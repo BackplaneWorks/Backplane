@@ -56,10 +56,11 @@ export function installPhoneThread({ document: doc = document, window: win = win
   // history), a ↓ at the timeline's foot goes back to the latest, as a
   // phone's messages do (host.js's holdBottom, the pill's own way down).
   // The hub's "N new ↓" pill says it when something new came: never both.
+  // (Not on a timeline too short to hold it, landscape's with the keyboard.)
   let down = null;
   const place = () => {
     const t = el;
-    const far = !!t && t.isConnected && t.clientHeight > 0 && onPhone(doc) && !doc.querySelector('.hold-pill')
+    const far = !!t && t.isConnected && t.clientHeight >= 120 && onPhone(doc) && !doc.querySelector('.hold-pill')
       && (t.scrollHeight - t.scrollTop - t.clientHeight > t.clientHeight * 1.5 || !newest());
     if (!far) { if (down) down.hidden = true; return; }
     if (!down) {

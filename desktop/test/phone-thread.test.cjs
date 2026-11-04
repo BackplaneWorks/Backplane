@@ -138,6 +138,8 @@ test('far from the end a ↓ goes back to the latest, on a phone only, never bes
   down.on.click(); assert.deepEqual(calls, ['latest']); assert.equal(down.hidden, true);
   p.pill = {}; p.timeline.scrollTop = 500; p.fire('scroll'); // the hub's "N new ↓" says it
   assert.equal(down.hidden, true);
+  p.pill = null; p.timeline.scrollTop = 400; p.fire('scroll'); assert.equal(down.hidden, false);
+  p.resize(100); assert.equal(down.hidden, true);           // too short to hold it
   // on an earlier page of the history, near its foot: still away from the latest
   const e = setup(true, () => false);
   e.p.timeline.scrollTop = 1400; e.p.fire('scroll');
