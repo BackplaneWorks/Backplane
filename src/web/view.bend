@@ -5986,7 +5986,7 @@ def View.phone.band(rs: List<&2, U.ARow>, +lo: Nat, +hi: Nat) -> List<&2, U.ARow
 def View.phone.group(+lc: I.Loc, +label: String, rs: List<&2, U.ARow>, +ix: U.SIx, +st: M.State, +sel: String) -> List<&2, D.Node>:
   match rs:
     case Nil{}: Nil{}
-    case +r <> +t: D.El{"div", "", [D.At{"class", "ph-group"}, D.At{"role", "heading"}], [D.Txt{label}]} <> View.arows(lc, r <> t, ix, st, sel, "", "live")
+    case +r <> +t: D.El{"div", "", [D.At{"class", "ph-group"}, D.At{"role", "heading"}], [D.Txt{label ++ " · " ++ Nat.show(Nat.add(1n, List.length(&2, U.ARow, t)))}]} <> View.arows(lc, r <> t, ix, st, sel, "", "live")
 
 # the Active rows in bands: Needs you, Finished, At work, Idle, then the
 # settled fold
