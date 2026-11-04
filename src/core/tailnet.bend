@@ -239,12 +239,50 @@ type PStep is Data:
 # sends on ack last). The next round is posted only after that, so however
 # long the hub's inbox holds a PairDue (its handling stalled), at most one
 # is ever outstanding, and two rounds never ask the same machine at once;
-# a round that failed is simply asked again by the next. Every step of a
-# round is bounded (curl -m 15, tmo 5), so the wait ends.
+# a round that failed is simply asked again by the next. A round's remote
+# steps are bounded (curl -m 15, tmo 5); its local ones (hostname, the
+# peer file, the inbox) are not time-limited, so a hung local step would
+# hold the machines loop too.
 def Pairing.ask(post: Unit -> IO(Unit), +ack: Chan(Unit)) -> IO(Unit):
   do IO<Unit>:
     post(Unit{})
     m : Maybe<&1, Unit> <- Chan.recv(Unit, ack)
+    return Unit{}
+
+# A round (server.bend's Pair.round): every machine due is asked at once,
+# each in its own job, and ack is sent once all are over (a barrier). A
+# slow machine never delays a healthy one; the round, and with it the
+# next, waits only for the slowest. Each machine is in one job only, so
+# none is asked twice at once.
+def Pairing.one(+ask: String -> IO(Unit), +u: String, +done: Chan(Unit)) -> IO(Unit):
+  do IO<Unit>:
+    ask(u)
+    ok : Result<&1, &1, Unit, Unit> <- Chan.send(Unit, done, Unit{})
+    return Unit{}
+
+def Pairing.spawn(us: List<&2, String>, +ask: String -> IO(Unit), +done: Chan(Unit)) -> IO(Nat):
+  match us:
+    case Nil{}:
+      IO.pure(Nat, 0n)
+    case +u <> t:
+      do IO<Nat>:
+        IO.spawn(Unit, Pairing.one(ask, u, done))
+        n : Nat <- Pairing.spawn(t, ask, done)
+        return Nat.add(n, 1n)
+
+def Pairing.wait(n: Nat, +done: Chan(Unit)) -> IO(Unit):
+  match n:
+    case 0n:
+      IO.pure(Unit, Unit{})
+    case 1n+m:
+      IO.bind(Maybe<&1, Unit>, Unit, Chan.recv(Unit, done), x => Pairing.wait(m, done))
+
+def Pairing.round(us: List<&2, String>, +ask: String -> IO(Unit), +ack: Chan(Unit)) -> IO(Unit):
+  do IO<Unit>:
+    +done : Chan(Unit) <- Chan.new(Unit, 256)
+    n : Nat <- Pairing.spawn(us, ask, done)
+    Pairing.wait(n, done)
+    ok : Result<&1, &1, Unit, Unit> <- Chan.send(Unit, ack, Unit{})
     return Unit{}
 
 def Pairing.half() -> Nat:
