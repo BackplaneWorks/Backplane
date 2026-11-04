@@ -273,16 +273,16 @@ def Tailnet.asks(finds: List<&2, Nat>, +t: Nat) -> List<&2, Nat>:
       List.append(&2, Nat, Pairing.period.asks(Pairing.plan(), f, t), Tailnet.asks(rest, Pairing.period.end(Pairing.plan(), f, t)))
 
 # every two asks at least `gap` apart (asks in time order)
-def Tailnet.apart.k(+a: Nat, ts: List<&2, Nat>, +gap: Nat) -> Bool:
+def Tailnet.apart.k(ts: List<&2, Nat>, +a: Nat, +gap: Nat) -> Bool:
   match ts:
     case Nil{}:
       True{}
     case +b <> rest:
-      Bool.and(Nat.is_ge(Nat.sub(b, a), gap), Tailnet.apart.k(b, rest, gap))
+      Bool.and(Nat.is_ge(Nat.sub(b, a), gap), Tailnet.apart.k(rest, b, gap))
 
 def Tailnet.apart(ts: List<&2, Nat>, +gap: Nat) -> Bool:
   match ts:
     case Nil{}:
       True{}
     case +a <> rest:
-      Tailnet.apart.k(a, rest, gap)
+      Tailnet.apart.k(rest, a, gap)
