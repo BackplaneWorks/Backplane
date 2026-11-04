@@ -1,10 +1,10 @@
 # Combined copied-store and active-load preparation
 
-Status: **clock20 and producer16 accepted; one scope-only packet released**.
-The evaluator accepted exact `5f10351ee3` clock/producer boundaries on normal
-Boat. The49 scope assertions remain unexecuted; a receipt/docs-only freeze
-preserves executable identity to that accepted source for the remaining gate. There is no whole-harness, actual-hub cleanup,
-memory, CPU, latency, startup or package PASS. The memory owner `t1793648028-1245355`
+Status: **all scoped boundary gates accepted; current-main merge gates pending**.
+The evaluator accepted exact clock20/producer16 on `5f10351ee3` and scope49 on
+`b60c4719b8` with byte-identical executables. Current-main integration must
+preserve every qualified input and obtain clean PR status/fresh Boat premerge. Boundaries have passed; there is no whole-load top-level, actual-hub cleanup or packaged startup,
+20-agent CPU/p99/RSS performance PASS. The memory owner `t1793648028-1245355`
 retains sole packaged before/after evaluation. Send the frozen source and check
 scope to that owner before executing even the self-tests. Existing recovery,
 load, policy and fence files are unchanged; the owner's pending fence fixes
@@ -349,9 +349,8 @@ clean temp and verified enclosing VM deletion. No MAIN import, scope49,
 hub/store/Bend/app or packaged acceptance ran; earlier overall FAILs remain
 unchanged. The evaluator accepted only these exact clock/producer boundaries.
 
-Exactly one remaining scope-only packet is released at a receipt/docs-only
-freeze whose executable files must be byte-identical to5f1035. Its extraction-
-free entry invokes only the unchanged `real_store_active_scope_test.cjs`:
+The accepted scope-only packet used a receipt/docs-only freeze with
+executable files byte-identical to5f1035. Its extraction-free entry invoked only the unchanged `real_store_active_scope_test.cjs`:
 49 assertions, including21 actual-stop manager/kernel mocks and two bounded
 synthetic Node worker-thread trees using the real LinuxScope implementation.
 Actual admission/cap/invocation+directory-FD identity precedes the payload
@@ -364,9 +363,31 @@ clock20/producer16/fence/policy/tar/pump results are reused only by exact
 revision/dependency/tool audit, never rerun. No MAIN, real hub/store/private
 fixture, Bend/app/build, capability/PID fallback, budget/assertion/source
 change or automatic retry is authorized. Scope refusal stays an honest FAIL;
-uncertain homes/scopes remain until enclosing VM deletion. Merge awaits the
-terminal49 verdict and fresh current-main/CI/premerge/installer checks;
+uncertain homes/scopes remain until enclosing VM deletion. Merge awaits fresh current-main/CI/premerge/installer checks;
 whole load and packaged startup/CPU/RSS/p99 remain unqualified.
+
+Scope49 was accepted from
+[`extra/hub-real-active-qualification/b60c`](../../extra/hub-real-active-qualification/b60c/ACCEPTED.json):
+work `1579962`, job `j20261104092310-1314144`, exit0 on exact
+`b60c4719b804bd6bd6015dc11423328ebd0abf47`/tree
+`fc5abf15e19a692e73277108be11396f5ad97093`. Both orphan/race trees recorded
+kernelKillIssued/allDescendantsEmpty/launcherExited true, uncertainty false,
+failureCode null, present admission/pre-kill resources and cap3699998720B/
+swap0. Pre-kill peaks31,526,912/39,366,656B, OOM0. Worker28,794,880B and
+controller350,142,464B peaks, no remaining children, clean temp and verified
+VM deletion. Exact49 assertions include21 actual stop-boundary mocks; source,
+mode/blob/tool/manifest identities stayed exact. Passed groups were audited,
+not repeated. These receipts qualify the tested synthetic scope boundary,
+not an actual MAIN/hub/store run. All historical FAILs remain unchanged.
+
+The evaluator released receipt integration/current-main integration/normal
+merge only if exact qualified component/dependency/tool identities survive,
+PR status is clean and the fresh approved pinned normal-Boat premerge passes
+on the actual merged source. Executable/dependency drift or behavioral merge
+conflicts require scoped evaluation. No app rebuild, install, Bend/full/root
+proof, MAIN/private-store run or packaged performance execution is authorized.
+Installer handoff must include the actual merge SHA/tree and exact scoped
+receipts/omissions; this harness-only PR requires no product rebuild.
 
 The evaluator's later acceptance command supplies `--bin`, `--artifact-receipt`,
 `--sha256`, `--fixture`, `--fixture-sha256`, `--fixture-receipt-sha256`,
