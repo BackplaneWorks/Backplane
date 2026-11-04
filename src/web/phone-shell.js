@@ -106,11 +106,19 @@ export function installPhoneShell({ on, doc = document, win = window, dispatch }
 
   // the visual viewport: its height, and how much the keyboard covers
   const vv = win.visualViewport;
+  // the tallest the page has been at this width: an app's WebView (Android)
+  // shrinks the whole layout for the keyboard, so only that tells it is up
+  const tallest = new Map();
+  const typing = () => !!doc.activeElement?.matches?.("input:not([type=checkbox]):not([type=radio]):not([type=button]), textarea, [contenteditable='true'], .xterm-helper-textarea");
   const fit = () => {
     const h = vv ? vv.height : win.innerHeight;
     const kb = vv ? Math.max(0, win.innerHeight - vv.height - vv.offsetTop) : 0;
-    // the keyboard is up whatever iOS's pan (offsetTop) makes of the inset
-    const shrunk = vv ? Math.max(0, win.innerHeight - vv.height) : 0;
+    const w = Math.round(win.innerWidth);
+    if (!typing() || !tallest.has(w)) tallest.set(w, Math.max(tallest.get(w) || 0, win.innerHeight));
+    // the keyboard is up whatever iOS's pan (offsetTop) makes of the inset,
+    // or (a WebView that resizes) while a field has the focus and the page
+    // is much shorter than it was at this width
+    const shrunk = Math.max(vv ? win.innerHeight - vv.height : 0, typing() ? (tallest.get(w) || 0) - win.innerHeight : 0);
     html.style.setProperty("--ph-vh", Math.round(h) + "px");
     html.style.setProperty("--ph-kb", Math.round(kb) + "px");
     // iOS pans the visual viewport instead of resizing it: the page's
@@ -127,6 +135,10 @@ export function installPhoneShell({ on, doc = document, win = window, dispatch }
   vv?.addEventListener("scroll", fit);
   win.addEventListener("resize", fit);
   win.addEventListener("orientationchange", () => setTimeout(fit, 250));
+  // a field losing the focus ends the keyboard (a resizing WebView's resize
+  // can come after the blur)
+  doc.addEventListener("focusin", () => setTimeout(fit, 0));
+  doc.addEventListener("focusout", () => setTimeout(fit, 0));
 
   // what the system back shuts before it goes back a screen: a menu, the
   // row menu, a sheet, search, the palette, the terminal
