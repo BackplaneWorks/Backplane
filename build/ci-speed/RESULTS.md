@@ -1240,3 +1240,11 @@ receipts and resource violations fail closed; no local fallback.
 wait1s, push2s, setup0s, one16KiB source file. No Bend/compiler/proof/build,
 account/auth change, guard-floor change, installer action or release trigger.
 This adds required enforcement/network overhead, not a speedup/full-gate claim.
+
+Pre-merge review correction before landing: final worker starts inside an
+outer512MiB/swap0 scope and reads the kernel limit back; it does not self-set
+or enlarge limits. The shape checker and law merge driver are pinned to the
+fetched base, not the candidate. Two new tampering controls require a fresh
+Boat guard. Above numbers belong to the preserved initial transport experiment,
+not final security-control qualification; no independently attested provider
+resource claim is made.

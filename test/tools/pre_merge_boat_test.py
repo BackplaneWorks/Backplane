@@ -70,7 +70,10 @@ class Contracts(unittest.TestCase):
         self.assertNotIn("'merge-tree'",source)
         self.assertNotIn('inspect_merge(',source)
         self.assertNotIn("'python3', 'scripts/laws-shape.py'",source)
-        self.assertIn("'worker'",source)
+        self.assertIn("SCOPE_CMD",source)
+        self.assertIn("systemd-run --user --scope",pm.SCOPE_CMD)
+        self.assertIn("MemoryMax=536870912",pm.SCOPE_CMD)
+        self.assertIn("MemorySwapMax=0",pm.SCOPE_CMD)
         self.assertIn("'--no-setup-bend'",source)
 
 
