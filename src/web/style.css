@@ -3266,6 +3266,14 @@ html.ph-kb .app.phone :is(.thread-content, .thread-view) > :is(.bot-head, .bot-h
 .app.phone :is(.browser-tabs, .browser-address) .browser-icon { min-width: var(--ph-tap, 44px); min-height: var(--ph-tap, 44px); }
 .app.phone .diff-body button, .app.phone .diff-none button { min-height: var(--ph-tap, 44px); }
 .app.phone .fm-bar button { min-width: var(--ph-tap, 44px); }
+/* a schematic's sheets: its Back/Forward/Up/Sheets row scrolls sideways
+   with 44 px buttons, its tree (Sheets) three 44 px rows high */
+.app.phone .sch-navigation { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; padding: 2px 8px; }
+.app.phone .sch-navigation > * { flex: none; }
+.app.phone .sch-navigation .sch-btn { min-height: var(--ph-tap, 44px); padding: 0 12px; }
+.app.phone .sch-navigation .sch-trail { max-width: 40vw; }
+.app.phone #viewer > .sch-panel { height: auto; max-height: 140px; }
+.app.phone .sch-row { min-height: var(--ph-tap, 44px); }
 /* files: whole rows to tap */
 .app.phone .fm-row { min-height: var(--ph-tap, 44px); }
 .app.phone .fm-bar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
