@@ -40,7 +40,7 @@ enum Pairing {
     static func socket(_ link: String) -> URL? {
         var s = link.trimmingCharacters(in: .whitespacesAndNewlines)
         if s.isEmpty { return nil }
-        if s.hasPrefix("backplane://") {
+        if s.hasPrefix("backplane://") || s.hasPrefix(AppIdentity.scheme + "://") {
             guard let q = URLComponents(string: s)?.queryItems?.first(where: { $0.name == "url" })?.value else { return nil }
             s = q
         }
@@ -307,7 +307,7 @@ extension Pairing {
     }
     static func invitation(_ text: String) -> Invitation? {
         var raw = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if raw.hasPrefix("backplane://") { raw = URLComponents(string: raw)?.queryItems?.first(where: { $0.name == "url" })?.value ?? "" }
+        if raw.hasPrefix("backplane://") || raw.hasPrefix(AppIdentity.scheme + "://") { raw = URLComponents(string: raw)?.queryItems?.first(where: { $0.name == "url" })?.value ?? "" }
         guard var c = URLComponents(string: raw), ["https", "http"].contains(c.scheme), c.host != nil,
               c.user == nil, c.password == nil else { return nil }
         let f = URLComponents(string: "?" + (c.fragment ?? ""))?.queryItems ?? []
@@ -319,7 +319,7 @@ extension Pairing {
     }
     static func malformedInvitation(_ text: String) -> Bool {
         var raw = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if raw.hasPrefix("backplane://") { raw = URLComponents(string: raw)?.queryItems?.first(where: { $0.name == "url" })?.value ?? "" }
+        if raw.hasPrefix("backplane://") || raw.hasPrefix(AppIdentity.scheme + "://") { raw = URLComponents(string: raw)?.queryItems?.first(where: { $0.name == "url" })?.value ?? "" }
         let fragment = URLComponents(string: raw)?.fragment ?? ""
         let fields = URLComponents(string: "?" + fragment)?.queryItems ?? []
         return fields.contains { $0.name == "invite" || $0.name == "code" }

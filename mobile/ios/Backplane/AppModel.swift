@@ -230,7 +230,12 @@ final class AppModel {
     let settings = AppSettings.shared
     // the screen unless Classic screens: the hub's phone web client (WebShell.swift)
     let web = WebShell()
+    #if GPUI_NATIVE
+    // the GPUI experiment's build: the native screens, with no web shell and no toggle
+    var webShown: Bool { false }
+    #else
     var webShown: Bool { !links.isEmpty && !settings.classic && !Self.nativeAutomation }
+    #endif
     // Debug builds driven from the environment (BACKPLANE_LINK, _ACTS,
     // _SELECT, _QUALIFICATION...) drive the native screens, unless
     // BACKPLANE_WEB=1
@@ -328,7 +333,7 @@ final class AppModel {
     }
 
     private func qualification(_ url: URL) -> Bool {
-        guard url.scheme == "backplane", url.host == "qualification",
+        guard url.scheme == AppIdentity.scheme, url.host == "qualification",
               let op = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "op" })?.value,
               ["disconnect", "reconnect"].contains(op) else { return false }
         qualificationDisconnected = op == "disconnect"
@@ -2070,7 +2075,7 @@ final class AppModel {
         if qualification(url) { return true }
         #endif
         // the island's tap (backplane://open?thread=…) opens the thread in the page
-        if webShown, url.scheme == "backplane", url.host == "open",
+        if webShown, url.scheme == AppIdentity.scheme, url.host == "open",
            let thread = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "thread" })?.value,
            !thread.isEmpty {
             alertOpened(thread)

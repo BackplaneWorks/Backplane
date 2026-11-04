@@ -22,7 +22,7 @@
 			<string>dev.backplane.mobile</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>backplane</string>
+				<string>$(URL_SCHEME)</string>
 			</array>
 		</dict>
 	</array>
