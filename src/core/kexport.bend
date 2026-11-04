@@ -48,14 +48,19 @@ def KX.report_path(p: KPaths) -> String:
 def KX.item(+e: J.Json) -> String:
   J.Json.get_str(e, "feature", "Unknown feature") ++ ": " ++ J.Json.get_str(e, "detail", "") ++ " (" ++ J.Json.as_raw(J.Json.get(e, "count"), "1") ++ ")"
 
-def KX.entry(+cat: String, text: String, l: List<&2, String>, d: List<&2, String>, b: List<&2, String>, k: List<&2, String>) -> KReport:
-  match cat:
+# KX.entry matches a copy of cat: a string pattern splits bit by bit and a
+# row that mentions its scrutinee gets it rebuilt at every split (lane B).
+def KX.entry.by(key: String, +cat: String, text: String, l: List<&2, String>, d: List<&2, String>, b: List<&2, String>, k: List<&2, String>) -> KReport:
+  match key:
     case "lower": KReport{text <> l, d, b, k}
     case "drop": KReport{l, text <> d, b, k}
     case "block": KReport{l, d, text <> b, k}
     case "keep": KReport{l, d, b, text <> k}
     case "kept": KReport{l, d, b, text <> k}
     case _: KReport{l, d, ("Unknown report category " ++ cat ++ ": " ++ text) <> b, k}
+
+def KX.entry(+cat: String, text: String, l: List<&2, String>, d: List<&2, String>, b: List<&2, String>, k: List<&2, String>) -> KReport:
+  KX.entry.by(cat, cat, text, l, d, b, k)
 
 def KX.entries(es: List<&2, J.Json>, +r: KReport) -> KReport:
   match es r:

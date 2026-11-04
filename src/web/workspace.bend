@@ -357,8 +357,10 @@ def WS.palette.move(+u: U.Ui, +delta: String) -> U.Act:
   +i = U.Palette.index(u)
   WS.none(U.Palette.set(u, U.Palette.query(u), Bool.pick(Nat, String.eq(delta, "up"), Nat.sub(i, 1n), Nat.min(1n+i, Nat.sub(List.length(&2, U.PItem, WS.items(u)), 1n)))))
 
-def WS.run.kind(+action: String, +u: U.Ui, value: String) -> U.Act:
-  match action:
+# WS.run.kind matches a copy of action: a string pattern splits bit by bit and a
+# row that mentions its scrutinee gets it rebuilt at every split (lane B).
+def WS.run.kind.by(key: String, +action: String, +u: U.Ui, value: String) -> U.Act:
+  match key:
     case "ws-stop": WS.stop(u)
     case "ws-term-here": WS.term.show(WS.term.local(u), u, "")
     case "ws-term-hide": WS.term.hide(u)
@@ -369,6 +371,9 @@ def WS.run.kind(+action: String, +u: U.Ui, value: String) -> U.Act:
     case "ws-routines": WS.routines.open(U.Ui.act(u, "bot", value))
     case "ws-keys": WS.none(U.Palette.set(U.Ui.scratch_set(U.Ui.flag_on(u, "palette"), "@ws.keys", "1"), "", 0n))
     case _: U.Ui.act(u, action, value)
+
+def WS.run.kind(+action: String, +u: U.Ui, value: String) -> U.Act:
+  WS.run.kind.by(action, action, u, value)
 
 def WS.palette.run.item(item: U.PItem, u: U.Ui) -> U.Act:
   match item:
@@ -386,8 +391,10 @@ def WS.key.digit(+combo: String, +u: U.Ui) -> U.Act:
   +digit = Maybe.default(&2, Nat, Nat.read(String.drop(combo, Bool.pick(Nat, String.starts_with(combo, "alt+"), 4n, 5n))), 0n)
   WS.key.digit.valid(Bool.and(Bool.or(String.starts_with(combo, "alt+"), String.starts_with(combo, "ctrl+")), Bool.and(Nat.is_ge(digit, 1n), Nat.is_le(digit, 9n))), combo, u, digit)
 
-def WS.key.go(+combo: String, +u: U.Ui) -> U.Act:
-  match combo:
+# WS.key.go matches a copy of combo: a string pattern splits bit by bit and a
+# row that mentions its scrutinee gets it rebuilt at every split (lane B).
+def WS.key.go.by(key: String, +combo: String, +u: U.Ui) -> U.Act:
+  match key:
     case "uber": U.Ui.act(u, "uber", "")
     case "term": WS.term.toggle(u, "")
     case "prev": WS.neighbour(u, False{})
@@ -397,6 +404,9 @@ def WS.key.go(+combo: String, +u: U.Ui) -> U.Act:
     case "diff": WS.view.key(u, "diff", "diff")
     case "files": WS.view.key(u, "files", "fm")
     case _: WS.key.digit(combo, u)
+
+def WS.key.go(+combo: String, +u: U.Ui) -> U.Act:
+  WS.key.go.by(combo, combo, u)
 
 # Ctrl+K opens the palette and, pressed in it, shuts it (as Ctrl+Shift+P);
 # any other workspace key works from the palette's field too, and shuts it
