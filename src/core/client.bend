@@ -6602,16 +6602,16 @@ def Bd.reply(has: Bool, u: Ui, +o: J.Json) -> Ui:
 
 # The combined view
 # -----------------
-# Kind "split": the schematic beside the board and its 3D model at once,
-# each pane named, put away and brought back on its own (the setting
-# "split.hide": the panes put away, words of "sch pcb 3d"; one always
-# stays, test/split_test.bend). Its board is the viewer's file, as the Board tab's
-# (the board picked, else the project's own); its sheet is kept per thread
-# ("@split.sheet:<t>"): the board's own schematic until another is opened
-# there.
-
-def Split.panes() -> List<&2, String>:
-  ["sch", "pcb", "3d"]
+# Kind "split": the schematic beside the board or its 3D model, at most
+# two panes: the board and the 3D share the side, one at a time (showing
+# one puts the other away), each pane named, put away and brought back on
+# its own (the setting "split.hide": the panes put away, words of
+# "sch pcb 3d"; the 3D shows only when the board is put away and it is
+# not, so no setting gives the schematic and the board; one pane always
+# stays, test/split_test.bend). Its board is the viewer's file, as the
+# Board tab's (the board picked, else the project's own); its sheet is
+# kept per thread ("@split.sheet:<t>"): the board's own schematic until
+# another is opened there.
 
 def Split.hide(+u: Ui) -> String:
   M.Setting.get(Ui.state(u), "split.hide", "")
@@ -6619,30 +6619,32 @@ def Split.hide(+u: Ui) -> String:
 def Split.has(+hide: String, +p: String) -> Bool:
   String.contains(" " ++ hide ++ " ", " " ++ p ++ " ")
 
-def Split.flip.keep(on: Bool, +q: String, rest: List<&2, String>) -> List<&2, String>:
-  match on:
-    case True{}:
-      q <> rest
-    case False{}:
-      rest
+# whether pane p shows, by the panes put away
+def Split.shows(+hide: String, +p: String) -> Bool:
+  Bool.pick(Bool, String.eq(p, "3d"), Bool.and(Split.has(hide, "pcb"), Bool.not(Split.has(hide, "3d"))), Bool.not(Split.has(hide, p)))
 
-def Split.flip.go(ps: List<&2, String>, +hide: String, +p: String) -> List<&2, String>:
-  match ps:
-    case Nil{}:
-      Nil{}
-    case +q <> t:
-      Split.flip.keep(Bool.xor(Split.has(hide, q), String.eq(q, p)), q, Split.flip.go(t, hide, p))
+# the panes put away when these show (the schematic, the board, the 3D)
+def Split.words(s: Bool, b: Bool, t: Bool) -> String:
+  String.trim(Bool.pick(String, s, "", "sch ") ++ Bool.pick(String, b, "", "pcb ") ++ Bool.pick(String, t, "", "3d"))
 
-def Split.flip.k(+hs: List<&2, String>, +hide: String) -> String:
-  Bool.pick(String, Nat.is_ge(List.length(&2, String, hs), 3n), hide, String.join(hs, " "))
+def Split.flip.k(none: Bool, +hide: String, +next: String) -> String:
+  Bool.pick(String, none, hide, next)
 
-# the panes put away once pane p is flipped, in order; the last one shown
-# stays
+def Split.flip.to(+hide: String, +s: Bool, +b: Bool, +t: Bool) -> String:
+  Split.flip.k(Bool.not(Bool.or(s, Bool.or(b, t))), hide, Split.words(s, b, t))
+
+# the panes put away once pane p is flipped: the schematic on its own;
+# the board or the 3D shown puts the other away; the last one shown stays
 def Split.flip(+hide: String, +p: String) -> String:
-  Split.flip.k(Split.flip.go(Split.panes(), hide, p), hide)
+  +s = Split.shows(hide, "sch")
+  +b = Split.shows(hide, "pcb")
+  +t = Split.shows(hide, "3d")
+  Bool.pick(String, String.eq(p, "sch"), Split.flip.to(hide, Bool.not(s), b, t),
+    Bool.pick(String, String.eq(p, "pcb"), Split.flip.to(hide, s, Bool.not(b), False{}),
+      Bool.pick(String, String.eq(p, "3d"), Split.flip.to(hide, s, False{}, Bool.not(t)), hide)))
 
 def Split.on(+u: Ui, +p: String) -> Bool:
-  Bool.not(Split.has(Split.hide(u), p))
+  Split.shows(Split.hide(u), p)
 
 def Split.is(+u: Ui) -> Bool:
   String.eq(Ui.view_get(u, "view.kind"), "split")

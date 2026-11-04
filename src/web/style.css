@@ -3422,11 +3422,8 @@ html.ph-kb .app.phone :is(.thread-content, .thread-view) > :is(.bot-head, .bot-h
 .app.phone .review-body.rp-bom th:first-child { width: auto; }
 /* the 3D status line keeps to one line (the whole of it is its tooltip) */
 .app.phone .solid-render-status:not(:empty) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: calc(100% - 72px); }
-/* split: a phone has room for two panes, the main one and the first beside
-   it (schematic over board, for cross-probing); 3D has its own chip */
+/* split: two panes stacked, the schematic over the board or its 3D */
 .app.phone .viewer.split .combo { --split-handle-size: 24px; }
-.app.phone .viewer.split .combo-side > .combo-pane ~ :is(.combo-pane, .combo-resize) { display: none; }
-.app.phone .viewer.split .combo-side[data-split-active] > :first-child { flex: 1 1 0; }
 /* full screen (viewer-tools.js's focusToggle): the drawing alone, the
    toggle over its top right corner */
 .ph-focus-toggle { display: none; }
