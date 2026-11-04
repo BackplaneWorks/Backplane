@@ -75,8 +75,13 @@ import { installPhoneOther, titleHits } from "./phone-other.js";
 // (imported, so the bundle ships it hashed and index.html's link to it
 // names that file: the home-screen icon, a notification's)
 import touchIcon from "./apple-touch-icon.png";
+// the home-screen app's icons (the phone's manifest names them)
+import icon192 from "./icon-192.png";
+import icon512 from "./icon-512.png";
+import iconMask from "./icon-maskable-512.png";
 const PHONE_TITLES = () => document.documentElement.classList.contains("phone");
-const phoneOther = installPhoneOther({ dispatch: (action, value) => dispatch(action, value), touchIcon });
+const phoneOther = installPhoneOther({ dispatch: (action, value) => dispatch(action, value), touchIcon,
+  appIcons: [{ src: icon192, size: 192 }, { src: icon512, size: 512 }, { src: iconMask, size: 512, purpose: "maskable" }] });
 import { ConnectionLog } from "./connection-log.js";
 import { frameSummary } from "./frame-summary.js";
 import { pairBrowser } from "./auth.js";
