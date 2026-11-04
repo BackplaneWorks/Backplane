@@ -1,18 +1,19 @@
 // Connection-boundary UI: available before a client can ask the hub for views.
 // Invitation material stays in this closure/DOM, never in Ui, logs or caches.
 import jsQR from './vendor/jsqr.cjs';
+import {cameraSupport, openScanner, scannerWords} from './pairing-scanner.js';
 import {defaultDeviceName} from './pairing-device.js';
 import {pairingInput, codeLink, pairingErrors} from './pairing-link.js';
 import {softFocus} from './touch-focus.js';
 export function installPairingUI({document, location, fetch, onPaired, navigator = globalThis.navigator}) {
-  let panel, camera, scanGeneration = 0, expiryTimer, pairingShown = false;
+  let panel, scanner = null, expiryTimer, pairingShown = false;
   const element = (tag, text, parent, attrs = {}) => {
     const node = document.createElement(tag);if (text) node.textContent = text;
     for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
     parent?.append(node);return node;
   };
   function close() {
-    ++scanGeneration;camera?.getTracks().forEach(t => t.stop());camera = null;
+    scanner?.close();scanner = null;
     clearInterval(expiryTimer);panel?.remove();panel = null;
     document.getElementById('root')?.removeAttribute('inert');
     document.body.classList.remove('pairing-pending');pairingShown = false;
@@ -52,7 +53,7 @@ export function installPairingUI({document, location, fetch, onPaired, navigator
   }
   function show({repair = false, cause = '', pending = null} = {}) {
     const card = frame(repair ? 'Re-pair this device' : 'Connect to your Backplane hub',
-      'On your paired computer, open Settings → Devices → Add a device. Choose how to connect below.', false);
+      'On your computer, open Backplane, then Settings → Devices → Add a device. A QR code, a short code and a pairing link appear there. Choose how to connect below.', false);
     pairingShown = true;
     const name = input(card, 'Device name', 'Name this device');name.value = defaultDeviceName(navigator, !!globalThis.window?.backplaneDesktop);
     const status = element('p', '', card, {role: 'status', 'aria-live': 'polite', class: 'pairing-status'});if (cause) error(status, cause);
@@ -68,10 +69,7 @@ export function installPairingUI({document, location, fetch, onPaired, navigator
       });
       return {tab, content};
     });
-    function stopScanning() {
-      ++scanGeneration;camera?.getTracks().forEach(t => t.stop());camera = null;
-      card.querySelectorAll('.pairing-camera, .pairing-stop').forEach(n => n.remove());
-    }
+    function stopScanning() { scanner?.close();scanner = null; }
     function selectMethod(index) {
       stopScanning();methods.forEach(({tab, content}, i) => {
         tab.setAttribute('aria-selected', String(i === index));tab.tabIndex = i === index ? 0 : -1;
@@ -92,35 +90,22 @@ export function installPairingUI({document, location, fetch, onPaired, navigator
     }
     button(links, 'Connect with link', () => connect(link.value)).classList.add('primary');
     link.addEventListener('keydown', e => { if (e.key === 'Enter') void connect(link.value); });
-    element('p', 'Scan the invitation on your paired device, or choose a saved QR image.', qr, {class: 'pairing-help'});
+    element('p', 'Scan the QR code shown under Add a device on your computer, or choose a picture of it.', qr, {class: 'pairing-help'});
+    // the camera only where the page may have it (https://, localhost);
+    // else what to do instead, never a button that cannot work
+    const cam = cameraSupport(globalThis.window ? {isSecureContext: globalThis.isSecureContext, navigator} : {navigator});
     const scanStatus = element('p', '', qr, {class: 'pairing-help', role: 'status'});
-    button(qr, 'Scan a QR code', async () => {
-      if (!navigator?.mediaDevices?.getUserMedia) { scanStatus.textContent = 'Camera scanning is unavailable in this browser. Use your phone’s camera to open the QR link, or choose Pairing link.';return; }
-      let video;const generation = ++scanGeneration;
-      try {
-        camera?.getTracks().forEach(t => t.stop());camera = await navigator.mediaDevices.getUserMedia({video: {facingMode: 'environment'}});
-        if (generation !== scanGeneration) { camera.getTracks().forEach(t => t.stop());return; }
-        video = element('video', '', qr, {autoplay: '', playsinline: '', class: 'pairing-camera'});video.srcObject = camera;await video.play();
-        button(qr, 'Stop scanning', stopScanning).classList.add('pairing-stop');
-        const detector = globalThis.BarcodeDetector ? new globalThis.BarcodeDetector({formats: ['qr_code']}) : null;
-        const canvas = document.createElement('canvas'), ctx = canvas.getContext('2d', {willReadFrequently: true});
-        const next = async () => {
-          if (generation !== scanGeneration) return;
-          try {
-            let codes;
-            if (detector) codes = await detector.detect(video);
-            else {
-              canvas.width = Math.min(800, video.videoWidth);canvas.height = Math.round(video.videoHeight * canvas.width / video.videoWidth);
-              ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-              const frame = ctx.getImageData(0, 0, canvas.width, canvas.height), result = jsQR(frame.data, frame.width, frame.height);
-              codes = result ? [{rawValue: result.data}] : [];
-            }
-            if (codes.length) { camera.getTracks().forEach(t => t.stop());video.remove();await connect(codes[0].rawValue);return; } }
-          catch { scanStatus.textContent = 'Could not read the code. Keep the whole QR code in view.'; }
-          if (generation === scanGeneration) setTimeout(next, 150);
-        };void next();
-      } catch { scanStatus.textContent = 'Camera unavailable. Allow camera access or paste a link.';camera?.getTracks().forEach(t => t.stop());video?.remove(); }
-    });
+    const accept = text => { try { pairingInput(text, location.origin);return true; } catch { return false; } };
+    if (cam.ok) button(qr, 'Scan with the camera', async () => {
+      scanStatus.textContent = '';stopScanning();
+      const s = scanner = openScanner({document, navigator, accept, onCode: text => connect(text), onClose: () => { if (scanner === s) scanner = null; }});
+      const why = await s.start();
+      if (why && why !== 'closed') scanStatus.textContent = scannerWords[why];
+    }).classList.add('primary', 'pairing-scan');
+    else {
+      element('p', scannerWords[cam.why], qr, {class: 'pairing-nocam', role: 'note'});
+      button(qr, 'Use Short code', () => { selectMethod(2);methods[2].tab.focus(); }).classList.add('primary');
+    }
     const qrFile = element('input', '', qr, {type: 'file', accept: 'image/*', class: 'pairing-file', 'aria-label': 'Or choose a QR image', tabindex: '-1'});
     button(qr, 'Choose QR image', () => qrFile.click());
     qrFile.addEventListener('change', async () => {
@@ -149,7 +134,7 @@ export function installPairingUI({document, location, fetch, onPaired, navigator
     // opened by a pairing link: it starts on the short code
     const standalone = !pending && (navigator?.standalone === true || !!globalThis.matchMedia?.('(display-mode: standalone)')?.matches);
     selectMethod(standalone ? 2 : 0);
-    if (standalone) element('p', 'Opened from the Home Screen: enter the short code from Settings → Devices → Add a device on your paired device.', card, {class: 'pairing-help pairing-standalone'});
+    if (standalone) element('p', 'Opened from the Home Screen: enter the short code from Settings → Devices → Add a device on your computer.', card, {class: 'pairing-help pairing-standalone'});
     if (pending) {
       const actions = element('div', '', card, {class: 'pairing-pending'});
       element('p', 'Or connect another way:', card, {class: 'pairing-or'});
