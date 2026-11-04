@@ -5968,10 +5968,39 @@ def View.phone.tabs(+lc: I.Loc, root: Bool, +screen: String, +u: U.Ui) -> List<&
 # the Now tab: what needs the person first, then what runs, over every
 # project (the sidebar's Active rows, core's Active.rows.given, whatever
 # the sidebar.view setting), drawn only while the tab is open
+# the rows whose urgency key is in [lo, hi), in their order
+def View.phone.band.k(keep: Bool, +r: U.ARow, rest: List<&2, U.ARow>) -> List<&2, U.ARow>:
+  match keep:
+    case True{}: r <> rest
+    case False{}: rest
+
+def View.phone.band(rs: List<&2, U.ARow>, +lo: Nat, +hi: Nat) -> List<&2, U.ARow>:
+  match rs:
+    case Nil{}: Nil{}
+    case U.ARow{+urg, +at, +th, +p, +ti, +f} <> rest:
+      View.phone.band.k(Bool.and(Nat.is_ge(urg, lo), Nat.is_lt(urg, hi)), U.ARow{urg, at, th, p, ti, f}, View.phone.band(rest, lo, hi))
+
+def View.phone.group(+lc: I.Loc, +label: String, rs: List<&2, U.ARow>, +ix: U.SIx, +st: M.State, +sel: String) -> List<&2, D.Node>:
+  match rs:
+    case Nil{}: Nil{}
+    case +r <> +t: D.El{"div", "", [D.At{"class", "ph-group"}, D.At{"role", "heading"}], [D.Txt{label}]} <> View.arows(lc, r <> t, ix, st, sel, "", "live")
+
+# the Active rows in bands: Needs you, Finished, At work, Idle, then the
+# settled fold
+def View.phone.now.parts(+lc: I.Loc, p: U.AParts, +u: U.Ui, +ix: U.SIx) -> List<&2, D.Node>:
+  match p:
+    case U.AParts{+l, f}:
+      [D.El{"section", "", [D.At{"class", "project active"}], List.concat(&2, D.Node, [
+        View.phone.group(lc, PHN.Phone.now.band(lc, 0n), View.phone.band(l, 12n, 100n), ix, U.Ui.state(u), U.Ui.sel(u)),
+        View.phone.group(lc, PHN.Phone.now.band(lc, 1n), View.phone.band(l, 8n, 12n), ix, U.Ui.state(u), U.Ui.sel(u)),
+        View.phone.group(lc, PHN.Phone.now.band(lc, 2n), View.phone.band(l, 4n, 8n), ix, U.Ui.state(u), U.Ui.sel(u)),
+        View.phone.group(lc, PHN.Phone.now.band(lc, 3n), View.phone.band(l, 0n, 4n), ix, U.Ui.state(u), U.Ui.sel(u)),
+        View.afaded(lc, f, "", U.Side.open(u), ix, U.Ui.state(u), U.Ui.sel(u))])}]
+
 def View.phone.now.rows(+lc: I.Loc, rs: List<&2, U.ARow>, +u: U.Ui, +ix: U.SIx) -> List<&2, D.Node>:
   match rs:
     case Nil{}: [PHN.Phone.empty("circle-check", PHN.Phone.now.none(lc), PHN.Phone.now.hint(lc), [D.Dom.button("primary", "ph-tab", "projects", MSG.T.tour.title.projects(lc), MSG.T.tour.title.projects(lc))])]
-    case +r <> +t: View.active.k(lc, U.Active.parts(r <> t), "", U.Side.open(u), ix, U.Ui.state(u), U.Ui.sel(u))
+    case +r <> +t: View.phone.now.parts(lc, U.Active.parts(r <> t), u, ix)
 
 def View.phone.now.k(+lc: I.Loc, +u: U.Ui, +ix: U.SIx) -> D.Node:
   D.El{"section", "ph-now", [D.At{"class", "ph-now"}], View.phone.now.rows(lc, U.Active.rows.given(U.Ui.state(u), ix, U.Side.now(u), "", View.phone.raw(u, ix)), u, ix)}

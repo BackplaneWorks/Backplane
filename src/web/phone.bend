@@ -44,6 +44,14 @@ def Phone.now.hint(lc: I.Loc) -> String:
 def Phone.tab(+u: U.Ui) -> String:
   Phone.tab.k(U.Ui.scratch(u, "@ph.tab"))
 
+# the Now tab's bands (by core's Urg.key: rank * 2, + 1 when pinned):
+# what needs the person (an approval, a question, a failure), what finished
+# or stopped, what is at work, what is idle
+def Phone.now.band(lc: I.Loc, +k: Nat) -> String:
+  match lc:
+    case I.Ja{}: Bool.pick(String, Nat.is_eq(k, 0n), "対応待ち", Bool.pick(String, Nat.is_eq(k, 1n), "完了", Bool.pick(String, Nat.is_eq(k, 2n), "作業中", "待機")))
+    case _: Bool.pick(String, Nat.is_eq(k, 0n), "Needs you", Bool.pick(String, Nat.is_eq(k, 1n), "Finished", Bool.pick(String, Nat.is_eq(k, 2n), "At work", "Idle")))
+
 def Phone.handles(+action: String) -> Bool:
   String.starts_with(action, "ph-")
 
