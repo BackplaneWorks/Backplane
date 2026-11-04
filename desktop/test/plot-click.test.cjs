@@ -128,14 +128,21 @@ test('a finger held still asks to comment there once, and is no tap', async () =
   const held = h.timers.filter(Boolean).at(-1);
   assert(held, 'a touch press starts the long-press timer');
   held();
-  assert.equal(h.places.length, 0, 'queued input goes first');
   h.timers.filter(Boolean).at(-1)();
-  assert.equal(h.places.length, 1, 'the place goes to the page (rv-note)');
+  assert.equal(h.places.length, 0, 'armed, it waits for the lift');
   h.fire('contextmenu');
-  assert.equal(h.places.length, 1, "the browser's own contextmenu after it is ignored");
+  assert.equal(h.places.length, 0, "the browser's own contextmenu is ignored");
   h.fire('pointerup', { pointerType: 'touch', timeStamp: 1600 });
+  assert.equal(h.places.length, 1, 'lifted where it came down, the place goes to the page (rv-note)');
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(h.probes.length, 0, 'the press does not probe');
+  // a slow drag whose moves never came: armed, but lifted far away
+  h.fire('pointerdown', { pointerType: 'touch', timeStamp: 2000, clientX: 20, clientY: 30 });
+  h.timers.filter(Boolean).at(-1)(); h.timers.filter(Boolean).at(-1)();
+  h.fire('pointerup', { pointerType: 'touch', timeStamp: 3000, clientX: 170, clientY: 30 });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.places.length, 1, 'a drag lifted far away does not comment');
+  assert.equal(h.probes.length, 0, 'nor probe');
   h.fire('pointerdown', { pointerType: 'touch', timeStamp: 3000 });
   const moved = h.timers.filter(Boolean).at(-1);
   h.fire('pointermove', { pointerType: 'touch', clientX: 60 });
