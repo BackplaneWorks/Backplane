@@ -5,7 +5,7 @@ Add a stable semantic key, translate it, then run:
     python3 scripts/i18n-gen.py --self-test
     python3 scripts/i18n-gen.py --check
 
-Commit catalogs and generated src/core/msgs.bend together. check.sh runs the
+Commit catalogs and generated src/core/msgs*.bend together. check.sh runs the
 catalog gate. --check rejects missing/extra keys, placeholder mismatches and
 stale output. Normal generation supports missing translations with an English
 fallback; release checks require every translation. Fallback grammar uses English
@@ -28,7 +28,8 @@ select makes it String; plain placeholders inherit the cross-locale kind.
 Combining Nat and select for one argument is an error.
 
 Call T.<key>(locale, args...) with arguments in English first-appearance order.
-T.keys lists sorted keys; T.missing lists fallbacks; T.plain looks up only
+In msgs-meta.bend, T.keys lists sorted keys and T.missing lists fallbacks.
+In msgs-lookup.bend, T.plain looks up only
 argument-free keys through a balanced String.cmp tree. Runtime ICU parsing and
 catalog IO are absent. I18n.* supplies locale, number, date and time formatters.
 Plural categories have a P prefix because Base already owns Zero.
