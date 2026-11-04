@@ -41,7 +41,7 @@ jobs:
         run: |
           set -euo pipefail
           [ "$PRODUCT" = afa9679273206b3e9b1da4c966c9b63fb6f57ab4 ]
-          python3 scripts/release-bootstrap.py fetch --source "$PRODUCT" --operation js --url "$PACKET_URL" --sha256 "$PACKET_SHA" --directory "$RUNNER_TEMP/test-inputs"
+          python3 build/test-workflow/scripts/release-bootstrap.py fetch --source "$PRODUCT" --operation js --url "$PACKET_URL" --sha256 "$PACKET_SHA" --directory "$RUNNER_TEMP/test-inputs"
           python3 build/test-workflow/extra/rc0142-test-only/prepare-tooling.py --source "$GITHUB_WORKSPACE" --output "$RUNNER_TEMP/test-consumers"
       - name: Transform and link TEST service; no Bend compiler, emitter or official identity
         shell: bash
