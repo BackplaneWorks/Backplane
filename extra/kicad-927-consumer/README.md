@@ -1,7 +1,7 @@
 # Prepared Windows artifact consumer — NOT EXECUTED
 
-This folder is test preparation only. It starts no emitter, package build,
-workflow/campaign or release. The installer/root owns the 0.14.2 source freeze;
+This folder is an artifact consumer only. It starts no emitter, package build
+or release. The installer/root owns the 0.14.2 source freeze;
 packaging 440155 supplies its exact Windows ZIP. The authoritative RC-CUT.json
 records commit afa9679273206b3e9b1da4c966c9b63fb6f57ab4 and tree
 ec6c85b4a8b62a0227f09151a9ec52a362b20ae2, version 0.14.2: main base 2a87,
@@ -65,3 +65,14 @@ save logs, kernel resources, package/provenance evidence and SID-owned cleanup.
 This preparation is untested and is not a Windows PASS. Do not close #927 or
 publish 0.14.2 based on it. #927 remains open until native acceptance passes
 and the verified fix ships; 0.14.2 publication remains on user-confirmation HOLD.
+
+The dedicated kicad-windows-927-native.yml workflow consumes authenticated
+Actions artifact 13352107148 from producer run 41886983230 and verifies the
+exact handed-off ZIP and receipt digests. bootstrap.ps1 enforces the actual
+Windows Job Object cap and no-pagefile gate before dependency setup, runtime
+fixtures or application execution. It creates and retires one disposable
+standard account. user.ps1 rereads inherited kernel limits under that account,
+fixes its profile environment, and invokes the consumer. No native verdict
+is implied by preparing these scripts; preserve the resulting evidence even
+if resource setup blocks the application test. The workflow runs once when
+its file is pushed on this consumer branch; any rerun needs a diagnosed reason.

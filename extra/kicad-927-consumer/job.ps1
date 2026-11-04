@@ -1,0 +1,61 @@
+$ErrorActionPreference = 'Stop'
+# Native Windows resource guard; executed on the disposable GitHub runner only.
+# See Microsoft's JOBOBJECT_EXTENDED_LIMIT_INFORMATION and QueryInformationJobObject.
+Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+public static class BP927Job {
+  [StructLayout(LayoutKind.Sequential)] public struct Basic {
+    public long processTime, jobTime; public uint flags;
+    public UIntPtr minWorkingSet, maxWorkingSet; public uint activeProcesses;
+    public UIntPtr affinity; public uint priority, scheduling;
+  }
+  [StructLayout(LayoutKind.Sequential)] public struct IO {
+    public ulong readOps, writeOps, otherOps, readBytes, writeBytes, otherBytes;
+  }
+  [StructLayout(LayoutKind.Sequential)] public struct Limits {
+    public Basic basic; public IO io; public UIntPtr processMemory, jobMemory, peakProcess, peakJob;
+  }
+  [DllImport("kernel32.dll", SetLastError=true, CharSet=CharSet.Unicode)] static extern IntPtr CreateJobObject(IntPtr sa, string name);
+  [DllImport("kernel32.dll", SetLastError=true)] static extern bool SetInformationJobObject(IntPtr job, int kind, ref Limits value, uint bytes);
+  [DllImport("kernel32.dll", SetLastError=true)] static extern bool QueryInformationJobObject(IntPtr job, int kind, out Limits value, uint bytes, IntPtr returned);
+  [DllImport("kernel32.dll", SetLastError=true)] static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+  [DllImport("kernel32.dll", SetLastError=true)] static extern bool IsProcessInJob(IntPtr process, IntPtr job, out bool member);
+  static IntPtr owned;
+  static void Check(bool ok) { if(!ok) throw new Win32Exception(Marshal.GetLastWin32Error()); }
+  public static void CapSelf() {
+    owned=CreateJobObject(IntPtr.Zero, null); if(owned==IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
+    var value=new Limits(); value.basic.flags=0x200; value.jobMemory=new UIntPtr(8589934592UL);
+    Check(SetInformationJobObject(owned,9,ref value,(uint)Marshal.SizeOf(typeof(Limits))));
+    Check(AssignProcessToJobObject(owned,Process.GetCurrentProcess().Handle));
+  }
+  public static Limits Current() {
+    Limits value; Check(QueryInformationJobObject(IntPtr.Zero,9,out value,(uint)Marshal.SizeOf(typeof(Limits)),IntPtr.Zero)); return value;
+  }
+  public static bool Member() {
+    bool member; Check(IsProcessInJob(Process.GetCurrentProcess().Handle,IntPtr.Zero,out member)); return member;
+  }
+}
+'@
+function Get-BP927Resources {
+    $limits = [BP927Job]::Current()
+    $paging = @(Get-CimInstance Win32_PageFileUsage -ErrorAction Stop | Select-Object Name,AllocatedBaseSize,CurrentUsage,PeakUsage)
+    @{
+        jobMemoryLimitBytes = $limits.jobMemory.ToUInt64()
+        peakJobMemoryBytes = $limits.peakJob.ToUInt64()
+        peakProcessMemoryBytes = $limits.peakProcess.ToUInt64()
+        limitFlags = $limits.basic.flags
+        member = [BP927Job]::Member()
+        pageFiles = $paging
+        pid = $PID
+        observedAt = [DateTime]::UtcNow.ToString('o')
+    }
+}
+function Assert-BP927Resources($resources) {
+    if (!$resources.member -or $resources.jobMemoryLimitBytes -le 0 -or $resources.jobMemoryLimitBytes -gt 8589934592 -or
+        ($resources.limitFlags -band 0x200) -eq 0 -or ($resources.limitFlags -band 0x1800) -ne 0 -or $resources.pageFiles.Count -ne 0) {
+        throw 'BLOCKED: enforced <=8 GiB Windows job, no breakaway and no active pagefile required'
+    }
+}
