@@ -68,8 +68,10 @@ with the keyboard up, the path and title bar give way.
 - **Settings → Appearance → Use the computer layout** switches this browser
   to the desktop page; a **Phone layout** button there brings it back.
 - **Settings → About → Send an improvement** opens Improvements.
-- A bot's pages are a row of chips under its cat; a room's field and Send
-  sit on one line; a project's home lists its threads before its viewer.
+- A bot's pages are a row of chips under its cat; while you drive its
+  Browser page, a line under it takes the phone's keyboard (typed text, Enter,
+  ⌫). A room's field and Send sit on one line; a project's home lists its
+  threads before its viewer; the project picker (Projects' +) has its own ×.
 - The Ready to order bar and a buy thread's order card have 44 px buttons.
 
 ## Signals
