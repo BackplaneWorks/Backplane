@@ -10,6 +10,7 @@ import { dirname, join, resolve } from 'node:path';
 import { cbor, plain } from '../../src/web/wire.js';
 import { ThinViews } from '../../src/web/thin.js';
 const P = require('./real_store_active_policy.cjs');
+const { TarStream } = require('./real_store_active_tar.cjs');
 type Row = Record<string, any>;
 const ensure = (v: any, code: string) => { if (!v) throw Error(code); };
 const mono = () => Number(process.hrtime.bigint()) / 1e6;
@@ -57,9 +58,14 @@ const producer = String.raw`
 const fs = require('node:fs'), readline = require('node:readline');
 const P = require(process.env.REAL_ACTIVE_POLICY), now = () => Number(process.hrtime.bigint()) / 1e6;
 if (process.argv.includes('--version')) { console.log('2.1.286 (owned stand-in)'); process.exit(0); }
+// Verification still launches the stand-in; no credential store is supplied.
+if (process.argv.includes('auth')) process.exit(127);
 const root = process.env.REAL_ACTIVE_ROOT, run = process.env.REAL_ACTIVE_RUN;
 const ids = JSON.parse(process.env.REAL_ACTIVE_IDS), sid = 'owned-' + process.pid;
-const emit = v => fs.writeSync(1, JSON.stringify({...v, session_id:sid}) + '\n');
+const emit = v => {
+  const b=Buffer.from(JSON.stringify({...v,session_id:sid})+'\n');let at=0;
+  while(at<b.length){const n=fs.writeSync(1,b,at,b.length-at);if(n<1)throw Error('owned-producer-short-write');at+=n;}
+};
 let running = false;
 async function go(input) {
   const id = /real-active-thread=([a-z0-9-]+)/.exec(JSON.stringify(input))?.[1], index = ids.indexOf(id);
@@ -116,11 +122,13 @@ readline.createInterface({input:process.stdin}).on('line',line=>{
 if (process.argv.slice(2).includes('--self-test')) {
   ensure(process.argv.length === 3, 'self-test-options');
   require('./real_store_active_policy_test.cjs');
+  await require('./real_store_active_stream_test.cjs').run();
+  await require('./real_store_active_pump_test.cjs').run();
   new Bun.Transpiler({ loader: 'js' }).transformSync(producer);
   const v = { id: 2 ** 47 + 17, m: 'view.open', p: { a: [1, '✓', false, null] } };
   ensure(JSON.stringify(plain(cbor(encode(v), keys, words))) === JSON.stringify(v), 'codec-roundtrip');
   await require('./real_store_active_producer_test.cjs').run(producer);
-  console.log('ok combined controller codec, producer phase switch and boundary controls; no hub started');
+  console.log('ok combined policy, streamed tar/gzip, iterative pump, codec and actual producer controls; no hub started');
   process.exit(0);
 }
 
@@ -138,7 +146,7 @@ mkdirSync(dirname(out), { recursive: true });
 const samplesFd = openSync(out + '.samples.jsonl', 'wx', 0o600);
 const run = randomBytes(6).toString('hex'), prefix = 'ra-' + run + '-', ids = Array.from({ length: 20 }, (_, i) => prefix + i);
 const report: Row = { schema: 1, scope: 'private-RC3-copy-plus-20-active-producers', preparation: false,
-  ok: false, forcedGC: false, inspector: false, copiedAccountProfilesInstalled: false,
+  ok: false, forcedGC: false, inspector: false,
   limits: P.LIMITS, requestedLoadedMs: o.seconds * 1000, checks: {}, phases: [], samplesFileSuffix: '.samples.jsonl',
   cpuScope: 'captured live hub PID utime+stime; 100% = one core; no normalization or subtraction',
   startedAt: new Date().toISOString() };
@@ -149,6 +157,17 @@ let lastSample = 0, nextViewRead = 0, sourceHashes: Row = {}, before: Row | unde
 const samples: Row[] = [], clients: Client[] = [], producerIdentities = new Map<number, number>();
 const logReaders: ReadableStreamDefaultReader<Uint8Array>[] = [];
 const watchdog: [number, number][] = [], delayedNotices: Row[] = [];
+const windows = new Map<number, Row>();
+let globalReceived: any[] = [];
+const original: Row = { threads: new Set(), settings: new Set(), bots: new Set(), routines: new Set(), projects: new Set(),
+  tasks: new Set(), asks: new Set(), rooms: new Set(), convs: new Set(), infoKeys: new Set(),
+  threadPrefixes: ['liveness.', 'summary.', 'bg.', 'watch.'], kinds: new Set() };
+let ownershipCharge = 0;
+function remember(set: Set<string>, key: string) {
+  if (set.has(key)) return;
+  ownershipCharge += 128 + key.length * 2;
+  ensure(ownershipCharge <= 128 * 1024 * 1024 && set.size < 300000, 'ownership-metadata-bound'); set.add(key);
+}
 const control = (c: Row) => { writeFileSync(join(root, 'control.next'), JSON.stringify(c), { mode: 0o600 }); renameSync(join(root, 'control.next'), join(root, 'control.json')); };
 const failed = (code: string) => { fault ??= code; };
 function guard() { ensure(!fault, fault ?? 'fault'); ensure(hub?.exitCode === null, 'child-exited'); }
@@ -189,36 +208,21 @@ async function drain(stream: ReadableStream<Uint8Array>) {
 // duplicate headers, PAX overrides and oversized entries BEFORE writing any
 // member. Stream gzip/tar; never materialize the private archive or log.
 async function extractArchive() {
-  const seen = new Set<string>(); let header = Buffer.alloc(0), left = 0, padding = 0, fd: number | undefined;
-  let total = 0, zeros = 0, expanded = 0;
+  let fd: number | undefined;
+  const parser = new TarStream({
+    begin(name: string) { const path = join(home, name); mkdirSync(dirname(path), { recursive: true, mode: 0o700 }); fd = openSync(path, 'wx', 0o600); },
+    data(b: Buffer) { let w = 0; while (w < b.length) { const n = writeSync(fd!, b, w, b.length - w); ensure(n > 0, 'archive-write'); w += n; } },
+    end() { closeSync(fd!); fd = undefined; }
+  });
   try {
-    for await (const raw of createReadStream(fixture).pipe(createGunzip())) {
-      expanded += raw.length; ensure(expanded <= 8 * 1024 ** 3 + 1048576, 'archive-expanded-bound');
-      let b = Buffer.from(raw);
-      while (b.length) {
-        if (left) {
-          const n = Math.min(left, b.length); if (fd !== undefined) { let w = 0; while (w < n) { const k = writeSync(fd, b, w, n - w); ensure(k > 0, 'archive-write'); w += k; } }
-          left -= n; b = b.subarray(n); if (!left && fd !== undefined) { closeSync(fd); fd = undefined; } continue;
-        }
-        if (padding) { const n = Math.min(padding, b.length); padding -= n; b = b.subarray(n); continue; }
-        const n = Math.min(512 - header.length, b.length); header = Buffer.concat([header, b.subarray(0, n)]); b = b.subarray(n);
-        if (header.length < 512) continue;
-        if (header.every(x => x === 0)) { zeros++; header = Buffer.alloc(0); continue; }
-        ensure(zeros === 0, 'archive-trailing-data');
-        const field = (a: number, z: number) => header.subarray(a, z).toString('utf8').replace(/\0.*$/s, '');
-        const octal = (s: string) => { ensure(/^[ 0-7]+\0?[ ]*$/.test(s), 'archive-number'); return parseInt(s.replace(/\0/g, '').trim(), 8); };
-        const sum = [...header].reduce((s, v, i) => s + (i >= 148 && i < 156 ? 32 : v), 0);
-        ensure(octal(header.subarray(148, 156).toString('ascii')) === sum && field(345, 500) === '', 'archive-header');
-        const name = field(0, 100), size = octal(header.subarray(124, 136).toString('ascii'));
-        const retain = P.archiveMember(name, String.fromCharCode(header[156]), size, seen);
-        total += size; ensure(total <= 8 * 1024 ** 3, 'archive-total');
-        if (retain) fd = openSync(join(home, name), 'wx', 0o600);
-        left = size; padding = (512 - size % 512) % 512; header = Buffer.alloc(0);
-      }
-    }
-    ensure(left === 0 && padding === 0 && header.length === 0 && zeros >= 2 &&
-      ['RECEIPT.json', 'events.jsonl', 'store.db'].every(n => seen.has(n)), 'archive-incomplete');
-    return { members: seen.size, extractedBytes: total };
+    for await (const raw of createReadStream(fixture).pipe(createGunzip())) parser.push(raw);
+    const extracted = parser.finish(), path = join(home, 'providers/accounts-v1/profiles.json');
+    if (existsSync(path)) {
+      const metadata = smallJson(path, 131072);
+      report.accountMetadata = { supplied: true, originalBytesPreserved: true, sha256BeforeRun: await hashFile(path),
+        identitySha256: sha(JSON.stringify(metadata.profiles.map((p: Row) => [p.id, p.provider]).sort())), ...P.accountMetadata(metadata) };
+    } else report.accountMetadata = { supplied: false, profiles: 0, credentialFields: false };
+    return extracted;
   } finally { if (fd !== undefined) closeSync(fd); }
 }
 async function stageFence() {
@@ -254,7 +258,7 @@ async function stageFence() {
     report.preflight = { cliVersionExit: 0, installed: true, beforeFixtureExtraction: true };
   } finally { clearTimeout(timer); if (probe.exitCode === null) { probe.kill('SIGKILL'); await probe.exited; } }
 }
-async function storeCounts() {
+async function storeCounts(collect = false) {
   const { Database } = await import('bun:sqlite'), db = new Database(join(home, 'store.db'), { readonly: true, create: false });
   const counts: Row = {};
   try {
@@ -271,8 +275,21 @@ async function storeCounts() {
       h.update(JSON.stringify(row) + '\n'); oldEntryRows++;
     }
     const catalog = createHash('sha256');
-    for (const row of db.query('SELECT id,title,root FROM project WHERE substr(id,1,?)<>? ORDER BY id').iterate(prefix.length, prefix)) catalog.update('project:' + JSON.stringify(row) + '\n');
-    for (const row of db.query('SELECT id,project,title FROM thread WHERE substr(id,1,?)<>? ORDER BY id').iterate(prefix.length, prefix)) catalog.update(JSON.stringify(row) + '\n');
+    for (const row of db.query('SELECT id,title,root FROM project WHERE substr(id,1,?)<>? ORDER BY id').iterate(prefix.length, prefix) as Iterable<Row>) {
+      catalog.update('project:' + JSON.stringify(row) + '\n'); if (collect) remember(original.projects, row.id);
+    }
+    for (const row of db.query('SELECT id,project,title FROM thread WHERE substr(id,1,?)<>? ORDER BY id').iterate(prefix.length, prefix) as Iterable<Row>) {
+      catalog.update(JSON.stringify(row) + '\n'); if (collect) remember(original.threads, row.id);
+    }
+    if (collect) {
+      for (const row of db.query('SELECT k FROM setting').iterate() as Iterable<Row>) remember(original.settings, row.k);
+      for (const [table, key] of [['bot', 'bots'], ['routine', 'routines'], ['task', 'tasks'], ['ask', 'asks'], ['room', 'rooms'], ['conv', 'convs']])
+        for (const row of db.query(`SELECT id FROM ${table}`).iterate() as Iterable<Row>) remember(original[key], row.id);
+      const model = readFileSync(resolve(import.meta.dir, '../../src/core/model.bend'), 'utf8'), start = model.indexOf('type Change is Data:');
+      ensure(start >= 0, 'change-schema'); const tail = model.slice(start), end = tail.indexOf('\ndef ');
+      for (const m of tail.slice(0, end).matchAll(/^  ([A-Za-z0-9]+)\{/gm)) original.kinds.add(m[1]);
+      ensure(original.kinds.size > 30 && original.kinds.size < 512, 'change-schema');
+    }
     const target = db.query("SELECT id FROM thread WHERE deleted=0 AND archived=0 ORDER BY activity DESC LIMIT 1").get() as Row;
     ensure(target?.id, 'fixture-target');
     return { counts, seq, originalThreads, syntheticThreads, originalEntryRows: oldEntryRows,
@@ -295,16 +312,28 @@ function cleanNotices(at: number) {
     if (n.window.mode === 'pure' && n.at >= n.window.start + 2000 && !watchdog.some(([a, b]) => n.at >= a && n.at <= b)) n.window.foreignNotices++;
   }
 }
+function attributeMetadata(family: string, at: number) {
+  const last = watchdog.at(-1); if (last && at - 100 <= last[1]) last[1] = at + 1250;
+  else { ensure(watchdog.length < 256, 'metadata-window-bound'); watchdog.push([at - 100, at + 1250]); }
+  for (const w of windows.values()) {
+    if (at >= w.start && at < w.end) w.background[family]++;
+    const a = Math.max(w.start, at - 100), b = Math.min(w.end, at + 1250);
+    if (b > a) { const last = w.metadata.at(-1); if (last && a <= last[1]) last[1] = Math.max(last[1], b);
+      else { ensure(w.metadata.length < 256, 'metadata-window-bound'); w.metadata.push([a, b]); } }
+  }
+}
 class Client {
   ws: WebSocket; views: any; session: Row; greeting: any; joined = false; ready = false;
-  pending = new Map<number, Row>(); sequence = 0; notices: number[] = []; replies = 0; refreshing = false;
+  pending = new Map<number, Row>(); sequence = 0; notices: number[] = []; replies = 0; pump: any; observerNext = 0;
   lastPending = false; lastShownSeq = 0; lastDelivered: number[] = Array(20).fill(0); controlBytes = 0;
-  constructor(readonly kind: 'observer' | 'own' | 'quiet' | 'sidebar', readonly target?: Row, cursor?: Row) {
+  constructor(readonly kind: 'observer' | 'own' | 'quiet' | 'sidebar', readonly target?: Row, readonly cursor?: Row) {
     const base = `ws://127.0.0.1:${port}`; ensure(P.ownedEndpoint(base, port), 'endpoint');
     const suffix = target ? '&view=1&frontend=1' : `&since=${cursor!.seq}&origin=${encodeURIComponent(cursor!.epoch)}`;
     this.ws = new WebSocket(`${base}/ws?token=${token}${suffix}`); this.ws.binaryType = 'arraybuffer'; clients.push(this);
     this.session = { sel: target?.kind === 'thread' ? target.id : '', drafts: {}, open: {}, info: {}, adding: false, panel: false };
     if (target) this.views = new ThinViews({ now: () => mono(), sidebarRegions: true, viewDelta: true, send: (_: string, r: Row) => r, command: (c: Row) => c });
+    this.observerNext = cursor?.seq ?? 0;
+    this.pump = new P.RefreshPump((call: Row) => this.picture(call), () => this.views.request('owned', 'view.update', { session: this.session, anchor: { id: '', offset: 0 } }), failed);
     this.ws.onerror = () => { if (!cleaning) failed('view-transport'); };
     this.ws.onclose = () => { if (!cleaning) failed('view-closed'); };
     this.ws.onmessage = e => { try { this.receive(e); } catch { failed('view-protocol'); } };
@@ -315,23 +344,30 @@ class Client {
     const f = typeof e.data === 'string' ? JSON.parse(e.data) : plain(cbor(new Uint8Array(e.data as ArrayBuffer), keys, words));
     ensure(typeof f?.t === 'string', 'frame-type');
     if (f.t === 'view' && this.target) { ensure(!this.greeting, 'duplicate-greeting'); this.greeting = f; }
-    if (f.t === 'log' && !this.target) { ensure(Number(f.since) >= 1448789 && (f.items?.length ?? 0) <= 1024, 'historical-replay'); this.joined = true; }
+    if (f.t === 'log' && !this.target) {
+      this.observerNext = P.observerLog(f, { seq: this.observerNext, epoch: this.cursor!.epoch });
+      if (!this.joined) for (const key of Object.keys(f.info ?? {})) remember(original.infoKeys, key);
+      this.joined = true;
+    }
     if (!this.target && f.t === 'delta') markers(f.text ?? '', m => {
       ensure(f.thread === ids[m.index], 'stream-thread');
       if (m.seq <= this.lastDelivered[m.index]) return; this.lastDelivered[m.index] = m.seq;
-      if (!current || at >= current.end || m.epoch !== current.epoch) {
-        if (current && at >= current.start + 2000 && at < current.end) current.threads[m.index].badPhase++;
-        return;
-      }
-      const t = current.threads[m.index];
-      // Marker stamps are floored to 1ms. Receipt stamps retain fractions.
-      if (m.mode !== current.mode || m.emitted + 1 < current.start || m.emitted >= current.end) { t.badPhase++; return; }
-      t.activity.add(at); t.lag.add(at - m.emitted); t.maxDeliveredSeq = Math.max(t.maxDeliveredSeq, m.seq);
+      if (globalReceived.length && at >= globalReceived[0].start && at < globalReceived[0].end) globalReceived[m.index].add(at);
+      // Receive-time continuity is separate from emission-epoch delivery.
+      if (current && at >= current.start && at < current.end) current.threads[m.index].activity.add(at);
+      const w = windows.get(m.epoch);
+      if (w) w.threads[m.index].cohort.add(m, at);
+      else if (globalReceived.length && m.epoch >= 1 && m.emitted >= bootAt + loadedStart && m.emitted < globalReceived[0].end - 2000) failed('stale-emission-epoch');
     });
     if (!this.target && f.t === 'changes') for (const item of f.items ?? []) {
-      const isWatchdog = item.$ === 'SettingSet' && ids.some(id => item.key === 'liveness.' + id);
-      if (isWatchdog) { ensure(watchdog.length < 256, 'watchdog-bound'); watchdog.push([at - 100, at + 1250]); }
-      if (current?.mode === 'pure' && at < current.end && at > current.start + 2000 && !isWatchdog) current.unexpectedPureCommits++;
+      const family = P.commitFamily(item, original, ids);
+      if (family !== 'unattributed') attributeMetadata(family, at);
+      else if (current?.mode === 'pure' && at < current.end && at > current.start + 2000) current.unattributedCommits++;
+    }
+    if (!this.target && f.t === 'info') {
+      const family = P.infoFamily(f.info, original.infoKeys);
+      if (family !== 'unattributed') attributeMetadata(family, at);
+      else if (current?.mode === 'pure' && at < current.end && at > current.start + 2000) current.unattributedInfo++;
     }
     if (this.target && ['delta', 'changes', 'log', 'live'].includes(f.t)) throw Error('legacy-view-leak');
     if (f.t === 'view.control') {
@@ -342,13 +378,14 @@ class Client {
       ensure(this.target, 'observer-notice');
       ensure(f.target?.kind === this.target!.kind && f.target?.id === this.target!.id &&
         f.epoch === this.greeting.epoch && f.generation === this.greeting.generation, 'foreign-notice');
-      const call = this.views.changed('owned', f, this.session, { id: '', offset: 0 });
+      const call = this.views.changed('owned', f, this.session, { id: '', offset: 0 }, this.pump.active);
       ensure(!call?.failed, 'foreign-notice');
       this.notices = this.notices.filter(t => t > at - 975); this.notices.push(at);
       ensure(this.notices.length < 128, 'notice-bound');
       if (current && at < current.end) {
         if (this.kind === 'own') { current.ownNotices++; current.ownPeak = Math.max(current.ownPeak, this.notices.length); }
         else if (this.kind === 'sidebar') { current.sidebarNotices++; current.sidebarPeak = Math.max(current.sidebarPeak, this.notices.length); }
+        else if (this.kind === 'quiet') current.quietPeak = Math.max(current.quietPeak, this.notices.length);
         if (this.kind === 'sidebar' || this.kind === 'quiet') {
           ensure(delayedNotices.length < 256, 'notice-queue-bound'); delayedNotices.push({ at, window: current });
         }
@@ -358,7 +395,10 @@ class Client {
     if (f.t === 'reply') {
       const p = this.pending.get(Number(f.id)); ensure(p, 'unrequested-reply');
       clearTimeout(p!.timer); this.pending.delete(Number(f.id));
-      if (p!.window) { p!.window.clients[this.kind].replies++; p!.window.clients[this.kind].lag.add(at - p!.at); }
+      if (p!.window) {
+        ensure(at <= p!.window.deadline && !p!.window.finalized, 'view-tail-deadline');
+        p!.window.clients[this.kind].replies++; p!.window.clients[this.kind].lag.add(at - p!.at);
+      }
       if (!f.ok) p!.reject(Error('rpc-rejected')); else p!.resolve(f);
     }
   }
@@ -372,29 +412,30 @@ class Client {
       this.pending.set(Number(r.id), { resolve, reject, timer, window, at: mono() }); this.ws.send(encode(r));
     });
   }
-  async issue(call: Row) {
+  issue(call: Row) { return this.pump.offer(call); }
+  async picture(call: Row) {
     try {
       ensure(!call?.failed, 'view-call'); if (!call?.id) return;
       const raw = await this.send(call.cmds[0]), taken = this.views.reply('owned', raw);
       ensure(taken?.current && taken.remoteReady && taken.shown, 'view-reply'); this.session = taken.session; this.replies++;
       ensure(P.usablePicture(taken.shown, this.target), 'unusable-picture');
-      const at = mono(); let latest: Row | undefined;
+      const at = mono(), latest = new Map<number, Row>();
       markers(JSON.stringify(taken.shown), m => {
         if (this.kind !== 'own' || m.index !== 0) { if (current && at < current.end) current.foreignText++; return; }
         if (current?.mode === 'pure' && at < current.end && m.mode === 'pure' && m.epoch === current.epoch) current.partialVisible++;
-        if (!latest || m.seq > latest.seq) latest = m;
+        const w = windows.get(m.epoch), old = latest.get(m.epoch);
+        if (w?.mode === 'mixed' && at <= w.deadline && m.emitted + 1 >= w.start && m.emitted < w.end && (!old || m.seq > old.seq)) latest.set(m.epoch, m);
       });
       if (this.kind === 'own') {
         this.lastPending = P.pendingRow(taken.shown, ids[0]).valid;
         if (current && at < current.end) {
           if (current.mode === 'pure' && at >= current.start + 2000) { current.pendingReplies++; if (!this.lastPending) current.invalidPending++; }
-          if (current.mode === 'mixed' && latest && latest.epoch === current.epoch && latest.seq > this.lastShownSeq && latest.emitted + 1 >= current.start) {
-            current.visible.add(at); current.visibleLag.add(at - latest.emitted); this.lastShownSeq = latest.seq;
-          }
         }
+        for (const [epoch, m] of latest) { const w = windows.get(epoch)!;
+          if (!w.finalized && m.seq > w.visibleSeq) { w.visible.add(at); w.visibleLag.add(at - m.emitted); w.visibleSeq = m.seq; } }
       }
-      if (taken.refreshDue) await this.issue(this.views.request('owned', 'view.update', { session: this.session, anchor: { id: '', offset: 0 } }));
-    } catch { if (!cleaning) failed('view-request'); }
+      return taken.refreshDue === true;
+    } catch { if (!cleaning) failed('view-request'); return false; }
   }
   async open() {
     await until(() => this.ws.readyState === WebSocket.OPEN && (this.target ? !!this.greeting : this.joined), 15000);
@@ -404,67 +445,72 @@ class Client {
     }
   }
   update() {
-    if (!this.ready || this.pending.size || this.refreshing) return;
-    this.refreshing = true;
-    void this.issue(this.views.request('owned', 'view.update', { session: this.session, anchor: { id: '', offset: 0 } }))
-      .finally(() => { this.refreshing = false; });
+    if (this.ready) this.pump.request();
   }
 }
 
-async function runWindow(index: number, tickHz: number) {
-  const start = mono(), end = start + 60000, mode = index % 2 ? 'pure' : 'mixed';
-  const c0 = sample();
-  current = { epoch: index + 1, mode, start, end, foreignText: 0, foreignNotices: 0, partialVisible: 0,
-    pendingReplies: 0, invalidPending: 0, ownPeak: 0, sidebarPeak: 0, unexpectedPureCommits: 0,
-    ownNotices: 0, sidebarNotices: 0,
+function beginWindow(index: number, start: number, c0: Row) {
+  const end = start + 60000, mode = index % 2 ? 'pure' : 'mixed';
+  const w = { index, epoch: index + 1, mode, start, end, deadline: end + 2000, c0, c1: null, finalized: false,
+    foreignText: 0, foreignNotices: 0, partialVisible: 0, pendingReplies: 0, invalidPending: 0,
+    ownPeak: 0, sidebarPeak: 0, quietPeak: 0, unattributedCommits: 0, unattributedInfo: 0, ownNotices: 0, sidebarNotices: 0,
+    metadata: [], background: { syntheticLiveness: 0, originalSetting: 0, originalThread: 0, originalBot: 0, originalRoutine: 0, originalProject: 0, originalLifecycle: 0, originalInfo: 0 },
     clients: Object.fromEntries(['own', 'quiet', 'sidebar'].map(k => [k, { requests: 0, replies: 0, lag: new P.Latency() }])),
     pendingAtStart: clients.find(c => c.kind === 'own')!.lastPending,
-    visible: new P.Activity(start, end), visibleLag: new P.Latency(), threads: ids.map(() => ({
-      activity: new P.Activity(start, end), lag: new P.Latency(), maxDeliveredSeq: 0, badPhase: 0 })) };
-  const w = current;
-  control({ epoch: w.epoch, mode, start, end });
-  while (mono() < end) {
-    guard(); const at = mono(); cleanNotices(at);
-    if (at - lastSample >= 5000) sample();
-    if (at >= nextViewRead) { for (const c of clients) c.update(); nextViewRead = at + 1000; }
-    await sleep(25);
-  }
-  const c1 = sample();
-  // Resolve notice attribution using actual later observations, not a fake
-  // clock advance. Producers and serialized view clients keep running. The
-  // <=1.5s flush is included in whole-load CPU/RSS, with <=2s phase seams.
-  const flushEnd = mono() + 1500;
-  while (mono() < flushEnd) {
-    guard(); cleanNotices(mono());
-    if (mono() - lastSample >= 5000) sample();
-    if (mono() >= nextViewRead) { for (const c of clients) c.update(); nextViewRead = mono() + 1000; }
-    await sleep(25);
-  }
-  cleanNotices(mono());
+    visible: new P.Activity(start, end + 2001), visibleLag: new P.Latency(), visibleSeq: 0,
+    threads: ids.map(() => ({ activity: new P.Activity(start, end), cohort: new P.EmissionCohort(index + 1, mode, start, end) })) };
+  windows.set(w.epoch, w); ensure(windows.size <= 2, 'cohort-retention-bound');
+  control({ epoch: w.epoch, mode, start, end }); return w;
+}
+function finishWindow(w: Row, tickHz: number) {
+  const { start, end, mode, index } = w;
   const threads = ids.map((_, i) => {
     const r = smallJson(join(root, `producer-${i}.json`)), state = r.states?.find((s: Row) => s.epoch === w.epoch);
     ensure(r.schema === 1 && r.run === run && r.index === i && r.at >= end - 1000 && r.at <= mono() + 10 && state, 'producer-receipt');
     registerProducer(r);
-    return { index: i, produced: P.activitySummary(state, start, end), delivered: w.threads[i].activity.summary(),
-      latency: w.threads[i].lag.summary(), bytes: state.bytes, receiptFresh: mono() - r.at <= 2000,
-      deliveryWithinProduced: w.threads[i].maxDeliveredSeq <= state.lastSeq && w.threads[i].activity.count <= state.count,
-      badPhase: w.threads[i].badPhase };
+    const delivered = w.threads[i].cohort.finish(state);
+    return { index: i, produced: P.activitySummary(state, start, end), received: w.threads[i].activity.summary(), delivered,
+      latency: delivered.latency, bytes: state.bytes, receiptFresh: mono() - r.at <= 2000, badPhase: delivered.badPhase };
   });
   const visibleLatency = w.visibleLag.summary();
   // Completed content is published at two cycles/s, unlike 40Hz raw deltas.
   const visibleOk = w.visible.count >= (end - start) / 1000 && w.visible.first !== null &&
     Math.max(w.visible.first - start, end - w.visible.last, w.visible.maxInteriorGapMs) <= 2000 && visibleLatency.ok;
-  const result: Row = { index, mode, start: start - bootAt, end: end - bootAt, cpu: P.cpu(c0, c1, tickHz), threads,
+  const result: Row = { index, mode, start: start - bootAt, end: end - bootAt, cpu: P.cpu(w.c0, w.c1, tickHz), threads,
     visible: { replies: w.visible.count, latency: visibleLatency, ok: visibleOk }, foreignText: w.foreignText,
     foreignNotices: w.foreignNotices, pendingReplies: w.pendingReplies, invalidPending: w.invalidPending,
     pendingAtStart: w.pendingAtStart,
     ownNotices: w.ownNotices, sidebarNotices: w.sidebarNotices,
     clients: Object.fromEntries(Object.entries(w.clients).map(([k, v]: [string, any]) => [k, { requests: v.requests, replies: v.replies, requestLatency: v.lag.summary() }])),
-    partialVisible: w.partialVisible, ownPeak: w.ownPeak, sidebarPeak: w.sidebarPeak, unexpectedPureCommits: w.unexpectedPureCommits };
+    partialVisible: w.partialVisible, ownPeak: w.ownPeak, sidebarPeak: w.sidebarPeak, quietPeak: w.quietPeak,
+    backgroundEvents: w.background, unattributedCommits: w.unattributedCommits, unattributedInfo: w.unattributedInfo,
+    cleanMetadataMs: end - start - w.metadata.reduce((n: number, [a, b]: [number, number]) => n + b - a, 0) };
   result.acceptance = P.phaseVerdict(result);
-  if (mode === 'pure' && w.unexpectedPureCommits) result.acceptance.ok = false;
-  report.phases.push(result); current = undefined;
+  w.finalized = true; report.phases.push(result); windows.delete(w.epoch);
   ensure(result.acceptance.ok, 'loaded-window-failed');
+}
+async function runLoaded(tickHz: number) {
+  const start = mono(), count = o.seconds / 60, end = start + o.seconds * 1000;
+  loadedStart = start - bootAt; report.loadedStartMs = loadedStart;
+  globalReceived = ids.map(() => new P.Activity(start, end + 2000));
+  current = beginWindow(0, start, sample());
+  while (windows.size) {
+    guard(); const at = mono(); cleanNotices(at);
+    if (at - lastSample >= 5000) sample();
+    if (at >= nextViewRead) { for (const c of clients) c.update(); nextViewRead = at + 1000; }
+    // First retire the previous cohort at its actual deadline. Never stop
+    // producers or insert idle time at a mixed/pure boundary.
+    for (const w of windows.values()) if (w.c1 && at >= w.deadline) finishWindow(w, tickHz);
+    if (current && at >= current.end) {
+      ensure(at - current.end <= 250, 'phase-boundary-scheduling');
+      const boundary = sample(); current.c1 = boundary;
+      current = current.index + 1 < count ? beginWindow(current.index + 1, current.end, boundary) : undefined;
+    }
+    await sleep(10);
+  }
+  loadedEnd = mono() - bootAt; sample();
+  report.wholeLoadDelivery = globalReceived.map((a, index) => ({ index, ...a.summary() }));
+  report.checks.wholeLoadDelivery = report.wholeLoadDelivery.every((s: Row) => s.ok);
 }
 
 const producerPids = new Map<number, number>();
@@ -477,6 +523,69 @@ function registerProducer(r: Row) {
     ![...producerPids].some(([i, pid]) => i !== r.index && pid === r.pid), 'producer-replaced');
   producerPids.set(r.index, r.pid); producerIdentities.set(r.pid, born);
 }
+function producerAlive(pid: number, born: number) {
+  try {
+    const s = readFileSync(`/proc/${pid}/stat`, 'utf8'), f = s.slice(s.lastIndexOf(') ') + 2).trim().split(/\s+/);
+    ensure(Number.isSafeInteger(Number(f[19])) && Number(f[19]) > 0, 'cleanup-producer-sample');
+    if (Number(f[19]) !== born) return false;
+    // A zombie can no longer access the home, and its parent reaps it.
+    if (f[0] === 'Z') return false;
+    ensure(ownedCliScope(pid), 'cleanup-producer-identity'); return true;
+  } catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT' || (e as NodeJS.ErrnoException).code === 'ESRCH') return false; throw e; }
+}
+function ownedCliScope(pid: number) {
+  const argv = readFileSync(`/proc/${pid}/cmdline`, 'utf8');
+  if (argv.split('\0').some(a => a.includes(root))) return true;
+  const env = readFileSync(`/proc/${pid}/environ`); ensure(env.length <= 2097152, 'cleanup-environment-bound');
+  return env.includes(Buffer.from('REAL_ACTIVE_ROOT=' + root + '\0'));
+}
+async function stopProducers() {
+  // Discover any newly started stand-ins even if warmup failed before every
+  // receipt was registered. Only this run's paths/nonces/argv are accepted.
+  for (let i = 0; i < 20; i++) {
+    const path = join(root, `producer-${i}.json`);
+    if (existsSync(path)) try {
+      const r = smallJson(path); ensure(r.run === run && r.index === i, 'cleanup-producer-receipt');
+      if (producerPids.get(i) !== r.pid) {
+        const stat = readFileSync(`/proc/${r.pid}/stat`, 'utf8');
+        if (stat.slice(stat.lastIndexOf(') ') + 2).split(' ')[0] !== 'Z') registerProducer(r);
+      }
+    } catch (e) {
+      if (!['ENOENT', 'ESRCH'].includes((e as NodeJS.ErrnoException).code ?? '')) throw e;
+    }
+  }
+  const alive = () => [...producerIdentities].filter(([pid, born]) => producerAlive(pid, born));
+  for (const signal of [null, 'SIGTERM', 'SIGKILL'] as const) {
+    collectOwnedCliChildren();
+    for (const [pid, born] of alive()) if (signal && producerAlive(pid, born)) {
+      try { process.kill(pid, signal); } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ESRCH') throw e; }
+    }
+    const deadline = mono() + 1000;
+    while (alive().length && mono() < deadline) { await sleep(25); collectOwnedCliChildren(); }
+    if (!alive().length) return true;
+  }
+  return false;
+}
+function collectOwnedCliChildren() {
+  if (!hub || hub.exitCode !== null) return;
+  const todo = [hub.pid], seen = new Set<number>();
+  while (todo.length) {
+    const pid = todo.pop()!; if (seen.has(pid)) continue; seen.add(pid); ensure(seen.size <= 512, 'cleanup-process-bound');
+    try {
+      const stat = readFileSync(`/proc/${pid}/stat`, 'utf8'), fields = stat.slice(stat.lastIndexOf(') ') + 2).trim().split(/\s+/);
+      if (pid === hub.pid) ensure(Number(fields[19]) === birth, 'cleanup-hub-identity');
+      // Birth + actual ancestry + this fresh private namespace include exec
+      // wrappers and verification stand-ins that have not written a receipt.
+      // No PID imported from the copied store is inspected or signalled.
+      if (pid !== hub.pid && fields[0] !== 'Z' && ownedCliScope(pid)) {
+        ensure(producerIdentities.size < 128 || producerIdentities.has(pid), 'cleanup-process-bound');
+        const born = Number(fields[19]); ensure(Number.isSafeInteger(born) && born > 0, 'cleanup-producer-identity');
+        producerIdentities.set(pid, born);
+      }
+      for (const x of readFileSync(`/proc/${pid}/task/${pid}/children`, 'utf8').trim().split(/\s+/).filter(Boolean)) todo.push(Number(x));
+    } catch (e) { if (!['ENOENT', 'ESRCH'].includes((e as NodeJS.ErrnoException).code ?? '')) throw e; }
+  }
+}
 
 let drains: Promise<void>[] = [];
 try {
@@ -487,8 +596,8 @@ try {
   ensure(await hashFile(bin) === o['--sha256'], 'service-sha');
   await stageFence(); // Missing/mismatched prerequisite fails before extraction.
   report.fixtureArchiveSha256 = await hashFile(fixture); ensure(report.fixtureArchiveSha256 === o['--fixture-sha256'], 'archive-sha');
-  const sourcePaths = ['test/tools/real_store_active_load.ts', 'test/tools/real_store_active_policy.cjs',
-    'src/core/cbor.bend', 'src/web/wire.js', 'src/web/thin.js', 'src/web/sidebar-region.js', 'src/web/view-delta.js',
+  const sourcePaths = ['test/tools/real_store_active_load.ts', 'test/tools/real_store_active_policy.cjs', 'test/tools/real_store_active_tar.cjs',
+    'src/core/model.bend', 'src/core/cbor.bend', 'src/web/wire.js', 'src/web/thin.js', 'src/web/sidebar-region.js', 'src/web/view-delta.js',
     'src/web/conversation-frame.js', 'src/web/terminal-input.js', 'src/web/model-menu-input.js', 'src/web/startup.js'];
   sourceHashes = Object.fromEntries(sourcePaths.map(p => [p, sha(readFileSync(resolve(import.meta.dir, '../..', p)))])); report.sourceHashes = sourceHashes;
   report.extraction = await extractArchive();
@@ -497,8 +606,9 @@ try {
   report.fixture = P.fixtureReceipt(smallJson(receiptPath, 1048576));
   originalBytes = lstatSync(join(home, 'events.jsonl')).size;
   ensure(originalBytes > 0 && await hashFile(join(home, 'events.jsonl')) === report.fixture.logSha256, 'fixture-log-sha');
-  before = await storeCounts(); ensure(before.seq === 1448789 && before.originalThreads === 10841 && before.syntheticThreads === 0, 'fixture-counts');
+  before = await storeCounts(true); ensure(before.seq === 1448789 && before.originalThreads === 10841 && before.syntheticThreads === 0, 'fixture-counts');
   report.before = countReport(before);
+  report.ownershipMetadata = { chargedBytes: ownershipCharge, originalThreads: original.threads.size, originalSettingKeys: original.settings.size };
   // Only this private copy receives new events. The original authoritative
   // prefix and SQLite checkpoint are preserved, not replaced by a catalog.
   const e = ($: string, row: Row) => ({ $, ...row, at: Date.now() });
@@ -554,15 +664,14 @@ try {
   let seq: number;
   try { seq = Number((checkpoint.query("SELECT v FROM meta WHERE k='applied_seq'").get() as Row).v); } finally { checkpoint.close(); }
   const observer = new Client('observer', undefined, { seq, epoch: own.greeting.epoch }); await observer.open();
+  report.ownershipMetadata.chargedBytes = ownershipCharge; report.ownershipMetadata.initialInfoKeys = original.infoKeys.size;
   // Serialize requests; a pending RPC queue never provides an artificial load.
   for (const id of ids) { const r = await observer.send({ id: ++observer.sequence, m: 'turn.start', p: { thread: id, text: `real-active-thread=${id}`, accountProfiles: 1, accountBinding: '' } }); ensure(r.ok, 'turn-start'); }
   await until(() => ids.every((_, i) => {
     if (!existsSync(join(root, `producer-${i}.json`))) return false;
     registerProducer(smallJson(join(root, `producer-${i}.json`))); return observer.lastDelivered[i] >= 10;
   }), 30000);
-  loadedStart = mono() - bootAt; report.loadedStartMs = loadedStart;
-  for (let index = 0; index < o.seconds / 60; index++) await runWindow(index, tickHz);
-  loadedEnd = mono() - bootAt; sample();
+  await runLoaded(tickHz);
   report.loadedEndMs = loadedEnd; report.actualLoadedMs = loadedEnd - loadedStart;
   report.resources = P.resources(samples, loadedStart, loadedEnd, tickHz);
   report.checks.resources = report.resources.ok;
@@ -571,8 +680,14 @@ try {
   guard();
 } catch (e) {
   // Never serialize exception messages/stacks from SQLite, RPCs or copied data.
-  const code = e instanceof Error ? e.message : '';
-  report.failureCode = /^[a-z][a-z0-9-]{0,63}$/.test(code) ? code : 'fixture-or-contract';
+  report.failureCode = P.failureCode(e);
+  report.failurePhase = loadedStart > 0 ? 'loaded' : hub ? 'startup' : 'prepare';
+  if (loadedStart > 0) {
+    loadedEnd = mono() - bootAt; report.loadedEndMs = loadedEnd; report.actualLoadedMs = loadedEnd - loadedStart;
+    report.partialResources = P.resources(samples, loadedStart, loadedEnd, report.tickHz);
+    report.finalProcessSampleAvailable = false;
+    try { sample(); report.finalProcessSampleAvailable = true; } catch {}
+  }
   report.ok = false;
 } finally {
   cleaning = true; current = undefined;
@@ -581,15 +696,12 @@ try {
     for (const p of c.pending.values()) { clearTimeout(p.timer); p.reject(Error('owned-stop')); }
     c.ws.close();
   }
+  try { report.cleanupBeforeHubStop = await stopProducers(); } catch { report.cleanupBeforeHubStop = false; }
   if (hub && hub.exitCode === null) {
     hub.kill('SIGTERM'); const timer = setTimeout(() => { if (hub!.exitCode === null) hub!.kill('SIGKILL'); }, 3000);
     try { await hub.exited; } finally { clearTimeout(timer); }
   }
-  // Only known synthetic producers with unchanged birth/argv are eligible.
-  for (const [pid, born] of producerIdentities) try {
-    const s = readFileSync(`/proc/${pid}/stat`, 'utf8'), f = s.slice(s.lastIndexOf(') ') + 2).trim().split(/\s+/);
-    if (Number(f[19]) === born && readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0').includes(join(agents, 'producer.cjs'))) process.kill(pid, 'SIGTERM');
-  } catch {}
+  try { report.checks.producersStopped = await stopProducers(); } catch { report.checks.producersStopped = false; }
   let drainTimer: ReturnType<typeof setTimeout> | undefined;
   const drained = await Promise.race([Promise.allSettled(drains).then(() => true),
     new Promise<boolean>(r => { drainTimer = setTimeout(() => r(false), 3000); })]);
@@ -603,6 +715,13 @@ try {
       report.checks.syntheticThreadCount = after.syntheticThreads === 20;
       report.checks.syntheticProjectCount = after.counts.project === before.counts.project + 1;
       report.checks.originalLogPrefix = await hashFile(join(home, 'events.jsonl'), originalBytes) === report.fixture.logSha256;
+      const path = join(home, 'providers/accounts-v1/profiles.json');
+      if (report.accountMetadata.supplied) {
+        const parsed = smallJson(path, 131072), metadata = P.accountMetadata(parsed); report.accountMetadata.sha256AfterRun = await hashFile(path);
+        report.accountMetadata.profilesAfterRun = metadata.profiles;
+        report.checks.accountMetadataPreserved = metadata.profiles === report.accountMetadata.profiles &&
+          sha(JSON.stringify(parsed.profiles.map((p: Row) => [p.id, p.provider]).sort())) === report.accountMetadata.identitySha256;
+      } else report.checks.accountMetadataPreserved = true;
     }
     report.checks.archiveUnchanged = await hashFile(fixture) === o['--fixture-sha256'];
     report.checks.serviceUnchanged = await hashFile(bin) === o['--sha256'];
@@ -612,10 +731,14 @@ try {
   report.childLogs = { bytes: logBytes, listening, stackError, retainedPrivateText: false };
   report.checks.childLogs = !stackError && logBytes <= 64 * 1024 * 1024;
   report.checks.noFault = !fault && !report.failureCode;
+  closeSync(samplesFd);
+  report.checks.ownedHomeRemoved = false;
+  if (report.checks.producersStopped && drained && (!hub || hub.exitCode !== null)) {
+    try { rmSync(root, { recursive: true, force: true }); report.checks.ownedHomeRemoved = true; } catch {}
+  }
   report.ok = Object.keys(report.checks).length >= 10 && Object.values(report.checks).every(v => v === true);
-  report.finishedAt = new Date().toISOString(); closeSync(samplesFd);
+  report.finishedAt = new Date().toISOString();
   writeFileSync(out, JSON.stringify(report, null, 2) + '\n', { mode: 0o600, flag: 'wx' });
-  rmSync(root, { recursive: true, force: true });
   console.log(JSON.stringify({ scope: report.scope, ok: report.ok, failureCode: report.failureCode,
     usableMs: report.usableMs, actualLoadedMs: report.actualLoadedMs, loadedWindows: report.phases.length }));
   process.exitCode = report.ok ? 0 : 1;
