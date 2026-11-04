@@ -92,22 +92,26 @@ async function main(){
     // Exercise the error UI before teardown. A resident service's handles or
     // a hung adapter close must not strand the second, independent home.
     phase('failure-launch');
+    // This override is outside the bundled service directory: BUILD.json and
+    // cygpath.exe are absent, so launchPaths fails before a native spawn.
+    // Assert that real setup diagnostic, rather than inventing ENOENT.
+    const expectedFailure='Cannot map paths with the packaged Windows runtime';
     const failedEnv={...env,BACKPLANE_HOME:path.join(out,'Failure home'),BACKPLANE_SERVICE:path.join(out,'missing-service.exe')};
     app=await _electron.launch({executablePath:executable,args:[],env:failedEnv,chromiumSandbox:true,timeout:60000});
     owned.push({app,child:app.process(),label:'failure UI'});
     page=await app.firstWindow();await page.locator('#retry').waitFor({state:'visible',timeout:15000});
-    const message=await page.locator('#status').innerText();assert.match(message,/ENOENT/);
+    const message=await page.locator('#status').innerText();assert(message.includes(expectedFailure),message);
     assert.equal((await page.evaluate(()=>backplaneDesktop.connectionState())).phase,'error');
     phase('failure-visible');
     await page.waitForTimeout(7000);assert.equal(await page.locator('#status').innerText(),message);assert(await page.locator('#retry').isVisible());
     assert.equal((await page.evaluate(()=>backplaneDesktop.connectionState())).phase,'error');
     await page.screenshot({path:path.join(out,'startup-error.png')});
-    report.failureUi={phase:'error',nativeError:'ENOENT',stableForMs:7000,retryVisible:true};
-    report.checks.push('packaged missing-service error stays visible with Retry after seven seconds');save();
+    report.failureUi={phase:'error',startupError:expectedFailure,stableForMs:7000,retryVisible:true};
+    report.checks.push('packaged service setup error stays visible with Retry after seven seconds');save();
     await page.locator('#retry').click();
     await page.locator('#retry').waitFor({state:'visible',timeout:15000});
     await page.waitForFunction(()=>backplaneDesktop.connectionState()?.phase==='error',null,{timeout:15000});
-    assert.match(await page.locator('#status').innerText(),/ENOENT/);assert(await page.locator('#retry').isVisible());
+    assert((await page.locator('#status').innerText()).includes(expectedFailure));assert(await page.locator('#retry').isVisible());
     report.failureUi.explicitRetryReturnsVisibleError=true;save();
   }finally{
     phase('test-owned-ui-cleanup');
