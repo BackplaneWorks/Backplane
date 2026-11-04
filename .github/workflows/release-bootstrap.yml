@@ -1,4 +1,4 @@
-name: Experimental 0142 TEST packages (never publish)
+name: Authenticated retained 0142 TEST packaging (never publish)
 run-name: TEST0142 ${{ inputs.target }} frozen afa967927
 on:
   workflow_dispatch:
@@ -6,13 +6,11 @@ on:
       ref: {type: string, required: true}
       build_run: {type: string, required: false, default: ''}
       native_run: {type: string, required: false, default: ''}
+      input_run: {type: string, required: false, default: ''}
+      measurement_run: {type: string, required: false, default: ''}
       target: {type: choice, required: true, options: [windows-x64, linux-x64, linux-arm64, darwin-arm64]}
       runner: {type: string, required: true}
-      packet_url: {type: string, required: true}
-      packet_sha256: {type: string, required: true}
-      components_url: {type: string, required: true}
       components_sha256: {type: string, required: true}
-      windows_runtime_url: {type: string, required: false, default: ''}
       windows_runtime_sha256: {type: string, required: false, default: ''}
 permissions: {contents: read, actions: read}
 concurrency:
@@ -24,52 +22,7 @@ env:
   BACKPLANE_TELEMETRY: 'off'
   BACKPLANE_TEST_ONLY: '1'
 jobs:
-  link:
-    if: inputs.build_run == '' && inputs.native_run == ''
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-        with: {ref: '${{ inputs.ref }}', persist-credentials: false}
-      - uses: actions/checkout@v4
-        with: {ref: '${{ github.sha }}', path: build/test-workflow, persist-credentials: false}
-      - uses: oven-sh/setup-bun@v2
-        with: {bun-version: '1.4.3'}
-      - name: Verify actual frozen TEST source; fetch public data; prepare separate consumers
-        shell: bash
-        env:
-          PRODUCT: ${{ inputs.ref }}
-          PACKET_URL: ${{ inputs.packet_url }}
-          PACKET_SHA: ${{ inputs.packet_sha256 }}
-        run: |
-          set -euo pipefail
-          [ "$PRODUCT" = afa9679273206b3e9b1da4c966c9b63fb6f57ab4 ]
-          python3 build/test-workflow/scripts/release-bootstrap.py fetch --source "$PRODUCT" --operation js --url "$PACKET_URL" --sha256 "$PACKET_SHA" --directory "$RUNNER_TEMP/test-inputs"
-          python3 build/test-workflow/extra/rc0142-test-only/prepare-tooling.py --source "$GITHUB_WORKSPACE" --output "$RUNNER_TEMP/test-consumers"
-      - name: Transform and link TEST service; no Bend compiler, emitter or official identity
-        shell: bash
-        env:
-          TARGET: ${{ inputs.target }}
-          BACKPLANE_GOOGLE_BAKE: '1'
-          BACKPLANE_GOOGLE_CLIENT_ID: ${{ secrets.BACKPLANE_GOOGLE_CLIENT_ID }}
-          BACKPLANE_GOOGLE_CLIENT_SECRET: ${{ secrets.BACKPLANE_GOOGLE_CLIENT_SECRET }}
-          BACKPLANE_TELEMETRY_BAKE: '1'
-          BACKPLANE_TELEMETRY_URL: https://backplaneworks.com/api/v1/events
-          BACKPLANE_TELEMETRY_KID: ${{ secrets.BACKPLANE_TELEMETRY_KID }}
-          BACKPLANE_TELEMETRY_KEY: ${{ secrets.BACKPLANE_TELEMETRY_KEY }}
-        run: |
-          set -euo pipefail
-          systemd-run --user --scope --quiet -p MemoryMax=3700000000 -p MemorySwapMax=0 -- python3 build/test-workflow/extra/rc0142-test-only/run-test-producer.py --source "$GITHUB_WORKSPACE" --tools "$RUNNER_TEMP/test-consumers" --inputs "$RUNNER_TEMP/test-inputs" --target "$TARGET" --output "$GITHUB_WORKSPACE/build/test-service"
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: test-service-build-${{ inputs.target }}
-          include-hidden-files: true
-          path: build/test-service/
-          if-no-files-found: warn
   native-package:
-    if: ${{ always() && !cancelled() && (needs.link.result == 'success' || inputs.build_run != '' || inputs.native_run != '') }}
-    needs: link
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 25
     steps:
@@ -86,11 +39,11 @@ jobs:
       - uses: actions/setup-node@v4
         with: {node-version: '24'}
       - uses: actions/download-artifact@v4
-        if: inputs.native_run == ''
+        if: inputs.build_run != ''
         with:
           name: test-service-build-${{ inputs.target }}
           path: build/test-service
-          run-id: ${{ inputs.build_run || github.run_id }}
+          run-id: ${{ inputs.build_run }}
           github-token: ${{ github.token }}
       - uses: actions/download-artifact@v4
         if: inputs.native_run != ''
@@ -99,21 +52,37 @@ jobs:
           path: build/resumed-native
           run-id: ${{ inputs.native_run }}
           github-token: ${{ github.token }}
-      - name: Prepare same isolated TEST consumers and native input data
+      - uses: actions/download-artifact@v4
+        if: inputs.input_run != ''
+        with:
+          name: TEST-ONLY-package-${{ inputs.target }}
+          path: build/authenticated-inputs
+          run-id: ${{ inputs.input_run }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        if: inputs.measurement_run != ''
+        with:
+          name: TEST-ONLY-package-${{ inputs.target }}
+          path: build/retained-measurement
+          run-id: ${{ inputs.measurement_run }}
+          github-token: ${{ github.token }}
+      - name: Recover missing packaging from authenticated artifacts; no emitter/link/ABI replay
         shell: bash
         env:
-          COMP_URL: ${{ inputs.components_url }}
           COMP_SHA: ${{ inputs.components_sha256 }}
-          WIN_URL: ${{ inputs.windows_runtime_url }}
           WIN_SHA: ${{ inputs.windows_runtime_sha256 }}
           TARGET: ${{ inputs.target }}
           NATIVE_RUN: ${{ inputs.native_run }}
+          INPUT_RUN: ${{ inputs.input_run }}
+          MEASUREMENT_RUN: ${{ inputs.measurement_run }}
         run: |
           set -euo pipefail
           python build/test-workflow/extra/rc0142-test-only/prepare-tooling.py --source "$GITHUB_WORKSPACE" --output "$RUNNER_TEMP/test-consumers"
           set --
-          if [ -n "$NATIVE_RUN" ]; then set -- --resume-native "$GITHUB_WORKSPACE/build/resumed-native"; fi
-          python build/test-workflow/extra/rc0142-test-only/native-package.py "$@" --source "$GITHUB_WORKSPACE" --tools "$RUNNER_TEMP/test-consumers" --target "$TARGET" --components-url "$COMP_URL" --components-sha256 "$COMP_SHA" --windows-url "$WIN_URL" --windows-sha256 "$WIN_SHA" --out "$GITHUB_WORKSPACE/build/test-native"
+          if [ -n "$NATIVE_RUN" ]; then set -- "$@" --resume-native "$GITHUB_WORKSPACE/build/resumed-native"; fi
+          if [ -n "$INPUT_RUN" ]; then set -- "$@" --authenticated-inputs "$GITHUB_WORKSPACE/build/authenticated-inputs"; fi
+          if [ -n "$MEASUREMENT_RUN" ]; then set -- "$@" --retained-measurement "$GITHUB_WORKSPACE/build/retained-measurement"; fi
+          python build/test-workflow/extra/rc0142-test-only/native-package.py "$@" --source "$GITHUB_WORKSPACE" --tools "$RUNNER_TEMP/test-consumers" --target "$TARGET" --components-sha256 "$COMP_SHA" --windows-sha256 "$WIN_SHA" --out "$GITHUB_WORKSPACE/build/test-native"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -125,6 +94,6 @@ jobs:
             build/test-native/*.log
             build/test-native/freeze/*.json
             build/test-native/service-component/*.json
-            build/test-native/service-component/component/SERVICE.json
+            build/test-native/service-component/component/
             build/test-native/service-component/runtime/runtime-evidence/
           if-no-files-found: warn

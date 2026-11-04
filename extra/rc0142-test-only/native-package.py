@@ -2,12 +2,12 @@
 import argparse
 import hashlib
 import json
+import shutil
 import os
 from pathlib import Path
 import subprocess
 import sys
 import tarfile
-import urllib.request
 
 
 def sha(path):
@@ -15,25 +15,14 @@ def sha(path):
         return hashlib.file_digest(stream, 'sha256').hexdigest()
 
 
-def fetch(url, expected, output):
-    assert url.startswith('https://') and len(expected) == 64
-    with urllib.request.urlopen(url, timeout=240) as response, output.open('xb') as stream:
-        assert response.geturl().startswith('https://')
-        count = 0
-        while chunk := response.read(1024 * 1024):
-            count += len(chunk)
-            assert count <= 2 * 1024**3
-            stream.write(chunk)
-    assert sha(output) == expected, 'Public input packet hash differs'
-
-
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     for name in ('source', 'tools', 'out'):
         p.add_argument('--' + name, type=Path, required=True)
-    for name in ('target', 'components-url', 'components-sha256'):
+    for name in ('target', 'components-sha256'):
         p.add_argument('--' + name, required=True)
-    p.add_argument('--windows-url', default='')
+    p.add_argument('--authenticated-inputs', type=Path)
+    p.add_argument('--retained-measurement', type=Path)
     p.add_argument('--windows-sha256', default='')
     p.add_argument('--resume-native', type=Path)
     a = p.parse_args()
@@ -52,14 +41,20 @@ def main():
                            check=True, timeout=900)
     try:
         packet = out / 'components.tar.gz'
-        fetch(a.components_url, a.components_sha256, packet)
+        inputs = a.resume_native or a.authenticated_inputs
+        assert inputs is not None, 'Authenticated Actions artifact required; no URL fallback'
+        original = inputs.resolve() / 'components.tar.gz'
+        assert original.is_file() and not original.is_symlink() and sha(original) == a.components_sha256
+        shutil.copyfile(original, packet)
         with tarfile.open(packet) as tar:
             tar.extractall(out / 'inputs', filter='data')
         args = []
         if a.target == 'windows-x64' and not a.resume_native:
             assert a.windows_sha256 == '42ef24bf69566f3d2d56aebf4b689276831e6e70d629d53d9cb9fc313a357412'
             win = out / 'windows-runtime.tar.gz'
-            fetch(a.windows_url, a.windows_sha256, win)
+            original = inputs.resolve() / 'windows-runtime.tar.gz'
+            assert original.is_file() and not original.is_symlink() and sha(original) == a.windows_sha256
+            shutil.copyfile(original, win)
             with tarfile.open(win) as tar:
                 tar.extractall(out / 'windows-runtime', filter='data')
             args = ['--windows-runtime', out / 'windows-runtime']
@@ -76,7 +71,10 @@ def main():
         else:
             factory = [tools / 'scripts/service-runtime.py']
             if a.target == 'windows-x64':
-                factory = [Path(__file__).with_name('runtime-test-catalog.py'), '--factory', tools / 'scripts/service-runtime.py']
+                assert a.retained_measurement, 'Reuse existing measured ABI; no fresh measurement'
+                factory = [Path(__file__).with_name('reconstruct-measured-component.py'), '--factory', tools / 'scripts/service-runtime.py', '--retained', a.retained_measurement]
+                record['nativeAbiReplayed'] = False
+                record['componentRecovery'] = 'Authenticated retained measurement and exact member hashes; no DLL observation replay'
             run([sys.executable, *factory, *args,
                 '--source-root', source, '--build', build, '--producer', producer,
                 '--producer-sha256', sha(producer), '--out', out / 'service-component'], 'abi-and-component')
