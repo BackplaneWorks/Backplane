@@ -1036,9 +1036,10 @@ in the setting `peer.own.<link>`, which only the hub writes (a client's
   a pasted one (`BotJob.join`), unless the asker is none of the machines
   the hub found (403: its link could not reach back), sync with it is off
   (403) or a live link already reaches it (409). A hub started with
-  `--no-tailscale` still lists the tailnet machines to switch to but pairs
-  only with hubs `BACKPLANE_PEERS` names (`named`), so a throwaway hub
-  never links itself to real ones. Laws `mate_*`; `test/tools/far_e2e.ts`
+  `--no-tailscale` neither runs `tailscale status` nor asks the tailnet's
+  machines `GET /hello` (`Tailnet.seen`): it lists and pairs only with
+  hubs `BACKPLANE_PEERS` names (`named`), so a throwaway hub never reaches
+  or links itself to real ones. Laws `mate_*`; `test/tools/far_e2e.ts`
   pairs its two hubs this way.
 - Pairing without Tailscale. Two hubs that name each other in
   `BACKPLANE_PEERS` (on one machine, or on a LAN) hold no credential of

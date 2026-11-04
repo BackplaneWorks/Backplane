@@ -110,6 +110,24 @@ def Tailnet.online(ms: List<&2, Machine>) -> List<&2, Machine>:
     case Machine{n, +ip, +on} <> t:
       Tailnet.online.k(Bool.and(on, Bool.not(String.is_empty(ip))), Machine{n, ip, on}, Tailnet.online(t))
 
+# What the machines list (server.bend's Machines.loop) is built from: the
+# hub's `tailscale status --json`, or nothing for a hub started with
+# --no-tailscale (on False). Such a hub neither runs Tailscale nor asks the
+# owner's tailnet machines GET /hello: it asks only the hubs BACKPLANE_PEERS
+# names, and names itself by its loopback address (Machines.me), so a
+# throwaway hub never reaches the owner's real machines and never waits on
+# one that does not answer.
+def Tailnet.seen(on: Bool, +status: String) -> String:
+  match on:
+    case True{}:
+      status
+    case False{}:
+      ""
+
+# the tailnet machines the machines list asks GET /hello
+def Tailnet.asked(on: Bool, +status: String) -> List<&2, Machine>:
+  Tailnet.online(Tailnet.peers(Tailnet.seen(on, status)))
+
 # the tailnet's MagicDNS domain ("box.tail1.ts.net." → "tail1.ts.net"):
 # every machine on it is named <host>.<domain>
 def Tailnet.domain.of(+dns: String) -> String:
