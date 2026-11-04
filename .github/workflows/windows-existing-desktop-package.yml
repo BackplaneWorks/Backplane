@@ -84,6 +84,14 @@ jobs:
           NODE
       - name: Stage existing component, brand on Windows, smoke and archive
         run: python tools/scripts/windows-existing-desktop-package.py --product product --out build/windows-existing
+      - name: Require packaged startup as a standard user without Developer Mode
+        shell: pwsh
+        run: |
+          $packages = @(Get-ChildItem build/windows-existing/dist -File -Filter '*windows-x64.zip')
+          if ($packages.Count -ne 1) { throw 'Expected one final Windows ZIP for standard-user qualification' }
+          $version = (Get-Content product/desktop/package.json -Raw | ConvertFrom-Json).version
+          $sha = (Get-FileHash $packages[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          ./product/scripts/windows-standard-user-smoke.ps1 -PackagePath $packages[0].FullName -PackageSHA256 $sha -ExpectedVersion $version
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -96,5 +104,9 @@ jobs:
             build/windows-existing/dist/
             build/windows-existing/stage/STAGE.json
             build/windows-existing/stage.request.json
+            product/build/windows-standard-user/result.json
+            product/build/windows-standard-user/package.json
+            product/build/windows-standard-user/unit-tests.txt
+            product/build/windows-standard-user/*.png
           if-no-files-found: warn
           retention-days: 30

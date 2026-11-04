@@ -1346,3 +1346,29 @@ controls, not Bend/proof/gate qualification; no actual-repo pass was seeded.
 The approved daily-runner/premerge dependency landed in PR906; the rebased
 cache code/helper bytes remain exact to the tested source. Fresh final-head
 Boat merged-shape validation is still required, with no guard exception.
+
+### IO-main plus module-driver single-compile experiment: no demonstrated win
+
+Stock Bend can emit both library and executable after one check. A matched
+normal-Boat pilot retained both actual `clipath_test` IO and JS-driver assertion
+paths, then verified exact library/standalone-executable bytes, separate output
+channels, argv/stdin/env/cwd behavior and live failure controls. Complete source,
+fixture, harness and official tool identities stayed unchanged. It is scoped
+parity evidence, not a full gate or a production runner change.
+
+| Change / complete three-pair measurement | Before | After |
+|---|---|---|
+| Median complete compile + IO + existing driver | 0.812110s | 0.838844s |
+| Largest command peak RSS | 173,712KiB | 194,876KiB |
+| Native source checks per pair | 2 | 1 (plus two independent emits) |
+| Full-suite / workflow promotion | none | none |
+
+The mixed pairs do **not** establish a speedup; no default test-runner change is
+being made. [Exact measurements, all four attempts and limits](test-single-compile/README.md).
+Final job `j20261104044326-1045417` / work1536983 passed all scoped controls,
+actual worker peak473,776,128B under3,699,998,720B; controller512MiB;
+combined caps4,236,870,912B <4GiB, swap0, max/OOM events0, actual native flock.
+Whole remote command42.60s,60credit-s/$0.00060, deletion verified. Three earlier
+fixture/harness failures remain explicitly failed; total122credit-s/$0.00122.
+Twelve dual-path tests were inventoried, only one exercised. The two-minute PR
+and every-job-under4GiB targets remain unachieved.

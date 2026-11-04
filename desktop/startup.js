@@ -1,7 +1,7 @@
 const status = document.getElementById('status');
-// Main reconnects by itself (it retries until the service answers): this
-// page only says so, and has nothing to press.
-const update = ({message}) => { status.textContent = message; };
+const retry = document.getElementById('retry');
+const update = ({phase, message}) => { status.textContent = message; retry.hidden = phase !== 'error'; };
+retry.addEventListener('click', () => { retry.hidden = true; void window.backplaneDesktop.retry(); });
 window.backplaneDesktop.onConnection(update);
 // Main outlives this document, including an error and a press on Reload.
 const current = window.backplaneDesktop.connectionState();
