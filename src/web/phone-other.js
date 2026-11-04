@@ -60,7 +60,7 @@ export function titleHits(doc, query, max = 8) {
   return out;
 }
 
-export function installPhoneOther({ doc = document, win = window, dispatch, touchIcon = "" }) {
+export function installPhoneOther({ doc = document, win = window, dispatch, touchIcon = "", appIcons = [] }) {
   const html = doc.documentElement;
   const on = () => html.classList.contains("phone");
   let row = null, ctrl = false;
@@ -187,17 +187,22 @@ export function installPhoneOther({ doc = document, win = window, dispatch, touc
   });
   // a home-screen app on an iPhone (the only place it shows notifications)
   // and Android: standalone, with the app's name and icon
-  if (on() && !doc.querySelector("link[rel=manifest]")) {
+  // (after host.js has put the saved theme on the page)
+  if (on() && !doc.querySelector("link[rel=manifest]")) win.setTimeout(() => {
     const meta = (name, content) => { const m = doc.createElement("meta");m.name = name;m.content = content;doc.head.append(m); };
     meta("apple-mobile-web-app-capable", "yes");meta("mobile-web-app-capable", "yes");
     meta("apple-mobile-web-app-title", "Backplane");meta("apple-mobile-web-app-status-bar-style", "black-translucent");
     const origin = win.location.origin;
     const icon = new URL(touchIcon || doc.querySelector("link[rel=apple-touch-icon]")?.getAttribute("href") || "apple-touch-icon.png", win.location.href).href;
-    const manifest = { name: "Backplane", short_name: "Backplane", start_url: origin + "/", scope: origin + "/", display: "standalone", background_color: "#0d0f12", theme_color: "#0d0f12",
-      icons: [{ src: icon, sizes: "180x180", type: "image/png" }, { src: doc.querySelector("link[rel=icon]")?.href || origin + "/favicon.svg", sizes: "any", type: "image/svg+xml" }] };
+    // the splash and the status bar in the theme the page has now; Android
+    // wants 192 and 512 px PNGs, and a maskable one it may crop to a circle
+    const bg = win.getComputedStyle(doc.documentElement).getPropertyValue("--bg").trim() || "#0d0f12";
+    const png = ({ src, size, purpose = "any" }) => ({ src: new URL(src, win.location.href).href, sizes: size + "x" + size, type: "image/png", purpose });
+    const manifest = { id: "/", name: "Backplane", short_name: "Backplane", start_url: origin + "/", scope: origin + "/", display: "standalone", background_color: bg, theme_color: bg,
+      icons: [{ src: icon, sizes: "180x180", type: "image/png" }, ...appIcons.map(png), { src: doc.querySelector("link[rel=icon]")?.href || origin + "/favicon.svg", sizes: "any", type: "image/svg+xml" }] };
     const link = doc.createElement("link");link.rel = "manifest";link.href = "data:application/manifest+json," + encodeURIComponent(JSON.stringify(manifest));
     doc.head.append(link);
-  }
+  }, 0);
 
   // the Now tab's count of threads that need the person (phone.bend's
   // tab badge, drawn on root screens): the home-screen app's badge and the

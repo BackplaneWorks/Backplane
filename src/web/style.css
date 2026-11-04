@@ -2740,11 +2740,13 @@ html.phone.ph-short .app.phone > .toast { top: calc(var(--ph-top, 0px) + env(saf
 
 /* a phone's first open: the bundle takes seconds on a slow network, so the
    page says it is coming (index.html's #ph-boot, gone once #root is drawn;
-   style.css loads long before the script) */
+   style.css loads long before the script); also while the page checks its
+   pairing (#root drawn but hidden), which on a hub out of reach lasts until
+   it is back, unless the pairing page opens */
 #ph-boot { display: none; }
 @media (pointer: coarse) and (max-width: 600px), (pointer: coarse) and (max-height: 600px) {
-  #root:empty + #ph-boot { display: flex; position: fixed; inset: 0; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: var(--bg); color: var(--dim); font: 15px/1.4 var(--sans); }
-  #root:empty + #ph-boot b { color: var(--text); font-size: 22px; }
+  #root:empty + #ph-boot, body.pairing-pending:not(:has(.pairing-screen)) > #ph-boot { display: flex; position: fixed; inset: 0; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: var(--bg); color: var(--dim); font: 15px/1.4 var(--sans); }
+  #root:empty + #ph-boot b, body.pairing-pending:not(:has(.pairing-screen)) > #ph-boot b { color: var(--text); font-size: 22px; }
 }
 
 /* the tab bar */
