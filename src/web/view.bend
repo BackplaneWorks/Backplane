@@ -5043,9 +5043,17 @@ def View.plot.wait.tree(sch: Bool, +u: U.Ui) -> String:
     case False{}:
       ""
 
+# the board's or schematic's help (its "?"): the mouse's and keys' ways,
+# a phone's touch ones
+def View.plot.hint(phone: Bool, +lc: I.Loc, +u: U.Ui) -> String:
+  match phone:
+    case True{}: MSG.T.viewer.pan.touch(lc)
+    case False{}:
+      MSG.T.viewer.pan.tip(lc) ++ Bool.pick(String, String.eq(U.Solid.kind(u), "schematic"),
+        " · Alt+←/→: " ++ MSG.T.viewer.sch.back(lc) ++ "/" ++ MSG.T.viewer.sch.forward(lc) ++ " · Alt+↑/Backspace: " ++ MSG.T.viewer.sch.up(lc), "")
+
 def View.plot(+lc: I.Loc, +u: U.Ui, +what: List<&2, D.Node>) -> List<&2, D.Node>:
-  View.bar.loc(lc, List.append(&2, D.Node, what, [View.plot.layers(lc, String.eq(U.Solid.kind(u), "schematic"), Nat.is_eq(HS.Hist.kind(U.Ui.view_get(u, "view.path")), 2n), U.Solid.off(u), U.Lfocus.of(u))]), MSG.T.viewer.pan.tip(lc) ++ Bool.pick(String, String.eq(U.Solid.kind(u), "schematic"),
-    " · Alt+←/→: " ++ MSG.T.viewer.sch.back(lc) ++ "/" ++ MSG.T.viewer.sch.forward(lc) ++ " · Alt+↑/Backspace: " ++ MSG.T.viewer.sch.up(lc), ""))
+  View.bar.loc(lc, List.append(&2, D.Node, what, [View.plot.layers(lc, String.eq(U.Solid.kind(u), "schematic"), Nat.is_eq(HS.Hist.kind(U.Ui.view_get(u, "view.path")), 2n), U.Solid.off(u), U.Lfocus.of(u))]), View.plot.hint(PHN.Phone.on(u), lc, u))
    <> D.El{"div", "", [D.At{"class", "viewer-stage"}], D.El{"canvas", "plot", List.append(&2, D.Attr, [D.At{"id", "plot"}, D.At{"class", "plot2d"}, D.At{"tabindex", "0"}, D.At{"aria-label", Bool.pick(String, String.eq(U.Solid.kind(u), "schematic"), MSG.T.viewer.schematic.tip(lc), MSG.T.viewer.board.tip(lc))}, D.At{"data-key", U.Solid.want(u)},
         D.At{"data-scope", U.Ui.sel(u)}, D.At{"data-off", U32.show(LY.Masks.off(LY.Lyr.masks(U.Lfocus.kind(u), U.Solid.off(u), U.Lfocus.of(u))))},
         D.At{"data-dim", U32.show(LY.Masks.dim(LY.Lyr.masks(U.Lfocus.kind(u), U.Solid.off(u), U.Lfocus.of(u))))}, D.At{"data-lift", U32.show(LY.Lyr.top(U.Lfocus.of(u)))},
@@ -5105,7 +5113,7 @@ def View.solid.workbench(+lc: I.Loc, +u: U.Ui, +key: String, +boardkey: String) 
            D.El{"aside", "solid-inspector", [D.At{"id", "solid-inspector"}, D.At{"class", "solid-inspector"}], Nil{}}]}]}
 
 def View.solid.loc(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
-  View.bar.loc(lc, View.solid.what.loc(lc, U.Mpage.onpart(u), u), MSG.T.viewer.orbit.tip(lc))
+  View.bar.loc(lc, View.solid.what.loc(lc, U.Mpage.onpart(u), u), Bool.pick(String, PHN.Phone.on(u), MSG.T.viewer.orbit.touch(lc), MSG.T.viewer.orbit.tip(lc)))
     <> List.append(&2, D.Node, D.Dom.when(Bool.not(String.is_empty(U.Ui.info(u, "plotnote:" ++ U.Solid.want(u)))), D.Dom.span("viewer-say", View.compact.text(View.compact(u), U.Ui.info(u, "plotnote:" ++ U.Solid.want(u))))),
       [View.solid.workbench(lc, u, U.Solid.want(u), View.solid.boardkey(u))])
 
