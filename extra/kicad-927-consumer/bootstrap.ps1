@@ -94,9 +94,19 @@ try {
     $cfg | ConvertTo-Json -Depth 10 | Set-Content -Encoding utf8 $configPath
     $report.phase = 'standard-user-native-acceptance'; Save-Report
     $shell = (Get-Command pwsh.exe).Source
-    $arguments = @('-NoProfile','-NonInteractive','-File','"'+(Join-Path $PSScriptRoot 'user.ps1')+'"','-ConfigPath','"'+$configPath+'"')
-    $credential = [PSCredential]::new("$env:COMPUTERNAME\$name",$password)
-    $child = Start-Process -FilePath $shell -ArgumentList $arguments -Credential $credential -LoadUserProfile -WorkingDirectory $out -PassThru
+    # Pass argv through .NET's actual argument list instead of PowerShell's
+    # comma/concatenation expressions or Start-Process's joined command line.
+    $start = [Diagnostics.ProcessStartInfo]::new($shell)
+    $start.UseShellExecute=$false; $start.WorkingDirectory=$out
+    $start.UserName=$name; $start.Domain=$env:COMPUTERNAME
+    $start.Password=$password; $start.LoadUserProfile=$true
+    $start.RedirectStandardOutput=$true; $start.RedirectStandardError=$true
+    foreach ($argument in @('-NoProfile','-NonInteractive','-File',(Join-Path $PSScriptRoot 'user.ps1'),'-ConfigPath',$configPath)) {
+        $start.ArgumentList.Add($argument)
+    }
+    $child = [Diagnostics.Process]::new(); $child.StartInfo=$start
+    if (!$child.Start()) { throw 'Cannot launch owned standard-user wrapper' }
+    $wrapperOut=$child.StandardOutput.ReadToEndAsync(); $wrapperErr=$child.StandardError.ReadToEndAsync()
     $report.wrapperPid = $child.Id; Save-Report
     $deadline = [DateTime]::UtcNow.AddMinutes(35)
     $samplesPath = Join-Path $out 'paging-samples.jsonl'
@@ -109,6 +119,8 @@ try {
         if ([DateTime]::UtcNow -gt $deadline) { $report.timedOut=$true; throw 'Native acceptance exceeded 35 minutes' }
     }
     $child.Refresh(); $report.consumerExitCode=$child.ExitCode
+    if ($wrapperOut.Wait(5000)) { $wrapperOut.Result | Set-Content -Encoding utf8 (Join-Path $out 'wrapper-stdout.txt') }
+    if ($wrapperErr.Wait(5000)) { $wrapperErr.Result | Set-Content -Encoding utf8 (Join-Path $out 'wrapper-stderr.txt') }
     if ($child.ExitCode -ne 0) { throw 'Native acceptance wrapper failed; preserve partial result/logs' }
     $result = Get-Content (Join-Path $out 'result.json') -Raw | ConvertFrom-Json
     Require-Equal $result.status 'PASS' 'consumer verdict'

@@ -1,4 +1,6 @@
 name: Issue 927 exact Windows package consumer
+# The preceding attempt stopped at wrapper usage exit 64 before either native
+# check; this revision fixes argv transport and captures wrapper diagnostics.
 on:
   push:
     branches: [backplane/verify-kicad-windows-927]
