@@ -14,7 +14,18 @@ try {
     New-Item -ItemType Directory -Force $env:TEMP | Out-Null
     . (Join-Path $PSScriptRoot 'job.ps1')
     # Bootstrap explicitly admits this logon-created process to its capped job.
-    # Reread the real limit here; there is no uncapped fallback.
+    # A query-only handle identifies that exact ancestor even if PowerShell
+    # creates an inner job. Never infer the cap from a caller-written receipt.
+    $admissionPath=Join-Path $cfg.out 'job-admission.json'
+    $deadline=[DateTime]::UtcNow.AddSeconds(30)
+    while (!(Test-Path -LiteralPath $admissionPath)) {
+        if ([DateTime]::UtcNow -gt $deadline) { throw 'Missing capped-job handle admission' }
+        Start-Sleep -Milliseconds 100
+    }
+    $admission=Get-Content -LiteralPath $admissionPath -Raw | ConvertFrom-Json
+    if ($admission.pid -ne $PID -or $admission.sid -ne $identity.User.Value) { throw 'Job query handle belongs to another process' }
+    [BP927Job]::UseQueryHandle([long]$admission.queryHandle)
+    # Reread actual kernel limits and membership through that handle.
     $resources = Get-BP927Resources
     $resources | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8 (Join-Path $cfg.out 'resources-start.json')
     Assert-BP927Resources $resources $cfg.resourcePolicy.allowExistingPagefile
