@@ -211,8 +211,12 @@ class InstallError(Exception):
 
 
 def fault(point):
-    """Test hook: COMPILER_GUARD_TEST_FAULT=<point> makes install fail at that point. It can only make it fail."""
+    """Test hook: COMPILER_GUARD_TEST_FAULT=<point> makes install fail at that point (an exception, so the rollback
+    runs); with COMPILER_GUARD_TEST_CRASH=1 the process dies on the spot instead (os._exit, no rollback), to test
+    recovery. It can only make an install fail."""
     if os.environ.get('COMPILER_GUARD_TEST_FAULT') == point:
+        if os.environ.get('COMPILER_GUARD_TEST_CRASH') == '1':
+            os._exit(97)
         raise RuntimeError('injected fault at ' + point)
 
 
@@ -240,31 +244,50 @@ def save_state(hg, state):
     write_atomic(manifest_path(hg), json.dumps(state, indent=1, sort_keys=True) + '\n')
 
 
+def free_backup(real):
+    """A backup name that does not exist yet (.prev, .prev.1, ...): an older backup is never overwritten."""
+    for n in range(1000):
+        candidate = real.with_name(real.name + ('.prev' if n == 0 else '.prev.%d' % n))
+        if not candidate.exists() and not candidate.is_symlink():
+            return candidate
+    raise InstallError('too many backups beside %s' % real)
+
+
 def recover(hg, state):
     """Roll back an interrupted install (a journal entry still marked 'installing'); anything unclear fails closed."""
     for name, entry in sorted(state.items()):
         if entry.get('state') != 'installing':
             continue
         path, real = Path(entry['path']), Path(entry['real'])
-        if real.is_file() and sha(real) == entry['original_sha256'] and (not path.exists() or is_shim(path)):
+        backup = Path(entry['backup']) if entry.get('backup') else None
+        new_digest = entry['original_sha256']            # the binary that was being guarded
+        old_digest = (entry.get('previous') or {}).get('real_sha256')
+        if real.is_file() and sha(real) == new_digest and (not path.exists() or is_shim(path)):
+            # the binary had already moved to .real
             if path.exists():
                 os.unlink(path)
             os.replace(real, path)
             os.chmod(path, entry['mode'])
-            backup = real.with_name(real.name + '.prev')
-            if entry.get('had_previous') and backup.is_file():
-                os.replace(backup, real)
-            if entry.get('previous'):
-                state[name] = entry['previous']
-            else:
-                state.pop(name)
-        elif path.is_file() and not is_shim(path) and sha(path) == entry['original_sha256'] and not real.exists():
-            if entry.get('previous'):
-                state[name] = entry['previous']
-            else:
-                state.pop(name)                       # nothing had moved yet
+            if entry.get('had_previous') and backup is not None and backup.is_file() and not real.exists():
+                os.rename(backup, real)
+        elif path.is_file() and not is_shim(path) and sha(path) == new_digest and not real.exists():
+            # nothing had moved, or only the old backup had (crash between backing it up and renaming the binary)
+            if entry.get('had_previous'):
+                if backup is None or not backup.is_file() or sha(backup) != old_digest:
+                    raise InstallError('%s: the previous backup %s is missing or changed; not touching anything' % (name, backup))
+                os.rename(backup, real)
+        elif (entry.get('had_previous') and path.is_file() and not is_shim(path) and sha(path) == new_digest
+              and real.is_file() and backup is not None and backup.is_file() and sha(real) == old_digest == sha(backup)):
+            os.unlink(backup)                            # crash between hard-linking the backup and unlinking the old .real
+        elif (entry.get('had_previous') and path.is_file() and not is_shim(path) and sha(path) == new_digest
+              and real.is_file() and sha(real) == old_digest and (backup is None or not backup.exists())):
+            pass                                         # the journal was written but the old backup had not moved yet
         else:
             raise InstallError('%s: an interrupted install left %s / %s in an unexpected state; not touching them' % (name, path, real))
+        if entry.get('previous'):
+            state[name] = entry['previous']
+        else:
+            state.pop(name)
         save_state(hg, state)
 
 
@@ -297,9 +320,12 @@ def install(home, tools, apply, env=None, paths=None):
                 if apply:
                     raise InstallError('%s: %s already exists and is not the recorded backup; refusing to overwrite it' % (name, real))
                 continue
-        actions.append((name, '%s%s -> %s and write shim' % ('update: keep the previous backup as .prev, move ' if update else 'move ', path, real)))
+        actions.append((name, '%s%s -> %s and write shim' % ('update: keep the previous backup as a new .prev file, move ' if update else 'move ', path, real)))
         if not apply:
             continue
+        stale = path.with_name('.guard-shim-' + path.name)
+        if stale.exists():
+            stale.unlink()                             # a temp shim left by a crashed install
         mode, digest = stat.S_IMODE(path.stat().st_mode), sha(path)
         guard = hg/'compiler-guard.py'
         hg.mkdir(parents=True, exist_ok=True)
@@ -307,16 +333,19 @@ def install(home, tools, apply, env=None, paths=None):
             shutil.copyfile(SELF, guard)               # a stable copy: worktrees come and go
             os.chmod(guard, 0o644)
         installed = {'path': str(path), 'real': str(real), 'real_sha256': digest, 'mode': mode, 'state': 'installed'}
+        backup = free_backup(real) if update else None      # never an existing file
         state[name] = {'path': str(path), 'real': str(real), 'original_sha256': digest, 'mode': mode, 'state': 'installing',
-                       'previous': previous, 'had_previous': update}
+                       'previous': previous, 'had_previous': update, 'backup': str(backup) if backup else None}
         save_state(hg, state)                          # durable before anything moves
-        backup = real.with_name(real.name + '.prev')
         shim_tmp = None
         try:
             fault('after-journal')
             shim_tmp = write_atomic(path.with_name('.guard-shim-' + path.name), shim_text(name, real, guard), 0o755)
             if update:
-                os.replace(real, backup)               # the previous real binary stays recoverable
+                os.link(real, backup)                  # fails if the name exists: no overwrite
+                fault('after-backup-link')
+                os.unlink(real)                        # the previous real binary stays recoverable as `backup`
+                fault('after-backup')
             os.rename(path, real)
             fault('after-move')
             os.replace(shim_tmp, path)
@@ -331,8 +360,11 @@ def install(home, tools, apply, env=None, paths=None):
             if real.exists() and not path.exists():
                 os.replace(real, path)
                 os.chmod(path, mode)
-            if update and backup.exists() and not real.exists():
-                os.replace(backup, real)
+            if update and backup is not None and backup.exists():
+                if not real.exists():
+                    os.rename(backup, real)            # the old real binary goes back
+                elif sha(real) == sha(backup):
+                    os.unlink(backup)                  # the link was made but the old name was not yet removed
             if shim_tmp is not None:
                 try:
                     os.unlink(shim_tmp)

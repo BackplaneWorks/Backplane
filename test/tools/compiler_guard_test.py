@@ -189,6 +189,90 @@ class CompilerGuard(unittest.TestCase):
         self.assertEqual(self.real('bend').read_text(), '#!/bin/sh\necho NEW\n')
         self.assertEqual(self.real('bend').with_name('bend.real.prev').read_bytes(), old_real)     # kept, not silently dropped
 
+    def crash_install(self, point, tool='bend'):
+        env = {**self.env, 'COMPILER_GUARD_TEST_FAULT': point, 'COMPILER_GUARD_TEST_CRASH': '1'}
+        return subprocess.run([sys.executable, str(ROOT/'scripts/compiler-guard.py'), 'install', '--home', str(self.home), '--tool', tool, '--apply'],
+                              env=env, capture_output=True, text=True, timeout=60)
+
+    def run_cli(self, *args):
+        return subprocess.run([sys.executable, str(ROOT/'scripts/compiler-guard.py'), *args, '--home', str(self.home), '--tool', 'bend'],
+                              env=self.env, capture_output=True, text=True, timeout=60)
+
+    def everything_bytes(self):
+        """Every regular file beside the bend shim, by name: nothing may disappear."""
+        return {p.name: p.read_bytes() for p in (self.home/'.bend/bin').iterdir() if p.is_file() and not p.is_symlink()}
+
+    def test_a_hard_crash_at_every_point_of_a_first_install_is_recovered_without_losing_the_original(self):
+        for point in ('after-journal', 'after-move', 'after-shim', 'before-manifest'):
+            with self.subTest(point=point):
+                crashed = self.crash_install(point)
+                self.assertEqual(crashed.returncode, 97, crashed.stderr)
+                held = b''.join(self.everything_bytes().values())
+                self.assertIn(self.original['bend'], held)             # the original is somewhere on disk
+                self.assertTrue(any('interrupted' in p for p in cg.check(self.home, ['bend'], self.env)) or not cg.is_shim(self.home/'.bend/bin/bend'))
+                recovered = self.run_cli('install', '--apply')
+                self.assertEqual(recovered.returncode, 0, recovered.stderr)
+                self.assertTrue(cg.is_shim(self.home/'.bend/bin/bend'))
+                self.assertEqual(self.real('bend').read_bytes(), self.original['bend'])
+                self.assertEqual(cg.check(self.home, ['bend'], self.env), [])
+                self.assertEqual(self.run_cli('uninstall', '--apply').returncode, 0)
+                self.assertEqual((self.home/'.bend/bin/bend').read_bytes(), self.original['bend'])
+                self.assertEqual(sorted(self.everything_bytes()), ['bend'])
+
+    def test_a_hard_crash_at_every_point_of_an_update_keeps_both_binaries(self):
+        for point in ('after-journal', 'after-backup-link', 'after-backup', 'after-move', 'after-shim', 'before-manifest'):
+            with self.subTest(point=point):
+                for p in list((self.home/'.bend/bin').iterdir()):
+                    p.unlink()
+                (self.home/'.bend/bin/bend').write_bytes(self.original['bend'])
+                (self.home/'.bend/bin/bend').chmod(0o755)
+                shutil_rm = Path(self.guard)
+                if shutil_rm.exists():
+                    import shutil
+                    shutil.rmtree(shutil_rm)
+                self.install()
+                old_real = self.real('bend').read_bytes()
+                new = b'#!/bin/sh\necho NEW-UPDATE\n'
+                (self.home/'.bend/bin/bend').write_bytes(new)                  # what bend update leaves behind
+                (self.home/'.bend/bin/bend').chmod(0o755)
+                crashed = self.crash_install(point)
+                self.assertEqual(crashed.returncode, 97, crashed.stderr)
+                held = list(self.everything_bytes().values())
+                self.assertIn(old_real, held)                                  # neither binary is ever lost
+                self.assertIn(new, held)
+                recovered = self.run_cli('install', '--apply')
+                self.assertEqual(recovered.returncode, 0, recovered.stderr)
+                self.assertTrue(cg.is_shim(self.home/'.bend/bin/bend'))
+                self.assertEqual(self.real('bend').read_bytes(), new)           # the update completed after recovery
+                backups = [v for n, v in self.everything_bytes().items() if n.startswith('bend.real.prev')]
+                self.assertEqual(backups, [old_real])                           # exactly one preserved old backup
+                self.assertEqual(cg.check(self.home, ['bend'], self.env), [])
+
+    def test_a_failed_update_at_the_backup_point_puts_the_old_real_binary_back(self):
+        self.install()
+        old_real = self.real('bend').read_bytes()
+        (self.home/'.bend/bin/bend').write_text('#!/bin/sh\necho NEW\n')
+        for point in ('after-backup-link', 'after-backup'):
+            with patch.dict(os.environ, {'COMPILER_GUARD_TEST_FAULT': point}):
+                with self.assertRaisesRegex(RuntimeError, 'injected fault'):
+                    cg.install(self.home, ['bend'], True, self.env)
+            self.assertEqual(self.real('bend').read_bytes(), old_real, point)
+            self.assertEqual((self.home/'.bend/bin/bend').read_text(), '#!/bin/sh\necho NEW\n', point)
+            self.assertEqual([n for n in self.everything_bytes() if n.startswith('bend.real.prev')], [], point)
+
+    def test_an_existing_prev_backup_is_never_overwritten(self):
+        self.install()
+        old_real = self.real('bend').read_bytes()
+        junk = self.real('bend').with_name('bend.real.prev')
+        junk.write_text('an older precious backup\n')
+        (self.home/'.bend/bin/bend').write_text('#!/bin/sh\necho NEW\n')
+        (self.home/'.bend/bin/bend').chmod(0o755)
+        cg.install(self.home, ['bend'], True, self.env)
+        self.assertEqual(junk.read_text(), 'an older precious backup\n')
+        self.assertEqual(self.real('bend').with_name('bend.real.prev.1').read_bytes(), old_real)
+        self.assertEqual(self.real('bend').read_text(), '#!/bin/sh\necho NEW\n')
+        self.assertEqual(cg.check(self.home, ['bend'], self.env), [])
+
     # the shim, called by absolute path -------------------------------------------------------------------------
     def test_absolute_path_call_outside_an_approved_context_is_refused_and_never_reaches_the_real_binary(self):
         self.install()

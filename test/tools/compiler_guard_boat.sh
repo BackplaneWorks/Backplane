@@ -32,6 +32,7 @@ env['BACKPLANE_HEAVY_LOCK_FD'] = str(fd)
 print(subprocess.run([exe, '/tmp/guard-fixture.bend', '--check-only'], env=env, pass_fds=(fd,), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode)
 PY
 before=$(sha256sum "$BEND" | cut -d' ' -f1); say "real bend sha256 $before at $BEND"
+cp "$BEND" /tmp/bend.orig
 bunbefore=""; bunpath=""
 if [ -n "$BUN" ] && [ -w "$(dirname "$BUN")" ]; then bunpath=$(readlink -f "$BUN"); bunbefore=$(sha256sum "$bunpath" | cut -d' ' -f1); say "bun $bunpath is writable: included"; else say "bun ${BUN:-absent} not writable here: bun cases SKIPPED (a root-owned bun is a documented bypass)"; fi
 tools=(--tool bend); [ -n "$bunpath" ] && tools+=(--tool bun --path "bun=$bunpath")
@@ -48,6 +49,33 @@ for point in after-journal after-move after-shim before-manifest; do
   intact && say "ok   original bend restored exactly after $point (bytes, no .real, no shim, no temp files)" || { say "FAIL bend not restored after $point"; ls -la "$BINDIR"; fail=1; }
   python3 $G check --tool bend >/dev/null 2>&1; ok $? 1 "check still reports bend unguarded after $point"
 done
+# hard crashes (the process dies on the spot, no rollback code runs) must be recoverable on the real bend
+for point in after-journal after-move after-shim before-manifest; do
+  COMPILER_GUARD_TEST_FAULT=$point COMPILER_GUARD_TEST_CRASH=1 python3 $G install --tool bend --apply >/tmp/gs4.out 2>&1; ok $? 97 "hard crash at $point"
+  python3 $G install --tool bend --apply >/tmp/gs5.out 2>&1; ok $? 0 "next install recovers after a crash at $point"
+  [ "$(sha256sum "$BEND.real" | cut -d' ' -f1)" = "$before" ] && python3 $G check --tool bend >/dev/null 2>&1 && say "ok   real bend intact beside the shim after $point" || { say "FAIL recovery after $point"; ls -la "$BINDIR"; show /tmp/gs5.out; fail=1; }
+  python3 $G uninstall --tool bend --apply >/dev/null 2>&1; intact && say "ok   uninstall after $point restores the original exactly" || { say "FAIL not restored after $point"; fail=1; }
+done
+# an update (new binary over the shim): crashes at the backup points keep BOTH binaries, and an older .prev is never overwritten
+python3 $G install --tool bend --apply >/dev/null 2>&1; ok $? 0 "install before the update scenario"
+cp "$BEND.real" /tmp/bend.new && printf '\n' >> /tmp/bend.new && chmod 755 /tmp/bend.new
+newsha=$(sha256sum /tmp/bend.new | cut -d' ' -f1)
+echo "older precious backup" > "$BEND.real.prev"
+for point in after-backup-link after-backup after-move; do
+  cp /tmp/bend.new "$BEND"; chmod 755 "$BEND"
+  COMPILER_GUARD_TEST_FAULT=$point COMPILER_GUARD_TEST_CRASH=1 python3 $G install --tool bend --apply >/tmp/gs6.out 2>&1; ok $? 97 "hard crash during an update at $point"
+  python3 $G install --tool bend --apply >/tmp/gs7.out 2>&1; ok $? 0 "next install recovers an update crashed at $point"
+  [ "$(sha256sum "$BEND.real" | cut -d' ' -f1)" = "$newsha" ] && [ "$(cat "$BEND.real.prev")" = "older precious backup" ] && say "ok   new binary is the real one; the older .prev is untouched ($point)" || { say "FAIL update recovery $point"; ls -la "$BINDIR"; show /tmp/gs7.out; fail=1; }
+  n=$(ls "$BINDIR" | grep -c '^bend.real.prev'); [ "$n" -ge 2 ] && say "ok   the previous real binary was kept as a further .prev file ($n backups)" || { say "FAIL no extra backup ($n)"; fail=1; }
+  python3 $G check --tool bend >/dev/null 2>&1; ok $? 0 "check clean after the recovered update ($point)"
+  # back to the pre-update state for the next point: the original bend guarded, one older .prev
+  python3 $G uninstall --tool bend --apply >/dev/null 2>&1
+  rm -f "$BEND" "$BINDIR"/bend.real.prev*
+  cp /tmp/bend.orig "$BEND"; chmod 755 "$BEND"
+  python3 $G install --tool bend --apply >/dev/null 2>&1
+  echo "older precious backup" > "$BEND.real.prev"
+done
+python3 $G uninstall --tool bend --apply >/dev/null 2>&1; rm -f "$BINDIR"/bend.real.prev* /tmp/bend.new
 python3 $G install "${tools[@]}" >/dev/null; ok $? 0 "dry run exits 0"
 [ "$(sha256sum "$BEND" | cut -d' ' -f1)" = "$before" ] && say "ok   dry run left bend untouched" || { say "FAIL dry run changed bend"; fail=1; }
 python3 $G install "${tools[@]}" --apply; ok $? 0 "install --apply"
