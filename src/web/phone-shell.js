@@ -194,11 +194,14 @@ export function installPhoneShell({ on, doc = document, win = window, dispatch }
     t = { x: p.clientX, y: p.clientY, edge: p.clientX < EDGE && level(doc) > 0 && !target.closest?.("#viewer canvas, .viewer-stage"), swipeEl, axis: null, timer: 0 };
     longFired = false;
     if (act) {
-      t.timer = setTimeout(() => {
-        if (!t || t.axis) return;
+      // a busy page runs the timer late, with the finger's lift still
+      // queued: let queued input go first, so a tap stays a tap
+      const mine = t;
+      t.timer = setTimeout(() => setTimeout(() => {
+        if (t !== mine || t.axis) return;
         longFired = true;win.navigator.vibrate?.(10);
         dispatch(act[0], act[1]);
-      }, LONG_MS);
+      }, 0), LONG_MS);
     }
   }, { passive: true, capture: true });
   doc.addEventListener("touchmove", e => {
