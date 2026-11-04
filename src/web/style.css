@@ -2881,6 +2881,18 @@ html.phone .pairing-card > button { align-self: flex-start; }
 html.phone .pairing-pending a { display: inline-flex; align-items: center; min-height: 44px; }
 html.phone .pairing-invitation button { min-width: 44px; }
 html.phone .pairing-qr { margin: 16px auto; width: min(100%, 300px); }
+/* the tour on a phone: a sheet at the bottom, within a thumb's reach,
+   with 44 px buttons, inside the home bar */
+.app.phone .tour { top: auto; bottom: 0; left: 0; transform: none; width: 100vw; max-height: calc(var(--ph-vh, 100dvh) * 0.7); box-sizing: border-box; padding: 16px 16px calc(12px + env(safe-area-inset-bottom)); border-width: 1px 0 0; font-size: 15px; }
+.app.phone .tour .count { font-size: 13px; }
+.app.phone .tour button { min-height: 44px; min-width: 44px; padding: 0 16px; }
+.app.phone .tour-btns { bottom: calc(-12px - env(safe-area-inset-bottom)); padding-bottom: 4px; }
+.app.phone .tour-choices button { width: 100%; text-align: left; }
+/* Improvements on a phone: the whole screen above the keyboard */
+html.phone section.improvements { top: 0 !important; left: 0 !important; right: 0; bottom: auto; width: 100vw !important; max-width: none; height: var(--ph-vh, 100dvh); max-height: none; box-sizing: border-box; overflow-y: auto; padding-top: calc(12px + env(safe-area-inset-top)); padding-bottom: calc(12px + env(safe-area-inset-bottom)); border: 0; transform: none; }
+html.phone section.improvements header button { min-width: 44px; min-height: 44px; }
+html.phone section.improvements :is(button, select) { min-height: 44px; }
+html.phone section.improvements :is(input, select, textarea) { font-size: 16px; }
 /* phone: thread (agent B). The thread screen in the phone arrangement
    (DESIGN.md: B); everything under .app.phone, so desktop and a narrow
    desktop window are unchanged. */
