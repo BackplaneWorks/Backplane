@@ -79,7 +79,7 @@ def with_state(u: U.Ui, st: M.State) -> U.Ui:
       U.Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}
 
 def assembled(v: String) -> String:
-  HUB.Hub.prompt(REC.cfg(), agent_state(v), "t", "/tmp/lang-project", K.Files{"", "", "", ""}, "")
+  HUB.Hub.prompt(REC.cfg(), agent_state(v), "t", "/tmp/lang-project", K.Files{"", "", "", "", False{}}, "")
 
 def bot(v: String) -> M.State:
   M.State.apply(agent_state(v), M.BotSet{"b", "Kit", "t", 0n, "", 0n})

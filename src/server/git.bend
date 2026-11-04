@@ -6,6 +6,8 @@ import ../core/sha1.bend as S
 import ../core/utf8.bend as U
 import ../core/diff.bend as D
 import ../core/hist.bend as HI
+import ../core/projkind.bend as PK
+import ../core/port.bend as PORT
 import ./kicad.bend as K
 
 # Git, run as a subprocess with an argv list (never a shell line). Every
@@ -407,6 +409,66 @@ def Git.exclude.sh() -> String:
 def Git.exclude(+cwd: String) -> IO(String):
   Git.seq(Git.run(cwd, ["rev-parse", "--path-format=absolute", "--git-common-dir"]),
     dir => Git.seq(P.Proc.run("sh", ["-c", Git.exclude.sh(), "sh", dir], cwd), _ => Git.done("")))
+
+# a file's lines added once each (the file made if need be): "$1", then the lines
+def Git.info.sh() -> String:
+  "f=$1; shift; mkdir -p \"${f%/*}\" && for l do grep -qxF -- \"$l\" \"$f\" 2>/dev/null || printf '%s\\n' \"$l\" >> \"$f\"; done"
+
+def Git.info(+file: String, +lines: List<&2, String>) -> IO(P.Ran):
+  P.Proc.run("sh", List.append(&2, String, ["-c", Git.info.sh(), "sh", file], lines), "/")
+
+# a hardware project's clone (core/projkind.bend): KiCad's droppings out of
+# status and no line merges of a design file, in the repository's own info
+# files, which its worktrees share and nothing tracked sees. Outside a
+# repository, nothing.
+def Git.hardware(+cwd: String) -> IO(String):
+  Git.seq(Git.run(cwd, ["rev-parse", "--path-format=absolute", "--git-common-dir"]),
+    +dir => IO.bind(P.Ran, String, Git.info(dir ++ "/info/exclude", PK.Pk.exclude()),
+      _ => IO.bind(P.Ran, String, Git.info(dir ++ "/info/attributes", PK.Pk.attributes()), _ => Git.done(""))))
+
+# The copies of a design the project's page does not show, as Pk.rows reads
+# them: the folder's own uncommitted design files, then every worktree of
+# the repository whose design differs from the folder (.kicad_pro stays out:
+# on its own it is KiCad's re-save noise). Read-only, bounded.
+def Git.outside.sh() -> String:
+  Git.safe.sh() ++ String.join([
+    "exec 2>/dev/null",
+    "export GIT_OPTIONAL_LOCKS=0",
+    "bp_safe",
+    "top=$(git rev-parse --show-toplevel) || exit 0",
+    "base=$(git rev-parse -q --verify HEAD) || exit 0",
+    "mt() { stat -c %y \"$1\" 2>/dev/null || stat -f %Sm -t '%Y-%m-%d %H:%M:%S' \"$1\"; }",
+    "g() { w=$1; shift; git -C \"$w\" -c core.fsmonitor=false -c core.quotepath=false \"$@\"; }",
+    "row() {",
+    "  pl=$1; w=$2; shift 2",
+    "  s=$(g \"$w\" status --porcelain --no-renames --untracked-files=all -- \"$@\")",
+    "  n=0; [ -z \"$s\" ] || n=$(printf '%s\\n' \"$s\" | wc -l | tr -d ' ')",
+    "  a=0; h=0",
+    "  if [ \"$pl\" = wt ]; then",
+    "    a=$(g \"$w\" log --format=%h HEAD --not \"$base\" -- \"$@\" | wc -l | tr -d ' ')",
+    "    h=$(g \"$w\" rev-list --count \"HEAD..$base\")",
+    "  fi",
+    "  [ \"$n\" -gt 0 ] || [ \"$a\" -gt 0 ] || return 0",
+    "  b=$(g \"$w\" symbolic-ref -q --short HEAD || g \"$w\" rev-parse --short HEAD)",
+    "  f=$(printf '%s\\n' \"$s\" | cut -c4- | sed -e 's/^\"//' -e 's/\"$//' -e '/^$/d')",
+    "  if [ -n \"$f\" ]; then t=$(printf '%s\\n' \"$f\" | while IFS= read -r p; do mt \"$w/$p\"; done | sort | tail -n 1 | cut -c1-16)",
+    "  else t=$(g \"$w\" log -1 --format=%ci HEAD -- \"$@\" | cut -c1-16); f=$(g \"$w\" log --format= --name-only HEAD --not \"$base\" -- \"$@\" | sed '/^$/d' | sort -u); fi",
+    "  names=$(printf '%s\\n' \"$f\" | head -n 4 | awk 'NR > 1 { printf \"`, `\" } { printf \"%s\", $0 }')",
+    "  printf '%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n' \"$pl\" \"$b\" \"$w\" \"$n\" \"$a\" \"$h\" \"$t\" \"$names\"",
+    "}",
+    "set -- '*.kicad_pcb' '*.kicad_sch' 'mech/*.py' 'mech/*.FCStd' 'mech/*.step' 'mech/*.stp'",
+    "{ row here \"$top\" \"$@\"",
+    "  git -C \"$top\" worktree list --porcelain | while IFS= read -r l; do",
+    "    case $l in 'worktree '*) w=${l#worktree }; [ \"$w\" = \"$top\" ] || [ ! -d \"$w\" ] || row wt \"$w\" \"$@\";; esac",
+    "  done; } | head -n 12"], "\n")
+
+def Git.outside.out(r: P.Ran) -> IO(String):
+  match r:
+    case P.Ran{_, out}:
+      IO.pure(String, out)
+
+def Git.outside(+root: String) -> IO(String):
+  IO.bind(P.Ran, String, P.Proc.run("sh", PORT.Port.timeout(["3", "sh", "-c", Git.outside.sh()]), root), Git.outside.out)
 
 # Copy the folder's uncommitted work (changed and untracked files, not
 # ignored ones) into a new worktree, and delete there what is deleted here.

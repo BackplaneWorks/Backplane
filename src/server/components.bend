@@ -61,7 +61,7 @@ def Components.load(ok: Bool, +pcb: String, +sch: String, +a: ComponentRevision,
 
 def Components.files(fs: K.Files) -> IO(J.Json):
   match fs:
-    case K.Files{_, +pcb, +sch, _}:
+    case K.Files{_, +pcb, +sch, _, _}:
       do IO<J.Json>:
         +a : ComponentRevision <- Components.version(pcb)
         +b : ComponentRevision <- Components.version(sch)
@@ -99,7 +99,7 @@ def ComponentsFx.sources(cwd: String, path: String, pcb: String, sch: String) ->
 
 def Components.sources.files(fs: K.Files, +cwd: String, path: String) -> IO(J.Json):
   match fs:
-    case K.Files{_, pcb, sch, _}:
+    case K.Files{_, pcb, sch, _, _}:
       IO.bind(String, J.Json, ComponentsFx.sources(cwd, path, pcb, sch), text =>
         IO.pure(J.Json, Maybe.default(&2, J.Json, J.Json.parse(text), Components.error("Could not resolve the selected board."))))
 
@@ -123,7 +123,7 @@ def Components.pages.put(fuel: Nat, go: Bool, +data: J.Json, +off: Nat, +cwd: St
 
 def Components.page.files(fs: K.Files, +cwd: String, +offset: Nat, +pcbRev: String, +schRev: String) -> IO(Unit):
   match fs:
-    case K.Files{_, +pcb, +sch, _}:
+    case K.Files{_, +pcb, +sch, _, _}:
       do IO<Unit>:
         +a : ComponentRevision <- Components.version(pcb)
         +b : ComponentRevision <- Components.version(sch)
@@ -136,7 +136,7 @@ def Components.page.files(fs: K.Files, +cwd: String, +offset: Nat, +pcbRev: Stri
 def Components.page.sources(ok: Bool, +sources: J.Json, cwd: String, offset: Nat, pcb: String, sch: String) -> IO(Unit):
   match ok:
     case True{}:
-      Components.page.files(K.Files{"", J.Json.get_str(sources, "source", ""), J.Json.get_str(sources, "schematic", ""), ""}, cwd, offset, pcb, sch)
+      Components.page.files(K.Files{"", J.Json.get_str(sources, "source", ""), J.Json.get_str(sources, "schematic", ""), "", False{}}, cwd, offset, pcb, sch)
     case False{}:
       IO.print(Components.response(sources))
 

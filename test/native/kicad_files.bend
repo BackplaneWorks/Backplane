@@ -13,7 +13,7 @@ def Kf.rel(+p: String, +root: String) -> String:
 
 def Kf.show(fs: K.Files, +root: String) -> String:
   match fs:
-    case K.Files{+pro, +pcb, +sch, +all}:
+    case K.Files{+pro, +pcb, +sch, +all, _}:
       String.join([Kf.rel(pro, root), Kf.rel(pcb, root), Kf.rel(sch, root), String.join(String.lines(all), ",")], "|")
 
 def Kf.sh() -> String:

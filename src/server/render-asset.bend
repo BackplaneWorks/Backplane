@@ -55,7 +55,7 @@ def RenderAsset.authorized(ok: Bool, +info: J.Json, +cwd: String, +canonical: St
 
 def RenderAsset.files(f: K.Files, +cwd: String, path: String, +kind: String, +revision: String) -> IO(Unit):
   match f:
-    case K.Files{_, +pcb, _, _}:
+    case K.Files{_, +pcb, _, _, _}:
       do IO<Unit>:
         raw : String <- RenderAssetFx.authorize(cwd, path, pcb, kind, revision)
         +info : J.Json = Maybe.default(&2, J.Json, J.Json.parse(raw), J.Json.obj([J.KV{"error", J.Str{"Unable to authorize saved asset."}}]))

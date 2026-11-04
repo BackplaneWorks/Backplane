@@ -16073,3 +16073,42 @@ def Laws.kicad_absolute_project_override(main):
 
 def Laws.kicad_divergent_write_requires_choice(explicit):
   {==}
+
+def Laws.pk_kind_hardware_said(ns, found):
+  {==}
+
+def Laws.pk_kind_software_said(ns, found):
+  {==}
+
+def Laws.pk_software_build_wins(t, found):
+  {==}
+
+def Laws.pk_board_at_root():
+  {==}
+
+def Laws.pk_board_below_root():
+  {==}
+
+def Laws.pk_mech_folder():
+  {==}
+
+def Laws.pk_plain_folder_software():
+  {==}
+
+def Laws.pk_software_keeps_worktrees(mode):
+  {==}
+
+def Laws.pk_hardware_stays():
+  {==}
+
+def Laws.pk_named_worktree_kept():
+  {==}
+
+def Laws.pk_no_copies_no_words():
+  {==}
+
+def Laws.pk_short_line_no_row():
+  {==}
+
+def Laws.home_no_outside_no_panel():
+  {==}
