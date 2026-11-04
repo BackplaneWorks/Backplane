@@ -3263,7 +3263,7 @@ html.ph-kb .app.phone :is(.thread-content, .thread-view) > :is(.bot-head, .bot-h
 .app.phone :is(.viewer-bar, .solid-toolbar, .hist-row)::-webkit-scrollbar { display: none; }
 .app.phone :is(.viewer-bar, .solid-toolbar, .solid-orientation) > * { flex: none; }
 .app.phone .viewer-bar { gap: 6px; padding: 6px 8px; }
-.app.phone .viewer-bar > .board-selector { flex: 0 1 auto; min-width: 0; max-width: 46vw; }
+.app.phone .viewer-bar > .board-selector { flex: 0 0 auto; min-width: 0; max-width: 46vw; }
 .app.phone .viewer-bar > .board-selector > summary { max-width: 100%; overflow: hidden; box-sizing: border-box; }
 .app.phone .viewer-bar > .board-selector .board-current { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .app.phone :is(.viewer-bar, .solid-toolbar, .hist-row) :is(button, summary, select, .btn) { min-height: var(--ph-tap, 44px); min-width: var(--ph-tap, 44px); }
