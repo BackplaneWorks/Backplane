@@ -8,7 +8,7 @@ import ../core/sha1.bend as SH
 import ./hubs.bend as H
 import ./screen.bend as S
 import ./bots.bend as MB
-import ../core/msgs.bend as MSG
+import ../core/msgs-lookup.bend as MSG
 import ./session.bend as PS
 import ./thin.bend as TH
 import ./history.bend as HISTORY
