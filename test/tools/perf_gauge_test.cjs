@@ -21,3 +21,13 @@ test('repeated explicit diagnostic reads retain only a minute-sampled numeric he
   f.time(60000);f.effects.take();assert.equal(f.walks,2);
   assert.deepEqual(Object.keys(vm.runInContext('perf_heap_sample',f.ctx)).sort(),['at','total','used']);
 });
+test('cache counters are numeric diagnostics and never inspect payloads',()=>{
+  const f=fixture();
+  f.ctx.BACKPLANE_CACHES={metrics:()=>({chargedBytes:270,maxBytes:8388608,slots:[{name:'browser.seen',entries:1,chargedBytes:270,hits:4,misses:2,evictions:3,expired:5,rejected:6}]})};
+  const text=f.effects.take();
+  assert.match(text,/cache\.charged_bytes\t1\t1\t270\t270\t270\t/);
+  assert.match(text,/cache\.browser\.seen\.entries\t1\t1\t1\t1\t1\t/);
+  assert.match(text,/cache\.browser\.seen\.evictions\t1\t1\t3\t3\t3\t/);
+  assert.equal(f.walks,1);
+  f.time(100);f.effects.take();assert.equal(f.walks,1);
+});

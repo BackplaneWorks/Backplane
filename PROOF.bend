@@ -293,9 +293,12 @@ import ./test/sidebar_full_branch_test.bend as FULLBRANCH
 import ./test/sidebar_draft_image_test.bend as SIDEDRAFTPROOF
 
 import ./test/secret_proof.bend as SECPROOF
+
 import ./test/secret_box_proof.bend as SECBP
 
 import ./src/core/landing.bend as LAND
+
+import ./src/server/cacheio.bend as CACHEIO
 
 # Lemmas
 # ------
@@ -15826,3 +15829,9 @@ def Laws.json_object_put_null(key, value): {==}
 def Laws.desktop_connection_snapshot(text, version, hub): {==}
 
 def Laws.adopt_live_entries_kept(record, handoff): {==}
+
+def Laws.cache_effect_slots(): {==}
+
+def Laws.cache_effect_budget(): {==}
+
+def Laws.cache_effect_global_budget(): {==}
