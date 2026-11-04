@@ -44,26 +44,34 @@ self.addEventListener("fetch", (e) => {
     return;
   }
   e.respondWith(caches.open(SHELL).then(async (c) => {
-    const net = fetch(e.request).then((r) => {
-      if (r.ok) {
-        c.put(e.request, r.clone());
-        if (page) e.waitUntil(r.clone().text().then((html) => prune(c, html)).catch(() => {}));
-      }
-      return r;
-    });
+    let late = false;
+    const net = fetch(e.request);
+    e.waitUntil(net.then(async (r) => {
+      if (!r.ok) return;
+      const forCache = r.clone(), forText = page ? r.clone() : null;
+      if (!page) return c.put(e.request, forCache);
+      const html = await forText.text();
+      // A page that came after the cached one was shown: its build's chunks
+      // first, then the page, and nothing pruned (the shown page still loads
+      // its own chunks), so the next open, online or not, is that build.
+      if (late) { await precache(c, html); return c.put(e.request, forCache); }
+      await c.put(e.request, forCache);
+      return prune(c, html);
+    }).catch(() => {}));
     const cached = async () => (await c.match(e.request)) ?? (page ? await c.match("/") : null);
     if (page) {
       // A page on a link that does not answer (a phone's weak signal, a
       // hub address that times out) is the cached one after PAGE_WAIT_MS;
-      // the fresh page is still saved for the next open, and a page that
-      // runs an earlier build reloads into the new one (host.js checkDeploy).
+      // a page that runs an earlier build reloads into the new one once the
+      // link answers (host.js checkDeploy).
       let timer;
-      const late = new Promise((resolve) => { timer = setTimeout(resolve, PAGE_WAIT_MS, null); });
-      const r = await Promise.race([net.catch(() => null), late]);
+      const wait = new Promise((resolve) => { timer = setTimeout(resolve, PAGE_WAIT_MS, null); });
+      const r = await Promise.race([net.catch(() => null), wait]);
       clearTimeout(timer);
       if (r) return r;
+      late = true;
       const hit = await cached();
-      if (hit) { e.waitUntil(net.catch(() => {})); return hit; }
+      if (hit) return hit;
     }
     try { return await net; } catch { return (await cached()) ?? Response.error(); }
   }));
@@ -73,14 +81,29 @@ const PAGE_WAIT_MS = 2500;
 
 const ASSET = /^\/(?:chunk-|favicon-|apple-touch-icon-)[a-zA-Z0-9_-]+\.(?:js|css|svg|png|woff2?)$/;
 
+// the hashed assets a page names
+function named(html) {
+  const names = new Set();
+  for (const m of html.matchAll(/(?:src|href)="\.?\/?((?:chunk-|favicon-|apple-touch-icon-)[a-zA-Z0-9_-]+\.[a-z0-9]+)"/g)) names.add("/" + m[1]);
+  return names;
+}
+
+// Fetch the chunks a page names that the cache lacks.
+async function precache(c, html) {
+  for (const path of named(html)) {
+    if (!path.startsWith("/chunk-") || await c.match(path)) continue;
+    const r = await fetch(path);
+    if (r.ok) await c.put(path, r);
+  }
+}
+
 // Keep only the hashed assets this page's build names. A page that names
 // none (an error page, a proxy's) leaves the cache alone.
 async function prune(c, html) {
-  const named = new Set();
-  for (const m of html.matchAll(/(?:src|href)="\.?\/?((?:chunk-|favicon-|apple-touch-icon-)[a-zA-Z0-9_-]+\.[a-z0-9]+)"/g)) named.add("/" + m[1]);
-  if (![...named].some((n) => n.startsWith("/chunk-"))) return;
+  const names = named(html);
+  if (![...names].some((n) => n.startsWith("/chunk-"))) return;
   for (const req of await c.keys()) {
     const path = new URL(req.url).pathname;
-    if (ASSET.test(path) && !named.has(path)) await c.delete(req);
+    if (ASSET.test(path) && !names.has(path)) await c.delete(req);
   }
 }
