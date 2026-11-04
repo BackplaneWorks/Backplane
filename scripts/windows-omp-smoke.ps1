@@ -9,10 +9,9 @@ Copy-Item $bun (Join-Path $out 'bin\bun.exe')
 $version = '18.16.0'
 $url = "https://github.com/can1357/oh-my-pi/releases/download/v$version"
 Invoke-WebRequest "$url/omp-windows-x64.exe" -OutFile (Join-Path $out 'bin\omp.exe')
-$sums = (Invoke-WebRequest "$url/SHA256SUMS.txt").Content
-$line = @($sums -split "`n" | Where-Object { $_ -match '\s+\*?omp-windows-x64.exe\s*$' })
-if ($line.Count -ne 1) { throw 'Missing exact upstream OMP executable checksum' }
-$expected = ($line[0] -split '\s+')[0].ToLowerInvariant()
+# Pinned from v18.16.0/SHA256SUMS.txt. Invoke-WebRequest may expose text
+# assets as byte[]; do not depend on its Content response-type inference.
+$expected = 'c249a9ed0a57c748fb1247d8ee9e2d0fe1b13229266ce74d8810a76a591e21fc'
 $actual = (Get-FileHash (Join-Path $out 'bin\omp.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($actual -ne $expected) { throw 'OMP executable checksum mismatch' }
 function Paging {
