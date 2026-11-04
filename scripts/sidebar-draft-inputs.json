@@ -178,7 +178,7 @@
     "src/server/thin-signal-text.bend": "9340744b270552b7f88a8fb31864fb639b62f013921649a733bc5e0aa0b12994",
     "src/server/thin-signals.bend": "43d380d04ab73c9fcb3fc7dcc307c47b3c93be43a5a2dda09c7f549c254274ef",
     "src/server/thin-splice.bend": "d1bc1c8e7710e0efba2abcf3fa599391d5d480eb37ced2a8a4f079d7b079a2be",
-    "src/server/thin-view.bend": "49110d1eff65f1760aceeafdd446b48083227e5ddac4a18e13b4c5ab42f0a92f",
+    "src/server/thin-view.bend": "4f70ae4068fb15f86cefc02bcc2c18a7d604231b0a1ee5ee55032606b77f8535",
     "src/server/thinstore.bend": "23c378c87b43907157c88b61a6a259df969b51011bcfc97d27015577cc905f2b",
     "src/web/allowance.bend": "0e9ee3ab27dd2b3c25a2778a35b300c7333c0878b5215b62c7229fed79ee168b",
     "src/web/bots.bend": "f265768306a1bc1edc14f53d1d6f9c7f7e0362afe236c8edd59f8813bd12aa0c",
@@ -189,6 +189,7 @@
     "src/web/list-windows.bend": "965be3f9f1a13e97dd7dc36a4f21827d51e1a666fc37d13a619ae66cf8584dcc",
     "src/web/mail-actions.bend": "da52f4d849410a7dbfe2484db0d1d07b010ff99e126668fdd05b30b12f495c8f",
     "src/web/mailroom.bend": "2b3fee92a16cc6f11df0fdcddecd19c2ec5f7e2212fefe72c300e198870c9270",
+    "src/web/phone.bend": "a92eb3be317f58b274b3d7eed3f4dcfe3a84ee0cf613582180c664ca95d8d4f3",
     "src/web/project-home.bend": "03a9e71aabce370b7dc5d9e5dfcb4daac05ef2eea5e970d31c5fa22007286a08",
     "src/web/settings-menu.bend": "231b31eae65cf8598d9ea78265e19a6e56169cb6a2361cacac6251e9573dd4cb",
     "src/web/sidebar-slot.bend": "1104967b7a84470cb9afcf6e1efdd911469de1cbef52c7ad34a16cad73754950",
@@ -196,7 +197,7 @@
     "src/web/terminal-cells.bend": "398447910b3ffe4645874d8e96198e9008bcb58202f16be95fd0177aa6a0bc63",
     "src/web/usage-graph.bend": "b41a1ffd14194cb6f95703852d238d9401d7aaa42589382bd13203d94d33523d",
     "src/web/usage-page.bend": "40ebb901b56f8c28f2b7eef5551c14b409333c0ef739c4d3df4ed44df581e876",
-    "src/web/view.bend": "0e598f9dfa50005948f0550c3e74e3dae8d953f2d31a4defd686b1cd312c919f"
+    "src/web/view.bend": "ddafb6cd36d4eb139a65dd756b20435b1c17076a1e85e4b46ee76068f2b8109c"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",

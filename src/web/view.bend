@@ -31,6 +31,7 @@ import ./allowance.bend as AW
 import ../core/allowance.bend as ALQ
 import ./settings-menu.bend as SM
 import ./icon.bend as WI
+import ./phone.bend as PHN
 import ../core/tools.bend as TO
 import ../core/client.bend as U
 import ../core/refs.bend as RF
@@ -5749,8 +5750,110 @@ def View.star.k(on: Bool, +token: String) -> List<&2, D.Node>:
 def View.star(+u: U.Ui) -> List<&2, D.Node>:
   View.star.k(View.star.visible(u), U.Star.token(u))
 
-# the whole page
-def View.page.b.sidebar(+lc: I.Loc, +bv: BI.View, u: U.Ui, sidebar: D.Node) -> D.Node:
+# The phone arrangement (phone.bend; scratch DESIGN.md): the same pieces as
+# the page below, one screen at a time. The screen is worked out from what
+# this browser has open: Settings (its root or a page), a bot or room, a
+# project's home, a thread, or its viewer over it; with nothing open, the
+# root tab (@ph.tab). Level 0 screens show the tab bar, the others a ‹.
+def View.phone(+u: U.Ui) -> Bool:
+  PHN.Phone.on(u)
+
+def View.phone.screen.sel(none: Bool, +u: U.Ui) -> String:
+  match none:
+    case True{}: PHN.Phone.tab(u)
+    case False{}: Bool.pick(String, PH.Home.is(U.Ui.sel(u)), "project", Bool.pick(String, U.Ui.panel(u), "viewer", "thread"))
+
+def View.phone.screen(settings: Bool, bv: BI.View, +u: U.Ui) -> String:
+  match settings bv:
+    case True{} _: Bool.pick(String, String.is_empty(U.Settings.page(u)), "settings", "settings-page")
+    case False{} BI.VBot{_}: "bot"
+    case False{} BI.VRoom{_}: "bot"
+    case False{} BI.VRemote{_}: "bot"
+    case False{} BI.VThread{}: View.phone.screen.sel(String.is_empty(U.Ui.sel(u)), u)
+
+def View.phone.level(+s: String) -> String:
+  match s:
+    case "projects": "0"
+    case "bots": "0"
+    case "settings": "0"
+    case "viewer": "2"
+    case _: "1"
+
+# a root screen's tools: search every conversation, the command palette
+def View.phone.tools(+lc: I.Loc) -> List<&2, D.Node>:
+  [PHN.Phone.tool("thin-search-open", "", "Search conversations", "search"), PHN.Phone.tool("ws-palette-open", "", View.chrome.jump.short(lc), "zap")]
+
+def View.phone.root(+lc: I.Loc, +on: Bool, +v: String, +name: String, tools: List<&2, D.Node>) -> D.Node:
+  PHN.Phone.head(Nil{}, List.append(&2, D.Node, View.chrome.brand(lc, on, v), PHN.Phone.title(name, "")), tools)
+
+def View.phone.back(+lc: I.Loc) -> List<&2, D.Node>:
+  [PHN.Phone.back("select", "", MSG.T.tour.back(lc))]
+
+# the views a thread can show (the rail's, as its menu); C's to shape
+def View.phone.views(+lc: I.Loc, +u: U.Ui, +id: String) -> D.Node:
+  View.chrome.views(lc, u, id)
+
+# a thread: ‹, its title (a tap renames it) over its project, ▾ its menu and
+# its views; its state's cells (B's) ride in a row under the header
+def View.phone.head.thread(+lc: I.Loc, +back: List<&2, D.Node>, +u: U.Ui, t: M.Thread) -> List<&2, D.Node>:
+  match u t:
+    case U.Ui{+st, _, +drafts, _, _, _, +now, _, +panel, _, _, _, _, _, +nf, _, _} M.Thread{+id, +p, title, _, _, turn, pending, archived, override, +sa, +ua, pinned, _, +branch, _, _, _, _, _, _, gone}:
+      [PHN.Phone.head(back,
+        [D.El{"div", "", [D.At{"class", "title-box"}], List.append(&2, D.Node, View.chrome.order(U.Fab.buying(st, id)), View.title.k.loc(lc, String.eq(U.Str.get(drafts, "@ren"), id), id, U.Label.title(st, id, TTL.Title.shown(lc, title)), U.Str.get(drafts, "@f.title")))},
+         D.Dom.span("ph-sub", U.Label.title(st, p, U.Ui.project_title(st, p)))],
+        [View.thread.actions(lc, [WI.WIcon.svg("chevron-down", 18)], st, id, TO.Tools.settled(override, Nat.is_gt(sa, ua)), pinned, M.Snooze.on(now, U.Side.until(st, id)), archived,
+           String.eq(U.Str.get(drafts, "@del"), id), U.Ui.flag(u, "term"), panel), View.phone.views(lc, u, id)]),
+       D.El{"div", "ph-cells", [D.At{"class", "kvs ph-cells"}], View.chrome.cells(gone, lc, st, nf, id, turn, pending, branch, now)}]
+
+def View.phone.head.bot(+lc: I.Loc, bv: BI.View, +u: U.Ui) -> List<&2, D.Node>:
+  match bv:
+    case BI.VBot{b}: [PHN.Phone.head(View.phone.back(lc), PHN.Phone.title(BI.Head.title(BI.BU.head.bot(u, b)), MSG.T.tour.title.bots(lc)), Nil{})]
+    case BI.VRoom{r}: [PHN.Phone.head(View.phone.back(lc), PHN.Phone.title("# " ++ BT.Room.name(r), MSG.T.bots.rooms(lc)), Nil{})]
+    case BI.VRemote{id}: [PHN.Phone.head(View.phone.back(lc), PHN.Phone.title(BI.Head.title(BI.BU.head(u, BI.VRemote{id})), ""), Nil{})]
+    case BI.VThread{}: Nil{}
+
+def View.phone.head(+lc: I.Loc, +screen: String, bv: BI.View, +u: U.Ui, +on: Bool, +v: String) -> List<&2, D.Node>:
+  match screen:
+    case "thread": View.phone.head.thread(lc, View.phone.back(lc), u, U.Ui.thread(U.Ui.state(u), U.Ui.sel(u)))
+    case "viewer": View.phone.head.thread(lc, [PHN.Phone.back("panel", "", MSG.T.viewer.close(lc))], u, U.Ui.thread(U.Ui.state(u), U.Ui.sel(u)))
+    case "project": [PHN.Phone.head(View.phone.back(lc), PHN.Phone.title(U.Ui.project_title(U.Ui.state(u), PH.Home.project(U.Ui.sel(u))), MSG.T.tour.title.projects(lc)), Nil{})]
+    case "bot": View.phone.head.bot(lc, bv, u)
+    case "settings": [View.phone.root(lc, on, v, MSG.T.palette.settings(lc), Nil{})]
+    case "settings-page": [PHN.Phone.head([PHN.Phone.back("settings-page", "", MSG.T.palette.settings(lc))], PHN.Phone.title(U.Settings.title(lc, U.Settings.page(u)), MSG.T.palette.settings(lc)), Nil{})]
+    case "bots": [View.phone.root(lc, on, v, MSG.T.tour.title.bots(lc), View.phone.tools(lc))]
+    case _: [View.phone.root(lc, on, v, MSG.T.tour.title.projects(lc), View.phone.tools(lc))]
+
+def View.phone.tabs(+lc: I.Loc, root: Bool, +screen: String) -> List<&2, D.Node>:
+  match root:
+    case True{}: [PHN.Phone.tabs(lc, screen, 0n, 0n)]
+    case False{}: Nil{}
+
+def View.phone.cls(+screen: String, +level: String) -> String:
+  "app top phone ph-" ++ screen ++ " ph-l" ++ level
+
+# the whole phone page: the header, the list (the sidebar, which CSS shows
+# on the Projects and Bots tabs), the main screen, the viewer while open,
+# then the layers over them, and the tab bar on a root screen
+def View.phone.page.k(+lc: I.Loc, +bv: BI.View, +u: U.Ui, sidebar: D.Node, +on: Bool, +v: String, +e: String) -> D.Node:
+  +settings = U.Ui.flag(u, "settings")
+  +screen = View.phone.screen(settings, bv, u)
+  +sel = U.Ui.sel(u)
+  +st = U.Ui.state(u)
+  D.El{"div", "app", [D.At{"data-bub-home", J.Json.show(HOP.Hop.snapshot(u))}, D.At{"style", "--text-scale:" ++ U32.show(TS.Scale.of(st))}, D.At{"data-ph-screen", screen},
+      D.At{"class", View.phone.cls(screen, View.phone.level(screen)) ++ Bool.pick(String, U.Ui.panel(u), " panel", "") ++ Bool.pick(String, Bool.or(Bool.or(Bool.not(String.is_empty(sel)), settings), WB.WB.shown(bv)), " picked", "")
+        ++ Bool.pick(String, String.eq(M.Setting.get(st, "ui.theme", ""), "light"), " light", "") ++ View.tour.cls(u)}],
+    List.concat(&2, D.Node, [View.phone.head(lc, screen, bv, u, on, v), [sidebar, View.main.b(lc, settings, bv, u, sel, List.length(&2, M.Project, U.Ui.projects(st)))],
+      View.aside.if(lc, Bool.and(U.Ui.panel(u), Bool.not(PH.Home.is(sel))), U.Ui.info(u, "view.kind:" ++ sel), u),
+      View.picker(lc, U.Ui.flag(u, "proj"), u), View.intent(lc, u), View.error(U.Ui.error.shown(lc, e)), View.tour(lc, u), View.star(u),
+      View.phone.tabs(lc, String.eq(View.phone.level(screen), "0"), screen)])}
+
+def View.phone.page(+lc: I.Loc, +bv: BI.View, u: U.Ui, sidebar: D.Node) -> D.Node:
+  match u:
+    case U.Ui{+st, +sel, +d, +l, +o, +on, +now, +ad, +pa, +v, +r, +w, +e, +note, +nf, +ob, +tr}:
+      View.phone.page.k(lc, bv, U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}, sidebar, on, v, e)
+
+# the whole page (the desktop's)
+def View.page.b.desk(+lc: I.Loc, +bv: BI.View, u: U.Ui, sidebar: D.Node) -> D.Node:
   match u:
     case U.Ui{+st, +sel, +d, +l, +o, +on, +now, +ad, +pa, +v, +r, +w, +e, +note, +nf, +ob, +tr}:
       D.El{"div", "app", [D.At{"data-bub-home", J.Json.show(HOP.Hop.snapshot(U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}))}, D.At{"style", "--text-scale:" ++ U32.show(TS.Scale.of(st))}, D.At{"class", Bool.pick(String, pa, "app panel", "app") ++ Bool.pick(String, Bool.or(Bool.or(Bool.not(String.is_empty(sel)), U.Flag.get(o, "settings")), WB.WB.shown(bv)), " picked", "")
@@ -5761,6 +5864,15 @@ def View.page.b.sidebar(+lc: I.Loc, +bv: BI.View, u: U.Ui, sidebar: D.Node) -> D
             D.Dom.cat(View.picker(lc, U.Flag.get(o, "proj"), U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}), D.Dom.cat(View.intent(lc, U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}),
               D.Dom.cat(View.error(U.Ui.error.shown(lc, e)), D.Dom.cat(View.tour(lc, U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}),
                 View.star(U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}))))))))}
+
+# a phone's page is View.phone.page; every other page is exactly as before
+def View.page.b.form(phone: Bool, +lc: I.Loc, +bv: BI.View, +u: U.Ui, sidebar: D.Node) -> D.Node:
+  match phone:
+    case True{}: View.phone.page(lc, bv, u, sidebar)
+    case False{}: View.page.b.desk(lc, bv, u, sidebar)
+
+def View.page.b.sidebar(+lc: I.Loc, +bv: BI.View, +u: U.Ui, sidebar: D.Node) -> D.Node:
+  View.page.b.form(View.phone(u), lc, bv, u, sidebar)
 
 def View.page.sidebar.node(reuse: Bool, +lc: I.Loc, u: U.Ui) -> D.Node:
   match reuse:
