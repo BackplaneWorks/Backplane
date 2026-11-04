@@ -18,7 +18,8 @@ archive are discarded. The full archive is hashed before and after the run.
 
 The harness creates its own private temporary home, token, project, lock
 directory, fake HOME and loopback child. It appends one uniquely named project,
-20 synthetic threads and six safety/UI settings to the copied log. It does not
+20 synthetic threads and only `telemetry.share=off` to the copied log. That
+single setting prevents copied consent from enabling telemetry. It does not
 replace the catalog or history. Original log-prefix, original indexed-entry
 and catalog hashes, full before/after counts, archive identity and service
 identity must match. The target, home, port and pairing cannot be supplied.
@@ -43,11 +44,28 @@ The evaluator owns that provenance assertion. Both baseline and candidate
 must carry their actual source/tree/service identities. An existing build's
 results cannot be relabelled for newer source.
 
-The existing preload fence is SHA-pinned and must write its installation
-receipt before the first request. `BACKPLANE_COPY=1`, a minimal environment,
+The owner's explicitly handed-off corrected preload is pinned at SHA256
+`74de3b99ba21abff2650de474fd6459d47f32778ef120d8940da8be3ed13f2d5`.
+`--fence-prerequisite` supplies its original saved receipt. Both the source
+and its companion test must match that receipt and its original uploaded
+manifest. The harness reads the handed-off paths, or exact byte files staged
+beside that receipt, and copies them into its own temporary preload directory.
+Missing/mismatched files or receipts fail **before fixture extraction**.
+The original job `j20261104003249-591142` passed two focused tests and owned
+preload preflight, while its overall startup/memory gate **failed**; that
+failure is preserved, never relabelled as acceptance. No shared file is edited.
+The actual supplied package must also pass a bounded `--version` preload
+receipt check before extraction, then write a fresh installation receipt
+at owned hub startup. None of this claims OS-level network isolation.
+
+`BACKPLANE_COPY=1`, a minimal environment,
 blocked provider/network CLIs and an isolated profile prevent restored work
 and provider credentials from being used. The stand-in only accepts this
-run's synthetic thread IDs. No inspector or forced GC is enabled. A raw
+run's synthetic thread IDs. No inspector or forced GC is enabled. Recovery,
+resume, bot verification and tick settings are **not overridden**. Neither
+restart.continue, fallback.on, onboarding flags nor sidebar.view are changed.
+No catalog/cache/performance budgets or JSC stack override are applied.
+A raw
 observer resumes from the current SQLite checkpoint and the selected view's
 epoch; it refuses historical replay rather than holding the original log.
 
@@ -103,7 +121,7 @@ Proposed checks, **not yet executed**:
 
 ```sh
 node test/tools/real_store_active_policy_test.cjs
-node test/tools/real_store_active_fence_test.cjs
+REAL_ACTIVE_FENCE_PREREQUISITE=/private/staged/FENCE-PREREQUISITE.json node test/tools/real_store_active_fence_test.cjs
 bun test/tools/real_store_active_load.ts --self-test
 ```
 
@@ -117,7 +135,7 @@ proof, production compile or load run in this check scope.
 
 The evaluator's later acceptance command supplies `--bin`, `--artifact-receipt`,
 `--sha256`, `--fixture`, `--fixture-sha256`, `--fixture-receipt-sha256`,
-`--fence-sha256` and a fresh `--out` under an owned build/temp directory.
+`--fence-sha256`, `--fence-prerequisite` and a fresh `--out` under an owned build/temp directory.
 `--seconds` defaults to 1800 and permits only complete mixed/pure pairs through
 3600 seconds. These arguments are deliberately absent from CI/public logs
 because fixture and artifact locations are private. Actual acceptance remains

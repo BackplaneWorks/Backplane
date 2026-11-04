@@ -7,6 +7,21 @@ const requireThat = (v, code) => { if (!v) throw Error(code); };
 const finite = n => typeof n === 'number' && Number.isFinite(n);
 const digest = s => typeof s === 'string' && /^[a-f0-9]{64}$/.test(s);
 const gitId = s => typeof s === 'string' && /^[a-f0-9]{40}$/.test(s);
+const FENCE = Object.freeze({ source: '74de3b99ba21abff2650de474fd6459d47f32778ef120d8940da8be3ed13f2d5',
+  test: 'cf433ab8152d463816c8a086a49f26b109ffac7e79f394659b7c1b6f98cd0bfe',
+  manifest: '794c59a5d820f588d7dd794cf20ba8bf6006740ec9783a93c050161257271bf7', job: 'j20261104003249-591142' });
+function fencePrerequisite(r) {
+  requireThat(r?.qualified_job === FENCE.job && r.manifest_sha256 === FENCE.manifest &&
+    r.focused_tests?.passed === 2 && r.focused_tests?.failed === 0 && r.preflight?.cliVersionExit === 0 &&
+    r.preflight.beforeAnyPrivateFixtureRun === true && r.preflight.fence?.installed === true &&
+    r.preflight.fence.externalFetchBlocked === true && r.preflight.fence.externalConnectBlocked === true &&
+    r.overall_job_exit === 1 && r.overall_job_pass === false && r.memory_startup_acceptance_pass === false, 'fence-prerequisite');
+  const files = Object.entries(r.source_files ?? {}).map(([path, sha256]) => ({ path, name: path.split('/').at(-1), sha256 }));
+  requireThat(files.length === 2 && files.every(f => f.path.startsWith('/') && !f.path.split('/').includes('..')) &&
+    files.some(f => f.name === 'real_store_fence.cjs' && f.sha256 === FENCE.source) &&
+    files.some(f => f.name === 'real_store_fence_test.cjs' && f.sha256 === FENCE.test), 'fence-prerequisite');
+  return { files, qualifiedJob: FENCE.job, manifestSha256: FENCE.manifest, originalOverallPass: false };
+}
 function artifactReceipt(r, sha) {
   requireThat(r?.schema === 1 && r.qualification === 'qualified' && digest(sha) &&
     r.serviceSha256 === sha && gitId(r.sourceHead) && gitId(r.sourceTree), 'artifact-receipt');
@@ -14,7 +29,7 @@ function artifactReceipt(r, sha) {
 }
 function options(args) {
   const required = ['--bin', '--artifact-receipt', '--sha256', '--fixture', '--fixture-sha256',
-    '--fixture-receipt-sha256', '--fence-sha256', '--out'];
+    '--fixture-receipt-sha256', '--fence-sha256', '--fence-prerequisite', '--out'];
   const out = Object.create(null);
   for (let i = 0; i < args.length; i += 2) {
     const k = args[i], v = args[i + 1];
@@ -28,7 +43,8 @@ function options(args) {
   const seconds = Number(out['--seconds'] ?? 1800);
   requireThat(Number.isInteger(seconds) && seconds >= 1800 && seconds <= 3600 && seconds % 120 === 0, 'duration');
   // Only local immutable input copies; no live target, home, port or pairing options.
-  for (const k of ['--bin', '--fixture', '--artifact-receipt']) {
+  requireThat(out['--fence-sha256'] === FENCE.source, 'fence-digest');
+  for (const k of ['--bin', '--fixture', '--artifact-receipt', '--fence-prerequisite']) {
     const p = out[k];
     requireThat(p.startsWith('/') && !p.split('/').includes('..') && !p.includes('://') &&
       !/^\/(proc|sys|dev)(\/|$)/.test(p) && !/\/\.local\/(bin|share\/backplane)(\/|$)/.test(p) &&
@@ -207,4 +223,4 @@ function loadedWindows(windows, start, end, expectedMs) {
       (!i || w.start >= windows[i - 1].end && w.start - windows[i - 1].end <= 2000));
 }
 module.exports = { LIMITS, Latency, Activity, activitySummary, processSample, cpu, resources, pendingRow,
-  usablePicture, artifactReceipt, options, archiveMember, fixtureReceipt, ownedEndpoint, phaseVerdict, loadedWindows };
+  usablePicture, artifactReceipt, options, archiveMember, fixtureReceipt, ownedEndpoint, phaseVerdict, loadedWindows, FENCE, fencePrerequisite };
