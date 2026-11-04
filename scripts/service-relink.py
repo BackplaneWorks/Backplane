@@ -129,6 +129,36 @@ def helper_reuse(producer, old, build, original_run):
     return run
 
 
+def retained_binary_reuse(a, producer, request, expected, original_run):
+    """Resume after a successful link; the original producer finishes all checks."""
+    if a.retained_build is None:
+        return original_run
+    retained = a.retained_build.resolve()
+    pin = expected['compiledCandidate']
+    service = producer.service_name(a.target)
+    producer.require(producer.digest(retained / service) == pin['binarySha256']
+        and producer.digest(retained / 'logs/js.log') == pin['linkLogSha256']
+        and producer.digest(retained / 'PRE-EMISSION.json') == pin['preEmissionSha256']
+        and producer.digest(retained / 'EXECUTION-HELPER.py') ==
+            REVIEWED_DELTA['scripts/service-release.py']['selected'], 'Retained link artifact mismatch')
+    prior = producer.read(retained / 'PRE-EMISSION.json')
+    current = producer.read(producer.bound(request['preEmission'], a.packet))
+    producer.require(prior['sourceCommit'] == HOTFIX_COMMIT and prior['sourceTree'] == HOTFIX_TREE
+        and prior['version'] == '0.14.1' and prior['files']['server.js'] == current['files']['server.js'],
+        'Retained link uses different product/server/version')
+    def run(args, log, env, timeout=2400):
+        if str(args[0]) != 'scripts/build-js.sh':
+            return original_run(args, log, env, timeout)
+        producer.require(len(args) == 3 and str(args[1]) == 'src/server/main.bend'
+            and Path(args[2]).resolve() == a.out / 'backplane-serve', 'Unexpected retained link command')
+        shutil.copy2(retained / service, a.out / service)
+        (a.out / service).chmod(0o755)
+        text = (retained / 'logs/js.log').read_text()
+        Path(log).write_text(text + '\nPost-link continuation: exact authenticated prior executable copied; link not repeated.\n')
+        return text
+    return run
+
+
 def prepare(a, producer, bootstrap):
     source = bootstrap.source_identity(a.source, a.checkout)
     producer.require(a.source == HOTFIX_COMMIT and source == HOTFIX_TREE, 'Exact frozen hotfix required')
@@ -182,7 +212,7 @@ def prepare(a, producer, bootstrap):
 
 def build(a, producer, bootstrap):
     request, old, prior, changed, expected = prepare(a, producer, bootstrap)
-    original_run = producer.run
+    original_run = retained_binary_reuse(a, producer, request, expected, producer.run)
     producer.run = helper_reuse(producer, old, prior, original_run)
     def kistack(out):
         producer.require(producer.check_kistack(old) == prior['kistack'], 'Reused KiStack changed')
@@ -204,6 +234,12 @@ def build(a, producer, bootstrap):
         'previousBinarySha256': prior['binary_sha256'], 'binarySha256': actual['binary_sha256'],
         'originalBuild': prior, 'publication': False}
     evidence['priorRuntimeQualificationSha256'] = expected['runtimeQualificationSha256']
+    if a.retained_build is not None:
+        evidence['retainedCompiledCandidate'] = expected['compiledCandidate']
+        evidence['linkRepeated'] = False
+        actual['preEmission']['scope'] = (
+            'Exact root server and retained web; protected target link already completed in authenticated '
+            'run ' + str(expected['compiledCandidate']['runId']) + '; only post-link finalization here.')
     producer.write(a.out / 'logs/relink-provenance.json', evidence)
     shutil.copyfile(__file__, a.out / 'EXECUTION-RELINK.py')
     actual['relink'] = producer.local_reference(a.out / 'logs/relink-provenance.json', a.out)
@@ -297,6 +333,7 @@ def main():
     p.add_argument('--previous', required=True, type=Path)
     p.add_argument('--packet', type=Path)
     p.add_argument('--build', type=Path)
+    p.add_argument('--retained-build', type=Path)
     p.add_argument('--launch-log', type=Path)
     p.add_argument('--out', required=True, type=Path)
     a = p.parse_args()
