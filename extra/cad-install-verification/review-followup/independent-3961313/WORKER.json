@@ -1,0 +1,34 @@
+{
+  "state": "passed",
+  "head": "cc5d2e196c4cdd283209fc2f9387c93b0e657f26",
+  "records": [
+    {
+      "command": [
+        "bun",
+        "extra/cad-independent-v2-cc5d2e19/cad_component.cjs",
+        "--out",
+        "build/cad-independent-v2/RESULTS.json"
+      ],
+      "exit": 0,
+      "seconds": 103.559907422,
+      "log_sha256": "1247dacbe7281e8ce1fb4e9530bef3e7723c12bde97b036c1d12c7b6a749102a"
+    }
+  ],
+  "admission": {
+    "memory.max": "3699998720",
+    "memory.peak": "473927680",
+    "memory.swap.max": "0",
+    "memory.swap.current": "0",
+    "memory.swap.peak": "0",
+    "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+  },
+  "resources": {
+    "memory.max": "3699998720",
+    "memory.peak": "575176704",
+    "memory.swap.max": "0",
+    "memory.swap.current": "0",
+    "memory.swap.peak": "0",
+    "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+  },
+  "results_sha256": "ef4b7e7429072236ce8f20cc9161fa937601b61783279cce767cf55a14dff4d4"
+}

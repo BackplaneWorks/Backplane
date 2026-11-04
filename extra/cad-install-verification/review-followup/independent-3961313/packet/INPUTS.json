@@ -1,0 +1,26 @@
+{
+  "head": "cc5d2e196c4cdd283209fc2f9387c93b0e657f26",
+  "tree": "d9bca91fe9c01b810a9aa701efde9bb7eda49947",
+  "bench": "extra/cad-independent-v2-cc5d2e19/cad_component.cjs",
+  "files": {
+    "scripts/heavy-boat.sh": "fd5510a80bd7501eda00929c6481e83e58562f2e78b8d55beb1ad30e8ae2b6a4",
+    "scripts/local-phase.py": "5edf28b7f91bf938576e818cca50491b27d4a3b84c74050bc91ebf4524ef5e17",
+    "src/server/effects/cad-install.js": "6ac7b70effd0310487120077a9adf95bc7b965f45d0caed6410b59021d70a39b",
+    "src/server/effects/host.js": "5764616d329d4f1b8515a07fff26c1f8b2a72da2c58966bdd16440567b561fc4",
+    "src/server/effects/loop.js": "7ac13585622fedea795d735a6e43abd25713e29ee4197c8efc4eb2d8d7805678",
+    "test/perf/hub-latency/effect_transfer.ts": "dff6b994065190f3cdeaed62781e4ad296dbb4c7f6361a52f6db6942b7808633",
+    "test/tools/disk_sync_component.cjs": "bdf46b22f39a9a20b6ddaeb7674df7681df6f4145b46308042dfad2b634dc085",
+    "test/tools/disk_sync_transfer.cjs": "d4ea4d8e976df1af89add46af98b869e049a20ee8482152271a33f6497914207",
+    "test/tools/real_store_active_clock.cjs": "53ef0b1edbbec45b5bb67761672dd24ec7af68def3a6dc047087d6dc20cf9f1b",
+    "extra/cad-independent-v2-cc5d2e19/cad_component.cjs": "3f4fe75a3068eff89b2d17060bda25411432d71d9d7f58fcb31894acba57c112",
+    "extra/cad-independent-v2-cc5d2e19/cad_gate.py": "bad4a9fab69946000466a44ee1c63cfb4f79f5faee311b1c8fb83849772b05fb"
+  },
+  "author_manifest_sha256": "3e0d0efa650e7d529b8702f2211d46b70f4f7299ded2a637366b8287d428b99b",
+  "author_functional_job": "j20261104161844-3666589",
+  "canonical_proof": "j20261104162112-3690577 OOM -9; not a pass",
+  "concurrent_load": "Runtime-only hub-latency lock, serial independent component. No compiler in this Boat VM; author/build jobs may run in other Boat VMs; physical host placement unknown.",
+  "scope": "CAD JS effect+real TCP/files/child only; inherited Hub Vault mask/fanout/reconnect/render/full package remain unqualified.",
+  "prior_failed_job": "j20261104162929-3761607 timeout1000, empty component log/no saved rows; cause unestablished",
+  "diagnostic_job": "j20261104165331-3945697 one pair/tool PASS, not qualified latency evidence",
+  "instrumentation_revision": "outside-window setup/trial progress and per-completed-trial partial JSONL; 30s setup-child deadline; original phase/probe/IO/fixture/acceptance unchanged"
+}

@@ -1,0 +1,38 @@
+{
+  "state": "passed",
+  "exit": 0,
+  "head": "cc5d2e196c4cdd283209fc2f9387c93b0e657f26",
+  "controller": {
+    "memory.max": "536870912",
+    "memory.peak": "9973760",
+    "memory.swap.max": "0",
+    "memory.swap.current": "0",
+    "memory.swap.peak": "0",
+    "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+  },
+  "manifest_sha256": "0583563b5f187d678ca159ca3fee0ceb167ef8a19a64ba015b9190e52d8b98f0",
+  "worker_log_sha256": "ba2a3c94492ff792c5d411f7dcff70f8a55079e34a3bc5d43325df8f2075b029",
+  "command": [
+    "systemd-run",
+    "--user",
+    "--scope",
+    "--quiet",
+    "--unit=bp-cad-component-5902",
+    "-p",
+    "MemoryMax=3700000000",
+    "-p",
+    "MemorySwapMax=0",
+    "-p",
+    "OOMPolicy=continue",
+    "--",
+    "sh",
+    "scripts/heavy-boat.sh",
+    "/usr/bin/python3",
+    "/home/user/bp-latency-a-review935-cc5d2e19/extra/cad-independent-v2-cc5d2e19/cad_gate.py",
+    "--inputs",
+    "extra/cad-independent-v2-cc5d2e19/INPUTS.json",
+    "--sha256",
+    "0583563b5f187d678ca159ca3fee0ceb167ef8a19a64ba015b9190e52d8b98f0",
+    "--worker"
+  ]
+}
