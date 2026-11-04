@@ -1,3 +1,4 @@
+import ./client-language.bend as CLANG
 import Base
 import ./project-home.bend as PH
 import ./pathrecords.bend as PR
@@ -3714,24 +3715,19 @@ def Ui.scratch_set(u: Ui, +k: String, v: String) -> Ui:
 
 # Device language. Only apply writes the resolved tag; hosts call on input changes.
 def Lang.ready() -> Bool:
-  False{}
+  CLANG.Lang.ready()
 
 def Lang.normalize.k(en: Bool, ja: Bool) -> String:
-  match en ja:
-    case True{} _: "en"
-    case False{} True{}: "ja"
-    case False{} False{}: "auto"
+  CLANG.Lang.normalize.k(en, ja)
 
 def Lang.normalize(+s: String) -> String:
-  Lang.normalize.k(String.eq(s, "en"), String.eq(s, "ja"))
+  CLANG.Lang.normalize(s)
 
 def Lang.resolve.k(+l: I.Loc, allow: Bool) -> String:
-  match l allow:
-    case I.Ja{} True{}: "ja"
-    case _ _: "en"
+  CLANG.Lang.resolve.k(l, allow)
 
 def Lang.resolve(setting: String, os: String, preview: Bool) -> String:
-  Lang.resolve.k(I.I18n.resolve(setting, os), Bool.or(Lang.ready(), preview))
+  CLANG.Lang.resolve(setting, os, preview)
 
 def Lang.choice(+u: Ui) -> String:
   Lang.normalize(Ui.scratch(u, "@lang"))
