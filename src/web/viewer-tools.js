@@ -38,7 +38,10 @@ class Workbench {
         const on = !root.classList.contains("solid-split"); this.state.pcb = on; root.classList.toggle("solid-split", on); split.setAttribute("aria-pressed", String(on));
       }, "Show the saved PCB beside the assembly"); split.setAttribute("aria-pressed", String(this.state.pcb)); this.toolbar.append(split);
     }
-    const camera = node("details", "solid-camera"); camera.open = this.state.camera; camera.addEventListener("toggle", () => { this.state.camera = camera.open; }); camera.append(node("summary", "", "Camera")); const cameraBody = node("div", "solid-camera-body"); camera.append(cameraBody);
+    const camera = node("details", "solid-camera"); camera.open = this.state.camera; camera.addEventListener("toggle", () => { this.state.camera = camera.open; });
+    // (a phone shows the panel as a sheet over a backdrop, the details' own
+    // ::before: a tap on it lands on the details, and shuts the panel)
+    camera.addEventListener("click", (e) => { if (e.target === camera && document.documentElement.classList.contains("phone")) camera.open = false; }); camera.append(node("summary", "", "Camera")); const cameraBody = node("div", "solid-camera-body"); camera.append(cameraBody);
     const projection = node("label", "solid-field", "Projection"); this.projection = node("select"); this.projection.setAttribute("aria-label", "Projection");
     for (const [value, label] of [["perspective", "Perspective"], ["orthographic", "Orthographic"]]) { const o = node("option", "", label); o.value = value; this.projection.append(o); }
     this.projection.addEventListener("change", () => this.act("projection", this.projection.value)); projection.append(this.projection); cameraBody.append(projection);

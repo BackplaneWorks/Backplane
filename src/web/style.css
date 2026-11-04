@@ -3197,8 +3197,9 @@ html.ph-kb .app.phone :is(.thread-content, .thread-view) > :is(.bot-head, .bot-h
 .app.phone .solid-toolbar { gap: 6px; padding: 6px 8px; }
 .app.phone .solid-orientation { flex-wrap: nowrap; gap: 6px; }
 .app.phone .solid-toolbar .solid-model-name { display: none; }
-.app.phone .solid-camera-body { position: fixed; left: 0; right: 0; top: auto; bottom: 0; width: auto; max-width: none; max-height: 70dvh; padding-bottom: calc(12px + env(safe-area-inset-bottom)); border-width: 1px 0 0; z-index: 60; }
+.app.phone .solid-camera-body { position: fixed; left: 0; right: 0; top: auto; bottom: 0; width: auto; max-width: none; max-height: 60dvh; box-shadow: 0 -10px 30px #0007; padding-bottom: calc(12px + env(safe-area-inset-bottom)); border-width: 1px 0 0; z-index: 60; }
 .app.phone .solid-camera-body :is(select, input, button) { min-height: var(--ph-tap, 44px); font-size: 16px; }
+.app.phone .solid-camera[open]::before { content: ""; position: fixed; inset: 0; z-index: 59; background: #0008; }
 /* the layer list is a sheet too (P's local-menu sheet, whose body it is not) */
 .app.phone .layers.local-menu[open] > .layer-list {
   position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 40; width: auto; max-width: none;
@@ -3280,6 +3281,8 @@ html.ph-kb .app.phone :is(.thread-content, .thread-view) > :is(.bot-head, .bot-h
    toggle over its top right corner */
 .ph-focus-toggle { display: none; }
 html.phone .ph-focus-toggle { display: grid; place-items: center; position: fixed; z-index: 30; width: var(--ph-tap, 44px); height: var(--ph-tap, 44px); padding: 0; border: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 85%, transparent); color: var(--text); font-size: 20px; }
+/* (not over a sheet: a menu or the camera panel) */
+html.phone:has(.local-menu[open], .solid-camera[open]) .ph-focus-toggle { display: none; }
 html.ph-focus .app.phone.ph-viewer > :is(.ph-head, .ph-cells),
 html.ph-focus .app.phone.ph-viewer #viewer > :is(.ph-views, .viewer-bar, .hist),
 html.ph-focus .app.phone.ph-viewer #viewer :is(.solid-toolbar, .solid-render-status, .combo-head) { display: none; }
