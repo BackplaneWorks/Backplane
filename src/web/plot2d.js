@@ -670,7 +670,7 @@ class View {
     const ctx = this.side === "board" ? {} : { groups: groupsOf(this.plot), nets: this.board ? boardNets(this.board) : null, place: this.place };
     const v = P.clickProbe(pick, this.side, ctx);
     this.publishProbe(v);
-    if (coarse?.matches) inspectCard(this, pick);
+    if (coarse?.matches) inspectCard(this, pick, null, { x: cx, y: cy });
   }
 
   publishProbe(v) {
@@ -1149,7 +1149,7 @@ const left = new Map();
 // clearing the probe or a double tap closes it.
 let card = null;
 let mentioned = null;
-function inspectCard(view, pick, src = null) {
+function inspectCard(view, pick, src = null, tapped = null) {
   const info = pick ? (typeof pick.info === "object" && pick.info ? pick.info : P.parseInfo(pick.text || pick.info || "")) : null;
   if (!info || !info.kind) { card?.el.remove(); card = null; return; }
   const raw = [info.arg ? `${info.kind} ${info.arg}` : info.kind, ...[...info.kv].filter(([k]) => k !== "g").map(([k, v]) => `${k}=${v}`)].join(";");
@@ -1191,6 +1191,15 @@ function inspectCard(view, pick, src = null) {
   el.replaceChildren(head, dl, acts);
   if (!el.isConnected) document.body.append(el);
   card = { el, view };
+  // what was tapped stays in sight: the drawing moves up out from under
+  // the card when the finger was where the card now is (once a double
+  // tap can no longer come)
+  const shown = card;
+  if (view && tapped) setTimeout(() => {
+    const top = el.getBoundingClientRect().top, d = tapped.y - (top - 32);
+    if (card !== shown || d <= 0) return;
+    view.oy -= d; view.touched = true; view.follow = false; view.later();
+  }, 340);
   // a part on a board: its saved component's fields too (the 3D
   // inspector's data, host.js's onDetails), once they come
   const ref = info.kv.get("ref"), mine = card, at = view ? { scope: view.canvas.dataset.scope || "", key: view.key } : src;
