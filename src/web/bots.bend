@@ -205,10 +205,12 @@ def WB.pages.menu(+lc: I.Loc, +ts: List<&2, String>, +cur: String) -> D.Node:
 # a bot's header (BU.head, the same for a bot here, one mirrored from a
 # linked machine and one only reported by one): its cat, its name with
 # where it lives, its mood, then sub (its model) and tools (Stop)
+# Keep the chrome keyed when chat's conditional siblings change or the
+# bot switches pages; the DOM patcher must not match it by position.
 def WB.header.layout(rail: Bool, +lc: I.Loc, hd: BI.Head, sub: List<&2, D.Node>, tools: List<&2, D.Node>) -> D.Node:
   match hd:
     case BI.Head{+title, +look, +mood, +note, +tabs, +tab, _, _}:
-      D.El{"header", "", [D.At{"class", "thread-head bot-head"}], [
+      D.El{"header", "bot-head", [D.At{"class", "thread-head bot-head"}], [
         D.Dom.button("back", "select", "", MSG.T.tour.back(lc), "‹"),
         WC.WCat.img(look, mood, 72),
         WB.div("bot-id", D.Dom.span("bot-title", title) <> D.Dom.span(WB.mood.cls(mood), note) <> sub),
@@ -241,7 +243,7 @@ def WB.head(+u: U.Ui, +b: BT.Bot, hd: BI.Head) -> D.Node:
 
 # the tabs a bot has (BU.head), the one shown on
 def WB.tabs(+lc: I.Loc, +hd: BI.Head) -> D.Node:
-  D.El{"nav", "", [D.At{"class", "bot-tabs bot-primary-tabs"}], [
+  D.El{"nav", "bot-tabs", [D.At{"class", "bot-tabs bot-primary-tabs"}], [
     D.El{"div", "", [D.At{"class", "bot-desktop-tabs"}], WB.tabs.go(lc, BI.Head.tabs(hd), BI.BU.nav.parent(BI.Head.tabs(hd), BI.Head.tab(hd)))}]}
 
 # Browser: the bot's page, a frame the hub serves (the pairing cookie
