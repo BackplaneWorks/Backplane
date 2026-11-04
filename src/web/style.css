@@ -3184,6 +3184,8 @@ html.ph-kb .app.phone :is(.thread-content, .thread-view) > :is(.bot-head, .bot-h
 .app.phone :is(.viewer-bar, .solid-toolbar, .solid-orientation) > * { flex: none; }
 .app.phone .viewer-bar { gap: 6px; padding: 6px 8px; }
 .app.phone .viewer-bar > .board-selector { flex: 0 1 auto; min-width: 0; max-width: 46vw; }
+.app.phone .viewer-bar > .board-selector > summary { max-width: 100%; overflow: hidden; box-sizing: border-box; }
+.app.phone .viewer-bar > .board-selector .board-current { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .app.phone :is(.viewer-bar, .solid-toolbar, .hist-row) :is(button, summary, select, .btn) { min-height: var(--ph-tap, 44px); min-width: var(--ph-tap, 44px); }
 .app.phone .viewer-bar .sch-btn, .app.phone .viewer-bar > button { padding: 0 12px; }
 .app.phone .solid-toolbar { gap: 6px; padding: 6px 8px; }
@@ -3229,16 +3231,21 @@ html.ph-kb .app.phone :is(.thread-content, .thread-view) > :is(.bot-head, .bot-h
 .app.phone .hist-row .icon { width: var(--ph-tap, 44px); height: var(--ph-tap, 44px); }
 .app.phone .hist-row .grow { display: none; }
 .app.phone .hbtn { max-width: none; }
-.app.phone .hist-scrub { height: 28px; }
-.app.phone .hist-scrub .tick { top: 0; height: 28px; width: 20px; }
-.app.phone .hist-scrub .tick::after { top: 8px; }
-.app.phone .hist-scrub .tick.on::after { top: 6px; }
+/* (its scrub's ticks, a few px apart, no finger can pick: ‹ › step instead,
+   and its buttons wrap under the transport rather than off the edge) */
+.app.phone .hist-scrub { display: none; }
+.app.phone .hist-row { flex-wrap: wrap; overflow-x: visible; }
 .app.phone .hist-said { display: none; }
 .app.phone .hist-menu { position: fixed; left: 0; right: 0; bottom: 0; width: auto; max-height: 70dvh; z-index: 60; padding-bottom: env(safe-area-inset-bottom); }
 .app.phone .hist-menu .row { min-height: var(--ph-tap, 44px); align-items: center; }
 /* a comment at a place (a long press): a field that does not zoom on focus */
 .app.phone .rc-card :is(input, textarea) { font-size: 16px; min-height: var(--ph-tap, 44px); }
 .app.phone .rc-card button { min-height: var(--ph-tap, 44px); padding: 0 16px; }
+/* the rest of the viewers' small controls, a thumb's size */
+.app.phone .combo-head .combo-hide { min-width: var(--ph-tap, 44px); min-height: 36px; }
+.app.phone :is(.browser-tabs, .browser-address) .browser-icon { min-width: var(--ph-tap, 44px); min-height: var(--ph-tap, 44px); }
+.app.phone .diff-body button, .app.phone .diff-none button { min-height: var(--ph-tap, 44px); }
+.app.phone .fm-bar button { min-width: var(--ph-tap, 44px); }
 /* files: whole rows to tap */
 .app.phone .fm-row { min-height: var(--ph-tap, 44px); }
 .app.phone .fm-bar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }

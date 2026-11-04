@@ -262,7 +262,7 @@ export function chipInView() {
 let focusButton = null;
 export function focusToggle() {
   const app = document.querySelector(".app.phone.ph-viewer");
-  const stage = app?.querySelector("#viewer .viewer-stage, #viewer .combo");
+  const stage = app?.querySelector("#viewer .viewer-stage");
   const html = document.documentElement;
   if (!app || !stage) {
     focusButton?.remove(); focusButton = null;
