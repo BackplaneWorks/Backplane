@@ -31,6 +31,9 @@ class HeavyGuardTest(unittest.TestCase):
         host = patch.object(guard, 'host_available', return_value=100 * guard.GIB)
         host.start()
         self.addCleanup(host.stop)
+        cap = patch.object(guard, 'local_cap_ok', return_value=True)   # most tests are about floors, not the cgroup
+        self.cap = cap.start()
+        self.addCleanup(cap.stop)
 
     def test_expected_peak_and_host_reserve_are_both_required(self):
         expected = guard.FLOORS['build']
@@ -101,7 +104,7 @@ class HeavyGuardTest(unittest.TestCase):
 
     def test_nested_process_inherits_real_lock(self):
         script = """import importlib.util,sys
-s=importlib.util.spec_from_file_location('g',sys.argv[1]);g=importlib.util.module_from_spec(s);s.loader.exec_module(g);g.available=lambda:100*g.GIB;g.host_available=lambda:100*g.GIB;g.lock_path=lambda:__import__('pathlib').Path(sys.argv[2]);sys.exit(g.main(sys.argv[3:]))"""
+s=importlib.util.spec_from_file_location('g',sys.argv[1]);g=importlib.util.module_from_spec(s);s.loader.exec_module(g);g.available=lambda:100*g.GIB;g.host_available=lambda:100*g.GIB;g.local_cap_ok=lambda:True;g.lock_path=lambda:__import__('pathlib').Path(sys.argv[2]);sys.exit(g.main(sys.argv[3:]))"""
         wrapper = [sys.executable, '-c', script, str(ROOT / 'scripts/heavy-guard.py'), str(Path(self.temp.name) / 'nested.lock')]
         child = [*wrapper, 'check', '--', sys.executable, '-c', 'print("nested-ok")']
         p = subprocess.run([*wrapper, 'check', '--', *child], text=True, capture_output=True, timeout=5)
@@ -318,6 +321,24 @@ s=importlib.util.spec_from_file_location('g',sys.argv[1]);g=importlib.util.modul
                 self.assertEqual(guard.main(argv), 75)
                 run.assert_not_called()
                 off.assert_not_called()
+
+    def test_whole_workload_profiles_are_inadmissible_locally_without_a_verified_cap(self):
+        self.cap.return_value = False
+        with patch.object(guard, 'available', return_value=100 * guard.GIB):
+            for profile in ('check', 'proof', 'test', 'build', 'web', 'browser', 'compile-js'):
+                self.assertFalse(guard.admit(profile), profile)
+            with patch.dict(os.environ, {guard.BOAT_VAR: '1', 'BACKPLANE_HEAVY_OFFLOADED': '1'}):
+                self.assertTrue(guard.admit('check'))     # a Boat sandbox stays parallel and unaffected
+        self.cap.return_value = True
+        with patch.object(guard, 'available', return_value=100 * guard.GIB):
+            self.assertTrue(guard.admit('check'))
+
+    def test_uncapped_local_whole_workload_offloads_instead_of_running(self):
+        self.cap.return_value = False
+        with patch.object(guard, 'available', return_value=100 * guard.GIB), patch.object(guard, 'offload', return_value=75) as off, patch.object(guard.os, 'execvpe') as run:
+            self.assertEqual(guard.main(['check', '--', 'scripts/check.sh']), 75)
+            off.assert_called_once()
+            run.assert_not_called()
 
 
 if __name__ == '__main__':
