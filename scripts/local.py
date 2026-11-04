@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import runpy
 import shlex
 import shutil
 import subprocess
@@ -94,11 +95,16 @@ def phone_bridge_cached(env):
     return cache.is_file() and receipt.is_file() and receipt.read_text().strip() == digest(cache)
 
 
+def emission_cache():
+    return runpy.run_path(str(Path(__file__).with_name('emit-cache.py')))
+
+
 def warm_build(env):
+    if env.get('BACKPLANE_EMIT_CACHE') == '0':
+        return False
     key = subprocess.check_output(['scripts/build-js.sh','--key','src/server/main.bend'],cwd=ROOT,env=env,text=True).strip()
     cache = Path(env.get('BACKPLANE_EMIT_CACHE') or Path(env.get('XDG_CACHE_HOME',Path.home()/'.cache'))/'backplane-bend/emit-js')
-    emit, receipt = cache/(key+'.js'), cache/(key+'.js.ok')
-    return emit.is_file() and receipt.is_file() and receipt.read_text().strip() == str(emit.stat().st_size) and phone_bridge_cached(env)
+    return emission_cache()['verify'](cache, key) and phone_bridge_cached(env)
 
 
 def import_emit(prepared, remote, env):
@@ -107,11 +113,8 @@ def import_emit(prepared, remote, env):
         raise SystemExit('Transferred emit input/hash mismatch')
     if env.get('BACKPLANE_EMIT_CACHE') == '0': return
     cache = Path(env.get('BACKPLANE_EMIT_CACHE') or Path(env.get('XDG_CACHE_HOME',Path.home()/'.cache'))/'backplane-bend/emit-js')
-    cache.mkdir(parents=True,exist_ok=True)
-    target = cache/(key+'.js')
-    temp = target.with_suffix('.'+str(os.getpid())+'.tmp')
-    shutil.copy2(prepared/'emit.js',temp);temp.replace(target)
-    target.with_suffix('.js.ok').write_text(str(target.stat().st_size))
+    # Bind the bytes actually copied, including across a post-check mutation.
+    emission_cache()['publish'](cache, key, prepared/'emit.js', expected_sha256=remote['emit_sha256'])
 
 
 def phone_bridge(env, prepared=None):

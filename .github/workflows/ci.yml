@@ -249,7 +249,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/backplane-bend/emit-js
-          key: emit-js-${{ steps.key.outputs.key }}
+          # Legacy immutable size-only entries must not shadow verified ones.
+          # A corrupt exact hit fails safe; cache repair needs another version.
+          key: emit-js-sha256-v1-${{ steps.key.outputs.key }}
       - name: Build backplane-serve for every target
         env:
           # nothing is published here: no Google client, no telemetry
