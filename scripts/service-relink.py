@@ -173,7 +173,9 @@ def component(a, producer, bootstrap):
         if item['type'] == 'file':
             p.chmod(item['mode'])
     producer.require(producer.inventory(runtime) == prior['members'], 'Prior runtime changed')
-    producer.runtime_closure(runtime, a.target)
+    # CLOSURE edges start at the service filename, which deliberately is not
+    # part of this runtime-only directory. The unchanged component producer
+    # validates runtime_closure after combining it with the new service.
     approval = copy.deepcopy(prior)
     approval.update(sourceCommit=b['source_commit'], sourceTree=b['source_tree'],
         binarySha256=b['binary_sha256'],
