@@ -1207,9 +1207,12 @@ function inspectCard(view, pick, src = null, tapped = null) {
   // tap can no longer come)
   const shown = card;
   if (view && tapped) setTimeout(() => {
-    const top = el.getBoundingClientRect().top, d = tapped.y - (top - 32);
-    if (card !== shown || d <= 0) return;
-    view.oy -= d; view.touched = true; view.follow = false; view.later();
+    const r = el.getBoundingClientRect();
+    if (card !== shown || tapped.x < r.left || tapped.x > r.right || tapped.y < r.top) return;
+    // (at the foot it moves the drawing up; at the side, a phone on its
+    // side, to the left)
+    if (r.left > 0) view.ox -= tapped.x - (r.left - 32); else view.oy -= tapped.y - (r.top - 32);
+    view.touched = true; view.follow = false; view.later();
   }, 340);
   // a part on a board: its saved component's fields too (the 3D
   // inspector's data, host.js's onDetails), once they come
