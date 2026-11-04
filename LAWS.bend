@@ -16363,3 +16363,8 @@ law kicad_main_project_config:
 law kicad_absolute_project_override:
   for main: J.Json
   {KPROJECT.Project.setting(main, J.Json.obj([J.KV{"project", J.Str{"/explicit/design.kicad_pro"}}]), "project") == J.KV{"project", J.Str{"/explicit/design.kicad_pro"}} : J.KV}
+
+# On differing linked designs, every mutation requires an explicit target.
+law kicad_divergent_write_requires_choice:
+  for explicit: Bool
+  {KPROJECT.Project.refuse_write(True{}, True{}, False{}, explicit) == Bool.not(explicit) : Bool}

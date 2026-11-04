@@ -175,6 +175,53 @@ class KiCadProject(unittest.TestCase):
         self.assertEqual(result["main"]["project"], "")
         self.assertEqual(result["request"]["path"], "")
 
+    def test_divergent_ipc_writes_require_explicit_target(self):
+        (self.thread / "board.kicad_pcb").write_text("29x22 real worktree design\n")
+        (self.main / "board.kicad_pcb").write_text("70x50 stale main draft\n")
+        for command in ("BeginCommit", "CreateItems", "UpdateItems", "DeleteItems", "EndCommit", "SaveDocument",
+                        "SaveDocumentAs", "OpenDocument", "RefillZones", "SketchRoute", "UnknownFutureWrite", "GetAndDeleteItems"):
+            with self.subTest(command=command):
+                result = self.resolve(path=str(self.thread / "board.kicad_pcb"), type="kiapi.common.commands." + command)
+                error = result["write_error"]
+                self.assertIn("write refused", error)
+                self.assertIn(str(self.main / "board.kicad_pcb"), error)
+                self.assertIn(str(self.thread / "board.kicad_pcb"), error)
+                self.assertIn("thread_copy:true", error)
+                self.assertIn("main:true", error)
+
+    def test_divergent_write_allows_each_explicit_target(self):
+        (self.thread / "board.kicad_pcb").write_text("modified\n")
+        for choice, expected in (({"thread_copy": True}, self.thread), ({"main": True}, self.main)):
+            with self.subTest(choice=choice):
+                result = self.resolve(path=str(self.thread / "board.kicad_pcb"), type="kiapi.common.commands.SaveDocument", **choice)
+                self.assertEqual(result["write_error"], "")
+                self.assertEqual(result["request"]["path"], str(expected / "board.kicad_pcb"))
+
+    def test_identical_copies_and_non_worktree_writes_are_unchanged(self):
+        self.assertEqual(self.resolve(type="kiapi.common.commands.BeginCommit")["write_error"], "")
+        self.assertEqual(self.resolve(self.main, type="kiapi.common.commands.SaveDocument")["write_error"], "")
+
+    def test_divergent_reads_still_default_to_main(self):
+        (self.thread / "board.kicad_sch").write_text("modified\n")
+        for command in ("kiapi.common.commands.GetItems", "kiapi.common.commands.GetVersion", "kiapi.backplane.GetCapabilities",
+                        "kiapi.schematic.commands.GetSchematicHierarchy", "kiapi.common.commands.GetDocumentModifiedState"):
+            with self.subTest(command=command):
+                result = self.resolve(type=command)
+                self.assertEqual(result["write_error"], "")
+                self.assertEqual(result["request"]["path"], str(self.main / "board.kicad_pro"))
+
+    def test_conflicting_explicit_targets_are_rejected(self):
+        result = self.resolve(type="kiapi.common.commands.SaveDocument", main=True, thread_copy=True)
+        self.assertIn("not both", result["write_error"])
+
+    def test_selected_alternate_board_is_guarded_too(self):
+        for root in (self.main, self.thread):
+            (root / "other.kicad_pcb").write_text("same\n")
+        (self.thread / "other.kicad_pcb").write_text("modified alternate\n")
+        result = self.resolve(path=str(self.thread / "other.kicad_pcb"), type="kiapi.common.commands.SaveDocument")
+        self.assertIn(str(self.main / "other.kicad_pcb"), result["write_error"])
+        self.assertIn(str(self.thread / "other.kicad_pcb"), result["write_error"])
+
     def test_other_files_are_not_redirected(self):
         path = str(self.thread / "mech/housing.step")
         self.assertEqual(self.resolve(path=path, kind="mech")["request"]["path"], path)

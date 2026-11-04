@@ -5713,12 +5713,22 @@ def KIpc.request(+o: J.Json, args: J.Json) -> J.Json:
   J.Json.obj([J.KV{"id", J.Json.get_obj(o, "id")}, J.KV{"method", J.Str{"tools/call"}},
     J.KV{"params", J.Json.obj([J.KV{"name", J.Str{J.Json.get_str(J.Json.get_obj(o, "params"), "name", "")}}, J.KV{"arguments", args}])}])
 
-def KIpc.job(m: Maybe<&2, Chan(KSV.KMsg)>, +rt: K.Rt, +setting: String, +inbox: Chan(Msg), +thread: String, +o: J.Json, +reply: Chan(String), cwd: String) -> IO(Unit):
+def KIpc.job.allowed(m: Maybe<&2, Chan(KSV.KMsg)>, +rt: K.Rt, +setting: String, +inbox: Chan(Msg), +thread: String, +o: J.Json, +reply: Chan(String), cwd: String) -> IO(Unit):
   do IO<Unit>:
     args : J.Json <- K.Files.request(cwd, KIpc.args(o), "project")
     +resolved : J.Json = KIpc.request(o, args)
     pro : String <- KIpc.pro(KIpc.path(resolved))
     KIpc.go(m, rt, setting, inbox, thread, resolved, reply, pro)
+
+def KIpc.job.guard(free: Bool, +why: String, m: Maybe<&2, Chan(KSV.KMsg)>, +rt: K.Rt, +setting: String, +inbox: Chan(Msg), +thread: String, +o: J.Json, +reply: Chan(String), cwd: String) -> IO(Unit):
+  match free:
+    case True{}: KIpc.job.allowed(m, rt, setting, inbox, thread, o, reply, cwd)
+    case False{}: KIpc.fail(reply, KIpc.id(o), why)
+
+def KIpc.job(m: Maybe<&2, Chan(KSV.KMsg)>, +rt: K.Rt, +setting: String, +inbox: Chan(Msg), +thread: String, +o: J.Json, +reply: Chan(String), +cwd: String) -> IO(Unit):
+  do IO<Unit>:
+    +why : String <- K.Files.write_guard(cwd, KIpc.args(o), KIpc.type(o))
+    KIpc.job.guard(String.is_empty(why), why, m, rt, setting, inbox, thread, o, reply, cwd)
 
 # Retry
 def KIpc.clear(m: Maybe<&2, Chan(KSV.KMsg)>) -> IO(Unit):

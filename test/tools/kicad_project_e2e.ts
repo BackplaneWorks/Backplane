@@ -95,6 +95,8 @@ try {
   let response = await rpc("kicad.open", { thread });
   await until(() => lines(opened).length ? true : undefined);
   check("unmodified worktree opens main", lines(opened).at(-1) === join(project, "board.kicad_pro"), response);
+  const identicalWrite = await tool(thread, "kicad_ipc", { type: "kiapi.common.commands.BeginCommit", message: {} });
+  check("identical copies allow existing IPC writes", !identicalWrite.raw.result.isError, identicalWrite);
   writeFileSync(join(worktree, "board.kicad_pcb"), "(kicad_pcb modified)");
   const count = lines(opened).length;
   response = await rpc("kicad.open", { thread });
@@ -112,6 +114,16 @@ try {
   check("viewer_show defaults to main schematic", shown.body.shown === join(project, "board.kicad_sch"), shown);
   shown = await tool(thread, "viewer_show", { kind: "board", thread_copy: true });
   check("viewer accepts explicit thread copy", shown.body.shown === join(worktree, "board.kicad_pcb"), shown);
+  const beforeWrite = lines(ipc).length;
+  const rejected = await tool(thread, "kicad_ipc", { path: join(worktree, "board.kicad_pcb"), type: "kiapi.common.commands.SaveDocument", message: {} });
+  check("divergent IPC write is refused with both paths and flags", rejected.raw.result.isError &&
+    JSON.stringify(rejected.body).includes(join(project, "board.kicad_pcb")) && JSON.stringify(rejected.body).includes(join(worktree, "board.kicad_pcb")) &&
+    JSON.stringify(rejected.body).includes("thread_copy:true") && JSON.stringify(rejected.body).includes("main:true"), rejected);
+  check("refused write never reaches IPC helper", lines(ipc).length === beforeWrite);
+  const mainWrite = await tool(thread, "kicad_ipc", { path: join(worktree, "board.kicad_pcb"), main: true, type: "kiapi.common.commands.SaveDocument", message: { path: join(worktree, "board.kicad_pcb") } });
+  check("explicit main write is allowed and canonical", !mainWrite.raw.result.isError && mainWrite.body.message?.received?.path === join(project, "board.kicad_pcb"), mainWrite);
+  const threadWrite = await tool(thread, "kicad_ipc", { path: join(worktree, "board.kicad_pcb"), thread_copy: true, type: "kiapi.common.commands.SaveDocument", message: { path: join(worktree, "board.kicad_pcb") } });
+  check("explicit thread-copy write is allowed", !threadWrite.raw.result.isError && threadWrite.body.message?.received?.path === join(worktree, "board.kicad_pcb"), threadWrite);
   await tool(thread, "kicad_ipc_status", { path: join(worktree, "board.kicad_pro") });
   check("IPC selects main project", lines(ipc).map(s => JSON.parse(s)).some(o => o.op === "spawn" && o.key === join(project, "board.kicad_pro")), lines(ipc));
   await tool(thread, "kicad_ipc_status", { path: join(worktree, "board.kicad_pro"), thread_copy: true });
@@ -131,6 +143,9 @@ try {
   const local = (await until(() => changes.find(c => c.$ === "ThreadCreated" && c.title === "ordinary"))).id;
   await rpc("kicad.open", { thread: local }); await until(() => lines(opened).length === count + 4 ? true : undefined);
   check("non-worktree thread opens its project unchanged", lines(opened).at(-1) === join(project, "board.kicad_pro"));
+  const ordinaryWrite = await tool(local, "kicad_ipc", { type: "kiapi.common.commands.SaveDocument", message: {} });
+  check("non-worktree IPC writes are unchanged", !ordinaryWrite.raw.result.isError, ordinaryWrite);
+
 } catch (error) { console.error(error); failed = true; }
 finally { ws?.close(); proc.kill(); await proc.exited; rmSync(root, { recursive: true, force: true }); }
 process.exit(failed ? 1 : 0);

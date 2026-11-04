@@ -715,6 +715,51 @@ def Files.changed(a: Files, b: Files) -> IO(Bool):
     case Files{ap, ab, as, _} Files{bp, bb, bs, _}:
       IO.bind(P.Ran, Bool, P.Proc.run("sh", ["-c", Files.changed.sh(), "sh", ap, bp, ab, bb, as, bs], "/"), r => IO.pure(Bool, Bool.not(String.is_empty(Files.found.out(r)))))
 
+def Files.owns(fs: Files, +path: String) -> Bool:
+  match fs:
+    case Files{p, b, s, _}:
+      Bool.and(Bool.not(String.is_empty(path)), Bool.or(String.eq(p, path), Bool.or(String.eq(b, path), String.eq(s, path))))
+
+def Files.thread_path(+cwd: String, +root: String, +local: Files, +path: String) -> String:
+  Bool.pick(String, Bool.or(Files.owns(local, path), String.starts_with(path, cwd ++ "/")), path, KP.Project.path(False{}, root, cwd, path))
+
+def Files.write_guard.changed(+cwd: String, +root: String, +args: J.Json, +ty: String) -> IO(String):
+  do IO<String>:
+    +main : Files <- Files.read(cwd)
+    +local : Files <- Files.read.local(cwd)
+    +cfg : J.Json <- Files.config.main(cwd, root)
+    +path : String = J.Json.get_str(args, "path", "")
+    +mp : String = Files.path.at(cwd, root, Files.target(main, local, path, "project"), False{}, cfg)
+    +tp : String = Files.thread_path(cwd, root, local, Files.target(local, main, path, "project"))
+    +changed : Bool <- Files.changed(main, local)
+    selected : Bool <- Files.changed(Files{"", mp, "", ""}, Files{"", tp, "", ""})
+    return Bool.pick(String, KP.Project.refuse_write(Bool.not(String.eq(cwd, root)), Bool.or(changed, selected), KP.Project.readonly(ty),
+      Bool.or(J.Json.get_bool(args, "thread_copy", False{}), J.Json.get_bool(args, "main", False{}))), KP.Project.write_error(mp, tp), "")
+
+def Files.write_guard.root(same: Bool, +cwd: String, +root: String, +args: J.Json, +ty: String) -> IO(String):
+  match same:
+    case True{}: IO.pure(String, "")
+    case False{}: Files.write_guard.changed(cwd, root, args, ty)
+
+def Files.write_guard.check(check: Bool, +cwd: String, +args: J.Json, +ty: String) -> IO(String):
+  match check:
+    case False{}: IO.pure(String, "")
+    case True{}:
+      do IO<String>:
+        +root : String <- Files.root(cwd)
+        Files.write_guard.root(String.eq(root, cwd), cwd, root, args, ty)
+
+# This runs before a mutating request reaches the IPC actor or starts KiCad.
+# Choice is per command, so a later change never silently reuses consent.
+def Files.write_guard.conflict(conflict: Bool, +cwd: String, +args: J.Json, +ty: String) -> IO(String):
+  match conflict:
+    case True{}: IO.pure(String, "Choose one KiCad target: main:true or thread_copy:true, not both.")
+    case False{}:
+      Files.write_guard.check(Bool.not(KP.Project.readonly(ty)), cwd, args, ty)
+
+def Files.write_guard(+cwd: String, +args: J.Json, +ty: String) -> IO(String):
+  Files.write_guard.conflict(Bool.and(J.Json.get_bool(args, "main", False{}), J.Json.get_bool(args, "thread_copy", False{})), cwd, args, ty)
+
 # KiStack
 # -------
 
