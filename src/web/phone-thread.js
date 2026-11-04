@@ -126,14 +126,25 @@ export function installPhoneThread({ document: doc = document, window: win = win
   // field and the next message repeated it). The focus comes back in the
   // same tap (a listener on the window runs after the page's own), which
   // iOS needs to keep its keyboard.
-  let back = 0;
+  // (The draft's one-line landscape layout, style.css's ph-short, follows
+  // its focus: the press's blur put the two-line one back under the finger
+  // and the tap missed Send. html.ph-hold keeps it from the touch to the
+  // click.)
+  let back = 0, hold = 0;
+  const release = () => { win.clearTimeout?.(hold); hold = 0; doc.documentElement?.classList.remove?.('ph-hold'); };
+  doc.addEventListener('touchstart', event => {
+    if (!onPhone(doc) || !keyboard() || !event.target?.closest?.('.composer .foot-end > button')) return;
+    doc.documentElement?.classList.add('ph-hold');
+    win.clearTimeout?.(hold); hold = win.setTimeout(release, 1000);
+  }, { capture: true, passive: true });
   doc.addEventListener('mousedown', event => {
     back = onPhone(doc) && keyboard() && event.target?.closest?.('.composer .foot-end > button') ? Date.now() : 0;
   }, true);
   win.addEventListener?.('click', () => {
-    if (!back || Date.now() - back > 1000) { back = 0;return; }
+    if (!back || Date.now() - back > 1000) { back = 0; release(); return; }
     back = 0;
     doc.getElementById('composer')?.focus?.({ preventScroll: true });
+    release();
   });
   return { watch };
 }
