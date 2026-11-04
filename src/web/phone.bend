@@ -17,12 +17,29 @@ import ./icon.bend as WI
 def Phone.on(+u: U.Ui) -> Bool:
   String.eq(U.Ui.info(u, "local.workspace.form"), "phone")
 
-# the root tabs: Projects (the sidebar's projects and threads, the default),
-# Bots (its bots and rooms); Settings is the "settings" flag
+# the root tabs: Now (what needs the person, then what runs: the default),
+# Projects (the sidebar's projects and threads), Bots (its bots and
+# rooms); Settings is the "settings" flag
 def Phone.tab.k(+t: String) -> String:
   match t:
+    case "projects": "projects"
     case "bots": "bots"
-    case _: "projects"
+    case _: "now"
+
+def Phone.now.label(lc: I.Loc) -> String:
+  match lc:
+    case I.Ja{}: "いま"
+    case _: "Now"
+
+def Phone.now.none(lc: I.Loc) -> String:
+  match lc:
+    case I.Ja{}: "対応が必要なものはありません"
+    case _: "Nothing needs you"
+
+def Phone.now.hint(lc: I.Loc) -> String:
+  match lc:
+    case I.Ja{}: "質問・承認・失敗・完了したスレッドがここに先に表示されます。"
+    case _: "Threads that ask you something, fail or finish show here first, then the ones at work."
 
 def Phone.tab(+u: U.Ui) -> String:
   Phone.tab.k(U.Ui.scratch(u, "@ph.tab"))
@@ -60,7 +77,8 @@ def Phone.tab.button(+cur: String, +name: String, +label: String, +icon: String,
 # the bar under a root screen: need = threads needing you, unread = rooms
 def Phone.tabs(+lc: I.Loc, +cur: String, +need: Nat, +unread: Nat) -> D.Node:
   D.El{"nav", "ph-tabs", [D.At{"class", "ph-tabs"}, D.At{"aria-label", "Sections"}], [
-    Phone.tab.button(cur, "projects", MSG.T.tour.title.projects(lc), "folder", need),
+    Phone.tab.button(cur, "now", Phone.now.label(lc), "bell", need),
+    Phone.tab.button(cur, "projects", MSG.T.tour.title.projects(lc), "folder", 0n),
     Phone.tab.button(cur, "bots", MSG.T.tour.title.bots(lc), "cpu", unread),
     Phone.tab.button(cur, "settings", MSG.T.palette.settings(lc), "settings", 0n)]}
 
