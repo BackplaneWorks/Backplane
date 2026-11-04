@@ -2652,7 +2652,7 @@ html[data-backplane-held="quiet"] .allowance-chip { visibility: hidden; }
 /* Embedded home viewers own their tabs; no outer workspace rail replaces them. */
 .project-home .viewer > .viewer-tabs { display:flex; flex-wrap:wrap; justify-content:flex-start; }
 
-/* ===================================================================
+/* ============================================================
    The phone arrangement (view.bend's View.phone.page, phone.bend,
    phone-shell.js; scratch DESIGN.md). Everything below is scoped under
    .app.phone or html.phone: a narrow desktop window never gets it.
@@ -2836,3 +2836,86 @@ html.phone .pairing-card > button { align-self: flex-start; }
 html.phone .pairing-pending a { display: inline-flex; align-items: center; min-height: 44px; }
 html.phone .pairing-invitation button { min-width: 44px; }
 html.phone .pairing-qr { margin: 16px auto; width: min(100%, 300px); }
+=======
+/* phone: thread (agent B). The thread screen in the phone arrangement
+   (DESIGN.md: B); everything under .app.phone, so desktop and a narrow
+   desktop window are unchanged. */
+/* the screen: the timeline takes what the header and the composer leave,
+   the composer sits on the keyboard (the shell sizes .app.phone to the
+   visual viewport, --ph-vh) */
+.app.phone .thread-view { min-height: 0; }
+.app.phone .thread-content { min-height: 0; }
+.app.phone .timeline { overscroll-behavior-y: contain; -webkit-overflow-scrolling: touch; }
+/* messages: their time and actions on one quiet line under them, each a
+   whole thumb wide; nothing waits for a hover */
+.app.phone .msg { font-size: calc(15px * var(--text-scale, 100) / 100); line-height: 1.5; }
+.app.phone .msg.user { max-width: 88%; }
+.app.phone .msg :is(.copy, .reply) { position: static; float: right; opacity: 1; min-width: 44px; min-height: 36px; margin: 2px -6px 0 4px; padding: 0 10px; border: 0; background: none; color: var(--dim); font-size: calc(13px * var(--text-scale, 100) / 100); }
+.app.phone .msg :is(.copy, .reply):active { color: var(--accent); background: var(--raise); }
+.app.phone .msg .stamp { display: inline-block; margin-top: 2px; line-height: 36px; font-size: calc(12px * var(--text-scale, 100) / 100); }
+.app.phone .msg.assistant .stamp.mid { display: inline-block; }
+.app.phone .msg.user .stamp { text-align: left; }
+/* code: a box of its own that scrolls sideways inside the message (the
+   page never does), its Copy over it, always there */
+.app.phone .codeblock { max-width: 100%; }
+.app.phone .codeblock pre { white-space: pre; overflow-wrap: normal; overflow-x: auto; overscroll-behavior-x: contain; padding: 4px 12px 10px; font-size: calc(13px * var(--text-scale, 100) / 100); }
+.app.phone .codeblock > .copy { position: static; float: none; display: block; margin: 0 0 0 auto; min-height: 32px; min-width: 56px; opacity: 1; border: 0; border-left: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--raise); color: var(--dim); }
+.app.phone .body table { display: block; max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; }
+.app.phone .body :is(td, th) { overflow-wrap: break-word; word-break: normal; min-width: 4ch; max-width: 70vw; }
+.app.phone .body img, .app.phone .msg .shot { max-width: 100%; }
+/* a turn's tool calls and its activity rows: a row a thumb can open */
+/* (padding on its row: a margin collapses through the row, which the
+   timeline's planner measures, and the next row overlapped it) */
+.app.phone .timeline-virtual-row:has(> button.fold) { padding-block: 4px; }
+.app.phone button.fold { min-height: 40px; max-width: 100%; padding: 0 12px; font-size: calc(13px * var(--text-scale, 100) / 100); }
+.app.phone .act { font-size: calc(12px * var(--text-scale, 100) / 100); line-height: 1.6; }
+/* an agent's question or approval: the question, then its answers as
+   big full-width buttons */
+.app.phone .asks { padding: 0 8px; gap: 6px; max-height: 40%; overflow-y: auto; overscroll-behavior: contain; flex: none; }
+.app.phone .ask { padding: 10px 12px; gap: 8px; }
+.app.phone .ask-detail { font-size: calc(14px * var(--text-scale, 100) / 100); max-height: 30vh; }
+.app.phone .ask-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.app.phone .ask-btns > button { min-height: 48px; padding: 6px 10px; font-size: calc(15px * var(--text-scale, 100) / 100); white-space: normal; overflow-wrap: anywhere; }
+.app.phone .ask-btns > button:only-child, .app.phone .ask-btns > button:last-child:nth-child(odd) { grid-column: 1 / -1; }
+.app.phone .ask input, .app.phone .ask textarea { font-size: 16px; min-height: 44px; }
+/* the composer: the field grows with the draft up to a third of the
+   screen; under it one row of the model and the tools, Send at the thumb */
+.app.phone .composer { --composer-button: 44px; flex: none; gap: 6px; padding: 6px max(8px, env(safe-area-inset-right)) max(6px, calc(env(safe-area-inset-bottom) - var(--ph-kb, 0px))) max(8px, env(safe-area-inset-left)); background: var(--bg); }
+.app.phone .composer textarea { font-size: 16px; line-height: 1.4; min-height: 44px; max-height: calc(var(--ph-vh, 100vh) * 0.33); padding: 10px 12px; }
+.app.phone .composer-foot kbd, .app.phone .model-chip kbd { display: none; }
+.app.phone .composer-foot { gap: 4px; }
+.app.phone .composer-foot > .attach, .app.phone .composer-foot > .foot-end > .mic, .app.phone .composer-more > summary { min-width: 44px; width: 44px; height: 44px; min-height: 44px; }
+/* the composer's ⋯ (a sheet on a phone): its tools as labelled rows */
+.app.phone .composer-options > :is(button, .attach) { display: flex; align-items: center; justify-content: flex-start; gap: 12px; width: 100%; min-height: 48px; height: auto; margin: 0; padding: 0 16px; border: 0; background: none; color: var(--text); font-size: calc(15px * var(--text-scale, 100) / 100); text-align: left; }
+.app.phone .composer-options > .account-chip .acct-v { display: none; }
+.app.phone .composer-options > .account-chip::after { content: attr(aria-label); }
+.app.phone .composer-options > .draw::after { content: attr(data-draw-title); }
+.app.phone .composer-options > .tok-chip .tok-n { display: inline; }
+.app.phone .composer-foot .model-chip, .app.phone .composer-foot .composer-model .model-chip { height: 44px; }
+.app.phone .composer .foot-end > button.primary:last-child { height: 44px; min-width: 64px; padding: 0 14px; font-size: calc(15px * var(--text-scale, 100) / 100); }
+/* what $ @ > % # complete to: rows a thumb can pick, over the composer */
+.app.phone .composer .skills { left: 0; right: 0; max-height: calc(var(--ph-vh, 100vh) * 0.4); overflow-y: auto; padding: 4px 0; z-index: 32; }
+.app.phone .composer .skills button { min-height: 44px; align-items: center; padding: 0 14px; }
+/* the model picker: a bottom sheet over the composer, its agents a row of
+   chips, its models rows, its effort a meter */
+.app.phone .model-layer .shade { background: rgba(0, 0, 0, .5); }
+.app.phone .model-menu.mp { position: fixed; left: 0; right: 0; bottom: 0; top: auto; width: auto; max-height: calc(var(--ph-vh, 100vh) - 48px); display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; border: 0; border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom); }
+.app.phone .model-menu.mp::before { content: ""; flex: none; align-self: center; width: 40px; height: 4px; margin: 8px 0 2px; background: var(--faint); opacity: .6; }
+.app.phone .model-menu .mp-col { border-right: 0; flex: none; }
+.app.phone .model-menu .mp-h { font-size: 11px; padding: 8px 14px 4px; border-bottom: 0; margin: 0; }
+.app.phone .model-menu .mp-h kbd { display: none; }
+.app.phone .model-menu .mp-agents .rows { flex-direction: row; flex-wrap: nowrap; overflow-x: auto; gap: 6px; padding: 4px 12px 8px; scrollbar-width: none; }
+.app.phone .model-menu .mp-agents .row { display: inline-flex; align-items: center; flex: none; min-height: 40px; padding: 0 14px; border: 1px solid var(--line); box-shadow: none; }
+.app.phone .model-menu .mp-agents .row.on { border-color: var(--accent); }
+.app.phone .model-menu .mp-models .rows { overflow: visible; }
+.app.phone .model-menu .row { min-height: 48px; align-items: center; padding: 0 14px; font-size: calc(15px * var(--text-scale, 100) / 100); }
+.app.phone .model-menu .find input { font-size: 16px; min-height: 44px; }
+.app.phone .model-menu .meter { height: 100px; padding: 8px 14px 4px; gap: 6px; }
+.app.phone .model-menu .step { min-height: 44px; font-size: 12px; }
+.app.phone .model-menu .note { padding: 6px 14px 12px; font-size: 12px; }
+/* queued messages and the account / token / allowance pop-ups */
+.app.phone .queue { margin: 0 8px; }
+.app.phone .queued { min-height: 44px; font-size: calc(13px * var(--text-scale, 100) / 100); }
+.app.phone .queued .q-acts button { min-height: 36px; padding: 0 10px; font-size: calc(13px * var(--text-scale, 100) / 100); }
+/* "N new ↓": back to the latest, over the composer at the thumb */
+.app.phone .hold-pill { height: 40px; padding: 0 16px; margin-top: calc(-40px - 10px); line-height: 38px; font-size: calc(14px * var(--text-scale, 100) / 100); }

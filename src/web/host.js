@@ -45,6 +45,7 @@ function bubMoveSync() {
 document.addEventListener("visibilitychange", () => { bubMoves.disconnect(location.origin); });
 import { installUsageTabs } from "./usage-tabs.js";
 import { installWorkspaceKeys, installComposerFocus } from "./workspace-keys.js";
+import { installPhoneThread, phoneKeepsReturn } from "./phone-thread.js";
 import { installImprovements } from "./improvements.js";
 import { ImprovementsRpc } from "./improvements-rpc.js";
 import { improvementOrigin, improvementContext } from "./improvements-context.js";
@@ -65,6 +66,7 @@ import { installWorkspaceHints } from "./workspace-hints.js";
 // Esc's choice of what to put away (workspace.bend's WS.esc.next); the
 // probe goes off its plots at once, as its chip's x does through the hub
 const composerKeeper = installComposerFocus({ phone: () => composerPhone() });
+installPhoneThread();
 installWorkspaceKeys({ dispatch, escNext: (term, probe, viewer) => App.esc_next(term, probe, viewer), composer: composerKeeper,
   clearProbe: () => { Plot2d.setProbe("");Solid.setProbe("");dispatch("probe", ""); } });
 installWorkspaceHints();
@@ -2287,7 +2289,7 @@ document.addEventListener("keydown", (e) => {
   // an empty data-enter leaves Enter to the field (a new line: an intent being edited)
   const alt = (e.ctrlKey || e.metaKey) && el.getAttribute("data-enter-alt");
   const action = alt || el.getAttribute("data-enter");
-  if (!action) return;
+  if (!action || phoneKeepsReturn(document, el, action, e)) return;
   e.preventDefault();
   dispatch(action, valueOf(el));
 });
