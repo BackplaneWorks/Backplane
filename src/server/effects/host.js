@@ -266,6 +266,77 @@ function sock_send_bytes(socket, data, k) {
   return host_send(socket, Uint8Array.from(bytes), k);
 }
 
+function sock_send_static(socket, request, k) {
+  const fs = require('fs'), handles = globalThis.BP_H;
+  const handle = handles?.is(socket), sys = handle ? null : io_sys();
+  const again = handle ? (handles.EAGAIN ?? 11) : (sys.mac ? 35 : 11);
+  const timeout = process.platform === 'darwin' ? 60 : 110;
+  let fd = -1, size = 0, pos = 0, pending, at = 0, chunk;
+  let until = performance.now() + 30000;
+  const close = () => {if (fd >= 0) {const was = fd;fd = -1;fs.closeSync(was);}};
+  const finish = code => {
+    try {close();} catch (e) {code ||= host_errno(e);}
+    pending = chunk = null;
+    return io_tup(socket, code ? io_fail(code) : io_done({$: 'Unit'}));
+  };
+  const head = (status, ctype, length, cache, extra) => Buffer.from(
+    'HTTP/1.1 ' + status + '\r\nContent-Type: ' + ctype + '\r\nContent-Length: ' + length
+    + '\r\nCache-Control: ' + cache + '\r\nConnection: close\r\n' + extra + '\r\n');
+  try {
+    if (!request || typeof request.path !== 'string' || typeof request.ctype !== 'string'
+        || typeof request.cache !== 'string' || typeof request.extra !== 'string'
+        || /[\0\r\n]/.test(request.ctype + request.cache) || request.extra.includes('\0')
+        || ![0,1].includes(request.coding) || !Number.isInteger(request.piece)
+        || request.piece < 1 || request.piece > 65536) return finish(22);
+    const candidates = request.coding === 1 ? [request.path + '.gz', request.path] : [request.path];
+    let gzip = false;
+    if (!request.path.includes('\0')) for (const candidate of candidates) {
+      try {
+        // Preserve static assets' existing symlink support. O_NONBLOCK keeps a
+        // changed path from blocking on a FIFO; the opened descriptor is fixed.
+        fd = fs.openSync(candidate, fs.constants.O_RDONLY | (fs.constants.O_NONBLOCK || 0));
+        const st = fs.fstatSync(fd);
+        if (st.isFile() && Number.isSafeInteger(st.size) && st.size > 0) {
+          size = st.size;gzip = candidate !== request.path;break;
+        }
+        close();
+      } catch (_) {try {close();} catch (_) {}}
+    }
+    if (fd >= 0) {
+      pending = head('200 OK', request.ctype, size, request.cache,
+        request.extra + (gzip ? 'Content-Encoding: gzip\r\n' : '') + 'Vary: Accept-Encoding\r\n');
+    } else {
+      const body = Buffer.from('not found');
+      pending = Buffer.concat([head('404 Not Found', 'text/plain; charset=utf-8', body.length, 'no-cache', ''),body]);
+    }
+  } catch (e) {return finish(host_errno(e));}
+  const go = () => {
+    try {
+      if (performance.now() >= until) return finish(timeout);
+      while (at < pending.length) {
+        const n = handle ? (handles.get(socket)?.write(pending.subarray(at)) ?? -9)
+          : host_write(socket, sys.ptr(pending, at), pending.length - at);
+        const code = n < 0 ? (handle ? -n : sys.errno()) : 0;
+        if (n === 0 || code === again) {
+          io_park_on(socket, true, k, go, Math.min(until, performance.now() + 1000));
+          return undefined;
+        }
+        if (code) return finish(code);
+        at += n;until = performance.now() + 30000;
+      }
+      if (pos === size) return finish(0);
+      chunk ??= Buffer.allocUnsafe(request.piece);
+      const n = fs.readSync(fd, chunk, 0, Math.min(chunk.length, size - pos), pos);
+      // Never append another response to a body that was truncated mid-send.
+      if (n <= 0) return finish(5);
+      pos += n;pending = chunk.subarray(0,n);at = 0;
+      io_park_on(undefined, false, k, go, performance.now());
+      return undefined;
+    } catch (e) {return finish(host_errno(e));}
+  };
+  return go();
+}
+
 function sock_send_preview(socket, path, ctype, range, k) {
   const fs = require('fs');
   const handle = globalThis.BP_H?.is(socket);
@@ -2239,6 +2310,7 @@ io_eff(CID(Sock.recv_bytes), sock_recv_bytes);
 io_eff(CID(Sock.save), sock_save);
 io_eff(CID(Sock.send_bytes), sock_send_bytes);
 io_eff(CID(Sock.send_preview), sock_send_preview);
+io_eff(CID(Sock.send_static), sock_send_static);
 io_eff(CID(Sock.send_file), sock_send_file);
 io_eff(CID(Sock.send_path), sock_send_path);
 io_eff(CID(Sock.send_until), sock_send_until);
