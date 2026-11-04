@@ -340,6 +340,68 @@ s=importlib.util.spec_from_file_location('g',sys.argv[1]);g=importlib.util.modul
             off.assert_called_once()
             run.assert_not_called()
 
+    FILE_CHECK = ['bend', 'test/stream_step_proof.bend', '--check-only']
+
+    def test_file_check_has_the_shard_floor_and_changes_no_other_floor(self):
+        self.assertEqual(guard.FLOORS['file-check'], 3 * guard.GIB)
+        self.assertEqual((guard.FLOORS['proof'], guard.FLOORS['check'], guard.FLOORS['build'], guard.HOST_RESERVE),
+                         (19 * guard.GIB, 14 * guard.GIB, 16 * guard.GIB, 8 * guard.GIB))
+        self.assertEqual(guard.FILE_CHECK_COMMANDS, (('bend', 'test/stream_step_proof.bend', '--check-only'),))
+
+    def test_file_check_accepts_only_the_exact_table_entry_from_the_repo_root(self):
+        with patch.object(guard.Path, 'cwd', return_value=ROOT):
+            self.assertEqual(guard.worker_contract('file-check', list(self.FILE_CHECK)), list(self.FILE_CHECK))
+            for bad in (['bend', 'PROOF.bend', '--check-only'], ['bend', 'LAWS.bend', '--check-only'], ['bend', 'PROOF.bend'],
+                        self.FILE_CHECK + ['--verdict'], ['bend', 'test/stream_step_proof.bend'], ['bend', 'test/stream_step_proof.bend', '--verdict'],
+                        ['bend', './test/stream_step_proof.bend', '--check-only'], ['bend', 'test/../test/stream_step_proof.bend', '--check-only'],
+                        ['bend', str(ROOT / 'test/stream_step_proof.bend'), '--check-only'], ['/usr/bin/bend', 'test/stream_step_proof.bend', '--check-only'],
+                        ['bun', 'test/stream_step_proof.bend', '--check-only'], ['sh', '-c', 'bend PROOF.bend'], ['bend', 'test/other.bend', '--check-only'],
+                        ['bend', 'test', '--check-only'], [], ['bend']):
+                self.assertIsNone(guard.worker_contract('file-check', bad), bad)
+        with patch.object(guard.Path, 'cwd', return_value=Path(self.temp.name)):
+            self.assertIsNone(guard.worker_contract('file-check', list(self.FILE_CHECK)))      # not run from the repo root
+
+    def test_other_profiles_cannot_run_the_file_check_and_it_cannot_run_theirs(self):
+        with patch.object(guard.Path, 'cwd', return_value=ROOT):
+            for profile in ('proof-shard', 'compile-shard', 'fixture-check'):
+                self.assertIsNone(guard.worker_contract(profile, list(self.FILE_CHECK)), profile)
+            self.assertIsNone(guard.worker_contract('file-check', ['python3', str(ROOT / 'scripts/proof-shards.py'), 'run']))
+            self.assertIsNone(guard.worker_contract('file-check', ['python3', str(ROOT / 'scripts/sepcomp-fixtures.py'), 'run']))
+            self.assertIsNone(guard.worker_contract('file-check', list(guard.COMPILE_COMMANDS[0])))
+
+    def test_file_check_fails_closed_without_the_cap_and_never_offloads(self):
+        argv = ['file-check', '--', *self.FILE_CHECK]
+        with patch.object(guard.Path, 'cwd', return_value=ROOT):
+            for limit, swap in [('max', '0'), (str(guard.SHARD_CAP + 1), '0'), (str(guard.SHARD_CAP), 'max'), (str(guard.SHARD_CAP), '1')]:
+                with patch.object(guard, 'available', return_value=100 * guard.GIB), patch.object(guard, 'own_cgroup', return_value=self.cgroup(limit, swap)), patch.object(guard.os, 'execvpe') as run, patch.object(guard, 'offload') as off:
+                    self.assertEqual(guard.main(argv), 75, (limit, swap))
+                    run.assert_not_called()
+                    off.assert_not_called()
+            good = self.cgroup(str(guard.SHARD_CAP), '0')
+            with patch.object(guard, 'available', return_value=100 * guard.GIB), patch.object(guard, 'own_cgroup', return_value=good), patch.object(guard.os, 'execvpe') as run:
+                self.assertEqual(guard.main(['file-check', '--held']), 2)
+                self.assertEqual(guard.main(['--held', 'file-check']), 2)
+                self.assertEqual(guard.main(['file-check', '--', 'bend', 'PROOF.bend', '--check-only']), 2)
+                self.assertEqual(guard.main(['file-check', '--', *self.FILE_CHECK, '--verdict']), 2)
+                run.assert_not_called()
+
+    def test_file_check_runs_the_exact_command_once_under_a_good_cap_and_refuses_a_busy_lock(self):
+        good = self.cgroup(str(guard.SHARD_CAP), '0')
+        argv = ['file-check', '--', *self.FILE_CHECK]
+        with patch.object(guard.Path, 'cwd', return_value=ROOT):
+            with patch.object(guard, 'available', return_value=100 * guard.GIB), patch.object(guard, 'own_cgroup', return_value=good), patch.object(guard.os, 'execvpe') as run:
+                guard.main(argv)
+                self.assertEqual(run.call_args.args[0], 'bend')
+                self.assertEqual(run.call_args.args[1], self.FILE_CHECK)
+                self.assertEqual(run.call_args.args[2][guard.FD_VAR] is not None, True)
+            other = Path(self.temp.name) / 'busy-file.lock'
+            with open(other, 'w') as held, patch.object(guard, 'lock_path', return_value=other):
+                fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                with patch.object(guard, 'available', return_value=100 * guard.GIB), patch.object(guard, 'own_cgroup', return_value=good), patch.object(guard.os, 'execvpe') as run, patch.object(guard, 'offload') as off:
+                    self.assertEqual(guard.main(argv), 75)
+                    run.assert_not_called()
+                    off.assert_not_called()
+
 
 if __name__ == '__main__':
     unittest.main()
