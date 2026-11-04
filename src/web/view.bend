@@ -128,8 +128,10 @@ def View.phase.label(+lc: I.Loc, p: M.Phase) -> String:
 # Sidebar
 # -------
 
-def VLabel.choice(+lc: I.Loc, v: String) -> String:
-  match v:
+# VLabel.choice matches a copy of v: a string pattern splits bit by bit and a
+# row that mentions its scrutinee gets it rebuilt at every split (lane B).
+def VLabel.choice.by(key: String, +lc: I.Loc, v: String) -> String:
+  match key:
     case "": MSG.T.common.default(lc)
     case "on": MSG.T.option.on(lc)
     case "off": MSG.T.option.off(lc)
@@ -139,7 +141,10 @@ def VLabel.choice(+lc: I.Loc, v: String) -> String:
     case "active": MSG.T.option.active(lc)
     case "stable": MSG.T.option.stable(lc)
     case "nightly": MSG.T.option.nightly(lc)
-    case x: x
+    case _: v
+
+def VLabel.choice(+lc: I.Loc, +v: String) -> String:
+  VLabel.choice.by(v, lc, v)
 
 def VLabel.option.k(+lc: I.Loc, known: Bool, +v: String) -> String:
   match known:
@@ -150,8 +155,10 @@ def VLabel.option(+lc: I.Loc, +key: String, v: String) -> String:
   VLabel.option.k(lc, Bool.or(Bool.or(Bool.or(String.eq(key, "order.enabled"), String.eq(key, "order.estimates")), Bool.or(String.eq(key, "ui.tokstats"), String.eq(key, "agent.thinking"))), Bool.or(String.eq(key, "restart.continue"), Bool.or(String.eq(key, "ui.theme"), Bool.or(String.eq(key, "sidebar.view"), Bool.or(String.eq(key, "update.channel"), Bool.or(String.eq(key, "kicad.ipc"), Bool.or(String.starts_with(key, "notify."), String.starts_with(key, "sync.")))))))), v)
 
 # Display labels only: metadata keys and submitted chip values stay unchanged.
-def VLabel.effort(+lc: I.Loc, +e: String) -> String:
-  match e:
+# VLabel.effort matches a copy of e: a string pattern splits bit by bit and a
+# row that mentions its scrutinee gets it rebuilt at every split (lane B).
+def VLabel.effort.by(key: String, +lc: I.Loc, +e: String) -> String:
+  match key:
     case "": MSG.T.model.level.auto(lc)
     case "auto": MSG.T.model.level.auto(lc)
     case "none": MSG.T.model.level.none(lc)
@@ -161,7 +168,10 @@ def VLabel.effort(+lc: I.Loc, +e: String) -> String:
     case "high": MSG.T.model.level.high(lc)
     case "xhigh": MSG.T.model.level.xhigh(lc)
     case "max": MSG.T.model.level.max(lc)
-    case x: x
+    case _: e
+
+def VLabel.effort(+lc: I.Loc, +e: String) -> String:
+  VLabel.effort.by(e, lc, e)
 
 def VLabel.chip(+lc: I.Loc, +e: String) -> String:
   Bool.pick(String, String.starts_with(e, "@"), U.Chip.name(e), VLabel.effort(lc, e))
@@ -3491,20 +3501,28 @@ def Local.send(+l: Local) -> D.Node:
 
 # the textarea's keys, as View.composer.loc sets them, for rows shown or not
 # and draft d (U.Draft.enter)
+# View.local.key matches a copy of the attribute: a string pattern splits
+# bit by bit and a row that mentions its scrutinee gets it rebuilt at every
+# split (lane B); the rows are View.local.keys' former ones.
+def View.local.key(key: D.Attr, h: D.Attr, +rows: Bool, +d: String) -> D.Attr:
+  match key:
+    case D.At{"data-enter", _}:
+      D.At{"data-enter", U.Draft.enter(rows, d)}
+    case D.At{"data-tab", _}:
+      D.At{"data-tab", Bool.pick(String, rows, "skill", "")}
+    case D.At{"data-arrows", _}:
+      D.At{"data-arrows", Bool.pick(String, rows, "skill-move", "")}
+    case D.At{"data-esc", _}:
+      D.At{"data-esc", Bool.pick(String, rows, "skill-close", "")}
+    case _:
+      h
+
 def View.local.keys(as: List<&2, D.Attr>, +rows: Bool, +d: String) -> List<&2, D.Attr>:
   match as:
     case Nil{}:
       Nil{}
-    case D.At{"data-enter", _} <> t:
-      D.At{"data-enter", U.Draft.enter(rows, d)} <> View.local.keys(t, rows, d)
-    case D.At{"data-tab", _} <> t:
-      D.At{"data-tab", Bool.pick(String, rows, "skill", "")} <> View.local.keys(t, rows, d)
-    case D.At{"data-arrows", _} <> t:
-      D.At{"data-arrows", Bool.pick(String, rows, "skill-move", "")} <> View.local.keys(t, rows, d)
-    case D.At{"data-esc", _} <> t:
-      D.At{"data-esc", Bool.pick(String, rows, "skill-close", "")} <> View.local.keys(t, rows, d)
-    case h <> t:
-      h <> View.local.keys(t, rows, d)
+    case +h <> t:
+      View.local.key(h, h, rows, d) <> View.local.keys(t, rows, d)
 
 # the foot's send button (span.foot-end's last child) drawn for the draft
 def View.local.end(ks: List<&2, D.Node>, +l: Local) -> List<&2, D.Node>:
