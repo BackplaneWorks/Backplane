@@ -125,7 +125,7 @@ def Pol.got.k(res: Result<&1, &1, U32 & String, Maybe<&1, String>>, s: Socket, +
   match res:
     case Fail{_}: Socket.close(s)
     case Done{None{}}: Socket.close(s)
-    case Done{Some{chunk}}: Pol.chunk(String.ends_with(chunk, "\n"), s, u, buf ++ chunk, k)
+    case Done{Some{+chunk}}: Pol.chunk(String.ends_with(chunk, "\n"), s, u, buf ++ chunk, k)
 
 def Pol.got(r: Socket & Result<&1, &1, U32 & String, Maybe<&1, String>>, +u: U.Ui, +buf: String, k: Socket -> U.Ui -> String -> IO(Unit)) -> IO(Unit):
   (s, res) = r
