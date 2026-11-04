@@ -221,12 +221,42 @@ export function installPhoneOther({ doc = document, win = window, dispatch, touc
     else nav.clearAppBadge?.()?.catch?.(() => {});
   };
 
+  // a bot's Browser page while the person drives it (bots.bend's
+  // .bot-screen.driven, its frame's data-type/data-keyto): a phone has no
+  // keys to press on the picture, so a line under it takes the phone's
+  // keyboard; what is typed goes as typed text, Enter and ⌫ as keys
+  let typeBar = null;
+  const driven = () => doc.querySelector(".app.phone .bot-screen.driven [data-type]");
+  const buildType = () => {
+    typeBar = doc.createElement("div");typeBar.className = "ph-type-bar";
+    const input = doc.createElement("input");
+    input.type = "text";input.placeholder = "Type into the page";input.autocomplete = "off";
+    input.setAttribute("autocapitalize", "off");input.setAttribute("aria-label", "Type into the page");
+    const key = (k) => { const f = driven();if (f) dispatch(f.getAttribute("data-keyto"), k); };
+    input.addEventListener("input", () => { const f = driven();if (f && input.value) { dispatch(f.getAttribute("data-type"), input.value);input.value = ""; } });
+    input.addEventListener("keydown", e => {
+      if (e.isComposing || e.keyCode === 229) return;
+      if (e.key === "Enter") { e.preventDefault();key("Enter"); }
+      else if (e.key === "Backspace" && !input.value) { e.preventDefault();key("Backspace"); }
+    });
+    const button = (label, k, aria) => {
+      const b = doc.createElement("button");b.type = "button";b.textContent = label;b.setAttribute("aria-label", aria);
+      b.addEventListener("pointerdown", e => e.preventDefault());b.addEventListener("click", () => key(k));
+      return b;
+    };
+    typeBar.append(input, button("⌫", "Backspace", "Backspace"), button("Enter", "Enter", "Enter"));
+    doc.body.append(typeBar);
+  };
+
   return {
     // after every render: the key row shows while a terminal is open
     rendered() {
       if (!on()) return;
       notifyState();
       needSync();
+      const drive = !!driven();
+      if (drive && !typeBar) buildType();
+      if (typeBar) typeBar.hidden = !drive;
       const open = !!field();
       if (open && !row) build();
       if (row) row.hidden = !open;
