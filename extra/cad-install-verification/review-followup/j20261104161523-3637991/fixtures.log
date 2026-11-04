@@ -1,0 +1,27 @@
+ok slow Content-Length download, rate/ETA, phases, duplicate/reload snapshot and throttle
+ok HTTP failure is visible and Retry creates a new attempt
+ok download Cancel aborts request, cleans staging and permits Retry
+ok Cancel during extraction reaps the captured child tree
+ok missing Content-Length stays indeterminate
+ok invalid checksum cannot install
+ok compiled Bend async effect start/snapshot/error/cancel ABI
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
++ actual - expected
+
++ 'cleanup'
+- 'failed'
+
+    at file:///home/user/backplane-c94e5205/test/tools/cad_install_test.mjs:121:10 {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: 'cleanup',
+  expected: 'failed',
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+
+Node.js v24.13.1

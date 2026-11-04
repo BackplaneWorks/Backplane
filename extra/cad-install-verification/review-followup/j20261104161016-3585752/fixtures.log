@@ -1,0 +1,30 @@
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: SOME PROOFS FAIL
+Error:
+- expected : a nat literal up to 4294967295n (got 8589934592n)
+- observed : ','
+Location:
+116 |     J.KV{"phase", J.Str{String.take(J.Json.get_str(next, "phase", "failed"), 16n)}},
+117>|     J.KV{"done", J.Json.nat(Nat.min(8589934592n, J.Json.get_nat(next, "done", 0n)))},
+    |                                                ^
+118 |     J.KV{"total", J.Json.nat(Nat.min(8589934592n, J.Json.get_nat(next, "total", 0n)))},
+
+
+1 !== 0
+
+    at file:///home/user/backplane-c94e5205/test/tools/cad_install_test.mjs:33:8
+    at ModuleJob.run (node:internal/modules/esm/module_job:430:25)
+    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:661:26)
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5) {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: 1,
+  expected: 0,
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+
+Node.js v24.13.1

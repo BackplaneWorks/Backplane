@@ -4324,20 +4324,11 @@ def CadJob.started(started: Bool, +home: String, +tool: String, +inbox: Chan(Msg
     case False{}: IO.pure(Unit, Unit{})
     case True{}: CadJob.watch(Fuel.forever(), True{}, home, tool, inbox, "", attempt)
 
-def CadJob.start(+home: String, +tool: String, +inbox: Chan(Msg)) -> IO(Unit):
+def CadJob.start(+home: String, +tool: String, +attempt: String, +inbox: Chan(Msg)) -> IO(Unit):
   do IO<Unit>:
     os : P.Ran <- P.Proc.run("uname", ["-sm"], "/")
-    +attempt : String <- CIX.CadFx.start(home, tool, J.Json.show(CIX.CadSpec.of(tool, home, K.Rt.platform(os))))
-    CadJob.started(Bool.not(String.is_empty(attempt)), home, tool, inbox, attempt)
-
-def CadJob.ask(+home: String, +tool: String, +op: String, +inbox: Chan(Msg)) -> IO(Unit):
-  match op:
-    case "cancel": CIX.CadFx.cancel(home, tool)
-    case "refresh": CadJob.refresh(tool, home, inbox)
-    case _: CadJob.start(home, tool, inbox)
-
-def Install.go(+home: String, +inbox: Chan(Msg)) -> IO(Unit):
-  CadJob.start(home, "kicad", inbox)
+    started : String <- CIX.CadFx.start(home, tool, attempt, J.Json.show(CIX.CadSpec.of(tool, home, K.Rt.platform(os))))
+    CadJob.started(Bool.not(String.is_empty(started)), home, tool, inbox, attempt)
 
 # install the channel's newest release and restart into it
 def Upgrade.go.k(force: Bool, +home: String, +channel: String, +inbox: Chan(Msg)) -> IO(Unit):
@@ -10742,13 +10733,119 @@ def Hub.send.saved(queued: Bool, h: Hub, +client: U32, +text: String) -> IO(Hub)
         cl2 : List<&2, Client> <- Wire.to(cl, client, text)
         return Hub{st, f, ls, cl2, as, inbox, cfg, note}
 
-def Hub.cad.request(h: Hub, +tool: String, +op: String) -> IO(Hub):
+def Cfg.with_freecad(c: Cfg, command: String) -> Cfg:
+  match c:
+    case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, _, ksx}, tm, views, accounts, cad}:
+      Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, command, ksx}, tm, views, accounts, cad}
+
+def Cfg.cad.at(+cfg: Cfg, +tool: String) -> J.Json:
+  J.Json.get_obj(Maybe.default(&2, J.Json, J.Json.parse(Cfg.cad(cfg)), J.Null{}), tool)
+
+def Cfg.cad.store.k(known: Bool, +cfg: Cfg, tool: String, snapshot: J.Json) -> Cfg:
+  match known:
+    case False{}: cfg
+    case True{}: Cfg.with_cad(cfg, J.Json.show(CIJO.Obj.put(Maybe.default(&2, J.Json, J.Json.parse(Cfg.cad(cfg)), J.Null{}), tool, snapshot)))
+
+def Cfg.cad.store(+cfg: Cfg, +tool: String, snapshot: J.Json) -> Cfg:
+  Cfg.cad.store.k(CIP.Cad.tool(tool), cfg, tool, snapshot)
+
+def Cfg.cad.clear.k(allowed: Bool, +cfg: Cfg, +tool: String) -> Cfg:
+  match allowed:
+    case False{}: cfg
+    case True{}: Cfg.cad.store(cfg, tool, CIP.Cad.dismiss(Cfg.cad.at(cfg, tool)))
+
+def Cfg.cad.clear(+cfg: Cfg, +tool: String, attempt: String) -> Cfg:
+  Cfg.cad.clear.k(CIP.Cad.can_dismiss(Cfg.cad.at(cfg, tool), attempt), cfg, tool)
+
+def Cfg.cad.apply.k(accepted: Bool, +cfg: Cfg, +tool: String, next: J.Json) -> Cfg:
+  match accepted:
+    case False{}: cfg
+    case True{}: Cfg.cad.store(cfg, tool, CIP.Cad.receive(Cfg.cad.at(cfg, tool), next))
+
+def Cfg.cad.apply(+cfg: Cfg, +tool: String, +snapshot: String) -> Cfg:
+  +next = Maybe.default(&2, J.Json, J.Json.parse(snapshot), J.Null{})
+  Cfg.cad.apply.k(CIP.Cad.accepts(Cfg.cad.at(cfg, tool), next), cfg, tool, next)
+
+def Hub.cad.freecad(h: Hub, +command: String) -> IO(Hub):
+  match h:
+    case Hub{st, f, ls, cl, as, inbox, cfg, note}:
+      do IO<Hub>:
+        +text : String <- Info.json(J.Json.obj([J.KV{"t", J.Str{"info"}}, J.KV{"info", J.Json.obj([J.KV{"freecad", J.Str{command}}])}]))
+        Hub.broadcast(Hub{st, f, ls, cl, as, inbox, Cfg.with_freecad(cfg, command), note}, text)
+
+# Info.json deliberately remains here: its inherited Vault freshness path
+# may stat/read api.env synchronously once per second. CAD does not bypass
+# masking, and scoped effect checks do not qualify that publish boundary.
+def Hub.cad.publish(h: Hub, +current: Cfg) -> IO(Hub):
+  match h:
+    case Hub{st, f, ls, cl, as, inbox, cfg, note}:
+      do IO<Hub>:
+        masked : String <- Info.json(J.Json.obj([J.KV{"t", J.Str{"info"}}, J.KV{"info", J.Json.obj([J.KV{"cad.install", J.Str{Cfg.cad(current)}}])}]))
+        text : String <- CIX.CadFx.frame(masked)
+        Hub.broadcast(Hub{st, f, ls, cl, as, inbox, current, note}, text)
+
+def Hub.cad.progress.k(changed: Bool, h: Hub, current: Cfg) -> IO(Hub):
+  match changed:
+    case False{}: IO.pure(Hub, h)
+    case True{}: Hub.cad.publish(h, current)
+
+def Hub.cad.progress(h: Hub, +tool: String, +snapshot: String) -> IO(Hub):
+  match h:
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      +current = Cfg.cad.apply(cfg, tool, snapshot)
+      Hub.cad.progress.k(Bool.not(String.eq(Cfg.cad(cfg), Cfg.cad(current))), Hub{st, f, ls, cl, as, inbox, cfg, note}, current)
+
+def Hub.cad.launch(h: Hub, +tool: String, +attempt: String) -> IO(Hub):
   match h:
     case Hub{st, f, ls, cl, as, +inbox, +cfg, note}:
       do IO<Hub>:
-        IO.spawn(Unit, CadJob.ask(Cfg.home(cfg), tool, op, inbox))
+        IO.spawn(Unit, CadJob.start(Cfg.home(cfg), tool, attempt, inbox))
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
 
+def Hub.cad.reserved(ok: Bool, h: Hub, +tool: String, +initial: J.Json) -> IO(Hub):
+  match ok h:
+    case False{} _: IO.pure(Hub, h)
+    case True{} Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      IO.bind(Hub, Hub, Hub.cad.publish(Hub{st, f, ls, cl, as, inbox, cfg, note}, Cfg.cad.store(cfg, tool, initial)),
+        h2 => Hub.cad.launch(h2, tool, J.Json.get_str(initial, "attempt", "")))
+
+def Hub.cad.reserve(allowed: Bool, h: Hub, +tool: String) -> IO(Hub):
+  match allowed h:
+    case False{} _: IO.pure(Hub, h)
+    case True{} Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      do IO<Hub>:
+        +initial : J.Json = CIP.Cad.begin(Cfg.cad.at(cfg, tool))
+        ok : Bool <- CIX.CadFx.reserve(Cfg.home(cfg), tool, J.Json.get_str(initial, "attempt", ""))
+        Hub.cad.reserved(ok, Hub{st, f, ls, cl, as, inbox, cfg, note}, tool, initial)
+
+def Hub.cad.control(allowed: Bool, h: Hub, +tool: String, +attempt: String) -> IO(Hub):
+  match allowed h:
+    case False{} _: IO.pure(Hub, h)
+    case True{} Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      do IO<Hub>:
+        CIX.CadFx.cancel(Cfg.home(cfg), tool, attempt)
+        return Hub{st, f, ls, cl, as, inbox, cfg, note}
+
+def Hub.cad.dismiss(allowed: Bool, h: Hub, +tool: String, +attempt: String) -> IO(Hub):
+  match allowed h:
+    case False{} _: IO.pure(Hub, h)
+    case True{} Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      do IO<Hub>:
+        CIX.CadFx.dismiss(Cfg.home(cfg), tool, attempt)
+        Hub.cad.publish(Hub{st, f, ls, cl, as, inbox, cfg, note}, Cfg.cad.clear(cfg, tool, attempt))
+
+def Hub.cad.request(h: Hub, +tool: String, +op: String, +attempt: String) -> IO(Hub):
+  match h op:
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note} "cancel":
+      Hub.cad.control(CIP.Cad.can_cancel(Cfg.cad.at(cfg, tool), attempt), Hub{st, f, ls, cl, as, inbox, cfg, note}, tool, attempt)
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note} "dismiss":
+      Hub.cad.dismiss(CIP.Cad.can_dismiss(Cfg.cad.at(cfg, tool), attempt), Hub{st, f, ls, cl, as, inbox, cfg, note}, tool, attempt)
+    case Hub{st, f, ls, cl, as, +inbox, +cfg, note} "refresh":
+      do IO<Hub>:
+        IO.spawn(Unit, CadJob.refresh(tool, Cfg.home(cfg), inbox))
+        return Hub{st, f, ls, cl, as, inbox, cfg, note}
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note} _:
+      Hub.cad.reserve(CIP.Cad.can_start(Cfg.cad.at(cfg, tool), attempt), Hub{st, f, ls, cl, as, inbox, cfg, note}, tool)
 
 def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
   match h o:
@@ -10840,12 +10937,10 @@ def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
     case Hub{st, f, ls, cl, as, inbox, cfg, note} B.KiCadRetry{}:
       Hub.kretry(Hub{st, f, ls, cl, as, inbox, cfg, note})
-    case Hub{st, f, ls, cl, as, inbox, cfg, note} B.CadInstall{tool, op}:
-      Hub.cad.request(Hub{st, f, ls, cl, as, inbox, cfg, note}, tool, op)
-    case Hub{st, f, ls, cl, as, +inbox, +cfg, note} B.KiCadInstall{}:
-      do IO<Hub>:
-        IO.spawn(Unit, Install.go(Cfg.home(cfg), inbox))
-        return Hub{st, f, ls, cl, as, inbox, cfg, note}
+    case Hub{st, f, ls, cl, as, inbox, cfg, note} B.CadInstall{tool, op, attempt}:
+      Hub.cad.request(Hub{st, f, ls, cl, as, inbox, cfg, note}, tool, op, attempt)
+    case Hub{st, f, ls, cl, as, inbox, cfg, note} B.KiCadInstall{}:
+      Hub.cad.request(Hub{st, f, ls, cl, as, inbox, cfg, note}, "kicad", "start", "")
     case Hub{+st, f, ls, cl, as, +inbox, +cfg, note} B.GrokTurn{+thread, +cwd, +model, +session, r, +text}:
       do IO<Hub>:
         +now : Nat <- Now.nat()
@@ -18095,31 +18190,6 @@ def Hub.mcp.parsed(+o: J.Json, h: Hub, +thread: String, body: String, +reply: Ch
 
 def Hub.mcp(h: Hub, +thread: String, +body: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
   Hub.mcp.parsed(Maybe.default(&2, J.Json, J.Json.parse(body), J.Null{}), h, thread, body, reply, now)
-
-def Cfg.with_freecad(c: Cfg, command: String) -> Cfg:
-  match c:
-    case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, _, ksx}, tm, views, accounts, cad}:
-      Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, command, ksx}, tm, views, accounts, cad}
-
-def Cfg.cad.apply(+cfg: Cfg, +tool: String, snapshot: String) -> Cfg:
-  +previous = Maybe.default(&2, J.Json, J.Json.parse(Cfg.cad(cfg)), J.Null{})
-  +next = CIP.Cad.merge(J.Json.get_obj(previous, tool), Maybe.default(&2, J.Json, J.Json.parse(snapshot), J.Null{}))
-  Cfg.with_cad(cfg, J.Json.show(CIJO.Obj.put(previous, tool, next)))
-
-def Hub.cad.freecad(h: Hub, +command: String) -> IO(Hub):
-  match h:
-    case Hub{st, f, ls, cl, as, inbox, cfg, note}:
-      do IO<Hub>:
-        +text : String <- Info.json(J.Json.obj([J.KV{"t", J.Str{"info"}}, J.KV{"info", J.Json.obj([J.KV{"freecad", J.Str{command}}])}]))
-        Hub.broadcast(Hub{st, f, ls, cl, as, inbox, Cfg.with_freecad(cfg, command), note}, text)
-
-def Hub.cad.progress(h: Hub, +tool: String, +snapshot: String) -> IO(Hub):
-  match h:
-    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
-      do IO<Hub>:
-        +current : Cfg = Cfg.cad.apply(cfg, tool, snapshot)
-        +text : String <- Info.json(J.Json.obj([J.KV{"t", J.Str{"info"}}, J.KV{"info", J.Json.obj([J.KV{"cad.install", J.Str{Cfg.cad(current)}}])}]))
-        Hub.broadcast(Hub{st, f, ls, cl, as, inbox, current, note}, text)
 
 def Msg.kind(m: Msg) -> String:
   match m:

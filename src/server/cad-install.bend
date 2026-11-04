@@ -4,13 +4,24 @@ import ../core/kicad_install.bend as KI
 
 # Owns at most one job per tool per hub. No client owns a download or a
 # subprocess: disconnects and navigation cannot cancel it accidentally.
-def CadFx.start(home: String, tool: String, spec: String) -> IO(String):
+def CadFx.reserve(home: String, tool: String, attempt: String) -> IO(Bool):
+  import "./effects/cad-install.js"
+
+def CadFx.start(home: String, tool: String, attempt: String, spec: String) -> IO(String):
   import "./effects/cad-install.js"
 
 def CadFx.next(home: String, tool: String, attempt: String) -> IO(String):
   import "./effects/cad-install.js"
 
-def CadFx.cancel(home: String, tool: String) -> IO(Unit):
+def CadFx.cancel(home: String, tool: String, attempt: String) -> IO(Unit):
+  import "./effects/cad-install.js"
+
+def CadFx.dismiss(home: String, tool: String, attempt: String) -> IO(Unit):
+  import "./effects/cad-install.js"
+
+# Applied only AFTER Info.json has masked the frame. This is a CAD progress
+# envelope ceiling, not a bound on unrelated data in a full join response.
+def CadFx.frame(masked: String) -> IO(String):
   import "./effects/cad-install.js"
 
 # The compiled catalog is selected by the hub, never by a phone/client.

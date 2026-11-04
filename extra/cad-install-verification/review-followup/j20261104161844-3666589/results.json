@@ -1,0 +1,411 @@
+[
+  {
+    "name": "fixtures",
+    "command": [
+      "node",
+      "test/tools/cad_install_test.mjs"
+    ],
+    "exit": 0,
+    "passed": true,
+    "timed_out": false,
+    "seconds": 20.714,
+    "before": {
+      "memory.max": "3699998720",
+      "memory.swap.max": "0",
+      "memory.peak": "473841664",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+    },
+    "after": {
+      "memory.max": "3699998720",
+      "memory.swap.max": "0",
+      "memory.peak": "516513792",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+    },
+    "peak_child_rss_kib": 290340
+  },
+  {
+    "name": "cad_install_handler_test.py",
+    "command": [
+      "python3",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      "test/tools",
+      "-p",
+      "cad_install_handler_test.py"
+    ],
+    "exit": 0,
+    "passed": true,
+    "timed_out": false,
+    "seconds": 0.365,
+    "before": {
+      "memory.max": "3699998720",
+      "memory.swap.max": "0",
+      "memory.peak": "516513792",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+    },
+    "after": {
+      "memory.max": "3699998720",
+      "memory.swap.max": "0",
+      "memory.peak": "516513792",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+    },
+    "peak_child_rss_kib": 290340
+  },
+  {
+    "name": "freecad_install_test.py",
+    "command": [
+      "python3",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      "test/tools",
+      "-p",
+      "freecad_install_test.py"
+    ],
+    "exit": 0,
+    "passed": true,
+    "timed_out": false,
+    "seconds": 0.114,
+    "before": {
+      "memory.max": "3699998720",
+      "memory.swap.max": "0",
+      "memory.peak": "516513792",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+    },
+    "after": {
+      "memory.max": "3699998720",
+      "memory.swap.max": "0",
+      "memory.peak": "516513792",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+    },
+    "peak_child_rss_kib": 290340
+  },
+  {
+    "name": "kicad_install_test.py",
+    "command": [
+      "python3",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      "test/tools",
+      "-p",
+      "kicad_install_test.py"
+    ],
+    "exit": 0,
+    "passed": true,
+    "timed_out": false,
+    "seconds": 1.167,
+    "before": {
+      "memory.max": "3699998720",
+      "memory.swap.max": "0",
+      "memory.peak": "516513792",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+    },
+    "after": {
+      "memory.max": "3699998720",
+      "memory.swap.max": "0",
+      "memory.peak": "516513792",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+    },
+    "peak_child_rss_kib": 290340
+  },
+  {
+    "name": "shape",
+    "command": [
+      "python3",
+      "scripts/laws-shape.py"
+    ],
+    "exit": 0,
+    "passed": true,
+    "timed_out": false,
+    "seconds": 0.064,
+    "before": {
+      "memory.max": "3699998720",
+      "memory.swap.max": "0",
+      "memory.peak": "516513792",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+    },
+    "after": {
+      "memory.max": "3699998720",
+      "memory.swap.max": "0",
+      "memory.peak": "516513792",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+    },
+    "peak_child_rss_kib": 290340
+  },
+  {
+    "name": "src_core_cad-install.bend",
+    "command": [
+      "bend",
+      "src/core/cad-install.bend",
+      "--check-only"
+    ],
+    "exit": 0,
+    "passed": true,
+    "timed_out": false,
+    "seconds": 0.369,
+    "before": {
+      "memory.max": "3699998720",
+      "memory.swap.max": "0",
+      "memory.peak": "516513792",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+    },
+    "after": {
+      "memory.max": "3699998720",
+      "memory.swap.max": "0",
+      "memory.peak": "516513792",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+    },
+    "peak_child_rss_kib": 290340
+  },
+  {
+    "name": "src_server_cad-install.bend",
+    "command": [
+      "bend",
+      "src/server/cad-install.bend",
+      "--check-only"
+    ],
+    "exit": 1,
+    "passed": true,
+    "timed_out": false,
+    "seconds": 0.622,
+    "before": {
+      "memory.max": "3699998720",
+      "memory.swap.max": "0",
+      "memory.peak": "516513792",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+    },
+    "after": {
+      "memory.max": "3699998720",
+      "memory.swap.max": "0",
+      "memory.peak": "516513792",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+    },
+    "peak_child_rss_kib": 290340
+  },
+  {
+    "name": "test_cad_install_test.bend",
+    "command": [
+      "bend",
+      "test/cad_install_test.bend"
+    ],
+    "exit": 0,
+    "passed": true,
+    "timed_out": false,
+    "seconds": 1.42,
+    "before": {
+      "memory.max": "3699998720",
+      "memory.swap.max": "0",
+      "memory.peak": "516513792",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+    },
+    "after": {
+      "memory.max": "3699998720",
+      "memory.swap.max": "0",
+      "memory.peak": "704577536",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+    },
+    "peak_child_rss_kib": 488172
+  },
+  {
+    "name": "test_kicad_install_test.bend",
+    "command": [
+      "bend",
+      "test/kicad_install_test.bend"
+    ],
+    "exit": 0,
+    "passed": true,
+    "timed_out": false,
+    "seconds": 0.416,
+    "before": {
+      "memory.max": "3699998720",
+      "memory.swap.max": "0",
+      "memory.peak": "704577536",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+    },
+    "after": {
+      "memory.max": "3699998720",
+      "memory.swap.max": "0",
+      "memory.peak": "704577536",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+    },
+    "peak_child_rss_kib": 488172
+  },
+  {
+    "name": "slice-laws",
+    "command": [
+      "bend",
+      "/home/user/backplane-c94e5205/build/cad-install-test/slice-laws/PROOF.bend",
+      "--check-only"
+    ],
+    "exit": 0,
+    "passed": true,
+    "timed_out": false,
+    "seconds": 0.117,
+    "before": {
+      "memory.max": "3699998720",
+      "memory.swap.max": "0",
+      "memory.peak": "704577536",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+    },
+    "after": {
+      "memory.max": "3699998720",
+      "memory.swap.max": "0",
+      "memory.peak": "704577536",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+    },
+    "peak_child_rss_kib": 488172
+  },
+  {
+    "name": "slice-cfg-shape",
+    "command": [
+      "bend",
+      "/home/user/backplane-c94e5205/build/cad-install-test/slice-cfg-shape/PROOF.bend",
+      "--check-only"
+    ],
+    "exit": 0,
+    "passed": true,
+    "timed_out": false,
+    "seconds": 0.116,
+    "before": {
+      "memory.max": "3699998720",
+      "memory.swap.max": "0",
+      "memory.peak": "704577536",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+    },
+    "after": {
+      "memory.max": "3699998720",
+      "memory.swap.max": "0",
+      "memory.peak": "704577536",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+    },
+    "peak_child_rss_kib": 488172
+  },
+  {
+    "name": "slice-server",
+    "command": [
+      "bend",
+      "/home/user/backplane-c94e5205/build/cad-install-test/slice-server/PROOF.bend",
+      "--check-only"
+    ],
+    "exit": 1,
+    "passed": true,
+    "timed_out": false,
+    "seconds": 0.521,
+    "before": {
+      "memory.max": "3699998720",
+      "memory.swap.max": "0",
+      "memory.peak": "704577536",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+    },
+    "after": {
+      "memory.max": "3699998720",
+      "memory.swap.max": "0",
+      "memory.peak": "704577536",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+    },
+    "peak_child_rss_kib": 488172
+  },
+  {
+    "name": "slice-ui",
+    "command": [
+      "bend",
+      "/home/user/backplane-c94e5205/build/cad-install-test/slice-ui/PROOF.bend",
+      "--check-only"
+    ],
+    "exit": 0,
+    "passed": true,
+    "timed_out": false,
+    "seconds": 0.317,
+    "before": {
+      "memory.max": "3699998720",
+      "memory.swap.max": "0",
+      "memory.peak": "704577536",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+    },
+    "after": {
+      "memory.max": "3699998720",
+      "memory.swap.max": "0",
+      "memory.peak": "704577536",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+    },
+    "peak_child_rss_kib": 488172
+  },
+  {
+    "name": "ui-assertions",
+    "command": [
+      "bend",
+      "/home/user/backplane-c94e5205/build/cad-install-test/slice-ui/t/test/cad_install_ui_test.bend"
+    ],
+    "exit": 0,
+    "passed": true,
+    "timed_out": false,
+    "seconds": 0.717,
+    "before": {
+      "memory.max": "3699998720",
+      "memory.swap.max": "0",
+      "memory.peak": "704577536",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+    },
+    "after": {
+      "memory.max": "3699998720",
+      "memory.swap.max": "0",
+      "memory.peak": "704577536",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+    },
+    "peak_child_rss_kib": 488172
+  },
+  {
+    "name": "slice-handoff",
+    "command": [
+      "bend",
+      "/home/user/backplane-c94e5205/build/cad-install-test/slice-handoff/PROOF.bend",
+      "--check-only"
+    ],
+    "exit": 0,
+    "passed": true,
+    "timed_out": false,
+    "seconds": 0.167,
+    "before": {
+      "memory.max": "3699998720",
+      "memory.swap.max": "0",
+      "memory.peak": "704577536",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+    },
+    "after": {
+      "memory.max": "3699998720",
+      "memory.swap.max": "0",
+      "memory.peak": "704577536",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+    },
+    "peak_child_rss_kib": 488172
+  },
+  {
+    "name": "handoff-assertions",
+    "command": [
+      "bend",
+      "/home/user/backplane-c94e5205/build/cad-install-test/slice-handoff/t/test/cad_install_handoff_test.bend"
+    ],
+    "exit": 0,
+    "passed": true,
+    "timed_out": false,
+    "seconds": 0.216,
+    "before": {
+      "memory.max": "3699998720",
+      "memory.swap.max": "0",
+      "memory.peak": "704577536",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+    },
+    "after": {
+      "memory.max": "3699998720",
+      "memory.swap.max": "0",
+      "memory.peak": "704577536",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+    },
+    "peak_child_rss_kib": 488172
+  }
+]

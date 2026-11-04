@@ -1,0 +1,15 @@
+ok web has real byte label
+ok web has progress element
+ok web offers Cancel
+ok web offers terminal Dismiss
+ok active job has no terminal Dismiss
+ok dismissed result falls back to installed-tool state
+ok web offers Retry on error
+ok mobile gets bytes and meter
+ok mobile gets known total
+ok mobile gets Cancel
+ok native Cancel hit is reachable
+ok native terminal Dismiss hit is reachable
+ok native active job has no Dismiss hit
+ok native Retry hit is reachable
+ok switching views retains current snapshot

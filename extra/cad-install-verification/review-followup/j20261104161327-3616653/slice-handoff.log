@@ -1,0 +1,11 @@
+SOME PROOFS FAIL
+Error:
+- expected : an annotated term (cannot infer)
+- observed : 1n+Maybe.default(&2, Nat, Nat.read(J.Json.as_raw(J.Json.get(old, "generation"), "")), 0n)
+Context:
+- old : J.Json
+Location: Cad.begin
+17 | def Cad.begin(+old: J.Json) -> J.Json:
+18>|   +generation = 1n+J.Json.get_nat(old, "generation", 0n)
+   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+19 |   J.Json.obj([J.KV{"attempt", J.Str{Nat.show(generation)}}, J.KV{"generation", J.Json.nat(generation)},

@@ -1,0 +1,11 @@
+ok slow Content-Length download, rate/ETA, phases, duplicate/reload snapshot and throttle
+ok HTTP failure is visible and Retry creates a new attempt
+ok download Cancel aborts request, cleans staging and permits Retry
+ok Cancel during extraction reaps the captured child tree
+ok missing Content-Length stays indeterminate
+ok invalid checksum cannot install
+ok compiled Bend async effect start/snapshot/error/cancel ABI
+ok stalled HTTP headers terminate with actionable error
+ok immediate reserve, early Cancel, terminal Dismiss and stale controls
+ok central escaped UTF-8 error/state/envelope ceilings and async complete lifetime
+ok terminal state waits for awaited cleanup; cleanup Cancel/Retry/Dismiss contract

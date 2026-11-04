@@ -1,0 +1,21 @@
+SOME PROOFS FAIL
+Error: 19 defs rely on unsafe or foreign code:
+- t/src/server/host.Sock.recv_bytes
+- t/src/server/host.Sock.shutdown
+- t/src/server/host.Proc.spawn
+- t/src/server/host.Proc.wait
+- t/src/server/host.Env.put
+- t/src/server/host.Sys.native_path
+- t/src/server/proc.Proc.drain
+- t/src/server/proc.Proc.finish
+- t/src/server/proc.Proc.collect
+- t/src/server/proc.Proc.run.k
+- t/src/server/proc.Proc.run.go
+- t/src/server/proc.Proc.run
+- t/src/server/freecad.FreeCAD.find
+- t/src/server/cad-install.CadFx.start
+- t/src/server/cad-install.CadFx.next
+- t/src/server/server.CadJob.refresh
+- t/src/server/server.CadJob.watch
+- t/src/server/server.CadJob.started
+- t/src/server/server.CadJob.start

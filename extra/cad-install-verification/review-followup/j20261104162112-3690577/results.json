@@ -1,0 +1,26 @@
+[
+  {
+    "name": "canonical-proof",
+    "command": [
+      "bend",
+      "PROOF.bend"
+    ],
+    "exit": -9,
+    "passed": false,
+    "timed_out": false,
+    "seconds": 8.598,
+    "before": {
+      "memory.max": "3699998720",
+      "memory.swap.max": "0",
+      "memory.peak": "473812992",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+    },
+    "after": {
+      "memory.max": "3699998720",
+      "memory.swap.max": "0",
+      "memory.peak": "3699998720",
+      "memory.events": "low 0\nhigh 0\nmax 677\noom 1\noom_kill 1\noom_group_kill 0"
+    },
+    "peak_child_rss_kib": 3576356
+  }
+]

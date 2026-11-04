@@ -1,0 +1,22 @@
+ok Linux keeps bp4 tar
+ok Linux pin unchanged
+ok Darwin arm64 tar
+ok Darwin pin
+ok real Cygwin uname selects Windows ZIP
+ok Windows published pin
+ok Windows architecture alias
+ok MSYS alias
+ok MINGW alias
+ok Darwin architecture alias
+ok whitespace and case
+ok Linux arm64 unavailable
+ok Darwin x64 unavailable
+ok Windows arm64 unavailable
+ok unknown OS unavailable
+ok missing arch unavailable
+ok failed uname unavailable
+ok extra uname words unavailable
+ok can_install Windows
+ok can_install Mac
+ok Windows discover exact exe
+ok Mac discover selected version

@@ -20,7 +20,7 @@ class Handlers(unittest.TestCase):
         self.assertEqual(self.check_controls(client), set())
         defs = coverage.definitions(client)
         self.assertIn('"cad.install"', defs['Cadview.rpc'])
-        for action, operation in [('cad-install','start'), ('cad-cancel','cancel'), ('cad-refresh','refresh')]:
+        for action, operation in [('cad-install','start'), ('cad-cancel','cancel'), ('cad-refresh','refresh'), ('cad-dismiss','dismiss')]:
             self.assertIn(f'case "{action}": Cadview.rpc(u, value, "{operation}")', defs['Cadview.dispatch'])
         hub = (ROOT/'src/core/hub.bend').read_text()
         self.assertIn('"cad.install"', hub)
@@ -34,6 +34,21 @@ class Handlers(unittest.TestCase):
         server = (ROOT/'src/server/server.bend').read_text()
         self.assertIn('J.KV{"cad.install", J.Str{cadInfo}}', coverage.definitions(server)['Hub.info'])
         self.assertIn('Cfg.cad.apply(cfg, tool, snapshot)', coverage.definitions(server)['Hub.cad.progress'])
-        self.assertIn('Hub.broadcast', coverage.definitions(server)['Hub.cad.progress'])
+        self.assertIn('Hub.cad.publish', coverage.definitions(server)['Hub.cad.progress.k'])
+        self.assertIn('Info.json', coverage.definitions(server)['Hub.cad.publish'])
+        self.assertIn('CadFx.frame(masked)', coverage.definitions(server)['Hub.cad.publish'])
+        self.assertIn('Hub.broadcast', coverage.definitions(server)['Hub.cad.publish'])
+        self.assertIn('Cad.accepts', coverage.definitions(server)['Cfg.cad.apply'])
+        self.assertIn('case False{}: cfg', coverage.definitions(server)['Cfg.cad.apply.k'])
+
+    def test_effect_has_no_synchronous_filesystem_calls(self):
+        effect = (ROOT/'src/server/effects/cad-install.js').read_text()
+        self.assertFalse(re.search(r'\.\w+Sync\s*\(', coverage.code(effect)))
+
+    def test_cad_notices_cannot_write_persistent_hidden_setting(self):
+        for path, name in [('src/web/view.bend','View.kn.dismiss.loc'), ('src/app/layout.bend','Kn.dismiss')]:
+            body = coverage.definitions((ROOT/path).read_text())[name]
+            self.assertIn('cad.install:', body)
+            self.assertNotIn('kicad.notice.hidden=', body)
 
 if __name__ == '__main__': unittest.main()

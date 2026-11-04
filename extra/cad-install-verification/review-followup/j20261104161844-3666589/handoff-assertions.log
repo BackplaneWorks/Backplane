@@ -1,0 +1,14 @@
+ok start reservation is visible before first poll
+ok retry reservation replaces old terminal immediately
+ok retry has a new consumer-owned token
+ok captured A cannot overwrite accepted B
+ok consumer in-phase progress does not decrease
+ok active dismiss preserves reconnect state exactly
+ok join info contains active snapshot
+ok unknown tool cannot grow the two-tool snapshot
+ok terminal dismiss leaves only a generation tombstone
+ok terminal dismiss clears the error
+ok late same-token result cannot resurrect dismissal
+ok new start after dismiss has fresh visible token
+ok old terminal dismiss cannot touch new active attempt
+ok captured old message preserves both tools and order

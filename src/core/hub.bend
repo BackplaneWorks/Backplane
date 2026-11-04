@@ -91,7 +91,7 @@ type Out is Data:
   UpgradeForce{}
   # the install is ready: end the hub's process into it now
   Restart{}
-  CadInstall{tool: String, op: String}
+  CadInstall{tool: String, op: String, attempt: String}
   KiCadInstall{}
   KiCadRetry{}
   # opencode's models read again for every client (server.bend's OcJob)
@@ -209,7 +209,7 @@ def Out.kind(o: Out) -> String:
     case Upgrade{}: "Upgrade"
     case UpgradeForce{}: "UpgradeForce"
     case Restart{}: "Restart"
-    case CadInstall{_, _}: "CadInstall"
+    case CadInstall{_, _, _}: "CadInstall"
     case KiCadInstall{}: "KiCadInstall"
     case KiCadRetry{}: "KiCadRetry"
     case ModelsRefresh{}: "ModelsRefresh"
@@ -10603,7 +10603,7 @@ def Hub.request.k(i: Nat, +s: M.State, +now: Nat, +client: U32, +id: String, +p:
     case 56n: Home.request(s, client, id, p)
     case 57n: Home.start(s, now, client, id, p)
     case 59n:
-      Step.outs([Reply.ok(client, id), CadInstall{Bool.pick(String, String.eq(J.Json.get_str(p, "tool", ""), "freecad"), "freecad", "kicad"), J.Json.get_str(p, "op", "start")}])
+      Step.outs([Reply.ok(client, id), CadInstall{Bool.pick(String, String.eq(J.Json.get_str(p, "tool", ""), "freecad"), "freecad", "kicad"), J.Json.get_str(p, "op", "start"), J.Json.get_str(p, "attempt", "")}])
     case 58n: Step.reply(client, id, Home.rename.project(Hub.project(s, J.Json.get_str(p, "project", "")), J.Json.get_str(p, "title", "")))
     case 55n:
       Step.outs(Reply.ok(client, id) <> Warm.outs(J.Json.get_str(p, "kind", ""), J.Json.get_str(p, "root", ""), [J.Json.get_str(p, "before", ""), J.Json.get_str(p, "after", "")]))

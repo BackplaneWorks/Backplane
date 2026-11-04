@@ -1,0 +1,15 @@
+ok in-phase bytes cannot decrease
+ok new attempt resets bytes
+ok new phase resets bytes
+ok download label uses real byte total
+ok unknown length has no invented percentage
+ok extraction is indeterminate
+ok unchanged percentage coalesces
+ok phase transition publishes
+ok cancel offers retry
+ok failed offers retry
+ok running offers cancel
+ok unsupported offers guide
+ok unknown phase fails visibly
+ok Windows hub catalog
+ok Mac hub catalog

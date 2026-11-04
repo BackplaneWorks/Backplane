@@ -15926,10 +15926,12 @@ def Laws.catalog_keys_nonempty(): {==}
 def Laws.cad_install_visible_action(p):
   match p:
     case CADINSTALL.CadIdle{}: {==}
+    case CADINSTALL.CadStarting{}: {==}
     case CADINSTALL.CadDownload{}: {==}
     case CADINSTALL.CadVerify{}: {==}
     case CADINSTALL.CadExtract{}: {==}
     case CADINSTALL.CadConfigure{}: {==}
+    case CADINSTALL.CadCleanup{}: {==}
     case CADINSTALL.CadReady{}: {==}
     case CADINSTALL.CadFailed{}: {==}
     case CADINSTALL.CadCancelled{}: {==}
@@ -15937,3 +15939,7 @@ def Laws.cad_install_visible_action(p):
 
 def Laws.cad_install_monotonic(old, next):
   Nat.max_ge_l(old, next)
+
+def Laws.cad_install_rejected_snapshot(current, next, h):
+  %Equal.sym(Bool, CADINSTALL.Cad.accepts(current, next), False{}, h) : {CADINSTALL.Cad.receive.k(_, current, next) == current : J.Json}
+  {==}
