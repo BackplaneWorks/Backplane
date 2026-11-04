@@ -1,3 +1,4 @@
+import ../../src/server/wire.bend as WIRE
 import Base
 import ../check.bend as C
 import ../../src/app/link.bend as L
@@ -27,23 +28,23 @@ def Probe.stop(done: Bool, text: String, k: Unit -> IO(String)) -> IO(String):
     case True{}: IO.pure(String, text)
     case False{}: k(Unit{})
 
-def Probe.wire(m: Maybe<&1, S.Wire>, k: Unit -> IO(String)) -> IO(String):
+def Probe.wire(m: Maybe<&1, WIRE.Wire>, k: Unit -> IO(String)) -> IO(String):
   match m:
-    case Some{S.WText{+text}}:
+    case Some{WIRE.WText{+text}}:
       Probe.stop(Probe.done(Probe.object(text)), text, k)
     case Some{_}: k(Unit{})
     case None{}: IO.pure(String, "closed without a result")
 
-def Probe.read(fuel: Nat, +out: Chan(S.Wire)) -> IO(String):
+def Probe.read(fuel: Nat, +out: Chan(WIRE.Wire)) -> IO(String):
   match fuel:
     case 0n: IO.pure(String, "too many messages before log")
     case 1n+k:
-      IO.bind(Maybe<&1, S.Wire>, String, Chan.recv(S.Wire, out), m => Probe.wire(m, u => Probe.read(k, out)))
+      IO.bind(Maybe<&1, WIRE.Wire>, String, Chan.recv(WIRE.Wire, out), m => Probe.wire(m, u => Probe.read(k, out)))
 
 def Probe.link(url: String, since: Nat, origin: String) -> IO(Unit):
   do IO<Unit>:
     +inbox : Chan(S.Msg) <- L.Link.start(url)
-    +out : Chan(S.Wire) <- Chan.new(S.Wire, 8192)
+    +out : Chan(WIRE.Wire) <- Chan.new(WIRE.Wire, 8192)
     +t0 : Nat <- IO.now()
     ok : Result<&1, &1, S.Msg, Unit> <- Chan.send(S.Msg, inbox, S.Join{0, out, since, origin, 1, 0})
     +text : String <- Probe.read(10n, out)
