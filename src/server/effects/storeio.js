@@ -2,7 +2,14 @@
 function store_temp(home) {
   const fs = require('fs'), path = require('path');
   const temp = fs.mkdtempSync(path.join(home, '.store-rebuild-'));
-  fs.symlinkSync(path.resolve(home, 'events.jsonl'), path.join(temp, 'events.jsonl'));
+  try {
+    // The rebuild lives inside home, on the same volume. A Windows hardlink
+    // needs neither elevation nor Developer Mode, and still reads the exact
+    // authoritative log without copying it or changing its append semantics.
+    const source = path.resolve(home, 'events.jsonl'), dest = path.join(temp, 'events.jsonl');
+    if (process.platform === 'win32') fs.linkSync(source, dest);
+    else fs.symlinkSync(source, dest);
+  } catch (error) { fs.rmdirSync(temp); throw error; }
   return temp;
 }
 function store_sync(path) {

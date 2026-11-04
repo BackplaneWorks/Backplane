@@ -2,6 +2,10 @@ import ./src/server/wire.bend as WIRE
 
 import ./src/server/watch-plan.bend as WATCHPLAN
 
+import ./src/server/review-window.bend as REVIEWWINDOW
+
+import ./src/server/db.bend as HISTORYDB
+
 import ./test/conversation-proof/window_final.bend as CONVROOT
 
 import ./test/conversation-proof/floor_shape_only.bend as CONVSHAPE
@@ -13179,13 +13183,19 @@ def Laws.mail_log_count_committed(c, fresh):
       {==}
 
 # ---- native phone i18n ----
-def Laws.native_language_english(): {==}
+def Laws.native_locale_composition(setting, os, preview): {==}
 
-def Laws.native_language_preview(): {==}
+def Laws.native_language_english():
+  Laws.native_locale_composition("en", "ja-JP", "1")
 
-def Laws.native_language_system(): {==}
+def Laws.native_language_preview():
+  Laws.native_locale_composition("ja", "en-US", "1")
 
-def Laws.native_language_fallback(): {==}
+def Laws.native_language_system():
+  Laws.native_locale_composition("auto", "ja_JP.UTF-8", "1")
+
+def Laws.native_language_fallback():
+  Laws.native_locale_composition("auto", "de-DE", "1")
 # ---- end native phone i18n ----
 # ---- build-speed: one executable, exact entry selection ----
 def Laws.exe_server_name():
@@ -15874,6 +15884,14 @@ def Laws.static_http_cached_chunks(): {==}
 def Laws.static_http_fresh_pages(): {==}
 
 def Laws.static_http_frame_policy(): {==}
+
+def Laws.review_window_budget(): {==}
+
+def Laws.review_window_progress(): {==}
+
+def Laws.review_window_read_failure(value): {==}
+
+def Laws.review_window_cursor_failure(value): {==}
 
 def Laws.auth_cache_key_sequence(st): {==}
 

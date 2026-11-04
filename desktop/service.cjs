@@ -199,11 +199,21 @@ class Service {
     // Like `backplane --headless`: the listener stays on 127.0.0.1 and the
     // hub's own tailnet handling decides whether the owner's phone reaches it.
     const args = ['--home', launch.home, '--port', String(port), '--host', '127.0.0.1', '--web', launch.web, '--foreground'];
-    this.child = spawn(this.binary, args, { stdio: ['ignore', 'ignore', 'ignore'], env: launch.env, ...(launch.cwd ? { cwd: launch.cwd } : {}), windowsHide: true, detached: true });
+    this.child = spawn(this.binary, args, { stdio: ['ignore', 'ignore', 'pipe'], env: launch.env, ...(launch.cwd ? { cwd: launch.cwd } : {}), windowsHide: true, detached: true });
     this.child.unref();
-    let failure;
-    this.child.once('error', () => { failure = new Error('Cannot start the packaged service'); });
-    this.child.once('exit', code => { failure = new Error(`Service exited (${code})`); });
+    // Bound diagnostics in memory; keep draining after readiness for resident
+    // services so their stderr can never block. No persistent credential log.
+    let failure, stderr = Buffer.alloc(0), starting = true;
+    const stream = this.child.stderr;
+    stream?.on('data', chunk => {
+      if (starting) stderr = Buffer.concat([stderr, Buffer.from(chunk)]).subarray(-8192);
+    });
+    stream?.unref?.();
+    const diagnostic = () => stderr.toString('utf8').replace(/\x1b\[[0-9;]*m/g, '').trim();
+    this.child.once('error', error => { failure = new Error(`Cannot start the packaged service: ${error.message}`); });
+    // close follows the final stderr bytes; exit can precede them.
+    this.child.once('close', (code, signal) => { failure = new Error(`Service exited (${signal || code})${diagnostic() ? ':\n' + diagnostic() : ''}`); });
+    try {
     while (Date.now() < deadline) {
       if (failure) throw failure;
       try {
@@ -219,7 +229,8 @@ class Service {
       }
       await new Promise(resolve => setTimeout(resolve, 100));
     }
-    throw new Error('Service readiness timed out');
+    throw new Error(`Service readiness timed out${diagnostic() ? ':\n' + diagnostic() : ''}`);
+    } finally { starting = false; stderr = Buffer.alloc(0); }
   }
   async token() {
     const token = (await fs.readFile(path.join(this.home, 'token'), 'utf8')).trim();

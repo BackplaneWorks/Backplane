@@ -98,6 +98,8 @@ def main():
                              'requested_laws': sorted(requested & set(shard['primary_laws'])),
                              'argv': [str(v) for v in argv], 'scope_exit': attempt.returncode,
                              'receipt': receipt, 'passed': ok})
+        if not ok:
+            break
     for name, digest in identity['files'].items():
         assert sha(ROOT/name) == digest, name
     final = controller_state(directory)

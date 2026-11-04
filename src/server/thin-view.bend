@@ -1,4 +1,5 @@
 import Base
+import ./window-file.bend as WF
 import ../core/project-home.bend as PH
 import ../core/i18n.bend as I
 import ../core/chat-pending.bend as CP
@@ -207,10 +208,7 @@ def State.window.subs(+st: M.State, +target: J.Json) -> List<&2, M.Entry>:
   List.reverse(&2, M.Entry, List.take(&2, M.Entry, M.State.mine(st, M.Bg.log(Target.thread(st, target))), SB.Subs.window()))
 
 def State.window.file(st: M.State, +key: String, es: List<&2, M.Entry>) -> M.State:
-  match st:
-    case M.State{ps, ts, entries, n, tk, settings, queued, asks, devices, nav, +bw}:
-      M.State{ps, ts, entries, n, tk, settings, queued, asks, devices, nav,
-        [M.Ext{M.Ext.world(M.Ext.of(bw)), Map.set(&2, List<&2, M.Entry>, M.Ext.by(M.Ext.of(bw)), key, es), M.Ext.mail(M.Ext.of(bw)), M.Ext.usage(M.Ext.of(bw))}]}
+  WF.State.window.file(st, key, es)
 
 # The inspector's identities and each call's bounded activity belong only
 # to the selected conversation, independently of its newest shared log page.
