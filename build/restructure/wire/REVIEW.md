@@ -49,6 +49,9 @@ Both original credit laws now import 12 implementation modules rather than
 accounting reaches three declarations. The global largest law remains 5,500;
 the Main.boot semantic closure is unchanged by this relocation.
 
+The first native result below is historical. The current resolved-source
+result and Boat-only PR checks follow it.
+
 Normal Boat job `j20261104023950-39517`, work `1501777`, stock Bend 2.0.36
 SHA256 `02089dc0eed0fd5fd6d73c74cc9cffcb2c6638dd3b02ae83f7b8cc57fbe381ba`,
 generated the full canonical 3,177-law/128-shard partition, identity
@@ -69,3 +72,30 @@ sender/receiver integration tests, full application build, all-shard join and
 the whole-project memory target remain unqualified. RC4 stays frozen under
 the install/build hold. After the new user rule, every further compiler/proof
 or test run, even light validation, runs only on capped, no-swap normal Boat.
+
+## Resolved merge and Boat-only PR checks
+
+Current main's browser-cache change added a disconnect cleanup call beside a
+Wire constructor reference. The merge retains `WIRE.WClose{}` and
+`CST.Cast.drop(client)`, as well as the cleanup call on the other disconnect
+path. Those hooks retain their original source-audit-only qualification; this
+does not claim a full server/runtime compile or integration test.
+
+Boat job `j20261104025314-148480`, work `1505990`, checked the resolved staged
+source tree `f054751bb65068ac49b59c2f57e3cdbf992a6d78` against main
+`2f2c1ab54a9d3015675aed38b855261037521a9e`. It generated the complete current
+3,180-law/128-shard canonical partition, identity
+`7eb8eb0b2c5f40022802a8a566e7c8ff06c695b9ec2af10bc9e38f9d53766ea4`.
+Affected original shard088 passed the unchanged foreign/unsafe-only verdict:
+1.994 s, peak RSS 824,352 KiB, cgroup peak 826,986,496 bytes, actual native
+flock, effective cap 3,699,998,720 bytes, no swap activity. All 459 canonical
+source file hashes still match the checked bytes after receipt-only changes.
+
+The same Boat job then passed all 35 Python tests (3 mapper, 14 canonical-shard,
+18 slicer), canonical and frozen merged-law shape checks, and source patch
+whitespace/applicability. The entire test process tree had a 536,870,912-byte
+cgroup limit, swap 0; peak 73,486,336 bytes, zero OOM/max events. No local test
+or compiler ran after the hard rule. Raw native and check receipts are in
+`merged/`; replay inputs for the light checks are archived there rather than
+adding duplicate full books to the source tree. The sandbox was deleted and
+verified gone, cost $0.00026. These checks do not close the full project gate.

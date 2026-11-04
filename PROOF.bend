@@ -1,4 +1,5 @@
 import ./src/server/wire.bend as WIRE
+
 import ./src/server/watch-plan.bend as WATCHPLAN
 
 import ./test/conversation-proof/window_final.bend as CONVROOT
@@ -294,9 +295,12 @@ import ./test/sidebar_full_branch_test.bend as FULLBRANCH
 import ./test/sidebar_draft_image_test.bend as SIDEDRAFTPROOF
 
 import ./test/secret_proof.bend as SECPROOF
+
 import ./test/secret_box_proof.bend as SECBP
 
 import ./src/core/landing.bend as LAND
+
+import ./src/server/cacheio.bend as CACHEIO
 
 # Lemmas
 # ------
@@ -15835,3 +15839,9 @@ def Laws.mail_json_credit_recharged(json, old, charge): {==}
 def Laws.mail_terminal_credit_recharged(json, old, charge): {==}
 
 def Laws.mail_wire_text_charge(text): {==}
+
+def Laws.cache_effect_slots(): {==}
+
+def Laws.cache_effect_budget(): {==}
+
+def Laws.cache_effect_global_budget(): {==}
