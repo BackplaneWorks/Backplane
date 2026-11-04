@@ -47,7 +47,7 @@
     "src/core/charter.bend": "7f906bdea712f6ff6162735c8cc133767ec0f9289c3d0bee6dfedbd4d75ad981",
     "src/core/chat-pending.bend": "4a6dcabdd6b5653d664729a07d7ff044488732a9e684a7832c18e20502442db1",
     "src/core/client-language.bend": "9315c77e9837deac6813974c711e52a2b4b885df7ecd1fa28ad8b84fb0bc4bac",
-    "src/core/client.bend": "c99b2afd1dc1fce9467829e220083ac1f4788b82f9019856d487f2bc1c74713d",
+    "src/core/client.bend": "10dd8dd4742708d76478574bcd7ac8e6c1e7d0c2873af4cbbcf63f75855b7726",
     "src/core/codec.bend": "75de46900a06e39152c37d4ac5c433a9fbabd522ff20baab18eb5ea5b0ae2bd2",
     "src/core/cron.bend": "6f89a001df0261a25c878616ea66c235e169f7fc1c726d39e695fce8adb57332",
     "src/core/deploy.bend": "ebee4e63a52cf41ae001bebcdbb7fb010ad71c1e04e481292585740d88a39cc4",
@@ -95,7 +95,7 @@
     "src/core/message-context.bend": "7e19596b3acec6ec7a1a10e6643c423ada897a6ee490a58b4a2b39a9767b677d",
     "src/core/model.bend": "6aad79770639632f859b8c7f70e886fa715d1722e64e013df9585942bba77965",
     "src/core/modelpick.bend": "7a04676ab0f5e312e175347f4386b2dd53c69b35071bcdc3c70384d100d0b32f",
-    "src/core/msgs.bend": "a502534d326ea0dc1091faf982ecb2e1a6beee4a975dfc98955f4dda3010ebde",
+    "src/core/msgs.bend": "4b0a10ba6aa8d7b20b85c872c2d8a46397932ece9bd98211f518a7fa58fb95d7",
     "src/core/native-sidebar.bend": "ad4018c6c5213f943ed4bb2472db4c88265555e90cb206907bacea2243ded20c",
     "src/core/notice.bend": "dc5868fa0118a858b9b92bdc67b39660a05919c8beb9ee23f8e30fcfcfb7cd21",
     "src/core/onboard.bend": "8fc5313d4cda3ddd7fac2aebd6d7c38027c0ed5c7931dcc9dc67bb62d43bf705",
@@ -172,7 +172,7 @@
     "src/core/winnote.bend": "f0cbd29916ff64103799874c96b8eee4945c05b1a83fbb3ba083bc1673031255",
     "src/core/wnote.bend": "019cf6a357f4428774176585931a2df17b83d2347b9e1078428f578968e445d5",
     "src/mobile/hubs.bend": "5ca0102839562f4129987deec77baba90fb75337bdb032816e50ae853c2855a0",
-    "src/mobile/screen.bend": "3b31572c206e6bda91867b3030214fb5624552d0d615604f36b8e850b3532437",
+    "src/mobile/screen.bend": "a4df008dd196cfbd6f7e877098bf86e41636947aeca15f76ed9db9be22a67912",
     "src/server/thin-actor.bend": "2e91a6abd414d026cff5da6838c25b313c6b321dbcc663fa351878c028fe4e15",
     "src/server/thin-body.bend": "779e72f8bb69990c74bf4acdd52f50fb1e0ceaa8771cd38044bef81d2c1a3680",
     "src/server/thin-mirror.bend": "b488dc7c45fe49bb1aa17966f454f1ee0e9cfef7db4d619c265c298c9bc94e92",
@@ -182,7 +182,7 @@
     "src/server/thin-signals.bend": "e2213ac2fab79b79dea8d14d4daac4ab9c640231759721079347be156bddebb7",
     "src/server/thin-splice.bend": "d1bc1c8e7710e0efba2abcf3fa599391d5d480eb37ced2a8a4f079d7b079a2be",
     "src/server/thin-view.bend": "c9bfaf9bac65d287fd70d3b804bb7b9bcb20cddd93324f7e477301a9f57382ae",
-    "src/server/thinstore.bend": "e8580475235614156675996055374c89f7de7595835311fabf2b5f9553eec77e",
+    "src/server/thinstore.bend": "07a7bbcfe3f3813f80925c0229e16653e362567d86ff4fb1369de22dbd262572",
     "src/web/allowance.bend": "0e9ee3ab27dd2b3c25a2778a35b300c7333c0878b5215b62c7229fed79ee168b",
     "src/web/bots.bend": "f265768306a1bc1edc14f53d1d6f9c7f7e0362afe236c8edd59f8813bd12aa0c",
     "src/web/cat.bend": "301a7ba925f92fc25bdc35b63f79bcf8bf7b72619106c826c471247a0ace85ba",
@@ -200,7 +200,7 @@
     "src/web/terminal-cells.bend": "398447910b3ffe4645874d8e96198e9008bcb58202f16be95fd0177aa6a0bc63",
     "src/web/usage-graph.bend": "b41a1ffd14194cb6f95703852d238d9401d7aaa42589382bd13203d94d33523d",
     "src/web/usage-page.bend": "40ebb901b56f8c28f2b7eef5551c14b409333c0ef739c4d3df4ed44df581e876",
-    "src/web/view.bend": "7eb118c140ef4c6dcc49a2fa46208dabcf79866ce4b8541c85ba7f78176854aa"
+    "src/web/view.bend": "263a75f7231b4dde0d559700ed618193688f74ca2c360053fc311539035f1c90"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -1129,5 +1129,15 @@
     ],
     "scope": "Manual review: new Files-only readers, icon and generated catalog additions. No sidebar draft/key/filter/unknown-input/authority changes. Full output fixture is UNQUALIFIED after capped termination; no inherited PASS. See explicit review limits.",
     "fullOutput24": "UNQUALIFIED_CAPPED_TERMINATION_143"
+  },
+  "splitViewersReview": {
+    "changedClosureFiles": [
+      "src/core/client.bend",
+      "src/core/msgs.bend",
+      "src/mobile/screen.bend",
+      "src/server/thinstore.bend",
+      "src/web/view.bend"
+    ],
+    "scope": "Split view: the board and the 3D share the side pane one at a time (Split.shows/Split.flip read only the split.hide setting) and the toggles' tooltips; Cadview.dispatch's action and Mob.kn's note actions marked shared; a thinstore.bend comment; the probe card's short Mention label in the catalog; the phone header loses Go to the start and puts Buy it before the views menu; the thread menu gains a Search in thread button (action thread-find, the thread id). No sidebar draft readers, unknown @ retention, private image keys or transport change."
   }
 }

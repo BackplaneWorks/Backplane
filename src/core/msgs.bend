@@ -8879,6 +8879,13 @@ def T.viewer.mention(l: I.Loc) -> String:
     case I.Ja{}:
       "チャットで参照"
 
+def T.viewer.mention.short(l: I.Loc) -> String:
+  match l:
+    case I.En{}:
+      "Mention"
+    case I.Ja{}:
+      "参照"
+
 def T.viewer.mesh.failed(l: I.Loc) -> String:
   match l:
     case I.En{}:

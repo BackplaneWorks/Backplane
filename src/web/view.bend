@@ -1160,6 +1160,7 @@ def View.thread.actions(+lc: I.Loc, summary: List<&2, D.Node>, +st: M.State, +id
   D.El{"details", "thread-actions:" ++ id, List.append(&2, D.Attr, [D.At{"class", "local-menu thread-actions"}], Bool.pick(List<&2, D.Attr>, del, [D.At{"open", ""}], Nil{})), [
     D.El{"summary", "", [D.At{"aria-label", "Thread actions"}, D.At{"title", "Thread actions"}], summary},
     D.El{"div", "", [D.At{"class", "local-menu-body"}], List.concat(&2, D.Node, [
+      [D.Dom.button("thread-find", "thread-find", id, "Find what was said in this thread", "Search in thread")],
       View.header.tools(lc, TO.Tools.head.loc(lc, TO.Head{False{}, settled, pinned, snoozed, archived, del,
         Bool.not(String.is_empty(M.Fork.source(st, id))), term, panel}, "flag", "snooze", "term-toggle", "@term-size")),
       D.Dom.when(U.ThreadTree.can_route(st, id), D.Dom.button("", "thread-child", id, "Create a conversation beneath this thread", "+ New subthread")),
@@ -3942,7 +3943,7 @@ def View.destinations(+lc: I.Loc, +cur: String) -> List<&2, D.Node>:
     View.tab(cur, "board", "view-kind", "board", MSG.T.viewer.board.tip(lc), MSG.T.viewer.board(lc)),
     View.tab(cur, "schematic", "view-kind", "schematic", MSG.T.viewer.schematic.tip(lc), MSG.T.viewer.schematic(lc)),
     View.tab(cur, "3d", "view-kind", "3d", MSG.T.viewer.parts3d.tip(lc), "3D"),
-    View.tab(cur, "split", "view-kind", "split", "Schematic, board and 3D side by side", "Split"),
+    View.tab(cur, "split", "view-kind", "split", "Schematic beside the board or its 3D", "Split"),
     View.tab(cur, "mech", "mech", "", MSG.T.viewer.mech.tip(lc), MSG.T.viewer.mech(lc)),
     View.tab(cur, "files", "fm", "", MSG.T.viewer.files.tip(lc), MSG.T.viewer.files(lc)),
     View.tab(cur, "diff", "diff", "", MSG.T.viewer.diff.tip(lc), MSG.T.viewer.diff(lc)),
@@ -5176,10 +5177,12 @@ def View.solid.loc(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
       [View.solid.workbench(lc, u, U.Solid.want(u), View.solid.boardkey(u))])
 
 # The combined view (client.bend's Split): the schematic beside the board
-# and its 3D model, each pane under a head that names it, with a button
-# that puts it away (the bar's toggles bring it back). The panes draw as on
-# their own tabs (plot2d.js, solid.js), with the layers those show; the
-# schematic's head navigates its sheets.
+# or its 3D model (one at a time: the bar's Board and 3D swap them), each
+# pane under a head that names it, with a button that puts it away (the
+# bar's toggles bring it back). The panes draw as on their own tabs
+# (plot2d.js, solid.js), with the layers those show; the schematic's head
+# navigates its sheets; the edge between the two panes resizes them
+# (project-splitters.js).
 
 def View.combo.hide(+pane: String, +name: String) -> D.Node:
   D.El{"button", "", [D.At{"type", "button"}, D.At{"class", "icon combo-hide"}, D.At{"title", "Hide the " ++ name}, D.At{"aria-label", "Hide the " ++ name},
@@ -5188,9 +5191,15 @@ def View.combo.hide(+pane: String, +name: String) -> D.Node:
 def View.combo.head(+pane: String, +name: String, more: List<&2, D.Node>) -> D.Node:
   D.El{"div", "", [D.At{"class", "combo-head"}], List.append(&2, D.Node, D.Dom.span("combo-name", name) <> more, [View.combo.hide(pane, name)])}
 
+# (the board and the 3D take each other's place)
+def View.combo.toggle.tip(+u: U.Ui, +pane: String, +name: String) -> String:
+  Bool.pick(String, U.Split.on(u, pane), "Hide the " ++ name,
+    Bool.pick(String, Bool.and(String.eq(pane, "3d"), U.Split.on(u, "pcb")), "Show the 3D in place of the board",
+      Bool.pick(String, Bool.and(String.eq(pane, "pcb"), U.Split.on(u, "3d")), "Show the board in place of the 3D", "Show the " ++ name)))
+
 def View.combo.toggle(+u: U.Ui, +pane: String, +name: String) -> D.Node:
   D.El{"button", "", [D.At{"type", "button"}, D.At{"class", Bool.pick(String, U.Split.on(u, pane), "combo-pick on", "combo-pick")},
-    D.At{"aria-pressed", Bool.pick(String, U.Split.on(u, pane), "true", "false")}, D.At{"title", Bool.pick(String, U.Split.on(u, pane), "Hide the ", "Show the ") ++ name},
+    D.At{"aria-pressed", Bool.pick(String, U.Split.on(u, pane), "true", "false")}, D.At{"title", View.combo.toggle.tip(u, pane, name)},
     D.At{"data-value", pane}, D.On{"click", "split-pane"}], [D.Txt{name}]}
 
 def View.combo.separator(+group: String, +first: String, +second: String, controls: String) -> D.Node:
@@ -5264,7 +5273,7 @@ def View.combo.if(on: Bool, +lc: I.Loc, +u: U.Ui, +i: Nat) -> List<&2, D.Node>:
       Nil{}
 
 def View.combo.side.label(+lc: I.Loc, +u: U.Ui) -> String:
-  Bool.pick(String, U.Split.on(u, "pcb"), Bool.pick(String, U.Split.on(u, "3d"), MSG.T.viewer.board(lc) ++ " and 3D", MSG.T.viewer.board(lc)), "3D")
+  Bool.pick(String, U.Split.on(u, "pcb"), MSG.T.viewer.board(lc), "3D")
 
 def View.combo(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
   [View.bar.loc(lc, List.append(&2, D.Node, View.boards(u, "Split"), D.El{"span", "", [D.At{"class", "combo-picks"}, D.At{"role", "group"}, D.At{"aria-label", "Panes"}], [
@@ -5273,9 +5282,8 @@ def View.combo(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
    D.El{"div", "combo", [D.At{"class", "combo"}, D.At{"data-split-project", U.Asset.project(u)}], [D.El{"div", "", [D.At{"class", "combo-in"}],
      List.concat(&2, D.Node, [View.combo.if(U.Split.on(u, "sch"), lc, u, 0n),
        D.Dom.when(Bool.and(U.Split.on(u, "sch"), Bool.or(U.Split.on(u, "pcb"), U.Split.on(u, "3d"))), View.combo.separator("primary", MSG.T.viewer.schematic(lc), View.combo.side.label(lc, u), "combo-sch combo-side")),
-       [D.El{"div", "combo-side", [D.At{"id", "combo-side"}, D.At{"class", "combo-side"}], List.concat(&2, D.Node, [View.combo.if(U.Split.on(u, "pcb"), lc, u, 1n),
-         D.Dom.when(Bool.and(U.Split.on(u, "pcb"), U.Split.on(u, "3d")), View.combo.separator("secondary", MSG.T.viewer.board(lc), "3D", "combo-pcb combo-3d")),
-         View.combo.if(U.Split.on(u, "3d"), lc, u, 2n)])}]])}]}]
+       [D.El{"div", "combo-side", [D.At{"id", "combo-side"}, D.At{"class", "combo-side"}], List.append(&2, D.Node, View.combo.if(U.Split.on(u, "pcb"), lc, u, 1n),
+         View.combo.if(U.Split.on(u, "3d"), lc, u, 2n))}]])}]}]
 
 # The viewer pane: a tab for each thing it shows (the one on show lit),
 # Close, then that thing
@@ -5797,12 +5805,13 @@ def View.chrome.order(buying: Bool) -> List<&2, D.Node>:
     case False{}:
       Nil{}
 
-# a phone's one top bar also holds the rail's views (its menu, as the rail
-# shows it) and Buy it; style.css shows them only where the rail is hidden
+# a phone's one top bar also holds Buy it and the rail's views (its menu,
+# as the rail shows it, in the corner); style.css shows them only where
+# the rail is hidden
 def View.chrome.views(+lc: I.Loc, +u: U.Ui, +id: String) -> D.Node:
   D.El{"div", "top-views", [D.At{"class", "top-views"}],
-    View.workspace.menu(lc, Bool.pick(String, U.Ui.panel(u), U.Rail.tab.of(U.Ui.panel(u), U.Ui.info(u, "view.kind:" ++ id), U.Ui.info(u, "view.path:" ++ id)), ""), U.Ui.flag(u, "term"), U.Ui.flag(u, "palette"))
-      <> View.workspace.buy(U.Fab.rail(u))}
+    List.append(&2, D.Node, View.workspace.buy(U.Fab.rail(u)),
+      [View.workspace.menu(lc, Bool.pick(String, U.Ui.panel(u), U.Rail.tab.of(U.Ui.panel(u), U.Ui.info(u, "view.kind:" ++ id), U.Ui.info(u, "view.path:" ++ id)), ""), U.Ui.flag(u, "term"), U.Ui.flag(u, "palette"))])}
 
 # a thread: its project, its title (a click renames it) and ▾ its menu, then
 # its cells; a project name cut short ends in "…" and its tooltip is whole
@@ -5967,18 +5976,18 @@ def View.phone.views.menu(+lc: I.Loc, +cur: String, term: Bool, palette: Bool) -
 
 def View.phone.views(+lc: I.Loc, +u: U.Ui, +id: String) -> D.Node:
   D.El{"div", "top-views", [D.At{"class", "top-views"}],
-    View.phone.views.menu(lc, Bool.pick(String, U.Ui.panel(u), U.Rail.tab.of(U.Ui.panel(u), U.Ui.info(u, "view.kind:" ++ id), U.Ui.info(u, "view.path:" ++ id)), ""), U.Ui.flag(u, "term"), U.Ui.flag(u, "palette"))
-      <> View.workspace.buy(U.Fab.rail(u))}
+    List.append(&2, D.Node, View.workspace.buy(U.Fab.rail(u)),
+      [View.phone.views.menu(lc, Bool.pick(String, U.Ui.panel(u), U.Rail.tab.of(U.Ui.panel(u), U.Ui.info(u, "view.kind:" ++ id), U.Ui.info(u, "view.path:" ++ id)), ""), U.Ui.flag(u, "term"), U.Ui.flag(u, "palette"))])}
 
-# a thread: ‹, its title (a tap renames it) over its project, ▾ its menu and
-# its views; its state's cells (B's) ride in a row under the header
+# a thread: ‹, its title (a tap renames it) over its project, ▾ its menu,
+# Buy it and its views (in the corner); its state's cells (B's) ride in a row under the header
 def View.phone.head.thread(+lc: I.Loc, +back: List<&2, D.Node>, +u: U.Ui, t: M.Thread) -> List<&2, D.Node>:
   match u t:
     case U.Ui{+st, _, +drafts, _, _, _, +now, _, +panel, _, _, _, _, _, +nf, _, _} M.Thread{+id, +p, title, _, _, turn, pending, archived, override, +sa, +ua, pinned, _, +branch, _, _, _, _, _, _, gone}:
       [PHN.Phone.head(back,
         [D.El{"div", "", [D.At{"class", "title-box"}], List.append(&2, D.Node, View.chrome.order(U.Fab.buying(st, id)), View.title.k.loc(lc, String.eq(U.Str.get(drafts, "@ren"), id), id, U.Label.title(st, id, TTL.Title.shown(lc, title)), U.Str.get(drafts, "@f.title")))},
          D.Dom.span("ph-sub", U.Label.title(st, p, U.Ui.project_title(st, p)))],
-        [PHN.Phone.tool("ph-start", "", "Go to the start", "skip-back"), View.thread.actions(lc, [WI.WIcon.svg("chevron-down", 18)], st, id, TO.Tools.settled(override, Nat.is_gt(sa, ua)), pinned, M.Snooze.on(now, U.Side.until(st, id)), archived,
+        [View.thread.actions(lc, [WI.WIcon.svg("chevron-down", 18)], st, id, TO.Tools.settled(override, Nat.is_gt(sa, ua)), pinned, M.Snooze.on(now, U.Side.until(st, id)), archived,
            String.eq(U.Str.get(drafts, "@del"), id), U.Ui.flag(u, "term"), panel), View.phone.views(lc, u, id)]),
        D.El{"div", "ph-cells", [D.At{"class", "kvs ph-cells"}], View.chrome.cells(gone, lc, st, nf, id, turn, pending, branch, now)}]
 

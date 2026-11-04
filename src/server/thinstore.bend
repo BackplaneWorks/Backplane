@@ -72,7 +72,7 @@ def Ts.above(newest: Bool, h: String, th: String, seq: Nat, keep: String) -> IO(
         r : List<&2, List<&2, String>> <- Ts.query(h, Q.Q.sql.above(keep), [th, Q.Q.n(seq)], 1)
         return Ts.nat(r)
 
-# "start:N" (the phone's Go to the start, web/thin-host.js): the page that
+# "start:N" (asked by older phone web clients' Go to the start): the page that
 # starts at the thread's Nth oldest row is the page below the row 32 after
 # it, so its bound is that row's ordinal (0, the newest page, when the
 # thread has no such row: the newest page holds them)

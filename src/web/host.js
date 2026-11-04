@@ -872,20 +872,6 @@ let jump = null;
 // thread shows it, paging back through the history while it is not there
 // yet (at most 40 pages)
 let searchJump = null;
-// a phone thread header's "Go to the start" (view.bend's View.phone.head.thread):
-// a line under the header says how far it got, with Cancel, then Newest
-let startJump = null, startNote = null, startNoteTimer = 0;
-function startSay(text, action, label) {
-  clearTimeout(startNoteTimer);
-  if (!startNote) { startNote = document.createElement("div");startNote.className = "ph-note";startNote.setAttribute("role", "status");document.body.append(startNote); }
-  startNote.replaceChildren(document.createTextNode(text));
-  if (action) {
-    const b = document.createElement("button");b.type = "button";b.textContent = label;
-    b.addEventListener("click", () => { startSay("");if (action === "cancel") startJump = null;else holdBottom(); });
-    startNote.append(b);
-  }
-  if (!text) { startNote.remove();startNote = null; }
-}
 let earlierAsked = false;
 
 // TanStack virtual-core 3.19.9's layout model is ported in timeline-plan.bend.
@@ -1224,17 +1210,6 @@ function render() {
       if (!searchJump.asked) { searchJump.asked = true; requestAnimationFrame(() => { if (searchJump) { searchJump.asked = false; if (thin.ahead("older")) searchJump.pages++; } }); }
     } else if (thin?.ready) searchJump = null;
   }
-  // "Go to the start": every earlier page, one after another, then the top
-  // (two pages a request; the view shows the oldest page in as it comes)
-  if (startJump && tl2 && startJump.thread === (thin?.session?.sel ?? App.sel(ui))) {
-    if (thin?.hasAhead?.("older") && startJump.pages < 400) {
-      if (startJump.pages) tl2.scrollTop = 0;
-      if (!startJump.asked) { startJump.asked = true; requestAnimationFrame(() => { if (startJump) { startJump.asked = false; if (thin.ahead("older", { two: true })) startJump.pages += 2; } }); }
-    } else if (thin?.ready) {
-      tl2.scrollTop = 0;startJump = null;
-      startSay("The start of the thread", "newest", "Newest ↓");startNoteTimer = setTimeout(() => startSay(""), 8000);
-    }
-  } else if (startJump && startJump.thread !== (thin?.session?.sel ?? App.sel(ui))) { startJump = null;startSay(""); }
   searchLight(tl2);
   panes();
   secretSaves.paint();
@@ -1309,7 +1284,7 @@ function landPathIn(shown, region) {
 function historyRegion(detail, projection) {
   const landing = detail.page && ["older", "newer"].includes(projection);
   const update = !detail.page && projection === "update" && !detail.historyReset && !detail.position;
-  if (!(landing || update) || !Array.isArray(detail.changed) || detail.changed.some(p => !p.length) || searchJump || startJump || jump || scroll) return "page";
+  if (!(landing || update) || !Array.isArray(detail.changed) || detail.changed.some(p => !p.length) || searchJump || jump || scroll) return "page";
   const lines = [];
   for (const r of LAND_REGIONS) { const p = landPathIn(detail.shown, r);if (p) lines.push([r.name, "shown", ...p].join("\t")); }
   if (!lines.length) return "page";
@@ -1702,13 +1677,18 @@ function dispatch(action, value, timer) {
       transitionViews.savePosition(transitionScope(), timelineList(timeline).position());
     }
   }
-  // (the host pages back itself: render's startJump, as a search jump does)
-  if (action === "ph-start") { startJump = { thread: currentSession().sel, pages: 0, asked: false };startSay("Going back to the start…", "cancel", "Cancel");thin?.start?.();later();return true; }
   if (action === "thin-search-open") {
     // (value: a query the command palette could not match: the palette
     // closes first, and the search opens running it once it is gone, render)
     if (value && viewMode === "view-v1" && thin?.ready && document.querySelector(".workspace-palette")) { paletteSearch = value;dispatch("ws-palette-close", "");return true; }
     if (viewMode === "view-v1" && thin?.ready) showThinSearch({ query: value || "", rows: [], cursor: "", hasMore: false });
+    else showViewStatus("Search requires the current conversation connection.");
+    return true;
+  }
+  // the thread menu's "Search in thread" (value: the thread)
+  if (action === "thread-find") {
+    document.querySelectorAll("details.thread-actions[open]").forEach(d => d.removeAttribute("open"));
+    if (viewMode === "view-v1" && thin?.ready) showThinSearch({ query: "", rows: [], cursor: "", hasMore: false }, value || currentSession().sel);
     else showViewStatus("Search requires the current conversation connection.");
     return true;
   }
@@ -3082,7 +3062,7 @@ function refusedView(target, reason) {
   trace("thin-refused", { reason });
   const back = refusedFallback(target, shownTarget, refusedViews);
   if (back === null || !thin) return false;
-  searchJump = null;startJump = null;startSay("");
+  searchJump = null;
   try { if (localStorage.getItem("backplane-selected") === target.id) localStorage.removeItem("backplane-selected"); } catch {}
   clearTimeout(viewNoteTimer);
   viewNote = back ? "That conversation can't be opened; back to the one before." : "That conversation can't be opened; here are your projects.";
@@ -3292,19 +3272,24 @@ function thinFindRow(row, n) {
   if (row.when) { const when = document.createElement("span");when.className = "find-when";when.textContent = row.when;button.append(when); }
   return button;
 }
-function showThinSearch(search) {
+// (thread: the thread menu's "Search in thread", thread-find: only that
+// thread's results, the hub's own first page of them (Search.here in
+// core/thin.bend) and then its "More results" pages, those of other
+// threads left out; a page with none of its own asks the next, a few)
+function showThinSearch(search, thread = "") {
   thinFind = null;
-  const { panel, close } = resultPanel("Search threads", "search-threads");
+  const { panel, close } = resultPanel(thread ? "Search in thread" : "Search threads", "search-threads");
   const query = document.createElement("input");query.type = "text";query.value = search.query;
-  query.placeholder = "Search every thread";query.autocomplete = "off";
-  query.setAttribute("aria-label", "Search every thread");query.setAttribute("role", "combobox");
+  const where = thread ? "Search this thread" : "Search every thread", empty = thread ? "Type a word said in this thread." : "Type a word said in any thread.";
+  query.placeholder = where;query.autocomplete = "off";
+  query.setAttribute("aria-label", where);query.setAttribute("role", "combobox");
   query.setAttribute("aria-controls", "find-rows");query.setAttribute("aria-expanded", "true");
   const note = document.createElement("div");note.className = "find-note";note.setAttribute("role", "status");
   const rows = document.createElement("div");rows.id = "find-rows";rows.className = "find-rows";rows.setAttribute("role", "listbox");
   const foot = document.createElement("footer");foot.textContent = "↑↓ choose · Enter open · Esc close";
   panel.append(query, note, rows, foot);
   // (a phone: threads whose titles match, above what was said in them)
-  const titles = PHONE_TITLES() ? document.createElement("div") : null;
+  const titles = PHONE_TITLES() && !thread ? document.createElement("div") : null;
   if (titles) { titles.className = "find-titles";rows.before(titles); }
   // (the sidebar's rows at once, then the hub's answer's titles, every
   // thread's: Search.titles in server/thin-view.bend)
@@ -3323,7 +3308,7 @@ function showThinSearch(search) {
   };
   // asked: the search on its way (its query and cursor); next: what to ask
   // once it is answered; shown: the query whose results are on screen
-  const f = { asked: null, next: null, shown: null, hits: [], at: -1, group: null, timer: 0, more: null };
+  const f = { asked: null, next: null, shown: null, hits: [], at: -1, group: null, timer: 0, more: null, skipped: 0 };
   const choose = at => {
     f.hits[f.at]?.el.classList.remove("on");f.hits[f.at]?.el.setAttribute("aria-selected", "false");
     f.at = at;const hit = f.hits[at];
@@ -3344,7 +3329,7 @@ function showThinSearch(search) {
   const ask = (text, cursor) => {
     clearTimeout(f.timer);
     if (!rows.isConnected) return;
-    if (!text.trim()) { f.next = null;f.shown = null;f.hits = [];f.at = -1;f.more = null;rows.replaceChildren();note.textContent = "Type a word said in any thread.";return; }
+    if (!text.trim()) { f.next = null;f.shown = null;f.hits = [];f.at = -1;f.more = null;rows.replaceChildren();note.textContent = empty;return; }
     // one at a time: an answer lost is given up after a while
     if (f.asked && Date.now() - f.asked.at < 8000) { f.next = { text, cursor };return; }
     f.next = null;f.asked = { text, cursor, at: Date.now() };
@@ -3352,22 +3337,25 @@ function showThinSearch(search) {
     if (!thin?.search(text, cursor)) { f.asked = null;note.textContent = "Search needs the hub: not connected."; }
   };
   const draw = (search, more) => {
-    if (!more) { rows.replaceChildren();f.hits = [];f.at = -1;f.group = null; }
+    if (!more) { rows.replaceChildren();f.hits = [];f.at = -1;f.group = null;f.skipped = 0; }
     f.more?.remove();f.more = null;
+    const had = f.hits.length;
     for (const row of search.rows || []) {
-      if (row.thread !== f.group) { rows.append(thinFindHead(row));f.group = row.thread; }
+      if (thread && row.thread !== thread) continue;
+      if (row.thread !== f.group && !thread) { rows.append(thinFindHead(row));f.group = row.thread; }
       const el = thinFindRow(row, f.hits.length), n = f.hits.length;
       el.addEventListener("click", () => open(row));
       el.addEventListener("mousemove", () => { if (f.at !== n) choose(n); });
       rows.append(el);f.hits.push({ row, el });
     }
+    if (thread && f.hits.length === had && search.hasMore && search.cursor && f.skipped < 4) { f.skipped++;f.shown = search.query;ask(search.query, search.cursor);return; }
     if (search.hasMore && search.cursor) {
       const button = document.createElement("button");button.type = "button";button.className = "find-more";button.textContent = "More results";
       button.addEventListener("click", () => { ask(search.query, search.cursor);query.focus(); });rows.append(button);f.more = button;
     }
     f.shown = search.query;
     if (!more && Array.isArray(search.titles)) showTitles(search.titles);
-    note.textContent = f.hits.length || titles?.childElementCount ? "" : `Nothing matches “${search.query.trim()}”.`;
+    note.textContent = f.hits.length || titles?.childElementCount ? "" : thread ? `Nothing in this thread matches “${search.query.trim()}”.` : `Nothing matches “${search.query.trim()}”.`;
     if (!more && f.hits.length) choose(0);
   };
   thinFind = {
@@ -3408,7 +3396,7 @@ function showThinSearch(search) {
   showTitles();
   if (search.rows?.length) draw(search, false);
   else if (search.query) ask(search.query, "");
-  else note.textContent = "Type a word said in any thread.";
+  else note.textContent = empty;
   query.focus();
 }
 function thinSearchAnswer(search) {
@@ -3649,12 +3637,8 @@ async function startThin(again = false, reason = "initial") {
           resumedConversation = null;
         }
         const previous = historyNode || node;
-        // (the start of the thread, thin-host's start(): a page of its own, as the newest is)
-        const projection = historyNode ? (detail.page?.direction === "start" ? "newest" : detail.page?.direction || "update") : "reset";
+        const projection = historyNode ? detail.page?.direction || "update" : "reset";
         if (RR && historyNode && projection === "older") RR.n("land.block." + History.why(previous, node, projection));
-        // "Go to the start" counts the earlier pages as they land (most come
-        // through the ordinary paging at the top, not its own requests)
-        if (startJump && projection === "older") { startJump.landed = (startJump.landed || 0) + 1;startSay(`Going back to the start… ${startJump.landed} ${startJump.landed === 1 ? "page" : "pages"}`, "cancel", "Cancel"); }
         const p0 = RR ? pnow() : 0;
         // historyNode is a merge's own result, prepared already and marked with
         // where its last non-entry row is: an older page is added as a block,

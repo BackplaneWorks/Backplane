@@ -10,12 +10,12 @@ def T.plain.nrrrlllllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, S
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.viewer.field.sheet(l)}
+      Some{CAT_0.T.viewer.field.side(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrrlllllll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrlllllll.cmp(String.cmp(key, "viewer.field.sheet"), l)
+  T.plain.nrrrlllllll.cmp(String.cmp(key, "viewer.field.side"), l)
 
 def T.plain.nrrrllllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -23,12 +23,12 @@ def T.plain.nrrrllllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       T.plain.nrrrlllllll(l, key)
     case EQ{}:
-      Some{CAT_0.T.viewer.field.side(l)}
+      Some{CAT_0.T.viewer.field.size(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrrllllll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrllllll.cmp(String.cmp(key, "viewer.field.side"), l)
+  T.plain.nrrrllllll.cmp(String.cmp(key, "viewer.field.size"), l)
 
 def T.plain.nrrrlllllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -36,12 +36,12 @@ def T.plain.nrrrlllllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.viewer.field.symbol(l)}
+      Some{CAT_0.T.viewer.field.text(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrrlllllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrlllllr.cmp(String.cmp(key, "viewer.field.symbol"), l)
+  T.plain.nrrrlllllr.cmp(String.cmp(key, "viewer.field.text"), l)
 
 def T.plain.nrrrlllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -49,12 +49,12 @@ def T.plain.nrrrlllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrrrllllll(l, key)
     case EQ{}:
-      Some{CAT_0.T.viewer.field.size(l)}
+      Some{CAT_0.T.viewer.field.symbol(l)}
     case GT{}:
       T.plain.nrrrlllllr(l, key)
 
 def T.plain.nrrrlllll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrlllll.cmp(String.cmp(key, "viewer.field.size"), l)
+  T.plain.nrrrlllll.cmp(String.cmp(key, "viewer.field.symbol"), l)
 
 def T.plain.nrrrllllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -62,12 +62,12 @@ def T.plain.nrrrllllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.viewer.field.value(l)}
+      Some{CAT_0.T.viewer.field.width(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrrllllrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrllllrl.cmp(String.cmp(key, "viewer.field.value"), l)
+  T.plain.nrrrllllrl.cmp(String.cmp(key, "viewer.field.width"), l)
 
 def T.plain.nrrrllllrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -75,12 +75,12 @@ def T.plain.nrrrllllrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.viewer.file.unread(l)}
+      Some{CAT_0.T.viewer.files(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrrllllrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrllllrr.cmp(String.cmp(key, "viewer.file.unread"), l)
+  T.plain.nrrrllllrr.cmp(String.cmp(key, "viewer.files"), l)
 
 def T.plain.nrrrllllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -88,12 +88,12 @@ def T.plain.nrrrllllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrrrllllrl(l, key)
     case EQ{}:
-      Some{CAT_0.T.viewer.field.width(l)}
+      Some{CAT_0.T.viewer.file.unread(l)}
     case GT{}:
       T.plain.nrrrllllrr(l, key)
 
 def T.plain.nrrrllllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrllllr.cmp(String.cmp(key, "viewer.field.width"), l)
+  T.plain.nrrrllllr.cmp(String.cmp(key, "viewer.file.unread"), l)
 
 def T.plain.nrrrllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -101,12 +101,12 @@ def T.plain.nrrrllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Stri
     case LT{}:
       T.plain.nrrrlllll(l, key)
     case EQ{}:
-      Some{CAT_0.T.viewer.field.text(l)}
+      Some{CAT_0.T.viewer.field.value(l)}
     case GT{}:
       T.plain.nrrrllllr(l, key)
 
 def T.plain.nrrrllll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrllll.cmp(String.cmp(key, "viewer.field.text"), l)
+  T.plain.nrrrllll.cmp(String.cmp(key, "viewer.field.value"), l)
 
 def T.plain.nrrrlllrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -114,12 +114,12 @@ def T.plain.nrrrlllrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, S
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.viewer.files.back(l)}
+      Some{CAT_0.T.viewer.files.empty(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrrlllrlll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrlllrlll.cmp(String.cmp(key, "viewer.files.back"), l)
+  T.plain.nrrrlllrlll.cmp(String.cmp(key, "viewer.files.empty"), l)
 
 def T.plain.nrrrlllrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -127,12 +127,12 @@ def T.plain.nrrrlllrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       T.plain.nrrrlllrlll(l, key)
     case EQ{}:
-      Some{CAT_0.T.viewer.files.empty(l)}
+      Some{CAT_0.T.viewer.files.loading(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrrlllrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrlllrll.cmp(String.cmp(key, "viewer.files.empty"), l)
+  T.plain.nrrrlllrll.cmp(String.cmp(key, "viewer.files.loading"), l)
 
 def T.plain.nrrrlllrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -140,12 +140,12 @@ def T.plain.nrrrlllrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.viewer.files.tip(l)}
+      Some{CAT_0.T.viewer.fit(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrrlllrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrlllrlr.cmp(String.cmp(key, "viewer.files.tip"), l)
+  T.plain.nrrrlllrlr.cmp(String.cmp(key, "viewer.fit"), l)
 
 def T.plain.nrrrlllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -153,12 +153,12 @@ def T.plain.nrrrlllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrrrlllrll(l, key)
     case EQ{}:
-      Some{CAT_0.T.viewer.files.loading(l)}
+      Some{CAT_0.T.viewer.files.tip(l)}
     case GT{}:
       T.plain.nrrrlllrlr(l, key)
 
 def T.plain.nrrrlllrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrlllrl.cmp(String.cmp(key, "viewer.files.loading"), l)
+  T.plain.nrrrlllrl.cmp(String.cmp(key, "viewer.files.tip"), l)
 
 def T.plain.nrrrlllrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -166,12 +166,12 @@ def T.plain.nrrrlllrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.viewer.fit.tip(l)}
+      Some{CAT_0.T.viewer.help.board(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrrlllrrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrlllrrl.cmp(String.cmp(key, "viewer.fit.tip"), l)
+  T.plain.nrrrlllrrl.cmp(String.cmp(key, "viewer.help.board"), l)
 
 def T.plain.nrrrlllrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -179,12 +179,12 @@ def T.plain.nrrrlllrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.viewer.help.browser(l)}
+      Some{CAT_0.T.viewer.help.scroll(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrrlllrrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrlllrrr.cmp(String.cmp(key, "viewer.help.browser"), l)
+  T.plain.nrrrlllrrr.cmp(String.cmp(key, "viewer.help.scroll"), l)
 
 def T.plain.nrrrlllrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -192,12 +192,12 @@ def T.plain.nrrrlllrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrrrlllrrl(l, key)
     case EQ{}:
-      Some{CAT_0.T.viewer.help.board(l)}
+      Some{CAT_0.T.viewer.help.browser(l)}
     case GT{}:
       T.plain.nrrrlllrrr(l, key)
 
 def T.plain.nrrrlllrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrlllrr.cmp(String.cmp(key, "viewer.help.board"), l)
+  T.plain.nrrrlllrr.cmp(String.cmp(key, "viewer.help.browser"), l)
 
 def T.plain.nrrrlllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -205,12 +205,12 @@ def T.plain.nrrrlllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Stri
     case LT{}:
       T.plain.nrrrlllrl(l, key)
     case EQ{}:
-      Some{CAT_0.T.viewer.fit(l)}
+      Some{CAT_0.T.viewer.fit.tip(l)}
     case GT{}:
       T.plain.nrrrlllrr(l, key)
 
 def T.plain.nrrrlllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrlllr.cmp(String.cmp(key, "viewer.fit"), l)
+  T.plain.nrrrlllr.cmp(String.cmp(key, "viewer.fit.tip"), l)
 
 def T.plain.nrrrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -218,12 +218,12 @@ def T.plain.nrrrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Strin
     case LT{}:
       T.plain.nrrrllll(l, key)
     case EQ{}:
-      Some{CAT_0.T.viewer.files(l)}
+      Some{CAT_0.T.viewer.files.back(l)}
     case GT{}:
       T.plain.nrrrlllr(l, key)
 
 def T.plain.nrrrlll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrlll.cmp(String.cmp(key, "viewer.files"), l)
+  T.plain.nrrrlll.cmp(String.cmp(key, "viewer.files.back"), l)
 
 def T.plain.nrrrllrllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -231,12 +231,12 @@ def T.plain.nrrrllrllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, S
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.viewer.help.solid(l)}
+      Some{CAT_0.T.viewer.history.added(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrrllrllll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrllrllll.cmp(String.cmp(key, "viewer.help.solid"), l)
+  T.plain.nrrrllrllll.cmp(String.cmp(key, "viewer.history.added"), l)
 
 def T.plain.nrrrllrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -244,12 +244,12 @@ def T.plain.nrrrllrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       T.plain.nrrrllrllll(l, key)
     case EQ{}:
-      Some{CAT_0.T.viewer.history.added(l)}
+      Some{CAT_0.T.viewer.history.changed(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrrllrlll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrllrlll.cmp(String.cmp(key, "viewer.history.added"), l)
+  T.plain.nrrrllrlll.cmp(String.cmp(key, "viewer.history.changed"), l)
 
 def T.plain.nrrrllrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -257,12 +257,12 @@ def T.plain.nrrrllrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.viewer.history.changes(l)}
+      Some{CAT_0.T.viewer.history.compare(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrrllrllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrllrllr.cmp(String.cmp(key, "viewer.history.changes"), l)
+  T.plain.nrrrllrllr.cmp(String.cmp(key, "viewer.history.compare"), l)
 
 def T.plain.nrrrllrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -270,12 +270,12 @@ def T.plain.nrrrllrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrrrllrlll(l, key)
     case EQ{}:
-      Some{CAT_0.T.viewer.history.changed(l)}
+      Some{CAT_0.T.viewer.history.changes(l)}
     case GT{}:
       T.plain.nrrrllrllr(l, key)
 
 def T.plain.nrrrllrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrllrll.cmp(String.cmp(key, "viewer.history.changed"), l)
+  T.plain.nrrrllrll.cmp(String.cmp(key, "viewer.history.changes"), l)
 
 def T.plain.nrrrllrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -283,12 +283,12 @@ def T.plain.nrrrllrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.viewer.history.compare.new(l)}
+      Some{CAT_0.T.viewer.history.compare.old(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrrllrlrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrllrlrl.cmp(String.cmp(key, "viewer.history.compare.new"), l)
+  T.plain.nrrrllrlrl.cmp(String.cmp(key, "viewer.history.compare.old"), l)
 
 def T.plain.nrrrllrlrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -296,12 +296,12 @@ def T.plain.nrrrllrlrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.viewer.history.new(l)}
+      Some{CAT_0.T.viewer.history.old(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrrllrlrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrllrlrr.cmp(String.cmp(key, "viewer.history.new"), l)
+  T.plain.nrrrllrlrr.cmp(String.cmp(key, "viewer.history.old"), l)
 
 def T.plain.nrrrllrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -309,12 +309,12 @@ def T.plain.nrrrllrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrrrllrlrl(l, key)
     case EQ{}:
-      Some{CAT_0.T.viewer.history.compare.old(l)}
+      Some{CAT_0.T.viewer.history.new(l)}
     case GT{}:
       T.plain.nrrrllrlrr(l, key)
 
 def T.plain.nrrrllrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrllrlr.cmp(String.cmp(key, "viewer.history.compare.old"), l)
+  T.plain.nrrrllrlr.cmp(String.cmp(key, "viewer.history.new"), l)
 
 def T.plain.nrrrllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -322,12 +322,12 @@ def T.plain.nrrrllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Stri
     case LT{}:
       T.plain.nrrrllrll(l, key)
     case EQ{}:
-      Some{CAT_0.T.viewer.history.compare(l)}
+      Some{CAT_0.T.viewer.history.compare.new(l)}
     case GT{}:
       T.plain.nrrrllrlr(l, key)
 
 def T.plain.nrrrllrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrllrl.cmp(String.cmp(key, "viewer.history.compare"), l)
+  T.plain.nrrrllrl.cmp(String.cmp(key, "viewer.history.compare.new"), l)
 
 def T.plain.nrrrllrrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -335,12 +335,12 @@ def T.plain.nrrrllrrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.viewer.history.pick(l)}
+      Some{CAT_0.T.viewer.history.ref(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrrllrrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrllrrll.cmp(String.cmp(key, "viewer.history.pick"), l)
+  T.plain.nrrrllrrll.cmp(String.cmp(key, "viewer.history.ref"), l)
 
 def T.plain.nrrrllrrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -348,12 +348,12 @@ def T.plain.nrrrllrrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.viewer.history.removed(l)}
+      Some{CAT_0.T.viewer.item.footprint(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrrllrrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrllrrlr.cmp(String.cmp(key, "viewer.history.removed"), l)
+  T.plain.nrrrllrrlr.cmp(String.cmp(key, "viewer.item.footprint"), l)
 
 def T.plain.nrrrllrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -361,12 +361,12 @@ def T.plain.nrrrllrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrrrllrrll(l, key)
     case EQ{}:
-      Some{CAT_0.T.viewer.history.ref(l)}
+      Some{CAT_0.T.viewer.history.removed(l)}
     case GT{}:
       T.plain.nrrrllrrlr(l, key)
 
 def T.plain.nrrrllrrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrllrrl.cmp(String.cmp(key, "viewer.history.ref"), l)
+  T.plain.nrrrllrrl.cmp(String.cmp(key, "viewer.history.removed"), l)
 
 def T.plain.nrrrllrrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -374,12 +374,12 @@ def T.plain.nrrrllrrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.viewer.item.globallabel(l)}
+      Some{CAT_0.T.viewer.item.hierlabel(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrrllrrrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrllrrrl.cmp(String.cmp(key, "viewer.item.globallabel"), l)
+  T.plain.nrrrllrrrl.cmp(String.cmp(key, "viewer.item.hierlabel"), l)
 
 def T.plain.nrrrllrrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -387,12 +387,12 @@ def T.plain.nrrrllrrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.viewer.item.label(l)}
+      Some{CAT_0.T.viewer.item.netclassflag(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrrllrrrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrllrrrr.cmp(String.cmp(key, "viewer.item.label"), l)
+  T.plain.nrrrllrrrr.cmp(String.cmp(key, "viewer.item.netclassflag"), l)
 
 def T.plain.nrrrllrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -400,12 +400,12 @@ def T.plain.nrrrllrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrrrllrrrl(l, key)
     case EQ{}:
-      Some{CAT_0.T.viewer.item.hierlabel(l)}
+      Some{CAT_0.T.viewer.item.label(l)}
     case GT{}:
       T.plain.nrrrllrrrr(l, key)
 
 def T.plain.nrrrllrrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrllrrr.cmp(String.cmp(key, "viewer.item.hierlabel"), l)
+  T.plain.nrrrllrrr.cmp(String.cmp(key, "viewer.item.label"), l)
 
 def T.plain.nrrrllrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -413,12 +413,12 @@ def T.plain.nrrrllrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Stri
     case LT{}:
       T.plain.nrrrllrrl(l, key)
     case EQ{}:
-      Some{CAT_0.T.viewer.item.footprint(l)}
+      Some{CAT_0.T.viewer.item.globallabel(l)}
     case GT{}:
       T.plain.nrrrllrrr(l, key)
 
 def T.plain.nrrrllrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrllrr.cmp(String.cmp(key, "viewer.item.footprint"), l)
+  T.plain.nrrrllrr.cmp(String.cmp(key, "viewer.item.globallabel"), l)
 
 def T.plain.nrrrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -426,12 +426,12 @@ def T.plain.nrrrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Strin
     case LT{}:
       T.plain.nrrrllrl(l, key)
     case EQ{}:
-      Some{CAT_0.T.viewer.history.old(l)}
+      Some{CAT_0.T.viewer.history.pick(l)}
     case GT{}:
       T.plain.nrrrllrr(l, key)
 
 def T.plain.nrrrllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrllr.cmp(String.cmp(key, "viewer.history.old"), l)
+  T.plain.nrrrllr.cmp(String.cmp(key, "viewer.history.pick"), l)
 
 def T.plain.nrrrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -439,9 +439,9 @@ def T.plain.nrrrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String
     case LT{}:
       T.plain.nrrrlll(l, key)
     case EQ{}:
-      Some{CAT_0.T.viewer.help.scroll(l)}
+      Some{CAT_0.T.viewer.help.solid(l)}
     case GT{}:
       T.plain.nrrrllr(l, key)
 
 def T.plain.nrrrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrll.cmp(String.cmp(key, "viewer.help.scroll"), l)
+  T.plain.nrrrll.cmp(String.cmp(key, "viewer.help.solid"), l)
