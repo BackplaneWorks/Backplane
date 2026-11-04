@@ -1,7 +1,9 @@
 # Combined copied-store and active-load preparation
 
-Status: **unexecuted preparation**. There is no runtime, memory, CPU, latency,
-startup or package PASS from this change. The memory owner `t1793648028-1245355`
+Status: **revised preparation, held for review**. The first no-hub packet on
+`bdd09fe794` failed its producer assertion; the revised producer and execution
+scope controls have not run. There is no whole-harness, actual-hub cleanup,
+memory, CPU, latency, startup or package PASS. The memory owner `t1793648028-1245355`
 retains sole packaged before/after evaluation. Send the frozen source and check
 scope to that owner before executing even the self-tests. Existing recovery,
 load, policy and fence files are unchanged; the owner's pending fence fixes
@@ -140,13 +142,27 @@ at most 900 process samples and 60 aggregate phase summaries. Logs are drained
 with a 16KiB private tail and 64MiB total limit; neither tail nor raw replies
 enter artifacts. The iterative single-flight refresh pump retains one pending
 invalidation flag and one picture/call, rather than recursive promise frames.
-Cleanup tracks actual owned descendants in this fresh namespace, validates
-process birth/namespace (including exec wrappers and verification stand-ins),
-awaits exit and escalates TERM/KILL. It deletes the home only after the owned
-hub, producers and log streams are stopped; uncertainty fails and preserves
-the private copy instead of deleting it under a still-running child.
+The revised cleanup launches the payload in a fresh capped systemd user scope.
+The manager's invocation ID, cgroup inode/device and actual hub executable,
+argv and birth are checked independently. CPU sampling uses that actual hub
+PID, rather than the manager or a wrapper. The fresh child environment is
+passed through `env -i`; only the manager receives the user bus environment.
+A short shell admission barrier holds the payload until the controller has read and verified the actual kernel cap and swap limit; only then is its private gate created. The controller stays outside the kill scope. The 15-second startup clock includes this admission.
 
-Proposed checks, **not yet executed**:
+Cleanup uses descriptor-bound `cgroup.kill` and whole-subtree `populated`,
+independently of whether the hub leader has already exited. These kernel
+interfaces include other task children and concurrent forks; see the
+[cgroup v2 interface](https://docs.kernel.org/admin-guide/cgroup-v2.html#core-interface-files)
+and [systemd scope lifetime](https://www.freedesktop.org/software/systemd/man/latest/systemd.scope.html).
+Every signal target is the verified owned scope, never a copied/recycled PID.
+An unknown invocation, missing identity, denied operation or ambiguous
+retirement permanently refuses cleanup PASS and preserves the private home.
+The home is removed only after proven whole-scope emptiness, launcher exit
+and closed log streams, with each result included in `report.checks`.
+Delegate/kill permissions and the revised implementation remain unqualified
+until the owner releases and reviews the synthetic Boat controls.
+
+Proposed next checks, **not released or executed on the revised source**:
 
 ```sh
 REAL_ACTIVE_FENCE_PREREQUISITE=/private/staged/FENCE-PREREQUISITE.json node test/tools/real_store_active_fence_test.cjs
@@ -157,11 +173,41 @@ Run only through the normal reviewed daily Boat runner, with hard memory
 <=3,700,000,000 bytes and swap zero; never locally or on xlarge. These checks
 use pure negative controls, mocked fence transports, synthetic in-memory
 streamed tar/gzip (including PAX, splits and truncation), a 20,000-refresh
-logical retention/queue control, codec checks and one short synthetic
-producer. They start no hub and open no real store. The forwarding control
+logical retention/queue control and codec checks. The revised producer control
+requires observed completed text, tool use, tool result and matching receipt
+counters before switching phases, with a bounded deadline and aggregate
+emitted phase spans. A separate real stand-in with only its cycle gate
+suppressed must fail readiness despite fresh deltas. Sixteen explicit
+producer assertions are expected. It does not substitute a longer fixed sleep
+for observing the missing cycle.
+
+Twenty-eight execution-scope controls include a synthetic Node worker spawning
+a child absent from the main task's children list, a late orphan after leader
+exit, concurrent spawning during stop, missing-task reads, replaced invocation
+and inode/device, and unknown-owner refusal. They use the same production
+harness scope implementation, start two small synthetic scopes and preserve
+their homes on uncertainty. Each has the same <=3.7GB/no-swap cap; no actual
+hub or real store is opened. The packet must verify those scope identities,
+caps, admission/pre-kill resource observations and cleanup as well as the outer workers. Resource observations are explicitly pre-kill; missing counters fail rather than becoming invented zeroes after cgroup retirement.
+The forwarding control
 intentionally rejects the old fence that loses Node HTTP option/callback
 overloads; do not weaken it to accept that version. There is no full/root
 proof, production compile or load run in this check scope.
+
+The original released packet is preserved in
+[`extra/hub-real-active-qualification/bdd09`](../../extra/hub-real-active-qualification/bdd09/FAILURE.json):
+work `1567247`, job `j20261104073057-626225`, overall exit 1. Node receipt-pinned
+fence mocks passed; Bun reported 54 policy cases, 29 streamed archive cases
+and 20,000 iterative refreshes before the producer assertion at line 45.
+It observed no mixed tool-use row after its fixed 650ms delay; the cause is
+unknown. Producer receipt assertions and the terminal sentinel were not
+reached. This partial evidence cannot qualify the producer or full harness.
+All 26 staged inputs and tool hashes were unchanged. Worker peaks were
+23,425,024 and 85,204,992 bytes; controller peak was 349,569,024 bytes, with
+zero OOM/swap events, no remaining worker children, clean synthetic temp and
+verified VM deletion. The original failed fence provenance remains failed.
+Raw receipt bytes and log hashes are retained; raw logs and private overlay
+receipt bodies are not published. No second packet has run.
 
 The evaluator's later acceptance command supplies `--bin`, `--artifact-receipt`,
 `--sha256`, `--fixture`, `--fixture-sha256`, `--fixture-receipt-sha256`,
