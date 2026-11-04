@@ -49,7 +49,7 @@ final class GoogleLoop: NSObject, ASWebAuthenticationPresentationContextProvidin
               let r = URLComponents(url: u, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "redirect_uri" })?.value,
               r == "http://127.0.0.1:\(port)/oauth/google" else { return }
         opened = true
-        let s = ASWebAuthenticationSession(url: u, callbackURLScheme: "backplane") { [weak self] _, _ in
+        let s = ASWebAuthenticationSession(url: u, callbackURLScheme: AppIdentity.scheme) { [weak self] _, _ in
             Task { @MainActor in self?.stop() }
         }
         s.presentationContextProvider = self
@@ -69,7 +69,7 @@ final class GoogleLoop: NSObject, ASWebAuthenticationPresentationContextProvidin
                     c.send(content: Data("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".utf8), completion: .contentProcessed { _ in c.cancel() })
                     return
                 }
-                let reply = "HTTP/1.1 302 Found\r\nLocation: backplane://google\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                let reply = "HTTP/1.1 302 Found\r\nLocation: \(AppIdentity.scheme)://google\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
                 c.send(content: Data(reply.utf8), completion: .contentProcessed { _ in c.cancel() })
                 self.act?("google", "done:http://127.0.0.1:\(self.port)\(path)")
                 self.listener?.cancel()

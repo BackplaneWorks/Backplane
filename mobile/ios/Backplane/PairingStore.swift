@@ -7,7 +7,7 @@ import Security
 // before that one "link"): the first load moves them here and removes them
 // there only once the Keychain holds them.
 enum PairingStore {
-    private static let service = "dev.backplane.mobile.pairing"
+    private static let service = (Bundle.main.bundleIdentifier ?? "dev.backplane.mobile") + ".pairing"
     private static let account = "links"
 
     private static var query: [String: Any] {
