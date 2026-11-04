@@ -1,6 +1,8 @@
 name: Issue 927 exact Windows package consumer
 # The preceding attempt stopped at wrapper usage exit 64 before either native
 # check; this revision fixes argv transport and captures wrapper diagnostics.
+# Logon-created wrapper is explicitly admitted to the same 8 GiB job before
+# its independent guard; an observed zero job limit remains a hard refusal.
 on:
   push:
     branches: [backplane/verify-kicad-windows-927]
