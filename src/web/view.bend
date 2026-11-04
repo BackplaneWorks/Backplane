@@ -2301,6 +2301,17 @@ def View.settings.phone.notify(phone: Bool, +lc: I.Loc) -> List<&2, D.Node>:
            "この http:// アドレスでは使えません：スマートフォンのブラウザは HTTPS でのみ通知を許可します。ハブを --tailscale-https で起動し、その https:// アドレスをここで開いてください。"))])]
     case False{}: Nil{}
 
+# inside the phone apps (docs/phone-app-shell.md; app-shell.js's
+# [data-ph-app], html.ph-in-app shows it): the app's own settings, its
+# hubs, notifications and Classic screens
+def View.settings.phone.app(phone: Bool, +lc: I.Loc) -> List<&2, D.Node>:
+  match phone:
+    case True{}:
+      [D.El{"div", "", [D.At{"class", "ph-app-row"}], [View.setrow(SM.Menu.text(lc, "This phone app", "このスマートフォンアプリ"),
+        SM.Menu.text(lc, "The hubs this phone is paired with, its notifications, and the app's Classic screens.", "ペアリングしたハブ、通知、アプリのクラシック画面。"),
+        [D.El{"button", "", [D.At{"type", "button"}, D.At{"data-ph-app", "settings"}], [D.Txt{SM.Menu.text(lc, "App settings", "アプリの設定")}]}])]}]
+    case False{}: Nil{}
+
 # a phone's way to Improvements (improvements.js opens it from any
 # [data-improvements]; the desktop's is in the top bar, which a phone has not)
 def View.settings.improve(phone: Bool, +lc: I.Loc) -> List<&2, D.Node>:
@@ -2316,14 +2327,14 @@ def View.settings.rows.k(i: Nat, +lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2
       View.lang.loc(lc, u),
       [View.setrow(MSG.T.settings.sidebar(lc), MSG.T.settings.sidebar.note(lc), View.chips.loc(lc, ["projects", "active"], U.Side.view(st), "sidebar.view"))],
       [View.setrow(MSG.T.settings.textsize(lc), MSG.T.settings.textsize.note(lc), View.settings.scale(TS.Scale.options(), TS.Scale.of(st)))],
-      View.settings.phone.layout(PHN.Phone.on(u), lc)])
+      View.settings.phone.layout(PHN.Phone.on(u), lc), View.settings.phone.app(PHN.Phone.on(u), lc)])
     case 1n: List.concat(&2, D.Node, [[View.setrow(MSG.T.settings.settle(lc), U.Settings.settle.note(lc, st), View.chips.loc(lc, ["0", "5", "10", "15", "30", "60"], M.Setting.get(st, "settle.idle.minutes", "15"), "settle.idle.minutes"))],
       [View.setrow(MSG.T.settings.settle.personal(lc), MSG.T.settings.settle.personal.note(lc), View.chips.loc(lc, ["0", "60", "120", "240", "480"], M.Setting.get(st, "settle.personal.minutes", "240"), "settle.personal.minutes"))],
       [View.setrow(MSG.T.settings.settle.done(lc), MSG.T.settings.settle.done.note(lc), View.chips.loc(lc, ["on", "off"], Bool.pick(String, M.Lifecycle.on(st), "on", "off"), M.Lifecycle.key()))],
       [View.setrow(MSG.T.settings.restart(lc), MSG.T.settings.restart.note(lc), View.chips.loc(lc, ["on", "off"], Bool.pick(String, M.Carry.on(st), "on", "off"), "restart.continue"))],
       [View.setrow(U.Files.set.label(), U.Files.set.note(st), View.chips.loc(lc, AT.Att.sizes(), U.Files.set.on(st), AT.Att.key()))],
       View.notify(lc, st),
-      View.settings.phone.notify(PHN.Phone.on(u), lc),
+      View.settings.phone.notify(PHN.Phone.on(u), lc), View.settings.phone.app(PHN.Phone.on(u), lc),
       View.agy.rows(u, U.Hookv.rows.loc(lc, u))])
     case 2n: List.append(&2, D.Node, Bool.pick(List<&2, D.Node>, U.Psv.active(u), View.agy.rows(u, U.Psv.rows(1n, u)), List.concat(&2, D.Node, [View.agy.rows(u, U.Psv.rows(1n, u)), [View.setrow(MSG.T.settings.provider(lc), MSG.T.settings.agents.note(lc, Bool.pick(String, String.is_empty(U.Models.cli(U.Str.get(nf, "models"), prov)), MSG.T.settings.provider.missing(lc, prov), U.Models.cli(U.Str.get(nf, "models"), prov))), View.chips.loc(lc, ["claude", "codex", "grok", "muse", "antigravity", "opencode", "pi", "omp"], prov, "agent.provider"))],
       [View.setrow(MSG.T.settings.model(lc), Bool.pick(String, String.is_empty(M.Setting.get(st, "agent.model", "")), MSG.T.common.default(lc), M.Setting.get(st, "agent.model", "")) ++ ": " ++ U.Models.label_of(U.Models.of(nf, prov), prov, M.Setting.get(st, "agent.model", "")),
