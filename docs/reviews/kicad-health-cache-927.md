@@ -71,8 +71,12 @@ The actual Bend `Rt.save` IO regression checks Windows drive paths, trailing
 backslashes, `\b`, `\n`, `\t`, spaces, UNC paths, Unicode, quotes and actual
 control characters. The native effect regression also checks replacement,
 file permissions on POSIX, partial-write failure, rename failure and cleanup.
-Both are included in CI. Scoped Boat execution and canonical proof have
-separate receipts; an interrupted proof never counts as passing.
+The effect controls and a source assertion that `Rt.save` uses the native
+writer without `Proc.run` run with Bun in every `scripts/local-small.py` lane.
+The actual Bend IO fixture and effect controls also run in the Linux
+nightly/release CI workflow; that workflow is not the per-PR merge gate.
+Scoped Boat execution and canonical proof have separate receipts; an
+interrupted proof never counts as passing.
 
 Boat job `j20261104193708-1087045` completed successfully under kernel
 `memory.max=3699998720`, swap 0. Atomic-write controls, the compiled actual
@@ -82,6 +86,17 @@ passed. The unchanged canonical `bend PROOF.bend` attempt was separately
 **incomplete**: kernel-confirmed OOM kill after 13.529 seconds, before the
 explicit 120-second timeout, with no proof output. No law/proof was changed.
 Receipts are under `extra/kicad-927-native-fix/evidence/`.
+
+After review, Boat `j20261104195200-1195105` reran those scoped checks with
+Bun effect controls and the caller assertion: all passed. It then attempted
+`scripts/local-small.py --focused-only --guards-only`. That broader gate
+**failed**, in the existing sidebar-draft guard, because the pinned hashes
+for `src/core/kexport.bend`, `src/core/refview.bend` and `src/mobile/hubs.bend`
+were stale. All reviewed sidebar inputs, its manifest, scanner, guard and
+test are byte-identical to branch base `caf71af247d87f9d89c0af7ced8a2721d152d541`;
+current main `123676a2ff041a712c112010f7a04e8a85290a6f` retains those same
+three mismatches. No guard or pin was bypassed/refreshed here. The scoped
+pass does not qualify that full small gate. Its failure is routed separately.
 
 This source fix still needs a real corrected packaged-build acceptance run;
 the already-produced frozen package cannot contain it. Package production and

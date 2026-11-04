@@ -14,7 +14,7 @@ record = {'state': 'incomplete', 'memoryMaxBytes': memory, 'swapMaxBytes': swap,
           'sources': {p: hashlib.sha256(Path(p).read_bytes()).hexdigest() for p in
                       ['src/server/host.bend', 'src/server/effects/host.js', 'src/server/kicad.bend']},
           'checks': []}
-for command in [['node', 'test/tools/atomic_text_test.cjs'],
+for command in [['bun', 'test/tools/atomic_text_test.cjs'],
                 ['python3', 'test/tools/kicad_cache_test.py'],
                 ['python3', 'test/tools/kicad_discovery_test.py'],
                 ['python3', 'test/tools/kicad_install_test.py'],
