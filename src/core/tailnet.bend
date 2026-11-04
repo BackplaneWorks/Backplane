@@ -224,14 +224,28 @@ def Tailnet.serve(+status: String, +port: String) -> String:
 # first on the same channel), wait half a period, ask again, wait again.
 # Nothing else asks the hub to pair, so two asks are at least half a
 # period (60 s) apart however long finding the machines takes (a late
-# first list included), and the first ask follows the first list at once.
-# An ask and the link it makes take at most 15 s each, so asks never
-# overlap. Tailnet.asks runs this plan on given discovery times (laws:
+# first list included), and the first ask follows the first list at once;
+# each ask also waits for the hub's round to end (Pairing.ask), so rounds
+# never overlap even when the hub's handling of them is late. Tailnet.asks runs this plan on given discovery times (laws:
 # test/tailnet_seen_test.bend).
 type PStep is Data:
   PFind{}
   PAsk{}
   PWait{ms: Nat}
+
+# One pairing round, acknowledged: post asks the hub to pair (server.bend's
+# PairDue), then this waits until the hub says the round is over (every
+# ask it made has come back and any link it joined is committed: Pair.round
+# sends on ack last). The next round is posted only after that, so however
+# long the hub's inbox holds a PairDue (its handling stalled), at most one
+# is ever outstanding, and two rounds never ask the same machine at once;
+# a round that failed is simply asked again by the next. Every step of a
+# round is bounded (curl -m 15, tmo 5), so the wait ends.
+def Pairing.ask(post: Unit -> IO(Unit), +ack: Chan(Unit)) -> IO(Unit):
+  do IO<Unit>:
+    post(Unit{})
+    m : Maybe<&1, Unit> <- Chan.recv(Unit, ack)
+    return Unit{}
 
 def Pairing.half() -> Nat:
   60000n
