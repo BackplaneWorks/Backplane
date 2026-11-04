@@ -178,7 +178,7 @@
     "src/server/thin-signal-text.bend": "9340744b270552b7f88a8fb31864fb639b62f013921649a733bc5e0aa0b12994",
     "src/server/thin-signals.bend": "43d380d04ab73c9fcb3fc7dcc307c47b3c93be43a5a2dda09c7f549c254274ef",
     "src/server/thin-splice.bend": "d1bc1c8e7710e0efba2abcf3fa599391d5d480eb37ced2a8a4f079d7b079a2be",
-    "src/server/thin-view.bend": "4f70ae4068fb15f86cefc02bcc2c18a7d604231b0a1ee5ee55032606b77f8535",
+    "src/server/thin-view.bend": "1712256b63e106408308dadfb1a11747f5b262030ee9ea0c9c47f36d35d2337a",
     "src/server/thinstore.bend": "23c378c87b43907157c88b61a6a259df969b51011bcfc97d27015577cc905f2b",
     "src/web/allowance.bend": "0e9ee3ab27dd2b3c25a2778a35b300c7333c0878b5215b62c7229fed79ee168b",
     "src/web/bots.bend": "f265768306a1bc1edc14f53d1d6f9c7f7e0362afe236c8edd59f8813bd12aa0c",
