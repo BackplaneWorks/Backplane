@@ -66,6 +66,8 @@ final class AppModel {
     @ObservationIgnored private var restoredAt: [String: UInt64] = [:]
     @ObservationIgnored private var wantsUsage = false
     @ObservationIgnored private var readingPages: [String: (seen: String, count: Int, away: Bool)] = [:]
+    // Skip pressed while the hub view was not ready (see act)
+    var tourHeld = false
     var contentReady: Bool {
         guard ready, !cachedPresentation, let screen else { return false }
         if startup[screen.hub] == .compatibilityChosen { return conn[screen.hub]?.phase == .online && conn[screen.hub]?.stage == "live" }
@@ -229,7 +231,9 @@ final class AppModel {
     @ObservationIgnored private var sentView = false
     let settings = AppSettings.shared
     // the screen unless Classic screens: the hub's phone web client (WebShell.swift)
+    #if !GPUI_NATIVE
     let web = WebShell()
+    #endif
     #if GPUI_NATIVE
     // the GPUI experiment's build: the native screens, with no web shell and no toggle
     var webShown: Bool { false }
@@ -459,11 +463,15 @@ final class AppModel {
         }
         notifier.viewing = { [weak self] id in
             guard let self, self.active else { return false }
+            #if !GPUI_NATIVE
             if self.webShown { return self.webShows(id) }
+            #endif
             return self.tab != .settings && self.screen?.sel == id
         }
         notifier.remoteInFront = { [weak self] in self?.webShown == true }
+        #if !GPUI_NATIVE
         webWire()
+        #endif
         if let d = try? Data(contentsOf: Self.settingsFile), let m = try? JSONDecoder().decode([String: Settings].self, from: d) { hubSettings = m }
         let e = engine
         Task {
@@ -644,24 +652,31 @@ final class AppModel {
     // hub's page: an id the phones' client qualified, "host:port|id",
     // names its hub), else the native screens select it
     private func alertOpened(_ id: String) {
+        #if GPUI_NATIVE
+        act("select", id)
+        #else
         guard webShown else { act("select", id); return }
         if let owner = WebShell.owner(id), owner != web.hub, links.contains(where: { Pairing.key($0) == owner }) {
             showWeb(owner)
         }
         web.open(id)
+        #endif
     }
 
+    #if !GPUI_NATIVE
     // whether the page shows this thread (its alert stays quiet then)
     private func webShows(_ id: String) -> Bool {
         let local = WebShell.local(id)
         return !local.isEmpty && local == web.thread && (WebShell.owner(id) ?? web.hub) == web.hub
     }
+    #endif
 
     // a hub's name as its machine calls itself, else its address
     func hubName(_ key: String) -> String {
         screen?.hubs.first(where: { $0.key == key })?.name ?? key
     }
 
+    #if !GPUI_NATIVE
     private func webWire() {
         web.pair = { [weak self] url in _ = self?.open(url) }
         web.switchTo = { [weak self] key, url in
@@ -685,10 +700,12 @@ final class AppModel {
             self.notifier.post(thread: thread, key: key, title: title, body: body)
         }
     }
+    #endif
 
     // the page of Pairing.key prefer (a hub just paired), else of the hub
     // on screen, else of the one shown last, else of the newest paired
     func syncWeb(prefer: String? = nil) {
+        #if !GPUI_NATIVE
         guard webShown else { return }
         let keys = links.compactMap(Pairing.key)
         let last = UserDefaults.standard.string(forKey: "web.hub")
@@ -697,12 +714,15 @@ final class AppModel {
             return
         }
         showWeb(key)
+        #endif
     }
 
     func showWeb(_ key: String, at url: URL? = nil) {
+        #if !GPUI_NATIVE
         guard let link = links.first(where: { Pairing.key($0) == key }) else { return }
         UserDefaults.standard.set(key, forKey: "web.hub")
         web.show(key, link: link, at: url)
+        #endif
     }
 
     // the hubs sheet over the page (backplaneApp.addHub)
@@ -1082,6 +1102,10 @@ final class AppModel {
     }
 
     private func act(_ action: String, _ value: String, continuingViewerLoad: Bool, openStarAfterApply: Bool = false) {
+        // Skip with a step on screen but the hub's view not ready (a stale or failing
+        // view cannot carry the action): the sheet goes down on this device at once;
+        // it may come back when the hub is ready and still holds the tour
+        if action == "ob-skip", !contentReady { tourHeld = true }
         if action == "view", value.isEmpty {
             if let token = viewerClose.current { closeViewer(token) }
             return
@@ -1139,6 +1163,9 @@ final class AppModel {
             earlyActions.removeAll { $0.0 == action }
             let targetHub = links.compactMap(Pairing.key).first { value.hasPrefix($0 + "|") } ?? screen?.hub
             let configured = targetHub.map { startup[$0] == .thin || startup[$0] == .compatibilityChosen } ?? false
+            #if DEBUG
+            if action.hasPrefix("ob-") { NSLog("Backplane tour act %@ early: ready=%@ configured=%@ hub=%@", action, String(ready), String(configured), targetHub ?? "-") }
+            #endif
             if ready, configured, action != "tz-report" {
                 let e = engine
                 let generation = pairingGeneration
@@ -2229,7 +2256,9 @@ final class AppModel {
         }
         if yes, contentReady, let s = screen { island?.show(s.islands ?? [], foreground: true) }
         if yes { performanceReady() }
+        #if !GPUI_NATIVE
         if webShown { web.foreground(yes) }
+        #endif
     }
 
     private func observeThinPresenting(_ update: SyncUpdate, epoch: UInt64) {

@@ -11,7 +11,7 @@ cp ~/bp-gpui-ios/bridge.js Backplane/bridge.js
 [ "'"$1"'" = clean ] && rm -rf build/dd
 S=$(date +%s)
 xcodebuild -quiet -project Backplane.xcodeproj -scheme Backplane -configuration Debug -sdk iphonesimulator \
-  -destination "generic/platform=iOS Simulator" -derivedDataPath build/dd CODE_SIGNING_ALLOWED=NO build 2>&1 | tail -40
+  -destination "generic/platform=iOS Simulator" -derivedDataPath build/dd CODE_SIGNING_ALLOWED=NO build 2>&1 | tail -60
 echo "build seconds: $(( $(date +%s) - S ))"
 du -sh build/dd/Build/Products/Debug-iphonesimulator/Backplane.app
 '

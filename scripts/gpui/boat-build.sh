@@ -20,8 +20,9 @@ rustc --version > build/gpui-artifacts/toolchain.txt
 cargo --version >> build/gpui-artifacts/toolchain.txt
 if ! { pkg-config --exists xkbcommon-x11 && [ -e /usr/lib/x86_64-linux-gnu/libxkbcommon-x11.so ]; }; then
  mkdir -p build/gpui-sysroot/debs
- (cd build/gpui-sysroot/debs && apt-get download libxkbcommon-x11-0 libxkbcommon-dev libxkbcommon-x11-dev libxcb-xkb-dev libxcb1-dev libwayland-dev)
+ (cd build/gpui-sysroot/debs && apt-get download libxkbcommon-x11-0 libxkbcommon-x11-dev)
  for deb in build/gpui-sysroot/debs/*.deb; do dpkg-deb -x "$deb" build/gpui-sysroot; done
+ rm -f build/gpui-sysroot/usr/lib/x86_64-linux-gnu/*.a
  export PKG_CONFIG_PATH="$PWD/build/gpui-sysroot/usr/lib/x86_64-linux-gnu/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
  export LIBRARY_PATH="$PWD/build/gpui-sysroot/usr/lib/x86_64-linux-gnu${LIBRARY_PATH:+:$LIBRARY_PATH}"
  export CPATH="$PWD/build/gpui-sysroot/usr/include${CPATH:+:$CPATH}"
