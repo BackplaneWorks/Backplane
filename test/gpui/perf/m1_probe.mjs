@@ -1,0 +1,12 @@
+import {mkdirSync} from 'node:fs';import {makeStandins,startHub,stopHub,client,sleep,rssKb} from './lib.mjs';
+const root='/home/h/Documents/i2cjak/backplane-gpui/build/gpui/perf-run/probe';mkdirSync(root,{recursive:true});
+makeStandins(root+'/bin');
+const h=await startHub({bin:'/home/h/Documents/i2cjak/backplane-gpui/build/gpui/backplane-serve',home:root+'/home',port:3801,standins:root+'/bin',extraEnv:{FAKE_SECS:'5',FAKE_PER:'3'},log:root+'/hub.log'});
+console.log('hub',h.pid,rssKb(h.pid));
+const c=await client(h,{onMsg:(o)=>{if(o.t==='delta'&&!globalThis.shown){globalThis.shown=1;console.log('delta',JSON.stringify(o).slice(0,300))}}});
+mkdirSync(root+'/proj',{recursive:true});
+c.send('project.add',{path:root+'/proj'});const pc=await c.until(10000,()=>c.seen.find(x=>x.$==='ProjectCreated'));console.log('pc',pc&&pc.id);
+c.send('thread.create',{project:pc.id,title:'t',env:'local'});const th=await c.until(10000,()=>c.seen.find(x=>x.$==='ThreadCreated'));
+c.send('turn.start',{thread:th.id,text:'go'});await sleep(3000);
+console.log((await c.rpc('load.ping',{}))?.ms);
+stopHub(h);process.exit(0);
