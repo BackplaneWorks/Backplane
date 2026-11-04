@@ -1087,3 +1087,30 @@ OOM or OOM-kill events. Whole process **0.43s /55,976KiB GNU peak RSS**; cost
 pass seed, compiler, Boat, app or release job runs. This is metadata-only
 planning cost, not warm execution or typical-PR timing. It rules out planning
 as the current large bottleneck; execution/memory and trusted reuse remain.
+
+### Original canonical shard 000, capped source checker: saved-result review
+
+One default Boat job ran the exact PR856 source checker on the original
+unsliced canonical 25-law shard (including `watch_copy_intent_none`).
+The original experiment exited1 because its trace verifier expected a
+nonexistent phase and source names instead of internal namespace keys.
+The failed raw receipts remain unchanged; the additive offline audit
+reconciles all25 filled laws plus the helper against completed check events.
+
+| Change / workload | Before | After / observation |
+|---|---|---|
+| Canonical000, exact856 check-only discard backend | No matched baseline at identical source/tool/cap | 669.804 s; 3,126,272 KiB actual compiler RSS |
+| Enforced compiler+controller caps | Historical native OOMs are not a matched comparison | 3,699,998,720+536,870,912 B <4 GiB, both swap0; zero OOM |
+| False-theorem control | Must fail at typed proof body | Rejected, 0.574 s /146,980 KiB |
+| Offline trace-verifier controls | Original empty-name assertion failed | 10 saved-evidence controls pass; no proof rerun |
+
+[Review and exact limitations](proof-source-backend-review/README.md),
+[additive receipt](proof-source-backend-review/REVIEW.json),
+[raw evidence index](proof-source-backend-review/EVIDENCE.json).
+Raw compiler exit1 is accepted only by the existing unsafe/foreign-code
+notice policy (2,574 defs); it is not `All terms check` or kernel-only proof
+qualification. Cgroup reached its3.7GB cap with1,675 reclaim/max events;
+controller peak471,326,720 B. Job692.33 s, 703 credit-s/$0.00703, sandbox
+deleted verified. This is a single shard feasibility observation, not a
+measured speedup, full-proof/CI/release qualification or pass-cache seed.
+No installer, app, emit, full proof or workflow change.
