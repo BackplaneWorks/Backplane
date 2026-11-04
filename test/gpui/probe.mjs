@@ -10,6 +10,7 @@ const request=(m,extra={})=>{const p={...extra,version:1,hub:'http://100.64.84.4
 const timer=setTimeout(()=>{console.error('probe timeout');ws.close();process.exit(1)},12000);
 ws.onmessage=({data})=>{const x=typeof data==='string'?JSON.parse(data):decode(data);console.log(JSON.stringify(x).slice(0,1600));
  if(x.t==='view'){greet=x;request('view.open');}
+ if(x.t==='reply'&&x.ok&&x.result?.session){Object.assign(session,x.result.session);if(x.result.nextTarget){target=x.result.nextTarget;viewId='';request('view.open');return;}}
  if(x.t==='reply'&&x.ok&&x.result?.shown){const r=x.result;viewId=r.viewId;writeFileSync('build/gpui/probe.json',JSON.stringify(r,null,2));
  if(!made){made=true;ws.send(encode({id:1,m:'project.add',p:{path:home+'/project'}}));}
  else if(stage===1){stage=2;request('view.action',{action:'select',value:r.shown.projects?.[0]?.threads?.[0]?.id||''});}
