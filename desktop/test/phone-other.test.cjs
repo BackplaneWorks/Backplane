@@ -9,7 +9,7 @@ test('a key of the row goes to the terminal as the keyboard would send it',async
   assert.equal(termKeyValue(field,'Escape',0),'Escape\t0');
   assert.equal(termKeyValue(owned,'ArrowUp',0),'t1\tArrowUp\t0');
   assert.equal(termKeyValue(field,'c',4),'c\t4');
-  for (const k of ['Escape','Tab','ArrowUp','ArrowDown','ArrowLeft','ArrowRight']) assert.ok(TERM_KEYS.some(x=>x.key===k),k);
+  for (const k of ['Escape','Tab','Backspace','ArrowUp','ArrowDown','ArrowLeft','ArrowRight']) assert.ok(TERM_KEYS.some(x=>x.key===k),k);
   assert.ok(TERM_KEYS.some(x=>x.ctrl),'a sticky Ctrl');
 });
 

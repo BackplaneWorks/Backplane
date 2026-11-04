@@ -16,6 +16,9 @@ export const TERM_KEYS = [
   { label: "Tab", key: "Tab" },
   { label: "Ctrl", ctrl: true },
   { label: "^C", key: "c", mods: 4, aria: "Control C" },
+  // (an Android keyboard in a WebView sends its own Backspace on an empty
+  // field as an unidentified key the terminal never gets)
+  { label: "⌫", key: "Backspace", aria: "Backspace" },
   { label: "←", key: "ArrowLeft", aria: "Left" },
   { label: "↑", key: "ArrowUp", aria: "Up" },
   { label: "↓", key: "ArrowDown", aria: "Down" },
