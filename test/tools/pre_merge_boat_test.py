@@ -1,5 +1,6 @@
 """Boat-run pre-merge guard controls. Never execute this suite locally."""
 import copy
+import fnmatch
 import importlib.util
 import os
 from pathlib import Path
@@ -7,6 +8,7 @@ import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
+from types import SimpleNamespace
 
 HERE=Path(__file__).resolve().parent
 PATH=HERE/'pre-merge-boat.py' if (HERE/'pre-merge-boat.py').exists() else HERE.parents[1]/'scripts/pre-merge-boat.py'
@@ -90,6 +92,99 @@ class Contracts(unittest.TestCase):
         self.assertFalse(pm.receipt_ok({**changed,'state':'passed'},'a'*40,'d'*64,'a'*40))
         self.assertFalse(pm.receipt_ok(changed,'a'*40,'d'*64,'a'*39))
         self.assertFalse(pm.receipt_ok({**good,'guard_change_ack':'a'*40},'a'*40,'d'*64,'a'*40))
+
+
+class RunnerTransport(unittest.TestCase):
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory(prefix='premerge-runner-control-')
+        self.addCleanup(self.temp.cleanup)
+        self.path=Path(self.temp.name)/'runner.sh'
+        self.data=b'#!/bin/sh\n# source fixture only; never a proof producer\nexit 0\n'
+        self.path.write_bytes(self.data);self.path.chmod(0o755)
+        self.digest=pm.sha(self.data)
+
+    def test_explicit_runner_requires_absolute_path_and_complete_digest(self):
+        for path,digest in (('runner.sh',self.digest),(str(self.path),''),(str(self.path),self.digest[:12]),(str(self.path),'z'*64)):
+            with self.subTest(path=path,digest=digest),self.assertRaises(ValueError):
+                pm.runner_source(path,digest,'exclude')
+        record,data=pm.runner_source(str(self.path),self.digest,'exclude')
+        self.assertEqual(data,self.data);self.assertEqual(record['sha256'],self.digest)
+
+    def test_wrong_or_changed_runner_bytes_are_refused(self):
+        self.path.write_bytes(self.data+b'# changed\n')
+        with self.assertRaisesRegex(ValueError,'SHA256'):pm.runner_source(str(self.path),self.digest,'exclude')
+
+    def test_runner_symlink_is_refused(self):
+        link=Path(self.temp.name)/'link';link.symlink_to(self.path)
+        with self.assertRaisesRegex(ValueError,'regular'):pm.runner_source(str(link),self.digest,'exclude')
+
+    def test_nonexecutable_or_directory_is_refused(self):
+        self.path.chmod(0o644)
+        for path in (self.path,Path(self.temp.name)):
+            with self.subTest(path=path),self.assertRaisesRegex(ValueError,'regular'):
+                pm.runner_source(str(path),self.digest,'exclude')
+
+    def test_implicit_runner_cannot_receive_ambient_overrides(self):
+        for digest,mode in ((self.digest,'include-file'),('','exclude')):
+            with self.assertRaisesRegex(ValueError,'explicit'):pm.runner_source(None,digest,mode)
+        with self.assertRaisesRegex(ValueError,'unsupported'):pm.runner_source(str(self.path),self.digest,'unknown')
+
+    def test_old_exclusion_transport_keeps_only_exact_worker(self):
+        worker='scripts/pre-merge-boat.py'
+        names=[worker,'PROOF.bend','.env','src/a.bend','scripts/boat-job.sh','scripts/nested/file.py',
+               'scripts/name[2].py','odd[1]/file','star*/file','question?/file','CI-OTHER.py']
+        args=pm.transport_arguments('exclude',names)
+        self.assertTrue(all(args[i]=='--exclude' for i in range(0,len(args),2)))
+        kept=[name for name in names if not any(fnmatch.fnmatch(name,p) for p in args[1::2])]
+        self.assertEqual(kept,[worker])
+        self.assertEqual(pm.transport_arguments('include-file',[]),['--include-file',worker])
+
+    def test_missing_worker_unsafe_inventory_and_unknown_mode_refuse(self):
+        for mode,names in (('exclude',[]),('unknown',[]),('exclude',['scripts/pre-merge-boat.py','../x']),
+                           ('exclude',['scripts/pre-merge-boat.py','a\nb'])):
+            with self.subTest(mode=mode,names=names),self.assertRaises(ValueError):pm.transport_arguments(mode,names)
+
+    def test_private_snapshot_pins_execution_bytes_and_detects_original_drift(self):
+        record,data=pm.runner_source(str(self.path),self.digest,'exclude')
+        def start(argv,**kwargs):
+            self.assertEqual(Path(argv[0]).read_bytes(),self.data)
+            self.assertNotEqual(argv[0],str(self.path))
+            self.path.write_bytes(self.data+b'# changed while productive\n')
+            self.assertEqual(Path(argv[0]).read_bytes(),self.data)
+            return SimpleNamespace(stdout=[],wait=lambda:0)
+        with patch.object(pm.subprocess,'Popen',side_effect=start):
+            self.assertEqual(pm.run_runner(record,data,[]),(0,None,None))
+        with self.assertRaisesRegex(ValueError,'SHA256'):pm.runner_source(str(self.path),self.digest,'exclude')
+
+    def test_snapshot_hash_mismatch_refuses_before_start(self):
+        record,data=pm.runner_source(str(self.path),self.digest,'exclude')
+        with patch.object(pm.subprocess,'Popen') as start:
+            with self.assertRaisesRegex(ValueError,'snapshot'):pm.run_runner(record,data+b'bad',[])
+            start.assert_not_called()
+
+    def test_ambiguous_identity_waits_for_owned_cleanup_then_refuses(self):
+        record,data=pm.runner_source(str(self.path),self.digest,'exclude');waited=[]
+        process=SimpleNamespace(stdout=['job j20261104000000-1: logs and artifacts in /tmp/j20261104000000-1\n',
+                                        'job j20261104000000-2: logs and artifacts in /tmp/j20261104000000-2\n'],
+                                wait=lambda:waited.append(True) or 0)
+        with patch.object(pm.subprocess,'Popen',return_value=process):
+            with self.assertRaisesRegex(ValueError,'multiple executor'):pm.run_runner(record,data,[])
+        self.assertEqual(waited,[True])
+
+    def test_uploaded_manifest_requires_exact_one_worker_and_hash(self):
+        good=(self.digest+'  ./scripts/pre-merge-boat.py\n').encode()
+        self.assertTrue(pm.transport_manifest_ok(good,self.digest))
+        for bad in (b'',good+('0'*64+'  ./extra.py\n').encode(),
+                    ('0'*64+'  ./scripts/pre-merge-boat.py\n').encode(),
+                    good.replace(b'./scripts/',b'scripts/'),good+b'\n'):
+            self.assertFalse(pm.transport_manifest_ok(bad,self.digest),bad)
+
+    def test_zero_exit_without_identifiable_owned_job_refuses(self):
+        job='j20261104000000-1'
+        for name,path in ((None,None),(job,None),(job,'/tmp/wrong'),(job,'relative/'+job),('invalid','/tmp/invalid')):
+            with self.subTest(name=name,path=path),self.assertRaisesRegex(ValueError,'identifiable'):
+                pm.owned_job_path(name,path)
+        self.assertEqual(pm.owned_job_path(job,'/tmp/'+job),Path('/tmp/'+job))
 
 
 class ActualGitMerges(unittest.TestCase):

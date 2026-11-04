@@ -1293,3 +1293,24 @@ These are single observations with fail/pass outcomes, not a matched speedup.
 The selector's pre-worker preparation failure cost$0.00032; total$0.00201.
 No stock/full-proof/CI/build/release qualification or cache pass is implied.
 Fresh final-head merged-shape guard remains required; no local validation ran.
+
+### Premerge supports the explicitly pinned normal daily runner
+
+The approved runner lacks `--include-file`. Explicit SHA-pinned private
+runner snapshots and literal exclusion transport preserve the one-worker
+payload, actual manifest verification and existing source/base/guard fences.
+
+| Tooling compatibility | Before | After |
+|---|---|---|
+| Approved daily runner transport | Unsupported include-file option; no qualification | Exact one-worker upload via exclude, identity/manifest/controller verified |
+| Guard controls | 14 | 26 passed0.254s |
+| Worker wall / peak RSS | Not measured for unsupported route | 9.14s /26,240KiB |
+| Actual cgroup peak / cap | No successful approved-route receipt | 41,091,072 /536,870,912B, swap0/events0 |
+| Paid qualification cost | None | 16credit-s/$0.00016; default VM deleted |
+
+[Exact7127f7f5c receipt and limits](premerge-runner/README.md),
+Boat`j20261104041114-793634`/work1529849. Independent review confirmed the
+boundary delta and approved-runner byte identity, with partial runner audit
+scope stated. No budget/start/size/memory guard changed, no exception runner,
+no local tests/merge-tree or Bend execution. This is transport compatibility,
+not a full CI/proof/build speedup claim. Fresh final-head guard remains needed.
