@@ -128,12 +128,12 @@ export function installPhoneThread({ document: doc = document, window: win = win
   // iOS needs to keep its keyboard.
   // (The draft's one-line landscape layout, style.css's ph-short, follows
   // its focus: the press's blur put the two-line one back under the finger
-  // and the tap missed Send. html.ph-hold keeps it from the touch to the
-  // click.)
+  // and the tap missed Send (or ⋯). html.ph-hold keeps it from the touch
+  // to the click.)
   let back = 0, hold = 0;
   const release = () => { win.clearTimeout?.(hold); hold = 0; doc.documentElement?.classList.remove?.('ph-hold'); };
   doc.addEventListener('touchstart', event => {
-    if (!onPhone(doc) || !keyboard() || !event.target?.closest?.('.composer .foot-end > button')) return;
+    if (!onPhone(doc) || !keyboard() || !event.target?.closest?.('.composer .foot-end > button, .composer .composer-more > summary')) return;
     doc.documentElement?.classList.add('ph-hold');
     win.clearTimeout?.(hold); hold = win.setTimeout(release, 1000);
   }, { capture: true, passive: true });
