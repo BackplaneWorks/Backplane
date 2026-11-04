@@ -399,9 +399,16 @@ def WS.row.thread(+u: U.Ui, +dot: String, +t: M.Thread, +label: String, +place: 
 # title, what it wants (a red row's question, approval or failure: the
 # sidebar's word) and its project (U.Palette.place), so it can't pass for a
 # command
+# (a phone has no keyboard to press them with: its rows are the names
+# alone, client.bend's Palette.name, "New thread" for "New thread · Ctrl+N")
+def WS.row.text(phone: Bool, +label: String) -> String:
+  match phone:
+    case True{}: U.Palette.name(label)
+    case False{}: label
+
 def WS.row.face(thread: Bool, +u: U.Ui, +label: String, +place: String, +v: String) -> List<&2, D.Node>:
   match thread:
-    case False{}: Bool.pick(List<&2, D.Node>, String.starts_with(label, "Stop the running turn ·"), [D.Txt{"Stop the running turn "}, D.El{"kbd", "", Nil{}, [D.Txt{"Ctrl+."}]}], [D.Txt{label}])
+    case False{}: Bool.pick(List<&2, D.Node>, String.starts_with(label, "Stop the running turn ·"), [D.Txt{"Stop the running turn "}, D.El{"kbd", "", Nil{}, [D.Txt{"Ctrl+."}]}], [D.Txt{WS.row.text(String.eq(U.Ui.info(u, "local.workspace.form"), "phone"), label)}])
     case True{}:
       +t = U.Ui.thread(U.Ui.state(u), v)
       WS.row.thread(u, U.Palette.dot(u, t), t, label, place)
