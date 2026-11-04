@@ -21,7 +21,7 @@ export function installPairingUI({document, location, fetch, onPaired, navigator
     document.getElementById('root')?.setAttribute('inert', '');
     const card = element('section', '', panel, {class: 'pairing-card'});
     element('h1', title, card);element('p', lead, card, {class: 'pairing-lead'});
-    if (dismissible) { button(card, 'Back', close);panel.dataset.dismissible = '1'; }
+    if (dismissible) { button(card, 'Back', close).classList.add('pairing-back');panel.dataset.dismissible = '1'; }
     return card;
   }
   // Esc leaves a screen that has Back (Devices), before any other key
