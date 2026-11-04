@@ -2652,6 +2652,116 @@ html[data-backplane-held="quiet"] .allowance-chip { visibility: hidden; }
 /* Embedded home viewers own their tabs; no outer workspace rail replaces them. */
 .project-home .viewer > .viewer-tabs { display:flex; flex-wrap:wrap; justify-content:flex-start; }
 
+/* ===================================================================
+   The phone arrangement (view.bend's View.phone.page, phone.bend,
+   phone-shell.js; scratch DESIGN.md). Everything below is scoped under
+   .app.phone or html.phone: a narrow desktop window never gets it.
+   Sections: phone: shell, phone: lists (P), phone: thread (B),
+   phone: viewers (C), phone: other (D).
+   =================================================================== */
+
+/* phone: shell */
+html.phone, html.phone body { height: 100%; overflow: hidden; overscroll-behavior: none; }
+html.phone body { position: fixed; inset: 0; }
+html.phone #root { height: var(--ph-vh, 100dvh); }
+.app.phone {
+  --ph-tap: 44px; --ph-row: 56px; --ph-head: 52px; --ph-tabs: 56px;
+  position: fixed; left: 0; right: 0; top: 0; height: var(--ph-vh, 100dvh);
+  display: flex; flex-direction: column; grid-template: none;
+  font-size: calc(15px * var(--text-scale, 100) / 100);
+  max-width: 100vw; overflow: hidden; -webkit-tap-highlight-color: transparent;
+}
+.app.phone > .sidebar, .app.phone > main, .app.phone > .viewer { flex: 1 1 0; min-height: 0; width: auto; min-width: 0; max-width: none; border: 0; }
+/* one screen at a time: the list on the Projects and Bots tabs, the main
+   area on a thread, project, bot or Settings, the viewer over its thread */
+.app.phone > .sidebar { display: none; }
+.app.phone.ph-projects > .sidebar, .app.phone.ph-bots > .sidebar { display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; }
+.app.phone.ph-projects > main, .app.phone.ph-bots > main, .app.phone.ph-viewer > main { display: none !important; }
+.app.phone > .viewer { display: flex; flex-direction: column; }
+.app.phone .workspace-bar, .app.phone .sidebar .keys-legend, .app.phone .sidebar > .side-strip, .app.phone .sidebar .side-fold, .app.phone .topbar { display: none !important; }
+/* the tabs show their part of the list */
+.app.phone.ph-projects > .sidebar > .bots, .app.phone.ph-projects > .sidebar > :has(> .uber-open) { display: none; }
+.app.phone.ph-bots > .sidebar > :not(.bots):not(:has(> .uber-open)):not(.shade):not(.rowmenu) { display: none !important; }
+/* on a pushed screen the content ends above the home bar */
+.app.phone.ph-l1 > main, .app.phone.ph-l2 > .viewer { padding-bottom: env(safe-area-inset-bottom); box-sizing: border-box; }
+html.phone.ph-kb .app.phone > main, html.phone.ph-kb .app.phone > .viewer { padding-bottom: 0; }
+
+/* the header: ‹, the title over a smaller line, the screen's tools */
+.ph-head { flex: none; position: relative; z-index: 8; display: flex; align-items: center; gap: 2px; min-height: var(--ph-head); box-sizing: content-box;
+  padding: env(safe-area-inset-top) max(4px, env(safe-area-inset-right)) 0 max(4px, env(safe-area-inset-left)); background: var(--panel); border-bottom: 1px solid var(--line); }
+.ph-back, .ph-tool { flex: none; display: inline-flex; align-items: center; justify-content: center; width: var(--ph-tap); height: var(--ph-tap); padding: 0; background: none; border: 0; color: var(--text); border-radius: 22px; }
+.ph-back { color: var(--accent); margin-right: -4px; }
+.ph-back:active, .ph-tool:active { background: var(--raise); }
+.ph-title { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; justify-content: center; padding: 0 6px; }
+.ph-title > *, .ph-title .title-box, .ph-title .title-box > * { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ph-name { font-weight: 600; font-size: calc(17px * var(--text-scale, 100) / 100); line-height: 1.25; }
+.ph-sub { color: var(--dim); font-size: calc(12px * var(--text-scale, 100) / 100); line-height: 1.3; }
+.ph-title:has(> .brand-mark) { flex-direction: row; align-items: center; justify-content: flex-start; gap: 10px; padding-left: 12px; }
+.ph-title:has(> .brand-mark) > .ph-name { font-size: calc(22px * var(--text-scale, 100) / 100); font-weight: 700; }
+.ph-title > .name { display: none; }
+.ph-title .title-box { display: flex; align-items: center; gap: 6px; }
+.ph-title .title-box button, .ph-title .title-box .title { background: none; border: 0; padding: 0; margin: 0; color: var(--text); font: 600 calc(16px * var(--text-scale, 100) / 100)/1.3 var(--sans); text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-height: 0; }
+.ph-title .title-box input { font-size: 16px; width: 100%; min-height: 36px; }
+.ph-tools { flex: none; display: flex; align-items: center; gap: 0; }
+.ph-tools .local-menu > summary { min-width: var(--ph-tap); min-height: var(--ph-tap); border: 0; background: none; padding: 0 6px; }
+.ph-tools .top-views { display: flex; }
+.app.phone .workspace-menu { display: block; min-width: 0; }
+.app.phone .workspace-menu .workspace-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.ph-tools .top-views .workspace-menu summary { min-width: var(--ph-tap); min-height: var(--ph-tap); padding: 0 6px; justify-content: center; border: 0; background: none; color: var(--dim); }
+.ph-tools .top-views .workspace-menu[open] summary { color: var(--accent); }
+.ph-tools .top-views .workspace-menu .workspace-current, .ph-tools .top-views .workspace-menu summary > svg:last-child, .ph-tools .top-views .keycap { display: none; }
+.ph-tools .top-views .workspace-buy { margin: 0; padding: 0; border: 0; }
+.ph-tools .top-views .workspace-buy button.buy { width: var(--ph-tap); min-width: var(--ph-tap); min-height: var(--ph-tap); padding: 0; border: 0; background: none; justify-content: center; }
+.ph-tools .top-views .workspace-buy .workspace-label, .ph-tools .top-views .workspace-buy .price { display: none; }
+/* the thread's state cells (B's) in a row under the header */
+.app.phone > .ph-cells { order: 0; flex: none; display: flex; align-items: center; gap: 4px; min-height: 36px; padding: 0 max(8px, env(safe-area-inset-right)) 0 max(8px, env(safe-area-inset-left)); overflow-x: auto; scrollbar-width: none; border: 0; border-bottom: 1px solid var(--line); background: var(--panel); margin: 0; }
+.app.phone > .ph-cells:empty { display: none; }
+.app.phone > .ph-cells > * { flex: none; }
+
+/* the tab bar */
+.ph-tabs { flex: none; position: relative; z-index: 8; display: flex; background: var(--panel); border-top: 1px solid var(--line);
+  padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+.ph-tab { flex: 1 1 0; position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: var(--ph-tabs); padding: 4px 0 2px; background: none; border: 0; color: var(--dim); font-size: calc(11px * var(--text-scale, 100) / 100); }
+.ph-tab.on { color: var(--accent); }
+.ph-tab:active { background: var(--raise); }
+.ph-badge { position: absolute; top: 4px; left: calc(50% + 6px); min-width: 18px; height: 18px; padding: 0 5px; box-sizing: border-box; border-radius: 9px; background: var(--bad); color: #fff; font-size: 11px; line-height: 18px; font-weight: 600; text-align: center; }
+html.phone.ph-kb .ph-tabs { display: none; }
+
+/* menus are bottom sheets: every <details class="local-menu">, the row
+   menu, and the sheets the hub draws (phone.bend's Phone.sheet) */
+@keyframes ph-sheet-up { from { transform: translateY(40px); opacity: 0.4; } to { transform: none; opacity: 1; } }
+.app.phone .local-menu[open]:not([data-inline])::before { content: ""; position: fixed; inset: 0; z-index: 39; background: #0008; }
+.app.phone .local-menu[open]:not([data-inline]) > .local-menu-body, .app.phone .rowmenu, .ph-sheet {
+  position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 40; width: auto; min-width: 0; max-width: none;
+  max-height: min(78dvh, calc(var(--ph-vh, 100dvh) - 56px)); overflow-y: auto; overscroll-behavior: contain; box-sizing: border-box;
+  display: flex; flex-direction: column; gap: 2px; background: var(--panel); color: var(--text); border: 0; border-radius: 14px 14px 0 0;
+  padding: 6px max(10px, env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+  box-shadow: 0 -10px 30px #0007; font-size: calc(15px * var(--text-scale, 100) / 100); animation: ph-sheet-up .16s ease-out; }
+.app.phone .local-menu[open]:not([data-inline]) > .local-menu-body::before, .app.phone .rowmenu::before { content: ""; flex: none; align-self: center; width: 36px; height: 4px; border-radius: 2px; background: var(--line); margin: 2px 0 8px; }
+.app.phone .local-menu-body button, .app.phone .rowmenu .mi, .ph-sheet button { min-height: 48px; font-size: calc(15px * var(--text-scale, 100) / 100); }
+.app.phone .shade { background: #0008; }
+html.phone.ph-kb .app.phone .local-menu[open]:not([data-inline]) > .local-menu-body { padding-bottom: 10px; }
+.ph-sheet-layer { position: fixed; inset: 0; z-index: 45; }
+.ph-sheet-back { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; padding: 0; background: #0008; }
+.ph-sheet-grab { flex: none; align-self: center; width: 36px; height: 4px; border-radius: 2px; background: var(--line); margin: 2px 0 8px; }
+.ph-sheet-title { font-weight: 600; padding: 4px 6px 8px; }
+
+/* a row's swipe buttons (phone-shell.js puts them under the row) */
+.ph-swiped { transition: transform .15s ease-out; position: relative; z-index: 2; background: var(--panel); }
+.ph-swipe-strip { position: fixed; z-index: 1; display: flex; }
+.ph-swipe-lead { left: 0; } .ph-swipe-trail { right: 0; }
+.ph-swipe-btn { min-width: 80px; height: 100%; border: 0; padding: 0 10px; background: var(--raise); color: var(--text); font-size: 14px; }
+.ph-swipe-btn.settle { background: var(--ok); color: var(--on-accent, #fff); }
+.ph-swipe-btn.danger { background: var(--bad); color: #fff; }
+
+/* an empty screen, a chip row */
+.ph-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 32px 24px; text-align: center; color: var(--dim); }
+.ph-empty-title { color: var(--text); font-weight: 600; font-size: calc(17px * var(--text-scale, 100) / 100); }
+.ph-empty-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 8px; }
+.ph-empty-actions button { min-height: var(--ph-tap); padding: 0 16px; }
+.ph-chips { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; padding: 8px 12px; }
+.ph-chips > * { flex: none; min-height: 36px; border-radius: 18px; padding: 0 14px; }
+
 /* phone: other (D: settings, search, palette, terminal, pairing and
    devices; phone-other.js). Overlays outside the hub's tree (search,
    pairing, the terminal's key row) go by html.phone, which phone-shell.js
