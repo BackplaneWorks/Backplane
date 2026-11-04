@@ -12,6 +12,10 @@ on:
       previous_run:
         description: Accepted configured service producer run
         required: true
+      build_run:
+        description: Existing relink run for component-only recovery (no compile)
+        required: false
+        default: ''
       packet_url:
         description: Public source-bound raw emission input packet
         required: true
@@ -29,6 +33,7 @@ env:
   PYTHONDONTWRITEBYTECODE: '1'
 jobs:
   js:
+    if: inputs.build_run == ''
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -82,6 +87,7 @@ jobs:
           retention-days: 14
   js-runtime:
     needs: js
+    if: always() && (needs.js.result == 'success' || (inputs.build_run != '' && needs.js.result == 'skipped'))
     runs-on: ${{ fromJSON('{"linux-x64":"ubuntu-24.04","linux-arm64":"ubuntu-24.04-arm","darwin-arm64":"macos-15","windows-x64":"windows-2025"}')[inputs.target] }}
     timeout-minutes: 20
     steps:
@@ -103,7 +109,9 @@ jobs:
           python-version: '3.12'
       - uses: actions/download-artifact@v4
         with:
-          name: configured-service-build-${{ inputs.target }}
+          name: ${{ inputs.build_run != '' && format('configured-service-{0}', inputs.target) || format('configured-service-build-{0}', inputs.target) }}
+          run-id: ${{ inputs.build_run || github.run_id }}
+          github-token: ${{ github.token }}
           path: build
       - uses: actions/download-artifact@v4
         with:
@@ -115,11 +123,18 @@ jobs:
         shell: bash
         env:
           TARGET: ${{ inputs.target }}
+          RETAINED_BUILD_RUN: ${{ inputs.build_run }}
         run: |
           set -euo pipefail
           exe=backplane-serve; [ "$TARGET" != windows-x64 ] || exe=backplane-serve.exe
           chmod 755 "build/bootstrap-js/$exe"
-          "build/bootstrap-js/$exe" --version > build/relink-version.log
+          if [ -z "$RETAINED_BUILD_RUN" ]; then
+            "build/bootstrap-js/$exe" --version > build/relink-version.log
+          else
+            # The authenticated prior matching-host artifact carries its actual
+            # successful launch log. The component driver checks exact version.
+            test -s build/relink-version.log
+          fi
           cat build/relink-version.log
           py=python; [ "$RUNNER_OS" != Linux ] || py=/usr/bin/python3
           "$py" build/bootstrap-tools/scripts/service-relink.py component --checkout "$GITHUB_WORKSPACE" --source "$BACKPLANE_FROZEN_COMMIT" --target "$TARGET" --previous "$GITHUB_WORKSPACE/build/previous" --build "$GITHUB_WORKSPACE/build/bootstrap-js" --launch-log "$GITHUB_WORKSPACE/build/relink-version.log" --out "$GITHUB_WORKSPACE/build/bootstrap-service/component"
