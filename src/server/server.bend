@@ -12751,7 +12751,7 @@ def Hub.shot.to(h: Hub, +text: String, +page: String) -> IO(Hub):
 def Cast.lease(due: Bool, m: Maybe<&2, Chan(BR.BMsg)>, +page: String) -> IO(Unit):
   match due m:
     case True{} Some{q}:
-      IO.spawn(Unit, IO.bind(String, Unit, BR.Browser.ask_on(q, page, "cast", J.Json.obj([J.KV{"ms", J.Num{"2500"}}])), r => IO.pure(Unit, Unit{})))
+      IO.spawn(Unit, IO.bind(String, Unit, BR.Browser.ask_on(q, page, "cast", J.Json.obj([J.KV{"ms", J.Num{"2500"}}, J.KV{"homeUrl", J.Str{CF.Cef.home_url()}}])), r => IO.pure(Unit, Unit{})))
     case _ _:
       IO.pure(Unit, Unit{})
 

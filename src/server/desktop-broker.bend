@@ -1,6 +1,7 @@
 import Base
 import ../core/json.bend as J
 import ../core/desktop-browser.bend as D
+import ../core/cef.bend as CF
 import ./perf.bend as PF
 
 type Message is Data:
@@ -1496,6 +1497,36 @@ def Broker.call(+b: Broker, q: Chan(Message), op: String, +args: J.Json, reply: 
     Bool.and(Bool.or(Bool.not(String.eq(J.Json.get_str(args, "__desktopActor", "service"), "agent")), String.eq(J.Json.get_str(Broker.owner(b, owner), "drive", "none"), "agent")),
       Nat.is_lt(List.length(&2, Pending, Broker.pending(b)), 32n)))), b, q, op, args, reply)
 
+# Opening the Browser offers a home page once for a fresh owner. Renewing
+# its frame lease never navigates an existing page or reopens closed tabs.
+# Normal preparation/dispatch still owns creation, navigation and authority.
+def Broker.home_needed(+b: Broker, +owner: String) -> Bool:
+  Bool.and(J.Json.get_bool(Broker.meta(b), "ready", False{}),
+    Bool.and(J.Json.get_bool(Broker.owner(b, owner), "known", False{}),
+    Bool.and(String.eq(Broker.effective_drive(b, owner), "agent"),
+    Bool.and(Bool.not(Broker.unknown_owner(b, owner)),
+    Bool.and(Bool.not(Broker.pending_owner(Broker.pending(b), owner)),
+    Bool.and(Bool.not(Broker.preparing(b, owner)),
+    Bool.and(Bool.not(J.Json.get_bool(Broker.owner(b, owner), "homeStarted", False{})),
+    Bool.and(String.is_empty(J.Json.get_str(Broker.owner(b, owner), "tabId", "")),
+      Maybe.is_none(&2, J.Json, J.Json.get(J.Json.get_obj(Broker.meta(b), "publicTabs"), owner))))))))))
+
+def Broker.home(start: Bool, +b: Broker, +q: Chan(Message), +args: J.Json, +reply: Chan(String)) -> IO(Broker):
+  match start:
+    case True{}:
+      +owner = J.Json.get_str(args, "page", "")
+      Broker.call(Broker.set_owner(b, owner, D.Desktop.put(Broker.owner(b, owner), "homeStarted", J.Flag{True{}})), q, "navigate",
+        J.Json.obj([J.KV{"page", J.Str{owner}}, J.KV{"url", J.Str{CF.Cef.home_url()}}]), reply)
+    case False{}:
+      do IO<Broker>:
+        Broker.send(Some{reply}, "{\"ok\":true}")
+        return b
+
+def Broker.cast(cast: Bool, +b: Broker, +q: Chan(Message), +op: String, +args: J.Json, reply: Chan(String)) -> IO(Broker):
+  match cast:
+    case True{}: Broker.home(Broker.home_needed(b, J.Json.get_str(args, "page", "")), b, q, args, reply)
+    case False{}: Broker.call(b, q, op, args, reply)
+
 def Broker.registry_apply(valid: Bool, +b: Broker, +p: J.Json, +id: String) -> IO(Broker):
   match valid:
     case False{}: Broker.reject(b, id, "foreign, stale, incomplete or duplicated guest inventory")
@@ -1704,7 +1735,7 @@ def Broker.step(m: Maybe<&1, Message>, +b: Broker, +q: Chan(Message), +version: 
       IO.bind(Broker, Unit, Broker.policy_update(b, owner, known, drive, recording), k)
     case Some{CaptureCommit{+candidate, permit, released}}:
       IO.bind(Broker, Unit, Broker.capture_permit(Broker.capture_commit_valid(b, candidate), b, candidate, permit, released), k)
-    case Some{Call{op, args, reply}}: IO.bind(Broker, Unit, Broker.call(b, q, op, args, reply), k)
+    case Some{Call{+op, args, reply}}: IO.bind(Broker, Unit, Broker.cast(String.eq(op, "cast"), b, q, op, args, reply), k)
     case Some{Deadline{+id}}: Broker.deadline_step(b, q, id, k)
     case None{}: IO.bind(Broker, Unit, Broker.close(b, "desktop broker closed"), _ => IO.pure(Unit, Unit{}))
 

@@ -83,6 +83,14 @@ async function ok(p: Promise<any>, what: string) {
 // run 1
 {
   const { proc, call, events } = start();
+  await ok(call("cast", {page:"fresh",ms:2500,homeUrl:`${base}/home`}), "fresh Browser opens home");
+  const home = await ok(call("status", {page:"fresh"}), "fresh Browser status");
+  check("home URL is loaded",home.url===`${base}/home`,home);
+  await ok(call("navigate", {page:"fresh",url:`${base}/elsewhere`}), "navigate away from home");
+  await ok(call("cast", {page:"fresh",ms:2500,homeUrl:`${base}/home`}), "renew Browser lease");
+  const away = await ok(call("status", {page:"fresh"}), "existing Browser status");
+  check("lease preserves navigation",away.url===`${base}/elsewhere`,away);
+  await ok(call("close", {page:"fresh"}), "close home-page fixture");
   await ok(call("open", { url: `${base}/shared`, width: 640, height: 480 }), "shared open");
   await ok(call("frames", { on: true, maxFps: 10 }), "shared raw frames on");
   await ok(call("open", { page: "bot-1", url: `${base}/anim`, width: 800, height: 600 }), "bot-1 open");

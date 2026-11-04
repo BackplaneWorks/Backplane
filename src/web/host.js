@@ -376,6 +376,9 @@ function patch(el, v) {
   RR?.n("dom.patch");
   const old = el.__v;
   setAttrs(el, old.attrs, v.attrs);
+  // The desktop bridge owns this label's live text. Reapplying the
+  // initial placeholder on every timeline update makes it flicker.
+  if (el.__desktopBrowserStatus) { el.__v = v; return; }
   if (el.id === "timeline") {
     let scroller = timelineLists.get(el);
     if (!scroller) {
