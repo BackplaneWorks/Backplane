@@ -13856,9 +13856,15 @@ def Laws.adopt_copy_none(rec, hand): {==}
 def Laws.copy_file_open_told(): {==}
 
 # --- J2: the pairing message made once per link, not per join ---
-def Laws.pair_msg_kept(): {==}
+def Laws.pair_cache_hit(kept, link): {==}
 
-def Laws.pair_msg_other_link(): {==}
+def Laws.pair_cache_miss(kept, link): {==}
+
+def Laws.pair_msg_kept():
+  Laws.pair_cache_hit("r1\n{m}", "r1")
+
+def Laws.pair_msg_other_link():
+  Laws.pair_cache_miss("r1\n{m}", "")
 
 def Laws.pair_msg_no_link_qr(): {==}
 
@@ -15812,3 +15818,11 @@ def Laws.home_viewer_size_is_local(u, value):
 def Laws.timeline_follow_grown_viewport(held, end): {==}
 
 def Laws.timeline_follow_grown_viewport_away(held, end): {==}
+
+def Laws.json_object_put_fields(fields, key, value): {==}
+
+def Laws.json_object_put_null(key, value): {==}
+
+def Laws.desktop_connection_snapshot(text, version, hub): {==}
+
+def Laws.adopt_live_entries_kept(record, handoff): {==}

@@ -2,7 +2,7 @@ import Base
 import ../src/core/json.bend as J
 import ../src/core/desktop-browser.bend as D
 import ../src/server/desktop-broker.bend as B
-import ../src/server/server.bend as S
+import ../src/server/desktop-info.bend as S
 
 def check(name: String, ok: Bool) -> IO(Unit):
   match ok:

@@ -1,3 +1,6 @@
+import ./adopt-plan.bend as ADOPTPLAN
+import ./desktop-info.bend as DESKINFO
+import ./pairing-info.bend as PAIRINFO
 import ./watch-plan.bend as WATCHPLAN
 import ../core/autosettle.bend as AUTO
 import Base
@@ -1925,16 +1928,8 @@ def Info.kicad(rt: K.Rt) -> List<&2, J.KV>:
        J.KV{"kicad.ipc.servers", J.Str{J.Json.get_str(h, "ipc", "")}}]
 
 # the pairing link as a QR code's rows (core/qr.bend), for Settings
-def Info.qr.k(none: Bool, +lk: String) -> String:
-  match none:
-    case True{}:
-      ""
-    case False{}:
-      QR.Qr.text(QR.Qr.link(lk))
 
 # the pairing link's QR code; none for no link
-def Info.qr(+lk: String) -> String:
-  Info.qr.k(String.is_empty(lk), lk)
 
 # the tailnet side as clients are told it ("tailscale"): off (the flag),
 # checking (no answer yet), unavailable, or reachable
@@ -1999,24 +1994,14 @@ def Info.masked(+text: String) -> IO(String):
 # the JS target, so Cfg.with_link keeps it in Bn and joins reuse it)
 # Shared root credentials never leave the hub in new invitations. Settings
 # requests a private, expiring invite through /auth/invitations instead.
-def Hub.pair_msg.of(+lk: String) -> String:
-  "{\"t\":\"info\",\"info\":{\"pair\":\"\",\"pair.qr\":\"\"}}"
 
-def Hub.pair_msg.k(hit: Bool, +kept: String, +lk: String) -> String:
-  match hit:
-    case True{}:
-      String.drop(kept, 1n+String.length(lk))
-    case False{}:
-      Hub.pair_msg.of(lk)
 
 # the message kept for this link, else made (law pair_msg_kept)
-def Hub.pair_msg.from(+kept: String, +lk: String) -> String:
-  Hub.pair_msg.k(String.starts_with(kept, lk ++ "\n"), kept, lk)
 
 def Hub.pair_msg(c: Cfg) -> String:
   match c:
     case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, _, _, _, _, _, _, _, bnx, _, +lk, _, _}, _, +views, +accountInfo}:
-      Hub.pair_msg.from(BN.Bn.pair(bnx), lk)
+      PAIRINFO.Hub.pair_msg.from(BN.Bn.pair(bnx), lk)
 
 # The pairing link in a hub-drawn view (the web page, the desktop window
 # and the phones all draw Settings that way). Wire.pair reaches such a
@@ -2026,14 +2011,10 @@ def Hub.pair_msg(c: Cfg) -> String:
 # Hub.info alone never had it, and Settings said "Shown once Backplane
 # listens on your tailnet." on a hub that did. So a client takes the link
 # with the info its view is made from (law thin_pair_told).
-def Hub.thin.pair.put(+kv: J.Json, +info: J.Json) -> J.Json:
-  TV.Obj.put(TV.Obj.put(info, "pair", J.Str{J.Json.get_str(kv, "pair", "")}), "pair.qr", J.Str{J.Json.get_str(kv, "pair.qr", "")})
 
-def Hub.thin.pair.k(+msg: String, +info: J.Json) -> J.Json:
-  Hub.thin.pair.put(J.Json.get_obj(Maybe.default(&2, J.Json, J.Json.parse(msg), J.Null{}), "info"), info)
 
 def Hub.thin.pair(c: Cfg, +info: J.Json) -> J.Json:
-  Hub.thin.pair.k(Hub.pair_msg(c), info)
+  PAIRINFO.Hub.thin.pair.k(Hub.pair_msg(c), info)
 
 # A link change is handled after it has been stored, through the inbox,
 # so both sides of an invite refresh immediately (revokes prune rows).
@@ -5238,10 +5219,6 @@ def Desktop.frame_owner(+text: String) -> String:
 
 # This text is internal to the hub actor's authenticated connected message.
 # Ordinary client frames retain their original bytes and cannot supply it.
-def Desktop.connection_info(kind: String, text: String, version: String, hub: String) -> String:
-  match kind:
-    case "connected": J.Json.show(J.Json.obj([J.KV{"version", J.Str{version}}, J.KV{"hub", J.Str{hub}}]))
-    case _: text
 
 def Desktop.forward(m: Maybe<&2, Chan(BR.BMsg)>, client: U32, kind: String, text: String, +out: Chan(String), e: String, l: String, +owner: String, +known: Bool, +tch: TE.TeachSt) -> IO(Unit):
   match m:
@@ -5715,7 +5692,7 @@ def Cfg.with_machines(c: Cfg, +mc: String) -> Cfg:
 def Cfg.with_link(c: Cfg, +lk: String) -> Cfg:
   match c:
     case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, _, fc, ksx}, +tcfg, +views, +accountInfo}:
-      Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, BN.Bn.with_pair(bnx, lk ++ "\n" ++ Hub.pair_msg.of(lk)), mgd, lk, fc, ksx}, tcfg, views, accountInfo}
+      Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, BN.Bn.with_pair(bnx, lk ++ "\n" ++ PAIRINFO.Hub.pair_msg.of(lk)), mgd, lk, fc, ksx}, tcfg, views, accountInfo}
 
 # the tailnet listener is up: every client hears the pairing link. Each
 # one either is the owner's own device or came in with the token already,
@@ -14616,12 +14593,6 @@ def Hub.adopt.es(+es: List<&2, AD.AEntry>, h: Hub, +allow: Bool, +now: Nat) -> I
 
 # the agents a hub takes over or stops at boot: none for a hub on a copied
 # log, whose records name the real hub's agents (law adopt_copy_none)
-def Adopt.copy.entries(copy: Bool, +rec: String, +hand: String) -> List<&2, AD.AEntry>:
-  match copy:
-    case True{}:
-      Nil{}
-    case False{}:
-      AD.Adopt.entries(rec, hand)
 
 def Hub.adopt(h: Hub, +now: Nat) -> IO(Hub):
   match h:
@@ -14634,7 +14605,7 @@ def Hub.adopt(h: Hub, +now: Nat) -> IO(Hub):
         AIO.Adopt.record(Adopt.home.record(home))
         +off : String <- Env.get("BACKPLANE_ADOPT", "")
         copy : Bool <- P.Proc.copy()
-        Hub.adopt.es(Adopt.copy.entries(copy, rec, hand), Hub{st, f, ls, cl, as, inbox, cfg, note}, Bool.not(String.eq(off, "0")), now)
+        Hub.adopt.es(ADOPTPLAN.Adopt.copy.entries(copy, rec, hand), Hub{st, f, ls, cl, as, inbox, cfg, note}, Bool.not(String.eq(off, "0")), now)
 
 def Hub.mail.recover.on(+on: Bool, h: Hub) -> IO(Hub):
   match on h:
@@ -15037,7 +15008,7 @@ def Hub.desktop.forward(h: Hub, client: U32, +kind: String, +text: String, out: 
   match h:
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       do IO<Hub>:
-        Desktop.forward(Cfg.br(cfg), client, kind, Desktop.connection_info(kind, text, Cfg.version(cfg), M.Setting.get(st, "machine.id", "")), out, e, l, Desktop.frame_owner(text), Cef.page.ok(st, Desktop.frame_owner(text)), Cfg.tch(cfg))
+        Desktop.forward(Cfg.br(cfg), client, kind, DESKINFO.Desktop.connection_info(kind, text, Cfg.version(cfg), M.Setting.get(st, "machine.id", "")), out, e, l, Desktop.frame_owner(text), Cef.page.ok(st, Desktop.frame_owner(text)), Cfg.tch(cfg))
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
 
 # A brand-new home must establish its real persisted machine identity before
