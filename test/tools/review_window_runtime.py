@@ -78,7 +78,7 @@ def compile_tiny():
         else:
             os.environ[guard.FD_VAR] = previous_fd
         bend = Path(shutil.which('bend')).resolve()
-        command = ['scripts/heavy-boat.sh', 'bend', 'test/review_window_test.bend', '-o', str(OUT / 'review-window.mjs')]
+        command = ['scripts/heavy-boat.sh', 'bend', 'test/review_window_test.bend', '-o', str(OUT / 'review-window.js')]
         start = time.monotonic()
         p = subprocess.run(command, capture_output=True, text=True, timeout=90, env=environment, pass_fds=(lock.fileno(),))
         (OUT / 'emit.log').write_text(p.stdout + p.stderr)
@@ -117,7 +117,7 @@ def main():
     p = subprocess.run(command, capture_output=True, text=True, timeout=110)
     (OUT / 'worker.log').write_text(p.stdout + p.stderr)
     assert p.returncode == 0, 'tiny compiler route failed: inspect retained worker/emit logs'
-    emitted = OUT / 'review-window.mjs'
+    emitted = OUT / 'review-window.js'
     assert emitted.is_file()
     p = subprocess.run(['bun', str(emitted)], capture_output=True, text=True, timeout=30)
     output = p.stdout + p.stderr
