@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Negative and delegation controls for exact configured-service reuse."""
 import importlib.util
+import hashlib
+import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 import tempfile
@@ -13,6 +16,54 @@ spec.loader.exec_module(relink)
 
 
 class RelinkTests(unittest.TestCase):
+    def require(self, ok, message):
+        if not ok:
+            raise ValueError(message)
+
+    def test_actual_qualified_old_source_and_actual_root_new_source(self):
+        directory = os.environ.get('BACKPLANE_RELINK_AUDIT')
+        self.assertTrue(directory, 'Actual source receipts required for release controls')
+        root = Path(directory)
+        old = json.loads((root / 'OLD-SOURCE.json').read_text())
+        prior = json.loads((root / 'OLD-BUILD.json').read_text())
+        new = json.loads((root / 'NEW-SOURCE.json').read_text())
+        emitted = json.loads((root / 'NEW-EMISSION.json').read_text())
+        self.assertEqual(hashlib.sha256((root / 'OLD-SOURCE.json').read_bytes()).hexdigest(),
+                         prior['sourceManifestSha256'])
+        self.assertEqual(prior['source_commit'], relink.BASE_COMMIT)
+        self.assertEqual(prior['source_tree'], relink.BASE_TREE)
+        self.assertEqual(new['commit'], relink.HOTFIX_COMMIT)
+        self.assertEqual(new['tree'], relink.HOTFIX_TREE)
+        self.assertEqual(hashlib.sha256((root / 'NEW-SOURCE.json').read_bytes()).hexdigest(),
+                         emitted['files']['SOURCE.json']['sha256'])
+        self.assertEqual(relink.source_equivalence(old['members'], new['members']),
+                         sorted(relink.REVIEWED_DELTA))
+        prior_emission = json.loads((root / 'OLD-EMISSION.json').read_text())
+        relink.validate_raw_change(SimpleNamespace(require=self.require), emitted, prior_emission)
+
+    def test_same_old_raw_server_and_changed_web_rejected(self):
+        producer = SimpleNamespace(require=self.require)
+        old = {'files': {'server.js': {'sha256': 'old'}, 'web/index.html': {'sha256': 'same'}}}
+        new = {'files': {'server.js': {'sha256': 'new'}, 'web/index.html': {'sha256': 'same'}}}
+        relink.validate_raw_change(producer, new, old)
+        with self.assertRaises(ValueError):
+            relink.validate_raw_change(producer, old, old)
+        new['files']['web/index.html'] = {'sha256': 'unreviewed'}
+        with self.assertRaises(ValueError):
+            relink.validate_raw_change(producer, new, old)
+
+    def test_prior_compile_input_version_and_channel_mismatches_rejected(self):
+        producer = SimpleNamespace(VERSION='0.14.1', require=self.require,
+            compile_inputs=lambda: {'version': '0.14.1', 'versionStamp': '0.14.1',
+                                    'telemetryChannel': 'release'})
+        expected = relink.previous_compile_inputs(producer)
+        relink.validate_previous_compile_inputs(producer, {'compileInputs': expected})
+        for name, value in [('version', '0.14.1'), ('versionStamp', '0.14.1'),
+                            ('telemetryChannel', 'dev')]:
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                relink.validate_previous_compile_inputs(producer,
+                    {'compileInputs': {**expected, name: value}})
+
     def reviewed_pair(self):
         old = {'src/unchanged.bend': 'same'}
         current = dict(old)
