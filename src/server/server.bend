@@ -15548,16 +15548,32 @@ def Bot.dir.machines(n: Net) -> String:
     case Net{_, _, _, _, _, _, _, _, _, mc, _, _, _, _, _, _}:
       mc
 
+# The hub's first machines list (Machines.loop, a moment after start) asks
+# the machines it should pair with at once: the minute's first tick ran
+# before any list was found, so its ask had nothing to ask and pairing
+# waited a whole minute (60.5 s for two hubs, lane B's far_latency). The
+# list comes at most about 13 s after start (tailscale status, 10 s, then
+# /hello, 3 s), so this ask and the link (15 s each at most) never overlap
+# the next minute's: still one ask at a time.
+def Hub.pair.first(first: Bool, h: Hub) -> IO(Hub):
+  match first:
+    case True{}:
+      Hub.pair(h)
+    case False{}:
+      IO.pure(Hub, h)
+
 def Hub.dir.returned(h: Hub, +mc: String) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       do IO<Hub>:
+        +first : Bool = String.is_empty(Bot.dir.machines(Cfg.net(cfg)))
         h2 : Hub <- Hub.machines(Hub{st, f, ls, cl, as, inbox, cfg, note}, mc)
         +returned : List<&2, BO.Peer> = BH.Dir.returned(BO.World.peers(M.State.bots(st)),
           J.Json.elems(J.Json.get_obj(Maybe.default(&2, J.Json, J.Json.parse(Bot.dir.machines(Cfg.net(cfg))), J.Null{}), "peers")),
           J.Json.elems(J.Json.get_obj(Maybe.default(&2, J.Json, J.Json.parse(mc), J.Null{}), "peers")))
         h3 : Hub <- Hub.dir.queue(h2, returned)
-        Far.returned(h3, returned)
+        h4 : Hub <- Far.returned(h3, returned)
+        Hub.pair.first(first, h4)
 
 def Bot.dir.awake(refresh: Bool, +inbox: Chan(Msg), +peer: String) -> IO(Unit):
   match refresh:
@@ -16571,7 +16587,33 @@ def Hub.bot.seen(bad: Bool, m: Maybe<&2, SG.Seen>, h: Hub, +why: String, +kind: 
           J.Json.elems(Maybe.default(&2, J.Json, J.Json.parse(BN.Bn.dir(Cfg.bn(cfg))), J.Null{})), arg)), inbox, arg)
         h2 : Hub <- Hub.bot.vouched(Bool.and(own, Bool.and(Bool.not(String.eq(kind, "hook")), String.is_empty(UC.Far.own.how(st, arg)))),
           Hub{st, f, ls, cl, as, inbox, Cfg.with_bn(cfg, BN.Bn.with_seen(Cfg.bn(cfg), s)), note}, arg, now)
-        Hub.bot.act(C.Codec.pos(["hook", "deliver", "link", "dir", "far-push", "far-log", "far-rpc"], kind), h2, arg, body, me, reply, now)
+        h3 : Hub <- Far.back(Bool.not(String.eq(kind, "hook")), h2, arg)
+        Hub.bot.act(C.Codec.pos(["hook", "deliver", "link", "dir", "far-push", "far-log", "far-rpc"], kind), h3, arg, body, me, reply, now)
+
+# A genuine signed request from one of the owner's machines whose mirror
+# here is away is a return signal: its mirror is pulled now (one pull per
+# link at a time, Far.pull), not at this hub's next minute. A machine that
+# restarted was seen back only at that minute (60.0 s, lane B's
+# far_latency); its first request (the directory it asks for at start)
+# now brings it back. A mirror that is not away, or a link that is not
+# the owner's (Far.own.id), pulls nothing, so two hubs never bounce pulls.
+def Far.back.k(go: Bool, h: Hub, +link: String) -> IO(Hub):
+  match go:
+    case True{}:
+      Far.pull.here(h, link)
+    case False{}:
+      IO.pure(Hub, h)
+
+def Far.back.p(r: FR.In & Hub, own: Bool, +link: String) -> IO(Hub):
+  (i, h) = r
+  Far.back.k(Bool.and(own, FR.In.away(i)), h, link)
+
+def Far.back(peer: Bool, h: Hub, +link: String) -> IO(Hub):
+  match peer h:
+    case True{} Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      Far.back.p(Far.in.of(Far.fh(Hub{st, f, ls, cl, as, inbox, cfg, note}), link, link), Far.own.id(st, cfg, link), link)
+    case False{} _:
+      IO.pure(Hub, h)
 
 # a signed request (or a webhook's bearer token), checked: genuine (key),
 # not seen before, then acted on; a refusal says why
