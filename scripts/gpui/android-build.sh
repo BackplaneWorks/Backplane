@@ -11,7 +11,7 @@ mkdir -p "$W/src/mobile/build/assets" "$ROOT/build/gpui/results/android"
 rsync -a --delete --exclude build --exclude .gradle "$ROOT/mobile/android/" "$W/src/mobile/android/"
 rsync -a --delete "$ROOT/mobile/shell/" "$W/src/mobile/shell/"
 # bridge.js: built from Bend elsewhere, never here (see build/gpui/results/android/bridge-source.txt)
-cp "$W/assets/bridge.js" "$W/src/mobile/build/assets/bridge.js"
+cp "${BRIDGE:-$W/assets/bridge.js}" "$W/src/mobile/build/assets/bridge.js"
 if [ "$MODE" = cold ]; then rm -rf "$W/gradle-home" "$W/src/mobile/android/.gradle" "$W/src/mobile/android/app/build"; fi
 mkdir -p "$W/gradle-home"
 S=$(date +%s.%N)

@@ -60,7 +60,11 @@ struct BackplaneApp: App {
                 #endif
                 // this device's appearance (App settings); the hub's theme is not
                 // read, except by the web screen, whose page says its theme
+                #if GPUI_NATIVE
+                .preferredColorScheme(model.settings.colorScheme)
+                #else
                 .preferredColorScheme(model.webShown ? model.web.theme ?? model.settings.colorScheme : model.settings.colorScheme)
+                #endif
                 // Canonical references and legacy notification links share message-tap routing.
                 .onOpenURL { model.open($0) }
                 .onAppear { delegate.model = model }

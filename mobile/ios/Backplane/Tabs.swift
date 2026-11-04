@@ -37,6 +37,30 @@ struct AppTabs: View {
         }
     }
 
+    // Regular width (iPad): the project list as a sidebar beside the open
+    // thread, as the web client has it. A row opens its thread in the detail
+    // pane through the same model path the compact stack pushes onto.
+    private var threadsSplit: some View {
+        let open = model.stacks[.threads]?.last
+        return HStack(spacing: 0) {
+            NavigationStack {
+                ProjectsView(model: model, screen: screen, pairing: $pairing)
+            }
+            .frame(width: 360)
+            Rectangle().fill(BackplaneDesign.line).frame(width: 1)
+            NavigationStack {
+                if let id = open, !id.hasPrefix("@") {
+                    ThreadDestination(model: model, id: id).id(id)
+                } else {
+                    Text(screen.locale == "ja" ? "スレッドを選択" : "Select a thread")
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(BackplaneDesign.background)
+                }
+            }
+        }
+    }
+
     @ViewBuilder private func root(_ t: AppTab) -> some View {
         switch t {
         case .home: HomeTab(model: model, screen: screen)
@@ -52,7 +76,9 @@ struct AppTabs: View {
             if next != model.tab { model.chooseTab(next) }
         })) {
             ForEach(AppTab.allCases) { t in
-                stack(t)
+                Group {
+                    if t == .threads && horizontalSizeClass == .regular { threadsSplit } else { stack(t) }
+                }
                     .toolbar(horizontalSizeClass == .compact ? .hidden : .automatic, for: .tabBar)
                     .tabItem { Label(t.title(screen.locale ?? "en"), systemImage: t.icon) }
                     .badge(badge(t))

@@ -145,7 +145,7 @@ struct RootView: View {
     // tourWait has seen the root clear; the same as Android: dismissing it
     // (swipe down) is Skip
     private var tourShown: Binding<Bool> {
-        Binding(get: { model.screen?.tour != nil && tourReady && !pairing },
+        Binding(get: { model.screen?.tour != nil && tourReady && !pairing && !(model.tourHeld && !model.contentReady) },
                 set: { if !$0, model.screen?.tour != nil { model.act("ob-skip") } })
     }
 
