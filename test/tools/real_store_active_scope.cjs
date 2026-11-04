@@ -6,7 +6,7 @@ const fs = require('node:fs'), cp = require('node:child_process');
 const check = (v, code) => { if (!v) throw Error(code); };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 class ScopeProof {
-  constructor() { this.launched = false; this.verified = false; this.uncertain = false; this.empty = false; this.killed = false; }
+  constructor() { this.launched = false; this.verified = false; this.uncertain = false; this.resourceUncertain = false; this.empty = false; this.killed = false; }
   submitted() { check(!this.launched, 'scope-double-start'); this.launched = true; }
   bind(identity) {
     check(this.launched && !this.verified && identity?.invocation && identity?.inode && identity?.device, 'scope-identity');
@@ -17,11 +17,13 @@ class ScopeProof {
     if (!same) this.uncertain = true; return same && !this.uncertain;
   }
   unknown() { this.uncertain = true; }
+  resourcesUnknown() { this.resourceUncertain = true; }
   killedAll() { check(this.verified && !this.uncertain, 'scope-owner-unknown'); this.killed = true; }
   observedEmpty() { check(this.verified, 'scope-owner-unknown'); this.empty = true; }
-  verdict() { return { safeToRemove: !this.launched || this.verified && this.empty && !this.uncertain,
+  verdict() { return { safeToRemove: !this.launched || this.verified && this.empty && !this.uncertain && !this.resourceUncertain,
     submitted: this.launched, identityVerified: this.verified, kernelKillIssued: this.killed,
-    allDescendantsEmpty: this.empty, uncertainty: this.uncertain }; }
+    allDescendantsEmpty: this.empty, uncertainty: this.uncertain || this.resourceUncertain,
+    ownershipUncertainty: this.uncertain, resourceUncertainty: this.resourceUncertain }; }
 }
 class LinuxScope {
   constructor(unit) {
@@ -58,6 +60,7 @@ class LinuxScope {
     try {
       while (performance.now() < deadline) {
         const m = this.manager();
+        if (this.proof.verified) this.observeInvocation(m);
         if (m.LoadState === 'loaded' && m.ControlGroup) {
           check(/^\/user\.slice\//.test(m.ControlGroup) && m.ControlGroup.endsWith('/' + this.unit) && /^[a-f0-9]{32}$/.test(m.InvocationID), 'scope-identity');
           if (this.fd === null) {
@@ -88,7 +91,7 @@ class LinuxScope {
     const known = new Set(['scope-identity', 'scope-owner-unknown', 'scope-cap', 'scope-type', 'scope-manager',
       'scope-file', 'scope-resource-missing', 'scope-resource-sample', 'scope-resource-bound', 'scope-pid-bound',
       'scope-multiple-leaders', 'scope-admission-deadline', 'scope-process-sample', 'scope-retirement-uncertain',
-      'scope-populated-missing', 'scope-kill-write', 'scope-stop-deadline']);
+      'scope-populated-missing', 'scope-kill-write', 'scope-stop-deadline', 'scope-resources-unqualified']);
     this.failureCode ??= ['EACCES', 'EPERM', 'ENOENT', 'ENODEV', 'ETIMEDOUT'].includes(e?.code) ?
       'scope-' + e.code.toLowerCase() : known.has(e?.message) ? e.message : 'scope-operation-failed';
   }
@@ -112,20 +115,29 @@ class LinuxScope {
   observeResources(stage) {
     try {
       const events = Object.fromEntries(this.read('memory.events').split('\n').map(row => {
-        const [k, v] = row.split(/\s+/); check(/^\d+$/.test(v), 'scope-resource-sample'); return [k, Number(v)];
+        const [k, v] = row.split(/\s+/); check(/^\d+$/.test(v) && Number.isSafeInteger(Number(v)), 'scope-resource-sample'); return [k, Number(v)];
       }));
+      check(['oom', 'oom_kill', 'oom_group_kill'].every(k => Number.isSafeInteger(events[k]) && events[k] >= 0), 'scope-resource-sample');
       const row = { stage, memoryMaxBytes: Number(this.read('memory.max')), swapMaxBytes: Number(this.read('memory.swap.max')),
         memoryPeakBytes: Number(this.read('memory.peak')), swapCurrentBytes: Number(this.read('memory.swap.current')), events };
       check(row.memoryMaxBytes > 0 && row.memoryMaxBytes <= 3700000000 && row.memoryPeakBytes > 0 &&
-        Number.isSafeInteger(row.memoryPeakBytes) && row.swapMaxBytes === 0 && Number.isSafeInteger(row.swapCurrentBytes), 'scope-resource-sample');
+        Number.isSafeInteger(row.memoryPeakBytes) && row.swapMaxBytes === 0 && Number.isSafeInteger(row.swapCurrentBytes) && row.swapCurrentBytes >= 0, 'scope-resource-sample');
       check(this.resourceObservations.length < 3, 'scope-resource-bound'); this.resourceObservations.push(row);
-    } catch (e) { this.resourceObservationMissing = true; this.recordFailure(e); }
+    } catch (e) { this.resourceObservationMissing = true; this.proof.resourcesUnknown(); this.recordFailure(e); }
   }
   resourcesHealthy() {
-    return !this.resourceObservationMissing && this.resourceObservations.length === 2 && this.resourceObservations.every(r =>
+    return !this.proof.resourceUncertain && !this.resourceObservationMissing && this.resourceObservations.length === 2 && this.resourceObservations.every(r =>
       r.swapCurrentBytes === 0 && ['oom', 'oom_kill', 'oom_group_kill'].every(k => r.events[k] === 0));
   }
+  observeInvocation(m) {
+    if (m.InvocationID && m.InvocationID !== this.proof.identity?.invocation) {
+      this.proof.unknown(); throw Error('scope-owner-unknown');
+    }
+  }
   retired(m) {
+    // Retirement may erase an ID, but a nonempty replacement is never ours.
+    // Check before even inspecting the old pathname, also on the read fallback.
+    this.observeInvocation(m);
     if (!this.proof.verified || !(m.LoadState === 'not-found' || !m.ControlGroup) || m.ActiveState !== 'inactive') return false;
     // existsSync also returns false for access errors. Only a positively
     // observed missing old pathname, plus manager retirement, proves this case.
@@ -134,6 +146,7 @@ class LinuxScope {
   }
   populated() {
     const m = this.manager();
+    this.observeInvocation(m);
     if (m.LoadState === 'not-found' || !m.ControlGroup) {
       // A cgroup directory can retire only after its complete subtree empties.
       check(this.retired(m), 'scope-retirement-uncertain');
@@ -152,7 +165,7 @@ class LinuxScope {
     check(entries.populated === '0' || entries.populated === '1', 'scope-populated-missing'); return Number(entries.populated);
   }
   async stop(timeoutMs = 3000) {
-    if (!this.proof.launched) return { ...this.proof.verdict(), failureCode: this.failureCode };
+    if (!this.proof.launched) return this.deletionVerdict();
     try {
       check(this.proof.verified && !this.proof.uncertain, 'scope-owner-unknown');
       if (this.populated() !== 0) {
@@ -171,6 +184,14 @@ class LinuxScope {
       while (this.populated() !== 0 && performance.now() < deadline) await sleep(10);
       check(this.populated() === 0, 'scope-stop-deadline'); this.proof.observedEmpty();
     } catch (e) { this.recordFailure(e); this.proof.unknown(); }
+    return this.deletionVerdict();
+  }
+  deletionVerdict() {
+    // Resource uncertainty blocks deletion independently of known ownership:
+    // a verified scope may still be killed to stop its children safely.
+    if (this.proof.launched && !this.resourcesHealthy()) {
+      this.proof.resourcesUnknown(); this.recordFailure(Error('scope-resources-unqualified'));
+    }
     return { ...this.proof.verdict(), failureCode: this.failureCode };
   }
   close() { if (this.fd !== null) { fs.closeSync(this.fd); this.fd = null; } }

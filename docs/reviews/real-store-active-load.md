@@ -157,6 +157,13 @@ and [systemd scope lifetime](https://www.freedesktop.org/software/systemd/man/la
 Every signal target is the verified owned scope, never a copied/recycled PID.
 An unknown invocation, missing identity, denied operation or ambiguous
 retirement permanently refuses cleanup PASS and preserves the private home.
+Every nonempty observed invocation ID is compared before accepting retirement,
+including an inactive unit without a control group and the missing-events
+fallback. Resource uncertainty is sticky independently of ownership: verified
+owned kill can still stop children, while missing/denied/malformed resource
+reads, absent observations or prior resource uncertainty deny home deletion
+even after the whole subtree is empty. Main and synthetic cleanup require both
+the deletion verdict and healthy resource evidence before removing the home.
 The home is removed only after proven whole-scope emptiness, launcher exit
 and closed log streams, with each result included in `report.checks`.
 Delegate/kill permissions and the revised implementation remain unqualified
@@ -181,7 +188,7 @@ suppressed must fail readiness despite fresh deltas. Sixteen explicit
 producer assertions are expected. It does not substitute a longer fixed sleep
 for observing the missing cycle.
 
-Twenty-eight execution-scope controls include a synthetic Node worker spawning
+Forty-nine execution-scope controls include a synthetic Node worker spawning
 a child absent from the main task's children list, a late orphan after leader
 exit, concurrent spawning during stop, missing-task reads, replaced invocation
 and inode/device, and unknown-owner refusal. They use the same production
@@ -189,6 +196,12 @@ harness scope implementation, start two small synthetic scopes and preserve
 their homes on uncertainty. Each has the same <=3.7GB/no-swap cap; no actual
 hub or real store is opened. The packet must verify those scope identities,
 caps, admission/pre-kill resource observations and cleanup as well as the outer workers. Resource observations are explicitly pre-kill; missing counters fail rather than becoming invented zeroes after cgroup retirement.
+Twenty-one of the 49 controls mock only the manager/kernel boundary and call
+the actual `LinuxScope.stop` implementation: direct inactive/not-found
+replacement IDs, ENOENT/ENODEV fallback replacement IDs, valid original/erased
+retirement IDs, before-kill missing/denied/malformed resource reads and absent
+observations. They assert no deletion after emptiness and no later recovery
+from prior uncertainty; they run no systemd command or process.
 The forwarding control
 intentionally rejects the old fence that loses Node HTTP option/callback
 overloads; do not weaken it to accept that version. There is no full/root

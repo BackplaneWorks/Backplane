@@ -692,7 +692,7 @@ try {
   report.checks.noFault = !fault && !report.failureCode;
   closeSync(samplesFd);
   report.checks.ownedHomeRemoved = false;
-  if (cleanup.safeToRemove && drained && launcherExited) {
+  if (cleanup.safeToRemove && (!cleanup.submitted || ownedScope.resourcesHealthy()) && drained && launcherExited) {
     try { rmSync(root, { recursive: true, force: true }); report.checks.ownedHomeRemoved = true; } catch {}
   }
   ownedScope.close();
