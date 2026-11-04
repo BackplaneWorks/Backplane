@@ -476,7 +476,9 @@ def Rt.run(+rt: Rt) -> IO(Rt):
   IO.bind(Bool, Rt, Io.is_file(Rt.cli(rt)), found => Rt.run.k(found, rt))
 
 def Rt.save(+home: String, +rt: Rt) -> IO(Unit):
-  IO.bind(P.Ran, Unit, P.Proc.run("sh", ["-c", "umask 077; printf '%s' \"$2\" > \"$1.tmp\" && mv \"$1.tmp\" \"$1\"", "sh", home ++ "/kicad-health.json", J.Json.show(Rt.json(rt))], "/"), _ => IO.pure(Unit, Unit{}))
+  # Native Windows argv quoting and Cygwin's parser disagree on backslashes:
+  # transporting JSON as a shell argument can turn \\b into a backspace.
+  IO.bind(Result<&1, &1, U32 & String, Unit>, Unit, H.FS.write_atomic(home ++ "/kicad-health.json", J.Json.show(Rt.json(rt))), _ => IO.pure(Unit, Unit{}))
 
 def Rt.refresh.k(check: Bool, +home: String, +setting: String, +stamp: String, +cs: List<&2, KCandidate>, can: Bool, +last: Rt) -> IO(Rt):
   match check:
