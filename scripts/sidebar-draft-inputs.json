@@ -25,7 +25,7 @@
   "closureScannerSha256": "118bf07ecfe1c3da0776cde55b23a824185daff7847bda4a73c503d6929c7826",
   "files": {
     "src/core/account-fallback.bend": "05ba18dd4ee4f3c1787f69711e376e9934f6782e12454f7fe25bb1d18f2f82fc",
-    "src/core/accounts.bend": "c477544bc0984a54d7b80d3a0abdad2784efa5f46043f4070e6e500865892f34",
+    "src/core/accounts.bend": "e2e3f9fa340eb1a8571150a0b265c970aa5b5e7bf96dda582e6dee8eb673a52e",
     "src/core/acp.bend": "9f199bd200f4c3cd4e0e7e0900e22cf2a93ca11e6a4a07f48611888e6dd88e2a",
     "src/core/agent.bend": "4cd526064adf54dc37b7b3fef4272d3ed0767c4e302e459cbd9097a1c7b5f28c",
     "src/core/agy.bend": "db6a8932469dd0848dc808bd5fe51dffdf9a3c209438798efe254ab6244c7e36",
@@ -43,11 +43,11 @@
     "src/core/cad-install.bend": "c27afcbe168c402eebf12621dff91b0564caf75a069c1558b6a5f5e0b1a4b77a",
     "src/core/cad.bend": "e53b068b417096d323f15aeec8fbaaa1c61410c2d34a83b47238c7fcb6b91775",
     "src/core/cat.bend": "0130231a18e515a94d40d7584d19a9b5a2d1663f9601fbff944bf97e37f9fd6b",
-    "src/core/cef.bend": "f2d3fa4c991d0e341620fe634ddb4e08da97f8e471ec46afac0b3de471cc69fb",
+    "src/core/cef.bend": "c79232d201183cd013ff5dc943d76561705b6728f2ac19cb87698919d523721c",
     "src/core/charter.bend": "7f906bdea712f6ff6162735c8cc133767ec0f9289c3d0bee6dfedbd4d75ad981",
     "src/core/chat-pending.bend": "4a6dcabdd6b5653d664729a07d7ff044488732a9e684a7832c18e20502442db1",
     "src/core/client-language.bend": "9315c77e9837deac6813974c711e52a2b4b885df7ecd1fa28ad8b84fb0bc4bac",
-    "src/core/client.bend": "4cbb7194de35393c575142a6a934afb33ae0069ae471950be7741d0eb7c717b0",
+    "src/core/client.bend": "47cb22bfb5e61595b1716c6765a2a22d822e3ae1cf67b8bc59f6d4eab18f2b5e",
     "src/core/codec.bend": "75de46900a06e39152c37d4ac5c433a9fbabd522ff20baab18eb5ea5b0ae2bd2",
     "src/core/cron.bend": "6f89a001df0261a25c878616ea66c235e169f7fc1c726d39e695fce8adb57332",
     "src/core/deploy.bend": "ebee4e63a52cf41ae001bebcdbb7fb010ad71c1e04e481292585740d88a39cc4",
@@ -172,7 +172,7 @@
     "src/core/winnote.bend": "f0cbd29916ff64103799874c96b8eee4945c05b1a83fbb3ba083bc1673031255",
     "src/core/wnote.bend": "019cf6a357f4428774176585931a2df17b83d2347b9e1078428f578968e445d5",
     "src/mobile/hubs.bend": "e8d78ec982828a8018c0845a36d03123c47bf9c94b5d4cee855f9358ccc293a3",
-    "src/mobile/screen.bend": "a4df008dd196cfbd6f7e877098bf86e41636947aeca15f76ed9db9be22a67912",
+    "src/mobile/screen.bend": "49904f2c5310890302efd526c459b81c17899562169b441ab18f056cecb84a43",
     "src/server/thin-actor.bend": "2e91a6abd414d026cff5da6838c25b313c6b321dbcc663fa351878c028fe4e15",
     "src/server/thin-body.bend": "779e72f8bb69990c74bf4acdd52f50fb1e0ceaa8771cd38044bef81d2c1a3680",
     "src/server/thin-mirror.bend": "b488dc7c45fe49bb1aa17966f454f1ee0e9cfef7db4d619c265c298c9bc94e92",
@@ -184,7 +184,7 @@
     "src/server/thin-view.bend": "c9bfaf9bac65d287fd70d3b804bb7b9bcb20cddd93324f7e477301a9f57382ae",
     "src/server/thinstore.bend": "07a7bbcfe3f3813f80925c0229e16653e362567d86ff4fb1369de22dbd262572",
     "src/web/allowance.bend": "0e9ee3ab27dd2b3c25a2778a35b300c7333c0878b5215b62c7229fed79ee168b",
-    "src/web/bots.bend": "f265768306a1bc1edc14f53d1d6f9c7f7e0362afe236c8edd59f8813bd12aa0c",
+    "src/web/bots.bend": "ca233856e989d9803c62521b9ced614e1681b461aae630ca3c71c30903b59ed2",
     "src/web/cat.bend": "301a7ba925f92fc25bdc35b63f79bcf8bf7b72619106c826c471247a0ace85ba",
     "src/web/composer-bar.bend": "fd6b6110ff409c090bf03f7ccbe64ed59f5474d548dfd804d8d1a0a441c1f863",
     "src/web/dom.bend": "6e0ddb26a372a07cf2af0bbccdae476087fb50d6e2af5da9c6f8d6b9cc1ca0b5",
@@ -200,7 +200,7 @@
     "src/web/terminal-cells.bend": "398447910b3ffe4645874d8e96198e9008bcb58202f16be95fd0177aa6a0bc63",
     "src/web/usage-graph.bend": "b41a1ffd14194cb6f95703852d238d9401d7aaa42589382bd13203d94d33523d",
     "src/web/usage-page.bend": "40ebb901b56f8c28f2b7eef5551c14b409333c0ef739c4d3df4ed44df581e876",
-    "src/web/view.bend": "769d3fb9f716ef44f8c5fe6d9abd94f6e9da038615a96debb17a0b0d0a0eafd0"
+    "src/web/view.bend": "af9c1748d0a244425e90accd197f8315accc700d2e2dd93353a1f4e36b4a0cbe"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -1165,5 +1165,27 @@
       "src/web/view.bend": "769d3fb9f716ef44f8c5fe6d9abd94f6e9da038615a96debb17a0b0d0a0eafd0"
     },
     "scope": "view.bend gains View.settings.phone.app: one Settings row (Appearance and Threads pages, phone layout only) with a static [data-ph-app=settings] button that only the phone apps show (html.ph-in-app). It reads only the locale; no sidebar draft reader, unknown @ retention, private image key, scratch filter or transport/recipient authority change. (Not re-run: test/sidebar_draft_image_test.bend.)"
+  },
+  "kicadMainCheckoutReview": {
+    "scope": "KiCad copy-choice reads only the requesting thread id, committed reply metadata in ko:<thread>, and existing Ui info. No ordinary draft body reads, filtering, sidebar key, bridge authority or fallback policy changed. Phone projection uses that same metadata and existing shared action table.",
+    "files": {
+      "src/core/accounts.bend": "e2e3f9fa340eb1a8571150a0b265c970aa5b5e7bf96dda582e6dee8eb673a52e",
+      "src/core/cef.bend": "c79232d201183cd013ff5dc943d76561705b6728f2ac19cb87698919d523721c",
+      "src/core/client.bend": "47cb22bfb5e61595b1716c6765a2a22d822e3ae1cf67b8bc59f6d4eab18f2b5e",
+      "src/mobile/screen.bend": "49904f2c5310890302efd526c459b81c17899562169b441ab18f056cecb84a43",
+      "src/web/bots.bend": "ca233856e989d9803c62521b9ced614e1681b461aae630ca3c71c30903b59ed2",
+      "src/web/view.bend": "af9c1748d0a244425e90accd197f8315accc700d2e2dd93353a1f4e36b4a0cbe"
+    },
+    "qualification": {
+      "job": "j20261104221430-2461466",
+      "test": "test/sidebar_draft_image_test.bend",
+      "ok": 24,
+      "fail": 0,
+      "memoryMaxBytes": 3700000000,
+      "memorySwapMaxBytes": 0,
+      "oomKill": 0,
+      "logSha256": "cd83cd83cb66e6c0ea17d490d0baf8502c2b965f711f5e731bbd391a9cd5612c"
+    },
+    "limits": "Full PROOF.bend attempted on this source under the 3.7e9 cap; OOM-killed. The three new laws and 13 copy-choice UI assertions passed separately. No native-device acceptance claimed."
   }
 }
