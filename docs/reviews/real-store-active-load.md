@@ -1,9 +1,11 @@
 # Combined copied-store and active-load preparation
 
-Status: **one-character correction released for one no-hub packet**. The
-`bdd09fe794` packet failed its producer assertion; the `27e9056464` packet
-failed parsing the producer diagnostic before any producer/scope controls.
-The extra closing parenthesis is corrected; no other executable source is changed. There is no whole-harness, actual-hub cleanup,
+Status: **aggregate test diagnostics released for one producer-only Boat run**.
+The `bdd09fe794`, `27e9056464` and corrected `2f88220d84` packets all failed.
+The last observed a real mixed cycle but failed its compound receipt/cohort
+assertion; the cause remains unestablished. Only bounded test diagnostics are
+added next; producer source, policy, clocks, phases, budgets and assertions
+remain unchanged. There is no whole-harness, actual-hub cleanup,
 memory, CPU, latency, startup or package PASS. The memory owner `t1793648028-1245355`
 retains sole packaged before/after evaluation. Send the frozen source and check
 scope to that owner before executing even the self-tests. Existing recovery,
@@ -240,6 +242,34 @@ The sole permitted executable correction removes that one parenthesis.
 Neither this correction release nor either partial result qualifies runtime
 cleanup, packaged performance or merge. A new failure requires terminal
 evaluation; it does not authorize automatic retry.
+
+The corrected packet is preserved in
+[`extra/hub-real-active-qualification/2f8822`](../../extra/hub-real-active-qualification/2f8822/FAILURE.json):
+work `1577389`, job `j20261104084927-1120550`, overall exit 1. Positive mixed
+text/tool/result were observed, then the compound cohort receipt assertion
+failed. Producer16 terminal/suppressed case and all scope49 controls were
+unexecuted. Partial policy54, tar29, pump20000/max1 and exact focused fence
+reuse are preserved; no fence rerun occurred. All 33 source/tool/overlay inputs
+were unchanged; worker peak 83,615,744 bytes, controller peak 350,978,048 bytes,
+OOM/swap zero, no remaining worker children, clean temp and verified sandbox
+deletion. This is not a producer, scope or performance qualification.
+
+The next released packet is **producer-only diagnostic**, with an untracked
+entrypoint that extracts and hashes the unchanged `String.raw` producer body
+without importing the executable harness top level. It invokes only the same
+producer test; none of the fence, policy, tar, pump or scope tests are rerun.
+Passed groups are reused solely by exact pinned source/input/tool receipt audit,
+with their original overall failures retained. The test adds two fixed epoch
+aggregates and at most three controller control publications/four numeric
+clock observations. It reports observed marker count/UTF8 bytes, sequence and
+timestamp ranges versus receipt count/bytes/bucket sum/first/last/sequence
+range, individual comparison booleans, numeric receive/control/receipt clocks
+and conservative outside-window counts accounting for <1ms marker flooring.
+It prints no payload, argv, private path or growing per-event log. The actual
+producer, policy, clocks, phase behavior, budgets and all original assertions
+are unchanged. A diagnostic failure requires terminal evaluation, not a
+behavioral fix or automatic retry. Actual scope permissions/cleanup and
+packaged startup/CPU/RSS/p99 remain unqualified; merge remains held.
 
 The evaluator's later acceptance command supplies `--bin`, `--artifact-receipt`,
 `--sha256`, `--fixture`, `--fixture-sha256`, `--fixture-receipt-sha256`,

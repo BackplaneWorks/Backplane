@@ -24,11 +24,58 @@ module.exports.run = async function run(source) {
     const file = join(root, 'producer.cjs'), run = '012345abcdef', id = 'ra-012345abcdef-0';
     const receiptPath = join(root, 'producer-0.json'); let child, finished = false, parseFault = null, bytes = 0, pending = '';
     const rows = [];
+    // Diagnostics retain two epoch aggregates and three control publications,
+    // never a per-event log. They do not change clocks, phases or assertions.
+    const controls = [], received = [{ count: 0, first: null, last: null }, { count: 0, first: null, last: null }];
+    const clockSamples = [];
+    const clockSample = stage => { if (clockSamples.length < 4) clockSamples.push({ stage,
+      monoMs: now(), performanceMs: performance.now(), performanceOriginMs: performance.timeOrigin, wallMs: Date.now() }); };
     const control = (epoch, mode) => {
       const start = now(); fs.writeFileSync(join(root, 'control.next'), JSON.stringify({ epoch, mode, start, end: start + 10000 }));
       fs.renameSync(join(root, 'control.next'), join(root, 'control.json'));
+      if (controls.length < 3) controls.push({ epoch, mode, start, end: start + 10000, publishedMonoMs: now() });
     };
     const receipt = () => fs.existsSync(receiptPath) ? JSON.parse(fs.readFileSync(receiptPath, 'utf8')) : null;
+    function diagnostic() {
+      let r = null, receiptReadFailed = false;
+      try { r = receipt(); } catch { receiptReadFailed = true; }
+      let unparsedDeltas = 0, unknownEpochMarkers = 0;
+      const observed = [1, 2].map(epoch => ({ epoch, count: 0, utf8Bytes: 0, firstSeq: null, lastSeq: null,
+        minSeq: null, maxSeq: null, minTimestampMs: null, maxTimestampMs: null,
+        definitelyBeforeWindow: 0, definitelyAfterWindow: 0, boundaryFloorUncertain: 0 }));
+      for (const row of rows) {
+        if (row.event?.type !== 'content_block_delta') continue;
+        const text = row.event.delta?.text, m = typeof text === 'string' && /~ra:012345abcdef:0:(\d+):(\d+):(\d+):(mixed|pure)~/.exec(text);
+        if (!m) { unparsedDeltas++; continue; }
+        const epoch = Number(m[3]), s = observed[epoch - 1];
+        if (!s || epoch < 1 || epoch > 2) { unknownEpochMarkers++; continue; }
+        const seq = Number(m[1]), at = Number(m[2]), c = controls.find(c => c.epoch === epoch);
+        s.count++; s.utf8Bytes += Buffer.byteLength(text); s.firstSeq ??= seq; s.lastSeq = seq;
+        s.minSeq = s.minSeq === null ? seq : Math.min(s.minSeq, seq); s.maxSeq = s.maxSeq === null ? seq : Math.max(s.maxSeq, seq);
+        s.minTimestampMs = s.minTimestampMs === null ? at : Math.min(s.minTimestampMs, at);
+        s.maxTimestampMs = s.maxTimestampMs === null ? at : Math.max(s.maxTimestampMs, at);
+        // Markers floor the producer's unchanged clock. Preserve its <1ms
+        // uncertainty instead of guessing which side of a fractional edge it is.
+        if (c) { if (at + 1 <= c.start) s.definitelyBeforeWindow++;
+          else if (at >= c.end) s.definitelyAfterWindow++;
+          else if (at < c.start) s.boundaryFloorUncertain++; }
+      }
+      return { scope: 'stand-in-cohort-diagnostic', suppressedCycle: suppressed, assertionsCompleted: cases,
+        hubStarted: false, outputRows: rows.length, unparsedDeltas, unknownEpochMarkers, controls, clockSamples,
+        controllerSnapshotMonoMs: now(), producerReceiptAtMs: r?.at ?? null, receiptReadFailed,
+        epochs: observed.map((o, i) => {
+          const s = r?.states?.find(s => s.epoch === o.epoch), bucketSum = Array.isArray(s?.buckets) ? s.buckets.reduce((a, b) => a + b, 0) : null;
+          return { observed: o, received: received[i], receipt: s ? { epoch: s.epoch, mode: s.mode,
+            count: s.count, bytes: s.bytes, bucketSum, first: s.first, last: s.last, firstSeq: s.firstSeq, lastSeq: s.lastSeq } : null,
+            comparisons: { receiptPresent: !!s, countEqualsObserved: !!s && s.count === o.count,
+              bytesEqualObservedUTF8: !!s && s.bytes === o.utf8Bytes, bytesEqualObservedCountTimes96: !!s && s.bytes === o.count * 96,
+              bucketSumEqualsObserved: !!s && bucketSum === o.count, bucketSumEqualsReceipt: !!s && bucketSum === s.count,
+              orderedReceiptTimes: !!s && s.last >= s.first,
+              firstSeqEqualsObserved: !!s && s.firstSeq === o.minSeq, lastSeqEqualsObserved: !!s && s.lastSeq === o.maxSeq,
+              firstTimeMatchesFlooredMarker: !!s && o.minTimestampMs !== null && s.first >= o.minTimestampMs && s.first < o.minTimestampMs + 1,
+              lastTimeMatchesFlooredMarker: !!s && o.maxTimestampMs !== null && s.last >= o.maxTimestampMs && s.last < o.maxTimestampMs + 1 } };
+        }) };
+    }
     async function collect(stream, stdout) {
       const decoder = new TextDecoder(); let errors = '';
       for await (const b of stream) {
@@ -36,7 +83,9 @@ module.exports.run = async function run(source) {
         if (!stdout) { errors += decoder.decode(b, { stream: true }); continue; }
         pending += decoder.decode(b, { stream: true });
         for (;;) { const at = pending.indexOf('\n'); if (at < 0) break;
-          rows.push(JSON.parse(pending.slice(0, at))); pending = pending.slice(at + 1); assert(rows.length <= 1024); }
+          const row = JSON.parse(pending.slice(0, at)); rows.push(row); pending = pending.slice(at + 1); assert(rows.length <= 1024);
+          const m = row.event?.type === 'content_block_delta' && /~ra:012345abcdef:0:(\d+):(\d+):(\d+):(mixed|pure)~/.exec(row.event.delta?.text ?? '');
+          if (m && (m[3] === '1' || m[3] === '2')) { const s = received[Number(m[3]) - 1], at = now(); s.count++; s.first ??= at; s.last = at; } }
       }
       if (stdout) assert.equal(pending, '', 'complete output lines'); return errors;
     }
@@ -51,9 +100,11 @@ module.exports.run = async function run(source) {
         assert.equal(input.split(gate).length, 2, 'negative changes only the cycle gate'); input = input.replace(gate, 'if (false)');
       }
       fs.writeFileSync(file, input); control(1, 'mixed');
+      clockSample('before-spawn');
       child = Bun.spawn([process.execPath, file], { cwd: root,
         env: { HOME: root, REAL_ACTIVE_ROOT: root, REAL_ACTIVE_RUN: run, REAL_ACTIVE_IDS: JSON.stringify([id]), REAL_ACTIVE_POLICY: resolve(__dirname, 'real_store_active_policy.cjs') },
         stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' });
+      clockSample('after-spawn');
       const output = collect(child.stdout, true), errors = collect(child.stderr, false);
       for (const p of [output, errors]) p.catch(e => { parseFault = e; if (child.exitCode === null) child.kill('SIGKILL'); });
       child.stdin.write(JSON.stringify({ type: 'user', message: { content: 'real-active-thread=' + id } }) + '\n');
@@ -69,9 +120,11 @@ module.exports.run = async function run(source) {
         await wait(() => receipt()?.states?.find(s => s.epoch === 2)?.count >= 10, 3000);
       }
       control(3, 'stop');
+      clockSample('stop-published');
       const timer = setTimeout(() => { if (child.exitCode === null) child.kill('SIGKILL'); }, 2000);
       try { assert.equal(await child.exited, 0); } finally { clearTimeout(timer); }
       finished = true; await output; assert.equal(await errors, ''); assert(!parseFault);
+      clockSample('child-exited'); console.log(JSON.stringify(diagnostic()));
       const deltas = rows.filter(r => r.event?.type === 'content_block_delta').map(r => r.event.delta.text);
       pass(deltas.length >= 30 && deltas.every(t => Buffer.byteLength(t) === 96), 'actual deltas have correct bytes/count');
       const marks = deltas.map(t => /~ra:012345abcdef:0:(\d+):(\d+):(\d+):(mixed|pure)~/.exec(t));
@@ -89,6 +142,7 @@ module.exports.run = async function run(source) {
       spans.push({ suppressedCycle: suppressed, phases: r.states.map(s => ({ epoch: s.epoch, mode: s.mode,
         emitted: s.count, spanMs: s.last - s.first, completed: s.completed, tools: s.tools, results: s.results })) });
     } catch (e) {
+      console.error(JSON.stringify(diagnostic()));
       // Aggregate diagnostics only; no body, input text, argv or private path.
       console.error(JSON.stringify({ scope: 'stand-in-control-failure', suppressedCycle: suppressed, outputRows: rows.length,
         completed: rows.filter(r => r.type === 'assistant' && r.message?.content?.some(c => c.type === 'text')).length,
