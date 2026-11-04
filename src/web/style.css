@@ -3429,3 +3429,138 @@ html.ph-focus .app.phone.ph-viewer > .viewer { padding-top: env(safe-area-inset-
   .app.phone .ph-views, .app.phone .hist-scrub { display: none; }
   .app.phone .viewer-bar, .app.phone .solid-toolbar { padding-block: 2px; }
 }
+
+/* phone: look (G). The desktop keeps its square "engineering" look; on a
+   phone the same screens get rounder, softer surfaces, a phone's own UI font
+   and pressed states (a thumb has no hover). Only under html.phone /
+   .app.phone, after the layout sections, so it overrides them by order and
+   specificity. Tokens for the other phone sections:
+     --ph-font   interface text (code, paths, tool output, terminals stay --mono)
+     --ph-r-*    radii: card 16, row 12, ctl (buttons, inputs) 12, sheet 22, pill
+     --ph-card   a card on the page, --ph-fill a control's fill,
+     --ph-press  a pressed control, --ph-sep a hairline inside a card */
+html.phone {
+  --ph-font: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", Roboto, "Segoe UI", "Noto Sans", "Noto Sans CJK JP", "Hiragino Sans", sans-serif;
+  --sans: var(--ph-font);
+  --ph-r-card: 16px; --ph-r-row: 12px; --ph-r-ctl: 12px; --ph-r-sheet: 22px; --ph-r-pill: 999px;
+  --ph-card: color-mix(in srgb, var(--panel) 55%, var(--raise));
+  --ph-fill: color-mix(in srgb, var(--text) 7%, transparent);
+  --ph-press: color-mix(in srgb, var(--text) 14%, transparent);
+  --ph-sep: color-mix(in srgb, var(--line) 70%, transparent);
+  --ph-on: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+html.phone.light, html.phone .app.light { --ph-card: #ffffff; --ph-fill: color-mix(in srgb, var(--text) 6%, transparent); }
+html.phone .app.phone.light { background: var(--panel); }
+html.phone:has(.app.light), html.phone:has(.app.light) body { background: var(--panel); }
+html.phone body, .app.phone { font-family: var(--ph-font); }
+.app.phone { -webkit-font-smoothing: antialiased; }
+/* text the interface owns reads in the UI font, also where the desktop asks for mono */
+.app.phone :is(.project-head .name, .ph-group, .chip, button.fold, .thread-head .meta, .find-group, .ph-tab, .model-chip, .settings-view h3) { font-family: var(--ph-font); }
+
+/* controls: rounded, filled, no hairline; a pressed state instead of hover */
+.app.phone button, .app.phone .local-menu > summary, .app.phone input, .app.phone select, .app.phone textarea { border-radius: var(--ph-r-ctl); }
+.app.phone :is(input.field, input[type=text], input[type=search], input:not([type]), select) { background: var(--ph-fill); border: 1px solid transparent; }
+.app.phone :is(input, textarea, select):focus { border-color: color-mix(in srgb, var(--accent) 60%, transparent); outline: none; }
+.app.phone button:not(.primary):not(.ph-tab):active, .app.phone summary:active { background: var(--ph-press); }
+.app.phone button.primary { border-radius: var(--ph-r-pill); border-color: transparent; font-weight: 600; }
+.app.phone button.primary:active { filter: brightness(0.88); }
+@media (prefers-reduced-motion: no-preference) {
+  .app.phone :is(button, .thread, summary) { transition: background-color .12s ease-out, transform .12s ease-out; }
+  .app.phone :is(.settings-category, .workspace-menu button.tab, .ph-empty-actions button):active { transform: scale(0.98); }
+}
+
+/* the header: the page's own colour, no rule under it; root screens get a large title */
+.ph-head { background: var(--bg); border-bottom: 1px solid transparent; }
+.app.phone.light .ph-head { background: var(--panel); }
+.app.phone.ph-l0 .ph-title:has(> .brand-mark) > .ph-name { font-size: calc(26px * var(--text-scale, 100) / 100); font-weight: 750; letter-spacing: -0.01em; }
+.ph-name, .ph-title .title-box button, .ph-title .title-box .title { font-family: var(--ph-font); letter-spacing: -0.005em; }
+.ph-back, .ph-tool, .ph-tools .local-menu > summary { border-radius: var(--ph-r-pill); }
+.ph-back:active, .ph-tool:active { background: var(--ph-press); }
+.app.phone > .ph-cells { border-bottom-color: transparent; }
+.app.phone > .ph-cells > * { border-radius: var(--ph-r-pill); }
+
+/* the tab bar: a raised surface, the current tab's icon in a pill */
+.ph-tabs { background: var(--panel); border-top: 1px solid var(--ph-sep); }
+.app.phone.light .ph-tabs { background: var(--bg); }
+.ph-tab { font-weight: 500; gap: 4px; padding-top: 6px; }
+.ph-tab > svg { box-sizing: content-box; padding: 4px 20px; border-radius: var(--ph-r-pill); transition: background-color .15s ease-out; }
+.ph-tab.on { font-weight: 650; }
+.ph-tab.on > svg { background: var(--ph-on); }
+.ph-tab:active { background: none; }
+.ph-tab:active > svg { background: var(--ph-press); }
+.ph-badge { border-radius: var(--ph-r-pill); top: 2px; left: calc(50% + 8px); box-shadow: 0 0 0 2px var(--panel); }
+@media (max-height: 480px) { .ph-tab > svg { padding: 3px 10px; } .app.phone.ph-l0 .ph-title:has(> .brand-mark) > .ph-name { font-size: calc(20px * var(--text-scale, 100) / 100); } }
+
+/* sheets: a big top radius, a round grab handle, rows as rounded buttons */
+.app.phone .local-menu[open]:not([data-inline="true"]) > .local-menu-body, .app.phone .rowmenu, .ph-sheet {
+  border-radius: var(--ph-r-sheet) var(--ph-r-sheet) 0 0; border-top: 0; background: var(--panel); padding-top: 8px;
+  box-shadow: 0 -8px 40px #0006; }
+.app.phone.light .local-menu[open]:not([data-inline="true"]) > .local-menu-body, .app.phone.light .rowmenu, .app.phone.light .ph-sheet { background: var(--bg); box-shadow: 0 -8px 40px #0002; }
+.app.phone .local-menu[open]:not([data-inline="true"]) > .local-menu-body::before, .app.phone .rowmenu::before, .ph-sheet-grab { width: 40px; height: 5px; border-radius: var(--ph-r-pill); background: color-mix(in srgb, var(--dim) 55%, transparent); margin: 0 0 10px; }
+.app.phone .local-menu[open]:not([data-inline="true"]) > .local-menu-body > :is(button, a), .app.phone .rowmenu .mi, .ph-sheet button { border: 0; border-radius: var(--ph-r-row); background: none; padding-inline: 14px; }
+.app.phone .local-menu[open]:not([data-inline="true"]) > .local-menu-body > :is(button, a):active, .app.phone .rowmenu .mi:active, .ph-sheet button:active { background: var(--ph-press); }
+.app.phone .shade, .ph-sheet-back, .app.phone .local-menu[open]:not([data-inline="true"])::before { background: #0009; }
+.ph-sheet-title { font-size: calc(17px * var(--text-scale, 100) / 100); font-weight: 650; padding: 2px 14px 10px; }
+/* the views sheet: tiles */
+.app.phone .workspace-menu .workspace-group { gap: 8px; }
+.app.phone .workspace-menu .local-menu-body button.tab { border: 0; border-radius: var(--ph-r-card); background: var(--ph-card); min-height: 52px; padding-inline: 14px; }
+.app.phone .workspace-menu .local-menu-body button.tab.on, .app.phone .workspace-menu .local-menu-body button.tab[aria-pressed="true"] { background: var(--ph-on); color: var(--accent); }
+.app.phone .workspace-menu .local-menu-body .workspace-group + .workspace-group { border-top: 0; }
+
+/* lists: Projects groups each project's threads in a card; Now's rows are
+   rounded segments of one card per group */
+.app.phone :is(.sidebar, .ph-now) .find input { border-radius: var(--ph-r-pill); padding-inline: 16px; }
+.app.phone :is(.sidebar, .ph-now) .find.with-add { background: var(--bg); border-bottom: 0; }
+.app.phone.light :is(.sidebar, .ph-now) .find.with-add { background: var(--panel); }
+.app.phone :is(.sidebar, .ph-now) .find .add-project { border-radius: var(--ph-r-pill); border: 0; background: var(--ph-fill); }
+.app.phone :is(.sidebar, .ph-now) .project-head { border: 0; background: none; padding-left: max(8px, env(safe-area-inset-left)); }
+.app.phone :is(.sidebar, .ph-now) .project-head .name { font-size: calc(16px * var(--text-scale, 100) / 100); font-weight: 700; letter-spacing: 0; text-transform: none; color: var(--text); }
+.app.phone :is(.sidebar, .ph-now) .project-head > button.icon, .app.phone :is(.sidebar, .ph-now) .project-head > .badge { border: 0; border-radius: var(--ph-r-pill); }
+.app.phone .sidebar .project-threads:not([style*="none"]) { display: flex !important; flex-direction: column; margin: 0 max(12px, env(safe-area-inset-right)) 6px max(12px, env(safe-area-inset-left)); background: var(--ph-card); border-radius: var(--ph-r-card); overflow: hidden; }
+.app.phone .sidebar .project-threads:not(:has(> *)) { display: none; }
+.app.phone .sidebar .project-threads > * + * { box-shadow: inset 0 1px 0 var(--ph-sep); }
+.app.phone .sidebar .project-threads > .thread-create { margin-left: 0; padding-left: 40px; }
+.app.phone .sidebar .project-threads > .shelf { padding-left: 16px; color: var(--dim); }
+.app.phone > .ph-now .ph-group { font-family: var(--ph-font); font-size: calc(15px * var(--text-scale, 100) / 100); font-weight: 700; text-transform: none; letter-spacing: 0; color: var(--text); padding-top: 18px; padding-bottom: 8px; }
+.app.phone > .ph-now .thread-tree-row { margin: 0 max(12px, env(safe-area-inset-right)) 0 max(12px, env(safe-area-inset-left)); background: var(--ph-card); border-radius: 4px; }
+.app.phone > .ph-now .thread-tree-row + .thread-tree-row, .app.phone > .ph-now .thread-tree-row + .thread-create + .thread-tree-row { margin-top: 2px; }
+.app.phone > .ph-now .ph-group + .thread-tree-row { border-top-left-radius: var(--ph-r-card); border-top-right-radius: var(--ph-r-card); }
+.app.phone > .ph-now .thread-tree-row:not(:has(+ .thread-tree-row, + .thread-create + .thread-tree-row)) { border-bottom-left-radius: var(--ph-r-card); border-bottom-right-radius: var(--ph-r-card); }
+.app.phone :is(.sidebar, .ph-now) .thread { border-radius: inherit; }
+.app.phone :is(.sidebar, .ph-now) .thread .title { font-weight: 500; }
+.app.phone :is(.sidebar, .ph-now) .thread .ago { color: var(--faint); }
+.app.phone :is(.sidebar, .ph-now) .thread:active { background: var(--ph-press); }
+.app.phone :is(.sidebar, .ph-now) .thread.on { background: var(--ph-on); }
+.app.phone .ph-swiped { background: var(--ph-card); }
+.ph-swipe-btn { border-radius: 0; font-weight: 600; }
+.app.phone :is(.sidebar, .ph-now) .bots > * { border-radius: var(--ph-r-row); }
+
+/* chips and pills: the viewer's view chips, the thread's cells, filters */
+.app.phone :is(.ph-chips > *, .chip, .ph-views button, .viewer-tabs button.tab, .aside-tabs button.tab, .viewer-bar button, .solid-toolbar button) { border-radius: var(--ph-r-pill); }
+.app.phone .ph-chips > * { border: 0; background: var(--ph-fill); }
+
+/* the thread: bubbles for the person's messages, rounded folds and code, a pill composer */
+.app.phone .msg.user { background: var(--ph-card); border: 0; border-radius: 20px 20px 6px 20px; padding: 10px 14px; }
+.app.phone button.fold { border: 0; border-radius: var(--ph-r-pill); background: var(--ph-fill); }
+.app.phone :is(.body pre, .codeblock, .ask, .apierr, .ask-detail, .lightbox img, .msg img) { border-radius: var(--ph-r-row); }
+.app.phone .codeblock { overflow: hidden; }
+.app.phone .body code { border-radius: 5px; }
+.app.phone .ask { border: 0; background: var(--ph-card); }
+.app.phone .composer { border-top: 0; }
+.app.phone .composer textarea { border-radius: 22px; background: var(--ph-fill); border: 1px solid transparent; padding-inline: 16px; }
+.app.phone .composer-foot :is(.model-chip, .composer-more > summary, .attach, .mic) { border: 0; border-radius: var(--ph-r-pill); background: var(--ph-fill); }
+.app.phone .composer-foot .composer-more[open] > .composer-options { border-radius: var(--ph-r-card); border: 0; box-shadow: 0 8px 40px #0007; }
+
+/* Settings: cards without rules, pill segments */
+.app.phone .settings-view :is(.settings-category, .set-row, .setting, .settings-card, .set-card, section.card) { border: 0; border-radius: var(--ph-r-card); background: var(--ph-card); }
+.app.phone .settings-view .set-find { border-radius: var(--ph-r-pill); padding-inline: 16px; }
+.app.phone .settings-view .set-ctl button, .app.phone .settings-view .set-ctl a.btn { border: 1px solid transparent; border-radius: var(--ph-r-pill); background: var(--ph-fill); padding-inline: 16px; }
+.app.phone .settings-view .set-ctl button.on { background: var(--ph-on); color: var(--accent); border-color: transparent; font-weight: 600; }
+.app.phone .settings-view .set-ctl button.primary { background: var(--accent); color: var(--on-accent); }
+.app.phone .settings-view h3 { border-bottom: 0; font-size: calc(15px * var(--text-scale, 100) / 100); font-weight: 700; text-transform: none; letter-spacing: 0; color: var(--text); }
+.app.phone .settings-view .settings-category .icon, .app.phone .settings-view .settings-category > svg:first-child { border-radius: 10px; }
+
+/* toasts and notes */
+.app.phone > .toast { border-radius: var(--ph-r-card); }
+.ph-note button { border-radius: var(--ph-r-pill); }
+.ph-empty-actions button { border-radius: var(--ph-r-pill); }
