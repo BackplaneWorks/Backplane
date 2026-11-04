@@ -108,6 +108,24 @@ export function installPhoneOther({ doc = document, win = window, dispatch }) {
     e.preventDefault();e.stopImmediatePropagation();send(e.key.toLowerCase(), 4 | (e.altKey ? 8 : 0));setCtrl(false);
   }, true);
 
+  // a swipe on the terminal's screen scrolls its history, as the wheel
+  // does on a desktop ([data-wheel]: the wheel's pixels, a finger down is
+  // a wheel up), a line (17 px) at a time
+  let swipe = null;
+  doc.addEventListener("touchstart", e => {
+    const screen = on() && e.touches.length === 1 && e.target.closest?.(".floating-terminal .screen[data-wheel]");
+    swipe = screen ? { screen, y: e.touches[0].clientY, acc: 0 } : null;
+  }, { passive: true });
+  doc.addEventListener("touchmove", e => {
+    if (!swipe || e.touches.length !== 1) return;
+    const y = e.touches[0].clientY;swipe.acc += y - swipe.y;swipe.y = y;
+    e.preventDefault();
+    if (Math.abs(swipe.acc) < 17) return;
+    const px = Math.trunc(swipe.acc / 17) * 17;swipe.acc -= px;
+    dispatch(swipe.screen.getAttribute("data-wheel"), String(-px));
+  }, { passive: false });
+  doc.addEventListener("touchend", () => { swipe = null; }, { passive: true });
+
   // a field focused in Settings (or a bot's settings) scrolls up from under
   // the keyboard once the keyboard is up
   let focused = null;
