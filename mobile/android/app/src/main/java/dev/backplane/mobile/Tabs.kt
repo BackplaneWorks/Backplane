@@ -268,7 +268,7 @@ private fun AppSettingsPage(m: AppModel, s: Screen, onPair: () -> Unit, state: L
             item { Header(NativeMessages.settings_appearance(tag)) }
             item { Choice(listOf("system" to NativeMessages.native_settings_system(tag), "light" to NativeMessages.settings_theme_light(tag), "dark" to NativeMessages.settings_theme_dark(tag)), AppSettings.appearance) { AppSettings.putAppearance(it) } }
             // (WebShell.kt: off shows the hub's page, the app's main screen)
-            item { ListItem(headlineContent = { Text("Classic screens") }, supportingContent = { Text("These native screens. Off: the hub's own phone page, as in a browser.") },
+            if (!BuildConfig.NATIVE_ONLY) item { ListItem(headlineContent = { Text("Classic screens") }, supportingContent = { Text("These native screens. Off: the hub's own phone page, as in a browser.") },
                 trailingContent = { Switch(AppSettings.classic, { AppSettings.putClassic(it) }) }) }
             s.lang?.rows?.firstOrNull()?.let { row ->
                 item { Text(NativeMessages.settings_lang(tag), Modifier.padding(horizontal = 16.dp)) }
