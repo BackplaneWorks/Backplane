@@ -46,7 +46,12 @@ def resources(cap):
 def inputs(args):
     assert sha(args.inputs) == args.sha256
     m = json.loads(Path(args.inputs).read_text())
-    assert subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip() == m['head']
+    # The reviewed runner commits its staged subset with the source SHA as
+    # subject. Its snapshot OID/tree are distinct from the source checkout.
+    subject = subprocess.check_output(['git', 'show', '-s', '--format=%s', 'HEAD'], text=True).strip()
+    assert subject == m['head']
+    tracked = set(subprocess.check_output(['git', 'ls-files', '-z']).decode().rstrip('\0').split('\0'))
+    assert tracked == set(m['files']) | {args.inputs}
     for name, checksum in m['files'].items():
         assert sha(name) == checksum, name
     return m
@@ -122,6 +127,10 @@ def main():
         worker(args, manifest)
         return
     resources(536870912)
+    save('SOURCE.json', dict(submitted_head=manifest['head'], submitted_tree=manifest['tree'],
+                             boat_snapshot_head=subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+                             boat_snapshot_tree=subprocess.check_output(['git', 'rev-parse', 'HEAD^{tree}'], text=True).strip(),
+                             exact_staged_files_and_hashes=True, full_checkout=False))
     tool = bun()
     save('TOOLS.json', dict(bun_version='1.3.10', bun_sha256=sha(tool), archive_sha256=BUN_ARCHIVE,
                             python_sha256=sha(Path(sys.executable).resolve())))
