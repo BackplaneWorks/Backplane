@@ -13793,7 +13793,7 @@ def Hub.thin.act(+send: Bool, h: Hub, client: U32, +o: J.Json, +c: Client, now: 
   Hub.thin.act.native(Bool.or(Bool.not(String.eq(J.Json.get_str(p, "action", ""), "native-sidebar-page")),
     Bool.and(NATIVE_SIDE.Ns.offered(String.eq(Client.thin.mode(c), "view-web"), p), TA.Actor.native.valid(ThinContext.actors(Client.thin.context(c)), p))), send, h, client, o, c, now)
 
-# "start:N" (the phone's Go to the start, web/thin-host.js's start): the
+# "start:N" (older phone web clients' Go to the start, kept for them): the
 # page that starts at the thread's Nth oldest row, its bound read from the
 # store (TSTO.Ts.start), one request where paging back took one a page;
 # without a store (memory, a thread elsewhere) the newest page, and the
