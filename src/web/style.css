@@ -1296,7 +1296,7 @@ button.dim { opacity: 0.5; pointer-events: none; }
 .tk-title { color: var(--accent); font-weight: 600; }
 .tk-meta { color: var(--faint); font-size: calc(12px * var(--text-scale, 100) / 100); }
 .tk-btns { display: flex; gap: 6px; margin-left: auto; }
-.tk-btns button.primary { border-color: var(--accent); color: var(--accent); }
+.tk-btns button.primary { border-color: var(--accent); color: var(--accent); background: none; }
 .tk-strip .bform.row { margin: 0; }
 .bot-screen.driven img { outline: 2px solid var(--accent); outline-offset: -1px; cursor: crosshair; user-select: none; }
 .bot-screen.driven img:focus { outline-color: var(--text); }
