@@ -61,7 +61,7 @@ def Link.write.one(m: Maybe<&1, S.Msg>, s: Socket, k: Socket -> IO(Unit)) -> IO(
   match m:
     case Some{S.Rpc{_, text}}:
       IO.bind(Socket & Result<&1, &1, U32 & String, Unit>, Unit, H.Sock.send_bytes(s, W.Ws.client_cbor(text)), r => Link.wrote(r, k))
-    case Some{S.Leave{_}}:
+    case Some{S.PeerLeave{_}}:
       IO.bind(Socket, Unit, H.Sock.shutdown(s), s2 => Socket.close(s2))
     case Some{_}:
       k(s)
@@ -79,7 +79,7 @@ def Link.writer(fuel: Nat, s: Socket, +inbox: Chan(S.Msg)) -> IO(Unit):
 # sends them again once a log arrives); Leave ends the link
 def Link.drain.one(m: Maybe<&1, S.Msg>, k: Unit -> IO(Unit)) -> IO(Unit):
   match m:
-    case Some{S.Leave{_}}:
+    case Some{S.PeerLeave{_}}:
       IO.pure(Unit, Unit{})
     case Some{_}:
       k(Unit{})

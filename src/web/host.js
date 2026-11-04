@@ -1430,7 +1430,7 @@ function run(cmds) {
       }
     } else if (is(c, "Copy")) {
       copy(c.text);
-    } else if (is(c, "Focus")) {
+    } else if (is(c, "FocusField")) {
       focus = c.id; // after the next render, which may create it
       later();
     } else if (is(c, "Connect")) {
@@ -2995,7 +2995,7 @@ function performPresentation(operation) {
   run(r.cmds);
 }
 function presentationCommand(command) {
-  const tag = { send: "Send", copy: "Copy", focus: "Focus", scroll: "ScrollEnd", connect: "Connect",
+  const tag = { send: "Send", copy: "Copy", focus: "FocusField", scroll: "ScrollEnd", connect: "Connect",
     keep: "Keep", notify: "Notify", later: "Later", jump: "Jump" }[command.type];
   if (!tag) throw Error("Unknown presentation command");
   run({ $: "Con", head: { ...command, $: tag }, tail: { $: "Nil" } });

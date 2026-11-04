@@ -53,11 +53,11 @@ def base() -> U.Ui:
 def plain() -> U.Ui:
   card(card(card(U.Ui.fold(log.plain(), U.Ui.init(1000n)), "c"), "b"), "a")
 
-def labels(ts: List<&2, TO.Tool>) -> String:
+def labels(ts: List<&2, TO.HeaderTool>) -> String:
   match ts:
     case Nil{}:
       ""
-    case TO.Tool{_, +label, _, +action, _, _, _, _} <> r:
+    case TO.HeaderTool{_, +label, _, +action, _, _, _, _} <> r:
       label ++ ":" ++ action ++ "|" ++ labels(r)
 
 def hidden() -> U.Ui:
