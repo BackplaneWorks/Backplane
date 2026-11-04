@@ -23,7 +23,9 @@ public static class BP927Job {
   [DllImport("kernel32.dll", SetLastError=true)] static extern bool QueryInformationJobObject(IntPtr job, int kind, out Limits value, uint bytes, IntPtr returned);
   [DllImport("kernel32.dll", SetLastError=true)] static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
   [DllImport("kernel32.dll", SetLastError=true)] static extern bool IsProcessInJob(IntPtr process, IntPtr job, out bool member);
-  static IntPtr owned;
+  [DllImport("kernel32.dll", SetLastError=true)] static extern bool DuplicateHandle(IntPtr sourceProcess, IntPtr source, IntPtr targetProcess, out IntPtr target, uint access, bool inherit, uint options);
+  static IntPtr owned, query;
+  static IntPtr ObservedJob() { return query!=IntPtr.Zero ? query : owned; }
   static void Check(bool ok) { if(!ok) throw new Win32Exception(Marshal.GetLastWin32Error()); }
   public static void CapSelf() {
     owned=CreateJobObject(IntPtr.Zero, null); if(owned==IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
@@ -32,7 +34,8 @@ public static class BP927Job {
     Check(AssignProcessToJobObject(owned,Process.GetCurrentProcess().Handle));
   }
   public static Limits Current() {
-    Limits value; Check(QueryInformationJobObject(IntPtr.Zero,9,out value,(uint)Marshal.SizeOf(typeof(Limits)),IntPtr.Zero)); return value;
+    var job=ObservedJob(); if(job==IntPtr.Zero) throw new InvalidOperationException("Explicit job query handle required");
+    Limits value; Check(QueryInformationJobObject(job,9,out value,(uint)Marshal.SizeOf(typeof(Limits)),IntPtr.Zero)); return value;
   }
   public static bool Admit(IntPtr process) {
     if(owned==IntPtr.Zero) throw new InvalidOperationException("No owned capped job");
@@ -42,8 +45,15 @@ public static class BP927Job {
     return member;
   }
   public static bool Member() {
-    bool member; Check(IsProcessInJob(Process.GetCurrentProcess().Handle,IntPtr.Zero,out member)); return member;
+    var job=ObservedJob(); if(job==IntPtr.Zero) throw new InvalidOperationException("Explicit job membership handle required");
+    bool member; Check(IsProcessInJob(Process.GetCurrentProcess().Handle,job,out member)); return member;
   }
+  public static long DuplicateQueryHandle(IntPtr targetProcess) {
+    if(owned==IntPtr.Zero) throw new InvalidOperationException("No owned capped job");
+    IntPtr target; Check(DuplicateHandle(Process.GetCurrentProcess().Handle,owned,targetProcess,out target,0x4,false,0));
+    return target.ToInt64(); // JOB_OBJECT_QUERY only; never SET_ATTRIBUTES.
+  }
+  public static void UseQueryHandle(long handle) { query=new IntPtr(handle); }
 }
 '@
 function Get-BP927Resources {

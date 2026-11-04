@@ -3,6 +3,8 @@ name: Issue 927 exact Windows package consumer
 # check; this revision fixes argv transport and captures wrapper diagnostics.
 # Logon-created wrapper is explicitly admitted to the same 8 GiB job before
 # its independent guard; an observed zero job limit remains a hard refusal.
+# Query the exact capped ancestor through a query-only duplicated handle,
+# rather than relying on Windows' implicit current-job lookup.
 on:
   push:
     branches: [backplane/verify-kicad-windows-927]

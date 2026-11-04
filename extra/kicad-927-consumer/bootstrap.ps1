@@ -110,6 +110,10 @@ try {
     # prior attempt. Explicitly admit its captured handle to this SAME capped
     # job; the user's wrapper independently rereads its actual inherited limit.
     $report.childAdmittedToCappedJob=[BP927Job]::Admit($child.Handle)
+    $queryHandle=[BP927Job]::DuplicateQueryHandle($child.Handle)
+    @{pid=$child.Id;sid=$account.SID.Value;queryHandle=$queryHandle;access='JOB_OBJECT_QUERY';capBytes=8589934592} |
+        ConvertTo-Json | Set-Content -Encoding utf8 (Join-Path $out 'job-admission.json.tmp')
+    Move-Item -LiteralPath (Join-Path $out 'job-admission.json.tmp') -Destination (Join-Path $out 'job-admission.json')
     $wrapperOut=$child.StandardOutput.ReadToEndAsync(); $wrapperErr=$child.StandardError.ReadToEndAsync()
     $report.wrapperPid = $child.Id; Save-Report
     $deadline = [DateTime]::UtcNow.AddMinutes(35)
