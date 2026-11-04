@@ -527,6 +527,10 @@ import ./src/core/landing.bend as LAND
 
 import ./src/server/cacheio.bend as CACHEIO
 
+import ./src/server/static-http.bend as STATICHTTP
+
+import ./src/server/host.bend as STATICIO
+
 # Backplane's rules, stated over the real code. `bend PROOF.bend` proves each
 # one. Humans own this file: an agent may add laws, never weaken or delete
 # one without the user's explicit consent.
@@ -16065,3 +16069,25 @@ law cache_effect_budget:
 
 law cache_effect_global_budget:
   {CACHEIO.Cache.global_bytes() == 8388608 : U32}
+
+# Static HTTP policy stays in Bend while the host streams the bytes.
+law static_effect_coding:
+  {[STATICIO.Static.coding(False{}), STATICIO.Static.coding(True{})] == [0, 1] : List<&2, U32>}
+
+law static_effect_piece:
+  {STATICIO.Static.piece() == 65536 : U32}
+
+law static_http_paths:
+  {[STATICHTTP.Static.safe("/assets/main.js"), STATICHTTP.Static.safe("/../private"), STATICHTTP.Static.safe("relative.js")] == [True{}, False{}, False{}] : List<&2, Bool>}
+
+law static_http_landing_aliases:
+  {[STATICHTTP.Static.file("/"), STATICHTTP.Static.file("/pair"), STATICHTTP.Static.file("/devices")] == ["/index.html", "/index.html", "/index.html"] : List<&2, String>}
+
+law static_http_cached_chunks:
+  {STATICHTTP.Static.cache("/chunk-deadbeef.js") == "public, max-age=31536000, immutable" : String}
+
+law static_http_fresh_pages:
+  {[STATICHTTP.Static.cache("/index.html"), STATICHTTP.Static.cache("/sw.js")] == ["no-cache", "no-cache"] : List<&2, String>}
+
+law static_http_frame_policy:
+  {[STATICHTTP.Static.frames("/index.html"), STATICHTTP.Static.frames("/main.js")] == ["X-Frame-Options: DENY\r\nContent-Security-Policy: frame-ancestors 'none'\r\n", ""] : List<&2, String>}

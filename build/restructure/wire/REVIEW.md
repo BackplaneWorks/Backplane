@@ -99,3 +99,14 @@ or compiler ran after the hard rule. Raw native and check receipts are in
 `merged/`; replay inputs for the light checks are archived there rather than
 adding duplicate full books to the source tree. The sandbox was deleted and
 verified gone, cost $0.00026. These checks do not close the full project gate.
+
+Current-main refresh: Boat job j20261104031212-300122 checked resolved tree
+1033e5ee3afbaa978f2192d69c7a96862ee10929 on main
+6b031e406f8f30d4e89743e0e030631290022296, preserving the static HTTP changes.
+Canonical partition: 3187 laws, 6905db4592a1483eeb0711c9530e25e70e4e991a65b26c139536f00372a9d562.
+Affected native shard088 passed the unchanged unsafe-only verdict in
+2.074 s, peak RSS 822,064 KiB; cgroup peak
+824,631,296 bytes. Native cap/flock/no-swap requirements held.
+All 35 Python tests, canonical/merged-law shape and patch checks passed on Boat;
+test/controller cap 536,870,912 bytes, peak 71,180,288, zero OOM/max events.
+Raw current receipts and replay inputs are in current/. No local validation ran.
