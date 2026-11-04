@@ -85,6 +85,53 @@ class RelinkTests(unittest.TestCase):
             self.assertEqual((out / 'helper').stat().st_mode & 0o777, 0o755)
             self.assertEqual((out / 'licenses/helpers/LICENSE').read_text(), 'retained-notice')
 
+    def test_abi_edges_validate_after_combining_service(self):
+        """Regression: runtime-only has no executable for CLOSURE.from edges."""
+        import json
+        import platform
+        from unittest.mock import patch
+        def require(ok, msg):
+            if not ok:
+                raise ValueError(msg)
+        with tempfile.TemporaryDirectory() as t:
+            root = Path(t)
+            build = root / 'new'; (build / 'logs').mkdir(parents=True)
+            (build / 'backplane-serve').write_text('new-binary')
+            previous = root / 'previous/bootstrap-service'
+            runtime = previous / 'runtime'; runtime.mkdir(parents=True)
+            (runtime / 'lib').write_text('retained-library')
+            log = root / 'version.log'; log.write_text('backplane 0.14.0\n')
+            data = {'BUILD.json': {'source_commit': 'new', 'source_tree': 'newtree',
+                    'target': 'linux-x64', 'service': 'backplane-serve', 'binary_sha256': 'newhash'},
+                'relink-provenance.json': {'previousSourceCommit': 'old', 'previousBinarySha256': 'oldhash',
+                    'originalBuild': {'source_tree': 'oldtree'}, 'priorRuntimeQualificationSha256': 'oldqual'},
+                'RUNTIME-QUALIFICATION.json': {'status': 'PASS', 'target': 'linux-x64',
+                    'sourceCommit': 'old', 'sourceTree': 'oldtree', 'binarySha256': 'oldhash',
+                    'members': {'lib': {'type': 'file', 'mode': 0o644}}}}
+            calls = []
+            def closure(folder, target):
+                require((folder / 'backplane-serve').is_file(), 'Invalid measured edge')
+                calls.append(folder)
+            def combine(request, base, out):
+                out.mkdir(); payload = out / 'payload'; payload.mkdir()
+                (payload / 'backplane-serve').write_text('new-binary')
+                closure(payload, request['target'])
+                return {'status': 'combined'}
+            producer = SimpleNamespace(VERSION='0.14.0', require=require,
+                read=lambda p: data[p.name],
+                digest=lambda p: 'newhash' if p.name == 'backplane-serve' else 'oldqual',
+                inventory=lambda p: data['RUNTIME-QUALIFICATION.json']['members'],
+                relative=lambda p: p,
+                reference=lambda p: {'path': str(p)},
+                write=lambda p, v: p.write_text(json.dumps(v)),
+                runtime_closure=closure, component=combine)
+            args = SimpleNamespace(target='linux-x64', build=build, previous=root / 'previous',
+                source='new', launch_log=log, out=root / 'assembled/component')
+            with patch.object(platform, 'system', return_value='Linux'), \
+                    patch.object(platform, 'machine', return_value='x86_64'):
+                relink.component(args, producer, None)
+            self.assertEqual(calls, [args.out / 'payload'])
+
 
 if __name__ == '__main__':
     unittest.main()
