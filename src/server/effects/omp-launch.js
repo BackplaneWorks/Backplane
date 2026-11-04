@@ -4,7 +4,10 @@ function omp_launch_prepare(home, prompt, extension) {
   let dir;
   try {
     // Detection can be stale after an uninstall; fail before spawning env.
-    if (!Bun.which("omp")) return io_fail(2);
+    // Bun's default lookup can retain the startup PATH. The hub merges
+    // provider locations later; use the same explicit PATH as Proc.spawn.
+    const key = Object.keys(process.env).find(k => k.toUpperCase() === "PATH");
+    if (!Bun.which("omp", { PATH: key ? process.env[key] : "" })) return io_fail(2);
     const root = path.resolve(home, "omp");
     fs.mkdirSync(root, { recursive: true, mode: 0o700 });
     dir = fs.mkdtempSync(path.join(root, "launch-"));

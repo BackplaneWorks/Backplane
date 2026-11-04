@@ -49,6 +49,12 @@ export function fileTests() {
     api.remove(a.value);assert(!fs.existsSync(a.value));assert(fs.existsSync(b.value));api.remove(b.value);
     const missing=launchFiles({which:()=>null}).prepare(root,prompt,'extension');
     assert.deepEqual(missing,{ok:false,errno:2});
+    let lookup;
+    const checked=launchFiles({which:(name,options)=>{lookup={name,options};return '/fixture/omp';}}).prepare(root,prompt,'extension');
+    assert.equal(lookup.name,'omp');
+    const key=Object.keys(process.env).find(k=>k.toUpperCase()==='PATH');
+    assert.equal(lookup.options.PATH,key?process.env[key]:'');
+    assert(checked.ok);api.remove(checked.value);
     let writes=0;
     const fail=launchFiles({files:{...fs,writeFileSync(...args){
       if(++writes===2) throw Object.assign(Error('fixture denied'),{code:'EACCES'});
