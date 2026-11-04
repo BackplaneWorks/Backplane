@@ -8,6 +8,10 @@ installMessageImages();
 // is dumb).
 
 import App from "./app.bend";
+import { phoneForm, phoneRequest, installPhoneShell } from "./phone-shell.js";
+// a phone gets the phone arrangement (phone-shell.js, view.bend's View.phone)
+const PHONE = phoneForm();
+const phoneShell = installPhoneShell({ on: PHONE, dispatch: (action, value) => dispatch(action, value) });
 import { SecretSaveHost } from "./secret-save.js";
 import { starAttention } from "./star-attention.js";
 const starAttentionSync = starAttention();
@@ -469,6 +473,7 @@ const KEYS = listOf(App.cbor_keys());
 const WORDS = listOf(App.cbor_words());
 
 let ui = App.page(App.init(now(), cid), location.origin);
+if (PHONE) ui = App.phone_form(ui, "phone");
 if (window.backplaneDesktop) ui = App.desktop(ui);
 if (window.backplaneDesktop?.browser) ui = App.desktop_browser(ui);
 const desktopBrowser = installDesktopBrowser({bridge:window.backplaneDesktop?.browser,
@@ -714,7 +719,7 @@ function focusedScope() {
     language: App.lang(ui), selected: currentSession().sel };
 }
 function transitionScope(target = presentationTarget(currentSession())) {
-  return { origin: location.origin, identity: cacheIdentity(document.cookie), language: App.lang(ui),
+  return { origin: location.origin, identity: cacheIdentity(document.cookie), language: App.lang(ui) + (PHONE ? "/phone" : ""),
     epoch: thin?.epoch || remoteEpoch, bundle: import.meta.url, target, selected:currentSession().sel, settings:currentSession().open?.settings===true, route: currentSession().route || null };
 }
 const previewViews = new ViewPrefetch({
@@ -722,7 +727,7 @@ const previewViews = new ViewPrefetch({
   has:target=>!!transitionViews.destination(transitionScope(), target),
   idle:()=>remoteReady && !document.hidden && !thin?.active && !thin?.paging,
   socket:()=>new WebSocket(location.origin.replace(/^http/, "ws") + "/ws?view=1&frontend=1"),
-  encode:request=>fromList(App.wire_out_json(Wire.json(request))),
+  encode:request=>fromList(App.wire_out_json(Wire.json(PHONE ? {...request,p:{...request.p,...phoneRequest(PHONE)}} : request))),
   decode:data=>Wire.plain(Wire.cbor(new Uint8Array(data), KEYS, WORDS)),
   picture:(shown, session, target, scope)=>{
     transitionViews.put({...scope,target,selected:session.sel,route:session.route||null,settings:false},shown);
@@ -1227,6 +1232,7 @@ function render() {
   if (reclaim && remoteReady) { reclaim = false;composerKeeper.claim(); } else composerKeeper.check();
   tourSync();
   settingsSync();
+  phoneShell.rendered();
   saveFocusedSoon();
 }
 
@@ -3438,7 +3444,7 @@ async function startThin(again = false, reason = "initial") {
         const tree = request.p?.session ? App.viewer_input(ui, presentationJson(currentSession().info || {}), presentationJson(request.p.session)) : null;
         const session = tree ? Wire.plain(tree) : null, known = new WeakMap();
         if (session && typeof session === "object") known.set(session, tree);
-        s.send(fromList(App.wire_out_json(Wire.json({ ...request, p: { ...request.p, ...(session ? { session } : {}), workspaceLayout: "rail-v1", workspaceChrome: "top-v1", terminalOutput: "pane-v1", plotStamp: "v1" } }, known))));
+        s.send(fromList(App.wire_out_json(Wire.json({ ...request, p: { ...request.p, ...(session ? { session } : {}), workspaceLayout: "rail-v1", workspaceChrome: "top-v1", terminalOutput: "pane-v1", plotStamp: "v1", ...phoneRequest(PHONE) } }, known))));
       },
       choice: choosePresentation, prepare: (session, input, action) => preservePresentationRoute(
         action === "send" || action === "send-alt" ? input : session,
