@@ -3,7 +3,9 @@
 Status: **all scoped boundary gates accepted; current-main merge gates pending**.
 The evaluator accepted exact clock20/producer16 on `5f10351ee3` and scope49 on
 `b60c4719b8` with byte-identical executables. Current-main integration must
-preserve every qualified input and obtain clean PR status/fresh Boat premerge. Boundaries have passed; there is no whole-load top-level, actual-hub cleanup or packaged startup,
+preserve every qualified input and obtain clean PR status/fresh Boat premerge.
+Boundaries have passed; there is no whole-load top-level, actual-hub cleanup or
+packaged startup,
 20-agent CPU/p99/RSS performance PASS. The memory owner `t1793648028-1245355`
 retains sole packaged before/after evaluation. Send the frozen source and check
 scope to that owner before executing even the self-tests. Existing recovery,
