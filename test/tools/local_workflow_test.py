@@ -17,15 +17,16 @@ class LocalWorkflow(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp);prepared=root/'prepared';prepared.mkdir()
             (prepared/'emit.js').write_text('verified compiler output')
-            meta={'emit_key':'current','emit_sha256':local.digest(prepared/'emit.js')}
+            key='a'*40
+            meta={'emit_key':key,'emit_sha256':local.digest(prepared/'emit.js')}
             env={'BACKPLANE_EMIT_CACHE':str(root/'cache')}
-            with patch.object(local.subprocess,'check_output',return_value='current'):
+            with patch.object(local.subprocess,'check_output',return_value=key):
                 local.import_emit(prepared,meta,env)
-                cached=(root/'cache/current.js').read_text()
+                cached=(root/'cache'/(key+'.js')).read_text()
                 (prepared/'emit.js').write_text('corrupted transfer')
                 with self.assertRaisesRegex(SystemExit,'input/hash mismatch'):
                     local.import_emit(prepared,meta,env)
-                self.assertEqual((root/'cache/current.js').read_text(),cached)
+                self.assertEqual((root/'cache'/(key+'.js')).read_text(),cached)
                 with self.assertRaisesRegex(SystemExit,'input/hash mismatch'):
                     local.import_emit(prepared,{**meta,'emit_key':'different'},env)
 
