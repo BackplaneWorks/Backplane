@@ -3,7 +3,8 @@ import ../core/model.bend as M
 import ../core/far.bend as FR
 import ../core/snapshot.bend as SN
 import ./db.bend as D
-import ./thin-view.bend as V
+import ./window-file.bend as V
+import ./review-window.bend as RW
 
 # Settled threads have no entries in the hot startup state. Read this
 # selected thread's complete review ops into the private render state.
@@ -53,13 +54,19 @@ def ReviewHistory.result(failed: Bool, +st: M.State, +thread: String, rows: List
     case True{}: st
     case False{}: ReviewHistory.attach(st, thread, rows)
 
+def ReviewHistory.complete(loaded: Maybe<&1, M.State>, +st: M.State, +thread: String) -> M.State:
+  match loaded:
+    case None{}: st
+    case Some{stored}:
+      V.State.window.file(st, M.Idx.review.key(thread), ReviewHistory.merge(M.State.reviews(st, thread), M.State.reviews(stored, thread)))
+
 def ReviewHistory.read.local(skip: Bool, +db: String, +st: M.State, +thread: String) -> IO(M.State):
   match skip:
     case True{}: IO.pure(M.State, st)
     case False{}:
       do IO<M.State>:
-        +rows : List<&2, List<&2, String>> <- D.Db.query.t(db, ReviewHistory.sql(), [D.DbText{thread}, D.Db.nat(M.State.seq(st))], 4000000000)
-        return ReviewHistory.result(ReviewHistory.failed(rows), st, thread, rows)
+        loaded : Maybe<&1, M.State> <- RW.ReviewWindow.fold(~M.State, ~(rows => prior => ReviewHistory.post(rows, prior)), db, thread, 0n, M.State.seq(st), M.State.empty())
+        return ReviewHistory.complete(loaded, st, thread)
 
 def ReviewHistory.read(+db: String, +st: M.State, +thread: String) -> IO(M.State):
   ReviewHistory.read.local(Bool.or(String.is_empty(db), Bool.or(String.is_empty(thread), FR.Fr.is(thread))), db, st, thread)

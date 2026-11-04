@@ -69,6 +69,19 @@ def Db.query.t(h: String, sql: String, params: List<&2, DbVal>, limit: U32) -> I
 def Db.query(h: String, sql: String, params: List<&2, String>, limit: U32) -> IO(List<&2, List<&2, String>>):
   import "./effects/db.js"
 
+# A selected thread's durable review actions, oldest first in (after, through].
+# Budgets bound rows and charged UTF-8 column bytes plus fixed row overhead.
+# One indivisible oversized row travels alone. Errors return no partial rows
+# or advanced cursor. The caller owns the snapshot's through sequence.
+type HistoryBudget is Data:
+  HistoryBudget{rows: U32, bytes: U32}
+
+type HistoryPage is Data:
+  HistoryPage{rows: List<&2, List<&2, String>>, next: Nat, done: Bool, error: String}
+
+def Db.review_page(h: String, thread: String, after: Nat, through: Nat, budget: HistoryBudget) -> IO(HistoryPage):
+  import "./effects/db.js"
+
 # "ok" or "fail <why>"; the handle is free again after
 def Db.close(h: String) -> IO(String):
   import "./effects/db.js"
