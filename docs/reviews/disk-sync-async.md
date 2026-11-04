@@ -82,7 +82,7 @@ Raw failure/resource/tool/source receipts are retained in
 peaks were 22,941,696/159,805,440 bytes; cap/swap/OOM checks passed and the
 enclosing VM was deleted. Corrected execution awaits lane A's static review.
 
-## Writer component result (independent review/rerun pending)
+## Writer component result
 
 `j20261104103008-1718048` / managed work `1585116` passed on exact source
 `0139fd6d12910082e7be7f930cb5a12a0eec3ead`, tree
@@ -114,8 +114,10 @@ sync/async completions, zero duplicates and zero pending continuations.
 The child exited cleanly, all component sockets closed, owned temporary
 files/descriptors were cleaned, and the runner verified enclosing VM deletion.
 Actual kernel memory.max was 3,699,998,720 bytes for worker/child and
-536,870,912 bytes for the controller; peaks were 202,133,504 and 159,784,960
-bytes respectively. Swap current/peak/max and OOM counters were zero.
+536,870,912 bytes for the controller. Shared worker cgroup high-water across
+all three serial stages was 202,133,504 bytes, set during checkpoint testing;
+controller peak was 159,784,960 bytes. These are not isolated benchmark-child
+RSS. Swap current/peak/max and OOM counters were zero.
 Tool: pinned Bun 1.3.10, executable SHA256
 `795b37d736a88d746b0e8bb5fcde92bf29bd0f9ac6a1dd1a950fd37440cf5822`.
 The Windows/macOS handle-policy cases are mocks; native execution here is
@@ -132,6 +134,51 @@ Input manifest SHA:
 Raw results SHA:
 `9f898ae72cfffd307aab0a59e7e24549f6128132464911d67f2db904273eb94a`.
 
+## Independent lane A result and cost
+
+Lane A **APPROVES the narrow Disk.sync effect/component slice** at tested
+`0139fd6d`, verifying `74440d28` preserves every tested `src` and `test/tools`
+byte. Its separate detached-checkout replay passed all 19 boundary cases,
+25 checkpoint cases and 32 A/B pairs (same two excluded warmups/variant) in
+normal/default Boat `j20261104103713-1761208`, work `1585651`.
+The readable final verdict and independent raw receipts are preserved in
+[`extra/hub-disk-sync-qualification/lane-a-0139fd6d/`](../../extra/hub-disk-sync-qualification/lane-a-0139fd6d/).
+
+| Independent component metric, ms | Before median | After median | Before p99 | After p99 | n per variant |
+|---|---:|---:|---:|---:|---:|
+| `/hello` during burst | 76.590 | 0.566 | 122.182 | 2.027 | 32 |
+| 256 KiB static socket response during burst | 81.221 | 4.657 | 126.513 | 7.787 | 32 |
+| Modeled append + Disk.sync ACK | 0.487 | 0.568 | 1.847 | 2.183 | 4096 |
+| Entire 128-commit burst | 74.543 | 81.960 | 120.601 | 130.848 | 32 |
+
+This second run exposes overhead on much shorter observed storage waits:
+modeled ACK median **+0.081 ms / 16.6%**, burst median **+7.417 ms / 9.95%**;
+28/32 paired bursts were slower after, with median paired difference
+10.196 ms. ACK maximum rose from 4.632 to 20.277 ms. Preserve these costs
+alongside the first run: this is improved socket responsiveness, not faster
+durability or storage throughput. **Do not pool the two runs or publish a
+universal speedup ratio.** Underlying storage/device/host-load cause remains
+unestablished. The writer VM was already deleted before this replay.
+
+Both response types again completed inside the burst in 0/32 before and
+32/32 after rounds. Lane A independently verified raw quantiles, issuance
+windows, input/tool hashes, exact bytes/order and strict terminal counters;
+the writer's receipt-only integration audit also recomputed the saved rows.
+Parks=resumes=4352, completions=8704 including warmups, duplicates/pending=0;
+child exit, temporary-file/socket cleanup and enclosing VM deletion verified.
+Worker cap 3,699,998,720 bytes, controller 536,870,912 bytes, swap/OOM zero;
+shared worker cgroup high-water 195,698,688 bytes (checkpoint stage), controller
+159,698,944 bytes. These are not benchmark-child RSS. Same pinned Bun 1.3.10,
+public manifest, template, production sender, main scheduler and park helper.
+Independent raw RESULTS SHA:
+`ca9a516794fe01f6d424c8b5af8082504b07d8d5ef02e9c5c14baf87110dd456`.
+
+Approval establishes this scoped effect/component result only. It does not
+authorize merge or qualify Hub actor/RPC/SQLite ACKs, startup, private-store,
+native Windows/macOS, whole-hub or packaged acceptance. Hub.loop's current
+handler and its queued messages remain serialized. No new executable edit or
+run followed this final review.
+
 Reproduction remains Boat-only through the normal approved daily runner,
 default sandbox, `hub-latency` lock, no reuse/setup-Bend; controller 512 MiB,
 worker/child at most 3.7e9 bytes, swap 0. `disk_sync_gate.py --inputs PATH
@@ -139,5 +186,5 @@ worker/child at most 3.7e9 bytes, swap 0. `disk_sync_gate.py --inputs PATH
 counts, exit/no-FAIL/sentinels and resource receipts. Stage exactly the public
 dependencies in the original manifest plus its own externally pinned bytes;
 the unchanged PR925 template is a public input, not a fork or edited file.
-Lane A reruns the frozen source independently. No local tests, product
+Lane A independently reran the frozen source as recorded above. No local tests, product
 build/install, new writer packet, rank-2 work or merge is authorized here.
