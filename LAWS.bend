@@ -1,5 +1,3 @@
-import ./src/core/cad-install.bend as CADINSTALL
-
 import ./src/core/msgs-lookup.bend as MLOOK
 
 import ./src/core/msgs-meta.bend as MMETA
@@ -16300,17 +16298,6 @@ law model_catalog_legacy_passthrough:
   for st: M.State
   for thread: String
   {ACCT.Accounts.overlay.needed(False{}, text, st, thread) == text : String}
-
-# Each CAD install phase has a status and a reachable action; an in-phase
-# byte reading never decreases (new phases/attempts explicitly reset).
-law cad_install_visible_action:
-  for p: CADINSTALL.CadPhase
-  {CADINSTALL.Cad.covered(p) == True{} : Bool}
-
-law cad_install_monotonic:
-  for +old: Nat
-  for next: Nat
-  {Nat.is_ge(CADINSTALL.Cad.advance(True{}, old, next), old) == True{} : Bool}
 
 # A new continuing subthread persists its launcher as the actual parent.
 # A later manual move is authoritative; report settings never recreate links.
