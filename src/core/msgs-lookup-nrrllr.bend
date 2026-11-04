@@ -10,12 +10,12 @@ def T.plain.nrrllrlllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, S
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.thread.title.keep(l)}
+      Some{CAT_0.T.thread.title.cancel(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrllrlllll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllrlllll.cmp(String.cmp(key, "thread.title.keep"), l)
+  T.plain.nrrllrlllll.cmp(String.cmp(key, "thread.title.cancel"), l)
 
 def T.plain.nrrllrllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -23,12 +23,12 @@ def T.plain.nrrllrllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       T.plain.nrrllrlllll(l, key)
     case EQ{}:
-      Some{CAT_0.T.thread.title.placeholder(l)}
+      Some{CAT_0.T.thread.title.keep(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrllrllll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllrllll.cmp(String.cmp(key, "thread.title.placeholder"), l)
+  T.plain.nrrllrllll.cmp(String.cmp(key, "thread.title.keep"), l)
 
 def T.plain.nrrllrlllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -36,12 +36,12 @@ def T.plain.nrrllrlllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.thread.todos(l)}
+      Some{CAT_0.T.thread.title.rename(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrllrlllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllrlllr.cmp(String.cmp(key, "thread.todos"), l)
+  T.plain.nrrllrlllr.cmp(String.cmp(key, "thread.title.rename"), l)
 
 def T.plain.nrrllrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -49,12 +49,12 @@ def T.plain.nrrllrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrrllrllll(l, key)
     case EQ{}:
-      Some{CAT_0.T.thread.title.rename(l)}
+      Some{CAT_0.T.thread.title.placeholder(l)}
     case GT{}:
       T.plain.nrrllrlllr(l, key)
 
 def T.plain.nrrllrlll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllrlll.cmp(String.cmp(key, "thread.title.rename"), l)
+  T.plain.nrrllrlll.cmp(String.cmp(key, "thread.title.placeholder"), l)
 
 def T.plain.nrrllrllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -62,12 +62,12 @@ def T.plain.nrrllrllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.todos.fewer(l)}
+      Some{CAT_0.T.thread.viewer(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrllrllrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllrllrl.cmp(String.cmp(key, "todos.fewer"), l)
+  T.plain.nrrllrllrl.cmp(String.cmp(key, "thread.viewer"), l)
 
 def T.plain.nrrllrllrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -75,12 +75,12 @@ def T.plain.nrrllrllrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.todos.show(l)}
+      Some{CAT_0.T.todos.hide(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrllrllrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllrllrr.cmp(String.cmp(key, "todos.show"), l)
+  T.plain.nrrllrllrr.cmp(String.cmp(key, "todos.hide"), l)
 
 def T.plain.nrrllrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -88,12 +88,12 @@ def T.plain.nrrllrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrrllrllrl(l, key)
     case EQ{}:
-      Some{CAT_0.T.todos.hide(l)}
+      Some{CAT_0.T.todos.fewer(l)}
     case GT{}:
       T.plain.nrrllrllrr(l, key)
 
 def T.plain.nrrllrllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllrllr.cmp(String.cmp(key, "todos.hide"), l)
+  T.plain.nrrllrllr.cmp(String.cmp(key, "todos.fewer"), l)
 
 def T.plain.nrrllrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -101,18 +101,31 @@ def T.plain.nrrllrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Stri
     case LT{}:
       T.plain.nrrllrlll(l, key)
     case EQ{}:
-      Some{CAT_0.T.thread.viewer(l)}
+      Some{CAT_0.T.thread.todos(l)}
     case GT{}:
       T.plain.nrrllrllr(l, key)
 
 def T.plain.nrrllrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllrll.cmp(String.cmp(key, "thread.viewer"), l)
+  T.plain.nrrllrll.cmp(String.cmp(key, "thread.todos"), l)
+
+def T.plain.nrrllrlrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
+  ((key, _), c) = r
+  match c:
+    case LT{}:
+      None{}
+    case EQ{}:
+      Some{CAT_0.T.tools.forkthread(l)}
+    case GT{}:
+      None{}
+
+def T.plain.nrrllrlrlll(l: I.Loc, key: String) -> Maybe<&2, String>:
+  T.plain.nrrllrlrlll.cmp(String.cmp(key, "tools.forkthread"), l)
 
 def T.plain.nrrllrlrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
   match c:
     case LT{}:
-      None{}
+      T.plain.nrrllrlrlll(l, key)
     case EQ{}:
       Some{CAT_0.T.tools.pinned(l)}
     case GT{}:
@@ -205,12 +218,12 @@ def T.plain.nrrllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Strin
     case LT{}:
       T.plain.nrrllrll(l, key)
     case EQ{}:
-      Some{CAT_0.T.tools.forkthread(l)}
+      Some{CAT_0.T.todos.show(l)}
     case GT{}:
       T.plain.nrrllrlr(l, key)
 
 def T.plain.nrrllrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllrl.cmp(String.cmp(key, "tools.forkthread"), l)
+  T.plain.nrrllrl.cmp(String.cmp(key, "todos.show"), l)
 
 def T.plain.nrrllrrllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r

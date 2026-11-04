@@ -7411,6 +7411,99 @@ def Laws.fm_parent_down():
 def Laws.fm_join_root():
   {==}
 
+def Laws.fm_zip_skips_git():
+  {==}
+
+def Laws.fm_zip_skips_history():
+  {==}
+
+def Laws.fm_zip_skips_worktrees():
+  {==}
+
+def Laws.fm_zip_keeps_checklist():
+  {==}
+
+def Laws.fm_zip_skips_backups():
+  {==}
+
+def Laws.fm_zip_skips_locks():
+  {==}
+
+def Laws.fm_zip_skips_modules():
+  {==}
+
+def Laws.fm_zip_keeps_board():
+  {==}
+
+def Laws.fm_zip_keeps_lookalike():
+  {==}
+
+def Laws.fm_zip_name_root():
+  {==}
+
+def Laws.fm_zip_name_folder():
+  {==}
+
+def Laws.fm_zip_top_never_up():
+  {==}
+
+def Laws.fm_zip_top_one_name():
+  {==}
+
+def Laws.fm_zip_url_encodes():
+  {==}
+
+def Laws.fm_get_url_encodes():
+  {==}
+
+def Laws.fm_zip_disposition():
+  {==}
+
+def Laws.fm_zip_disposition_one_line():
+  {==}
+
+def Laws.fm_zip_skips_env():
+  {==}
+
+def Laws.fm_zip_skips_env_variants():
+  {==}
+
+def Laws.fm_zip_keeps_dotfiles():
+  {==}
+
+def Laws.fm_zip_rules_known():
+  {==}
+
+def Laws.fm_zip_within_history():
+  {==}
+
+def Laws.fm_zip_within_notes():
+  {==}
+
+def Laws.fm_zip_stores_compressed():
+  {==}
+
+def Laws.fm_zip_deflates_boards():
+  {==}
+
+def Laws.fm_zip_entry_backslash():
+  {==}
+
+def Laws.fm_zip_top_windows():
+  {==}
+
+def Laws.fm_files_safe_backslash():
+  {==}
+
+def Laws.fm_files_safe_drive():
+  {==}
+
+def Laws.fm_files_safe_share():
+  {==}
+
+def Laws.fm_files_safe_down():
+  {==}
+
 def Laws.emb_summary_round():
   {==}
 
@@ -15948,4 +16041,19 @@ def Laws.mcp_subthread_manual_move_wins():
   {==}
 
 def Laws.mcp_subthread_seed_batch():
+  {==}
+
+def Laws.fm_zip_bounded_bytes():
+  {==}
+
+def Laws.fm_zip_bounded_entries():
+  {==}
+
+def Laws.fm_zip_skips_credentials():
+  {==}
+
+def Laws.fm_zip_skips_vault():
+  {==}
+
+def Laws.fm_zip_credentials_ignore_case():
   {==}
