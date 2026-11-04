@@ -24,7 +24,12 @@ app's settings.
   shows one hub's page at a time (the one opened last). `hubs()`,
   `switchHub(key)` and `addHub()` reach the list from the page.
 - **Notifications and the live status** come from the app's own Bend client
-  and sockets exactly as before (src/mobile/notify.bend: a turn that ends,
+  and sockets as before, plus the page: the hub tells the desk used last
+  (here, the page) of a finished or waiting thread, and the page hands that
+  to the app (`notify`). (On current hubs the app's own client runs in
+  thin mode, which raises the live status but no turn alerts; the page's
+  are what alert on Android. iOS also has the hub's APNs push.) The rest
+  as before (src/mobile/notify.bend: a turn that ends,
   an ask, a reminder; the ongoing "agents are working" notification / Live
   Activity). A tapped alert brings the app up on that hub and sends the
   page `open-thread`. The page tells the app which thread it shows
@@ -90,7 +95,8 @@ page awaits an answer). App → page: `{"id": 7, "ok": true, "value": …}` or
 | `openAppSettings()` | the app's own settings: hubs, Classic screens, notifications, version |
 | `notifications()` | Promise<{allowed, asked}> |
 | `requestNotifications()` | Promise<{allowed}>: asks the system (or opens its settings once refused) |
-| `pairingFailed(cause)` | no answer: the page's token was refused (`pairing_required`, …); the app re-pairs |
+| `pairingFailed(cause)` | no answer: the page could not trade its token: `hub_unreachable` (the app shows its "Can't reach" screen and retries), or refused (`pairing_required`, …: the app re-pairs) |
+| `notify({title, body, thread, key, kind})` | no answer: an alert the hub gave this page (the desk used last, core/desk.bend's desktop notification: a thread finished, failed or needs the person). The app posts it as its own notification (same channel and id rule as its other alerts: `key`, else `turn-<thread>`); a tap opens the thread (`open-thread`). None while that thread is on screen in front. |
 | `on(type, fn)` | listen for an event; returns a function that stops listening. Events sent before the first listener of their type are kept and given to it. |
 
 Events: `open-thread` `{thread}` (a tapped notification; the page selects
