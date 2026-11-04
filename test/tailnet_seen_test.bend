@@ -59,13 +59,17 @@ def loop2(+log: Chan(String), +inbox: Chan(Unit), +ack: Chan(Unit)) -> IO(Unit):
     TN.Pairing.ask(u => post(log, inbox, "2"), ack)
     say(log, "back2")
 
+# the round's one machine: 300 ms, then the ask fails
+def fail1(+log: Chan(String)) -> IO(Unit):
+  do IO<Unit>:
+    IO.sleep(300)
+    say(log, "failed1")
+
 def hub2(+log: Chan(String), +inbox: Chan(Unit), +ack: Chan(Unit)) -> IO(Unit):
   do IO<Unit>:
     a : Maybe<&1, Unit> <- Chan.recv(Unit, inbox)
     say(log, "due1")
-    IO.sleep(300)
-    say(log, "failed1")
-    o1 : Result<&1, &1, Unit, Unit> <- Chan.send(Unit, ack, Unit{})
+    TN.Pairing.round(["m"], u => fail1(log), ack)
     b : Maybe<&1, Unit> <- Chan.recv(Unit, inbox)
     say(log, "due2")
     o2 : Result<&1, &1, Unit, Unit> <- Chan.send(Unit, ack, Unit{})
@@ -94,9 +98,31 @@ def stalled() -> IO(String):
     IO.spawn(Unit, hub2(log, inbox, ack))
     lines(7n, log)
 
+# a round with two slow machines and a healthy one (TN.Pairing.round): the
+# healthy one is through at once, the round's ack waits for the slowest
+def ask3(+log: Chan(String), +u: String) -> IO(Unit):
+  do IO<Unit>:
+    IO.sleep(Bool.pick(U32, String.eq(u, "slow1"), 400, Bool.pick(U32, String.eq(u, "slow2"), 700, 0)))
+    say(log, u)
+
+def acked(+log: Chan(String), +ack: Chan(Unit)) -> IO(Unit):
+  do IO<Unit>:
+    m : Maybe<&1, Unit> <- Chan.recv(Unit, ack)
+    say(log, "ack")
+
+def peers3() -> IO(String):
+  do IO<String>:
+    +log : Chan(String) <- Chan.new(String, 16)
+    +ack : Chan(Unit) <- Chan.new(Unit, 1)
+    IO.spawn(Unit, acked(log, ack))
+    IO.spawn(Unit, TN.Pairing.round(["slow1", "slow2", "healthy"], u => ask3(log, u), ack))
+    lines(4n, log)
+
 def main() -> IO(Unit):
   do IO<Unit>:
     +order : String <- stalled()
+    +three : String <- peers3()
+    C.Check.str("slow machines never hold up a healthy one; the round ends after the slowest", three, "healthy|slow1|slow2|ack|")
     C.Check.str("a stalled round: the next is posted only after it ends (failed), then retried", order, "post1|due1|failed1|back1|post2|due2|back2|")
     C.Check.str("on the tailnet: the owner's online machines are asked", ips(TN.Tailnet.asked(True{}, status())), "desk=100.2.2.2|box=100.3.3.3|")
     C.Check.str("--no-tailscale: no tailnet machine is asked", ips(TN.Tailnet.asked(False{}, status())), "")
