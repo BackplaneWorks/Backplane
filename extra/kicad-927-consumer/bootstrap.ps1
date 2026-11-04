@@ -89,6 +89,8 @@ try {
         frozenSourceRoot=(Join-Path $root 'build\frozen-source')
         canonicalFactoryRoot=(Join-Path $root 'build\canonical-946')
         resourcePolicy=$resourcePolicy
+        git=(Get-Command git.exe).Source
+        hostedRun=@{githubActions=$env:GITHUB_ACTIONS;runnerOS=$env:RUNNER_OS;repository=$env:GITHUB_REPOSITORY;runId=$env:GITHUB_RUN_ID;runAttempt=$env:GITHUB_RUN_ATTEMPT}
     }
     $configPath = Join-Path $out 'config.json'
     $cfg | ConvertTo-Json -Depth 10 | Set-Content -Encoding utf8 $configPath

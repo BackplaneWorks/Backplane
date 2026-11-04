@@ -6,6 +6,14 @@ try {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = [Security.Principal.WindowsPrincipal]::new($identity)
     if ($identity.User.Value -ne $cfg.standardUserSid -or $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Wrong standard-user identity' }
+    # A logon-created process has this account's environment, not Actions'
+    # environment. Restore only the hosted identity verified by bootstrap.
+    if ($cfg.hostedRun.githubActions -ne 'true' -or $cfg.hostedRun.runnerOS -ne 'Windows' -or
+        $cfg.hostedRun.repository -ne 'BackplaneWorks/Backplane' -or $cfg.hostedRun.runId -notmatch '^[0-9]+$') { throw 'Missing actual hosted-run identity' }
+    $env:GITHUB_ACTIONS=$cfg.hostedRun.githubActions
+    $env:GITHUB_RUN_ID=$cfg.hostedRun.runId
+    $env:GITHUB_REPOSITORY=$cfg.hostedRun.repository
+    $env:RUNNER_OS=$cfg.hostedRun.runnerOS
     $profile = Get-ItemPropertyValue ('HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\'+$identity.User.Value) ProfileImagePath
     $env:USERPROFILE = $profile; $env:HOME = $profile
     $env:APPDATA = Join-Path $profile 'AppData\Roaming'
