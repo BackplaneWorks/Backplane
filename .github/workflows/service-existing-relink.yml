@@ -16,6 +16,10 @@ on:
         description: Existing relink run for component-only recovery (no compile)
         required: false
         default: ''
+      resume_run:
+        description: Existing successful link artifact for post-link finalization only
+        required: false
+        default: ''
       packet_url:
         description: Public source-bound raw emission input packet
         required: true
@@ -62,9 +66,17 @@ jobs:
           PACKET_SHA: ${{ inputs.packet_sha256 }}
         run: |
           python3 build/bootstrap-tools/scripts/release-bootstrap.py fetch --source "$BACKPLANE_FROZEN_COMMIT" --operation js --url "$PACKET_URL" --sha256 "$PACKET_SHA" --directory "$RUNNER_TEMP/release-inputs"
+      - uses: actions/download-artifact@v4
+        if: inputs.resume_run != ''
+        with:
+          name: configured-service-build-${{ inputs.target }}
+          run-id: ${{ inputs.resume_run }}
+          github-token: ${{ github.token }}
+          path: build/retained
       - name: Transform and link only, reusing accepted helpers
         env:
           TARGET: ${{ inputs.target }}
+          PARTIAL_BUILD_RUN: ${{ inputs.resume_run }}
           BACKPLANE_GOOGLE_BAKE: '1'
           BACKPLANE_GOOGLE_CLIENT_ID: ${{ secrets.BACKPLANE_GOOGLE_CLIENT_ID }}
           BACKPLANE_GOOGLE_CLIENT_SECRET: ${{ secrets.BACKPLANE_GOOGLE_CLIENT_SECRET }}
@@ -73,7 +85,9 @@ jobs:
           BACKPLANE_TELEMETRY_KID: ${{ secrets.BACKPLANE_TELEMETRY_KID }}
           BACKPLANE_TELEMETRY_KEY: ${{ secrets.BACKPLANE_TELEMETRY_KEY }}
         run: |
-          python3 scripts/local-phase.py --record build/relink.resources.json -- python3 build/bootstrap-tools/scripts/service-relink.py build --checkout "$GITHUB_WORKSPACE" --source "$BACKPLANE_FROZEN_COMMIT" --target "$TARGET" --previous "$GITHUB_WORKSPACE/build/previous" --packet "$RUNNER_TEMP/release-inputs" --out "$GITHUB_WORKSPACE/build/bootstrap-js"
+          set --
+          if [ -n "$PARTIAL_BUILD_RUN" ]; then set -- --retained-build "$GITHUB_WORKSPACE/build/retained/bootstrap-js"; fi
+          python3 scripts/local-phase.py --record build/relink.resources.json -- python3 build/bootstrap-tools/scripts/service-relink.py build --checkout "$GITHUB_WORKSPACE" --source "$BACKPLANE_FROZEN_COMMIT" --target "$TARGET" --previous "$GITHUB_WORKSPACE/build/previous" --packet "$RUNNER_TEMP/release-inputs" --out "$GITHUB_WORKSPACE/build/bootstrap-js" "$@"
           python3 -c 'import json; r=json.load(open("build/relink.resources.json")); assert r["rc"] == 0 and r["peak_rss_kib"] < 3900*1024, "Compile-only memory budget exceeded"'
           python3 -c 'import json,os,sys; kid=os.environ.get("BACKPLANE_TELEMETRY_KID",""); kid or sys.exit("no telemetry key ID"); json.dump({"schema":1,"version":"0.14.1","channel":"release","baked":True,"capability":"signed-release-events","keyId":kid,"endpoint":os.environ["BACKPLANE_TELEMETRY_URL"],"target":os.environ["TARGET"],"sourceCommit":os.environ["BACKPLANE_FROZEN_COMMIT"]},open("build/bootstrap-js/TELEMETRY-CAPABILITY.json","w"),indent=2)'
       - uses: actions/upload-artifact@v4
