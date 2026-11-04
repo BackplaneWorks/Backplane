@@ -27,3 +27,11 @@ test('the shell does nothing on a desktop page',async()=>{
  const s=installPhoneShell({on:false,doc:null,win:null,dispatch:()=>{throw Error('no');}});
  assert.equal(s.on,false);s.rendered();
 });
+test('a sidebar thread row swipes as the phone apps: settle; snooze an hour or delete through its menu',async()=>{
+ const {sidebarSwipes}=await load();
+ const row={matches:s=>s.includes('.thread'),getAttribute:n=>n==='data-value'?'t1':null};
+ const s=sidebarSwipes(row);
+ assert.deepEqual(s.lead.map(x=>[x.action,x.value]),[['row-settle','t1']]);
+ assert.deepEqual(s.trail.map(x=>[x.action,x.value,!!x.menu]),[['row-snooze','t1|1h',false],['row-delete','t1',true]]);
+ assert.equal(sidebarSwipes({matches:()=>false,getAttribute:()=>'x'}),null);
+});

@@ -2689,7 +2689,7 @@ html.phone.ph-kb .app.phone > main, html.phone.ph-kb .app.phone > .viewer { padd
 /* the header: ‹, the title over a smaller line, the screen's tools */
 .ph-head { flex: none; position: relative; z-index: 8; display: flex; align-items: center; gap: 2px; min-height: var(--ph-head); box-sizing: content-box;
   padding: env(safe-area-inset-top) max(4px, env(safe-area-inset-right)) 0 max(4px, env(safe-area-inset-left)); background: var(--panel); border-bottom: 1px solid var(--line); }
-.ph-back, .ph-tool { flex: none; display: inline-flex; align-items: center; justify-content: center; width: var(--ph-tap); height: var(--ph-tap); padding: 0; background: none; border: 0; color: var(--text); border-radius: 22px; }
+.ph-back, .ph-tool { flex: none; display: inline-flex; align-items: center; justify-content: center; width: var(--ph-tap); height: var(--ph-tap); padding: 0; background: none; border: 0; color: var(--text); border-radius: 0; }
 .ph-back { color: var(--accent); margin-right: -4px; }
 .ph-back:active, .ph-tool:active { background: var(--raise); }
 .ph-title { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; justify-content: center; padding: 0 6px; }
@@ -2724,26 +2724,27 @@ html.phone.ph-kb .app.phone > main, html.phone.ph-kb .app.phone > .viewer { padd
 .ph-tab { flex: 1 1 0; position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: var(--ph-tabs); padding: 4px 0 2px; background: none; border: 0; color: var(--dim); font-size: calc(11px * var(--text-scale, 100) / 100); }
 .ph-tab.on { color: var(--accent); }
 .ph-tab:active { background: var(--raise); }
-.ph-badge { position: absolute; top: 4px; left: calc(50% + 6px); min-width: 18px; height: 18px; padding: 0 5px; box-sizing: border-box; border-radius: 9px; background: var(--bad); color: #fff; font-size: 11px; line-height: 18px; font-weight: 600; text-align: center; }
+.ph-badge { position: absolute; top: 4px; left: calc(50% + 6px); min-width: 18px; height: 18px; padding: 0 5px; box-sizing: border-box; background: var(--bad); color: #fff; font-size: 11px; line-height: 18px; font-weight: 600; text-align: center; }
 html.phone.ph-kb .ph-tabs { display: none; }
 
 /* menus are bottom sheets: every <details class="local-menu">, the row
    menu, and the sheets the hub draws (phone.bend's Phone.sheet) */
 @keyframes ph-sheet-up { from { transform: translateY(40px); opacity: 0.4; } to { transform: none; opacity: 1; } }
-.app.phone .local-menu[open]:not([data-inline])::before { content: ""; position: fixed; inset: 0; z-index: 39; background: #0008; }
-.app.phone .local-menu[open]:not([data-inline]) > .local-menu-body, .app.phone .rowmenu, .ph-sheet {
+.app.phone .local-menu[open]:not([data-inline="true"])::before { content: ""; position: fixed; inset: 0; z-index: 39; background: #0008; }
+.app.phone .local-menu[open]:not([data-inline="true"]) > .local-menu-body, .app.phone .rowmenu, .ph-sheet {
   position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 40; width: auto; min-width: 0; max-width: none;
   max-height: min(78dvh, calc(var(--ph-vh, 100dvh) - 56px)); overflow-y: auto; overscroll-behavior: contain; box-sizing: border-box;
-  display: flex; flex-direction: column; gap: 2px; background: var(--panel); color: var(--text); border: 0; border-radius: 14px 14px 0 0;
+  display: flex; flex-direction: column; gap: 2px; background: var(--panel); color: var(--text); border: 0; border-top: 1px solid var(--line);
   padding: 6px max(10px, env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
   box-shadow: 0 -10px 30px #0007; font-size: calc(15px * var(--text-scale, 100) / 100); animation: ph-sheet-up .16s ease-out; }
-.app.phone .local-menu[open]:not([data-inline]) > .local-menu-body::before, .app.phone .rowmenu::before { content: ""; flex: none; align-self: center; width: 36px; height: 4px; border-radius: 2px; background: var(--line); margin: 2px 0 8px; }
+.app.phone .local-menu[open]:not([data-inline="true"]) > .local-menu-body::before, .app.phone .rowmenu::before { content: ""; flex: none; align-self: center; width: 36px; height: 4px; background: var(--line); margin: 2px 0 8px; }
+.app.phone .rowmenu { left: 0 !important; right: 0 !important; top: auto !important; bottom: 0 !important; transform: none !important; width: auto !important; min-width: 0 !important; }
 .app.phone .local-menu-body button, .app.phone .rowmenu .mi, .ph-sheet button { min-height: 48px; font-size: calc(15px * var(--text-scale, 100) / 100); }
 .app.phone .shade { background: #0008; }
-html.phone.ph-kb .app.phone .local-menu[open]:not([data-inline]) > .local-menu-body { padding-bottom: 10px; }
+html.phone.ph-kb .app.phone .local-menu[open]:not([data-inline="true"]) > .local-menu-body { padding-bottom: 10px; }
 .ph-sheet-layer { position: fixed; inset: 0; z-index: 45; }
 .ph-sheet-back { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; padding: 0; background: #0008; }
-.ph-sheet-grab { flex: none; align-self: center; width: 36px; height: 4px; border-radius: 2px; background: var(--line); margin: 2px 0 8px; }
+.ph-sheet-grab { flex: none; align-self: center; width: 36px; height: 4px; background: var(--line); margin: 2px 0 8px; }
 .ph-sheet-title { font-weight: 600; padding: 4px 6px 8px; }
 
 /* a row's swipe buttons (phone-shell.js puts them under the row) */
@@ -2760,7 +2761,36 @@ html.phone.ph-kb .app.phone .local-menu[open]:not([data-inline]) > .local-menu-b
 .ph-empty-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 8px; }
 .ph-empty-actions button { min-height: var(--ph-tap); padding: 0 16px; }
 .ph-chips { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; padding: 8px 12px; }
-.ph-chips > * { flex: none; min-height: 36px; border-radius: 18px; padding: 0 14px; }
+.ph-chips > * { flex: none; min-height: 36px; padding: 0 14px; }
+
+/* phone: lists (P): the Projects and Bots tabs' rows, sized for a thumb:
+   56 px thread rows, 48 px project heads, 44 px buttons, 15-16 px text;
+   nothing waits on a hover (the reorder arrows go: a row's menu moves it) */
+.app.phone > .ph-now { flex: 1 1 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 12px; }
+.app.phone.ph-now > main { display: none !important; }
+.app.phone > .ph-now .project.active { padding-top: 4px; }
+.app.phone :is(.sidebar, .ph-now) { font-size: calc(15px * var(--text-scale, 100) / 100); padding-bottom: 12px; }
+.app.phone :is(.sidebar, .ph-now) .find.with-add { position: sticky; top: 0; z-index: 6; gap: 6px; padding: 8px max(8px, env(safe-area-inset-right)) 8px max(12px, env(safe-area-inset-left)); }
+.app.phone :is(.sidebar, .ph-now) .find input { min-height: 40px; font-size: 16px; padding: 6px 10px; }
+.app.phone :is(.sidebar, .ph-now) .find .add-project { width: var(--ph-tap); height: var(--ph-tap); padding: 0; }
+.app.phone :is(.sidebar, .ph-now) .project { padding-top: 6px; }
+.app.phone :is(.sidebar, .ph-now) .project-head { cursor: default; min-height: 48px; padding: 0 max(4px, env(safe-area-inset-right)) 0 max(4px, env(safe-area-inset-left)); font-size: calc(12px * var(--text-scale, 100) / 100); }
+.app.phone :is(.sidebar, .ph-now) .project-head > button { min-width: var(--ph-tap); min-height: var(--ph-tap); display: inline-flex; align-items: center; }
+.app.phone :is(.sidebar, .ph-now) .project-head > button.icon, .app.phone :is(.sidebar, .ph-now) .project-head > .badge { justify-content: center; }
+.app.phone :is(.sidebar, .ph-now) .project-head .badge { justify-content: center; padding: 0; }
+.app.phone :is(.sidebar, .ph-now) .project-head .name { min-width: 0; text-align: left; font-size: calc(13px * var(--text-scale, 100) / 100); letter-spacing: 0.06em; }
+.app.phone :is(.sidebar, .ph-now) .thread-tree-row { min-height: var(--ph-row); }
+.app.phone :is(.sidebar, .ph-now) .thread { min-height: var(--ph-row); box-sizing: border-box; gap: 12px; padding: 6px max(16px, env(safe-area-inset-right)) 6px 12px; font-size: calc(16px * var(--text-scale, 100) / 100); }
+.app.phone :is(.sidebar, .ph-now) .thread .ago, .app.phone :is(.sidebar, .ph-now) .thread .want, .app.phone :is(.sidebar, .ph-now) .thread .note { font-size: calc(13px * var(--text-scale, 100) / 100); }
+.app.phone :is(.sidebar, .ph-now) .thread .dot { flex: none; transform: scale(1.4); }
+.app.phone :is(.sidebar, .ph-now) .thread .moves, .app.phone :is(.sidebar, .ph-now) .thread:hover .moves { display: none !important; }
+.app.phone :is(.sidebar, .ph-now) .thread:hover:not(.on) { background: none; }
+.app.phone :is(.sidebar, .ph-now) .thread:active { background: var(--raise); }
+.app.phone :is(.sidebar, .ph-now) .thread-expander { min-width: 36px; min-height: var(--ph-row); }
+.app.phone :is(.sidebar, .ph-now) .thread-create button { min-height: var(--ph-tap); font-size: calc(14px * var(--text-scale, 100) / 100); }
+.app.phone :is(.sidebar, .ph-now) .project-threads button:not(.thread-expander), .app.phone :is(.sidebar, .ph-now) .fold, .app.phone :is(.sidebar, .ph-now) .older { min-height: var(--ph-tap); }
+.app.phone :is(.sidebar, .ph-now) .bots { padding-top: 6px; }
+.app.phone :is(.sidebar, .ph-now) .bots > * { min-height: var(--ph-tap); }
 
 /* phone: other (D: settings, search, palette, terminal, pairing and
    devices; phone-other.js). Overlays outside the hub's tree (search,

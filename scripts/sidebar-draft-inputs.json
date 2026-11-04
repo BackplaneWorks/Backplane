@@ -45,7 +45,7 @@
     "src/core/cef.bend": "f2d3fa4c991d0e341620fe634ddb4e08da97f8e471ec46afac0b3de471cc69fb",
     "src/core/charter.bend": "7f906bdea712f6ff6162735c8cc133767ec0f9289c3d0bee6dfedbd4d75ad981",
     "src/core/chat-pending.bend": "4a6dcabdd6b5653d664729a07d7ff044488732a9e684a7832c18e20502442db1",
-    "src/core/client.bend": "7a169a18b9f1b414d5c70a224762b01ab6d07d8103fed60c5d86a5f97902908a",
+    "src/core/client.bend": "90bfff777ec1e2441747ba93fa9b2c8e99ada1c4a433ea4b3a73e68029392b8f",
     "src/core/codec.bend": "75de46900a06e39152c37d4ac5c433a9fbabd522ff20baab18eb5ea5b0ae2bd2",
     "src/core/cron.bend": "6f89a001df0261a25c878616ea66c235e169f7fc1c726d39e695fce8adb57332",
     "src/core/deploy.bend": "ebee4e63a52cf41ae001bebcdbb7fb010ad71c1e04e481292585740d88a39cc4",
