@@ -200,7 +200,7 @@
     "src/web/terminal-cells.bend": "398447910b3ffe4645874d8e96198e9008bcb58202f16be95fd0177aa6a0bc63",
     "src/web/usage-graph.bend": "b41a1ffd14194cb6f95703852d238d9401d7aaa42589382bd13203d94d33523d",
     "src/web/usage-page.bend": "40ebb901b56f8c28f2b7eef5551c14b409333c0ef739c4d3df4ed44df581e876",
-    "src/web/view.bend": "64787d4ba08bef0f84af2af36b243ce357e0c3ae23300752b6ad8335bbe41d54"
+    "src/web/view.bend": "769d3fb9f716ef44f8c5fe6d9abd94f6e9da038615a96debb17a0b0d0a0eafd0"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -1139,5 +1139,11 @@
       "src/web/view.bend"
     ],
     "scope": "Split view: the board and the 3D share the side pane one at a time (Split.shows/Split.flip read only the split.hide setting) and the toggles' tooltips; Cadview.dispatch's action and Mob.kn's note actions marked shared; a thinstore.bend comment; the probe card's short Mention label in the catalog; the phone header loses Go to the start and puts Buy it before the views menu; the thread menu gains a Search in thread button (action thread-find, the thread id). No sidebar draft readers, unknown @ retention, private image keys or transport change."
+  },
+  "phoneAppShellReview": {
+    "files": {
+      "src/web/view.bend": "769d3fb9f716ef44f8c5fe6d9abd94f6e9da038615a96debb17a0b0d0a0eafd0"
+    },
+    "scope": "view.bend gains View.settings.phone.app: one Settings row (Appearance and Threads pages, phone layout only) with a static [data-ph-app=settings] button that only the phone apps show (html.ph-in-app). It reads only the locale; no sidebar draft reader, unknown @ retention, private image key, scratch filter or transport/recipient authority change. (Not re-run: test/sidebar_draft_image_test.bend.)"
   }
 }
