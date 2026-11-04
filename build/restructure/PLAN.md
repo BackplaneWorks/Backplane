@@ -179,5 +179,25 @@ those do not describe the completed worker and must not be used as verdict or
 peak evidence. The sandbox was deleted and verified gone (81 credit-s/$0.00081).
 
 Runtime extraction, compositional law proofs, fresh after measurements, and
-all-shard qualification remain pending. No memory-budget success is claimed by
-this first PR.
+all-shard qualification remained pending at this first PR. Subsequent milestones:
+
+| PR | Boundary | Before/after implementation import closure | Native affected-law result |
+|---|---|---|---|
+| #890 | Watch planning | 359 to 1 | canonical shards098/124 passed; highest RSS171,836 KiB |
+| #894 | Pairing/desktop/adoption | 359 to 5/2/15 | canonical shards077/105/121 passed; highest RSS431,604 KiB |
+| #896 | Private Wire and writer credit | 359 to 12 | canonical shard088 passed; latest RSS822,064 KiB |
+| Auth cache follow-up | Authentication cache | 367 to 12 | canonical shard088 passed; RSS325,804 KiB |
+
+Each change retains every original law and adds concrete compositional laws;
+boundary-specific REVIEW.md files state the implication arguments and scope.
+All listed after runs use normal Boat, native guarded workers capped at
+3.7e9 bytes/no swap, and separate 512 MiB/no-swap controllers. Successful
+foreign/unsafe-only verdicts are distinguished from exit-zero proof checks.
+Auth's source audit and 35 Python checks also ran entirely on capped Boat.
+The latest user constraint prohibits **all local compiler, proof and test runs**,
+including light tests. RC4 remains frozen and the installer holds builds/installs.
+
+Auth's paired original-law closure grows from49 to51 due to explicit proof
+composition; this is reported alongside its reduced import cost. The largest
+law remains5,500 declarations. Full before/after per-shard qualification,
+residual runtime coverage, and the whole-project memory target remain open.
