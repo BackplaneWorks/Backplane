@@ -3173,6 +3173,13 @@ html.ph-kb .app.phone :is(.thread-content, .thread-view) > :is(.bot-head, .bot-h
 .app.phone .review-body.body :is(td, th) { white-space: nowrap; overflow-wrap: normal; padding: 6px 8px; }
 .app.phone .review-body.rp-bom td:first-child { white-space: normal; min-width: 11em; max-width: 15em; }
 .app.phone .review-body.rp-bom th:first-child { width: auto; }
+/* the 3D status line keeps to one line (the whole of it is its tooltip) */
+.app.phone .solid-render-status:not(:empty) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: calc(100% - 16px); }
+/* split: a phone has room for two panes, the main one and the first beside
+   it (schematic over board, for cross-probing); 3D has its own chip */
+.app.phone .viewer.split .combo { --split-handle-size: 24px; }
+.app.phone .viewer.split .combo-side > .combo-pane ~ :is(.combo-pane, .combo-resize) { display: none; }
+.app.phone .viewer.split .combo-side[data-split-active] > :first-child { flex: 1 1 0; }
 /* a phone on its side has ~340 px of height: the views stay in the header's
    menu, the history keeps its one row, so the drawing keeps most of it */
 @media (max-height: 500px) {
