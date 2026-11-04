@@ -5844,6 +5844,22 @@ def View.phone.level(+s: String) -> String:
     case _: "1"
 
 # a root screen's tools: search every conversation, the command palette
+# the sidebar's rows over every project, as the sidebar makes them
+def View.phone.raw(+u: U.Ui, +ix: U.SIx) -> List<&2, U.SRow>:
+  U.Side.rows.ix.at(U.Ui.state(u), ix, U.Side.now(u), U.Side.cur.held(U.Ui.state(u), U.Ui.sel(u), U.Side.now(u)))
+
+# a new thread in the project at the top of the sidebar's order (live
+# first, the one worked in last), the thumb's quickest way to start; none
+# before there is a project
+def View.phone.new.k(none: Bool, +lc: I.Loc, +p: String, +st: M.State) -> List<&2, D.Node>:
+  match none:
+    case True{}: Nil{}
+    case False{}: [PHN.Phone.tool("new-thread", p, MSG.T.thread.new(lc) ++ " · " ++ U.Ui.project_title(st, p), "square-pen")]
+
+def View.phone.new(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
+  +p = Maybe.default(&2, String, List.head(&2, String, U.Side.pids(View.phone.raw(u, U.Side.ix(U.Ui.state(u))))), "")
+  View.phone.new.k(String.is_empty(p), lc, p, U.Ui.state(u))
+
 def View.phone.tools(+lc: I.Loc) -> List<&2, D.Node>:
   [PHN.Phone.tool("thin-search-open", "", "Search conversations", "search"), PHN.Phone.tool("ws-palette-open", "", View.chrome.jump.short(lc), "zap")]
 
@@ -5885,12 +5901,8 @@ def View.phone.head(+lc: I.Loc, +screen: String, bv: BI.View, +u: U.Ui, +on: Boo
     case "settings": [View.phone.root(lc, on, v, MSG.T.palette.settings(lc), Nil{})]
     case "settings-page": [PHN.Phone.head([PHN.Phone.back("settings-page", "", MSG.T.palette.settings(lc))], PHN.Phone.title(U.Settings.title(lc, U.Settings.page(u)), MSG.T.palette.settings(lc)), Nil{})]
     case "bots": [View.phone.root(lc, on, v, MSG.T.tour.title.bots(lc), View.phone.tools(lc))]
-    case "now": [View.phone.root(lc, on, v, PHN.Phone.now.label(lc), View.phone.tools(lc))]
-    case _: [View.phone.root(lc, on, v, MSG.T.tour.title.projects(lc), View.phone.tools(lc))]
-
-# the sidebar's rows over every project, as the sidebar makes them
-def View.phone.raw(+u: U.Ui, +ix: U.SIx) -> List<&2, U.SRow>:
-  U.Side.rows.ix.at(U.Ui.state(u), ix, U.Side.now(u), U.Side.cur.held(U.Ui.state(u), U.Ui.sel(u), U.Side.now(u)))
+    case "now": [View.phone.root(lc, on, v, PHN.Phone.now.label(lc), List.append(&2, D.Node, View.phone.new(lc, u), View.phone.tools(lc)))]
+    case _: [View.phone.root(lc, on, v, MSG.T.tour.title.projects(lc), List.append(&2, D.Node, View.phone.new(lc, u), View.phone.tools(lc)))]
 
 # threads needing the person (the sidebar's own count, Plane.tally)
 def View.phone.need(+u: U.Ui) -> Nat:
