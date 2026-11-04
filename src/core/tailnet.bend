@@ -239,25 +239,38 @@ def Pairing.half() -> Nat:
 def Pairing.plan() -> List<&2, PStep>:
   [PFind{}, PAsk{}, PWait{Pairing.half()}, PAsk{}, PWait{Pairing.half()}]
 
-# the times (ms from start) the plan asks, when each period's finding takes
-# the given time; one period per entry of finds
-def Tailnet.asks.go(ps: List<&2, PStep>, +finds: List<&2, Nat>, +t: Nat) -> List<&2, Nat>:
+# one period of a plan from time t, its finding taking f: the times it asks
+def Pairing.period.asks(ps: List<&2, PStep>, +f: Nat, +t: Nat) -> List<&2, Nat>:
   match ps:
     case Nil{}:
-      Tailnet.asks(List.drop(&2, Nat, finds, 1n), t)
+      Nil{}
     case PFind{} <> rest:
-      Tailnet.asks.go(rest, finds, Nat.add(t, Maybe.default(&2, Nat, List.head(&2, Nat, finds), 0n)))
+      Pairing.period.asks(rest, f, Nat.add(t, f))
     case PAsk{} <> rest:
-      t <> Tailnet.asks.go(rest, finds, t)
+      t <> Pairing.period.asks(rest, f, t)
     case PWait{ms} <> rest:
-      Tailnet.asks.go(rest, finds, Nat.add(t, ms))
+      Pairing.period.asks(rest, f, Nat.add(t, ms))
 
-def Tailnet.asks(+finds: List<&2, Nat>, +t: Nat) -> List<&2, Nat>:
+# and when it ends
+def Pairing.period.end(ps: List<&2, PStep>, +f: Nat, +t: Nat) -> Nat:
+  match ps:
+    case Nil{}:
+      t
+    case PFind{} <> rest:
+      Pairing.period.end(rest, f, Nat.add(t, f))
+    case PAsk{} <> rest:
+      Pairing.period.end(rest, f, t)
+    case PWait{ms} <> rest:
+      Pairing.period.end(rest, f, Nat.add(t, ms))
+
+# the times (ms from start) Pairing.plan asks, when each period's finding
+# takes the given time; one period per entry of finds
+def Tailnet.asks(finds: List<&2, Nat>, +t: Nat) -> List<&2, Nat>:
   match finds:
     case Nil{}:
       Nil{}
-    case _ <> _:
-      Tailnet.asks.go(Pairing.plan(), finds, t)
+    case +f <> rest:
+      List.append(&2, Nat, Pairing.period.asks(Pairing.plan(), f, t), Tailnet.asks(rest, Pairing.period.end(Pairing.plan(), f, t)))
 
 # every two asks at least `gap` apart (asks in time order)
 def Tailnet.apart.k(+a: Nat, ts: List<&2, Nat>, +gap: Nat) -> Bool:
