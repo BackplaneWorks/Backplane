@@ -2763,6 +2763,14 @@ html.phone.ph-short .ph-note { top: calc(var(--ph-top, 0px) + env(safe-area-inse
 .ph-tab:active { background: var(--raise); }
 .ph-badge { position: absolute; top: 4px; left: calc(50% + 6px); min-width: 18px; height: 18px; padding: 0 5px; box-sizing: border-box; background: var(--bad); color: #fff; font-size: 11px; line-height: 18px; font-weight: 600; text-align: center; }
 html.phone.ph-kb .ph-tabs { display: none; }
+/* a phone on its side (under 480 px tall): a 44 px header and a 44 px tab
+   bar with each label beside its icon, so the screen keeps its height */
+@media (max-height: 480px) {
+  .app.phone .ph-head { min-height: 44px; }
+  .app.phone .ph-head .ph-sub { display: none; }
+  .app.phone .ph-tab { flex-direction: row; gap: 8px; min-height: 44px; padding: 0; font-size: calc(13px * var(--text-scale, 100) / 100); }
+  .app.phone .ph-badge { top: 4px; left: calc(50% + 2px); }
+}
 
 /* menus are bottom sheets: every <details class="local-menu">, the row
    menu, and the sheets the hub draws (phone.bend's Phone.sheet) */
