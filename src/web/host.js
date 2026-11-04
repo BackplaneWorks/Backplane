@@ -867,6 +867,8 @@ let jump = null;
 // thread shows it, paging back through the history while it is not there
 // yet (at most 40 pages)
 let searchJump = null;
+// a phone thread header's "Go to the start" (view.bend's View.phone.head.thread)
+let startJump = null;
 let earlierAsked = false;
 
 // TanStack virtual-core 3.19.9's layout model is ported in timeline-plan.bend.
@@ -1205,6 +1207,12 @@ function render() {
       if (!searchJump.asked) { searchJump.asked = true; requestAnimationFrame(() => { if (searchJump) { searchJump.asked = false; if (thin.ahead("older")) searchJump.pages++; } }); }
     } else if (thin?.ready) searchJump = null;
   }
+  // "Go to the start": every earlier page, one after another, then the top
+  if (startJump && tl2 && startJump.thread === (thin?.session?.sel ?? App.sel(ui))) {
+    if (thin?.hasAhead?.("older") && startJump.pages < 200) {
+      if (!startJump.asked) { startJump.asked = true; requestAnimationFrame(() => { if (startJump) { startJump.asked = false; if (thin.ahead("older")) startJump.pages++; } }); }
+    } else if (thin?.ready) { tl2.scrollTop = 0; startJump = null; }
+  } else if (startJump && startJump.thread !== (thin?.session?.sel ?? App.sel(ui))) startJump = null;
   searchLight(tl2);
   panes();
   secretSaves.paint();
@@ -1279,7 +1287,7 @@ function landPathIn(shown, region) {
 function historyRegion(detail, projection) {
   const landing = detail.page && ["older", "newer"].includes(projection);
   const update = !detail.page && projection === "update" && !detail.historyReset && !detail.position;
-  if (!(landing || update) || !Array.isArray(detail.changed) || detail.changed.some(p => !p.length) || searchJump || jump || scroll) return "page";
+  if (!(landing || update) || !Array.isArray(detail.changed) || detail.changed.some(p => !p.length) || searchJump || startJump || jump || scroll) return "page";
   const lines = [];
   for (const r of LAND_REGIONS) { const p = landPathIn(detail.shown, r);if (p) lines.push([r.name, "shown", ...p].join("\t")); }
   if (!lines.length) return "page";
@@ -1672,6 +1680,8 @@ function dispatch(action, value, timer) {
       transitionViews.savePosition(transitionScope(), timelineList(timeline).position());
     }
   }
+  // (the host pages back itself: render's startJump, as a search jump does)
+  if (action === "ph-start") { startJump = { thread: currentSession().sel, pages: 0, asked: false };later();return true; }
   if (action === "thin-search-open") {
     // (value: a query the command palette could not match: the palette
     // closes first, and the search opens running it once it is gone, render)
@@ -3050,7 +3060,7 @@ function refusedView(target, reason) {
   trace("thin-refused", { reason });
   const back = refusedFallback(target, shownTarget, refusedViews);
   if (back === null || !thin) return false;
-  searchJump = null;
+  searchJump = null;startJump = null;
   try { if (localStorage.getItem("backplane-selected") === target.id) localStorage.removeItem("backplane-selected"); } catch {}
   clearTimeout(viewNoteTimer);
   viewNote = back ? "That conversation can't be opened; back to the one before." : "That conversation can't be opened; here are your projects.";

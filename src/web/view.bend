@@ -5922,7 +5922,7 @@ def View.phone.head.thread(+lc: I.Loc, +back: List<&2, D.Node>, +u: U.Ui, t: M.T
       [PHN.Phone.head(back,
         [D.El{"div", "", [D.At{"class", "title-box"}], List.append(&2, D.Node, View.chrome.order(U.Fab.buying(st, id)), View.title.k.loc(lc, String.eq(U.Str.get(drafts, "@ren"), id), id, U.Label.title(st, id, TTL.Title.shown(lc, title)), U.Str.get(drafts, "@f.title")))},
          D.Dom.span("ph-sub", U.Label.title(st, p, U.Ui.project_title(st, p)))],
-        [View.thread.actions(lc, [WI.WIcon.svg("chevron-down", 18)], st, id, TO.Tools.settled(override, Nat.is_gt(sa, ua)), pinned, M.Snooze.on(now, U.Side.until(st, id)), archived,
+        [PHN.Phone.tool("ph-start", "", "Go to the start", "skip-back"), View.thread.actions(lc, [WI.WIcon.svg("chevron-down", 18)], st, id, TO.Tools.settled(override, Nat.is_gt(sa, ua)), pinned, M.Snooze.on(now, U.Side.until(st, id)), archived,
            String.eq(U.Str.get(drafts, "@del"), id), U.Ui.flag(u, "term"), panel), View.phone.views(lc, u, id)]),
        D.El{"div", "ph-cells", [D.At{"class", "kvs ph-cells"}], View.chrome.cells(gone, lc, st, nf, id, turn, pending, branch, now)}]
 
