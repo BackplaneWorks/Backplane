@@ -520,6 +520,14 @@ section.subs > .subs-head[aria-expanded="false"] > svg { transform: rotate(-90de
 .fm-row.folder svg { color: var(--accent); }
 .fm-row .fm-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fm-row .fm-size { color: var(--faint); font-size: calc(12px * var(--text-scale, 100) / 100); font-family: var(--mono); }
+/* a row and its download (a link beside the row's button, never in it) */
+.fm-item { display: flex; align-items: stretch; }
+.fm-item .fm-row { flex: 1; min-width: 0; }
+.fm-dl { flex: none; display: flex; align-items: center; justify-content: center; width: 32px; margin-right: 6px; color: var(--faint); text-decoration: none; border-radius: 0; }
+.fm-item:hover .fm-dl { color: var(--dim); }
+.fm-dl:hover, .fm-dl:focus-visible { color: var(--text); background: var(--raise); }
+.fm-bar .fm-dl-bar { display: inline-flex; align-items: center; gap: 6px; border-radius: 0; }
+.fm-bar .fm-dl-bar:hover { color: var(--text); }
 /* the Review tab: the report's Markdown, scrolling in the pane */
 .fm-bar .crumb.on { color: var(--text); }
 .review-pane .fm-bar .fm-file { margin-left: 10px; color: var(--dim); }
@@ -3395,6 +3403,7 @@ html.ph-kb .app.phone :is(.thread-content, .thread-view) > :is(.bot-head, .bot-h
 .app.phone #viewer > .sch-panel { height: auto; max-height: 140px; }
 .app.phone .sch-row { min-height: var(--ph-tap, 44px); }
 /* files: whole rows to tap */
+.app.phone .fm-dl { min-width: var(--ph-tap, 44px); min-height: var(--ph-tap, 44px); }
 .app.phone .fm-row { min-height: var(--ph-tap, 44px); }
 .app.phone .fm-bar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
 .app.phone .fm-bar :is(.crumb, button, .btn) { min-height: var(--ph-tap, 44px); flex: none; }

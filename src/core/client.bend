@@ -6168,6 +6168,43 @@ def Fm.top(+u: Ui) -> Nat:
 def Fm.name(+u: Ui) -> String:
   FM.Fm.last(Ui.view_get(u, "view.path"))
 
+def Fm.down.url(folder: Bool, +thread: String, +rel: String) -> String:
+  match folder:
+    case True{}: FM.Fm.zip.url(thread, rel)
+    case False{}: FM.Fm.get.url(thread, rel)
+
+def Fm.down.k(none: Bool, folder: Bool, +thread: String, +rel: String) -> String:
+  match none:
+    case True{}: ""
+    case False{}: Fm.down.url(folder, thread, rel)
+
+# where a Files entry downloads from (core/fm.bend's Fm.zip.url for a
+# folder, Fm.get.url for a file; the folder on show is dir "" from its
+# root): "" with no thread, on a thread elsewhere, whose files are another
+# hub's (its listing is that hub's; this hub holds only a cache), and for
+# what a download never holds (Fm.zip.within: a backups folder, a lock)
+def Fm.down(+u: Ui, folder: Bool, +rel: String) -> String:
+  Fm.down.k(Bool.or(Bool.or(String.is_empty(Ui.sel(u)), FR.Fr.is(Ui.sel(u))), FM.Fm.zip.within(rel)), folder, Ui.sel(u), rel)
+
+# the selected thread's project title (a project home's own), the zip's
+# name at the root as the hub names it (core/hub.bend's Hub.files.of)
+def Fm.down.title.k(home: Bool, +st: M.State, +sel: String) -> String:
+  match home:
+    case True{}: Ui.project_title(st, PH.Home.project(sel))
+    case False{}: Ui.project_title(st, Ui.thread_project(Ui.thread(st, sel)))
+
+def Fm.down.title(u: Ui) -> String:
+  match u:
+    case Ui{+st, +sel, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _}:
+      Fm.down.title.k(PH.Home.is(sel), st, sel)
+
+# the name a download saves as, as the hub's answer names it: a file's own
+# name, a folder's zip (the phones save under it: Mob's Files.json)
+def Fm.down.name(+u: Ui, folder: Bool, +rel: String) -> String:
+  match folder:
+    case True{}: FM.Fm.zip.name(Fm.down.title(u), rel)
+    case False{}: FM.Fm.last(rel)
+
 # Mech opened (Mpage.open marks "@mech.to3d:<t>"; it shows at once what
 # the parts last listed give, and asks for them again, Mpage.sync): once
 # the fresh listing is in, the thread's viewer shows what it gives

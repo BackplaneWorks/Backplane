@@ -5279,31 +5279,47 @@ def View.fm.trail.loc(+lc: I.Loc, ps: List<&2, U.PItem>) -> List<&2, D.Node>:
 def View.fm.trail(ps: List<&2, U.PItem>) -> List<&2, D.Node>:
   View.fm.trail.loc(I.En{}, ps)
 
-def View.fm.row.loc(+lc: I.Loc, r: U.FmRow) -> D.Node:
+# a download (client.bend's Fm.down: none when url is ""): a plain link
+# the browser saves, with the page's own sign-in; the hub's answer names
+# the file (core/fm.bend's Fm.disposition)
+def View.fm.dl.k(none: Bool, +cls: String, +url: String, +tip: String, +icon: String, label: List<&2, D.Node>) -> List<&2, D.Node>:
+  match none:
+    case True{}:
+      Nil{}
+    case False{}:
+      [D.El{"a", "", [D.At{"class", cls}, D.At{"href", url}, D.At{"download", ""}, D.At{"title", tip}, D.At{"aria-label", tip}], WI.WIcon.svg(icon, 16) <> label}]
+
+def View.fm.dl(+cls: String, +url: String, +tip: String, +icon: String, label: List<&2, D.Node>) -> List<&2, D.Node>:
+  View.fm.dl.k(String.is_empty(url), cls, url, tip, icon, label)
+
+def View.fm.row.dl(+lc: I.Loc, +u: U.Ui, +folder: Bool, +l: String, +v: String) -> List<&2, D.Node>:
+  View.fm.dl("fm-dl", U.Fm.down(u, folder, v), Bool.pick(String, folder, MSG.T.files.download.folder(lc, l), MSG.T.files.download.file(lc, l)), Bool.pick(String, folder, "folder-down", "download"), Nil{})
+
+def View.fm.row.loc(+lc: I.Loc, +u: U.Ui, r: U.FmRow) -> D.Node:
   match r:
     case U.FmRow{+l, +a, +v, +d, +k}:
-      D.El{"button", "", List.append(&2, D.Attr, [D.At{"class", "fm-row " ++ Bool.pick(String, String.is_empty(a), "off", k)}, D.At{"title", Bool.pick(String, String.is_empty(a), MSG.T.files.preview.none(lc, l), l)}],
+      D.El{"div", "", [D.At{"class", "fm-item"}], D.El{"button", "", List.append(&2, D.Attr, [D.At{"class", "fm-row " ++ Bool.pick(String, String.is_empty(a), "off", k)}, D.At{"title", Bool.pick(String, String.is_empty(a), MSG.T.files.preview.none(lc, l), l)}],
           Bool.pick(List<&2, D.Attr>, String.is_empty(a), [D.At{"disabled", "disabled"}], [D.At{"data-value", v}, D.On{"click", a}])),
-        [WI.WIcon.svg(U.Fm.icon(k), 16), D.Dom.span("fm-name", l), D.Dom.span("fm-size", d)]}
+        [WI.WIcon.svg(U.Fm.icon(k), 16), D.Dom.span("fm-name", l), D.Dom.span("fm-size", d)]} <> View.fm.row.dl(lc, u, String.eq(k, "folder"), l, v)}
 
-def View.fm.row(r: U.FmRow) -> D.Node:
-  View.fm.row.loc(I.En{}, r)
+def View.fm.row(+u: U.Ui, r: U.FmRow) -> D.Node:
+  View.fm.row.loc(I.En{}, u, r)
 
-def View.fm.rows.loc(+lc: I.Loc, rs: List<&2, U.FmRow>) -> List<&2, D.Node>:
+def View.fm.rows.loc(+lc: I.Loc, +u: U.Ui, rs: List<&2, U.FmRow>) -> List<&2, D.Node>:
   match rs:
     case Nil{}:
       Nil{}
     case r <> t:
-      View.fm.row.loc(lc, r) <> View.fm.rows.loc(lc, t)
+      View.fm.row.loc(lc, u, r) <> View.fm.rows.loc(lc, u, t)
 
-def View.fm.rows(rs: List<&2, U.FmRow>) -> List<&2, D.Node>:
-  View.fm.rows.loc(I.En{}, rs)
+def View.fm.rows(+u: U.Ui, rs: List<&2, U.FmRow>) -> List<&2, D.Node>:
+  View.fm.rows.loc(I.En{}, u, rs)
 
 def View.fm.body.loc(+lc: I.Loc, ready: Bool, +u: U.Ui) -> List<&2, D.Node>:
   match ready:
     case True{}:
       Bool.pick(List<&2, D.Node>, String.is_empty(U.Ui.info(u, "fm.err:" ++ U.Ui.sel(u))),
-        Bool.pick(List<&2, D.Node>, List.is_empty(&2, U.FmRow, U.Fm.rows(u)), [D.Dom.span("fm-note", MSG.T.viewer.files.empty(lc))], View.fm.rows.loc(lc, U.Fm.rows(u))),
+        Bool.pick(List<&2, D.Node>, List.is_empty(&2, U.FmRow, U.Fm.rows(u)), [D.Dom.span("fm-note", MSG.T.viewer.files.empty(lc))], View.fm.rows.loc(lc, u, U.Fm.rows(u))),
         [D.Dom.span("fm-note", U.Ui.info(u, "fm.err:" ++ U.Ui.sel(u)))])
     case False{}:
       [D.Dom.span("fm-note", MSG.T.viewer.files.loading(lc))]
@@ -5313,7 +5329,8 @@ def View.fm.body(ready: Bool, +u: U.Ui) -> List<&2, D.Node>:
 
 def View.files(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
   [D.El{"div", "", [D.At{"class", "fm-bar"}], List.append(&2, D.Node, View.fm.trail.loc(lc, U.Fm.trail.loc(lc, u)),
-     [D.El{"span", "", [D.At{"class", "grow"}], Nil{}}, D.Dom.button("", "fm-up", "", MSG.T.files.up.tip(lc), MSG.T.queue.up(lc))])},
+     D.El{"span", "", [D.At{"class", "grow"}], Nil{}} <> List.append(&2, D.Node, View.fm.dl("btn fm-dl-bar", U.Fm.down(u, True{}, U.Fm.dir(u)), MSG.T.files.download.tip(lc), "folder-down", [D.Txt{MSG.T.files.download(lc)}]),
+       [D.Dom.button("", "fm-up", "", MSG.T.files.up.tip(lc), MSG.T.queue.up(lc))]))},
    D.El{"div", "files-list", [D.At{"class", "fm-list"}], View.fm.body.loc(lc, U.Fm.ready(u), u)}]
 
 # an image or a PDF opened from the Files tab: its name, back to the folder

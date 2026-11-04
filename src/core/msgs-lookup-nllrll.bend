@@ -283,12 +283,12 @@ def T.plain.nllrllrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.files.tab(l)}
+      Some{CAT_0.T.files.download(l)}
     case GT{}:
       None{}
 
 def T.plain.nllrllrlrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nllrllrlrl.cmp(String.cmp(key, "files.tab"), l)
+  T.plain.nllrllrlrl.cmp(String.cmp(key, "files.download"), l)
 
 def T.plain.nllrllrlrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -296,12 +296,12 @@ def T.plain.nllrllrlrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.fm.root(l)}
+      Some{CAT_0.T.files.download.tip(l)}
     case GT{}:
       None{}
 
 def T.plain.nllrllrlrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nllrllrlrr.cmp(String.cmp(key, "fm.root"), l)
+  T.plain.nllrllrlrr.cmp(String.cmp(key, "files.download.tip"), l)
 
 def T.plain.nllrllrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -309,12 +309,12 @@ def T.plain.nllrllrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nllrllrlrl(l, key)
     case EQ{}:
-      Some{CAT_0.T.files.up.tip(l)}
+      Some{CAT_0.T.files.download.failed(l)}
     case GT{}:
       T.plain.nllrllrlrr(l, key)
 
 def T.plain.nllrllrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nllrllrlr.cmp(String.cmp(key, "files.up.tip"), l)
+  T.plain.nllrllrlr.cmp(String.cmp(key, "files.download.failed"), l)
 
 def T.plain.nllrllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -335,12 +335,12 @@ def T.plain.nllrllrrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.fold.now(l)}
+      Some{CAT_0.T.files.up.tip(l)}
     case GT{}:
       None{}
 
 def T.plain.nllrllrrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nllrllrrll.cmp(String.cmp(key, "fold.now"), l)
+  T.plain.nllrllrrll.cmp(String.cmp(key, "files.up.tip"), l)
 
 def T.plain.nllrllrrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -348,12 +348,12 @@ def T.plain.nllrllrrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.google.client.hide(l)}
+      Some{CAT_0.T.fold.more(l)}
     case GT{}:
       None{}
 
 def T.plain.nllrllrrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nllrllrrlr.cmp(String.cmp(key, "google.client.hide"), l)
+  T.plain.nllrllrrlr.cmp(String.cmp(key, "fold.more"), l)
 
 def T.plain.nllrllrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -361,12 +361,12 @@ def T.plain.nllrllrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nllrllrrll(l, key)
     case EQ{}:
-      Some{CAT_0.T.google.callback(l)}
+      Some{CAT_0.T.fm.root(l)}
     case GT{}:
       T.plain.nllrllrrlr(l, key)
 
 def T.plain.nllrllrrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nllrllrrl.cmp(String.cmp(key, "google.callback"), l)
+  T.plain.nllrllrrl.cmp(String.cmp(key, "fm.root"), l)
 
 def T.plain.nllrllrrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -374,12 +374,12 @@ def T.plain.nllrllrrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.google.client.own(l)}
+      Some{CAT_0.T.google.callback(l)}
     case GT{}:
       None{}
 
 def T.plain.nllrllrrrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nllrllrrrl.cmp(String.cmp(key, "google.client.own"), l)
+  T.plain.nllrllrrrl.cmp(String.cmp(key, "google.callback"), l)
 
 def T.plain.nllrllrrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -387,12 +387,12 @@ def T.plain.nllrllrrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.google.client.secret(l)}
+      Some{CAT_0.T.google.client.id(l)}
     case GT{}:
       None{}
 
 def T.plain.nllrllrrrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nllrllrrrr.cmp(String.cmp(key, "google.client.secret"), l)
+  T.plain.nllrllrrrr.cmp(String.cmp(key, "google.client.id"), l)
 
 def T.plain.nllrllrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -400,12 +400,12 @@ def T.plain.nllrllrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nllrllrrrl(l, key)
     case EQ{}:
-      Some{CAT_0.T.google.client.save(l)}
+      Some{CAT_0.T.google.client.hide(l)}
     case GT{}:
       T.plain.nllrllrrrr(l, key)
 
 def T.plain.nllrllrrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nllrllrrr.cmp(String.cmp(key, "google.client.save"), l)
+  T.plain.nllrllrrr.cmp(String.cmp(key, "google.client.hide"), l)
 
 def T.plain.nllrllrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -413,12 +413,12 @@ def T.plain.nllrllrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Stri
     case LT{}:
       T.plain.nllrllrrl(l, key)
     case EQ{}:
-      Some{CAT_0.T.google.client.id(l)}
+      Some{CAT_0.T.fold.now(l)}
     case GT{}:
       T.plain.nllrllrrr(l, key)
 
 def T.plain.nllrllrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nllrllrr.cmp(String.cmp(key, "google.client.id"), l)
+  T.plain.nllrllrr.cmp(String.cmp(key, "fold.now"), l)
 
 def T.plain.nllrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -426,12 +426,12 @@ def T.plain.nllrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Strin
     case LT{}:
       T.plain.nllrllrl(l, key)
     case EQ{}:
-      Some{CAT_0.T.fold.more(l)}
+      Some{CAT_0.T.files.tab(l)}
     case GT{}:
       T.plain.nllrllrr(l, key)
 
 def T.plain.nllrllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nllrllr.cmp(String.cmp(key, "fold.more"), l)
+  T.plain.nllrllr.cmp(String.cmp(key, "files.tab"), l)
 
 def T.plain.nllrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
