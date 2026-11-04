@@ -105,6 +105,10 @@ async function detected(context, expectedRoot, expectedSource) {
 async function main() {
   assert.equal(process.platform,'win32','Real Windows required');
   assert.equal(process.env.GITHUB_ACTIONS,'true','Hosted acceptance only');
+  assert(cfg.buildProvenance && typeof cfg.buildProvenance.compilerMode==='string' && cfg.buildProvenance.compilerMode.length>0,'Actual compiler mode required in test evidence');
+  assert(typeof cfg.buildProvenance.producerWorkId==='string' && cfg.buildProvenance.producerWorkId.length>0,'Actual producer work identity required');
+  result.buildProvenance=cfg.buildProvenance;
+  result.releaseBuildApproved=false;
   assert(/^[a-f0-9]{40}$/.test(cfg.sourceCommit));assert(/^[a-f0-9]{40}$/.test(cfg.sourceTree));
   assert(/^[a-f0-9]{64}$/.test(cfg.packageSHA256));
   assert.equal(sha(cfg.packagePath),cfg.packageSHA256,'Authoritative Windows ZIP mismatch');
