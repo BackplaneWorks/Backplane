@@ -596,6 +596,7 @@ class View {
     clearTimeout(this.baking);
     clearTimeout(this.resting);
     clearTimeout(this.pressing);
+    clearTimeout(this.slicing);
     if (this.idling) cancelIdleCallback(this.idling);
     clearInterval(this.tick); this.tick = null;
     this.canvas.classList.remove("dragging");
@@ -847,10 +848,23 @@ class View {
       const f = this.scale / b.scale, k = f * dpr / b.dpr;
       g.setTransform(k, 0, 0, k, dpr * (this.ox - f * (b.ox + b.m / b.dpr)), dpr * (this.oy - f * (b.oy + b.m / b.dpr)));
       g.drawImage(b.canvas, 0, 0);
+    } else if (this.sliced && this.sliced.view === view && this.sliced.look === look && (this.sliced.done || b)) {
+      // a sliced rested frame: done, it is shown; under way, the bitmap
+      // stays up meanwhile
+      if (this.sliced.done) { g.setTransform(1, 0, 0, 1, 0, 0); g.drawImage(this.sliced.canvas, 0, 0); this.sliced = null; this.idle(); }
+      else { const f = this.scale / b.scale, k = f * dpr / b.dpr; g.setTransform(k, 0, 0, k, dpr * (this.ox - f * (b.ox + b.m / b.dpr)), dpr * (this.oy - f * (b.oy + b.m / b.dpr))); g.drawImage(b.canvas, 0, 0); }
+    } else if (b && coarse?.matches && this.drew > SLICE_MS && !this.fading) {
+      const f = this.scale / b.scale, k = f * dpr / b.dpr;
+      g.setTransform(k, 0, 0, k, dpr * (this.ox - f * (b.ox + b.m / b.dpr)), dpr * (this.oy - f * (b.oy + b.m / b.dpr)));
+      g.drawImage(b.canvas, 0, 0);
+      this.slice(view, look, w, h, dpr);
     } else {
       const t = performance.now();
       this.fading = this.paint(g, dpr, 0);
       this.drew = performance.now() - t;
+      // the browser rasterizes the paths after this returns: on a touch
+      // screen the frame's whole time (to the next frame, less one) counts
+      if (coarse?.matches) requestAnimationFrame(() => { this.drew = Math.max(this.drew, performance.now() - t - 17); });
       // only while something fades in does it ask for the next frame
       if (this.fading) this.later();
       else this.idle();
@@ -879,12 +893,54 @@ class View {
 
   // the layers at the current view into the bitmap, kept for the next frames
   // unless something is still fading in (then the next frame draws again)
+  // A touch screen's rested frame of a board that paints slowly (a phone's
+  // CPU: a large board takes seconds) is painted off screen a layer chunk
+  // at a time, about 12 ms of work a slice, so a finger that comes back is
+  // answered at once; the stretched bitmap shows meanwhile. A move or a new
+  // look drops it (draw starts another when the view rests again).
+  slice(view, look, w, h, dpr) {
+    const c = this.sliceCanvas ||= document.createElement("canvas");
+    if (c.width !== w) c.width = w;
+    if (c.height !== h) c.height = h;
+    const g = c.getContext("2d");
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.fillStyle = this.bg;
+    g.fillRect(0, 0, w, h);
+    const job = { view, look, canvas: c, done: false, steps: this.paintSteps(g, dpr, 0), spent: 0 };
+    this.sliced = job;
+    const step = () => {
+      if (this.sliced !== job || this.disposed) return;
+      if (this.shown !== view || this.look !== look || this.moving) { this.sliced = null; return; }
+      const t = performance.now();
+      let r = job.steps.next();
+      while (!r.done && performance.now() - t < 12) r = job.steps.next();
+      // (reading a pixel makes the canvas rasterize this slice's paths now)
+      g.getImageData(0, 0, 1, 1);
+      job.spent += performance.now() - t;
+      if (!r.done) { clearTimeout(this.slicing); this.slicing = setTimeout(step, 0); return; }
+      this.drew = job.spent;
+      this.fading = r.value;
+      job.done = true;
+      this.later();
+    };
+    clearTimeout(this.slicing);
+    this.slicing = setTimeout(step, 0);
+  }
+
   // On a touch screen a board whose rested frame took long to paint gets a
   // bitmap at half the page's pixels: a moving view is blurred a moment, and the idle bake,
   // which fills several screens' worth, no longer blocks a phone for seconds.
   bake(p, look, w, h, dpr) {
     const bd = coarse?.matches && this.drew > HEAVY_MS && dpr > 1 ? Math.max(1, dpr / 2) : dpr;
     const m = Math.round(256 * bd), bw = Math.round(w * bd / dpr) + 2 * m, bh = Math.round(h * bd / dpr) + 2 * m;
+    const at = { plot: p, look, scale: this.scale, ox: this.ox, oy: this.oy, m, dpr: bd };
+    // a slow board on a touch screen bakes in slices, into a canvas of its
+    // own (the last bitmap serves a move meanwhile), kept if nothing moved
+    if (coarse?.matches && this.drew > SLICE_MS) {
+      const own = document.createElement("canvas");
+      own.width = bw; own.height = bh;
+      return this.bakeSliced({ canvas: own }, at, bd, m, p);
+    }
     const b = this.cache && this.cache.canvas.width === bw && this.cache.canvas.height === bh ? this.cache : { canvas: document.createElement("canvas") };
     if (b.canvas.width !== bw) b.canvas.width = bw;
     if (b.canvas.height !== bh) b.canvas.height = bh;
@@ -893,11 +949,31 @@ class View {
     g.fillStyle = this.bg;
     g.fillRect(0, 0, b.canvas.width, b.canvas.height);
     const fading = this.paint(g, bd, m);
-    Object.assign(b, { plot: fading ? null : p, look, scale: this.scale, ox: this.ox, oy: this.oy, m, dpr: bd });
+    Object.assign(b, at, { plot: fading ? null : p });
     this.cache = b;
     this.fading = fading;
     // only while something fades in does it ask for the next frame
     if (fading) this.later();
+    return b;
+  }
+
+  bakeSliced(b, at, bd, m, p) {
+    const g = b.canvas.getContext("2d");
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.fillStyle = this.bg;
+    g.fillRect(0, 0, g.canvas.width, g.canvas.height);
+    const steps = this.paintSteps(g, bd, m), view = this.shown;
+    const step = () => {
+      if (this.disposed || this.shown !== view || this.moving || this.plot !== p) return;
+      const t = performance.now();
+      let r = steps.next();
+      while (!r.done && performance.now() - t < 12) r = steps.next();
+      g.getImageData(0, 0, 1, 1);
+      if (!r.done) { this.baking = setTimeout(step, 0); return; }
+      Object.assign(b, at, { plot: r.value ? null : p });
+      this.cache = b;
+    };
+    step();
     return b;
   }
 
@@ -922,6 +998,14 @@ class View {
   // every layer at the current view, shifted by the bitmap's margin; whether
   // something is still fading in
   paint(g, dpr, m) {
+    const steps = this.paintSteps(g, dpr, m);
+    let r = steps.next();
+    while (!r.done) r = steps.next();
+    return r.value;
+  }
+
+  // paint, a layer chunk at a time (yield between them: sliced)
+  *paintSteps(g, dpr, m) {
     const p = this.plot;
     g.setTransform(this.scale * dpr, 0, 0, this.scale * dpr, this.ox * dpr + m, this.oy * dpr + m);
     g.lineCap = "round";
@@ -949,6 +1033,7 @@ class View {
       // a line never thinner than a pixel, however far out the view is
       g.lineWidth = Math.max(k.r * 2, thin);
       g.stroke(k.line);
+      yield;
     }
     if (dimAll !== 1) {
       // what the probe lights: in its own colours, full strength (a line
@@ -993,6 +1078,9 @@ class View {
 
 // a rested frame painted slower than this (ms) makes the bitmap half size
 const HEAVY_MS = 60;
+// and slower than this, on a touch screen, the next rested frames come in
+// slices (View.slice)
+const SLICE_MS = 100;
 // how far the rest dims under a probe, and the edge drawn round what it lights
 const DIM = 0.28;
 // fills under this many square micrometres (25 mm²) get the edge
