@@ -64,7 +64,7 @@ this procedural guard is not an independent execution attestation.
 
 The final suite has 14 controls, including checker/driver replacement,
 conflicting ordinary files, altered guard sources, and mislabelled or absent
-acknowledgements. No final schema3 qualification has run yet.
+acknowledgements. Schema3 qualification is recorded below.
 
 Residual trust root: this version still executes the dispatcher and worker
 from the candidate checkout. Its matrix cannot authenticate itself against a
@@ -77,3 +77,27 @@ On a changed guard, failure prints the matrix and exact-head flag. This first
 guard PR can qualify only as `passed-reviewed-guard-change`.
 
 History remains blobless and non-shallow as required by repository policy.
+
+## Reviewed schema3 qualification
+
+[Raw result](SCHEMA3-RESULT.json), [controls](SCHEMA3-controls.txt) and
+[owned executor provenance](SCHEMA3-provenance.json) cover exactly
+`0ea8b82ba88e55220813ea1f6a19a0572a824d12` against main
+`c499e7f5477508410dcbb9f014affb9c85cc08a2`, merged tree
+`ffab6166f521b998d42ab4bdf68006deb0e770e3`. Work1513291 / Boat
+`j20261104032138-375442` ended0, including the dispatcher's returned-source
+and final-base identity audit. Expected distinct outcome was
+`passed-reviewed-guard-change`, with the acknowledgement equal to that exact
+head; controls_exit0, 14 tests0.116s, actual merged shape_exit0.
+
+Worker5.60s /25,600KiB peak RSS; cgroup peak39,907,328B under536,870,912B,
+swap0 and all memory events0. Default sandbox wait1s, push3s, setup0;
+12credit-s/$0.00012, sandbox deleted verified. One20KiB worker source file
+was uploaded; Git blobs were fetched directly on Boat. End-to-end controller
+time was not isolated, so worker time is not a PR latency claim.
+
+This qualification is only for the recorded source/base pair. The subsequent
+receipt-documentation commit requires its own fresh exact-head guard before
+merge. The candidate-dispatcher residual trust root described above remains;
+trusted-base `--head` mode is still unimplemented. No proof or full CI/build
+qualification follows from this structural gate.

@@ -1248,3 +1248,24 @@ fetched base, not the candidate. Two new tampering controls require a fresh
 Boat guard. Above numbers belong to the preserved initial transport experiment,
 not final security-control qualification; no independently attested provider
 resource claim is made.
+
+Reviewed schema3 measurement (exact source0ea8b82ba / mainc499e7f5,
+Boatj20261104032138-375442, work1513291):
+
+| Change | Before | After |
+|---|---|---|
+| Required merge/shape execution | Local execution, now prohibited | Boat-only actual merged tree, BASE verifier/driver, closed guard-source matrix |
+| Worker wall / process peak RSS | Not separately measured | 5.60s /25,600KiB |
+| Guard controls | Initial8-control transport prototype | 14 controls0.116s, shape_exit0 |
+| Actual cgroup peak / limit | No isolated local cap | 39,907,328 /536,870,912B, swap0, all events0 |
+| Paid cost | $0 local | 12credit-s/$0.00012, default VM deleted |
+
+[Exact-head receipt and limitations](premerge-boat/README.md#reviewed-schema3-qualification).
+The deliberate guard update returned `passed-reviewed-guard-change`, never
+plain `passed`; the exact-head acknowledgement and controls identities are
+recorded. Independent read-only review covered code and negative controls.
+The candidate dispatcher remains a procedural trust root requiring an
+independent diff of its three source files; trusted-base `--head` mode is not
+implemented. No local tests/merge-tree ran. This is enforcement, not a proof,
+compiler, full CI or two-minute PR qualification. A fresh guard remains
+required for the final receipt-documentation head.
