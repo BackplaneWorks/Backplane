@@ -4,12 +4,12 @@ function harness() {
   const source = fs.readFileSync(require.resolve('../../src/web/plot2d.js'), 'utf8');
   const start = source.indexOf('class View {'), end = source.indexOf('\n}\n', start) + 2;
   const park = source.slice(source.indexOf('function park(v) {'), source.indexOf('\nfunction mountOne('));
-  const handlers = {}, probes = [], navigations = [], hits = [], timers = [], places = [];let rect = { left: 0, top: 0 };let reads = 0, resize, wait = Promise.resolve();
+  const handlers = {}, probes = [], navigations = [], hits = [], timers = [], places = [], frames = [];let rect = { left: 0, top: 0 };let reads = 0, resize, wait = Promise.resolve();
   const canvas = { get clientWidth() { reads++;return 900; }, get clientHeight() { reads++;return 600; }, isConnected: true,
     addEventListener: (name, fn) => { handlers[name] = fn; }, setPointerCapture() {}, focus() {},
     closest: () => ({ querySelector: selector => ({ click: () => navigations.push(selector) }) }),
     getBoundingClientRect: () => rect, classList: { add() {}, remove() {} } };
-  const context = { AbortController, ResizeObserver: class { constructor(fn) { resize = fn; } observe() {} }, requestAnimationFrame() {},
+  const context = { AbortController, ResizeObserver: class { constructor(fn) { resize = fn; } observe() {} }, requestAnimationFrame: (fn) => { frames.push(fn);return frames.length; }, cancelAnimationFrame: (id) => { if (id) frames[id - 1] = null; },
     views: new Map(), left: new Map(), componentSources: new Map(), sheeted: null, need: () => wait,
     hitComponent: () => ({ id: 'U1' }), selectComponent() {},
     probed: value => probes.push(value), under: (_, x, y) => { hits.push([x,y]);return []; }, partAt: () => null,
@@ -23,7 +23,7 @@ function harness() {
   const fire = (name, fields = {}) => handlers[name]({ type: name, pointerType: 'mouse', pointerId: 1, button: 0,
     detail: 1, clientX: 20, clientY: 30, deltaY: 10, deltaX: 0, deltaMode: 0, preventDefault() {}, ...fields });
   const click = detail => { fire('pointerdown');fire('pointerup');fire('click', { detail }); };
-  return { view, probes, timers, places, navigations, hits, fire, click, inspect(fn) { context.componentSources.set(view.key, { data: {}, onSelect: fn }); }, setRect(value) { rect = value; }, park: () => context.park(view), saved: () => context.left.get(view.key), reads: () => reads, resize: (w, h) => resize([{ contentRect: { width: w, height: h } }]),
+  return { view, probes, timers, places, frames, navigations, hits, fire, click, inspect(fn) { context.componentSources.set(view.key, { data: {}, onSelect: fn }); }, setRect(value) { rect = value; }, park: () => context.park(view), saved: () => context.left.get(view.key), reads: () => reads, resize: (w, h) => resize([{ contentRect: { width: w, height: h } }]),
     defer() { let release;wait = new Promise(resolve => { release = resolve; });return release; } };
 }
 
@@ -140,4 +140,28 @@ test('a finger held still asks to comment there once, and is no tap', async () =
   const moved = h.timers.filter(Boolean).at(-1);
   h.fire('pointermove', { pointerType: 'touch', clientX: 60 });
   assert.equal(h.timers.includes(moved), false, 'moving the finger cancels it');
+});
+
+test('a one-finger pan flicked off coasts to a stop, and a finger down stops it', () => {
+  const h = harness();
+  h.view.fit();
+  h.fire('pointerdown', { pointerType: 'touch', timeStamp: 1000, clientX: 100, clientY: 100 });
+  for (let i = 1; i <= 5; i++) h.fire('pointermove', { pointerType: 'touch', timeStamp: 1000 + i * 16, clientX: 100 + i * 20, clientY: 100 });
+  const ox = h.view.ox;
+  h.fire('pointerup', { pointerType: 'touch', timeStamp: 1090, clientX: 200, clientY: 100 });
+  const step = h.frames.filter(Boolean).at(-1);
+  assert(step, 'a flick starts the coast');
+  h.frames.fill(null);
+  step(performance.now() + 16);
+  assert(h.view.ox > ox, 'the view keeps moving the way the finger went');
+  h.fire('pointerdown', { pointerType: 'touch', timeStamp: 1200, clientX: 150, clientY: 100 });
+  const held = h.view.ox;
+  for (const f of h.frames) if (f === step) f(performance.now() + 32);
+  assert.equal(h.view.ox, held, 'a finger down stops it');
+  h.fire('pointerup', { pointerType: 'touch', timeStamp: 1240, clientX: 150, clientY: 100 });
+  h.fire('pointerdown', { pointerType: 'mouse', timeStamp: 2000, clientX: 100, clientY: 100 });
+  for (let i = 1; i <= 5; i++) h.fire('pointermove', { pointerType: 'mouse', timeStamp: 2000 + i * 16, clientX: 100 + i * 20, clientY: 100 });
+  const n = h.frames.filter(Boolean).length;
+  h.fire('pointerup', { pointerType: 'mouse', timeStamp: 2090, clientX: 200, clientY: 100 });
+  assert.equal(h.frames.filter(Boolean).length, n, 'a mouse drag does not coast');
 });
