@@ -111,7 +111,12 @@ export function installPhoneShell({ on, doc = document, win = window, dispatch }
     const kb = vv ? Math.max(0, win.innerHeight - vv.height - vv.offsetTop) : 0;
     html.style.setProperty("--ph-vh", Math.round(h) + "px");
     html.style.setProperty("--ph-kb", Math.round(kb) + "px");
+    // iOS pans the visual viewport instead of resizing it: the page's
+    // fixed shell follows, so the header never slides off the top
+    html.style.setProperty("--ph-top", Math.round(vv ? Math.max(0, vv.offsetTop) : 0) + "px");
     html.classList.toggle("ph-kb", kb > 80);
+    // little height left (landscape with the keyboard up): a compact header
+    html.classList.toggle("ph-short", h < 360);
     // iOS scrolls the page to show a focused field; the page never scrolls
     if (win.scrollY || win.scrollX) win.scrollTo(0, 0);
   };
