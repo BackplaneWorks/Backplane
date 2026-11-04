@@ -1877,6 +1877,27 @@ function fs_rename(from, to) {
   }
 }
 
+function fs_write_atomic(destination, text) {
+  const fs = require("fs"), path = require("path");
+  let stage, fd;
+  try {
+    stage = fs.mkdtempSync(path.join(path.dirname(destination), ".backplane-write-"));
+    const file = path.join(stage, "text");
+    fd = fs.openSync(file, "wx", 0o600);
+    fs.writeFileSync(fd, text, { encoding: "utf8" });
+    fs.closeSync(fd); fd = undefined;
+    // Same filesystem, so readers see either the previous complete file or
+    // this complete file. A failed write/rename preserves the previous cache.
+    fs.renameSync(file, destination);
+    return io_done({ $: "Unit" });
+  } catch (e) {
+    return io_fail(host_errno(e));
+  } finally {
+    if (fd !== undefined) { try { fs.closeSync(fd); } catch (_) {} }
+    if (stage) { try { fs.rmSync(stage, { recursive: true, force: true }); } catch (_) {} }
+  }
+}
+
 function fs_remove(path) {
   try {
     require("fs").rmSync(path);
@@ -2341,6 +2362,7 @@ io_eff(CID(FS.list), fs_list);
 io_eff(CID(FS.mkdirs), fs_mkdirs);
 io_eff(CID(FS.mkdtemp), fs_mkdtemp);
 io_eff(CID(FS.rename), fs_rename);
+io_eff(CID(FS.write_atomic), fs_write_atomic);
 io_eff(CID(FS.remove), fs_remove);
 io_eff(CID(FS.chmod), fs_chmod);
 io_eff(CID(FS.pairing_token), fs_pairing_token);
