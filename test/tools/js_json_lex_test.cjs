@@ -10,11 +10,11 @@ const name=tail=>{const xs=[...defs.keys()].filter(n=>n.endsWith(tail));assert.e
 const lex=name('core$047json$058Json$lex$'),parse=name('core$047json$058Json$parse$');
 const decode=name('core$047utf8$058Utf8$decode$'),feed=name('core$047utf8$058Lines$feed$');
 const encode=name('core$047utf8$058Utf8$encode$'),fold=name('core$047search$045fold$058Fold$text$');
-const needed=new Set(),todo=[parse,'$String$reverse$go$','$String$to_lower$','$String$take$',decode,feed,encode,fold];
+const needed=new Set(),todo=[parse,'$String$reverse$go$','$String$to_lower$','$String$take$','$String$drop$',decode,feed,encode,fold];
 while(todo.length){const n=todo.pop();if(needed.has(n))continue;needed.add(n);for(const m of defs.get(n).matchAll(/[A-Za-z_$][\w$]*/g))if(defs.has(m[0])&&!needed.has(m[0]))todo.push(m[0])}
 const ns=source.match(/\$:\s*"([^"\n]+)\.LIdle"/)[1],ctx=vm.createContext({});
 vm.runInContext([...needed].map(n=>defs.get(n)).join('\n')+'\n'+fs.readFileSync(path.join(root,'scripts/js-json-lex.js'),'utf8')+'\n'+fs.readFileSync(path.join(root,'scripts/js-utf8.js'),'utf8')+'\n'+fs.readFileSync(path.join(root,'scripts/js-text.js'),'utf8')+`
-globalThis.oracleEncode=${encode};globalThis.oracleFold=${fold};globalThis.oracleLower=$String$to_lower$;globalThis.oracleTake=$String$take$;globalThis.nativeEncode=__bpUtf8Encode;globalThis.nativeFold=s=>__bpFoldText(s,oracleFold);globalThis.nativeLower=s=>__bpLower(s,oracleLower);globalThis.nativeTake=__bpTake;
+globalThis.oracleEncode=${encode};globalThis.oracleFold=${fold};globalThis.oracleLower=$String$to_lower$;globalThis.oracleTake=$String$take$;globalThis.oracleDrop=$String$drop$;globalThis.nativeEncode=__bpUtf8Encode;globalThis.nativeFold=s=>__bpFoldText(s,oracleFold);globalThis.nativeLower=s=>__bpLower(s,oracleLower);globalThis.nativeTake=__bpTake;globalThis.nativeDrop=__bpDrop;
 globalThis.oracleDecode=${decode};globalThis.oracleFeed=${feed};globalThis.nativeDecode=__bpUtf8Decode;globalThis.nativeFeed=__bpLinesFeed;
 globalThis.oracleLex=${lex};globalThis.oracleParse=${parse};globalThis.reverse=$String$reverse$go$;
 globalThis.nativeLex=s=>__bpJsonLex(s,oracleLex,${JSON.stringify(ns)});
@@ -56,7 +56,7 @@ test('server-only transform rejects missing, duplicate and changed lexer/reverse
   assert.equal(got.split('return Array.from($0).reverse().join("")+$1').length-1,1);
   assert.equal(got.split('return __bpUtf8Decode(').length-1,1);assert.equal(got.split('return __bpLinesFeed(').length-1,1);
   result=run(original,false);assert.equal(result.status,0,result.stderr);assert(!fs.readFileSync(min,'utf8').includes('__bpJsonLex'));
-  for(const fn of [lex,'$String$reverse$go$',decode,feed,encode,fold,'$String$to_lower$','$String$take$','$Char$to_lower$','$Char$is_upper$']){
+  for(const fn of [lex,'$String$reverse$go$',decode,feed,encode,fold,'$String$to_lower$','$String$take$','$String$drop$','$Char$to_lower$','$Char$is_upper$']){
    const start=original.indexOf('function '+fn+'('),stop=original.indexOf('function ',start+9);assert(start>=0&&stop>start);const body=original.slice(start,stop);
    for(const bad of [original.replace(body,''),original+body,original.replace(body,body.replace('return ','return void '))]){
     result=run(bad);assert.notEqual(result.status,0);assert.equal(fs.readFileSync(min,'utf8'),bad);
@@ -95,7 +95,7 @@ test('search indexing text primitives preserve ASCII-only lowercase, Unicode fol
   assert.deepEqual(outcome(ctx.nativeLower,s),outcome(ctx.oracleLower,s));
   assert.deepEqual(outcome(ctx.nativeFold,s),outcome(ctx.oracleFold,s));
   assert.deepEqual(outcome(s=>array(ctx.nativeEncode(s)),s),outcome(s=>array(ctx.oracleEncode(s)),s));
-  for(const n of [0,1,2,3,7,30,1024,2**53-1])assert.deepEqual(outcome(ctx.nativeTake,s,n),outcome(ctx.oracleTake,s,n));
+  for(const n of [0,1,2,3,7,30,1024,2**53-1]){assert.deepEqual(outcome(ctx.nativeTake,s,n),outcome(ctx.oracleTake,s,n));assert.deepEqual(outcome(ctx.nativeDrop,s,n),outcome(ctx.oracleDrop,s,n))}
  }
  let calls=0;const helper=vm.runInContext('__bpFoldText',ctx),fallback=s=>{calls++;return ctx.oracleFold(s)};
  helper('AbC ~!?',fallback);assert.equal(calls,0);helper('日本語',fallback);assert.equal(calls,1);
@@ -105,6 +105,6 @@ test('search indexing text primitives preserve ASCII-only lowercase, Unicode fol
   assert.deepEqual(outcome(ctx.nativeLower,s),outcome(ctx.oracleLower,s));
   assert.deepEqual(outcome(ctx.nativeFold,s),outcome(ctx.oracleFold,s));
   assert.deepEqual(outcome(s=>array(ctx.nativeEncode(s)),s),outcome(s=>array(ctx.oracleEncode(s)),s));
-  const n=next()%50;assert.deepEqual(outcome(ctx.nativeTake,s,n),outcome(ctx.oracleTake,s,n));
+  const n=next()%50;assert.deepEqual(outcome(ctx.nativeTake,s,n),outcome(ctx.oracleTake,s,n));assert.deepEqual(outcome(ctx.nativeDrop,s,n),outcome(ctx.oracleDrop,s,n));
  }
 });
