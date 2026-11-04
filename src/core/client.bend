@@ -1028,8 +1028,21 @@ def KN.thread.k(shown: Bool, +info: Map<&2, String>, +st: M.State) -> Maybe<&2, 
     case True{}: KN.visible(info, st)
     case False{}: None{}
 
+# A differing worktree design never opens without a deliberate choice. The
+# first action is the default; its request is still resolved afresh by Git.
+def KO.pending(+nf: Map<&2, String>, +th: String) -> Bool:
+  Bool.not(String.is_empty(Str.get(nf, "ko:" ++ th)))
+
+def KO.notice(pending: Bool, +nf: Map<&2, String>, +th: String, other: Maybe<&2, KH.KNote>) -> Maybe<&2, KH.KNote>:
+  match pending:
+    case False{}: other
+    case True{}:
+      +r = Maybe.default(&2, J.Json, J.Json.parse(Str.get(nf, "ko:" ++ th)), J.Null{})
+      Some{KH.KNote{"kicad-copy", "Open in KiCad", "This thread's design differs from main. Open main is the default.\nMain: " ++ J.Json.get_str(r, "main", "") ++ "\nThis thread: " ++ J.Json.get_str(r, "copy", ""),
+        [KH.KAct{"Open main", "kicad-copy-main", th}, KH.KAct{"Open this thread's copy", "kicad-copy-thread", th}, KH.KAct{"Cancel", "kicad-copy-cancel", th}]}}
+
 def KN.thread(+info: Map<&2, String>, +st: M.State, +sel: String) -> Maybe<&2, KH.KNote>:
-  KN.thread.k(String.eq(Str.get(info, "kn:" ++ sel), "1"), info, st)
+  KO.notice(KO.pending(info, sel), info, sel, KN.thread.k(String.eq(Str.get(info, "kn:" ++ sel), "1"), info, st))
 
 def KN.action(+a: String) -> String:
   Bool.pick(String, String.eq(a, "link"), "open-url", a)
@@ -12329,6 +12342,16 @@ def KN.reply.k(has: Bool, +u: Ui, +o: J.Json) -> Ui:
 def KN.reply(+u: Ui, +o: J.Json) -> Ui:
   KN.reply.k(Bool.not(String.is_empty(J.Json.get_str(J.Json.get_obj(o, "result"), "kicad", ""))), u, o)
 
+def KO.reply(+u: Ui, +o: J.Json) -> Ui:
+  +r = J.Json.get_obj(o, "result")
+  Bool.pick(Ui, J.Json.get_bool(r, "kicadCopy", False{}), Ui.info_set(u, "ko:" ++ J.Json.get_str(r, "thread", Ui.sel(u)), J.Json.show(r)), u)
+
+def KO.act(+u: Ui, +action: String, +value: String) -> Act:
+  +th = Bool.pick(String, String.is_empty(value), Ui.sel(u), value)
+  +cleared = Ui.info_set(u, "ko:" ++ th, "")
+  Bool.pick(Act, Bool.or(String.eq(action, "kicad-copy-cancel"), String.eq(action, "menu-close")), Act{cleared, Nil{}},
+    Ui.rpc(cleared, "kicad.open", [J.KV{"thread", J.Str{th}}, J.KV{"copy", J.Str{Bool.pick(String, String.eq(action, "kicad-copy-thread"), "thread", "main")}}]))
+
 def KX.result(+nf: Map<&2, String>, +th: String) -> J.Json:
   Maybe.default(&2, J.Json, J.Json.parse(Str.get(nf, "kx:" ++ th)), J.Null{})
 
@@ -16107,7 +16130,7 @@ def Mailv.reply(+u: Ui, +o: J.Json) -> Ui:
   Mailv.reply.on(Bool.not(String.is_empty(Ui.scratch(u, "@mr.req:" ++ J.Json.as_raw(J.Json.get(o, "id"), "")))), u, o, J.Json.as_raw(J.Json.get(o, "id"), ""))
 
 def Ui.reply.apply(u: Ui, +o: J.Json) -> Ui:
-  Share.reply(KX.reply(KN.reply(Made.reply(o, Bots.reply(o, Proj.reply(o, Btw.reply(Fab.reply(Fab.has(o), Ui.reply.skills(Mailv.reply(u, o), o), o), o)))), o), o), o)
+  Share.reply(KO.reply(KX.reply(KN.reply(Made.reply(o, Bots.reply(o, Proj.reply(o, Btw.reply(Fab.reply(Fab.has(o), Ui.reply.skills(Mailv.reply(u, o), o), o), o)))), o), o), o), o)
 
 def Ui.reply.fresh(stale: Bool, +u: Ui, +o: J.Json) -> Ui:
   match stale:
@@ -16936,13 +16959,18 @@ def Ui.act.kx(kx: Bool, +u: Ui, +action: String, +value: String) -> Act:
     case True{}: KX.act(u, action, value)
     case False{}: Ui.act.share(Share.is(action), u, action, value)
 
+def Ui.act.ko(copy: Bool, +u: Ui, +action: String, +value: String) -> Act:
+  match copy:
+    case True{}: KO.act(u, action, value)
+    case False{}: Ui.act.kx(Bool.or(String.starts_with(action, "kicad-export10"), Bool.and(String.eq(action, "menu-close"), KX.pending(Ui.infos(u), Ui.sel(u)))), u, action, value)
+
 # (design review's "rv-" actions route before the rest: Rv.act)
 def Ui.act.r(rv: Bool, +u: Ui, +action: String, +value: String) -> Act:
   match rv:
     case True{}:
       Rv.act(u, action, value)
     case False{}:
-      Ui.act.kx(Bool.or(String.starts_with(action, "kicad-export10"), Bool.and(String.eq(action, "menu-close"), KX.pending(Ui.infos(u), Ui.sel(u)))), u, action, value)
+      Ui.act.ko(Bool.or(String.starts_with(action, "kicad-copy-"), Bool.and(String.eq(action, "menu-close"), KO.pending(Ui.infos(u), Ui.sel(u)))), u, action, value)
 
 # (Antigravity's "agy-" actions route before the rest too: Agv.act)
 # (the secret box's "secret-" actions: Sbox.act)
