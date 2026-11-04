@@ -15937,3 +15937,15 @@ def Laws.cad_install_visible_action(p):
 
 def Laws.cad_install_monotonic(old, next):
   Nat.max_ge_l(old, next)
+
+def Laws.mcp_subthread_link(c, tail, child, now, cs):
+  {==}
+
+def Laws.mcp_subthread_parent():
+  {==}
+
+def Laws.mcp_subthread_manual_move_wins():
+  {==}
+
+def Laws.mcp_subthread_seed_batch():
+  {==}

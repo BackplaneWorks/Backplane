@@ -569,9 +569,9 @@ def Auto.message.metadata(c: M.Change, +s: M.State) -> List<&2, M.Change>:
 def Auto.messages.metadata.acc(cs: List<&2, M.Change>, +s: M.State, acc: List<&2, M.Change>) -> List<&2, M.Change>:
   match cs:
     case Nil{}: List.reverse(&2, M.Change, acc)
-    case c <> rest:
+    case +c <> rest:
       +one = Auto.message.metadata(c, s)
-      Auto.messages.metadata.acc(rest, M.State.replay(one, s), List.append(&2, M.Change, List.reverse(&2, M.Change, one), acc))
+      Auto.messages.metadata.acc(rest, M.State.replay(one, M.State.apply(s, c)), List.append(&2, M.Change, List.reverse(&2, M.Change, one), acc))
 
 def Auto.messages.metadata(cs: List<&2, M.Change>, +s: M.State) -> List<&2, M.Change>:
   Auto.messages.metadata.acc(cs, s, Nil{})
