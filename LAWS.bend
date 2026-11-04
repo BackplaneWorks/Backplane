@@ -1,3 +1,5 @@
+import ./src/server/wire.bend as WIRE
+
 import ./src/core/json-object.bend as JSONOBJECT
 
 import ./src/server/adopt-plan.bend as ADOPTPLAN
@@ -524,6 +526,10 @@ import ./src/core/snapshot.bend as BOOTSNAP
 import ./src/core/landing.bend as LAND
 
 import ./src/server/cacheio.bend as CACHEIO
+
+import ./src/server/static-http.bend as STATICHTTP
+
+import ./src/server/host.bend as STATICIO
 
 # Backplane's rules, stated over the real code. `bend PROOF.bend` proves each
 # one. Humans own this file: an agent may add laws, never weaken or delete
@@ -11484,12 +11490,12 @@ law cef_native_link_allowed:
 law mail_credit_carried:
   for text: String
   for charge: Nat
-  {MPCREDIT.Wire.charged(False{}, MPCREDIT.WText{text}, charge) == MPCREDIT.WCharged{text, charge} : MPCREDIT.Wire}
+  {WIRE.Wire.charged(False{}, WIRE.WText{text}, charge) == WIRE.WCharged{text, charge} : WIRE.Wire}
 
 law mail_credit_native_kept:
-  for w: MPCREDIT.Wire
+  for w: WIRE.Wire
   for charge: Nat
-  {MPCREDIT.Wire.charged(True{}, w, charge) == w : MPCREDIT.Wire}
+  {WIRE.Wire.charged(True{}, w, charge) == w : WIRE.Wire}
 # ---- i18n web phone ----
 law webphone_option_english:
   {WPH.VLabel.option(I18.En{}, "ui.theme", "dark") == "dark" : String}
@@ -16029,6 +16035,29 @@ law adopt_live_entries_kept:
   for +handoff: String
   {ADOPTPLAN.Adopt.copy.entries(False{}, record, handoff) == AD.Adopt.entries(record, handoff) : List<&2, AD.AEntry>}
 
+# Credit policy follows the original offer, independently of encoding.
+law mail_credit_recharged:
+  for +text: String
+  for old: Nat
+  for +charge: Nat
+  {WIRE.Wire.charged(False{}, WIRE.WCharged{text, old}, charge) == WIRE.WCharged{text, charge} : WIRE.Wire}
+
+law mail_json_credit_recharged:
+  for +json: J.Json
+  for old: Nat
+  for +charge: Nat
+  {WIRE.Wire.charged(False{}, WIRE.WJson{json, old}, charge) == WIRE.WJson{json, charge} : WIRE.Wire}
+
+law mail_terminal_credit_recharged:
+  for +json: J.Json
+  for old: Nat
+  for +charge: Nat
+  {WIRE.Wire.charged(False{}, WIRE.WTerminal{json, old}, charge) == WIRE.WTerminal{json, charge} : WIRE.Wire}
+
+law mail_wire_text_charge:
+  for +text: String
+  {WIRE.Wire.text.charge(text) == String.length(text) : Nat}
+
 # Typed effect slots and budgets. Foreign-code boundary tests separately
 # establish LRU, expiry, accounting and cleanup; these laws fix the policy
 # that Bend supplies rather than assuming an implementation of the effect.
@@ -16040,3 +16069,25 @@ law cache_effect_budget:
 
 law cache_effect_global_budget:
   {CACHEIO.Cache.global_bytes() == 8388608 : U32}
+
+# Static HTTP policy stays in Bend while the host streams the bytes.
+law static_effect_coding:
+  {[STATICIO.Static.coding(False{}), STATICIO.Static.coding(True{})] == [0, 1] : List<&2, U32>}
+
+law static_effect_piece:
+  {STATICIO.Static.piece() == 65536 : U32}
+
+law static_http_paths:
+  {[STATICHTTP.Static.safe("/assets/main.js"), STATICHTTP.Static.safe("/../private"), STATICHTTP.Static.safe("relative.js")] == [True{}, False{}, False{}] : List<&2, Bool>}
+
+law static_http_landing_aliases:
+  {[STATICHTTP.Static.file("/"), STATICHTTP.Static.file("/pair"), STATICHTTP.Static.file("/devices")] == ["/index.html", "/index.html", "/index.html"] : List<&2, String>}
+
+law static_http_cached_chunks:
+  {STATICHTTP.Static.cache("/chunk-deadbeef.js") == "public, max-age=31536000, immutable" : String}
+
+law static_http_fresh_pages:
+  {[STATICHTTP.Static.cache("/index.html"), STATICHTTP.Static.cache("/sw.js")] == ["no-cache", "no-cache"] : List<&2, String>}
+
+law static_http_frame_policy:
+  {[STATICHTTP.Static.frames("/index.html"), STATICHTTP.Static.frames("/main.js")] == ["X-Frame-Options: DENY\r\nContent-Security-Policy: frame-ancestors 'none'\r\n", ""] : List<&2, String>}
