@@ -2649,7 +2649,7 @@ def WtJob.run(+inbox: Chan(Msg), +thread: String, +root: String, +mode: String, 
   Bool.pick(IO(Unit), String.eq(mode, "again"),
     IO.bind(String, Unit, GT.Git.thread_wt.again(root, branch), r => WtJob.again.k(r, inbox, thread, branch, provider, binding)),
     Bool.pick(IO(Unit), String.eq(mode, "fork"), WtJob.fork(inbox, thread, root, branch, provider, binding),
-      IO.bind(K.Files, Unit, K.Files.read(root), fs => WtJob.fresh(PJK.Pk.stay(K.Files.hardware(fs), mode), inbox, thread, root, mode, provider, binding))))
+      IO.bind(K.Files, Unit, K.Files.read.local(root), fs => WtJob.fresh(PJK.Pk.stay(K.Files.hardware(fs), mode), inbox, thread, root, mode, provider, binding))))
 
 # Removing a thread's worktree (M.Worktree.drop): its state is kept first as
 # a checkpoint (a hidden ref, so nothing is lost; the branch stays too),
@@ -3151,7 +3151,7 @@ def Ticker.loop(fuel: Nat, +inbox: Chan(Msg)) -> IO(Unit):
 
 def KiCadJob.project(fs: K.Files) -> String:
   match fs:
-    case K.Files{pro, _, _, _}: pro
+    case K.Files{pro, _, _, _, _}: pro
 
 def KiCadJob.open(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +rt: K.Rt, fs: K.Files) -> IO(Unit):
   do IO<Unit>:
@@ -3348,7 +3348,7 @@ def ProjectHomeJob.outside.k(hw: Bool, +r: J.Json, +cwd: String) -> IO(J.Json):
 # a page's snapshot only: a document read has no panels
 def ProjectHomeJob.outside(+op: String, +r: J.Json, +cwd: String) -> IO(J.Json):
   Bool.pick(IO(J.Json), String.eq(op, "document"), IO.pure(J.Json, r),
-    IO.bind(K.Files, J.Json, K.Files.read(cwd), fs => ProjectHomeJob.outside.k(K.Files.hardware(fs), r, cwd)))
+    IO.bind(K.Files, J.Json, K.Files.read.local(cwd), fs => ProjectHomeJob.outside.k(K.Files.hardware(fs), r, cwd)))
 
 def ProjectHomeJob.finish(price: Bool, +r: J.Json, +inbox: Chan(Msg), +client: U32, +id: String, +home: String, +cwd: String, +opts: String) -> IO(Unit):
   match price:
@@ -3927,12 +3927,14 @@ def Hub.hardware.rows(hw: Bool, +root: String, +cwd: String) -> IO(String):
     case True{}:
       IO.bind(String, String, GT.Git.outside(root), out => IO.pure(String, PJK.Pk.prompt(String.eq(root, cwd), root, cwd, PJK.Pk.rows(out))))
 
-# a hardware project's rules for a turn (Pk.prompt), read from the
-# thread's own folder, so a thread that made the first board in a worktree
-# hears them on its next turn
+# a hardware project's rules for an agent start (Pk.prompt): the thread's own
+# folder or the project's says so, each read as itself (Files.read.local), so
+# a thread that made the first board in a worktree is seen.
+# A provider with a process per turn hears it next turn; Claude keeps its
+# process, so hears it when that next starts.
 def Hub.hardware.prompt(+root: String, +cwd: String) -> IO(String):
   Bool.pick(IO(String), String.is_empty(root), IO.pure(String, ""),
-    IO.bind(K.Files, String, K.Files.read(cwd), fs => Hub.hardware.rows(K.Files.hardware(fs), root, cwd)))
+    IO.bind(K.Files, String, K.Files.read.local(cwd), l => IO.bind(K.Files, String, K.Files.read.local(root), m => Hub.hardware.rows(Bool.or(K.Files.hardware(l), K.Files.hardware(m)), root, cwd))))
 
 def Hub.turn.blocks(+a: String, +b: String) -> String:
   Bool.pick(String, Bool.or(String.is_empty(a), String.is_empty(b)), a ++ b, a ++ "\n\n" ++ b)
