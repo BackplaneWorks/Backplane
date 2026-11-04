@@ -338,6 +338,9 @@ type Msg is Data:
   # asks in the thread (Hub.checks.ask)
   ChecksAsk{thread: String, hash: String, text: String}
   MachinesFound{machines: String}
+  # time to ask the machines this hub should pair with (Machines.loop:
+  # right after each machines list and once between two)
+  PairDue{}
   # the tailnet listener is up: the pairing link clients show in Settings
   LinkFound{link: String}
   # a Codex or Grok turn's process started: the one the hub now hears (and
@@ -6164,6 +6167,22 @@ def Machines.tell(+inbox: Chan(Msg), +now: String, +last: String) -> IO(String):
   Bool.pick(IO(String), String.eq(now, last), IO.pure(String, last),
     IO.bind(Result<&1, &1, Msg, Unit>, String, Chan.send(Msg, inbox, MachinesFound{now}), ok => IO.pure(String, now)))
 
+# Pairing (Hub.pair) is asked for only here, in this one sequential loop:
+# right after each machines list (MachinesFound is posted first, so the
+# hub has the list when it asks) and again half a period later. Two asks
+# are always Machines.half() (60 s) apart, as the minute tick's were, so an
+# ask and its link (15 s each at most) never overlap the next, however
+# late the first list comes; and the first ask no longer waits for a
+# minute tick that ran before any list was found (two hubs paired 60.5 s
+# after start with the list ready at 0.58 s: lane B's far_latency).
+def Machines.half() -> U32:
+  60000
+
+def Machines.pair(+inbox: Chan(Msg)) -> IO(Unit):
+  do IO<Unit>:
+    ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, PairDue{})
+    return Unit{}
+
 # `tailscale status --json`, only on the tailnet: a hub started with
 # --no-tailscale never runs Tailscale for its machines list
 def Machines.status(on: Bool) -> IO(String):
@@ -6182,7 +6201,10 @@ def Machines.loop(fuel: Nat, +inbox: Chan(Msg), +on: Bool, +port: U32, +extra: S
         +st : String <- Machines.status(on)
         found : String <- Machines.ask(on, st, port, extra)
         now : String <- Machines.tell(inbox, found, last)
-        IO.sleep(Machines.every())
+        Machines.pair(inbox)
+        IO.sleep(Machines.half())
+        Machines.pair(inbox)
+        IO.sleep(Machines.half())
         Machines.loop(f, inbox, on, port, extra, now)
 
 def Machines.start(+inbox: Chan(Msg), +cfg: Cfg) -> IO(Unit):
@@ -15139,11 +15161,12 @@ def Hub.dir.refresh(h: Hub, +peer: String) -> IO(Hub):
           J.Json.elems(Maybe.default(&2, J.Json, J.Json.parse(BN.Bn.dir(Cfg.bn(cfg))), J.Null{})), ps))))
         Hub.dir.queue(h2, BH.Dir.request(ps, peer))
 
-# Pairing the owner's machines (UC.Mate.*): each minute, every machine
-# of the owner's this hub should link to and is not linked to yet is
-# asked for an invite (POST /bots/pair), and the invite it answers is
-# joined like a pasted one. Only the minute asks, so two asks never
-# overlap (the ask and the link take at most 15 s each).
+# Pairing the owner's machines (UC.Mate.*): each minute (PairDue, from
+# Machines.loop only), every machine of the owner's this hub should link
+# to and is not linked to yet is asked for an invite (POST /bots/pair),
+# and the invite it answers is joined like a pasted one. Only that loop
+# asks, a minute apart, so two asks never overlap (the ask and the link
+# take at most 15 s each).
 # (own: the machine was asked over the tailnet, where Tailscale says whose
 # it is; one named in BACKPLANE_PEERS answered at a plain address, so its
 # link waits for the owner's word: UC.Far.unsure)
@@ -15533,8 +15556,7 @@ def Hub.bot_tick(h: Hub, +tz: String, +now: Nat) -> IO(Hub):
     case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
       do IO<Hub>:
         h2 : Hub <- Hub.dir.refresh(Hub{st, f, ls, cl, as, inbox, cfg, note}, "")
-        h3 : Hub <- Hub.pair(h2)
-        h4s : Hub <- Hub.step(h3, BH.Bots.tick(st, now, BH.Tz{M.Snooze.tz.secs(tz), M.Snooze.tz.east(tz)}))
+        h4s : Hub <- Hub.step(h2, BH.Bots.tick(st, now, BH.Tz{M.Snooze.tz.secs(tz), M.Snooze.tz.east(tz)}))
         +every : String <- Env.get("BACKPLANE_WAKE_TICK_MS", "60000")
         h4 : Hub <- Hub.bot_wake(h4s, tz, Nat.add(now, Nat.div(U32.to_nat(WK.Wake.tick.ms(every)), 1000n)), now)
         h5 : Hub <- Hub.zone.tick(h4, now)
@@ -15548,32 +15570,16 @@ def Bot.dir.machines(n: Net) -> String:
     case Net{_, _, _, _, _, _, _, _, _, mc, _, _, _, _, _, _}:
       mc
 
-# The hub's first machines list (Machines.loop, a moment after start) asks
-# the machines it should pair with at once: the minute's first tick ran
-# before any list was found, so its ask had nothing to ask and pairing
-# waited a whole minute (60.5 s for two hubs, lane B's far_latency). The
-# list comes at most about 13 s after start (tailscale status, 10 s, then
-# /hello, 3 s), so this ask and the link (15 s each at most) never overlap
-# the next minute's: still one ask at a time.
-def Hub.pair.first(first: Bool, h: Hub) -> IO(Hub):
-  match first:
-    case True{}:
-      Hub.pair(h)
-    case False{}:
-      IO.pure(Hub, h)
-
 def Hub.dir.returned(h: Hub, +mc: String) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       do IO<Hub>:
-        +first : Bool = String.is_empty(Bot.dir.machines(Cfg.net(cfg)))
         h2 : Hub <- Hub.machines(Hub{st, f, ls, cl, as, inbox, cfg, note}, mc)
         +returned : List<&2, BO.Peer> = BH.Dir.returned(BO.World.peers(M.State.bots(st)),
           J.Json.elems(J.Json.get_obj(Maybe.default(&2, J.Json, J.Json.parse(Bot.dir.machines(Cfg.net(cfg))), J.Null{}), "peers")),
           J.Json.elems(J.Json.get_obj(Maybe.default(&2, J.Json, J.Json.parse(mc), J.Null{}), "peers")))
         h3 : Hub <- Hub.dir.queue(h2, returned)
-        h4 : Hub <- Far.returned(h3, returned)
-        Hub.pair.first(first, h4)
+        Far.returned(h3, returned)
 
 def Bot.dir.awake(refresh: Bool, +inbox: Chan(Msg), +peer: String) -> IO(Unit):
   match refresh:
@@ -18621,6 +18627,8 @@ def Msg.kind(m: Msg) -> String:
       "checks_ask"
     case MachinesFound{_}:
       "machines"
+    case PairDue{}:
+      "pair_due"
     case LinkFound{_}:
       "link"
     case TurnPid{_, _, _, _}:
@@ -20010,6 +20018,8 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
       Hub.checks.ask(h, thread, hash, text, now)
     case MachinesFound{mc}:
       Hub.dir.returned(h, mc)
+    case PairDue{}:
+      Hub.pair(h)
     case LinkFound{lk}:
       Hub.link(h, lk)
     case MailRecovered{changes}: Hub.mail.recovered(h, changes, now)
