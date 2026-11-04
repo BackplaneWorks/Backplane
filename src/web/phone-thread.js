@@ -60,6 +60,15 @@ export function installPhoneThread({ document: doc = document, window: win = win
     if (t) { seen = new RO(resized); seen.observe(t); }
   };
   const moved = () => { finger = Date.now(); };
+  // (a tap anywhere but the composer, a reply's "Replying to" going to its
+  // message say, is the person's own move: the end is no longer held)
+  // message say, is the person's own move: the end is no longer held; a
+  // touch in the composer, before its keyboard comes up, asks afresh)
+  doc.addEventListener('touchstart', event => {
+    if (!onPhone(doc)) return;
+    watch();
+    end = !!el && !!event.target?.closest?.('.composer') && atEnd(el);
+  }, { capture: true, passive: true });
   for (const type of ['touchstart', 'pointerdown', 'focusin']) doc.addEventListener(type, () => { if (onPhone(doc)) watch(); }, { capture: true, passive: true });
   for (const type of ['touchmove', 'wheel']) doc.addEventListener(type, moved, { capture: true, passive: true });
   doc.addEventListener('scroll', event => {

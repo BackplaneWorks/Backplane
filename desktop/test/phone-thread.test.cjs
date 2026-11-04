@@ -12,9 +12,10 @@ const page = (phone, mic = true) => {
     addEventListener: (type, f) => { (on[type] ||= []).push(f); },
   };
   class RO { constructor(f) { this.f = f; observers.push(this); } observe(t) { this.t = t; } disconnect() { this.t = null; } }
+  const inComposer = { closest: s => s === '.composer' ? {} : null };
   const fire = (type, target = timeline) => (on[type] || []).forEach(f => f({ target }));
   const resize = h => { timeline.clientHeight = h; for (const o of observers) if (o.t) o.f([{ target: o.t }]); };
-  return { doc, win: { ResizeObserver: RO, navigator: { mediaDevices: mic ? { getUserMedia() {} } : undefined } }, timeline, fire, resize, classes };
+  return { inComposer, doc, win: { ResizeObserver: RO, navigator: { mediaDevices: mic ? { getUserMedia() {} } : undefined } }, timeline, fire, resize, classes };
 };
 
 test('Return in the draft is a new line on a phone only, Send still sends', async () => {
@@ -33,9 +34,14 @@ test('the keyboard keeps the end in view on a phone, and the bottom edge elsewhe
   // no finger made (a view reply) is put back at the end
   const p = page(true);
   installPhoneThread({ document: p.doc, window: p.win });
-  p.timeline.scrollTop = 1500; p.fire('touchstart'); p.doc.activeElement = { id: 'composer' };
+  p.timeline.scrollTop = 1470; p.fire('touchstart', p.inComposer); p.doc.activeElement = { id: 'composer' };
   p.resize(160); assert.equal(p.timeline.scrollTop, 1840);
   p.fire('scroll'); p.timeline.scrollTop = 1500; p.fire('scroll'); assert.equal(p.timeline.scrollTop, 1840);
+  // a tap elsewhere (a link going to an earlier message) lets it go
+  const q = page(true);
+  installPhoneThread({ document: q.doc, window: q.win });
+  q.timeline.scrollTop = 1500; q.fire('touchstart', q.inComposer); q.doc.activeElement = { id: 'composer' }; q.resize(160);
+  q.fire('touchstart', { closest: () => null }); q.timeline.scrollTop = 900; q.fire('scroll'); assert.equal(q.timeline.scrollTop, 900);
   // a finger's drag reads back, and that is kept
   p.fire('touchmove'); p.timeline.scrollTop = 1200; p.fire('scroll'); assert.equal(p.timeline.scrollTop, 1200);
   // reading back, the keyboard going moves the top by the height
@@ -43,7 +49,7 @@ test('the keyboard keeps the end in view on a phone, and the bottom edge elsewhe
   // not a phone: nothing moves
   const d = page(false);
   installPhoneThread({ document: d.doc, window: d.win });
-  d.timeline.scrollTop = 1500; d.fire('touchstart'); d.resize(160); assert.equal(d.timeline.scrollTop, 1500);
+  d.timeline.scrollTop = 1500; d.fire('touchstart', d.inComposer); d.resize(160); assert.equal(d.timeline.scrollTop, 1500);
 });
 
 test('a page that cannot record says so (the composer hides its mic on a phone)', async () => {
