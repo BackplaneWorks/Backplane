@@ -3049,6 +3049,11 @@ html.phone section.improvements :is(input, select, textarea) { font-size: 16px; 
 /* an agent's question or approval: the question, then its answers as
    big full-width buttons */
 .app.phone .asks { padding: 0 8px; gap: 6px; max-height: 40%; overflow-y: auto; overscroll-behavior: contain; flex: none; }
+/* a question or an approval is what the thread waits on: with no dock
+   open and the keyboard down it may take 60% (on an iPhone SE, 40% cut a
+   two-choice question's Dismiss under the composer; typing, 60% left the
+   timeline nothing) */
+.app.phone .thread-content:not(:has(> :is(.subs, .todos).dock:not(.shut), #composer:focus)) > .asks { max-height: 60%; }
 .app.phone .ask { padding: 10px 12px; gap: 8px; }
 .app.phone .ask-detail { font-size: calc(14px * var(--text-scale, 100) / 100); max-height: 30vh; }
 .app.phone .ask-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
