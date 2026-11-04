@@ -147,7 +147,7 @@ fun ChoiceRow(choices: List<Choice>, picked: String, modifier: Modifier = Modifi
         SingleChoiceSegmentedButtonRow {
             choices.forEachIndexed { i, c ->
                 SegmentedButton(selected = c.value == picked, onClick = { pick(c.value) },
-                    shape = SegmentedButtonDefaults.itemShape(i, choices.size), icon = {},
+                    shape = SegmentedButtonDefaults.itemShape(i, choices.size, flat), icon = {},
                     colors = SegmentedButtonDefaults.colors(activeContainerColor = MaterialTheme.colorScheme.primary,
                         activeContentColor = MaterialTheme.colorScheme.onPrimary,
                         inactiveContainerColor = MaterialTheme.colorScheme.surface,
