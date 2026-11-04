@@ -1,6 +1,7 @@
 import Base
 import ./locks.bend as LK
 import ./model.bend as M
+import ./subthreads.bend as ST
 import ./signal.bend as SG
 import ./fold.bend as FO
 import ./client.bend as U
@@ -876,15 +877,26 @@ def Subs.agent_n(ls: List<&2, String>) -> Nat:
     case +l <> t:
       Nat.add(Bool.pick(Nat, String.eq(M.Bg.kind.of(l), "subagent"), 1n, 0n), Subs.agent_n(t))
 
+# Visible conversations count even when they have no delegated task.
+# Existing task counts stay separate; never count one child twice.
+def Subs.tree.extra.go(ts: List<&2, M.Thread>, +tasks: Map<&2, Bool>) -> Nat:
+  match ts:
+    case Nil{}: 0n
+    case +t <> rest:
+      Nat.add(Bool.pick(Nat, U.Flag.get(tasks, M.Thread.id(t)), 0n, 1n), Subs.tree.extra.go(rest, tasks))
+
+def Subs.tree.extra(+st: M.State, +th: String) -> Nat:
+  Subs.tree.extra.go(ST.Tree.children(st, th), U.Kids.of(U.Tasks.of(st, th), M.State.bots(st), Map.new(&2, Bool)))
+
 # how many subagents a thread has at work (its sidebar row's count): what
 # it delegated that is not finished, and the agent's own (its shells and
 # monitors are not agents)
 def Subs.count(+st: M.State, +th: String) -> Nat:
-  Nat.add(U.Side.live(U.Tasks.of(st, th)), Subs.agent_n(M.Bg.of(st, th)))
+  Nat.add(Subs.tree.extra(st, th), Nat.add(U.Side.live(U.Tasks.of(st, th)), Subs.agent_n(M.Bg.of(st, th))))
 
 # Subs.count from the sidebar's index (law subs_count_ix_eq)
 def Subs.count.ix(+ix: U.SIx, +st: M.State, +th: String) -> Nat:
-  Nat.add(U.SIx.kids(ix, th), Subs.agent_n(M.Bg.of(st, th)))
+  Nat.add(Subs.tree.extra(st, th), Nat.add(U.SIx.kids(ix, th), Subs.agent_n(M.Bg.of(st, th))))
 
 def Subs.counts(ts: List<&2, M.Thread>, +st: M.State) -> List<&2, Nat>:
   match ts:
