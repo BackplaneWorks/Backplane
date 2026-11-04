@@ -51,7 +51,7 @@ gate laws each reach 3 declarations. The largest law in the whole program
 remains 5,500 declarations. Main.boot's semantic declaration closure remains
 25,401: this first leaf extraction does not solve the whole server.
 
-Fresh normal Boat job `j20261104013154-1092717`, work `1491719`, used stock
+Fresh normal Boat job `j20261104013608-1126602`, work `1492737`, used stock
 Bend 2.0.36, SHA256 `02089dc0eed0fd5fd6d73c74cc9cffcb2c6638dd3b02ae83f7b8cc57fbe381ba`.
 It generated the **complete canonical** 3,167-law / 128-shard partition and
 executed the two real shards containing these six application laws. No slicer,
@@ -59,8 +59,8 @@ template laws, substituted implementation or cached pass was used.
 
 | Canonical shard | All laws in shard | Worker time | Peak RSS | Cgroup peak |
 |---|---:|---:|---:|---:|
-| 098 | 18 | 0.298 s | 180,176 KiB | 165,904,384 B |
-| 124 | 25 | 0.202 s | 146,728 KiB | 131,624,960 B |
+| 098 | 18 | 0.473 s | 171,836 KiB | 157,413,376 B |
+| 124 | 25 | 0.230 s | 151,308 KiB | 136,511,488 B |
 
 Both pass the unchanged `bendok` verdict: native exit 1 with only unrelated
 foreign font/window definitions listed, no failing typed proof. The raw output
@@ -70,9 +70,9 @@ worktree. `RESULT.json` and `BOAT.json` bind the partition, tools and launcher.
 
 The merged #854 native guard held the actual Bend flock in each worker's own
 3,699,998,720-byte/no-swap scope. The separate controller scope was capped at
-536,870,912 bytes, swap 0, peak 69,324,800 bytes, zero OOM/max events. Sum of
+536,870,912 bytes, swap 0, peak 69,402,624 bytes, zero OOM/max events. Sum of
 configured caps is 4,236,870,912 bytes (<4 GiB). Swap-in/out stayed zero for both
-workers. The sandbox was deleted and verified gone; cost 56 credit-s/$0.00056.
+workers. The sandbox was deleted and verified gone; cost 26 credit-s/$0.00026.
 
 The fresh before run in `../BEFORE-BOAT.json` failed with SIGKILL at the cap on
 canonical shard000, which included the original watcher laws. The before and
@@ -85,3 +85,9 @@ being relabeled as this stock-compiler application-law result.
 Only two of 128 canonical shards ran here. Full proof join, runtime build and
 full application tests remain unqualified. No merged gate, proof verdict,
 foreign-code policy or source-coverage requirement has been changed.
+
+Historical first pass before the EOF-only formatting correction is preserved in
+`INITIAL-AFTER.json`. An intervening explicit transport missed laws-shape.py and
+failed before partition generation or any proof worker (`SETUP-FAILURE.json`);
+adding that existing helper fixed transport without changing source or caps.
+The table and current receipts above apply to the corrected source bytes.

@@ -39,4 +39,3 @@ def Watch.stop.argv(copy: Bool, +kind: String, +target: String, +ident: String, 
 
 def Watch.intent.argv(copy: Bool, +home: String, +id: String) -> List<&2, String>:
   Watch.argv.k(copy, ["-c", "mkdir -p \"$1\" && : > \"$1/intent\"", "sh", Watch.dir(home, id)])
-

@@ -28,5 +28,7 @@
   ],
   "largest_law_closure_before": 5500,
   "largest_law_closure_after": 5500,
-  "global_memory_budget_qualified": false
+  "global_memory_budget_qualified": false,
+  "exact_source_files_verified_against_corrected_boat": 452,
+  "corrected_partition_sha256": "45a3a3850386577a8c3dbf10b1f83a54cb4f04d4462d950601660593165b4717"
 }
