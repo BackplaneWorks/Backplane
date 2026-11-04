@@ -3031,3 +3031,61 @@ html.phone .mailroom .mail-row { min-height: 56px; }
 .app.phone .project-home > .home-header button { min-height: 44px; min-width: 44px; }
 .app.phone .project-home .home-details { font-size: max(1em, 13px); }
 .app.phone .project-home .home-details * { font-size: max(1em, 12px); }
+
+/* phone: viewers (C) — the viewer screen of the phone arrangement */
+/* the phone header holds ‹ back and the views, so the pane's own tabs go */
+.app.phone.ph-viewer #viewer > .viewer-tabs { display: none; }
+.app.phone #viewer { touch-action: manipulation; overscroll-behavior: contain; }
+/* each toolbar is one row that scrolls sideways, every control a thumb's size;
+   their menus open as sheets (position: fixed, so the row's overflow keeps none) */
+.app.phone :is(.viewer-bar, .solid-toolbar, .hist-row) { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scrollbar-width: none; }
+.app.phone :is(.viewer-bar, .solid-toolbar, .hist-row)::-webkit-scrollbar { display: none; }
+.app.phone :is(.viewer-bar, .solid-toolbar, .solid-orientation) > * { flex: none; }
+.app.phone .viewer-bar { gap: 6px; padding: 6px 8px; }
+.app.phone .viewer-bar > .board-selector { flex: 0 1 auto; min-width: 0; max-width: 46vw; }
+.app.phone :is(.viewer-bar, .solid-toolbar, .hist-row) :is(button, summary, select, .btn) { min-height: var(--ph-tap, 44px); min-width: var(--ph-tap, 44px); }
+.app.phone .viewer-bar .sch-btn, .app.phone .viewer-bar > button { padding: 0 12px; }
+.app.phone .solid-toolbar { gap: 6px; padding: 6px 8px; }
+.app.phone .solid-orientation { flex-wrap: nowrap; gap: 6px; }
+.app.phone .solid-toolbar .solid-model-name { display: none; }
+.app.phone .solid-camera-body { position: fixed; left: 0; right: 0; top: auto; bottom: 0; width: auto; max-width: none; max-height: 70dvh; padding-bottom: calc(12px + env(safe-area-inset-bottom)); border-width: 1px 0 0; z-index: 60; }
+.app.phone .solid-camera-body :is(select, input, button) { min-height: var(--ph-tap, 44px); font-size: 16px; }
+/* what a tap picked: the chip and its clear button big enough to hit */
+.app.phone .viewer-stage > .probe-chip { min-height: var(--ph-tap, 44px); }
+.app.phone .probe-chip .probe-name { padding: 0 6px 0 12px; max-width: 70vw; }
+.app.phone .probe-chip .probe-clear { min-width: var(--ph-tap, 44px); }
+/* a part's details (the 3D inspector) rise from the bottom over the model */
+.app.phone .solid-inspector:not(:empty):not([hidden]) { position: absolute; left: 0; right: 0; bottom: 0; z-index: 8; width: auto; max-width: none; max-height: 50%; border: 0; border-top: 1px solid var(--line); box-shadow: 0 -8px 24px rgb(0 0 0 / .35); padding: 12px; }
+.app.phone .solid-inspector :is(button, select) { min-height: var(--ph-tap, 44px); }
+/* the design history: one row (transport, version, the rest by scrolling) and the scrub */
+.app.phone .hist { padding: 2px 8px 4px; gap: 2px; }
+.app.phone .hist-row { gap: 2px; }
+.app.phone .hist-row > * { flex: none; }
+.app.phone .hist-row .title { overflow: visible; }
+.app.phone .hist-row .icon { width: var(--ph-tap, 44px); height: var(--ph-tap, 44px); }
+.app.phone .hist-row .grow { display: none; }
+.app.phone .hbtn { max-width: none; }
+.app.phone .hist-scrub { height: 28px; }
+.app.phone .hist-scrub .tick { top: 0; height: 28px; width: 20px; }
+.app.phone .hist-scrub .tick::after { top: 8px; }
+.app.phone .hist-scrub .tick.on::after { top: 6px; }
+.app.phone .hist-said { display: none; }
+.app.phone .hist-menu { position: fixed; left: 0; right: 0; bottom: 0; width: auto; max-height: 70dvh; z-index: 60; padding-bottom: env(safe-area-inset-bottom); }
+.app.phone .hist-menu .row { min-height: var(--ph-tap, 44px); align-items: center; }
+/* files: whole rows to tap */
+.app.phone .fm-row { min-height: var(--ph-tap, 44px); }
+.app.phone .fm-bar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+.app.phone .fm-bar :is(.crumb, button, .btn) { min-height: var(--ph-tap, 44px); flex: none; }
+/* diff: one column, long lines wrap inside the pane */
+.app.phone .diff-head { padding: 8px; }
+.app.phone .diff-btns button { min-height: var(--ph-tap, 44px); }
+.app.phone .dl { white-space: pre-wrap; overflow-wrap: anywhere; }
+.app.phone .dl .no { display: none; }
+.app.phone .dhead { padding: 8px; }
+/* review: the BOM and the other tables scroll sideways in the pane; cells
+   keep their words whole, references wrap in a column of their own */
+.app.phone .review-body { padding: 8px; }
+.app.phone .review-body.body table { display: block; overflow-x: auto; max-width: 100%; }
+.app.phone .review-body.body :is(td, th) { white-space: nowrap; overflow-wrap: normal; padding: 6px 8px; }
+.app.phone .review-body.rp-bom td:first-child { white-space: normal; min-width: 11em; max-width: 15em; }
+.app.phone .review-body.rp-bom th:first-child { width: auto; }
