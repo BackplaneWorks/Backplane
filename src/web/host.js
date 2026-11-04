@@ -3623,6 +3623,10 @@ async function startThin(again = false, reason = "initial") {
       blocked: () => showViewStatus("Wait for the current conversation to connect."),
       viewerChoice: choice => viewerFeedback.choice(choice),
       warning: message => showViewStatus(message),
+      // a Send the dropped link never took is back in the field: "Not sent"
+      // now, and once connected again that it is still there to send
+      // (the words a Send pressed while offline gets)
+      sendLost: () => { if (remoteReady) return; offlineSend = true; showViewStatus(App.host_message(ui, "offline-send")); },
       pageState: historyPageState,
       letGo: historyLetGo,
       refused: refusedView,
