@@ -174,7 +174,7 @@ performance conclusion. No API/model calls in load tests.
 | CPU | Delta process-tree user+system CPU / monotonic wall over equal idle and load intervals; report in core-percent (100% = one core). |
 | Input | Sidebar click, thread switch, popup open and typing. Timestamp injected event → next frame that shows expected state; median/p95 over at least 30 events, idle and load. Processing time is labeled separately from input-to-pixels. |
 | Size | Stripped binary bytes, compressed download, installed runtime closure including assets/libraries/helpers. Do not compare GPUI client alone with Electron + hub. |
-| Build | Boat only, clean dependency/cold build and warm incremental build separately, elapsed time, peak RSS, cap, compiler and cache state. Artifact retrieval excluded. |
+| Build | Mac or Boat, clean dependency/cold build and warm incremental build separately, elapsed time, peak RSS, cap, compiler and cache state. Artifact retrieval excluded. |
 
 20-agent validity: all 20 stand-ins must actually stream decoded deltas,
 each at least 1/s, longest gap ≤2 s; equal duration, rates and conversation
@@ -186,8 +186,8 @@ Report unmeasured metrics as unmeasured; never infer latency from FPS.
 
 ## Isolation, build and phone access
 
-All heavy compiles run on Boat, **8 GiB max for big jobs, 3.7 GiB otherwise,
-swap max 0**. Compile serially (`CARGO_BUILD_JOBS=1`), strip debug info,
+Heavy compiles run on `hs-mac-mini` or on Boat, never on the desktop. On Boat:
+**8 GiB max for big jobs, 3.7 GiB otherwise, swap max 0**. Compile serially (`CARGO_BUILD_JOBS=1`), strip debug info,
 avoid LTO initially. Verify the cgroup limits before compiling and stop if
 they cannot be applied without privileged approval. No local fallback.
 Use the existing budget/admission/cleanup-aware Boat runner; artifacts and
@@ -200,27 +200,40 @@ refuse a live home/path alias and occupied experimental port. Set
 use isolated locks and keep separate logs. Phone listener binds only the
 Tailscale address `100.64.84.41` (plus loopback when needed).
 
-**Recommend existing web UI served by the isolated experimental hub.**
-The iPhone uses Safari on the tailnet; no desktop input streaming latency,
-touch emulation or public relay is required. Planned URL:
-`http://desktop.tail9e0cf2.ts.net:3799/` (mark live only after it answers).
-Pair through that experiment's own token/invitation, never the live token.
-No Funnel, public tunnel, or 0.0.0.0 listener. Prefer HTTPS via a dedicated
-Tailscale Serve port if mobile browser APIs require a secure context; never
-overwrite another Serve mapping. First phone endpoint may use the JS hub;
-it does not become a native backend just because GPUI is installed.
+**Updated user decision: native apps on the other platforms.** Desktop uses
+GPUI; iPhone/iPad uses SwiftUI; Android uses Jetpack Compose. Reuse the
+existing native screens in `mobile/ios` and `mobile/android`, not the
+WebView/WKWebView shell that currently defaults on in production. Keep the
+same hub view protocol and Bend decisions. Their existing Bend/JS bridge
+is a transport/policy dependency, not a native-code backend claim; replacing
+it with native Bend remains a separate measured step.
 
-Streaming GPUI through noVNC/WebRTC is optional later. It requires an
-isolated desktop/display and tailnet-only authenticated listener, incurs
-capture/encode CPU and network latency, and is a worse default for phone
-text entry. No iOS/Android GPUI target is assumed.
+Give experimental builds a distinct app identity, name and private storage,
+so installing one does not overwrite production Backplane or pair to its
+store automatically. Default to native screens at build time, without
+requiring the person to enable the legacy/classic toggle. Pair only to the
+experimental endpoint `http://desktop.tail9e0cf2.ts.net:3799/`, using its own
+invitation. Preserve native viewer and composer code and tokens. The web
+endpoint may remain available for comparison, but it is not the phone
+experience delivered by this experiment.
+
+**Updated user decision: builds run on the local Mac.** After the Boat build
+failed (`xattr 0.2.3`, `ENOATTR`, libc 0.2.191), the person said to use the
+Mac we have locally. `hs-mac-mini` (M-series, 10 cores, 16 GiB, Xcode 26.6,
+iOS 26.5 runtime) now builds GPUI and the iOS app, and Boat remains allowed
+for Linux and Android work under its caps. The desktop still never compiles.
+The Mac is shared with release threads, so heavy jobs there take the named
+lock `mac-heavy`, each stream keeps its own directory and simulator, and work
+stops if free space falls under 20 GiB (61 GiB at the start). `xcode-select`
+points at the command line tools and stays that way: use `DEVELOPER_DIR`.
+Do not publish or replace the production TestFlight app implicitly.
 
 ## Gates and deliverables
 
 1. Commit this plan and intent on `gpui`; publish the feasibility finding.
-2. Build the minimal client on Boat under the cap. Run it locally against a
-   fresh isolated hub. Verify real sidebar/history and composer round trip.
-3. Bring up the phone route; verify tailnet binding and browser rendering.
+2. Build the minimal client on the Mac. Run it against the fresh isolated hub
+   over the tailnet. Verify real sidebar/history and composer round trip.
+3. Bring up native phone variants; verify isolated identity, native screen selection, pairing and tailnet reachability.
 4. Collect paired baseline/prototype measurements, retain raw samples,
    screenshots and method in `docs/gpui/RESULTS.md`; distinguish smoke,
    full-load, missing metrics and unsupported UI.
