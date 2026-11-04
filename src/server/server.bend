@@ -13590,10 +13590,32 @@ def Hub.thin.act(+send: Bool, h: Hub, client: U32, +o: J.Json, +c: Client, now: 
   Hub.thin.act.native(Bool.or(Bool.not(String.eq(J.Json.get_str(p, "action", ""), "native-sidebar-page")),
     Bool.and(NATIVE_SIDE.Ns.offered(String.eq(Client.thin.mode(c), "view-web"), p), TA.Actor.native.valid(ThinContext.actors(Client.thin.context(c)), p))), send, h, client, o, c, now)
 
+# "start:N" (the phone's Go to the start, web/thin-host.js's start): the
+# page that starts at the thread's Nth oldest row, its bound read from the
+# store (TSTO.Ts.start), one request where paging back took one a page;
+# without a store (memory, a thread elsewhere) the newest page, and the
+# page pages back from it as before
+def Hub.thin.start.at(store: Bool, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +thread: String, +n: Nat) -> IO(Hub):
+  match store h:
+    case False{} _: Hub.thin.page(Some{0n}, h, client, o, c, now)
+    case True{} Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      do IO<Hub>:
+        +before : Nat <- TSTO.Ts.start(Cfg.thin.store(cfg), thread, n)
+        Hub.thin.page(Some{before}, Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now)
+
+def Hub.thin.page.cursor(start: Bool, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat) -> IO(Hub):
+  match start h:
+    case False{} Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      Hub.thin.page(Hub.thin.cursor(J.Json.get_obj(o, "p"), Hub.thin.view_epoch(st, cfg, TV.Target.thread(st, J.Json.get_obj(J.Json.get_obj(o, "p"), "target"))), ""), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now)
+    case True{} Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      +thread = TV.Target.thread(st, J.Json.get_obj(J.Json.get_obj(o, "p"), "target"))
+      Hub.thin.start.at(Bool.and(Bool.not(String.is_empty(Cfg.thin.store(cfg))), Bool.not(FR.Fr.is(thread))), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, thread,
+        TSTO.Ts.start.n(J.Json.get_str(J.Json.get_obj(o, "p"), "cursor", "")))
+
 def Hub.thin.dispatch(+kind: Nat, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat) -> IO(Hub):
   match kind h:
     case 0n _: Hub.thin.render(h, client, o, c, now, Hub.thin.context.for(True{}, J.Json.get_obj(o, "p"), c, J.Json.as_raw(J.Json.get(o, "id"), "0"), 0n), 0n)
-    case 1n Hub{+st, f, ls, cl, as, inbox, +cfg, note}: Hub.thin.page(Hub.thin.cursor(J.Json.get_obj(o, "p"), Hub.thin.view_epoch(st, cfg, TV.Target.thread(st, J.Json.get_obj(J.Json.get_obj(o, "p"), "target"))), ""), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now)
+    case 1n _: Hub.thin.page.cursor(String.starts_with(J.Json.get_str(J.Json.get_obj(o, "p"), "cursor", ""), "start:"), h, client, o, c, now)
     case 2n Hub{+st, f, ls, cl, as, inbox, +cfg, note}: Hub.thin.search.valid(Hub.thin.query.valid(J.Json.get_obj(o, "p")), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, Client.thin.context(c), Hub.thin.cursor(J.Json.get_obj(o, "p"), Hub.thin.view_epoch(st, cfg, TV.Target.thread(st, J.Json.get_obj(J.Json.get_obj(o, "p"), "target"))), J.Json.get_str(J.Json.get_obj(o, "p"), "query", "")))
     case 3n _: Hub.thin.render(h, client, TV.Obj.put(o, "p", TV.Obj.put(J.Json.get_obj(o, "p"), "action", J.Str{""})), c, now, Client.thin.context(c), ThinContext.anchor(Client.thin.context(c)))
     case 4n _: Hub.thin.act(Hub.thin.sends(J.Json.get_str(J.Json.get_obj(o, "p"), "action", "")), h, client, o, c, now)
