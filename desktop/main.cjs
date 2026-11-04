@@ -43,7 +43,6 @@ const startupPath = path.join(__dirname, 'startup.html');
 const startupURL = pathToFileURL(startupPath).href;
 const launchedAtMs = Date.now();
 let window, origin, connection, serviceReadyAtMs, firstVisibleAtMs, connecting;
-let connectTries = 0, connectTimer = null;
 let connectionStatus = {phase:'connecting', message:'Connecting to your service…'};
 let desktopBrowser, browserSession;
 const browserRestore=new Map(),browserRestoreTasks=new Map(),browserRestoreErrors=new Map();
@@ -178,16 +177,11 @@ async function connect(ses) {
       }
       // Start independently of the UI; failed private channels retry in main.
       if(directBrowser)void connectBrowser(ses).catch(()=>{});
-      connectTries = 0;
     } catch (error) {
-      // Never a button to press: the service is tried again by itself, a
-      // growing delay up to 5 s, while the page says it is reconnecting.
-      status('connecting', 'Reconnecting to your service…');
+      // Service.start already bounds recovery/readiness. A failed launch
+      // needs its actual diagnostic and a deliberate retry, not a spawn loop.
+      status('error', 'Backplane could not connect to its service.\n' + error.message + '\nFix the problem, then choose Retry.');
       console.error('backplane: connect failed:', error?.message);
-      const wait = Math.min(5000, 500 * 2 ** Math.min(connectTries++, 4));
-      clearTimeout(connectTimer);
-      connectTimer = setTimeout(() => { connectTimer = null;if (!quitting && window && !window.isDestroyed()) void connect(ses); }, wait);
-      connectTimer.unref?.();
     } finally { connecting = null; }
   })();
   return connecting;
