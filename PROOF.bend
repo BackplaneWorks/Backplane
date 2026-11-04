@@ -1,3 +1,5 @@
+import ./src/core/cad-install.bend as CADINSTALL
+
 import ./src/server/wire.bend as WIRE
 
 import ./src/server/watch-plan.bend as WATCHPLAN
@@ -13174,12 +13176,12 @@ def Laws.mail_global_primary(): {==}
 
 def Laws.mail_log_count_set(c, n):
   match c:
-    case MPCREDIT.Cfg{home, web, host, port, prompt, dirs, version, MPCREDIT.Net{tailnet, https, token, models, mtext, rt, br, pk, tm, machines, pv, MPLOG.Bn{dir, seen, work, far, live, broken, fl, tools, tch, cef, wire_n, pair, auth, dq}, managed, link, freecad, ks}, telemetry, views, accounts}:
+    case MPCREDIT.Cfg{home, web, host, port, prompt, dirs, version, MPCREDIT.Net{tailnet, https, token, models, mtext, rt, br, pk, tm, machines, pv, MPLOG.Bn{dir, seen, work, far, live, broken, fl, tools, tch, cef, wire_n, pair, auth, dq}, managed, link, freecad, ks}, telemetry, views, accounts, cad}:
       {==}
 
 def Laws.mail_log_count_committed(c, fresh):
   match c:
-    case MPCREDIT.Cfg{home, web, host, port, prompt, dirs, version, MPCREDIT.Net{tailnet, https, token, models, mtext, rt, br, pk, tm, machines, pv, MPLOG.Bn{dir, seen, work, far, live, broken, fl, tools, tch, cef, wire_n, pair, auth, dq}, managed, link, freecad, ks}, telemetry, views, accounts}:
+    case MPCREDIT.Cfg{home, web, host, port, prompt, dirs, version, MPCREDIT.Net{tailnet, https, token, models, mtext, rt, br, pk, tm, machines, pv, MPLOG.Bn{dir, seen, work, far, live, broken, fl, tools, tch, cef, wire_n, pair, auth, dq}, managed, link, freecad, ks}, telemetry, views, accounts, cad}:
       {==}
 
 # ---- native phone i18n ----
@@ -15920,3 +15922,18 @@ def Laws.catalog_metadata_complete(lc):
     case I18.Ja{}: {==}
 
 def Laws.catalog_keys_nonempty(): {==}
+
+def Laws.cad_install_visible_action(p):
+  match p:
+    case CADINSTALL.CadIdle{}: {==}
+    case CADINSTALL.CadDownload{}: {==}
+    case CADINSTALL.CadVerify{}: {==}
+    case CADINSTALL.CadExtract{}: {==}
+    case CADINSTALL.CadConfigure{}: {==}
+    case CADINSTALL.CadReady{}: {==}
+    case CADINSTALL.CadFailed{}: {==}
+    case CADINSTALL.CadCancelled{}: {==}
+    case CADINSTALL.CadUnavailable{}: {==}
+
+def Laws.cad_install_monotonic(old, next):
+  Nat.max_ge_l(old, next)
