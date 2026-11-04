@@ -35,6 +35,7 @@ def main():
         p.add_argument('--' + name, required=True)
     p.add_argument('--windows-url', default='')
     p.add_argument('--windows-sha256', default='')
+    p.add_argument('--resume-native', type=Path)
     a = p.parse_args()
     source, tools, out = a.source.resolve(), a.tools.resolve(), a.out.resolve()
     assert not out.exists(), 'Inspect prior native attempt; no overwrite/retry'
@@ -55,24 +56,57 @@ def main():
         with tarfile.open(packet) as tar:
             tar.extractall(out / 'inputs', filter='data')
         args = []
-        if a.target == 'windows-x64':
+        if a.target == 'windows-x64' and not a.resume_native:
             assert a.windows_sha256 == '42ef24bf69566f3d2d56aebf4b689276831e6e70d629d53d9cb9fc313a357412'
             win = out / 'windows-runtime.tar.gz'
             fetch(a.windows_url, a.windows_sha256, win)
             with tarfile.open(win) as tar:
                 tar.extractall(out / 'windows-runtime', filter='data')
             args = ['--windows-runtime', out / 'windows-runtime']
-        build = source / 'build/test-service'
+        build = (a.resume_native.resolve() / 'service-component/component/payload') if a.resume_native else source / 'build/test-service'
         service = build / ('backplane-serve.exe' if a.target == 'windows-x64' else 'backplane-serve')
         service.chmod(0o755)
         producer = tools / 'scripts/service-release.py'
-        run([sys.executable, tools / 'scripts/service-runtime.py', *args,
-            '--source-root', source, '--build', build, '--producer', producer,
-            '--producer-sha256', sha(producer), '--out', out / 'service-component'], 'abi-and-component')
-        component = out / 'service-component/component/SERVICE.json'
+        if a.resume_native:
+            # Previous native ABI/component succeeded; reuse it byte-for-byte.
+            # Only artifact-mode restoration and missing stage/archive follow.
+            component = a.resume_native.resolve() / 'service-component/component/SERVICE.json'
+            record['nativeAbiReplayed'] = False
+            record['componentSource'] = str(component)
+        else:
+            factory = [tools / 'scripts/service-runtime.py']
+            if a.target == 'windows-x64':
+                factory = [Path(__file__).with_name('runtime-test-catalog.py'), '--factory', tools / 'scripts/service-runtime.py']
+            run([sys.executable, *factory, *args,
+                '--source-root', source, '--build', build, '--producer', producer,
+                '--producer-sha256', sha(producer), '--out', out / 'service-component'], 'abi-and-component')
+            component = out / 'service-component/component/SERVICE.json'
         assert json.loads(component.read_text())['releaseQualified'] is False
+        def restore_modes(root, members):
+            # The whole input archive is already SHA-bound. Python's safe
+            # tar filter and Actions strip modes; restore only receipt modes,
+            # then let the unchanged stage membership/hash guard verify all.
+            if os.name == 'nt':
+                return  # original producer applies its Windows mode normalization
+            root = root.resolve()
+            for name, item in members.items():
+                if item['type'] != 'file':
+                    continue
+                relative = Path(name)
+                assert not relative.is_absolute() and '..' not in relative.parts
+                path = root / relative
+                assert path.is_file() and not path.is_symlink() and root in path.resolve().parents
+                mode = item['mode']
+                assert isinstance(mode, int) and 0 <= mode <= 0o777
+                path.chmod(mode)
+        components = out / 'inputs/components'
+        restore_modes(components / 'shell-payload', json.loads((components / 'SHELL.json').read_text())['members'])
+        restore_modes(components / 'payload', json.loads((components / 'ELECTRON.json').read_text())['members'])
+        restore_modes(component.parent / 'payload', json.loads(component.read_text())['members'])
+        # freeze-target derives identity from the original measured component,
+        # even when a stage-only recovery uses its retained runtime evidence.
         run([sys.executable, source / 'desktop/freeze-target.py', source,
-            out / 'inputs/components', component, out / 'freeze'], 'freeze')
+            components, component, out / 'freeze'], 'freeze')
         run(['node', tools / 'desktop/prepare-native-stage.cjs', 'stage',
             '--components', out / 'inputs/components/COMPONENT-INPUTS.json', '--service', component,
             '--freeze', out / 'freeze/FREEZE.json', '--out', out / 'stage'], 'stage')

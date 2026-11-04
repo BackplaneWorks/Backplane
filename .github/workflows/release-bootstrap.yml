@@ -4,6 +4,8 @@ on:
   workflow_dispatch:
     inputs:
       ref: {type: string, required: true}
+      build_run: {type: string, required: false, default: ''}
+      native_run: {type: string, required: false, default: ''}
       target: {type: choice, required: true, options: [windows-x64, linux-x64, linux-arm64, darwin-arm64]}
       runner: {type: string, required: true}
       packet_url: {type: string, required: true}
@@ -12,7 +14,7 @@ on:
       components_sha256: {type: string, required: true}
       windows_runtime_url: {type: string, required: false, default: ''}
       windows_runtime_sha256: {type: string, required: false, default: ''}
-permissions: {contents: read}
+permissions: {contents: read, actions: read}
 concurrency:
   group: test0142-${{ inputs.ref }}-${{ inputs.target }}
   cancel-in-progress: false
@@ -23,6 +25,7 @@ env:
   BACKPLANE_TEST_ONLY: '1'
 jobs:
   link:
+    if: inputs.build_run == '' && inputs.native_run == ''
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -65,6 +68,7 @@ jobs:
           path: build/test-service/
           if-no-files-found: warn
   native-package:
+    if: ${{ always() && !cancelled() && (needs.link.result == 'success' || inputs.build_run != '' || inputs.native_run != '') }}
     needs: link
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 25
@@ -82,9 +86,19 @@ jobs:
       - uses: actions/setup-node@v4
         with: {node-version: '24'}
       - uses: actions/download-artifact@v4
+        if: inputs.native_run == ''
         with:
           name: test-service-build-${{ inputs.target }}
           path: build/test-service
+          run-id: ${{ inputs.build_run || github.run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        if: inputs.native_run != ''
+        with:
+          name: TEST-ONLY-package-${{ inputs.target }}
+          path: build/resumed-native
+          run-id: ${{ inputs.native_run }}
+          github-token: ${{ github.token }}
       - name: Prepare same isolated TEST consumers and native input data
         shell: bash
         env:
@@ -93,15 +107,24 @@ jobs:
           WIN_URL: ${{ inputs.windows_runtime_url }}
           WIN_SHA: ${{ inputs.windows_runtime_sha256 }}
           TARGET: ${{ inputs.target }}
+          NATIVE_RUN: ${{ inputs.native_run }}
         run: |
           set -euo pipefail
           python build/test-workflow/extra/rc0142-test-only/prepare-tooling.py --source "$GITHUB_WORKSPACE" --output "$RUNNER_TEMP/test-consumers"
-          python build/test-workflow/extra/rc0142-test-only/native-package.py --source "$GITHUB_WORKSPACE" --tools "$RUNNER_TEMP/test-consumers" --target "$TARGET" --components-url "$COMP_URL" --components-sha256 "$COMP_SHA" --windows-url "$WIN_URL" --windows-sha256 "$WIN_SHA" --out "$GITHUB_WORKSPACE/build/test-native"
+          set --
+          if [ -n "$NATIVE_RUN" ]; then set -- --resume-native "$GITHUB_WORKSPACE/build/resumed-native"; fi
+          python build/test-workflow/extra/rc0142-test-only/native-package.py "$@" --source "$GITHUB_WORKSPACE" --tools "$RUNNER_TEMP/test-consumers" --target "$TARGET" --components-url "$COMP_URL" --components-sha256 "$COMP_SHA" --windows-url "$WIN_URL" --windows-sha256 "$WIN_SHA" --out "$GITHUB_WORKSPACE/build/test-native"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: TEST-ONLY-package-${{ inputs.target }}
           include-hidden-files: true
           path: |
-            build/test-native/
+            build/test-native/dist/
+            build/test-native/RESULT.json
+            build/test-native/*.log
+            build/test-native/freeze/*.json
+            build/test-native/service-component/*.json
+            build/test-native/service-component/component/SERVICE.json
+            build/test-native/service-component/runtime/runtime-evidence/
           if-no-files-found: warn
