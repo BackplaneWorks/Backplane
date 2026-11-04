@@ -38,6 +38,8 @@ try {
     $resources | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8 (Join-Path $cfg.out 'resources-start.json')
     Assert-BP927Resources $resources $cfg.resourcePolicy.allowExistingPagefile
     $env:PYTHONDONTWRITEBYTECODE = '1'
+    & $cfg.node (Join-Path $PSScriptRoot 'argv-probe.cjs') $ConfigPath 'node' *> (Join-Path $cfg.out 'argv-probe-node.log')
+    & $cfg.bunProbe (Join-Path $PSScriptRoot 'argv-probe.cjs') $ConfigPath 'bun' *> (Join-Path $cfg.out 'argv-probe-bun.log')
     & $cfg.python (Join-Path $PSScriptRoot 'canonical-946.py') $ConfigPath *> (Join-Path $cfg.out 'canonical-946.log')
     $abiCode = $LASTEXITCODE
     & $cfg.node (Join-Path $PSScriptRoot 'accept.cjs') $ConfigPath *> (Join-Path $cfg.out 'consumer.log')

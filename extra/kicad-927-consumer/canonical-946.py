@@ -43,6 +43,7 @@ try:
     require(git(source, "rev-parse", "HEAD").decode().strip() == cfg["sourceCommit"], "Wrong frozen product commit")
     require(git(source, "rev-parse", "HEAD^{tree}").decode().strip() == cfg["sourceTree"], "Wrong frozen product tree")
     tool = factory / "scripts" / "service-runtime.py"
+    receipt.update(factorySHA256Observed=digest(tool), factoryCRLFCount=tool.read_bytes().count(b"\r\n"))
     require(digest(tool) == factory_sha, "Canonical verifier hash mismatch")
     require(digest(cfg["packagePath"]) == cfg["packageSHA256"], "ZIP changed")
     service = Path(cfg["executable"]).parent / "resources" / "backplane-service"

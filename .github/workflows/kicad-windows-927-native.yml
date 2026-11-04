@@ -23,12 +23,18 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 50
     steps:
+      - name: Preserve exact committed source bytes on Windows
+        shell: pwsh
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.3'
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
