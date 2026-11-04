@@ -24,13 +24,18 @@ production effect code against real temporary files, with controlled socket
 wakeups: exact headers/bodies, gzip fallback, symlinks, partial writes, EAGAIN,
 zero writes, idle expiry, disconnection, short reads, replacement and errors.
 
-Qualification is pending. All further tests run only on Boat. The scoped runner
+Boat qualification passed on frozen source `80ec029e9`, job
+`j20261104025128-135771`. All validation ran on Boat. The scoped runner
 checks the exact seven canonical law/proof blocks and the complete unchanged
 static/host/HTTP module closure with the original stock-Bend shard executor.
-It runs a false piece-size theorem in a separate copy. The controller and
+It rejected the false piece-size theorem in a separate copy. Node passed
+62 static/preview cases plus the binary regression; Bun passed 29 static cases. The controller and
 Node/Bun boundary suites have a hard 512 MiB/no-swap scope; proof workers have
 a hard 3.7 GB/no-swap scope. Original verdicts, source/block/head hashes, OOM,
-swap and peak counters are retained. The policy relocation and five server
+swap and peak counters are retained in
+[the receipts](../../extra/hub-static-qualification/SUMMARY.json). Compiler RSS
+peaked at 146,024 KiB; the controller peaked at 473,956,352 bytes. OOM, swap
+activity and memory-limit event counters stayed zero. The policy relocation and five server
 delegates receive a separate source-only audit.
 
 This does not qualify the full server/application closure, execute a packaged
