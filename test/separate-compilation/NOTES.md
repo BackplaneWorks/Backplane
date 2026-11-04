@@ -1,11 +1,22 @@
 # Separate-compilation semantic fixtures (experimental, unwired, no soundness claim)
 
 Small fixtures of what the stock checker does at module boundaries. They check nothing about the real tree and
-qualify nothing. Run (inside a cgroup with own memory.max <= 3,700,000,000 and swap.max 0, else exit 75):
+qualify nothing. Sources are stored as `*.bend.txt` so `scripts/check.sh` (type-checks every tracked `*.bend`) and the
+content-cache / inputs-key inventories never ingest these deliberately failing modules; the runner materialises a
+case in a temporary directory with the suffix removed.
 
-    systemd-run --user --scope -p MemoryMax=3700000000 -p MemorySwapMax=0 python3 scripts/sepcomp-fixtures.py run
     python3 scripts/sepcomp-fixtures.py list        # no compiler
     python3 -m unittest discover -s test/tools -p sepcomp_fixtures_test.py   # light, no compiler
+
+`run` executes the real compiler and therefore REFUSES (exit 75) unless the process (1) inherited the actual native
+bend flock (BACKPLANE_HEAVY_LOCK_FD on /tmp/bp-bend.lock) from an admitted executor, (2) has its own cgroup with
+memory.max <= 3,700,000,000 and swap.max 0, and (3) passes heavy-guard admission (proof-shard floor and host
+reserve). heavy-guard has no profile that execs this script, so it needs an executor that already holds the guard;
+there is no fallback and a plain systemd-run scope is not enough.
+
+The 15-case evidence below was produced earlier by a local capped scope (MemoryMax=3700000000, swap 0, no flock, no
+guard admission) on identical bytes: it is local capped evidence, not an admitted run. Saved traces:
+bp-coord/lowmem-swarm/lane3/fill-order-evidence/ (strace openat, verdicts, file hashes).
 
 Compiler identity: `bend` 2.0.36 (binary sha256 b2b183bddc3c3fa4bc45d99f6a6bdbb192ebc616e6e697777f49e74c545b1643);
 verdicts use scripts/bendok.sh (sha256 prefix 3f3e17c4ba1a0d90). Each case: `bend cases/<name>/MAIN.bend --check-only`.
