@@ -1,3 +1,4 @@
+import ../core/client-language.bend as CLANG
 import Base
 import ../core/i18n.bend as I
 import ../core/json.bend as J
@@ -27,7 +28,7 @@ def reflow_plan(profile: String, alloy: String) -> String:
 # Resolve the native host's language once when device settings change. This uses
 # the same normalization and preview gate as each hub's Ui, including no hubs.
 def native_locale(setting: String, os: String, preview: String) -> String:
-  U.Lang.resolve(U.Lang.normalize(setting), os, String.eq(preview, "1"))
+  CLANG.native_locale(setting, os, preview)
 
 # What bridge.js calls. The phone apps see only strings: server messages
 # in (binary CBOR frames, carried as base64, decoded by bridge.js) from
