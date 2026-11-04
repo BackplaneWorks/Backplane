@@ -96,72 +96,102 @@ def scan_module(text, origin):
 
 def _js_code(text, where):
     """Light JavaScript scanner: returns (code with comments removed and every string literal replaced by
-    a \\x00S<n>\\x00 placeholder, strings). A template literal containing ${ becomes \\x00T\\x00 (computed).
-    Regex literals are skipped. Unterminated strings/comments/templates raise."""
-    out, strings, i, n = [], [], 0, len(text)
-    prev = ''
-    while i < n:
-        c = text[i]
-        if c == '/' and text[i+1:i+2] == '/':
-            j = text.find('\n', i)
-            i = n if j < 0 else j
-            continue
-        if c == '/' and text[i+1:i+2] == '*':
-            j = text.find('*/', i + 2)
-            if j < 0:
-                raise ValueError('effect companion %s: unterminated comment' % where)
-            i = j + 2
-            continue
-        if c in '\'"':
-            j = i + 1
-            while j < n and text[j] != c:
-                if text[j] == '\\':
-                    j += 1
-                if j < n and text[j] == '\n':
-                    raise ValueError('effect companion %s: unterminated string' % where)
+    a \\x00S<n>\\x00 placeholder, strings). A template literal containing ${...} becomes \\x00T\\x00 AFTER its
+    interpolated expressions have been scanned as code (nested strings, templates and comments included), so a
+    require/import inside an interpolation is seen and checked like any other. Regex literals are skipped.
+    Unterminated strings/comments/templates/interpolations raise."""
+    out, strings, n = [], [], len(text)
+    state = {'prev': ''}
+
+    def fail(what):
+        raise ValueError('effect companion %s: unterminated %s' % (where, what))
+
+    def template(i):
+        j, computed = i + 1, False
+        while j < n and text[j] != '`':
+            if text[j] == '\\':
+                j += 2
+                continue
+            if text[j] == '$' and text[j+1:j+2] == '{':
+                computed = True
+                out.append(' ( ')
+                j = walk(j + 2, True)
+                out.append(' ) ')
                 j += 1
-            if j >= n:
-                raise ValueError('effect companion %s: unterminated string' % where)
+                continue
+            j += 1
+        if j >= n:
+            fail('template')
+        if computed:
+            out.append('\x00T\x00')
+        else:
             strings.append(text[i+1:j])
             out.append('\x00S%d\x00' % (len(strings) - 1))
-            i, prev = j + 1, 'S'
-            continue
-        if c == '`':
-            j, computed = i + 1, False
-            while j < n and text[j] != '`':
-                if text[j] == '\\':
+        state['prev'] = 'S'
+        return j + 1
+
+    def walk(i, in_expr):
+        depth = 0
+        while i < n:
+            c = text[i]
+            if c == '/' and text[i+1:i+2] == '/':
+                j = text.find('\n', i)
+                i = n if j < 0 else j
+                continue
+            if c == '/' and text[i+1:i+2] == '*':
+                j = text.find('*/', i + 2)
+                if j < 0:
+                    fail('comment')
+                i = j + 2
+                continue
+            if c in '\'"':
+                j = i + 1
+                while j < n and text[j] != c:
+                    if text[j] == '\\':
+                        j += 1
+                    if j < n and text[j] == '\n':
+                        fail('string')
                     j += 1
-                elif text[j] == '$' and text[j+1:j+2] == '{':
-                    computed = True
-                j += 1
-            if j >= n:
-                raise ValueError('effect companion %s: unterminated template' % where)
-            if computed:
-                out.append('\x00T\x00')
-            else:
+                if j >= n:
+                    fail('string')
                 strings.append(text[i+1:j])
                 out.append('\x00S%d\x00' % (len(strings) - 1))
-            i, prev = j + 1, 'S'
-            continue
-        if c == '/' and (prev == '' or prev in '(,=:[!&|?{};' ):
-            j, cls = i + 1, False
-            while j < n and (text[j] != '/' or cls):
-                if text[j] == '\\':
+                i, state['prev'] = j + 1, 'S'
+                continue
+            if c == '`':
+                i = template(i)
+                continue
+            if c == '/' and (state['prev'] == '' or state['prev'] in '(,=:[!&|?{};'):
+                j, cls = i + 1, False
+                while j < n and (text[j] != '/' or cls):
+                    if text[j] == '\\':
+                        j += 1
+                    elif text[j] == '[':
+                        cls = True
+                    elif text[j] == ']':
+                        cls = False
+                    elif text[j] == '\n':
+                        fail('regex')
                     j += 1
-                elif text[j] == '[':
-                    cls = True
-                elif text[j] == ']':
-                    cls = False
-                elif text[j] == '\n':
-                    raise ValueError('effect companion %s: unterminated regex' % where)
-                j += 1
-            i, prev = j + 1, 'S'
-            out.append('\x00R\x00')
-            continue
-        out.append(c)
-        if not c.isspace():
-            prev = c
-        i += 1
+                i, state['prev'] = j + 1, 'S'
+                out.append('\x00R\x00')
+                continue
+            if in_expr:
+                if c == '{':
+                    depth += 1
+                elif c == '}':
+                    if depth == 0:
+                        return i
+                    depth -= 1
+            out.append(c)
+            if not c.isspace():
+                state['prev'] = c
+            i += 1
+        if in_expr:
+            fail('template interpolation')
+        return i
+
+    walk(0, False)
     return ''.join(out), strings
 
 
