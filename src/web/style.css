@@ -606,7 +606,11 @@ section.subs > .subs-head[aria-expanded="false"] > svg { transform: rotate(-90de
 .combo-resize[aria-orientation="horizontal"] { cursor:row-resize; }
 .combo-resize::after { content:""; position:absolute; top:0; bottom:0; left:calc(50% - 1px); width:2px; background:var(--line); }
 .combo-resize[aria-orientation="horizontal"]::after { top:calc(50% - 1px); bottom:auto; left:0; right:0; width:auto; height:2px; }
-.combo-resize:hover::after, .combo-resize.on::after, .combo-resize:focus-visible::after { background:var(--accent); }
+/* (a grip in its middle says it can be dragged) */
+.combo-resize::before { content:""; position:absolute; z-index:1; top:calc(50% - 14px); left:calc(50% - 2px); width:4px; height:28px; border-radius:2px; background:var(--faint); opacity:.7; }
+.combo-resize[aria-orientation="horizontal"]::before { top:calc(50% - 2px); left:calc(50% - 14px); width:28px; height:4px; }
+.combo-resize:hover::after, .combo-resize.on::after, .combo-resize:focus-visible::after,
+.combo-resize:hover::before, .combo-resize.on::before, .combo-resize:focus-visible::before { background:var(--accent); opacity:1; }
 .combo-resize:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
 body.resizing-project-split, body.resizing-project-split * { user-select:none !important; }
 body.resizing-project-split:has(.combo-resize.on[aria-orientation="vertical"]),
