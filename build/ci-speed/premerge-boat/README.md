@@ -137,5 +137,6 @@ overridden. Command arguments remain explicit default-size, no-reuse, wait0,
 idle0, no Bend setup and outer512MiB/swap0. Trusted BASE shape/merge driver,
 three-file guard matrix, exact-head acknowledgement, worker/source/control
 identities and base-drift fences remain mandatory. The suite now adds12
-runner/transport controls to the existing14. This correction still needs
-independent review and normal-Boat qualification before use for merge gates.
+runner/transport controls to the existing14. Independent read-only review and
+the [initial normal-Boat qualification](../premerge-runner/README.md) passed.
+The final receipt-only head still needs a fresh guard before normal merge.
