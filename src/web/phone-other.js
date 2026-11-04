@@ -177,8 +177,8 @@ export function installPhoneOther({ doc = document, win = window, dispatch, touc
   // (html.ph-notify-on/-off/-none/-ask), and a tap on Allow asks
   const notifyState = () => {
     const N = win.Notification;
-    const state = !N || !win.isSecureContext ? "none" : N.permission === "granted" ? "on" : N.permission === "denied" ? "off" : "ask";
-    for (const k of ["on", "off", "none", "ask"]) html.classList.toggle("ph-notify-" + k, k === state);
+    const state = !win.isSecureContext ? "http" : !N ? "none" : N.permission === "granted" ? "on" : N.permission === "denied" ? "off" : "ask";
+    for (const k of ["on", "off", "none", "ask", "http"]) html.classList.toggle("ph-notify-" + k, k === state);
   };
   doc.addEventListener("click", e => {
     if (!on() || !e.target.closest?.("[data-ph-notify]")) return;

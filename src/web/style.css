@@ -3163,9 +3163,9 @@ html.phone .bot-desktop-tabs { gap: 6px; flex-wrap: nowrap; }
 html.phone .bot-tabs .tab { flex: none; min-height: 44px; padding: 8px 14px; border: 1px solid var(--line); border-radius: 0; color: var(--dim); }
 html.phone .bot-tabs .tab.on { color: var(--bg); background: var(--accent); border-color: var(--accent); }
 /* Settings → Threads: this phone's notifications, the words for its state */
-html.phone :is(.ph-notify-on, .ph-notify-off, .ph-notify-none) { display: none; color: var(--dim); }
+html.phone :is(.ph-notify-on, .ph-notify-off, .ph-notify-none, .ph-notify-http) { display: none; color: var(--dim); }
 html.phone:not(.ph-notify-ask) .ph-notify-ask { display: none; }
-html.phone.ph-notify-on .ph-notify-on, html.phone.ph-notify-off .ph-notify-off, html.phone.ph-notify-none .ph-notify-none { display: inline; }
+html.phone.ph-notify-on .ph-notify-on, html.phone.ph-notify-off .ph-notify-off, html.phone.ph-notify-none .ph-notify-none, html.phone.ph-notify-http .ph-notify-http { display: inline; }
 html.phone.ph-notify-on .ph-notify-on { color: var(--ok, var(--text)); }
 /* a room's line to write: the field and Send side by side on a phone */
 .app.phone main.room-view > div.composer { display: flex; flex-direction: row; align-items: flex-end; gap: 8px; padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); }
