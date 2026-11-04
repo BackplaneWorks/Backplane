@@ -15,7 +15,7 @@ const page = (phone, mic = true) => {
   const inComposer = { closest: s => s === '.composer' ? {} : null };
   const fire = (type, target = timeline) => (on[type] || []).forEach(f => f({ target }));
   const resize = h => { timeline.clientHeight = h; for (const o of observers) if (o.t) o.f([{ target: o.t }]); };
-  return { inComposer, doc, win: { ResizeObserver: RO, navigator: { mediaDevices: mic ? { getUserMedia() {} } : undefined }, setTimeout: f => { f(); return 1; } }, timeline, fire, resize, classes };
+  return { on, inComposer, doc, win: { ResizeObserver: RO, navigator: { mediaDevices: mic ? { getUserMedia() {} } : undefined }, setTimeout: f => { f(); return 1; } }, timeline, fire, resize, classes };
 };
 
 test('Return in the draft is a new line on a phone only, Send still sends', async () => {
@@ -83,3 +83,4 @@ test('back from the full-screen viewer, the thread is where the person left it',
   assert.deepEqual(calls, [{ top: 700, atEnd: false, anchor: 'm42', offset: 12 }]);
   assert.equal(p.timeline.scrollTop, 0); // (the planner places it, not a shift)
 });
+
