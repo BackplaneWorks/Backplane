@@ -58,7 +58,17 @@ speedup or threshold is asserted before receipts exist. No startup, private
 fixture, provider, whole-hub, packaged memory/CPU/p99 or installed acceptance
 is covered. Lane A independently reviews and reruns the frozen measurement.
 
-Execution/receipts: pending. Run only through the normal approved daily Boat
+First attempt `j20261104102045-1651727` / work `1584003` failed at source
+identity admission: the controller incorrectly equated Boat's new staged
+snapshot commit with the submitted source commit. No tool installation,
+boundary/checkpoint test or measurement ran. Original exit 1, raw receipts
+and verified VM deletion are preserved in
+`extra/hub-disk-sync-qualification/fb25895d-identity-fail/`. The correction
+checks the runner's source-SHA commit subject, exact staged file set and
+every pinned file hash, and records the distinct snapshot OID/tree.
+Production and measurement code are unchanged by that transport correction.
+
+Execution/measurement receipts: pending. Run only through the normal approved daily Boat
 runner, default sandbox, `hub-latency` lock, no reuse/setup-Bend; controller
 512 MiB, worker at most 3.7e9 bytes, swap 0. `disk_sync_gate.py` verifies source
 manifest/tool identities, strict case counts, exit/no-FAIL/sentinels and
