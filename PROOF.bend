@@ -15902,3 +15902,21 @@ def Laws.autosettle_live_work_subscription_never_expires(old):
 
 def Laws.autosettle_active_file_subscription_never_expires(live, old):
   {==}
+
+def Laws.catalog_lookup_common_cancel(lc):
+  match lc:
+    case I18.En{}: {==}
+    case I18.Ja{}: {==}
+
+def Laws.catalog_lookup_parameterized_absent(lc): {==}
+
+def Laws.catalog_lookup_unknown_absent(lc): {==}
+
+def Laws.catalog_lookup_root(lc, key): {==}
+
+def Laws.catalog_metadata_complete(lc):
+  match lc:
+    case I18.En{}: {==}
+    case I18.Ja{}: {==}
+
+def Laws.catalog_keys_nonempty(): {==}

@@ -1,3 +1,7 @@
+import ./src/core/msgs-lookup.bend as MLOOK
+
+import ./src/core/msgs-meta.bend as MMETA
+
 import ./src/server/auth-cache.bend as AUTHCACHE
 
 import ./src/server/wire.bend as WIRE
@@ -16148,3 +16152,27 @@ law autosettle_active_file_subscription_never_expires:
   for live: Bool
   for old: Bool
   {AUTOS.Auto.expired.work("file", live, old) == False{} : Bool}
+
+law catalog_lookup_common_cancel:
+  for +lc: I18.Loc
+  {MLOOK.T.plain(lc, "common.cancel") == Some{MSG.T.common.cancel(lc)} : Maybe<&2, String>}
+
+law catalog_lookup_parameterized_absent:
+  for lc: I18.Loc
+  {MLOOK.T.plain(lc, "files.changed") == None{} : Maybe<&2, String>}
+
+law catalog_lookup_unknown_absent:
+  for lc: I18.Loc
+  {MLOOK.T.plain(lc, "restructure.unknown.catalog.key") == None{} : Maybe<&2, String>}
+
+law catalog_lookup_root:
+  for +lc: I18.Loc
+  for +key: String
+  {MLOOK.T.plain(lc, key) == MLOOK.T.plain.n(lc, key) : Maybe<&2, String>}
+
+law catalog_metadata_complete:
+  for lc: I18.Loc
+  {MMETA.T.missing(lc) == [] : List<&2, String>}
+
+law catalog_keys_nonempty:
+  {List.is_empty(&2, String, MMETA.T.keys()) == False{} : Bool}
