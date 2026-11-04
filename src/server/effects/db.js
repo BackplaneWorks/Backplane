@@ -239,7 +239,7 @@ function db_query_t(h, sql, params, limit) {
 // byte budget before a payload crosses from SQLite into JavaScript.
 function db_review_page(h, thread, after, through, budget) {
   const fail = () => ({ $: CID(HistoryPage), rows: bp_db_from([]), next: after,
-    done: { $: CID(False) }, error: 'indexed review page unavailable' });
+    done: false, error: 'indexed review page unavailable' });
   const db = bp_db_get(h);
   let scan, read, result, saved = false;
   try {
@@ -264,7 +264,7 @@ function db_review_page(h, thread, after, through, budget) {
       out.push(bp_db_from(cols.map(c => bp_db_text(row[c])))); bytes += charge; next = seq;
     }
     result = { $: CID(HistoryPage), rows: bp_db_from(out), next,
-      done: more ? { $: CID(False) } : { $: CID(True) }, error: '' };
+      done: !more, error: '' };
   } catch (_) { result = fail(); }
   finally {
     try { if (scan) scan.finalize(); } catch (_) { result = fail(); }
