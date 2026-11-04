@@ -409,6 +409,7 @@ class View {
     };
     on("pointerdown", (e) => {
       this.gesture++;
+      this.coast(null);
       if (this.side === "schematic" && (e.button === 3 || e.button === 4)) {
         canvas.closest("#viewer")?.querySelector(`[data-on-click="${e.button === 3 ? "sch-back" : "sch-fwd"}"]`)?.click();
         return;
@@ -450,6 +451,8 @@ class View {
       } else if (this.drag) {
         this.ox += e.clientX - this.drag.x; this.oy += e.clientY - this.drag.y;
         this.drag.x = e.clientX; this.drag.y = e.clientY;
+        // (a finger's last moves, for the coast when it lifts)
+        if (e.pointerType === "touch") { (this.trail ||= []).push({ t: e.timeStamp, x: e.clientX, y: e.clientY }); if (this.trail.length > 6) this.trail.shift(); }
       } else return;
       this.touched = true;
       this.follow = false;
@@ -498,6 +501,13 @@ class View {
       const [rest] = [...this.pts.values()];
       this.drag = rest ? { x: rest.x, y: rest.y } : null;
       if (!rest) canvas.classList.remove("dragging");
+      // a one-finger pan flicked off keeps going a moment, as a map does
+      const trail = this.trail;
+      this.trail = null;
+      if (!rest && !tap && e.type === "pointerup" && e.pointerType === "touch" && trail?.length > 1) {
+        const a = trail.find((p) => e.timeStamp - p.t < 100) || trail.at(-1), b = trail.at(-1), dt = b.t - a.t;
+        if (dt > 0 && e.timeStamp - b.t < 50) this.coast({ vx: (b.x - a.x) / dt, vy: (b.y - a.y) / dt });
+      }
     };
     // Cancel native Back on the mouse events. Cancelling pointerdown
     // would suppress those events before Chromium handles navigation.
@@ -518,6 +528,7 @@ class View {
     });
     on("wheel", (e) => {
       this.gesture++;
+      this.coast(null);
       e.preventDefault();
       const b = canvas.getBoundingClientRect();
       const mx = e.clientX - b.left, my = e.clientY - b.top;
@@ -571,6 +582,27 @@ class View {
     this.watchDpr();
   }
 
+  // the view keeps moving at v (px/ms), slowing to a stop in about half a
+  // second; null stops it (a finger down, a wheel, a fit)
+  coast(v) {
+    cancelAnimationFrame(this.coasting);
+    this.coasting = 0;
+    if (!v || Math.hypot(v.vx, v.vy) < 0.25) return;
+    let { vx, vy } = v, last = performance.now();
+    const step = (t) => {
+      const dt = Math.min(48, t - last); last = t;
+      const k = Math.pow(0.994, dt);
+      vx *= k; vy *= k;
+      if (this.disposed || Math.hypot(vx, vy) < 0.02) { this.coasting = 0; return; }
+      this.ox += vx * dt; this.oy += vy * dt;
+      this.touched = true;
+      this.follow = false;
+      this.later();
+      this.coasting = requestAnimationFrame(step);
+    };
+    this.coasting = requestAnimationFrame(step);
+  }
+
   // a comment asked for at a point of the page: the place in mm
   placeAt(cx, cy) {
     const b = this.canvas.getBoundingClientRect();
@@ -597,6 +629,7 @@ class View {
     clearTimeout(this.resting);
     clearTimeout(this.pressing);
     clearTimeout(this.slicing);
+    cancelAnimationFrame(this.coasting);
     if (this.idling) cancelIdleCallback(this.idling);
     clearInterval(this.tick); this.tick = null;
     this.canvas.classList.remove("dragging");
@@ -745,6 +778,7 @@ class View {
 
   fit() {
     this.gesture++;
+    this.coast(null);
     const { width: w, height: h } = this.viewport;
     if (!this.plot || !this.plot.box || w <= 0 || h <= 0) { this.later(); return; }
     const [x0, y0, x1, y1] = this.plot.box;
