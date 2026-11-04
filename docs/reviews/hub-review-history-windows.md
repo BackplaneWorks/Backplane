@@ -56,6 +56,35 @@ final verdict or resource receipt, so the termination cause is unknown.
 [The incomplete attempt](../../extra/hub-review-qualification/INTEGRATION-INCOMPLETE.json)
 is retained. No broad retry or larger cap is planned; integration waits for
 the CI owner's qualification route.
+
+The subsequent owner-controlled exact `418050be7` gate reused the existing
+normal Boat VM without a new start, job `j20261104034430-579852`. Its positive
+worker reached the original guarded proof executor and was OOM-killed at the
+unchanged 3,700,000,000-byte cap with swap disabled. Systemd and the own-VM
+journal establish that cause; there was no final law/resource verdict and
+the negative control did not run. The controller's 37 MiB RSS was not a proof
+peak. [The incident receipt](../../extra/hub-review-qualification/INTEGRATION-418-OOM.json)
+and raw journal are retained. Neither existing law produced a counterexample.
+
+After explicit writer release, `State.window.file` moves with its identical
+signature and body into `window-file.bend`, which imports only Base/model.
+Thin-view keeps an argument-preserving delegate, and ReviewHistory switches
+its import to the production leaf. All ReviewHistory function bodies remain
+unchanged. The gate checks the exact extraction and reconstructs the old
+thin-view source hash to detect unrelated edits. Its compiler packet contains
+the whole actual revised adapter/test import closure; no renderer substitute
+or declaration slicing is used. The two existing canonical merge laws and
+proofs remain unchanged, with a separately corrupted-merge negative control.
+
+`review_history_adapter_test.bend` exercises the production adapter at
+`M.State` over 260 stored actions, with None/Some/empty results, partial-fold
+discard, resident queued duplicate payload precedence, sequence 522 excluding
+future 524, full review text/order and skip behavior. It imports no renderer.
+The actual executable must return zero, contain no `FAIL`, match all 31 expected
+checks including fixture multiplicities, and end with the close check.
+The old legacy renderer test is preserved. Both new qualification stages remain
+pending on the new frozen source; no claim is made that this closure fits yet.
+
 No full/root proof, full application compile, build, installation or live
 store access is authorized. Startup, steady memory, CPU and p99 targets remain
 open pending a qualified packaged artifact and copied-store measurements.

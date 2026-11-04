@@ -15,15 +15,17 @@ import sys
 import time
 
 ROOT = Path.cwd()
-OUT = ROOT / 'build/hub-review-integration'
+OUT = ROOT / 'build/hub-review-adapter-scope'
 NAMES = ['review_history_keeps_newest', 'review_history_overlap_once']
-FILES = ['LAWS.bend', 'PROOF.bend', *subprocess.check_output(
-    [sys.executable, 'scripts/bend-closure.py', 'test/review_history_test.bend'], text=True).splitlines()]
+ENTRY = 'test/review_history_adapter_test.bend'
+FILES = []
 RUNNERS = ['scripts/proof-shards.py', 'scripts/proof-slice.py', 'scripts/ci-packet.py',
            'scripts/bend-closure.py', 'scripts/laws-shape.py', 'scripts/bendok.sh',
-           'scripts/heavy-guard.py', 'scripts/local-phase.py', 'test/tools/review_integration_scope.py',
+           'scripts/heavy-guard.py', 'scripts/heavy-boat.sh', 'scripts/local-phase.py', 'test/tools/review_integration_scope.py',
            'src/server/review-history.bend', 'test/tools/review_window_test.cjs',
-           'test/fixtures/review_history_reference.txt', 'extra/hub-review-qualification/SUMMARY.json']
+           'test/fixtures/review_adapter_reference.txt', 'test/fixtures/window_file_reference.json',
+           'src/server/thin-view.bend', 'test/fixtures/review_history_adapter_runtime.json',
+           'test/tools/review_history_adapter_runtime.py', 'extra/hub-review-qualification/SUMMARY.json']
 PYTHON = str(Path(sys.executable).resolve())
 
 
@@ -32,13 +34,22 @@ def sha(path):
 
 
 def run(argv, log, expected=0):
-    p = subprocess.run([str(x) for x in argv], cwd=ROOT, capture_output=True, text=True, timeout=90)
+    p = subprocess.run([str(x) for x in argv], cwd=ROOT, capture_output=True, text=True, timeout=900)
     log.write_text(p.stdout + p.stderr)
     if p.returncode != expected:
+        unit = next((str(x).split('=', 1)[1] for x in argv if str(x).startswith('--unit=')), None)
+        if unit:
+            details = {'launcher_exit':p.returncode, 'unit':unit+'.scope', 'cause':'unclassified; inspect actual unit/journal'}
+            for label, command in [('unit', ['systemctl','--user','show',unit+'.scope','-p','Result','-p','OOMPolicy','-p','MemoryMax','-p','MemorySwapMax']),
+                                   ('journal', ['journalctl','--user','--no-pager','-u',unit+'.scope','-n','30','-o','json'])]:
+                observed = subprocess.run(command,capture_output=True,text=True,timeout=10)
+                details[label] = {'exit':observed.returncode,'stdout':observed.stdout,'stderr':observed.stderr}
+            log.with_suffix('.failure.json').write_text(json.dumps(details,indent=2)+'\n')
         raise RuntimeError(f'{log}: expected {expected}, got {p.returncode}')
 
 
 def main():
+    global FILES
     assert os.environ.get('BACKPLANE_HEAVY_BOAT_SANDBOX') == os.environ.get('BACKPLANE_HEAVY_OFFLOADED') == '1'
     assert not OUT.exists(), 'inspect the existing attempt; do not repeat automatically'
     group = Path('/sys/fs/cgroup') / Path('/proc/self/cgroup').read_text().split('0::', 1)[1].strip().lstrip('/')
@@ -48,6 +59,9 @@ def main():
     assert (group / 'memory.max').read_text().strip() == '536870912'
     assert (group / 'memory.swap.max').read_text().strip() == '0'
     OUT.mkdir(parents=True)
+    FILES = ['LAWS.bend', 'PROOF.bend', *subprocess.check_output([PYTHON, 'scripts/bend-closure.py', ENTRY],text=True).splitlines()]
+    assert 'src/server/window-file.bend' in FILES and 'src/server/review-history.bend' in FILES
+    assert not any(name.startswith(('src/web/', 'src/mobile/', 'src/app/')) or name=='src/server/thin-view.bend' for name in FILES), 'actual adapter closure still imports a renderer'
     head = os.environ['REVIEW_INTEGRATION_SOURCE_HEAD']
     assert re.fullmatch(r'[0-9a-f]{40}', head)
     sources = {p: sha(ROOT / p) for p in FILES + RUNNERS}
@@ -66,18 +80,32 @@ def main():
         while lines and (not lines[-1].strip() or lines[-1].startswith('#')):
             lines.pop()
         return '\n'.join(lines)
-    old = module.Module(ROOT, 'test/fixtures/review_history_reference.txt')
+    old = module.Module(ROOT, 'test/fixtures/review_adapter_reference.txt')
     current = module.Module(ROOT, 'src/server/review-history.bend')
     preserved = {}
     for name, blocks in old.by_name.items():
-        if name == 'ReviewHistory.read.local':
-            continue
         assert len(blocks) == len(current.by_name[name]) == 1
         assert body(blocks[0]['text']) == body(current.by_name[name][0]['text']), name
         preserved[name] = hashlib.sha256(body(blocks[0]['text']).encode()).hexdigest()
-    (OUT / 'source-audit.json').write_text(json.dumps({'kind':'source-only preservation of existing pure folds, merge, baseline and skip policies',
-        'reference_source_head':'6b031e406f8f30d4e89743e0e030631290022296', 'preserved':preserved,
-        'full_review_history_typecheck_qualified':False},indent=2)+'\n')
+    reference = json.loads((ROOT / 'test/fixtures/window_file_reference.json').read_text())
+    leaf = module.Module(ROOT, 'src/server/window-file.bend')
+    thin = module.Module(ROOT, 'src/server/thin-view.bend')
+    assert set(leaf.imports)=={'Base','M'} and leaf.imports['M'][1]=='src/core/model.bend'
+    assert set(leaf.by_name)=={'State.window.file'}
+    assert body(leaf.by_name['State.window.file'][0]['text']) == body(reference['definition'])
+    signature = reference['definition'].splitlines()[0]
+    delegate = signature+'\n  WF.State.window.file(st, key, es)'
+    assert body(thin.by_name['State.window.file'][0]['text'])==delegate
+    current_thin = (ROOT / 'src/server/thin-view.bend').read_text()
+    restored = current_thin.replace(delegate, reference['definition'].rstrip('\n'),1).replace('import ./window-file.bend as WF\n','',1)
+    assert hashlib.sha256(restored.encode()).hexdigest()==reference['source_sha256'], 'unrelated thin-view source changed'
+    adapter_before = (ROOT / 'test/fixtures/review_adapter_reference.txt').read_text()
+    assert (ROOT / 'src/server/review-history.bend').read_text()==adapter_before.replace('import ./thin-view.bend as V','import ./window-file.bend as V',1)
+    (OUT / 'source-audit.json').write_text(json.dumps({'kind':'exact production helper extraction/transparent delegate; whole adapter bodies preserved',
+        'reference_source_head':reference['source_head'], 'preserved_adapter_defs':preserved,
+        'extracted_definition_sha256':hashlib.sha256(body(reference['definition']).encode()).hexdigest(),
+        'thin_view_restored_source_sha256':hashlib.sha256(restored.encode()).hexdigest(),
+        'actual_whole_closure':FILES[2:], 'declaration_slicing':False, 'thin_view_delegate_typecheck_qualified':False},indent=2)+'\n')
     selected = {}
     for name in NAMES:
         assert len(laws.by_name[name]) == len(proof.by_name['Laws.' + name]) == 1
@@ -92,8 +120,8 @@ def main():
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / p, target)
             assert sha(target) == sources[p]
-        (repo / 'LAWS.bend').write_text('import Base\nimport ./src/server/review-history.bend as REVIEWHISTORY\nimport ./src/core/model.bend as M\nimport ./test/review_history_test.bend as REVIEWTEST\n\n' + ''.join(selected[n][0] for n in NAMES))
-        (repo / 'PROOF.bend').write_text('import Base\nimport ./LAWS.bend as Laws\nimport ./src/server/review-history.bend as REVIEWHISTORY\nimport ./src/core/model.bend as M\nimport ./test/review_history_test.bend as REVIEWTEST\n\n' + ''.join(selected[n][1] for n in NAMES))
+        (repo / 'LAWS.bend').write_text('import Base\nimport ./src/server/review-history.bend as REVIEWHISTORY\nimport ./src/core/model.bend as M\nimport ./test/review_history_adapter_test.bend as REVIEWTEST\n\n' + ''.join(selected[n][0] for n in NAMES))
+        (repo / 'PROOF.bend').write_text('import Base\nimport ./LAWS.bend as Laws\nimport ./src/server/review-history.bend as REVIEWHISTORY\nimport ./src/core/model.bend as M\nimport ./test/review_history_adapter_test.bend as REVIEWTEST\n\n' + ''.join(selected[n][1] for n in NAMES))
         if negative:
             policy = repo / 'src/server/review-history.bend'
             before = policy.read_text()
@@ -118,16 +146,16 @@ def main():
         assert 0 < receipt['memory_max_bytes'] <= 3700000000
         assert receipt['swap_before'] == receipt['swap_after']
         if negative:
-            assert receipt['exit'] == 1 and 'review_history_' in receipt['output']
+            assert receipt['exit'] == 1 and any(name in receipt['output'] for name in NAMES)
         receipts.append(receipt)
     for p, digest in sources.items():
         assert sha(ROOT / p) == digest, 'source changed during scoped qualification: ' + p
     events = {k: int(v) for k, v in (line.split() for line in (group / 'memory.events').read_text().splitlines())}
     assert events['oom'] == events['oom_kill'] == 0
-    summary = {'state': 'passed', 'kind': 'two existing exact canonical review merge laws + whole unchanged ReviewHistory/test type closure',
-               'source_head': head, 'law_names': NAMES, 'source_sha256': sources,
+    summary = {'state': 'passed', 'kind': 'two existing exact canonical review merge laws + whole actual revised M.State adapter/test type closure',
+               'source_head': head, 'law_names': NAMES, 'source_sha256': sources, 'compiled_source_files':FILES[2:],
                'boundary_reused_from':previous['source_head'], 'boundary_inputs_unchanged':preserved_boundary,
-               'source_policy_audit_passed':True, 'runtime_tests_executed':False,
+               'source_policy_audit_passed':True, 'runtime_tests_executed':False, 'integration_assertions_runtime_qualified':False,
                'canonical_blocks_sha256': {n: [hashlib.sha256(b.encode()).hexdigest() for b in blocks] for n, blocks in selected.items()},
                'controller_memory_max_bytes': 536870912, 'controller_swap_max_bytes': 0,
                'controller_memory_peak_bytes': int((group / 'memory.peak').read_text()), 'controller_events': events,
@@ -135,7 +163,7 @@ def main():
                'worker_peak_rss_kib': [r['peak_rss_kib'] for r in receipts],
                'worker_seconds': [r['seconds'] for r in receipts],
                'worker_scope_resources': [r['scope_resources'] for r in receipts],
-               'io_main_executed': False, 'server_typecheck_qualified': False, 'full_review_history_typecheck_qualified': True,
+               'io_main_executed': False, 'server_typecheck_qualified': False, 'full_review_history_typecheck_qualified': True, 'thin_view_delegate_typecheck_qualified':False,
                'full_proof_run': False, 'production_shards_qualified': False, 'cache_pass_seeded': False,
                'negative_control_refused': True, 'inputs_unchanged': True}
     (OUT / 'SUMMARY.json').write_text(json.dumps(summary, indent=2) + '\n')
