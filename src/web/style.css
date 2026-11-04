@@ -3171,7 +3171,9 @@ html.ph-kb .app.phone :is(.thread-content, .thread-view) > :is(.bot-head, .bot-h
 .app.phone .ph-views > [data-viewer-pending] { color: var(--accent); border-color: var(--accent); }
 /* (and the narrow window's own "Loading" note would sit over the chips) */
 .app.phone .top-views .viewer-choice-status { display: none; }
-.app.phone #viewer { touch-action: manipulation; overscroll-behavior: contain; }
+/* (no page pinch-zoom over the viewer: iOS ignores user-scalable=no, so a
+   pinch that starts beside the canvas would zoom the whole page) */
+.app.phone #viewer { touch-action: pan-x pan-y; overscroll-behavior: contain; }
 /* the views as chips over the pane (view.bend's View.viewer.chips) */
 .app.phone .ph-views { flex: none; gap: 6px; padding: 6px 8px; border-bottom: 1px solid var(--line); background: var(--bg); overscroll-behavior-x: contain; }
 .app.phone .ph-views > .tab { display: inline-flex; align-items: center; gap: 6px; min-height: var(--ph-tap, 44px); padding: 0 14px; border: 1px solid var(--line); border-radius: 22px; background: var(--raise); color: var(--dim); white-space: nowrap; }

@@ -288,3 +288,8 @@ export function focusToggle() {
     focusButton.style.right = `${Math.round(innerWidth - r.right + 8)}px`;
   });
 }
+
+// (and Safari's own pinch, which touch-action does not always stop there)
+if (typeof document !== "undefined") document.addEventListener("gesturestart", (e) => {
+  if (e.target?.closest?.(".app.phone #viewer")) e.preventDefault();
+}, { passive: false });
