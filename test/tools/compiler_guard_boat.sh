@@ -35,6 +35,19 @@ before=$(sha256sum "$BEND" | cut -d' ' -f1); say "real bend sha256 $before at $B
 bunbefore=""; bunpath=""
 if [ -n "$BUN" ] && [ -w "$(dirname "$BUN")" ]; then bunpath=$(readlink -f "$BUN"); bunbefore=$(sha256sum "$bunpath" | cut -d' ' -f1); say "bun $bunpath is writable: included"; else say "bun ${BUN:-absent} not writable here: bun cases SKIPPED (a root-owned bun is a documented bypass)"; fi
 tools=(--tool bend); [ -n "$bunpath" ] && tools+=(--tool bun --path "bun=$bunpath")
+# install safety on the REAL bend: an unexpected .real is never overwritten; any failure restores the original exactly
+BINDIR=$(dirname "$BEND")
+intact() { [ "$(sha256sum "$BEND" | cut -d' ' -f1)" = "$before" ] && [ ! -e "$BEND.real" ] && [ -z "$(ls -A "$BINDIR" | grep -E '^\.guard-' || true)" ] && ! grep -q "backplane-compiler-guard shim" "$BEND"; }
+echo "precious unrelated file" > "$BEND.real"
+python3 $G install --tool bend --apply >/tmp/gs1.out 2>&1; ok $? 1 "install refuses an unexpected existing bend.real"
+[ "$(cat "$BEND.real")" = "precious unrelated file" ] && [ "$(sha256sum "$BEND" | cut -d' ' -f1)" = "$before" ] && say "ok   the unrelated file and bend are untouched" || { say "FAIL existing .real was disturbed"; show /tmp/gs1.out; fail=1; }
+python3 $G install --tool bend >/tmp/gs2.out 2>&1; grep -q REFUSED /tmp/gs2.out && say "ok   dry run reports REFUSED" || { say "FAIL dry run did not report"; fail=1; }
+rm -f "$BEND.real"
+for point in after-journal after-move after-shim before-manifest; do
+  COMPILER_GUARD_TEST_FAULT=$point python3 $G install --tool bend --apply >/tmp/gs3.out 2>&1; ok $? 1 "install fails at injected fault $point"
+  intact && say "ok   original bend restored exactly after $point (bytes, no .real, no shim, no temp files)" || { say "FAIL bend not restored after $point"; ls -la "$BINDIR"; fail=1; }
+  python3 $G check --tool bend >/dev/null 2>&1; ok $? 1 "check still reports bend unguarded after $point"
+done
 python3 $G install "${tools[@]}" >/dev/null; ok $? 0 "dry run exits 0"
 [ "$(sha256sum "$BEND" | cut -d' ' -f1)" = "$before" ] && say "ok   dry run left bend untouched" || { say "FAIL dry run changed bend"; fail=1; }
 python3 $G install "${tools[@]}" --apply; ok $? 0 "install --apply"

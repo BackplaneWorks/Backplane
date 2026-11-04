@@ -107,6 +107,88 @@ class CompilerGuard(unittest.TestCase):
         self.real('bun').write_bytes(b'x')
         self.assertTrue(any('changed' in p for p in cg.check(self.home, ['bun'], self.env)))
 
+    # transactional install ------------------------------------------------------------------------------------------
+    def snapshot(self):
+        files = {}
+        for rel in ('.bend/bin', '.bun/bin'):
+            for p in sorted((self.home/rel).iterdir()):
+                files[str(p.relative_to(self.home))] = (os.readlink(p) if p.is_symlink() else p.read_bytes(),
+                                                          None if p.is_symlink() else stat.S_IMODE(p.stat().st_mode))
+        return files
+
+    def test_install_refuses_to_overwrite_an_unexpected_existing_real_file(self):
+        stale = self.home/'.bend/bin/bend.real'
+        stale.write_text('unrelated precious file\n')
+        before = self.snapshot()
+        with self.assertRaisesRegex(cg.InstallError, 'not overwriting|refusing to overwrite'):
+            cg.install(self.home, ['bend'], True, self.env)
+        self.assertEqual(self.snapshot(), before)                  # nothing moved, nothing lost
+        self.assertFalse(cg.is_shim(self.home/'.bend/bin/bend'))
+        dry = cg.install(self.home, ['bend'], False, self.env)
+        self.assertIn('REFUSED', dry[0][1])
+
+    def test_install_refuses_a_stale_real_when_the_manifest_is_missing_or_does_not_match(self):
+        self.install()
+        manifest = cg.manifest_path(self.guard)
+        manifest.write_text('{}\n')                                 # the record of our backup is gone
+        (self.home/'.bend/bin/bend').write_bytes(self.original['bend'])      # e.g. a reinstall over the shim
+        before = self.snapshot()
+        with self.assertRaises(cg.InstallError):
+            cg.install(self.home, ['bend'], True, self.env)
+        self.assertEqual(self.snapshot(), before)
+
+    def test_every_injected_failure_restores_the_original_exactly(self):
+        for point in ('after-journal', 'after-move', 'after-shim', 'before-manifest'):
+            with self.subTest(point=point):
+                before = self.snapshot()
+                with patch.dict(os.environ, {'COMPILER_GUARD_TEST_FAULT': point}):
+                    with self.assertRaisesRegex(RuntimeError, 'injected fault'):
+                        cg.install(self.home, ['bend', 'bun'], True, self.env)
+                self.assertEqual(self.snapshot(), before)           # bytes and modes identical, no .real, no temp files
+                self.assertFalse(cg.is_shim(self.home/'.bend/bin/bend'))
+                self.assertEqual([n for n in cg.load(self.guard) if True], [])   # no half-written record
+                self.assertEqual(cg.check(self.home, ['bend', 'bun'], self.env), ['bend: %s is a real binary, not the guard shim' % (self.home/'.bend/bin/bend'), 'bun: %s is a real binary, not the guard shim' % (self.home/'.bun/bin/bun')])
+        self.install()                                              # and a clean install still works afterwards
+        self.assertEqual(cg.check(self.home, ['bend', 'bun'], self.env), [])
+
+    def test_an_interrupted_install_is_rolled_back_by_the_next_install(self):
+        path, real = self.home/'.bend/bin/bend', self.home/'.bend/bin/bend.real'
+        digest = cg.sha(path)
+        before = self.snapshot()
+        cg.save_state(self.guard, {'bend': {'path': str(path), 'real': str(real), 'original_sha256': digest,
+                                            'mode': 0o755, 'state': 'installing', 'previous': None, 'had_previous': False}})
+        os.rename(path, real)                                       # the process died right after the move
+        self.assertTrue(any('interrupted' in p for p in cg.check(self.home, ['bend'], self.env)))
+        cg.install(self.home, ['bend'], True, self.env)
+        self.assertTrue(cg.is_shim(path))
+        self.assertEqual(real.read_bytes(), self.original['bend'])
+        self.assertEqual(cg.check(self.home, ['bend'], self.env), [])
+
+    def test_an_unclear_interrupted_state_fails_closed_and_touches_nothing(self):
+        path, real = self.home/'.bend/bin/bend', self.home/'.bend/bin/bend.real'
+        cg.save_state(self.guard, {'bend': {'path': str(path), 'real': str(real), 'original_sha256': 'f' * 64,
+                                            'mode': 0o755, 'state': 'installing', 'previous': None, 'had_previous': False}})
+        before = self.snapshot()
+        with self.assertRaisesRegex(cg.InstallError, 'unexpected state'):
+            cg.install(self.home, ['bend'], True, self.env)
+        self.assertEqual(self.snapshot(), before)
+
+    def test_update_keeps_the_previous_backup_and_a_failed_update_restores_both(self):
+        self.install()
+        old_real = self.real('bend').read_bytes()
+        (self.home/'.bend/bin/bend').write_text('#!/bin/sh\necho NEW\n')       # what `bend update` leaves behind
+        (self.home/'.bend/bin/bend').chmod(0o755)
+        with patch.dict(os.environ, {'COMPILER_GUARD_TEST_FAULT': 'after-shim'}):
+            with self.assertRaises(RuntimeError):
+                cg.install(self.home, ['bend'], True, self.env)
+        self.assertEqual((self.home/'.bend/bin/bend').read_text(), '#!/bin/sh\necho NEW\n')      # the new binary is back
+        self.assertEqual(self.real('bend').read_bytes(), old_real)                                 # the old backup is back
+        self.assertFalse(self.real('bend').with_name('bend.real.prev').exists())
+        cg.install(self.home, ['bend'], True, self.env)
+        self.assertTrue(cg.is_shim(self.home/'.bend/bin/bend'))
+        self.assertEqual(self.real('bend').read_text(), '#!/bin/sh\necho NEW\n')
+        self.assertEqual(self.real('bend').with_name('bend.real.prev').read_bytes(), old_real)     # kept, not silently dropped
+
     # the shim, called by absolute path -------------------------------------------------------------------------
     def test_absolute_path_call_outside_an_approved_context_is_refused_and_never_reaches_the_real_binary(self):
         self.install()
