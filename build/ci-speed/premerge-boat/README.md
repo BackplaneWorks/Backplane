@@ -107,6 +107,9 @@ qualification follows from this structural gate.
 The caller can select an approved external runner with `--runner ABSOLUTE_PATH
 --runner-sha256 SHA256 --runner-transport exclude`. A complete digest is
 required; no environment-selected runner or automatic fallback is used.
+The digest must come from an independently reviewed runner record, not from
+hashing an unknown file immediately before executing it. The dispatcher
+prints the selected path and digest; caller review is still required.
 `exclude` supports older runners that lack `--include-file`, by excluding
 every other top-level path and script child from the current inventory.
 Glob characters are escaped as literals. It still transfers only the exact
@@ -122,6 +125,10 @@ refuses the receipt. The original selected source is rechecked after the job;
 drift refuses merge permission. `premerge-controller.json` in the owned local
 job directory records the selected path, digest, transport, snapshot digest
 and exact worker-result digest after all existing source/base/verdict checks.
+For both transports it also requires the owned job's actual manifest to
+contain exactly one regular-file entry, `./scripts/pre-merge-boat.py`, with
+the expected worker digest. Extra/missing/changed entries refuse merge
+permission, including paths introduced between the two inventories.
 The distinct reviewed-guard-change state is preserved. The runner is a
 caller-reviewed trust dependency, not an independent execution attestation.
 
@@ -129,6 +136,6 @@ No account, budget, concurrency, start, size or memory guard is changed or
 overridden. Command arguments remain explicit default-size, no-reuse, wait0,
 idle0, no Bend setup and outer512MiB/swap0. Trusted BASE shape/merge driver,
 three-file guard matrix, exact-head acknowledgement, worker/source/control
-identities and base-drift fences remain mandatory. The suite now adds10
+identities and base-drift fences remain mandatory. The suite now adds12
 runner/transport controls to the existing14. This correction still needs
 independent review and normal-Boat qualification before use for merge gates.

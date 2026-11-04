@@ -171,6 +171,21 @@ class RunnerTransport(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'multiple executor'):pm.run_runner(record,data,[])
         self.assertEqual(waited,[True])
 
+    def test_uploaded_manifest_requires_exact_one_worker_and_hash(self):
+        good=(self.digest+'  ./scripts/pre-merge-boat.py\n').encode()
+        self.assertTrue(pm.transport_manifest_ok(good,self.digest))
+        for bad in (b'',good+('0'*64+'  ./extra.py\n').encode(),
+                    ('0'*64+'  ./scripts/pre-merge-boat.py\n').encode(),
+                    good.replace(b'./scripts/',b'scripts/'),good+b'\n'):
+            self.assertFalse(pm.transport_manifest_ok(bad,self.digest),bad)
+
+    def test_zero_exit_without_identifiable_owned_job_refuses(self):
+        job='j20261104000000-1'
+        for name,path in ((None,None),(job,None),(job,'/tmp/wrong'),(job,'relative/'+job),('invalid','/tmp/invalid')):
+            with self.subTest(name=name,path=path),self.assertRaisesRegex(ValueError,'identifiable'):
+                pm.owned_job_path(name,path)
+        self.assertEqual(pm.owned_job_path(job,'/tmp/'+job),Path('/tmp/'+job))
+
 
 class ActualGitMerges(unittest.TestCase):
     def setUp(self):

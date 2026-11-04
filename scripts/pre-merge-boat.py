@@ -309,6 +309,20 @@ def run_runner(descriptor, data, arguments):
         return code, job, location
 
 
+def owned_job_path(job, location):
+    if (not isinstance(job, str) or re.fullmatch(r'j[0-9]{14}-[0-9]+', job) is None
+            or not isinstance(location, str) or not Path(location).is_absolute()
+            or Path(location).name != job):
+        raise ValueError('owned Boat execution did not yield one identifiable job')
+    return Path(location)
+
+
+def transport_manifest_ok(data, expected):
+    return (isinstance(data, bytes) and isinstance(expected, str)
+            and re.fullmatch(r'[0-9a-f]{64}', expected) is not None
+            and data == (expected+'  ./scripts/pre-merge-boat.py\n').encode())
+
+
 def dispatch(base, acknowledgement='', runner_path=None, runner_sha='', transport='include-file'):
     # Local side: metadata/transport/byte identities only. Never merge or test.
     base_remote, base_local = base_ref(base)
@@ -324,13 +338,14 @@ def dispatch(base, acknowledgement='', runner_path=None, runner_sha='', transpor
     argv = ['--size', 'default', '--timeout', '240', '--wait', '0', '--idle', '0', '--no-reuse',
             '--no-setup-bend', *transport_arguments(transport, [n for n in names if n]), '--artifact', 'build/pre-merge',
             '--', 'bash', '-c', SCOPE_CMD, 'premerge-scope', head, base, expected, acknowledgement]
-    print('pre-merge: reviewed runner '+runner['sha256']+'; transport '+transport, flush=True)
+    print('pre-merge: reviewed runner '+runner['path']+' SHA256 '+runner['sha256']+'; transport '+transport, flush=True)
     code, job, location = run_runner(runner, runner_bytes, argv)
     if code:
         return code
-    if job is None or Path(location).name != job:
-        raise ValueError('owned Boat execution did not yield one identifiable job')
-    at = Path(location)
+    at = owned_job_path(job, location)
+    uploaded_manifest = (at/'manifest.sha256').read_bytes()
+    if not transport_manifest_ok(uploaded_manifest, expected):
+        raise ValueError('uploaded manifest must contain only the exact pushed pre-merge worker')
     provenance = json.loads((at/'provenance.json').read_text())
     report = json.loads((at/'artifacts/pre-merge/RESULT.json').read_text())
     if (provenance.get('job') != job or provenance.get('size') != 'default' or type(provenance.get('exit')) is not int or provenance['exit'] != 0
@@ -367,6 +382,7 @@ def dispatch(base, acknowledgement='', runner_path=None, runner_sha='', transpor
     (at/'premerge-controller.json').write_text(json.dumps({'kind': 'owned-premerge-controller',
         'job': job, 'head': head, 'base': report['base'], 'tree': report['tree'],
         'runner': runner, 'private_snapshot_sha256': runner['sha256'],
+        'uploaded_manifest_sha256': sha(uploaded_manifest), 'uploaded_files': ['./scripts/pre-merge-boat.py'],
         'worker_result_sha256': sha((at/'artifacts/pre-merge/RESULT.json').read_bytes()),
         'state': report['state'], 'limits': 'Caller-reviewed local runner identity; not independent worker attestation'},
         sort_keys=True, indent=2)+'\n')
