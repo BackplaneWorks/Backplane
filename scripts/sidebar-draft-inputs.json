@@ -93,6 +93,7 @@
     "src/core/mech.bend": "be262b768558a21e6c401c48e2158e6156d2db6c7d174f14cda55e379d3d88f4",
     "src/core/menu.bend": "807668923de70eaabb72ddb760f808cbf6d786b70822ba6a1180776758af7eee",
     "src/core/message-context.bend": "7e19596b3acec6ec7a1a10e6643c423ada897a6ee490a58b4a2b39a9767b677d",
+    "src/core/model-catalog.bend": "bdde44f85e11cf510a613d976a84c1964635c7f58efb1d64dae8a728a82e2a6e",
     "src/core/model.bend": "6aad79770639632f859b8c7f70e886fa715d1722e64e013df9585942bba77965",
     "src/core/modelpick.bend": "7a04676ab0f5e312e175347f4386b2dd53c69b35071bcdc3c70384d100d0b32f",
     "src/core/msgs.bend": "915c00db8275e7bef10a80cbe4c61d593f41ada6ecd6b5602c5b14ae4178e023",
@@ -1187,6 +1188,6 @@
       "logSha256": "cd83cd83cb66e6c0ea17d490d0baf8502c2b965f711f5e731bbd391a9cd5612c"
     },
     "limits": "Full PROOF.bend attempted on this source under the 3.7e9 cap; OOM-killed. The three new laws and 13 copy-choice UI assertions passed separately. No native-device acceptance claimed.",
-    "inheritedMainReview": "Also reviewed main changes since 3d17db4ec7: accounts overlay catalog fast path reads committed bindings; CEF changes only the new-tab URL constant; bot header/tab identity keys add no state reads; model picker parses existing info catalog and the same retained scratch query. No new ordinary draft-body reader or sidebar filtering/authority change."
+    "inheritedMainReview": "Also reviewed main changes since 3d17db4ec7: accounts overlay catalog fast path reads committed bindings; CEF changes only the new-tab URL constant; bot header/tab identity keys add no state reads; model picker parses existing info catalog and the same retained scratch query. No new ordinary draft-body reader or sidebar filtering/authority change. The added model-catalog import is pure catalog/JSON preparation with no Ui or draft access; its current source is pinned too."
   }
 }
