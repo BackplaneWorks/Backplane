@@ -2847,7 +2847,7 @@ html.phone .settings-view .settings summary { display: flex; }
 .app.phone .settings-view .settings-path { display: none; }
 
 /* full-screen pickers: search, the folder picker, Find */
-html.phone .picker { top: 0; left: 0; transform: none; width: 100vw; max-width: none; height: var(--ph-vh, 100dvh); max-height: none; border: 0; box-shadow: none; padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); box-sizing: border-box; z-index: 140; }
+html.phone .picker { top: var(--ph-top, 0px); left: 0; transform: none; width: 100vw; max-width: none; height: var(--ph-vh, 100dvh); max-height: none; border: 0; box-shadow: none; padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); box-sizing: border-box; z-index: 140; }
 html.phone .picker.search-threads { width: 100vw; }
 html.phone .picker .phead { min-height: 52px; padding: 0 4px 0 16px; font-size: 17px; color: var(--text); }
 html.phone .picker .phead button { min-width: 48px; min-height: 48px; font-size: 24px; }
@@ -2869,7 +2869,7 @@ html.phone .find-title .find-project { flex: none; max-width: 40%; overflow: hid
 
 /* the command palette: a full-screen list of big rows; keys are a
    keyboard's, so its key help goes */
-html.phone .workspace-palette-backdrop { padding: 0; z-index: 140; align-items: stretch; }
+html.phone .workspace-palette-backdrop { padding: var(--ph-top, 0px) 0 0; z-index: 140; align-items: flex-start; }
 html.phone .workspace-palette { width: 100%; height: var(--ph-vh, 100dvh); max-height: none; border: 0; box-shadow: none; padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); box-sizing: border-box; }
 html.phone .workspace-palette header { min-height: 52px; padding: 0 8px 0 16px; font-size: 17px; }
 html.phone .workspace-palette header button { min-height: 44px; padding: 0 14px; }
@@ -2881,15 +2881,15 @@ html.phone .workspace-palette footer { display: none; }
 /* the terminal: the whole screen above the keyboard, with the key row
    (phone-other.js) under it; floating-terminal.js's drag geometry is
    inline, so these win with !important */
-html.phone .floating-terminal { left: 0 !important; top: 0 !important; width: 100vw !important; height: calc(var(--ph-vh, 100dvh) - 52px - env(safe-area-inset-bottom)) !important; max-width: none !important; max-height: none !important; min-width: 0; min-height: 0; resize: none; border: 0; box-shadow: none; z-index: 130; padding-top: env(safe-area-inset-top); box-sizing: border-box; }
+html.phone .floating-terminal { left: 0 !important; top: var(--ph-top, 0px) !important; width: 100vw !important; height: calc(var(--ph-vh, 100dvh) - 52px - env(safe-area-inset-bottom)) !important; max-width: none !important; max-height: none !important; min-width: 0; min-height: 0; resize: none; border: 0; box-shadow: none; z-index: 130; padding-top: env(safe-area-inset-top); box-sizing: border-box; }
 html.phone.ph-kb .floating-terminal { height: calc(var(--ph-vh, 100dvh) - 52px) !important; }
 html.phone .floating-terminal-handle { min-height: 48px; cursor: default; font-size: 15px; }
 html.phone .floating-terminal-handle button { min-height: 44px; padding: 0 16px; }
 html.phone .floating-terminal footer { display: none; }
 html.phone .floating-terminal .screen { font-size: 13px; }
 .ph-term-keys { display: none; }
-html.phone .ph-term-keys:not([hidden]) { display: flex; position: fixed; z-index: 131; left: 0; right: 0; top: calc(var(--ph-vh, 100dvh) - 52px - env(safe-area-inset-bottom)); height: 52px; gap: 6px; padding: 4px 8px; box-sizing: border-box; overflow-x: auto; overscroll-behavior: contain; scrollbar-width: none; background: var(--panel, var(--bg)); border-top: 1px solid var(--line); }
-html.phone.ph-kb .ph-term-keys:not([hidden]) { top: calc(var(--ph-vh, 100dvh) - 52px); }
+html.phone .ph-term-keys:not([hidden]) { display: flex; position: fixed; z-index: 131; left: 0; right: 0; top: calc(var(--ph-top, 0px) + var(--ph-vh, 100dvh) - 52px - env(safe-area-inset-bottom)); height: 52px; gap: 6px; padding: 4px 8px; box-sizing: border-box; overflow-x: auto; overscroll-behavior: contain; scrollbar-width: none; background: var(--panel, var(--bg)); border-top: 1px solid var(--line); }
+html.phone.ph-kb .ph-term-keys:not([hidden]) { top: calc(var(--ph-top, 0px) + var(--ph-vh, 100dvh) - 52px); }
 html.phone .ph-term-keys button { flex: none; min-width: 44px; height: 44px; padding: 0 10px; font: 15px var(--mono); border: 1px solid var(--line); background: var(--raise); color: var(--text); -webkit-user-select: none; user-select: none; touch-action: manipulation; }
 html.phone .ph-term-keys button[aria-pressed="true"] { background: var(--accent); color: var(--bg); border-color: var(--accent); }
 /* a short screen (a phone on its side): the terminal keeps its lines; the
@@ -2901,8 +2901,8 @@ html.phone .ph-term-keys button[aria-pressed="true"] { background: var(--accent)
   html.phone .floating-terminal-handle button { min-height: 36px; }
   html.phone .floating-terminal { height: calc(var(--ph-vh, 100dvh) - 44px - env(safe-area-inset-bottom)) !important; }
   html.phone.ph-kb .floating-terminal { height: calc(var(--ph-vh, 100dvh) - 44px) !important; }
-  html.phone .ph-term-keys:not([hidden]) { height: 44px; top: calc(var(--ph-vh, 100dvh) - 44px - env(safe-area-inset-bottom)); padding: 4px 8px; }
-  html.phone.ph-kb .ph-term-keys:not([hidden]) { top: calc(var(--ph-vh, 100dvh) - 44px); }
+  html.phone .ph-term-keys:not([hidden]) { height: 44px; top: calc(var(--ph-top, 0px) + var(--ph-vh, 100dvh) - 44px - env(safe-area-inset-bottom)); padding: 4px 8px; }
+  html.phone.ph-kb .ph-term-keys:not([hidden]) { top: calc(var(--ph-top, 0px) + var(--ph-vh, 100dvh) - 44px); }
   html.phone .ph-term-keys button { height: 36px; }
   html.phone.ph-kb .floating-terminal-handle { display: none; }
   html.phone .floating-terminal { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
@@ -2910,7 +2910,7 @@ html.phone .ph-term-keys button[aria-pressed="true"] { background: var(--accent)
 
 /* pairing and Devices: inside the safe area, above the keyboard; on a
    pairing link, its Connect comes before the other ways in */
-html.phone .pairing-screen { height: var(--ph-vh, 100dvh); bottom: auto; padding: calc(16px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) calc(24px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left)); box-sizing: border-box; scroll-padding: 16px; }
+html.phone .pairing-screen { top: var(--ph-top, 0px); height: var(--ph-vh, 100dvh); bottom: auto; padding: calc(16px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) calc(24px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left)); box-sizing: border-box; scroll-padding: 16px; }
 html.phone .pairing-card input.field { font-size: 16px; }
 html.phone .pairing-card { display: flex; flex-direction: column; }
 html.phone .pairing-card > * { order: 3; }
@@ -2942,7 +2942,7 @@ html.phone .pairing-qr { margin: 16px auto; width: min(100%, 300px); }
 .app.phone .order-card :is(button, a) { min-height: 44px; display: inline-flex; align-items: center; }
 .app.phone .order-card .oc-steps { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
 /* Improvements on a phone: the whole screen above the keyboard */
-html.phone section.improvements { top: 0 !important; left: 0 !important; right: 0; bottom: auto; width: 100vw !important; max-width: none; height: var(--ph-vh, 100dvh); max-height: none; box-sizing: border-box; overflow-y: auto; padding-top: calc(12px + env(safe-area-inset-top)); padding-bottom: calc(12px + env(safe-area-inset-bottom)); border: 0; transform: none; }
+html.phone section.improvements { top: var(--ph-top, 0px) !important; left: 0 !important; right: 0; bottom: auto; width: 100vw !important; max-width: none; height: var(--ph-vh, 100dvh); max-height: none; box-sizing: border-box; overflow-y: auto; padding-top: calc(12px + env(safe-area-inset-top)); padding-bottom: calc(12px + env(safe-area-inset-bottom)); border: 0; transform: none; }
 html.phone section.improvements header button { min-width: 44px; min-height: 44px; }
 html.phone section.improvements :is(button, select) { min-height: 44px; }
 html.phone section.improvements :is(input, select, textarea) { font-size: 16px; }
@@ -3164,6 +3164,13 @@ html.phone #reconnect-note { top: calc(var(--ph-top, 0px) + env(safe-area-inset-
 html.phone.ph-short #reconnect-note { top: calc(var(--ph-top, 0px) + env(safe-area-inset-top) + 40px) !important; }
 /* a phone that chose the computer layout: the way back (phone-other.js) */
 .ph-layout-back { position: fixed; z-index: 12001; left: max(8px, env(safe-area-inset-left)); bottom: max(8px, env(safe-area-inset-bottom)); min-height: 44px; padding: 0 14px; border: 1px solid var(--accent); background: var(--raise); color: var(--accent); font-size: 14px; }
+/* typing into a bot's Browser page from a phone (phone-other.js) */
+.ph-type-bar { display: none; }
+html.phone .ph-type-bar:not([hidden]) { display: flex; position: fixed; z-index: 131; left: 0; right: 0; top: calc(var(--ph-top, 0px) + var(--ph-vh, 100dvh) - 56px - env(safe-area-inset-bottom)); height: 56px; gap: 6px; padding: 6px 8px; box-sizing: border-box; background: var(--panel, var(--bg)); border-top: 1px solid var(--line); }
+html.phone.ph-kb .ph-type-bar:not([hidden]) { top: calc(var(--ph-top, 0px) + var(--ph-vh, 100dvh) - 56px); }
+html.phone .ph-type-bar input { flex: 1; min-width: 0; min-height: 44px; font-size: 16px; }
+html.phone .ph-type-bar button { flex: none; min-width: 52px; min-height: 44px; }
+html.phone .bot-screen.driven { padding-bottom: 64px; }
 /* the Bots tab with no bot yet: what one is and how to make one */
 .app.phone .sidebar .bots:not(:has(.bot-name)) > .bots-head:first-child { flex-wrap: wrap; }
 .app.phone .sidebar .bots:not(:has(.bot-name)) > .bots-head:first-child::after { content: "No bots yet. A bot is an agent that stays between chats, with a name, a cat and a memory: mention it in any message (@scout look at the BOM). Tap + to make one."; flex: 1 1 100%; padding: 8px 0 12px; color: var(--dim); font-size: 14px; font-weight: normal; text-transform: none; letter-spacing: normal; line-height: 1.5; white-space: normal; }
