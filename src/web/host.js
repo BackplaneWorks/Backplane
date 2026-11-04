@@ -65,6 +65,9 @@ installWorkspaceKeys({ dispatch, escNext: (term, probe, viewer) => App.esc_next(
   clearProbe: () => { Plot2d.setProbe("");Solid.setProbe("");dispatch("probe", ""); } });
 installWorkspaceHints();
 installFloatingTerminal({ dispatch });
+import { installPhoneOther, titleHits } from "./phone-other.js";
+const PHONE_TITLES = () => document.documentElement.classList.contains("phone");
+const phoneOther = installPhoneOther({ dispatch: (action, value) => dispatch(action, value) });
 import { ConnectionLog } from "./connection-log.js";
 import { frameSummary } from "./frame-summary.js";
 import { pairBrowser } from "./auth.js";
@@ -1134,6 +1137,7 @@ function render() {
   starAttentionSync(root);
   bubMoveSync();
   terminalOutput.apply(true);
+  phoneOther.rendered();
   if (PERF) PERF.render.push([t1 - t0, pnow() - t1]);
   if (RR) { RR.n("render.full");RR.t("render.view", t1 - t0);RR.t("render.patch", pnow() - t1); }
   if (frontendNode || canonicalBoot && App.synced(ui)) themeSeen(root.querySelector(".app"));
@@ -3213,6 +3217,20 @@ function showThinSearch(search) {
   const rows = document.createElement("div");rows.id = "find-rows";rows.className = "find-rows";rows.setAttribute("role", "listbox");
   const foot = document.createElement("footer");foot.textContent = "↑↓ choose · Enter open · Esc close";
   panel.append(query, note, rows, foot);
+  // (a phone: threads whose titles match, above what was said in them)
+  const titles = PHONE_TITLES() ? document.createElement("div") : null;
+  if (titles) { titles.className = "find-titles";rows.before(titles); }
+  const showTitles = () => {
+    if (!titles) return;
+    titles.replaceChildren();
+    for (const hit of titleHits(document, query.value)) {
+      const b = document.createElement("button");b.type = "button";b.className = "find-title";
+      const t = document.createElement("span");t.className = "find-thread";t.textContent = hit.title;b.append(t);
+      if (hit.project) { const p = document.createElement("span");p.className = "find-project";p.textContent = hit.project;b.append(p); }
+      b.addEventListener("click", () => { close();thinFind = null;dispatch("select", hit.id);later(); });
+      titles.append(b);
+    }
+  };
   // asked: the search on its way (its query and cursor); next: what to ask
   // once it is answered; shown: the query whose results are on screen
   const f = { asked: null, next: null, shown: null, hits: [], at: -1, group: null, timer: 0, more: null };
@@ -3258,7 +3276,7 @@ function showThinSearch(search) {
       button.addEventListener("click", () => { ask(search.query, search.cursor);query.focus(); });rows.append(button);f.more = button;
     }
     f.shown = search.query;
-    note.textContent = f.hits.length ? "" : `Nothing matches “${search.query.trim()}”.`;
+    note.textContent = f.hits.length || titles?.childElementCount ? "" : `Nothing matches “${search.query.trim()}”.`;
     if (!more && f.hits.length) choose(0);
   };
   thinFind = {
@@ -3280,6 +3298,7 @@ function showThinSearch(search) {
     },
   };
   query.addEventListener("input", () => {
+    showTitles();
     clearTimeout(f.timer);
     if (!query.value.trim()) { ask("", "");return; }
     f.timer = setTimeout(() => ask(query.value, ""), 180);
@@ -3295,6 +3314,7 @@ function showThinSearch(search) {
       else ask(query.value, "");
     }
   });
+  showTitles();
   if (search.rows?.length) draw(search, false);
   else if (search.query) ask(search.query, "");
   else note.textContent = "Type a word said in any thread.";
