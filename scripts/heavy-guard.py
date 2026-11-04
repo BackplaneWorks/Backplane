@@ -120,6 +120,26 @@ def shard_run_ok(command):
     return all(command.count(o) == 1 for o in ('--out', '--shard', '--expect', '--result'))
 
 
+def cached_proof_run_ok(command):
+    """One fixed original-shard cache executor, never arbitrary checker argv."""
+    if len(command) < 3 or not trusted_python(command[0]) or command[2] != 'run':
+        return False
+    try:
+        if Path(command[1]).resolve() != Path(__file__).resolve().parent / 'proof-cache.py':
+            return False
+    except (OSError, ValueError):
+        return False
+    options = command[3:]
+    if len(options) % 2:
+        return False
+    seen = {}
+    for name, value in zip(options[::2], options[1::2]):
+        if name not in {'--plan', '--shard', '--result', '--root', '--cache'} or name in seen or not value:
+            return False
+        seen[name] = value
+    return {'--plan', '--shard', '--result'} <= set(seen) and re.fullmatch(r'[0-9]{3}', seen['--shard']) is not None
+
+
 def worker_contract(profile, command):
     """Return the argv to exec (interpreter pinned to an absolute path) or None.
 
@@ -134,7 +154,7 @@ def worker_contract(profile, command):
     if not python:
         return None
     pinned = [str(Path(sys.executable).resolve()), *command[1:]]
-    if profile == 'proof-shard' and shard_run_ok(command):
+    if profile == 'proof-shard' and (shard_run_ok(command) or cached_proof_run_ok(command)):
         return pinned
     wrapper = Path(__file__).resolve().parent / 'lowmem-build.py'
     try:

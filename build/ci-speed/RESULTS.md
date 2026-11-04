@@ -1187,3 +1187,34 @@ immutable legacy-entry shadowing. The emit source key and retained-producer
 identities, memory floors and installer/release paths remain unchanged.
 Concurrent LRU touches cannot force false misses; partial publishes fail
 safe. Full hub/web/proof/CI/release qualification remains incomplete.
+
+
+### Execute original missing proof shards and join authenticated local passes
+
+The prior proof-cache path only planned hits and imported caller-declared JSON.
+`proof-cache.py` now runs ONE missing original shard inside its real admitted
+executor, records only its accepted unchanged execution, and joins only a
+complete current MAC-authenticated key inventory. JSON pass import refuses;
+proof keys bind the owned executor so legacy imported entries miss. No proof,
+law, original worker, verdict policy, floor or reserve was weakened.
+
+| Real stock-Bend two-law fixture, normal Boat | Before (cold) | After (cached) |
+|---|---:|---:|
+| Proof executions | 2 | 0 warm; 1 after one proof comment edit |
+| Worker scopes + final join, excluding plan/diagnostic joins | 1.288 s | 0.270 s warm; 0.788 s edited |
+| Peak worker RSS | 120,448 KiB | 118,784 KiB edited; no warm worker |
+
+[Receipt and limits](affected-proof/README.md), [measurements](affected-proof/MEASURE.json),
+[indexed raw evidence](affected-proof/EVIDENCE.json), [126 controls](affected-proof/TESTS.json).
+One run; cold planning0.272s separately. False theorem rejected at original
+proof body (exit1), no entry, join incomplete; max123,136KiB. Stale plan/source,
+missing key/partial join and bad MAC fail closed. Fresh worker scopes actual
+3,699,998,720B +512MiB controller, both swap0, combined4,236,869,632B<4GiB;
+zero max/OOM/swap events. Whole experiment5.979s, push2s/setup1s,
+12credit-s/$0.00012; default sandbox deleted verified. Local tests2.904s.
+
+This is an executable opt-in same-user LOCAL cache, not shared PR/main/Boat
+trust, fresh-nightly proof or production/full-suite qualification. No workflow,
+full-proof, compiler-memory or release gate changed. The two-minute full PR
+and every-job-under4GiB targets remain unachieved; heavy shards and signed
+shared reuse remain follow-ups with their owners.
