@@ -1314,3 +1314,26 @@ boundary delta and approved-runner byte identity, with partial runner audit
 scope stated. No budget/start/size/memory guard changed, no exception runner,
 no local tests/merge-tree or Bend execution. This is transport compatibility,
 not a full CI/proof/build speedup claim. Fresh final-head guard remains needed.
+
+### Check-cache entries bind a fresh standalone context
+
+Aggregate manifest passes cannot be recorded as independent module passes:
+earlier imports can fill declarations used by later modules. The opt-in
+pre-check now checks each miss as its exact fresh-process entry, retires old
+aggregate-derived entries, and returns advisory3 (failure/inconclusive4),
+never aggregate-green. Original full check/proof gates and guard floors stay.
+
+| Frozen1,185-module key metadata only | Before | After |
+|---|---|---|
+| Median of three key-plan samples | 0.195583s | 0.194275s |
+| Process VmHWM | 58,576KiB | 64,976KiB |
+| Actual cgroup peak / cap | 426,598,400 /536,870,912B | 334,839,808 /536,870,912B |
+| Bend/proofs/pass seeds/paid cost | 0/0/0/$0 | 0/0/0/$0 |
+
+[Exact old candidate/corpus identities, receipts and limitations](check-entry-context/README.md).
+These preserved measurements are metadata only, not native check throughput
+or a speedup claim; both actual512MiB/swap0 runs had zero limit/OOM events.
+Historical94 mock-based Python controls predate the Boat-only rule and are
+not real-Bend proof evidence. The cold-check14GiB admission floor is unchanged
+and still refuses on a normal capped Boat; this correctness correction is
+not a bounded cold worker or a CI gate. Fresh Boat checks remain required.
