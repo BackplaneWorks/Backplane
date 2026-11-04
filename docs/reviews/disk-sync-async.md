@@ -70,6 +70,19 @@ checks the runner's source-SHA commit subject, exact staged file set and
 every pinned file hash, and records the distinct snapshot OID/tree.
 Production and measurement code are unchanged by that transport correction.
 
+Second attempt `j20261104102459-1678325` / work `1584384` passed corrected
+snapshot admission and failed controlled boundary case 3: done=1, result=ok,
+resumes=1, but the park counter remained 0. Only the two duplicate-negative
+controls passed; no checkpoint/A/B or real-fsync boundary case ran. The
+host-assigned VM property wrapper was bypassed by the effect's lexical call.
+The prepared instrumentation correction defines the wrapper and original
+byte-identical park helper in the same VM lexical environment, with named
+counter assertions. Production behavior and measurement method are unchanged.
+Raw failure/resource/tool/source receipts are retained in
+`extra/hub-disk-sync-qualification/962c7255-counter-fail/`. Worker/controller
+peaks were 22,941,696/159,805,440 bytes; cap/swap/OOM checks passed and the
+enclosing VM was deleted. Corrected execution awaits lane A's static review.
+
 Execution/measurement receipts: pending. Run only through the normal approved daily Boat
 runner, default sandbox, `hub-latency` lock, no reuse/setup-Bend; controller
 512 MiB, worker at most 3.7e9 bytes, swap 0. `disk_sync_gate.py` verifies source

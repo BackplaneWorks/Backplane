@@ -11,15 +11,17 @@ function load({ io = fs, asyncMode = true, mode = '', platform = process.platfor
   const park = loop.slice(begin, end), effects = {}, stats = { parks: 0, resumes: 0, completions: 0, duplicates: 0 };
   const context = vm.createContext({ require: n => n === 'fs' ? io : require(n), Buffer,
     process: { platform, env: { BACKPLANE_JS_LOOP: mode } }, console,
-    BEND_ASYNC: asyncMode, BEND_IO: { pend: 0 }, Promise,
+    BEND_ASYNC: asyncMode, BEND_IO: { pend: 0 }, Promise, componentStats: stats,
     CID: x => x, Nil: 'Nil', Con: 'Con', WireScan: 'WireScan',
     Disk: new Proxy({}, { get: (_, key) => 'Disk.' + key }),
     io_eff: (key, fn) => { effects[key] = fn; },
     bp_resume: (k, then) => queueMicrotask(() => { stats.resumes++; k(then()); }) });
   if (bridge) {
-    vm.runInContext(park, context);
-    const original = context.io_park_promise;
-    context.io_park_promise = (...args) => { stats.parks++; return original(...args); };
+    // Define the wrapper in the same lexical environment as the effect.
+    // Host-side context property rebinding can leave Bun's original lexical
+    // function binding intact, bypassing an instrumentation-only wrapper.
+    vm.runInContext('const componentPark = (' + park + ');\n'
+      + 'function io_park_promise(p, k, then) { componentStats.parks++; return componentPark(p, k, then); }', context);
   }
   vm.runInContext(source, context);
   return { context, effects, stats, identity: { effect_sha256: sha(source), loop_sha256: sha(loop),
