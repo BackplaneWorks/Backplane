@@ -60,6 +60,17 @@ export function titleHits(doc, query, max = 8) {
   return out;
 }
 
+// a native app's WebView (Android's "; wv)" in its user agent, an iOS
+// WKWebView's no "Safari/" and not a home-screen app), or a shell that says so (window.backplaneApp):
+// browser-only offers (notification permission) are the app's business there
+export function inWebView(nav, w = globalThis) {
+  if (w?.backplaneApp) return true;
+  const ua = String(nav?.userAgent || "");
+  // (an iPhone's home-screen web app has no "Safari/" either, but says
+  // navigator.standalone, and does show notifications)
+  return /; wv\)/.test(ua) || (/iPhone|iPad|iPod/.test(ua) && !/Safari\//.test(ua) && nav?.standalone !== true);
+}
+
 export function installPhoneOther({ doc = document, win = window, dispatch, touchIcon = "", appIcons = [] }) {
   const html = doc.documentElement;
   const on = () => html.classList.contains("phone");
@@ -81,7 +92,11 @@ export function installPhoneOther({ doc = document, win = window, dispatch, touc
         // into it; the browser asks or shows its Paste bubble)
         if (k.paste) {
           const f = field();
-          win.navigator.clipboard?.readText?.().then(t => { if (t && f) dispatch(f.getAttribute("data-text"), (f.getAttribute("data-for") ? f.getAttribute("data-for") + "\t" : "") + t); }, () => {});
+          const put = t => { if (t && f) dispatch(f.getAttribute("data-text"), (f.getAttribute("data-for") ? f.getAttribute("data-for") + "\t" : "") + t); };
+          // (a WebView often refuses readText: then a field over the row
+          // takes the system's own long-press Paste)
+          const ask = win.navigator.clipboard?.readText?.();
+          if (ask) ask.then(put, () => pasteField(put)); else pasteField(put);
           return;
         }
         send(k.key, (k.mods || 0) | (ctrl ? 4 : 0));setCtrl(false);
@@ -93,6 +108,15 @@ export function installPhoneOther({ doc = document, win = window, dispatch, touc
     row.addEventListener("touchstart", e => { if (e.target.closest("button")) e.preventDefault(); }, { passive: false });
     row.addEventListener("touchend", e => { const b = e.target.closest("button");if (b) { e.preventDefault();b.click(); } }, { passive: false });
     doc.body.append(row);
+  };
+  const pasteField = (put) => {
+    row.querySelector(".ph-term-paste")?.remove();
+    const p = doc.createElement("input");
+    p.className = "ph-term-paste";p.type = "text";p.placeholder = "Long-press here, then Paste";p.setAttribute("aria-label", "Paste into the terminal");
+    const done = () => { p.remove();field()?.focus({ preventScroll: true }); };
+    p.addEventListener("input", () => { if (p.value) { put(p.value);done(); } });
+    p.addEventListener("blur", () => setTimeout(() => p.isConnected && done(), 300));
+    row.append(p);p.focus();
   };
   // Ctrl held: the phone keyboard's next character is the chord's
   doc.addEventListener("input", e => {
@@ -175,10 +199,11 @@ export function installPhoneOther({ doc = document, win = window, dispatch, touc
 
   // notifications on this phone: which words Settings shows
   // (html.ph-notify-on/-off/-none/-ask), and a tap on Allow asks
+  // (inside the phone app's WebView the app itself notifies: the row goes)
   const notifyState = () => {
     const N = win.Notification;
-    const state = !win.isSecureContext ? "http" : !N ? "none" : N.permission === "granted" ? "on" : N.permission === "denied" ? "off" : "ask";
-    for (const k of ["on", "off", "none", "ask", "http"]) html.classList.toggle("ph-notify-" + k, k === state);
+    const state = inWebView(win.navigator) ? "app" : !win.isSecureContext ? "http" : !N ? "none" : N.permission === "granted" ? "on" : N.permission === "denied" ? "off" : "ask";
+    for (const k of ["on", "off", "none", "ask", "http", "app"]) html.classList.toggle("ph-notify-" + k, k === state);
   };
   doc.addEventListener("click", e => {
     if (!on() || !e.target.closest?.("[data-ph-notify]")) return;
