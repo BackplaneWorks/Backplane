@@ -2651,3 +2651,78 @@ html[data-backplane-held="quiet"] .allowance-chip { visibility: hidden; }
 
 /* Embedded home viewers own their tabs; no outer workspace rail replaces them. */
 .project-home .viewer > .viewer-tabs { display:flex; flex-wrap:wrap; justify-content:flex-start; }
+
+/* phone: other (D: settings, search, palette, terminal, pairing and
+   devices; phone-other.js). Overlays outside the hub's tree (search,
+   pairing, the terminal's key row) go by html.phone, which phone-shell.js
+   sets before the first frame; --ph-vh is the visual viewport's height,
+   so a sheet ends where the on-screen keyboard starts. */
+html.phone .settings-view .set-ctl button, html.phone .settings-view .settings-path button { min-height: 44px; min-width: 44px; padding: 8px 14px; }
+html.phone .settings-view .set-ctl { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+html.phone .settings-view input, html.phone .settings-view select, html.phone .settings-view textarea { font-size: 16px; min-height: 44px; }
+html.phone .settings-view .settings { padding: 12px 12px calc(24px + env(safe-area-inset-bottom)); }
+html.phone.ph-kb .settings-view .settings { padding-bottom: calc(24px + var(--ph-kb, 0px)); }
+html.phone .settings-view .set-row { padding: 14px 12px; }
+html.phone .settings-view .settings-category { min-height: 64px; }
+/* the phone's header names the page and has ‹; the page's own path line
+   would say it twice */
+.app.phone .settings-view .settings-path { display: none; }
+
+/* full-screen pickers: search, the folder picker, Find */
+html.phone .picker { top: 0; left: 0; transform: none; width: 100vw; max-width: none; height: var(--ph-vh, 100dvh); max-height: none; border: 0; box-shadow: none; padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); box-sizing: border-box; z-index: 140; }
+html.phone .picker.search-threads { width: 100vw; }
+html.phone .picker .phead { min-height: 52px; padding: 0 4px 0 16px; font-size: 17px; color: var(--text); }
+html.phone .picker .phead button { min-width: 48px; min-height: 48px; font-size: 24px; }
+html.phone .picker input { min-height: 44px; font-size: 16px; margin: 4px 12px 10px; }
+html.phone .find-rows, html.phone .picker .find-rows { flex: 1; padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
+html.phone .find-hit { min-height: 52px; padding: 12px 16px; }
+html.phone .find-group { padding: 14px 16px 6px; }
+html.phone .find-more { min-height: 48px; padding: 12px 16px; }
+html.phone .search-threads .find-note { padding: 4px 16px 10px; font-size: 14px; }
+html.phone .picker.search-threads footer { display: none; }
+html.phone .find-titles:not(:empty) { flex: none; max-height: 40%; overflow-y: auto; border-top: 1px solid var(--line); }
+html.phone .find-title { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 52px; padding: 10px 16px; text-align: left; border: 0; border-bottom: 1px solid var(--line); background: none; color: var(--text); }
+html.phone .find-title .find-thread { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+html.phone .find-title .find-project { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+
+/* the command palette: a full-screen list of big rows; keys are a
+   keyboard's, so its key help goes */
+html.phone .workspace-palette-backdrop { padding: 0; z-index: 140; align-items: stretch; }
+html.phone .workspace-palette { width: 100%; height: var(--ph-vh, 100dvh); max-height: none; border: 0; box-shadow: none; padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); box-sizing: border-box; }
+html.phone .workspace-palette header { min-height: 52px; padding: 0 8px 0 16px; font-size: 17px; }
+html.phone .workspace-palette header button { min-height: 44px; padding: 0 14px; }
+html.phone .workspace-palette input { min-height: 44px; margin: 4px 12px 10px; width: calc(100% - 24px); }
+html.phone #workspace-commands { flex: 1; padding-bottom: env(safe-area-inset-bottom); }
+html.phone .workspace-command { min-height: 52px; padding: 12px 16px; }
+html.phone .workspace-palette footer { display: none; }
+
+/* the terminal: the whole screen above the keyboard, with the key row
+   (phone-other.js) under it; floating-terminal.js's drag geometry is
+   inline, so these win with !important */
+html.phone .floating-terminal { left: 0 !important; top: 0 !important; width: 100vw !important; height: calc(var(--ph-vh, 100dvh) - 52px - env(safe-area-inset-bottom)) !important; max-width: none !important; max-height: none !important; min-width: 0; resize: none; border: 0; box-shadow: none; z-index: 130; padding-top: env(safe-area-inset-top); box-sizing: border-box; }
+html.phone.ph-kb .floating-terminal { height: calc(var(--ph-vh, 100dvh) - 52px) !important; }
+html.phone .floating-terminal-handle { min-height: 48px; cursor: default; font-size: 15px; }
+html.phone .floating-terminal-handle button { min-height: 44px; padding: 0 16px; }
+html.phone .floating-terminal footer { display: none; }
+html.phone .floating-terminal .screen { font-size: 13px; }
+.ph-term-keys { display: none; }
+html.phone .ph-term-keys:not([hidden]) { display: flex; position: fixed; z-index: 131; left: 0; right: 0; top: calc(var(--ph-vh, 100dvh) - 52px - env(safe-area-inset-bottom)); height: 52px; gap: 6px; padding: 4px 8px; box-sizing: border-box; overflow-x: auto; overscroll-behavior: contain; scrollbar-width: none; background: var(--panel, var(--bg)); border-top: 1px solid var(--line); }
+html.phone.ph-kb .ph-term-keys:not([hidden]) { top: calc(var(--ph-vh, 100dvh) - 52px); }
+html.phone .ph-term-keys button { flex: none; min-width: 44px; height: 44px; padding: 0 10px; font: 15px var(--mono); border: 1px solid var(--line); background: var(--raise); color: var(--text); -webkit-user-select: none; user-select: none; touch-action: manipulation; }
+html.phone .ph-term-keys button[aria-pressed="true"] { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+
+/* pairing and Devices: inside the safe area, above the keyboard; on a
+   pairing link, its Connect comes before the other ways in */
+html.phone .pairing-screen { height: var(--ph-vh, 100dvh); bottom: auto; padding: calc(16px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) calc(24px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left)); box-sizing: border-box; scroll-padding: 16px; }
+html.phone .pairing-card input.field { font-size: 16px; }
+html.phone .pairing-card { display: flex; flex-direction: column; }
+html.phone .pairing-card > * { order: 3; }
+html.phone .pairing-card > h1, html.phone .pairing-card > .pairing-lead { order: 0; }
+html.phone .pairing-card > label:first-of-type, html.phone .pairing-card > .pairing-status { order: 1; }
+html.phone .pairing-card > .pairing-pending { order: 2; }
+html.phone .pairing-card > .pairing-pending button { width: 100%; margin: 8px 0 0; }
+html.phone .pairing-card > .pairing-or { display: block; order: 2; margin: 24px 0 0; color: var(--dim); }
+html.phone .pairing-card > button { align-self: flex-start; }
+html.phone .pairing-pending a { display: inline-flex; align-items: center; min-height: 44px; }
+html.phone .pairing-invitation button { min-width: 44px; }
+html.phone .pairing-qr { margin: 16px auto; width: min(100%, 300px); }
