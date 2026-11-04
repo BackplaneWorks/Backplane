@@ -21,7 +21,7 @@ class Handlers(unittest.TestCase):
         defs = coverage.definitions(client)
         self.assertIn('"cad.install"', defs['Cadview.rpc'])
         for action, operation in [('cad-install','start'), ('cad-cancel','cancel'), ('cad-refresh','refresh')]:
-            self.assertIn(f'case "{action}": Cadview.rpc(u, value, "{operation}")', defs['Cadview.dispatch'])
+            self.assertIn(f'case "{action}": Cadview.rpc(u, value, "{operation}")', defs['Cadview.dispatch.by'])
         hub = (ROOT/'src/core/hub.bend').read_text()
         self.assertIn('"cad.install"', hub)
         self.assertIn('CadInstall{', hub)
