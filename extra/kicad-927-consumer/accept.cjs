@@ -20,7 +20,7 @@ const points = value => Array.from(value, c => c.codePointAt(0));
 const wait = ms => new Promise(resolve => setTimeout(resolve,ms));
 async function until(label, fn, ms=120000) {
   const end=Date.now()+ms; let last;
-  while(Date.now()<end) { try { const value=await fn(); if(value)return value; } catch(e){last=e.message;} await wait(250); }
+  while(Date.now()<end) { try { const value=await fn(); if(value)return value; } catch(e){if(e.code==='HEALTH_JSON_INVALID')throw e;last=e.message;} await wait(250); }
   throw Error(label+' timed out'+(last?': '+last:''));
 }
 function setting(home) {
@@ -28,7 +28,11 @@ function setting(home) {
   try { return db.prepare('SELECT v FROM setting WHERE k=?').get('kicad.path')?.v ?? ''; }
   finally { db.close(); }
 }
-function health(home) { return json(path.join(home,'kicad-health.json')); }
+function health(home) {
+  const raw=fs.readFileSync(path.join(home,'kicad-health.json'),'utf8');
+  try {return JSON.parse(raw);}
+  catch(cause) {const e=Error('Invalid production health JSON: '+cause.message);e.code='HEALTH_JSON_INVALID';throw e;}
+}
 function cleanEnvironment() {
   const env={...process.env};
   for(const key of Object.keys(env)) {
@@ -64,14 +68,16 @@ async function openCase(name, pathRoot) {
   Object.assign(entry,{origin:url.origin,phase:'ready'});save();
   // Dismiss the fresh home's onboarding through its real visible control.
   // It holds input while open; seeding a setting would bypass this boundary.
-  const skip=page.locator('#tour [data-on-click="ob-skip"]');
+  const skip=page.locator('.tour [data-on-click="ob-skip"]');
   if(await skip.isVisible()) {
-    await skip.click();await page.locator('#tour').waitFor({state:'hidden',timeout:30000});
+    await skip.click();await page.locator('.tour').waitFor({state:'hidden',timeout:30000});
     entry.tourSkipped=true;save();
   }
   return {app,page,home,entry};
 }
 async function cadSettings(page) {
+  const skip=page.locator('.tour [data-on-click="ob-skip"]');
+  if(await skip.isVisible()) {await skip.click();await page.locator('.tour').waitFor({state:'hidden',timeout:30000});}
   if(!await page.locator('#settings-content').isVisible()) {
     await page.locator('[data-on-click="flag"][data-value="settings"]').first().click();
   }
@@ -92,6 +98,7 @@ async function typePath(context, typed, expectedStatus='ok') {
   await page.screenshot({path:path.join(out,entry.name+'-typed.png')});
   await field.press('Enter');
   await until('literal persisted setting',()=>setting(home)===typed);
+  entry.saved=setting(home);entry.savedCodePoints=points(entry.saved);save();
   const h=await until('checked manual path',()=>{
     const h=health(home);return h.setting===typed && h.status===expectedStatus ? h : false;
   });
@@ -169,14 +176,20 @@ async function main() {
   for(let i=0;i<cfg.manualRoots.length;i++) {
     await check('manual-'+i,async()=>{
     const context=await openCase('manual-'+i);
-    const typed=cfg.manualRoots[i], h=await typePath(context,typed);
+    const typed=cfg.manualRoots[i];
+    try {
+    const h=await typePath(context,typed);
     assert.equal(normal(h.cli),normal(path.join(typed,'bin/kicad-cli.exe')));
     assert.equal(h.source,'setting');
+    } finally {
+    if(context.entry.saved===typed) {
     await context.page.reload();
     await context.page.waitForFunction(()=>document.documentElement.dataset.backplaneRemoteReady==='true',null,{timeout:90000});
     await cadSettings(context.page);
     assert.equal(await context.page.locator('#kicad-path').inputValue(),typed,'Saved path changed after a real page reload');
     context.entry.reloadPreserved=true;save();
+    }
+    }
     });
   }
   await check('real-install',async()=>{
@@ -184,7 +197,9 @@ async function main() {
   // Force a genuine missing runtime notice without changing Program Files or
   // substituting a download. After install, clear the explicit missing setting.
   const missing=path.join(out,'absent-runtime')+'\\';
-  assert(!fs.existsSync(missing));await typePath(install,missing,'missing');
+  assert(!fs.existsSync(missing));
+  try {await typePath(install,missing,'missing');}
+  catch(e) {if(e.code!=='HEALTH_JSON_INVALID')throw e;(result.failures??=[]).push({name:'install-health-json',error:e.message});save();}
   const button=install.page.locator('[data-on-click="kicad-install"], [data-on-click="cad-install"][data-value="kicad"]').first();
   await button.waitFor({state:'visible',timeout:30000});
   install.entry.installStartedAt=new Date().toISOString();save();await button.click();
@@ -192,12 +207,16 @@ async function main() {
   await until('real in-app download / verify / extract / promote',()=>fs.existsSync(installed),1200000);
   assert.equal(sha(installed),cfg.runtimeCliSHA256,'Installed native CLI differs from the pinned runtime');
   install.entry.installedCli=installed;install.entry.installedCliSHA256=sha(installed);
-  const h=await typePath(install,'');
-  assert.equal(h.source,'installed');assert.equal(normal(h.cli),normal(installed));
+  try {
+    const h=await typePath(install,'');
+    assert.equal(h.source,'installed');assert.equal(normal(h.cli),normal(installed));
+    install.entry.installedResolverVerified=true;
+  } catch(e) {if(e.code!=='HEALTH_JSON_INVALID')throw e;(result.failures??=[]).push({name:'installed-health-json',error:e.message});save();}
   assert.equal(json(path.join(install.home,'kicad',cfg.runtimeVersion,'manifest.json')).version,cfg.runtimeVersion);
   install.entry.version=execFileSync(installed,['version'],{encoding:'utf8',timeout:30000}).trim();
   assert(install.entry.version.includes(cfg.runtimeVersion.split('-bp.')[0]),'Installed real CLI version mismatch');
   install.entry.installCompletedAt=new Date().toISOString();
+  install.entry.realInstallBytesAndCliVerified=true;save();
   await install.page.screenshot({path:path.join(out,'real-install-complete.png')});
   });
   assert.equal(result.failures?.length||0,0,'One or more native acceptance cases failed; see failures and partial evidence');
