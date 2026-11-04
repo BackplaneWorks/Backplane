@@ -2,6 +2,10 @@ import ./src/server/wire.bend as WIRE
 
 import ./src/server/watch-plan.bend as WATCHPLAN
 
+import ./src/server/review-window.bend as REVIEWWINDOW
+
+import ./src/server/db.bend as HISTORYDB
+
 import ./test/conversation-proof/window_final.bend as CONVROOT
 
 import ./test/conversation-proof/floor_shape_only.bend as CONVSHAPE
@@ -15874,6 +15878,14 @@ def Laws.static_http_cached_chunks(): {==}
 def Laws.static_http_fresh_pages(): {==}
 
 def Laws.static_http_frame_policy(): {==}
+
+def Laws.review_window_budget(): {==}
+
+def Laws.review_window_progress(): {==}
+
+def Laws.review_window_read_failure(value): {==}
+
+def Laws.review_window_cursor_failure(value): {==}
 
 def Laws.auth_cache_key_sequence(st): {==}
 
