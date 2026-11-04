@@ -254,3 +254,37 @@ export function chipInView() {
   const row = on.parentElement, a = on.getBoundingClientRect(), r = row.getBoundingClientRect();
   if (a.left < r.left || a.right > r.right) row.scrollLeft += a.left - r.left - (r.width - a.width) / 2;
 }
+
+// A phone's viewer can give the drawing the whole screen: a button at the
+// stage's top right (on <body>, outside the hub's tree) hides the header,
+// the chips, the toolbars and the history (style.css, html.ph-focus) and
+// brings them back. Leaving the viewer screen ends it.
+let focusButton = null;
+export function focusToggle() {
+  const app = document.querySelector(".app.phone.ph-viewer");
+  const stage = app?.querySelector("#viewer .viewer-stage, #viewer .combo");
+  const html = document.documentElement;
+  if (!app || !stage) {
+    focusButton?.remove(); focusButton = null;
+    html.classList.remove("ph-focus");
+    return;
+  }
+  if (!focusButton) {
+    focusButton = document.createElement("button");
+    focusButton.type = "button"; focusButton.className = "ph-focus-toggle";
+    focusButton.addEventListener("click", () => { html.classList.toggle("ph-focus"); focusToggle(); });
+    addEventListener("resize", () => focusToggle());
+  }
+  const on = html.classList.contains("ph-focus");
+  focusButton.setAttribute("aria-pressed", String(on));
+  focusButton.setAttribute("aria-label", on ? "Show the controls" : "Full screen");
+  focusButton.title = focusButton.getAttribute("aria-label");
+  focusButton.textContent = on ? "⤡" : "⤢";
+  if (!focusButton.isConnected) document.body.append(focusButton);
+  requestAnimationFrame(() => {
+    if (!focusButton || !stage.isConnected) return;
+    const r = stage.getBoundingClientRect();
+    focusButton.style.top = `${Math.round(r.top + 8)}px`;
+    focusButton.style.right = `${Math.round(innerWidth - r.right + 8)}px`;
+  });
+}

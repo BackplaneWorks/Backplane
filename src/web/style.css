@@ -3233,6 +3233,14 @@ html.ph-kb .app.phone :is(.thread-content, .thread-view) > :is(.bot-head, .bot-h
 .app.phone .viewer.split .combo { --split-handle-size: 24px; }
 .app.phone .viewer.split .combo-side > .combo-pane ~ :is(.combo-pane, .combo-resize) { display: none; }
 .app.phone .viewer.split .combo-side[data-split-active] > :first-child { flex: 1 1 0; }
+/* full screen (viewer-tools.js's focusToggle): the drawing alone, the
+   toggle over its top right corner */
+.ph-focus-toggle { display: none; }
+html.phone .ph-focus-toggle { display: grid; place-items: center; position: fixed; z-index: 30; width: var(--ph-tap, 44px); height: var(--ph-tap, 44px); padding: 0; border: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 85%, transparent); color: var(--text); font-size: 20px; }
+html.ph-focus .app.phone.ph-viewer > :is(.ph-head, .ph-cells),
+html.ph-focus .app.phone.ph-viewer #viewer > :is(.ph-views, .viewer-bar, .hist),
+html.ph-focus .app.phone.ph-viewer #viewer :is(.solid-toolbar, .solid-render-status, .combo-head) { display: none; }
+html.ph-focus .app.phone.ph-viewer > .viewer { padding-top: env(safe-area-inset-top); }
 /* a phone on its side has ~340 px of height: the views stay in the header's
    menu, the history keeps its one row, so the drawing keeps most of it */
 @media (max-height: 500px) {
