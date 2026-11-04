@@ -66,7 +66,7 @@ import { installWorkspaceHints } from "./workspace-hints.js";
 // Esc's choice of what to put away (workspace.bend's WS.esc.next); the
 // probe goes off its plots at once, as its chip's x does through the hub
 const composerKeeper = installComposerFocus({ phone: () => composerPhone() });
-installPhoneThread();
+installPhoneThread({ list: el => timelineList(el) });
 installWorkspaceKeys({ dispatch, escNext: (term, probe, viewer) => App.esc_next(term, probe, viewer), composer: composerKeeper,
   clearProbe: () => { Plot2d.setProbe("");Solid.setProbe("");dispatch("probe", ""); } });
 installWorkspaceHints();

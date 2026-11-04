@@ -15,7 +15,7 @@ const page = (phone, mic = true) => {
   const inComposer = { closest: s => s === '.composer' ? {} : null };
   const fire = (type, target = timeline) => (on[type] || []).forEach(f => f({ target }));
   const resize = h => { timeline.clientHeight = h; for (const o of observers) if (o.t) o.f([{ target: o.t }]); };
-  return { inComposer, doc, win: { ResizeObserver: RO, navigator: { mediaDevices: mic ? { getUserMedia() {} } : undefined } }, timeline, fire, resize, classes };
+  return { inComposer, doc, win: { ResizeObserver: RO, navigator: { mediaDevices: mic ? { getUserMedia() {} } : undefined }, setTimeout: f => { f(); return 1; } }, timeline, fire, resize, classes };
 };
 
 test('Return in the draft is a new line on a phone only, Send still sends', async () => {
@@ -68,4 +68,18 @@ test('a tap on a reply\'s file link opens its menu on a phone, its menu\'s Open 
   assert.equal(phoneClickAction(page(true).doc, item, 'file-open'), 'file-open');
   assert.equal(phoneClickAction(page(false).doc, link, 'file-open'), 'file-open');
   assert.equal(phoneClickAction(page(true).doc, link, 'select'), 'select');
+});
+
+test('back from the full-screen viewer, the thread is where the person left it', async () => {
+  const { installPhoneThread } = await import('../../src/web/phone-thread.js');
+  const p = page(true), calls = [];
+  const planner = { position: () => ({ top: 700, atEnd: false, anchor: 'm42', offset: 12 }), restore: b => calls.push(b) };
+  installPhoneThread({ document: p.doc, window: p.win, list: () => planner });
+  p.timeline.scrollTop = 700; p.fire('touchstart', { closest: () => null });
+  p.fire('scroll');                 // read here (kept)
+  p.resize(0);                      // the viewer covers the thread (display: none)
+  p.timeline.scrollTop = 0;
+  p.resize(500);                    // back to the thread
+  assert.deepEqual(calls, [{ top: 700, atEnd: false, anchor: 'm42', offset: 12 }]);
+  assert.equal(p.timeline.scrollTop, 0); // (the planner places it, not a shift)
 });
