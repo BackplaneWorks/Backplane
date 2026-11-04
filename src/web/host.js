@@ -142,6 +142,7 @@ import { RecentViews } from "./recent-views.js";
 import { ViewPrefetch } from "./view-prefetch.js";
 import { validatePresentation } from "./startup.js";
 import { T, is, learnJson, learnDom } from "./wire.js";
+import { softFocus, ASKED_TO_TYPE } from "./touch-focus.js";
 
 const CONNECTION_BUNDLE = bundleOf(import.meta.url);
 
@@ -1235,10 +1236,12 @@ function render() {
   if (paletteSearch && !document.querySelector(".workspace-palette")) { const query = paletteSearch;paletteSearch = "";dispatch("thin-search-open", query); }
   if (focus) {
     const el = document.getElementById(focus);
-    el?.focus();
+    // (on a touch screen only a search just opened takes the keyboard by
+    // itself; the rest wait for a tap on the field: touch-focus.js)
+    const took = softFocus(el, { asked: ASKED_TO_TYPE.has(focus) });
     // a rename opens with the old title selected: typing replaces it ("New
     // thread" was kept in front of what was typed), an arrow key keeps it
-    if (focus === "thread-title") el?.select?.();
+    if (took && focus === "thread-title") el?.select?.();
     focus = null;
   }
   refocusGive();
@@ -3359,7 +3362,7 @@ function showThinSearch(search, thread = "") {
     if (thread && f.hits.length === had && search.hasMore && search.cursor && f.skipped < 4) { f.skipped++;f.shown = search.query;ask(search.query, search.cursor);return; }
     if (search.hasMore && search.cursor) {
       const button = document.createElement("button");button.type = "button";button.className = "find-more";button.textContent = "More results";
-      button.addEventListener("click", () => { ask(search.query, search.cursor);query.focus(); });rows.append(button);f.more = button;
+      button.addEventListener("click", () => { ask(search.query, search.cursor);softFocus(query); });rows.append(button);f.more = button;
     }
     f.shown = search.query;
     if (!more && Array.isArray(search.titles)) showTitles(search.titles);

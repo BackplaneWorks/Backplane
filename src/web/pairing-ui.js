@@ -3,6 +3,7 @@
 import jsQR from './vendor/jsqr.cjs';
 import {defaultDeviceName} from './pairing-device.js';
 import {pairingInput, codeLink, pairingErrors} from './pairing-link.js';
+import {softFocus} from './touch-focus.js';
 export function installPairingUI({document, location, fetch, onPaired, navigator = globalThis.navigator}) {
   let panel, camera, scanGeneration = 0, expiryTimer, pairingShown = false;
   const element = (tag, text, parent, attrs = {}) => {
@@ -155,9 +156,10 @@ export function installPairingUI({document, location, fetch, onPaired, navigator
       button(actions, 'Connect this device', async () => { status.classList.remove('bad');status.textContent = 'Connecting…';try { await enroll(pending.secret, name.value); } catch(e) { error(status,e.message); } }).classList.add('primary');
       element('a', 'Open in Backplane', actions, {href: 'backplane://pair?url=' + encodeURIComponent(location.origin + '/pair' + pending.hash)});
     }
-    // (a phone raises its keyboard for it, over a pairing link's Connect)
-    if (standalone) code.focus({preventScroll: true});
-    else if (!pending || !document.documentElement.classList.contains('phone')) link.focus();
+    // (a phone raises its keyboard for it, over a pairing link's Connect:
+    // on a touch screen the field waits for a tap, touch-focus.js)
+    if (standalone) softFocus(code, {preventScroll: true});
+    else if (!pending || !document.documentElement.classList.contains('phone')) softFocus(link);
   }
   function invitationState(x) {
     const thing = x.kind === 'machine' ? 'a machine' : 'a device', its = x.kind === 'machine' ? 'the machine it linked' : 'the device it paired';
