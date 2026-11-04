@@ -2847,7 +2847,7 @@ html.phone .pairing-qr { margin: 16px auto; width: min(100%, 300px); }
 .app.phone > .ph-cells .kv.state { border: 0; background: none; padding: 0 4px 0 2px; }
 .app.phone > .ph-cells .kv.state > .k, .app.phone > .ph-cells .kv.branch { display: none; }
 .app.phone > .ph-cells .kv.state > .v { color: var(--text); }
-.app.phone > .ph-cells .kv.state button.tool { min-height: 36px; padding: 0 10px; margin-left: 4px; font-size: calc(13px * var(--text-scale, 100) / 100); }
+.app.phone > .ph-cells .kv.state button.tool { display: inline-flex; flex-direction: row; align-items: center; gap: 6px; min-height: 36px; padding: 0 10px; margin-left: 4px; font-size: calc(13px * var(--text-scale, 100) / 100); }
 .app.phone > .ph-cells .kv > .k { color: var(--dim); }
 .app.phone > .ph-cells .kv > .v { color: var(--text); }
 .app.phone > .ph-cells .kv[aria-expanded="true"] { border-color: var(--accent); }
@@ -2882,6 +2882,8 @@ html.phone .pairing-qr { margin: 16px auto; width: min(100%, 300px); }
 .app.phone .body table { display: block; max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; }
 .app.phone .body :is(td, th) { overflow-wrap: break-word; word-break: normal; min-width: 4ch; max-width: 70vw; }
 .app.phone .body img, .app.phone .msg .shot { max-width: 100%; }
+/* an API error's "› details" and a restart's "› what it was told" */
+.app.phone :is(.apierr-raw, .carry-told) > summary { display: inline-flex; align-items: center; min-height: 40px; padding: 0 8px; }
 /* a turn's tool calls and its activity rows: a row a thumb can open */
 /* (padding on its row: a margin collapses through the row, which the
    timeline's planner measures, and the next row overlapped it) */
@@ -2941,3 +2943,9 @@ html.ph-nomic .app.phone .composer .mic { display: none; }
 .app.phone .queued .q-acts button { min-height: 36px; padding: 0 10px; font-size: calc(13px * var(--text-scale, 100) / 100); }
 /* "N new ↓": back to the latest, over the composer at the thumb */
 .app.phone .hold-pill { height: 40px; padding: 0 16px; margin-top: calc(-40px - 10px); line-height: 38px; font-size: calc(14px * var(--text-scale, 100) / 100); }
+/* the image lightbox (outside .app): its tools below the notch and a
+   thumb wide, its status above the home bar */
+html.phone .lightbox .lb-close { top: max(12px, env(safe-area-inset-top)); right: max(12px, env(safe-area-inset-right)); width: 44px; height: 44px; }
+html.phone .lightbox .lb-tools { top: max(12px, env(safe-area-inset-top)); left: max(12px, env(safe-area-inset-left)); right: calc(68px + env(safe-area-inset-right)); }
+html.phone .lightbox .lb-tools button { min-height: 44px; padding: 0 14px; }
+html.phone .lightbox .lb-status { bottom: max(20px, env(safe-area-inset-bottom)); }
