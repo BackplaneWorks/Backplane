@@ -59,18 +59,6 @@ export function titleHits(doc, query, max = 8) {
   return out;
 }
 
-// What a phone's back closes before it leaves a screen: the overlay on
-// top (search, the command palette, the terminal, Devices), with how to
-// close it; null when none is open. phone-shell.js counts an open one as
-// a pushed screen (its system back and edge swipe press this first).
-export function phoneOverlay(doc, dispatch) {
-  if (doc.querySelector("#thin-result")) return { name: "search", close: () => doc.querySelector("#thin-result .phead button")?.click() };
-  if (doc.querySelector(".pairing-screen[data-dismissible='1']")) return { name: "devices", close: () => doc.querySelector(".pairing-screen .pairing-back")?.click() };
-  if (doc.querySelector(".workspace-palette-backdrop")) return { name: "palette", close: () => dispatch("ws-palette-close", "") };
-  if (doc.querySelector(".floating-terminal")) return { name: "terminal", close: () => dispatch("ws-term-hide", "") };
-  return null;
-}
-
 export function installPhoneOther({ doc = document, win = window, dispatch }) {
   const html = doc.documentElement;
   const on = () => html.classList.contains("phone");
