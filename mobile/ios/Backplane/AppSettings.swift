@@ -48,6 +48,9 @@ final class AppSettings {
     // a tab's raw value, or empty: Home with an uberbot, else Threads
     var defaultTab: String { didSet { d.set(defaultTab, forKey: "app.defaultTab") } }
     var haptics: Bool { didSet { d.set(haptics, forKey: "app.haptics") } }
+    // the native screens instead of the hub's phone web client (for one
+    // release, while the web screens settle in)
+    var classic: Bool { didSet { d.set(classic, forKey: "app.classic") } }
     @ObservationIgnored var migrated: Bool {
         get { d.bool(forKey: "app.migrated.v1") }
         set { d.set(newValue, forKey: "app.migrated.v1") }
@@ -61,6 +64,7 @@ final class AppSettings {
         threadList = d.string(forKey: "app.threadList") ?? ""
         defaultTab = d.string(forKey: "app.defaultTab") ?? ""
         haptics = d.object(forKey: "app.haptics") as? Bool ?? true
+        classic = d.bool(forKey: "app.classic")
     }
 
     var colorScheme: ColorScheme? {
@@ -85,8 +89,15 @@ enum Haptics {
         UIImpactFeedbackGenerator(style: style).impactOccurred()
     }
 
-    static func success() {
+    static func success() { notify(.success) }
+
+    static func notify(_ kind: UINotificationFeedbackGenerator.FeedbackType) {
         guard UserDefaults.standard.object(forKey: "app.haptics") as? Bool ?? true else { return }
-        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        UINotificationFeedbackGenerator().notificationOccurred(kind)
+    }
+
+    static func selection() {
+        guard UserDefaults.standard.object(forKey: "app.haptics") as? Bool ?? true else { return }
+        UISelectionFeedbackGenerator().selectionChanged()
     }
 }
