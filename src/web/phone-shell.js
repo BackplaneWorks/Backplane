@@ -260,6 +260,12 @@ export function installPhoneShell({ on, doc = document, win = window, dispatch }
   // a long press's lifting click and the browser's own menu do nothing more
   doc.addEventListener("click", e => {
     if (longFired) { longFired = false;e.preventDefault();e.stopPropagation();return; }
+    // the tab already open, tapped again: its list back to the top
+    if (e.target.closest?.(".ph-tabs .ph-tab.on")) {
+      const app = doc.querySelector(".app.phone"), el = app && screenEl(app);
+      const box = el && [el, ...el.querySelectorAll(".settings")].find(x => x.scrollTop > 0);
+      box?.scrollTo({ top: 0, behavior: "smooth" });
+    }
     // a tap on a menu sheet's backdrop (the open <details> itself) shuts it
     const t2 = e.target;
     if (t2?.matches?.(".local-menu[open]")) { t2.open = false;e.preventDefault();e.stopPropagation(); }
