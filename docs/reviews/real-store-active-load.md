@@ -1,10 +1,9 @@
 # Combined copied-store and active-load preparation
 
-Status: **shared-kernel-clock source preparation; no execution released**.
-The latest `39a3c2fb8d` diagnostic failed and established different Bun process
-clock origins. The old host-shared hrtime assumption was wrong in both test
-and MAIN timing, not only the short stand-in control. A Linux clock correction
-and new regressions are prepared for static review only. There is no whole-harness, actual-hub cleanup,
+Status: **clock20 and producer16 accepted; one scope-only packet released**.
+The evaluator accepted exact `5f10351ee3` clock/producer boundaries on normal
+Boat. The49 scope assertions remain unexecuted; a receipt/docs-only freeze
+preserves executable identity to that accepted source for the remaining gate. There is no whole-harness, actual-hub cleanup,
 memory, CPU, latency, startup or package PASS. The memory owner `t1793648028-1245355`
 retains sole packaged before/after evaluation. Send the frozen source and check
 scope to that owner before executing even the self-tests. Existing recovery,
@@ -310,11 +309,11 @@ The prepared clock contract is explicit:
 Primary references: [Linux clock_gettime](https://man7.org/linux/man-pages/man2/clock_gettime.2.html),
 [time namespaces](https://man7.org/linux/man-pages/man7/time_namespaces.7.html),
 [Bun FFI](https://bun.sh/docs/runtime/ffi). The FFI backend is experimental in
-Bun's documentation. This harness binding/ABI and its resource behavior are
-unqualified until the approved narrow Boat checks actually execute. Existing
+Bun's documentation. The x64 binding was qualified only by the exact normal-Boat clock20 boundary
+below; arm64, MAIN integration and packaged performance remain unqualified. Existing
 hub effects already use this FFI mechanism; no shared effect is changed here.
 
-Proposed narrow checks for **static review, not execution**: a fresh pinned
+The accepted `5f1035` narrow clock/producer check used: a fresh pinned
 producer-only entry extracts/hashes the revised producer without importing
 MAIN, runs `real_store_active_clock_test.cjs` (20 cases:14 deterministic plus
 six checks over two synthetic children launched with0/300ms delay), then the
@@ -330,9 +329,44 @@ worker<=3.7e9/swap0, normal/default Boat, no hub/store/app/Bend/scope trees.
 Changing the whole load source invalidates the old whole-harness identity.
 Unchanged policy/tar/pump/fence helpers may be reused only with an exact
 revision/input/tool audit. They do not qualify the new clock, new producer,
-whole harness or packaged startup/CPU/RSS/p99. The source is prepared only;
-no native call, probe, compile, local test or new Boat packet has run. Merge
-and actual scope/permission/performance qualification remain held.
+whole harness or packaged startup/CPU/RSS/p99. The clock20/producer16 boundary result below qualifies only its exact source
+and tested x64/native binding. Merge and actual scope/permission/whole-load/
+performance qualification remain held.
+
+The accepted boundary packet is preserved in
+[`extra/hub-real-active-qualification/5f1035`](../../extra/hub-real-active-qualification/5f1035/ACCEPTED.json):
+work `1579245`, job `j20261104091505-1264046`, exit0 on exact
+`5f10351ee3eb0ac95013c31651284e046d2661a4`. Raw receipts record clock20
+(14 deterministic +6 over two delayed children), producer16, exact group
+order, exit/noFAIL/sentinel, extraction4484B/ad834f72801f76189c5ca89eef83a0e039b38a9caaae66b0dba954ec3f0fb178,
+and matching domain/sequence/count/byte/timestamp comparisons for24mixed,
+14pure and32suppressed. Suppressed tools0/readiness rejection held. Native
+x64 CLOCK_MONOTONIC resolution was1ns with no offset/fallback. Each synthetic
+clock child delivered16 samples with missing0/p99=2ms: clock-fixture evidence
+only, never hub performance. All28 source/tool/overlay inputs stayed exact.
+Worker peak61,501,440B/controller350,052,352B; swap/OOM0, remaining children0,
+clean temp and verified enclosing VM deletion. No MAIN import, scope49,
+hub/store/Bend/app or packaged acceptance ran; earlier overall FAILs remain
+unchanged. The evaluator accepted only these exact clock/producer boundaries.
+
+Exactly one remaining scope-only packet is released at a receipt/docs-only
+freeze whose executable files must be byte-identical to5f1035. Its extraction-
+free entry invokes only the unchanged `real_store_active_scope_test.cjs`:
+49 assertions, including21 actual-stop manager/kernel mocks and two bounded
+synthetic Node worker-thread trees using the real LinuxScope implementation.
+Actual admission/cap/invocation+directory-FD identity precedes the payload
+barrier; descriptor-bound cgroup.kill and populated evidence, both synthetic
+resource snapshots, no unknown/failure, empty subtrees, exited launchers and
+home removal must agree. Each synthetic scope and worker is <=3.7e9/swap0;
+controller512MiB. Strict hashes/count/group/exit/noFAIL/sentinel, no remaining
+owned children/temp and verified enclosing VM deletion are required. Existing
+clock20/producer16/fence/policy/tar/pump results are reused only by exact
+revision/dependency/tool audit, never rerun. No MAIN, real hub/store/private
+fixture, Bend/app/build, capability/PID fallback, budget/assertion/source
+change or automatic retry is authorized. Scope refusal stays an honest FAIL;
+uncertain homes/scopes remain until enclosing VM deletion. Merge awaits the
+terminal49 verdict and fresh current-main/CI/premerge/installer checks;
+whole load and packaged startup/CPU/RSS/p99 remain unqualified.
 
 The evaluator's later acceptance command supplies `--bin`, `--artifact-receipt`,
 `--sha256`, `--fixture`, `--fixture-sha256`, `--fixture-receipt-sha256`,
