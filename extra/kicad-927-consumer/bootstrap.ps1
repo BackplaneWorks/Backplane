@@ -81,6 +81,9 @@ try {
         playwrightModule=(Join-Path $root 'desktop\node_modules\playwright-core')
         programFilesRoot=$programFilesRoot;pathRoot=$pathRoot;manualRoots=$manualRoots
         runtimeVersion=$pin.version;runtimeCliSHA256=$cliSHA;node=(Get-Command node.exe).Source
+        python=(Get-Command python.exe).Source
+        frozenSourceRoot=(Join-Path $root 'build\frozen-source')
+        canonicalFactoryRoot=(Join-Path $root 'build\canonical-946')
     }
     $configPath = Join-Path $out 'config.json'
     $cfg | ConvertTo-Json -Depth 10 | Set-Content -Encoding utf8 $configPath
