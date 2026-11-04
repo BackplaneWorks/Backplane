@@ -1269,3 +1269,27 @@ independent diff of its three source files; trusted-base `--head` mode is not
 implemented. No local tests/merge-tree ran. This is enforcement, not a proof,
 compiler, full CI or two-minute PR qualification. A fresh guard remains
 required for the final receipt-documentation head.
+
+### MailProof.keeps: proof body handles Step.cat empty-step cases
+
+Only the proof body changes: split `cs`/`os` emptiness before applying
+`append_nil`. Existing law statement, quantifiers and runtime code stay exact.
+The old proof did not convert through Step.cat's earlier empty-step patterns.
+
+| Change / exact canonical037 experiment | Before | After |
+|---|---|---|
+| Source | main345a9f395 | candidate957a50435 |
+| Checker result | Typed proof mismatch, exit1 | `ALL PROOFS CHECK`, exit0; completed trace covers MailProof.keeps |
+| Checker wall / GNU peak RSS | 59.0196s /2,956,136KiB | 42.9686s /2,787,664KiB |
+| Actual worker cgroup peak | 3,329,044,480B | 3,157,594,112B |
+| Whole job / paid cost | 83.40s /$0.00092 | 67.84s /$0.00077 |
+
+[Receipts, exact identities and limits](mailproof-keeps/README.md).
+Same original canonical25-law shard and85 whole source dependencies, frozen
+#877 source loader/unchanged kernel, normal Boat, actual3.7GB worker plus
+512MiB controller caps (sum<4GiB), swap0/native admission+flock, zero limit/OOM
+events. Fresh typed false theorem rejected; no laws/proofs removed or weakened.
+These are single observations with fail/pass outcomes, not a matched speedup.
+The selector's pre-worker preparation failure cost$0.00032; total$0.00201.
+No stock/full-proof/CI/build/release qualification or cache pass is implied.
+Fresh final-head merged-shape guard remains required; no local validation ran.
