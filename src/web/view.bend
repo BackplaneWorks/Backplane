@@ -32,6 +32,7 @@ import ../core/allowance.bend as ALQ
 import ./settings-menu.bend as SM
 import ./icon.bend as WI
 import ./phone.bend as PHN
+import ../core/plane.bend as PL
 import ../core/tools.bend as TO
 import ../core/client.bend as U
 import ../core/refs.bend as RF
@@ -5773,6 +5774,7 @@ def View.phone.screen(settings: Bool, bv: BI.View, +u: U.Ui) -> String:
 
 def View.phone.level(+s: String) -> String:
   match s:
+    case "now": "0"
     case "projects": "0"
     case "bots": "0"
     case "settings": "0"
@@ -5821,11 +5823,37 @@ def View.phone.head(+lc: I.Loc, +screen: String, bv: BI.View, +u: U.Ui, +on: Boo
     case "settings": [View.phone.root(lc, on, v, MSG.T.palette.settings(lc), Nil{})]
     case "settings-page": [PHN.Phone.head([PHN.Phone.back("settings-page", "", MSG.T.palette.settings(lc))], PHN.Phone.title(U.Settings.title(lc, U.Settings.page(u)), MSG.T.palette.settings(lc)), Nil{})]
     case "bots": [View.phone.root(lc, on, v, MSG.T.tour.title.bots(lc), View.phone.tools(lc))]
+    case "now": [View.phone.root(lc, on, v, PHN.Phone.now.label(lc), View.phone.tools(lc))]
     case _: [View.phone.root(lc, on, v, MSG.T.tour.title.projects(lc), View.phone.tools(lc))]
 
-def View.phone.tabs(+lc: I.Loc, root: Bool, +screen: String) -> List<&2, D.Node>:
+# the sidebar's rows over every project, as the sidebar makes them
+def View.phone.raw(+u: U.Ui, +ix: U.SIx) -> List<&2, U.SRow>:
+  U.Side.rows.ix.at(U.Ui.state(u), ix, U.Side.now(u), U.Side.cur.held(U.Ui.state(u), U.Ui.sel(u), U.Side.now(u)))
+
+# threads needing the person (the sidebar's own count, Plane.tally)
+def View.phone.need(+u: U.Ui) -> Nat:
+  +ix = U.Side.ix(U.Ui.state(u))
+  PL.PTally.need(PL.Plane.tally(u, ix, View.phone.raw(u, ix)))
+
+def View.phone.tabs(+lc: I.Loc, root: Bool, +screen: String, +u: U.Ui) -> List<&2, D.Node>:
   match root:
-    case True{}: [PHN.Phone.tabs(lc, screen, 0n, 0n)]
+    case True{}: [PHN.Phone.tabs(lc, screen, View.phone.need(u), 0n)]
+    case False{}: Nil{}
+
+# the Now tab: what needs the person first, then what runs, over every
+# project (the sidebar's Active rows, core's Active.rows.given, whatever
+# the sidebar.view setting), drawn only while the tab is open
+def View.phone.now.rows(+lc: I.Loc, rs: List<&2, U.ARow>, +u: U.Ui, +ix: U.SIx) -> List<&2, D.Node>:
+  match rs:
+    case Nil{}: [PHN.Phone.empty("circle-check", PHN.Phone.now.none(lc), PHN.Phone.now.hint(lc), [D.Dom.button("primary", "ph-tab", "projects", MSG.T.tour.title.projects(lc), MSG.T.tour.title.projects(lc))])]
+    case +r <> +t: View.active.k(lc, U.Active.parts(r <> t), "", U.Side.open(u), ix, U.Ui.state(u), U.Ui.sel(u))
+
+def View.phone.now.k(+lc: I.Loc, +u: U.Ui, +ix: U.SIx) -> D.Node:
+  D.El{"section", "ph-now", [D.At{"class", "ph-now"}], View.phone.now.rows(lc, U.Active.rows.given(U.Ui.state(u), ix, U.Side.now(u), "", View.phone.raw(u, ix)), u, ix)}
+
+def View.phone.now(on: Bool, +lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
+  match on:
+    case True{}: [View.phone.now.k(lc, u, U.Side.signals.ix(U.Side.ix(U.Ui.state(u)), u))]
     case False{}: Nil{}
 
 def View.phone.cls(+screen: String, +level: String) -> String:
@@ -5842,10 +5870,10 @@ def View.phone.page.k(+lc: I.Loc, +bv: BI.View, +u: U.Ui, sidebar: D.Node, +on: 
   D.El{"div", "app", [D.At{"data-bub-home", J.Json.show(HOP.Hop.snapshot(u))}, D.At{"style", "--text-scale:" ++ U32.show(TS.Scale.of(st))}, D.At{"data-ph-screen", screen},
       D.At{"class", View.phone.cls(screen, View.phone.level(screen)) ++ Bool.pick(String, U.Ui.panel(u), " panel", "") ++ Bool.pick(String, Bool.or(Bool.or(Bool.not(String.is_empty(sel)), settings), WB.WB.shown(bv)), " picked", "")
         ++ Bool.pick(String, String.eq(M.Setting.get(st, "ui.theme", ""), "light"), " light", "") ++ View.tour.cls(u)}],
-    List.concat(&2, D.Node, [View.phone.head(lc, screen, bv, u, on, v), [sidebar, View.main.b(lc, settings, bv, u, sel, List.length(&2, M.Project, U.Ui.projects(st)))],
+    List.concat(&2, D.Node, [View.phone.head(lc, screen, bv, u, on, v), [sidebar], View.phone.now(String.eq(screen, "now"), lc, u), [View.main.b(lc, settings, bv, u, sel, List.length(&2, M.Project, U.Ui.projects(st)))],
       View.aside.if(lc, Bool.and(U.Ui.panel(u), Bool.not(PH.Home.is(sel))), U.Ui.info(u, "view.kind:" ++ sel), u),
       View.picker(lc, U.Ui.flag(u, "proj"), u), View.intent(lc, u), View.error(U.Ui.error.shown(lc, e)), View.tour(lc, u), View.star(u),
-      View.phone.tabs(lc, String.eq(View.phone.level(screen), "0"), screen)])}
+      View.phone.tabs(lc, String.eq(View.phone.level(screen), "0"), screen, u)])}
 
 def View.phone.page(+lc: I.Loc, +bv: BI.View, u: U.Ui, sidebar: D.Node) -> D.Node:
   match u:
