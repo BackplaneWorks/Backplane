@@ -54,3 +54,12 @@ test('a page that cannot record says so (the composer hides its mic on a phone)'
   assert.equal(plain.classes.has('ph-nomic'), true);
   assert.equal(secure.classes.has('ph-nomic'), false);
 });
+
+test('a tap on a reply\'s file link opens its menu on a phone, its menu\'s Open still opens', async () => {
+  const { phoneClickAction } = await import('../../src/web/phone-thread.js');
+  const link = { matches: s => s === 'a.link.file' }, item = { matches: () => false };
+  assert.equal(phoneClickAction(page(true).doc, link, 'file-open'), 'file-menu');
+  assert.equal(phoneClickAction(page(true).doc, item, 'file-open'), 'file-open');
+  assert.equal(phoneClickAction(page(false).doc, link, 'file-open'), 'file-open');
+  assert.equal(phoneClickAction(page(true).doc, link, 'select'), 'select');
+});

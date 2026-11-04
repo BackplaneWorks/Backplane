@@ -11,6 +11,13 @@ export function phoneKeepsReturn(doc, el, action, event) {
   return onPhone(doc) && action === 'send' && el?.id === 'composer' && !event.ctrlKey && !event.metaKey;
 }
 
+// A file link in a reply (dom.bend's Dom.file) opens its menu on a phone,
+// as its right-click does elsewhere (open it in Backplane's viewer, copy
+// its path): a tap opened the file on the hub machine's own screen.
+export function phoneClickAction(doc, el, action) {
+  return onPhone(doc) && action === 'file-open' && el?.matches?.('a.link.file') ? 'file-menu' : action;
+}
+
 // The keyboard coming up (or the draft growing a line) shrinks the timeline
 // from below; what was just above the composer stays in view, as a phone's
 // messages do, rather than slide under the keyboard:

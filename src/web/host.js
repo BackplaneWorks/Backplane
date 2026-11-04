@@ -45,7 +45,7 @@ function bubMoveSync() {
 document.addEventListener("visibilitychange", () => { bubMoves.disconnect(location.origin); });
 import { installUsageTabs } from "./usage-tabs.js";
 import { installWorkspaceKeys, installComposerFocus } from "./workspace-keys.js";
-import { installPhoneThread, phoneKeepsReturn } from "./phone-thread.js";
+import { installPhoneThread, phoneKeepsReturn, phoneClickAction } from "./phone-thread.js";
 import { installImprovements } from "./improvements.js";
 import { ImprovementsRpc } from "./improvements-rpc.js";
 import { improvementOrigin, improvementContext } from "./improvements-context.js";
@@ -2176,7 +2176,7 @@ for (const ev of EVENTS) {
       document.documentElement.style.setProperty("--mx", Math.min(e.clientX, innerWidth - 216) + "px");
       document.documentElement.style.setProperty("--my", e.clientY + "px");
     }
-    dispatch(action, ev === "input" ? inputValue(el) : valueOf(el));
+    dispatch(ev === "click" ? phoneClickAction(document, el, action) : action, ev === "input" ? inputValue(el) : valueOf(el));
     // A mouse send or stop leaves the next keystroke in the message box.
     if (ev === "click" && el.closest(".composer") && ["send", "send-alt", "interrupt"].includes(action)) composerKeeper.activate(e);
   });
