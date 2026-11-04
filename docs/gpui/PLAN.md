@@ -186,7 +186,7 @@ Report unmeasured metrics as unmeasured; never infer latency from FPS.
 
 ## Isolation, build and phone access
 
-Heavy compiles run on `hs-mac-mini` or on Boat, never on the desktop. On Boat:
+Heavy compiles run where the section below says. On Boat:
 **8 GiB max for big jobs, 3.7 GiB otherwise, swap max 0**. Compile serially (`CARGO_BUILD_JOBS=1`), strip debug info,
 avoid LTO initially. Verify the cgroup limits before compiling and stop if
 they cannot be applied without privileged approval. No local fallback.
@@ -217,16 +217,16 @@ invitation. Preserve native viewer and composer code and tokens. The web
 endpoint may remain available for comparison, but it is not the phone
 experience delivered by this experiment.
 
-**Updated user decision: builds run on the local Mac.** After the Boat build
-failed (`xattr 0.2.3`, `ENOATTR`, libc 0.2.191), the person said to use the
-Mac we have locally. `hs-mac-mini` (M-series, 10 cores, 16 GiB, Xcode 26.6,
-iOS 26.5 runtime) now builds GPUI and the iOS app, and Boat remains allowed
-for Linux and Android work under its caps. The desktop still never compiles.
-The Mac is shared with release threads, so heavy jobs there take the named
-lock `mac-heavy`, each stream keeps its own directory and simulator, and work
-stops if free space falls under 20 GiB (61 GiB at the start). `xcode-select`
-points at the command line tools and stays that way: use `DEVELOPER_DIR`.
-Do not publish or replace the production TestFlight app implicitly.
+**Updated user decision: where builds run.** `hs-mac-mini` (M-series, 10
+cores, 16 GiB, Xcode 26.6, iOS 26.5 runtime) builds only what needs a Mac: the
+macOS GPUI client and iOS. Android builds run on Boat or on the desktop, and
+Bend builds on Boat. An Android build on the desktop runs in its own capped
+scope; nothing else compiles there. The Mac is shared with release threads,
+so heavy jobs there take the named lock `mac-heavy`, each stream keeps its
+own directory and simulator, and work stops if free space falls under 20 GiB.
+`xcode-select` points at the command line tools and stays that way: use
+`DEVELOPER_DIR`. Do not publish or replace the production TestFlight app
+implicitly.
 
 ## Gates and deliverables
 
