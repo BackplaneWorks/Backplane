@@ -18,7 +18,7 @@ command(join(runtime, "bin/kicad-cli"), "#!/bin/sh\n[ \"$1\" = version ] || exit
 command(join(runtime, "bin/kicad"), "#!/bin/sh\nprintf '%s\\n' \"$1\" >> \"$TEST_OPENED\"\n");
 writeFileSync(join(runtime, "manifest.json"), JSON.stringify({ version: "10.99.0-bp.4", sourceCommit: "fixture", apiVersion: 2,
   sourceRepository: "https://github.com/i2cjak/Backplane_KiCad" }));
-// Stop at the helper boundary after recording the selected project. No real
+// Record the helper boundary and answer the startup handshake. No real
 // KiCad, network socket, GUI or provider account is used by this fixture.
 command(join(fake, "backplane-kipc"), `#!${process.execPath}
 import { appendFileSync } from "node:fs";
@@ -26,8 +26,12 @@ import { createInterface } from "node:readline";
 for await (const line of createInterface({ input: process.stdin })) {
   const request = JSON.parse(line);
   appendFileSync(process.env.TEST_IPC, JSON.stringify(request) + "\\n");
-  console.log(JSON.stringify({ id: request.id, ok: false, error: "fixture recorded project" }));
-  if (request.op === "spawn") console.log(JSON.stringify({ event: "exit", key: request.key, code: 1, tail: "fixture recorded project" }));
+  const message = request.type?.endsWith("GetVersion") ? { version: { full_version: "10.99.0-bp.4" } } : { received: request.message ?? {} };
+  console.log(JSON.stringify({ id: request.id, ok: true, type: request.type + "Response", message }));
+  if (request.op === "spawn") {
+    const socket = request.argv[request.argv.indexOf("--socket") + 1];
+    console.log(JSON.stringify({ event: "line", key: request.key, text: "KiCad API server listening at " + socket }));
+  }
 }
 `);
 function git(cwd: string, ...args: string[]) {
@@ -112,6 +116,11 @@ try {
   check("IPC selects main project", lines(ipc).map(s => JSON.parse(s)).some(o => o.op === "spawn" && o.key === join(project, "board.kicad_pro")), lines(ipc));
   await tool(thread, "kicad_ipc_status", { path: join(worktree, "board.kicad_pro"), thread_copy: true });
   check("IPC accepts explicit thread-copy project", lines(ipc).map(s => JSON.parse(s)).some(o => o.op === "spawn" && o.key === join(worktree, "board.kicad_pro")), lines(ipc));
+  const doc = join(worktree, "board.kicad_pcb");
+  const answer = await tool(thread, "kicad_ipc", { path: doc, type: "kiapi.board.commands.GetItems", message: { header: { document: { path: doc } } } });
+  check("IPC command document path agrees with main server", answer.body.message?.received?.header?.document?.path === join(project, "board.kicad_pcb"), answer);
+  const copyAnswer = await tool(thread, "kicad_ipc", { path: doc, thread_copy: true, type: "kiapi.board.commands.GetItems", message: { header: { document: { path: doc } } } });
+  check("explicit copy preserves IPC command document path", copyAnswer.body.message?.received?.header?.document?.path === doc, copyAnswer);
   const outside = join(root, "absolute"); design(outside);
   writeFileSync(join(worktree, ".backplane.json"), JSON.stringify({ project: join(outside, "board.kicad_pro") }));
   response = await rpc("kicad.open", { thread }); await until(() => lines(opened).length === count + 3 ? true : undefined);
