@@ -2194,6 +2194,19 @@ def View.settings.scale(vs: List<&2, String>, +cur: U32) -> List<&2, D.Node>:
     case +v <> t:
       D.Dom.button(Bool.pick(String, U32.is_eq(TS.Scale.read(v), cur), "on", ""), "setting", "ui.text_scale=" ++ v, TS.Scale.label(v), TS.Scale.label(v)) <> View.settings.scale(t, cur)
 
+# a phone's own notifications: the browser asks only on a tap on Allow
+# (phone-other.js's [data-ph-notify]), and html's ph-notify-* class says
+# which of the words shows (granted, denied, unavailable here)
+def View.settings.phone.notify(phone: Bool) -> List<&2, D.Node>:
+  match phone:
+    case True{}:
+      [View.setrow("Notifications on this phone", "An alert when a thread needs you or finishes while this phone was the device you used last. On an iPhone, add Backplane to the Home Screen first (Share, Add to Home Screen) and allow them there.",
+        [D.El{"button", "", [D.At{"type", "button"}, D.At{"class", "ph-notify-ask"}, D.At{"data-ph-notify", ""}], [D.Txt{"Allow notifications"}]},
+         D.Dom.span("ph-notify-on", "On for this phone"),
+         D.Dom.span("ph-notify-off", "Blocked: allow notifications for this site in the browser's settings"),
+         D.Dom.span("ph-notify-none", "This browser can't show notifications here")])]
+    case False{}: Nil{}
+
 # a phone's way to Improvements (improvements.js opens it from any
 # [data-improvements]; the desktop's is in the top bar, which a phone has not)
 def View.settings.improve(phone: Bool) -> List<&2, D.Node>:
@@ -2215,6 +2228,7 @@ def View.settings.rows.k(i: Nat, +lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2
       [View.setrow(MSG.T.settings.restart(lc), MSG.T.settings.restart.note(lc), View.chips.loc(lc, ["on", "off"], Bool.pick(String, M.Carry.on(st), "on", "off"), "restart.continue"))],
       [View.setrow(U.Files.set.label(), U.Files.set.note(st), View.chips.loc(lc, AT.Att.sizes(), U.Files.set.on(st), AT.Att.key()))],
       View.notify(lc, st),
+      View.settings.phone.notify(PHN.Phone.on(u)),
       View.agy.rows(u, U.Hookv.rows.loc(lc, u))])
     case 2n: List.append(&2, D.Node, Bool.pick(List<&2, D.Node>, U.Psv.active(u), View.agy.rows(u, U.Psv.rows(1n, u)), List.concat(&2, D.Node, [View.agy.rows(u, U.Psv.rows(1n, u)), [View.setrow(MSG.T.settings.provider(lc), MSG.T.settings.agents.note(lc, Bool.pick(String, String.is_empty(U.Models.cli(U.Str.get(nf, "models"), prov)), MSG.T.settings.provider.missing(lc, prov), U.Models.cli(U.Str.get(nf, "models"), prov))), View.chips.loc(lc, ["claude", "codex", "grok", "muse", "antigravity", "opencode", "pi", "omp"], prov, "agent.provider"))],
       [View.setrow(MSG.T.settings.model(lc), Bool.pick(String, String.is_empty(M.Setting.get(st, "agent.model", "")), MSG.T.common.default(lc), M.Setting.get(st, "agent.model", "")) ++ ": " ++ U.Models.label_of(U.Models.of(nf, prov), prov, M.Setting.get(st, "agent.model", "")),
