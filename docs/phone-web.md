@@ -19,6 +19,31 @@ desktop or a narrow desktop window never gets any of it.
   marked **This device** (the browser keeps the device id `/auth/enroll`
   answers; see docs/pairing.md).
 
+## Moving around
+
+- **Tabs** (on the root screens only): **Now** (the default: what needs you
+  first, then what runs, then the recently settled, over every project; its
+  badge is the need-you count), **Projects** (the project tree, whatever the
+  sidebar view setting), **Bots** (bots and rooms; badge: rooms with unread)
+  and **Settings**. Which tab is open is this browser's own; other clients
+  never follow it.
+- **Screens push and pop**: a thread, a project's home, a bot or room or a
+  Settings page opens over the tab with a ‹ in its header; the viewer opens
+  over its thread. ‹, the system back (Android's key, the browser's) and a
+  swipe in from the left edge (the screen follows the finger) go back; back
+  first shuts whatever is open over the screen (a menu, a sheet, search, the
+  palette, the terminal, the project picker, the viewer's full screen).
+- **Rows**: a tap opens; a long press opens the row's or project's menu (what
+  a right-click does on a computer) as a sheet; a swipe right settles a
+  thread, a swipe left offers Snooze 1h or Delete (asked in the menu).
+  Rename from the menu opens a sheet above the keyboard.
+- **Headers**: Now and Projects have New thread (in the project at the top of
+  the list), search and the command palette; a thread's has ⏮ Go to the
+  start (every earlier page, then the top), ▾ its menu and its views.
+- Every menu is a bottom sheet; a tap on the dimmed page or back shuts it.
+  The first open on a slow network shows "Backplane / Loading…" until the
+  page is drawn.
+
 ## Finding things
 
 - Search (the magnifier) is a full-screen sheet that ends at the keyboard.
@@ -60,6 +85,7 @@ with the keyboard up, the path and title bar give way.
 
 ## Testing
 
-`node --test desktop/test/phone-other.test.cjs desktop/test/service-worker-notify.test.cjs`;
+`node --test desktop/test/phone-shell.test.cjs desktop/test/phone-other.test.cjs desktop/test/service-worker-notify.test.cjs`,
+`bend test/phone_shell_test.bend`;
 in a browser, `?phone=1` on a desktop Chromium forces the phone layout
 (`?phone=auto` forgets it).
