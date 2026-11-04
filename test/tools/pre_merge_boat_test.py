@@ -32,8 +32,8 @@ class Contracts(unittest.TestCase):
                 'events':{'max':0,'oom':0,'oom_kill':0,'oom_group_kill':0}}
 
     def report(self):
-        return {'schema':1,'kind':'boat-merged-laws-shape','head':'a'*40,'base':'b'*40,'tree':'c'*40,
-                'worker_sha256':'d'*64,'state':'passed','shape_exit':0,'laws_sha256':'e'*64,
+        return {'schema':2,'kind':'boat-merged-laws-shape','head':'a'*40,'base':'b'*40,'tree':'c'*40,
+                'verification_base':'b'*40,'merge_driver_sha256':'2'*64,'worker_sha256':'d'*64,'state':'passed','shape_exit':0,'laws_sha256':'e'*64,
                 'proof_sha256':'f'*64,'shape_sha256':'1'*64,'resources':self.resources()}
 
     def test_only_closed_remote_ref_or_complete_object_id(self):
@@ -55,7 +55,7 @@ class Contracts(unittest.TestCase):
 
     def test_owned_receipt_requires_exact_head_worker_and_shape_success(self):
         good=self.report();self.assertTrue(pm.receipt_ok(good,'a'*40,'d'*64))
-        for fields in ({'state':'failed'},{'shape_exit':1},{'shape_exit':False},{'schema':True},
+        for fields in ({'state':'failed'},{'shape_exit':1},{'shape_exit':False},{'schema':True},{'schema':1},{'verification_base':'0'*40},{'merge_driver_sha256':None},
                        {'head':'0'*40},{'worker_sha256':'0'*64},{'tree':'not-a-tree'},{'proof_sha256':None}):
             self.assertFalse(pm.receipt_ok({**good,**fields},'a'*40,'d'*64),fields)
         for missing in ('resources','laws_sha256','proof_sha256','tree','base'):
@@ -85,6 +85,10 @@ class ActualGitMerges(unittest.TestCase):
         self.proof=b'import Base\nimport ./LAWS.bend as Laws\n\ndef Laws.one():\n  {==}\n'
         (self.repo/'LAWS.bend').write_bytes(self.laws);(self.repo/'PROOF.bend').write_bytes(self.proof)
         (self.repo/'other.txt').write_text('base\n')
+        (self.repo/'scripts').mkdir()
+        source_dir=HERE if (HERE/'laws-shape.py').exists() else HERE.parents[1]/'scripts'
+        (self.repo/'scripts/laws-shape.py').write_bytes((source_dir/'laws-shape.py').read_bytes())
+        (self.repo/'scripts/merge-laws.py').write_bytes((source_dir/'merge-laws.py').read_bytes())
         self.base=self.commit()
 
     def commit(self):
@@ -106,6 +110,28 @@ class ActualGitMerges(unittest.TestCase):
     def test_missing_merged_proof_is_not_a_pass(self):
         (self.repo/'PROOF.bend').unlink();head=self.commit()
         with self.assertRaises(ValueError):pm.inspect_merge(self.repo,self.base,head)
+
+    def test_head_always_pass_checker_cannot_bless_broken_merged_law(self):
+        (self.repo/'LAWS.bend').write_text('import Base\n\nlaw one:\n\n')
+        (self.repo/'scripts/laws-shape.py').write_text('raise SystemExit(0)\n')
+        head=self.commit()
+        shape,_=pm.trusted_verifiers(self.repo,self.base,Path(self.temp.name)/'trusted')
+        _,laws,proof=pm.inspect_merge(self.repo,self.base,head)
+        (Path(self.temp.name)/'LAWS.bend').write_bytes(laws)
+        (Path(self.temp.name)/'PROOF.bend').write_bytes(proof)
+        result=subprocess.run([os.sys.executable,'-IB',str(shape),str(Path(self.temp.name)/'LAWS.bend'),str(Path(self.temp.name)/'PROOF.bend')],capture_output=True)
+        self.assertNotEqual(result.returncode,0)
+        self.assertNotEqual(shape.read_bytes(),(self.repo/'scripts/laws-shape.py').read_bytes())
+
+    def test_head_take_ours_driver_cannot_hide_law_conflict(self):
+        (self.repo/'LAWS.bend').write_bytes(self.laws.replace(b'0n == 0n',b'1n == 1n'))
+        (self.repo/'scripts/merge-laws.py').write_text('raise SystemExit(0)\n')
+        head=self.commit()
+        pm.git(self.repo,'checkout','-q',self.base)
+        (self.repo/'LAWS.bend').write_bytes(self.laws.replace(b'0n == 0n',b'2n == 2n'))
+        main=self.commit()
+        pm.trusted_verifiers(self.repo,main,Path(self.temp.name)/'trusted')
+        with self.assertRaises(ValueError):pm.inspect_merge(self.repo,main,head)
 
 
 if __name__=='__main__':unittest.main()
