@@ -44,11 +44,16 @@ sources = list(after['sources'])
 del after
 with tempfile.TemporaryDirectory(prefix='feature-map-') as temp:
     base = Path(temp)
-    for name in sources:
+    # A narrowed import boundary can remove modules from the after graph that
+    # the restored baseline still imports. Preserve unchanged source modules
+    # too, instead of assuming the two closures contain the same files.
+    available = set(sources) | {p.relative_to(root).as_posix() for p in (root/'src').rglob('*.bend')}
+    for name in sorted(available):
         target = base/name
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(root/name, target)
     for name, source in identity['base_files'].items():
+        (base/name).parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(root/source, base/name)
     before = mapper.analyze(base, ['PROOF.bend', 'src/server/server.bend'])
     (args.out/'before-sources.json').write_text(json.dumps(before['sources'], indent=2)+'\n')

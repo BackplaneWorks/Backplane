@@ -13183,13 +13183,19 @@ def Laws.mail_log_count_committed(c, fresh):
       {==}
 
 # ---- native phone i18n ----
-def Laws.native_language_english(): {==}
+def Laws.native_locale_composition(setting, os, preview): {==}
 
-def Laws.native_language_preview(): {==}
+def Laws.native_language_english():
+  Laws.native_locale_composition("en", "ja-JP", "1")
 
-def Laws.native_language_system(): {==}
+def Laws.native_language_preview():
+  Laws.native_locale_composition("ja", "en-US", "1")
 
-def Laws.native_language_fallback(): {==}
+def Laws.native_language_system():
+  Laws.native_locale_composition("auto", "ja_JP.UTF-8", "1")
+
+def Laws.native_language_fallback():
+  Laws.native_locale_composition("auto", "de-DE", "1")
 # ---- end native phone i18n ----
 # ---- build-speed: one executable, exact entry selection ----
 def Laws.exe_server_name():
@@ -15890,3 +15896,27 @@ def Laws.review_window_cursor_failure(value): {==}
 def Laws.auth_cache_key_sequence(st): {==}
 
 def Laws.auth_empty_threads_waits_none(st): {==}
+
+def Laws.autosettle_live_work_subscription_never_expires(old):
+  {==}
+
+def Laws.autosettle_active_file_subscription_never_expires(live, old):
+  {==}
+
+def Laws.catalog_lookup_common_cancel(lc):
+  match lc:
+    case I18.En{}: {==}
+    case I18.Ja{}: {==}
+
+def Laws.catalog_lookup_parameterized_absent(lc): {==}
+
+def Laws.catalog_lookup_unknown_absent(lc): {==}
+
+def Laws.catalog_lookup_root(lc, key): {==}
+
+def Laws.catalog_metadata_complete(lc):
+  match lc:
+    case I18.En{}: {==}
+    case I18.Ja{}: {==}
+
+def Laws.catalog_keys_nonempty(): {==}

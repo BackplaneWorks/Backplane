@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import resource
+import re
 import shutil
 import subprocess
 import sys
@@ -42,6 +43,31 @@ def source_audit(root, identity):
         return reader.scan_module(normalized(text, replacements or {}), name)[1]
 
     equivalent = []
+    partitions = []
+    forwarders = []
+    for entry in requested.get('forwarders', []):
+        header = next(line for line in (root/entry['before']).read_text().splitlines()
+                      if line.startswith('def '+entry['name']+'('))
+        expected = reader.scan_module('import Base\n'+header+'\n  '+entry['call']+'\n', 'forwarder')[1]
+        actual = declarations(entry['after'])
+        key = ('def', entry['name'])
+        assert actual[key] == expected[key], (entry['after'], key, 'nontransparent delegate')
+        alias = entry['call'].split('.', 1)[0]
+        imports = dict((a, p) for p, a in re.findall(r'^import (\S+) as (\w+)',
+                                                    (root/entry['after']).read_text(), re.M))
+        assert ((root/entry['after']).parent/imports[alias]).resolve() == (root/entry['target_module']).resolve()
+        forwarders.append([entry['after'], entry['name'], entry['target_module']])
+    for entry in requested.get('partitions', []):
+        before = declarations(entry['before'])
+        combined = {}
+        for part in entry['after']:
+            after = declarations(part['path'], part.get('replacements'))
+            assert not set(combined) & set(after), 'duplicate relocated declaration'
+            combined.update(after)
+        assert combined == before, 'relocation changed, added or lost a declaration'
+        partitions.append({'declarations': len(before),
+                           'files': [part['path'] for part in entry['after']],
+                           'all_bodies_preserved': True})
     for entry in requested['declarations']:
         before = declarations(entry['before'], entry.get('before_replacements'))
         after = declarations(entry['after'], entry.get('after_replacements'))
@@ -55,14 +81,42 @@ def source_audit(root, identity):
         assert set(after) == set(before)-removed
         for key, digest in after.items():
             assert before[key] == digest, (entry['after'], key)
+    for entry in requested.get('books', []):
+        before = declarations(entry['before'])
+        after = declarations(entry['after'], entry.get('after_replacements'))
+        changed = {tuple(k) for k in entry['changed']}
+        assert set(after)-set(before) == {tuple(k) for k in entry['added']}
+        assert set(before) <= set(after)
+        for key in set(before)-changed:
+            assert before[key] == after[key], (entry['after'], key)
     laws = requested['laws']
     before = declarations(laws['before'])
     after = declarations(laws['after'], laws['after_replacements'])
     for key, digest in before.items():
         assert after[key] == digest, key
     assert set(after)-set(before) == {('law', n) for n in laws['added']}
-    return {'equivalent_declarations': equivalent, 'remaining_declarations_unchanged': True,
-            'all_original_law_statements_preserved': True, 'added_laws': laws['added']}
+    result = {'equivalent_declarations': equivalent, 'remaining_declarations_unchanged': True,
+              'all_original_law_statements_preserved': True, 'added_laws': laws['added']}
+    result['partitions'] = partitions
+    result['transparent_forwarders'] = forwarders
+    if requested.get('phone_state'):
+        phone = requested['phone_state']
+        assert sha(root/'scripts/state-key.py') == phone['script_sha256']
+        assert sha(root/'.github/actions/setup-bend/action.yml') == phone['compiler_pin_sha256']
+        covered = subprocess.check_output([sys.executable, 'scripts/state-key.py', '--types'], text=True)
+        paths = {line.split()[0] for line in covered.splitlines()}
+        typed_changes = sorted(paths & set(phone['changed_files']))
+        for name in typed_changes:
+            original = declarations(identity['base_files'][name])
+            current = declarations(name)
+            assert {k: v for k, v in original.items() if k[0] == 'type'} == {
+                k: v for k, v in current.items() if k[0] == 'type'}, 'changed phone-kept type declaration'
+        result['phone_state'] = {
+            'key': subprocess.check_output([sys.executable, 'scripts/state-key.py'], text=True).strip(),
+            'covered_files': sorted(paths), 'changed_inputs_in_covered_graph': [],
+            'changed_files_with_identical_type_blocks': typed_changes,
+            'script_and_compiler_pin_unchanged': True}
+    return result
 
 
 def main():
@@ -100,6 +154,13 @@ def main():
         ['git', 'apply', '--check', '--whitespace=error-all',
          '--directory='+str(out.relative_to(root)/'base'), identity['code_patch']],
     ])
+    if identity.get('i18n_checks'):
+        commands.extend([
+            [python, '-B', 'scripts/i18n-gen.py', '--self-test'],
+            [python, '-B', 'scripts/i18n-gen.py', '--check'],
+            [python, '-B', '-m', 'unittest', 'discover', '-s', 'test/tools',
+             '-p', 'i18n_native_codegen_test.py'],
+        ])
     observations = []
     environment = {**os.environ, 'PYTHONDONTWRITEBYTECODE': '1'}
     failed = False
@@ -117,7 +178,7 @@ def main():
     assert events['oom'] == events['oom_kill'] == 0
     assert (group/'memory.max').read_text().strip() == '536870912'
     assert (group/'memory.swap.max').read_text().strip() == '0'
-    report = {'scope': '35 Python tests, canonical and merged-law shape, source patch whitespace/applicability; no compiler/full proof/build',
+    report = {'scope': '35 Python tests, optional i18n controls, canonical and merged-law shape, source patch whitespace/applicability; no compiler/full proof/build',
               'state': 'failed' if failed else 'passed', 'identity_sha256': sha(identity_path),
               'merge_snapshot': identity['merge_snapshot'], 'cgroup': str(group),
               'memory_max_bytes': 536870912, 'memory_swap_max_bytes': 0,
