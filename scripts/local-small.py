@@ -7,6 +7,7 @@ import sys
 
 root = Path(__file__).resolve().parent.parent
 subprocess.run(['node', 'test/tools/asset_file_test.mjs'], cwd=root, check=True)
+subprocess.run(['node', '--test', 'test/tools/bounded_cache_test.mjs'], cwd=root, check=True)
 subprocess.run(['bun', 'test/tools/secret_save_test.mjs'], cwd=root, check=True)
 subprocess.run([sys.executable, 'test/tools/secret_box_handler_test.py'], cwd=root, check=True)
 # Required in every local lane, including focused-only and guards-only.
