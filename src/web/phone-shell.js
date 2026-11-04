@@ -109,12 +109,14 @@ export function installPhoneShell({ on, doc = document, win = window, dispatch }
   const fit = () => {
     const h = vv ? vv.height : win.innerHeight;
     const kb = vv ? Math.max(0, win.innerHeight - vv.height - vv.offsetTop) : 0;
+    // the keyboard is up whatever iOS's pan (offsetTop) makes of the inset
+    const shrunk = vv ? Math.max(0, win.innerHeight - vv.height) : 0;
     html.style.setProperty("--ph-vh", Math.round(h) + "px");
     html.style.setProperty("--ph-kb", Math.round(kb) + "px");
     // iOS pans the visual viewport instead of resizing it: the page's
     // fixed shell follows, so the header never slides off the top
     html.style.setProperty("--ph-top", Math.round(vv ? Math.max(0, vv.offsetTop) : 0) + "px");
-    html.classList.toggle("ph-kb", kb > 80);
+    html.classList.toggle("ph-kb", shrunk > 80);
     // little height left (landscape with the keyboard up): a compact header
     html.classList.toggle("ph-short", h < 360);
     // iOS scrolls the page to show a focused field; the page never scrolls
@@ -134,6 +136,8 @@ export function installPhoneShell({ on, doc = document, win = window, dispatch }
     if (doc.querySelector(".rowmenu")) return () => dispatch("menu-close", "");
     const sheet = doc.querySelector(".ph-sheet-layer .ph-sheet-back");
     if (sheet) return () => sheet.click();
+    const devices = doc.querySelector(".pairing-screen[data-dismissible='1'] .pairing-back");
+    if (devices) return () => devices.click();
     const search = doc.querySelector("#thin-result .phead button");
     if (search) return () => search.click();
     if (doc.querySelector(".workspace-palette")) return () => dispatch("ws-palette-close", "");
@@ -164,7 +168,7 @@ export function installPhoneShell({ on, doc = document, win = window, dispatch }
   doc.addEventListener("click", () => setTimeout(guard, 0));
 
   // touches: the back edge swipe, long press, row swipes
-  let t = null, longFired = false, openRow = null;
+  let t = null, longFired = false, openRow = null, touchedAt = 0;
   const closeRow = () => {
     if (!openRow) return;
     openRow.row.style.transform = "";openRow.row.classList.remove("ph-swiped");openRow.strip.remove();openRow = null;
@@ -193,7 +197,7 @@ export function installPhoneShell({ on, doc = document, win = window, dispatch }
   };
   doc.addEventListener("touchstart", e => {
     if (e.touches.length !== 1) { t = null;return; }
-    const p = e.touches[0], target = e.target;
+    const p = e.touches[0], target = e.target;touchedAt = Date.now();
     if (openRow && !openRow.strip.contains(target)) closeRow();
     const act = longAction(target);
     const swipeEl = target.closest?.(SWIPE_SEL);
@@ -239,9 +243,18 @@ export function installPhoneShell({ on, doc = document, win = window, dispatch }
   // a phone's own long-press menu (Chrome's contextmenu) would open the
   // same menu again on top of ours, and shut it: the long press owns it
   // (only there: a long press on a reply's text is how one selects it)
+  // (a right-click, as with ?phone=1 on a computer, still opens it)
   doc.addEventListener("contextmenu", e => {
+    if (Date.now() - touchedAt > 1500) return;
     if (!e.target.closest?.("[data-on-contextmenu],[data-ph-long]:not([data-ph-long=''])")) return;
     e.preventDefault();e.stopPropagation();
+  }, true);
+
+  // Esc (a keyboard on a phone, or ?phone=1 on a computer) shuts what the
+  // system back would, before the page's own Esc handling
+  doc.addEventListener("keydown", e => {
+    if (e.key !== "Escape" || e.isComposing) return;
+    if (doc.querySelector(".rowmenu, .ph-sheet-layer")) { overlay()?.();e.preventDefault();e.stopPropagation(); }
   }, true);
 
   return {
