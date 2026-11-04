@@ -397,7 +397,7 @@ def Mob.rmenu.export(pending: Bool, +lc: I.Loc, +u: U.Ui) -> J.Json:
     case False{}: Mob.rmenu.k(lc, Bool.or(String.is_empty(U.Menu.open(u)), Bool.not(String.is_empty(U.Ui.scratch(u, "@del") ++ U.Ui.scratch(u, "@rm")))), u)
 
 def Mob.rmenu(+lc: I.Loc, +u: U.Ui) -> J.Json:
-  Mob.rmenu.export(U.KX.pending(U.Ui.infos(u), U.Ui.sel(u)), lc, u)
+  Bool.pick(J.Json, U.KO.pending(U.Ui.infos(u), U.Ui.sel(u)), Mob.kx.menu(U.KO.notice(True{}, U.Ui.infos(u), U.Ui.sel(u), None{})), Mob.rmenu.export(U.KX.pending(U.Ui.infos(u), U.Ui.sel(u)), lc, u))
 
 # markdown blocks from the same Md.render the web page uses; built onto a
 # reversed accumulator so a long reply's many blocks cost no stack (only

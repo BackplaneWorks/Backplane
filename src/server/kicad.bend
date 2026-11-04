@@ -7,6 +7,7 @@ import ../core/kihealth.bend as KH
 import ../core/port.bend as PORT
 import ../core/kicad_install.bend as KI
 import ./kicad_library.bend as KL
+import ../core/kicad-project.bend as KP
 
 # KiCad on this machine: which kicad-cli to use (the Backplane KiCad fork,
 # with IPC, when present), a project's canonical files, and the KiStack
@@ -546,7 +547,7 @@ def Files.stem(+name: String, +ext: String) -> String:
   String.take(name, Nat.sub(String.length(name), String.length(ext)))
 
 def Files.abs(+root: String, +rel: String) -> String:
-  Bool.pick(String, String.is_empty(rel), "", Bool.pick(String, String.starts_with(rel, "/"), rel, root ++ "/" ++ rel))
+  Bool.pick(String, String.is_empty(rel), "", Bool.pick(String, KP.Project.absolute(rel), rel, root ++ "/" ++ rel))
 
 def Files.named.k(found: Bool, +exact: String, +first: String) -> String:
   Bool.pick(String, found, exact, first)
@@ -617,8 +618,147 @@ def Files.read.cfg(+root: String, +cfg: J.Json) -> IO(Files):
     +all : String <- Files.found(root)
     Files.read.at(root, Files.pro(J.Json.get_str(cfg, "project", ""), Files.pick(ns, ".kicad_pro"), all), cfg, all)
 
-def Files.read(+root: String) -> IO(Files):
+def Files.read.local(+root: String) -> IO(Files):
   IO.bind(String, Files, Io.text(root ++ "/.backplane.json"), text => Files.read.cfg(root, Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{})))
+
+# Verify Git's actual linkage, including relocated/separate git directories,
+# and preserve a project's subfolder within its repository. No pathname
+# pattern decides whether a folder is a worktree.
+def Files.root.sh() -> String:
+  "set -eu; cd \"$1\" || exit 1; common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || exit 0; own=$(git rev-parse --absolute-git-dir 2>/dev/null) || exit 0; [ \"$common\" != \"$own\" ] || exit 0; main=$(git --git-dir=\"$common\" config --path --get core.worktree || git worktree list --porcelain | sed -n '1s/^worktree //p'); [ -n \"$main\" ] && [ -e \"$main/.git\" ] || exit 1; check=$(git -C \"$main\" rev-parse --absolute-git-dir); [ \"$common\" = \"$check\" ] || exit 1; prefix=$(git rev-parse --show-prefix); printf '%s' \"$main${prefix:+/}${prefix%/}\""
+
+def Files.root.result(r: P.Ran, +cwd: String) -> String:
+  match r:
+    case P.Ran{0, +out}: KP.Project.root(Bool.not(String.is_empty(out)), cwd, out)
+    case _: ""
+
+def Files.root(+cwd: String) -> IO(String):
+  do IO<String>:
+    r : P.Ran <- P.Proc.run("sh", ["-c", Files.root.sh(), "sh", cwd], "/")
+    return Files.root.result(r, cwd)
+
+
+def Files.config(+root: String) -> IO(J.Json):
+  IO.bind(String, J.Json, Io.text(root ++ "/.backplane.json"), text => IO.pure(J.Json, Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{})))
+
+def Files.config.main(+cwd: String, +root: String) -> IO(J.Json):
+  do IO<J.Json>:
+    main : J.Json <- Files.config(root)
+    thread : J.Json <- Files.config(cwd)
+    return KP.Project.config(main, thread)
+
+def Files.read.root(+root: String, cfg: J.Json) -> IO(Files):
+  Bool.pick(IO(Files), String.is_empty(root), IO.pure(Files, Files{"", "", "", ""}), Files.read.cfg(root, cfg))
+
+def Files.read(+cwd: String) -> IO(Files):
+  do IO<Files>:
+    +root : String <- Files.root(cwd)
+    cfg : J.Json <- Files.config.main(cwd, root)
+    Files.read.root(root, cfg)
+
+
+def Files.override(+cfg: J.Json, +key: String, +path: String) -> Bool:
+  +value = J.Json.get_str(cfg, key, "")
+  Bool.and(KP.Project.absolute(value), Bool.or(String.eq(path, value),
+    Bool.and(Bool.not(String.eq(key, "pcb")), String.starts_with(path, Files.dir(value) ++ "/"))))
+
+def Files.path.at(+cwd: String, +root: String, +path: String, +copy: Bool, +cfg: J.Json) -> String:
+  Bool.pick(String, Bool.and(String.is_empty(root), Bool.and(Bool.not(copy), KP.Project.design(path))), "",
+    KP.Project.path(Bool.or(copy, Bool.or(Files.override(cfg, "project", path), Bool.or(Files.override(cfg, "pcb", path), Files.override(cfg, "schematic", path)))), cwd, root, path))
+
+# The launch button, MCP and viewer defaults use the same root and overrides.
+def Files.path(+cwd: String, +path: String, copy: Bool) -> IO(String):
+  do IO<String>:
+    +root : String <- Files.root(cwd)
+    cfg : J.Json <- Files.config.main(cwd, root)
+    return Files.path.at(cwd, root, path, copy, cfg)
+
+def Files.target(+main: Files, local: Files, +path: String, +kind: String) -> String:
+  match main local:
+    case Files{+mp, +mb, +ms, _} Files{+lp, +lb, +ls, _}:
+      Bool.pick(String, String.is_empty(path), Bool.pick(String, String.eq(kind, "project"), mp, Bool.pick(String, String.eq(kind, "schematic"), ms, mb)),
+        Bool.pick(String, Bool.and(Bool.not(String.is_empty(lp)), String.eq(path, lp)), mp,
+          Bool.pick(String, Bool.and(Bool.not(String.is_empty(lb)), String.eq(path, lb)), mb,
+            Bool.pick(String, Bool.and(Bool.not(String.is_empty(ls)), String.eq(path, ls)), ms, path))))
+
+# Apply the resolved document paths to IPC's nested document descriptors too;
+# relative names in descriptors are identifiers, and must stay names.
+def Files.message(+cwd: String, +root: String, +cfg: J.Json, +main: Files, +local: Files, v: J.Json) -> J.Json:
+  match v:
+    case J.Str{+s}: J.Str{Bool.pick(String, KP.Project.absolute(s), Files.path.at(cwd, root, Files.target(main, local, s, ""), False{}, cfg), s)}
+    case J.Arr{xs}: J.Arr{Files.message(cwd, root, cfg, main, local, xs)}
+    case J.Obj{xs}: J.Obj{Files.message(cwd, root, cfg, main, local, xs)}
+    case J.Item{h, t}: J.Item{Files.message(cwd, root, cfg, main, local, h), Files.message(cwd, root, cfg, main, local, t)}
+    case J.Field{k, v, t}: J.Field{k, Files.message(cwd, root, cfg, main, local, v), Files.message(cwd, root, cfg, main, local, t)}
+    case other: other
+
+def Files.request(+cwd: String, +args: J.Json, +kind: String) -> IO(J.Json):
+  do IO<J.Json>:
+    +root : String <- Files.root(cwd)
+    +cfg : J.Json <- Files.config.main(cwd, root)
+    +main : Files <- Files.read.root(root, cfg)
+    +local : Files <- Files.read.local(cwd)
+    +copy : Bool = J.Json.get_bool(args, "thread_copy", False{})
+    +path : String = Bool.pick(String, copy, Files.target(local, local, J.Json.get_str(args, "path", ""), kind), Files.target(main, local, J.Json.get_str(args, "path", ""), kind))
+    return J.Json.obj([J.KV{"path", J.Str{Files.path.at(cwd, Bool.pick(String, copy, cwd, root), path, copy, cfg)}},
+      J.KV{"kind", J.Str{J.Json.get_str(args, "kind", "")}}, J.KV{"type", J.Str{J.Json.get_str(args, "type", "")}},
+      J.KV{"message", Bool.pick(J.Json, copy, J.Json.get_obj(args, "message"), Files.message(cwd, root, cfg, main, local, J.Json.get_obj(args, "message")))}])
+
+# Byte comparisons include all sheets under the selected root schematic,
+# with additions and deletions considered differences too. No Git index or
+# timestamp can hide an unsaved-to-Git board change.
+def Files.changed.sh() -> String:
+  "set -eu; while [ \"$#\" -ge 2 ]; do a=$1; b=$2; shift 2; [ \"$a\" != \"$b\" ] || continue; if [ -f \"$a\" ] || [ -f \"$b\" ]; then cmp -s \"$a\" \"$b\" || { printf changed; exit 0; }; fi; case $a in *.kicad_sch) ad=${a%/*}; bd=${b%/*}; for dir in \"$ad\" \"$bd\"; do [ -d \"$dir\" ] || continue; find \"$dir\" -type d \\( -name '.*' -o -name node_modules -o -name '*-backups' \\) -prune -o -type f -name '*.kicad_sch' -print | while IFS= read -r f; do rel=${f#\"$dir\"/}; cmp -s \"$ad/$rel\" \"$bd/$rel\" || printf changed; done; done;; esac; done"
+
+def Files.changed(a: Files, b: Files) -> IO(Bool):
+  match a b:
+    case Files{ap, ab, as, _} Files{bp, bb, bs, _}:
+      IO.bind(P.Ran, Bool, P.Proc.run("sh", ["-c", Files.changed.sh(), "sh", ap, bp, ab, bb, as, bs], "/"), r => IO.pure(Bool, Bool.not(String.is_empty(Files.found.out(r)))))
+
+def Files.owns(fs: Files, +path: String) -> Bool:
+  match fs:
+    case Files{p, b, s, _}:
+      Bool.and(Bool.not(String.is_empty(path)), Bool.or(String.eq(p, path), Bool.or(String.eq(b, path), String.eq(s, path))))
+
+def Files.thread_path(+cwd: String, +root: String, +local: Files, +path: String) -> String:
+  Bool.pick(String, Bool.or(Files.owns(local, path), String.starts_with(path, cwd ++ "/")), path, KP.Project.path(False{}, root, cwd, path))
+
+def Files.write_guard.changed(+cwd: String, +root: String, +args: J.Json, +ty: String) -> IO(String):
+  do IO<String>:
+    +main : Files <- Files.read(cwd)
+    +local : Files <- Files.read.local(cwd)
+    +cfg : J.Json <- Files.config.main(cwd, root)
+    +path : String = J.Json.get_str(args, "path", "")
+    +mp : String = Files.path.at(cwd, root, Files.target(main, local, path, "project"), False{}, cfg)
+    +tp : String = Files.thread_path(cwd, root, local, Files.target(local, main, path, "project"))
+    +changed : Bool <- Files.changed(main, local)
+    selected : Bool <- Files.changed(Files{"", mp, "", ""}, Files{"", tp, "", ""})
+    return Bool.pick(String, KP.Project.refuse_write(Bool.not(String.eq(cwd, root)), Bool.or(changed, selected), KP.Project.readonly(ty),
+      Bool.or(J.Json.get_bool(args, "thread_copy", False{}), J.Json.get_bool(args, "main", False{}))), KP.Project.write_error(mp, tp), "")
+
+def Files.write_guard.root(same: Bool, +cwd: String, +root: String, +args: J.Json, +ty: String) -> IO(String):
+  match same:
+    case True{}: IO.pure(String, "")
+    case False{}: Files.write_guard.changed(cwd, root, args, ty)
+
+def Files.write_guard.check(check: Bool, +cwd: String, +args: J.Json, +ty: String) -> IO(String):
+  match check:
+    case False{}: IO.pure(String, "")
+    case True{}:
+      do IO<String>:
+        +root : String <- Files.root(cwd)
+        Files.write_guard.root(String.eq(root, cwd), cwd, root, args, ty)
+
+# This runs before a mutating request reaches the IPC actor or starts KiCad.
+# Choice is per command, so a later change never silently reuses consent.
+def Files.write_guard.conflict(conflict: Bool, +cwd: String, +args: J.Json, +ty: String) -> IO(String):
+  match conflict:
+    case True{}: IO.pure(String, "Choose one KiCad target: main:true or thread_copy:true, not both.")
+    case False{}:
+      Files.write_guard.check(Bool.not(KP.Project.readonly(ty)), cwd, args, ty)
+
+def Files.write_guard(+cwd: String, +args: J.Json, +ty: String) -> IO(String):
+  Files.write_guard.conflict(Bool.and(J.Json.get_bool(args, "main", False{}), J.Json.get_bool(args, "thread_copy", False{})), cwd, args, ty)
 
 # KiStack
 # -------
