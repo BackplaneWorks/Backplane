@@ -65,6 +65,7 @@
     openAppSettings: function () { tell("openAppSettings"); },
     notifications: function () { return ask("notifications"); },
     requestNotifications: function () { return ask("requestNotifications"); },
+    notify: function (n) { tell("notify", n || {}); },
     pairingFailed: function (cause) { tell("pairingFailed", { cause: String(cause || "") }); },
     on: function (type, fn) {
       (listeners[type] = listeners[type] || []).push(fn);

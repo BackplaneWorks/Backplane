@@ -97,7 +97,7 @@ const pairingUI = installPairingUI({document, location, fetch: window.fetch.bind
 // Consume the secret before the generic deeplink handler clears the fragment.
 let pendingInvitation = null;
 try { const p = pairingInput(location.href, location.origin);if (p.kind !== "token") { pendingInvitation = p;history.replaceState(null, "", location.pathname + location.search); } } catch {}
-const pairingReady = pendingInvitation ? Promise.resolve(false) : pairBrowser({ location, history, storage: localStorage, fetch: window.fetch.bind(window), report: cause => { pairingCause = cause;if (cause !== "hub_unreachable" && cause !== "invalid_link") appShell.pairingFailed(cause); } }).catch(() => false);
+const pairingReady = pendingInvitation ? Promise.resolve(false) : pairBrowser({ location, history, storage: localStorage, fetch: window.fetch.bind(window), report: cause => { pairingCause = cause;if (cause !== "invalid_link") appShell.pairingFailed(cause); } }).catch(() => false);
 if (!document.cookie.split(";").some(c => c.trim().startsWith("bp_cache_v1=")) && !pendingInvitation) pairingUI.show();
 
 import * as Solid from "./solid.js";
@@ -1516,6 +1516,8 @@ function askNotify() {
 for (const ev of ["pointerdown", "keydown"]) document.addEventListener(ev, askNotify, { once: true, capture: true });
 
 function notify(c) {
+  // (inside the phone apps the app posts it: app-shell.js)
+  if (appShell.notify(c)) return;
   if (!("Notification" in window) || Notification.permission !== "granted") return;
   // (a phone's browser shows a page's notifications only through its
   // service worker, Android Chrome's constructor throws; sw.js's

@@ -8,7 +8,10 @@
 // - Settings' "App settings" ([data-ph-app]) opens the app's own settings;
 // - something shared into the app ("share-in") waits for a thread, then goes
 //   into its composer (text) and attaches (files);
-// - a hub that refuses this phone's token tells the app (pairingFailed).
+// - a hub that refuses this phone's token tells the app (pairingFailed);
+// - the hub's desktop notifications for this page (the desk used last: a
+//   thread that finished or needs the person) go to the app, which posts
+//   them as its own alerts (a WebView has no Notification API).
 
 export function appBridge(win = globalThis.window) {
   const app = win?.backplaneApp;
@@ -36,7 +39,7 @@ function base64Bytes(b64) {
 
 export function installAppShell({ win = window, doc = document, dispatch, selected, attach }) {
   const app = appBridge(win);
-  if (!app) return { app: null, rendered() {}, pairingFailed() {} };
+  if (!app) return { app: null, rendered() {}, pairingFailed() {}, notify: () => false };
   const html = doc.documentElement;
   html.classList.add("ph-in-app");
   const has = (f) => Array.isArray(app.features) && app.features.includes(f);
@@ -95,5 +98,11 @@ export function installAppShell({ win = window, doc = document, dispatch, select
       if (shared && s.thread) deliver();
     },
     pairingFailed(cause) { app.pairingFailed(cause); },
+    // a Notify command (core/desk.bend's desktop notification): the app's to show
+    notify(c) {
+      if (!has("notify") || typeof app.notify !== "function") return false;
+      app.notify({ title: String(c.title || ""), body: String(c.body || ""), thread: String(c.thread || ""), key: String(c.key || ""), kind: String(c.kind || "") });
+      return true;
+    },
   };
 }
