@@ -1162,11 +1162,27 @@ def Pv.argv(low: Bool, +exe: String, +args: List<&2, String>) -> List<&2, String
 def Pv.lock.sh() -> String:
   "if command -v flock >/dev/null 2>&1 && mkdir -p \"${0%/*}\" 2>/dev/null && : >> \"$0\" 2>/dev/null; then exec flock \"$0\" \"$@\"; fi; exec \"$@\""
 
-def Pv.locked(solid: Bool, +dir: String, +argv: List<&2, String>) -> List<&2, String>:
-  match solid:
-    case True{}:
-      "sh" <> "-c" <> Pv.lock.sh() <> (dir ++ "/solid.lock") <> argv
-    case False{}:
+def Pv.locked.k(+sh: String, +lock: String, +dir: String, +argv: List<&2, String>) -> List<&2, String>:
+  "sh" <> "-c" <> sh <> (dir ++ "/" ++ lock) <> argv
+
+# The board's child is told to keep its heap near 2 GB: the runtime (Bun's
+# JavaScriptCore) otherwise sizes its heap by the machine's memory and
+# collects late. An 85 MB board peaked at 6 GB without it and 2.5 GB with it
+# (34 s instead of 22); a 4 MB one 570 MB and 410 MB, the same speed.
+def Pv.lock.board.sh() -> String:
+  "export BUN_JSC_forceRAMSize=2147483648; " ++ Pv.lock.sh()
+
+# A board's 2D plot holds board.lock the same way: a big board's read
+# takes gigabytes too, and two views of it (a phone and a page, its 2D and
+# 3D views, a source dropped and asked for again while its read was under
+# way) started two at once (14 + 8 GB for an 85 MB board)
+def Pv.locked(solid: Bool, board: Bool, +dir: String, +argv: List<&2, String>) -> List<&2, String>:
+  match solid board:
+    case True{} _:
+      Pv.locked.k(Pv.lock.sh(), "solid.lock", dir, argv)
+    case False{} True{}:
+      Pv.locked.k(Pv.lock.board.sh(), "board.lock", dir, argv)
+    case False{} False{}:
       argv
 
 def Pv.run(argv: List<&2, String>) -> IO(PR.Ran):
@@ -1203,7 +1219,7 @@ def Pv.read.run(fits: Bool, +size: U32, st: U32 & String, low: Bool, +key: Strin
     case True{}:
       do IO<Unit>:
         exe : String <- H.Sys.exe_path()
-        r : PR.Ran <- Pv.run(Pv.locked(Pv.solid.kind(kind), dir, Pv.argv(low, EX.Exe.child(exe), ["--plot", U32.show(kind), path, Pv.infos(dir, key)])))
+        r : PR.Ran <- Pv.run(Pv.locked(Pv.solid.kind(kind), U32.is_eq(kind, 0), dir, Pv.argv(low, EX.Exe.child(exe), ["--plot", U32.show(kind), path, Pv.infos(dir, key)])))
         after : U32 & String <- Pv.stamp.of(path)
         Pv.read.checked(st, after, r, key, kind, q)
     case False{}:
