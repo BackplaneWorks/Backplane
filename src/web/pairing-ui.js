@@ -153,7 +153,7 @@ export function installPairingUI({document, location, fetch, onPaired, navigator
       element('a', 'Open in Backplane', actions, {href: 'backplane://pair?url=' + encodeURIComponent(location.origin + '/pair' + pending.hash)});
     }
     // (a phone raises its keyboard for it, over a pairing link's Connect)
-    if (standalone) code.focus();
+    if (standalone) code.focus({preventScroll: true});
     else if (!pending || !document.documentElement.classList.contains('phone')) link.focus();
   }
   function invitationState(x) {
