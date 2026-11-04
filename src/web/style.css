@@ -3119,6 +3119,18 @@ html.phone section.improvements :is(input, select, textarea) { font-size: 16px; 
   html.phone.ph-short .app.phone .composer:is(:has(#composer:focus), html.ph-hold .composer) .foot-end > button.primary:last-child { height: 36px; min-width: 64px; }
   html.phone.ph-short .app.phone .composer:is(:has(#composer:focus), html.ph-hold .composer) .composer-more > summary { height: 36px; min-height: 36px; }
 }
+/* (Android resizes the page for its keyboard, and on its side a browser
+   with its bar can leave 44 px: the header alone filled it and the draft
+   was under the keyboard. Under 120 px the draft takes all of it: no
+   header, no docks; back is there again with the keyboard down.) */
+@media (orientation: landscape) and (max-height: 120px) {
+  html.phone .app.phone:is(:has(#composer:focus), html.ph-hold .app) > .ph-head,
+  html.phone .app.phone:is(:has(#composer:focus), html.ph-hold .app) .thread-content > :not(#timeline, .composer) { display: none; }
+  html.phone .app.phone .composer:is(:has(#composer:focus), html.ph-hold .composer) { padding-top: 2px; padding-bottom: 2px; }
+  html.phone .app.phone .composer:is(:has(#composer:focus), html.ph-hold .composer) textarea { min-height: 36px; padding-top: 6px; padding-bottom: 6px; }
+  html.phone .app.phone .composer:is(:has(#composer:focus), html.ph-hold .composer) .composer-foot { bottom: 3px; }
+  html.phone .app.phone .composer:is(:has(#composer:focus), html.ph-hold .composer) :is(.foot-end > button.primary:last-child, .composer-more > summary) { height: 32px; min-height: 32px; }
+}
 /* (no microphone this page can use: phone-thread.js's ph-nomic) */
 html.ph-nomic .app.phone .composer .mic { display: none; }
 /* what $ @ > % # complete to: rows a thumb can pick, over the composer */
