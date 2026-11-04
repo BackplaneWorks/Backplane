@@ -158,7 +158,10 @@ test('a one-finger pan flicked off coasts to a stop, and a finger down stops it'
   const held = h.view.ox;
   for (const f of h.frames) if (f === step) f(performance.now() + 32);
   assert.equal(h.view.ox, held, 'a finger down stops it');
+  const probes = h.probes.length;
   h.fire('pointerup', { pointerType: 'touch', timeStamp: 1240, clientX: 150, clientY: 100 });
+  assert.equal(h.view.tap, null, 'and that press is no tap');
+  assert.equal(h.probes.length, probes);
   h.fire('pointerdown', { pointerType: 'mouse', timeStamp: 2000, clientX: 100, clientY: 100 });
   for (let i = 1; i <= 5; i++) h.fire('pointermove', { pointerType: 'mouse', timeStamp: 2000 + i * 16, clientX: 100 + i * 20, clientY: 100 });
   const n = h.frames.filter(Boolean).length;

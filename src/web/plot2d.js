@@ -409,6 +409,8 @@ class View {
     };
     on("pointerdown", (e) => {
       this.gesture++;
+      // (a finger that stops a coasting view only stops it: no tap)
+      const coasting = !!this.coasting;
       this.coast(null);
       if (this.side === "schematic" && (e.button === 3 || e.button === 4)) {
         canvas.closest("#viewer")?.querySelector(`[data-on-click="${e.button === 3 ? "sch-back" : "sch-fwd"}"]`)?.click();
@@ -419,7 +421,7 @@ class View {
       this.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
       // a press that stays put is a tap (a sheet symbol opens, anything
       // else is probed), unless a second finger joins it
-      this.tap = this.pts.size === 1 && e.button === 0 ? { x: e.clientX, y: e.clientY } : null;
+      this.tap = this.pts.size === 1 && e.button === 0 && !coasting ? { x: e.clientX, y: e.clientY } : null;
       this.drag = this.pts.size === 1 ? { x: e.clientX, y: e.clientY } : null;
       this.pinch = this.pts.size === 2 ? mid() : null;
       canvas.classList.add("dragging");
