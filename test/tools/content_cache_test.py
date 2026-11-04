@@ -303,7 +303,7 @@ class RunCheck(Base):
         self.write('src/e.c', '#include "gone.h"\n')
         self.write('src/c.bend', 'import Base\nimport ./e.c\n')
         log = self.root.parent/'seen'
-        self.fake_bend('cat "$1" >> %s; echo "All terms check."\n' % log)
+        self.fake_bend('echo "$1" >> %s; echo "All terms check."\n' % log)
         self.assertEqual(self.run_check(self.plan_file()), 0)
         self.assertIn('src/c.bend', log.read_text())
         self.assertNotIn('src/c.bend', cc.plan(cc.check_units(self.root))[0])
