@@ -92,3 +92,69 @@ def Pcb2.items.k(m: Maybe<&2, List<&2, List<&2, U32>>>) -> Maybe<&2, List<&2, B.
 
 def Pcb2.items(bs: List<&2, U32>) -> Maybe<&2, List<&2, B.Item>>:
   Pcb2.items.k(S.Sx.forms(bs))
+
+# A board read as text forms (server/effects/plot_board.js): each form is
+# latin1 text, one char per byte, turned back into its bytes only while it
+# parses, so the whole board is never a byte list at once. The forms are
+# numbered and dealt into hands exactly as Pcb2.items does (B.Board.number,
+# B.Board.split), so the items, their keys and signatures are the same.
+
+def Pcb2.bytes.go(s: String, acc: List<&2, U32>) -> List<&2, U32>:
+  match s:
+    case SNil{}:
+      acc
+    case SCon{h, t}:
+      Pcb2.bytes.go(t, Char.to_u32(h) <> acc)
+
+# a latin1 text's bytes
+def Pcb2.bytes(s: String) -> List<&2, U32>:
+  List.reverse(&2, U32, Pcb2.bytes.go(s, Nil{}))
+
+type Part is Data:
+  Part{i: Nat, text: String}
+
+type Parts is Data:
+  Parts{a: List<&2, Part>, b: List<&2, Part>}
+
+def Part.number(fs: List<&2, String>, +i: Nat) -> List<&2, Part>:
+  match fs:
+    case Nil{}:
+      Nil{}
+    case f <> t:
+      Part{i, f} <> Part.number(t, 1n+i)
+
+def Part.deal(fs: List<&2, Part>, h: Parts) -> Parts:
+  match fs h:
+    case Nil{} _:
+      h
+    case f <> t Parts{a, b}:
+      Part.deal(t, Parts{b, f <> a})
+
+def Part.split.k(h: Parts, k: List<&2, Part> -> List<&2, Part> -> List<&2, B.Item>) -> List<&2, B.Item>:
+  match h:
+    case Parts{a, b}:
+      k(a, b)
+
+def Part.split(fs: List<&2, Part>, k: List<&2, Part> -> List<&2, Part> -> List<&2, B.Item>) -> List<&2, B.Item>:
+  Part.split.k(Part.deal(fs, Parts{Nil{}, Nil{}}), k)
+
+def Part.seq(fs: List<&2, Part>) -> List<&2, B.Item>:
+  match fs:
+    case Nil{}:
+      Nil{}
+    case Part{+i, text} <> t:
+      List.append(&2, B.Item, Pcb2.one(Pcb2.bytes(text), i), Part.seq(t))
+
+def Part.par(d: Nat, fs: List<&2, Part>) -> List<&2, B.Item>:
+  match d:
+    case 0n:
+      Part.seq(fs)
+    case 1n+e0:
+      +e = e0
+      Part.split(fs, a => b => (
+        x y = Part.par(e, a) Part.par(e, b)
+        List.append(&2, B.Item, x, y)))
+
+# Pcb2.items over a board's text forms
+def Pcb2.items.text(fs: List<&2, String>) -> List<&2, B.Item>:
+  Part.par(8n, Part.number(fs, 0n))

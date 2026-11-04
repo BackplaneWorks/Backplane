@@ -846,8 +846,36 @@ def Pv.child.diff(+kind: U32, +path: String, +infos: String) -> IO(Unit):
     +b : List<&2, U32> <- GT.Git.version(HS.Hist.new(path))
     Pv.child.k(Pv.plot(Pv.mark(HS.Hist.bits(path), Pv.side(kind, a), Pv.side(kind, b)), U32.or(kind, LO.Look.diff())), 0, infos)
 
+# A live board is read as text forms (effects/plot_board.js), never as one
+# byte list: an 85 MB board took 4 GB of list cells as bytes and as much
+# again as forms, and its child ran out of memory at 12 GB. None is a file
+# still being written, [] an empty or missing one, else its first 8192
+# bytes (for the thickness) and its forms.
+def PlotFx.board(path: String) -> IO(Maybe<&2, List<&2, String>>):
+  import "./effects/plot_board.js"
+
+def Pv.child.board.k(fs: List<&2, String>, +path: String, +infos: String) -> IO(Unit):
+  match fs:
+    case Nil{}:
+      IO.bind(Result<&1, &1, U32 & String, U32 & String>, Unit, H.FS.revision(path), r => Pv.child.empty(r, path))
+    case +h <> t:
+      Pv.child.k(Some{P.Plot.of(P2.Pcb2.items.text(t), 0)}, Pv.thick(P2.Pcb2.bytes(h)), infos)
+
+def Pv.child.board.got(m: Maybe<&2, List<&2, String>>, +path: String, +infos: String) -> IO(Unit):
+  match m:
+    case None{}:
+      IO.die(Unit, 2, "")
+    case Some{fs}:
+      Pv.child.board.k(fs, path, infos)
+
+def Pv.child.board(+path: String, +infos: String) -> IO(Unit):
+  IO.bind(Maybe<&2, List<&2, String>>, Unit, PlotFx.board(path), m => Pv.child.board.got(m, path, infos))
+
+def Pv.child.live(+kind: U32, +path: String, +infos: String) -> IO(Unit):
+  Bool.pick(IO(Unit), Bool.and(U32.is_eq(kind, 0), Nat.is_eq(HS.Hist.kind(path), 0n)), Pv.child.board(path, infos), Pv.child.one(kind, path, infos))
+
 def Pv.child.plot(+kind: U32, +path: String, +infos: String) -> IO(Unit):
-  Bool.pick(IO(Unit), Nat.is_eq(HS.Hist.kind(path), 2n), Pv.child.diff(kind, path, infos), Pv.child.one(kind, path, infos))
+  Bool.pick(IO(Unit), Nat.is_eq(HS.Hist.kind(path), 2n), Pv.child.diff(kind, path, infos), Pv.child.live(kind, path, infos))
 
 def Pv.child(+kind: U32, +path: String, +infos: String) -> IO(Unit):
   Bool.pick(IO(Unit), Pv.solid.kind(kind), Pv.child.solid(U32.is_eq(kind, 3), U32.is_eq(kind, 4), path, infos), Pv.child.plot(kind, path, infos))
