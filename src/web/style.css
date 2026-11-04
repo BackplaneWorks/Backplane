@@ -3156,6 +3156,9 @@ html.ph-kb .app.phone :is(.thread-content, .thread-view) > :is(.bot-head, .bot-h
 .app.phone .hist-said { display: none; }
 .app.phone .hist-menu { position: fixed; left: 0; right: 0; bottom: 0; width: auto; max-height: 70dvh; z-index: 60; padding-bottom: env(safe-area-inset-bottom); }
 .app.phone .hist-menu .row { min-height: var(--ph-tap, 44px); align-items: center; }
+/* a comment at a place (a long press): a field that does not zoom on focus */
+.app.phone .rc-card :is(input, textarea) { font-size: 16px; min-height: var(--ph-tap, 44px); }
+.app.phone .rc-card button { min-height: var(--ph-tap, 44px); padding: 0 16px; }
 /* files: whole rows to tap */
 .app.phone .fm-row { min-height: var(--ph-tap, 44px); }
 .app.phone .fm-bar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }

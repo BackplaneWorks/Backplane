@@ -4,7 +4,7 @@ function harness() {
   const source = fs.readFileSync(require.resolve('../../src/web/plot2d.js'), 'utf8');
   const start = source.indexOf('class View {'), end = source.indexOf('\n}\n', start) + 2;
   const park = source.slice(source.indexOf('function park(v) {'), source.indexOf('\nfunction mountOne('));
-  const handlers = {}, probes = [], navigations = [], hits = [];let rect = { left: 0, top: 0 };let reads = 0, resize, wait = Promise.resolve();
+  const handlers = {}, probes = [], navigations = [], hits = [], timers = [], places = [];let rect = { left: 0, top: 0 };let reads = 0, resize, wait = Promise.resolve();
   const canvas = { get clientWidth() { reads++;return 900; }, get clientHeight() { reads++;return 600; }, isConnected: true,
     addEventListener: (name, fn) => { handlers[name] = fn; }, setPointerCapture() {}, focus() {},
     closest: () => ({ querySelector: selector => ({ click: () => navigations.push(selector) }) }),
@@ -14,14 +14,16 @@ function harness() {
     hitComponent: () => ({ id: 'U1' }), selectComponent() {},
     probed: value => probes.push(value), under: (_, x, y) => { hits.push([x,y]);return []; }, partAt: () => null,
     groupsOf: () => [], P: { pickBoard: () => null, pickSheet: () => null, clickProbe: () => 'r:new' }, wheelKind: () => 'wheel',
-    window: { devicePixelRatio: 1, matchMedia: () => ({ addEventListener() {}, removeEventListener() {} }) }, coarse: null, viewDpr: () => 1, inspectCard() {}, card: null };
+    window: { devicePixelRatio: 1, matchMedia: () => ({ addEventListener() {}, removeEventListener() {} }) }, coarse: null, viewDpr: () => 1, inspectCard() {}, card: null,
+    setTimeout: (fn) => { timers.push(fn);return timers.length; }, clearTimeout: (id) => { if (id) timers[id - 1] = null; }, performance, navigator: {} };
+  context.placed = place => places.push(place);
   vm.runInNewContext(source.slice(start, end) + '\n' + park + '\nglobalThis.View = View;', context);
   const view = new context.View(canvas, '');context.views.set(canvas, view);
   view.plot = { chunks: [], box: [0, 0, 100, 100] };view.key = 'board';view.probe = 'r:old';
   const fire = (name, fields = {}) => handlers[name]({ type: name, pointerType: 'mouse', pointerId: 1, button: 0,
     detail: 1, clientX: 20, clientY: 30, deltaY: 10, deltaX: 0, deltaMode: 0, preventDefault() {}, ...fields });
   const click = detail => { fire('pointerdown');fire('pointerup');fire('click', { detail }); };
-  return { view, probes, navigations, hits, fire, click, inspect(fn) { context.componentSources.set(view.key, { data: {}, onSelect: fn }); }, setRect(value) { rect = value; }, park: () => context.park(view), saved: () => context.left.get(view.key), reads: () => reads, resize: (w, h) => resize([{ contentRect: { width: w, height: h } }]),
+  return { view, probes, timers, places, navigations, hits, fire, click, inspect(fn) { context.componentSources.set(view.key, { data: {}, onSelect: fn }); }, setRect(value) { rect = value; }, park: () => context.park(view), saved: () => context.left.get(view.key), reads: () => reads, resize: (w, h) => resize([{ contentRect: { width: w, height: h } }]),
     defer() { let release;wait = new Promise(resolve => { release = resolve; });return release; } };
 }
 
@@ -117,4 +119,25 @@ test('a touch double tap gives back the first tap\'s probe, zooms in, then fits 
   assert(h.view.scale > fitted * 2, "the browser's own dblclick after it does not fit again");
   tap(3000);tap(3200);
   assert.equal(h.view.scale, fitted, 'zoomed in, a double tap fits the plot');
+});
+
+test('a finger held still asks to comment there once, and is no tap', async () => {
+  const h = harness();
+  h.view.fit();
+  h.fire('pointerdown', { pointerType: 'touch', timeStamp: 1000 });
+  const held = h.timers.filter(Boolean).at(-1);
+  assert(held, 'a touch press starts the long-press timer');
+  held();
+  assert.equal(h.places.length, 0, 'queued input goes first');
+  h.timers.filter(Boolean).at(-1)();
+  assert.equal(h.places.length, 1, 'the place goes to the page (rv-note)');
+  h.fire('contextmenu');
+  assert.equal(h.places.length, 1, "the browser's own contextmenu after it is ignored");
+  h.fire('pointerup', { pointerType: 'touch', timeStamp: 1600 });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.probes.length, 0, 'the press does not probe');
+  h.fire('pointerdown', { pointerType: 'touch', timeStamp: 3000 });
+  const moved = h.timers.filter(Boolean).at(-1);
+  h.fire('pointermove', { pointerType: 'touch', clientX: 60 });
+  assert.equal(h.timers.includes(moved), false, 'moving the finger cancels it');
 });
