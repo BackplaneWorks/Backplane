@@ -1496,7 +1496,7 @@ private fun HistoryBar(m: AppModel, h: HistBar, light: Boolean) {
                 val ways = listOf("old" to NativeMessages.viewer_history_old(lang), "diff" to NativeMessages.viewer_diff(lang), "new" to NativeMessages.viewer_history_new(lang))
                 ways.forEachIndexed { i, w ->
                     SegmentedButton(selected = shown == w.first, onClick = { m.act("rv-as", w.first) },
-                        shape = SegmentedButtonDefaults.itemShape(i, ways.size), icon = {}) { Text(w.second, maxLines = 1, style = MaterialTheme.typography.labelMedium) }
+                        shape = SegmentedButtonDefaults.itemShape(i, ways.size, flat), icon = {}) { Text(w.second, maxLines = 1, style = MaterialTheme.typography.labelMedium) }
                 }
             }
             if (shown == "diff") Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1627,7 +1627,7 @@ private fun MechScreen(m: AppModel, v: Viewer, p: MechPage) {
             SingleChoiceSegmentedButtonRow(Modifier.weight(1f)) {
                 v.choices.forEachIndexed { i, c ->
                     SegmentedButton(selected = c.value == v.open, onClick = { m.act("view", c.value) },
-                        shape = SegmentedButtonDefaults.itemShape(i, v.choices.size), icon = {}) { Text(c.label, maxLines = 1, style = MaterialTheme.typography.labelMedium) }
+                        shape = SegmentedButtonDefaults.itemShape(i, v.choices.size, flat), icon = {}) { Text(c.label, maxLines = 1, style = MaterialTheme.typography.labelMedium) }
                 }
             }
             IconButton(onClick = { m.act("view", "") }) { Icon(Icons.Filled.Close, NativeMessages.common_close(lang)) }

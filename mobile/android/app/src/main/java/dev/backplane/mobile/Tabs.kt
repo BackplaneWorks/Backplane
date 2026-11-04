@@ -171,8 +171,8 @@ private fun BotsPage(m: AppModel, s: Screen, state: LazyListState) {
         LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = pad) {
             item(key = "seg") {
                 SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(16.dp, 8.dp)) {
-                    SegmentedButton(part == "bots", { part = "bots" }, SegmentedButtonDefaults.itemShape(0, 2)) { Text(NativeMessages.tour_title_bots(lang)) }
-                    SegmentedButton(part == "rooms", { part = "rooms" }, SegmentedButtonDefaults.itemShape(1, 2)) { Text(NativeMessages.bots_rooms(lang)) }
+                    SegmentedButton(part == "bots", { part = "bots" }, SegmentedButtonDefaults.itemShape(0, 2, flat)) { Text(NativeMessages.tour_title_bots(lang)) }
+                    SegmentedButton(part == "rooms", { part = "rooms" }, SegmentedButtonDefaults.itemShape(1, 2, flat)) { Text(NativeMessages.bots_rooms(lang)) }
                 }
             }
             if (part == "bots") {
@@ -305,7 +305,7 @@ private fun AppSettingsPage(m: AppModel, s: Screen, onPair: () -> Unit, state: L
                     trailingContent = {
                         OutlinedButton(onClick = {
                             ctx.startActivity(Intent(AndroidSettings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(AndroidSettings.EXTRA_APP_PACKAGE, ctx.packageName).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                        }) { Text(NativeMessages.native_settings_system_settings(tag)) }
+                        }, shape = flat) { Text(NativeMessages.native_settings_system_settings(tag)) }
                     })
             }
             // what the hub alerts for: its settings, from the last screen that carried them
@@ -351,7 +351,7 @@ private fun Header(text: String) {
 private fun Choice(options: List<Pair<String, String>>, current: String, pick: (String) -> Unit) {
     SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
         options.forEachIndexed { i, (v, label) ->
-            SegmentedButton(current == v, { pick(v) }, SegmentedButtonDefaults.itemShape(i, options.size)) { Text(label) }
+            SegmentedButton(current == v, { pick(v) }, SegmentedButtonDefaults.itemShape(i, options.size, flat)) { Text(label) }
         }
     }
 }

@@ -94,3 +94,4 @@ fun Theme(theme: String, content: @Composable () -> Unit) {
     }
     MaterialTheme(colorScheme = if (dark) darkScheme else lightScheme, typography = typography, shapes = shapes, content = content)
 }
+internal val flat = RoundedCornerShape(0.dp)
