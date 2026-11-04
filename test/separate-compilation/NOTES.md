@@ -9,14 +9,21 @@ case in a temporary directory with the suffix removed.
     python3 -m unittest discover -s test/tools -p sepcomp_fixtures_test.py   # light, no compiler
 
 `run` executes the real compiler and therefore REFUSES (exit 75) unless the process (1) inherited the actual native
-bend flock (BACKPLANE_HEAVY_LOCK_FD on /tmp/bp-bend.lock) from an admitted executor, (2) has its own cgroup with
-memory.max <= 3,700,000,000 and swap.max 0, and (3) passes heavy-guard admission (proof-shard floor and host
-reserve). heavy-guard has no profile that execs this script, so it needs an executor that already holds the guard;
-there is no fallback and a plain systemd-run scope is not enough.
+bend flock (BACKPLANE_HEAVY_LOCK_FD on /tmp/bp-bend.lock), (2) has its own cgroup with memory.max <= 3,700,000,000
+and swap.max 0, and (3) passes heavy-guard admission (3 GiB floor and host reserve). The supported invocation is the
+merged `fixture-check` profile (PR #892), which takes the flock itself and admits exactly this argv:
 
-The 15-case evidence below was produced earlier by a local capped scope (MemoryMax=3700000000, swap 0, no flock, no
-guard admission) on identical bytes: it is local capped evidence, not an admitted run. Saved traces:
-bp-coord/lowmem-swarm/lane3/fill-order-evidence/ (strace openat, verdicts, file hashes).
+    systemd-run --user --scope -p MemoryMax=3700000000 -p MemorySwapMax=0 python3 scripts/heavy-guard.py fixture-check -- python3 scripts/sepcomp-fixtures.py run
+
+Anything else is refused and there is no fallback. The runner sets BEND_NO_TELEMETRY=1 for the compiler itself.
+
+Two kinds of evidence, kept apart:
+- **Earlier, unadmitted:** the first 15-case result and the strace traces came from a local capped scope
+  (MemoryMax=3700000000, swap 0, no flock, no guard admission), compiler env not set to no-telemetry.
+- **Later, admitted:** one run through `fixture-check` (native flock taken by the guard, cgroup memory.max
+  3699998720, swap 0, peak 92,725,248 B, oom_kill 0), 15/15 cases matched, on a local merge of main into the #891
+  head 8f8400970 with the same script/fixture bytes. Receipt: bp-coord/lowmem-swarm/lane3/fixture-exec-receipt/.
+  It has not been repeated on the rebased head. Saved traces: bp-coord/lowmem-swarm/lane3/fill-order-evidence/.
 
 Compiler identity: `bend` 2.0.36 (binary sha256 b2b183bddc3c3fa4bc45d99f6a6bdbb192ebc616e6e697777f49e74c545b1643);
 verdicts use scripts/bendok.sh (sha256 prefix 3f3e17c4ba1a0d90). Each case: `bend cases/<name>/MAIN.bend --check-only`.

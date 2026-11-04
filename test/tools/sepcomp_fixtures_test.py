@@ -56,6 +56,23 @@ class Fixtures(unittest.TestCase):
             self.assertEqual(rc, 75, (lock, cgroup, admit))
             run.assert_not_called()
 
+    def test_compiler_runs_with_telemetry_off_set_by_the_runner(self):
+        seen = {}
+
+        def fake(cmd, **kw):
+            if cmd and cmd[0] == 'bend':
+                seen['env'] = kw.get('env')
+            return type('P', (), {'returncode': 0, 'stdout': 'ALL PROOFS CHECK\n', 'stderr': ''})()
+        with patch.object(sc, 'guard') as g, patch.object(sc.subprocess, 'run', side_effect=fake), patch.dict(sc.os.environ, {}, clear=False):
+            sc.os.environ.pop('BEND_NO_TELEMETRY', None)
+            g.return_value.inherited_lock.return_value = 7
+            g.return_value.verify_shard_cgroup.return_value = True
+            g.return_value.admit.return_value = True
+            g.return_value.own_cgroup.side_effect = RuntimeError('stop after the cases')
+            with self.assertRaises(RuntimeError):
+                sc.run()
+        self.assertEqual(seen['env']['BEND_NO_TELEMETRY'], '1')
+
     def test_no_tracked_bend_files_are_ingested_by_check_inventories(self):
         import subprocess
         listed = subprocess.check_output(['git', 'ls-files', '-co', '--exclude-standard', '--', '*.bend'], cwd=ROOT, text=True).split()

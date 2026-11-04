@@ -11,11 +11,17 @@ classification with test/separate-compilation/expected.json. It REFUSES (exit 75
      an admitted executor started it; this script cannot take the lock itself;
   2. its own cgroup has a finite memory.max <= 3,700,000,000 B and memory.swap.max = 0;
   3. heavy-guard admission passes (memory headroom and host reserve, profile proof-shard).
-heavy-guard has no profile that execs this script (its worker contract is deliberately narrow), so a run needs
-an executor that already holds the guard; there is no fallback. This is not a proof run and qualifies nothing.
+The supported invocation is the merged heavy-guard `fixture-check` profile (PR #892), which takes the native
+flock itself and admits exactly this argv, from inside a verified scope:
+
+    systemd-run --user --scope -p MemoryMax=3700000000 -p MemorySwapMax=0 python3 scripts/heavy-guard.py fixture-check -- python3 scripts/sepcomp-fixtures.py run
+
+Anything else (extra arguments, another script, no verified cap) is refused; there is no fallback. The compiler
+runs with BEND_NO_TELEMETRY=1 set explicitly by this script. This is not a proof run and qualifies nothing.
 """
 import importlib.util
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -77,7 +83,8 @@ def run(bend='bend'):
     with tempfile.TemporaryDirectory() as work:
         for name, want in table.items():
             main = materialise(name, work)
-            p = subprocess.run([bend, str(main), '--check-only'], capture_output=True, text=True, timeout=300)
+            p = subprocess.run([bend, str(main), '--check-only'], capture_output=True, text=True, timeout=300,
+                               env={**os.environ, 'BEND_NO_TELEMETRY': '1'})
             got = classify(p.returncode, p.stdout + p.stderr)
             results[name] = {'expected': want['verdict'], 'got': got, 'rc': p.returncode}
     cg = g.own_cgroup()
