@@ -15219,20 +15219,26 @@ def Pair.named(ms: List<&2, J.Json>, +url: String) -> Bool:
     case +m <> t:
       Bool.or(Bool.and(String.eq(J.Json.get_str(m, "url", ""), url), J.Json.get_bool(m, "named", False{})), Pair.named(t, url))
 
-# one round (TN.Pairing.round): every machine due asked at once, each in
+# one round (TN.Pairing.one, close): every machine due asked at once, each in
 # its own job (its ask, and the link it joins, committed through the
 # inbox), ack once all are over, so the machines loop posts no next round
 # before this one is done and a slow machine never holds up a healthy one
-def Pair.urls(ms: List<&2, UC.MRow>) -> List<&2, String>:
+def Pair.spawn(ms: List<&2, UC.MRow>, +inbox: Chan(Msg), +cfg: Cfg, +done: Chan(Unit)) -> IO(Nat):
   match ms:
     case Nil{}:
-      Nil{}
+      IO.pure(Nat, 0n)
     case UC.MRow{_, +url, _} <> t:
-      url <> Pair.urls(t)
+      do IO<Nat>:
+        IO.spawn(Unit, TN.Pairing.one(Pair.ask(url, TN.Tailnet.announce(Cfg.tailnet(cfg), J.Json.get_str(J.Json.get_obj(Far.machines(cfg), "self"), "url", "")), inbox, Cfg.home(cfg), Cfg.tailnet(cfg), Cfg.host(cfg), Cfg.port(cfg),
+          Net.token(Cfg.net(cfg)), Pair.named(J.Json.elems(J.Json.get_obj(Far.machines(cfg), "peers")), url)), done))
+        n : Nat <- Pair.spawn(t, inbox, cfg, done)
+        return Nat.add(n, 1n)
 
 def Pair.round(ms: List<&2, UC.MRow>, +inbox: Chan(Msg), +cfg: Cfg, +ack: Chan(Unit)) -> IO(Unit):
-  TN.Pairing.round(Pair.urls(ms), url => Pair.ask(url, TN.Tailnet.announce(Cfg.tailnet(cfg), J.Json.get_str(J.Json.get_obj(Far.machines(cfg), "self"), "url", "")), inbox, Cfg.home(cfg), Cfg.tailnet(cfg), Cfg.host(cfg), Cfg.port(cfg),
-    Net.token(Cfg.net(cfg)), Pair.named(J.Json.elems(J.Json.get_obj(Far.machines(cfg), "peers")), url)), ack)
+  do IO<Unit>:
+    +done : Chan(Unit) <- Chan.new(Unit, 256)
+    n : Nat <- Pair.spawn(ms, inbox, cfg, done)
+    TN.Pairing.close(n, done, ack)
 
 # (the machines to ask are read now, after every link an earlier round
 # joined was committed: that round's Commit reached the inbox before its

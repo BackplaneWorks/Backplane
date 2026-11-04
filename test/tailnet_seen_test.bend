@@ -69,7 +69,9 @@ def hub2(+log: Chan(String), +inbox: Chan(Unit), +ack: Chan(Unit)) -> IO(Unit):
   do IO<Unit>:
     a : Maybe<&1, Unit> <- Chan.recv(Unit, inbox)
     say(log, "due1")
-    TN.Pairing.round(["m"], u => fail1(log), ack)
+    +done : Chan(Unit) <- Chan.new(Unit, 4)
+    IO.spawn(Unit, TN.Pairing.one(fail1(log), done))
+    TN.Pairing.close(1n, done, ack)
     b : Maybe<&1, Unit> <- Chan.recv(Unit, inbox)
     say(log, "due2")
     o2 : Result<&1, &1, Unit, Unit> <- Chan.send(Unit, ack, Unit{})
@@ -98,12 +100,29 @@ def stalled() -> IO(String):
     IO.spawn(Unit, hub2(log, inbox, ack))
     lines(7n, log)
 
-# a round with two slow machines and a healthy one (TN.Pairing.round): the
+# a round with two slow machines and a healthy one (TN.Pairing.one, close): the
 # healthy one is through at once, the round's ack waits for the slowest
 def ask3(+log: Chan(String), +u: String) -> IO(Unit):
   do IO<Unit>:
     IO.sleep(Bool.pick(U32, String.eq(u, "slow1"), 400, Bool.pick(U32, String.eq(u, "slow2"), 700, 0)))
     say(log, u)
+
+# as server.bend's Pair.spawn and Pair.round: one job per machine, then
+# the barrier
+def spawn3(us: List<&2, String>, +log: Chan(String), +done: Chan(Unit)) -> IO(Nat):
+  match us:
+    case Nil{}:
+      IO.pure(Nat, 0n)
+    case +u <> t:
+      do IO<Nat>:
+        IO.spawn(Unit, TN.Pairing.one(ask3(log, u), done))
+        n : Nat <- spawn3(t, log, done)
+        return Nat.add(n, 1n)
+
+def round3(us: List<&2, String>, +log: Chan(String), +done: Chan(Unit), +ack: Chan(Unit)) -> IO(Unit):
+  do IO<Unit>:
+    n : Nat <- spawn3(us, log, done)
+    TN.Pairing.close(n, done, ack)
 
 def acked(+log: Chan(String), +ack: Chan(Unit)) -> IO(Unit):
   do IO<Unit>:
@@ -115,7 +134,8 @@ def peers3() -> IO(String):
     +log : Chan(String) <- Chan.new(String, 16)
     +ack : Chan(Unit) <- Chan.new(Unit, 1)
     IO.spawn(Unit, acked(log, ack))
-    IO.spawn(Unit, TN.Pairing.round(["slow1", "slow2", "healthy"], u => ask3(log, u), ack))
+    +done : Chan(Unit) <- Chan.new(Unit, 4)
+    IO.spawn(Unit, round3(["slow1", "slow2", "healthy"], log, done, ack))
     lines(4n, log)
 
 def main() -> IO(Unit):
