@@ -3215,6 +3215,8 @@ html.ph-kb .app.phone :is(.thread-content, .thread-view) > :is(.bot-head, .bot-h
 /* the phone header holds ‹ back and the views, so the pane's own tabs and
    the thread's state row go */
 .app.phone.ph-viewer #viewer > .viewer-tabs, .app.phone.ph-viewer > .ph-cells { display: none; }
+/* (nor the thread's "Go to the start", whose timeline is not on show) */
+.app.phone.ph-viewer .ph-tools [data-on-click="ph-start"] { display: none; }
 /* in the screen's column under the header, not fixed over the whole page
    as a narrow window's viewer is (the header would hide its top) */
 .app.phone > .viewer { position: relative; inset: auto; z-index: auto; }
