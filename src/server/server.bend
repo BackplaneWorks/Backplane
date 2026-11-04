@@ -4263,12 +4263,26 @@ def Upgrade.done.k(ok: Bool, force: Bool, +err: String, +inbox: Chan(Msg)) -> IO
 def Upgrade.done(force: Bool, +err: String, +inbox: Chan(Msg)) -> IO(Unit):
   Upgrade.done.k(String.is_empty(err), force, err, inbox)
 
+# how it went, for the KiCad notice ("kicad": client KN.install) and for
+# clients that only read state/error; success restarts to pick it up
+def Install.done(ok: Bool, +err: String, +inbox: Chan(Msg)) -> IO(Unit):
+  match ok:
+    case True{}:
+      do IO<Unit>:
+        Upgrade.say(inbox, Upgrade.note([J.KV{"kicad", J.Str{"installed"}}, J.KV{"state", J.Str{"Backplane KiCad installed"}}]))
+        Upgrade.done(False{}, err, inbox)
+    case False{}:
+      Upgrade.say(inbox, Upgrade.note([J.KV{"kicad", J.Str{"failed"}}, J.KV{"error", J.Str{err}}]))
+
+def Install.said(+err: String, +inbox: Chan(Msg)) -> IO(Unit):
+  Install.done(String.is_empty(err), err, inbox)
+
 # install Backplane KiCad beside our data and restart to pick it up
 def Install.go(+home: String, +inbox: Chan(Msg)) -> IO(Unit):
   do IO<Unit>:
-    Upgrade.say(inbox, Upgrade.note([J.KV{"state", J.Str{"installing Backplane KiCad"}}]))
+    Upgrade.say(inbox, Upgrade.note([J.KV{"kicad", J.Str{"installing"}}, J.KV{"state", J.Str{"installing Backplane KiCad"}}]))
     err : String <- K.KiCad.install(home)
-    Upgrade.done(False{}, err, inbox)
+    Install.said(err, inbox)
 
 # install the channel's newest release and restart into it
 def Upgrade.go.k(force: Bool, +home: String, +channel: String, +inbox: Chan(Msg)) -> IO(Unit):
@@ -6121,18 +6135,18 @@ def Conn.gz(bs: List<&2, U32>, s: Socket, +web: String, +path: String) -> IO(Uni
     case b <> t:
       Conn.served(s, path, True{}, b <> t)
 
-def Conn.static.go(+gz: Bool, s: Socket, +web: String, +path: String) -> IO(Unit):
-  SHTTP.Static.send(gz, s, web, path)
+def Conn.static.go(+coding: U32, s: Socket, +web: String, +path: String) -> IO(Unit):
+  SHTTP.Static.send(coding, s, web, path)
 
-def Conn.static.k(ok: Bool, s: Socket, +web: String, +path: String, gz: Bool) -> IO(Unit):
+def Conn.static.k(ok: Bool, s: Socket, +web: String, +path: String, +coding: U32) -> IO(Unit):
   match ok:
     case True{}:
-      Conn.static.go(gz, s, web, path)
+      Conn.static.go(coding, s, web, path)
     case False{}:
       Conn.finish(s, W.Http.text("400 Bad Request", "bad path"))
 
-def Conn.static(s: Socket, +web: String, +path: String, gz: Bool) -> IO(Unit):
-  Conn.static.k(Conn.safe(path), s, web, Conn.file(path), gz)
+def Conn.static(s: Socket, +web: String, +path: String, +coding: U32) -> IO(Unit):
+  Conn.static.k(Conn.safe(path), s, web, Conn.file(path), coding)
 
 def Conn.pos(xs: List<&2, String>, +x: String, +i: Nat) -> Nat:
   match xs:
@@ -6217,12 +6231,12 @@ def Hello.busy(ss: List<&2, PF.Stat>) -> Nat:
     case +x <> t:
       Bool.pick(Nat, String.eq(PF.Stat.name(x), "hub.busy"), PF.Stat.last(x), Hello.busy(t))
 
-def Conn.get(hello: Bool, s: Socket, +web: String, +path: String, gz: Bool) -> IO(Unit):
+def Conn.get(hello: Bool, s: Socket, +web: String, +path: String, +coding: U32) -> IO(Unit):
   match hello:
     case True{}:
       IO.bind(U32, Unit, PS.Perf.gauge("hub.busy"), busy => Conn.finish(s, W.Http.response("200 OK", "application/cbor", TN.Hello.answer.c(Main.version(), U32.to_nat(busy), VR.Version.commit()), "")))
     case False{}:
-      Conn.static(s, web, path, gz)
+      Conn.static(s, web, path, coding)
 
 # GET /debug/perf (a table), /debug/perf.json and /debug/log (the last
 # log lines): what this process measured since it started (docs/perf.md),
@@ -6291,10 +6305,10 @@ def Info.serve(allowed: Bool, s: Socket, +h: String) -> IO(Unit):
     case False{}:
       Conn.finish(s, W.Http.text("401 Unauthorized", "this Backplane needs its pairing token"))
 
-def Conn.get.k(i: Nat, s: Socket, +web: String, +p: String, gz: Bool, +allowed: Bool, +range: String) -> IO(Unit):
+def Conn.get.k(i: Nat, s: Socket, +web: String, +p: String, +coding: U32, +allowed: Bool, +range: String) -> IO(Unit):
   match i:
     case 0n:
-      Conn.get(True{}, s, web, W.Http.route(p), gz)
+      Conn.get(True{}, s, web, W.Http.route(p), coding)
     case 1n:
       Img.serve(allowed, s, ATT.Att.from_uri("file://" ++ W.Http.param(p, "path")), range)
     case 2n:
@@ -6312,7 +6326,7 @@ def Conn.get.k(i: Nat, s: Socket, +web: String, +p: String, gz: Bool, +allowed: 
     case 8n:
       MessageImageHTTP.serve(allowed, s, ATT.Att.from_uri("file://" ++ W.Http.param(p, "entry")), ATT.Att.from_uri("file://" ++ W.Http.param(p, "path")))
     case _:
-      Conn.get(False{}, s, web, W.Http.route(p), gz)
+      Conn.get(False{}, s, web, W.Http.route(p), coding)
 
 def Conn.view.mode(view: String, +mobile: String, +frontend: String) -> String:
   match view:
@@ -6325,7 +6339,7 @@ def Conn.route.k(ws: Bool, s: Socket, req: W.Request, rest: List<&2, U32>, +web:
       Conn.gate(Conn.allowed(hs, p, token), CF.Cef.link(W.Http.header_of(hs, "tailscale-user-login"), W.Http.header_of(hs, "origin")), s, W.Http.header_of(hs, "sec-websocket-key"), rest, id, inbox,
         Maybe.default(&2, Nat, Nat.read(W.Http.param(p, "since")), 0n), W.Http.param(p, "origin"), Conn.view.mode(W.Http.param(p, "view"), W.Http.param(p, "mobile"), W.Http.param(p, "frontend")))
     case False{} W.Request{_, +p, +hs}:
-      Conn.get.k(Conn.pos(["/hello", "/img", "/debug/perf", "/debug/perf.json", "/debug/log", "/plot/info", "/viewer-asset", "/debug/diagnostics.json", "/message-image"], W.Http.route(p), 0n), s, web, p, String.contains(W.Http.header_of(hs, "accept-encoding"), "gzip"), Bool.and(Conn.allowed(hs, p, token), Bool.or(Bool.not(String.eq(W.Http.route(p), "/message-image")), AUTH.Auth.credential(hs, p, token))), W.Http.header_of(hs, "range"))
+      Conn.get.k(Conn.pos(["/hello", "/img", "/debug/perf", "/debug/perf.json", "/debug/log", "/plot/info", "/viewer-asset", "/debug/diagnostics.json", "/message-image"], W.Http.route(p), 0n), s, web, p, H.Static.coding(W.Http.header_of(hs, "accept-encoding")), Bool.and(Conn.allowed(hs, p, token), Bool.or(Bool.not(String.eq(W.Http.route(p), "/message-image")), AUTH.Auth.credential(hs, p, token))), W.Http.header_of(hs, "range"))
 
 def LockHttp.wait.next(waiting: Bool, s: Socket, +text: String, +body: String, +inbox: Chan(Msg), k: Maybe<&1, String> -> Socket -> IO(Unit)) -> IO(Unit):
   match waiting:
@@ -13590,10 +13604,32 @@ def Hub.thin.act(+send: Bool, h: Hub, client: U32, +o: J.Json, +c: Client, now: 
   Hub.thin.act.native(Bool.or(Bool.not(String.eq(J.Json.get_str(p, "action", ""), "native-sidebar-page")),
     Bool.and(NATIVE_SIDE.Ns.offered(String.eq(Client.thin.mode(c), "view-web"), p), TA.Actor.native.valid(ThinContext.actors(Client.thin.context(c)), p))), send, h, client, o, c, now)
 
+# "start:N" (the phone's Go to the start, web/thin-host.js's start): the
+# page that starts at the thread's Nth oldest row, its bound read from the
+# store (TSTO.Ts.start), one request where paging back took one a page;
+# without a store (memory, a thread elsewhere) the newest page, and the
+# page pages back from it as before
+def Hub.thin.start.at(store: Bool, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +thread: String, +n: Nat) -> IO(Hub):
+  match store h:
+    case False{} _: Hub.thin.page(Some{0n}, h, client, o, c, now)
+    case True{} Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      do IO<Hub>:
+        +before : Nat <- TSTO.Ts.start(Cfg.thin.store(cfg), thread, n)
+        Hub.thin.page(Some{before}, Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now)
+
+def Hub.thin.page.cursor(start: Bool, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat) -> IO(Hub):
+  match start h:
+    case False{} Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      Hub.thin.page(Hub.thin.cursor(J.Json.get_obj(o, "p"), Hub.thin.view_epoch(st, cfg, TV.Target.thread(st, J.Json.get_obj(J.Json.get_obj(o, "p"), "target"))), ""), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now)
+    case True{} Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      +thread = TV.Target.thread(st, J.Json.get_obj(J.Json.get_obj(o, "p"), "target"))
+      Hub.thin.start.at(Bool.and(Bool.not(String.is_empty(Cfg.thin.store(cfg))), Bool.not(FR.Fr.is(thread))), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, thread,
+        TSTO.Ts.start.n(J.Json.get_str(J.Json.get_obj(o, "p"), "cursor", "")))
+
 def Hub.thin.dispatch(+kind: Nat, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat) -> IO(Hub):
   match kind h:
     case 0n _: Hub.thin.render(h, client, o, c, now, Hub.thin.context.for(True{}, J.Json.get_obj(o, "p"), c, J.Json.as_raw(J.Json.get(o, "id"), "0"), 0n), 0n)
-    case 1n Hub{+st, f, ls, cl, as, inbox, +cfg, note}: Hub.thin.page(Hub.thin.cursor(J.Json.get_obj(o, "p"), Hub.thin.view_epoch(st, cfg, TV.Target.thread(st, J.Json.get_obj(J.Json.get_obj(o, "p"), "target"))), ""), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now)
+    case 1n _: Hub.thin.page.cursor(String.starts_with(J.Json.get_str(J.Json.get_obj(o, "p"), "cursor", ""), "start:"), h, client, o, c, now)
     case 2n Hub{+st, f, ls, cl, as, inbox, +cfg, note}: Hub.thin.search.valid(Hub.thin.query.valid(J.Json.get_obj(o, "p")), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, Client.thin.context(c), Hub.thin.cursor(J.Json.get_obj(o, "p"), Hub.thin.view_epoch(st, cfg, TV.Target.thread(st, J.Json.get_obj(J.Json.get_obj(o, "p"), "target"))), J.Json.get_str(J.Json.get_obj(o, "p"), "query", "")))
     case 3n _: Hub.thin.render(h, client, TV.Obj.put(o, "p", TV.Obj.put(J.Json.get_obj(o, "p"), "action", J.Str{""})), c, now, Client.thin.context(c), ThinContext.anchor(Client.thin.context(c)))
     case 4n _: Hub.thin.act(Hub.thin.sends(J.Json.get_str(J.Json.get_obj(o, "p"), "action", "")), h, client, o, c, now)
@@ -16709,7 +16745,7 @@ def Conn.devices.reply(+j: J.Json, s: Socket, +native: Bool, +https: Bool, +op: 
     +credential : String = J.Json.get_str(j, "token", "")
     +link : String = J.Json.get_str(j, "link", "")
     +body : J.Json = Bool.pick(J.Json, String.eq(op, "enroll"),
-      Bool.pick(J.Json, Bool.or(native, Bool.not(String.is_empty(error))), j, J.Json.obj([J.KV{"ok", J.Flag{True{}}}])),
+      Bool.pick(J.Json, Bool.or(native, Bool.not(String.is_empty(error))), j, J.Json.obj([J.KV{"ok", J.Flag{True{}}}, J.KV{"device", J.Str{J.Json.get_str(j, "id", "")}}])),
       Bool.pick(J.Json, String.is_empty(link), j, TV.Obj.put(j, "qr", J.Str{QR.Qr.text(link)})))
     Conn.finish(s, W.Http.response(Bool.pick(String, String.is_empty(error), "200 OK", Bool.pick(String, String.eq(error, "rate_limited"), "429 Too Many Requests", "400 Bad Request")),
       "application/json", U.Utf8.encode(J.Json.show(body)), "Cache-Control: no-store\r\nReferrer-Policy: no-referrer\r\n" ++

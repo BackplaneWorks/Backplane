@@ -117,6 +117,12 @@ def Q.sql.context.runs() -> String:
   "SELECT p.id,(SELECT h.id FROM entry h WHERE h.thread=p.thread AND h.seq<=p.seq AND h.seq>coalesce((SELECT b.seq FROM entry b WHERE b.thread=p.thread AND b.seq<p.seq AND NOT (b.kind='act' AND b.role IN ('tool','step')) AND NOT (b.kind='msg' AND b.role='assistant' AND trim(b.text,char(9)||char(10)||char(13)||char(32))='') ORDER BY b.seq DESC LIMIT 1),0) AND h.kind='act' AND h.role IN ('tool','step') ORDER BY h.seq LIMIT 1) FROM entry p WHERE p.thread=?1 AND p.ord IN (SELECT value FROM json_each(?2)) AND p.kind='act' AND p.role IN ('tool','step') ORDER BY p.seq DESC LIMIT 32"
 
 # how many rows of a thread are older than seq ?2
+# the ordinal of a thread's row ?2 rows after its oldest, in the page
+# query's order (both of its branches), 0 when there is none: the page
+# below it is the thread's start (the "start:N" cursor, server/thinstore.bend)
+def Q.sql.start() -> String:
+  "SELECT coalesce((SELECT ord FROM (SELECT seq, ord FROM entry WHERE thread = ?1 UNION ALL SELECT seq, ord FROM entry WHERE src = ?1 AND src <> '') ORDER BY seq LIMIT 1 OFFSET ?2), 0)"
+
 def Q.sql.below() -> String:
   "SELECT (SELECT count(*) FROM entry WHERE thread = ?1 AND seq < ?2) + (SELECT count(*) FROM entry WHERE src = ?1 AND src <> '' AND seq < ?2)"
 

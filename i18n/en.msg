@@ -774,6 +774,11 @@ viewer.field.text = text
 viewer.field.sheet = sheet
 viewer.field.file = file
 viewer.field.netclass = netclass
+viewer.card.part = part {ref}
+viewer.field.side = side
+viewer.field.pads = pads
+viewer.side.top = top
+viewer.side.bottom = bottom
 
 # ---- i18n web phone ----
 web.viewer.layers.active = Layers · {name}
@@ -970,6 +975,8 @@ viewer.pan.tip = drag or two fingers to pan · wheel or pinch to zoom · double-
 mech.renders.tip = The part''s pictures, and drawing them
 viewer.board3d.tip = The board in 3D
 viewer.orbit.tip = drag to turn · right-drag or two fingers to move · wheel or pinch to zoom · double-click to fit
+viewer.pan.touch = one finger pans · pinch to zoom · double-tap to zoom in or fit · tap to inspect · hold to comment
+viewer.orbit.touch = one finger turns · two fingers move, pinch and twist · double-tap to fit · tap a part to inspect
 viewer.board.tip = The project''s board
 viewer.parts3d.tip = The board in 3D, with its parts
 viewer.mech.tip = Mechanical parts: their renders, and each in 3D

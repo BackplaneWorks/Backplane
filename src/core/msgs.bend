@@ -8172,6 +8172,13 @@ def T.viewer.browser.tip(l: I.Loc) -> String:
     case I.Ja{}:
       "このスレッドのブラウザー"
 
+def T.viewer.card.part(l: I.Loc, arg0: String) -> String:
+  match l:
+    case I.En{}:
+      "part " ++ arg0
+    case I.Ja{}:
+      "部品 " ++ arg0
+
 def T.viewer.close(l: I.Loc) -> String:
   match l:
     case I.En{}:
@@ -8347,6 +8354,13 @@ def T.viewer.field.netclass(l: I.Loc) -> String:
     case I.Ja{}:
       "ネットクラス"
 
+def T.viewer.field.pads(l: I.Loc) -> String:
+  match l:
+    case I.En{}:
+      "pads"
+    case I.Ja{}:
+      "パッド数"
+
 def T.viewer.field.ref(l: I.Loc) -> String:
   match l:
     case I.En{}:
@@ -8367,6 +8381,13 @@ def T.viewer.field.sheet(l: I.Loc) -> String:
       "sheet"
     case I.Ja{}:
       "シート"
+
+def T.viewer.field.side(l: I.Loc) -> String:
+  match l:
+    case I.En{}:
+      "side"
+    case I.Ja{}:
+      "面"
 
 def T.viewer.field.size(l: I.Loc) -> String:
   match l:
@@ -8837,6 +8858,13 @@ def T.viewer.orbit.tip(l: I.Loc) -> String:
     case I.Ja{}:
       "ドラッグで回転・右ドラッグか2本指で移動・ホイールかピンチで拡大縮小・ダブルクリックで全体表示"
 
+def T.viewer.orbit.touch(l: I.Loc) -> String:
+  match l:
+    case I.En{}:
+      "one finger turns · two fingers move, pinch and twist · double-tap to fit · tap a part to inspect"
+    case I.Ja{}:
+      "1本指で回転・2本指で移動、ピンチ、ひねり・ダブルタップで全体表示・部品をタップで詳細"
+
 def T.viewer.page.empty(l: I.Loc) -> String:
   match l:
     case I.En{}:
@@ -8857,6 +8885,13 @@ def T.viewer.pan.tip(l: I.Loc) -> String:
       "drag or two fingers to pan · wheel or pinch to zoom · double-click to fit"
     case I.Ja{}:
       "ドラッグか2本指で移動・ホイールかピンチで拡大縮小・ダブルクリックで全体表示"
+
+def T.viewer.pan.touch(l: I.Loc) -> String:
+  match l:
+    case I.En{}:
+      "one finger pans · pinch to zoom · double-tap to zoom in or fit · tap to inspect · hold to comment"
+    case I.Ja{}:
+      "1本指で移動・ピンチで拡大縮小・ダブルタップで拡大か全体表示・タップで詳細・長押しでコメント"
 
 def T.viewer.parts3d.tip(l: I.Loc) -> String:
   match l:
@@ -9067,6 +9102,20 @@ def T.viewer.sheet.top(l: I.Loc) -> String:
       "Top sheet"
     case I.Ja{}:
       "最上位シート"
+
+def T.viewer.side.bottom(l: I.Loc) -> String:
+  match l:
+    case I.En{}:
+      "bottom"
+    case I.Ja{}:
+      "裏面"
+
+def T.viewer.side.top(l: I.Loc) -> String:
+  match l:
+    case I.En{}:
+      "top"
+    case I.Ja{}:
+      "表面"
 
 def T.viewer.solid(l: I.Loc) -> String:
   match l:

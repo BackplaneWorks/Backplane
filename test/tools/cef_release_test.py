@@ -41,6 +41,8 @@ class PublicRelease(unittest.TestCase):
         private.mkdir()
         (private / 'events.jsonl').write_text('explicit browser.engine=chrome; session sentinel\n')
         self.env = dict(os.environ, HOME=str(self.home), XDG_CACHE_HOME=str(self.repo / 'cache'),
+                        XDG_DATA_HOME=str(self.home / '.local/share'), XDG_CONFIG_HOME=str(self.home / '.config'),
+                        XDG_STATE_HOME=str(self.home / '.local/state'),
                         BACKPLANE_PREFIX=str(self.prefix), BACKPLANE_BIN=str(self.root / 'links'),
                         PATH=str(self.repo / 'bin') + ':' + os.environ['PATH'])
         self.build_payload('first')

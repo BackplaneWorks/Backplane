@@ -480,9 +480,13 @@ export class ThinHost {
     this.api.sendFeedback?.(false, preview.thread, this.session.drafts[preview.thread] || '');
   }
   rejectOperations(operations) {
+    // (a Send not yet taken by the hub goes back to the field: the page says
+    // so, api.sendLost, else it read as sent and then came back for no reason)
+    const lost = operations.some(op => op?.preview && !op.preview.issued && this.sendPreviews.has(op.preview.key));
     // Restore newer captures first so the original send remains at the front
     // when a connection fails with several messages waiting behind it.
     for (const operation of operations.slice().reverse()) operation?.settled?.(false);
+    if (lost) this.api.sendLost?.();
   }
   fieldValue(name, fallback) {
     const field = this.fields.get(name);
@@ -617,6 +621,9 @@ export class ThinHost {
     }
     const bottom = held.pages.at(-1);
     if (bottom.back.length) return this.pageJump(bottom.back.at(-1), bottom.back.slice(0, -1), 'newer');
+    // (reached by start(): the next newer page shares half of this one)
+    const from = /^start:(\d+)$/.exec(bottom.cursor || '');
+    if (from && !this.atNewest()) return this.pageJump('start:' + (Number(from[1]) + 16), [], 'newer');
     return this.atNewest() ? false : this.pageJump('', [], 'newer');
   }
   // whether ahead(direction) has a page to ask for
@@ -651,7 +658,7 @@ export class ThinHost {
     }
     this.retainedHistory = false;
     const page = this.heldPage(paged?.destination || this), same = p => p.cursor === page.cursor && p.back.length === page.back.length;
-    if (!this.held || !paged || paged.direction === 'restore' || paged.direction === 'newest') { this.held = this.heldHere();return; }
+    if (!this.held || !paged || paged.direction === 'restore' || paged.direction === 'newest' || paged.direction === 'start') { this.held = this.heldHere();return; }
     const pages = this.held.pages.filter(p => !same(p));
     if (paged.direction === 'older') pages.unshift(page);else pages.push(page);
     this.held = { pages };
@@ -688,6 +695,18 @@ export class ThinHost {
     this.cursor = '';this.back = [];
     return this.pageTo('', undo, 'newest');
   }
+  // Straight to the thread's first page (the phone's Go to the start): the
+  // hub's "start:N" cursor names the page that starts at the thread's Nth
+  // oldest row (server.bend's Hub.thin.page.cursor), one request where
+  // paging back took one a page. The trail is let go, as newest() does;
+  // paging newer from there asks start:N+16 (ahead). A hub without a store
+  // answers the newest page, and the page pages back from it as before.
+  start() {
+    if (!this.ready || this.paging || this.pagingNext || this.pageActionPending()) return false;
+    const undo = { cursor: this.cursor, back: this.back.slice() };
+    this.cursor = 'start:0';this.back = [];
+    return this.pageTo('start:0', undo, 'start');
+  }
   newestDue() {
     if (!this.pendingNewest || !this.ready || this.paging || this.pagingNext || this.pageActionPending()) return false;
     if (this.atNewest()) {
@@ -716,7 +735,7 @@ export class ThinHost {
       this.cursor = destination.cursor;this.back = destination.back.slice();
       return this.pageTo(this.cursor, undo, 'restore', position);
     }
-    return this.pageError?.direction === 'newer' ? this.newer() : this.pageError?.direction === 'newest' ? this.newest() : this.pageError ? this.page() : false;
+    return this.pageError?.direction === 'newer' ? this.newer() : this.pageError?.direction === 'newest' ? this.newest() : this.pageError?.direction === 'start' ? this.start() : this.pageError ? this.page() : false;
   }
   atNewest() {
     // The trail describes issued navigation; the accepted source window

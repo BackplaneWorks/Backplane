@@ -286,10 +286,12 @@ function sock_send_static(socket, request, k) {
     if (!request || typeof request.path !== 'string' || typeof request.ctype !== 'string'
         || typeof request.cache !== 'string' || typeof request.extra !== 'string'
         || /[\0\r\n]/.test(request.ctype + request.cache) || request.extra.includes('\0')
-        || ![0,1].includes(request.coding) || !Number.isInteger(request.piece)
+        || ![0,1,2].includes(request.coding) || !Number.isInteger(request.piece)
         || request.piece < 1 || request.piece > 65536) return finish(22);
-    const candidates = request.coding === 1 ? [request.path + '.gz', request.path] : [request.path];
-    let gzip = false;
+    // coding 2: the browser takes brotli and gzip, 1: gzip, 0: neither
+    const candidates = request.coding === 2 ? [request.path + '.br', request.path + '.gz', request.path]
+      : request.coding === 1 ? [request.path + '.gz', request.path] : [request.path];
+    let coding = '';
     if (!request.path.includes('\0')) for (const candidate of candidates) {
       try {
         // Preserve static assets' existing symlink support. O_NONBLOCK keeps a
@@ -297,14 +299,14 @@ function sock_send_static(socket, request, k) {
         fd = fs.openSync(candidate, fs.constants.O_RDONLY | (fs.constants.O_NONBLOCK || 0));
         const st = fs.fstatSync(fd);
         if (st.isFile() && Number.isSafeInteger(st.size) && st.size > 0) {
-          size = st.size;gzip = candidate !== request.path;break;
+          size = st.size;coding = candidate === request.path ? '' : candidate.endsWith('.br') ? 'br' : 'gzip';break;
         }
         close();
       } catch (_) {try {close();} catch (_) {}}
     }
     if (fd >= 0) {
       pending = head('200 OK', request.ctype, size, request.cache,
-        request.extra + (gzip ? 'Content-Encoding: gzip\r\n' : '') + 'Vary: Accept-Encoding\r\n');
+        request.extra + (coding ? 'Content-Encoding: ' + coding + '\r\n' : '') + 'Vary: Accept-Encoding\r\n');
     } else {
       const body = Buffer.from('not found');
       pending = Buffer.concat([head('404 Not Found', 'text/plain; charset=utf-8', body.length, 'no-cache', ''),body]);

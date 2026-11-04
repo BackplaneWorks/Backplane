@@ -11,7 +11,7 @@ export function viewerChoice(action, value) {
 export function installViewerFeedback(root = document) {
   let pending = null;
   const sync = () => {
-    for (const bar of root.querySelectorAll('.workspace-bar,.viewer-tabs,.top-views')) {
+    for (const bar of root.querySelectorAll('.workspace-bar,.viewer-tabs,.top-views,.ph-views')) {
       for (const button of bar.querySelectorAll('button')) {
         const selected = pending && button.dataset.onClick === pending.action && button.dataset.value === pending.value;
         if (selected && button.dataset.viewerPending !== 'true') button.dataset.viewerPending = 'true';

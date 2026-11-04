@@ -78,7 +78,17 @@ export class TimelineScroller {
     const given = Array.from(rows);
     this._floating(given.filter(this.callbacks.floating));
     const snapshot = given.filter(row => !this.callbacks.floating(row));
-    const keys = snapshot.map(this.callbacks.key);
+    // A key met again (a log that holds one tool call twice, a resumed
+    // turn: two runs headed "fold:<that id>") is told apart by its
+    // occurrence, the first keeping its own key, rather than throwing on
+    // every render: the whole conversation never drew.
+    const seen = new Map();
+    const keys = snapshot.map((row, i) => {
+      const k = this.callbacks.key(row, i);
+      if (typeof k !== 'string') return k;
+      const n = seen.get(k) || 0;seen.set(k, n + 1);
+      return n ? k + '\u001f' + n : k;
+    });
     // A row drawn again the same (a fresh tree from the hub or a local
     // render, its rows equal to the last) keeps the vnode it had: it is
     // neither patched nor measured again (same: the host's deep equality)

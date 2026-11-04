@@ -794,6 +794,11 @@ viewer.field.text = テキスト
 viewer.field.sheet = シート
 viewer.field.file = ファイル
 viewer.field.netclass = ネットクラス
+viewer.card.part = 部品 {ref}
+viewer.field.side = 面
+viewer.field.pads = パッド数
+viewer.side.top = 表面
+viewer.side.bottom = 裏面
 
 # ---- i18n web phone ----
 web.viewer.layers.active = レイヤー・{name}
@@ -990,6 +995,8 @@ viewer.pan.tip = ドラッグか2本指で移動・ホイールかピンチで�
 mech.renders.tip = パーツの画像とレンダー作成
 viewer.board3d.tip = 基板の3D表示
 viewer.orbit.tip = ドラッグで回転・右ドラッグか2本指で移動・ホイールかピンチで拡大縮小・ダブルクリックで全体表示
+viewer.pan.touch = 1本指で移動・ピンチで拡大縮小・ダブルタップで拡大か全体表示・タップで詳細・長押しでコメント
+viewer.orbit.touch = 1本指で回転・2本指で移動、ピンチ、ひねり・ダブルタップで全体表示・部品をタップで詳細
 viewer.board.tip = プロジェクトの基板
 viewer.parts3d.tip = 部品を含む基板の3D表示
 viewer.mech.tip = 機械パーツのレンダーと3D表示
