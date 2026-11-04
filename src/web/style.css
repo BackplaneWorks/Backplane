@@ -2759,12 +2759,6 @@ html.phone.ph-short.ph-kb .app.phone > .ph-cells { display: none; }
    tap puts it away ("dismiss"; phone-shell.js also does after 6 s) */
 .app.phone > .toast { left: max(8px, env(safe-area-inset-left)); right: max(8px, env(safe-area-inset-right)); top: calc(var(--ph-top, 0px) + env(safe-area-inset-top) + var(--ph-head) + 6px); max-width: none; min-height: var(--ph-tap); box-sizing: border-box; display: flex; align-items: center; z-index: 150; padding: 10px 14px; font-size: calc(14px * var(--text-scale, 100) / 100); box-shadow: 0 6px 18px #0006; }
 html.phone.ph-short .app.phone > .toast { top: calc(var(--ph-top, 0px) + env(safe-area-inset-top) + 46px); }
-/* a line under the header for a long errand (Go to the start: how far,
-   Cancel, then Newest ↓) */
-.ph-note { position: fixed; left: 0; right: 0; top: calc(var(--ph-top, 0px) + env(safe-area-inset-top) + var(--ph-head, 52px) + 1px); z-index: 140; display: flex; align-items: center; gap: 12px; min-height: var(--ph-tap, 44px); box-sizing: border-box;
-  padding: 0 max(8px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left)); background: var(--raise); color: var(--text); border-bottom: 1px solid var(--line); font-size: 14px; }
-.ph-note button { margin-left: auto; min-height: 36px; padding: 0 14px; }
-html.phone.ph-short .ph-note { top: calc(var(--ph-top, 0px) + env(safe-area-inset-top) + 41px); }
 /* on the viewer a toast sits at the foot, off the view chips */
 .app.phone.ph-viewer > .toast { top: auto; bottom: calc(env(safe-area-inset-bottom) + 12px); }
 
@@ -3302,8 +3296,6 @@ html.ph-kb .app.phone :is(.thread-content, .thread-view) > :is(.bot-head, .bot-h
 /* the phone header holds ‹ back and the views, so the pane's own tabs and
    the thread's state row go */
 .app.phone.ph-viewer #viewer > .viewer-tabs, .app.phone.ph-viewer > .ph-cells { display: none; }
-/* (nor the thread's "Go to the start", whose timeline is not on show) */
-.app.phone.ph-viewer .ph-tools [data-on-click="ph-start"] { display: none; }
 /* in the screen's column under the header, not fixed over the whole page
    as a narrow window's viewer is (the header would hide its top) */
 .app.phone > .viewer { position: relative; inset: auto; z-index: auto; }
@@ -3589,7 +3581,6 @@ html.phone body, .app.phone { font-family: var(--ph-font); }
 
 /* toasts and notes */
 .app.phone > .toast { border-radius: var(--ph-r-card); }
-.ph-note button { border-radius: var(--ph-r-pill); }
 .ph-empty-actions button { border-radius: var(--ph-r-pill); }
 
 /* the screens outside the hub's tree (search, the command palette, the
