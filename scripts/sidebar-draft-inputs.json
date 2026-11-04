@@ -1186,6 +1186,7 @@
       "oomKill": 0,
       "logSha256": "cd83cd83cb66e6c0ea17d490d0baf8502c2b965f711f5e731bbd391a9cd5612c"
     },
-    "limits": "Full PROOF.bend attempted on this source under the 3.7e9 cap; OOM-killed. The three new laws and 13 copy-choice UI assertions passed separately. No native-device acceptance claimed."
+    "limits": "Full PROOF.bend attempted on this source under the 3.7e9 cap; OOM-killed. The three new laws and 13 copy-choice UI assertions passed separately. No native-device acceptance claimed.",
+    "inheritedMainReview": "Also reviewed main changes since 3d17db4ec7: accounts overlay catalog fast path reads committed bindings; CEF changes only the new-tab URL constant; bot header/tab identity keys add no state reads; model picker parses existing info catalog and the same retained scratch query. No new ordinary draft-body reader or sidebar filtering/authority change."
   }
 }
