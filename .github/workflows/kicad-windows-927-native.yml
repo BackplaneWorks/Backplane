@@ -7,6 +7,8 @@ name: Issue 927 exact Windows package consumer
 # rather than relying on Windows' implicit current-job lookup.
 # Pass actual non-secret hosted-run metadata across the standard-user logon;
 # preserve its real identity/profile rather than inheriting the admin profile.
+# Optional diagnostics use a readable exact runtime copy; a probe setup error
+# cannot skip the independent canonical ABI and application checks.
 on:
   push:
     branches: [backplane/verify-kicad-windows-927]
