@@ -71,7 +71,7 @@ def main() -> IO(Unit):
     # the owning hub
     +s : M.State = owner()
     C.Check.str("owner lists its threads (not a bot's)", said(F.Fm.serve(s, 100n, 1, asked("thread_list", Nil{}))),
-      "{\"t\":\"reply\",\"id\":0,\"ok\":true,\"mcp\":{\"ok\":true,\"body\":{\"threads\":[{\"id\":\"pt\",\"project\":\"p\",\"title\":\"layout\",\"provider\":\"claude\",\"model\":\"\",\"turn\":\"idle\",\"activity\":2,\"phase\":\"idle\",\"waiting\":0,\"work\":[]}]}}}")
+      "{\"t\":\"reply\",\"id\":0,\"ok\":true,\"mcp\":{\"ok\":true,\"body\":{\"threads\":[{\"id\":\"pt\",\"project\":\"p\",\"title\":\"layout\",\"provider\":\"claude\",\"model\":\"\",\"turn\":\"idle\",\"activity\":2,\"parent\":\"\",\"phase\":\"idle\",\"waiting\":0,\"work\":[]}]}}}")
     +sd : B.Step = F.Fm.serve(s, 100n, 1, asked("thread_send", [J.KV{"threadId", J.Str{"pt"}}, J.KV{"text", J.Str{"hello from alpha"}}]))
     C.Check.str("a send to a shared thread is stored", Bool.show(String.contains(said(sd), "\"ok\":true,\"body\":{\"threadId\":\"pt\",\"state\":\"sent\"")) ++ " " ++ Bool.show(Nat.is_gt(changed(sd), 0n)), "True True")
     +un : B.Step = F.Fm.serve(s, 100n, 1, asked("thread_send", [J.KV{"threadId", J.Str{"nope"}}, J.KV{"text", J.Str{"x"}}]))

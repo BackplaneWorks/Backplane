@@ -38,7 +38,10 @@ class Workbench {
         const on = !root.classList.contains("solid-split"); this.state.pcb = on; root.classList.toggle("solid-split", on); split.setAttribute("aria-pressed", String(on));
       }, "Show the saved PCB beside the assembly"); split.setAttribute("aria-pressed", String(this.state.pcb)); this.toolbar.append(split);
     }
-    const camera = node("details", "solid-camera"); camera.open = this.state.camera; camera.addEventListener("toggle", () => { this.state.camera = camera.open; }); camera.append(node("summary", "", "Camera")); const cameraBody = node("div", "solid-camera-body"); camera.append(cameraBody);
+    const camera = node("details", "solid-camera"); camera.open = this.state.camera; camera.addEventListener("toggle", () => { this.state.camera = camera.open; });
+    // (a phone shows the panel as a sheet over a backdrop, the details' own
+    // ::before: a tap on it lands on the details, and shuts the panel)
+    camera.addEventListener("click", (e) => { if (e.target === camera && document.documentElement.classList.contains("phone")) camera.open = false; }); camera.append(node("summary", "", "Camera")); const cameraBody = node("div", "solid-camera-body"); camera.append(cameraBody);
     const projection = node("label", "solid-field", "Projection"); this.projection = node("select"); this.projection.setAttribute("aria-label", "Projection");
     for (const [value, label] of [["perspective", "Perspective"], ["orthographic", "Orthographic"]]) { const o = node("option", "", label); o.value = value; this.projection.append(o); }
     this.projection.addEventListener("change", () => this.act("projection", this.projection.value)); projection.append(this.projection); cameraBody.append(projection);
@@ -241,3 +244,55 @@ export function sourceStamp(key, revision) {
   if (workbench && key === workbench.boardKey) workbench.stamp();
 }
 export function reset() { workbench?.dispose(); workbench = null; revisions.clear(); stamps.clear(); }
+
+// A phone's row of view chips (view.bend's View.viewer.chips) scrolls
+// sideways: after a render the view on show is brought into the row, once
+// per view, so a later swipe along the row is the person's to keep.
+let chipShown = "";
+export function chipInView() {
+  const on = document.querySelector(".ph-views > .tab.on");
+  const key = on ? on.dataset.key || on.getAttribute("aria-label") || "" : "";
+  if (!on || key === chipShown) { if (!on) chipShown = ""; return; }
+  chipShown = key;
+  const row = on.parentElement, a = on.getBoundingClientRect(), r = row.getBoundingClientRect();
+  if (a.left < r.left || a.right > r.right) row.scrollLeft += a.left - r.left - (r.width - a.width) / 2;
+}
+
+// A phone's viewer can give the drawing the whole screen: a button at the
+// stage's top right (on <body>, outside the hub's tree) hides the header,
+// the chips, the toolbars and the history (style.css, html.ph-focus) and
+// brings them back. Leaving the viewer screen ends it.
+let focusButton = null;
+export function focusToggle() {
+  const app = document.querySelector(".app.phone.ph-viewer");
+  const stage = app?.querySelector("#viewer .viewer-stage");
+  const html = document.documentElement;
+  if (!app || !stage) {
+    focusButton?.remove(); focusButton = null;
+    html.classList.remove("ph-focus");
+    return;
+  }
+  if (!focusButton) {
+    focusButton = document.createElement("button");
+    focusButton.type = "button"; focusButton.className = "ph-focus-toggle";
+    focusButton.addEventListener("click", () => { html.classList.toggle("ph-focus"); focusToggle(); });
+    addEventListener("resize", () => focusToggle());
+  }
+  const on = html.classList.contains("ph-focus");
+  focusButton.setAttribute("aria-pressed", String(on));
+  focusButton.setAttribute("aria-label", on ? "Show the controls" : "Full screen");
+  focusButton.title = focusButton.getAttribute("aria-label");
+  focusButton.textContent = on ? "⤡" : "⤢";
+  if (!focusButton.isConnected) document.body.append(focusButton);
+  requestAnimationFrame(() => {
+    if (!focusButton || !stage.isConnected) return;
+    const r = stage.getBoundingClientRect();
+    focusButton.style.top = `${Math.round(r.top + 8)}px`;
+    focusButton.style.right = `${Math.round(innerWidth - r.right + 8)}px`;
+  });
+}
+
+// (and Safari's own pinch, which touch-action does not always stop there)
+if (typeof document !== "undefined") document.addEventListener("gesturestart", (e) => {
+  if (e.target?.closest?.(".app.phone #viewer")) e.preventDefault();
+}, { passive: false });

@@ -291,8 +291,50 @@ def WS.stop.k(running: Bool, u: U.Ui) -> U.Act:
 def WS.stop(+u: U.Ui) -> U.Act:
   WS.stop.k(WS.stop.available(u), u)
 
+# a command that acts on the open thread (its terminal, viewers, name,
+# pin, settle, snooze, to-dos...) or its project, or a keyboard's key list:
+# a phone's palette on a root tab, no thread open, leaves these out
+# instead of offering them only to say "select a thread first"
+def WS.scoped(+a: String) -> Bool:
+  match a:
+    case "ws-term-here": True{}
+    case "ws-term-hide": True{}
+    case "row-rename": True{}
+    case "fork": True{}
+    case "delete": True{}
+    case "view-kind": True{}
+    case "mech": True{}
+    case "diff": True{}
+    case "rv-page": True{}
+    case "panel": True{}
+    case "fm": True{}
+    case "thread-child": True{}
+    case "pin": True{}
+    case "unpin": True{}
+    case "settle": True{}
+    case "unsettle": True{}
+    case "archive": True{}
+    case "unarchive": True{}
+    case "snooze": True{}
+    case "proj-remove": True{}
+    case "ws-keys": True{}
+    case "": True{}
+    case "fold": True{}
+    case _: False{}
+
+def WS.unscoped(xs: List<&2, U.PItem>) -> List<&2, U.PItem>:
+  match xs:
+    case Nil{}: Nil{}
+    case U.PItem{+l, +a, +v} <> t: U.Palette.filter.k(Bool.not(WS.scoped(a)), U.PItem{l, a, v}, WS.unscoped(t))
+
+def WS.commands.for(bare: Bool, xs: List<&2, U.PItem>) -> List<&2, U.PItem>:
+  match bare:
+    case True{}: WS.unscoped(xs)
+    case False{}: xs
+
 def WS.commands(+u: U.Ui) -> List<&2, U.PItem>:
-  List.append(&2, U.PItem, WS.stop.command(WS.stop.available(u)), WS.commands.k(u, WS.cmds(u)))
+  WS.commands.for(Bool.and(String.eq(U.Ui.info(u, "local.workspace.form"), "phone"), String.is_empty(U.Ui.sel(u))),
+    List.append(&2, U.PItem, WS.stop.command(WS.stop.available(u)), WS.commands.k(u, WS.cmds(u))))
 
 def WS.projects(xs: List<&2, M.Project>) -> List<&2, U.PItem>:
   match xs:
@@ -315,8 +357,10 @@ def WS.palette.move(+u: U.Ui, +delta: String) -> U.Act:
   +i = U.Palette.index(u)
   WS.none(U.Palette.set(u, U.Palette.query(u), Bool.pick(Nat, String.eq(delta, "up"), Nat.sub(i, 1n), Nat.min(1n+i, Nat.sub(List.length(&2, U.PItem, WS.items(u)), 1n)))))
 
-def WS.run.kind(+action: String, +u: U.Ui, value: String) -> U.Act:
-  match action:
+# WS.run.kind matches a copy of action: a string pattern splits bit by bit and a
+# row that mentions its scrutinee gets it rebuilt at every split (lane B).
+def WS.run.kind.by(key: String, +action: String, +u: U.Ui, value: String) -> U.Act:
+  match key:
     case "ws-stop": WS.stop(u)
     case "ws-term-here": WS.term.show(WS.term.local(u), u, "")
     case "ws-term-hide": WS.term.hide(u)
@@ -327,6 +371,9 @@ def WS.run.kind(+action: String, +u: U.Ui, value: String) -> U.Act:
     case "ws-routines": WS.routines.open(U.Ui.act(u, "bot", value))
     case "ws-keys": WS.none(U.Palette.set(U.Ui.scratch_set(U.Ui.flag_on(u, "palette"), "@ws.keys", "1"), "", 0n))
     case _: U.Ui.act(u, action, value)
+
+def WS.run.kind(+action: String, +u: U.Ui, value: String) -> U.Act:
+  WS.run.kind.by(action, action, u, value)
 
 def WS.palette.run.item(item: U.PItem, u: U.Ui) -> U.Act:
   match item:
@@ -344,8 +391,10 @@ def WS.key.digit(+combo: String, +u: U.Ui) -> U.Act:
   +digit = Maybe.default(&2, Nat, Nat.read(String.drop(combo, Bool.pick(Nat, String.starts_with(combo, "alt+"), 4n, 5n))), 0n)
   WS.key.digit.valid(Bool.and(Bool.or(String.starts_with(combo, "alt+"), String.starts_with(combo, "ctrl+")), Bool.and(Nat.is_ge(digit, 1n), Nat.is_le(digit, 9n))), combo, u, digit)
 
-def WS.key.go(+combo: String, +u: U.Ui) -> U.Act:
-  match combo:
+# WS.key.go matches a copy of combo: a string pattern splits bit by bit and a
+# row that mentions its scrutinee gets it rebuilt at every split (lane B).
+def WS.key.go.by(key: String, +combo: String, +u: U.Ui) -> U.Act:
+  match key:
     case "uber": U.Ui.act(u, "uber", "")
     case "term": WS.term.toggle(u, "")
     case "prev": WS.neighbour(u, False{})
@@ -355,6 +404,9 @@ def WS.key.go(+combo: String, +u: U.Ui) -> U.Act:
     case "diff": WS.view.key(u, "diff", "diff")
     case "files": WS.view.key(u, "files", "fm")
     case _: WS.key.digit(combo, u)
+
+def WS.key.go(+combo: String, +u: U.Ui) -> U.Act:
+  WS.key.go.by(combo, combo, u)
 
 # Ctrl+K opens the palette and, pressed in it, shuts it (as Ctrl+Shift+P);
 # any other workspace key works from the palette's field too, and shuts it
@@ -399,9 +451,16 @@ def WS.row.thread(+u: U.Ui, +dot: String, +t: M.Thread, +label: String, +place: 
 # title, what it wants (a red row's question, approval or failure: the
 # sidebar's word) and its project (U.Palette.place), so it can't pass for a
 # command
+# (a phone has no keyboard to press them with: its rows are the names
+# alone, client.bend's Palette.name, "New thread" for "New thread · Ctrl+N")
+def WS.row.text(phone: Bool, +label: String) -> String:
+  match phone:
+    case True{}: U.Palette.name(label)
+    case False{}: label
+
 def WS.row.face(thread: Bool, +u: U.Ui, +label: String, +place: String, +v: String) -> List<&2, D.Node>:
   match thread:
-    case False{}: Bool.pick(List<&2, D.Node>, String.starts_with(label, "Stop the running turn ·"), [D.Txt{"Stop the running turn "}, D.El{"kbd", "", Nil{}, [D.Txt{"Ctrl+."}]}], [D.Txt{label}])
+    case False{}: Bool.pick(List<&2, D.Node>, String.starts_with(label, "Stop the running turn ·"), [D.Txt{"Stop the running turn "}, D.El{"kbd", "", Nil{}, [D.Txt{"Ctrl+."}]}], [D.Txt{WS.row.text(String.eq(U.Ui.info(u, "local.workspace.form"), "phone"), label)}])
     case True{}:
       +t = U.Ui.thread(U.Ui.state(u), v)
       WS.row.thread(u, U.Palette.dot(u, t), t, label, place)

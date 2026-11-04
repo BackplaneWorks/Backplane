@@ -28,9 +28,13 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.DeveloperBoard
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.FolderZip
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Memory
@@ -52,6 +56,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -62,6 +67,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.net.HttpURLConnection
@@ -80,7 +86,60 @@ private fun fileIcon(name: String): ImageVector = when (name) {
     "box" -> Icons.Filled.ViewInAr
     "image" -> Icons.Filled.Image
     "file-text" -> Icons.Filled.Description
+    "download" -> Icons.Filled.Download
+    "folder-down" -> Icons.Filled.FolderZip
     else -> Icons.Filled.InsertDriveFile
+}
+
+// A download from the Files tab (mobile/view.bend's Files.json: a row's
+// down, the folder's zip): the person picks where it goes (the system's
+// Create document, under the name the hub gives it), then it streams there
+// from the hub with its token. Never opened in a browser: the address
+// carries the token.
+private class Pending(val url: String, val name: String)
+
+private class FileTransfer {
+    @Volatile var connection: HttpURLConnection? = null
+    @Volatile var cancelled = false
+    fun cancel() { cancelled = true; connection?.disconnect() }
+    fun fetch(url: String, ctx: android.content.Context, into: android.net.Uri): Boolean {
+        var ok = false
+        try {
+            val c = URL(url).openConnection() as HttpURLConnection
+            connection = c
+            c.instanceFollowRedirects = false
+            c.connectTimeout = 5000
+            c.readTimeout = 30000
+            if (cancelled) return false
+            if (c.responseCode != 200) return false
+            ctx.contentResolver.openOutputStream(into, "wt").use { output ->
+                requireNotNull(output)
+                c.inputStream.use { input ->
+                    val buffer = ByteArray(131072)
+                    while (!cancelled) {
+                        val n = input.read(buffer)
+                        if (n < 0) { ok = !cancelled; break }
+                        output.write(buffer, 0, n)
+                    }
+                }
+            }
+        } catch (_: Exception) { ok = false }
+        finally {
+            connection?.disconnect(); connection = null
+            if (!ok) runCatching { android.provider.DocumentsContract.deleteDocument(ctx.contentResolver, into) }
+        }
+        return ok
+    }
+}
+
+@Composable
+private fun DownButton(busy: Boolean, enabled: Boolean, icon: String, tip: String, label: String? = null, onCancel: () -> Unit, onClick: () -> Unit) {
+    if (busy) IconButton(onClick = onCancel) { Icon(Icons.Filled.Close, NativeMessages.common_cancel(LocalBackplaneLanguage.current)) }
+    else if (label != null) TextButton(onClick = onClick, enabled = enabled) {
+        Icon(fileIcon(icon), tip, Modifier.size(18.dp))
+        Text(label, Modifier.padding(start = 6.dp))
+    }
+    else IconButton(onClick = onClick, enabled = enabled) { Icon(fileIcon(icon), tip, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.outline) }
 }
 
 // the viewer's choices (Board, Schematic, 3D, Mech, Files) and its close button
@@ -97,15 +156,48 @@ fun ViewerChoices(m: AppModel, v: Viewer) {
 @Composable
 fun FilesScreen(m: AppModel, v: Viewer, f: FilesPage) {
     val lang = LocalBackplaneLanguage.current
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).statusBarsPadding().navigationBarsPadding()) {
-        ViewerChoices(m, v)
-        LazyRow(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            items(f.trail) { c ->
-                TextButton(onClick = { m.act(c.action, c.value) }) {
-                    Text(c.label, maxLines = 1, color = if (c == f.trail.last()) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outline)
-                }
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var pending by remember { mutableStateOf<Pending?>(null) }
+    var busy by remember { mutableStateOf<String?>(null) }
+    var failed by remember { mutableStateOf(false) }
+    var transfer by remember { mutableStateOf<FileTransfer?>(null) }
+    DisposableEffect(Unit) { onDispose { transfer?.cancel() } }
+    val save = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+        val p = pending
+        pending = null
+        if (uri != null && p != null) {
+            busy = p.url
+            failed = false
+            val current = FileTransfer()
+            transfer = current
+            scope.launch {
+                val ok = withContext(Dispatchers.IO) { current.fetch(p.url, ctx, uri) }
+                busy = null
+                transfer = null
+                failed = !ok && !current.cancelled
             }
         }
+    }
+    val download = { path: String, name: String ->
+        m.web(path)?.let { u -> pending = Pending(u, name); save.launch(name) }
+        Unit
+    }
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).statusBarsPadding().navigationBarsPadding()) {
+        ViewerChoices(m, v)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            LazyRow(Modifier.weight(1f).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                items(f.trail) { c ->
+                    TextButton(onClick = { m.act(c.action, c.value) }) {
+                        Text(c.label, maxLines = 1, color = if (c == f.trail.last()) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outline)
+                    }
+                }
+            }
+            if (f.ready && f.zip.isNotEmpty()) DownButton(busy == m.web(f.zip), busy == null && pending == null, "folder-down", NativeMessages.files_download_tip(lang), NativeMessages.files_download(lang), onCancel = { transfer?.cancel() }) {
+                download(f.zip, f.zipName)
+            }
+        }
+        if (failed) Text(NativeMessages.files_download_failed(lang), Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
         HorizontalDivider()
         when {
             !f.ready -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
@@ -122,6 +214,10 @@ fun FilesScreen(m: AppModel, v: Viewer, f: FilesPage) {
                         Text(r.label, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
                             color = if (on) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outline)
                         if (r.detail.isNotEmpty()) Text(r.detail, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                        if (r.down.isNotEmpty()) DownButton(busy == m.web(r.down), busy == null && pending == null, if (r.kind == "folder") "folder-down" else "download",
+                            if (r.kind == "folder") NativeMessages.files_download_folder(lang, r.label) else NativeMessages.files_download_file(lang, r.label), onCancel = { transfer?.cancel() }) {
+                            download(r.down, r.downName.ifEmpty { r.label })
+                        }
                     }
                 }
             }

@@ -14,6 +14,8 @@ private func fileSymbol(_ name: String) -> String {
     case "box": return "cube"
     case "image": return "photo"
     case "file-text": return "doc.richtext"
+    case "download": return "square.and.arrow.down"
+    case "folder-down": return "square.and.arrow.down.on.square"
     default: return "doc"
     }
 }
@@ -43,26 +45,125 @@ struct ViewerChoices: View {
     }
 }
 
+// A download from the Files tab (mobile/view.bend's Files.json: a row's
+// down, the folder's zip): fetched with the hub's token into this app's
+// temporary folder under the name the hub gives it, then handed to the
+// share sheet (Save to Files, AirDrop...). Never opened in a browser: the
+// address carries the token.
+struct SavedFile: Identifiable {
+    let id = UUID()
+    let url: URL
+}
+
+private final class DownloadNoRedirect: NSObject, URLSessionTaskDelegate {
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+        completionHandler(nil)
+    }
+}
+
+@MainActor
+final class FileDownload: ObservableObject {
+    @Published var busy: String?
+    @Published var saved: SavedFile?
+    @Published var failed = false
+
+    private var task: Task<Void, Never>?
+    func cancel() { task?.cancel() }
+    func start(_ model: AppModel, _ path: String, _ name: String) {
+        guard task == nil else { return }
+        task = Task { await fetch(model, path, name); task = nil }
+    }
+
+    private func fetch(_ model: AppModel, _ path: String, _ name: String) async {
+        guard busy == nil, let u = model.web(path) else { return }
+        busy = path
+        failed = false
+        defer { busy = nil }
+        do {
+            let (tmp, resp) = try await URLSession.shared.download(from: u, delegate: DownloadNoRedirect())
+            defer { try? FileManager.default.removeItem(at: tmp) }
+            try Task.checkCancellation()
+            guard (resp as? HTTPURLResponse)?.statusCode == 200 else { failed = true; return }
+            let dir = FileManager.default.temporaryDirectory.appendingPathComponent("downloads", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let safe = (resp.suggestedFilename ?? name).components(separatedBy: CharacterSet(charactersIn: "/\\:\0\r\n")).joined(separator: "_")
+            let plain = safe == "." || safe == ".." ? "download" : safe
+            let dest = dir.appendingPathComponent(plain.isEmpty ? "download" : plain)
+            try FileManager.default.moveItem(at: tmp, to: dest)
+            saved = SavedFile(url: dest)
+        } catch {
+            failed = !Task.isCancelled
+        }
+    }
+
+    // the copy goes once the share sheet is done with it
+    func done(_ file: SavedFile) {
+        try? FileManager.default.removeItem(at: file.url.deletingLastPathComponent())
+    }
+}
+
+private struct ShareSheet: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: [url], applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
+}
+
 struct FilesScreen: View {
     @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let viewer: Viewer
     let page: FilesPage
+    @StateObject private var download = FileDownload()
+
+    // a download button: a spinner while it comes, then the share sheet
+    @ViewBuilder
+    private func downButton(_ path: String, _ name: String, _ icon: String, _ tip: String, label: String? = nil) -> some View {
+        if download.busy == path {
+            Button { download.cancel() } label: { Image(systemName: "xmark.circle") }
+                .frame(minWidth: 44, minHeight: 44)
+                .buttonStyle(.borderless)
+                .accessibilityLabel(NativeMessages.common_cancel(lang))
+        } else {
+            Button { download.start(model, path, name) } label: {
+                if let label { Label(label, systemImage: fileSymbol(icon)) } else { Image(systemName: fileSymbol(icon)).frame(width: 28) }
+            }
+            .frame(minWidth: 44, minHeight: 44)
+            .buttonStyle(.borderless)
+            .disabled(download.busy != nil)
+            .accessibilityLabel(tip)
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ViewerChoices(model: model, viewer: viewer)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 2) {
-                    ForEach(page.trail, id: \.self) { c in
-                        Button(c.label) { model.act(c.action, c.value) }
-                            .buttonStyle(.borderless)
-                            .foregroundStyle(c == page.trail.last ? .primary : .secondary)
-                        if c != page.trail.last { Text("/").foregroundStyle(.tertiary) }
+            HStack(spacing: 4) {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 2) {
+                        ForEach(page.trail, id: \.self) { c in
+                            Button(c.label) { model.act(c.action, c.value) }
+                                .buttonStyle(.borderless)
+                                .foregroundStyle(c == page.trail.last ? .primary : .secondary)
+                            if c != page.trail.last { Text("/").foregroundStyle(.tertiary) }
+                        }
                     }
+                    .padding(.horizontal)
+                    .padding(.vertical, 6)
                 }
-                .padding(.horizontal)
-                .padding(.vertical, 6)
+                if let zip = page.zip, !zip.isEmpty, page.ready {
+                    downButton(zip, page.zipName ?? "", "folder-down", NativeMessages.files_download_tip(lang), label: NativeMessages.files_download(lang))
+                        .padding(.trailing)
+                        .accessibilityIdentifier("files.download")
+                }
+            }
+            if download.failed {
+                Text(NativeMessages.files_download_failed(lang)).font(.caption).foregroundStyle(.secondary).padding(.horizontal)
             }
             Divider()
             if !page.ready {
@@ -72,21 +173,32 @@ struct FilesScreen: View {
                 Spacer()
             } else {
                 List(page.rows, id: \.value) { r in
-                    Button { model.act(r.action, r.value) } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: fileSymbol(r.icon))
-                                .foregroundStyle(r.kind == "folder" ? Color.accentColor : (r.action.isEmpty ? .secondary : .primary))
-                                .frame(width: 22)
-                            Text(r.label).lineLimit(1).truncationMode(.middle)
-                                .foregroundStyle(r.action.isEmpty ? .secondary : .primary)
-                            Spacer()
-                            if !r.detail.isEmpty { Text(r.detail).font(.caption).foregroundStyle(.secondary) }
+                    HStack(spacing: 8) {
+                        Button { model.act(r.action, r.value) } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: fileSymbol(r.icon))
+                                    .foregroundStyle(r.kind == "folder" ? Color.accentColor : (r.action.isEmpty ? .secondary : .primary))
+                                    .frame(width: 22)
+                                Text(r.label).lineLimit(1).truncationMode(.middle)
+                                    .foregroundStyle(r.action.isEmpty ? .secondary : .primary)
+                                Spacer()
+                                if !r.detail.isEmpty { Text(r.detail).font(.caption).foregroundStyle(.secondary) }
+                            }
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(r.action.isEmpty)
+                        if let down = r.down, !down.isEmpty {
+                            downButton(down, r.downName ?? r.label, r.kind == "folder" ? "folder-down" : "download",
+                                r.kind == "folder" ? NativeMessages.files_download_folder(lang, r.label) : NativeMessages.files_download_file(lang, r.label))
                         }
                     }
-                    .disabled(r.action.isEmpty)
                 }
                 .listStyle(.plain)
             }
+        }
+        .onDisappear { download.cancel() }
+        .sheet(item: $download.saved) { f in
+            ShareSheet(url: f.url).onDisappear { download.done(f) }
         }
     }
 }

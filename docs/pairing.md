@@ -2,13 +2,25 @@
 
 An unpaired web or desktop client starts at **Connect to your Backplane hub**.
 A revoked device starts at **Re-pair this device**. On an already paired machine,
-open **Settings → Devices → Add a device**. Copy or share its invitation link,
-scan its QR code, or enter the eight-character code and the shown hub address.
-Web clients show Pairing link, QR code and Short code as equal choices. The
-QR choice includes an app-styled image picker; images are decoded locally.
+open **Settings → Devices → Add a device** (Settings → Network has Add a
+device too). Copy or share its invitation link, scan its QR code,
+or enter the eight-character code and the shown hub address; the pairing
+screen says where to find them. Web clients show Pairing link, QR code and
+Short code as equal choices. The QR choice opens the camera full screen inside
+the page (`src/web/pairing-scanner.js`: the rear camera, a Torch where the
+camera has one, Close/Esc/Back; the browser's BarcodeDetector where it has
+one, else the bundled jsQR) and pairs with the first invitation it reads, the
+same way as a pasted link; it also has an image picker; images and frames are
+decoded locally. A browser gives the camera only to a secure page (https://,
+or localhost): over a plain http:// address (a phone at the hub's LAN or
+tailnet address) the QR choice says so and offers the other ways in (the
+phone's own camera app, which opens the link, or Short code) instead of a
+button that cannot work.
 Connection and device screens use the same light/dark theme as Settings.
 Device names start with the advertised OS and browser (or Desktop) and remain
-editable; no permission or network lookup is needed.
+editable; no permission or network lookup is needed. A browser's enrolment answers its own device id
+(never its credential), so a phone's Devices list marks and lists first This
+device.
 
 An invitation expires after ten minutes and works once, whether redeemed by
 link, QR or code. Create a separate invitation for each device. Wrong, expired,

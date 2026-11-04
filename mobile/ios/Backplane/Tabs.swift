@@ -365,6 +365,8 @@ struct AppSettingsTab: View {
                     ForEach(AppTab.allCases.filter { $0 != .settings }) { Text($0.title(tag)).tag($0.rawValue) }
                 }
                 Toggle(NativeMessages.native_settings_haptics(tag), isOn: $settings.haptics)
+                // off: the hub's phone web client is the app's screen again
+                Toggle(tag == "ja" ? "クラシック画面" : "Classic screens", isOn: $settings.classic)
             } header: {
                 Text(NativeMessages.native_settings_behaviour(tag))
             } footer: {

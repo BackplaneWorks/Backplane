@@ -91,6 +91,7 @@ type Out is Data:
   UpgradeForce{}
   # the install is ready: end the hub's process into it now
   Restart{}
+  CadInstall{tool: String, op: String}
   KiCadInstall{}
   KiCadRetry{}
   # opencode's models read again for every client (server.bend's OcJob)
@@ -208,6 +209,7 @@ def Out.kind(o: Out) -> String:
     case Upgrade{}: "Upgrade"
     case UpgradeForce{}: "UpgradeForce"
     case Restart{}: "Restart"
+    case CadInstall{_, _}: "CadInstall"
     case KiCadInstall{}: "KiCadInstall"
     case KiCadRetry{}: "KiCadRetry"
     case ModelsRefresh{}: "ModelsRefresh"
@@ -672,11 +674,28 @@ def Hub.thread_create.base(+s: M.State, +now: Nat, +client: U32, +id: String, +p
   Hub.thread_create.named(s, now, client, id, p, Hub.id("t", now, Hub.seq(s)))
 
 # A new visible child is a normal thread. Parent links are never inferred
-# from worker launches, delegated tasks or forks of older conversations.
+# from historical worker launches or forks of older conversations.
 def Hub.thread_create.link(+parent: String, +th: String, +now: Nat, step: Step) -> Step:
   match step:
     case Step{cs, os}:
       Step{List.append(&2, M.Change, cs, [M.ThreadParentSet{th, parent, now}, M.SettingSet{ST.Tree.open_key(parent), "1", now}]), os}
+
+# Manual moves and harness repairs use this same persisted parent event.
+# Empty means detach. Validate the entire new ancestry before writing it.
+def Hub.thread_parent.valid(+s: M.State, +th: String, +parent: String) -> Bool:
+  Bool.and(ST.Tree.alive(Hub.thread(s, th)), Bool.or(String.is_empty(parent), Bool.and(
+    ST.Tree.alive(Hub.thread(s, parent)), Bool.and(String.eq(ST.Tree.project(Hub.thread(s, th)), ST.Tree.project(Hub.thread(s, parent))),
+      ST.Tree.chain(64n, s, parent, th)))))
+
+def Hub.thread_parent.set(ok: Bool, +now: Nat, +client: U32, +id: String, +th: String, +parent: String) -> Step:
+  match ok:
+    case False{}: Step.outs([Reply.err(client, id, "Parent must be a live conversation in the same project without a cycle (maximum depth 64).")])
+    case True{}:
+      Step.before([M.ThreadParentSet{th, parent, now}], [Reply.ok(client, id)],
+        Bool.pick(Step, String.is_empty(parent), Step{Nil{}, Nil{}}, Step{[M.SettingSet{ST.Tree.open_key(parent), "1", now}], Nil{}}))
+
+def Hub.thread_parent(+s: M.State, +now: Nat, +client: U32, +id: String, +th: String, +parent: String) -> Step:
+  Hub.thread_parent.set(Hub.thread_parent.valid(s, th, parent), now, client, id, th, parent)
 
 def Hub.thread_create.child(ok: Bool, +s: M.State, +now: Nat, +client: U32, +id: String, +p: J.Json, +parent: String) -> Step:
   match ok:
@@ -1379,7 +1398,7 @@ def Hub.methods() -> List<&2, String>:
    "thread.pin", "thread.unpin", "thread.rename", "thread.delete", "kicad.watch", "thread.modes", "app.update", "setting.set", "kicad.install",
    "ask.answer", "device.register", "device.drop", "kicad.info", "queue.resume",
    "queue.edit", "queue.remove", "queue.move", "queue.steer", "thread.fork", "thread.back", "thread.provider", "update.now", "work.cancel", "task.cancel", "wake.cancel", "deploy.restart", "deploy.cancel", "deploy.status", "lock.release", "lock.cancel", "kicad.retry", "mail.list", "mail.read", "mail.find", "mail.mark", "mail.tag", "mail.send",
-   "fab.look", "fab.intent", "order.buy", "models.refresh", "thread.detach", "todos.edit", "improvements.context", "improvements.report", "project.move", "kicad.warm", "project.home", "project.start", "project.rename"]
+   "fab.look", "fab.intent", "order.buy", "models.refresh", "thread.detach", "todos.edit", "improvements.context", "improvements.report", "project.move", "kicad.warm", "project.home", "project.start", "project.rename", "cad.install", "thread.reparent"]
 
 # Agent output (Claude stream-json)
 # ---------------------------------
@@ -2950,6 +2969,32 @@ def Hub.thread_project(t: M.Thread) -> String:
   match t:
     case M.Thread{_, p, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _}:
       p
+
+def Hub.project.title(p: M.Project) -> String:
+  match p:
+    case M.Project{_, t, _, _, _}:
+      t
+
+# where a Files download reads from (server.bend's FilesHttp): the folder,
+# "" when there is none, and the project's title (the zip's name)
+type FilesAt is Data:
+  FilesAt{root: String, title: String}
+
+def Hub.files.of.k(i: Nat, +s: M.State, +id: String) -> FilesAt:
+  match i:
+    # a project home: its folder, as Hub.root_for chooses it, but never a
+    # removed project's (Hub.project.home_root, as project.home reads)
+    case 0n:
+      FilesAt{Hub.project.home_root(Hub.project(s, PH.Home.project(id))), Hub.project.title(Hub.project(s, PH.Home.project(id)))}
+    # a thread here: the folder files.dir lists (Hub.root_for's Hub.cwd)
+    case 1n:
+      FilesAt{Bool.pick(String, Bool.and(Hub.owns(s, id), Bool.not(String.is_empty(Hub.project.home_root(Hub.project(s, Hub.thread_project(Hub.thread(s, id))))))), Hub.cwd(s, Hub.thread(s, id)), ""), Hub.project.title(Hub.project(s, Hub.thread_project(Hub.thread(s, id))))}
+    # a thread elsewhere (<link>~<id>): its files are its own hub's
+    case _:
+      FilesAt{"", ""}
+
+def Hub.files.of(+s: M.State, +id: String) -> FilesAt:
+  Hub.files.of.k(Bool.pick(Nat, FR.Fr.is(id), 2n, Bool.pick(Nat, PH.Home.is(id), 0n, 1n)), s, id)
 
 # the worktree made again from a thread's kept branch
 # A thread's worktree folder found missing at its agent's start (removed
@@ -10595,11 +10640,15 @@ def Hub.request.k(i: Nat, +s: M.State, +now: Nat, +client: U32, +id: String, +p:
     case 52n:
       Step.outs([Reply.data(client, id, Improvements.context(s, J.Json.get_str(p, "sourceThread", "")))])
     case 50n:
-      Step.reply(client, id, [M.ThreadParentSet{J.Json.get_str(p, "thread", ""), "", now}])
+      Hub.thread_parent(s, now, client, id, J.Json.get_str(p, "thread", ""), "")
     # the history steps before and after the one on show, plotted ahead
     # (client.bend's Hs.warm; kind "board" or "schematic")
     case 56n: Home.request(s, client, id, p)
     case 57n: Home.start(s, now, client, id, p)
+    case 60n:
+      Hub.thread_parent(s, now, client, id, J.Json.get_str(p, "thread", ""), J.Json.get_str(p, "parent", ""))
+    case 59n:
+      Step.outs([Reply.ok(client, id), CadInstall{Bool.pick(String, String.eq(J.Json.get_str(p, "tool", ""), "freecad"), "freecad", "kicad"), J.Json.get_str(p, "op", "start")}])
     case 58n: Step.reply(client, id, Home.rename.project(Hub.project(s, J.Json.get_str(p, "project", "")), J.Json.get_str(p, "title", "")))
     case 55n:
       Step.outs(Reply.ok(client, id) <> Warm.outs(J.Json.get_str(p, "kind", ""), J.Json.get_str(p, "root", ""), [J.Json.get_str(p, "before", ""), J.Json.get_str(p, "after", "")]))

@@ -1,8 +1,9 @@
 // The web client's reconnect pieces (src/web/reconnect.js): backoff with
 // jitter and a cap, Retry-After from a starting hub, one pending retry that
-// a wake runs at once, and telling a deploy from the bundle names.
+// a wake runs at once, what a wake does to a try under way, and telling a
+// deploy from the bundle names.
 //   bun test/tools/reconnect_test.ts
-import { Backoff, Retry, retryAfterMs, bundleOf, bundleIn, styleOf, stylesIn, deployed, probeHub, CAP_MS, RETRY_AFTER_CAP_MS } from "../../src/web/reconnect.js";
+import { Backoff, Retry, wakeAction, WAKE_STALE_MS, directReconnect, DIRECT_TRIES, retryAfterMs, bundleOf, bundleIn, styleOf, stylesIn, deployed, probeHub, CAP_MS, RETRY_AFTER_CAP_MS } from "../../src/web/reconnect.js";
 
 let fail = 0;
 const check = (ok: boolean, what: string) => { console.log(`${ok ? "ok  " : "FAIL"} ${what}`); if (!ok) fail++; };
@@ -38,6 +39,28 @@ check(retryAfterMs(new Date(10_000).toUTCString(), 4_000) === 6000, "Retry-After
   r.schedule(1000, () => runs++);r.cancel();check(!r.pending && timers.size === 0 && runs === 1, "cancel drops it");
   r.schedule(1000, () => runs++);[...timers.values()][0]();check(runs === 2 && !r.pending, "the timer runs it");
 }
+
+// a wake while the link is down (a phone back from the background, a
+// laptop opened): a waiting retry runs now; a try started while the page was
+// away is replaced, never waited out; a fresh one is left to finish
+{
+  const at = 100_000;
+  check(wakeAction({ down: false, pending: true, since: 0, now: at }) === "none", "link up: a wake does nothing");
+  check(wakeAction({ down: true, pending: true, since: 0, now: at }) === "retry", "a retry waiting on its timer runs now");
+  check(wakeAction({ down: true, pending: false, since: at - 60_000, now: at }) === "restart", "a try begun a minute ago, while away, is replaced");
+  check(wakeAction({ down: true, pending: false, since: at - WAKE_STALE_MS, now: at }) === "restart", "one begun WAKE_STALE_MS ago too");
+  check(wakeAction({ down: true, pending: false, since: at - 200, now: at }) === "none", "a try begun just now is left to finish");
+  check(wakeAction({ down: true, pending: false, since: 0, now: at }) === "restart", "down with nothing under way: a try starts");
+}
+
+// a reconnect of a page that has had a view goes straight to its socket
+// (a phone's first HTTP requests after the background hang on connections
+// the network dropped); after DIRECT_TRIES sockets fail before a greeting
+// it asks /hello and the capabilities again, which can tell why
+check(directReconnect({ again: true, viewsEver: true, directFails: 0 }), "a reconnect after a view: straight to the socket");
+check(!directReconnect({ again: false, viewsEver: true, directFails: 0 }), "the page's first connect asks first");
+check(!directReconnect({ again: true, viewsEver: false, directFails: 0 }), "a page that never had a view asks first");
+check(directReconnect({ again: true, viewsEver: true, directFails: DIRECT_TRIES - 1 }) && !directReconnect({ again: true, viewsEver: true, directFails: DIRECT_TRIES }), `after ${DIRECT_TRIES} sockets fail before a greeting, it asks again`);
 
 // deploys: the running chunk against the one index.html names now
 const index = (c: string) => `<link rel="stylesheet" crossorigin href="./chunk-eqswhk46.css"><script type="module" crossorigin src="./${c}"></script>`;

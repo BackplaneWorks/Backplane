@@ -152,6 +152,26 @@ object NativeMessages {
   fun files_changed(tag: String, arg0: ULong): String =
     if (tag == "ja") ((if (arg0 == 0uL) "変更なし" else "変更ファイル" + number(arg0) + "件")) else ((if (arg0 == 0uL) "No files changed" else (if (arg0 == 1uL) number(arg0) + " file changed" else number(arg0) + " files changed")))
 
+  // files.download
+  fun files_download(tag: String): String =
+    if (tag == "ja") ("ダウンロード") else ("Download")
+
+  // files.download.failed
+  fun files_download_failed(tag: String): String =
+    if (tag == "ja") ("ダウンロードが完了しませんでした") else ("The download did not finish")
+
+  // files.download.file
+  fun files_download_file(tag: String, arg0: String): String =
+    if (tag == "ja") (arg0 + "をダウンロード") else ("Download " + arg0)
+
+  // files.download.folder
+  fun files_download_folder(tag: String, arg0: String): String =
+    if (tag == "ja") (arg0 + "をzipでダウンロード") else ("Download " + arg0 + " as a zip")
+
+  // files.download.tip
+  fun files_download_tip(tag: String): String =
+    if (tag == "ja") ("このフォルダをzipでダウンロード") else ("Download this folder as a zip")
+
   // google.client.own
   fun google_client_own(tag: String): String =
     if (tag == "ja") ("独自クライアント") else ("Own client")

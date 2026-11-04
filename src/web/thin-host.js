@@ -480,9 +480,13 @@ export class ThinHost {
     this.api.sendFeedback?.(false, preview.thread, this.session.drafts[preview.thread] || '');
   }
   rejectOperations(operations) {
+    // (a Send not yet taken by the hub goes back to the field: the page says
+    // so, api.sendLost, else it read as sent and then came back for no reason)
+    const lost = operations.some(op => op?.preview && !op.preview.issued && this.sendPreviews.has(op.preview.key));
     // Restore newer captures first so the original send remains at the front
     // when a connection fails with several messages waiting behind it.
     for (const operation of operations.slice().reverse()) operation?.settled?.(false);
+    if (lost) this.api.sendLost?.();
   }
   fieldValue(name, fallback) {
     const field = this.fields.get(name);
