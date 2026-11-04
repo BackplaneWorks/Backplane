@@ -2202,33 +2202,37 @@ def View.settings.scale(vs: List<&2, String>, +cur: U32) -> List<&2, D.Node>:
 # a phone's way out of the phone layout (phone-other.js's
 # [data-ph-layout]: kept for this browser, as ?phone=0 is); a phone on the
 # computer layout gets a "Phone layout" button back
-def View.settings.phone.layout(phone: Bool) -> List<&2, D.Node>:
+def View.settings.phone.layout(phone: Bool, +lc: I.Loc) -> List<&2, D.Node>:
   match phone:
     case True{}:
-      [View.setrow("Layout on this phone", "The phone layout shows one screen at a time. The computer layout shows the sidebar, thread and viewer together, small; a Phone layout button brings this one back.",
-        [D.El{"button", "", [D.At{"type", "button"}, D.At{"data-ph-layout", "0"}], [D.Txt{"Use the computer layout"}]}])]
+      [View.setrow(SM.Menu.text(lc, "Layout on this phone", "このスマートフォンのレイアウト"),
+        SM.Menu.text(lc, "The phone layout shows one screen at a time. The computer layout shows the sidebar, thread and viewer together, small; a Phone layout button brings this one back.",
+          "スマートフォン用レイアウトは一度に一画面を表示します。パソコン用レイアウトはサイドバー、スレッド、ビューアーを小さくまとめて表示し、Phone layout ボタンでこちらに戻れます。"),
+        [D.El{"button", "", [D.At{"type", "button"}, D.At{"data-ph-layout", "0"}], [D.Txt{SM.Menu.text(lc, "Use the computer layout", "パソコン用レイアウトにする")}]}])]
     case False{}: Nil{}
 
 # a phone's own notifications: the browser asks only on a tap on Allow
 # (phone-other.js's [data-ph-notify]), and html's ph-notify-* class says
 # which of the words shows (granted, denied, unavailable here)
-def View.settings.phone.notify(phone: Bool) -> List<&2, D.Node>:
+def View.settings.phone.notify(phone: Bool, +lc: I.Loc) -> List<&2, D.Node>:
   match phone:
     case True{}:
-      [View.setrow("Notifications on this phone", "An alert when a thread needs you or finishes while this phone was the device you used last. On an iPhone, add Backplane to the Home Screen first (Share, Add to Home Screen) and allow them there.",
-        [D.El{"button", "", [D.At{"type", "button"}, D.At{"class", "ph-notify-ask"}, D.At{"data-ph-notify", ""}], [D.Txt{"Allow notifications"}]},
-         D.Dom.span("ph-notify-on", "On for this phone"),
-         D.Dom.span("ph-notify-off", "Blocked: allow notifications for this site in the browser's settings"),
-         D.Dom.span("ph-notify-none", "This browser can't show notifications here")])]
+      [View.setrow(SM.Menu.text(lc, "Notifications on this phone", "このスマートフォンの通知"),
+        SM.Menu.text(lc, "An alert when a thread needs you or finishes while this phone was the device you used last. On an iPhone, add Backplane to the Home Screen first (Share, Add to Home Screen) and allow them there.",
+          "最後に使った端末がこのスマートフォンのとき、スレッドがあなたを必要としたり終わったりすると知らせます。iPhone では先に Backplane をホーム画面に追加し（共有、ホーム画面に追加）、そこで許可してください。"),
+        [D.El{"button", "", [D.At{"type", "button"}, D.At{"class", "ph-notify-ask"}, D.At{"data-ph-notify", ""}], [D.Txt{SM.Menu.text(lc, "Allow notifications", "通知を許可")}]},
+         D.Dom.span("ph-notify-on", SM.Menu.text(lc, "On for this phone", "このスマートフォンでオン")),
+         D.Dom.span("ph-notify-off", SM.Menu.text(lc, "Blocked: allow notifications for this site in the browser's settings", "ブロック中：ブラウザの設定でこのサイトの通知を許可してください")),
+         D.Dom.span("ph-notify-none", SM.Menu.text(lc, "This browser can't show notifications here", "このブラウザではここに通知を表示できません"))])]
     case False{}: Nil{}
 
 # a phone's way to Improvements (improvements.js opens it from any
 # [data-improvements]; the desktop's is in the top bar, which a phone has not)
-def View.settings.improve(phone: Bool) -> List<&2, D.Node>:
+def View.settings.improve(phone: Bool, +lc: I.Loc) -> List<&2, D.Node>:
   match phone:
     case True{}:
-      [View.setrow("Improvements", "Tell us what to fix or add, with a screenshot of what you see.",
-        [D.El{"button", "", [D.At{"type", "button"}, D.At{"data-improvements", ""}], [D.Txt{"Send an improvement"}]}])]
+      [View.setrow(SM.Menu.text(lc, "Improvements", "改善の提案"), SM.Menu.text(lc, "Tell us what to fix or add, with a screenshot of what you see.", "直してほしいことや欲しい機能を、見ている画面のスクリーンショットと一緒に送れます。"),
+        [D.El{"button", "", [D.At{"type", "button"}, D.At{"data-improvements", ""}], [D.Txt{SM.Menu.text(lc, "Send an improvement", "改善を送る")}]}])]
     case False{}: Nil{}
 
 def View.settings.rows.k(i: Nat, +lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2, String>, +v: String, +note: String, +prov: String, +ipc: String) -> List<&2, D.Node>:
@@ -2237,14 +2241,14 @@ def View.settings.rows.k(i: Nat, +lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2
       View.lang.loc(lc, u),
       [View.setrow(MSG.T.settings.sidebar(lc), MSG.T.settings.sidebar.note(lc), View.chips.loc(lc, ["projects", "active"], U.Side.view(st), "sidebar.view"))],
       [View.setrow(MSG.T.settings.textsize(lc), MSG.T.settings.textsize.note(lc), View.settings.scale(TS.Scale.options(), TS.Scale.of(st)))],
-      View.settings.phone.layout(PHN.Phone.on(u))])
+      View.settings.phone.layout(PHN.Phone.on(u), lc)])
     case 1n: List.concat(&2, D.Node, [[View.setrow(MSG.T.settings.settle(lc), U.Settings.settle.note(lc, st), View.chips.loc(lc, ["0", "5", "10", "15", "30", "60"], M.Setting.get(st, "settle.idle.minutes", "15"), "settle.idle.minutes"))],
       [View.setrow(MSG.T.settings.settle.personal(lc), MSG.T.settings.settle.personal.note(lc), View.chips.loc(lc, ["0", "60", "120", "240", "480"], M.Setting.get(st, "settle.personal.minutes", "240"), "settle.personal.minutes"))],
       [View.setrow(MSG.T.settings.settle.done(lc), MSG.T.settings.settle.done.note(lc), View.chips.loc(lc, ["on", "off"], Bool.pick(String, M.Lifecycle.on(st), "on", "off"), M.Lifecycle.key()))],
       [View.setrow(MSG.T.settings.restart(lc), MSG.T.settings.restart.note(lc), View.chips.loc(lc, ["on", "off"], Bool.pick(String, M.Carry.on(st), "on", "off"), "restart.continue"))],
       [View.setrow(U.Files.set.label(), U.Files.set.note(st), View.chips.loc(lc, AT.Att.sizes(), U.Files.set.on(st), AT.Att.key()))],
       View.notify(lc, st),
-      View.settings.phone.notify(PHN.Phone.on(u)),
+      View.settings.phone.notify(PHN.Phone.on(u), lc),
       View.agy.rows(u, U.Hookv.rows.loc(lc, u))])
     case 2n: List.append(&2, D.Node, Bool.pick(List<&2, D.Node>, U.Psv.active(u), View.agy.rows(u, U.Psv.rows(1n, u)), List.concat(&2, D.Node, [View.agy.rows(u, U.Psv.rows(1n, u)), [View.setrow(MSG.T.settings.provider(lc), MSG.T.settings.agents.note(lc, Bool.pick(String, String.is_empty(U.Models.cli(U.Str.get(nf, "models"), prov)), MSG.T.settings.provider.missing(lc, prov), U.Models.cli(U.Str.get(nf, "models"), prov))), View.chips.loc(lc, ["claude", "codex", "grok", "muse", "antigravity", "opencode", "pi", "omp"], prov, "agent.provider"))],
       [View.setrow(MSG.T.settings.model(lc), Bool.pick(String, String.is_empty(M.Setting.get(st, "agent.model", "")), MSG.T.common.default(lc), M.Setting.get(st, "agent.model", "")) ++ ": " ++ U.Models.label_of(U.Models.of(nf, prov), prov, M.Setting.get(st, "agent.model", "")),
@@ -2269,7 +2273,7 @@ def View.settings.rows.k(i: Nat, +lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2
     case 8n: List.concat(&2, D.Node, [View.agy.rows(u, U.Agv.rows.loc(lc, u))])
     case 9n: List.concat(&2, D.Node, [View.tz.set(lc, u)])
     case 10n: View.tok.set(lc, st) <> View.usage.page(lc, u)
-    case 11n: List.concat(&2, D.Node, [[View.setrow(MSG.T.settings.tour(lc), MSG.T.settings.tour.note(lc), [D.Dom.button("", "ob-open", "", MSG.T.settings.tour.again(lc), MSG.T.settings.tour.show(lc))])], View.settings.improve(PHN.Phone.on(u))])
+    case 11n: List.concat(&2, D.Node, [[View.setrow(MSG.T.settings.tour(lc), MSG.T.settings.tour.note(lc), [D.Dom.button("", "ob-open", "", MSG.T.settings.tour.again(lc), MSG.T.settings.tour.show(lc))])], View.settings.improve(PHN.Phone.on(u), lc)])
     case 12n: View.agy.rows(u, U.Share.rows(u))
     case 14n: [View.setrow("Devices", "Create a one-time invitation, see last activity, or revoke a device.", [D.Dom.button("primary", "devices-open", "", "", "Manage devices")])]
     case 13n: List.concat(&2, D.Node, [[D.El{"p", "", [D.At{"class", "set-about"}], [D.Txt{U.Fab.set.about()}]}],
