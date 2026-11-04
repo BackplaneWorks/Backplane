@@ -7,6 +7,7 @@ import ./charter.bend as CH
 import ./locks.bend as LK
 import ./json.bend as J
 import ./model.bend as M
+import ./subthreads.bend as ST
 import ./review.bend as RVW
 import ./codec.bend as C
 import ./hub.bend as B
@@ -156,7 +157,7 @@ def Mcp.titles(xs: List<&2, String>) -> List<&2, J.Json>:
 
 # a thread as agents read it: its turn and where it stands with its work
 def Mcp.thread_json.w(+s: M.State, +t: M.Thread) -> J.Json:
-  J.Json.obj(List.append(&2, J.KV, Mcp.thread_kvs(t), [J.KV{"phase", J.Str{M.Phase.name(Mcp.phase(s, t))}},
+  J.Json.obj(List.append(&2, J.KV, Mcp.thread_kvs(t), [J.KV{"parent", J.Str{ST.Tree.parent(s, M.Thread.id(t))}}, J.KV{"phase", J.Str{M.Phase.name(Mcp.phase(s, t))}},
     J.KV{"waiting", J.Json.nat(M.Work.busy(s, M.Thread.id(t)))}, J.KV{"work", J.Json.arr(Mcp.titles(M.Work.titles(s, M.Thread.id(t))))}]))
 
 # Handlers
@@ -433,23 +434,32 @@ def Mcp.delegate.b(bot: Bool, none: Bool, +s: M.State, +now: Nat, +thread: Strin
     case _ _:
       Mcp.delegate.k(M.Task.may_delegate(B.Task.depth(s, thread)), B.Hub.thread(s, thread), s, now, thread, bot, proj, p)
 
-# a new top-level thread with its first message (it waits for its
+# a continuing subthread with its first message (it waits for its
 # worktree like any new thread)
 # (the launcher is kept with the thread, so its turn ends and asks are
 # reported back: hub.bend's Launch.tell)
 def Mcp.launch.cs(+c: M.Change, +th: String, +by: String, +report: Bool, +now: Nat) -> List<&2, M.Change>:
   Bool.pick(List<&2, M.Change>, String.is_empty(by), [c], [c, M.ThreadLaunched{th, by, report, now}])
 
+# Only creation writes the link. Report toggles never reparent old threads.
+def Mcp.launch.link(parent: String, +th: String, +now: Nat, cs: List<&2, M.Change>) -> List<&2, M.Change>:
+  match parent:
+    case SNil{}: cs
+    case SCon{+c, +t}:
+      List.append(&2, M.Change, cs, [M.ThreadParentSet{th, SCon{c, t}, now}, M.SettingSet{ST.Tree.open_key(SCon{c, t}), "1", now}])
+
 def Mcp.launch.note(+by: String, +report: Bool) -> String:
   Bool.pick(String, Bool.and(report, Bool.not(String.is_empty(by))), "Its reports will come to you as messages when its turn ends or it asks the person something. End your turn instead of polling.", "")
 
-def Mcp.launch.go(+s: M.State, +now: Nat, +th: String, +from: String, +by: String, +report: Bool, +project: String, +env: String, +provider: String, +model: String, +title: String, +prompt: String) -> Res:
+def Mcp.launch.go(+s: M.State, +now: Nat, +th: String, +from: String, +by: String, +report: Bool, +parent: String, +project: String, +env: String, +provider: String, +model: String, +title: String, +prompt: String) -> Res:
   +c = {M.ThreadCreated{th, project, title, B.Hub.new.env(M.Scratch.is(project), env), "", B.Hub.new.wt(M.Scratch.is(project), B.Hub.project.root(B.Hub.project(s, project)), th), provider, model, now} : M.Change}
-  +cs = {Mcp.launch.cs(c, th, by, report, now) : List<&2, M.Change>}
+  +cs = {Mcp.launch.link(parent, th, now, Mcp.launch.cs(c, th, by, report, now)) : List<&2, M.Change>}
   +s1 = {M.State.replay(cs, s) : M.State}
-  Res{True{}, J.Json.obj([J.KV{"threadId", J.Str{th}}, J.KV{"title", J.Str{title}}, J.KV{"provider", J.Str{provider}}, J.KV{"state", J.Str{"started"}}, J.KV{"note", J.Str{Mcp.launch.note(by, report)}}]),
-    B.Step.before(cs, B.Hub.new.outs(M.Scratch.is(project), th, B.Hub.project.root(B.Hub.project(s, project)), env),
-      B.Hub.post(s1, now, th, Mcp.from.id(from, B.Hub.id("m", now, B.Hub.seq(s1))), M.User{}, prompt))}
+  +mid = Mcp.from.id(from, B.Hub.id("m", now, B.Hub.seq(s1)))
+  +seed = {M.SettingSet{"autosettle.seed." ++ th, mid, now} : M.Change}
+  Res{True{}, J.Json.obj([J.KV{"threadId", J.Str{th}}, J.KV{"parent", J.Str{parent}}, J.KV{"title", J.Str{title}}, J.KV{"provider", J.Str{provider}}, J.KV{"state", J.Str{"started"}}, J.KV{"note", J.Str{Mcp.launch.note(by, report)}}]),
+    B.Step.before(List.append(&2, M.Change, cs, [seed]), B.Hub.new.outs(M.Scratch.is(project), th, B.Hub.project.root(B.Hub.project(s, project)), env),
+      B.Hub.post(M.State.apply(s1, seed), now, th, mid, M.User{}, prompt))}
 
 # a project by id or name (any case)
 def Mcp.project.k(p: M.Project, +name: String) -> Bool:
@@ -483,22 +493,38 @@ def Mcp.delegate(+s: M.State, +now: Nat, +thread: String, +p: J.Json) -> Res:
 def Mcp.launch.proj(+s: M.State, +thread: String, +name: String) -> String:
   Bool.pick(String, Bool.or(Mcp.bot(s, thread), Bool.not(String.is_empty(name))), Mcp.project.find(s, name), Mcp.proj(s, thread))
 
+# Bots and linked-machine calls have no local parent. A project thread
+# defaults to a child; another project requires explicit subthread false.
+def Mcp.launch.parent(+s: M.State, +thread: String, +p: J.Json) -> String:
+  Bool.pick(String, Bool.and(J.Json.get_bool(p, "subthread", True{}), Bool.and(Bool.not(Mcp.bot(s, thread)), Bool.not(String.is_empty(thread)))), thread, "")
+
+def Mcp.launch.valid(+s: M.State, +thread: String, +p: J.Json) -> Bool:
+  +parent = Mcp.launch.parent(s, thread, p)
+  Bool.or(String.is_empty(parent), Bool.and(ST.Tree.alive(B.Hub.thread(s, parent)), Bool.and(
+    String.eq(ST.Tree.project(B.Hub.thread(s, parent)), Mcp.launch.proj(s, thread, J.Json.get_str(p, "project", ""))),
+    ST.Tree.chain(63n, s, ST.Tree.raw(s, parent), parent))))
+
 def Mcp.launch.k(empty: Bool, +s: M.State, +now: Nat, +thread: String, +by: String, +p: J.Json) -> Res:
   match empty:
     case True{}:
       Res.fail("a prompt is needed")
     case False{}:
-      Mcp.launch.go(s, now, B.Hub.id("t", now, B.Hub.seq(s)), Bool.pick(String, Mcp.bot(s, thread), thread, ""), by, J.Json.get_bool(p, "report", True{}), Mcp.launch.proj(s, thread, J.Json.get_str(p, "project", "")), M.Setting.get(s, "thread.env", "auto"),
+      Mcp.launch.go(s, now, B.Hub.id("t", now, B.Hub.seq(s)), Bool.pick(String, Mcp.bot(s, thread), thread, ""), by, J.Json.get_bool(p, "report", True{}), Mcp.launch.parent(s, thread, p), Mcp.launch.proj(s, thread, J.Json.get_str(p, "project", "")), M.Setting.get(s, "thread.env", "auto"),
         Mcp.or(J.Json.get_str(p, "provider", ""), M.Setting.get(s, "agent.provider", "claude")),
         Mcp.or(J.Json.get_str(p, "model", ""), Bool.pick(String, String.is_empty(J.Json.get_str(p, "provider", "")), M.Setting.get(s, "agent.model", ""), "")),
         Mcp.or(J.Json.get_str(p, "title", ""), B.Hub.title.of(J.Json.get_str(p, "prompt", ""))), J.Json.get_str(p, "prompt", ""))
+
+def Mcp.launch.checked(valid: Bool, +s: M.State, +now: Nat, +thread: String, +by: String, +p: J.Json) -> Res:
+  match valid:
+    case False{}: Res.fail("A subthread needs its launcher in the same project (maximum depth 64). Use subthread false only for an explicitly requested top-level conversation.")
+    case True{}: Mcp.launch.k(String.is_empty(String.trim(J.Json.get_str(p, "prompt", ""))), s, now, thread, by, p)
 
 def Mcp.launch.b(bad: Bool, +s: M.State, +now: Nat, +thread: String, +by: String, +p: J.Json) -> Res:
   match bad:
     case True{}:
       Res.fail("name an existing project (project_list shows them)")
     case False{}:
-      Mcp.launch.k(String.is_empty(String.trim(J.Json.get_str(p, "prompt", ""))), s, now, thread, by, p)
+      Mcp.launch.checked(Mcp.launch.valid(s, thread, p), s, now, thread, by, p)
 
 # Scratch remains readable, but no new agent work can be launched there.
 def Mcp.launch.retired_id(+project: String) -> Bool:
@@ -628,12 +654,29 @@ def Mcp.config(ok: Bool, +s: M.State, +now: Nat, +target: String, +a: J.Json) ->
       supported = Nat.is_lt(C.Codec.pos(["claude", "codex", "grok", "muse", "antigravity", "opencode", "pi", "omp"], provider), 8n)
       strings = Bool.and(Mcp.config.string(J.Json.get(a, "provider")), Mcp.config.string(J.Json.get(a, "model")))
       only = Bool.and(Bool.not(Maybe.is_some(&2, J.Json, J.Json.get(a, "title"))), Bool.not(Maybe.is_some(&2, J.Json, J.Json.get(a, "report"))))
-      Mcp.config.valid(Bool.and(Mcp.config.live(B.Hub.thread(s, target)), Bool.and(supported, Bool.and(strings, only))), s, now, target, provider, model)
+      Mcp.config.valid(Bool.and(Mcp.config.live(B.Hub.thread(s, target)), Bool.and(supported, Bool.and(strings, Bool.and(only, Bool.not(Maybe.is_some(&2, J.Json, J.Json.get(a, "parent"))))))), s, now, target, provider, model)
+
+# Explicit reparenting is a move, independent of launch/report ownership.
+def Mcp.update.parent(valid: Bool, +s: M.State, +now: Nat, +target: String, +parent: String) -> Res:
+  match valid:
+    case False{}: Res.fail("Parent must be a live conversation in this project without a cycle (maximum depth 64); give parent alone.")
+    case True{}: Mcp.config.done(s, target, B.Queue.changes(B.Hub.thread_parent(s, now, 0, "", target, parent)))
+
+def Mcp.update.metadata.k(value: Maybe<&2, J.Json>, +ok: Bool, +s: M.State, +now: Nat, +thread: String, +target: String, +a: J.Json) -> Res:
+  match value:
+    case None{}: Mcp.update.r(Mcp.flag(J.Json.get(a, "report")), s, now, thread, target, J.Json.get_str(a, "title", ""))
+    case Some{J.Str{+parent}}:
+      Mcp.update.parent(Bool.and(ok, Bool.and(B.Hub.thread_parent.valid(s, target, parent), Bool.and(
+        Bool.not(Maybe.is_some(&2, J.Json, J.Json.get(a, "title"))), Bool.not(Maybe.is_some(&2, J.Json, J.Json.get(a, "report")))))), s, now, target, parent)
+    case _: Res.fail("parent must be a thread id string, or empty to move to top level")
+
+def Mcp.update.metadata(+ok: Bool, +s: M.State, +now: Nat, +thread: String, +target: String, +a: J.Json) -> Res:
+  Mcp.update.metadata.k(J.Json.get(a, "parent"), ok, s, now, thread, target, a)
 
 def Mcp.update.args(config: Bool, +ok: Bool, +s: M.State, +now: Nat, +thread: String, +target: String, +a: J.Json) -> Res:
   match config:
     case True{}: Mcp.config(ok, s, now, target, a)
-    case False{}: Mcp.update.r(Mcp.flag(J.Json.get(a, "report")), s, now, thread, target, J.Json.get_str(a, "title", ""))
+    case False{}: Mcp.update.metadata(ok, s, now, thread, target, a)
 
 def Mcp.pick(hit: Bool, +text: String, +acc: String) -> String:
   match hit:
@@ -957,7 +1000,7 @@ def Mcp.tools() -> J.Json:
       "List the providers and models this Backplane can run, the delegation depth limit, and this thread's own provider, model and depth.",
       Nil{}, Nil{}),
     Tool.def("delegate_task",
-      "Delegate one task to a child agent of THIS thread, on any provider/model (see orchestrator_capabilities). The child sees only `prompt` of this conversation (no history) and works in this thread's directory; like every thread it has Backplane's instructions and the installed skills (KiStack's KiCad skills, the person's) and uses the one its task matches, so name a skill rather than pasting it. Its result arrives in this thread as a message when it finishes, so end your turn instead of polling; use task_status only when you need it mid-turn. Delegation is limited in depth; children of children are allowed up to the limit.",
+      "Create a bounded subthread by delegating one task to a child agent of THIS thread, on any provider/model (see orchestrator_capabilities). The child sees only `prompt` of this conversation (no history) and works in this thread's directory; like every thread it has Backplane's instructions and the installed skills (KiStack's KiCad skills, the person's) and uses the one its task matches, so name a skill rather than pasting it. Its result arrives in this thread as a message when it finishes, so end your turn instead of polling; use task_status only when you need it mid-turn. Delegation is limited in depth; children of children are allowed up to the limit.",
       [Tool.prop("prompt", "string", "The complete task for the child, with every detail it needs."),
        Tool.prop("provider", "string", "claude, codex, grok, muse, antigravity, opencode, pi or omp (default: this thread's)."),
        Tool.prop("model", "string", "Model for the child (default: this thread's)."),
@@ -974,13 +1017,13 @@ def Mcp.tools() -> J.Json:
       [Tool.prop("threadId", "string", "The thread to read."), Tool.prop("limit", "number", "How many entries (default 40).")], ["threadId"]),
     Tool.def("thread_send", "Send a message to another thread in this project, or on another machine by its <link>~<id>. It is delivered at once: an idle thread starts a turn with it, a running turn takes it (Claude at once; Codex, Grok and Muse with their next Backplane tool result, or as a new turn if theirs ends first).",
       [Tool.prop("threadId", "string", "The thread."), Tool.prop("text", "string", "The message.")], ["threadId", "text"]),
-    Tool.def("thread_launch", "Start a new top-level thread in this project, or in `project` (not a child of this one: the user sees it in the sidebar like their own) with a first message, on any provider/model. Bots must name the project. Scratch is retired and cannot be a launch target; use a project from machine_list. Answers its threadId. Its reports come to you by themselves, as a message that wakes you: each time its turn ends (completed, failed or interrupted, with its last reply), and at once when it asks the person something; so end your turn instead of polling, and answer it with thread_send. report false launches it without reports; thread_update turns them off or on later. With `machine`, it starts on that other machine of the person's, in its project named by `project` (machine_list).",
-      [Tool.prop("prompt", "string", "The first message, complete."), Tool.prop("title", "string", "A short title (default: from the prompt)."), Tool.prop("report", "boolean", "Whether its turn ends and asks are reported to you (default true)."),
+    Tool.def("thread_launch", "Create a continuing subthread of this calling thread, with a first message on any provider/model. It nests under its launcher, counts in its subthreads badge, reports back and follows normal auto-settle rules; it can still be opened and messaged on its own. Use subthread false ONLY when the user explicitly requests a top-level conversation. Local subthreads must stay in their launcher’s project; bots and launches on another machine have no local parent. Bots must name the project. Scratch is retired and cannot be a launch target; use a project from machine_list. Answers its threadId. Its reports come to you by themselves, as a message that wakes you: each time its turn ends (completed, failed or interrupted, with its last reply), and at once when it asks the person something; so end your turn instead of polling, and answer it with thread_send. report false launches it without reports; thread_update turns them off or on later. With `machine`, it starts on that other machine of the person's, in its project named by `project` (machine_list).",
+      [Tool.prop("subthread", "boolean", "Nest under this calling thread (default true). False only for an explicitly requested top-level thread; required for cross-project launches."), Tool.prop("prompt", "string", "The first message, complete."), Tool.prop("title", "string", "A short title (default: from the prompt)."), Tool.prop("report", "boolean", "Whether its turn ends and asks are reported to you (default true)."),
        Tool.prop("provider", "string", "claude, codex, grok, muse, antigravity, opencode, pi or omp (default: the user's default)."), Tool.prop("model", "string", "Model (default: the provider's default)."),
        Tool.prop("project", "string", "The project's name or id (default: this thread's; bots must give one); on another machine its <link>~<id> from machine_list."),
        Tool.prop("machine", "string", "Start it on another machine of the person's, in its project of that name (machine_list).")], ["prompt"]),
-    Tool.def("thread_update", "Configure a thread's provider/model between turns without sending a message or starting an agent; answers the saved status. Running turns are rejected. Stopped queued work stays held until a new request or explicit resume. Fresh choices are silent; established history is kept for the next real prompt. With no provider/model: rename with title, regenerate the title with no title, or change a launched thread's reports with report. Configuration cannot be combined with title/report.",
-      [Tool.prop("threadId", "string", "The thread (default: this one), or its <link>~<id> on another machine."), Tool.prop("provider", "string", "claude, codex, grok, muse, antigravity, opencode, pi or omp. A different provider uses its default model unless model is given; accounts are unchanged."),
+    Tool.def("thread_update", "Configure a thread's provider/model between turns without sending a message or starting an agent; answers the saved status. Running turns are rejected. Stopped queued work stays held until a new request or explicit resume. Fresh choices are silent; established history is kept for the next real prompt. With no provider/model: rename with title, regenerate the title with no title, or change a launched thread's reports with report. Give parent alone to explicitly move a thread under a conversation in the same project, or empty to move to top level; this persists ThreadParentSet and wins over its launch relationship. Configuration cannot be combined with title/report/parent.",
+      [Tool.prop("parent", "string", "Explicit parent move (same project); empty moves to top level. Use only when asked to move a thread; give without title/report/provider/model."), Tool.prop("threadId", "string", "The thread (default: this one), or its <link>~<id> on another machine."), Tool.prop("provider", "string", "claude, codex, grok, muse, antigravity, opencode, pi or omp. A different provider uses its default model unless model is given; accounts are unchanged."),
        Tool.prop("model", "string", "Set the selected provider's model; empty selects its default. May be used alone."), Tool.prop("title", "string", "The new title; empty to regenerate it."), Tool.prop("report", "boolean", "For a thread you launched: whether its reports come to you.")], Nil{}),
     Tool.def("thread_wait", "Wait until a thread in this project has finished its turn, or until timeoutMs passes. Answers its state, whether it is done, and its last reply. For anything longer than a few minutes use wake_on instead and end your turn.",
       [Tool.prop("threadId", "string", "The thread."), Tool.prop("timeoutMs", "number", "How long to wait at most (default 30000, at most 600000).")], ["threadId"]),
