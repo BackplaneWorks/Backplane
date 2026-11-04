@@ -3586,3 +3586,14 @@ html.phone .ph-term-keys button[aria-pressed="true"] { background: var(--ph-on);
 .app.phone .project-home .home-header { border-bottom-color: transparent; }
 .app.phone .project-home :is(section, .home-threads, .home-card) { border-radius: var(--ph-r-card); }
 .app.phone .project-home .viewer { border-radius: var(--ph-r-card); overflow: hidden; border-color: var(--ph-sep); }
+
+/* the Bots tab: bots and rooms as rounded segments under their headings;
+   text areas filled like the fields */
+.app.phone .sidebar .bots > :is(.bot-row, .room-row, .uber-row) { margin: 0 max(12px, env(safe-area-inset-right)) 0 max(12px, env(safe-area-inset-left)); background: var(--ph-card); border-radius: 4px; }
+.app.phone .sidebar .bots > :is(.bot-row, .room-row, .uber-row) + :is(.bot-row, .room-row, .uber-row) { margin-top: 2px; }
+.app.phone .sidebar .bots > :not(:is(.bot-row, .room-row, .uber-row)) + :is(.bot-row, .room-row, .uber-row) { border-top-left-radius: var(--ph-r-card); border-top-right-radius: var(--ph-r-card); }
+.app.phone .sidebar .bots > :is(.bot-row, .room-row, .uber-row):not(:has(+ :is(.bot-row, .room-row, .uber-row))) { border-bottom-left-radius: var(--ph-r-card); border-bottom-right-radius: var(--ph-r-card); margin-bottom: 6px; }
+.app.phone .sidebar .bots > :is(.bot-row, .room-row, .uber-row):active { background: var(--ph-press); }
+.app.phone textarea:not(.xterm-helper-textarea) { background: var(--ph-fill); border: 1px solid transparent; }
+.app.phone textarea:focus { border-color: color-mix(in srgb, var(--accent) 60%, transparent); outline: none; }
+@media (prefers-reduced-motion: reduce) { .ph-tab > svg { transition: none; } }
