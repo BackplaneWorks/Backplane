@@ -151,6 +151,36 @@ def pages(ths: List<&2, String>, +i: T.Index, +r: T.Index, +h: String, +acc: Acc
         +a : Acc <- pages.th(36n, i, r, h, th, acc)
         pages(t, i, r, h, a)
 
+# "start:N" (Ts.start): the page below its bound has N rows older than it
+# and 32 rows, or the bound is 0 (the newest page) when the thread has no
+# row 32 after its Nth oldest
+def start.want(+total: Nat, +n: Nat) -> String:
+  Bool.pick(String, Nat.is_gt(total, Nat.add(n, 32n)), "remaining " ++ Nat.show(n) ++ ", rows 32", "before 0")
+
+def start.got(+before: Nat, +w: J.Json, +rows: Nat) -> String:
+  Bool.pick(String, Nat.is_eq(before, 0n), "before 0", "remaining " ++ Nat.show(J.Json.get_nat(w, "remaining", 9999n)) ++ ", rows " ++ Nat.show(rows))
+
+def starts.th(ns: List<&2, Nat>, +r: T.Index, +h: String, +th: String, +total: Nat, +acc: Acc) -> IO(Acc):
+  match ns:
+    case Nil{}: IO.pure(Acc, acc)
+    case +n <> t:
+      do IO<Acc>:
+        +before : Nat <- TS.Ts.start(h, th, n)
+        +pg : TS.Page <- TS.Ts.page(h, th, before, 32n, r)
+        +w : J.Json = V.Page.window(TS.Page.index(pg), th, request(th), "ep", TS.Page.ids(pg))
+        +a : Acc = Acc.see(acc, th ++ " start:" ++ Nat.show(n), start.got(before, w, List.length(&2, String, TS.Page.ids(pg))), start.want(total, n))
+        starts.th(t, r, h, th, total, a)
+
+def starts(ths: List<&2, String>, +i: T.Index, +r: T.Index, +h: String, +acc: Acc) -> IO(Acc):
+  match ths:
+    case Nil{}: IO.pure(Acc, acc)
+    case +th <> t:
+      +ids = T.Index.page(i, th, 0n, 32n)
+      +total = Nat.add(J.Json.get_nat(V.Page.window(i, th, request(th), "ep", ids), "remaining", 0n), List.length(&2, String, ids))
+      do IO<Acc>:
+        +a : Acc <- starts.th([0n, 1n, 5n, 16n, 40n, 100n, 1000n], r, h, th, total, acc)
+        starts(t, i, r, h, a)
+
 # Message reads
 # -------------
 
@@ -287,6 +317,8 @@ def main() -> IO(Unit):
     +ths : List<&2, String> = ["ta", "tb", "tc", "td", "", "zz"]
     +a1 : Acc <- pages(ths, i, r, h, Acc{0n, 0n, ""})
     Acc.report("every page of every thread at every anchor", a1)
+    +a4 : Acc <- starts(["ta", "tb", "tc", "td", "zz"], i, r, h, Acc{0n, 0n, ""})
+    Acc.report("the page at each thread's start (start:N)", a4)
     +a2 : Acc <- reads(["ta", "tb", "tc"], [0n, 100n, 40n], h, i, r, st, Acc{0n, 0n, ""})
     Acc.report("message reads, first and continued", a2)
     +a3 : Acc <- searches(["common", "alpha", "beta alpha", "日本語", "absent", "", "COMMON n13", "common absent", "n7", "üüü"], ["ta", "tc", "", "zz"], h, i, Acc{0n, 0n, ""})

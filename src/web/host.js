@@ -1703,7 +1703,7 @@ function dispatch(action, value, timer) {
     }
   }
   // (the host pages back itself: render's startJump, as a search jump does)
-  if (action === "ph-start") { startJump = { thread: currentSession().sel, pages: 0, asked: false };startSay("Going back to the start…", "cancel", "Cancel");later();return true; }
+  if (action === "ph-start") { startJump = { thread: currentSession().sel, pages: 0, asked: false };startSay("Going back to the start…", "cancel", "Cancel");thin?.start?.();later();return true; }
   if (action === "thin-search-open") {
     // (value: a query the command palette could not match: the palette
     // closes first, and the search opens running it once it is gone, render)
@@ -3649,7 +3649,8 @@ async function startThin(again = false, reason = "initial") {
           resumedConversation = null;
         }
         const previous = historyNode || node;
-        const projection = historyNode ? detail.page?.direction || "update" : "reset";
+        // (the start of the thread, thin-host's start(): a page of its own, as the newest is)
+        const projection = historyNode ? (detail.page?.direction === "start" ? "newest" : detail.page?.direction || "update") : "reset";
         if (RR && historyNode && projection === "older") RR.n("land.block." + History.why(previous, node, projection));
         // "Go to the start" counts the earlier pages as they land (most come
         // through the ordinary paging at the top, not its own requests)

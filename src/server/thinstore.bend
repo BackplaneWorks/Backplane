@@ -72,6 +72,18 @@ def Ts.above(newest: Bool, h: String, th: String, seq: Nat, keep: String) -> IO(
         r : List<&2, List<&2, String>> <- Ts.query(h, Q.Q.sql.above(keep), [th, Q.Q.n(seq)], 1)
         return Ts.nat(r)
 
+# "start:N" (the phone's Go to the start, web/thin-host.js): the page that
+# starts at the thread's Nth oldest row is the page below the row 32 after
+# it, so its bound is that row's ordinal (0, the newest page, when the
+# thread has no such row: the newest page holds them)
+def Ts.start.n(+text: String) -> Nat:
+  Q.Q.num(String.drop(text, 6n))
+
+def Ts.start(+h: String, +th: String, +n: Nat) -> IO(Nat):
+  do IO<Nat>:
+    r : List<&2, List<&2, String>> <- Ts.query(h, Q.Q.sql.start(), [th, Q.Q.n(Nat.add(n, 32n))], 1)
+    return Ts.nat(r)
+
 # a thread's page older than ordinal `before` (0: the newest), at most
 # `limit` (capped at 32) and one more, as T.Index.page would give it, and
 # what Page.window asks of the rest
