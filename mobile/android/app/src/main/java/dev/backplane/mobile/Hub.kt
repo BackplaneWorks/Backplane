@@ -30,7 +30,7 @@ object Pairing {
     data class Invitation(val origin: String, val secret: String)
     fun invitation(text: String): Invitation? {
         var raw = text.trim()
-        if (raw.startsWith("backplane://")) raw = Uri.parse(raw).getQueryParameter("url") ?: return null
+        if ((raw.startsWith("backplane://") || raw.startsWith(BuildConfig.URL_SCHEME + "://"))) raw = Uri.parse(raw).getQueryParameter("url") ?: return null
         val u = Uri.parse(raw)
         if (u.scheme !in setOf("http", "https") || u.host.isNullOrEmpty() || u.userInfo != null) return null
         val f = Uri.parse("https://pair/?" + (u.encodedFragment ?: ""))
@@ -40,7 +40,7 @@ object Pairing {
     }
     fun malformedInvitation(text: String): Boolean {
         var raw = text.trim()
-        if (raw.startsWith("backplane://")) raw = Uri.parse(raw).getQueryParameter("url") ?: return false
+        if ((raw.startsWith("backplane://") || raw.startsWith(BuildConfig.URL_SCHEME + "://"))) raw = Uri.parse(raw).getQueryParameter("url") ?: return false
         val fields = Uri.parse("https://pair/?" + (Uri.parse(raw).encodedFragment ?: ""))
         return fields.queryParameterNames.any { it == "invite" || it == "code" }
     }
@@ -75,7 +75,7 @@ object Pairing {
     fun socket(link: String): String? {
         var s = link.trim()
         if (s.isEmpty()) return null
-        if (s.startsWith("backplane://")) s = Uri.parse(s).getQueryParameter("url") ?: return null
+        if ((s.startsWith("backplane://") || s.startsWith(BuildConfig.URL_SCHEME + "://"))) s = Uri.parse(s).getQueryParameter("url") ?: return null
         if (!s.contains("://")) s = "http://$s"
         val u = Uri.parse(s)
         val host = u.host ?: return null

@@ -29,12 +29,24 @@ gradle.taskGraph.whenReady {
     }
 }
 
+// The GPUI experiment's one build setting: -PbpNative=false gives the
+// production behaviour (the WebView shell, a Classic screens switch).
+// Default true: native Compose screens, no toggle. Debug builds only.
+val bpNative = providers.gradleProperty("bpNative").map { it != "false" }.getOrElse(true)
+val bpAppId = "dev.backplane.mobile.gpui"
+val bpScheme = "bpgpui"
+
 android {
     namespace = "dev.backplane.mobile"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "dev.backplane.mobile"
+        applicationId = bpAppId
+        manifestPlaceholders["urlScheme"] = bpScheme
+        resValue("string", "app_name", "Backplane GPUI")
+        resValue("string", "app_id", bpAppId)
+        buildConfigField("boolean", "NATIVE_ONLY", bpNative.toString())
+        buildConfigField("String", "URL_SCHEME", "\"$bpScheme\"")
         minSdk = 26
         targetSdk = 35
         versionCode = releaseCode ?: 1
@@ -62,6 +74,7 @@ android {
         jvmTarget = "17"
     }
     buildFeatures {
+        buildConfig = true
         compose = true
     }
     // bridge.js is copied in by scripts/build-mobile.sh
