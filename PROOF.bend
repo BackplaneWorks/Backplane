@@ -15897,6 +15897,12 @@ def Laws.auth_cache_key_sequence(st): {==}
 
 def Laws.auth_empty_threads_waits_none(st): {==}
 
+def Laws.autosettle_live_work_subscription_never_expires(old):
+  {==}
+
+def Laws.autosettle_active_file_subscription_never_expires(live, old):
+  {==}
+
 def Laws.catalog_lookup_common_cancel(lc):
   match lc:
     case I18.En{}: {==}
