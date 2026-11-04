@@ -2,9 +2,16 @@
 
 This folder is test preparation only. It starts no emitter, package build,
 workflow/campaign or release. The installer/root owns the 0.14.2 source freeze;
-packaging 440155 supplies its exact Windows ZIP. Do not reuse the earlier
-2a87 main identity as the authoritative freeze: held #932 is to be excluded
-and version metadata finalized by the build owner. Lane C owns producer pins.
+packaging 440155 supplies its exact Windows ZIP. The authoritative RC-CUT.json
+records commit afa9679273206b3e9b1da4c966c9b63fb6f57ab4 and tree
+ec6c85b4a8b62a0227f09151a9ec52a362b20ae2, version 0.14.2: main base 2a87,
+excluding #932 and #935, with version metadata finalized by the build owner.
+Do not substitute the earlier unmodified 2a87 identity. Lane C owns producer pins.
+
+The user authorizes the TEST-ONLY Windows ZIP from run 1614985, using #934's
+low-memory compiler mode, for #927 native acceptance. Record the actual
+compiler mode and producer work identity with the result. This permission
+does not approve release output or waive its separate equivalence review.
 
 Before execution, obtain the authoritative ZIP, its SHA256, commit, tree and
 version, and the vendor KiCad runtime/version/CLI SHA256. The runner bootstrap
@@ -17,7 +24,8 @@ is allowed. Run only on GitHub Windows; never on the person's machine.
 The config requires these actual values (no defaults or invented receipts):
 packagePath, packageSHA256, executable, sourceCommit, sourceTree, version,
 out, standardUserSid, playwrightModule (absolute path to playwright-core),
-programFilesRoot, pathRoot, manualRoots, runtimeVersion, runtimeCliSHA256.
+programFilesRoot, pathRoot, manualRoots, runtimeVersion, runtimeCliSHA256,
+buildProvenance (including actual compilerMode and producerWorkId).
 Install real verified vendor runtime copies under the actual Program Files
 KiCad version folder, a separate native PATH folder, C:\backplane_kicad\,
 and a space-containing path with literal backslash-new/backslash-test.
