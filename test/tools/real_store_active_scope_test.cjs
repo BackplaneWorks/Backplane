@@ -31,6 +31,7 @@ module.exports.run = async function run() {
   pass(!changed.safeToRemove && changed.uncertainty && !changed.kernelKillIssued && !resourceRead,
     'changed live invocation is refused before resources or signal');
   pass(!replaced.resourcesHealthy(), 'missing resource observations never become zero or PASS');
+  cases += await require('./real_store_active_scope_mock_test.cjs').run();
   // Pin executable identity without inheriting provider/auth environment.
   const find = cp.spawnSync('which', ['node'], { encoding: 'utf8', env: { PATH: process.env.PATH }, timeout: 2000 });
   assert.equal(find.status, 0); const node = fs.realpathSync(find.stdout.trim());
@@ -86,7 +87,7 @@ module.exports.run = async function run() {
       stopped ??= await scope.stop();
       // Never turn an uncertain scope into a pass or remove its home. The
       // enclosing reviewed Boat packet must clean the VM on a failed control.
-      if (stopped.safeToRemove && waited) fs.rmSync(root, { recursive: true, force: true });
+      if (stopped.safeToRemove && scope.resourcesHealthy() && waited) fs.rmSync(root, { recursive: true, force: true });
       scope.close();
     }
     if (failure) {
@@ -97,7 +98,7 @@ module.exports.run = async function run() {
     pass(stopped.safeToRemove && !fs.existsSync(root), 'owned synthetic home removed only after positive proof');
   }
   pass(taskReads === 0, 'cleanup never relies on any task children file');
-  assert.equal(cases, 28);
+  assert.equal(cases, 49);
   console.log(JSON.stringify({ scope: 'combined-real-store-owned-execution-scope', ok: true, cases,
     hubStarted: false, realFixtureOpened: false, syntheticScopes: 2, missingTaskReads: taskReads, summaries }));
 };
