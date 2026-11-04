@@ -13,10 +13,18 @@ const shell=path.join(process.env.SystemRoot,'System32/WindowsPowerShell/v1.0/po
 async function main(){
   assert.equal(process.platform,'win32');
   report.identity=JSON.parse(execFileSync(shell,['-NoProfile','-NonInteractive','-Command',
-    "$i=[Security.Principal.WindowsIdentity]::GetCurrent(); $p=[Security.Principal.WindowsPrincipal]::new($i); $d=Get-ItemPropertyValue 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\AppModelUnlock' AllowDevelopmentWithoutDevLicense -ErrorAction SilentlyContinue; @{name=$i.Name;sid=$i.User.Value;admin=$p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator);developerMode=($d -eq 1)} | ConvertTo-Json -Compress"
+    "$i=[Security.Principal.WindowsIdentity]::GetCurrent(); $p=[Security.Principal.WindowsPrincipal]::new($i); $d=Get-ItemPropertyValue 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\AppModelUnlock' AllowDevelopmentWithoutDevLicense -ErrorAction SilentlyContinue; $profile=Get-ItemPropertyValue ('HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\ProfileList\\'+$i.User.Value) ProfileImagePath; @{name=$i.Name;sid=$i.User.Value;profile=$profile;admin=$p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator);developerMode=($d -eq 1)} | ConvertTo-Json -Compress"
   ],{encoding:'utf8'}));
   assert.equal(report.identity.admin,false,'Smoke must run with a standard user token');
   assert.equal(report.identity.developerMode,false,'Developer Mode must be OFF');
+  // CreateProcessWithLogonW loads the new profile but inherits the caller's
+  // environment. Resolve this account's actual registered profile and give
+  // it a writable TEMP, instead of reaching into the runner admin's home.
+  assert(path.isAbsolute(report.identity.profile));
+  Object.assign(process.env,{USERPROFILE:report.identity.profile,HOME:report.identity.profile,
+    APPDATA:path.join(report.identity.profile,'AppData','Roaming'),LOCALAPPDATA:path.join(report.identity.profile,'AppData','Local'),
+    TEMP:path.join(out,'temp'),TMP:path.join(out,'temp')});
+  fs.mkdirSync(process.env.TEMP,{recursive:true});
   report.privileges=execFileSync('whoami.exe',['/priv'],{encoding:'utf8'});
   assert(!report.privileges.includes('SeCreateSymbolicLinkPrivilege'),'User must not hold symlink privilege');
   const source=path.join(out,'symlink-source');fs.writeFileSync(source,'negative control');
