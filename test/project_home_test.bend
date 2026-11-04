@@ -50,6 +50,10 @@ def artifact(+kind: String, path: String) -> J.Json:
 def home() -> U.Ui:
   snapshot(ui(), "p", [artifact("board", "/tmp/project-home-test/boards/logic.kicad_pcb"), artifact("schematic", "/tmp/project-home-test/drawings/control.kicad_sch"), artifact("mech", "/tmp/mech/a.step"), artifact("intent", "/tmp/.backplane/intent.md")])
 
+# the copies of a hardware project's design outside the folder (core/projkind.bend)
+def outside.page() -> String:
+  web(U.Ui.info_set(ui(), "home.snapshot", J.Json.show(J.Json.obj([J.KV{"project_home", J.Str{"p"}}, J.KV{"outside", J.Str{"**backplane-753e**: 2 files not committed."}}, J.KV{"artifacts", J.Json.arr(Nil{})}]))))
+
 def expanded() -> U.Ui:
   U.Act.ui(U.Ui.act(U.Act.ui(U.Ui.act(U.Ui.scratch_set(home(), "project-home-p", "Exact retained draft"), "home-view", "3d")), "home-viewer-size", "1"))
 
@@ -103,6 +107,9 @@ def main() -> IO(Unit):
   do IO<Unit>:
     C.Check.str("project route round trip", PH.Home.project(PH.Home.owner("p")), "p")
     C.Check.str("absent artifact has no panel", Nat.show(List.length(&2, PH.Panel, PH.Home.panel("board", "", "Board", ""))), "0")
+    C.Check.str("the page names the design outside the folder", Bool.show(String.contains(outside.page(), "Design outside this folder")), "True")
+    C.Check.str("and which copy", Bool.show(String.contains(outside.page(), "backplane-753e")), "True")
+    C.Check.str("no copies, no such panel", Bool.show(String.contains(web(home()), "Design outside this folder")), "False")
     C.Check.str("empty snapshot has no CAD control", Bool.show(String.contains(web(ui()), "Open schematic")), "False")
     C.Check.str("foreign project snapshot is never displayed", Bool.show(String.contains(web(snapshot(ui(), "q", [artifact("schematic", "/tmp/q.kicad_sch")])), "Open schematic")), "False")
     C.Check.str("saved schematic exposes viewer", Bool.show(String.contains(web(snapshot(ui(), "p", [artifact("schematic", "/tmp/project-home-test/drawings/control.kicad_sch")])), "Open schematic")), "True")
