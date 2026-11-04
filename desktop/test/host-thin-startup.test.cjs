@@ -6,8 +6,10 @@ async function fixture(supported=false, legacyProbe=false, legacyPaint=false){
  const {ViewerRpc}=await import('../../src/web/viewer-rpc.js'),{ReviewPosition}=await import('../../src/web/review-position.js');
  const {ImprovementsRpc}=await import('../../src/web/improvements-rpc.js');
  const {SubsFeedback}=await import('../../src/web/subs-feedback.js');
+ const {SecretSaveHost}=await import('../../src/web/secret-save.js');
+ const {phoneRequest}=await import('../../src/web/phone-shell.js');
  const {EntryHistory}=await import('../../src/web/entry-history.js');
- const {ThinHost,presentationTarget,preservePresentationRoute,refusedFallback}=await import('../../src/web/thin-host.js'),{Backoff,Retry,probeHub,QUIET_MS}=await import('../../src/web/reconnect.js'),{ThinViews,viewCapability,VIEW_LIMITS}=await import('../../src/web/thin.js'),{discoverViews}=await import('../../src/web/thin-discovery.js');
+ const {ThinHost,presentationTarget,preservePresentationRoute,refusedFallback}=await import('../../src/web/thin-host.js'),{Backoff,Retry,directReconnect,DIRECT_TRIES,probeHub,QUIET_MS}=await import('../../src/web/reconnect.js'),{ThinViews,viewCapability,VIEW_LIMITS}=await import('../../src/web/thin.js'),{discoverViews}=await import('../../src/web/thin-discovery.js');
  let source=fs.readFileSync(path.resolve(__dirname,'../../src/web/host.js'),'utf8');
  if(legacyProbe)source=source.replaceAll(' || attempt !== thinAttempt','');
  if(legacyPaint)source=source.replace(' && !detail?.presenting','').replace('state.painted && !becameReady','state.paged && !becameReady');
@@ -31,15 +33,16 @@ async function fixture(supported=false, legacyProbe=false, legacyPaint=false){
   presentationJson:x=>x,fromList:x=>x,presentationCommand:c=>calls.push(c),anchorOf:()=>null,
   History:{project:(_before,fresh)=>fresh,project_block:(_before,fresh)=>fresh},historyNode:null,timelineList:()=>null,
   App:{wire_out:t=>encoder.encode(t),wire_out_json:v=>encoder.encode(JSON.stringify(v)),viewer_input:(_u,_info,s)=>s,desk_reset:u=>u,presentation_node:n=>n,presentation_prepare:(s,input)=>({...input,rid:s.rid}),presentation_reply:s=>s,presentation_select:(u,id)=>({...u,sel:id}),presentation_handoff:(u,s)=>({...u,sel:s.sel}),unsync:u=>u,lang:()=> 'en'},
-  Wire:{cbor:b=>JSON.parse(decoder.decode(b)),plain:x=>x,json:x=>x},document:{getElementById:()=>null,querySelector:()=>null,querySelectorAll:()=>[],documentElement:{classList:{toggle(){}},style:{setProperty(){}}}},pairingReady:Promise.resolve(true),pendingInvitation:null,pairingCause:'',pairingUI:{show(){calls.push('pairing-screen');}},
-  fallbackIntent:null,wantFrontend:true,Backoff,Retry:FixtureRetry,probeHub,QUIET_MS,navigator:{onLine:true},thinContinuations:{clear(){},accept:()=>false,bind(){},project:x=>x},presentationTarget,preservePresentationRoute,checkDeploy:()=>{},outbox:new Map(),OUTBOX:'outbox',OUTBOX_DAY:86400000,DRAFT:'draft:',
+  Wire:{cbor:b=>JSON.parse(decoder.decode(b)),plain:x=>x,json:x=>x},document:{getElementById:()=>null,querySelector:()=>null,querySelectorAll:()=>[],documentElement:{classList:{toggle(){},contains:()=>false},style:{setProperty(){}}}},pairingReady:Promise.resolve(true),pendingInvitation:null,pairingCause:'',pairingUI:{show(){calls.push('pairing-screen');}},
+  fallbackIntent:null,wantFrontend:true,Backoff,Retry:FixtureRetry,directReconnect,probeHub,QUIET_MS,navigator:{onLine:true},thinContinuations:{clear(){},accept:()=>false,bind(){},project:x=>x},presentationTarget,preservePresentationRoute,checkDeploy:()=>{},outbox:new Map(),OUTBOX:'outbox',OUTBOX_DAY:86400000,DRAFT:'draft:',
   fabLook(){},restoreTransition(){},transitionNode:null,transitionFor:'',shownFor:'',heldAt:0,transitionScope:()=>({}),transitionPosition:null,previewViews:{stop(){}},warmDestinations(){},transitionViews:{put(){},position:()=>null,warm:()=>Promise.resolve(false),destination:()=>null},
   thinReading:null,resumedConversation:null,readingIdentity:()=> 'fixture-account',historyDirection:'',
   historyFillMore(){calls.push('history-fill-cleared');},historyPageState(){},historyClear(){},thinSearchAnswer(){},thinSearchFailed(){},showThinMessage(){},keepViewer(){},held:null,
   modelFeedback:{clear(){}},subsFeedback:new SubsFeedback(()=>{}),viewerFeedback:{choice(){}},
   // The extracted socket adapter shares these services with the full host.
   // Record peripheral lifecycle calls; wire admission/ownership still uses real ThinHost/ThinViews.
-  RR:null,COARSE_POINTER:false,ViewerTools:{reset(){calls.push('viewer-tools-retired');}},viewerRpc:new ViewerRpc(()=>{throw Error('unexpected viewer RPC');}),
+  RR:null,COARSE_POINTER:false,PHONE:false,phoneRequest,ViewerTools:{reset(){calls.push('viewer-tools-retired');}},viewerRpc:new ViewerRpc(()=>{throw Error('unexpected viewer RPC');}),
+  secretSaves:new SecretSaveHost({build:()=>{throw Error('unexpected secret save');},scope:()=>'',binding:()=>'',send(){throw Error('unexpected secret send');},dispatch(){},note(){}}),
   improvementsRpc:new ImprovementsRpc(()=>{throw Error('unexpected Improvements RPC');}),voiceMicHeard(){calls.push('voice-envelope');},
   reviewPosition:new ReviewPosition({getItem:k=>store.get(k)??null,setItem:(k,v)=>store.set(k,v)}),
   composerKeeper:{selecting(){},navigationFailed(){}},keepDesk:s=>s,deskCheck(){},settingsRecovery:null,settingsRecovering:null,
@@ -55,8 +58,11 @@ async function fixture(supported=false, legacyProbe=false, legacyPaint=false){
  for(const [start,end] of [['function keepThinReading(','// (the re-render harness'],['function keepSettingsRecovery(','async function recoverSettings('],['function restoreDraftAttachments(','function uploadScope(']]){
   const from=source.indexOf(start),to=source.indexOf(end,from);assert(from>0&&to>from);vm.runInContext(source.slice(from,to),ctx);
  }
+ // Top-level names of host.js that the slice below reads, taken from host.js itself.
+ const phoneFrom=source.indexOf('const PHONE_TITLES ='),phoneTo=source.indexOf('\n',phoneFrom);assert(phoneFrom>0&&phoneTo>phoneFrom);vm.runInContext(source.slice(phoneFrom,phoneTo),ctx);
+ const watchFrom=source.indexOf('let wakeProbe = 0, plotHeard = 0;'),watchTo=source.indexOf('const onWake = why =>',watchFrom);assert(watchFrom>0&&watchTo>watchFrom);vm.runInContext(source.slice(watchFrom,watchTo),ctx);
  vm.runInContext(source.slice(a,b),ctx);ctx.showViewStatus=s=>status.push(s);
- return{ctx,calls,status,requests,sockets,VIEW_LIMITS,boot,source,runBoot:async()=>{let started;const start=ctx.startThin;ctx.startThin=()=>started=start();vm.runInContext(boot,ctx);await Promise.resolve();await started;},tick:ms=>{clock+=ms;for(const[id,t]of[...timers])if(t.at<=clock&&timers.has(id)){timers.delete(id);t.fn();}}};
+ return{ctx,calls,status,requests,sockets,VIEW_LIMITS,DIRECT_TRIES,boot,source,runBoot:async()=>{let started;const start=ctx.startThin;ctx.startThin=()=>started=start();vm.runInContext(boot,ctx);await Promise.resolve();await started;},tick:ms=>{clock+=ms;for(const[id,t]of[...timers])if(t.at<=clock&&timers.has(id)){timers.delete(id);t.fn();}}};
 }
 test('actual startup begins capability discovery despite a permanently pending focused IDB lookup',async()=>{
  const f=await fixture(false);await f.runBoot();assert(f.calls.includes('focused-read'));assert(f.calls.includes('/client/capabilities'));assert.equal(f.ctx.viewMode,'read-only');
@@ -114,6 +120,8 @@ test('late retry probe cannot replace a newer connection; previous host path rep
   const f=await fixture(true,legacy);await f.runBoot();f.sockets[0].open();
   const original=f.ctx.window.fetch;let release;
   f.ctx.window.fetch=url=>url==='/hello'?new Promise(resolve=>{release=resolve;}):original(url);
+  // A page past its direct tries asks /hello first (directReconnect); that probe is what can come back late.
+  vm.runInContext('directFails='+f.DIRECT_TRIES,f.ctx);
   f.sockets[0].close();vm.runInContext('thinRetry.wake()',f.ctx);assert.equal(typeof release,'function');
   await f.ctx.startThin(false,'retry');const newer=f.sockets[1];newer.open();
   release({status:200});await new Promise(setImmediate);
