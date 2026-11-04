@@ -21,10 +21,18 @@ merge. The complete baseline remains in the private render state; this only
 bounds temporary I/O materialization. Canonical history eviction, durable
 provider positions, recovery hydration and vault masking are unchanged.
 
-Qualification is pending. The proposed Boat scope includes actual Bun SQLite
-boundary tests, the complete small IO/fold closure, and the exact new budget
-and progress laws with a false-budget control. The broad review-state
-integration and its existing laws require separately stated qualification.
+Narrow qualification passed on frozen source `bab3fe485`, Boat job
+`j20261104031852-353487`: seven actual Bun SQLite boundary cases, the complete
+unchanged small IO/fold/db/test type closure, and four exact new canonical
+budget, progress and failure-discard laws. A separate false-budget theorem
+was rejected. Proof RSS peaked at 120,960 KiB; the controller peaked at
+134,348,800 bytes. Workers had hard 3.7 GB/no-swap scopes and the controller
+had a hard 512 MiB/no-swap scope. All OOM, limit and swap activity counters
+remained zero. [Receipts](../../extra/hub-review-qualification/SUMMARY.json)
+also retain prior failed attempts. Existing pure folds, merge and skip
+policies received a source-preservation audit. The broad review-state
+adapter, its two existing merge-law closures and the tiny emitted-program
+runtime test remain unqualified; this PR is not ready to merge yet.
 No full/root proof, full application compile, build, installation or live
 store access is authorized. Startup, steady memory, CPU and p99 targets remain
 open pending a qualified packaged artifact and copied-store measurements.
