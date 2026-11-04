@@ -254,21 +254,13 @@ def Pairing.ask(post: Unit -> IO(Unit), +ack: Chan(Unit)) -> IO(Unit):
 # slow machine never delays a healthy one; the round, and with it the
 # next, waits only for the slowest. Each machine is in one job only, so
 # none is asked twice at once.
-def Pairing.one(+ask: String -> IO(Unit), +u: String, +done: Chan(Unit)) -> IO(Unit):
+# (the caller spawns one Pairing.one per machine, counts them, then
+# Pairing.close: a function value cannot be shared among the jobs)
+def Pairing.one(ask: IO(Unit), +done: Chan(Unit)) -> IO(Unit):
   do IO<Unit>:
-    ask(u)
+    ask
     ok : Result<&1, &1, Unit, Unit> <- Chan.send(Unit, done, Unit{})
     return Unit{}
-
-def Pairing.spawn(us: List<&2, String>, +ask: String -> IO(Unit), +done: Chan(Unit)) -> IO(Nat):
-  match us:
-    case Nil{}:
-      IO.pure(Nat, 0n)
-    case +u <> t:
-      do IO<Nat>:
-        IO.spawn(Unit, Pairing.one(ask, u, done))
-        n : Nat <- Pairing.spawn(t, ask, done)
-        return Nat.add(n, 1n)
 
 def Pairing.wait(n: Nat, +done: Chan(Unit)) -> IO(Unit):
   match n:
@@ -277,10 +269,9 @@ def Pairing.wait(n: Nat, +done: Chan(Unit)) -> IO(Unit):
     case 1n+m:
       IO.bind(Maybe<&1, Unit>, Unit, Chan.recv(Unit, done), x => Pairing.wait(m, done))
 
-def Pairing.round(us: List<&2, String>, +ask: String -> IO(Unit), +ack: Chan(Unit)) -> IO(Unit):
+# the barrier: once the round's n jobs are over, ack
+def Pairing.close(n: Nat, +done: Chan(Unit), +ack: Chan(Unit)) -> IO(Unit):
   do IO<Unit>:
-    +done : Chan(Unit) <- Chan.new(Unit, 256)
-    n : Nat <- Pairing.spawn(us, ask, done)
     Pairing.wait(n, done)
     ok : Result<&1, &1, Unit, Unit> <- Chan.send(Unit, ack, Unit{})
     return Unit{}
