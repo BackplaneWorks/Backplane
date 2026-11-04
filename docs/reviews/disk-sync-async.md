@@ -42,7 +42,7 @@ independent controller uses the same `get()` to measure `/hello` and a
 262,144-byte static socket response. Only its two extracted TS helpers are
 transpiled as part of this Bun component test; no app or Bend build runs.
 
-Plan: two excluded warmups per variant, then 32 alternating paired rounds,
+Method: two excluded warmups per variant, then 32 alternating paired rounds,
 128 sequential real append+fsync completions per burst. There is no artificial
 fsync delay. A verified shared Linux CLOCK_MONOTONIC domain requires both
 probe issuance windows to lie inside the active burst. Every response body
@@ -55,8 +55,7 @@ whole-burst time, park/resume/duplicate counters, caps/OOM/swap and cleanup.
 At n=32, nearest-rank p99 is the largest round observation.
 
 These are component responses and modeled append+Disk.sync ACKs, **not actual
-Hub RPC ACKs or SQLite transactions**. Real filesystem latency can vary; no
-speedup or threshold is asserted before receipts exist. No startup, private
+Hub RPC ACKs or SQLite transactions**. Real filesystem latency can vary. No startup, private
 fixture, provider, whole-hub, packaged memory/CPU/p99 or installed acceptance
 is covered. Lane A independently reviews and reruns the frozen measurement.
 
@@ -83,9 +82,62 @@ Raw failure/resource/tool/source receipts are retained in
 peaks were 22,941,696/159,805,440 bytes; cap/swap/OOM checks passed and the
 enclosing VM was deleted. Corrected execution awaits lane A's static review.
 
-Execution/measurement receipts: pending. Run only through the normal approved daily Boat
-runner, default sandbox, `hub-latency` lock, no reuse/setup-Bend; controller
-512 MiB, worker at most 3.7e9 bytes, swap 0. `disk_sync_gate.py` verifies source
-manifest/tool identities, strict case counts, exit/no-FAIL/sentinels and
-resource receipts. Its public manifest must stage the unchanged template and
-only the source/test dependencies. No local tests or product build/install.
+## Writer component result (independent review/rerun pending)
+
+`j20261104103008-1718048` / managed work `1585116` passed on exact source
+`0139fd6d12910082e7be7f930cb5a12a0eec3ead`, tree
+`c285018e43b807e2535f70fb382e3aeefd37cfbc`: **19 boundary + 25 checkpoint
+cases and all 32 A/B pairs**, strict exit 0/counts/sentinels/no FAIL.
+Raw samples and source/tool/kernel receipts are in
+[`extra/hub-disk-sync-qualification/0139fd6d/`](../../extra/hub-disk-sync-qualification/0139fd6d/).
+
+| Component metric, ms | Before median | After median | Before p99 | After p99 | n per variant |
+|---|---:|---:|---:|---:|---:|
+| `/hello` during burst | 2454.074 | 0.294 | 4400.849 | 1.104 | 32 |
+| 256 KiB static socket response during burst | 2458.741 | 4.932 | 4405.255 | 9.700 | 32 |
+| Modeled append + Disk.sync ACK | 16.373 | 16.356 | 60.596 | 62.009 | 4096 |
+| Entire 128-commit burst | 2452.433 | 2473.958 | 4399.592 | 4246.868 | 32 |
+
+The durability wait/ACK did **not** materially improve: its p99 was slightly
+worse and median burst time was also slightly worse. The result demonstrates
+removal of the component's loop freeze. Both response types completed inside
+the burst in 0/32 before rounds and 32/32 after rounds. Every probe's issuance
+bracket was inside the real burst; no synthetic fsync delay was inserted.
+The 4096 ACK observations are pooled from 128 sequential operations in each
+of 32 rounds, not 4096 independent process trials. At n=32 the response p99
+is the maximum observed round. This is one paired run on one Boat sandbox,
+not a whole-hub before/after or an explanation of storage-device latency.
+
+All full-file UTF-8 append bytes/order and response bytes matched. Including
+excluded warmups, the adapter recorded 4352 parks, 4352 resumes, 8704 total
+sync/async completions, zero duplicates and zero pending continuations.
+The child exited cleanly, all component sockets closed, owned temporary
+files/descriptors were cleaned, and the runner verified enclosing VM deletion.
+Actual kernel memory.max was 3,699,998,720 bytes for worker/child and
+536,870,912 bytes for the controller; peaks were 202,133,504 and 159,784,960
+bytes respectively. Swap current/peak/max and OOM counters were zero.
+Tool: pinned Bun 1.3.10, executable SHA256
+`795b37d736a88d746b0e8bb5fcde92bf29bd0f9ac6a1dd1a950fd37440cf5822`.
+The Windows/macOS handle-policy cases are mocks; native execution here is
+Linux only. Neither full Bend marshalling nor packaged service execution is
+qualified by this component.
+
+The unchanged sender SHA is
+`a4ff856f2c97f5af58741403eca2b36bf20ad55d56f7dd80dc073ac09ec2d83f`;
+both variants use the unchanged main `bp_idle` SHA
+`cd8a5d6c5d31df1503227983f5d17813d355c4b968358cf735c29a911579bf32`.
+PR925's scheduler candidate is not part of either variant.
+Input manifest SHA:
+`466aa1599802d011765900777d87fb85a3b24e82f7ba90edd9a9bb02d9c72bbd`.
+Raw results SHA:
+`9f898ae72cfffd307aab0a59e7e24549f6128132464911d67f2db904273eb94a`.
+
+Reproduction remains Boat-only through the normal approved daily runner,
+default sandbox, `hub-latency` lock, no reuse/setup-Bend; controller 512 MiB,
+worker/child at most 3.7e9 bytes, swap 0. `disk_sync_gate.py --inputs PATH
+--sha256 SHA` verifies the staged manifest, tool identities, strict case
+counts, exit/no-FAIL/sentinels and resource receipts. Stage exactly the public
+dependencies in the original manifest plus its own externally pinned bytes;
+the unchanged PR925 template is a public input, not a fork or edited file.
+Lane A reruns the frozen source independently. No local tests, product
+build/install, new writer packet, rank-2 work or merge is authorized here.
