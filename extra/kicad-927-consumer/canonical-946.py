@@ -103,7 +103,7 @@ try:
                                       "loadedImagePath": str(loaded), "sha256": digest(crt),
                                       "peMachine": pe["machine"], "export": "_get_osfhandle",
                                       "exportAddress": hex(address), "exportInvoked": False},
-                   python={"version": sys.version, "executable": sys.executable, "machine": platform.machine()})
+                   python={"version": sys.version, "executable": sys.executable, "machine": platform.machine(), "utf8Mode": sys.flags.utf8_mode})
 except Exception as error:
     receipt.update(status="FAIL", error=f"{type(error).__name__}: {error}")
 finally:

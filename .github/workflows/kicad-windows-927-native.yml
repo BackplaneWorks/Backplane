@@ -9,6 +9,7 @@ name: Issue 927 exact Windows package consumer
 # preserve its real identity/profile rather than inheriting the admin profile.
 # Optional diagnostics use a readable exact runtime copy; a probe setup error
 # cannot skip the independent canonical ABI and application checks.
+# Canonical verifier uses Python UTF-8 mode for exact frozen UTF-8 JS bytes.
 on:
   push:
     branches: [backplane/verify-kicad-windows-927]
