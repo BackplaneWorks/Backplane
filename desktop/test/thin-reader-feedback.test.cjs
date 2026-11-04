@@ -46,6 +46,13 @@ test('renders and live tool-only pictures cannot rearm exhausted initial or gest
  for(let i=0;i<100;i++){context.earlierAsked=false;check(tl);}assert.equal(requests.length,2,'one user gesture permits at most two pages, not an entire history');assert.equal(context.historyOlderDemand,0);
  context.historyOlderDemand=2;context.historyFillOwner=()=> 'new-account-or-history';check(tl);assert.equal(context.historyOlderDemand,0);assert.equal(requests.length,2,'retire demand at an ownership boundary');
 });
+test('a hidden timeline offers no Load earlier control over the screen above it',()=>{
+ const src=source(),a=src.indexOf('function earlierCheck(tl)'),b=src.indexOf('function laterCheck(tl)',a),shown=[];
+ const context=vm.createContext({entryHistory:idleEntry,historyDirection:'',historyFillScope:'scope',historyFillOwner:()=> 'scope',historyOlderDemand:0,earlierAsked:false,historyFillMore(_tl,on){shown.push(on);},historyHasMessage:()=>false,thin:{ready:true,pageError:null,paging:null,hasAhead:()=>true,ahead:()=>true},historyGap:()=>0,historyRunway:()=>1400});
+ const check=vm.runInContext('('+src.slice(a,b)+')',context);
+ check({id:'timeline',scrollHeight:0,clientHeight:0,scrollTop:0});check({id:'timeline',scrollHeight:300,clientHeight:300,scrollTop:0});
+ assert.deepEqual(shown,[false,true]);
+});
 test('usable history means an actually visible committed message rather than a tiny scrollbar',()=>{
  const src=source(),a=src.indexOf('function historyHasMessage(tl)'),b=src.indexOf('// A short tool-only page',a);
  let rows=[];const tl={scrollHeight:705,clientHeight:700,getBoundingClientRect:()=>({top:0,bottom:700}),querySelectorAll:()=>rows};
