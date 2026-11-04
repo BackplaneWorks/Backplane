@@ -5910,6 +5910,17 @@ def View.phone.now(on: Bool, +lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
     case True{}: [View.phone.now.k(lc, u, U.Side.signals.ix(U.Side.ix(U.Ui.state(u)), u))]
     case False{}: Nil{}
 
+# a rename asked from a list's row menu (row-rename): the phones' dialog, as
+# a sheet with the header's own field (the open thread renames in place)
+def View.phone.rename.k(on: Bool, +lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
+  match on:
+    case True{}: [PHN.Phone.sheet.on("rename", MSG.T.menu.rename(lc), "rename-no",
+      [D.El{"div", "", [D.At{"class", "title-box ph-rename"}], View.title.k.loc(lc, True{}, U.Ui.scratch(u, "@ren"), "", U.Ui.scratch(u, "@f.title"))}])]
+    case False{}: Nil{}
+
+def View.phone.rename(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
+  View.phone.rename.k(Bool.and(Bool.not(String.is_empty(U.Ui.scratch(u, "@ren"))), Bool.not(String.eq(U.Ui.scratch(u, "@ren"), U.Ui.sel(u)))), lc, u)
+
 def View.phone.cls(+screen: String, +level: String) -> String:
   "app top phone ph-" ++ screen ++ " ph-l" ++ level
 
@@ -5926,7 +5937,7 @@ def View.phone.page.k(+lc: I.Loc, +bv: BI.View, +u: U.Ui, sidebar: D.Node, +on: 
         ++ Bool.pick(String, String.eq(M.Setting.get(st, "ui.theme", ""), "light"), " light", "") ++ View.tour.cls(u)}],
     List.concat(&2, D.Node, [View.phone.head(lc, screen, bv, u, on, v), [sidebar], View.phone.now(String.eq(screen, "now"), lc, u), [View.main.b(lc, settings, bv, u, sel, List.length(&2, M.Project, U.Ui.projects(st)))],
       View.aside.if(lc, Bool.and(U.Ui.panel(u), Bool.not(PH.Home.is(sel))), U.Ui.info(u, "view.kind:" ++ sel), u),
-      View.picker(lc, U.Ui.flag(u, "proj"), u), View.intent(lc, u), View.error(U.Ui.error.shown(lc, e)), View.tour(lc, u), View.star(u),
+      View.picker(lc, U.Ui.flag(u, "proj"), u), View.phone.rename(lc, u), View.intent(lc, u), View.error(U.Ui.error.shown(lc, e)), View.tour(lc, u), View.star(u),
       View.phone.tabs(lc, String.eq(View.phone.level(screen), "0"), screen, u)])}
 
 def View.phone.page(+lc: I.Loc, +bv: BI.View, u: U.Ui, sidebar: D.Node) -> D.Node:
