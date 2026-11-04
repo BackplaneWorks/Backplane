@@ -233,6 +233,50 @@ function db_query(h, sql, params, limit) {
 function db_query_t(h, sql, params, limit) {
   return bp_db_query(h, sql, params, limit, true);
 }
+
+// The fixed review-history boundary: no caller SQL, statement cache, retained
+// history, or eagerly materialized result set. Metadata lookahead checks the
+// byte budget before a payload crosses from SQLite into JavaScript.
+function db_review_page(h, thread, after, through, budget) {
+  const fail = () => ({ $: CID(HistoryPage), rows: bp_db_from([]), next: after,
+    done: { $: CID(False) }, error: 'indexed review page unavailable' });
+  const db = bp_db_get(h);
+  let scan, read, result, saved = false;
+  try {
+    const a = Number(after), z = Number(through);
+    if (!db || typeof thread !== 'string' || !thread || thread.includes('\0')
+        || !Number.isSafeInteger(a) || a < 0 || !Number.isSafeInteger(z) || z < a
+        || !budget || !Number.isInteger(budget.rows) || budget.rows < 1 || budget.rows > 128
+        || !Number.isInteger(budget.bytes) || budget.bytes < 256 || budget.bytes > 1048576) throw Error('request');
+    const cols = ['seq', 'ord', 'id', 'thread', 'src', 'kind', 'role', 'akind', 'text', 'at'];
+    const where = " FROM entry INDEXED BY entry_thread WHERE thread=?1 AND kind='act' AND role='review' AND seq>?2 AND seq<=?3";
+    const cost = '256+' + cols.map(c => `coalesce(length(CAST(${c} AS BLOB)),0)`).join('+');
+    db.exec('SAVEPOINT bp_review_page'); saved = true;
+    scan = db.prepare('SELECT seq,' + cost + ' AS cost' + where + ' ORDER BY seq LIMIT ?4');
+    read = db.prepare('SELECT ' + cols.join(',') + where + ' AND seq=?4');
+    const out = []; let bytes = 0, next = a, more = false;
+    for (const meta of scan.iterate(thread, BigInt(a), BigInt(z), budget.rows + 1)) {
+      const seq = Number(meta.seq), charge = Number(meta.cost);
+      if (!Number.isSafeInteger(seq) || seq <= next || seq > z || !Number.isSafeInteger(charge) || charge < 256) throw Error('index');
+      if (out.length >= budget.rows || (out.length && bytes + charge > budget.bytes)) { more = true; break; }
+      const row = read.get(thread, BigInt(a), BigInt(z), BigInt(seq));
+      if (!row) throw Error('missing');
+      out.push(bp_db_from(cols.map(c => bp_db_text(row[c])))); bytes += charge; next = seq;
+    }
+    result = { $: CID(HistoryPage), rows: bp_db_from(out), next,
+      done: more ? { $: CID(False) } : { $: CID(True) }, error: '' };
+  } catch (_) { result = fail(); }
+  finally {
+    try { if (scan) scan.finalize(); } catch (_) { result = fail(); }
+    finally {
+      try { if (read) read.finalize(); } catch (_) { result = fail(); }
+      finally {
+        try { if (saved) db.exec('RELEASE bp_review_page'); } catch (_) { result = fail(); }
+      }
+    }
+  }
+  return result;
+}
 function db_close(h) {
   const db = bp_db_get(h);
   if (!db) return "fail no handle " + h;
@@ -256,3 +300,4 @@ io_eff(CID(Db.run.t), db_run_t);
 io_eff(CID(Db.batch.t), db_batch_t);
 io_eff(CID(Db.script.t), db_script_t);
 io_eff(CID(Db.query.t), db_query_t);
+io_eff(CID(Db.review_page), db_review_page);
