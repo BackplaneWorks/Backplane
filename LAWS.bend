@@ -1,3 +1,5 @@
+import ./src/core/cad-install.bend as CADINSTALL
+
 import ./src/core/msgs-lookup.bend as MLOOK
 
 import ./src/core/msgs-meta.bend as MMETA
@@ -16176,3 +16178,14 @@ law catalog_metadata_complete:
 
 law catalog_keys_nonempty:
   {List.is_empty(&2, String, MMETA.T.keys()) == False{} : Bool}
+
+# Each CAD install phase has a status and a reachable action; an in-phase
+# byte reading never decreases (new phases/attempts explicitly reset).
+law cad_install_visible_action:
+  for p: CADINSTALL.CadPhase
+  {CADINSTALL.Cad.covered(p) == True{} : Bool}
+
+law cad_install_monotonic:
+  for +old: Nat
+  for next: Nat
+  {Nat.is_ge(CADINSTALL.Cad.advance(True{}, old, next), old) == True{} : Bool}

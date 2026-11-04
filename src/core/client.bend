@@ -1,5 +1,7 @@
 import ./client-language.bend as CLANG
 import Base
+import ./cad-install.bend as CIP
+import ./json-object.bend as CIJO
 import ./project-home.bend as PH
 import ./pathrecords.bend as PR
 import ./rpcout.bend as RPO
@@ -990,8 +992,26 @@ def KN.install(+state: String, +why: String, n: Maybe<&2, KH.KNote>) -> Maybe<&2
 def KN.of.k(+info: Map<&2, String>, +st: M.State) -> Maybe<&2, KH.KNote>:
   KN.ipc(KH.KH.notice(Str.get(info, "kicad.status"), Str.get(info, "kicad.cli"), Str.get(info, "kicad.version"), Str.get(info, "kicad.why"), String.eq(Str.get(info, "kicad.can_install"), "1")), Str.get(info, "kicad.ipc.servers"))
 
+# Hub-owned CAD jobs. The snapshot is part of info, not a page's scratch.
+def Cadview.at(+info: Map<&2, String>, +tool: String) -> J.Json:
+  Maybe.default(&2, J.Json, J.Json.get(Maybe.default(&2, J.Json, J.Json.parse(Str.get(info, "cad.install")), J.Null{}), tool),
+    J.Json.obj([J.KV{"phase", J.Str{Bool.pick(String, Bool.pick(Bool, String.eq(tool, "freecad"), Bool.not(String.is_empty(Str.get(info, "freecad"))), String.eq(Str.get(info, "kicad.status"), "ok")), "ready", "idle")}}]))
+
+def Cadview.phase(+info: Map<&2, String>, +tool: String) -> CIP.CadPhase:
+  CIP.Cad.phase(J.Json.get_str(Cadview.at(info, tool), "phase", "idle"))
+
+def Cadview.value(+info: Map<&2, String>, +tool: String) -> String:
+  J.Json.show(CIJO.Obj.put(Cadview.at(info, tool), "tool", J.Str{tool}))
+
+def Cadview.btn(+info: Map<&2, String>, +tool: String) -> KH.KAct:
+  KH.KAct{CIP.Cad.button(Cadview.phase(info, tool)), CIP.Cad.action(Cadview.phase(info, tool)), Cadview.value(info, tool)}
+
+def Cadview.notice(+info: Map<&2, String>, fallback: Maybe<&2, KH.KNote>) -> Maybe<&2, KH.KNote>:
+  Bool.pick(Maybe<&2, KH.KNote>, Bool.and(Bool.not(String.is_empty(J.Json.get_str(Cadview.at(info, "kicad"), "attempt", ""))), Bool.not(String.eq(J.Json.get_str(Cadview.at(info, "kicad"), "phase", ""), "ready"))),
+    Some{KH.KNote{"cad.install:" ++ J.Json.get_str(Cadview.at(info, "kicad"), "attempt", ""), "Backplane KiCad", CIP.Cad.note(Cadview.at(info, "kicad")), [Cadview.btn(info, "kicad")]}}, fallback)
+
 def KN.of(+info: Map<&2, String>, +st: M.State) -> Maybe<&2, KH.KNote>:
-  KN.install(Str.get(info, "kicad.install"), Str.get(info, "kicad.install.why"), KN.of.k(info, st))
+  Cadview.notice(info, KN.install(Str.get(info, "kicad.install"), Str.get(info, "kicad.install.why"), KN.of.k(info, st)))
 
 def KN.visible.k(n: Maybe<&2, KH.KNote>, +st: M.State) -> Maybe<&2, KH.KNote>:
   match n:
@@ -11610,6 +11630,17 @@ type AgRow is Data:
   AgRow{label: String, note: String, fields: List<&2, AgField>, btns: List<&2, AgBtn>}
 
 # a form's argument ("agykey:GEMINI_API_KEY" has "GEMINI_API_KEY")
+def Ui.infos(u: Ui) -> Map<&2, String>:
+  match u:
+    case Ui{_, _, _, _, _, _, _, _, _, _, _, _, _, _, nf, _, _}:
+      nf
+
+def Cadview.row(+u: Ui, +tool: String) -> AgRow:
+  +nf = Ui.infos(u)
+  +phase = Cadview.phase(nf, tool)
+  AgRow{Bool.pick(String, String.eq(tool, "kicad"), "Backplane KiCad", "FreeCAD"), CIP.Cad.note(Cadview.at(nf, tool)), Nil{},
+    [AgBtn{CIP.Cad.button(phase), CIP.Cad.action(phase), Cadview.value(nf, tool), False{}}]}
+
 def Sealed.arg(+form: String) -> String:
   String.drop(form, Nat.add(String.length(Sealed.base(form)), 1n))
 
@@ -12565,11 +12596,6 @@ def HubCache.get(vs: List<&2, HubView>, +hub: String) -> Maybe<&2, HubView>:
       None{}
     case +v <> t:
       HubCache.get.k(String.eq(HubView.hub(v), hub), v, HubCache.get(t, hub))
-
-def Ui.infos(u: Ui) -> Map<&2, String>:
-  match u:
-    case Ui{_, _, _, _, _, _, _, _, _, _, _, _, _, _, nf, _, _}:
-      nf
 
 def HubCache.save.k(installed: Bool, +u: Ui, vs: List<&2, HubView>) -> List<&2, HubView>:
   match installed:
@@ -16704,7 +16730,7 @@ def Ui.act.k(+i: Nat, +u: Ui, +value: String) -> Act:
     case 20n:
       Ui.also(Ui.model(u, value), [FocusField{"composer"}])
     case 21n:
-      Ui.rpc(Ui.info_set(Ui.info_set(u, "kicad.install", "installing"), "kicad.install.why", ""), "kicad.install", Nil{})
+      Ui.rpc(u, "cad.install", [J.KV{"tool", J.Str{"kicad"}}, J.KV{"op", J.Str{"start"}}])
     case 22n:
       Ui.answer(u, value)
     case 23n:
@@ -17362,8 +17388,22 @@ def Ui.act.home(home: Bool, +u: Ui, +action: String, +value: String) -> Act:
     case True{}: Bool.pick(Act, String.eq(action, "home-bom"), Rp.open(u, "bom"), Home.dispatch(u, action, value))
     case False{}: Ui.act.own(String.eq(action, "peer-own"), u, action, value)
 
+def Cadview.tool(value: String) -> String:
+  Bool.pick(String, String.eq(J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(value), J.Null{}), "tool", ""), "freecad"), "freecad", "kicad")
+
+def Cadview.rpc(+u: Ui, value: String, op: String) -> Act:
+  Ui.rpc(u, "cad.install", [J.KV{"tool", J.Str{Cadview.tool(value)}}, J.KV{"op", J.Str{op}}])
+
+def Cadview.dispatch(+u: Ui, action: String, +value: String) -> Act:
+  match action:
+    case "cad-install": Cadview.rpc(u, value, "start")
+    case "cad-cancel": Cadview.rpc(u, value, "cancel")
+    case "cad-refresh": Cadview.rpc(u, value, "refresh")
+    case "cad-guide": Ui.act.home(False{}, u, "open-url", Bool.pick(String, String.eq(Cadview.tool(value), "freecad"), "https://www.freecad.org/downloads.php", "https://github.com/i2cjak/Backplane_KiCad/releases"))
+    case _: Ui.act.home(Bool.or(Bool.or(String.eq(action, "proj-home"), String.starts_with(action, "home-")), Bool.and(PH.Home.is(Ui.sel(u)), Bool.or(String.eq(action, "send"), String.eq(action, "send-alt")))), u, action, value)
+
 def Ui.act(+u: Ui, +action: String, +value: String) -> Act:
-  Ui.act.home(Bool.or(Bool.or(String.eq(action, "proj-home"), String.starts_with(action, "home-")), Bool.and(PH.Home.is(Ui.sel(u)), Bool.or(String.eq(action, "send"), String.eq(action, "send-alt")))), u, action, value)
+  Cadview.dispatch(u, action, value)
 
 def Home.sent.clear(clear: Bool, +u: Ui, +owner: String, cs: List<&2, Cmd>) -> Act:
   match clear:
