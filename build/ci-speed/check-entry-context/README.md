@@ -65,7 +65,10 @@ file; source came from immutable public blobless Git. Raw BOAT receipts and
 or proof/gate qualification; actual-repository pass seeds remain0. The later
 receipt-only commit changes none of those tested helper/source bytes.
 
-Landing is waiting for a separate premerge transport correction: the approved
-daily runner lacks `--include-file`, which the current premerge dispatcher
-requires. No exception is established and no runner/budget/guard is silently
-substituted. Fresh normal-Boat merged-shape validation remains required.
+The premerge transport dependency landed as PR906, merge
+`6b24fd8773c52f0e3d20d2b1fe685da15fe5b6d8`. This branch was rebased onto it;
+all four tested cache source/test files and their helper dependencies remain
+byte-identical to the fresh Boat-tested5b3f52424 source. Both RESULTS tables
+were retained when resolving their documentation-only rebase conflict.
+Fresh normal-Boat merged-shape validation still remains required, using the
+explicitly pinned approved daily runner; no runner/budget/guard exception.
