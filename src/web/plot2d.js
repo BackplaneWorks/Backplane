@@ -1130,7 +1130,7 @@ function inspectCard(view, pick) {
   }
   const acts = document.createElement("div"), mention = document.createElement("button");
   acts.className = "ph-inspect-acts";
-  mention.type = "button"; mention.textContent = "Mention in chat";
+  mention.type = "button"; mention.textContent = App.viewer_mention(document.documentElement.lang);
   mention.addEventListener("click", () => { inspectCard(view, null); mentioned?.(`[${raw}]`); });
   acts.append(mention);
   el.replaceChildren(head, dl, acts);

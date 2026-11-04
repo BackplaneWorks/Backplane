@@ -571,6 +571,10 @@ def solid_stats(tag: String, size: String, triangles: String, waited: String, bu
 def plot_stats(tag: String, size: String, waited: String, delayed: Bool) -> String:
   MSG.T.viewer.plot.stats(I.I18n.of_tag(tag), size, Bool.pick(String, delayed, "yes", "no"), waited)
 
+# the phone's tap card's button (plot2d.js's inspectCard)
+def viewer_mention(tag: String) -> String:
+  MSG.T.viewer.mention(I.I18n.of_tag(tag))
+
 # the same corner while another version of the file on show is read (a
 # step of the design history): the last one stays up until it comes
 def plot_loading(tag: String) -> String:
