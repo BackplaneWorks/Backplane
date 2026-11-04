@@ -292,8 +292,9 @@ jobs:
       - name: Native hub text and map paths match pure definitions
         env:
           JSON_SHOW_REFERENCE_EMIT: build/js/backplane-serve/all.js
+          JSON_PARSE_REFERENCE_EMIT: build/js/backplane-serve/all.js
           MAP_REFERENCE_EMIT: build/js/backplane-serve/all.js
-        run: node --test test/tools/js_json_lex_test.cjs test/tools/js_map_test.cjs
+        run: node --test test/tools/js_json_lex_test.cjs test/tools/js_map_test.cjs test/tools/js_parse_memo_test.cjs
       # the host effects and ptys on the loop the hub ships (Bun's event
       # loop): test.sh runs these in-process, on the runtime's sync loop
       - name: Effects on the Bun loop
