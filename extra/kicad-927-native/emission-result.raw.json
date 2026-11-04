@@ -1,0 +1,58 @@
+{
+  "source_commit_requested": "2a87e6526575254d536591b29bf511ea6dbef9dc",
+  "command": [
+    "bend",
+    "src/server/main.bend",
+    "-o",
+    "build/kicad-927-native/raw-hub.js"
+  ],
+  "timeout_seconds": 180,
+  "kernel_before": {
+    "memory_max": 3699998720,
+    "swap_max": 0,
+    "peak_bytes": 474210304,
+    "events": {
+      "low": 0,
+      "high": 0,
+      "max": 0,
+      "oom": 0,
+      "oom_kill": 0,
+      "oom_group_kill": 0
+    }
+  },
+  "packaged_current_main": false,
+  "native_windows_checked": false,
+  "source_sha256": {
+    "src/server/main.bend": "b0ca9de7d6629c8dc76ad93fbc7aa17b88b98a9833c212c270ce35f12e3c4b01",
+    "src/server/kicad.bend": "df536ecd0b411abb9e23b0b846bdcffcba3db42d171c3c353271e2123e2bbeeb",
+    "src/core/kicad_install.bend": "c5bb81c95f0acdd6f14f11b096495545c3c06db94413b56b15d34e617e1132e5",
+    "src/server/effects/cad-install.js": "9f0975bf4a4389791aea942d97e08a4378c140d3224e6fb8dc78432a30246509"
+  },
+  "exit_code": -9,
+  "seconds": 11.267,
+  "timed_out": false,
+  "kernel_after": {
+    "memory_max": 3699998720,
+    "swap_max": 0,
+    "peak_bytes": 3699998720,
+    "events": {
+      "low": 0,
+      "high": 0,
+      "max": 885,
+      "oom": 1,
+      "oom_kill": 1,
+      "oom_group_kill": 0
+    }
+  },
+  "events_delta": {
+    "low": 0,
+    "high": 0,
+    "max": 885,
+    "oom": 1,
+    "oom_kill": 1,
+    "oom_group_kill": 0
+  },
+  "peak_child_rss_kib": 3635500,
+  "reason": "cgroup_oom_kill",
+  "state": "BLOCKED_NO_CURRENT_MAIN_PACKAGE"
+}
