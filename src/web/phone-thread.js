@@ -49,13 +49,16 @@ export function installPhoneThread({ document: doc = document, window: win = win
     if (l?.position) { kept = l.position(); keptEl = el; }
   };
   const atEnd = t => t.scrollHeight - t.scrollTop - t.clientHeight < NEAR;
+  const shutMore = () => { for (const d of doc.querySelectorAll?.('.composer-more[open]') || []) d.open = false; };
   const keyboard = () => doc.activeElement?.id === 'composer';
   const toEnd = t => { const max = t.scrollHeight - t.clientHeight; if (t.scrollTop < max - 1) t.scrollTop = max; };
   const resized = entries => {
     for (const e of entries) {
       const t = e.target, h = t.clientHeight;
       if (t !== el) continue;
-      // (shown again after being hidden: its reading place back)
+      // (hidden behind the viewer: its ⋯ sheet shut; shown again: its
+      // reading place back)
+      if (h === 0 && height > 0) shutMore();
       if (height === 0 && h > 0 && kept && keptEl === t && onPhone(doc)) list(t)?.restore?.(kept);
       else if (height > 0 && h > 0 && h !== height && onPhone(doc)) {
         if (end) toEnd(t);

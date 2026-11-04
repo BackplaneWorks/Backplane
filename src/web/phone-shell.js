@@ -278,7 +278,7 @@ export function installPhoneShell({ on, doc = document, win = window, dispatch }
   // system back would, before the page's own Esc handling
   doc.addEventListener("keydown", e => {
     if (e.key !== "Escape" || e.isComposing) return;
-    if (doc.querySelector(".rowmenu, .ph-sheet-layer")) { overlay()?.();e.preventDefault();e.stopPropagation(); }
+    if (doc.querySelector(".rowmenu, .ph-sheet-layer, .lightbox, .app.phone .composer .shade[data-on-click]")) { overlay()?.();e.preventDefault();e.stopPropagation(); }
   }, true);
 
   // the screen on show: its level and what it is, to animate a push or pop

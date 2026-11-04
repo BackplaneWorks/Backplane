@@ -84,3 +84,13 @@ test('back from the full-screen viewer, the thread is where the person left it',
   assert.equal(p.timeline.scrollTop, 0); // (the planner places it, not a shift)
 });
 
+
+test('the composer\'s ⋯ sheet shuts when the viewer covers the thread', async () => {
+  const { installPhoneThread } = await import('../../src/web/phone-thread.js');
+  const p = page(true), more = { open: true };
+  p.doc.querySelectorAll = s => s === '.composer-more[open]' && more.open ? [more] : [];
+  installPhoneThread({ document: p.doc, window: p.win });
+  p.fire('touchstart', { closest: () => null });
+  p.resize(0);
+  assert.equal(more.open, false);
+});
