@@ -3294,7 +3294,8 @@ html.ph-kb .app.phone :is(.thread-content, .thread-view) > :is(.bot-head, .bot-h
 .ph-focus-toggle { display: none; }
 html.phone .ph-focus-toggle { display: grid; place-items: center; position: fixed; z-index: 30; width: var(--ph-tap, 44px); height: var(--ph-tap, 44px); padding: 0; border: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 85%, transparent); color: var(--text); font-size: 20px; }
 /* (not over a sheet: a menu or the camera panel) */
-html.phone:has(.local-menu[open], .solid-camera[open]) .ph-focus-toggle { display: none; }
+/* (only a menu over the viewer: one left open in the thread behind it does not count) */
+html.phone:has(#viewer .local-menu[open], .ph-head .local-menu[open], .solid-camera[open]) .ph-focus-toggle { display: none; }
 html.ph-focus .app.phone.ph-viewer > :is(.ph-head, .ph-cells),
 html.ph-focus .app.phone.ph-viewer #viewer > :is(.ph-views, .viewer-bar, .hist),
 html.ph-focus .app.phone.ph-viewer #viewer :is(.solid-toolbar, .solid-render-status, .combo-head) { display: none; }
