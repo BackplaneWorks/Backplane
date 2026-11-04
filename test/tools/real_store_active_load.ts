@@ -129,8 +129,9 @@ ensure(process.platform === 'linux', 'linux-required');
 const bin = realpathSync(o['--bin']), fixture = realpathSync(o['--fixture']), out = resolve(o['--out']);
 ensure(bin === o['--bin'] && fixture === o['--fixture'], 'input-symlink');
 ensure(![bin, fixture, o['--artifact-receipt']].includes(out) && !existsSync(out) && !existsSync(out + '.samples.jsonl'), 'output-collision');
-const fence = resolve(import.meta.dir, 'real_store_fence.cjs');
 const root = mkdtempSync(join(tmpdir(), 'bp-real-active-')); chmodSync(root, 0o700);
+let fence = '';
+const fenceInputs: { path: string; sha256: string }[] = [];
 const home = join(root, 'home'), user = join(root, 'user'), agents = join(root, 'agents'), project = join(root, 'project');
 for (const p of [home, user, agents, project, join(root, 'locks')]) mkdirSync(p, { mode: 0o700 });
 mkdirSync(dirname(out), { recursive: true });
@@ -219,6 +220,39 @@ async function extractArchive() {
       ['RECEIPT.json', 'events.jsonl', 'store.db'].every(n => seen.has(n)), 'archive-incomplete');
     return { members: seen.size, extractedBytes: total };
   } finally { if (fd !== undefined) closeSync(fd); }
+}
+async function stageFence() {
+  const receipt = smallJson(o['--fence-prerequisite']), qualified = P.fencePrerequisite(receipt);
+  report.fencePrerequisite = { qualifiedJob: qualified.qualifiedJob, manifestSha256: qualified.manifestSha256,
+    originalOverallPass: false, osNetworkIsolationClaimed: false, receiptSha256: await hashFile(o['--fence-prerequisite']) };
+  fenceInputs.push({ path: o['--fence-prerequisite'], sha256: report.fencePrerequisite.receiptSha256 });
+  const dir = join(root, 'preload'); mkdirSync(dir, { mode: 0o700 });
+  for (const f of qualified.files) {
+    // A Boat packet may place the exact byte files beside the original
+    // receipt. Otherwise use its owner-supplied paths, read-only.
+    const sibling = join(dirname(o['--fence-prerequisite']), f.name), source = existsSync(sibling) ? sibling : f.path;
+    const st = lstatSync(source); ensure(st.isFile() && !st.isSymbolicLink() && st.size <= 65536, 'fence-source');
+    const bytes = readFileSync(source); ensure(sha(bytes) === f.sha256, 'fence-source-sha');
+    fenceInputs.push({ path: source, sha256: f.sha256 }); writeFileSync(join(dir, f.name), bytes, { mode: 0o600, flag: 'wx' });
+  }
+  fence = join(dir, 'real_store_fence.cjs'); report.fenceSha256 = await hashFile(fence);
+  ensure(report.fenceSha256 === o['--fence-sha256'], 'fence-sha');
+  // Test this packaged artifact's actual preload handling before extracting
+  // any private data. This is CLI --version, outside the startup/load clock.
+  const path = join(root, 'preflight-fence.json');
+  const probe = Bun.spawn([bin, '--version'], { cwd: root, env: { HOME: user, USERPROFILE: user,
+    XDG_CONFIG_HOME: join(user, 'config'), XDG_CACHE_HOME: join(user, 'cache'), XDG_DATA_HOME: join(user, 'data'),
+    PATH: '/usr/bin:/bin', BACKPLANE_COPY: '1', BACKPLANE_TELEMETRY: 'off', BEND_NO_TELEMETRY: '1',
+    BACKPLANE_OWNED_FENCE_RECEIPT: path, BUN_OPTIONS: `--preload=${fence}` }, stdout: 'pipe', stderr: 'ignore' });
+  const timer = setTimeout(() => { if (probe.exitCode === null) probe.kill('SIGKILL'); }, 5000);
+  let bytes = 0;
+  try {
+    for await (const b of probe.stdout) { bytes += b.length; ensure(bytes <= 16384, 'preflight-output'); }
+    ensure(await probe.exited === 0, 'preflight-exit');
+    const installed = smallJson(path);
+    ensure(installed.installed === true && installed.externalFetchBlocked === true && installed.externalConnectBlocked === true, 'preflight-fence');
+    report.preflight = { cliVersionExit: 0, installed: true, beforeFixtureExtraction: true };
+  } finally { clearTimeout(timer); if (probe.exitCode === null) { probe.kill('SIGKILL'); await probe.exited; } }
 }
 async function storeCounts() {
   const { Database } = await import('bun:sqlite'), db = new Database(join(home, 'store.db'), { readonly: true, create: false });
@@ -451,9 +485,9 @@ try {
   report.controller = { platform: process.platform, bun: Bun.version, executableSha256: await hashFile(realpathSync(process.execPath)) };
   ensure(lstatSync(bin).isFile() && lstatSync(fixture).isFile(), 'input-file');
   ensure(await hashFile(bin) === o['--sha256'], 'service-sha');
+  await stageFence(); // Missing/mismatched prerequisite fails before extraction.
   report.fixtureArchiveSha256 = await hashFile(fixture); ensure(report.fixtureArchiveSha256 === o['--fixture-sha256'], 'archive-sha');
-  report.fenceSha256 = await hashFile(fence); ensure(report.fenceSha256 === o['--fence-sha256'], 'fence-sha');
-  const sourcePaths = ['test/tools/real_store_active_load.ts', 'test/tools/real_store_active_policy.cjs', 'test/tools/real_store_fence.cjs',
+  const sourcePaths = ['test/tools/real_store_active_load.ts', 'test/tools/real_store_active_policy.cjs',
     'src/core/cbor.bend', 'src/web/wire.js', 'src/web/thin.js', 'src/web/sidebar-region.js', 'src/web/view-delta.js',
     'src/web/conversation-frame.js', 'src/web/terminal-input.js', 'src/web/model-menu-input.js', 'src/web/startup.js'];
   sourceHashes = Object.fromEntries(sourcePaths.map(p => [p, sha(readFileSync(resolve(import.meta.dir, '../..', p)))])); report.sourceHashes = sourceHashes;
@@ -470,8 +504,7 @@ try {
   const e = ($: string, row: Row) => ({ $, ...row, at: Date.now() });
   const added = [e('ProjectCreated', { id: prefix + 'project', title: 'Owned synthetic load', root: project }),
     ...ids.map(id => e('ThreadCreated', { id, project: prefix + 'project', title: id, env: 'local', branch: '', worktree: project, provider: 'claude', model: 'fixture' })),
-    ...['restart.continue', 'fallback.on', 'telemetry.share'].map(key => e('SettingSet', { key, value: 'off' })),
-    ...['onboard.done', 'onboard.uber'].map(key => e('SettingSet', { key, value: '1' })), e('SettingSet', { key: 'sidebar.view', value: 'active' })];
+    e('SettingSet', { key: 'telemetry.share', value: 'off' })];
   const logFd = openSync(join(home, 'events.jsonl'), 'r+');
   try { const last = Buffer.alloc(1); ensure(fstatSync(logFd).size === originalBytes, 'fixture-length');
     // A complete original log is required; never repair or rewrite its tail.
@@ -495,10 +528,10 @@ try {
     cwd: project, env: { HOME: user, USERPROFILE: user, XDG_CONFIG_HOME: join(user, 'config'), XDG_CACHE_HOME: join(user, 'cache'), XDG_DATA_HOME: join(user, 'data'),
       CODEX_HOME: join(user, 'codex'), CLAUDE_CONFIG_DIR: join(user, 'claude'), GEMINI_HOME: join(user, 'gemini'),
       PATH: `${agents}:${dirname(process.execPath)}:/usr/bin:/bin`, TMPDIR: root, DISPLAY: '', WAYLAND_DISPLAY: '', CI: '1', DO_NOT_TRACK: '1',
-      BACKPLANE_HOME: home, BACKPLANE_COPY: '1', BACKPLANE_AGENTS: agents, BACKPLANE_ADOPT: '0', BACKPLANE_PEERS: '', BACKPLANE_NO_UPDATE: '1',
+      BACKPLANE_HOME: home, BACKPLANE_COPY: '1', BACKPLANE_AGENTS: agents, BACKPLANE_PEERS: '', BACKPLANE_NO_UPDATE: '1',
       BACKPLANE_KISTACK_SYNC: '0', BACKPLANE_TELEMETRY: 'off', BEND_NO_TELEMETRY: '1', BACKPLANE_GOOGLE_BAKE: '0', BACKPLANE_ORDER_SERVER: 'http://127.0.0.1:9',
       BACKPLANE_LOCK_DIR: join(root, 'locks'), BACKPLANE_OWNED_FENCE_RECEIPT: join(root, 'fence.json'),
-      BUN_OPTIONS: `--preload=${fence}`, BUN_JSC_maxPerThreadStackUsage: '268435456',
+      BUN_OPTIONS: `--preload=${fence}`,
       REAL_ACTIVE_ROOT: root, REAL_ACTIVE_RUN: run, REAL_ACTIVE_IDS: JSON.stringify(ids), REAL_ACTIVE_POLICY: resolve(import.meta.dir, 'real_store_active_policy.cjs') },
     stdout: 'pipe', stderr: 'pipe' });
   report.hubPid = hub.pid; drains = [drain(hub.stdout), drain(hub.stderr)].map(p => p.catch(() => { failed('child-log-stream'); }));
@@ -574,6 +607,7 @@ try {
     report.checks.archiveUnchanged = await hashFile(fixture) === o['--fixture-sha256'];
     report.checks.serviceUnchanged = await hashFile(bin) === o['--sha256'];
     report.checks.sourcesUnchanged = Object.entries(sourceHashes).length > 0 && Object.entries(sourceHashes).every(([p, h]) => sha(readFileSync(resolve(import.meta.dir, '../..', p))) === h);
+    report.checks.fenceInputsUnchanged = fenceInputs.length === 3 && fenceInputs.every(p => sha(readFileSync(p.path)) === p.sha256);
   } catch { report.checks.finalIdentityAndCounts = false; }
   report.childLogs = { bytes: logBytes, listening, stackError, retainedPrivateText: false };
   report.checks.childLogs = !stackError && logBytes <= 64 * 1024 * 1024;

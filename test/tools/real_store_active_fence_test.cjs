@@ -2,7 +2,15 @@
 // private fixture or hub. Includes forwarding controls for the owner's fix.
 const assert = require('node:assert/strict'), vm = require('node:vm'), fs = require('node:fs');
 const { join } = require('node:path');
-const source = fs.readFileSync(join(__dirname, 'real_store_fence.cjs'), 'utf8');
+const { dirname } = require('node:path'), { createHash } = require('node:crypto');
+const P = require('./real_store_active_policy.cjs');
+const prerequisite = process.env.REAL_ACTIVE_FENCE_PREREQUISITE;
+assert(prerequisite, 'explicit corrected-fence prerequisite required; canonical shared file untouched');
+const qualified = P.fencePrerequisite(JSON.parse(fs.readFileSync(prerequisite, 'utf8')));
+const f = qualified.files.find(f => f.name === 'real_store_fence.cjs');
+const sibling = join(dirname(prerequisite), f.name), path = fs.existsSync(sibling) ? sibling : f.path;
+const source = fs.readFileSync(path, 'utf8');
+assert.equal(createHash('sha256').update(source).digest('hex'), f.sha256);
 const calls = [], receipts = [];
 function record(name) { return function (...args) { calls.push({ name, args }); return { end() {}, on() {}, destroy() {} }; }; }
 const net = { connect: record('net.connect'), createConnection: record('net.createConnection') };

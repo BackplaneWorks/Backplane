@@ -60,10 +60,22 @@ test('fixture receipt pins existing real fixture sequence', () => { assert(P.fix
 test('archive traversal symlink hardlink duplicates and PAX fail before extraction', () => { for (const [name, type, size] of [['../events.jsonl', '0', 10], ['/events.jsonl', '0', 10], ['events.jsonl', '2', 10], ['store.db', '1', 10], ['events.jsonl', 'x', 10], ['RECEIPT.json', '0', 2000000]]) assert.throws(() => P.archiveMember(name, type, size, new Set())); const seen = new Set(); assert(P.archiveMember('events.jsonl', '0', 10, seen)); assert.throws(() => P.archiveMember('events.jsonl', '0', 10, seen)); assert.equal(P.archiveMember('providers/accounts-v1/profiles.json', '0', 10, new Set()), false); });
 test('owned endpoints exclude live ports credentials and arbitrary hosts', () => { assert(P.ownedEndpoint('http://127.0.0.1:43210/hello', 43210)); for (const url of ['http://127.0.0.1:3787', 'http://localhost:43210', 'http://127.0.0.1.evil:43210', 'https://127.0.0.1:43210', 'http://u:p@127.0.0.1:43210', 'file:///tmp/test']) assert(!P.ownedEndpoint(url, 43210)); });
 const args = ['--bin', '/tmp/artifact/service', '--artifact-receipt', '/tmp/artifact/receipt.json', '--sha256', hash,
-  '--fixture', '/tmp/private-RC3-real-store.tar.gz', '--fixture-sha256', hash, '--fixture-receipt-sha256', hash, '--fence-sha256', hash, '--out', '/tmp/result.json'];
+  '--fixture', '/tmp/private-RC3-real-store.tar.gz', '--fixture-sha256', hash, '--fixture-receipt-sha256', hash,
+  '--fence-sha256', P.FENCE.source, '--fence-prerequisite', '/tmp/FENCE-PREREQUISITE.json', '--out', '/tmp/result.json'];
 test('inputs require immutable artifact and exact existing archive identity', () => assert.equal(P.options(args).seconds, 1800));
 test('arbitrary homes live targets pairing short runs and live binaries rejected', () => {
   for (const extra of [['--home', '/tmp/home'], ['--target', 'http://127.0.0.1:3787'], ['--pairing', 'anything'], ['--seconds', '60'], ['--seconds', '1860'], ['--sha256', hash]]) assert.throws(() => P.options([...args, ...extra]));
   const live = [...args]; live[1] = '/home/test/.local/share/backplane/backplane-serve'; assert.throws(() => P.options(live));
+});
+const fenceReceipt = () => ({ qualified_job: P.FENCE.job, manifest_sha256: P.FENCE.manifest,
+  source_files: { '/owner/real_store_fence.cjs': P.FENCE.source, '/owner/real_store_fence_test.cjs': P.FENCE.test },
+  focused_tests: { passed: 2, failed: 0 }, preflight: { cliVersionExit: 0, beforeAnyPrivateFixtureRun: true,
+    fence: { installed: true, externalFetchBlocked: true, externalConnectBlocked: true } },
+  overall_job_exit: 1, overall_job_pass: false, memory_startup_acceptance_pass: false });
+test('fence prerequisite preserves exact focused PASS and overall FAIL', () => { assert.equal(P.fencePrerequisite(fenceReceipt()).originalOverallPass, false); });
+test('fence mismatch missing receipt or relabelled overall pass fail', () => {
+  assert.throws(() => P.fencePrerequisite({})); const r = fenceReceipt(); r.overall_job_pass = true; assert.throws(() => P.fencePrerequisite(r));
+  const m = fenceReceipt(); m.source_files['/owner/real_store_fence.cjs'] = hash; assert.throws(() => P.fencePrerequisite(m));
+  const p = fenceReceipt(); p.preflight.beforeAnyPrivateFixtureRun = false; assert.throws(() => P.fencePrerequisite(p));
 });
 console.log(JSON.stringify({ scope: 'combined-real-store-pure-policy', cases, ok: true, hubStarted: false }));
