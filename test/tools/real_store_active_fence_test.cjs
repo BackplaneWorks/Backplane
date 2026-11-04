@@ -7,10 +7,14 @@ const P = require('./real_store_active_policy.cjs');
 const prerequisite = process.env.REAL_ACTIVE_FENCE_PREREQUISITE;
 assert(prerequisite, 'explicit corrected-fence prerequisite required; canonical shared file untouched');
 const qualified = P.fencePrerequisite(JSON.parse(fs.readFileSync(prerequisite, 'utf8')));
-const f = qualified.files.find(f => f.name === 'real_store_fence.cjs');
-const sibling = join(dirname(prerequisite), f.name), path = fs.existsSync(sibling) ? sibling : f.path;
-const source = fs.readFileSync(path, 'utf8');
-assert.equal(createHash('sha256').update(source).digest('hex'), f.sha256);
+let source;
+for (const f of qualified.files) {
+  const sibling = join(dirname(prerequisite), f.name), path = fs.existsSync(sibling) ? sibling : f.path;
+  const st = fs.lstatSync(path); assert(st.isFile() && !st.isSymbolicLink() && st.size <= 65536);
+  const bytes = fs.readFileSync(path); assert.equal(createHash('sha256').update(bytes).digest('hex'), f.sha256);
+  if (f.name === 'real_store_fence.cjs') source = bytes.toString('utf8');
+}
+assert(source);
 const calls = [], receipts = [];
 function record(name) { return function (...args) { calls.push({ name, args }); return { end() {}, on() {}, destroy() {} }; }; }
 const net = { connect: record('net.connect'), createConnection: record('net.createConnection') };

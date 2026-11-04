@@ -7,6 +7,16 @@ const requireThat = (v, code) => { if (!v) throw Error(code); };
 const finite = n => typeof n === 'number' && Number.isFinite(n);
 const digest = s => typeof s === 'string' && /^[a-f0-9]{64}$/.test(s);
 const gitId = s => typeof s === 'string' && /^[a-f0-9]{40}$/.test(s);
+function failureCode(e) {
+  const known = new Set(['child-exited', 'deadline', 'loaded-window-failed', 'view-protocol', 'view-request', 'view-closed',
+    'view-transport', 'view-tail-deadline', 'observer-cursor-epoch', 'hub-swap', 'hub-resource-stop', 'child-replaced',
+    'child-log-bound', 'child-log-stream', 'phase-boundary-scheduling', 'stale-emission-epoch', 'producer-replaced',
+    'producer-receipt', 'producer-identity', 'service-sha', 'artifact-receipt', 'fence-prerequisite', 'fence-source-sha',
+    'fence-sha', 'preflight-exit', 'preflight-fence', 'fence-receipt-missing', 'fence-not-installed', 'fixture-counts',
+    'fixture-receipt', 'fixture-receipt-sha', 'fixture-log-sha', 'archive-sha', 'archive-checksum', 'archive-padding',
+    'archive-incomplete', 'archive-pax-override', 'archive-member', 'account-metadata', 'ownership-metadata-bound']);
+  return known.has(e?.message) ? e.message : 'fixture-or-contract';
+}
 const FENCE = Object.freeze({ source: '74de3b99ba21abff2650de474fd6459d47f32778ef120d8940da8be3ed13f2d5',
   test: 'cf433ab8152d463816c8a086a49f26b109ffac7e79f394659b7c1b6f98cd0bfe',
   manifest: '794c59a5d820f588d7dd794cf20ba8bf6006740ec9783a93c050161257271bf7', job: 'j20261104003249-591142' });
@@ -61,9 +71,25 @@ const MEMBERS = Object.freeze(['RECEIPT.json', 'events.jsonl', 'store.db', 'prov
 function archiveMember(name, type, size, seen) {
   requireThat(MEMBERS.includes(name) && !seen.has(name) && (type === '0' || type === '\0') &&
     Number.isSafeInteger(size) && size > 0 && size <= 4 * 1024 ** 3 &&
-    (name !== 'RECEIPT.json' || size <= 1024 * 1024), 'archive-member');
+    (name !== 'RECEIPT.json' || size <= 1024 * 1024) &&
+    (name !== 'providers/accounts-v1/profiles.json' || size <= 131072), 'archive-member');
   seen.add(name);
-  return name !== 'providers/accounts-v1/profiles.json'; // Never install copied account profiles.
+  return true;
+}
+function accountMetadata(r) {
+  requireThat(r && Object.keys(r).every(k => ['version', 'profiles'].includes(k)) && r.version === 1 &&
+    Array.isArray(r.profiles) && r.profiles.length <= 40, 'account-metadata');
+  const ids = new Set();
+  for (const p of r.profiles) {
+    requireThat(p && Object.keys(p).every(k => ['id', 'provider', 'label', 'epoch', 'fingerprint', 'store'].includes(k)) &&
+      typeof p.id === 'string' && /^[a-f0-9-]{36}$/.test(p.id) && !ids.has(p.id) &&
+      ['claude', 'codex'].includes(p.provider) && Number.isSafeInteger(p.epoch) && p.epoch >= 1 &&
+      typeof p.label === 'string' && p.label.length <= 1024 &&
+      (p.fingerprint === undefined || p.fingerprint === '' || digest(p.fingerprint)) &&
+      (p.store === undefined || p.store === '' || /^[a-f0-9-]{36}$/.test(p.store)), 'account-metadata');
+    ids.add(p.id);
+  }
+  return { profiles: r.profiles.length, credentialFields: false };
 }
 function fixtureReceipt(r) {
   requireThat(r?.private === true && Number(r.meta?.applied_seq) === 1448789 && digest(r.logSha256), 'fixture-receipt');
@@ -75,6 +101,11 @@ function ownedEndpoint(url, port) {
     return Number.isInteger(port) && port > 0 && port !== 3787 && u.hostname === '127.0.0.1' &&
       u.port === String(port) && ['http:', 'ws:'].includes(u.protocol) && !u.username && !u.password;
   } catch { return false; }
+}
+function observerLog(f, cursor) {
+  requireThat(f?.t === 'log' && f.origin === cursor?.epoch && Number.isSafeInteger(cursor.seq) && cursor.seq >= 1448789 &&
+    Number(f.since) === cursor.seq && Array.isArray(f.items) && f.items.length <= 1024, 'observer-cursor-epoch');
+  return cursor.seq + f.items.length;
 }
 // Integer-millisecond buckets through the gate, plus one overflow bucket.
 // ceil(value) is conservative at the exact 2000ms boundary. Rank is ceil(.99*n).
@@ -93,7 +124,7 @@ class Latency {
 }
 class Activity {
   constructor(start, end) {
-    requireThat(finite(start) && finite(end) && end > start && end - start <= 120000, 'activity-window');
+    requireThat(finite(start) && finite(end) && end > start && end - start <= LIMITS.maxLoadedMs + 3000, 'activity-window');
     this.start = start; this.end = end; this.count = 0; this.first = null; this.last = null;
     this.maxInteriorGapMs = 0; this.buckets = new Uint32Array(Math.ceil((end - start) / 5000));
   }
@@ -107,6 +138,88 @@ class Activity {
     return activitySummary({ count: this.count, first: this.first, last: this.last,
       maxInteriorGapMs: this.maxInteriorGapMs, buckets: [...this.buckets] }, this.start, this.end);
   }
+}
+// Emission cohort ownership survives the receive-time phase boundary. At most
+// two cohorts are live; absent deliveries count as overflow latency, not zero.
+class EmissionCohort {
+  constructor(epoch, mode, start, end) {
+    this.epoch = epoch; this.mode = mode; this.start = start; this.end = end; this.deadline = end + 2000;
+    this.seen = new Set(); this.lag = new Latency(); this.firstSeq = Infinity; this.lastSeq = 0;
+    this.firstAt = null; this.late = 0; this.bad = 0; this.finished = false;
+  }
+  add(m, at) {
+    requireThat(!this.finished && finite(at), 'cohort-closed');
+    if (m.epoch !== this.epoch || m.emitted + 1 < this.start || m.emitted >= this.end) return false;
+    if (m.mode !== this.mode || !Number.isSafeInteger(m.seq) || m.seq < 1 || !finite(m.emitted) || at < m.emitted) { this.bad++; return false; }
+    if (this.seen.has(m.seq)) return false;
+    if (at > this.deadline) { this.late++; return false; }
+    requireThat(this.seen.size < 8192, 'cohort-bound'); this.seen.add(m.seq); this.lag.add(at - m.emitted);
+    this.firstSeq = Math.min(this.firstSeq, m.seq); this.lastSeq = Math.max(this.lastSeq, m.seq);
+    this.firstAt ??= at; return true;
+  }
+  finish(p) {
+    requireThat(!this.finished, 'cohort-closed'); this.finished = true;
+    const valid = Number.isSafeInteger(p?.count) && p.count > 0 && p.count <= 8192 &&
+      Number.isSafeInteger(p.firstSeq) && Number.isSafeInteger(p.lastSeq) && p.lastSeq - p.firstSeq + 1 === p.count && this.seen.size <= p.count;
+    const missing = valid ? p.count - this.seen.size : null;
+    const observedLatency = this.lag.summary();
+    if (valid) for (let i = 0; i < missing; i++) this.lag.add(2001);
+    const latency = this.lag.summary();
+    return { count: this.seen.size, missing, late: this.late, badPhase: this.bad, latency, observedLatency,
+      missingAsTimeoutOverflow: true,
+      firstDeliveryGapMs: this.firstAt === null ? null : this.firstAt - this.start,
+      ok: valid && this.bad === 0 && this.late === 0 && this.seen.size >= p.count * 0.99 &&
+        this.firstSeq === p.firstSeq && this.lastSeq === p.lastSeq && this.firstAt - this.start <= 2000 && latency.ok };
+  }
+}
+// Iterative single-flight pump. Repeated invalidations retain one boolean,
+// not a recursive promise frame or a queue of pictures/calls.
+class RefreshPump {
+  constructor(one, refresh, fail) { this.one = one; this.refresh = refresh; this.fail = fail;
+    this.active = false; this.again = false; this.accepted = 0; this.maxInFlight = 0; this.maxQueued = 0; }
+  offer(call) {
+    if (!call?.id) return Promise.resolve();
+    if (this.active) { this.fail('pump-overlap'); return Promise.resolve(); }
+    this.active = true; this.maxInFlight = 1;
+    const first = new Promise(resolve => { this.first = resolve; });
+    this.done = this.drain(call); return first;
+  }
+  request() {
+    if (this.active) { this.again = true; this.maxQueued = 1; return; }
+    void this.offer(this.refresh());
+  }
+  async drain(call) {
+    try {
+      while (call?.id) {
+        const more = await this.one(call); this.accepted++; if (this.first) { this.first(); this.first = null; }
+        const again = more || this.again; this.again = false;
+        call = again ? this.refresh() : null;
+      }
+    } catch { this.fail('view-request'); }
+    finally { if (this.first) this.first(); this.first = null; this.active = false; this.again = false; }
+  }
+}
+function commitFamily(c, original, syntheticIds) {
+  if (c?.$ === 'SettingSet') {
+    if (syntheticIds.some(id => c.key === 'liveness.' + id)) return 'syntheticLiveness';
+    if (typeof c.key === 'string' && (original.settings.has(c.key) ||
+      [...original.threadPrefixes].some(p => c.key.startsWith(p) && original.threads.has(c.key.slice(p.length))))) return 'originalSetting';
+    return 'unattributed';
+  }
+  if (original.kinds.has(c?.$)) {
+    if (original.threads.has(c.thread) || original.threads.has(c.id)) return 'originalThread';
+    if (original.bots.has(c.bot) || original.bots.has(c.id)) return 'originalBot';
+    if (original.routines.has(c.routine) || original.routines.has(c.id)) return 'originalRoutine';
+    if (original.projects.has(c.project) || original.projects.has(c.id)) return 'originalProject';
+    if (original.tasks.has(c.task) || original.asks.has(c.id) || original.rooms.has(c.room) || original.convs.has(c.conv)) return 'originalLifecycle';
+  }
+  return 'unattributed';
+}
+function infoFamily(info, originalKeys) {
+  if (!info || typeof info !== 'object' || Array.isArray(info)) return 'unattributed';
+  const keys = Object.keys(info);
+  return keys.length > 0 && keys.length <= 300000 && keys.every(k =>
+    originalKeys.has(k) || ['accounts.live', 'boat.usage', 'agy.job'].includes(k)) ? 'originalInfo' : 'unattributed';
 }
 function activitySummary(r, start, end) {
   const seconds = (end - start) / 1000, expected = Math.ceil((end - start) / 5000);
@@ -200,9 +313,9 @@ function usablePicture(shown, target) {
 function phaseVerdict(w) {
   const checks = { duration: w.end - w.start >= LIMITS.windowMs - 250 && ['mixed', 'pure'].includes(w.mode),
     cpu: w.cpu?.ok === true, streams: w.threads?.length === LIMITS.threads && w.threads.every(t =>
-      t.produced.ok && t.delivered.ok && t.latency.ok && t.bytes === t.produced.count * LIMITS.bytes &&
-      t.latency.n === t.delivered.count &&
-      t.badPhase === 0 && t.receiptFresh === true && t.deliveryWithinProduced === true &&
+      t.produced.ok && t.received.ok && t.delivered.ok && t.latency.ok && t.bytes === t.produced.count * LIMITS.bytes &&
+      t.latency.n === t.produced.count &&
+      t.badPhase === 0 && t.receiptFresh === true &&
       t.delivered.count >= t.produced.count * 0.99),
     foreignText: w.foreignText === 0, foreignNotices: w.foreignNotices === 0,
     viewReads: ['own', 'quiet', 'sidebar'].every(k => w.clients?.[k]?.replies >= (w.end - w.start) / 2000 &&
@@ -210,17 +323,19 @@ function phaseVerdict(w) {
       w.clients[k].requests === w.clients[k].replies),
     mixedNotices: w.mode !== 'mixed' || w.ownNotices >= (w.end - w.start) / 1000 && w.sidebarNotices >= (w.end - w.start) / 2000,
     visible: w.mode === 'mixed' ? w.visible?.ok === true : w.pendingAtStart === true && w.pendingReplies > 0 && w.invalidPending === 0 && w.partialVisible === 0,
-    sidebarPacing: w.sidebarPeak <= 2, ownPacing: w.ownPeak <= 20 };
+    sidebarPacing: w.sidebarPeak <= 2, quietPacing: w.quietPeak <= 2, ownPacing: w.ownPeak <= 20,
+    metadataAttribution: w.mode !== 'pure' || w.unattributedCommits === 0 && w.unattributedInfo === 0 && w.cleanMetadataMs >= (w.end - w.start) * 0.25 };
   return { checks, ok: Object.values(checks).every(Boolean) };
 }
 function loadedWindows(windows, start, end, expectedMs) {
   return finite(start) && finite(end) && end - start >= LIMITS.loadedMs && expectedMs >= LIMITS.loadedMs &&
     windows.length === expectedMs / LIMITS.windowMs && windows.length > 0 &&
-    windows[0].start >= start && windows[0].start - start <= 250 && end >= windows.at(-1).end && end - windows.at(-1).end <= 2000 &&
+    windows[0].start >= start && windows[0].start - start <= 250 && end >= windows.at(-1).end && end - windows.at(-1).end <= 2250 &&
     windows.reduce((n, w) => n + w.end - w.start, 0) >= expectedMs - 250 * windows.length &&
     windows.every((w, i) => w.index === i && w.mode === (i % 2 ? 'pure' : 'mixed') &&
       w.acceptance?.ok === true && w.end > w.start &&
-      (!i || w.start >= windows[i - 1].end && w.start - windows[i - 1].end <= 2000));
+      (!i || w.start === windows[i - 1].end));
 }
 module.exports = { LIMITS, Latency, Activity, activitySummary, processSample, cpu, resources, pendingRow,
-  usablePicture, artifactReceipt, options, archiveMember, fixtureReceipt, ownedEndpoint, phaseVerdict, loadedWindows, FENCE, fencePrerequisite };
+  usablePicture, artifactReceipt, options, archiveMember, fixtureReceipt, ownedEndpoint, phaseVerdict, loadedWindows, FENCE, fencePrerequisite,
+  accountMetadata, EmissionCohort, RefreshPump, commitFamily, infoFamily, observerLog, failureCode };

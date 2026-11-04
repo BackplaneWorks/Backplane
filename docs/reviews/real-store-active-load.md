@@ -12,9 +12,13 @@ with 20 stand-in agents. It accepts the **existing**
 `private-RC3-real-store.tar.gz`, its SHA256 and its embedded receipt's SHA256.
 It fetches nothing and makes no new backup. The receipt must identify the
 1,448,789-event fixture, and its copied SQLite index must hold 10,841 original
-threads. Streaming extraction rejects links, traversal, duplicates, PAX
-overrides and oversized members before writing them. Account profiles in the
-archive are discarded. The full archive is hashed before and after the run.
+threads. The streaming parser supports Python tarfile's bounded per-member
+PAX timestamp/owner metadata. It rejects path/link/size overrides, global or
+sparse extensions, links, traversal, duplicates, bad checksum/padding and
+truncation. The supplied account profile metadata is preserved byte-for-byte
+before startup; only the known noncredential registry schema is accepted.
+No credential directories are copied. Counts/identity hashes are checked
+again after shutdown. The full archive is hashed before and after the run.
 
 The harness creates its own private temporary home, token, project, lock
 directory, fake HOME and loopback child. It appends one uniquely named project,
@@ -58,16 +62,18 @@ The actual supplied package must also pass a bounded `--version` preload
 receipt check before extraction, then write a fresh installation receipt
 at owned hub startup. None of this claims OS-level network isolation.
 
-`BACKPLANE_COPY=1`, a minimal environment,
-blocked provider/network CLIs and an isolated profile prevent restored work
-and provider credentials from being used. The stand-in only accepts this
+`BACKPLANE_COPY=1`, a minimal environment and blocked provider/network CLIs
+isolate work from the live hub and real credentials. Copied account registry
+metadata and the actual verification/recovery logic remain present; auth
+checks reach the stand-in and receive credential-unavailable. It only accepts this
 run's synthetic thread IDs. No inspector or forced GC is enabled. Recovery,
 resume, bot verification and tick settings are **not overridden**. Neither
 restart.continue, fallback.on, onboarding flags nor sidebar.view are changed.
 No catalog/cache/performance budgets or JSC stack override are applied.
-A raw
-observer resumes from the current SQLite checkpoint and the selected view's
-epoch; it refuses historical replay rather than holding the original log.
+A raw observer resumes from the current SQLite checkpoint and actual selected
+view's wire epoch. Every log page must match that exact cursor/epoch, then
+advance by its item count. It refuses a reset/replay rather than holding the
+original log.
 
 Readiness starts immediately before spawn and includes one successful hello,
 an actual real-thread timeline, the synthetic own-thread timeline and the
@@ -80,26 +86,43 @@ mixed mode commits message/tool cycles every 500ms. Pure mode intentionally
 keeps the proper Working/pending row static while the raw delivered stream
 advances. Completed content from an earlier pure phase is valid history.
 Partial markers from the current pure phase, foreign thread text and foreign
-notices fail. Watchdog liveness metadata has the existing bounded attribution
-window; other pure-phase commits fail rather than being hidden.
+notices fail. Original-store background work is retained and reported as
+aggregate event families, alongside synthetic liveness. Attribution requires
+an actual canonical change referring to a known original ID/key, or an
+observed info update of an initial protocol key/explicit account/helper key.
+It never inspects or reports an info/reply body's account data. Only observed
+metadata earns the existing -100ms/+1250ms notice attribution interval.
+Unknown changes/info fail in pure mode. At least 25% of each pure window must
+remain outside these intervals; a broad grace cannot hide all invalidations.
+CPU, delivery and memory retain all background work and all such intervals.
 
 Each thread needs >=32 actual produced and delivered deltas/s in every
 five-second bucket, <=48/s, >=99% delivery relative to actual production,
 correct byte counts, fresh receipts, correct epochs and <=2s initial, interior
-and terminal gaps. Per-thread latency uses bounded integer-millisecond buckets
+and terminal gaps. Receive-time continuity and emission-owned delivery are
+separate. Closing emission cohorts stay live through the real end+2000ms
+deadline while the next contiguous phase already runs. Valid late tail
+deliveries and view replies count toward their original cohort/request. A
+missing first/last sequence, late tail or lost >1% fails. Missing cohort
+deliveries also enter the timeout overflow count rather than disappearing
+from latency. Observed-only latency and missing counts are reported separately.
+Per-thread latency uses bounded integer-millisecond buckets
 and nearest-rank `ceil(99*n/100)`, with an overflow bucket above 2000ms. Empty
 latency is unavailable. Fractional latencies round upward conservatively.
 Mixed views must show fresh completed own content >=1/s with <=2s gaps/p99;
 pure views need a valid starting pending picture and accepted phase replies.
 View requests remain serialized and have their own p99/count checks. Pacing
-limits remain 20 own notices/s and two sidebar notices/s.
+limits remain 20 own notices/s, two sidebar notices/s and two quiet notices/s.
 
 Hub CPU is the actual captured PID's utime+stime, with a stable process birth
 and executable identity. Every loaded phase and the whole loaded interval
 must consume nonzero CPU <=80% of one core, without normalization, subtraction
-or idle padding. The <=1.5s receipt/notice flush between windows keeps all
-producers and view clients running, remains in whole-load CPU/RSS, and must
-fit the <=2s window seam. No idle soak follows a short active test.
+or idle padding. Phase emission windows are contiguous; the closing cohort's
+two-second deadline overlaps the next phase, with at most two cohorts retained.
+After the last emission window, producers and clients remain active for its
+two-second deadline and whole-interval CPU/RSS/delivery still count. Scheduling
+overshoot is bounded to 250ms and is not a substitute for loaded duration.
+No idle soak follows a short active test.
 
 RSS, HWM, swap, ticks and process birth are sampled every five seconds and
 streamed to a numeric JSONL sidecar. Missing samples, holes >15s, zero memory,
@@ -110,24 +133,31 @@ at least 15 minutes/60 steady samples are required. OLS RSS slope must be
 policy's growth guard. Runs stop on failed loaded windows or a runaway 3GB
 RSS boundary; such runs are failures and cannot establish a 30-minute pass.
 
-Controller memory is bounded: one current phase plus a bounded notice grace,
-two fixed producer receipt epochs, fixed 2002-bucket latency histograms,
+Controller memory is bounded: at most two emission cohorts (8192 unique
+sequences/thread/cohort), two fixed producer receipt epochs, fixed 2002-bucket latency histograms,
+charged original ID/key metadata <=128MiB, bounded five-second receive buckets,
 at most 900 process samples and 60 aggregate phase summaries. Logs are drained
 with a 16KiB private tail and 64MiB total limit; neither tail nor raw replies
-enter artifacts. Cleanup targets only the owned hub and known synthetic
-producer PIDs with unchanged birth/argv identities, then deletes the home.
+enter artifacts. The iterative single-flight refresh pump retains one pending
+invalidation flag and one picture/call, rather than recursive promise frames.
+Cleanup tracks actual owned descendants in this fresh namespace, validates
+process birth/namespace (including exec wrappers and verification stand-ins),
+awaits exit and escalates TERM/KILL. It deletes the home only after the owned
+hub, producers and log streams are stopped; uncertainty fails and preserves
+the private copy instead of deleting it under a still-running child.
 
 Proposed checks, **not yet executed**:
 
 ```sh
-node test/tools/real_store_active_policy_test.cjs
 REAL_ACTIVE_FENCE_PREREQUISITE=/private/staged/FENCE-PREREQUISITE.json node test/tools/real_store_active_fence_test.cjs
 bun test/tools/real_store_active_load.ts --self-test
 ```
 
 Run only through the normal reviewed daily Boat runner, with hard memory
 <=3,700,000,000 bytes and swap zero; never locally or on xlarge. These checks
-use pure negative controls, mocked fence transports and one short synthetic
+use pure negative controls, mocked fence transports, synthetic in-memory
+streamed tar/gzip (including PAX, splits and truncation), a 20,000-refresh
+logical retention/queue control, codec checks and one short synthetic
 producer. They start no hub and open no real store. The forwarding control
 intentionally rejects the old fence that loses Node HTTP option/callback
 overloads; do not weaken it to accept that version. There is no full/root
