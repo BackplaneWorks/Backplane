@@ -86,8 +86,10 @@ class Contracts(unittest.TestCase):
         changed.update(guard_files_match_base=False,guard_change_ack='a'*40,state='passed-reviewed-guard-change')
         self.assertFalse(pm.receipt_ok(changed,'a'*40,'d'*64))
         self.assertTrue(pm.receipt_ok(changed,'a'*40,'d'*64,'a'*40))
+        self.assertFalse(pm.receipt_ok({**changed,'guard_files_match_base':True,'state':'passed'},'a'*40,'d'*64,'a'*40))
         self.assertFalse(pm.receipt_ok({**changed,'state':'passed'},'a'*40,'d'*64,'a'*40))
         self.assertFalse(pm.receipt_ok(changed,'a'*40,'d'*64,'a'*39))
+        self.assertFalse(pm.receipt_ok({**good,'guard_change_ack':'a'*40},'a'*40,'d'*64,'a'*40))
 
 
 class ActualGitMerges(unittest.TestCase):
@@ -158,8 +160,29 @@ class ActualGitMerges(unittest.TestCase):
         matrix,same=pm.guard_files(self.repo,self.base,head)
         self.assertFalse(same)
         self.assertNotEqual(matrix['scripts/pre-merge-boat.py']['base'],matrix['scripts/pre-merge-boat.py']['head'])
+        for ack in ('','0'*40,head[:12],'origin/main'):
+            self.assertFalse(pm.guard_authorized(head,same,ack),ack)
+        self.assertTrue(pm.guard_authorized(head,same,head))
+
+    def test_mode_only_guard_change_requires_acknowledgement(self):
+        (self.repo/'scripts/boat-job.sh').chmod(0o755)
+        head=self.commit()
+        matrix,same=pm.guard_files(self.repo,self.base,head)
+        row=matrix['scripts/boat-job.sh']
+        self.assertEqual(row['base']['sha256'],row['head']['sha256'])
+        self.assertNotEqual(row['base']['mode'],row['head']['mode'])
+        self.assertFalse(same);self.assertFalse(pm.guard_authorized(head,same,''))
+        self.assertTrue(pm.guard_authorized(head,same,head))
+
+    def test_guard_missing_at_base_is_an_explicit_guard_change(self):
+        (self.repo/'scripts/pre-merge-boat.py').unlink()
+        missing=self.commit()
+        (self.repo/'scripts/pre-merge-boat.py').write_text('# newly introduced guard\n')
+        head=self.commit()
+        matrix,same=pm.guard_files(self.repo,missing,head)
+        self.assertIsNone(matrix['scripts/pre-merge-boat.py']['base'])
+        self.assertFalse(same);self.assertTrue(pm.guard_matrix_ok(matrix,False))
         self.assertFalse(pm.guard_authorized(head,same,''))
-        self.assertFalse(pm.guard_authorized(head,same,'0'*40))
         self.assertTrue(pm.guard_authorized(head,same,head))
 
 
