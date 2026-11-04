@@ -3248,6 +3248,14 @@ html.phone:not(.ph-notify-ask) .ph-notify-ask { display: none; }
 html.phone.ph-notify-on .ph-notify-on, html.phone.ph-notify-off .ph-notify-off, html.phone.ph-notify-none .ph-notify-none, html.phone.ph-notify-http .ph-notify-http { display: inline; }
 html.phone.ph-notify-on .ph-notify-on { color: var(--ok, var(--text)); }
 html.phone.ph-notify-app .set-row:has([data-ph-notify]) { display: none; }
+/* the phone apps' own settings (app-shell.js), only inside an app */
+.ph-app-row { display: none; }
+html.phone.ph-in-app .ph-app-row { display: contents; }
+/* something shared into the app, waiting for a thread to go to */
+html.phone .ph-share-wait { position: fixed; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom) + var(--ph-tabs)); z-index: 40; display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; background: var(--panel, var(--bg)); color: var(--text); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 6px 24px rgba(0,0,0,.35); font-size: 15px; }
+html.phone .ph-share-wait span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+html.phone .ph-share-wait button { min-height: 44px; min-width: 44px; padding: 0 12px; }
 /* the terminal's paste field (phone-other.js, where the clipboard is refused) */
 html.phone .ph-term-keys .ph-term-paste { position: absolute; inset: 4px 8px; min-height: 44px; font-size: 16px; z-index: 1; }
 /* a room's line to write: the field and Send side by side on a phone */

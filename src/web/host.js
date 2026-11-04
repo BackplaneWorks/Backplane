@@ -82,6 +82,10 @@ import iconMask from "./icon-maskable-512.png";
 const PHONE_TITLES = () => document.documentElement.classList.contains("phone");
 const phoneOther = installPhoneOther({ dispatch: (action, value) => dispatch(action, value), touchIcon,
   appIcons: [{ src: icon192, size: 192 }, { src: icon512, size: 512 }, { src: iconMask, size: 512, purpose: "maskable" }] });
+// inside the phone apps: their bridge (window.backplaneApp, docs/phone-app-shell.md)
+import { installAppShell } from "./app-shell.js";
+const appShell = installAppShell({ dispatch: (action, value) => dispatch(action, value), selected: () => currentSession().sel,
+  attach: (files) => { const el = document.querySelector(".app.phone [data-attach]");if (el) void uploadFiles(el.getAttribute("data-attach"), files); } });
 import { ConnectionLog } from "./connection-log.js";
 import { frameSummary } from "./frame-summary.js";
 import { pairBrowser } from "./auth.js";
@@ -93,7 +97,7 @@ const pairingUI = installPairingUI({document, location, fetch: window.fetch.bind
 // Consume the secret before the generic deeplink handler clears the fragment.
 let pendingInvitation = null;
 try { const p = pairingInput(location.href, location.origin);if (p.kind !== "token") { pendingInvitation = p;history.replaceState(null, "", location.pathname + location.search); } } catch {}
-const pairingReady = pendingInvitation ? Promise.resolve(false) : pairBrowser({ location, history, storage: localStorage, fetch: window.fetch.bind(window), report: cause => { pairingCause = cause; } }).catch(() => false);
+const pairingReady = pendingInvitation ? Promise.resolve(false) : pairBrowser({ location, history, storage: localStorage, fetch: window.fetch.bind(window), report: cause => { pairingCause = cause;if (cause !== "hub_unreachable" && cause !== "invalid_link") appShell.pairingFailed(cause); } }).catch(() => false);
 if (!document.cookie.split(";").some(c => c.trim().startsWith("bp_cache_v1=")) && !pendingInvitation) pairingUI.show();
 
 import * as Solid from "./solid.js";
@@ -1154,6 +1158,7 @@ function render() {
   bubMoveSync();
   terminalOutput.apply(true);
   phoneOther.rendered();
+  appShell.rendered();
   if (PERF) PERF.render.push([t1 - t0, pnow() - t1]);
   if (RR) { RR.n("render.full");RR.t("render.view", t1 - t0);RR.t("render.patch", pnow() - t1); }
   if (frontendNode || canonicalBoot && App.synced(ui)) themeSeen(root.querySelector(".app"));

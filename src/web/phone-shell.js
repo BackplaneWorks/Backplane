@@ -246,7 +246,7 @@ export function installPhoneShell({ on, doc = document, win = window, dispatch }
       const mine = t;
       t.timer = setTimeout(() => setTimeout(() => {
         if (t !== mine || t.axis) return;
-        longFired = true;win.navigator.vibrate?.(10);
+        longFired = true;if (win.backplaneApp?.haptic) win.backplaneApp.haptic("medium");else win.navigator.vibrate?.(10);
         dispatch(act[0], act[1]);
       }, 0), LONG_MS);
     }
