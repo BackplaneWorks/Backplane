@@ -2738,6 +2738,15 @@ html.phone.ph-short .app.phone > .toast { top: calc(var(--ph-top, 0px) + env(saf
 /* on the viewer a toast sits at the foot, off the view chips */
 .app.phone.ph-viewer > .toast { top: auto; bottom: calc(env(safe-area-inset-bottom) + 12px); }
 
+/* a phone's first open: the bundle takes seconds on a slow network, so the
+   page says it is coming (index.html's #ph-boot, gone once #root is drawn;
+   style.css loads long before the script) */
+#ph-boot { display: none; }
+@media (pointer: coarse) and (max-width: 600px), (pointer: coarse) and (max-height: 600px) {
+  #root:empty + #ph-boot { display: flex; position: fixed; inset: 0; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: var(--bg); color: var(--dim); font: 15px/1.4 var(--sans); }
+  #root:empty + #ph-boot b { color: var(--text); font-size: 22px; }
+}
+
 /* the tab bar */
 .ph-tabs { flex: none; position: relative; z-index: 8; display: flex; background: var(--panel); border-top: 1px solid var(--line);
   padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
