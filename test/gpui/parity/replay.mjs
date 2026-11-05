@@ -120,7 +120,7 @@ if(import.meta.main){
     writeFileSync(`${out}/${f}`,JSON.stringify(r));
     const a=normalise(recd.frames.filter(f=>f.kind!=='check')),b=normalise(r.frames);const d=[];
     for(const c of new Set([...Object.keys(a),...Object.keys(b)]))for(const s of ['out','events','hk','deltas','replies','views','other'])diff(a[c]?.[s],b[c]?.[s],`${c}.${s}`,d);
-    console.log(name,d.length?`${d.length} differences`:'identical');for(const x of d.slice(0,12))console.log('   ',x);total+=d.length;
+    console.log(name,d.length?`${d.length} differences`:'identical');for(const x of (process.argv.includes('--all')?d:d.slice(0,12)))console.log('   ',x);total+=d.length;
   }
   console.log('TOTAL differences:',total);process.exit(total?1:0);
 }

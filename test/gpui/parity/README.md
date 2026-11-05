@@ -27,6 +27,7 @@ Polls the recording made while waiting for a turn are repeated until the same ob
 ## Normalisations (compare.mjs `NORMALISATIONS`)
 - N1 clocks: numeric fields at, rid, now, clock, last, since-time keys -> <T>; 10-digit (17xxxxxxxx/18xxxxxxxx) and 13-digit epoch numbers inside strings -> <T>; hh:mm and durations (e.g. "Finished 18:26 · 2s") -> <time>. Reason: wall clock.
 - N16 housekeeping events read the id table but never add to it, so their number and position cannot shift the ordinals of other events (an id first seen only there is <id>).
+- N17 time zone: every hub the harness starts (recording and replay) gets `TZ=Etc/UTC` (hubs.mjs). Reason: the hub logs its machine time zone as `tz.machine` / `tz.rule.<zone>` at start; without a pin the JS baseline (recorded on a host in Etc/UTC) and a hub on a UTC host differ by environment, not behaviour. Recordings made before this pin already carry Etc/UTC. `replay.mjs --all` prints every difference instead of the first 12.
 - N13 ordinals are per client: each client numbers the ids it sees by first appearance in its own stream, so what another client saw first cannot shift them.
 - N14 delta tokens: viewDelta token and base strings (the hub revision a body was kept under) -> ordinals, like ids; an empty base (a whole reply) stays empty.
 - N2 ids: p/t/g/m-ids with a 10-digit time part (p1793834744-7, t..., g..., m...), stand-in session/message ids (fake-<pid>, m<pid>-n-n, tu<pid>-..), view ids (<gen>:<n>), and the greeting generation and epoch -> ordinals by first appearance per recording (ID1, ID2...). Reason: ids embed time, pids and counters.
@@ -51,3 +52,5 @@ Not covered: web renderer (out of scope), phone-app traffic as such (the mobile 
 Hub: build/gpui/backplane-serve-current (src/ at the base commit 7c9b3c223c, built on Boat with the composite compiler; see its README).
 Self-diff (two recordings): 0 differences in 6 scenarios. Replay of recording A against a fresh instance: 0 differences in 6 scenarios. 179 s on Boat.
 Raw: build/gpui/results/parity-current/. This recording (recA there) is the baseline for the Rust hub; the earlier one (results/parity) came from an older JS build.
+
+Rust hubs: pass the presenter as flags in `PARITY_HUB_ARGS` (space separated), e.g. `--policy-bin build/gpui/slim/bp-policy-page --window-bin build/gpui/hub/new/window --commit <sha>`; without them the hub answers with its canned presenter and a replay differs in shown/window/overlay and view ids. Check `/proc/<pid>/cmdline` before trusting a run. The JS hub takes no such flags (leave it unset).
