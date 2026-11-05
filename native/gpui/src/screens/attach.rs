@@ -132,7 +132,7 @@ impl Attacher {
                 });
                 if skipped > 0 { Err(format!("Attached the first {MAX_FILES} files; {skipped} more were not.")) } else { Ok(()) }
             }
-            ComposerEvent::Submit => Ok(()),
+            ComposerEvent::Submit | ComposerEvent::CopyTimeline => Ok(()),
         }
     }
 }

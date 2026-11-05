@@ -25,6 +25,8 @@ pub enum ComposerEvent {
     Files(Vec<PathBuf>),
     /// Enter in an ask's box (key context AskInput).
     Submit,
+    /// Ctrl-C with nothing selected in the box: the window copies the timeline's selection.
+    CopyTimeline,
 }
 
 /// One logical line, shaped on its own so an empty line (and a trailing newline) is a row too.
@@ -118,7 +120,7 @@ impl Composer {
     fn sel_up(&mut self, _: &SelUp, _: &mut Window, cx: &mut Context<Self>) { self.vertical(-1, true, cx); }
     fn sel_down(&mut self, _: &SelDown, _: &mut Window, cx: &mut Context<Self>) { self.vertical(1, true, cx); }
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
-        if !self.ed.selection().is_empty() { cx.write_to_clipboard(ClipboardItem::new_string(self.ed.selected().to_string())); }
+        if !self.ed.selection().is_empty() { cx.write_to_clipboard(ClipboardItem::new_string(self.ed.selected().to_string())); } else { cx.emit(ComposerEvent::CopyTimeline); }
     }
     fn cut(&mut self, _: &Cut, _: &mut Window, cx: &mut Context<Self>) {
         let s = self.ed.cut(); if !s.is_empty() { cx.write_to_clipboard(ClipboardItem::new_string(s)); self.sync(cx); }

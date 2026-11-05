@@ -7,6 +7,7 @@ use gpui::*;
 impl Backplane {
     /// A composer event (paste, drop, picked files): start the uploads off the UI thread; say why when nothing starts.
     pub(crate) fn attach_event(&mut self, event: &ComposerEvent, cx: &mut Context<Self>) {
+        if matches!(event, ComposerEvent::CopyTimeline) { return self.timeline_copy(cx); }
         let cap = self.data["thread"]["cap"].as_u64().unwrap_or(DEFAULT_CAP);
         if let Err(e) = self.screens.attacher.event(&self.tx, &self.selected, cap, event) { self.error = e; }
         cx.notify();
@@ -65,5 +66,15 @@ impl Backplane {
         if !self.selected.is_empty() { self.screens.offsets.insert(self.selected.clone(), f32::from(self.scroll.offset().y)); }
         self.screens.attacher.show(raw);
         if let Some(y) = self.screens.offsets.get(raw).copied() { self.scroll.set_offset(point(px(0.), px(y))); }
+    }
+    /// Repaint a few times a second while an image is still arriving, then stop (no standing repaint loop).
+    pub(crate) fn poll_images(&mut self, cx: &mut Context<Self>) {
+        if self.screens.img_poll || !self.screens.images.loading() { return; }
+        self.screens.img_poll = true;
+        cx.spawn(async move |weak, cx| loop {
+            cx.background_executor().timer(std::time::Duration::from_millis(150)).await;
+            let Ok(more) = weak.update(cx, |this, cx| { cx.notify(); let more = this.screens.images.loading(); if !more { this.screens.img_poll = false; } more }) else { return };
+            if !more { return; }
+        }).detach();
     }
 }
