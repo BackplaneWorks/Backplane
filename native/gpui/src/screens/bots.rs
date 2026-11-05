@@ -71,12 +71,14 @@ fn inert(light: bool, label: &str) -> AnyElement {
 
 /// What a form or page asks the window to focus when it opens: the name of its first typed field, "" for none.
 pub fn focus_target(data: &Value) -> String {
+    if data["renaming"].is_object() { return super::tools::focus_target(data).into(); }
     if data["newBot"].is_object() { return "name".into(); }
     if data["newRoom"].is_object() { return "rname".into(); }
     match data["bot"]["kind"].as_str() { Some("room") => "rpost".into(), Some("remote") => "rtext".into(), _ => String::new() }
 }
 /// Esc on a form: the action that drops it.
 pub fn close_form(data: &Value) -> Option<Command> {
+    if let Some(c) = super::tools::close_question(data) { return Some(c); }
     if data["newBot"].is_object() { Some(act("form-close", "@bnew")) } else if data["newRoom"].is_object() { Some(act("form-close", "@rnew")) } else { None }
 }
 

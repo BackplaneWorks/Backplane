@@ -246,6 +246,7 @@ impl Render for Backplane {
         // Thread permissions are read-only here and are not drawn in the composer: the web's composer chip beside the model chip is the account chip.
         let ctx = string(&thread["picker"], "label").split("ctx ").nth(1).map(|s| format!("ctx {}", s.split(' ').next().unwrap_or(""))).unwrap_or_default();
         let todo = thread["todos"]["count"].as_str().unwrap_or("").to_string();
+        let tools_strip = crate::screens::tools::strip(cx, light, thread, self.screens.menu_open);
         let mut rail: Vec<AnyElement> = Vec::new();
         let active_kind = if thread["diff"].is_object() { String::new() } else { crate::screens::viewer::active_kind(&thread["viewer"], self.screens.rail_pending.as_deref()) };
         for (l, i) in [("Terminal", "terminal"), ("Commands", "search"), ("", ""), ("Board", "circuit-board"), ("Schematic", "cpu"), ("3D", "box"), ("Split", "layout-panel-left"), ("Mech", "layers"), ("", ""), ("Files", "folder"), ("Diff", "diff"), ("Review", "circle-check"), ("Browser", "globe")].iter() {
@@ -292,7 +293,7 @@ impl Render for Backplane {
                         .child(div().absolute().right(px(-2.)).bottom(px(-1.)).size(px(6.)).bg(if connected { c("ok") } else { c("bad") })))
                     .child(div().font_weight(FontWeight::BOLD).child("Backplane"))
                     .child(div().text_color(c("faint")).child("/")).child(div().text_color(c("dim")).child(if has_thread { "Project".to_string() } else { "Projects".to_string() }))
-                    .when(has_thread, |d| d.child(div().text_color(c("faint")).child("/")).child(div().font_weight(FontWeight::BOLD).child(string(thread, "title"))).child(ic(light, "chevron-down", 14., "dim"))))
+                    .when(has_thread, |d| d.child(div().text_color(c("faint")).child("/")).child(div().id("thread-title").cursor_pointer().on_click(cx.listener(|this, _, _, cx| { let id = string(&this.data["thread"], "id"); let id = crate::screens::attach::raw_id(&id).to_string(); let _ = this.tx.try_send(Command::Action("row-rename".into(), id)); cx.notify(); })).font_weight(FontWeight::BOLD).child(string(thread, "title"))).child(ic(light, "chevron-down", 14., "dim"))))
                 .child(div().flex().items_center().gap_3()
                     .child(with_rect(div().opacity(0.45), || "ui:Jump or run a command".to_string()).w(px(260.)).px_2().flex().items_center().gap_2().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("faint")).child(ic(light, "chevron-right", 13., "faint")).child("Jump or run a command"))
                     .child(with_rect(div().opacity(0.45), || "ui:Improvements".to_string()).px_2().flex().items_center().gap_2().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("dim")).child(ic(light, "message-square", 15., "dim")).child("Improvements"))
@@ -308,7 +309,8 @@ impl Render for Backplane {
                     .children(crate::screens::bots::bar(cx, light, &self.data["bot"]))
                     .when(has_thread, |d| d.child(div().h(px(32.)).flex_shrink_0().flex().items_center().border_b_1().border_color(c("line"))
                         .child(div().px_3().flex().gap_2().text_size(px(11.)).child(div().text_color(c("faint")).child("STATE")).child(div().size(px(6.)).mt(px(7.)).bg(c("ok"))).child(string(thread, "phase").split(':').next().unwrap_or("").to_lowercase()))
-                        .when(!todo.is_empty(), |d| d.child(div().px_3().h_full().flex().items_center().gap_2().border_l_1().border_color(c("line")).text_size(px(11.)).child(div().text_color(c("faint")).child("TO-DO")).child(todo.clone()).child(ic(light, "chevron-down", 12., "faint"))))))
+                        .when(!todo.is_empty(), |d| d.child(div().px_3().h_full().flex().items_center().gap_2().border_l_1().border_color(c("line")).text_size(px(11.)).child(div().text_color(c("faint")).child("TO-DO")).child(todo.clone()).child(ic(light, "chevron-down", 12., "faint"))))
+                        .children(tools_strip)))
                     .when(has_home, |d| d.child(div().id("home").overflow_y_scroll().flex_1().flex().justify_center().child(div().w_full().max_w(px(930.)).p_4().flex().flex_col().gap_3().children(home_els))))
                     .when(!has_home, |d| d.child(div().id("timeline").overflow_y_scroll().track_scroll(&self.scroll)
                         .on_mouse_down(MouseButton::Left, cx.listener(|this, e, _, cx| this.timeline_down(e, cx))).on_mouse_down(MouseButton::Right, cx.listener(|this, e, _, cx| this.timeline_down(e, cx)))
@@ -332,6 +334,8 @@ impl Render for Backplane {
                             .child(with_rect(chip(light, String::new()).opacity(0.45), || "ui:Dictate".to_string()).child(ic(light, "mic", 16., "dim")))
                             .child(with_rect(div().id("send"), || "send".to_string()).flex_shrink_0().px_4().py_1().bg(c("accent")).text_color(c("on-accent")).cursor_pointer().child("Send").on_click(cx.listener(|this, _, window, cx| this.send(&Send, window, cx)))))))
                     .children(crate::screens::bots::page(cx, light, &self.screens.fields, &self.data["bot"]))
+                    .children(crate::screens::tools::dropdown(cx, light, thread, self.screens.menu_open))
+                    .children(crate::screens::tools::questions(cx, light, &self.screens.fields, &self.data))
                     .children(crate::screens::bots::forms(cx, light, &self.screens.fields, &self.data))
                     .children(crate::screens::settings::view(cx, light, &self.screens.fields, &self.data["settings"], &self.screens.settings_focus))
                 )
