@@ -2,9 +2,9 @@
 //! live snapshot every client is told (info `accounts.live`), the inventory kept in the log (setting `accounts.inventory`, so a restart still knows the profiles' ids and
 //! epochs), a default that follows its profile away, and the threads whose account's identity changed or disconnected: their running turn is stopped, with the reason.
 //! The JS hub offers `accounts*` only to a client the hub knows to be an account-capable web view (thin mode `view-web` and a current `accountProfiles` version, kept per
-//! client). Here nothing grants that yet: `AccountsRpc::grant` has no production caller, so every client (GPUI's renderer is `mobile`, so it too) gets the named-account
-//! message and no client is sent the live profiles (they are not broadcast as info). Wiring it means granting from the connection's mode, revoking on close, and sending
-//! the snapshot to granted clients only.
+//! client). Here a connection is granted by a request in its view session that names the accounts wire version (`accountProfiles: 1`, as the web view sends it; `Hub::request`
+//! calls `note_request`), the grant is kept until the connection detaches, and every other client gets the named-account message. The live profiles are not broadcast:
+//! a granted client reads them with the `accounts` request (`op: list`), which is how the settings page gets them.
 use super::{accounts, accounts_io::Accounts};
 use crate::{agents::Agents, api::{Caller, Fut, RpcHandler}, hub::{now_ms, Hub}};
 use serde_json::{json, Value};
@@ -75,13 +75,23 @@ pub async fn found(hub: &Arc<Hub>, agents: &Option<Arc<Agents>>, snapshot: &Valu
     }
 }
 
-pub struct AccountsRpc { pub mgr: Arc<Accounts>, pub granted: std::sync::Mutex<std::collections::HashSet<(String, u64)>> }
+/// Clients allowed to manage accounts: `(generation, client)`, kept for the life of the connection (Client.accounts). Process-wide so the request path can grant and
+/// `Hub::detach` can revoke.
+static GRANTED: std::sync::Mutex<Vec<(String, u64)>> = std::sync::Mutex::new(Vec::new());
+pub fn grant_client(gen: &str, client: u64) { let mut g = GRANTED.lock().unwrap(); if !g.iter().any(|(a, c)| a == gen && *c == client) { g.push((gen.to_string(), client)) } }
+pub fn revoke_client(client: u64) { GRANTED.lock().unwrap().retain(|(_, c)| *c != client) }
+pub fn is_granted(who: &Caller) -> bool { GRANTED.lock().unwrap().iter().any(|(a, c)| a == &who.gen && *c == who.client) }
+/// Accounts.offer: a request that names the accounts wire version (`accountProfiles: 1`) on a connection that is in a view session grants the connection, as the JS
+/// hub does for a thin web view (`view-web` + `TVW.Wire.version`). This hub has one renderer (`mobile`), so the mode is the view session itself; the grant is kept.
+pub fn offered(p: &Value) -> bool { p.get("accountProfiles") == Some(&json!(1)) }
+pub fn note_request(gen: &str, client: u64, in_view: bool, msg: &Value) { if in_view && offered(msg.get("p").unwrap_or(&Value::Null)) { grant_client(gen, client) } }
+
+pub struct AccountsRpc { pub mgr: Arc<Accounts> }
 impl AccountsRpc {
-    pub fn new(mgr: Arc<Accounts>) -> Self { Self { mgr, granted: Default::default() } }
-    /// A client (one connection of one generation) that may manage accounts; nothing a request carries grants it.
-    pub fn grant(&self, who: &Caller) { self.granted.lock().unwrap().insert((who.gen.clone(), who.client)); }
-    pub fn revoke(&self, who: &Caller) { self.granted.lock().unwrap().remove(&(who.gen.clone(), who.client)); }
-    fn allowed(&self, who: &Caller) -> bool { self.granted.lock().unwrap().contains(&(who.gen.clone(), who.client)) }
+    pub fn new(mgr: Arc<Accounts>) -> Self { Self { mgr } }
+    pub fn grant(&self, who: &Caller) { grant_client(&who.gen, who.client) }
+    pub fn revoke(&self, who: &Caller) { revoke_client(who.client) }
+    fn allowed(&self, who: &Caller) -> bool { is_granted(who) }
 }
 impl RpcHandler for AccountsRpc {
     fn methods(&self) -> &'static [&'static str] { &["accounts"] }
@@ -126,8 +136,12 @@ mod tests {
         let home = std::env::temp_dir().join(format!("bp-acc-hub-{}", std::process::id())); let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap();
         let hub = Hub::start(crate::hub::Cfg { home: home.clone(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(crate::presenter::Canned { reply: json!({}) })).await.unwrap();
         let rpc = AccountsRpc::new(Arc::new(Accounts::open(&home, Arc::new(|p: &str| Ok(std::path::PathBuf::from(p))))));
-        let (a, b) = (Caller { gen: "g".into(), client: 1 }, Caller { gen: "g".into(), client: 2 });
-        assert_eq!(ask(&rpc, &hub, &a).await["error"], accounts::GATE, "a request that claims the capability is not enough");
+        let (a, b) = (Caller { gen: "g".into(), client: 9001 }, Caller { gen: "g".into(), client: 9002 });
+        assert_eq!(ask(&rpc, &hub, &a).await["error"], accounts::GATE, "naming the capability on the accounts request itself grants nothing");
+        note_request("g", 9002, false, &json!({"m":"accounts","p":{"accountProfiles":1}})); assert!(!is_granted(&b), "not outside a view session");
+        note_request("g", 9002, true, &json!({"m":"view.open","p":{"accountProfiles":2}})); assert!(!is_granted(&b), "only the current wire version");
+        note_request("g", 9002, true, &json!({"m":"view.open","p":{"accountProfiles":1}})); assert!(is_granted(&b), "a view session that offers the version is granted, and it stays");
+        assert_eq!(ask(&rpc, &hub, &b).await["ok"], true); revoke_client(9002); assert!(!is_granted(&b), "detach revokes");
         rpc.grant(&a); assert_eq!(ask(&rpc, &hub, &a).await["ok"], true); assert_eq!(ask(&rpc, &hub, &b).await["error"], accounts::GATE, "per connection");
         rpc.revoke(&a); assert_eq!(ask(&rpc, &hub, &a).await["error"], accounts::GATE); let _ = std::fs::remove_dir_all(&home);
     }
