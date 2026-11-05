@@ -156,6 +156,8 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                         if x["ok"]==true {if is_post {let _=events.send(Event::Accepted).await;}}else{let _=events.send(Event::Refused(format!("The hub refused it: {why}"))).await;}if v.dirty&&v.pending.is_empty()&&!v.view_id.is_empty(){v.dirty=false;let request=v.request("view.update",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;}continue;}
                     let Some((revision,target,method))=v.pending.remove(&id) else{continue};
                     let paged=v.paging.take_if(|(page,_)|*page==id).map(|(_,cursor)|cursor);
+                    // "not yet" (a hub still opening its log says this for minutes): ask again by itself, before anything reads the refusal as a place gone
+                    if retry_view(&x,&method) {let _=events.send(Event::Status("Hub is opening its log…".into())).await;tokio::time::sleep(Duration::from_secs(1)).await;let request=v.request("view.open",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;continue;}
                     // the place kept from the last run may be gone (a thread deleted since, a page this hub does not have): open as on a first run
                     if x["ok"]!=true&&v.restored&&method=="view.open" {v.restored=false;v.target=json!({"kind":"recent","id":""});v.session["sel"]=json!("");v.view_id.clear();let request=v.request("view.open",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;continue;}
                     if x["ok"]!=true {if let Some(cursor)=paged {let _=events.send(Event::Older(cursor,None)).await;}let _=events.send(Event::Refused(format!("View request refused: {}",x["error"]["code"]))).await;continue;}
@@ -234,6 +236,9 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
     }}
 }
 
+/// A view.open the hub refused with "try again". Only the open: an action or an update refused this way is not repeated behind the person's back.
+pub fn retry_view(x:&Value,method:&str)->bool {x["ok"]!=true&&method=="view.open"&&x["error"]["retryable"]==true}
+
 /// The words for a failed product RPC's answer: the hub's error may be a plain string, an object with a message or a code, or something else.
 pub fn rpc_error(x:&Value)->String {
     let e=&x["error"];
@@ -252,6 +257,13 @@ mod rpc_tests {
         assert_eq!(rpc_error(&json!({"ok":false,"error":{"code":"nope"}})), "nope");
         assert_eq!(rpc_error(&json!({"ok":false})), "no reason given");
         assert!(rpc_error(&json!({"ok":false,"error":[1]})).contains('1'));
+    }
+    #[test] fn only_an_open_refused_as_retryable_is_asked_again() {
+        let not_yet = json!({"ok":false,"error":{"code":"PRESENTER_UNAVAILABLE","retryable":true}});
+        assert!(super::retry_view(&not_yet, "view.open"));
+        assert!(!super::retry_view(&not_yet, "view.action"), "an action is not repeated");
+        assert!(!super::retry_view(&json!({"ok":false,"error":{"code":"nope","retryable":false}}), "view.open"));
+        assert!(!super::retry_view(&json!({"ok":true}), "view.open"));
     }
     #[test] fn turn_start_is_a_post() { for m in ["turn.start","message.send","thread.send","send"] { assert!(is_post(m), "{m}"); } assert!(!is_post("fab.look") && !is_post("mech.list")); }
 }
