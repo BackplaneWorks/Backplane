@@ -10,6 +10,7 @@
 //!   take POST: `routes::auth` is complete and tested without the hub's GET-only gate.
 //! * `Auth` asking `pairing::Registry::resolve` instead of reading devices-v1.json once.
 pub mod botnet;
+pub mod devices;
 pub mod far;
 pub mod machines;
 pub mod origin;
