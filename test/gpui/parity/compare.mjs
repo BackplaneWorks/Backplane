@@ -13,6 +13,7 @@ export const NORMALISATIONS=[
   'N18 http probe auth flag: an http-get probe with auth:false is compared as {path} only. Reason: recordings made before the harness wrote the flag omit it; false is its default.',
  'N19 origin in a query string (the since/origin of a reconnect): the value is replaced by its FORM only: <origin:decimal> (Bend: the decimal `at` of the log\'s first change), <origin:hex>, <origin:empty> or <origin:other>. Reason: the value differs per log, but a hub that answers in another form is a real difference (a client resuming across hubs reads it), so the form is compared.',
  'N20 sets: the housekeeping events (hk) and the greeting\'s info keys (logInfoKeys) are compared as multisets, one difference per element found on one side only. Reason: the hub appends them in varying order; positional comparison turned one missing key into a difference at every later position.',
+ 'N21 arrays of different length are aligned by key (an object\'s id or key, else its JSON) with a longest common subsequence; an inserted or removed element is one difference. Reason: positional comparison made one insertion a difference at every later position. Equal-length arrays are still compared position by position.',
  'N12 late volatile replies: volatile means a poll request and its reply, matched by client and request id, whenever the reply arrives; every other inbound frame is kept even if it arrived during a poll window (the recorder flags by arrival time, which is not a property of the frame).',
  'N6 dropped: hb frames, view.changed frames (their number and position follow timing; each reply carries the revision it saw), volatile frames (polls made while waiting for a turn). Reason: timing-driven counts.',
  'N11 harness steps: `settle` and `end` pseudo-frames (the client program waiting or closing) are control, not wire traffic, and are not compared. Reason: a replay waits by reply id, not by the recorded quiet times.',
@@ -87,6 +88,21 @@ export function normalise(frames){
     s.hk=[...new Set(s.hkEv.map(e=>JSON.stringify(e)))].sort().map(x=>JSON.parse(x));delete s.hkEv}
   return per;
 }
+// Arrays of different lengths are aligned by key (an object's `id` or `key`, else its JSON) with a longest common subsequence: an element
+// inserted or removed is one difference, and the elements after it are still compared with their own counterparts, not shifted ones.
+const keyOf=x=>x&&typeof x==='object'&&!Array.isArray(x)?(typeof x.id==='string'?'id:'+x.id:typeof x.key==='string'?'key:'+x.key+(x.value!==undefined?'='+JSON.stringify(x.value):''):JSON.stringify(x)):JSON.stringify(x);
+function keyed(a,b,path,out){
+  const ka=a.map(keyOf),kb=b.map(keyOf),n=a.length,m=b.length;
+  const L=Array.from({length:n+1},()=>new Int32Array(m+1));
+  for(let i=n-1;i>=0;i--)for(let j=m-1;j>=0;j--)L[i][j]=ka[i]===kb[j]?L[i+1][j+1]+1:Math.max(L[i+1][j],L[i][j+1]);
+  let i=0,j=0;
+  while(i<n||j<m){
+    if(i<n&&j<m&&ka[i]===kb[j]){diff(a[i],b[j],`${path}[${i}]`,out);i++;j++}
+    else if(j>=m||(i<n&&L[i+1][j]>=L[i][j+1])){out.push(`${path}[${i}]: only in A: ${JSON.stringify(a[i])?.slice(0,160)}`);i++}
+    else{out.push(`${path}[${j}]: only in B: ${JSON.stringify(b[j])?.slice(0,160)}`);j++}
+  }
+  return out;
+}
 // housekeeping events (hk) and the greeting's info keys (logInfoKeys) are sets: the hub appends them in varying order, and one missing or
 // extra element must not shift (and so count) every later position. Compared as multisets: each element on one side only is one difference.
 const SETS=/\.(hk|logInfoKeys)$/;
@@ -99,6 +115,7 @@ function multiset(a,b,path,out){
 export function diff(a,b,path='',out=[]){
   if(JSON.stringify(a)===JSON.stringify(b))return out;
   if(SETS.test(path)&&Array.isArray(a)&&Array.isArray(b))return multiset(a,b,path,out);
+  if(Array.isArray(a)&&Array.isArray(b)&&a.length!==b.length&&a.length*b.length<=4e6)return keyed(a,b,path,out);
   if(Array.isArray(a)&&Array.isArray(b)){const n=Math.max(a.length,b.length);if(a.length!==b.length)out.push(`${path}: length ${a.length} vs ${b.length}`);for(let i=0;i<Math.min(a.length,b.length);i++)diff(a[i],b[i],`${path}[${i}]`,out);for(let i=Math.min(a.length,b.length);i<n;i++)out.push(`${path}[${i}]: ${a.length>b.length?'only in A':'only in B'}: ${JSON.stringify(a.length>b.length?a[i]:b[i])?.slice(0,160)}`);return out}
   if(a&&b&&typeof a==='object'&&typeof b==='object'&&!Array.isArray(a)&&!Array.isArray(b)){for(const k of new Set([...Object.keys(a),...Object.keys(b)]))diff(a[k],b[k],`${path}.${k}`,out);return out}
   out.push(`${path}: ${JSON.stringify(a)?.slice(0,160)} vs ${JSON.stringify(b)?.slice(0,160)}`);return out;
