@@ -338,7 +338,7 @@ impl Render for Backplane {
                     .children(crate::screens::tools::dropdown(cx, light, thread, self.screens.menu_open))
                     .children(crate::screens::tools::questions(cx, light, &self.screens.fields, &self.data))
                     .children(crate::screens::bots::forms(cx, light, &self.screens.fields, &self.data))
-                    .children(crate::screens::settings::view(cx, light, &self.screens.fields, &self.data["settings"], &self.screens.settings_focus))
+                    .children(crate::screens::settings::view(cx, light, &self.screens.fields, &self.data["settings"], &self.screens.settings_focus, &self.screens.settings_ui))
                 )
                 .children(crate::screens::viewer::view(cx, &reg, light, thread, &self.screens.plot, &mut self.screens.plotview, self.screens.solid.as_ref(), self.screens.browser.as_ref().map(|(_, b)| b)))
                 // right rail

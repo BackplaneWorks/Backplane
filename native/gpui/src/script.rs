@@ -12,7 +12,7 @@ pub fn metric(started: Instant, event: &str, mut fields: Value) {
 }
 
 #[derive(Clone, Debug)]
-pub enum Step { Home(usize), Select(usize), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Unsupported(String) }
+pub enum Step { Home(usize), Select(usize), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Mark(String), Fit, Unsupported(String) }
 /// What a click on a registered control does; the e2e harness's controls inventory and `click` step use these.
 #[derive(Clone, Debug)]
 pub enum Ctl { None, Rail(String), PickFiles, ToggleSidebar, Select(String), Home(String), Fold(String), Send, Skill(String), Page(String), Node(String, String), More, RenameSave(String) }
@@ -40,6 +40,8 @@ pub fn load(path: &Path) -> VecDeque<Step> {
         else if let Some(id) = v["click"].as_str() { Some(Step::Click(id.into())) }
         else if let Some(what) = v["read"].as_str() { Some(Step::Read(what.into())) }
         else if let Some(on) = v["layers"].as_bool() { Some(Step::Layers(on, v["max_h"].as_f64().map(|x| x as f32), v["scroll"].as_f64().unwrap_or(0.0) as f32)) }
+        else if let Some(name) = v["mark"].as_str() { Some(Step::Mark(name.into())) }
+        else if v["fit"].as_bool() == Some(true) { Some(Step::Fit) }
         else if let Some(what) = v["expect"].as_str() { Some(Step::Expect(what.into())) }
         else if let Some(kind) = v["view"].as_str() { Some(Step::View(kind.into())) }
         else if let Some(a) = v["pan"].as_array() { Some(Step::Pan(a.first().and_then(Value::as_f64).unwrap_or(0.0) as f32, a.get(1).and_then(Value::as_f64).unwrap_or(0.0) as f32)) }
@@ -227,6 +229,8 @@ impl Backplane {
             Step::View(kind) => { // open a viewer page like the rail does (the idempotent `view` action)
                 let _ = self.tx.try_send(crate::screens::viewer::view_kind(&kind)); self.m("view", json!({"kind": kind})); cx.notify(); self.pump(cx);
             }
+            Step::Mark(name) => { self.m("mark", json!({"name": name})); self.pump(cx); }
+            Step::Fit => { self.screens.plotview.view = None; self.ui_epoch += 1; self.begin("fit".into(), Goal::Frame, cx); cx.notify(); }
             Step::Expect(what) => { // a run that cannot measure what it claims stops itself: "canvas" needs a plot canvas with real height
                 let h = self.screens.plotview.bounds.map_or(0.0, |b| f32::from(b.size.height));
                 if what == "canvas" && h < 200.0 { self.m("not_usable", json!({"why": "plot canvas has no height", "canvas_h": h})); eprintln!("expect canvas: height {h} px: stopping"); std::process::exit(4); }
@@ -248,7 +252,10 @@ impl Backplane {
             }
             Step::Read(what) => {
                 // G6: the composer's text, or the thread selection (GPUI has no text selection yet: "" with supported:false)
-                let (text, supported) = match what.as_str() { "composer" => (self.input.read(cx).content.to_string(), true), _ => (String::new(), false) };
+                let (text, supported) = match what.as_str() { "composer" => (self.input.read(cx).content.to_string(), true),
+                    // the settings overlay's structure (labels, button actions, field names; never a field's value), to design its layout from the real payload
+                    "settings" => (crate::screens::settings::structure(&self.data["settings"]), true),
+                    _ => (String::new(), false) };
                 self.m("read", json!({"what": what, "text": text, "supported": supported}));
                 self.pump(cx);
             }
