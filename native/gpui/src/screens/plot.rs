@@ -253,25 +253,30 @@ mod tests {
     }
     /// The child's `.plot` text for a real project (ecc83's board, microwave): geometry made by the real generator, not by this file's encoder.
     fn child_chunks(text: &str) -> (Vec<u32>, Vec<C>) {
-        let (mut cs, mut b) = (Vec::new(), Vec::new());
-        for line in text.split_inclusive('\n') {
-            let mut chars = line.chars();
-            match chars.next() {
-                Some('b') => { b = line[1..].trim_end().split(' ').filter_map(|n| n.parse().ok()).collect(); }
-                Some('c') => {
-                    let rest: Vec<char> = line[1..].chars().collect();
-                    let (mut nums, mut cur, mut at) = (Vec::new(), 0u32, 0usize);
-                    while at < rest.len() && nums.len() < 8 { let c = rest[at]; at += 1; if c == ' ' { nums.push(cur); cur = 0 } else { cur = cur * 10 + (c as u32 - 48) } }
-                    let dl = nums[6] as usize;
-                    let d: Vec<u8> = rest[at..at + dl].iter().map(|c| *c as u32 as u8).collect();
-                    let mut m = BTreeMap::new();
-                    for (k, i) in [("s", 0), ("l", 1), ("c", 2), ("a", 3), ("m", 4), ("w", 5)] { m.insert(k.to_string(), C::U(nums[i] as i64)); }
-                    m.insert("d".into(), C::Bytes(d)); cs.push(C::Map(m));
-                }
-                _ => {}
+        // the child's lines are not text lines: a chunk's bytes (chars 0..255) may hold newlines, so read by the declared lengths
+        let cs: Vec<char> = text.chars().collect();
+        let (mut at, mut cks, mut b) = (0usize, Vec::new(), Vec::new());
+        while at < cs.len() {
+            let tag = cs[at]; at += 1;
+            let (mut nums, mut cur) = (Vec::new(), 0u32);
+            loop {
+                if at >= cs.len() { return (b, cks); }
+                let c = cs[at]; at += 1;
+                if c == ' ' { nums.push(cur); cur = 0; if tag == 'c' && nums.len() == 8 { break } }
+                else if c == '\n' { if tag == 'b' { nums.push(cur) } break }
+                else if c.is_ascii_digit() { cur = cur * 10 + (c as u32 - 48) }
+            }
+            if tag == 'b' { b = nums; }
+            if tag == 'c' && nums.len() == 8 {
+                let (dl, il) = (nums[6] as usize, nums[7] as usize);
+                let d: Vec<u8> = cs[at..at + dl].iter().map(|c| *c as u32 as u8).collect();
+                at += dl + il; if cs.get(at) == Some(&'\n') { at += 1 }
+                let mut m = BTreeMap::new();
+                for (k, i) in [("s", 0), ("l", 1), ("c", 2), ("a", 3), ("m", 4), ("w", 5)] { m.insert(k.to_string(), C::U(nums[i] as i64)); }
+                m.insert("d".into(), C::Bytes(d)); cks.push(C::Map(m));
             }
         }
-        (b, cs)
+        (b, cks)
     }
     #[test] fn real_plots_from_the_generator_decode_inside_their_box() {
         for (name, text) in [("ecc83-pp", include_str!("../../../../test/gpui/files/fixtures/plot/ecc83-pp.kicad_pcb.plot")), ("microwave", include_str!("../../../../test/gpui/files/fixtures/plot/microwave.kicad_pcb.plot"))] {
