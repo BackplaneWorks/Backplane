@@ -32,10 +32,12 @@ struct BotCat: View {
     let model: AppModel
     let key: String
     let size: CGFloat
+    // names where it is drawn in the BACKPLANE_GEOM log: "cat" (lists, headers), "catpost", "catlook"
+    var place: String = "cat"
 
     var body: some View {
         CatView(rig: model.cats[key] ?? [], size: size)
-            .geomLog("cat:" + key + ":" + String(Int(size)))
+            .geomLog(place + ":" + key + ":" + String(Int(size)))
             .task(id: key) { await model.cat(key) }
     }
 }
@@ -466,9 +468,26 @@ private struct SettingsTab: View {
 
     var body: some View {
         Form {
+            if let n = settings.looks, n > 0 {
+                Section(settings.lookLabel ?? "Look") {
+                    // the web's look picker: every look as its idle cat, 40 px; a tap picks it
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 48), spacing: 8)], spacing: 8) {
+                        ForEach(0..<n, id: \.self) { i in
+                            Button { model.act("bot-look", String(i)) } label: {
+                                BotCat(model: model, key: "\(i):idle", size: 40, place: "catlook")
+                                    .padding(4)
+                                    .overlay(Rectangle().stroke(i == settings.look ? BackplaneDesign.accent : Color.clear, lineWidth: 2))
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("bot.look.\(i)")
+                        }
+                    }
+                }
+            }
             Section(NativeMessages.bots_persona(lang)) {
                 TextField(NativeMessages.bots_persona(lang), text: $persona, axis: .vertical)
                     .lineLimit(4...14)
+                    .onAppear { NSLog("Backplane bot settings looks=%@ look=%@", String(describing: settings.looks), String(describing: settings.look)) }
                     .onChange(of: persona) { _, t in model.field("persona", t) }
                 Button(NativeMessages.common_save(lang)) { model.act("bot-edit") }.disabled(persona == settings.persona)
             }
@@ -577,9 +596,10 @@ struct TalkScreen: View {
                     ForEach(bot.posts ?? []) { p in
                         VStack(alignment: p.mine ? .trailing : .leading, spacing: 2) {
                             HStack(spacing: 6) {
-                                // a bot's post carries its cat, 28 px as on the web (matched by name)
-                                if !p.mine, let cat = model.screen?.bots.first(where: { $0.name == p.from })?.cat {
-                                    BotCat(model: model, key: cat, size: 28)
+                                // the post carries its author's cat, 28 px as on the web ("" for the person's own)
+                                if let cat = p.cat, !cat.isEmpty {
+                                    // style.css .cat-mood-away: opacity .5 (an unknown author is "0:away")
+                                    BotCat(model: model, key: cat, size: 28, place: "catpost").opacity(cat.hasSuffix(":away") ? 0.5 : 1)
                                 }
                                 Text(p.from).font(.caption.weight(.semibold))
                                 Text(p.ago).font(.caption2).foregroundStyle(.secondary)

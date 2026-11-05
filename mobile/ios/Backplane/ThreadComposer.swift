@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ThreadComposer: View {
     @Environment(\.backplaneLanguage) private var lang
@@ -186,6 +187,30 @@ struct ThreadComposer: View {
             .padding(.horizontal).padding(.vertical, 8)
           }
           .background(BackplaneDesign.panel)
+          // a picture or a file dropped on the composer (iPad drag and drop) is attached like the paperclip's
+          .onDrop(of: [UTType.image, UTType.fileURL], isTargeted: nil) { providers in
+              guard canSend else { return false }
+              let owner = thread.id
+              for p in providers {
+                  if p.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+                      _ = p.loadObject(ofClass: URL.self) { url, _ in
+                          guard let url else { return }
+                          // a copy in our temp folder: the dropped file's scope ends with this callback
+                          let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + "-" + url.lastPathComponent)
+                          let scoped = url.startAccessingSecurityScopedResource()
+                          defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                          guard (try? FileManager.default.copyItem(at: url, to: tmp)) != nil else { return }
+                          Task { @MainActor in model.attach(file: tmp, name: url.lastPathComponent, for: owner) }
+                      }
+                  } else if p.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
+                      p.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { data, _ in
+                          guard let data else { return }
+                          Task { @MainActor in model.attach(data, name: "dropped.png", for: owner) }
+                      }
+                  }
+              }
+              return true
+          }
 
     }
 }
