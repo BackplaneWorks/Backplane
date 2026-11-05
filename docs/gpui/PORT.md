@@ -163,7 +163,7 @@ port waits for the person's decision.
 
 <!-- law-map: generated below by scripts/gpui/law-map.py -->
 
-Laws in LAWS.bend: 3253. bend 912, rust 583, unported 1161, client 470, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`, `src/core/msp.bend`, `src/core/agy.bend`, `src/core/opencode.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
+Laws in LAWS.bend: 3253. bend 912, rust 584, unported 1160, client 470, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`, `src/core/msp.bend`, `src/core/agy.bend`, `src/core/opencode.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
 
 | law | status | seed | file | note |
 |---|---|---|---|---|
@@ -493,7 +493,7 @@ Laws in LAWS.bend: 3253. bend 912, rust 583, unported 1161, client 470, window 1
 | `muse_run_turn` | rust `muse_run_turn` | map | `src/core/hub.bend` |  |
 | `msp_mode_supervised_asks` | rust `msp_mode_supervised_asks` | map | `src/core/msp.bend` |  |
 | `msp_mode_full_allows` | rust `msp_mode_full_allows` | map | `src/core/msp.bend` |  |
-| `archive_running_stops` | unported | seed R +-10% | `src/core/hub.bend` |  |
+| `archive_running_stops` | rust `archive_running_stops` | map | `src/core/hub.bend` |  |
 | `archive_idle_no_turn` | rust `archive_closes_asks_clears_background_rows_and_wakes_a_snooze` | map | `src/core/hub.bend` |  |
 | `archive_closes_approval` | rust `archive_closes_asks_clears_background_rows_and_wakes_a_snooze` | map | `src/core/hub.bend` |  |
 | `delete_running_stops` | unported | seed R +-10% | `src/core/hub.bend` |  |

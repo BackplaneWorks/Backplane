@@ -26,7 +26,9 @@ pub fn now_s() -> u64 { std::time::SystemTime::now().duration_since(std::time::U
 struct Commands { fold: Arc<tokio::sync::Mutex<fold::Fold>> }
 
 impl RpcHandler for Commands {
-    fn methods(&self) -> &'static [&'static str] { plan::METHODS }
+    fn methods(&self) -> &'static [&'static str] { &["thread.pin", "thread.unpin", "thread.settle", "thread.unsettle", "thread.archive", "thread.unarchive", "thread.rename", "thread.delete", "thread.snooze",
+        "thread.reorder", "thread.detach", "thread.reparent", "thread.create", "thread.modes", "thread.effort", "thread.provider", "thread.fork", "thread.back", "project.remove", "project.rename",
+        "project.reorder", "project.move", "project.add", "project.new", "project.create", "queue.edit", "queue.remove", "queue.move", "queue.steer", "queue.resume", "fs.list", "fs.mkdir", "fs.find"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             // one request at a time: the plan reads the fold the commit then moves on
@@ -68,6 +70,8 @@ impl RpcHandler for Commands {
                 if let Some(s) = seam::current() { s.stop(&th).await }
             }
             if !pl.events.is_empty() && hub.commit_many(&pl.events).await.is_err() { return vec![json!({"t":"reply","id":id,"ok":false,"error":"store write failed"})] }
+            // BotFx gone (thread.delete): the thread's browser page closes (the term lane's `browser.close`; no events)
+            if method == "thread.delete" { if let Some(h) = hub.rpc_for("browser.close") { let th = p["thread"].as_str().unwrap_or(""); let _ = h.call(hub, who, &json!(0), "browser.close", &json!({"thread": th})).await; } }
             // BotFx scratch (an out, so after the changes): the folder exists before the reply, and before anything runs in it
             if let Some(th) = pl.scratch.clone() { scratch_folder(hub, &th); }
             if let Some((kind, th, text)) = pl.act.clone() {
