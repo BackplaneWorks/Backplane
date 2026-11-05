@@ -8,6 +8,5 @@ T=$HOME/bins-target; (cd native/host && rm -f $T/release/backplane-hub && CARGO_
 bend native/bend/window.bend -o $O/window.c 2>&1 | tail -2; clang -std=c11 -O2 $O/window.c -lpthread -lm -o $O/window || exit 1
 H=$O/home; rm -rf $H; mkdir -p $H; cp test/gpui/hub/fixtures/pages.jsonl $H/events.jsonl
 $O/backplane-hub --home $H --port 3815 --policy-bin $R/test/gpui/hub/policy-bin/bp-policy-serve-O2-v3 --window-bin $O/window > $H/log 2>&1 & HP=$!
-while ! curl -s -m 1 http://127.0.0.1:3815/hello > /dev/null; do sleep 0.1; done
-bun $R/test/gpui/hub/window_e2e.mjs $H 3815 | tee $O/result.txt
-kill $HP
+n=0; while ! curl -s -m 1 http://127.0.0.1:3815/hello > /dev/null; do sleep 0.1; n=$((n+1)); [ $n -gt 300 ] && { echo 'hub did not start'; tail -5 $H/log; kill $HP; exit 1; }; done
+bun $R/test/gpui/hub/window_e2e.mjs $H 3815 > $O/result.txt 2>&1; e=$?; cat $O/result.txt; kill $HP; exit $e

@@ -11,4 +11,4 @@ bend native/bend/window.bend -o $O/window.c 2>&1 | tail -1; clang -std=c11 -O2 $
 grep -E '^error|Finished' $O/build-full.log | head -8; [ $bf -eq 0 ] && { cp $T/release/backplane-hub $O/backplane-hub-full || bf=1; }; [ $bf -eq 0 ] || exit $bf
 rm -f $O/window.c; ls -l $O
 sh test/gpui/hub/copy_gate.sh $O/backplane-hub-full > $O/copy_gate.txt 2>&1; cg=$?; cat $O/copy_gate.txt
-(cd native/host && cargo test --release copy:: > $O/copy_unit_full.txt 2>&1); ct=$?; echo "exit $ct" >> $O/copy_unit_full.txt; grep -E "^test |test result|^error|panicked|exit " $O/copy_unit_full.txt | tee $O/copy_unit.txt; exit $(( cg | ct ))
+(cd native/host && CARGO_TARGET_DIR=$T cargo test --release copy:: > $O/copy_unit_full.txt 2>&1); ct=$?; echo "exit $ct" >> $O/copy_unit_full.txt; grep -E "^test |test result|^error|panicked|exit " $O/copy_unit_full.txt | tee $O/copy_unit.txt; exit $(( cg | ct ))
