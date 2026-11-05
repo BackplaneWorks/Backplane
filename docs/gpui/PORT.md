@@ -163,10 +163,7 @@ port waits for the person's decision.
 
 <!-- law-map: generated below by scripts/gpui/law-map.py -->
 
-Laws in LAWS.bend: 3253. bend 1050, rust 356, unported 1238, client 482, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`, `src/core/msp.bend`, `src/core/agy.bend`, `src/core/opencode.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
-Laws in LAWS.bend: 3253. bend 1065, rust 333, unported 1246, client 482, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
-Laws in LAWS.bend: 3253. bend 1077, rust 320, unported 1247, client 482, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
-Laws in LAWS.bend: 3253. bend 1073, rust 325, unported 1246, client 482, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
+Laws in LAWS.bend: 3253. bend 1016, rust 400, unported 1228, client 482, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`, `src/core/msp.bend`, `src/core/agy.bend`, `src/core/opencode.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
 
 | law | status | seed | file | note |
 |---|---|---|---|---|
@@ -2510,7 +2507,7 @@ Laws in LAWS.bend: 3253. bend 1073, rust 325, unported 1246, client 482, window 
 | `exe_app_name` | bend | seed K +-10% | `src/core/exe.bend` |  |
 | `exe_server_exact` | bend | seed K +-10% | `src/core/exe.bend` |  |
 | `fallback_empty_exhausted` | bend | seed K +-10% | `src/core/fallback.bend` |  |
-| `fallback_never_wraps` | bend | seed K +-10% | `src/core/fallback.bend` |  |
+| `fallback_never_wraps` | rust `fallback_never_wraps` | map | `src/core/fallback.bend` |  |
 | `fallback_auth_is_not_quota` | unported | seed R +-10% | `src/core/json.bend` |  |
 | `fallback_unknown_reset_held` | unported | seed R +-10% | `src/core/json.bend` |  |
 | `fallback_reset_boundary` | unported | seed R +-10% | `src/core/json.bend` |  |
@@ -2698,7 +2695,7 @@ Laws in LAWS.bend: 3253. bend 1073, rust 325, unported 1246, client 482, window 
 | `copy_git_write_told` | rust `a_client_that_asked_for_git_that_writes_is_told` | map | `src/core/hub.bend` |  |
 | `copy_refuses_net` | rust `a_copy_refuses_network_commands_and_a_hub_that_is_no_copy_refuses_none` | map | `-` |  |
 | `copy_off_refuses_none` | rust `a_copy_refuses_network_commands_and_a_hub_that_is_no_copy_refuses_none` | map | `-` |  |
-| `adopt_copy_none` | unported | map | `src/core/adopt.bend` |  |
+| `adopt_copy_none` | rust `a_copy_adopts_none` | map | `src/core/adopt.bend` |  |
 | `copy_file_open_told` | rust `a_client_that_asked_for_git_that_writes_is_told` | map | `src/core/hub.bend` |  |
 | `pair_msg_kept` | unported | seed R +-10% | `src/server/pairing-info.bend` |  |
 | `pair_msg_other_link` | unported | seed R +-10% | `src/server/pairing-info.bend` |  |
@@ -2728,24 +2725,24 @@ Laws in LAWS.bend: 3253. bend 1073, rust 325, unported 1246, client 482, window 
 | `oc_models_failed_says` | rust `oc_models_failed_says` | map | `src/core/opencode.bend` |  |
 | `oc_models_empty_says` | rust `oc_models_empty_says` | map | `src/core/opencode.bend` |  |
 | `oc_models_missing_quiet` | rust `oc_models_missing_quiet` | map | `src/core/opencode.bend` |  |
-| `pi_run_turn` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `omp_run_turn` | unported | seed R +-10% | `src/core/hub.bend` |  |
+| `pi_run_turn` | rust `pi_run_turn` | map | `src/core/hub.bend` |  |
+| `omp_run_turn` | rust `omp_run_turn` | map | `src/core/hub.bend` |  |
 | `interrupt_pi_stops` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `interrupt_omp_stops` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `pi_acp_like` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `omp_acp_like` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `pi_mode_supervised_asks` | bend | seed K +-10% | `src/core/pi.bend` |  |
-| `pi_mode_accept_edits` | bend | seed K +-10% | `src/core/pi.bend` |  |
-| `pi_mode_full_allows` | bend | seed K +-10% | `src/core/pi.bend` |  |
-| `omp_mode_supervised_asks` | bend | seed K +-10% | `src/core/omp.bend` |  |
-| `omp_mode_accept_edits` | bend | seed K +-10% | `src/core/omp.bend` |  |
-| `omp_mode_full_allows` | bend | seed K +-10% | `src/core/omp.bend` |  |
-| `pi_session_kept` | bend | seed K +-10% | `src/core/pi.bend` |  |
-| `dialog_decline_denies` | bend | seed K +-10% | `src/core/dialog.bend` |  |
-| `dialog_dismissed_denies` | bend | seed K +-10% | `src/core/dialog.bend` |  |
-| `dialog_session_allows` | bend | seed K +-10% | `src/core/dialog.bend` |  |
-| `pi_effort_flag` | bend | seed K +-10% | `src/core/agent.bend` |  |
-| `pi_effort_unknown_default` | bend | seed K +-10% | `src/core/agent.bend` |  |
+| `pi_acp_like` | rust `pi_acp_like` | map | `src/core/hub.bend` |  |
+| `omp_acp_like` | rust `omp_acp_like` | map | `src/core/hub.bend` |  |
+| `pi_mode_supervised_asks` | rust `pi_mode_supervised_asks` | map | `src/core/pi.bend` |  |
+| `pi_mode_accept_edits` | rust `pi_mode_accept_edits` | map | `src/core/pi.bend` |  |
+| `pi_mode_full_allows` | rust `pi_mode_full_allows` | map | `src/core/pi.bend` |  |
+| `omp_mode_supervised_asks` | rust `omp_mode_supervised_asks` | map | `src/core/omp.bend` |  |
+| `omp_mode_accept_edits` | rust `omp_mode_accept_edits` | map | `src/core/omp.bend` |  |
+| `omp_mode_full_allows` | rust `omp_mode_full_allows` | map | `src/core/omp.bend` |  |
+| `pi_session_kept` | rust `pi_session_kept` | map | `src/core/pi.bend` |  |
+| `dialog_decline_denies` | rust `dialog_decline_denies` | map | `src/core/dialog.bend` |  |
+| `dialog_dismissed_denies` | rust `dialog_dismissed_denies` | map | `src/core/dialog.bend` |  |
+| `dialog_session_allows` | rust `dialog_session_allows` | map | `src/core/dialog.bend` |  |
+| `pi_effort_flag` | rust `pi_effort_flag` | map | `src/core/agent.bend` |  |
+| `pi_effort_unknown_default` | rust `pi_effort_unknown_default` | map | `src/core/agent.bend` |  |
 | `sidebar_wire_unissued` | unported | seed R +-10% | `src/server/thin-sidebar-wire.bend` |  |
 | `sidebar_wire_wrong_ack` | unported | seed R +-10% | `src/server/thin-sidebar-wire.bend` |  |
 | `active_rows_given_eq` | client | seed C +-10% | `src/core/client.bend` |  |
@@ -2821,7 +2818,7 @@ Laws in LAWS.bend: 3253. bend 1073, rust 325, unported 1246, client 482, window 
 | `hot_demo_threads` | unported | none | `-` |  |
 | `sec_box_handlers` | bend | seed K +-10% | `src/core/secret-box.bend` |  |
 | `sec_mask_total` | rust `sec_mask_total` | map | `src/core/secret.bend` |  |
-| `sec_vault_valid` | rust `a_value_starting_with_the_mask_character_is_not_storable` | map | `src/core/secret.bend` |  |
+| `sec_vault_valid` | rust `sec_vault_valid` | map | `src/core/secret.bend` |  |
 | `sec_vault_total` | rust `sec_mask_total` | map | `src/core/secret.bend` |  |
 | `sec_mask_idem` | rust `sec_mask_idem` | map | `src/core/secret.bend` |  |
 | `sec_mask_clean_id` | rust `sec_mask_clean_id` | map | `src/core/secret.bend` |  |
@@ -3209,9 +3206,9 @@ Laws in LAWS.bend: 3253. bend 1073, rust 325, unported 1246, client 482, window 
 | `star_nudge_rejected_decision` | rust `star_nudge_rejected_decision` | map | `src/core/json.bend` |  |
 | `star_nudge_official_repository` | rust `star_nudge_official_repository` | map | `src/core/star-nudge.bend` |  |
 | `star_nudge_saved_send_waits` | bend | seed K +-10% | `src/core/diskq.bend` |  |
-| `settings_proposal_decline_no_write` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `settings_proposal_deadline_exclusive` | bend | seed K +-10% | `src/core/settingsproposal.bend` |  |
-| `settings_proposal_write_invalidates` | unported | seed R +-10% | `src/core/model.bend` |  |
+| `settings_proposal_decline_no_write` | rust `settings_proposal_decline_no_write` | map | `src/core/hub.bend` |  |
+| `settings_proposal_deadline_exclusive` | rust `settings_proposal_deadline_exclusive` | map | `src/core/settingsproposal.bend` |  |
+| `settings_proposal_write_invalidates` | rust `settings_proposal_write_invalidates` | map | `src/core/model.bend` |  |
 | `fallback_settings_agents_row` | client | seed C +-10% | `src/core/client.bend` |  |
 | `chat_pending_working` | bend | seed K +-10% | `src/core/chat-pending.bend` |  |
 | `chat_pending_blocked` | bend | seed K +-10% | `src/core/chat-pending.bend` |  |
@@ -3434,14 +3431,3 @@ Laws that name a web-only file but also native-shared code, so kept (review by h
 
 - `stop_command_only_while_running` names `src/web/workspace.bend`
 - `terminal_empty_input_keeps_view` names `src/web/workspace.bend`
-
-### Open seam: stalled clients and terminal output (term lane, 2026-11-05)
-Terminal output goes out with `Hub::push_all` into each connection's unbounded outbox, so one stalled client plus a flood (`yes` in a terminal) grows the hub without limit. M3's "slow clients bounded" does not hold for terminal output, and M7 must not run with a stalled client until this is wired. The fix needs `Hub::push_budgeted(client, frame, bytes) -> bool` and `Hub::outbox_pending(client) -> usize` (owner: the `bend` lead; requested 2026-11-05) and a way to list connections; the term lane then drops a stalled client's term frames past its budget and sends one snapshot when it drains (`term/mod.rs` header).
-## Settings lane: known gaps (native/host/src/settings/)
-
-- `setting.set` of `kicad.path`: the Bend hub also sends `KiCadRetry` so the runtime is checked again at once. The Rust runtime reads the setting on each use (`kicad/ipc.rs`) and has no cached check to retry, so there is nothing to call; the next KiCad request picks the new path up.
-- Telemetry: the choice (opt-out, reset, receipts) is ported; the sender is not, and no endpoint is baked in, so nothing is ever sent.
-- Vault: Windows DPAPI key storage is not ported (the file and keyring/keychain backends are).
-- `vault::with` holds the vault lock through key-store commands (up to 5 s), as a blocking call; callers use `spawn_blocking`.
-- Settings propose: Bend's `Settings.propose` also refuses while `Private.live(thread)` (a bot's private-mail turn). Rust has no private turns yet; the bots lane must add that check to `settings::proposal::tool_propose` when they exist, or a private turn can open a hub-wide proposal.
-- Fallback outage classifier (`Error.classify`) and chain `pick`: not ported (they read provider error envelopes in the agents' turn handling).
