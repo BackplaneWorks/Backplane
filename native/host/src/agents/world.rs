@@ -24,7 +24,7 @@ impl Tk { pub fn terminal(&self) -> bool { matches!(self.state.as_str(), "done" 
 pub struct Ask { pub thread: String, pub kind: String, pub tool: String, pub detail: String, pub options: String }
 
 #[derive(Default)]
-pub struct World { pub queued: HashMap<String, Vec<String>>, pub parents: HashMap<String, String>, pub td_msgs: std::collections::HashSet<String>, pub launched: HashMap<String, (String, bool)>, pub projects: HashMap<String, (String, bool)>, pub tasks: HashMap<String, Tk>, pub deadlines: std::collections::HashSet<String>, pub asks: HashMap<String, Ask>, pub sessions: std::collections::HashSet<(String, String)>, pub threads: HashMap<String, T>, pub roots: HashMap<String, String>, pub st: HashMap<String, String>, seen: usize }
+pub struct World { pub reviews: HashMap<String, Vec<(String, String, u64)>>, pub queued: HashMap<String, Vec<String>>, pub parents: HashMap<String, String>, pub td_msgs: std::collections::HashSet<String>, pub launched: HashMap<String, (String, bool)>, pub projects: HashMap<String, (String, bool)>, pub tasks: HashMap<String, Tk>, pub deadlines: std::collections::HashSet<String>, pub asks: HashMap<String, Ask>, pub sessions: std::collections::HashSet<(String, String)>, pub threads: HashMap<String, T>, pub roots: HashMap<String, String>, pub st: HashMap<String, String>, seen: usize }
 
 const KEYS: &[&str] = &["watch.", "thread.parent.", "bg.", "wait.", "work.timeout.seconds", "allowance.claude", "effort.", "buy.", "kicad.ipc", "order.enabled", "agent.lang", "tz.machine", "agent.thinking", "restart.continue", "tok.epoch", "tok.recount", "tok.basis.", "turn.speed.", "turn.models.", "limit.claude.", "ride.", "agy.", "session."];
 fn tracked(k: &str) -> bool { KEYS.iter().any(|p| k == *p || (p.ends_with('.') && k.starts_with(p))) || k.starts_with("usage.") || k.starts_with("tok.key.") }
@@ -94,7 +94,9 @@ impl World {
                 x.carry_text_last = v.get("role").and_then(Value::as_str) == Some("user") && g("text").starts_with(CARRY_TEXT);
                 if v.get("role").and_then(Value::as_str) == Some("user") { x.last_user = g("msg") }
             },
-            "ActivityLogged" => if let Some(x) = self.threads.get_mut(&g("thread")) { x.newest = g("act"); if g("kind") != "restart" { x.carry_text_last = false } },
+            "ActivityLogged" => if let Some(x) = self.threads.get_mut(&g("thread")) {
+                if g("tone") == "review" { self.reviews.entry(g("thread")).or_default().push((g("kind"), g("summary"), v.get("at").and_then(Value::as_u64).unwrap_or(0))) } // Idx.review: a thread's review ops, in order
+                x.newest = g("act"); if g("kind") != "restart" { x.carry_text_last = false } },
             "UsageSet" => { let k = format!("usage.{}", g("thread")); let old = self.setting(&k).to_string(); let (u, w) = (v.get("used").and_then(Value::as_u64).unwrap_or(0), v.get("window").and_then(Value::as_u64).unwrap_or(0));
                 let keep = |new: u64, old: u64| if new == 0 { old } else { new };
                 let ps: Vec<u64> = old.split('/').map(num).collect(); self.st.insert(k, format!("{}/{}", keep(u, *ps.first().unwrap_or(&0)), keep(w, *ps.get(1).unwrap_or(&0)))); }
