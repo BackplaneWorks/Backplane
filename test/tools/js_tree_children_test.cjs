@@ -33,3 +33,9 @@ test('identity memo: the same object and String answer what the pure def answere
  const r1=ctx.memo('t',a,'x',f),r2=ctx.memo('t',a,'x',f),r3=ctx.memo('t',a,'y',f),r4=ctx.memo('t',a2,'x',f),r5=ctx.memo('u',a,'x',f);
  assert.equal(r1,r2);assert.deepEqual(r3,{of:'1:y'});assert.notEqual(r4,r1);assert.deepEqual(r4,r1);assert.notEqual(r5,r1);assert.equal(calls,4);
 });
+test('one-argument identity memo: the very same object answers once, an equal copy is asked again',()=>{
+ const ctx=vm.createContext({});vm.runInContext(fs.readFileSync(path.join(root,'scripts/js-memo.js'),'utf8')+';globalThis.memo1=__bpMemo1;',ctx);
+ let calls=0;const f=a=>{calls++;return {n:a.length}};const rows=[1,2],copy=[1,2];
+ const r1=ctx.memo1('own',rows,f),r2=ctx.memo1('own',rows,f),r3=ctx.memo1('own',copy,f),r4=ctx.memo1('other',rows,f);
+ assert.equal(r1,r2);assert.notEqual(r3,r1);assert.deepEqual(r3,r1);assert.notEqual(r4,r1);assert.equal(calls,3);
+});
