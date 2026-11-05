@@ -20,7 +20,7 @@ fn forbidden() -> HttpReply { HttpReply::text("403 Forbidden", "threads are shar
 
 impl FarSync {
     pub fn new(store: Arc<FarStore>, peering: Arc<Peering>) -> Arc<FarSync> { Arc::new(FarSync { store, peering, feed: Default::default(), catalogs: Mutex::new(HashMap::new()), pulling: Default::default() }) }
-    fn own(&self, link: &str) -> bool { let j = self.peering.routes.machines_value(); self.peering.table.with(|p| own_link(p, &j, link)) }
+    pub(super) fn own(&self, link: &str) -> bool { let j = self.peering.routes.machines_value(); self.peering.table.with(|p| own_link(p, &j, link)) }
     pub fn catalog(&self, link: &str) -> Value { self.catalogs.lock().unwrap().get(link).cloned().unwrap_or(json!([])) }
 
     /// Take a batch (blocking fsyncs off the workers) and hand the events to the presenter. Ok(gap).

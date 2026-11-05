@@ -20,7 +20,7 @@ pub struct Hub {
     pub store: Store, pub model: Mutex<Model>, gen: AtomicU64, pub changed: broadcast::Sender<u64>, pub frames: broadcast::Sender<Value>, pub native_key: String,
     commits: tokio::sync::mpsc::UnboundedSender<Commit>,
     rpc: std::sync::RwLock<Vec<(&'static str, Arc<dyn RpcHandler>)>>, http: std::sync::RwLock<Vec<(&'static str, Arc<dyn HttpHandler>)>>,
-    views: std::sync::RwLock<Vec<(&'static str, Arc<dyn ViewMethod>)>>, observers: std::sync::RwLock<Vec<Arc<dyn Observer>>>, transforms: std::sync::RwLock<Vec<Arc<dyn Transform>>>, far: std::sync::OnceLock<Arc<dyn FarView>>, mirror_feed: std::sync::OnceLock<Arc<dyn crate::api::MirrorFeed>>, mirror_gate: tokio::sync::Mutex<()>, rebuild_run: tokio::sync::Mutex<()>, rebuild_again: std::sync::atomic::AtomicBool, pairing: std::sync::OnceLock<Arc<dyn Pairing>>, auth_route: std::sync::OnceLock<Arc<dyn AuthRoute>>,
+    views: std::sync::RwLock<Vec<(&'static str, Arc<dyn ViewMethod>)>>, observers: std::sync::RwLock<Vec<Arc<dyn Observer>>>, transforms: std::sync::RwLock<Vec<Arc<dyn Transform>>>, far: std::sync::OnceLock<Arc<dyn FarView>>, far_router: std::sync::OnceLock<Arc<dyn crate::api::FarRouter>>, mirror_feed: std::sync::OnceLock<Arc<dyn crate::api::MirrorFeed>>, mirror_gate: tokio::sync::Mutex<()>, rebuild_run: tokio::sync::Mutex<()>, rebuild_again: std::sync::atomic::AtomicBool, pairing: std::sync::OnceLock<Arc<dyn Pairing>>, auth_route: std::sync::OnceLock<Arc<dyn AuthRoute>>,
     live: std::sync::Mutex<std::collections::HashMap<String, String>>,
     pub window_bin: std::sync::OnceLock<PathBuf>,
     me: std::sync::OnceLock<std::sync::Weak<Hub>>, next_client: AtomicU64,
@@ -88,7 +88,7 @@ impl Hub {
         let (ftx, _) = broadcast::channel(1024);
         let model = Model::build(&store)?;
         let hub = Arc::new(Hub { cfg, auth, epoch, presenter, store: store.clone(), commits: ctx, model: Mutex::new(model), gen: AtomicU64::new(1), changed: tx, frames: ftx, native_key: { let mut b = [0u8; 16]; if let Ok(mut f) = std::fs::File::open("/dev/urandom") { let _ = std::io::Read::read_exact(&mut f, &mut b); } hex::encode(b) },
-            rpc: Default::default(), http: Default::default(), views: Default::default(), observers: Default::default(), transforms: Default::default(), far: Default::default(), mirror_feed: Default::default(), mirror_gate: Default::default(), rebuild_run: Default::default(), rebuild_again: Default::default(), pairing: Default::default(), auth_route: Default::default(), outbox_max: std::sync::atomic::AtomicUsize::new(OUTBOX_MAX), signal_seq: AtomicU64::new(store.len() as u64), id_alloc: AtomicU64::new(0), need_resync: Default::default(), extra_info: Default::default(), live: Default::default(), window_bin: Default::default(), me: Default::default(), next_client: AtomicU64::new(1), outboxes: Default::default() });
+            rpc: Default::default(), http: Default::default(), views: Default::default(), observers: Default::default(), transforms: Default::default(), far: Default::default(), far_router: Default::default(), mirror_feed: Default::default(), mirror_gate: Default::default(), rebuild_run: Default::default(), rebuild_again: Default::default(), pairing: Default::default(), auth_route: Default::default(), outbox_max: std::sync::atomic::AtomicUsize::new(OUTBOX_MAX), signal_seq: AtomicU64::new(store.len() as u64), id_alloc: AtomicU64::new(0), need_resync: Default::default(), extra_info: Default::default(), live: Default::default(), window_bin: Default::default(), me: Default::default(), next_client: AtomicU64::new(1), outboxes: Default::default() });
         let _ = hub.me.set(Arc::downgrade(&hub));
         hub.bootstrap()?;
         hub.signal_seq.store(hub.store.len() as u64, Relaxed); // start-up housekeeping counts: a restart is a new signal
@@ -312,6 +312,7 @@ impl Hub {
         });
     }
     /// Installs the mirrored threads' page source (net lane). Pages of a `<link>~<id>` thread come from it.
+    pub fn set_far_router(&self, r: Arc<dyn crate::api::FarRouter>) { let _ = self.far_router.set(r); }
     pub fn set_far(&self, f: Arc<dyn FarView>) { let _ = self.far.set(f); }
     pub fn far(&self) -> Option<Arc<dyn FarView>> { self.far.get().cloned() }
     /// Mirrored events (already renamed to `<link>~<id>` ids) to the presenter's state only: never the log, never `Model`, never a client's
@@ -455,12 +456,18 @@ impl Hub {
         if !msg.get("m").and_then(Value::as_str).unwrap_or("").starts_with("view.") { if let Some(id) = msg.get("id").and_then(Value::as_u64) { let m = msg.get("m").and_then(Value::as_str).unwrap_or(""); if crate::session::is_job(m) { crate::session::replied_late(c.client, id) } else { crate::session::replied(c.client, id) } } }
         out
     }
-    async fn request_one(&self, c: &mut Conn, msg: &Value) -> Vec<Value> {
+    async fn request_one(&self, c: &mut Conn, msg: &Value) -> Vec<Value> { self.request_one_r(c, msg, true).await }
+    /// A request run on this hub whatever its params name: the owner's side of /far/rpc runs a linked machine's request here, and must never route it onward
+    /// (`on` is not renamed on the way, so a router would send it straight back; Bend's owner calls `Bot.request` directly).
+    pub async fn request_here(&self, c: &mut Conn, msg: &Value) -> Vec<Value> { self.request_one_r(c, msg, false).await }
+    async fn request_one_r(&self, c: &mut Conn, msg: &Value, routed: bool) -> Vec<Value> {
         let id = msg.get("id").cloned().unwrap_or(Value::Null);
         let m = msg.get("m").and_then(Value::as_str).unwrap_or("");
         // `ping` and `load.ping` are not methods of the Bend hub: it answers them "unknown method" (recorded, parity/recA)
         // a copy of a log: git that writes and acting on the machine are told, not run (copy.rs)
         if crate::copy::rpc_refused(m) { return vec![json!({"t":"reply","id":id,"ok":false,"error":crate::copy::GIT_TOLD})] }
+        // a request naming a thing on a linked machine goes there (net lane: Far.rpc.go)
+        if routed { if let Some(r) = self.far_router.get().cloned() { let p = msg.get("p").unwrap_or(&Value::Null); if r.wants(m, p) { return r.call(&self.arc(), c.client, &id, m, p).await } } }
         if m == "fab.look" {
             let reply = crate::settings::fab::reply(&self.arc(), &id, "fab.look", msg.get("p").unwrap_or(&Value::Null)).await; // settings/fab.rs: the project card
             // the hub's own read, applied to this view's held state by the policy on its next V (Fab.reply)

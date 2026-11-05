@@ -163,7 +163,7 @@ port waits for the person's decision.
 
 <!-- law-map: generated below by scripts/gpui/law-map.py -->
 
-Laws in LAWS.bend: 3253. bend 911, rust 599, unported 1146, client 470, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`, `src/core/msp.bend`, `src/core/agy.bend`, `src/core/opencode.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
+Laws in LAWS.bend: 3253. bend 911, rust 603, unported 1142, client 470, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`, `src/core/msp.bend`, `src/core/agy.bend`, `src/core/opencode.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
 
 | law | status | seed | file | note |
 |---|---|---|---|---|
@@ -821,10 +821,10 @@ Laws in LAWS.bend: 3253. bend 911, rust 599, unported 1146, client 470, window 1
 | `far_old_takes_nothing` | rust `far_old_takes_nothing` | map | `src/core/far.bend` |  |
 | `far_overlap_takes_new` | rust `far_overlap_takes_new` | map | `src/core/far.bend` |  |
 | `far_batch_again` | rust `far_batch_again` | map | `src/core/far.bend` |  |
-| `far_route_here_stays` | unported | seed R +-10% | `src/core/json.bend` |  |
-| `far_route_goes_home` | unported | seed R +-10% | `src/core/json.bend` |  |
-| `far_allowed_only_methods` | unported | seed R +-10% | `src/core/json.bend` |  |
-| `far_no_delete` | unported | seed R +-10% | `src/core/json.bend` |  |
+| `far_route_here_stays` | rust `far_route_here_stays` | map | `src/core/json.bend` |  |
+| `far_route_goes_home` | rust `far_route_goes_home_and_the_reply_comes_back_as_ours` | map | `src/core/json.bend` |  |
+| `far_allowed_only_methods` | rust `far_allowed_only_methods_and_far_no_delete` | map | `src/core/json.bend` |  |
+| `far_no_delete` | rust `far_allowed_only_methods_and_far_no_delete` | map | `src/core/json.bend` |  |
 | `far_where_here` | bend | seed K +-10% | `src/core/far.bend` |  |
 | `far_where_far` | bend | seed K +-10% | `src/core/far.bend` |  |
 | `far_bot_tabs` | client | seed C +-10% | `src/core/botui.bend` |  |

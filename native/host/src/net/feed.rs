@@ -21,6 +21,10 @@ pub struct Index {
     lasts: HashMap<String, u64>,        // project -> its last shared line
     applied: u32, built: bool,
 }
+impl Index {
+    /// `Fr.project.shared`: a project of this hub's own (not a mirror's) that exists
+    fn project_shared(&self, id: &str) -> bool { !id.is_empty() && self.projects.contains_key(id) && !far::is(id) }
+}
 impl Owned for Index {
     fn thread(&self, id: &str) -> bool { self.threads.contains_key(id) }
     fn ask_thread(&self, id: &str) -> Option<String> { self.asks.get(id).cloned() }
@@ -74,6 +78,23 @@ fn nums_last(v: &[(u32, String)]) -> Option<u32> { v.last().map(|x| x.0) }
 pub const PAGE_CHARS: usize = 400_000;
 
 impl Feed {
+    /// `Fr.allowed` (core/far.bend): whether this hub takes the request `m` with params `p` from one of the owner's machines: only the methods of
+    /// `Fr.methods`, and only about something this hub shares (a thread of its own, an ask in one, a project of its own, a bot); browsing and adding
+    /// folders on this machine claims nothing.
+    pub fn allowed(&self, m: &str, p: &Value) -> bool {
+        if !far::may(m) { return false }
+        let g = |k: &str| p.get(k).and_then(Value::as_str).unwrap_or("");
+        let st = self.st.lock().unwrap();
+        let idx = &st.0;
+        match m {
+            "ask.answer" => idx.ask_thread(g("id")).map_or(false, |t| idx.thread(&t) && !far::is(&t)),
+            "bots.space" | "bots.routine_run" => !(if g("bot").is_empty() { g("id") } else { g("bot") }).is_empty(),
+            "thread.create" | "project.remove" => idx.project_shared(g("project")),
+            "project.add" | "project.new" | "fs.list" | "fs.mkdir" | "fs.find" => true,
+            _ => idx.thread(g("thread")) && !far::is(g("thread")),
+        }
+    }
+
     pub fn new() -> Arc<Feed> { Arc::new(Feed { st: Mutex::new((Index::default(), vec![])), tx: Mutex::new(None) }) }
     pub fn ready(&self) -> bool { self.st.lock().unwrap().0.built }
     pub fn with<R>(&self, f: impl FnOnce(&Index) -> R) -> R { f(&self.st.lock().unwrap().0) }
