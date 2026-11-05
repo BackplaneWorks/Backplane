@@ -21,11 +21,13 @@ export function sizeComposerControls(doc = document) {
   for (const menu of doc.querySelectorAll('.composer-more')) {
     const summary = menu.querySelector(':scope > summary');
     const inline = getComputedStyle(summary).display === 'none';
-    if (inline) menu.open = true;
+    // (each written only when it changes: this runs after every render, and a
+    // write of the same value is still a mutation and a style invalidation)
+    if (inline) { if (!menu.open) menu.open = true; }
     else if (menu.dataset.inline === 'true') menu.open = false;
-    menu.dataset.inline = String(inline);
+    if (menu.dataset.inline !== String(inline)) menu.dataset.inline = String(inline);
     const field = menu.closest('.composer')?.querySelector('textarea');
     const hint = inline ? field?.dataset.placeholderFull : field?.dataset.placeholderShort;
-    if (hint) field.placeholder = hint;
+    if (hint && field.placeholder !== hint) field.placeholder = hint;
   }
 }

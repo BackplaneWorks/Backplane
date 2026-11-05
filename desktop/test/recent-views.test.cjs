@@ -39,3 +39,15 @@ test('project homes use the same bounded picture cache with exact artifact-owner
  assert(!cache.put({...homeScope,target:{kind:'project',id:'other'}},home));
  assert(!JSON.stringify(pictureOnly(home)).includes('Private project draft'));
 });
+test('a view is written at most once per gap, its newest picture kept for the next write',async()=>{
+ const {RecentViews}=await import('../../src/web/recent-views.js');
+ let clock=0;const saved=[];const r=new RecentViews({indexedDB:null,validate:()=>true,now:()=>clock});
+ r.save=async(scope,key,shown,checked)=>{saved.push([key,shown,checked]);return true;};
+ r.schedule({},'A','one');clearTimeout(r.scheduled);r.flush();
+ clock=1000;r.schedule({},'A','two');clearTimeout(r.scheduled);r.flush();
+ clock=2000;r.schedule({},'A','three');clearTimeout(r.scheduled);r.flush();
+ assert.deepEqual(saved.map(x=>x[1]),['one'],'within the gap: not written again');
+ clock=10001;clearTimeout(r.scheduled);r.flush();clearTimeout(r.scheduled);
+ assert.deepEqual(saved.map(x=>x[1]),['one','three'],'after it: the newest');
+ assert.equal(saved[0][2],true,'the host’s pictures are written without validating them again');
+});

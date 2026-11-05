@@ -14,7 +14,7 @@ const glb=path.resolve(opt('glb')),out=path.resolve(opt('out')),source=path.reso
 assert.ok(opt('glb')&&opt('out'),'supply --glb and --out');fs.mkdirSync(out,{recursive:true});
 const fixture=glbFixture(glb),sha=b=>createHash('sha256').update(b).digest('hex');
 const solid=fs.readFileSync(source,'utf8')+'\nexport {view as testView, assets as testAssets};';
-const files=['solid-assets.js','solid-materials.js','solid-dof.js','solid-framing.js','mesh-worker.js'];
+const files=['solid-assets.js','solid-materials.js','solid-dof.js','solid-framing.js','mesh-worker.js','solid-pictures.js'];
 const server=http.createServer((req,res)=>{
  const name=new URL(req.url,'http://fixture').pathname.slice(1);
  if(name==='solid.js'){res.setHeader('Content-Type','text/javascript');res.end(solid);}

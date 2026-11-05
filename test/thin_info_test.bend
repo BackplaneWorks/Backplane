@@ -6,6 +6,7 @@ import ../src/core/client.bend as U
 import ../src/core/usage.bend as Z
 import ../src/server/thin-actor.bend as A
 import ../src/server/thin-view.bend as V
+import ../src/core/thin-wire.bend as TW
 
 # Synthetic data only. A closed ledger larger than the actual rejected
 # frame must not cross the UI boundary or change any displayed usage row.
@@ -81,5 +82,52 @@ def main.source(+source: J.Json) -> IO(Unit):
     check("private usage cache is absent from serialized presentation session", Bool.not(String.contains(J.Json.show(V.Route.pack(A.Actor.ui(received(text)))), "boat.usage")))
     C.Check.str("refresh retains private info and rejects client spoof", U.Ui.info(A.Actor.ui(refreshed(text)), "boat.usage"), text)
 
+# The hub's "desk" info (which threads the desks show) is drawn by no view:
+# folding it must not mark the view dirty (each desk.look re-tells it to
+# every client), but any other key with it still does.
+def desk(+keys: List<&2, J.KV>) -> A.Actor:
+  A.Actor.message(actor(), True{}, "fixture-hub", J.Json.obj([J.KV{"t", J.Str{"info"}}, J.KV{"info", J.Json.obj(keys)}]))
+
+# An owned reply that changes nothing the view draws (asked again and
+# answered the same) leaves it clean; one that changes the error line, a
+# kept answer or the selection marks it dirty.
+def replied(+a: A.Actor, +o: String) -> A.Actor:
+  A.Actor.reply_if(True{}, a, True{}, "fixture-hub", obj(o))
+
+def secrets() -> String:
+  "{\"t\":\"reply\",\"id\":5,\"ok\":true,\"secrets\":\"[]\",\"vault\":\"{}\"}"
+
+def fab_count(xs: List<&2, J.Json>, n: Nat) -> Nat:
+  match xs:
+    case Nil{}: n
+    case +x <> rest: fab_count(rest, Nat.add(n, Bool.pick(Nat, String.contains(J.Json.get_str(x, "text", ""), "fab.look"), 1n, 0n)))
+
+def project_actor() -> A.Actor:
+  A.Actor{U.Ui.select.k(U.Ui.adopt(U.Ui.init(100n), M.State.replay([M.ProjectCreated{"p", "Project", "/fixture", 1n},
+    M.ThreadCreated{"t", "p", "Fixture", M.Local{}, "", "", "codex", "", 1n}], M.State.empty())), "t"), "view", target(), Map.new(&2, String), Nil{}, False{}, Nil{}}
+
+def fab_reads(+a: A.Actor) -> Nat:
+  fab_count(A.Actor.queued(a), 0n)
+
+def main.quiet() -> IO(Unit):
+  +once = A.Actor.clean(replied(actor(), secrets()))
+  do IO<Unit>:
+    C.Check.str("desk info is kept in the Ui", U.Ui.info(A.Actor.ui(desk([J.KV{"desk", J.Str{"t"}}])), "desk"), "t")
+    check("desk info alone leaves the view clean", Bool.not(A.Actor.dirty(desk([J.KV{"desk", J.Str{"t"}}]))))
+    check("desk info with another key still dirties", A.Actor.dirty(desk([J.KV{"desk", J.Str{"t"}}, J.KV{"boat.usage", J.Str{"x"}}])))
+    check("empty info dirties as before", A.Actor.dirty(desk(Nil{})))
+    check("a bare ok reply (its empty request slots cleared) changes nothing drawn", Bool.not(A.Actor.dirty(replied(once, "{\"t\":\"reply\",\"id\":8,\"ok\":true}"))))
+    check("an error reply dirties", A.Actor.dirty(replied(actor(), "{\"t\":\"reply\",\"id\":5,\"ok\":false,\"error\":\"boom\"}")))
+    check("a first secret list dirties", A.Actor.dirty(replied(actor(), secrets())))
+    C.Check.str("the secret list is kept", U.Ui.scratch(A.Actor.ui(once), "@secrets"), "[]")
+    check("the same secret list again leaves the view clean", Bool.not(A.Actor.dirty(replied(once, secrets()))))
+    check("a web view's greeting says the hub asks the card itself", J.Json.get_bool(TW.Wire.greeting("web", "1", "e"), "fabSelf", False{}))
+    check("a phone's greeting does not", Bool.not(J.Json.get_bool(TW.Wire.greeting("mobile", "1", "e"), "fabSelf", False{})))
+    C.Check.str("a shown thread's render asks for its order card itself", Nat.show(fab_reads(A.Actor.mail_ready(project_actor()))), "1")
+    C.Check.str("and only once while the thread stays as it was", Nat.show(fab_reads(A.Actor.mail_ready(A.Actor.clean(A.Actor.mail_ready(project_actor()))))), "0")
+    check("a changed secret list dirties", A.Actor.dirty(replied(once, "{\"t\":\"reply\",\"id\":6,\"ok\":true,\"secrets\":\"[1]\",\"vault\":\"{}\"}")))
+
 def main() -> IO(Unit):
-  main.source(status())
+  do IO<Unit>:
+    main.source(status())
+    main.quiet()
