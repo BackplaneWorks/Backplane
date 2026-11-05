@@ -12,7 +12,7 @@ pub fn metric(started: Instant, event: &str, mut fields: Value) {
 }
 
 #[derive(Clone, Debug)]
-pub enum Step { Home(usize), Select(usize), Popup(String), Type(String), Send, Wait(u64), Record(Option<String>), Click(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Unsupported(String) }
+pub enum Step { Home(usize), Select(usize), Popup(String), Type(String), Send, Attach(String), Wait(u64), Record(Option<String>), Click(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Unsupported(String) }
 /// What a click on a registered control does; the e2e harness's controls inventory and `click` step use these.
 #[derive(Clone, Debug)]
 pub enum Ctl { None, Rail(String), PickFiles, ToggleSidebar, Select(String), Home(String), Fold(String), Send, Skill(String), Page(String), Node(String, String) }
@@ -32,6 +32,7 @@ pub fn load(path: &Path) -> VecDeque<Step> {
         else if let Some(t) = v["popup"].as_str() { Some(Step::Popup(t.into())) }
         else if let Some(t) = v["type"].as_str() { Some(Step::Type(t.into())) }
         else if v["send"].as_bool() == Some(true) { Some(Step::Send) }
+        else if let Some(p) = v["attach"].as_str() { Some(Step::Attach(p.into())) }
         else if let Some(ms) = v["wait"].as_u64() { Some(Step::Wait(ms)) }
         else if let Some(r) = v["record"].as_str() { Some(Step::Record(if r == "start" { Some(v["name"].as_str().unwrap_or("rec").to_string()) } else { None })) }
         else if let Some(id) = v["click"].as_str() { Some(Step::Click(id.into())) }
@@ -266,6 +267,13 @@ impl Backplane {
                         }).detach();
                     }
                 }
+            }
+            Step::Attach(path) => {
+                // the e2e hook for a dropped or picked file: the same path as a drop on the window (screens::glue::attach_event)
+                self.attach_event(&crate::screens::composer::ComposerEvent::Files(vec![std::path::PathBuf::from(path)]), cx);
+                self.seq += 1; let seq = self.seq;
+                self.pending = Some(Pending { label: "attach".into(), started: Instant::now(), goal: Goal::Sleep, armed: true, seq });
+                cx.spawn(async move |this, cx| { cx.background_executor().timer(Duration::from_millis(100)).await; let _ = this.update(cx, |t, cx| { if t.pending.as_ref().map_or(false, |p| p.seq == seq) { t.pending = None; t.pump(cx); } }); }).detach();
             }
             Step::Wait(ms) => {
                 self.seq += 1;
