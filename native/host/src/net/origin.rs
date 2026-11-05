@@ -2,7 +2,10 @@
 //! `project/<id>` references are translated once, in the same direction as `far::sender`: an id of the mirroring
 //! machine's own ("<link>~<id>") is local again, one of the owner's is named through the link, a foreign link's is
 //! left. Code (inline and fenced, by backtick runs) is kept byte for byte, and so is everything else.
-use crate::md::refs;
+// (md/refs.rs is standalone; it is included by path until the md module is declared in main.rs)
+#[path = "../md/refs.rs"]
+#[allow(dead_code)]
+mod refs;
 
 /// Origin.id
 pub fn id(i: &str, link: &str) -> String {
