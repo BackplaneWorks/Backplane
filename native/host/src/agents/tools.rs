@@ -98,6 +98,11 @@ impl Agents {
     pub async fn answer(self: &Arc<Self>, ask: &str, answer: &str) -> Result<(), String> {
         let a = { let w = self.world().await; w.asks.get(ask).cloned() };
         let Some(a) = a else { return Ok(()) }; // ask_closes_once: an ask already closed (or never opened) changes nothing
+        if crate::files::rv::checks_answer(&self.hub.cfg.home.to_string_lossy(), ask, answer) { // Checks.answer.k: a project's own checks ask closes with no "answer" activity
+            self.commit_events(vec![json!({"$":"AskClosed","id":ask,"answer":answer,"at":now_s()})]).await;
+            if let Some(p) = self.parked.lock().unwrap().remove(ask) { let _ = p.tx.send(answer.to_string()); }
+            return Ok(())
+        }
         let (now, th) = (now_s(), a.thread.clone());
         let mut ev = vec![json!({"$":"AskClosed","id":ask,"answer":answer,"at":now})];
         let implement = a.kind == "plan" && answer == "implement";

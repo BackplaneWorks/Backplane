@@ -149,10 +149,13 @@ impl Mcp {
             "thread_interrupt" => ag.tool_interrupt(thread, &a).await,
             "kicad_ipc" => match crate::files::kicad::ipc::kicad_ipc_in(&ag.hub, Some(thread), sv(&a, "path"), sv(&a, "type"), a.get("message").cloned().unwrap_or(json!({}))).await { Ok(v) => (true, v), Err(e) => fail(&e) },
             "kicad_ipc_status" => match crate::files::kicad::ipc::kicad_ipc_status_in(&ag.hub, Some(thread), sv(&a, "path")).await { Ok(v) => (true, v), Err(e) => fail(&e) },
+            "kicad_export10" => crate::files::export10::mcp(&ag.hub, sv(&a, "path"), a.get("force").and_then(Value::as_bool).unwrap_or(false)).await,
             "viewer_show" => { ag.hub.push_all(&json!({"t":"view","thread":thread,"path":sv(&a, "path"),"kind":sv(&a, "kind")})); (true, json!({"shown":sv(&a, "path")})) }
             _ => fail("unknown tool"),
         };
-        Some(result(id, content(ok, &body)))
+        let mut res = result(id, content(ok, &body));
+        if let Some(block) = ag.ride_take(thread).await { if let Some(a) = res.pointer_mut("/result/content").and_then(Value::as_array_mut) { a.push(json!({"type":"text","text":block})) } }
+        Some(res)
     }
 
     /// Mcp.permit: Claude asks before a tool runs outside full access. The request becomes an ask the person answers and the reply waits.
