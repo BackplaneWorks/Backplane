@@ -7,7 +7,11 @@ use tokio::sync::mpsc::{self, Sender};
 use tokio_tungstenite::tungstenite::{Message, protocol::WebSocketConfig};
 
 #[derive(Debug)] pub enum Command { Rpc(String,crate::screens::settings::Secret,&'static str), Sleep(f64), Select(String), Send(String), Draft(String), Action(String,String), Page(String), Ask(String,Value,u64) }
-#[derive(Debug)] pub enum Event { PlotTooBig(usize), Rpc(&'static str,bool,String), Answer(u64,Value), Plot(Vec<u8>), NetWake, Picture(Value,Timing), Status(String), Accepted, Error(String) }
+#[derive(Debug)] pub enum Event { PlotTooBig(usize), Rpc(&'static str,bool,String), Answer(u64,Value), Plot(Vec<u8>), NetWake, Picture(Value,Timing), Status(String), Accepted, Error(String), /** the hub answered, and said no: shown, but the connection is fine */ Refused(String) }
+/// The connection label an event sets (None: it leaves the label alone). A refusal is a live connection, so it is not "Disconnected".
+pub fn status_for(ev:&Event)->Option<&'static str>{match ev{Event::Error(_)=>Some("Disconnected"),_=>None}}
+#[cfg(test)] mod status_tests{use super::*;use core::prelude::v1::test;
+    #[test] fn a_refused_view_or_command_leaves_the_connection_label_alone(){assert_eq!(status_for(&Event::Refused("View request refused: \"PRESENTER_UNAVAILABLE\"".into())),None);assert_eq!(status_for(&Event::Error("Hub disconnected".into())),Some("Disconnected"));assert_eq!(status_for(&Event::Accepted),None);}}
 /// Where a reply's time went before the UI saw it: send to frame received, decode, delta/merge, and the body's size.
 #[derive(Debug,Clone,Default)] pub struct Timing { pub rtt_ms:f64, pub decode_ms:f64, pub process_ms:f64, pub bytes:usize, pub delta:bool }
 #[derive(Clone)] pub struct Config { pub hub:String, pub token_file:PathBuf, pub exit_after:Option<f64>, pub script:Option<PathBuf>, pub swatches:bool, pub gallery:bool, pub fonts:bool, pub solid_demo:Option<String>, pub theme:Option<String> }
@@ -138,9 +142,9 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                         // every product RPC's answer is logged, so a refused send is never silent (the reply's error may be a plain string, a code or a message)
                         let why=if x["ok"]==true {String::new()} else {rpc_error(&x)};
                         eprintln!("GPUI_LOG {}",json!({"rpc_reply":name,"ok":x["ok"]==true,"error":why.chars().take(160).collect::<String>()}));
-                        if x["ok"]==true {if is_post {let _=events.send(Event::Accepted).await;}}else{let _=events.send(Event::Error(format!("The hub refused it: {why}"))).await;}if v.dirty&&v.pending.is_empty()&&!v.view_id.is_empty(){v.dirty=false;let request=v.request("view.update",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;}continue;}
+                        if x["ok"]==true {if is_post {let _=events.send(Event::Accepted).await;}}else{let _=events.send(Event::Refused(format!("The hub refused it: {why}"))).await;}if v.dirty&&v.pending.is_empty()&&!v.view_id.is_empty(){v.dirty=false;let request=v.request("view.update",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;}continue;}
                     let Some((revision,target,method))=v.pending.remove(&id) else{continue};
-                    if x["ok"]!=true {let _=events.send(Event::Error(format!("View request refused: {}",x["error"]["code"]))).await;continue;}
+                    if x["ok"]!=true {let _=events.send(Event::Refused(format!("View request refused: {}",x["error"]["code"]))).await;continue;}
                     let mut r:Value=x["result"].take();
                     if let Some(control)=r["controlId"].as_u64() {
                         let c=v.controls.remove(&control).filter(|c|c.done);
