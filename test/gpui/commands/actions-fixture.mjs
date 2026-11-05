@@ -16,10 +16,18 @@ const base={hub:'h',cid:'c',target:{kind:'recent',id:''},nativeSidebar:0,epoch:'
 const steps=[['noop','x'],['row-menu','t2'],['row-menu','t2'],['proj-menu','p1'],['menu-close',''],['row-menu','t1'],['row-pin','t1'],['row-unpin','t1'],['row-settle','t2'],['row-unsettle','t2'],
  ['row-snooze','t2|1h'],['row-snooze','t2|tomorrow'],['row-snooze','t2|off'],['row-menu','t1'],['row-delete','t1'],['row-archive','t1'],['row-unarchive','t1'],
  ['row-rename','t2'],['rename-no','t2'],['row-rename','t2'],['rename-save','t2'],['rename-save','t1\u001fNew name'],['rename-save','t1\u001f   '],['rename-save',''],['row-menu','t2'],['new-thread','p1'],['new-thread','']];
+// the selected thread's own actions (the header's buttons, the keys): the thread is the target's
+const tsteps=[['pin',''],['unpin',''],['settle',''],['unsettle',''],['archive',''],['unarchive',''],['snooze','1h'],['snooze','tomorrow'],['snooze','off'],['row-menu','t1'],['settle','']];
 const out=[];
 for(const [action,value] of steps){
   const r=JSON.parse(await ask('V '+JSON.stringify({...base,session,action,value})));
   out.push({action,value,session_in:session,session:r.session,cmds:r.cmds,nextTarget:r.nextTarget??null});
+  if(r.session)session=r.session;
+}
+for(const [action,value] of tsteps){
+  const target={kind:'thread',id:'t1'};
+  const r=JSON.parse(await ask('V '+JSON.stringify({...base,target,session,action,value})));
+  out.push({action,value,target,session_in:session,session:r.session,cmds:r.cmds,nextTarget:r.nextTarget??null});
   if(r.session)session=r.session;
 }
 console.log(JSON.stringify({log,titles:{t1:'One',t2:'Two'},steps:out}));

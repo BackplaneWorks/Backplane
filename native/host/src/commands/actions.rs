@@ -1,6 +1,6 @@
 //! The thread-row actions of the view protocol, as pure functions over the session (client.bend `Ui.act` for `Menu.*`, `Ren.*` and `Made.*`):
 //! `row-menu`, `proj-menu`, `menu-close`, `row-pin`, `row-unpin`, `row-archive`, `row-unarchive`, `row-settle`, `row-unsettle`, `row-snooze`,
-//! `row-rename`, `rename-save`, `rename-no` and `new-thread`. An action answers what Bend's presenter answers: a patch of the session (its scratch
+//! `row-rename`, `rename-save`, `rename-no` and `new-thread`, and the selected thread's own `pin`, `unpin`, `settle`, `unsettle`, `archive`, `unarchive`, `snooze`. An action answers what Bend's presenter answers: a patch of the session (its scratch
 //! drafts `@menu`, `@del`, `@ren`..., and the request counter `rid`) and the commands the client runs (the `send` of the hub request, a `focus`).
 //! Not the dispatcher: the selection (`select`, `nextTarget`) and everything shared by all actions are the session module's; a row action takes the
 //! thread from its `value` and never selects. `None` is "not mine" (the helper answers). Oracle: test/gpui/commands/fixtures/actions.json, recorded
@@ -12,6 +12,8 @@ pub struct Req<'a> {
     pub hub: &'a str,
     /// the session the request carries (`sel`, `rid`, `drafts`, `info`...)
     pub session: &'a Value,
+    /// the thread the view shows (the request's target): the one the header's buttons and keys act on
+    pub sel: &'a str,
     pub action: &'a str,
     pub value: &'a str,
     /// a thread's title as the sidebar shows it (Active.title): the field a rename starts from
@@ -64,6 +66,12 @@ pub fn act(r: &Req) -> Option<ActOut> {
             let m = match r.action { "row-pin" => "thread.pin", "row-unpin" => "thread.unpin", "row-archive" => "thread.archive", "row-unarchive" => "thread.unarchive", "row-settle" => "thread.settle", _ => "thread.unsettle" };
             a.rpc(m, json!({"thread": v})); a.set("@del", ""); a.set("@menu", "");
         }
+        // the selected thread's own buttons and keys (Ui.on_thread); the thread is the view's
+        "pin" | "unpin" | "archive" | "unarchive" | "settle" | "unsettle" => {
+            let m = format!("thread.{}", r.action);
+            a.rpc(&m, json!({"thread": r.sel})); a.set("@del", ""); a.set("@menu", "");
+        }
+        "snooze" => { a.rpc("thread.snooze", json!({"thread": r.sel, "for": v})); a.set("@del", ""); a.set("@menu", ""); }
         // "<thread>|<for>": 1h, 1w, tomorrow or off
         "row-snooze" => {
             let (th, span) = v.split_once('|')?;
@@ -123,28 +131,31 @@ mod tests {
         let (mut mine, mut passed) = (0, 0);
         for s in fx["steps"].as_array().unwrap() {
             let (action, value) = (s["action"].as_str().unwrap(), s["value"].as_str().unwrap());
-            let req = Req { hub: "h", session: &s["session_in"], action, value, title_of: &title_of };
+            let sel = s["target"]["id"].as_str().unwrap_or(""); let req = Req { hub: "h", session: &s["session_in"], sel, action, value, title_of: &title_of };
             let Some(o) = act(&req) else { passed += 1; assert!(matches!(action, "noop") || (action == "row-delete") || (action == "new-thread" && value.is_empty()), "{action} {value:?} fell through"); continue };
             mine += 1;
             let want = &s["session"]; let was = &s["session_in"];
             let got = merge(was, &o.session_patch);
-            // every draft the presenter changed is changed the same way here, and nothing here disagrees with it
-            for (k, x) in want["drafts"].as_object().unwrap() { if was["drafts"][k] != *x { assert_eq!(got["drafts"][k], *x, "{action} {value:?}: draft {k}") } }
+            // The shared post-hook (Fab.sync / Dv.sync / Mpage.sync, the dispatcher's) may add `fab.look` requests after mine and set `@fab.at`; nothing else may differ.
+            let want_cmds = s["cmds"].as_array().unwrap(); let mine_n = o.cmds.len();
+            assert_eq!(&want_cmds[..mine_n], &o.cmds[..], "{action} {value:?}: cmds");
+            let extra = &want_cmds[mine_n..];
+            for c in extra { assert!(c["type"] == "send" && c["text"].as_str().unwrap().contains("\"m\":\"fab.look\""), "{action} {value:?}: unexpected extra command {c}") }
+            for (k, x) in want["drafts"].as_object().unwrap() { if was["drafts"][k] != *x && k != "@fab.at" { assert_eq!(got["drafts"][k], *x, "{action} {value:?}: draft {k}") } }
             for (k, x) in o.session_patch["drafts"].as_object().unwrap() { assert_eq!(want["drafts"][k], *x, "{action} {value:?}: draft {k} set here but not so there") }
-            assert_eq!(got["rid"], want["rid"], "{action} {value:?}: rid");
-            assert_eq!(Value::Array(o.cmds.clone()), s["cmds"], "{action} {value:?}: cmds");
+            assert_eq!(got["rid"].as_u64().unwrap() + extra.len() as u64, want["rid"].as_u64().unwrap(), "{action} {value:?}: rid");
             assert_eq!(o.next_target, if s["nextTarget"].is_null() { None } else { Some(s["nextTarget"].clone()) }, "{action} {value:?}: nextTarget");
             passed += 1;
         }
-        assert!(mine >= 22, "{mine} actions of the recorded ones are served here"); assert_eq!(passed, fx["steps"].as_array().unwrap().len());
+        assert!(mine >= 33, "{mine} actions of the recorded ones are served here"); assert_eq!(passed, fx["steps"].as_array().unwrap().len());
     }
     #[test] fn a_rename_without_a_title_or_a_thread_sends_nothing_and_an_artifact_is_not_mine() {
         let s = json!({"sel":"","rid":4,"drafts":{"@ren":"t1","@f.title":"  ","@ren.kind":"thread"},"info":{}}); let t = |_: &str| String::new();
-        let o = act(&Req { hub: "h", session: &s, action: "rename-save", value: "", title_of: &t }).unwrap(); assert!(o.cmds.is_empty()); assert!(o.session_patch.get("rid").is_none());
+        let o = act(&Req { hub: "h", session: &s, sel: "", action: "rename-save", value: "", title_of: &t }).unwrap(); assert!(o.cmds.is_empty()); assert!(o.session_patch.get("rid").is_none());
         let s2 = json!({"sel":"","rid":4,"drafts":{"@ren":"a","@f.title":"x","@ren.kind":"artifact"},"info":{}});
-        assert!(act(&Req { hub: "h", session: &s2, action: "rename-save", value: "", title_of: &t }).is_none());
-        assert!(act(&Req { hub: "h", session: &s, action: "row-snooze", value: "t1", title_of: &t }).is_none(), "a snooze without its span is not mine");
-        let o = act(&Req { hub: "h", session: &json!({"sel":"","rid":4,"drafts":{},"info":{"local.machine":"m","local.generation":"7"}}), action: "new-thread", value: "p1", title_of: &t }).unwrap();
+        assert!(act(&Req { hub: "h", session: &s2, sel: "", action: "rename-save", value: "", title_of: &t }).is_none());
+        assert!(act(&Req { hub: "h", session: &s, sel: "", action: "row-snooze", value: "t1", title_of: &t }).is_none(), "a snooze without its span is not mine");
+        let o = act(&Req { hub: "h", session: &json!({"sel":"","rid":4,"drafts":{},"info":{"local.machine":"m","local.generation":"7"}}), sel: "", action: "new-thread", value: "p1", title_of: &t }).unwrap();
         assert_eq!(o.session_patch["drafts"]["@want.new.at"], "m|7"); assert_eq!(o.session_patch["drafts"]["@want.new"], "4");
     }
 }
