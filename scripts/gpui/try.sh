@@ -30,7 +30,7 @@ start_hub() {
   fi
   cp "$ROOT/build/gpui/backplane-serve-current" "$H/backplane-serve"
   printf '#!/bin/sh\nexec %s %s "$@"\n' "$(command -v bun)" "$ROOT/test/tools/claude_standin.ts" > "$H/bin/claude"
-  for n in codex grok muse opencode; do printf '#!/bin/sh\nexit 1\n' > "$H/bin/$n"; done
+  for n in codex grok muse opencode pi omp antigravity; do printf '#!/bin/sh\nexit 1\n' > "$H/bin/$n"; done
   chmod +x "$H"/bin/*
   systemd-run --user --unit=$HUB --collect -q $CAP --working-directory="$H/fakehome" \
     --setenv=HOME="$H/fakehome" --setenv=BACKPLANE_COPY=1 --setenv=BACKPLANE_NO_UPDATE=1 --setenv=BACKPLANE_ADOPT=0 \

@@ -141,7 +141,7 @@ impl Render for Backplane {
             if name == "BOTS" {
                 for ((bname, mood, note, _), rig) in bot_data.iter().zip(bot_rigs.iter()) {
                     let note_color = match mood.as_str() { "wait" | "error" => c("bad"), "work" | "talk" => c("accent"), _ => c("faint") };
-                    rows.push(div().flex().items_center().gap_2().px_3().py(px(3.)).child(art::cat(rig.clone(), mood, 28., started, format!("cat:{bname}")))
+                    rows.push(div().flex().items_center().gap_2().px_3().py(px(3.)).child(art::cat(rig.clone(), mood, 28., started, if art::rects_on() { format!("cat:{bname}") } else { String::new() }))
                         .child(div().flex().flex_col().min_w_0().line_height(px(18.)).child(div().overflow_hidden().whitespace_nowrap().child(bname.clone()))
                             .child(div().text_size(px(11.)).text_color(note_color).child(note.clone()))).into_any_element());
                 }
