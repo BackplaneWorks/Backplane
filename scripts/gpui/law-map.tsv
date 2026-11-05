@@ -86,3 +86,4 @@ law kserve_unavailable_names_fallback rust kserve_gate_words
 law kicad_min_version rust kicad_runtime_status
 law kicad_old_runtime_is_old rust kicad_runtime_status
 law kicad_new_runtime_is_ok rust kicad_runtime_status
+law boards_list_offered rust boards_list_offered

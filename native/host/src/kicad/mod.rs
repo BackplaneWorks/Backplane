@@ -2,6 +2,7 @@
 //! `files::start` registers it (the one line main.rs calls); no signal is sent to any process here.
 pub mod ipc;
 pub mod kserve;
+pub mod boards;
 pub mod plot;
 pub mod project;
 pub mod watch;

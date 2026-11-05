@@ -25,7 +25,7 @@ fn pdf_why(out: &str) -> String { if out.contains("nopoppler") { "PDFs show here
 
 pub struct Misc;
 impl RpcHandler for Misc {
-    fn methods(&self) -> &'static [&'static str] { &["file.open", "pdf.page", "mech.list", "mech.render", "history.resolve"] }
+    fn methods(&self) -> &'static [&'static str] { &["file.open", "pdf.page", "mech.list", "mech.render", "history.resolve", "boards.list"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let s = |k: &str| p.get(k).and_then(Value::as_str).unwrap_or("").to_string();
@@ -61,6 +61,14 @@ impl RpcHandler for Misc {
                     if r.code == 0 { let ls: Vec<&str> = r.out.split('\n').collect(); let at = |i: usize| ls.get(i).map(|x| x.trim()).unwrap_or("");
                         reply(true, json!({"resolved":{"thread":thread,"side":side,"ref":rf,"commit":at(0),"git":at(1),"top":at(2)}})) }
                     else { err(if r.out.trim().is_empty() { format!("could not resolve {rf}") } else { r.out.trim().to_string() }) }
+                }
+                "boards.list" => { // BoardsJob: the project's boards read again, as the card finds them
+                    let thread = s("thread"); let cwd_p = super::root_of(hub, &thread).await; let cwd = cwd_p.to_string_lossy().into_owned();
+                    if cwd.is_empty() { return reply(true, json!({"thread":thread,"board_list":[],"board_default":""})) }
+                    let found = crate::files::kicad::boards::find(std::path::Path::new(&cwd));
+                    let f = crate::files::kicad::project::read(&cwd); // Od.pcb: the folder's own board, from its root
+                    let bd = f.pcb.strip_prefix(&format!("{cwd}/")).unwrap_or("").to_string();
+                    reply(true, json!({"thread":thread,"board_list":crate::files::kicad::boards::pick(&found, &bd),"board_default":bd}))
                 }
                 _ => { // mech.list, mech.render
                     let thread = s("thread"); let cwd_p = super::root_of(hub, &thread).await; let cwd = cwd_p.to_string_lossy().into_owned();
