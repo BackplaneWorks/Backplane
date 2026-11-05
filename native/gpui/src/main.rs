@@ -88,6 +88,7 @@ impl Backplane {
 fn main()->anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
     let started=Instant::now();let config=hub::Config::parse()?;let exit_after=config.exit_after;
+    if config.swatches||config.gallery||config.fonts||std::env::var_os("BACKPLANE_GPUI_RECTS").is_some(){art::enable_rects();}
     script::metric(started,"process_start",serde_json::json!({}));
     Application::new().run(move|cx:&mut App|{
         art::load_fonts(cx);input::bind(cx);cx.bind_keys([KeyBinding::new("enter",Send,Some("TextInput")),KeyBinding::new("ctrl-enter",Send,Some("TextInput")),KeyBinding::new("escape",ClosePopup,None)]);

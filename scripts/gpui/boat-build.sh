@@ -29,6 +29,8 @@ if ! { pkg-config --exists xkbcommon-x11 && [ -e /usr/lib/x86_64-linux-gnu/libxk
  export RUSTFLAGS="-L native=$PWD/build/gpui-sysroot/usr/lib/x86_64-linux-gnu ${RUSTFLAGS:-}"
  export LD_LIBRARY_PATH="$PWD/build/gpui-sysroot/usr/lib/x86_64-linux-gnu${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 fi
+# The font files are not in git (binaries): fetched once and verified against the committed SHA256SUMS
+[ -f assets/fonts/jetbrains-mono/JetBrainsMono-Regular.ttf ] && [ -f assets/fonts/jetbrains-mono/JetBrainsMono-Bold.ttf ] || sh scripts/gpui/fetch-fonts.sh
 # The cats' rigs and the icon set come from Bend (core/cat.bend, core/icons.bend), generated here into
 # build/gpui-artifacts/assets/, never hand-copied. The app finds assets/ beside the binary.
 BEND=$(command -v bend || echo "$HOME/.bend/bin/bend")
@@ -51,6 +53,8 @@ for line in open("build/gpui-artifacts/icons.txt"):
 json.dump(icons, open("build/gpui-artifacts/assets/icons.json", "w"), separators=(",", ":"))
 print("cat rigs:", n, "icons:", len(icons))
 PY
+cp assets/fonts/jetbrains-mono/OFL.txt build/gpui-artifacts/assets/OFL-JetBrainsMono.txt
+cp assets/fonts/jetbrains-mono/SOURCE.txt build/gpui-artifacts/assets/SOURCE-JetBrainsMono.txt
 if [ "${1:-}" = check ]; then cargo check --release --manifest-path native/gpui/Cargo.toml 2>&1 | grep -E '^(error|warning: unused)' -A12 | head -150; echo CHECK-DONE; exit 0; fi
 /usr/bin/time -v -o build/gpui-artifacts/build.time cargo build --release --manifest-path native/gpui/Cargo.toml
 cp native/gpui/Cargo.lock build/gpui-artifacts/Cargo.lock

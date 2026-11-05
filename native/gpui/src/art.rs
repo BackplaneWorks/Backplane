@@ -38,13 +38,21 @@ fn parse_d(d: &str) -> Vec<Seg> {
 
 fn rgb_alpha(c: u32, a: f32) -> Rgba { rgba((c << 8) | (a.clamp(0.0, 1.0) * 255.0).round() as u32) }
 
+static RECTS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// GPUI_RECT lines are for the visual checks only: on with --gallery/--swatches/--fonts or BACKPLANE_GPUI_RECTS=1, off in the normal app
+/// (no formatting, no lock, no stderr from the render path).
+pub fn enable_rects() { RECTS.store(true, std::sync::atomic::Ordering::Relaxed); }
+pub fn rects_on() -> bool { RECTS.load(std::sync::atomic::Ordering::Relaxed) }
 /// One `GPUI_RECT` line per distinct drawn region (physical px), for the visual check.
 pub fn report(name: &str, b: Bounds<Pixels>, scale: f32) {
+    if !rects_on() { return; }
     static SEEN: std::sync::Mutex<Option<std::collections::HashSet<String>>> = std::sync::Mutex::new(None);
     let line = format!("{{\"name\":\"{}\",\"x\":{:.1},\"y\":{:.1},\"w\":{:.1},\"h\":{:.1},\"scale\":{}}}", name,
         f32::from(b.origin.x) * scale, f32::from(b.origin.y) * scale, f32::from(b.size.width) * scale, f32::from(b.size.height) * scale, scale);
     let mut g = SEEN.lock().unwrap();
-    if g.get_or_insert_with(Default::default).insert(line.clone()) { eprintln!("GPUI_RECT {line}"); }
+    let set = g.get_or_insert_with(Default::default);
+    if set.len() > 4096 { set.clear(); }
+    if set.insert(line.clone()) { eprintln!("GPUI_RECT {line}"); }
 }
 
 // ---- logo -------------------------------------------------------------------------------------
@@ -170,13 +178,14 @@ pub fn mono_font() -> Font {
 }
 
 // ---- generated assets (cat rigs, icons): found beside the binary, loud when missing --------------------
-/// BACKPLANE_GPUI_ASSETS, else `assets/` beside the binary, else the repo's build folder (a copied binary).
+/// BACKPLANE_GPUI_ASSETS, else `assets/` beside the binary (try.sh copies it); debug builds also try the repo's build folder.
 pub fn assets_dir() -> PathBuf {
     static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
     DIR.get_or_init(|| {
         let mut c: Vec<PathBuf> = Vec::new();
         if let Some(d) = std::env::var_os("BACKPLANE_GPUI_ASSETS") { c.push(PathBuf::from(d)); }
         if let Some(p) = std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.join("assets"))) { c.push(p); }
+        #[cfg(debug_assertions)] // a debug build run from the repo; a release build never looks outside its own folder
         if let Some(h) = std::env::var_os("HOME") { c.push(PathBuf::from(h).join("Documents/i2cjak/backplane-gpui/build/gpui/linux/assets")); }
         c.iter().find(|d| d.join("icons.json").is_file()).cloned().unwrap_or_else(|| c.into_iter().next().unwrap_or_default())
     }).clone()
@@ -214,7 +223,7 @@ pub fn icon(name: &'static str, size: f32, color: Rgba) -> AnyElement {
         return div().size(px(size)).into_any_element();
     };
     canvas(|_, _, _| (), move |b: Bounds<Pixels>, _, window: &mut Window, _| {
-        report(&format!("icon:{name}"), b, window.scale_factor());
+        if rects_on() { report(&format!("icon:{name}"), b, window.scale_factor()); }
         let s = size / 24.0; let o = b.origin;
         for l in layers {
             let f = |x: f32, y: f32| point(o.x + px(x * s), o.y + px(y * s));
