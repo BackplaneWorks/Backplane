@@ -69,9 +69,9 @@ export async function run(j,ctx){ // ctx: {gpuBin, display:{env,display}, hub:{s
   else if(wantFrames)res.notes.push('no frames event (G2) in this run');
   // G3: layout snapshots; inputT = time of the latest input event before the snapshot (same clock, t_ms)
   const lay=metrics.filter(m=>m.event==='layout');
-  if(lay.length>=2){const inT=inputs.map(m=>m.t_ms);const snaps=lay.map(m=>{const prior=inT.filter(t=>t<=m.t_ms);return {t:m.t_ms,inputT:prior.length?prior[prior.length-1]:null,rects:flatRects(m.rects)}});
-    res.metrics.layout=layoutShift(snaps,{w:1440,h:900});res.metrics.layout.snapshots=snaps.length}
-  else if(wantLayout)res.notes.push('fewer than 2 layout snapshots (G3 needs BACKPLANE_GPUI_RECTS, set for this run)');
+  if(lay.length>=1){const inT=inputs.map(m=>m.t_ms);const snaps=lay.map(m=>{const prior=inT.filter(t=>t<=m.t_ms);return {t:m.t_ms,inputT:prior.length?prior[prior.length-1]:null,rects:flatRects(m.rects)}});
+    res.metrics.layout=layoutShift(snaps,{w:1440,h:900});res.metrics.layout.snapshots=snaps.length;res.metrics.layout.note='GPUI emits a layout event only when a rectangle changed: one snapshot means stable'}
+  else if(wantLayout)res.notes.push('no layout event at all (G3 needs BACKPLANE_GPUI_RECTS, set for this run): layout shift unmeasured');
   if(first.memSamples.length>=3){res.metrics.memory={samples:first.memSamples.length,rssMBlast:first.memSamples.at(-1).rssMB,pssMBlast:first.memSamples.at(-1).pssMB,slope:rssSlope(first.memSamples,Math.min(300,first.memSamples.at(-1).t_s/4))}}
   // G4: dead-control sweep: phase 2 clicks every control the first run reported on its final screen
   if(sweep){const ctlEv=[...metrics].reverse().find(m=>m.event==='controls'&&m.controls?.length);
