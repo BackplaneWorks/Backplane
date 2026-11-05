@@ -16,4 +16,4 @@ PY
 git ls-files -co --exclude-standard native/host test/gpui/screen test/gpui/agents/fixtures test/gpui/files/hostile_paths.tsv | grep -v '^native/host/target'
 echo src/mobile/screen.bend; echo src/core/cbor.bend; } | sed 's/^/--include-file /' | tr '\n' ' ')
 # shellcheck disable=SC2086
-exec scripts/boat-job.sh --size large --timeout 1800 --idle 0 --artifact out/md $INC -- env N="${N:-3000}" SEED="${SEED:-1}" sh test/gpui/screen/md_oracle.sh
+exec scripts/boat-job.sh --size large --timeout 1800 --idle 3600 --artifact out/md $INC -- env N="${N:-3000}" SEED="${SEED:-1}" sh test/gpui/screen/md_oracle.sh

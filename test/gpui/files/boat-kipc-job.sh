@@ -4,7 +4,7 @@
 # helper's NDJSON interface, for the desktop's checks against the real server. Output: out/kipc/{probe-tests,probe,tests}.txt, kipc-probe.
 # Exit 0 only when the probe's tests pass and the binary exists; the hub's result is printed as HUB_TESTS=<code>, since other
 # streams' unfinished work in the shared tree can stop that build.
-exec scripts/boat-job.sh --size default --timeout 2400 --idle 0 --no-reuse --artifact out/kipc \
+exec scripts/boat-job.sh --size default --timeout 2400 --idle 3600 --artifact out/kipc \
   --exclude 'mobile/**' --exclude 'desktop/**' --exclude 'build/**' --exclude 'docs/**' --exclude 'tools/**' \
   --exclude 'shots-snap/**' --exclude 'assets/**' --exclude 'i18n/**' --exclude 'deploy/**' --exclude 'order/**' \
   --exclude 'skills/**' --exclude 'extra/**' --exclude 'test/gpui/hub/policy-bin/**' -- sh -c '
