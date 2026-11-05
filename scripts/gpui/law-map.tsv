@@ -388,3 +388,27 @@ law oc_models_failed_says rust oc_models_failed_says
 law oc_models_empty_says rust oc_models_empty_says
 law oc_models_missing_quiet rust oc_models_missing_quiet
 law todo_acp_plan rust todo_acp_plan
+# settings stream: native/host/src/settings/ (mask.rs, keys.rs, secret.rs, telemetry.rs)
+law sec_mask_total rust sec_mask_total
+law sec_vault_valid rust a_value_starting_with_the_mask_character_is_not_storable
+law sec_vault_total rust sec_mask_total
+law sec_mask_idem rust sec_mask_idem
+law sec_mask_clean_id rust sec_mask_clean_id
+law sec_empty_id rust sec_empty_id
+law sec_json_total rust sec_json_total
+law sec_handle_shape rust sec_handle_shape
+law sec_changes_empty rust sec_changes_empty
+law keys_name_env rust keys_name_env
+law keys_name_digit rust keys_name_digit
+law keys_quote_single rust keys_quote_single
+law keys_set_replaces rust keys_set_replaces
+law keys_drop_keeps_others rust keys_drop_keeps_others
+law keys_names_of_lines rust keys_names_of_lines
+law keys_prompt_none rust keys_prompt_none
+law keys_prompt_load_quotes_path rust keys_prompt_load_quotes_path
+law keys_prompt_list_quotes_path rust keys_prompt_list_quotes_path
+law telemetry_default_selected rust telemetry_default_selected
+law telemetry_default_pending rust telemetry_default_pending
+law telemetry_all_off rust telemetry_all_off
+law telemetry_existing_optout_answered rust telemetry_existing_optout_answered
+law telemetry_choice_no_decision_no_replay rust telemetry_choice_no_decision_no_replay
