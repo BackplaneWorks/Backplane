@@ -26,7 +26,7 @@ the hub binary's own `--render` flag (agents are told to run `<hub> --render`: m
 ## Design review and KiCad 10 copies
 `files/rv.rs` (review.bom, checks, tick, comment, release; the parts change on a new pull request) and `files/export10.rs` (kicad.export10, and `mcp` for the agents' kicad_export10) run in the hub, with no `--review` child and no Bun. The rules are pure twins in `kicad/{bj,cad,bom,checks,release,review,kexport}.rs`; `bj.rs` is core/json.bend exactly, because serde_json is neither as lenient nor keeps a number's text. Their shell text is extracted like the rest.
 Deliberate differences, all refusals, listed at the top of `rv.rs`: a version must name the thread's own repository and a commit id (the JS hub runs `git show` anywhere, and a commit word starting with "-" is an option to it: `--output` writes a file); no checklist write through a link; a comment needs a thread with a folder; a hub on a copied log ticks nothing, releases nothing and runs no project's own checks.
-`e2e_review.mjs` compares both hubs on the same paths (ports 3880/3881). It has not completed a run yet: see `build/gpui/results/files/README.md`. It must not override XDG_RUNTIME_DIR, which `systemd-run --user` needs: that stopped the first hub from starting.
+`e2e_review.mjs` compares both hubs on the same paths (ports 3880/3881) and exits 1 when release, gate, publish or consent did not really run: equal failures are not parity. It must not override XDG_RUNTIME_DIR, which `systemd-run --user` needs. Results: `build/gpui/results/files/README.md`.
 
 ## KiCad IPC checks
 
