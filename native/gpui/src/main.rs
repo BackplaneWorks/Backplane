@@ -34,7 +34,7 @@ fn pager_row(cx:&mut Context<Backplane>,id:String,pager:&Value,light:bool)->Opti
 pub fn string(v:&Value,key:&str)->String {v[key].as_str().unwrap_or("").to_string()}
 impl Backplane {
     fn new(window:&mut Window,cx:&mut Context<Self>,config:hub::Config,started:Instant)->Self {
-        let steps:VecDeque<Step>=config.script.as_ref().map(|p|script::load(p)).unwrap_or_default();let script_total=steps.len();
+        let (swatches,theme)=(config.swatches,config.theme.clone());let steps:VecDeque<Step>=config.script.as_ref().map(|p|script::load(p)).unwrap_or_default();let script_total=steps.len();
         let input=cx.new(input::TextInput::new);input.focus_handle(cx).focus(window);
         let(tx,events)=hub::connect(config);
         cx.spawn(async move |weak,cx|{while let Ok(event)=events.recv().await {if weak.update(cx,|this,cx|this.receive(event,cx)).is_err(){break;}}}).detach();
@@ -45,7 +45,7 @@ impl Backplane {
             if this.popup {let _=this.tx.try_send(Command::Draft(text));}
             cx.notify();
         }).detach();
-        Self{input,data:Value::Null,status:"Connecting…".into(),error:art::assets_missing().unwrap_or_default(),tx,selected:String::new(),drafts:HashMap::new(),popup:false,started,usable:false,first_frame:false,script_done:false,scroll:ScrollHandle::new(),last_entries:0,cats:art::Cats::new(),swatches:config.swatches,theme_override:config.theme.as_deref().map(|t|t=="light"),steps,pending:None,seq:0,want_focus:false,script_total}
+        Self{input,data:Value::Null,status:"Connecting…".into(),error:art::assets_missing().unwrap_or_default(),tx,selected:String::new(),drafts:HashMap::new(),popup:false,started,usable:false,first_frame:false,script_done:false,scroll:ScrollHandle::new(),last_entries:0,cats:art::Cats::new(),swatches,theme_override:theme.as_deref().map(|t|t=="light"),steps,pending:None,seq:0,want_focus:false,script_total}
     }
     fn receive(&mut self,event:Event,cx:&mut Context<Self>) {
         match event {
