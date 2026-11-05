@@ -27,13 +27,23 @@ fn render_scratch(key: &str) -> bool { key.starts_with("@more.") || key == "@pil
 const VIEW_INFO: [&str; 5] = ["view.design:", "view.kind:", "view.path:", "view.sheet:", "view.tree:"];
 
 #[derive(Default)]
-pub struct ViewActor { view: String, target: Option<Value>, sel: Option<String>, keys: BTreeSet<String>, away: BTreeMap<String, String>, page: Option<(String, Value, u64)> }
+pub struct ViewActor { view: String, target: Option<Value>, sel: Option<String>, keys: BTreeSet<String>, away: BTreeMap<String, String>, page: Option<(String, Value, u64)>, local: Option<(String, Value, Value)> }
 
 /// The thread a target's draft and viewer belong to (V.Target.owner). Limits: a bot's thread (Target.thread) and a
 /// project home's owner are not modelled, so those targets get no "@away.<t>" and no seeds.
 fn owner(target: &Value) -> &str { if target["kind"] == "thread" { target["id"].as_str().unwrap_or("") } else { "" } }
 
 impl ViewActor {
+    /// The policy's per-view memory (`local`: the sidebar's page positions) for this request: what the last reply of the same
+    /// view and target left, nothing after a view.open or a move.
+    pub fn local_in(&self, view: &str, method: &str, target: &Value) -> Option<Value> {
+        match &self.local { Some((v, t, l)) if method != "view.open" && v == view && t == target => Some(l.clone()), _ => None }
+    }
+    /// Keep the `local` a policy reply carried (and take it out of the reply, which the client never sees).
+    pub fn local_out(&mut self, view: &str, target: &Value, pol: &mut Value) {
+        let l = pol.as_object_mut().and_then(|o| o.remove("local"));
+        self.local = l.filter(|l| l.is_object()).map(|l| (view.to_string(), target.clone(), l));
+    }
     /// The older page this view stands on (`before`, 0 = the newest window). A view.page sets it from its cursor; later
     /// updates and actions of the same view and target keep it (the JS hub's actor holds the page it last served) until
     /// a view.open or another target ends it. Measured on recA/session-gpuid requests 41..45.
@@ -104,6 +114,14 @@ pub fn apply(client: u64, view: &str, req: &Value, pol: &Value) -> Value {
     let mut out = pol.clone();
     out["session"] = s;
     out
+}
+/// `local` to send the policy with this request.
+pub fn local_in(client: u64, view: &str, method: &str, target: &Value) -> Option<Value> {
+    ACTORS.lock().unwrap().get(&client).and_then(|a| a.local_in(view, method, target))
+}
+/// The policy's answer with `local` kept and removed.
+pub fn local_out(client: u64, view: &str, target: &Value, pol: &mut Value) {
+    ACTORS.lock().unwrap().entry(client).or_default().local_out(view, target, pol)
 }
 /// `before` for this request: see `ViewActor::page_at`.
 pub fn page(client: u64, view: &str, method: &str, target: &Value, asked: u64) -> u64 {
@@ -197,6 +215,20 @@ mod tests {
         a.page_at("v1", "view.page", &t, 99);
         assert_eq!(a.page_at("v1", "view.open", &t, 0), 0);
         assert_eq!(a.page_at("v1", "view.update", &t, 0), 0);
+    }
+    #[test] fn the_policys_local_memory_stays_with_the_view_and_never_reaches_the_client() {
+        let mut a = ViewActor::default();
+        let t = json!({"kind": "thread", "id": "t1"});
+        assert!(a.local_in("v1", "view.update", &t).is_none());
+        let mut reply = json!({"remoteReady": true, "local": {"sidebar": {"offset": 48}}, "session": {}});
+        a.local_out("v1", &t, &mut reply);
+        assert!(reply.get("local").is_none());
+        assert_eq!(a.local_in("v1", "view.update", &t), Some(json!({"sidebar": {"offset": 48}})));
+        assert!(a.local_in("v1", "view.open", &t).is_none());
+        assert!(a.local_in("v2", "view.update", &t).is_none());
+        assert!(a.local_in("v1", "view.update", &json!({"kind": "thread", "id": "t2"})).is_none());
+        a.local_out("v1", &t, &mut json!({"remoteReady": true}));
+        assert!(a.local_in("v1", "view.update", &t).is_none());
     }
     #[test] fn forget_and_the_bound_keep_the_map_flat() {
         let mut m: HashMap<u64, ViewActor> = HashMap::new();
