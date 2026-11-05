@@ -82,7 +82,8 @@ pub fn reap_orphans(home: &str) -> usize {
 
 pub fn spawn(program: &Path, args: &[String], cwd: &Path, extra_path: Option<&Path>, env: &[(String, String)]) -> std::io::Result<Proc> {
     let mut c = Command::new(program);
-    c.args(args).current_dir(cwd).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
+    let args: Vec<String> = args.iter().map(|a| crate::settings::mask::mask(a)).collect(); // settings lane: Spawn.agent masks every launch argument
+    c.args(&args).current_dir(cwd).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
     if let Some(d) = extra_path { let old = std::env::var_os("PATH").unwrap_or_default(); let mut v = vec![d.to_path_buf()]; v.extend(std::env::split_paths(&old)); if let Ok(j) = std::env::join_paths(v) { c.env("PATH", j); } }
     for (k, v) in env { c.env(k, v); }
     if let Some(o) = OWNER.get() { c.env("BACKPLANE_AGENT_OWNER", o); }
@@ -93,9 +94,9 @@ pub fn spawn(program: &Path, args: &[String], cwd: &Path, extra_path: Option<&Pa
     let (in_tx, mut in_rx) = mpsc::channel::<String>(IN_QUEUE);
     let (out_tx, out_rx) = mpsc::channel::<String>(OUT_QUEUE);
     let (exit_tx, exit_rx) = oneshot::channel();
-    tokio::spawn(async move { while let Some(l) = in_rx.recv().await { if stdin.write_all(l.as_bytes()).await.is_err() || stdin.write_all(b"\n").await.is_err() || stdin.flush().await.is_err() { break } } });
-    tokio::spawn(async move { let mut r = BufReader::with_capacity(64 << 10, stdout); while let Ok(Some(l)) = read_capped(&mut r, LINE_CAP).await { if out_tx.send(l).await.is_err() { break } } });
-    let tail = tokio::spawn(async move { let mut keep: Vec<u8> = Vec::new(); let mut b = [0u8; 4096]; loop { match stderr.read(&mut b).await { Ok(0) | Err(_) => break, Ok(n) => { keep.extend_from_slice(&b[..n]); if keep.len() > STDERR_TAIL { let cut = keep.len() - STDERR_TAIL; keep.drain(..cut); } } } } String::from_utf8_lossy(&keep).into_owned() });
+    tokio::spawn(async move { while let Some(l) = in_rx.recv().await { let l = crate::settings::mask::mask(&l); /* Agent.write */ if stdin.write_all(l.as_bytes()).await.is_err() || stdin.write_all(b"\n").await.is_err() || stdin.flush().await.is_err() { break } } });
+    tokio::spawn(async move { let mut r = BufReader::with_capacity(64 << 10, stdout); while let Ok(Some(l)) = read_capped(&mut r, LINE_CAP).await { let l = crate::settings::mask::mask(&l); /* Hub.tagged */ if out_tx.send(l).await.is_err() { break } } });
+    let tail = tokio::spawn(async move { let mut keep: Vec<u8> = Vec::new(); let mut b = [0u8; 4096]; loop { match stderr.read(&mut b).await { Ok(0) | Err(_) => break, Ok(n) => { keep.extend_from_slice(&b[..n]); if keep.len() > STDERR_TAIL { let cut = keep.len() - STDERR_TAIL; keep.drain(..cut); } } } } crate::settings::mask::mask(&String::from_utf8_lossy(&keep)) });
     tokio::spawn(async move {
         let st = child.wait().await; // always reaped
         let err = tail.await.unwrap_or_default();

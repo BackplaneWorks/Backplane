@@ -12,7 +12,7 @@ use std::{sync::{Arc, Weak}, time::Duration};
 use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::{TcpListener, TcpStream}, sync::{oneshot, Semaphore}};
 
 pub const TOOLS_JSON: &str = include_str!("../../../../test/gpui/agents/fixtures/mcp-tools.json");
-pub const IMPLEMENTED: &[&str] = &["orchestrator_capabilities", "thread_list", "thread_read", "thread_send", "thread_update", "thread_wait", "thread_interrupt", "viewer_show", "permission_prompt", "kicad_ipc", "kicad_ipc_status", "terminal_open", "terminal_read", "terminal_send", "terminal_close"];
+pub const IMPLEMENTED: &[&str] = &["orchestrator_capabilities", "thread_list", "thread_read", "thread_send", "thread_update", "thread_wait", "thread_interrupt", "viewer_show", "permission_prompt", "kicad_ipc", "kicad_ipc_status", "terminal_open", "terminal_read", "terminal_send", "terminal_close", "secret_request", "secret_list", "secret_run"];
 const MAX_BODY: usize = 4 << 20;
 const MAX_CONNS: usize = 256;
 const MAX_PARKED_PER_THREAD: usize = 16;
@@ -31,10 +31,11 @@ fn same(a: &str, b: &str) -> bool { a.len() == b.len() && a.bytes().zip(b.bytes(
 /// Mcp.result / Mcp.error / Mcp.content
 pub fn result(id: &Value, r: Value) -> Value { json!({"jsonrpc":"2.0","id":id,"result":r}) }
 pub fn error(id: &Value, code: i64, msg: &str) -> Value { json!({"jsonrpc":"2.0","id":id,"error":{"code":code,"message":msg}}) }
-pub fn content(ok: bool, body: &Value) -> Value { json!({"content":[{"type":"text","text":body.to_string()}],"isError":!ok}) }
+pub fn content(ok: bool, body: &Value) -> Value { let mut b = body.clone(); crate::settings::mask::json(&mut b); /* Mcp.masked */ json!({"content":[{"type":"text","text":b.to_string()}],"isError":!ok}) }
+
 /// The text of a result that does not pass through `content`'s JSON masking (a terminal's screen, a page's text blocks): the one place a mask is applied to it.
-/// The settings lane's vault mask is `crate::settings::mask::mask`; until it is on this branch this is the seam (see HUB-API.md).
-fn mask_text(s: &str) -> String { s.to_string() }
+/// The vault's mask (settings lane), as Hub.tagged / Mcp.masked apply it.
+fn mask_text(s: &str) -> String { crate::settings::mask::mask(s) }
 /// A tool body's shapes (term/tools.rs docs): a String is the raw text, {"$content":[blocks]} is the content array (text blocks masked, images as they are), anything else JSON text.
 pub fn shaped(ok: bool, body: &Value) -> Value {
     match body {
@@ -164,6 +165,9 @@ impl Mcp {
             "kicad_ipc" => match crate::files::kicad::ipc::kicad_ipc_in(&ag.hub, Some(thread), sv(&a, "path"), sv(&a, "type"), a.get("message").cloned().unwrap_or(json!({}))).await { Ok(v) => (true, v), Err(e) => fail(&e) },
             "kicad_ipc_status" => match crate::files::kicad::ipc::kicad_ipc_status_in(&ag.hub, Some(thread), sv(&a, "path")).await { Ok(v) => (true, v), Err(e) => fail(&e) },
             "kicad_export10" => crate::files::export10::mcp(&ag.hub, sv(&a, "path"), a.get("force").and_then(Value::as_bool).unwrap_or(false)).await,
+            "secret_request" => crate::settings::secret::tool_request(&ag.hub, thread, &a).await,
+            "secret_list" => crate::settings::secret::tool_list(),
+            "secret_run" => { let cwd = crate::files::root_of(&ag.hub, thread).await.map(|p| p.to_string_lossy().to_string()).unwrap_or_default(); crate::settings::secret::tool_run(thread, &cwd, &a).await }
             n if crate::term::tools::NAMES.contains(&n) => crate::term::tools::call(&ag.hub, thread, n, &a).await.unwrap_or_else(|| fail("unknown tool")),
             "viewer_show" => { ag.hub.push_all(&json!({"t":"view","thread":thread,"path":sv(&a, "path"),"kind":sv(&a, "kind")})); (true, json!({"shown":sv(&a, "path")})) }
             _ => fail("unknown tool"),

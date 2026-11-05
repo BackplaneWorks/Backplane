@@ -140,7 +140,9 @@ impl Hub {
     /// write and one fsync for the batch, the model and the presenter in log order, then every caller is told.
     pub async fn commit_many(&self, events: &[Value]) -> Result<u64> {
         let (done, rx) = tokio::sync::oneshot::channel();
-        self.commits.send(Commit { events: events.to_vec(), done }).map_err(|_| anyhow::anyhow!("hub is stopping"))?;
+        // settings lane: a stored secret never reaches the log, the model, the presenter or a client (Hub.step.go, Secret.changes)
+        let mut events = events.to_vec(); crate::settings::mask::events(&mut events);
+        self.commits.send(Commit { events, done }).map_err(|_| anyhow::anyhow!("hub is stopping"))?;
         rx.await?
     }
 
@@ -257,6 +259,7 @@ impl Hub {
     pub fn subscribe(&self) -> broadcast::Receiver<u64> { self.changed.subscribe() }
     /// Streamed text of a running turn, not yet an event: shown to views as the thread's live reply.
     pub async fn live_delta(&self, thread: &str, text: &str) -> Result<()> {
+        let text = &crate::settings::mask::mask(text); // settings lane: Hub.tagged
         self.live.lock().unwrap().entry(thread.to_string()).or_default().push_str(text);
         let _ = self.frames.send(json!({"t":"delta","thread":thread,"text":text}));
         self.presenter.fold(&json!({"t":"delta","thread":thread,"text":text,"now":now_ms()})).await?;
