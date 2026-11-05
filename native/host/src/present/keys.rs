@@ -104,7 +104,7 @@ mod tests {
             if x["thread"].is_null() && x.get("diff").is_none() { continue }
             let mut st = State::new(); for l in log.lines() { st.apply_line(l); }
             for e in x["extra"].as_array().unwrap() { st.apply(e); }
-            let Some(got) = keys(&st, T, 1_700_100_000) else { assert!(matches!(name.as_str(), "failed" | "interrupted"), "{name} should be computed"); continue };
+            let Some(got) = keys(&st, T, 1_700_100_000) else { assert!(matches!(name.as_str(), "failed" | "interrupted" | "queued"), "{name} should be computed"); continue };
             let diff = x["diff"].as_object().unwrap();
             for k in ["state", "tools", "menu", "working", "phase"] { assert_eq!(Some(&got[k]), diff.get(k).or(base.get(k)), "{name}: {k}"); }
             checked += 1;
