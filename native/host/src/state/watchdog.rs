@@ -101,6 +101,47 @@ pub fn after(st: &State, now: u64, batch: &[Value]) -> Vec<Value> {
     out
 }
 
+// ---- Watchdog.line: streamed output with no committed message ----
+
+fn nonempty(o: &Value, k: &str) -> bool { !gstr(o, k, "").is_empty() }
+/// Watchdog.block.content: a block with text, content (a string or a non-empty list) or a tool name
+fn block_content(b: &Value) -> bool {
+    nonempty(b, "text") || nonempty(b, "content") || !elems(gobj(b, "content")).is_empty() || nonempty(b, "name")
+}
+/// Watchdog.blocks: any block that is output (for a user line only tool results count)
+fn blocks(xs: &[Value], user: bool) -> bool { xs.iter().any(|b| (!user || gstr(b, "type", "") == "tool_result") && block_content(b)) }
+/// Watchdog.output: a provider line that is real output (text, thinking, partial tool input, a command or its output), never a ping or a quota line
+pub fn line_is_output(o: &Value) -> bool {
+    match gstr(o, "type", "") {
+        "assistant" => blocks(elems(gobj(gobj(o, "message"), "content")), false),
+        "user" => blocks(elems(gobj(gobj(o, "message"), "content")), true),
+        "stream_event" => { let d = gobj(gobj(o, "event"), "delta"); nonempty(d, "text") || nonempty(d, "thinking") || nonempty(d, "partial_json") }
+        "item.delta" => nonempty(o, "text"),
+        "item.started" => nonempty(gobj(o, "item"), "command"),
+        "item.completed" => { let i = gobj(o, "item"); nonempty(i, "text") || nonempty(i, "aggregated_output") || nonempty(i, "command") }
+        "item.updated" => nonempty(gobj(o, "item"), "text"),
+        _ => false,
+    }
+}
+/// Prog.is: a progress line of the thread's own agent (a subagent's goes to its log)
+fn is_progress(o: &Value) -> bool { gstr(o, "type", "") == "system" && gstr(o, "subtype", "") == "task_progress" && gstr(o, "parent_tool_use_id", "").is_empty() }
+/// Watchdog.line: the thread's record moves at five-second precision on real output, or on a task's progress line that says something new;
+/// an open episode ends on the first real output at once. `st` is the current state. The agents lane calls this for each provider line and
+/// commits the events it returns.
+pub fn line(st: &State, now: u64, th: &str, o: &Value) -> Vec<Value> {
+    let task = is_progress(o) && {
+        let id = gstr(o, "task_id", "");
+        let known = st.get(&format!("bg.{th}"), "").split('\n').filter(|l| !l.is_empty())
+            .find(|row| row.split('\t').next() == Some(id)).map_or("", |row| row.split('\t').nth(1).unwrap_or(""));
+        gstr(o, "description", "") != known
+    };
+    let l = live(st, th);
+    if !((line_is_output(o) || task) && (now >= l.last.saturating_add(5) || l.nudged > 0)) { return vec![] }
+    let mut out = vec![];
+    progress(st, now, th, "agent tool or stream output", &mut out);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -146,5 +187,28 @@ mod tests {
         assert!(ev[3]["value"].as_str().unwrap().contains("request resolved"));
         let quiet = json!({"$":"ActivityLogged","thread":"t1","act":"g2","tone":"info","kind":"git","summary":"x","at":60});
         assert!(after(&st, 61, &[quiet]).is_empty(), "an info act is not output");
+    }
+    #[test] fn streamed_output_moves_the_record_at_five_second_precision() {
+        let st = fold(&[BASE[0], BASE[1], BASE[3], r#"{"$":"SettingSet","key":"liveness.t1","value":"{\"last\":100,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"r\"}","at":100}"#]);
+        let text = json!({"type":"stream_event","event":{"delta":{"text":"hi"}}});
+        assert!(line(&st, 104, "t1", &text).is_empty(), "inside five seconds");
+        let ev = line(&st, 105, "t1", &text); assert_eq!(ev.len(), 1);
+        assert!(ev[0]["value"].as_str().unwrap().contains(r#""last":105"#) && ev[0]["value"].as_str().unwrap().contains("agent tool or stream output"));
+        // a ping or an empty delta is no output; an open episode ends at once
+        assert!(line(&st, 200, "t1", &json!({"type":"stream_event","event":{"delta":{"text":""}}})).is_empty());
+        assert!(line(&st, 200, "t1", &json!({"type":"system","subtype":"init"})).is_empty());
+        let st2 = fold(&[BASE[0], BASE[1], r#"{"$":"SettingSet","key":"liveness.t1","value":"{\"last\":100,\"nudged\":101,\"stalled\":true,\"reported\":true,\"reason\":\"r\"}","at":100}"#]);
+        assert_eq!(line(&st2, 102, "t1", &text).len(), 1, "an open episode (nudged) ends on the first output even inside five seconds");
+    }
+    #[test] fn which_provider_lines_are_output() {
+        for o in [json!({"type":"assistant","message":{"content":[{"type":"text","text":"x"}]}}), json!({"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash"}]}}),
+                  json!({"type":"user","message":{"content":[{"type":"tool_result","content":"out"}]}}), json!({"type":"stream_event","event":{"delta":{"thinking":"t"}}}),
+                  json!({"type":"stream_event","event":{"delta":{"partial_json":"{"}}}), json!({"type":"item.delta","text":"x"}), json!({"type":"item.started","item":{"command":"ls"}}),
+                  json!({"type":"item.completed","item":{"aggregated_output":"o"}}), json!({"type":"item.updated","item":{"text":"x"}})] { assert!(line_is_output(&o), "{o}"); }
+        for o in [json!({"type":"user","message":{"content":[{"type":"text","text":"a person"}]}}), json!({"type":"assistant","message":{"content":[]}}), json!({"type":"result"}), json!({"type":"item.started","item":{}})] { assert!(!line_is_output(&o), "{o}"); }
+        // a task progress line counts when its description is new
+        let st = fold(&[BASE[0], BASE[1], r#"{"$":"SettingSet","key":"bg.t1","value":"task9\tsame\tx","at":1}"#]);
+        let prog = |d: &str| json!({"type":"system","subtype":"task_progress","task_id":"task9","description":d});
+        assert!(line(&st, 50, "t1", &prog("same")).is_empty()); assert_eq!(line(&st, 50, "t1", &prog("new")).len(), 1);
     }
 }
