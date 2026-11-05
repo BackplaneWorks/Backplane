@@ -386,7 +386,7 @@ impl Hub {
         if m == "fab.look" {
             let reply = self.fab_look(&id, msg.get("p").unwrap_or(&Value::Null));
             // the hub's own read, applied to this view's held state by the policy on its next V (Fab.reply)
-            if !c.view_id.is_empty() { crate::session::record_read(c.client, &c.view_id, "fab.look", id.as_u64().unwrap_or(0), reply["result"].clone()); }
+            if !c.view_id.is_empty() { crate::session::record_read(c.client, &c.view_id, "fab.look", id.as_u64().unwrap_or(0), reply["ok"].as_bool().unwrap_or(true), reply["result"].clone()); }
             return vec![reply];
         }
         if let Some(handler) = self.rpc_for(m) {
