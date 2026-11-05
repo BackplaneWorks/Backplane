@@ -4,13 +4,14 @@
 set -u
 export BEND_NO_TELEMETRY=1
 O=out/split; mkdir -p $O
+CC=${CC:-clang}; CSTD=${CSTD:-c11}
 SRC=${SRC:-native/bend/slim_serve.bend}; UNITS=${UNITS:-16}; OPT=${OPT:--O2}
 now() { date +%s; }
 T0=$(now)
-echo "machine: $(nproc) vCPU, $(free -m | awk '/Mem/{print $2}') MiB, clang $(clang --version | head -1), bend $(bend version), src $SRC units $UNITS opt $OPT" | tee $O/build.txt
+echo "machine: $(nproc) vCPU, $(free -m | awk '/Mem/{print $2}') MiB, $CC $($CC --version | head -1), bend $(bend version), src $SRC units $UNITS opt $OPT" | tee $O/build.txt
 capped() { systemd-run --user --scope -q -p MemoryMax=8G -p MemorySwapMax=0 -- "$@"; }
 # peak of the scope's tree sampled every 0.5 s
-peakof() { f=$1; shift; ( "$@" ) & w=$!; p=0; while kill -0 $w 2>/dev/null; do r=$(ps -eo rss=,comm= | awk '$2=="clang"||$2=="clang-18"||$2=="cc1"||$2=="bun"||$2=="bend"{s+=$1}END{print s+0}'); [ "$r" -gt "$p" ] && p=$r; sleep 0.5; done; wait $w; rc=$?; echo $p > $f; return $rc; }
+peakof() { f=$1; shift; ( "$@" ) & w=$!; p=0; while kill -0 $w 2>/dev/null; do r=$(ps -eo rss=,comm= | awk '$2=="clang"||$2=="gcc"||$2=="cc1"||$2=="ld"||$2=="collect2"||$2=="clang-18"||$2=="cc1"||$2=="bun"||$2=="bend"{s+=$1}END{print s+0}'); [ "$r" -gt "$p" ] && p=$r; sleep 0.5; done; wait $w; rc=$?; echo $p > $f; return $rc; }
 if [ -n "${PRE:-}" ] && [ -f "$PRE" ]; then gunzip -c "$PRE" > $O/all.c; echo "emit: reused $PRE" | tee -a $O/build.txt; EMIT_S=0; EMIT_KB=0
 else
   export BUN_JSC_forceRAMSize=${EMIT_RAM:-5368709120}
@@ -23,12 +24,12 @@ ls -l $O/u*.c | tee -a $O/build.txt
 CCMAX=0; t=$(now)
 for c in $(ls -S $O/u*.c); do
   o=${c%.c}.o; t1=$(now)
-  peakof $c.peak capped clang -std=c11 $OPT -w -c $c -o $o > $c.log 2>&1 || { echo "cc failed $c"; tail -20 $c.log; exit 1; }
+  peakof $c.peak capped $CC -std=$CSTD $OPT -w -c $c -o $o > $c.log 2>&1 || { echo "cc failed $c"; tail -20 $c.log; exit 1; }
   k=$(cat $c.peak); [ "$k" -gt "$CCMAX" ] && CCMAX=$k
   echo "cc $c: $(( $(now) - t1 )) s peak_kib=$k" | tee -a $O/build.txt
 done
 CC_S=$(( $(now) - t )); t=$(now)
-capped clang $OPT $O/u*.o -o $O/bp-policy -lpthread -lm || exit 1
+capped $CC $OPT $O/u*.o -o $O/bp-policy -lpthread -lm || exit 1
 LINK_S=$(( $(now) - t ))
 strip -o $O/bp-policy.stripped $O/bp-policy
 ls -l $O/bp-policy $O/bp-policy.stripped | tee -a $O/build.txt
