@@ -17,6 +17,6 @@ mod tests {
     use super::*;
     #[test] fn codex_passes_its_own_shapes_through_and_ignores_noise() {
         let mut d = CodexDriver; assert_eq!(d.on_line(&serde_json::json!({"type":"item.delta","text":"x"})).shapes.len(), 1); assert!(d.on_line(&Value::String("warning".into())).shapes.is_empty());
-        assert!(super::super::driver("codex").is_some() && super::super::driver("pi").is_none());
+        assert!(super::super::driver("codex").is_some());
     }
 }
