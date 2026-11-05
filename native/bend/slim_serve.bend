@@ -6,6 +6,11 @@ import ../../src/mobile/session.bend as MS
 import ../../src/core/native-sidebar.bend as NS
 import ../../src/mobile/thin.bend as MT
 import ../../src/mobile/folded-actions.bend as FA
+import ../../src/core/model.bend as M
+import ../../src/core/project-home.bend as PH
+import ../../src/core/bot.bend as B
+import ../../src/core/thin.bend as T
+import ../../src/core/thinq.bend as Q
 
 # bp-policy: the slim backend's policy process, in machine code. It folds the
 # hub's wire frames incrementally into Backplane's own client state (the same
@@ -23,6 +28,57 @@ import ../../src/mobile/folded-actions.bend as FA
 #
 # A request is ASCII (the host escapes non-ASCII as \uXXXX); a reply is one
 # line of JSON. The state never crosses the socket: frames in, one picture out.
+
+# ---- a page ----------------------------------------------------------------
+# V's optional p.page = {thread, before, below, above, rows: [[10 string cells]...]}: the rows Rust read out of its
+# own index (the cells of policy.bend: seq ord id thread src kind role akind text at). The thread's timeline is drawn
+# from the 32-row page only, the way Render.ui draws a view.page: the shared state minus its entries, plus the page.
+
+def Pol.cell(+x: J.Json) -> String:
+  match x:
+    case J.Str{+t}: t
+    case _: ""
+
+def Pol.cells(+xs: List<&2, J.Json>) -> List<&2, String>:
+  match xs:
+    case Nil{}: Nil{}
+    case +x <> +t: Pol.cell(x) <> Pol.cells(t)
+
+def Pol.cellrows(+xs: List<&2, J.Json>) -> List<&2, List<&2, String>>:
+  match xs:
+    case Nil{}: Nil{}
+    case +x <> +t: Pol.cells(J.Json.elems(x)) <> Pol.cellrows(t)
+
+def Pol.ents(ids: List<&2, String>, +idx: T.Index, acc: List<&2, M.Entry>) -> List<&2, M.Entry>:
+  match ids:
+    case Nil{}: acc
+    case id <> rest: Pol.ents(rest, idx, T.Row.preview(T.Index.row(idx, Q.Q.num(id))) <> acc)
+
+def Pol.empty(+st: M.State) -> M.State:
+  match st:
+    case M.State{+ps, +ts, _, +n, +tk, +settings, +queued, +asks, _, +nav, +bw}:
+      M.State{ps, ts, Nil{}, n, tk, settings, queued, asks, Map.new(&2, M.Device), nav,
+        [M.Ext{M.Ext.world(M.Ext.of(bw)), Map.new(&2, List<&2, M.Entry>), M.Ext.mail(M.Ext.of(bw)), M.Ext.usage(M.Ext.of(bw))}]}
+
+def Pol.add(+es: List<&2, M.Entry>, +st: M.State) -> M.State:
+  match es:
+    case Nil{}: st
+    case +e <> +t: Pol.add(t, M.State.post(st, e))
+
+def Pol.paged(+u: U.Ui, +th: String, +idx: T.Index, +before: Nat) -> U.Ui:
+  U.Ui.adopt.raw(U.Ui.scratch_set(U.Ui.scratch_set(U.Ui.scratch_set(u, "@more." ++ th, "1"), "@away." ++ th, ""), "@pill", ""),
+    Pol.add(Pol.ents(T.Index.page(idx, th, before, 32n), idx, Nil{}), Pol.empty(U.Ui.state(u))))
+
+def Pol.page.k(+u: U.Ui, +th: String, +before: Nat, +below: Nat, +above: Nat, +rows: List<&2, List<&2, String>>) -> U.Ui:
+  Pol.paged(u, th, T.Index.window.above(T.Index.window(Q.Q.rows(rows), th, below, T.Index.empty()), th, above), before)
+
+def Pol.page(+u: U.Ui, +page: J.Json) -> U.Ui:
+  Pol.page.k(u, J.Json.get_str(page, "thread", ""), J.Json.get_nat(page, "before", 0n), J.Json.get_nat(page, "below", 0n), J.Json.get_nat(page, "above", 0n), Pol.cellrows(J.Json.elems(J.Json.get_obj(page, "rows"))))
+
+def Pol.pick(+has: Bool, +u: U.Ui, +page: J.Json) -> U.Ui:
+  match has:
+    case True{}: Pol.page(u, page)
+    case False{}: u
 
 # ---- the picture -----------------------------------------------------------
 
@@ -83,12 +139,24 @@ def Pol.view.r(+r: J.Json, +want: J.Json, +window: J.Json) -> J.Json:
 def Pol.clock(+ms: Nat, +own: Nat) -> Nat:
   Bool.pick(Nat, Nat.is_eq(ms, 0n), own, Nat.div(ms, 1000n))
 
+# Target.bind of thin-view.bend: the target's selection and the bot/room views (these set the scratch keys @bot, @bot.want)
+def Pol.bind.kind(+kind: String, +u: U.Ui, +id: String) -> U.Ui:
+  match kind:
+    case "project": U.Bots.views(U.Bots.sel.set(u, PH.Home.owner(id)), "", "", "")
+    case "thread": U.Bots.views(U.Bots.sel.set(u, id), "", "", "")
+    case "bot": U.Bots.views(U.Bots.sel.set(u, U.Bots.chat.of(U.Ui.state(u), id, B.Bot.thread(B.World.bot(M.State.bots(U.Ui.state(u)), id)))), id, "", "")
+    case "room": U.Bots.views(u, "", id, "")
+    case _: U.Bots.views(U.Bots.sel.set(u, ""), "", "", "")
+
+def Pol.bind(+u: U.Ui, +target: J.Json) -> U.Ui:
+  Pol.bind.kind(J.Json.get_str(target, "kind", ""), u, J.Json.get_str(target, "id", ""))
+
 def Pol.view(+u0: U.Ui, +now0: Nat, +p: J.Json) -> J.Json:
   +now = Pol.clock(J.Json.get_nat(p, "now", 0n), now0)
   +key = J.Json.get_str(p, "hub", "")
   +cid = J.Json.get_str(p, "cid", "")
-  +u1 = U.Ui.scratch_set(U.Ui.online(U.Ui.set_cid(MS.Session.adopt(U.Ui.tick(u0, now), J.Json.get_obj(p, "session")), cid), True{}), "@sync", "1")
-  +u = NS.Ns.prepare(u1, False{}, p, J.Json.get_str(p, "epoch", ""), J.Json.get_str(p, "viewId", ""), J.Json.get_nat(p, "revision", 0n), J.Json.get_str(p, "nativeKey", ""))
+  +u1 = U.Ui.scratch_set(U.Ui.online(U.Ui.set_cid(Pol.bind(MS.Session.adopt(U.Ui.tick(u0, now), J.Json.get_obj(p, "session")), J.Json.get_obj(p, "target")), cid), True{}), "@sync", "1")
+  +u = NS.Ns.prepare(Pol.pick(Pol.is_obj(J.Json.get_obj(p, "page")), u1, J.Json.get_obj(p, "page")), False{}, p, J.Json.get_str(p, "epoch", ""), J.Json.get_str(p, "viewId", ""), J.Json.get_nat(p, "revision", 0n), J.Json.get_str(p, "nativeKey", ""))
   Pol.view.r(MS.Session.result(MS.Session.act(u, key, cid, now, J.Json.get_str(p, "action", ""), J.Json.get_str(p, "value", "")), key), J.Json.get_obj(p, "target"), J.Json.get_obj(p, "window"))
 
 # ---- the fold --------------------------------------------------------------
