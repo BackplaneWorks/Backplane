@@ -20,7 +20,7 @@ const KEEP: &[&str] = &["settle.", "autosettle.", "launch.", "launched.", "threa
     "order.enabled", "order.estimates", "account.thread.", "fork.", "usage.", "effort.", "buy."]; // fork.<id>: the source thread id, a thread screen's "back" button; the action dispatcher's facts (Fab.at / Fab.want, Accounts.named): tiny values, one account key per thread
 // A thread screen must see its refusal gate's configuration even in the lean copy. Exact global keys keep their values;
 // per-thread keys keep only presence, never the possibly large body. stopped./failed. remain outside this allowlist.
-const GATE_EXACT: &[&str] = &["files.max.mb", "person.tz", "person.tz.device", "tz.machine", "think", "permissions.default"];
+const GATE_EXACT: &[&str] = &["files.max.mb", "person.tz", "person.tz.device", "tz.machine", "think", "agent.thinking", "permissions.default"];
 const GATE_PRESENCE: &[&str] = &["effort:", "wait.", "stop.", "fail.", "stopped.", "failed."]; // stopped./failed.<msg>: how a turn ended, for the reply stamps (one per stopped or failed turn, presence only)
 pub fn gate_presence(k: &str) -> bool { GATE_PRESENCE.iter().any(|p| k.starts_with(p)) }
 // `told.` is a ledger that grows with the log until the minute tick prunes it (Told.prune: 30 days, 2000 records, run by `Core::tick`): only

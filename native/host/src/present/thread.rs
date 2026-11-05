@@ -127,6 +127,46 @@ fn api_say(x: &str) -> String {
     format!("{head}{} and ended the turn{why}.", if code.is_empty() { String::new() } else { format!(" ({code})") })
 }
 
+
+// ---- attachments and images (core/attach.bend, core/images.bend) ----
+/// Att.split: the lines at the end of a message that are `[attachment: <path>]` (blank lines between them allowed) are its attachments; the rest is the body
+fn att_split(text: &str) -> (String, Vec<String>) {
+    let lines: Vec<&str> = text.split('\n').collect();
+    let (mut paths, mut end) = (Vec::new(), lines.len());
+    while end > 0 {
+        let l = lines[end - 1].trim();
+        if l.starts_with("[attachment: ") && l.ends_with(']') { paths.insert(0, l[13..l.len() - 1].trim().to_string()); end -= 1 }
+        else if l.is_empty() { end -= 1 }
+        else { break }
+    }
+    if paths.is_empty() { return (text.to_string(), paths) }
+    (lines[..end].join("\n"), paths)
+}
+fn enc(s: &str) -> String { s.bytes().map(|b| if b.is_ascii_alphanumeric() || matches!(b, b'/' | b'.' | b'-' | b'_') { (b as char).to_string() } else { format!("%{b:02X}") }).collect() }
+/// Mob.chip: an attachment as a chip (its name without the upload key, whether it is an image, where the hub serves it)
+fn chip(path: &str) -> Value {
+    let base = path.rsplit('/').next().unwrap_or(path);
+    let parts: Vec<&str> = base.split('-').collect();
+    let label = if parts.len() >= 2 { parts[1..].join("-") } else { base.to_string() };
+    let ext = base.rsplit('.').next().unwrap_or("").to_lowercase();
+    json!({"label": label, "path": path, "image": matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp"), "url": format!("/img?path={}", enc(path))})
+}
+/// Img.paths: the image files a message names, each once, in order
+fn img_paths(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for w in text.split(|c: char| matches!(c, ' ' | '\n' | '\t' | '\r' | '(' | ')' | '[' | ']' | '<' | '>' | '`' | '"' | '\'' | ',' | ';' | '|')) {
+        if w.is_empty() || w.chars().count() > 1024 { continue }
+        let b = w.strip_prefix("file://").unwrap_or(w);
+        let b = if b.ends_with(['.', ':', '!', '?']) { &b[..b.len() - 1] } else { b };
+        let l = b.to_lowercase();
+        if (b.starts_with('/') || b.starts_with("~/")) && [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"].iter().any(|e| l.ends_with(e)) && !out.iter().any(|o| o == b) { out.push(b.to_string()) }
+    }
+    out
+}
+fn images(entry: &str, text: &str) -> Vec<Value> {
+    img_paths(text).into_iter().map(|p| json!({"path": p, "url": format!("/message-image?entry={}&path={}", enc(entry), enc(&p))})).collect()
+}
+
 /// `entries` of shown.thread for a plain page; `running`: the thread's turn runs; `open`: runs the person opened (the "fold:<id>" choices = "1");
 /// `now_ms`: the request's clock. None when any row needs what this cut does not do.
 pub fn entries(es: &[Ent], running: bool, open: &dyn Fn(&str) -> bool, now_ms: u64, zone: Option<&Rule>, marks: &dyn Fn(&str) -> u8, end: u8) -> Option<Vec<Value>> {
@@ -134,13 +174,14 @@ pub fn entries(es: &[Ent], running: bool, open: &dyn Fn(&str) -> bool, now_ms: u
     // Hist.seen: the design as it was before is no row
     let seen: Vec<Ent> = es.iter().filter(|e| !step_base(e)).cloned().collect();
     let es = seen.as_slice();
-    // thoughts show only while the setting is on (it refuses the thread, so here they are hidden); then Fold.shown
-    let vis: Vec<Ent> = fold_shown(&es.iter().filter(|e| !(!e.msg && e.role == "think")).cloned().collect::<Vec<_>>());
+    let vis: Vec<Ent> = fold_shown(es);
     let now = now_ms / 1000;
     // Stamp.ends over the page, oldest first in, walked newest first
     let sx: Vec<stamp::E> = es.iter().map(|e| if e.msg && e.role == "user" { stamp::E::User { id: e.id.clone(), at: e.at } } else if e.msg { stamp::E::Assistant { id: e.id.clone(), at: e.at } } else { stamp::E::Other }).collect();
     let ends: HashMap<String, u64> = stamp::ends(&sx, running);
     let stops = stops(es, running, end, marks);
+    // Mob.imgs.seen: the images of the newest 30 replies are found
+    let newest_replies: std::collections::HashSet<&str> = es.iter().rev().filter(|e| e.msg && e.role == "assistant").take(30).map(|e| e.id.as_str()).collect();
     let mut out = Vec::new(); let mut i = 0;
     while i < vis.len() {
         let e = &vis[i];
@@ -158,7 +199,8 @@ pub fn entries(es: &[Ent], running: bool, open: &dyn Fn(&str) -> bool, now_ms: u
         if e.role == "user" && e.text.starts_with(CARRY) {
             out.push(json!({"id": e.id, "kind": "act", "tone": "info restart", "label": "restart", "text": "Continuing after the restart"}));
         } else if e.role == "user" {
-            out.push(json!({"id": e.id, "kind": "user", "text": e.text, "attachments": [], "stamp": c.unwrap_or_default()}));
+            let (body, paths) = att_split(&e.text);
+            out.push(json!({"id": e.id, "kind": "user", "text": body, "attachments": paths.iter().map(|p| chip(p)).collect::<Vec<_>>(), "stamp": c.unwrap_or_default()}));
         } else {
             let st = ends.get(&e.id).copied().unwrap_or(0);
             // Stamp.reply.s / .f / reply: how the turn ended says the word; a stopped one says it whether or not the page holds its start
@@ -167,7 +209,8 @@ pub fn entries(es: &[Ent], running: bool, open: &dyn Fn(&str) -> bool, now_ms: u
                 match stops.get(&e.id).copied().unwrap_or(0) { 1 => took_s("Stopped"), 3 => if st == 0 { c } else { took_s("Failed") }, _ => if st == 0 { c } else { took_s("Finished") } } } };
             // a synthetic "@live:" row is the agent still working; an API error reply reads as one sentence, its raw text kept for Copy
             let (text, blocks, s) = if e.id.starts_with("@live:") { ("Working".to_string(), md_blocks("Working"), String::new()) } else if api_err(&e.text) { (e.text.clone(), md_blocks(&api_say(&e.text)), s) } else { (e.text.clone(), md_blocks(&e.text), s) };
-            out.push(json!({"id": e.id, "kind": "assistant", "text": text, "blocks": blocks, "images": [], "stamp": s}));
+            let imgs = if newest_replies.contains(e.id.as_str()) { images(&e.id, &e.text) } else { vec![] };
+            out.push(json!({"id": e.id, "kind": "assistant", "text": text, "blocks": blocks, "images": imgs, "stamp": s}));
         }
         i += 1;
     }
@@ -224,11 +267,13 @@ const STATIC: &str = include_str!("thread_static.json");
 /// First refusal gate, with fixed labels only: never a thread id, title, setting value or body.
 pub fn metadata_refusal(st: &State, id: &str) -> Option<&'static str> {
     let Some(t)=st.threads.get(id) else { return Some("thread.missing") };
+    // thoughts are shown or hidden by the setting agent.thinking: a lean State must keep it
+    if st.lean && !crate::state::fam::policy::lean_keeps("agent.thinking") { return Some("state.gate-key-not-retained") }
     if t.deleted { return Some("thread.deleted") }
     if t.title.trim().is_empty() { return Some("thread.title-empty") }
     for (key,reason) in [(format!("effort:{id}"),"setting.effort"),(format!("wait.{id}"),"setting.wait"),(format!("stop.{id}"),"setting.stop"),(format!("fail.{id}"),"setting.fail"),
         ("files.max.mb".into(),"setting.files.max.mb"),("person.tz".into(),"setting.person.tz"),("person.tz.device".into(),"setting.person.tz.device"),("tz.machine".into(),"setting.tz.machine"),
-        ("think".into(),"setting.think"),("permissions.default".into(),"setting.permissions.default")] {
+        ("permissions.default".into(),"setting.permissions.default")] {
         if st.lean && !crate::state::fam::policy::lean_keeps(&key) { return Some("state.gate-key-not-retained") }
         if st.settings.contains_key(&key) && !matches!(key.as_str(),"person.tz"|"person.tz.device"|"tz.machine") { return Some(reason) }
     }
@@ -312,6 +357,9 @@ pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value
     let rows=page["rows"].as_array().ok_or("page.rows-missing")?;
     let es = ents(rows, thread).ok_or("row.malformed-or-foreign")?;
     if let Some(reason)=es.iter().find_map(row_refusal) { return Err(reason) }
+    // Mob.think.hide: a thought (tone "thinking") shows only while the setting `think` is on
+    let think_on = st.settings.get("agent.thinking").map_or(false, |v| v == "on");
+    let es: Vec<Ent> = es.into_iter().filter(|e| think_on || !(!e.msg && e.role == "thinking")).collect();
     let zone = person_zone(st);
     let running = st.threads.get(thread).map_or(false, |t| t.turn == Turn::Running);
     let now_ms = params["now"].as_u64().unwrap_or(0);
@@ -417,7 +465,7 @@ mod tests {
             if let Some(all) = x.get("all").and_then(Value::as_array) { assert_eq!(es, all.as_slice(), "{name}: every entry"); }
             checked.push(name.clone());
         }
-        for n in ["base", "running", "completed", "failed", "interrupted", "pinned", "archived", "snoozed", "settledhand", "codex", "opus", "queued", "askapproval", "askinput", "askplan", "asksend", "stepchange", "stepbase", "stepfirst", "stepopen"] { assert!(checked.iter().any(|c| c == n), "{n} not checked: {checked:?}"); }
+        for n in ["base", "running", "completed", "failed", "interrupted", "pinned", "archived", "snoozed", "settledhand", "codex", "opus", "queued", "askapproval", "askinput", "askplan", "asksend", "stepchange", "stepbase", "stepfirst", "stepopen", "apierror", "apierror2", "restartcarry", "blankreply", "thought", "thoughton", "tonethink", "imagereply", "attached"] { assert!(checked.iter().any(|c| c == n), "{n} not checked: {checked:?}"); }
     }
     #[test] fn civil_dates() { assert_eq!(civil(0), (1970, 1, 1)); assert_eq!(civil(19675), (2023, 11, 14)); assert_eq!(clock(1700002806, 0, &Rule::utc()), "Tue 14 Nov 23:00"); }
     #[test] fn labels_name_three_kinds_and_the_live_one_says_what_runs() {
