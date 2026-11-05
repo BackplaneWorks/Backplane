@@ -31,7 +31,7 @@ R='$R'; ROOT='$ROOT'; REPO='$REPO'; X='$X'; HUBBIN='$HUBBIN'; CLIENT='$CLIENT'; 
 unset BACKPLANE_AGENTS BACKPLANE_COPY BACKPLANE_SIDE_BY_SIDE
 export BACKPLANE_NO_UPDATE=1
 cd $R/proj/backplane-gpui
-$HUBBIN --home $R/home --port $PORT --host 127.0.0.1 --no-tailscale --foreground --policy-bin $ROOT/build/gpui/slim/bp-policy-page --window-bin $ROOT/build/gpui/hub/new/window > $R/hub.log 2>&1 &
+$HUBBIN --home $R/home --port $PORT --host 127.0.0.1 --no-tailscale --foreground > $R/hub.log 2>&1 &
 echo $! > $R/hub.pid; sleep 5
 HP=$(cat $R/hub.pid)
 # this run is the one with a REAL agent: the hub must have no stand-in folder and no copy mode, and its home must be the throwaway one
