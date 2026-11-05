@@ -63,12 +63,12 @@ fn uid(uuid: &str) -> String { if uuid.is_empty() { String::new() } else { forma
 impl Cx {
     pub fn new(thread: &str) -> Cx { Cx { thread: thread.into(), default_account: true, ..Default::default() } }
 
-    fn used_event(&mut self, used: u64, at: u64, out: &mut Vec<Value>) {
+    pub(super) fn used_event(&mut self, used: u64, at: u64, out: &mut Vec<Value>) {
         if used > 0 && used != self.used { self.used = used; out.push(json!({"$":"UsageSet","thread":self.thread,"used":used,"window":0,"at":at})) }
     }
 
     /// Claude.init: the session id, recorded once; a new session's cost and speed start at 0.
-    fn init(&mut self, o: &Value, at: u64, out: &mut Vec<Value>) {
+    pub(super) fn init(&mut self, o: &Value, at: u64, out: &mut Vec<Value>) {
         let sid = s(o, "session_id"); let same = self.session == sid;
         if !same { out.push(json!({"$":"SessionSet","id":self.thread,"session":sid,"at":at})); }
         if !same && !sid.is_empty() {

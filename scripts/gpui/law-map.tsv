@@ -222,3 +222,23 @@ law signal_asked_dot_stays_blocked rust signal_asked_dot_stays_blocked
 law signal_failed_display_name rust signal_failed_display_name
 law signal_pending_display_blocked rust signal_pending_display_blocked
 law kids_bot_child_shown rust kids_bot_child_shown
+law ride_running_no_restart rust ride_running_no_restart
+law ride_posted_at_once rust ride_running_no_restart
+law ride_kept rust ride_kept
+law ride_carries_block rust ride_carries_block
+law ride_taken_empties rust ride_taken_empties
+law ride_nothing_waiting_same rust the_ride_is_taken_by_the_running_turns_tool_result_once
+law ride_turn_end_starts rust a_message_to_a_running_codex_turn_rides_and_starts_the_next_turn
+law ride_interrupted_starts rust ride_interrupted_starts
+law ride_turn_end_empties rust a_message_to_a_running_codex_turn_rides_and_starts_the_next_turn
+law codex_error_notice_kind rust codex_error_notice_kind
+law codex_error_notice_no_effects rust codex_error_notice_kind
+# files stream: 3D models and renders in Rust (kicad/glb.rs, png.rs, mesh.rs, solid.rs, render.rs)
+ported src/core/glb.bend
+ported src/core/png.bend
+law png_crc_iend rust png_crc_iend
+law mech_render_path rust mech_render_path
+law cam_fit_turns_about rust cam_fit_turns_about
+law mech_render_success_quiet rust mech_render_success_quiet
+law mech_render_failure_visible rust mech_render_failure_visible
+law mech_render_failure_diagnostic rust mech_render_failure_diagnostic
