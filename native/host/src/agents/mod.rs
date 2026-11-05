@@ -55,7 +55,7 @@ impl JobGuard { fn new(a: &Arc<Agents>) -> JobGuard { a.stats.jobs.fetch_add(1, 
 impl Drop for JobGuard { fn drop(&mut self) { self.0.stats.jobs.fetch_sub(1, Relaxed); } }
 pub fn handle() -> Option<Arc<Agents>> { HANDLE.get().cloned() }
 
-pub struct Agents { pub hub: Arc<Hub>, pub cli: Cli, pub host: host::HostInfo, world: Mutex<World>, actors: StdMutex<HashMap<String, mpsc::Sender<Cmd>>>, pub stats: Stats, n: AtomicU64,
+pub struct Agents { pub stopped_by: StdMutex<HashMap<String, String>>, pub hub: Arc<Hub>, pub cli: Cli, pub host: host::HostInfo, world: Mutex<World>, actors: StdMutex<HashMap<String, mpsc::Sender<Cmd>>>, pub stats: Stats, n: AtomicU64,
     pub driver_asks: StdMutex<HashMap<String, String>>, pub mcp: std::sync::OnceLock<Arc<mcp::Mcp>>, gens: StdMutex<HashMap<String, String>>, pub parked: StdMutex<HashMap<String, mcp::Parked>> }
 
 pub fn now_s() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) }
@@ -69,7 +69,7 @@ impl Agents {
     pub async fn start_with(hub: Arc<Hub>, cli: Cli) -> Result<Arc<Agents>> { Agents::start_host(hub, cli, host::HostInfo::default()).await }
     pub async fn start_host(hub: Arc<Hub>, cli: Cli, host: host::HostInfo) -> Result<Arc<Agents>> {
         let ag = Arc::new(Agents { hub: hub.clone(), cli, host, world: Mutex::new(World::default()), actors: StdMutex::new(HashMap::new()), stats: Stats::default(), n: AtomicU64::new(0),
-            driver_asks: StdMutex::new(HashMap::new()), mcp: std::sync::OnceLock::new(), gens: StdMutex::new(HashMap::new()), parked: StdMutex::new(HashMap::new()) });
+            driver_asks: StdMutex::new(HashMap::new()), stopped_by: StdMutex::new(HashMap::new()), mcp: std::sync::OnceLock::new(), gens: StdMutex::new(HashMap::new()), parked: StdMutex::new(HashMap::new()) });
         let home = hub.cfg.home.to_string_lossy().into_owned(); proc::set_owner(&home);
         let left = tokio::task::spawn_blocking(move || proc::reap_orphans(&home)).await.unwrap_or(0);
         if left > 0 { eprintln!("agents: ended {left} process(es) a previous hub left behind") }
@@ -194,7 +194,7 @@ impl Agents {
             (ev, carry, cut_threads)
         };
         if !cut.is_empty() { if let Err(e) = self.hub.commit_many(&cut).await { eprintln!("agents: recovery: {e:#}") } }
-        for th in &cut_threads { if !carry.contains(th) { self.task_end(th, "interrupted").await } } // Rec.turn.k: a cut turn that will not carry on ends its task (a carried one is still its business)
+        for th in &cut_threads { if !carry.contains(th) { self.task_end(th, "interrupted").await; self.launch_tell(th, &[json!({"$":"TurnChanged","thread":th,"state":"interrupted","at":now_s()})], "").await } } // Rec.turn.k: a cut turn that will not carry on ends its task (a carried one is still its business)
         for th in carry {
             let now = now_s(); let id = hub_id("c", now, self.seq());
             let note = json!({"$":"ActivityLogged","thread":th,"act":hub_id("r", now, self.seq()),"tone":"info","kind":"restart","summary":"Continuing after the restart","at":now});
