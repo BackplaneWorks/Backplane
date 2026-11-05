@@ -38,7 +38,7 @@ fn block(node: &Value, light: bool, depth: usize) -> AnyElement {
             }
             list.into_any_element()
         }
-        "pre" => { inline_text(node, &mut text); div().w_full().bg(c("raise")).border_1().border_color(c("line")).p_2().text_size(px(12.)).child(text).into_any_element() }
+        "pre" => { inline_text(node, &mut text); div().font(art::mono_font()).w_full().bg(c("raise")).border_1().border_color(c("line")).p_2().text_size(px(12.)).child(text).into_any_element() }
         t if t.starts_with('h') && t.len() == 2 => { inline_text(node, &mut text); div().font_weight(FontWeight::BOLD).text_size(px(15.)).child(text).into_any_element() }
         "blockquote" => {
             let mut q = div().border_l_2().border_color(c("line")).pl_3().text_color(c("dim"));
@@ -104,6 +104,7 @@ impl Render for Backplane {
         let light = self.theme_override.unwrap_or(self.data["theme"] == "light");
         if self.swatches { return crate::swatch::view(light).into_any_element(); }
         if self.gallery { return crate::swatch::gallery(light).into_any_element(); }
+        if self.fonts { return crate::swatch::fonts(light).into_any_element(); }
         let c = |name: &str| theme::color(light, name);
         // bots: (name, mood, note, look seed) copied out so the cat cache can be filled
         let bot_data: Vec<(String, String, String, u64)> = self.data["bots"].as_array().into_iter().flatten()
@@ -174,7 +175,7 @@ impl Render for Backplane {
                     entries.push(col.child(div().text_size(px(11.)).text_color(c("faint")).child(stamp)).into_any_element());
                 }
                 _ => if !text.is_empty() {
-                    entries.push(div().id(SharedString::from(format!("e-{id}"))).flex().gap_2().py_1().text_size(px(12.)).text_color(c("dim")).child(string(e, "label")).child(text).into_any_element());
+                    entries.push(div().id(SharedString::from(format!("e-{id}"))).flex().gap_2().py_1().font(art::mono_font()).text_size(px(12.)).text_color(c("dim")).child(string(e, "label")).child(text).into_any_element());
                 }
             }
         }
@@ -248,7 +249,7 @@ impl Render for Backplane {
                         .when(show_popup, |d| d.child(popup))
                         .child(div().border_1().border_color(c("accent")).bg(c("view")).px_3().py_2().min_h(px(60.)).child(self.input.clone()))
                         .child(div().flex().gap_2().items_center()
-                            .child(div().flex_1().px_3().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).child(format!("claude / {} / {}", if model_short.is_empty() { "default" } else { &model_short }, if effort.is_empty() { "auto" } else { &effort })))
+                            .child(div().flex_1().px_3().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).font(art::mono_font()).child(format!("claude / {} / {}", if model_short.is_empty() { "default" } else { &model_short }, if effort.is_empty() { "auto" } else { &effort })))
                             .child(chip(light, String::new()).flex().items_center().gap_2().child(ic(light, "user", 16., "text")).child("Default"))
                             .child(chip(light, String::new()).child(ic(light, "square-pen", 16., "dim")))
                             .child(chip(light, String::new()).flex().items_center().gap_2().child(ic(light, "gauge", 14., "dim")).child(ctx))

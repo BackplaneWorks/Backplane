@@ -36,7 +36,11 @@ for s in dark light; do
   python3 test/gpui/visual/check_logo_cats.py $V/manifest-icons-$s.json > $V/icons-$s.txt 2>&1 || rc=1
   say "icons $s: $(grep -c '^PASS' $V/icons-$s.txt) pass, $(grep -c '^FAIL' $V/icons-$s.txt) fail; $(cat $V/icons-prep-$s.txt | tail -1)"
   python3 test/gpui/visual/check_logo_cats.py $V/manifest-icons-$s.json --selftest > $V/icons-selftest-$s.txt 2>&1 || say "icons selftest $s did not behave"
+  shoot fonts-$s :61 1440 900 96 --fonts --theme $s
+  python3 test/gpui/visual/check_fonts.py $V/fonts-$s.png $V/fonts-$s.log assets/fonts/jetbrains-mono $s --out $V/fonts-side-$s.png > $V/fonts-$s.txt 2>&1 || rc=1
+  say "fonts $s: $(grep -c '^PASS' $V/fonts-$s.txt) pass, $(grep -c '^FAIL' $V/fonts-$s.txt) fail"
 done
+python3 test/gpui/visual/check_fonts.py --selftest > $V/fonts-selftest.txt 2>&1 || say "font selftest did not behave"
 python3 test/gpui/visual/check_colors.py --selftest > $V/colors-selftest.txt 2>&1 || say "colour selftest did not behave"
 say "done rc=$rc"
 exit 0

@@ -35,3 +35,14 @@ pub fn gallery(light: bool) -> impl IntoElement {
     div().size_full().bg(theme::color(light, "bg")).p(px(16.)).flex().flex_wrap().gap(px(20.))
         .children(WEB_ICONS.iter().map(move |n| crate::art::icon(n, 36., c)))
 }
+
+/// `--fonts`: fixed lines in the mono face for the font check (line i at y = 16 + 24 i, x = 16).
+pub const FONT_LINES: [&str; 5] = ["The quick brown fox 0123456789 {}[]()<>", "=> != -> == <= >= :: ... |> ++ www", "\u{250c}\u{2500}\u{252c}\u{2500}\u{2510}\u{2502} \u{251c}\u{2500}\u{253c}\u{2500}\u{2524} \u{2514}\u{2500}\u{2534}\u{2500}\u{2518} \u{2192} \u{2190} \u{2713} \u{2318}", "\u{65e5}\u{672c}\u{8a9e} \u{4e2d}\u{6587} fallback", "Bold: The quick brown fox"];
+pub fn fonts(light: bool) -> impl IntoElement {
+    let c = theme::color(light, "text");
+    div().size_full().bg(theme::color(light, "bg")).text_color(c).p(px(16.)).flex().flex_col()
+        .children(FONT_LINES.iter().enumerate().map(|(i, t)| {
+            let d = div().h(px(24.)).line_height(px(24.)).text_size(px(13.)).font(crate::art::mono_font()).child(t.to_string());
+            if i == 4 { d.font_weight(FontWeight::BOLD) } else { d }
+        }))
+}
