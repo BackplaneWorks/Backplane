@@ -80,7 +80,8 @@ async fn bot(hub: &Arc<Hub>, name: &str) -> String {
     let dir = hub.cfg.home.join("backups"); assert!(std::fs::read_dir(dir).unwrap().next().is_some(), "backed up first");
     assert_eq!(rpc(&hub, "bots.uber", json!({"bot":b})).await["ok"], true, "the uberbot again changes nothing");
     assert_eq!(log(&hub).iter().filter(|e| e["$"] == "UberSet").count(), 1);
-    assert_eq!(rpc(&hub, "bots.uber", json!({"bot":"p1~b9"})).await["error"], "only a bot on this machine can be the uberbot");
+    assert_eq!(rpc(&hub, "bots.uber", json!({"bot":"p1~b9"})).await["error"], "that machine did not take it: that is done on its own machine");
+    assert_eq!(rpc(&hub, "bots.uber", json!({"bot":"nope"})).await["error"], "only a bot on this machine can be the uberbot");
     assert_eq!(rpc(&hub, "bots.uber", json!({"bot":""})).await["ok"], true);
     assert_eq!(log(&hub).iter().filter(|e| e["$"] == "UberSet").count(), 2);
 }
@@ -224,8 +225,8 @@ const JS_STEPS: &str = include_str!("../../../../test/gpui/bots/fixtures/js-step
 /// test/gpui/bots/filter.py: the events a bots scenario is about, without clocks
 fn filter(ev: &[Value]) -> Vec<Value> {
     let threads: std::collections::HashSet<String> = ev.iter().filter(|e| e["$"] == "BotSet" && !e["thread"].as_str().unwrap_or("").is_empty()).map(|e| e["thread"].as_str().unwrap().to_string()).collect();
-    const KEEP: [&str; 18] = ["BotSet", "BotDeleted", "RoomSet", "RoomDeleted", "RoomPosted", "BotWoke", "MemorySaved", "MemoryForgot", "SpaceSet", "WorktreeSet", "UberSet",
-        "RoutineSet", "RoutinePlan", "RoutineFired", "RoutineSlot", "RoutineDone", "RoutineDeleted", "Reminded"];
+    const KEEP: [&str; 19] = ["BotSet", "BotDeleted", "RoomSet", "RoomDeleted", "RoomPosted", "BotWoke", "MemorySaved", "MemoryForgot", "SpaceSet", "WorktreeSet", "UberSet",
+        "RoutineSet", "RoutinePlan", "RoutineFired", "RoutineSlot", "RoutineDone", "RoutineDeleted", "Reminded", "UberOp"];
     ev.iter().filter(|e| { let k = e["$"].as_str().unwrap_or(""); let th = e["thread"].as_str().unwrap_or("");
         match k { "ThreadCreated" => e["project"] == "", "MessagePosted" => threads.contains(th) && e["role"] == "user", "MessageFrom" => threads.contains(th),
             "WorktreeSet" => threads.contains(e["id"].as_str().unwrap_or("")), _ => KEEP.contains(&k) } })
@@ -373,4 +374,60 @@ const JS_ROUTINE_STEPS: &str = include_str!("../../../../test/gpui/bots/fixtures
     assert_eq!(default_tab(&hub, &u, false).await, "status", "a client without the Mailroom opens the uberbot on its Status");
     assert_eq!(default_tab(&hub, &u, true).await, "chat"); assert_eq!(default_tab(&hub, &a, false).await, "chat");
     let uth = bots.world().await.bot(&u).unwrap().thread.clone(); assert_eq!(chat_thread(&hub, &u).await, Some(uth));
+}
+
+/// the run's own machine id, uberbot id, stamp seconds and one-time instants inside op bodies, as test/gpui/bots/filter.py makes them
+fn canon(raw: &[Value]) -> Vec<String> {
+    let me = raw.iter().rev().find(|e| e["$"] == "SettingSet" && e["key"] == "machine.id").and_then(|e| e["value"].as_str()).unwrap_or("").to_string();
+    let uid = raw.iter().find(|e| e["$"] == "UberSet" && !e["uid"].as_str().unwrap_or("").is_empty()).and_then(|e| e["uid"].as_str()).unwrap_or("").to_string();
+    norm(&filter(raw)).into_iter().map(|mut s| {
+        if !me.is_empty() { s = s.replace(&me, "<me>") } if !uid.is_empty() { s = s.replace(&uid, "<uid>") }
+        let cs: Vec<char> = s.chars().collect(); let mut o = String::new(); let mut i = 0;
+        while i < cs.len() { // 10 digits . 6 digits . <me>  ->  <S>.dddddd.<me>
+            let st: String = cs[i..].iter().take(25).collect();
+            if i + 10 <= cs.len() && cs[i..i + 10].iter().all(|c| c.is_ascii_digit()) && (i == 0 || !cs[i - 1].is_ascii_digit()) && st.len() >= 21 && &st[10..11] == "." && st[11..17].bytes().all(|b| b.is_ascii_digit()) && st[17..].starts_with(".<me>") { o += "<S>"; i += 10 } else { o.push(cs[i]); i += 1 }
+        }
+        let mut res = String::new(); let mut rest = o.as_str(); // once\":N inside an op body
+        while let Some(p) = rest.find("once\\\":") { let (a, b) = rest.split_at(p + 8); res += a; let d = b.bytes().take_while(u8::is_ascii_digit).count(); if d > 0 && !b.starts_with('0') { res += "<T>"; rest = &b[d..] } else { rest = b } }
+        res + rest
+    }).collect()
+}
+
+const JS_UBER_EVENTS: &str = include_str!("../../../../test/gpui/bots/fixtures/js-uber.jsonl");
+const JS_UBER_STEPS: &str = include_str!("../../../../test/gpui/bots/fixtures/js-uber-steps.json");
+
+#[tokio::test] async fn js_parity_uber() {
+    std::env::set_var("TZ", "Etc/UTC");
+    let (hub, bots, _r) = start("parity-uber", "").await;
+    let steps: Vec<Value> = serde_json::from_str(JS_UBER_STEPS).unwrap();
+    let step = |i: usize, r: &Value| { let want = &steps[i]; assert_eq!((r["ok"].as_bool().unwrap(), r.get("error").and_then(Value::as_str).map(str::to_string)), (want["ok"].as_bool().unwrap(), want["error"].as_str().map(str::to_string)), "step {} ({})", i, want["name"]) };
+    let ada = bot(&hub, "ada").await;
+    let r = rpc(&hub, "bots.create", json!({"name":"bub","uber":true})).await; step(1, &r); let bub = r["bot"].as_str().unwrap().to_string();
+    until(&hub, |l| l.iter().any(|e| e["$"] == "UberSet")).await;
+    until(&hub, |l| l.iter().any(|e| e["$"] == "WorktreeSet" && e["id"] != "x") && l.iter().filter(|e| e["$"] == "WorktreeSet").count() >= 2).await;
+    step(2, &rpc(&hub, "bots.uber", json!({"bot":bub})).await);
+    step(3, &rpc(&hub, "bots.uber", json!({"bot":"p1~b9"})).await);
+    assert!(bots.uber_init(now_s()).await > 0, "the first ops");   // the minute tick
+    assert_eq!(bots.uber_init(now_s()).await, 0, "only once");
+    let mut i = 4;
+    for (m, p) in [
+        ("bots.remember", json!({"bot":bub,"key":"Home Town","kind":"fact","text":"Oulu","tags":"x"})),
+        ("bots.remember", json!({"bot":ada,"key":"k","kind":"note","text":"t"})),
+        ("bots.forget", json!({"bot":bub,"key":"Home Town"})),
+        ("bots.routine", json!({"bot":bub,"routine":"ro1","name":"later","at":"in 3d","prompt":"p"})),
+        ("bots.routine", json!({"bot":bub,"routine":"ro2","name":"daily","schedule":"daily 09:30","prompt":"q"})),
+        ("bots.pin", json!({"routine":"ro2","pin":"here"})),
+        ("bots.pin", json!({"routine":"ro2","pin":""})),
+        ("bots.pin", json!({"routine":"zz","pin":"here"})),
+        ("bots.routine_delete", json!({"routine":"ro1"})),
+        ("bots.edit", json!({"bot":bub,"persona":"calm"})),
+        ("bots.uber_home", json!({})),
+        ("bots.uber_join", json!({"uid":"u1-x"})),
+    ] { let r = rpc(&hub, m, p).await; step(i, &r); i += 1; }
+    let js: Vec<Value> = JS_UBER_EVENTS.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+    let a: Vec<String> = js.iter().map(|e| serde_json::to_string(e).unwrap()).collect();
+    let a = norm(&js).into_iter().zip(a).map(|(n, _)| n).collect::<Vec<_>>();
+    let b = canon(&log(&hub));
+    for (i, (x, y)) in a.iter().zip(b.iter()).enumerate() { assert_eq!(x, y, "event {i}: JS left, Rust right") }
+    assert_eq!(a.len(), b.len(), "same number of events\nJS: {a:#?}\nRust: {b:#?}");
 }

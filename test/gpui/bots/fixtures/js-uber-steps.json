@@ -1,0 +1,98 @@
+[
+ {
+  "name": "create ada",
+  "m": "bots.create",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "create bub uber",
+  "m": "bots.create",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "uber again",
+  "m": "bots.uber",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "uber a missing bot",
+  "m": "bots.uber",
+  "ok": false,
+  "error": "that machine did not take it: that is done on its own machine"
+ },
+ {
+  "name": "remember",
+  "m": "bots.remember",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "remember on a plain bot",
+  "m": "bots.remember",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "forget",
+  "m": "bots.forget",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "routine",
+  "m": "bots.routine",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "routine daily",
+  "m": "bots.routine",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "pin here",
+  "m": "bots.pin",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "pin unpin",
+  "m": "bots.pin",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "pin a plain bot routine",
+  "m": "bots.pin",
+  "ok": false,
+  "error": "only the uberbot's routines can be pinned"
+ },
+ {
+  "name": "routine delete",
+  "m": "bots.routine_delete",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "edit bub",
+  "m": "bots.edit",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "uber_home as holder",
+  "m": "bots.uber_home",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "join with nothing on offer",
+  "m": "bots.uber_join",
+  "ok": false,
+  "error": "that uberbot is not on offer here"
+ }
+]

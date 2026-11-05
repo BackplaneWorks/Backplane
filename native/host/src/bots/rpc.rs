@@ -116,6 +116,7 @@ impl Bots {
     }
 
     /// BotJob.home: the bot's folder `<home>/bots/<bot>` (git init'ed), then the thread works there.
+    pub(super) async fn home_pub(&self, bot: &str, thread: &str) { self.home(bot, thread).await }
     async fn home(&self, bot: &str, thread: &str) {
         if !safe_id(bot) { eprintln!("bots: not a folder name: {bot}"); return }
         let path = self.hub.cfg.home.join("bots").join(bot);
@@ -128,8 +129,9 @@ impl Bots {
         let bot = gs(p, "bot"); let w = self.world().await;
         if !w.live(bot) { return vec![err(id, "no such bot")] }
         let b = w.bot(bot).cloned().unwrap();
-        let ev = json!({"$":"BotSet","id":b.id,"name":b.name,"thread":"","look":gnat(p, "look").unwrap_or(b.look),"persona":gsd(p, "persona", &b.persona),"at":now_s()});
-        self.commit_reply(id, vec![ev]).await
+        let now = now_s();
+        let ev = json!({"$":"BotSet","id":b.id,"name":b.name,"thread":"","look":gnat(p, "look").unwrap_or(b.look),"persona":gsd(p, "persona", &b.persona),"at":now});
+        self.commit_reply(id, w.also(now, vec![ev])).await
     }
 
     async fn delete(&self, id: &Value, p: &Value) -> Vec<Value> {
@@ -206,8 +208,8 @@ impl Bots {
             if w.setting("uber.bot", "").is_empty() { return vec![ok(id)] }
             return self.commit_reply(id, vec![json!({"$":"UberSet","bot":"","uid":"","at":now_s()})]).await;
         }
-        let live = w.live(bot) && !bot.contains('~');
-        if !live { return vec![err(id, "only a bot on this machine can be the uberbot")] }
+        if bot.contains('~') { return vec![err(id, "that machine did not take it: that is done on its own machine")] } // a bot elsewhere: the far layer answers (net lane)
+        if !w.live(bot) { return vec![err(id, "only a bot on this machine can be the uberbot")] }
         if bot == w.setting("uber.bot", "") && !w.setting("uber.uid", "").is_empty() { return vec![ok(id)] }
         drop(w);
         match self.promote_job(bot).await { Ok(uid) => vec![json!({"t":"reply","id":id,"ok":true,"uid":uid})], Err(e) => vec![err(id, &e)] }
@@ -232,7 +234,7 @@ const BACKUP_SH: &str = "set -e; d=\"$1/backups/uber-$2-$3\"; mkdir -p \"$d\"; i
 
 struct Rpc(Arc<Bots>);
 impl RpcHandler for Rpc {
-    fn methods(&self) -> &'static [&'static str] { &["bots.create", "bots.edit", "bots.delete", "bots.say", "bots.room", "bots.room_delete", "bots.post", "bots.remember", "bots.forget", "bots.space", "bots.uber", "bots.routine", "bots.routine_delete", "bots.routine_run"] }
+    fn methods(&self) -> &'static [&'static str] { &["bots.create", "bots.edit", "bots.delete", "bots.say", "bots.room", "bots.room_delete", "bots.post", "bots.remember", "bots.forget", "bots.space", "bots.uber", "bots.routine", "bots.routine_delete", "bots.routine_run", "bots.pin", "bots.uber_home", "bots.uber_join"] }
     fn call<'a>(&'a self, _hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let b = &self.0;
@@ -244,13 +246,16 @@ impl RpcHandler for Rpc {
                 "bots.room" => b.room(id, p).await,
                 "bots.room_delete" => { let _w = b.world().await; b.commit_reply(id, vec![json!({"$":"RoomDeleted","id":gs(p, "room"),"at":now_s()})]).await }
                 "bots.post" => b.post(id, p).await,
-                "bots.forget" => { let _w = b.world().await; b.commit_reply(id, vec![json!({"$":"MemoryForgot","bot":gs(p, "bot"),"key":gs(p, "key"),"at":now_s()})]).await }
-                "bots.remember" => { let _w = b.world().await; b.commit_reply(id, vec![json!({"$":"MemorySaved","bot":gs(p, "bot"),"key":mem_key(gs(p, "key")),"kind":mem_kind(gs(p, "kind")),"text":gs(p, "text"),"tags":gs(p, "tags"),"at":now_s()})]).await }
+                "bots.forget" => { let w = b.world().await; let now = now_s(); b.commit_reply(id, w.also(now, vec![json!({"$":"MemoryForgot","bot":gs(p, "bot"),"key":gs(p, "key"),"at":now})])).await }
+                "bots.remember" => { let w = b.world().await; let now = now_s(); b.commit_reply(id, w.also(now, vec![json!({"$":"MemorySaved","bot":gs(p, "bot"),"key":mem_key(gs(p, "key")),"kind":mem_kind(gs(p, "kind")),"text":gs(p, "text"),"tags":gs(p, "tags"),"at":now})])).await }
                 "bots.space" => { let text = space_msg(gs(p, "action"), gs(p, "value")); b.say(id, gs(p, "bot"), &text, "", "").await }
                 "bots.uber" => b.uber(id, gs(p, "bot")).await,
                 "bots.routine" => b.routine(id, p).await,
-                "bots.routine_delete" => { let _w = b.world().await; b.commit_reply(id, vec![json!({"$":"RoutineDeleted","id":gs(p, "routine"),"at":now_s()})]).await }
+                "bots.routine_delete" => { let w = b.world().await; let now = now_s(); b.commit_reply(id, w.also(now, vec![json!({"$":"RoutineDeleted","id":gs(p, "routine"),"at":now})])).await }
                 "bots.routine_run" => b.routine_run(id, gs(p, "routine")).await,
+                "bots.pin" => b.pin(id, p).await,
+                "bots.uber_home" => b.uber_home(id).await,
+                "bots.uber_join" => b.uber_join(id, gs(p, "uid")).await,
                 _ => vec![err(id, "unknown bots request")],
             }
         })

@@ -7,6 +7,7 @@ pub mod clock;
 pub mod reply;
 pub mod routines;
 pub mod rpc;
+pub mod uber;
 pub mod world;
 pub use api::{chat_thread, default_tab};
 pub use rpc::{Bots, Inbox};

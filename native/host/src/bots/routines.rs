@@ -62,7 +62,7 @@ impl Bots {
         let ex = w.routines.get(rid_in).filter(|r| !r.deleted);
         if p.get("keep").and_then(Value::as_bool).unwrap_or(false) { // a toggle keeps the plan and the schedule as they are: only RoutineSet
             let cron = w.routines.get(rid_in).map_or("", |r| r.cron.as_str());
-            return self.commit_reply_pub(id, vec![json!({"$":"RoutineSet","id":rid_in,"bot":bot,"name":name,"cron":cron,"prompt":prompt,"on":on,"at":now})]).await
+            return self.commit_reply_pub(id, w.also(now, vec![json!({"$":"RoutineSet","id":rid_in,"bot":bot,"name":name,"cron":cron,"prompt":prompt,"on":on,"at":now})])).await
         }
         let sch = if gs(p, "cron").is_empty() { gs(p, "schedule") } else { gs(p, "cron") };
         let z = Zones { settings: &w.settings };
@@ -70,8 +70,8 @@ impl Bots {
             Pick::Bad(m) => vec![err(id, &m)],
             Pick::Plan { cron, once, tz } => {
                 let kind = w.routines.get(rid_in).map_or("", |r| r.kind.as_str());
-                self.commit_reply_pub(id, vec![json!({"$":"RoutineSet","id":rid,"bot":bot,"name":name,"cron":cron,"prompt":prompt,"on":on,"at":now}),
-                    json!({"$":"RoutinePlan","id":rid,"once":once,"tz":tz,"kind":kind,"at":now})]).await
+                self.commit_reply_pub(id, w.also(now, vec![json!({"$":"RoutineSet","id":rid,"bot":bot,"name":name,"cron":cron,"prompt":prompt,"on":on,"at":now}),
+                    json!({"$":"RoutinePlan","id":rid,"once":once,"tz":tz,"kind":kind,"at":now})])).await
             }
         }
     }
@@ -153,6 +153,7 @@ impl Bots {
                 tokio::time::sleep(std::time::Duration::from_secs(at.saturating_sub(now_s()).max(1))).await;
                 let Some(b) = me.upgrade() else { return };
                 b.tick_at(now_s()).await;
+                b.uber_init(now_s()).await;
             }
         });
     }
