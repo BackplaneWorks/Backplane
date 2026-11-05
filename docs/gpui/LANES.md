@@ -30,6 +30,7 @@ lane cannot break another lane's build.
   absolute path.
 - Build and test from that worktree with `scripts/boat-job.sh`. Boat or the Mac only.
 - Pick up others' work with `git rebase gpui` in your own worktree.
+- Before landing, rebase on gpui and compile the whole crate on Boat. A batch that breaks gpui's build is backed out.
 - Land small and often: take the named lock `gpui-merge`, run
   `git -C /home/h/Documents/i2cjak/backplane-gpui cherry-pick <sha>...`, release the lock.
   If a cherry-pick refuses, abort it and tell the owner of the file. Never force anything.
