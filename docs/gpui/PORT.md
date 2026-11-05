@@ -15,7 +15,7 @@ whole hub cannot be emitted to C (212 JS-only effect defs; the emit exceeds 8 Gi
 ## Target
 
 ```
-web, phones, GPUI  ──  today's protocol, unchanged  ──  backplane-hub (Rust, native/host)
+GPUI, iOS, Android  ──  today's protocol, unchanged  ──  backplane-hub (Rust, native/host)
                                                          ├ event store, windowed history
                                                          ├ broadcast, fan-out, view sessions
                                                          ├ threads, sidebar status
@@ -27,26 +27,32 @@ web, phones, GPUI  ──  today's protocol, unchanged  ──  backplane-hub (R
 `events.jsonl` keeps its format: persisted events stay decodable forever, and the Rust
 hub reads a log the Bend hub wrote, and the reverse.
 
+## Native clients only
+
+Decision (2026-11-04): no web page. The clients are GPUI, SwiftUI and Compose. The Rust
+hub serves no web client and has no `renderer: web`, so `src/web/view.bend` and the
+web host are out of the port. The web UI remains only as the reference for how the
+native apps should look, and Electron remains only as the baseline to measure against.
+
 ## The presentation layer
 
-Exact parity needs more than sockets. The hub draws what clients show: the phones and
-GPUI get a screen model (`Render.mobile`), and the web page gets nodes (`src/web/view.bend`).
-That code is client.bend, screen.bend, hubs.bend and view.bend: about 27,000 lines, far
-from small, and it depends on much of core.
+The hub draws what clients show: GPUI and the phones get a screen model (`Render.mobile`)
+from client.bend, screen.bend and hubs.bend, about 22,000 lines, far from small.
 
 It is pure, so the plan is staged:
 
-1. **Presenter sidecar (transitional).** Rust owns all state and asks a presenter for a
-   picture. `bp-policy` (native Bend) serves `renderer: mobile`. The web renderer may
-   need the existing Bend-on-JS code in a child process until it is ported. A hub with that
-   child is not yet JS-free, and every report must say so.
+1. **Presenter sidecar (transitional).** Rust owns all state and asks `bp-policy`
+   (native Bend, no JS) for a picture.
 2. **Screen model to Rust.** Row by row and screen by screen, each compared with the Bend
-   output on recorded traffic. This also removes the O(threads^2) sidebar render.
-3. **Web nodes last.** The largest and least valuable part to port.
+   output on recorded traffic, the sidebar first. This also removes the O(threads^2)
+   sidebar render.
 
 Measured so far on the presenter: `-O0` only (114 MB, an optimized build exceeds the cap
 until the C is split into units with `cc-split.py`); render is O(threads^2) in shared
 Bend code, and the JS hub has it too (1,000 threads: 503 ms).
+
+The phones still run `bridge.js`, Bend's client compiled to JS inside the app. That is
+separate from the hub, and it stays until a later decision.
 
 ## Milestones
 
@@ -56,7 +62,7 @@ start only when the one before passes, except where noted.
 | # | Work | Gate |
 |---|---|---|
 | M0 | Parity harness; baselines; law map; store copy | Harness replays recorded traffic against today's hub and reports zero differences against itself |
-| M1 | Protocol: HTTP, authenticated WebSocket, join, view open/update/action, CBOR frames | Recorded sessions match the JS hub; web, phone and GPUI clients connect to the Rust hub on the store copy |
+| M1 | Protocol: HTTP, authenticated WebSocket, join, view open/update/action, CBOR frames | Recorded sessions match the JS hub; phone and GPUI clients connect to the Rust hub on the store copy |
 | M2 | Event store and windowed history | Same log, same pages; torn tail, restart and 1M-event tests pass |
 | M3 | Broadcast and fan-out | Keyed deltas match; slow clients bounded; 20-agent load valid |
 | M4 | Threads and sidebar status | Sidebar and settle state match on recorded logs; 300 and 6,666 threads stay fast |
@@ -88,10 +94,13 @@ or deleted. Each law has one of these statuses, listed for every law below:
 - **client**: client-side Bend in the web and phone bundles, unchanged.
 - **window**: native-window code GPUI replaces. The entry says what GPUI does instead,
   or that it has no equivalent yet.
+- **retired**: web-client-only, gone with the web page. The entry names the law's reason;
+  a law that also guards a native client is not retired.
 
 First classification, by the file whose defs a law names (within about 10% until each
 law is checked; detail in `PORT-CLASSIFICATION.md`): 1,470 stay in Bend, 963 move to Rust,
-581 are client-side and 221 are native-window code.
+581 are client-side and 221 are native-window code. Some client-side laws become
+`retired` now that the web page is gone.
 
 A function stays in Bend only if it is pure, takes and returns kilobytes rather than a
 state, is off the per-event and per-view hot paths, and has a law or security property

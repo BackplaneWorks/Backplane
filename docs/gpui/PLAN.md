@@ -228,6 +228,9 @@ directory and simulator, work stops if free space falls under 20 GiB, and
 `xcode-select` stays as it is (use `DEVELOPER_DIR`). Do not publish or replace
 the production TestFlight app implicitly.
 
+**Updated user decision: native apps only.** There is no web page in this
+experiment. The web endpoint and the web renderer are dropped; see `PORT.md`.
+
 ## Gates and deliverables
 
 1. Commit this plan and intent on `gpui`; publish the feasibility finding.
