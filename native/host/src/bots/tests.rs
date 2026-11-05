@@ -385,7 +385,7 @@ fn canon(raw: &[Value]) -> Vec<String> {
         let cs: Vec<char> = s.chars().collect(); let mut o = String::new(); let mut i = 0;
         while i < cs.len() { // 10 digits . 6 digits . <me>  ->  <S>.dddddd.<me>
             let st: String = cs[i..].iter().take(25).collect();
-            if i + 10 <= cs.len() && cs[i..i + 10].iter().all(|c| c.is_ascii_digit()) && (i == 0 || !cs[i - 1].is_ascii_digit()) && st.len() >= 21 && &st[10..11] == "." && st[11..17].bytes().all(|b| b.is_ascii_digit()) && st[17..].starts_with(".<me>") { o += "<S>"; i += 10 } else { o.push(cs[i]); i += 1 }
+            if i + 10 <= cs.len() && cs[i..i + 10].iter().all(|c| c.is_ascii_digit()) && (i == 0 || !cs[i - 1].is_ascii_digit()) && st.len() >= 21 && &st[10..11] == "." && st[11..17].bytes().all(|b| b.is_ascii_digit()) && st[17..].starts_with(".<me>") { o += "<S>.<c>"; i += 17 } else { o.push(cs[i]); i += 1 }
         }
         let mut res = String::new(); let mut rest = o.as_str(); // once\":N inside an op body
         while let Some(p) = rest.find("once\\\":") { let (a, b) = rest.split_at(p + 7); res += a; let d = b.bytes().take_while(u8::is_ascii_digit).count(); if d > 0 && !b.starts_with('0') { res += "<T>"; rest = &b[d..] } else { rest = b } }
@@ -430,4 +430,13 @@ const JS_UBER_STEPS: &str = include_str!("../../../../test/gpui/bots/fixtures/js
     let b = canon(&log(&hub));
     for (i, (x, y)) in a.iter().zip(b.iter()).enumerate() { assert_eq!(x, y, "event {i}: JS left, Rust right") }
     assert_eq!(a.len(), b.len(), "same number of events\nJS: {a:#?}\nRust: {b:#?}");
+}
+
+#[test] fn uber_stamps_are_later_than_the_last_whatever_the_clock_says() {
+    // Ub.stamp.next: a later second starts the counter again; the same or an earlier one counts on from the last
+    use super::uber::stamp_next;
+    assert_eq!(stamp_next("", 100, "m"), "0000000100.000000.m");
+    assert_eq!(stamp_next("0000000100.000000.m", 100, "m"), "0000000100.000001.m");
+    assert_eq!(stamp_next("0000000100.000007.m", 90, "m"), "0000000100.000008.m");
+    assert_eq!(stamp_next("0000000100.000007.m", 101, "m"), "0000000101.000000.m");
 }

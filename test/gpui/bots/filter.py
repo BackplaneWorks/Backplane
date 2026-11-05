@@ -11,7 +11,7 @@ uid = next((e["uid"] for e in ev if e["$"] == "UberSet" and e.get("uid")), "")
 def norm(s):  # this run's machine id and uberbot id, and the seconds of a stamp, are its own
     if me: s = s.replace(me, "<me>")
     if uid: s = s.replace(uid, "<uid>")
-    s = re.sub(r"\b\d{10}\.(\d{6})\.<me>", r"<S>.\1.<me>", s)
+    s = re.sub(r"\b\d{10}\.(\d{6})\.<me>", r"<S>.<c>.<me>", s)
     return re.sub(r'once\\":[1-9][0-9]*', 'once\\":<T>', s)  # a one-time routine's instant inside an op body
 for e in ev:
     k = e["$"]
