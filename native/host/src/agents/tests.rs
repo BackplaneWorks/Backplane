@@ -1196,3 +1196,18 @@ fn watch_log(work: &Path, rows: &[String], extra: &str) -> String { base_log(wor
     assert!(text.contains("\n\n<references>\nmodel claude/nonesuch: ") && text.ends_with("</references>"), "{text}");
     ag.shutdown();
 }
+#[tokio::test(flavor = "multi_thread")] async fn an_enforced_rule_refuses_a_matching_tool_call_until_the_person_says_its_word() {
+    let sd = dir("gt-bin"); perf_standin(&sd, 1);
+    let rules = [r#"{"id":"r1","text":"No lists without asking","tool":"thread_list","enforce":true,"word":"list it","at":1}"#, r#"{"id":"r2","text":"No rm","tool":"Bash","enforce":true,"at":2}"#];
+    let extra = format!("{}\n{}\n{{\"$\":\"MessagePosted\",\"thread\":\"{T1}\",\"msg\":\"m1\",\"role\":\"user\",\"text\":\"hello there\",\"at\":1700000100}}\n", json!({"$":"SettingSet","key":"rule.r1","value":rules[0],"at":1700000005}), json!({"$":"SettingSet","key":"rule.r2","value":rules[1],"at":1700000006}));
+    let (hub, ag, _h, _w) = start("gt", |w| base_log(w, 1, &extra), |_| Cli::standin(&sd)).await;
+    let wait = Instant::now() + Duration::from_secs(5); while ag.world().await.setting("rule.r1").is_empty() && Instant::now() < wait { tokio::time::sleep(Duration::from_millis(50)).await }
+    let (_, r) = rpc_mcp(&ag, T1, "", "tools/call", json!({"name":"thread_list","arguments":{}})).await;
+    assert_eq!(r["result"]["isError"], true, "{r}"); assert!(r["result"]["content"][0]["text"].as_str().unwrap().starts_with("Refused by a standing rule (r1): \"No lists without asking\". thread_list needs the person's word \"list it\""), "{r}");
+    let (_, p) = rpc_mcp(&ag, T1, "", "tools/call", json!({"name":"permission_prompt","arguments":{"tool_name":"Bash","input":{"command":"rm x"}}})).await;
+    let v: Value = serde_json::from_str(p["result"]["content"][0]["text"].as_str().unwrap()).unwrap(); assert_eq!(v["behavior"], "deny", "{p}"); assert!(v["message"].as_str().unwrap().contains("No rm"), "{p}");
+    assert!(!log_from(&hub, 0).await.iter().any(|e| is(e, "AskOpened")), "a refused permission asks no one");
+    hub.commit(&json!({"$":"MessagePosted","thread":T1,"msg":"m2","role":"user","text":"OK, list it please","at":1700000200})).await.unwrap();
+    let (_, r) = rpc_mcp(&ag, T1, "", "tools/call", json!({"name":"thread_list","arguments":{}})).await; assert_ne!(r["result"]["isError"], true, "the person's word unlocks it: {r}");
+    ag.shutdown();
+}
