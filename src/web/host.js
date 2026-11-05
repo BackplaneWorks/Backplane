@@ -936,7 +936,8 @@ const withNodeAttr = (n, name, value) => {
 };
 function sidebarRegrouped(side, theirs) {
   const projectOf = id => id && document.querySelector(`aside.sidebar .thread[data-value="${CSS.escape(id)}"]`)?.closest("section")?.getAttribute("data-drag-to");
-  const pa = shownFor.startsWith("thread:") ? projectOf(shownFor.slice(7)) : "", pt = transitionFor.startsWith("thread:") ? projectOf(transitionFor.slice(7)) : transitionFor.slice(8);
+  // (a project's home holds nothing in place: only the left thread's moves)
+  const pa = shownFor.startsWith("thread:") ? projectOf(shownFor.slice(7)) : "", pt = transitionFor.startsWith("thread:") ? projectOf(transitionFor.slice(7)) : "";
   const live = sectionsIn(side), pic = sectionsIn(theirs);
   if (!live || !pic || pa === pt) return side;
   const picBy = new Map(pic.ks.filter(k => is(k, "El") && k.tag === "section" && k.key).map(k => [k.key, k]));
