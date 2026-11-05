@@ -224,22 +224,37 @@ async fn resume_facts(hub: &Arc<Hub>, th: &str) -> ResumeFacts {
 }
 
 /// ProviderResume: a thread that waited for a reported reset continues once it has passed. Unknown resets wait for the person.
+/// NOT on a copy of a real log (BACKPLANE_COPY=1, and so not in side-by-side either): the records `provider.resume.*` are the real hub's, and delivering one starts a
+/// real turn nobody asked for. The tick returns at once and clears nothing.
 pub struct ResumeTicker;
+/// The ready resumes: `(record key, thread)`. Reads only.
+pub async fn ready_resumes(hub: &Arc<Hub>, now_s: u64) -> Vec<(String, String)> {
+    let keys: Vec<String> = { let m = hub.model().await; m.settings_with_prefix("provider.resume.").map(|(k, _)| k.to_string()).collect() };
+    let mut out = vec![];
+    for k in keys {
+        let th = k.trim_start_matches("provider.resume.").to_string();
+        let rec: Value = serde_json::from_str(&hub.setting(&k).await.unwrap_or_default()).unwrap_or(Value::Null);
+        if resume_ready(&resume_facts(hub, &th).await, &rec, now_s) { out.push((k, th)) }
+    }
+    out
+}
+/// One tick: `deliver(thread, message id, events)` runs each ready resume (production: `Agents::deliver`). A copy delivers nothing.
+pub async fn run_resumes<F, Fut>(copy: bool, hub: &Arc<Hub>, now_s: u64, deliver: F) where F: Fn(String, String, Vec<Value>) -> Fut, Fut: std::future::Future<Output = ()> {
+    if copy { return }
+    for (k, th) in ready_resumes(hub, now_s).await {
+        // the message and the record's clearing are one commit; a failed start leaves the record for the next tick
+        // the log's length is read at each thread: the commit before it moved it
+        let seq = hub.revision().await;
+        deliver(th.clone(), crate::agents::lines::hub_id("resume", now_s, seq), resume_events(&k, &th, now_s, seq)).await;
+    }
+}
 impl Ticker for ResumeTicker {
     fn every_s(&self) -> u64 { 30 }
     fn tick<'a>(&'a self, hub: &'a Arc<Hub>, now_s: u64) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
+            if crate::copy::on() { return vec![] }
             let Some(ag) = crate::agents::handle() else { return vec![] };
-            let keys: Vec<String> = { let m = hub.model().await; m.settings_with_prefix("provider.resume.").map(|(k, _)| k.to_string()).collect() };
-            for k in keys {
-                let th = k.trim_start_matches("provider.resume.").to_string();
-                let rec: Value = serde_json::from_str(&hub.setting(&k).await.unwrap_or_default()).unwrap_or(Value::Null);
-                if !resume_ready(&resume_facts(hub, &th).await, &rec, now_s) { continue }
-                // the message and the record's clearing are one commit; a failed start leaves the record for the next tick
-                // the log's length is read at each thread: the commit before it moved it
-                let seq = hub.revision().await;
-                let _ = ag.deliver(&th, &crate::agents::lines::hub_id("resume", now_s, seq), RESUME_TEXT, None, resume_events(&k, &th, now_s, seq)).await;
-            }
+            run_resumes(false, hub, now_s, |th, msg, ev| { let ag = ag.clone(); async move { let _ = ag.deliver(&th, &msg, RESUME_TEXT, None, ev).await; } }).await;
             vec![]
         })
     }
