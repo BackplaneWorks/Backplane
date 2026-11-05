@@ -26,6 +26,19 @@ data class Row(
 )
 
 // machine: the hub it is on, named when the phone has several
+// The hub's bounded sidebar pages (native-sidebar-page, as iOS NativeSidebar.swift): a control is shown
+// only when well formed; its value is opaque and goes back as the action's value.
+data class PageControl(val label: String, val action: String, val value: String)
+data class Pager(val previous: PageControl?, val next: PageControl?) { val any get() = previous != null || next != null }
+data class HubPages(val hub: String, val projects: Pager?, val active: Pager?, val legacy: Pager?)
+
+private fun pageControl(o: JSONObject?): PageControl? = o?.let {
+    val label = it.optString("label"); val value = it.optString("value")
+    if (label.isNotEmpty() && it.optString("action") == "native-sidebar-page" && value.indexOf('|') > 0 && value.indexOf('|') < value.length - 1)
+        PageControl(label, "native-sidebar-page", value) else null
+}
+fun pager(o: JSONObject?): Pager? = o?.let { Pager(pageControl(it.optJSONObject("previous")), pageControl(it.optJSONObject("next"))).takeIf { p -> p.any } }
+
 data class Project(
     val id: String, val title: String, val root: String, val machine: String, val open: Boolean,
     val threads: List<Row>, val snoozedShelf: String, val snoozed: List<Row>,
@@ -35,6 +48,8 @@ data class Project(
     // no live thread: its header shows faded, after the live ones
     val quiet: Boolean = false,
     val icon: String = "folder",
+    // bounded pages of each list (null: no more to reach)
+    val threadsPage: Pager? = null, val snoozedPage: Pager? = null, val settledPage: Pager? = null, val archivedPage: Pager? = null,
 )
 
 // the folded shelf of older projects at the end of the list ("side-older"),
@@ -532,6 +547,7 @@ data class Screen(
     val bubMove: BubMove? = null,
     val starNudge: StarNudge? = null,
     val projectHome: ProjectHome? = null,
+    val sidebarPages: List<HubPages> = emptyList(),
 )
 
 data class Cmd(
@@ -848,7 +864,8 @@ fun parseScreen(o: JSONObject) = Screen(
         Project(it.optString("id"), it.optString("title"), it.optString("root"), it.optString("machine"), it.optBoolean("open"),
             it.optJSONArray("threads").map(::row), it.optString("snoozedShelf"), it.optJSONArray("snoozed").map(::row),
             it.optString("shelf"), it.optJSONArray("settled").map(::row),
-            it.optString("value"), it.optBoolean("archOpen"), it.optJSONArray("archived").map(::row), it.optBoolean("quiet"), it.optString("icon", "folder"))
+            it.optString("value"), it.optBoolean("archOpen"), it.optJSONArray("archived").map(::row), it.optBoolean("quiet"), it.optString("icon", "folder"),
+            pager(it.optJSONObject("threadsPage")), pager(it.optJSONObject("snoozedPage")), pager(it.optJSONObject("settledPage")), pager(it.optJSONObject("archivedPage")))
     },
     o.optJSONObject("thread")?.let(::thread),
     island(o.optJSONObject("island")),
@@ -894,6 +911,7 @@ fun parseScreen(o: JSONObject) = Screen(
     plane = o.optJSONObject("plane")?.let(::parsePlane),
     active = o.optJSONArray("active").map(::row),
     legacy = o.optJSONArray("legacy").map(::row),
+    sidebarPages = o.optJSONArray("sidebarPages").map { HubPages(it.optString("hub"), pager(it.optJSONObject("projects")), pager(it.optJSONObject("active")), pager(it.optJSONObject("legacy"))) },
     bubMove = o.optJSONObject("bubMove")?.let(::parseBubMove),
     older = o.optJSONObject("older")?.let { Older(it.optInt("count"), it.optBoolean("open")) },
     settled = o.optJSONObject("settled")?.let { Older(it.optInt("count"), it.optBoolean("open")) },
