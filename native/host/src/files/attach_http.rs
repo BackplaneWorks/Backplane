@@ -59,7 +59,7 @@ mod tests {
                 let target = text.lines().next().unwrap().split(' ').nth(1).unwrap().to_string();
                 let len: u64 = text.lines().find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse().unwrap())).unwrap();
                 let expect = text.to_ascii_lowercase().contains("expect: 100-continue");
-                let req = Req { method: "POST".into(), target, headers: vec![] };
+                let req = Req { method: "POST".into(), target, headers: vec![], body: vec![], peer: None, trusted: false };
                 let r = { let body = crate::api::Body::new(&mut s, len, expect); Attach.call_body(&h, &req, body).await };
                 let _ = s.write_all(&crate::wire::response_for(r.status, &r.ctype, &r.extra, &r.body)).await; }); } });
         let post = |q: String, len: usize, body: Vec<u8>, expect: bool| async move {

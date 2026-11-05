@@ -126,7 +126,7 @@ mod tests {
 
     fn png() -> Vec<u8> { let mut p = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, b'I', b'H', b'D', b'R', 0, 0, 0, 4, 0, 0, 0, 4, 8, 6, 0, 0, 0]; p.extend([0u8; 16]); p }
     async fn get(hub: &Arc<Hub>, tok: &str, entry: &str, path: &str) -> HttpReply {
-        let req = Req { method: "GET".into(), target: format!("/message-image?entry={entry}&path={}&token={tok}", path.replace('/', "%2F")), headers: vec![] };
+        let req = Req { method: "GET".into(), target: format!("/message-image?entry={entry}&path={}&token={tok}", path.replace('/', "%2F")), headers: vec![], body: vec![], peer: None, trusted: false };
         MessageImage { retained: Arc::new(AtomicUsize::new(usize::MAX)) }.call(hub, &req).await
     }
     // Hub.thread: a message committed live is snapshotted by the loop; one that is only in the log (no ref) is found by the bounded scan;
