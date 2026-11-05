@@ -586,6 +586,8 @@ mod tests {
         let _ = crate::session::take_reads(c.client, &c.view_id, &c.target); // whatever the open itself recorded
         let out = h.request(&mut c, &json!({"id": 77, "m": "fab.look", "p": {"thread": "t1"}})).await;
         assert_eq!(out[0]["ok"], true);
+        // like a job-answered request's marks, the read joins the view with the next served view request and is carried by the one after
+        assert!(crate::session::take_reads(c.client, &c.view_id, &c.target).is_empty());
         let reads = crate::session::take_reads(c.client, &c.view_id, &c.target);
         assert_eq!(reads.len(), 1, "{reads:?}");
         assert_eq!(reads[0]["kind"], "fab.look"); assert_eq!(reads[0]["result"]["thread"], "t1");
