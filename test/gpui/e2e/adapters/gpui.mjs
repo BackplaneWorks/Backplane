@@ -63,7 +63,9 @@ export async function run(j,ctx){ // ctx: {gpuBin, display:{env,display}, hub:{s
   // fall back to video only if the client gave no ack at all
   if(!acksBy.size&&first.capture&&Number.isFinite(offsetMs)){try{const thr=Number(process.env.E2E_SCENE)||0.00005;const ch=changedFrames(first.capture,thr);const chE=toEpochMs(ch,offsetMs);const inj=okIn.map(m=>m.epoch_ms-m.latency_ms);const a=acks(chE,inj);const res_=1000/(videoFps(first.capture)||30)+30;res.metrics.click=clickStats(okIn.map((m,i)=>({id:m.step+'#'+i,t_inject:0,t_result:m.latency_ms,t_ack:a[i]})),ctx.hz,0,res_);res.metrics.click.source=`video-derived (no ack event), resolution ~${res_.toFixed(0)} ms`}catch(e){res.notes.push('video analysis failed: '+String(e.message).slice(0,100))}}
   // G2: frame times over the scripted scroll/stream
-  const fr=metrics.find(m=>m.event==='frames');if(fr&&fr.t_ms?.length>10){res.metrics.frames=frameStats(fr.t_ms,60);res.metrics.frames.source='GPUI frames event (G2): every drawn frame while recording'}
+  const fr=metrics.find(m=>m.event==='frames');const frT=fr&&(fr.frames_ms||fr.times_ms||(Array.isArray(fr.t_ms)?fr.t_ms:null));
+  if(fr&&!frT)res.notes.push('frames event has no timestamp array: script.rs metric() overwrites the payload field t_ms with the event time; G2 needs the array under another name (frames_ms)');
+  if(frT?.length>10){res.metrics.frames=frameStats(frT,60);res.metrics.frames.source='GPUI frames event (G2): every drawn frame while recording'}
   else if(wantFrames)res.notes.push('no frames event (G2) in this run');
   // G3: layout snapshots; inputT = time of the latest input event before the snapshot (same clock, t_ms)
   const lay=metrics.filter(m=>m.event==='layout');

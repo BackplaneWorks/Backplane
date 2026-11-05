@@ -10,7 +10,7 @@ let lay=0;const layout=shift=>m('layout',{rects:{sidebar:{x:0,y:0,w:300,h:900},m
 layout(false);
 for(const s of steps){
  if(s.record==='start'){rec=[];m('record',{state:'start',name:s.name});for(let i=0;i<120;i++)rec.push(Math.round(i*16.667*1000)/1000);continue}
- if(s.record==='stop'){m('frames',{name:'x',n:rec.length,t_ms:rec});rec=null;continue}
+ if(s.record==='stop'){m('frames',{name:'x',n:rec.length,frames_ms:rec});rec=null;continue}
  if(s.wait){await new Promise(r=>setTimeout(r,Math.min(s.wait,20)));continue}
  const label=s.select!==undefined?`select:${s.select}`:s.popup!==undefined?`popup:${s.popup}`:s.click?`click:${s.click}`:s.scroll!==undefined?`scroll:${s.scroll}`:s.net_sleep?`net_sleep:${s.net_sleep}`:s.home!==undefined?`home:${s.home}`:'x';
  if(s.click){const id=s.click;m('click',{id,found:true,changed:id!==dead,action:id!==dead?'did':null});continue}
