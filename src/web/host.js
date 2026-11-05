@@ -2460,16 +2460,18 @@ function paletteCaughtUp() {
 // A thread or bot in the sidebar is picked at the mouse press, not at its
 // release: a person holds a click 60-120 ms, and the switch (its picture
 // drawn from the client's cache) is under way meanwhile. So are the viewer
-// rail's tabs and the composer's pickers (as a native select or a browser's
-// tab does). Its click then does nothing more. Touch keeps the tap (a press
+// rail's tabs, the sidebar's shelves and the composer's pickers (as a
+// native select or a browser's tab does). Its click then does nothing more. Touch keeps the tap (a press
 // may start a scroll); project heads, which drag, keep the click.
 const PRESS_PICKS = ['aside.sidebar [data-on-click="select"]', 'aside.sidebar [data-on-click="bot"]',
   '.workspace-bar button[data-on-click="view-kind"]', '.workspace-bar button[data-on-click="fm"]', '.workspace-bar button[data-on-click="diff"]',
   '.workspace-bar button[data-on-click="mech"]', '.workspace-bar button[data-on-click="rv-page"]',
   'button.model-chip[data-on-click="flag"]', 'button.tok-chip[data-on-click="flag"]', 'button.account-chip[data-on-click="acct-open"]',
   'button.gear[data-on-click="flag"]', 'button[data-on-click="ws-palette-open"]', 'button.find-open[data-on-click="thin-search-open"]',
-  // (a run of tool calls' head and Settings' categories, as disclosures do)
-  '#timeline button.fold[data-on-click="fold"]', '#settings-content [data-on-click="settings-page"]', '.settings-path [data-on-click="settings-page"]', '.settings-side [data-on-click="settings-page"]', '.topbar .crumbs [data-on-click="settings-page"]'].join(", ");
+  // (a run of tool calls' head, the sidebar's shelves and Settings'
+  // categories, as disclosures do)
+  '#timeline button.fold[data-on-click="fold"]', 'aside.sidebar button.shelf[data-on-click="toggle-settled"]', 'aside.sidebar button.shelf[data-on-click="side-settled"]',
+  'aside.sidebar button.shelf[data-on-click="side-older"]', 'aside.sidebar button.shelf[data-on-click="thread-history"]', '#settings-content [data-on-click="settings-page"]', '.settings-path [data-on-click="settings-page"]', '.settings-side [data-on-click="settings-page"]', '.topbar .crumbs [data-on-click="settings-page"]'].join(", ");
 let pressedPick = null, pressedMenu = null, pickedTimer = 0;
 // A thread row pressed with no retained picture of it draws nothing new
 // until the hub's view: the row at least is marked the chosen one at once
@@ -2498,7 +2500,7 @@ document.addEventListener("pointerdown", e => {
   const summary = e.target.closest?.(".local-menu > summary");
   if (summary) { const menu = summary.parentElement;menu.open = !menu.open;pressedMenu = { menu, at: e.timeStamp };return; }
   const el = e.target.closest?.(PRESS_PICKS);
-  if (!el || el.disabled || el.closest('[draggable="true"]') || el.closest("aside.sidebar") && !el.getAttribute("data-value")) return;
+  if (!el || el.disabled || el.closest('[draggable="true"]') || el.closest("aside.sidebar") && !el.getAttribute("data-value") && !el.classList.contains("shelf")) return;
   pressedPick = { action: el.getAttribute("data-on-click"), value: el.getAttribute("data-value"), at: e.timeStamp, x: e.clientX, y: e.clientY };
   // (Search's field takes the keyboard now: the press's own focus would take it back)
   if (pressedPick.action === "thin-search-open") e.preventDefault();
