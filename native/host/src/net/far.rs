@@ -48,6 +48,12 @@ use K::*;
 /// Fr.change's table: for each change that shows a thread, a bot and its space, the fields renamed into this hub's
 /// ids. Settings, devices, links, webhooks, rooms (shared rooms travel on their own), ordering and usage are absent:
 /// they stay home.
+/// Every variant `change` renames; the test below checks each field against codec.bend's wire names.
+pub const VARIANTS: &[&str] = &["ProjectCreated", "ProjectRemoved", "ThreadRenamed", "ThreadSettled", "ThreadUnsettled", "ThreadWoke", "ThreadArchived", "ThreadPinned",
+    "ThreadDeleted", "ModesSet", "ProviderSet", "AskClosed", "BotDeleted", "RoutineDeleted", "RoutineFired", "RoutinePlan", "RoutineSlot", "RoutineDone", "ThreadCreated",
+    "MessagePosted", "MessageFrom", "TurnChanged", "PendingChanged", "TurnQueued", "QueueTaken", "QueueEdited", "QueueRemoved", "QueueMoved", "QueueTakenOne", "TodosChanged",
+    "TodosSet", "WorkSet", "ActivityLogged", "ThreadForked", "TaskDelegated", "TaskStateSet", "TaskDelivered", "AskOpened", "BotSet", "RoutineSet", "Reminded", "MemorySaved",
+    "MemoryForgot", "TaskSet", "TaskDeleted", "SpaceSet", "SpacePageSet", "ThreadParentSet", "ThreadLaunched"];
 fn table(variant: &str) -> Option<&'static [(&'static str, K)]> {
     Some(match variant {
         "ProjectCreated" | "ProjectRemoved" | "ThreadRenamed" | "ThreadSettled" | "ThreadUnsettled" | "ThreadWoke" | "ThreadArchived" | "ThreadPinned"
@@ -58,7 +64,7 @@ fn table(variant: &str) -> Option<&'static [(&'static str, K)]> {
         "TurnChanged" | "PendingChanged" | "TurnQueued" | "QueueTaken" | "QueueEdited" | "QueueRemoved" | "QueueMoved" | "QueueTakenOne"
         | "TodosChanged" | "TodosSet" | "WorkSet" => &[("thread", Id)],
         "ActivityLogged" => &[("thread", Id), ("summary", Text)],
-        "ThreadForked" => &[("id", Id), ("src", Id)],
+        "ThreadForked" => &[("id", Id), ("source", Id)],
         "TaskDelegated" => &[("task", Id), ("parent", Opt), ("child", Opt)],
         "TaskStateSet" | "TaskDelivered" => &[("task", Id)],
         "AskOpened" => &[("id", Id), ("thread", Id)],
@@ -86,6 +92,11 @@ pub fn change(l: &str, c: &Value, origin: &dyn Fn(&str, &str) -> String) -> Opti
 
 // ----- what the owning hub shares -----
 /// What `shared` asks of the owner's state, after the change.
+///
+/// `ask_thread` MUST see a closed ask: Bend's `Fr.ask.shared` reads the asks after the change, where a closed ask
+/// stays in the map with its flag off. A state that removes an ask on close (`commands::Fold`, the agents' world,
+/// the lean state) makes this answer None, so `AskClosed` is never shared and the mirror's ask stays open forever.
+/// Back it with the full state, or look the ask up before the fold. The same holds for `task_parent` of a finished task.
 pub trait Owned {
     /// A thread of this hub's own (mirrors are client projections, never re-exported).
     fn thread(&self, id: &str) -> bool;
@@ -190,5 +201,20 @@ mod tests {
     #[test] fn far_old_takes_nothing() { assert_eq!(take(9, 3, 6, &[it(4), it(6)]), Got { head: 9, items: vec![], gap: false }); }
     #[test] fn far_overlap_takes_new() { assert_eq!(take(5, 3, 8, &[it(4), it(6), it(8)]), Got { head: 8, items: vec![it(6), it(8)], gap: false }); }
     #[test] fn far_batch_again() { assert_eq!(take(8, 5, 8, &[it(6), it(8)]), Got { head: 8, items: vec![], gap: false }); }
+    #[test] fn far_change_fork_names_its_source() {
+        let c = change("L", &json!({"$":"ThreadForked","id":"t2","source":"t1","at":1}), &same).unwrap();
+        assert_eq!((c["id"].as_str().unwrap(), c["source"].as_str().unwrap()), ("L~t2", "L~t1"), "a mirror's fork points at the mirrored source");
+    }
+    /// The table's field names are the wire names (codec.bend), not Bend's binder names.
+    #[test] fn far_change_fields_are_codec_wire_names() {
+        let codec = include_str!("../../../../src/core/codec.bend");
+        for v in VARIANTS {
+            let key = format!("Change.obj(\"{v}\", [");
+            let line = codec.lines().find(|l| l.contains(&key)).unwrap_or_else(|| panic!("codec.bend has no encoder for {v}"));
+            let wire: Vec<&str> = line.split("J.KV{\"").skip(1).filter_map(|p| p.split('"').next()).collect();
+            for (f, _) in table(v).unwrap() { assert!(wire.contains(f), "{v}.{f} is not a wire field: {wire:?}"); }
+        }
+        assert!(table("SettingSet").is_none());
+    }
     #[test] fn far_item_roundtrip() { let i = it(7); assert_eq!(Item::of(&i.json()), i); let _ = id_("a", "b"); }
 }
