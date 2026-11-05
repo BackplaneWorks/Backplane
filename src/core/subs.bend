@@ -81,8 +81,19 @@ def Agg.step(+kind: String, +text: String, +n: Nat, +ss: List<&2, SubStep>) -> L
 
 # 0 its start, 1 its end, 3 what the hub noted about it (Subs.meta: what it
 # was asked, how it ended), 2 a step it took
+# 4 a call's step count where the store read left its older steps out
+# (server/subagent-history.bend: only each call's newest Subs.shown() steps
+# are read, with this count of the steps a full read would have walked)
+def Subs.count.kind() -> String:
+  "steps.count"
+
 def Agg.kind(+kind: String) -> Nat:
-  Bool.pick(Nat, String.starts_with(kind, "start"), 0n, Bool.pick(Nat, String.eq(kind, "end"), 1n, Bool.pick(Nat, Subs.meta(kind), 3n, 2n)))
+  Bool.pick(Nat, String.starts_with(kind, "start"), 0n, Bool.pick(Nat, String.eq(kind, "end"), 1n, Bool.pick(Nat, Subs.meta(kind), 3n, Bool.pick(Nat, String.eq(kind, Subs.count.kind()), 4n, 2n))))
+
+# the count's own number, never fewer than the steps already walked
+def Subs.count.of(+text: String, +n: Nat) -> Nat:
+  +c = Maybe.default(&2, Nat, Nat.read(text), 0n)
+  Bool.pick(Nat, Nat.is_gt(c, n), c, n)
 
 def Agg.find(as: List<&2, SubAgg>, +call: String) -> SubAgg:
   match as:
@@ -125,6 +136,8 @@ def Agg.upd(i: Nat, a: SubAgg, +kind: String, +text: String, +at: Nat) -> SubAgg
       SubAgg{c, k, ti, Subs.or(en, text), n, ss, Bool.pick(Nat, String.is_empty(en), at, tm)}
     case 3n a:
       a
+    case 4n SubAgg{c, k, ti, e, +n, ss, tm}:
+      SubAgg{c, k, ti, e, Subs.count.of(text, n), ss, tm}
     case _ SubAgg{c, k, ti, e, +n, ss, +tm}:
       SubAgg{c, k, ti, e, 1n+n, Agg.step(kind, text, n, ss), Bool.pick(Nat, Nat.is_eq(tm, 0n), at, tm)}
 
@@ -996,6 +1009,8 @@ def Walk.act(i: Nat, w: SubWalk, +kind: String, +text: String, +at: Nat) -> SubW
       SubWalk{si, Bool.pick(Nat, Nat.is_eq(u, 0n), at, u), n, l, ab, oc, ss}
     case 3n SubWalk{si, u, n, l, +ab, +oc, ss}:
       SubWalk{si, u, n, l, Bool.pick(String, String.eq(kind, "about"), Walk.first(ab, text), ab), Bool.pick(String, String.eq(kind, "outcome"), Walk.first(oc, text), oc), ss}
+    case 4n SubWalk{si, u, +n, l, ab, oc, ss}:
+      SubWalk{si, u, Subs.count.of(text, n), l, ab, oc, ss}
     case _ SubWalk{si, u, +n, +l, ab, oc, ss}:
       SubWalk{si, u, 1n+n, Walk.last(Walk.empty(l), kind, text, l), ab, oc, Agg.step(kind, text, n, ss)}
 

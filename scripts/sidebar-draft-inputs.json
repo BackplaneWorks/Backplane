@@ -141,7 +141,7 @@
     "src/core/steer.bend": "e3bf553f18763459bd46637a4a02150ce610aa65136581804474399611576f74",
     "src/core/store.bend": "037f48017d9b9c1b6ed24d750bc898dc62200635d95fecc627f2196fd79d89d5",
     "src/core/strokefont.bend": "a5d15a2a0c28e9b24673d41bd31a283b8b9df71b1d40524b4bfb689b3ff964bb",
-    "src/core/subs.bend": "9f349eb37a62b9b6dd3986b3501b94df1b2f2b3d5d2c56eb3159ead36c4c3a80",
+    "src/core/subs.bend": "b032937af372f9301f5c1676b78827c665b12adf0752596b57bb3be3a27ae7a1",
     "src/core/subthreads.bend": "48b0d1c078222b3ba94d9a95c7e59edd9c49705a39a89b6de33ae96ecf398fb0",
     "src/core/svg.bend": "dc334fd62bc35e0fa3c9cdac414ee563a31f99a3fd538810d42d35c148c30c14",
     "src/core/task.bend": "8280585ed265c028ae6fa6bc72be4b56e527e4f162262e1a4a61401d693457b2",
@@ -1199,5 +1199,6 @@
     "viewerInfo": "Also left out of the private image key: info keys of each thread's viewer and fold choices ('fold:', 'view.', 'panel:', 'panel.hand:', 'diff:', 'hist.at:', 'hist.back:', 'hist.diff:', 'cmp.a:', 'cmp.b:', 'cmp.al', 'cmp.bl', 'fm.want:'; client.bend's Reset.prefixes less 'subs:' and 'fab.'). Call-graph scan from every View.sidebar/project/row/tree/groups def (1161 reachable defs): no literal reader of these prefixes; the only info walk (Side.signals.ix \u2192 Signal.cache.work) reads '@signal:' keys. test/sidebar_draft_image_test.bend: fold and viewer choices reuse the image and the whole page with the kept sidebar equals the fresh one; 'subs:' still invalidates."
   },
   "snappyDiffReview20261105": "client.bend Dv.open/Dv.mark/Dv.unwait, view.bend View.diff.wait, screen.bend Mob.diff.at.w: a Diff asked for by hand opens its viewer at once with a Loading head (diff.wait:t, diff.ask:<id>) until its answer or an error. Viewer/info keys only; no sidebar draft reader changed.",
-  "snappyGreetingReview20261105": "thin-wire.bend: the web greeting adds \"fabSelf\": true (Wire.greeting.extra); no sidebar or draft data."
+  "snappyGreetingReview20261105": "thin-wire.bend: the web greeting adds \"fabSelf\": true (Wire.greeting.extra); no sidebar or draft data.",
+  "snappySubsCountReview20261105": "subs.bend: Agg.kind 4 / Subs.count.of take a 'steps.count' act row's count (only from subagent-history.bend's SQL) as a call's step count; rows, titles and steps otherwise unchanged (test/tools/subagent_store.mjs compares with the old full read). No sidebar draft reader changed."
 }
