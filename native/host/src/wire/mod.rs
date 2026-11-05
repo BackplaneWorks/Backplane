@@ -21,6 +21,10 @@ pub fn hello_body(version: &str, commit: &str, side_by_side: bool) -> Value {
 }
 /// The same fact in the hub info the views read (info values are text): `sideBySide` = "1" when on, no key when off.
 pub fn side_by_side_info_with(o: &mut serde_json::Map<String, Value>, on: bool) { if on { o.insert("sideBySide".into(), json!("1")); } }
+/// The view picture the client gets: `shown.sideBySide = true` (top level) on a copy that lets the person start a real agent; untouched otherwise
+/// and when `shown` is not an object. The GPUI strip reads it from here.
+pub fn shown_with_side_by_side(shown: Value) -> Value { shown_marked(shown, crate::copy::person_turn_allowed()) }
+pub fn shown_marked(mut shown: Value, on: bool) -> Value { if on { if let Some(o) = shown.as_object_mut() { o.insert("sideBySide".into(), json!(true)); } } shown }
 pub fn side_by_side_info(o: &mut serde_json::Map<String, Value>) { side_by_side_info_with(o, crate::copy::person_turn_allowed()) }
 
 /// Bend `Hub.origin`: the decimal `at` of the log's first change ("0" for an empty log or a first line without `at`).
