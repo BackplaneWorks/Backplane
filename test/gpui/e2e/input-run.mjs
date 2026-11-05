@@ -16,7 +16,7 @@ const pf=await preflight({display:dsp.display,env:dsp.env,ime,out:out+'/prefligh
 const ACTIONS=['drag-select','ctrl-c','paste-image','drop-file','ime-hangul','paperclip'];
 // which actions each failed check takes down: core input (pointer, keys, clipboard) takes down the whole run; the rest only the action that needs it
 const failed=new Set(pf.failed);const coreFailed=pf.failed.filter(k=>/^(pointer|key-|wheel|clipboard|primary)/.test(k));
-const harnessFor={'drop-file':pf.failed.filter(k=>/^xdnd/.test(k)),'ime-hangul':pf.failed.filter(k=>/^(ime|xim)/.test(k)),'paperclip':pf.failed.filter(k=>/^portal/.test(k))};
+const harnessFor={'drag-select':pf.failed.filter(k=>/^selections-cleared/.test(k)),'ctrl-c':pf.failed.filter(k=>/^selections-cleared/.test(k)),'drop-file':pf.failed.filter(k=>/^xdnd/.test(k)),'ime-hangul':pf.failed.filter(k=>/^(ime|xim)/.test(k)),'paperclip':pf.failed.filter(k=>/^portal/.test(k))};
 const harnessActions=Object.fromEntries(Object.entries(harnessFor).filter(([,v])=>v.length));
 if(coreFailed.length){try{portal?.kill('SIGTERM')}catch{}try{ime.stop()}catch{}dsp.stop();
   summary.verdict='harness';summary.reason='preflight failed on core input: '+coreFailed.join(', ')+' (no GPUI was started; nothing here says anything about the app)';summary.actions=Object.fromEntries(ACTIONS.map(a=>[a,{ok:null,status:'harness',evidence:{failedChecks:pf.failed}}]));
@@ -24,7 +24,7 @@ if(coreFailed.length){try{portal?.kill('SIGTERM')}catch{}try{ime.stop()}catch{}d
 summary.harnessActions=harnessActions; // these actions are not run: their tool does not work here, so they cannot say anything about the app
 const fx=await startFixtureHub({bin:hubBin,root:resolve('out/e2e-run/input'),port:3813,threads:6});
 try{
-  const sf=out+'/hold.script.json';const holdSteps=Array.from({length:80},()=>[{wait:1500},{read:'composer'}]).flat();holdSteps.splice(2*45,0,{click:'ui:Attach'}); // at ~70 s the client itself clicks its paperclip: tells 'the real click missed' from 'the control does nothing'
+  const sf=out+'/hold.script.json';const holdSteps=Array.from({length:80},()=>[{wait:1500},{read:'composer'}]).flat();// (the client's own paperclip click is a separate, later client run: it must never land inside another action)
   writeFileSync(sf,JSON.stringify([{select:0},...holdSteps])); // G6: the client reports its composer text every 1.5 s
   const metrics=[];let buf='';const g=spawn(gpuBin,['--url',fx.state.url,'--token-file',fx.state.root+'/home/token','--script',sf],{env:{...dsp.env,...ime.env,HOME:fx.state.root+'/fakehome',BACKPLANE_GPUI_RECTS:'1'},stdio:['ignore','ignore','pipe']});
   g.stderr.on('data',d=>{buf+=d;let i;while((i=buf.indexOf('\n'))>=0){const l=buf.slice(0,i);buf=buf.slice(i+1);const k=l.indexOf('GPUI_METRIC ');if(k>=0)try{metrics.push(JSON.parse(l.slice(k+12)))}catch{}}});
@@ -37,16 +37,16 @@ try{
   const main=Object.entries(flat).filter(([k])=>!/sidebar|rail|composer/.test(k)).sort((a,b)=>b[1].w*b[1].h-a[1].w*a[1].h)[0];
   summary.mainRegion=main?main[0]:null;
   const runIf=async(name,f)=>{if(harnessActions[name]){summary.actions[name]={ok:null,status:'harness',evidence:{failedChecks:harnessActions[name]}};return}await run(name,f)};
-  const run=async(name,f)=>{try{summary.actions[name]=await f()}catch(e){summary.actions[name]={ok:false,evidence:{error:String(e.message).slice(0,200)}}}};
+  const run=async(name,f)=>{try{summary.actions[name]=await f()}catch(e){summary.actions[name]={ok:null,status:'error',evidence:{harnessError:String(e.stack||e.message).slice(0,300)}}}}; // a thrown xclip/python/xdotool error is the harness's, never the app's
   // client-side pointer sanity (the plain-client preflight cannot prove GPUI receives XTEST pointer events: GPUI logs "Found no xinput mouse pointers" under Xvfb):
   // click another thread's row, taken from its own controls event, and require the main area to change
   const ctl0=[...metrics].reverse().find(m=>m.event==='controls'&&m.controls?.some(c=>c.rect));const threads=(ctl0?.controls||[]).filter(c=>/^thread:/.test(c.id)&&c.rect);
   if(threads.length>=2&&main){const t=threads[threads.length-1].rect,r=main[1];const b4=inp.s('before-pointer-sanity');inp.clickAt(win,[t.x+t.w/2,t.y+t.h/2]);await sleep(2500);const af=inp.s('after-pointer-sanity');
     const d=diffPixels(b4,af,`${Math.round(r.w)}x${Math.round(r.h)}+${Math.round(r.x)}+${Math.round(r.y)}`);summary.clientPointer={clickedControl:threads[threads.length-1].id,mainRegionChangedPixels:d,delivered:d>5000};
-    if(!summary.clientPointer.delivered){harnessActions['drag-select']=['client-pointer'];harnessActions['paperclip']=['client-pointer'];summary.notes=[...(summary.notes||[]),'a click on a sidebar thread row changed nothing in the main area: GPUI is not receiving XTEST pointer events on this display (it logs "Found no xinput mouse pointers"); pointer-dependent actions are harness, not app']}}
-  else summary.clientPointer={delivered:null,note:'no thread controls with rects to click'};
+    if(summary.clientPointer.delivered!==true){for(const a of ['drag-select','ctrl-c','paperclip'])harnessActions[a]=[...(harnessActions[a]||[]),'client-pointer'];summary.notes=[...(summary.notes||[]),'a click on a sidebar thread row changed nothing in the main area: GPUI is not receiving XTEST pointer events on this display; pointer-dependent actions are harness, not app']}}
+  else{summary.clientPointer={delivered:null,note:'no thread controls with rects to click: the pointer is unproven'};for(const a of ['drag-select','ctrl-c','paperclip'])harnessActions[a]=[...(harnessActions[a]||[]),'client-pointer-unproven']}
   inp.cb.clear();await sleep(300);
-  if(main){const r=main[1];await run('drag-select',()=>inp.dragSelect(win,[r.x+40,r.y+60],[r.x+Math.min(r.w-40,500),r.y+110]));await run('ctrl-c',()=>{return inp.copy()})}
+  if(main){const r=main[1];await runIf('drag-select',()=>inp.dragSelect(win,[r.x+40,r.y+60],[r.x+Math.min(r.w-40,500),r.y+110]));await runIf('ctrl-c',()=>{return inp.copy()})}
   else summary.blocked['drag-select/ctrl-c']='no main region in the layout event';
   execFileSync('convert',['-size','240x160','gradient:red-blue',out+'/paste.png'],{env:dsp.env});
   // Evidence comes from the hub's own log (the message the client actually sent), not from pixels: pixels also change when a thread streams.
@@ -68,18 +68,22 @@ try{
   const ctlAll=metrics.filter(m=>m.event==='controls');const ctl=[...ctlAll].reverse().find(m=>m.controls?.some(c=>c.rect));
   const attach=ctl?.controls?.find(c=>c.id==='ui:Attach'&&c.rect);
   if(!attach)summary.blocked['paperclip']='no ui:Attach control with a rect in the controls event';
-  else await runIf('paperclip',async()=>{const w0=inp.windows();const b4=inp.s('before-paperclip');inp.clickAt(win,[attach.rect.x+attach.rect.w/2,attach.rect.y+attach.rect.h/2]);await sleep(3000);const w1=inp.windows();const shot=inp.s('after-paperclip');const r=attach.rect;const crop=`${Math.round(r.w)}x${Math.round(r.h)}+${Math.round(r.x)}+${Math.round(r.y)}`;const rectDiff=diffPixels(b4,shot,crop);
+  else await runIf('paperclip',async()=>{const countOpen=()=>{try{return (readFileSync(portalLog,'utf8').match(/OpenFile/g)||[]).length}catch{return 0}};const calls0=countOpen();const w0=inp.windows();const b4=inp.s('before-paperclip');inp.clickAt(win,[attach.rect.x+attach.rect.w/2,attach.rect.y+attach.rect.h/2]);await sleep(3000);const w1=inp.windows();const shot=inp.s('after-paperclip');const r=attach.rect;const crop=`${Math.round(r.w)}x${Math.round(r.h)}+${Math.round(r.x)}+${Math.round(r.y)}`;const rectDiff=diffPixels(b4,shot,crop);
     const opened=w1.filter(x=>!w0.some(y=>y.id===x.id));let pl='';try{pl=readFileSync(portalLog,'utf8')}catch{}
-    const called=/OpenFile/.test(pl);
-    return {ok:called,evidence:{rect:attach.rect,rectChangedPixels:rectDiff,portalStandin:portal?'running':'not running',portalCalled:called,portalLog:pl.split('\n').slice(-4).join(' | '),newWindows:opened.map(x=>x.name).slice(0,5),screenshot:shot,note:'ok = the client asked the OS file chooser (xdg-desktop-portal FileChooser, via a stand-in on Boat); whether the chosen file then attaches is the upload chain measured by paste/drop'}}});
-  // the client's own click on its paperclip (G4 `click` step): does ITS handler reach the OS chooser?
-  for(let k=0;k<40&&!metrics.some(m=>m.event==='click'&&m.id==='ui:Attach');k++)await sleep(1500);
-  await sleep(1500);{const sc=metrics.find(m=>m.event==='click'&&m.id==='ui:Attach');let pl2='';try{pl2=readFileSync(portalLog,'utf8')}catch{}
-    summary.paperclipScriptedClick={clickEvent:sc||null,portalOpenFileCalls:(pl2.match(/OpenFile/g)||[]).length,portalLogTail:pl2.split('\n').slice(-3).join(' | ')}}
+    const calls1=countOpen();const called=calls1>calls0; // an increase caused by this click, not any OpenFile anywhere in the log
+    return {ok:called,evidence:{rect:attach.rect,rectChangedPixels:rectDiff,portalStandin:portal?'running':'not running',portalCalls:{before:calls0,after:calls1},portalCalled:called,portalLog:pl.split('\n').slice(-4).join(' | '),newWindows:opened.map(x=>x.name).slice(0,5),screenshot:shot,note:'ok = the client asked the OS file chooser (xdg-desktop-portal FileChooser, via a stand-in on Boat); whether the chosen file then attaches is the upload chain measured by paste/drop'}}});
+  const lk0=null;
   const lk=[...metrics].reverse().find(m=>m.event==='links');summary.blocked['link-click']=lk&&lk.supported===false?'GPUI draws message text without link detection (links event supported:false)':(lk?null:'no links event');
   const sel=[...metrics].reverse().find(m=>m.event==='read'&&m.what==='selection');if(sel)summary.selectionRead=sel;
-  try{g.kill('SIGTERM')}catch{}
+  try{g.kill('SIGTERM')}catch{}await sleep(1500);
+  // the client's own click on its paperclip, as a separate later client run (never inside another action): is ITS handler wired to the OS chooser?
+  {const cnt=()=>{try{return (readFileSync(portalLog,'utf8').match(/OpenFile/g)||[]).length}catch{return 0}};const n0=cnt();
+   const sf2=out+'/paperclip.script.json';writeFileSync(sf2,JSON.stringify([{select:0},{wait:2500},{click:'ui:Attach'},{wait:4000}]));const m2=[];let b2='';
+   const g2=spawn(gpuBin,['--url',fx.state.url,'--token-file',fx.state.root+'/home/token','--script',sf2],{env:{...dsp.env,...ime.env,HOME:fx.state.root+'/fakehome',BACKPLANE_GPUI_RECTS:'1'},stdio:['ignore','ignore','pipe']});
+   g2.stderr.on('data',d=>{b2+=d;let i;while((i=b2.indexOf('\n'))>=0){const l=b2.slice(0,i);b2=b2.slice(i+1);const k=l.indexOf('GPUI_METRIC ');if(k>=0)try{m2.push(JSON.parse(l.slice(k+12)))}catch{}}});
+   await Promise.race([new Promise(r=>g2.on('close',()=>r())),sleep(40000)]);try{g2.kill('SIGTERM')}catch{}await sleep(800);
+   summary.paperclipScriptedClick={clickEvent:m2.find(m=>m.event==='click'&&m.id==='ui:Attach')||null,portalOpenFileCallsAdded:cnt()-n0}}
 }finally{try{portal?.kill('SIGTERM')}catch{}try{ime.stop()}catch{}await fx.stop();dsp.stop()}
 // an action only counts when evidence says so; pass also needs the Rust hub on real hardware (CONTRACT.md), which this Boat run is not
-summary.verdict=Object.keys(harnessActions).length?'app+harness':'app';for(const a of Object.values(summary.actions))if(a.status!=='harness')a.status=a.ok?'partial':'fail'; // the preflight passed, so a false below is the app's
+summary.verdict=Object.keys(harnessActions).length?'app+harness':'app';for(const a of Object.values(summary.actions))if(a.status!=='harness'&&a.status!=='error')a.status=a.ok?'partial':'fail'; // the preflight passed, so a false below is the app's
 writeFileSync(out+'/input-summary.json',JSON.stringify(summary,null,1));console.log(JSON.stringify({actions:Object.fromEntries(Object.entries(summary.actions).map(([k,v])=>[k,v.ok])),blocked:summary.blocked},null,1));

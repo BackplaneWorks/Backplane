@@ -1,7 +1,7 @@
 // Harness self-check: proves the pointer, keyboard, clipboard, PRIMARY, XDND and input method work against PLAIN X clients before GPUI starts.
 // If any check fails the run is a HARNESS failure, never a verdict about the app. Boat or an isolated display only.
 import {spawn,execFileSync,spawnSync} from 'node:child_process';import {writeFileSync,readFileSync,existsSync,mkdirSync} from 'node:fs';import {resolve} from 'node:path';
-import {xinput} from './xinput.mjs';import {clip} from './clip.mjs';
+import {shot,diffPixels} from './driver.mjs';import {xinput} from './xinput.mjs';import {clip} from './clip.mjs';
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 // ime: a running startIme() instance (its env is what an XIM client needs); out: folder for scratch files
 export async function preflight({display,env,ime,out,portalLog=null}){
@@ -15,6 +15,10 @@ export async function preflight({display,env,ime,out,portalLog=null}){
     const m=(log.match(/MotionNotify/g)||[]).length;
     ok('pointer-click',/ButtonPress[\s\S]*button 1/.test(log),null);ok('pointer-drag',m>=8&&/ButtonRelease/.test(log),{motion:m});
     ok('key-ctrl-c',/keysym 0x63, c/.test(log)&&/Control_L/.test(log),null);ok('key-unicode',/eacute/.test(log),null);ok('wheel',/button (4|5)/.test(log),null)});
+  // 1b. screenshots and the pixel diff the client-pointer check relies on: identical shots differ by 0, a new window changes the picture
+  await guard('screenshot-diff',async()=>{const a=shot(display,out+'/pf-a.png'),a2=shot(display,out+'/pf-a2.png');const same=diffPixels(a,a2);
+    const w=spawn('xev',['-geometry','400x300+700+400','-name','pf-shot'],{env,stdio:'ignore'});await sleep(1200);const b=shot(display,out+'/pf-b.png');w.kill();const moved=diffPixels(a,b);
+    ok('screenshot-diff',same===0&&moved>1000,{identicalDiff:same,newWindowDiff:moved})});
   // 2. clipboard + PRIMARY, read by a different process than the owner (what a client does)
   await guard('clipboard',async()=>{
     cb.setText('pf clip');await sleep(300);ok('clipboard-text',cb.getText()==='pf clip',{got:cb.getText()});
