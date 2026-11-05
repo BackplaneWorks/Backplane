@@ -12,7 +12,7 @@ use std::{sync::{Arc, Weak}, time::Duration};
 use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::{TcpListener, TcpStream}, sync::{oneshot, Semaphore}};
 
 pub const TOOLS_JSON: &str = include_str!("../../../../test/gpui/agents/fixtures/mcp-tools.json");
-pub const IMPLEMENTED: &[&str] = &["orchestrator_capabilities", "thread_list", "thread_read", "thread_send", "thread_update", "thread_wait", "thread_interrupt", "viewer_show", "permission_prompt", "kicad_ipc", "kicad_ipc_status", "terminal_open", "terminal_read", "terminal_send", "terminal_close", "secret_request", "secret_list", "secret_run"];
+pub const IMPLEMENTED: &[&str] = &["orchestrator_capabilities", "thread_list", "thread_read", "thread_send", "thread_update", "thread_wait", "thread_interrupt", "viewer_show", "permission_prompt", "kicad_ipc", "kicad_ipc_status", "terminal_open", "terminal_read", "terminal_send", "terminal_close", "secret_request", "secret_list", "secret_run", "settings_inspect", "settings_propose"];
 const MAX_BODY: usize = 4 << 20;
 const MAX_CONNS: usize = 256;
 const MAX_PARKED_PER_THREAD: usize = 16;
@@ -165,6 +165,8 @@ impl Mcp {
             "kicad_ipc" => match crate::files::kicad::ipc::kicad_ipc_in(&ag.hub, Some(thread), sv(&a, "path"), sv(&a, "type"), a.get("message").cloned().unwrap_or(json!({}))).await { Ok(v) => (true, v), Err(e) => fail(&e) },
             "kicad_ipc_status" => match crate::files::kicad::ipc::kicad_ipc_status_in(&ag.hub, Some(thread), sv(&a, "path")).await { Ok(v) => (true, v), Err(e) => fail(&e) },
             "kicad_export10" => crate::files::export10::mcp(&ag.hub, sv(&a, "path"), a.get("force").and_then(Value::as_bool).unwrap_or(false)).await,
+            "settings_inspect" => crate::settings::proposal::tool_inspect(&ag.hub, &ag.host.models).await,
+            "settings_propose" => { let now = now_s(); let id = hub_id("settings", now, ag.seq_n()); crate::settings::proposal::tool_propose(&ag.hub, thread, &ag.host.models, &a, now, &id).await }
             "secret_request" => crate::settings::secret::tool_request(&ag.hub, thread, &a).await,
             "secret_list" => crate::settings::secret::tool_list(),
             "secret_run" => { let cwd = ag.world().await.cwd(thread); crate::settings::secret::tool_run(thread, &cwd, &a).await }
