@@ -779,9 +779,41 @@ for (const name of ["pointerover", "touchstart"]) document.addEventListener(name
   const el=event.target.closest?.('[data-on-click="select"],[data-on-click="bot"],[data-on-click="proj-home"]');
   if (!el) return;
   void transitionViews.warm(transitionScope());
-  if (name==="pointerover") previewViews.enqueue({kind:el.getAttribute("data-on-click")==="bot"?"bot":el.getAttribute("data-on-click")==="proj-home"?"project":"thread",id:el.getAttribute("data-value")},true);
+  const target={kind:el.getAttribute("data-on-click")==="bot"?"bot":el.getAttribute("data-on-click")==="proj-home"?"project":"thread",id:el.getAttribute("data-value")};
+  if (name==="pointerover") previewViews.enqueue(target,true);
+  warmPicture(target);
 }, {passive:true});
 const targetKey = target => target ? target.kind + ":" + target.id : "";
+// A retained picture as Bend's nodes, made once per picture and theme (a
+// whole view: made at the click it was most of the click's own time), and
+// made ahead, with its messages' Markdown, while the person points at the
+// row (warmPicture): the click then draws it from what is ready.
+const pictureNodes = new WeakMap();
+function pictureNode(shown) {
+  const kept = pictureNodes.get(shown);
+  if (kept?.theme === themeNow) return kept.node;
+  const node = App.presentation_node(presentationJson(themed(shown)));
+  pictureNodes.set(shown, { theme: themeNow, node });
+  return node;
+}
+const idleSoon = fn => typeof requestIdleCallback === "function" ? requestIdleCallback(fn, { timeout: 300 }) : setTimeout(fn, 50);
+let warming = null;
+function warmPicture(target) {
+  const shown = transitionViews.destination(transitionScope(), target)?.shown;
+  if (!shown || warming === shown || pictureNodes.get(shown)?.theme === themeNow) return;
+  warming = shown;
+  idleSoon(() => {
+    warming = null;
+    const node = pictureNode(shown), stack = [node];
+    // (each message's piece made now: the click's render finds it made)
+    while (stack.length) {
+      const v = stack.pop();
+      if (!is(v, "El")) continue;
+      if (v.tag === "bp-memo") { expand(v);continue; }
+      for (const k of each(v.kids)) stack.push(k);
+    }
+  });
+}
 // Nothing is drawn in between two views: a thread picked, a reconnect, a
 // failure keep the hub's last view on screen until the next one comes.
 function holdPicture() {
@@ -792,7 +824,7 @@ function restoreTransition(target) {
   const shown = transitionViews.get(transitionScope(target));
   if (shown) { transitionFor = targetKey(target);heldAt = 0;transitionPosition = transitionViews.position(transitionScope(target)) || {atEnd:true}; }
   else if (transitionNode && transitionFor !== targetKey(target) && !heldAt) { heldAt = performance.now();setTimeout(later, QUIET_MS + 20); }
-  transitionNode = shown ? App.presentation_node(presentationJson(themed(shown))) : transitionNode;
+  transitionNode = shown ? pictureNode(shown) : transitionNode;
   return !!shown;
 }
 const focusedView = new FocusedView({
