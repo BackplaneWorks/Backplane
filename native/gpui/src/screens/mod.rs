@@ -7,6 +7,7 @@ pub mod composer;
 pub mod edit;
 pub mod images;
 pub mod md;
+pub mod picker;
 pub mod select;
 pub mod settings;
 pub mod timeline;
@@ -23,6 +24,7 @@ pub struct Screens {
     /// Timeline scroll offset per thread, so a thread left scrolled up keeps its place.
     pub offsets: HashMap<String, f32>,
     pub reg: timeline::Reg,
+    pub picker_open: bool,
     pub fields: HashMap<String, settings::FieldSlot>,
     pub parsed: timeline::ParseCache,
     pub images: images::Images,
@@ -36,6 +38,6 @@ pub struct Screens {
 
 impl Screens {
     pub fn new<T: 'static>(_cx: &mut Context<T>, target: Option<attach::Target>, drafts_path: std::path::PathBuf, saved: HashMap<String, String>) -> Self {
-        Self { ask_inputs: HashMap::new(), attacher: attach::Attacher::new(target), drafts: drafts::Writer::start(drafts_path, saved), offsets: HashMap::new(), reg: Default::default(), fields: HashMap::new(), parsed: Default::default(), images: Default::default(), img_poll: false, await_draft: None, pending_draft: None, draft_timer: false }
+        Self { ask_inputs: HashMap::new(), attacher: attach::Attacher::new(target), drafts: drafts::Writer::start(drafts_path, saved), offsets: HashMap::new(), reg: Default::default(), picker_open: false, fields: HashMap::new(), parsed: Default::default(), images: Default::default(), img_poll: false, await_draft: None, pending_draft: None, draft_timer: false }
     }
 }
