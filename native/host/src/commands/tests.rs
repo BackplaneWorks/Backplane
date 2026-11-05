@@ -370,3 +370,43 @@ impl crate::api::RpcHandler for Arc<Close> {
     mk(&h, "r3").await; let (e, _) = ask(&h, "thread.archive", json!({"thread":"r3"})).await; assert!(!e.iter().any(|v| v["$"] == "TurnChanged"));
     ask(&h, "thread.delete", json!({"thread":"r2"})).await; assert!(!running(&h, "r2")); assert_eq!(*closes.0.lock().unwrap(), vec!["r2".to_string()], "thread.delete closes the thread's browser page");
 }
+
+// AG.Title.clean / Title.changes: the writer's title replaces the placeholder only while the thread still has it
+#[test] fn a_writers_answer_becomes_a_clean_title() {
+    for (a, b) in [("Title: Fix the board.", "Fix the board"), ("  # **Hello**  world  ", "Hello world"), ("'quoted'", "quoted"), ("one\ntwo", "one"), ("", ""), ("wait...", "wait..."), (&"x".repeat(70), &format!("{}...", "x".repeat(57)))] { assert_eq!(super::plan::title_clean(a), b, "{a:?}") }
+}
+#[tokio::test] async fn thread_titled_unrooted_and_merged_land_the_server_jobs_reports() {
+    let h = hub("jobs").await;
+    h.commit(&json!({"$":"ThreadRenamed","id":"t2","title":"New thread","at":9})).await.unwrap();
+    let (e, r) = ask(&h, "thread.titled", json!({"thread":"t2","placeholder":"New thread","title":"Title: Route the clock."})).await; assert_eq!(r, ok()); assert_eq!(e, vec![json!({"$":"ThreadRenamed","id":"t2","title":"Route the clock","at":0})]);
+    let (e, _) = ask(&h, "thread.titled", json!({"thread":"t2","placeholder":"New thread","title":"Again"})).await; assert!(e.is_empty(), "a rename by the person wins");
+    let (e, _) = ask(&h, "thread.titled", json!({"thread":"t2","placeholder":"","title":"x"})).await; assert!(e.is_empty());
+    // unrooted: the worktree went; the record that it was asked for again clears
+    h.commit(&json!({"$":"SettingSet","key":"wt.again.t2","value":"5","at":9})).await.unwrap();
+    let (e, _) = ask(&h, "thread.unrooted", json!({"thread":"t2"})).await; assert_eq!(e, vec![json!({"$":"WorktreeRemoved","id":"t2","at":0}), json!({"$":"SettingSet","key":"wt.again.t2","value":"","at":0})]);
+    let mut fo = super::fold::Fold::default(); fo.sync(&h.store).unwrap(); assert_eq!(fo.threads["t2"].worktree, "");
+    // merged: once, for a thread with a branch on the pinned or active shelf
+    h.commit(&json!({"$":"WorktreeSet","id":"t2","branch":"backplane/x","worktree":"/w","at":9})).await.unwrap();
+    let (e, r) = ask(&h, "thread.merged", json!({"thread":"t2","url":"https://github.com/o/r/pull/3"})).await; assert_eq!(r, ok());
+    assert_eq!(e[0], json!({"$":"ThreadMerged","id":"t2","url":"https://github.com/o/r/pull/3","at":0})); assert_eq!(e[1]["summary"], "merged: https://github.com/o/r/pull/3"); assert_eq!(e[1]["kind"], "git");
+    let (e, _) = ask(&h, "thread.merged", json!({"thread":"t2","url":"u"})).await; assert!(e.is_empty(), "a recorded merge is not due again");
+    let (e, _) = ask(&h, "thread.merged", json!({"thread":"t1","url":"u"})).await; assert!(e.is_empty(), "no branch, no merge");
+}
+// Home.start / Home.request / ProjectHome.read
+#[tokio::test] async fn a_home_send_makes_one_conversation_and_asks_the_agents_to_post_the_message() {
+    let h = hub("homestart").await;
+    let (e, r) = ask(&h, "project.start", json!({"project":"p1","msg":"hm_1-a","text":"Build a clock\nwith a display"})).await; assert_eq!(r["ok"], true); assert_eq!(r["thread"], "home-hm_1-a");
+    assert_eq!(e[0], json!({"$":"ThreadCreated","id":"home-hm_1-a","project":"p1","title":"Build a clock\nwith a display","env":"worktree","branch":"","worktree":"","provider":"claude","model":"","at":0}));
+    let (e, r) = ask(&h, "project.start", json!({"project":"p1","msg":"hm_1-a","text":"again"})).await; assert!(e.is_empty()); assert_eq!(r["thread"], "home-hm_1-a", "a retry is the same conversation");
+    for bad in [json!({"project":"p1","msg":"has space","text":"x"}), json!({"project":"p1","msg":"ok","text":"  "}), json!({"project":"nope","msg":"ok","text":"x"})] {
+        let (e, r) = ask(&h, "project.start", bad).await; assert!(e.is_empty()); assert_eq!(r["error"], "Choose a project and enter a message before starting a thread.");
+    }
+    h.commit(&json!({"$":"ThreadDeleted","id":"home-hm_1-a","at":9})).await.unwrap();
+    let (_, r) = ask(&h, "project.start", json!({"project":"p1","msg":"hm_1-a","text":"x"})).await; assert!(r["error"].as_str().unwrap().starts_with("This request belongs to a different or removed conversation"));
+}
+#[tokio::test] async fn the_project_home_reads_the_projects_folder() {
+    let h = hub("home").await; let d = tmp("homefolder"); std::fs::write(d.join("README.md"), "hello").unwrap();
+    h.commit(&json!({"$":"ProjectCreated","id":"ph","title":"h","root":d.to_str().unwrap(),"at":9})).await.unwrap();
+    let (_, r) = ask(&h, "project.home", json!({"project":"ph"})).await; assert_eq!(r["ok"], true); assert_eq!(r["result"]["project_home"], "ph"); assert_eq!(r["result"]["artifacts"][0]["kind"], "readme");
+    let (_, r) = ask(&h, "project.home", json!({"project":"ghost"})).await; assert_eq!(r["error"], "Choose an existing project.");
+}

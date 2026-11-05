@@ -169,7 +169,29 @@ fn plan_inner(f: &Fold, at: u64, id: &Value, method: &str, p: &Value, cx: &Ctx) 
         "queue.edit" => done(vec![json!({"$":"QueueEdited","thread":th,"msg":s(p, "msg", ""),"text":s(p, "text", ""),"at":at})], id),
         "queue.remove" => done(vec![json!({"$":"QueueRemoved","thread":th,"msg":s(p, "msg", ""),"at":at})], id),
         "queue.move" => done(vec![json!({"$":"QueueMoved","thread":th,"msg":s(p, "msg", ""),"to":nat(p, "to"),"at":at})], id),
-        "thread.create" => create(f, at, id, p, None),
+        "thread.create" => create(f, at, id, p, None, None),
+        "thread.titled" => {
+            // Title.changes: the writer's title replaces the placeholder only while the thread still has it, and only when there is an answer
+            let (cur, ph) = (f.threads.get(&th).map(|t| t.title.clone()).unwrap_or_default(), s(p, "placeholder", ""));
+            let clean = title_clean(&s(p, "title", ""));
+            done(if cur == ph && !ph.is_empty() && !clean.is_empty() { vec![json!({"$":"ThreadRenamed","id":th,"title":clean,"at":at})] } else { vec![] }, id)
+        }
+        "thread.unrooted" => {
+            let mut ev = vec![json!({"$":"WorktreeRemoved","id":th,"at":at})];
+            if !f.setting(&format!("wt.again.{th}")).is_empty() { ev.push(json!({"$":"SettingSet","key":format!("wt.again.{th}"),"value":"","at":at})) } // Wt.answered
+            done(ev, id)
+        }
+        // Merge.found: gh saw the thread's branch merged; it settles, once. (Policy.merged's alert record is not written: the notification records are not ported.)
+        "thread.merged" => {
+            let t = f.threads.get(&th).cloned().unwrap_or_default();
+            let shelf_ok = !(t.deleted || t.archived) && t.forced != 1 && (t.pinned || t.forced == 2 || t.settled_at <= t.unsettled_at);
+            let due = shelf_ok && !t.branch.is_empty() && f.setting(&format!("merged.{th}")).is_empty();
+            if !due { return done(vec![], id) }
+            let url = s(p, "url", "");
+            done(vec![json!({"$":"ThreadMerged","id":th,"url":url,"at":at}),
+                json!({"$":"ActivityLogged","thread":th,"act":hub_id("g", at, f.n()),"tone":"info","kind":"git","summary":format!("merged{}", if url.is_empty() { String::new() } else { format!(": {url}") }),"at":at})], id)
+        }
+        "project.start" => start(f, at, id, p),
         // Queue.steer: a queued message sent now (into the running turn, or as a turn of its own); the agents module runs it
         "queue.steer" => {
             let m = s(p, "msg", "");
@@ -196,13 +218,13 @@ fn plan_inner(f: &Fold, at: u64, id: &Value, method: &str, p: &Value, cx: &Ctx) 
 }
 
 /// Hub.thread_create: a thread of a project, as the person asked; a retry with the same creationKey is the same thread.
-fn create(f: &Fold, at: u64, id: &Value, p: &Value, new_root: Option<(&str, usize)>) -> Option<Plan> {
+fn create(f: &Fold, at: u64, id: &Value, p: &Value, new_root: Option<(&str, usize)>, forced_id: Option<&str>) -> Option<Plan> {
     let project = s(p, "project", ""); let parent = s(p, "parent", ""); let key = s(p, "creationKey", "");
     let refuse = |m: &str| Some(Plan { events: vec![], reply: err(id, m), stop: None, wt: None, scratch: None, act: None });
     let root = new_root.map(|r| r.0.to_string()).unwrap_or_else(|| f.projects.get(&project).map(|x| x.root.clone()).unwrap_or_default());
     let scratch = project == "scratch";
     let n = new_root.map_or(f.n(), |r| r.1);
-    let mut th = hub_id("t", at, n);
+    let mut th = forced_id.map(str::to_string).unwrap_or_else(|| hub_id("t", at, n));
     if !key.is_empty() {
         let hex = key.len() == 32 && key.bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c));
         let live = f.projects.get(&project).map_or(false, |x| !x.removed && !x.root.is_empty()) && !scratch;
@@ -382,9 +404,40 @@ pub fn project_create(f: &Fold, at: u64, id: &Value, p: &Value, root: &str) -> P
         Some(pid) => Plan { events: vec![json!({"$":"ProjectCreated","id":pid,"title":title,"root":root_n,"at":at})], reply: ok(id), stop: None, wt: None, scratch: None, act: None },
         None => {
             let pid = hub_id("p", at, n);
-            let mut pl = create(f, at, id, &json!({"project":pid,"title":"New thread"}), Some((&root_n, n + 1))).unwrap();
+            let mut pl = create(f, at, id, &json!({"project":pid,"title":"New thread"}), Some((&root_n, n + 1)), None).unwrap();
             pl.events.insert(0, json!({"$":"ProjectCreated","id":pid,"title":title,"root":root_n,"at":at})); pl
         }
     };
     pl.events = step_tail(pend_fix(f, pl.events), at); pl
+}
+
+
+/// AG.Title.clean: the writer's answer as a title: its first line without quotes, markdown, a "Title:" label or a trailing period, spaces collapsed, at most 60 characters.
+pub fn title_clean(answer: &str) -> String {
+    let first = answer.trim().lines().next().unwrap_or("").trim().to_string();
+    let bare: String = first.chars().filter(|c| !matches!(c, '`' | '"' | '*')).collect();
+    let unhash = bare.trim_start_matches(|c| c == '#' || c == ' ').to_string();
+    let prefixed = if unhash.to_lowercase().starts_with("title:") { unhash.chars().skip(6).collect::<String>().trim().to_string() } else { unhash };
+    let unq = if prefixed.chars().count() >= 2 && prefixed.starts_with('\'') && prefixed.ends_with('\'') { prefixed.chars().skip(1).take(prefixed.chars().count() - 2).collect::<String>().trim().to_string() } else { prefixed };
+    let squash = unq.replace('\t', " ").split(' ').filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" ");
+    let unp = if squash.ends_with('.') && !squash.ends_with("..") { squash.chars().take(squash.chars().count() - 1).collect::<String>().trim().to_string() } else { squash };
+    if unp.chars().count() > 60 { format!("{}...", unp.chars().take(57).collect::<String>()) } else { unp }
+}
+
+/// Home.start: one real conversation and its first message, made atomically; the retained message id resolves to the same thread on every retry.
+fn start(f: &Fold, at: u64, id: &Value, p: &Value) -> Option<Plan> {
+    let (project, msg, text) = (s(p, "project", ""), s(p, "msg", ""), s(p, "text", ""));
+    let refuse = |m: &str| Some(Plan { events: vec![], reply: err(id, m), stop: None, wt: None, scratch: None, act: None });
+    let live_root = f.projects.get(&project).filter(|x| !x.removed).map_or(false, |x| !x.root.is_empty());
+    let token = !msg.is_empty() && msg.chars().count() <= 160 && msg.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    if !(live_root && token && !text.trim().is_empty()) { return refuse("Choose a project and enter a message before starting a thread.") }
+    let th = format!("home-{msg}");
+    if f.threads.contains_key(&th) {
+        let ok = f.threads.get(&th).map_or(false, |t| !t.deleted && t.project == project);
+        return if ok { Some(Plan { events: vec![], reply: made(id, &th), stop: None, wt: None, scratch: None, act: None }) } else { refuse("This request belongs to a different or removed conversation. Open that conversation before retrying.") };
+    }
+    let title: String = text.chars().take(80).collect();
+    let mut pl = create(f, at, id, &json!({"project": project, "title": title}), None, Some(&th))?;
+    // the first message is the agents' turn.start (queued while the worktree is made)
+    pl.act = Some(("post", th.clone(), text)); Some(pl)
 }
