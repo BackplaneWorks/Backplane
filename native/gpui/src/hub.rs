@@ -6,8 +6,8 @@ use std::{collections::HashMap, path::PathBuf, time::{Duration, SystemTime, UNIX
 use tokio::sync::mpsc::{self, Sender};
 use tokio_tungstenite::tungstenite::{Message, protocol::WebSocketConfig};
 
-#[derive(Debug)] pub enum Command { Rpc(String,crate::screens::settings::Secret), Sleep(f64), Select(String), Send(String), Draft(String), Action(String,String), Page(String) }
-#[derive(Debug)] pub enum Event { Plot(Vec<u8>), NetWake, Picture(Value,Timing), Status(String), Accepted, Error(String) }
+#[derive(Debug)] pub enum Command { Rpc(String,crate::screens::settings::Secret,&'static str), Sleep(f64), Select(String), Send(String), Draft(String), Action(String,String), Page(String) }
+#[derive(Debug)] pub enum Event { Rpc(&'static str,bool,String), Plot(Vec<u8>), NetWake, Picture(Value,Timing), Status(String), Accepted, Error(String) }
 /// Where a reply's time went before the UI saw it: send to frame received, decode, delta/merge, and the body's size.
 #[derive(Debug,Clone,Default)] pub struct Timing { pub rtt_ms:f64, pub decode_ms:f64, pub process_ms:f64, pub bytes:usize, pub delta:bool }
 #[derive(Clone)] pub struct Config { pub hub:String, pub token_file:PathBuf, pub exit_after:Option<f64>, pub script:Option<PathBuf>, pub swatches:bool, pub gallery:bool, pub fonts:bool, pub solid_demo:Option<String>, pub theme:Option<String> }
@@ -39,6 +39,7 @@ impl Config {
 fn unqualify(id:&str)->String {id.rsplit_once('|').map_or(id,|(_,id)|id).into()}
 fn millis()->u64 {SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64}
 struct View {
+    rpcs:HashMap<u64,&'static str>,
     hub:String, cid:String, greeting:Value, target:Value, session:Value,
     view_id:String, revision:u64, next:u64, pending:HashMap<u64,(u64,Value,String)>,
     outgoing:HashMap<u64,bool>, dirty:bool, controls:HashMap<u64,Control>, sent:HashMap<u64,std::time::Instant>, req_draft:HashMap<u64,String>, offered:HashMap<u64,String>, bases:delta::Bases,
@@ -46,7 +47,7 @@ struct View {
 #[derive(Default)] struct Control { next:u64, bytes:usize, parts:Vec<String>, done:bool }
 const MAX_CONTROLS:usize=4;const MAX_CONTROL_BYTES:usize=16*1024*1024;const MAX_CONTROL_PARTS:u64=4096;
 impl View {
-    fn new(config:&Config)->Self {Self {hub:config.hub.replacen("ws://","http://",1),cid:format!("gpui-{}-{}",std::process::id(),millis()),
+    fn new(config:&Config)->Self {Self {rpcs:HashMap::new(),hub:config.hub.replacen("ws://","http://",1),cid:format!("gpui-{}-{}",std::process::id(),millis()),
         greeting:Value::Null,target:json!({"kind":"recent","id":""}),session:json!({"sel":"","rid":millis(),"drafts":{},"open":{},"adding":false,"panel":false,"info":{}}),
         view_id:String::new(),revision:0,next:(1_u64<<47)+millis(),pending:HashMap::new(),outgoing:HashMap::new(),dirty:false,controls:HashMap::new(),sent:HashMap::new(),req_draft:HashMap::new(),offered:HashMap::new(),bases:delta::Bases::default()}}
     fn request(&mut self, method:&str, extra:Value)->Value {
@@ -102,7 +103,7 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
     let token=std::fs::read_to_string(&config.token_file)?;
     ensure!(token.trim().chars().all(|c|c.is_ascii_alphanumeric()||c=='-'||c=='_'),"invalid token file");
     let url=format!("{}/ws?view=1&mobile=1&token={}",config.hub.trim_end_matches('/'),token.trim());
-    let limits=WebSocketConfig::default().max_message_size(Some(16<<20)).max_frame_size(Some(16<<20));
+    let limits=WebSocketConfig::default().max_message_size(Some(64<<20)).max_frame_size(Some(64<<20));
     let (socket,_)=tokio::time::timeout(Duration::from_secs(5),tokio_tungstenite::connect_async_with_config(url,Some(limits),true)).await??;
     let (mut sink,mut source)=socket.split();let mut last=tokio::time::Instant::now();
     let mut heartbeat=tokio::time::interval(Duration::from_secs(10));
@@ -112,7 +113,7 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
             if let Command::Sleep(s)=&command {anyhow::bail!("net_sleep:{s}");}
             let request=match command {
                 Command::Sleep(_)=>unreachable!(),
-                Command::Rpc(m,p)=>{static RPC:std::sync::atomic::AtomicU64=std::sync::atomic::AtomicU64::new(1<<30);json!({"id":RPC.fetch_add(1,std::sync::atomic::Ordering::Relaxed),"m":m,"p":p.0})},
+                Command::Rpc(m,p,tag)=>{static RPC:std::sync::atomic::AtomicU64=std::sync::atomic::AtomicU64::new(1<<30);let id=RPC.fetch_add(1,std::sync::atomic::Ordering::Relaxed);v.rpcs.insert(id,tag);if v.rpcs.len()>64 {v.rpcs.clear();}json!({"id":id,"m":m,"p":p.0})},
                 Command::Select(id)=>{let id=unqualify(&id);v.target=json!({"kind":"thread","id":id});v.session["sel"]=json!(id);v.view_id.clear();v.request("view.open",json!({}))},
                 Command::Send(text)=>{ensure!(!v.view_id.is_empty(),"view not ready");let id=v.target["id"].as_str().unwrap_or("").to_string();v.session["drafts"][id]=json!(text);v.request("view.action",json!({"action":"send","value":""}))},
                 Command::Draft(text)=>{let id=v.target["id"].as_str().unwrap_or("").to_string();v.session["drafts"][id]=json!(text);v.request("view.action",json!({"action":"draft","value":text}))},
@@ -122,13 +123,14 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
             sink.send(Message::Binary(wire::encode(&request).into())).await?;
         },
         frame=source.next()=>{
-            let frame=frame.context("hub closed")??;last=tokio::time::Instant::now();if let Message::Binary(b)=&frame {if crate::screens::plot::is_plot(b) {let _=events.send(Event::Plot(b.to_vec())).await;continue;}}let recv=std::time::Instant::now();let mut size=0usize;
+            let frame=frame.context("hub closed")??;last=tokio::time::Instant::now();if let Message::Binary(b)=&frame {if crate::screens::plot::is_plot(b) {if b.len()<=(32<<20) {let _=events.send(Event::Plot(b.to_vec())).await;}continue;}}let recv=std::time::Instant::now();let mut size=0usize;
             let mut x=match frame {Message::Binary(bytes)=>{size=bytes.len();wire::decode(&bytes)?},Message::Text(text)=>serde_json::from_str(&text)?,Message::Ping(bytes)=>{sink.send(Message::Pong(bytes)).await?;continue},Message::Close(_)=>anyhow::bail!("closed"),_=>continue};
             let decoded=std::time::Instant::now();
             match x["t"].as_str().unwrap_or("") {
                 "view"=>{ensure!(x["version"]==1&&x["renderer"]=="mobile"&&x["generation"].is_string()&&x["epoch"].is_string(),"unsupported hub greeting");v.greeting=x;let request=v.request("view.open",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;},
                 "reply"=>{
                     let id=x["id"].as_u64().unwrap_or(0);
+                    if let Some(tag)=v.rpcs.remove(&id) {let why=x["error"]["message"].as_str().or(x["error"]["code"].as_str()).unwrap_or("").to_string();let _=events.send(Event::Rpc(tag,x["ok"]==true,why)).await;continue;}
                     if let Some(is_post)=v.outgoing.remove(&id) {if x["ok"]==true {if is_post {let _=events.send(Event::Accepted).await;}}else{let _=events.send(Event::Error(format!("Hub refused request: {}",x["error"]["code"]))).await;}continue;}
                     let Some((revision,target,method))=v.pending.remove(&id) else{continue};
                     if x["ok"]!=true {let _=events.send(Event::Error(format!("View request refused: {}",x["error"]["code"]))).await;continue;}
