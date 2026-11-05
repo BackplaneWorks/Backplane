@@ -214,6 +214,25 @@ function* paths() {
   yield '.backplane/history.git'; yield '.backplane/worktrees'; yield '.backplane/history.git/objects/ab'; yield '';
 }
 
+await t('directory listings refuse missing roots, traversal, symlinks and forged records', () => {
+  const root = fs.mkdtempSync(join(dir, 'listing-'));
+  const outside = fs.mkdtempSync(join(dir, 'outside-listing-'));
+  fs.mkdirSync(join(root, 'etc')); fs.mkdirSync(join(root, 'empty'));
+  fs.writeFileSync(join(root, 'note.txt'), 'inside');
+  fs.writeFileSync(join(root, 'etc', 'note.txt'), 'subfolder');
+  fs.writeFileSync(join(outside, 'note.txt'), 'outside');
+  fs.writeFileSync(join(root, 'forged\nf\t1\toutside.txt'), 'bad record');
+  fs.symlinkSync(outside, join(root, 'escape'));
+  fs.symlinkSync(join(outside, 'note.txt'), join(root, 'escape.txt'));
+  const effect = load().effects.get('Zip.list');
+  const listing = (top, rel) => list(effect(top, rel, join(dir, 'hub-home')));
+  for (const [top, rel] of [['', ''], ['', 'etc'], [root, '..'], [root, '../outside-listing'], [root, 'escape'], [root, 'escape/etc']])
+    assert.deepEqual(listing(top, rel), [], JSON.stringify([top, rel]));
+  assert.deepEqual(listing(root, 'empty'), ['']);
+  assert.deepEqual(listing(root, 'etc'), ['f\t9\tnote.txt\n']);
+  assert.deepEqual(listing(root, ''), ['d\t0\tempty\nd\t0\tetc\nf\t6\tnote.txt\n']);
+});
+
 await t('the zip writer decides as Fm.zip.skip, within, store and entry, over generated paths', () => {
   const { Z } = load();
   let n = 0;
