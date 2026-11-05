@@ -668,3 +668,24 @@ async fn codex_start(name: &str) -> (Arc<Hub>, Arc<Agents>, PathBuf) {
     let end = Instant::now() + Duration::from_secs(5); while proc::alive(grand) && Instant::now() < end { tokio::time::sleep(Duration::from_millis(50)).await }
     assert!(!proc::alive(grand), "no orphan after the next hub starts");
 }
+
+/// Item 5 measurement, never run in CI: a SYNTHETIC log (no real data) of BP_SYNTH_EVENTS events (default 1.7M, 2000 threads) in a temp dir.
+/// cargo test ... scan_synthetic_log -- --ignored --nocapture. Times Store::open and the agents' World fold, with peak RSS.
+#[test] #[ignore] fn scan_synthetic_log() {
+    use std::io::Write;
+    let n: usize = std::env::var("BP_SYNTH_EVENTS").ok().and_then(|s| s.parse().ok()).unwrap_or(1_700_000);
+    let d = dir("synth"); let p = d.join("events.jsonl");
+    { let mut f = std::io::BufWriter::new(std::fs::File::create(&p).unwrap());
+      writeln!(f, "{{\"$\":\"ProjectCreated\",\"id\":\"p1\",\"title\":\"s\",\"root\":\"/tmp\",\"at\":1}}").unwrap();
+      for i in 0..2000 { writeln!(f, "{{\"$\":\"ThreadCreated\",\"id\":\"t{i}\",\"project\":\"p1\",\"title\":\"T{i}\",\"env\":\"local\",\"branch\":\"\",\"worktree\":\"\",\"provider\":\"claude\",\"model\":\"\",\"at\":2}}").unwrap() }
+      for i in 0..n { match i % 5 {
+          0 => writeln!(f, "{{\"$\":\"MessagePosted\",\"thread\":\"t{}\",\"msg\":\"m{i}\",\"role\":\"user\",\"text\":\"{}\",\"at\":{}}}", i % 2000, "x".repeat(300), 3 + i),
+          1 => writeln!(f, "{{\"$\":\"TurnChanged\",\"thread\":\"t{}\",\"state\":\"{}\",\"at\":{}}}", i % 2000, if i % 10 == 1 { "running" } else { "completed" }, 3 + i),
+          2 => writeln!(f, "{{\"$\":\"SettingSet\",\"key\":\"tok.basis.t{}\",\"value\":\"c:{i}\",\"at\":{}}}", i % 2000, 3 + i),
+          _ => writeln!(f, "{{\"$\":\"ActivityLogged\",\"thread\":\"t{}\",\"act\":\"a{i}\",\"tone\":\"tool\",\"kind\":\"Bash\",\"summary\":\"ls\",\"at\":{}}}", i % 2000, 3 + i) }.unwrap() } }
+    let rss = || std::fs::read_to_string("/proc/self/status").unwrap().lines().find(|l| l.starts_with("VmHWM")).map(|l| l.to_string()).unwrap_or_default();
+    let t0 = Instant::now(); let store = Store::open(&p).unwrap(); let open = t0.elapsed();
+    let t1 = Instant::now(); let mut w = world::World::default(); w.sync(&store).unwrap(); let fold = t1.elapsed();
+    println!("SCAN events={} threads={} open_ms={} fold_ms={} {}", store.len(), w.threads.len(), open.as_millis(), fold.as_millis(), rss());
+    let _ = std::fs::remove_dir_all(&d);
+}
