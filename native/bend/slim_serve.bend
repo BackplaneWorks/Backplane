@@ -11,6 +11,7 @@ import ../../src/core/project-home.bend as PH
 import ../../src/core/bot.bend as B
 import ../../src/core/thin.bend as T
 import ../../src/core/thinq.bend as Q
+import ../../src/server/thin-view.bend as V
 
 # bp-policy: the slim backend's policy process, in machine code. It folds the
 # hub's wire frames incrementally into Backplane's own client state (the same
@@ -129,9 +130,20 @@ def Pol.out.k(+same: Bool, +has: Bool, +r: J.Json, +next: J.Json, +window: J.Jso
 def Pol.out(+same: Bool, +r: J.Json, +next: J.Json, +window: J.Json) -> J.Json:
   Pol.out.k(same, Pol.is_obj(window), r, next, window)
 
-def Pol.view.r(+r: J.Json, +want: J.Json, +window: J.Json) -> J.Json:
-  +next = Pol.target(J.Json.get_obj(r, "session"))
+# the target the view is on after the request, as the JS hub's actor reads it from the Ui (thin-view.bend Target.after: a bot or a room view
+# stays that target; only a selection is a thread): a request for another target than the one the Ui is on is answered with nextTarget
+def Pol.view.r(+r: J.Json, +next: J.Json, +want: J.Json, +window: J.Json) -> J.Json:
   Pol.out(Pol.same(next, want), r, next, window)
+
+def Pol.after(+a: H.HAct, +key: String) -> J.Json:
+  match a:
+    case H.HAct{+hs, _, _}: V.Target.after(H.Hubs.ui(hs, key))
+
+# a target that does not exist (an unknown bot, room or project) is stale for the JS hub: the host answers STALE_VIEW
+def Pol.stale(gone: Bool, +r: J.Json) -> J.Json:
+  match gone:
+    case True{}: NS.Obj.put(r, "stale", J.Flag{True{}})
+    case False{}: r
 
 # the session the client sent adopted onto the shared state, the action run,
 # the screen drawn
@@ -250,7 +262,7 @@ def Pol.view(+u0: U.Ui, +now0: Nat, +p: J.Json) -> J.Json:
   +isPage = String.eq(J.Json.get_str(p, "action", ""), "native-sidebar-page")
   +ok = Bool.and(Bool.and(isPage, NS.Ns.offered(False{}, p)), NS.Ns.valid(u, J.Json.get_str(p, "value", "")))
   +ua = Pol.act(ok, isPage, u, key, cid, now, J.Json.get_str(p, "action", ""), J.Json.get_str(p, "value", ""))
-  Pol.view.out(Pol.refuse(Bool.and(isPage, Bool.not(ok)), Pol.view.r(MS.Session.result(ua, key), J.Json.get_obj(p, "target"), J.Json.get_obj(p, "window"))), ua, key)
+  Pol.view.out(Pol.refuse(Bool.and(isPage, Bool.not(ok)), Pol.stale(Bool.not(V.Target.exists(U.Ui.state(u), J.Json.get_obj(p, "target"))), Pol.view.r(MS.Session.result(ua, key), Pol.after(ua, key), J.Json.get_obj(p, "target"), J.Json.get_obj(p, "window")))), ua, key)
 
 # ---- the fold --------------------------------------------------------------
 
