@@ -186,14 +186,55 @@ def Pol.local.of(+a: H.HAct, +key: String) -> J.Json:
 def Pol.view.out(+r: J.Json, +ua: H.HAct, +key: String) -> J.Json:
   NS.Obj.put(r, "local", Pol.local.of(ua, key))
 
+# The sidebar's page action is not a client action: the JS hub's actor answers it with Ns.accept on its Ui and no commands (thin-actor.bend
+# Actor.native.action) and keeps from the session only the fields the client captured (Actor.native.page_result). The same here.
+def Pol.act(+native: Bool, +u: U.Ui, +key: String, +cid: String, +now: Nat, +action: String, +value: String) -> H.HAct:
+  match native:
+    case True{}: MS.Session.act(NS.Ns.accept(u, value), key, cid, now, "", "")
+    case False{}: MS.Session.act(u, key, cid, now, action, value)
+
+def Pol.fields.keep(keep: Bool, +key: String, +value: J.Json, rest: J.Json) -> J.Json:
+  match keep:
+    case True{}: J.Field{key, value, rest}
+    case False{}: rest
+
+def Pol.fields(+fields: J.Json, +mask: J.Json) -> J.Json:
+  match fields:
+    case J.Obj{fs}: J.Obj{Pol.fields(fs, mask)}
+    case J.Field{+key, value, rest}: Pol.fields.keep(Maybe.is_some(&2, J.Json, J.Json.get(mask, key)), key, value, Pol.fields(rest, mask))
+    case _: J.End{}
+
+def Pol.drop.k(hit: Bool, +k: String, v: J.Json, rest: J.Json) -> J.Json:
+  match hit:
+    case True{}: rest
+    case False{}: J.Field{k, v, rest}
+
+def Pol.drop(+j: J.Json, +key: String) -> J.Json:
+  match j:
+    case J.Obj{fs}: J.Obj{Pol.drop(fs, key)}
+    case J.Field{+k, v, rest}: Pol.drop.k(String.eq(k, key), k, v, Pol.drop(rest, key))
+    case _: j
+
+def Pol.sbpage.k(+result: J.Json, +actual: J.Json, +captured: J.Json) -> J.Json:
+  NS.Obj.put(result, "session", NS.Obj.put(NS.Obj.put(NS.Obj.put(Pol.drop(Pol.drop(actual, "error"), "note"),
+    "drafts", Pol.fields(J.Json.get_obj(actual, "drafts"), J.Json.get_obj(captured, "drafts"))),
+    "info", Pol.fields(J.Json.get_obj(actual, "info"), J.Json.get_obj(captured, "info"))),
+    "outbox", Pol.fields(J.Json.get_obj(actual, "outbox"), J.Json.get_obj(captured, "outbox"))))
+
+def Pol.sbpage(page: Bool, +result: J.Json, +p: J.Json) -> J.Json:
+  match page:
+    case False{}: result
+    case True{}: Pol.sbpage.k(result, J.Json.get_obj(result, "session"), J.Json.get_obj(p, "session"))
+
 def Pol.view(+u0: U.Ui, +now0: Nat, +p: J.Json) -> J.Json:
   +now = Pol.clock(J.Json.get_nat(p, "now", 0n), now0)
   +key = J.Json.get_str(p, "hub", "")
   +cid = J.Json.get_str(p, "cid", "")
   +u1 = U.Ui.scratch_set(U.Ui.online(U.Ui.set_cid(Pol.bind(MS.Session.adopt(U.Ui.tick(u0, now), J.Json.get_obj(p, "session")), J.Json.get_obj(p, "target")), cid), True{}), "@sync", "1")
   +u = NS.Ns.prepare(Pol.local.put(Pol.pick(Pol.is_obj(J.Json.get_obj(p, "page")), u1, J.Json.get_obj(p, "page")), J.Json.get_obj(p, "local")), False{}, p, J.Json.get_str(p, "epoch", ""), J.Json.get_str(p, "viewId", ""), J.Json.get_nat(p, "revision", 0n), J.Json.get_str(p, "nativeKey", ""))
-  +ua = MS.Session.act(u, key, cid, now, J.Json.get_str(p, "action", ""), J.Json.get_str(p, "value", ""))
-  Pol.view.out(Pol.view.r(MS.Session.result(ua, key), J.Json.get_obj(p, "target"), J.Json.get_obj(p, "window")), ua, key)
+  +native = Bool.and(NS.Ns.offered(False{}, p), String.eq(J.Json.get_str(p, "action", ""), "native-sidebar-page"))
+  +ua = Pol.act(native, u, key, cid, now, J.Json.get_str(p, "action", ""), J.Json.get_str(p, "value", ""))
+  Pol.view.out(Pol.sbpage(native, Pol.view.r(MS.Session.result(ua, key), J.Json.get_obj(p, "target"), J.Json.get_obj(p, "window")), p), ua, key)
 
 # ---- the fold --------------------------------------------------------------
 
