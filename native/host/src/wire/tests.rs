@@ -121,3 +121,31 @@ async fn origin_is_read_at_each_join_and_a_zero_resumes_from_nothing() {
     assert_eq!(*ok.log_since.lock().unwrap(), Some(n as u64)); assert_eq!(ok.items.lock().unwrap().len(), 0);
     a.task.abort(); b.task.abort(); r.task.abort(); ok.task.abort();
 }
+
+// side-by-side (docs/gpui/SIDE-BY-SIDE.md): /hello and the info carry `sideBySide` only on a copy with the flag. The switch is read once per process,
+// so each case is a child process of this test binary with the environment as given.
+#[test] fn side_by_side_probe_child() {
+    let Ok(mode) = std::env::var("BP_SBS_WIRE_PROBE") else { return };
+    let on = crate::copy::person_turn_allowed();
+    assert_eq!(on, mode == "on");
+    let h = hello_body("0.14.0", "c", on);
+    assert_eq!(h.get("sideBySide"), if mode == "on" { Some(&json!(true)) } else { None }, "{h}");
+    assert_eq!(h["backplane"], "0.14.0"); assert_eq!(h["busy"], 0);
+    let mut info = serde_json::Map::new(); side_by_side_info(&mut info);
+    assert_eq!(info.get("sideBySide"), if mode == "on" { Some(&json!("1")) } else { None });
+    println!("wire_sbs_ok {mode}");
+}
+fn sbs_wire_child(mode: &str, copy: Option<&str>, flag: Option<&str>) -> String {
+    let mut c = std::process::Command::new(std::env::current_exe().unwrap());
+    c.args(["wire::tests::side_by_side_probe_child", "--exact", "--nocapture", "--test-threads=1"]).env("BP_SBS_WIRE_PROBE", mode);
+    match copy { Some(v) => { c.env("BACKPLANE_COPY", v); } None => { c.env_remove("BACKPLANE_COPY"); } }
+    match flag { Some(v) => { c.env("BACKPLANE_SIDE_BY_SIDE", v); } None => { c.env_remove("BACKPLANE_SIDE_BY_SIDE"); } }
+    let o = c.output().unwrap(); assert!(o.status.success(), "{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr)); String::from_utf8_lossy(&o.stdout).into_owned()
+}
+#[test] fn hello_and_info_say_side_by_side_only_on_a_copy_with_the_flag() {
+    assert!(sbs_wire_child("on", Some("1"), Some("1")).contains("wire_sbs_ok on"));
+    assert!(sbs_wire_child("off", Some("1"), None).contains("wire_sbs_ok off"), "a copy without the flag");
+    assert!(sbs_wire_child("off", None, None).contains("wire_sbs_ok off"), "no flags");
+    assert!(sbs_wire_child("off", None, Some("1")).contains("wire_sbs_ok off"), "the flag without the copy switch");
+    assert!(sbs_wire_child("off", Some("1"), Some("0")).contains("wire_sbs_ok off"), "a wrong flag value");
+}

@@ -12,6 +12,17 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::{handshake::server::ErrorResponse, protocol::WebSocketConfig, Message};
 
+/// `/hello`: the version, the busy count and the commit; `"sideBySide": true` only on a copy that lets the person start a real agent
+/// (`copy::person_turn_allowed()`, docs/gpui/SIDE-BY-SIDE.md), absent otherwise.
+pub fn hello_body(version: &str, commit: &str, side_by_side: bool) -> Value {
+    let mut v = json!({"backplane":version,"busy":0,"commit":commit});
+    if side_by_side { v["sideBySide"] = json!(true); }
+    v
+}
+/// The same fact in the hub info the views read (info values are text): `sideBySide` = "1" when on, no key when off.
+pub fn side_by_side_info_with(o: &mut serde_json::Map<String, Value>, on: bool) { if on { o.insert("sideBySide".into(), json!("1")); } }
+pub fn side_by_side_info(o: &mut serde_json::Map<String, Value>) { side_by_side_info_with(o, crate::copy::person_turn_allowed()) }
+
 /// Bend `Hub.origin`: the decimal `at` of the log's first change ("0" for an empty log or a first line without `at`).
 /// A client resumes (`since`) only into the log it came from.
 /// Read from the log at every join (Bend reads the first line per message): a home that starts empty has "0" until its first commit.
@@ -97,7 +108,7 @@ pub async fn http(hub: &Hub, mut s: TcpStream, mut req: Req) -> Result<()> {
     }
     let out = match req.route() {
         "/hello" => {
-            let body = cbor::encode(&json!({"backplane":hub.cfg.version,"busy":0,"commit":hub.cfg.commit}));
+            let body = cbor::encode(&hello_body(&hub.cfg.version, &hub.cfg.commit, crate::copy::person_turn_allowed()));
             response("200 OK", "application/cbor", "", &body)
         }
         "/client/capabilities" => if hub.auth.paired_request(&req) {
