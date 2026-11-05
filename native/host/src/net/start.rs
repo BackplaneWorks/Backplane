@@ -52,7 +52,9 @@ pub fn routes() -> Option<Arc<AuthRoutes>> { ROUTES.get().cloned() }
 pub fn start(hub: &Arc<Hub>, host: &str, port: u16) -> Arc<AuthRoutes> { start_with(hub, host, port, false) }
 /// `tailnet`: this hub uses Tailscale (started without --no-tailscale): it names itself by its MagicDNS name and pairs with
 /// every machine of the owner's it finds, not only those BACKPLANE_PEERS names.
-pub fn start_with(hub: &Arc<Hub>, host: &str, port: u16, tailnet: bool) -> Arc<AuthRoutes> {
+pub fn start_with(hub: &Arc<Hub>, host: &str, port: u16, tailnet: bool) -> Arc<AuthRoutes> { start_full(hub, host, port, tailnet, false) }
+/// `https`: `--tailscale-https`, the hub is also put behind `tailscale serve` on HTTPS and pairing links name that address.
+pub fn start_full(hub: &Arc<Hub>, host: &str, port: u16, tailnet: bool, https: bool) -> Arc<AuthRoutes> {
     match open(&hub.cfg.home, host, port) {
         Ok((reg, routes)) => {
             // (the wire blanks DeviceRegistered/DeviceDropped for clients: Hub::wire_item, laws device_token_never_sent/device_drop_never_sent)
@@ -69,13 +71,20 @@ pub fn start_with(hub: &Arc<Hub>, host: &str, port: u16, tailnet: bool) -> Arc<A
                 super::farhttp_start(hub.clone(), peering.clone());
                 if tailnet {
                     // the tailnet listener: owner trust by whois, the pairing link, and what clients are told ("tailscale")
-                    let (h, r, host) = (hub.clone(), routes.clone(), host.to_string());
+                    let (h, r, host) = (hub.clone(), routes.clone(), host.to_string()); let r2 = routes.clone();
                     tokio::spawn(async move {
                         let token = std::fs::read_to_string(h.cfg.home.join("token")).unwrap_or_default().trim().to_string();
                         h.set_info("tailnet", "on").await;
                         h.set_info("tailscale", "checking").await;
                         let st = super::listener::start(h.clone(), Arc::new(super::listener::Cli), peering, r, &host, port, &token).await;
-                        h.set_info("tailscale", if matches!(st, super::listener::State::Reachable { .. }) { "reachable" } else { "unavailable" }).await;
+                        let mut state = if matches!(st, super::listener::State::Reachable { .. }) { "reachable" } else { "unavailable" };
+                        if https {
+                            if let Some(link) = super::listener::https(&super::listener::Cli, &r2, port, &token).await {
+                                println!("Backplane over HTTPS on your tailnet: {} (pair in Settings)", link.trim_end_matches(&format!("/#token={token}")));
+                                h.set_info("tailnet", "https").await; state = "reachable";
+                            } else { eprintln!("backplane: tailscale serve did not give an HTTPS address") }
+                        }
+                        h.set_info("tailscale", state).await;
                     });
                 }
             }
