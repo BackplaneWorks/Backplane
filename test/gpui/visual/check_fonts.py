@@ -24,7 +24,10 @@ def ink_box(l, bg_l):
     if not m.any(): return None
     ys, xs = np.where(m); return xs.min(), ys.min(), xs.max() + 1, ys.max() + 1
 def reference(text, font, scheme):
-    im = Image.new("RGB", (900, 24), BG[scheme]); ImageDraw.Draw(im).text((0, 5), text, font=font, fill=FG[scheme]); return im
+    im = Image.new("RGB", (900, 24), BG[scheme]); d = ImageDraw.Draw(im)
+    try: d.text((0, 5), text, font=font, fill=FG[scheme], features=["-calt", "-liga", "-clig"])  # the app turns ligatures off; raqm applies the same
+    except (KeyError, ValueError, OSError): d.text((0, 5), text, font=font, fill=FG[scheme])  # basic layout never ligates
+    return im
 
 def files_check(d):
     out = []
