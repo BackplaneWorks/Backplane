@@ -6,8 +6,9 @@ const PNG='iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAF0lEQVR4nGNgGAWjYBSMg
 export async function startFixtureHub({bin,root,port,threads=20,seedTurns=true,extraArgs=[],extraEnv={},repo=process.env.PERF_REPO||process.cwd()}){
   rmSync(root,{recursive:true,force:true});mkdirSync(root+'/proj/fixtures',{recursive:true});makeStandins(root+'/bin');
   writeFileSync(root+'/proj/fixtures/pic.png',Buffer.from(PNG,'base64'));writeFileSync(root+'/proj/readme.txt','e2e fixture file\n');
-  for(const [src,dst] of [['test/fixtures/pcb-bottom-silk/asymmetric.kicad_pcb','e2e.kicad_pcb'],['test/fixtures/fork-viewers/aliases.kicad_sch','e2e.kicad_sch'],['test/gpui/files/fixtures/mesh/bracket.step','part.step']])
-    if(existsSync(`${repo}/${src}`))copyFileSync(`${repo}/${src}`,`${root}/proj/${dst}`);
+  // the board and schematic come from test/gpui/ (drive.sh uploads only that folder to the hub machine; test/fixtures/ is not there)
+  for(const [src,dst] of [['test/gpui/files/fixtures/plot/ecc83-pp.kicad_pcb','e2e.kicad_pcb'],['test/gpui/files/fixtures/plot/ecc83-pp.kicad_sch','e2e.kicad_sch'],['test/gpui/files/fixtures/mesh/bracket.step','part.step']])
+    if(existsSync(`${repo}/${src}`))copyFileSync(`${repo}/${src}`,`${root}/proj/${dst}`);else console.error('fixture source missing: '+src);
   // a KiCad project next to the board and schematic, so the Board/Schematic/3D viewers have something to open
   writeFileSync(root+'/proj/e2e.kicad_pro',JSON.stringify({meta:{filename:'e2e.kicad_pro',version:1}}));writeFileSync(root+'/proj/.backplane.json',JSON.stringify({project:'e2e.kicad_pro'}));
   try{execSync('git init -q',{cwd:root+'/proj'})}catch{}
