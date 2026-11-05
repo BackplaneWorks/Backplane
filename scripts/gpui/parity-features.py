@@ -214,6 +214,7 @@ PF = {
     "review": "kicad/review.rs 24 tests, bom.rs 16, checks.rs 16, release.rs 15; results/files/review-1,2.json",
     "kipc": "results/files/kipc-hub-e2e.txt, kicad/ipc.rs + kserve.rs tests",
     "state": "state/ tests (fam, liveness, todo, uber, star), model.rs vs store.db (895 entries, 100 pages)",
+    "term": "term/ 27 tests on Boat (vt corpus = test/vt_test.bend, pty, actor, tools); results/term",
     "side": "sidebar.rs 5 tests, bin/sidebar-check, results/slim",
 }
 F = []
@@ -288,7 +289,7 @@ R(A, "In-thread search (view.search) and cancel", m=["view.search", "view.cancel
 R(A, "Thread header tools (stop, pin, settle, fork, terminal, viewer)", m=["view.action"], hub="partial", c="ppp", lane=L["gthread"], ev="tools.bend list via presenter; handlers for the actions are in 'Sidebar'")
 R(A, "Token and context stats, rate limits, usage page", hub="partial", pf="agents", c="ppp", lane=L["agents"], ev="UsageSet/context.usage events written by agents/lines.rs; usage page needs setting/allowance info")
 R(A, "Reconnect keeps drafts, resume from log position", m=["view.open"], hub="partial", c="ddd", lane=L["pedge"], ev="reconnect scenario: 1 difference (origin is hex in Rust vs decimal at in Bend, N19); android 07a-c; GPUI keeps session")
-R(A, "Terminal-in-chat rows (emb)", m=["term.open", "term.input", "term.resize", "term.snap", "term.restart"], c="mpp", lane=L["term"], ev="no pty in Rust")
+R(A, "Terminal-in-chat rows (emb)", m=["term.open", "term.input", "term.resize", "term.snap", "term.restart"], pf="term", c="mpp", lane=L["term"], ev="term/: pty, VT, term.* requests; frames {t:term,b:[..],reset}; GPUI row view unchecked")
 
 # ---- Agents and providers
 A = "Agents and providers"
@@ -314,7 +315,7 @@ R(A, "work_run / work_watch / work_list / work_cancel / work_unwatch", t=["work_
 R(A, "wake_on / wake_list / wake_cancel", t=["wake_on", "wake_list", "wake_cancel"], c="nnn", lane=L["mcp"], ev="no tool in Rust")
 R(A, "lock_acquire / lock_release / lock_list / lock_cancel", t=["lock_acquire", "lock_release", "lock_list", "lock_cancel"], c="nnn", lane=L["mcp"], ev="no tool in Rust (locks.bend projection not ported)")
 R(A, "deploy_main / deploy_restart / deploy_status / deploy_cancel", t=["deploy_main", "deploy_restart", "deploy_status", "deploy_cancel"], c="nnn", lane=L["mcp"], ev="no tool in Rust")
-R(A, "terminal_open / read / send / close", t=["terminal_open", "terminal_read", "terminal_send", "terminal_close"], c="nnn", lane=L["term"], ev="no tool in Rust")
+R(A, "terminal_open / read / send / close", t=["terminal_open", "terminal_read", "terminal_send", "terminal_close"], pf="term", c="nnn", lane=L["term"], ev="term/tools.rs; the agents MCP server must route NAMES to term::tools::call (seam)")
 R(A, "preview_* browser tools (open, navigate, snapshot, click, type, press, scroll, evaluate, wait_for, resize, status)", t=["preview_open", "preview_navigate", "preview_snapshot", "preview_click", "preview_type", "preview_press", "preview_scroll", "preview_evaluate", "preview_wait_for", "preview_resize", "preview_status"], c="nnn", lane=L["term"], ev="no tool in Rust")
 R(A, "review_comment, review_comments", t=["review_comment", "review_comments"], c="nnn", lane=L["mcp"], ev="Rust has review.comment request (kicad/review.rs) but no agent tool")
 R(A, "secret_request / secret_list / secret_run", t=["secret_request", "secret_list", "secret_run"], c="nnn", lane=L["mcp"], ev="no vault in Rust")
@@ -419,7 +420,7 @@ R(A, "Update (self-update, managed installs)", m=["update.now", "update.check"],
 
 # ---- Terminal, browser, voice, secrets
 A = "Terminal, browser, voice, secrets"
-R(A, "Terminal in the viewer (pty, VT emulation)", m=["term.open", "term.input", "term.resize", "term.snap", "term.restart"], c="mpp", lane=L["term"], ev="no pty/vt in Rust")
+R(A, "Terminal in the viewer (pty, VT emulation)", m=["term.open", "term.input", "term.resize", "term.snap", "term.restart"], pf="term", c="mpp", lane=L["term"], ev="term/: pty + vt.rs + emb.rs")
 R(A, "Embedded browser (CEF), browser.place/embed", m=["browser.embed", "browser.place", "browser.seen"], c="npp", lane=L["term"], ev="no helper process in Rust")
 R(A, "Voice dictation, clarify words, Pebble ring", m=["bots.voice"], r=["/voice/in"], c="mpp", lane=L["voice"], ev="no handler; VoiceRecorder.swift/.kt")
 R(A, "Secret box (secret.set/del/list/dismiss, vault)", m=["secret.set", "secret.del", "secret.list", "secret.dismiss"], c="mpp", lane=L["sett"], ev="no vault in Rust; Secret masking of agent lines absent")
