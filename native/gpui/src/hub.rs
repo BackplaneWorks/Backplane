@@ -42,14 +42,14 @@ struct View {
     rpcs:HashMap<u64,&'static str>,
     hub:String, cid:String, greeting:Value, target:Value, session:Value,
     view_id:String, revision:u64, next:u64, pending:HashMap<u64,(u64,Value,String)>,
-    outgoing:HashMap<u64,bool>, dirty:bool, controls:HashMap<u64,Control>, sent:HashMap<u64,std::time::Instant>, req_draft:HashMap<u64,String>, offered:HashMap<u64,String>, bases:delta::Bases,
+    outgoing:HashMap<u64,bool>, rpc_names:HashMap<u64,String>, dirty:bool, controls:HashMap<u64,Control>, sent:HashMap<u64,std::time::Instant>, req_draft:HashMap<u64,String>, offered:HashMap<u64,String>, bases:delta::Bases,
 }
 #[derive(Default)] struct Control { next:u64, bytes:usize, parts:Vec<String>, done:bool }
 const MAX_CONTROLS:usize=4;const MAX_CONTROL_BYTES:usize=16*1024*1024;const MAX_CONTROL_PARTS:u64=4096;
 impl View {
     fn new(config:&Config)->Self {Self {rpcs:HashMap::new(),hub:config.hub.replacen("ws://","http://",1),cid:format!("gpui-{}-{}",std::process::id(),millis()),
         greeting:Value::Null,target:json!({"kind":"recent","id":""}),session:json!({"sel":"","rid":millis(),"drafts":{},"open":{},"adding":false,"panel":false,"info":{}}),
-        view_id:String::new(),revision:0,next:(1_u64<<47)+millis(),pending:HashMap::new(),outgoing:HashMap::new(),dirty:false,controls:HashMap::new(),sent:HashMap::new(),req_draft:HashMap::new(),offered:HashMap::new(),bases:delta::Bases::default()}}
+        view_id:String::new(),revision:0,next:(1_u64<<47)+millis(),pending:HashMap::new(),outgoing:HashMap::new(),rpc_names:HashMap::new(),dirty:false,controls:HashMap::new(),sent:HashMap::new(),req_draft:HashMap::new(),offered:HashMap::new(),bases:delta::Bases::default()}}
     fn request(&mut self, method:&str, extra:Value)->Value {
         self.next+=1;self.revision+=1;
         let mut p=json!({"version":1,"hub":self.hub,"generation":self.greeting["generation"],"epoch":self.greeting["epoch"],"requestRevision":self.revision,
@@ -86,12 +86,12 @@ pub fn connect(config:Config)->(Sender<Command>,async_channel::Receiver<Event>) 
                         if let Some(secs)=format!("{error:#}").strip_prefix("net_sleep:").and_then(|s|s.parse::<f64>().ok()) {
                             // the e2e harness's net_sleep: the socket is gone for `secs`, then the normal reconnect runs
                             let _=events.send(Event::Status("Disconnected (net_sleep)".into())).await;
-                            view.pending.clear();view.outgoing.clear();view.controls.clear();view.offered.clear();view.bases.clear();view.view_id.clear();view.greeting=Value::Null;
+                            view.pending.clear();view.outgoing.clear();view.rpc_names.clear();view.controls.clear();view.offered.clear();view.bases.clear();view.view_id.clear();view.greeting=Value::Null;
                             tokio::time::sleep(Duration::from_secs_f64(secs)).await;let _=events.send(Event::NetWake).await;delay=1;continue;
                         }
                         let token=std::fs::read_to_string(&config.token_file).unwrap_or_default();let mut text=format!("{error:#}");if !token.trim().is_empty(){text=text.replace(token.trim(),"<token>");}eprintln!("GPUI_LOG {{\"disconnect\":{}}}",serde_json::Value::String(text));
                         let _=events.send(Event::Error("Hub disconnected. Draft kept; reconnecting. Check the experimental hub log.".into())).await;
-                        view.pending.clear();view.outgoing.clear();view.controls.clear();view.offered.clear();view.bases.clear();view.view_id.clear();view.greeting=Value::Null;
+                        view.pending.clear();view.outgoing.clear();view.rpc_names.clear();view.controls.clear();view.offered.clear();view.bases.clear();view.view_id.clear();view.greeting=Value::Null;
                         tokio::time::sleep(Duration::from_secs(delay)).await;delay=(delay*2).min(10);
                     }
                 }
@@ -131,7 +131,11 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                 "reply"=>{
                     let id=x["id"].as_u64().unwrap_or(0);
                     if let Some(tag)=v.rpcs.remove(&id) {let why=crate::screens::settings::reply_error(&x);let _=events.send(Event::Rpc(tag,x["ok"]==true,why)).await;continue;}
-                    if let Some(is_post)=v.outgoing.remove(&id) {if !is_post {v.dirty=true;} /* a job's answer (mech.list, boards.list, fab.look...) is folded by the hub into this view: ask for it */ if x["ok"]==true {if is_post {let _=events.send(Event::Accepted).await;}}else{let why=crate::screens::settings::reply_error(&x);eprintln!("GPUI_LOG {{\"rpc_refused\":{}}}",Value::String(why.chars().take(160).collect()));let _=events.send(Event::Error(format!("The hub refused it: {why}"))).await;}if v.dirty&&v.pending.is_empty()&&!v.view_id.is_empty(){v.dirty=false;let request=v.request("view.update",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;}continue;}
+                    if let Some(is_post)=v.outgoing.remove(&id) {let name=v.rpc_names.remove(&id).unwrap_or_default();if !is_post {v.dirty=true;} /* a job's answer (mech.list, boards.list, fab.look...) is folded by the hub into this view: ask for it */
+                        // every product RPC's answer is logged, so a refused send is never silent (the reply's error may be a plain string, a code or a message)
+                        let why=if x["ok"]==true {String::new()} else {rpc_error(&x)};
+                        eprintln!("GPUI_LOG {}",json!({"rpc_reply":name,"ok":x["ok"]==true,"error":why.chars().take(160).collect::<String>()}));
+                        if x["ok"]==true {if is_post {let _=events.send(Event::Accepted).await;}}else{let _=events.send(Event::Error(format!("The hub refused it: {why}"))).await;}if v.dirty&&v.pending.is_empty()&&!v.view_id.is_empty(){v.dirty=false;let request=v.request("view.update",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;}continue;}
                     let Some((revision,target,method))=v.pending.remove(&id) else{continue};
                     if x["ok"]!=true {let _=events.send(Event::Error(format!("View request refused: {}",x["error"]["code"]))).await;continue;}
                     let mut r:Value=x["result"].take();
@@ -170,7 +174,7 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                             let request:Value=serde_json::from_str(command["text"].as_str().context("missing command text")?)?;
                             let rpc_id=request["id"].as_u64().context("missing RPC id")?;
                             let m=request["m"].as_str().unwrap_or("");ensure!(!m.starts_with("view.")&&rpc_id<(1<<47),"invalid product RPC");eprintln!("GPUI_LOG {{\"rpc_sent\":\"{m}\",\"thread\":{}}}",request["p"]["thread"]);
-                            v.outgoing.insert(rpc_id,method=="view.action"&&["message.send","thread.send","send"].contains(&m));
+                            v.outgoing.insert(rpc_id,method=="view.action"&&is_post(m));v.rpc_names.insert(rpc_id,m.to_string());
                             // The send action's canonical command is named by the hub; ACK all sends from this action.
                             if method=="view.action" && m=="chat.send" {v.outgoing.insert(rpc_id,true);}
                             sink.send(Message::Binary(wire::encode(&request).into())).await?;
@@ -195,4 +199,26 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
         },
         _=heartbeat.tick()=>{ensure!(last.elapsed()<Duration::from_secs(35),"hub heartbeat timeout");sink.send(Message::Ping(Vec::new().into())).await?;}
     }}
+}
+
+/// The words for a failed product RPC's answer: the hub's error may be a plain string, an object with a message or a code, or something else.
+pub fn rpc_error(x:&Value)->String {
+    let e=&x["error"];
+    e.as_str().map(String::from).or_else(||e["message"].as_str().map(String::from)).or_else(||e["code"].as_str().map(String::from)).unwrap_or_else(||if e.is_null(){"no reason given".into()}else{e.to_string()})
+}
+/// The product RPCs that post a message: their acceptance is the client's "sent" (chat.send comes through `view.action` by name too).
+pub fn is_post(m:&str)->bool { ["message.send","thread.send","send","turn.start"].contains(&m) }
+
+#[cfg(test)]
+mod rpc_tests {
+    use super::{is_post, rpc_error};
+    use serde_json::json;
+    #[test] fn a_failed_answer_always_says_something() {
+        assert_eq!(rpc_error(&json!({"ok":false,"error":"unknown thread"})), "unknown thread", "a plain string, not null");
+        assert_eq!(rpc_error(&json!({"ok":false,"error":{"code":"nope","message":"no such thing"}})), "no such thing");
+        assert_eq!(rpc_error(&json!({"ok":false,"error":{"code":"nope"}})), "nope");
+        assert_eq!(rpc_error(&json!({"ok":false})), "no reason given");
+        assert!(rpc_error(&json!({"ok":false,"error":[1]})).contains('1'));
+    }
+    #[test] fn turn_start_is_a_post() { for m in ["turn.start","message.send","thread.send","send"] { assert!(is_post(m), "{m}"); } assert!(!is_post("fab.look") && !is_post("mech.list")); }
 }
