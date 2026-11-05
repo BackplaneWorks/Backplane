@@ -16073,3 +16073,6 @@ def Laws.kicad_absolute_project_override(main):
 
 def Laws.kicad_divergent_write_requires_choice(explicit):
   {==}
+
+def Laws.thread_folder_refuses_job(client, id, job, thread, a, b):
+  {==}

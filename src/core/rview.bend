@@ -128,7 +128,7 @@ def Rview.has(r: Map<&2, M.Thread> & Bool) -> Bool:
   b
 
 def Rview.root(+home: String, +s: M.State, +th: String, +claimed: String) -> String:
-  Rview.root.k(Rview.has(Map.has(&2, M.Thread, FR.Fr.st.threads(s), th)), FR.Fr.is(th), home, FR.Fr.link(th), H.Hub.cwd(s, H.Hub.thread(s, th)), claimed)
+  Rview.root.k(Rview.has(Map.has(&2, M.Thread, FR.Fr.st.threads(s), th)), FR.Fr.is(th), home, FR.Fr.link(th), Maybe.default(&2, String, H.Hub.root_for(s, th), ""), claimed)
 
 # which request a path is: 1 the listing, 2 a file, 3 a file of a commit
 def Rview.kind(+route: String) -> Nat:
@@ -163,7 +163,7 @@ def Rview.proot.k(known: Bool, +s: M.State, +th: String) -> String:
   Bool.pick(String, Bool.and(known, Bool.not(FR.Fr.is(th))), H.Hub.project.root(H.Hub.project(s, H.Hub.thread_project(H.Hub.thread(s, th)))), "")
 
 def Rview.proot(+s: M.State, +th: String) -> String:
-  Rview.proot.k(Rview.has(Map.has(&2, M.Thread, FR.Fr.st.threads(s), th)), s, th)
+  Rview.proot.k(Bool.not(String.is_empty(Maybe.default(&2, String, H.Hub.root_for(s, th), ""))), s, th)
 
 # a version's git directory is the thread's own: inside its folder or its
 # project's (the repository, a worktree's record in it, the history kept
