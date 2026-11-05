@@ -77,6 +77,31 @@ impl Echo {
     }
 }
 
+/// The settings dialog's own state (the hub keeps the page; this keeps the list the left nav shows and what is typed in its search).
+#[derive(Default)]
+pub struct SettingsUi { pub nav: Vec<(String, String)>, pub page: String, pub q: String, pub search: Option<Entity<Composer>>, pub auto: bool }
+/// The pages in the order and groups the nav shows them (the hub's menu order, grouped with a divider between groups). An unknown page goes last.
+const GROUPS: [&[&str]; 4] = [&["appearance", "threads", "agents", "writing"], &["cad", "ordering", "devices"], &["network", "voice", "keys", "timezone"], &["usage", "about", "privacy"]];
+pub fn group_of(page: &str) -> usize { GROUPS.iter().position(|g| g.contains(&page)).unwrap_or(GROUPS.len()) }
+/// An icon (from the set the client carries) for each page.
+pub fn nav_icon(page: &str) -> &'static str {
+    match page { "appearance" => "sun", "threads" => "message-square", "agents" => "cpu", "writing" => "square-pen", "cad" => "circuit-board", "ordering" => "shopping-cart",
+        "devices" => "link", "network" => "globe", "voice" => "mic", "keys" => "code", "timezone" => "clock", "usage" => "gauge", "about" => "book", "privacy" => "file-text", _ => "settings" }
+}
+/// The hub shows its page menu (rows that are each one `settings-page` button naming a page) or one page (its first row is the way back).
+#[derive(Debug, PartialEq)]
+pub enum Shown { Menu(Vec<(String, String)>), Page, Other }
+pub fn shown(rows: &[Row]) -> Shown {
+    let items: Vec<(String, String)> = rows.iter().filter_map(|r| r.buttons.iter().find(|b| b.action == "settings-page" && !b.value.is_empty()).map(|b| (b.value.clone(), r.label.clone()))).collect();
+    if items.len() >= 3 && items.len() * 2 >= rows.len() { return Shown::Menu(items); }
+    if rows.first().map_or(false, |r| r.buttons.iter().any(|b| b.action == "settings-page" && b.value.is_empty())) { return Shown::Page; }
+    Shown::Other
+}
+/// The nav list: the menu's pages in group order (stable within a group).
+pub fn nav_order(items: &[(String, String)]) -> Vec<(String, String)> { let mut v = items.to_vec(); v.sort_by_key(|(p, _)| group_of(p)); v }
+/// Whether a nav title matches what is typed in the search (an empty search matches all).
+pub fn nav_matches(title: &str, q: &str) -> bool { let q = q.trim().to_lowercase(); q.is_empty() || title.to_lowercase().contains(&q) }
+
 pub struct FieldSlot { pub input: Entity<Composer>, pub vault: bool, pub hub: String, echo: Echo, pending: Option<String>, timer: bool }
 
 impl FieldSlot { fn remember(&mut self, t: &str) { self.echo.remember(t); } }
@@ -85,6 +110,7 @@ impl FieldSlot { fn remember(&mut self, t: &str) { self.echo.remember(t); } }
 /// 30 ms); the hub's value is taken only when it is a real change. A vault field holds its text here and sends nothing until Save.
 pub fn sync(this: &mut Backplane, cx: &mut Context<Backplane>) {
     let rows = parse(&this.data["settings"]);
+    sync_nav(this, &rows, cx);
     let mut want: Vec<Field> = rows.into_iter().flat_map(|r| r.fields).collect();
     want.extend(super::bots::form_fields(&this.data)); want.extend(super::tools::form_fields(&this.data));
     this.screens.fields.retain(|n, _| want.iter().any(|f| f.name == *n));
@@ -112,6 +138,23 @@ pub fn sync(this: &mut Backplane, cx: &mut Context<Backplane>) {
         let sname = f.name.clone();
         cx.subscribe(&input, move |this, _, ev: &ComposerEvent, cx| if matches!(ev, ComposerEvent::Submit) { submit(this, &sname, cx); }).detach();
         this.screens.fields.insert(f.name.clone(), FieldSlot { input, vault: f.vault, hub: f.value.clone(), echo: Echo::new(&f.value), pending: None, timer: false });
+    }
+}
+
+/// Keep the nav's pages from the hub's menu, open the first page when the dialog opens on the menu, and own the search box.
+fn sync_nav(this: &mut Backplane, rows: &[Row], cx: &mut Context<Backplane>) {
+    if !this.data["settings"].is_object() { let ui = &mut this.screens.settings_ui; ui.page.clear(); ui.auto = false; return; }
+    if this.screens.settings_ui.search.is_none() {
+        let input = cx.new(|cx| Composer::with_context(cx, "AskInput"));
+        input.update(cx, |i, _| { i.set_placeholder("Search"); });
+        cx.observe(&input, |this, input, cx| { this.screens.settings_ui.q = input.read(cx).content.to_string(); cx.notify(); }).detach();
+        this.screens.settings_ui.search = Some(input);
+    }
+    if let Shown::Menu(items) = shown(rows) {
+        let nav = nav_order(&items);
+        let ui = &mut this.screens.settings_ui;
+        ui.nav = nav;
+        if !ui.auto { ui.auto = true; if let Some((p, _)) = ui.nav.first().cloned() { ui.page = p.clone(); let _ = this.tx.try_send(Command::Action("settings-page".into(), p)); } }
     }
 }
 
@@ -196,40 +239,80 @@ fn qr(light: bool, lines: &[String]) -> AnyElement {
     }).size(px(n as f32 * cell))).into_any_element()
 }
 
-fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, r: &Row, i: usize) -> AnyElement {
-    let c = |n: &str| theme::color(light, n);
-    let mut col = div().flex().flex_col().gap_1().py_2().border_b_1().border_color(c("line"));
-    if !r.label.is_empty() { col = col.child(div().font_weight(FontWeight::BOLD).text_size(px(13.)).child(r.label.clone())); }
-    if !r.note.is_empty() { col = col.child(div().text_size(px(12.)).text_color(c("dim")).child(r.note.clone())); }
-    for f in &r.fields {
-        if let Some(slot) = fields.get(&f.name) { col = col.child(div().w_full().max_w(px(520.)).px_2().py_1().border_1().border_color(c("line")).bg(c("view")).child(slot.input.clone())); }
-    }
-    if !r.qr.is_empty() { col = col.child(qr(light, &r.qr)); if !r.qrnote.is_empty() { col = col.child(div().text_size(px(11.)).text_color(c("dim")).child(r.qrnote.clone())); } }
-    if !r.buttons.is_empty() {
-        col = col.child(div().flex().flex_wrap().gap_2().children(r.buttons.iter().enumerate().map(|(j, b)| {
-            let b2 = b.clone();
-            let d = div().id(SharedString::from(format!("set-{i}-{j}"))).px_3().py_1().text_size(px(12.)).cursor_pointer().border_1();
-            let d = if b.on { d.bg(c("accent")).text_color(c("on-accent")).border_color(c("accent")) } else { d.bg(c("raise")).border_color(c("line")).hover(|s| s.bg(c("panel"))) };
-            d.child(b.label.clone()).on_click(cx.listener(move |this, _, _, cx| { flush_fields(this); if is_vault_save(&b2) { save_vault(this, &b2, cx); } else { let _ = this.tx.try_send(press(&b2)); } cx.notify(); })).into_any_element()
-        }).collect::<Vec<_>>()));
-    }
-    col.into_any_element()
+/// The overlay's structure as one JSON text: each row's label, whether it has a note, its buttons (label, action, value, on) and field names. No field values.
+pub fn structure(settings: &Value) -> String {
+    let rows: Vec<Value> = parse(settings).iter().map(|r| serde_json::json!({"label": r.label, "note": !r.note.is_empty(), "buttons": r.buttons.iter().map(|b| serde_json::json!([b.label, b.action, b.value, b.on])).collect::<Vec<_>>(), "fields": r.fields.iter().map(|f| f.name.clone()).collect::<Vec<_>>(), "qr": !r.qr.is_empty()})).collect();
+    serde_json::json!({"keys": settings.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>()).unwrap_or_default(), "rows": rows}).to_string()
 }
 
-/// The overlay over the main area while the hub has settings open; None when it has not.
-pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, settings: &Value, focus: &FocusHandle) -> Option<AnyElement> {
+/// The most chips on one line of a row's controls.
+const CHIPS_PER_LINE: usize = 6;
+/// A hub row as a dialog row: label and muted note on the left, the controls on the right, a hairline under it. A row that is only a label is a
+/// section heading; a label and a note with nothing to press or type is a paragraph.
+fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, r: &Row, i: usize) -> AnyElement {
+    let c = |n: &str| theme::color(light, n);
+    let controls = !r.buttons.is_empty() || r.fields.iter().any(|f| fields.contains_key(&f.name)) || !r.qr.is_empty();
+    if !controls && r.note.is_empty() {
+        return div().pt_4().pb_1().text_size(px(14.)).font_weight(FontWeight::BOLD).child(r.label.clone()).into_any_element();
+    }
+    let mut left = div().flex().flex_col().gap_1().flex_1().min_w_0();
+    if !r.label.is_empty() { left = left.child(div().text_size(px(13.)).child(r.label.clone())); }
+    if !r.note.is_empty() { left = left.child(div().text_size(px(12.)).text_color(c("dim")).child(r.note.clone())); }
+    let mut right = div().flex().flex_col().items_end().gap_2().flex_shrink_0().max_w(px(430.));
+    for f in &r.fields {
+        if let Some(slot) = fields.get(&f.name) { right = right.child(div().w(px(260.)).px_2().py_1().rounded(px(6.)).bg(c("raise")).child(slot.input.clone())); }
+    }
+    if !r.qr.is_empty() { right = right.child(qr(light, &r.qr)); if !r.qrnote.is_empty() { right = right.child(div().text_size(px(11.)).text_color(c("dim")).child(r.qrnote.clone())); } }
+    if !r.buttons.is_empty() {
+        // chips in lines of at most CHIPS_PER_LINE (a wrapping flex row does not grow its parent's height in gpui, and the next row would be drawn over it)
+        for (line, chunk) in r.buttons.chunks(CHIPS_PER_LINE).enumerate() {
+            right = right.child(div().flex().justify_end().gap_1().children(chunk.iter().enumerate().map(|(k, b)| {
+                let j = line * CHIPS_PER_LINE + k; let b2 = b.clone();
+                let d = div().id(SharedString::from(format!("set-{i}-{j}"))).px_3().py_1().rounded(px(6.)).text_size(px(12.)).cursor_pointer();
+                let d = if b.on { d.bg(c("accent")).text_color(c("on-accent")) } else { d.bg(c("raise")).hover(|s| s.bg(c("line"))) };
+                d.child(b.label.clone()).on_click(cx.listener(move |this, _, _, cx| { flush_fields(this); if is_vault_save(&b2) { save_vault(this, &b2, cx); } else { let _ = this.tx.try_send(press(&b2)); } cx.notify(); })).into_any_element()
+            }).collect::<Vec<_>>()));
+        }
+    }
+    div().flex().items_center().gap_4().py_3().border_b_1().border_color(c("line")).child(left).child(right).into_any_element()
+}
+
+/// The dialog while the hub has settings open; None when it has not: a title bar with a close ×, the pages on the left (search above, an icon and a
+/// label each, the open one on a rounded fill, a thin divider between groups) and the page's rows on the right with their own scroll.
+pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, settings: &Value, focus: &FocusHandle, ui: &SettingsUi) -> Option<AnyElement> {
     if !settings.is_object() { return None; }
     let c = |n: &str| theme::color(light, n);
     let rows = parse(settings);
-    let mut els: Vec<AnyElement> = rows.iter().take(MAX_ROWS).enumerate().map(|(i, r)| row_el(cx, light, fields, r, i)).collect();
-    if rows.len() > MAX_ROWS { els.push(div().py_2().text_color(c("dim")).child(format!("… {} more", rows.len() - MAX_ROWS)).into_any_element()); }
-    Some(div().id("settings").absolute().inset_0().occlude().track_focus(focus).bg(c("bg")).flex().flex_col()
-        .child(div().h(px(36.)).flex_shrink_0().px_3().flex().items_center().gap_3().border_b_1().border_color(c("line"))
-            .child(div().flex_1().font_weight(FontWeight::BOLD).child("Settings"))
-            .child(div().id("settings-close").px_2().cursor_pointer().text_color(c("dim")).hover(|s| s.text_color(c("text"))).child("Close")
+    let on_page = matches!(shown(&rows), Shown::Page);
+    let skip = if on_page { 1 } else { 0 };
+    let mut els: Vec<AnyElement> = rows.iter().skip(skip).take(MAX_ROWS).enumerate().map(|(i, r)| row_el(cx, light, fields, r, i)).collect();
+    if rows.len() > MAX_ROWS + skip { els.push(div().py_2().text_color(c("dim")).child(format!("… {} more", rows.len() - MAX_ROWS - skip)).into_any_element()); }
+    // the left nav
+    let mut nav = div().flex().flex_col().gap(px(2.)).p_3().w(px(220.)).flex_shrink_0().border_r_1().border_color(c("line"));
+    if let Some(input) = &ui.search { nav = nav.child(div().flex().items_center().gap_2().px_2().py_1().mb_2().rounded(px(6.)).bg(c("raise")).child(crate::art::icon("search", 14., c("dim"))).child(div().flex_1().child(input.clone()))); }
+    let mut last = usize::MAX;
+    let title_now = rows.first().map(|r| r.label.clone()).unwrap_or_default();
+    for (n, (page, t_nav)) in ui.nav.iter().enumerate().filter(|(_, (_, t))| nav_matches(t, &ui.q)) {
+        let title = t_nav;
+        let g = group_of(page);
+        if last != usize::MAX && g != last { nav = nav.child(div().my_2().mx_2().h(px(1.)).bg(c("line"))); }
+        last = g;
+        let (p2, on) = (page.clone(), if on_page { title_now == *t_nav } else { *page == ui.page });
+        let item = div().id(SharedString::from(format!("set-nav-{n}"))).flex().items_center().gap_3().px_3().py(px(6.)).rounded(px(6.)).cursor_pointer().text_size(px(13.));
+        let item = if on { item.bg(c("raise")) } else { item.hover(|s| s.bg(c("panel"))) };
+        nav = nav.child(item.child(crate::art::icon(nav_icon(page), 16., c(if on { "text" } else { "dim" }))).child(title.clone())
+            .on_click(cx.listener(move |this, _, _, cx| { flush_fields(this); this.screens.settings_ui.page = p2.clone(); let _ = this.tx.try_send(Command::Action("settings-page".into(), p2.clone())); cx.notify(); })));
+    }
+    let title = if on_page { rows[0].label.clone() } else { ui.nav.iter().find(|(p, _)| *p == ui.page).map(|(_, t)| t.clone()).unwrap_or_default() };
+    let dialog = div().flex().flex_col().w(px(1040.)).max_w_full().h(px(760.)).max_h_full().rounded(px(10.)).border_1().border_color(c("line")).bg(c("bg")).overflow_hidden()
+        .child(div().h(px(44.)).flex_shrink_0().px_4().flex().items_center().border_b_1().border_color(c("line"))
+            .child(div().flex_1().font_weight(FontWeight::BOLD).text_size(px(14.)).child("Settings"))
+            .child(div().id("settings-close").p_1().rounded(px(6.)).cursor_pointer().text_color(c("dim")).hover(|s| s.text_color(c("text")).bg(c("raise"))).child(crate::art::icon("x", 16., c("dim")))
                 .on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(Command::Action("flag".into(), "settings".into())); cx.notify(); }))))
-        .child(div().id("settings-rows").flex_1().overflow_y_scroll().flex().justify_center().child(div().w_full().max_w(px(760.)).px_4().py_2().flex().flex_col().children(els)))
-        .into_any_element())
+        .child(div().flex().flex_1().min_h_0().child(nav)
+            .child(div().id("settings-rows").flex_1().min_w_0().overflow_y_scroll().px_6().py_3().flex().flex_col()
+                .child(div().pb_1().text_size(px(15.)).font_weight(FontWeight::BOLD).child(title)).children(els)));
+    Some(div().id("settings").absolute().inset_0().occlude().track_focus(focus).bg(gpui::hsla(0., 0., 0., 0.55)).flex().items_center().justify_center().p_6().child(dialog).into_any_element())
 }
 
 #[cfg(test)]
@@ -278,5 +361,20 @@ mod tests {
         assert!(e.on_hub("", "abc"), "the hub cleared the field (a Save or a Set): that is a real change");
         let mut f = Echo::new(""); f.remember("x");
         assert!(f.on_hub("changed on another device", "x"), "a real change from elsewhere");
+    }
+    fn row(label: &str, page: &str) -> Row { Row { label: label.into(), note: String::new(), buttons: if page.is_empty() { vec![] } else { vec![Btn { label: format!("{label} ›"), action: "settings-page".into(), value: page.into(), on: false }] }, fields: vec![], qr: vec![], qrnote: String::new(), local: false } }
+    #[test] fn the_pages_menu_is_told_from_a_page_and_the_nav_keeps_group_order() {
+        let menu = vec![row("Usage", "usage"), row("Appearance", "appearance"), row("Voice", "voice"), row("Agents", "agents")];
+        match shown(&menu) { Shown::Menu(items) => { let nav = nav_order(&items); assert_eq!(nav.iter().map(|(p, _)| p.as_str()).collect::<Vec<_>>(), ["appearance", "agents", "voice", "usage"], "grouped, stable inside a group"); } s => panic!("{s:?}") }
+        let mut back = row("‹ Settings", ""); back.buttons.push(Btn { label: "‹ Settings".into(), action: "settings-page".into(), value: String::new(), on: false });
+        assert_eq!(shown(&[back, row("Theme", "")]), Shown::Page);
+        assert_eq!(shown(&[row("Theme", ""), row("Language", "")]), Shown::Other);
+        assert_eq!(shown(&[]), Shown::Other);
+    }
+    #[test] fn every_page_has_an_icon_in_the_set_and_the_search_filters_titles_by_substring() {
+        let icons: Vec<String> = ["sun", "message-square", "cpu", "square-pen", "circuit-board", "shopping-cart", "link", "globe", "mic", "code", "clock", "gauge", "book", "file-text", "settings", "search", "x"].iter().map(|s| s.to_string()).collect();
+        for g in GROUPS { for p in g { assert!(icons.contains(&nav_icon(p).to_string()), "{p}"); } }
+        assert!(nav_matches("Appearance", "") && nav_matches("Appearance", " ear") && nav_matches("Appearance", "APP") && !nav_matches("Appearance", "zzz"));
+        assert_eq!(group_of("zzz"), GROUPS.len());
     }
 }
