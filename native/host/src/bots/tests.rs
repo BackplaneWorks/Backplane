@@ -571,7 +571,17 @@ const JS_MAIL1_STEPS: &str = include_str!("../../../../test/gpui/bots/fixtures/j
     let mut ours = log(&hub);
     let dir = hub.cfg.home.join("mail"); let mut names: Vec<String> = std::fs::read_dir(&dir).map(|d| d.filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default(); names.sort();
     for n in names.iter().filter(|n| n.ends_with(".jsonl")) { let lines: Vec<String> = std::fs::read_to_string(dir.join(n)).unwrap().lines().map(str::to_string).collect(); ours.push(json!({"$":"MailFile","name":n,"lines":lines})); }
-    let (a, b) = (norm(&js), canon(&ours));
+    let (a, b): (Vec<String>, Vec<String>) = (norm(&js).iter().map(|s| unclock(s)).collect(), canon(&ours).iter().map(|s| unclock(s)).collect());
     for (i, (x, y)) in a.iter().zip(b.iter()).enumerate() { assert_eq!(x, y, "event {i}: JS left, Rust right") }
     assert_eq!(a.len(), b.len(), "same number of events\nJS: {a:#?}\nRust: {b:#?}");
+}
+/// the run's clock inside a record (a ten-digit second, and the log length in an owner ticket's stamp)
+fn unclock(s: &str) -> String {
+    let cs: Vec<char> = s.chars().collect(); let mut o = String::new(); let mut i = 0;
+    while i < cs.len() {
+        if cs[i].is_ascii_digit() && (i == 0 || !cs[i - 1].is_ascii_alphanumeric()) { let mut j = i; while j < cs.len() && cs[j].is_ascii_digit() { j += 1 }
+            if j - i == 10 { o += "<T>"; i = j; if i < cs.len() && cs[i] == ':' { o.push(':'); i += 1; let k = i; while i < cs.len() && cs[i].is_ascii_digit() { i += 1 } if i > k { o += "<n>" } } continue } }
+        o.push(cs[i]); i += 1
+    }
+    o
 }
