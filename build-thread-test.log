@@ -1,10 +1,22 @@
 cannot delete non-empty directory: .target/debug
 cannot delete non-empty directory: .target/debug
 cannot delete non-empty directory: .target
-provisional: commit edb3829cee, dirty tree possible, host backplane
-error[E0432]: unresolved imports `crate::md`, `crate::stamp`
- --> src/present/thread.rs:5:13
-  |
-5 | use crate::{md, stamp};
+provisional: commit 27fcc30846, dirty tree possible, host backplane
+test present::thread::tests::civil_dates ... FAILED
+test present::thread::tests::labels_name_three_kinds_and_the_live_one_says_what_runs ... ok
+test present::thread::tests::the_entries_of_a_plain_page_are_the_helpers ... ok
+
+failures:
+
 --
-error: could not compile `backplane-hub` (bin "backplane-hub" test) due to 1 previous error; 39 warnings emitted
+thread 'present::thread::tests::civil_dates' (739054) panicked at src/present/thread.rs:141:68:
+assertion `left == right` failed
+  left: (2023, 11, 15)
+ right: (2023, 11, 14)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+--
+test result: FAILED. 2 passed; 1 failed; 0 ignored; 0 measured; 1523 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `--bin backplane-hub`
