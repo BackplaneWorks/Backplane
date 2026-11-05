@@ -16368,3 +16368,13 @@ law kicad_absolute_project_override:
 law kicad_divergent_write_requires_choice:
   for explicit: Bool
   {KPROJECT.Project.refuse_write(True{}, True{}, False{}, explicit) == Bool.not(explicit) : Bool}
+
+# An unresolved folder never schedules a listing, Git write, or other job.
+law thread_folder_refuses_job:
+  for client: U32
+  for id: String
+  for job: String
+  for thread: String
+  for a: String
+  for b: String
+  {H.Hub.folder.job(None{}, client, id, job, thread, a, b) == H.Step.outs([H.Reply.err(client, id, "No folder for this thread or project: unknown, deleted, removed or unavailable")]) : H.Step}

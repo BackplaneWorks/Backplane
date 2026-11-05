@@ -2071,6 +2071,11 @@ function sys_exe_path() {
 // Answers only on failure. Under `bun x.js` the script runs through bun
 // (host_self).
 function sys_exec(path, args) {
+  // Windows cannot replace the current process with POSIX execve. Return
+  // through Hub.reexec.k so it removes the handoff and reports the failure.
+  if (process.platform === "win32") {
+    return io_fail(globalThis.BP_H.ERRNO.ENOSYS);
+  }
   const c = host_libc();
   const argv = host_self([path, ...host_list_js(args)]);
   if (argv.some((a) => a.includes("\0"))) {
