@@ -266,7 +266,7 @@ mod tests {
                 else if c == '\n' { if tag == 'b' { nums.push(cur) } break }
                 else if c.is_ascii_digit() { cur = cur * 10 + (c as u32 - 48) }
             }
-            if tag == 'b' { b = nums; }
+            if tag == 'b' { b = nums.clone(); }
             if tag == 'c' && nums.len() == 8 {
                 let (dl, il) = (nums[6] as usize, nums[7] as usize);
                 let d: Vec<u8> = cs[at..at + dl].iter().map(|c| *c as u32 as u8).collect();
