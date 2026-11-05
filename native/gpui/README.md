@@ -37,6 +37,24 @@ Script file: a JSON list of steps, run after `usable`, one at a time:
 `{"type":"text"}` (append to the composer), `{"send":true}`, `{"wait":MS}`.
 Example: `test/gpui/shot-popup.json`.
 
+## e2e hooks G1-G5 (test/gpui/e2e/CONTRACT.md)
+
+Script steps (JSON, one per list item): `{"record":"start","name":"scroll"}` / `{"record":"stop"}`, `{"click":"<control id>"}`, `{"scroll":PX}`,
+`{"net_sleep":SECS}`; `{"paste_image"|"open_viewer"|"open_settings"|"files_download": ...}` answer `input {ok:false,error:"not_implemented"}` (viewers, settings
+and downloads do not exist in GPUI yet), so the harness marks those journeys blocked. Events (stderr, `GPUI_METRIC`):
+- **G1 `ack {step, ack_ms}`**: for every scripted step, the first frame presented after the event was injected: its local effect (pressed/selected row, typed text),
+  before any hub round trip. `input.latency_ms` stays the frame that shows the result. GPUI draws on demand, so "differs from the frame before" is
+  the first frame after the state change, not a pixel diff.
+- **G2 `frames {name, n, t_ms:[...]}`** at `record stop`: the start time of every frame drawn while the record was open (GPUI asks for frames while recording, so
+  this is the achievable rate, not the idle rate).
+- **G3 `layout {rects:{topbar,sidebar,main,rail,composer:{x,y,w,h}}}`** (physical px) whenever a stable region moved or resized; check modes only (`BACKPLANE_GPUI_RECTS=1`).
+- **G4 `controls {controls:[{id,label,enabled,visible,wired}]}`** per screen on change (same switch); `enabled`/`wired` is false for a control with no handler yet (the
+  rail buttons, Improvements, search, settings, attach, mic ... are listed and are dead today). `click {id, changed, action}` answers a click step: `changed` is true when the
+  client's shown state moved or an action was sent; `action` is what was sent to the hub ("none" = dead).
+- **G5**: `net_sleep` drops the socket, keeps the hub unreachable for SECS, reconnects with the normal backoff; events `net {event:"hub_reachable_again"}` and
+  `net {event:"reconnected", ms}` (ms from wake to the first picture).
+The input metric also carries the latency phases: `hub_rtt_ms, decode_ms, process_ms, apply_ms, render_build_ms, applied_to_frame_ms, bytes, delta`.
+
 ## Build (never on the desktop)
 
     scripts/boat-job.sh --size large --artifact build/gpui-artifacts -- sh scripts/gpui/boat-build.sh        # full build + tests
