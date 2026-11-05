@@ -58,20 +58,12 @@ impl Backplane {
         }
         asks::sync(self, cx);
     }
-    /// Leaving `self.selected` for `raw`: remember its picture and scroll, show the target's cached picture at once.
+    /// Leaving `self.selected` for `raw`: flush its draft, remember its scroll, show the target's remembered scroll.
+    /// (The picture itself is the window's `thread_cache`.)
     pub(crate) fn thread_switch(&mut self, raw: &str) {
         self.screens.drafts.kick();
-        if !self.selected.is_empty() && self.data["thread"].is_object() {
-            let t = self.data["thread"].clone();
-            self.screens.pictures.put(&self.selected.clone(), t);
-            self.screens.offsets.insert(self.selected.clone(), f32::from(self.scroll.offset().y));
-        }
+        if !self.selected.is_empty() { self.screens.offsets.insert(self.selected.clone(), f32::from(self.scroll.offset().y)); }
         self.screens.attacher.show(raw);
-        if let Some(t) = self.screens.pictures.get(raw) {
-            self.data["thread"] = t;
-            self.last_entries = self.data["thread"]["entries"].as_array().map_or(0, |e| e.len());
-            let y = self.screens.offsets.get(raw).copied().unwrap_or(-1_000_000.);
-            self.scroll.set_offset(point(px(0.), px(y)));
-        }
+        if let Some(y) = self.screens.offsets.get(raw).copied() { self.scroll.set_offset(point(px(0.), px(y))); }
     }
 }
