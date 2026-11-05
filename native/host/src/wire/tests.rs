@@ -133,6 +133,8 @@ async fn origin_is_read_at_each_join_and_a_zero_resumes_from_nothing() {
     assert_eq!(h["backplane"], "0.14.0"); assert_eq!(h["busy"], 0);
     let mut info = serde_json::Map::new(); side_by_side_info(&mut info);
     assert_eq!(info.get("sideBySide"), if mode == "on" { Some(&json!("1")) } else { None });
+    let shown = shown_with_side_by_side(json!({"projects":[]}));
+    assert_eq!(shown.get("sideBySide"), if mode == "on" { Some(&json!(true)) } else { None }, "{shown}");
     println!("wire_sbs_ok {mode}");
 }
 fn sbs_wire_child(mode: &str, copy: Option<&str>, flag: Option<&str>) -> String {
@@ -148,4 +150,10 @@ fn sbs_wire_child(mode: &str, copy: Option<&str>, flag: Option<&str>) -> String 
     assert!(sbs_wire_child("off", None, None).contains("wire_sbs_ok off"), "no flags");
     assert!(sbs_wire_child("off", None, Some("1")).contains("wire_sbs_ok off"), "the flag without the copy switch");
     assert!(sbs_wire_child("off", Some("1"), Some("0")).contains("wire_sbs_ok off"), "a wrong flag value");
+}
+
+#[test] fn shown_is_marked_only_when_on_and_only_an_object() {
+    assert_eq!(shown_marked(json!({"a":1}), true), json!({"a":1,"sideBySide":true}));
+    assert_eq!(shown_marked(json!({"a":1}), false), json!({"a":1}));
+    assert_eq!(shown_marked(Value::Null, true), Value::Null);
 }

@@ -236,7 +236,7 @@ impl Hub {
             o.insert("window".into(), empty_window());
             o.insert("cmds".into(), pol.get("cmds").cloned().unwrap_or(json!([])));
             o.insert("session".into(), pol.get("session").cloned().unwrap_or(Value::Null));
-            o.insert("shown".into(), pol.get("shown").cloned().unwrap_or(Value::Null));
+            o.insert("shown".into(), crate::wire::shown_with_side_by_side(pol.get("shown").cloned().unwrap_or(Value::Null)));
             if let Some(ov) = pol.get("overlay") { o.insert("overlay".into(), ov.clone()); }
         }
         Value::Object(o)
