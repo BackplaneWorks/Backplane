@@ -12,4 +12,4 @@ export SIMCTL_CHILD_BACKPLANE_ACTS="$ACTS"
 [ -n "$SEL" ] && export SIMCTL_CHILD_BACKPLANE_SELECT="$SEL"
 [ -n "$VIEW" ] && export SIMCTL_CHILD_BACKPLANE_VIEW="$VIEW"
 [ "${JIT:-1}" = 0 ] && export SIMCTL_CHILD_JSC_useJIT=0
-xcrun simctl launch "$U" dev.backplane.gpui
+xcrun simctl launch "$U" dev.backplane.gpui $LAUNCHARGS

@@ -17,6 +17,16 @@ const mapOf = (o: Record<string, any>): number[] => [...hd(0xa0, Object.keys(o).
 const send = (m: string, p: object) => ws.send(new Uint8Array(mapOf({ id: ++id, m, p })));
 await Bun.sleep(1500);
 const th = process.argv[5];
+if (th === "bulk") { // bun ios-seed.ts HP HOME PROJ bulk FROM TO [TURNS]: threads "bulk i" for i in FROM..TO, a tool turn in the first TURNS of them
+  const pid = (await Bun.file(`${home}/events.jsonl`).text()).split("\n").map((l) => { try { return JSON.parse(l); } catch { return {}; } }).find((e) => e.$ === "ProjectCreated")?.id;
+  const [from, to, turns = 0] = process.argv.slice(6).map(Number);
+  for (let i = from; i <= to; i++) { send("thread.create", { project: pid, title: `bulk ${i}`, env: "local", provider: "claude" }); await Bun.sleep(60); }
+  await Bun.sleep(3000);
+  const evs = (await Bun.file(`${home}/events.jsonl`).text()).split("\n").map((l) => { try { return JSON.parse(l); } catch { return {}; } }).filter((e) => e.$ === "ThreadCreated" && /^bulk \d+$/.test(e.title));
+  const ids = evs.filter((e) => { const n = Number(e.title.slice(5)); return n >= from && n <= to; }).map((e) => e.id);
+  for (const t of ids.slice(0, turns)) { send("turn.start", { thread: t, text: `tools:2 hello ${t}`, msg: `b-${t}` }); await Bun.sleep(2500); }
+  console.log(ids.join(" ")); process.exit(0);
+}
 if (th === "new") { // bun ios-seed.ts HP HOME PROJ new N: N threads, each with a short tool turn
   const pid = (await Bun.file(`${home}/events.jsonl`).text()).split("\n").map((l) => { try { return JSON.parse(l); } catch { return {}; } }).find((e) => e.$ === "ProjectCreated")?.id;
   const n = Number(process.argv[6]); const before = new Set<string>();
