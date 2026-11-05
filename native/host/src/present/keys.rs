@@ -51,12 +51,15 @@ pub fn menu(id: &str, snoozed: bool) -> Vec<Value> {
     ]
 }
 
-/// signal::own for a thread with no deleted flag, asks, pending, queue, bg/watch rows, children or order wait: its own turn and shelf alone
+/// The thread's signal: its own turn and shelf alone when it has no asks, task links, queue, background rows, launch or pending, else the hub's
+/// whole index (signal::index flows bits from children; O(threads), so only for the threads that need it)
 fn plain_signal(st: &State, id: &str) -> Option<u8> {
     let t = st.threads.get(id)?;
-    if t.deleted || t.pending > 0 || st.queue.get(id).map_or(false, |q| !q.is_empty()) { return None }
-    for k in ["bg", "watch", "auth.wait", "order.wait", "launch"] { if st.settings.get(&format!("{k}.{id}")).map_or(false, |v| !v.is_empty()) { return None } }
-    if st.asks.values().any(|(th, _)| th == id) || st.tasks.values().any(|(p, c, _, _)| p == id || c == id) { return None }
+    if t.deleted { return None }
+    let linked = t.pending > 0 || st.queue.get(id).map_or(false, |q| !q.is_empty())
+        || ["bg", "watch", "auth.wait", "order.wait", "launch"].iter().any(|k| st.settings.get(&format!("{k}.{id}")).map_or(false, |v| !v.is_empty()))
+        || st.asks.values().any(|(th, _)| th == id) || st.tasks.values().any(|(p, c, _, _)| p == id || c == id);
+    if linked { return signal::index(st).get(id).copied() }
     let blocked = t.turn == Turn::Failed;
     let active = t.turn == Turn::Running && !blocked;
     let settled = shelf_of(t) == Shelf::Settled;
