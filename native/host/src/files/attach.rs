@@ -50,7 +50,7 @@ pub async fn receive<R: AsyncRead + Unpin>(home: &std::path::Path, thread: &str,
     let d = dir(home, thread);
     if let Err(e) = tokio::fs::create_dir_all(&d).await { return ("500 Internal Server Error", failed_plain(thread, &e.to_string())) }
     let path = d.join(stored(key, name));
-    // a path that is a link is not followed: the file is made new (O_NOFOLLOW) and replaced if it was a plain file
+    // O_NOFOLLOW: a link at the target is never followed, the open fails (500) and nothing is written; a plain file there is truncated and replaced
     let mut f = match tokio::fs::OpenOptions::new().write(true).create(true).truncate(true).custom_flags(libc::O_NOFOLLOW).open(&path).await {
         Ok(f) => f, Err(e) => return ("500 Internal Server Error", failed_plain(thread, &e.to_string())) };
     let p = path.to_string_lossy().into_owned();

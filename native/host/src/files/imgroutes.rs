@@ -3,13 +3,18 @@
 use super::{fm, mimg, serve};
 use crate::{api::{Fut, HttpHandler, HttpReply}, auth::{Auth, Req}, hub::Hub};
 use serde_json::Value;
-use std::sync::Arc;
+use std::sync::{atomic::{AtomicUsize, Ordering}, Arc};
 
 pub fn start(hub: &Arc<Hub>) {
-    hub.register_http(Arc::new(MessageImage));
+    // `retained`: how many log lines the snapshot loop has read; a request waits for it to reach the log's length it saw on arrival
+    let retained = Arc::new(AtomicUsize::new(hub.store.len()));
+    hub.register_http(Arc::new(MessageImage { retained: retained.clone() }));
     let h = hub.clone();
-    tokio::spawn(async move { retain_loop(h).await });
+    tokio::spawn(async move { retain_loop(h, retained).await });
 }
+/// The longest a request waits for the snapshot loop to catch up with the log (a message naming several 24 MiB images is read, hashed and written one at a time).
+const CATCH_UP: std::time::Duration = std::time::Duration::from_secs(5);
+const CHUNK: usize = 200;
 
 /// Conn.get.k i=8: /message-image needs the hub's own credential on top of Conn.allowed (Auth.credential: bearer, ?token= or cookie equal to
 /// the hub token; a paired device's token does not open it).
@@ -25,7 +30,7 @@ fn pct(s: &str) -> String { // Att.unpct: percent-decoded, `+` stays, a bad esca
     String::from_utf8_lossy(&o).into_owned()
 }
 
-struct MessageImage;
+struct MessageImage { retained: Arc<AtomicUsize> }
 impl HttpHandler for MessageImage {
     fn routes(&self) -> &'static [&'static str] { &["/message-image"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, req: &'a Req) -> Fut<'a, HttpReply> {
@@ -35,14 +40,12 @@ impl HttpHandler for MessageImage {
             let unavailable = || HttpReply::text("404 Not Found", "Image unavailable");
             if !mimg::is_image(&path) || path.contains("/../") || path.contains("/./") || path.contains('\\') { return unavailable() }
             let home = hub.cfg.home.clone();
-            // the message's own commit makes the snapshot a moment after the commit: ask again briefly before answering "unavailable"
-            let mut snap = None;
-            for i in 0..6 {
-                let (h, e, p) = (home.clone(), entry.clone(), path.clone());
-                if let Ok(Ok(s)) = tokio::task::spawn_blocking(move || mimg::lookup(&h, &e, &p)).await { snap = Some(s); break }
-                if i < 5 { tokio::time::sleep(std::time::Duration::from_millis(100)).await }
-            }
-            let Some(s) = snap else { return unavailable() };
+            // Bend snapshots before it announces the message; here the loop runs just after the commit. Wait (up to CATCH_UP) while the loop is
+            // behind the log as it stood when this request arrived, then look once: an image the message named is there by then.
+            let target = hub.store.len(); let t0 = std::time::Instant::now();
+            while self.retained.load(Ordering::Acquire) < target && t0.elapsed() < CATCH_UP { tokio::time::sleep(std::time::Duration::from_millis(25)).await }
+            let (h, e, p) = (home.clone(), entry.clone(), path.clone());
+            let Ok(Ok(s)) = tokio::task::spawn_blocking(move || mimg::lookup(&h, &e, &p)).await else { return unavailable() };
             // a message of a deleted thread grants nothing (the Bend hub joins `thread.deleted = 0`)
             if let Some(t) = &s.thread { if hub.model().await.threads.get(t).map_or(false, |m| m.deleted) { return unavailable() } }
             let (p, ct) = (s.path.to_string_lossy().into_owned(), fm::ctype(&s.path.to_string_lossy()));
@@ -52,16 +55,21 @@ impl HttpHandler for MessageImage {
 }
 
 /// MessageImage.changes: after a commit, each image an assistant message names gets its snapshot (a missing or rejected image never stops delivery).
-async fn retain_loop(hub: Arc<Hub>) {
+/// Lines are read CHUNK at a time (a lagging receiver or a long gap never loads everything missed at once); `retained` follows the log.
+async fn retain_loop(hub: Arc<Hub>, retained: Arc<AtomicUsize>) {
     let mut rx = hub.subscribe();
-    let mut seen = hub.store.len();
+    let mut seen = retained.load(Ordering::Acquire);
     loop {
         match rx.recv().await { Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {} Err(_) => return }
-        let now = hub.store.len();
-        if now <= seen { continue }
-        let lines = hub.store.range(seen, now).unwrap_or_default(); seen = now;
-        let home = hub.cfg.home.clone();
-        let _ = tokio::task::spawn_blocking(move || { for l in lines { retain_line(&home, &l) } }).await;
+        loop {
+            let now = hub.store.len();
+            if now <= seen { break }
+            let to = (seen + CHUNK).min(now);
+            let lines = hub.store.range(seen, to).unwrap_or_default(); seen = to;
+            let home = hub.cfg.home.clone();
+            let _ = tokio::task::spawn_blocking(move || { for l in lines { retain_line(&home, &l) } }).await;
+            retained.store(seen, Ordering::Release);
+        }
     }
 }
 pub fn retain_line(home: &std::path::Path, line: &str) {
