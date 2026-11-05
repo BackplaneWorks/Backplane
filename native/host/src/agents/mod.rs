@@ -373,7 +373,7 @@ impl Actor {
         }
         if clear { self.live_end().await }
         self.commit(events).await;
-        if ended && self.driver.as_ref().map_or(false, |d| d.ends_on_turn_end()) { self.stop().await; self.lines = None; self.exit = None; self.asked.clear() } // Grok.stop: SIGTERM after the turn's events
+        if ended && self.driver.as_ref().map_or(false, |d| d.ends_on_turn_end()) { self.stop().await; self.lines = None; self.exit = None; self.asked.clear(); self.live_proc = None; self.ag.stats.procs_exited.fetch_add(1, Relaxed); } // Grok.stop: SIGTERM after the turn's events
         if ended { if self.live_proc.is_none() { self.codex_next().await } else { self.next_ride = true } }
     }
 
