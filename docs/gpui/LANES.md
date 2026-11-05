@@ -16,6 +16,12 @@ lane cannot break another lane's build.
 | prov-pi | new | `native/host/src/agents/providers/{pi,omp,dialog}.rs` |
 | state | new | `native/host/src/state/` |
 | soak | new | `test/gpui/soak/` |
+| commands | new | `native/host/src/commands/`: thread, project and queue requests |
+| settings | new | `native/host/src/settings/`: settings, accounts, telemetry, diagnostics, vault |
+| bots | new | `native/host/src/bots/`: bots, rooms, routines, mail, uber ops, bot tools |
+| net | new | `native/host/src/net/`: pairing, QR, devices, push, far threads, peers |
+| term | new | `native/host/src/term/`: pty, terminals, browser helper, `preview_*`, teach, tasks |
+| gpui-screens | new | `native/gpui/src/screens/`: settings, asks, images, multi-line composer, project home, viewers |
 
 ## How a lane works
 
