@@ -2292,16 +2292,29 @@ document.addEventListener("input", (e) => {
 
 // A thread or bot in the sidebar is picked at the mouse press, not at its
 // release: a person holds a click 60-120 ms, and the switch (its picture
-// drawn from the client's cache) is under way meanwhile. Its click then
-// does nothing more. Touch keeps the tap (a press may start a scroll);
-// project heads, which drag, keep the click.
-let pressedPick = null;
+// drawn from the client's cache) is under way meanwhile. So are the viewer
+// rail's tabs and the composer's pickers (as a native select or a browser's
+// tab does). Its click then does nothing more. Touch keeps the tap (a press
+// may start a scroll); project heads, which drag, keep the click.
+const PRESS_PICKS = ['aside.sidebar [data-on-click="select"]', 'aside.sidebar [data-on-click="bot"]',
+  '.workspace-bar button[data-on-click="view-kind"]', '.workspace-bar button[data-on-click="fm"]', '.workspace-bar button[data-on-click="diff"]',
+  '.workspace-bar button[data-on-click="mech"]', '.workspace-bar button[data-on-click="rv-page"]',
+  'button.model-chip[data-on-click="flag"]', 'button.tok-chip[data-on-click="flag"]', 'button.account-chip[data-on-click="acct-open"]'].join(", ");
+let pressedPick = null, pressedMenu = null;
 document.addEventListener("pointerdown", e => {
   if (!e.isTrusted || e.button !== 0 || e.pointerType !== "mouse" || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
-  const el = e.target.closest?.('aside.sidebar [data-on-click="select"], aside.sidebar [data-on-click="bot"]');
-  if (!el || !el.getAttribute("data-value") || el.closest('[draggable="true"]')) return;
+  // a menu (.local-menu: thread ▾, Views, the viewer's pickers) opens or
+  // shuts at the press too; its click's own toggle is then held back
+  const summary = e.target.closest?.(".local-menu > summary");
+  if (summary) { const menu = summary.parentElement;menu.open = !menu.open;pressedMenu = { menu, at: e.timeStamp };return; }
+  const el = e.target.closest?.(PRESS_PICKS);
+  if (!el || el.disabled || el.closest('[draggable="true"]') || el.closest("aside.sidebar") && !el.getAttribute("data-value")) return;
   pressedPick = { action: el.getAttribute("data-on-click"), value: el.getAttribute("data-value"), at: e.timeStamp };
   dispatch(phoneClickAction(document, el, el.getAttribute("data-on-click")), valueOf(el));
+}, true);
+document.addEventListener("click", e => {
+  const p = pressedMenu;pressedMenu = null;
+  if (p && e.target.closest?.(".local-menu > summary")?.parentElement === p.menu && e.timeStamp - p.at < 2000) e.preventDefault();
 }, true);
 for (const ev of EVENTS) {
   document.addEventListener(ev, (e) => {
