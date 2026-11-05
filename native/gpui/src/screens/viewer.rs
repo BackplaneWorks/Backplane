@@ -110,7 +110,11 @@ fn plot_page(cx: &mut Context<Backplane>, light: bool, open: &str, viewer: &Valu
     let mut col = div().size_full().flex().flex_col();
     let note = string(viewer, "note");
     if !note.is_empty() { col = col.child(div().px_3().py_1().text_size(px(11.)).text_color(c("dim")).child(note)); }
-    col.child(super::plotview::canvas_el(cx, light, frame, view)).into_any_element()
+    // Layers: the menu lists the layers this plot has; the hub's masks decide what the canvas draws
+    let present: std::collections::BTreeSet<u32> = frame.chunks.iter().map(|c| c.layer).collect();
+    let strip = crate::viewers::layers::strip(viewer, &present);
+    col = col.child(crate::viewers::layers::strip_el(cx, light, &strip, pv.layers_open));
+    col.child(super::plotview::canvas_el(cx, light, frame, view, crate::viewers::layers::masks(viewer))).into_any_element()
 }
 
 fn review_page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, review: &Value) -> AnyElement {

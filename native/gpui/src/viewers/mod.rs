@@ -3,4 +3,5 @@
 //! (`Entity<SolidPage>`, `Entity<BrowserPage>`): screens::viewer hosts them with `.child(entity.clone())` next to `plot_page`.
 pub mod browser;
 pub mod demo;
+pub mod layers;
 pub mod solid;
