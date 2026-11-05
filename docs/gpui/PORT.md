@@ -3431,3 +3431,6 @@ Laws that name a web-only file but also native-shared code, so kept (review by h
 
 - `stop_command_only_while_running` names `src/web/workspace.bend`
 - `terminal_empty_input_keeps_view` names `src/web/workspace.bend`
+
+### Open seam: stalled clients and terminal output (term lane, 2026-11-05)
+Terminal output goes out with `Hub::push_all` into each connection's unbounded outbox, so one stalled client plus a flood (`yes` in a terminal) grows the hub without limit. M3's "slow clients bounded" does not hold for terminal output, and M7 must not run with a stalled client until this is wired. The fix needs `Hub::push_budgeted(client, frame, bytes) -> bool` and `Hub::outbox_pending(client) -> usize` (owner: the `bend` lead; requested 2026-11-05) and a way to list connections; the term lane then drops a stalled client's term frames past its budget and sends one snapshot when it drains (`term/mod.rs` header).
