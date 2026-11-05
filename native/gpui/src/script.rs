@@ -45,7 +45,7 @@ impl Backplane {
                 None => metric(started, "gpu", json!({"device": null})),
             }
         }
-        let draws = self.data["projects"].as_array().map_or(false, |p| !p.is_empty()) && self.data["thread"].is_object();
+        let draws = self.data["projects"].as_array().map_or(false, |p| !p.is_empty());
         if !self.usable && draws {
             self.usable = true;
             let entries = self.data["thread"]["entries"].as_array().map_or(0, |e| e.len());

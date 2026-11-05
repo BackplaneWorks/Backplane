@@ -29,6 +29,7 @@ if ! { pkg-config --exists xkbcommon-x11 && [ -e /usr/lib/x86_64-linux-gnu/libxk
  export RUSTFLAGS="-L native=$PWD/build/gpui-sysroot/usr/lib/x86_64-linux-gnu ${RUSTFLAGS:-}"
  export LD_LIBRARY_PATH="$PWD/build/gpui-sysroot/usr/lib/x86_64-linux-gnu${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 fi
+if [ "${1:-}" = check ]; then cargo check --release --manifest-path native/gpui/Cargo.toml 2>&1 | grep -E '^(error|warning: unused)' -A12 | head -150; echo CHECK-DONE; exit 0; fi
 /usr/bin/time -v -o build/gpui-artifacts/build.time cargo build --release --manifest-path native/gpui/Cargo.toml
 cp native/gpui/Cargo.lock build/gpui-artifacts/Cargo.lock
 cp build/gpui-target/release/backplane-gpui build/gpui-artifacts/
