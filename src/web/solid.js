@@ -159,7 +159,7 @@ export function fit() {
 // the preview as a PNG Blob: drawn now and copied in the same task (the
 // context keeps no drawing buffer) over the background the page shows it on
 export function snapshot(canvas) {
-  if (!view || view.canvas !== canvas || view.disposed) return Promise.resolve(null);
+  if (!view || view.canvas !== canvas || view.disposed || !view.linked) return Promise.resolve(null);
   let bg = "", el = canvas;
   while (el && (!bg || bg === "transparent" || /rgba\(.*,\s*0\)$/.test(bg))) { bg = getComputedStyle(el).backgroundColor; el = el.parentElement; }
   view.draw();
@@ -442,22 +442,42 @@ class View {
     this.resize.observe(canvas);
   }
 
+  // The program compiles and links without the page waiting on it where
+  // the browser can (KHR_parallel_shader_compile: a first open's shaders
+  // took 100-250 ms of the main thread on a real GPU): draw() asks whether
+  // it is ready and tries again next frame meanwhile (the view's picture,
+  // if any, stays over the canvas). Attributes are bound before the link,
+  // so nothing asks the program anything before then.
   initGpu() {
     const gl = this.gl;
-    const sh = (type, src) => {
-      const s = gl.createShader(type);gl.shaderSource(s, src);gl.compileShader(s);
-      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(`3D shader: ${gl.getShaderInfoLog(s)}`);
-      return s;
-    };
+    const sh = (type, src) => { const s = gl.createShader(type);gl.shaderSource(s, src);gl.compileShader(s);return s; };
     this.prog = gl.createProgram();
-    const vertex = sh(gl.VERTEX_SHADER, VS), fragment = sh(gl.FRAGMENT_SHADER, FS);
-    gl.attachShader(this.prog, vertex);gl.attachShader(this.prog, fragment);gl.linkProgram(this.prog);
-    gl.deleteShader(vertex);gl.deleteShader(fragment);
-    if (!gl.getProgramParameter(this.prog, gl.LINK_STATUS)) throw new Error(`3D program: ${gl.getProgramInfoLog(this.prog)}`);
-    this.bufs = ["p", "n", "c"].map(a => ({ a: gl.getAttribLocation(this.prog, a), b: gl.createBuffer() }));
+    this.shaders = [sh(gl.VERTEX_SHADER, VS), sh(gl.FRAGMENT_SHADER, FS)];
+    for (const s of this.shaders) gl.attachShader(this.prog, s);
+    ["p", "n", "c"].forEach((a, i) => gl.bindAttribLocation(this.prog, i, a));
+    gl.linkProgram(this.prog);
+    this.linking = gl.getExtension("KHR_parallel_shader_compile")?.COMPLETION_STATUS_KHR || 0;
+    this.linked = false;
+    if (!this.linking) this.programReady();
+    this.bufs = ["p", "n", "c"].map((a, i) => ({ a: i, b: gl.createBuffer() }));
     this.uploadedBuffer = null;this.uploadedCount = 0;
     this.dof = new DepthOfField(gl);
     if (!this.dof.available) console.info(`3D depth of field disabled: ${this.dof.reason}`);
+  }
+
+  // whether the program is linked (false while it still compiles); a
+  // shader or link failure throws, as it did when compiling waited
+  programReady() {
+    if (this.linked) return true;
+    const gl = this.gl;
+    if (this.linking && !gl.getProgramParameter(this.prog, this.linking)) return false;
+    this.linking = 0;
+    const [vertex, fragment] = this.shaders || [];
+    for (const s of [vertex, fragment]) if (s && !gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(`3D shader: ${gl.getShaderInfoLog(s)}`);
+    if (!gl.getProgramParameter(this.prog, gl.LINK_STATUS)) throw new Error(`3D program: ${gl.getProgramInfoLog(this.prog)}`);
+    for (const s of [vertex, fragment]) if (s) gl.deleteShader(s);
+    this.shaders = null; this.linked = true;
+    return true;
   }
 
   // closer by k (over 1 in), keeping the point under (x, y) on the canvas where it is
@@ -603,7 +623,7 @@ class View {
 
   draw() {
     const gl = this.gl, c = this.canvas;
-    if (this.disposed || this.contextLost || gl?.isContextLost() || this.previewVisible === false || !c.isConnected || !c.clientWidth || !c.clientHeight) return;
+    if (this.disposed || this.broken || this.contextLost || gl?.isContextLost() || this.previewVisible === false || !c.isConnected || !c.clientWidth || !c.clientHeight) return;
     if (!gl) { if (this.note) this.note.textContent = "3D unavailable: WebGL could not start"; return; }
         const dpr = viewDpr();
     const w = Math.max(1, Math.round(c.clientWidth * dpr)), h = Math.max(1, Math.round(c.clientHeight * dpr));
@@ -621,6 +641,9 @@ class View {
     if (this.note && !this.saying) this.note.textContent = this.count || pictured ? "" : record?.error || this.waiting();
     if (this.stat && !pictured) this.stat.textContent = this.count && record?.status === "ready" ? this.statLine({ ...record.stats, build: record.stats.build / 1000, waited: this.waited || 0, tris: this.count / 3 }) : "";
     if (!this.count) return;
+    let ready = false;
+    try { ready = this.programReady(); } catch (e) { this.broken = true; this.say(e.message); return; }
+    if (!ready) { if (!this.queued) { this.queued = true; this.frame = requestAnimationFrame(() => { this.frame = null; this.queued = false; this.draw(); }); } return; }
     dropPicture(c);
     if (record?.status === "ready" && !record.stale && !this.picturing) this.pictureSoon();
     gl.enable(gl.DEPTH_TEST);
@@ -677,7 +700,7 @@ View.prototype.pictureSoon = function () {
 };
 View.prototype.takePicture = function () {
   const c = this.canvas, record = assets.get(this.key);
-  if (this.disposed || this.contextLost || !this.gl || this.gl.isContextLost() || !c.isConnected || !this.count || !c.clientWidth || !c.clientHeight
+  if (this.disposed || this.contextLost || !this.gl || this.gl.isContextLost() || !this.linked || !c.isConnected || !this.count || !c.clientWidth || !c.clientHeight
     || record?.status !== "ready" || record.stale || this.thermal.enabled) return;
   const state = this.snapshot(), dpr = viewDpr(), token = JSON.stringify([this.stateKey, record.revision, c.clientWidth, c.clientHeight, dpr, state]);
   if (token === this.pictureToken) return;
@@ -731,7 +754,7 @@ View.prototype.dispose = function() {
   this.ticking(false); this.resize?.disconnect(); this.events?.abort(); this.canvas.classList.remove("dragging"); this.dof?.dispose();
   if (this.frame) cancelAnimationFrame(this.frame);
   cancelAnimationFrame(this.coasting);
-  if (this.gl) { for (const {b} of this.bufs || []) this.gl.deleteBuffer(b); this.gl.deleteProgram(this.prog); }
+  if (this.gl) { for (const {b} of this.bufs || []) this.gl.deleteBuffer(b); for (const sh of this.shaders || []) this.gl.deleteShader(sh); this.gl.deleteProgram(this.prog); }
   this.frame = null; this.queued = false; this.gl = null; this.pos = null;
 };
 let view = null;
@@ -831,6 +854,27 @@ export function mount(canvas) {
     if (record) view.receive(record);
     else { view.ticking(true); view.later(); }
   } else view.later();
+}
+
+// A page's first WebGL context costs the most (the GPU process sets its GL
+// up: 156-280 ms of the main thread measured here, right after the first
+// 3D press). Made first in a worker (an OffscreenCanvas's, then let go),
+// a few seconds after a 3D view came within a click, the page's own first
+// context takes ~6 ms, and the page never waits for the worker's.
+let warmed = false;
+export function warm() {
+  if (warmed || view || parked || typeof Worker !== "function" || typeof OffscreenCanvas !== "function") return;
+  warmed = true;
+  setTimeout(() => {
+    if (view || parked) return;
+    try {
+      const src = "try{const g=new OffscreenCanvas(1,1).getContext('webgl');g&&g.getExtension('WEBGL_lose_context')?.loseContext();}catch(e){}postMessage(0);";
+      const url = URL.createObjectURL(new Blob([src], { type: "text/javascript" }));
+      const worker = new Worker(url, { name: "backplane-gl-warm" });
+      const done = () => { worker.terminate(); URL.revokeObjectURL(url); };
+      worker.onmessage = done; worker.onerror = done; setTimeout(done, 10000);
+    } catch {}
+  }, 3000);
 }
 
 // the kept view of a canvas that will not come back (its workbench was let
