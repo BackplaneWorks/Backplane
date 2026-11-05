@@ -96,7 +96,8 @@ impl RpcHandler for Misc {
                 // jobs the Rust hub does not run yet: the folder is resolved first (a thread without one is refused as everywhere), then they say so
                 "kicad.components" => {
                     if super::root_of(hub, &s("thread")).await.is_none() { return vec![super::threadpath::refusal(id)] }
-                    vec![json!({"t":"reply","id":id,"ok":false,"error":format!("{method} is not available in this hub yet")})]
+                    // kicad.components and kicad.renderAsset are called by the web viewer only (src/web/viewer-rpc.js); no GPUI, iOS or Android client sends them
+                    vec![json!({"t":"reply","id":id,"ok":false,"error":format!("{method} is served to the web viewer only; this hub has none")})]
                 }
                 "boards.list" => { // BoardsJob: the project's boards read again, as the card finds them
                     let thread = s("thread");
