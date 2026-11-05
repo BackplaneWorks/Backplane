@@ -32,7 +32,11 @@ const wrongSince=held+firstLive;const ws2=new WebSocket(`ws://127.0.0.1:${port}/
 const got2=[];ws2.onmessage=e=>{const o=typeof e.data==='string'?JSON.parse(e.data):decode(e.data);if(o.t==='log'||o.t==='changes')for(const it of o.items??[])got2.push(it)};
 await new Promise(r=>ws2.onopen=r);await sleep(1500);
 // the reference may have lines the resume did not see yet: settle the three streams
-await sleep(1500);
+const fileLen=()=>readFileSync(root+'/home/events.jsonl','utf8').trimEnd().split('\n').length;
+{let last=-1,since=Date.now(),t0=Date.now();
+ while(Date.now()-t0<120000){const n=fileLen();if(n!==last){last=n;since=Date.now()}
+  if(Date.now()-since>3000&&refLog.length===n&&held+got.length===n&&held+got2.length+firstLive===n)break;
+  if(Date.now()-since>3000&&refLog.length===n&&held+got.length===n)break;await sleep(250)}}
 const norm=x=>{x=JSON.parse(JSON.stringify(x));if(x.$==='SettingSet'&&typeof x.key==='string'&&(x.key.startsWith('launch.input.')||x.key.startsWith('fallback.input.')))x.value='';return JSON.stringify(x)};
 const key=x=>JSON.stringify(x);
 const joined=[...firstLog.slice(0,held),...got];
@@ -42,11 +46,19 @@ for(let i=0;i<n;i++){if(refLog[i]===undefined||joined[i]===undefined||key(refLog
 const kinds={};for(const [,a,b] of strictDiff){const k=(a||'-')+' | '+(b||'-');kinds[k]=(kinds[k]||0)+1}
 const normEq=refLog.length===joined.length&&refLog.every((x,i)=>norm(x)===norm(joined[i]));
 const lines=readFileSync(root+'/home/events.jsonl','utf8').trimEnd().split('\n');
-const fileEq=lines.length>=refLog.length&&refLog.every((x,i)=>norm(JSON.parse(lines[i]))===norm(x))&&lines.slice(0,refLog.length).length===refLog.length&&true;//((l,i)=>norm(JSON.parse(l))===norm(refLog[i]));
+const fileEq=lines.length===refLog.length&&lines.every((l,i)=>norm(JSON.parse(l))===norm(refLog[i]));//((l,i)=>norm(JSON.parse(l))===norm(refLog[i]));
 const j2=[...firstLog.slice(0,held),...got2];const have2=new Set(j2.map(key));const absent2=refLog.map((x,i)=>[i,x]).filter(([i,x])=>!have2.has(key(x)));
 const missingStrict=refLog.filter(x=>!new Set(joined.map(key)).has(key(x)));
 const out={bin,agents,held,firstLiveItems:firstLive,firstOrigin,resumeOrigin,resumeSince,refItems:refLog.length,joinedItems:joined.length,eventsJsonlLines:lines.length,
  strictDifferences:strictDiff.length,strictByKind:kinds,strictAbsent:missingStrict.length,strictAbsentKinds:[...new Set(missingStrict.map(kind))],
  normalisedIdentical:normEq,faultyClient:{sinceUsed:wrongSince,liveItemsCountedIn:firstLive,absentLines:absent2.length,absentPositions:absent2.map(a=>a[0]).slice(0,40),absentKinds:[...new Set(absent2.map(a=>kind(a[1])))]},referenceEqualsFile:fileEq,duplicates:joined.length-new Set(joined.map(key)).size};
 console.log(JSON.stringify(out,null,1));if(outFile)writeFileSync(outFile,JSON.stringify(out,null,1));
-ws.close();ws2.close();stopHub(h);await sleep(800);process.exit(normEq&&fileEq&&joined.length===refLog.length?0:1);
+const checks={'first+resume has every log line once, in order (normalised)':normEq&&joined.length===refLog.length&&joined.length===lines.length,
+ 'no duplicates':out.duplicates===0,'reference equals events.jsonl line for line, through the end of the run':fileEq,
+ 'strict differences only blanked turn inputs':Object.keys(kinds).every(k=>/SettingSet:(fallback|launch)\.input\./.test(k)),
+ 'resume honoured since/origin':resumeSince===held&&resumeOrigin===firstOrigin,
+ 'live frame carried items that are not log lines':firstLive>0,
+ 'a client counting live items into since is short by exactly that many':out.faultyClient.absentLines===firstLive};
+let ok=true;for(const [k,v] of Object.entries(checks)){console.log((v?'PASS ':'FAIL ')+k);ok=ok&&v}
+console.log(ok?'RESULT PASS':'RESULT FAIL');out.checks=checks;out.pass=ok;if(outFile)writeFileSync(outFile,JSON.stringify(out,null,1));
+ws.close();ws2.close();stopHub(h);await sleep(800);process.exit(ok?0:1);
