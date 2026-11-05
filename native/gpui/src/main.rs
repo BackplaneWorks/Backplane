@@ -6,6 +6,7 @@ mod screens;
 mod script;
 mod swatch;
 mod ui;
+mod viewers;
 mod theme;
 mod wire;
 use gpui::{prelude::*, *, actions};
