@@ -57,6 +57,15 @@ const variants={
   stepbase:[{$:'ActivityLogged',thread:T,act:'step:c1',tone:'step',kind:'kicad',summary:JSON.stringify({e:'m1700003338-3348',c:'c1',p:'',g:'/x/.backplane/history.git',t:'/x',f:['A\tboard.kicad_pcb'],w:'start'}),at:A}],
   stepfirst:[{$:'ActivityLogged',thread:T,act:'step:c3',tone:'step',kind:'kicad',summary:JSON.stringify({e:'g1700003339-3639',c:'c3',p:'',g:'/x/.backplane/history.git',t:'/x',f:['A\tboard.kicad_pcb','D\told.kicad_sch'],w:''}),at:A}],
   stepopen:{info:{'fold:g1700003339-3639':'1'},extra:[{$:'ActivityLogged',thread:T,act:'step:c2',tone:'step',kind:'kicad',summary:JSON.stringify({e:'g1700003339-3639',c:'c2',p:'c1',g:'/x/.backplane/history.git',t:'/x',f:['M\tboard.kicad_pcb'],w:''}),at:A},{$:'ActivityLogged',thread:T,act:'err1',tone:'error',kind:'result',summary:'',at:A+1}]},
+  apierror:[{$:'MessagePosted',thread:T,msg:'ma1',role:'assistant',text:'API Error: 529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}',at:A},{$:'ActivityLogged',thread:T,act:'e1',tone:'error',kind:'result',summary:'',at:A+1}],
+  apierror2:[{$:'MessagePosted',thread:T,msg:'ma2',role:'assistant',text:'API Error: 400 {"error":{"type":"invalid_request_error","message":"prompt is too long."}}',at:A},{$:'ActivityLogged',thread:T,act:'e2',tone:'error',kind:'result',summary:'API Error: 400 {"error":{"type":"invalid_request_error","message":"prompt is too long."}}',at:A+1}],
+  restartcarry:[{$:'MessagePosted',thread:T,msg:'mu1',role:'user',text:'Backplane restarted while you were working. Continue where you left off.',at:A},{$:'ActivityLogged',thread:T,act:'r1',tone:'info',kind:'restart',summary:'Continuing after the restart',at:A+1}],
+  blankreply:[{$:'MessagePosted',thread:T,msg:'mb1',role:'assistant',text:'  \n ',at:A}],
+  thought:[{$:'ActivityLogged',thread:T,act:'h1',tone:'thinking',kind:'thinking',summary:'hmm',at:A}],
+  thoughton:{extra:[{$:'SettingSet',key:'agent.thinking',value:'on',at:A},{$:'ActivityLogged',thread:T,act:'h2',tone:'thinking',kind:'thinking',summary:'hmm',at:A}]},
+  tonethink:[{$:'ActivityLogged',thread:T,act:'h3',tone:'think',kind:'thinking',summary:'hmm',at:A}],
+  imagereply:[{$:'MessagePosted',thread:T,msg:'mi1',role:'assistant',text:'see /tmp/board.png and ![x](y.jpg)',at:A}],
+  attached:[{$:'MessagePosted',thread:T,msg:'mt1',role:'user',text:'look at this\n\n[attachment: /tmp/a.pdf]',at:A}],
   queued:[{$:'TurnQueued',thread:T,msg:'q1',text:'later please',at:A}],
 };
 const out={};
