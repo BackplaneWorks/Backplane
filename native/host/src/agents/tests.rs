@@ -828,3 +828,12 @@ const TESTCLI: &str = "#!/bin/sh\nread hello\necho '{\"q\":1}'\nread ans\necho \
     let (_, c) = ag.tool_review_comments(T1).await; assert_eq!((c["open"].as_u64(), c["resolved"].as_u64()), (Some(0), Some(1))); assert_eq!(c["text"], "No open comments.");
     assert!(log_from(&hub, 0).await.iter().any(|e| is(e, "ActivityLogged") && e["tone"] == "review" && e["kind"] == "add")); ag.shutdown();
 }
+#[tokio::test(flavor = "multi_thread")] async fn open_review_comments_follow_the_message_to_the_agent() { // Review.agent
+    let (hub, ag, sd) = codex_start("rva").await;
+    assert!(ag.tool_review_comment(T1, &json!({"op":"add","text":"move the connector"})).await.0);
+    let from = len(&hub).await; rpc(&hub, "turn.start", json!({"thread":T1,"text":"hello there"})).await;
+    let ev = until(&hub, from, 20, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await;
+    let echoed = ev.iter().find(|e| is(e, "MessagePosted") && e["role"] == "assistant").map(|e| e["text"].as_str().unwrap().to_string()).unwrap_or_default();
+    assert!(echoed.contains("move the connector"), "the agent was given the open comment after the message: {echoed}"); assert!(echoed.contains("hello there"));
+    let posted = ev.iter().find(|e| is(e, "MessagePosted") && e["role"] == "user").unwrap(); assert_eq!(posted["text"], "hello there", "the log keeps the person's words only"); let _ = sd; ag.shutdown();
+}
