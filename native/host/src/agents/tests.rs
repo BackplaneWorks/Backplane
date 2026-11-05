@@ -753,7 +753,9 @@ const TESTCLI: &str = "#!/bin/sh\nread hello\necho '{\"q\":1}'\nread ans\necho \
     assert!(ev.iter().any(|e| is(e, "TaskStateSet") && e["state"] == "done"), "{ev:?}");
     let m = ev.iter().find(|e| is(e, "MessagePosted") && e["thread"] == T1 && e["role"] == "system").expect("the result message");
     assert_eq!(m["msg"], format!("t:{child}:td-{task}")); assert!(m["text"].as_str().unwrap().starts_with(&format!("[Backplane] Delegated task {task} (codex) finished:\n\nre: do the child work")), "{}", m["text"]);
-    tokio::time::sleep(Duration::from_millis(2500)).await; let all = log_from(&hub, from).await;
+    tokio::time::sleep(Duration::from_millis(1500)).await; let all = log_from(&hub, from).await;
+    let at = |f: &dyn Fn(&Value) -> bool| all.iter().position(|e| f(e)).unwrap();
+    assert!(at(&|e| is(e, "TaskStateSet") && e["state"] == "done") < at(&|e| is(e, "MessagePosted") && e["role"] == "system") && at(&|e| is(e, "MessagePosted") && e["role"] == "system") < at(&|e| is(e, "TaskDelivered")), "task_finish_delivered_last");
     assert_eq!(all.iter().filter(|e| is(e, "TaskDelivered")).count(), 1, "delivered once"); assert_eq!(all.iter().filter(|e| is(e, "MessagePosted") && e["msg"] == format!("t:{child}:td-{task}")).count(), 1);
     let (ok, st) = ag.tool_task_status(T1, &json!({"taskId":task})).await; assert!(ok && st["state"] == "done" && st["childThreadId"] == child.as_str());
     assert!(!ag.tool_task_status("someone-else", &json!({"taskId":task})).await.0, "another thread's task is not its business");
@@ -783,5 +785,13 @@ const TESTCLI: &str = "#!/bin/sh\nread hello\necho '{\"q\":1}'\nread ans\necho \
     assert!(!ag.tool_launch(T1, &json!({"prompt":"x","project":"nope"})).await.0, "an unknown project is refused");
     assert!(!ag.tool_launch(T1, &json!({"prompt":"  "})).await.0, "a prompt is needed");
     assert!(!ag.tool_update(T1, &json!({"threadId":T1,"report":true})).await.0, "nobody launched the root thread");
+    ag.shutdown();
+}
+#[tokio::test(flavor = "multi_thread")] async fn a_restart_finishes_a_torn_delivery_and_wakes_the_idle_parent() { // task_repair_activates_idle, end to end
+    let sd = dir("rp-bin"); script(&sd, "codex", CODEX_STANDIN); let child = "t1700001001-1";
+    let extra = format!("{{\"$\":\"TaskDelegated\",\"task\":\"k1\",\"parent\":\"{T1}\",\"child\":\"{child}\",\"depth\":1,\"provider\":\"codex\",\"model\":\"\",\"at\":1700000010}}\n{{\"$\":\"TaskStateSet\",\"task\":\"k1\",\"state\":\"done\",\"summary\":\"done it\",\"at\":1700000011}}\n{{\"$\":\"MessagePosted\",\"thread\":\"{T1}\",\"msg\":\"t:{child}:td-k1\",\"role\":\"system\",\"text\":\"note\",\"at\":1700000012}}\n");
+    let (hub, ag, _h, _w) = start("rp", |w| base_log(w, 2, &extra).replace("\"provider\":\"claude\"", "\"provider\":\"codex\""), |_| Cli::standin(&sd)).await; let from = 0;
+    let ev = until(&hub, from, 30, |ev| ev.iter().any(|e| is(e, "TaskDelivered"))).await;
+    assert!(ev.iter().any(|e| turn_is(e, "running") && e["thread"] == T1), "the parent's turn started with the result"); assert_eq!(ev.iter().filter(|e| is(e, "MessagePosted") && e["msg"] == format!("t:{child}:td-k1")).count(), 1, "the message is not posted twice");
     ag.shutdown();
 }
