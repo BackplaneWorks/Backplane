@@ -18,6 +18,8 @@ export async function runOne(name,{bin,port,work}){
   const rec=new Rec();const [s,arg1]=name.split(':');
   await (arg1?SCENARIOS[s].bind(null,arg1):SCENARIOS[s])({hub:h,rec});
   const sessions=await h.finish();
+  const bad=rec.frames.filter(f=>f.kind==='check'&&f.json.deltaRebuildEqualsWhole===false);
+  if(bad.length)throw Error('keyed delta: the body rebuilt from ops differs from the whole view');
   return {meta:{scenario:name,bin,home:'<home>',check:h.check,sessions,frames:rec.frames.length,hubUrl:h.url,work:h.work,port},frames:rec.frames};
 }
 if(import.meta.main){
