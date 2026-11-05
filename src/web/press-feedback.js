@@ -36,19 +36,22 @@ const NEVER = new Set(['select', 'bot', 'bot-tab', 'proj-home', 'send', 'send-al
   'thread-child', 'delete', 'row-archive', 'row-settle', 'row-pin', 'row-rename', 'rename-save', 'secret-save', 'sealed']);
 // presses that open the viewer pane (the rail's tabs, the header's Viewer)
 const VIEWER = new Set(['view-kind', 'fm', 'diff', 'mech', 'rv-page', 'panel']);
+const DEPTH = 7;
 const sig = n => n.tag + '\u0000' + n.key + '\u0000' + (n.key ? '' : classes(n)[0] || '');
 
 // every region of the page with its parent (the timeline and made pieces are
 // never walked: no region is in them)
 export function regions(page) {
-  const found = new Map(), stack = [[page, null, 0]];
+  // (regions sit a few levels under .app: the sidebar's rows and the like
+  // below that are never walked)
+  const found = new Map(), stack = [[page, null, 0, 0]];
   while (stack.length && found.size < REGIONS.length) {
-    const [n, parent, index] = stack.pop();
-    if (!is(n, 'El') || n.tag === 'bp-memo' || attr(n, 'id') === 'timeline') continue;
+    const [n, parent, index, depth] = stack.pop();
+    if (!is(n, 'El') || n.tag === 'bp-memo' || depth > DEPTH || attr(n, 'id') === 'timeline') continue;
     const kind = REGIONS.find(([k, test]) => !found.has(k) && test(n));
     if (kind && parent) { found.set(kind[0], { node: n, parent: sig(parent), parentClass: attr(parent, 'class'), index });continue; }
     const ks = items(n.kids);
-    for (let i = ks.length - 1; i >= 0; i--) stack.push([ks[i], n, i]);
+    for (let i = ks.length - 1; i >= 0; i--) stack.push([ks[i], n, i, depth + 1]);
   }
   return found;
 }
