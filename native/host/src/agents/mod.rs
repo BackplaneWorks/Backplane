@@ -240,7 +240,7 @@ const HIST_IDLE: Duration = Duration::from_secs(300); const HIST_JOB: Duration =
 pub(crate) async fn hist_worker<F, Fut>(mut rx: mpsc::Receiver<(Option<JobGuard>, HistJob)>, idle: Duration, per_job: Duration, mut run: F) where F: FnMut(HistJob) -> Fut, Fut: std::future::Future<Output = ()> {
     loop {
         match tokio::time::timeout(idle, rx.recv()).await {
-            Ok(Some((_g, j))) => { if tokio::time::timeout(per_job, run(j.clone())).await.is_err() { eprintln!("agents: a design-history capture ({j:?}) took more than {per_job:?}: given up, the later ones go on") } }
+            Ok(Some((_g, j))) => { if tokio::time::timeout(per_job, run(j.clone())).await.is_err() { eprintln!("agents: a design-history capture ({j:?}) took more than {per_job:?}: no longer waited for (its git child, if started, is not killed), the later ones go on") } }
             _ => break,
         }
     }
@@ -505,7 +505,7 @@ impl Actor {
     /// A thread's design-history captures run one after another, in the order they were asked for: two captures overlapping on one thread's index could see each other's
     /// changes (a step logged against the wrong entry, or an index lock clash), and a turn's end capture must not be overtaken by the next turn's start.
     /// Bounded: a burst of tool-end steps past HIST_STEPS_MAX waiting is dropped (counted), starts and ends always fit. The worker ends after HIST_IDLE with nothing to do
-    /// (a deleted or retired thread's actor sends nothing more), and one capture that hangs is given up after HIST_JOB so the later ones still run.
+    /// (a deleted or retired thread's actor sends nothing more), and the wait for one capture that hangs ends after HIST_JOB so the later ones still run (the future is dropped; a git child it already started is not killed and may run beside the next one, rarely).
     fn hist(&mut self, j: HistJob) {
         let is_step = matches!(j, HistJob::Step(..));
         for attempt in 0..2 {
