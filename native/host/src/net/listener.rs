@@ -151,24 +151,28 @@ mod tests {
         for _ in 0..3 { let t = get(&format!("127.0.0.1:{port}")).await; assert!(t.contains("trusted=false") && t.contains("owner_conn=false"), "{t}"); }
         let _ = std::fs::remove_dir_all(h);
     }
-    /// What a phone is handed: once the listener is up on the tailnet address, an invitation (and its QR) names that address.
-    #[tokio::test] async fn tailnet_the_pairing_link_and_qr_carry_the_listeners_address() {
+    /// What a phone is handed. The hub's main routes are on one port (the Host a client reached it by), the tailnet listener on
+    /// its own: once the listener is up its address is among the routes, and it is the one the link names.
+    #[tokio::test] async fn tailnet_the_pairing_link_and_qr_name_the_listeners_address_not_the_hosts() {
         let (hub, p, _unused, h) = node("link").await;
-        // (routes made as the hub makes them: listening on 127.0.0.1:<port>, not the 0.0.0.0 fixture the other tests share)
         let h2 = std::env::temp_dir().join(format!("bp-listener-link2-{}", std::process::id())); let _ = std::fs::remove_dir_all(&h2); std::fs::create_dir_all(&h2).unwrap(); std::fs::write(h2.join("token"), "tok\n").unwrap();
         let ts = Arc::new(Fake { ip: "127.0.0.1".into(), whois: [("127.0.0.1".to_string(), who("me@x.com"))].into(), status: String::new() });
-        let (mut port, mut routes) = (0, None);
-        for _ in 0..10 {
-            port = free(); let (_, r) = super::super::start::open(&h2, "127.0.0.1", port).unwrap();
-            if start(hub.clone(), ts.clone(), p.clone(), r.clone(), "127.0.0.1x", port, "tok").await != State::Unavailable { routes = Some(r); break }
-        }
-        let routes = routes.expect("a free port");
-        let req = Req { method: "POST".into(), target: "/auth/invitations".into(), headers: vec![("Authorization".into(), "Bearer tok".into()), ("Host".into(), format!("127.0.0.1:{port}"))], body: vec![], peer: None, trusted: false };
-        let out = routes.handle(&req, 1).unwrap(); assert_eq!(out.reply.status, "200 OK", "{}", String::from_utf8_lossy(&out.reply.body));
+        let main_port = free();
+        let (_, routes) = super::super::start::open(&h2, "127.0.0.1", main_port).unwrap();
+        let (mut port, mut up_) = (0, false);
+        for _ in 0..10 { port = free(); if port != main_port && start(hub.clone(), ts.clone(), p.clone(), routes.clone(), "127.0.0.1x", port, "tok").await != State::Unavailable { up_ = true; break } }
+        assert!(up_ && port != main_port, "a listener port of its own");
+        let req = |host: u16| Req { method: "POST".into(), target: "/auth/invitations".into(), headers: vec![("Authorization".into(), "Bearer tok".into()), ("Host".into(), format!("127.0.0.1:{host}"))], body: vec![], peer: None, trusted: false };
+        let out = routes.handle(&req(main_port), 1).unwrap(); assert_eq!(out.reply.status, "200 OK", "{}", String::from_utf8_lossy(&out.reply.body));
         let b: serde_json::Value = serde_json::from_slice(&out.reply.body).unwrap();
-        assert!(b["link"].as_str().unwrap().starts_with(&format!("http://127.0.0.1:{port}/pair#invite=")), "{b}");
-        assert_eq!(b["routes"], json!([format!("http://127.0.0.1:{port}")]));
+        let (l_addr, m_addr) = (format!("http://127.0.0.1:{port}"), format!("http://127.0.0.1:{main_port}"));
+        assert_eq!(b["routes"], json!([l_addr, m_addr]), "the listener's confirmed address, then the one this request came to: {b}");
+        assert!(b["link"].as_str().unwrap().starts_with(&format!("{l_addr}/pair#invite=")), "the link names the listener's address first: {b}");
         assert_eq!(b["qr"], crate::net::qr::text(b["link"].as_str().unwrap()), "the QR encodes that link");
+        // without the listener (never started) the link would name only the address the request came to
+        let (_, bare) = super::super::start::open(&h2, "127.0.0.1", main_port).unwrap();
+        let o2: serde_json::Value = serde_json::from_slice(&bare.handle(&req(main_port), 1).unwrap().reply.body).unwrap();
+        assert_eq!(o2["routes"], json!([m_addr]), "so the listener is what puts its address there");
         let _ = std::fs::remove_dir_all(h); let _ = std::fs::remove_dir_all(h2);
     }
     #[tokio::test] async fn tailnet_no_address_is_unavailable_and_sets_nothing() {
