@@ -163,8 +163,8 @@ impl Policy {
     /// nothing, the boot commits nothing (no Auto.upgrade), no summary is asked for. What a person's own action derives in the same batch still does.
     pub fn passive(&self) -> bool { self.passive.load(Ordering::SeqCst) }
     pub fn set_passive(&self, on: bool) { self.passive.store(on, Ordering::SeqCst) }
-    /// the summaries to ask the text model for: none while passive
-    pub fn summaries_to_ask(&self, asks: Vec<(String, String)>) -> Vec<(String, String)> { if self.passive() { vec![] } else { asks } }
+    /// the summaries to ask the text model for: none while passive, and none on a copy of a real log (`BACKPLANE_COPY=1`: the call leaves the machine)
+    pub fn summaries_to_ask(&self, asks: Vec<(String, String)>) -> Vec<(String, String)> { if self.passive() || crate::copy::on() { vec![] } else { asks } }
     pub fn tick(&self, now_s: u64) -> Vec<Value> {
         if self.passive() { return vec![] }
         let g = self.lock();
