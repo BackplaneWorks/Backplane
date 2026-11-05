@@ -94,7 +94,9 @@ fn err(id: &Value, e: &str) -> Value { json!({"t":"reply","id":id,"ok":false,"er
 
 impl Bots {
     /// Uber.init (the minute): the uberbot's first ops, when it has none
-    pub async fn uber_init(&self, now: u64) -> usize {
+    pub async fn uber_init(&self, now: u64) -> usize { if crate::copy::on() { return 0 } self.uber_init_now(now).await }
+    /// the first ops without the copy gate (a test fixture on a copy hub builds the uberbot's state with it)
+    pub(crate) async fn uber_init_now(&self, now: u64) -> usize {
         let w = self.world().await;
         if !(w.ub_on() && w.vv(&w.uid(), &w.me()) == 0) { return 0 }
         let ops = w.ops(now, &w.init_bodies(&w.ub.settings.get("uber.bot").cloned().unwrap_or_default()));

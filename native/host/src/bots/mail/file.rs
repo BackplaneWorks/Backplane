@@ -107,6 +107,7 @@ impl Bots {
     /// MailStore.recover + Hub.mail.recovered: a body that reached the journal but whose header never reached the log (a crash between the two) gets its
     /// ConvSet (if the conversation is unknown) and MailPosted now. Re-seeding the owner's tickets for recovered mail is triage's (slice 3).
     pub async fn mail_recover(&self) -> usize {
+        if crate::copy::on() { return 0 } // it commits headers: not on a copy of a log
         let w = self.world().await; let dir = self.hub.cfg.home.join("mail");
         let mut names: Vec<PathBuf> = tokio::task::spawn_blocking(move || std::fs::read_dir(&dir).map(|d| d.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.extension().map_or(false, |x| x == "jsonl")).collect()).unwrap_or_default()).await.unwrap_or_default();
         names.sort();

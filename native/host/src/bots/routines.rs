@@ -138,6 +138,7 @@ impl Bots {
 
     /// Bots.tick.routines: every routine due at `now` runs once
     pub async fn tick_at(&self, now: u64) -> usize {
+        if crate::copy::on() { return 0 } // a hub on a copy of a log fires no routine, reminder or wake
         let w = self.world().await;
         let z = Zones { settings: &w.settings }; let (mo, me) = machine_off(&z, now);
         let mut due: Vec<&Routine> = w.routines.values().filter(|r| plan_of(r).due(&z, now, mo, me)).collect();
@@ -163,6 +164,7 @@ impl Bots {
 
     /// The minute tick, and a wake for a routine whose time comes between two ticks
     pub fn start_ticker(self: &Arc<Self>) {
+        if crate::copy::on() { return } // nothing runs by itself on a copy of a log
         let me = Arc::downgrade(self);
         tokio::spawn(async move {
             loop {
