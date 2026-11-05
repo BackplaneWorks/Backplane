@@ -211,12 +211,12 @@ mod state_tests {
             json!({"$":"RoomSet","id":"dm:a:b","name":"Direct","members":"b\nother","at":3}),
             json!({"$":"SettingSet","key":"ui.theme","value":"light","at":4}),
             json!({"$":"SettingSet","key":"project.icon.p","value":"cpu","at":4}),
-            json!({"$":"SettingSet","key":"usage.t","value":"not kept","at":4})] { event(&mut st,e); }
+            json!({"$":"SettingSet","key":"ride.t","value":"not kept","at":4})] { event(&mut st,e); }
         let v=recent(&st,&params()).unwrap(); let s=&v["shown"];
         assert_eq!(s["theme"],"light"); assert_eq!(s["projects"][0]["icon"],"cpu");
         assert_eq!(s["bots"][0]["id"],"h|b"); assert_eq!(s["bots"][0]["name"],"Cat"); assert_eq!(s["bots"][0]["look"],42);
         assert_eq!(s["rooms"].as_array().unwrap().len(),1); assert_eq!(s["rooms"][0]["members"],2);
-        assert!(!st.settings.contains_key("usage.t") && st.entries.is_empty());
+        assert!(!st.settings.contains_key("ride.t") && st.entries.is_empty());
         event(&mut st,json!({"$":"BotSet","id":"b","name":"Edited","thread":"","look":8,"at":5}));
         assert_eq!(st.bots_nav["b"].thread,"t"); assert_eq!(st.bots_nav["b"].created,2);
         event(&mut st,json!({"$":"BotDeleted","id":"b","at":6})); event(&mut st,json!({"$":"RoomDeleted","id":"r","at":6}));
