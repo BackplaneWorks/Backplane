@@ -22,8 +22,10 @@ pub struct Ran { pub code: i32, pub out: String }
 
 /// P.Proc.run: `cmd args` in `cwd`, stdin closed, stdout then stderr, code 127 when it cannot start.
 pub async fn proc(cmd: &str, args: &[&str], cwd: &str, env: &[(&str, &str)]) -> Ran {
+    // Proc.run.folder: an empty working folder is refused, never the hub's own directory
+    if cwd.is_empty() { return Ran { code: 2, out: "No working folder: refusing to use the hub working directory".into() } }
     let mut c = Command::new(cmd);
-    c.args(args).current_dir(if cwd.is_empty() { "/" } else { cwd }).stdin(std::process::Stdio::null()).envs(GIT_ENV.iter().copied()).envs(env.iter().copied());
+    c.args(args).current_dir(cwd).stdin(std::process::Stdio::null()).envs(GIT_ENV.iter().copied()).envs(env.iter().copied());
     match c.output().await {
         Ok(o) => { let mut out = String::from_utf8_lossy(&o.stdout).into_owned(); out.push_str(&String::from_utf8_lossy(&o.stderr)); Ran { code: o.status.code().unwrap_or(1), out } }
         Err(e) => Ran { code: 127, out: e.to_string() },
@@ -126,9 +128,11 @@ pub async fn checkpoint_revert(cwd: &str, thread: &str, n: u64) -> String {
     flat(go.await)
 }
 /// Git.step.capture: a step of the thread's KiCad files ("" when nothing changed); `reg` is the hub's history.trusted file.
-pub async fn step_capture(cwd: &str, thread: &str, reg: &str) -> String { let r = sh(STEP, &[cwd, &b64url(thread), reg], "/", &[]).await; if r.code == 0 { r.out } else { String::new() } }
+pub async fn step_capture(cwd: &str, thread: &str, reg: &str) -> String {
+    if !super::threadpath::absolute(cwd) { return String::new() } let r = sh(STEP, &[cwd, &b64url(thread), reg], "/", &[]).await; if r.code == 0 { r.out } else { String::new() } }
 /// Git.refs: what a file may be compared with (git dir, top, then `kind\tlabel\tcommit` lines).
-pub async fn refs(cwd: &str, thread: &str) -> String { let r = sh(REFS, &[cwd, &b64url(thread)], "/", &[]).await; if r.code == 0 { r.out } else { String::new() } }
+pub async fn refs(cwd: &str, thread: &str) -> String {
+    if !super::threadpath::absolute(cwd) { return String::new() } let r = sh(REFS, &[cwd, &b64url(thread)], "/", &[]).await; if r.code == 0 { r.out } else { String::new() } }
 /// Git.show: a file as a commit has it (`git --git-dir G show OBJ`), None when it is not there.
 pub async fn show(gitdir: &str, obj: &str) -> Option<Vec<u8>> {
     let o = Command::new("sh").args(["-c", "exec 2>/dev/null; git --git-dir=\"$1\" show \"$2\"", "sh", gitdir, obj]).current_dir("/").stdin(std::process::Stdio::null()).envs(GIT_ENV.iter().copied()).output().await.ok()?;

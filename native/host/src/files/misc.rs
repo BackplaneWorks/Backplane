@@ -54,31 +54,36 @@ impl RpcHandler for Misc {
                 }
                 "history.resolve" => { // RvJob.resolve: a commit, branch or tag typed in, as the commit it names
                     let (thread, side, rf) = (s("thread"), s("side"), s("ref"));
-                    let cwd_p = super::root_of(hub, &thread).await; let cwd = cwd_p.to_string_lossy().into_owned();
+                    let Some(cwd_p) = super::root_of(hub, &thread).await else { return vec![super::threadpath::refusal(id)] };
+                    let cwd = cwd_p.to_string_lossy().into_owned();
                     let err = |why: String| reply(false, json!({"error":why}));
-                    if rf.is_empty() || rf.starts_with('-') || cwd.is_empty() || rf.contains('\0') { return err(format!("no commit, branch or tag named {rf}")) }
+                    if rf.is_empty() || rf.starts_with('-') || rf.contains('\0') { return err(format!("no commit, branch or tag named {rf}")) }
                     let r = proc("sh", &["-c", RESOLVE, "sh", &cwd, &rf], "/", &[]).await;
                     if r.code == 0 { let ls: Vec<&str> = r.out.split('\n').collect(); let at = |i: usize| ls.get(i).map(|x| x.trim()).unwrap_or("");
                         reply(true, json!({"resolved":{"thread":thread,"side":side,"ref":rf,"commit":at(0),"git":at(1),"top":at(2)}})) }
                     else { err(if r.out.trim().is_empty() { format!("could not resolve {rf}") } else { r.out.trim().to_string() }) }
                 }
                 "boards.list" => { // BoardsJob: the project's boards read again, as the card finds them
-                    let thread = s("thread"); let cwd_p = super::root_of(hub, &thread).await; let cwd = cwd_p.to_string_lossy().into_owned();
-                    if cwd.is_empty() { return reply(true, json!({"thread":thread,"board_list":[],"board_default":""})) }
+                    let thread = s("thread");
+                    let Some(cwd_p) = super::root_of(hub, &thread).await else { return vec![super::threadpath::refusal(id)] };
+                    let cwd = cwd_p.to_string_lossy().into_owned();
                     let found = crate::files::kicad::boards::find(std::path::Path::new(&cwd));
                     let f = crate::files::kicad::project::read(&cwd); // Od.pcb: the folder's own board, from its root
                     let bd = f.pcb.strip_prefix(&format!("{cwd}/")).unwrap_or("").to_string();
                     reply(true, json!({"thread":thread,"board_list":crate::files::kicad::boards::pick(&found, &bd),"board_default":bd}))
                 }
                 _ => { // mech.list, mech.render
-                    let thread = s("thread"); let cwd_p = super::root_of(hub, &thread).await; let cwd = cwd_p.to_string_lossy().into_owned();
-                    if cwd.is_empty() { return reply(false, json!({"text":"no folder"})) }
+                    let thread = s("thread");
+                    let Some(cwd_p) = super::root_of(hub, &thread).await else { return vec![super::threadpath::refusal(id)] };
+                    let cwd = cwd_p.to_string_lossy().into_owned();
                     let (mut rendered, mut err) = (String::new(), String::new());
                     if method == "mech.render" {
                         let path = s("path");
                         // the model to draw lies in the project: a path from its root, or an absolute path under it
-                        let inside = if let Some(rel) = path.strip_prefix(&format!("{cwd}/")) { fm::contained(std::path::Path::new(&cwd), rel).is_some() } else { fm::safe(&path) && !path.is_empty() && !path.contains('\\') };
-                        if !inside { return reply(false, json!({"text":"that file is not in this project"})) }
+                        // Hub.folder.path.ok, then Mech.render.at: a path from the root or absolute under it, and a model that really lies inside (no link out)
+                        if !super::threadpath::path_in(&cwd, &path) { return vec![json!({"t":"reply","id":id,"ok":false,"error":"that path is not in this project"})] }
+                        let rel = path.strip_prefix(&format!("{cwd}/")).unwrap_or(&path);
+                        if fm::contained(std::path::Path::new(&cwd), rel).is_none() { return reply(false, json!({"text":"that model is unavailable or outside this project"})) }
                         let bin = std::env::var_os("BACKPLANE_PLOT_BIN").map(std::path::PathBuf::from).unwrap_or_else(|| "backplane-serve".into());
                         let r = proc(&bin.to_string_lossy(), &["--render", &path], &cwd, &[]).await;
                         err = mech_error(r.code, &r.out); rendered = path;

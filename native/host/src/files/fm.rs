@@ -43,7 +43,8 @@ fn abs_or_home(p: &str) -> bool { p.starts_with('/') || p.starts_with("~/") }
 pub fn is_image(p: &str) -> bool { abs_or_home(p) && ends(&[".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"], &p.to_lowercase()) }
 /// Img.viewable: what /img serves.
 pub fn viewable(p: &str) -> bool {
-    is_image(p) || preview(p) == "text" || (abs_or_home(p) && p.chars().rev().take(4).collect::<String>().to_lowercase() == "fdp.")
+    // since PR #960 a cwd-relative path is no viewer path at all: every kind needs an absolute or ~/ path
+    abs_or_home(p) && (is_image(p) || preview(p) == "text" || p.chars().rev().take(4).collect::<String>().to_lowercase() == "fdp.")
 }
 /// Img.ctype
 pub fn ctype(p: &str) -> &'static str {
@@ -129,7 +130,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
     }
     #[test] fn viewable_and_ctype() {
-        assert!(viewable("/x/a.PNG")); assert!(viewable("~/a.jpg")); assert!(viewable("rel/note.md")); assert!(viewable("/a/b.pdf")); assert!(viewable("~/a.PDF"));
+        assert!(viewable("/x/a.PNG")); assert!(viewable("~/a.jpg")); assert!(!viewable("rel/note.md")); assert!(viewable("/x/note.md")); assert!(viewable("/a/b.pdf")); assert!(viewable("~/a.PDF"));
         assert!(!viewable("/etc/passwd")); assert!(!viewable("rel/a.pdf")); assert!(!viewable("/a/b.png.exe")); assert!(!viewable("/a/key.pem")); assert!(!viewable(""));
         assert_eq!(ctype("/a.PNG"), "image/png"); assert_eq!(ctype("/a.md"), "text/plain; charset=utf-8"); assert_eq!(ctype("/a.pdf"), "application/pdf"); assert_eq!(ctype("/a.bmp"), "image/bmp");
     }
