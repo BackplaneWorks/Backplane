@@ -163,7 +163,7 @@ port waits for the person's decision.
 
 <!-- law-map: generated below by scripts/gpui/law-map.py -->
 
-Laws in LAWS.bend: 3253. bend 931, rust 535, unported 1190, client 470, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`, `src/core/msp.bend`, `src/core/agy.bend`, `src/core/opencode.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
+Laws in LAWS.bend: 3253. bend 922, rust 547, unported 1187, client 470, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`, `src/core/msp.bend`, `src/core/agy.bend`, `src/core/opencode.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
 
 | law | status | seed | file | note |
 |---|---|---|---|---|
@@ -642,8 +642,8 @@ Laws in LAWS.bend: 3253. bend 931, rust 535, unported 1190, client 470, window 1
 | `sign_window_300` | rust `sign_window_300` | map | `src/core/sign.bend` |  |
 | `seen_add_has` | rust `seen_add_has` | map | `src/core/sign.bend` |  |
 | `invite_roundtrip` | rust `invite_roundtrip` | map | `src/core/sign.bend` |  |
-| `cron_next_after` | bend | seed K +-10% | `src/core/cron.bend` |  |
-| `cron_due_fires_once` | bend | seed K +-10% | `src/core/cron.bend` |  |
+| `cron_next_after` | rust `cron_next_after` | map | `src/core/cron.bend` |  |
+| `cron_due_fires_once` | rust `cron_due_fires_once` | map | `src/core/cron.bend` |  |
 | `space_caps` | bend | seed K +-10% | `src/core/space.bend` |  |
 | `space_progress_max` | bend | seed K +-10% | `src/core/space.bend` |  |
 | `space_message_prefix` | bend | seed K +-10% | `src/core/space.bend` |  |
@@ -691,7 +691,7 @@ Laws in LAWS.bend: 3253. bend 931, rust 535, unported 1190, client 470, window 1
 | `bot_loop_up` | bend | seed K +-10% | `src/core/bot.bend` |  |
 | `bot_loop_bounded` | bend | seed K +-10% | `src/core/bot.bend` |  |
 | `bot_loop_stops` | bend | seed K +-10% | `src/core/bot.bend` |  |
-| `bot_held_wakes_none` | unported | seed R +-10% | `src/core/hub.bend` |  |
+| `bot_held_wakes_none` | rust `bot_held_wakes_none` | map | `src/core/hub.bend` |  |
 | `bot_room_no_takeover` | bend | seed K +-10% | `src/core/bot.bend` |  |
 | `bot_room_deleted_stays` | bend | seed K +-10% | `src/core/bot.bend` |  |
 | `rooms_listed_once` | client | seed C +-10% | `src/core/botui.bend` |  |
@@ -1291,8 +1291,8 @@ Laws in LAWS.bend: 3253. bend 931, rust 535, unported 1190, client 470, window 1
 | `hb_ignored_by_fold` | client | seed C +-10% | `src/core/client.bend` |  |
 | `alive_due` | bend | seed K +-10% | `src/core/desk.bend` |  |
 | `claude_text_ids_distinct` | rust `claude_text_ids_distinct` | map | `src/core/model.bend` |  |
-| `bots_say_once` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `bots_post_once` | unported | seed R +-10% | `src/core/hub.bend` |  |
+| `bots_say_once` | rust `bots_say_once` | map | `src/core/hub.bend` |  |
+| `bots_post_once` | rust `bots_post_once_and_wakes_other_members_here` | map | `src/core/hub.bend` |  |
 | `bots_tell_once` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `exit_why_killed` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `live_split_fence_safe` | client | seed C +-10% | `src/core/client.bend` |  |
@@ -1762,13 +1762,13 @@ Laws in LAWS.bend: 3253. bend 931, rust 535, unported 1190, client 470, window 1
 | `cal_update_asks` | bend | seed K +-10% | `src/core/google.bend` |  |
 | `cal_delete_asks` | bend | seed K +-10% | `src/core/google.bend` |  |
 | `cal_id_no_slash` | bend | seed K +-10% | `src/core/google.bend` |  |
-| `tz_fixed_wall` | bend | seed K +-10% | `src/core/tz.bend` |  |
-| `sched_done_never` | bend | seed K +-10% | `src/core/bot.bend` |  |
-| `sched_once_due` | bend | seed K +-10% | `src/core/bot.bend` |  |
-| `sched_legacy_same` | bend | seed K +-10% | `src/core/bot.bend` |  |
-| `sched_zoned_once_per_slot` | bend | seed K +-10% | `src/core/tz.bend` |  |
-| `when_in_minutes` | bend | seed K +-10% | `src/core/tz.bend` |  |
-| `when_in_hours` | bend | seed K +-10% | `src/core/tz.bend` |  |
+| `tz_fixed_wall` | rust `tz_fixed_wall` | map | `src/core/tz.bend` |  |
+| `sched_done_never` | rust `sched_done_never` | map | `src/core/bot.bend` |  |
+| `sched_once_due` | rust `sched_once_due` | map | `src/core/bot.bend` |  |
+| `sched_legacy_same` | rust `sched_legacy_same` | map | `src/core/bot.bend` |  |
+| `sched_zoned_once_per_slot` | rust `sched_zoned_once_per_slot` | map | `src/core/tz.bend` |  |
+| `when_in_minutes` | rust `when_in_minutes` | map | `src/core/tz.bend` |  |
+| `when_in_hours` | rust `when_in_hours` | map | `src/core/tz.bend` |  |
 | `task_secret_never_stored` | rust `task_secret_never_stored` | map | `src/core/task.bend` |  |
 | `task_risky_needs_confirm` | rust `run_laws` | map | `src/core/task.bend` |  |
 | `run_confirm_runs` | rust `run_laws` | map | `src/core/task.bend` |  |
