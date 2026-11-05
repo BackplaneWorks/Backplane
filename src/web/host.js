@@ -1466,7 +1466,10 @@ function renderPage() {
   // (its toolbar, though, is built in the press's frame: built with the
   // canvas, it filled in two frames late and the stage shrank under it)
   // and its model's last picture, when it has one (solid.js)
-  if (pressFeedback.active?.kind === "viewer") { mountTools(true); Solid.picture(document.getElementById("solid")); requestAnimationFrame(() => requestAnimationFrame(mountViewers)); }
+  // (a board or schematic draws in the press's own frame, from the plot the
+  // page holds: only 3D's set-up waits, else the pane comes up a frame
+  // before its drawing)
+  if (pressFeedback.active?.kind === "viewer") { mountTools(true); Solid.picture(document.getElementById("solid")); Plot2d.mount([...document.querySelectorAll("canvas.plot2d")]); requestAnimationFrame(() => requestAnimationFrame(mountViewers)); }
   else mountViewers();
   if (!glWarmAsked && document.querySelector('[data-on-click="view-kind"][data-value="3d"]')) { glWarmAsked = true; Solid.warm(); }
   ViewerTools.chipInView();

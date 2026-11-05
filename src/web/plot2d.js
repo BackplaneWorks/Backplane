@@ -171,8 +171,10 @@ export function got(o, at = { bytes: 0, t: performance.now() }) {
       const old = previous[all.length];
       // A fresh subscription may send an already drawn chunk whole again.
       // Reuse it only when its style, signature and geometry all agree.
-      // (and a chunk drawn from the kept plot: plot-keep.js)
-      if ((key.startsWith("1|") && c?.sig !== null || old?.kept) && c && old && c.sig === old.sig && c.layer === old.layer && c.color === old.color && c.mode === old.mode && c.r === old.r && c.d.length === old.d.length && c.d.every((b, i) => b === old.d[i])) all.push(old);
+      // (boards too: a board's resent plot faded in again from the
+      // background, a dark flash on every open; and a chunk drawn from
+      // the kept plot: plot-keep.js)
+      if (c && old && c.sig === old.sig && c.layer === old.layer && c.color === old.color && c.mode === old.mode && c.r === old.r && c.d.length === old.d.length && c.d.every((b, i) => b === old.d[i])) all.push(old);
       else if (c) all.push(c);
     }
     const box = Array.isArray(o.box) && o.box.length === 4 ? o.box : [0, 0, 1, 1];
@@ -872,6 +874,14 @@ class View {
     else if (first || (!this.touched && moved)) this.fit(); else this.later();
   }
 
+  // drawn in this frame (a canvas that has just come up with a plot to
+  // show: else the viewer is on screen a frame before its drawing)
+  now() {
+    if (this.disposed) return;
+    if (this.queued) { cancelAnimationFrame(this.frame); this.queued = false; }
+    this.draw();
+  }
+
   later() {
     if (this.disposed || this.queued) return;
     this.queued = true;
@@ -1448,6 +1458,7 @@ function park(v) {
 
 function mountOne(canvas) {
   let view = views.get(canvas);
+  const fresh = !view;
   if (!view) views.set(canvas, (view = new View(canvas, canvas.dataset.bg || "#0d0f12")));
   const waitingTree = canvas.dataset.waitTree === "1";
   if (waitingTree !== view.waitingTree) {
@@ -1485,7 +1496,7 @@ function mountOne(canvas) {
     view.hl = null;
     if (!same) { view.plot = null; view.fitted = false; view.back = left.get(stateKey) || null; }
     revive(key);
-    if (plots.has(key)) { view.show(plots.get(key)); prefetch(view); } else view.later();
+    if (plots.has(key)) { view.show(plots.get(key)); prefetch(view); if (fresh) view.now(); } else view.later();
   }
 }
 
