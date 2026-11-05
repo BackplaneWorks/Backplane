@@ -67,8 +67,15 @@ impl Agents {
     pub async fn tool_update(&self, thread: &str, a: &Value) -> (bool, Value) {
         let target = if sv(a, "threadId").is_empty() { thread } else { sv(a, "threadId") };
         if !self.same_project(thread, target).await { return fail(NOT_HERE) }
-        if a.get("provider").is_some() || a.get("model").is_some() || a.get("report").is_some() { return fail("changing a thread's provider, model or reports is not available in the Rust hub yet") }
-        let title = sv(a, "title").trim().to_string(); if title.is_empty() { return fail("writing a title is not available in the Rust hub yet; give the new title") }
+        if a.get("provider").is_some() || a.get("model").is_some() { return fail("changing a thread's provider or model is not available in the Rust hub yet") }
+        let title = sv(a, "title").trim().to_string();
+        let flag = match a.get("report") { Some(Value::Bool(b)) => Some(*b), Some(Value::String(v)) if v == "true" => Some(true), Some(Value::String(v)) if v == "false" => Some(false), _ => None };
+        if let (Some(on), true) = (flag, title.is_empty()) { // Mcp.report.k: a launched thread's reports turned off or on (its launcher stays)
+            let by = self.world().await.launched.get(target).map(|x| x.0.clone()).unwrap_or_default();
+            if by.is_empty() { return fail("nobody launched that thread, so it has no reports to change") }
+            self.commit_events(vec![json!({"$":"ThreadLaunched","id":target,"by":by,"report":on,"at":now_s()})]).await;
+            return (true, json!({"threadId":target,"report":on}))
+        } if title.is_empty() { return fail("writing a title is not available in the Rust hub yet; give the new title") }
         self.commit_events(vec![json!({"$":"ThreadRenamed","id":target,"title":title,"at":now_s()})]).await;
         (true, json!({"threadId":target,"title":title}))
     }

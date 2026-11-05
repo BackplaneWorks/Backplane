@@ -770,3 +770,18 @@ const TESTCLI: &str = "#!/bin/sh\nread hello\necho '{\"q\":1}'\nread ans\necho \
     for _ in 0..3 { let (ok, r) = ag.tool_delegate(&th, &json!({"prompt":"deeper hang"})).await; last_ok = ok; if ok { th = r["childThreadId"].as_str().unwrap().to_string() } else { assert!(r["error"].as_str().unwrap().contains("depth limit")) } }
     assert!(!last_ok || th != child, "the chain is bounded"); ag.shutdown();
 }
+
+#[tokio::test(flavor = "multi_thread")] async fn thread_launch_starts_a_subthread_with_its_first_message_and_reports_can_be_muted() {
+    let (hub, ag, _sd) = codex_start("tl1").await; let from = len(&hub).await;
+    let (ok, r) = ag.tool_launch(T1, &json!({"prompt":"launched work","title":"Side"})).await; assert!(ok, "{r}");
+    let th = r["threadId"].as_str().unwrap().to_string(); assert_eq!(r["parent"], T1); assert_eq!(r["state"], "started");
+    let ev = until(&hub, from, 30, |ev| ev.iter().any(|e| turn_is(e, "completed") && e["thread"] == th.as_str())).await;
+    assert!(ev.iter().any(|e| is(e, "ThreadParentSet") && e["id"] == th.as_str() && e["parent"] == T1) && ev.iter().any(|e| is(e, "ThreadLaunched") && e["by"] == T1 && e["report"] == true));
+    assert!(ev.iter().any(|e| is(e, "MessagePosted") && e["thread"] == th.as_str() && e["role"] == "user" && e["text"] == "launched work"));
+    let (ok, m) = ag.tool_update(T1, &json!({"threadId":th,"report":false})).await; assert!(ok && m["report"] == false, "{m}");
+    assert!(log_from(&hub, from).await.iter().any(|e| is(e, "ThreadLaunched") && e["report"] == false));
+    assert!(!ag.tool_launch(T1, &json!({"prompt":"x","project":"nope"})).await.0, "an unknown project is refused");
+    assert!(!ag.tool_launch(T1, &json!({"prompt":"  "})).await.0, "a prompt is needed");
+    assert!(!ag.tool_update(T1, &json!({"threadId":T1,"report":true})).await.0, "nobody launched the root thread");
+    ag.shutdown();
+}
