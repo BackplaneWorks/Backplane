@@ -105,4 +105,100 @@ mod tests {
         let c = catalog(out); assert_eq!(models(&c), ["a", "b"]);
         assert_eq!(about(&c).to_string(), r#"{"default":"Muse's own default","a":"A · Muse's default","b":"b"}"#); assert_eq!(about(&[]).to_string(), "{}"); assert!(catalog("junk").is_empty());
     }
+
+    #[test] fn muse_args_laws() { assert_eq!(driver("claude").is_none(), true); assert_eq!(super::super::driver("muse").unwrap().cli, "muse"); }
+}
+
+/// Test harness shared with agy.rs: run a driver against a stand-in process (never a real CLI), turn its shapes into log events through `Cx::codex_line`
+/// as the actor does, answer asks, and project the events the driver decides (what test/gpui/agents/prov/js-*.jsonl records from the JS hub).
+#[cfg(test)] pub(crate) mod e2e {
+    use super::super::{Driver, TurnIn};
+    use crate::agents::{lines::Cx, proc};
+    use serde_json::{json, Value};
+    use std::{path::{Path, PathBuf}, time::Duration};
+
+    pub fn dir(name: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-prov-{}-{}", std::process::id(), name)); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
+    pub fn script(p: &Path, body: &str) { use std::os::unix::fs::PermissionsExt; std::fs::write(p, body).unwrap(); std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o755)).unwrap(); }
+    /// The events a driver decides, in the JS hub's fields (ids and clocks left out).
+    pub fn project(e: &Value) -> Option<String> {
+        let t = e["$"].as_str().unwrap_or("");
+        let m = match t {
+            "SessionSet" => json!(["SessionSet", e["session"]]),
+            "TodosChanged" => json!(["TodosChanged", e["who"], e["data"]]),
+            "AskOpened" => json!(["AskOpened", e["kind"], e["tool"], e["detail"], e["options"]]),
+            "ActivityLogged" if e["tone"] == "tool" || e["tone"] == "error" => json!(["ActivityLogged", e["tone"], e["kind"], e["summary"]]),
+            "MessagePosted" if e["role"] == "assistant" => json!(["MessagePosted", e["text"]]),
+            "TurnChanged" if e["state"] != "running" => json!(["TurnChanged", e["state"]]),
+            "SettingSet" if e["key"].as_str().unwrap_or("").starts_with("tok.basis.") && e["value"] != "c:0" => json!(["tok.basis", e["value"]]),
+            _ => return None,
+        };
+        Some(m.to_string())
+    }
+    pub fn js(name: &str) -> Vec<String> {
+        let raw = match name { "muse-turn" => include_str!("../../../../../test/gpui/agents/prov/js-muse-turn.jsonl"), "muse-perm" => include_str!("../../../../../test/gpui/agents/prov/js-muse-perm.jsonl"),
+            "agy-turn" => include_str!("../../../../../test/gpui/agents/prov/js-agy-turn.jsonl"), _ => include_str!("../../../../../test/gpui/agents/prov/js-agy-perm.jsonl") };
+        raw.lines().filter_map(|l| project(&serde_json::from_str(l).unwrap())).collect()
+    }
+    /// One turn, as the actor runs it. Returns the projected events and every line written to the process.
+    pub async fn run(prog: &Path, d: &mut dyn Driver, a: &TurnIn, provider: &str, answer: &str, extra_env: &[(String, String)]) -> (Vec<String>, Vec<String>) {
+        let mut env = d.env(a); env.extend(extra_env.iter().cloned());
+        let mut p = proc::spawn(prog, &d.argv(a), Path::new(&a.cwd), None, &env).unwrap();
+        let mut wrote = vec![]; let mut out = vec![]; let mut cx = Cx::new(&a.thread); cx.running = true;
+        for l in d.start(a) { wrote.push(l.clone()); p.input.send(l).await.unwrap(); }
+        'turn: loop {
+            let Ok(Some(l)) = tokio::time::timeout(Duration::from_secs(20), p.lines.recv()).await else { out.push("TIMEOUT".into()); break };
+            let line = serde_json::from_str::<Value>(&l).unwrap_or_else(|_| Value::String(l.clone()));
+            let r = d.on_line(&line);
+            for s in r.send { wrote.push(s.clone()); p.input.send(s).await.unwrap(); }
+            for sh in r.shapes {
+                if sh["type"] == "bp.ask" {
+                    let req = sh["request"].clone(); let info = d.ask_info(&req).expect("an ask the driver describes");
+                    out.push(json!(["AskOpened", info.kind, info.tool, info.detail, info.options]).to_string());
+                    for s in d.answer(&req, answer) { wrote.push(s.clone()); p.input.send(s).await.unwrap(); }
+                    continue;
+                }
+                let fx = cx.codex_line(&sh, provider, &a.model, 1);
+                for e in fx.events { if let Some(x) = project(&e) { out.push(x) } if e["$"] == "TurnChanged" && e["state"] != "running" { break 'turn } }
+            }
+        }
+        proc::terminate(p.pid, Duration::from_millis(200));
+        (out, wrote)
+    }
+}
+
+#[cfg(test)]
+mod standin_tests {
+    use super::*;
+    use super::e2e::*;
+    fn ti(d: &std::path::Path, runtime: &str, text: &str, session: &str, nonce: &str) -> TurnIn {
+        TurnIn { thread: "t1700000010-2".into(), cwd: d.to_string_lossy().into(), home: d.to_string_lossy().into(), runtime: runtime.into(), text: text.into(), session: session.into(),
+            prompt: "RULES lls>".into(), mcp_url: "http://127.0.0.1:1/mcp/x".into(), gen: nonce.into(), ..Default::default() }
+    }
+    fn tail(v: Vec<String>) -> Vec<String> { v }
+    // Stand-in Muse (test/gpui/agents/prov/standin-muse.py) through the driver: the events equal what the JS hub logged for the same exchange.
+    #[tokio::test] async fn muse_turn_matches_the_js_hub() {
+        let d = dir("muse-turn"); script(&d.join("muse"), include_str!("../../../../../test/gpui/agents/prov/standin-muse.py"));
+        let mut dr = MuseDriver::new(); let a = ti(&d, "full-access", "zq hello", "", "1793864133-24");
+        let (got, wrote) = run(&d.join("muse"), &mut dr, &a, "muse", "accept", &[("MUSE_LOG".into(), d.join("log").to_string_lossy().into())]).await;
+        assert_eq!(tail(got), js("muse-turn"));
+        assert!(wrote[0].contains("initialize") && wrote.iter().any(|w| w.contains("session/start")) && wrote.iter().any(|w| w.contains("turn/start")));
+        assert!(std::fs::read_to_string(d.join("log")).unwrap().starts_with("ARGV serve --trust-workspace --disable-sandbox"));
+    }
+    #[tokio::test] async fn muse_approval_matches_the_js_hub_and_is_decided() {
+        let d = dir("muse-perm"); script(&d.join("muse"), include_str!("../../../../../test/gpui/agents/prov/standin-muse.py"));
+        let mut dr = MuseDriver::new(); let a = ti(&d, "approval-required", "zq perm please", "", "1793864143-25");
+        let (got, wrote) = run(&d.join("muse"), &mut dr, &a, "muse", "accept", &[("MUSE_LOG".into(), d.join("log").to_string_lossy().into())]).await;
+        assert_eq!(got, js("muse-perm"));
+        assert!(wrote.iter().any(|w| w.contains("approval/decide") && w.contains("allow_once")));
+        assert!(std::fs::read_to_string(d.join("log")).unwrap().contains("DECIDE \"allow_once\""), "the stand-in received the decision");
+        assert!(wrote.iter().any(|w| w.contains("\"approvalMode\":\"promptUnmatched\"")));
+    }
+    #[tokio::test] async fn a_resumed_muse_session_sets_its_mode_first_and_repeats_no_command_id() {
+        let d = dir("muse-resume"); script(&d.join("muse"), include_str!("../../../../../test/gpui/agents/prov/standin-muse.py"));
+        let mut dr = MuseDriver::new(); let a = ti(&d, "auto", "zq hi", "OLDSESSION", "1793864150-26");
+        let (got, wrote) = run(&d.join("muse"), &mut dr, &a, "muse", "accept", &[]).await;
+        assert_eq!(got.last().unwrap(), r#"["TurnChanged","completed"]"#); assert!(got.contains(&r#"["SessionSet","OLDSESSION"]"#.to_string()));
+        let m: Vec<&str> = wrote.iter().map(|w| w.as_str()).filter(|w| w.contains("session/resume") || w.contains("setApprovalMode") || w.contains("turn/start")).collect();
+        assert!(m[0].contains("session/resume") && m[1].contains("setApprovalMode") && m[1].contains("onRequest") && m[2].contains("turn/start") && !m[2].contains("backplane_instructions"));
+    }
 }
