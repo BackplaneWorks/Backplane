@@ -121,15 +121,15 @@ pub fn start(hub: &Arc<Hub>, agents: Option<Arc<Agents>>) -> Arc<Accounts> {
 mod tests {
     use super::*;
     fn snap(profiles: Value, error: &str) -> Value { json!({"version":1,"revision":3,"profiles":profiles,"error":error,"attempts":[{"id":"a","url":"https://claude.ai/x","userCode":"C"}]}) }
+    async fn ask(rpc: &AccountsRpc, hub: &Arc<Hub>, who: &Caller) -> Value { rpc.call(hub, who, &json!(1), "accounts", &json!({"op":"list","accountProfiles":true})).await.remove(0) }
     #[tokio::test(flavor = "multi_thread")] async fn only_a_granted_client_may_manage_accounts() {
         let home = std::env::temp_dir().join(format!("bp-acc-hub-{}", std::process::id())); let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap();
         let hub = Hub::start(crate::hub::Cfg { home: home.clone(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(crate::presenter::Canned { reply: json!({}) })).await.unwrap();
         let rpc = AccountsRpc::new(Arc::new(Accounts::open(&home, Arc::new(|p: &str| Ok(std::path::PathBuf::from(p))))));
         let (a, b) = (Caller { gen: "g".into(), client: 1 }, Caller { gen: "g".into(), client: 2 });
-        let ask = |who: &Caller| { let (rpc, hub, who) = (&rpc, hub.clone(), who.clone()); async move { rpc.call(&hub, &who, &json!(1), "accounts", &json!({"op":"list","accountProfiles":true})).await.remove(0) } };
-        assert_eq!(ask(&a).await["error"], accounts::GATE, "a request that claims the capability is not enough");
-        rpc.grant(&a); assert_eq!(ask(&a).await["ok"], true); assert_eq!(ask(&b).await["error"], accounts::GATE, "per connection");
-        rpc.revoke(&a); assert_eq!(ask(&a).await["error"], accounts::GATE); let _ = std::fs::remove_dir_all(&home);
+        assert_eq!(ask(&rpc, &hub, &a).await["error"], accounts::GATE, "a request that claims the capability is not enough");
+        rpc.grant(&a); assert_eq!(ask(&rpc, &hub, &a).await["ok"], true); assert_eq!(ask(&rpc, &hub, &b).await["error"], accounts::GATE, "per connection");
+        rpc.revoke(&a); assert_eq!(ask(&rpc, &hub, &a).await["error"], accounts::GATE); let _ = std::fs::remove_dir_all(&home);
     }
     #[test] fn clients_are_told_the_profiles_but_never_an_attempts_link_or_code() { let t = public(&snap(json!([{"id":"w"}]), "")); assert!(!t.contains("userCode") && !t.contains("https://") && t.contains("\"revision\":3") && t.contains("\"profiles\":[{\"id\":\"w\"}]")); }
     #[test] fn the_inventory_is_kept_when_it_moves_and_a_default_follows_its_profile_away() {
