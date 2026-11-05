@@ -57,6 +57,10 @@ async fn boot_task(policy: Arc<Policy>, hub: Arc<Hub>) {
     if !derived.is_empty() { let _ = hub.commit_many(&derived).await; }
 }
 
+static POLICIES: OnceLock<Arc<Policies>> = OnceLock::new();
+/// The policies, once `start` has run: for actors that cannot be handed them (agents: `Policies::line` per provider line, `read` on a view open)
+pub fn policies() -> Option<Arc<Policies>> { POLICIES.get().cloned() }
+
 pub fn start(hub: Arc<Hub>) -> Arc<Policies> {
     let policy = Arc::new(Policy::new());
     let host = Arc::new(Host { policy: policy.clone(), hub: OnceLock::new() });
@@ -64,5 +68,7 @@ pub fn start(hub: Arc<Hub>) -> Arc<Policies> {
     hub.register_transform(host.clone());   // first: the log length is read after this, so no batch is missed
     hub.register_ticker(host);
     tokio::spawn(boot_task(policy.clone(), hub));
-    Arc::new(Policies { policy })
+    let p = Arc::new(Policies { policy });
+    let _ = POLICIES.set(p.clone());
+    p
 }
