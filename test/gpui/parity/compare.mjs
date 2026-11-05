@@ -11,6 +11,7 @@ export const NORMALISATIONS=[
  'N4 delta frames: consecutive delta frames of one thread joined into one item with "@<ms>@" stamps stripped; frame boundaries are not compared. Reason: coalescing follows read timing (200 ms pace).',
  'N5 changes frames: expanded to one item per event; batch boundaries are not compared. Reason: batching follows timing.',
   'N18 http probe auth flag: an http-get probe with auth:false is compared as {path} only. Reason: recordings made before the harness wrote the flag omit it; false is its default.',
+ 'N19 origin in a query string (the since/origin of a reconnect): the hub-issued origin id -> <origin>. Reason: it is the hub\'s own identifier, different on every hub.',
  'N12 late volatile replies: volatile means a poll request and its reply, matched by client and request id, whenever the reply arrives; every other inbound frame is kept even if it arrived during a poll window (the recorder flags by arrival time, which is not a property of the frame).',
  'N6 dropped: hb frames, view.changed frames (their number and position follow timing; each reply carries the revision it saw), volatile frames (polls made while waiting for a turn). Reason: timing-driven counts.',
  'N11 harness steps: `settle` and `end` pseudo-frames (the client program waiting or closing) are control, not wire traffic, and are not compared. Reason: a replay waits by reply id, not by the recorded quiet times.',
@@ -28,6 +29,7 @@ function mkNorm(){
     s=s.replace(/@\d{13}@/g,'@<T>@').replace(/(?:\/[^"\s]*)?\/work-[A-Za-z0-9]+/g,'<work>').replace(/backplane[-\/][0-9a-f]{8}\b/g,'backplane-<wt>').replace(/\bc[a-z0-9-]*?\d{10}-\d+\b/g,m=>ord(m));
     s=s.replace(/\b1[78]\d{8}\b(?!-)/g,'<T>').replace(/\b1[78]\d{11}\b/g,'<T>');
     s=s.replace(idRe,m=>ord(m));
+    s=s.replace(/([?&]origin=)[^&"\s]*/g,'$1<origin>');
     s=s.replace(/\b\d{1,2}:\d\d\b/g,'<time>').replace(/(Finished <time> · )[0-9hms ]+/,'$1<dur>');
     s=s.replace(/\/home\/[^"\s]*?\/parity\/work-[A-Za-z0-9]+/g,'<work>').replace(/\b127\.0\.0\.1:\d+\b/g,'127.0.0.1:<port>').replace(/\bm[0-9a-f]{48}\b/g,'<machine>');
     return s;};
