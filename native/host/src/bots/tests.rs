@@ -777,3 +777,35 @@ fn tool_norm(v: &Value) -> Value {
     }
     assert!(log(&hub).iter().any(|e| e["$"] == "RoomPosted" && e["hop"] == 7 && e["text"].as_str().unwrap().starts_with("[held: 6 messages")));
 }
+#[tokio::test] async fn bot_request_in_room() {
+    // law bot_request_in_room: a request goes in a room the person can follow, never a dm; a found room is used only when it is not dm:, and a new id is not dm: either.
+    // (bot_send with direct:true is the one way into a dm: room, and says so.)
+    let (hub, bots, _r) = start("tools-req", "").await;
+    let (ada, bob) = (bot(&hub, "ada").await, bot(&hub, "bob").await);
+    let th = log(&hub).iter().find(|e| e["$"] == "BotSet" && e["id"] == ada.as_str()).unwrap()["thread"].as_str().unwrap().to_string();
+    // a dm: room that carries the topic's name and both members is there to be found
+    hub.commit(&json!({"$":"RoomSet","id":"dm:ada:bob","name":"greet","members":format!("{ada}\n{bob}"),"at":5})).await.unwrap();
+    let (ok, r) = bots.tool_call(&th, "bot_send", &json!({"to":"bob","text":"one","topic":"greet"})).await;
+    assert!(ok, "{r}"); let room = r["room"].as_str().unwrap().to_string();
+    assert!(!room.starts_with("dm:"), "the request went to {room}");
+    // the same request again is kept in the room it made
+    let (_, r2) = bots.tool_call(&th, "bot_send", &json!({"to":"bob","text":"two","topic":"greet"})).await;
+    assert_eq!(r2["room"], room.as_str());
+    // direct is the dm: path, and the request path never reuses it
+    let (_, d) = bots.tool_call(&th, "bot_send", &json!({"to":"bob","text":"private","direct":true})).await; assert_eq!(d["note"], "sent to bob");
+    assert!(log(&hub).iter().any(|e| e["$"] == "RoomPosted" && e["room"].as_str().map_or(false, |r| r.starts_with("dm:")) && e["text"] == "private"));
+    assert!(log(&hub).iter().filter(|e| e["$"] == "RoomPosted" && (e["text"] == "one" || e["text"] == "two")).all(|e| e["room"] == room.as_str()));
+}
+#[tokio::test(flavor = "multi_thread")] async fn person_timezone_looks_up_an_unknown_zone_and_sets_it() {
+    let d = std::env::temp_dir().join(format!("bp-zi-bots-{}", std::process::id())); std::fs::create_dir_all(d.join("Europe")).unwrap();
+    std::fs::write(d.join("Europe/Helsinki"), b"TZif2\0\0binary\n\nEET-2EEST,M3.5.0/3,M10.5.0/4\n").unwrap(); std::env::set_var("BACKPLANE_ZONEINFO", &d);
+    let (hub, bots, _r) = start("tools-zone", "").await;
+    hub.register_rpc(Arc::new(crate::settings::zone::ZoneRpc));
+    let ada = bot(&hub, "ada").await;
+    let th = log(&hub).iter().find(|e| e["$"] == "BotSet" && e["id"] == ada.as_str()).unwrap()["thread"].as_str().unwrap().to_string();
+    let (ok, r) = bots.tool_call(&th, "person_timezone", &json!({"zone":"Europe/Helsinki"})).await;
+    assert!(ok && r["note"].as_str().unwrap().starts_with("looking up Europe/Helsinki"), "{r}");
+    for _ in 0..100 { if hub.setting("person.tz").await.as_deref() == Some("Europe/Helsinki") { break } tokio::time::sleep(std::time::Duration::from_millis(50)).await }
+    assert_eq!(hub.setting("person.tz").await.as_deref(), Some("Europe/Helsinki"));
+    assert_eq!(hub.setting("tz.rule.Europe/Helsinki").await.as_deref(), Some("EET-2EEST,M3.5.0/3,M10.5.0/4"));
+}

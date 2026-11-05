@@ -11,7 +11,7 @@ use super::sched_text::{person_rule, rel, routine_json, saved, zone_source};
 use super::world::{Bot, Routine, World};
 use serde_json::{json, Value};
 
-pub const TOOLS_JSON: &str = include_str!("../../../../test/gpui/bots/fixtures/js-bot-tools.json");
+pub const TOOLS_JSON: &str = include_str!("tools.json");
 pub const NAMES: &[&str] = &["bot_whoami", "bot_list", "bot_send", "room_list", "room_create", "room_post", "room_read", "memory_save", "memory_recall", "memory_forget", "memory_list",
     "space_set", "space_get", "space_page", "routine_list", "routine_set", "routine_delete", "project_list", "remind_person", "person_timezone"];
 const HOP_MAX: u64 = 6;
@@ -257,7 +257,9 @@ impl Bots {
             let note = format!("the person's time zone was {}; it is {zone} now", z.person());
             return self.t_commit(w, now, vec![json!({"$":"SettingSet","key":"person.tz","value":zone,"at":now})]).await.map_or_else(|e| fail(&e), |_| said(&note))
         }
-        // the zone's rules are looked up by the settings lane (zone.set / zone.report): PARITY
+        // BotFx "zone": the rule is looked up and the zone set once it resolves (settings lane's zone.set), after this answer
+        let hub = self.hub.clone(); let zn = zone.to_string();
+        tokio::spawn(async move { if let Some(h) = hub.rpc_for("zone.set") { let _ = h.call(&hub, &crate::api::Caller { gen: "bots".into(), client: 0 }, &json!(0), "zone.set", &json!({"zone":zn})).await; } });
         said(&format!("looking up {zone}; the person's time zone changes from {} when it resolves (person_timezone shows it)", z.person()))
     }
 }
