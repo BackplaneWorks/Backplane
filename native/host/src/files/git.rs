@@ -30,6 +30,8 @@ async fn spawn(cmd: &str, args: &[&str], cwd: &str, env: &[(&str, &str)], kill: 
     if crate::copy::refused(cmd, args) { return Ran { code: 126, out: crate::copy::refusal(cmd) } }
     let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Local, cmd);
     c.args(args).current_dir(cwd).stdin(std::process::Stdio::null()).envs(GIT_ENV.iter().copied()).envs(env.iter().copied()).kill_on_drop(kill);
+    // a listed read on a copy must not refresh the real repository's index or take its lock while a live agent works there (git status would)
+    if crate::copy::on() { c.env("GIT_OPTIONAL_LOCKS", "0"); }
     match c.output().await {
         Ok(o) => { let mut out = String::from_utf8_lossy(&o.stdout).into_owned(); out.push_str(&String::from_utf8_lossy(&o.stderr)); Ran { code: o.status.code().unwrap_or(1), out } }
         Err(e) => Ran { code: 127, out: e.to_string() },
@@ -330,6 +332,7 @@ mod tests {
             assert_eq!(proc_ro("sh", &["-c", "echo ok"], &cwd, &[]).await.out.trim(), "ok");
             assert_eq!(read("sh", &["-c", "echo ok"], &cwd, &[]).await.out.trim(), "ok");
             assert_eq!(run_ro(&cwd, &["--version"]).await.code, 0);
+            assert_eq!(proc_ro("sh", &["-c", "echo $GIT_OPTIONAL_LOCKS"], &cwd, &[]).await.out.trim(), "0"); assert_eq!(read("sh", &["-c", "echo $GIT_OPTIONAL_LOCKS"], &cwd, &[]).await.out.trim(), "0");
         });
     }
     #[test] fn a_copy_run_writes_nothing_outside_its_home() {
