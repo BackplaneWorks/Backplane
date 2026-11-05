@@ -93,12 +93,19 @@ fn render_cli() -> i32 {
     r.code
 }
 
+/// True when the signal is currently ignored (inherited SIG_IGN from nohup or a background job).
+fn signal_ignored(sig: i32) -> bool {
+    unsafe { let mut old: libc::sigaction = std::mem::zeroed(); libc::sigaction(sig, std::ptr::null(), &mut old) == 0 && old.sa_sigaction == libc::SIG_IGN }
+}
+
 #[tokio::main]
 async fn main() {
     if std::env::args().nth(1).as_deref() == Some("--render") { std::process::exit(render_cli()) }
     let args = match parse() { Ok(a) => a, Err(code) => std::process::exit(code) };
-    // a signal that ends the hub says so in hub.log and exits nonzero (128 + the signal); SIGKILL cannot be caught
+    // a signal that ends the hub says so in hub.log and exits nonzero (128 + the signal); SIGKILL cannot be caught.
+    // SIGHUP and SIGINT stay as the parent left them when it ignored them (nohup, a background `&`): registering would override that.
     for (kind, name, n) in [(tokio::signal::unix::SignalKind::terminate(), "SIGTERM", 15), (tokio::signal::unix::SignalKind::interrupt(), "SIGINT", 2), (tokio::signal::unix::SignalKind::hangup(), "SIGHUP", 1)] {
+        if n != 15 && signal_ignored(n) { continue }
         if let Ok(mut sig) = tokio::signal::unix::signal(kind) { tokio::spawn(async move { sig.recv().await; eprintln!("backplane-hub: {name} received, exiting"); std::process::exit(128 + n) }); }
     }
     if let Err(e) = run(args).await { eprintln!("backplane-hub: {e:#}"); std::process::exit(1) }
@@ -413,6 +420,19 @@ mod wire_private_tests {
         assert!(all.contains("ProjectCreated") && all.contains("DeviceRegistered"), "the frames carried the log (join) and the live batch");
         for s in ["STORED-PUSH-TOKEN-1", "STORED-INPUT-SECRET", "STORED-RIDE-MAIL", "LIVE-PUSH-TOKEN-2", "LIVE-INPUT-SECRET", "LIVE-RIDE-MAIL", "dev.backplane.mobile", "android"] {
             assert!(!all.contains(s), "a frame holds {s}");
+        }
+    }
+    // a signal that was ignored when the hub started (nohup, `&`) reads as ignored, and one that was not does not; the disposition is restored
+    #[test] fn an_ignored_signal_reads_as_ignored() {
+        let sig = libc::SIGUSR2;
+        unsafe {
+            let mut old: libc::sigaction = std::mem::zeroed(); libc::sigaction(sig, std::ptr::null(), &mut old);
+            let was = signal_ignored(sig);
+            let mut ign: libc::sigaction = std::mem::zeroed(); ign.sa_sigaction = libc::SIG_IGN; libc::sigaction(sig, &ign, std::ptr::null_mut());
+            assert!(signal_ignored(sig), "SIG_IGN is read as ignored");
+            let mut dfl: libc::sigaction = std::mem::zeroed(); dfl.sa_sigaction = libc::SIG_DFL; libc::sigaction(sig, &dfl, std::ptr::null_mut());
+            assert!(!signal_ignored(sig), "the default is not ignored");
+            libc::sigaction(sig, &old, std::ptr::null_mut()); assert_eq!(signal_ignored(sig), was, "restored");
         }
     }
 }
