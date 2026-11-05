@@ -194,7 +194,7 @@ fun BotDestination(m: AppModel, s: Screen, b: BotView) {
     }
 }
 
-// a cat, its name and how it is (style.css .bot-head: the phone's cat is 40 px, the title 15 px semibold, the mood 12 px
+// a cat, its name and how it is (style.css .bot-head: the cat is 42 px, the title 15 px semibold, the mood 12 px
 // in its mood's colour; .cat-mood-away dims the cat only)
 @Composable
 private fun BotHeader(m: AppModel, b: BotView, size: Dp) {
@@ -212,7 +212,7 @@ private fun BotHeader(m: AppModel, b: BotView, size: Dp) {
 @Composable
 private fun BotTabs(m: AppModel, b: BotView) {
     Column {
-        BotHeader(m, b, 40.dp)
+        BotHeader(m, b, 42.dp)
         val i = b.tabs.indexOfFirst { it.id == b.navTab.ifEmpty { b.tab } }.coerceAtLeast(0)
         ScrollableTabRow(selectedTabIndex = i, edgePadding = 8.dp) {
             b.tabs.forEachIndexed { j, t ->
