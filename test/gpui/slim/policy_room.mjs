@@ -11,6 +11,8 @@ const BT='t1793875706-147',B='b1793875706-146',B2='b1793875706-149',BT2='t179387
 const log=[E({$:'ProjectCreated',id:'p1700000000-1',title:'soak',root:'/tmp/soak'}),
  E({$:'ThreadCreated',id:BT,project:'',title:'room-bot-a',env:'local',branch:'',worktree:'',provider:'claude',model:''}),E({$:'BotSet',id:B,name:'room-bot-a',thread:BT,look:3,persona:''}),
  E({$:'ThreadCreated',id:BT2,project:'',title:'room-bot-b',env:'local',branch:'',worktree:'',provider:'claude',model:''}),E({$:'BotSet',id:B2,name:'room-bot-b',thread:BT2,look:4,persona:''}),
+ E({$:'ThreadCreated',id:'t1793875706-160',project:'p1700000000-1',title:'ordinary thread',env:'local',branch:'',worktree:'',provider:'claude',model:''}),
+ E({$:'MessagePosted',thread:'t1793875706-160',msg:'m1793875706-161',role:'user',text:'hello'}),
  E({$:'RoomSet',id:'parity-room',name:'Parity room',members:`${B},${B2}`}),E({$:'RoomPosted',id:'r1793875706-150',room:'parity-room',from:'person',text:'hello room',hop:0})];
 await ask('F '+JSON.stringify({t:'log',since:0,origin:'1',version:'x',info:{},items:log}));
 const V=async(target)=>JSON.parse(await ask('V '+JSON.stringify({hub:'h',cid:'c',now:(at+100)*1000,session:{sel:'',rid:1,drafts:{},open:{},adding:false,panel:false,info:{}},target,action:'',value:''})));

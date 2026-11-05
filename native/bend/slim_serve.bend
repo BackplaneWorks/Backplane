@@ -227,11 +227,20 @@ def Pol.read.has(xs: List<&2, String>, +kind: String) -> Bool:
 def Pol.read.ok(+kind: String) -> Bool:
   Pol.read.has(Pol.read.kinds(), kind)
 
-# the hub's reply as the client received it: a refusal is a top-level `error` (kept when the entry has one)
-def Pol.read.frame(has: Bool, +item: J.Json) -> J.Json:
+# the hub's reply as the client received it: some replies carry their fields in `result`, others at the top of the frame (a bot's voice status,
+# the thread a bot made), and the client's handlers read either; the frame has both. A refusal is a top-level `error` (kept when the entry has one).
+def Pol.read.head(has: Bool, +item: J.Json, +fs: J.Json) -> J.Json:
   match has:
-    case True{}: J.Json.obj([J.KV{"t", J.Json.str("reply")}, J.KV{"id", Maybe.default(&2, J.Json, J.Json.get(item, "id"), J.Num{"0"})}, J.KV{"ok", Maybe.default(&2, J.Json, J.Json.get(item, "ok"), J.Flag{True{}})}, J.KV{"error", J.Json.get_obj(item, "error")}, J.KV{"result", J.Json.get_obj(item, "result")}])
-    case False{}: J.Json.obj([J.KV{"t", J.Json.str("reply")}, J.KV{"id", Maybe.default(&2, J.Json, J.Json.get(item, "id"), J.Num{"0"})}, J.KV{"ok", Maybe.default(&2, J.Json, J.Json.get(item, "ok"), J.Flag{True{}})}, J.KV{"result", J.Json.get_obj(item, "result")}])
+    case True{}: J.Field{"error", J.Json.get_obj(item, "error"), fs}
+    case False{}: fs
+
+def Pol.read.fields(+item: J.Json, +r: J.Json) -> J.Json:
+  match r:
+    case J.Obj{+fs}: J.Field{"t", J.Json.str("reply"), J.Field{"id", Maybe.default(&2, J.Json, J.Json.get(item, "id"), J.Num{"0"}), J.Field{"ok", Maybe.default(&2, J.Json, J.Json.get(item, "ok"), J.Flag{True{}}), J.Field{"result", J.Obj{fs}, fs}}}}
+    case _: J.Field{"t", J.Json.str("reply"), J.Field{"id", Maybe.default(&2, J.Json, J.Json.get(item, "id"), J.Num{"0"}), J.Field{"ok", Maybe.default(&2, J.Json, J.Json.get(item, "ok"), J.Flag{True{}}), J.Field{"result", J.Null{}, J.End{}}}}}
+
+def Pol.read.frame(has: Bool, +item: J.Json) -> J.Json:
+  J.Obj{Pol.read.head(has, item, Pol.read.fields(item, J.Json.get_obj(item, "result")))}
 
 def Pol.read.one(ok: Bool, +u: U.Ui, +item: J.Json) -> U.Ui:
   match ok:
