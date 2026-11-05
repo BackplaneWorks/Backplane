@@ -27,7 +27,8 @@ async fn setup(name: &str) -> (Arc<Hub>, Arc<Driver>, PathBuf) {
     assert!(wait(5, || { let g = d.st.try_lock(); g.map_or(false, |g| g.teach.get("b1").steps.len() == 4) }).await);
     let draft = std::fs::read_to_string(d.dir("b1").join(".draft.jsonl")).unwrap(); assert!(!draft.contains("hunter2") && draft.lines().count() == 4);
     let infos: Vec<Value> = { tokio::time::sleep(Duration::from_millis(100)).await; tap.take().into_iter().filter(|v| v["t"] == "info").collect() };
-    assert!(infos.iter().any(|v| v["info"]["drive.b1"] == "teach" && v["info"]["teach.b1"].as_str().map_or(false, |t| t.starts_with("rec ")))); assert!(!infos.iter().any(|v| v.to_string().contains("hunter2")));
+    assert!(infos.iter().any(|v| v["info"]["drive.b1"] == "teach"), "one frame per key (Hub::set_info)"); assert!(infos.iter().any(|v| v["info"]["teach.b1"].as_str().map_or(false, |t| t.starts_with("rec ")))); assert!(!infos.iter().any(|v| v.to_string().contains("hunter2")));
+    assert!(wait(5, || hub.info_frame()["info"]["teach.draft.b1"].as_str().map_or(false, |t| t.contains("1042") && t.contains("then wait"))).await, "a client that joins now gets the draft"); let joined = hub.info_frame()["info"].clone(); assert_eq!(joined["drive.b1"], "teach"); assert!(!joined.to_string().contains("hunter2"));
     rpc(&hub, "bots.teach", json!({"bot":"b1","op":"stop"})).await; assert_eq!(d.st.lock().await.teach.get("b1").mode, "review");
     assert_eq!(rpc(&hub, "bots.teach", json!({"bot":"b1","op":"save","name":" "})).await["error"], "name the task and record at least one step");
     let r = rpc(&hub, "bots.teach", json!({"bot":"b1","op":"save","name":"Order status","description":"look up","params":[{"step":2,"name":"order","label":"Order number"}]})).await; assert_eq!(r["ok"], true, "{r}");
@@ -38,6 +39,7 @@ async fn setup(name: &str) -> (Arc<Hub>, Arc<Driver>, PathBuf) {
     let (ok, list) = d.tool("b1", "task_list", &json!({})).await; assert!(ok && list[0]["slug"] == "order-status" && list[0]["params"] == json!(["order"]), "{list}");
     let w = woke.lock().unwrap().clone(); assert_eq!(w.len(), 1); assert!(w[0].1.starts_with("[taught: Order status]") && w[0].1.contains("<secret: Password>"));
     assert!(d.br.agent_drives_ok("b1").await); assert!(d.st.lock().await.teach.get("b1").idle());
+    let after = hub.info_frame()["info"].clone(); assert!(after.get("drive.b1").is_none() && after.get("teach.b1").is_none() && after.get("teach.draft.b1").is_none(), "an idle bot's keys are removed: {after}");
 }
 
 #[tokio::test] async fn the_persons_input_is_scaled_and_refused_while_the_bot_drives() {
@@ -111,7 +113,7 @@ async fn setup(name: &str) -> (Arc<Hub>, Arc<Driver>, PathBuf) {
 #[tokio::test] async fn a_runs_pictures_are_served_only_from_the_bots_own_tasks_folder() {
     let (hub, d, _log) = setup("shot").await; let run = "look-up-5";
     let dir = d.run_dir("b1", run); std::fs::create_dir_all(&dir).unwrap(); std::fs::write(dir.join("pause-3.jpg"), b"JPEG3").unwrap(); std::fs::write(dir.join("1.jpg"), b"JPEG1").unwrap(); std::fs::write(d.dir("b1").join("secret.jpg"), b"NO").unwrap();
-    let get = |t: &str| Req { method: "GET".into(), target: t.into(), headers: vec![] };
+    let get = |t: &str| Req::new("GET", t, vec![]);
     let call = |t: String| { let hub = hub.clone(); async move { hub.http_for("/bots/b1/tasks/shot").unwrap().call(&hub, &get(&t)).await } };
     let r = call("/bots/b1/tasks/shot?run=look-up-5&n=3".into()).await; assert_eq!((r.status, r.ctype.as_str(), r.body.as_slice()), ("200 OK", "image/jpeg", &b"JPEG3"[..]));
     assert_eq!(call("/bots/b1/tasks/shot?run=look-up-5&f=1.jpg".into()).await.body, b"JPEG1");

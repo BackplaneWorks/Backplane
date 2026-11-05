@@ -98,7 +98,8 @@ impl Driver {
             }
         }
     }
-    async fn put_drive(&self, b: &TeachBot) { self.br.set_drive(&b.bot, &b.drive).await; self.hub.push_all(&b.msg()) }
+    /// The page's driver, and the three info keys (drive.<bot>, teach.<bot>, teach.draft.<bot>) a joining client gets and connected ones are told; an idle bot's are removed.
+    async fn put_drive(&self, b: &TeachBot) { self.br.set_drive(&b.bot, &b.drive).await; for (k, v) in b.kvs() { if !self.hub.set_info(&k, &v).await { eprintln!("term: info {k} refused (bounded)") } } }
     async fn set_teach(&self, g: &mut DState, b: TeachBot) -> bool { let okk = g.teach.put(b.clone()); if okk { self.put_drive(&b).await } okk }
 
     // ---- bots.browser ----
