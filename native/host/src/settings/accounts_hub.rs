@@ -61,7 +61,7 @@ pub async fn found(hub: &Arc<Hub>, agents: &Option<Arc<Agents>>, snapshot: &Valu
     if let Some(e) = allowance(&get, snapshot, at, at) { evs.push(e) }
     if !evs.is_empty() { let _ = hub.commit_many(&evs).await; }
     let inventory = public(snapshot);
-    hub.set_info("accounts.live", &inventory).await;
+    // not broadcast: the live profiles go only to clients granted account access (the `accounts` request)
     // threads whose account changed under them
     let running: Vec<(String, String)> = { let m = hub.model().await; m.threads.iter().filter(|(_, t)| !t.deleted && t.turn == "running").map(|(id, t)| (id.clone(), t.provider.clone())).collect() };
     for (id, provider) in running {
@@ -73,13 +73,19 @@ pub async fn found(hub: &Arc<Hub>, agents: &Option<Arc<Agents>>, snapshot: &Valu
     }
 }
 
-pub struct AccountsRpc { pub mgr: Arc<Accounts> }
+pub struct AccountsRpc { pub mgr: Arc<Accounts>, pub granted: std::sync::Mutex<std::collections::HashSet<(String, u64)>> }
+impl AccountsRpc {
+    pub fn new(mgr: Arc<Accounts>) -> Self { Self { mgr, granted: Default::default() } }
+    /// A client (one connection of one generation) that may manage accounts; nothing a request carries grants it.
+    pub fn grant(&self, who: &Caller) { self.granted.lock().unwrap().insert((who.gen.clone(), who.client)); }
+    pub fn revoke(&self, who: &Caller) { self.granted.lock().unwrap().remove(&(who.gen.clone(), who.client)); }
+    fn allowed(&self, who: &Caller) -> bool { self.granted.lock().unwrap().contains(&(who.gen.clone(), who.client)) }
+}
 impl RpcHandler for AccountsRpc {
     fn methods(&self) -> &'static [&'static str] { &["accounts"] }
-    fn call<'a>(&'a self, hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, _m: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
+    fn call<'a>(&'a self, hub: &'a Arc<Hub>, who: &'a Caller, id: &'a Value, _m: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
-            let cap = matches!(p.get("accountProfiles"), Some(Value::Bool(true))) || p.get("accountProfiles") == Some(&json!(1));
-            if !cap { return vec![json!({"t":"reply","id":id,"ok":false,"error":accounts::GATE})] }
+            if !self.allowed(who) { return vec![json!({"t":"reply","id":id,"ok":false,"error":accounts::GATE})] }
             let op = p.get("op").and_then(Value::as_str).unwrap_or("");
             if matches!(op, "remove" | "login" | "disconnect") && active(hub, p.get("profile").and_then(Value::as_str).unwrap_or("")).await {
                 return vec![json!({"t":"reply","id":id,"ok":false,"error":"Stop this account's active turns before changing its login."})]
@@ -94,7 +100,7 @@ impl RpcHandler for AccountsRpc {
 pub fn start(hub: &Arc<Hub>, agents: Option<Arc<Agents>>) -> Arc<Accounts> {
     let cli = crate::agents::proc::Cli::from_env();
     let mgr = Arc::new(Accounts::open(&hub.cfg.home, Arc::new(move |p: &str| cli.resolve(p))));
-    hub.register_rpc(Arc::new(AccountsRpc { mgr: mgr.clone() }));
+    hub.register_rpc(Arc::new(AccountsRpc::new(mgr.clone())));
     let (h, m) = (hub.clone(), mgr.clone());
     tokio::spawn(async move {
         let mut last = String::new();
@@ -113,6 +119,11 @@ pub fn start(hub: &Arc<Hub>, agents: Option<Arc<Agents>>) -> Arc<Accounts> {
 mod tests {
     use super::*;
     fn snap(profiles: Value, error: &str) -> Value { json!({"version":1,"revision":3,"profiles":profiles,"error":error,"attempts":[{"id":"a","url":"https://claude.ai/x","userCode":"C"}]}) }
+    #[test] fn only_a_granted_client_may_manage_accounts() {
+        let rpc = AccountsRpc::new(Arc::new(Accounts::open(&std::env::temp_dir().join(format!("bp-acc-{}", std::process::id())), Arc::new(|p: &str| Ok(p.to_string())))));
+        let (a, b) = (Caller { gen: "g".into(), client: 1 }, Caller { gen: "g".into(), client: 2 });
+        assert!(!rpc.allowed(&a)); rpc.grant(&a); assert!(rpc.allowed(&a) && !rpc.allowed(&b), "per connection"); rpc.revoke(&a); assert!(!rpc.allowed(&a));
+    }
     #[test] fn clients_are_told_the_profiles_but_never_an_attempts_link_or_code() { let t = public(&snap(json!([{"id":"w"}]), "")); assert!(!t.contains("userCode") && !t.contains("https://") && t.contains("\"revision\":3") && t.contains("\"profiles\":[{\"id\":\"w\"}]")); }
     #[test] fn the_inventory_is_kept_when_it_moves_and_a_default_follows_its_profile_away() {
         let s = snap(json!([{"id":"w","epoch":2}]), "");
