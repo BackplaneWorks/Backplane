@@ -110,7 +110,7 @@ mod tests {
     #[test] fn sidebar_split_at_count() {
         let mut r = Rng(8);
         for _ in 0..200 { let n = r.below(30) as usize; let ts: Vec<Thread> = (0..n).map(|_| thread(&mut r)).collect(); let ids: Vec<String> = (0..n).map(|i| format!("t{i}")).collect();
-            let snoozes: HashMap<String, u64> = ids.iter().filter(|_| r.bool()).map(|i| (i.clone(), r.below(2000))).collect(); let now = r.below(2000);
+            let mut snoozes: HashMap<String, u64> = HashMap::new(); for i in &ids { if r.bool() { snoozes.insert(i.clone(), r.below(2000)); } } let now = r.below(2000);
             let pairs: Vec<(&str, &Thread)> = ids.iter().map(|s| s.as_str()).zip(ts.iter()).collect(); assert_eq!(split_at(&pairs, &snoozes, now).count(), n); }
     }
     // Shelf.of / Shelf.at are not named by a law but fix the table the sidebar rests on
