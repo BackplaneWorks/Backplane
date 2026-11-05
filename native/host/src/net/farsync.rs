@@ -27,10 +27,10 @@ impl FarSync {
     async fn take(&self, hub: &Arc<Hub>, link: &str, epoch: &str, since: u64, to: u64, items: Vec<Item>) -> anyhow::Result<bool> {
         let (store, l, e) = (self.store.clone(), link.to_string(), epoch.to_string());
         let t = tokio::task::spawn_blocking(move || store.take(&l, &e, since, to, &items)).await??;
-        // GAP (PARITY): another history starts the mirror over, and Bend forgets the link's old rows first (Fr.forget). The
-        // presenter has no such seam yet, so the old rows stay until a restart: said, never silent.
-        if t.reset { eprintln!("far: the mirror of {link} started over (another history); the presenter keeps its old rows until restart") }
-        if !t.events.is_empty() { fold_in_chunks(hub, &t.events).await }
+        // another history starts the mirror over, and Bend forgets the link's old rows first (Fr.forget): the presenter is rebuilt (the
+        // log folded again) and given every mirror, this link's new one included, by the feed (`Hub::forget_mirror`)
+        if t.reset { eprintln!("far: the mirror of {link} started over (another history)"); hub.forget_mirror().await }
+        else if !t.events.is_empty() { fold_in_chunks(hub, &t.events).await }
         Ok(t.got.gap)
     }
 
@@ -94,6 +94,20 @@ impl FarSync {
 
 /// Events to the presenter a chunk at a time, so one frame is never a whole history.
 pub async fn fold_in_chunks(hub: &Arc<Hub>, events: &[Value]) { for c in events.chunks(500) { hub.fold_mirror(c).await } }
+
+/// Re-feeds every mirror (state and the last message of each thread) to the presenter after it lost them.
+pub struct Refeed(pub Arc<FarStore>);
+impl crate::api::MirrorFeed for Refeed {
+    fn replay<'a>(&'a self, hub: &'a Arc<Hub>) -> Fut<'a, ()> {
+        Box::pin(async move {
+            for l in self.0.links() {
+                let (s, link) = (self.0.clone(), l.clone());
+                let ev = tokio::task::spawn_blocking(move || s.replay_events(&link)).await.unwrap_or_default();
+                fold_in_chunks(hub, &ev).await;
+            }
+        })
+    }
+}
 
 pub struct FarRoutes(pub Arc<FarSync>);
 impl HttpHandler for FarRoutes {

@@ -40,6 +40,7 @@ pub fn farhttp_start(hub: std::sync::Arc<crate::hub::Hub>, peering: std::sync::A
         let home = hub.cfg.home.clone();
         let Ok(Ok(store)) = tokio::task::spawn_blocking(move || farstore::FarStore::open(&home)).await else { eprintln!("backplane: could not read the far mirrors"); return };
         hub.set_far(store.clone());
+        hub.set_mirror_feed(std::sync::Arc::new(farsync::Refeed(store.clone())));
         for l in store.links() {
             // (read off the async workers, and sent a chunk at a time)
             let s = store.clone(); let link = l.clone();

@@ -138,6 +138,11 @@ pub trait Transform: Send + Sync {
 /// Threads mirrored from the owner's other machines: NOT in this hub's log or `Model` (the Bend hub reads and writes the same
 /// events.jsonl; a mirror there would fold as local ids). Their events live in the net lane's per-link store and reach the
 /// presenter through `Hub::fold_mirror` (renamed to `<link>~<id>`); pages of a mirrored thread come from here.
+/// Gives the presenter the mirrors again after it lost them (a restart, or `Hub::forget_mirror`): the net lane folds every mirror's
+/// events (`Hub::fold_mirror`) here. Called at the end of `resync_presenter`, so a crash restart re-feeds them too.
+pub trait MirrorFeed: Send + Sync {
+    fn replay<'a>(&'a self, hub: &'a Arc<Hub>) -> Fut<'a, ()>;
+}
 pub trait FarView: Send + Sync {
     /// whether `thread` (an id like "<link>~<id>") is a mirrored thread
     fn has(&self, thread: &str) -> bool;
