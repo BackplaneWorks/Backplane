@@ -55,9 +55,12 @@ ck(ord.refused!==true,'an ordinary action is not refused');
   ck((r2.session?.info||{})['fab.line:'+th]==='No goal yet. Edit to say what this project is for.','an empty goal reads as the placeholder line');
   const rs=await v({reads:[{kind:'secret.list',id:0,result:{secrets:[],vault:{}}},{kind:'bots.voice',id:0,result:{voiceKey:'k',voiceDict:'',voiceDevices:'{"default":"","devices":[]}'}}]});
   ck(rs.session?.drafts?.['@voice.key']==='k'&&rs.session?.drafts?.['@voice.set']==='1','a bots.voice read is applied: @voice.key and @voice.set');
-  // the Files listing is kept for the request the Ui itself made (fm.req:<id> -> thread, fm.id:<thread> -> id, fm.want:<thread> -> folder)
-  const fd=await v({session:{sel:th,rid:1,drafts:{},open:{},adding:false,panel:false,info:{['fm.req:7']:th,['fm.id:'+th]:'7',['fm.want:'+th]:''}},reads:[{kind:'files.dir',id:7,result:{fmEntries:'d\t0\tsrc\nf\t12\tREADME.md',fmDir:'',fmRoot:'/tmp/x',thread:th}}]});
-  ck((fd.session?.info||{})['fm.list:'+th]==='d\t0\tsrc\nf\t12\tREADME.md','a files.dir read is applied: the Files listing is kept (fm.list)');
+  // the Files listing is kept for the request the Ui itself made: its fm.req:<id>, fm.id:<t>, fm.want:<t> cross in `local` (the session does not carry fm.*)
+  const loc0={['fm.req:7']:th,['fm.id:'+th]:'7',['fm.want:'+th]:''};
+  const fd=await v({local:loc0,reads:[{kind:'files.dir',id:7,result:{fmEntries:'d\t0\tsrc\nf\t12\tREADME.md',fmDir:'',fmRoot:'/tmp/x',thread:th}}]});
+  ck(fd.local?.['fm.list:'+th]==='d\t0\tsrc\nf\t12\tREADME.md','a files.dir read is applied: the Files listing is kept (local fm.list:<t>)');
+  const fe=await v({local:loc0});
+  ck(fe.local?.['fm.req:7']===th&&fe.local?.['fm.id:'+th]==='7','the request\'s fm.* keys come back in local');
   const r3=await v({reads:[{kind:'no.such.read',id:1,result:{thread:th,goal:'IGNORED'}}]});
   ck((r3.session?.info||{})['fab.line:'+th]!=='IGNORED','an unknown kind is ignored');
 }
