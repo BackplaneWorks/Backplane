@@ -35,8 +35,8 @@ try:
     require(platform.machine() == "AMD64", "Native AMD64 Python required")
     source = Path(cfg["frozenSourceRoot"])
     factory = Path(cfg["canonicalFactoryRoot"])
-    factory_commit = "2823fe4641bbadcb41a6cf49f91fe2c7fbc77978"
-    factory_tree = "6aee3595dfa1862952cfb28969f0a884a49ae8ff"
+    factory_commit = "be904cd4cb21ad6febe17e674918c96945113d07"
+    factory_tree = "1034e9dc35fb517f1186ebcdb2d8f3351beb7a59"
     factory_sha = "b1f159e4304d82577a55465891c423e0e9c3fbce063696529ac15ef2a374b823"
     require(git(factory, "rev-parse", "HEAD").decode().strip() == factory_commit, "Wrong canonical factory commit")
     require(git(factory, "rev-parse", "HEAD^{tree}").decode().strip() == factory_tree, "Wrong canonical factory tree")
@@ -48,7 +48,7 @@ try:
     require(digest(cfg["packagePath"]) == cfg["packageSHA256"], "ZIP changed")
     service = Path(cfg["executable"]).parent / "resources" / "backplane-service"
     binary = service / "backplane-serve.exe"
-    binary_sha = "11f53c9619d095e0ccd520c5616743155ee240b9637021d4d5a0bea4707aadd1"
+    binary_sha = "d0cb5b3b2d572a072cd41d639147ca93e9b1c1e981272ee7fce82735c5572bc4"
     require(digest(binary) == binary_sha, "Measured executable differs from retained service")
     build = service / "BUILD.json"
     original_build_sha = digest(build)
