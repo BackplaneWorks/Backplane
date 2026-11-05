@@ -69,7 +69,7 @@ mod tests {
         let mut st = fold(&W);
         st.apply_line(r#"{"$":"MessagePosted","thread":"a","msg":"u1","role":"user","text":"fix the bug","at":30}"#);
         st.apply_line(r#"{"$":"MessagePosted","thread":"a","msg":"a1","role":"assistant","text":"fixed it","at":31}"#);
-        assert_eq!(thread_input_of(&st, "a"), thread_input("Alpha", "Proj", "", "fix the bug", "fixed it"));
+        assert_eq!(thread_input_of(&st, "a"), thread_input("Alpha", "Proj", "does alpha", "fix the bug", "fixed it"));
     }
     fn fold(lines: &[&str]) -> State { let mut s = State::new(); for l in lines { s.apply_line(l); } s }
     const W: [&str; 5] = [r#"{"$":"ProjectCreated","id":"p","title":"Proj","root":"/r","at":1}"#,
