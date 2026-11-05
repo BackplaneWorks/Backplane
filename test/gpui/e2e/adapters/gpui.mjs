@@ -36,7 +36,7 @@ async function launch(script,j,ctx,tag,{record=false,rects=false}={}){
   const g=spawn(ctx.gpuBin,['--url',ctx.hub.state.url,'--token-file',ctx.hub.state.root+'/home/token','--script',sf],{env:{...ctx.display.env,HOME:ctx.hub.state.root+'/fakehome',...(rects?{BACKPLANE_GPUI_RECTS:'1'}:{})},stdio:['ignore','ignore','pipe']});
   g.stderr.on('data',d=>{buf+=d;let i;while((i=buf.indexOf('\n'))>=0){const l=buf.slice(0,i);buf=buf.slice(i+1);const k=l.indexOf('GPUI_METRIC ');if(k>=0)try{metrics.push({...JSON.parse(l.slice(k+12)),wall:Date.now()})}catch{}}});
   const memTimer=setInterval(()=>{try{const sm=readFileSync(`/proc/${g.pid}/smaps_rollup`,'utf8');const k=n=>Number(new RegExp(n+':\\s+(\\d+)').exec(sm)?.[1]||0);memSamples.push({t_s:(Date.now()-t00)/1000,rssMB:k('Rss')/1024,pssMB:k('Pss')/1024})}catch{}},j.measure.includes('memory')?30000:5000);
-  const done=await Promise.race([new Promise(r=>g.on('exit',()=>r(true))),sleep(script.reduce((a,x)=>a+(x.wait||600)+(x.net_sleep?x.net_sleep*1000:0),0)+90000).then(()=>false)]);
+  const done=await Promise.race([new Promise(r=>g.on('close',()=>r(true))),sleep(script.reduce((a,x)=>a+(x.wait||600)+(x.net_sleep?x.net_sleep*1000:0),0)+90000).then(()=>false)]);
   if(!done){try{g.kill('SIGTERM')}catch{}}
   clearInterval(memTimer);const offsetMs=rec?.offsetMs?.();const capture=rec?(await rec.stop()).file:null;const screenshot=screenshot_(ctx,`${j.id}${tag}`);
   return {metrics,done,offsetMs,capture,screenshot,memSamples}}
