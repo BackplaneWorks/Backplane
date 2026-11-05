@@ -221,7 +221,7 @@ pub fn projects(st: &State, o: &Opts) -> Vec<Value> {
         for (id, _) in all { let p = display_parent(st, id); if !p.is_empty() { kids_by.entry(p).or_default().push(id); } }
     }
     let kids = kids_hidden(st);
-    struct P<'a> { id: &'a str, latest: u64, key: Vec<bool>, sh: Shelves<'a> }
+    struct P<'a> { id: &'a str, created: u64, latest: u64, key: Vec<bool>, sh: Shelves<'a> }
     let mut ps: Vec<P> = vec![];
     for (id, p) in &st.projects {
         if p.removed { continue }
@@ -229,11 +229,11 @@ pub fn projects(st: &State, o: &Opts) -> Vec<Value> {
         // Side.latest: a thread's last move for its project's place; settling by hand counts
         let mut latest = p.created;
         for tid in st.threads.iter().filter(|(i, t)| t.project == *id && !kids.contains(i.as_str())).map(|(i, _)| i) { let t = &st.threads[tid]; let touched = if t.override_ == Override::ForcedSettled { t.activity.max(t.settled_at) } else { t.activity }; latest = latest.max(touched); }
-        ps.push(P { id: id.as_str(), latest, key: order_key(st, &format!("project:{id}"), "active"), sh: tree_shelves(st, &raw) });
+        ps.push(P { id: id.as_str(), created: p.created, latest, key: order_key(st, &format!("project:{id}"), "active"), sh: tree_shelves(st, &raw) });
     }
-    // PSlot.before: keyed projects first, by key; then latest first, then id (SRow.before); equal keys fall back to SRow.before
+    // PSlot.before: keyed projects first, by key; then SRow.before. (`latest` is the group rank: live, quiet or older)
     ps.sort_by(|a, b| {
-        let by_row = b.latest.cmp(&a.latest).then(a.id.cmp(b.id));
+        let by_row = b.created.cmp(&a.created).then(a.id.cmp(b.id)); // SRow.before: the project's creation time, newest first, then id
         match (a.key.is_empty(), b.key.is_empty()) {
             (false, false) => match key_cmp(&a.key, &b.key) { std::cmp::Ordering::Equal => by_row, o => o },
             (false, true) => std::cmp::Ordering::Less, (true, false) => std::cmp::Ordering::Greater, (true, true) => by_row,
