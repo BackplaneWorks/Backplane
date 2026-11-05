@@ -58,3 +58,7 @@ Raw: build/gpui/results/parity-current/. This recording (recA there) is the base
 Rust hubs: pass the presenter as flags in `PARITY_HUB_ARGS` (space separated), e.g. `--policy-bin build/gpui/slim/bp-policy-page --window-bin build/gpui/hub/new/window --commit <sha>`; without them the hub answers with its canned presenter and a replay differs in shown/window/overlay and view ids. Check `/proc/<pid>/cmdline` before trusting a run. The JS hub takes no such flags (leave it unset).
 
 Counts before commit `parity: remove the 40-difference cap` were capped at about 42 per scenario, so totals such as 156, 177, 151 and 127 were floors, not true counts. A result of 0 was always exact.
+
+## Scenario `private` (private lines)
+
+The fixture log holds DeviceRegistered/DeviceDropped (with tokens) and ride.*, launch.input.*, fallback.input.* values, all with `PRIV...` sentinels. A raw full join, a resumed join (`since=3`), two live `setting.set` writes and a gpui view run against it. `privateLeaks()` (lib.mjs) searches the raw bytes of every inbound frame for a sentinel: the JS recording fails if one is found, and a replay prints "PRIVATE LINES REACHED A CLIENT" and counts each frame. Run on both hubs with `sh test/gpui/parity/boat-private.sh` (staged JS hub, Rust hub, policy and window) or `boat-private-build.sh` (builds the Rust hub from the tree first). It is in record.mjs's scenario list, so the full parity run covers it; keep it there. A comparison with no recordings or an `--only` that matches nothing exits 2: an empty run proves nothing.
