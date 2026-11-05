@@ -48,7 +48,7 @@ fn parent_raw<'a>(st: &'a State, id: &str) -> &'a str {
     }
 }
 /// Tree.chain: the raw ancestry is at most 64 deep and never returns to the start
-fn chain_ok(st: &State, start: &str, mut p: &str) -> bool {
+fn chain_ok<'a>(st: &'a State, start: &str, mut p: &'a str) -> bool {
     for _ in 0..64 { if p.is_empty() { return true } if p == start { return false } p = parent_raw(st, p); }
     p.is_empty()
 }
