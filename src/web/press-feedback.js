@@ -99,13 +99,16 @@ export class PressFeedback {
     const walk = n => { if (out !== undefined || !is(n, 'El') || n.tag === 'bp-memo') return;if (sig(n) === parentSig) { out = attr(n, 'class');return; }for (const k of items(n.kids)) walk(k); };
     walk(this.seenNode);return out;
   }
-  // a press: a function that settles it (the hub's answer), or undefined
-  choice(action, value, target) {
+  // a press: a function that settles it (the hub's answer), or undefined.
+  // back: a retained picture of what a REPLACES region (Settings) puts back
+  // when it shuts, as the host has it (the thread's own picture): drawn in
+  // its place at the press
+  choice(action, value, target, back = null) {
     if (NEVER.has(action) || !this.now || this.nowFor !== target) return undefined;
     const key = JSON.stringify([target, action, String(value ?? ''), shape(this.now)]);
     const revision = ++this.revision, press = { key, target, before: this.now, settled: false, revision, by: action + '\u0000' + String(value ?? '') };
     this.press = press;
-    const known = this.learned.get(key) || this.opening(action, action + '\u0000' + String(value ?? ''));
+    const known = this.learned.get(key) || this.opening(action, action + '\u0000' + String(value ?? '')) || this.closing(back);
     this.active = known ? { ...known, revision } : null;
     if (known) this.changed();
     return () => {
@@ -129,6 +132,17 @@ export class PressFeedback {
       ...(id ? [{ ...items(sh.node.attrs).find(a => is(a, 'At')), name: 'id', value: id }] : [])]),
       kids: list([...(edge ? [edge] : []), { ...sh.node, tag: 'div', key: 'viewer-pending', attrs: list([{ ...items(sh.node.attrs).find(a => is(a, 'At')), name: 'class', value: 'viewer-stage' }]), kids: list([]) }]) };
     return { kind: 'viewer', node: pane, parent: sh.parent, addClass: 'panel', index: sh.index };
+  }
+  // Settings shut: the thread's main and top bar from its retained picture
+  // take Settings' place (and the top bar's)
+  closing(back) {
+    const open = this.now?.get('settings');
+    if (!back || !open) return null;
+    const find = (n, test, d = 0) => { if (!is(n, 'El') || d > DEPTH || n.tag === 'bp-memo') return null;if (test(n)) return n;for (const k of items(n.kids)) { const f = find(k, test, d + 1);if (f) return f; }return null; };
+    const main = find(back, n => n.tag === 'main' && classes(n).includes('thread-view'));
+    if (!main) return null;
+    const top = find(back, n => n.tag === 'header' && classes(n).includes('topbar')), here = this.now.get('+topbar');
+    return { kind: 'settings', node: main, parent: open.parent, index: open.index, prev: open.prev, along: top && here ? [{ node: top, parent: here.parent }] : [] };
   }
   // (no pane seen yet: one made from the page's own pieces, last in .app)
   bare() {

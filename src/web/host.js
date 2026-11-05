@@ -1197,8 +1197,12 @@ function render() {
   }
   const tl = document.getElementById("timeline");
   const t0 = PERF || RR ? pnow() : 0;
-  let page = frontendNode ? App.presentation_overlay(historyGaps(frontendNode), presentationJson(feedbackSession()))
-    : transitionNode ? App.presentation_overlay(transitionNode, presentationJson(currentSession())) : focusedNode
+  // (a press not yet answered: what it opened, drawn into the hub's picture
+  // before the overlay, so the draft and the pieces in it are the page's own;
+  // press-feedback.js)
+  if (frontendNode) pressFeedback.seen(frontendNode, targetKey(presentationTarget(currentSession())));
+  let page = frontendNode ? App.presentation_overlay(historyGaps(pressFeedback.project(frontendNode)), presentationJson(feedbackSession()))
+    : transitionNode ? App.presentation_overlay(pressFeedback.project(transitionNode), presentationJson(currentSession())) : focusedNode
     || (canonicalBoot ? App.view(ui) : App.presentation_node(presentationJson(themed(Wire.plain(App.presentation_view(App.presentation_wait(ui)))))));
   // Saved transition/startup pictures contain the server's unprojected partial
   // footer. Clean it before their first paint, without borrowing live readers
@@ -1209,9 +1213,9 @@ function render() {
     node => frontendNode && node.tag === "bp-memo" && bodyWindows.parts.get(node.key)?.automatic === true ? node : expand(node), !!frontendNode);
   const tb = RR ? pnow() : 0;
   if (frontendNode) page = bodyWindows.project(page);
-  // a press not yet answered: what it opened the last time (press-feedback.js)
-  if (frontendNode) { pressFeedback.seen(frontendNode, targetKey(presentationTarget(currentSession())));foldFeedback.seen(frontendNode); }
-  if (frontendNode || transitionNode) page = foldFeedback.project(pressFeedback.project(page));
+  // a run of tool calls opened or shut at the click (fold-feedback.js)
+  if (frontendNode) foldFeedback.seen(frontendNode);
+  if (frontendNode || transitionNode) page = foldFeedback.project(page);
   if (frontendNode && remoteReady || transitionNode && transitionFor === targetKey(presentationTarget(currentSession()))) page = pendingPresentation(page);
   const t1 = PERF || RR ? pnow() : 0;
   if (RR) { RR.t("render.continuations", tb - tc);RR.t("render.bodies", t1 - tb); }
@@ -1826,7 +1830,9 @@ function dispatch(action, value, timer) {
       if (subs) subsNow();
       // what the press opened the last time, drawn at once (press-feedback.js;
       // Commands: its field takes the keys in this frame)
-      const press = pressFeedback.choice(action, value, targetKey(presentationTarget(currentSession())));
+      // (Settings put away: the thread under it, from its retained picture)
+      const back = action === "flag" && value === "settings" && document.querySelector("main.settings-view") ? transitionViews.destination(transitionScope(), presentationTarget(currentSession())) : null;
+      const press = pressFeedback.choice(action, value, targetKey(presentationTarget(currentSession())), back ? pictureNode(back.shown) : null);
       if (pressFeedback.active?.kind === "palette" && pressFeedback.active.node) focus = "workspace-query";
       // (a run of tool calls opened or shut at the click: fold-feedback.js)
       const fold = subs ? undefined : foldFeedback.choice(action, value);
