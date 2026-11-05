@@ -1,4 +1,5 @@
 use super::*;
+use serde_json::Value;
 fn it(n: u64) -> Item { Item { n, c: json!(n) } }
 fn out(from: u64, to: u64, xs: &[u64]) -> Out { let mut o = Out::default(); o.add(from, to, xs.iter().map(|n| it(*n)).collect()); o }
 
