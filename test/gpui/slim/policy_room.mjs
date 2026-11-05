@@ -16,6 +16,12 @@ await ask('F '+JSON.stringify({t:'log',since:0,origin:'1',version:'x',info:{},it
 const V=async(target)=>JSON.parse(await ask('V '+JSON.stringify({hub:'h',cid:'c',now:(at+100)*1000,session:{sel:'',rid:1,drafts:{},open:{},adding:false,panel:false,info:{}},target,action:'',value:''})));
 for(const t of [{kind:'bot',id:B},{kind:'room',id:'parity-room'},{kind:'bot',id:'ghost'},{kind:'room',id:'ghost'},{kind:'recent',id:''}]){
   const r=await V(t);const j=r.overlay?.j||{};
-  console.log(JSON.stringify(t),'-> remoteReady',r.remoteReady,'nextTarget',JSON.stringify(r.nextTarget),'| overlay.j.bot',j.bot?JSON.stringify(Object.keys(j.bot)).slice(0,80):j.bot,'| rooms',JSON.stringify((j.rooms||[]).length),'| sel',JSON.stringify(r.session?.sel),'| drafts @bot/@room/@bot.want',JSON.stringify([r.session?.drafts?.['@bot'],r.session?.drafts?.['@room'],r.session?.drafts?.['@bot.want']]));
+  console.log(JSON.stringify(t),'-> remoteReady',r.remoteReady,'nextTarget',JSON.stringify(r.nextTarget),'| overlay.j.bot',j.bot?JSON.stringify(Object.keys(j.bot)).slice(0,80):j.bot,'| rooms',JSON.stringify((j.rooms||[]).length),'| stale',r.stale===true,'| sel',JSON.stringify(r.session?.sel),'| drafts @bot/@room/@bot.want',JSON.stringify([r.session?.drafts?.['@bot'],r.session?.drafts?.['@room'],r.session?.drafts?.['@bot.want']]));
 }
-p.kill();process.exit(0);
+const want={bot:true,room:true};let bad=0;const ck=(ok,m)=>{console.log(ok?'ok  ':'FAIL',m);if(!ok)bad++};
+const rb=await V({kind:'bot',id:B}),rr=await V({kind:'room',id:'parity-room'}),gb=await V({kind:'bot',id:'ghost'}),gr=await V({kind:'room',id:'ghost'}),rc=await V({kind:'recent',id:''});
+ck(rb.remoteReady===true&&!rb.nextTarget&&rb.stale!==true,'an existing bot target is served as asked');
+ck(rr.remoteReady===true&&!rr.nextTarget&&rr.stale!==true,'an existing room target is served as asked');
+ck(gb.stale===true&&gr.stale===true,'an unknown bot and an unknown room are stale');
+ck(rc.remoteReady===true&&rc.stale!==true,'recent is served');
+p.kill();console.log(bad?'FAILED '+bad:'ALL OK');process.exit(bad?1:0);
