@@ -27,6 +27,8 @@ pub trait Tailscale: Send + Sync {
     fn ip4(&self) -> Fut<String>;
     fn whois(&self, ip: String) -> Fut<String>;
     fn status(&self) -> Fut<String>;
+    /// `tailscale serve --bg --https=443 http://127.0.0.1:<port>`: HTTPS on this node's MagicDNS name, proxied to the hub. Whether it took.
+    fn serve(&self, _port: u16) -> Fut<bool> { Box::pin(async { false }) }
 }
 pub struct Cli;
 async fn run(args: Vec<String>) -> String {
@@ -34,10 +36,28 @@ async fn run(args: Vec<String>) -> String {
     match tokio::time::timeout(Duration::from_secs(5), crate::proc::tokio_cmd(crate::proc::Kind::Net, "tailscale").args(&args).stderr(std::process::Stdio::null()).output()).await {
         Ok(Ok(o)) if o.status.success() => String::from_utf8_lossy(&o.stdout).into_owned(), _ => String::new() }
 }
+async fn run_ok(args: Vec<String>) -> bool {
+    if crate::copy::on() { return false }
+    matches!(tokio::time::timeout(Duration::from_secs(15), crate::proc::tokio_cmd(crate::proc::Kind::Net, "tailscale").args(&args).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status()).await, Ok(Ok(s)) if s.success())
+}
 impl Tailscale for Cli {
+    fn serve(&self, port: u16) -> Fut<bool> { Box::pin(async move { run_ok(vec!["serve".into(), "--bg".into(), "--https=443".into(), format!("http://127.0.0.1:{port}")]).await }) }
     fn ip4(&self) -> Fut<String> { Box::pin(async { run(vec!["ip".into(), "-4".into()]).await.lines().next().unwrap_or("").trim().to_string() }) }
     fn whois(&self, ip: String) -> Fut<String> { Box::pin(async move { run(vec!["whois".into(), "--json".into(), ip]).await }) }
     fn status(&self) -> Fut<String> { Box::pin(async { run(vec!["status".into(), "--json".into()]).await }) }
+}
+
+/// `--tailscale-https` (server.bend `Tailnet.https`): put the hub behind `tailscale serve` on HTTPS and give a phone that address, which
+/// works off the tailnet's IP names and is encrypted. The MagicDNS name comes from `tailscale status`; the address goes first among the
+/// invitation routes (`AuthRoutes::address`), and the pairing link is `https://<name>/#token=<token>`. None when serve did not take
+/// or the node reports no DNS name (said, not guessed).
+pub async fn https(ts: &dyn Tailscale, routes: &AuthRoutes, port: u16, token: &str) -> Option<String> {
+    if !ts.serve(port).await { return None }
+    let name = tailnet::dns_name(&ts.status().await);
+    if name.is_empty() { return None }
+    let base = format!("https://{name}");
+    routes.address(&base);
+    Some(tailnet::link(&base, token))
 }
 
 /// One connection: the verdict is the owner's own device, decided per connection (nothing cached).
@@ -174,6 +194,28 @@ mod tests {
         let o2: serde_json::Value = serde_json::from_slice(&bare.handle(&req(main_port), 1).unwrap().reply.body).unwrap();
         assert_eq!(o2["routes"], json!([m_addr]), "so the listener is what puts its address there");
         let _ = std::fs::remove_dir_all(h); let _ = std::fs::remove_dir_all(h2);
+    }
+    struct Serve { took: bool, status: String }
+    impl Tailscale for Serve {
+        fn ip4(&self) -> Fut<String> { Box::pin(async { String::new() }) }
+        fn whois(&self, _ip: String) -> Fut<String> { Box::pin(async { String::new() }) }
+        fn status(&self) -> Fut<String> { let v = self.status.clone(); Box::pin(async move { v }) }
+        fn serve(&self, _port: u16) -> Fut<bool> { let t = self.took; Box::pin(async move { t }) }
+    }
+    #[tokio::test] async fn tailnet_https_gives_a_phone_the_magicdns_address() {
+        let (_hub, _p, routes, h) = node("https").await;
+        let ts = Serve { took: true, status: r#"{"Self":{"DNSName":"box.tail9.ts.net."}}"#.into() };
+        let link = https(&ts, &routes, 3787, "tok").await;
+        assert_eq!(link.as_deref(), Some("https://box.tail9.ts.net/#token=tok"));
+        // an invitation then names it first, ahead of the address the request came to (a phone off the tailnet IP can use it)
+        let req = Req { method: "POST".into(), target: "/auth/invitations".into(), headers: vec![("Authorization".into(), "Bearer tok".into()), ("Host".into(), "127.0.0.1:3787".into())], body: vec![], peer: None, trusted: false };
+        let b: serde_json::Value = serde_json::from_slice(&routes.handle(&req, 1).unwrap().reply.body).unwrap();
+        assert!(b["link"].as_str().unwrap().starts_with("https://box.tail9.ts.net/pair#invite="), "{b}");
+        assert_eq!(b["routes"][0], "https://box.tail9.ts.net");
+        // serve refused, or no DNS name: nothing is claimed
+        assert_eq!(https(&Serve { took: false, status: r#"{"Self":{"DNSName":"x.ts.net."}}"#.into() }, &routes, 3787, "tok").await, None);
+        assert_eq!(https(&Serve { took: true, status: "{}".into() }, &routes, 3787, "tok").await, None);
+        let _ = std::fs::remove_dir_all(h);
     }
     #[tokio::test] async fn tailnet_no_address_is_unavailable_and_sets_nothing() {
         let (hub, p, routes, h) = node("none").await;
