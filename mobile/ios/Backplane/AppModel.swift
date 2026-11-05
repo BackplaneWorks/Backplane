@@ -2021,6 +2021,9 @@ final class AppModel {
     }
     func editComposer(_ text: String, for thread: String) {
         guard canEditComposer(for: thread) else { return }
+        #if DEBUG
+        Stall.draftBytes = text.utf8.count
+        #endif
         let edit = composerDrafts.change(thread, text)
         composerOwner = thread
         composer = text
@@ -2514,6 +2517,15 @@ final class AppModel {
                                 NSLog("Backplane pager offset=%d total=%d limit=%d next=%@ prev=%@ projects=%d view=%@", pg?.offset ?? -1, pg?.total ?? -1, pg?.limit ?? -1,
                                       String(pg?.next != nil), String(pg?.previous != nil), (self.screen?.projects.reduce(0) { $0 + $1.threads.count } ?? 0) + (self.screen?.active?.count ?? 0), self.screen?.view ?? "-")
                             } else if let c = kv[0] == "@pagenext" ? pg?.next : pg?.previous { self.act(c.action, c.value) }
+                            continue
+                        }
+                        // "@keys=abc": characters typed one after another (150 ms apart), each timed by Stall.key (BACKPLANE_STALL=1)
+                        if kv[0] == "@keys", kv.count > 1 {
+                            for ch in kv[1] {
+                                Stall.key()
+                                self.draft(self.composer + String(ch))
+                                try? await Task.sleep(for: .milliseconds(150))
+                            }
                             continue
                         }
                         if kv[0] == "@fonts" { self.showFonts = true; continue }

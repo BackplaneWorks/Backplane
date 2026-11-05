@@ -13,5 +13,6 @@ export SIMCTL_CHILD_BACKPLANE_ACTS="$ACTS"
 [ -n "$GEOM" ] && export SIMCTL_CHILD_BACKPLANE_GEOM=1
 [ -n "$NOLINK" ] && unset SIMCTL_CHILD_BACKPLANE_LINK
 [ -n "$VIEW" ] && export SIMCTL_CHILD_BACKPLANE_VIEW="$VIEW"
+for kv in $EXTRAENV; do export "SIMCTL_CHILD_$kv"; done
 [ "${JIT:-1}" = 0 ] && export SIMCTL_CHILD_JSC_useJIT=0
 xcrun simctl launch "$U" dev.backplane.gpui $LAUNCHARGS

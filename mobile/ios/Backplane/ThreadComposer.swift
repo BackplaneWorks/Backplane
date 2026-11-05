@@ -180,12 +180,7 @@ struct ThreadComposer: View {
                     .accessibilityElement(children: .combine)
                     .accessibilityIdentifier("thread.composer")
                 } else {
-                    TextField("", text: Binding(get: { model.composerText(for: thread) }, set: { model.editComposer($0, for: thread.id) }), prompt: Text(NativeMessages.native_thread_composer(lang)).foregroundStyle(BackplaneDesign.secondaryText), axis: .vertical)
-                        .disabled(!model.canEditComposer(for: thread.id))
-                        .lineLimit(1...6)
-                        .focused($focused)
-                        .accessibilityLabel(NativeMessages.native_thread_composer(lang))
-                        .accessibilityIdentifier("thread.composer")
+                    ComposerInput(model: model, thread: thread, focus: $focused)
                         .padding(.horizontal, 12).padding(.vertical, 8)
                         .foregroundStyle(.primary)
                         .background(BackplaneDesign.raised)
