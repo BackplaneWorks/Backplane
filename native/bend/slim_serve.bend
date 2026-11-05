@@ -151,13 +151,49 @@ def Pol.bind.kind(+kind: String, +u: U.Ui, +id: String) -> U.Ui:
 def Pol.bind(+u: U.Ui, +target: J.Json) -> U.Ui:
   Pol.bind.kind(J.Json.get_str(target, "kind", ""), u, J.Json.get_str(target, "id", ""))
 
+# The sidebar's page memory (offsets, the context it holds for, the cursor key and budget) lives in four Ui info keys that Ns.prepare and the
+# page action read and write. The host keeps the Ui per request and not per view, so it carries them: V takes `local` {key: text} and puts each
+# non-empty one into the Ui before Ns.prepare; the reply's `local` is the same four keys read after the action.
+def Pol.local.k1() -> String:
+  "local.native.sidebar.pages"
+
+def Pol.local.k2() -> String:
+  "local.native.sidebar.context"
+
+def Pol.local.k3() -> String:
+  "local.native.sidebar.key"
+
+def Pol.local.k4() -> String:
+  "local.native.sidebar.budget"
+
+def Pol.local.put.k(+v: String, +u: U.Ui, +k: String) -> U.Ui:
+  Bool.pick(U.Ui, String.is_empty(v), u, U.Ui.info_set(u, k, v))
+
+def Pol.local.put.one(+u: U.Ui, +loc: J.Json, +k: String) -> U.Ui:
+  Pol.local.put.k(J.Json.get_str(loc, k, ""), u, k)
+
+def Pol.local.put(+u: U.Ui, +loc: J.Json) -> U.Ui:
+  Pol.local.put.one(Pol.local.put.one(Pol.local.put.one(Pol.local.put.one(u, loc, Pol.local.k1()), loc, Pol.local.k2()), loc, Pol.local.k3()), loc, Pol.local.k4())
+
+def Pol.local.get(+u: U.Ui) -> J.Json:
+  J.Json.obj([J.KV{Pol.local.k1(), J.Json.str(U.Ui.info(u, Pol.local.k1()))}, J.KV{Pol.local.k2(), J.Json.str(U.Ui.info(u, Pol.local.k2()))},
+    J.KV{Pol.local.k3(), J.Json.str(U.Ui.info(u, Pol.local.k3()))}, J.KV{Pol.local.k4(), J.Json.str(U.Ui.info(u, Pol.local.k4()))}])
+
+def Pol.local.of(+a: H.HAct, +key: String) -> J.Json:
+  match a:
+    case H.HAct{+hs, _, _}: Pol.local.get(H.Hubs.ui(hs, key))
+
+def Pol.view.out(+r: J.Json, +ua: H.HAct, +key: String) -> J.Json:
+  NS.Obj.put(r, "local", Pol.local.of(ua, key))
+
 def Pol.view(+u0: U.Ui, +now0: Nat, +p: J.Json) -> J.Json:
   +now = Pol.clock(J.Json.get_nat(p, "now", 0n), now0)
   +key = J.Json.get_str(p, "hub", "")
   +cid = J.Json.get_str(p, "cid", "")
   +u1 = U.Ui.scratch_set(U.Ui.online(U.Ui.set_cid(Pol.bind(MS.Session.adopt(U.Ui.tick(u0, now), J.Json.get_obj(p, "session")), J.Json.get_obj(p, "target")), cid), True{}), "@sync", "1")
-  +u = NS.Ns.prepare(Pol.pick(Pol.is_obj(J.Json.get_obj(p, "page")), u1, J.Json.get_obj(p, "page")), False{}, p, J.Json.get_str(p, "epoch", ""), J.Json.get_str(p, "viewId", ""), J.Json.get_nat(p, "revision", 0n), J.Json.get_str(p, "nativeKey", ""))
-  Pol.view.r(MS.Session.result(MS.Session.act(u, key, cid, now, J.Json.get_str(p, "action", ""), J.Json.get_str(p, "value", "")), key), J.Json.get_obj(p, "target"), J.Json.get_obj(p, "window"))
+  +u = NS.Ns.prepare(Pol.local.put(Pol.pick(Pol.is_obj(J.Json.get_obj(p, "page")), u1, J.Json.get_obj(p, "page")), J.Json.get_obj(p, "local")), False{}, p, J.Json.get_str(p, "epoch", ""), J.Json.get_str(p, "viewId", ""), J.Json.get_nat(p, "revision", 0n), J.Json.get_str(p, "nativeKey", ""))
+  +ua = MS.Session.act(u, key, cid, now, J.Json.get_str(p, "action", ""), J.Json.get_str(p, "value", ""))
+  Pol.view.out(Pol.view.r(MS.Session.result(ua, key), J.Json.get_obj(p, "target"), J.Json.get_obj(p, "window")), ua, key)
 
 # ---- the fold --------------------------------------------------------------
 
