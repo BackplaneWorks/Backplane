@@ -5,7 +5,11 @@ import {startDisplay,installMissing} from './lib/capture.mjs';import {startFixtu
 const arg=(k,d)=>{const i=process.argv.indexOf('--'+k);return i>=0?process.argv[i+1]:d};const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const hubBin=resolve(arg('hub-bin')),gpuBin=resolve(arg('gpui-bin')),out=resolve(arg('out','out/e2e/input'));mkdirSync(out,{recursive:true});
 const summary={when:new Date().toISOString(),actions:{},blocked:{},env:installMissing()};
-const dsp=await startDisplay(64);const ime=await startIme(dsp.display); // before the client, so it can connect to it through XIM
+const dsp=await startDisplay(64);
+const pickFile=out+'/paste.png';execFileSync('convert',['-size','240x160','gradient:red-blue',pickFile],{env:dsp.env});
+const portalLog=out+'/portal.log';let portal=null;
+try{portal=spawn('python3',['test/gpui/e2e/input/portal_standin.py'],{env:{...process.env,PORTAL_PICK:pickFile,PORTAL_LOG:portalLog},stdio:'ignore'});for(let k=0;k<40;k++){await sleep(250);try{readFileSync(portalLog+'.ready');break}catch{}}}catch(e){summary.portalError=String(e.message)}
+const ime=await startIme(dsp.display); // before the client, so it can connect to it through XIM
 summary.ime={status:ime.status,engine:ime.engine};const fx=await startFixtureHub({bin:hubBin,root:resolve('out/e2e-run/input'),port:3813,threads:6});
 try{
   const sf=out+'/hold.script.json';writeFileSync(sf,JSON.stringify([{select:0},...Array.from({length:80},()=>[{wait:1500},{read:'composer'}]).flat()])); // G6: the client reports its composer text every 1.5 s
@@ -42,13 +46,14 @@ try{
   const ctlAll=metrics.filter(m=>m.event==='controls');const ctl=[...ctlAll].reverse().find(m=>m.controls?.some(c=>c.rect));
   const attach=ctl?.controls?.find(c=>c.id==='ui:Attach'&&c.rect);
   if(!attach)summary.blocked['paperclip']='no ui:Attach control with a rect in the controls event';
-  else await run('paperclip',async()=>{const w0=inp.windows();inp.s('before-paperclip');inp.clickAt(win,[attach.rect.x+attach.rect.w/2,attach.rect.y+attach.rect.h/2]);await sleep(2500);const w1=inp.windows();const shot=inp.s('after-paperclip');
-    const opened=w1.filter(x=>!w0.some(y=>y.id===x.id));inp.xi.key('Escape');
-    return {ok:opened.length>0,evidence:{newWindows:opened.map(x=>x.name).slice(0,5),screenshot:shot,note:'a picker is a new top-level window; pixels alone cannot tell it from the stream scrolling'}}});
+  else await run('paperclip',async()=>{const w0=inp.windows();inp.s('before-paperclip');inp.clickAt(win,[attach.rect.x+attach.rect.w/2,attach.rect.y+attach.rect.h/2]);await sleep(3000);const w1=inp.windows();const shot=inp.s('after-paperclip');
+    const opened=w1.filter(x=>!w0.some(y=>y.id===x.id));let pl='';try{pl=readFileSync(portalLog,'utf8')}catch{}
+    const called=/OpenFile/.test(pl);
+    return {ok:called,evidence:{portalStandin:portal?'running':'not running',portalCalled:called,portalLog:pl.split('\n').slice(-4).join(' | '),newWindows:opened.map(x=>x.name).slice(0,5),screenshot:shot,note:'ok = the client asked the OS file chooser (xdg-desktop-portal FileChooser, via a stand-in on Boat); whether the chosen file then attaches is the upload chain measured by paste/drop'}}});
   const lk=[...metrics].reverse().find(m=>m.event==='links');summary.blocked['link-click']=lk&&lk.supported===false?'GPUI draws message text without link detection (links event supported:false)':(lk?null:'no links event');
   const sel=[...metrics].reverse().find(m=>m.event==='read'&&m.what==='selection');if(sel)summary.selectionRead=sel;
   try{g.kill('SIGTERM')}catch{}
-}finally{try{ime.stop()}catch{}await fx.stop();dsp.stop()}
+}finally{try{portal?.kill('SIGTERM')}catch{}try{ime.stop()}catch{}await fx.stop();dsp.stop()}
 // an action only counts when evidence says so; pass also needs the Rust hub on real hardware (CONTRACT.md), which this Boat run is not
 for(const a of Object.values(summary.actions))a.status=a.ok?'partial':'fail';
 writeFileSync(out+'/input-summary.json',JSON.stringify(summary,null,1));console.log(JSON.stringify({actions:Object.fromEntries(Object.entries(summary.actions).map(([k,v])=>[k,v.ok])),blocked:summary.blocked},null,1));
