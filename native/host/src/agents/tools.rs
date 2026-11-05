@@ -105,6 +105,7 @@ impl Agents {
     pub async fn answer(self: &Arc<Self>, ask: &str, answer: &str) -> Result<(), String> {
         let a = { let w = self.world().await; w.asks.get(ask).cloned() };
         let Some(a) = a else { return Ok(()) }; // ask_closes_once: an ask already closed (or never opened) changes nothing
+        if a.kind == "browser" && a.tool == "task_pause" { if let Some(d) = crate::term::driver::get(&self.hub) { d.answered(ask, answer).await; } } // the paused task tool waits for this answer
         if crate::files::rv::checks_answer(&self.hub.cfg.home.to_string_lossy(), ask, answer) { // Checks.answer.k: a project's own checks ask closes with no "answer" activity
             let pend = self.pending_ev(&a.thread, 0, ask, now_s()).await; self.commit_events(vec![json!({"$":"AskClosed","id":ask,"answer":answer,"at":now_s()}), pend]).await;
             if let Some(p) = self.parked.lock().unwrap().remove(ask) { let _ = p.tx.send(answer.to_string()); }

@@ -24,7 +24,7 @@ impl Tk { pub fn terminal(&self) -> bool { matches!(self.state.as_str(), "done" 
 pub struct Ask { pub thread: String, pub kind: String, pub tool: String, pub detail: String, pub options: String }
 
 #[derive(Default)]
-pub struct World { pub launched: HashMap<String, (String, bool)>, pub projects: HashMap<String, (String, bool)>, pub tasks: HashMap<String, Tk>, pub deadlines: std::collections::HashSet<String>, pub asks: HashMap<String, Ask>, pub sessions: std::collections::HashSet<(String, String)>, pub threads: HashMap<String, T>, pub roots: HashMap<String, String>, pub st: HashMap<String, String>, seen: usize }
+pub struct World { pub td_msgs: std::collections::HashSet<String>, pub launched: HashMap<String, (String, bool)>, pub projects: HashMap<String, (String, bool)>, pub tasks: HashMap<String, Tk>, pub deadlines: std::collections::HashSet<String>, pub asks: HashMap<String, Ask>, pub sessions: std::collections::HashSet<(String, String)>, pub threads: HashMap<String, T>, pub roots: HashMap<String, String>, pub st: HashMap<String, String>, seen: usize }
 
 const KEYS: &[&str] = &["watch.", "thread.parent.", "bg.", "wait.", "work.timeout.seconds", "allowance.claude", "effort.", "buy.", "kicad.ipc", "order.enabled", "agent.lang", "tz.machine", "agent.thinking", "restart.continue", "tok.epoch", "tok.recount", "tok.basis.", "turn.speed.", "turn.models.", "limit.claude.", "ride.", "agy.", "session."];
 fn tracked(k: &str) -> bool { KEYS.iter().any(|p| k == *p || (p.ends_with('.') && k.starts_with(p))) || k.starts_with("usage.") || k.starts_with("tok.key.") }
@@ -85,6 +85,7 @@ impl World {
             "TurnChanged" => if let Some(x) = self.threads.get_mut(&g("thread")) { x.turn = g("state") },
             "MessagePosted" => if let Some(x) = self.threads.get_mut(&g("thread")) {
                 x.newest = g("msg");
+                if g("msg").contains(":td-") { self.td_msgs.insert(g("msg")); } // Task.holds: the task results a thread already holds
                 if v.get("role").and_then(Value::as_str) == Some("assistant") { x.last_assistant = g("text") } // Task.last
                 x.carry_text_last = v.get("role").and_then(Value::as_str) == Some("user") && g("text").starts_with(CARRY_TEXT);
                 if v.get("role").and_then(Value::as_str) == Some("user") { x.last_user = g("msg") }
@@ -108,6 +109,8 @@ impl World {
         let n = name.trim().to_lowercase(); if n.is_empty() { return None }
         self.projects.iter().find(|(id, (title, removed))| !*removed && (id.to_lowercase() == n || title.to_lowercase() == n)).map(|(id, _)| id.clone())
     }
+    /// Work.ready: the thread has no running work of its own (background or watched rows, tasks it delegated that still run). (A queued message also holds it in Bend; the Rust agents queue nothing.)
+    pub fn ready(&self, th: &str) -> bool { self.work(th).0 == 0 && !self.tasks.values().any(|k| k.parent == th && !k.terminal()) }
     pub fn cwd(&self, th: &str) -> String {
         let Some(t) = self.threads.get(th) else { return String::new() };
         if !t.worktree.is_empty() { t.worktree.clone() } else { self.roots.get(&t.project).cloned().unwrap_or_default() }

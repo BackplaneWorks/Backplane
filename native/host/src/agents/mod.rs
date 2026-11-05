@@ -38,7 +38,7 @@ pub enum Cmd {
     /// AgentStop: end the thread's agent process in any state, no events.
     Stop { reply: oneshot::Sender<()> },
     /// Wt.start: queued text runs as one turn (the caller logged the queue events it owns).
-    StartQueued { text: String, reply: oneshot::Sender<Result<(), String>> },
+    StartQueued { text: String, taken: bool, reply: oneshot::Sender<Result<(), String>> },
     /// Steer.go: a running non-Claude turn stops and starts again with the text; Claude takes it in place.
     Steer { text: String, reply: oneshot::Sender<Result<(), String>> },
 }
@@ -66,8 +66,9 @@ impl Agents {
         let left = tokio::task::spawn_blocking(move || proc::reap_orphans(&home)).await.unwrap_or(0);
         if left > 0 { eprintln!("agents: ended {left} process(es) a previous hub left behind") }
         let _ = ag.mcp.set(mcp::Mcp::start(&ag).await?);
+        let repair = { let w = ag.world().await; tasks::repair_plan(&w) }; // Task.repair judges the state the hub started from, before recovery
         ag.recover().await;
-        let _ = HANDLE.set(ag.clone()); tasks::watch(&ag);
+        let _ = HANDLE.set(ag.clone()); tasks::watch(&ag); if !repair.is_empty() { let a = ag.clone(); tokio::spawn(async move { a.task_repair_run(repair).await }); }
         hub.register_rpc(Arc::new(Rpc(ag.clone())));
         Ok(ag)
     }
@@ -140,7 +141,12 @@ impl Agents {
     /// and logs the queue events it owns; this does not check them. Not a client method: it logs no message.
     pub async fn start_queued(self: &Arc<Self>, thread: &str, text: &str) -> Result<(), String> {
         let tx = self.actor(thread); let (reply, rx) = oneshot::channel();
-        tx.try_send(Cmd::StartQueued { text: text.into(), reply }).map_err(|_| "too many requests are waiting for this thread".to_string())?; rx.await.unwrap_or_else(|_| Err("the thread's agent stopped".into()))
+        tx.try_send(Cmd::StartQueued { text: text.into(), taken: true, reply }).map_err(|_| "too many requests are waiting for this thread".to_string())?; rx.await.unwrap_or_else(|_| Err("the thread's agent stopped".into()))
+    }
+    /// Task.repair: the idle parent that holds a task's result as its newest message starts its turn with it (TurnChanged running only; the caller logs TaskDelivered).
+    pub async fn resume_with(self: &Arc<Self>, thread: &str, text: &str) -> Result<(), String> {
+        let tx = self.actor(thread); let (reply, rx) = oneshot::channel();
+        tx.try_send(Cmd::StartQueued { text: text.into(), taken: false, reply }).map_err(|_| "too many requests are waiting for this thread".to_string())?; rx.await.unwrap_or_else(|_| Err("the thread's agent stopped".into()))
     }
     /// Steer.go: a running non-Claude turn stops and starts again with `text`; Claude takes it in place (and starts a process if none lives). Logs TurnChanged running either way.
     pub async fn steer(self: &Arc<Self>, thread: &str, text: &str) -> Result<(), String> {
@@ -261,8 +267,8 @@ impl Actor {
         match c {
             Cmd::User { msg, text, role, origin, extra, reply } => { let r = self.user(msg, text, role, origin, extra).await; let _ = reply.send(r); }
             Cmd::Interrupt { reply } => { self.interrupt().await; let _ = reply.send(()); }
-            Cmd::Stop { reply } => { if self.live_proc.is_some() { self.ag.stats.procs_exited.fetch_add(1, Relaxed); } self.stop().await; self.lines = None; self.exit = None; self.next_ride = false; self.asked.clear(); self.live_proc = None; let _ = reply.send(()); }
-            Cmd::StartQueued { text, reply } => { let r = self.start_queued(text).await; let _ = reply.send(r); }
+            Cmd::Stop { reply } => { self.cx.running = false; if self.live_proc.is_some() { self.ag.stats.procs_exited.fetch_add(1, Relaxed); } self.stop().await; self.lines = None; self.exit = None; self.next_ride = false; self.asked.clear(); self.live_proc = None; let _ = reply.send(()); }
+            Cmd::StartQueued { text, taken, reply } => { let r = self.start_queued(text, taken).await; let _ = reply.send(r); }
             Cmd::Steer { text, reply } => { let r = self.steer(text).await; let _ = reply.send(r); }
             Cmd::Answer { ask, answer } => { if let Some(req) = self.asked.remove(&ask) { let lines = self.driver.as_mut().map(|d| d.answer(&req, &answer)).unwrap_or_default(); if let Some(p) = &self.live_proc { for l in lines { let _ = p.input.try_send(l); } } } }
         }
@@ -312,13 +318,13 @@ impl Actor {
     }
 
     /// Wt.start / Hub.resume: an idle thread's queued text runs as one turn (QueueTaken, TurnChanged running).
-    async fn start_queued(&mut self, text: String) -> Result<(), String> {
+    async fn start_queued(&mut self, text: String, taken: bool) -> Result<(), String> {
         let (t, cwd, cx) = { let w = self.ag.world().await; let Some(t) = w.threads.get(&self.th).cloned() else { return Err("unknown thread".into()) }; (t, w.cwd(&self.th), w.cx(&self.th)) };
         if self.cx.running || t.turn == "running" { return Err("the thread's turn is running".into()) }
         if t.provider != "claude" && providers::driver(&t.provider).is_none() { return Err(format!("{} threads are not run by the Rust hub yet", t.provider)) }
         let (now, th) = (now_s(), self.th.clone());
         self.codex = t.provider != "claude"; self.prov = t.provider.clone(); self.model = t.model.clone(); self.cx = cx; self.cwd = cwd.clone();
-        self.commit(vec![json!({"$":"QueueTaken","thread":th,"at":now}), json!({"$":"TurnChanged","thread":th,"state":"running","at":now})]).await;
+        let mut ev = vec![]; if taken { ev.push(json!({"$":"QueueTaken","thread":th,"at":now})) } ev.push(json!({"$":"TurnChanged","thread":th,"state":"running","at":now})); self.commit(ev).await;
         self.cx.running = true; self.ag.stats.turns.fetch_add(1, Relaxed); self.jobs_start(&cwd, "");
         if self.codex { self.codex_run(&t, &cwd, &text).await } else { let msg = hub_id("q", now, self.ag.seq()); self.claude_send(&t, &cwd, &msg, &text, &text, now).await }
         Ok(())
