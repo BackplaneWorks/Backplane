@@ -35,4 +35,8 @@ console.log(`events full ${L.length}, compacted (K=${K}) ${compact(L,K).length}`
 for(const v of ['recent','thread']){const d=[];diff(full[v].shown,comp[v].shown,'shown',d);diff(full[v].overlay,comp[v].overlay,'overlay',d);diff(full[v].session,comp[v].session,'session',d);
   const c={};for(const x of d){const k=x.split(': ')[0].replace(/\[\d+\]/g,'[]');c[k]=(c[k]||0)+1}
   console.log(`-- view ${v}: ${d.length} differing paths`);for(const [k,n] of Object.entries(c).slice(0,25))console.log('  ',n,k);if(d.length)console.log('   first:',d[0].slice(0,200))}
-process.exit(0);
+// an equal-views CHECK: only the policy's own change count (the host sets the real one with V `seq`) and, on a thread view, the entries the page supplies may differ
+const ALLOWED=/^(shown|overlay\.j)\.(hubs\[\d+\]\.changes|seq|thread\.(entries|earlier)|j\.seq)/;let bad=0;
+for(const v of ['recent','thread']){const d=[];diff(full[v].shown,comp[v].shown,'shown',d);diff(full[v].overlay,comp[v].overlay,'overlay',d);diff(full[v].session,comp[v].session,'session',d);
+  for(const x of d){const path=x.split(': ')[0].replace(/^overlay\./,'overlay.j.').replace(/^overlay\.j\.j\./,'overlay.j.');if(!ALLOWED.test(path)&&!/^overlay\.j\.(seq|thread\.(entries|earlier))$/.test(path)&&!/^shown\.(hubs\[\d+\]\.changes|thread\.(entries|earlier))$/.test(path)){bad++;console.log('FAIL view',v,x.slice(0,200))}}}
+console.log(bad?`FAILED ${bad} unexpected differences`:'ALL OK: the compacted log gives the same screen');process.exit(bad?1:0);
