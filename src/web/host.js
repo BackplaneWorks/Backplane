@@ -772,7 +772,11 @@ const previewViews = new ViewPrefetch({
     transitionViews.put({...scope,target,selected:session.sel,route:session.route||null,settings:false},shown);
   },
   // (the thread on show with its runs open: only what they hold is kept)
-  folds:(shown, target)=>{ if (targetKey(target) === shownFor) foldFeedback.seen(pictureNode(shown)); },
+  folds:(shown, target, window)=>{
+    if (targetKey(target) !== shownFor) return;
+    foldFeedback.seen(pictureNode(shown));
+    if (window && remoteEpoch) thinContinuations.learn(location.origin, { epoch: remoteEpoch, target, window });
+  },
 });
 // The palette's chosen row, when it is a thread, is read ahead once the
 // list has stayed 200 ms (its Enter then draws the thread's picture with
