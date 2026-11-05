@@ -67,8 +67,7 @@ impl Core {
         let after = live.into_iter().chain(asks).chain(told).chain(quiet).chain(meta).collect();
         Derived { core, end, marks, after }
     }
-    pub fn tick(&self, now_s: u64) -> Vec<Value> { if self.st.get("autosettle.version", "") != "1" { return autosettle::upgrade(&self.st, now_s) } // Hub.autosettle.upgrade, once, first
-        let mut v = autosettle::changes(&self.st, now_s); v.extend(autosettle::tick_post(&self.st, now_s)); v.extend(turnend::told_prune(&self.st, now_s)); v }
+    pub fn tick(&self, now_s: u64) -> Vec<Value> { let mut v = autosettle::changes(&self.st, now_s); v.extend(autosettle::tick_post(&self.st, now_s)); v.extend(turnend::told_prune(&self.st, now_s)); v }
 }
 
 struct Inner {
@@ -112,7 +111,7 @@ impl Policy {
     }
     /// The log through line `len` was folded into `core` (read AFTER the transform was registered): install it, replay the batches seen
     /// since past `len`, and return the events they derive (to be committed by the caller).
-    pub fn finish_boot(&self, core: Core, len: u64) -> Vec<Value> {
+    pub fn finish_boot(&self, core: Core, len: u64, now_s: u64) -> Vec<Value> {
         let mut g = self.lock();
         g.core = core;
         let held = g.booting.take().unwrap_or_default();
@@ -122,6 +121,8 @@ impl Policy {
             let d = g.core.derive(&evs);
             derived.extend(d.end); derived.extend(d.after); // the batch itself is already in the log, and so are its marks
         }
+        // Hub.autosettle.upgrade (Hub.recover.v): once at start, after the log is folded; nothing at version 1. On a fresh home it sets the version.
+        derived.extend(autosettle::upgrade(&g.core.st, now_s));
         derived
     }
     pub fn tick(&self, now_s: u64) -> Vec<Value> {
@@ -146,7 +147,7 @@ mod tests {
     fn msg(th: &str, id: &str, role: &str, at: u64) -> Value { json!({"$":"MessagePosted","thread":th,"msg":id,"role":role,"text":"hello","at":at}) }
     const P: &str = r#"{"$":"ProjectCreated","id":"p","title":"p","root":"/r","at":1}"#;
     const T: &str = r#"{"$":"ThreadCreated","id":"t1","project":"p","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1}"#;
-    fn booted() -> Policy { let p = Policy::new(); let mut c = Core::new(); c.fold_line(P); c.fold_line(T); assert!(p.finish_boot(c, 2).is_empty()); p }
+    fn booted() -> Policy { let p = Policy::new(); let mut c = Core::new(); c.fold_line(P); c.fold_line(T); assert!(p.finish_boot(c, 2, 1000).iter().all(|e| e["key"] == "autosettle.version")); p }
     fn keys(evs: &[Value]) -> Vec<String> { evs.iter().filter_map(|e| e["key"].as_str().map(String::from)).collect() }
 
     #[test] fn lean_keeps_what_policies_read_and_drops_what_grows() {
@@ -178,8 +179,8 @@ mod tests {
         assert_eq!(p.before_commit(3, vec![msg("t1", "a1", "assistant", 10)]).len(), 1);
         assert!(p.tick(100).is_empty() && p.read("t1", 100).is_empty(), "nothing is decided while booting");
         let mut c = Core::new(); c.fold_line(P); c.fold_line(T);
-        let derived = p.finish_boot(c, 2);
-        assert_eq!(keys(&derived), vec!["liveness.t1".to_string(), "autosettle.quiet.t1".to_string(), "autosettle.output.t1".to_string()], "only the batch past line 2 derives");
+        let derived = p.finish_boot(c, 2, 1000);
+        assert_eq!(keys(&derived).into_iter().filter(|k| k != "autosettle.version").collect::<Vec<_>>(), vec!["liveness.t1".to_string(), "autosettle.quiet.t1".to_string(), "autosettle.output.t1".to_string()], "only the batch past line 2 derives");
         let again = p.before_commit(4, vec![msg("t1", "a2", "assistant", 11)]);
         assert_eq!(again.len(), 4, "after boot the batch carries its own events");
     }
@@ -190,7 +191,7 @@ mod tests {
         assert_eq!(p.before_commit(3, vec![msg("t1", "a2", "assistant", 12)]).len(), 1, "buffered while resyncing");
         assert!(!p.commit_failed(3), "a failed batch seen while resyncing just leaves the buffer");
         let mut c = Core::new(); c.fold_line(P); c.fold_line(T);
-        assert!(p.finish_boot(c, 2).is_empty(), "the failed batch is gone from the buffer");
+        assert!(p.finish_boot(c, 2, 1000).iter().all(|e| e["key"] == "autosettle.version"), "the failed batch is gone from the buffer");
     }
     #[test] fn a_failed_batch_with_several_buffered_commits_forgets_all_of_them() {
         // the writer's batch held three commits (seq 3, 4, 5) and calls commit_failed once with its base, 3; an earlier commit (2) was written
@@ -198,7 +199,7 @@ mod tests {
         for (s, id) in [(2u64, "w"), (3, "x"), (4, "y"), (5, "z")] { let _ = p.before_commit(s, vec![msg("t1", id, "assistant", 10 + s)]); }
         assert!(!p.commit_failed(3), "still booting: just forget");
         let mut c = Core::new(); c.fold_line(P); c.fold_line(T);
-        let derived = p.finish_boot(c, 1);
+        let derived = p.finish_boot(c, 1, 1000);
         let outs: Vec<&str> = derived.iter().filter(|e| e["key"].as_str() == Some("autosettle.output.t1")).map(|e| e["value"].as_str().unwrap()).collect();
         assert_eq!(outs, vec!["w"], "only the commit before the failed base is replayed; x, y, z were never written");
     }
@@ -206,7 +207,7 @@ mod tests {
         let p = Policy::new(); let mut c = Core::new();
         for l in [P, T, r#"{"$":"MessagePosted","thread":"t1","msg":"mu1","role":"user","text":"do it","at":5}"#,
                   r#"{"$":"MessagePosted","thread":"t1","msg":"ma1","role":"assistant","text":"Done.\nmore","at":6}"#, r#"{"$":"TurnChanged","thread":"t1","state":"running","at":7}"#] { c.fold_line(l); }
-        assert!(p.finish_boot(c, 5).is_empty());
+        assert!(p.finish_boot(c, 5, 1000).iter().all(|e| e["key"] == "autosettle.version"));
         let end = json!({"$":"TurnChanged","thread":"t1","state":"completed","_end":true,"at":100});
         let out = p.before_commit(6, vec![end, json!({"$":"UsageSet","thread":"t1","used":1,"window":2,"at":100})]);
         let ks = keys(&out);
@@ -223,7 +224,7 @@ mod tests {
         let p = Policy::new(); let mut c = Core::new();
         for l in [P, T, r#"{"$":"MessagePosted","thread":"t1","msg":"mu1","role":"user","text":"do it","at":5}"#,
                   r#"{"$":"MessagePosted","thread":"t1","msg":"ma1","role":"assistant","text":"Done.","at":6}"#, r#"{"$":"TurnChanged","thread":"t1","state":"running","at":7}"#] { c.fold_line(l); }
-        assert!(p.finish_boot(c, 5).is_empty()); p
+        assert!(p.finish_boot(c, 5, 1000).iter().all(|e| e["key"] == "autosettle.version")); p
     }
     #[test] fn a_stop_and_a_spawn_failure_write_no_clock_and_no_alert() {
         // Bend does not run Ended.out for Retire.turn.f (Stop) or Hub.spawned.fail: their TurnChanged carries no end marker
@@ -255,5 +256,19 @@ mod tests {
         assert!(out[0].get("_end").is_none(), "the marker is stripped even then");
         assert!(p.take_poisoned(), "the host is told to fold the log again"); assert!(!p.take_poisoned());
         assert!(p.tick(10).is_empty(), "nothing is decided until the fold is done");
+    }
+    #[test] fn the_legacy_upgrade_runs_once_at_start_after_the_fold() {
+        // a home below version 1 with a launched thread and its launch mail: finish_boot returns Auto.upgrade's events; at version 1 it returns none
+        let p = Policy::new(); let mut c = Core::new();
+        for l in [P, T, r#"{"$":"ThreadLaunched","id":"t1","by":"boss","report":true,"at":2}"#,
+                  r#"{"$":"MailPosted","id":"t:t1:lr-1","conv":"c","from":"thread:t1","to":"thread:boss","kind":"launch","ref":"","want":"","head":"","size":0,"at":9}"#] { c.fold_line(l); }
+        let up = p.finish_boot(c, 4, 5000);
+        assert!(up.iter().any(|e| e["key"] == "autosettle.delivery.t1\tthread:boss" && e["value"] == "9"), "{:?}", keys(&up));
+        assert_eq!(up.iter().filter(|e| e["key"] == "autosettle.version").count(), 1, "the version is set once");
+        let p2 = Policy::new(); let mut c2 = Core::new();
+        for l in [P, T, r#"{"$":"SettingSet","key":"autosettle.version","value":"1","at":2}"#] { c2.fold_line(l); }
+        assert!(p2.finish_boot(c2, 3, 5000).is_empty(), "nothing at version 1");
+        let p3 = Policy::new(); let c3 = Core::new();
+        assert_eq!(keys(&p3.finish_boot(c3, 0, 5000)), vec!["autosettle.version".to_string()], "a fresh home gets the version, as Auto.upgrade does on an empty state");
     }
 }
