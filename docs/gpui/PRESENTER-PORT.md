@@ -8,10 +8,27 @@ indexed, never the whole log in memory. Bar: **same answers as today**, checked 
 
 ## Decision needed from the person
 
-Your bar was memory **flat** at two log sizes. This port cannot meet that word: the log index and the read model grow with events (the store keeps an offset per event, `Model` an entry per
-message). Measured so far about 38 B/event all in (38 MB at 1M events; 18.7 B of RSS per committed event), so about 64 MB at 1.69M and 380 MB at 10M. What the port does give: no helper and no whole-log fold
-(the 3.6 GB at 1.69M events is gone), `meta` bounded by threads/projects/tasks, and a measured slope. Proposed replacement bar: slope at most 64 B/event, measured at 0.85M and 1.69M synthetic events, and RSS
-steady while no events arrive. Say if you want a different number, or flat as originally written (which would need the index on disk, a larger design).
+The memory bar is **not accepted**; this section is a proposal. Your wording asked for memory flat in the log. This port cannot be flat: the log index and the read model grow with events (the store keeps an
+offset per event, `Model` an entry per message). Measured so far about 38 B/event all in (38 MB at 1M events, which includes the hub's own baseline; 18.7 B of RSS per committed event), so about 64 MB at 1.69M
+and 380 MB at 10M. What the port gives for certain: no helper and no whole-log fold (the 3.6 GB at 1.69M events is gone), `meta` bounded by threads/projects/tasks, and a measured slope.
+Working proposal: slope at most 64 B/event, measured at 0.85M and 1.69M synthetic events, and RSS steady while no events arrive. **That proposal is over a 500 MB ceiling at 10M events** (64 B x 10M = 640 MB), which is the
+number Bub gave you; so the next section says how to make 500 MB at 10M possible and what it costs. Say which bar you want: the 64 B/event proposal, a hard 500 MB at 10M, or flat as first written (an on-disk index, a larger design).
+
+### What a hard 500 MB at 10M events takes
+
+Budget: 500 MB / 10M = 50 B/event all in. Fixed costs come off the top (hub baseline about 10 MB RSS, `meta` for ~11k threads a few MB, page cache 8 MB, per-client outboxes up to 8 MiB each x clients: 20 clients is 160 MB in the worst case, so
+`OUTBOX_MAX` must shrink or be counted), leaving about 40 B/event for the log index and the read model, i.e. 400 MB at 10M. Where the bytes are today (from the code, not yet measured by structure):
+
+| Structure | Today | Change | After (estimate) |
+|---|---|---|---|
+| `store.rs` `idx: Vec<(u64, u32)>` per event | 16 B (tuple padding) | offsets in blocks of 64: one `u64` base per block, `u32` lengths delta-coded | about 4.5 B |
+| `model.rs` `all: Vec<u32>` per entry | 4 B | kept | 4 B |
+| `model.rs` `own`/`sent` `Ent{seq,ord}` per entry | 8 B | drop `ord` (it is the position in `all`; recover by binary search) | 4 B |
+
+Entries are messages and activities only (about a third of the synthetic log); other events cost the index only. Estimate: about 4.5 B per event plus 8 B per entry, so about 7-12 B/event, 70-120 MB at 10M, against a 400 MB allowance.
+These are estimates until measured: the first deliverable is a per-structure heap breakdown at 0.85M and 1.69M events, then the changes above, then the same run again. Also needed: start streams the file without retaining lines, so the start peak stays in the same
+budget (checked in the measurement); outboxes counted in the budget. If the estimate is wrong the fallback is a sidecar index file read through `mmap`/`pread` (anonymous memory stays flat; touched file pages count as reclaimable cache, which a cgroup limit may or may not
+count as used), a larger design that I would bring back to you before starting.
 
 ## What the helper does now
 
