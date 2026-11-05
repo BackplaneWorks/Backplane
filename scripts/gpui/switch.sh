@@ -22,10 +22,10 @@
 #   HUB_BIN POLICY_BIN CLIENT_BIN  by absolute path; default the main checkout's build/gpui/{hub/prov/backplane-hub-full,
 #                   slim/bp-policy-bp,linux/backplane-gpui}
 #
-# SWITCHING BACK. Starting this changes nothing of today's app, so going back is `rollback` and nothing else. What is lost is
-# whatever was done on the copy: threads, messages, settings and project edits made in the GPUI app live in the copy's own log,
-# not in today's. Nothing from the copy flows back into ~/.backplane-bend, and nothing done in today's app after the copy was
-# made shows up here (a start makes a fresh copy every time).
+# SWITCHING BACK. Starting this changes nothing of today's app, so going back is `rollback` and nothing else. Lost: the threads,
+# messages and settings made on the copy (they live only in its own log). NOT undone: files an agent changed in a real folder (in the
+# side-by-side mode agents run in real folders; with stand-ins only, none). Nothing flows back into ~/.backplane-bend, and nothing done
+# in today's app after the copy was made shows up here (a start makes a fresh copy every time).
 set -eu
 ROOT=${GPUI_MAIN:-/home/h/Documents/i2cjak/backplane-gpui}
 HERE=$(cd "$(dirname "$0")/../.." && pwd)
@@ -203,7 +203,7 @@ cmd_rollback() {
   cmd_stop
   [ "$H" = "$SW/home" ] && [ -d "$H" ] && rm -rf "$H" && echo "copy deleted."
   echo "Nothing to undo: today's app (3787, ~/.backplane-bend) was never stopped or changed."
-  echo "Lost by going back: everything done on the copy (threads, messages, settings, edits), since it lived only in the copy."
+  echo "Lost by going back: the threads, messages and settings made on the copy. Files an agent changed in a real folder stay changed (the copy keeps no history of them; use git)."
 }
 
 case "${1:-}" in
