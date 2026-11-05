@@ -3,7 +3,6 @@
 pub mod asks;
 pub mod attach;
 pub mod drafts;
-pub mod cache;
 pub mod composer;
 pub mod edit;
 mod glue;
@@ -14,7 +13,6 @@ use std::collections::HashMap;
 /// State the screens keep between frames (input boxes, caches); the hub owns everything else.
 pub struct Screens {
     pub ask_inputs: HashMap<String, Entity<composer::Composer>>,
-    pub pictures: cache::PictureCache,
     pub attacher: attach::Attacher,
     pub drafts: drafts::Writer,
     /// Timeline scroll offset per thread, so a thread left scrolled up keeps its place.
@@ -28,6 +26,6 @@ pub struct Screens {
 
 impl Screens {
     pub fn new<T: 'static>(_cx: &mut Context<T>, target: Option<attach::Target>, drafts_path: std::path::PathBuf, saved: HashMap<String, String>) -> Self {
-        Self { ask_inputs: HashMap::new(), pictures: cache::PictureCache::new(8), attacher: attach::Attacher::new(target), drafts: drafts::Writer::start(drafts_path, saved), offsets: HashMap::new(), await_draft: None, pending_draft: None, draft_timer: false }
+        Self { ask_inputs: HashMap::new(), attacher: attach::Attacher::new(target), drafts: drafts::Writer::start(drafts_path, saved), offsets: HashMap::new(), await_draft: None, pending_draft: None, draft_timer: false }
     }
 }
