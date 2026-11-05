@@ -644,3 +644,5 @@ law far_route_here_stays rust far_route_here_stays
 law far_route_goes_home rust far_route_goes_home_and_the_reply_comes_back_as_ours
 law far_allowed_only_methods rust far_allowed_only_methods_and_far_no_delete
 law far_no_delete rust far_allowed_only_methods_and_far_no_delete
+# the test runs the real Agents module with a stand-in that never answers: archive ends the running turn (interrupted) and archives; the recorder test (archive_running_stops) states the call order
+law archive_running_stops rust archive_running_stops_through_the_real_agents_module

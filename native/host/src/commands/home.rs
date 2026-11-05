@@ -1,6 +1,7 @@
 //! The project home's snapshot (src/server/effects/project-home.js `bp_project_home`, core/project-home.bend): the files that make a project's home
 //! page, read within the project's folder only. `project.home {project, op?}`: no op is the snapshot; `document` reads a window of one of its files;
 //! `intent` writes `.backplane/intent.md` (revision-checked, atomically) and answers the snapshot. Reads are bounded (windows, 256 scanned files, 32 rows).
+//! Reads are whole-file with caps (8 MiB for the fab/config metadata, 16 MiB for a saved check report; a bigger file counts as unreadable): the JS effect streams them in constant memory.
 //! Not ported: the `price` op's `price` field (the order server's estimate for the fab files; settings/fab.rs owns that client).
 use crate::files::git;
 use serde_json::{json, Map, Value};
@@ -45,7 +46,7 @@ impl Home {
 
 /// bp_project_metadata: the approved top-level scalars of a JSON file, and the scalar entries of the named maps.
 fn metadata(path: &Path, keys: &[&str], maps: &[&str]) -> Result<Map<String, Value>, String> {
-    if std::fs::metadata(path).map_or(0, |m| m.len()) > 64 << 20 { return Err("Incomplete metadata".into()) }
+    if std::fs::metadata(path).map_or(0, |m| m.len()) > 8 << 20 { return Err("Incomplete metadata".into()) }
     let v: Value = serde_json::from_slice(&std::fs::read(path).map_err(|e| e.to_string())?).map_err(|_| "Malformed metadata".to_string())?;
     let Value::Object(o) = v else { return Err("Incomplete metadata".into()) };
     let mut out = Map::new();
@@ -59,7 +60,7 @@ fn metadata(path: &Path, keys: &[&str], maps: &[&str]) -> Result<Map<String, Val
 
 /// bp_project_report: a saved DRC/ERC report's source, date and counts.
 fn report(path: &Path) -> Option<Value> {
-    if std::fs::metadata(path).ok()?.len() > 256 << 20 { return None }
+    if std::fs::metadata(path).ok()?.len() > 16 << 20 { return None }
     let v: Value = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
     fn walk(v: &Value, key: &str, r: &mut (u64, u64, u64)) {
         match v {
