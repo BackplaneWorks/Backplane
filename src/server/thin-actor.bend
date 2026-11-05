@@ -636,10 +636,12 @@ def Actor.rpc(+command: J.Json) -> J.Json:
 # client.bend's Dv.sync, with no action of the page's; and mech.list:
 # Mech's parts, listed when Mech comes on screen, Mpage.sync, a thread on
 # it chosen again included, which on this page is no action; files.dir
-# reads a restored Files panel's folder the same way)
+# reads a restored Files panel's folder the same way; and fab.look: the
+# thread's ordering card, asked by the render itself: client.bend's
+# Fab.sync.shown)
 def Actor.read_only.legacy(+command: J.Json) -> Bool:
   Bool.and(String.eq(J.Json.get_str(command, "type", ""), "send"),
-    Nat.is_lt(U.Keys.pos(["mail.list", "mail.read", "mail.find", "git.diff", "mech.list", "review.bom", "review.checks", "history.refs", "files.dir", "browser.seen"], J.Json.get_str(Actor.rpc(command), "m", "")), 10n))
+    Nat.is_lt(U.Keys.pos(["mail.list", "mail.read", "mail.find", "git.diff", "mech.list", "review.bom", "review.checks", "history.refs", "files.dir", "browser.seen", "fab.look"], J.Json.get_str(Actor.rpc(command), "m", "")), 11n))
 
 def Actor.read_only(+command: J.Json) -> Bool:
   Bool.or(Actor.read_only.legacy(command), Bool.and(String.eq(J.Json.get_str(command, "type", ""), "send"),
@@ -695,7 +697,7 @@ def Actor.accept( +a: Actor, +r: V.ActResult, +queue: Bool) -> Actor:
 # Mech's parts and a restored Files folder, Mpage.sync.m and Fm.sync: once per thread and
 # view, so a render that changed nothing asks for nothing)
 def Actor.mail_ready( +a: Actor) -> Actor:
-  Actor.accept(a, V.ActResult.web(MA.MA.after(U.Mailv.sync(U.Rp.sync(U.Dv.sync(U.Fm.sync(U.Mpage.sync.m(U.Home.refresh(U.Act{Actor.ui(a), Nil{}})))))))), True{})
+  Actor.accept(a, V.ActResult.web(MA.MA.after(U.Fab.sync.shown(U.Mailv.sync(U.Rp.sync(U.Dv.sync(U.Fm.sync(U.Mpage.sync.m(U.Home.refresh(U.Act{Actor.ui(a), Nil{}}))))))))), True{})
 
 def Actor.origin( +a: Actor, +origin: String) -> Actor:
   match a:

@@ -8733,6 +8733,20 @@ def Fab.sync(a: Act) -> Act:
     case Act{+u, cmds}:
       Fab.sync.home(PH.Home.is(Ui.sel(u)), Act{u, cmds})
 
+# The card asked for by the hub's own render of a view (thin-actor.bend's
+# Actor.mail_ready), before it draws a thread: opening a thread there is no
+# action, so the page asked with a "fab-look" action after each open, a
+# whole render and two round trips before Ready to order could show.
+# Threads only: a project home asks for its own (Home.sync).
+def Fab.sync.shown.k(home: Bool, +u: Ui, cmds: List<&2, Cmd>) -> Act:
+  match home:
+    case True{}: Act{u, cmds}
+    case False{}: Fab.sync.k(Fab.want(u), u, cmds)
+
+def Fab.sync.shown(a: Act) -> Act:
+  match a:
+    case Act{+u, cmds}: Fab.sync.shown.k(PH.Home.is(Ui.sel(u)), u, cmds)
+
 # the hub's card for a thread
 def Fab.has(+o: J.Json) -> Bool:
   Bool.not(String.eq(J.Json.show(Maybe.default(&2, J.Json, J.Json.get(J.Json.get_obj(o, "result"), "goal"), J.Null{})), "null"))

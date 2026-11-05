@@ -47,7 +47,7 @@
     "src/core/charter.bend": "7f906bdea712f6ff6162735c8cc133767ec0f9289c3d0bee6dfedbd4d75ad981",
     "src/core/chat-pending.bend": "4a6dcabdd6b5653d664729a07d7ff044488732a9e684a7832c18e20502442db1",
     "src/core/client-language.bend": "9315c77e9837deac6813974c711e52a2b4b885df7ecd1fa28ad8b84fb0bc4bac",
-    "src/core/client.bend": "47cb22bfb5e61595b1716c6765a2a22d822e3ae1cf67b8bc59f6d4eab18f2b5e",
+    "src/core/client.bend": "46d12f76764b3ffb4c95bf3045c9c4e725acde65dc0c1261d92d540824a6cf88",
     "src/core/codec.bend": "75de46900a06e39152c37d4ac5c433a9fbabd522ff20baab18eb5ea5b0ae2bd2",
     "src/core/cron.bend": "6f89a001df0261a25c878616ea66c235e169f7fc1c726d39e695fce8adb57332",
     "src/core/deploy.bend": "ebee4e63a52cf41ae001bebcdbb7fb010ad71c1e04e481292585740d88a39cc4",
@@ -174,7 +174,7 @@
     "src/core/wnote.bend": "019cf6a357f4428774176585931a2df17b83d2347b9e1078428f578968e445d5",
     "src/mobile/hubs.bend": "e8d78ec982828a8018c0845a36d03123c47bf9c94b5d4cee855f9358ccc293a3",
     "src/mobile/screen.bend": "49904f2c5310890302efd526c459b81c17899562169b441ab18f056cecb84a43",
-    "src/server/thin-actor.bend": "242591e049cd0e3a26e6468074727628dd60b1e1b5acfadfd8ed80f640922832",
+    "src/server/thin-actor.bend": "fc0909a5d7287c5daedd890ab68bbfa272f9f4c7dac8c3263214a30bad702a09",
     "src/server/thin-body.bend": "779e72f8bb69990c74bf4acdd52f50fb1e0ceaa8771cd38044bef81d2c1a3680",
     "src/server/thin-mirror.bend": "b488dc7c45fe49bb1aa17966f454f1ee0e9cfef7db4d619c265c298c9bc94e92",
     "src/server/thin-side-index.bend": "92ac2f5fb70858c3db946f316e9e25f0833251b253727c759b01130f61f4a96d",
@@ -1190,5 +1190,5 @@
     "limits": "Full PROOF.bend attempted on this source under the 3.7e9 cap; OOM-killed. The three new laws and 13 copy-choice UI assertions passed separately. No native-device acceptance claimed.",
     "inheritedMainReview": "Also reviewed main changes since 3d17db4ec7: accounts overlay catalog fast path reads committed bindings; CEF changes only the new-tab URL constant; bot header/tab identity keys add no state reads; model picker parses existing info catalog and the same retained scratch query. No new ordinary draft-body reader or sidebar filtering/authority change. The added model-catalog import is pure catalog/JSON preparation with no Ui or draft access; its current source is pinned too."
   },
-  "snappyActorReview20261105": "thin-actor.bend: an owned reply or desk-only info that leaves the connection Ui's drawn parts unchanged keeps the view clean (no view.changed). No sidebar draft reader changed."
+  "snappyActorReview20261105": "thin-actor.bend: an owned reply or desk-only info that leaves the connection Ui's drawn parts unchanged keeps the view clean (no view.changed); mail_ready asks a shown thread's fab.look card itself (client.bend Fab.sync.shown, a hub-run read). No sidebar draft reader changed."
 }

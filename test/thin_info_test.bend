@@ -96,6 +96,18 @@ def replied(+a: A.Actor, +o: String) -> A.Actor:
 def secrets() -> String:
   "{\"t\":\"reply\",\"id\":5,\"ok\":true,\"secrets\":\"[]\",\"vault\":\"{}\"}"
 
+def fab_count(xs: List<&2, J.Json>, n: Nat) -> Nat:
+  match xs:
+    case Nil{}: n
+    case +x <> rest: fab_count(rest, Nat.add(n, Bool.pick(Nat, String.contains(J.Json.get_str(x, "text", ""), "fab.look"), 1n, 0n)))
+
+def project_actor() -> A.Actor:
+  A.Actor{U.Ui.select.k(U.Ui.adopt(U.Ui.init(100n), M.State.replay([M.ProjectCreated{"p", "Project", "/fixture", 1n},
+    M.ThreadCreated{"t", "p", "Fixture", M.Local{}, "", "", "codex", "", 1n}], M.State.empty())), "t"), "view", target(), Map.new(&2, String), Nil{}, False{}, Nil{}}
+
+def fab_reads(+a: A.Actor) -> Nat:
+  fab_count(A.Actor.queued(a), 0n)
+
 def main.quiet() -> IO(Unit):
   +once = A.Actor.clean(replied(actor(), secrets()))
   do IO<Unit>:
@@ -108,6 +120,8 @@ def main.quiet() -> IO(Unit):
     check("a first secret list dirties", A.Actor.dirty(replied(actor(), secrets())))
     C.Check.str("the secret list is kept", U.Ui.scratch(A.Actor.ui(once), "@secrets"), "[]")
     check("the same secret list again leaves the view clean", Bool.not(A.Actor.dirty(replied(once, secrets()))))
+    C.Check.str("a shown thread's render asks for its order card itself", Nat.show(fab_reads(A.Actor.mail_ready(project_actor()))), "1")
+    C.Check.str("and only once while the thread stays as it was", Nat.show(fab_reads(A.Actor.mail_ready(A.Actor.clean(A.Actor.mail_ready(project_actor()))))), "0")
     check("a changed secret list dirties", A.Actor.dirty(replied(once, "{\"t\":\"reply\",\"id\":6,\"ok\":true,\"secrets\":\"[1]\",\"vault\":\"{}\"}")))
 
 def main() -> IO(Unit):
