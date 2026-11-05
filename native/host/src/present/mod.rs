@@ -58,6 +58,19 @@ impl Presenter for Routed {
     fn why_down(&self) -> Option<String> { self.helper.why_down() }
 }
 
+/// The helper-less hub's base presenter: a view nothing ported answers says so (the session turns the error into the retryable PRESENTER_UNAVAILABLE) and
+/// nothing is folded into it, so it holds nothing and the hub does not feed it the log (`wants_log` is false).
+pub struct NotPorted;
+impl Presenter for NotPorted {
+    fn name(&self) -> &'static str { "not ported (no helper)" }
+    fn fold<'a>(&'a self, _frame: &'a Value) -> Fut<'a, ()> { Box::pin(async { Ok(()) }) }
+    fn view<'a>(&'a self, params: &'a Value) -> Fut<'a, Value> {
+        Box::pin(async move { anyhow::bail!("not ported: {} {}", params["target"]["kind"].as_str().unwrap_or("?"), params["action"].as_str().unwrap_or("")) })
+    }
+    fn ping(&self) -> Fut<'_, ()> { Box::pin(async { Ok(()) }) }
+    fn wants_log(&self) -> bool { false }
+}
+
 #[allow(dead_code)]
 type _R = Result<()>;
 
@@ -75,6 +88,13 @@ mod tests {
         let r = Routed { helper: helper(), screens: vec![Box::new(Mine)], dump: None };
         assert_eq!(r.view(&json!({"target":{"kind":"thread","id":"t"}})).await.unwrap()["shown"]["by"], "rust");
         assert_eq!(r.view(&json!({"target":{"kind":"recent"}})).await.unwrap()["shown"]["by"], "helper");
+    }
+    #[tokio::test] async fn without_a_helper_an_unported_view_says_so_and_the_log_is_not_fed() {
+        let r = Routed { helper: Arc::new(NotPorted), screens: vec![Box::new(Mine)], dump: None };
+        assert_eq!(r.view(&json!({"target":{"kind":"thread","id":"t"}})).await.unwrap()["shown"]["by"], "rust", "a ported screen still answers");
+        let e = r.view(&json!({"target":{"kind":"settings"},"action":"x"})).await.unwrap_err().to_string();
+        assert!(e.contains("not ported") && e.contains("settings"), "{e}");
+        assert!(!r.wants_log() && r.ping().await.is_ok() && !r.is_down());
     }
     #[tokio::test] async fn no_screens_is_the_helper_unchanged() {
         let r = Routed { helper: helper(), screens: vec![], dump: None };
