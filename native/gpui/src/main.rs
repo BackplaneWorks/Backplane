@@ -1,3 +1,4 @@
+#![recursion_limit = "256"]
 mod art;
 mod delta;
 mod hub;
