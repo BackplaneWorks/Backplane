@@ -516,18 +516,25 @@ fn norm_steps(s: &str, roots: &[&str]) -> String {
 
 // ---- laws that are about what the hub does with a message and a restart ----
 /// The log after messages sent to an idle thread, into a running turn, and into one that is streaming, by the person and by another thread.
+/// A user message with this text is in the log and the turn is running again right after it (so what follows it has landed).
+fn posted_then_running(ev: &[Value], text: &str) -> bool { ev.iter().position(|e| is(e, "MessagePosted") && e["text"] == text).map_or(false, |i| ev.get(i + 1).map_or(false, |n| turn_is(n, "running"))) }
 async fn deliveries() -> Vec<Value> {
     let sd = dir("dl-bin"); perf_standin(&sd, 5);
     let (hub, ag, _h, _w) = start("dl", |w| base_log(w, 2, ""), |_| Cli::standin(&sd)).await; let other = "t1700001001-1"; let from = len(&hub).await;
-    rpc(&hub, "turn.start", json!({"thread":T1,"text":"zqshort one"})).await; tokio::time::sleep(Duration::from_millis(400)).await;       // idle -> starts
-    rpc(&hub, "turn.start", json!({"thread":T1,"text":"two"})).await; tokio::time::sleep(Duration::from_millis(200)).await;                  // into the running turn
+    // each step waits for its own events to land (not for a clock): a loaded runner only makes it slower
+    rpc(&hub, "turn.start", json!({"thread":T1,"text":"zqshort one"})).await;                                                                          // idle -> starts
+    until(&hub, from, 30, |ev| posted_then_running(ev, "zqshort one")).await;
+    rpc(&hub, "turn.start", json!({"thread":T1,"text":"two"})).await;                                                                                  // into the running turn
+    until(&hub, from, 30, |ev| posted_then_running(ev, "two")).await;
     let (_, r) = rpc_mcp(&ag, other, "", "tools/call", json!({"name":"thread_send","arguments":{"threadId":T1,"text":"three"}})).await; assert_eq!(r["result"]["isError"], false); // another thread's message into it
-    tokio::time::sleep(Duration::from_millis(300)).await; let ev = log_from(&hub, from).await; ag.shutdown(); ev
+    let ev = until(&hub, from, 30, |ev| posted_then_running(ev, "three")).await; ag.shutdown(); ev
 }
+/// Wait until a file exists (a stand-in writes its pid when it starts): a loaded runner makes it slower, not wrong.
+async fn wait_file(p: &Path) { let end = Instant::now() + Duration::from_secs(30); while !p.exists() && Instant::now() < end { tokio::time::sleep(Duration::from_millis(20)).await } }
 fn held(ev: &[Value]) -> bool { ev.iter().any(|e| is(e, "TurnQueued") && !e["msg"].as_str().unwrap_or("").starts_with("handoff:")) }
 #[tokio::test(flavor = "multi_thread")] async fn deliver_never_waits() { assert!(!held(&deliveries().await)) }
 #[tokio::test(flavor = "multi_thread")] async fn deliver_held_go() { let ev = deliveries().await; assert!(!held(&ev) && ev.iter().filter(|e| turn_is(e, "running")).count() >= 1) }
-#[tokio::test(flavor = "multi_thread")] async fn deliver_held_steer() { let ev = deliveries().await; assert!(!held(&ev) && ev.iter().filter(|e| is(e, "MessagePosted") && e["role"] == "user").count() == 3) }
+#[tokio::test(flavor = "multi_thread")] async fn deliver_held_steer() { let ev = deliveries().await; let users: Vec<&str> = ev.iter().filter(|e| is(e, "MessagePosted") && e["role"] == "user").map(|e| e["text"].as_str().unwrap_or("")).collect(); assert!(!held(&ev), "nothing is held"); assert_eq!(users, vec!["zqshort one", "two", "three"], "the three messages, each posted once, in order") }
 #[tokio::test(flavor = "multi_thread")] async fn deliver_held_steer_k() { assert!(!held(&deliveries().await)) }
 #[tokio::test(flavor = "multi_thread")] async fn deliver_held_restart() {
     let sd = dir("dr-bin"); perf_standin(&sd, 1);
@@ -616,7 +623,7 @@ async fn codex_start(name: &str) -> (Arc<Hub>, Arc<Agents>, PathBuf) {
 }
 #[tokio::test(flavor = "multi_thread")] async fn interrupting_a_codex_turn_ends_its_process_and_keeps_the_ride() {
     let (hub, ag, sd) = codex_start("cx5").await; let from = len(&hub).await;
-    rpc(&hub, "turn.start", json!({"thread":T1,"text":"hang"})).await; tokio::time::sleep(Duration::from_millis(500)).await;
+    rpc(&hub, "turn.start", json!({"thread":T1,"text":"hang"})).await; wait_file(&sd.join("pid")).await;
     let pid: u32 = std::fs::read_to_string(sd.join("pid")).unwrap().trim().parse().unwrap(); assert!(proc::alive(pid));
     rpc(&hub, "turn.interrupt", json!({"thread":T1})).await;
     let ev = until(&hub, from, 10, |ev| ev.iter().any(|e| turn_is(e, "interrupted"))).await; assert!(ev.iter().any(|e| turn_is(e, "interrupted")));
@@ -709,7 +716,7 @@ const TESTCLI: &str = "#!/bin/sh\nread hello\necho '{\"q\":1}'\nread ans\necho \
 // ---- seams for the commands lane: agents.stop, agents.start_queued, agents.steer ----
 #[tokio::test(flavor = "multi_thread")] async fn steer_codex_restarts() { // law steer_codex_restarts: a running Codex turn stops and starts again with the text
     let (hub, ag, sd) = codex_start("st1").await; let from = len(&hub).await;
-    rpc(&hub, "turn.start", json!({"thread":T1,"text":"hang first"})).await; tokio::time::sleep(Duration::from_millis(500)).await;
+    rpc(&hub, "turn.start", json!({"thread":T1,"text":"hang first"})).await; wait_file(&sd.join("pid")).await;
     let pid: u32 = std::fs::read_to_string(sd.join("pid")).unwrap().trim().parse().unwrap();
     assert!(ag.steer(T1, "steered text").await.is_ok()); assert!(hub.rpc_for("agents.steer").is_none() && hub.rpc_for("agents.stop").is_none() && hub.rpc_for("agents.start_queued").is_none(), "not client methods: a socket client cannot call them");
     let ev = until(&hub, from, 20, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await;
