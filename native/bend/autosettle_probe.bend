@@ -127,7 +127,8 @@ def Ap.out(+st: M.State, +now: Nat, +cs: List<&2, M.Change>) -> J.Json:
     J.KV{"live", Ap.live(st, now, cs)},
     J.KV{"end", Ap.end(st, now, Ap.nofail(cs))},
     J.KV{"wakes", J.Json.arr(Ap.enc(B.Shelve.wakes(B.Shelve.tick.post(st, now, M.Work.kids.map(st)))))},
-    J.KV{"upgrade", J.Json.arr(Ap.enc(A.Auto.upgrade(st, now)))}])
+    J.KV{"upgrade", J.Json.arr(Ap.enc(A.Auto.upgrade(st, now)))},
+    J.KV{"reopen", J.Json.arr(Ap.enc(B.Shelve.auto.messages(cs, st, cs)))}])
 
 def main() -> IO(Unit):
   do IO<Unit>:
