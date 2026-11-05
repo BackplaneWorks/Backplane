@@ -15,7 +15,7 @@ use std::sync::{Mutex, MutexGuard};
 /// records) and nothing that grows with the log for its own sake (`stopped.<msg>`, `failed.<msg>`, token totals, uber op lines, session and
 /// seen counts...). A policy that starts reading another family adds its prefix here.
 const KEEP: &[&str] = &["settle.", "autosettle.", "launch.", "launched.", "thread.parent.", "bg.", "watch.", "order.wait.", "wake.", "wakes.", "lock.", "locks.",
-    "secret.ask.", "liveness.", "star.nudge.", "restart.retry", "provider.resume.", "thread.config.hold.", "watchdog.", "alert.", "summary.", "notify.", "push.webhook", "told."];
+    "secret.ask.", "liveness.", "star.nudge.", "restart.retry", "provider.resume.", "thread.config.hold.", "watchdog.", "alert.", "summary.", "notify.", "push.webhook", "told.", "project.dormant."];
 // `told.` is a ledger that grows with the log until the minute tick prunes it (Told.prune: 30 days, 2000 records, run by `Core::tick`): only
 // its keys are kept (`lean_value`), the prune reads nothing else. A turn's input (launch.input.<t>, fallback.input.<t>: 10-20 KB each) and a
 // thread's riding mail (ride.) are never kept.
