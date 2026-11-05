@@ -37,7 +37,7 @@ Allowance for the index and read model = 500 MB - (baseline + folds + page cache
 | hub baseline | about 10 MB | the earlier spike host; today's hub unmeasured (guess) |
 | page cache | 8 MB | a plan |
 | outboxes | 40 MB | assumption above; `OUTBOX_MAX` is 8 MiB today |
-| `state::State` (lean) per thread/project/task | unmeasured | the real log has 12,561 threads at 1.70M events, created at a steady rate (see the gate section): about 74k at 10M if that rate holds, an extrapolation (the synthetic log makes all 11,277 of its threads in the first 13k lines and says nothing about growth) |
+| `state::State` (lean) per thread/project/task | unmeasured | the real log has 12,446 threads at 1.69M events, created at a steady rate (see the gate section): about 74k at 10M if that rate holds, an extrapolation (the synthetic log makes all 11,277 of its threads in the first 13k lines and says nothing about growth) |
 | `state/` `Sum` per thread (`last_user`/`last_reply` up to 2000 chars each, 64 recent message ids) | up to about 6 KB/thread worst case, 390 MB at 65k threads: the whole budget; real values far smaller, unmeasured | `state/summary.rs` |
 | agents `World`, bots `World`, `Feed` `Index` and `Bindings` (each its own fold) | unmeasured | `agents/`, `bots/`, `net/` |
 | `meta` for the presenter (`Extra`: runtime, fork source, usage, todos, background rows) | unmeasured | `present/meta.rs`, to be added |
@@ -52,7 +52,7 @@ Log index and read model, from the code:
 | `model.rs` `all: Vec<u32>` per entry | 4 B | kept | 4 B |
 | `model.rs` `own`/`sent` `Ent{seq,ord}` per entry | 8 B | drop `ord` (it is the position in `all`, which is sorted; recover by binary search) | 4 B |
 
-Entries are messages and activities only: 27% of the real log's events (459k of 1.70M). Estimate: 4.5 B per event plus 8 B per entry, so about 6.7 B/event on the real mix (12.5 B/event if every event were an entry), 67 to 125 MB at 10M.
+Entries are messages and activities only: 27% of the real log's events (458k of 1.69M). Estimate: 4.5 B per event plus 8 B per entry, so about 6.7 B/event on the real mix (12.5 B/event if every event were an entry), 67 to 125 MB at 10M.
 These are estimates until measured: the first deliverable is a per-structure heap breakdown at 0.85M and 1.69M events, then the changes above, then the same run again. Also needed: start streams the file without retaining lines, so the start peak stays in the same
 budget (checked in the measurement); outboxes counted in the budget. If the estimate is wrong the fallback is a sidecar index file read through `mmap`/`pread` (anonymous memory stays flat; touched file pages count as reclaimable cache, which a cgroup limit may or may not
 count as used), a larger design that I would bring back to you before starting.
@@ -139,7 +139,7 @@ An action's contract is JS behaviour: the dumped pair is evidence for the branch
 - Log: offset index (28 B/event), unchanged. Entries are read by `seq` from the store through a bounded page cache (decoded pages, LRU, a few MB), never folded.
 - `meta.rs`: threads (11k at real size), projects, settings, asks, queues, bots, rooms, usage. Per thread: counters (total, last message id/preview/time, status) updated at apply. `meta` grows with objects (threads, projects, tasks, kept settings), not with events; the log index does grow with events.
 - A thread's page = rows read via `model.rs` (`ids`, `ord`, lookahead 17), as today; `window` is computed from the page plus the thread's latest human/assistant text (`message-context`), read from the index tail.
-- Start reads the log once to build `meta` and `model` (streaming, no retained lines). The real slope is not zero: `store.rs` keeps an offset per event and `Model` keeps `all: Vec<u32>` plus `own`/`sent` entries (8 B each) per event. Measured: 38 MB RSS at 1M events with no helper alive (the earlier 71 MB figure came from a hub whose helper had died, so it is not a steady number). The measurement runs the memory gate (above) on a copy of the real log, with about 10 stand-in agents and 5 views, and reports start peak, steady RSS, B/event and B/thread at 0.85M and 1.70M events and view latency. Memory grows linearly with events: say so, never "flat".
+- Start reads the log once to build `meta` and `model` (streaming, no retained lines). The real slope is not zero: `store.rs` keeps an offset per event and `Model` keeps `all: Vec<u32>` plus `own`/`sent` entries (8 B each) per event. Measured: 38 MB RSS at 1M events with no helper alive (the earlier 71 MB figure came from a hub whose helper had died, so it is not a steady number). The measurement runs the memory gate (above) on a copy of the real log, with about 10 stand-in agents and 5 views, and reports start peak, steady RSS, B/event and B/thread at 0.85M and 1.69M events and view latency. Memory grows linearly with events: say so, never "flat".
 - `meta.rs` keeps only the settings `fam::policy::lean_keeps` lists, with `lean_value` caps, because values reach 10-20 KB (state needed it); everything else is read from the log or the hub when asked.
 
 ## `--policy-bin` and `--window-bin` go away in stages
