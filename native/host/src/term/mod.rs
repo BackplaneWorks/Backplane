@@ -113,14 +113,16 @@ impl Terms {
         drop(g);
         self.catch_up().await;
     }
-    /// Each skipped client with room again (under a quarter of the outbox) gets one snapshot of the screen it missed; gone clients are forgotten.
+    /// Each skipped client gets one snapshot of the screen it missed as soon as its outbox takes one (a budgeted push: over half full it is
+    /// refused and the mark stays); gone clients are forgotten.
     pub async fn catch_up(&self) {
         let mut g = self.inner.lock().await; if g.skipped.is_empty() { return }
         let live = self.hub.clients(); g.skipped.retain(|(c, _)| live.contains(c));
-        let ready: Vec<(u64, String)> = g.skipped.iter().filter(|(c, _)| self.hub.outbox_pending(*c) < crate::hub::OUTBOX_MAX / 4).cloned().collect();
-        for (c, key) in ready {
-            g.skipped.remove(&(c, key.clone()));
-            if let Some(sc) = g.screens.get(&key) { self.hub.push(c, frame(&key, None, &emb::snap(&sc.vt), Some((sc.vt.cols(), sc.vt.rows())))); }
+        let marks: Vec<(u64, String)> = g.skipped.iter().cloned().collect();
+        for (c, key) in marks {
+            let Some(sc) = g.screens.get(&key) else { g.skipped.remove(&(c, key)); continue };
+            let snap = emb::snap(&sc.vt); let f = frame(&key, None, &snap, Some((sc.vt.cols(), sc.vt.rows())));
+            if self.hub.push_budgeted(c, f, snap.len() * 4 + 96) { g.skipped.remove(&(c, key)); }
         }
     }
 
