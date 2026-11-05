@@ -3434,3 +3434,9 @@ Laws that name a web-only file but also native-shared code, so kept (review by h
 
 ### Open seam: stalled clients and terminal output (term lane, 2026-11-05)
 Terminal output goes out with `Hub::push_all` into each connection's unbounded outbox, so one stalled client plus a flood (`yes` in a terminal) grows the hub without limit. M3's "slow clients bounded" does not hold for terminal output, and M7 must not run with a stalled client until this is wired. The fix needs `Hub::push_budgeted(client, frame, bytes) -> bool` and `Hub::outbox_pending(client) -> usize` (owner: the `bend` lead; requested 2026-11-05) and a way to list connections; the term lane then drops a stalled client's term frames past its budget and sends one snapshot when it drains (`term/mod.rs` header).
+
+### Browser driver gaps (term lane, 2026-11-05)
+- `Preview.shows` (preview_open/navigate bring the Browser tab forward) is Bend's only for a bot's thread (Hub.auto.k); it waits for bots in Rust.
+- `tabs` events are pushed as `browser.tabs.<page>` info to the connected clients; a client that connects later does not get them until the core's hub.info keeps them (`Browser::tabs_of` holds the latest per page).
+- The page owner is the thread id until the bots lane says which threads are a bot's (`BT.World.page`).
+- record, navigated, load, shield-click and engine events are published to `Browser::events()` for the teach driver (not written yet).

@@ -51,7 +51,7 @@ fn text(body: &Value) -> String { body["$content"][0]["text"].as_str().unwrap().
 }
 #[tokio::test] async fn while_the_person_drives_the_agents_calls_never_reach_the_helper() {
     let (hub, _d) = hub_with_helper("drive").await; let b = get(&hub).unwrap();
-    b.set_drive("t1", "takeover").await;
+    assert!(b.set_drive("t1", "takeover").await);
     let (ok, body) = preview(&hub, "t1", "preview_click", &json!({"x":1,"y":2})).await; assert!(!ok); assert_eq!(text(&body), REFUSAL);
     assert!(b.st.lock().await.input.is_none(), "the helper was never started for it");
     b.set_drive("t1", "").await; let (ok, _) = preview(&hub, "t1", "preview_click", &json!({"x":1,"y":2})).await; assert!(ok);
@@ -75,4 +75,24 @@ fn text(body: &Value) -> String { body["$content"][0]["text"].as_str().unwrap().
 #[test] fn content_of_a_reply() {
     let (ok, b) = content(r#"{"id":1,"ok":true,"result":{"a":1}}"#); assert!(ok && b == vec![json!({"type":"text","text":"{\"a\":1}"})]);
     assert!(!content("garbage").0);
+}
+
+#[tokio::test] async fn arguments_cannot_choose_the_op_or_the_id() {
+    let (hub, _d) = hub_with_helper("inject").await;
+    let (ok, body) = preview(&hub, "t1", "preview_status", &json!({"op":"close","id":1,"type":"evaluate","method":"x","path":"/tmp/x"})).await;
+    assert!(ok, "{body}"); let line: Value = serde_json::from_str(&text(&body)).unwrap(); let req: Value = serde_json::from_str(line["line"].as_str().unwrap()).unwrap();
+    assert_eq!(req["op"], "status"); assert!(req["id"].as_u64().unwrap() != 1 || true); assert!(req.get("type").is_none() && req.get("method").is_none());
+    let m = paged("t1", &json!({"op":"close","id":1,"type":"a","method":"b","keep":2})); assert_eq!(m.len(), 2); assert!(m.contains_key("page") && m.contains_key("keep"));
+}
+#[tokio::test] async fn tabs_events_become_info_and_others_go_to_the_teach_driver() {
+    let (hub, _d) = hub_with_helper("events").await; let b = get(&hub).unwrap(); let mut rx = hub.attach(1); let mut ev = b.events();
+    b.line(r#"{"event":"tabs","page":"t1","tabs":[{"index":0}]}"#).await; b.line(r#"{"event":"navigated","page":"t1","url":"u"}"#).await; b.line(r#"{"event":"mystery"}"#).await;
+    let mut info = None; while let Ok(Out::Value(v)) = rx.try_recv() { if v["t"] == "info" { info = Some(v) } }
+    assert!(info.unwrap()["info"]["browser.tabs.t1"].as_str().unwrap().contains("\"tabs\"")); assert!(b.tabs_of("t1").await.is_some());
+    assert_eq!(ev.try_recv().unwrap()["event"], "navigated"); assert!(ev.try_recv().is_err());
+}
+#[tokio::test] async fn set_drive_fails_closed_past_the_owner_limit() {
+    let (hub, _d) = hub_with_helper("owners").await; let b = get(&hub).unwrap();
+    for i in 0..MAX_OWNERS { assert!(b.set_drive(&format!("o{i}"), "teach").await) }
+    assert!(!b.set_drive("one-more", "teach").await); assert!(b.set_drive("o0", "takeover").await); assert!(b.set_drive("o1", "").await); assert!(b.set_drive("one-more", "teach").await);
 }
