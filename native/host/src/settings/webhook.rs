@@ -149,6 +149,17 @@ mod tests {
     #[test] fn hook_unsigned_header() { assert_eq!(headers("", 1, "{}").len(), 1); }
     #[test] fn hook_signed_header() { assert_eq!(headers("s", 1, "{}").len(), 3); }
     #[test] fn hook_secret_default() { assert_eq!(path(Path::new("/h"), ""), PathBuf::from("/h/secrets/push.webhook")); assert_eq!(path(Path::new("/h"), " /x/y "), PathBuf::from("/x/y")); }
+    #[test] fn hook_secret_path() { assert_eq!(path(Path::new("/h"), "/tmp/s"), PathBuf::from("/tmp/s")); }
+    #[test] fn hook_report_keeps_end() { assert_eq!(report("completed", "running"), "completed"); }
+    #[test] fn hook_report_keeps_fail() { assert_eq!(report("failed", "running"), "failed"); }
+    #[test] fn hook_report_fallback() { assert_eq!(report("", "interrupted"), "stopped"); }
+    #[test] fn hook_route_done() { assert_eq!(route("done"), 1); }
+    #[test] fn hook_route_fail() { assert_eq!(route("fail"), 1); }
+    #[test] fn hook_route_ask() { assert_eq!(route("ask"), 2); }
+    #[test] fn hook_route_merged() { assert_eq!(route("merged"), 2); }
+    #[test] fn hook_route_reminder() { assert_eq!(route("reminder"), 2); }
+    #[test] fn hook_route_note() { assert_eq!(route("note"), 2); }
+    #[test] fn hook_route_quiet() { assert_eq!(route(""), 0); }
     #[test] fn a_default_secret_that_is_there_but_unreadable_is_not_a_downgrade_to_unsigned() {
         assert!(!wants("", Seen::None)); assert!(wants("", Seen::File)); assert!(wants("", Seen::Fail(13))); assert!(wants("/named", Seen::None));
         assert_eq!(seen_fail(2), Seen::None); assert_eq!(seen_fail(13), Seen::Fail(13));
