@@ -61,7 +61,12 @@ final class Driver {
         while !ok && CFAbsoluteTimeGetCurrent() - t0 < timeout { Thread.sleep(forTimeInterval: 0.02); ok = expect() }
         let result = ms(t0)
         steps.append(["do": name, "tap_epoch_ms": epoch, "tap_ms": tap, "result_ms": ok ? result : -1, "ok": ok])
-        if !ok { failed = true }
+        if !ok {
+            failed = true
+            // what the screen held when the expectation never came: a picture and the accessibility tree
+            shot("fail-\(steps.count)")
+            try? app.debugDescription.write(toFile: "\(out)/\(journey)-fail-\(steps.count).txt", atomically: true, encoding: .utf8)
+        }
         return ok
     }
     func note(_ s: String) { notes.append(s) }
