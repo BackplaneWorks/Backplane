@@ -24,11 +24,13 @@ export function makeStandins(dir,env={}){mkdirSync(dir,{recursive:true});writeFi
 export async function startHub({bin,home,port,standins,host,extraEnv={},extraArgs=[],cap='3700M',log}){
  if(home.includes('.backplane-bend')||home.includes('/.backplane/'))throw Error('live home refused');
  mkdirSync(home,{recursive:true});
- const args=['--user','--scope','--quiet','-p',`MemoryMax=${cap}`,'-p','MemorySwapMax=0',bin,'--home',home,'--port',String(port),'--no-tailscale','--foreground'];
+ const direct=!!process.env.NO_SCOPE; // on Boat the sandbox is the hard cap; on the desktop every hub runs in its own capped scope
+ const args=direct?[]:['--user','--scope','--quiet','-p',`MemoryMax=${cap}`,'-p','MemorySwapMax=0',bin];if(direct)args.push('--home',home,'--port',String(port),'--no-tailscale','--foreground');else args.push('--home',home,'--port',String(port),'--no-tailscale','--foreground');
  if(host)args.push('--host',host);
  args.push(...extraArgs);
  const env={...process.env,DISPLAY:'',WAYLAND_DISPLAY:'',BACKPLANE_NO_UPDATE:'1',BACKPLANE_ORDER_SERVER:'http://127.0.0.1:9',BACKPLANE_KEYRING_LOCKED:'0',BACKPLANE_PEERS:'',BACKPLANE_AGENTS:standins,PATH:`${standins}:${process.env.PATH}`,FAKE_LOG:`${home}/fake.log`,...extraEnv};
- const proc=spawn('systemd-run',args,{env,stdio:['ignore',log?'pipe':'ignore',log?'pipe':'ignore']});
+ delete env.BUN_BE_BUN; // the script runner may be the hub binary itself in bun mode; the hub it starts must not be
+ const proc=direct?spawn(bin,args,{env,stdio:['ignore',log?'pipe':'ignore',log?'pipe':'ignore']}):spawn('systemd-run',args,{env,stdio:['ignore',log?'pipe':'ignore',log?'pipe':'ignore']});
  if(log){const fs=require('node:fs');const o=fs.openSync(log,'a');proc.stdout.on('data',d=>fs.writeSync(o,d));proc.stderr.on('data',d=>fs.writeSync(o,d))}
  const h=host||'127.0.0.1';
  let seenPid=NaN;const tStart=Date.now();
