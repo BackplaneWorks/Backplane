@@ -281,3 +281,16 @@ Harness fixes that changed verdicts (each was a false result of mine, found by r
 | IME | **harness, not run** | one attempt each with ibus+Hangul and fcitx5 (XIM frontend + hangul): a plain XIM client (xev) never gets 한 (`XFilterEvent: False`; ibus engine runs, fcitx5 reports no active engine), so GPUI cannot be judged; parked for a real-hardware run |
 | link click | blocked | GPUI has no link detection (`links` supported:false) |
 None of these counts as a pass: the gate needs the Rust hub on real hardware.
+
+### Input actions on client `cbbd8ebec4` (screens lane's 12:05 Boat build; run job j20261105171749-1578612; llvmpipe, JS hub; runner `a5bcbc95ae`)
+This supersedes the paste and drop falses above: they were about the older client. The sent message now carries the hub's attachment reference (`see pic\n\n[attachment: …/attachments/<thread>/…-pasted-….png]`, and the same for the dropped `paste.png`), and the file is on the hub, so both actions pass here (pass-so-far only: software render, JS hub). My earlier test looked for an `images` field, but the hub records an attachment as that text line; the judge accepts it because it reads the whole sent message.
+| action | verdict | evidence |
+|---|---|---|
+| drag-select | pass-so-far | PRIMARY holds the dragged assistant text |
+| Ctrl-C | pass-so-far | clipboard holds the same text (UTF8_STRING and text/plain targets) |
+| paste image | **pass-so-far, changed** | sent message has `[attachment: …pasted-….png]`, file on the hub |
+| drop file | **pass-so-far, changed** | sent message has `[attachment: …paste.png]`, file on the hub (XDND accepted) |
+| paperclip | unverified | the client's own `click ui:Attach` reaches the OS chooser (stand-in logged one OpenFile); the OS click aimed at the reported rect (still 40x44 at 1113,847) does nothing |
+| IME | harness, not run | the plain-client check still fails (ibus and fcitx5), so GPUI is not judged |
+| link click | blocked | no link detection |
+Runner change: a missing GPUI window is now a nonzero `harness` failure (exit 4) with the client's stderr/stdout, the hub log, token/asset checks and an xwininfo tree in the artifact (`summary.windowSearch`); the Boat wrapper no longer hides the exit code behind `tail`. Mechanics' job j20261105171315-1515229 (client `fb25d984d1`, no window) cannot be explained from its artifact, which has no client log; with `cbbd8ebec4` the window appears at once (title "Backplane GPUI · experimental" found by name). Next time it happens the artifact says why.
