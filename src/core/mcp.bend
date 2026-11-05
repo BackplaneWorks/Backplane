@@ -348,6 +348,15 @@ def Mcp.view(+thread: String, +path: String, +kind: String) -> Res:
   Res{True{}, J.Json.obj([J.KV{"shown", J.Str{path}}]),
     B.Step{Nil{}, [B.Broadcast{J.Json.show(J.Json.obj([J.KV{"t", J.Str{"view"}}, J.KV{"thread", J.Str{thread}}, J.KV{"path", J.Str{path}}, J.KV{"kind", J.Str{kind}}]))}]}}
 
+# What viewer_show showed is the one file outside the thread's folder the
+# viewers may then be asked for (kicad.watch, core/watchpol.bend): the hub
+# keeps it as the setting viewer.src:<thread>, the file as an absolute path.
+def Mcp.grant(r: Res, +thread: String, +path: String, +now: Nat) -> Res:
+  match r:
+    case Res{+ok, +out, B.Step{+cs, os}}:
+      Res{ok, out, B.Step{Bool.pick(List<&2, M.Change>, String.starts_with(path, "/"),
+        List.append(&2, M.Change, cs, [M.SettingSet{"viewer.src:" ++ thread, path, now}]), cs), os}}
+
 # Terminals in the chat (core/emb.bend); terminal_read is the server's
 # (it asks the terminal actor, off the hub)
 # --------------------------------------------------------------------

@@ -777,11 +777,6 @@ def RvJob.report(r: P.Ran, +thread: String, +page: String) -> Res:
       Res{True{}, J.Json.obj([J.KV{"report", J.Json.obj([J.KV{"thread", J.Str{thread}}, J.KV{"page", J.Str{page}}, J.KV{"md", J.Str{""}},
         J.KV{"err", J.Str{Bool.pick(String, String.is_empty(String.trim(out)), "could not read the schematic", String.trim(out))}}])}])}
 
-def RvJob.bom.k(+sch: String, +thread: String, +a: String, +b: String) -> IO(Res):
-  Bool.pick(IO(Res), String.is_empty(sch), IO.pure(Res, Res{True{}, J.Json.obj([J.KV{"report", J.Json.obj([J.KV{"thread", J.Str{thread}}, J.KV{"page", J.Str{"bom"}}, J.KV{"md", J.Str{""}}, J.KV{"err", J.Str{"This project has no schematic."}}])}])}),
-    IO.bind(P.Ran, Res, Rvc.run(["--review", "bom", Bool.pick(String, String.is_empty(a), "", HI.Hist.rebase(a, sch)), Bool.pick(String, String.is_empty(b), sch, HI.Hist.rebase(b, sch))]),
-      r => IO.pure(Res, RvJob.report(r, thread, "bom"))))
-
 # review.bom {thread, a, b}: the BOM of b (a "": one BOM; b "": the working
 # copy), or what changed from a to b; a and b are versions of any file of
 # the project (the one on show), read at its root schematic
@@ -790,17 +785,55 @@ def RvJob.bom.k(+sch: String, +thread: String, +a: String, +b: String) -> IO(Res
 def RvJob.bom.root(+cwd: String, +b: String, +fallback: String) -> String:
   Bool.pick(String, Bool.and(String.starts_with(b, cwd ++ "/"), Bool.and(String.ends_with(b, ".kicad_sch"), FM.Fm.safe(String.drop(b, 1n+String.length(cwd))))), b, fallback)
 
-# A version of a commit names a repository and a commit; both go to git, so
-# they must be this folder's own repository and a commit hash.
-def RvJob.bom.mine(ok: Bool, +thread: String, +cwd: String, +a: String, +b: String) -> IO(Res):
-  match ok:
-    case True{}:
-      IO.bind(K.Files, Res, K.Files.read(cwd), f => RvJob.bom.k(RvJob.bom.root(cwd, b, Rvc.sch(f)), thread, a, b))
-    case False{}:
-      IO.pure(Res, Res.err("that version is not of this project"))
+# A version of a commit names a repository and a commit; both go to git.
+# The repository is proved to be this folder's own by git itself (git.bend's
+# Git.ident, run in the folder, symlinks resolved) and the file is rebuilt
+# from what that answers: the repository's top, the folder's place under it
+# and the schematic's place under the folder. Only the commit is the
+# client's, and only a hash. Anything unproved refuses the request.
+def RvJob.bom.refuse() -> Res:
+  Res.err("that version is not of this project")
+
+# "git <dir> <commit> <len top> <top>/<prefix><rel>": what Hist.rebase builds,
+# from the proved top and prefix
+def RvJob.bom.ver(+p: String, +id: String, +cwd: String, +sch: String) -> String:
+  Bool.pick(String, Bool.or(Bool.not(Nat.is_eq(HI.Hist.kind(p), 1n)), String.is_empty(FM.Fm.rel(cwd, sch))), HI.Hist.rebase(p, sch),
+    "git\t" ++ HI.Hist.at(String.split(id, '\n'), 2n) ++ "\t" ++ HI.Hist.git.commit(p) ++ "\t" ++ Nat.show(String.length(HI.Hist.at(String.split(id, '\n'), 0n))) ++ "\t" ++ HI.Hist.at(String.split(id, '\n'), 0n) ++ "/" ++ HI.Hist.at(String.split(id, '\n'), 1n) ++ FM.Fm.rel(cwd, sch))
+
+def RvJob.bom.run(+thread: String, +cwd: String, +a: String, +b: String, +sch: String, +id: String) -> IO(Res):
+  Bool.pick(IO(Res), String.is_empty(sch), IO.pure(Res, Res{True{}, J.Json.obj([J.KV{"report", J.Json.obj([J.KV{"thread", J.Str{thread}}, J.KV{"page", J.Str{"bom"}}, J.KV{"md", J.Str{""}}, J.KV{"err", J.Str{"This project has no schematic."}}])}])}),
+    IO.bind(P.Ran, Res, Rvc.run(["--review", "bom", Bool.pick(String, String.is_empty(a), "", RvJob.bom.ver(a, id, cwd, sch)), Bool.pick(String, String.is_empty(b), sch, RvJob.bom.ver(b, id, cwd, sch))]),
+      r => IO.pure(Res, RvJob.report(r, thread, "bom"))))
+
+# the version a request names, with the repository proved: "" when it names
+# none (a live file, nothing), a failure's marker when it is not this folder's
+def RvJob.bom.which(+a: String, +b: String) -> String:
+  Bool.pick(String, Nat.is_eq(HI.Hist.kind(a), 1n), a, Bool.pick(String, Nat.is_eq(HI.Hist.kind(b), 1n), b, ""))
+
+def RvJob.bom.prove(+cwd: String, +a: String, +b: String) -> IO(Maybe<&2, String>):
+  Bool.pick(IO(Maybe<&2, String>), String.is_empty(RvJob.bom.which(a, b)), IO.pure(Maybe<&2, String>, Some{"\n\n"}),
+    GT.Git.ident(cwd, HI.Hist.git.dir(RvJob.bom.which(a, b))))
+
+def RvJob.bom.sides(+a: String, +b: String, +cwd: String, +sch: String) -> Bool:
+  Bool.and(Bool.or(String.is_empty(RvJob.bom.which(a, b)), Bool.not(String.is_empty(FM.Fm.rel(cwd, sch)))), Bool.and(Bool.or(Bool.not(Nat.is_eq(HI.Hist.kind(a), 1n)), Bool.and(RVW.Rview.hex(HI.Hist.git.commit(a)), String.eq(HI.Hist.git.dir(a), HI.Hist.git.dir(RvJob.bom.which(a, b))))),
+    Bool.or(Bool.not(Nat.is_eq(HI.Hist.kind(b), 1n)), Bool.and(RVW.Rview.hex(HI.Hist.git.commit(b)), String.eq(HI.Hist.git.dir(b), HI.Hist.git.dir(RvJob.bom.which(a, b)))))))
+
+def RvJob.bom.at(m: Maybe<&2, String>, +thread: String, +cwd: String, +a: String, +b: String, +sch: String) -> IO(Res):
+  match m:
+    case Some{+id}:
+      Bool.pick(IO(Res), RvJob.bom.sides(a, b, cwd, sch), RvJob.bom.run(thread, cwd, a, b, sch, id), IO.pure(Res, RvJob.bom.refuse()))
+    case None{}:
+      IO.pure(Res, RvJob.bom.refuse())
+
+def RvJob.bom.go(+thread: String, +cwd: String, +a: String, +b: String) -> IO(Res):
+  do IO<Res>:
+    f : K.Files <- K.Files.read(cwd)
+    +sch : String = RvJob.bom.root(cwd, b, Rvc.sch(f))
+    m : Maybe<&2, String> <- RvJob.bom.prove(cwd, a, b)
+    RvJob.bom.at(m, thread, cwd, a, b, sch)
 
 def RvJob.bom(+thread: String, +cwd: String, +a: String, +b: String) -> IO(Res):
-  RvJob.bom.mine(Bool.and(Bool.not(String.is_empty(cwd)), Bool.and(RVW.Rview.repo.ok(a, cwd), RVW.Rview.repo.ok(b, cwd))), thread, cwd, a, b)
+  Bool.pick(IO(Res), String.is_empty(cwd), IO.pure(Res, Res.err("no project folder")), RvJob.bom.go(thread, cwd, a, b))
 
 # review.checks {thread, commit, trigger}: the design checks, in the child
 def RvJob.checks.k(r: P.Ran, +thread: String) -> Res:

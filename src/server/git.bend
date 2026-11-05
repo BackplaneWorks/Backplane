@@ -888,6 +888,47 @@ def Git.show.ran(r: P.Ran) -> IO(Maybe<&2, String>):
 def Git.show(+g: String, +obj: String) -> IO(Maybe<&2, String>):
   IO.bind(P.Ran, Maybe<&2, String>, P.Proc.run("sh", ["-c", "exec 2>/dev/null; case \"$1\" in ''|-*) exit 1;; esac; case \"$2\" in ''|-*) exit 1;; esac; git --git-dir=\"$1\" show \"$2\"", "sh", g, obj], "/"), Git.show.ran)
 
+# Whose repository a version's git directory is. Run in the folder the
+# request is about (never a path the client names), it resolves the folder's
+# own repository as git does (the nearest one, its top, its common and its
+# per-worktree directory, symlinks resolved) and the named directory the same
+# way, and answers only when the named one IS the folder's: the repository's
+# common directory, the worktree's own, or the history kept outside git
+# (<folder>/.backplane/history.git). Answers "top", "prefix" (the folder's
+# place under the top, with a trailing /) and the directory, one a line;
+# nothing otherwise (exit 1 unreadable, 2 another repository). Path ancestry
+# is not identity: a nested repository, an external linked worktree or a
+# --separate-git-dir are told apart by git, and a symlinked folder by pwd -P.
+def Git.ident.sh() -> String:
+  String.join([
+    "exec 2>/dev/null",
+    "case \"$1\" in /*) ;; *) exit 1;; esac",
+    "case \"$2\" in /*) ;; *) exit 1;; esac",
+    "canon() { p=$1; rest=; n=0; while [ ! -d \"$p\" ] && [ \"$n\" -lt 64 ]; do rest=\"/$(basename \"$p\")$rest\"; p=$(dirname \"$p\"); n=$((n+1)); done; [ -d \"$p\" ] || return 1; d=$(cd \"$p\" && pwd -P) || return 1; [ \"$d\" = / ] && d=; printf '%s%s' \"$d\" \"$rest\"; }",
+    "cd \"$1\" || exit 1",
+    "want=$(canon \"$2\") || exit 1",
+    "here=$(pwd -P) || exit 1",
+    "if top=$(git rev-parse --show-toplevel) && [ -n \"$top\" ]; then",
+    "  top=$(cd \"$top\" && pwd -P) || exit 1",
+    "  prefix=$(git rev-parse --show-prefix) || exit 1",
+    "  common=$(cd \"$(git rev-parse --git-common-dir)\" && pwd -P) || exit 1",
+    "  own=$(cd \"$(git rev-parse --absolute-git-dir)\" && pwd -P) || exit 1",
+    "  if [ \"$want\" != \"$common\" ] && [ \"$want\" != \"$own\" ] && [ \"$want\" != \"$here/.backplane/history.git\" ]; then exit 2; fi",
+    "  printf '%s\\n%s\\n%s\\n' \"$top\" \"$prefix\" \"$want\"",
+    "else",
+    "  [ \"$want\" = \"$here/.backplane/history.git\" ] || exit 2",
+    "  printf '%s\\n\\n%s\\n' \"$here\" \"$want\"",
+    "fi"], "\n")
+
+def Git.ident.got(r: P.Ran) -> Maybe<&2, String>:
+  match r:
+    case P.Ran{0, +out}: Some{out}
+    case _: None{}
+
+def Git.ident(+cwd: String, +gd: String) -> IO(Maybe<&2, String>):
+  Bool.pick(IO(Maybe<&2, String>), Bool.or(String.is_empty(cwd), String.is_empty(gd)), IO.pure(Maybe<&2, String>, None{}),
+    IO.bind(P.Ran, Maybe<&2, String>, P.Proc.run("sh", ["-c", Git.ident.sh(), "sh", cwd, gd], "/"), r => IO.pure(Maybe<&2, String>, Git.ident.got(r))))
+
 def Git.version.got(m: Maybe<&2, String>) -> IO(List<&2, U32>):
   match m:
     case Some{t}:

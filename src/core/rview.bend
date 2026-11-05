@@ -157,40 +157,6 @@ def Rview.version.ok(+p: String) -> Bool:
     Bool.and(Bool.and(Rview.gitdir(HI.Hist.git.dir(p)), Rview.hex(HI.Hist.git.commit(p))),
       Bool.and(FM.Fm.safe(HI.Hist.git.rel(p)), Bool.not(String.is_empty(HI.Hist.git.rel(p))))))
 
-# where `mark` first starts in s (n counts what came before); the length of
-# s when it never does
-def Rview.find.k(+s: String, hit: Bool, +mark: String, +n: Nat) -> Nat:
-  match s hit:
-    case _ True{}:
-      n
-    case SNil{} False{}:
-      n
-    case SCon{_, +t} False{}:
-      Rview.find.k(t, String.starts_with(t, mark), mark, 1n+n)
-
-def Rview.find(+s: String, +mark: String) -> Nat:
-  Rview.find.k(s, String.starts_with(s, mark), mark, 0n)
-
-# the folder a hub git directory belongs to: its repository's, the one a
-# worktree's record is in, or the one the history outside git is kept for
-def Rview.top(+g: String) -> String:
-  Bool.pick(String, String.ends_with(g, "/.backplane/history.git"), String.take(g, Nat.sub(String.length(g), 23n)),
-    Bool.pick(String, String.ends_with(g, "/.git"), String.take(g, Nat.sub(String.length(g), 5n)),
-      Bool.pick(String, Nat.is_lt(Rview.find(g, "/.git/worktrees/"), String.length(g)), String.take(g, Rview.find(g, "/.git/worktrees/")), "")))
-
-# a git directory that belongs to the folder a request works in: that
-# folder is its repository's folder or inside it
-def Rview.bound.cwd(+g: String, +cwd: String) -> Bool:
-  Bool.and(Bool.and(Bool.not(String.is_empty(cwd)), Bool.not(String.is_empty(Rview.top(g)))),
-    Bool.or(String.eq(cwd, Rview.top(g)), String.starts_with(cwd, Rview.top(g) ++ "/")))
-
-# a version (core/hist.bend) a request may name by its repository and commit
-# alone: review.bom takes the file from the project's own schematic, so only
-# those two reach git. "", a live file and a comparison name no repository.
-def Rview.repo.ok(+p: String, +cwd: String) -> Bool:
-  Bool.or(Bool.not(Nat.is_eq(HI.Hist.kind(p), 1n)),
-    Bool.and(Bool.and(Rview.gitdir(HI.Hist.git.dir(p)), Rview.hex(HI.Hist.git.commit(p))), Rview.bound.cwd(HI.Hist.git.dir(p), cwd)))
-
 # a thread's project folder ("" for a thread the hub does not keep itself:
 # a mirrored thread's history is its own machine's)
 def Rview.proot.k(known: Bool, +s: M.State, +th: String) -> String:
