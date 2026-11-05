@@ -1,0 +1,4 @@
+# Law map for the Rust port. Everything not listed resolves to its seed. See scripts/gpui/law-map.py.
+# ported <src path>
+# law <name> bend
+# law <name> rust <test name>
