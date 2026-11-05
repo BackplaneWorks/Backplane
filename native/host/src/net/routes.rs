@@ -13,7 +13,7 @@ pub struct AuthRoutes {
 }
 pub struct Outcome { pub reply: HttpReply, pub close: Vec<u64>, pub unpeer: Option<String> }
 
-pub const ROUTES: &[&str] = &["/auth/enroll", "/auth/invitations", "/auth/devices", "/auth/revoke", "/auth/known"];
+pub const ROUTES: &[&str] = &["/auth/enroll", "/auth/invitations", "/auth/devices", "/auth/revoke", "/auth/known", "/auth/pair", "/auth/cache"];
 
 fn json_reply(status: &'static str, body: &Value, extra: &str) -> HttpReply {
     HttpReply { status, ctype: "application/json".into(), extra: format!("Cache-Control: no-store\r\nReferrer-Policy: no-referrer\r\n{extra}"), body: body.to_string().into_bytes() }
@@ -58,6 +58,20 @@ impl AuthRoutes {
         let route = req.route();
         if !ROUTES.contains(&route) { return None }
         let hs = &req.headers;
+        if route == "/auth/pair" || route == "/auth/cache" {
+            // the credential the request presents, resolved (the hub token or a paired device's own)
+            let token = self.reg.resolve(&Self::secret(req), client, route);
+            let https = req.header("origin").starts_with("https://");
+            let done = |reply: HttpReply| Some(Outcome { reply, close: vec![], unpeer: None });
+            return if route == "/auth/pair" {
+                // Conn.pair.reply: pairing proves the shared secret in the bearer; it never inherits a localhost exemption
+                if req.method == "POST" && owner::pair(hs, &token) { done(HttpReply { status: "204 No Content", ctype: "text/plain".into(), extra: owner::pair_cookies(&token, https), body: vec![] }) }
+                else { done(HttpReply::text("401 Unauthorized", "pairing refused")) }
+            } else if owner::cache_request(&req.method, hs, &token) {
+                // Conn.cache.reply: public, domain-separated data; never a credential
+                done(json_reply("200 OK", &json!({"version": 1, "cacheKey": owner::cache_key(&token)}), ""))
+            } else { done(HttpReply { status: "401 Unauthorized", ctype: "text/plain".into(), extra: "Cache-Control: no-store\r\n".into(), body: b"cache identity refused".to_vec() }) };
+        }
         let denied = || Outcome { reply: json_reply("401 Unauthorized", &json!({"error":"pairing_required"}), ""), close: vec![], unpeer: None };
         let (op, secret) = if route == "/auth/enroll" {
             if !(req.method == "POST" && owner::browser(hs)) { return Some(denied()) }
@@ -155,6 +169,28 @@ mod tests {
         let rv = a.handle(&req("POST", "/auth/revoke", &[("Authorization", "Bearer root"), ("X-Backplane-Device", id)]), 1).unwrap();
         assert_eq!(body(&rv)["ok"], true);
         assert_eq!(a.handle(&req("GET", "/auth/devices", &[("Authorization", &format!("Bearer {tok}"))]), 3).unwrap().reply.status, "401 Unauthorized");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+    #[test] fn pair_cookie_route_proves_the_secret() {
+        let (a, dir) = setup("cookie", "127.0.0.1");
+        let ok = a.handle(&req("POST", "/auth/pair", &[("Authorization", "Bearer root")]), 1).unwrap().reply;
+        assert_eq!(ok.status, "204 No Content"); assert!(ok.extra.contains("bp_token=root") && ok.extra.contains("bp_cache_v1=") && ok.extra.contains("HttpOnly") && !ok.extra.contains("Secure"));
+        let sec = a.handle(&req("POST", "/auth/pair", &[("Authorization", "Bearer root"), ("Origin", "https://h"), ("Host", "h")]), 1).unwrap().reply;
+        assert!(sec.extra.contains("; Secure"));
+        for (m, hs) in [("POST", vec![]), ("GET", vec![("Authorization", "Bearer root")]), ("POST", vec![("Authorization", "Bearer wrong")]), ("POST", vec![("Host", "localhost")]), ("POST", vec![("Cookie", "bp_token=root")])] {
+            assert_eq!(a.handle(&req(m, "/auth/pair", &hs), 1).unwrap().reply.status, "401 Unauthorized", "{m} {hs:?}");
+        }
+        assert_eq!(a.handle(&req("POST", "/auth/pair?token=root", &[]), 1).unwrap().reply.status, "401 Unauthorized", "no query token");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+    #[test] fn pair_cache_identity_is_for_paired_browsers() {
+        let (a, dir) = setup("cache", "127.0.0.1");
+        let r = a.handle(&req("GET", "/auth/cache", &[("Cookie", "bp_token=root")]), 1).unwrap().reply;
+        assert_eq!(r.status, "200 OK"); let b: Value = serde_json::from_slice(&r.body).unwrap();
+        assert_eq!(b, json!({"version": 1, "cacheKey": owner::cache_key("root")})); assert_ne!(b["cacheKey"], "root");
+        for (m, t, hs) in [("GET", "/auth/cache", vec![]), ("GET", "/auth/cache?token=root", vec![]), ("POST", "/auth/cache", vec![("Authorization", "Bearer root")]), ("GET", "/auth/cache", vec![("Authorization", "Bearer root"), ("Sec-Fetch-Site", "cross-site")])] {
+            assert_eq!(a.handle(&req(m, t, &hs), 1).unwrap().reply.status, "401 Unauthorized", "{m} {t} {hs:?}");
+        }
         let _ = std::fs::remove_dir_all(dir);
     }
     #[test] fn pair_browser_enroll_hides_the_credential_in_a_cookie() {
