@@ -70,6 +70,41 @@ fn label(name: &str) -> Option<&'static str> {
         "settled" => "Settled", "waiting" => "Waiting: on subagents or work it started", "blocked" => "Blocked: needs interaction", _ => return None })
 }
 
+
+/// PM.Permissions.json: the permission mode chips (English); `rt` is the mode's name, absent for full access
+pub fn permissions(rt: &str) -> Value {
+    let modes = [("approval-required", "Approval required"), ("auto-accept-edits", "Auto-accept edits"), ("auto", "Auto"), ("full-access", "Full access")];
+    let cur = if modes.iter().any(|(v, _)| *v == rt) { rt } else { "full-access" };
+    let name = modes.iter().find(|(v, _)| *v == cur).map(|(_, n)| *n).unwrap_or("Full access");
+    json!({"label": "Permissions", "current": format!("Permissions: {name}"),
+        "choices": modes.iter().map(|(v, n)| json!({"label": n, "value": v, "on": *v == cur})).collect::<Vec<_>>()})
+}
+
+fn effort_label(e: &str) -> String { if e.is_empty() { "auto".into() } else { e.to_string() } }
+fn levels(provider: &str) -> &'static [&'static str] {
+    match provider { "claude" => &["low", "medium", "high", "xhigh", "max"], "codex" => &["low", "medium", "high", "xhigh"], "grok" => &["low", "medium", "high"],
+        "muse" => &["minimal", "low", "medium", "high", "xhigh", "max"], "pi" => &["off", "minimal", "low", "medium", "high", "xhigh", "max"],
+        "omp" => &["off", "auto", "minimal", "low", "medium", "high", "xhigh", "max"], _ => &[] }
+}
+fn tokens(n: u64) -> String { if n >= 1_000_000 { format!("{}M", n / 1_000_000) } else if n >= 1000 { format!("{}k", n / 1000) } else { n.to_string() } }
+/// Use.tail / Usage.text: the model chip's context tail from the thread's `usage.<id>` reading ("used/window")
+fn usage_tail(provider: &str, reading: &str) -> String {
+    let mut p = reading.split('/').map(|x| x.parse::<u64>().unwrap_or(0));
+    let (used, window) = (p.next().unwrap_or(0), p.next().unwrap_or(0));
+    if used > 0 { if window == 0 { format!(" · ctx {}", tokens(used)) } else { format!(" · ctx {}% of {}", used * 100 / window, tokens(window)) } }
+    else if provider == "claude" { String::new() } else { " · ctx n/a".into() }
+}
+/// Mob.picker.ctx.loc with no models info: the model chip, the model menu (the thread's own model only: the hub's model list is not here), the efforts the
+/// provider takes and the providers. This is what the helper draws before it has heard the hub's models.
+pub fn picker(provider: &str, model: &str, effort: &str, reading: &str) -> Value {
+    let label = format!("{} · {}{}{}", provider, if model.is_empty() { "default" } else { model }, if effort.is_empty() { String::new() } else { format!(" · {}", effort_label(effort)) }, usage_tail(provider, reading));
+    let choice = |l: String, v: &str, on: bool| json!({"label": l, "value": v, "on": on});
+    let lv = levels(provider);
+    let efforts: Vec<Value> = if lv.is_empty() { vec![] } else { std::iter::once("").chain(lv.iter().copied()).map(|e| choice(effort_label(e), e, e == effort || e == format!("@{provider}"))).collect() };
+    let providers: Vec<Value> = ["claude", "codex", "grok", "muse", "antigravity", "opencode", "pi", "omp"].iter().map(|p| { let v = format!("@{p}"); choice((*p).into(), &v, v == effort || *p == provider) }).collect();
+    json!({"label": label, "models": [choice("default".into(), "", model.is_empty())], "efforts": efforts, "providers": providers})
+}
+
 /// `state`, `tools`, `menu`, `working`, `phase` for a thread at clock `now_s`, or None for a case not computed here.
 pub fn keys(st: &State, id: &str, now_s: u64, why: &str) -> Option<Map<String, Value>> {
     let t = st.threads.get(id)?;
@@ -93,6 +128,10 @@ pub fn keys(st: &State, id: &str, now_s: u64, why: &str) -> Option<Map<String, V
     m.insert("tools".into(), Value::Array(tools(t.turn, t.pinned, settled(st, id), t.archived, forked)));
     m.insert("menu".into(), Value::Array(menu(id, now_s < until)));
     m.insert("working".into(), json!(working)); m.insert("phase".into(), json!(phase));
+    m.insert("permissions".into(), permissions(st.runtime.get(id).map(String::as_str).unwrap_or("")));
+    let get = |k: String| st.settings.get(&k).map(String::as_str).unwrap_or("");
+    m.insert("picker".into(), picker(&t.provider, &t.model, get(format!("effort.{id}")), get(format!("usage.{id}"))));
+    m.insert("claude".into(), json!(t.provider == "claude"));
     Some(m)
 }
 
@@ -101,10 +140,11 @@ mod tests {
     use super::*;
     fn fx() -> Value { serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/gpui/slim/fixtures/thread-variants.json"))).unwrap() }
     const T: &str = "t1700000003-8";
-    /// every variant the helper was dumped for: the keys that differ from the base are the ones computed here
+    /// every variant the helper was dumped for: a key not in a variant's diff is the base thread's (the helper's own dump of it)
     #[test] fn each_variants_state_keys_are_the_helpers() {
         let v = fx(); let log = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/gpui/slim/fixtures/thread-log.jsonl"));
-        let base = { let mut st = State::new(); for l in log.lines() { st.apply_line(l); } keys(&st, T, 1_700_100_000, "").expect("base") };
+        let pair: Value = serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/gpui/slim/fixtures/thread-pair.json"))).unwrap();
+        let base = &pair["out"]["shown"]["thread"];
         let mut checked = 0;
         for (name, x) in v.as_object().unwrap() {
             if x["thread"].is_null() && x.get("diff").is_none() { continue }
@@ -112,9 +152,17 @@ mod tests {
             for e in x["extra"].as_array().unwrap() { st.apply(e); }
             let Some(got) = keys(&st, T, 1_700_100_000, "") else { assert!(matches!(name.as_str(), "queued"), "{name} should be computed"); continue };
             let diff = x["diff"].as_object().unwrap();
-            for k in ["state", "tools", "menu", "working", "phase"] { assert_eq!(Some(&got[k]), diff.get(k).or(base.get(k)), "{name}: {k}"); }
+            for k in ["state", "tools", "menu", "working", "phase", "picker", "claude", "permissions"] { assert_eq!(Some(&got[k]), diff.get(k).or(base.get(k)), "{name}: {k}"); }
             checked += 1;
         }
-        assert!(checked >= 6, "{checked}");
+        assert!(checked >= 8, "{checked}");
+    }
+    #[test] fn permission_modes_and_the_context_tail() {
+        assert_eq!(permissions("approval-required")["current"], "Permissions: Approval required");
+        assert_eq!(permissions("")["choices"][3]["on"], true);
+        assert_eq!(usage_tail("claude", ""), ""); assert_eq!(usage_tail("codex", ""), " · ctx n/a");
+        assert_eq!(usage_tail("claude", "45000/200000"), " · ctx 22% of 200k"); assert_eq!(usage_tail("claude", "900/0"), " · ctx 900");
+        let p = picker("claude", "claude-opus-4", "high", "");
+        assert_eq!(p["label"], "claude · claude-opus-4 · high"); assert_eq!(p["efforts"][3]["on"], true); assert_eq!(p["models"][0]["on"], false);
     }
 }
