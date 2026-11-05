@@ -267,6 +267,24 @@ pub fn images(light: bool, list: &Value, key: &str, target: Option<&super::attac
     Some(row.into_any_element())
 }
 
+/// A sent message's attachments (the hub's chips: label, path, image, url): pictures drawn like a reply's images, other files as a chip.
+pub fn split_attachments(list: &Value) -> (Vec<Value>, Vec<String>) {
+    let mut pics = Vec::new(); let mut files = Vec::new();
+    for a in list.as_array().into_iter().flatten() {
+        if a["image"].as_bool().unwrap_or(false) && a["url"].as_str().map_or(false, |u| !u.is_empty()) { pics.push(a.clone()); }
+        else { let l = a["label"].as_str().filter(|l| !l.is_empty()).or_else(|| a["path"].as_str()).unwrap_or("").rsplit('/').next().unwrap_or("").to_string(); if !l.is_empty() { files.push(l); } }
+    }
+    (pics, files)
+}
+pub fn attachments(light: bool, list: &Value, key: &str, target: Option<&super::attach::Target>, imgs: &super::images::Images) -> Vec<AnyElement> {
+    let c = |n: &str| theme::color(light, n);
+    let (pics, files) = split_attachments(list);
+    let mut out = Vec::new();
+    if let Some(p) = images(light, &Value::Array(pics), key, target, imgs) { out.push(p); }
+    if !files.is_empty() { out.push(div().flex().flex_wrap().gap_1().children(files.into_iter().map(|f| div().px_2().py_1().border_1().border_color(c("line")).text_size(px(11.)).text_color(c("dim")).child(f))).into_any_element()); }
+    out
+}
+
 /// Repaint a few times a second while an image is still arriving, then stop (no standing repaint loop).
 pub fn poll(cx: &mut Context<Backplane>) {
     cx.spawn(async move |weak, cx| loop {
@@ -342,6 +360,10 @@ impl Backplane {
 mod tests {
     use super::*;
     use core::prelude::v1::test;
+    #[test] fn a_sent_messages_attachments_split_into_pictures_and_file_chips() {
+        let l: Value = serde_json::from_str(r#"[{"label":"a.png","path":"/h/attachments/t1/k-a.png","image":true,"url":"/img?p=1"},{"label":"b.pdf","path":"/h/attachments/t1/k-b.pdf","image":false,"url":""}]"#).unwrap();
+        let (p, f) = split_attachments(&l); assert_eq!(p.len(), 1); assert_eq!(f, vec!["b.pdf".to_string()]); assert_eq!(split_attachments(&Value::Null), (vec![], vec![]));
+    }
     fn info(id: &str, idx: usize, text: &str) -> Info { Info { text: text.into(), entry: id[1..].parse().unwrap_or(0), id: id.into(), idx, links: vec![], layout: None } }
     fn frame(r: &mut Registry, blocks: &[(&str, usize, &str)]) { r.begin(); for (id, idx, t) in blocks { r.blocks.push(info(id, *idx, t)); } r.resolve(); }
     #[test] fn a_selection_follows_its_text_when_blocks_are_added_above() {
