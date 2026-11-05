@@ -178,6 +178,11 @@ impl Element for SelText {
 fn text(reg: &Reg, light: bool, spans: Vec<Span>, kind: Kind) -> AnyElement { SelText::new(reg, spans, kind, light).into_any_element() }
 fn plain_spans(s: &str) -> Vec<Span> { vec![Span { text: s.to_string(), style: Default::default() }] }
 
+/// A person's message whose text may wrap gets the bubble's full width (640 px at most) instead of shrinking to its text: a shrink-to-fit
+/// parent let the layout measure the wrapping text at one width and paint it at another, so a long message was drawn over what follows it.
+/// A message of short lines never wraps and keeps its snug bubble.
+pub fn bubble_full_width(text: &str) -> bool { text.lines().any(|l| l.chars().count() > 60) }
+
 /// A user's message text.
 pub fn user_text(reg: &Reg, light: bool, s: &str) -> AnyElement { text(reg, light, md::linkify(s), Kind::Body) }
 
@@ -363,6 +368,10 @@ mod tests {
     #[test] fn a_sent_messages_attachments_split_into_pictures_and_file_chips() {
         let l: Value = serde_json::from_str(r#"[{"label":"a.png","path":"/h/attachments/t1/k-a.png","image":true,"url":"/img?p=1"},{"label":"b.pdf","path":"/h/attachments/t1/k-b.pdf","image":false,"url":""}]"#).unwrap();
         let (p, f) = split_attachments(&l); assert_eq!(p.len(), 1); assert_eq!(f, vec!["b.pdf".to_string()]); assert_eq!(split_attachments(&Value::Null), (vec![], vec![]));
+    }
+    #[test] fn a_message_that_may_wrap_takes_the_bubbles_full_width() {
+        assert!(bubble_full_width(&"word ".repeat(40))); assert!(bubble_full_width(&format!("short\n{}", "x".repeat(61))));
+        assert!(!bubble_full_width("hello from the test")); assert!(!bubble_full_width("a\nb\nc")); assert!(!bubble_full_width(&"y".repeat(60)));
     }
     fn info(id: &str, idx: usize, text: &str) -> Info { Info { text: text.into(), entry: id[1..].parse().unwrap_or(0), id: id.into(), idx, links: vec![], layout: None } }
     fn frame(r: &mut Registry, blocks: &[(&str, usize, &str)]) { r.begin(); for (id, idx, t) in blocks { r.blocks.push(info(id, *idx, t)); } r.resolve(); }
