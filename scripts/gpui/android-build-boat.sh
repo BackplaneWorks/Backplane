@@ -29,7 +29,7 @@ $SDK/cmdline-tools/latest/bin/sdkmanager "platforms;android-35" "build-tools;34.
 S1=$(now)
 # bridge.js comes from the Boat bridge build (uploaded with --include-file), never built here
 mkdir -p mobile/build/assets; cp scripts/gpui/android-bridge-stage/bridge.js mobile/build/assets/bridge.js
-X=""; [ "${1:-}" = nosidebar ] && X="-PbpNativeSidebar=false"
+X=""; for a in "$@"; do case "$a" in nosidebar) X="$X -PbpNativeSidebar=false";; host=*) X="$X -PbpE2eHost=${a#host=}";; esac; done
 export GRADLE_USER_HOME=$PWD/build/gpui-gradle-home
 cd mobile/android
 /usr/bin/time -v -o ../../$A/gradle.time ./gradlew --no-daemon --console=plain --max-workers=2 -Dorg.gradle.jvmargs=-Xmx3g assembleDebug -PbpNative=true $X > ../../$A/gradle.log 2>&1 || { tail -40 ../../$A/gradle.log; exit 1; }

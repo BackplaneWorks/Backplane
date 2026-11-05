@@ -62,7 +62,7 @@ private fun inline(bs: List<Block>): AnnotatedString {
         for (b in xs) when (b) {
             is Block.Txt -> append(b.text)
             is Block.El -> when {
-                b.tag == "code" -> withStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = code)) { go(b.kids) }
+                b.tag == "code" -> withStyle(SpanStyle(fontFamily = BpMono, fontFeatureSettings = NO_LIGATURES, background = code)) { go(b.kids) }
                 b.tag == "strong" -> withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { go(b.kids) }
                 b.tag == "em" -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { go(b.kids) }
                 b.tag == "a" && b.href != null && b.file && tap != null ->
@@ -112,7 +112,7 @@ private fun MdBlock(b: Block) {
             "hr" -> Box(Modifier.fillMaxWidth().padding(vertical = 6.dp).height(1.dp).background(MaterialTheme.colorScheme.outlineVariant))
             "table" -> MdTable(b.kids.filterIsInstance<Block.El>())
             "pre" -> Surface(color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth()) {
-                Text(plain(b.kids), style = t.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                Text(plain(b.kids), style = t.bodyMedium.copy(fontFamily = BpMono, fontFeatureSettings = NO_LIGATURES),
                     softWrap = false,
                     modifier = Modifier.horizontalScroll(rememberScrollState()).padding(12.dp))
             }

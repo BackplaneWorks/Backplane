@@ -7,6 +7,7 @@ import android.os.ParcelFileDescriptor
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -346,5 +347,5 @@ private fun TextPage(m: AppModel, path: String) {
     }.value
     if (got == null) CircularProgressIndicator(Modifier.padding(16.dp))
     else if (got.first == null) Text(NativeMessages.native_file_text_error(lang, got.second), Modifier.padding(16.dp), color = MaterialTheme.colorScheme.outline)
-    else SelectionContainer { Text(got.first!!, Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), fontFamily = FontFamily.Monospace) }
+    else SelectionContainer { Text(got.first!!, Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), style = TextStyle(fontFamily = BpMono, fontFeatureSettings = NO_LIGATURES)) }
 }

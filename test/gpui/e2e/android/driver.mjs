@@ -65,8 +65,11 @@ async function step(s,ctx,st){
     case 'download':{await tapText(new RegExp(s.file.replace('.','\\.')),8000,'file '+s.file);await sleep(1500);return}
     case 'open_settings':{await tapText(/Settings/,8000,'Settings');return}
     case 'click_every_control':{const inv=ui().filter(n=>n.clickable&&n.enabled);const res={};for(const n of inv){const b=dump();tapXY(...mid(n));await sleep(450);const a=dump();res[n.id]={changed:a!==b,action:false};if(a!==b){back();await sleep(300)}}st.dead=deadControls(inv,res);return}
-    case 'sleep_network':{sh('svc wifi disable');sh('svc data disable');st.netDown=Date.now();await sleep(Math.min(s.secs,60)*1000);return}
-    case 'wake_network':{sh('svc wifi enable');sh('svc data enable');st.netUp=Date.now();return}
+    case 'sleep_network':{ // the fixture hub's control endpoint (serve-fixture.mjs: port+1) drops all connections and refuses new ones for N s
+      const u=new URL(ctx.hub?.state.url||process.env.E2E_HUB_URL||'http://invalid');const ctl=process.env.E2E_CTL_URL||`http://${u.hostname}:${Number(u.port)+1}`;
+      const r=await fetch(`${ctl}/ctl/cut?secs=${s.secs}`,{method:'POST'}).catch(()=>null);if(!r||!r.ok)block('hub control endpoint /ctl/cut not reachable at '+ctl);
+      st.netDown=Date.now();await sleep(s.secs*1000);return}
+    case 'wake_network':{st.netUp=Date.now();return} // the cut ends by itself
     case 'agents':return; // started by the harness (startAgents)
     case 'session':{ // random walk over the sidebar/threads, sampling the app's PSS every 30 s
       const t=Date.now();const mem=[];let k=0;while(Date.now()-t<s.minutes*60000){const rs=rows(ui());if(rs.length)tapXY(...mid(rs[(k++*7)%Math.min(rs.length,8)]));await sleep(1200);swipeUp(0.4);await sleep(600);back();
