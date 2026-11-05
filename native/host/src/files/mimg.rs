@@ -122,6 +122,18 @@ pub fn lookup(home: &Path, entry: &str, src: &str) -> Result<Snap, &'static str>
     let file = dir.join(name); let b = read_image(&file)?; let ext = image_type(&b)?;
     if name == format!("{}.{ext}", sha_hex(&b)) { Ok(Snap { path: file, thread: j.get("thread").and_then(|v| v.as_str()).map(str::to_string) }) } else { Err("") }
 }
+/// Write the thread into a ref the Bend hub made (it has none), so the deleted-thread check can apply to it from now on.
+pub fn set_thread(home: &Path, entry: &str, src: &str, thread: &str) -> bool {
+    let Ok(dir) = snapshot_dir(home) else { return false };
+    let rf = dir.join(ref_name(entry, src));
+    let Ok(text) = std::fs::read_to_string(&rf) else { return false };
+    let Ok(mut j) = serde_json::from_str::<serde_json::Value>(&text) else { return false };
+    if j.get("thread").is_some() { return true }
+    j["thread"] = serde_json::json!(thread);
+    let tmp = rf.with_extension("json.thread");
+    let ok = (|| { use std::io::Write; let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp)?; f.write_all(j.to_string().as_bytes())?; std::fs::rename(&tmp, &rf) })();
+    let _ = std::fs::remove_file(&tmp); ok.is_ok()
+}
 /// mi_snapshot: the snapshot file for (entry, source), made if it is not there yet; Err when it cannot be had.
 pub fn snapshot(home: &Path, entry: &str, src: &str, thread: &str) -> Result<Snap, &'static str> {
     if entry.is_empty() || entry.len() > 1024 { return Err("") }
@@ -160,6 +172,15 @@ mod tests {
         assert!(image_type(b"<svg xmlns='http://www.w3.org/2000/svg'></svg>").is_err()); assert!(image_type(b"").is_err()); assert!(image_type(&[0xff, 0xd8, 0xff]).is_err());
         let mut gif = b"GIF89a".to_vec(); gif.extend([4, 0, 3, 0, 0, 0]); assert_eq!(image_type(&gif), Ok("gif"));
         let jpg = [0xff, 0xd8, 0xff, 0xc0, 0, 17, 8, 0, 20, 0, 30, 3, 1, 0x22, 0, 2, 0x11, 0, 3, 0x11, 0]; assert_eq!(image_type(&jpg), Ok("jpg"));
+    }
+    #[test] fn a_ref_without_a_thread_gets_one() {
+        let home = tmp("sth"); let src = tmp("sths"); let f = src.join("p.png"); std::fs::write(&f, png(8, 8)).unwrap(); let fs = f.to_string_lossy().into_owned();
+        let s = snapshot(&home, "m1", &fs, "t1").unwrap(); let name = s.path.file_name().unwrap().to_string_lossy().into_owned();
+        // a ref as the Bend hub writes it: the image only
+        let rf = home.join("message-images").join(ref_name("m1", &fs)); std::fs::write(&rf, format!("{{\"image\":\"{name}\"}}")).unwrap();
+        assert!(lookup(&home, "m1", &fs).unwrap().thread.is_none());
+        assert!(set_thread(&home, "m1", &fs, "t9")); assert_eq!(lookup(&home, "m1", &fs).unwrap().thread.as_deref(), Some("t9"));
+        assert!(!set_thread(&home, "nope", &fs, "t9"));
     }
     #[test] fn snapshot_refs_and_refusals() {
         let home = tmp("home"); let src = tmp("src"); let f = src.join("p.png"); std::fs::write(&f, png(8, 8)).unwrap();
