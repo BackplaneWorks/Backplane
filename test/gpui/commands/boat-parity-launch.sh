@@ -7,4 +7,4 @@ rm -rf pstage; mkdir -p pstage; B=${GPUI_BUILD:-/home/h/Documents/i2cjak/backpla
   git ls-files -co --exclude-standard test/gpui/agents/fixtures test/gpui/files/hostile_paths.tsv test/gpui/commands
   find pstage -type f; } | sed 's/^/--include-file /' | tr '\n' ' ' > pstage/.args
 # shellcheck disable=SC2046
-scripts/boat-job.sh --size large --timeout 2400 $(cat pstage/.args) --artifact out/commands-parity -- sh test/gpui/commands/boat-parity.sh
+scripts/boat-job.sh --size large --timeout 2700 --idle 3600 $(cat pstage/.args) --artifact out/commands-parity -- sh test/gpui/commands/boat-parity.sh
