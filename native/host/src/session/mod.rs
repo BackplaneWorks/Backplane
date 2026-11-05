@@ -44,6 +44,15 @@ fn target_valid(t: &Value) -> bool {
     within(i, 1024) && ((k == "recent" && i.is_empty()) || (!i.is_empty() && matches!(k, "project" | "thread" | "bot" | "room")))
 }
 
+/// The event type of a log line: `{"$":"Type",…}`, tolerant of JSON whitespace (`{ "$" : "Type"`), as the JSON parse of the Bend hub and `Model` are. A line
+/// that is not an object starting with a `$` string field gives None. The fast path is the compact form the hub writes itself; hand-written logs
+/// (Python's json.dumps puts a space after the colon) took the strict `strip_prefix` filters of agents/bots/commands to "no such event".
+pub fn event_type(line: &str) -> Option<&str> {
+    if let Some(r) = line.strip_prefix("{\"$\":\"") { return r.split('"').next() }
+    let r = line.trim_start().strip_prefix('{')?.trim_start().strip_prefix("\"$\"")?.trim_start().strip_prefix(':')?.trim_start().strip_prefix('"')?;
+    r.split('"').next()
+}
+
 /// The error a policy reply stands for: `refused` (page action not offered / token not held) is INVALID_REQUEST, `stale` (the target does not exist) STALE_VIEW.
 fn policy_error(pol: &Value) -> Option<&'static str> {
     if pol.get("refused") == Some(&json!(true)) { Some("INVALID_REQUEST") } else if pol.get("stale") == Some(&json!(true)) { Some("STALE_VIEW") } else { None }
@@ -217,13 +226,22 @@ impl Hub {
 #[cfg(test)]
 mod read_tests {
     use super::*;
-    // Hub.autosettle.read_view: view.open reads; view.update and view.page do not; a mirror does not
+    #[test] fn a_log_line_has_its_type_whatever_the_spacing() {
+        assert_eq!(event_type(r#"{"$":"ThreadCreated","id":"t1"}"#), Some("ThreadCreated"));
+        assert_eq!(event_type(r#"{"$": "ThreadCreated", "id": "t1"}"#), Some("ThreadCreated"));
+        assert_eq!(event_type(r#"  { "$" : "ProjectCreated" , "id":"p"}"#), Some("ProjectCreated"));
+        assert_eq!(event_type(r#"{"id":"t1","$":"ThreadCreated"}"#), None, "the type is the first field, as the hub writes it");
+        assert_eq!(event_type("not json"), None);
+        assert_eq!(event_type(r#"{"$":5}"#), None);
+        assert_eq!(event_type(""), None);
+    }
     #[test] fn the_policys_verdicts_become_errors() {
         assert_eq!(policy_error(&json!({"refused": true})), Some("INVALID_REQUEST"));
         assert_eq!(policy_error(&json!({"stale": true})), Some("STALE_VIEW"));
         assert_eq!(policy_error(&json!({"remoteReady": true, "stale": false})), None);
         assert_eq!(policy_error(&json!({"remoteReady": true})), None);
     }
+    // Hub.autosettle.read_view: view.open reads; view.update and view.page do not; a mirror does not
     #[test] fn only_a_view_open_of_a_local_thread_acknowledges() {
         assert!(acknowledges("view.open", false));
         assert!(!acknowledges("view.open", true));

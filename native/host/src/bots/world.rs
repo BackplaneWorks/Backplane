@@ -109,7 +109,7 @@ impl World {
         Ok(())
     }
     pub fn apply_line(&mut self, line: &str) {
-        let Some(t) = line.strip_prefix("{\"$\":\"").and_then(|r| r.split('"').next()) else { return };
+        let Some(t) = crate::session::event_type(line) else { return };
         const READ: [&str; 35] = ["BotSet", "BotDeleted", "RoomSet", "RoomDeleted", "RoomPosted", "HookSet", "HookHit", "RoutineSet", "RoutineDeleted", "RoutineFired",
             "MemorySaved", "MemoryForgot", "SpaceSet", "SpacePageSet", "PeerSet", "RoutinePlan", "RoutineSlot", "RoutineDone", "SettingSet", "MessagePosted", "ThreadCreated", "TaskSet", "UberSet", "UberOp", "ConvSet", "MailPosted", "MailMarked", "MailTagged", "TurnChanged", "AskOpened", "AskClosed", "QueueTaken", "BotWoke", "ProjectCreated", "ProjectRemoved"];
         if !READ.contains(&t) { return }
