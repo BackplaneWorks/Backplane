@@ -743,10 +743,14 @@ function transitionScope(target = presentationTarget(currentSession())) {
   return { origin: location.origin, identity: cacheIdentity(document.cookie), language: App.lang(ui) + (PHONE ? "/phone" : ""),
     epoch: thin?.epoch || remoteEpoch, bundle: import.meta.url, target, selected:currentSession().sel, settings:currentSession().open?.settings===true, route: currentSession().route || null };
 }
+let lastInput = 0;
+for (const name of ["pointerdown", "keydown", "wheel"]) addEventListener(name, () => { lastInput = performance.now(); }, { capture: true, passive: true });
 const previewViews = new ViewPrefetch({
   hub:location.origin, scope:()=>transitionScope(),
   has:target=>!!transitionViews.destination(transitionScope(), target),
-  idle:()=>remoteReady && !document.hidden && !thin?.active && !thin?.paging,
+  // (and the person has not pressed, typed or scrolled for two seconds: the hub
+  // answers one request at a time, and a prefetch ahead of a click delays it)
+  idle:()=>remoteReady && !document.hidden && !thin?.active && !thin?.paging && performance.now() - lastInput > 2000,
   socket:()=>new WebSocket(location.origin.replace(/^http/, "ws") + "/ws?view=1&frontend=1"),
   encode:request=>fromList(App.wire_out_json(Wire.json(PHONE ? {...request,p:{...request.p,...phoneRequest(PHONE)}} : request))),
   decode:data=>Wire.plain(Wire.cbor(new Uint8Array(data), KEYS, WORDS)),
