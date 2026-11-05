@@ -2,7 +2,7 @@
 # Boat: bridge.js from the branch (focused checks first), then the APK from it. Result: build/gpui/bridge/bridge.js, apk per android-build.sh
 cd "$(dirname "$0")/../.." || exit 1
 LOG=$(mktemp)
-scripts/boat-job.sh --size large --exclude "native/host/target/**" --exclude "stage/**" --exclude "stage-edge/**" --timeout 3000 --artifact build/gpui-bridge-artifacts -- sh scripts/gpui/android-bridge-boat.sh test/mbots_test.bend 2>&1 | tee "$LOG"
+scripts/boat-job.sh --size large --exclude "native/host/target/**" --exclude "stage/**" --exclude "stage-edge/**" --exclude "native/**" --exclude "mobile/ios/**" --exclude "docs/**" --exclude "desktop/**" --exclude "deploy/**" --exclude "order/**" --timeout 3000 --artifact build/gpui-bridge-artifacts -- sh scripts/gpui/android-bridge-boat.sh test/mbots_test.bend 2>&1 | tee "$LOG"
 ID=$(grep -o "job j[0-9]*-[0-9]*" "$LOG" | head -1 | cut -d" " -f2); rm -f "$LOG"
 [ -n "$ID" ] || { echo "no job id"; exit 1; }
 J="${XDG_STATE_HOME:-$HOME/.local/state}/backplane/boat/jobs/$ID"
