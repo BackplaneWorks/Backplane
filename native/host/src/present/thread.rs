@@ -149,12 +149,18 @@ fn plain_thread(st: &State, id: &str) -> bool {
     if !t.worktree.is_empty() || t.worktree_mode || st.snooze_until.get(id).copied().unwrap_or(0) != 0 { return false }
     if st.tasks.values().any(|(p, c, _, _)| p == id || c == id) || st.asks.values().any(|(th, open)| th == id && *open) { return false }
     if st.queue.get(id).map_or(false, |q| !q.is_empty()) { return false }
-    let gate = [format!("effort:{id}"), format!("wait.{id}"), format!("stop.{id}"), format!("fail.{id}"), "files.max.mb".into(), "person.tz".into(), "tz.machine".into(), "think".into(), "permissions.default".into()];
+    let gate = [format!("effort:{id}"), format!("wait.{id}"), format!("stop.{id}"), format!("fail.{id}"), "files.max.mb".into(), "person.tz".into(), "person.tz.device".into(), "tz.machine".into(), "think".into(), "permissions.default".into()];
     // A lean State drops the settings it does not keep: there, "the key is absent" proves nothing, so a gate key it may have dropped means refuse
     // (the state lane keeps these keys bounded; until it does this answers None on a lean State rather than a false supported case).
     if st.lean && gate.iter().any(|k| !crate::state::fam::policy::lean_keeps(k)) { return false }
-    !gate.iter().any(|k| st.settings.contains_key(k))
+    // The time stamps here are UTC only: a zone setting is supported when it names UTC (the hub records tz.machine=Etc/UTC on a UTC machine), any other zone is not
+    let utc = |k: &str| st.settings.get(k).map_or(true, |v| utc_name(v));
+    if !(utc("person.tz") && utc("person.tz.device") && utc("tz.machine")) { return false }
+    !gate.iter().filter(|k| !matches!(k.as_str(), "person.tz" | "person.tz.device" | "tz.machine")).any(|k| st.settings.contains_key(k))
 }
+
+/// the names of the zone with no offset (Tz: UTC0), as the hub writes them
+fn utc_name(v: &str) -> bool { matches!(v.trim(), "" | "UTC" | "Etc/UTC") }
 
 /// shown.thread for a plain idle thread, from the page rows. `hub` is the request's hub key (the id is `<hub>|<thread>`), `draft` the composer's text.
 /// None unless every key is derived.
@@ -202,6 +208,14 @@ mod tests {
     #[test] fn rows_may_carry_numbers_or_strings() {
         let a = json!([["5", "5", "m1", "t", "", "msg", "user", "", "hi", "9"]]); let b = json!([[5, 5, "m1", "t", "", "msg", "user", "", "hi", 9]]);
         assert_eq!(ents(a.as_array().unwrap(), "t").unwrap()[0].at, ents(b.as_array().unwrap(), "t").unwrap()[0].at);
+    }
+    #[test] fn a_utc_zone_setting_is_supported_and_another_zone_is_not() {
+        let p = fixture(); let th = p["params"]["page"]["thread"].as_str().unwrap();
+        let log = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/gpui/slim/fixtures/thread-log.jsonl")).unwrap();
+        let with = |k: &str, v: &str| { let mut st = State::new(); for l in log.lines() { st.apply_line(l); } st.apply_line(&format!(r#"{{"$":"SettingSet","key":"{k}","value":"{v}","at":1}}"#)); st };
+        for (k, v, ok) in [("tz.machine", "Etc/UTC", true), ("person.tz", "UTC", true), ("tz.machine", "Europe/Helsinki", false), ("person.tz", "EET-2EEST,M3.5.0/3,M10.5.0/4", false), ("person.tz.device", "America/New_York", false)] {
+            assert_eq!(thread_object(&with(k, v), "h", th, &p["params"], "").is_some(), ok, "{k}={v}");
+        }
     }
     #[test] fn civil_dates() { assert_eq!(civil(0), (1970, 1, 1)); assert_eq!(civil(19675), (2023, 11, 14)); assert_eq!(clock(1700002806, 0), "Tue 14 Nov 23:00"); }
     #[test] fn labels_name_three_kinds_and_the_live_one_says_what_runs() {
