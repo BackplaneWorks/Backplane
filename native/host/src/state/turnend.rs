@@ -174,6 +174,8 @@ pub struct ToldCtx { pub seq: u64, items: std::collections::HashMap<String, (Str
 pub fn told_ctx(pre: &State, batch: &[Value], extra_threads: &[String]) -> ToldCtx {
     let mut ths: Vec<String> = extra_threads.to_vec();
     for c in batch { if gstr(c, "$", "") == "SettingSet" { if let Some(t) = gstr(c, "key", "").strip_prefix("alert.") { ths.push(t.to_string()); } } }
+    // the threads of the asks the step opens get an alert record (Alerts.asks) and so a told mark
+    for c in batch { if gstr(c, "$", "") == "AskOpened" { ths.push(gstr(c, "thread", "").to_string()); } }
     let mut items = std::collections::HashMap::new();
     for th in ths {
         let title = pre.threads.get(&th).map_or(String::new(), |t| t.title.clone());
