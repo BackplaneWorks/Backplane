@@ -581,6 +581,19 @@ mod tests {
         assert!(a.take_reads("v2", &t2).is_empty());
         assert!(a.take_reads("v3", &t2).is_empty());
     }
+    #[test] fn a_page_action_before_the_first_update_gets_the_empty_maps_back() {
+        // android: a native-sidebar-page sent before any view.update; the request's captured session is empty, so must the reply's maps be
+        let mut req = req("recent", "");
+        req["action"] = json!("native-sidebar-page"); req["nativeSidebar"] = json!(1);
+        req["session"] = json!({"sel": "", "drafts": {}, "info": {}, "outbox": {}});
+        let pol = json!({"remoteReady": true, "session": {"sel": "", "error": "e", "note": "n", "drafts": {}, "info": {}, "outbox": {}}});
+        let mut out = apply(900_777, "v1", &req, &pol);
+        assert!(out["session"]["drafts"].as_object().unwrap().len() > 0, "the actor's constants are in the unmasked reply");
+        mask_page_reply(&req, &mut out);
+        assert_eq!(out["session"]["drafts"], json!({})); assert_eq!(out["session"]["info"], json!({})); assert_eq!(out["session"]["outbox"], json!({}));
+        assert!(out["session"].get("error").is_none() && out["session"].get("note").is_none());
+        forget(900_777);
+    }
     #[test] fn forget_and_the_bound_keep_the_map_flat() {
         let mut m: HashMap<u64, ViewActor> = HashMap::new();
         for c in 0..10_000u64 { m.entry(c).or_default(); bound(&mut m, MAX_ACTORS); }
