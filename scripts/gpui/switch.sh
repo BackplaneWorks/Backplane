@@ -86,6 +86,8 @@ guard_source() {
       [ "${SWITCH_ALLOW_LIVE:-}" = person ] || die "side mode needs the person's typed yes (SWITCH_ALLOW_LIVE=person, set by side-by-side.sh): refused"
       if real_store "$d"; then
         [ "$(realpath -m "$d")" = "$(realpath -m "$HOME/.backplane-bend")" ] || die "side mode reads only ~/.backplane-bend as a real store; $d is another real store: refused"
+        # the env var alone is not consent: a real store also needs a terminal here, not only in side-by-side.sh
+        { [ -t 0 ] && [ -t 1 ]; } || die "side on a real store needs a terminal (the person's own): refused"
         [ "$HOLD" = 0 ] || die "the hold: no hub on a copy of a real log yet (HOLD=1 in switch.sh, lifted by a reviewed commit)"
       fi
     fi
