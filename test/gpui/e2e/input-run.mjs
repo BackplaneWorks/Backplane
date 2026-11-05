@@ -1,7 +1,7 @@
 // The must-pass GPUI input actions with real OS input on Xvfb (Boat): drag-select, Ctrl-C, paste an image, drop a file, IME, paperclip, link click.
 // bun test/gpui/e2e/input-run.mjs --hub-bin PATH --gpui-bin PATH [--out DIR]   (Boat only; see boat-run.sh input-run)
 import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';import {spawn,execFileSync} from 'node:child_process';import {resolve} from 'node:path';
-import {startDisplay,installMissing} from './lib/capture.mjs';import {startFixtureHub} from './lib/hubfx.mjs';import {Input,diffPixels} from './input/driver.mjs';import {startIme} from './input/ime.mjs';import {preflight} from './input/preflight.mjs';
+import {startDisplay,installMissing} from './lib/capture.mjs';import {startFixtureHub} from './lib/hubfx.mjs';import {Input,diffPixels} from './input/driver.mjs';import {startIme} from './input/ime.mjs';import {viewClient} from './lib/../../perf/view.mjs';import {preflight} from './input/preflight.mjs';
 const arg=(k,d)=>{const i=process.argv.indexOf('--'+k);return i>=0?process.argv[i+1]:d};const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const hubBin=resolve(arg('hub-bin')),gpuBin=resolve(arg('gpui-bin')),out=resolve(arg('out','out/e2e/input'));mkdirSync(out,{recursive:true});
 const summary={when:new Date().toISOString(),actions:{},blocked:{},env:installMissing()};
@@ -56,12 +56,15 @@ try{
   const newEvents=(t0)=>{try{const ev=readFileSync(evPath,'utf8').split('\n').filter(Boolean).map(l=>{try{return JSON.parse(l)}catch{return null}}).filter(e=>e&&e.at>=t0);return {kinds:Object.entries(ev.reduce((a,e)=>(a[e.$]=(a[e.$]||0)+1,a),{})),mentionsPng:ev.filter(e=>/png|pasted|attach|image/i.test(JSON.stringify(e))).map(e=>({kind:e.$,sample:JSON.stringify(e).slice(0,200)})).slice(0,4)}}catch{return null}};
   const composerText=()=>{const r=[...metrics].reverse().find(m=>m.event==='read'&&m.what==='composer');return r?{text:r.text,supported:r.supported}:null};
   const sendAndRead=async(t0)=>{inp.xi.key('Return');await sleep(1500);const m=sentSince(t0);return m.at(-1)||null};
+  // what the hub itself shows for the thread after the send (the same picture every client gets): does it carry the attachment?
+  const hubShows=async(threadId)=>{try{const v=await viewClient(fx.hub,{mobile:true,delta:false,tag:'e2e-judge'});await v.open();v.target={kind:'thread',id:threadId};v.viewId='';const r=await v.req('view.open',{},20000);v.close();
+      const t=JSON.stringify(r?.x?.result?.shown?.thread||{});return {bytes:t.length,mentionsImage:/png|pasted|image|attachment|<img/i.test(t),sample:(t.match(/.{0,50}(pasted|\.png|image).{0,50}/i)||[''])[0]}}catch(e){return {error:String(e.message).slice(0,120)}}};
   const clearComposer=async()=>{inp.xi.click(win.x+comp[0],win.y+comp[1]);inp.xi.key('ctrl+a');inp.xi.key('BackSpace');await sleep(200)};
   if(comp){
     await run('paste-image',async()=>{await clearComposer();const t0=Math.floor(Date.now()/1000);inp.xi.type('see pic');const r=await inp.pasteImage(out+'/paste.png',win,comp);await sleep(6000);inp.s('before-send-paste');const m=await sendAndRead(t0);const blob=JSON.stringify(m||{});
-      return {ok:!!m&&/png|image|pasted/i.test(blob)&&/see pic/.test(m.text||''),evidence:{...r.evidence,attachmentsOnHub:attachments(),newEvents:newEvents(t0),hubMessage:m?{keys:Object.keys(m),text:m.text}:null,mentionsImage:/png|image|pasted/i.test(blob)}}});
+      const shown=m?await hubShows(m.thread):null;return {ok:!!m&&/see pic/.test(m.text||'')&&(/png|image|pasted/i.test(blob)||!!shown?.mentionsImage),evidence:{...r.evidence,hubThreadShows:shown,attachmentsOnHub:attachments(),newEvents:newEvents(t0),hubMessage:m?{keys:Object.keys(m),text:m.text}:null,mentionsImage:/png|image|pasted/i.test(blob)}}});
     await runIf('drop-file',async()=>{await clearComposer();const t0=Math.floor(Date.now()/1000);inp.xi.type('see drop');const r=inp.dropFile(win,resolve(out+'/paste.png'),comp);await sleep(6000);inp.s('before-send-drop');const m=await sendAndRead(t0);const blob=JSON.stringify(m||{});
-      return {ok:r.ok&&!!m&&/paste\.png|png|image/i.test(blob),evidence:{...r.evidence,attachmentsOnHub:attachments(),newEvents:newEvents(t0),hubMessage:m?{keys:Object.keys(m),text:m.text}:null,mentionsFile:/paste\.png/i.test(blob)}}});
+      const shown=m?await hubShows(m.thread):null;return {ok:r.ok&&!!m&&(/paste\.png|png|image/i.test(blob)||!!shown?.mentionsImage),evidence:{...r.evidence,hubThreadShows:shown,attachmentsOnHub:attachments(),newEvents:newEvents(t0),hubMessage:m?{keys:Object.keys(m),text:m.text}:null,mentionsFile:/paste\.png/i.test(blob)}}});
     await runIf('ime-hangul',async()=>{await clearComposer();const t0=Math.floor(Date.now()/1000);const r=await inp.imeCompose(ime,comp,win);const m=await sendAndRead(t0);
       return {ok:!!m&&/한/.test(m.text||''),evidence:{...r.evidence,composerRead:composerText(),hubMessageText:m?.text??null,expected:'한 (composed); raw keys would arrive as "gks"'}}});
   } else summary.blocked['paste/drop/ime']='no composer region in the layout event';

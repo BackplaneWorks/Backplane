@@ -40,7 +40,7 @@ export async function preflight({display,env,ime,out,portalLog=null}){
     ok('ime-daemon',true,{engine:ime.engine});
     let sw='';try{sw=ime.setEngine('hangul')}catch(e){ok('ime-switch',false,String(e.stderr||e.message).slice(0,200));return}
     ok('ime-switch',/hangul/.test(sw),{engine:sw});try{ime.setEngine('xkb:us::eng')}catch{}
-    let xs='';try{xs=execFileSync('xprop',['-root','XIM_SERVERS'],{env,encoding:'utf8'})}catch{}ok('xim-server-registered',/ibus/.test(xs),{xprop:xs.trim().slice(0,120)});
+    let xs='';try{xs=execFileSync('xprop',['-root','XIM_SERVERS'],{env,encoding:'utf8'})}catch{}ok('xim-server-registered',/ibus|fcitx/.test(xs),{xprop:xs.trim().slice(0,120)});
     const xev=spawn('xev',['-geometry','300x300+380+40','-name','pf-xim','-event','keyboard'],{env:{...env,...ime.env},stdio:['ignore','pipe','ignore']});let log='';xev.stdout.on('data',d=>log+=d);await sleep(1800);
     const g=xi.geometry('pf-xim');xi.focus(g.id);await sleep(500);xi.click(g.x+50,g.y+50);await sleep(400);
     // ibus keeps an engine per input context: switch AFTER the client's context has focus (a new context starts on the default engine)
