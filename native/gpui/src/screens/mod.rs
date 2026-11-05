@@ -11,6 +11,7 @@ pub mod picker;
 pub mod select;
 pub mod settings;
 pub mod timeline;
+pub mod viewer;
 mod glue;
 
 use gpui::{Context, Entity};
