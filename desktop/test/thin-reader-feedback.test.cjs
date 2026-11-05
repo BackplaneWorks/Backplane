@@ -142,7 +142,7 @@ test('a matching retained reconnect history keeps the current viewport instead o
  for(const retained of [true,false]){
   const saved=retained?{node:{history:true},direction:'older',conversation:'A',gone:{older:['a'],newer:[]},held:{pages:[{ids:['a']}]}}:null;
   let transitions=0;const ctx={transitionScope:()=>({}),thin:null,remoteReady:true,targetKey:()=>'',transitionViews:{warm:()=>Promise.resolve(false)},composerKeeper:{selecting(){}},takeReadingHistory:()=>saved,historyClear(){},historyNode:null,historyDirection:'',resumedConversation:null,historyGone:{older:new Set(),newer:new Set()},
-   modelFeedback:{clear(){}},subsFeedback:{clear(){}},pressFeedback:{drop(){},seen(){},showing:false,project:p=>p,choice(){}},thinMailDraft:{clear(){}},thinContinuations:{clear(){}},bodyWindows:{disconnect(){}},App:{presentation_select:u=>u},ui:{},restoreFocused(){},restoreTransition(){transitions++;},transitionPosition:{atEnd:true}};
+   modelFeedback:{clear(){}},subsFeedback:{clear(){}},pressFeedback:{drop(){},seen(){},showing:false,project:p=>p,choice(){}},foldFeedback:{drop(){},seen(){},showing:false,project:p=>p,choice(){}},thinMailDraft:{clear(){}},thinContinuations:{clear(){}},bodyWindows:{disconnect(){}},App:{presentation_select:u=>u},ui:{},restoreFocused(){},restoreTransition(){transitions++;},transitionPosition:{atEnd:true}};
   vm.createContext(ctx);const select=vm.runInContext('('+callback+')',ctx);assert.equal(select({kind:'thread',id:'A'},{sel:'A'}),saved?.held);
   assert.equal(transitions,retained?0:1);if(retained){assert.equal(ctx.transitionPosition,null);assert.equal(ctx.historyNode,saved.node);assert.equal(ctx.resumedConversation,'A');}
  }
