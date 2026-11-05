@@ -240,15 +240,19 @@ fn git_repo(name: &str) -> std::path::PathBuf {
     g(&["init", "-q"]); std::fs::write(d.join("f"), "x").unwrap(); g(&["add", "."]); g(&["commit", "-qm", "x"]); d
 }
 /// The agents module as a recorder: (call, thread, text). One for the process (the seam is global), so each test asks about its own threads.
-struct Rec(std::sync::Mutex<Vec<(&'static str, String, String)>>);
+struct Rec(std::sync::Mutex<Vec<(&'static str, String, String)>>, std::sync::Mutex<Option<Arc<Hub>>>);
 impl super::seam::Seam for Rec {
     fn stop<'a>(&'a self, th: &'a str) -> crate::api::Fut<'a, ()> { Box::pin(async move { self.0.lock().unwrap().push(("stop", th.into(), String::new())) }) }
-    fn interrupt<'a>(&'a self, th: &'a str) -> crate::api::Fut<'a, ()> { Box::pin(async move { self.0.lock().unwrap().push(("interrupt", th.into(), String::new())) }) }
+    // agents' interrupt contract: a running turn ends as interrupted (TurnChanged), logged by the hub that holds the thread
+    fn interrupt<'a>(&'a self, th: &'a str) -> crate::api::Fut<'a, ()> { Box::pin(async move {
+        self.0.lock().unwrap().push(("interrupt", th.into(), String::new()));
+        let hub = interrupt_hubs().lock().unwrap().get(th).cloned(); if let Some(h) = hub { let _ = h.commit(&json!({"$":"TurnChanged","thread":th,"state":"interrupted","at":10})).await; } }) }
     fn start_queued<'a>(&'a self, th: &'a str, text: &'a str) -> crate::api::Fut<'a, ()> { Box::pin(async move { self.0.lock().unwrap().push(("start_queued", th.into(), text.into())) }) }
     fn steer<'a>(&'a self, th: &'a str, text: &'a str) -> crate::api::Fut<'a, ()> { Box::pin(async move { self.0.lock().unwrap().push(("steer", th.into(), text.into())) }) }
     fn start_one<'a>(&'a self, th: &'a str, text: &'a str) -> crate::api::Fut<'a, ()> { Box::pin(async move { self.0.lock().unwrap().push(("start_one", th.into(), text.into())) }) }
 }
-fn rec() -> &'static Arc<Rec> { static R: std::sync::OnceLock<Arc<Rec>> = std::sync::OnceLock::new(); R.get_or_init(|| { let r = Arc::new(Rec(Default::default())); super::seam::inject(Some(r.clone())); r }) }
+fn interrupt_hubs() -> &'static std::sync::Mutex<std::collections::HashMap<String, Arc<Hub>>> { static M: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, Arc<Hub>>>> = std::sync::OnceLock::new(); M.get_or_init(Default::default) }
+fn rec() -> &'static Arc<Rec> { static R: std::sync::OnceLock<Arc<Rec>> = std::sync::OnceLock::new(); R.get_or_init(|| { let r = Arc::new(Rec(Default::default(), Default::default())); super::seam::inject(Some(r.clone())); r }) }
 fn calls(th: &str) -> Vec<(&'static str, String)> { rec().0.lock().unwrap().iter().filter(|c| c.1 == th).map(|c| (c.0, c.2.clone())).collect() }
 async fn settled(h: &Arc<Hub>, n0: usize, want: usize) -> Vec<Value> {
     for _ in 0..100 { if h.store.len() >= n0 + want { break } tokio::time::sleep(std::time::Duration::from_millis(50)).await }
@@ -345,4 +349,24 @@ async fn queue(h: &Arc<Hub>, th: &str, msg: &str, text: &str) { h.commit(&json!(
 // project_drive_root_absolute / project_unc_root: Hub.root.norm
 #[test] fn project_roots_are_kept_absolute() {
     for (a, b) in [("C:/", "C:/"), ("//server/share/", "//server/share"), ("/a/b//", "/a/b"), ("/", "/"), ("c://", "c:/")] { assert_eq!(super::plan::norm_root(a), b, "{a}") }
+}
+
+// archive_running_stops: archiving a running thread ends its turn (the agents module logs the interrupt) and its process goes; thread.delete also closes its page
+struct Close(std::sync::Mutex<Vec<String>>);
+impl crate::api::RpcHandler for Arc<Close> {
+    fn methods(&self) -> &'static [&'static str] { &["browser.close"] }
+    fn call<'a>(&'a self, _h: &'a Arc<Hub>, _w: &'a crate::api::Caller, id: &'a Value, _m: &'a str, p: &'a Value) -> crate::api::Fut<'a, Vec<Value>> {
+        Box::pin(async move { self.0.lock().unwrap().push(p["thread"].as_str().unwrap_or("").into()); vec![json!({"t":"reply","id":id,"ok":true})] })
+    }
+}
+#[tokio::test] async fn archive_running_stops() {
+    let h = hub("runstop").await; let closes = Arc::new(Close(Default::default())); h.register_rpc(Arc::new(closes.clone()));
+    for th in ["r1", "r2"] { mk(&h, th).await; h.commit(&json!({"$":"TurnChanged","thread":th,"state":"running","at":9})).await.unwrap(); interrupt_hubs().lock().unwrap().insert(th.into(), h.clone()); }
+    let running = |h: &Arc<Hub>, th: &str| { let mut f = super::fold::Fold::default(); f.sync(&h.store).unwrap(); f.threads[th].turn == "running" };
+    assert!(running(&h, "r1"));
+    ask(&h, "thread.archive", json!({"thread":"r1"})).await;
+    assert!(!running(&h, "r1"), "archive ends a running turn"); assert_eq!(calls("r1"), vec![("interrupt", String::new()), ("stop", String::new())]);
+    // an idle thread gets no turn change (archive_idle_no_turn)
+    mk(&h, "r3").await; let (e, _) = ask(&h, "thread.archive", json!({"thread":"r3"})).await; assert!(!e.iter().any(|v| v["$"] == "TurnChanged"));
+    ask(&h, "thread.delete", json!({"thread":"r2"})).await; assert!(!running(&h, "r2")); assert_eq!(*closes.0.lock().unwrap(), vec!["r2".to_string()], "thread.delete closes the thread's browser page");
 }

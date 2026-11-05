@@ -242,22 +242,22 @@ R(A, "Search / filter projects and threads", m=["view.action"], hub="partial", c
 R(A, "Older / quiet projects fold, faded rows", hub="partial", c="mpp", lane=L["side"], ev="presenter output, not compared on recorded logs with old projects; no phone shot")
 R(A, "Active view and Settled fold (sidebar.view)", m=["setting.set"], c="mpp", lane=L["cmd"], ev="setting.set has no handler in Rust; Active.rows is presenter code")
 R(A, "Row menu (right-click / long press): pin, settle, snooze, archive, delete", m=["thread.pin", "thread.unpin", "thread.settle", "thread.unsettle", "thread.snooze", "thread.archive", "thread.unarchive", "thread.delete"], c="mpp", lane=L["cmd"],
-  ev="none of the eight thread requests has a Rust handler; GPUI draws presenter buttons only; no menu proof on phones")
+  ev="commands/ planners (31 Boat tests, JS-hub replay 0 differences: test/gpui/commands); GPUI draws presenter buttons only; no menu proof on phones")
 R(A, "Pins", m=["thread.pin", "thread.unpin"], c="mpp", lane=L["cmd"], ev="commands/ planners, Boat tests + JS-hub replay (test/gpui/commands); archive/delete stop the process through agents::handle()")
 R(A, "Settle / unsettle, autosettle", m=["thread.settle", "thread.unsettle"], hub="partial", c="mpp", lane=L["cmd"],
-  ev="state/liveness.rs (8 tests) folds settle state; the settle requests are unhandled; autosettle.version only seeded at start")
+  ev="commands/ planners (31 Boat tests, JS-hub replay 0 differences: test/gpui/commands); state/liveness.rs folds settle state (8 tests); autosettle.version only seeded at start")
 R(A, "Snooze", m=["thread.snooze"], c="mpp", lane=L["cmd"], ev="commands/ planners, Boat tests + JS-hub replay (test/gpui/commands); archive/delete stop the process through agents::handle()")
 R(A, "Archive / unarchive", m=["thread.archive", "thread.unarchive"], c="mpp", lane=L["cmd"], ev="commands/ planners, Boat tests + JS-hub replay (test/gpui/commands); archive/delete stop the process through agents::handle()")
 R(A, "Delete thread (asks first)", m=["thread.delete"], c="mpp", lane=L["cmd"], ev="commands/ planners, Boat tests + JS-hub replay (test/gpui/commands); archive/delete stop the process through agents::handle()")
 R(A, "Rename thread / project", m=["thread.rename", "project.rename"], c="mpp", lane=L["cmd"], ev="commands/ planners, Boat tests + JS-hub replay (test/gpui/commands); archive/delete stop the process through agents::handle()")
-R(A, "Fork thread, bring back", m=["thread.fork", "thread.back", "thread.branch"], c="mpp", lane=L["cmd"], ev="no Rust handler")
+R(A, "Fork thread, bring back", m=["thread.fork", "thread.back"], c="mpp", lane=L["cmd"], ev="commands/ planners (31 Boat tests, JS-hub replay 0 differences: test/gpui/commands); the fork's worktree is made by the worktree job (commands/worktree.rs), thread.branch is the server job's report")
 R(A, "Reorder threads and projects", m=["thread.reorder", "project.reorder", "project.move"], c="mpp", lane=L["cmd"], ev="commands/ planners, Boat tests + JS-hub replay (test/gpui/commands); archive/delete stop the process through agents::handle()")
 R(A, "New thread", m=["thread.create"], c="mpp", lane=L["cmd"], ev="commands/ planners, Boat tests + JS-hub replay (test/gpui/commands); archive/delete stop the process through agents::handle()")
-R(A, "Add project (folder picker, mkdir, find)", m=["project.add", "fs.list", "fs.mkdir", "fs.find", "project.new", "project.create"], hub="partial", c="mpp", lane=L["cmd"],
-  ev="project.add handled (hub.rs, hub test project.add + first thread); fs.list/mkdir/find, project.new/create not; phones' picker code exists, no shot")
+R(A, "Add project (folder picker, mkdir, find)", m=["project.add", "fs.list", "fs.mkdir", "fs.find", "project.new", "project.create"], c="mpp", lane=L["cmd"],
+  ev="commands/ planners (31 Boat tests, JS-hub replay 0 differences: test/gpui/commands); the picker scripts are FsJob's; phones' picker code exists, no shot")
 R(A, "Remove project, restore on re-add", m=["project.remove"], c="mpp", lane=L["cmd"], ev="commands/ planners, Boat tests + JS-hub replay (test/gpui/commands); archive/delete stop the process through agents::handle()")
 R(A, "Scratch project and threads (ephemeral, sweep)", hub="missing", c="ppp", lane=L["cmd"], ev="hub makes <home>/scratch and sweeps (Scratch.sweep); not in Rust")
-R(A, "Thread tree: parent, detach, reparent", m=["thread.detach", "thread.reparent", "thread.worktree", "thread.note", "thread.local", "thread.merged", "thread.unrooted", "thread.titled"], c="mpp", lane=L["cmd"], ev="no Rust handler (sidebar.rs reads thread.tree.* settings only)")
+R(A, "Thread tree: parent, detach, reparent", m=["thread.detach", "thread.reparent"], c="mpp", lane=L["cmd"], ev="commands/ planners (31 Boat tests, JS-hub replay 0 differences: test/gpui/commands); thread.worktree/note/local are the server job's reports, written by commands/worktree.rs (thread.merged/unrooted/titled belong to git and title jobs, not ported)")
 R(A, "Project badge colour/icon editor", m=["setting.set"], c="mpp", lane=L["cmd"], ev="no Rust handler")
 R(A, "Status colours, urgency order, counts", hub="partial", pf="side", c="pdd", lane=L["side"], ev="sidebar.rs/signal.rs/shelf.rs ported with tests; compared only through the 1621-difference gate")
 R(A, "Machine switch / one list over machines", m=["view.action"], hub="missing", c="mpp", lane=L["net"], ev="needs far/links (see Machines)")
@@ -284,8 +284,8 @@ R(A, "Stop a turn (interrupt)", m=["turn.interrupt"], pf="agents", c="ppp", lane
 R(A, "Send a message (composer, draft kept)", m=["turn.start"], pf="agents", c="dpd", lane=L["gthread"], ev="hub test turn.start commits MessagePosted; GPUI send in shots (rust-hub-first, gpui-dark-2); android 05-send-roundtrip.png; iOS shots/ios/send1.png")
 R(A, "Long draft over 64 KB: typed, kept across restart, sent (bridge draft bound 0d930e939)", m=["turn.start"], c="ppp", hub="partial", lane=L["ios"], ev="iOS on the JS hub with bridge be6731574b: 70,000 characters stay in the composer and survive a relaunch, 30/70/100 KB drafts sent and reached the hub intact (results/ios/longdraft-hub.txt); OPEN: one stuck send ('Updating conversation...', composer keeps the text, hub gets nothing) on the multi-type flow is under investigation (results/ios/stuck-js.txt), the draft across a thread switch is not confirmed, Android's half is not done, not run on the Rust hub yet")
 R(A, "Multi-line composer, paste, selection, IME", c="pdd", hub="n/a", lane=L["gthread"], ev="GPUI single-line input (README gap); phones native text fields | gpui: screens/composer.rs + edit.rs multi-line, wrapped, undo/redo, word/line selection, IME, paste; edit::tests; no render check yet")
-R(A, "Queue while busy, steer, edit, remove, resume", m=["queue.move", "queue.remove", "queue.resume", "queue.steer", "queue.edit"], c="mpp", lane=L["cmd"], ev="no Rust handler; agents has a steer path (inputs.rs) but not the queue requests")
-R(A, "Model, effort and provider picker", m=["thread.provider", "thread.effort", "thread.modes", "models.refresh"], c="mpd", lane=L["cmd"], ev="no Rust handler (thread.modes = runtime/permissions too); GPUI picker not drawn; android/ios pop/settings shots show the picker on JS hub")
+R(A, "Queue while busy, steer, edit, remove, resume", m=["queue.move", "queue.remove", "queue.resume", "queue.steer", "queue.edit"], c="mpp", lane=L["cmd"], ev="commands/ planners (31 Boat tests, JS-hub replay 0 differences: test/gpui/commands); run through Agents::steer / start_one / start_queued; the agents lane owns the queue run")
+R(A, "Model, effort and provider picker", m=["thread.provider", "thread.effort", "thread.modes"], c="mpd", lane=L["cmd"], ev="commands/ planners (31 Boat tests, JS-hub replay 0 differences: test/gpui/commands) (models.refresh is not mine); GPUI picker not drawn; android/ios pop/settings shots show the picker on JS hub")
 R(A, "Slash commands and $skill / @ > % # popups", m=["skills.list"], hub="partial", c="dpd", lane=L["agents"], ev="slash popup drawn from presenter in GPUI (gpui-*-3-popup, side-*-popup); skills.list has no Rust handler (skills come from the view only); iOS pop.png, android 04-composer-popup.png")
 R(A, "/btw side question", m=["thread.btw"], c="mpp", lane=L["cmd"], ev="no Rust handler")
 R(A, "/give hand-off, references, summaries", m=["bots.give", "summary.set"], c="mpp", lane=L["bots"], ev="no Rust handler")
@@ -383,7 +383,7 @@ R(A, "KiStack skills in every thread, $ list", hub="partial", c="ppp", lane=L["a
 # ---- Git
 A = "Git and PR"
 R(A, "Git status, commit, push, PR (git.act)", m=["git.status", "git.act", "git.diff", "git.revert"], pf="git", c="mpp", lane=L["files"], ev="git-1.json; copy guard refuses writes on copies (copy.rs 15 tests); client buttons unproven")
-R(A, "Worktrees per thread, checkpoints", m=["thread.worktree"], c="ppp", lane=L["cmd"], ev="no Rust handler; thread.create is where worktrees are made")
+R(A, "Worktrees per thread, checkpoints", m=["thread.create"], c="ppp", lane=L["cmd"], ev="commands/worktree.rs (Git.thread_wt: upstream, subdirectory check, carry of uncommitted KiCad work; copy mode skips at once); real-git test on Boat; checkpoints are files/git.rs")
 
 # ---- Settings
 A = "Settings"

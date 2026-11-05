@@ -15,9 +15,6 @@ pub struct Line { pub msg: bool, pub role: String, pub kind: String, pub text: S
 #[derive(Default)]
 pub struct Ctx { pub entries: Vec<Line> }
 
-pub const METHODS: &[&str] = &["thread.pin", "thread.unpin", "thread.settle", "thread.unsettle", "thread.archive", "thread.unarchive", "thread.rename", "thread.delete", "thread.snooze",
-    "thread.reorder", "thread.detach", "thread.reparent", "thread.create", "project.remove", "project.rename", "project.reorder", "project.move",
-    "queue.edit", "queue.remove", "queue.move", "fs.list", "fs.mkdir", "fs.find", "project.add", "project.new", "project.create", "thread.modes", "thread.effort", "thread.provider", "thread.fork", "thread.back", "queue.steer", "queue.resume"];
 /// The requests that read the thread's whole conversation.
 pub fn needs_entries(m: &str) -> bool { matches!(m, "thread.fork" | "thread.back" | "thread.provider") }
 
