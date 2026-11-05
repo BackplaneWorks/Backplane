@@ -47,5 +47,9 @@ try {
   ok(k2 !== k && JSON.stringify(A(k2)) === JSON.stringify(A(k)), "close/open drops kept reads; the answer is the same");
   for (let i = 0; i < 300; i++) eff["Db.query.t"](h2, "SELECT ?1", L([T(String(i))]), 1);
   ok(A(eff["Db.query.t"](h2, "SELECT ?1", L([T("299")]), 1))[0][0] === "299", "bounded and still right");
+  const big = "x".repeat(600000), b1 = eff["Db.query.t"](h2, "SELECT ?1", L([T(big)]), 1), b2 = eff["Db.query.t"](h2, "SELECT ?1", L([T(big)]), 1);
+  ok(b1 !== b2 && A(b2)[0][0] === big, "an answer over 1 MiB is not kept");
+  const s1 = eff["Db.query.t"](h2, "SELECT ?1", L([T("small")]), 1), s2 = eff["Db.query.t"](h2, "SELECT ?1", L([T("small")]), 1);
+  ok(s1 === s2, "a small one still is");
 } finally { rmSync(dir, { recursive: true, force: true }); }
 console.log(fail ? fail + " failed" : "db_read_cache: ok"); process.exit(fail ? 1 : 0);

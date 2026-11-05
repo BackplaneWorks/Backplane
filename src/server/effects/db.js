@@ -79,11 +79,24 @@ function bp_db_text(v) {
 // store.db has no other writer (one hub per home; the other readers open it
 // read-only), so an answer is always what the database holds now. Only plain
 // reads are kept: SELECT/WITH with no write and no clock or random
-// function, at most 128 answers; failures are never kept.
+// function, at most 128 answers and 16 MiB of text (an answer over 1 MiB is
+// not kept); failures are never kept.
 const bp_db_reads = new Map();
-const BP_DB_READS = 128;
+const BP_DB_READS = 128, BP_DB_READ_BYTES = 16 << 20, BP_DB_READ_MAX = 1 << 20;
+let bp_db_read_bytes = 0;
 function bp_db_wrote() {
   if (bp_db_reads.size) bp_db_reads.clear();
+  bp_db_read_bytes = 0;
+}
+// the text an answer holds (UTF-16 units, two bytes each), up to the cap
+function bp_db_size(rows) {
+  let n = 0;
+  for (let r = rows; r.$ === CID(Con); r = r.tail)
+    for (let c = r.head; c.$ === CID(Con); c = c.tail) {
+      n += 16 + 2 * c.head.length;
+      if (n > BP_DB_READ_MAX) return n;
+    }
+  return n;
 }
 function bp_db_pure(sql) {
   return /^\s*(SELECT|WITH)\b/i.test(sql) && !/\b(INSERT|UPDATE|DELETE|REPLACE|UPSERT|CREATE|DROP|ALTER|PRAGMA|ATTACH|DETACH|VACUUM|RANDOM|RANDOMBLOB|CHANGES|TOTAL_CHANGES|LAST_INSERT_ROWID|CURRENT_TIME|CURRENT_DATE|CURRENT_TIMESTAMP)\b|'now'/i.test(sql);
@@ -265,9 +278,11 @@ function bp_db_read(h, sql, params, limit, typed) {
   const rows = bp_db_query(h, sql, params, limit, typed);
   // a failure is one row whose first column is NUL + "fail"
   const failed = rows.$ === CID(Con) && rows.head.$ === CID(Con) && rows.head.head === "\0fail";
-  if (!failed) {
-    if (bp_db_reads.size >= BP_DB_READS) bp_db_reads.clear();
+  const size = failed ? 0 : bp_db_size(rows);
+  if (!failed && size <= BP_DB_READ_MAX) {
+    if (bp_db_reads.size >= BP_DB_READS || bp_db_read_bytes + size > BP_DB_READ_BYTES) bp_db_wrote();
     bp_db_reads.set(key, rows);
+    bp_db_read_bytes += size;
   }
   return rows;
 }
