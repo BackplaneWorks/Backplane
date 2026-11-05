@@ -41,7 +41,7 @@ lane cannot break another lane's build.
 
 ## The ready push (2026-11-05)
 
-Ready means: GPUI desktop opens a copy of the person's real data on the Rust hub, a real Claude turn works, and Claude launches and drives a thread from inside. Bend leaves the runtime path. Each lane works in its own worktree under `~/Documents/i2cjak/bp-gpui-lanes/` and lands only through `scripts/gpui/land.sh` after the reviewer's recorded OK.
+Ready means: GPUI desktop opens a copy of the person's real data on the Rust hub, a real Claude turn works, and Claude launches and drives a thread from inside. Improvements works end to end in GPUI on the Rust hub, handing off to a real Claude thread that can work on the `gpui` branch. Bend leaves the runtime path. Each lane works in its own worktree under `~/Documents/i2cjak/bp-gpui-lanes/` and lands only through `scripts/gpui/land.sh` after the reviewer's recorded OK.
 
 | Lane | Thread | Owns | Worktree |
 |---|---|---|---|
@@ -53,4 +53,5 @@ Ready means: GPUI desktop opens a copy of the person's real data on the Rust hub
 | 5. Core MCP tools | mcp-core | `agents/mcp*` tool handlers for threads, subthreads and reports, `work_*`, `wake_on`, files, memory | `mcp-core` |
 | 6. Side-by-side and switch script | switchover `t1793897533-1897003` | `scripts/gpui/switch.sh`, `side-by-side.sh`, `SIDE-BY-SIDE.md` | `switchover-dev` |
 | 7. Real-log open test | perf `t1793832632-1684495` | the test harness; runs on synthetic until the coordinator lifts the hold | `perf` |
+| 8. Improvements | improvements `t1793897721-1900263` | `native/gpui` Improvements panel, recording, `settings/improvements.rs`, `issue_report.rs`, the hand-off | `improvements` |
 
