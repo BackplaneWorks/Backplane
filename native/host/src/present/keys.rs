@@ -71,16 +71,22 @@ fn label(name: &str) -> Option<&'static str> {
 }
 
 /// `state`, `tools`, `menu`, `working`, `phase` for a thread at clock `now_s`, or None for a case not computed here.
-pub fn keys(st: &State, id: &str, now_s: u64) -> Option<Map<String, Value>> {
+pub fn keys(st: &State, id: &str, now_s: u64, why: &str) -> Option<Map<String, Value>> {
     let t = st.threads.get(id)?;
-    if matches!(t.turn, Turn::Failed | Turn::Interrupted) || signal::stalled(st, id) { return None }
+    if signal::stalled(st, id) { return None }
     // a lean State may have dropped the fork record: then "forked" cannot be told
     let fork_key = format!("fork.{id}");
     if st.lean && !crate::state::fam::policy::lean_keeps(&fork_key) { return None }
     let forked = st.settings.get(&fork_key).map_or(false, |v| !v.is_empty());
     let n = plain_signal(st, id)?;
     let phase = signal::display_name(st, n, id);
-    let working = label(phase)?;
+    // Signal.label.shown: how the last turn ended says more than the signal when nothing else is going on
+    let shown = signal::shown_k(signal::name(n), t.turn, t.pending);
+    let working = match shown {
+        "stopped" => "Stopped: nothing is running".to_string(),
+        "failed" => format!("Failed{}{}", if why.is_empty() { String::new() } else { format!(": {why}") }, if signal::active(n) { "; work also active" } else { "" }),
+        _ => label(phase)?.to_string(),
+    };
     let until = st.snooze_until.get(id).copied().unwrap_or(0);
     let mut m = Map::new();
     m.insert("state".into(), json!(state_word(t.turn)));
@@ -98,13 +104,13 @@ mod tests {
     /// every variant the helper was dumped for: the keys that differ from the base are the ones computed here
     #[test] fn each_variants_state_keys_are_the_helpers() {
         let v = fx(); let log = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/gpui/slim/fixtures/thread-log.jsonl"));
-        let base = { let mut st = State::new(); for l in log.lines() { st.apply_line(l); } keys(&st, T, 1_700_100_000).expect("base") };
+        let base = { let mut st = State::new(); for l in log.lines() { st.apply_line(l); } keys(&st, T, 1_700_100_000, "").expect("base") };
         let mut checked = 0;
         for (name, x) in v.as_object().unwrap() {
             if x["thread"].is_null() && x.get("diff").is_none() { continue }
             let mut st = State::new(); for l in log.lines() { st.apply_line(l); }
             for e in x["extra"].as_array().unwrap() { st.apply(e); }
-            let Some(got) = keys(&st, T, 1_700_100_000) else { assert!(matches!(name.as_str(), "failed" | "interrupted" | "queued"), "{name} should be computed"); continue };
+            let Some(got) = keys(&st, T, 1_700_100_000, "") else { assert!(matches!(name.as_str(), "queued"), "{name} should be computed"); continue };
             let diff = x["diff"].as_object().unwrap();
             for k in ["state", "tools", "menu", "working", "phase"] { assert_eq!(Some(&got[k]), diff.get(k).or(base.get(k)), "{name}: {k}"); }
             checked += 1;

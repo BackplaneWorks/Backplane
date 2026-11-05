@@ -86,18 +86,20 @@ fn plain(e: &Ent) -> bool {
         }
         false
     } else {
-        matches!(e.role.as_str(), "tool") && e.akind != "restart"
+        // a tool call folds; any other tone draws as a plain row (Mob.act.k) except the ones with their own rows: design steps, terminals, reviews, reminders, thoughts, and the restart row (Fold.dup)
+        !matches!(e.role.as_str(), "step" | "emb" | "review" | "remind" | "think") && e.akind != "restart"
     }
 }
 
 /// `entries` of shown.thread for a plain page; `running`: the thread's turn runs; `open`: runs the person opened (the "fold:<id>" choices = "1");
 /// `now_ms`: the request's clock. None when any row needs what this cut does not do.
-pub fn entries(es: &[Ent], running: bool, open: &dyn Fn(&str) -> bool, now_ms: u64, zone: Option<&Rule>) -> Option<Vec<Value>> {
+pub fn entries(es: &[Ent], running: bool, open: &dyn Fn(&str) -> bool, now_ms: u64, zone: Option<&Rule>, marks: &dyn Fn(&str) -> u8, end: u8) -> Option<Vec<Value>> {
     if !es.iter().all(|e| tool(e) && e.role == "tool" && plain(e) || !tool(e) && plain(e)) { return None }
     let now = now_ms / 1000;
     // Stamp.ends over the page, oldest first in, walked newest first
     let sx: Vec<stamp::E> = es.iter().map(|e| if e.msg && e.role == "user" { stamp::E::User { id: e.id.clone(), at: e.at } } else if e.msg { stamp::E::Assistant { id: e.id.clone(), at: e.at } } else { stamp::E::Other }).collect();
     let ends: HashMap<String, u64> = stamp::ends(&sx, running);
+    let stops = stops(es, running, end, marks);
     let mut out = Vec::new(); let mut i = 0;
     while i < es.len() {
         let e = &es[i];
@@ -109,18 +111,45 @@ pub fn entries(es: &[Ent], running: bool, open: &dyn Fn(&str) -> bool, now_ms: u
             if o { for r in run { out.push(act(r, id)) } }
             i = j; continue;
         }
+        if !e.msg { out.push(plain_act(e)); i += 1; continue }
         // a zone that cannot be known degrades the time stamps (empty), not the screen
         let c = zone.map(|z| clock(e.at, now, z));
         if e.role == "user" {
             out.push(json!({"id": e.id, "kind": "user", "text": e.text, "attachments": [], "stamp": c.unwrap_or_default()}));
         } else {
             let st = ends.get(&e.id).copied().unwrap_or(0);
-            let s = match c { None => String::new(), Some(c) => if st == 0 { c } else if st > 1 { format!("Finished {c} · {}", took(e.at.saturating_sub(st))) } else { format!("Finished {c}") } };
+            // Stamp.reply.s / .f / reply: how the turn ended says the word; a stopped one says it whether or not the page holds its start
+            let s = match c { None => String::new(), Some(c) => {
+                let took_s = |w: &str| if st > 1 { format!("{w} {c} · {}", took(e.at.saturating_sub(st))) } else { format!("{w} {c}") };
+                match stops.get(&e.id).copied().unwrap_or(0) { 1 => took_s("Stopped"), 3 => if st == 0 { c } else { took_s("Failed") }, _ => if st == 0 { c } else { took_s("Finished") } } } };
             out.push(json!({"id": e.id, "kind": "assistant", "text": e.text, "blocks": md_blocks(&e.text), "images": [], "stamp": s}));
         }
         i += 1;
     }
     Some(out)
+}
+
+/// Stamp.stops + Stamp.ended.last: the turns' last replies that were stopped (1) or failed (3): by the marks the hub set on the person's message, and
+/// the thread's current turn when it ended that way (`end`: 1 stopped, 3 failed; 0 while it runs)
+fn stops(es: &[Ent], running: bool, end: u8, marks: &dyn Fn(&str) -> u8) -> HashMap<String, u8> {
+    let (mut open, mut held, mut m) = (!running, String::new(), HashMap::new());
+    for e in es.iter().rev() {
+        if !e.msg { continue }
+        if e.role == "user" { let k = marks(&e.id); if k > 0 && !held.is_empty() { m.insert(held.clone(), k); } open = true; held.clear(); }
+        else if e.role == "assistant" { let a = e.id.ends_with(":before"); if !a && open { held = e.id.clone(); } open = open && a; }
+    }
+    // Stamp.last.go: the newest message, when it is a reply
+    let last = es.iter().rev().find(|e| e.msg).filter(|e| e.role == "assistant").map(|e| e.id.clone());
+    let kind = if running { 0 } else { end };
+    if let (true, Some(id)) = (kind > 0, last) { m.insert(id, kind); }
+    m
+}
+
+/// Mob.act.k for an activity that does not fold: its tone, its name and what it says
+fn plain_act(e: &Ent) -> Value {
+    let text = if e.akind == "result" && e.text.trim().is_empty() { "The turn ended with an error; the agent gave no reason.".to_string() } else if e.text == e.akind { String::new() } else { e.text.clone() };
+    let tone = if e.akind == "restart" { "info restart".to_string() } else { e.role.clone() };
+    json!({"id": e.id, "kind": "act", "tone": tone, "label": shown_name(&e.akind), "text": text})
 }
 
 /// Mob.act.k for a plain tool call (open run)
@@ -149,7 +178,7 @@ const STATIC: &str = include_str!("thread_static.json");
 fn plain_thread(st: &State, id: &str) -> bool {
     let Some(t) = st.threads.get(id) else { return false };
     // pinned, archived, snoozed and settled threads are computed (present/keys.rs); a failed or stopped turn is not (its last stamp and error text), and keys() says so
-    if t.deleted || !matches!(t.turn, Turn::Idle | Turn::Running | Turn::Completed) || t.provider != "claude" || !t.model.is_empty() || t.title.trim().is_empty() { return false }
+    if t.deleted || !matches!(t.turn, Turn::Idle | Turn::Running | Turn::Completed | Turn::Failed | Turn::Interrupted) || t.provider != "claude" || !t.model.is_empty() || t.title.trim().is_empty() { return false }
     if !t.worktree.is_empty() || t.worktree_mode { return false }
     if st.tasks.values().any(|(p, c, _, _)| p == id || c == id) || st.asks.values().any(|(th, open)| th == id && *open) { return false }
     if st.queue.get(id).map_or(false, |q| !q.is_empty()) { return false }
@@ -182,10 +211,15 @@ pub fn thread_object(st: &State, hub: &str, thread: &str, params: &Value, draft:
     let zone = person_zone(st);
     let running = st.threads.get(thread).map_or(false, |t| t.turn == Turn::Running);
     let now_ms = params["now"].as_u64().unwrap_or(0);
-    let mut entries = entries(&es, running, &|_| false, now_ms, zone.as_ref())?;
+    let mark = |msg: &str| -> u8 { if st.settings.get(&format!("stopped.{msg}")).map_or(false, |v| v == "1") { 1 } else if st.settings.get(&format!("failed.{msg}")).map_or(false, |v| v == "1") { 3 } else { 0 } };
+    let turn = st.threads.get(thread).map(|t| t.turn);
+    let end = match turn { Some(Turn::Interrupted) => 1, Some(Turn::Failed) => 3, _ => 0 };
+    let mut entries = entries(&es, running, &|_| false, now_ms, zone.as_ref(), &mark, end)?;
     // Mob.pending: a thread that works shows the agent's "Working" row after its last entry
     if running { entries.push(json!({"id": format!("@working:{thread}"), "kind": "assistant", "text": "Working", "blocks": md_blocks("Working"), "images": [], "stamp": ""})) }
-    let state_keys = super::keys::keys(st, thread, now_ms / 1000)?;
+    // Signal.why: the first error of the thread's last turn (newest first, stopping at the person's message), at most 400 characters
+    let why: String = es.iter().rev().take_while(|e| !(e.msg && e.role == "user")).find(|e| !e.msg && e.role == "error").map(|e| e.text.trim().chars().take(400).collect()).unwrap_or_default();
+    let state_keys = super::keys::keys(st, thread, now_ms / 1000, &why)?;
     let t = st.threads.get(thread)?;
     let mut o: serde_json::Map<String, Value> = serde_json::from_str(STATIC).ok()?;
     o.insert("id".into(), json!(format!("{hub}|{thread}")));
@@ -212,7 +246,7 @@ mod tests {
     #[test] fn the_entries_of_a_plain_page_are_the_helpers() {
         let p = fixture(); let th = p["params"]["page"]["thread"].as_str().unwrap();
         let es = ents(p["params"]["page"]["rows"].as_array().unwrap(), th).unwrap();
-        let got = entries(&es, false, &|_| false, p["params"]["now"].as_u64().unwrap(), Some(&Rule::utc())).unwrap();
+        let got = entries(&es, false, &|_| false, p["params"]["now"].as_u64().unwrap(), Some(&Rule::utc()), &|_| 0, 0).unwrap();
         let want = p["out"]["shown"]["thread"]["entries"].as_array().unwrap();
         assert_eq!(got.len(), want.len());
         for (g, w) in got.iter().zip(want) { assert_eq!(g, w); }
@@ -265,7 +299,7 @@ mod tests {
         let mut checked = Vec::new();
         for (name, x) in v.as_object().unwrap() {
             let mut st = State::new(); for l in log.lines() { st.apply_line(l); } for e in x["extra"].as_array().unwrap() { st.apply(e); }
-            let Some(got) = thread_object(&st, "h", th, &p["params"], "") else { assert!(matches!(name.as_str(), "failed" | "interrupted" | "queued" | "codex" | "opus"), "{name} should be drawn"); continue };
+            let Some(got) = thread_object(&st, "h", th, &p["params"], "") else { assert!(matches!(name.as_str(), "queued" | "codex" | "opus"), "{name} should be drawn"); continue };
             let (diff, tail) = (x["diff"].as_object().unwrap(), x["tail"].as_array().unwrap());
             for (k, w) in diff { if !matches!(k.as_str(), "claude" | "picker") { assert_eq!(got.get(k), Some(w), "{name}: {k}"); } }
             let es = got["entries"].as_array().unwrap();
@@ -273,7 +307,7 @@ mod tests {
             assert_eq!(&es[es.len() - 2..], tail.as_slice(), "{name}: tail");
             checked.push(name.clone());
         }
-        for n in ["base", "running", "completed", "pinned", "archived", "snoozed", "settledhand"] { assert!(checked.iter().any(|c| c == n), "{n} not checked: {checked:?}"); }
+        for n in ["base", "running", "completed", "failed", "interrupted", "pinned", "archived", "snoozed", "settledhand"] { assert!(checked.iter().any(|c| c == n), "{n} not checked: {checked:?}"); }
     }
     #[test] fn civil_dates() { assert_eq!(civil(0), (1970, 1, 1)); assert_eq!(civil(19675), (2023, 11, 14)); assert_eq!(clock(1700002806, 0, &Rule::utc()), "Tue 14 Nov 23:00"); }
     #[test] fn labels_name_three_kinds_and_the_live_one_says_what_runs() {

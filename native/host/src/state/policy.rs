@@ -21,7 +21,7 @@ const KEEP: &[&str] = &["settle.", "autosettle.", "launch.", "launched.", "threa
 // A thread screen must see its refusal gate's configuration even in the lean copy. Exact global keys keep their values;
 // per-thread keys keep only presence, never the possibly large body. stopped./failed. remain outside this allowlist.
 const GATE_EXACT: &[&str] = &["files.max.mb", "person.tz", "person.tz.device", "tz.machine", "think", "permissions.default"];
-const GATE_PRESENCE: &[&str] = &["effort:", "wait.", "stop.", "fail."];
+const GATE_PRESENCE: &[&str] = &["effort:", "wait.", "stop.", "fail.", "stopped.", "failed."]; // stopped./failed.<msg>: how a turn ended, for the reply stamps (one per stopped or failed turn, presence only)
 pub fn gate_presence(k: &str) -> bool { GATE_PRESENCE.iter().any(|p| k.starts_with(p)) }
 // `told.` is a ledger that grows with the log until the minute tick prunes it (Told.prune: 30 days, 2000 records, run by `Core::tick`): only
 // its keys are kept (`lean_value`), the prune reads nothing else. A turn's input (launch.input.<t>, fallback.input.<t>: 10-20 KB each) is kept the
@@ -210,7 +210,7 @@ mod tests {
 
     #[test] fn lean_keeps_what_policies_read_and_drops_what_grows() {
         for k in ["autosettle.quiet.t1", "liveness.t1", "wake.w1", "lock.merge", "launch.t2", "alert.t1", "told.k1-1", "settle.done", "launch.input.t1", "fallback.input.t1", "order.enabled", "order.estimates", "account.thread.t1.claude", "files.max.mb", "person.tz", "tz.machine", "think", "permissions.default", "effort:t1", "wait.t1", "stop.t1", "fail.t1"] { assert!(lean_keeps(k), "{k}"); }
-        for k in ["stopped.m1", "failed.m1", "ride.t1", "tok.t.t1", "uber.op.u.m.1", "usage.t1", "todos.t1", "session.t1.claude"] { assert!(!lean_keeps(k), "{k}"); }
+        for k in ["ride.t1", "tok.t.t1", "uber.op.u.m.1", "usage.t1", "todos.t1", "session.t1.claude"] { assert!(!lean_keeps(k), "{k}"); }
     }
     #[test] fn lean_thread_screen_gate_preserves_exact_values_and_only_thread_key_presence() {
         let mut core=Core::new();
@@ -228,7 +228,7 @@ mod tests {
         }
         for key in ["stopped.m1","failed.m1"] {
             core.st.apply(&json!({"$":"SettingSet","key":key,"value":large,"at":4}));
-            assert!(!core.st.settings.contains_key(key),"per-message marks stay dropped: {key}");
+            assert_eq!(core.st.settings.get(key).map(String::as_str),Some("1"),"per-message end marks keep presence only (the reply stamps read them): {key}");
         }
         // The full digest fold's empty-value semantics have not changed.
         let mut full=State::new(); full.apply(&json!({"$":"SettingSet","key":"stop.t1","value":"","at":1}));
