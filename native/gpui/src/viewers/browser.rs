@@ -22,6 +22,7 @@ impl BrowserPage {
     /// for a thread's page: the host passes `BT.World.page`'s value), `token` the hub token (a Bearer header, never logged). The poller fetches only while
     /// `set_visible(true)`; mount the page with the tab and call `set_visible(false)` when another tab is shown.
     pub fn new(cx: &mut Context<Self>, base: String, owner: String, token: String) -> Self {
+        let https = base.starts_with("https://");
         let stop = Arc::new(AtomicBool::new(false)); let visible = Arc::new(AtomicBool::new(true)); let vis = visible.clone();
         let (tx, rx) = async_channel::bounded::<Result<Arc<RenderImage>, String>>(2);
         let flag = stop.clone();
@@ -52,7 +53,7 @@ impl BrowserPage {
                 if weak.update(cx, |this, cx| { match msg { Ok(i) => { if let Some(old) = this.image.replace(i) { this.retired.push(old); } this.status.clear(); } Err(e) => this.status = e } cx.notify(); }).is_err() { break }
             }
         }).detach();
-        let status = if base.starts_with("https://") { "https hubs are not supported by this page yet (the client has no TLS)".to_string() } else { "Waiting for the first frame".to_string() };
+        let status = if https { "https hubs are not supported by this page yet (the client has no TLS)".to_string() } else { "Waiting for the first frame".to_string() };
         BrowserPage { image: None, retired: Vec::new(), status, stop, visible }
     }
     pub fn set_visible(&mut self, visible: bool) { self.visible.store(visible, Ordering::Relaxed); }
