@@ -81,9 +81,9 @@ struct Inner {
     booting: Option<Vec<(u64, Vec<Value>)>>,
 }
 /// The policies behind one short lock. `before_commit` is the writer's call; `tick` and `read` are the ticker's and the viewers'.
-pub struct Policy { inner: Mutex<Inner>, poisoned: AtomicBool, passive: AtomicBool }
+pub struct Policy { inner: Mutex<Inner>, poisoned: AtomicBool, passive: AtomicBool, no_outward: AtomicBool }
 impl Policy {
-    pub fn new() -> Policy { Policy { inner: Mutex::new(Inner { core: Core::new(), booting: Some(vec![]) }), poisoned: AtomicBool::new(false), passive: AtomicBool::new(std::env::var("BACKPLANE_PASSIVE").map_or(false, |v| v == "1")) } }
+    pub fn new() -> Policy { Policy { inner: Mutex::new(Inner { core: Core::new(), booting: Some(vec![]) }), poisoned: AtomicBool::new(false), passive: AtomicBool::new(std::env::var("BACKPLANE_PASSIVE").map_or(false, |v| v == "1")), no_outward: AtomicBool::new(false) } }
     /// The lock, even after a panic inside it: the copy may be half-folded then, so it is flagged and the host folds the log again
     /// (`take_poisoned`); until that finishes the policies decide nothing, and a later batch never panics on the poisoned lock.
     fn lock(&self) -> MutexGuard<'_, Inner> {
@@ -163,8 +163,10 @@ impl Policy {
     /// nothing, the boot commits nothing (no Auto.upgrade), no summary is asked for. What a person's own action derives in the same batch still does.
     pub fn passive(&self) -> bool { self.passive.load(Ordering::SeqCst) }
     pub fn set_passive(&self, on: bool) { self.passive.store(on, Ordering::SeqCst) }
+    /// A copy of a real log (`BACKPLANE_COPY=1`, set by the host from `crate::copy::on()`): nothing that leaves the machine (the summary model call)
+    pub fn set_no_outward(&self, on: bool) { self.no_outward.store(on, Ordering::SeqCst) }
     /// the summaries to ask the text model for: none while passive, and none on a copy of a real log (`BACKPLANE_COPY=1`: the call leaves the machine)
-    pub fn summaries_to_ask(&self, asks: Vec<(String, String)>) -> Vec<(String, String)> { if self.passive() || crate::copy::on() { vec![] } else { asks } }
+    pub fn summaries_to_ask(&self, asks: Vec<(String, String)>) -> Vec<(String, String)> { if self.passive() || self.no_outward.load(Ordering::SeqCst) { vec![] } else { asks } }
     pub fn tick(&self, now_s: u64) -> Vec<Value> {
         if self.passive() { return vec![] }
         let g = self.lock();
