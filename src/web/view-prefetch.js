@@ -85,7 +85,7 @@ export class ViewPrefetch {
         clearTimeout(this.deadline);this.active=null;
         const current=this.api.scope();
         const same=reply.remoteReady && reply.shown && !reply.result.cmds.length && current.identity===job.scope.identity && current.epoch===job.scope.epoch && current.origin===job.scope.origin;
-        if(same && job.folds)this.api.folds?.(reply.shown,job.target);
+        if(same && job.folds)this.api.folds?.(reply.shown,job.target,reply.window);
         else if(same && (job.fresh || !this.api.has(job.target)))this.api.picture(reply.shown,reply.session,job.target,job.scope);
         if(this.queue.length)this.timer=setTimeout(()=>{this.timer=null;this.pump();},PACE);
       }catch{this.stop();}

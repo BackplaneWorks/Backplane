@@ -35,6 +35,13 @@ export class ThinContinuations {
     for (const [id, reader] of this.readers) if (!partial.has(id) || partial.get(id).version !== reader.version) this.readers.delete(id);
     this.partial = partial;
   }
+  // (a read-ahead of this conversation with its runs open, view-prefetch.js:
+  // its partial rows join those seen, for the runs opened at the click)
+  learn(hub, detail) {
+    if (JSON.stringify([hub, detail.epoch, detail.target.kind, detail.target.id]) !== this.scope) return;
+    for (const p of detail.window?.partial || []) if (!(p.bodyPage === 1 && p.automatic) && typeof p.id === 'string') { this.seen.delete(p.id);this.seen.set(p.id, p); }
+    while (this.seen.size > 256) this.seen.delete(this.seen.keys().next().value);
+  }
   accept(message) {
     if (!this.scope || this.partial.get(message.id)?.version !== message.version) return false;
     if (!this.readers.has(message.id) && this.readers.size >= 4) this.readers.delete(this.readers.keys().next().value);

@@ -58,3 +58,10 @@ test('a run opened again at the click gets its rows’ Read full activity text a
  assert(!all(c.project(timeline([row('a')]),n=>n)).some(n=>n.tag==='button'),'a row not put back by the click gets none');
  bind('u',[]);assert(!all(c.project(timeline([row('a')]),n=>n,true,new Set(['a']))).some(n=>n.tag==='button'),'another thread forgets them');
 });
+test('a read-ahead of the same conversation teaches its partial rows; another conversation’s teaches nothing',async()=>{
+ const {ThinContinuations}=await import(process.env.CONTINUATIONS_SOURCE||'../../src/web/thin-continuations.js');const c=new ThinContinuations();
+ const d=(id,ids)=>({epoch:'e',target:{kind:'thread',id},window:{partial:ids.map(x=>({id:x,version:'1',cursor:'',hasMore:true,complete:false}))}});
+ c.bind('h',d('t',[]));c.learn('h',d('u',['x']));c.learn('h',d('t',['a']));
+ assert(all(c.project(timeline([row('a')]),n=>n,true,new Set(['a']))).some(n=>n.tag==='button'),'learned from the read-ahead');
+ assert(!all(c.project(timeline([row('x')]),n=>n,true,new Set(['x']))).some(n=>n.tag==='button'),'not from another thread');
+});
