@@ -5,7 +5,9 @@
 // 4. a different viewId makes the context differ, so the pages are dropped;
 // 5. a native-sidebar-page action with a valid token moves the pages (local changes) and is not refused;
 // 6. the same action with a tampered token, or with no nativeSidebar offer, is refused (`refused`: true) and the pages stay put;
-// 7. an ordinary action is not refused.
+// 7. an ordinary action is not refused;
+// 8. a `reads` entry for fab.look is applied as the client applies the hub's reply: the session returned carries fab.line:<thread> (the goal, or the
+//    placeholder when there is none), fab.shown, and an unknown kind is ignored; review.page / telemetry.share entries clear nothing they do not hold.
 import {spawn} from 'node:child_process';import {readFileSync} from 'node:fs';import net from 'node:net';
 const [bin,log,port]=process.argv.slice(2);
 const p=spawn('sh',['-c',`ulimit -s 1048576; exec ${bin} ${port}`],{stdio:['ignore','pipe','inherit']});
@@ -44,4 +46,14 @@ if(ctl){
 }
 const ord=await v({action:'noop-action',value:'x',local:a.local});
 ck(ord.refused!==true,'an ordinary action is not refused');
+{
+  const th='t1700000002-3';
+  const r1=await v({reads:[{kind:'fab.look',id:0,result:{thread:th,goal:'Ship the rev B board',intent:'',label:'',parts:[],boards:0}}]});
+  const info=r1.session?.info||{};
+  ck(info['fab.line:'+th]==='Ship the rev B board','a fab.look read is applied: fab.line:<thread> carries the goal');
+  const r2=await v({reads:[{kind:'fab.look',id:0,result:{thread:th,goal:'',intent:'',label:'',parts:[],boards:0}}]});
+  ck((r2.session?.info||{})['fab.line:'+th]==='No goal yet. Edit to say what this project is for.','an empty goal reads as the placeholder line');
+  const r3=await v({reads:[{kind:'no.such.read',id:1,result:{thread:th,goal:'IGNORED'}}]});
+  ck((r3.session?.info||{})['fab.line:'+th]!=='IGNORED','an unknown kind is ignored');
+}
 p.kill();console.log(bad?'FAILED '+bad:'ALL OK');process.exit(bad?1:0);

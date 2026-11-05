@@ -200,12 +200,33 @@ def Pol.refuse(refused: Bool, +r: J.Json) -> J.Json:
     case True{}: NS.Obj.put(r, "refused", J.Flag{True{}})
     case False{}: r
 
+# The hub's own RPC replies for this view (fab.look, review.page, telemetry.share), oldest first, taken once: each is applied as the client
+# applies a hub reply (U.Ui.recv: Fab.reply, the Rp and Share reply handlers) before the view is drawn. The session returned carries what they
+# changed (fab.*:<thread> info, the @rp.req:N and @telemetry.req:N drafts); the host holds it and sends it back.
+def Pol.read.ok(+kind: String) -> Bool:
+  Bool.or(Bool.or(String.eq(kind, "fab.look"), String.eq(kind, "review.page")), String.eq(kind, "telemetry.share"))
+
+def Pol.read.one(ok: Bool, +u: U.Ui, +item: J.Json) -> U.Ui:
+  match ok:
+    case True{}: U.Ui.recv(u, J.Json.obj([J.KV{"t", J.Json.str("reply")}, J.KV{"id", Maybe.default(&2, J.Json, J.Json.get(item, "id"), J.Num{"0"})}, J.KV{"ok", J.Flag{True{}}}, J.KV{"result", J.Json.get_obj(item, "result")}]))
+    case False{}: u
+
+def Pol.reads.go(items: J.Json, +u: U.Ui) -> U.Ui:
+  match items:
+    case J.Item{+h, t}: Pol.reads.go(t, Pol.read.one(Pol.read.ok(J.Json.get_str(h, "kind", "")), u, h))
+    case _: u
+
+def Pol.reads(+u: U.Ui, +arr: J.Json) -> U.Ui:
+  match arr:
+    case J.Arr{items}: Pol.reads.go(items, u)
+    case _: u
+
 def Pol.view(+u0: U.Ui, +now0: Nat, +p: J.Json) -> J.Json:
   +now = Pol.clock(J.Json.get_nat(p, "now", 0n), now0)
   +key = J.Json.get_str(p, "hub", "")
   +cid = J.Json.get_str(p, "cid", "")
   +u1 = U.Ui.scratch_set(U.Ui.online(U.Ui.set_cid(Pol.bind(MS.Session.adopt(U.Ui.tick(u0, now), J.Json.get_obj(p, "session")), J.Json.get_obj(p, "target")), cid), True{}), "@sync", "1")
-  +u = NS.Ns.prepare(Pol.local.put(Pol.pick(Pol.is_obj(J.Json.get_obj(p, "page")), u1, J.Json.get_obj(p, "page")), J.Json.get_obj(p, "local")), False{}, p, J.Json.get_str(p, "epoch", ""), J.Json.get_str(p, "viewId", ""), J.Json.get_nat(p, "revision", 0n), J.Json.get_str(p, "nativeKey", ""))
+  +u = NS.Ns.prepare(Pol.reads(Pol.local.put(Pol.pick(Pol.is_obj(J.Json.get_obj(p, "page")), u1, J.Json.get_obj(p, "page")), J.Json.get_obj(p, "local")), Maybe.default(&2, J.Json, J.Json.get(p, "reads"), J.Null{})), False{}, p, J.Json.get_str(p, "epoch", ""), J.Json.get_str(p, "viewId", ""), J.Json.get_nat(p, "revision", 0n), J.Json.get_str(p, "nativeKey", ""))
   +isPage = String.eq(J.Json.get_str(p, "action", ""), "native-sidebar-page")
   +ok = Bool.and(Bool.and(isPage, NS.Ns.offered(False{}, p)), NS.Ns.valid(u, J.Json.get_str(p, "value", "")))
   +ua = Pol.act(ok, isPage, u, key, cid, now, J.Json.get_str(p, "action", ""), J.Json.get_str(p, "value", ""))
