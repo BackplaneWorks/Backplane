@@ -261,6 +261,13 @@ mod tests {
     fn tc(id: &str, at: u64) -> String { format!(r#"{{"$":"ThreadCreated","id":"{id}","project":"p1","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":{at}}}"#) }
     fn opts<'a>(open: &'a HashSet<String>, now: u64) -> Opts<'a> { Opts { hub: "h", now, selected: "", open, older_open: false } }
 
+    // law kids_bot_child_shown: a bot's delegated child is never hidden under the bot
+    #[test] fn kids_bot_child_shown() {
+        let d = r#"{"$":"TaskDelegated","task":"k1","parent":"t1","child":"t2","depth":1,"provider":"claude","model":"","at":12}"#;
+        let set = r#"{"$":"SettingSet","key":"thread.parent.t2","value":"t1","at":13}"#;
+        let s = fold(&[PC, &tc("t1", 11), &tc("t2", 12), set, d]); assert!(kids_hidden(&s).contains("t2"), "a person's thread hides its delegated child under it");
+        let s = fold(&[r#"{"$":"BotSet","id":"b1","name":"Bub","thread":"t1","look":0,"persona":"","at":9}"#, PC, &tc("t1", 11), &tc("t2", 12), set, d]); assert!(!kids_hidden(&s).contains("t2"), "a bot's child is shown");
+    }
     #[test] fn ago_words() { assert_eq!(ago(100, 100), "now"); assert_eq!(ago(100, 40), "1m"); assert_eq!(ago(10000, 0), "2h"); assert_eq!(ago(200000, 0), "2d"); assert_eq!(ago(5, 9), "now"); }
     #[test] fn new_threads_sort_newest_first_and_a_quiet_project_is_marked() {
         let s = fold(&[PC, &tc("a", 11), &tc("b", 12)]); let open = HashSet::new();

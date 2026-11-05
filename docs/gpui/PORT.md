@@ -163,7 +163,7 @@ port waits for the person's decision.
 
 <!-- law-map: generated below by scripts/gpui/law-map.py -->
 
-Laws in LAWS.bend: 3253. bend 1175, rust 195, unported 1272, client 483, window 128, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: none yet. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
+Laws in LAWS.bend: 3253. bend 1166, rust 209, unported 1268, client 482, window 128, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: none yet. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
 
 | law | status | seed | file | note |
 |---|---|---|---|---|
@@ -718,7 +718,7 @@ Laws in LAWS.bend: 3253. bend 1175, rust 195, unported 1272, client 483, window 
 | `bot_request_in_room` | unported | seed R +-10% | `src/core/bothub.bend` |  |
 | `bot_request_fresh_id` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `bot_delegate_needs_project` | bend | seed K +-10% | `src/core/mcp.bend` |  |
-| `kids_bot_child_shown` | client | seed C +-10% | `src/core/client.bend` |  |
+| `kids_bot_child_shown` | rust `kids_bot_child_shown` | map | `src/core/client.bend` |  |
 | `bot_mood_idle_still` | client | seed C +-10% | `src/core/botui.bend` |  |
 | `perf_errors_always_logged` | bend | seed K +-10% | `src/core/perf.bend` |  |
 | `perf_debug_quiet_by_default` | bend | seed K +-10% | `src/core/perf.bend` |  |
@@ -2750,15 +2750,15 @@ Laws in LAWS.bend: 3253. bend 1175, rust 195, unported 1272, client 483, window 
 | `side_signals_given_eq` | client | seed C +-10% | `src/core/client.bend` |  |
 | `signal_cache_epoch_miss` | unported | seed R +-10% | `src/server/thin-signals.bend` |  |
 | `signal_given_mine` | client | seed C +-10% | `src/core/client.bend` |  |
-| `signal_finished_named` | bend | seed K +-10% | `src/core/signal.bend` |  |
-| `signal_finished_keeps_rest` | bend | seed K +-10% | `src/core/signal.bend` |  |
-| `signal_finished_needs_completed` | bend | seed K +-10% | `src/core/signal.bend` |  |
-| `signal_finished_quiet` | bend | seed K +-10% | `src/core/signal.bend` |  |
-| `signal_waiting_named` | bend | seed K +-10% | `src/core/signal.bend` |  |
-| `signal_waiting_active` | bend | seed K +-10% | `src/core/signal.bend` |  |
-| `signal_waiting_not_finished` | bend | seed K +-10% | `src/core/signal.bend` |  |
-| `signal_waiting_keeps_rest` | bend | seed K +-10% | `src/core/signal.bend` |  |
-| `signal_waiting_turn_over` | bend | seed K +-10% | `src/core/signal.bend` |  |
+| `signal_finished_named` | rust `signal_finished_named` | map | `src/core/signal.bend` |  |
+| `signal_finished_keeps_rest` | rust `signal_finished_keeps_rest` | map | `src/core/signal.bend` |  |
+| `signal_finished_needs_completed` | rust `signal_finished_needs_completed` | map | `src/core/signal.bend` |  |
+| `signal_finished_quiet` | rust `signal_finished_quiet` | map | `src/core/signal.bend` |  |
+| `signal_waiting_named` | rust `signal_waiting_named` | map | `src/core/signal.bend` |  |
+| `signal_waiting_active` | rust `signal_waiting_active` | map | `src/core/signal.bend` |  |
+| `signal_waiting_not_finished` | rust `signal_waiting_not_finished` | map | `src/core/signal.bend` |  |
+| `signal_waiting_keeps_rest` | rust `signal_waiting_keeps_rest` | map | `src/core/signal.bend` |  |
+| `signal_waiting_turn_over` | rust `signal_waiting_turn_over` | map | `src/core/signal.bend` |  |
 | `signal_activity_input` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `signal_assistant_input` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `signal_system_input` | unported | seed R +-10% | `src/core/model.bend` |  |
@@ -3010,8 +3010,8 @@ Laws in LAWS.bend: 3253. bend 1175, rust 195, unported 1272, client 483, window 
 | `buy_later_intent_is_new` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `order_one_file_singular` | unported | none | `-` |  |
 | `order_many_files_plural` | unported | none | `-` |  |
-| `signal_failed_dot_truthful` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `signal_asked_dot_stays_blocked` | unported | seed R +-10% | `src/core/model.bend` |  |
+| `signal_failed_dot_truthful` | rust `signal_failed_dot_truthful` | map | `src/core/model.bend` |  |
+| `signal_asked_dot_stays_blocked` | rust `signal_asked_dot_stays_blocked` | map | `src/core/model.bend` |  |
 | `settings_settle_names_idle_timer` | client | seed C +-10% | `src/core/client.bend` |  |
 | `settings_settle_idle_off_truthful` | client | seed C +-10% | `src/core/client.bend` |  |
 | `estimate_snapshot_is_explicit` | unported | none | `-` |  |
@@ -3062,8 +3062,8 @@ Laws in LAWS.bend: 3253. bend 1175, rust 195, unported 1272, client 483, window 
 | `phone_subs_fold_routed` | unported | none | `-` |  |
 | `phone_subs_cancel_routed` | unported | none | `-` |  |
 | `delegation_captures_baseline_before_agent` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `signal_failed_display_name` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `signal_pending_display_blocked` | unported | seed R +-10% | `src/core/model.bend` |  |
+| `signal_failed_display_name` | rust `signal_failed_display_name` | map | `src/core/model.bend` |  |
+| `signal_pending_display_blocked` | rust `signal_pending_display_blocked` | map | `src/core/model.bend` |  |
 | `composer_slash_local` | unported | seed R +-10% | `src/core/json.bend` |  |
 | `composer_slash_not_claude` | unported | seed R +-10% | `src/core/json.bend` |  |
 | `composer_hub_rows_same_draft` | unported | seed R +-10% | `src/core/json.bend` |  |

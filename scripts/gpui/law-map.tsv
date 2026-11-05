@@ -206,3 +206,19 @@ law wake_act_once rust wake_act_once
 law wake_completed_plain rust wake_completed_plain
 law wake_says_killed rust wake_says_killed
 law cmds_json_round rust cmds_json_round
+
+# native/host/src/signal.rs and sidebar.rs: the thread signal and what the sidebar lists (tests carry the laws' names)
+law signal_finished_named rust signal_finished_named
+law signal_finished_keeps_rest rust signal_finished_keeps_rest
+law signal_finished_needs_completed rust signal_finished_needs_completed
+law signal_finished_quiet rust signal_finished_quiet
+law signal_waiting_named rust signal_waiting_named
+law signal_waiting_active rust signal_waiting_active
+law signal_waiting_not_finished rust signal_waiting_not_finished
+law signal_waiting_keeps_rest rust signal_waiting_keeps_rest
+law signal_waiting_turn_over rust signal_waiting_turn_over
+law signal_failed_dot_truthful rust signal_failed_dot_truthful
+law signal_asked_dot_stays_blocked rust signal_asked_dot_stays_blocked
+law signal_failed_display_name rust signal_failed_display_name
+law signal_pending_display_blocked rust signal_pending_display_blocked
+law kids_bot_child_shown rust kids_bot_child_shown
