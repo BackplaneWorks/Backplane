@@ -29,7 +29,7 @@ const PR: &str = include_str!("scripts/review_pr.sh");
 const MISSING: &str = "KiCad is not installed on this machine (no kicad-cli): get it from kicad.org/download or its package manager";
 const WAIT_OK: &str = "this project's own checks wait for your OK";
 
-fn copy() -> bool { std::env::var("BACKPLANE_COPY").as_deref() == Ok("1") }
+fn copy() -> bool { crate::copy::on() }
 fn lines(s: &str) -> Vec<String> { bj::trim(s).split('\n').map(str::to_string).collect() }
 fn at(xs: &[String], i: usize) -> &str { xs.get(i).map(String::as_str).unwrap_or("") }
 fn or<'a>(text: &'a str, d: &'a str) -> &'a str { if bj::trim(text).is_empty() { d } else { text } }

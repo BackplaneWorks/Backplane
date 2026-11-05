@@ -56,7 +56,7 @@ fn put(o: J, key: &str, v: J) -> J {
 }
 /// KExport.open: the copy opened in stock KiCad 10 (or the file opener); a hub on a copied log opens nothing
 async fn open(o: J, pro: &str) -> J {
-    if std::env::var("BACKPLANE_COPY").as_deref() == Ok("1") { return o }
+    if crate::copy::on() { return o }
     let path = o.get_str("path", "").to_string();
     let file = pro.rsplit('/').next().unwrap_or("project.kicad_pro");
     let r = within(proc("sh", &["-c", OPEN, "sh", &path, &format!("{path}{file}")], "/", &[])).await;
