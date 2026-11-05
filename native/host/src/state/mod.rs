@@ -127,6 +127,7 @@ impl State {
 
     fn thread_mut(&mut self, id: &str) -> &mut Thread { self.threads.entry(id.to_string()).or_insert_with(Thread::blank) }
     fn set(&mut self, k: &str, v: &str) {
+        if self.lean && !fam::policy::lean_keeps(k) { return }
         if v.is_empty() && blank_gone(k) { self.settings.remove(k); } else { self.settings.insert(k.to_string(), v.to_string()); }
     }
     fn get(&self, k: &str, d: &str) -> String { self.settings.get(k).cloned().unwrap_or_else(|| d.to_string()) }
@@ -219,7 +220,7 @@ impl State {
             "TaskStateSet" => { let (task, want) = (s(e, "task")?, TaskSt::parse(s(e, "state")?).unwrap_or(TaskSt::Cancelled)); s(e, "summary")?;
                 let t = self.tasks.entry(task.into()).or_insert((String::new(), String::new(), true, TaskSt::Cancelled)); t.3 = TaskSt::next(t.3, want); t.2 = t.3.terminal(); }
             "AskOpened" => { let (id, th) = (s(e, "id")?, s(e, "thread")?); self.asks.insert(id.into(), (th.into(), true)); }
-            "AskClosed" => { let id = s(e, "id")?; if let Some(a) = self.asks.get_mut(id) { a.1 = false; } else { self.asks.insert(id.into(), (String::new(), false)); } }
+            "AskClosed" => { let id = s(e, "id")?; if self.lean { self.asks.remove(id); } else if let Some(a) = self.asks.get_mut(id) { a.1 = false; } else { self.asks.insert(id.into(), (String::new(), false)); } }
             "TurnQueued" => { let (th, msg, text) = (s(e, "thread")?, s(e, "msg")?, s(e, "text")?); self.queue.entry(th.into()).or_default().push((msg.into(), text.into())); }
             "QueueTaken" => { let th = s(e, "thread")?; self.queue.insert(th.into(), vec![]); }
             "QueueEdited" => { let (th, msg, text) = (s(e, "thread")?, s(e, "msg")?, s(e, "text")?); for q in self.queue.entry(th.into()).or_default() { if q.0 == msg { q.1 = text.into(); } } }

@@ -1,7 +1,9 @@
 //! Automatic settling (src/core/autosettle.bend, `Auto.changes`): which completed, idle threads settle by themselves, and
 //! which wake subscriptions end. Pure: the caller hands the folded `State` and the time, and commits the events returned.
-//! Deliberate gap: the legacy upgrade (`Auto.upgrade`, reports read from the mail box when `autosettle.version` is not "1") is
-//! not ported; the Rust hub only ever starts new homes at version 1 (docs/gpui/PARITY.md).
+//! Deliberate gap (docs/gpui/PARITY.md): the legacy upgrade (`Auto.upgrade`, reports read from the mail box when `autosettle.version` is not
+//! "1"). The Rust hub reads logs the Bend hub wrote, so a home can still be below version 1; the reports map is then empty here. A launched
+//! thread (one that must report to its launcher before it settles) then can only be held, never settled early: with no mail receipt it waits
+//! for `autosettle.report.<th>` or `autosettle.delivery.<th>\t<addr>`, so the error is toward not settling.
 use super::ext::Sum;
 use super::json::*;
 use crate::state::{Override, State, Thread, Turn};
@@ -92,6 +94,18 @@ pub fn index(st: &State) -> Index {
     Index { workers, owned, work }
 }
 
+/// Auto.allow: a completed, idle, read, reported, quiet thread on the active shelf with no override settles
+pub fn allow(turn: Turn, work: bool, ask: bool, unread: bool, delivered: bool, quiet: bool, shelf: Shelf, o: Override) -> bool {
+    turn == Turn::Completed && !work && !ask && !unread && delivered && quiet && shelf == Shelf::Active && o == Override::None
+}
+/// Auto.wake.active.kind: a subscription that still holds its subscriber (work and thread waits while the target owns work; file and pr
+/// subscriptions are passive; unknown kinds are held)
+pub fn wake_active_kind(kind: &str, target: &str, work: &HashSet<String>, owned: &HashSet<String>) -> bool {
+    match kind { "work" => work.contains(target), "thread" => owned.contains(target), "file" | "pr" => false, _ => true }
+}
+/// Auto.expired.work: a work dependency whose target is no longer running work, past the worker grace
+pub fn expired_work(kind: &str, live: bool, old: bool) -> bool { kind == "work" && !live && old }
+
 fn worker(st: &State, th: &str, ix: &Index) -> bool {
     improvement(th) || !launch_by(st, th).is_empty() || !st.get(&format!("thread.parent.{th}"), "").is_empty() || ix.workers.contains(th) || th.starts_with("run") || th.starts_with("mailcoord-")
 }
@@ -127,7 +141,7 @@ pub fn due(st: &State, th: &str, t: &Thread, now: u64, ix: &Index) -> bool {
     let idle = seconds(st, "settle.idle.minutes", 15);
     let window = if w { idle } else if !unread && st.get("settle.done", "off") == "on" { idle } else { seconds(st, "settle.personal.minutes", 240) };
     let quiet = window > 0 && now >= sum.quiet.max(t.activity).max(num_setting(st, &format!("autosettle.quiet.{th}"), 0).max(snooze(st, th))).saturating_add(window);
-    !ix.owned.contains(th) && t.pending == 0 && !unread && reported(st, th, sum, t.activity) && quiet
+    allow(t.turn, ix.owned.contains(th), t.pending > 0, unread, reported(st, th, sum, t.activity), quiet, shelf_of(t), t.override_)
 }
 
 /// Auto.changes: ThreadSettled for the threads that are due, WakeDropped for the subscriptions that ended
@@ -143,8 +157,9 @@ pub fn changes(st: &State, now: u64) -> Vec<Value> {
         for id in lines(&st.get(key, "")) {
             let o = parse_or_null(&st.get(&format!("wake.{id}"), ""));
             let (kind, target) = (gstr(&o, "kind", ""), gstr(&o, "target", ""));
-            let active = match kind { "work" => ix.work.contains(target), "thread" => ix.owned.contains(target), "file" | "pr" => false, _ => true };
-            let drop = if retired { !active } else { kind == "work" && !ix.work.contains(target) && window > 0 && now >= gnat(&o, "created", now).saturating_add(window) };
+            let active = wake_active_kind(kind, target, &ix.work, &ix.owned);
+            let old = window > 0 && now >= gnat(&o, "created", now).saturating_add(window);
+            let drop = if retired { !active } else { expired_work(kind, ix.work.contains(target), old) };
             if drop { out.push(json!({"$": "WakeDropped", "id": id, "at": now})); }
         }
     }
@@ -154,6 +169,12 @@ pub fn changes(st: &State, now: u64) -> Vec<Value> {
 fn put(m: &mut HashMap<String, u64>, th: &str, at: u64) { let e = m.entry(th.to_string()).or_insert(0); *e = (*e).max(at); }
 fn set_ev(key: String, value: String, at: u64) -> Value { json!({"$": "SettingSet", "key": key, "value": value, "at": at}) }
 fn improvement_seed(th: &str) -> String { if improvement(th) { format!("improvement-request-{}", &th[12..]) } else { String::new() } }
+
+/// Auto.read: the person read the thread's newest reply (it opened in a viewer): the mark that stops it counting as unread. `st` is current.
+pub fn read(st: &State, th: &str, now: u64) -> Vec<Value> {
+    let output = st.get(&format!("autosettle.output.{th}"), st.ext.sum.get(th).map_or("", |s| s.output.as_str()));
+    if !output.is_empty() && output != st.get(&format!("autosettle.read.{th}"), "") { vec![set_ev(format!("autosettle.read.{th}"), output, now)] } else { vec![] }
+}
 
 /// Auto.message.metadata: what a committed change leaves behind for the settle decision. `st` is the state before the change.
 pub fn metadata(st: &State, c: &Value) -> Vec<Value> {
@@ -207,4 +228,50 @@ pub fn quiet(st: &State, batch: &[Value]) -> Vec<Value> {
     let mut out: Vec<(String, u64)> = m.into_iter().filter(|(th, at)| !th.is_empty() && *at > num_setting(st, &format!("autosettle.quiet.{th}"), 0)).collect();
     out.sort();
     out.into_iter().map(|(th, at)| set_ev(format!("autosettle.quiet.{th}"), at.to_string(), at)).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    const TURNS: [Turn; 5] = [Turn::Idle, Turn::Running, Turn::Completed, Turn::Interrupted, Turn::Failed];
+    const SHELVES: [Shelf; 5] = [Shelf::Pinned, Shelf::Active, Shelf::Settled, Shelf::Hidden, Shelf::Snoozed];
+    const OVERRIDES: [Override; 3] = [Override::None, Override::ForcedSettled, Override::ForcedActive];
+    const B: [bool; 2] = [false, true];
+    fn each(f: impl Fn(bool, bool, bool, bool)) { for a in B { for b in B { for c in B { for d in B { f(a, b, c, d) } } } } }
+
+    #[test] fn autosettle_owned_work_held() { for t in TURNS { each(|a, u, d, q| { for s in SHELVES { for o in OVERRIDES { assert!(!allow(t, true, a, u, d, q, s, o)); } } }); } }
+    #[test] fn autosettle_pending_ask_held() { each(|u, d, q, _| assert!(!allow(Turn::Completed, false, true, u, d, q, Shelf::Active, Override::None))); }
+    #[test] fn autosettle_unread_held() { each(|d, q, _, _| assert!(!allow(Turn::Completed, false, false, true, d, q, Shelf::Active, Override::None))); }
+    #[test] fn autosettle_failed_held() { each(|w, a, u, d| for q in B { assert!(!allow(Turn::Failed, w, a, u, d, q, Shelf::Active, Override::None)); }); }
+    #[test] fn autosettle_interrupted_held() { each(|w, a, u, d| for q in B { assert!(!allow(Turn::Interrupted, w, a, u, d, q, Shelf::Active, Override::None)); }); }
+    #[test] fn autosettle_report_held() { for q in B { assert!(!allow(Turn::Completed, false, false, false, false, q, Shelf::Active, Override::None)); } }
+    #[test] fn autosettle_grace_held() { assert!(!allow(Turn::Completed, false, false, false, true, false, Shelf::Active, Override::None)); }
+    #[test] fn autosettle_ready() { assert!(allow(Turn::Completed, false, false, false, true, true, Shelf::Active, Override::None)); }
+    #[test] fn autosettle_allow_needs_every_other_condition() { // beyond the laws: only the one input combination settles
+        let mut ok = 0;
+        for t in TURNS { for s in SHELVES { for o in OVERRIDES { each(|w, a, u, d| for q in B { if allow(t, w, a, u, d, q, s, o) { assert!(t == Turn::Completed && s == Shelf::Active && o == Override::None && !w && !a && !u && d && q); } }); ok += 1; } } }
+        assert_eq!(ok, 75);
+    }
+    #[test] fn autosettle_delegation_seed_not_personal() {
+        for text in ["", "hello", "[message from person@box] hi", "More work"] { assert!(!direct_seed("m100-4", super::super::ext::direct("m100-4", text), "m100-4")); }
+    }
+    #[test] fn autosettle_human_followup_is_personal() { assert!(direct_seed("human-followup", super::super::ext::direct("human-followup", "More work"), "m100-4")); }
+    #[test] fn autosettle_finished_work_wake_not_running() {
+        let none = HashSet::new();
+        for owned in [HashSet::new(), ["ended".to_string()].into_iter().collect(), ["x".to_string()].into_iter().collect()] { assert!(!wake_active_kind("work", "ended", &none, &owned)); }
+    }
+    #[test] fn autosettle_live_thread_wake_held() {
+        let owned: HashSet<String> = ["t".to_string()].into_iter().collect();
+        assert!(wake_active_kind("thread", "t", &HashSet::new(), &owned));
+    }
+    #[test] fn autosettle_live_work_subscription_never_expires() { for old in B { assert!(!expired_work("work", true, old)); } }
+    #[test] fn autosettle_active_file_subscription_never_expires() { for live in B { for old in B { assert!(!expired_work("file", live, old)); } } }
+    #[test] fn auto_read_marks_the_newest_reply_once() {
+        let mut st = State::new();
+        st.apply_line(r#"{"$":"MessagePosted","thread":"t1","msg":"a1","role":"assistant","text":"x","at":5}"#);
+        let ev = read(&st, "t1", 9); assert_eq!(ev.len(), 1);
+        assert_eq!((ev[0]["key"].as_str(), ev[0]["value"].as_str()), (Some("autosettle.read.t1"), Some("a1")));
+        st.apply(&ev[0]); assert!(read(&st, "t1", 10).is_empty());
+        assert!(read(&st, "nothing", 10).is_empty());
+    }
 }

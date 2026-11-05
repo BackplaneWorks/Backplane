@@ -1,92 +1,62 @@
-//! The state policies' host in the Rust hub: one lean copy of the fold (no entry ids; bounded by threads, settings and thread pairs),
-//! fed by the hub's commits (`Observer`), asked on the minute tick (`Ticker`). What a policy decides it commits as events, as the Bend hub's
-//! Step does; the events it commits come back through the observer and are not folded twice (`expect`).
-//! Declared from main.rs as `#[path = "state/host.rs"] mod statehost;` and started with `statehost::start(hub.clone()).await` next to files::start.
+//! The state policies in the Rust hub: a thin shell around `policy::Core`. The Observer sends each committed batch to one task over a channel
+//! (it never blocks the writer and takes no lock); the Ticker asks the same task for the tick's events; the task folds, decides and commits
+//! what it derives in order. The log is read at start in `spawn_blocking`, after the listener is up; batches committed meanwhile wait in the
+//! channel. Declared from main.rs as `#[path = "state/host.rs"] mod statehost;`, started with `statehost::start(hub.clone())` next to files::start.
 use crate::api::{Fut, Observer, Ticker};
 use crate::hub::Hub;
-use crate::state::{fam::autosettle, State};
+use crate::state::fam::policy::{self, Core, Msg, Sink};
 use serde_json::Value;
-use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use tokio::sync::{mpsc, oneshot};
 
-struct Inner {
-    st: State,
-    /// log lines folded so far (1-based count): a batch already inside it is skipped
-    applied: u64,
-    /// batches seen while the log was being read at start
-    booting: Option<Vec<(u64, Vec<Value>)>>,
-    /// events this host committed and already folded: skipped once when they come back
-    expect: VecDeque<Value>,
+struct Obs { tx: mpsc::UnboundedSender<Msg> }
+impl Observer for Obs {
+    fn committed(&self, _hub: &Arc<Hub>, events: &[Value], first_seq: u32) { let _ = self.tx.send(Msg::Batch(first_seq as u64, events.to_vec())); }
 }
-pub struct Host { inner: Mutex<Inner> }
-
-impl Inner {
-    /// fold a batch the hub committed and return the events the policies derive from it (already folded here)
-    fn batch(&mut self, first_seq: u64, events: &[Value]) -> Vec<Value> {
-        let end = first_seq + events.len() as u64 - 1;
-        if events.is_empty() || end <= self.applied { return vec![] }
-        let skip = self.applied.saturating_sub(first_seq.saturating_sub(1)) as usize;
-        let events = &events[skip.min(events.len())..];
-        let mut derived = vec![];
-        let quiet = autosettle::quiet(&self.st, events);
-        for e in events {
-            if self.expect.front() == Some(e) { self.expect.pop_front(); continue }
-            let meta = autosettle::metadata(&self.st, e);
-            self.st.apply(e);
-            for m in &meta { self.st.apply(m); }
-            derived.extend(meta);
-        }
-        for q in &quiet { self.st.apply(q); }
-        derived.extend(quiet);
-        self.applied = end;
-        for d in &derived { self.expect.push_back(d.clone()); }
-        // the expectation list is a short queue of events in flight; a stale head (a commit that failed) must not pile up
-        while self.expect.len() > 4096 { self.expect.pop_front(); }
-        derived
-    }
-}
-
-impl Observer for Host {
-    fn committed(&self, hub: &Arc<Hub>, events: &[Value], first_seq: u32) {
-        let derived = {
-            let mut g = self.inner.lock().unwrap();
-            if let Some(buf) = g.booting.as_mut() { buf.push((first_seq as u64, events.to_vec())); return }
-            g.batch(first_seq as u64, events)
-        };
-        if derived.is_empty() { return }
-        let hub = hub.clone();
-        tokio::spawn(async move { let _ = hub.commit_many(&derived).await; });
-    }
-}
-impl Ticker for Host {
+struct Tick { tx: mpsc::UnboundedSender<Msg> }
+impl Ticker for Tick {
     fn tick<'a>(&'a self, _hub: &'a Arc<Hub>, now_s: u64) -> Fut<'a, Vec<Value>> {
-        Box::pin(async move { let g = self.inner.lock().unwrap(); autosettle::changes(&g.st, now_s) })
+        Box::pin(async move {
+            let (tx, rx) = oneshot::channel();
+            if self.tx.send(Msg::Tick(now_s, tx)).is_err() { return vec![] }
+            rx.await.unwrap_or_default()
+        })
     }
 }
 
-/// Read the log into the lean state, then take over: start the observer first so no commit is missed, fold lines 1..=len, then the batches
-/// the observer held that are beyond that.
-pub async fn start(hub: Arc<Hub>) -> Arc<Host> {
-    let mut st = State::new(); st.lean = true;
-    let host = Arc::new(Host { inner: Mutex::new(Inner { st, applied: 0, booting: Some(vec![]), expect: VecDeque::new() }) });
-    hub.register_observer(host.clone());
+/// the lean fold of the whole log, on a blocking thread
+fn boot(hub: &Hub) -> Core {
+    let mut core = Core::new();
     let len = hub.store.len();
     let mut at = 0usize;
     while at < len {
         let to = (at + 2000).min(len);
-        let lines = hub.store.range(at, to).unwrap_or_default();
-        let mut g = host.inner.lock().unwrap();
-        for l in lines { g.st.apply_line(&l); }
+        for l in hub.store.range(at, to).unwrap_or_default() { core.fold_line(&l); }
         at = to;
     }
-    let held = {
-        let mut g = host.inner.lock().unwrap();
-        g.applied = len as u64;
-        g.booting.take().unwrap_or_default()
-    };
-    let mut derived = vec![];
-    { let mut g = host.inner.lock().unwrap(); for (seq, evs) in held { derived.extend(g.batch(seq, &evs)); } }
-    if !derived.is_empty() { let _ = hub.commit_many(&derived).await; }
-    hub.register_ticker(host.clone());
-    host
+    core
+}
+
+/// What other modules ask of the policies. `read` is Auto.read: the person opened a thread's newest reply (the view and desk-look
+/// handlers call it, then commit the events it returns with the same batch as their own effect).
+pub struct Policies { tx: mpsc::UnboundedSender<Msg> }
+impl Policies {
+    pub async fn read(&self, thread: &str, now_s: u64) -> Vec<Value> {
+        let (tx, rx) = oneshot::channel();
+        if self.tx.send(Msg::Read(thread.to_string(), now_s, tx)).is_err() { return vec![] }
+        rx.await.unwrap_or_default()
+    }
+}
+
+pub fn start(hub: Arc<Hub>) -> Arc<Policies> {
+    let (tx, rx) = mpsc::unbounded_channel();
+    hub.register_observer(Arc::new(Obs { tx: tx.clone() }));
+    hub.register_ticker(Arc::new(Tick { tx: tx.clone() }));
+    tokio::spawn(async move {
+        let h = hub.clone();
+        let Ok(core) = tokio::task::spawn_blocking(move || boot(&h)).await else { return };
+        let sink: Sink = Box::new(move |evs: Vec<Value>| { let hub = hub.clone(); Box::pin(async move { hub.commit_many(&evs).await.is_ok() }) });
+        policy::run(rx, core, sink).await;
+    });
+    Arc::new(Policies { tx })
 }

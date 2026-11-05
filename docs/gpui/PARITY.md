@@ -191,11 +191,15 @@ Rust hub: 3 missing, 1 partial. GPUI desktop: 0 missing, 0 partial.
 - Onboarding and polish / Star nudge: hub missing
 
 Deliberate gap (state lane), the only one that stays out:
-- Autosettle legacy upgrade (`Auto.upgrade`, `autosettle.version` not "1"): the Bend hub reads launch reports out of the mail box once to seed `autosettle.delivery.*`. The Rust autosettle (`state/autosettle.rs`) treats that reports map as empty, which is what Bend does at version 1. Reason: the Rust fold keeps no mail box, and a home that reaches the Rust hub through a Bend hub is already at version 1. A home still below version 1 would settle some launched threads one tick early; migrate such a home with the Bend hub first.
+- Autosettle legacy upgrade (`Auto.upgrade`, `autosettle.version` not "1"): the Bend hub reads launch reports out of the mail box once to seed `autosettle.delivery.*`. The Rust hub reads logs the Bend hub wrote, so a home can still be below version 1; `state/autosettle.rs` then treats the reports map as empty, as Bend does at version 1. A launched thread (one that must report to its launcher before it settles) can then only be held, never settled early: with no mail receipt it waits for `autosettle.report.<th>` or `autosettle.delivery.<th>\t<addr>`, so the error is toward not settling. Reason it stays out: the Rust fold keeps no mail box; migrate such a home with the Bend hub once.
 
-Open work (state lane), to be ported for full parity, in this order, after alert, told and summary:
+Open work (state lane), to be ported for full parity (a gap here means open, not accepted):
+- Autosettle's commit-path pieces of `Shelve.auto.fix` (hub.bend:8087): `Shelve.step`'s wakes, `Shelve.auto.messages` (a settled thread reopens on a new assistant message or turn: laws `autosettle_new_assistant_message_reopens`, `autosettle_new_turn_reopens`, unported until this is done) and `Shelve.auto.clean` (a batch that would settle a thread it also wakes). The Rust tick covers `Auto.changes` only.
+- `Auto.read`: ported as a pure function (`autosettle::read`, `Policies::read`), but nothing calls it yet: the view-open and desk-look handlers (session lane) must call it and commit its events with their own. Until then `autosettle.read.<th>` is never written, so a person's thread with output stays unread and never settles. It fails safe, but it is a visible difference.
+- Atomicity: Bend commits a change's quiet marks, message metadata and wakes in the same step as the change (quiet first). Here they follow as a later batch (metadata first), so a crash between the two loses that metadata and `autosettle.audience` falls back to `found`. A pre-commit hook beside the mask seam in the hub would close it; asked of `bend`.
 - `Shelve.tick.post`: the wake (`ThreadWoke`) when a snooze ends, run with the settle tick.
 - Liveness deliveries: the nudge into the stalled thread and the notice to its launcher or Bub (`Watchdog.decided`: `Lr.send`, `Bots.wake`), plus the lock heartbeat and the work-timeout / provider-resume / retry ticks `Watchdog.tick.after` runs. These touch the agents and bots seams; their owners (`agents`, `bend`) are asked before the code goes in.
+- Alert, told and summary housekeeping writes (`alert.<t>`, `told.*`, `summary.at.*`), liveness progress writes and the star nudge's wiring: next in order.
 
 ### NEW bots
 
