@@ -259,7 +259,7 @@ impl Hub {
     pub fn subscribe(&self) -> broadcast::Receiver<u64> { self.changed.subscribe() }
     /// Streamed text of a running turn, not yet an event: shown to views as the thread's live reply.
     pub async fn live_delta(&self, thread: &str, text: &str) -> Result<()> {
-        let text = &crate::settings::mask::mask(text); // settings lane: Hub.tagged
+        let masked = crate::settings::mask::mask_cow(text); let text: &str = &masked; // settings lane: Hub.tagged (a secret split across two chunks is a known limit, settings/mask.rs)
         self.live.lock().unwrap().entry(thread.to_string()).or_default().push_str(text);
         let _ = self.frames.send(json!({"t":"delta","thread":thread,"text":text}));
         self.presenter.fold(&json!({"t":"delta","thread":thread,"text":text,"now":now_ms()})).await?;

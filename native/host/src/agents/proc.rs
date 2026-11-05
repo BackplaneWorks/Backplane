@@ -94,8 +94,8 @@ pub fn spawn(program: &Path, args: &[String], cwd: &Path, extra_path: Option<&Pa
     let (in_tx, mut in_rx) = mpsc::channel::<String>(IN_QUEUE);
     let (out_tx, out_rx) = mpsc::channel::<String>(OUT_QUEUE);
     let (exit_tx, exit_rx) = oneshot::channel();
-    tokio::spawn(async move { while let Some(l) = in_rx.recv().await { let l = crate::settings::mask::mask(&l); /* Agent.write */ if stdin.write_all(l.as_bytes()).await.is_err() || stdin.write_all(b"\n").await.is_err() || stdin.flush().await.is_err() { break } } });
-    tokio::spawn(async move { let mut r = BufReader::with_capacity(64 << 10, stdout); while let Ok(Some(l)) = read_capped(&mut r, LINE_CAP).await { let l = crate::settings::mask::mask(&l); /* Hub.tagged */ if out_tx.send(l).await.is_err() { break } } });
+    tokio::spawn(async move { while let Some(l) = in_rx.recv().await { let l = crate::settings::mask::mask_owned(l); /* Agent.write */ if stdin.write_all(l.as_bytes()).await.is_err() || stdin.write_all(b"\n").await.is_err() || stdin.flush().await.is_err() { break } } });
+    tokio::spawn(async move { let mut r = BufReader::with_capacity(64 << 10, stdout); while let Ok(Some(l)) = read_capped(&mut r, LINE_CAP).await { let l = crate::settings::mask::mask_owned(l); /* Hub.tagged */ if out_tx.send(l).await.is_err() { break } } });
     let tail = tokio::spawn(async move { let mut keep: Vec<u8> = Vec::new(); let mut b = [0u8; 4096]; loop { match stderr.read(&mut b).await { Ok(0) | Err(_) => break, Ok(n) => { keep.extend_from_slice(&b[..n]); if keep.len() > STDERR_TAIL { let cut = keep.len() - STDERR_TAIL; keep.drain(..cut); } } } } crate::settings::mask::mask(&String::from_utf8_lossy(&keep)) });
     tokio::spawn(async move {
         let st = child.wait().await; // always reaped

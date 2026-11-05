@@ -167,7 +167,7 @@ impl Mcp {
             "kicad_export10" => crate::files::export10::mcp(&ag.hub, sv(&a, "path"), a.get("force").and_then(Value::as_bool).unwrap_or(false)).await,
             "secret_request" => crate::settings::secret::tool_request(&ag.hub, thread, &a).await,
             "secret_list" => crate::settings::secret::tool_list(),
-            "secret_run" => { let cwd = crate::files::root_of(&ag.hub, thread).await.map(|p| p.to_string_lossy().to_string()).unwrap_or_default(); crate::settings::secret::tool_run(thread, &cwd, &a).await }
+            "secret_run" => { let cwd = ag.world().await.cwd(thread); crate::settings::secret::tool_run(thread, &cwd, &a).await }
             n if crate::term::tools::NAMES.contains(&n) => crate::term::tools::call(&ag.hub, thread, n, &a).await.unwrap_or_else(|| fail("unknown tool")),
             "viewer_show" => { ag.hub.push_all(&json!({"t":"view","thread":thread,"path":sv(&a, "path"),"kind":sv(&a, "kind")})); (true, json!({"shown":sv(&a, "path")})) }
             _ => fail("unknown tool"),
