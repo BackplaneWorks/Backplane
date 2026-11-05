@@ -48,7 +48,7 @@ cat > $R/script.json <<JSON
 JSON
 $CLIENT --url http://127.0.0.1:$PORT --token-file $R/home/token --script $R/script.json --exit-after 40 > $OUT/$N.client.log 2>&1 &
 echo $! > $R/client.pid
-sleep 14; import -window root $SH/$N-board.png
-sleep 9; import -window root $SH/$N-schematic.png
+sleep 7; import -window root $SH/$N-board.png
+sleep 6; import -window root $SH/$N-schematic.png
 wait $(cat $R/client.pid) || true
 '
