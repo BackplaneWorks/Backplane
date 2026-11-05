@@ -21,11 +21,12 @@ export const size=p=>{try{return statSync(p).size}catch{return 0}};
 export function dirSizes(home){const o={};for(const f of ['events.jsonl','store.db','store.db-wal','store.db-shm'])o[f]=size(`${home}/${f}`);return o}
 export function makeStandins(dir,env={}){mkdirSync(dir,{recursive:true});writeFileSync(`${dir}/claude`,standinScript);chmodSync(`${dir}/claude`,0o755);
  for(const n of['codex','grok','muse']){writeFileSync(`${dir}/${n}`,'#!/bin/sh\nexit 1\n');chmodSync(`${dir}/${n}`,0o755)}}
-export async function startHub({bin,home,port,standins,host,extraEnv={},cap='3700M',log}){
+export async function startHub({bin,home,port,standins,host,extraEnv={},extraArgs=[],cap='3700M',log}){
  if(home.includes('.backplane-bend')||home.includes('/.backplane/'))throw Error('live home refused');
  mkdirSync(home,{recursive:true});
  const args=['--user','--scope','--quiet','-p',`MemoryMax=${cap}`,'-p','MemorySwapMax=0',bin,'--home',home,'--port',String(port),'--no-tailscale','--foreground'];
  if(host)args.push('--host',host);
+ args.push(...extraArgs);
  const env={...process.env,DISPLAY:'',WAYLAND_DISPLAY:'',BACKPLANE_NO_UPDATE:'1',BACKPLANE_ORDER_SERVER:'http://127.0.0.1:9',BACKPLANE_KEYRING_LOCKED:'0',BACKPLANE_PEERS:'',BACKPLANE_AGENTS:standins,PATH:`${standins}:${process.env.PATH}`,FAKE_LOG:`${home}/fake.log`,...extraEnv};
  const proc=spawn('systemd-run',args,{env,stdio:['ignore',log?'pipe':'ignore',log?'pipe':'ignore']});
  if(log){const fs=require('node:fs');const o=fs.openSync(log,'a');proc.stdout.on('data',d=>fs.writeSync(o,d));proc.stderr.on('data',d=>fs.writeSync(o,d))}
