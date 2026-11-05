@@ -7,11 +7,26 @@ import {viewClient} from './view.mjs';
 const REPO='/home/h/Documents/i2cjak/backplane-gpui';
 // The store copy ~/.backplane-gpui-copy is read-only and never written by a hub. Every run works on a throwaway copy under build/gpui/ (cp --reflink=auto), removed afterwards.
 const SRC=process.env.SRC_HOME||(process.env.HOME+'/.backplane-gpui-copy');const HOME=process.env.M0_HOME||(REPO+'/build/gpui/perf-run/m0/home'); // M0_HOME: the throwaway copy (under build/gpui or ~/.backplane-gpui-scratch), removed on exit
-function prepareCopy(){const free=Number(execSync("df -B1G --output=avail / | tail -1",{encoding:'utf8'}).trim());if(free<40)throw Error('df: only '+free+' GiB free on /, need >= 40');
- mkdirSync(HOME,{recursive:true});execSync(`cp --reflink=auto ${SRC}/events.jsonl ${HOME}/events.jsonl`);if(process.env.WITH_STORE&&existsSync(SRC+'/store.db'))execSync(`cp --reflink=auto ${SRC}/store.db ${HOME}/store.db`);
- if(existsSync(SRC+'/token'))execSync(`cp ${SRC}/token ${HOME}/token`);execSync(`chmod -R u+rwX ${HOME}`); // the store copy is read-only: a throwaway copy has to be writable for a hub to append to it
+import {rmSync,chmodSync,realpathSync} from 'node:fs';import {execFileSync} from 'node:child_process';import pathMod from 'node:path';
+const SCRATCH=process.env.HOME+'/.backplane-gpui-scratch',BUILD=REPO+'/build/gpui';
+const under=(p,d)=>{const r=pathMod.resolve(p),b=pathMod.resolve(d);return r===b||r.startsWith(b+pathMod.sep)};
+const REAL=[process.env.HOME+'/.backplane-gpui-copy',process.env.HOME+'/.backplane-bend',process.env.HOME+'/.backplane-gpui',process.env.HOME+'/.local/share/backplane'];
+const isRealLog=p=>REAL.some(d=>under(p,d))||/\/\.backplane-gpui-scratch\/(store-copy-backup|person-)/.test(pathMod.resolve(p));
+// the throwaway copy is the ONLY thing this script chmods and deletes: strictly under the scratch folder or build/gpui, never the source, never a real home
+function assertSafePaths(){
+  const h=pathMod.resolve(HOME),sr=pathMod.resolve(SRC);
+  if(!((under(h,SCRATCH)&&h!==pathMod.resolve(SCRATCH))||(under(h,BUILD)&&h!==pathMod.resolve(BUILD))))throw Error('refusing M0_HOME '+h+': must be strictly under '+SCRATCH+' or '+BUILD);
+  if(under(h,sr)||under(sr,h))throw Error('refusing: M0_HOME and the source home overlap');
+  if(REAL.some(d=>under(h,d)||under(d,h)))throw Error('refusing: M0_HOME touches a real home');
+  if(under(sr,process.env.HOME+'/.backplane-bend')||under(sr,process.env.HOME+'/.local/share/backplane'))throw Error('refusing SRC_HOME: a live hub\'s home');
+  // the hold: no Rust hub (any non-default HUB_BIN) on a copy of the real log until the coordinator lifts it (COMMON.md)
+  if(process.env.HUB_BIN&&isRealLog(sr)&&process.env.HOLD_LIFTED!=='coordinator-lifted')throw Error('refusing: a hold is on any Rust hub on a copy of the real log (COMMON.md); use a synthetic log, or set HOLD_LIFTED=coordinator-lifted only when the coordinator has lifted it');
+}
+function prepareCopy(){assertSafePaths();const free=Number(execSync("df -B1G --output=avail / | tail -1",{encoding:'utf8'}).trim());if(free<40)throw Error('df: only '+free+' GiB free on /, need >= 40');
+ mkdirSync(HOME,{recursive:true});execFileSync('cp',['--reflink=auto',SRC+'/events.jsonl',HOME+'/events.jsonl']);if(process.env.WITH_STORE&&existsSync(SRC+'/store.db'))execFileSync('cp',['--reflink=auto',SRC+'/store.db',HOME+'/store.db']);
+ if(existsSync(SRC+'/token'))execFileSync('cp',[SRC+'/token',HOME+'/token']);execFileSync('chmod',['-R','u+rwX',HOME]); // the source is read-only: a throwaway copy has to be writable for a hub to append to it (the guard above already proved HOME is ours)
  R.copy={made:new Date().toISOString(),dfFreeGiB:free,withStoreDb:!!process.env.WITH_STORE}}
-function removeCopy(){try{execSync(`rm -rf ${HOME}`)}catch{}}const PORT=3830,HOST='100.64.84.41';
+function removeCopy(){try{assertSafePaths();rmSync(HOME,{recursive:true,force:true})}catch(e){console.error('not removing the copy: '+e.message)}}const PORT=3830,HOST='100.64.84.41';
 const root=REPO+'/build/gpui/perf-run/m0';mkdirSync(root+'/fakehome',{recursive:true});mkdirSync(root+'/proj',{recursive:true});makeStandins(root+'/bin');
 const out=process.env.M0_OUT||(REPO+'/build/gpui/results/perf/m0');mkdirSync(out,{recursive:true});
 const stat=a=>({n:a.length,p50:pct(a,50),p95:pct(a,95),p99:pct(a,99),max:Math.max(...a)});
