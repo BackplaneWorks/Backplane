@@ -27,7 +27,7 @@ fn render_scratch(key: &str) -> bool { key.starts_with("@more.") || key == "@pil
 const VIEW_INFO: [&str; 5] = ["view.design:", "view.kind:", "view.path:", "view.sheet:", "view.tree:"];
 
 #[derive(Default)]
-pub struct ViewActor { view: String, target: Option<Value>, sel: Option<String>, keys: BTreeSet<String>, away: BTreeMap<String, String>, page: Option<(String, Value, u64)>, local: Option<(String, Value, Value)>, held_drafts: Map<String, Value>, held_info: Map<String, Value>, rid: u64, panel: bool, hub_view: bool,
+pub struct ViewActor { view: String, target: Option<Value>, sel: Option<String>, keys: BTreeSet<String>, away: BTreeMap<String, String>, page: Option<(String, Value, u64)>, local: Option<(String, Value, Value)>, held_drafts: Map<String, Value>, held_info: Map<String, Value>, rid: u64, panel: bool, hub_view: bool, reads: Vec<Value>,
     /// ids of the requests this view's commands told the client to send (`cmds` of type send), and of those the hub has since answered
     sent: BTreeSet<u64>, replied: BTreeSet<u64> }
 
@@ -123,6 +123,15 @@ impl ViewActor {
         let l = pol.as_object_mut().and_then(|o| o.remove("local"));
         self.local = l.filter(|l| l.is_object()).map(|l| (view.to_string(), target.clone(), l));
     }
+    /// A reply to one of the hub's own reads for this view (`fab.look`, `review.page`, `telemetry.share`), kept for the next V
+    /// request of the view (the policy applies it to its Ui as the JS actor does). Bounded: the oldest go first.
+    pub fn record_read(&mut self, kind: &str, id: u64, result: Value) {
+        self.reads.push(json!({"kind": kind, "id": id, "result": result}));
+        let n = self.reads.len();
+        if n > MAX_READS { self.reads.drain(..n - MAX_READS); }
+    }
+    /// The recorded reads, taken (and cleared) for the next V request.
+    pub fn take_reads(&mut self) -> Vec<Value> { std::mem::take(&mut self.reads) }
     /// The older page this view stands on (`before`, 0 = the newest window). A view.page sets it from its cursor; later
     /// updates and actions of the same view and target keep it (the JS hub's actor holds the page it last served) until
     /// a view.open or another target ends it. Measured on recA/session-gpuid requests 41..45.
@@ -185,6 +194,9 @@ impl ViewActor {
 }
 
 static ACTORS: LazyLock<Mutex<HashMap<u64, ViewActor>>> = LazyLock::new(Default::default);
+
+/// Most reads held per view between two requests.
+const MAX_READS: usize = 16;
 
 /// A connection that never says goodbye cannot grow the map past this: the oldest client ids go first.
 const MAX_ACTORS: usize = 4096;
@@ -250,6 +262,17 @@ pub fn mask_page_reply(req: &Value, reply: &mut Value) {
         let mask = req["session"][f].as_object();
         if let Some(Value::Object(o)) = s.get_mut(f) { o.retain(|k, _| mask.map_or(false, |m| m.contains_key(k))); }
     }
+}
+/// The hub answered one of its own reads for this connection's view: keep the reply for the policy (see `ViewActor::record_read`).
+/// `kind` is "fab.look", "review.page" or "telemetry.share"; `id` is the RPC id of the reply as the hub sent it (0 for fab.look);
+/// `result` is the RPC reply's `result` as the hub sent it. The
+/// reply is the hub's own, never the client's.
+pub fn record_read(client: u64, _view_id: &str, kind: &str, id: u64, result: Value) {
+    ACTORS.lock().unwrap().entry(client).or_default().record_read(kind, id, result);
+}
+/// The reads recorded since the last V request, for `reads` in the next one.
+pub fn take_reads(client: u64) -> Vec<Value> {
+    ACTORS.lock().unwrap().get_mut(&client).map(ViewActor::take_reads).unwrap_or_default()
 }
 /// A connection ended (`Hub::detach`, from the connection's drop guard).
 pub fn forget(client: u64) { ACTORS.lock().unwrap().remove(&client); }
@@ -475,6 +498,14 @@ mod tests {
         let mut r2 = json!({"session": {"drafts": {"@rp.req:1": ""}}});
         mask_page_reply(&other, &mut r2);
         assert!(r2["session"]["drafts"].get("@rp.req:1").is_some());
+    }
+    #[test] fn recorded_reads_go_with_the_next_request_once_and_are_bounded() {
+        let mut a = ViewActor::default();
+        for i in 0..40 { a.record_read("fab.look", 0, json!({"n": i})); }
+        let r = a.take_reads();
+        assert_eq!(r.len(), MAX_READS);
+        assert_eq!(r[0]["result"]["n"], json!(24)); assert_eq!(r[15]["result"]["n"], json!(39)); assert_eq!(r[0]["kind"], json!("fab.look")); assert_eq!(r[0]["id"], json!(0));
+        assert!(a.take_reads().is_empty());
     }
     #[test] fn forget_and_the_bound_keep_the_map_flat() {
         let mut m: HashMap<u64, ViewActor> = HashMap::new();
