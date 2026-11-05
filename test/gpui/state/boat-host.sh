@@ -1,5 +1,5 @@
 #!/bin/sh
-# Boat: the hub crate with the state policy host compiled in (main.rs needs `mod shelf; mod state; #[path="state/host.rs"] mod statehost;` and statehost::start). Artifact: out/host/check.txt
+# Boat: the hub crate with the state policy host compiled in (main.rs has `mod shelf; mod state; #[path="state/host.rs"] mod statehost;` and statehost::start). Artifact: out/host/check.txt
 set -u
 export PATH="$HOME/.cargo/bin:$PATH" CARGO_TARGET_DIR=$PWD/target-host
 O=out/host; mkdir -p $O
