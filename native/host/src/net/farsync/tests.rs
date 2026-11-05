@@ -38,6 +38,7 @@ async fn push(a: &Node, b: &Node, link: &str, body: Value) -> botnet::Resp {
 #[tokio::test] async fn far_push_from_the_owner_lands_in_the_mirror_not_the_log() {
     let a = node("fa1", false).await; let (b, fs) = mirror("fb1").await;
     let link = linked(&a, &b).await;
+    fs.store.take(&link, "e1", 0, 0, &[]).unwrap(); // (a mirror with no epoch yet pulls on its first push, as Bend: Fr.epoch.changed)
     let n0 = b.hub.store.len();
     let r = push(&a, &b, &link, json!({"epoch":"e1","since":0,"head":2,"items":[thread(1, "t9"), msg(2, "t9", "hello from A")]})).await;
     assert_eq!((r.code, r.body.as_str()), (200, r#"{"ok":true}"#));
@@ -51,7 +52,9 @@ async fn push(a: &Node, b: &Node, link: &str, body: Value) -> botnet::Resp {
 #[tokio::test] async fn far_push_is_refused_from_a_stranger_a_replay_and_a_machine_sync_is_off_for() {
     let a = node("fa2", false).await; let (b, fs) = mirror("fb2").await;
     let link = linked(&a, &b).await;
+    fs.store.take(&link, "e", 0, 0, &[]).unwrap();
     let body = json!({"epoch":"e","since":0,"head":1,"items":[thread(1, "t")]});
+    let nth = |n: u64| { let mut b = body.clone(); b["note_n"] = json!(n); b }; // (each signed body distinct: a signature is accepted once)
     // unsigned: 401 (the intake)
     let r = botnet::plain(&format!("{}/far/push", url(&b))).await; assert_eq!(r.code, 401, "{}", r.body);
     // not an owner's machine: a link that exists but is not verified
@@ -63,9 +66,9 @@ async fn push(a: &Node, b: &Node, link: &str, body: Value) -> botnet::Resp {
     // sync off for A's name: 403
     let name = b.p.table.with(|p| p.peer(&link).unwrap().name.clone());
     b.hub.commit(&json!({"$":"SettingSet","key":format!("sync.{}", name.to_lowercase()),"value":"off","at":2})).await.unwrap();
-    assert_eq!(push(&a, &b, &link, body.clone()).await.code, 403);
+    assert_eq!(push(&a, &b, &link, nth(1)).await.code, 403);
     b.hub.commit(&json!({"$":"SettingSet","key":format!("sync.{}", name.to_lowercase()),"value":"","at":3})).await.unwrap();
-    assert_eq!(push(&a, &b, &link, body.clone()).await.code, 200);
+    assert_eq!(push(&a, &b, &link, nth(2)).await.code, 200);
     // the same signed bytes again are a replay
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
     let s = botnet::peer_secret(&a.home, &link); let raw = body.to_string();
@@ -82,7 +85,7 @@ async fn push(a: &Node, b: &Node, link: &str, body: Value) -> botnet::Resp {
         let o: Value = serde_json::from_slice(&req.body).unwrap(); let since = o["since"].as_u64().unwrap();
         c.fetch_add(1, Ordering::SeqCst);
         let body = if since == 0 { json!({"since":0,"catalog":[{"id":"proj","title":"P","at":3,"n":3}],"head":2,"items":[thread(1, "t"), msg(2, "t", "one")],"more":true,"epoch":"E"}) }
-            else { json!({"since":since,"catalog":[],"head":3,"items":[msg(3, "t", "two")],"more":false,"epoch":"E"}) };
+            else { json!({"since":since,"catalog":[{"id":"proj","title":"P","at":3,"n":3}],"head":3,"items":[msg(3, "t", "two")],"more":false,"epoch":"E"}) };
         Some(HttpReply { status: "200 OK", ctype: "application/json".into(), extra: String::new(), body: body.to_string().into_bytes() }) }) });
     let a = node_extra("fa3", false, false, Some(log)).await; let (b, fs) = mirror("fb3").await;
     let link = linked(&a, &b).await;
