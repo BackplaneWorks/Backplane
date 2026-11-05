@@ -22,7 +22,7 @@ function mkNorm(){
   const ids=new Map();const ord=v=>{if(!ids.has(v))ids.set(v,'ID'+(ids.size+1));return ids.get(v)};
   const idRe=/\b([ptgm]\d{10}-\d+(?::\d+)?)\b|\bfake-\d+\b|\b[mt][a-z]?\d{3,8}-\d+-\d+(?::\d+)?\b|\btu\d+-\d+-\d+\b|\b\d+:\d{12,15}\b/g;
   const str=(s,key)=>{
-    s=s.replace(/@\d{13}@/g,'@<T>@').replace(/work-[A-Za-z0-9]+/g,'work-<tag>').replace(/\bc[a-z0-9-]*?\d{10}-\d+\b/g,m=>ord(m));
+    s=s.replace(/@\d{13}@/g,'@<T>@').replace(/(?:\/[^"\s]*)?\/work-[A-Za-z0-9]+/g,'<work>').replace(/backplane[-\/][0-9a-f]{8}\b/g,'backplane-<wt>').replace(/\bc[a-z0-9-]*?\d{10}-\d+\b/g,m=>ord(m));
     s=s.replace(/\b1[78]\d{8}\b(?!-)/g,'<T>').replace(/\b1[78]\d{11}\b/g,'<T>');
     s=s.replace(idRe,m=>ord(m));
     s=s.replace(/\b\d{1,2}:\d\d\b/g,'<time>').replace(/(Finished <time> · )[0-9hms ]+/,'$1<dur>');
