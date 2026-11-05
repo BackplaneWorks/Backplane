@@ -12,7 +12,7 @@ pub fn metric(started: Instant, event: &str, mut fields: Value) {
 }
 
 #[derive(Clone, Debug)]
-pub enum Step { Home(usize), Select(usize), Popup(String), Type(String), Send, Wait(u64), Record(Option<String>), Click(String), Scroll(f32), NetSleep(f64), Unsupported(String) }
+pub enum Step { Home(usize), Select(usize), Popup(String), Type(String), Send, Wait(u64), Record(Option<String>), Click(String), Read(String), Scroll(f32), NetSleep(f64), Unsupported(String) }
 /// What a click on a registered control does; the e2e harness's controls inventory and `click` step use these.
 #[derive(Clone, Debug)]
 pub enum Ctl { None, PickFiles, ToggleSidebar, Select(String), Home(String), Fold(String), Send, Skill(String), Page(String), Node(String, String) }
@@ -35,6 +35,7 @@ pub fn load(path: &Path) -> VecDeque<Step> {
         else if let Some(ms) = v["wait"].as_u64() { Some(Step::Wait(ms)) }
         else if let Some(r) = v["record"].as_str() { Some(Step::Record(if r == "start" { Some(v["name"].as_str().unwrap_or("rec").to_string()) } else { None })) }
         else if let Some(id) = v["click"].as_str() { Some(Step::Click(id.into())) }
+        else if let Some(what) = v["read"].as_str() { Some(Step::Read(what.into())) }
         else if let Some(n) = v["scroll"].as_f64() { Some(Step::Scroll(n as f32)) }
         else if let Some(sec) = v["net_sleep"].as_f64() { Some(Step::NetSleep(sec)) }
         else if let Some(k) = ["paste_image", "open_viewer", "open_settings", "files_download"].iter().find(|k| v.get(**k).is_some()) { Some(Step::Unsupported((*k).to_string())) }
@@ -68,9 +69,14 @@ impl Backplane {
             let snap = crate::art::layout_snapshot();
             if snap != self.last_layout { self.last_layout = snap.clone(); metric(started, "layout", json!({"rects": serde_json::from_str::<Value>(&snap).unwrap_or(Value::Null)})); }
             // G4: the controls on screen, on change
-            let ctl: Vec<Value> = self.controls.iter().map(|c| json!({"id": c.id, "label": c.label, "enabled": !matches!(c.ctl, Ctl::None), "visible": true, "wired": !matches!(c.ctl, Ctl::None), "disabled_look": matches!(c.ctl, Ctl::None)})).collect();
+            let rects = crate::art::ctl_rects();
+            let ctl: Vec<Value> = self.controls.iter().map(|c| json!({"id": c.id, "label": c.label, "rect": rects.get(&c.id).map(|r| json!({"x": r[0], "y": r[1], "w": r[2], "h": r[3]})), "enabled": !matches!(c.ctl, Ctl::None), "visible": true, "wired": !matches!(c.ctl, Ctl::None), "disabled_look": matches!(c.ctl, Ctl::None)})).collect();
             let text = serde_json::to_string(&ctl).unwrap_or_default();
-            if text != self.ctl_last { self.ctl_last = text; metric(started, "controls", json!({"controls": ctl})); }
+            if text != self.ctl_last {
+                self.ctl_last = text; metric(started, "controls", json!({"controls": ctl}));
+                // links in messages: GPUI draws message text without link detection, so there are none to aim at yet
+                if !self.links_sent { self.links_sent = true; metric(started, "links", json!({"links": [], "supported": false})); }
+            }
         }
         let draws = self.data["projects"].as_array().map_or(false, |p| !p.is_empty());
         if !self.usable && draws {
@@ -89,7 +95,7 @@ impl Backplane {
             Goal::Changed(epoch) => self.ui_epoch != *epoch,
             Goal::Reconnected => self.reconnected,
             Goal::Home => self.data["projectHome"].is_object(),
-            Goal::Popup => (self.data["thread"]["skills"].as_array().map_or(false, |s| !s.is_empty()) || self.input.read(cx).content.starts_with('/')),
+            Goal::Popup => self.data["thread"]["skills"].as_array().map_or(false, |s| !s.is_empty()), // the hub's rows, nothing local
             Goal::Typed(text) => self.input.read(cx).content.as_ref() == text,
             Goal::Sent(before) => self.user_entries() > *before,
             Goal::Sleep => false,
@@ -195,6 +201,12 @@ impl Backplane {
                 let _ = self.tx.try_send(crate::hub::Command::Sleep(secs));
             }
             Step::Unsupported(k) => { self.m("input", json!({"step": k, "ok": false, "error": "not_implemented"})); self.pump(cx); }
+            Step::Read(what) => {
+                // G6: the composer's text, or the thread selection (GPUI has no text selection yet: "" with supported:false)
+                let (text, supported) = match what.as_str() { "composer" => (self.input.read(cx).content.to_string(), true), _ => (String::new(), false) };
+                self.m("read", json!({"what": what, "text": text, "supported": supported}));
+                self.pump(cx);
+            }
             Step::Click(id) => {
                 let epoch = self.ui_epoch;
                 match self.controls.iter().find(|c| c.id == id).cloned() {

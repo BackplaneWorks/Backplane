@@ -285,3 +285,17 @@ pub fn layout_snapshot() -> String {
     let m: serde_json::Map<String, Value> = g.iter().flatten().map(|(k, r)| (k.clone(), serde_json::json!({"x": r[0], "y": r[1], "w": r[2], "h": r[3]}))).collect();
     Value::Object(m).to_string()
 }
+
+// ---- control rectangles (G6): the window rectangle of each registered control, in check mode only ------------
+static CTL_RECTS: std::sync::Mutex<Option<std::collections::HashMap<String, [f32; 4]>>> = std::sync::Mutex::new(None);
+/// An invisible overlay recording its parent control's rectangle (physical window px) under the control's id.
+pub fn probe_rect(id: String) -> AnyElement {
+    canvas(|_, _, _| (), move |b: Bounds<Pixels>, _, window: &mut Window, _| {
+        let s = window.scale_factor();
+        let mut g = CTL_RECTS.lock().unwrap();
+        let m = g.get_or_insert_with(Default::default);
+        if m.len() > 2048 { m.clear(); }
+        m.insert(id, [f32::from(b.origin.x) * s, f32::from(b.origin.y) * s, f32::from(b.size.width) * s, f32::from(b.size.height) * s]);
+    }).absolute().size_full().into_any_element()
+}
+pub fn ctl_rects() -> std::collections::HashMap<String, [f32; 4]> { CTL_RECTS.lock().unwrap().clone().unwrap_or_default() }
