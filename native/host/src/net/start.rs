@@ -63,7 +63,20 @@ pub fn start_with(hub: &Arc<Hub>, host: &str, port: u16, tailnet: bool) -> Arc<A
             hub.set_pairing(reg, Arc::new(Wired { routes: routes.clone(), hub: Arc::downgrade(hub) }));
             let _ = ROUTES.set(routes.clone());
             let _ = PEERING.set(peering.clone());
-            if tokio::runtime::Handle::try_current().is_ok() { super::peerhttp::spawn_loops(hub.clone(), table, peering) }
+            if tokio::runtime::Handle::try_current().is_ok() {
+                super::peerhttp::spawn_loops(hub.clone(), table, peering.clone());
+                if tailnet {
+                    // the tailnet listener: owner trust by whois, the pairing link, and what clients are told ("tailscale")
+                    let (h, r, host) = (hub.clone(), routes.clone(), host.to_string());
+                    tokio::spawn(async move {
+                        let token = std::fs::read_to_string(h.cfg.home.join("token")).unwrap_or_default().trim().to_string();
+                        h.set_info("tailnet", "on").await;
+                        h.set_info("tailscale", "checking").await;
+                        let st = super::listener::start(h.clone(), Arc::new(super::listener::Cli), peering, r, &host, port, &token).await;
+                        h.set_info("tailscale", if matches!(st, super::listener::State::Reachable { .. }) { "reachable" } else { "unavailable" }).await;
+                    });
+                }
+            }
             routes
         }
         Err(e) => { eprintln!("backplane: {e}"); std::process::exit(1) }
