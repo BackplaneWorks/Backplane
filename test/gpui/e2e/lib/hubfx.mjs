@@ -6,8 +6,10 @@ const PNG='iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAF0lEQVR4nGNgGAWjYBSMg
 export async function startFixtureHub({bin,root,port,threads=20,seedTurns=true,repo=process.env.PERF_REPO||process.cwd()}){
   rmSync(root,{recursive:true,force:true});mkdirSync(root+'/proj/fixtures',{recursive:true});makeStandins(root+'/bin');
   writeFileSync(root+'/proj/fixtures/pic.png',Buffer.from(PNG,'base64'));writeFileSync(root+'/proj/readme.txt','e2e fixture file\n');
-  for(const [src,dst] of [['test/fixtures/pcb-bottom-silk/asymmetric.kicad_pcb','board.kicad_pcb'],['test/fixtures/fork-viewers/aliases.kicad_sch','schematic.kicad_sch'],['test/gpui/files/fixtures/mesh/bracket.step','part.step']])
+  for(const [src,dst] of [['test/fixtures/pcb-bottom-silk/asymmetric.kicad_pcb','e2e.kicad_pcb'],['test/fixtures/fork-viewers/aliases.kicad_sch','e2e.kicad_sch'],['test/gpui/files/fixtures/mesh/bracket.step','part.step']])
     if(existsSync(`${repo}/${src}`))copyFileSync(`${repo}/${src}`,`${root}/proj/${dst}`);
+  // a KiCad project next to the board and schematic, so the Board/Schematic/3D viewers have something to open
+  writeFileSync(root+'/proj/e2e.kicad_pro',JSON.stringify({meta:{filename:'e2e.kicad_pro',version:1}}));writeFileSync(root+'/proj/.backplane.json',JSON.stringify({project:'e2e.kicad_pro'}));
   try{execSync('git init -q',{cwd:root+'/proj'})}catch{}
   const h=await startHub({bin,home:root+'/home',port,standins:root+'/bin',extraEnv:{FAKE_SECS:'600',FAKE_PER:'2',FAKE_CYCLE:'20'},log:root+'/hub.log'});
   const report={refused:[],ok:[]};const c=await client(h);
@@ -18,7 +20,10 @@ export async function startFixtureHub({bin,root,port,threads=20,seedTurns=true,r
   if(seedTurns)for(const t of ths){c.send('turn.start',{thread:t,text:'zqshort seed history'})}
   if(seedTurns)await sleep(20000);
   for(const n of ['Bub','Mochi'])await call('bots.create',{name:n,persona:`${n} the stand-in bot`,provider:'claude',model:''});
-  await call('rooms.create',{name:'e2e-room'});
+  await sleep(1500);
+  // a room: bots.room {room:'' (new), name, members: newline-separated bot ids}; the ids come from the bots' creation events when the hub logs them
+  const botIds=[...new Set(c.seen.filter(x=>/Bot/.test(x.$||'')&&x.id&&['Bub','Mochi'].includes(x.name)).map(x=>x.id))];
+  await call('bots.room',{room:'',name:'e2e-room',members:botIds.join('\n')});
   await call('setting.set',{key:'onboard.done',value:'1'});
   return {hub:h,state:{url:h.url,token:h.token,project:project?.id,threads:ths,root,pid:h.pid},seedReport:report,client:c,
     stop:async()=>{try{c.ws.close()}catch{}stopHub(h);await sleep(1500)}};
