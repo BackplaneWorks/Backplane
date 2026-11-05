@@ -1,0 +1,205 @@
+import XCTest
+
+// The 12 gate journeys (test/gpui/e2e/journeys.json ids) driven on the iOS simulator with real taps, typing and a real pasteboard
+// paste. Fixture hub: test/gpui/e2e/serve-fixture.mjs (project "e2e", 20 threads "e2e thread N", bots Bub/Mochi, room e2e-room).
+final class Journeys: XCTestCase {
+    var d: Driver!
+    override func setUp() { continueAfterFailure = false }
+
+    private func rows() -> XCUIElementQuery { d.app.cells }
+    private func openThread(_ n: Int) -> Bool {
+        let want = "e2e thread \(n + 1)"
+        let row = d.label(want)
+        return d.step("open \(want)", act: {
+            if !row.exists { d.app.swipeUp() }
+            row.tap()
+        }, expect: { d.el("thread.composer").exists })
+    }
+    private func back() { let b = d.app.navigationBars.buttons.element(boundBy: 0); if b.exists { b.tap() } }
+    private func tab(_ name: String) {
+        let t = d.app.tabBars.buttons[name]
+        if t.exists { t.tap() } else { d.label(name).tap() }
+    }
+
+    func test_pair() {
+        d = Driver("pair"); defer { d.finish() }
+        d.launch(paired: false)
+        let addr = d.el("pair.address")
+        guard d.step("pairing screen", act: {}, expect: { addr.exists }) else { return }
+        d.step("type the pairing link", act: { addr.tap(); addr.typeText(d.link) }, expect: { d.el("pair.connect").isEnabled })
+        d.step("connect", timeout: 30, act: { d.el("pair.connect").tap() }, expect: { d.app.tabBars.buttons.firstMatch.exists })
+        d.skipTour(); d.shot("paired")
+    }
+
+    func test_projects_threads() {
+        d = Driver("projects-threads"); defer { d.finish() }
+        d.launch()
+        tab("Threads")
+        guard d.step("project list", act: {}, expect: { d.label("e2e").exists }) else { return }
+        guard openThread(0) else { return }
+        d.step("scroll 3 screens", act: { for _ in 0..<3 { d.app.swipeUp(velocity: .fast) } }, expect: { true })
+        back()
+        if openThread(5) { d.step("history shown", act: {}, expect: { d.app.staticTexts.count > 3 }) }
+        d.shot("thread")
+    }
+
+    func test_send_image() {
+        d = Driver("send-image"); defer { d.finish() }
+        d.launch(); tab("Threads")
+        guard openThread(1) else { return }
+        let comp = d.el("thread.composer")
+        d.step("type a message", act: { comp.tap(); comp.typeText("here is a picture zqshort") }, expect: { d.el("thread.send").isEnabled })
+        // a real pasteboard image, pasted through the paperclip menu
+        let img = UIGraphicsImageRenderer(size: CGSize(width: 120, height: 80)).image { c in UIColor.systemTeal.setFill(); c.fill(CGRect(x: 0, y: 0, width: 120, height: 80)) }
+        UIPasteboard.general.image = img
+        let clip = d.app.buttons.matching(NSPredicate(format: "label CONTAINS[c] 'attach'")).firstMatch
+        d.step("open the attach menu", act: { clip.tap() }, expect: { d.label("Paste").exists })
+        d.step("paste the image", act: {
+            d.label("Paste").tap()
+            let sb = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+            let allow = sb.buttons["Allow Paste"]
+            if allow.waitForExistence(timeout: 3) { allow.tap() }
+        }, expect: { d.app.images.count > 0 || d.label("pasted").exists })
+        d.step("send", act: { d.el("thread.send").tap() }, expect: { d.label("here is a picture").exists })
+        d.step("reply arrives", timeout: 30, act: {}, expect: { d.label("REPLY").exists || d.label("Finished").exists })
+        d.shot("sent")
+    }
+
+    func test_stream() {
+        d = Driver("stream"); defer { d.finish() }
+        d.launch(); tab("Threads")
+        guard openThread(2) else { return }
+        let comp = d.el("thread.composer")
+        d.step("type", act: { comp.tap(); comp.typeText("stream me a long answer") }, expect: { d.el("thread.send").isEnabled })
+        d.step("send", act: { d.el("thread.send").tap() }, expect: { d.label("stream me").exists })
+        // the long stand-in turn (600 s): the thread stays working and the text grows; sample the visible text length for 20 s
+        var lens: [Int] = []; let t0 = CFAbsoluteTimeGetCurrent()
+        while CFAbsoluteTimeGetCurrent() - t0 < 20 { lens.append(d.app.staticTexts.allElementsBoundByIndex.prefix(40).map { $0.label.count }.reduce(0, +)); Thread.sleep(forTimeInterval: 0.5) }
+        d.metrics["stream_visible_text_chars"] = lens
+        let grew = (lens.last ?? 0) > (lens.first ?? 0)
+        d.steps.append(["do": "watch the stream 20 s", "tap_epoch_ms": (Date().timeIntervalSince1970 * 1000).rounded() - 20000, "tap_ms": 0, "result_ms": 20000, "ok": grew])
+        if !grew { d.failed = true; d.note("the visible text did not grow during the stream") }
+        d.shot("stream")
+        let stop = d.el("thread.interrupt"); if stop.exists { stop.tap() }
+    }
+
+    func test_switch_fast() {
+        d = Driver("switch-fast"); defer { d.finish() }
+        d.launch(); tab("Threads")
+        for i in 0..<10 {
+            guard openThread(i % 6) else { break }
+            back()
+        }
+        d.shot("switched")
+    }
+
+    func test_popups() {
+        d = Driver("popups"); defer { d.finish() }
+        d.launch(); tab("Threads")
+        guard openThread(0) else { return }
+        let comp = d.el("thread.composer"); comp.tap()
+        for (sigil, want) in [("@", "@Bub"), (">", ">e2e"), ("%", "%e2e"), ("#", "#e2e"), ("$", "$"), ("/", "/btw")] {
+            d.step("type \(sigil) -> popup", act: { comp.typeText(sigil) }, expect: { want == "$" ? d.app.buttons.count > 12 : d.label(want).exists })
+            comp.typeText(XCUIKeyboardKey.delete.rawValue)
+        }
+        d.shot("popup")
+    }
+
+    func test_bots_rooms() {
+        d = Driver("bots-rooms"); defer { d.finish() }
+        d.launch(); tab("Bots")
+        d.step("bots list", act: {}, expect: { d.label("Bub").exists })
+        d.step("open Bub", act: { d.label("Bub").tap() }, expect: { d.el("thread.composer").exists || d.label("ready").exists })
+        d.shot("bot"); back()
+        d.step("rooms", act: { d.app.buttons["Rooms"].tap() }, expect: { d.label("e2e-room").exists })
+        d.step("open the room", act: { d.label("e2e-room").tap() }, expect: { d.app.textFields.firstMatch.exists })
+        let post = d.app.textFields.firstMatch
+        d.step("post to the room", act: { post.tap(); post.typeText("hello room zqshort\n") }, expect: { d.label("hello room").exists })
+        d.shot("room")
+    }
+
+    func test_viewers() {
+        d = Driver("viewers"); defer { d.finish() }
+        d.launch(); tab("Threads")
+        guard openThread(0) else { return }
+        // the thread's viewer panel lists Board / Schematic / 3D when the project holds them
+        let open = d.el("viewer.open").exists ? d.el("viewer.open") : d.app.buttons.matching(NSPredicate(format: "label CONTAINS[c] 'viewer' OR label CONTAINS[c] 'board'")).firstMatch
+        for kind in ["Board", "Schematic", "3D"] {
+            if !open.exists { d.block("viewer button not found"); break }
+            d.step("open \(kind)", timeout: 25, act: { if d.label(kind).exists { d.label(kind).tap() } else { open.tap(); d.label(kind).tap() } }, expect: { d.el("viewer.close").exists })
+            d.app.swipeLeft(); d.app.pinch(withScale: 1.5, velocity: 1)
+            d.shot("viewer-\(kind)")
+            if d.el("viewer.close").exists { d.el("viewer.close").tap() }
+        }
+    }
+
+    func test_downloads() {
+        d = Driver("downloads"); defer { d.finish() }
+        d.launch(); tab("Threads")
+        guard openThread(0) else { return }
+        let files = d.app.buttons.matching(NSPredicate(format: "label CONTAINS[c] 'files'")).firstMatch
+        guard files.exists || d.label("Files").exists else { d.block("files tab not found"); return }
+        d.step("open Files", act: { (files.exists ? files : d.label("Files")).tap() }, expect: { d.label("readme.txt").exists })
+        d.step("open readme.txt", act: { d.label("readme.txt").tap() }, expect: { d.app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] 'readme' OR label CONTAINS[c] 'hello'")).count > 0 })
+        d.shot("file")
+    }
+
+    func test_settings() {
+        d = Driver("settings"); defer { d.finish() }
+        d.launch(); tab("Settings")
+        d.step("settings page", act: {}, expect: { d.app.navigationBars.firstMatch.exists })
+        var dead: [String] = []; var tapped = 0
+        let skip = ["clear", "unpair", "forget", "remove", "delete", "sign out", "quit"]
+        let labels = d.app.buttons.allElementsBoundByIndex.compactMap { b -> String? in
+            guard b.exists, b.isHittable, b.isEnabled, !b.label.isEmpty else { return nil }
+            if skip.contains(where: { b.label.lowercased().contains($0) }) { return nil }
+            return b.label
+        }
+        for l in labels where !["Home", "Threads", "Bots", "Routines", "Settings"].contains(l) {
+            let b = d.app.buttons[l].firstMatch
+            guard b.exists, b.isHittable else { continue }
+            let before = d.app.debugDescription.hashValue
+            b.tap(); tapped += 1
+            Thread.sleep(forTimeInterval: 0.8)
+            let changed = d.app.debugDescription.hashValue != before || d.app.alerts.count > 0 || d.app.sheets.count > 0
+            if !changed { dead.append(l) }
+            for close in ["Done", "Close", "Cancel", "Back"] { let c = d.app.buttons[close].firstMatch; if c.exists && c.isHittable { c.tap(); break } }
+            let nb = d.app.navigationBars.buttons.element(boundBy: 0)
+            if d.app.tabBars.count == 0, nb.exists { nb.tap() }
+        }
+        d.metrics["dead_controls"] = dead; d.metrics["controls_tapped"] = tapped
+        d.steps.append(["do": "tap every settings control", "tap_epoch_ms": (Date().timeIntervalSince1970 * 1000).rounded(), "tap_ms": 0, "result_ms": 0, "ok": dead.isEmpty])
+        if !dead.isEmpty { d.failed = true; d.note("dead controls: \(dead)") }
+        d.shot("settings")
+    }
+
+    func test_reconnect() {
+        d = Driver("reconnect"); defer { d.finish() }
+        guard ProcessInfo.processInfo.environment["HUB_CTL"] != nil else { d = Driver("reconnect"); d.block("HUB_CTL (the fixture's control endpoint) is not set"); return }
+        d.launch(); tab("Threads")
+        guard openThread(0) else { return }
+        let comp = d.el("thread.composer"); comp.tap(); comp.typeText("draft over a sleep")
+        d.step("the hub drops every connection for 30 s", act: { _ = d.ctl("/ctl/cut?secs=30") }, expect: { d.label("Offline").exists || d.label("reconnecting").exists || d.label("Cannot reach").exists })
+        d.shot("offline")
+        d.step("the app reconnects", timeout: 90, act: {}, expect: { !d.label("Offline").exists && !d.label("Cannot reach").exists })
+        let kept = (comp.value as? String ?? "").contains("draft over a sleep")
+        d.steps.append(["do": "the draft is kept", "tap_epoch_ms": (Date().timeIntervalSince1970 * 1000).rounded(), "tap_ms": 0, "result_ms": 0, "ok": kept])
+        if !kept { d.failed = true }
+        d.shot("back")
+    }
+
+    func test_long_session() {
+        d = Driver("long-session"); defer { d.finish() }
+        d.launch(); tab("Threads")
+        let secs = Double(ProcessInfo.processInfo.environment["LONG_SECS"] ?? "") ?? 300
+        let t0 = CFAbsoluteTimeGetCurrent(); var n = 0
+        while CFAbsoluteTimeGetCurrent() - t0 < secs {
+            guard openThread(n % 20) else { break }
+            d.app.swipeUp(); let comp = d.el("thread.composer"); comp.tap(); comp.typeText("@"); comp.typeText(XCUIKeyboardKey.delete.rawValue)
+            back(); n += 1
+        }
+        d.metrics["cycles"] = n
+        d.note("memory is sampled by run.sh (footprint every 30 s into long-session.mem.csv)")
+        d.shot("end")
+    }
+}
