@@ -6,7 +6,10 @@
 import { sleep } from './driver.mjs';
 
 const q = (s) => JSON.stringify(s);
-// thread X is on screen: the main view is X, not busy, and its timeline shows text
+// thread X is on screen (what the person sees: the main view is X and its timeline shows text, a cached picture
+// marked aria-busy included); threadShown = the same, confirmed by the hub (not busy)
+export const threadSeen = (id) => `(() => { const m = document.querySelector('main.thread-view[data-thread=${q(id)}]'); if (!m) return false;
+  const rows = m.querySelectorAll('#timeline .timeline-virtual-row'); for (const r of rows) if (r.textContent.trim().length > 20) return true; return false; })()`;
 export const threadShown = (id) => `(() => { const m = document.querySelector('main.thread-view[data-thread=${q(id)}]'); if (!m || m.getAttribute('aria-busy') === 'true') return false;
   const rows = m.querySelectorAll('#timeline .timeline-virtual-row'); for (const r of rows) if (r.textContent.trim().length > 20) return true; return false; })()`;
 const visible = (sel) => `(() => { for (const e of document.querySelectorAll(${q(sel)})) if (e.getClientRects().length) return true; return false; })()`;
@@ -16,13 +19,13 @@ const row = (id) => `.thread[data-value="${id}"]`;
 // make sure a sidebar row is visible: open the project's shelves (Settled / Older) if needed
 export async function ensureRow(h, id) {
   const p = h.page;
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 30; i++) {
     if (await p.locator(row(id)).filter({ visible: true }).count()) return true;
-    const shelves = p.locator('button.shelf[aria-expanded="false"], button.shelf:not([aria-expanded])').filter({ visible: true });
+    const shelves = p.locator('button.shelf:not(.open)').filter({ visible: true });
     const n = await shelves.count();
     if (!n) break;
-    await shelves.nth(Math.min(i, n - 1)).click().catch(() => {});
-    await sleep(500);
+    await shelves.nth(0).click().catch(() => {});
+    await sleep(400);
   }
   return !!(await p.locator(row(id)).filter({ visible: true }).count());
 }
@@ -30,7 +33,7 @@ export async function openThread(h, id) {
   if (await h.page.evaluate(threadShown(id))) return;
   if (await ensureRow(h, id)) await h.page.locator(row(id)).filter({ visible: true }).first().click();
   else await paletteTo(h, id);
-  await h.page.waitForFunction(threadShown(id), null, { timeout: 20000 });
+  await h.page.waitForFunction(threadShown(id), null, { timeout: 40000 });
   await h.idle(800);
 }
 async function paletteTo(h, id) {
@@ -51,21 +54,27 @@ const toggleThread = (id, a, b, via = 'row') => ({
   step: async (h, S, i) => {
     const to = S[i % 2 ? b : a];
     await ensureRow(h, to);
-    return { pred: threadShown(to), content: '#timeline', go: () => h.click(row(to)), settleAfter: 600 };
+    return { pred: threadSeen(to), confirm: threadShown(to), content: '#timeline', go: () => h.click(row(to)), settleAfter: 600 };
   },
 });
+
+async function foldStep(h, S, i) {
+      const open = await h.page.evaluate(() => !!document.querySelector('#timeline button.fold[aria-expanded="true"]'));
+      if (open) return { pred: `!document.querySelector('#timeline button.fold[aria-expanded="true"]')`, go: () => h.click('#timeline button.fold[aria-expanded="true"]') };
+      return { pred: `!!document.querySelector('#timeline button.fold[aria-expanded="true"]')`, go: () => h.click('#timeline button.fold[aria-expanded="false"] >> nth=-1') };
+    }
 
 export const INTERACTIONS = [
   { id: 'thread-near', what: 'sidebar: switch between two threads of one project (short <-> long)', ...toggleThread('x', 'A', 'B') },
   { id: 'thread-long', what: 'sidebar: open the long thread from a short one (one-way, each rep from A)',
     prep: async (h, S) => { await openThread(h, S.A); },
-    step: async (h, S) => { await ensureRow(h, S.B); return { pred: threadShown(S.B), go: () => h.click(row(S.B)), undo: () => openThread(h, S.A) }; } },
+    step: async (h, S) => { await ensureRow(h, S.B); return { pred: threadSeen(S.B), confirm: threadShown(S.B), go: () => h.click(row(S.B)), undo: () => openThread(h, S.A) }; } },
   { id: 'thread-project', what: 'sidebar: switch to a thread in another project', ...toggleThread('x', 'B', 'C') },
   { id: 'thread-short', what: 'sidebar: switch between two short threads', ...toggleThread('x', 'A', 'D') },
   { id: 'thread-far', what: 'palette: jump to a far thread (other project, 11k events) by title + Enter',
     prep: async (h, S) => { await openThread(h, S.A); },
     step: async (h, S) => { await h.key('Control+k'); await sleep(400); await h.type(S.titles[S.FAR].slice(0, 20)); await h.idle(900);
-      return { pred: threadShown(S.FAR), go: () => h.key('Enter'), undo: () => openThread(h, S.A) }; } },
+      return { pred: threadSeen(S.FAR), confirm: threadShown(S.FAR), go: () => h.key('Enter'), undo: () => openThread(h, S.A) }; } },
   { id: 'project-home', what: 'sidebar: open a project home (from a thread)',
     prep: async (h, S) => { await openThread(h, S.A); },
     step: async (h, S) => ({ pred: `(() => { const m = document.querySelector('main.project-home[data-project-home=${q(S.P)}]'); return !!m && m.getAttribute('aria-busy') !== 'true' && m.textContent.length > 80; })()`,
@@ -137,11 +146,7 @@ export const INTERACTIONS = [
       go: () => h.click(`nav.workspace-bar button.tab[aria-label=${q(name)}]`), undo: () => closeViewer(h, name) }) })),
   { id: 'tool-fold', what: 'timeline: expand / collapse a tool-call group',
     prep: async (h, S) => { await openThread(h, S.B); },
-    step: async (h, S, i) => {
-      const open = await h.page.evaluate(() => !!document.querySelector('#timeline button.fold[aria-expanded="true"]'));
-      if (open) return { pred: `!document.querySelector('#timeline button.fold[aria-expanded="true"]')`, go: () => h.click('#timeline button.fold[aria-expanded="true"]') };
-      return { pred: `!!document.querySelector('#timeline button.fold[aria-expanded="true"]')`, go: () => h.click('#timeline button.fold[aria-expanded="false"] >> nth=-1') };
-    } },
+    step: (h, S, i) => foldStep(h, S, i) },
   { id: 'scroll-up', what: 'timeline: wheel up 3 notches in the long thread -> new rows drawn',
     prep: async (h, S) => { await openThread(h, S.B); },
     step: async (h, S, i) => {
@@ -170,7 +175,7 @@ export const INTERACTIONS = [
     prep: async (h, S) => { await openThread(h, S.B); },
     step: async (h, S) => {
       await h.click('button.gear'); await h.page.waitForSelector('#settings-content'); await h.idle(500);
-      return { pred: threadShown(S.B), go: () => h.key('Escape'), undo: () => openThread(h, S.B) };
+      return { pred: threadSeen(S.B), confirm: threadShown(S.B), go: () => h.key('Escape'), undo: () => openThread(h, S.B) };
     } },
   { id: 'resize', what: 'window resize 1400 -> 1100 wide (and back)',
     prep: async (h, S) => { await openThread(h, S.B); },
@@ -178,6 +183,45 @@ export const INTERACTIONS = [
       const w = i % 2 ? 1400 : 1100;
       return { pred: `innerWidth === ${w}`, go: async () => { await h.page.evaluate(() => { window.__c2r.t0 = performance.now(); window.__c2r.inputType = 'resize'; }); await h.page.setViewportSize({ width: w, height: 900 }); } };
     }, webOnly: true },
+];
+
+// Phone (iPhone 15 web, form=phone): the list and the thread are separate screens; Back is [data-ph-back]
+const phBack = async (h) => { const b = h.page.locator('[data-ph-back]').filter({ visible: true }); if (await b.count()) { await h.click('[data-ph-back]'); await sleep(800); } };
+const PH_VIEWS = 'summary[aria-label="Views"]';
+const phList = `!document.querySelector('main.thread-view') && ${visible('.thread')}`;
+export const PHONE = [
+  { id: 'ph-thread-open', what: 'phone: tap a thread in the list -> the thread',
+    prep: async (h) => { await phBack(h); },
+    step: async (h, S, i) => { const to = i % 2 ? S.A : S.B; await ensureRow(h, to); return { pred: threadSeen(to), confirm: threadShown(to), content: '#timeline', go: () => h.click(row(to)), undo: phBack }; } },
+  { id: 'ph-back', what: 'phone: Back from a thread to the list',
+    prep: async () => {},
+    step: async (h, S) => { await openThread(h, S.B); return { pred: phList, go: () => h.click('[data-ph-back]') }; } },
+  { id: 'ph-model-picker', what: 'phone: model picker open',
+    prep: async (h, S) => { await openThread(h, S.B); },
+    step: async (h) => ({ pred: visible('.model-menu'), content: '.model-menu', go: () => h.click('button.model-chip'), undo: escClose('.model-menu') }) },
+  { id: 'ph-views-menu', what: 'phone: the thread header Views menu open',
+    prep: async (h, S) => { await openThread(h, S.B); },
+    step: async (h) => ({ pred: visible('details[open] button.tab[data-on-click="view-kind"]'), go: () => h.click(PH_VIEWS), undo: escClose('details[open] button.tab[data-on-click="view-kind"]') }) },
+  { id: 'ph-palette', what: 'phone: Views -> Commands (the second tap measured)',
+    prep: async (h, S) => { await openThread(h, S.B); },
+    step: async (h) => { await h.click(PH_VIEWS); await sleep(500);
+      return { pred: visible('.workspace-palette'), content: '.workspace-palette', go: () => h.click('details[open] button.tab[data-on-click="ws-palette-open"]'), undo: escClose('.workspace-palette') }; } },
+  { id: 'ph-tool-fold', what: 'phone: expand / collapse a tool-call group',
+    prep: async (h, S) => { await openThread(h, S.B); },
+    step: (h, S, i) => foldStep(h, S, i) },
+  { id: 'ph-type-key', what: 'phone: composer keystroke -> echo',
+    prep: async (h, S) => { await openThread(h, S.B); await h.click('#composer'); await h.idle(300); },
+    step: async (h, S, i) => { const v = await h.page.evaluate(() => document.querySelector('#composer').value); const ch = 'abcdefghij'[i % 10];
+      return { pred: `document.querySelector('#composer').value === ${q(v + ch)}`, go: () => h.type(ch), quiet: 200 }; } },
+  { id: 'ph-send', what: 'phone: send -> my bubble',
+    prep: async (h, S) => { await openThread(h, S.D); },
+    step: async (h, S, i) => { const text = `ping ${Date.now() % 100000} ${i}`; await h.click('#composer'); await h.page.keyboard.type(text); await h.idle(300);
+      return { pred: `[...document.querySelectorAll('#timeline .timeline-virtual-row')].some((r) => r.textContent.includes(${q(text)}))`, go: () => h.click('button.primary[data-on-click="send"]'), cap: 4000, undo: async () => { await h.idle(2500); } }; } },
+  { id: 'ph-viewer-board', what: 'phone: Views -> Board (the second tap measured)',
+    prep: async (h, S) => { await openThread(h, S.B); },
+    step: async (h) => { await h.click(PH_VIEWS); await sleep(500);
+      return { pred: visible('aside#viewer'), content: 'aside#viewer', go: () => h.click('details[open] button.tab[data-value="board"]'),
+        undo: async (hh) => { await phBack(hh); await sleep(500); if (await hh.page.evaluate(() => !document.querySelector('main.thread-view'))) await openThread(hh, hh.S.B); } }; } },
 ];
 
 async function closeViewer(h, name) {

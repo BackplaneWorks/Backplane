@@ -17,6 +17,8 @@ for line in open(sys.argv[1], 'rb'):
     t = e.get('thread') or (e.get('id') if k and k.startswith('Thread') else None)
     if isinstance(t, str): n[t] += 1
 live = [t for t in proj if t not in gone and proj[t] in ptitle]
+full = [t for t in live if n[t] >= 10]  # threads with a conversation (an empty 'New thread' shows nothing)
+live = full if len(full) >= 5 else live
 by = collections.defaultdict(list)
 for t in live: by[proj[t]].append(t)
 ps = sorted(by, key=lambda p: -len(by[p]))

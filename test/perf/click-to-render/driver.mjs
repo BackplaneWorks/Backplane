@@ -49,8 +49,8 @@ export async function open(o) {
     async throttle(rate) { await cdp.send('Emulation.setCPUThrottlingRate', { rate: rate || 1 }); h.cpu = rate || 1; },
     box: async (sel) => {
       const loc = typeof sel === 'string' ? page.locator(sel).filter({ visible: true }).first() : sel;
-      await loc.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
-      const b = await loc.boundingBox({ timeout: 5000 });
+      await loc.scrollIntoViewIfNeeded({ timeout: 10000 }).catch(() => {});
+      const b = await loc.boundingBox({ timeout: 15000 });
       if (!b) throw new Error('no box for ' + sel);
       return { x: b.x + b.width / 2, y: b.y + Math.min(b.height / 2, 12) };
     },
@@ -66,8 +66,8 @@ export async function open(o) {
     async type(text, delay = 0) { await page.keyboard.type(text, { delay }); },
     async idle(ms = 400) { await sleep(ms); await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)))); },
     // one measurement: arm the recorder with the predicate, run go(), wait for the predicate's frame, settle
-    async measure(label, { pred, sample, content, go, timeout = 15000, quiet = 300, cap = 6000 }) {
-      const armed = await page.evaluate(([p, s, c]) => window.__c2r.arm(p, s, c), [pred, sample || null, content || null]);
+    async measure(label, { pred, sample, content, confirm, go, timeout = 15000, quiet = 300, cap = 6000 }) {
+      const armed = await page.evaluate(([p, s, c, f]) => window.__c2r.arm(p, s, c, f), [pred, sample || null, content || null, confirm || null]);
       if (!armed) { const e = await page.evaluate(() => window.__c2r.error); return { label, error: e }; }
       const wall0 = Date.now();
       await go();
@@ -78,6 +78,7 @@ export async function open(o) {
         await page.evaluate(() => { window.__c2r.armed = false; });
         return { label, error: st.t0 == null ? 'input never arrived' : 'predicate never true', wall: Date.now() - wall0 };
       }
+      if (confirm) await page.waitForFunction(() => window.__c2r.tDom2 != null, null, { timeout: cap, polling: 50 }).catch(() => {});
       const r = await page.evaluate(([q, c]) => window.__c2r.finish(q, c), [quiet, cap]);
       return { label, ...r };
     },
