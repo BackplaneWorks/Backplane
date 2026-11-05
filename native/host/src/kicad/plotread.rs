@@ -36,7 +36,7 @@ pub fn version_env(path: &str, env: &[(&str, &str)]) -> Vec<u8> {
     if kind_of(path) != 1 { return std::fs::read(path).unwrap_or_default() }
     let obj = git_obj(path);
     if obj.starts_with('-') { return vec![] }
-    let o = std::process::Command::new("git").arg(format!("--git-dir={}", at(path, '\t', 1))).arg("show").arg(obj).current_dir("/").envs(env.iter().copied())
+    let o = crate::proc::std_cmd(crate::proc::Kind::Local, "git").arg(format!("--git-dir={}", at(path, '\t', 1))).arg("show").arg(obj).current_dir("/").envs(env.iter().copied())
         .stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null()).output();
     match o { Ok(o) if o.status.success() => decode(&o.stdout).into_bytes(), _ => vec![] }
 }

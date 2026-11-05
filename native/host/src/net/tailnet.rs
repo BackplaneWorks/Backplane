@@ -120,7 +120,7 @@ pub async fn find(status: &str, port: u16, extra: &str) -> Value {
 pub async fn status_json() -> String {
     use tokio::process::Command;
     if crate::copy::on() { return String::new() }
-    match tokio::time::timeout(std::time::Duration::from_secs(10), Command::new("tailscale").args(["status", "--json"]).stderr(std::process::Stdio::null()).output()).await {
+    match tokio::time::timeout(std::time::Duration::from_secs(10), crate::proc::tokio_cmd(crate::proc::Kind::Net, "tailscale").args(["status", "--json"]).stderr(std::process::Stdio::null()).output()).await {
         Ok(Ok(o)) if o.status.success() => String::from_utf8_lossy(&o.stdout).into_owned(), _ => String::new() }
 }
 

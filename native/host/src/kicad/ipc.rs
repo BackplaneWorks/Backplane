@@ -90,7 +90,7 @@ impl Actor {
             self.helper = Some(Helper { link: Box::new(kipc::Native::new("", Arc::new(move |o| { let _ = me.send(Msg::Line(gen, o)); }))), gen });
             return
         };
-        let mut c = Command::new(&exe); c.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).current_dir("/").kill_on_drop(false);
+        let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Local, &exe); c.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).current_dir("/").kill_on_drop(false);
         let Ok(mut child) = c.spawn() else { return };
         let (Some(mut stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else { return };
         let (tx, mut rx) = mpsc::unbounded_channel::<String>();

@@ -41,7 +41,7 @@ fn which(cmd: &str) -> bool {
 /// Runs a key-store command (5 s), the input on its stdin. (ok, stdout).
 fn sh(cmd: &str, args: &[&str], input: Option<&str>) -> (bool, String) {
     use std::process::{Command, Stdio};
-    let Ok(mut c) = Command::new(cmd).args(args).stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() }).stdout(Stdio::piped()).stderr(Stdio::null()).spawn() else { return (false, String::new()) };
+    let Ok(mut c) = crate::proc::std_cmd(crate::proc::Kind::Local, cmd).args(args).stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() }).stdout(Stdio::piped()).stderr(Stdio::null()).spawn() else { return (false, String::new()) };
     if let (Some(i), Some(mut s)) = (input, c.stdin.take()) { let _ = s.write_all(i.as_bytes()); }
     let mut out = c.stdout.take();
     let reader = std::thread::spawn(move || { let mut b = String::new(); if let Some(o) = out.as_mut() { let _ = o.read_to_string(&mut b); } b });
@@ -353,7 +353,7 @@ pub async fn run(spec: Value) -> Value {
         if let Some(obj) = o.as_object() { for (k, x) in obj { m.insert(k.clone(), match x { Value::String(s) => Value::String(super::mask::mask_with(&f, s)), other => other.clone() }); } }
         Value::Object(m)
     };
-    let mut cmd = tokio::process::Command::new("/bin/sh");
+    let mut cmd = crate::proc::tokio_cmd(crate::proc::Kind::Shell, "/bin/sh");
     cmd.kill_on_drop(true).arg("-c").arg(&command).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
     if let Some(cwd) = spec.get("cwd").and_then(Value::as_str).filter(|c| !c.is_empty()) { cmd.current_dir(cwd); }
     for (var, name) in &envs { if let Some(i) = use_names.iter().position(|n| n == name) { cmd.env(var, &injected[i]); } }

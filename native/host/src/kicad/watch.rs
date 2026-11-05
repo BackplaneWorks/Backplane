@@ -199,7 +199,7 @@ impl Plots {
         }).await.ok()
     }
     async fn run_child(&self, kind: u32, file: &str, ky: &str) -> Option<(i32, String)> {
-        let mut c = if solid_kind(kind) { let mut c = tokio::process::Command::new("nice"); c.args(["-n", "10"]).arg(&self.bin); c } else { tokio::process::Command::new(&self.bin) };
+        let mut c = if solid_kind(kind) { let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Local, "nice"); c.args(["-n", "10"]).arg(&self.bin); c } else { crate::proc::tokio_cmd(crate::proc::Kind::Local, &self.bin) };
         c.arg("--plot").arg(kind.to_string()).arg(file).arg(self.infos(ky)).stdin(std::process::Stdio::null()).kill_on_drop(false);
         let o = c.output().await.ok()?;
         let code = o.status.code().unwrap_or(1);
@@ -242,7 +242,7 @@ impl Plots {
                 hub.push(client, json!({"t":"sheets","root":root,"slot":slot,"gen":gen.to_string(),"rows":t.rows,"boxes":t.boxes,"ids":t.ids,"top":t.top,"refs":t.refs}));
                 return
             }
-            let Some(o) = tokio::process::Command::new(&me.bin).arg("--plot-tree").arg(&file).stdin(std::process::Stdio::null()).output().await.ok() else { return };
+            let Some(o) = crate::proc::tokio_cmd(crate::proc::Kind::Local, &me.bin).arg("--plot-tree").arg(&file).stdin(std::process::Stdio::null()).output().await.ok() else { return };
             if !o.status.success() { return }
             let text = String::from_utf8_lossy(&o.stdout).trim().to_string();
             let j: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
@@ -258,7 +258,7 @@ impl Plots {
             let f = self.infos(key_);
             return tokio::task::spawn_blocking(move || { let t = std::fs::read(f).unwrap_or_default(); plotgen::info_find(&String::from_utf8_lossy(&t), sig, idx).trim_end().to_string() }).await.unwrap_or_default();
         }
-        let o = tokio::process::Command::new(&self.bin).arg("--plot-info").arg(self.infos(key_)).arg(sig.to_string()).arg(idx.to_string()).stdin(std::process::Stdio::null()).output().await;
+        let o = crate::proc::tokio_cmd(crate::proc::Kind::Local, &self.bin).arg("--plot-info").arg(self.infos(key_)).arg(sig.to_string()).arg(idx.to_string()).stdin(std::process::Stdio::null()).output().await;
         match o { Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim_end().to_string(), _ => String::new() }
     }
 }

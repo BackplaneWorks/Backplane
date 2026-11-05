@@ -172,7 +172,7 @@ async fn lines<R: AsyncRead + Unpin>(r: R, mut each: impl FnMut(String)) {
 fn start_server(key: String, argv0: Vec<String>, memory: Option<String>, env: Vec<(String, String)>, sink: Sink) {
     let at = socket_arg(&argv0); let before = sockets_at(&at);
     let argv = wrap(argv0, memory.as_deref());
-    let mut c = Command::new(&argv[0]);
+    let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Local, &argv[0]);
     c.args(&argv[1..]).envs(env).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).current_dir("/").kill_on_drop(false);
     let run = Arc::new(Run { key, said: AtomicBool::new(false), done: AtomicBool::new(false), tail: Mutex::new(VecDeque::new()), sink });
     tokio::spawn(async move {

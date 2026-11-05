@@ -81,7 +81,7 @@ pub fn reap_orphans(home: &str) -> usize {
 }
 
 pub fn spawn(program: &Path, args: &[String], cwd: &Path, extra_path: Option<&Path>, env: &[(String, String)]) -> std::io::Result<Proc> {
-    let mut c = Command::new(program);
+    let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Agent, program);
     let args: Vec<String> = args.iter().map(|a| crate::settings::mask::mask(a)).collect(); // settings lane: Spawn.agent masks every launch argument
     c.args(&args).current_dir(cwd).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
     if let Some(d) = extra_path { let old = std::env::var_os("PATH").unwrap_or_default(); let mut v = vec![d.to_path_buf()]; v.extend(std::env::split_paths(&old)); if let Ok(j) = std::env::join_paths(v) { c.env("PATH", j); } }
