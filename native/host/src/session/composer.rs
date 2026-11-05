@@ -50,6 +50,33 @@ pub fn send(cx: &SendCtx, session: &Value) -> Option<ActOut> {
     })
 }
 
+/// Refs.blank: only spaces and 9..13 (the composer asks this of a pasted draft on every render, stopping at the first other character).
+fn blank(t: &str) -> bool { t.chars().all(|c| c == ' ' || ('\u{9}'..='\u{d}').contains(&c)) }
+
+/// Btw.is / Give.is / Intent.is: the draft is the command `w` (`/btw`, `/give`, `/intent`): the word alone (leading and trailing blanks aside), or `w ` / `w\n` first.
+pub fn command_is(draft: &str, w: &str) -> bool {
+    let lead = draft.trim_start_matches(|c| c == ' ' || ('\u{9}'..='\u{d}').contains(&c));
+    (lead.starts_with(w) && blank(&lead[w.len()..])) || draft.starts_with(&format!("{w} ")) || draft.starts_with(&format!("{w}\n"))
+}
+
+/// The composer's rows for a slash command being typed (Composer.slash: `Slash.local`: the commands whose name starts with what follows the `/`, the first marked): `{name, desc, on}`.
+pub fn slash_rows(claude: bool, draft: &str) -> Value {
+    if !super::slash::typing(draft) { return json!([]) }
+    let q = super::slash::token(draft).strip_prefix('/').unwrap_or("");
+    Value::Array(super::slash::cmds(claude, q).iter().enumerate().map(|(i, (n, a))| json!({"name": n, "desc": a, "on": i == 0})).collect())
+}
+
+/// Composer.of for the thread view: `{draft, skills, send, sendAct}`. `running`: the turn runs (state "run"); `attaching`: files are being attached; `own_skills`: the rows the
+/// thread already carries (the hub's `$` / reference popup: the caller's, `[]` for a plain thread). English only: another interface language is None (the helper's).
+pub fn fields(draft: &str, running: bool, attaching: bool, claude: bool, own_skills: &Value, lang: &str) -> Option<Value> {
+    if !matches!(lang, "" | "en") { return None }
+    // Follow.stop: Stop while a turn runs and nothing is typed or attached
+    let stop = running && blank(draft) && !attaching;
+    let label = if stop { "Stop" } else if command_is(draft, "/btw") { "Ask" } else if command_is(draft, "/give") { "Give" } else if command_is(draft, "/intent") { "Save" } else if running { "Steer" } else { "Send" };
+    let skills = if super::slash::typing(draft) { slash_rows(claude, draft) } else { own_skills.clone() };
+    Some(json!({"draft": draft, "skills": skills, "send": label, "sendAct": if stop { "interrupt" } else { "send" }}))
+}
+
 /// What the model knows about the selected thread that a send needs: the presenter implements it over its metadata projection.
 pub trait Facts { fn bot_thread(&self, thread: &str) -> bool; fn account_params(&self, thread: &str) -> bool; }
 
@@ -94,6 +121,28 @@ mod tests {
         assert_eq!(p["rid"], json!(3));
         assert_eq!(p["drafts"], json!({"t1700000002-3": "", "@att:t1700000002-3": "", "@reply:t1700000002-3": "", "@reply.q:t1700000002-3": ""}));
         assert_eq!(p["outbox"]["2"], o.cmds[1]["text"]);
+    }
+    #[test] fn command_words_are_the_drafts_first_word_alone() {
+        assert!(command_is("/btw", "/btw") && command_is("  /btw  \n", "/btw") && command_is("/btw why", "/btw") && command_is("/btw\nwhy", "/btw"));
+        assert!(!command_is("/btwx", "/btw") && !command_is("hi /btw", "/btw") && !command_is("/btw\twhy", "/btw") && !command_is("", "/btw"));
+    }
+    #[test] fn the_send_button_follows_the_draft() {
+        let f = |d: &str, run: bool, att: bool| fields(d, run, att, true, &json!([]), "en").unwrap();
+        assert_eq!((f("hi", false, false)["send"].as_str(), f("hi", false, false)["sendAct"].as_str()), (Some("Send"), Some("send")));
+        assert_eq!(f("hi", true, false)["send"], json!("Steer"));
+        assert_eq!((f("", true, false)["send"].as_str(), f("  ", true, false)["sendAct"].as_str()), (Some("Stop"), Some("interrupt")));
+        assert_eq!(f("", true, true)["send"], json!("Steer"), "attaching: not blank for the button");
+        assert_eq!((f("/btw q", false, false)["send"].as_str(), f("/give >t", false, false)["send"].as_str(), f("/intent x", true, false)["send"].as_str()), (Some("Ask"), Some("Give"), Some("Save")));
+        assert!(fields("hi", false, false, true, &json!([]), "ja").is_none(), "another language is the helper's");
+    }
+    #[test] fn a_slash_being_typed_offers_its_commands_the_first_marked() {
+        let r = slash_rows(true, "/c");
+        assert_eq!(r, json!([{"name": "/compact", "desc": "Summarize the conversation to free context", "on": true}, {"name": "/context", "desc": "Show what fills the context window", "on": false}]));
+        assert_eq!(slash_rows(false, "/")[0]["name"], json!("/btw"));
+        assert_eq!(slash_rows(true, "/give >a"), json!([]));
+        let own = json!([{"name": "x", "desc": "", "on": true}]);
+        assert_eq!(fields("hello", false, false, false, &own, "en").unwrap()["skills"], own);
+        assert_eq!(fields("/b", false, false, false, &own, "en").unwrap()["skills"][0]["name"], json!("/btw"));
     }
     struct Plain;
     impl Facts for Plain { fn bot_thread(&self, _: &str) -> bool { false } fn account_params(&self, _: &str) -> bool { false } }
