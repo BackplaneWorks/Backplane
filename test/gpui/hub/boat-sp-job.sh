@@ -1,5 +1,5 @@
 #!/bin/sh
-exec scripts/boat-job.sh --size large --timeout 1500 --idle 0 --no-reuse --include-file test/gpui/hub/policy-bin/bp-policy-page --artifact out/sp \
+exec scripts/boat-job.sh --size large --timeout 1500 --idle 0 --no-reuse --artifact out/sp \
   --exclude 'mobile/**' --exclude 'desktop/**' --exclude 'build/**' --exclude 'docs/**' --exclude 'tools/**' \
   --exclude 'shots-snap/**' --exclude 'assets/**' --exclude 'i18n/**' --exclude 'deploy/**' --exclude 'order/**' \
   --exclude 'skills/**' --exclude 'extra/**' -- sh test/gpui/hub/sidebar_page_e2e.sh
