@@ -276,6 +276,32 @@ mod auth_wire_tests {
         assert!(post(port, "/closed", "Content-Length: 5\r\n", b"hello").await.starts_with("HTTP/1.1 401"), "a handler that does not opt out gets no body and no credential-free answer");
     }
 
+    struct Up(&'static str);
+    impl HttpHandler for Up {
+        fn routes(&self) -> &'static [&'static str] { &["/upload"] }
+        fn takes_body(&self) -> bool { true }
+        fn call<'a>(&'a self, _h: &'a Arc<Hub>, _r: &'a Req) -> Fut<'a, HttpReply> { Box::pin(async { HttpReply::text("200 OK", "get") }) }
+        fn call_body<'a>(&'a self, _h: &'a Arc<Hub>, _r: &'a Req, mut body: crate::api::Body<'a>) -> Fut<'a, HttpReply> {
+            Box::pin(async move { body.proceed().await.ok(); let mut got = Vec::new(); tokio::io::AsyncReadExt::read_to_end(&mut body, &mut got).await.ok();
+                HttpReply::text("200 OK", &format!("got {} of {} ({})", got.len(), body.len, self.0)) })
+        }
+    }
+    // streaming uploads: credential first, length required, exactly Content-Length bytes, 100-continue answered
+    #[tokio::test] async fn a_streaming_upload_needs_the_credential_a_length_and_reads_no_more_than_it() {
+        let (hub, port, _reg) = up("stream").await; hub.register_http(Arc::new(Up("x")));
+        let send = |head: String, body: Vec<u8>| async move { let mut s = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+            s.write_all(format!("POST /upload HTTP/1.1\r\nHost: x\r\n{head}Connection: close\r\n\r\n").as_bytes()).await.unwrap(); s.write_all(&body).await.unwrap();
+            let mut out = Vec::new(); let _ = tokio::time::timeout(Duration::from_secs(5), s.read_to_end(&mut out)).await; String::from_utf8_lossy(&out).into_owned() };
+        assert!(send("Content-Length: 4\r\n".into(), b"abcd".to_vec()).await.starts_with("HTTP/1.1 401"), "no credential");
+        let auth = format!("Authorization: Bearer {ROOT}\r\n");
+        assert!(send(format!("{auth}Content-Length: 5\r\n"), b"hello".to_vec()).await.ends_with("got 5 of 5 (x)"));
+        assert!(send(format!("{auth}Content-Length: 3\r\n"), b"hello".to_vec()).await.ends_with("got 3 of 3 (x)"), "no more than Content-Length is read");
+        assert!(send(auth.clone(), vec![]).await.starts_with("HTTP/1.1 411"), "no length");
+        assert!(send(format!("{auth}Content-Length: {}\r\n", crate::api::STREAM_MAX + 1), vec![]).await.starts_with("HTTP/1.1 413"));
+        let r = send(format!("{auth}Content-Length: 2\r\nExpect: 100-continue\r\n"), b"hi".to_vec()).await;
+        assert!(r.starts_with("HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 200"), "{r}");
+    }
+
     async fn get(port: u16, path: &str, auth: Option<&str>) -> String {
         let mut s = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
         let a = auth.map(|t| format!("Authorization: Bearer {t}\r\n")).unwrap_or_default();
