@@ -1183,6 +1183,10 @@ function htmlData(name, value) {
   if (d[name] !== v) d[name] = v;
 }
 function render() {
+  rendering = true;
+  try { renderPage(); } finally { rendering = false; }
+}
+function renderPage() {
   reviewPosition.capture();
   mailCheckpoint();
   const mail = mailAnchor();
@@ -1467,11 +1471,20 @@ function renderRegions() {
   if (RR) { RR.n("render.regions");RR.t("render.regions", pnow() - t0); }
 }
 
+let queuedFrame = 0, rendering = false;
 function later() {
   if (!queued) {
     queued = true;
-    requestAnimationFrame(render);
+    queuedFrame = requestAnimationFrame(render);
   }
+}
+// A press's picture drawn in its own handler, not at the next frame: what
+// it shows is ready (the press layer's, a retained picture), and waiting
+// for the frame lost one (M: DOM at ~27 ms, pixels ~30, for a press at 0).
+function renderNow() {
+  if (!queued || rendering) return;
+  cancelAnimationFrame(queuedFrame);
+  render();
 }
 
 // A keystroke in the composer changes only the composer and the asks (an
@@ -2338,6 +2351,7 @@ document.addEventListener("pointerdown", e => {
   if (!el || el.disabled || el.closest('[draggable="true"]') || el.closest("aside.sidebar") && !el.getAttribute("data-value")) return;
   pressedPick = { action: el.getAttribute("data-on-click"), value: el.getAttribute("data-value"), at: e.timeStamp };
   dispatch(phoneClickAction(document, el, el.getAttribute("data-on-click")), valueOf(el));
+  renderNow();
 }, true);
 document.addEventListener("click", e => {
   const p = pressedMenu;pressedMenu = null;
