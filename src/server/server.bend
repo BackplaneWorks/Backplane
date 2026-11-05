@@ -622,8 +622,9 @@ def Thin.store.open(+cfg: Cfg, +st: M.State, +h: String) -> IO(Cfg):
     r : THIN.Index <- TSTO.Ts.recent(h, st)
     return Cfg.thin.stored(cfg, h, r)
 
-def Cfg.thin.committed(+cfg: Cfg, +changes: List<&2, M.Change>, +st: M.State) -> Cfg:
-  Cfg.with_thin_cache(cfg, ThinCache{Cfg.thin.lazy.committed(String.is_empty(Cfg.thin.store(cfg)), changes, Cfg.thin.lazy(cfg)), Cfg.thin.first_epoch(changes, Cfg.thin.epoch(cfg)), Cfg.thin.next(Cfg.thin.revision(cfg)), Cfg.thin.streams(cfg), TMAIL.Lazy.committed(changes, st, Cfg.thin.mail.lazy(cfg)), Cfg.thin.waiting(cfg), TPACE.Notes.changes(Cfg.thin.notes(cfg), changes), Cfg.thin.store(cfg), SGR.SignalRevision.advance(changes, Cfg.thin.signal_seq(cfg), M.State.seq(st))})
+# (old: the state before the changes, st: after)
+def Cfg.thin.committed(+cfg: Cfg, +changes: List<&2, M.Change>, +old: M.State, +st: M.State) -> Cfg:
+  Cfg.with_thin_cache(cfg, ThinCache{Cfg.thin.lazy.committed(String.is_empty(Cfg.thin.store(cfg)), changes, Cfg.thin.lazy(cfg)), Cfg.thin.first_epoch(changes, Cfg.thin.epoch(cfg)), Cfg.thin.next(Cfg.thin.revision(cfg)), Cfg.thin.streams(cfg), TMAIL.Lazy.committed(changes, st, Cfg.thin.mail.lazy(cfg)), Cfg.thin.waiting(cfg), TPACE.Notes.changes.at(Cfg.thin.notes(cfg), old, st, changes), Cfg.thin.store(cfg), SGR.SignalRevision.advance(changes, Cfg.thin.signal_seq(cfg), M.State.seq(st))})
 
 # ---- mail perf: local wire-log length ----
 # Valid unknown JSON remains a wire line without changing State.seq.
@@ -2077,11 +2078,11 @@ def Bot.dir.changed.all(cs: List<&2, M.Change>, +inbox: Chan(Msg)) -> IO(Unit):
         Bot.dir.changed(c, inbox)
         Bot.dir.changed.all(t, inbox)
 
-def Hub.commit.k(fd: Folded, +cs: List<&2, M.Change>, f: File, cl: List<&2, Client>, as: List<&2, Agent>, inbox: Chan(Msg), +cfg: Cfg, note: String) -> Hub & Wrote:
+def Hub.commit.k(fd: Folded, +cs: List<&2, M.Change>, +old: M.State, f: File, cl: List<&2, Client>, as: List<&2, Agent>, inbox: Chan(Msg), +cfg: Cfg, note: String) -> Hub & Wrote:
   match fd:
     case Folded{+st, ls, +fr}:
       (Hub{st, f, WRET.WireRetention.keep(Bool.not(String.is_empty(Cfg.thin.store(cfg))), ls), cl, as, inbox,
-        LogCount.committed(Cfg.thin.committed(cfg, cs, st), fr), note}, Wrote{fr, True{}, "", False{}})
+        LogCount.committed(Cfg.thin.committed(cfg, cs, old, st), fr), note}, Wrote{fr, True{}, "", False{}})
 
 def Hub.retained(h: Hub) -> Hub:
   match h:
@@ -7638,7 +7639,7 @@ def Hub.commit.stored.result(ok: Bool, +post: M.State, +result: String, +disk: L
         Bot.dir.changed.all(cs, inbox)
         +buffers : List<&2, LV.Buf> = STR.Steer.keep(cs, Live.of(cfg), LV.Live.ends(cs, Live.of(cfg)))
         Live.checkpoint.sync(cs, post, cfg, buffers)
-        return Hub.commit.k(Hub.fold.state(Hub.fold(cs, disk, Folded{st, ls, Nil{}}), post), cs, f, cl, as, inbox, Cfg.telemetry.privacy_committed(cs, Live.committed(cfg, cs, buffers)), note)
+        return Hub.commit.k(Hub.fold.state(Hub.fold(cs, disk, Folded{st, ls, Nil{}}), post), cs, st, f, cl, as, inbox, Cfg.telemetry.privacy_committed(cs, Live.committed(cfg, cs, buffers)), note)
     case False{}:
       do IO<Hub & Wrote>:
         cut : Bool <- Hub.cut(len, cfg)
@@ -7725,7 +7726,7 @@ def Hub.fold.st(fd: Folded) -> M.State:
 def Hub.commit.held(fd: Folded, +cs: List<&2, M.Change>, f: File, cl: List<&2, Client>, as: List<&2, Agent>, inbox: Chan(Msg), +cfg: Cfg, note: String, +q: DQ.Dq, +st: M.State, +disk: List<&2, String>) -> Hub & Wrote:
   match fd:
     case Folded{+post, ls, +fr}:
-      (Hub{post, f, ls, cl, as, inbox, LogCount.committed(Cfg.thin.committed(Cfg.with_dq(cfg, DQ.Dq.push(q, st, M.State.seq(st), disk, cs, fr, Nil{})), cs, post), fr), note}, Wrote{fr, True{}, "", True{}})
+      (Hub{post, f, ls, cl, as, inbox, LogCount.committed(Cfg.thin.committed(Cfg.with_dq(cfg, DQ.Dq.push(q, st, M.State.seq(st), disk, cs, fr, Nil{})), cs, st, post), fr), note}, Wrote{fr, True{}, "", True{}})
 
 def Hub.commit.queue(+cs: List<&2, M.Change>, +st: M.State, f: File, ls: List<&2, String>, cl: List<&2, Client>,
     as: List<&2, Agent>, +inbox: Chan(Msg), +cfg: Cfg, note: String, +q: DQ.Dq) -> IO(Hub & Wrote):
