@@ -126,6 +126,48 @@ fn act(e: &Ent, run: &str) -> Value {
     json!({"id": e.id, "kind": "act", "tone": e.role, "label": shown_name(&e.akind), "text": text, "run": run})
 }
 
+
+// ---- the whole shown.thread of a plain, idle thread ----
+use crate::state::{State, Turn};
+
+const STATIC: &str = include_str!("thread_static.json");
+
+/// Whether this thread is the one configuration whose static keys (tools, menu, permissions, picker, viewer, voice ...) were checked against the
+/// helper: idle, not pinned/archived/snoozed, Claude with the default model, no worktree, no task links, no open ask, nothing queued, and none of the
+/// settings that change those keys. Anything else is None (the helper draws it) until a dump of that case is matched.
+fn plain_thread(st: &State, id: &str) -> bool {
+    let Some(t) = st.threads.get(id) else { return false };
+    if t.archived || t.deleted || t.pinned || t.turn != Turn::Idle || t.provider != "claude" || !t.model.is_empty() || t.title.trim().is_empty() { return false }
+    if !t.worktree.is_empty() || t.worktree_mode || st.snooze_until.get(id).copied().unwrap_or(0) != 0 { return false }
+    if st.tasks.values().any(|(p, c, _, _)| p == id || c == id) || st.asks.values().any(|(th, open)| th == id && *open) { return false }
+    if st.queue.get(id).map_or(false, |q| !q.is_empty()) { return false }
+    let own = [format!("effort:{id}"), format!("wait.{id}"), format!("stop.{id}"), format!("fail.{id}")];
+    if own.iter().any(|k| st.settings.contains_key(k)) { return false }
+    !["files.max.mb", "person.tz", "tz.machine", "think", "permissions.default"].iter().any(|k| st.settings.contains_key(*k))
+}
+
+/// shown.thread for a plain idle thread, from the page rows. `hub` is the request's hub key (the id is `<hub>|<thread>`), `draft` the composer's text.
+/// None unless every key is derived.
+pub fn thread_object(st: &State, hub: &str, thread: &str, params: &Value, draft: &str) -> Option<Value> {
+    if !plain_thread(st, thread) || !draft.is_empty() { return None }
+    let page = params.get("page")?;
+    if page["thread"].as_str() != Some(thread) { return None }
+    let es = ents(page["rows"].as_array()?, thread)?;
+    let entries = entries(&es, false, &|_| false, params["now"].as_u64().unwrap_or(0))?;
+    let t = st.threads.get(thread)?;
+    let mut o: serde_json::Map<String, Value> = serde_json::from_str(STATIC).ok()?;
+    o.insert("id".into(), json!(format!("{hub}|{thread}")));
+    o.insert("title".into(), json!(t.title));
+    o.insert("branch".into(), json!(t.branch));
+    o.insert("readingSeen".into(), json!(es.last().map(|e| e.id.as_str()).unwrap_or("-")));
+    o.insert("entries".into(), Value::Array(entries));
+    // Render.native_screen: thread.earlier = window.remaining when the host sent a window, else the page's own hidden count (0 on the newest page)
+    let earlier = if params["window"].is_object() { params["window"]["remaining"].as_u64().unwrap_or(0) } else { 0 };
+    o.insert("earlier".into(), json!(earlier));
+    o.insert("draft".into(), json!(""));
+    Some(Value::Object(o))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -137,6 +179,15 @@ mod tests {
         let want = p["out"]["shown"]["thread"]["entries"].as_array().unwrap();
         assert_eq!(got.len(), want.len());
         for (g, w) in got.iter().zip(want) { assert_eq!(g, w); }
+    }
+    #[test] fn a_plain_threads_whole_shown_thread_is_the_helpers() {
+        let p = fixture(); let th = p["params"]["page"]["thread"].as_str().unwrap();
+        let mut st = State::new();
+        for l in std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/gpui/slim/fixtures/thread-log.jsonl")).unwrap().lines() { st.apply_line(l); }
+        let got = thread_object(&st, "h", th, &p["params"], "").expect("a plain idle thread is drawn here");
+        let want = &p["out"]["shown"]["thread"];
+        for (k, w) in want.as_object().unwrap() { assert_eq!(got.get(k), Some(w), "key {k}"); }
+        assert_eq!(got.as_object().unwrap().len(), want.as_object().unwrap().len());
     }
     #[test] fn civil_dates() { assert_eq!(civil(0), (1970, 1, 1)); assert_eq!(civil(19675), (2023, 11, 14)); assert_eq!(clock(1700002806, 0), "Tue 14 Nov 23:00"); }
     #[test] fn labels_name_three_kinds_and_the_live_one_says_what_runs() {
