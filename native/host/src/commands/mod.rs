@@ -48,6 +48,7 @@ impl RpcHandler for Commands {
             let cx = if plan::needs_entries(method) { entries_of(hub, &p["thread"].as_str().unwrap_or("").to_string()).await } else { Ctx::default() };
             let mut f = self.fold.lock().await;
             if let Err(e) = f.sync(&hub.store) { return vec![json!({"t":"reply","id":id,"ok":false,"error":format!("{e:#}")})] }
+            f.alloc = Some(hub.alloc_n(4) as usize); // p<at>-<n>, t<at>-<n+1>, g<at>-<n+3>: a number no other request shares
             if let Some(root) = create_in {
                 let pl = plan::project_create(&f, now_s(), id, p, &root);
                 if !pl.events.is_empty() && hub.commit_many(&pl.events).await.is_err() { return vec![json!({"t":"reply","id":id,"ok":false,"error":"store write failed"})] }

@@ -83,7 +83,7 @@ fn hardware(root: &str) -> bool {
 
 async fn note(hub: &Arc<Hub>, th: &str, tone: &str, summary: String) -> Vec<serde_json::Value> {
     let at = super::now_s();
-    vec![json!({"$":"ActivityLogged","thread":th,"act":super::plan::hub_id("g", at, hub.store.len()),"tone":tone,"kind":"git","summary":summary,"at":at})]
+    vec![json!({"$":"ActivityLogged","thread":th,"act":super::plan::hub_id("g", at, hub.alloc_n(1) as usize),"tone":tone,"kind":"git","summary":summary,"at":at})]
 }
 
 /// Hub.job.ready: the job's report lands only if the thread still has the provider and account binding it started with; then the change, the
