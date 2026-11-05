@@ -63,13 +63,15 @@ def Pol.screen(+has: Bool, +screen: J.Json, +window: J.Json) -> J.Json:
 def Pol.overlay(+has: Bool, +shown: J.Json, +window: J.Json) -> J.Json:
   NS.Obj.put(shown, "j", Pol.screen(has, J.Json.get_obj(shown, "j"), window))
 
-def Pol.out(+same: Bool, +r: J.Json, +next: J.Json, +window: J.Json) -> J.Json:
-  +has = Pol.is_obj(window)
+def Pol.out.k(+same: Bool, +has: Bool, +r: J.Json, +next: J.Json, +window: J.Json) -> J.Json:
   match same:
     case True{}:
       J.Json.obj([J.KV{"remoteReady", J.Flag{True{}}}, J.KV{"shown", Pol.screen(has, J.Json.get_obj(r, "screen"), window)}, J.KV{"overlay", Pol.overlay(has, J.Json.get_obj(r, "shown"), window)}, J.KV{"session", J.Json.get_obj(r, "session")}, J.KV{"cmds", J.Json.get_obj(r, "cmds")}])
     case False{}:
       J.Json.obj([J.KV{"remoteReady", J.Flag{False{}}}, J.KV{"nextTarget", next}, J.KV{"session", J.Json.get_obj(r, "session")}, J.KV{"cmds", J.Json.get_obj(r, "cmds")}])
+
+def Pol.out(+same: Bool, +r: J.Json, +next: J.Json, +window: J.Json) -> J.Json:
+  Pol.out.k(same, Pol.is_obj(window), r, next, window)
 
 def Pol.view.r(+r: J.Json, +want: J.Json, +window: J.Json) -> J.Json:
   +next = Pol.target(J.Json.get_obj(r, "session"))
