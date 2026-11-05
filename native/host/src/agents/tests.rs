@@ -1157,3 +1157,27 @@ fn watch_log(work: &Path, rows: &[String], extra: &str) -> String { base_log(wor
     let from = len(&hub).await; rpc(&hub, "turn.start", json!({"thread":T1,"text":"zqshort plain"})).await;
     let ev = until(&hub, from, 30, |ev| ev.iter().filter(|e| turn_is(e, "completed")).count() >= 1).await; assert!(ev.iter().find(|e| is(e, "MessagePosted") && e["role"] == "user").unwrap().get("refs").is_none(), "omitted when empty"); ag.shutdown();
 }
+// ---- side-by-side: a routine run from the client reaches no real agent (it waits in the bot thread's ride) ----
+#[tokio::test(flavor = "multi_thread")] async fn sbs_routine_probe() {
+    if std::env::var("BP_SBS_ROUTINE").is_err() { return }
+    assert!(crate::copy::on() && crate::copy::person_turn_allowed());
+    let person = PathBuf::from(std::env::var("BP_SBS_PERSON").unwrap()); let rec = person.join("rec"); std::fs::create_dir_all(&rec).unwrap();
+    let bin = person.join(".local/bin"); std::fs::create_dir_all(&bin).unwrap();
+    script(&bin, "claude", &STANDIN.replacen("\n", &format!("\nexport FAKE_PER=2 FAKE_CYCLE=5 FAKE_SECS=1 FAKE_LOG={rec}/starts\n", rec = rec.display()), 1));
+    let sd = dir("sbr-bin"); perf_standin(&sd, 1);
+    let (hub, ag, _h, _w) = start("sbr", |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await; let _bots = crate::bots::start(hub.clone(), ag.clone()).await;
+    let r = rpc(&hub, "bots.create", json!({"name":"ada"})).await; let bot = r["bot"].as_str().expect("a bot").to_string();
+    let th = until(&hub, 0, 20, |ev| ev.iter().any(|e| is(e, "BotSet") && e["id"] == bot.as_str())).await.iter().find(|e| is(e, "BotSet") && e["id"] == bot.as_str()).unwrap()["thread"].as_str().unwrap().to_string();
+    let r = rpc(&hub, "bots.routine", json!({"bot":bot,"routine":"ro1","name":"morning","schedule":"daily 09:30","prompt":"do the routine thing"})).await; assert_eq!(r["ok"], true, "{r}");
+    let r = rpc(&hub, "bots.routine_run", json!({"routine":"ro1"})).await; assert_eq!(r["ok"], true, "{r}");
+    let end = Instant::now() + Duration::from_secs(15); loop { if ag.world().await.setting(&format!("ride.{th}")).contains("do the routine thing") { break } assert!(Instant::now() < end, "the routine's turn waits in the bot thread's ride"); tokio::time::sleep(Duration::from_millis(100)).await }
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert_eq!(ag.stats.procs_spawned.load(Relaxed), 0, "a routine started no agent"); assert!(!rec.join("starts").exists(), "the person's claude never ran");
+    ag.shutdown();
+}
+#[test] fn a_routine_run_in_side_by_side_reaches_no_real_agent() {
+    let me = std::env::current_exe().unwrap(); let person = dir("sbr-person"); let live = dir("sbr-live").join("events.jsonl"); std::fs::write(&live, "{\"$\":\"ProjectCreated\",\"id\":\"z\",\"title\":\"z\",\"root\":\"/nonexistent-live\",\"at\":1}\n").unwrap();
+    let o = std::process::Command::new(me).args(["agents::tests::sbs_routine_probe", "--exact", "--nocapture", "--test-threads=1"]).env("BACKPLANE_COPY", "1").env("BACKPLANE_SIDE_BY_SIDE", "1").env("BACKPLANE_PERSON_HOME", &person).env("BACKPLANE_LIVE_LOG", &live).env("BP_SBS_ROUTINE", "1").env("BP_SBS_PERSON", &person).env_remove("BACKPLANE_AGENTS").output().unwrap();
+    assert!(o.status.success(), "{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
+    assert!(String::from_utf8_lossy(&o.stdout).contains("sbs_routine_probe ... ok"), "the probe ran: {}", String::from_utf8_lossy(&o.stdout));
+}
