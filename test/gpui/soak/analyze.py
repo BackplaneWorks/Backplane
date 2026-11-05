@@ -126,3 +126,24 @@ mins = [s['minPerThreadPerS'] for s in S if T(s) >= warm and 'minPerThreadPerS' 
 res['ack_failures'] = errs; res['view_errors'] = verrs
 print(f"write ack failures {errs}, view errors {verrs}; slowest stream, deltas/s in a 30 s window: min {min(mins) if mins else float('nan'):.2f}, median {st.median(mins) if mins else float('nan'):.2f}")
 if out: json.dump(res, open(out, 'w'), indent=1, default=lambda x: None)
+# per-hop view (chained soak): each hop restarts the hub, so the floor is also read inside every hop, and at each hop's start against the log size
+hops = sorted(set(s.get('hop', 1) for s in S))
+if len(hops) > 1:
+    print("\nper hop: restart RSS and the floor slope inside the hop (10-minute minima, first 10 minutes of the hop left out)")
+    print("  hop   events at start   boot RSS MB   floor first -> last MB   slope MB/h (95%)")
+    res['hops'] = []
+    for hp_ in hops:
+        H = [s for s in S if s.get('hop', 1) == hp_]
+        bins = {}
+        for s in H:
+            if s['t'] < 600: continue
+            bins.setdefault(int(s['t']//600), []).append(s['rss']/1024)
+        fl = [((k*600+300)/3600, min(v)) for k, v in sorted(bins.items())]
+        o = ols(*zip(*fl)) if len(fl) >= 4 else None
+        first = H[0]
+        print(f"  {hp_:>3}   {first['events']:>15}   {first['rss']/1024:>10.1f}   " + (f"{fl[0][1]:>8.1f} -> {fl[-1][1]:<8.1f}   {o['slope']:+7.2f} ({o['ci95']:.2f})" if o else "-"))
+        res['hops'].append(dict(hop=hp_, events_at_start=first['events'], start_rss_MB=first['rss']/1024, slope=o and o['slope'], ci95=o and o['ci95']))
+    ev_ = [(h_['events_at_start']/1e6, h_['start_rss_MB']) for h_ in res['hops']]
+    if len(ev_) >= 4:
+        o = ols(*zip(*ev_)); print(f"  boot RSS vs log size: {o['slope']:+.1f} MB per million events (+-{o['ci95']:.1f}) = {o['slope']*1048576/1e6:+.1f} B/event (design: 18.7)"); res['boot_rss_MB_per_Mevents'] = o['slope']
+    if out: json.dump(res, open(out, 'w'), indent=1, default=lambda x: None)
