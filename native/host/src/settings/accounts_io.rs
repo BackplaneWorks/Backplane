@@ -93,6 +93,9 @@ enum Cmd { Respond(String), Cancel }
 #[derive(Default)]
 struct Inner { profiles: Vec<Profile>, attempts: Vec<Attempt>, jobs: HashMap<String, String>, cmds: HashMap<String, mpsc::UnboundedSender<Cmd>>, revision: u64, load_error: String, default_allowance: Option<Value>, default_identity: String, refresh_at: HashMap<String, u64>, busy: HashMap<String, usize>, launching: HashMap<String, usize>, launch_locks: HashMap<String, Arc<tokio::sync::Mutex<()>>> }
 
+/// A launch waiting or running on a profile; dropped (finished, refused or its future dropped) it leaves the queue, so the profile is never stranded.
+struct Queued { me: Arc<Accounts>, id: String }
+impl Drop for Queued { fn drop(&mut self) { let mut g = self.me.inner.lock().unwrap(); if let Some(n) = g.launching.get_mut(&self.id) { *n = n.saturating_sub(1); if *n == 0 { g.launching.remove(&self.id); } } } }
 pub struct Accounts { root: PathBuf, inner: Mutex<Inner>, resolve: Arc<dyn Fn(&str) -> Result<PathBuf, String> + Send + Sync> }
 
 fn private_dir(dir: &Path) -> std::io::Result<()> {
@@ -190,9 +193,9 @@ impl Accounts {
     fn update(&self, id: &str, f: impl FnOnce(&mut Profile)) -> Result<(), ()> { self.mutate_save(|g| { if let Some(p) = g.profiles.iter_mut().find(|p| p.id == id) { f(p) } }) }
     /// Change the profiles and write them; if the write fails the profiles are as they were.
     fn mutate_save(&self, f: impl FnOnce(&mut Inner)) -> Result<(), ()> {
-        let mut g = self.inner.lock().unwrap(); let backup = g.profiles.clone(); let (rev, atts) = (g.revision, g.attempts.clone());
+        let mut g = self.inner.lock().unwrap(); let backup = g.profiles.clone(); let (rev, atts, jobs, cmds) = (g.revision, g.attempts.clone(), g.jobs.clone(), g.cmds.clone());
         f(&mut g);
-        if self.save(&mut g).is_err() { g.profiles = backup; g.revision = rev; g.attempts = atts; return Err(()) }
+        if self.save(&mut g).is_err() { g.profiles = backup; g.revision = rev; g.attempts = atts; g.jobs = jobs; g.cmds = cmds; return Err(()) }
         Ok(())
     }
     /// The profile's private directory (made 0700): its store inside when it has one.
@@ -380,7 +383,7 @@ impl Accounts {
     pub fn child_ended(&self, id: &str) { let mut g = self.inner.lock().unwrap(); if let Some(n) = g.busy.get_mut(id) { *n = n.saturating_sub(1); if *n == 0 { g.busy.remove(id); } } }
 
     /// A request on a profile: refused while another is in progress, or a launch is queued (accounts.js `jobs` / `launchQueues`). `check_busy`: also while a provider
-    /// child (a turn) runs on it; only login and refresh ask that (disconnect and remove check it themselves), a status, a rename and a launch do not.
+    /// child (a turn) runs on it; refresh asks that (login checks `busy` and `launching` itself in `start`, disconnect and remove check it themselves), a status and a rename do not.
     fn begin(&self, id: &str, what: &str, check_busy: bool) -> Result<(), ()> {
         let mut g = self.inner.lock().unwrap();
         if g.jobs.contains_key(id) || g.launching.get(id).copied().unwrap_or(0) > 0 || (check_busy && g.busy.get(id).copied().unwrap_or(0) > 0) { return Err(()) }
@@ -477,7 +480,7 @@ impl Accounts {
             let mut g = self.inner.lock().unwrap();
             let live: Vec<String> = g.jobs.iter().filter(|(_, v)| v.starts_with("attempt:")).map(|(k, _)| k.clone()).collect();
             g.attempts.retain(|a| live.contains(&a.profile));
-            if g.attempts.len() >= 8 || g.jobs.contains_key(&p.id) || g.busy.get(&p.id).copied().unwrap_or(0) > 0 { return Err(()) }
+            if g.attempts.len() >= 8 || g.jobs.contains_key(&p.id) || g.busy.get(&p.id).copied().unwrap_or(0) > 0 || g.launching.get(&p.id).copied().unwrap_or(0) > 0 { return Err(()) }
             let cand = Profile { store: aid.clone(), ..p.clone() };
             g.attempts.push(Attempt { id: aid.clone(), profile: p.id.clone(), state: "starting".into(), url: String::new(), user_code: String::new(), expires_at: now_ms() + 600_000, message: String::new(), previous_state: p.state.clone(), store: aid.clone() });
             g.jobs.insert(p.id.clone(), format!("attempt:{aid}"));
@@ -518,9 +521,13 @@ impl Accounts {
             Ok(np) => {
                 if self.current(aid).is_none() { return }
                 let old_store = self.profile(&a.profile).map(|p| p.store).unwrap_or_default();
-                let saved = self.mutate_save(|g| { if let Some(slot) = g.profiles.iter_mut().find(|p| p.id == a.profile) { *slot = np.clone(); slot.store = a.store.clone(); } });
+                // one lock: the profile takes the new store and the attempt is done in the same step, so a cancel cannot land between and put the old state back over it
+                let saved = self.mutate_save(|g| {
+                    if let Some(slot) = g.profiles.iter_mut().find(|p| p.id == a.profile) { *slot = np.clone(); slot.store = a.store.clone(); }
+                    g.jobs.remove(&a.profile); g.cmds.remove(aid);
+                    if let Some(att) = g.attempts.iter_mut().find(|x| x.id == aid) { att.state = "done".into(); att.url.clear(); att.user_code.clear(); }
+                });
                 if saved.is_err() { return self.cancel(aid, "failed", "storage") }
-                { let mut g = self.inner.lock().unwrap(); g.jobs.remove(&a.profile); g.cmds.remove(aid); if let Some(att) = g.attempts.iter_mut().find(|x| x.id == aid) { att.state = "done".into(); att.url.clear(); att.user_code.clear(); } g.revision += 1; }
                 if !old_store.is_empty() { self.remove_store(&a.profile, &old_store); }
             }
             Err(e) => self.cancel(aid, "failed", if e == DIRECTORY_ERR { "directory" } else { "verification" }),
@@ -610,14 +617,17 @@ impl Accounts {
     /// provider's own, or why the turn must not start under this account.
     pub async fn launch_plan(self: &Arc<Self>, profile: &str, epoch: &str, cmd: &str) -> Result<LaunchPlan, String> {
         const NO: &str = "Reconnect and select this account before starting a turn";
+        // launches on one profile queue one behind another; any other request on it is refused while one is queued or running
+        let (lock, _queued) = {
+            let mut g = self.inner.lock().unwrap();
+            if g.jobs.contains_key(profile) || !g.profiles.iter().any(|p| p.id == profile) { return Err(NO.to_string()) }
+            *g.launching.entry(profile.to_string()).or_insert(0) += 1;
+            (g.launch_locks.entry(profile.to_string()).or_default().clone(), Queued { me: self.clone(), id: profile.to_string() })
+        };
+        let _turn = lock.lock().await;
+        // the profile as it is now, after the launches ahead of this one: what they changed (identity, epoch, state) counts
         let p = self.profile(profile).map_err(|_| NO.to_string())?;
         if !matches!(p.state.as_str(), "connected" | "unchecked") || p.epoch.to_string() != epoch || cmd != p.provider { return Err(NO.into()) }
-        // launches on one profile queue one behind another; any other request on it is refused while one is queued or running
-        let lock = { let mut g = self.inner.lock().unwrap();
-            if g.jobs.contains_key(profile) { return Err(NO.to_string()) }
-            *g.launching.entry(profile.to_string()).or_insert(0) += 1;
-            g.launch_locks.entry(profile.to_string()).or_default().clone() };
-        let _turn = lock.lock().await;
         let r = async {
             let np = self.verify(&p, false).await.map_err(|_| NO.to_string())?;
             // the verified identity is kept even when the turn is refused: the epoch it moved to is what the person must select again
@@ -628,7 +638,6 @@ impl Accounts {
                 else { vec!["--setting-sources".into(), "user".into(), "--settings".into(), "{\"forceLoginMethod\":\"claudeai\"}".into()] };
             Ok(LaunchPlan { program, env: self.environment(Some(&np)).map_err(|_| NO.to_string())?, args })
         }.await;
-        { let mut g = self.inner.lock().unwrap(); if let Some(n) = g.launching.get_mut(profile) { *n = n.saturating_sub(1); if *n == 0 { g.launching.remove(profile); } } }
         r
     }
     /// A current Claude child may publish its passive usage windows (accounts.js `observe`); anything else changes nothing.
@@ -808,6 +817,70 @@ for l in sys.stdin:
         let s = a.request(&json!({"op":"disconnect","profile":id})).await; assert_eq!((prof(&s, &id)["state"].clone(), prof(&s, &id)["epoch"].clone()), (json!("disconnected"), json!(4)));
         assert!(std::fs::read_dir(&store).unwrap().flatten().all(|e| !e.path().is_dir()), "the store is forgotten");
         std::env::remove_var("ANTHROPIC_API_KEY"); let _ = std::fs::remove_dir_all(&h);
+    }
+    async fn connect(a: &Arc<Accounts>, id: &str) {
+        a.request(&json!({"op":"login","profile":id})).await; let s = until(a, |s| s["attempts"][0]["state"] == "waiting").await; let aid = s["attempts"][0]["id"].as_str().unwrap().to_string();
+        assert_eq!(a.request(&json!({"op":"respond","profile":id,"attempt":aid,"code":"CODE#STATE123"})).await["error"], "");
+        until(a, |s| s["attempts"][0]["state"] == "done").await;
+    }
+    fn launch_gate(a: &Arc<Accounts>, id: &str) -> Arc<tokio::sync::Mutex<()>> { a.inner.lock().unwrap().launch_locks.entry(id.to_string()).or_default().clone() }
+    fn queued(a: &Arc<Accounts>, id: &str) -> usize { a.inner.lock().unwrap().launching.get(id).copied().unwrap_or(0) }
+    #[tokio::test(flavor = "multi_thread")] async fn launches_on_one_profile_queue_and_every_other_request_waits_for_them() {
+        let (h, sd) = dirs("lq"); let a = mgr(&h, &sd); let id = add(&a, "claude", "Work").await; connect(&a, &id).await;
+        let gate = launch_gate(&a, &id); let hold = gate.lock().await; // a launch is running
+        let (a1, i1) = (a.clone(), id.clone()); let one = tokio::spawn(async move { a1.launch_plan(&i1, "2", "claude").await });
+        let (a2, i2) = (a.clone(), id.clone()); let two = tokio::spawn(async move { a2.launch_plan(&i2, "2", "claude").await });
+        for _ in 0..100 { if queued(&a, &id) == 2 { break } tokio::time::sleep(Duration::from_millis(20)).await }
+        assert_eq!(queued(&a, &id), 2, "both are queued behind the one running");
+        for op in ["status", "login", "disconnect", "remove"] { assert_eq!(a.request(&json!({"op":op,"profile":id})).await["error"], GENERIC, "{op} is refused while launches are queued"); }
+        assert_eq!(prof(&a.snapshot(), &id)["state"], "connected", "and none of them changed it");
+        drop(hold);
+        assert!(one.await.unwrap().is_ok() && two.await.unwrap().is_ok(), "they run one after the other");
+        assert_eq!(queued(&a, &id), 0); assert_eq!(a.request(&json!({"op":"status","profile":id})).await["error"], "", "the profile is free again");
+        let _ = std::fs::remove_dir_all(&h);
+    }
+    #[tokio::test(flavor = "multi_thread")] async fn a_launch_rechecks_the_profile_after_the_ones_ahead_and_a_dropped_one_leaves_the_queue() {
+        let (h, sd) = dirs("lr"); let a = mgr(&h, &sd); let id = add(&a, "claude", "Work").await; connect(&a, &id).await;
+        let gate = launch_gate(&a, &id); let hold = gate.lock().await;
+        let (a1, i1) = (a.clone(), id.clone()); let waits = tokio::spawn(async move { a1.launch_plan(&i1, "2", "claude").await });
+        for _ in 0..100 { if queued(&a, &id) == 1 { break } tokio::time::sleep(Duration::from_millis(20)).await }
+        // while it waits, the identity behind the profile moves (what the launch ahead of it would have found)
+        a.update(&id, |p| p.epoch = 3).unwrap();
+        drop(hold);
+        assert!(waits.await.unwrap().is_err(), "the epoch it was asked for is gone: refused on the profile as it is now");
+        let hold = gate.lock().await; let (a2, i2) = (a.clone(), id.clone()); let dropped = tokio::spawn(async move { a2.launch_plan(&i2, "3", "claude").await });
+        for _ in 0..100 { if queued(&a, &id) == 1 { break } tokio::time::sleep(Duration::from_millis(20)).await }
+        dropped.abort(); let _ = dropped.await; assert_eq!(queued(&a, &id), 0, "a dropped launch does not strand the profile"); drop(hold);
+        assert_eq!(a.request(&json!({"op":"status","profile":id})).await["error"], "");
+        let _ = std::fs::remove_dir_all(&h);
+    }
+    #[tokio::test(flavor = "multi_thread")] async fn a_launch_and_a_status_go_on_while_a_turn_runs_but_not_a_sign_in() {
+        let (h, sd) = dirs("lc"); let a = mgr(&h, &sd); let id = add(&a, "claude", "Work").await; connect(&a, &id).await;
+        a.child_started(&id);
+        assert!(a.launch_plan(&id, "2", "claude").await.is_ok(), "a second turn may start under the account");
+        assert_eq!(a.request(&json!({"op":"status","profile":id})).await["error"], "", "status is not refused by a running turn");
+        assert_eq!(a.request(&json!({"op":"login","profile":id})).await["error"], GENERIC, "a sign-in is");
+        a.child_ended(&id); let _ = std::fs::remove_dir_all(&h);
+    }
+    #[tokio::test(flavor = "multi_thread")] async fn a_failed_save_leaves_the_profile_as_it_was_and_says_so() {
+        let (h, sd) = dirs("sv"); let a = mgr(&h, &sd); let id = add(&a, "claude", "Work").await;
+        let reg = h.join("providers/accounts-v1/profiles.json"); std::fs::remove_file(&reg).unwrap(); std::fs::create_dir_all(reg.join("x")).unwrap(); // the rename onto it cannot succeed
+        let rev = a.snapshot()["revision"].clone();
+        assert_eq!(a.request(&json!({"op":"rename","profile":id,"label":"New"})).await["error"], GENERIC);
+        let s = a.snapshot(); assert_eq!((prof(&s, &id)["label"].clone(), s["revision"].clone()), (json!("Work"), rev), "label and revision are as they were");
+        assert_eq!(a.request(&json!({"op":"remove","profile":id})).await["error"], GENERIC); assert!(a.snapshot()["profiles"].as_array().unwrap().iter().any(|p| p["id"] == id.as_str()), "a profile whose removal was not saved stays");
+        assert!(h.join("providers/accounts-v1").join(&id).exists(), "and so does its directory");
+        let _ = std::fs::remove_dir_all(&h);
+    }
+    #[tokio::test(flavor = "multi_thread")] async fn a_candidate_store_survives_a_cancel_until_the_child_has_exited() {
+        let (h, sd) = dirs("cs"); let a = mgr(&h, &sd); let id = add(&a, "claude", "Work").await;
+        a.request(&json!({"op":"login","profile":id})).await; let s = until(&a, |s| s["attempts"][0]["state"] == "waiting").await; let aid = s["attempts"][0]["id"].as_str().unwrap().to_string();
+        let store = h.join("providers/accounts-v1").join(&id).join(&aid); assert!(store.exists(), "the candidate store exists while the CLI runs");
+        a.cancel(&aid, "cancelled", ""); // the attempt is over for the person; the child is only now told to go (the command channel closes)
+        assert!(store.exists(), "cancel itself removes nothing: its child may still write to the store");
+        for _ in 0..100 { if !store.exists() { break } tokio::time::sleep(Duration::from_millis(50)).await }
+        assert!(!store.exists(), "removed once the child is gone");
+        let _ = std::fs::remove_dir_all(&h);
     }
     #[tokio::test(flavor = "multi_thread")] async fn a_refused_code_fails_the_attempt_with_its_reason_and_leaves_the_profile_as_it_was() {
         let (h, sd) = dirs("bad"); let a = mgr(&h, &sd); let id = add(&a, "claude", "Work").await;
