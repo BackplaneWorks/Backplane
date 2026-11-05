@@ -60,6 +60,7 @@ pub fn start_with(hub: &Arc<Hub>, host: &str, port: u16, tailnet: bool) -> Arc<A
             let table = super::peers::PeerTable::new();
             let peering = Arc::new(super::peering::Peering::new(hub.cfg.home.clone(), reg.clone(), table.clone(), routes.clone(), tailnet, host, port));
             hub.register_http(Arc::new(super::peerhttp::PeerRoutes(peering.clone())));
+            hub.register_rpc(Arc::new(super::peerrpc::PeerRpc(peering.clone())));
             hub.set_pairing(reg, Arc::new(Wired { routes: routes.clone(), hub: Arc::downgrade(hub) }));
             let _ = ROUTES.set(routes.clone());
             let _ = PEERING.set(peering.clone());

@@ -21,6 +21,7 @@ pub mod origin;
 pub mod outbox;
 pub mod owner;
 pub mod pairing;
+pub mod peerrpc;
 pub mod peerhttp;
 pub mod peering;
 pub mod peers;

@@ -128,6 +128,21 @@ impl Peering {
         let kept = why.is_empty() && botnet::peer_save(&self.home, &peer, &secret);
         if kept { json("200 OK", &json!({"invite": sign::invite_make(&here, &peer, &secret)})) } else { text("500 Internal Server Error", "could not keep the invite's secret") }
     }
+    /// BotJob.invite (bots.invite): an invite for another machine to paste: a new peer id and secret, recorded (ten minutes,
+    /// once) and kept here. `given` is the address to name instead of this hub's own. Ok((invite, peer)) or why not.
+    pub async fn invite_for(&self, given: &str) -> Result<(String, String), String> {
+        let here = if given.trim().is_empty() { botnet::url_here(self.tailnet, &self.host, self.port).await } else { given.trim().to_string() };
+        let peer = format!("p{}", hex::encode(super::pairing::urandom(8)));
+        let secret = botnet::fresh_secret();
+        let rec = self.reg.machine(&peer);
+        if rec["ok"] != true {
+            return Err(if rec["error"] == "too_many_invitations" { "too many open invites: wait for one to expire, or revoke one in Settings > Devices".into() } else { "could not record the invite".into() });
+        }
+        if !botnet::peer_save(&self.home, &peer, &secret) { return Err("could not keep the invite's secret".into()) }
+        Ok((sign::invite_make(&here, &peer, &secret), peer))
+    }
+    /// BotJob.unpeer: the link's secret goes, and the invite that made it shows as unlinked in Settings > Devices.
+    pub fn unpeered(&self, peer: &str) { botnet::peer_forget(&self.home, peer); let _ = self.reg.unlinked(peer); }
     /// Conn.pair.check: 204 when this hub made that proof within the last minute, else 403 (and it says nothing more).
     fn check(&self, r: &PReq) -> HttpReply {
         let at = r.param("at").parse::<u64>().unwrap_or(0);
