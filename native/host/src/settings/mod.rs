@@ -8,6 +8,7 @@ pub mod accounts;
 pub mod accounts_hub;
 pub mod accounts_io;
 pub mod diagnostics;
+pub mod driver;
 pub mod fab;
 pub mod fallback;
 pub mod improvements;
@@ -72,6 +73,7 @@ pub fn start(hub: Arc<Hub>, agents: Option<Arc<crate::agents::Agents>>) {
     hub.register_rpc(Arc::new(fab::FabRpc));
     hub.register_rpc(Arc::new(accounts::AccountsDefault));
     let _accounts = accounts_hub::start(&hub, agents.clone());
+    hub.register_ticker(Arc::new(driver::ResumeTicker));
     hub.register_rpc(Arc::new(misc::SettingsMisc));
     hub.register_rpc(Arc::new(improvements::ImprovementsRpc));
     hub.register_rpc(Arc::new(secret::SecretRpc { agents }));
