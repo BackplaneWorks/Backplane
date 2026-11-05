@@ -171,7 +171,7 @@ async fn settle() { for _ in 0..50 { tokio::time::sleep(std::time::Duration::fro
     let a = node("a8", false).await;
     let secret = botnet::fresh_secret(); assert!(botnet::peer_save(&a.home, "p1", &secret));
     let now = (a.p.now)();
-    let req = |ts: u64, sig: Option<String>, body: &str| PReq { method: "POST".into(), target: "/x".into(), trusted: false, body: body.as_bytes().to_vec(),
+    let req = |ts: u64, sig: Option<String>, body: &str| PReq { method: "POST".into(), target: "/x".into(), trusted: false, own_device: false, body: body.as_bytes().to_vec(),
         headers: vec![("X-Backplane-Peer".into(), "p1".into()), ("X-Backplane-Timestamp".into(), ts.to_string()), ("X-Backplane-Signature".into(), sig.unwrap_or_else(|| sign::header(&secret, ts, body)))] };
     assert_eq!(a.p.signed_in("deliver", &req(now, None, "{}")).ok().unwrap(), "p1");
     assert_eq!(a.p.signed_in("deliver", &req(now, None, "{}")).unwrap_err().body, b"already seen");
