@@ -1,9 +1,9 @@
 // A deterministic synthetic fixture home (no real conversations): one project, two threads, one long thread.
 import {mkdirSync,writeFileSync,rmSync} from 'node:fs';
-export function makeFixture(home){
+export function makeFixture(home,root='/tmp/parity-fixture'){
   rmSync(home,{recursive:true,force:true});mkdirSync(home,{recursive:true});
   const t0=1700000000,L=[];const P=o=>L.push(JSON.stringify(o));
-  P({$:'ProjectCreated',id:'p1700000000-1',title:'fixture',root:'/tmp/parity-fixture',at:t0});
+  P({$:'ProjectCreated',id:'p1700000000-1',title:'fixture',root,at:t0});
   P({$:'ThreadCreated',id:'t1700000001-2',project:'p1700000000-1',title:'Fixture short',env:'local',branch:'',worktree:'',provider:'claude',model:'',at:t0+1});
   P({$:'ThreadCreated',id:'t1700000002-3',project:'p1700000000-1',title:'Fixture long',env:'local',branch:'',worktree:'',provider:'claude',model:'',at:t0+2});
   for(let i=0;i<120;i++){

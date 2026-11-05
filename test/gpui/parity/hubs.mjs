@@ -15,7 +15,7 @@ export const R=process.env.BACKPLANE_PARITY_ROOT||fileURLToPath(new URL('../../.
 // where fixture homes and project folders live: outside any git checkout, or the hub makes worktrees with random names
 export const WORK=process.env.PARITY_WORK||(R+'/build/gpui/parity');
 export async function startFixtureHub({bin,port,work,extraArgs}){
-  const home=work+'/home';makeFixture(home);makeStandins(work+'/bin');
+  const home=work+'/home';mkdirSync(work+'/fixroot',{recursive:true});makeFixture(home,work+'/fixroot');makeStandins(work+'/bin');
   const h=await startHub({bin,home,port,cap:'3700M',standins:work+'/bin',extraEnv:{FAKE_SECS:'2',FAKE_PER:'2',FAKE_CYCLE:'5'}});
   const check=execFileSync(R+'/test/gpui/slim/check_agents.sh',[String(h.pid),work+'/bin']).toString().trim();
   await quiesce(h);
