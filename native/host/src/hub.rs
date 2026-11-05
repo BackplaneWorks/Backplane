@@ -139,7 +139,7 @@ impl Hub {
                 Ok(Ok(first_idx)) => {
                     { let mut m = hub.model.lock().await; for (i, l) in lines.iter().enumerate() { m.apply_line((first_idx + i + 1) as u32, l); } }
                     let all: Vec<Value> = batch.iter().flat_map(|c| c.events.iter().cloned()).collect();
-                    { let obs: Vec<Arc<dyn Observer>> = hub.observers.read().unwrap().clone(); for o in obs { o.committed(&hub, &all, (first_idx + 1) as u32); } }
+                    { let obs: Vec<Arc<dyn Observer>> = hub.observers.read().unwrap().clone(); for o in obs { let first = (first_idx + 1) as u32; let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| o.committed(&hub, &all, first))); } }
                     let _ = hub.presenter.fold(&json!({"t":"changes","items":all,"now":now_ms()})).await;
                     let n = hub.store.len() as u64; let _ = hub.changed.send(n);
                     let mut upto = first_idx;
@@ -161,10 +161,12 @@ impl Hub {
         let hub = self.arc();
         tokio::spawn(async move {
             let mut iv = tokio::time::interval(std::time::Duration::from_secs(t.every_s().max(1)));
+            iv.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             iv.tick().await;
             loop {
                 iv.tick().await;
-                let evs = t.tick(&hub, now_ms() / 1000).await;
+                // a panicking tick must not end the job: it is skipped, the next one runs
+                let evs = futures_util::FutureExt::catch_unwind(std::panic::AssertUnwindSafe(t.tick(&hub, now_ms() / 1000))).await.unwrap_or_default();
                 if !evs.is_empty() { let _ = hub.commit_many(&evs).await; }
             }
         });
@@ -185,13 +187,18 @@ impl Hub {
     /// True while the connection's outbox exists (it has not gone away).
     pub fn is_attached(&self, client: u64) -> bool { self.outboxes.lock().unwrap().contains_key(&client) }
     pub fn detach(&self, client: u64) { self.outboxes.lock().unwrap().remove(&client); if let Some(p) = self.pairing.get() { p.forget(client) } }
-    /// Installs the pairing registry and the /auth routes (net lane). Before this, devices-v1.json read once at start decides.
+    /// Installs the pairing registry and the /auth routes (net lane). Call it BEFORE the listener accepts: until then, devices-v1.json read once at start
+    /// decides and no /auth route exists. Afterwards the registry decides every request.
     pub fn set_pairing(&self, p: Arc<dyn Pairing>, r: Arc<dyn AuthRoute>) { self.auth.set_pairing(p.clone()); let _ = self.pairing.set(p); let _ = self.auth_route.set(r); }
     pub fn auth_route(&self) -> Option<Arc<dyn AuthRoute>> { self.auth_route.get().cloned() }
     /// A connection id for an HTTP request (the /auth routes remember it).
     pub fn fresh_client(&self) -> u64 { self.next_client.fetch_add(1, Relaxed) }
     /// A /ws connection presenting `token` may proceed: its credential resolves and its device is not revoked.
-    pub fn admit(&self, client: u64, token: &str) -> bool { match self.pairing.get() { None => true, Some(p) => !p.resolve(token, client, "/ws").is_empty() && p.active(client) } }
+    pub fn admit(&self, client: u64, token: &str) -> bool {
+        match self.pairing.get() { None => true, // the snapshot path decided in `serve` (Auth::allowed)
+            // pairing.js resolve answers the credential that holds for this connection (the hub token for an empty one): it holds only if it is the one presented
+            Some(p) => !token.is_empty() && p.resolve(token, client, "/ws") == token && p.active(client) }
+    }
     /// Ends the connections a revoke named.
     pub fn close_clients(&self, ids: &[u64]) { let o = self.outboxes.lock().unwrap(); for id in ids { if let Some(t) = o.get(id) { let _ = t.send(Out::Close); } } }
     /// Read access to the model: threads, projects, entry indexes, pages.

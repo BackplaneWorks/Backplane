@@ -67,7 +67,8 @@ pub trait Observer: Send + Sync {
 pub trait Pairing: Send + Sync {
     /// the credential is the hub token or a live paired device's (no side effects)
     fn holds(&self, token: &str) -> bool;
-    /// the credential this connection presents, remembered for the connection; "" when none holds
+    /// pairing.js resolve: the credential that holds for this connection, remembered for it, compared by the caller with the one presented:
+    /// the hub token for an empty or unknown one (so callers must compare, never test for non-empty); a held device's token for its own
     fn resolve(&self, token: &str, client: u64, route: &str) -> String;
     /// false once the connection's device was revoked
     fn active(&self, client: u64) -> bool;
@@ -81,4 +82,6 @@ pub struct AuthOutcome { pub reply: HttpReply, pub close: Vec<u64>, pub unpeer: 
 /// /auth route is final, so it must deny by default.
 pub trait AuthRoute: Send + Sync {
     fn handle(&self, req: &Req, client: u64) -> Option<AuthOutcome>;
+    /// A used machine invitation was revoked: remove the link it made (Bend's uninvite). Called by the hub with `AuthOutcome.unpeer`.
+    fn unpeer(&self, _link: &str) {}
 }

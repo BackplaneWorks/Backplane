@@ -215,3 +215,84 @@ mod reconnect_tests {
         assert!(live_seen > 0, "the join happened while agents were streaming: the live frame carried items that are not log lines");
     }
 }
+
+#[cfg(test)]
+mod auth_wire_tests {
+    use super::*;
+    use crate::api::{AuthOutcome, AuthRoute, Fut, HttpHandler, HttpReply, Pairing};
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::SeqCst};
+    use tokio_tungstenite::connect_async;
+
+    const ROOT: &str = "roottoken"; const DEV: &str = "0123456789abcdef0123456789abcdef";
+    // net's Registry in miniature: pairing.js resolve answers the credential that holds, the hub token for an empty or unknown one
+    struct Reg { revoked: AtomicBool, last: AtomicU64 }
+    impl Pairing for Reg {
+        fn holds(&self, t: &str) -> bool { t == ROOT || (t == DEV && !self.revoked.load(SeqCst)) }
+        fn resolve(&self, t: &str, client: u64, _r: &str) -> String { if t == DEV && !self.revoked.load(SeqCst) { self.last.store(client, SeqCst); t.into() } else { ROOT.into() } }
+        fn active(&self, _c: u64) -> bool { !self.revoked.load(SeqCst) }
+        fn forget(&self, _c: u64) {}
+    }
+    struct NoRoutes; impl AuthRoute for NoRoutes { fn handle(&self, _r: &Req, _c: u64) -> Option<AuthOutcome> { None } }
+    struct Probe(bool);
+    impl HttpHandler for Probe {
+        fn routes(&self) -> &'static [&'static str] { if self.0 { &["/open"] } else { &["/closed"] } }
+        fn own_auth(&self) -> bool { self.0 }
+        fn call<'a>(&'a self, _h: &'a Arc<Hub>, _r: &'a Req) -> Fut<'a, HttpReply> { Box::pin(async { HttpReply::text("200 OK", "ran") }) }
+    }
+    async fn up(name: &str) -> (Arc<Hub>, u16, Arc<Reg>) {
+        let dir = std::env::temp_dir().join(format!("bp-authwire-{}-{name}", std::process::id())); let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("token"), ROOT).unwrap();
+        std::fs::write(dir.join("events.jsonl"), "{\"$\":\"ProjectCreated\",\"id\":\"p1\",\"title\":\"p\",\"root\":\"/x\",\"at\":1}\n").unwrap();
+        let cfg = hub::Cfg { home: dir, version: "0.14.0".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() };
+        let hub = Hub::start(cfg, Arc::new(presenter::Canned { reply: json!({"remoteReady":false,"cmds":[],"session":{}}) })).await.unwrap();
+        let reg = Arc::new(Reg { revoked: AtomicBool::new(false), last: AtomicU64::new(0) });
+        hub.set_pairing(reg.clone(), Arc::new(NoRoutes));
+        hub.register_http(Arc::new(Probe(false))); hub.register_http(Arc::new(Probe(true)));
+        let l = TcpListener::bind("127.0.0.1:0").await.unwrap(); let port = l.local_addr().unwrap().port();
+        { let hub = hub.clone(); tokio::spawn(async move { loop { let (s, _) = l.accept().await.unwrap(); let h = hub.clone(); tokio::spawn(async move { let _ = serve(h, s).await; }); } }); }
+        (hub, port, reg)
+    }
+    async fn get(port: u16, path: &str, auth: Option<&str>) -> String {
+        let mut s = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        let a = auth.map(|t| format!("Authorization: Bearer {t}\r\n")).unwrap_or_default();
+        s.write_all(format!("GET {path} HTTP/1.1\r\nHost: x\r\n{a}Connection: close\r\n\r\n").as_bytes()).await.unwrap();
+        let mut out = Vec::new(); s.read_to_end(&mut out).await.unwrap(); String::from_utf8_lossy(&out).into_owned()
+    }
+
+    // default-deny: a handler that does not opt out is refused without a credential; only an explicit own_auth skips the check
+    #[tokio::test] async fn a_handler_without_own_auth_answers_401_with_no_credential() {
+        let (_hub, port, _reg) = up("deny").await;
+        assert!(get(port, "/closed", None).await.starts_with("HTTP/1.1 401"), "no credential");
+        assert!(get(port, "/closed", Some("wrong")).await.starts_with("HTTP/1.1 401"), "a wrong one");
+        assert!(get(port, "/closed", Some("0123456789abcdef0123456789abcdee")).await.starts_with("HTTP/1.1 401"), "a well-formed one nobody holds");
+        assert!(get(port, "/closed", Some(DEV)).await.starts_with("HTTP/1.1 200"), "a held device credential");
+        assert!(get(port, "/closed", Some(ROOT)).await.starts_with("HTTP/1.1 200"), "the hub token");
+        assert!(get(port, "/open", None).await.starts_with("HTTP/1.1 200"), "the opt-out route takes its own decision");
+        assert!(get(port, "/nope", None).await.starts_with("HTTP/1.1 404"));
+    }
+    #[tokio::test] async fn admit_refuses_an_empty_an_unknown_and_a_revoked_token() {
+        let (hub, _port, reg) = up("admit").await;
+        assert!(hub.admit(7, DEV), "a held device");
+        assert!(hub.admit(8, ROOT), "the hub token resolves to itself");
+        assert!(!hub.admit(9, ""), "empty resolves to the hub token but is not it");
+        assert!(!hub.admit(10, "0123456789abcdef0123456789abcdee"), "unknown");
+        reg.revoked.store(true, SeqCst);
+        assert!(!hub.admit(11, DEV), "revoked");
+    }
+    // Out::Close ends the socket: a revoke returns client ids and the hub closes those streams
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn out_close_ends_a_live_stream_and_a_revoke_during_connect_is_not_missed() {
+        let (hub, port, reg) = up("close").await;
+        let (mut ws, _) = connect_async(format!("ws://127.0.0.1:{port}/ws?view=1&mobile=1&enc=cbor&token={DEV}")).await.unwrap();
+        let first = tokio::time::timeout(Duration::from_secs(3), ws.next()).await.expect("greeting in time");
+        assert!(matches!(first, Some(Ok(Message::Binary(_)))), "the greeting");
+        let client = reg.last.load(SeqCst); assert!(client != 0, "the connection was resolved for its device");
+        assert!(hub.is_attached(client), "attached before anything was published");
+        hub.close_clients(&[client]);
+        let end = tokio::time::timeout(Duration::from_secs(3), async { loop { match ws.next().await { None | Some(Err(_)) | Some(Ok(Message::Close(_))) => break, _ => {} } } }).await;
+        assert!(end.is_ok(), "the stream ended after Out::Close");
+        // a connection whose device is revoked before it is admitted never gets a greeting
+        reg.revoked.store(true, SeqCst);
+        let r = connect_async(format!("ws://127.0.0.1:{port}/ws?view=1&mobile=1&enc=cbor&token={DEV}")).await;
+        assert!(r.is_err(), "a revoked credential is refused at the upgrade (Auth::allowed)");
+    }
+}
