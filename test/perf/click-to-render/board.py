@@ -31,7 +31,7 @@ def where(r):
     if dom is not None: out.append(f"frame {p - dom:.0f}")
     return ', '.join(out)
 ids.sort(key=lambda i: -((m.get(i) or {}).get('paint50') or 1e9))
-hdr = ['interaction'] + [f'{c} p50/p95' for c in cells] + [f'within 16/50/100 ({main})', f'content ({main})', f'settle ({main})', 'cold', 'round trip', 'hub wait', f'where ({main}, p50 ms)', 'shift', 'late']
+hdr = ['interaction'] + [f'{c} p50/p95' for c in cells] + [f'within 16/50/100 ({main})', f'confirmed by hub ({main})', f'content ({main})', f'settle ({main})', 'cold', 'round trip', 'hub wait', f'where ({main}, p50 ms)', 'shift', 'late']
 print('| ' + ' | '.join(hdr) + ' |'); print('|' + '---|' * len(hdr))
 for i in ids:
     r = m.get(i) or {}
@@ -40,5 +40,5 @@ for i in ids:
         x = data[c].get(i); row.append(f"{f(x['paint50'])} / {f(x['paint95'])}" if x and x['paint50'] is not None else ('err' if x else ''))
     rt = ('y' if r.get('roundTrip', 0) * 2 >= r.get('n', 0) else 'n') if r.get('n') else ''
     p = r.get('paint50'); band = '' if p is None else ('16 ✓' if p <= 16 else '50 ✓' if p <= 50 else '100 ✓' if p <= 100 else '✗')
-    row += [band, f(r.get('content50')), f(r.get('settle50')), f(r.get('cold')), rt, f(r.get('hubWait50')), where(r) if r else '', f"{r.get('shift50') or 0:.3f}", f(r.get('late50'))]
+    row += [band, f(r.get('confirm50')), f(r.get('content50')), f(r.get('settle50')), f(r.get('cold')), rt, f(r.get('hubWait50')), where(r) if r else '', f"{r.get('shift50') or 0:.3f}", f(r.get('late50'))]
     print('| ' + ' | '.join(row) + ' |')

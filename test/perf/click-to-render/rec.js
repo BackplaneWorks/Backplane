@@ -26,7 +26,7 @@
   const reset = () => Object.assign(R, {
     armed: false, t0: null, inputType: null, pred: null, tDom: null, tRaf: null, tPaint: null,
     lastMut: null, nMut: 0, nMutBefore: 0, sends: [], recvs: [], shifts: [], events: [], longs: [], loafs: [],
-    late: [], lateNodes: [], done: false, sample: null, film: [], contentSel: null, lastContent: null, settled: null, tArm: null, error: null, hitHow: null, perfMark: 0,
+    late: [], lateNodes: [], done: false, sample: null, film: [], contentSel: null, lastContent: null, pred2: null, tDom2: null, settled: null, tArm: null, error: null, hitHow: null, perfMark: 0,
   });
   reset();
   const desc = (n) => {
@@ -39,6 +39,7 @@
     return s;
   };
   const check = (how) => {
+    if (R.armed && R.t0 != null && R.pred2 && R.tDom2 == null) { let ok2 = false; try { ok2 = !!R.pred2(); } catch {} if (ok2) R.tDom2 = now(); }
     if (!R.armed || R.tDom != null || R.t0 == null) return;
     let ok = false;
     try { ok = !!R.pred(); } catch (e) { ok = false; }
@@ -80,7 +81,7 @@
       if (R.t0 == null) { R.nMutBefore += recs.length; return; }
       R.nMut += recs.length; R.lastMut = t;
       if (R.contentSel) for (const r of recs) { const el = r.target.nodeType === 1 ? r.target : r.target.parentElement; if (el?.closest?.(R.contentSel)) { R.lastContent = t; break; } }
-      if (R.tDom == null) { check('mutation'); return; }
+      if (R.tDom == null || (R.pred2 && R.tDom2 == null)) { check('mutation'); if (R.tDom == null) return; }
       if (R.tPaint != null && R.lateNodes.length < 400) {
         for (const r of recs) {
           if (r.type === 'childList') for (const n of r.addedNodes) {
@@ -131,10 +132,11 @@
     R.loafs.push({ t: e.startTime - R.t0, dur: e.duration, block: e.blockingDuration, render: e.renderStart ? e.startTime + e.duration - e.renderStart : 0, style: e.styleAndLayoutStart ? e.startTime + e.duration - e.styleAndLayoutStart : 0,
       scripts: (e.scripts || []).slice(0, 4).map((s) => ({ dur: Math.round(s.duration), inv: s.invoker, fn: s.sourceFunctionName, src: (s.sourceURL || '').split('/').pop() + ':' + s.sourceCharPosition, fsl: Math.round(s.forcedStyleAndLayoutDuration || 0) })) });
   });
-  R.arm = (src, sample, contentSel) => {
+  R.arm = (src, sample, contentSel, confirm) => {
     reset(); for (const k in RT) delete RT[k]; for (const k in RN) delete RN[k];
     if (sample) R.sample = new Function('return (' + sample + ')');
     R.contentSel = contentSel || null; lastSig = '';
+    R.pred2 = confirm ? new Function('return (' + confirm + ')') : null;
     R.pred = new Function('return (' + src + ')');
     let pre = false; try { pre = !!R.pred(); } catch {}
     if (pre) { R.error = 'predicate already true before input'; return false; }
@@ -167,6 +169,7 @@
         res({
           inputType: R.inputType, hitHow: R.hitHow, queue: rel(R.tArm) == null ? null : null,
           dom: rel(R.tDom), raf: rel(R.tRaf), paint: rel(R.tPaint),
+          confirm: R.tDom2 == null ? null : +(R.tDom2 - R.t0).toFixed(1),
           content: R.contentSel ? +((Math.max(R.lastContent || 0, R.tPaint) - R.t0).toFixed(1)) : null, settle: +R.settled.at.toFixed(1), capped: R.settled.capped,
           send: R.sends.length ? rel(R.sends[0][0]) : null, nSend: R.sends.length, sendBytes: R.sends.reduce((a, s) => a + s[1], 0),
           recv1: R.recvs.length ? rel(R.recvs[0][0]) : null, recvN: R.recvs.length ? rel(R.recvs[R.recvs.length - 1][0]) : null, nRecv: R.recvs.length, recvBytes: R.recvs.reduce((a, s) => a + s[1], 0),

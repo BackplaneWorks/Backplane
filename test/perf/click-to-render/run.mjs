@@ -2,7 +2,7 @@
 //   node run.mjs --kind web|desktop [--origin URL --token T | --cdp PORT] --state R [--cpu 4] [--reps 10]
 //        [--only a,b] [--skip a,b] [--out DIR] [--label L] [--device iphone15]
 import { open, sleep } from './driver.mjs';
-import { INTERACTIONS, STATES } from './interactions.mjs';
+import { INTERACTIONS, PHONE, STATES } from './interactions.mjs';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 const a = process.argv.slice(2);
 const opt = (n, d) => { const i = a.indexOf('--' + n); return i >= 0 ? a[i + 1] : d; };
@@ -13,7 +13,7 @@ if (kind === 'web' && !opt('origin')) throw new Error('--origin http://127.0.0.1
 if (/:(3787|57808)\b/.test(opt('origin', '')) || ['4787', '58808'].includes(opt('cdp', ''))) throw new Error('refusing the live hub / app ports');
 const fx = opt('fixture', new URL(`./fixture-${state}.json`, import.meta.url).pathname);
 const S = STATES[state] || JSON.parse(readFileSync(fx, 'utf8'));
-const list = INTERACTIONS.filter((x) => (!only || only.split(',').includes(x.id)) && !(skip && skip.split(',').includes(x.id)) && !(kind === 'desktop' && x.webOnly));
+const list = (device === 'iphone15' ? PHONE : INTERACTIONS).filter((x) => (!only || only.split(',').includes(x.id)) && !(skip && skip.split(',').includes(x.id)) && !(kind === 'desktop' && x.webOnly));
 const pct = (xs, p) => { const s = xs.filter((x) => x != null).sort((x, y) => x - y); if (!s.length) return null; return s[Math.min(s.length - 1, Math.floor(p * (s.length - 1) + 0.5))]; };
 const log = (...m) => console.error(`[${new Date().toISOString().slice(11, 19)}]`, ...m);
 import { existsSync } from 'node:fs';
@@ -31,8 +31,10 @@ for (const it of list) {
     await h.throttle(cpu);
     await h.idle(600);
     for (let i = 0; i <= reps; i++) {
-      const st = await it.step(h, S, i);
-      const r = await h.measure(it.id, { pred: st.pred, go: st.go, quiet: st.quiet || 300, cap: st.cap || 6000, sample: st.sample, content: st.content, timeout: st.timeout || 15000 });
+      if (cpu > 1) await h.throttle(1);
+      const st = await it.step(h, S, i); // setup unthrottled; only the measured part runs at --cpu
+      if (cpu > 1) { await h.throttle(cpu); await h.idle(300); }
+      const r = await h.measure(it.id, { pred: st.pred, go: st.go, quiet: st.quiet || 300, cap: st.cap || 6000, sample: st.sample, content: st.content, confirm: st.confirm, timeout: st.timeout || 15000 });
       r.rep = i; r.cold = i === 0; runs.push(r);
       if (r.error) log(it.id, i, 'ERROR', r.error);
       if (st.undo) { await h.throttle(1); await st.undo(h); await h.throttle(cpu); }
@@ -43,7 +45,7 @@ for (const it of list) {
   const warm = runs.filter((r) => !r.cold && !r.error && r.paint != null), cold = runs.find((r) => r.cold && !r.error);
   const m = (k, p = 0.5) => pct(warm.map((r) => r[k]), p);
   const row = { id: it.id, what: it.what, n: warm.length, errors: runs.filter((r) => r.error).length,
-    paint50: m('paint'), paint95: m('paint', 0.95), content50: m('content'), content95: m('content', 0.95), dom50: m('dom'), settle50: m('settle'), settle95: m('settle', 0.95),
+    paint50: m('paint'), paint95: m('paint', 0.95), content50: m('content'), content95: m('content', 0.95), confirm50: m('confirm'), confirm95: m('confirm', 0.95), dom50: m('dom'), settle50: m('settle'), settle95: m('settle', 0.95),
     cold: cold?.paint ?? null, coldSettle: cold?.settle ?? null,
     send50: m('send'), recv50: m('recv1'), recvN50: m('recvN'), nRecv50: m('nRecv'), recvKB50: Math.round((m('recvBytes') || 0) / 1024),
     shift50: m('shift'), shiftMax: Math.max(0, ...warm.map((r) => r.shift || 0)), late50: m('nLate'), lateMax50: m('lateMax'),
