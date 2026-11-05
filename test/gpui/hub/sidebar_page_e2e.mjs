@@ -30,4 +30,4 @@ for(let i=0;i<3;i++){
   console.log('  action reply: remoteReady='+r.result.remoteReady+' cmds='+JSON.stringify(r.result.cmds).slice(0,120)+' session.error='+JSON.stringify(r.result.session?.error)+' note='+JSON.stringify(r.result.session?.note)+' offset='+p?.offset+' tokenSame='+(p?.next?.value===c.value)+' value='+String(c.value).slice(0,160));
 }
 log(offsets.length===4&&offsets.every((o,i)=>i===0||o>offsets[i-1]),'the pager advances: offsets '+offsets.join(','));
-console.log(JSON.stringify({failures:bad}));ws.close();process.exit(0);
+console.log(JSON.stringify({failures:bad}));ws.close();await new Promise(r=>process.stdout.write('',r));await new Promise(r=>setTimeout(r,200));process.exit(0);
