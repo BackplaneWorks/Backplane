@@ -1,11 +1,14 @@
 // bun lib/frames.test.mjs  (run on Boat; nothing here needs a display)
 import assert from 'node:assert/strict';
+import {acks,parse,toEpochMs} from './video-frames.mjs';
 import {clickStats,frameStats,layoutShift,deadControls,rssSlope} from './frames.mjs';
 // 60 Hz budget 16.67 ms
 let c=clickStats([{id:'a',t_inject:0,t_ack:10,t_result:80},{id:'b',t_inject:100,t_ack:112,t_result:150}],60);
 assert.equal(c.pass,true);assert.equal(c.overBudget,0);assert.ok(Math.abs(c.ackMs.p50-12)<=2||c.ackMs.p50===12||c.ackMs.p50===10);
 c=clickStats([{id:'a',t_inject:0,t_ack:40,t_result:80}],60);assert.equal(c.pass,false);assert.equal(c.overBudget,1);
 c=clickStats([{id:'a',t_inject:0,t_result:80}],60);assert.equal(c.pass,false);assert.equal(c.noAck,1);
+// evidence coarser than the budget -> unknown (null), never pass
+c=clickStats([{id:'a',t_inject:0,t_ack:10,t_result:80}],60,0,33.3);assert.equal(c.pass,null);
 // smooth 60 fps vs one 100 ms hitch
 const smooth=Array.from({length:120},(_,i)=>i*16.667);let f=frameStats(smooth,60);assert.equal(f.jank,0);assert.equal(f.pass,true);assert.ok(Math.abs(f.fps-60)<0.5);
 const hitch=[...smooth.slice(0,60),...smooth.slice(60).map(t=>t+100)];f=frameStats(hitch,60);assert.equal(f.jank,1);assert.ok(f.droppedEstimate>=5);assert.equal(f.longOver50,1);
@@ -26,4 +29,7 @@ assert.equal(deadControls([],{}).pass,false); // no controls found never passes
 const flat=Array.from({length:60},(_,i)=>({t_s:i*60+300,rssMB:300+(i%3)}));assert.equal(rssSlope(flat).pass,true);
 const grow=Array.from({length:60},(_,i)=>({t_s:i*60+300,rssMB:300+100*(i*60/3600)}));const g=rssSlope(grow);assert.ok(Math.abs(g.slopeMBh-100)<1);assert.equal(g.pass,false);
 assert.equal(rssSlope([{t_s:400,rssMB:1}]).pass,false);
+// video helpers
+assert.deepEqual(parse('x pts_time:1.5 y\n n:1 pts_time:2.25'),[1.5,2.25]);
+assert.deepEqual(acks([1000,1040,2000],[990,1500,2100]),[10,500,NaN]);
 console.log('frames.test.mjs: all assertions passed');
