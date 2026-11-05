@@ -36,7 +36,12 @@ pub fn clean(line: &str) -> std::borrow::Cow<'_, str> {
 }
 
 /// The log is never held as text: an index of (offset, length) per whole line, lines read back on demand.
-pub struct Store { path: PathBuf, file: File, idx: Vec<(u64, u32)>, size: u64, torn: bool, pub torn_bytes: usize, pub bad: usize }
+/// Cheap to clone and safe to share: readers (a join, a page) take a brief read lock on the index and `pread`
+/// the bytes; they never wait for a writer's fsync.
+#[derive(Clone)]
+pub struct Store { inner: std::sync::Arc<Inner>, pub torn_bytes: usize, pub bad: usize }
+struct Inner { path: PathBuf, read: File, w: std::sync::Mutex<W>, idx: std::sync::RwLock<Vec<(u64, u32)>> }
+struct W { file: File, size: u64, torn: bool }
 
 impl Store {
     pub fn open(path: &Path) -> Result<Store> {
@@ -58,36 +63,39 @@ impl Store {
             }
         }
         let file = OpenOptions::new().create(true).read(true).append(true).open(path).with_context(|| format!("append {}", path.display()))?;
-        Ok(Store { path: path.to_path_buf(), file, idx, size, torn: torn_bytes > 0, torn_bytes, bad })
+        let read = File::open(path)?;
+        Ok(Store { inner: std::sync::Arc::new(Inner { path: path.to_path_buf(), read, w: std::sync::Mutex::new(W { file, size, torn: torn_bytes > 0 }), idx: std::sync::RwLock::new(idx) }), torn_bytes, bad })
     }
-    pub fn len(&self) -> usize { self.idx.len() }
-    pub fn path(&self) -> &Path { &self.path }
+    pub fn len(&self) -> usize { self.inner.idx.read().unwrap().len() }
+    pub fn path(&self) -> &Path { &self.inner.path }
     pub fn get(&self, i: usize) -> Result<String> {
-        let (off, len) = self.idx[i];
-        let mut b = vec![0u8; len as usize]; self.file.read_exact_at(&mut b, off)?;
+        let (off, len) = *self.inner.idx.read().unwrap().get(i).ok_or_else(|| anyhow::anyhow!("no line {i}"))?;
+        let mut b = vec![0u8; len as usize]; self.inner.read.read_exact_at(&mut b, off)?;
         Ok(clean(&String::from_utf8_lossy(&b)).into_owned())
     }
     /// Lines a..b (clamped), read in one pass over their byte range.
     pub fn range(&self, a: usize, b: usize) -> Result<Vec<String>> {
-        let b = b.min(self.idx.len()); if a >= b { return Ok(vec![]) }
-        let (start, last) = (self.idx[a].0, self.idx[b - 1]);
-        let mut buf = vec![0u8; (last.0 + last.1 as u64 - start) as usize]; self.file.read_exact_at(&mut buf, start)?;
-        Ok(self.idx[a..b].iter().map(|(off, len)| clean(&String::from_utf8_lossy(&buf[(off - start) as usize..(off - start) as usize + *len as usize])).into_owned()).collect())
+        let spans: Vec<(u64, u32)> = { let idx = self.inner.idx.read().unwrap(); let b = b.min(idx.len()); if a >= b { return Ok(vec![]) } idx[a..b].to_vec() };
+        let (start, last) = (spans[0].0, *spans.last().unwrap());
+        let mut buf = vec![0u8; (last.0 + last.1 as u64 - start) as usize]; self.inner.read.read_exact_at(&mut buf, start)?;
+        Ok(spans.iter().map(|(off, len)| clean(&String::from_utf8_lossy(&buf[(off - start) as usize..(off - start) as usize + *len as usize])).into_owned()).collect())
     }
     pub fn all(&self) -> Vec<String> { self.range(0, self.len()).unwrap_or_default() }
-    /// Durable before it returns: the caller acknowledges only after this.
-    pub fn append(&mut self, line: &str) -> Result<()> { self.append_many(&[line]) }
-    /// Several events, one write and one fsync (group commit): the ack waits once, not per event.
-    pub fn append_many(&mut self, lines: &[&str]) -> Result<()> {
+    /// Durable before it returns; blocking (an fsync): call it from a blocking thread. Returns the index of the
+    /// first line appended. One writer at a time; readers are not held up.
+    pub fn append_many(&self, lines: &[&str]) -> Result<usize> {
+        let mut w = self.inner.w.lock().unwrap();
         let mut buf = Vec::with_capacity(lines.iter().map(|l| l.len() + 1).sum::<usize>() + 1);
-        if self.torn { buf.push(b'\n'); }
-        let mut at = self.size + buf.len() as u64;
+        if w.torn { buf.push(b'\n'); }
+        let mut at = w.size + buf.len() as u64;
         let mut spans = Vec::with_capacity(lines.len());
         for l in lines { debug_assert!(!l.contains('\n')); spans.push((at, l.len() as u32)); buf.extend(l.as_bytes()); buf.push(b'\n'); at += l.len() as u64 + 1; }
-        self.file.write_all(&buf)?; self.file.sync_data()?;
-        self.idx.extend(spans); self.size += buf.len() as u64; self.torn = false;
-        Ok(())
+        w.file.write_all(&buf)?; w.file.sync_data()?;
+        w.size += buf.len() as u64; w.torn = false;
+        let mut idx = self.inner.idx.write().unwrap(); let first = idx.len(); idx.extend(spans);
+        Ok(first)
     }
+    pub fn append(&self, line: &str) -> Result<()> { self.append_many(&[line]).map(|_| ()) }
 }
 
 #[cfg(test)]
@@ -100,19 +108,19 @@ mod tests {
     }
     #[test] fn a_torn_tail_is_closed_off_before_the_next_write() {
         let p = tmp("close"); std::fs::write(&p, "{\"$\":\"A\",\"at\":1}\n{\"$\":\"B\"").unwrap();
-        let mut s = Store::open(&p).unwrap(); s.append("{\"$\":\"D\",\"at\":3}").unwrap();
+        let s = Store::open(&p).unwrap(); s.append("{\"$\":\"D\",\"at\":3}").unwrap();
         let again = Store::open(&p).unwrap(); assert_eq!(again.len(), 2); assert_eq!(again.bad, 1);
         assert_eq!(std::fs::read_to_string(&p).unwrap(), "{\"$\":\"A\",\"at\":1}\n{\"$\":\"B\"\n{\"$\":\"D\",\"at\":3}\n");
     }
     #[test] fn appended_lines_survive_reopen() {
-        let p = tmp("dur"); let mut s = Store::open(&p).unwrap(); for i in 0..50 { s.append(&format!("{{\"$\":\"X\",\"at\":{i}}}")).unwrap(); }
+        let p = tmp("dur"); let s = Store::open(&p).unwrap(); for i in 0..50 { s.append(&format!("{{\"$\":\"X\",\"at\":{i}}}")).unwrap(); }
         assert_eq!(Store::open(&p).unwrap().len(), 50);
     }
     // law store_torn_tail_newline: a torn tail is closed with a newline; a log ending in one, or empty, needs none
     #[test] fn store_torn_tail_newline() {
         for (bytes, closes) in [(&b"{\""[..], true), (&b"{\n"[..], false), (&b""[..], false)] {
             let p = tmp(&format!("nl{}", bytes.len())); std::fs::write(&p, bytes).unwrap();
-            let mut s = Store::open(&p).unwrap(); s.append("{\"$\":\"Z\"}").unwrap();
+            let s = Store::open(&p).unwrap(); s.append("{\"$\":\"Z\"}").unwrap();
             let text = String::from_utf8(std::fs::read(&p).unwrap()).unwrap();
             assert_eq!(text.starts_with(std::str::from_utf8(bytes).unwrap()) && text[bytes.len()..].starts_with('\n') && closes || !closes, true);
             assert_eq!(text.ends_with("{\"$\":\"Z\"}\n"), true);
@@ -133,7 +141,7 @@ mod tests {
         let ys: Vec<String> = (7..12).map(|i| format!("{{\"$\":\"Y\",\"at\":{i}}}")).collect();
         let whole = tmp("la-whole"); std::fs::write(&whole, xs.iter().chain(&ys).map(|l| format!("{l}\n")).collect::<String>()).unwrap();
         let part = tmp("la-part"); std::fs::write(&part, xs.iter().map(|l| format!("{l}\n")).collect::<String>()).unwrap();
-        let mut s = Store::open(&part).unwrap(); for y in &ys { s.append(y).unwrap(); }
+        let s = Store::open(&part).unwrap(); for y in &ys { s.append(y).unwrap(); }
         assert_eq!(Store::open(&part).unwrap().all(), Store::open(&whole).unwrap().all());
     }
     #[test] fn lone_surrogates_become_replacement_characters() {
@@ -142,6 +150,13 @@ mod tests {
         assert_eq!(clean(r#"{"a":"\ud83d\ude42"}"#), r#"{"a":"\ud83d\ude42"}"#); // a pair stays
         assert_eq!(clean(r#"{"a":"\\ud83d"}"#), r#"{"a":"\\ud83d"}"#);        // an escaped backslash is not an escape
         assert!(serde_json::from_str::<serde_json::Value>(&clean(r#"{"a":"\ud83d\u00e9"}"#)).is_ok());
+    }
+    // law outbox_fifo: a log goes oldest first from where the client was (OB.Join.from(["d","c","b","a"], 4, 1) == ["b","c","d"])
+    #[test] fn outbox_fifo() {
+        let p = tmp("fifo"); std::fs::write(&p, "{\"$\":\"a\"}\n{\"$\":\"b\"}\n{\"$\":\"c\"}\n{\"$\":\"d\"}\n").unwrap();
+        let s = Store::open(&p).unwrap();
+        assert_eq!(s.range(1, 4).unwrap(), vec!["{\"$\":\"b\"}", "{\"$\":\"c\"}", "{\"$\":\"d\"}"]);
+        assert_eq!(s.range(4, 9).unwrap(), Vec::<String>::new());
     }
     #[test] fn unicode_and_blank_lines() {
         let p = tmp("uni"); std::fs::write(&p, "{\"$\":\"M\",\"text\":\"日本語🙂\"}\n\n{\"$\":\"N\"}\n").unwrap();
