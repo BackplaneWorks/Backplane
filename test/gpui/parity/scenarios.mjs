@@ -61,4 +61,13 @@ export const SCENARIOS={
     const c=await connect({hub,rec,name:'resumed',profile:'raw',query:`since=${since}&origin=${origin}`});await c.settle(900);
     await b.end(500);await c.end(800);
   },
+  // 7. a thread id that names no folder (unknown, empty, deleted) on files, git, mech and the like (post-#960: every one refuses, none schedules a job)
+  async unresolved({hub,rec}){
+    const c=await connect({hub,rec,name:'raw',profile:'raw'});await c.settle(800);
+    const THREADS=['missing','','t1700000003-4'];
+    const CALLS=[['files.dir',{path:''}],['files.dir',{path:'etc'}],['files.dir',{path:'..'}],['files.list',{}],['git.status',{}],['git.diff',{}],['mech.list',{}],['boards.list',{}],['history.refs',{}],['review.bom',{}],['review.checks',{}]];
+    for(const th of THREADS)for(const [m,x] of CALLS)await c.rpc(m,{thread:th,...x});
+    for(const th of THREADS)for(const route of ['/view/get','/files/get','/files/zip'])await httpProbe(hub,`${route}?thread=${encodeURIComponent(th)}&path=note.txt`,rec,'raw',{auth:true});
+    await c.end(800);
+  },
 };

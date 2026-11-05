@@ -18,9 +18,9 @@ export const PROFILES={
   gpuid:{query:'view=1&mobile=1',view:true,extra:{nativeSidebar:1},delta:true},
 };
 
-export async function httpProbe(hub,path,rec,name){
-  rec.push(name,'out','http-get',null,{path});
-  const r=await fetch(hub.url+path).catch(e=>({status:0,headers:new Headers(),arrayBuffer:async()=>new ArrayBuffer(0),err:String(e)}));
+export async function httpProbe(hub,path,rec,name,{auth=false}={}){
+  rec.push(name,'out','http-get',null,{path,auth});
+  const r=await fetch(hub.url+path,auth?{headers:{Authorization:'Bearer '+hub.token}}:{}).catch(e=>({status:0,headers:new Headers(),arrayBuffer:async()=>new ArrayBuffer(0),err:String(e)}));
   const body=new Uint8Array(await r.arrayBuffer());
   let json=null;try{json=decode(body)}catch{}
   rec.push(name,'in','http',body,json,{status:r.status,ctype:r.headers.get('content-type')||''});

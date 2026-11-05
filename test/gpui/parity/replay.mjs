@@ -32,7 +32,7 @@ export async function replayOne(recording,{bin,port,work}){
     if(f.dir==='in'&&f.json?.t==='reply'&&!(f.vol&&volIds.has(f.c+'|'+f.json.id)))for(const cm of f.json.result?.cmds||[])if(cm.type==='send'){try{(cmdRec[f.c]??=[]).push({q:JSON.parse(cm.text),used:false})}catch{}}
     if(f.dir==='out'&&f.kind==='bin'&&!f.vol&&f.json&&!f.json.raw){const k=(cmdRec[f.c]||[]).findIndex(x=>!x.used&&JSON.stringify(x.q)===JSON.stringify(f.json));if(k>=0){cmdRec[f.c][k].used=true;outCmd.set(f.i,k)}}}
   const cmdRep={};
-  const h=await startFixtureHub({bin,port,work});
+  const h=await startFixtureHub({bin,port,work,deleted:meta.scenario==='unresolved'});
   const rec=new Rec();const clients={};const repIds=[],repSeen=new Set();const viewIdsRep={};
   const observe=(c)=>{for(const j of c.inbox.slice(c.obs||0)){
       if(j?.t==='reply'&&!(j.ok===false))for(const cm of j.result?.cmds||[])if(cm.type==='send'){try{(cmdRep[c.name]??=[]).push(JSON.parse(cm.text))}catch{}}const vid=j?.result?.viewId;if(vid&&!(viewIdsRep[c.name]??=[]).includes(vid))viewIdsRep[c.name].push(vid);
@@ -84,7 +84,7 @@ export async function replayOne(recording,{bin,port,work}){
     const c=clients[f.c];
     if(f.dir==='out'){
       if(f.kind!=='settle'){const d=T0+f.ms-Date.now();if(d>0)await sleep(d)}
-      if(f.kind==='http-get'){await httpProbe(h,f.json.path,rec,f.c);continue}
+      if(f.kind==='http-get'){await httpProbe(h,f.json.path,rec,f.c,{auth:f.json.auth});continue}
       if(f.kind==='connect'){
         if(f.json.mode==='good'){let q=f.json.query||'';
           // a resume names the log position and origin it was given: the origin is the target's own
