@@ -1,0 +1,21 @@
+{"$":"ThreadCreated","id":"t1793870421-147","project":"","title":"ada","env":"local","branch":"","worktree":"","provider":"claude","model":""}
+{"$":"BotSet","id":"b1793870421-147","name":"ada","thread":"t1793870421-147","look":304951,"persona":""}
+{"$":"WorktreeSet","id":"t1793870421-147","branch":"","worktree":"/home/h/Documents/i2cjak/backplane-gpui/build/gpui/results/bots/rec2/work/home/bots/b1793870421-147"}
+{"$":"RoutineSet","id":"ro1","bot":"b1793870421-147","name":"morning","cron":"30 9 * * *","prompt":"good morning","on":true}
+{"$":"RoutinePlan","id":"ro1","once":0,"tz":"person","kind":""}
+{"$":"RoutineSet","id":"ro2","bot":"b1793870421-147","name":"soon","cron":"","prompt":"once please","on":true}
+{"$":"RoutinePlan","id":"ro2","once":"<T>","tz":"person","kind":""}
+{"$":"RoutineSet","id":"ro3","bot":"b1793870421-147","name":"hourly","cron":"0 * * * *","prompt":"tick","on":true}
+{"$":"RoutinePlan","id":"ro3","once":0,"tz":"UTC","kind":""}
+{"$":"RoutineSet","id":"ro3","bot":"b1793870421-147","name":"hourly","cron":"0 * * * *","prompt":"tick","on":false}
+{"$":"RoutineFired","id":"ro1"}
+{"$":"RoutineSlot","id":"ro1","slot":"<T>"}
+{"$":"BotWoke","bot":"b1793870421-147","hop":0}
+{"$":"MessagePosted","thread":"t1793870421-147","msg":"m1793870424-158.0","role":"user","text":"[routine: morning]\ngood morning"}
+{"$":"MessageFrom","thread":"t1793870421-147","msg":"m1793870424-158.0","from":"routine:morning","kind":"routine","ref":"morning"}
+{"$":"RoutineFired","id":"ro2"}
+{"$":"RoutineDone","id":"ro2"}
+{"$":"BotWoke","bot":"b1793870421-147","hop":0}
+{"$":"MessagePosted","thread":"t1793870421-147","msg":"m1793870432-189.0","role":"user","text":"[routine: soon]\nonce please"}
+{"$":"MessageFrom","thread":"t1793870421-147","msg":"m1793870432-189.0","from":"routine:soon","kind":"routine","ref":"soon"}
+{"$":"RoutineDeleted","id":"ro1"}

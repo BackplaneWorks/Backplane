@@ -326,7 +326,7 @@ impl Zones<'_> {
     /// Zone.rule.of: a routine's tz field ("person" is the person's zone)
     pub fn rule_of(&self, tz: &str) -> Option<TzRule> { self.rule(&if tz == "person" { self.person() } else { tz.to_string() }) }
     /// Zone.valid: a name made of letters, digits and _ + - / segments
-    pub fn valid(name: &str) -> bool { !name.is_empty() && name.split('/').all(|seg| !seg.is_empty() && seg.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '+' || c == '-')) }
+    pub fn valid(name: &str) -> bool { (1..=64).contains(&name.chars().count()) && name.split('/').all(|seg| !seg.is_empty() && seg.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '+' || c == '-')) }
 }
 /// the fields of a routine the schedule reads
 pub struct Plan<'a> { pub cron: &'a str, pub on: bool, pub deleted: bool, pub done: bool, pub last: u64, pub once: u64, pub tz: &'a str, pub slot: u64 }

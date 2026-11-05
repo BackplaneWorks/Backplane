@@ -224,11 +224,14 @@ const JS_STEPS: &str = include_str!("../../../../test/gpui/bots/fixtures/js-step
 /// test/gpui/bots/filter.py: the events a bots scenario is about, without clocks
 fn filter(ev: &[Value]) -> Vec<Value> {
     let threads: std::collections::HashSet<String> = ev.iter().filter(|e| e["$"] == "BotSet" && !e["thread"].as_str().unwrap_or("").is_empty()).map(|e| e["thread"].as_str().unwrap().to_string()).collect();
-    const KEEP: [&str; 11] = ["BotSet", "BotDeleted", "RoomSet", "RoomDeleted", "RoomPosted", "BotWoke", "MemorySaved", "MemoryForgot", "SpaceSet", "WorktreeSet", "UberSet"];
+    const KEEP: [&str; 18] = ["BotSet", "BotDeleted", "RoomSet", "RoomDeleted", "RoomPosted", "BotWoke", "MemorySaved", "MemoryForgot", "SpaceSet", "WorktreeSet", "UberSet",
+        "RoutineSet", "RoutinePlan", "RoutineFired", "RoutineSlot", "RoutineDone", "RoutineDeleted", "Reminded"];
     ev.iter().filter(|e| { let k = e["$"].as_str().unwrap_or(""); let th = e["thread"].as_str().unwrap_or("");
         match k { "ThreadCreated" => e["project"] == "", "MessagePosted" => threads.contains(th) && e["role"] == "user", "MessageFrom" => threads.contains(th),
             "WorktreeSet" => threads.contains(e["id"].as_str().unwrap_or("")), _ => KEEP.contains(&k) } })
-        .map(|e| { let mut o = e.clone(); o.as_object_mut().unwrap().remove("at"); o }).collect()
+        .map(|e| { let mut o = e.clone(); let m = o.as_object_mut().unwrap(); m.remove("at");
+            for k in ["once", "slot"] { if m.get(k).and_then(Value::as_u64).map_or(false, |n| n > 0) { m.insert(k.into(), json!("<T>")); } } // instants are the run's own
+            o }).collect()
 }
 /// ids the hub made (b/t/m + 10-digit clock + "-" + counter) become ordinals by first appearance; a worktree path loses its home
 fn norm(ev: &[Value]) -> Vec<String> {
@@ -285,4 +288,76 @@ fn norm(ev: &[Value]) -> Vec<String> {
     let (a, b) = (norm(&js), norm(&ours));
     for (i, (x, y)) in a.iter().zip(b.iter()).enumerate() { assert_eq!(x, y, "event {i}: JS left, Rust right") }
     assert_eq!(a.len(), b.len(), "same number of events\nJS: {a:#?}\nRust: {b:#?}");
+}
+
+const JS_ROUTINE_EVENTS: &str = include_str!("../../../../test/gpui/bots/fixtures/js-routines.jsonl");
+const JS_ROUTINE_STEPS: &str = include_str!("../../../../test/gpui/bots/fixtures/js-routines-steps.json");
+
+#[tokio::test] async fn js_parity_routines() {
+    std::env::set_var("TZ", "Etc/UTC"); // the recording's hub ran in UTC
+    let (hub, _b, _r) = start("parity-routines", "").await;
+    let steps: Vec<Value> = serde_json::from_str(JS_ROUTINE_STEPS).unwrap();
+    let step = |i: usize, r: &Value| { let want = &steps[i]; assert_eq!((r["ok"].as_bool().unwrap(), r.get("error").and_then(Value::as_str).map(str::to_string)), (want["ok"].as_bool().unwrap(), want["error"].as_str().map(str::to_string)), "step {} ({})", i, want["name"]) };
+    let ada = bot(&hub, "ada").await;
+    let mut i = 1;
+    for (m, p) in [
+        ("bots.routine", json!({"bot":ada,"routine":"ro1","name":"morning","schedule":"daily 09:30","prompt":"good morning"})),
+        ("bots.routine", json!({"bot":ada,"name":"x","schedule":"whenever","prompt":"p"})),
+        ("bots.routine", json!({"bot":ada,"name":"x","prompt":"p"})),
+        ("bots.routine", json!({"bot":ada,"name":"x","schedule":"daily 09:30","at":"in 1h","prompt":"p"})),
+        ("bots.routine", json!({"bot":ada,"name":"x","schedule":"daily 09:30","tz":"not a zone","prompt":"p"})),
+        ("bots.routine", json!({"bot":ada,"name":"x","at":"banana","prompt":"p"})),
+        ("bots.routine", json!({"bot":"nope","name":"x","schedule":"daily 09:30","prompt":"p"})),
+        ("bots.routine", json!({"bot":ada,"routine":"ro2","name":"soon","at":"in 3s","prompt":"once please"})),
+        ("bots.routine", json!({"bot":ada,"routine":"ro3","name":"hourly","schedule":"@hourly","tz":"UTC","prompt":"tick"})),
+        ("bots.routine", json!({"bot":ada,"routine":"ro3","name":"hourly","prompt":"tick","on":false,"keep":true})),
+        ("bots.routine_run", json!({"routine":"ro1"})),
+        ("bots.routine_run", json!({"routine":"ro2"})),
+        ("bots.routine_delete", json!({"routine":"ro1"})),
+        ("bots.routine_run", json!({"routine":"ro1"})),
+        ("bots.routine_run", json!({"routine":"zz"})),
+    ] { let r = rpc(&hub, m, p).await; step(i, &r); i += 1; }
+    let js: Vec<Value> = JS_ROUTINE_EVENTS.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+    let (a, b) = (norm(&js), norm(&filter(&log(&hub))));
+    for (i, (x, y)) in a.iter().zip(b.iter()).enumerate() { assert_eq!(x, y, "event {i}: JS left, Rust right") }
+    assert_eq!(a.len(), b.len(), "same number of events\nJS: {a:#?}\nRust: {b:#?}");
+}
+
+#[tokio::test] async fn routines_tick_fires_what_is_due_once_and_a_reminder_alerts() {
+    std::env::set_var("TZ", "Etc/UTC");
+    let (hub, bots, rec) = start("routine-tick", "").await;
+    let ada = bot(&hub, "ada").await; let th = bots.world().await.bot(&ada).unwrap().thread.clone();
+    // a one-time routine at a past instant is due; it fires once, then is done
+    let past = 1_000_000u64;
+    for e in [json!({"$":"RoutineSet","id":"o1","bot":ada,"name":"once","cron":"","prompt":"p1","on":true,"at":past}), json!({"$":"RoutinePlan","id":"o1","once":past + 10,"tz":"person","kind":"","at":past})] { hub.commit(&e).await.unwrap(); }
+    assert_eq!(bots.tick_at(past + 20).await, 1); assert_eq!(bots.tick_at(past + 21).await, 0, "done is never due again");
+    { let got = rec.got.lock().unwrap(); assert_eq!(got.len(), 1); assert_eq!(got[0].2, "[routine: once]\np1"); assert_eq!(got[0].3, Some(("routine:once".into(), "routine".into(), "once".into()))); }
+    assert!(log(&hub).iter().any(|e| e["$"] == "RoutineDone" && e["id"] == "o1"));
+    // a repeating routine fires once per slot
+    for e in [json!({"$":"RoutineSet","id":"d1","bot":ada,"name":"daily","cron":"30 9 * * *","prompt":"p2","on":true,"at":past}), json!({"$":"RoutinePlan","id":"d1","once":0,"tz":"person","kind":"","at":past})] { hub.commit(&e).await.unwrap(); }
+    let day = (past / 86400 + 1) * 86400 + 9 * 3600 + 30 * 60; // 09:30 UTC the next day
+    assert_eq!(bots.tick_at(day - 1).await, 0); assert_eq!(bots.tick_at(day).await, 1); assert_eq!(bots.tick_at(day + 30).await, 0, "one fire per slot");
+    // a reminder: no agent turn, an alert record for its thread
+    for e in [json!({"$":"RoutineSet","id":"r1","bot":ada,"name":"water","cron":"","prompt":"drink\twater","on":true,"at":past}), json!({"$":"RoutinePlan","id":"r1","once":past + 10,"tz":"person","kind":"remind","at":past})] { hub.commit(&e).await.unwrap(); }
+    let n = rec.got.lock().unwrap().len();
+    assert_eq!(bots.tick_at(past + 30).await, 1);
+    assert_eq!(rec.got.lock().unwrap().len(), n, "a reminder wakes no one");
+    let ev = log(&hub); let rem = ev.iter().find(|e| e["$"] == "Reminded").unwrap();
+    assert_eq!((rem["id"].as_str().unwrap(), rem["thread"].as_str().unwrap(), rem["text"].as_str().unwrap()), ("r1", th.as_str(), "drink\twater"));
+    let al = ev.iter().rev().find(|e| e["$"] == "SettingSet" && e["key"] == format!("alert.{th}").as_str()).unwrap()["value"].as_str().unwrap().to_string();
+    let f: Vec<&str> = al.split('\t').collect(); assert_eq!((f[0], f[1], f[4]), ("reminder", "remind-r1", "drink water"));
+}
+
+#[test] fn routines_plan_reads_like_bots_plan() {
+    use super::clock::Zones; use super::routines::{plan, Pick};
+    use std::collections::HashMap;
+    let mut s: HashMap<String, String> = HashMap::new();
+    s.insert("person.tz".into(), "Europe/Helsinki".into()); s.insert("tz.rule.Europe/Helsinki".into(), "EET-2EEST,M3.5.0/3,M10.5.0/4".into());
+    let z = Zones { settings: &s };
+    assert_eq!(plan(&z, 1791957600, "", " daily 09:30 ", "", None), Pick::Plan { cron: "30 9 * * *".into(), once: 0, tz: "person".into() });
+    assert_eq!(plan(&z, 1791957600, "machine", "@hourly", "", None), Pick::Plan { cron: "0 * * * *".into(), once: 0, tz: String::new() });
+    assert_eq!(plan(&z, 1791957600, "", "", "tomorrow 9am", None), Pick::Plan { cron: String::new(), once: 1792044000, tz: "person".into() });
+    assert!(matches!(plan(&z, 1, "Mars/Base", "", "tomorrow 9am", None), Pick::Plan { .. }) == false);
+    assert_eq!(plan(&z, 1, "Mars/Base", "", "tomorrow 9am", None), Pick::Bad("I don't have that time zone's rules yet; try again in a minute (or give the time with its offset, or as in 20m)".into()));
+    assert_eq!(plan(&z, 1, "Mars/Base", "", "in 5m", None), Pick::Plan { cron: String::new(), once: 301, tz: "Mars/Base".into() });
 }
