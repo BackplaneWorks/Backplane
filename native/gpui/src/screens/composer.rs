@@ -18,6 +18,9 @@ actions!(composer, [Backspace, Delete, WordBackspace, WordDelete, Left, Right, W
 
 pub const MAX_LINES: f32 = 12.0;
 
+/// `*` for every byte of every character, so a byte offset in the secret is the same offset in what is shown.
+pub fn mask(s: &str) -> String { let mut o = String::with_capacity(s.len()); for ch in s.chars() { if ch == '\n' { o.push('\n'); } else { for _ in 0..ch.len_utf8() { o.push('*'); } } } o }
+
 pub enum ComposerEvent {
     /// A clipboard image (encoded bytes and extension).
     Image { bytes: Vec<u8>, ext: &'static str },
@@ -65,6 +68,8 @@ pub struct Composer {
     scroll_y: Pixels,
     selecting: bool,
     pub light: bool,
+    /// Show every character as `*` (same byte length, so offsets stay exact); copy and cut give nothing.
+    pub masked: bool,
     ctx: &'static str,
 }
 
@@ -78,7 +83,7 @@ impl Composer {
     pub fn new(cx: &mut Context<Self>) -> Self { Self::with_context(cx, "Composer") }
     /// A composer with its own key context: "Composer" sends on Enter (main.rs), "AskInput" emits Submit.
     pub fn with_context(cx: &mut Context<Self>, ctx: &'static str) -> Self {
-        Self { light: false, ctx, focus: cx.focus_handle(), ed: Editor::default(), content: "".into(), placeholder: "Ask anything: @bot, >thread, %project, #room, $skill, /btw".into(),
+        Self { light: false, masked: false, ctx, focus: cx.focus_handle(), ed: Editor::default(), content: "".into(), placeholder: "Ask anything: @bot, >thread, %project, #room, $skill, /btw".into(),
             rows: vec![], bounds: None, line_height: px(20.), scroll_y: px(0.), selecting: false }
     }
     pub fn set(&mut self, text: String, cx: &mut Context<Self>) { self.ed.set(&text); self.sync(cx); }
@@ -120,9 +125,11 @@ impl Composer {
     fn sel_up(&mut self, _: &SelUp, _: &mut Window, cx: &mut Context<Self>) { self.vertical(-1, true, cx); }
     fn sel_down(&mut self, _: &SelDown, _: &mut Window, cx: &mut Context<Self>) { self.vertical(1, true, cx); }
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
+        if self.masked { return; }
         if !self.ed.selection().is_empty() { cx.write_to_clipboard(ClipboardItem::new_string(self.ed.selected().to_string())); } else { cx.emit(ComposerEvent::CopyTimeline); }
     }
     fn cut(&mut self, _: &Cut, _: &mut Window, cx: &mut Context<Self>) {
+        if self.masked { return; }
         let s = self.ed.cut(); if !s.is_empty() { cx.write_to_clipboard(ClipboardItem::new_string(s)); self.sync(cx); }
     }
     fn paste(&mut self, _: &Paste, _: &mut Window, cx: &mut Context<Self>) {
@@ -250,7 +257,7 @@ impl gpui::Element for Element_ {
     fn source_location(&self) -> Option<&'static core::panic::Location<'static>> { None }
     fn request_layout(&mut self, _: Option<&GlobalElementId>, _: Option<&gpui::InspectorElementId>, window: &mut Window, cx: &mut App) -> (LayoutId, ()) {
         let input = self.input.read(cx);
-        let text: SharedString = if input.content.is_empty() { input.placeholder.clone() } else { input.content.clone() };
+        let text: SharedString = if input.content.is_empty() { input.placeholder.clone() } else if input.masked { mask(&input.content).into() } else { input.content.clone() };
         let style = window.text_style();
         let (font_size, lh) = (style.font_size.to_pixels(window.rem_size()), window.line_height());
         let base = TextRun { len: text.len(), font: style.font(), color: style.color, background_color: None, underline: None, strikethrough: None };
@@ -268,7 +275,7 @@ impl gpui::Element for Element_ {
         let style = window.text_style();
         let (font_size, lh) = (style.font_size.to_pixels(window.rem_size()), window.line_height());
         let empty = input.content.is_empty();
-        let (text, color) = if empty { (input.placeholder.clone(), theme::color(light, "faint").into()) } else { (input.content.clone(), style.color) };
+        let (text, color) = if empty { (input.placeholder.clone(), theme::color(light, "faint").into()) } else if input.masked { (mask(&input.content).into(), style.color) } else { (input.content.clone(), style.color) };
         let base = TextRun { len: text.len(), font: style.font(), color, background_color: None, underline: None, strikethrough: None };
         let marked = if empty { None } else { input.ed.marked.clone() };
         let rows = shape_rows(window, &text, &base, marked.as_ref(), font_size, Some(bounds.size.width), lh);
@@ -363,4 +370,16 @@ pub fn bind(cx: &mut App) {
     ]);
     }
     cx.bind_keys([KeyBinding::new("enter", Go, Some("AskInput"))]);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use core::prelude::v1::test;
+    #[test] fn the_mask_keeps_every_byte_offset_and_newline() {
+        let s = "key-é日\nline2";
+        let m = mask(s);
+        assert_eq!(m.len(), s.len()); assert_eq!(m.find('\n'), s.find('\n')); assert!(m.chars().all(|c| c == '*' || c == '\n'));
+        assert_eq!(mask(""), "");
+    }
 }
