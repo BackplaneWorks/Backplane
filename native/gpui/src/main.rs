@@ -54,6 +54,7 @@ impl Backplane {
         Self{input,data:Value::Null,status:"Connecting…".into(),error:art::assets_missing().unwrap_or_default(),tx,selected:String::new(),drafts:saved.clone(),started,usable:false,first_frame:false,script_done:false,scroll:ScrollHandle::new(),last_entries:0,cats:art::Cats::new(),links_sent:false,links_last:String::new(),sidebar_open:true,thread_cache:Vec::new(),thread_source:"hub",confirm:None,ack_pending:None,recording:None,ui_epoch:0,controls:Vec::new(),ctl_last:String::new(),last_layout:String::new(),wake_at:None,reconnected:false,click_info:None,timing:None,applied_at:None,apply_ms:0.0,render_us:0,swatches,gallery,fonts,theme_override:theme.as_deref().map(|t|t=="light"),steps,pending:None,seq:0,want_focus:false,script_total,screens:screens::Screens::new(cx,target,drafts_path,saved)}
     }
     fn receive(&mut self,event:Event,cx:&mut Context<Self>) {
+        if let Some(s)=hub::status_for(&event){self.status=s.into();}
         match event {
             Event::NetWake=>{self.wake_at=Some(Instant::now());self.m("net",serde_json::json!({"event":"hub_reachable_again"}));},
             Event::Picture(r,timing)=>{
@@ -74,7 +75,8 @@ impl Backplane {
             Event::PlotTooBig(n)=>self.screens.plot.too_big(n),
             Event::Status(s)=>{self.status=s;if self.status=="Connected"{self.error.clear();}},
             Event::Accepted=>{self.input.update(cx,|input,cx|input.set(String::new(),cx));self.drafts.remove(&self.selected);},
-            Event::Error(e)=>{self.error=e;self.status="Disconnected".into();},
+            Event::Error(e)=>{self.error=e;},
+            Event::Refused(e)=>{self.error=e;},
         }
         cx.notify();
     }
