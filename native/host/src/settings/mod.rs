@@ -34,6 +34,33 @@ pub fn open(home: &std::path::Path) {
     if st["locked"] == true { eprintln!("vault: locked: {}", st["why"].as_str().unwrap_or("")); }
 }
 
+/// The Settings pages' status reads. The JS hub's replies to `secret.list` / `secret.set` / `secret.del` (`secrets` and `vault`, JSON texts) and to `bots.voice`
+/// (`apiKeys`, `voiceKey`, ...) are FLAT: the client's Ui reads those fields from the reply itself (Sbox.reply, Voice.reply). The view's policy applies them
+/// as reads (session::record_read, kinds "secret.list" and "bots.voice"); `body` is the reply without `t`, `id` and `ok`, which the policy must merge flat
+/// into the reply it builds (it wraps `result` for the other kinds). A secret.set/del reply carries the same two fields as the list, so it is kind "secret.list" too.
+/// A failure keeps its `error`. Values never come from the client.
+pub fn read_of(method: &str, reply: &serde_json::Value) -> Option<(&'static str, bool, serde_json::Value)> {
+    let kind = match method { "secret.list" | "secret.set" | "secret.del" => "secret.list", "bots.voice" => "bots.voice", _ => return None };
+    if reply["t"] != "reply" { return None }
+    let mut body = reply.clone();
+    if let Some(o) = body.as_object_mut() { for k in ["t", "id", "ok"] { o.remove(k); } }
+    Some((kind, reply["ok"].as_bool().unwrap_or(true), body))
+}
+
+#[cfg(test)]
+mod read_tests {
+    use super::*; use serde_json::json;
+    #[test] fn the_secret_box_and_voice_replies_are_status_reads_with_their_flat_fields() {
+        let r = json!({"t":"reply","id":9,"ok":true,"secrets":"[]","vault":"{\"n\":0}"});
+        assert_eq!(read_of("secret.list", &r), Some(("secret.list", true, json!({"secrets":"[]","vault":"{\"n\":0}"}))));
+        assert_eq!(read_of("secret.set", &r).unwrap().0, "secret.list"); assert_eq!(read_of("secret.del", &r).unwrap().0, "secret.list");
+        let v = json!({"t":"reply","id":3,"ok":true,"apiKeys":"A\nB"}); assert_eq!(read_of("bots.voice", &v), Some(("bots.voice", true, json!({"apiKeys":"A\nB"}))));
+        let e = json!({"t":"reply","id":4,"ok":false,"error":"A secret is at least 8 characters"}); assert_eq!(read_of("secret.set", &e), Some(("secret.list", false, json!({"error":"A secret is at least 8 characters"}))));
+        assert_eq!(read_of("setting.set", &r), None); assert_eq!(read_of("secret.list", &json!({"t":"info"})), None);
+    }
+    #[test] fn a_planted_value_is_never_part_of_a_read() { let r = json!({"t":"reply","id":1,"ok":true,"secrets":"[{\"name\":\"k\"}]","vault":"{}"}); assert!(!read_of("secret.set", &r).unwrap().2.to_string().contains("value")); }
+}
+
 /// Registers the handlers (after `open`).
 pub fn start(hub: Arc<Hub>, agents: Option<Arc<crate::agents::Agents>>) {
     hub.register_rpc(Arc::new(set::SettingSet { agents: agents.clone() }));

@@ -446,6 +446,8 @@ impl Hub {
         if matches!(method, "files.dir" | "pdf.page" | "mech.list" | "mech.render" | "boards.list" | "history.refs") && !c.view_id.is_empty() {
             if let Some(r) = out.first().filter(|r| r["t"] == "reply") { crate::session::record_reply(c.client, method, r); }
         }
+        // the Settings pages' status reads (secret box, API keys/voice): the policy applies the hub's own answer to the view's Ui (settings::read_of)
+        if !c.view_id.is_empty() { if let (Some(m), Some(id), Some(f)) = (msg.get("m").and_then(Value::as_str), msg.get("id").and_then(Value::as_u64), out.first()) { if let Some((kind, ok, body)) = crate::settings::read_of(m, f) { crate::session::record_read(c.client, &c.view_id, kind, id, ok, body); } } }
         // the view actor folds the answer of a request its own commands sent (session/actor.rs: @rp.req, @telemetry.req)
         if !msg.get("m").and_then(Value::as_str).unwrap_or("").starts_with("view.") { if let Some(id) = msg.get("id").and_then(Value::as_u64) { let m = msg.get("m").and_then(Value::as_str).unwrap_or(""); if crate::session::is_job(m) { crate::session::replied_late(c.client, id) } else { crate::session::replied(c.client, id) } } }
         out
