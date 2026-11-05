@@ -18,6 +18,7 @@ const nexts=r=>find(r.result.shown,o=>o.action==='native-sidebar-page');
 let bad=0;const log=(ok,m)=>{console.log((ok?'ok   ':'FAIL ')+m);if(!ok)bad++};
 const r0=await ask('view.open');
 log(r0.ok&&r0.result?.remoteReady===true,'open answers a picture: '+JSON.stringify(r0.error||'').slice(0,80));
+console.log('viewRevision at open: '+r0.result.viewRevision);
 console.log('pagers: '+JSON.stringify(pagers(r0).map(p=>[p.total,p.offset,p.limit,!!p.next])));
 const p0=pager(r0);log(!!p0&&p0.offset===0&&p0.total>=300,'first page: total='+p0?.total+' offset='+p0?.offset+' limit='+p0?.limit);
 let offsets=[p0?.offset];let r=r0;
@@ -27,7 +28,7 @@ for(let i=0;i<3;i++){
   r=await ask('view.action',{action:'native-sidebar-page',value:c.value});
   if(!r.ok||!r.result?.shown){log(false,'page action refused: '+JSON.stringify(r).slice(0,200));break}
   const p=pager(r);offsets.push(p?.offset);
-  console.log('  action reply: remoteReady='+r.result.remoteReady+' cmds='+JSON.stringify(r.result.cmds).slice(0,120)+' session.error='+JSON.stringify(r.result.session?.error)+' note='+JSON.stringify(r.result.session?.note)+' offset='+p?.offset+' tokenSame='+(p?.next?.value===c.value)+' cmdsLen='+(r.result.cmds||[]).length);
+  console.log('  action reply: remoteReady='+r.result.remoteReady+' cmds='+JSON.stringify(r.result.cmds).slice(0,120)+' session.error='+JSON.stringify(r.result.session?.error)+' note='+JSON.stringify(r.result.session?.note)+' offset='+p?.offset+' tokenSame='+(p?.next?.value===c.value)+' cmdsLen='+(r.result.cmds||[]).length+' viewRevision='+r.result.viewRevision);
 }
 log(offsets.length===4&&offsets.every((o,i)=>i===0||o>offsets[i-1]),'the pager advances: offsets '+offsets.join(','));
 console.log(JSON.stringify({failures:bad}));ws.close();await new Promise(r=>process.stdout.write('',r));await new Promise(r=>setTimeout(r,200));process.exit(0);
