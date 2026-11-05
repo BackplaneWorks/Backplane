@@ -35,7 +35,10 @@ MEM=${SWITCH_MEM:-3700M}
 SRC=${SWITCH_SOURCE:-$HOME/.backplane-gpui-copy}
 HUB_BIN=${HUB_BIN:-$ROOT/build/gpui/hub/prov/backplane-hub-full}
 POLICY_BIN=${POLICY_BIN:-$ROOT/build/gpui/slim/bp-policy-bp}
-CLIENT_BIN=${CLIENT_BIN:-$ROOT/build/gpui/linux/backplane-gpui}
+# the newest commit-named client build (client-<10 hex>), with its assets beside it; CLIENT_BIN overrides
+DB=$ROOT/build/gpui/desktop-bin
+CLIENT_BIN=${CLIENT_BIN:-$(ls -t "$DB"/client-* 2>/dev/null | grep -E '/client-[0-9a-f]{9,10}$' | head -1)}
+[ -d "$DB/assets" ] && export BACKPLANE_GPUI_ASSETS=${BACKPLANE_GPUI_ASSETS:-$DB/assets}
 DISP=${SWITCH_DISPLAY:-}   # required for the client: never defaulted from $DISPLAY (an agent window must not land on a screen by accident)
 H=$SW/home
 MODE=copy
@@ -175,9 +178,9 @@ PY
   if [ "${1:-}" != "--no-client" ]; then
     [ -x "$CLIENT_BIN" ] || die "no client $CLIENT_BIN (use --no-client to run the hub alone)"
     [ -n "$DISP" ] || die "no display: set SWITCH_DISPLAY (:61 is the isolated one) or pass --no-client"
-    ( exec env DISPLAY="$DISP" ${VK_ICD_FILENAMES:+VK_ICD_FILENAMES="$VK_ICD_FILENAMES"} HOME="$HOME" \
+    ( exec env DISPLAY="$DISP" ${VK_ICD_FILENAMES:+VK_ICD_FILENAMES="$VK_ICD_FILENAMES"} ${BACKPLANE_GPUI_ASSETS:+BACKPLANE_GPUI_ASSETS="$BACKPLANE_GPUI_ASSETS"} HOME="$HOME" \
         systemd-run --user --scope -q -p "MemoryMax=$MEM" -p MemorySwapMax=0 -- \
-        "$CLIENT_BIN" --url "http://127.0.0.1:$PORT" --token-file "$H/token" > "$SW/client.log" 2>&1 < /dev/null ) &
+        "$CLIENT_BIN" --url "http://127.0.0.1:$PORT" --token-file "$H/token" ${SWITCH_CLIENT_ARGS:-} > "$SW/client.log" 2>&1 < /dev/null ) &
     echo $! > "$SW/client.pid"; echo "client pid $(cat "$SW/client.pid") on $DISP"
   fi
   echo "Running beside today's Backplane (untouched on 3787). To go back: scripts/gpui/switch.sh rollback"
