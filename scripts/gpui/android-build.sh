@@ -11,9 +11,10 @@ ARG=""; [ "$V" = nosidebar ] && ARG=nosidebar
 ARG="$ARG host=${E2E_ANDROID_HOST:-backplane.tail9e0cf2.ts.net}"
 # --include-file means "upload only these": list the app, its shell assets, the job script and the staged bridge
 INC=""; for f in $(git ls-files -co --exclude-standard mobile/android mobile/shell) scripts/gpui/android-build-boat.sh scripts/gpui/android-bridge-stage/bridge.js; do INC="$INC --include-file $f"; done
-LOG=$(mktemp); scripts/boat-job.sh --no-setup-bend --timeout 2400 $INC --artifact build/gpui-apk-artifacts -- sh scripts/gpui/android-build-boat.sh $ARG 2>&1 | tee "$LOG"
+LOG=$(mktemp); scripts/boat-job.sh --no-setup-bend --timeout 2400 $INC --artifact build/gpui-apk-artifacts -- sh scripts/gpui/android-build-boat.sh $ARG > "$LOG" 2>&1; RC=$?; cat "$LOG"
 # this job's folder by the id boat-job printed (the newest folder may be another stream's)
 ID=$(grep -o "job j[0-9]*-[0-9]*" "$LOG" | head -1 | cut -d" " -f2); rm -f "$LOG"
+[ "$RC" -eq 0 ] || { echo "boat-job exit $RC (refused or failed; the output is above)"; exit "$RC"; }
 [ -n "$ID" ] || { echo "no job id in boat-job output"; exit 1; }
 J="${XDG_STATE_HOME:-$HOME/.local/state}/backplane/boat/jobs/$ID/"
 mkdir -p build/gpui/android; cp "$J"artifacts/*/app-debug.apk "build/gpui/android/apk-$V.apk"
