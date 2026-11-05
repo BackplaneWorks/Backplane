@@ -21,8 +21,9 @@ impl HttpHandler for PeerRoutes {
 }
 
 /// The machines list, kept fresh: tailscale's view of the owner's machines plus BACKPLANE_PEERS, each asked /hello.
-async fn find_once(hub: &Arc<Hub>, peering: &Peering, table: &PeerTable) {
-    let status = tailnet::status_json().await;
+async fn find_once(hub: &Arc<Hub>, peering: &Peering, table: &PeerTable) { find_with(hub, peering, table, tailnet::status_json().await).await }
+/// (`status`: `tailscale status --json`, "" when there is none; a test passes its own so it never depends on the host)
+async fn find_with(hub: &Arc<Hub>, peering: &Peering, table: &PeerTable, status: String) {
     let extra = std::env::var("BACKPLANE_PEERS").unwrap_or_default();
     // (this machine first, at once: the probes of the others take seconds)
     hub.set_info("machines", &tailnet::machines_json(&status, peering.port, &[]).to_string()).await;
@@ -69,7 +70,7 @@ mod tests {
     /// info "machines" is the switcher's JSON, as the Bend hub publishes it: self.name "" with no tailnet, its own url, peers named in BACKPLANE_PEERS.
     #[tokio::test] async fn machines_info_is_published_in_the_switchers_shape() {
         let a = super::super::peering::tests::node("minfo", false).await;
-        find_once(&a.hub, &a.p, &a.p.table).await;
+        find_with(&a.hub, &a.p, &a.p.table, String::new()).await;
         let info = a.hub.info_frame()["info"]["machines"].as_str().expect("info machines is a string").to_string();
         let j: serde_json::Value = serde_json::from_str(&info).unwrap();
         assert_eq!(j["self"], serde_json::json!({"name": "", "url": format!("http://127.0.0.1:{}", a.port), "domain": ""}), "{info}");
