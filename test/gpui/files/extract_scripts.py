@@ -6,11 +6,13 @@ and other such defs) into native/host/src/files/scripts/*.sh, so the Rust hub ru
 """
 import re, sys, os
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-SRC = "\n".join(open(os.path.join(ROOT, f)).read() for f in ["src/server/git.bend", "src/server/pdf.bend", "src/core/links.bend", "src/server/server.bend", "src/server/review.bend"])
+SRC = "\n".join(open(os.path.join(ROOT, f)).read() for f in ["src/server/git.bend", "src/server/pdf.bend", "src/core/links.bend", "src/server/server.bend", "src/server/review.bend", "src/server/kexport.bend"]).replace("GT.Git.", "Git.").replace("LK.Link.file.cmd(\"open\")", "Link.file.open()")
 OUT = os.path.join(ROOT, "native/host/src/files/scripts")
 WANT = {"Git.safe.sh": "safe.sh", "Git.index.seed.sh": "index_seed.sh", "Git.step.script": "step.sh", "Git.step.migrate.sh": "step_migrate.sh",
         "Git.refs.script": "refs.sh", "Git.diff.cap.sh": "diff_cap.sh",
-        "Pdf.sh": "pdf.sh", "Link.file.open": "file_open.sh", "Link.file.reveal": "file_reveal.sh", "Mech.cmd": "mech_list.sh", "RvJob.resolve.sh": "resolve.sh", "Git.init.sh": "init.sh"}
+        "Pdf.sh": "pdf.sh", "Link.file.open": "file_open.sh", "Link.file.reveal": "file_reveal.sh", "Mech.cmd": "mech_list.sh", "RvJob.resolve.sh": "resolve.sh", "Git.init.sh": "init.sh",
+        "Rvc.prep.sh": "review_prep.sh", "Rvc.bound.sh": "review_bound.sh", "RvJob.pr.sh": "review_pr.sh", "Rvr.prep.sh": "release_prep.sh", "Rvr.output.sh": "release_output.sh", "Rvr.files.sh": "release_files.sh",
+        "Rvr.commit.sh": "release_commit.sh", "Rvr.source.sh": "release_source.sh", "Rvr.tag.sh": "release_tag.sh", "KExport.guard": "kexport_guard.sh", "KExport.open_script": "kexport_open.sh"}
 defs = {}
 for m in re.finditer(r"^def ([A-Z][A-Za-z]*\.[A-Za-z_.]+)\(\) -> String:\n((?:  .*\n|\n)+?)(?=\S|\Z)", SRC, re.M):
     defs[m.group(1)] = m.group(2).strip("\n")

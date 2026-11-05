@@ -30,9 +30,13 @@ fn git_obj(p: &str) -> String {
     format!("{}:{}", at(p, '\t', 2), norm(&rel))
 }
 /// Git.version: the bytes of a version the viewer names; empty when it cannot be read
-pub fn version(path: &str) -> Vec<u8> {
+pub fn version(path: &str) -> Vec<u8> { version_env(path, &[]) }
+/// The same, with the hub's git settings. A commit word starting with "-" reads as nothing: to `git show` it is an option (--output writes a file).
+pub fn version_env(path: &str, env: &[(&str, &str)]) -> Vec<u8> {
     if kind_of(path) != 1 { return std::fs::read(path).unwrap_or_default() }
-    let o = std::process::Command::new("git").arg(format!("--git-dir={}", at(path, '\t', 1))).arg("show").arg(git_obj(path)).current_dir("/")
+    let obj = git_obj(path);
+    if obj.starts_with('-') { return vec![] }
+    let o = std::process::Command::new("git").arg(format!("--git-dir={}", at(path, '\t', 1))).arg("show").arg(obj).current_dir("/").envs(env.iter().copied())
         .stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null()).output();
     match o { Ok(o) if o.status.success() => decode(&o.stdout).into_bytes(), _ => vec![] }
 }
@@ -107,12 +111,12 @@ pub fn read(kind: u32, path: &str) -> Read {
 }
 
 // A schematic's sheets: core/hier.bend
-struct Kids { file: String, sheets: Vec<(String, String)> }
+pub struct Kids { pub file: String, pub sheets: Vec<(String, String)> }
 /// Hier.dir: the folder of a path, with its trailing slash ("" for a bare name)
 fn dir(p: &str) -> &str { p.rfind('/').map(|i| &p[..=i]).unwrap_or("") }
 fn resolve(parent: &str, f: &str) -> String { if f.starts_with('/') { f.to_string() } else { format!("{}{f}", dir(parent)) } }
 fn sheet_forms<'b>(fs: &'b Option<Vec<&'b [u8]>>) -> impl Iterator<Item = &'b [u8]> + 'b { fs.iter().flatten().copied().filter(|f| head(f) == b"sheet") }
-fn kids(file: &str, b: &[u8]) -> Kids {
+pub fn kids(file: &str, b: &[u8]) -> Kids {
     let fs = forms(b);
     let sheets = sheet_forms(&fs).map(|f| { let x = parse(f); (sheet_prop(&x, "Sheetname", "Sheet name").to_string(), resolve(file, sheet_prop(&x, "Sheetfile", "Sheet file"))) }).collect();
     Kids { file: file.to_string(), sheets }

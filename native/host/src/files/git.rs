@@ -14,7 +14,7 @@ const INIT: &str = include_str!("scripts/init.sh");
 const DIFF_CAP: &str = include_str!("scripts/diff_cap.sh");
 pub const STEP_MIGRATE: &str = include_str!("scripts/step_migrate.sh");
 
-const GIT_ENV: [(&str, &str); 12] = [("GIT_CONFIG_COUNT", "5"), ("GIT_CONFIG_KEY_0", "core.fsmonitor"), ("GIT_CONFIG_VALUE_0", "false"), ("GIT_CONFIG_KEY_1", "core.hooksPath"), ("GIT_CONFIG_VALUE_1", "/dev/null"),
+pub const GIT_ENV: [(&str, &str); 12] = [("GIT_CONFIG_COUNT", "5"), ("GIT_CONFIG_KEY_0", "core.fsmonitor"), ("GIT_CONFIG_VALUE_0", "false"), ("GIT_CONFIG_KEY_1", "core.hooksPath"), ("GIT_CONFIG_VALUE_1", "/dev/null"),
     ("GIT_CONFIG_KEY_2", "core.pager"), ("GIT_CONFIG_VALUE_2", "cat"), ("GIT_CONFIG_KEY_3", "diff.ignoreSubmodules"), ("GIT_CONFIG_VALUE_3", "dirty"),
     ("GIT_CONFIG_KEY_4", "log.showSignature"), ("GIT_CONFIG_VALUE_4", "false"), ("GIT_PAGER", "cat")];
 
@@ -24,6 +24,8 @@ pub struct Ran { pub code: i32, pub out: String }
 pub async fn proc(cmd: &str, args: &[&str], cwd: &str, env: &[(&str, &str)]) -> Ran {
     // Proc.run.folder: an empty working folder is refused, never the hub's own directory
     if cwd.is_empty() { return Ran { code: 2, out: "No working folder: refusing to use the hub working directory".into() } }
+    // a copy of a log runs no network command (copy.rs: curl, gh, ssh, git push/fetch..., also through sh -c)
+    if crate::copy::refused(cmd, args) { return Ran { code: 126, out: crate::copy::refusal(cmd) } }
     let mut c = Command::new(cmd);
     c.args(args).current_dir(cwd).stdin(std::process::Stdio::null()).envs(GIT_ENV.iter().copied()).envs(env.iter().copied());
     match c.output().await {
@@ -140,14 +142,17 @@ pub async fn show(gitdir: &str, obj: &str) -> Option<Vec<u8>> {
 }
 
 // --- stacked actions (Git.act): commit | push | create_pr | commit_push | commit_push_pr | init
-fn last_line(s: &str) -> String { s.lines().map(str::trim).filter(|l| !l.is_empty()).last().unwrap_or("").to_string() }
+pub fn last_line(s: &str) -> String { s.lines().map(str::trim).filter(|l| !l.is_empty()).last().unwrap_or("").to_string() }
 fn label(name: &str, r: Result<String, String>) -> Result<String, String> { r.map_err(|e| format!("error: {name}: {}", e.strip_prefix("error: ").unwrap_or(&e))) }
 /// Network commands (push, gh) are refused on a hub running on a copied log (core/copy.bend), as P.Proc.run does.
 fn copy_refused() -> bool { std::env::var("BACKPLANE_COPY").as_deref() == Ok("1") }
 const QUIET: [(&str, &str); 3] = [("GH_PROMPT_DISABLED", "1"), ("GH_NO_UPDATE_NOTIFIER", "1"), ("GIT_TERMINAL_PROMPT", "0")];
 /// GhRun.plain: the command as it is, without prompts. (The several-accounts choice of core/gh.bend, GhRun.try, is not ported: it
 /// only acts when `gh auth status` lists two or more accounts for the remote's host.)
-async fn plain(cwd: &str, cmd: &str, args: &[&str]) -> Ran { if copy_refused() { return Ran { code: 126, out: format!("refused: {cmd} on a copy of a log") } } proc(cmd, args, cwd, &QUIET).await }
+pub async fn plain(cwd: &str, cmd: &str, args: &[&str]) -> Ran { if copy_refused() { return Ran { code: 126, out: format!("refused: {cmd} on a copy of a log") } } proc(cmd, args, cwd, &QUIET).await }
+
+/// GhRun.push (git push and ls-remote): as the user's git has it set up, refused on a copied log. (Its several-accounts retry is GhRun.try, not ported.)
+pub async fn push(cwd: &str, args: &[&str]) -> Ran { plain(cwd, "git", args).await }
 
 async fn step_commit(cwd: &str, msg: &str) -> Result<String, String> {
     let msg = if msg.trim().is_empty() { "Update from Backplane" } else { msg };
