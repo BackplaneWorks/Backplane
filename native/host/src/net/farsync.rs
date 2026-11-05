@@ -41,7 +41,7 @@ impl FarSync {
         let Ok(o) = serde_json::from_slice::<Value>(&r.body) else { return HttpReply::text("400 Bad Request", "not JSON") };
         let Some(feed) = self.feed.get() else { return HttpReply::text("503 Service Unavailable", "not ready") };
         let cat = feed.catalog(hub).await;
-        match feed.answer(hub, o["since"].as_u64().unwrap_or(0), o["epoch"].as_str().unwrap_or(""), cat) {
+        match feed.answer(hub, o["since"].as_u64().unwrap_or(0), o["epoch"].as_str().unwrap_or(""), cat).await {
             Some(v) => HttpReply { status: "200 OK", ctype: "application/json".into(), extra: String::new(), body: v.to_string().into_bytes() },
             None => HttpReply::text("503 Service Unavailable", "not ready"),
         }

@@ -38,3 +38,21 @@ fn out(from: u64, to: u64, xs: &[u64]) -> Out { let mut o = Out::default(); o.ad
     let small = body("E", "me", &Send { since: 1, to: 2, items: vec![it(2)] });
     let v: Value = serde_json::from_str(&small).unwrap(); assert_eq!((v["since"].as_u64(), v["name"].as_str(), v["items"][0]["n"].as_u64()), (Some(1), Some("me"), Some(2)));
 }
+
+#[test] fn far_a_link_that_takes_nothing_holds_a_bounded_queue_and_is_told_the_gap() {
+    let mut o = Out::default();
+    for n in 1..=(MAX_WAITING as u64 + 5) { o.add(n - 1, n, vec![it(n)]); }
+    assert!(o.items.is_empty() && o.lost, "past the limit the items are dropped");
+    let s = o.next().unwrap();
+    let last = MAX_WAITING as u64 + 5;
+    assert_eq!(s, Send { since: last, to: last, items: vec![] }, "the gap form: only where the log ends");
+    o.done(false, last); assert!(o.lost && o.items.is_empty(), "a failed gap is owed again, not forgotten"); o.release();
+    o.add(last, last + 1, vec![it(last + 1)]);
+    let s = o.next().unwrap(); assert_eq!(s.items.len(), 1, "what comes after the loss is sent; the gap before it is why the other end pulls");
+    o.done(true, last + 1); assert!(!o.lost && !o.flight_lost);
+    // a failing flight plus what waited cannot grow past the limit either
+    let mut o = Out::default();
+    o.add(0, 5000, (1..=5000).map(it).collect()); o.next().unwrap(); o.add(5000, 10_000, (5001..=10_000).map(it).collect());
+    o.done(false, 5000); o.release(); assert_eq!(o.items.len(), 10_000);
+    o.add(10_000, 10_001, vec![it(10_001)]); assert!(o.lost && o.items.is_empty());
+}

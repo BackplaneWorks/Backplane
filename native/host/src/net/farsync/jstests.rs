@@ -77,18 +77,50 @@ fn line(v: Value) -> String { v.to_string() }
     let text = std::fs::read_to_string(b.home.join(format!("far/{me_link}.jsonl"))).unwrap();
     assert!(text.lines().next().unwrap().contains("\"epoch\"") && text.lines().last().unwrap().starts_with("{\"head\":"));
 
+    // ----- the other direction: this hub is the owner, with history the JS hub does not have, including pages at the size limit -----
+    b.hub.commit_many(&[json!({"$":"ProjectCreated","id":"projrs","title":"From Rust","root":"/tmp","at":at(35)}),
+        json!({"$":"ThreadCreated","id":"trs0","project":"projrs","title":"A Rust thread with history","env":"","branch":"","worktree":"","provider":"claude","model":"","at":at(36)}),
+        json!({"$":"MessagePosted","thread":"trs0","msg":"h1","role":"user","text":big('x', 390_000),"at":at(37)}),
+        json!({"$":"MessagePosted","thread":"trs0","msg":"h2","role":"assistant","text":big('y', 390_000),"at":at(38)}),
+        json!({"$":"MessagePosted","thread":"trs0","msg":"h3","role":"user","text":"the short one from Rust","at":at(39)}),
+        json!({"$":"MessagePosted","thread":"trs0","msg":"h4","role":"assistant","text":big('z', 700_000),"at":at(40)})]).await.unwrap();
+
     // ----- push: this hub shares a thread; the JS hub takes it and writes its own mirror file, which we read -----
     let feed = Feed::new(); let rx = feed.pushes(); feed.start(&b.hub).await; let _ = fs.feed.set(feed.clone());
     tokio::spawn(outbox::run(b.hub.clone(), b.p.clone(), outbox::Outbox::new(), rx));
     b.hub.commit_many(&[json!({"$":"ThreadCreated","id":"trs1","project":"","title":"A Rust thread","env":"","branch":"","worktree":"","provider":"claude","model":"","at":at(40)}),
         json!({"$":"MessagePosted","thread":"trs1","msg":"r1","role":"user","text":"hello from the Rust hub","at":at(41)})]).await.unwrap();
     let jfile = jhome.join(format!("far/{me_link}.jsonl"));
-    let wrote = wait_for(40, || std::fs::read_to_string(&jfile).map_or(false, |t| t.contains("hello from the Rust hub"))).await;
-    assert!(wrote, "the JS hub took our push and kept it in far/{me_link}.jsonl");
+    let wrote = wait_for(60, || std::fs::read_to_string(&jfile).map_or(false, |t| t.contains("hello from the Rust hub") && t.contains("the short one from Rust"))).await;
+    assert!(wrote, "the JS hub took our push (a gap) and pulled our /far/log, v:4 and all, keeping it in far/{me_link}.jsonl");
+    // the JS hub's mirror holds every message of ours whole, the two near the page size and the 700k one included
+    let mut lens: Vec<usize> = std::fs::read_to_string(&jfile).unwrap().lines().filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter(|o| o["c"]["$"] == "MessagePosted" && o["c"]["thread"] == "trs0").map(|o| o["c"]["text"].as_str().unwrap().chars().count()).collect();
+    lens.sort();
+    assert_eq!(lens, vec![23, 390_000, 390_000, 700_000], "built from our /far/log pages");
     // Rust reads the file the JS hub wrote (the Bend format), as a mirror of this hub's own history
     let copy = root.join("copy"); std::fs::create_dir_all(copy.join("far")).unwrap(); std::fs::copy(&jfile, copy.join(format!("far/{me_link}.jsonl"))).unwrap();
     let again = FarStore::open(&copy).unwrap();
     assert!(again.has(&format!("{me_link}~trs1")), "FarStore reads a mirror file written by the Bend hub");
-    let _ = js.kill().await;
+    // ----- Bend reads a mirror file Rust wrote: a second JS hub starts on a file this side wrote (our mirror of the first hub's history) -----
+    let _ = js.kill().await; tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    let (j2, link2) = (root.join("js2"), "pmirrorfrom0001");
+    std::fs::create_dir_all(j2.join("far")).unwrap();
+    std::fs::copy(b.home.join(format!("far/{me_link}.jsonl")), j2.join(format!("far/{link2}.jsonl"))).unwrap();
+    std::fs::write(j2.join("events.jsonl"), line(json!({"$":"PeerSet","id":link2,"name":"rustmirror","url":"http://127.0.0.1:1","revoked":false,"at":at(50)})) + "\n").unwrap();
+    let mut js2 = tokio::process::Command::new(&bin).args(["--home", j2.to_str().unwrap(), "--port", "3917", "--host", "127.0.0.1", "--no-tailscale", "--foreground"])
+        .env("BACKPLANE_AGENTS", &standins).env("BACKPLANE_NO_UPDATE", "1").env("HOME", &root).stdout(Stdio::null()).stderr(Stdio::null()).kill_on_drop(true).spawn().expect("start the second JS hub");
+    assert!(wait_for(60, || std::net::TcpStream::connect(("127.0.0.1", 3917)).is_ok() && j2.join("token").exists()).await, "the second JS hub listens");
+    let token = std::fs::read_to_string(j2.join("token")).unwrap().trim().to_string();
+    use futures_util::StreamExt;
+    let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://127.0.0.1:3917/ws?token={token}&since=0")).await.expect("join the second JS hub");
+    let mut seen = String::new();
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(30), async { while let Some(Ok(m)) = ws.next().await {
+        let text = match m { tokio_tungstenite::tungstenite::Message::Text(t) => t.to_string(), tokio_tungstenite::tungstenite::Message::Binary(b) => crate::cbor::decode(&b).map(|v| v.to_string()).unwrap_or_default(), _ => continue };
+        seen.push_str(&text);
+        if seen.contains("short one") && seen.contains(&format!("{link2}~tjs1")) { break }
+    } }).await;
+    assert!(seen.contains(&format!("{link2}~tjs1")) && seen.contains("short one"), "the Bend hub folded the mirror file Rust wrote (frames: {} bytes)", seen.len());
+    let _ = js2.kill().await;
     let _ = std::fs::remove_dir_all(&root);
 }

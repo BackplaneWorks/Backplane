@@ -67,6 +67,9 @@ impl Index {
 
 pub struct Feed { st: Mutex<(Index, Vec<(u32, Vec<Value>)>)>, tx: Mutex<Option<tokio::sync::mpsc::UnboundedSender<super::outbox::Batch>>> }
 const CHUNK: usize = 20_000;
+/// Line numbers copied from the index per slice (the lock is held for the copy only).
+const SLICE: usize = 4096;
+fn nums_last(v: &[(u32, String)]) -> Option<u32> { v.last().map(|x| x.0) }
 /// A page is cut at about this many characters (one bigger line goes alone).
 pub const PAGE_CHARS: usize = 400_000;
 
@@ -114,19 +117,40 @@ impl Feed {
         }).await.unwrap_or_default();
         self.finish(local);
     }
-    /// The answer to a pull. `None`: not ready (the asker pulls again). `since`/`epoch` are the asker's.
-    pub fn answer(&self, hub: &Hub, since: u64, asked_epoch: &str, catalog: Value) -> Option<Value> {
+    /// The answer to a pull. `None`: not ready (the asker pulls again). `since`/`epoch` are the asker's. The index lock is
+    /// held only to copy a few line numbers; the lines are read from the log off the async workers, so a pull never holds
+    /// up a commit's observer.
+    pub async fn answer(&self, hub: &Hub, since: u64, asked_epoch: &str, catalog: Value) -> Option<Value> {
         let own = epoch(hub);
         let from = if super::farstore::epoch_changed(asked_epoch, &own) { 0 } else { since };
-        let g = self.st.lock().unwrap();
-        if !g.0.built { return None }
-        let mut items = vec![]; let (mut room, mut more, mut last) = (PAGE_CHARS as i64, false, from);
-        for &n in g.0.shared_after(from) {
-            let Ok(line) = hub.store.get(n as usize - 1) else { continue };
-            if !items.is_empty() && (line.chars().count() as i64) > room { more = true; break }
-            room -= line.chars().count() as i64; last = n as u64;
-            let Some(c) = Hub::wire_item(&line) else { continue };
-            items.push(json!({"n": n, "c": c}));
+        if !self.ready() { return None }
+        let store = hub.store.clone();
+        let (mut items, mut room, mut more, mut last, mut cursor) = (vec![], PAGE_CHARS as i64, false, from, from);
+        'pages: loop {
+            // a bounded slice of line numbers, copied under the lock
+            let nums: Vec<u32> = { let g = self.st.lock().unwrap(); g.0.shared_after(cursor).iter().take(SLICE).copied().collect() };
+            if nums.is_empty() { break }
+            let (s, r) = (store.clone(), room);
+            let (got, left, stop) = tokio::task::spawn_blocking(move || {
+                let (mut out, mut room, mut stop) = (vec![], r, false);
+                for n in nums.iter().copied() {
+                    let Ok(line) = s.get(n as usize - 1) else { continue };
+                    let len = line.chars().count() as i64;
+                    if !out.is_empty() && len > room { stop = true; break }
+                    // (a page's first line goes alone however big; later ones only while they fit)
+                    room -= len; out.push((n, line));
+                }
+                (out, room, stop)
+            }).await.ok()?;
+            let full = nums_last(&got);
+            room = left;
+            for (n, line) in got {
+                last = n as u64;
+                let Some(c) = Hub::wire_item(&line) else { continue };
+                items.push(json!({"n": n, "c": c}));
+            }
+            if stop { more = true; break 'pages }
+            match full { Some(n) => cursor = n as u64, None => break }
         }
         let head = if more { last } else { hub.store.len() as u64 };
         Some(json!({"since": from, "catalog": catalog, "epoch": own, "head": head, "items": items, "more": more}))
