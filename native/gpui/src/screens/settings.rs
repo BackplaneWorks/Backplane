@@ -86,7 +86,7 @@ impl FieldSlot { fn remember(&mut self, t: &str) { self.echo.remember(t); } }
 pub fn sync(this: &mut Backplane, cx: &mut Context<Backplane>) {
     let rows = parse(&this.data["settings"]);
     let mut want: Vec<Field> = rows.into_iter().flat_map(|r| r.fields).collect();
-    want.extend(super::bots::form_fields(&this.data));
+    want.extend(super::bots::form_fields(&this.data)); want.extend(super::tools::form_fields(&this.data));
     this.screens.fields.retain(|n, _| want.iter().any(|f| f.name == *n));
     for f in want {
         if let Some(slot) = this.screens.fields.get_mut(&f.name) {
