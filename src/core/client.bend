@@ -6676,16 +6676,16 @@ def Bd.reply(has: Bool, u: Ui, +o: J.Json) -> Ui:
 
 # The combined view
 # -----------------
-# Kind "split": the schematic beside the board or its 3D model, at most
-# two panes: the board and the 3D share the side, one at a time (showing
-# one puts the other away), each pane named, put away and brought back on
-# its own (the setting "split.hide": the panes put away, words of
-# "sch pcb 3d"; the 3D shows only when the board is put away and it is
-# not, so no setting gives the schematic and the board; one pane always
-# stays, test/split_test.bend). Its board is the viewer's file, as the
-# Board tab's (the board picked, else the project's own); its sheet is
-# kept per thread ("@split.sheet:<t>"): the board's own schematic until
-# another is opened there.
+# Kind "split": the schematic beside the board and its 3D model, each pane
+# named, put away and brought back on its own (the setting "split.hide":
+# the panes put away, words of "sch pcb 3d"; one pane always stays,
+# test/split_test.bend). On a phone (the phone arrangement) there is room
+# for two: the board and the 3D share the side, one at a time (showing one
+# puts the other away; the 3D shows only when the board is put away and it
+# is not). Its board is the viewer's file, as the Board tab's (the board
+# picked, else the project's own); its sheet is kept per thread
+# ("@split.sheet:<t>"): the board's own schematic until another is opened
+# there.
 
 def Split.hide(+u: Ui) -> String:
   M.Setting.get(Ui.state(u), "split.hide", "")
@@ -6693,9 +6693,14 @@ def Split.hide(+u: Ui) -> String:
 def Split.has(+hide: String, +p: String) -> Bool:
   String.contains(" " ++ hide ++ " ", " " ++ p ++ " ")
 
-# whether pane p shows, by the panes put away
-def Split.shows(+hide: String, +p: String) -> Bool:
-  Bool.pick(Bool, String.eq(p, "3d"), Bool.and(Split.has(hide, "pcb"), Bool.not(Split.has(hide, "3d"))), Bool.not(Split.has(hide, p)))
+# whether the board and the 3D take turns (the phone arrangement)
+def Split.one(+u: Ui) -> Bool:
+  String.eq(Ui.info(u, "local.workspace.form"), "phone")
+
+# whether pane p shows, by the panes put away (one: the board and the 3D
+# one at a time)
+def Split.shows(+one: Bool, +hide: String, +p: String) -> Bool:
+  Bool.pick(Bool, Bool.and(one, String.eq(p, "3d")), Bool.and(Split.has(hide, "pcb"), Bool.not(Split.has(hide, "3d"))), Bool.not(Split.has(hide, p)))
 
 # the panes put away when these show (the schematic, the board, the 3D)
 def Split.words(s: Bool, b: Bool, t: Bool) -> String:
@@ -6707,18 +6712,18 @@ def Split.flip.k(none: Bool, +hide: String, +next: String) -> String:
 def Split.flip.to(+hide: String, +s: Bool, +b: Bool, +t: Bool) -> String:
   Split.flip.k(Bool.not(Bool.or(s, Bool.or(b, t))), hide, Split.words(s, b, t))
 
-# the panes put away once pane p is flipped: the schematic on its own;
-# the board or the 3D shown puts the other away; the last one shown stays
-def Split.flip(+hide: String, +p: String) -> String:
-  +s = Split.shows(hide, "sch")
-  +b = Split.shows(hide, "pcb")
-  +t = Split.shows(hide, "3d")
+# the panes put away once pane p is flipped: each on its own (one: the
+# board or the 3D shown puts the other away); the last one shown stays
+def Split.flip(+one: Bool, +hide: String, +p: String) -> String:
+  +s = Split.shows(one, hide, "sch")
+  +b = Split.shows(one, hide, "pcb")
+  +t = Split.shows(one, hide, "3d")
   Bool.pick(String, String.eq(p, "sch"), Split.flip.to(hide, Bool.not(s), b, t),
-    Bool.pick(String, String.eq(p, "pcb"), Split.flip.to(hide, s, Bool.not(b), False{}),
-      Bool.pick(String, String.eq(p, "3d"), Split.flip.to(hide, s, False{}, Bool.not(t)), hide)))
+    Bool.pick(String, String.eq(p, "pcb"), Split.flip.to(hide, s, Bool.not(b), Bool.and(Bool.not(one), t)),
+      Bool.pick(String, String.eq(p, "3d"), Split.flip.to(hide, s, Bool.and(Bool.not(one), b), Bool.not(t)), hide)))
 
 def Split.on(+u: Ui, +p: String) -> Bool:
-  Split.shows(Split.hide(u), p)
+  Split.shows(Split.one(u), Split.hide(u), p)
 
 def Split.is(+u: Ui) -> Bool:
   String.eq(Ui.view_get(u, "view.kind"), "split")
@@ -17139,7 +17144,7 @@ def Ui.act.sch(sch: Bool, +u: Ui, +action: String, +value: String) -> Act:
 def Ui.act.split(i: Nat, +u: Ui, +action: String, +value: String) -> Act:
   match i:
     case 0n:
-      Ui.setting(u, "split.hide=" ++ Split.flip(Split.hide(u), value))
+      Ui.setting(u, "split.hide=" ++ Split.flip(Split.one(u), Split.hide(u), value))
     case 1n:
       Probe.set(u, value)
     case _:
