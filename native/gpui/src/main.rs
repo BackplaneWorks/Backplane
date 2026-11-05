@@ -2,6 +2,7 @@ mod art;
 mod delta;
 mod hub;
 mod input;
+mod screens;
 mod script;
 mod swatch;
 mod ui;
@@ -14,10 +15,10 @@ use script::{Pending,Step};
 use hub::{Command,Event};
 actions!(backplane,[Send,ClosePopup]);
 pub struct Backplane {
-    pub input:Entity<input::TextInput>, data:Value, status:String, error:String,
+    pub input:Entity<screens::composer::Composer>, data:Value, status:String, error:String,
     tx:tokio::sync::mpsc::Sender<Command>, selected:String,
-    drafts:HashMap<String,String>, popup:bool, started:Instant, usable:bool,
-    first_frame:bool, script_done:bool, scroll:ScrollHandle, last_entries:usize, pub cats:art::Cats, pub thread_cache:Vec<(String,Value)>, pub thread_source:&'static str, pub confirm:Option<(String,Instant)>, pub ack_pending:Option<(String,Instant)>, pub recording:Option<(String,Vec<f64>)>, pub ui_epoch:u64, pub controls:Vec<script::CtlEntry>, pub ctl_last:String, pub last_layout:String, pub wake_at:Option<Instant>, pub reconnected:bool, pub click_info:Option<(String,String)>, pub timing:Option<hub::Timing>, pub applied_at:Option<Instant>, pub apply_ms:f64, pub render_us:u64, swatches:bool, gallery:bool, fonts:bool, theme_override:Option<bool>, steps:VecDeque<Step>, pending:Option<Pending>, seq:u64, want_focus:bool, script_total:usize,
+    drafts:HashMap<String,String>, started:Instant, usable:bool,
+    first_frame:bool, script_done:bool, scroll:ScrollHandle, last_entries:usize, pub cats:art::Cats, pub thread_cache:Vec<(String,Value)>, pub thread_source:&'static str, pub confirm:Option<(String,Instant)>, pub ack_pending:Option<(String,Instant)>, pub recording:Option<(String,Vec<f64>)>, pub ui_epoch:u64, pub controls:Vec<script::CtlEntry>, pub ctl_last:String, pub last_layout:String, pub wake_at:Option<Instant>, pub reconnected:bool, pub click_info:Option<(String,String)>, pub timing:Option<hub::Timing>, pub applied_at:Option<Instant>, pub apply_ms:f64, pub render_us:u64, swatches:bool, gallery:bool, fonts:bool, theme_override:Option<bool>, steps:VecDeque<Step>, pending:Option<Pending>, seq:u64, want_focus:bool, script_total:usize, screens:screens::Screens,
 }
 fn pager_row(cx:&mut Context<Backplane>,id:String,pager:&Value,light:bool)->Option<AnyElement> {let c=|name:&str|theme::color(light,name);
     let mut row=div().flex().gap_2().px_3().py_1().text_size(px(11.));let mut any=false;
@@ -35,17 +36,19 @@ pub fn string(v:&Value,key:&str)->String {v[key].as_str().unwrap_or("").to_strin
 impl Backplane {
     fn new(window:&mut Window,cx:&mut Context<Self>,config:hub::Config,started:Instant)->Self {
         let (swatches,gallery,fonts,theme)=(config.swatches,config.gallery,config.fonts,config.theme.clone());let steps:VecDeque<Step>=config.script.as_ref().map(|p|script::load(p)).unwrap_or_default();let script_total=steps.len();
-        let input=cx.new(input::TextInput::new);input.focus_handle(cx).focus(window);
+        let input=cx.new(screens::composer::Composer::new);input.focus_handle(cx).focus(window);
+        let target=screens::attach::Target::from(&config.hub,&config.token_file);let drafts_path=config.token_file.with_file_name("gpui-drafts.json");let saved=screens::drafts::load(&drafts_path);
         let(tx,events)=hub::connect(config);
         cx.spawn(async move |weak,cx|{while let Ok(event)=events.recv().await {if weak.update(cx,|this,cx|this.receive(event,cx)).is_err(){break;}}}).detach();
         cx.observe(&input,|this,_,cx|{
             let text=this.input.read(cx).content.to_string();
-            this.drafts.insert(this.selected.clone(),text.clone());
-            this.popup=text.starts_with('/')||text.starts_with('$');
-            if this.popup {let _=this.tx.try_send(Command::Draft(text));}
+            let changed=this.draft_changed(&text);
+            if changed {this.send_draft(text,cx);}
             cx.notify();
         }).detach();
-        Self{input,data:Value::Null,status:"Connecting…".into(),error:art::assets_missing().unwrap_or_default(),tx,selected:String::new(),drafts:HashMap::new(),popup:false,started,usable:false,first_frame:false,script_done:false,scroll:ScrollHandle::new(),last_entries:0,cats:art::Cats::new(),thread_cache:Vec::new(),thread_source:"hub",confirm:None,ack_pending:None,recording:None,ui_epoch:0,controls:Vec::new(),ctl_last:String::new(),last_layout:String::new(),wake_at:None,reconnected:false,click_info:None,timing:None,applied_at:None,apply_ms:0.0,render_us:0,swatches,gallery,fonts,theme_override:theme.as_deref().map(|t|t=="light"),steps,pending:None,seq:0,want_focus:false,script_total}
+        cx.subscribe(&input,|this,_,event:&screens::composer::ComposerEvent,cx|this.attach_event(event,cx)).detach();
+        cx.on_app_quit(|this,_|{this.screens.drafts.flush();async{}}).detach();
+        Self{input,data:Value::Null,status:"Connecting…".into(),error:art::assets_missing().unwrap_or_default(),tx,selected:String::new(),drafts:saved.clone(),started,usable:false,first_frame:false,script_done:false,scroll:ScrollHandle::new(),last_entries:0,cats:art::Cats::new(),thread_cache:Vec::new(),thread_source:"hub",confirm:None,ack_pending:None,recording:None,ui_epoch:0,controls:Vec::new(),ctl_last:String::new(),last_layout:String::new(),wake_at:None,reconnected:false,click_info:None,timing:None,applied_at:None,apply_ms:0.0,render_us:0,swatches,gallery,fonts,theme_override:theme.as_deref().map(|t|t=="light"),steps,pending:None,seq:0,want_focus:false,script_total,screens:screens::Screens::new(cx,target,drafts_path,saved)}
     }
     fn receive(&mut self,event:Event,cx:&mut Context<Self>) {
         match event {
@@ -53,17 +56,17 @@ impl Backplane {
             Event::Picture(r,timing)=>{
                 let t_apply=Instant::now();self.ui_epoch+=1;
                 if let Some(w)=self.wake_at.take(){self.reconnected=true;self.m("net",serde_json::json!({"event":"reconnected","ms":(w.elapsed().as_secs_f64()*1e6).round()/1e3}));}
-                let mut r=r;self.data=r["shown"].take();
+                let mut r=r;self.data=r["shown"].take();self.draft_from_hub(cx);
                 let entries=self.data["thread"]["entries"].as_array().map_or(0,|e|e.len());
                 if entries!=self.last_entries {self.last_entries=entries;self.scroll.set_offset(point(px(0.),px(-1_000_000.)));}
                 let selected=string(&self.data["thread"],"id");
-                if !selected.is_empty() {self.selected=selected;}
+                if !selected.is_empty() {self.picture_arrived(&selected,cx);self.selected=selected;}
                 self.thread_source="hub";
                 if let Some((label,t0))=self.confirm.take(){self.m("input",serde_json::json!({"step":label,"ok":true,"latency_ms":(t0.elapsed().as_secs_f64()*1e6).round()/1e3,"source":"hub"}));}
                 self.apply_ms=t_apply.elapsed().as_secs_f64()*1000.0;self.timing=Some(timing);self.applied_at=Some(Instant::now());
             },
             Event::Status(s)=>{self.status=s;if self.status=="Connected"{self.error.clear();}},
-            Event::Accepted=>{self.input.update(cx,|input,cx|input.set(String::new(),cx));self.drafts.remove(&self.selected);self.popup=false;},
+            Event::Accepted=>{self.input.update(cx,|input,cx|input.set(String::new(),cx));self.drafts.remove(&self.selected);},
             Event::Error(e)=>{self.error=e;self.status="Disconnected".into();},
         }
         cx.notify();
@@ -72,8 +75,9 @@ impl Backplane {
     fn select_id(&mut self,id:String,cx:&mut Context<Self>) {self.ui_epoch+=1;
         let raw=id.rsplit_once('|').map_or(id.as_str(),|(_,id)|id).to_string();
         self.drafts.insert(self.selected.clone(),self.input.read(cx).content.to_string());
+        self.thread_switch(&raw);
         self.selected=raw.clone();let text=self.drafts.get(&raw).cloned().unwrap_or_default();
-        self.input.update(cx,|input,cx|input.set(text,cx));self.popup=false;
+        self.input.update(cx,|input,cx|input.set(text,cx));
         // Stale-while-revalidate: the thread on screen goes into a small cache; a thread seen before is drawn from it at once and the hub's picture
         // replaces it; one never seen shows its title (from the sidebar row) and "Loading…". Bounded at 12 threads.
         let cur=string(&self.data["thread"],"id");let cur=cur.rsplit_once('|').map_or(cur.as_str(),|(_,i)|i).to_string();
@@ -103,7 +107,7 @@ impl Backplane {
         ids
     }
     fn user_entries(&self)->usize {self.data["thread"]["entries"].as_array().map_or(0,|e|e.iter().filter(|e|e["kind"]=="user").count())}
-    fn close_popup(&mut self,_:&ClosePopup,_:&mut Window,cx:&mut Context<Self>){self.popup=false;cx.notify();}
+    fn close_popup(&mut self,_:&ClosePopup,_:&mut Window,cx:&mut Context<Self>){let _=self.tx.try_send(Command::Action("skill-close".into(),String::new()));cx.notify();}
 }
 fn main()->anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
@@ -111,7 +115,7 @@ fn main()->anyhow::Result<()> {
     if config.swatches||config.gallery||config.fonts||std::env::var_os("BACKPLANE_GPUI_RECTS").is_some(){art::enable_rects();}
     script::metric(started,"process_start",serde_json::json!({}));
     Application::new().run(move|cx:&mut App|{
-        art::load_fonts(cx);input::bind(cx);cx.bind_keys([KeyBinding::new("enter",Send,Some("TextInput")),KeyBinding::new("ctrl-enter",Send,Some("TextInput")),KeyBinding::new("escape",ClosePopup,None)]);
+        art::load_fonts(cx);input::bind(cx);screens::composer::bind(cx);cx.bind_keys([KeyBinding::new("enter",Send,Some("Composer")),KeyBinding::new("ctrl-enter",Send,Some("Composer")),KeyBinding::new("escape",ClosePopup,None)]);
         cx.on_window_closed(|cx|if cx.windows().is_empty(){cx.quit();}).detach();
         let bounds=Bounds::centered(None,size(px(1400.),px(900.)),cx);
         cx.open_window(WindowOptions{window_bounds:Some(WindowBounds::Windowed(bounds)),titlebar:Some(TitlebarOptions{title:Some("Backplane GPUI · experimental".into()),..Default::default()}),..Default::default()},move|window,cx|cx.new(|cx|Backplane::new(window,cx,config,started))).expect("open GPUI window");

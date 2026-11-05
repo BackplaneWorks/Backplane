@@ -89,7 +89,7 @@ impl Backplane {
             Goal::Changed(epoch) => self.ui_epoch != *epoch,
             Goal::Reconnected => self.reconnected,
             Goal::Home => self.data["projectHome"].is_object(),
-            Goal::Popup => self.popup && (self.data["thread"]["skills"].as_array().map_or(false, |s| !s.is_empty()) || self.input.read(cx).content.starts_with('/')),
+            Goal::Popup => (self.data["thread"]["skills"].as_array().map_or(false, |s| !s.is_empty()) || self.input.read(cx).content.starts_with('/')),
             Goal::Typed(text) => self.input.read(cx).content.as_ref() == text,
             Goal::Sent(before) => self.user_entries() > *before,
             Goal::Sleep => false,
@@ -240,8 +240,8 @@ impl Backplane {
             Ctl::Node(a, p) => { let _ = self.tx.try_send(Command::Action(a.clone(), p.clone())); format!("view.action {a}") }
         }
     }
-    /// The popup is showing the client's own slash rows because the hub has sent none yet.
-    pub fn popup_local(&self) -> bool { self.popup && self.data["thread"]["skills"].as_array().map_or(true, |s| s.is_empty()) && self.pending.as_ref().map_or(false, |p| matches!(p.goal, Goal::Popup)) }
+    /// The popup is always the hub's rows now (no client-side rows), so a popup step is never local.
+    pub fn popup_local(&self) -> bool { false }
     fn set_text(&mut self, text: String, cx: &mut Context<Self>) {
         self.input.update(cx, |i, cx| i.set(text, cx));
     }
