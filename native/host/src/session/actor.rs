@@ -124,6 +124,12 @@ pub fn local_in(client: u64, view: &str, method: &str, target: &Value) -> Option
 pub fn local_out(client: u64, view: &str, target: &Value, pol: &mut Value) {
     ACTORS.lock().unwrap().entry(client).or_default().local_out(view, target, pol)
 }
+/// Only the hub sets `local` on a V request: a client's own field is dropped, then the held one (if any) is put in.
+pub fn set_local(params: &mut Value, held: Option<Value>) {
+    let Some(o) = params.as_object_mut() else { return };
+    o.remove("local");
+    if let Some(l) = held { o.insert("local".into(), l); }
+}
 /// `before` for this request: see `ViewActor::page_at`.
 pub fn page(client: u64, view: &str, method: &str, action: &str, target: &Value, asked: u64) -> u64 {
     ACTORS.lock().unwrap().entry(client).or_default().page_at(view, method, action, target, asked)
@@ -236,6 +242,13 @@ mod tests {
         assert!(a.local_in("v1", "view.update", &json!({"kind": "thread", "id": "t2"})).is_none());
         a.local_out("v1", &t, &mut json!({"remoteReady": true}));
         assert!(a.local_in("v1", "view.update", &t).is_none());
+    }
+    #[test] fn a_clients_own_local_never_reaches_the_policy() {
+        let mut p = json!({"target": {}, "local": {"local.native.sidebar.pages": "x"}});
+        set_local(&mut p, None);
+        assert!(p.get("local").is_none());
+        set_local(&mut p, Some(json!({"local.native.sidebar.pages": "held"})));
+        assert_eq!(p["local"]["local.native.sidebar.pages"], json!("held"));
     }
     #[test] fn forget_and_the_bound_keep_the_map_flat() {
         let mut m: HashMap<u64, ViewActor> = HashMap::new();
