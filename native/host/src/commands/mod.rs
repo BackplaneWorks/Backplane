@@ -5,6 +5,7 @@
 pub mod fold;
 pub mod key;
 pub mod plan;
+pub mod actions;
 pub mod fs;
 pub mod home;
 pub mod seam;
