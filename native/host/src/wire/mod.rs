@@ -56,12 +56,23 @@ pub fn response(status: &str, ctype: &str, extra: &str, body: &[u8]) -> Vec<u8> 
     v.extend_from_slice(body); v
 }
 
-pub async fn http(hub: &Hub, mut s: TcpStream, req: Req) -> Result<()> {
+pub async fn http(hub: &Hub, mut s: TcpStream, mut req: Req) -> Result<()> {
+    // the body of a POST to a route that decides for itself (an own_auth handler, /auth/*): Content-Length only, capped; never buffered for the rest
+    if req.method == "POST" && (req.route().starts_with("/auth/") || hub.http_for(req.route()).map_or(false, |h| h.own_auth())) {
+        let len = req.header("content-length").trim().parse::<usize>().ok();
+        let status = if !req.header("transfer-encoding").is_empty() || len.is_none() { Some("411 Length Required") } else if len.unwrap() > crate::auth::BODY_MAX { Some("413 Payload Too Large") } else { None };
+        if let Some(st) = status { s.write_all(&response(st, "text/plain; charset=utf-8", "", st.as_bytes())).await.ok(); return Ok(()) }
+        let mut body = vec![0u8; len.unwrap()];
+        match tokio::time::timeout(Duration::from_secs(10), s.read_exact(&mut body)).await {
+            Ok(Ok(_)) => req.body = body,
+            _ => { s.write_all(&response("408 Request Timeout", "text/plain; charset=utf-8", "", b"408 Request Timeout")).await.ok(); return Ok(()) }
+        }
+    }
     // the /auth routes decide for themselves (enrollment proves itself with its invitation); nothing else does
     if let Some(ar) = hub.auth_route() {
         let client = hub.fresh_client();
         // the registry fsyncs now and then: off the async threads
-        let (ar2, req2) = (ar.clone(), Req { method: req.method.clone(), target: req.target.clone(), headers: req.headers.clone() });
+        let (ar2, req2) = (ar.clone(), req.clone());
         if let Some(o) = tokio::task::spawn_blocking(move || ar2.handle(&req2, client)).await.ok().flatten() {
             hub.close_clients(&o.close);
             if let Some(link) = &o.unpeer { ar.unpeer(link) }
@@ -202,8 +213,8 @@ pub async fn serve(hub: Arc<Hub>, s: TcpStream) -> Result<()> {
         let mut hs = [httparse::EMPTY_HEADER; 64];
         let mut r = httparse::Request::new(&mut hs);
         match r.parse(&buf[..n]) {
-            Ok(httparse::Status::Complete(len)) => break (len, Req { method: r.method.unwrap_or("").to_string(), target: r.path.unwrap_or("/").to_string(),
-                headers: r.headers.iter().map(|h| (h.name.to_string(), String::from_utf8_lossy(h.value).into_owned())).collect() }),
+            Ok(httparse::Status::Complete(len)) => break (len, { let mut q = Req::new(r.method.unwrap_or(""), r.path.unwrap_or("/"),
+                r.headers.iter().map(|h| (h.name.to_string(), String::from_utf8_lossy(h.value).into_owned())).collect()); q.peer = s.peer_addr().ok(); q }),
             Ok(httparse::Status::Partial) if n < buf.len() && tries < 200 => { tries += 1; tokio::time::sleep(Duration::from_millis(10)).await }
             _ => { let mut s = s; s.write_all(&response("400 Bad Request", "text/plain; charset=utf-8", "", b"bad request")).await.ok(); return Ok(()) }
         }

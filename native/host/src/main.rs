@@ -242,7 +242,7 @@ mod auth_wire_tests {
     impl HttpHandler for Probe {
         fn routes(&self) -> &'static [&'static str] { if self.0 { &["/open"] } else { &["/closed"] } }
         fn own_auth(&self) -> bool { self.0 }
-        fn call<'a>(&'a self, _h: &'a Arc<Hub>, _r: &'a Req) -> Fut<'a, HttpReply> { Box::pin(async { HttpReply::text("200 OK", "ran") }) }
+        fn call<'a>(&'a self, _h: &'a Arc<Hub>, _r: &'a Req) -> Fut<'a, HttpReply> { { let n = _r.body.len(); let p = _r.peer.is_some(); Box::pin(async move { HttpReply::text("200 OK", &format!("ran {n} peer={p}")) }) } }
     }
     async fn up(name: &str) -> (Arc<Hub>, u16, Arc<Reg>) {
         let dir = std::env::temp_dir().join(format!("bp-authwire-{}-{name}", std::process::id())); let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();
@@ -257,6 +257,21 @@ mod auth_wire_tests {
         { let hub = hub.clone(); tokio::spawn(async move { loop { let (s, _) = l.accept().await.unwrap(); let h = hub.clone(); tokio::spawn(async move { let _ = serve(h, s).await; }); } }); }
         (hub, port, reg)
     }
+    async fn post(port: u16, path: &str, head: &str, body: &[u8]) -> String {
+        let mut s = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        s.write_all(format!("POST {path} HTTP/1.1\r\nHost: x\r\n{head}Connection: close\r\n\r\n").as_bytes()).await.unwrap(); s.write_all(body).await.unwrap();
+        let mut out = Vec::new(); let _ = tokio::time::timeout(Duration::from_secs(5), s.read_to_end(&mut out)).await; String::from_utf8_lossy(&out).into_owned()
+    }
+    // bodies: only for POSTs to routes that decide for themselves; Content-Length only, capped; the peer address reaches the handler
+    #[tokio::test] async fn a_body_is_read_for_own_auth_posts_only_with_a_length_and_under_the_cap() {
+        let (_hub, port, _reg) = up("body").await;
+        assert!(post(port, "/open", "Content-Length: 5\r\n", b"hello").await.ends_with("ran 5 peer=true"), "body and peer reach the handler");
+        assert!(post(port, "/open", "", b"").await.starts_with("HTTP/1.1 411"), "no length");
+        assert!(post(port, "/open", "Transfer-Encoding: chunked\r\n", b"0\r\n\r\n").await.starts_with("HTTP/1.1 411"), "chunked");
+        assert!(post(port, "/open", &format!("Content-Length: {}\r\n", (1 << 20) + 1), b"").await.starts_with("HTTP/1.1 413"), "over the cap");
+        assert!(post(port, "/closed", "Content-Length: 5\r\n", b"hello").await.starts_with("HTTP/1.1 401"), "a handler that does not opt out gets no body and no credential-free answer");
+    }
+
     async fn get(port: u16, path: &str, auth: Option<&str>) -> String {
         let mut s = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
         let a = auth.map(|t| format!("Authorization: Bearer {t}\r\n")).unwrap_or_default();

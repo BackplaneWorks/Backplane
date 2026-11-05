@@ -447,6 +447,24 @@ mod tests {
         }
     }
 
+    // Hub::set_info: stored for joiners, pushed to every client, empty removes, bounded
+    #[tokio::test] async fn set_info_is_stored_pushed_removed_and_bounded() {
+        let h = Hub::start(cfg(&home("setinfo")), Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        let mut o = h.attach(1);
+        assert!(h.set_info("term.demo", "state-1").await);
+        assert!(matches!(o.recv().await, Some(Out::Value(v)) if v["t"] == "info" && v["info"]["term.demo"] == "state-1"));
+        assert_eq!(h.log_info()["term.demo"], "state-1", "joiners get it");
+        assert_eq!(h.info_frame()["info"]["term.demo"], "state-1");
+        assert!(h.set_info("term.demo", "state-1").await); assert!(o.try_recv().is_err(), "no change, no frame");
+        assert!(h.set_info("term.demo", "").await);
+        assert!(matches!(o.recv().await, Some(Out::Value(v)) if v["info"]["term.demo"] == ""), "removal is told as an empty value");
+        assert!(h.log_info().get("term.demo").is_none());
+        for i in 0..256 { assert!(h.set_info(&format!("k{i}"), "v").await) }
+        assert!(!h.set_info("one-too-many", "v").await, "the map is bounded");
+        assert!(h.set_info("k0", "changed").await, "an existing key can still change");
+        assert!(!h.set_info("big", &"x".repeat(70_000)).await && !h.set_info(&"k".repeat(200), "v").await);
+    }
+
     #[tokio::test] async fn open_assembles_identity_in_js_order() {
         let h = Hub::start(cfg(&home("open")), Arc::new(Canned { reply: json!({"remoteReady":true,"shown":{"a":1},"session":{"sel":""},"cmds":[]}) })).await.unwrap();
         let (mut c, g) = h.connect(true); assert_eq!(g["renderer"], "mobile");
