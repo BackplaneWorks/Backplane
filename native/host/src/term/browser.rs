@@ -187,3 +187,5 @@ impl crate::api::RpcHandler for Close {
 
 #[cfg(test)]
 pub(crate) mod tests;
+#[cfg(test)]
+mod chrome;
