@@ -34,6 +34,8 @@ export const REGIONS = [
 const NEVER = new Set(['select', 'bot', 'bot-tab', 'proj-home', 'send', 'send-alt', 'draft', 'bfield', 'detach',
   'uber', 'uber-bot', 'remote', 'ref-go', 'ref-back', 'ref-fwd', 'earlier', 'view-page', 'fork', 'new-thread',
   'thread-child', 'delete', 'row-archive', 'row-settle', 'row-pin', 'row-rename', 'rename-save', 'secret-save', 'sealed']);
+// presses that open the viewer pane (the rail's tabs, the header's Viewer)
+const VIEWER = new Set(['view-kind', 'fm', 'diff', 'mech', 'rv-page', 'panel']);
 const sig = n => n.tag + '\u0000' + n.key + '\u0000' + (n.key ? '' : classes(n)[0] || '');
 
 // every region of the page with its parent (the timeline and made pieces are
@@ -58,6 +60,8 @@ export class PressFeedback {
   seen(page, target) {
     if (page === this.seenNode) return;
     this.seenNode = page;this.now = regions(page);this.nowFor = target;
+    // (a pane as the hub drew it, any destination: the shape of a first open)
+    if (this.now.has('viewer')) this.shell = this.now.get('viewer');
     const p = this.press;
     if (!p?.settled || p.target !== target) return;
     this.press = null;
@@ -65,6 +69,8 @@ export class PressFeedback {
     const moved = REGIONS.map(([k]) => k).filter(k => p.before.get(k)?.node !== this.now.get(k)?.node);
     if (moved.length !== 1) return;
     const kind = moved[0], after = this.now.get(kind) || null, before = p.before.get(kind) || null;
+    // (which press put the pane on show: the same press again shuts it)
+    if (kind === 'viewer') this.viewerBy = after ? p.by : '';
     const parent = after || before, parentClass = after ? after.parentClass : before && this.parentClass(before.parent);
     this.learned.delete(p.key);
     this.learned.set(p.key, { kind, node: after?.node || null, parent: parent.parent, parentClass, index: parent.index });
@@ -80,15 +86,42 @@ export class PressFeedback {
   choice(action, value, target) {
     if (NEVER.has(action) || !this.now || this.nowFor !== target) return undefined;
     const key = JSON.stringify([target, action, String(value ?? ''), shape(this.now)]);
-    const revision = ++this.revision, press = { key, target, before: this.now, settled: false, revision };
+    const revision = ++this.revision, press = { key, target, before: this.now, settled: false, revision, by: action + '\u0000' + String(value ?? '') };
     this.press = press;
-    const known = this.learned.get(key);
+    const known = this.learned.get(key) || this.opening(action, action + '\u0000' + String(value ?? ''));
     this.active = known ? { ...known, revision } : null;
     if (known) this.changed();
     return () => {
       press.settled = true;
       if (this.active?.revision === revision) { this.active = null;this.changed(); }
     };
+  }
+  // A viewer opened for the first time here: its pane, empty, where the hub
+  // puts it (the same column and size), so the click shows at once and the
+  // hub's pane fills it; nothing else moves again. With a pane open, another
+  // tab's press empties it the same way; the press that put it on show (it
+  // shuts it) and a pane whose press is unknown are left to the hub.
+  opening(action, by) {
+    if (!VIEWER.has(action)) return null;
+    if (this.now.has('viewer') && (!this.viewerBy || this.viewerBy === by)) return null;
+    const sh = this.now.get('viewer') || this.shell || this.bare();
+    if (!sh) return null;
+    const ks = items(sh.node.kids), edge = ks.find(k => is(k, 'El') && classes(k).includes('viewer-split'));
+    const id = attr(sh.node, 'id');
+    const pane = { ...sh.node, key: sh.node.key, attrs: list([{ ...items(sh.node.attrs).find(a => is(a, 'At')), name: 'class', value: 'viewer pending' },
+      ...(id ? [{ ...items(sh.node.attrs).find(a => is(a, 'At')), name: 'id', value: id }] : [])]),
+      kids: list([...(edge ? [edge] : []), { ...sh.node, tag: 'div', key: 'viewer-pending', attrs: list([{ ...items(sh.node.attrs).find(a => is(a, 'At')), name: 'class', value: 'viewer-stage' }]), kids: list([]) }]) };
+    return { kind: 'viewer', node: pane, parent: sh.parent, addClass: 'panel', index: sh.index };
+  }
+  // (no pane seen yet: one made from the page's own pieces, last in .app)
+  bare() {
+    let app = null, at = null;
+    const walk = (n, d) => { if (app || !is(n, 'El') || d > 4) return;if (classes(n).includes('app')) { app = n;return; }for (const k of items(n.kids)) walk(k, d + 1); };
+    walk(this.seenNode, 0);
+    if (app) at = items(app.attrs).find(a => is(a, 'At'));
+    if (!app || !at) return null;
+    return { node: { ...app, tag: 'aside', key: 'viewer', attrs: list([{ ...at, name: 'class', value: 'viewer' }, { ...at, name: 'id', value: 'viewer' }]), kids: list([]) },
+      parent: sig(app), index: items(app.kids).length };
   }
   get showing() { return !!this.active; }
   project(page) {
@@ -104,6 +137,7 @@ export class PressFeedback {
         const kids = at >= 0 ? (a.node ? ks.map((k, i) => i === at ? a.node : k) : ks.filter((_, i) => i !== at))
           : a.node ? [...ks.slice(0, a.index), a.node, ...ks.slice(a.index)] : ks;
         const out = { ...n, kids: list(kids) };
+        if (a.addClass) { const c = attr(out, 'class') || '';return c.split(/\s+/).includes(a.addClass) ? out : withAttr(out, 'class', (c + ' ' + a.addClass).trim()); }
         return a.parentClass === undefined ? out : withAttr(out, 'class', a.parentClass);
       }
       const ks = items(n.kids), mapped = ks.map(walk);
@@ -113,5 +147,5 @@ export class PressFeedback {
   }
   // (another destination picked: a press on its way is the hub's to answer)
   drop() { this.revision++;this.active = null;this.press = null; }
-  clear() { this.revision = (this.revision || 0) + 1;this.active = null;this.press = null;this.now = null;this.nowFor = '';this.seenNode = null;this.learned?.clear(); }
+  clear() { this.revision = (this.revision || 0) + 1;this.active = null;this.press = null;this.now = null;this.shell = null;this.nowFor = '';this.seenNode = null;this.learned?.clear(); }
 }

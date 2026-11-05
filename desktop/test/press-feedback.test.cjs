@@ -46,3 +46,22 @@ test('a viewer pane comes with its parent’s class; other destinations, navigat
  f.seen(page({n:5}),'thread:A');f.choice('weird','','thread:A');assert.equal(f.showing,false,'two regions moved: not learned');
  f.drop();assert.equal(f.showing,false);
 });
+test('a first viewer open shows an empty pane where the hub puts it, only while none is open',async()=>{
+ const {PressFeedback,regions,T}=await load();const f=new PressFeedback(()=>{}),{page}=fixture(T);
+ f.seen(page(),'thread:A');let s=f.choice('view-kind','board','thread:A');
+ assert.equal(f.active?.kind,'viewer','the very first: a pane made from the page’s pieces');
+ let shown=f.project(page()),app=kids(shown)[0];assert.equal(at(app,'class'),'app panel');assert.equal(kids(app).at(-1).tag,'aside');
+ s(true);f.seen(page({view:'board'}),'thread:A');f.seen(page({n:1}),'thread:B');
+ s=f.choice('fm','','thread:B');assert.equal(f.active?.kind,'viewer');
+ shown=f.project(page({n:2}));const pane=regions(shown).get('viewer').node;assert.equal(at(pane,'class'),'viewer pending');assert.equal(kids(pane).at(-1).key,'viewer-pending');
+ s(true);f.seen(page({view:'files',n:3}),'thread:B');
+ f.choice('diff','','thread:B');assert.equal(f.showing,true,'another tab: the pane empties at once');f.drop();f.choice('fm','','thread:B');assert.equal(f.showing,false,'the tab that opened it shuts it: the hub\u2019s');
+});
+test('with a pane open, another tab empties it at the press; the tab that opened it is the hub’s',async()=>{
+ const {PressFeedback,regions,T}=await load();const f=new PressFeedback(()=>{}),{page}=fixture(T);
+ f.seen(page(),'thread:A');let s=f.choice('view-kind','board','thread:A');s(true);f.seen(page({view:'board'}),'thread:A');
+ f.choice('view-kind','board','thread:A');assert.equal(f.showing,false,'Board again shuts it: not guessed');f.drop();
+ s=f.choice('fm','','thread:A');assert.equal(f.active?.kind,'viewer');
+ const pane=regions(f.project(page({view:'board',n:1}))).get('viewer').node;assert.equal(at(pane,'class'),'viewer pending');
+ s(true);
+});
