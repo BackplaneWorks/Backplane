@@ -170,7 +170,16 @@ function bp_db_tables(sql) {
       k = ws(k);
       let a = ident(k);
       if (a && !a.quoted && a.name.toUpperCase() === "AS") { k = ws(a.end); a = ident(k); }
-      if (a && (a.quoted || !BP_DB_STOP.has(a.name.toUpperCase()))) k = ws(a.end);
+      if (a && (a.quoted || !BP_DB_STOP.has(a.name.toUpperCase()))) { k = ws(a.end); a = ident(k); }
+      // "INDEXED BY i" / "NOT INDEXED" after a table or its alias
+      if (a && !a.quoted && a.name.toUpperCase() === "INDEXED") {
+        const by = ident(ws(a.end)), i = by ? ident(ws(by.end)) : null;
+        if (!i) break;
+        k = ws(i.end);
+      } else if (a && !a.quoted && a.name.toUpperCase() === "NOT") {
+        const ix = ident(ws(a.end));
+        if (ix && ix.name.toUpperCase() === "INDEXED") k = ws(ix.end);
+      }
       if (sql[k] !== ",") break;
       k++;
     }
