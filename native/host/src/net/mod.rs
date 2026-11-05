@@ -11,4 +11,6 @@
 //! * `Auth` asking `pairing::Registry::resolve` instead of reading devices-v1.json once.
 pub mod owner;
 pub mod pairing;
+pub mod qr;
 pub mod routes;
+pub mod start;
