@@ -48,7 +48,8 @@ def main():
     result = {'schema': 1, 'status': 'INCOMPLETE', 'repository': REPO,
         'sourceCommit': SOURCE, 'releaseId': a.release_id, 'assetId': a.asset_id,
         'expectedSha256': a.sha256, 'expectedBytes': a.bytes,
-        'workflowPermissions': {'contents': 'read'}, 'permissionChanged': False,
+        'workflowPermissions': {'contents': 'write'}, 'permissionChanged': True,
+        'permissionNote': 'jobs.intake.permissions.contents read->write by explicit user approval; this code performs GET requests only',
         'audience': 'User accepted signed-in public-repository Actions readers; not private storage',
         'draftCleanupOwner': 't1792701529-415584', 'temporaryArtifactCleanupRequired': True,
         'releasePublicationSupported': False, 'startedAt': time.time()}
@@ -66,7 +67,7 @@ def main():
             match = re.search(rb'HTTP\s+(\d{3})', r.stderr)
             result['httpFailure'] = int(match[1]) if match else None
             result['failedEndpoint'] = suffix
-            raise RuntimeError('Existing contents:read workflow token could not read the exact draft/asset; preserve evidence and report before requesting any permission change')
+            raise RuntimeError('contents:write job token could not read the exact draft/asset; preserve evidence and report before requesting any permission change')
         return None if binary else json.loads(r.stdout)
 
     try:
@@ -82,7 +83,7 @@ def main():
                 and (cg/'memory.swap.max').read_text().strip() == '0', 'Actual intake512MiB/swap0 scope missing')
         result['kernelMemoryMaxBytes'] = int(cap)
         result['kernelSwapMaxBytes'] = 0
-        result['phase'] = 'EXISTING_READ_TOKEN_DRAFT_CANARY'
+        result['phase'] = 'WRITE_TOKEN_DRAFT_CANARY'
         release = api('/releases/'+str(a.release_id))
         asset = api('/releases/assets/'+str(a.asset_id))
         validate(release, asset, a.release_id, a.asset_id, a.sha256, a.bytes, a.name)
