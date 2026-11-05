@@ -18,6 +18,7 @@ pub mod secret;
 pub mod set;
 pub mod telemetry;
 pub mod vault;
+pub mod webhook;
 pub mod zone;
 
 use crate::hub::Hub;
