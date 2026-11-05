@@ -155,3 +155,37 @@ fn routes() -> Vec<String> { vec!["https://m.tail.ts.net".into()] }
     assert!(!k("https://desk.evil.net")); assert!(!k("https://other.tail.ts.net")); assert!(!k("http://100.1.1.1:3788"));
     assert!(!k("http://u@100.1.1.1:3787")); assert!(!k("ftp://me.tail.ts.net")); assert!(!k("not a url"));
 }
+
+#[test] fn pair_known_refuses_what_new_url_throws() {
+    let machines = json!({"self":{"url":"https://me.tail.ts.net","name":"me","domain":"tail.ts.net"},"peers":[]});
+    let k = |o: &str| known(o, &[], &machines, &[]);
+    assert!(k("https://me.tail.ts.net") && k("https://me.tail.ts.net:443") && k("HTTPS://ME.tail.ts.net/x"), "default port and case are the same origin");
+    for bad in ["https://me.tail.ts.net:99999", "https://me.x:1.tail.ts.net", "https://me.a|b.tail.ts.net", "https://me.a b.tail.ts.net", "https://.tail.ts.net:x", "https://[::1", "https://me.tail.ts.net:123456"] {
+        assert!(!k(bad), "{bad}");
+    }
+    assert!(authority("[::1]:3787").is_some() && authority("[zz]").is_none() && authority("a:65535").is_some() && authority("a:65536").is_none());
+    let e = Env::new("badroute"); let r = e.reg();
+    assert_eq!(r.create(&["https://h:99999".into(), "https://a|b".into()])["error"], "no_reachable_address");
+}
+#[test] fn pair_revoked_is_js_truthy() {
+    let e = Env::new("truthy");
+    let tok = "0123456789abcdef0123456789abcdef";
+    for (i, v) in [json!(1), json!("yes"), json!(true), json!({}), json!([])].into_iter().enumerate() {
+        let body = json!({"version":1,"owner":digest("root-token"),"devices":[{"id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","hash":digest(tok),"name":"x","createdAt":1,"lastSeen":2,"revoked":v}]});
+        std::fs::write(e.dir.join("devices-v1.json"), body.to_string()).unwrap();
+        assert_eq!(e.reg().resolve(tok, 1, "/x"), "", "case {i}");
+    }
+    for v in [json!(0), json!(""), json!(null), json!(false)] {
+        let body = json!({"version":1,"owner":digest("root-token"),"devices":[{"id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","hash":digest(tok),"name":"x","createdAt":1,"lastSeen":2,"revoked":v}]});
+        std::fs::write(e.dir.join("devices-v1.json"), body.to_string()).unwrap();
+        assert_eq!(e.reg().resolve(tok, 1, "/x"), tok);
+    }
+}
+#[test] fn pair_unwritable_stamp_refuses_the_device() {
+    let e = Env::new("stamp"); let r = e.reg();
+    let inv = r.create(&routes()); let tok = r.enroll(inv["code"].as_str().unwrap(), "P")["token"].as_str().unwrap().to_string();
+    e.advance(61_000);
+    // the folder can no longer take a new file: the stamp cannot be written
+    std::fs::remove_dir_all(&e.dir).unwrap();
+    assert_eq!(r.resolve(&tok, 1, "/x"), "", "pairing_resolve's catch returns nothing");
+}

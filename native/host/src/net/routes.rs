@@ -36,7 +36,7 @@ impl AuthRoutes {
         let b = req.header("authorization");
         if let Some(t) = b.strip_prefix("Bearer ") { return t.to_string() }
         let cookie = req.header("cookie").split(';').find_map(|c| c.trim().strip_prefix("bp_token=").map(str::to_string)).unwrap_or_default();
-        if cookie.is_empty() { req.param("token") } else { cookie }
+        if cookie.is_empty() { owner::param(&req.target, "token") } else { cookie }
     }
     fn create_routes(&self, authority: &str, https: bool) -> Vec<String> {
         let mut routes = self.state.lock().unwrap().routes.clone();
