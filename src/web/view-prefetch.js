@@ -10,9 +10,9 @@ import {validateThinResult} from './thin-results.js';
 // last fetch (a streaming bot's row moves with every delta: it was fetched
 // again every ~340 ms, ~100 KB each, for as long as it streamed); a timer
 // asks once the floor has passed, so the last move is still fetched.
-const QUEUE=24, ATTEMPTS=64, PACE=300, REFRESH=30000;
+const QUEUE=24, ATTEMPTS=64, PACE=300, REFRESH=30000, VIEWERS=96;
 export class ViewPrefetch {
-  constructor(api) {this.api=api;this.queue=[];this.attempted=new Set();this.generation=0;this.fetchedAt=new Map();this.later=new Map();}
+  constructor(api) {this.api=api;this.queue=[];this.attempted=new Set();this.viewersDone=new Set();this.generation=0;this.fetchedAt=new Map();this.later=new Map();}
   // fresh: the picture held is known to be behind (its sidebar row moved
   // since): fetched again even though one is held
   // soon: asked for now, not after two seconds without input (the palette's
@@ -39,6 +39,26 @@ export class ViewPrefetch {
   // entries): what each run holds is learned (fold-feedback.js), so a run's
   // first open draws at the click too. Never a picture; once per thread and
   // page load; only while the page is idle, like the rest.
+  // A thread's viewers, each as the hub draws it open (opens: {action, value,
+  // kind}: the rail tab's press and the view.kind it shows): learned at the
+  // press layer (press-feedback.js's ahead), so a viewer's first open draws
+  // at the click too. Never a picture; once per thread and viewer per page
+  // load, VIEWERS at most; only while the page is idle, like the rest.
+  enqueueViewers(target, opens) {
+    if (!viewTarget(target) || target.kind !== 'thread' || !opens.length) return;
+    const scope=this.api.scope();
+    if (!scope.identity || !scope.epoch) return;
+    // (first in the queue: the thread on show's, ahead of the sidebar's)
+    const jobs=[];
+    for (const open of opens) {
+      const key=JSON.stringify([scope.origin,scope.identity,scope.epoch,target,'viewer',open.kind]);
+      if (this.viewersDone.has(key) || this.viewersDone.size+jobs.length>=VIEWERS || this.queue.some(x=>x.key===key)) continue;
+      jobs.push({target,key,viewer:open});
+    }
+    this.queue=[...jobs,...this.queue];
+    this.queue=this.queue.slice(0,QUEUE);
+    if (!this.timer) this.timer=setTimeout(()=>{this.timer=null;this.pump();},750);
+  }
   enqueueFolds(target, ids) {
     if (!viewTarget(target) || target.kind !== 'thread' || !ids.length) return;
     const scope=this.api.scope(),key=JSON.stringify([scope.origin,scope.identity,scope.epoch,target,'folds']);
@@ -51,17 +71,22 @@ export class ViewPrefetch {
     if (this.active || !this.queue.length) return;
     // (not idle: tried again later, never dropped)
     if (!this.api.idle(this.queue[0].soon)) { if (!this.timer) this.timer=setTimeout(()=>{this.timer=null;this.pump();},this.queue[0].soon?PACE/4:PACE*3);return; }
-    while(this.queue.length && !this.queue[0].fresh && !this.queue[0].folds && this.api.has(this.queue[0].target))this.queue.shift();
+    while(this.queue.length && !this.queue[0].fresh && !this.queue[0].folds && !this.queue[0].viewer && this.api.has(this.queue[0].target))this.queue.shift();
     if(!this.queue.length)return;
+    // (a viewer's render on a connection of its own: the hub keeps one view
+    // per thread and connection, whose viewer the first render chose)
+    if(this.socket && this.used && this.queue[0].viewer)this.drop();
     if(!this.socket){this.connect();return;}
     if(!this.greeted)return;
     const job=this.queue.shift(),scope=this.api.scope();
-    if(this.attempted.size>=ATTEMPTS)return;
-    this.attempted.add(job.key);this.fetchedAt.set(job.key,(this.api.now||performance.now.bind(performance))());
-    this.active={...job,scope};
-    const target=job.target,session={sel:target.kind==='project'?'project-home-'+target.id:target.kind==='thread'?target.id:'',rid:1,drafts:{'@lang':scope.language},open:{},info:job.folds?Object.fromEntries(job.folds.map(id=>['fold:'+id,'1'])):{},adding:false,panel:false,wantNew:false,
+    if(!job.viewer && this.attempted.size>=ATTEMPTS)return;
+    (job.viewer?this.viewersDone:this.attempted).add(job.key);this.fetchedAt.set(job.key,(this.api.now||performance.now.bind(performance))());
+    this.active={...job,scope};this.used=true;
+    const target=job.target,session={sel:target.kind==='project'?'project-home-'+target.id:target.kind==='thread'?target.id:'',rid:1,drafts:{'@lang':scope.language},open:{},info:job.folds?Object.fromEntries(job.folds.map(id=>['fold:'+id,'1'])):job.viewer?{['panel:'+target.id]:'1',['view.kind:'+target.id]:job.viewer.kind,['view.path:'+target.id]:''}:{},adding:false,panel:!!job.viewer,wantNew:false,
       ...(target.kind==='bot'?{route:{kind:'bot-tab',bot:target.id,tab:'chat'}}:{})};
-    const result=this.client.select(this.api.hub,target,session,'preview');
+    // (cid "ahead-<kind>": unlike a "preview", a viewer's render is given the
+    // thread's kept viewer reads: its rows, refs and diff)
+    const result=this.client.select(this.api.hub,target,session,job.viewer?'ahead-'+job.viewer.kind:'preview');
     if(result.failed){this.active=null;return;}
     this.deadline=setTimeout(()=>this.stop(),10000);
   }
@@ -84,17 +109,24 @@ export class ViewPrefetch {
         if(!reply)return;
         clearTimeout(this.deadline);this.active=null;
         const current=this.api.scope();
-        const same=reply.remoteReady && reply.shown && !reply.result.cmds.length && current.identity===job.scope.identity && current.epoch===job.scope.epoch && current.origin===job.scope.origin;
-        if(same && job.folds)this.api.folds?.(reply.shown,job.target,reply.window);
+        // (a viewer's render asks its reads again: those asks are not sent)
+        const same=reply.remoteReady && reply.shown && (job.viewer || !reply.result.cmds.length) && current.identity===job.scope.identity && current.epoch===job.scope.epoch && current.origin===job.scope.origin;
+        if(same && job.viewer)this.api.viewer?.(reply.shown,job.target,job.viewer);
+        else if(same && job.folds)this.api.folds?.(reply.shown,job.target,reply.window);
         else if(same && (job.fresh || !this.api.has(job.target)))this.api.picture(reply.shown,reply.session,job.target,job.scope);
         if(this.queue.length)this.timer=setTimeout(()=>{this.timer=null;this.pump();},PACE);
       }catch{this.stop();}
     };
     socket.onclose=socket.onerror=()=>{if(this.generation===generation)this.stop();};
   }
+  // (the connection only: what is queued stays, asked on the next one)
+  drop() {
+    this.generation++;clearTimeout(this.deadline);this.greeted=false;this.used=false;
+    const socket=this.socket;this.socket=null;this.client=null;socket?.close();
+  }
   stop() {
     for (const t of this.later.values()) clearTimeout(t);this.later.clear();
-    this.generation++;clearTimeout(this.timer);clearTimeout(this.deadline);this.timer=null;this.active=null;this.queue=[];this.greeted=false;
+    this.generation++;clearTimeout(this.timer);clearTimeout(this.deadline);this.timer=null;this.active=null;this.queue=[];this.greeted=false;this.used=false;
     const socket=this.socket;this.socket=null;this.client=null;socket?.close();
   }
 }
