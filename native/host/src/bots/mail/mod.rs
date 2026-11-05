@@ -3,6 +3,7 @@
 //! `mailbox::Box`. Slice 1 files mail (`file.rs`); the requests (slice 2), triage and private threads (slice 3) and Google (slice 4) use these types.
 //! No message text or address is ever logged by this module.
 pub mod file;
+pub mod owner;
 pub mod requests;
 pub mod mailbox;
 pub mod store;

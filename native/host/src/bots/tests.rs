@@ -895,8 +895,8 @@ fn tool_norm(v: &Value) -> Value {
     assert_eq!(rpc(&hub, "mail.read", json!({"conv":"room:zz"})).await["error"], "room:zz: unknown room conversation or mail cursor");
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn a_mail_read_does_not_hold_the_world_lock_for_its_file_work() {
-    // a deep page of a big room walks the log and the journal; meanwhile other bot requests must go through. The test reads a 4000-post room's oldest page while
-    // bots.say requests are served, and asserts that every say finished before the read did (they would all wait behind a read that held the lock).
+    // a deep page of a big room walks the log and the journal; meanwhile other bot requests must go through. The test starts a read of a 4000-post room's oldest page and
+    // runs bots.edit requests (which take the world lock) until the read ends; it asserts the read finished and that at least one edit went through while it ran.
     let (hub, _bots, _r) = start("readlock", "").await;
     let (ada, bob) = (bot(&hub, "ada").await, bot(&hub, "bob").await);
     assert_eq!(rpc(&hub, "bots.room", json!({"room":"r1","name":"lab","members":format!("{ada}\n{bob}")})).await["ok"], true);
@@ -909,4 +909,54 @@ fn tool_norm(v: &Value) -> Value {
     let (r, took) = read.await.unwrap();
     assert_eq!(r["ok"], true, "{r}"); assert_eq!(r["result"]["mails"][0]["text"], "post 2");
     eprintln!("read took {took:?}, {said} edits went through meanwhile");
+    assert!(said > 0, "the read was over before any other request ran: the room is too small to show it");
+}
+struct ToHolder { holder: Arc<Bots>, as_link: String, sent: StdMutex<Vec<String>> }
+impl mail::owner::OwnerLink for ToHolder {
+    fn post<'a>(&'a self, link: &'a str, body: String) -> Fut<'a, Option<(u16, String)>> {
+        Box::pin(async move { self.sent.lock().unwrap().push(link.to_string()); if link != "linkB" { return None } let o: Value = serde_json::from_str(&body).unwrap(); Some(self.holder.owner_received(&self.as_link, &o).await) })
+    }
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn owner_mail_moves_waiting_mail_to_the_holder_and_is_acknowledged_once() {
+    std::env::set_var("TZ", "Etc/UTC");
+    // machine B holds the uberbot's conversation; machine A has a replica and gets mail for it. The outbox plans the recipient, sends the signed request, and clears its ticket on "committed".
+    let (hb, bb, _r) = start("ownerB", "").await;
+    let r = rpc(&hb, "bots.create", json!({"name":"bub","uber":true})).await; assert_eq!(r["ok"], true);
+    until(&hb, |l| l.iter().any(|e| e["$"] == "UberSet") && l.iter().any(|e| e["$"] == "WorktreeSet")).await;
+    assert!(bb.uber_init(now_s()).await > 0);
+    let lb = log(&hb); let uid = lb.iter().find(|e| e["$"] == "UberSet").unwrap()["uid"].as_str().unwrap().to_string();
+    let bme = hb.setting("machine.id").await.unwrap(); let ubb = lb.iter().find(|e| e["$"] == "UberSet").unwrap()["bot"].as_str().unwrap().to_string();
+    let (ha, ba, _ra) = start("ownerA", "").await;
+    let ua = bot(&ha, "ua").await; let ame = ha.setting("machine.id").await.unwrap(); assert_ne!(ame, bme);
+    let mut evs: Vec<Value> = vec![json!({"$":"UberSet","bot":ua,"uid":uid,"at":5})];
+    evs.extend(lb.iter().filter(|e| e["$"] == "UberOp").cloned());
+    evs.push(json!({"$":"SettingSet","key":format!("uber.link.{uid}.{bme}"),"value":"linkB","at":6}));
+    ha.commit_many(&evs).await.unwrap();
+    hb.commit(&json!({"$":"SettingSet","key":format!("uber.link.{uid}.{ame}"),"value":"linkA","at":6})).await.unwrap();
+    let link = Arc::new(ToHolder { holder: bb.clone(), as_link: "linkA".into(), sent: Default::default() });
+    ba.set_owner_link(link.clone());
+    // mail for the uberbot arrives on A: filed, with a pending ticket
+    assert_eq!(rpc(&ha, "mail.send", json!({"to":format!("bot:{ua}"),"text":"hello owner\nmore"})).await["ok"], true);
+    let pend = ba.owner_records().await; assert_eq!(pend.len(), 1, "{pend:?}"); let r = pend[0].clone(); assert_eq!(r["id"].as_str().unwrap().starts_with("mail"), true);
+    ba.owner_outbox().await;                       // plans: the holder is chosen and persisted before IO
+    let planned = ba.owner_records().await; assert_eq!(planned[0]["to"], bme.as_str()); assert!(link.sent.lock().unwrap().is_empty());
+    ba.owner_outbox().await;                       // sends
+    assert_eq!(link.sent.lock().unwrap().as_slice(), ["linkB"]);
+    assert!(ba.owner_records().await.is_empty(), "committed: the ticket is cleared");
+    // B has the mail: its own conversation, the original text, addressed to its uberbot, and a ticket of its own
+    let l = rpc(&hb, "mail.list", json!({})).await["result"].clone(); assert_eq!(l["total"], 1, "{l}");
+    let cid = l["convs"][0]["id"].as_str().unwrap().to_string(); assert!(cid.starts_with("owner:"), "{cid}");
+    assert!(l["convs"][0]["parts"].as_array().unwrap().iter().any(|p| p == &json!(format!("bot:{ubb}"))));
+    let rd = rpc(&hb, "mail.read", json!({"conv":cid})).await["result"].clone(); assert_eq!(rd["mails"][0]["text"], "hello owner\nmore"); assert_eq!(rd["mails"][0]["to"], format!("bot:{ubb}").as_str());
+    assert_eq!(bb.owner_records().await.len(), 1, "the holder keeps a ticket for the run to claim");
+    // the same request again is acknowledged without a second filing; a wrong link, a stale term and a body that is not the ticket's are refused
+    let key = mail::owner::key(&r);
+    let req = |term: u64, id: &str| json!({"m":"owner.mail","p":{"sender":ame,"uid":uid,"term":term,"ticket":{"uid":uid,"origin":ame,"mail":{"id":id},"conversation":{},"id":id,"conv":"c"},"body":{},"hold":""}});
+    let ticket = r.clone(); let again = json!({"m":"owner.mail","p":{"sender":ame,"uid":uid,"term":1,"ticket":ticket,"body":null,"hold":""}});
+    assert_eq!(bb.owner_received("linkA", &again).await, (200, mail::owner::response(&ticket, "committed")));
+    assert_eq!(bb.owner_received("linkZ", &again).await.0, 403);
+    assert_eq!(bb.owner_received("linkA", &req(9, "m-new")).await, (409, mail::owner::response(&req(9, "m-new")["p"]["ticket"], "moved")));
+    assert_eq!(bb.owner_received("linkA", &req(1, "m-new")).await.0, 400, "a ticket whose body is not there is invalid");
+    assert_eq!(rpc(&hb, "mail.list", json!({})).await["result"]["total"], 1);
+    assert!(key.starts_with("owner:["));
 }
