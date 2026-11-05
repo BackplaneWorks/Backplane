@@ -53,6 +53,8 @@ ck(ord.refused!==true,'an ordinary action is not refused');
   ck(info['fab.line:'+th]==='Ship the rev B board','a fab.look read is applied: fab.line:<thread> carries the goal');
   const r2=await v({reads:[{kind:'fab.look',id:0,result:{thread:th,goal:'',intent:'',label:'',parts:[],boards:0}}]});
   ck((r2.session?.info||{})['fab.line:'+th]==='No goal yet. Edit to say what this project is for.','an empty goal reads as the placeholder line');
+  const rs=await v({reads:[{kind:'secret.list',id:0,result:{secrets:[],vault:{}}},{kind:'bots.voice',id:0,result:{voiceKey:'k',voiceDict:'',voiceDevices:'{"default":"","devices":[]}'}}]});
+  ck(rs.session?.drafts?.['@voice.key']==='k'&&rs.session?.drafts?.['@voice.set']==='1','a bots.voice read is applied: @voice.key and @voice.set');
   const r3=await v({reads:[{kind:'no.such.read',id:1,result:{thread:th,goal:'IGNORED'}}]});
   ck((r3.session?.info||{})['fab.line:'+th]!=='IGNORED','an unknown kind is ignored');
 }
