@@ -370,6 +370,8 @@ fn tool_text(r: &Value) -> Value { serde_json::from_str(r["result"]["content"][0
     let ev = until(&hub, from, 5, |ev| ev.iter().any(|e| is(e, "AskOpened"))).await; let ask = ev.iter().find(|e| is(e, "AskOpened")).unwrap().clone();
     assert_eq!((ask["kind"].as_str().unwrap(), ask["tool"].as_str().unwrap(), ask["detail"].as_str().unwrap()), ("approval", "Bash", "rm -rf build")); assert!(!first.is_finished(), "the reply waits");
     let id = ask["id"].as_str().unwrap();
+    let bad = rpc(&hub, "ask.answer", json!({"id":id,"answer":"allow"})).await; assert_eq!(bad["ok"], false, "an unknown word is an error, not a decline: {bad}"); assert!(bad["error"].as_str().unwrap().contains("accept"), "{bad}");
+    assert!(!log_from(&hub, from).await.iter().any(|e| is(e, "AskClosed")), "the ask stays open"); assert!(!first.is_finished());
     assert_eq!(rpc(&hub, "ask.answer", json!({"id":id,"answer":"session"})).await["ok"], true);
     let (st, b) = first.await.unwrap(); assert_eq!(st, 200); let v: Value = serde_json::from_str(&b).unwrap(); assert_eq!(v["id"], 7);
     assert_eq!(serde_json::from_str::<Value>(v["result"]["content"][0]["text"].as_str().unwrap()).unwrap(), json!({"behavior":"allow","updatedInput":{"command":"rm -rf build"}}));
