@@ -213,11 +213,13 @@ export class ViewerQuality {
     }
   }
   describeMaterials(status) {
-    this.materialNote.textContent = status.materialPolicy === "realistic"
+    let text = status.materialPolicy === "realistic"
       ? "Estimated physical finishes on identified materials. Saved colors and model placement are preserved; source materials remain available."
       : status.materialPolicy === "source-defaults" ? "Original CAD export materials, including its transparency and default surface factors."
       : "CAD studio estimates only missing surface factors. Explicit export settings are preserved.";
-    if (status.materialWarnings?.length) this.materialNote.textContent += ` ${status.materialWarnings.join(" ")}`;
+    if (status.materialWarnings?.length) text += ` ${status.materialWarnings.join(" ")}`;
+    // (said again at every status: written only when it changes)
+    if (this.materialNote.textContent !== text) this.materialNote.textContent = text;
   }
   async updateSolder() {
     const renderer = this.renderer, generation = this.generation;

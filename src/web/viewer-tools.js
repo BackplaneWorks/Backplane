@@ -8,6 +8,9 @@ function node(tag, cls, text) {
   const n = document.createElement(tag); if (cls) n.className = cls;
   if (text != null) n.textContent = text; return n;
 }
+// (a sync after every render writes only what changed: the same words
+// written again replaced the text node, a change to the page each time)
+function text(el, value) { if (el.textContent !== value) el.textContent = value; }
 function button(label, fn, title = label) {
   const b = node("button", "", label); b.type = "button"; b.title = title; b.addEventListener("click", fn); return b;
 }
@@ -101,14 +104,16 @@ class Workbench {
     this.focal.wrap.hidden = ortho;
     for (const [field, value] of [[this.focal, state.focal], [this.exposure, state.exposure]]) {
       if (value == null) continue;
-      field.input.value = value; field.value.value = `${Number(value).toFixed(field === this.exposure ? 1 : 0)} ${field.unit}`;
+      field.input.value = value; text(field.value, `${Number(value).toFixed(field === this.exposure ? 1 : 0)} ${field.unit}`);
     }
     // An unsupported depth control is absent, never a decorative slider.
     const dof = Object.hasOwn(state, "aperture"); this.apertureLabel.hidden = ortho || !dof; this.focusLock.hidden = ortho || !dof;
     this.focus.hidden = ortho || state.focusDistance == null;
-    if (state.focusDistance != null) this.focus.value = `Focus ${Number(state.focusDistance).toFixed(1)} mm${state.focusLocked ? " · locked" : ""}`;
+    if (state.focusDistance != null) text(this.focus, `Focus ${Number(state.focusDistance).toFixed(1)} mm${state.focusLocked ? " · locked" : ""}`);
     if (dof) this.aperture.value = state.aperture > 0 ? String(state.aperture) : "off";
-    this.focusLock.setAttribute("aria-pressed", state.focusLocked ? "true" : "false"); this.focusLock.textContent = state.focusLocked ? "Unlock focus" : "Lock focus";
+    const pressed = state.focusLocked ? "true" : "false";
+    if (this.focusLock.getAttribute("aria-pressed") !== pressed) this.focusLock.setAttribute("aria-pressed", pressed);
+    text(this.focusLock, state.focusLocked ? "Unlock focus" : "Lock focus");
   }
   showReflow(on) {
     if (on) { this.state.components = false; this.componentPanel?.(); this.componentPanel = null; this.componentsButton?.setAttribute("aria-expanded", "false"); }
@@ -200,7 +205,7 @@ class Workbench {
     const assemblyReady = pcbReady && data.sourceRevision === revisions.get(this.key) && status?.status === "ready" && !status.stale;
     const board = pcbReady ? data : null;
     if (this.boundBoard !== board) { this.boundBoard = board; this.services.plot?.setComponents?.(this.boardKey, board, id => this.components.select(id)); }
-    if (this.alignmentNote) this.alignmentNote.textContent = assemblyReady ? this.quality?.visible ? "Saved revisions match. Model bodies use exact component references; unmatched bodies are not selectable." : "Saved PCB and assembly revisions match. Canvas selection identifies footprint geometry." : pcbReady ? "PCB revision matches. Assembly selection waits for the same saved revision." : "Waiting for saved-source revision confirmation; canvas selection is unavailable.";
+    if (this.alignmentNote) text(this.alignmentNote, assemblyReady ? this.quality?.visible ? "Saved revisions match. Model bodies use exact component references; unmatched bodies are not selectable." : "Saved PCB and assembly revisions match. Canvas selection identifies footprint geometry." : pcbReady ? "PCB revision matches. Assembly selection waits for the same saved revision." : "Waiting for saved-source revision confirmation; canvas selection is unavailable.");
     const overlayData = assemblyReady && !this.quality?.visible ? data : null;
     if (overlayData !== this.overlayData) {
       this.overlay?.(); this.overlay = null; this.overlayData = overlayData;
