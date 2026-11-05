@@ -148,6 +148,9 @@ impl Agents {
         let tx = self.actor(thread); let (reply, rx) = oneshot::channel();
         tx.try_send(Cmd::StartQueued { text: text.into(), taken: false, reply }).map_err(|_| "too many requests are waiting for this thread".to_string())?; rx.await.unwrap_or_else(|_| Err("the thread's agent stopped".into()))
     }
+    /// Queue.steer.k's idle branch: log TurnChanged running (a normal turn start: design baseline, checkpoint) and run `text` as a turn of its own. No stop, no "Steered" act,
+    /// no QueueTaken: the caller logs QueueTakenOne and the rest of its queue stays. For a running turn use `steer`.
+    pub async fn start_one(self: &Arc<Self>, thread: &str, text: &str) -> Result<(), String> { self.resume_with(thread, text).await }
     /// Steer.go: a running non-Claude turn stops and starts again with `text`; Claude takes it in place (and starts a process if none lives). Logs TurnChanged running either way.
     pub async fn steer(self: &Arc<Self>, thread: &str, text: &str) -> Result<(), String> {
         let tx = self.actor(thread); let (reply, rx) = oneshot::channel();
