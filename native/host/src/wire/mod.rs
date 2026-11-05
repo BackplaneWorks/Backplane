@@ -62,6 +62,7 @@ pub async fn http(hub: &Hub, mut s: TcpStream, req: Req) -> Result<()> {
         let client = hub.fresh_client();
         if let Some(o) = ar.handle(&req, client) {
             hub.close_clients(&o.close);
+            if let Some(link) = &o.unpeer { ar.unpeer(link) }
             let r = o.reply; let out = response_for(r.status, &r.ctype, &r.extra, &r.body);
             s.write_all(&out).await?; s.shutdown().await.ok(); return Ok(());
         }
@@ -85,27 +86,24 @@ pub async fn http(hub: &Hub, mut s: TcpStream, req: Req) -> Result<()> {
 }
 
 /// hub_frames_cbor: every frame the hub sends is binary (opcode 2, final): CBOR, never text.
-tokio::task_local! { /// the credential the /ws upgrade presented (set by `serve`, read once by the stream)
-    pub static WS_TOKEN: String; }
-
 pub fn pack(_c: &Conn, v: &Value) -> Message { Message::Binary(cbor::encode(v).into()) }
 
+/// A view stream with no credential of its own (tests, no pairing registry installed). Fails closed once one is.
 pub async fn socket(hub: Arc<Hub>, s: TcpStream, cbor_wanted: bool) -> Result<()> {
-    socket_inner(hub, s, cbor_wanted).await
+    socket_inner(hub, s, cbor_wanted, String::new()).await
 }
-pub async fn socket_inner(hub: Arc<Hub>, s: TcpStream, cbor_wanted: bool) -> Result<()> {
+/// `token` is the credential the /ws upgrade presented (`Auth::credential`).
+pub async fn socket_inner(hub: Arc<Hub>, s: TcpStream, cbor_wanted: bool, token: String) -> Result<()> {
     let mut cfg = WebSocketConfig::default(); cfg.max_message_size = Some(524288); cfg.max_frame_size = Some(524288);
     let (mut tx, mut rx) = tokio_tungstenite::accept_async_with_config(s, Some(cfg)).await?.split();
     let (mut conn, greeting) = hub.connect(cbor_wanted);
-    { // a revoked or unknown credential never gets a stream: resolve it for this connection, check it is still active
-        let tok = WS_TOKEN.try_with(|t| t.clone()).unwrap_or_default();
-        if !hub.admit(conn.client, &tok) { hub.detach(conn.client); return Ok(()) }
-    }
-    tx.send(pack(&conn, &greeting)).await?;
-    let mut changes = hub.changed.subscribe();
     let mut outbox = hub.attach(conn.client);
     struct Detach(Arc<Hub>, u64); impl Drop for Detach { fn drop(&mut self) { self.0.detach(self.1) } }
     let _detach = Detach(hub.clone(), conn.client);
+    // attached first, then admitted: a revoke after this point finds the outbox and closes the stream; before it, the credential no longer holds
+    if !hub.admit(conn.client, &token) { return Ok(()) }
+    tx.send(pack(&conn, &greeting)).await?;
+    let mut changes = hub.changed.subscribe();
     let mut beat = tokio::time::interval(Duration::from_millis(15000)); beat.tick().await;
     let mut due: Option<tokio::time::Instant> = None;
     loop {
@@ -131,17 +129,14 @@ pub async fn socket_inner(hub: Arc<Hub>, s: TcpStream, cbor_wanted: bool) -> Res
 /// The plain wire stream (what the Bend hub gives a client that did not ask for views): `log` from `since`
 /// (honoured only for this log's `origin`), `live`, `info`, then every commit as `changes`, streamed text as
 /// `delta`/`delta_end`. One cursor (`sent`) over the log: no commit is skipped or repeated, whatever the timing.
-pub async fn wire(hub: Arc<Hub>, s: TcpStream, since: usize, origin_asked: String) -> Result<()> {
+pub async fn wire(hub: Arc<Hub>, s: TcpStream, since: usize, origin_asked: String, token: String) -> Result<()> {
     let mut cfg = WebSocketConfig::default(); cfg.max_message_size = Some(524288); cfg.max_frame_size = Some(524288);
     let (mut tx, mut rx) = tokio_tungstenite::accept_async_with_config(s, Some(cfg)).await?.split();
     let (mut conn, _) = hub.connect(true);
-    { // a revoked or unknown credential never gets a stream: resolve it for this connection, check it is still active
-        let tok = WS_TOKEN.try_with(|t| t.clone()).unwrap_or_default();
-        if !hub.admit(conn.client, &tok) { hub.detach(conn.client); return Ok(()) }
-    }
     let mut outbox = hub.attach(conn.client);
     struct Detach(Arc<Hub>, u64); impl Drop for Detach { fn drop(&mut self) { self.0.detach(self.1) } }
     let _detach = Detach(hub.clone(), conn.client);
+    if !hub.admit(conn.client, &token) { return Ok(()) }
     // atomic join point: the length now, and a subscription taken under the same lock as commits
     let (mut changes, mut deltas) = (hub.changed.subscribe(), hub.frames.subscribe());
     let n0 = hub.store.len(); // subscribed first: a commit after this point is announced, and the cursor below reads from `sent`
@@ -219,13 +214,13 @@ pub async fn serve(hub: Arc<Hub>, s: TcpStream) -> Result<()> {
         }
         let (view, mobile) = (req.param("view") == "1", req.param("mobile") == "1");
         if !view { // the plain wire stream: log, live, changes, deltas
-            return WS_TOKEN.scope(Auth::credential(&req), wire(hub, s, req.param("since").parse().unwrap_or(0), req.param("origin"))).await;
+            return wire(hub, s, req.param("since").parse().unwrap_or(0), req.param("origin"), Auth::credential(&req)).await;
         }
         if !mobile { // renderer web is dropped
             let mut sink = vec![0u8; head_len]; s.read_exact(&mut sink).await?;
             s.write_all(&response("400 Bad Request", "text/plain; charset=utf-8", "", b"this hub serves renderer mobile only")).await?; s.shutdown().await.ok(); return Ok(());
         }
-        return WS_TOKEN.scope(Auth::credential(&req), socket(hub, s, req.param("enc") == "cbor")).await;
+        return socket_inner(hub, s, req.param("enc") == "cbor", Auth::credential(&req)).await;
     }
     let mut sink = vec![0u8; head_len]; s.read_exact(&mut sink).await?;
     http(&hub, s, req).await
