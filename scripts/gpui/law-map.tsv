@@ -99,3 +99,6 @@ law settle_never_snoozed rust settle_never_snoozed
 law snooze_wakes rust snooze_wakes
 law sidebar_split_count rust sidebar_split_count
 law sidebar_split_at_count rust sidebar_split_at_count
+
+# thread-folder boundary (#960): the Rust hub refuses unresolved thread folders (native/host/src/files/threadpath.rs)
+law thread_folder_refuses_job rust thread_folder_refuses_job
