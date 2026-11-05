@@ -32,13 +32,18 @@ pub fn unpeer_event(link: &str, at: u64) -> serde_json::Value { serde_json::json
 /// reason and leaves the file as it was ("existing pairings were preserved").
 pub fn open(home: &std::path::Path, host: &str, port: u16) -> Result<(Arc<Registry>, Arc<AuthRoutes>), String> {
     let root = std::fs::read_to_string(home.join("token")).unwrap_or_default().trim().to_string();
+    // the registry's owner is the hub token: with no token yet there is no owner to bind it to
+    if root.is_empty() { return Err("the hub token does not exist yet; the device registry starts after it".to_string()) }
     let reg = Arc::new(Registry::open(home, &root).map_err(|_| "Cannot read or initialize device registry; existing pairings were preserved".to_string())?);
     Ok((reg.clone(), Arc::new(AuthRoutes::new(reg, host, port, super::qr::text))))
 }
 
-pub fn start(hub: &Arc<Hub>, host: &str, port: u16) {
+/// Call after the token exists and before the listener accepts. Returns the routes so the listener can
+/// report its confirmed addresses (`address`) and the machine finder the owner's machines (`machines`);
+/// until it does, invitations carry only the Host header's route and /auth/known knows this listener only.
+pub fn start(hub: &Arc<Hub>, host: &str, port: u16) -> Arc<AuthRoutes> {
     match open(&hub.cfg.home, host, port) {
-        Ok((reg, routes)) => hub.set_pairing(reg, Arc::new(Wired { routes, hub: Arc::downgrade(hub) })),
+        Ok((reg, routes)) => { hub.set_pairing(reg, Arc::new(Wired { routes: routes.clone(), hub: Arc::downgrade(hub) })); routes }
         Err(e) => { eprintln!("backplane: {e}"); std::process::exit(1) }
     }
 }
@@ -49,6 +54,14 @@ mod tests {
     use crate::api::Pairing;
     #[test] fn pair_unpeer_event_is_a_revoked_peerset() {
         assert_eq!(unpeer_event("p0123456789abcdef", 7).to_string(), r#"{"$":"PeerSet","id":"p0123456789abcdef","name":"","url":"","revoked":true,"at":7}"#);
+    }
+    #[test] fn pair_start_needs_the_token() {
+        let dir = std::env::temp_dir().join(format!("bp-net-notoken-{}", std::process::id())); std::fs::create_dir_all(&dir).unwrap();
+        assert!(open(&dir, "127.0.0.1", 3787).is_err(), "no token file: no registry");
+        std::fs::write(dir.join("token"), "\n").unwrap();
+        assert!(open(&dir, "127.0.0.1", 3787).is_err());
+        assert!(!dir.join("devices-v1.json").exists());
+        let _ = std::fs::remove_dir_all(dir);
     }
     #[test] fn pair_holds_means_token_or_live_device() {
         let dir = std::env::temp_dir().join(format!("bp-net-holds-{}", std::process::id())); std::fs::create_dir_all(&dir).unwrap();
@@ -68,10 +81,7 @@ mod tests {
         assert_eq!(p.resolve("", 1, "/x"), "roottoken");
         assert!(!p.holds("0123456789abcdef0123456789abcdef"));
         drop(p); drop(reg);
-        let before = std::fs::read_to_string(dir.join("devices-v1.json")).ok();
         std::fs::write(dir.join("token"), "othertoken").unwrap();
-        // (no registry file yet: nothing to refuse) create one then change the token
-        let _ = before;
         let (r, _) = open(&dir, "127.0.0.1", 3787).unwrap();
         r.create(&["https://m.ts.net".to_string()]);
         std::fs::write(dir.join("token"), "third").unwrap();
