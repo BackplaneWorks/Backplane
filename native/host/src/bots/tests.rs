@@ -809,3 +809,27 @@ fn tool_norm(v: &Value) -> Value {
     assert_eq!(hub.setting("person.tz").await.as_deref(), Some("Europe/Helsinki"));
     assert_eq!(hub.setting("tz.rule.Europe/Helsinki").await.as_deref(), Some("EET-2EEST,M3.5.0/3,M10.5.0/4"));
 }
+#[tokio::test] async fn mail_requests_list_read_find_mark_tag_send() {
+    // Mail.request.ui: always on; a send to a bot is filed in the journal and listed, read, found, marked and tagged
+    let (hub, _bots, _r) = start("mailreq", "").await;
+    let ada = bot(&hub, "ada").await;
+    assert_eq!(rpc(&hub, "mail.send", json!({"to":"bot:nobody","text":"x"})).await["error"], "invalid mail target");
+    assert_eq!(rpc(&hub, "mail.send", json!({"to":format!("bot:{ada}"),"text":"hello ada\nsecond line"})).await["ok"], true);
+    let l = rpc(&hub, "mail.list", json!({})).await["result"].clone();
+    assert_eq!(l["total"], 1); let c = &l["convs"][0]; let cid = c["id"].as_str().unwrap().to_string();
+    assert_eq!((c["head"].as_str().unwrap(), c["from"].as_str().unwrap(), c["n"].clone(), c["status"].as_str().unwrap()), ("hello ada", "person", json!(1), ""));
+    let bl = rpc(&hub, "mail.list", json!({"bot":ada})).await["result"].clone();
+    assert_eq!((bl["total"].clone(), bl["convs"][0]["status"].as_str().unwrap(), bl["convs"][0]["unread"].clone()), (json!(1), "unread", json!(true)));
+    assert_eq!(rpc(&hub, "mail.list", json!({"bot":ada,"status":"done"})).await["result"]["total"], 0);
+    let f = rpc(&hub, "mail.find", json!({"q":"HELLO"})).await["result"].clone(); assert_eq!(f["total"], 1);
+    assert_eq!(rpc(&hub, "mail.find", json!({"q":"zzz"})).await["result"]["total"], 0);
+    let r = rpc(&hub, "mail.read", json!({"conv":cid,"bot":ada})).await["result"].clone();
+    assert_eq!((r["mails"][0]["text"].as_str().unwrap(), r["more"].clone(), r["conv"]["status"].as_str().unwrap()), ("hello ada\nsecond line", json!(false), "open"));
+    assert_eq!(rpc(&hub, "mail.read", json!({"conv":cid,"before":"nope"})).await["ok"], false);
+    assert_eq!(rpc(&hub, "mail.mark", json!({"bot":ada,"conv":cid,"status":"bogus"})).await["error"], "invalid mail status");
+    assert_eq!(rpc(&hub, "mail.mark", json!({"bot":ada,"conv":cid,"status":"done"})).await["ok"], true);
+    assert_eq!(rpc(&hub, "mail.tag", json!({"bot":ada,"conv":cid,"tags":["a","b"]})).await["ok"], true);
+    let bl = rpc(&hub, "mail.list", json!({"bot":ada,"status":"done"})).await["result"].clone();
+    assert_eq!((bl["total"].clone(), bl["convs"][0]["tags"].clone()), (json!(1), json!(["a", "b"])));
+    assert_eq!(rpc(&hub, "mail.find", json!({"bot":ada,"q":"b"})).await["result"]["total"], 1);
+}
