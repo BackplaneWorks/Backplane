@@ -46,12 +46,13 @@ struct View {
     rpcs:HashMap<u64,&'static str>, asks:HashMap<u64,u64>,
     hub:String, cid:String, greeting:Value, target:Value, session:Value,
     view_id:String, revision:u64, next:u64, pending:HashMap<u64,(u64,Value,String)>,
-    outgoing:HashMap<u64,bool>, rpc_names:HashMap<u64,String>, dirty:bool, controls:HashMap<u64,Control>, sent:HashMap<u64,std::time::Instant>, req_draft:HashMap<u64,String>, offered:HashMap<u64,String>, bases:delta::Bases,
+    restored:bool, outgoing:HashMap<u64,bool>, rpc_names:HashMap<u64,String>, dirty:bool, controls:HashMap<u64,Control>, sent:HashMap<u64,std::time::Instant>, req_draft:HashMap<u64,String>, offered:HashMap<u64,String>, bases:delta::Bases,
 }
 #[derive(Default)] struct Control { next:u64, bytes:usize, parts:Vec<String>, done:bool }
 const MAX_CONTROLS:usize=4;const MAX_CONTROL_BYTES:usize=16*1024*1024;const MAX_CONTROL_PARTS:u64=4096;
 impl View {
-    fn new(config:&Config)->Self {Self {rpcs:HashMap::new(),asks:HashMap::new(),hub:config.hub.replacen("ws://","http://",1),cid:format!("gpui-{}-{}",std::process::id(),millis()),
+    fn new(config:&Config)->Self {let mut v=Self::fresh(config);if let Some((target,session))=crate::screens::place::take_view(){v.target=target;v.session=crate::screens::place::opened_session(&session,millis());v.restored=true;}v}
+    fn fresh(config:&Config)->Self {Self {restored:false,rpcs:HashMap::new(),asks:HashMap::new(),hub:config.hub.replacen("ws://","http://",1),cid:format!("gpui-{}-{}",std::process::id(),millis()),
         greeting:Value::Null,target:json!({"kind":"recent","id":""}),session:json!({"sel":"","rid":millis(),"drafts":{},"open":{},"adding":false,"panel":false,"info":{}}),
         view_id:String::new(),revision:0,next:(1_u64<<47)+millis(),pending:HashMap::new(),outgoing:HashMap::new(),rpc_names:HashMap::new(),dirty:false,controls:HashMap::new(),sent:HashMap::new(),req_draft:HashMap::new(),offered:HashMap::new(),bases:delta::Bases::default()}}
     fn request(&mut self, method:&str, extra:Value)->Value {
@@ -78,6 +79,7 @@ impl View {
     }
 }
 pub fn connect(config:Config)->(Sender<Command>,async_channel::Receiver<Event>) {
+    crate::screens::place::open(&config);
     let (tx,mut commands)=mpsc::channel(256);let (events,rx)=async_channel::bounded(64);
     std::thread::Builder::new().name("hub".into()).spawn(move || {
         let runtime=tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
@@ -144,6 +146,8 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                         eprintln!("GPUI_LOG {}",json!({"rpc_reply":name,"ok":x["ok"]==true,"error":why.chars().take(160).collect::<String>()}));
                         if x["ok"]==true {if is_post {let _=events.send(Event::Accepted).await;}}else{let _=events.send(Event::Refused(format!("The hub refused it: {why}"))).await;}if v.dirty&&v.pending.is_empty()&&!v.view_id.is_empty(){v.dirty=false;let request=v.request("view.update",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;}continue;}
                     let Some((revision,target,method))=v.pending.remove(&id) else{continue};
+                    // the place kept from the last run may be gone (a thread deleted since, a page this hub does not have): open as on a first run
+                    if x["ok"]!=true&&v.restored&&method=="view.open" {v.restored=false;v.target=json!({"kind":"recent","id":""});v.session["sel"]=json!("");v.view_id.clear();let request=v.request("view.open",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;continue;}
                     if x["ok"]!=true {let _=events.send(Event::Refused(format!("View request refused: {}",x["error"]["code"]))).await;continue;}
                     let mut r:Value=x["result"].take();
                     if let Some(control)=r["controlId"].as_u64() {
@@ -174,7 +178,7 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                     if target!=v.target||revision!=v.revision {v.dirty=true;continue;}
                     ensure!(r["version"]==1&&r["hub"]==v.hub&&r["generation"]==v.greeting["generation"]&&r["epoch"]==v.greeting["epoch"]&&r["requestRevision"]==revision&&r["target"]==target,"view identity mismatch");
                     v.view_id=r["viewId"].as_str().context("missing view id")?.to_string();
-                    ensure!(r["session"].is_object(),"missing session");v.session=r["session"].clone();
+                    ensure!(r["session"].is_object(),"missing session");v.session=r["session"].clone();v.restored=false;crate::screens::place::note_view(&v.target,&v.session);
                     for command in r["cmds"].as_array().into_iter().flatten(){
                         if command["type"]=="send" {
                             ensure!(command["hub"].is_null()||command["hub"]==v.hub,"cross-hub command refused");

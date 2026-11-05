@@ -3,6 +3,7 @@
 #   scripts/gpui/side-by-side.sh            start (asks you to type yes)
 #   scripts/gpui/side-by-side.sh rollback   stop and delete the copy: the one line back
 #   scripts/gpui/side-by-side.sh status | stop
+#   scripts/gpui/side-by-side.sh watch      stay open and relaunch on each new test build, on the same copy (dev-reload.sh; docs/gpui/DEV-RELOAD.md)
 # Today's Backplane (3787, ~/.backplane-bend) is only read once, to copy its log; it is never stopped or written.
 # Run it yourself in a terminal: it refuses without one, so no agent can start it.
 set -eu
@@ -23,7 +24,17 @@ TXT
     printf 'Type yes to start: '; read -r a; [ "$a" = yes ] || { echo "not started"; exit 1; }
     export SWITCH_ALLOW_LIVE=person SWITCH_DISPLAY=${SWITCH_DISPLAY:-${DISPLAY:?set DISPLAY}}
     case "${1:-}" in start) shift;; esac; exec "$HERE/switch.sh" side "$@";;
+  watch)
+    [ -t 0 ] && [ -t 1 ] || { echo "side-by-side: run this yourself in a terminal (it needs your yes)" >&2; exit 1; }
+    cat <<TXT
+$WORDS
+This terminal stays open and follows the test builds: each new one replaces the running hub and window on this same copy, and your thread, place and drafts
+come back. A hub restart waits for running turns (Enter overrides). Ctrl-C stops following; the app keeps running.
+TXT
+    printf 'Type yes to follow new builds: '; read -r a; [ "$a" = yes ] || { echo "not started"; exit 1; }
+    export SWITCH_ALLOW_LIVE=person SWITCH_DISPLAY=${SWITCH_DISPLAY:-${DISPLAY:?set DISPLAY}}
+    exec "$HERE/dev-reload.sh";;
   rollback) echo "$WORDS"; exec "$HERE/switch.sh" rollback;;
   stop|status) exec "$HERE/switch.sh" "$cmd";;
-  *) sed -n 2,6p "$0"; exit 2;;
+  *) sed -n 2,7p "$0"; exit 2;;
 esac

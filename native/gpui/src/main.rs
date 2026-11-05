@@ -42,6 +42,7 @@ impl Backplane {
         let input=cx.new(screens::composer::Composer::new);input.focus_handle(cx).focus(window);
         let target=screens::attach::Target::from(&config.hub,&config.token_file);let drafts_path=config.token_file.with_file_name("gpui-drafts.json");let saved=screens::drafts::load(&drafts_path);
         let(tx,events)=hub::connect(config);
+        screens::place::watch(cx);
         cx.spawn(async move |weak,cx|{while let Ok(event)=events.recv().await {if weak.update(cx,|this,cx|this.receive(event,cx)).is_err(){break;}}}).detach();
         cx.observe(&input,|this,_,cx|{
             let text=this.input.read(cx).content.to_string();

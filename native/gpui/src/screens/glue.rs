@@ -57,6 +57,7 @@ impl Backplane {
             self.screens.attacher.show(selected);
             if let Some(d) = self.drafts.get(selected).cloned() { if self.input.read(cx).content.is_empty() { self.input.update(cx, |i, cx| i.set(d, cx)); } }
         }
+        self.place_restore(selected);
         asks::sync(self, cx);
     }
     /// Leaving `self.selected` for `raw`: flush its draft, remember its scroll, show the target's remembered scroll.
