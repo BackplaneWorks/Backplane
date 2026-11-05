@@ -139,7 +139,7 @@ impl Hub {
             "freecad":"","kicad.cli":"","kicad.fork":"","kicad.commit":"","kicad.status":"checking","kicad.source":"path","kicad.version":"",
             "kicad.api":"0","kicad.caps":"","kicad.why":"","kicad.min":"10.99.0-bp.4","kicad.can_install":"","kicad.ipc.servers":"",
             "browser.engine.live":"","browser.engine.err":""})
-        .as_object().map(|o| { let mut o = o.clone(); for (k, v) in self.extra_info.lock().unwrap().iter() { o.insert(k.clone(), json!(v)); } Value::Object(o) }).unwrap_or(Value::Null)
+        .as_object().map(|o| { let mut o = o.clone(); crate::wire::side_by_side_info(&mut o); for (k, v) in self.extra_info.lock().unwrap().iter() { o.insert(k.clone(), json!(v)); } Value::Object(o) }).unwrap_or(Value::Null)
     }
 
     /// Hub info a module publishes (a terminal's state, a browser engine's...): joining clients get it through `info()`, every
