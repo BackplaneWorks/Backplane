@@ -30,3 +30,24 @@ function __bpMemo1(tab, a, f) {
   }
   return r;
 }
+
+// two objects by identity (weakly) and two equal Strings or numbers
+// (Subs.rows(st, info, thread, now): the top bar's subagent count and the
+// subagents panel ask it with the very same arguments in one render, ~7.7 ms
+// each on the huge state's long thread, 2026-11-05). Anything else (an
+// argument that is no object) is asked as before.
+const __bpMemo4Tabs = new Map();
+function __bpMemo4(tab, a, b, c, d, f) {
+  if (a === null || typeof a !== "object" || b === null || typeof b !== "object") return f(a, b, c, d);
+  let w = __bpMemo4Tabs.get(tab);
+  if (w === undefined) __bpMemo4Tabs.set(tab, w = new WeakMap());
+  let wb = w.get(a);
+  if (wb === undefined) w.set(a, wb = new WeakMap());
+  let m = wb.get(b);
+  if (m === undefined) wb.set(b, m = new Map());
+  const key = typeof c + ":" + String(c) + "\0" + typeof d + ":" + String(d);
+  if (m.has(key)) return m.get(key);
+  const r = f(a, b, c, d);
+  m.set(key, r);
+  return r;
+}
