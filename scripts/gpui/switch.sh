@@ -50,7 +50,10 @@ pidof_file() { [ -f "$SW/$1.pid" ] && cat "$SW/$1.pid" || true; }
 # a pid file is trusted only while /proc/<pid>/cmdline still names our binary and our home
 # The binary is the one RECORDED at launch ($SW/hub.bin, $SW/client.bin), never re-derived from CURRENT or the environment at stop time.
 ours() { local c b; c=$(tr '\0' ' ' < "/proc/$1/cmdline" 2>/dev/null) || return 1
-  b=$(cat "$SW/$2.bin" 2>/dev/null) || return 1; [ -n "$b" ] || return 1
+  b=$(cat "$SW/$2.bin" 2>/dev/null) || b=
+  # a session an older script started has no .bin: fall back to the identity check on the binary this script would use
+  if [ -z "$b" ]; then case "$2" in hub) b=$HUB_BIN;; client) b=$CLIENT_BIN;; esac; fi
+  [ -n "$b" ] || return 1
   case "$c" in *"$b"*"$H"*) return 0;; esac; return 1; }
 owned() { [ -f "$SW/.switch-owned" ]; }
 rss_mb() { awk '/^VmRSS/{printf "%d", $2/1024}' "/proc/$1/status" 2>/dev/null || echo "?"; }
