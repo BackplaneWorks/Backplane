@@ -12,15 +12,17 @@ let viewId='';
 const ask=async(m,extra={})=>{const id=++n;const p={version:1,hub:'http://127.0.0.1:3815',generation:greet.generation,epoch:greet.epoch,requestRevision:++rev,target:{kind:'recent',id:''},viewId,session,cid:'e2e',nativeSidebar:1,...extra};
  const pr=new Promise(r=>waiting.set(id,r));ws.send(encode({id,m,p}));const x=await pr;const res=x.result;if(res?.session)Object.assign(session,res.session);if(res?.viewId)viewId=res.viewId;return x};
 const find=(o,f,out=[])=>{if(o&&typeof o==='object'){if(f(o))out.push(o);for(const v of Object.values(o))find(v,f,out)}return out};
-const pager=r=>find(r.result.shown,o=>o&&typeof o==='object'&&'offset' in o&&'limit' in o&&'total' in o)[0];
+const pagers=r=>find(r.result.shown,o=>o&&typeof o==='object'&&'offset' in o&&'limit' in o&&'total' in o);
+const pager=r=>pagers(r).sort((a,b)=>b.total-a.total)[0]; // the threads list's: the biggest
 const nexts=r=>find(r.result.shown,o=>o.action==='native-sidebar-page');
 let bad=0;const log=(ok,m)=>{console.log((ok?'ok   ':'FAIL ')+m);if(!ok)bad++};
 const r0=await ask('view.open');
 log(r0.ok&&r0.result?.remoteReady===true,'open answers a picture: '+JSON.stringify(r0.error||'').slice(0,80));
-const p0=pager(r0);log(!!p0&&p0.offset===0&&p0.total>=300,'first page: '+JSON.stringify(p0));
+console.log('pagers: '+JSON.stringify(pagers(r0).map(p=>[p.total,p.offset,p.limit,!!p.next])));
+const p0=pager(r0);log(!!p0&&p0.offset===0&&p0.total>=300,'first page: '+JSON.stringify(p0).slice(0,200));
 let offsets=[p0?.offset];let r=r0;
 for(let i=0;i<3;i++){
-  const c=nexts(r).find(c=>/next|more|\bmore\b/i.test(c.label||'')||true);
+  const pg=pager(r);const c=pg&&pg.next&&pg.next.action==='native-sidebar-page'?pg.next:null;
   if(!c){log(false,'no next control at step '+i);break}
   r=await ask('view.action',{action:'native-sidebar-page',value:c.value});
   if(!r.ok||!r.result?.shown){log(false,'page action refused: '+JSON.stringify(r).slice(0,200));break}
