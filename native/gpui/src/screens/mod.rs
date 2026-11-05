@@ -18,6 +18,7 @@ pub mod plot;
 pub mod projects;
 pub mod plotview;
 pub mod select;
+pub mod strip;
 pub mod settings;
 pub mod timeline;
 pub mod tools;
