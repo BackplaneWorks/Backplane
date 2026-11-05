@@ -20,13 +20,29 @@ pub struct Hub {
     live: std::sync::Mutex<std::collections::HashMap<String, String>>,
     pub window_bin: std::sync::OnceLock<PathBuf>,
     me: std::sync::OnceLock<std::sync::Weak<Hub>>, next_client: AtomicU64,
-    outboxes: std::sync::Mutex<std::collections::HashMap<u64, tokio::sync::mpsc::UnboundedSender<Out>>>,
+    outboxes: std::sync::Mutex<std::collections::HashMap<u64, Slot>>, outbox_max: std::sync::atomic::AtomicUsize,
 }
 
 /// One item of a connection's outbox: a value the hub encodes (CBOR with the dictionaries), or bytes that go out as
 /// one binary frame exactly as given (plot frames carry byte strings and plain text the dictionaries would change).
 pub enum Out { Value(Value), Raw(Vec<u8>), /// end the connection (its device was revoked)
     Close }
+
+/// The most bytes a client's outbox may hold unread. A client that stops reading is dropped (it reconnects and resumes
+/// from its cursor) rather than growing the hub without limit; droppable frames (terminal output, plots) are skipped once
+/// the outbox is half full, so frames that must arrive keep their room.
+pub const OUTBOX_MAX: usize = 8 << 20;
+struct Slot { tx: tokio::sync::mpsc::UnboundedSender<(Out, usize)>, pending: Arc<std::sync::atomic::AtomicUsize> }
+/// What a connection loop reads: the frames pushed to it. Reading one gives its bytes back to the budget.
+pub struct Outbox { rx: tokio::sync::mpsc::UnboundedReceiver<(Out, usize)>, pending: Arc<std::sync::atomic::AtomicUsize> }
+impl Outbox {
+    pub async fn recv(&mut self) -> Option<Out> { let (o, n) = self.rx.recv().await?; self.pending.fetch_sub(n, Relaxed); Some(o) }
+}
+/// A cheap size of a frame (its strings, numbers and structure), without encoding it.
+pub fn frame_bytes(v: &Value) -> usize {
+    match v { Value::Null | Value::Bool(_) => 4, Value::Number(_) => 8, Value::String(s) => s.len() + 2,
+        Value::Array(a) => 2 + a.iter().map(|x| frame_bytes(x) + 1).sum::<usize>(), Value::Object(o) => 2 + o.iter().map(|(k, x)| k.len() + 3 + frame_bytes(x)).sum::<usize>() }
+}
 
 struct Commit { events: Vec<Value>, done: tokio::sync::oneshot::Sender<Result<u64>> }
 
@@ -57,7 +73,7 @@ impl Hub {
         let (ftx, _) = broadcast::channel(1024);
         let model = Model::build(&store)?;
         let hub = Arc::new(Hub { cfg, auth, epoch, presenter, store: store.clone(), commits: ctx, model: Mutex::new(model), gen: AtomicU64::new(1), changed: tx, frames: ftx, native_key: { let mut b = [0u8; 16]; if let Ok(mut f) = std::fs::File::open("/dev/urandom") { let _ = std::io::Read::read_exact(&mut f, &mut b); } hex::encode(b) },
-            rpc: Default::default(), http: Default::default(), views: Default::default(), observers: Default::default(), pairing: Default::default(), auth_route: Default::default(), live: Default::default(), window_bin: Default::default(), me: Default::default(), next_client: AtomicU64::new(1), outboxes: Default::default() });
+            rpc: Default::default(), http: Default::default(), views: Default::default(), observers: Default::default(), pairing: Default::default(), auth_route: Default::default(), outbox_max: std::sync::atomic::AtomicUsize::new(OUTBOX_MAX), live: Default::default(), window_bin: Default::default(), me: Default::default(), next_client: AtomicU64::new(1), outboxes: Default::default() });
         let _ = hub.me.set(Arc::downgrade(&hub));
         hub.bootstrap()?;
         hub.fold_log().await?;
@@ -178,12 +194,30 @@ impl Hub {
     pub fn http_for(&self, route: &str) -> Option<Arc<dyn HttpHandler>> { self.http.read().unwrap().iter().filter(|(p, _)| route == *p || route.starts_with(&format!("{p}/"))).max_by_key(|(p, _)| p.len()).map(|(_, h)| h.clone()) }
     pub fn arc(&self) -> Arc<Hub> { self.me.get().and_then(|w| w.upgrade()).expect("hub is alive") }
     /// Send an unsolicited frame (a plot, a notice) to one connection; false when it has gone.
-    pub fn push(&self, client: u64, frame: Value) -> bool { self.outboxes.lock().unwrap().get(&client).map_or(false, |t| t.send(Out::Value(frame)).is_ok()) }
+    pub fn push(&self, client: u64, frame: Value) -> bool { let n = frame_bytes(&frame); self.enqueue(client, Out::Value(frame), n, false) }
+    /// A frame that may be skipped: false (and nothing queued) when the client's outbox is more than half full or it has gone. `bytes` is its size.
+    pub fn push_budgeted(&self, client: u64, frame: Value, bytes: usize) -> bool { self.enqueue(client, Out::Value(frame), bytes, true) }
+    /// Bytes queued for the client and not yet read by its connection (0 when it has gone).
+    pub fn outbox_pending(&self, client: u64) -> usize { self.outboxes.lock().unwrap().get(&client).map_or(0, |s| s.pending.load(Relaxed)) }
+    /// Tests: the byte bound.
+    pub fn set_outbox_max(&self, n: usize) { self.outbox_max.store(n, Relaxed) }
+    fn enqueue(&self, client: u64, out: Out, bytes: usize, droppable: bool) -> bool {
+        let max = self.outbox_max.load(Relaxed); let cap = if droppable { max / 2 } else { max };
+        let mut m = self.outboxes.lock().unwrap();
+        let Some(s) = m.get(&client) else { return false };
+        if s.pending.load(Relaxed) + bytes > cap {
+            // a frame that must arrive cannot: the client is too slow. Drop it; it reconnects and resumes from its cursor.
+            if !droppable { m.remove(&client); }
+            return false
+        }
+        s.pending.fetch_add(bytes, Relaxed);
+        s.tx.send((out, bytes)).is_ok()
+    }
     /// Bytes as one binary WebSocket frame, not re-encoded (plot frames). False when the connection has gone.
-    pub fn push_raw(&self, client: u64, bytes: Vec<u8>) -> bool { self.outboxes.lock().unwrap().get(&client).map_or(false, |t| t.send(Out::Raw(bytes)).is_ok()) }
+    pub fn push_raw(&self, client: u64, bytes: Vec<u8>) -> bool { let n = bytes.len(); self.enqueue(client, Out::Raw(bytes), n, false) }
     /// ... to every connection.
-    pub fn push_all(&self, frame: &Value) { for t in self.outboxes.lock().unwrap().values() { let _ = t.send(Out::Value(frame.clone())); } }
-    pub fn attach(&self, client: u64) -> tokio::sync::mpsc::UnboundedReceiver<Out> { let (t, r) = tokio::sync::mpsc::unbounded_channel(); self.outboxes.lock().unwrap().insert(client, t); r }
+    pub fn push_all(&self, frame: &Value) { let ids: Vec<u64> = self.outboxes.lock().unwrap().keys().copied().collect(); let n = frame_bytes(frame); for id in ids { self.enqueue(id, Out::Value(frame.clone()), n, false); } }
+    pub fn attach(&self, client: u64) -> Outbox { let (tx, rx) = tokio::sync::mpsc::unbounded_channel(); let pending = Arc::new(std::sync::atomic::AtomicUsize::new(0)); self.outboxes.lock().unwrap().insert(client, Slot { tx, pending: pending.clone() }); Outbox { rx, pending } }
     /// True while the connection's outbox exists (it has not gone away).
     pub fn is_attached(&self, client: u64) -> bool { self.outboxes.lock().unwrap().contains_key(&client) }
     pub fn detach(&self, client: u64) { self.outboxes.lock().unwrap().remove(&client); if let Some(p) = self.pairing.get() { p.forget(client) } crate::session::forget(client); }
@@ -200,7 +234,7 @@ impl Hub {
             Some(p) => !token.is_empty() && p.resolve(token, client, "/ws") == token && p.active(client) }
     }
     /// Ends the connections a revoke named.
-    pub fn close_clients(&self, ids: &[u64]) { let o = self.outboxes.lock().unwrap(); for id in ids { if let Some(t) = o.get(id) { let _ = t.send(Out::Close); } } }
+    pub fn close_clients(&self, ids: &[u64]) { let o = self.outboxes.lock().unwrap(); for id in ids { if let Some(t) = o.get(id) { let _ = t.tx.send((Out::Close, 0)); } } }
     /// Read access to the model: threads, projects, entry indexes, pages.
     pub async fn model(&self) -> tokio::sync::MutexGuard<'_, Model> { self.model.lock().await }
     /// A setting's current value (None when it has none or was removed); read from the log line the model points at.
@@ -382,5 +416,29 @@ mod write_tests {
         let disk = Store::open(&dir.join("events.jsonl")).unwrap(); assert_eq!(disk.len(), n0 + 2); assert!(disk.get(n0).unwrap().contains("\"MessagePosted\""));
         assert_eq!(h.model.lock().await.entries(), 1);
         let bad = h.request(&mut c, &json!({"id":10,"m":"turn.start","p":{"thread":"nope","text":"x"}})).await; assert_eq!(bad[0]["ok"], false);
+    }
+
+    // a client that never reads never grows the hub: past the bound it is dropped (plain push), droppable frames are skipped sooner
+    #[tokio::test] async fn a_client_that_never_reads_cannot_grow_the_outbox_past_its_bound() {
+        let dir = std::env::temp_dir().join(format!("bp-outbox-{}", std::process::id())); let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();
+        let hub = Hub::start(cfg(&dir), Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        hub.set_outbox_max(100_000);
+        let _never = hub.attach(1); let _reads = hub.attach(2);
+        let frame = json!({"t":"term","data":"x".repeat(1000)}); let n = frame_bytes(&frame);
+        // droppable frames stop at half the bound, and the client stays
+        let mut budgeted = 0; while hub.push_budgeted(1, frame.clone(), n) { budgeted += 1; assert!(budgeted < 1000) }
+        assert!(hub.outbox_pending(1) <= 50_000 && hub.outbox_pending(1) > 40_000, "pending {}", hub.outbox_pending(1));
+        assert!(hub.is_attached(1), "skipping a droppable frame does not drop the client");
+        // plain pushes go on to the bound, then the client is dropped and nothing more is queued
+        let mut pushed = 0; while hub.push(1, frame.clone()) { pushed += 1; assert!(pushed < 1000) }
+        assert!(!hub.is_attached(1), "past the bound the client is dropped");
+        assert_eq!(hub.outbox_pending(1), 0);
+        assert!(!hub.push(1, frame.clone()) && !hub.push_budgeted(1, frame.clone(), n), "nothing is queued for a dropped client");
+        // push_all: a reading client keeps working while the stalled one goes
+        let mut r = hub.attach(3); for _ in 0..200 { hub.push_all(&frame); if let Ok(Some(_)) = tokio::time::timeout(std::time::Duration::from_millis(1), r.recv()).await {} }
+        assert!(hub.outbox_pending(3) <= 100_000, "bounded for push_all too: {}", hub.outbox_pending(3));
+        // reading frees the budget
+        let mut o = hub.attach(4); assert!(hub.push(4, frame.clone())); let before = hub.outbox_pending(4); assert!(before > 0);
+        o.recv().await.unwrap(); assert_eq!(hub.outbox_pending(4), 0);
     }
 }
