@@ -14,9 +14,10 @@ final class Journeys: XCTestCase {
         let row = d.app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'thread.row.'"))
             .containing(NSPredicate(format: "label == %@", want)).firstMatch
         return d.step("open \(want)", act: {
+            // the list keeps its scroll position after a back: look above first, then page down
+            if !row.exists { for _ in 0..<3 { d.app.swipeDown(velocity: .fast) } }
             var tries = 0
-            while !row.exists && tries < 6 { d.app.swipeUp(); tries += 1 }
-            if !row.isHittable { d.app.swipeDown() }
+            while !row.exists && tries < 8 { d.app.swipeUp(); tries += 1 }
             d.tap(row)
         }, expect: { d.el("thread.composer").exists })
     }
