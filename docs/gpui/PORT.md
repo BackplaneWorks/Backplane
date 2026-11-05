@@ -3431,3 +3431,17 @@ Laws that name a web-only file but also native-shared code, so kept (review by h
 
 - `stop_command_only_while_running` names `src/web/workspace.bend`
 - `terminal_empty_input_keeps_view` names `src/web/workspace.bend`
+
+### Open seam: stalled clients and terminal output (term lane, 2026-11-05)
+Terminal output goes out with `Hub::push_all` into each connection's unbounded outbox, so one stalled client plus a flood (`yes` in a terminal) grows the hub without limit. M3's "slow clients bounded" does not hold for terminal output, and M7 must not run with a stalled client until this is wired. The fix needs `Hub::push_budgeted(client, frame, bytes) -> bool` and `Hub::outbox_pending(client) -> usize` (owner: the `bend` lead; requested 2026-11-05) and a way to list connections; the term lane then drops a stalled client's term frames past its budget and sends one snapshot when it drains (`term/mod.rs` header).
+## Settings lane: known gaps (native/host/src/settings/)
+
+- `setting.set` of `kicad.path`: the Bend hub also sends `KiCadRetry` so the runtime is checked again at once. The Rust runtime reads the setting on each use (`kicad/ipc.rs`) and has no cached check to retry, so there is nothing to call; the next KiCad request picks the new path up.
+- Telemetry: the choice (opt-out, reset, receipts) is ported; the sender is not, and no endpoint is baked in, so nothing is ever sent.
+- Vault: Windows DPAPI key storage is not ported (the file and keyring/keychain backends are).
+- `vault::with` holds the vault lock through key-store commands (up to 5 s), as a blocking call; callers use `spawn_blocking`.
+- Settings propose: Bend's `Settings.propose` also refuses while `Private.live(thread)` (a bot's private-mail turn). Rust has no private turns yet; the bots lane must add that check to `settings::proposal::tool_propose` when they exist, or a private turn can open a hub-wide proposal.
+- Fallback outage classifier (`Error.classify`) and chain `pick`: not ported (they read provider error envelopes in the agents' turn handling).
+- Webhook: the `hook_follows_*` laws (the webhook posts exactly when Notify me for would notify) are about `notice.bend`'s Policy over the alert records; they stay with the notification pipeline (net lane). `settings::webhook::deliver` is the entry point it calls for each alert; `fires`/`route` hold the kinds the policy raises.
+- Time zones: `settings::zone` keeps each zone's POSIX rule as `tz.rule.<name>` but does not parse or evaluate it (`core/tz.bend`: offset at an instant, wall clock, gaps and overlaps); that belongs with the routines (bots lane). The hub does not yet write `tz.machine` at start nor refresh rules on a tick (`Hub.zone.tick`).
+- Improvements: `improvements.context` / `improvements.report` are ported; the thread itself is `thread.create` with a `creationKey` (commands lane; `settings::improvements::key`/`thread_for` are its rules).

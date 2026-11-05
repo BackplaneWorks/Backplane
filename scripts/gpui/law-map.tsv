@@ -495,3 +495,14 @@ law hook_body_ask_event rust hook_body_ask_event
 law hook_unsigned_header rust hook_unsigned_header
 law hook_signed_header rust hook_signed_header
 law hook_secret_default rust hook_secret_default
+law hook_secret_path rust hook_secret_path
+law hook_report_keeps_end rust hook_report_keeps_end
+law hook_report_keeps_fail rust hook_report_keeps_fail
+law hook_report_fallback rust hook_report_fallback
+law hook_route_done rust hook_route_done
+law hook_route_fail rust hook_route_fail
+law hook_route_ask rust hook_route_ask
+law hook_route_merged rust hook_route_merged
+law hook_route_reminder rust hook_route_reminder
+law hook_route_note rust hook_route_note
+law hook_route_quiet rust hook_route_quiet
