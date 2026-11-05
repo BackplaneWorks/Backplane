@@ -4,6 +4,7 @@ import ../core/fm.bend as FM
 import ./proc.bend as P
 import ../core/json.bend as J
 import ../core/hist.bend as HI
+import ../core/rview.bend as RVW
 import ../core/codec.bend as C
 import ../core/hier.bend as HR
 import ../core/bom.bend as BM
@@ -789,8 +790,17 @@ def RvJob.bom.k(+sch: String, +thread: String, +a: String, +b: String) -> IO(Res
 def RvJob.bom.root(+cwd: String, +b: String, +fallback: String) -> String:
   Bool.pick(String, Bool.and(String.starts_with(b, cwd ++ "/"), Bool.and(String.ends_with(b, ".kicad_sch"), FM.Fm.safe(String.drop(b, 1n+String.length(cwd))))), b, fallback)
 
+# A version of a commit names a repository and a commit; both go to git, so
+# they must be this folder's own repository and a commit hash.
+def RvJob.bom.mine(ok: Bool, +thread: String, +cwd: String, +a: String, +b: String) -> IO(Res):
+  match ok:
+    case True{}:
+      IO.bind(K.Files, Res, K.Files.read(cwd), f => RvJob.bom.k(RvJob.bom.root(cwd, b, Rvc.sch(f)), thread, a, b))
+    case False{}:
+      IO.pure(Res, Res.err("that version is not of this project"))
+
 def RvJob.bom(+thread: String, +cwd: String, +a: String, +b: String) -> IO(Res):
-  IO.bind(K.Files, Res, K.Files.read(cwd), f => RvJob.bom.k(RvJob.bom.root(cwd, b, Rvc.sch(f)), thread, a, b))
+  RvJob.bom.mine(Bool.and(Bool.not(String.is_empty(cwd)), Bool.and(RVW.Rview.repo.ok(a, cwd), RVW.Rview.repo.ok(b, cwd))), thread, cwd, a, b)
 
 # review.checks {thread, commit, trigger}: the design checks, in the child
 def RvJob.checks.k(r: P.Ran, +thread: String) -> Res:
