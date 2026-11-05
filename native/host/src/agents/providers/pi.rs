@@ -207,12 +207,6 @@ pub struct PiDriver { acp: Acp, turn: Turn }
 impl PiDriver { pub fn new() -> PiDriver { PiDriver { acp: Acp::default(), turn: Turn::default() } } }
 impl Default for PiDriver { fn default() -> Self { Self::new() } }
 
-/// The turn's gen (the MCP endpoint is `/mcp/<thread>.<gen>?k=..`, Mcp::seg), which names a new session.
-pub fn gen_of(a: &TurnIn) -> String {
-    let key = format!("/mcp/{}.", a.thread);
-    a.mcp_url.find(&key).map(|i| a.mcp_url[i + key.len()..].split(['?', '/']).next().unwrap_or("").to_string()).unwrap_or_default()
-}
-
 /// PiRun.args: `pi --mode rpc` with its session, Backplane's extension and the instructions; the model ("provider/id") and thinking level are flags.
 pub fn args(sid: &str, ext: &str, prompt: &str, model_: &str, effort: &str) -> Vec<String> {
     let mut v: Vec<String> = ["--mode", "rpc", "--session-id", sid, "-e", ext, "--append-system-prompt", prompt].iter().map(|x| x.to_string()).collect();
@@ -220,13 +214,15 @@ pub fn args(sid: &str, ext: &str, prompt: &str, model_: &str, effort: &str) -> V
 }
 
 impl Driver for PiDriver {
+    /// Proto.install
+    fn install_hint(&self) -> Option<String> { Some("Install Pi (https://pi.dev), then sign in: run `pi` and use /login.".into()) }
     /// Proto.gone
     fn exit_why(&self, _code: i32) -> Option<String> { Some("pi exited before the turn ended (is it signed in? run `pi` and use /login)".into()) }
     /// The extension is written before each turn (`<home>/pi/backplane.js`), as PiRun.go does.
     fn argv(&self, a: &TurnIn) -> Vec<String> {
         let dir = std::path::Path::new(&a.home).join("pi");
         let _ = write_atomic(&dir, "backplane.js", EXT);
-        args(&session(&a.session, &a.thread, &gen_of(a)), &dir.join("backplane.js").to_string_lossy(), &a.prompt, &a.model, &a.effort)
+        args(&session(&a.session, &a.thread, &a.gen), &dir.join("backplane.js").to_string_lossy(), &a.prompt, &a.model, &a.effort)
     }
     /// BACKPLANE_PI_MCP and BACKPLANE_PI_MODE: what Backplane's extension reads.
     fn env(&self, a: &TurnIn) -> Vec<(String, String)> { vec![("BACKPLANE_PI_MCP".into(), a.mcp_url.clone()), ("BACKPLANE_PI_MODE".into(), mode(&a.runtime).into())] }
@@ -252,7 +248,7 @@ mod tests {
         fn asks(&self) -> Vec<Value> { self.shapes.iter().filter(|s| s["type"] == "bp.ask").map(|s| s["request"].clone()).collect() }
         fn plain(&self) -> Vec<Value> { self.shapes.iter().filter(|s| s["type"] != "bp.ask").cloned().collect() }
     }
-    fn ti(runtime: &str) -> TurnIn { TurnIn { thread: "t1".into(), mcp_url: "http://127.0.0.1:1/mcp/t1.9?k=x".into(), home: "/h".into(), runtime: runtime.into(), text: "hi".into(), prompt: "P".into(), ..TurnIn::default() } }
+    fn ti(runtime: &str) -> TurnIn { TurnIn { thread: "t1".into(), gen: "9".into(), mcp_url: "http://m".into(), home: "/h".into(), runtime: runtime.into(), text: "hi".into(), prompt: "P".into(), ..TurnIn::default() } }
     fn feed(d: &mut PiDriver, lines: &[&str]) -> Vec<Reaction> { lines.iter().map(|l| d.on_line(&serde_json::from_str(l).unwrap())).collect() }
 
     // laws pi_mode_*: supervised asks, accept edits asks for all but edits, full access asks nothing

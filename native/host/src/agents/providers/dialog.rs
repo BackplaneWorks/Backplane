@@ -203,8 +203,7 @@ mod e2e {
         }
         o
     }
-    // PendingChanged (the JS hub counts the open asks, 1 on AskOpened and 0 on AskClosed) is NOT compared: the Rust actor does not write it yet (agents lane).
-    const KEEP: &[&str] = &["MessagePosted", "TurnChanged", "ActivityLogged", "AskOpened", "AskClosed", "SessionSet", "UsageSet", "TurnUsage"];
+    const KEEP: &[&str] = &["MessagePosted", "TurnChanged", "ActivityLogged", "AskOpened", "AskClosed", "SessionSet", "UsageSet", "TurnUsage", "PendingChanged"];
     fn core(ev: &[Value]) -> Vec<String> {
         ev.iter().filter(|e| KEEP.contains(&e["$"].as_str().unwrap_or("")) && e["thread"].as_str().map_or(true, |t| t == T1) && !(e["$"] == "MessagePosted" && e["role"] == "user" && false))
             .map(|e| { let mut e = e.clone(); if let Some(o) = e.as_object_mut() { o.remove("at"); } digits(&e.to_string()) }).collect()

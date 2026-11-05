@@ -166,7 +166,7 @@ impl Default for OmpDriver { fn default() -> Self { Self::new() } }
 impl OmpDriver {
     /// OmpLaunch.prepare + Grok.failed: the turn's private launch folder, or the words of a turn that could not start (the actor says "could not start omp: " first).
     pub fn prepare_turn(&self, a: &TurnIn) -> Result<(), String> {
-        match prepare(&a.home, &a.prompt, EXT) { Ok(d) => { *self.launch.borrow_mut() = Some(d); Ok(()) } Err(e) => Err(format!("{}. {}", launch_why(&e), INSTALL)) }
+        match prepare(&a.home, &a.prompt, EXT) { Ok(d) => { *self.launch.borrow_mut() = Some(d); Ok(()) } Err(e) => Err(launch_why(&e)) }
     }
 }
 /// Proto.install
@@ -181,6 +181,9 @@ pub fn launch_why(e: &std::io::Error) -> String {
 }
 
 impl Driver for OmpDriver {
+    /// OmpRun.prepared: omp is never started without its private launch folder; the actor adds "could not start omp: " before and the hint after.
+    fn prepare(&mut self, a: &TurnIn) -> Result<(), String> { self.prepare_turn(a) }
+    fn install_hint(&self) -> Option<String> { Some(INSTALL.into()) }
     /// Proto.gone
     fn exit_why(&self, _code: i32) -> Option<String> { Some("omp exited before the turn ended (is it signed in? run `omp` and use /login)".into()) }
     /// The launch folder is made by `prepare_turn` (OmpRun.prepared: omp is never started without it). The agents lane calls that first (see the
@@ -198,7 +201,6 @@ impl Driver for OmpDriver {
     fn ask_info(&self, request: &Value) -> Option<AskInfo> { dl::ask_info(request) }
     fn answer(&mut self, request: &Value, answer: &str) -> Vec<String> { vec![dl::reply(request, answer)] }
     fn ends_on_turn_end(&self) -> bool { true }
-    fn on_exit(&mut self, _code: Option<i32>) -> Vec<Value> { if let Some(d) = self.launch.borrow_mut().take() { remove(&d) } vec![] }
 }
 impl Drop for OmpDriver { fn drop(&mut self) { if let Some(d) = self.launch.borrow_mut().take() { remove(&d) } } }
 
@@ -212,7 +214,7 @@ mod tests {
         fn asks(&self) -> Vec<Value> { self.shapes.iter().filter(|s| s["type"] == "bp.ask").map(|s| s["request"].clone()).collect() }
         fn plain(&self) -> Vec<Value> { self.shapes.iter().filter(|s| s["type"] != "bp.ask").cloned().collect() }
     }
-    fn ti(runtime: &str) -> TurnIn { TurnIn { thread: "t1".into(), home: "/h".into(), runtime: runtime.into(), text: "hi".into(), prompt: "P".into(), mcp_url: "http://m".into(), ..TurnIn::default() } }
+    fn ti(runtime: &str) -> TurnIn { TurnIn { thread: "t1".into(), gen: "9".into(), home: "/h".into(), runtime: runtime.into(), text: "hi".into(), prompt: "P".into(), mcp_url: "http://m".into(), ..TurnIn::default() } }
     fn feed(d: &mut OmpDriver, lines: &[&str]) -> Vec<Reaction> { lines.iter().map(|l| d.on_line(&serde_json::from_str(l).unwrap())).collect() }
 
     // laws omp_mode_*
@@ -232,13 +234,13 @@ mod tests {
         let r = d.on_line(&json!({"type":"response","id":"1","success":true,"data":{"sessionId":"S9","messageCount":4}}));
         assert_eq!(r.send, vec![r#"{"id":"2","type":"prompt","message":"say this"}"#], "the text reaches the prompt; the session is the one resumed");
         assert_eq!(r.shapes, vec![json!({"type":"thread.started","thread_id":"S9"})]);
-        d.on_exit(Some(0)); let _ = std::fs::remove_dir_all(dir_);
+        drop(d); let _ = std::fs::remove_dir_all(dir_);
     }
     #[test] fn omp_exits_with_its_own_words() { assert_eq!(OmpDriver::new().exit_why(1).unwrap(), "omp exited before the turn ended (is it signed in? run `omp` and use /login)") }
     #[test] fn a_launch_folder_that_cannot_be_made_fails_the_turn_with_the_install_hint() {
         let blocker = std::env::temp_dir().join(format!("bp-omp-block-{}", std::process::id())); std::fs::write(&blocker, "x").unwrap();
         let d = OmpDriver::new(); let a = TurnIn { home: blocker.to_string_lossy().into(), ..TurnIn::default() };
-        let e = d.prepare_turn(&a).unwrap_err(); assert!(e.ends_with(". Install Oh My Pi (https://github.com/can1357/oh-my-pi), then sign in: run `omp` and use /login."), "{e}");
+        let mut d = d; let e = d.prepare(&a).unwrap_err(); assert!(!e.is_empty(), "{e}"); assert_eq!(d.install_hint().unwrap(), "Install Oh My Pi (https://github.com/can1357/oh-my-pi), then sign in: run `omp` and use /login.");
         assert_eq!(launch_why(&std::io::Error::from_raw_os_error(2)), "Oh My Pi CLI or a required launch path was not found (ENOENT); check omp on the hub's PATH and its working directory");
         let _ = std::fs::remove_file(blocker);
     }
@@ -262,7 +264,7 @@ mod tests {
         assert_eq!(std::fs::read_to_string(launch.join("system-prompt.txt")).unwrap(), "THE PROMPT"); assert_eq!(std::fs::read_to_string(launch.join("backplane.js")).unwrap(), EXT);
         { use std::os::unix::fs::PermissionsExt; assert_eq!(std::fs::metadata(launch.join("system-prompt.txt")).unwrap().permissions().mode() & 0o777, 0o600); assert_eq!(std::fs::metadata(&launch).unwrap().permissions().mode() & 0o777, 0o700); }
         assert_eq!(d.env(&a), vec![("BACKPLANE_OMP_MCP".to_string(), "http://m".to_string())]);
-        let mut d = d; d.on_exit(Some(0)); assert!(!launch.exists());
+        drop(d); assert!(!launch.exists());
         a.model = "openai/gpt".into(); a.effort = "turbo".into(); let d2 = OmpDriver::new(); let v2 = d2.argv(&a); assert_eq!(&v2[v2.len() - 2..], ["--model", "openai/gpt"]); drop(d2);
         let _ = std::fs::remove_dir_all(dir_);
     }
