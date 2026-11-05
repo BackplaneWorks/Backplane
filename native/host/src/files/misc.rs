@@ -130,7 +130,7 @@ impl RpcHandler for Misc {
                             match r { Ok(Ok(r)) => (r.code, r.out), _ => (1, "backplane --render: the renderer stopped".to_string()) }
                         } else {
                             let bin = std::env::var_os("BACKPLANE_PLOT_BIN").map(std::path::PathBuf::from).unwrap_or_else(|| "backplane-serve".into());
-                            let r = super::git::keep(proc(&bin.to_string_lossy(), &["--render", &path], &cwd, &[])).await; (r.code, r.out)
+                            let r = proc(&bin.to_string_lossy(), &["--render", &path], &cwd, &[]).await; (r.code, r.out)
                         };
                         err = mech_error(code, &out); rendered = path;
                     }

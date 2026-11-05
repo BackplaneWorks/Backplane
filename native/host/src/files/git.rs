@@ -21,19 +21,13 @@ pub const GIT_ENV: [(&str, &str); 12] = [("GIT_CONFIG_COUNT", "5"), ("GIT_CONFIG
 pub struct Ran { pub code: i32, pub out: String }
 
 /// P.Proc.run: `cmd args` in `cwd`, stdin closed, stdout then stderr, code 127 when it cannot start.
-tokio::task_local! { static KEEP: bool; }
-/// Run `f` so that the commands it starts are NOT killed when it is dropped (a caller's timeout, a closed connection). Work that changes
-/// something (a commit, a push, a checkpoint, an export, a release) runs to its end once started; everything else is killed with its future.
-pub async fn keep<F: std::future::Future>(f: F) -> F::Output { KEEP.scope(true, f).await }
-/// A command is killed when the future waiting on it is dropped: a caller's `tokio::time::timeout` (commands/home.rs wraps `git log` and `gh pr list`
-/// in 1.5 s, as the JS effect's execFile timeout does) must not leave the child running. Inside `keep` it is not.
 pub async fn proc(cmd: &str, args: &[&str], cwd: &str, env: &[(&str, &str)]) -> Ran {
     // Proc.run.folder: an empty working folder is refused, never the hub's own directory
     if cwd.is_empty() { return Ran { code: 2, out: "No working folder: refusing to use the hub working directory".into() } }
     // a copy of a log runs no network command (copy.rs: curl, gh, ssh, git push/fetch..., also through sh -c)
     if crate::copy::refused(cmd, args) { return Ran { code: 126, out: crate::copy::refusal(cmd) } }
     let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Local, cmd);
-    c.args(args).current_dir(cwd).stdin(std::process::Stdio::null()).envs(GIT_ENV.iter().copied()).envs(env.iter().copied()).kill_on_drop(!KEEP.try_with(|k| *k).unwrap_or(false));
+    c.args(args).current_dir(cwd).stdin(std::process::Stdio::null()).envs(GIT_ENV.iter().copied()).envs(env.iter().copied());
     match c.output().await {
         Ok(o) => { let mut out = String::from_utf8_lossy(&o.stdout).into_owned(); out.push_str(&String::from_utf8_lossy(&o.stderr)); Ran { code: o.status.code().unwrap_or(1), out } }
         Err(e) => Ran { code: 127, out: e.to_string() },
@@ -86,8 +80,7 @@ pub async fn snapshot(cwd: &str, thread: &str) -> Result<String, String> {
     seq(run_idx(cwd, &idx, &["write-tree"]).await, false)
 }
 /// Git.checkpoint.capture: the work tree as turn n of a thread (no commit lands on any branch); answers the commit id.
-pub async fn checkpoint_capture(cwd: &str, thread: &str, n: u64) -> Result<String, String> { keep(checkpoint_capture_run(cwd, thread, n)).await }
-async fn checkpoint_capture_run(cwd: &str, thread: &str, n: u64) -> Result<String, String> {
+pub async fn checkpoint_capture(cwd: &str, thread: &str, n: u64) -> Result<String, String> {
     let tree = snapshot(cwd, thread).await?;
     let prev = run(cwd, &["rev-parse", "--verify", "-q", &checkpoint_prev(thread, n)]).await;
     let parents: Vec<String> = if prev.code == 0 { vec!["-p".into(), prev.out.trim().into()] } else { vec![] };
@@ -124,8 +117,7 @@ pub async fn diff(cwd: &str, thread: &str, a: &str, b: &str) -> String {
     } else { checkpoint_diff(cwd, thread, an, b.parse().unwrap_or(0)).await }
 }
 /// Git.checkpoint.revert: the work tree exactly as checkpoint n had it; HEAD, the branch and the real index do not move. "" when done.
-pub async fn checkpoint_revert(cwd: &str, thread: &str, n: u64) -> String { keep(checkpoint_revert_run(cwd, thread, n)).await }
-async fn checkpoint_revert_run(cwd: &str, thread: &str, n: u64) -> String {
+pub async fn checkpoint_revert(cwd: &str, thread: &str, n: u64) -> String {
     let go = async {
         let gd = seq(run(cwd, &["rev-parse", "--absolute-git-dir"]).await, false)?;
         let idx = format!("{gd}/backplane-{}.index", b64url(thread));
@@ -138,15 +130,14 @@ async fn checkpoint_revert_run(cwd: &str, thread: &str, n: u64) -> String {
     flat(go.await)
 }
 /// Git.step.capture: a step of the thread's KiCad files ("" when nothing changed); `reg` is the hub's history.trusted file.
-pub async fn step_capture(cwd: &str, thread: &str, reg: &str) -> String { keep(step_capture_run(cwd, thread, reg)).await }
-async fn step_capture_run(cwd: &str, thread: &str, reg: &str) -> String {
+pub async fn step_capture(cwd: &str, thread: &str, reg: &str) -> String {
     if !super::threadpath::absolute(cwd) { return String::new() } let r = sh(STEP, &[cwd, &b64url(thread), reg], "/", &[]).await; if r.code == 0 { r.out } else { String::new() } }
 /// Git.refs: what a file may be compared with (git dir, top, then `kind\tlabel\tcommit` lines).
 pub async fn refs(cwd: &str, thread: &str) -> String {
     if !super::threadpath::absolute(cwd) { return String::new() } let r = sh(REFS, &[cwd, &b64url(thread)], "/", &[]).await; if r.code == 0 { r.out } else { String::new() } }
 /// Git.show: a file as a commit has it (`git --git-dir G show OBJ`), None when it is not there.
 pub async fn show(gitdir: &str, obj: &str) -> Option<Vec<u8>> {
-    let o = crate::proc::tokio_cmd(crate::proc::Kind::Local, "sh").args(["-c", "exec 2>/dev/null; git --git-dir=\"$1\" show \"$2\"", "sh", gitdir, obj]).current_dir("/").stdin(std::process::Stdio::null()).envs(GIT_ENV.iter().copied()).kill_on_drop(true).output().await.ok()?;
+    let o = crate::proc::tokio_cmd(crate::proc::Kind::Local, "sh").args(["-c", "exec 2>/dev/null; git --git-dir=\"$1\" show \"$2\"", "sh", gitdir, obj]).current_dir("/").stdin(std::process::Stdio::null()).envs(GIT_ENV.iter().copied()).output().await.ok()?;
     if o.status.success() { Some(o.stdout) } else { None }
 }
 
@@ -195,8 +186,7 @@ async fn step_init(cwd: &str) -> Result<String, String> {
     Ok(format!("{cwd} is a git repository now (commit {out}); new threads get their own worktree"))
 }
 /// Git.act: one line per step ("commit: <sha> <subject>", "push: <branch>", "pr: <url>"); the first failing step ends it with "error: <step>: ...".
-pub async fn act(cwd: &str, action: &str, message: &str, title: &str, body: &str) -> String { keep(act_run(cwd, action, message, title, body)).await }
-async fn act_run(cwd: &str, action: &str, message: &str, title: &str, body: &str) -> String {
+pub async fn act(cwd: &str, action: &str, message: &str, title: &str, body: &str) -> String {
     let steps: &[&str] = match action { "commit" => &["c"], "push" => &["p"], "create_pr" => &["r"], "commit_push" => &["c", "p"], "commit_push_pr" => &["c", "p", "r"], "init" => &["i"], _ => return format!("error: unknown action {action}") };
     let mut log = String::new();
     for s in steps {
@@ -219,20 +209,6 @@ mod tests {
         assert_eq!(checkpoint_ref("t1", 3), "refs/backplane/checkpoints/dDE/turn/3");
     }
     #[test] fn failed_words() { assert!(failed("error: x")); assert!(failed("a\nerror: b")); assert!(!failed("fine error: x")); assert!(!failed("")) }
-    // commands/home.rs wraps git log / gh pr list in a 1.5 s timeout: the child must be gone when the future is dropped, and inside `keep` it must not be
-    fn alive(pid: i32) -> bool { std::path::Path::new(&format!("/proc/{pid}")).exists() && std::fs::read_to_string(format!("/proc/{pid}/stat")).map_or(false, |s| !s.contains(") Z ")) }
-    async fn gone_within(pid: i32, ms: u64) -> bool { for _ in 0..ms / 25 { if !alive(pid) { return true } tokio::time::sleep(std::time::Duration::from_millis(25)).await } !alive(pid) }
-    #[tokio::test] async fn a_timeout_kills_the_child_and_keep_does_not() {
-        let d = tmp("kill"); let (a, b) = (format!("{d}/killed.pid"), format!("{d}/kept.pid"));
-        let run = |f: String, secs: &'static str| async move { proc("sh", &["-c", "echo $$ > \"$0\"; exec sleep $1", &f, secs], "/", &[]).await };
-        // a plain call: dropped by the timeout, the sleep (exec'd, same pid) is killed
-        let t = tokio::time::timeout(std::time::Duration::from_millis(300), run(a.clone(), "30")).await; assert!(t.is_err(), "the timeout fired");
-        let pid: i32 = std::fs::read_to_string(&a).unwrap().trim().parse().unwrap(); assert!(gone_within(pid, 2000).await, "child {pid} still running after the timeout");
-        // inside keep: the same timeout leaves it running until it ends by itself
-        let t = tokio::time::timeout(std::time::Duration::from_millis(300), keep(run(b.clone(), "2"))).await; assert!(t.is_err());
-        let pid: i32 = std::fs::read_to_string(&b).unwrap().trim().parse().unwrap(); assert!(alive(pid), "a kept command must outlive its caller's timeout");
-        assert!(gone_within(pid, 5000).await, "and end by itself");
-    }
     #[tokio::test] async fn checkpoints_diff_revert_and_status() {
         let d = tmp("cp"); g(&d, &["init", "-q"]).await; std::fs::write(format!("{d}/a.txt"), "one\n").unwrap(); g(&d, &["add", "."]).await; g(&d, &["commit", "-qm", "i"]).await;
         assert!(is_repo(&d).await); assert_eq!(checkpoint_count(&d, "th").await, 0);

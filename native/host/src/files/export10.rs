@@ -18,8 +18,7 @@ fn result(home: &str, pro: &str, report: &J, state: &str, text: &str) -> J {
 }
 /// KExport.run
 async fn within(work: impl std::future::Future<Output = Ran>) -> Ran {
-    // the command is not killed by the deadline: it holds the export folder's lock until it exits (so `keep`)
-    tokio::time::timeout(DEADLINE, super::git::keep(work)).await.unwrap_or(Ran { code: 124, out: "KiCad export timed out after ten minutes. Its export folder stays locked until the command exits.".into() })
+    tokio::time::timeout(DEADLINE, work).await.unwrap_or(Ran { code: 124, out: "KiCad export timed out after ten minutes. Its export folder stays locked until the command exits.".into() })
 }
 /// KExport.command: only a marked, managed folder is cleared
 async fn command(home: &str, pro: &str, cli: &str, mode: &str, flags: &[&str]) -> Ran {
