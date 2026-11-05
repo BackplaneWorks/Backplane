@@ -24,7 +24,7 @@ impl Tk { pub fn terminal(&self) -> bool { matches!(self.state.as_str(), "done" 
 pub struct Ask { pub thread: String, pub kind: String, pub tool: String, pub detail: String, pub options: String }
 
 #[derive(Default)]
-pub struct World { pub tasks: HashMap<String, Tk>, pub deadlines: std::collections::HashSet<String>, pub asks: HashMap<String, Ask>, pub sessions: std::collections::HashSet<(String, String)>, pub threads: HashMap<String, T>, pub roots: HashMap<String, String>, pub st: HashMap<String, String>, seen: usize }
+pub struct World { pub launched: HashMap<String, (String, bool)>, pub projects: HashMap<String, (String, bool)>, pub tasks: HashMap<String, Tk>, pub deadlines: std::collections::HashSet<String>, pub asks: HashMap<String, Ask>, pub sessions: std::collections::HashSet<(String, String)>, pub threads: HashMap<String, T>, pub roots: HashMap<String, String>, pub st: HashMap<String, String>, seen: usize }
 
 const KEYS: &[&str] = &["watch.", "thread.parent.", "bg.", "wait.", "work.timeout.seconds", "allowance.claude", "effort.", "buy.", "kicad.ipc", "order.enabled", "agent.lang", "tz.machine", "agent.thinking", "restart.continue", "tok.epoch", "tok.recount", "tok.basis.", "turn.speed.", "turn.models.", "limit.claude.", "ride.", "agy.", "session."];
 fn tracked(k: &str) -> bool { KEYS.iter().any(|p| k == *p || (p.ends_with('.') && k.starts_with(p))) || k.starts_with("usage.") || k.starts_with("tok.key.") }
@@ -54,12 +54,14 @@ impl World {
 
     pub fn apply(&mut self, line: &str) {
         let Some(t) = line.strip_prefix("{\"$\":\"").and_then(|r| r.split('"').next()) else { return };
-        const READ: [&str; 25] = ["TaskDelegated", "TaskStateSet", "TaskDelivered", "WorkSet", "AskOpened", "AskClosed", "ThreadRenamed", "ProjectCreated", "ThreadCreated", "WorktreeSet", "ProviderSet", "ModesSet", "SessionSet", "TurnChanged", "MessagePosted", "ActivityLogged", "UsageSet", "SettingSet", "TurnUsage", "ThreadArchived", "ThreadDeleted", "ThreadForked", "QueueTaken", "TurnQueued", "ThreadWoke"];
+        const READ: [&str; 27] = ["ProjectRemoved", "ThreadLaunched", "TaskDelegated", "TaskStateSet", "TaskDelivered", "WorkSet", "AskOpened", "AskClosed", "ThreadRenamed", "ProjectCreated", "ThreadCreated", "WorktreeSet", "ProviderSet", "ModesSet", "SessionSet", "TurnChanged", "MessagePosted", "ActivityLogged", "UsageSet", "SettingSet", "TurnUsage", "ThreadArchived", "ThreadDeleted", "ThreadForked", "QueueTaken", "TurnQueued", "ThreadWoke"];
         if !READ.contains(&t) { return }
         let Ok(v) = serde_json::from_str::<Value>(line) else { return };
         let g = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").to_string();
         match t {
-            "ProjectCreated" => { self.roots.insert(g("id"), g("root")); }
+            "ProjectCreated" => { self.roots.insert(g("id"), g("root")); self.projects.insert(g("id"), (g("title"), false)); }
+            "ProjectRemoved" => if let Some(p) = self.projects.get_mut(&g("id")) { p.1 = true },
+            "ThreadLaunched" => { self.launched.insert(g("id"), (g("by"), v.get("report").and_then(Value::as_bool).unwrap_or(true))); }
             "TaskDelegated" => { self.tasks.insert(g("task"), Tk { parent: g("parent"), child: g("child"), depth: v.get("depth").and_then(Value::as_u64).unwrap_or(0), state: "queued".into(), provider: g("provider"), model: g("model"), ..Default::default() }); }
             "TaskStateSet" => if let Some(k) = self.tasks.get_mut(&g("task")) { if !k.terminal() { k.state = g("state") } k.summary = g("summary") }, // Task.step: a terminal state sticks; the summary is replaced
             "TaskDelivered" => if let Some(k) = self.tasks.get_mut(&g("task")) { k.delivered = true },
@@ -101,6 +103,11 @@ impl World {
     /// Where a thread's agent works: its worktree, else its project's folder (Hub.cwd).
     /// Task.depth: how deep a thread's delegation chain is (0 for a thread nobody delegated).
     pub fn depth(&self, th: &str) -> u64 { self.tasks.values().find(|k| k.child == th).map_or(0, |k| k.depth) }
+    /// Mcp.project.find: a live project by id or name (any case).
+    pub fn project_find(&self, name: &str) -> Option<String> {
+        let n = name.trim().to_lowercase(); if n.is_empty() { return None }
+        self.projects.iter().find(|(id, (title, removed))| !*removed && (id.to_lowercase() == n || title.to_lowercase() == n)).map(|(id, _)| id.clone())
+    }
     pub fn cwd(&self, th: &str) -> String {
         let Some(t) = self.threads.get(th) else { return String::new() };
         if !t.worktree.is_empty() { t.worktree.clone() } else { self.roots.get(&t.project).cloned().unwrap_or_default() }
