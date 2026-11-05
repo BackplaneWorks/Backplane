@@ -12,9 +12,9 @@ use hub::{Command,Event};
 actions!(backplane,[Send,ClosePopup]);
 pub struct Backplane {
     pub input:Entity<input::TextInput>, data:Value, status:String, error:String,
-    tx:tokio::sync::mpsc::UnboundedSender<Command>, selected:String,
+    tx:tokio::sync::mpsc::Sender<Command>, selected:String,
     drafts:HashMap<String,String>, popup:bool, started:Instant, usable:bool,
-    first_frame:bool, script_done:bool, steps:VecDeque<Step>, pending:Option<Pending>, seq:u64, want_focus:bool, script_total:usize,
+    first_frame:bool, script_done:bool, scroll:ScrollHandle, last_entries:usize, steps:VecDeque<Step>, pending:Option<Pending>, seq:u64, want_focus:bool, script_total:usize,
 }
 fn pager_row(cx:&mut Context<Backplane>,id:String,pager:&Value,light:bool)->Option<AnyElement> {let c=|name:&str|theme::color(light,name);
     let mut row=div().flex().gap_2().px_3().py_1().text_size(px(11.));let mut any=false;
@@ -23,7 +23,7 @@ fn pager_row(cx:&mut Context<Backplane>,id:String,pager:&Value,light:bool)->Opti
         if let Some(value)=control["value"].as_str() {
             any=true;let value=value.to_string();let label=format!("{} ({})",name,pager["total"]);
             row=row.child(div().id(SharedString::from(format!("{id}-{key}"))).cursor_pointer().text_color(c("accent")).hover(|s|s.bg(c("raise"))).px_1().child(label)
-                .on_click(cx.listener(move|this,_,_,cx|{let _=this.tx.send(Command::Page(value.clone()));cx.notify();})));
+                .on_click(cx.listener(move|this,_,_,cx|{let _=this.tx.try_send(Command::Page(value.clone()));cx.notify();})));
         }
     }
     if any {Some(row.into_any_element())} else {None}
@@ -39,15 +39,17 @@ impl Backplane {
             let text=this.input.read(cx).content.to_string();
             this.drafts.insert(this.selected.clone(),text.clone());
             this.popup=text.starts_with('/')||text.starts_with('$');
-            if this.popup {let _=this.tx.send(Command::Draft(text));}
+            if this.popup {let _=this.tx.try_send(Command::Draft(text));}
             cx.notify();
         }).detach();
-        Self{input,data:Value::Null,status:"Connecting…".into(),error:String::new(),tx,selected:String::new(),drafts:HashMap::new(),popup:false,started,usable:false,first_frame:false,script_done:false,steps,pending:None,seq:0,want_focus:false,script_total}
+        Self{input,data:Value::Null,status:"Connecting…".into(),error:String::new(),tx,selected:String::new(),drafts:HashMap::new(),popup:false,started,usable:false,first_frame:false,script_done:false,scroll:ScrollHandle::new(),last_entries:0,steps,pending:None,seq:0,want_focus:false,script_total}
     }
     fn receive(&mut self,event:Event,cx:&mut Context<Self>) {
         match event {
             Event::Picture(r)=>{
-                self.data=r["shown"].clone();
+                let mut r=r;self.data=r["shown"].take();
+                let entries=self.data["thread"]["entries"].as_array().map_or(0,|e|e.len());
+                if entries!=self.last_entries {self.last_entries=entries;self.scroll.set_offset(point(px(0.),px(-1_000_000.)));}
                 let selected=string(&self.data["thread"],"id");
                 if !selected.is_empty() {self.selected=selected;}
             },
@@ -63,12 +65,12 @@ impl Backplane {
         self.drafts.insert(self.selected.clone(),self.input.read(cx).content.to_string());
         self.selected=raw.clone();let text=self.drafts.get(&raw).cloned().unwrap_or_default();
         self.input.update(cx,|input,cx|input.set(text,cx));self.popup=false;
-        let _=self.tx.send(Command::Select(id));self.want_focus=true;cx.notify();
+        let _=self.tx.try_send(Command::Select(id));self.want_focus=true;cx.notify();
     }
     fn send(&mut self,_:&Send,_:&mut Window,cx:&mut Context<Self>) {self.do_send(cx);}
     fn do_send(&mut self,cx:&mut Context<Self>) {
         let text=self.input.read(cx).content.to_string();
-        if !text.trim().is_empty()&&self.status=="Connected" {let _=self.tx.send(Command::Send(text));self.error.clear();}cx.notify();
+        if !text.trim().is_empty()&&self.status=="Connected" {let _=self.tx.try_send(Command::Send(text));self.error.clear();}cx.notify();
     }
     fn thread_ids(&self)->Vec<String> {
         let mut ids=Vec::new();
