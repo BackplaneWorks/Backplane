@@ -9,6 +9,8 @@ EXC=(--exclude 'mobile/**' --exclude 'desktop/**' --exclude 'docs/**' --exclude 
 case $mode in
  selftest) scripts/boat-job.sh --size default --timeout 900 --idle 3600 --no-setup-bend --artifact out/e2e "${EXC[@]}" -- sh test/gpui/e2e/boat-inner.sh selftest ;;
  input-selftest) scripts/boat-job.sh --size default --timeout 900 --idle 3600 --no-setup-bend --artifact out/e2e "${EXC[@]}" -- sh test/gpui/e2e/boat-inner.sh input-selftest ;;
+ input-run) cp --reflink=auto "$2" test/gpui/e2e/bin/hub; cp --reflink=auto "$3" test/gpui/e2e/bin/gpui; [ -d "$(dirname "$3")/assets" ] && cp -r "$(dirname "$3")/assets" test/gpui/e2e/bin/assets
+      scripts/boat-job.sh --size default --timeout 1800 --idle 3600 --no-setup-bend --artifact out/e2e "${EXC[@]}" -- sh test/gpui/e2e/boat-inner.sh input-run ;;
  run) cp --reflink=auto "$2" test/gpui/e2e/bin/hub; cp --reflink=auto "$3" test/gpui/e2e/bin/gpui; [ -d "$(dirname "$3")/assets" ] && cp -r "$(dirname "$3")/assets" test/gpui/e2e/bin/assets
       scripts/boat-job.sh --size default --timeout 3000 --idle 3600 --no-setup-bend --artifact out/e2e "${EXC[@]}" -- sh test/gpui/e2e/boat-inner.sh run "${4:-all}" ;;
  *) echo "usage: $0 selftest | run HUB GPUI [journey]"; exit 2 ;;
