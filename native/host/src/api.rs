@@ -47,6 +47,8 @@ pub trait HttpHandler: Send + Sync {
     /// `STREAM_MAX` with 413); `body` reads exactly that many bytes and no more; `body.proceed().await` answers `Expect: 100-continue`
     /// (call it once you accept the size). The connection closes after the reply.
     fn call_body<'a>(&'a self, _hub: &'a Arc<Hub>, _req: &'a Req, _body: Body<'a>) -> Fut<'a, HttpReply> { Box::pin(async { HttpReply::text("405 Method Not Allowed", "this route takes no body") }) }
+    /// The most body bytes read for this route when it is `own_auth` (default `auth::BODY_MAX`, 1 MiB). Over it: 413 before anything is read.
+    fn body_max(&self) -> usize { crate::auth::BODY_MAX }
     /// `call` with the connection's id (Pairing.resolve remembers a connection's device by it). Handlers that do not
     /// need it implement `call` only.
     fn call_with<'a>(&'a self, hub: &'a Arc<Hub>, req: &'a Req, _client: u64) -> Fut<'a, HttpReply> { self.call(hub, req) }

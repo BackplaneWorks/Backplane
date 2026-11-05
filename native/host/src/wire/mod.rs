@@ -72,7 +72,7 @@ pub async fn http(hub: &Hub, mut s: TcpStream, mut req: Req) -> Result<()> {
     }
     if req.method == "POST" && (req.route().starts_with("/auth/") || hub.http_for(req.route()).map_or(false, |h| h.own_auth())) {
         let len = req.header("content-length").trim().parse::<usize>().ok();
-        let status = if !req.header("transfer-encoding").is_empty() || len.is_none() { Some("411 Length Required") } else if len.unwrap() > crate::auth::BODY_MAX { Some("413 Payload Too Large") } else { None };
+        let status = if !req.header("transfer-encoding").is_empty() || len.is_none() { Some("411 Length Required") } else if len.unwrap() > hub.http_for(req.route()).map_or(crate::auth::BODY_MAX, |h| h.body_max()) { Some("413 Payload Too Large") } else { None };
         if let Some(st) = status { s.write_all(&response(st, "text/plain; charset=utf-8", "", st.as_bytes())).await.ok(); return Ok(()) }
         let mut body = vec![0u8; len.unwrap()];
         match tokio::time::timeout(Duration::from_secs(10), s.read_exact(&mut body)).await {
