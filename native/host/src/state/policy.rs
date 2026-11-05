@@ -14,7 +14,9 @@ use tokio::sync::{mpsc, oneshot};
 /// records) and nothing that grows with the log for its own sake (`stopped.<msg>`, `failed.<msg>`, token totals, uber op lines, session and
 /// seen counts...). A policy that starts reading another family adds its prefix here.
 const KEEP: &[&str] = &["settle.", "autosettle.", "launch.", "launched.", "thread.parent.", "bg.", "watch.", "order.wait.", "wake.", "wakes.", "lock.", "locks.",
-    "secret.ask.", "liveness.", "star.nudge.", "restart.retry", "provider.resume.", "watchdog.", "alert.", "told.", "summary.", "notify.", "push.webhook"];
+    "secret.ask.", "liveness.", "star.nudge.", "restart.retry", "provider.resume.", "watchdog.", "alert.", "summary.", "notify.", "push.webhook"];
+// `told.` is a ledger that grows with the log until the minute tick prunes it (Told.prune: 30 days, 2000 records); it is kept again when the told policy
+// is ported with that prune, not before.
 pub fn lean_keeps(k: &str) -> bool { KEEP.iter().any(|p| k.starts_with(p)) }
 
 pub struct Core {
@@ -80,8 +82,8 @@ mod tests {
     fn msg(th: &str, id: &str, role: &str, at: u64) -> Value { json!({"$":"MessagePosted","thread":th,"msg":id,"role":role,"text":"hello","at":at}) }
 
     #[test] fn lean_keeps_what_policies_read_and_drops_what_grows() {
-        for k in ["autosettle.quiet.t1", "liveness.t1", "wake.w1", "lock.merge", "launch.t2", "told.k1", "settle.done"] { assert!(lean_keeps(k), "{k}"); }
-        for k in ["stopped.m1", "failed.m1", "tok.t.t1", "uber.op.u.m.1", "usage.t1", "todos.t1", "session.t1.claude"] { assert!(!lean_keeps(k), "{k}"); }
+        for k in ["autosettle.quiet.t1", "liveness.t1", "wake.w1", "lock.merge", "launch.t2", "alert.t1", "settle.done"] { assert!(lean_keeps(k), "{k}"); }
+        for k in ["stopped.m1", "failed.m1", "told.k1", "tok.t.t1", "uber.op.u.m.1", "usage.t1", "todos.t1", "session.t1.claude"] { assert!(!lean_keeps(k), "{k}"); }
     }
     #[test] fn an_ordered_commit_of_two_back_to_back_batches() {
         // the first batch's commit is slow, the second's fast: the log must still get the first's events first, and every echo is skipped in turn
