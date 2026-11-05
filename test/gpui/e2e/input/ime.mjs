@@ -5,7 +5,7 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 export async function startIme(display,engine='xkb:us::eng'){
   // default ibus address handling (the selftest's way, which works): the daemon writes its address under ~/.config/ibus/bus and the CLI reads it
   const env={...process.env,DISPLAY:display,XMODIFIERS:'@im=ibus',GTK_IM_MODULE:'ibus',QT_IM_MODULE:'ibus',LANG:'en_US.UTF-8'};
-  let log='';const p=spawn('ibus-daemon',['-r','-x','--panel','disable','-v'],{env,stdio:['ignore','pipe','pipe']});p.stdout.on('data',d=>log+=d);p.stderr.on('data',d=>log+=d);
+  let log='';const p=spawn('ibus-daemon',[...(process.env.BOAT_SANDBOX?['-r']:[]),'-x','--panel','disable','-v'] /* -r (replace) only in a disposable Boat sandbox: on a shared machine it would kill the person's own daemon */,{env,stdio:['ignore','pipe','pipe']});p.stdout.on('data',d=>log+=d);p.stderr.on('data',d=>log+=d);
   let up=false;for(let k=0;k<30&&!up;k++){await sleep(500);try{execFileSync('ibus',['address'],{env,timeout:3000,stdio:'pipe'});up=true}catch{}}
   let status='started',engineNow='';
   try{execFileSync('ibus',['engine',engine],{env,timeout:8000,stdio:'pipe'});engineNow=execFileSync('ibus',['engine'],{env,encoding:'utf8',timeout:8000}).trim()}catch(e){status='engine not selectable (daemon answered: '+up+'): '+String(e.stderr||e.message).slice(0,160)+' | daemon log: '+log.slice(-300)}

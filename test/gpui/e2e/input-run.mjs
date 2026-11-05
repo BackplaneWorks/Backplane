@@ -1,7 +1,7 @@
 // The must-pass GPUI input actions with real OS input on Xvfb (Boat): drag-select, Ctrl-C, paste an image, drop a file, IME, paperclip, link click.
 // bun test/gpui/e2e/input-run.mjs --hub-bin PATH --gpui-bin PATH [--out DIR]   (Boat only; see boat-run.sh input-run)
 import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';import {spawn,execFileSync} from 'node:child_process';import {resolve} from 'node:path';
-import {startDisplay,installMissing} from './lib/capture.mjs';import {startFixtureHub} from './lib/hubfx.mjs';import {Input} from './input/driver.mjs';import {startIme} from './input/ime.mjs';
+import {startDisplay,installMissing} from './lib/capture.mjs';import {startFixtureHub} from './lib/hubfx.mjs';import {Input} from './input/driver.mjs';import {startIme} from './input/ime.mjs';import {preflight} from './input/preflight.mjs';
 const arg=(k,d)=>{const i=process.argv.indexOf('--'+k);return i>=0?process.argv[i+1]:d};const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const hubBin=resolve(arg('hub-bin')),gpuBin=resolve(arg('gpui-bin')),out=resolve(arg('out','out/e2e/input'));mkdirSync(out,{recursive:true});
 const summary={when:new Date().toISOString(),actions:{},blocked:{},env:installMissing()};
@@ -10,7 +10,14 @@ const pickFile=out+'/paste.png';execFileSync('convert',['-size','240x160','gradi
 const portalLog=out+'/portal.log';let portal=null;
 try{portal=spawn('python3',['test/gpui/e2e/input/portal_standin.py'],{env:{...process.env,PORTAL_PICK:pickFile,PORTAL_LOG:portalLog},stdio:'ignore'});for(let k=0;k<40;k++){await sleep(250);try{readFileSync(portalLog+'.ready');break}catch{}}}catch(e){summary.portalError=String(e.message)}
 const ime=await startIme(dsp.display); // before the client, so it can connect to it through XIM
-summary.ime={status:ime.status,engine:ime.engine};const fx=await startFixtureHub({bin:hubBin,root:resolve('out/e2e-run/input'),port:3813,threads:6});
+summary.ime={status:ime.status,engine:ime.engine};
+// HARNESS SELF-CHECK before the client exists: if the pointer, clipboard, XDND or input method do not work against plain X clients, no verdict about GPUI is possible
+const pf=await preflight({display:dsp.display,env:dsp.env,ime,out:out+'/preflight',portalLog});summary.preflight=pf;
+const ACTIONS=['drag-select','ctrl-c','paste-image','drop-file','ime-hangul','paperclip'];
+if(!pf.pass){try{portal?.kill('SIGTERM')}catch{}try{ime.stop()}catch{}dsp.stop();
+  summary.verdict='harness';summary.reason='preflight failed: '+pf.failed.join(', ')+' (no GPUI was started; nothing here says anything about the app)';summary.actions=Object.fromEntries(ACTIONS.map(a=>[a,{ok:null,status:'harness',evidence:{failedChecks:pf.failed}}]));
+  writeFileSync(out+'/input-summary.json',JSON.stringify(summary,null,1));console.log('HARNESS FAILURE: '+summary.reason);process.exit(3)}
+const fx=await startFixtureHub({bin:hubBin,root:resolve('out/e2e-run/input'),port:3813,threads:6});
 try{
   const sf=out+'/hold.script.json';writeFileSync(sf,JSON.stringify([{select:0},...Array.from({length:80},()=>[{wait:1500},{read:'composer'}]).flat()])); // G6: the client reports its composer text every 1.5 s
   const metrics=[];let buf='';const g=spawn(gpuBin,['--url',fx.state.url,'--token-file',fx.state.root+'/home/token','--script',sf],{env:{...dsp.env,...ime.env,HOME:fx.state.root+'/fakehome',BACKPLANE_GPUI_RECTS:'1'},stdio:['ignore','ignore','pipe']});
@@ -55,5 +62,5 @@ try{
   try{g.kill('SIGTERM')}catch{}
 }finally{try{portal?.kill('SIGTERM')}catch{}try{ime.stop()}catch{}await fx.stop();dsp.stop()}
 // an action only counts when evidence says so; pass also needs the Rust hub on real hardware (CONTRACT.md), which this Boat run is not
-for(const a of Object.values(summary.actions))a.status=a.ok?'partial':'fail';
+summary.verdict='app';for(const a of Object.values(summary.actions))a.status=a.ok?'partial':'fail'; // the preflight passed, so a false below is the app's
 writeFileSync(out+'/input-summary.json',JSON.stringify(summary,null,1));console.log(JSON.stringify({actions:Object.fromEntries(Object.entries(summary.actions).map(([k,v])=>[k,v.ok])),blocked:summary.blocked},null,1));
