@@ -17,14 +17,15 @@ use std::sync::{Mutex, MutexGuard};
 const KEEP: &[&str] = &["settle.", "autosettle.", "launch.", "launched.", "thread.parent.", "bg.", "watch.", "order.wait.", "wake.", "wakes.", "lock.", "locks.",
     "secret.ask.", "liveness.", "star.nudge.", "restart.retry", "provider.resume.", "thread.config.hold.", "watchdog.", "alert.", "summary.", "notify.", "push.webhook", "told.", "project.dormant."];
 // `told.` is a ledger that grows with the log until the minute tick prunes it (Told.prune: 30 days, 2000 records, run by `Core::tick`): only
-// its keys are kept (`lean_value`), the prune reads nothing else. A turn's input (launch.input.<t>, fallback.input.<t>: 10-20 KB each) and a
-// thread's riding mail (ride.) are never kept.
+// its keys are kept (`lean_value`), the prune reads nothing else. A turn's input (launch.input.<t>, fallback.input.<t>: 10-20 KB each) is kept the
+// same way, key only, for Input.prune (the minute tick removes those of threads at rest); a thread's riding mail (ride.) is never kept.
 pub fn lean_keeps(k: &str) -> bool {
-    !(k.starts_with("launch.input.") || k.starts_with("fallback.input.") || k.starts_with("ride.")) && KEEP.iter().any(|p| k.starts_with(p))
+    k.starts_with("launch.input.") || k.starts_with("fallback.input.") || (!k.starts_with("ride.") && KEEP.iter().any(|p| k.starts_with(p)))
 }
 /// the value the lean copy keeps for a setting: a told record keeps a placeholder (its key carries the time), unless it is not one of ours
 pub fn lean_value(k: &str, v: &str) -> String {
     if v.is_empty() { return String::new() } // an empty value removes the key, as for the full state
+    if k.starts_with("launch.input.") || k.starts_with("fallback.input.") { return "1".to_string() }
     match k.strip_prefix("told.") { Some(id) if turnend::told_stamp(id).is_some() => "1".to_string(), _ => v.to_string() }
 }
 
@@ -68,7 +69,7 @@ impl Core {
         let after = live.into_iter().chain(asks).chain(told).chain(quiet).chain(meta).chain(reopen).collect();
         Derived { core, end, marks, after }
     }
-    pub fn tick(&self, now_s: u64) -> Vec<Value> { let mut v = autosettle::changes(&self.st, now_s); v.extend(autosettle::tick_post(&self.st, now_s)); v.extend(turnend::told_prune(&self.st, now_s)); v }
+    pub fn tick(&self, now_s: u64) -> Vec<Value> { let mut v = autosettle::changes(&self.st, now_s); v.extend(autosettle::tick_post(&self.st, now_s)); v.extend(turnend::told_prune(&self.st, now_s)); v.extend(turnend::input_prune(&self.st, now_s)); v }
 }
 
 struct Inner {
@@ -170,8 +171,8 @@ mod tests {
     fn keys(evs: &[Value]) -> Vec<String> { evs.iter().filter_map(|e| e["key"].as_str().map(String::from)).collect() }
 
     #[test] fn lean_keeps_what_policies_read_and_drops_what_grows() {
-        for k in ["autosettle.quiet.t1", "liveness.t1", "wake.w1", "lock.merge", "launch.t2", "alert.t1", "told.k1-1", "settle.done"] { assert!(lean_keeps(k), "{k}"); }
-        for k in ["stopped.m1", "failed.m1", "launch.input.t1", "fallback.input.t1", "ride.t1", "tok.t.t1", "uber.op.u.m.1", "usage.t1", "todos.t1", "session.t1.claude"] { assert!(!lean_keeps(k), "{k}"); }
+        for k in ["autosettle.quiet.t1", "liveness.t1", "wake.w1", "lock.merge", "launch.t2", "alert.t1", "told.k1-1", "settle.done", "launch.input.t1", "fallback.input.t1"] { assert!(lean_keeps(k), "{k}"); }
+        for k in ["stopped.m1", "failed.m1", "ride.t1", "tok.t.t1", "uber.op.u.m.1", "usage.t1", "todos.t1", "session.t1.claude"] { assert!(!lean_keeps(k), "{k}"); }
     }
     #[test] fn a_batch_gets_its_derived_events_in_the_same_batch() {
         let p = booted();

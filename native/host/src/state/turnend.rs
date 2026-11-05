@@ -56,6 +56,24 @@ pub fn told_prune(st: &State, now: u64) -> Vec<Value> {
         .map(|(_, (k, _))| json!({"$": "SettingSet", "key": k, "value": "", "at": now})).collect()
 }
 
+pub const INPUT_MAX: usize = 200;
+/// Input.prune: the removals of the turn inputs (launch.input.<t>, then fallback.input.<t>, each in key order) of threads at rest (not running,
+/// nothing queued), at most 200 a tick. Reads only the keys.
+pub fn input_prune(st: &State, now: u64) -> Vec<Value> {
+    let mut out = vec![];
+    for pre in ["launch.input.", "fallback.input."] {
+        let mut ks: Vec<&String> = st.settings.keys().filter(|k| k.starts_with(pre)).collect();
+        ks.sort();
+        for k in ks {
+            let th = &k[pre.len()..];
+            let busy = st.threads.get(th).map_or(false, |t| t.turn == Turn::Running || t.pending > 0);
+            if !busy { out.push(json!({"$": "SettingSet", "key": k, "value": "", "at": now})); }
+        }
+    }
+    out.truncate(INPUT_MAX);
+    out
+}
+
 /// Sum.due: never made, or made 600 seconds ago or more
 pub fn sum_due(st: &State, id: &str, now: u64) -> bool {
     let at = st.get(&format!("summary.at.{id}"), "");
@@ -268,6 +286,13 @@ mod tests {
     #[test] fn told_ids_carry_their_time() {
         assert_eq!(told_stamp("k1793846698-190-3"), Some(1793846698)); assert_eq!(told_stamp("k5-1"), Some(5));
         assert_eq!(told_stamp("kabc"), None); assert_eq!(told_stamp("x5-1"), None); assert_eq!(told_stamp("k55"), None, "no dash: not one of ours"); assert_eq!(told_stamp("k-1"), None);
+    }
+    #[test] fn input_prune_removes_the_inputs_of_threads_at_rest_only() {
+        let mut st = State::new(); st.lean = true;
+        for l in [r#"{"$":"SettingSet","key":"launch.input.a","value":"x","at":1}"#, r#"{"$":"SettingSet","key":"fallback.input.a","value":"x","at":1}"#,
+                  r#"{"$":"SettingSet","key":"launch.input.b","value":"x","at":1}"#, r#"{"$":"TurnChanged","thread":"b","state":"running","at":2}"#] { st.apply_line(l); }
+        let gone: Vec<String> = input_prune(&st, 9).iter().map(|e| e["key"].as_str().unwrap().to_string()).collect();
+        assert_eq!(gone, ["launch.input.a", "fallback.input.a"]);
     }
     #[test] fn told_prune_drops_the_old_and_all_but_the_newest_2000() {
         let mut st = State::new();
