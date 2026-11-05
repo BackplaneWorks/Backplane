@@ -12,9 +12,14 @@ rsync -a --exclude node_modules --exclude out test/gpui/ h@backplane:bp-gpui-e2e
 rsync -a test/tools/claude_standin.ts test/tools/perf_standin.ts h@backplane:bp-gpui-e2e-fixture/repo/test/tools/
 rsync -a src/web/wire.js h@backplane:bp-gpui-e2e-fixture/repo/src/web/; rsync -a src/core/cbor.bend h@backplane:bp-gpui-e2e-fixture/repo/src/core/
 rsync -a $HUB h@backplane:bp-gpui-e2e-fixture/hub
+RUSTFLAGS_=""
+case "$HUB" in *backplane-hub-full*)
+  # the Rust hub: its policy and window helpers (policy-pager: the bounded sidebar pager) next to it
+  rsync -a build/gpui/slim/bp-policy-pager build/gpui/hub/new/window h@backplane:bp-gpui-e2e-fixture/
+  RUSTFLAGS_="--policy-bin $V/bp-policy-pager --window-bin $V/window";; esac
 # the hub is started by an ssh session that stays open as long as the fixture lives: run it in the background of THIS script
 # (its pid is killed at the end) and never wait for it
-ssh -n -o BatchMode=yes h@backplane "cd $V/repo/test/gpui/e2e && exec systemd-run --user --scope -q -p MemoryMax=3700M -p MemorySwapMax=0 \$HOME/.bun/bin/bun serve-fixture.mjs --hub-bin $V/hub --root $V/root --host $HOSTIP --port $PORT" < /dev/null > $B/results/ios/e2e-fixture.log 2>&1 &
+ssh -n -o BatchMode=yes h@backplane "cd $V/repo/test/gpui/e2e && exec systemd-run --user --scope -q -p MemoryMax=3700M -p MemorySwapMax=0 \$HOME/.bun/bin/bun serve-fixture.mjs --hub-bin $V/hub --root $V/root --host $HOSTIP --port $PORT $RUSTFLAGS_" < /dev/null > $B/results/ios/e2e-fixture.log 2>&1 &
 FIXSSH=$!
 sleep 30
 tail -2 $B/results/ios/e2e-fixture.log | cut -c1-200
