@@ -1,6 +1,7 @@
 #!/bin/sh
 # Run only through bp-build.sh: focused root tests, sidebar parity, then the runtime binary.
 export PATH="$HOME/.bun/bin:$PATH"
+if [ "${ROOT_CHECK_GATE:-}" = 1 ]; then sh "$(dirname "$0")/gate-check.sh" || exit "$?"; fi
 cd native/host
 cargo test --release --bin backplane-hub -- present:: > /tmp/bp-root-tests.log 2>&1
 rc=$?
