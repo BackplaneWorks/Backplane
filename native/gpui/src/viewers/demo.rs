@@ -1,7 +1,8 @@
 //! `--solid-demo TRIS[,STEPS]`: the 3D page on a synthetic sphere of about TRIS triangles, put through the real frame path (CBOR frame -> worker decode ->
 //! render), then STEPS orbit-drag steps; prints render times (draft = half size while dragging, full at the end), the decode+first image time and the
 //! process's resident memory before and after, as `GPUI_METRIC {"event":"solid_demo",...}`. Memory is the atlas too under a software Vulkan (llvmpipe).
-//! `SOLID_DEMO_NO_DROP=1` skips window.drop_image on retired images, to show what that call prevents. A synthetic model: not a real board's.
+//! A synthetic model: not a real board's. (The no-drop comparison, 137 -> 808 MB over 400 drag steps against 147 -> 156 MB with drop_image, was measured with a build
+//! that had a switch for it; the switch is gone from the shipping render path.)
 use super::solid::SolidPage;
 use gpui::{prelude::*, *};
 use std::time::{Duration, Instant};
@@ -42,7 +43,7 @@ impl Demo {
         cx.spawn(async move |_, cx| {
             let t0 = Instant::now(); let rss0 = rss_mb();
             cx.background_executor().timer(Duration::from_millis(500)).await; // the window and its size
-            let _ = p2.update(cx, |p, _| { p.accept(&frame); });
+            let _ = p2.update(cx, |p, _| { let _ = p.accept(frame); });
             let wait = |cx: &mut AsyncApp, target: u64| { let p = p2.clone(); let cx = cx.clone(); async move {
                 for _ in 0..5000 { if p.read_with(&cx, |p, _| p.stats.images).unwrap_or(target) >= target { return true } cx.background_executor().timer(Duration::from_millis(2)).await; } false } };
             let ok = wait(cx, 1).await;
@@ -58,7 +59,7 @@ impl Demo {
             let rss2 = rss_mb();
             let metric = serde_json::json!({"event": "solid_demo", "tris": n, "ok": ok, "steps": steps, "panel_image": [size0.0, size0.1],
                 "first_image_ms": (first_ms * 10.0).round() / 10.0, "drag_render_ms": {"p50": (pct(&mut draft.clone(), 0.5) * 10.0).round() / 10.0, "p95": (pct(&mut draft.clone(), 0.95) * 10.0).round() / 10.0, "max": (pct(&mut draft, 1.0) * 10.0).round() / 10.0},
-                "rss_mb": {"start": rss0.round(), "after_first_image": rss1.round(), "after_drag": rss2.round()}, "drop_image": std::env::var_os("SOLID_DEMO_NO_DROP").is_none(),
+                "rss_mb": {"start": rss0.round(), "after_first_image": rss1.round(), "after_drag": rss2.round()}, "drop_image": true,
                 "t_ms": started.elapsed().as_millis() as u64});
             eprintln!("GPUI_METRIC {metric}");
             let _ = cx.update(|cx| cx.quit());

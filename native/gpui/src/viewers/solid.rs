@@ -74,6 +74,29 @@ fn item(b: &[u8], at: &mut usize, depth: usize) -> Option<Item> {
         _ => Item::Other,
     })
 }
+/// Step over one CBOR item without building it (byte strings are not copied).
+fn skip(b: &[u8], at: &mut usize, depth: usize) -> Option<()> {
+    if depth > 8 { return None }
+    let (major, n) = head(b, at)?;
+    match major {
+        2 | 3 => { *at = at.checked_add(n as usize)?; if *at > b.len() { return None } }
+        4 => { for _ in 0..n { skip(b, at, depth + 1)?; } }
+        5 => { for _ in 0..n.checked_mul(2)? { skip(b, at, depth + 1)?; } }
+        6 => { skip(b, at, depth + 1)?; }
+        _ => {}
+    }
+    Some(())
+}
+/// The frame's `key` text only: the map is walked and every other value skipped, so a large `mesh` is not copied.
+pub fn peek_key(b: &[u8]) -> Option<String> {
+    let mut at = 0; let (major, n) = head(b, &mut at)?; if major != 5 || n > 256 { return None }
+    for _ in 0..n {
+        let name = match item(b, &mut at, 1)? { Item::Text(t) => t, Item::Int(i) => crate::wire::KEYS.get(i as usize)?.to_string(), _ => return None };
+        if name == "key" { return match item(b, &mut at, 1)? { Item::Text(t) => Some(t), _ => None } }
+        skip(b, &mut at, 1)?;
+    }
+    None
+}
 /// The frame's map as (key, value) pairs; integer keys go through the wire dictionary.
 pub fn read_frame(b: &[u8]) -> Option<Vec<(String, Item)>> {
     let mut at = 0; let (major, n) = head(b, &mut at)?; if major != 5 || n > 256 { return None }
@@ -134,6 +157,8 @@ impl Camera {
         for v in [&mut self.up, &mut self.fwd, &mut self.right] { *v = rotate(*v, ar2, dy * k); }
         self.reortho();
     }
+    /// alt drag: roll about the view axis.
+    pub fn roll(&mut self, dx: f32) { let (f, a) = (self.fwd, dx * 0.008); self.right = rotate(self.right, f, a); self.up = rotate(self.up, f, a); self.reortho(); }
     /// Move the view: a right/middle or shift drag of (dx, dy) pixels in a panel `h` pixels high.
     pub fn pan(&mut self, dx: f32, dy: f32, h: f32) {
         let per_px = 2.0 * (FOV / 2.0).tan() * self.dist / h.max(1.0);
@@ -258,7 +283,7 @@ impl Worker {
 impl Drop for Worker { fn drop(&mut self) { let (m, cv) = &*self.slot; m.lock().unwrap().shutdown = true; self.ticket.fetch_add(1, Ordering::Relaxed); cv.notify_one(); } }
 
 // ---- the page ---------------------------------------------------------------------------------------------------------
-#[derive(Clone, Copy, PartialEq)] enum Drag { Orbit, Pan }
+#[derive(Clone, Copy, PartialEq)] enum Drag { Orbit, Pan, Roll }
 /// What the demo/metrics read: how many images arrived, the last render's time.
 #[derive(Clone, Debug, Default)] pub struct Stats { pub images: u64, pub last_ms: f64, pub last_tris: usize, pub last_size: (usize, usize) }
 
@@ -277,11 +302,10 @@ impl SolidPage {
         SolidPage { mesh: None, key: String::new(), cam: None, image: None, retired: Vec::new(), drag: None, note: "No 3D model yet".into(), worker: Worker::spawn(tx),
             size: Arc::new(Mutex::new([0.0, 0.0, 1.0, 0.0, 0.0])), asked: (0, 0), want_gen: 0, stats: Stats::default() }
     }
-    /// A plot-lane binary frame: true when it was a solid frame (keys 2|, 3|, 4|). Decoding happens on the worker.
-    pub fn accept(&mut self, bytes: &[u8]) -> bool {
-        let solid = read_frame(bytes).map_or(false, |f| f.iter().any(|(k, v)| k == "key" && matches!(v, Item::Text(t) if is_solid_key(t))));
-        if solid { self.worker.submit_frame(bytes.to_vec()); }
-        solid
+    /// A plot-lane binary frame (keys 2|, 3|, 4| are solids).
+    /// None: taken (a solid frame, decoded on the worker; the bytes are moved, not copied). Some(bytes): not a solid frame, handed back unread.
+    pub fn accept(&mut self, bytes: Vec<u8>) -> Option<Vec<u8>> {
+        if peek_key(&bytes).map_or(false, |k| is_solid_key(&k)) { self.worker.submit_frame(bytes); None } else { Some(bytes) }
     }
     fn apply(&mut self, msg: Msg, cx: &mut Context<Self>) {
         match msg {
@@ -320,7 +344,7 @@ impl SolidPage {
 impl Render for SolidPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // images no longer shown leave the sprite atlas (gpui keeps a painted RenderImage there until it is dropped)
-        for old in self.retired.drain(..) { if std::env::var_os("SOLID_DEMO_NO_DROP").is_none() { let _ = window.drop_image(old); } }
+        for old in self.retired.drain(..) { let _ = window.drop_image(old); }
         let size = self.size.clone();
         let probe = canvas(|_, _, _| (), move |b: Bounds<Pixels>, _, window: &mut Window, _| {
             let new = [f32::from(b.size.width), f32::from(b.size.height), window.scale_factor(), f32::from(b.origin.x), f32::from(b.origin.y)];
@@ -336,7 +360,7 @@ impl Render for SolidPage {
         };
         div().id("solid-page").size_full().overflow_hidden().relative().child(body).child(probe)
             .when(self.image.is_some() && !self.note.is_empty(), |d| d.child(div().absolute().bottom_2().left_2().px_2().text_size(px(12.)).text_color(rgb(0x8a93a3)).child(self.note.clone())))
-            .on_mouse_down(MouseButton::Left, cx.listener(|this, e: &MouseDownEvent, _, _| { this.drag = Some((if e.modifiers.shift { Drag::Pan } else { Drag::Orbit }, e.position)); }))
+            .on_mouse_down(MouseButton::Left, cx.listener(|this, e: &MouseDownEvent, _, _| { this.drag = Some((if e.modifiers.alt { Drag::Roll } else if e.modifiers.shift || e.modifiers.control { Drag::Pan } else { Drag::Orbit }, e.position)); }))
             .on_mouse_down(MouseButton::Right, cx.listener(|this, e: &MouseDownEvent, _, _| { this.drag = Some((Drag::Pan, e.position)); }))
             .on_mouse_down(MouseButton::Middle, cx.listener(|this, e: &MouseDownEvent, _, _| { this.drag = Some((Drag::Pan, e.position)); }))
             .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, _, cx| {
@@ -344,7 +368,7 @@ impl Render for SolidPage {
                 if e.pressed_button.is_none() { this.drag = None; this.ask_render(false); cx.notify(); return } // the button went up where we could not see it
                 let (dx, dy) = (f32::from(e.position.x - last.x), f32::from(e.position.y - last.y));
                 let h = this.size.lock().unwrap()[1];
-                if let Some(c) = &mut this.cam { if kind == Drag::Orbit { c.orbit(dx, dy) } else { c.pan(dx, dy, h) } }
+                if let Some(c) = &mut this.cam { match kind { Drag::Orbit => c.orbit(dx, dy), Drag::Pan => c.pan(dx, dy, h), Drag::Roll => c.roll(dx) } }
                 this.drag = Some((kind, e.position)); this.ask_render(true); cx.notify(); // half size while dragging, the full image on release
             }))
             .on_mouse_up(MouseButton::Left, cx.listener(|this, _: &MouseUpEvent, _, cx| { if this.drag.take().is_some() { this.ask_render(false); cx.notify(); } }))
@@ -410,6 +434,15 @@ mod tests {
         assert_ne!(a, render(&m, &c, 64, 64, ALIVE).unwrap());
         let mut z = Camera::fitted(&m); for _ in 0..500 { z.zoom_at(5.0, 0.0, 0.0, 1.5); } assert!((z.dist - z.fit / 60.0).abs() < 1e-3, "in-bound 1/60");
         for _ in 0..500 { z.zoom_at(-5.0, 0.0, 0.0, 1.5); } assert!((z.dist - z.fit * 20.0).abs() < 1e-1, "out-bound 20x");
+    }
+    #[test] fn roll_turns_about_the_view_axis_and_peek_reads_the_key_without_the_mesh() {
+        let m = mesh(); let mut c = Camera::fitted(&m); let fwd = c.fwd; let up = c.up; c.roll(60.0);
+        for a in 0..3 { assert!((c.fwd[a] - fwd[a]).abs() < 1e-4, "the view direction stays"); }
+        assert!(c.up.iter().zip(up).any(|(x, y)| (x - y).abs() > 1e-2), "the up vector turned");
+        let text = |f: &mut Vec<u8>, s: &str| { f.push(0x60 | s.len() as u8); f.extend(s.as_bytes()) };
+        let mut f = vec![0xa2]; text(&mut f, "mesh"); f.push(0x5a); f.extend(1_000_000u32.to_be_bytes()); f.extend(vec![7u8; 1_000_000]); text(&mut f, "key"); text(&mut f, "4|x");
+        assert_eq!(super::peek_key(&f).as_deref(), Some("4|x"));
+        assert_eq!(super::peek_key(&[0xa1, 0x63, b'a', b'b', b'c', 0x01]), None);
     }
     #[test] fn zoom_at_the_pointer_keeps_the_point_under_it_fixed() {
         let m = mesh(); let mut c = Camera::fitted(&m); let (nx, ny, aspect) = (0.4f32, -0.3f32, 1.5f32);
