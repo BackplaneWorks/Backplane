@@ -1176,6 +1176,9 @@ function render() {
     htmlData("backplaneSeq", App.seq(ui));
   }
   htmlData("backplaneMode", viewMode);
+  // (style.css sizes the tools rail by it: an html:has() there restyled the
+  // whole page on every change inside .app)
+  htmlData("workspace", root.querySelector(".app > .workspace-thread") ? "thread" : "");
   htmlData("backplaneRemoteReady", String(remoteReady));
   htmlData("backplaneCached", String(!!(focusedNode || transitionNode) && !frontendNode));
   // what style.css quiets: a picture kept for another target than the one
