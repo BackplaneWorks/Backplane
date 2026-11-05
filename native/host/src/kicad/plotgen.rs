@@ -262,6 +262,11 @@ pub fn lines(p: &Plot) -> Vec<u8> {
         for b in &c.d { if *b < 128 { o.push(*b) } else { o.push(0xc0 | (b >> 6)); o.push(0x80 | (b & 63)) } }
         o.extend(c.info.as_bytes()); o.push(b'\n');
     }
+    if let Some(s) = &p.solid { // Line.solid
+        o.extend(format!("m{} {} {} {} {} {} {} {} ", s.n, s.b[0], s.b[1], s.b[2], s.b[3], s.b[4], s.b[5], s.d.len()).into_bytes());
+        for b in &s.d { if *b < 128 { o.push(*b) } else { o.push(0xc0 | (b >> 6)); o.push(0x80 | (b & 63)) } }
+        o.push(b'\n');
+    }
     o
 }
 /// Infos.find (`--plot-info`): piece idx's info of the chunk with this sig, from an info file's text; the last line of a sig wins, as the scan does
