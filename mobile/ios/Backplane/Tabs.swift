@@ -192,7 +192,7 @@ struct BotsTab: View {
                     ForEach(screen.bots) { b in
                         Button { model.open(nav: b.nav ?? "", action: b.act ?? (b.remote ? "remote" : "bot"), value: b.id, title: b.name, cat: b.cat, kind: b.remote ? "remote" : "bot") } label: {
                             HStack(spacing: 12) {
-                                BotCat(model: model, key: b.cat, size: 36)
+                                BotCat(model: model, key: b.cat, size: 28)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(b.name).foregroundStyle(.primary)
                                     HStack(spacing: 5) {

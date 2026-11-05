@@ -10,6 +10,8 @@ TOK=$(cat ${TOKFILE:-~/bp-gpui-secrets/hub-token})
 export SIMCTL_CHILD_BACKPLANE_LINK="${HUBURL:-http://desktop.tail9e0cf2.ts.net:3799/}#token=$TOK"
 export SIMCTL_CHILD_BACKPLANE_ACTS="$ACTS"
 [ -n "$SEL" ] && export SIMCTL_CHILD_BACKPLANE_SELECT="$SEL"
+[ -n "$GEOM" ] && export SIMCTL_CHILD_BACKPLANE_GEOM=1
+[ -n "$NOLINK" ] && unset SIMCTL_CHILD_BACKPLANE_LINK
 [ -n "$VIEW" ] && export SIMCTL_CHILD_BACKPLANE_VIEW="$VIEW"
 [ "${JIT:-1}" = 0 ] && export SIMCTL_CHILD_JSC_useJIT=0
 xcrun simctl launch "$U" dev.backplane.gpui $LAUNCHARGS
