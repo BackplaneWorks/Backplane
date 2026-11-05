@@ -28,6 +28,7 @@ export const NORMALISATIONS=[
  'N9 info frames: all info frames of a client are merged into one item (keys unioned, later values win; environment keys dropped); position and repeat count are not compared. The `other` stream (http, upgrade, close, info) is compared as a sorted set. Reason: the hub repeats info on its own timer.',
  'N10 housekeeping events: a contiguous run of events that concurrent hub jobs append (SettingSet keys machine.id, accounts.*, allowance.*, projects.missing, tz.*, autosettle.*, liveness.*, turn.from/speed.*, restart.*, provider.*, fallback.*, tok.*, summary.*, told.*, alert.*, account.*, star.*; ActivityLogged of kind git or spawn; WorktreeSkipped) is taken out of the event stream and compared as a multiset (canonical order, real counts, except liveness.* by presence: N20, N22; no order, and not their position among the other events); every other event stays in order. Reason: start-up, git probes and settle/liveness bookkeeping finish in varying order.',
  'N15 counters: numeric seq and changes (the hub change count at the instant a view was drawn) -> <N>. Reason: housekeeping events land between draws.',
+ 'N18 project-home revision: the 64-hex `revision` of a project.home reply hashes the artifacts\' paths, mtimes and sizes -> <rev>. Reason: file mtimes are the wall clock (the numbers are already <T>).',
  'N8 info frames: home paths, ports, machine ids, tokens, pids -> placeholders. Reason: environment.',
 ];
 const CLOCK_KEYS=new Set(['at','rid','now','clock','last','nudged','attempted_at','eligibleAt','sentAt','checked']);
@@ -46,6 +47,7 @@ function mkNorm(){
   const go=(v,key)=>{
     if(v===undefined||v===null||typeof v==='boolean')return v;
     if((key==='seq'||key==='changes')&&typeof v==='number')return '<N>';
+    if(key==='revision'&&typeof v==='string'&&/^[0-9a-f]{64}$/.test(v))return '<rev>';
     if(typeof v==='number')return key==='look'?'<N>':CLOCK_KEYS.has(key)?'<T>':(v>=1.7e9&&v<1.9e9?'<T>':(v>=1.7e12&&v<1.9e12?'<T>':v));
     if(typeof v==='string'){if(v!==''&&(key==='epoch'||key==='generation'||key==='origin'||key==='hub'||key==='viewId'||key==='token'||key==='base'))return ord(v);if(key==='viewRevision')return '<R>';return str(v,key)}
     if(Array.isArray(v))return v.map(x=>go(x,key));
