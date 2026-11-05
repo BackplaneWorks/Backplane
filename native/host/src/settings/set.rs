@@ -76,7 +76,7 @@ mod tests {
         assert_eq!(log.matches("PRIVLIVE-0007").count(), 3, "three events in the log, value whole: {log}");
         // a client's frame holds the value blank (Hub::wire_item)
         let line = log.lines().find(|l| l.contains("launch.input.t1") && l.contains("PRIVLIVE")).unwrap();
-        assert_eq!(Hub::wire_item(line, true).unwrap()["value"], "", "blank on the wire");
+        assert_eq!(Hub::wire_item(line).unwrap()["value"], "", "blank on the wire");
         // clearing it is an event too, and an empty value over nothing is not 'no change' for these keys (they are kept blank, not removed, in the log)
         assert_eq!(call(&hub, "setting.set", json!({"key":"launch.input.t9","value":""})).await["ok"], true);
         assert!(std::fs::read_to_string(home.join("events.jsonl")).unwrap().contains("\"key\":\"launch.input.t9\",\"value\":\"\""), "an empty write is logged");
