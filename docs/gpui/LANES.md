@@ -38,3 +38,19 @@ lane cannot break another lane's build.
 - To change a file you do not own, ask its owner by `thread_send`.
 - A shared seam (one line in `main.rs`, one `mod` line) goes through the lead.
 - Before landing a batch, send the `reviewer` thread its commit range. The reviewer records the OK with `scripts/gpui/review-ok.sh BASE..TIP`; only that session can. Land small batches, not every commit.
+
+## The ready push (2026-11-05)
+
+Ready means: GPUI desktop opens a copy of the person's real data on the Rust hub, a real Claude turn works, and Claude launches and drives a thread from inside. Bend leaves the runtime path. Each lane works in its own worktree under `~/Documents/i2cjak/bp-gpui-lanes/` and lands only through `scripts/gpui/land.sh` after the reviewer's recorded OK.
+
+| Lane | Thread | Owns | Worktree |
+|---|---|---|---|
+| 1. Thread view and pages | slim `t1793834628-1688992` | new `native/host/src/present/` thread view and pages, Files and Mech replies | `slim` |
+| 2. Composer, send, turn state | parity-session `t1793852397-1739751` | `present/` composer, send, popups; the replay oracle | `parity-session` |
+| 2b. Thread actions | commands `t1793862825-1750573` | `native/host/src/commands/`: create, pin, settle, rename, archive as served by the Rust presenter | its own |
+| 3. Bend off the runtime | bend `t1793832639-1684539` | indexed read model, `hub.rs`, `main.rs`, `--policy-bin` removal, law map to Rust property tests, `PRESENTER-PORT.md` | `endstrip` |
+| 4. Real Claude turns | agents `t1793842041-1700235` | `native/host/src/agents/`: full prompt, skills, images, `Kind::PersonTurn` | `agents` |
+| 5. Core MCP tools | mcp-core | `agents/mcp*` tool handlers for threads, subthreads and reports, `work_*`, `wake_on`, files, memory | `mcp-core` |
+| 6. Side-by-side and switch script | switchover `t1793897533-1897003` | `scripts/gpui/switch.sh`, `side-by-side.sh`, `SIDE-BY-SIDE.md` | `switchover-dev` |
+| 7. Real-log open test | perf `t1793832632-1684495` | the test harness; runs on synthetic until the coordinator lifts the hold | `perf` |
+
