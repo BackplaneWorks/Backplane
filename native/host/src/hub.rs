@@ -383,7 +383,12 @@ impl Hub {
         // a copy of a log: git that writes and acting on the machine are told, not run (copy.rs)
         if crate::copy::rpc_refused(m) { return vec![json!({"t":"reply","id":id,"ok":false,"error":crate::copy::GIT_TOLD})] }
         if m == "project.add" { return self.project_add(&id, msg.get("p").unwrap_or(&Value::Null)).await }
-        if m == "fab.look" { return vec![self.fab_look(&id, msg.get("p").unwrap_or(&Value::Null))] }
+        if m == "fab.look" {
+            let reply = self.fab_look(&id, msg.get("p").unwrap_or(&Value::Null));
+            // the hub's own read, applied to this view's held state by the policy on its next V (Fab.reply)
+            if !c.view_id.is_empty() { crate::session::record_read(c.client, &c.view_id, "fab.look", id.as_u64().unwrap_or(0), reply["result"].clone()); }
+            return vec![reply];
+        }
         if let Some(handler) = self.rpc_for(m) {
             let me = self.arc();
             return handler.call(&me, &Caller { gen: c.gen.clone(), client: c.client }, &id, m, msg.get("p").unwrap_or(&Value::Null)).await;
@@ -551,6 +556,19 @@ mod tests {
         let u2 = h.commit_many(&[json!({"$":"Boom"})]).await.unwrap();
         assert_eq!(u2, n0 + 3, "a panicking transform leaves the batch as it came");
         assert!(!t.1.load(Relaxed));
+    }
+
+    // fab.look is a read the hub makes for a view: it is recorded for that view's next presenter call (session::record_read)
+    #[tokio::test] async fn fab_look_is_recorded_as_a_read_of_its_view() {
+        let h = Hub::start(cfg(&home("fabread")), Arc::new(Canned { reply: json!({"remoteReady":true,"shown":{},"session":{},"cmds":[]}) })).await.unwrap();
+        let (mut c, _g) = h.connect(true);
+        let r0 = req(&c, &h, "view.open", (1 << 47) + 5, json!({})); let _ = h.request(&mut c, &r0).await;
+        let _ = crate::session::take_reads(c.client); // whatever the open itself recorded
+        let out = h.request(&mut c, &json!({"id": 77, "m": "fab.look", "p": {"thread": "t1"}})).await;
+        assert_eq!(out[0]["ok"], true);
+        let reads = crate::session::take_reads(c.client);
+        assert_eq!(reads.len(), 1, "{reads:?}");
+        assert_eq!(reads[0]["kind"], "fab.look"); assert_eq!(reads[0]["result"]["thread"], "t1");
     }
 
     #[tokio::test] async fn open_assembles_identity_in_js_order() {
