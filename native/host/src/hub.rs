@@ -37,6 +37,8 @@ struct Slot { tx: tokio::sync::mpsc::UnboundedSender<(Out, usize)>, pending: Arc
 pub struct Outbox { rx: tokio::sync::mpsc::UnboundedReceiver<(Out, usize)>, pending: Arc<std::sync::atomic::AtomicUsize> }
 impl Outbox {
     pub async fn recv(&mut self) -> Option<Out> { let (o, n) = self.rx.recv().await?; self.pending.fetch_sub(n, Relaxed); Some(o) }
+    /// Without waiting (tests, drains): Err(Empty) when nothing is queued, Err(Disconnected) when the client was dropped and the queue is empty.
+    pub fn try_recv(&mut self) -> Result<Out, tokio::sync::mpsc::error::TryRecvError> { let (o, n) = self.rx.try_recv()?; self.pending.fetch_sub(n, Relaxed); Ok(o) }
 }
 /// A cheap size of a frame (its strings, numbers and structure), without encoding it.
 pub fn frame_bytes(v: &Value) -> usize {
