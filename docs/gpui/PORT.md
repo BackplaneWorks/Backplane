@@ -163,7 +163,7 @@ port waits for the person's decision.
 
 <!-- law-map: generated below by scripts/gpui/law-map.py -->
 
-Laws in LAWS.bend: 3248. bend 1260, rust 40, unported 1337, client 483, window 128, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: none yet. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
+Laws in LAWS.bend: 3248. bend 1258, rust 42, unported 1337, client 483, window 128, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: none yet. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
 
 | law | status | seed | file | note |
 |---|---|---|---|---|
@@ -396,8 +396,8 @@ Laws in LAWS.bend: 3248. bend 1260, rust 40, unported 1337, client 483, window 1
 | `took_hours` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `hub_frames_cbor` | rust `hub_frames_cbor` | map | `src/core/http.bend` |  |
 | `hub_plot_frames_binary` | bend | seed K +-10% | `src/core/http.bend` |  |
-| `plot_delta_exact` | bend | seed K +-10% | `src/core/plot.bend` |  |
-| `plot_unchanged_sends_nothing` | bend | seed K +-10% | `src/core/plot.bend` |  |
+| `plot_delta_exact` | rust `plot_delta_exact` | map | `src/core/plot.bend` |  |
+| `plot_unchanged_sends_nothing` | rust `plot_unchanged_sends_nothing` | map | `src/core/plot.bend` |  |
 | `plot_hidden_not_sent` | bend | seed K +-10% | `src/core/plot.bend` |  |
 | `plot_courtyard_hidden` | bend | seed K +-10% | `src/core/plot.bend` |  |
 | `plot_tint_own_colour` | bend | seed K +-10% | `src/core/plot.bend` |  |

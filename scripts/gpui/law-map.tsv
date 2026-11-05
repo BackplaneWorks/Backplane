@@ -44,3 +44,6 @@ law carry_once rust carry_once
 law carry_twice_once rust carry_twice_once
 law carry_skips_archived rust carry_skips_archived
 law steer_claude_in_place rust steer_claude_in_place
+# files stream: native/host/src/kicad/plot.rs (the hub side of core/plot.bend; the parser stays the Bend child)
+law plot_delta_exact rust plot_delta_exact
+law plot_unchanged_sends_nothing rust plot_unchanged_sends_nothing
