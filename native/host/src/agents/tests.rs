@@ -873,3 +873,20 @@ const TESTCLI: &str = "#!/bin/sh\nread hello\necho '{\"q\":1}'\nread ans\necho \
     let n = len(&hub).await; let (ok, _) = ag.tool_interrupt(T1, &json!({"threadId":c3})).await; assert!(ok); tokio::time::sleep(Duration::from_millis(2000)).await;
     assert!(!log_from(&hub, n).await.iter().any(|e| is(e, "MessagePosted") && e["thread"] == T1 && e["text"].as_str().map_or(false, |t| t.contains(&c3))), "own stop is quiet"); ag.shutdown();
 }
+
+struct TestTools;
+impl mcp::ToolSet for TestTools {
+    fn list(&self, thread: &str) -> Vec<Value> { if thread == T1 { vec![json!({"name":"bot_echo","description":"x","inputSchema":{"type":"object"}})] } else { vec![] } }
+    fn owns(&self, name: &str) -> bool { name == "bot_echo" }
+    fn call<'a>(&'a self, thread: &'a str, _name: &'a str, a: &'a Value) -> crate::api::Fut<'a, (bool, Value)> { Box::pin(async move { (true, json!(format!("echo {thread} {}", a["x"]))) }) }
+}
+#[tokio::test(flavor = "multi_thread")] async fn a_registered_tool_set_is_listed_per_thread_and_called_by_name() {
+    let sd = dir("ts-bin"); perf_standin(&sd, 1);
+    let (_hub, ag, _h, _w) = start("ts", |w| base_log(w, 2, ""), |_| Cli::standin(&sd)).await; ag.add_tools(Arc::new(TestTools));
+    let other = "t1700001001-1";
+    let (_, l1) = rpc_mcp(&ag, T1, "", "tools/list", json!({})).await; let n1: Vec<&str> = l1["result"]["tools"].as_array().unwrap().iter().filter_map(|t| t["name"].as_str()).collect();
+    let (_, l2) = rpc_mcp(&ag, other, "", "tools/list", json!({})).await; let n2: Vec<&str> = l2["result"]["tools"].as_array().unwrap().iter().filter_map(|t| t["name"].as_str()).collect();
+    assert!(n1.contains(&"bot_echo") && !n2.contains(&"bot_echo"), "listed to the thread the set names, not to others");
+    let (_, r) = rpc_mcp(&ag, T1, "", "tools/call", json!({"name":"bot_echo","arguments":{"x":5}})).await; assert_eq!(r["result"]["isError"], false); assert_eq!(r["result"]["content"][0]["text"], format!("echo {T1} 5"), "a string body is the raw text");
+    let (_, u) = rpc_mcp(&ag, T1, "", "tools/call", json!({"name":"nope_tool","arguments":{}})).await; assert_eq!(u["result"]["isError"], true); ag.shutdown();
+}
