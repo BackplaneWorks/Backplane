@@ -37,7 +37,8 @@ HUB_BIN=${HUB_BIN:-$ROOT/build/gpui/hub/prov/backplane-hub-full}
 POLICY_BIN=${POLICY_BIN:-$ROOT/build/gpui/slim/bp-policy-bp}
 # the newest commit-named client build (client-<10 hex>), with its assets beside it; CLIENT_BIN overrides
 DB=$ROOT/build/gpui/desktop-bin
-CLIENT_BIN=${CLIENT_BIN:-$(ls -t "$DB"/client-* 2>/dev/null | grep -E '/client-[0-9a-f]{9,10}$' | head -1)}
+# build/gpui/desktop-bin/CURRENT names the client to use (one line: a file name beside it), set by whoever lands a newer build
+CLIENT_BIN=${CLIENT_BIN:-$( [ -f "$DB/CURRENT" ] && echo "$DB/$(head -1 "$DB/CURRENT")" || ls -t "$DB"/client-* 2>/dev/null | grep -E '/client-[0-9a-f]{9,10}$' | head -1)}
 [ -d "$DB/assets" ] && export BACKPLANE_GPUI_ASSETS=${BACKPLANE_GPUI_ASSETS:-$DB/assets}
 DISP=${SWITCH_DISPLAY:-}   # required for the client: never defaulted from $DISPLAY (an agent window must not land on a screen by accident)
 H=$SW/home
@@ -178,7 +179,8 @@ PY
   if [ "${1:-}" != "--no-client" ]; then
     [ -x "$CLIENT_BIN" ] || die "no client $CLIENT_BIN (use --no-client to run the hub alone)"
     [ -n "$DISP" ] || die "no display: set SWITCH_DISPLAY (:61 is the isolated one) or pass --no-client"
-    ( exec env DISPLAY="$DISP" ${VK_ICD_FILENAMES:+VK_ICD_FILENAMES="$VK_ICD_FILENAMES"} ${BACKPLANE_GPUI_ASSETS:+BACKPLANE_GPUI_ASSETS="$BACKPLANE_GPUI_ASSETS"} HOME="$HOME" \
+    local sw=; case "${VK_ICD_FILENAMES:-}" in *lvp*) sw="BACKPLANE_GPUI_RECTS=1 LP_NUM_THREADS=2";; esac  # software Vulkan draws only in rects mode
+    ( exec env $sw DISPLAY="$DISP" ${VK_ICD_FILENAMES:+VK_ICD_FILENAMES="$VK_ICD_FILENAMES"} ${BACKPLANE_GPUI_ASSETS:+BACKPLANE_GPUI_ASSETS="$BACKPLANE_GPUI_ASSETS"} HOME="$HOME" \
         systemd-run --user --scope -q -p "MemoryMax=$MEM" -p MemorySwapMax=0 -- \
         "$CLIENT_BIN" --url "http://127.0.0.1:$PORT" --token-file "$H/token" ${SWITCH_CLIENT_ARGS:-} > "$SW/client.log" 2>&1 < /dev/null ) &
     echo $! > "$SW/client.pid"; echo "client pid $(cat "$SW/client.pid") on $DISP"
@@ -209,7 +211,42 @@ cmd_rollback() {
   echo "Lost by going back: the threads, messages and settings made on the copy. Files an agent changed in a real folder stay changed (the copy keeps no history of them; use git)."
 }
 
+# selftest: try mode on a display, a scripted select+type+send, a real screenshot of the live window, FAILS on a flat or near-flat picture
+# (fewer than 50 colours) or if the send did not reach the log. Starts its own Xvfb on SWITCH_DISPLAY if none; always rolls back; logs and shot kept.
+cmd_selftest() {
+  [ -n "$DISP" ] || die "selftest needs SWITCH_DISPLAY (an isolated one, e.g. :61)"
+  local n=${DISP#:} xp= ip= rc=0 out=${SWITCH_LOGS:-$HOME/.backplane-gpui-switch-logs}/shots; mkdir -p "$out"
+  if [ ! -e "/tmp/.X11-unix/X$n" ]; then
+    local X=$ROOT/build/gpui/xvfb; [ -x "$X/usr/bin/Xvfb" ] || die "no Xvfb in $X"
+    ( LD_LIBRARY_PATH=$X/usr/lib/x86_64-linux-gnu exec "$X/usr/bin/Xvfb" "$DISP" -screen 0 1440x900x24 -nolisten tcp -xkbdir /usr/share/X11/xkb ) > /dev/null 2>&1 < /dev/null & xp=$!
+    sleep 2
+    if command -v i3 >/dev/null; then printf 'font pango:monospace 8\nnew_window none\nfor_window [class=".*"] border none\ndefault_border none\nhide_edge_borders both\n' > "$SW.i3.conf"
+      ( DISPLAY=$DISP exec i3 -c "$SW.i3.conf" ) > /dev/null 2>&1 < /dev/null & ip=$!; sleep 1; fi
+  fi
+  mkdir -p "$SW"; echo '[{"select":0},{"wait":3000},{"type":"selftest message"},{"wait":300},{"send":true},{"wait":30000}]' > "$SW.selftest.json"
+  SWITCH_CLIENT_ARGS="--script $SW.selftest.json" MODE=try cmd_start || rc=1
+  if [ $rc = 0 ]; then
+    local l0 l1 f="$out/$(date +%Y%m%d-%H%M%S)-selftest.png"; l0=$(wc -l < "$H/events.jsonl"); sleep 16
+    DISPLAY=$DISP import -window root "$f"; l1=$(wc -l < "$H/events.jsonl")
+    local colours; colours=$(python3 -I - "$f" <<'PY'
+import sys
+from PIL import Image
+im=Image.open(sys.argv[1]).convert('RGB'); print(len(set(im.getdata())))
+PY
+)
+    echo "selftest: shot $f has $colours colours; the log has $l1 events ($l0 before the wait)"
+    [ "${colours:-0}" -ge 50 ] || { echo "selftest FAILED: the window is flat (under 50 colours)"; rc=1; }
+    [ "$(grep -c 'selftest message' "$H/events.jsonl")" -ge 1 ] || { echo "selftest FAILED: the sent message never reached the log"; rc=1; }
+    [ "$(grep -c '"role":"assistant".*test0 test1\|test39' "$H/events.jsonl")" -ge 1 ] || echo "selftest note: no stand-in reply in the log yet"
+  fi
+  cmd_rollback > /dev/null || true
+  [ -z "$ip" ] || kill "$ip" 2>/dev/null || true; [ -z "$xp" ] || kill "$xp" 2>/dev/null || true; rm -f "$SW.i3.conf" "$SW.selftest.json"
+  [ $rc = 0 ] && echo "selftest ok" || echo "selftest FAILED (logs in ${SWITCH_LOGS:-$HOME/.backplane-gpui-switch-logs})"
+  return $rc
+}
+
 case "${1:-}" in
+  selftest) MODE=try; cmd_selftest;;
   start) shift; MODE=copy; cmd_start "$@";;
   try) shift; MODE=try; cmd_start "$@";;
   side) shift; MODE=side; SRC=live; cmd_start "$@";;
