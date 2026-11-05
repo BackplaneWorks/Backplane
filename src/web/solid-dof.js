@@ -33,13 +33,19 @@ export class DepthOfField {
     this.gl=gl;this.available=false;this.width=0;this.height=0;
     if(!gl.getExtension('WEBGL_depth_texture')){this.reason='depth textures unavailable';return;}
     if(!gl.getShaderPrecisionFormat(gl.FRAGMENT_SHADER,gl.HIGH_FLOAT)?.precision){this.reason='fragment high precision unavailable';return;}
+    // (its program is made the first time a lens is on, not with every
+    // view: compiling it waited on the GPU in each 3D open's first frame)
+    this.available=true;
+  }
+  make(){
+    const gl=this.gl;
     try{
       this.program=program(gl,VS,FS);this.vertex=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,this.vertex);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,1,1]),gl.STATIC_DRAW);
-      this.frame=gl.createFramebuffer();this.scratchFrame=gl.createFramebuffer();this.scratch=gl.createTexture();this.color=gl.createTexture();this.depth=gl.createTexture();this.available=true;
-    }catch(e){this.reason=String(e.message||e);this.dispose();}
+      this.frame=gl.createFramebuffer();this.scratchFrame=gl.createFramebuffer();this.scratch=gl.createTexture();this.color=gl.createTexture();this.depth=gl.createTexture();return true;
+    }catch(e){this.reason=String(e.message||e);this.dispose();console.info(`3D depth of field disabled: ${this.reason}`);return false;}
   }
   begin(w,h){
-    if(!this.available)return false;const gl=this.gl;
+    if(!this.available||(!this.program&&!this.make()))return false;const gl=this.gl;
     // At most 1536 pixels on the long side: two RGBA8+depth16 <=24 MiB.
     const scale=Math.min(1,1536/Math.max(w,h));w=Math.max(1,Math.round(w*scale));h=Math.max(1,Math.round(h*scale));
     if(w!==this.width||h!==this.height){

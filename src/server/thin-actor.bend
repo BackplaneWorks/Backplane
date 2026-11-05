@@ -636,10 +636,12 @@ def Actor.rpc(+command: J.Json) -> J.Json:
 # client.bend's Dv.sync, with no action of the page's; and mech.list:
 # Mech's parts, listed when Mech comes on screen, Mpage.sync, a thread on
 # it chosen again included, which on this page is no action; files.dir
-# reads a restored Files panel's folder the same way)
+# reads a restored Files panel's folder the same way; and fab.look: the
+# thread's ordering card, asked by the render itself: client.bend's
+# Fab.sync.shown)
 def Actor.read_only.legacy(+command: J.Json) -> Bool:
   Bool.and(String.eq(J.Json.get_str(command, "type", ""), "send"),
-    Nat.is_lt(U.Keys.pos(["mail.list", "mail.read", "mail.find", "git.diff", "mech.list", "review.bom", "review.checks", "history.refs", "files.dir", "browser.seen"], J.Json.get_str(Actor.rpc(command), "m", "")), 10n))
+    Nat.is_lt(U.Keys.pos(["mail.list", "mail.read", "mail.find", "git.diff", "mech.list", "review.bom", "review.checks", "history.refs", "files.dir", "browser.seen", "fab.look"], J.Json.get_str(Actor.rpc(command), "m", "")), 11n))
 
 def Actor.read_only(+command: J.Json) -> Bool:
   Bool.or(Actor.read_only.legacy(command), Bool.and(String.eq(J.Json.get_str(command, "type", ""), "send"),
@@ -695,7 +697,7 @@ def Actor.accept( +a: Actor, +r: V.ActResult, +queue: Bool) -> Actor:
 # Mech's parts and a restored Files folder, Mpage.sync.m and Fm.sync: once per thread and
 # view, so a render that changed nothing asks for nothing)
 def Actor.mail_ready( +a: Actor) -> Actor:
-  Actor.accept(a, V.ActResult.web(MA.MA.after(U.Mailv.sync(U.Rp.sync(U.Dv.sync(U.Fm.sync(U.Mpage.sync.m(U.Home.refresh(U.Act{Actor.ui(a), Nil{}})))))))), True{})
+  Actor.accept(a, V.ActResult.web(MA.MA.after(U.Fab.sync.shown(U.Mailv.sync(U.Rp.sync(U.Dv.sync(U.Fm.sync(U.Mpage.sync.m(U.Home.refresh(U.Act{Actor.ui(a), Nil{}}))))))))), True{})
 
 def Actor.origin( +a: Actor, +origin: String) -> Actor:
   match a:
@@ -1033,10 +1035,89 @@ def Actor.terminal.picture(fast: Bool, +pid: String, a: Actor) -> Actor:
       Actor{TO.Output.next(U.Ui.info_set(u, "local.terminal.pid", pid)), view, target, pending, reads, dirty, Actor.kept(memo)}
     case False{} _: Actor.mark_dirty(a)
 
+# What a view can draw of its connection's Ui: everything but the clock,
+# the request counter and the mail cache (a mail reply clears its
+# "@mr.req:" slot in drafts, so it always counts as a change), and of the
+# state only its length. An owned reply that leaves all of it as it was
+# (a fab.look card or a secret list asked again and answered the same)
+# changes nothing on screen: marking the view dirty for it sent
+# view.changed and a whole render of the view after each thread switch
+# and each Settings open/close (two follow-up round trips per click).
+def Actor.same.head(+ys: List<&2, String>) -> String:
+  match ys:
+    case +y <> _: y
+    case Nil{}: ""
+
+def Actor.same.tail(+ys: List<&2, String>) -> List<&2, String>:
+  match ys:
+    case _ <> +t: t
+    case Nil{}: Nil{}
+
+def Actor.same.bhead(+ys: List<&2, Bool>) -> Bool:
+  match ys:
+    case +y <> _: y
+    case Nil{}: False{}
+
+def Actor.same.btail(+ys: List<&2, Bool>) -> List<&2, Bool>:
+  match ys:
+    case _ <> +t: t
+    case Nil{}: Nil{}
+
+def Actor.same.strs(xs: List<&2, String>, +ys: List<&2, String>, same: Bool) -> Bool:
+  match xs:
+    case Nil{}: same
+    case +x <> xt: Actor.same.strs(xt, Actor.same.tail(ys), Bool.and(same, String.eq(x, Actor.same.head(ys))))
+
+def Actor.same.bools(xs: List<&2, Bool>, +ys: List<&2, Bool>, same: Bool) -> Bool:
+  match xs:
+    case Nil{}: same
+    case +x <> xt: Actor.same.bools(xt, Actor.same.btail(ys), Bool.and(same, Bool.not(Bool.xor(x, Actor.same.bhead(ys)))))
+
+# a map's entries as key, value, ..., an empty value left out: a reply
+# clears its own request slots ("@rp.req:<id>", "" whether or not it was
+# set), and an empty slot reads as no slot
+def Actor.same.keep(empty: Bool, +k: String, +v: String, acc: List<&2, String>) -> List<&2, String>:
+  match empty:
+    case True{}: acc
+    case False{}: k <> v <> acc
+
+def Actor.same.flat(xs: List<&2, Sigma<&2, &2, String, _ => String>>, acc: List<&2, String>) -> List<&2, String>:
+  match xs:
+    case Nil{}: acc
+    case (+k, +v) <> tail: Actor.same.flat(tail, Actor.same.keep(String.is_empty(v), k, v, acc))
+
+def Actor.same.map(+a: Map<&2, String>, +b: Map<&2, String>) -> Bool:
+  +fa = Actor.same.flat(Map.to_list(&2, String, a), Nil{})
+  +fb = Actor.same.flat(Map.to_list(&2, String, b), Nil{})
+  Bool.and(Nat.is_eq(List.length(&2, String, fa), List.length(&2, String, fb)), Actor.same.strs(fa, fb, True{}))
+
+def Actor.same.flags(+a: Map<&2, Bool>, +b: Map<&2, Bool>) -> Bool:
+  +ka = Map.keys(&2, Bool, a)
+  +kb = Map.keys(&2, Bool, b)
+  Bool.and(Nat.is_eq(List.length(&2, String, ka), List.length(&2, String, kb)),
+    Bool.and(Actor.same.strs(ka, kb, True{}), Actor.same.bools(Map.values(&2, Bool, a), Map.values(&2, Bool, b), True{})))
+
+def Actor.same.drawn(+a: U.Ui, +b: U.Ui) -> Bool:
+  match a b:
+    case U.Ui{st, sel, dr, live, op, on, _, ad, pa, v, _, w, er, note, nf, ob, _} U.Ui{st2, sel2, dr2, live2, op2, on2, _, ad2, pa2, v2, _, w2, er2, note2, nf2, ob2, _}:
+      Bool.and(Bool.and(Nat.is_eq(M.State.seq(st), M.State.seq(st2)), Bool.and(String.eq(sel, sel2), String.eq(v, v2))),
+        Bool.and(Bool.and(Bool.and(Bool.not(Bool.xor(on, on2)), Bool.not(Bool.xor(ad, ad2))), Bool.and(Bool.not(Bool.xor(pa, pa2)), Bool.not(Bool.xor(w, w2)))),
+          Bool.and(Bool.and(String.eq(er, er2), String.eq(note, note2)),
+            Bool.and(Bool.and(Actor.same.map(nf, nf2), Actor.same.map(dr, dr2)),
+              Bool.and(Actor.same.map(live, live2), Bool.and(Actor.same.map(ob, ob2), Actor.same.flags(op, op2)))))))
+
+def Actor.settle.k(same: Bool, +a: Actor) -> Actor:
+  match same:
+    case True{}: a
+    case False{}: Actor.mark_dirty(a)
+
+def Actor.settle(+before: U.Ui, +a: Actor) -> Actor:
+  Actor.settle.k(Actor.same.drawn(before, Actor.ui(a)), a)
+
 def Actor.reply_if( +owned: Bool, +a: Actor, +web: Bool, +key: String, +o: J.Json) -> Actor:
   match owned:
     case False{}: a
-    case True{}: Actor.mark_dirty(Actor.accept(a, Actor.receive(web, Actor.ui(a), key, Actor.now(Actor.ui(a)), o), True{}))
+    case True{}: Actor.settle(Actor.ui(a), Actor.accept(a, Actor.receive(web, Actor.ui(a), key, Actor.now(Actor.ui(a)), o), True{}))
 
 def Actor.terminal.feed(owned: Bool, +fast: Bool, +a: Actor, +web: Bool, +key: String, +o: J.Json) -> Actor:
   match owned:
@@ -1095,10 +1176,33 @@ def Actor.reply(+a: Actor, +web: Bool, +key: String, +o: J.Json) -> Actor:
 # visibility). Render and other derived memos still clear here; actions and scope boundaries still discard it.
 # Targeted job info belongs to this connection's server-owned Ui. It does
 # not settle a request, enqueue commands or become client-supplied state.
-def Actor.info(a: Actor, o: J.Json) -> Actor:
+def Actor.info.drawn(a: Actor, o: J.Json) -> Actor:
   match a:
     case Actor{u, view, target, pending, reads, _, +memo}:
       Actor{U.Ui.info_merge(u, J.Json.get_obj(o, "info")), view, target, pending, reads, True{}, List.append(&2, Memo, Bodies.keep(memo), List.append(&2, Memo, SidebarSent.keep(memo), List.append(&2, Memo, Actor.same.view(memo), Actor.canonical(memo))))}
+
+# The hub's "desk" info (core/desk.bend: which threads the desks show) is
+# kept for the phone app's alerts (mobile/hubs.bend); no view draws it.
+# Each desk.look re-tells it to every client, so marking the view dirty
+# for it re-rendered every connected view on every thread switch anywhere.
+def Actor.info.desk.go(fs: J.Json, only: Bool) -> Bool:
+  match fs:
+    case J.Field{key, _, tail}: Actor.info.desk.go(tail, Bool.and(only, String.eq(key, "desk")))
+    case _: only
+
+def Actor.info.desk(+info: J.Json) -> Bool:
+  match info:
+    case J.Obj{J.Field{key, v, tail}}: Actor.info.desk.go(J.Field{key, v, tail}, True{})
+    case _: False{}
+
+def Actor.info.k(desk: Bool, a: Actor, +o: J.Json) -> Actor:
+  match desk a:
+    case True{} Actor{u, view, target, pending, reads, dirty, memo}:
+      Actor{U.Ui.info_merge(u, J.Json.get_obj(o, "info")), view, target, pending, reads, dirty, memo}
+    case False{} _: Actor.info.drawn(a, o)
+
+def Actor.info(a: Actor, +o: J.Json) -> Actor:
+  Actor.info.k(Actor.info.desk(J.Json.get_obj(o, "info")), a, o)
 
 # A thin socket receives rendered views, not raw info notifications or a
 # schematic's sheets. The server folds those privately and sends its

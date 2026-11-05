@@ -41,3 +41,23 @@ def repeat(+rows: List<&2, List<&2, String>>) -> String:
 
 def fallback() -> String:
   SB.Subs.panel.word(F.rows(H.SubHistory.result(True{}, F.finished(), "t1", Nil{}), Map.new(&2, String)))
+
+# every row as the panel draws it (key, title, word, step count, steps on
+# show) and one call's detail walk: the driver compares a read through the
+# production SQL with the full per-call read it replaced
+def summary.go(rs: List<&2, SB.SubRow>) -> String:
+  match rs:
+    case Nil{}: ""
+    case SB.SubRow{+key, _, +title, _, +word, _, _, _, n, ss} <> t:
+      key ++ "|" ++ title ++ "|" ++ word ++ "|" ++ Nat.show(n) ++ "|" ++ String.join(F.step.texts(ss), ",") ++ "\n" ++ summary.go(t)
+
+def summary(rows: List<&2, List<&2, String>>) -> String:
+  summary.go(F.rows(from(rows), F.expanded()))
+
+def walk.str(w: SB.SubWalk) -> String:
+  match w:
+    case SB.SubWalk{si, u, n, SB.SubStep{_, lt}, ab, oc, ss}:
+      Nat.show(si) ++ "|" ++ Nat.show(u) ++ "|" ++ Nat.show(n) ++ "|" ++ lt ++ "|" ++ ab ++ "|" ++ oc ++ "|" ++ String.join(F.step.texts(ss), ",")
+
+def walk(rows: List<&2, List<&2, String>>, call: String) -> String:
+  walk.str(SB.Subs.walk(from(rows), "t1", call))

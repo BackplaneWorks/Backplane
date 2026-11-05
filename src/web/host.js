@@ -67,7 +67,8 @@ import { installWorkspaceHints } from "./workspace-hints.js";
 // probe goes off its plots at once, as its chip's x does through the hub
 const composerKeeper = installComposerFocus({ phone: () => composerPhone() });
 installPhoneThread({ list: el => timelineList(el), latest: () => holdBottom(), newest: () => thin?.atNewest?.() !== false });
-installWorkspaceKeys({ dispatch, escNext: (term, probe, viewer) => App.esc_next(term, probe, viewer), composer: composerKeeper,
+// (a key's result drawn in its own handler too, as a mouse press's is)
+installWorkspaceKeys({ dispatch: (action, value, timer) => { const done = dispatch(action, value, timer);renderNow();return done; }, escNext: (term, probe, viewer) => App.esc_next(term, probe, viewer), composer: composerKeeper,
   clearProbe: () => { Plot2d.setProbe("");Solid.setProbe("");dispatch("probe", ""); } });
 installWorkspaceHints();
 installFloatingTerminal({ dispatch });
@@ -115,10 +116,16 @@ import { compactRoute } from "./thin.js";
 import { TerminalOutputPane } from "./terminal-output.js";
 import { ModelFeedback } from "./model-feedback.js";
 import { SubsFeedback } from "./subs-feedback.js";
+import { PressFeedback } from "./press-feedback.js";
+import { FoldFeedback } from "./fold-feedback.js";
 import { ReviewPosition } from "./review-position.js";
 const reviewPosition = new ReviewPosition(localStorage);
 const modelFeedback = new ModelFeedback(() => later());
 const subsFeedback = new SubsFeedback(() => later());
+// (what presses opened is kept per hub, pairing, bundle and language)
+const pressFeedback = new PressFeedback(() => later(), 64, { storage: localStorage,
+  scope: () => { try { return JSON.stringify([location.origin, cacheIdentity(document.cookie), import.meta.url, App.lang(ui)]); } catch { return ""; } } });
+const foldFeedback = new FoldFeedback(() => later());
 // the session the hub's picture is drawn over: the model menu and the
 // Subagents rows as clicked, ahead of the hub's answer
 const feedbackSession = () => subsFeedback.project(modelFeedback.project(currentSession()));
@@ -211,9 +218,17 @@ const SVG_TAGS = new Set(["svg", "path"]);
 // The re-render harness (test/tools/rerender): a page whose window has
 // __bpRender (set before it loads) counts what each render does. Off otherwise.
 const RR = globalThis.__bpRender || null;
+// (a 3D tab on the page once: solid.js makes the page's first graphics
+// context ahead, when idle)
+let glWarmAsked = false;
 function create(v) {
   RR?.n("dom.create");
   if (is(v, "Txt")) return document.createTextNode(v.text);
+  // the 3D workbench that left the page last, when the hub draws that very
+  // one again (viewer-tools.js: same model, thread and board), comes back
+  // with its drawn model, toolbar and graphics contexts, patched to v
+  const kept = v.key === "solid-workbench" ? ViewerTools.kept(nodeAttr(v, "data-key"), nodeAttr(v, "data-scope"), nodeAttr(v, "data-board-key")) : null;
+  if (kept && kept.__v?.tag === v.tag) { patch(kept, v); ViewerTools.restyle(kept); return kept; }
   const el = SVG_TAGS.has(v.tag) ? document.createElementNS(SVG_NS, v.tag) : document.createElement(v.tag);
   el.__v = { $: T.El, tag: v.tag, key: v.key, attrs: { $: "Nil" }, kids: { $: "Nil" } };
   el.__kids = [];
@@ -393,7 +408,7 @@ function patch(el, v) {
       timelineLists.set(el, scroller);
     }
     const u0 = RR ? pnow() : 0, rows = [...each(v.kids)].map(expand), u1 = RR ? pnow() : 0;
-    scroller.update(rows, { follow: entryHistory.active(historyFillOwner()) || !(thin && thin.atNewest?.() === false) });
+    scroller.update(rows, { follow: entryHistory.active(historyFillOwner()) || !(thin && thin.atNewest?.() === false), defer: true });
     if (RR) { RR.t("patch.tl.rows", u1 - u0);RR.t("patch.tl.update", pnow() - u1); }
     el.__v = v;
     return;
@@ -501,7 +516,7 @@ const forcedLang = new URLSearchParams(location.search).get("lang");
 if (forcedLang === "ja" || forcedLang === "en") ui = App.lang_preview(ui);
 ui = App.act(ui, "lang", forcedLang === "ja" || forcedLang === "en" ? forcedLang : (localStorage.getItem("backplane-lang") || "auto")).ui;
 ui = App.act(ui, "lang-os", navigator.languages?.[0] || navigator.language || "").ui;
-document.documentElement.lang = App.lang(ui);
+pageLang(App.lang(ui));
 window.addEventListener("languagechange", () => dispatch("lang-os", navigator.languages?.[0] || navigator.language || ""));
 // opened from another hub to show one of this machine's bots ("#bot=<name>")
 if (location.hash) {
@@ -683,7 +698,8 @@ const bodyWindows = new BodyWindows({renderBody: node => App.make(node), request
 let frontend = null, frontendNode = null, wantFrontend = true, fallbackIntent = null;
 let viewMode = "discovering", remoteReady = false, remoteEpoch = "", thinSession = null;
 let pairingAccepted = false;
-const transitionViews = new ViewTransition({ store: new RecentViews({ indexedDB, validate: (shown, scope) => {
+// (24 pictures: every destination the sidebar shows is prefetched, warmDestinations)
+const transitionViews = new ViewTransition({ limit: 24, store: new RecentViews({ indexedDB, limit: 24, bytes: 6 * 1024 * 1024, validate: (shown, scope) => {
   try { validatePresentation({ session: {sel:scope.selected, rid:0, drafts:{}}, view:shown, cmds:[] });return true; } catch {return false;}
 } }) });
 // The picture on screen while the next view is on its way: a retained
@@ -704,6 +720,7 @@ let focusedNode = null, focusedAtEnd = true, focusedSaveTimer = 0;
 let focusedRequestedKey = null;
 const COARSE_POINTER = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
 let thin = null, thinSocket = null, thinAttempt = 0, thinExpiry = 0, thinGreetingTimer = 0, thinDraftTimer = 0, thinFieldTimer = 0;
+let paletteAsked = -Infinity;
 let thinReading = null, resumedConversation = null;
 const readingIdentity = () => JSON.stringify([location.origin, cacheIdentity(document.cookie)]);
 function keepThinReading() {
@@ -740,30 +757,224 @@ function transitionScope(target = presentationTarget(currentSession())) {
   return { origin: location.origin, identity: cacheIdentity(document.cookie), language: App.lang(ui) + (PHONE ? "/phone" : ""),
     epoch: thin?.epoch || remoteEpoch, bundle: import.meta.url, target, selected:currentSession().sel, settings:currentSession().open?.settings===true, route: currentSession().route || null };
 }
+let lastInput = 0;
+for (const name of ["pointerdown", "keydown", "wheel"]) addEventListener(name, () => { lastInput = performance.now(); }, { capture: true, passive: true });
+// the rail's viewer tabs read ahead for the thread on show (the press each
+// tab sends, and the view.kind it opens)
+const VIEWER_OPENS = [["fm", "", "files"], ["diff", "", "diff"], ["view-kind", "board", "board"], ["view-kind", "schematic", "schematic"],
+  ["view-kind", "3d", "3d"], ["view-kind", "browser", "browser"], ["rv-page", "bom", "review"]].map(([action, value, kind]) => ({ action, value, kind }));
 const previewViews = new ViewPrefetch({
   hub:location.origin, scope:()=>transitionScope(),
   has:target=>!!transitionViews.destination(transitionScope(), target),
-  idle:()=>remoteReady && !document.hidden && !thin?.active && !thin?.paging,
+  // (and the person has not pressed, typed or scrolled for two seconds: the hub
+  // answers one request at a time, and a prefetch ahead of a click delays it)
+  idle:soon=>remoteReady && !document.hidden && !thin?.active && !thin?.paging && (soon || performance.now() - lastInput > 2000),
   socket:()=>new WebSocket(location.origin.replace(/^http/, "ws") + "/ws?view=1&frontend=1"),
   encode:request=>fromList(App.wire_out_json(Wire.json(PHONE ? {...request,p:{...request.p,...phoneRequest(PHONE)}} : request))),
   decode:data=>Wire.plain(Wire.cbor(new Uint8Array(data), KEYS, WORDS)),
   picture:(shown, session, target, scope)=>{
     transitionViews.put({...scope,target,selected:session.sel,route:session.route||null,settings:false},shown);
+    // (its messages whole: a first visit draws them so before their pages come)
+    if (target.kind === "thread") bodyWindows.wholes(pictureNode(shown));
+  },
+  // (a viewer of the thread on show, as the hub draws it open)
+  viewer:(shown, target, open)=>{
+    if (targetKey(target) !== shownFor) return;
+    pressFeedback.ahead(pictureNode(shown), targetKey(presentationTarget(currentSession())), open.action, open.value, open.kind);
+  },
+  // (the thread on show with its runs open: only what they hold is kept)
+  folds:(shown, target, window)=>{
+    if (targetKey(target) !== shownFor) return;
+    foldFeedback.seen(pictureNode(shown));
+    if (window && remoteEpoch) thinContinuations.learn(location.origin, { epoch: remoteEpoch, target, window });
   },
 });
+// The palette's chosen row, when it is a thread, is read ahead once the
+// list has stayed 200 ms (its Enter then draws the thread's picture with
+// the palette's answer, not a round trip after it): a thread far from the
+// sidebar has no other picture.
+let paletteAheadFor = null, paletteAheadTimer = 0;
+function paletteAhead() {
+  const id = document.querySelector("#workspace-commands .workspace-command.on.thread[data-thread]")?.getAttribute("data-thread") || null;
+  if (id === paletteAheadFor) return;
+  paletteAheadFor = id;clearTimeout(paletteAheadTimer);
+  if (id) paletteAheadTimer = setTimeout(() => { if (paletteAheadFor === id) previewViews.enqueue({ kind: "thread", id }, true, false, true); }, 200);
+}
+// Every destination the sidebar shows is fetched ahead (view-prefetch.js),
+// so a click on one draws its picture at once instead of waiting a round
+// trip. A row drawn differently since its picture was fetched (new activity,
+// a title, a state) has a picture that is behind: it is fetched again.
+const warmRows = new Map();
 function warmDestinations() {
-  for (const el of [...document.querySelectorAll('[data-on-click="select"],[data-on-click="bot"],[data-on-click="proj-home"]')].filter(el=>el.getAttribute("data-value")).slice(0,3)) {
+  const current = targetKey(thin?.target);
+  for (const el of [...document.querySelectorAll('[data-on-click="select"],[data-on-click="bot"],[data-on-click="proj-home"]')].filter(el=>el.getAttribute("data-value")).slice(0,24)) {
     const target={kind:el.getAttribute("data-on-click")==="bot"?"bot":el.getAttribute("data-on-click")==="proj-home"?"project":"thread",id:el.getAttribute("data-value")};
-    if (targetKey(target)!==targetKey(thin?.target)) previewViews.enqueue(target);
+    const key = targetKey(target), row = el.className.replace(/(^|\s)on(?=\s|$)/g, "") + "\u0000" + el.textContent, seen = warmRows.get(key);
+    warmRows.set(key, row);
+    // (the picture of the one on show is the hub's own, kept as it comes; a
+    // thread's is fetched again once per page load: one kept from an earlier
+    // load has its long messages cut to previews, a fetched one has them
+    // whole, which its first visit then draws until their pages come)
+    if (key !== current) previewViews.enqueue(target, false, seen === undefined ? target.kind === "thread" : seen !== row);
   }
 }
 for (const name of ["pointerover", "touchstart"]) document.addEventListener(name, event=>{
   const el=event.target.closest?.('[data-on-click="select"],[data-on-click="bot"],[data-on-click="proj-home"]');
   if (!el) return;
   void transitionViews.warm(transitionScope());
-  if (name==="pointerover") previewViews.enqueue({kind:el.getAttribute("data-on-click")==="bot"?"bot":el.getAttribute("data-on-click")==="proj-home"?"project":"thread",id:el.getAttribute("data-value")},true);
+  const target={kind:el.getAttribute("data-on-click")==="bot"?"bot":el.getAttribute("data-on-click")==="proj-home"?"project":"thread",id:el.getAttribute("data-value")};
+  if (name==="pointerover") previewViews.enqueue(target,true);
+  warmPicture(target);
 }, {passive:true});
 const targetKey = target => target ? target.kind + ":" + target.id : "";
+// A retained picture as Bend's nodes, made once per picture and theme (a
+// whole view: made at the click it was most of the click's own time), and
+// made ahead, with its messages' Markdown, while the person points at the
+// row (warmPicture): the click then draws it from what is ready.
+const pictureNodes = new WeakMap();
+function pictureNode(shown) {
+  const kept = pictureNodes.get(shown);
+  if (kept?.theme === themeNow) return kept.node;
+  const node = App.presentation_node(presentationJson(themed(shown)));
+  if (shown && typeof shown === "object") pictureNodes.set(shown, { theme: themeNow, node });
+  return node;
+}
+const idleSoon = fn => typeof requestIdleCallback === "function" ? requestIdleCallback(fn, { timeout: 300 }) : setTimeout(fn, 50);
+let warming = null;
+function warmPicture(target) {
+  const shown = transitionViews.destination(transitionScope(), target)?.shown;
+  if (!shown || warming === shown || pictureNodes.get(shown)?.theme === themeNow) return;
+  warming = shown;
+  idleSoon(() => {
+    warming = null;
+    const node = pictureNode(shown), stack = [node];
+    // (each message's piece made now: the click's render finds it made)
+    while (stack.length) {
+      const v = stack.pop();
+      if (!is(v, "El")) continue;
+      if (v.tag === "bp-memo") { expand(v);continue; }
+      for (const k of each(v.kids)) stack.push(k);
+    }
+  });
+}
+// A retained picture of another destination is drawn with the sidebar on
+// screen (the hub's last view's): the picture's own was drawn when it was
+// fetched, with the sidebar's default shelves and trees, so projects and
+// rows jumped at the click and back when the hub's view came. The row
+// picked is marked (style.css's data-picked) until that view lands.
+let liveNode = null;
+// (a project head's press, drawn ahead of its click: headPress below)
+let headPreview = null, headPress = null, headClick = null;
+const sidebarOf = n => nodeIn(n, v => v.tag === "aside" && v.key === "sidebar");
+const liveSided = new WeakMap();
+function withLiveSidebar(picture) {
+  if (!liveNode || transitionFor === shownFor) return picture;
+  // (only while the row picked is on screen in it, or under the shut Older
+  // shelf, which then shows its project: else the picture's own sidebar,
+  // which shows that row, is the one the hub's view will bring)
+  // (a project's home: while its section is on screen)
+  const older = transitionFor.startsWith("thread:") && !document.querySelector(`aside.sidebar .thread[data-value="${CSS.escape(transitionFor.slice(7))}"]`);
+  if (transitionFor.startsWith("project:") ? !document.querySelector(`aside.sidebar section[data-drag-to="${CSS.escape(transitionFor.slice(8))}"]`)
+    : !transitionFor.startsWith("thread:")) return picture;
+  const kept = liveSided.get(picture);
+  if (kept?.live === liveNode) return kept.out;
+  let side = sidebarOf(liveNode);
+  const theirs = sidebarOf(picture);
+  if (older) side = side && theirs ? olderFrom(side, theirs, transitionFor.slice(7)) : null;
+  if (!side) { liveSided.set(picture, { live: liveNode, out: picture });return picture; }
+  let out = picture;
+  if (side && theirs && side !== theirs) {
+    const moved = sidebarRegrouped(side, theirs);
+    const walk = n => {
+      if (n === theirs) return moved;
+      if (!is(n, "El") || n.tag === "bp-memo") return n;
+      const ks = [...each(n.kids)], mapped = ks.map(walk);
+      if (mapped.every((k, i) => k === ks[i])) return n;
+      let kids = { $: "Nil" };
+      for (let i = mapped.length - 1; i >= 0; i--) kids = { $: "Con", head: mapped[i], tail: kids };
+      return { ...n, kids };
+    };
+    out = walk(picture);
+  }
+  liveSided.set(picture, { live: liveNode, out });
+  return out;
+}
+// A thread picked from under the shut Older shelf (a palette jump, a
+// link): shut, the shelf shows just the open thread's project ("Older 7 ·
+// 1 shown"). The live sidebar takes the picture's shut shelf and the
+// projects it shows (the picture is drawn with that thread open), in place
+// of its own; null when either has it open or the picture's lacks the row.
+function olderFrom(side, theirs, id) {
+  const live = sectionsIn(side), pic = sectionsIn(theirs);
+  if (!live || !pic) return null;
+  const shelf = ks => ks.findIndex(k => is(k, "El") && k.tag === "button" && classOf(k).includes("older"));
+  const block = (ks, i) => { let j = i + 1;while (j < ks.length && is(ks[j], "El") && ks[j].tag === "section") j++;return j; };
+  const iL = shelf(live.ks), iP = shelf(pic.ks);
+  if (iL < 0 || iP < 0 || classOf(live.ks[iL]).includes("open") || classOf(pic.ks[iP]).includes("open")) return null;
+  const jL = block(live.ks, iL), jP = block(pic.ks, iP), shown = pic.ks.slice(iP + 1, jP);
+  if (!shown.some(n => JSON.stringify(n).includes(JSON.stringify(id)))) return null;
+  const kids = [...live.ks.slice(0, iL), pic.ks[iP], ...shown, ...live.ks.slice(jL)];
+  const swap = n => {
+    if (n === live.at) { let l = { $: "Nil" };for (let i = kids.length - 1; i >= 0; i--) l = { $: "Con", head: kids[i], tail: l };return { ...n, kids: l }; }
+    if (!is(n, "El") || n.tag === "bp-memo") return n;
+    const ks = [...each(n.kids)], mapped = ks.map(swap);
+    if (mapped.every((k, i) => k === ks[i])) return n;
+    let l = { $: "Nil" };for (let i = mapped.length - 1; i >= 0; i--) l = { $: "Con", head: mapped[i], tail: l };
+    return { ...n, kids: l };
+  };
+  return swap(side);
+}
+// The open thread's project keeps its place among the live ones (it never
+// sinks under the reader: client.bend's Side.groups.at) only while that
+// thread is open: picking a thread in another project sinks it to the
+// quiet ones, and raises the picked thread's own. The picture's sidebar,
+// drawn with the picked thread open, says which of the two move: they are
+// moved in the live sidebar at the press (each placed after the section it
+// follows in the picture), every other section left where it is, so the
+// hub's view finds them in place. Only those two: the picture's sidebar may
+// be older than the live one for every other project.
+const sectionsIn = side => {
+  const at = nodeIn(side, v => [...each(v.kids)].some(k => is(k, "El") && k.tag === "section" && k.key && classOf(k).includes("project")));
+  return at ? { at, ks: [...each(at.kids)] } : null;
+};
+const classOf = n => (nodeAttr(n, "class") || "").split(/\s+/);
+const withNodeAttr = (n, name, value) => {
+  const as = [...each(n.attrs)];
+  let l = { $: "Nil" };for (let i = as.length - 1; i >= 0; i--) l = { $: "Con", head: is(as[i], "At") && as[i].name === name ? { ...as[i], value } : as[i], tail: l };
+  return { ...n, attrs: l };
+};
+function sidebarRegrouped(side, theirs) {
+  const projectOf = id => id && document.querySelector(`aside.sidebar .thread[data-value="${CSS.escape(id)}"]`)?.closest("section")?.getAttribute("data-drag-to");
+  // (a project's home holds nothing in place: only the left thread's moves)
+  const pa = shownFor.startsWith("thread:") ? projectOf(shownFor.slice(7)) : "", pt = transitionFor.startsWith("thread:") ? projectOf(transitionFor.slice(7)) : "";
+  const live = sectionsIn(side), pic = sectionsIn(theirs);
+  if (!live || !pic || pa === pt) return side;
+  const picBy = new Map(pic.ks.filter(k => is(k, "El") && k.tag === "section" && k.key).map(k => [k.key, k]));
+  const quiet = n => classOf(n).includes("quiet");
+  const move = new Set([pa, pt].filter(id => id && live.ks.some(k => k.key === id) && picBy.has(id)
+    && quiet(live.ks.find(k => k.key === id)) !== quiet(picBy.get(id))));
+  if (!move.size) return side;
+  let kids = live.ks.filter(k => !move.has(k.key));
+  const order = pic.ks.map(k => k.key);
+  for (const id of order.filter(id => move.has(id))) {
+    const own = live.ks.find(k => k.key === id), cls = nodeAttr(picBy.get(id), "class");
+    const node = withNodeAttr(own, "class", cls);
+    // after the nearest section before it in the picture that is in place
+    let after = -1;
+    for (let i = order.indexOf(id) - 1; i >= 0 && after < 0; i--) after = kids.findIndex(k => k.key === order[i] && !move.has(order[i]));
+    if (after < 0 && order.indexOf(id) > 0) return side;
+    kids = [...kids.slice(0, after + 1), node, ...kids.slice(after + 1)];
+  }
+  const swap = n => {
+    if (n === live.at) { let l = { $: "Nil" };for (let i = kids.length - 1; i >= 0; i--) l = { $: "Con", head: kids[i], tail: l };return { ...n, kids: l }; }
+    if (!is(n, "El") || n.tag === "bp-memo") return n;
+    const ks = [...each(n.kids)], mapped = ks.map(swap);
+    if (mapped.every((k, i) => k === ks[i])) return n;
+    let l = { $: "Nil" };for (let i = mapped.length - 1; i >= 0; i--) l = { $: "Con", head: mapped[i], tail: l };
+    return { ...n, kids: l };
+  };
+  return swap(side);
+}
 // Nothing is drawn in between two views: a thread picked, a reconnect, a
 // failure keep the hub's last view on screen until the next one comes.
 function holdPicture() {
@@ -774,7 +985,7 @@ function restoreTransition(target) {
   const shown = transitionViews.get(transitionScope(target));
   if (shown) { transitionFor = targetKey(target);heldAt = 0;transitionPosition = transitionViews.position(transitionScope(target)) || {atEnd:true}; }
   else if (transitionNode && transitionFor !== targetKey(target) && !heldAt) { heldAt = performance.now();setTimeout(later, QUIET_MS + 20); }
-  transitionNode = shown ? App.presentation_node(presentationJson(themed(shown))) : transitionNode;
+  transitionNode = shown ? pictureNode(shown) : transitionNode;
   return !!shown;
 }
 const focusedView = new FocusedView({
@@ -831,7 +1042,7 @@ async function refreshFocusedIdentityFor(generation) {
   }
   if (before !== cacheIdentity(document.cookie) || result.state === "denied" || result.state === "invalid") {
     void draftAttachments.prune().catch(() => {});
-    previewViews.stop();transitionViews.clear();transitionNode = null;transitionFor = "";focusedView.invalidate();
+    previewViews.stop();transitionViews.clear();warmRows.clear();transitionNode = null;transitionFor = "";focusedView.invalidate();
     if (!canonicalBoot && !remoteReady) void restoreFocused();
     else saveFocusedSoon();
   }
@@ -1120,6 +1331,12 @@ function jumpTo(tl, el, word = "") {
   void el.offsetWidth;
   el.classList.add("jumped");
 }
+// <html lang>: written only when it changes. Writing the same value is still
+// a :lang() invalidation of every element (each hub view wrote it: ~1,500
+// style invalidations a view on a thread)
+function pageLang(lang) {
+  if (document.documentElement.lang !== lang) document.documentElement.lang = lang;
+}
 // <html>'s data attributes (style.css reads them): written only when they
 // change, so a render that changes nothing there invalidates no style
 function htmlData(name, value) {
@@ -1127,6 +1344,10 @@ function htmlData(name, value) {
   if (d[name] !== v) d[name] = v;
 }
 function render() {
+  rendering = true;
+  try { renderPage(); } finally { rendering = false; }
+}
+function renderPage() {
   reviewPosition.capture();
   mailCheckpoint();
   const mail = mailAnchor();
@@ -1141,24 +1362,45 @@ function render() {
   }
   const tl = document.getElementById("timeline");
   const t0 = PERF || RR ? pnow() : 0;
-  let page = frontendNode ? App.presentation_overlay(historyGaps(frontendNode), presentationJson(feedbackSession()))
-    : transitionNode ? App.presentation_overlay(transitionNode, presentationJson(currentSession())) : focusedNode
+  // (a press not yet answered: what it opened, drawn into the hub's picture
+  // before the overlay, so the draft and the pieces in it are the page's own;
+  // press-feedback.js)
+  if (frontendNode) pressFeedback.seen(frontendNode, targetKey(presentationTarget(currentSession())));
+  let page = headPreview && frontendNode ? App.presentation_overlay(headPreview.node, presentationJson(currentSession()))
+    : frontendNode ? App.presentation_overlay(historyGaps(pressFeedback.project(frontendNode)), presentationJson(feedbackSession()))
+    : transitionNode ? App.presentation_overlay(pressFeedback.project(withLiveSidebar(transitionNode)), presentationJson(currentSession())) : focusedNode
     || (canonicalBoot ? App.view(ui) : App.presentation_node(presentationJson(themed(Wire.plain(App.presentation_view(App.presentation_wait(ui)))))));
   // Saved transition/startup pictures contain the server's unprojected partial
   // footer. Clean it before their first paint, without borrowing live readers
   // or request authority from the currently selected conversation.
   const tc = RR ? pnow() : 0;
   if (RR) RR.t("render.overlay", tc - t0);
+  // a run of tool calls opened or shut at the click (fold-feedback.js),
+  // before the continuations: its rows get the same controls the hub's do
+  if (frontendNode) foldFeedback.seen(frontendNode);
+  if (frontendNode || transitionNode) page = foldFeedback.project(page);
+  // (a retained picture of a thread read before: its long messages drawn
+  // with the pages read for them then, as the hub's view will draw them)
+  const heldBodies = !frontendNode && transitionNode ? bodyWindows.heldParts(transitionFor) : null;
   if (frontendNode || transitionNode || focusedNode) page = thinContinuations.project(page,
-    node => frontendNode && node.tag === "bp-memo" && bodyWindows.parts.get(node.key)?.automatic === true ? node : expand(node), !!frontendNode);
+    node => node.tag === "bp-memo" && (frontendNode ? bodyWindows.parts : heldBodies?.parts)?.get(node.key)?.automatic === true && !(heldBodies && node.key.startsWith("@live:")) ? node : expand(node), !!frontendNode,
+    frontendNode ? foldFeedback.restored() : null);
   const tb = RR ? pnow() : 0;
   if (frontendNode) page = bodyWindows.project(page);
+  else if (heldBodies) page = bodyWindows.projectHeld(page, transitionFor);
   if (frontendNode && remoteReady || transitionNode && transitionFor === targetKey(presentationTarget(currentSession()))) page = pendingPresentation(page);
   const t1 = PERF || RR ? pnow() : 0;
   if (RR) { RR.t("render.continuations", tb - tc);RR.t("render.bodies", t1 - tb); }
   patch(root, { $: T.El, tag: "div", key: "", attrs: { $: "Nil" }, kids: { $: "Con", head: page, tail: { $: "Nil" } } });
   starAttentionSync(root);
   bubMoveSync();
+  paletteCaughtUp();
+  paletteAhead();
+  // (a picture of another thread drawn with the live sidebar: its row marked)
+  if (transitionNode && !frontendNode && transitionFor !== shownFor && transitionFor.startsWith("thread:")) {
+    const row = document.querySelector(`aside.sidebar .thread[data-value="${CSS.escape(transitionFor.slice(7))}"]`);
+    if (row) pickRow(row);
+  }
   terminalOutput.apply(true);
   phoneOther.rendered();
   appShell.rendered();
@@ -1170,6 +1412,9 @@ function render() {
     htmlData("backplaneSeq", App.seq(ui));
   }
   htmlData("backplaneMode", viewMode);
+  // (style.css sizes the tools rail by it: an html:has() there restyled the
+  // whole page on every change inside .app)
+  htmlData("workspace", root.querySelector(".app > .workspace-thread") ? "thread" : "");
   htmlData("backplaneRemoteReady", String(remoteReady));
   htmlData("backplaneCached", String(!!(focusedNode || transitionNode) && !frontendNode));
   // what style.css quiets: a picture kept for another target than the one
@@ -1188,9 +1433,11 @@ function render() {
   const list = timelineList(tl2);
   if (activeTimeline && activeTimeline !== list) activeTimeline.destroy();
   activeTimeline = list || null;
-  list?.refresh();
-  if (transitionPosition && list) { list.restore(transitionPosition);transitionPosition = null; }
-  else if (scroll) list?.scrollToEnd();
+  // (one plan for the patch's rows and this render's command: timeline-scroller.js)
+  let next = null;
+  if (transitionPosition && list) { next = { mode: "restore", bookmark: { ...transitionPosition } };transitionPosition = null; }
+  else if (scroll && list) next = { mode: "bottom" };
+  list?.refresh(next);
   // A live bot/mailroom update may change only the floating pill. Unchanged
   // virtual rows/geometry cause neither a plan nor a scroll callback; still
   // reconcile the accepted newest picture with the controller's read mark.
@@ -1223,9 +1470,17 @@ function render() {
   panes();
   secretSaves.paint();
   projectSplitters.sync();
-  Solid.mount(document.getElementById("solid"));
-  ViewerTools.mount(document.getElementById("solid-workbench"), Solid, { components: (thread, options) => viewerRpc.components(thread, options), asset: (thread, path, kind, revision, options) => viewerRpc.renderAsset(thread, path, kind, revision, options), plot: Plot2d });
-  Plot2d.mount([...document.querySelectorAll("canvas.plot2d")]);
+  // (a viewer pane drawn at a press is painted first: a 3D or board canvas
+  // starting up in the same frame held its first picture back ~500 ms)
+  // (its toolbar, though, is built in the press's frame: built with the
+  // canvas, it filled in two frames late and the stage shrank under it)
+  // and its model's last picture, when it has one (solid.js)
+  // (a board or schematic draws in the press's own frame, from the plot the
+  // page holds: only 3D's set-up waits, else the pane comes up a frame
+  // before its drawing)
+  if (pressFeedback.active?.kind === "viewer") { mountTools(true); Solid.picture(document.getElementById("solid")); Plot2d.mount([...document.querySelectorAll("canvas.plot2d")]); requestAnimationFrame(() => requestAnimationFrame(mountViewers)); }
+  else mountViewers();
+  if (!glWarmAsked && document.querySelector('[data-on-click="view-kind"][data-value="3d"]')) { glWarmAsked = true; Solid.warm(); }
   ViewerTools.chipInView();
   ViewerTools.focusToggle();
   Plot2d.inspectGone();
@@ -1260,6 +1515,18 @@ function render() {
   saveFocusedSoon();
 }
 
+// (drawnOnly: a new workbench on the page only; a kept one comes back with
+// its canvas, in mountViewers)
+function mountTools(drawnOnly = false) {
+  const root = document.getElementById("solid-workbench");
+  if (!drawnOnly || root && !ViewerTools.isKept(root)) ViewerTools.mount(root, Solid, { components: (thread, options) => viewerRpc.components(thread, options), asset: (thread, path, kind, revision, options) => viewerRpc.renderAsset(thread, path, kind, revision, options), plot: Plot2d });
+}
+function mountViewers() {
+  Solid.mount(document.getElementById("solid"));
+  mountTools();
+  Plot2d.mount([...document.querySelectorAll("canvas.plot2d")]);
+}
+
 // Live updates and page landings redraw only the regions their delta wrote
 // into (core/landing.bend, laws land_*). A sidebar activity change must not
 // overlay, project and reconcile the selected timeline. Whole replies and
@@ -1273,6 +1540,10 @@ const LAND_REGIONS = [
     node: v => nodeAttr(v, "id") === "timeline", el: () => document.getElementById("timeline") },
   { name: "topbar", json: n => n?.tag === "header" && jsonClass(n, "topbar"),
     node: v => v.tag === "header" && (" " + (nodeAttr(v, "class") || "") + " ").includes(" topbar "), el: () => document.querySelector("header.topbar") },
+  // a keystroke's echo (the draft, its send button, the composer's popup)
+  // redraws the composer alone, not the page
+  { name: "composer", json: n => n?.tag === "div" && jsonClass(n, "composer"),
+    node: v => v.tag === "div" && (" " + (nodeAttr(v, "class") || "") + " ").includes(" composer "), el: () => document.querySelector(".thread-view .composer") },
 ];
 const landPaths = new Map();
 // a region's path in a reply's body: the last one first (regions seldom move)
@@ -1296,10 +1567,13 @@ function historyRegion(detail, projection) {
   const landing = detail.page && ["older", "newer"].includes(projection);
   const update = !detail.page && projection === "update" && !detail.historyReset && !detail.position;
   if (!(landing || update) || !Array.isArray(detail.changed) || detail.changed.some(p => !p.length) || searchJump || jump || scroll) return "page";
+  // (the session's drafts are the page's own, each keystroke's echo: the
+  // composer draws them, a region of its own; every echo drew the page)
+  const changed = detail.changed.filter(p => !(p[0] === "session" && p[1] === "drafts"));
   const lines = [];
   for (const r of LAND_REGIONS) { const p = landPathIn(detail.shown, r);if (p) lines.push([r.name, "shown", ...p].join("\t")); }
   if (!lines.length) return "page";
-  const region = History.landing(lines.join("\n"), detail.changed.map(p => p.map(String).join("\t")).join("\n"));
+  const region = History.landing(lines.join("\n"), changed.map(p => p.map(String).join("\t")).join("\n"));
   if (RR) RR.n("land.region." + (region.trim() || "none"));
   return region;
 }
@@ -1344,6 +1618,9 @@ function overlayRows(timeline, session) {
 function renderRegions() {
   const names = landQueued || new Set();landQueued = null;
   if (queued || !frontendNode) return;
+  pressFeedback.seen(frontendNode, targetKey(presentationTarget(currentSession())));foldFeedback.seen(frontendNode);
+  // (a region drawn at a press lives in the page's picture: the page is drawn)
+  if (pressFeedback.showing || foldFeedback.showing) { later();return; }
   const parts = [];
   for (const r of LAND_REGIONS) if (names.has(r.name)) {
     const el = r.el(), hub = nodeIn(frontendNode, r.node);
@@ -1364,6 +1641,7 @@ function renderRegions() {
     if (RR) { RR.t("reg." + r.name + ".overlay", a1 - a0);RR.t("reg." + r.name + ".project", a2 - a1);RR.t("reg." + r.name + ".patch", pnow() - a2); }
   }
   if (names.has("sidebar")) bubMoveSync();
+  if (names.has("composer")) { attachmentPreviews();composerGeometry(); }
   if (names.has("timeline")) {
     const tl = document.getElementById("timeline"), list = timelineList(tl);
     if (activeTimeline && activeTimeline !== list) activeTimeline.destroy();
@@ -1381,11 +1659,20 @@ function renderRegions() {
   if (RR) { RR.n("render.regions");RR.t("render.regions", pnow() - t0); }
 }
 
+let queuedFrame = 0, rendering = false;
 function later() {
   if (!queued) {
     queued = true;
-    requestAnimationFrame(render);
+    queuedFrame = requestAnimationFrame(render);
   }
+}
+// A press's picture drawn in its own handler, not at the next frame: what
+// it shows is ready (the press layer's, a retained picture), and waiting
+// for the frame lost one (M: DOM at ~27 ms, pixels ~30, for a press at 0).
+function renderNow() {
+  if (!queued || rendering) return;
+  cancelAnimationFrame(queuedFrame);
+  render();
 }
 
 // A keystroke in the composer changes only the composer and the asks (an
@@ -1548,6 +1835,9 @@ function notify(c) {
 const fabLooked = new Map();
 function fabLook(target) {
   if (target?.kind !== "thread" || !target.id || !thin?.ready) return;
+  // (a hub that asks for a shown thread's card itself says so in its
+  // greeting: the look would only cost it another render and a round trip)
+  if (thin.client?.links?.get(location.origin)?.greeting?.fabSelf === true) return;
   const now = Date.now(), last = fabLooked.get(target.id) || 0;
   if (now - last < 20000) return;
   fabLooked.set(target.id, now);
@@ -1667,6 +1957,7 @@ function voiceMicHeard(envelope) {
 }
 
 function dispatch(action, value, timer) {
+  headPreview = null;
   if (action === "devices-open" || action === "settings-page" && value === "devices") { void pairingUI.devices();return true; }
   if (action === "voice" && !timer) value = voiceMicPress(value);
   if (action === "fork") reviewPosition.fork(value || currentSession().sel);
@@ -1739,7 +2030,15 @@ function dispatch(action, value, timer) {
       const menu = layer ? modelFeedback.choice(action, value, layer.style.display !== "none") : undefined;
       const subs = subsFeedback.choice(action, value);
       if (subs) subsNow();
-      const settled = menu || subs ? accepted => { menu?.(accepted);subs?.(accepted); } : undefined;
+      // what the press opened the last time, drawn at once (press-feedback.js;
+      // Commands: its field takes the keys in this frame)
+      // (Settings put away: the thread under it, from its retained picture)
+      const back = action === "flag" && value === "settings" && document.querySelector("main.settings-view") ? transitionViews.destination(transitionScope(), presentationTarget(currentSession())) : null;
+      const press = pressFeedback.choice(action, value, targetKey(presentationTarget(currentSession())), back ? pictureNode(back.shown) : null);
+      if (pressFeedback.active?.kind === "palette" && pressFeedback.active.node) focus = "workspace-query";
+      // (a run of tool calls opened or shut at the click: fold-feedback.js)
+      const fold = subs ? undefined : foldFeedback.choice(action, value);
+      const settled = menu || subs || press || fold ? accepted => { menu?.(accepted);subs?.(accepted);press?.(accepted);fold?.(accepted); } : undefined;
       const thread = currentSession().sel;
       const attachments = ["detach", "send", "send-alt"].includes(action) ? draftAttachmentPaths(currentSession(), thread) : [];
       return thin.request(action, value, accepted => {
@@ -1785,7 +2084,7 @@ function dispatch(action, value, timer) {
   }
   if (action === "select") try { localStorage.setItem("backplane-selected", value); } catch {}
   mailCheckpoint();
-  if (action === "lang" || action === "lang-os") document.documentElement.lang = App.lang(ui);
+  if (action === "lang" || action === "lang-os") pageLang(App.lang(ui));
   if (action === "subs-shut" || action === "subs-open") {
     try {
       const sep = value.indexOf("\t");
@@ -2110,6 +2409,54 @@ document.addEventListener("drop", (e) => {
   void uploadFiles(el.getAttribute("data-drop"), files);
 });
 
+// A project's head drags (to reorder projects), so its name (the project's
+// home) and its badge (the colour and icon picker) act at the click. What
+// they open is drawn at the mouse press all the same, as a preview with
+// nothing sent: the home's retained picture (with the sidebar on screen),
+// the picker as the hub drew it for the same press. The release sends the
+// action (the hub's answer then draws the same in place); a drag starting
+// puts the page back as it was, and nothing is sent.
+const HEAD_PRESS = 'aside.sidebar .project-head [data-on-click="proj-home"], aside.sidebar .project-head [data-on-click="look"]';
+function headUndo() {
+  if (!headPress) return;
+  const p = headPress;headPress = null;
+  if (p.look) pressFeedback.drop();
+  if (headPreview || p.look) { headPreview = null;later();renderNow(); }
+}
+document.addEventListener("pointerdown", e => {
+  if (!e.isTrusted || e.button !== 0 || e.pointerType !== "mouse" || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+  const el = e.target.closest?.(HEAD_PRESS), value = el?.getAttribute("data-value");
+  if (!el || !value || !frontendNode || !remoteReady) return;
+  if (el.getAttribute("data-on-click") === "proj-home") {
+    // (the picture the click's selection draws: its scope names the home as selected)
+    const shown = transitionViews.get({ ...transitionScope({ kind: "project", id: value }), selected: "project-home-" + value, settings: false, route: null });
+    if (!shown || shownFor === "project:" + value) return;
+    // (drawn as the click will draw it: with the sidebar on screen)
+    const before = transitionFor;transitionFor = "project:" + value;
+    try { headPreview = { node: withLiveSidebar(pictureNode(shown)) }; } finally { transitionFor = before; }
+    headPress = { action: "proj-home", value };
+  } else {
+    headPress = { action: "look", value, look: true };
+    pressFeedback.choice("look", value, targetKey(presentationTarget(currentSession())));
+    if (!pressFeedback.showing) { headPress = null;return; }
+  }
+  later();renderNow();
+}, true);
+// A release with no drag is the click: its action goes then (what the press
+// drew may lie under the pointer, the picker's shade: the browser's own
+// click lands there, and is swallowed); dispatch takes over from the preview.
+document.addEventListener("dragstart", headUndo, true);
+document.addEventListener("pointercancel", headUndo, true);
+document.addEventListener("pointerup", e => {
+  const p = headPress;
+  if (!p || e.button !== 0) return;
+  headPress = null;headClick = { at: e.timeStamp, x: e.clientX, y: e.clientY };
+  dispatch(p.action, p.value);later();renderNow();
+}, true);
+document.addEventListener("click", e => {
+  const c = headClick;headClick = null;
+  if (c && e.timeStamp - c.at < 1000 && Math.abs(e.clientX - c.x) < 8 && Math.abs(e.clientY - c.y) < 8) { e.preventDefault();e.stopImmediatePropagation(); }
+}, true);
 // Row drags: a [data-drag] element dropped on a [data-drag-to] one with the
 // same data-drag-act sends that action "dragged|target" (app.bend decides
 // what moves where)
@@ -2217,9 +2564,90 @@ document.addEventListener("input", (e) => {
   dispatch(el.getAttribute("data-text"), forKey(el) + v);
 });
 
+// Commands narrowed at each key to the rows on screen that hold what is
+// typed, until the hub's list for that query lands (its ranking and its
+// rows from beyond the 24 shown are the hub's): the hub took 75 ms + a
+// render + the round trip before anything changed.
+function narrowPalette(text) {
+  const q = text.trim().toLocaleLowerCase(), rows = [...document.querySelectorAll("#workspace-commands .workspace-command")];
+  const hides = rows.map(row => !!q && !row.textContent.toLocaleLowerCase().includes(q));
+  // (none of them holds it: the list stays as it is for the hub's, never empty)
+  if (hides.every(Boolean)) return;
+  rows.forEach((row, i) => { if (hides[i] !== row.hasAttribute("data-narrowed")) row.toggleAttribute("data-narrowed", hides[i]); });
+}
+function paletteCaughtUp() {
+  const field = document.getElementById("workspace-query");
+  if (!field?.__v || !document.querySelector("#workspace-commands [data-narrowed]")) return;
+  if ((nodeAttr(field.__v, "value") ?? "") !== field.value) return;
+  for (const row of document.querySelectorAll("#workspace-commands [data-narrowed]")) row.removeAttribute("data-narrowed");
+}
+// A thread or bot in the sidebar is picked at the mouse press, not at its
+// release: a person holds a click 60-120 ms, and the switch (its picture
+// drawn from the client's cache) is under way meanwhile. So are the viewer
+// rail's tabs, the sidebar's shelves and the composer's pickers (as a
+// native select or a browser's tab does). Its click then does nothing more. Touch keeps the tap (a press
+// may start a scroll); project heads, which drag, keep the click.
+const PRESS_PICKS = ['aside.sidebar [data-on-click="select"]', 'aside.sidebar [data-on-click="bot"]',
+  '.workspace-bar button[data-on-click="view-kind"]', '.workspace-bar button[data-on-click="fm"]', '.workspace-bar button[data-on-click="diff"]',
+  '.workspace-bar button[data-on-click="mech"]', '.workspace-bar button[data-on-click="rv-page"]',
+  'button.model-chip[data-on-click="flag"]', 'button.tok-chip[data-on-click="flag"]', 'button.account-chip[data-on-click="acct-open"]',
+  'button.gear[data-on-click="flag"]', 'button[data-on-click="ws-palette-open"]', 'button.find-open[data-on-click="thin-search-open"]',
+  // (the Files tab's folders, its path and Up: a folder seen before is drawn at the press)
+  'aside#viewer .fm-list button[data-on-click="fm-cd"]', 'aside#viewer .fm-bar button[data-on-click="fm-cd"]', 'aside#viewer .fm-bar button[data-on-click="fm-up"]',
+  // (a run of tool calls' head, the sidebar's shelves and Settings'
+  // categories, as disclosures do)
+  '#timeline button.fold[data-on-click="fold"]', 'aside.sidebar button.shelf[data-on-click="toggle-settled"]', 'aside.sidebar button.shelf[data-on-click="side-settled"]',
+  'aside.sidebar button.shelf[data-on-click="side-older"]', 'aside.sidebar button.shelf[data-on-click="thread-history"]', '#settings-content [data-on-click="settings-page"]', '.settings-path [data-on-click="settings-page"]', '.settings-side [data-on-click="settings-page"]', '.topbar .crumbs [data-on-click="settings-page"]'].join(", ");
+let pressedPick = null, pressedMenu = null, pickedTimer = 0;
+// A thread row pressed with no retained picture of it draws nothing new
+// until the hub's view: the row at least is marked the chosen one at once
+// (style.css), until that view (or 5 s) puts the hub's own mark back.
+function markPicked(el) {
+  if (el.getAttribute("data-on-click") !== "select" || !el.classList.contains("thread")) return;
+  if (transitionViews.destination(transitionScope(), { kind: "thread", id: el.getAttribute("data-value") })) return;
+  pickRow(el);
+}
+function pickRow(el) {
+  if (el.hasAttribute("data-picked") && pickedTimer) return;
+  unmarkPicked();
+  el.setAttribute("data-picked", "");htmlData("picking", "1");
+  pickedTimer = setTimeout(unmarkPicked, 5000);
+}
+function unmarkPicked() {
+  if (!pickedTimer) return;
+  clearTimeout(pickedTimer);pickedTimer = 0;
+  for (const row of document.querySelectorAll("[data-picked]")) row.removeAttribute("data-picked");
+  htmlData("picking", "");
+}
+document.addEventListener("pointerdown", e => {
+  if (!e.isTrusted || e.button !== 0 || e.pointerType !== "mouse" || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+  // a menu (.local-menu: thread ▾, Views, the viewer's pickers) opens or
+  // shuts at the press too; its click's own toggle is then held back
+  const summary = e.target.closest?.(".local-menu > summary");
+  if (summary) { const menu = summary.parentElement;menu.open = !menu.open;pressedMenu = { menu, at: e.timeStamp };return; }
+  const el = e.target.closest?.(PRESS_PICKS);
+  if (!el || el.disabled || el.closest('[draggable="true"]') || el.closest("aside.sidebar") && !el.getAttribute("data-value") && !el.classList.contains("shelf")) return;
+  pressedPick = { action: el.getAttribute("data-on-click"), value: el.getAttribute("data-value"), at: e.timeStamp, x: e.clientX, y: e.clientY };
+  // (Search's field takes the keyboard now: the press's own focus would take it back)
+  if (pressedPick.action === "thin-search-open") e.preventDefault();
+  markPicked(el);
+  dispatch(phoneClickAction(document, el, el.getAttribute("data-on-click")), valueOf(el));
+  renderNow();
+}, true);
+document.addEventListener("click", e => {
+  const p = pressedMenu;pressedMenu = null;
+  if (p && e.target.closest?.(".local-menu > summary")?.parentElement === p.menu && e.timeStamp - p.at < 2000) e.preventDefault();
+}, true);
 for (const ev of EVENTS) {
   document.addEventListener(ev, (e) => {
     const el = e.target.closest?.(`[data-on-${ev}]`);
+    if (ev === "click" && pressedPick) {
+      const p = pressedPick;pressedPick = null;
+      // (the same row, drawn again or not since the press; or whatever is
+      // there now: the hub's view may have landed before the click did, and
+      // a tab that opened the viewer is by then the one that shuts it)
+      if (e.timeStamp - p.at < 2000 && (el && el.getAttribute("data-on-click") === p.action && el.getAttribute("data-value") === p.value || e.detail > 0 && Math.abs(e.clientX - p.x) < 8 && Math.abs(e.clientY - p.y) < 8)) return;
+    }
     if (!el) return;
     const action = el.getAttribute(`data-on-${ev}`);
     if (ev === "click" && action === "copy") {
@@ -2240,7 +2668,12 @@ for (const ev of EVENTS) {
       document.documentElement.style.setProperty("--mx", Math.min(e.clientX, innerWidth - 216) + "px");
       document.documentElement.style.setProperty("--my", e.clientY + "px");
     }
+    if (ev === "input" && el.id === "workspace-query") narrowPalette(el.value);
     dispatch(ev === "click" ? phoneClickAction(document, el, action) : action, ev === "input" ? inputValue(el) : valueOf(el));
+    // (a row's menu, at the right press, in this frame; so is what a tap
+    // on what a mouse acts on at the press picks (the phone's list rows too),
+    // and a send's bubble)
+    if (ev === "contextmenu" || ev === "click" && (e.pointerType === "touch" && (el.matches(PRESS_PICKS) || action === "select" || action === "bot") || action === "send")) renderNow();
     // A mouse send or stop leaves the next keystroke in the message box.
     if (ev === "click" && el.closest(".composer") && ["send", "send-alt", "interrupt"].includes(action)) composerKeeper.activate(e);
   });
@@ -3055,11 +3488,14 @@ function showViewStatus(message) {
     const text = document.createElement("span");text.id = "view-connection-text";box.append(text);
     document.body.append(box);
   }
-  box.hidden = !message;
-  box.style.display = message ? "flex" : "none";
-  document.getElementById("view-connection-text").textContent = message;
+  // (each written only when it changes: most calls clear a bar already clear)
+  if (box.hidden !== !message) box.hidden = !message;
+  const display = message ? "flex" : "none", text = document.getElementById("view-connection-text");
+  if (box.style.display !== display) box.style.display = display;
+  if (text.textContent !== message) text.textContent = message;
   // The page shrinks above the bar instead of sliding under it.
-  document.documentElement.style.setProperty("--status-h", message ? box.offsetHeight + "px" : "0px");
+  const room = message ? box.offsetHeight + "px" : "0px";
+  if (document.documentElement.style.getPropertyValue("--status-h") !== room) document.documentElement.style.setProperty("--status-h", room);
 }
 
 
@@ -3397,11 +3833,16 @@ function showThinSearch(search, thread = "") {
       draw(search, !!(asked?.cursor && asked.text === search.query && f.shown === search.query));
     },
   };
+  // The first key of a burst asks at once (two letters or more); the keys
+  // after it wait for a 120 ms pause (ask keeps one search on its way and
+  // the newest behind it). Every query waited 180 ms first.
   query.addEventListener("input", () => {
     showTitles();
-    clearTimeout(f.timer);
+    const burst = !!f.timer;
+    clearTimeout(f.timer);f.timer = 0;
     if (!query.value.trim()) { ask("", "");return; }
-    f.timer = setTimeout(() => ask(query.value, ""), 180);
+    if (!burst && !f.asked && query.value.trim().length >= 2) { ask(query.value, "");f.timer = setTimeout(() => { f.timer = 0; }, 120);return; }
+    f.timer = setTimeout(() => { f.timer = 0;ask(query.value, ""); }, 120);
   });
   query.addEventListener("keydown", e => {
     if (e.isComposing) return;
@@ -3566,7 +4007,7 @@ async function startThin(again = false, reason = "initial") {
           historyNode = saved.node;historyDirection = saved.direction;resumedConversation = saved.conversation;
           for (const side of ["older", "newer"]) for (const id of saved.gone[side]) historyGone[side].add(id);
         }
-        modelFeedback.clear();subsFeedback.clear();
+        modelFeedback.clear();subsFeedback.clear();pressFeedback.drop();foldFeedback.drop();
         thinMailDraft.clear();thinContinuations.clear();bodyWindows.disconnect();
         if (target.kind === "thread") { ui = App.presentation_select(ui, target.id);void restoreFocused(); }
         else { focusedRequestedKey = null;focusedView.invalidate(); }
@@ -3605,7 +4046,7 @@ async function startThin(again = false, reason = "initial") {
           // Only live response choices cross this boundary. State and applied
           // cursor stay in the fresh unsynced recipient, never in a picture.
           ui = App.unsync(App.presentation_handoff(ui, presentationJson(keepDesk(session))));
-          document.documentElement.lang = App.lang(ui);
+          pageLang(App.lang(ui));
           keepViewer();
           // A hub action can open a thread too (Ctrl+N, Fork, the palette).
           // Keep the accepted selection as well as explicit sidebar clicks.
@@ -3639,7 +4080,14 @@ async function startThin(again = false, reason = "initial") {
       // (a touch screen's keys wait a little longer for the hub's echo, so
       // its page is not patched under every key while the person types)
       draftRefresh: refresh => { clearTimeout(thinDraftTimer);thinDraftTimer = setTimeout(() => { if (current()) refresh(); }, COARSE_POINTER ? 200 : 75); },
-      fieldRefresh: refresh => { clearTimeout(thinFieldTimer);thinFieldTimer = setTimeout(() => { if (current()) refresh(); }, 75); },
+      // (the palette's results: the first key of a burst asks at once, the
+      // rest of it 75 ms after its last key, as Search's)
+      fieldRefresh: (refresh, name) => {
+        clearTimeout(thinFieldTimer);thinFieldTimer = setTimeout(() => { if (current()) refresh(); }, 75);
+        const now = performance.now();
+        if (name === "wspalette" && now - paletteAsked >= 75 && current()) refresh();
+        if (name === "wspalette") paletteAsked = now;
+      },
       fieldsChanged: (name, text) => { if (name === "mrreply") thinMailDraft.edit(text);later(); },
       operationScope: (action, value) => action === "mail-send" ? thinMailDraft.scope(true) : action === "bfield" && value.startsWith("mrreply\u001f") ? thinMailDraft.scope() : undefined,
       blocked: () => showViewStatus("Wait for the current conversation to connect."),
@@ -3689,12 +4137,20 @@ async function startThin(again = false, reason = "initial") {
         const accepted = field === undefined ? undefined : thinMailDraft.matches(detail.mailDraftContext, detail.epoch) ? thin.fieldValue("mrreply", field) : field;
         thinMailDraft.bind(detail.mailDraftContext, detail.epoch, accepted);
         thinContinuations.bind(location.origin, detail);
-        bodyWindows.bind(location.origin, detail, detail.accountBinding || "", node, held);
+        bodyWindows.bind(location.origin, detail, detail.accountBinding || "", node, held, targetKey(detail.target));
         if (detail.position) transitionPosition = detail.position;
         else if (!remoteReady && !detail.historyReset) transitionPosition = transitionViews.position(transitionScope(detail.target)) || {atEnd:true};
+        // (a pressed row's own mark goes once a view of another target lands)
+        if (typeof unmarkPicked === "function" && targetKey(detail.target) !== shownFor) unmarkPicked();
+        liveNode = node;
         focusedView.remote(detail.epoch);remoteEpoch = detail.epoch;frontendNode = node;transitionNode = null;transitionFor = "";heldAt = 0;
         shownFor = targetKey(detail.target);shownTarget = detail.target;transitionViews.put(transitionScope(detail.target), detail.shown);
         void transitionViews.warm(transitionScope(detail.target)).then(warmDestinations);
+        // (its shut runs of tool calls read ahead: a first open draws at the click)
+        if (detail.target?.kind === "thread") previewViews.enqueueFolds(detail.target, foldFeedback.unseen(node));
+        // (and its viewers, each as the hub draws it open: a first open of
+        // each draws at the click too; not on a phone, where data costs)
+        if (detail.target?.kind === "thread" && !PHONE) previewViews.enqueueViewers(detail.target, VIEWER_OPENS);
         trace("thin-view", { entries: detail.window?.ids?.length || 0 });
         const region = historyRegion(detail, projection);
         if (region === "page") later();else laterRegions(region.split(" ").filter(Boolean));
@@ -3708,7 +4164,7 @@ async function startThin(again = false, reason = "initial") {
         if (becameReady) deskCheck();
         if (remoteReady && (attachmentController !== thin || attachmentView !== thin?.client.links.get(thin.hub)?.viewId || attachmentSelection !== currentSession().sel)) restoreDraftAttachments(currentSession());
         if (!remoteReady) {
-          modelFeedback.clear();subsFeedback.clear();
+          modelFeedback.clear();subsFeedback.clear();pressFeedback.drop();foldFeedback.drop();
           // Keep the last validated tree as a read-only picture. The local Ui
           // has no canonical bot/catalog state in view mode. Falling back to
           // it here removed the sidebar and cats after a refusal or disconnect.

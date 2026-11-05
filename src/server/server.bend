@@ -30,6 +30,7 @@ import ./review-history.bend as REVHIST
 import ./message-context.bend as MSGHIST
 import ../core/fm.bend as FMP
 import ./restart-hold.bend as RHOLD
+import ./viewer-kept.bend as VKEPT
 import ../core/watchdog.bend as WD
 import ../core/tickplan.bend as TICK
 import ../core/stream-step.bend as SSTEP
@@ -622,8 +623,9 @@ def Thin.store.open(+cfg: Cfg, +st: M.State, +h: String) -> IO(Cfg):
     r : THIN.Index <- TSTO.Ts.recent(h, st)
     return Cfg.thin.stored(cfg, h, r)
 
-def Cfg.thin.committed(+cfg: Cfg, +changes: List<&2, M.Change>, +st: M.State) -> Cfg:
-  Cfg.with_thin_cache(cfg, ThinCache{Cfg.thin.lazy.committed(String.is_empty(Cfg.thin.store(cfg)), changes, Cfg.thin.lazy(cfg)), Cfg.thin.first_epoch(changes, Cfg.thin.epoch(cfg)), Cfg.thin.next(Cfg.thin.revision(cfg)), Cfg.thin.streams(cfg), TMAIL.Lazy.committed(changes, st, Cfg.thin.mail.lazy(cfg)), Cfg.thin.waiting(cfg), TPACE.Notes.changes(Cfg.thin.notes(cfg), changes), Cfg.thin.store(cfg), SGR.SignalRevision.advance(changes, Cfg.thin.signal_seq(cfg), M.State.seq(st))})
+# (old: the state before the changes, st: after)
+def Cfg.thin.committed(+cfg: Cfg, +changes: List<&2, M.Change>, +old: M.State, +st: M.State) -> Cfg:
+  Cfg.with_thin_cache(cfg, ThinCache{Cfg.thin.lazy.committed(String.is_empty(Cfg.thin.store(cfg)), changes, Cfg.thin.lazy(cfg)), Cfg.thin.first_epoch(changes, Cfg.thin.epoch(cfg)), Cfg.thin.next(Cfg.thin.revision(cfg)), Cfg.thin.streams(cfg), TMAIL.Lazy.committed(changes, st, Cfg.thin.mail.lazy(cfg)), Cfg.thin.waiting(cfg), TPACE.Notes.changes.at(Cfg.thin.notes(cfg), old, st, changes), Cfg.thin.store(cfg), SGR.SignalRevision.advance(changes, Cfg.thin.signal_seq(cfg), M.State.seq(st))})
 
 # ---- mail perf: local wire-log length ----
 # Valid unknown JSON remains a wire line without changing State.seq.
@@ -1013,13 +1015,23 @@ def Client.thin.message(c: Client, +o: J.Json) -> Client:
 def Client.thin.reply(c: Client, +text: String) -> Client:
   Client.thin.message(c, Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}))
 
-def Wire.text.thin.send(send: Bool, +c: Client, text: String) -> IO(Maybe<&2, Client>):
+# A thin view's message was parsed here already (o): a socket client's writer
+# gets that tree (WJson, the same charge, encoded in the host as the very
+# bytes W.Ws.cbor(text) makes), not the text to parse and encode again (a 3D
+# viewer's ~160 KB component pages: ~30 ms each, 2026-11-05). The hub's own
+# window and links still get the text.
+def Wire.text.thin.k(native: Bool, c: Client, +o: J.Json, +text: String) -> IO(Maybe<&2, Client>):
+  match native:
+    case True{}: Wire.text.k(True{}, c, text)
+    case False{}: Wire.offer(c, WIRE.WJson{o, WIRE.Wire.text.charge(text)}, WIRE.Wire.text.charge(text))
+
+def Wire.text.thin.send(send: Bool, +c: Client, +o: J.Json, text: String) -> IO(Maybe<&2, Client>):
   match send:
     case False{}: IO.pure(Maybe<&2, Client>, Some{c})
-    case True{}: Wire.text.k(Wire.native(c), c, text)
+    case True{}: Wire.text.thin.k(Wire.native(c), c, o, text)
 
 def Wire.text.thin(+c: Client, +o: J.Json, text: String) -> IO(Maybe<&2, Client>):
-  Wire.text.thin.send(TA.Message.on_wire(o), Client.thin.message(c, o), text)
+  Wire.text.thin.send(TA.Message.on_wire(o), Client.thin.message(c, o), o, text)
 
 def Wire.text.route(thin: Bool, +c: Client, +text: String) -> IO(Maybe<&2, Client>):
   match thin:
@@ -1517,9 +1529,21 @@ def Conn.out.items(s: Socket, +hd: String, +pl: String, +sp: String, +xs: List<&
     H.Sock.send_items(s, hd, pl, sp, xs, tl, Bool.pick(U32, ends, 1, 0), U32.from_nat(OB.Join.most()), U32.from_nat(OB.Join.bytes()), Conn.keys(), Conn.words(), Conn.deadline()),
     r => Conn.sent.k(r, out, s2 => k(s2, 0n)))
 
+def Conn.sent.n(r: Socket & Result<&1, &1, U32 & String, U32>, +charge: Nat, +out: Chan(WIRE.Wire), k: Socket -> Nat -> IO(Unit)) -> IO(Unit):
+  (s, res) = r
+  match res:
+    case Done{n}:
+      Conn.written(s, U32.to_nat(n), charge, k)
+    case Fail{_}:
+      do IO<Unit>:
+        Chan.close(WIRE.Wire, out)
+        Conn.drain(Fuel.forever(), out)
+        Socket.close(s)
+
+# a message's tree as its CBOR frame, made and sent in the host
+# (H.Sock.send_tree: the bytes of W.Ws.encode(2, CB.Cbor.encode(j)))
 def Conn.json(+j: J.Json, +charge: Nat, s: Socket, +out: Chan(WIRE.Wire), k: Socket -> Nat -> IO(Unit)) -> IO(Unit):
-  +bs = W.Ws.encode(2, CB.Cbor.encode(j))
-  Conn.out(s, bs, out, s2 => Conn.written(s2, List.length(&2, U32, bs), charge, k))
+  IO.bind(Socket & Result<&1, &1, U32 & String, U32>, Unit, H.Sock.send_tree(s, j, Conn.keys(), Conn.words(), Conn.deadline()), r => Conn.sent.n(r, charge, out, k))
 
 def Conn.write(m: Maybe<&1, WIRE.Wire>, s: Socket, +out: Chan(WIRE.Wire), k: Socket -> Nat -> IO(Unit)) -> IO(Unit):
   match m:
@@ -2065,11 +2089,11 @@ def Bot.dir.changed.all(cs: List<&2, M.Change>, +inbox: Chan(Msg)) -> IO(Unit):
         Bot.dir.changed(c, inbox)
         Bot.dir.changed.all(t, inbox)
 
-def Hub.commit.k(fd: Folded, +cs: List<&2, M.Change>, f: File, cl: List<&2, Client>, as: List<&2, Agent>, inbox: Chan(Msg), +cfg: Cfg, note: String) -> Hub & Wrote:
+def Hub.commit.k(fd: Folded, +cs: List<&2, M.Change>, +old: M.State, f: File, cl: List<&2, Client>, as: List<&2, Agent>, inbox: Chan(Msg), +cfg: Cfg, note: String) -> Hub & Wrote:
   match fd:
     case Folded{+st, ls, +fr}:
       (Hub{st, f, WRET.WireRetention.keep(Bool.not(String.is_empty(Cfg.thin.store(cfg))), ls), cl, as, inbox,
-        LogCount.committed(Cfg.thin.committed(cfg, cs, st), fr), note}, Wrote{fr, True{}, "", False{}})
+        LogCount.committed(Cfg.thin.committed(cfg, cs, old, st), fr), note}, Wrote{fr, True{}, "", False{}})
 
 def Hub.retained(h: Hub) -> Hub:
   match h:
@@ -2737,8 +2761,21 @@ def GitJob.text.k(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String,
     GitJob.reply(inbox, client, id, Bool.not(GT.Git.failed(r)), J.Json.obj([J.KV{"text", J.Str{r}}, J.KV{"thread", J.Str{thread}}]))
     GitJob.note(inbox, thread, Bool.pick(String, GT.Git.failed(r), "error", "info"), what ++ Bool.pick(String, String.is_empty(r), "", ": " ++ String.trim(r)))
 
-def GitJob.diff.k(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +r: String) -> IO(Unit):
-  GitJob.reply(inbox, client, id, Bool.not(GT.Git.failed(r)), J.Json.obj([J.KV{"diff", J.Str{r}}, J.KV{"thread", J.Str{thread}}]))
+# A thread's whole diff (Diff's own ask: from 0 to -1, client.bend's Dv.ask)
+# is kept hub-wide too, "diff.kept:<t>" (viewer-kept.bend), before the view
+# is answered: client.bend's Dv.kept draws it at the press while git runs
+# again; one git cannot make is not kept
+def GitJob.diff.kept(whole: Bool, +thread: String, +cwd: String, +r: String) -> IO(String):
+  match whole:
+    case True{}:
+      Bool.pick(IO(String), GT.Git.failed(r), VKEPT.ViewerKept.drop(thread, "diff.kept:" ++ thread),
+        VKEPT.ViewerKept.put(thread, cwd, "diff.kept:" ++ thread, J.Json.show(J.Json.obj([J.KV{"diff", J.Str{r}}]))))
+    case False{}: IO.pure(String, "")
+
+def GitJob.diff.k(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +whole: Bool, +r: String) -> IO(Unit):
+  do IO<Unit>:
+    +k : String <- GitJob.diff.kept(whole, thread, cwd, r)
+    GitJob.reply(inbox, client, id, Bool.not(GT.Git.failed(r)), J.Json.obj([J.KV{"diff", J.Str{r}}, J.KV{"thread", J.Str{thread}}]))
 
 # Before a thread's first turn there is no checkpoint yet (the turn takes
 # checkpoint 0 as it starts): nothing has changed since the thread began,
@@ -2932,7 +2969,7 @@ def GitJob.go(i: Nat, +tx: TextScope, +inbox: Chan(Msg), +client: U32, +id: Stri
     case 2n:
       IO.bind(Nat, Unit, GitJob.count(cwd, thread), n => IO.bind(String, Unit, GT.Git.checkpoint.capture(cwd, thread, n), r => IO.pure(Unit, Unit{})))
     case 3n:
-      IO.bind(String, Unit, GitJob.diff(cwd, thread, a, b), r => GitJob.diff.k(inbox, client, id, thread, r))
+      IO.bind(String, Unit, GitJob.diff(cwd, thread, a, b), r => GitJob.diff.k(inbox, client, id, thread, cwd, Bool.and(String.eq(a, "0"), String.eq(b, "-1")), r))
     case 4n:
       IO.bind(String, Unit, GT.Git.checkpoint.revert(cwd, thread, Maybe.default(&2, Nat, Nat.read(a), 0n)), r => GitJob.text.k(inbox, client, id, thread, "reverted to turn " ++ a, r))
     case 5n:
@@ -2951,7 +2988,9 @@ def GitJob.go(i: Nat, +tx: TextScope, +inbox: Chan(Msg), +client: U32, +id: Stri
 def GitJob.none(diff: Bool, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String) -> IO(Unit):
   match diff:
     case True{}:
-      GitJob.reply(inbox, client, id, True{}, J.Json.obj([J.KV{"diff", J.Str{""}}, J.KV{"thread", J.Str{thread}}, J.KV{"nogit", J.Str{cwd}}]))
+      do IO<Unit>:
+        +k : String <- VKEPT.ViewerKept.put(thread, cwd, "diff.kept:" ++ thread, J.Json.show(J.Json.obj([J.KV{"diff", J.Str{""}}, J.KV{"nogit", J.Str{cwd}}])))
+        GitJob.reply(inbox, client, id, True{}, J.Json.obj([J.KV{"diff", J.Str{""}}, J.KV{"thread", J.Str{thread}}, J.KV{"nogit", J.Str{cwd}}]))
     case False{}:
       GitJob.reply(inbox, client, id, False{}, J.Json.obj([J.KV{"text", J.Str{"not a git repository: " ++ cwd}}]))
 
@@ -3262,15 +3301,31 @@ def RefsJob.files(f: K.Files) -> List<&2, J.KV>:
 
 # what the thread's files may be compared with (Git.refs), and its
 # canonical board and schematic
-def RefsJob.reply(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +ls: List<&2, String>, f: K.Files) -> IO(Unit):
-  GitJob.reply(inbox, client, id, True{}, J.Json.obj(List.append(&2, J.KV, [J.KV{"thread", J.Str{thread}}, J.KV{"git", J.Str{HI.Hist.at(ls, 0n)}},
-    J.KV{"top", J.Str{HI.Hist.at(ls, 1n)}}, J.KV{"refs", J.Str{String.join(List.drop(&2, String, ls, 2n), "\n")}}], RefsJob.files(f))))
+# (kept hub-wide too, "refs.kept:<t>", before the view is answered:
+# viewer-kept.bend; client.bend's Rc.own draws the thread's own board's and
+# schematic's history from it at the press)
+def RefsJob.kept(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +r: J.Json) -> IO(Unit):
+  do IO<Unit>:
+    +k : String <- VKEPT.ViewerKept.put(thread, cwd, "refs.kept:" ++ thread, J.Json.show(r))
+    GitJob.reply(inbox, client, id, True{}, r)
+
+def RefsJob.result(+thread: String, +ls: List<&2, String>, f: K.Files) -> J.Json:
+  J.Json.obj(List.append(&2, J.KV, [J.KV{"thread", J.Str{thread}}, J.KV{"git", J.Str{HI.Hist.at(ls, 0n)}},
+    J.KV{"top", J.Str{HI.Hist.at(ls, 1n)}}, J.KV{"refs", J.Str{String.join(List.drop(&2, String, ls, 2n), "\n")}}], RefsJob.files(f)))
 
 def RefsJob.run(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String) -> IO(Unit):
   do IO<Unit>:
     out : String <- GT.Git.refs(cwd, thread)
     f : K.Files <- K.Files.read(cwd)
-    RefsJob.reply(inbox, client, id, thread, String.split(out, '\n'), f)
+    RefsJob.kept(inbox, client, id, thread, cwd, RefsJob.result(thread, String.split(out, '\n'), f))
+
+# A shown thread's answer read ahead (Kept.ahead): kept only
+def RefsJob.ahead(+thread: String, +cwd: String) -> IO(Unit):
+  do IO<Unit>:
+    out : String <- GT.Git.refs(cwd, thread)
+    f : K.Files <- K.Files.read(cwd)
+    +k : String <- VKEPT.ViewerKept.put(thread, cwd, "refs.kept:" ++ thread, J.Json.show(RefsJob.result(thread, String.split(out, '\n'), f)))
+    return Unit{}
 
 def FileJob.done(r: P.Ran, +inbox: Chan(Msg), +client: U32, +id: String) -> IO(Unit):
   match r:
@@ -3287,6 +3342,13 @@ def FileJob.run(+inbox: Chan(Msg), +client: U32, +id: String, +path: String, +ho
 # The viewer's Files tab (core/fm.bend): one folder of a thread's project,
 # its folders then its files ("d|f <tab> size <tab> name"), hidden ones and
 # symlinked folders left out, 2000 of each at most
+# (each listing is also kept hub-wide for its thread and folder, before the
+# view is answered: viewer-kept.bend; a folder that cannot be listed is not)
+def DirJob.kept(entries: List<&2, String>, +thread: String, +cwd: String, +rel: String) -> IO(String):
+  match entries:
+    case out <> _: VKEPT.ViewerKept.put(thread, cwd, "fm.kept:" ++ thread ++ "\n" ++ rel, out)
+    case Nil{}: VKEPT.ViewerKept.drop(thread, "fm.kept:" ++ thread ++ "\n" ++ rel)
+
 def DirJob.sent(entries: List<&2, String>, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +rel: String) -> IO(Unit):
   match entries:
     case out <> _:
@@ -3294,11 +3356,56 @@ def DirJob.sent(entries: List<&2, String>, +inbox: Chan(Msg), +client: U32, +id:
     case Nil{}:
       GitJob.reply(inbox, client, id, False{}, J.Json.obj([J.KV{"text", J.Str{"that folder is unavailable or outside this project"}}, J.KV{"fmEntries", J.Str{""}}, J.KV{"fmError", J.Str{"that folder is unavailable or outside this project"}}, J.KV{"fmDir", J.Str{rel}}, J.KV{"thread", J.Str{thread}}]))
 
+# one folder, listed with the download descriptor checks (zip.bend's Zip.list)
+def DirJob.list(+cwd: String, +rel: String) -> IO(List<&2, String>):
+  do IO<List<&2, String>>:
+    home : String <- Env.get("BACKPLANE_HOME", "")
+    ZIP.Zip.list(cwd, rel, home)
+
+# A folder listed ahead: kept only, no view is answered (DirJob.ahead)
+def DirJob.ahead.at(+thread: String, +cwd: String, +rel: String) -> IO(Unit):
+  do IO<Unit>:
+    +entries : List<&2, String> <- DirJob.list(cwd, rel)
+    +k : String <- DirJob.kept(entries, thread, cwd, rel)
+    return Unit{}
+
+def DirJob.ahead.one(go: Bool, +thread: String, +cwd: String, +rel: String) -> IO(Unit):
+  match go:
+    case True{}: IO.spawn(Unit, DirJob.ahead.at(thread, cwd, rel))
+    case False{}: IO.pure(Unit, Unit{})
+
+def DirJob.claim(dir: Bool, +thread: String, +cwd: String, +rel: String) -> IO(String):
+  match dir:
+    case True{}: VKEPT.ViewerKept.claim(thread, cwd, "fm.kept:" ++ thread ++ "\n" ++ rel, "30000")
+    case False{}: IO.pure(String, "")
+
+def DirJob.ahead.each(es: List<&2, FMP.FEnt>, +thread: String, +cwd: String, +rel: String) -> IO(Unit):
+  match es:
+    case Nil{}: IO.pure(Unit, Unit{})
+    case FMP.FEnt{dir, _, +name} <> tail:
+      do IO<Unit>:
+        +go : String <- DirJob.claim(dir, thread, cwd, FMP.Fm.join(rel, name))
+        +sent : Unit <- DirJob.ahead.one(String.eq(go, "1"), thread, cwd, FMP.Fm.join(rel, name))
+        DirJob.ahead.each(tail, thread, cwd, rel)
+
+# A folder the person lists has its first folders (8 at most) listed
+# ahead, each once in 30 s, so going into one draws its rows with the press's
+# answer
+def DirJob.children(entries: List<&2, String>, +thread: String, +cwd: String, +rel: String) -> IO(Unit):
+  match entries:
+    case +out <> _: DirJob.ahead.each(List.take(&2, FMP.FEnt, FMP.Fm.parse(out), 8n), thread, cwd, rel)
+    case Nil{}: IO.pure(Unit, Unit{})
+
 def DirJob.run(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +rel: String) -> IO(Unit):
   do IO<Unit>:
-    home : String <- Env.get("BACKPLANE_HOME", "")
-    entries : List<&2, String> <- ZIP.Zip.list(cwd, rel, home)
+    +entries : List<&2, String> <- DirJob.list(cwd, rel)
+    +k : String <- DirJob.kept(entries, thread, cwd, rel)
     DirJob.sent(entries, inbox, client, id, thread, cwd, rel)
+    DirJob.children(entries, thread, cwd, rel)
+
+# A shown thread's Files root, listed ahead (Kept.ahead)
+def DirJob.ahead(+thread: String, +cwd: String) -> IO(Unit):
+  DirJob.ahead.at(thread, cwd, "")
 
 # a PDF's page drawn to a PNG for the window (which cannot draw a PDF), by
 # poppler's pdftoppm when this machine has it, kept in <home>/pdf per file
@@ -7639,7 +7746,7 @@ def Hub.commit.stored.result(ok: Bool, +post: M.State, +result: String, +disk: L
         Bot.dir.changed.all(cs, inbox)
         +buffers : List<&2, LV.Buf> = STR.Steer.keep(cs, Live.of(cfg), LV.Live.ends(cs, Live.of(cfg)))
         Live.checkpoint.sync(cs, post, cfg, buffers)
-        return Hub.commit.k(Hub.fold.state(Hub.fold(cs, disk, Folded{st, ls, Nil{}}), post), cs, f, cl, as, inbox, Cfg.telemetry.privacy_committed(cs, Live.committed(cfg, cs, buffers)), note)
+        return Hub.commit.k(Hub.fold.state(Hub.fold(cs, disk, Folded{st, ls, Nil{}}), post), cs, st, f, cl, as, inbox, Cfg.telemetry.privacy_committed(cs, Live.committed(cfg, cs, buffers)), note)
     case False{}:
       do IO<Hub & Wrote>:
         cut : Bool <- Hub.cut(len, cfg)
@@ -7726,7 +7833,7 @@ def Hub.fold.st(fd: Folded) -> M.State:
 def Hub.commit.held(fd: Folded, +cs: List<&2, M.Change>, f: File, cl: List<&2, Client>, as: List<&2, Agent>, inbox: Chan(Msg), +cfg: Cfg, note: String, +q: DQ.Dq, +st: M.State, +disk: List<&2, String>) -> Hub & Wrote:
   match fd:
     case Folded{+post, ls, +fr}:
-      (Hub{post, f, ls, cl, as, inbox, LogCount.committed(Cfg.thin.committed(Cfg.with_dq(cfg, DQ.Dq.push(q, st, M.State.seq(st), disk, cs, fr, Nil{})), cs, post), fr), note}, Wrote{fr, True{}, "", True{}})
+      (Hub{post, f, ls, cl, as, inbox, LogCount.committed(Cfg.thin.committed(Cfg.with_dq(cfg, DQ.Dq.push(q, st, M.State.seq(st), disk, cs, fr, Nil{})), cs, st, post), fr), note}, Wrote{fr, True{}, "", True{}})
 
 def Hub.commit.queue(+cs: List<&2, M.Change>, +st: M.State, f: File, ls: List<&2, String>, cl: List<&2, Client>,
     as: List<&2, Agent>, +inbox: Chan(Msg), +cfg: Cfg, note: String, +q: DQ.Dq) -> IO(Hub & Wrote):
@@ -13587,6 +13694,63 @@ def Hub.thin.page.memo(on: Bool, +st: M.State, +context: ThinContext, +base: Str
     case True{}: TA.Memo.page.if(TA.Memo.page.on(st), TA.Actor.memos(ThinContext.actors(context)), base, ms, now)
     case False{}: None{}
 
+# A thin view's shown thread's viewer reads kept hub-wide (viewer-kept.bend),
+# given to its actor with the hub's info (client.bend's Fm.kept: a Files
+# folder seen before is drawn at the press), and that thread's Files root
+# listed ahead when none was listed in the last 10 min (DirJob.ahead: one
+# listing on its way at a time per thread; the press lists it again anyway),
+# and what it may compare its
+# board with (history.refs, RefsJob.ahead) when not read in the last 5 min.
+# Not for a sidebar destination's picture fetched ahead (host.js's
+# previewViews: view.open with cid "preview", 24 of them, again as their
+# rows move): with 20 bots streaming those reads cost the hub ~3 s a minute.
+# (Not its diff: git.diff stages the work tree through the thread's own
+# index, and one ahead could take that index's lock from the Diff pressed)
+# (what is kept comes as keys and values in turn, no JSON to parse: a
+# thread's listings and diff run to tens of KB, read on its first render)
+def Kept.pairs(xs: List<&2, String>, +key: String, value: Bool, +fs: J.Json) -> J.Json:
+  match xs value:
+    case Nil{} _: fs
+    case +h <> rest False{}: Kept.pairs(rest, h, True{}, fs)
+    case +h <> rest True{}: J.Field{key, J.Str{h}, Kept.pairs(rest, "", False{}, fs)}
+
+def Kept.with(+info: J.Json, xs: List<&2, String>) -> J.Json:
+  match info:
+    case J.Obj{+fs}: J.Obj{Kept.pairs(xs, "", False{}, fs)}
+    case _: info
+
+# (a moment after the render, so the press's own answer goes out first)
+def Kept.ahead(go: Bool, +thread: String, +cwd: String) -> IO(Unit):
+  match go:
+    case True{}: IO.spawn(Unit, IO.bind(Unit, Unit, IO.sleep(300), _ => DirJob.ahead(thread, cwd)))
+    case False{}: IO.pure(Unit, Unit{})
+
+def Kept.ahead.refs(go: Bool, +thread: String, +cwd: String) -> IO(Unit):
+  match go:
+    case True{}: IO.spawn(Unit, IO.bind(Unit, Unit, IO.sleep(400), _ => RefsJob.ahead(thread, cwd)))
+    case False{}: IO.pure(Unit, Unit{})
+
+def Kept.info.k(on: Bool, +thread: String, +cwd: String, +since: String) -> IO(List<&2, String>):
+  match on:
+    case False{}: IO.pure(List<&2, String>, Nil{})
+    case True{}:
+      do IO<List<&2, String>>:
+        +go : String <- VKEPT.ViewerKept.claim(thread, cwd, "fm.kept:" ++ thread ++ "\n", "600000")
+        +sent : Unit <- Kept.ahead(String.eq(go, "1"), thread, cwd)
+        +refs : String <- VKEPT.ViewerKept.claim(thread, cwd, "refs.kept:" ++ thread, "300000")
+        +asked : Unit <- Kept.ahead.refs(String.eq(refs, "1"), thread, cwd)
+        VKEPT.ViewerKept.info(thread, cwd, since)
+
+# (what the view was last given: its actor keeps it, "kept.seq:<t>")
+def Kept.since(xs: List<&2, TA.Actor>, +thread: String) -> String:
+  match xs:
+    case Nil{}: ""
+    case a <> _: UC.Ui.info(TA.Actor.ui(a), "kept.seq:" ++ thread)
+
+def Kept.info(+st: M.State, +thread: String, +since: String) -> IO(List<&2, String>):
+  +cwd = B.Hub.cwd(st, B.Hub.thread(st, thread))
+  Kept.info.k(Bool.and(Bool.not(String.is_empty(thread)), Bool.and(Bool.not(FR.Fr.is(thread)), Bool.not(String.is_empty(cwd)))), thread, cwd, since)
+
 def Hub.thin.render.page.shown(+v: SEC.Vault, +pg: TSTO.Page, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +p: J.Json, +key: String, +ms: Nat, +shown: M.State) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
@@ -13595,9 +13759,10 @@ def Hub.thin.render.page.shown(+v: SEC.Vault, +pg: TSTO.Page, h: Hub, +client: U
       +epoch = Hub.thin.view_epoch(st, cfg, thread)
       +rows = TBODY.Body.window.bounded(TSTO.Page.ids(pg), TSTO.Page.index(pg), p)
       +stream = TLIVE.Stream.get(Cfg.thin.streams(cfg), TV.Target.thread(st, J.Json.get_obj(p, "target")))
-      +actor = TA.Actor.mail_cache(TA.Actor.refresh(ThinContext.actors(context), web, shown, Hub.thin.pair(cfg, SEC.Sec.json(v, Hub.info(cfg))),
-        J.Json.obj([J.KV{"t", J.Str{"live"}}, J.KV{"items", J.Json.arr(Nil{})}]), now, p, ThinContext.view(context)), ThinContext.actors(context), Cfg.thin.mail(cfg))
       do IO<Hub>:
+        +kept : List<&2, String> <- Kept.info(st, Bool.pick(String, String.eq(J.Json.get_str(p, "cid", ""), "preview"), "", thread), Kept.since(ThinContext.actors(context), thread))
+        +actor : TA.Actor = TA.Actor.mail_cache(TA.Actor.refresh(ThinContext.actors(context), web, shown, Kept.with(Hub.thin.pair(cfg, SEC.Sec.json(v, Hub.info(cfg))), kept),
+          J.Json.obj([J.KV{"t", J.Str{"live"}}, J.KV{"items", J.Json.arr(Nil{})}]), now, p, ThinContext.view(context)), ThinContext.actors(context), Cfg.thin.mail(cfg))
         +secret : String <- Hub.thin.native_key(NATIVE_SIDE.Ns.offered(web, p), actor, p, epoch, ThinContext.view(context))
         +prepared : TA.Actor = TA.Actor.native.prepare(actor, web, p, epoch, ThinContext.view(context), Cfg.thin.signal_seq(cfg), secret)
         Hub.thin.native_fit.choose(NATIVE_SIDE.Ns.offered(web, p), prepared, web, Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context, p,

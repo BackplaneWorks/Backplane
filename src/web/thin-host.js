@@ -362,7 +362,7 @@ export class ThinHost {
         tail.settled?.(false);Object.assign(tail, { value, revision, settled, scope });
       } else this.actions.push({ action, value, field: name, input: clone(this.session), revision, settled, scope });
       this.api.fieldsChanged?.(name, value.slice(split + 1));
-      if (this.api.fieldRefresh) this.api.fieldRefresh(() => this.pump(true));
+      if (this.api.fieldRefresh) this.api.fieldRefresh(() => this.pump(true), name);
       else this.pump(true);
       return true;
     }

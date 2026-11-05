@@ -959,7 +959,7 @@ def Files.rows(rs: List<&2, U.FmRow>, +u: U.Ui) -> List<&2, J.Json>:
 def Files.json(+lc: I.Loc, on: Bool, +u: U.Ui) -> J.Json:
   match on:
     case True{}:
-      J.Json.obj([J.KV{"trail", J.Json.arr(Files.trail(U.Fm.trail.loc(lc, u)))}, J.KV{"rows", J.Json.arr(Files.rows(U.Fm.rows(u), u))}, J.KV{"ready", J.Json.bool(U.Fm.ready(u))},
+      J.Json.obj([J.KV{"trail", J.Json.arr(Files.trail(U.Fm.trail.loc(lc, u)))}, J.KV{"rows", J.Json.arr(Files.rows(U.Fm.rows(u), u))}, J.KV{"ready", J.Json.bool(U.Fm.shown(u))},
         J.KV{"zip", J.Str{U.Fm.down(u, True{}, U.Fm.dir(u))}}, J.KV{"zipName", J.Str{U.Fm.down.name(u, True{}, U.Fm.dir(u))}}])
     case False{}:
       J.Null{}

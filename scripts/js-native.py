@@ -83,6 +83,26 @@ No memo or protocol/client changes; scripts/js-json-show.js holds the helper.
 Server-only Json.bytes.esc/str count code-point UTF-8 widths without slicing
 a fresh string tail per character. Exact JSON escapes, raw lexemes and Nat
 overflow remain the pure counter's; no whole-tree or cap predicate changes.
+Server-only identity memos (js-memo.js) for pure defs asked again with the
+same values: MEMO2 (Subs.aggs, the top bar's and the subagents panel's: the
+very same first argument, weakly, and an equal String) and MEMO1
+(SubHistory.own: a read's rows as a state, by the rows' identity, which
+db.js's read cache keeps for an unchanged read). Pure and immutable, so
+nothing is stale.
+
+Server-only Tree.children(s, id) (core/subthreads.bend) works out every
+thread's display parent once per state (a WeakMap: a state never changes)
+with the very display_parent and Thread.id its walk calls, in Tree.all's
+order, and sorts each id's list with the pure sort; the pure def scanned all
+threads for each id the sidebar asked (2026-11-05: 88 → 24 ms a click
+session, 318 of 318 real answers identical). Exact entry, walk and
+Tree.roots.add bodies fence it.
+
+Server-only Json.bytes(j) counts the same total over the tree and keeps each
+object's and array's size by identity (a WeakMap: immutable values, so a
+size never changes), so the several measurements of one reply on its way out
+count it once (3-7 ms a view on a real home, 2026-11-05). Malformed chains
+count as Json.bytes.go counts them; an unknown constructor goes to go.
 
 Server-only ContentEq.same compares actual JSON constructors and fields, with
 an identity fast path for immutable values. It does not compare dependency
@@ -282,6 +302,31 @@ def byte_loop(kind):
                       ("chr" if kind == "esc" else "raw") + r"\$)" + re.escape(after))
 
 BYTE_ESC, BYTE_STR = byte_loop("esc"), byte_loop("str")
+# pure core defs of an object and a String kept by identity (js-memo.js);
+# each must be a def of exactly these two parameters, found once
+MEMO2 = (("Subs.aggs", r"\$\$\$\$047core\$047subs\$058Subs\$aggs\$", "_st_0", "_th_0"),)
+# pure defs of one object kept by identity; each a def of exactly this parameter, found once
+MEMO1 = (("SubHistory.own", r"\$subagent\$045history\$058SubHistory\$own\$", "_rows_0"),
+         # the page's sidebar region, found by a walk of the whole page tree,
+         # asked ~3 times a render about the very same rendered page
+         ("Slot.sidebar", r"\$\$\$\$047web\$047sidebar\$045slot\$058Slot\$sidebar\$", "_o_0"),
+         ("Slot.count", r"\$\$\$\$047web\$047sidebar\$045slot\$058Slot\$count\$", "_o_0"))
+# pure defs of two objects (by identity) and two Strings/numbers; found once
+MEMO4 = (("Subs.rows", r"\$\$\$\$047core\$047subs\$058Subs\$rows\$", "_st_0", "_info_0", "_th_0", "_now_0"),)
+def memo4_rx(entry, a, b, c, d):
+    return re.compile(r"function (" + entry + r")\(" + a + "," + b + "," + c + "," + d + r"\)\{")
+def memo1_rx(entry, a):
+    return re.compile(r"function (" + entry + r")\(" + a + r"\)\{")
+def memo2_rx(entry, a, b):
+    return re.compile(r"function (" + entry + r")\(" + a + "," + b + r"\)\{")
+# Tree.children(s, id) = sort(Tree.children.go(Tree.all(s), s, id)), and that
+# walk exactly an in-order filter on display_parent through Tree.roots.add
+TREE_KIDS = re.compile(r"function (" + I + r"\$058Tree\$children\$)\(_s_0,_id_0\)\{return (" + I + r")\((" + I + r"\$058Tree\$children\$go\$)\((" + I + r"\$058Tree\$all\$)\(_s_0\),_s_0,_id_0\)\)\}")
+TREE_GO = (r"function {go}\(_ts_0,_s_0,_id_0\)\{{if\(_ts_0\.\$===\"Nil\"\)return\{{\$:\"Nil\"\}};else\{{let\{{head:_t_0,tail:_rest_0\}}=_ts_0;"
+           r"return ({add})\(\$Bool\$not\$\(\$String\$eq\$\(({parent})\(_s_0,({tid})\(_t_0\)\),_id_0\)\),_t_0,{go}\(_rest_0,_s_0,_id_0\)\)\}}\}}")
+TREE_ADD = r"function {add}\(_skip_0,_t_0,_rest_0\)\{{if\(_skip_0\)return _rest_0;else return\{{\$:\"Con\",head:_t_0,tail:_rest_0\}}\}}"
+# Json.bytes(j), exactly the pure entry over its own Json.bytes.go
+BYTES = re.compile(r"function (" + I + r"\$058Json\$bytes\$)\(_j_0\)\{return (" + I + r"\$058Json\$bytes\$go\$)\(_j_0,!0,0\)\}")
 # Lexer-only surrogate repair reviewed; byte counters/callees remain unchanged.
 JSON_BYTES_SOURCE_SHA256 = "f500b30686fc4eea0f6d7ac00bda03e524676f59dd00c6244696e678536560af"
 
@@ -430,7 +475,43 @@ if server:
                     sys.exit("js-native: encoding/folding callee changed")
 found["Json.show"] = sum(len(SHOW.findall(s)) for s in srcs.values()) if server else 0
 found["ContentEq.same"] = sum(len(CONTENT_EQ.findall(s)) for s in srcs.values()) if server else 0
-for name, rx in (("Json.bytes.esc", BYTE_ESC), ("Json.bytes.str", BYTE_STR)):
+def tree_kids(s, m):
+    """the walk's display_parent and Thread.id, when Tree.children.go and Tree.roots.add are exactly the pure ones"""
+    go, sub = m.group(3), m.group(1).rsplit("$058Tree$children$", 1)[0]
+    if go != m.group(1) + "go$" or m.group(4) != sub + "$058Tree$all$":
+        return None
+    w = re.search(TREE_GO.format(go=re.escape(go), add=re.escape(sub + "$058Tree$roots$add$"),
+                                 parent=re.escape(sub + "$058Tree$display_parent$"), tid=I + r"\$058Thread\$id\$"), s)
+    if w is None or len(re.findall(r"function " + re.escape(go) + r"\(", s)) != 1:
+        return None
+    add = w.group(1)
+    if not re.search(TREE_ADD.format(add=re.escape(add)), s) or len(re.findall(r"function " + re.escape(add) + r"\(", s)) != 1:
+        return None
+    for f in (w.group(2), w.group(3)):
+        if len(re.findall(r"function " + re.escape(f) + r"\(", s)) != 1:
+            return None
+    return w.group(2), w.group(3)
+for name, entry, a in MEMO1:
+    found[name] = sum(len(memo1_rx(entry, a).findall(s)) for s in srcs.values()) if server else 0
+    if server and found[name] != 1:
+        sys.exit(f"js-native: {name} found {found[name]} times as a def of ({a}), not once")
+for name, entry, a, b in MEMO2:
+    found[name] = sum(len(memo2_rx(entry, a, b).findall(s)) for s in srcs.values()) if server else 0
+    if server and found[name] != 1:
+        sys.exit(f"js-native: {name} found {found[name]} times as a def of ({a}, {b}), not once")
+for name, entry, a, b, c, d in MEMO4:
+    found[name] = sum(len(memo4_rx(entry, a, b, c, d).findall(s)) for s in srcs.values()) if server else 0
+    if server and found[name] != 1:
+        sys.exit(f"js-native: {name} found {found[name]} times as a def of ({a}, {b}, {c}, {d}), not once")
+found["Tree.children"] = sum(len(TREE_KIDS.findall(s)) for s in srcs.values()) if server else 0
+if server and found["Tree.children"] != 1:
+    sys.exit(f"js-native: Tree.children found {found['Tree.children']} times, not once")
+if server:
+    for s in srcs.values():
+        for m in TREE_KIDS.finditer(s):
+            if tree_kids(s, m) is None:
+                sys.exit("js-native: Tree.children needs its exact Tree.children.go and Tree.roots.add once")
+for name, rx in (("Json.bytes.esc", BYTE_ESC), ("Json.bytes.str", BYTE_STR), ("Json.bytes", BYTES)):
     found[name] = sum(len(rx.findall(s)) for s in srcs.values()) if server else 0
     if server and found[name] != 1:
         sys.exit(f"js-native: {name} found {found[name]} times, not once")
@@ -443,6 +524,9 @@ if server:
                 expected = match.group(1).replace("$058Json$bytes$" + kind + "$", "$058Json$bytes$" + callee + "$")
                 if match.group(2) != expected or len(re.findall(r"function " + re.escape(expected) + r"\(", s)) != 1:
                     sys.exit(f"js-native: Json.bytes.{kind} needs its exact character callee once")
+        for match in BYTES.finditer(s):
+            if match.group(2) != match.group(1) + "go$" or len(re.findall(r"function " + re.escape(match.group(2)) + r"\(", s)) != 1:
+                sys.exit("js-native: Json.bytes needs its exact Json.bytes.go once")
         if len(re.findall(r"function nat_chk\(", s)) != 1:
             sys.exit("js-native: Json.bytes needs its exact Nat guard once")
 if server and found["ContentEq.same"] != 1:
@@ -524,6 +608,30 @@ for f, s in srcs.items():
     if server:
         s = BYTE_ESC.sub(lambda m: 'function %s($0,$1){return __bpJsonBytesEsc($0,$1,nat_chk)}' % m.group(1), s)
         s = BYTE_STR.sub(lambda m: 'function %s($0,$1){return __bpJsonBytesStr($0,$1,nat_chk)}' % m.group(1), s)
+        s = BYTES.sub(lambda m: 'function %s(_j_0){return __bpJsonBytes(_j_0,%s,nat_chk)}' % (m.group(1), m.group(2)), s)
+        memos = 0
+        for name, entry, a in MEMO1:
+            rx = memo1_rx(entry, a)
+            memos += len(rx.findall(s))
+            s = rx.sub(lambda m: 'function %s(%s){return __bpMemo1(%s,%s,%s$raw)}function %s$raw(%s){' %
+                       (m.group(1), a, json.dumps(name), a, m.group(1), m.group(1), a), s)
+        for name, entry, a, b in MEMO2:
+            rx = memo2_rx(entry, a, b)
+            memos += len(rx.findall(s))
+            s = rx.sub(lambda m: 'function %s(%s,%s){return __bpMemo2(%s,%s,%s,%s$raw)}function %s$raw(%s,%s){' %
+                       (m.group(1), a, b, json.dumps(name), a, b, m.group(1), m.group(1), a, b), s)
+        for name, entry, a, b, c, d in MEMO4:
+            rx = memo4_rx(entry, a, b, c, d)
+            memos += len(rx.findall(s))
+            s = rx.sub(lambda m: 'function %s(%s,%s,%s,%s){return __bpMemo4(%s,%s,%s,%s,%s,%s$raw)}function %s$raw(%s,%s,%s,%s){' %
+                       (m.group(1), a, b, c, d, json.dumps(name), a, b, c, d, m.group(1), m.group(1), a, b, c, d), s)
+        if memos:
+            s = Path(__file__).with_name("js-memo.js").read_text(encoding="utf-8") + "\n" + s
+        kids = [(m, tree_kids(s, m)) for m in TREE_KIDS.finditer(s)]
+        for m, (parent, tid) in kids:
+            s = s.replace(m.group(0), 'function %s(_s_0,_id_0){return __bpTreeChildren(_s_0,_id_0,%s,%s,%s,%s)}' % (m.group(1), m.group(4), parent, tid, m.group(2)))
+        if kids:
+            s = Path(__file__).with_name("js-tree-children.js").read_text(encoding="utf-8") + "\n" + s
         s = Path(__file__).with_name("js-json-bytes.js").read_text(encoding="utf-8") + "\n" + s
     if SEC_FINE.search(s):
         s = SEC_FINE.sub(lambda m: 'function %s(%s,%s){return __bpSecFine(%s,%s)}' % (m.group(1), m.group(2), m.group(3), m.group(2), m.group(3)), s)
@@ -549,6 +657,10 @@ for name, call in (("Map.bit", "{return __bpMapBit("), ("Map.diff", "{return __b
                    ("Utf8.decode", "){return __bpUtf8Decode("), ("Lines.feed", "){return __bpLinesFeed("),
                    ("Json.show", "){return __bpJsonShow("), ("ContentEq.same", "){return __bpContentEq("),
                    ("Json.bytes.esc", "){return __bpJsonBytesEsc("), ("Json.bytes.str", "){return __bpJsonBytesStr("),
+                   ("Json.bytes", "){return __bpJsonBytes(_j_0,"),
+                   ("Tree.children", "){return __bpTreeChildren(_s_0,_id_0,"),
+                   ("Subs.aggs", '){return __bpMemo2("Subs.aggs",'),
+                   ("SubHistory.own", '){return __bpMemo1("SubHistory.own",'),
                    ("Sec.fine", "){return __bpSecFine("), ("Refs.last.go", "){return __bpRefsLast(")):
     n = outs.count(call)
     if n != found[name]:

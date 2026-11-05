@@ -73,7 +73,10 @@ export class TimelineScroller {
     return this;
   }
 
-  update(rows, { follow } = {}) {
+  // defer: the host is patching the page around this list; the plan runs
+  // once at its refresh() after the whole patch (a plan here measured the
+  // half-patched page: a forced style and layout, and another for the rest)
+  update(rows, { follow, defer = false } = {}) {
     if (this._destroyed) return this;
     const given = Array.from(rows);
     this._floating(given.filter(this.callbacks.floating));
@@ -122,7 +125,18 @@ export class TimelineScroller {
     for (const item of this.lastPlan?.items || []) {
       if (item.keepHeight && !byKey.has(item.key)) delete this.sizes[item.key];
     }
-    if (changed || followChanged) this._request('update');
+    if (changed || followChanged) {
+      if (!defer) this._request('update');
+      else {
+        // (a switch may change the list's height: read again with the rows'
+        // sizes, in the same layout, not now before the plan: a forced layout
+        // of the patched page of its own)
+        this._viewStale = true;
+        if (!this._pending || !['restore', 'bottom', 'key'].includes(this._pending.mode)) this._pending = { mode: 'update' };
+        // (a host that never refreshes still gets its plan, before the frame)
+        if (!this._deferring) { this._deferring = true;queueMicrotask(() => { this._deferring = false;if (this._pending && !this._busy) this.refresh(); }); }
+      }
+    }
     return this;
   }
 
@@ -157,7 +171,10 @@ export class TimelineScroller {
   }
 
   // Host creation starts detached. Call after the root patch attaches it.
-  refresh() {
+  // next: the command the host has for this render (a restore, the end),
+  // planned in the same pass as the rows the patch handed over
+  refresh(next = null) {
+    if (next && !this._destroyed) this._pending = { ...next };
     if (this._destroyed || !this.el.isConnected) return this;
     if (!this._attached) {
       this._attached = true;
@@ -263,7 +280,13 @@ export class TimelineScroller {
         // track can be much shorter than the measured rows, especially during
         // streaming. Feeding that temporary browser clamp into readback used
         // to translate the entire track by hundreds of pixels.
-        if (this._readSizes()) {
+        const sized = this._readSizes();
+        if (this._viewStale) {
+          this._viewStale = false;
+          const view = this.el.clientHeight;
+          if (view !== plan.view) { this._view = view;this._pending = { mode: 'measure', top: plan.top };continue; }
+        }
+        if (sized) {
           this._pending = { mode: 'measure', top: plan.top };
           continue;
         }

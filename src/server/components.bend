@@ -106,20 +106,65 @@ def Components.sources.files(fs: K.Files, +cwd: String, path: String) -> IO(J.Js
 def Components.sources(+cwd: String, path: String) -> IO(J.Json):
   IO.bind(K.Files, J.Json, K.Files.read(cwd), fs => Components.sources.files(fs, cwd, path))
 
-# every page of a first read, so the hub answers the pages after it from the
-# cache (a page child parses both files again for one page)
-def Components.pages.put(fuel: Nat, go: Bool, +data: J.Json, +off: Nat, +cwd: String, +pcb: String, +sch: String) -> IO(Unit):
+# A first read's pages, in order: all are kept, so the hub answers the pages
+# after the first from the cache (a page child parses both files again for one)
+def Components.chain(fuel: Nat, go: Bool, +data: J.Json, +off: Nat, acc: List<&2, J.Json>) -> List<&2, J.Json>:
   match fuel go:
     case 1n+f True{}:
-      +pcbRev = J.Json.get_str(data, "sourceRevision", "")
-      +schRev = J.Json.get_str(data, "schematicRevision", "")
-      +page = C.Components.page(data, off, pcbRev, schRev)
+      +page = C.Components.page(data, off, J.Json.get_str(data, "sourceRevision", ""), J.Json.get_str(data, "schematicRevision", ""))
       +next = J.Json.get_nat(J.Json.get_obj(page, "page"), "next", 0n)
+      Components.chain(f, Bool.and(String.is_empty(J.Json.get_str(page, "error", "")), Nat.is_gt(next, off)), data, next, page <> acc)
+    case _ _: List.reverse(&2, J.Json, acc)
+
+def Components.offsets(ps: List<&2, J.Json>) -> List<&2, J.Json>:
+  match ps:
+    case Nil{}: Nil{}
+    case +p <> t: J.Json.nat(J.Json.get_nat(J.Json.get_obj(p, "page"), "offset", 0n)) <> Components.offsets(t)
+
+def Components.page.add(p: J.Json, offs: List<&2, J.Json>) -> J.Json:
+  match p:
+    case J.Obj{fs}: J.Obj{J.Field{"offsets", J.Json.arr(offs), fs}}
+    case _: p
+
+# The first page names every page's offset ("page.offsets", 0 first), so
+# the viewer can ask the rest at once (web/viewer-rpc.js) rather than one
+# round trip after another (6 of them for the real-data copy's board,
+# +RTT each). An old viewer reads the pages as before.
+def Components.first.offsets(+page: J.Json, offs: List<&2, J.Json>) -> J.Json:
+  match page:
+    case J.Obj{J.Field{k, cs, J.Field{pk, pg, rest}}}: J.Obj{J.Field{k, cs, J.Field{pk, Components.page.add(pg, offs), rest}}}
+    case _: page
+
+def Components.first.go(+ps: List<&2, J.Json>) -> List<&2, J.Json>:
+  match ps:
+    case Nil{}: Nil{}
+    case +p <> t: Components.first.offsets(p, Components.offsets(ps)) <> t
+
+def Components.put.all(ps: List<&2, J.Json>, +cwd: String, +pcb: String, +sch: String) -> IO(Unit):
+  match ps:
+    case Nil{}: IO.pure(Unit, Unit{})
+    case +p <> t:
       do IO<Unit>:
-        w : String <- ComponentsFx.put(cwd, pcb, sch, pcbRev, schRev, Nat.show(off), Components.response(page))
-        Components.pages.put(f, Bool.and(String.is_empty(J.Json.get_str(page, "error", "")), Nat.is_gt(next, off)), data, next, cwd, pcb, sch)
-    case _ _:
-      IO.pure(Unit, Unit{})
+        w : String <- ComponentsFx.put(cwd, pcb, sch, J.Json.get_str(p, "sourceRevision", ""), J.Json.get_str(p, "schematicRevision", ""), Nat.show(J.Json.get_nat(J.Json.get_obj(p, "page"), "offset", 0n)), Components.response(p))
+        Components.put.all(t, cwd, pcb, sch)
+
+def Components.first.print(ps: List<&2, J.Json>) -> IO(Unit):
+  match ps:
+    case Nil{}: IO.pure(Unit, Unit{})
+    case +p <> _: IO.print(Components.response(p))
+
+# a first read: its pages worked out once, the first (with every offset)
+# printed, all of them kept for the hub
+def Components.page.first(+data: J.Json, +cwd: String, +pcb: String, +sch: String) -> IO(Unit):
+  +ps = Components.first.go(Components.chain(4097n, True{}, data, 0n, Nil{}))
+  do IO<Unit>:
+    Components.first.print(ps)
+    Components.put.all(ps, cwd, pcb, sch)
+
+def Components.page.at(first: Bool, +data: J.Json, +cwd: String, +offset: Nat, +pcbRev: String, +schRev: String, +pcb: String, +sch: String) -> IO(Unit):
+  match first:
+    case True{}: Components.page.first(data, cwd, pcb, sch)
+    case False{}: IO.print(Components.response(C.Components.page(data, offset, pcbRev, schRev)))
 
 def Components.page.files(fs: K.Files, +cwd: String, +offset: Nat, +pcbRev: String, +schRev: String) -> IO(Unit):
   match fs:
@@ -128,8 +173,7 @@ def Components.page.files(fs: K.Files, +cwd: String, +offset: Nat, +pcbRev: Stri
         +a : ComponentRevision <- Components.version(pcb)
         +b : ComponentRevision <- Components.version(sch)
         +data : J.Json <- Components.load(Bool.and(Components.small(a), Components.small(b)), pcb, sch, a, b)
-        IO.print(Components.response(C.Components.page(data, offset, pcbRev, schRev)))
-        Components.pages.put(4097n, Bool.and(Nat.is_eq(offset, 0n), Bool.and(String.is_empty(pcbRev), String.is_empty(J.Json.get_str(data, "error", "")))), data, 0n, cwd, pcb, sch)
+        Components.page.at(Bool.and(Nat.is_eq(offset, 0n), Bool.and(String.is_empty(pcbRev), String.is_empty(J.Json.get_str(data, "error", "")))), data, cwd, offset, pcbRev, schRev, pcb, sch)
 
 # Subsequent pages send both stamps from the first page. The unchanged outer
 # response cap includes its envelope and trailing newline.

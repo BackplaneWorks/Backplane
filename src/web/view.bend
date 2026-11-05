@@ -3297,21 +3297,29 @@ def View.dfiles(fs: List<&2, DF.DFile>) -> List<&2, D.Node>:
 
 # a git action of the diff's head; with no changes there is nothing to
 # commit, push or put back, and it is shown disabled (no accent)
-def View.diff.btn(+none: Bool, +cls: String, +action: String, +value: String, +tip: String, +label: String) -> D.Node:
+def View.diff.btn.off(+none: Bool, +off: Bool, +cls: String, +action: String, +value: String, +tip: String, +label: String) -> D.Node:
   D.El{"button", "", List.append(&2, D.Attr, [D.At{"class", Bool.pick(String, none, "", cls)}, D.At{"title", tip}, D.At{"data-value", value}, D.On{"click", action}],
-    Bool.pick(List<&2, D.Attr>, none, [D.At{"disabled", "true"}], Nil{})), [D.Txt{label}]}
+    Bool.pick(List<&2, D.Attr>, Bool.or(none, off), [D.At{"disabled", "true"}], Nil{})), [D.Txt{label}]}
 
-# what this thread changed, with the git actions (as the native Lay.diff)
-def View.diff.loc(+lc: I.Loc, +text: String) -> List<&2, D.Node>:
+def View.diff.btn(+none: Bool, +cls: String, +action: String, +value: String, +tip: String, +label: String) -> D.Node:
+  View.diff.btn.off(none, False{}, cls, action, value, tip, label)
+
+# what this thread changed, with the git actions (as the native Lay.diff);
+# off: the diff kept from before, drawn while git runs again (View.diff.at),
+# its actions off until git's answer replaces it
+def View.diff.loc.off(+lc: I.Loc, +text: String, +off: Bool) -> List<&2, D.Node>:
   +fs = DF.Diff.parse(text)
   +none = List.is_empty(&2, DF.DFile, fs)
   [D.El{"div", "", [D.At{"class", "diff-head"}], [
       D.Dom.span("summary", Bool.pick(String, none, MSG.T.viewer.diff.empty(lc), DF.Diff.summary(fs))),
       D.El{"div", "", [D.At{"class", "diff-btns"}], [
-        View.diff.btn(none, "", "revert", "ask", MSG.T.diff.revert.tip(lc), MSG.T.palette.revert(lc)),
-        View.diff.btn(none, "", "git", "commit_push_pr", MSG.T.diff.pr.tip(lc), MSG.T.viewer.diff.pr(lc)),
-        View.diff.btn(none, "primary", "git", "commit_push", MSG.T.diff.commit.tip(lc), MSG.T.palette.commit(lc))]}]},
+        View.diff.btn.off(none, off, "", "revert", "ask", MSG.T.diff.revert.tip(lc), MSG.T.palette.revert(lc)),
+        View.diff.btn.off(none, off, "", "git", "commit_push_pr", MSG.T.diff.pr.tip(lc), MSG.T.viewer.diff.pr(lc)),
+        View.diff.btn.off(none, off, "primary", "git", "commit_push", MSG.T.diff.commit.tip(lc), MSG.T.palette.commit(lc))]}]},
     D.El{"div", "", [D.At{"class", "diff-body"}], View.dfiles.b(fs, lc, View.diff.lines(), View.diff.files())}]
+
+def View.diff.loc(+lc: I.Loc, +text: String) -> List<&2, D.Node>:
+  View.diff.loc.off(lc, text, False{})
 
 def View.diff(+text: String) -> List<&2, D.Node>:
   View.diff.loc(I.En{}, text)
@@ -3333,9 +3341,39 @@ def View.diff.at.k(git: Bool, +lc: I.Loc, +text: String, +none: String) -> List<
     case False{}:
       View.diff.nogit(lc, none)
 
-# (none: the folder the hub found no repository in, "diff.none:t")
-def View.diff.at(+lc: I.Loc, +text: String, +none: String) -> List<&2, D.Node>:
-  View.diff.at.k(String.is_empty(none), lc, text, none)
+# a Diff asked for and not answered yet (client.bend's Dv.open): the
+# pane's own head, its buttons off, "Loading…" where the summary goes
+def View.diff.wait(+lc: I.Loc) -> List<&2, D.Node>:
+  [D.El{"div", "", [D.At{"class", "diff-head"}], [
+      D.Dom.span("summary", MSG.T.viewer.loading(lc)),
+      D.El{"div", "", [D.At{"class", "diff-btns"}], [
+        View.diff.btn(True{}, "", "revert", "ask", MSG.T.diff.revert.tip(lc), MSG.T.palette.revert(lc)),
+        View.diff.btn(True{}, "", "git", "commit_push_pr", MSG.T.diff.pr.tip(lc), MSG.T.viewer.diff.pr(lc)),
+        View.diff.btn(True{}, "primary", "git", "commit_push", MSG.T.diff.commit.tip(lc), MSG.T.palette.commit(lc))]}]},
+    D.El{"div", "", [D.At{"class", "diff-body"}], Nil{}}]
+
+# a Diff asked for, drawn with the thread's diff kept from before (kept:
+# {diff, nogit} as this page or the hub had it last, client.bend's Dv.text,
+# "diff.kept:t") until git answers, else "Loading…"
+def View.diff.kept.k(git: Bool, +lc: I.Loc, +text: String, +none: String) -> List<&2, D.Node>:
+  match git:
+    case True{}: View.diff.loc.off(lc, text, True{})
+    case False{}: View.diff.nogit(lc, none)
+
+def View.diff.kept(known: Bool, +lc: I.Loc, +kept: J.Json) -> List<&2, D.Node>:
+  match known:
+    case True{}: View.diff.kept.k(String.is_empty(J.Json.get_str(kept, "nogit", "")), lc, J.Json.get_str(kept, "diff", ""), J.Json.get_str(kept, "nogit", ""))
+    case False{}: View.diff.wait(lc)
+
+def View.diff.at.w(wait: Bool, +lc: I.Loc, +text: String, +none: String, +kept: String) -> List<&2, D.Node>:
+  match wait:
+    case True{}: View.diff.kept(Bool.not(String.is_empty(kept)), lc, Maybe.default(&2, J.Json, J.Json.parse(kept), J.Null{}))
+    case False{}: View.diff.at.k(String.is_empty(none), lc, text, none)
+
+# (none: the folder the hub found no repository in, "diff.none:t"; wait:
+# the asked Diff not answered yet, "diff.wait:t"; kept: its diff from before)
+def View.diff.at(+lc: I.Loc, +text: String, +none: String, +wait: String, +kept: String) -> List<&2, D.Node>:
+  View.diff.at.w(Bool.not(String.is_empty(wait)), lc, text, none, kept)
 
 # The diff stays visible while the person decides what to discard.
 def View.revert.loc(on: Bool, +lc: I.Loc) -> List<&2, D.Node>:
@@ -5436,7 +5474,7 @@ def View.files(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
   [D.El{"div", "", [D.At{"class", "fm-bar"}], List.append(&2, D.Node, View.fm.trail.loc(lc, U.Fm.trail.loc(lc, u)),
      D.El{"span", "", [D.At{"class", "grow"}], Nil{}} <> List.append(&2, D.Node, View.fm.dl("btn fm-dl-bar", U.Fm.down(u, True{}, U.Fm.dir(u)), MSG.T.files.download.tip(lc), "folder-down", [D.Txt{MSG.T.files.download(lc)}]),
        [D.Dom.button("", "fm-up", "", MSG.T.files.up.tip(lc), MSG.T.queue.up(lc))]))},
-   D.El{"div", "files-list", [D.At{"class", "fm-list"}], View.fm.body.loc(lc, U.Fm.ready(u), u)}]
+   D.El{"div", "files-list", [D.At{"class", "fm-list"}], View.fm.body.loc(lc, U.Fm.shown(u), u)}]
 
 # an image or a PDF opened from the Files tab: its name, back to the folder
 def View.fm.head.loc(+lc: I.Loc, +u: U.Ui, more: List<&2, D.Node>) -> D.Node:
@@ -5537,7 +5575,7 @@ def View.review(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
 def View.aside.k(+lc: I.Loc, i: Nat, +u: U.Ui) -> List<&2, D.Node>:
   match i:
     case 0n:
-      List.append(&2, D.Node, View.revert.loc(U.Ui.reverting(u), lc), View.diff.at(lc, U.Ui.view_get(u, "diff"), U.Ui.view_get(u, "diff.none")))
+      List.append(&2, D.Node, View.revert.loc(U.Ui.reverting(u), lc), View.diff.at(lc, U.Ui.view_get(u, "diff"), U.Ui.view_get(u, "diff.none"), U.Ui.view_get(u, "diff.wait"), U.Ui.view_get(u, "diff.kept")))
     case 1n:
       View.browser.loc(lc, u)
     case 2n:
