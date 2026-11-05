@@ -54,7 +54,7 @@ impl Hub {
         let (ctx, crx) = tokio::sync::mpsc::unbounded_channel::<Commit>();
         let (tx, _) = broadcast::channel(64);
         let (ftx, _) = broadcast::channel(1024);
-        let origin = { let s = store.get(0).ok().map(|l| { use sha2::{Digest, Sha256}; hex::encode(&Sha256::digest(l.as_bytes())[..6]) }); s.unwrap_or_else(|| epoch.clone()) };
+        let origin = crate::wire::origin_of(store.get(0).ok().as_deref());
         let model = Model::build(&store)?;
         let hub = Arc::new(Hub { cfg, auth, epoch, presenter, store: store.clone(), commits: ctx, model: Mutex::new(model), gen: AtomicU64::new(1), changed: tx, frames: ftx, origin, native_key: { let mut b = [0u8; 16]; if let Ok(mut f) = std::fs::File::open("/dev/urandom") { let _ = std::io::Read::read_exact(&mut f, &mut b); } hex::encode(b) },
             rpc: Default::default(), http: Default::default(), views: Default::default(), live: Default::default(), window_bin: Default::default(), me: Default::default(), next_client: AtomicU64::new(1), outboxes: Default::default() });
