@@ -57,7 +57,7 @@ start)
   running $APP && { echo "GPUI is already open"; exit 0; }
   cp "$ROOT/build/gpui/linux/backplane-gpui" "$H/backplane-gpui"
   systemd-run --user --unit=$APP --collect -q $CAP --working-directory="$H" \
-    --setenv=DISPLAY="$DISPLAY_TO" --setenv=XAUTHORITY="${XAUTHORITY:-$HOME/.Xauthority}" --setenv=VK_ICD_FILENAMES="$ICD" \
+    --setenv=DISPLAY="$DISPLAY_TO" --setenv=XAUTHORITY="${XAUTHORITY:-/run/user/$(id -u)/gdm/Xauthority}" --setenv=VK_ICD_FILENAMES="$ICD" \
     "$H/backplane-gpui" --url "$URL" --token-file "$H/home/token"
   echo "GPUI window opened. Stop and clean up with: scripts/gpui/try.sh stop"
   ;;
