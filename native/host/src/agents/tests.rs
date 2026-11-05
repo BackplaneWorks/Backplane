@@ -495,6 +495,7 @@ fn norm_steps(s: &str, roots: &[&str]) -> String {
     let ag = Agents::start_host(hub.clone(), Cli::standin(&sd), host).await.unwrap(); let from = len(&hub).await;
     rpc(&hub, "turn.start", json!({"thread":T1,"text":"hello"})).await;
     until(&hub, from, 30, |ev| ev.iter().any(|e| turn_is(e, "completed")) && ev.iter().any(|e| e["tone"] == "step")).await;
+    let end = Instant::now() + Duration::from_secs(20); while ag.stats.jobs.load(Relaxed) > 0 && Instant::now() < end { tokio::time::sleep(Duration::from_millis(20)).await } // the first turn's end capture must be over before the file changes, or it records the change as its own
     std::fs::write(work.join("b.kicad_pcb"), "(kicad_pcb (version 20240108))\n(footprint \"R1\")\n").unwrap();
     rpc(&hub, "turn.start", json!({"thread":T1,"text":"again"})).await;
     let ev = until(&hub, from, 30, |ev| ev.iter().filter(|e| turn_is(e, "completed")).count() == 2 && ev.iter().filter(|e| e["tone"] == "step").count() == 2).await; tokio::time::sleep(Duration::from_millis(800)).await;

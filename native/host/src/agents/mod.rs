@@ -27,7 +27,7 @@ pub const BURST: usize = 4;           // Rec.burst: turns a restart carries on a
 pub const RECENT: usize = 256;        // message ids remembered per thread against a resend
 
 #[derive(Default)]
-pub struct Stats { pub turns: AtomicU64, pub procs_spawned: AtomicU64, pub procs_exited: AtomicU64, pub spawn_failures: AtomicU64, pub lines: AtomicU64, pub deltas: AtomicU64,
+pub struct Stats { pub jobs: AtomicU64, pub turns: AtomicU64, pub procs_spawned: AtomicU64, pub procs_exited: AtomicU64, pub spawn_failures: AtomicU64, pub lines: AtomicU64, pub deltas: AtomicU64,
     pub events: AtomicU64, pub commit_errors: AtomicU64, pub interrupts: AtomicU64, pub refused_full: AtomicU64, pub bad_lines: AtomicU64, pub max_batch_lines: AtomicU64 }
 
 pub enum Cmd {
@@ -46,6 +46,10 @@ pub enum Cmd {
 /// The hub's one agent manager, for hub-side callers that were not handed it (commands, bots).
 static HANDLE: std::sync::OnceLock<Arc<Agents>> = std::sync::OnceLock::new();
 pub use textgen::{summarizer, Summarizer};
+/// A design-history job in flight (checkpoint, step): counted so a test, or a shutdown, can wait for what a turn's end left running.
+struct JobGuard(Arc<Agents>);
+impl JobGuard { fn new(a: &Arc<Agents>) -> JobGuard { a.stats.jobs.fetch_add(1, Relaxed); JobGuard(a.clone()) } }
+impl Drop for JobGuard { fn drop(&mut self) { self.0.stats.jobs.fetch_sub(1, Relaxed); } }
 pub fn handle() -> Option<Arc<Agents>> { HANDLE.get().cloned() }
 
 pub struct Agents { pub hub: Arc<Hub>, pub cli: Cli, pub host: host::HostInfo, world: Mutex<World>, actors: StdMutex<HashMap<String, mpsc::Sender<Cmd>>>, pub stats: Stats, n: AtomicU64,
@@ -470,11 +474,11 @@ impl Actor {
     /// Hub.post.go: a new turn's design baseline (checkpoint 0 and a step), taken in the background.
     fn jobs_start(&self, cwd: &str, entry: &str) {
         let (hub, th, home) = (self.ag.hub.clone(), self.th.clone(), self.ag.host.home.to_string_lossy().into_owned()); let (cwd, entry) = (cwd.to_string(), entry.to_string());
-        tokio::spawn(async move { hist::checkpoint0(cwd.clone(), th.clone()).await; hist::step(hub, th, cwd, entry, home, "start").await });
+        let g = JobGuard::new(&self.ag); tokio::spawn(async move { let _g = g; hist::checkpoint0(cwd.clone(), th.clone()).await; hist::step(hub, th, cwd, entry, home, "start").await });
     }
     /// A tool call ended (Steps.claude): a step after it. A turn ended (Ended.out): a step and a checkpoint.
-    fn jobs_step(&self, entry: &str) { let (hub, th, home, cwd) = (self.ag.hub.clone(), self.th.clone(), self.ag.host.home.to_string_lossy().into_owned(), self.cwd.clone()); let entry = entry.to_string(); tokio::spawn(async move { hist::step(hub, th, cwd, entry, home, "").await }); }
-    fn jobs_end(&self) { let (hub, th, home, cwd) = (self.ag.hub.clone(), self.th.clone(), self.ag.host.home.to_string_lossy().into_owned(), self.cwd.clone()); tokio::spawn(async move { hist::step(hub.clone(), th.clone(), cwd.clone(), String::new(), home, "").await; hist::checkpoint(cwd, th).await }); }
+    fn jobs_step(&self, entry: &str) { let (hub, th, home, cwd) = (self.ag.hub.clone(), self.th.clone(), self.ag.host.home.to_string_lossy().into_owned(), self.cwd.clone()); let entry = entry.to_string(); let g = JobGuard::new(&self.ag); tokio::spawn(async move { let _g = g; hist::step(hub, th, cwd, entry, home, "").await }); }
+    fn jobs_end(&self) { let (hub, th, home, cwd) = (self.ag.hub.clone(), self.th.clone(), self.ag.host.home.to_string_lossy().into_owned(), self.cwd.clone()); let g = JobGuard::new(&self.ag); tokio::spawn(async move { let _g = g; hist::step(hub.clone(), th.clone(), cwd.clone(), String::new(), home, "").await; hist::checkpoint(cwd, th).await }); }
 
     async fn spawn(&mut self, t: &world::T, cwd: &str, key: String) -> Result<(), String> {
         if !std::path::Path::new(cwd).is_dir() { return Err(format!("its folder {cwd} is gone")) }
