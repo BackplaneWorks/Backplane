@@ -11,6 +11,10 @@ use tokio::sync::{broadcast, Mutex};
 
 pub struct Cfg { pub home: PathBuf, pub version: String, pub commit: String, pub listen: String, pub os: String, pub arch: String }
 
+/// What `Hub::rebuild_presenter` did: ran the rebuild (and whether the restart took), or left the request to the rebuild already running.
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum Rebuilt { Ran(bool), Merged }
+
 pub struct Hub {
     pub cfg: Cfg, pub auth: Auth, pub epoch: String, pub presenter: Arc<dyn Presenter>,
     pub store: Store, pub model: Mutex<Model>, gen: AtomicU64, pub changed: broadcast::Sender<u64>, pub frames: broadcast::Sender<Value>, pub native_key: String,
@@ -94,7 +98,7 @@ impl Hub {
         { let hub = hub.clone(); tokio::spawn(async move { loop {
             tokio::time::sleep(std::time::Duration::from_millis(250)).await;
             if hub.presenter.is_down() {
-                if hub.forget_mirror().await { eprintln!("presenter restarted; folded the log and the mirrors again") } else { tokio::time::sleep(std::time::Duration::from_secs(2)).await }
+                match hub.rebuild_presenter().await { Rebuilt::Ran(true) => eprintln!("presenter restarted; folded the log and the mirrors again"), Rebuilt::Ran(false) => tokio::time::sleep(std::time::Duration::from_secs(2)).await, Rebuilt::Merged => {} }
             }
         } }); }
         Ok(hub)
@@ -208,20 +212,31 @@ impl Hub {
     pub async fn mirror_gate(&self) -> tokio::sync::MutexGuard<'_, ()> { self.mirror_gate.lock().await }
     /// A mirror's history was replaced, or the presenter died: the presenter is restarted, the log folded again, and the registered
     /// `MirrorFeed` gives it every mirror. One rebuild at a time: a request that arrives while one runs makes a following pass (what it
-    /// changed may be missing from the running one's snapshot) and returns at once. False: the presenter would not restart (said).
-    pub async fn forget_mirror(&self) -> bool {
+    /// changed may be missing from the running one's snapshot) and returns `Merged` at once. `Ran(false)`: the presenter would not restart (said).
+    pub async fn rebuild_presenter(&self) -> Rebuilt {
         self.rebuild_again.store(true, Relaxed);
-        let Ok(_run) = self.rebuild_run.try_lock() else { return true };
-        let mut ok = true;
-        while self.rebuild_again.swap(false, Relaxed) {
-            let _g = self.mirror_gate.lock().await;
-            match self.presenter.restart().await {
-                Ok(()) => self.resync_held().await,
-                Err(e) => { eprintln!("presenter restart failed: {e:#}"); ok = false; break }
+        let mut ran = None;
+        loop {
+            let Ok(run) = self.rebuild_run.try_lock() else { return ran.map_or(Rebuilt::Merged, Rebuilt::Ran) };
+            let mut ok = ran.unwrap_or(true);
+            while self.rebuild_again.swap(false, Relaxed) {
+                let _g = self.mirror_gate.lock().await;
+                match self.presenter.restart().await {
+                    Ok(()) => self.resync_held().await,
+                    Err(e) => { eprintln!("presenter restart failed: {e:#}"); ok = false; break }
+                }
             }
+            ran = Some(ok);
+            drop(run);
+            // A request that came after the last `swap` but before `run` was released found the lock held, left the flag set and returned:
+            // nobody would act on it. Look again once the lock is free (the staging: far_many_rebuild_requests_leave_none_unserved).
+            if !self.rebuild_again.load(Relaxed) { return Rebuilt::Ran(ok) }
         }
-        ok
     }
+    /// `rebuild_presenter` as a bool: false only when the presenter would not restart (a merged request counts as served).
+    pub async fn forget_mirror(&self) -> bool { !matches!(self.rebuild_presenter().await, Rebuilt::Ran(false)) }
+    #[cfg(test)]
+    pub fn rebuild_pending(&self) -> bool { self.rebuild_again.load(Relaxed) }
     pub async fn commit_many(&self, events: &[Value]) -> Result<u64> {
         let (done, rx) = tokio::sync::oneshot::channel();
         // settings lane: a stored secret never reaches the log, the model, the presenter or a client (Hub.step.go, Secret.changes)
