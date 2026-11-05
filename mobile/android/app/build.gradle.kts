@@ -36,15 +36,12 @@ val bpNative = providers.gradleProperty("bpNative").map { it != "false" }.getOrE
 // -PbpNativeSidebar=false: do not ask the hub for bounded sidebar pages (to test segmented replies); default true
 // -PbpE2eHost=host[,host]: the debug build also allows plain http to these fixture hosts (the e2e hub on h@backplane); the release config keeps the shared hub only
 val bpE2eHosts = providers.gradleProperty("bpE2eHost").map { v -> v.split(",").map { it.trim() }.filter { it.matches(Regex("[A-Za-z0-9.-]+")) } }.getOrElse(emptyList())
-val genNet = tasks.register("generateE2eNetworkConfig") {
-    val out = layout.buildDirectory.dir("generated/e2e-net/res/xml/network.xml")
-    val hosts = bpE2eHosts
-    outputs.file(out)
-    doLast {
-        val f = out.get().asFile; f.parentFile.mkdirs()
-        val extra = hosts.joinToString("") { "        <domain includeSubdomains=\"false\">$it</domain>\n" }
-        f.writeText("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<network-security-config>\n    <base-config cleartextTrafficPermitted=\"false\" />\n    <domain-config cleartextTrafficPermitted=\"true\">\n        <domain includeSubdomains=\"false\">desktop.tail9e0cf2.ts.net</domain>\n$extra    </domain-config>\n</network-security-config>\n")
-    }
+// written while the build is configured (no task, so nothing has to be ordered before the resource merge)
+if (bpE2eHosts.isNotEmpty()) {
+    val f = layout.buildDirectory.file("generated/e2e-net/res/xml/network.xml").get().asFile
+    f.parentFile.mkdirs()
+    val extra = bpE2eHosts.joinToString("") { "        <domain includeSubdomains=\"false\">$it</domain>\n" }
+    f.writeText("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<network-security-config>\n    <base-config cleartextTrafficPermitted=\"false\" />\n    <domain-config cleartextTrafficPermitted=\"true\">\n        <domain includeSubdomains=\"false\">desktop.tail9e0cf2.ts.net</domain>\n$extra    </domain-config>\n</network-security-config>\n")
 }
 val bpNativeSidebar = providers.gradleProperty("bpNativeSidebar").map { it != "false" }.getOrElse(true)
 val bpAppId = "dev.backplane.mobile.gpui"
@@ -95,7 +92,6 @@ android {
     // bridge.js is copied in by scripts/build-mobile.sh
     if (bpE2eHosts.isNotEmpty()) {
         sourceSets["debug"].res.srcDir(layout.buildDirectory.dir("generated/e2e-net/res"))
-        tasks.matching { it.name == "mergeDebugResources" }.configureEach { dependsOn(genNet) }
     }
     sourceSets["main"].assets.srcDir("../../build/assets")
     // window.backplaneApp, the same script the iOS app injects
