@@ -15,7 +15,7 @@ summary.ime={status:ime.status,engine:ime.engine};
 const pf=await preflight({display:dsp.display,env:dsp.env,ime,out:out+'/preflight',portalLog});summary.preflight=pf;
 const ACTIONS=['drag-select','ctrl-c','paste-image','drop-file','ime-hangul','paperclip'];
 // which actions each failed check takes down: core input (pointer, keys, clipboard) takes down the whole run; the rest only the action that needs it
-const failed=new Set(pf.failed);const coreFailed=pf.failed.filter(k=>/^(pointer|key-|wheel|clipboard|primary)/.test(k));
+const coreFailed=pf.failed.filter(k=>/^(pointer|key-|wheel|clipboard|primary)/.test(k));
 const harnessFor={'drag-select':pf.failed.filter(k=>/^selections-cleared/.test(k)),'ctrl-c':pf.failed.filter(k=>/^selections-cleared/.test(k)),'drop-file':pf.failed.filter(k=>/^xdnd/.test(k)),'ime-hangul':pf.failed.filter(k=>/^(ime|xim)/.test(k)),'paperclip':pf.failed.filter(k=>/^portal/.test(k))};
 const harnessActions=Object.fromEntries(Object.entries(harnessFor).filter(([,v])=>v.length));
 if(coreFailed.length){try{portal?.kill('SIGTERM')}catch{}try{ime.stop()}catch{}dsp.stop();
@@ -76,7 +76,6 @@ try{
     const opened=w1.filter(x=>!w0.some(y=>y.id===x.id));let pl='';try{pl=readFileSync(portalLog,'utf8')}catch{}
     const calls1=countOpen();const called=calls1>calls0; // an increase caused by this click, not any OpenFile anywhere in the log
     return {ok:called,evidence:{rect:attach.rect,rectChangedPixels:rectDiff,portalStandin:portal?'running':'not running',portalCalls:{before:calls0,after:calls1},portalCalled:called,portalLog:pl.split('\n').slice(-4).join(' | '),newWindows:opened.map(x=>x.name).slice(0,5),screenshot:shot,note:'ok = the client asked the OS file chooser (xdg-desktop-portal FileChooser, via a stand-in on Boat); whether the chosen file then attaches is the upload chain measured by paste/drop'}}});
-  const lk0=null;
   const lk=[...metrics].reverse().find(m=>m.event==='links');summary.blocked['link-click']=lk&&lk.supported===false?'GPUI draws message text without link detection (links event supported:false)':(lk?null:'no links event');
   const sel=[...metrics].reverse().find(m=>m.event==='read'&&m.what==='selection');if(sel)summary.selectionRead=sel;
   try{g.kill('SIGTERM')}catch{}await sleep(1500);
