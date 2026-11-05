@@ -546,31 +546,37 @@ function bp_db_query(h, sql, params, limit, typed) {
     if (st) st.finalize();
   }
 }
+// a kept answer, put back at the end (most recently used), or undefined
+function bp_db_kept(key) {
+  const kept = bp_db_reads.get(key);
+  if (kept === undefined) return undefined;
+  bp_db_reads.delete(key);
+  bp_db_reads.set(key, kept);
+  return kept.rows;
+}
+// keep an answer of size (bp_db_size) that reads tables (and scope, or null)
+function bp_db_keep(key, rows, size, tables, scope) {
+  if (size > BP_DB_READ_MAX) return;
+  // over a cap, the answers used longest ago go first (a Map keeps its
+  // insertion order, and a hit is put back at the end): the huge state's
+  // big thread filled the cap in a few renders and emptied it every time
+  for (const [k, old] of bp_db_reads) {
+    if (bp_db_reads.size < BP_DB_READS && bp_db_read_bytes + size <= BP_DB_READ_BYTES) break;
+    bp_db_reads.delete(k);
+    bp_db_read_bytes -= old.size;
+  }
+  bp_db_reads.set(key, { rows, size, tables, scope });
+  bp_db_read_bytes += size;
+}
 function bp_db_read(h, sql, params, limit, typed) {
   if (!bp_db_pure(sql)) return bp_db_query(h, sql, params, limit, typed);
   const key = bp_db_read_key(h, sql, params, limit, typed);
-  const kept = bp_db_reads.get(key);
-  if (kept !== undefined) {
-    bp_db_reads.delete(key);
-    bp_db_reads.set(key, kept);
-    return kept.rows;
-  }
+  const kept = bp_db_kept(key);
+  if (kept !== undefined) return kept;
   const rows = bp_db_query(h, sql, params, limit, typed);
   // a failure is one row whose first column is NUL + "fail"
   const failed = rows.$ === CID(Con) && rows.head.$ === CID(Con) && rows.head.head === "\0fail";
-  const size = failed ? 0 : bp_db_size(rows);
-  if (!failed && size <= BP_DB_READ_MAX) {
-    // over a cap, the answers used longest ago go first (a Map keeps its
-    // insertion order, and a hit is put back at the end): the huge state's
-    // big thread filled the cap in a few renders and emptied it every time
-    for (const [k, old] of bp_db_reads) {
-      if (bp_db_reads.size < BP_DB_READS && bp_db_read_bytes + size <= BP_DB_READ_BYTES) break;
-      bp_db_reads.delete(k);
-      bp_db_read_bytes -= old.size;
-    }
-    bp_db_reads.set(key, { rows, size, tables: bp_db_tables(sql), scope: bp_db_scope(sql, params, typed) });
-    bp_db_read_bytes += size;
-  }
+  if (!failed) bp_db_keep(key, rows, bp_db_size(rows), bp_db_tables(sql), bp_db_scope(sql, params, typed));
   return rows;
 }
 function db_query(h, sql, params, limit) {
@@ -583,7 +589,19 @@ function db_query_t(h, sql, params, limit) {
 // The fixed review-history boundary: no caller SQL, statement cache, retained
 // history, or eagerly materialized result set. Metadata lookahead checks the
 // byte budget before a payload crosses from SQLite into JavaScript.
+// A page is kept as a read is (bp_db_kept): it reads entry rows of one
+// thread (thread=?1 AND ... below), so only a write that can change those
+// drops it (~10 ms a render on the huge state's review history, 2026-11-05).
 function db_review_page(h, thread, after, through, budget) {
+  const key = typeof thread === "string" && budget && typeof budget === "object"
+    ? JSON.stringify(["review", h, thread, String(after), String(through), budget.rows, budget.bytes]) : null;
+  const kept = key === null ? undefined : bp_db_kept(key);
+  if (kept !== undefined) return kept;
+  const page = bp_db_review_page(h, thread, after, through, budget);
+  if (key !== null && page.error === "") bp_db_keep(key, page, bp_db_size(page.rows), new Set(["entry"]), { table: "entry", col: "thread", value: thread });
+  return page;
+}
+function bp_db_review_page(h, thread, after, through, budget) {
   const fail = () => ({ $: CID(HistoryPage), rows: bp_db_from([]), next: after,
     done: false, error: 'indexed review page unavailable' });
   const db = bp_db_get(h);
