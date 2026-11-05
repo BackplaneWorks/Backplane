@@ -93,11 +93,27 @@ def Ap.live.step(r: B.Step, +n: Nat) -> J.Json:
 def Ap.live(+st: M.State, +now: Nat, +cs: List<&2, M.Change>) -> J.Json:
   Ap.live.step(W.Watchdog.after(st, now, B.Step{cs, Nil{}}), List.length(&2, M.Change, cs))
 
+# Ended.out then Alerts.changes (the production order): the summary clock, the alert record and the told marks a turn's end writes. The
+# first TurnChanged's thread is the ended one; only the added part is printed
+def Ap.end.th(cs: List<&2, M.Change>) -> String:
+  match cs:
+    case Nil{}: ""
+    case M.TurnChanged{+th, _, _} <> _: th
+    case _ <> t: Ap.end.th(t)
+
+def Ap.end.k(r: B.Step, +st: M.State, +n: Nat) -> J.Json:
+  match r:
+    case B.Step{cs2, _}: Ap.live.k(B.Alerts.changes(st, cs2), n)
+
+def Ap.end(+st: M.State, +now: Nat, +cs: List<&2, M.Change>) -> J.Json:
+  Ap.end.k(B.Ended.out(st, now, Ap.end.th(cs), B.Step{cs, Nil{}}), st, List.length(&2, M.Change, cs))
+
 def Ap.out(+st: M.State, +now: Nat, +cs: List<&2, M.Change>) -> J.Json:
   J.Json.obj([J.KV{"tick", J.Json.arr(Ap.enc(A.Auto.changes(st, now)))},
     J.KV{"meta", J.Json.arr(Ap.enc(A.Auto.messages.metadata(cs, st)))},
     J.KV{"quiet", J.Json.arr(Ap.enc(A.Auto.quiet.changes(Map.to_list(&2, Nat, A.Auto.quiet.collect(cs, st, Map.new(&2, Nat))), st)))},
-    J.KV{"live", Ap.live(st, now, cs)}])
+    J.KV{"live", Ap.live(st, now, cs)},
+    J.KV{"end", Ap.end(st, now, cs)}])
 
 def main() -> IO(Unit):
   do IO<Unit>:

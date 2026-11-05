@@ -4,6 +4,7 @@
 //! Pure of the hub, so it is tested here.
 use super::autosettle;
 use super::json::gnat;
+use super::turnend;
 use super::watchdog;
 use crate::state::State;
 use serde_json::Value;
@@ -25,10 +26,16 @@ impl Core {
     /// fold a batch and return the events the policies derive from it (already folded here), quiet marks first and then the message metadata:
     /// the marks are judged against the state before the batch, the metadata against the state before each change (Auto.messages.metadata)
     pub fn derive(&mut self, events: &[Value]) -> Vec<Value> {
-        // all judged against the state before the batch, as Bend's Hub.step does: liveness progress (Watchdog.after), then quiet marks
+        // judged against the state before the batch, as Bend's Hub.step does
         let now = events.iter().map(|e| gnat(e, "at", 0)).max().unwrap_or(0);
         let live = watchdog::after(&self.st, now, events);
         let quiet = autosettle::quiet(&self.st, events);
+        let ended: Vec<String> = turnend::ended_threads(events).into_iter().map(String::from).collect();
+        let ctx = turnend::told_ctx(&self.st, events, &ended);
+        let seq = self.st.seq + events.len() as u64; // Alert.seq(post): the changes applied after the step's own
+        // the state after the batch, to decide the turn's end on; the earlier state is kept for the clocks and the told text
+        let pre_running: Vec<(String, bool)> = ended.iter().map(|t| (t.clone(), turnend::was_running(&self.st, t))).collect();
+        let pre_due: Vec<(String, bool)> = ended.iter().map(|t| (t.clone(), turnend::sum_due(&self.st, t, now))).collect();
         let mut meta = vec![];
         for e in events {
             let m = autosettle::metadata(&self.st, e); // against the state before each change (Auto.messages.metadata)
@@ -36,9 +43,13 @@ impl Core {
             for x in &m { self.st.apply(x); }
             meta.extend(m);
         }
-        for x in live.iter().chain(&quiet) { self.st.apply(x); }
-        // the log order is Bend's: the batch, the liveness records, the quiet marks, then the message metadata
-        live.into_iter().chain(quiet).chain(meta).collect()
+        let end = turnend::ended_events_from(&self.st, &pre_running, &pre_due, seq, now, events);
+        let mut list: Vec<Value> = events.to_vec();
+        list.extend(end.iter().cloned()); list.extend(live.iter().cloned());
+        let marks = turnend::told_marks(&ctx, &list);
+        for x in end.iter().chain(&live).chain(&marks).chain(&quiet) { self.st.apply(x); }
+        // the log order is Bend's: the batch, the turn's end records, the liveness records, the told marks, the quiet marks, then the message metadata
+        end.into_iter().chain(live).chain(marks).chain(quiet).chain(meta).collect()
     }
     pub fn tick(&self, now_s: u64) -> Vec<Value> { autosettle::changes(&self.st, now_s) }
 }
@@ -154,5 +165,22 @@ mod tests {
         let derived = p.finish_boot(c, 1);
         let outs: Vec<&str> = derived.iter().filter(|e| e["key"].as_str() == Some("autosettle.output.t1")).map(|e| e["value"].as_str().unwrap()).collect();
         assert_eq!(outs, vec!["w"], "only the commit before the failed base is replayed; x, y, z were never written");
+    }
+    #[test] fn a_turns_end_writes_the_clock_the_alert_and_the_told_mark_before_the_quiet_marks() {
+        let p = Policy::new(); let mut c = Core::new();
+        for l in [P, T, r#"{"$":"MessagePosted","thread":"t1","msg":"mu1","role":"user","text":"do it","at":5}"#,
+                  r#"{"$":"MessagePosted","thread":"t1","msg":"ma1","role":"assistant","text":"Done.\nmore","at":6}"#, r#"{"$":"TurnChanged","thread":"t1","state":"running","at":7}"#] { c.fold_line(l); }
+        assert!(p.finish_boot(c, 5).is_empty());
+        let end = json!({"$":"TurnChanged","thread":"t1","state":"completed","at":100});
+        let out = p.before_commit(6, vec![end, json!({"$":"UsageSet","thread":"t1","used":1,"window":2,"at":100})]);
+        let ks = keys(&out);
+        assert_eq!(ks[0..3].to_vec(), vec!["summary.at.t1".to_string(), "alert.t1".to_string(), "told.k100-5-3".to_string()], "the clock, the alert record, then its mark numbered by its place (3)");
+        let alert = out.iter().find(|e| e["key"] == "alert.t1").unwrap()["value"].as_str().unwrap().to_string();
+        assert_eq!(alert, "done\tturn-t1\tmu1\t100.7\t", "kind, key, the person's message it settled, <now>.<changes applied after the step: 5 + 2>");
+        let told = out.iter().find(|e| e["key"].as_str().map_or(false, |k| k.starts_with("told."))).unwrap()["value"].as_str().unwrap().to_string();
+        assert_eq!(told, r#"{"key":"turn-t1","text":"T: Done.","channel":"alert","bot":"","at":100}"#);
+        // the same person message does not alert twice: the memory holds it
+        let again = p.before_commit(10, vec![json!({"$":"TurnChanged","thread":"t1","state":"completed","at":200})]);
+        assert!(!keys(&again).contains(&"alert.t1".to_string()));
     }
 }
