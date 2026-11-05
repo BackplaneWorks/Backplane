@@ -7,5 +7,5 @@ case "$1" in
  selftest) $RUN test/gpui/e2e/lib/frames.test.mjs 2>&1 | tee out/e2e/frames-test.txt
            $RUN test/gpui/e2e/adapter.test.mjs 2>&1 | tee out/e2e/adapter-test.txt
            $RUN -e "import('./test/gpui/e2e/lib/capture.mjs').then(m=>console.log(JSON.stringify(m.tools())))" | tee out/e2e/tools.txt ;;
- run) export E2E_SESSION_MIN=${E2E_SESSION_MIN:-3}; $RUN test/gpui/e2e/lib/frames.test.mjs 2>&1 | tee out/e2e/frames-test.txt | tail -12; chmod +x test/gpui/e2e/bin/*; $RUN test/gpui/e2e/run.mjs --client gpui --hub-bin test/gpui/e2e/bin/hub --gpui-bin test/gpui/e2e/bin/gpui --journey "${2:-all}" --record --out out/e2e 2>&1 | tail -40 ;;
+ run) export BACKPLANE_GPUI_ASSETS=$PWD/test/gpui/e2e/bin/assets; export E2E_SESSION_MIN=${E2E_SESSION_MIN:-3}; $RUN test/gpui/e2e/lib/frames.test.mjs 2>&1 | tee out/e2e/frames-test.txt | tail -12; chmod +x test/gpui/e2e/bin/*; $RUN test/gpui/e2e/run.mjs --client gpui --hub-bin test/gpui/e2e/bin/hub --gpui-bin test/gpui/e2e/bin/gpui --journey "${2:-all}" --record --out out/e2e 2>&1 | tail -40 ;;
 esac

@@ -8,7 +8,7 @@ mode=${1:-selftest}; mkdir -p test/gpui/e2e/bin; trap 'rm -rf test/gpui/e2e/bin'
 EXC=(--exclude 'mobile/**' --exclude 'desktop/**' --exclude 'docs/**' --exclude 'tools/**' --exclude 'native/**' --exclude 'shots-snap/**' --exclude 'assets/**' --exclude 'i18n/**' --exclude 'deploy/**' --exclude 'order/**' --exclude 'skills/**' --exclude 'extra/**' --exclude 'stage/**' --exclude 'stage-edge/**' --exclude 'scripts/**' --exclude 'test/gpui/hub/**' --exclude 'test/gpui/slim/**' --exclude 'test/gpui/state/**' --exclude 'test/gpui/agents/**' --exclude 'test/gpui/net/**' --exclude 'test/gpui/parity/**' --exclude 'test/gpui/bend/**' --exclude 'test/gpui/term/**' --exclude 'test/gpui/screen/**' --exclude 'test/gpui/visual/**' --exclude 'test/gpui/wire/**' --exclude 'test/gpui/settings/**' --exclude 'test/gpui/web/**')
 case $mode in
  selftest) scripts/boat-job.sh --size default --timeout 900 --idle 0 --no-reuse --no-setup-bend --artifact out/e2e "${EXC[@]}" -- sh test/gpui/e2e/boat-inner.sh selftest ;;
- run) cp --reflink=auto "$2" test/gpui/e2e/bin/hub; cp --reflink=auto "$3" test/gpui/e2e/bin/gpui
+ run) cp --reflink=auto "$2" test/gpui/e2e/bin/hub; cp --reflink=auto "$3" test/gpui/e2e/bin/gpui; [ -d "$(dirname "$3")/assets" ] && cp -r "$(dirname "$3")/assets" test/gpui/e2e/bin/assets
       scripts/boat-job.sh --size default --timeout 3000 --idle 0 --no-reuse --no-setup-bend --artifact out/e2e "${EXC[@]}" -- sh test/gpui/e2e/boat-inner.sh run "${4:-all}" ;;
  *) echo "usage: $0 selftest | run HUB GPUI [journey]"; exit 2 ;;
 esac
