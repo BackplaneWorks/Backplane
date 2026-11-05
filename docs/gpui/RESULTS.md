@@ -185,3 +185,18 @@ These are request round trips to the hub (server time + transfer), not a client'
 
 ### Live hub, reference only (`/proc`, nothing sent to it)
 Hub pid 3890 at 22:57: RSS about 20.5 GB (peak 32.0 GB), 140 % of a core over 30 s, 16 threads. A single sample, not a baseline; it only shows the scale the production hub has reached.
+
+## GPUI client soak (Linux, RTX 5080, isolated Xvfb :62)
+
+`test/gpui/perf/cmp_soak.mjs`; raw `build/gpui/results/perf/gpui-soak/samples.jsonl`. The GPUI binary (9.6 MB) on the small fixture hub with 20 simulated agents streaming (hub RSS about 700 MB), thread 0 open, in a 3700M scope; sampled every 30 s from `/proc` (RSS, PSS, private, fds, threads). **38 minutes, 77 samples: shorter than the 2 hours I would like, so this is a short soak, not a leak verdict.** The harness process ended about 2 minutes before its 40 minutes (the work watcher's time limit); the client and hub were stopped by PID afterwards.
+
+| measure | result |
+|---|---|
+| RSS (after 5 min) | 287 MB at start, floor 262 MB, max 290 MB, 263 MB at the end |
+| RSS floor slope | -49 MB/h +-11 (naive 95 %, n=67) after warm-up, i.e. falling, not rising; the 10-minute floors are 290, 262, 262, 263 MB |
+| PSS / private at the end | 226 / 216 MB |
+| fds / threads | 76 / 47, constant for the whole run (slope 0) |
+| CPU | 7.1 % of a core on average (agents streaming) |
+| GPU memory (system-wide, nvidia-smi) | 1.2-1.8 GB, shared with other users of the card; per client unmeasured |
+
+Reading: no growth in memory, fds or threads over 38 minutes with the sidebar and one thread updating continuously. A 2 h run and a churn run (switching threads, reconnecting, creating and deleting threads) on the GPUI client are not done; `m4_churn.mjs` exists for the hub and was not run (the desktop pause came first, and it was not on the approved list).
