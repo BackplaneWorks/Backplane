@@ -1,7 +1,7 @@
 //! Liveness progress writes (src/core/watchdog.bend `Watchdog.after`): a change that shows an agent is alive (its output, a tool act, a request,
 //! a wait it set up) moves that thread's `liveness.<t>` record to now, ends an episode, clears a restart-retry count, and does the same for the
 //! up-to-four owners above it that are themselves at work. Pure: `st` is the state BEFORE the batch (as Bend's `s`), `now` the batch's time.
-//! Not here (PARITY.md, open): the lock heartbeat `Watchdog.progress.k` also sends, the stalled-thread tick and its deliveries.
+//! Not here (PARITY.md, open): the stalled-thread tick and its deliveries.
 use super::json::*;
 use super::liveness;
 use crate::state::{State, Turn};
@@ -65,6 +65,28 @@ fn active(st: &State, th: &str) -> bool {
     let executing = t.turn == Turn::Running || starting || kids + rows(st, th) > 0;
     executing && t.pending == 0 && !st.asks.values().any(|(a, open)| *open && a == th)
 }
+/// Locks.lease.seconds: the lock lease, the setting locks.lease.minutes (digits; 0 or unreadable: 20) in seconds
+fn lease_seconds(st: &State) -> u64 { let m = num_digits(&st.get("locks.lease.minutes", "20")); (if m == 0 { 20 } else { m }) * 60 }
+fn num_digits(s: &str) -> u64 { if !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()) { s.parse().unwrap_or(0) } else { 0 } }
+/// Locks.heartbeat: progress renews the lease of every lock party the thread owns (not a client's), so a working holder is not told its lease went stale;
+/// a LockChanged is written only for a lock the renewal changes
+fn heartbeat(st: &State, now: u64, th: &str, out: &mut Vec<Value>) {
+    let lease = now + lease_seconds(st);
+    for name in st.get("locks.names", "").split('\n').filter(|l| !l.is_empty()) {
+        let old = st.get(&format!("lock.{name}"), "");
+        let mut l = parse_or_null(&old);
+        let mut changed = false;
+        let mut renew = |p: &mut Value| {
+            if gstr(p, "thread", "") == th && gstr(p, "kind", "thread") != "client" { if let Some(o) = p.as_object_mut() { o.insert("lease".into(), serde_json::Value::Number(lease.into())); changed = true; } }
+        };
+        if let Some(o) = l.as_object_mut() {
+            if let Some(h) = o.get_mut("holder") { if !h.is_null() { renew(h); } }
+            if let Some(Value::Array(ws)) = o.get_mut("waiters") { for w in ws { renew(w); } }
+        }
+        if changed && show(&l) != old { out.push(json!({"$": "LockChanged", "name": name, "lock": l, "at": now})); }
+    }
+}
+
 /// Watchdog.progress.k: the record moves to `now`; a restart-retry count is cleared with it
 fn progress_k(st: &State, now: u64, th: &str, reason: &str, out: &mut Vec<Value>) {
     let l = liveness::progress(&live(st, th), now, &take(reason, 240));
@@ -73,6 +95,7 @@ fn progress_k(st: &State, now: u64, th: &str, reason: &str, out: &mut Vec<Value>
         out.push(json!({"$": "SettingSet", "key": format!("restart.retry.{th}"), "value": "", "at": now}));
         out.push(json!({"$": "SettingSet", "key": format!("restart.retry.n.{th}"), "value": "0", "at": now}));
     }
+    heartbeat(st, now, th, out); // B.Locks.heartbeat: the same step also renews the thread's lock leases
 }
 /// Watchdog.progress: the thread itself (if the clock moved or an episode is open), then up to four owners that are at work
 fn progress(st: &State, now: u64, th: &str, why: &str, out: &mut Vec<Value>) {
@@ -211,5 +234,17 @@ mod tests {
         let st = fold(&[BASE[0], BASE[1], r#"{"$":"SettingSet","key":"bg.t1","value":"task9\tsame\tx","at":1}"#]);
         let prog = |d: &str| json!({"type":"system","subtype":"task_progress","task_id":"task9","description":d});
         assert!(line(&st, 50, "t1", &prog("same")).is_empty()); assert_eq!(line(&st, 50, "t1", &prog("new")).len(), 1);
+    }
+    #[test] fn progress_renews_the_threads_lock_leases_and_only_when_they_change() {
+        let lock = r#"{"$":"LockChanged","name":"merge","lock":{"holder":{"id":"a","kind":"thread","thread":"t1","note":"","since":1,"lease":5},"waiters":[{"id":"b","kind":"client","thread":"t1","note":"","since":2,"lease":6},{"id":"c","kind":"thread","thread":"t2","note":"","since":3,"lease":7}],"ready":false},"at":1}"#;
+        let st = fold(&[BASE[0], BASE[1], BASE[3], lock]);
+        let ev = after(&st, 1000, &[m("t1", "a1", "assistant", "x")]);
+        let lk = ev.iter().find(|e| e["$"] == "LockChanged").expect("a LockChanged");
+        assert_eq!(lk["lock"]["holder"]["lease"], 1000 + 1200, "now + 20 minutes");
+        assert_eq!(lk["lock"]["waiters"][0]["lease"], 6, "a client's party is not renewed"); assert_eq!(lk["lock"]["waiters"][1]["lease"], 7, "another thread's is not either");
+        let st2 = fold(&[BASE[0], BASE[1], BASE[3], lock, r#"{"$":"SettingSet","key":"locks.lease.minutes","value":"1","at":2}"#]);
+        assert_eq!(after(&st2, 1000, &[m("t1", "a1", "assistant", "x")]).iter().find(|e| e["$"] == "LockChanged").unwrap()["lock"]["holder"]["lease"], 1060);
+        let st3 = fold(&[BASE[0], BASE[1], BASE[3], r#"{"$":"LockChanged","name":"merge","lock":{"holder":{"id":"a","kind":"thread","thread":"t1","note":"","since":1,"lease":2200},"waiters":[],"ready":false},"at":1}"#]);
+        assert!(after(&st3, 1000, &[m("t1", "a1", "assistant", "x")]).iter().all(|e| e["$"] != "LockChanged"), "a lease already at now + 20 minutes is unchanged: no event");
     }
 }
