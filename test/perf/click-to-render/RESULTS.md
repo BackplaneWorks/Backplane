@@ -29,6 +29,22 @@ from R and X on base (most clicks already at the press there) and is not used fo
 layout shift during settle, including those right after the input (Chromium's CLS leaves those out); "CLS" columns
 appear for runs that record hadRecentInput.
 
+## Update: tip 50ce55592 (08:46), R-fast and X-fast
+
+Same method. The viewer-open layout shift seen on 97abcb9ea (0.414) is back to base's 0.144; Search open acts at the press.
+
+| cell | n | median p50 before -> after | slowest 80 %: mean p50 before -> after | geo-mean speed-up | within 16 ms | within 50 ms | within 100 ms | shift>0.01 (all) | shift>0.01 (CLS: no recent input) | late>0 |
+|---|---:|---|---|---:|---|---|---|---|---|---|
+| R-fast-web | 30 | 160 -> 37 | 372 -> 58 (6.4x) | 4.0x | 1/30 -> 1/30 | 3/30 -> 22/30 | 6/30 -> 25/30 | 16 -> 16 | 1 -> 0 | 6 -> 14 |
+| X-fast-web | 20 | 315 -> 55 | 707 -> 71 (10.0x) | 4.9x | 0/20 -> 0/20 | 2/20 -> 8/20 | 3/20 -> 16/20 | 7 -> 8 | 1 -> 0 | 3 -> 5 |
+
+Layout shift by Chromium's CLS rule (only shifts without recent input; base: the Diff viewer's shift ~5 s after the click):
+
+| cell | interactions | shifting (>0.01) before -> after | mean CLS / interaction before -> after | late items / rep, all interactions: before | after, late in both | after, NEW (shown earlier) |
+|---|---:|---|---|---:|---:|---:|
+| R-fast-web | 30 | 1 -> 0 | 0.005 -> 0.000 | 27.6 | 21.5 | 35.5 |
+| X-fast-web | 20 | 2 -> 0 | 0.009 -> 0.000 | 15.8 | 15.0 | 29.7 |
+
 ## Speed
 
 | cell | n | median p50 before -> after | slowest 80 %: mean p50 before -> after | geo-mean speed-up | within 16 ms | within 50 ms | within 100 ms | shift>0.01 (all) | shift>0.01 (CLS: no recent input) | late>0 |

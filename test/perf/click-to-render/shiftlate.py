@@ -27,18 +27,22 @@ def lates(rs):
 def summary_row(c):
     global cell; cell = c
     ids = sorted({f[:-5] for f in os.listdir(f'{tip}/{cell}') if f.endswith('.json') and f != 'summary.json'} & {f[:-5] for f in os.listdir(f'{base}/{cell}') if f.endswith('.json')})
-    cb = ct = 0; nb = nt = 0; lb_n = lt_new = lt_both = 0
+    cb = ct = 0; nb = nt = 0; lb_n = lt_new = lt_both = 0; unk_b = [False]; unk_t = [False]
     for i in ids:
         T, B = reps(tip, i), reps(base, i)
         if not T or not B: continue
-        sb, _ = shifts(B); st, _ = shifts(T); cb += sb; ct += st; nb += sb > 0.01; nt += st > 0.01
+        sb, _ = shifts(B); st, _ = shifts(T)
+        if CLS and any('shiftCls' not in r for r in B): unk_b[0] = True
+        if CLS and any('shiftCls' not in r for r in T): unk_t[0] = True
+        cb += sb; ct += st; nb += sb > 0.01; nt += st > 0.01
         lb, lt = lates(B), lates(T)
         lb_n += sum(len(v) for v in lb.values()) / len(B)
         for k, v in lt.items():
             if k in lb: lt_both += len(v) / len(T)
             else: lt_new += len(v) / len(T)
     n = max(len(ids), 1)
-    print(f'| {cell} | {len(ids)} | {nb} -> {nt} | {cb / n:.3f} -> {ct / n:.3f} | {lb_n:.1f} | {lt_both:.1f} | {lt_new:.1f} |')
+    B_ = '—' if unk_b[0] else None; T_ = '—' if unk_t[0] else None
+    print(f'| {cell} | {len(ids)} | {B_ or nb} -> {T_ or nt} | {B_ or f"{cb / n:.3f}"} -> {T_ or f"{ct / n:.3f}"} | {lb_n:.1f} | {lt_both:.1f} | {lt_new:.1f} |')
 if SUMMARY:
     print('| cell | interactions | shifting (>0.01) before -> after | mean CLS / interaction before -> after | late items / rep, all interactions: before | after, late in both | after, NEW (shown earlier) |')
     print('|---|---:|---|---|---:|---:|---:|')
