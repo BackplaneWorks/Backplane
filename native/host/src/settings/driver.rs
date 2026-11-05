@@ -269,8 +269,8 @@ mod tests {
         assert_eq!(start.as_deref(), Some("go")); assert_eq!((ev[0]["key"].clone(), ev[0]["value"].clone()), (json!("account.thread.t1.claude"), json!(accounts::binding_show("p", 1))));
         assert_eq!(ev[1]["summary"], "Usage limit reached on Work; automatically switched to Personal (claude). Continuing the request.");
         // both held: the thread waits for the earliest reset, and the chain may not be left when it is off
-        let both = after.with(&[set(&fb::hold_key("claude", "p", 1), &json!({"scope":"claude","reset":4000}).to_string(), 1)]);
-        let (ev, start) = plan_switch(&both, "go"); assert!(start.is_none()); let rec: Value = serde_json::from_str(ev[0]["value"].as_str().unwrap()).unwrap(); assert_eq!(rec["reset"], 0, "one hold has no reset: unknown, held until cleared");
+        let both = after.with(&[set(&fb::hold_key("claude", "p", 1), &json!({"scope":"claude","reset":now_ms() / 1000 + 4000}).to_string(), 1)]);
+        let (ev, start) = plan_switch(&both, "go"); assert!(start.is_none()); let rec: Value = serde_json::from_str(ev[0]["value"].as_str().unwrap()).unwrap(); assert_eq!(rec["reset"].as_u64().unwrap() / 10, (now_ms() / 1000 + 4000) / 10, "an unknown reset is skipped (Reset.earliest): the known one is waited for");
     }
     #[test] fn the_ticker_continues_only_what_waited_for_a_reset_that_has_come() { /* the ticker is exercised with the agents; here: the record's reset gate */ assert!(due(&lim("c", 0), 5) && due(&lim("c", 9), 5) && !due(&lim("c", 5), 5)); }
 }
