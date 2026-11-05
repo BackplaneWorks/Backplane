@@ -149,6 +149,7 @@ export class PressFeedback {
       const kept = JSON.parse(this.store.storage.getItem(STORE + scope) || '[]'), rows = Array.isArray(kept) ? kept : kept?.rows;
       for (const [k, n] of Array.isArray(kept?.rail?.tabs) ? kept.rail.tabs : []) if (typeof k === 'string' && shaped(n) && n && !this.tabs.has(k)) this.tabs.set(k, n);
       if (!this.closer && shaped(kept?.rail?.closer) && kept.rail.closer) this.closer = kept.rail.closer;
+      for (const [k, e] of Array.isArray(kept?.shelves) ? kept.shelves : []) if (typeof k === 'string' && e?.kind === 'section' && typeof e.sec === 'string' && shaped(e.node) && e.node && !this.shelves.has(k)) this.shelves.set(k, e);
       for (const [key, e] of Array.isArray(rows) ? rows : []) {
         if (typeof key !== 'string' || this.learned.has(key) || !e || !REGIONS.some(([k]) => k === e.kind) || !shaped(e.node) || typeof e.parent !== 'string') continue;
         if (!(e.along || []).every(x => x && shaped(x.node) && x.node && typeof x.parent === 'string')) continue;
@@ -166,8 +167,9 @@ export class PressFeedback {
       if (!scope) return;
       try {
         const rail = { tabs: [...this.tabs], closer: this.closer };
-        let rows = [...this.learned].map(([key, e]) => [key, { ...e, node: e.node && blank(e.node), along: (e.along || []).map(x => ({ ...x, node: blank(x.node) })) }]), text = JSON.stringify({ rows, rail });
-        while (text.length > STORE_BYTES && rows.length) { rows = rows.slice(1);text = JSON.stringify({ rows, rail }); }
+        let shelves = [...this.shelves].map(([k, e]) => [k, { ...e, node: blank(e.node) }]);
+        let rows = [...this.learned].map(([key, e]) => [key, { ...e, node: e.node && blank(e.node), along: (e.along || []).map(x => ({ ...x, node: blank(x.node) })) }]), text = JSON.stringify({ rows, rail, shelves });
+        while (text.length > STORE_BYTES && (rows.length || shelves.length)) { if (rows.length) rows = rows.slice(1);else shelves = shelves.slice(1);text = JSON.stringify({ rows, rail, shelves }); }
         const st = this.store.storage;
         for (let i = st.length - 1; i >= 0; i--) { const k = st.key(i);if (k && k.startsWith(STORE) && k !== STORE + scope) st.removeItem(k); }
         st.setItem(STORE + scope, text);
@@ -239,6 +241,7 @@ export class PressFeedback {
     const key = p.shelf + '\u0000' + moved[0] + '\u0000' + shapeOf(before.get(moved[0]));
     this.shelves.delete(key);this.shelves.set(key, { kind: 'section', sec: moved[0], node: after.get(moved[0]) });
     while (this.shelves.size > this.limit) this.shelves.delete(this.shelves.keys().next().value);
+    this.persist();
   }
   shelfFor(press) {
     for (const [k, n] of press.sections || []) {
