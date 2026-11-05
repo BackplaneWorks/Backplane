@@ -16,7 +16,7 @@ export async function replayOne(recording,{bin,port,work}){
   const {meta,frames}=recording;
   // the recording's server-issued values, in order of first appearance
   const recIds=[],seen=new Set();
-  const greet={},viewIdsRec={};
+  const greet={},viewIdsRec={},tokRec={},tokRep={};
   const volIds=new Set(frames.filter(f=>f.dir==='out'&&f.vol&&f.json&&f.json.id!==undefined).map(f=>f.c+'|'+f.json.id));
   // ids the client made itself (first seen in something it sent) are not the hub's and are never substituted
   for(const f of frames){if(f.dir==='out'&&f.json&&typeof f.json==='object'&&!f.vol)for(const s of ids(JSON.stringify(f.json)))seen.add(s);
@@ -24,10 +24,12 @@ export async function replayOne(recording,{bin,port,work}){
     if(f.json.t==='reply'&&volIds.has(f.c+'|'+f.json.id))continue;
     if(f.json.t==='view')greet[f.c]=f.json;
     const vid=f.json.result?.viewId;if(vid&&!(viewIdsRec[f.c]??=[]).includes(vid))viewIdsRec[f.c].push(vid);
+    const tk=f.json.result?.viewDelta?.token;if(tk&&!(tokRec[f.c]??=[]).includes(tk))tokRec[f.c].push(tk);
     for(const s of ids(JSON.stringify(f.json)))if(!seen.has(s)){seen.add(s);recIds.push(s)}}
   const h=await startFixtureHub({bin,port,work});
   const rec=new Rec();const clients={};const repIds=[],repSeen=new Set();const viewIdsRep={};
   const observe=(c)=>{for(const j of c.inbox.slice(c.obs||0)){const vid=j?.result?.viewId;if(vid&&!(viewIdsRep[c.name]??=[]).includes(vid))viewIdsRep[c.name].push(vid);
+      const tk=j?.result?.viewDelta?.token;if(tk&&!(tokRep[c.name]??=[]).includes(tk))tokRep[c.name].push(tk);
       for(const s of ids(JSON.stringify(j)))if(!repSeen.has(s)){repSeen.add(s);repIds.push(s)}}c.obs=c.inbox.length};
   const sub=(c,v)=>walkStr(v,s=>{
     if(s===meta.hubUrl)return h.url;
@@ -58,13 +60,13 @@ export async function replayOne(recording,{bin,port,work}){
         else await attempt(h,rec,f.c,f.json.mode);
         continue}
       if(!c)continue;
-      if(f.kind==='settle'){continue}
+      if(f.kind==='settle'||f.kind==='check'){continue}
       if(f.kind==='end'){await c.end(f.json.quiet);continue}
       // wait for every reply owed to an earlier non-volatile request of this client
       for(const oid of owed.filter(o=>o.c===f.c&&o.i<f.i&&(replyAt.get(o.c+'|'+o.id)??Infinity)<f.i)){if(!(await c.until(x=>x.t==='reply'&&String(x.id)===String(oid.id),20000)))break}
       observe(c);
       if(f.json.raw){c.sendRaw(Uint8Array.from(Buffer.from(f.raw,'base64')))}
-      else{const obj=sub(c,f.json);for(const s of ids(JSON.stringify(obj)))repSeen.add(s);c.send(obj)}
+      else{const obj=sub(c,f.json);const t0=obj?.p?.viewDelta?.token;if(t0!==undefined){const i=(tokRec[f.c]||[]).indexOf(f.json.p.viewDelta.token);if(i>=0&&tokRep[f.c]?.[i]!==undefined)obj.p.viewDelta.token=tokRep[f.c][i]}for(const s of ids(JSON.stringify(obj)))repSeen.add(s);c.send(obj)}
       if(outId(f)!==undefined&&outId(f)!==null)owed.push({c:f.c,i:f.i,id:outId(f)});
       continue}
   }

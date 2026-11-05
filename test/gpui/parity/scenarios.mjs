@@ -43,6 +43,12 @@ export const SCENARIOS={
     c.resync();await c.vcall('view.update');await c.settle(600);
     // segmented / paged history: ask for older pages while the window says there are some
     for(let i=0;i<3;i++){const w=c.view.last?.window;if(!w||!w.older)break;await c.vcall('view.page',{cursor:w.older});}
+    if(c.P.delta){ // the end check: what the ops rebuild equals a whole view asked for with no offer
+      await c.settle(1500);const a=await c.vcall('view.update');const bodyA=JSON.stringify({shown:c.view.last.shown,window:c.view.last.window});
+      c.view.noOffer=true;const w=await c.vcall('view.update');c.view.noOffer=false;
+      const bodyB=JSON.stringify({shown:w.result.shown,window:w.result.window});
+      rec.push(prof,'out','check',null,{deltaRebuildEqualsWhole:bodyA===bodyB,offered:!!a?.result?.viewDelta,ops:!!a?.result?.viewDelta?.ops});
+    }
     await c.end(1500);await raw.end(500);
   },
   // 5. reconnect: resume from the log position the client already has

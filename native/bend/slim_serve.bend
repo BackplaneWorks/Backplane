@@ -4,6 +4,8 @@ import ../../src/core/client.bend as U
 import ../../src/mobile/hubs.bend as H
 import ../../src/mobile/session.bend as MS
 import ../../src/core/native-sidebar.bend as NS
+import ../../src/mobile/thin.bend as MT
+import ../../src/mobile/folded-actions.bend as FA
 
 # bp-policy: the slim backend's policy process, in machine code. It folds the
 # hub's wire frames incrementally into Backplane's own client state (the same
@@ -13,7 +15,9 @@ import ../../src/core/native-sidebar.bend as NS
 # per line. No custom effects, no JS.
 #
 #   F <frame json>      fold one wire frame (log, changes, delta, info, ...)   -> ok
-#   V <request json>    view.open/update/action params                          -> view json
+#   V <request json>    view.open/update/action params; optional p.now (ms since epoch: native IO.now()
+#                       is not the wall clock) and p.window (the host's window object, as Render.native_screen takes it)  -> view json
+#   C <ms>              set the wall clock (ms since epoch) the folded state reads              -> ok
 #   P                   ping                                                    -> pong
 #   Q                   close
 #
@@ -34,25 +38,52 @@ def Pol.target(+session: J.Json) -> J.Json:
 def Pol.same(+a: J.Json, +b: J.Json) -> Bool:
   Bool.and(String.eq(J.Json.get_str(a, "kind", ""), J.Json.get_str(b, "kind", "")), String.eq(J.Json.get_str(a, "id", ""), J.Json.get_str(b, "id", "")))
 
-def Pol.out(+same: Bool, +r: J.Json, +next: J.Json) -> J.Json:
+def Pol.is_obj(+j: J.Json) -> Bool:
+  match j:
+    case J.Obj{_}: True{}
+    case _: False{}
+
+# Render.native_screen of thin-view.bend: partial rows, folded actions, thread.earlier = window.remaining
+def Pol.earlier(+th: J.Json, +window: J.Json) -> J.Json:
+  match th:
+    case J.Null{}: J.Null{}
+    case +t: NS.Obj.put(t, "earlier", J.Json.nat(J.Json.get_nat(window, "remaining", 0n)))
+
+def Pol.native(+screen: J.Json, +window: J.Json) -> J.Json:
+  +partial = FA.Folded.screen(MT.Partial.screen(screen, window))
+  NS.Obj.put(partial, "thread", Pol.earlier(J.Json.get_obj(partial, "thread"), window))
+
+# with the host's window the screen is the hub's native screen; without it, the raw screen
+def Pol.screen(+has: Bool, +screen: J.Json, +window: J.Json) -> J.Json:
+  match has:
+    case True{}: Pol.native(screen, window)
+    case False{}: screen
+
+# result.overlay: the {key, name, j} object with j drawn the same way
+def Pol.overlay(+has: Bool, +shown: J.Json, +window: J.Json) -> J.Json:
+  NS.Obj.put(shown, "j", Pol.screen(has, J.Json.get_obj(shown, "j"), window))
+
+def Pol.out(+same: Bool, +r: J.Json, +next: J.Json, +window: J.Json) -> J.Json:
+  +has = Pol.is_obj(window)
   match same:
     case True{}:
-      J.Json.obj([J.KV{"remoteReady", J.Flag{True{}}}, J.KV{"shown", J.Json.get_obj(r, "screen")}, J.KV{"session", J.Json.get_obj(r, "session")}, J.KV{"cmds", J.Json.get_obj(r, "cmds")}])
+      J.Json.obj([J.KV{"remoteReady", J.Flag{True{}}}, J.KV{"shown", Pol.screen(has, J.Json.get_obj(r, "screen"), window)}, J.KV{"overlay", Pol.overlay(has, J.Json.get_obj(r, "shown"), window)}, J.KV{"session", J.Json.get_obj(r, "session")}, J.KV{"cmds", J.Json.get_obj(r, "cmds")}])
     case False{}:
       J.Json.obj([J.KV{"remoteReady", J.Flag{False{}}}, J.KV{"nextTarget", next}, J.KV{"session", J.Json.get_obj(r, "session")}, J.KV{"cmds", J.Json.get_obj(r, "cmds")}])
 
-def Pol.view.r(+r: J.Json, +want: J.Json) -> J.Json:
+def Pol.view.r(+r: J.Json, +want: J.Json, +window: J.Json) -> J.Json:
   +next = Pol.target(J.Json.get_obj(r, "session"))
-  Pol.out(Pol.same(next, want), r, next)
+  Pol.out(Pol.same(next, want), r, next, window)
 
 # the session the client sent adopted onto the shared state, the action run,
 # the screen drawn
-def Pol.view(+u0: U.Ui, +now: Nat, +p: J.Json) -> J.Json:
+def Pol.view(+u0: U.Ui, +now0: Nat, +p: J.Json) -> J.Json:
+  +now = J.Json.get_nat(p, "now", now0)
   +key = J.Json.get_str(p, "hub", "")
   +cid = J.Json.get_str(p, "cid", "")
   +u1 = U.Ui.scratch_set(U.Ui.online(U.Ui.set_cid(MS.Session.adopt(U.Ui.tick(u0, now), J.Json.get_obj(p, "session")), cid), True{}), "@sync", "1")
   +u = NS.Ns.prepare(u1, False{}, p, J.Json.get_str(p, "epoch", ""), J.Json.get_str(p, "viewId", ""), J.Json.get_nat(p, "revision", 0n), J.Json.get_str(p, "nativeKey", ""))
-  Pol.view.r(MS.Session.result(MS.Session.act(u, key, cid, now, J.Json.get_str(p, "action", ""), J.Json.get_str(p, "value", "")), key), J.Json.get_obj(p, "target"))
+  Pol.view.r(MS.Session.result(MS.Session.act(u, key, cid, now, J.Json.get_str(p, "action", ""), J.Json.get_str(p, "value", "")), key), J.Json.get_obj(p, "target"), J.Json.get_obj(p, "window"))
 
 # ---- the fold --------------------------------------------------------------
 
@@ -79,6 +110,7 @@ def Pol.step.k(+op: String, +u: U.Ui, +line: String, +now: Nat) -> Step:
   match op:
     case "F": Step{Pol.fold(u, Pol.tail(line)), "ok", False{}}
     case "V": Step{u, J.Json.show(Pol.view(u, now, Maybe.default(&2, J.Json, J.Json.parse(Pol.tail(line)), J.Null{}))), False{}}
+    case "C": Step{U.Ui.tick(u, Maybe.default(&2, Nat, Nat.read(Pol.tail(line)), 0n)), "ok", False{}}
     case "P": Step{u, "pong", False{}}
     case "Q": Step{u, "bye", True{}}
     case _: Step{u, "err", False{}}

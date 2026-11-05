@@ -4,6 +4,7 @@ import {readFileSync,readdirSync} from 'node:fs';
 export const NORMALISATIONS=[
  'N1 clocks: numeric fields at, rid, now, clock, last, since-time keys -> <T>; 10-digit (17xxxxxxxx/18xxxxxxxx) and 13-digit epoch numbers inside strings -> <T>; hh:mm and durations (e.g. "Finished 18:26 · 2s") -> <time>. Reason: wall clock.',
  'N13 ordinals are per client: each client numbers the ids it sees by first appearance in its own stream, so what another client saw first cannot shift them.',
+ 'N14 delta tokens: viewDelta token and base strings (the hub revision a body was kept under) -> ordinals, like ids; an empty base (a whole reply) stays empty.',
  'N2 ids: p/t/g/m-ids with a 10-digit time part (p1793834744-7, t..., g..., m...), stand-in session/message ids (fake-<pid>, m<pid>-n-n, tu<pid>-..), view ids (<gen>:<n>), and the greeting generation and epoch -> ordinals by first appearance per recording (ID1, ID2...). Reason: ids embed time, pids and counters.',
  'N3 viewRevision -> <R> (and checked non-decreasing per client). Reason: counts hub-internal changes, which coalesce with timing.',
  'N4 delta frames: consecutive delta frames of one thread joined into one item with "@<ms>@" stamps stripped; frame boundaries are not compared. Reason: coalescing follows read timing (200 ms pace).',
@@ -30,7 +31,7 @@ function mkNorm(){
   const go=(v,key)=>{
     if(v===undefined||v===null||typeof v==='boolean')return v;
     if(typeof v==='number')return CLOCK_KEYS.has(key)?'<T>':(v>=1.7e9&&v<1.9e9?'<T>':(v>=1.7e12&&v<1.9e12?'<T>':v));
-    if(typeof v==='string'){if(key==='epoch'||key==='generation'||key==='origin'||key==='hub'||key==='viewId')return ord(v);if(key==='viewRevision')return '<R>';return str(v,key)}
+    if(typeof v==='string'){if(v!==''&&(key==='epoch'||key==='generation'||key==='origin'||key==='hub'||key==='viewId'||key==='token'||key==='base'))return ord(v);if(key==='viewRevision')return '<R>';return str(v,key)}
     if(Array.isArray(v))return v.map(x=>go(x,key));
     const o={};for(const k of Object.keys(v).sort())o[k]=go(v[k],k);return o;};
   return go;
@@ -48,6 +49,7 @@ export function normalise(frames){
     go=gof(f.c);const isReply=f.dir==='in'&&f.json&&f.json.t==='reply';
     if(f.vol&&!isReply)continue;const c=f.c,j=f.json,s=S(c);
     if(f.dir==='out'&&(f.kind==='settle'||f.kind==='end'))continue;
+    if(f.dir==='out'&&f.kind==='check'){s.other.push(go(j));continue}
     if(f.dir==='out'){s.out.push(go(j));continue}
     if(f.kind==='http'){s.other.push(go({http:f.status,type:f.ctype,json:j}));continue}
     if(f.kind==='upgrade'||f.kind==='close'||f.kind==='connect-failed'){s.other.push(go({[f.kind]:j}));continue}
