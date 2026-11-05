@@ -138,10 +138,15 @@ final class Journeys: XCTestCase {
 
     // the thread's viewer panel: viewer.open opens it, viewer.source picks Board / Schematic / 3D / Files ...
     private func openViewer(_ kind: String) -> Bool {
-        let open = d.el("viewer.open")
+        let id = "viewer.choice." + kind.lowercased()
         return d.step("open \(kind)", timeout: 25, act: {
-            if !d.el("viewer.close").exists { d.tap(open) }
-            if kind != "Board" { d.tap(d.el("viewer.source")); d.tap(d.app.buttons[kind].firstMatch) }
+            if d.el("viewer.close").exists {
+                // already in the viewer: its kind strip (Board, Schematic, 3D, Mech, Files, Review)
+                let tabBtn = d.app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", String(kind.prefix(3)))).firstMatch
+                d.tap(tabBtn)
+            } else {
+                d.tap(d.el("viewer.open")); d.tap(d.el(id))   // viewer.open lists the kinds as viewer.choice.*
+            }
         }, expect: { d.el("viewer.close").exists })
     }
 
@@ -166,7 +171,7 @@ final class Journeys: XCTestCase {
         guard openThread(0) else { return }
         guard openViewer("Files") else { return }
         d.step("the Files list shows the fixture's readme", act: {}, expect: { d.label("readme.txt").exists })
-        d.step("open readme.txt", act: { d.tap(d.label("readme.txt")) }, expect: { d.app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] 'hello' OR label CONTAINS[c] 'readme'")).count > 1 })
+        d.step("open readme.txt", act: { d.tap(d.label("readme.txt")) }, expect: { d.app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] 'fixture file'")).count > 0 })
         d.shot("file")
     }
 

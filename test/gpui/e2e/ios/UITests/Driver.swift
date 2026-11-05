@@ -72,7 +72,12 @@ final class Driver {
     // a tap that cannot crash the test: a missing element leaves the step to fail with its screenshot and tree
     func tap(_ e: XCUIElement) { if e.waitForExistence(timeout: 4) { e.tap() } }
 
-    func type(_ e: XCUIElement, _ text: String) { if e.waitForExistence(timeout: 4) { e.typeText(text) } }
+    func type(_ e: XCUIElement, _ text: String) {
+        guard e.waitForExistence(timeout: 4) else { return }
+        // typeText needs keyboard focus: tap once more when the keyboard is not up (a back/forward may have dropped it)
+        if !app.keyboards.firstMatch.exists { e.tap(); _ = app.keyboards.firstMatch.waitForExistence(timeout: 2) }
+        if app.keyboards.firstMatch.exists { e.typeText(text) } else { note("no keyboard for typing \(text.prefix(12))") }
+    }
 
     func note(_ s: String) { notes.append(s) }
     func block(_ why: String) { blocked.append(why) }
