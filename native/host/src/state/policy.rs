@@ -3,6 +3,8 @@
 //! metadata) joins that batch. The Ticker and `Auto.read` take the same short lock. `before_commit` does no IO and no await: it folds and decides.
 //! Pure of the hub, so it is tested here.
 use super::autosettle;
+use super::json::gnat;
+use super::watchdog;
 use crate::state::State;
 use serde_json::Value;
 use std::sync::Mutex;
@@ -11,7 +13,7 @@ use std::sync::Mutex;
 /// records) and nothing that grows with the log for its own sake (`stopped.<msg>`, `failed.<msg>`, token totals, uber op lines, session and
 /// seen counts...). A policy that starts reading another family adds its prefix here.
 const KEEP: &[&str] = &["settle.", "autosettle.", "launch.", "launched.", "thread.parent.", "bg.", "watch.", "order.wait.", "wake.", "wakes.", "lock.", "locks.",
-    "secret.ask.", "liveness.", "star.nudge.", "restart.retry", "provider.resume.", "watchdog.", "alert.", "summary.", "notify.", "push.webhook"];
+    "secret.ask.", "liveness.", "star.nudge.", "restart.retry", "provider.resume.", "thread.config.hold.", "watchdog.", "alert.", "summary.", "notify.", "push.webhook"];
 // `told.` is a ledger that grows with the log until the minute tick prunes it (Told.prune: 30 days, 2000 records); it is kept again when the told policy
 // is ported with that prune, not before.
 pub fn lean_keeps(k: &str) -> bool { KEEP.iter().any(|p| k.starts_with(p)) }
@@ -23,17 +25,20 @@ impl Core {
     /// fold a batch and return the events the policies derive from it (already folded here), quiet marks first and then the message metadata:
     /// the marks are judged against the state before the batch, the metadata against the state before each change (Auto.messages.metadata)
     pub fn derive(&mut self, events: &[Value]) -> Vec<Value> {
+        // all judged against the state before the batch, as Bend's Hub.step does: liveness progress (Watchdog.after), then quiet marks
+        let now = events.iter().map(|e| gnat(e, "at", 0)).max().unwrap_or(0);
+        let live = watchdog::after(&self.st, now, events);
         let quiet = autosettle::quiet(&self.st, events);
-        let mut derived = vec![];
+        let mut meta = vec![];
         for e in events {
-            let meta = autosettle::metadata(&self.st, e);
+            let m = autosettle::metadata(&self.st, e); // against the state before each change (Auto.messages.metadata)
             self.st.apply(e);
-            for m in &meta { self.st.apply(m); }
-            derived.extend(meta);
+            for x in &m { self.st.apply(x); }
+            meta.extend(m);
         }
-        for q in &quiet { self.st.apply(q); }
-        // the log order is Bend's (Shelve.auto.fix): the batch, then the quiet marks, then the message metadata
-        quiet.into_iter().chain(derived).collect()
+        for x in live.iter().chain(&quiet) { self.st.apply(x); }
+        // the log order is Bend's: the batch, the liveness records, the quiet marks, then the message metadata
+        live.into_iter().chain(quiet).chain(meta).collect()
     }
     pub fn tick(&self, now_s: u64) -> Vec<Value> { autosettle::changes(&self.st, now_s) }
 }
@@ -104,9 +109,9 @@ mod tests {
     #[test] fn a_batch_gets_its_derived_events_in_the_same_batch() {
         let p = booted();
         let out = p.before_commit(3, vec![msg("t1", "a1", "assistant", 10)]);
-        assert_eq!(out.len(), 3, "the message, then the policies' events");
+        assert_eq!(out.len(), 4, "the message, then the policies' events");
         assert_eq!(out[0]["msg"], "a1");
-        assert_eq!(keys(&out), vec!["autosettle.quiet.t1".to_string(), "autosettle.output.t1".to_string()], "Bend's order: the batch, the quiet marks, then the metadata");
+        assert_eq!(keys(&out), vec!["liveness.t1".to_string(), "autosettle.quiet.t1".to_string(), "autosettle.output.t1".to_string()], "Bend's order: the batch, the liveness record, the quiet marks, then the metadata");
     }
     #[test] fn two_back_to_back_batches_derive_in_order_from_the_state_the_first_left() {
         let p = booted();
@@ -127,9 +132,9 @@ mod tests {
         assert!(p.tick(100).is_empty() && p.read("t1", 100).is_empty(), "nothing is decided while booting");
         let mut c = Core::new(); c.fold_line(P); c.fold_line(T);
         let derived = p.finish_boot(c, 2);
-        assert_eq!(keys(&derived), vec!["autosettle.quiet.t1".to_string(), "autosettle.output.t1".to_string()], "only the batch past line 2 derives");
+        assert_eq!(keys(&derived), vec!["liveness.t1".to_string(), "autosettle.quiet.t1".to_string(), "autosettle.output.t1".to_string()], "only the batch past line 2 derives");
         let again = p.before_commit(4, vec![msg("t1", "a2", "assistant", 11)]);
-        assert_eq!(again.len(), 3, "after boot the batch carries its own events");
+        assert_eq!(again.len(), 4, "after boot the batch carries its own events");
     }
     #[test] fn a_failed_commit_asks_for_a_resync_and_buffers_until_it_is_done() {
         let p = booted();

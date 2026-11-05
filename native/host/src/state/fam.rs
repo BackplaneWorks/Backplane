@@ -6,6 +6,7 @@
 #[path = "uber.rs"] mod uber;
 #[path = "todo.rs"] mod todo;
 #[path = "liveness.rs"] pub mod liveness;
+#[path = "watchdog.rs"] pub mod watchdog;
 #[path = "star.rs"] pub mod star;
 #[path = "ext.rs"] pub mod ext;
 #[path = "policy.rs"] pub mod policy;

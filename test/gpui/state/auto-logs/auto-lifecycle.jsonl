@@ -183,5 +183,11 @@
 {"$":"WakeSet","id":"w4","by":"setd","kind":"weird","target":"z","events":[],"once":true,"note":"","at":1794000025}
 {"$":"WakeSet","id":"w5","by":"pinned","kind":"pr","target":"7","events":[],"once":true,"note":"","at":1794000026}
 {"$":"WakeSet","id":"w6","by":"bg","kind":"work","target":"job1","events":[],"once":true,"note":"","at":1794000027}
+{"$":"SettingSet","key":"liveness.tc","value":"{\"last\":1794000010,\"nudged\":1794000500,\"stalled\":true,\"reported\":true,\"reason\":\"stuck\"}","at":1794000000}
+{"$":"SettingSet","key":"liveness.tp","value":"{\"last\":1794060000,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"x\"}","at":1794000000}
+{"$":"SettingSet","key":"restart.retry.tc","value":"2","at":1794000000}
+{"$":"SettingSet","key":"restart.retry.n.w-launched","value":"3","at":1794000000}
+{"$":"SettingSet","key":"provider.resume.w-parent","value":"1","at":1794000000}
+{"$":"SettingSet","key":"thread.config.hold.w-rep2","value":"on","at":1794000000}
 {"$":"SettingSet","key":"autosettle.version","value":"1","at":1794000000}
 {"$":"SettingSet","key":"settle.done","value":"on","at":1794000100}
