@@ -115,7 +115,7 @@ impl Backplane {
     fn user_entries(&self)->usize {self.data["thread"]["entries"].as_array().map_or(0,|e|e.iter().filter(|e|e["kind"]=="user").count())}
     /// Ctrl/Cmd-C with no text field focused (a click in the timeline leaves none): copy what is selected there.
     fn copy_selection(&mut self,_:&CopySelection,_:&mut Window,cx:&mut Context<Self>){self.timeline_copy(cx);}
-    fn close_popup(&mut self,_:&ClosePopup,_:&mut Window,cx:&mut Context<Self>){if self.data["settings"].is_object() {let _=self.tx.try_send(Command::Action("flag".into(),"settings".into()));}else{let _=self.tx.try_send(Command::Action("skill-close".into(),String::new()));}cx.notify();}
+    fn close_popup(&mut self,_:&ClosePopup,_:&mut Window,cx:&mut Context<Self>){if self.data["settings"].is_object() {let _=self.tx.try_send(Command::Action("flag".into(),"settings".into()));}else if let Some(a)=screens::bots::close_form(&self.data) {let _=self.tx.try_send(a);}else{let _=self.tx.try_send(Command::Action("skill-close".into(),String::new()));}cx.notify();}
 }
 fn main()->anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();

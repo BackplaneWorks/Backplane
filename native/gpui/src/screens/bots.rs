@@ -48,7 +48,7 @@ fn btn(cx: &mut Context<Backplane>, light: bool, id: String, label: String, on: 
     let c = |n: &str| theme::color(light, n);
     let d = div().id(SharedString::from(id)).px_2().py_1().text_size(px(12.)).cursor_pointer().border_1();
     let d = if on { d.bg(c("accent")).text_color(c("on-accent")).border_color(c("accent")) } else { d.bg(c("raise")).border_color(c("line")).hover(|s| s.bg(c("panel"))) };
-    d.child(label).on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(cmd(&arg)); cx.notify(); })).into_any_element()
+    d.child(label).on_click(cx.listener(move |this, _, _, cx| { super::settings::flush_fields(this); let _ = this.tx.try_send(cmd(&arg)); cx.notify(); })).into_any_element()
 }
 fn tab_cmd(id: &str) -> Command { act("bot-tab", id) }
 fn pick_cmd(id: &str) -> Command { act("room-pick", id) }
@@ -61,9 +61,34 @@ fn create_bot(_: &str) -> Command { act("bot-create", "") }
 fn save_room(_: &str) -> Command { act("room-save", "") }
 fn close_bot_form(_: &str) -> Command { act("form-close", "@bnew") }
 fn close_room_form(_: &str) -> Command { act("form-close", "@rnew") }
-fn send_room(_: &str) -> Command { act("room-post", "") }
-fn send_remote(_: &str) -> Command { act("remote-send", "") }
 fn provider_cmd(v: &str) -> Command { Command::Action("bfield".into(), format!("provider{SEP}{v}")) }
+
+/// A disabled control: drawn dimmed, no pointer, no handler, sends nothing.
+fn inert(light: bool, label: &str) -> AnyElement {
+    let c = |n: &str| theme::color(light, n);
+    div().px_2().py_1().text_size(px(12.)).border_1().border_color(c("line")).bg(c("raise")).text_color(c("faint")).opacity(0.6).child(label.to_string()).into_any_element()
+}
+
+/// What a form or page asks the window to focus when it opens: the name of its first typed field, "" for none.
+pub fn focus_target(data: &Value) -> String {
+    if data["newBot"].is_object() { return "name".into(); }
+    if data["newRoom"].is_object() { return "rname".into(); }
+    match data["bot"]["kind"].as_str() { Some("room") => "rpost".into(), Some("remote") => "rtext".into(), _ => String::new() }
+}
+/// Esc on a form: the action that drops it.
+pub fn close_form(data: &Value) -> Option<Command> {
+    if data["newBot"].is_object() { Some(act("form-close", "@bnew")) } else if data["newRoom"].is_object() { Some(act("form-close", "@rnew")) } else { None }
+}
+
+/// Send a post: the box's pending typing first, then the send action, then the box is emptied (nothing is sent for blank text).
+pub fn send_post(this: &mut Backplane, field: &str, action: &str, cx: &mut Context<Backplane>) {
+    let Some(input) = this.screens.fields.get(field).map(|s| s.input.clone()) else { return };
+    if input.read(cx).content.trim().is_empty() { return; }
+    super::settings::flush_fields(this);
+    let _ = this.tx.try_send(act(action, ""));
+    input.update(cx, |i, cx| i.set(String::new(), cx));
+    cx.notify();
+}
 
 fn field_box(light: bool, fields: &HashMap<String, FieldSlot>, name: &str) -> Option<AnyElement> {
     let c = |n: &str| theme::color(light, n);
@@ -80,7 +105,7 @@ pub fn forms(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, 
         for n in ["name", "persona"] { if let Some(b) = field_box(light, fields, n) { els.push(b); } }
         let provs = providers(nb);
         if !provs.is_empty() { els.push(div().flex().flex_wrap().gap_2().children(provs.iter().enumerate().map(|(i, p)| btn(cx, light, format!("prov-{i}"), p.label.clone(), p.on, provider_cmd, p.provider.clone())).collect::<Vec<_>>()).into_any_element()); }
-        (title, body, close, go, go_label, ok) = ("New bot", els, close_bot_form, create_bot, "Create", !string(nb, "name").trim().is_empty());
+        (title, body, close, go, go_label, ok) = ("New bot", els, close_bot_form, create_bot, "Create", fields.get("name").map_or(false, |s| !s.input.read(cx).content.trim().is_empty()));
     } else if nr.is_object() {
         let mut els: Vec<AnyElement> = Vec::new();
         if let Some(b) = field_box(light, fields, "rname") { els.push(b); }
@@ -92,7 +117,7 @@ pub fn forms(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, 
         .child(div().font_weight(FontWeight::BOLD).text_size(px(15.)).child(title))
         .children(body)
         .child(div().flex().gap_2().child(btn(cx, light, "form-cancel".into(), "Cancel".into(), false, close, String::new()))
-            .child(div().opacity(if ok { 1. } else { 0.45 }).child(btn(cx, light, "form-go".into(), go_label.into(), true, if ok { go } else { |_| Command::Page(String::new()) }, String::new()))))
+            .child(if ok { btn(cx, light, "form-go".into(), go_label.into(), true, go, String::new()) } else { inert(light, go_label) }))
         .into_any_element())
 }
 
@@ -153,7 +178,7 @@ fn hooks_page(cx: &mut Context<Backplane>, light: bool, bot: &Value) -> AnyEleme
     }).collect::<Vec<_>>()).into_any_element()
 }
 
-fn talk_page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, bot: &Value, field: &str, send: fn(&str) -> Command) -> AnyElement {
+fn talk_page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, bot: &Value, field: &'static str, action: &'static str) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let ps = posts(bot);
     let mut list = div().id("posts").flex_1().min_h_0().overflow_y_scroll().flex().flex_col().gap_2().p_3();
@@ -165,7 +190,7 @@ fn talk_page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, 
     div().size_full().flex().flex_col().child(list)
         .child(div().flex().gap_2().items_end().p_3().border_t_1().border_color(c("line"))
             .child(div().flex_1().px_2().py_1().border_1().border_color(c("line")).bg(c("view")).children(fields.get(field).map(|s| s.input.clone())))
-            .child(btn(cx, light, "talk-send".into(), "Send".into(), true, send, String::new()))).into_any_element()
+            .child(div().id("talk-send").px_2().py_1().text_size(px(12.)).cursor_pointer().border_1().bg(c("accent")).text_color(c("on-accent")).border_color(c("accent")).child("Send").on_click(cx.listener(move |this, _, _, cx| send_post(this, field, action, cx))))).into_any_element()
 }
 
 /// The page under a bot's tab strip, or a room's or remote bot's whole page; None for a bot's chat (the thread view) and for no bot.
@@ -175,8 +200,8 @@ pub fn page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
     let header = |t: String| div().h(px(36.)).flex_shrink_0().px_3().flex().items_center().border_b_1().border_color(c("line")).font_weight(FontWeight::BOLD).child(t);
     let frame = |inner: AnyElement, top: f32, header: Option<Div>| div().id("bot-page").absolute().top(px(top)).left_0().right_0().bottom_0().occlude().bg(c("bg")).flex().flex_col().children(header).child(div().id("bot-body").flex_1().min_h_0().overflow_y_scroll().child(inner)).into_any_element();
     match kind {
-        "room" => Some(div().id("room-page").absolute().inset_0().occlude().bg(c("bg")).flex().flex_col().child(header(bot["title"].as_str().map(str::to_string).unwrap_or_else(|| string(bot, "name")))).child(div().flex_1().min_h_0().child(talk_page(cx, light, fields, bot, "rpost", send_room))).into_any_element()),
-        "remote" => Some(div().id("remote-page").absolute().inset_0().occlude().bg(c("bg")).flex().flex_col().child(header(bot["title"].as_str().map(str::to_string).unwrap_or_else(|| string(bot, "name")))).child(div().flex_1().min_h_0().child(talk_page(cx, light, fields, bot, "rtext", send_remote))).into_any_element()),
+        "room" => Some(div().id("room-page").absolute().inset_0().occlude().bg(c("bg")).flex().flex_col().child(header(bot["title"].as_str().map(str::to_string).unwrap_or_else(|| string(bot, "name")))).child(div().flex_1().min_h_0().child(talk_page(cx, light, fields, bot, "rpost", "room-post"))).into_any_element()),
+        "remote" => Some(div().id("remote-page").absolute().inset_0().occlude().bg(c("bg")).flex().flex_col().child(header(bot["title"].as_str().map(str::to_string).unwrap_or_else(|| string(bot, "name")))).child(div().flex_1().min_h_0().child(talk_page(cx, light, fields, bot, "rtext", "remote-send"))).into_any_element()),
         "bot" => {
             let tab = bot["tab"].as_str().unwrap_or("chat");
             let inner = match tab {
@@ -211,8 +236,14 @@ mod tests {
         let f = j(r#"{"picks":[{"id":"b1","name":"Kit","on":true},{"id":"b2","name":"Mochi","on":false}],"providers":[{"label":"Claude","provider":"claude","on":false}]}"#);
         assert!(picks(&f)[0].on && !picks(&f)[1].on); assert_eq!(providers(&f)[0].provider, "claude");
     }
+    #[test] fn focus_and_escape_follow_the_open_form_or_page() {
+        assert_eq!(focus_target(&j(r#"{"newBot":{}}"#)), "name"); assert_eq!(focus_target(&j(r#"{"newRoom":{}}"#)), "rname");
+        assert_eq!(focus_target(&j(r#"{"bot":{"kind":"room"}}"#)), "rpost"); assert_eq!(focus_target(&j(r#"{"bot":{"kind":"remote"}}"#)), "rtext"); assert_eq!(focus_target(&j(r#"{"bot":{"kind":"bot"}}"#)), "");
+        assert!(matches!(close_form(&j(r#"{"newBot":{}}"#)), Some(Command::Action(a, v)) if a == "form-close" && v == "@bnew"));
+        assert!(matches!(close_form(&j(r#"{"newRoom":{}}"#)), Some(Command::Action(a, v)) if v == "@rnew")); assert!(close_form(&j(r#"{"bot":{"kind":"room"}}"#)).is_none());
+    }
     #[test] fn presses_are_the_phones_actions() {
-        for (c, a, v) in [(tab_cmd("memory"), "bot-tab", "memory"), (pick_cmd("b1"), "room-pick", "b1"), (forget_cmd("k"), "mem-forget", "k"), (routine_toggle("r"), "routine-toggle", "r"), (hook_revoke("h"), "hook-revoke", "h"), (close_bot_form(""), "form-close", "@bnew"), (close_room_form(""), "form-close", "@rnew"), (send_room(""), "room-post", ""), (provider_cmd("claude"), "bfield", "provider\u{1f}claude")] {
+        for (c, a, v) in [(tab_cmd("memory"), "bot-tab", "memory"), (pick_cmd("b1"), "room-pick", "b1"), (forget_cmd("k"), "mem-forget", "k"), (routine_toggle("r"), "routine-toggle", "r"), (hook_revoke("h"), "hook-revoke", "h"), (close_bot_form(""), "form-close", "@bnew"), (close_room_form(""), "form-close", "@rnew"), (provider_cmd("claude"), "bfield", "provider\u{1f}claude")] {
             match c { Command::Action(x, y) => assert_eq!((x.as_str(), y.as_str()), (a, v)), c => panic!("{c:?}") }
         }
     }
