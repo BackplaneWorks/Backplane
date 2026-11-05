@@ -29,6 +29,8 @@ pub struct World {
     msgs: HashMap<(String, String), usize>, bot_threads: HashSet<String>,
     /// messages being delivered (decided, not yet filed by the agent): a request sent again meanwhile is the same request
     pub inflight: HashSet<(String, String)>,
+    /// the uberbot's ops and registers, folded by the state lane's fold (UberOp, UberSet, machine.id, uber.offer, uber.link.*): only those lines reach it
+    pub ub: crate::state::State,
     seen: usize, line: usize,
 }
 /// the settings the bots lane reads: the new bot's provider and model, the mail switch, the uberbot
@@ -60,9 +62,29 @@ impl World {
     pub fn setting(&self, k: &str, d: &str) -> String { self.settings.get(k).cloned().unwrap_or_else(|| d.to_string()) }
     /// Uber.is: the uberbot of this machine
     pub fn uber_is(&self, bot: &str) -> bool { !bot.is_empty() && !bot.contains('~') && self.settings.get("uber.bot").map_or(false, |b| b == bot) && self.live(bot) }
+    /// Uber.bot: the uberbot's bot id, "" when none or gone
+    pub fn uber_bot(&self) -> String { let b = self.settings.get("uber.bot").cloned().unwrap_or_default(); if self.uber_is(&b) { b } else { String::new() } }
     /// Triage.owner: the uberbot, with a thread
     pub fn triage_owner(&self, bot: &str) -> bool { self.uber_is(bot) && self.bots.get(bot).map_or(false, |b| !b.thread.is_empty()) }
     pub fn lines_seen(&self) -> usize { self.seen }
+    // ---- the uberbot's registers (ubersync.bend) ----
+    fn ubs(&self, k: &str) -> String { self.ub.settings.get(k).cloned().unwrap_or_default() }
+    /// Ub.uid, Ub.me
+    pub fn uid(&self) -> String { self.ubs("uber.uid") }
+    pub fn me(&self) -> String { self.ubs("machine.id") }
+    /// Ub.on: this machine has an id and an uberbot of its own to sync
+    pub fn ub_on(&self) -> bool { !self.me().is_empty() && !self.uid().is_empty() && self.bots.get(&self.ubs("uber.bot")).map_or(false, |b| !b.deleted) }
+    /// Ub.vv.of: the highest op of an origin this machine has
+    pub fn vv(&self, uid: &str, origin: &str) -> u64 { self.ubs(&format!("uber.vv.{uid}.{origin}")).parse().unwrap_or(0) }
+    pub fn hlc(&self, uid: &str) -> String { self.ubs(&format!("uber.hlc.{uid}")) }
+    /// a register's op (JSON text), "" when it has none
+    pub fn reg(&self, uid: &str, key: &str) -> String { self.ubs(&format!("uber.r.{uid}.{key}")) }
+    /// Ub.lease: (holder, term)
+    pub fn lease(&self) -> (String, u64) { let v: Value = serde_json::from_str(&self.reg(&self.uid(), "lease")).unwrap_or(Value::Null); (v["holder"].as_str().unwrap_or("").to_string(), v["term"].as_u64().unwrap_or(0)) }
+    /// Ub.holder.me: this machine holds the conversation (and with no lease yet, the only machine there is does)
+    pub fn holder_me(&self) -> bool { let h = self.lease().0; h.is_empty() || h == self.me() }
+    /// Ub.pin: where a routine (global id) is pinned
+    pub fn pin(&self, gid: &str) -> String { let v: Value = serde_json::from_str(&self.reg(&self.uid(), &format!("routine:{gid}"))).unwrap_or(Value::Null); v["pin"].as_str().unwrap_or("").to_string() }
 
     pub fn sync(&mut self, store: &Store) -> anyhow::Result<()> {
         let total = store.len();
@@ -75,11 +97,11 @@ impl World {
     }
     pub fn apply_line(&mut self, line: &str) {
         let Some(t) = line.strip_prefix("{\"$\":\"").and_then(|r| r.split('"').next()) else { return };
-        const READ: [&str; 23] = ["BotSet", "BotDeleted", "RoomSet", "RoomDeleted", "RoomPosted", "HookSet", "HookHit", "RoutineSet", "RoutineDeleted", "RoutineFired",
-            "MemorySaved", "MemoryForgot", "SpaceSet", "SpacePageSet", "PeerSet", "RoutinePlan", "RoutineSlot", "RoutineDone", "SettingSet", "MessagePosted", "ThreadCreated", "TaskSet", "UberSet"];
+        const READ: [&str; 24] = ["BotSet", "BotDeleted", "RoomSet", "RoomDeleted", "RoomPosted", "HookSet", "HookHit", "RoutineSet", "RoutineDeleted", "RoutineFired",
+            "MemorySaved", "MemoryForgot", "SpaceSet", "SpacePageSet", "PeerSet", "RoutinePlan", "RoutineSlot", "RoutineDone", "SettingSet", "MessagePosted", "ThreadCreated", "TaskSet", "UberSet", "UberOp"];
         if !READ.contains(&t) { return }
         // cheap tests before a parse: most lines of a big log are messages of other threads and settings nobody here reads
-        if t == "SettingSet" && !["agent.", "mail.on", "uber.", "person.tz", "tz."].iter().any(|k| line.contains(k)) { return }
+        if t == "SettingSet" && !["agent.", "mail.on", "uber.", "person.tz", "tz.", "machine.id"].iter().any(|k| line.contains(k)) { return }
         if t == "MessagePosted" {
             let th = line.split_once("\"thread\":\"").and_then(|(_, r)| r.split('"').next()).unwrap_or("");
             if !self.bot_threads.contains(th) { return }
@@ -143,8 +165,9 @@ impl World {
                                    if s(e, "url").is_empty() { old.as_ref().map(|o| o.url.clone()).unwrap_or_default() } else { s(e, "url").into() });
                 self.peers.insert(id.clone(), Peer { id, name, url, created: old.map_or(at, |o| if o.revoked { at } else { o.created }), revoked: b(e, "revoked") });
             }
-            "UberSet" => { self.settings.insert("uber.bot".into(), s(e, "bot").into()); self.settings.insert("uber.uid".into(), s(e, "uid").into()); }
-            "SettingSet" => { let k = s(e, "key"); if kept(k) { self.settings.insert(k.into(), s(e, "value").into()); } }
+            "UberSet" => { self.settings.insert("uber.bot".into(), s(e, "bot").into()); self.settings.insert("uber.uid".into(), s(e, "uid").into()); self.ub.apply(e); }
+            "UberOp" => { self.ub.apply(e); }
+            "SettingSet" => { let k = s(e, "key"); if k == "machine.id" || k == "uber.offer" || k.starts_with("uber.link.") { self.ub.apply(e); } if kept(k) { self.settings.insert(k.into(), s(e, "value").into()); } }
             "MessagePosted" => { let th = s(e, "thread"); if self.bot_threads.contains(th) { self.msgs.insert((th.into(), s(e, "msg").into()), self.line); } }
             _ => {}
         }

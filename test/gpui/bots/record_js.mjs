@@ -14,7 +14,27 @@ await sleep(4000);
 const c=await client(h);
 const R=async(m,p)=>{const r=await c.rpc(m,p);const o=r?.o;return {ok:o?.ok,error:o?.error,bot:o?.bot}};
 const steps=[];const S=async(name,m,p)=>{const r=await R(m,p);steps.push({name,m,ok:r.ok,error:r.error??null});await sleep(250);return r};
-if(scen==='routines'){
+if(scen==='uber'){
+const ada=(await S('create ada','bots.create',{name:'ada'})).bot;
+const bub=(await S('create bub uber','bots.create',{name:'bub',uber:true})).bot;
+await sleep(3000);
+await S('uber again','bots.uber',{bot:bub});
+await S('uber a missing bot','bots.uber',{bot:'p1~b9'});
+await sleep(130000);
+await S('remember','bots.remember',{bot:bub,key:'Home Town',kind:'fact',text:'Oulu',tags:'x'});
+await S('remember on a plain bot','bots.remember',{bot:ada,key:'k',kind:'note',text:'t'});
+await S('forget','bots.forget',{bot:bub,key:'Home Town'});
+await S('routine','bots.routine',{bot:bub,routine:'ro1',name:'later',at:'in 3d',prompt:'p'});
+await S('routine daily','bots.routine',{bot:bub,routine:'ro2',name:'daily',schedule:'daily 09:30',prompt:'q'});
+await S('pin here','bots.pin',{routine:'ro2',pin:'here'});
+await S('pin unpin','bots.pin',{routine:'ro2',pin:''});
+await S('pin a plain bot routine','bots.pin',{routine:'zz',pin:'here'});
+await S('routine delete','bots.routine_delete',{routine:'ro1'});
+await S('edit bub','bots.edit',{bot:bub,persona:'calm'});
+await S('uber_home as holder','bots.uber_home',{});
+await S('join with nothing on offer','bots.uber_join',{uid:'u1-x'});
+await sleep(1500);
+}else if(scen==='routines'){
 const ada=(await S('create ada','bots.create',{name:'ada'})).bot;
 await S('routine daily','bots.routine',{bot:ada,routine:'ro1',name:'morning',schedule:'daily 09:30',prompt:'good morning'});
 await S('routine bad schedule','bots.routine',{bot:ada,name:'x',schedule:'whenever',prompt:'p'});
