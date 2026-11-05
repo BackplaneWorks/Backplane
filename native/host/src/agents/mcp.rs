@@ -21,7 +21,7 @@ pub trait ToolSet: Send + Sync {
     fn call<'a>(&'a self, thread: &'a str, name: &'a str, a: &'a Value) -> crate::api::Fut<'a, (bool, Value)>;
 }
 pub const TOOLS_JSON: &str = include_str!("../../../../test/gpui/agents/fixtures/mcp-tools.json");
-pub const IMPLEMENTED: &[&str] = &["orchestrator_capabilities", "review_comment", "review_comments", "thread_launch", "delegate_task", "task_status", "task_cancel", "thread_list", "thread_read", "thread_send", "thread_update", "thread_wait", "thread_interrupt", "viewer_show", "permission_prompt", "kicad_ipc", "kicad_ipc_status", "terminal_open", "terminal_read", "terminal_send", "terminal_close", "preview_open", "preview_navigate", "preview_snapshot", "preview_click", "preview_type", "preview_press", "preview_scroll", "preview_evaluate", "preview_wait_for", "preview_resize", "preview_status", "secret_request", "secret_list", "secret_run", "settings_inspect", "settings_propose"];
+pub const IMPLEMENTED: &[&str] = &["orchestrator_capabilities", "review_comment", "review_comments", "work_run", "work_watch", "work_list", "work_cancel", "work_unwatch", "thread_launch", "delegate_task", "task_status", "task_cancel", "thread_list", "thread_read", "thread_send", "thread_update", "thread_wait", "thread_interrupt", "viewer_show", "permission_prompt", "kicad_ipc", "kicad_ipc_status", "terminal_open", "terminal_read", "terminal_send", "terminal_close", "preview_open", "preview_navigate", "preview_snapshot", "preview_click", "preview_type", "preview_press", "preview_scroll", "preview_evaluate", "preview_wait_for", "preview_resize", "preview_status", "secret_request", "secret_list", "secret_run", "settings_inspect", "settings_propose"];
 const MAX_BODY: usize = 4 << 20;
 const MAX_CONNS: usize = 256;
 const MAX_PARKED_PER_THREAD: usize = 16;
@@ -169,6 +169,11 @@ impl Mcp {
             "thread_read" => ag.tool_read(thread, &a).await,
             "review_comment" => ag.tool_review_comment(thread, &a).await,
             "review_comments" => ag.tool_review_comments(thread).await,
+            "work_run" => ag.tool_work_run(thread, &a).await,
+            "work_watch" => ag.tool_work_watch(thread, &a).await,
+            "work_list" => ag.tool_work_list(thread).await,
+            "work_cancel" => ag.tool_work_cancel(thread, &a).await,
+            "work_unwatch" => ag.tool_work_unwatch(thread, &a).await,
             "thread_launch" => ag.tool_launch(thread, &a).await,
             "delegate_task" => ag.tool_delegate(thread, &a).await,
             "task_status" => ag.tool_task_status(thread, &a).await,

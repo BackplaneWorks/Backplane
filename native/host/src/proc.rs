@@ -21,6 +21,8 @@ pub enum Kind {
     Shell,
     /// an agent CLI (claude, codex, ...)
     Agent,
+    /// a REAL agent CLI for a turn the person started (side-by-side mode only: `copy::person_turn_allowed()`); the only other kind that runs a real agent on a copy
+    PersonTurn,
 }
 
 /// Why a copy does not run this, or None. `on` is the copy switch (a parameter so the rule is testable).
@@ -29,13 +31,14 @@ pub fn refusal_with(on: bool, kind: Kind, program: &str, agents_dir: Option<&str
     let base = program.rsplit('/').next().unwrap_or(program);
     let no = || Some(copy::refusal(base));
     match kind {
-        Kind::Net | Kind::Terminal | Kind::Browser | Kind::Shell => no(),
+        Kind::Net | Kind::Terminal | Kind::Browser | Kind::Shell | Kind::PersonTurn => no(), // PersonTurn: refused here; the global `refusal` lets it through in side-by-side mode
         Kind::Agent => match agents_dir { Some(d) if !d.is_empty() && program.starts_with(&format!("{}/", d.trim_end_matches('/'))) => None, _ => no() },
         Kind::Local => if copy::refused_with(true, program, &[]) { no() } else { None },
     }
 }
 fn refusal(kind: Kind, program: &str) -> Option<String> {
     if !copy::on() { return None }
+    if kind == Kind::PersonTurn && copy::person_turn_allowed() { return None }
     refusal_with(true, kind, program, std::env::var("BACKPLANE_AGENTS").ok().as_deref())
 }
 fn dead(program: &str, why: &str) -> String { eprintln!("{why}"); format!("/nonexistent/backplane-copy-refused/{}", program.rsplit('/').next().unwrap_or(program)) }
@@ -54,6 +57,30 @@ pub fn std_cmd<S: AsRef<OsStr>>(kind: Kind, program: S) -> std::process::Command
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // side-by-side: the person's turn is the one real agent on a copy, and nothing else opens up with it
+    #[test] fn a_person_turn_is_refused_on_a_copy_by_the_pure_rule_and_free_off_a_copy() {
+        assert!(refusal_with(true, Kind::PersonTurn, "/home/u/.local/bin/claude", None).is_some(), "refused unless side-by-side lets it through (the global `refusal`)");
+        assert!(refusal_with(false, Kind::PersonTurn, "claude", None).is_none(), "not a copy: no gate");
+    }
+    #[test] fn side_by_side_probe_child() { // run by the tests below with BACKPLANE_COPY=1 and the flag as given
+        let Ok(mode) = std::env::var("BP_SBS_PROBE") else { return };
+        assert!(copy::on());
+        let person = refusal(Kind::PersonTurn, "/home/u/.local/bin/claude").is_none();
+        assert_eq!(person, mode == "on", "PersonTurn runs only with the flag");
+        assert_eq!(copy::person_turn_allowed(), mode == "on");
+        for (k, p) in [(Kind::Agent, "/home/u/.local/bin/claude"), (Kind::Net, "curl"), (Kind::Shell, "sh"), (Kind::Terminal, "/bin/bash"), (Kind::Browser, "b"), (Kind::Local, "gh")] {
+            assert!(refusal(k, p).is_some(), "{k:?} {p} stays refused in side-by-side mode");
+        }
+        println!("sbs_probe_ok {mode}");
+    }
+    fn sbs_child(mode: &str, flag: Option<&str>) -> String {
+        let mut c = std::process::Command::new(std::env::current_exe().unwrap()); c.args(["proc::tests::side_by_side_probe_child", "--exact", "--nocapture", "--test-threads=1"]).env("BACKPLANE_COPY", "1").env("BP_SBS_PROBE", mode).env_remove("BACKPLANE_AGENTS");
+        match flag { Some(f) => { c.env("BACKPLANE_SIDE_BY_SIDE", f); } None => { c.env_remove("BACKPLANE_SIDE_BY_SIDE"); } }
+        let o = c.output().unwrap(); assert!(o.status.success(), "{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr)); String::from_utf8_lossy(&o.stdout).into_owned()
+    }
+    #[test] fn with_the_side_by_side_flag_only_a_person_turn_may_run_a_real_agent_and_every_other_gate_holds() { assert!(sbs_child("on", Some("1")).contains(&format!("sbs_probe_ok on"))) }
+    #[test] fn without_the_flag_or_with_a_wrong_value_a_person_turn_is_refused_too() { assert!(sbs_child("off", None).contains("sbs_probe_ok off")); assert!(sbs_child("off", Some("yes")).contains("sbs_probe_ok off")); assert!(sbs_child("off", Some("0")).contains("sbs_probe_ok off")) }
 
     // a copy runs nothing that acts outside its home
     #[test] fn a_copy_refuses_network_terminal_browser_shell_and_foreign_agents() {

@@ -17,6 +17,10 @@ pub fn is_on(v: &str) -> bool { v == "1" }
 /// The switch, read once at start.
 pub fn on() -> bool { static ON: OnceLock<bool> = OnceLock::new(); *ON.get_or_init(|| is_on(&std::env::var("BACKPLANE_COPY").unwrap_or_default())) }
 
+/// Side-by-side mode (docs/gpui/SIDE-BY-SIDE.md): a copy on which the person's own `turn.start` may start a REAL agent (`proc::Kind::PersonTurn`). Needs `BACKPLANE_COPY=1`
+/// as well; the flag alone allows nothing. Read once.
+pub fn person_turn_allowed() -> bool { static ON: OnceLock<bool> = OnceLock::new(); *ON.get_or_init(|| on() && std::env::var("BACKPLANE_SIDE_BY_SIDE").map_or(false, |v| v == "1")) }
+
 /// Copy.note: said in the first log lines.
 pub const NOTE: &str = "BACKPLANE_COPY=1: a copy of a log; no watched work, deploys, pushes, far pushes, network commands or git that writes; agents are stand-in blocks";
 /// What a client that asked for git that writes is told (it would wait for an answer that never comes).
