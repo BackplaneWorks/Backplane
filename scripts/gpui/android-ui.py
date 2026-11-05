@@ -19,6 +19,15 @@ def match(n, text, exact):
 cmd = sys.argv[1]
 t = dump()
 if cmd == "dump": print(len(nodes(t)))
+elif cmd in ("bounds", "rowbox"):
+    # bounds TEXT [exact] [nth]  -> l t r b of the node; rowbox: of its nearest clickable ancestor
+    text = sys.argv[2]; nth = int(sys.argv[3]) if len(sys.argv) > 3 else 0
+    par = {c: p for p in t.iter() for c in p}
+    ms = [n for n in nodes(t) if match(n, text, True)]
+    n = ms[nth]
+    if cmd == "rowbox":
+        while n is not None and n.get("clickable") != "true": n = par.get(n)
+    print(*re.findall(r"\d+", n.get("bounds")))
 elif cmd in ("find", "has", "count"):
     text = sys.argv[2]; exact = len(sys.argv) > 3 and sys.argv[3] == "exact"
     ms = [n for n in nodes(t) if match(n, text, exact)]

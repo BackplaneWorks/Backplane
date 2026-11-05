@@ -15,7 +15,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 
-// The sidebar brand mark of the web client (style.css .brand-mark): 24 px, the same art in the theme's colours
+// The brand mark of the web client as it shows at phone width (style.css .topbar .brand-mark: 18 px; the desktop sidebar's is 24), the same art in the theme's colours
 // (dark: favicon.svg / apple-touch-icon art on #111410; light: favicon-light.svg, white with a black mark,
 // commit 80cc30e499), `contain`, vector, with the connection square (.conn: 7 px, ok green or bad red,
 // ringed by the panel colour, right -2 px bottom -1 px).
@@ -25,9 +25,9 @@ fun BrandMark(online: Boolean, modifier: Modifier = Modifier) {
     val ring = if (light) Color(0xFFF1F0EC) else Color(0xFF13161B)
     val ok = if (light) Color(0xFF1C8550) else Color(0xFF58C28A)
     val bad = if (light) Color(0xFFC93434) else Color(0xFFF06A6A)
-    Box(modifier.size(24.dp)) {
+    Box(modifier.size(18.dp)) {
         Image(painterResource(if (light) R.drawable.brand_light else R.drawable.brand_dark), "Backplane",
-            Modifier.size(24.dp), contentScale = ContentScale.Fit)
+            Modifier.size(18.dp), contentScale = ContentScale.Fit)
         Box(Modifier.align(androidx.compose.ui.Alignment.BottomEnd).offset(2.dp, 1.dp).size(11.dp).background(ring)) {
             Box(Modifier.align(androidx.compose.ui.Alignment.Center).size(7.dp).background(if (online) ok else bad))
         }
