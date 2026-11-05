@@ -144,7 +144,7 @@ impl Element for SelText {
         let range = { let r = self.reg.borrow(); r.blocks.get(self.ord).and_then(|b| r.sel.within(self.ord, b.text.len())) };
         if let Some(range) = range {
             let lh = layout.line_height();
-            let tint = { let mut a = theme::color(self.light, "accent"); a.a = 0.28; a };
+            let tint = select::highlight(self.light);
             if let (Some(pa), Some(pb)) = (layout.position_for_index(range.start), layout.position_for_index(range.end)) {
                 let (left, right) = (bounds.left(), bounds.right());
                 if pa.y == pb.y { window.paint_quad(fill(Bounds::from_corners(pa, point(pb.x, pb.y + lh)), tint)); }
@@ -157,6 +157,17 @@ impl Element for SelText {
             }
         }
         styled.paint(id, inspector, bounds, rl, pre, window, cx);
+        // the OS I-beam over selectable text, the hand over a link
+        let hb = window.insert_hitbox(bounds, HitboxBehavior::Normal);
+        window.set_cursor_style(CursorStyle::IBeam, &hb);
+        let lh = layout.line_height();
+        let links: Vec<Range<usize>> = self.reg.borrow().blocks.get(self.ord).map(|b| b.links.iter().map(|(r, _)| r.clone()).collect()).unwrap_or_default();
+        for r in links {
+            if let (Some(pa), Some(pb)) = (layout.position_for_index(r.start), layout.position_for_index(r.end)) {
+                let rect = if pa.y == pb.y { Bounds::from_corners(pa, point(pb.x, pb.y + lh)) } else { Bounds::from_corners(point(bounds.left(), pa.y), point(bounds.right(), pb.y + lh)) };
+                let h = window.insert_hitbox(rect, HitboxBehavior::Normal); window.set_cursor_style(CursorStyle::PointingHand, &h);
+            }
+        }
         if let Some(b) = self.reg.borrow_mut().blocks.get_mut(self.ord) { b.layout = Some(layout); }
     }
 }

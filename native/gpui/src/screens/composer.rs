@@ -67,6 +67,7 @@ pub struct Composer {
     line_height: Pixels,
     scroll_y: Pixels,
     selecting: bool,
+    blink: super::blink::Blink,
     pub light: bool,
     /// Show every character as `*` (same byte length, so offsets stay exact); copy and cut give nothing.
     pub masked: bool,
@@ -83,7 +84,7 @@ impl Composer {
     pub fn new(cx: &mut Context<Self>) -> Self { Self::with_context(cx, "Composer") }
     /// A composer with its own key context: "Composer" sends on Enter (main.rs), "AskInput" emits Submit.
     pub fn with_context(cx: &mut Context<Self>, ctx: &'static str) -> Self {
-        Self { light: false, masked: false, ctx, focus: cx.focus_handle(), ed: Editor::default(), content: "".into(), placeholder: "Ask anything: @bot, >thread, %project, #room, $skill, /btw".into(),
+        Self { blink: Default::default(), light: false, masked: false, ctx, focus: cx.focus_handle(), ed: Editor::default(), content: "".into(), placeholder: "Ask anything: @bot, >thread, %project, #room, $skill, /btw".into(),
             rows: vec![], bounds: None, line_height: px(20.), scroll_y: px(0.), selecting: false }
     }
     pub fn set(&mut self, text: String, cx: &mut Context<Self>) { self.ed.set(&text); self.sync(cx); }
@@ -247,8 +248,6 @@ fn runs_for(len: usize, base: &TextRun, marked: Option<&Range<usize>>) -> Vec<Te
     }
 }
 
-/// The accent token with an alpha, for the selection.
-fn tint(c: gpui::Rgba, alpha: f32) -> gpui::Rgba { gpui::Rgba { a: alpha, ..c } }
 
 impl gpui::Element for Element_ {
     type RequestLayoutState = ();
@@ -293,7 +292,7 @@ impl gpui::Element for Element_ {
             let at = if empty { Some(point(px(0.), px(0.))) } else { rows.iter().rev().find(|r| r.start <= head).map(|r| { let p = r.pos(head - r.start, lh); point(p.x, r.top + p.y) }) };
             if let Some(p) = at { carets.push(fill(Bounds::new(point(origin.x + p.x, origin.y + p.y), size(px(2.), lh)), accent)); }
         } else {
-            let c = tint(accent, 0.25); let w = bounds.size.width;
+            let c = super::select::highlight(light); let w = bounds.size.width;
             for r in &rows {
                 let end = r.start + r.len;
                 let (a, b) = (range.start.max(r.start), range.end.min(end));
@@ -321,8 +320,16 @@ impl gpui::Element for Element_ {
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
             for q in pre.sel.drain(..) { window.paint_quad(q); }
             for r in &pre.rows { if let Some(l) = &r.line { let _ = l.paint(point(origin.x, origin.y + r.top), lh, TextAlign::Left, Some(bounds), window, cx); } }
-            if focus.is_focused(window) { for q in pre.carets.drain(..) { window.paint_quad(q); } }
+            if focus.is_focused(window) && self.input.read(cx).blink.shown() { for q in pre.carets.drain(..) { window.paint_quad(q); } }
         });
+        // the blink: solid after an edit or a move, then the platform's phases; one repaint per phase change, only while focused
+        let focused = focus.is_focused(window);
+        let sig = { let i = self.input.read(cx); super::blink::sig(&i.content, i.ed.head(), i.ed.selection().start) };
+        let wait = self.input.update(cx, |i, _| { i.blink.seen(sig, focused); if focused && !i.blink.pending { let w = i.blink.wait(); if w.is_some() { i.blink.pending = true; } w } else { None } });
+        if let Some(w) = wait {
+            let input = self.input.clone();
+            cx.spawn(async move |cx| { cx.background_executor().timer(w).await; let _ = input.update(cx, |i, cx| { i.blink.pending = false; cx.notify(); }); }).detach();
+        }
         let rows = std::mem::take(&mut pre.rows);
         let (scroll, empty) = (pre.scroll, pre.empty);
         self.input.update(cx, |i, _| { i.rows = if empty { vec![] } else { rows }; i.bounds = Some(bounds); i.line_height = lh; i.scroll_y = scroll; });

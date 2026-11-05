@@ -96,3 +96,7 @@ mod tests {
         assert_eq!(extract(&texts, &block_range(&texts, 1).unwrap()), "two words"); assert!(block_range(&texts, 9).is_none());
     }
 }
+
+/// The selection highlight, one colour for every text surface. GPUI on X11 exposes no system highlight colour, so it is the theme's
+/// accent at a fixed alpha (readable under the glyphs in both themes); a platform colour would replace this one function.
+pub fn highlight(light: bool) -> gpui::Rgba { let mut a = crate::theme::color(light, "accent"); a.a = if light { 0.30 } else { 0.28 }; a }
