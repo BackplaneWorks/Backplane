@@ -13,7 +13,7 @@ rsync -a scripts/gpui/ios-hubrun.sh h@backplane:bp-gpui-ios-hub/run.sh
 $SB "cd $V && ln -sfn t/tools tools; BP_STANDIN_MODE=stream BP_STREAM_N=40 BP_STREAM_MS=100 sh run.sh start | tail -2; B=\$HOME/.bun/bin/bun; HP=100.96.192.111:3811; \$B tools/ios-seed.ts \$HP $V/home $V/proj >/dev/null 2>&1; \$B tools/ios-seed.ts \$HP $V/home $V/proj new 2 >/dev/null 2>&1"
 $SB "cat $V/home/token" > /tmp/lc-token; RSYNC_RSH=$M rsync -a /tmp/lc-token hs-mac-mini:bp-gpui-ios/seed7-token
 T=$($SB "grep -o '\"ThreadCreated\",\"id\":\"[^\"]*\"' $V/home/events.jsonl | sed -n 2p | cut -d'\"' -f6")
-RSYNC_RSH=$M rsync -a scripts/gpui/ios-keys-mac.sh hs-mac-mini:bp-gpui-ios/
+RSYNC_RSH=$M rsync -a scripts/gpui/ios-keys-mac.sh scripts/gpui/ios-run.sh scripts/gpui/ios-shot.sh hs-mac-mini:bp-gpui-ios/
 scripts/gpui/ios-build.sh > $B/results/ios/build-keys.log 2>&1; grep -E "error:|build seconds" $B/results/ios/build-keys.log | head -2
 mkdir -p $B/results/ios/keys
 for k in $KINDS; do for n in $SIZES; do
