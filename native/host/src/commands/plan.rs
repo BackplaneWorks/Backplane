@@ -434,7 +434,9 @@ fn start(f: &Fold, at: u64, id: &Value, p: &Value) -> Option<Plan> {
     let th = format!("home-{msg}");
     if f.threads.contains_key(&th) {
         let ok = f.threads.get(&th).map_or(false, |t| !t.deleted && t.project == project);
-        return if ok { Some(Plan { events: vec![], reply: made(id, &th), stop: None, wt: None, scratch: None, act: None }) } else { refuse("This request belongs to a different or removed conversation. Open that conversation before retrying.") };
+        // a retry finds the thread made: the message goes in if it never arrived (the hub died, or turn.start failed, between the two)
+        let posted = f.home_msgs.contains(&format!("{th}\u{1}{msg}"));
+        return if ok { Some(Plan { events: vec![], reply: made(id, &th), stop: None, wt: None, scratch: None, act: (!posted).then(|| ("post", th.clone(), text.clone())) }) } else { refuse("This request belongs to a different or removed conversation. Open that conversation before retrying.") };
     }
     let title: String = text.chars().take(80).collect();
     let mut pl = create(f, at, id, &json!({"project": project, "title": title}), None, Some(&th))?;

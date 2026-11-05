@@ -501,7 +501,7 @@ Laws in LAWS.bend: 3253. bend 911, rust 603, unported 1142, client 470, window 1
 | `muse_run_turn` | rust `muse_run_turn` | map | `src/core/hub.bend` |  |
 | `msp_mode_supervised_asks` | rust `msp_mode_supervised_asks` | map | `src/core/msp.bend` |  |
 | `msp_mode_full_allows` | rust `msp_mode_full_allows` | map | `src/core/msp.bend` |  |
-| `archive_running_stops` | rust `archive_running_stops` | map | `src/core/hub.bend` |  |
+| `archive_running_stops` | rust `archive_running_stops_through_the_real_agents_module` | map | `src/core/hub.bend` |  |
 | `archive_idle_no_turn` | rust `archive_closes_asks_clears_background_rows_and_wakes_a_snooze` | map | `src/core/hub.bend` |  |
 | `archive_closes_approval` | rust `archive_closes_asks_clears_background_rows_and_wakes_a_snooze` | map | `src/core/hub.bend` |  |
 | `delete_running_stops` | unported | seed R +-10% | `src/core/hub.bend` |  |

@@ -23,7 +23,8 @@ pub struct Fold {
     pub queues: HashMap<String, Vec<(String, String)>>, pub asks: BTreeMap<String, Ask>, pub forks: HashMap<String, String>,
     pub st: HashMap<String, String>, /// Switch.count: entries filed under each thread by that thread
     pub count: HashMap<String, usize>, /// the number the request's ids are built from (Hub::alloc_n), else the log length
-    pub alloc: Option<usize>,
+    pub alloc: Option<usize>, /// the first messages of home threads ("home-<msg>"), so a retry knows whether the message arrived
+    pub home_msgs: std::collections::HashSet<String>,
 }
 
 const KEYS: &[&str] = &["thread.parent.", "bg.", "watch.", "thread.env", "agent.provider", "agent.model", "projects.missing", "merged.", "provider.resume.", "restart.retry.", "resume.", "wt.again.", "thread.config.hold.", "seen.", "tz.machine", "account.thread.", "account.default."];
@@ -100,7 +101,7 @@ impl Fold {
             "ThreadMerged" => { let id = g("id"); if let Some(x) = self.threads.get_mut(&id) { x.forced = 1; x.settled_at = at; x.pinned = false } self.st.insert(format!("merged.{id}"), g("url")); }
             "WorktreeRemoved" => if let Some(x) = self.threads.get_mut(&g("id")) { x.worktree = String::new() },
             "SessionSet" => if let Some(x) = self.threads.get_mut(&g("id")) { x.session = g("session") },
-            "MessagePosted" | "ActivityLogged" | "Reminded" => { let th = g("thread"); if !th.is_empty() { if t == "MessagePosted" && g("role") == "user" { if let Some(x) = self.threads.get_mut(&th) { x.unsettled_at = at } } *self.count.entry(th).or_default() += 1 } }
+            "MessagePosted" | "ActivityLogged" | "Reminded" => { let th = g("thread"); if !th.is_empty() { if t == "MessagePosted" && th.starts_with("home-") { self.home_msgs.insert(format!("{th}\u{1}{}", g("msg"))); } if t == "MessagePosted" && g("role") == "user" { if let Some(x) = self.threads.get_mut(&th) { x.unsettled_at = at } } *self.count.entry(th).or_default() += 1 } }
             "TurnChanged" => if let Some(x) = self.threads.get_mut(&g("thread")) { x.turn = g("state") },
             "WorktreeSet" => if let Some(x) = self.threads.get_mut(&g("id")) { x.branch = g("branch"); x.worktree = g("worktree") },
             "ModesSet" => if let Some(x) = self.threads.get_mut(&g("id")) { x.runtime = g("runtime"); x.interaction = g("interaction"); x.model = g("model") },

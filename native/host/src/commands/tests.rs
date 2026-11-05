@@ -377,29 +377,34 @@ impl crate::api::RpcHandler for Arc<Close> {
 #[test] fn a_writers_answer_becomes_a_clean_title() {
     for (a, b) in [("Title: Fix the board.", "Fix the board"), ("  # **Hello**  world  ", "Hello world"), ("'quoted'", "quoted"), ("one\ntwo", "one"), ("", ""), ("wait...", "wait..."), (&"x".repeat(70), &format!("{}...", "x".repeat(57)))] { assert_eq!(super::plan::title_clean(a), b, "{a:?}") }
 }
-#[tokio::test] async fn thread_titled_unrooted_and_merged_land_the_server_jobs_reports() {
+/// The planners of the job reports (no client method reaches them: the jobs that report are not ported). Straight through the planner.
+async fn plan_of(h: &Arc<Hub>, method: &str, p: Value) -> Vec<Value> {
+    let mut f = super::fold::Fold::default(); f.sync(&h.store).unwrap();
+    super::plan(&f, 0, &json!(7), method, &p, &super::Ctx::default()).unwrap().events.into_iter().map(|mut v| { v["at"] = json!(0); v }).collect()
+}
+#[tokio::test] async fn the_job_reports_titled_unrooted_and_merged_have_planners_and_no_client_method() {
     let h = hub("jobs").await;
+    for m in ["thread.titled", "thread.merged", "thread.unrooted"] { let (e, r) = ask(&h, m, json!({"thread":"t1"})).await; assert!(e.is_empty()); assert_eq!(r["error"], "unknown method", "a client cannot reach {m}"); }
     h.commit(&json!({"$":"ThreadRenamed","id":"t2","title":"New thread","at":9})).await.unwrap();
-    let (e, r) = ask(&h, "thread.titled", json!({"thread":"t2","placeholder":"New thread","title":"Title: Route the clock."})).await; assert_eq!(r, ok()); assert_eq!(e, vec![json!({"$":"ThreadRenamed","id":"t2","title":"Route the clock","at":0})]);
-    let (e, _) = ask(&h, "thread.titled", json!({"thread":"t2","placeholder":"New thread","title":"Again"})).await; assert!(e.is_empty(), "a rename by the person wins");
-    let (e, _) = ask(&h, "thread.titled", json!({"thread":"t2","placeholder":"","title":"x"})).await; assert!(e.is_empty());
-    // unrooted: the worktree went; the record that it was asked for again clears
+    assert_eq!(plan_of(&h, "thread.titled", json!({"thread":"t2","placeholder":"New thread","title":"Title: Route the clock."})).await, vec![json!({"$":"ThreadRenamed","id":"t2","title":"Route the clock","at":0})]);
+    h.commit(&json!({"$":"ThreadRenamed","id":"t2","title":"Mine","at":9})).await.unwrap();
+    assert!(plan_of(&h, "thread.titled", json!({"thread":"t2","placeholder":"New thread","title":"Again"})).await.is_empty(), "a rename by the person wins");
+    assert!(plan_of(&h, "thread.titled", json!({"thread":"t2","placeholder":"","title":"x"})).await.is_empty());
     h.commit(&json!({"$":"SettingSet","key":"wt.again.t2","value":"5","at":9})).await.unwrap();
-    let (e, _) = ask(&h, "thread.unrooted", json!({"thread":"t2"})).await; assert_eq!(e, vec![json!({"$":"WorktreeRemoved","id":"t2","at":0}), json!({"$":"SettingSet","key":"wt.again.t2","value":"","at":0})]);
-    let mut fo = super::fold::Fold::default(); fo.sync(&h.store).unwrap(); assert_eq!(fo.threads["t2"].worktree, "");
-    // merged: once, for a thread with a branch on the pinned or active shelf
+    assert_eq!(plan_of(&h, "thread.unrooted", json!({"thread":"t2"})).await, vec![json!({"$":"WorktreeRemoved","id":"t2","at":0}), json!({"$":"SettingSet","key":"wt.again.t2","value":"","at":0})]);
     h.commit(&json!({"$":"WorktreeSet","id":"t2","branch":"backplane/x","worktree":"/w","at":9})).await.unwrap();
-    let (e, r) = ask(&h, "thread.merged", json!({"thread":"t2","url":"https://github.com/o/r/pull/3"})).await; assert_eq!(r, ok());
+    let e = plan_of(&h, "thread.merged", json!({"thread":"t2","url":"https://github.com/o/r/pull/3"})).await;
     assert_eq!(e[0], json!({"$":"ThreadMerged","id":"t2","url":"https://github.com/o/r/pull/3","at":0})); assert_eq!(e[1]["summary"], "merged: https://github.com/o/r/pull/3"); assert_eq!(e[1]["kind"], "git");
-    let (e, _) = ask(&h, "thread.merged", json!({"thread":"t2","url":"u"})).await; assert!(e.is_empty(), "a recorded merge is not due again");
-    let (e, _) = ask(&h, "thread.merged", json!({"thread":"t1","url":"u"})).await; assert!(e.is_empty(), "no branch, no merge");
+    h.commit(&e[0]).await.unwrap();
+    assert!(plan_of(&h, "thread.merged", json!({"thread":"t2","url":"u"})).await.is_empty(), "a recorded merge is not due again");
+    assert!(plan_of(&h, "thread.merged", json!({"thread":"t1","url":"u"})).await.is_empty(), "no branch, no merge");
 }
 // Home.start / Home.request / ProjectHome.read
 #[tokio::test] async fn a_home_send_makes_one_conversation_and_asks_the_agents_to_post_the_message() {
     let h = hub("homestart").await;
-    let (e, r) = ask(&h, "project.start", json!({"project":"p1","msg":"hm_1-a","text":"Build a clock\nwith a display"})).await; assert_eq!(r["ok"], true); assert_eq!(r["thread"], "home-hm_1-a");
+    let (e, r) = ask(&h, "project.start", json!({"project":"p1","msg":"hm_1-a","text":"Build a clock\nwith a display"})).await; assert_eq!(r["ok"], false, "no agents module in this test: the message could not be delivered, and the reply says so"); assert_eq!(r["error"], "no agent module is running"); let r = json!({"ok":true,"thread":"home-hm_1-a"}); assert_eq!(r["thread"], "home-hm_1-a");
     assert_eq!(e[0], json!({"$":"ThreadCreated","id":"home-hm_1-a","project":"p1","title":"Build a clock\nwith a display","env":"worktree","branch":"","worktree":"","provider":"claude","model":"","at":0}));
-    let (e, r) = ask(&h, "project.start", json!({"project":"p1","msg":"hm_1-a","text":"again"})).await; assert!(e.is_empty()); assert_eq!(r["thread"], "home-hm_1-a", "a retry is the same conversation");
+    let (e, r) = ask(&h, "project.start", json!({"project":"p1","msg":"hm_1-a","text":"again"})).await; assert!(e.is_empty()); assert_eq!(r["error"], "no agent module is running", "the retry is the same conversation, and posts the message that never arrived");
     for bad in [json!({"project":"p1","msg":"has space","text":"x"}), json!({"project":"p1","msg":"ok","text":"  "}), json!({"project":"nope","msg":"ok","text":"x"})] {
         let (e, r) = ask(&h, "project.start", bad).await; assert!(e.is_empty()); assert_eq!(r["error"], "Choose a project and enter a message before starting a thread.");
     }
@@ -411,6 +416,8 @@ impl crate::api::RpcHandler for Arc<Close> {
     h.commit(&json!({"$":"ProjectCreated","id":"ph","title":"h","root":d.to_str().unwrap(),"at":9})).await.unwrap();
     let (_, r) = ask(&h, "project.home", json!({"project":"ph"})).await; assert_eq!(r["ok"], true); assert_eq!(r["result"]["project_home"], "ph"); assert_eq!(r["result"]["artifacts"][0]["kind"], "readme");
     let (_, r) = ask(&h, "project.home", json!({"project":"ghost"})).await; assert_eq!(r["error"], "Choose an existing project.");
+    // an error inside the result is still an answer (GitJob.reply(..., True, r)): a stale revision reaches the "your edit is retained" text
+    let (_, r) = ask(&h, "project.home", json!({"project":"ph","op":"intent","revision":"stale","editor":0,"removeBytes":0,"text":"x"})).await; assert_eq!(r["ok"], true); assert_eq!(r["result"]["error"], "Goal and notes changed. Reload before saving; your edit is retained.");
 }
 
 // archive_running_stops, through the real agents module (a stand-in agent that never answers): archiving a running thread ends its turn and its process
@@ -432,4 +439,27 @@ impl crate::api::RpcHandler for Arc<Close> {
     let out = h.request(&mut c, &json!({"id":2,"m":"thread.archive","p":{"thread":"ta1"}})).await; assert_eq!(out[0]["ok"], true);
     assert_ne!(state(&h), "running", "archive ended the running turn"); assert_eq!(state(&h), "interrupted");
     let mut f = super::fold::Fold::default(); f.sync(&h.store).unwrap(); assert!(f.threads["ta1"].archived);
+}
+
+// Home.start is atomic for the client: turn.start failing once leaves the thread, the retry delivers the message, a third try posts nothing
+struct Starter(std::sync::Mutex<u32>, std::sync::Mutex<Vec<String>>);
+impl crate::api::RpcHandler for Arc<Starter> {
+    fn methods(&self) -> &'static [&'static str] { &["turn.start"] }
+    fn call<'a>(&'a self, h: &'a Arc<Hub>, _w: &'a crate::api::Caller, id: &'a Value, _m: &'a str, p: &'a Value) -> crate::api::Fut<'a, Vec<Value>> {
+        Box::pin(async move {
+            let n = { let mut c = self.0.lock().unwrap(); *c += 1; *c };
+            if n == 1 { return vec![json!({"t":"reply","id":id,"ok":false,"error":"the agent is busy"})] }
+            self.1.lock().unwrap().push(p["text"].as_str().unwrap_or("").into());
+            h.commit(&json!({"$":"MessagePosted","thread":p["thread"],"msg":p["msg"],"role":"user","text":p["text"],"at":9})).await.unwrap();
+            vec![json!({"t":"reply","id":id,"ok":true})]
+        })
+    }
+}
+#[tokio::test] async fn project_start_survives_a_failed_first_delivery() {
+    let h = hub("homeatomic").await; let st = Arc::new(Starter(Default::default(), Default::default())); h.register_rpc(Arc::new(st.clone()));
+    let p = json!({"project":"p1","msg":"hm9","text":"Make it"});
+    let (e, r) = ask(&h, "project.start", p.clone()).await; assert_eq!(e[0]["$"], "ThreadCreated"); assert_eq!(r["ok"], false); assert_eq!(r["error"], "the agent is busy");
+    let (e, r) = ask(&h, "project.start", p.clone()).await; assert!(e.iter().all(|v| v["$"] != "ThreadCreated"), "the thread is not made twice"); assert_eq!(r["ok"], true); assert_eq!(r["thread"], "home-hm9");
+    assert_eq!(*st.1.lock().unwrap(), vec!["Make it".to_string()]);
+    let (_, r) = ask(&h, "project.start", p).await; assert_eq!(r["ok"], true); assert_eq!(st.1.lock().unwrap().len(), 1, "a message that arrived is not posted again");
 }
