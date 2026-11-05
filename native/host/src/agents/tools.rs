@@ -104,7 +104,7 @@ impl Agents {
             return Ok(())
         }
         let (now, th) = (now_s(), a.thread.clone());
-        if a.tool == crate::settings::proposal::TOOL { return crate::settings::proposal::answer_ask(&self.hub, ask, &th, &a.options, answer, now).await } // settings lane: Settings.answer
+        if a.tool == crate::settings::proposal::TOOL { return { let open: Vec<String> = self.world().await.asks.iter().filter(|(_, k)| k.tool == crate::settings::proposal::TOOL).map(|(i, _)| i.clone()).collect(); crate::settings::proposal::answer_ask(&self.hub, ask, &th, &a.options, answer, now, &open).await } } // settings lane: Settings.answer
         let mut ev = vec![json!({"$":"AskClosed","id":ask,"answer":answer,"at":now})];
         let implement = a.kind == "plan" && answer == "implement";
         if implement { let t = { let w = self.world().await; w.threads.get(&th).cloned() }; if let Some(t) = t { ev.push(json!({"$":"ModesSet","id":th,"runtime":t.runtime,"interaction":"default","model":t.model,"at":now})) } }
