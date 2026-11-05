@@ -79,9 +79,8 @@ export async function run(j,ctx){ // ctx: {gpuBin, display:{env,display}, hub:{s
     else{const inv=ctlEv.controls.map(c=>({id:c.id,label:c.label,enabled:c.enabled,visible:c.visible,wired:c.wired,disabledLook:c.disabled_look===true}));
       const prefix=script.filter(x=>!x.wait);const sweepScript=[...script.filter(x=>x.select!==undefined||x.home!==undefined).slice(-1),{wait:500},...inv.flatMap(c=>[{click:c.id},{wait:300}])];
       const second=await launch(sweepScript,j,ctx,'.sweep',{rects:true});const results={};
-      // ids that are not on screen when the second run starts (rows of a streaming thread, new every few seconds) are transient, not dead
-      const ctl2=second.metrics.find(m=>m.event==='controls'&&m.controls?.length);const ids2=new Set((ctl2?.controls||[]).map(c=>c.id));
-      const transient=ctl2?inv.filter(c=>!ids2.has(c.id)):[];if(ctl2)inv.splice(0,inv.length,...inv.filter(c=>ids2.has(c.id)));
+      // a control the click step could not find in the second run (rows of a streaming thread have new ids every few seconds) is transient, not dead
+      const gone=new Set(second.metrics.filter(m=>m.event==='click'&&m.found===false).map(m=>m.id));const transient=inv.filter(c=>gone.has(c.id));if(gone.size)inv.splice(0,inv.length,...inv.filter(c=>!gone.has(c.id)));
       for(const m of second.metrics.filter(m=>m.event==='click'&&m.found!==false))results[m.id]={changed:!!m.changed,action:m.action!=null};
       for(const m of second.metrics.filter(m=>m.event==='input'&&m.step?.startsWith('click:')&&m.ok)){const id=m.step.slice(6);results[id]={changed:true,action:results[id]?.action||false}}
       res.metrics.dead=deadControls(inv,results);res.metrics.dead.controlsFound=inv.length;res.metrics.dead.transientSkipped=transient.length;
