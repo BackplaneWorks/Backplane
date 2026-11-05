@@ -293,6 +293,9 @@ impl Actor {
         if let Err(e) = self.ag.hub.commit_many(&ev).await { self.ag.stats.commit_errors.fetch_add(1, Relaxed); eprintln!("agents: {}: could not write {} events: {e:#}", self.th, ev.len()) }
     }
     async fn live_end(&mut self) { self.live.clear(); let _ = self.ag.hub.live_end(&self.th).await; }
+    /// The stream is over without an assistant line having closed it (a turn that ends, is stopped or fails mid-text): Bend sends no delta_end then (only Claude.assistant does), so the
+    /// frame is sent only when streamed text is still on screen and nothing else would clear it. A turn whose last assistant line already closed its stream sends none.
+    async fn live_close(&mut self) { if !self.live.is_empty() { self.live_end().await } }
 
     async fn cmd(&mut self, c: Cmd) {
         match c {
@@ -375,7 +378,7 @@ impl Actor {
         let mut ev = vec![json!({"$":"ActivityLogged","thread":th,"act":hub_id("s", now, self.ag.seq()),"tone":"info","kind":"steer","summary":"Steered: the turn starts again with this message","at":now})];
         let run = if ride.is_empty() { text.clone() } else { ev.extend(codex::ride_done(&th, &ride, "with the steer", now)); format!("{}\n\n{}", codex::ride_input(&ride), text) };
         ev.push(json!({"$":"TurnChanged","thread":th,"state":"running","at":now}));
-        self.live_end().await; self.commit(ev).await; self.cwd = cwd.clone(); self.cx.running = true; self.codex = true; self.prov = t.provider.clone(); self.model = t.model.clone();
+        self.live_close().await; self.commit(ev).await; self.cwd = cwd.clone(); self.cx.running = true; self.codex = true; self.prov = t.provider.clone(); self.model = t.model.clone();
         self.codex_run(&t, &cwd, &run).await; Ok(())
     }
 
@@ -472,7 +475,7 @@ impl Actor {
             if fx.delta_end { clear = true }
             }
         }
-        if clear { self.live_end().await }
+        if clear { self.live_close().await }
         self.commit(events).await;
         if ended && self.driver.as_ref().map_or(false, |d| d.ends_on_turn_end()) { self.stop().await; self.lines = None; self.exit = None; self.asked.clear(); self.live_proc = None; self.ag.stats.procs_exited.fetch_add(1, Relaxed); } // Grok.stop: SIGTERM after the turn's events
         if ended { if self.live_proc.is_none() { self.codex_next().await } else { self.next_ride = true } }
@@ -552,7 +555,7 @@ impl Actor {
         let (now, th) = (now_s(), self.th.clone());
         let mut ev = vec![json!({"$":"ActivityLogged","thread":th,"act":act,"tone":"error","kind":kind,"summary":text,"at":now}), json!({"$":"TurnChanged","thread":th,"state":"failed","at":now})]; if ended && MARK_ENDS { ev[1]["_end"] = json!(true) };
         if ended && !self.last_user.is_empty() { ev.push(set(format!("failed.{}", self.last_user), "1".into(), now)) } // Bend writes failed.<msg> for an agent-gone end, not for a spawn failure
-        self.live_end().await; self.commit(ev).await; self.cx.running = false; self.jobs_end();
+        self.live_close().await; self.commit(ev).await; self.cx.running = false; self.jobs_end();
     }
 
     /// Hub.interrupt: only a running turn is stopped. What streamed so far is posted as the reply; Claude keeps its process.
@@ -579,7 +582,7 @@ impl Actor {
             let say = if n == 1 { format!("Stop cancelled a message the agent had not read yet: {q}. Send it again if you still want it.") } else { format!("Stop cancelled {n} messages the agent had not read yet: {q}. Send them again if you still want them.") };
             ev.push(json!({"$":"ActivityLogged","thread":th,"act":hub_id("u", now, self.ag.seq()),"tone":"error","kind":"stop","summary":say,"at":now}));
         }
-        self.live_end().await; self.commit(ev).await; self.cx.running = false; self.jobs_end();
+        self.live_close().await; self.commit(ev).await; self.cx.running = false; self.jobs_end();
         if let (Some(d), Some(p)) = (self.driver.as_mut(), self.live_proc.as_ref()) { for s in d.on_stop() { let _ = p.input.try_send(s); } }
         if self.codex { self.stop().await; self.lines = None; self.exit = None; self.next_ride = false; self.codex_next().await } // AgentStop ends the process; mail waiting starts the next turn (ride_interrupted_starts)
     }
@@ -643,7 +646,7 @@ impl Actor {
                 let w = ids.join(" "); if w != self.wait { events.push(set(format!("wait.{}", self.th), w.clone(), at)); self.wait = w }
             }
         }
-        if clear { self.live_end().await; }
+        if clear { self.live_close().await; }
         self.commit(events).await;
         if let Some(p) = &self.live_proc { for s in sends { let _ = p.input.try_send(s); } }
         if pace { self.pacing = Some(Instant::now() + Duration::from_millis(lines::PACE_MS)) }
@@ -659,7 +662,7 @@ impl Actor {
             self.cmds = self.cmds.cleared();
             ev.push(json!({"$":"ActivityLogged","thread":self.th,"act":hub_id("x", at, self.ag.seq()),"tone":"info","kind":"stuck","summary":"Its agent finished its last command but its turn never ended: ended now","at":at}));
             let text = String::new(); ev.extend(self.cx.end(code, &text, at)); if code == 4 && !self.last_user.is_empty() { ev.push(set(format!("failed.{}", self.last_user), "1".into(), at)) }
-            self.live_end().await;
+            self.live_close().await;
         }
         self.commit(ev).await;
     }
