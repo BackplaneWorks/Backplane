@@ -6,7 +6,7 @@ use serde_json::Value;
 use std::{future::Future, path::Path, pin::Pin, process::Stdio, time::Duration};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
-use tokio::process::Child;
+use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
 pub type Fut<'a, T> = Pin<Box<dyn Future<Output = Result<T>> + Send + 'a>>;
@@ -51,7 +51,7 @@ impl BpPolicy {
     }
     async fn start(bin: &Path) -> Result<(Link, Child)> {
         let port = { let l = std::net::TcpListener::bind("127.0.0.1:0")?; l.local_addr()?.port() };
-        let mut child = crate::proc::tokio_cmd(crate::proc::Kind::Local, bin).arg(port.to_string()).stdout(Stdio::piped()).stderr(Stdio::inherit()).kill_on_drop(true)
+        let mut child = Command::new(bin).arg(port.to_string()).stdout(Stdio::piped()).stderr(Stdio::inherit()).kill_on_drop(true)
             .spawn().with_context(|| format!("start {}", bin.display()))?;
         let mut out = BufReader::new(child.stdout.take().context("policy stdout")?);
         let mut line = String::new();
