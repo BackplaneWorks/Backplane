@@ -47,7 +47,7 @@ assert not ws.exists()
 ws.parent.mkdir(parents=True, exist_ok=True)
 shutil.copytree(components/'shell-payload/node_modules/ws', ws, symlinks=False)
 new = out/'prepared-components'
-subprocess.run(['node', str(s/'desktop/prepare-components.cjs'), '--source', str(s),
+subprocess.run(['node', str(tools/'desktop/prepare-components.cjs'), '--source', str(s),
     '--vendor', str(out/'vendor'), '--out', str(new), '--targets', a.target], check=True)
 inputs = out/'new-inputs'
 inputs.mkdir()
