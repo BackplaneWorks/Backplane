@@ -4,7 +4,7 @@
 case "$HOME" in /home/h|/home/h/*) echo "window_e2e.sh refuses to run on the desktop" >&2; exit 3;; esac
 [ "$(id -un)" = user ] || { echo "window_e2e.sh: not a Boat sandbox; refusing" >&2; exit 3; }
 R=$PWD; export BEND_NO_TELEMETRY=1; O=$R/out/we; mkdir -p $O
-T=$HOME/bins-target; C=$HOME/bins-core; rm -rf $C && mkdir -p $C/native/host $C/src/core && cp src/core/cbor.bend $C/src/core/ && (cd native/host && tar --exclude=./target -cf - .) | (cd $C/native/host && tar -xf -) && (cd $C/native/host && rm -rf src/agents src/files src/kicad && sed -i 's/mod agents; //; s/mod files; //; s/mod kicad; //; /agents::Agents::start/d; /files::start/d' src/main.rs && rm -f $T/release/backplane-hub && CARGO_TARGET_DIR=$T cargo build --release --bin backplane-hub > $R/out/we/build-core.log 2>&1); bc=$?; grep -E '^error|Finished' $R/out/we/build-core.log | head -8; [ $bc -eq 0 ] && { cp $T/release/backplane-hub $O/backplane-hub || bc=1; }; [ $bc -eq 0 ] || exit $bc
+T=$HOME/bins-target; (cd native/host && rm -f $T/release/backplane-hub && CARGO_TARGET_DIR=$T cargo build --release --bin backplane-hub > $R/out/we/build-hub.log 2>&1); bc=$?; grep -E '^error|Finished' $R/out/we/build-hub.log | head -8; [ $bc -eq 0 ] && { cp $T/release/backplane-hub $O/backplane-hub || bc=1; }; [ $bc -eq 0 ] || exit $bc
 bend native/bend/window.bend -o $O/window.c 2>&1 | tail -2; clang -std=c11 -O2 $O/window.c -lpthread -lm -o $O/window || exit 1
 H=$O/home; rm -rf $H; mkdir -p $H; cp test/gpui/hub/fixtures/pages.jsonl $H/events.jsonl
 $O/backplane-hub --home $H --port 3815 --policy-bin $R/test/gpui/hub/policy-bin/bp-policy-serve-O2-v3 --window-bin $O/window > $H/log 2>&1 & HP=$!
