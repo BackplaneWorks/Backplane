@@ -161,3 +161,74 @@ pub async fn note(hub: &Arc<Hub>, thread: &str, tone: &str, summary: &str) {
     let seq = hub.store.len();
     let _ = hub.commit(&json!({"$":"ActivityLogged","thread":thread,"act":format!("g{at}-{seq}"),"tone":tone,"kind":"git","summary":summary,"at":at})).await;
 }
+
+/// PR #960 on the real handlers (8aa5a45900): every folder route, asked about a thread or project home that does not resolve, answers the one refusal and
+/// schedules nothing; the same routes still work for a thread that does. The handlers are the registered ones, the hub is a real `Hub` on a temp home.
+#[cfg(test)]
+mod boundary_tests {
+    use super::*;
+    use crate::{hub::Cfg, presenter::Canned};
+    fn tmp(n: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-boundary-{}-{n}", std::process::id())); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
+    async fn world() -> (Arc<Hub>, PathBuf) {
+        let (home, proj) = (tmp("home"), tmp("proj"));
+        std::fs::write(proj.join("a.txt"), "x").unwrap();
+        let cfg = Cfg { home, version: "0.14.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() };
+        let hub = Hub::start(cfg, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        start(hub.clone());
+        let root = proj.to_string_lossy().into_owned();
+        let tc = |id: &str, project: &str, wt: &str| json!({"$":"ThreadCreated","id":id,"project":project,"title":"T","env":"local","branch":"","worktree":wt,"provider":"claude","model":"","at":2});
+        hub.commit_many(&[json!({"$":"ProjectCreated","id":"p1","title":"P","root":root,"at":1}), json!({"$":"ProjectCreated","id":"p2","title":"Q","root":root,"at":1}), json!({"$":"ProjectCreated","id":"p3","title":"R","root":"relative/root","at":1}),
+            tc("ok", "p1", ""), tc("gone", "p1", ""), tc("rm", "p2", ""), tc("badwt", "p1", "relative/wt"), tc("badroot", "p3", ""), tc("priv", "", ""),
+            json!({"$":"ThreadDeleted","id":"gone","at":3}), json!({"$":"ProjectRemoved","id":"p2","at":3})]).await.unwrap();
+        (hub, proj)
+    }
+    const ROUTES: &[&str] = &["files.dir", "files.list", "git.status", "git.diff", "git.act", "git.revert", "history.refs", "history.resolve", "kicad.components", "boards.list", "mech.list", "mech.render",
+        "review.bom", "review.checks", "review.tick", "review.comment", "review.release", "kicad.export10", "pdf.page", "file.open"];
+    #[tokio::test] async fn every_folder_route_refuses_what_does_not_resolve() {
+        let (hub, _) = world().await;
+        let who = Caller { gen: "g".into(), client: 1 };
+        let refusal = threadpath::refusal(&json!(9));
+        // empty, unknown, deleted thread, removed project, relative worktree, relative project root, no project and no folder, unknown and removed project homes
+        for thread in ["", "nope", "gone", "rm", "badwt", "badroot", "priv", "project-home-", "project-home-nope", "project-home-p2", "project-home-p3"] {
+            for m in ROUTES {
+                if matches!(*m, "pdf.page" | "file.open") { continue } // explicit-path viewer APIs, not thread lookups (the doc's /img note)
+                let Some(h) = hub.rpc_for(m) else { panic!("{m} is not registered") };
+                let r = h.call(&hub, &who, &json!(9), m, &json!({"thread":thread,"path":"a.txt","action":"commit","message":"x","from":"0","to":"-1","a":"x","b":"y","ref":"HEAD","n":1})).await;
+                assert_eq!(r, vec![refusal.clone()], "{m} for {thread:?}");
+            }
+        }
+        // a path outside the project is refused first, as the JS hub's Hub.dir.k does
+        let r = hub.rpc_for("files.dir").unwrap().call(&hub, &who, &json!(9), "files.dir", &json!({"thread":"","path":"../etc"})).await;
+        assert_eq!(r[0]["error"], "that folder is not in this project");
+    }
+    #[tokio::test] async fn a_thread_that_resolves_still_works() {
+        let (hub, proj) = world().await;
+        let who = Caller { gen: "g".into(), client: 1 };
+        for t in ["ok", "project-home-p1"] {
+            let r = hub.rpc_for("files.dir").unwrap().call(&hub, &who, &json!(1), "files.dir", &json!({"thread":t,"path":""})).await;
+            assert_eq!(r[0]["ok"], true, "{t}"); assert_eq!(r[0]["result"]["fmEntries"], "f\t1\ta.txt\n", "{t}");
+            let r = hub.rpc_for("git.status").unwrap().call(&hub, &who, &json!(2), "git.status", &json!({"thread":t})).await;
+            assert_ne!(r[0]["error"], threadpath::NO_FOLDER, "{t}");
+        }
+        assert_eq!(root_of(&hub, "ok").await.unwrap(), proj);
+        // an archived thread keeps its folder
+        hub.commit(&json!({"$":"ThreadArchived","id":"ok","archived":true,"at":4})).await.unwrap();
+        assert_eq!(root_of(&hub, "ok").await.unwrap(), proj);
+    }
+    #[tokio::test] async fn downloads_and_viewer_sources_keep_the_boundary() {
+        let (hub, _) = world().await;
+        let who = Caller { gen: "g".into(), client: 1 };
+        let dl = |route: &str, thread: &str| { let req = Req::new("GET", &format!("{route}?thread={thread}&path=a.txt"), vec![]); let hub = hub.clone(); let route = route.to_string(); async move { let h = hub.http_for(&route).expect("route"); h.call(&hub, &req).await } };
+        for t in ["", "nope", "gone", "rm", "badwt"] {
+            for r in ["/files/get", "/files/zip"] { assert!(dl(r, t).await.status.starts_with("404"), "{r} {t:?}") }
+            for r in ["/view/get", "/view/ver", "/view/git"] { assert!(dl(r, t).await.status.starts_with("403"), "{r} {t:?}") }
+        }
+        // kicad.watch: an active request with neither an absolute root nor an absolute source is refused; a stop is not
+        let h = hub.rpc_for("kicad.watch").unwrap();
+        for (root, path) in [("", ""), ("rel", ""), ("", "rel/a.kicad_pcb"), ("rel", "rel/a.kicad_pcb")] {
+            let r = h.call(&hub, &who, &json!(3), "kicad.watch", &json!({"kind":"board","root":root,"path":path})).await;
+            assert_eq!(r, vec![threadpath::refusal(&json!(3))], "{root:?} {path:?}");
+        }
+        assert_eq!(h.call(&hub, &who, &json!(4), "kicad.watch", &json!({"kind":""})).await[0]["ok"], true);
+    }
+}
