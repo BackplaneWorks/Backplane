@@ -1,89 +1,132 @@
 # Side-by-side: GPUI + the Rust hub on a copy of the real data, doing real work
 
-Design for review (switchover lane, 2026-11-05). Nothing runs on real data until the reviewer OKs this, agents' and files' copy fixes
-have landed, and the coordinator confirms. `BACKPLANE_COPY=1` stays as it is (tests, rehearsals, stand-ins only).
+Design, revision 2 (switchover lane, 2026-11-05), after the reviewer's NOT OK. Nothing runs on real data until the reviewer OKs this
+document, agents', files', bots' and state's fixes have landed and been verified, a hub built from them opens a real-size log, and the
+coordinator confirms. `BACKPLANE_COPY=1` stays as it is (tests, rehearsals, stand-ins only).
 
-## What the person gets
+## Blockers before any design is OK
 
-- One command, run by the person in a terminal: `scripts/gpui/side-by-side.sh`. It asks for a typed `yes` (it refuses without a terminal,
-  so no lane can run it), copies the live log (read only), starts the Rust hub with the current policy helper and the GPUI window.
-- One line back: `scripts/gpui/side-by-side.sh rollback` (stop, delete the copy). Today's Backplane (port 3787, `~/.backplane-bend`) is never
-  stopped or written, so there is nothing to restore. Lost by going back: whatever was done in the GPUI app (it lives only in the copy).
-  Also true while running: what the live Backplane does after the copy point never shows up here.
-- Real agents run, with the person's real provider logins, in the real project folders, **only on a turn the person starts**.
-  Nothing else acts by itself.
+1. **The hub must open a real-size log.** On the real copy (1,691,619 events, 1.48 GB) the hub exited after 28 s with no error line while
+   its policy helper was at 1.5 GB and climbing; cause unknown. A synthetic log of the same event count (1.14 GB) is being run to find it
+   (results: `build/gpui/results/switchover/`, logs kept). Until the hub opens and the helper fits 3700M, nothing below matters.
+2. Every row marked **pending** or **unverified** in the actor table below is held, by code, and verified by a test.
 
-## The mode
+## What this is, honestly
 
-`BACKPLANE_SIDE_BY_SIDE=1` is honoured only together with `BACKPLANE_COPY=1` (alone it is refused at start). `copy::on()` stays true, so every
-gate that exists for a copy still holds; the mode adds exactly **one** permission and nothing else:
+A private copy of the log, opened in the Rust hub and GPUI, beside today's Backplane (never stopped or written; its log is read once, to
+make the copy, and its log's tail is read again at each turn start, see 5). **Real agents run on a turn the person starts, with the person's
+logins, in the person's real project folders. Their file edits are real.** Going back (`rollback`) deletes the copy (threads, messages,
+settings made here); it does **not** undo anything an agent did to a file, and with design history off Backplane keeps no way back for
+those edits: only the person's own git. Nothing else acts by itself.
 
-`crate::copy::real_agents() -> bool` = `on() && BACKPLANE_SIDE_BY_SIDE=1`. Consulted by `proc.rs` (Kind::Agent gate) and the agents'
-`Cli::from_env`; nowhere else. With it, a real agent process may START only for a turn whose trigger is a person's message through the
-`turn.start` RPC from a client (agents' rule, below). Everything else stays default-deny. A new actor added later is denied until someone
-adds it to the table below (the source scan in `proc.rs` already fails the build on a child made outside `crate::proc`).
+## The one command, the one line back
 
-The hub's `/hello` and the view's info carry `sideBySide: true` so the client can say so.
+- Start: `scripts/gpui/side-by-side.sh`: refuses without a terminal, prints the text below, needs a typed `yes`.
+- Back: `scripts/gpui/side-by-side.sh rollback`: stops and deletes the copy; today's app never stopped.
+- Text shown at start and at rollback (the same words in the client's strip, Known missing and here):
+  "This is a copy of your data. Agents you start here run in your real project folders: their file changes are real, and going back does not
+  undo them (this copy keeps no history of them; use git). Threads and settings made here are lost when you go back. Nothing else runs by itself."
 
-## Environment contract
+## The mode, and the new process kind
 
-- The hub runs with the real `HOME` and `PATH` (the providers' login files are in `HOME`), but **without** `DBUS_SESSION_BUS_ADDRESS` and
-  `XDG_RUNTIME_DIR` (no `secret-tool`, no keyring: the vault is never opened; Codex keeps its file login; Claude's is a file). Its own
-  `--home` is the private copy: only `events.jsonl` plus a `restart.continue=off` setting appended. No `secrets/`, no `api.env`, no tokens
-  of the live hub are copied, so the vault is empty and no key is injected by the hub.
-- The agent runs with the hub's environment, cwd = the thread's folder, which is **the real project folder**: the agent can edit real files,
-  that is the point. The Backplane MCP tools it is given are this hub's, under the same gates (a `thread_launch`, `work_run`, deploy, push is
-  refused with the copy's message).
-- A thread whose turn was `running` at the copy point is refused a new turn ("this turn was running in today's Backplane when the copy was
-  made"): the live hub may still be working in that folder. Other threads on the same folder as a live turn are not detected: said in "Known missing".
-- The copy is made from `head -c <size at start>` of the live log cut to the last complete line (the live hub keeps appending).
+`BACKPLANE_SIDE_BY_SIDE=1` is honoured only with `BACKPLANE_COPY=1` (alone: refused at start). `copy::on()` stays true, so every copy gate holds.
+The mode adds **one new process kind, not a flag consulted by existing ones**:
 
-## Every automatic actor, how it is held off
+- `proc::Kind::PersonTurn`. The only place a real agent CLI is made. Constructed only on the person's `turn.start` path in the agents actor, after the
+  checks below, and only when `copy::person_turn_allowed()` (= `on()` && the flag) is true.
+- `Kind::Agent` stays **stand-in-only** on a copy, in this mode too. Everything else that runs an agent CLI (`one_shot` summaries, accounts'
+  `claude auth` and usage refresh, model and CLI probes, `ResumeTicker`, ride-started turns, queues, task and launch children, limit fallback,
+  bots' turns) stays `Kind::Agent`, so default-deny holds by construction, not by each caller remembering. Test (child process, like the copy
+  ones): on this hub `one_shot`, the accounts refresh and a probe spawn nothing real; `Kind::PersonTurn` is reachable from the `turn.start`
+  handler only (a source scan fails the build on any other `Kind::PersonTurn`).
+- Tickers: on a copy `register_ticker` accepts only a named list (today: the state policy ticker once verified); any other ticker fails a test.
+  Observers and handlers that deliver or commit are in the table and need a named gate too.
 
-Default-deny: "held" means a person-visible no-op on this hub; the owner lane implements it by `copy::on()` (not by `real_agents()`).
+## Checks at a person's `turn.start` (all must hold; a failure is a refusal row with its reason, nothing starts)
 
-| Actor | Where | Held by | A person sees |
-|---|---|---|---|
-| Resume of turns that were running (restart carry) | `agents/mod.rs` recovery | copy fix b9f1c1673e (agents, in review) + `restart.continue=off` appended; running turns are logged `interrupted` in the copy | those threads read "interrupted" |
-| Real agent start for anything but a person's `turn.start` (ride/wake_ride that starts a turn, start_queued/start_one/steer from commands, task and launch children, work/lock results, limit-fallback restart, `Launch.tell` reports, mail, bots' turns) | `agents/` | agents' rule: `real_agents()` plus trigger = client RPC, role user, no origin, not a retry; otherwise the stand-in/refusal | a queued message does not start by itself: "held on a copy: starts only when you send" |
-| Routine and reminder ticker, `uber_init` | `bots/routines.rs` `start_ticker`, `tick_at` | **gate missing today**: `if copy::on() { return }` at the top of the loop and of `tick_at` (bots lane has it ready) | routines list says "paused on a copy"; no reminders |
-| Mail recovery (`mail_recover`) | `bots/` `Bots::start` | **gate missing today**: same one line | none; no mail headers written |
-| Owner outbox (20 s) and `owner_kick` | `bots/mail/owner.rs` | gated today (test proves it); no transport exists yet | none |
-| State policies minute ticker (autosettle, alerts, told, summaries, liveness, star nudge) | `state/host.rs` `register_ticker` | **to verify by the state lane**: its commits go to the copy's log only (kept: settle states are the copy's own), but its `outs` that reach outside (push, webhook, summary text-model calls, alerts to desks) must be dropped on a copy | threads may settle; no alerts or summaries from a model |
-| Push to phones, webhook, telemetry, update check | `settings/webhook.rs`, push, telemetry | `Kind::Net` refused (curl); webhook gated | Settings shows them as off on a copy |
-| Far sync, peers, feeds, tailnet listener, pairing over tailnet | `net/farsync.rs`, `peers.rs`, `feed.rs`, `listener.rs`, `tailnet.rs`, `botnet.rs` | `Kind::Net` refused, listener never started, `hello_with` returns at once | no other machines listed |
-| Deploys, restarts, updates | none in the Rust hub | no code; `deploy.*` RPCs refused | "not available on a copy" |
-| Watched work (`work_run`), named locks | watch gate | `watch_argv` empty on a copy: every watch reads as gone | none |
-| Terminals, browser helper, `preview_*`, teach, tasks | `term/` | `Kind::Terminal`/`Browser` not started | terminal/browser tabs say they are off on a copy (known missing) |
-| Shell for `secret_run`, vault | `settings/` | `Kind::Shell` not started; no keyring env | secrets box empty |
-| Git writes, `file.open`, release | `files/`, `commands/` | `copy::rpc_refused` + `files::git::proc` | told: "a hub on a copied log runs no git that writes" |
-| Design history (`step`, `checkpoint`: hidden refs and `.backplane/history.git` in the real folder) | `agents/hist.rs` via `files::git` | **files'/agents' fix pending**: no capture on a copy (it would write into the real folder, twice with the live hub) | history bar shows nothing new |
-| File watchers (kicad watch), KiCad IPC | `kicad/` | read only on the project; `Kind::Local`, no install path | works |
-| Heartbeats (15 s per connection), the 1 s beat of a running turn | `wire/`, `agents/` | connection- or person-turn-bound, not actors | n/a |
+1. **Trigger**: the client's `turn.start` RPC (`who.client > 0`), role user, no origin, not retry-generated. A person's turn that is running
+   keeps working; messages it receives while running are added to its ride only.
+2. **Folder**: the thread's folder (`World::cwd`, the log's `worktree`) must exist, resolve (realpath, symlinks followed) under a project
+   root named by the copy or under the copy's own home, must not be `/`, and must not be under the live home (`~/.backplane-bend`: scratch
+   and bot threads live there) or the copy's `--home` control files. Test: a thread with a `worktree` under the live home, `/`, a missing
+   folder and a symlink into the live home are each refused.
+3. **Sessions**: a copied session id is never resumed (`--resume <session>` in `agents/rules.rs`, Codex `exec resume`): with the real `HOME` that is the
+   live thread's own session file, and both hubs would append to one conversation. A person's turn here **starts fresh** (new session id).
+   Lost: the agent does not know the thread's earlier conversation (the messages stay on screen; it never saw them). Offering the last messages as
+   quoted text in the first prompt is a later, explicit choice.
+4. **Permissions**: the runtime is forced to `approval-required` for a turn here (never `bypassPermissions` or
+   `--dangerously-bypass-approvals-and-sandbox`, whatever the copied thread says: an empty or `full-access` runtime is mapped down), with approvals through GPUI's
+   asks; the person may raise it per thread by hand. Approvals are therefore on the first-run path and are tested first.
+5. **Same folder as the live hub**: at `turn.start` the hub reads the **live** log's tail read-only, from the copy point (the script passes
+   the path as `BACKPLANE_LIVE_LOG`; in this mode only, and only because the person chose it), and refuses a folder in which a live turn is
+   running (the same folder or one under/over it). Not protected, said plainly: a live turn that starts after the check; and the live hub's
+   own design history, which will record the GPUI agent's edits as its thread's steps if it captures there later.
+6. **Environment**: the hub itself runs with the **fake HOME** (a folder in the copy's state dir), no `DBUS_SESSION_BUS_ADDRESS`, no
+   `XDG_RUNTIME_DIR`; hub-side `git`, `gh` and `kicad-cli` never see the real config or keyring. Only the `PersonTurn` child gets the real
+   `HOME` (passed to the hub as `BACKPLANE_PERSON_HOME`, set by the script) and the merged `PATH`; **all `BACKPLANE_*` are stripped from its
+   environment** (so no token, port or home of this hub leaks into it); cwd is the checked folder.
 
-## What the person sees in the UI (client lane)
+## What no gate covers (the person is told this at start)
 
-- A one-line strip under the title: "Copy of your data. Edits stay here. Agents run only when you send. Nothing runs by itself."
-  (from `sideBySide` in the view info; GPUI first, the other clients when they connect to this hub).
-- A refused action (git write, launch, deploy, a routine) shows the hub's one-line reason in the usual error row, never a silent no-op.
+A real agent has a shell and the real `HOME`. Nothing in the hub stops it from `git push`, `gh`, reading `~/.backplane-bend/token`, reaching
+port 3787, or doing anything the person's logins allow. User-level hooks and MCP servers of the person's agent setup also load unless
+the agents lane proves the turn runs with `--strict-mcp-config` and project-only settings (not yet checked: until it is, assume they load).
+"Every copy gate still holds" is true of the **hub** only; the agent's own process is the person's agent.
 
-## Known missing (the list the person gets)
+## Every automatic actor, how it is held off, and its state today
 
-1. No sync either way: the live Backplane's later work is not here; this copy's work never goes back.
-2. No routines, reminders, bots waking, mail, uberbot behaviour; no notifications or push.
-3. No terminals, browser, `preview_*`, taught tasks, secrets.
-4. No git commit/push/PR from the app, no file-open or release; agents can still run `git` themselves in their folder.
-5. No design history capture; history bar shows what the copy already had.
-6. No other machines, pairing, tailnet.
-7. A turn the live Backplane is running in the same folder is not detected unless it was running at the copy point: don't run the same folder in both.
-8. The policy helper on the whole real log: unmeasured (see the rehearsal report); if it does not fit 3700M the mode ships only with a trimmed copy.
+Status: **held** = code and test exist; **pending** = a named owner is landing the gate; **unverified** = nobody has shown it. No pending or
+unverified row may exist at the first real run.
 
-## Owners and what each must land before the first real run
+| Actor | Where | Held by | Status | A person sees |
+|---|---|---|---|---|
+| Resume of running turns (restart carry) | `agents/mod.rs` recovery | agents' copy fix b9f1c1673e; `restart.continue=off` appended to the copy | pending (in review) | those threads read "interrupted" |
+| Any agent start other than the person's `turn.start` (ride/wake_ride, start_queued/start_one/steer, task/launch children, work/lock results, limit fallback, `Launch.tell`, mail, bots' turns) | `agents/` | `Kind::Agent` stand-in-only; only `Kind::PersonTurn` is real | pending (agents) | a queued message waits: "starts only when you send" |
+| `one_shot` summaries, accounts' `claude auth` and usage refresh, models and CLI refresh/probes | `agents/`, `settings/` | `Kind::Agent` stand-in-only | pending (test above) | summaries and usage blank on a copy |
+| `ResumeTicker` | `settings/` | named-ticker list; no delivery on a copy | unverified | none |
+| Routine and reminder ticker, `uber_init` | `bots/routines.rs` | `if copy::on() { return }` in the loop and `tick_at` | pending (bots) | routines "paused on a copy" |
+| Mail recovery | `bots/` `Bots::start` | same gate | pending (bots) | none |
+| Owner outbox, `owner_kick` | `bots/mail/owner.rs` | returns on a copy; test proves it | held | none |
+| State policies ticker (autosettle, alerts, told, summaries, liveness, star nudge) | `state/host.rs` | its commits stay in the copy's log; every out that reaches outside (push, webhook, summary model, desk alerts) dropped | unverified (state lane must show it) | threads may settle; no alerts |
+| `work_run`/`work_watch` (agents' new tools), named locks | `agents/`, watch gate | `watch_argv` empty on a copy; the tools refused | pending (agents) | refused with the copy's line |
+| Push, webhook, telemetry, update check | `settings/` | `Kind::Net` refused; webhook gated | held | off in Settings |
+| Far sync, peers, feeds, tailnet listener, pairing | `net/` | `Kind::Net` refused, listener never started | held | no other machines |
+| Deploys, restarts, updates | none in the Rust hub | no code; `deploy.*` refused | held | "not available on a copy" |
+| Terminals, browser helper, `preview_*`, teach, tasks | `term/` | `Kind::Terminal`/`Browser` not started | held | tabs say "off on a copy" |
+| `secret_run` shell, vault | `settings/` | `Kind::Shell` not started; no session bus, fake HOME | held | empty secrets box |
+| Git writes, `file.open`, release | `files/`, `commands/` | `copy::rpc_refused` + `files::git::proc` | held | one-line refusal |
+| Design history (`step`, `checkpoint`) | `agents/hist.rs` | fb25d984d1 landed: no capture on a copy | held (reviewer to confirm in the final binary) | history bar shows nothing new |
+| Hub-side file writes that are not git (intent, checklist, renders, exports, `kicad_ipc`) | `files/`, `kicad/` | files' audit: each writes only inside the copy's home or is refused | pending (files) | refused or written in the copy |
+| KiCad watch, KiCad IPC reads | `kicad/` | `Kind::Local`, read-only on the project | held | works |
+| Heartbeats, a running turn's 1 s beat | `wire/`, `agents/` | connection- or person-turn-bound | held | n/a |
 
-core: `copy::real_agents()`, the flag refusal without `BACKPLANE_COPY=1`, `sideBySide` in `/hello`. agents: the person-turn rule, the
-copy recovery fix, no design-history capture. bots: gates for the three ticker/mail items. state: verify policy outs. files: git/history.
-switchover: `side-by-side.sh`, copy cut, env contract, the first-run checklist below. reviewer: OK this document and each range.
+## What the person sees (client lane)
 
-First-run checklist (the person's command does it; each is a hard stop): live hub answers `/hello`; port free; `/` has 20 GB beyond the
-copy; the hub's `/proc/<pid>/environ` has `BACKPLANE_COPY=1`, `BACKPLANE_SIDE_BY_SIDE=1`, no DBUS/XDG_RUNTIME_DIR; the copy's log has
-`restart.continue=off` as its last setting; after 30 s idle the copy's log has grown by no more than the policy's own settings (a count, no content).
+- A strip under the title with the text above ("a copy of your data; agents you start run in your real folders; their file changes are real and
+  not undone by going back; nothing else runs by itself"), from `sideBySide` in `/hello` and the view info.
+- A refused action shows the hub's one-line reason in the usual error row, never a silent no-op.
+- An approval for each tool an agent wants, in GPUI's asks.
+
+## Known missing
+
+1. No sync either way: the live Backplane's later work is not here; this copy's threads never go back.
+2. No routines, reminders, bots, mail, uberbot; no notifications or push.
+3. No terminals, browser, `preview_*`, taught tasks, secrets box.
+4. **Agents are the person's real agents**: their file edits are real, rollback does not undo them, there is no history of them in this copy, and no gate
+   covers what an agent does with its shell and real `HOME` (see above).
+5. No git commit/push/PR from the app, no file-open or release; no design history capture.
+6. A copied thread starts a fresh agent session: the agent does not know the thread's earlier conversation.
+7. No other machines, pairing, tailnet.
+8. A live turn that starts in a folder after the check is not detected; don't run the same folder in both apps.
+
+## Owners
+
+core: `Kind::PersonTurn`, `copy::person_turn_allowed()`, the flag refusal without `BACKPLANE_COPY=1`, the named-ticker list and its test,
+`sideBySide` in `/hello`. agents: the `turn.start` checks 1-6, no real start from any other path, forced approvals, fresh session, strict MCP/settings,
+`work_*` refusals. bots: the three gates. state: verify and test the policy outs. files: git, non-git writes, history. settings: `ResumeTicker`,
+accounts refresh. switchover: the scripts (fake HOME for the hub, `BACKPLANE_PERSON_HOME`, `BACKPLANE_LIVE_LOG`, the copy cut, idle-growth check,
+logs kept), the diagnosis of the 28 s exit. reviewer: OK this document and each range.
+
+First-run checklist (the person's command does each, a hard stop): live hub answers `/hello`; port free; 20 GB free beyond the copy; the hub's
+`/proc/<pid>/environ` has `BACKPLANE_COPY=1`, `BACKPLANE_SIDE_BY_SIDE=1`, the fake `HOME`, no real `HOME`, no DBUS/XDG_RUNTIME_DIR, no
+`BACKPLANE_AGENTS`; the copy's last setting is `restart.continue=off`; after 30 s idle the copy's log has grown by at most 50 events (a count).
