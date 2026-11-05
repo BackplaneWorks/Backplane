@@ -35,7 +35,14 @@ impl Pty {
             let m = OwnedFd::from_raw_fd(m);
             if libc::grantpt(m.as_raw_fd()) != 0 || libc::unlockpt(m.as_raw_fd()) != 0 { return Err(std::io::Error::last_os_error()) }
             let mut name = [0 as libc::c_char; 128];
+            #[cfg(target_os = "linux")]
             if libc::ptsname_r(m.as_raw_fd(), name.as_mut_ptr(), name.len()) != 0 { return Err(std::io::Error::last_os_error()) }
+            // macOS has no ptsname_r: ptsname returns a static buffer, so one at a time
+            #[cfg(not(target_os = "linux"))]
+            { static PTSNAME: std::sync::Mutex<()> = std::sync::Mutex::new(()); let _g = PTSNAME.lock().unwrap_or_else(|e| e.into_inner());
+              let p = libc::ptsname(m.as_raw_fd()); if p.is_null() { return Err(std::io::Error::last_os_error()) }
+              let b = std::ffi::CStr::from_ptr(p).to_bytes_with_nul(); if b.len() > name.len() { return Err(std::io::Error::other("pty name too long")) }
+              for (i, c) in b.iter().enumerate() { name[i] = *c as libc::c_char } }
             let s = libc::open(name.as_ptr(), libc::O_RDWR | libc::O_NOCTTY);
             if s < 0 { return Err(std::io::Error::last_os_error()) }
             libc::fcntl(s, libc::F_SETFD, libc::FD_CLOEXEC);
