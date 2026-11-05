@@ -642,3 +642,29 @@ async fn codex_start(name: &str) -> (Arc<Hub>, Arc<Agents>, PathBuf) {
     assert!(log_from(&hub, from).await.iter().any(|e| is(e, "MessagePosted") && e["text"] == "more" && e["role"] == "user"));
     assert_eq!(ag.stats.procs_spawned.load(Relaxed), 1, "no restart"); until(&hub, from, 20, |ev| ev.iter().filter(|e| turn_is(e, "completed")).count() == 2).await; ag.shutdown();
 }
+
+// ---- the hub is SIGKILLed with agents alive ----
+/// Not a test by itself: run as a child by the SIGKILL test. A mini hub: it starts a Codex-like agent whose shell leaves a background `sleep`, prints the pids, and waits to be killed.
+#[tokio::test(flavor = "multi_thread")] async fn sigkill_helper() {
+    let Ok(d) = std::env::var("BP_SIGKILL_DIR") else { return };
+    let d = PathBuf::from(d); proc::set_owner(&d.to_string_lossy());
+    let sh = d.join("agent"); script(&d, "agent", "#!/bin/sh\nsleep 300 &\necho $! > \"$(dirname \"$0\")/grandchild\"\necho $$ > \"$(dirname \"$0\")/child\"\nsleep 300\n");
+    let p = proc::spawn(&sh, &[], &d, None, &[]).unwrap(); let _keep = p;
+    std::fs::write(d.join("ready"), "1").unwrap(); tokio::time::sleep(Duration::from_secs(600)).await;
+}
+#[tokio::test(flavor = "multi_thread")] async fn a_killed_hub_leaves_no_agent_behind() {
+    let d = dir("kill"); let exe = std::env::current_exe().unwrap();
+    let mut h = std::process::Command::new(exe).args(["agents::tests::sigkill_helper", "--exact", "--nocapture", "--test-threads=1"]).env("BP_SIGKILL_DIR", &d).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().unwrap();
+    let end = Instant::now() + Duration::from_secs(20); while !d.join("grandchild").exists() || !d.join("child").exists() { assert!(Instant::now() < end, "helper did not start"); tokio::time::sleep(Duration::from_millis(50)).await }
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let rd = |n: &str| -> u32 { std::fs::read_to_string(d.join(n)).unwrap().trim().parse().unwrap() };
+    let (child, grand) = (rd("child"), rd("grandchild")); assert!(proc::alive(child) && proc::alive(grand));
+    unsafe { libc::kill(h.id() as i32, libc::SIGKILL); } let _ = h.wait();
+    let end = Instant::now() + Duration::from_secs(5); while proc::alive(child) && Instant::now() < end { tokio::time::sleep(Duration::from_millis(50)).await }
+    assert!(!proc::alive(child), "the agent dies with its hub (PDEATHSIG)");
+    // what the agent started outlives it; the next hub on the home ends it
+    assert!(proc::alive(grand), "(a grandchild survives the kernel's rule: this is why the next hub reaps)");
+    let n = proc::reap_orphans(&d.to_string_lossy()); assert!(n >= 1, "reaped {n}");
+    let end = Instant::now() + Duration::from_secs(5); while proc::alive(grand) && Instant::now() < end { tokio::time::sleep(Duration::from_millis(50)).await }
+    assert!(!proc::alive(grand), "no orphan after the next hub starts");
+}
