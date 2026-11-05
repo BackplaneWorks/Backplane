@@ -13,7 +13,7 @@ fn main() {
     println!("cargo:rerun-if-changed={}",css_path.display());
     let css=fs::read_to_string(css_path).unwrap();
     let mut theme=String::new();
-    for (selector, name) in [(":root {","DARK"),(".app.light {","LIGHT")] {
+    for (selector, name) in [(":root {","DARK"),("html.light, .app.light, .bub-move.light {","LIGHT")] {
         let block=css.split(selector).nth(1).unwrap().split('}').next().unwrap();
         theme.push_str(&format!("pub const {name}: &[(&str,u32)] = &[\n"));
         for line in block.lines() {
