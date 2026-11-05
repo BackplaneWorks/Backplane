@@ -37,6 +37,15 @@ fn parse_d(d: &str) -> Vec<Seg> {
 
 fn rgb_alpha(c: u32, a: f32) -> Rgba { rgba((c << 8) | (a.clamp(0.0, 1.0) * 255.0).round() as u32) }
 
+/// One `GPUI_RECT` line per distinct drawn region (physical px), for the visual check.
+fn report(name: &str, b: Bounds<Pixels>, scale: f32) {
+    static SEEN: std::sync::Mutex<Option<std::collections::HashSet<String>>> = std::sync::Mutex::new(None);
+    let line = format!("{{\"name\":\"{}\",\"x\":{:.1},\"y\":{:.1},\"w\":{:.1},\"h\":{:.1},\"scale\":{}}}", name,
+        f32::from(b.origin.x) * scale, f32::from(b.origin.y) * scale, f32::from(b.size.width) * scale, f32::from(b.size.height) * scale, scale);
+    let mut g = SEEN.lock().unwrap();
+    if g.get_or_insert_with(Default::default).insert(line.clone()) { eprintln!("GPUI_RECT {line}"); }
+}
+
 // ---- logo -------------------------------------------------------------------------------------
 pub struct Logo { bg: u32, fg: u32, segs: Vec<Seg>, tx: f32, ty: f32, scale: f32, size: f32 }
 fn attr<'a>(svg: &'a str, from: &str, name: &str) -> Option<&'a str> {
@@ -53,12 +62,13 @@ impl Logo {
             size: attr(svg, "<svg", "width").and_then(|w| w.parse().ok()).unwrap_or(256.0) }
     }
 }
-pub fn logo(light: bool, size: f32) -> impl IntoElement {
+pub fn logo(light: bool, size: f32, name: &'static str) -> impl IntoElement {
     static DARK: std::sync::OnceLock<Logo> = std::sync::OnceLock::new();
     static LIGHT: std::sync::OnceLock<Logo> = std::sync::OnceLock::new();
     let l: &'static Logo = if light { LIGHT.get_or_init(|| Logo::parse(include_str!("../../../src/web/favicon-light.svg"))) }
         else { DARK.get_or_init(|| Logo::parse(include_str!("../../../src/web/favicon.svg"))) };
     canvas(|_, _, _| (), move |b: Bounds<Pixels>, _, window: &mut Window, _| {
+        report(name, b, window.scale_factor());
         let s = size / l.size;
         window.paint_quad(fill(b, rgb(l.bg)));
         let o = b.origin;
@@ -159,10 +169,11 @@ impl Cats {
     }
 }
 /// A cat, `size` px square. Only a moving mood asks for another frame, so an idle window never repaints.
-pub fn cat(rig: Option<Arc<Rig>>, mood: &str, size: f32, started: std::time::Instant) -> AnyElement {
+pub fn cat(rig: Option<Arc<Rig>>, mood: &str, size: f32, started: std::time::Instant, name: String) -> AnyElement {
     let away = mood == "away";
     match rig {
         Some(rig) => canvas(|_, _, _| (), move |b: Bounds<Pixels>, _, window: &mut Window, _| {
+            report(&name, b, window.scale_factor());
             let ms = if rig.moving { started.elapsed().as_secs_f32() * 1000.0 } else { 0.0 };
             paint_cat(window, b, &rig, ms, size, if away { 0.5 } else { 1.0 });
             if rig.moving { window.request_animation_frame(); }
