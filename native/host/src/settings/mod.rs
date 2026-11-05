@@ -6,16 +6,19 @@
 //! line to an agent, and `secret::prompt()` / `keys::prompt(..)` in the prompt. See docs/gpui/HUB-API.md.
 pub mod diagnostics;
 pub mod fallback;
+pub mod improvements;
 pub mod keys;
 #[cfg(test)]
 mod e2e;
 pub mod mask;
+pub mod misc;
 pub mod models;
 pub mod proposal;
 pub mod secret;
 pub mod set;
 pub mod telemetry;
 pub mod vault;
+pub mod zone;
 
 use crate::hub::Hub;
 use std::sync::Arc;
@@ -33,6 +36,9 @@ pub fn start(hub: Arc<Hub>, agents: Option<Arc<crate::agents::Agents>>) {
     hub.register_rpc(Arc::new(set::SettingSet { agents: agents.clone() }));
     hub.register_rpc(Arc::new(telemetry::TelemetryRpc));
     hub.register_rpc(Arc::new(diagnostics::DiagnosticsRpc));
+    hub.register_rpc(Arc::new(zone::ZoneRpc));
+    hub.register_rpc(Arc::new(misc::SettingsMisc));
+    hub.register_rpc(Arc::new(improvements::ImprovementsRpc));
     hub.register_rpc(Arc::new(secret::SecretRpc { agents }));
     if hub.rpc_for("bots.voice").is_none() { hub.register_rpc(Arc::new(keys_rpc::VoiceKeys)); }
 }
