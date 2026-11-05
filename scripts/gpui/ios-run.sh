@@ -2,7 +2,7 @@
 # Install and launch on a simulator. Usage: ios-run.sh UDID [ACTS] [SELECT]   (env: JIT=0 for no-JIT JSC)
 U=$1; ACTS=${2:-ob-skip}; SEL=${3:-}
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
-APP=~/bp-gpui-ios/ios/build/dd/Build/Products/Debug-iphonesimulator/Backplane.app
+APP=${APP:-~/bp-gpui-ios/ios/build/dd/Build/Products/Debug-iphonesimulator/Backplane.app}
 xcrun simctl bootstatus "$U" -b >/dev/null 2>&1
 xcrun simctl terminate "$U" dev.backplane.gpui >/dev/null 2>&1
 xcrun simctl install "$U" "$APP" || exit 1

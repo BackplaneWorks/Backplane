@@ -40,7 +40,7 @@ final class PerformanceTrace: @unchecked Sendable {
     // Default configuration cannot enable instrumentation in a release build
     // or on a physical device. Sink is optional and receives only numeric data.
     convenience init(sink: Sink? = nil) {
-        #if DEBUG && targetEnvironment(simulator)
+        #if (DEBUG || BP_MEASURE) && targetEnvironment(simulator)
         let enabled = ProcessInfo.processInfo.environment["BACKPLANE_PERFORMANCE"] == "1"
         #else
         let enabled = false
