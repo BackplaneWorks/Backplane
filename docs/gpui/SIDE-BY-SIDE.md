@@ -51,10 +51,15 @@ The mode adds **one new process kind, not a flag consulted by existing ones**:
 
 1. **Trigger**: the client's `turn.start` RPC (`who.client > 0`), role user, no origin, not retry-generated. A person's turn that is running
    keeps working; messages it receives while running are added to its ride only.
+   **Delivery is a door too** (`agents/mod.rs`: a live process whose key matches takes the next message on its stdin): after a person's turn a Claude
+   process stays up, so check 1 applies at every delivery: in this mode only a person's `turn.start` may write to a `PersonTurn` process or end it at
+   turn end; `Launch.tell`, a queued message, a wake or a routine run never write to it (they go to a stand-in or wait). Test: after a person's turn, each
+   non-person delivery leaves the process's stdin untouched and starts nothing.
 2. **Folder**: the thread's folder (`World::cwd`, the log's `worktree`) must exist, resolve (realpath, symlinks followed) under a project
    root named by the copy or under the copy's own home, must not be `/`, and must not be under the live home (`~/.backplane-bend`: scratch
    and bot threads live there) or the copy's `--home` control files. Test: a thread with a `worktree` under the live home, `/`, a missing
-   folder and a symlink into the live home are each refused.
+   folder and a symlink into the live home are each refused. The same rule applies to every extra directory the turn is given (`--add-dir`, the
+   log's `a.dirs`): each must pass, or the turn is refused.
 3. **Sessions**: a copied session id is never resumed (`--resume <session>` in `agents/rules.rs`, Codex `exec resume`): with the real `HOME` that is the
    live thread's own session file, and both hubs would append to one conversation. A person's turn here **starts fresh** (new session id).
    Lost: the agent does not know the thread's earlier conversation (the messages stay on screen; it never saw them). Offering the last messages as
@@ -64,7 +69,9 @@ The mode adds **one new process kind, not a flag consulted by existing ones**:
    asks; the person may raise it per thread by hand. Approvals are therefore on the first-run path and are tested first.
 5. **Same folder as the live hub**: at `turn.start` the hub reads the **live** log's tail read-only, from the copy point (the script passes
    the path as `BACKPLANE_LIVE_LOG`; in this mode only, and only because the person chose it), and refuses a folder in which a live turn is
-   running (the same folder or one under/over it). Not protected, said plainly: a live turn that starts after the check; and the live hub's
+   running (the same folder or one under/over it). The check must know the folder of threads created after the copy point, so the tail read folds
+   `ThreadCreated` and `WorktreeSet` as well as turns, and still refuses a thread whose turn was running at the copy point. A live log the check cannot read
+   (missing, unreadable, torn beyond its last whole line, a fold error) means **refuse**. Not protected, said plainly: a live turn that starts after the check; and the live hub's
    own design history, which will record the GPUI agent's edits as its thread's steps if it captures there later.
 6. **Environment**: the hub itself runs with the **fake HOME** (a folder in the copy's state dir), no `DBUS_SESSION_BUS_ADDRESS`, no
    `XDG_RUNTIME_DIR`; hub-side `git`, `gh` and `kicad-cli` never see the real config or keyring. Only the `PersonTurn` child gets the real
@@ -74,8 +81,10 @@ The mode adds **one new process kind, not a flag consulted by existing ones**:
 ## What no gate covers (the person is told this at start)
 
 A real agent has a shell and the real `HOME`. Nothing in the hub stops it from `git push`, `gh`, reading `~/.backplane-bend/token`, reaching
-port 3787, or doing anything the person's logins allow. User-level hooks and MCP servers of the person's agent setup also load unless
-the agents lane proves the turn runs with `--strict-mcp-config` and project-only settings (not yet checked: until it is, assume they load).
+port 3787, or doing anything the person's logins allow. **Requirement, not an assumption:** a `PersonTurn` runs with `--strict-mcp-config` (only this hub's own MCP config, passed by argument, so stripping `BACKPLANE_*`
+does not break approvals) and with user settings not loaded (`--setting-sources project,local`; the login method goes by `--settings` as today): the person's
+**user-level hooks, MCP servers and permission rules do not load**; the **project's own** `.claude` hooks and settings (in the real folder) **do** load, since
+they belong to that project. The agents lane proves login still works that way. A test reads the argv.
 "Every copy gate still holds" is true of the **hub** only; the agent's own process is the person's agent.
 
 ## Every automatic actor, how it is held off, and its state today
@@ -85,7 +94,7 @@ unverified row may exist at the first real run.
 
 | Actor | Where | Held by | Status | A person sees |
 |---|---|---|---|---|
-| Resume of running turns (restart carry) | `agents/mod.rs` recovery | agents' copy fix b9f1c1673e; `restart.continue=off` appended to the copy | pending (in review) | those threads read "interrupted" |
+| Resume of running turns (restart carry) | `agents/mod.rs` recovery | agents' copy fix b9f1c1673e; `restart.continue=off` appended to the copy | held (fb25d984d1 landed) | those threads read "interrupted" |
 | Any agent start other than the person's `turn.start` (ride/wake_ride, start_queued/start_one/steer, task/launch children, work/lock results, limit fallback, `Launch.tell`, mail, bots' turns) | `agents/` | `Kind::Agent` stand-in-only; only `Kind::PersonTurn` is real | pending (agents) | a queued message waits: "starts only when you send" |
 | `one_shot` summaries, accounts' `claude auth` and usage refresh, models and CLI refresh/probes | `agents/`, `settings/` | `Kind::Agent` stand-in-only | pending (test above) | summaries and usage blank on a copy |
 | `ResumeTicker` | `settings/` | named-ticker list; no delivery on a copy | unverified | none |
@@ -128,7 +137,7 @@ unverified row may exist at the first real run.
 ## Owners
 
 core: `Kind::PersonTurn`, `copy::person_turn_allowed()`, the flag refusal without `BACKPLANE_COPY=1`, the named-ticker list and its test,
-`sideBySide` in `/hello`. agents: the `turn.start` checks 1-6, no real start from any other path, forced approvals, fresh session, strict MCP/settings,
+`sideBySide` in `/hello`. agents: the `turn.start` checks 1-6 and the delivery rule, `--strict-mcp-config`, project-only settings, no real start from any other path, forced approvals, fresh session, strict MCP/settings,
 `work_*` refusals. bots: the three gates. state: verify and test the policy outs. files: git, non-git writes, history. settings: `ResumeTicker`,
 accounts refresh. switchover: the scripts (fake HOME for the hub, `BACKPLANE_PERSON_HOME`, `BACKPLANE_LIVE_LOG`, the copy cut, idle-growth check,
 logs kept), the diagnosis of the 28 s exit. reviewer: OK this document and each range.
