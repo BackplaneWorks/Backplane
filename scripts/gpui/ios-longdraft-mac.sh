@@ -5,10 +5,10 @@ U=$1; T=$2; T0=$3; K=$4
 LONG=$(cat ~/bp-gpui-ios/longdraft.txt)
 xcrun simctl boot $U 2>/dev/null; xcrun simctl uninstall $U dev.backplane.gpui
 sh ~/bp-gpui-ios/ios-shot.sh $U ld-typed 40 "ob-skip;;@type=$LONG" $T
-sh ~/bp-gpui-ios/ios-shot.sh $U ld-switched 50 "ob-skip;;@type=$LONG;;@back;;select=$K|$T0;;@back;;select=$K|$T" $T
+sh ~/bp-gpui-ios/ios-shot.sh $U ld-switched 50 "ob-skip;;@type=$LONG;;@times;;@times;;@back;;@times;;select=$K|$T0;;@times;;@back;;@times;;select=$K|$T" $T
 xcrun simctl terminate $U dev.backplane.gpui; sleep 2
 sh ~/bp-gpui-ios/ios-shot.sh $U ld-restart 30 'ob-skip' $T
-sh ~/bp-gpui-ios/ios-shot.sh $U ld-sent 60 "ob-skip;;@type=$LONG;;@send" $T
+sh ~/bp-gpui-ios/ios-shot.sh $U ld-sent 70 "ob-skip;;@type=$LONG;;@times;;@times;;@times;;@times;;@send" $T
 sh ~/bp-gpui-ios/ios-shot.sh $U pop-at 35 'ob-skip;;@type=@B' $T
 sh ~/bp-gpui-ios/ios-shot.sh $U pop-gt 35 'ob-skip;;@type=>l' $T
 xcrun simctl shutdown $U
