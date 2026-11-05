@@ -3,40 +3,62 @@
 //! next write, as the Bend hub does (evlog.js "tail's fix"). A write is fsync'd before it is
 //! acknowledged.
 use anyhow::{Context, Result};
+use serde::de::IgnoredAny;
 use std::fs::{File, OpenOptions};
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, Write};
+use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
 
-pub struct Store { path: PathBuf, file: File, lines: Vec<String>, torn: bool, pub torn_bytes: usize, pub bad: usize }
+/// The log is never held as text: an index of (offset, length) per whole line, lines read back on demand.
+pub struct Store { path: PathBuf, file: File, idx: Vec<(u64, u32)>, size: u64, torn: bool, pub torn_bytes: usize, pub bad: usize }
 
 impl Store {
     pub fn open(path: &Path) -> Result<Store> {
-        let mut bytes = Vec::new();
-        if path.exists() { File::open(path).with_context(|| format!("open {}", path.display()))?.read_to_end(&mut bytes)?; }
-        let whole = bytes.iter().rposition(|b| *b == b'\n').map(|i| i + 1).unwrap_or(0);
-        let mut lines = Vec::new();
-        let mut bad = 0;
-        for l in bytes[..whole].split(|b| *b == b'\n') {
-            if l.is_empty() { continue }
-            let s = String::from_utf8_lossy(l).into_owned();
-            if serde_json::from_str::<serde_json::Value>(&s).is_err() { bad += 1; continue }
-            lines.push(s);
+        let mut idx = Vec::new();
+        let (mut size, mut bad, mut torn_bytes) = (0u64, 0usize, 0usize);
+        if path.exists() {
+            let mut r = BufReader::with_capacity(1 << 20, File::open(path).with_context(|| format!("open {}", path.display()))?);
+            let mut buf = Vec::new();
+            loop {
+                buf.clear();
+                let n = r.read_until(b'\n', &mut buf)?;
+                if n == 0 { break }
+                if buf.last() != Some(&b'\n') { torn_bytes = n; size += n as u64; break } // after the last newline: not a line
+                let body = &buf[..n - 1];
+                if !body.is_empty() {
+                    if serde_json::from_slice::<IgnoredAny>(body).is_err() { bad += 1 } else { idx.push((size, body.len() as u32)) }
+                }
+                size += n as u64;
+            }
         }
-        let torn_bytes = bytes.len() - whole;
-        let file = OpenOptions::new().create(true).append(true).open(path).with_context(|| format!("append {}", path.display()))?;
-        Ok(Store { path: path.to_path_buf(), file, lines, torn: torn_bytes > 0, torn_bytes, bad })
+        let file = OpenOptions::new().create(true).read(true).append(true).open(path).with_context(|| format!("append {}", path.display()))?;
+        Ok(Store { path: path.to_path_buf(), file, idx, size, torn: torn_bytes > 0, torn_bytes, bad })
     }
-    pub fn lines(&self) -> &[String] { &self.lines }
-    pub fn len(&self) -> usize { self.lines.len() }
+    pub fn len(&self) -> usize { self.idx.len() }
     pub fn path(&self) -> &Path { &self.path }
+    pub fn get(&self, i: usize) -> Result<String> {
+        let (off, len) = self.idx[i];
+        let mut b = vec![0u8; len as usize]; self.file.read_exact_at(&mut b, off)?;
+        Ok(String::from_utf8_lossy(&b).into_owned())
+    }
+    /// Lines a..b (clamped), read in one pass over their byte range.
+    pub fn range(&self, a: usize, b: usize) -> Result<Vec<String>> {
+        let b = b.min(self.idx.len()); if a >= b { return Ok(vec![]) }
+        let (start, last) = (self.idx[a].0, self.idx[b - 1]);
+        let mut buf = vec![0u8; (last.0 + last.1 as u64 - start) as usize]; self.file.read_exact_at(&mut buf, start)?;
+        Ok(self.idx[a..b].iter().map(|(off, len)| String::from_utf8_lossy(&buf[(off - start) as usize..(off - start) as usize + *len as usize]).into_owned()).collect())
+    }
+    pub fn all(&self) -> Vec<String> { self.range(0, self.len()).unwrap_or_default() }
     /// Durable before it returns: the caller acknowledges only after this.
     pub fn append(&mut self, line: &str) -> Result<()> {
         debug_assert!(!line.contains('\n'));
         let mut buf = Vec::with_capacity(line.len() + 2);
-        if self.torn { buf.push(b'\n'); }
+        if self.torn { buf.push(b'\n'); self.size += 1; }
+        let off = self.size + 0;
         buf.extend(line.as_bytes()); buf.push(b'\n');
         self.file.write_all(&buf)?; self.file.sync_data()?;
-        self.torn = false; self.lines.push(line.to_string());
+        self.idx.push((off, line.len() as u32)); self.size += buf.len() as u64 - if self.torn { 1 } else { 0 };
+        self.torn = false;
         Ok(())
     }
 }
@@ -75,7 +97,7 @@ mod tests {
         for torn in ["{\"$\":\"T\",\"a", "{", "{\"$\""] {
             let (p1, p2) = (tmp("rs1"), tmp("rs2"));
             std::fs::write(&p1, format!("{torn}\n{}\n{}\n", rest[0], rest[1])).unwrap(); std::fs::write(&p2, format!("{}\n{}\n", rest[0], rest[1])).unwrap();
-            assert_eq!(Store::open(&p1).unwrap().lines(), Store::open(&p2).unwrap().lines());
+            assert_eq!(Store::open(&p1).unwrap().all(), Store::open(&p2).unwrap().all());
         }
     }
     // law store_load_append: a log read in two parts is the log read whole
@@ -85,10 +107,10 @@ mod tests {
         let whole = tmp("la-whole"); std::fs::write(&whole, xs.iter().chain(&ys).map(|l| format!("{l}\n")).collect::<String>()).unwrap();
         let part = tmp("la-part"); std::fs::write(&part, xs.iter().map(|l| format!("{l}\n")).collect::<String>()).unwrap();
         let mut s = Store::open(&part).unwrap(); for y in &ys { s.append(y).unwrap(); }
-        assert_eq!(Store::open(&part).unwrap().lines(), Store::open(&whole).unwrap().lines());
+        assert_eq!(Store::open(&part).unwrap().all(), Store::open(&whole).unwrap().all());
     }
     #[test] fn unicode_and_blank_lines() {
         let p = tmp("uni"); std::fs::write(&p, "{\"$\":\"M\",\"text\":\"日本語🙂\"}\n\n{\"$\":\"N\"}\n").unwrap();
-        let s = Store::open(&p).unwrap(); assert_eq!(s.len(), 2); assert!(s.lines()[0].contains("日本語🙂"));
+        let s = Store::open(&p).unwrap(); assert_eq!(s.len(), 2); assert!(s.all()[0].contains("日本語🙂"));
     }
 }
