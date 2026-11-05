@@ -190,6 +190,10 @@ Rust hub: 3 missing, 1 partial. GPUI desktop: 0 missing, 0 partial.
 - Terminal, browser, voice, secrets / Told ledger (already told): hub partial
 - Onboarding and polish / Star nudge: hub missing
 
+Deliberate gaps (state lane), not to be dropped quietly:
+- Autosettle legacy upgrade (`Auto.upgrade`, `autosettle.version` not "1"): the Bend hub reads launch reports out of the mail box once to seed `autosettle.delivery.*`. The Rust autosettle (`state/autosettle.rs`) treats that reports map as empty, which is what Bend does at version 1. Reason: the Rust fold keeps no mail box, and a home that reaches the Rust hub through a Bend hub is already at version 1 (the Bend tick writes it). A home still below version 1 would settle some launched threads one tick early; migrate such a home with the Bend hub first.
+- `Shelve.tick.post` (ThreadWoke after a snooze ends, run with the settle tick) is not ported yet.
+
 ### NEW bots
 
 Proposed. Owns: `native/host/src/bots/` (bots.*, rooms, routines and clock, hooks, space, memory, mail, Google, uber ops, bot tools; `bots` MCP tools registered through the agents lane's tool table).
