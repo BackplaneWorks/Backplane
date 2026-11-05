@@ -15,11 +15,12 @@ use tokio_tungstenite::tungstenite::{handshake::server::ErrorResponse, protocol:
 
 const USAGE: &str = "usage: backplane-hub --home DIR --port N [--host ADDR] [--policy-bin PATH] [--no-tailscale] [--foreground] [--headless]\n       backplane-hub --help | --version\n";
 
-struct Args { window: Option<PathBuf>, home: PathBuf, port: u16, host: String, policy: Option<PathBuf>, version: String, commit: String }
+struct Args { window: Option<PathBuf>, home: PathBuf, port: u16, host: String, policy: Option<PathBuf>, version: String, commit: String, tailscale: bool }
 
 fn parse() -> std::result::Result<Args, i32> {
     let a: Vec<String> = std::env::args().skip(1).collect();
     let (mut home, mut port, mut host, mut policy, mut window) = (None, None, "127.0.0.1".to_string(), None, None::<PathBuf>);
+    let mut no_tailscale = false;
     let (mut version, mut commit) = ("0.14.0".to_string(), std::env::var("BACKPLANE_COMMIT").unwrap_or_else(|_| "unknown".into()));
     let mut i = 0;
     while i < a.len() {
@@ -34,7 +35,8 @@ fn parse() -> std::result::Result<Args, i32> {
             "--window-bin" => { window = Some(PathBuf::from(value(i)?)); i += 1 }
             "--version-string" => { version = value(i)?; i += 1 }
             "--commit" => { commit = value(i)?; i += 1 }
-            "--no-tailscale" | "--foreground" | "--headless" => {}
+            "--no-tailscale" => no_tailscale = true,
+            "--foreground" | "--headless" => {}
             _ => { eprint!("{USAGE}"); return Err(2) }
         }
         i += 1;
@@ -42,7 +44,7 @@ fn parse() -> std::result::Result<Args, i32> {
     if window.is_none() { window = std::env::var("BACKPLANE_WINDOW_BIN").ok().filter(|p| !p.is_empty()).map(PathBuf::from); }
     if policy.is_none() { policy = std::env::var("BACKPLANE_POLICY_BIN").ok().filter(|p| !p.is_empty()).map(PathBuf::from); }
     // no default home or port: this binary must never land on a live hub's by accident
-    match (home, port) { (Some(home), Some(port)) => Ok(Args { window, home, port, host, policy, version, commit }), _ => { eprint!("{USAGE}"); Err(2) } }
+    match (home, port) { (Some(home), Some(port)) => Ok(Args { window, home, port, host, policy, version, commit, tailscale: !no_tailscale }), _ => { eprint!("{USAGE}"); Err(2) } }
 }
 
 /// One hub per home: an exclusive flock on <home>/hub.lock, which says "<pid> <port> flock".
@@ -96,7 +98,7 @@ async fn run(a: Args) -> Result<()> {
     let hub = Hub::start(hub::Cfg { home: a.home.clone(), version: a.version, commit: a.commit, listen: listen.clone(), os: "linux".into(), arch: "x64".into() }, presenter).await?;
     session::start(&hub);
     // pairing and the /auth routes, before the listener accepts (net lane)
-    let _routes = net::start::start(&hub, &a.host, a.port);
+    let _routes = net::start::start_with(&hub, &a.host, a.port, a.tailscale);
     files::start(hub.clone());
     settings::open(&hub.cfg.home);
     term::start(hub.clone());
