@@ -373,6 +373,9 @@ pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value
     let state_keys = super::keys::keys(st, thread, now_ms / 1000, &why).ok_or_else(||state_keys_refusal(st,thread))?;
     let t = st.threads.get(thread).ok_or("thread.missing")?;
     let mut o: serde_json::Map<String, Value> = serde_json::from_str(STATIC).map_err(|_|"thread.template")?;
+    // the viewer panel the thread has open (Board, Schematic, 3D; other pages are not ported)
+    let viewer = super::viewer::viewer_json(st, &o["viewer"], &params["session"]).ok_or("viewer.page-not-ported")?;
+    o.insert("viewer".into(), viewer);
     o.insert("id".into(), json!(format!("{hub}|{thread}")));
     o.insert("title".into(), json!(t.title));
     o.insert("branch".into(), json!(t.branch));

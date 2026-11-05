@@ -17,7 +17,7 @@ pub struct Dispatched { pub session: Value, pub cmds: Vec<Value>, pub next_targe
 fn s<'a>(v: &'a Value, k: &str) -> &'a str { v[k].as_str().unwrap_or("") }
 
 /// Fab.sync: the look the actor asks for when where the selected thread stands changed since the last ask (`@fab.at`), after the action's own commands, with the next `rid`.
-fn fab_tail<F: Facts>(f: &F, hub: &str, session: &mut Value, cmds: &mut Vec<Value>) {
+pub(crate) fn fab_tail<F: Facts>(f: &F, hub: &str, session: &mut Value, cmds: &mut Vec<Value>) {
     let sel = s(session, "sel").to_string();
     if sel.is_empty() || sel.contains('~') || sel.starts_with("project-home-") || sel.starts_with('@') || !select::Facts::thread_exists(f, &sel) { return }
     let at = select::fab_at(f, &sel);

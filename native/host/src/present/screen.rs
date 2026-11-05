@@ -94,6 +94,18 @@ pub fn recent(st: &State,p: &Value) -> Option<Value> {
             if !session["open"].is_object() { session["open"]=json!({}); }
             let was=flag(&session,key); session["open"][key]=json!(!was);
         },
+        // the viewer panel opened on a drawing (or closed): the watch, the project card's look, the boards (present/viewer.rs); other pages are not ported
+        "view" => {
+            let Some(o)=super::viewer::view_action(st,hub,&session,value) else { return refused("action.view-unported") };
+            crate::session::patch::merge(&mut session,&o.patch);
+            cmds=o.before;
+            crate::session::dispatch::fab_tail(&crate::session::dispatch::StateFacts(st),hub,&mut session,&mut cmds);
+            if o.boards_look {
+                let rid=session["rid"].as_u64().unwrap_or(0);
+                cmds.push(json!({"type":"send","hub":hub,"text":format!("{{\"id\":{rid},\"m\":\"boards.list\",\"p\":{{\"thread\":{}}}}}",serde_json::to_string(thread).unwrap_or_default())}));
+                session["rid"]=json!(rid+1);
+            }
+        },
         _ => return refused("action.unported"),
     } }
     // A thread is drawn only when the async session seam supplied a native window and indexed page.
