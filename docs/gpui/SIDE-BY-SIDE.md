@@ -96,13 +96,13 @@ they belong to that project. The agents lane proves login still works that way. 
 ## Every automatic actor, how it is held off, and its state today
 
 Status: **held** = a landed commit and a test that fails if the hold is removed (named in the last column); **pending** = a named owner has not landed it
-on `gpui` yet; **unverified** = no commit and test found; **not held** = the actor runs on a copy today. Checked against `gpui` at `d66a6b1c67` (2026-11-05).
+on `gpui` yet; **unverified** = no commit and test found; **not held** = the actor runs on a copy today. Checked against `gpui` at `2942e8fdb5` (2026-11-05).
 No pending, unverified or not-held row may exist at the first real run. Rows that stay open are listed under the table.
 
 | Actor | Where | Held by | Status | Commit and test | A person sees |
 |---|---|---|---|---|---|
 | Resume of running turns (restart carry) | `agents/mod.rs` recovery | copy fix; `restart.continue=off` appended to the copy by the launcher | held | `fb25d984d1`: `a_hub_on_a_copy_writes_no_design_history_and_resumes_no_turn` (child process) | those threads read "interrupted" |
-| A real agent start for anything but a person's `turn.start` (ride, queue, steer, task/launch children, limit fallback, `Launch.tell`, mail, bots' turns) | `agents/` | `Kind::Agent` stand-in-only; the person's turn is a separate `Kind::PersonTurn` | pending | `Kind::PersonTurn` is not in `proc.rs` on `gpui`; agents' wiring `14ce1f493f` is not on `gpui`. Until it lands NO real agent can start on a copy (stand-ins only): `proc::tests::a_copy_refuses_network_terminal_browser_shell_and_foreign_agents` | a queued message waits: "starts only when you send" |
+| A real agent start for anything but a person's `turn.start` (ride, queue, steer, task/launch children, limit fallback, `Launch.tell`, mail, bots' turns) | `agents/` | `Kind::Agent` stand-in-only; the person's turn is a separate `Kind::PersonTurn` (`proc.rs`), reachable only from the `turn.start` path (`agents/person.rs`: the checks, the door, forced `approval-required`, `--strict-mcp-config`, a fresh session, the person's environment) | held | `2942e8fdb5`: `agents::tests::side_by_side_runs_only_the_persons_turn_with_the_persons_agent_and_guards` (copied ride dropped, bot delivery starts nothing, live-folder conflict refuses, argv and environment guards) | a queued message waits: "starts only when you send" |
 | `one_shot` summaries, accounts' `claude auth`/usage refresh, model and CLI probes | `agents/textgen.rs:59`, `settings/` | `Kind::Agent` stand-in-only (`Cli::resolve` refuses a foreign agent on a copy) | pending | no test of `one_shot` itself on a copy is on `gpui` (the proc test above covers the resolver); agents' test is in the unlanded range | summaries and usage blank on a copy |
 | `ResumeTicker` (provider-resume records) | `settings/driver.rs:227`, registered `settings/mod.rs:84` | nothing: no `copy::` check in `driver.rs` | **not held** | it delivers a resume message (a turn start) for any `provider.resume.*` record the copied log holds; under `Kind::Agent` that is a stand-in today, but it commits events on its own. Needs a one-line gate and a test (settings lane) | none |
 | Routine and reminder ticker, `uber_init`, mail recovery | `bots/` | `copy::on()` return in the loop and `tick_at` | held | `ff07f5c4d4`: `unprompted_work_runs_live_and_not_on_a_copy_hub` (child process, both modes) | routines "paused on a copy" |
@@ -110,7 +110,7 @@ No pending, unverified or not-held row may exist at the first real run. Rows tha
 | Owner outbox, `owner_kick` | `bots/mail/owner.rs` | returns on a copy | held | `c1c14a1472`: `a_hub_on_a_copy_walks_no_owner_outbox` | none |
 | State policies ticker (autosettle, alerts, told, liveness, star nudge, summaries) | `state/host.rs` | passive mode: no tick, boot or summary action on its own; the launcher exports `BACKPLANE_PASSIVE=1` and refuses to start unless the hub's environment has it | held (by the variable) | `89c618243f`: `passive_mode_ticks_nothing`; `86cd8a705b`: `passive_mode_ticks_nothing_and_asks_for_no_summary`, `a_passive_start_commits_nothing_on_a_legacy_home`; `d6147c6451`: no summary model call on a copy. `main.rs` still calls `statehost::start` (bend's line deriving it from the side-by-side flag is not in), so the hold rests on the variable the launcher sets | threads may settle; no alerts |
 | Legacy watched work and named locks (`watch_argv`, adoption) | watch gate | every watch reads as gone on a copy | held | `636f1df382` and `copy::tests::watch_gate_none_on_a_copy_and_the_list_kept_off`, `copy_e2e` | none |
-| New `work_run`/`work_watch` tools (agents) | `agents/` | off and not re-armed on a copy | pending | agents' `ef5c11d130` is not on `gpui` | refused with the copy's line |
+| New `work_run`/`work_watch` tools (agents) | `agents/` | off and not re-armed on a copy; the tools are refused | held | `2942e8fdb5`: `agents::tests::a_hub_on_a_copy_rearms_no_work_and_the_tools_are_refused` | refused with the copy's line |
 | `wake_on`/`wake_cancel` | `agents/` | no tail, no fire, both refused on a copy | held | `865d7c7c76` (child-process test) | refused with the copy's line |
 | Alert-driven outs: webhook, push, island, desk alerts | `net/`, `settings/webhook.rs` | no out leaves on a copy | held | `0de535dc3c`: `no_alert_driven_out_leaves_on_a_copy_and_the_same_probe_posts_without_the_flag`; `7dbce7696c`: `every_child_process_is_made_through_proc` | alerts off in Settings |
 | Telemetry, update check | `hub.rs` | `Kind::Net` refused | unverified | no commit or test names them | off on a copy |
@@ -124,10 +124,11 @@ No pending, unverified or not-held row may exist at the first real run. Rows tha
 | KiCad watch, KiCad IPC reads, git reads | `kicad/`, `files/` | reads run with `GIT_OPTIONAL_LOCKS=0` (a read never rewrites an index) | held | `2dc771d3ec` (test in `files/git.rs` asserting the variable) | works |
 | Heartbeats, a running turn's 1 s beat | `wire/`, `agents/` | connection- or person-turn-bound, not actors | n/a | n/a | n/a |
 
-Open rows at `d66a6b1c67`, and who closes them: **not held** `ResumeTicker` (settings: a one-line `copy::on()` gate and a child-process test); **pending**
-person-turn exception, `one_shot`/accounts/probes, `bots.routine_run`, new `work_*` tools (agents: `14ce1f493f` and `ef5c11d130` onto `gpui`, with their tests);
-**partly pending** the non-git writes (files: a test each for `mech.render`, `review.tick`, intent); **unverified** telemetry and update check, deploys and restarts
-(net/settings: a test that a copy refuses them). The state row depends on `BACKPLANE_PASSIVE=1`, which only the launcher sets until bend's `main.rs` line lands.
+Open rows at `2942e8fdb5`, and who closes them: **not held** `ResumeTicker` (settings: a one-line `copy::on()` gate and a child-process test; the coordinator's
+hold condition 5 (`51abfb678d`) already covers provider resume, and `settings/driver.rs` still has no `copy::` check); **pending** `one_shot`/accounts/probes (agents:
+a test that they spawn nothing real on a copy) and `bots.routine_run` (agents/bots: the side-by-side test above shows bot delivery starts nothing, but no test names
+`routine_run`); **partly pending** the non-git writes (files: a test each for `mech.render`, `review.tick`, intent); **unverified** telemetry and update check, deploys
+and restarts (net/settings: a test that a copy refuses them). The state row depends on `BACKPLANE_PASSIVE=1`, which only the launcher sets until bend's `main.rs` line lands.
 
 ## What the person sees (client lane)
 
