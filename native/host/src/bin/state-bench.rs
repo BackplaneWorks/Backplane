@@ -39,7 +39,7 @@ fn main() {
             3 => serde_json::json!({"$": "ActivityLogged", "thread": th, "act": format!("gb{i}"), "tone": "tool", "kind": "Bash", "summary": "ls -la", "at": at}),
             _ => serde_json::json!({"$": "AskClosed", "id": format!("q{}", x % 400), "answer": "y", "at": at}),
         };
-        let t = Instant::now(); let d = core.derive(&[ev]); ds.push((t.elapsed().as_secs_f64() * 1e6, d.len()));
+        let t = Instant::now(); let d = core.derive(&[ev]); ds.push((t.elapsed().as_secs_f64() * 1e6, d.end.len() + d.after.len())); // the events the policies add; core and a failed end's moved marks are the caller's own
     }
     let mut us: Vec<f64> = ds.iter().map(|x| x.0).collect(); us.sort_by(|a, b| a.partial_cmp(b).unwrap());
     println!("derive per batch (40000 single-event batches, {} tasks, {} open asks): mean {:.1} us median {:.1} us p99 {:.1} us p99.9 {:.1} us max {:.1} us, {:.1} extra events/batch",
