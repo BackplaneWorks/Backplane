@@ -16,7 +16,7 @@ export const R=process.env.BACKPLANE_PARITY_ROOT||fileURLToPath(new URL('../../.
 export const WORK=process.env.PARITY_WORK||(R+'/build/gpui/parity');
 export async function startFixtureHub({bin,port,work,extraArgs,deleted=false}){
   const home=work+'/home';mkdirSync(work+'/fixroot',{recursive:true});makeFixture(home,work+'/fixroot',{deleted});makeStandins(work+'/bin');
-  const h=await startHub({bin,home,port,cap:'3700M',standins:work+'/bin',extraArgs:(process.env.PARITY_HUB_ARGS||'').split(' ').filter(Boolean),extraEnv:{TZ:'Etc/UTC',FAKE_SECS:'2',FAKE_PER:'2',FAKE_CYCLE:'5'}});
+  const h=await startHub({bin,home,port,cap:'3700M',standins:work+'/bin',extraArgs:(process.env.PARITY_HUB_ARGS||'').split(' ').filter(Boolean),extraEnv:{TZ:'Etc/UTC',BACKPLANE_VAULT_KEYRING:'file',FAKE_SECS:'2',FAKE_PER:'2',FAKE_CYCLE:'5'}});
   const check=execFileSync(R+'/test/gpui/slim/check_agents.sh',[String(h.pid),work+'/bin']).toString().trim();
   await quiesce(h);
   mkdirSync(work+'/proj',{recursive:true});mkdirSync(work+'/proj-2',{recursive:true});

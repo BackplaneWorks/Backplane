@@ -61,6 +61,31 @@ export const SCENARIOS={
     const c=await connect({hub,rec,name:'resumed',profile:'raw',query:`since=${since}&origin=${origin}`});await c.settle(900);
     await b.end(500);await c.end(800);
   },
+  // 8. the Settings requests (docs/gpui/LANES.md, lane settings): setting.set and its refusals, the telemetry choice (Off, a stale On, a retry), the
+  //    secret box (a planted value must come back in no frame), zone report/set, diagnostics, models.refresh, update.check, app.update,
+  //    improvements.context/report and accounts.default. Fixed values only; the vault uses its key file (BACKPLANE_VAULT_KEYRING=file).
+  async settings({hub,rec}){
+    const c=await connect({hub,rec,name:'raw',profile:'raw'});await c.settle(800);
+    const call=async(m,p)=>{await c.rpc(m,p);await c.settle(150)};
+    for(const [k,v] of [['onboard.done','1'],['onboard.uber','1'],['sidebar.view','active'],['peer.own.x','1'],['account.thread.t1.claude','{}'],['accounts.default','x'],['onboard.done','']])await call('setting.set',{key:k,value:v});
+    await call('telemetry.choice',{value:'on',expected:'stale',decision:'d1',popup:false});
+    await call('telemetry.choice',{value:'off',expected:'',decision:'d2',popup:false});
+    await call('telemetry.choice',{value:'off',expected:'',decision:'d2',popup:false});
+    await call('setting.set',{key:'telemetry.share',value:'on'});
+    await call('secret.list',{});
+    await call('secret.set',{name:'Parity Secret',value:'PARITY-planted-9f3k27',purpose:'parity'});
+    await call('secret.set',{name:'x',value:'short'});
+    await call('secret.set',{name:'',value:'PARITY-planted-9f3k27'});
+    await call('setting.set',{key:'note.parity',value:'a note PARITY-planted-9f3k27 in a setting'});
+    await call('secret.list',{});await call('secret.dismiss',{name:'parity-secret'});await call('secret.del',{name:'parity-secret'});await call('secret.del',{name:'parity-secret'});await call('secret.list',{});
+    for(const z of ['Europe/Helsinki','not a zone','Europe/Helsinki'])await call('zone.report',{zone:z});
+    for(const z of ['Europe/Helsinki','Mars/Olympus','a b','auto'])await call('zone.set',{zone:z});
+    await call('diagnostics.status',{});await call('diagnostics.control',{action:'bogus'});await call('diagnostics.control',{action:'off'});await call('diagnostics.control',{action:'on'});await call('diagnostics.control',{action:'clear'});
+    await call('models.refresh',{});await call('update.check',{});await call('app.update',{});
+    await call('improvements.context',{sourceThread:'missing'});await call('improvements.report',{thread:'missing'});
+    await call('accounts.default',{provider:'claude',profile:'',epoch:0});await call('accounts.default',{provider:'claude',profile:'nope',epoch:1});await call('accounts.default',{provider:'grok',profile:'',epoch:0});
+    await c.end(800);
+  },
   // 7. a thread id that names no folder (unknown, empty, deleted) on files, git, mech and the like (post-#960: every one refuses, none schedules a job)
   async unresolved({hub,rec}){
     const c=await connect({hub,rec,name:'raw',profile:'raw'});await c.settle(800);
