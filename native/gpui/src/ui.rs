@@ -107,6 +107,7 @@ impl Render for Backplane {
         let t_render = std::time::Instant::now();
         crate::screens::improvements::tick(self, window, cx);
         if self.want_focus { self.want_focus = false; self.input.focus_handle(cx).focus(window); }
+        if let Some(w) = self.screens.projects.focus.take() { let e = if w == "folder" { self.screens.projects.folder.clone() } else { self.screens.projects.search.clone() }; if let Some(e) = e { window.focus(&e.focus_handle(cx)); } }
         if let Some(n) = self.screens.focus_field.take() { if let Some(s) = self.screens.fields.get(&n) { window.focus(&s.input.focus_handle(cx)); } }
         if self.screens.focus_settings { self.screens.focus_settings = false; window.focus(&self.screens.settings_focus); }
         self.frame_marks(window, cx);
@@ -288,8 +289,10 @@ impl Render for Backplane {
         if let Some(p) = self.data["projects"].as_array().and_then(|p| p.first()) { let id = string(p, "id"); let id = id.rsplit_once('|').map_or(id.as_str(), |(_, r)| r).to_string(); ctl.push(CtlEntry { id: "ui:New thread".into(), label: "New thread".into(), ctl: Ctl::Node("new-thread".into(), id) }); }
         ctl.push(CtlEntry { id: "send".into(), label: "Send".into(), ctl: Ctl::Send });
         for l in ["Terminal", "Commands"] { ctl.push(CtlEntry { id: format!("rail:{l}"), label: l.into(), ctl: Ctl::None }); }
-        for l in ["Jump or run a command", "Search", "Add project", "Account", "Edit", "Context", "Dictate"] { ctl.push(CtlEntry { id: format!("ui:{l}"), label: l.into(), ctl: Ctl::None }); }
+        for l in ["Jump or run a command", "Account", "Edit", "Context", "Dictate"] { ctl.push(CtlEntry { id: format!("ui:{l}"), label: l.into(), ctl: Ctl::None }); }
         crate::screens::improvements::controls(self, &mut ctl);
+        for (id, label, c) in crate::screens::projects::controls(&self.data) { ctl.push(CtlEntry { id, label, ctl: c }); }
+        ctl.push(CtlEntry { id: "ui:Search".into(), label: "Search".into(), ctl: Ctl::FocusSearch });
         ctl.push(CtlEntry { id: "ui:Fold sidebar".into(), label: "Fold sidebar".into(), ctl: Ctl::ToggleSidebar });
         ctl.push(CtlEntry { id: "ui:Attach".into(), label: "Attach".into(), ctl: Ctl::PickFiles });
         if !self.sidebar_open { ctl.push(CtlEntry { id: "ui:Unfold sidebar".into(), label: "Unfold sidebar".into(), ctl: Ctl::ToggleSidebar }); }
@@ -311,11 +314,11 @@ impl Render for Backplane {
                 .child(div().flex().items_center().gap_3()
                     .child(with_rect(div().opacity(0.45), || "ui:Jump or run a command".to_string()).w(px(260.)).px_2().flex().items_center().gap_2().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("faint")).child(ic(light, "chevron-right", 13., "faint")).child("Jump or run a command"))
                     .child(with_rect(div().id("improvements-btn"), || "ui:Improvements".to_string()).cursor_pointer().on_click(cx.listener(|this, _, _, cx| crate::screens::improvements::toggle(this, cx))).px_2().flex().items_center().gap_2().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("dim")).child(ic(light, "message-square", 15., "dim")).child("Improvements"))
-                    .child(with_rect(div().opacity(0.45), || "ui:Search".to_string()).child(ic(light, "search", 15., "dim"))).child(with_rect(div().id("gear"), || "ui:Settings".to_string()).cursor_pointer().on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(Command::Action("flag".into(), "settings".into())); cx.notify(); })).child(ic(light, "settings", 15., "dim")))))
+                    .child(with_rect(div().id("search-btn"), || "ui:Search".to_string()).cursor_pointer().on_click(cx.listener(|this, _, _, cx| this.focus_search(cx))).child(ic(light, "search", 15., "dim"))).child(with_rect(div().id("gear"), || "ui:Settings".to_string()).cursor_pointer().on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(Command::Action("flag".into(), "settings".into())); cx.notify(); })).child(ic(light, "settings", 15., "dim")))))
             .child(div().flex_1().min_h_0().flex()
                 // sidebar
                 .child(div().w(px(if self.sidebar_open { 264. } else { 0. })).overflow_hidden().h_full().flex_shrink_0().relative().child(art::probe("sidebar")).bg(c("bg")).border_r_1().border_color(c("line")).flex().flex_col()
-                    .child(div().flex().items_center().gap_2().p_2().child(with_rect(div().id("fold-sidebar"), || "ui:Fold sidebar".to_string()).cursor_pointer().child(ic(light, "chevron-left", 16., "dim")).on_click(cx.listener(|this, _, _, cx| { this.sidebar_open = false; this.ui_epoch += 1; cx.notify(); }))).child(div().flex_1().px_2().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).text_color(c("faint")).child("Search projects")).child(with_rect(div().opacity(0.45), || "ui:Add project".to_string()).child(ic(light, "plus", 16., "dim"))))
+                    .child(div().flex().items_center().gap_2().p_2().child(with_rect(div().id("fold-sidebar"), || "ui:Fold sidebar".to_string()).cursor_pointer().child(ic(light, "chevron-left", 16., "dim")).on_click(cx.listener(|this, _, _, cx| { this.sidebar_open = false; this.ui_epoch += 1; cx.notify(); }))).child(crate::screens::projects::search_box(light, &self.screens.projects)).child(with_rect(div().id("add-project"), || "ui:Add project".to_string()).cursor_pointer().on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(crate::screens::projects::open_cmd()); cx.notify(); })).child(ic(light, "plus", 16., "dim"))))
                     .child(div().id("sidebar").overflow_y_scroll().flex_1().children(rows))
                     .child(div().px_3().py_1().border_t_1().border_color(c("line")).text_size(px(11.)).text_color(c("dim")).child(self.status.clone())))
                 // main
@@ -350,6 +353,7 @@ impl Render for Backplane {
                     .children(crate::screens::bots::page(cx, light, &self.screens.fields, &self.data["bot"]))
                     .children(crate::screens::tools::dropdown(cx, light, thread, self.screens.menu_open))
                     .children(crate::screens::tools::questions(cx, light, &self.screens.fields, &self.data))
+                    .children(crate::screens::projects::view(cx, light, &self.screens.projects, &self.data))
                     .children(crate::screens::bots::forms(cx, light, &self.screens.fields, &self.data))
                     .children(crate::screens::settings::view(cx, light, &self.screens.fields, &self.data["settings"], &self.screens.settings_focus, &self.screens.settings_ui))
                     .children(crate::screens::improvements::view(cx, light, &self.screens.imp))

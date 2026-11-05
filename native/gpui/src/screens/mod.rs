@@ -15,6 +15,7 @@ pub mod capture;
 pub mod md;
 pub mod picker;
 pub mod plot;
+pub mod projects;
 pub mod plotview;
 pub mod select;
 pub mod settings;
@@ -35,6 +36,7 @@ pub struct Screens {
     pub offsets: HashMap<String, f32>,
     pub reg: timeline::Reg,
     pub menu_open: bool,
+    pub projects: projects::Projects,
     /// The 3D page (fed the hub's solid frames) and the Browser page (polls the thread's frame while it is shown); made when first needed.
     pub solid: Option<Entity<crate::viewers::solid::SolidPage>>,
     pub browser: Option<(String, Entity<crate::viewers::browser::BrowserPage>)>,
@@ -67,6 +69,6 @@ pub struct Screens {
 impl Screens {
     pub fn new<T: 'static>(_cx: &mut Context<T>, target: Option<attach::Target>, drafts_path: std::path::PathBuf, saved: HashMap<String, String>) -> Self {
         let imp = improvements::Imp::new(&drafts_path, target.clone());
-        Self { ask_inputs: HashMap::new(), attacher: attach::Attacher::new(target), drafts: drafts::Writer::start(drafts_path, saved), offsets: HashMap::new(), reg: Default::default(), menu_open: false, solid: None, browser: None, rail_pending: None, rail_at: None, focus_field: None, bots_open: String::new(), plot_click: None, plot: Default::default(), plotview: Default::default(), picker_open: false, fields: HashMap::new(), settings_focus: _cx.focus_handle(), focus_settings: false, settings_was_open: false, settings_ui: Default::default(), parsed: Default::default(), images: Default::default(), img_poll: false, await_draft: None, pending_draft: None, draft_timer: false, imp }
+        Self { ask_inputs: HashMap::new(), attacher: attach::Attacher::new(target), drafts: drafts::Writer::start(drafts_path, saved), offsets: HashMap::new(), reg: Default::default(), menu_open: false, projects: Default::default(), solid: None, browser: None, rail_pending: None, rail_at: None, focus_field: None, bots_open: String::new(), plot_click: None, plot: Default::default(), plotview: Default::default(), picker_open: false, fields: HashMap::new(), settings_focus: _cx.focus_handle(), focus_settings: false, settings_was_open: false, settings_ui: Default::default(), parsed: Default::default(), images: Default::default(), img_poll: false, await_draft: None, pending_draft: None, draft_timer: false, imp }
     }
 }
