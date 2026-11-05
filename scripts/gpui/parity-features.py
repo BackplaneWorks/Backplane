@@ -427,10 +427,20 @@ R(A, "Secret box (secret.set/del/list/dismiss, vault)", m=["secret.set", "secret
 R(A, "Rules and task board (rules.set/drop, board.set/drop)", m=["rules.set", "rules.drop", "board.set", "board.drop"], hub="partial", pf="state", c="mpp", lane=L["state"], ev="agents/rules.rs gates tools; the requests are unhandled; state keeps rule./board. settings")
 R(A, "Told ledger (already told)", hub="partial", pf="state", c="nnn", lane=L["state"], ev="told.* settings kept; tools missing")
 
+# ---- Hub housekeeping policies (state lane): what the Bend hub writes by itself at a turn's end and on the minute tick
+A = "Hub housekeeping"
+R(A, "Autosettle: tick, quiet marks, message metadata (Auto.changes, Auto.messages.metadata, Auto.quiet)", hub="done", pf="state", c="nnn", lane=L["state"], ev="state/autosettle.rs + Transform::before_commit; Bend-vs-Rust probe 72 runs (full+lean) 0 differ, 14 autosettle_* laws mapped; legacy upgrade (Auto.upgrade, autosettle.version below 1) is a DELIBERATE gap: the reports map is empty, so a launched thread can only be held, never settled early; migrate such a home with the Bend hub once")
+R(A, "Autosettle: Shelve.auto.fix wakes, Shelve.auto.messages (a settled thread reopens on a new reply or turn), Shelve.auto.clean", hub="missing", pf="state", c="nnn", lane=L["state"], ev="not ported; laws autosettle_new_assistant_message_reopens, autosettle_new_turn_reopens stay unported")
+R(A, "Auto.read: a thread opened in a viewer marks its newest reply read (autosettle.read.<t>)", hub="partial", pf="state", c="nnn", lane=L["state"], ev="autosettle::read + Policies::read exist; the view-open and desk-look handlers (parity-session) must call it and commit its events; until then a person's thread with output stays unread and never settles")
+R(A, "Shelve.tick.post: the wake (ThreadWoke) when a snooze ends", hub="missing", pf="state", c="nnn", lane=L["state"], ev="not ported (runs with the settle tick)")
+R(A, "Liveness: progress writes (liveness.<t> on agent output, parents, restart.retry clear)", hub="missing", pf="state", c="nnn", lane=L["state"], ev="state/liveness.rs has the pure decision (7 liveness_* laws mapped); Watchdog.progress/after/tick are not ported; JS recording shows liveness.<t> on every user and assistant message")
+R(A, "Liveness deliveries: nudge into the stalled thread, notice to its launcher or Bub, lock heartbeat, work timeout, provider resume, retry tick", hub="missing", pf="state", c="nnn", lane=L["state"], ev="not ported; touches the agents and bots seams (Lr.send, Bots.wake): ask their owners first")
+R(A, "Alert, told and summary writes at a turn's end (alert.<t>, told.<key>, summary.at.<id>)", hub="missing", pf="state", c="nnn", lane=L["state"], ev="not ported; keys and order are in the JS recording (parity-causes.md B); told.* is not kept in the lean state until Told.prune is ported")
+
 # ---- Onboarding, nudge, i18n
 A = "Onboarding and polish"
 R(A, "First-run tour", m=["setting.set"], c="mdd", lane=L["gscreens"], ev="onboard.done is a setting (no handler); ios build-tour.log, tour-timeline.png; android pair shot shows tour")
-R(A, "Star nudge", m=["star.nudge"], pf="state", c="mpp", lane=L["state"], ev="state/star.rs (4 tests); star.nudge request no handler")
+R(A, "Star nudge", m=["star.nudge"], pf="state", c="mpp", lane=L["state"], ev="state/star.rs (4 tests, 3 star_nudge_* laws mapped); not wired: nobody counts prompts or answers star.nudge")
 R(A, "Command palette and shortcuts (alt/ctrl digits, hints)", hub="n/a", c="pnn", lane=L["gscreens"], ev="GPUI input.rs bindings only; palette missing")
 R(A, "i18n (en, ja)", hub="partial", c="mdd", lane=L["i18n"], ev="Rust prompt language T::PROMPT_LANG_K; iOS en/ja lproj, Android NativeLocale; GPUI strings are English literals")
 R(A, "Light and dark themes, tokens", hub="n/a", c="dpp", lane=L["gscreens"], ev="GPUI theme.rs tokens, shots light/dark; phones' BackplaneTheme/Design")
