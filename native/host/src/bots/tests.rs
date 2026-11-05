@@ -230,7 +230,7 @@ fn filter(ev: &[Value]) -> Vec<Value> {
     ev.iter().filter(|e| { let k = e["$"].as_str().unwrap_or(""); let th = e["thread"].as_str().unwrap_or("");
         let s = serde_json::to_string(e).unwrap_or_default();
         // what the JS hub's routing adds after a mail is filed (triage, escalations, claims) is slice 3: not compared
-        if s.contains("triage-") || (k == "ConvSet" && e["id"].as_str().unwrap_or("").starts_with("pair:")) || (k == "MailPosted" && e["conv"].as_str().unwrap_or("").starts_with("pair:"))
+        if s.contains("triage-") || (k == "ThreadCreated" && (e["id"].as_str().unwrap_or("").starts_with("run") || e["id"].as_str().unwrap_or("").starts_with("mailcoord-"))) || (k == "ConvSet" && e["id"].as_str().unwrap_or("").starts_with("pair:")) || (k == "MailPosted" && e["conv"].as_str().unwrap_or("").starts_with("pair:"))
             || (k == "MessageFrom" && e["kind"] == "escalation") || (k == "SettingSet" && e["key"].as_str().unwrap_or("").starts_with("owner.mail.") && e["value"] == "") { return false }
         match k { "ThreadCreated" => e["project"] == "", "MessagePosted" => threads.contains(th) && e["role"] == "user", "MessageFrom" => threads.contains(th), "SettingSet" => e["key"].as_str().unwrap_or("").starts_with("owner.mail."),
             "WorktreeSet" => threads.contains(e["id"].as_str().unwrap_or("")), _ => KEEP.contains(&k) } })
