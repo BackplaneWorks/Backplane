@@ -122,3 +122,18 @@ test('what presses opened is kept across a reload for the same hub and pairing, 
  scope='hubB';const h=new PressFeedback(()=>{},64,{storage,scope:()=>scope});h.seen(page({n:2}),'thread:A');h.choice('flag','settings','thread:A');assert.equal(h.showing,false,'another hub: nothing');
  mem.set('bp-press-v1:hubC','{not json');scope='hubC';const k=new PressFeedback(()=>{},64,{storage,scope:()=>scope});k.seen(page({n:3}),'thread:A');assert.equal(k.learned.size,0,'a broken store is ignored');
 });
+test('a popover drawn with its shade before it is put in and taken away with the shade, in the hub’s order',async()=>{
+ const {PressFeedback,regions,T}=await load();const f=new PressFeedback(()=>{});
+ const el=(tag,key,attrs,ks=[])=>({$:T.El,tag,key,attrs:L(Object.entries(attrs).map(([name,value])=>({$:T.At,name,value}))),kids:L(ks)});
+ const pop=el('div','',{class:'tok-pop'},[el('span','',{class:'tok-title'})]),shade=el('div','',{class:'shade','data-value':'tokstats'});
+ const page=(open,n=0)=>el('div','',{},[el('div','app',{class:'app'},[el('main','main',{class:'thread-view'},[el('div','tl',{id:'timeline'},[el('div','r'+n,{class:'msg'})]),
+  el('div','composer',{class:'composer'},[el('textarea','composer',{}),el('button','tok',{class:'tok-chip'}),...(open?[shade,pop]:[]),el('div','foot',{class:'composer-foot'})])])])]);
+ const comp=pg=>kids(kids(kids(kids(pg)[0])[0])[1]);
+ f.seen(page(false),'thread:A');let s=f.choice('flag','tokstats','thread:A');s(true);f.seen(page(true),'thread:A');
+ f.seen(page(false,1),'thread:A');s=f.choice('flag','tokstats','thread:A');assert.equal(f.active?.kind,'tokens');
+ assert.deepEqual(comp(f.project(page(false,2))).map(k=>at(k,'class')),[undefined,'tok-chip','shade','tok-pop','composer-foot'],'the shade, then the popover, where the hub draws them');
+ s(true);f.seen(page(true,3),'thread:A');s=f.choice('flag','tokstats','thread:A');s(true);f.seen(page(false,5),'thread:A');
+ f.seen(page(true,6),'thread:A');s=f.choice('flag','tokstats','thread:A');assert.equal(f.active?.node,null,'the shut press is known too');
+ assert.deepEqual(comp(f.project(page(true,4))).map(k=>at(k,'class')),[undefined,'tok-chip','composer-foot'],'the shade goes with it (it would catch every click)');
+ assert.equal(regions(page(true)).get('tokens').pre[0],shade);
+});
