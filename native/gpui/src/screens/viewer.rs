@@ -72,6 +72,7 @@ fn diff_page(cx: &mut Context<Backplane>, light: bool, diff: &Value) -> AnyEleme
         .children([("Commit", "commit_push"), ("PR", "commit_push_pr")].into_iter().map(|(l, v)| btn(cx, light, format!("git-{v}"), l.to_string(), false, Command::Action("git".into(), v.into()))).collect::<Vec<_>>()));
     let mut budget = MAX_ROWS;
     for f in diff_files(diff) {
+        if budget == 0 { break; }
         col = col.child(div().flex().gap_2().px_3().py_1().mt_1().bg(c("raise")).border_y_1().border_color(c("line")).child(div().flex_1().overflow_hidden().whitespace_nowrap().child(f.name.clone())).child(div().text_color(c("dim")).child(f.status.clone())));
         for l in &f.lines {
             if budget == 0 { break; } budget -= 1;
