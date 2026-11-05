@@ -12,6 +12,28 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::{handshake::server::ErrorResponse, protocol::WebSocketConfig, Message};
 
+/// Bend `Hub.origin`: the decimal `at` of the log's first change ("0" for an empty log or a first line without `at`).
+/// A client resumes (`since`) only into the log it came from.
+pub fn origin_of(first_line: Option<&str>) -> String {
+    first_line.and_then(|l| serde_json::from_str::<Value>(l).ok()).and_then(|v| v.get("at").and_then(Value::as_u64)).unwrap_or(0).to_string()
+}
+
+/// One inbound frame as a request, or the reply the hub gives for it (Bend `Hub.request_text`): text is JSON, binary is CBOR;
+/// a frame that does not parse is `malformed request` to id 0; a parsed value answers to its `id`, or 0 when it has none or is not an object.
+/// None for frames that are not requests (ping, pong).
+pub fn decode(m: &Message) -> Option<std::result::Result<Value, Value>> {
+    let v = match m {
+        Message::Binary(b) => cbor::decode(b).ok(),
+        Message::Text(t) => serde_json::from_str::<Value>(t.as_str()).ok(),
+        _ => return None,
+    };
+    Some(match v {
+        Some(Value::Object(mut o)) => { if !o.contains_key("id") { o.insert("id".into(), json!(0)); } Ok(Value::Object(o)) }
+        Some(_) => Ok(json!({"id":0})),
+        None => Err(json!({"t":"reply","id":0,"ok":false,"error":"malformed request"})),
+    })
+}
+
 /// A handler's reply: a header it names in `extra` (Cache-Control, Content-Type...) replaces the default of
 /// the same name; Content-Length is always the body's.
 pub fn response_for(status: &str, ctype: &str, extra: &str, body: &[u8]) -> Vec<u8> {
@@ -71,7 +93,9 @@ pub async fn socket_inner(hub: Arc<Hub>, s: TcpStream, cbor_wanted: bool) -> Res
         tokio::select! {
             m = rx.next() => {
                 let Some(m) = m else { return Ok(()) };
-                let v: Value = match m? { Message::Binary(b) => match cbor::decode(&b) { Ok(v) => v, Err(_) => { tx.send(pack(&conn, &json!({"t":"reply","id":0,"ok":false,"error":"malformed request"}))).await?; continue } }, Message::Text(t) => match serde_json::from_str(t.as_str()) { Ok(v) => v, Err(_) => { tx.send(pack(&conn, &json!({"t":"reply","id":0,"ok":false,"error":"malformed request"}))).await?; continue } }, Message::Close(_) => return Ok(()), _ => continue };
+                let m = m?;
+                if matches!(m, Message::Close(_)) { return Ok(()) }
+                let v = match decode(&m) { None => continue, Some(Err(reply)) => { tx.send(pack(&conn, &reply)).await?; continue } Some(Ok(v)) => v };
                 for f in hub.request(&mut conn, &v).await { tx.send(pack(&conn, &f)).await?; }
             }
             n = changes.recv() => { match n { Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => if due.is_none() && !conn.view_id.is_empty() { due = Some(tokio::time::Instant::now() + Duration::from_millis(50)) }, Err(_) => return Ok(()) } }
@@ -115,9 +139,11 @@ pub async fn wire(hub: Arc<Hub>, s: TcpStream, since: usize, origin: String) -> 
         tokio::select! {
             m = rx.next() => {
                 let Some(m) = m else { return Ok(()) };
-                let v: Value = match m? { Message::Binary(b) => match cbor::decode(&b) { Ok(v) => v, Err(_) => { tx.send(pack(&conn, &json!({"t":"reply","id":0,"ok":false,"error":"malformed request"}))).await?; continue } }, Message::Text(t) => match serde_json::from_str(t.as_str()) { Ok(v) => v, Err(_) => { tx.send(pack(&conn, &json!({"t":"reply","id":0,"ok":false,"error":"malformed request"}))).await?; continue } }, Message::Close(_) => return Ok(()), _ => continue };
+                let m = m?;
+                if matches!(m, Message::Close(_)) { return Ok(()) }
+                let v = match decode(&m) { None => continue, Some(Err(reply)) => { tx.send(pack(&conn, &reply)).await?; continue } Some(Ok(v)) => v };
                 // a plain stream has no views: the Bend hub answers a view method there STALE_CONNECTION
-                if v.get("m").and_then(Value::as_str).map_or(false, |m| m.starts_with("view.")) { tx.send(pack(&conn, &hub::error(v.get("id").unwrap_or(&Value::Null), "STALE_CONNECTION"))).await?; continue }
+                if v.get("m").and_then(Value::as_str).map_or(false, |m| m.starts_with("view.")) { tx.send(pack(&conn, &hub::error(&v["id"], "STALE_CONNECTION"))).await?; continue }
                 let frames = hub.request(&mut conn, &v).await;
                 // events the request committed (project.add, turn.start...) reach this client before the reply that names them
                 loop {
@@ -183,3 +209,6 @@ pub async fn serve(hub: Arc<Hub>, s: TcpStream) -> Result<()> {
 
 pub fn rejected(e: &str) -> ErrorResponse { let mut r = ErrorResponse::new(Some(e.to_string())); *r.status_mut() = 401.try_into().unwrap(); r }
 
+
+#[cfg(test)]
+mod tests;
