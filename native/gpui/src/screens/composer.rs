@@ -357,7 +357,7 @@ impl Render for Composer {
 impl Focusable for Composer { fn focus_handle(&self, _: &App) -> FocusHandle { self.focus.clone() } }
 
 pub fn bind(cx: &mut App) {
-    for ctx in ["Composer", "AskInput"] {
+    for ctx in ["Composer", "AskInput", "ImpInput"] {
     let c = Some(ctx);
     cx.bind_keys([
         KeyBinding::new("backspace", Backspace, c), KeyBinding::new("delete", Delete, c),
