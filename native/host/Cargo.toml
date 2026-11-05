@@ -16,6 +16,8 @@ httparse = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order", "arbitrary_precision"] }
 sha2 = "0.10"
+aes-gcm = "0.10"
+base64 = "0.22"
 hex = "0.4"
 tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync", "time", "process", "macros", "fs"] }
 tokio-tungstenite = "0.24"

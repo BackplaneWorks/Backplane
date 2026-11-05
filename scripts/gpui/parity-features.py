@@ -375,7 +375,7 @@ R(A, "Worktrees per thread, checkpoints", m=["thread.worktree"], c="ppp", lane=L
 
 # ---- Settings
 A = "Settings"
-R(A, "Setting storage and echo (setting.set)", m=["setting.set"], c="mpp", lane=L["sett"], ev="no Rust handler; hub only seeds a few keys; GPUI settings glyph is inert")
+R(A, "Setting storage and echo (setting.set)", m=["setting.set"], c="mpp", lane=L["sett"], ev="settings/set.rs handles setting.set (peer.own, account gate, telemetry keys); unit-tested on Boat (49 settings tests); GPUI settings glyph still inert")
 R(A, "Appearance (theme, text size, look)", m=["setting.set"], c="mdd", lane=L["gscreens"], ev="GPUI theme tokens fixed light/dark (theme.rs test); not settable")
 R(A, "Threads page (settle, notify, snooze defaults, scratch days)", m=["setting.set"], c="mpp", lane=L["sett"], ev="no handler")
 R(A, "Agents page (providers, models, CLI install, API keys)", m=["setting.set", "models.refresh", "update.check"], c="mpp", lane=L["sett"], ev="no handler; models list info frames are empty strings in Rust (hub.rs info seed)")
@@ -385,12 +385,12 @@ R(A, "Ordering page and price estimates", m=["setting.set"], c="mpp", lane=L["or
 R(A, "Devices page, paired devices, revoke", m=["device.register", "device.drop"], r=["/auth/devices", "/auth/revoke", "/auth/known", "/auth/cache"], hub="partial", c="mpp", lane=L["net"], ev="LIVE: registry decides every credential, /auth/invitations|devices|revoke|known|enroll (net/, 40 Boat tests); device.register/drop (push) not yet")
 R(A, "Network page (Tailscale, listen, pairing link)", r=["/auth/pair", "/auth/enroll", "/auth/invitations"], hub="missing", c="mpp", lane=L["net"], ev="info 'tailnet' seeded as off; no tailscale")
 R(A, "Voice page (engine, model, device, dictionary)", m=["bots.voice"], r=["/voice/in"], c="mpp", lane=L["voice"], ev="no Rust handler/route")
-R(A, "API keys (add/drop, api.env)", m=["bots.voice"], c="mpp", lane=L["sett"], ev="goes through bots.voice op api-add: no handler")
+R(A, "API keys (add/drop, api.env)", m=["bots.voice"], c="mpp", lane=L["sett"], ev="settings/keys.rs + keys_rpc: api-add/api-del/status answer names only; bots.voice other ops (voice) are the term lane's")
 R(A, "Antigravity account and sign-in", m=["bots.voice"], c="mpp", lane=L["msp"], ev="no handler")
 R(A, "Time zone page", m=["zone.report", "zone.set"], c="mpp", lane=L["sett"], ev="no handler")
 R(A, "Usage page and allowance windows", hub="partial", c="mpp", lane=L["sett"], ev="allowance.codex seeded; no updater")
 R(A, "About, version, update check, update now", m=["update.check", "update.now", "app.update"], r=["/hello"], hub="partial", c="mpp", lane=L["sett"], ev="/hello and version in hub.rs; no updater (BACKPLANE_NO_UPDATE)")
-R(A, "Privacy page and telemetry opt-out / reset", m=["telemetry.choice"], hub="missing", c="mpp", lane=L["sett"], ev="telemetry.bend (planner, sender) not ported; info telemetry.* seeded empty")
+R(A, "Privacy page and telemetry opt-out / reset", m=["telemetry.choice"], hub="missing", c="mpp", lane=L["sett"], ev="settings/telemetry.rs: choice, receipts, legacy off-only path ported; sender deliberately not ported (nothing is sent, no endpoint baked)")
 R(A, "Settings propose / approve (agent changes)", t=["settings_propose", "settings_inspect"], m=["setting.set"], c="mpp", lane=L["sett"], ev="no handler or tool")
 R(A, "Settings stick across restarts", m=["setting.set"], pf="state", c="ppp", lane=L["sett"], ev="SettingSet events fold in state/mod.rs; nothing writes them from a client")
 
@@ -423,7 +423,7 @@ A = "Terminal, browser, voice, secrets"
 R(A, "Terminal in the viewer (pty, VT emulation)", m=["term.open", "term.input", "term.resize", "term.snap", "term.restart"], pf="term", c="mpp", lane=L["term"], ev="term/: pty + vt.rs + emb.rs")
 R(A, "Embedded browser (CEF), browser.place/embed", m=["browser.embed", "browser.place", "browser.seen"], c="npp", lane=L["term"], ev="no helper process in Rust")
 R(A, "Voice dictation, clarify words, Pebble ring", m=["bots.voice"], r=["/voice/in"], c="mpp", lane=L["voice"], ev="no handler; VoiceRecorder.swift/.kt")
-R(A, "Secret box (secret.set/del/list/dismiss, vault)", m=["secret.set", "secret.del", "secret.list", "secret.dismiss"], c="mpp", lane=L["sett"], ev="no vault in Rust; Secret masking of agent lines absent")
+R(A, "Secret box (secret.set/del/list/dismiss, vault)", m=["secret.set", "secret.del", "secret.list", "secret.dismiss"], c="mpp", lane=L["sett"], ev="settings/vault.rs (AES-256-GCM, JS file format, fail-closed, staged writes) + secret.rs RPCs; masks in mask.rs, NOT yet called by commit_many / agent lines / MCP answers (core+agents seams)")
 R(A, "Rules and task board (rules.set/drop, board.set/drop)", m=["rules.set", "rules.drop", "board.set", "board.drop"], hub="partial", pf="state", c="mpp", lane=L["state"], ev="agents/rules.rs gates tools; the requests are unhandled; state keeps rule./board. settings")
 R(A, "Told ledger (already told)", hub="partial", pf="state", c="nnn", lane=L["state"], ev="told.* settings kept; tools missing")
 
