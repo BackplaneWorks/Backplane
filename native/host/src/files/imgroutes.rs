@@ -49,9 +49,12 @@ impl HttpHandler for MessageImage {
             let looked = tokio::task::spawn_blocking(move || mimg::lookup(&h, &e, &p)).await;
             // no ref: a message from before this hub kept refs (the Bend hub made them at commit, or none was made). Find it in the recent log, as the
             // Bend hub reads store.db, and let the message's own text authorize the path (Img.message_allowed); bounded so a bad id costs little.
-            let s = match looked { Ok(Ok(s)) => s, _ => {
-                let (hub2, e, p) = (hub.clone(), entry.clone(), path.clone());
-                match tokio::task::spawn_blocking(move || snapshot_from_log(&hub2, &e, &p)).await { Ok(Some(s)) => s, _ => return unavailable() } } };
+            let (hub2, e, p) = (hub.clone(), entry.clone(), path.clone());
+            let s = match looked {
+                Ok(Ok(s)) => match tokio::task::spawn_blocking(move || adopt_ref(&hub2, s, &e, &p)).await { Ok(Some(s)) => s, _ => return unavailable() },
+                _ => {
+                    if missed(&entry, &path) { return unavailable() }
+                    match tokio::task::spawn_blocking(move || snapshot_from_log(&hub2, &e, &p)).await { Ok(Some(s)) => s, _ => { remember_miss(&entry, &path); return unavailable() } } } };
             // a message of a deleted thread grants nothing (the Bend hub joins `thread.deleted = 0`)
             if let Some(t) = &s.thread { if hub.model().await.threads.get(t).map_or(false, |m| m.deleted) { return unavailable() } }
             let (p, ct) = (s.path.to_string_lossy().into_owned(), fm::ctype(&s.path.to_string_lossy()));
@@ -81,7 +84,7 @@ async fn retain_loop(hub: Arc<Hub>, retained: Arc<AtomicUsize>) {
 /// How far back a request looks for a message with no ref: lines and time.
 const SCAN_LINES: usize = 200_000;
 const SCAN_TIME: std::time::Duration = std::time::Duration::from_secs(2);
-fn snapshot_from_log(hub: &Hub, entry: &str, path: &str) -> Option<mimg::Snap> {
+fn find_message(hub: &Hub, entry: &str) -> Option<(String, String)> {
     let (mut to, floor, t0) = (hub.store.len(), hub.store.len().saturating_sub(SCAN_LINES), std::time::Instant::now());
     let needle = format!("\"{}\"", entry.replace('\\', "\\\\").replace('"', "\\\""));
     while to > floor && t0.elapsed() < SCAN_TIME {
@@ -89,16 +92,32 @@ fn snapshot_from_log(hub: &Hub, entry: &str, path: &str) -> Option<mimg::Snap> {
         for l in hub.store.range(from, to).ok()?.iter().rev() {
             if !l.contains("\"MessagePosted\"") || !l.contains(&needle) { continue }
             let v: Value = serde_json::from_str(l).ok()?;
-            if v["$"] == "MessagePosted" && v["role"] == "assistant" && v["msg"].as_str() == Some(entry) {
-                let (thread, text) = (v["thread"].as_str().unwrap_or(""), v["text"].as_str().unwrap_or(""));
-                if hub.model.blocking_lock().threads.get(thread).map_or(true, |t| t.deleted) { return None } // a deleted thread grants nothing
-                return if mimg::message_allowed(text, path) { mimg::snapshot(&hub.cfg.home, entry, path, thread).ok() } else { None };
-            }
+            if v["$"] == "MessagePosted" && v["role"] == "assistant" && v["msg"].as_str() == Some(entry) { return Some((v["thread"].as_str().unwrap_or("").to_string(), v["text"].as_str().unwrap_or("").to_string())) }
         }
         to = from;
     }
     None
 }
+fn deleted(hub: &Hub, thread: &str) -> bool { hub.model.blocking_lock().threads.get(thread).map_or(true, |t| t.deleted) }
+/// No ref: find the message in the recent log; its own text authorises the path (Img.message_allowed); a deleted thread grants nothing.
+fn snapshot_from_log(hub: &Hub, entry: &str, path: &str) -> Option<mimg::Snap> {
+    let (thread, text) = find_message(hub, entry)?;
+    if deleted(hub, &thread) || !mimg::message_allowed(&text, path) { return None }
+    mimg::snapshot(&hub.cfg.home, entry, path, &thread).ok()
+}
+/// A ref the Bend hub wrote names no thread: look the message up, refuse a deleted thread's, and write the thread into the ref (then it is checked without a scan).
+fn adopt_ref(hub: &Hub, s: mimg::Snap, entry: &str, path: &str) -> Option<mimg::Snap> {
+    if s.thread.is_some() { return Some(s) }
+    match find_message(hub, entry) {
+        Some((thread, _)) => { if deleted(hub, &thread) { return None } mimg::set_thread(&hub.cfg.home, entry, path, &thread); Some(mimg::Snap { thread: Some(thread), ..s }) }
+        None => Some(s), // older than the scan reaches: the ref proves a message named it; the thread cannot be checked
+    }
+}
+/// A miss that cost a scan is remembered for a minute (a page of old images must not cost a scan each).
+static MISSES: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<(String, String), std::time::Instant>>> = std::sync::LazyLock::new(Default::default);
+const MISS_FOR: std::time::Duration = std::time::Duration::from_secs(60);
+fn missed(entry: &str, path: &str) -> bool { MISSES.lock().unwrap().get(&(entry.to_string(), path.to_string())).map_or(false, |t| t.elapsed() < MISS_FOR) }
+fn remember_miss(entry: &str, path: &str) { let mut m = MISSES.lock().unwrap(); if m.len() >= 1024 { m.retain(|_, t| t.elapsed() < MISS_FOR); if m.len() >= 1024 { m.clear() } } m.insert((entry.to_string(), path.to_string()), std::time::Instant::now()); }
 pub fn retain_line(home: &std::path::Path, line: &str) {
     if !line.contains("\"MessagePosted\"") || !line.contains("assistant") { return }
     let Ok(v) = serde_json::from_str::<Value>(line) else { return };
@@ -150,6 +169,13 @@ mod tests {
         let r = get(&hub, &tok, "live1", &pa).await; assert_eq!((r.status, r.body.as_slice()), ("200 OK", png().as_slice())); assert!(r.extra.contains("Accept-Ranges: bytes") && r.ctype == "image/png");
         // an older message: no ref, found in the log, authorised by its own text
         let r = get(&hub, &tok, "old1", &pb).await; assert_eq!(r.status, "200 OK");
+        // a ref the Bend hub wrote (no thread) of a deleted thread's message: the scan finds the thread and refuses; a live thread's gets its thread written
+        let dir = home.join("message-images"); let snap = mimg::snapshot(&home, "gone1", &pb, "t2").unwrap(); let nm = snap.path.file_name().unwrap().to_string_lossy().into_owned();
+        std::fs::write(dir.join(mimg::ref_name("gone1", &pb)), format!("{{\"image\":\"{nm}\"}}")).unwrap(); assert!(mimg::lookup(&home, "gone1", &pb).unwrap().thread.is_none());
+        assert_eq!(get(&hub, &tok, "gone1", &pb).await.status, "404 Not Found");
+        let snap = mimg::snapshot(&home, "old1", &pb, "t1").unwrap(); let nm = snap.path.file_name().unwrap().to_string_lossy().into_owned();
+        std::fs::write(dir.join(mimg::ref_name("old1", &pb)), format!("{{\"image\":\"{nm}\"}}")).unwrap();
+        assert_eq!(get(&hub, &tok, "old1", &pb).await.status, "200 OK"); assert_eq!(mimg::lookup(&home, "old1", &pb).unwrap().thread.as_deref(), Some("t1"));
         // refusals: a deleted thread's message, a path the message did not name, an unknown entry, a wrong or missing credential, a non-image path
         for (e, p) in [("gone1", pb.as_str()), ("old1", pa.as_str()), ("live1", pb.as_str()), ("nope", pa.as_str()), ("live1", "/etc/passwd"), ("live1", "/x/../a.png")] { assert_eq!(get(&hub, &tok, e, p).await.status, "404 Not Found", "{e} {p}") }
         assert_eq!(get(&hub, "wrong", "live1", &pa).await.status, "401 Unauthorized"); assert_eq!(get(&hub, "", "live1", &pa).await.status, "401 Unauthorized");

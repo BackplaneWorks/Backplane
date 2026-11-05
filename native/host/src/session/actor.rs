@@ -116,7 +116,7 @@ pub fn apply(client: u64, view: &str, req: &Value, pol: &Value) -> Value {
     let Some(s) = pol.get("session").filter(|s| s.is_object()) else { return pol.clone() };
     let mut m = ACTORS.lock().unwrap();
     let a = m.entry(client).or_default();
-    for id in sent_ids(pol) { a.sent.insert(id); }
+    for id in sent_ids(pol) { a.sent.insert(id); cap(&mut a.sent); }
     let s = a.reply(view, req, s);
     bound(&mut m, MAX_ACTORS);
     let mut out = pol.clone();
@@ -130,8 +130,11 @@ fn sent_ids(pol: &Value) -> Vec<u64> {
 }
 /// The hub answered request `id` of this connection: when it is one the view's commands sent, the actor now holds its marks (next reply's session).
 pub fn replied(client: u64, id: u64) {
-    if let Some(a) = ACTORS.lock().unwrap().get_mut(&client) { if a.sent.remove(&id) { a.replied.insert(id); } }
+    if let Some(a) = ACTORS.lock().unwrap().get_mut(&client) { if a.sent.remove(&id) { a.replied.insert(id); cap(&mut a.replied); } }
 }
+/// The newest ids only: a long connection keeps at most this many requests' marks (each answered one is two drafts resent to the policy).
+const MARKS_KEPT: usize = 256;
+fn cap(s: &mut BTreeSet<u64>) { while s.len() > MARKS_KEPT { s.pop_first(); } }
 /// `local` to send the policy with this request.
 pub fn local_in(client: u64, view: &str, method: &str, target: &Value) -> Option<Value> {
     ACTORS.lock().unwrap().get(&client).and_then(|a| a.local_in(view, method, target))
@@ -177,6 +180,7 @@ mod tests {
         let s = a.reply("v", &req("thread", "t1"), &pol("t1", &[])); assert!(has(&s, "@rp.req:1") && has(&s, "@telemetry.req:1") && s["drafts"]["@rp.req:1"] == "");
         let s = a.reply("v", &req("thread", "t2"), &pol("t2", &[])); assert!(has(&s, "@rp.req:1"), "kept across a move (Actor.scope.keep)");
         replied(77, 1); // an unknown connection: nothing
+        let mut many: BTreeSet<u64> = (1..=1000).collect(); cap(&mut many); assert_eq!((many.len(), many.first().copied(), many.last().copied()), (256, Some(745), Some(1000)));
     }
     #[test] fn hist_picker_scope() {
         assert!(!scope_kept("@cmp.menu"));
