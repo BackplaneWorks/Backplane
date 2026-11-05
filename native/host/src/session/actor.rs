@@ -47,9 +47,10 @@ impl ViewActor {
     /// The older page this view stands on (`before`, 0 = the newest window). A view.page sets it from its cursor; later
     /// updates and actions of the same view and target keep it (the JS hub's actor holds the page it last served) until
     /// a view.open or another target ends it. Measured on recA/session-gpuid requests 41..45.
-    pub fn page_at(&mut self, view: &str, method: &str, target: &Value, asked: u64) -> u64 {
+    pub fn page_at(&mut self, view: &str, method: &str, action: &str, target: &Value, asked: u64) -> u64 {
         let held = match &self.page { Some((v, t, b)) if v == view && t == target => *b, _ => 0 };
-        let before = match method { "view.open" => 0, "view.page" => asked, _ => held };
+        // a sent message shows at the newest (Hub.thin.act.ordinary renders `send` and `send-alt` with anchor 0)
+        let before = match method { "view.open" => 0, "view.page" => asked, _ if matches!(action, "send" | "send-alt") => 0, _ => held };
         self.page = if before == 0 { None } else { Some((view.to_string(), target.clone(), before)) };
         before
     }
@@ -124,8 +125,8 @@ pub fn local_out(client: u64, view: &str, target: &Value, pol: &mut Value) {
     ACTORS.lock().unwrap().entry(client).or_default().local_out(view, target, pol)
 }
 /// `before` for this request: see `ViewActor::page_at`.
-pub fn page(client: u64, view: &str, method: &str, target: &Value, asked: u64) -> u64 {
-    ACTORS.lock().unwrap().entry(client).or_default().page_at(view, method, target, asked)
+pub fn page(client: u64, view: &str, method: &str, action: &str, target: &Value, asked: u64) -> u64 {
+    ACTORS.lock().unwrap().entry(client).or_default().page_at(view, method, action, target, asked)
 }
 /// A connection ended (`Hub::detach`, from the connection's drop guard).
 pub fn forget(client: u64) { ACTORS.lock().unwrap().remove(&client); }
@@ -205,16 +206,22 @@ mod tests {
     #[test] fn a_page_position_holds_for_the_view_until_open_or_a_move() {
         let mut a = ViewActor::default();
         let t = json!({"kind": "thread", "id": "t1"});
-        assert_eq!(a.page_at("v1", "view.update", &t, 0), 0);
-        assert_eq!(a.page_at("v1", "view.page", &t, 131), 131);
-        assert_eq!(a.page_at("v1", "view.update", &t, 0), 131);
-        assert_eq!(a.page_at("v1", "view.action", &t, 0), 131);
-        assert_eq!(a.page_at("v1", "view.page", &t, 115), 115);
-        assert_eq!(a.page_at("v1", "view.update", &json!({"kind": "thread", "id": "t2"}), 0), 0);
-        assert_eq!(a.page_at("v1", "view.update", &t, 0), 0);
-        a.page_at("v1", "view.page", &t, 99);
-        assert_eq!(a.page_at("v1", "view.open", &t, 0), 0);
-        assert_eq!(a.page_at("v1", "view.update", &t, 0), 0);
+        assert_eq!(a.page_at("v1", "view.update", "", &t, 0), 0);
+        assert_eq!(a.page_at("v1", "view.page", "", &t, 131), 131);
+        assert_eq!(a.page_at("v1", "view.update", "", &t, 0), 131);
+        assert_eq!(a.page_at("v1", "view.action", "draft", &t, 0), 131);
+        assert_eq!(a.page_at("v1", "view.page", "", &t, 115), 115);
+        // a message sent from an older page shows at the newest, and stays there
+        assert_eq!(a.page_at("v1", "view.action", "send", &t, 0), 0);
+        assert_eq!(a.page_at("v1", "view.update", "", &t, 0), 0);
+        assert_eq!(a.page_at("v1", "view.page", "", &t, 115), 115);
+        assert_eq!(a.page_at("v1", "view.action", "send-alt", &t, 0), 0);
+        assert_eq!(a.page_at("v1", "view.page", "", &t, 115), 115);
+        assert_eq!(a.page_at("v1", "view.update", "", &json!({"kind": "thread", "id": "t2"}), 0), 0);
+        assert_eq!(a.page_at("v1", "view.update", "", &t, 0), 0);
+        a.page_at("v1", "view.page", "", &t, 99);
+        assert_eq!(a.page_at("v1", "view.open", "", &t, 0), 0);
+        assert_eq!(a.page_at("v1", "view.update", "", &t, 0), 0);
     }
     #[test] fn the_policys_local_memory_stays_with_the_view_and_never_reaches_the_client() {
         let mut a = ViewActor::default();
