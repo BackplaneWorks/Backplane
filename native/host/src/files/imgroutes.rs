@@ -142,6 +142,7 @@ mod tests {
         let cfg = crate::hub::Cfg { home: home.clone(), version: "0.14.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() };
         let hub = Hub::start(cfg, Arc::new(crate::presenter::Canned { reply: json!({}) })).await.unwrap();
         start(&hub);
+        std::fs::write(home.join("token"), "0123456789abcdef-test-token\n").unwrap(); // the hub token file (main.rs makes it at start)
         let tok = std::fs::read_to_string(home.join("token")).unwrap().trim().to_string();
         // live: committed after start, snapshotted by the loop
         hub.commit(&json!({"$":"MessagePosted","thread":"t1","msg":"live1","role":"assistant","text":format!("see {pa} please"),"at":7})).await.unwrap();
