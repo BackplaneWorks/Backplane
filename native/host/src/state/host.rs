@@ -113,6 +113,7 @@ pub fn start(hub: Arc<Hub>) -> Arc<Policies> { start_with(hub, None) }
 pub fn start_with(hub: Arc<Hub>, passive: Option<bool>) -> Arc<Policies> {
     let policy = Arc::new(Policy::new());
     if let Some(on) = passive { policy.set_passive(on) }
+    policy.set_no_outward(crate::copy::on());
     let host = Arc::new(Host { policy: policy.clone(), hub: OnceLock::new() });
     let _ = host.hub.set(hub.clone());
     hub.register_transform(host.clone());   // first: the log length is read after this, so no batch is missed
