@@ -59,7 +59,7 @@ try {
  if(next){const page=await req('view.action',{action:next.action,value:next.value});if(!page.r.ok||page.r.result.shown.sidebarPages[0].projects.offset!==8)throw Error('project cursor did not advance');}
  const bad=await req('view.action',{action:'native-sidebar-page',value:'forged'});if(bad.r.ok||bad.r.error?.code!=='INVALID_REQUEST')throw Error('forged sidebar cursor was not refused');
  const unsupported=[];
- for(const kind of ['thread','bot','room','project']){const r=await req('view.open',{target:{kind,id:'unported'}});if(r.r.ok||r.r.error?.code!=='PRESENTER_UNAVAILABLE')throw Error(`unported ${kind} was claimed`);unsupported.push({kind,retryable:r.r.error.retryable});}
+ for(const kind of ['thread','bot','room','project']){const r=await req('view.open',{target:{kind,id:'unported'}});if(r.r.ok||r.r.error?.code!=='PRESENTER_UNAVAILABLE'||r.r.error.retryable!==true)throw Error(`unported ${kind} was claimed`);unsupported.push({kind,retryable:r.r.error.retryable});}
  const children=readFileSync(`/proc/${pid}/task/${pid}/children`,'utf8').trim().split(/\s+/).filter(Boolean).map(Number);
  if(children.length)throw Error(`unexpected child processes after views: ${children.length}`);
  const usage=execFileSync('python3',['-c','import json,sys; f=open(sys.argv[1]); f.seek(int(sys.argv[2])); print(sum(1 for l in f if json.loads(l).get("$")=="TurnUsage"))',`${home}/events.jsonl`,String(eventsBytes)],{encoding:'utf8'}).trim();

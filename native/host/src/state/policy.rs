@@ -22,8 +22,8 @@ const KEEP: &[&str] = &["settle.", "autosettle.", "launch.", "launched.", "threa
 // same way, key only, for Input.prune (the minute tick removes those of threads at rest); a thread's riding mail (ride.) is never kept.
 pub fn lean_keeps(k: &str) -> bool {
     // The GPUI recent root and existing sidebar read only bounded navigation settings.
-    if ["ui.theme", "sidebar.view", "mail.on", "uber.bot"].contains(&k)
-        || ["thread.tree.", "project.icon.", "mail.private.owner."].iter().any(|p| k.starts_with(p)) { return true }
+    if ["ui.theme", "sidebar.view", "mail.on", "uber.bot", "order.enabled", "order.estimates"].contains(&k)
+        || ["thread.tree.", "project.icon.", "mail.private.owner.", "account.thread."].iter().any(|p| k.starts_with(p)) { return true }
     k.starts_with("launch.input.") || k.starts_with("fallback.input.") || (!k.starts_with("ride.") && KEEP.iter().any(|p| k.starts_with(p)))
 }
 /// the value the lean copy keeps for a setting: a told record keeps a placeholder (its key carries the time), unless it is not one of ours
