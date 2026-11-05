@@ -15,7 +15,7 @@ pub fn limit(text: &str) -> String { if text.len() <= 120_000 { text.to_string()
 
 pub struct ImprovementsRpc;
 impl RpcHandler for ImprovementsRpc {
-    fn methods(&self) -> &'static [&'static str] { &["improvements.context", "improvements.report", "improvements.preview", "improvements.template", "improvements.prompt"] }
+    fn methods(&self) -> &'static [&'static str] { &["improvements.context", "improvements.report", "improvements.preview", "improvements.template", "improvements.prompt", "improvements.diagnostics"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let data = |v: Value| vec![json!({"t":"reply","id":id,"ok":true,"result":v})];
@@ -25,6 +25,8 @@ impl RpcHandler for ImprovementsRpc {
                 "improvements.preview" => return data(if p.get("body").is_some() { super::issue_report::preview_body(&t("body")) } else { super::issue_report::preview(&t("text"), &t("os"), &t("version"), &t("details"), &t("diagnostics")) }),
                 "improvements.template" => return data(json!({"template": super::issue_report::TEMPLATE})),
                 "improvements.prompt" => return data(json!({"prompt": super::issue_report::prompt(&t("description"), &t("os"), &t("version"), &t("evidence"), &t("diagnostics"))})),
+                // the elected diagnostics, finished: the local recorder's export allowlisted again (issue_report::safe_hub), no connection ring here
+                "improvements.diagnostics" => { let doc = tokio::task::spawn_blocking(super::diagnostics::export).await.ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).unwrap_or(Value::Null); return data(json!({"report": super::issue_report::diagnostic_report(&doc)})) }
                 _ => {}
             }
             if method == "improvements.context" { return data(context(hub, p.get("sourceThread").and_then(Value::as_str).unwrap_or("")).await) }
