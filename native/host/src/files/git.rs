@@ -21,18 +21,24 @@ pub const GIT_ENV: [(&str, &str); 12] = [("GIT_CONFIG_COUNT", "5"), ("GIT_CONFIG
 pub struct Ran { pub code: i32, pub out: String }
 
 /// P.Proc.run: `cmd args` in `cwd`, stdin closed, stdout then stderr, code 127 when it cannot start.
-pub async fn proc(cmd: &str, args: &[&str], cwd: &str, env: &[(&str, &str)]) -> Ran {
+async fn spawn(cmd: &str, args: &[&str], cwd: &str, env: &[(&str, &str)], kill: bool) -> Ran {
     // Proc.run.folder: an empty working folder is refused, never the hub's own directory
     if cwd.is_empty() { return Ran { code: 2, out: "No working folder: refusing to use the hub working directory".into() } }
     // a copy of a log runs no network command (copy.rs: curl, gh, ssh, git push/fetch..., also through sh -c)
     if crate::copy::refused(cmd, args) { return Ran { code: 126, out: crate::copy::refusal(cmd) } }
     let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Local, cmd);
-    c.args(args).current_dir(cwd).stdin(std::process::Stdio::null()).envs(GIT_ENV.iter().copied()).envs(env.iter().copied());
+    c.args(args).current_dir(cwd).stdin(std::process::Stdio::null()).envs(GIT_ENV.iter().copied()).envs(env.iter().copied()).kill_on_drop(kill);
     match c.output().await {
         Ok(o) => { let mut out = String::from_utf8_lossy(&o.stdout).into_owned(); out.push_str(&String::from_utf8_lossy(&o.stderr)); Ran { code: o.status.code().unwrap_or(1), out } }
         Err(e) => Ran { code: 127, out: e.to_string() },
     }
 }
+/// A command, left running if the future waiting for it is dropped: a write (commit, push, worktree, checkpoint, export, release) must finish once it has
+/// started, or it can die mid-way and leave `index.lock` or a half-made worktree. For a read a caller wants to time out, use `read`.
+pub async fn proc(cmd: &str, args: &[&str], cwd: &str, env: &[(&str, &str)]) -> Ran { spawn(cmd, args, cwd, env, false).await }
+/// A READ, killed when the future waiting for it is dropped: a caller's `tokio::time::timeout` (commands/home.rs wraps `git log` and `gh pr list` in
+/// 1.5 s, as the JS effect's execFile timeout does) must not leave the child running. Only for commands that change nothing.
+pub async fn read(cmd: &str, args: &[&str], cwd: &str, env: &[(&str, &str)]) -> Ran { spawn(cmd, args, cwd, env, true).await }
 async fn sh(script: &str, args: &[&str], cwd: &str, env: &[(&str, &str)]) -> Ran {
     let mut a = vec!["-c", script, "sh"]; a.extend(args);
     proc("sh", &a, cwd, env).await
@@ -137,7 +143,7 @@ pub async fn refs(cwd: &str, thread: &str) -> String {
     if !super::threadpath::absolute(cwd) { return String::new() } let r = sh(REFS, &[cwd, &b64url(thread)], "/", &[]).await; if r.code == 0 { r.out } else { String::new() } }
 /// Git.show: a file as a commit has it (`git --git-dir G show OBJ`), None when it is not there.
 pub async fn show(gitdir: &str, obj: &str) -> Option<Vec<u8>> {
-    let o = crate::proc::tokio_cmd(crate::proc::Kind::Local, "sh").args(["-c", "exec 2>/dev/null; git --git-dir=\"$1\" show \"$2\"", "sh", gitdir, obj]).current_dir("/").stdin(std::process::Stdio::null()).envs(GIT_ENV.iter().copied()).output().await.ok()?;
+    let o = crate::proc::tokio_cmd(crate::proc::Kind::Local, "sh").args(["-c", "exec 2>/dev/null; git --git-dir=\"$1\" show \"$2\"", "sh", gitdir, obj]).current_dir("/").stdin(std::process::Stdio::null()).envs(GIT_ENV.iter().copied()).kill_on_drop(true).output().await.ok()?; // a pure read: killed with its future
     if o.status.success() { Some(o.stdout) } else { None }
 }
 
@@ -209,6 +215,19 @@ mod tests {
         assert_eq!(checkpoint_ref("t1", 3), "refs/backplane/checkpoints/dDE/turn/3");
     }
     #[test] fn failed_words() { assert!(failed("error: x")); assert!(failed("a\nerror: b")); assert!(!failed("fine error: x")); assert!(!failed("")) }
+    // commands/home.rs times out git log / gh pr list: a READ's child must be gone when the future is dropped; a plain call (a write) must outlive the timeout
+    #[cfg(target_os = "linux")] fn alive(pid: i32) -> bool { std::fs::read_to_string(format!("/proc/{pid}/stat")).map_or(false, |s| !s.contains(") Z ")) }
+    #[cfg(target_os = "linux")] async fn gone_within(pid: i32, ms: u64) -> bool { for _ in 0..ms / 25 { if !alive(pid) { return true } tokio::time::sleep(std::time::Duration::from_millis(25)).await } !alive(pid) }
+    #[cfg(target_os = "linux")]
+    #[tokio::test] async fn a_read_is_killed_by_a_timeout_and_a_write_is_not() {
+        let d = tmp("kill"); let (a, b) = (format!("{d}/read.pid"), format!("{d}/write.pid"));
+        let script = "echo $$ > \"$0\"; exec sleep $1";
+        let t = tokio::time::timeout(std::time::Duration::from_millis(300), read("sh", &["-c", script, &a, "30"], "/", &[])).await; assert!(t.is_err(), "the timeout fired");
+        let pid: i32 = std::fs::read_to_string(&a).unwrap().trim().parse().unwrap(); assert!(gone_within(pid, 2000).await, "read child {pid} still running after the timeout");
+        let t = tokio::time::timeout(std::time::Duration::from_millis(300), proc("sh", &["-c", script, &b, "2"], "/", &[])).await; assert!(t.is_err());
+        let pid: i32 = std::fs::read_to_string(&b).unwrap().trim().parse().unwrap(); assert!(alive(pid), "a plain command must outlive its caller's timeout");
+        assert!(gone_within(pid, 5000).await, "and end by itself");
+    }
     #[tokio::test] async fn checkpoints_diff_revert_and_status() {
         let d = tmp("cp"); g(&d, &["init", "-q"]).await; std::fs::write(format!("{d}/a.txt"), "one\n").unwrap(); g(&d, &["add", "."]).await; g(&d, &["commit", "-qm", "i"]).await;
         assert!(is_repo(&d).await); assert_eq!(checkpoint_count(&d, "th").await, 0);
