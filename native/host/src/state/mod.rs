@@ -73,6 +73,8 @@ pub struct State {
     pub rooms_nav: HashMap<String, RoomNav>,
     /// ThreadSnoozed: the time a thread's snooze ends (Nav.until); 0 / absent: never snoozed
     pub snooze_until: HashMap<String, u64>,
+    /// ModesSet: a thread's permission mode when it is not the default ("approval-required", "auto-accept-edits", "auto"); absent: full access
+    pub runtime: HashMap<String, String>,
     /// ThreadOrdered/ProjectOrdered: manual order keys (hex) per thread id, and per "project:<id>" for a project's place; (pinned key, active key)
     pub order_keys: HashMap<String, (String, String)>,
     /// RunSet: thread -> the bot it runs for (a mail run's thread)
@@ -196,7 +198,9 @@ impl State {
             "WorktreeSkipped" => { let id = s(e, "id")?; let t = self.thread_mut(id); t.worktree_mode = false; t.branch.clear(); t.worktree.clear(); }
             "WorktreeRemoved" => { let id = s(e, "id")?; self.thread_mut(id).worktree.clear(); }
             "SessionSet" => { let id = s(e, "id")?; let se = s(e, "session")?.to_string(); self.thread_mut(id).session = se; }
-            "ModesSet" => { let id = s(e, "id")?; let m = s(e, "model")?.to_string(); s(e, "runtime")?; s(e, "interaction")?; self.thread_mut(id).model = m; }
+            "ModesSet" => { let id = s(e, "id")?; let m = s(e, "model")?.to_string(); let rt = s(e, "runtime")?.to_string(); s(e, "interaction")?; self.thread_mut(id).model = m;
+                // the permission mode (Thread.runtime): only a mode other than the default is kept, so the map is bounded by the threads that changed it
+                if matches!(rt.as_str(), "approval-required" | "auto-accept-edits" | "auto") { self.runtime.insert(id.to_string(), rt); } else { self.runtime.remove(id); } }
             "ThreadMerged" => {
                 let id = s(e, "id")?; let url = s(e, "url")?.to_string(); let at = n(e, "at")?;
                 let t = self.thread_mut(id); t.override_ = Override::ForcedSettled; t.settled_at = at; t.pinned = false;
