@@ -28,3 +28,14 @@ test('a picture known to be behind is fetched again, once, and replaces the one 
  p.enqueue({kind:'thread',id:'A'},false,true);assert.equal(p.queue.length,1,'behind: attempted again');
  p.stop();
 });
+test('a row that keeps moving (a streaming bot) is fetched again at most once per floor, and once after it',async()=>{
+ const {ViewPrefetch}=await import('../../src/web/view-prefetch.js');
+ const scope={origin:'https://hub',identity:'owner',epoch:'e',language:'en'};let clock=0;
+ const p=new ViewPrefetch({hub:scope.origin,scope:()=>scope,has:()=>true,idle:()=>true,now:()=>clock,encode:x=>x,decode:x=>x,socket:()=>({send(){},close(){}}),picture(){}});
+ const key=JSON.stringify([scope.origin,scope.identity,scope.epoch,{kind:'thread',id:'A'}]);
+ p.fetchedAt.set(key,0);
+ for(let i=1;i<=50;i++){clock=i*340;p.enqueue({kind:'thread',id:'A'},false,true);}
+ assert.equal(p.queue.length,0,'within the floor: not fetched again');assert.equal(p.later.size,1,'one fetch owed for after it');
+ clock=31000;p.later.clear();p.enqueue({kind:'thread',id:'A'},false,true);assert.equal(p.queue.length,1,'past the floor: fetched again');
+ p.stop();assert.equal(p.later.size,0);
+});
