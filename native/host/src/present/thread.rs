@@ -130,6 +130,14 @@ fn act(e: &Ent, run: &str) -> Value {
 // ---- the whole shown.thread of a plain, idle thread ----
 use crate::state::{State, Turn};
 
+/// The keys of `thread_static.json` are NOT ported: each is a table value that holds only under `plain_thread`'s gate (which is why the gate is strict). Per
+/// PRESENTER-PORT.md a key is computed or left out, so every one of these comes out of the template as it is computed (src named):
+///   tools (core/tools.bend Tools.*: turn, pinned, settled, archived, fork source)      menu (Mob.menu.loc: snoozed, Fab.mini.tools, running)
+///   permissions (PM.Permissions.json: the thread's runtime mode `rt`)                   picker (Mob.picker.ctx.loc: provider, model, effort, usage, models info)
+///   state (Mob.state: turn)   working/phase (SG.Signal.display: signal)   send/sendAct (U.Follow: draft, running, attachments)   boat (UZ.Chip.of)
+///   canChild (U.ThreadTree.can_route)   viewer (VW.View.json: the viewer's kind/panes/review/files/hist/mech)   voice (Mob.voice: dictation state)
+///   skills (the hub's skills info; parity-session)   chunk/cap (AT.Att, setting files.max.mb)   replying (draft keys)   attaching/uploading (session)
+///   parent/subs/asks/order/queued/queue/todos/live/btw/diff/term/embs/sending (null/empty only while the gate's conditions hold)
 const STATIC: &str = include_str!("thread_static.json");
 
 /// Whether this thread is the one configuration whose static keys (tools, menu, permissions, picker, viewer, voice ...) were checked against the
