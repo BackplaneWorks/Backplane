@@ -563,10 +563,10 @@ mod tests {
         let h = Hub::start(cfg(&home("fabread")), Arc::new(Canned { reply: json!({"remoteReady":true,"shown":{},"session":{},"cmds":[]}) })).await.unwrap();
         let (mut c, _g) = h.connect(true);
         let r0 = req(&c, &h, "view.open", (1 << 47) + 5, json!({})); let _ = h.request(&mut c, &r0).await;
-        let _ = crate::session::take_reads(c.client); // whatever the open itself recorded
+        let _ = crate::session::take_reads(c.client, &c.view_id, &c.target); // whatever the open itself recorded
         let out = h.request(&mut c, &json!({"id": 77, "m": "fab.look", "p": {"thread": "t1"}})).await;
         assert_eq!(out[0]["ok"], true);
-        let reads = crate::session::take_reads(c.client);
+        let reads = crate::session::take_reads(c.client, &c.view_id, &c.target);
         assert_eq!(reads.len(), 1, "{reads:?}");
         assert_eq!(reads[0]["kind"], "fab.look"); assert_eq!(reads[0]["result"]["thread"], "t1");
     }

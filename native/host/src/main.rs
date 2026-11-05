@@ -103,6 +103,7 @@ async fn run(a: Args) -> Result<()> {
     settings::open(&hub.cfg.home);
     term::start(hub.clone());
     let agents = agents::Agents::start(hub.clone()).await?;
+    let _bots = bots::start(hub.clone(), agents.clone()).await;
     settings::start(hub.clone(), Some(agents));
     commands::start(hub.clone());
     if let Some(w) = &a.window { let _ = hub.window_bin.set(w.clone()); }
