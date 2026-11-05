@@ -11,15 +11,17 @@ rsync -a scripts/gpui/ios-hubrun.sh h@backplane:bp-gpui-ios-hub/run.sh
 $SB "cd $V && ln -sfn t/tools tools; sh run.sh start | tail -2; B=\$HOME/.bun/bin/bun; HP=100.96.192.111:3811; \$B tools/ios-seed.ts \$HP $V/home $V/proj >/dev/null 2>&1; \$B tools/ios-seed.ts \$HP $V/home $V/proj new 2 >/dev/null 2>&1"
 $SB "cat $V/home/token" > /tmp/lc-token; RSYNC_RSH=$M rsync -a /tmp/lc-token hs-mac-mini:bp-gpui-ios/seed7-token
 T=$($SB "grep -o '\"ThreadCreated\",\"id\":\"[^\"]*\"' $V/home/events.jsonl | sed -n 2p | cut -d'\"' -f6")
-python3 -c "print(('lorem ipsum dolor sit amet ' * 4000)[:70000], end='')" > /tmp/longdraft70.txt
-RSYNC_RSH=$M rsync -a /tmp/longdraft70.txt hs-mac-mini:bp-gpui-ios/longdraft70.txt; RSYNC_RSH=$M rsync -a scripts/gpui/ios-stuck-mac.sh hs-mac-mini:bp-gpui-ios/
+for n in 60 70; do python3 -c "print(('lorem ipsum dolor sit amet ' * 4000)[:${n}000], end='')" > /tmp/longdraft$n.txt; RSYNC_RSH=$M rsync -a /tmp/longdraft$n.txt hs-mac-mini:bp-gpui-ios/longdraft$n.txt; done
+RSYNC_RSH=$M rsync -a scripts/gpui/ios-stuck-mac.sh scripts/gpui/ios-stuck2-mac.sh hs-mac-mini:bp-gpui-ios/
 scripts/gpui/ios-build.sh > $B/results/ios/build-stuck.log 2>&1; grep -E "error:|build seconds" $B/results/ios/build-stuck.log | head -2
-$M hs-mac-mini "sh ~/bp-gpui-ios/ios-stuck-mac.sh $U $T" | tee $B/results/ios/stuck-js.txt
-mkdir -p $B/shots/ios/stuck; for n in A B C; do for i in 1 2 3; do RSYNC_RSH=$M rsync -a hs-mac-mini:bp-gpui-ios/shots/stuck-$n$i.png $B/shots/ios/stuck/; done; done
+T0=$($SB "grep -o '\"ThreadCreated\",\"id\":\"[^\"]*\"' $V/home/events.jsonl | sed -n 1p | cut -d'\"' -f6")
+K=backplane.tail9e0cf2.ts.net:3811
+$M hs-mac-mini "sh ~/bp-gpui-ios/ios-${MODE:-stuck}-mac.sh $U $T $T0 $K" | tee $B/results/ios/stuck-${MODE:-stuck}-js.txt
+mkdir -p $B/shots/ios/stuck; for f in stuck-A1 stuck-A2 stuck-A3 stuck-B1 stuck-B2 stuck-B3 stuck-C1 stuck-C2 stuck-C3 sw60-1 sw60-2 sw70-1 sw70-2; do RSYNC_RSH=$M rsync -a hs-mac-mini:bp-gpui-ios/shots/$f.png $B/shots/ios/stuck/ 2>/dev/null; done
 $SB "python3 - <<'PY'
 import json,os
 f=os.path.expanduser('$V/home/events.jsonl')
 n=[len(json.loads(l).get('text','')) for l in open(f) if l.startswith('{\"\$\":\"MessagePosted\"') and json.loads(l).get('role')=='user']
 print('user messages (text lengths):', n)
-PY" | tee -a $B/results/ios/stuck-js.txt
+PY" | tee -a $B/results/ios/stuck-${MODE:-stuck}-js.txt
 $SB "sh $V/run.sh stop; rm -rf $V; ls -d $V 2>&1 | tail -1"
