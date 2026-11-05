@@ -10,7 +10,9 @@ $SSH "mkdir -p ~/$D/bend-dl && cd ~/$D && { [ -x bend-home/.bend/bin/bend ] || {
 rsync -a --delete --exclude .git --exclude /build --exclude target --exclude 'native/*/target' --exclude /mobile --exclude /desktop --exclude /docs --exclude /deploy --exclude /order \
   --exclude /stage --exclude 'stage-*' --exclude staged-bins --exclude .lowmem --exclude bend-home --exclude bend-dl --exclude /out "$REPO/" "h@backplane:$D/src-tree/"
 echo "provisional: commit $COMMIT (tree may be dirty), host backplane, bend 2.0.36 pinned, gcc"
-$SSH "cd ~/$D/src-tree && export PATH=\$HOME/$D/bend-home/.bend/bin:\$HOME/.bun/bin:\$PATH BEND_NO_TELEMETRY=1 CC=gcc CSTD=gnu11 && rm -rf out && systemd-run --user --scope -q -p MemoryMax=14G -p MemorySwapMax=0 -- sh -c 'sh test/gpui/slim/build-split.sh && sh test/gpui/slim/policy-checks.sh'" 2>&1 | tee /tmp/slim-policy-bp.log | grep -vE "^cc out|^$" | tail -40
+$SSH "cd ~/$D/src-tree && export PATH=\$HOME/$D/bend-home/.bend/bin:\$HOME/.bun/bin:\$PATH BEND_NO_TELEMETRY=1 CC=gcc CSTD=gnu11 CAP=11G && rm -rf out && systemd-run --user --scope -q -p MemoryMax=12G -p MemorySwapMax=0 -- sh -c 'sh test/gpui/slim/build-split.sh && sh test/gpui/slim/policy-checks.sh' > ../build.log 2>&1; echo \$? > ../build.rc; tail -40 ../build.log" 2>&1 | grep -vE "^cc out|^$" | tee /tmp/slim-policy-bp.log
+RC=$($SSH "cat ~/$D/build.rc")
+[ "$RC" = 0 ] || { echo "REMOTE BUILD/CHECKS FAILED rc=$RC (stopping; see ~/$D/build.log)"; exit 1; }
 mkdir -p build/gpui/slim build/gpui/results/slim/bp-policy-out
 rsync -a "h@backplane:$D/src-tree/out/split/bp-policy.stripped" build/gpui/slim/bp-policy-bp
 rsync -a "h@backplane:$D/src-tree/out/pl/" build/gpui/results/slim/bp-policy-out/

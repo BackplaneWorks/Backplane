@@ -9,7 +9,7 @@ SRC=${SRC:-native/bend/slim_serve.bend}; UNITS=${UNITS:-16}; OPT=${OPT:--O2}
 now() { date +%s; }
 T0=$(now)
 echo "machine: $(nproc) vCPU, $(free -m | awk '/Mem/{print $2}') MiB, $CC $($CC --version | head -1), bend $(bend version), src $SRC units $UNITS opt $OPT" | tee $O/build.txt
-capped() { systemd-run --user --scope -q -p MemoryMax=8G -p MemorySwapMax=0 -- "$@"; }
+capped() { systemd-run --user --scope -q -p MemoryMax=${CAP:-8G} -p MemorySwapMax=0 -- "$@"; }
 # peak of the scope's tree sampled every 0.5 s
 peakof() { f=$1; shift; ( "$@" ) & w=$!; p=0; while kill -0 $w 2>/dev/null; do r=$(ps -eo rss=,comm= | awk '$2=="clang"||$2=="gcc"||$2=="cc1"||$2=="ld"||$2=="collect2"||$2=="clang-18"||$2=="cc1"||$2=="bun"||$2=="bend"{s+=$1}END{print s+0}'); [ "$r" -gt "$p" ] && p=$r; sleep 0.5; done; wait $w; rc=$?; echo $p > $f; return $rc; }
 if [ -n "${PRE:-}" ] && [ -f "$PRE" ]; then gunzip -c "$PRE" > $O/all.c; echo "emit: reused $PRE" | tee -a $O/build.txt; EMIT_S=0; EMIT_KB=0
