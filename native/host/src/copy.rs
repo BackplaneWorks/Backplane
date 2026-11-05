@@ -19,7 +19,15 @@ pub fn on() -> bool { static ON: OnceLock<bool> = OnceLock::new(); *ON.get_or_in
 
 /// Side-by-side mode (docs/gpui/SIDE-BY-SIDE.md): a copy on which the person's own `turn.start` may start a REAL agent (`proc::Kind::PersonTurn`). Needs `BACKPLANE_COPY=1`
 /// as well; the flag alone allows nothing. Read once.
-pub fn person_turn_allowed() -> bool { static ON: OnceLock<bool> = OnceLock::new(); *ON.get_or_init(|| on() && std::env::var("BACKPLANE_SIDE_BY_SIDE").map_or(false, |v| v == "1")) }
+pub fn person_turn_allowed() -> bool { static ON: OnceLock<bool> = OnceLock::new(); *ON.get_or_init(|| on() && side_by_side_requested()) }
+/// `BACKPLANE_SIDE_BY_SIDE=1` as given (exactly "1"), whatever else is set; `side_by_side_gate` refuses it without the copy switch.
+pub fn side_by_side_requested() -> bool { static ON: OnceLock<bool> = OnceLock::new(); *ON.get_or_init(|| std::env::var("BACKPLANE_SIDE_BY_SIDE").map_or(false, |v| v == "1")) }
+/// Checked at start with the gate: the flag without the copy switch is refused, so a live hub can never run in side-by-side mode.
+pub fn side_by_side_gate(copy: bool, requested: bool) -> Result<(), String> {
+    if requested && !copy { Err("backplane-hub: BACKPLANE_SIDE_BY_SIDE=1 without BACKPLANE_COPY=1: refused (side-by-side runs only on a copy)".to_string()) } else { Ok(()) }
+}
+/// The state policies run passive in side-by-side mode (they do nothing on their own); otherwise `BACKPLANE_PASSIVE` decides, as before.
+pub fn passive_from(person_turn_allowed: bool) -> Option<bool> { person_turn_allowed.then_some(true) }
 
 /// Copy.note: said in the first log lines.
 pub const NOTE: &str = "BACKPLANE_COPY=1: a copy of a log; no watched work, deploys, pushes, far pushes, network commands or git that writes; agents are stand-in blocks";
@@ -230,5 +238,10 @@ mod tests {
     #[test] fn a_home_the_hub_made_restarts_without_the_switch() {
         let h = home("own"); log(&h, &format!("{SYNTH}{{\"$\":\"SettingSet\",\"key\":\"machine.id\",\"value\":\"m1\",\"at\":3}}\n"));
         assert!(gate(&h, false).is_err()); mark(&h); assert!(gate(&h, false).is_ok(), "marked: its own log");
+    }
+    #[test] fn side_by_side_needs_the_copy_switch_and_makes_the_policies_passive() {
+        assert!(side_by_side_gate(true, true).is_ok() && side_by_side_gate(true, false).is_ok() && side_by_side_gate(false, false).is_ok());
+        assert!(side_by_side_gate(false, true).unwrap_err().contains("without BACKPLANE_COPY=1"), "the flag alone is refused");
+        assert_eq!(passive_from(true), Some(true), "side-by-side: passive"); assert_eq!(passive_from(false), None, "otherwise the env decides");
     }
 }

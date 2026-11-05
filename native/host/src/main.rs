@@ -116,6 +116,7 @@ async fn run(a: Args) -> Result<()> {
     let _ = rejected; // reserved for the handshake callback once the query rules grow
     // the safety gate, before the home is touched: a home that looks like a copy of a real hub's data needs BACKPLANE_COPY=1
     if let Err(why) = copy::gate(&a.home, copy::on()) { eprintln!("{why}"); std::process::exit(1); }
+    if let Err(why) = copy::side_by_side_gate(copy::on(), copy::side_by_side_requested()) { eprintln!("{why}"); std::process::exit(1); }
     if copy::on() { eprintln!("{}", copy::NOTE); }
     std::fs::create_dir_all(&a.home)?;
     let _lock = take_lock(&a.home, a.port)?;
@@ -144,7 +145,7 @@ async fn run(a: Args) -> Result<()> {
     let l = TcpListener::bind(&listen).await.with_context(|| format!("bind {listen}"))?;
     eprintln!("Backplane listening on http://{listen}");
     // the policies (autosettle, alerts, told, summaries, liveness, star nudge...): keep the Arc, the view lane reads it
-    let _policies = statehost::start(hub.clone());
+    let _policies = statehost::start_with(hub.clone(), copy::passive_from(copy::person_turn_allowed()));
     { let p = _policies.clone(); _bots.set_star(std::sync::Arc::new(move |msg: &str, now: u64| p.star_prompt(msg, now))); } // the star nudge counts a person's bots.say / bots.post
     let (events, torn) = (hub.store.len(), hub.store.torn_bytes);
     eprintln!("presenter: {}; events: {}; torn tail bytes: {}", hub.presenter.name(), events, torn);
