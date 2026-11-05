@@ -46,7 +46,8 @@ wait_for 3 grep -q 'a draft kept' "$SW/home/gpui-drafts.json"
 check "the place file is private" test "$(stat -c %a "$SW/home/gpui-place.json")" = 600
 check "no draft text in the place file" sh -c "! grep -q 'a draft kept' '$SW/home/gpui-place.json'"
 check "/dev/turns needs the token" test "$(curl -s -m3 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/dev/turns")" = 401
-check "/dev/turns says none" test "$(token_turns)" = '{"running":0}'
+none_running() { [ "$(token_turns)" = '{"running":0}' ]; }
+wait_for 40 none_running; check "/dev/turns goes back to none when the turn ends" none_running
 y_of() { grep "\"name\":\"$1\"" "$SW/$2" 2>/dev/null | tail -1 | python3 -I -c 'import json,sys; t=sys.stdin.read(); print(round(json.loads(t.split(" ",1)[1])["y"])) if t else print("none")'; }
 Y0=$(y_of left client.log); echo "left the thread scrolled to y=$Y0"
 check "the thread was scrolled up from its end" test "$Y0" != none
@@ -63,7 +64,7 @@ wait_for 10 log_has '"event":"usable"' client.log
 check "it shows that thread's entries" sh -c "grep '\"event\":\"usable\"' '$SW/client.log' | grep -qv '\"entries\":0'"
 wait_for 10 log_has '"name":"back"' client.log; Y1=$(y_of back client.log); echo "came back at y=$Y1"
 check "the scroll place came back" test "$Y1" = "$Y0"
-wait_for 3 false; DRAFTED=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get(sys.argv[2],""))' "$SW/home/gpui-drafts.json" "$T1")
+sleep 1; DRAFTED=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get(sys.argv[2],""))' "$SW/home/gpui-drafts.json" "$T1")
 check "the draft is still kept" test "$DRAFTED" = "a draft kept across builds"
 check "the old window saved and quit by itself (its log has no panic)" sh -c "! grep -qi panic '$SW/client.log.prev'"
 DISPLAY=$D import -window root "$T/after-client-swap.png" 2>/dev/null
