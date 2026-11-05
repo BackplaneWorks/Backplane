@@ -51,6 +51,13 @@ export class FoldFeedback {
       if (rows.length) this.keep(this.rows, h.id, rows);
     }
   }
+  // the shut runs of a page whose rows were never seen (their first ids,
+  // the newest last; at most `n`)
+  unseen(page, n = 32) {
+    const tl = timeline(page), out = [];
+    for (const k of tl ? items(tl.kids) : []) { const h = runHead(k);if (h && !h.open && !this.rows.has(h.id)) out.push(h.id); }
+    return out.slice(-n);
+  }
   // a click: a function that settles it (the hub's answer), or undefined
   choice(action, value) {
     if (action !== 'fold') return undefined;
