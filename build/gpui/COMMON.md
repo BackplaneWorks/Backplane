@@ -10,6 +10,8 @@ The person may be gaming on this desktop. Builds and long runs go to Boat, the M
 ## Compiling
 - Builds run on Boat or the Mac, never on this desktop, including Android and the Rust hub. Linux builds go to Boat; iOS goes to the Mac.
 - Boat starts are rationed: 840 a day across everything, and we hit it. Keep one warm sandbox per lane: always pass `--idle 3600`, never `--no-reuse`, and batch build, tests and replay into one job. A reused warm sandbox costs no start.
+- h@backplane is an extra build machine for finding failures early: `scripts/gpui/bp-build.sh LANE 'cmd'` through work_run with lock `bp-build`, one at a time, 12 GB, -j8. Results are provisional: a gating result must run once on Boat. Stop at the first ICE, SIGILL or segfault and tell the coordinator.
+- Release a Boat sandbox when a lane's batch is done; don't leave `--idle 3600` stacked up.
 - Boat: `scripts/boat-job.sh`, 8 GiB big jobs, 3.7 GiB otherwise, swap 0.
 - Running a finished binary or the hub here is fine.
 - Mac access: `build/gpui/mac-ssh hs-mac-mini '<cmd>'`, and `RSYNC_RSH=$PWD/build/gpui/mac-ssh rsync ...`. Plain ssh fails.
