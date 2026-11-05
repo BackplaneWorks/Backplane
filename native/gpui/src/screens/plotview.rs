@@ -10,12 +10,14 @@ pub struct PlotView {
     pub view: Option<View>, pub fitted: f32, pub key: String, pub drag: Option<(f32, f32)>,
     /// The canvas's last painted bounds (window pixels), for the pointer.
     pub bounds: Option<Bounds<Pixels>>,
+    /// The Layers menu is open.
+    pub layers_open: bool,
 }
 
-fn color(c: &Chunk) -> Hsla { let mut r = rgb(c.color); r.a = c.alpha; r.into() }
+fn color(c: &Chunk, factor: f32) -> Hsla { let mut r = rgb(c.color); r.a = c.alpha * factor; r.into() }
 
 /// A chunk's stroke width in pixels: the hub's width is in micrometres on the capsule (radius = width / 2).
-fn paint_chunk(window: &mut Window, c: &Chunk, v: &View, o: Point<Pixels>, w: f32, h: f32) {
+fn paint_chunk(window: &mut Window, c: &Chunk, factor: f32, v: &View, o: Point<Pixels>, w: f32, h: f32) {
     let on = |x: f32, y: f32| { let (px, py) = v.to_px(x, y, w, h); (px >= -50. && px <= w + 50. && py >= -50. && py <= h + 50.).then_some((px, py)) };
     if !c.caps.is_empty() {
         let width = (c.caps[4] * 2. * v.scale).max(1.0);
@@ -27,7 +29,7 @@ fn paint_chunk(window: &mut Window, c: &Chunk, v: &View, o: Point<Pixels>, w: f3
             if (a.0 - b.0).abs() + (a.1 - b.1).abs() < 0.5 { pb.line_to(point(o.x + px(b.0 + 0.5), o.y + px(b.1))); } else { pb.line_to(point(o.x + px(b.0), o.y + px(b.1))); }
             any = true;
         }
-        if any { if let Ok(path) = pb.build() { window.paint_path(path, color(c)); } }
+        if any { if let Ok(path) = pb.build() { window.paint_path(path, color(c, factor)); } }
     }
     if !c.polys.is_empty() {
         let mut pb = PathBuilder::fill(); let mut any = false;
@@ -39,20 +41,22 @@ fn paint_chunk(window: &mut Window, c: &Chunk, v: &View, o: Point<Pixels>, w: f3
             for (i, p) in pts.iter().enumerate() { let q = point(o.x + px(p.0), o.y + px(p.1)); if i == 0 { pb.move_to(q) } else { pb.line_to(q) } }
             pb.close(); any = true;
         }
-        if any { if let Ok(path) = pb.build() { window.paint_path(path, color(c)); } }
+        if any { if let Ok(path) = pb.build() { window.paint_path(path, color(c, factor)); } }
     }
 }
 
 /// The canvas for a frame; its size comes from the layout, the camera from `Screens.plotview`.
-pub fn canvas_el(cx: &mut Context<Backplane>, light: bool, frame: &Frame, view: Option<View>) -> AnyElement {
+pub fn canvas_el(cx: &mut Context<Backplane>, light: bool, frame: &Frame, view: Option<View>, masks: crate::viewers::layers::Masks) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let chunks = frame.chunks.clone();
+    // the hub's masks decide which chunks are drawn, dimmed, and which one is painted last
+    let order = crate::viewers::layers::plan(&chunks.iter().map(|c| c.layer).collect::<Vec<_>>(), &masks);
     let this = cx.entity();
     let el = canvas(|b, _, _| b, move |_, b, window, cx| {
         let (w, h) = (f32::from(b.size.width), f32::from(b.size.height));
         this.update(cx, |app, _| { app.screens.plotview.bounds = Some(b); });
         let Some(v) = view else { return };
-        window.with_content_mask(Some(ContentMask { bounds: b }), |window| { for ch in &chunks { paint_chunk(window, ch, &v, b.origin, w, h); } });
+        window.with_content_mask(Some(ContentMask { bounds: b }), |window| { for &(i, factor) in &order { paint_chunk(window, &chunks[i], factor, &v, b.origin, w, h); } });
         // click to the first painted plot: what the person feels (the metric the gate asks for)
         this.update(cx, |app, _| { if let Some(t) = app.screens.plot_click.take() { app.m("plot_painted", serde_json::json!({"ms": (t.elapsed().as_secs_f64() * 1e6).round() / 1e3, "chunks": chunks.len()})); } });
     }).size_full();
