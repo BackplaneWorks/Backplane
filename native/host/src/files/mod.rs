@@ -1,9 +1,11 @@
 //! M6 files stream: the Files tab (`files.dir`), `/img`, and what follows (plots, git, KiCad IPC).
 //! Registers its handlers with the hub through api.rs; the one line in main.rs is `files::start`.
 pub mod dir;
+pub mod export10;
 pub mod fm;
 pub mod git;
 pub mod misc;
+pub mod rv;
 pub mod serve;
 pub mod threadpath;
 #[path = "../kicad/mod.rs"]
@@ -19,6 +21,8 @@ pub fn start(hub: Arc<Hub>) {
     hub.register_rpc(Arc::new(Files));
     hub.register_rpc(Arc::new(GitRpc));
     hub.register_rpc(Arc::new(misc::Misc));
+    hub.register_rpc(Arc::new(rv::Rv));
+    hub.register_rpc(Arc::new(export10::Export10));
     kicad::start(&hub);
 }
 
@@ -59,7 +63,10 @@ impl HttpHandler for Downloads {
         Box::pin(async move {
             let thread = fm::from_uri(&req.param("thread"));
             if req.route().starts_with("/files/") && !fm::files_safe(&fm::from_uri(&req.param("path"))) { return HttpReply::text("400 Bad Request", "that path is not in this project") }
-            if root_of(hub, &thread).await.is_none() { return HttpReply::text("404 Not Found", "no such thread") }
+            if root_of(hub, &thread).await.is_none() {
+                // /view/*: Hub.bot.view's refusal; /files/*: FilesHttp.root
+                return if req.route().starts_with("/view/") { HttpReply::text("403 Forbidden", "not a thread of this machine, or not a file the viewers read") } else { HttpReply::text("404 Not Found", "no such thread") };
+            }
             HttpReply::text("501 Not Implemented", "this route is not served by this hub")
         })
     }
@@ -125,6 +132,11 @@ impl RpcHandler for GitRpc {
                     let message = match p.get("message").and_then(Value::as_str) { Some(m) if !m.is_empty() => m.to_string(), _ => if action == "init" { "start".into() } else if title.is_empty() { "Backplane: changes from this thread".into() } else { title } };
                     let r = git::act(&cwd, &action, &message, "", "").await;
                     note(hub, &thread, if git::failed(&r) { "error" } else { "info" }, &format!("{action}{}", if r.is_empty() { String::new() } else { format!(": {}", r.trim()) })).await;
+                    // GitJob.text.pr: a pull request just opened gets its parts change, after the answer's note
+                    if !git::failed(&r) && git::last_line(&r).starts_with("pr: http") {
+                        let w = rv::pr_note(&cwd, git::last_line(&r)[4..].trim()).await;
+                        if !w.is_empty() { note(hub, &thread, "info", &w).await }
+                    }
                     vec![reply(!git::failed(&r), json!({"text":r,"thread":thread}))]
                 }
                 _ => { // git.revert
