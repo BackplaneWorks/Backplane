@@ -83,7 +83,8 @@ async fn junk_and_unknown_requests_get_the_replies_bend_gives() {
 // law (Hub.join): a request's committed changes reach the client before its reply
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_requests_changes_come_before_its_reply() {
-    let (_hub, port) = test_hub("wire-order", FIXTURE).await;
+    let (hub, port) = test_hub("wire-order", FIXTURE).await;
+    crate::commands::start(hub.clone()); // project.add is the commands lane's handler
     let mut c = join(port, None).await; tokio::time::sleep(Duration::from_millis(300)).await;
     let before = c.frames.lock().unwrap().len();
     c.send(json!({"id":1,"m":"project.add","p":{"path":"/tmp/wire-order-proj"}})).await; tokio::time::sleep(Duration::from_millis(400)).await;

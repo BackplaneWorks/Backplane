@@ -406,7 +406,6 @@ impl Hub {
         // `ping` and `load.ping` are not methods of the Bend hub: it answers them "unknown method" (recorded, parity/recA)
         // a copy of a log: git that writes and acting on the machine are told, not run (copy.rs)
         if crate::copy::rpc_refused(m) { return vec![json!({"t":"reply","id":id,"ok":false,"error":crate::copy::GIT_TOLD})] }
-        if m == "project.add" { return self.project_add(&id, msg.get("p").unwrap_or(&Value::Null)).await }
         if m == "fab.look" {
             let reply = crate::settings::fab::reply(&self.arc(), &id, "fab.look", msg.get("p").unwrap_or(&Value::Null)).await; // settings/fab.rs: the project card
             // the hub's own read, applied to this view's held state by the policy on its next V (Fab.reply)
@@ -424,24 +423,9 @@ impl Hub {
         self.view_request(c, id, m, msg).await
     }
 
-    /// project.add: the project, its first thread and that thread's account setting, as the Bend hub logs them.
-    async fn project_add(&self, id: &Value, p: &Value) -> Vec<Value> {
-        let path = p.get("path").and_then(Value::as_str).unwrap_or("");
-        if path.is_empty() { return vec![json!({"t":"reply","id":id,"ok":false,"error":"path required"})] }
-        let (at, n) = (now_ms() / 1000, self.alloc_n(4) as usize);
-        let title = path.trim_end_matches('/').rsplit('/').next().unwrap_or(path);
-        let (pid, tid) = (format!("p{at}-{n}"), format!("t{at}-{}", n + 1));
-        let evs = [json!({"$":"ProjectCreated","id":pid,"title":title,"root":path,"at":at}),
-            json!({"$":"ThreadCreated","id":tid,"project":pid,"title":"New thread","env":"worktree","branch":"","worktree":"","provider":"claude","model":"","at":at}),
-            json!({"$":"SettingSet","key":format!("account.thread.{tid}.claude"),"value":"{\"id\":\"\",\"epoch\":0}","at":at})];
-        let mut evs = evs.to_vec();
-        // a folder that is not a git repository: the Bend hub says so on the new thread (act id g<at>-<n+3>)
-        if !std::path::Path::new(path).join(".git").exists() {
-            evs.push(json!({"$":"ActivityLogged","thread":tid,"act":format!("g{at}-{}", n + 3),"tone":"info","kind":"git","summary":"working in the project folder: not a git repository","at":at}));
-            evs.push(json!({"$":"WorktreeSkipped","id":tid,"at":at}));
-        }
-        if self.commit_many(&evs).await.is_err() { return vec![json!({"t":"reply","id":id,"ok":false,"error":"store write failed"})] }
-        vec![json!({"t":"reply","id":id,"ok":true,"thread":tid})]
+    /// fab.look: the card for a thread with no goal, intent or fab files (what the Bend hub answers for one).
+    fn fab_look(&self, id: &Value, p: &Value) -> Value {
+        json!({"t":"reply","id":id,"ok":true,"result":{"thread":p.get("thread").cloned().unwrap_or(json!("")),"intent":"","goal":"","parts":[],"boards":0,"label":"","estimate_problems":"","error":"","estimates":true,"board_files":[],"board_default":"","order":""}})
     }
 
 
