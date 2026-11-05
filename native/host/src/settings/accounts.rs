@@ -57,14 +57,17 @@ pub fn created(change: &Value, get: &dyn Fn(&str) -> String) -> Vec<Value> {
 
 /// `accounts.default`. In the JS hub every `accounts*` request from a client that has not declared the accounts capability is refused with the named-account
 /// message (server.bend `Hub.rpc.account.client`, `Accounts.client.allowed`); only the web renderer's view requests declare it (`accountProfiles`), and phones and
-/// the GPUI client never do. This hub has no per-connection capability yet, so it refuses for everyone (what a mobile client gets from the JS hub); `make_default`
-/// is the real handler, ready for the day a connection can carry the capability.
+/// the GPUI client never do. Here a connection is granted when a request in its view session names `accountProfiles: 1` (accounts_hub.rs `note_request`, revoked at detach):
+/// granted, `make_default` answers; any other client gets the refusal below.
 pub struct AccountsDefault;
 pub const GATE: &str = "This thread uses a named account. Use updated Backplane web or desktop to continue; your draft is preserved.";
 impl RpcHandler for AccountsDefault {
     fn methods(&self) -> &'static [&'static str] { &["accounts.default"] }
-    fn call<'a>(&'a self, _hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, _m: &'a str, _p: &'a Value) -> Fut<'a, Vec<Value>> {
-        Box::pin(async move { vec![json!({"t":"reply","id":id,"ok":false,"error":GATE})] })
+    fn call<'a>(&'a self, hub: &'a Arc<Hub>, who: &'a Caller, id: &'a Value, _m: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
+        Box::pin(async move {
+            if !super::accounts_hub::is_granted(who) { return vec![json!({"t":"reply","id":id,"ok":false,"error":GATE})] }
+            vec![make_default(hub, id, p).await]
+        })
     }
 }
 /// AccountsRpc.default.step: make a connected profile (or the CLI's own login) the default for new threads.
