@@ -163,7 +163,7 @@ port waits for the person's decision.
 
 <!-- law-map: generated below by scripts/gpui/law-map.py -->
 
-Laws in LAWS.bend: 3253. bend 912, rust 585, unported 1159, client 470, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`, `src/core/msp.bend`, `src/core/agy.bend`, `src/core/opencode.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
+Laws in LAWS.bend: 3253. bend 912, rust 595, unported 1149, client 470, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`, `src/core/msp.bend`, `src/core/agy.bend`, `src/core/opencode.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
 
 | law | status | seed | file | note |
 |---|---|---|---|---|
@@ -1624,17 +1624,17 @@ Laws in LAWS.bend: 3253. bend 912, rust 585, unported 1159, client 470, window 1
 | `plane_list_same_rich` | bend | seed K +-10% | `src/core/plane.bend` |  |
 | `plane_launch_once` | bend | seed K +-10% | `src/core/plane.bend` |  |
 | `plane_counts_split` | bend | seed K +-10% | `src/core/i18n.bend` |  |
-| `launch_reports_turn_end` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `launch_ask_at_once` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `launch_fail_told` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `launch_once_per_end` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `launch_muted_quiet` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `launch_waits_for_work` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `launch_said_quiet` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `launch_own_stop_quiet` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `launch_stop_told` | unported | seed R +-10% | `src/core/hub.bend` |  |
+| `launch_reports_turn_end` | rust `launch_reports_turn_end` | map | `src/core/hub.bend` |  |
+| `launch_ask_at_once` | rust `launch_ask_at_once` | map | `src/core/hub.bend` |  |
+| `launch_fail_told` | rust `launch_fail_told` | map | `src/core/hub.bend` |  |
+| `launch_once_per_end` | rust `launch_once_per_end` | map | `src/core/hub.bend` |  |
+| `launch_muted_quiet` | rust `launch_muted_quiet` | map | `src/core/hub.bend` |  |
+| `launch_waits_for_work` | rust `launch_waits_for_work` | map | `src/core/hub.bend` |  |
+| `launch_said_quiet` | rust `launch_said_quiet` | map | `src/core/hub.bend` |  |
+| `launch_own_stop_quiet` | rust `launch_own_stop_quiet` | map | `src/core/hub.bend` |  |
+| `launch_stop_told` | rust `launch_own_stop_quiet` | map | `src/core/hub.bend` |  |
 | `launch_delivered_in_order` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `launch_loop_bounded` | unported | seed R +-10% | `src/core/hub.bend` |  |
+| `launch_loop_bounded` | rust `launch_loop_bounded` | map | `src/core/hub.bend` |  |
 | `launch_far_once` | bend | seed K +-10% | `src/core/fmcp.bend` |  |
 | `launch_far_order` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `launch_list_once` | unported | seed R +-10% | `src/core/model.bend` |  |
