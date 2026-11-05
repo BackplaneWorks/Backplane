@@ -1259,6 +1259,7 @@ function renderPage() {
   patch(root, { $: T.El, tag: "div", key: "", attrs: { $: "Nil" }, kids: { $: "Con", head: page, tail: { $: "Nil" } } });
   starAttentionSync(root);
   bubMoveSync();
+  paletteCaughtUp();
   // (a picture of another thread drawn with the live sidebar: its row marked)
   if (transitionNode && !frontendNode && transitionFor !== shownFor && transitionFor.startsWith("thread:")) {
     const row = document.querySelector(`aside.sidebar .thread[data-value="${CSS.escape(transitionFor.slice(7))}"]`);
@@ -2365,6 +2366,23 @@ document.addEventListener("input", (e) => {
   dispatch(el.getAttribute("data-text"), forKey(el) + v);
 });
 
+// Commands narrowed at each key to the rows on screen that hold what is
+// typed, until the hub's list for that query lands (its ranking and its
+// rows from beyond the 24 shown are the hub's): the hub took 75 ms + a
+// render + the round trip before anything changed.
+function narrowPalette(text) {
+  const q = text.trim().toLocaleLowerCase(), rows = [...document.querySelectorAll("#workspace-commands .workspace-command")];
+  const hides = rows.map(row => !!q && !row.textContent.toLocaleLowerCase().includes(q));
+  // (none of them holds it: the list stays as it is for the hub's, never empty)
+  if (hides.every(Boolean)) return;
+  rows.forEach((row, i) => { if (hides[i] !== row.hasAttribute("data-narrowed")) row.toggleAttribute("data-narrowed", hides[i]); });
+}
+function paletteCaughtUp() {
+  const field = document.getElementById("workspace-query");
+  if (!field?.__v || !document.querySelector("#workspace-commands [data-narrowed]")) return;
+  if ((nodeAttr(field.__v, "value") ?? "") !== field.value) return;
+  for (const row of document.querySelectorAll("#workspace-commands [data-narrowed]")) row.removeAttribute("data-narrowed");
+}
 // A thread or bot in the sidebar is picked at the mouse press, not at its
 // release: a person holds a click 60-120 ms, and the switch (its picture
 // drawn from the client's cache) is under way meanwhile. So are the viewer
@@ -2444,6 +2462,7 @@ for (const ev of EVENTS) {
       document.documentElement.style.setProperty("--mx", Math.min(e.clientX, innerWidth - 216) + "px");
       document.documentElement.style.setProperty("--my", e.clientY + "px");
     }
+    if (ev === "input" && el.id === "workspace-query") narrowPalette(el.value);
     dispatch(ev === "click" ? phoneClickAction(document, el, action) : action, ev === "input" ? inputValue(el) : valueOf(el));
     // (a row's menu, at the right press, in this frame)
     if (ev === "contextmenu") renderNow();
