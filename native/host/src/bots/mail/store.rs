@@ -31,7 +31,7 @@ fn dir(home: &Path) -> Result<PathBuf, StoreError> {
     Ok(d)
 }
 /// open a journal without following a link; a regular file, and for a write exactly one link
-fn open(p: &Path, write: bool) -> Result<std::fs::File, StoreError> {
+pub fn open(p: &Path, write: bool) -> Result<std::fs::File, StoreError> {
     let mut o = OpenOptions::new(); o.read(true).custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     if write { o.append(true).create(true).mode(0o600); }
     let f = o.open(p).map_err(|e| match e.raw_os_error() { Some(libc::ELOOP) => StoreError::Link, Some(libc::EISDIR) => StoreError::NotRegular, _ => StoreError::Io })?;
@@ -69,7 +69,7 @@ pub fn append(home: &Path, b: &Body) -> Result<bool, StoreError> {
     Ok(repaired)
 }
 /// The lines of a file that are text: a line that is not UTF-8 is skipped (the journal is the person's data; one bad line must not hide the rest)
-fn text_lines(f: std::fs::File) -> impl Iterator<Item = String> {
+pub fn text_lines(f: std::fs::File) -> impl Iterator<Item = String> {
     let mut r = std::io::BufReader::new(f); let mut buf = vec![];
     std::iter::from_fn(move || loop { buf.clear(); match std::io::BufRead::read_until(&mut r, b'\n', &mut buf) { Ok(0) | Err(_) => return None, Ok(_) => { if buf.last() == Some(&b'\n') { buf.pop(); } if let Ok(s) = String::from_utf8(buf.clone()) { return Some(s) } } } })
 }
@@ -83,3 +83,22 @@ pub fn headers(path: &Path) -> Vec<(Conv, Hdr)> {
     let Ok(f) = open(path, false) else { return vec![] };
     text_lines(f).filter_map(|l| body_parse(&l)).map(|b| (b.conv, b.mail)).collect()
 }
+
+/// MailStore.read for a page: the bodies strictly before `before` (all when empty), newest first, at most `n`, and whether older ones remain.
+/// One streaming pass over the journal that stops at the cursor, holding n+1 bodies (Scan in mailstore.bend); Err(None) when the cursor is not in the file.
+pub fn page(path: &Path, before: &str, n: usize) -> Result<Option<(Vec<Body>, bool)>, PageError> {
+    if n == 0 { return Ok(Some((vec![], false))) }
+    let f = match open(path, false) { Ok(f) => f, Err(StoreError::Io) if !path.exists() => return Ok(None), Err(e) => return Err(PageError::Store(e)) };
+    let mut ring: std::collections::VecDeque<Body> = std::collections::VecDeque::with_capacity(n + 2);
+    let mut found = before.is_empty();
+    for l in text_lines(f) {
+        let Some(b) = body_parse(&l) else { continue };
+        if !before.is_empty() && b.mail.id == before { found = true; break }
+        ring.push_back(b); if ring.len() > n + 1 { ring.pop_front(); }
+    }
+    if !found { return Err(PageError::Cursor) }
+    let more = ring.len() > n;
+    Ok(Some((ring.into_iter().rev().take(n).collect(), more)))
+}
+#[derive(Debug, PartialEq)]
+pub enum PageError { Cursor, Store(StoreError) }

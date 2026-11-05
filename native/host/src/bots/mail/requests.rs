@@ -50,16 +50,9 @@ pub fn find(w: &World, p: &Value) -> Value {
 }
 fn body_row(b: &Body) -> Value { let m = &b.mail; json!({"id":m.id,"from":m.from,"to":m.to,"kind":m.kind,"want":m.want,"at":m.at,"text":b.text}) }
 
-/// The bodies of a journal strictly before `before` (all when empty), newest first, at most n; Err when the cursor is not in the file
-fn page(path: &std::path::Path, before: &str, n: usize) -> Result<Vec<Body>, String> {
-    let all = store::read(path);
-    let end = if before.is_empty() { all.len() } else { all.iter().position(|b| b.mail.id == before).ok_or_else(|| format!("{}: unknown mail cursor", path.display()))? };
-    Ok(all[..end].iter().rev().take(n).cloned().collect())
-}
-
 impl Bots {
     async fn mail_read(&self, id: &Value, p: &Value) -> Vec<Value> {
-        let (conv, bot, before, n) = (gs(p, "conv"), gs(p, "bot"), gs(p, "before"), limit(gn(p, "n", 50)));
+        let (conv, bot, n) = (gs(p, "conv"), gs(p, "bot"), limit(gn(p, "n", 50))); let before = gs(p, "before").to_string();
         let w = self.world().await;
         if conv.starts_with("room:") { return vec![err(id, "a room's conversation is read from its posts: not ported yet")] }
         if !bot.is_empty() { // Mail.seen: reading opens it for that bot
@@ -67,25 +60,24 @@ impl Bots {
             if let Err(e) = self.hub.commit(&json!({"$":"MailMarked","bot":bot,"conv":conv,"status":"open","seen":c.last,"until":0,"at":now})).await { return vec![err(id, &format!("{e:#}"))] }
         }
         let w = { drop(w); self.world().await };
-        let path = store::path(&self.hub.cfg.home, conv); let (b2, p2) = (before.to_string(), path.clone());
-        let r = if n == 0 { Ok(vec![]) } else { tokio::task::spawn_blocking(move || if p2.exists() { page(&p2, &b2, n) } else { Ok(vec![]) }).await.unwrap_or_else(|e| Err(e.to_string())) };
-        match r {
-            Err(e) => vec![err(id, &e)],
-            Ok(bs) => {
-                // more: one body before the oldest of a full page
-                let more = if n > 0 && bs.len() == n { let oldest = bs.last().map(|b| b.mail.id.clone()).unwrap_or_default(); let p3 = path.clone();
-                    tokio::task::spawn_blocking(move || page(&p3, &oldest, 1).map(|v| !v.is_empty()).unwrap_or(false)).await.unwrap_or(false) } else { false };
-                vec![data(id, json!({"conv":row(&w, bot, &w.mail.conv(conv)),"mails":bs.iter().map(body_row).collect::<Vec<_>>(),"more":more}))]
-            }
-        }
+        let path = store::path(&self.hub.cfg.home, conv);
+        let r = tokio::task::spawn_blocking(move || store::page(&path, &before, n)).await.map_err(|e| e.to_string());
+        let (bs, more) = match r {
+            Ok(Ok(Some(p))) => p, Ok(Ok(None)) => (vec![], false), // no journal yet: the conversation with no bodies
+            Ok(Err(store::PageError::Cursor)) => return vec![err(id, &format!("{}: unknown mail cursor", store::path(&self.hub.cfg.home, conv).display()))],
+            Ok(Err(store::PageError::Store(e))) => return vec![err(id, &format!("{}: {e}", store::path(&self.hub.cfg.home, conv).display()))],
+            Err(e) => return vec![err(id, &e)],
+        };
+        vec![data(id, json!({"conv":row(&w, bot, &w.mail.conv(conv)),"mails":bs.iter().map(body_row).collect::<Vec<_>>(),"more":more}))]
     }
 
-    /// Mail.ui.request: the target must be a thread of this hub (a bot's address is its thread); the reply comes first, then the mail is filed
-    /// (a bot's thread: the mailbox only; any other: the message is posted in the thread as the person's, and filed)
+    /// Mail.ui.request: the target must be a thread of this hub (a bot's address is its thread). A bot's thread: the mailbox only. Any other: the message is
+    /// delivered to the thread as the person's first, then filed (Mail.send.worker's order), and the reply comes last, so a failed delivery or filing is told.
+    /// (Bend replies before it files; replying after the durable step is stricter on purpose.)
     async fn mail_send(&self, id: &Value, p: &Value) -> Vec<Value> {
         let to = gs(p, "to");
         let w = self.world().await;
-        let thread = if let Some(t) = to.strip_prefix("thread:") { t.to_string() } else if let Some(b) = to.strip_prefix("bot:") { w.bot(b).map(|b| b.thread.clone()).unwrap_or_default() } else { String::new() };
+        let thread = if let Some(t) = to.strip_prefix("thread:") { t.split('/').next().unwrap_or("").to_string() } else if let Some(b) = to.strip_prefix("bot:") { w.bot(b.split('/').next().unwrap_or("")).map(|b| b.thread.clone()).unwrap_or_default() } else { String::new() };
         if thread.is_empty() || !self.hub.model().await.threads.contains_key(&thread) { return vec![err(id, "invalid mail target")] }
         let now = now_s(); let msg = self.hub_id("mail", now); let text = gs(p, "text");
         let addr = w.mail_addr(&thread);
@@ -100,10 +92,11 @@ impl Bots {
         } else { old };
         let mail = Hdr { id: msg.clone(), conv: cid, from: "person".into(), to: addr, kind: "thread".into(), r#ref: String::new(), want: super::want("thread", gs(p, "want"), &super::flags(&o, text)), head: super::head(text), size: super::bytes(text), at: now };
         let body = Body { conv, mail, text: text.into() };
-        let filed = self.file_body(&w, body).await;
+        let already = w.mail.has(&msg);
         drop(w);
-        if let Err(e) = filed { return vec![err(id, &e)] }
-        if !is_bot { if let Err(e) = self.inbox_deliver_raw(&thread, &msg, text, None).await { eprintln!("mail: could not deliver to a thread: {e}") } }
+        if !is_bot && !already { if let Err(e) = self.inbox_deliver_raw(&thread, &msg, text, None).await { return vec![err(id, &format!("could not deliver the message: {e}"))] } }
+        let w = self.world().await;
+        if let Err(e) = self.file_body(&w, body).await { return vec![err(id, &e)] }
         vec![ok(id)]
     }
 }
