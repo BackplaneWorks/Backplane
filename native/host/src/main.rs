@@ -110,7 +110,9 @@ async fn run(a: Args) -> Result<()> {
     loop {
         let (s, _) = l.accept().await?; s.set_nodelay(true).ok();
         let h = hub.clone();
-        tokio::spawn(async move { let _ = serve(h, s).await; });
+        // loopback peers are trusted (Bend's Accept.local); a tailnet listener (net lane) passes its whois verdict with serve_with
+        let trusted = s.peer_addr().map_or(false, |p| p.ip().is_loopback());
+        tokio::spawn(async move { let _ = serve_with(h, s, trusted).await; });
     }
 }
 
