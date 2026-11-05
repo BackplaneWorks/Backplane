@@ -18,7 +18,12 @@ export function restoreFrameAliases(shown, aliases, window) {
       }
       return a;
     });
-    return { ...node, key: aliases[node.key] ?? node.key, attrs, kids: node.kids.map(k => visit(k, depth + 1)) };
+    const kids = node.kids.map(k => visit(k, depth + 1));
+    const key = Object.hasOwn(aliases, node.key) ? aliases[node.key] : node.key;
+    // copy on write: what no alias reaches stays the object it was, so a
+    // held sidebar is still the very one kept, and the page can skip it
+    if (key === node.key && attrs.every((a, i) => a === node.attrs[i]) && kids.every((k, i) => k === node.kids[i])) return node;
+    return { ...node, key, attrs, kids };
   };
   return visit(shown);
 }
@@ -32,4 +37,23 @@ export function restoreWindowProjection(shown, projection) {
       !shown.attrs?.some(a => a.name === 'data-window-region' && a.value === 'root') ||
       projection.root?.type !== 'element' || projection.root.key !== 'workspace-root') throw Error('Invalid canonical root region');
   return projection.root;
+}
+
+// The canonical sidebar goes back into the one slot the hub left for it. Only
+// the path to the slot is copied, so the sidebar stays the very object kept.
+export function restoreCanonicalSidebar(root, sidebar) {
+  let left = 20000, slots = 0;
+  const visit = (node, depth = 0) => {
+    if (--left < 0 || depth >= 64) throw Error('Invalid canonical root');
+    if (node?.type !== 'element') return node;
+    if (node.key === 'sidebar' || node.tag === 'bp-canonical-sidebar') {
+      if (node.key !== 'sidebar' || node.tag !== 'bp-canonical-sidebar' || node.attrs?.length !== 0 || node.kids?.length !== 0 || ++slots > 1) throw Error('Invalid canonical slot');
+      return sidebar;
+    }
+    const kids = node.kids.map(k => visit(k, depth + 1));
+    return kids.some((k, i) => k !== node.kids[i]) ? { ...node, kids } : node;
+  };
+  const whole = visit(root);
+  if (slots !== 1) throw Error('Invalid canonical slot');
+  return whole;
 }
