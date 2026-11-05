@@ -57,37 +57,65 @@ impl Peers {
     pub fn verified(&self, link: &str) -> bool { !matches!(self.own_how(link), "" | "no") }
 }
 
-/// The shared table: replayed at start, then kept by `Observer`.
-pub struct PeerTable(Mutex<Peers>);
+/// The shared table: replayed at start, then kept by `Observer`. A commit that lands while the replay runs is
+/// buffered and applied after it by seq, so none is lost and none is applied twice.
+pub struct PeerTable { st: Mutex<State> }
+#[derive(Default)]
+struct State { peers: Peers, pending: Vec<(u32, Vec<Value>)> }
+const CHUNK: usize = 20_000;
+
 impl PeerTable {
-    pub fn new() -> Arc<PeerTable> { Arc::new(PeerTable(Mutex::new(Peers::default()))) }
-    pub fn with<R>(&self, f: impl FnOnce(&Peers) -> R) -> R { f(&self.0.lock().unwrap()) }
+    pub fn new() -> Arc<PeerTable> { Arc::new(PeerTable { st: Mutex::new(State::default()) }) }
+    pub fn with<R>(&self, f: impl FnOnce(&Peers) -> R) -> R { f(&self.st.lock().unwrap().peers) }
+    /// The whole table from `lines` (1-based `first_seq`), for tests and small logs.
     pub fn from_lines(&self, lines: &[String], first_seq: u32) {
-        let mut g = self.0.lock().unwrap();
-        for (i, l) in lines.iter().enumerate() { if let Ok(e) = serde_json::from_str::<Value>(l) { g.fold(&e) } g.applied = first_seq + i as u32 }
-        g.replayed = true;
+        let mut local = Peers::default();
+        for (i, l) in lines.iter().enumerate() { fold_line(&mut local, l); local.applied = first_seq + i as u32 }
+        self.finish(local);
     }
-    /// Register on the hub, then replay what is already there; commits in between are folded once (by seq).
-    pub async fn start(self: &Arc<Self>, hub: &Arc<Hub>) {
-        hub.register_observer(self.clone());
-        let lines = hub.store.all();
-        let mut g = self.0.lock().unwrap();
-        if g.replayed { return }
-        g.applied = 0;
-        for l in &lines { if let Ok(e) = serde_json::from_str::<Value>(l) { g.fold(&e) } g.applied += 1 }
-        g.replayed = true;
-    }
-}
-impl Observer for PeerTable {
-    fn committed(&self, _hub: &Arc<Hub>, events: &[Value], first_seq: u32) {
-        let mut g = self.0.lock().unwrap();
-        if !g.replayed { return } // the replay reads the store after this commit was written
+    /// A committed batch: held while the replay runs, folded by seq afterwards.
+    pub fn observe(&self, events: &[Value], first_seq: u32) {
+        let mut g = self.st.lock().unwrap();
+        if !g.peers.replayed { g.pending.push((first_seq, events.to_vec())); return }
         for (i, e) in events.iter().enumerate() {
             let seq = first_seq + i as u32;
-            if seq <= g.applied { continue }
-            g.fold(e); g.applied = seq;
+            if seq <= g.peers.applied { continue }
+            g.peers.fold(e); g.peers.applied = seq;
         }
     }
+    /// Swap the replayed table in, then apply what was buffered past it.
+    pub fn finish(&self, mut local: Peers) {
+        let mut g = self.st.lock().unwrap();
+        local.replayed = true;
+        let pending = std::mem::take(&mut g.pending);
+        g.peers = local; drop(g);
+        for (first, evs) in pending { self.observe(&evs, first) }
+    }
+    /// Register on the hub (so every later commit is seen), then read the log as it stands in chunks off the async
+    /// workers, folding only the lines that can matter into a local table; the lock is held only to swap it in.
+    pub async fn start(self: &Arc<Self>, hub: &Arc<Hub>) {
+        hub.register_observer(self.clone());
+        let h = hub.clone();
+        let local = tokio::task::spawn_blocking(move || {
+            let (mut local, len) = (Peers::default(), h.store.len());
+            let mut at = 0;
+            while at < len {
+                let to = (at + CHUNK).min(len);
+                for l in h.store.range(at, to).unwrap_or_default() { fold_line(&mut local, &l) }
+                at = to;
+            }
+            local.applied = len as u32; local
+        }).await.unwrap_or_default();
+        self.finish(local);
+    }
+}
+/// Only a line that names `PeerSet` or `SettingSet` is parsed.
+fn fold_line(p: &mut Peers, l: &str) {
+    if !(l.contains("PeerSet") || l.contains("SettingSet")) { return }
+    if let Ok(e) = serde_json::from_str::<Value>(l) { p.fold(&e) }
+}
+impl Observer for PeerTable {
+    fn committed(&self, _hub: &Arc<Hub>, events: &[Value], first_seq: u32) { self.observe(events, first_seq) }
 }
 
 #[cfg(test)]
@@ -118,14 +146,27 @@ mod tests {
         p.fold(&json!({"$":"SettingSet","key":"sync.desk","value":"","at":3}));
         assert!(!p.sync_off("desk"));
     }
-    #[test] fn peer_observer_skips_what_the_replay_covered() {
+    #[test] fn peer_commits_during_the_replay_are_neither_lost_nor_doubled() {
         let t = PeerTable::new();
-        t.from_lines(&[ps("p1", "a", "http://a:1", false, 1).to_string()], 1);
-        let h: Option<Arc<Hub>> = None; let _ = h;
-        // (committed() needs a hub only for its signature: exercise the fold by seq directly)
-        let mut g = t.0.lock().unwrap();
-        for (seq, e) in [(1u32, ps("p1", "a", "http://a:1", true, 2)), (2, ps("p2", "b", "http://b:1", false, 3))] { if seq > g.applied { g.fold(&e); g.applied = seq } }
-        assert!(g.peer("p1").unwrap().revoked == false, "seq 1 was already applied");
-        assert!(g.peer("p2").is_some());
+        // seq 5 lands while the replay is still reading; seq 2 is one the replay also reads
+        t.observe(&[ps("p5", "late", "http://l:1", false, 50)], 5);
+        t.observe(&[ps("p1", "", "", true, 20)], 2);
+        let mut local = Peers::default();
+        for (i, e) in [ps("p0", "a", "http://a:1", false, 1), ps("p1", "b", "http://b:1", false, 2), ps("p2", "c", "http://c:1", false, 3)].iter().enumerate() { local.fold(e); local.applied = 1 + i as u32 }
+        t.finish(local);
+        t.with(|p| {
+            assert!(p.peer("p5").is_some(), "a commit past the replay's end is applied after it");
+            assert!(!p.peer("p1").unwrap().revoked, "seq 2 was in the replay: the buffered copy is not applied again");
+            assert_eq!(p.applied, 5);
+        });
+        // after the swap, batches fold directly, once
+        t.observe(&[ps("p6", "n", "http://n:1", false, 60)], 6); t.observe(&[ps("p6", "n", "http://n:1", true, 61)], 6);
+        t.with(|p| assert!(!p.peer("p6").unwrap().revoked));
+    }
+    #[test] fn peer_only_peer_and_setting_lines_are_parsed() {
+        let mut p = Peers::default();
+        fold_line(&mut p, "not json PeerSet"); fold_line(&mut p, r#"{"$":"MessagePosted","text":"PeerSet"}"#);
+        fold_line(&mut p, &ps("p1", "n", "http://u:1", false, 1).to_string());
+        assert_eq!(p.live().len(), 1);
     }
 }

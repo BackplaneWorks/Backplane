@@ -91,8 +91,11 @@ pub fn machines_json(status: &str, port: u16, found: &[(Cand, String)]) -> Value
 }
 
 /// GET /hello on a hub: the version it names (CBOR; JSON from a hub not updated yet); "" for no answer. http only.
-pub async fn hello(url: &str) -> String {
+pub async fn hello(url: &str) -> String { hello_with(crate::copy::on(), url).await }
+/// (Bend probes with curl, which a hub on a copied log refuses: so does this, with no connection made.)
+pub async fn hello_with(copy: bool, url: &str) -> String {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    if copy { return String::new() }
     let Some(rest) = url.strip_prefix("http://") else { return String::new() };
     let hp = rest.split('/').next().unwrap_or("");
     let go = async {
@@ -187,6 +190,10 @@ mod tests {
             assert_eq!(hello(&url).await, want);
         }
         assert_eq!(hello("http://127.0.0.1:1").await, "", "nothing there");
+        // a copied log makes no connection at all
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap(); let url = format!("http://{}", l.local_addr().unwrap());
+        assert_eq!(hello_with(true, &url).await, "");
+        assert!(tokio::time::timeout(std::time::Duration::from_millis(200), l.accept()).await.is_err(), "nothing connected");
         assert_eq!(hello("https://x").await, "", "http only");
     }
 
