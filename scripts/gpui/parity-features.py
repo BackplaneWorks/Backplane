@@ -262,6 +262,13 @@ R(A, "Project badge colour/icon editor", m=["setting.set"], c="mpp", lane=L["cmd
 R(A, "Status colours, urgency order, counts", hub="partial", pf="side", c="pdd", lane=L["side"], ev="sidebar.rs/signal.rs/shelf.rs ported with tests; compared only through the 1621-difference gate")
 R(A, "Machine switch / one list over machines", m=["view.action"], hub="missing", c="mpp", lane=L["net"], ev="needs far/links (see Machines)")
 
+# ---- Platforms
+A = "Platforms"
+R(A, "Hub on macOS (darwin-arm64, darwin-x64)", hub="partial", c="ppp", lane=L["core"],
+  ev="today's Bend hub runs on macOS; Rust: Linux-only calls (prctl PDEATHSIG, ptsname_r, /proc) are behind cfg with macOS fallbacks (agents/proc.rs reap_orphans via ps, term/pty.rs ptsname); compile check on hs-mac-mini pending; no run")
+R(A, "Hub on Windows (windows-x64)", hub="missing", c="ppp", lane=L["core"],
+  ev="today's Bend hub is cross-built for windows-x64; the Rust hub is unix-only (libc flock/setsid/pty/ioctl, unix sockets, /proc): the plan and effort are in docs/gpui/PORT.md 'Platforms'")
+
 # ---- Threads and timeline
 A = "Threads and timeline"
 R(A, "Open a thread, windowed history (view.page, anchors, newer/older)", m=["view.page", "view.open"], hub="partial", pf="state", c="pdd", lane=L["pses"],

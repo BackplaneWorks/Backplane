@@ -69,6 +69,8 @@ static OWNER: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 /// Every agent process carries BACKPLANE_AGENT_OWNER=<home>: after a hub is SIGKILLed (the kernel kills the agent itself, PDEATHSIG, but not what it
 /// started), the next hub on that home ends what is left. One hub per home, so nothing live is taken.
 pub fn set_owner(home: &str) { let _ = OWNER.set(home.to_string()); }
+/// Linux: the process table is /proc, each environment is /proc/<pid>/environ.
+#[cfg(target_os = "linux")]
 pub fn reap_orphans(home: &str) -> usize {
     let mark = format!("BACKPLANE_AGENT_OWNER={home}").into_bytes(); let me = std::process::id(); let mut n = 0;
     let Ok(rd) = std::fs::read_dir("/proc") else { return 0 };
@@ -76,6 +78,19 @@ pub fn reap_orphans(home: &str) -> usize {
         let Some(pid) = e.file_name().to_str().and_then(|s| s.parse::<u32>().ok()) else { continue }; if pid == me { continue }
         let Ok(env) = std::fs::read(format!("/proc/{pid}/environ")) else { continue };
         if env.split(|b| *b == 0).any(|kv| kv == mark.as_slice()) { unsafe { libc::kill(pid as i32, libc::SIGKILL); } n += 1 }
+    }
+    n
+}
+/// macOS and other Unix: no /proc; `ps eww` prints each process's environment after its command line.
+#[cfg(not(target_os = "linux"))]
+pub fn reap_orphans(home: &str) -> usize {
+    let mark = format!("BACKPLANE_AGENT_OWNER={home}"); let me = std::process::id(); let mut n = 0;
+    let Ok(o) = crate::proc::std_cmd(crate::proc::Kind::Local, "ps").args(["eww", "-A", "-o", "pid=,command="]).output() else { return 0 };
+    for l in String::from_utf8_lossy(&o.stdout).lines() {
+        let l = l.trim_start(); let Some((pid, rest)) = l.split_once(' ') else { continue };
+        let Ok(pid) = pid.parse::<u32>() else { continue }; if pid == me { continue }
+        // the owner mark is a whole word of the environment part: " BACKPLANE_AGENT_OWNER=<home>" followed by a space or the end
+        if let Some(at) = rest.find(&format!(" {mark}")) { let after = &rest[at + 1 + mark.len()..]; if after.is_empty() || after.starts_with(' ') { unsafe { libc::kill(pid as i32, libc::SIGKILL); } n += 1 } }
     }
     n
 }
@@ -87,7 +102,8 @@ pub fn spawn(program: &Path, args: &[String], cwd: &Path, extra_path: Option<&Pa
     if let Some(d) = extra_path { let old = std::env::var_os("PATH").unwrap_or_default(); let mut v = vec![d.to_path_buf()]; v.extend(std::env::split_paths(&old)); if let Ok(j) = std::env::join_paths(v) { c.env("PATH", j); } }
     for (k, v) in env { c.env(k, v); }
     if let Some(o) = OWNER.get() { c.env("BACKPLANE_AGENT_OWNER", o); }
-    unsafe { c.pre_exec(|| { libc::setsid(); libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL); Ok(()) }); }
+    // Linux: the kernel kills the agent when the hub dies (PDEATHSIG). macOS has no such call: the next hub on the home reaps what is left (reap_orphans).
+    unsafe { c.pre_exec(|| { libc::setsid(); #[cfg(target_os = "linux")] libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL); Ok(()) }); }
     let mut child = c.spawn()?;
     let pid = child.id().unwrap_or(0);
     let mut stdin = child.stdin.take().expect("piped"); let stdout = child.stdout.take().expect("piped"); let mut stderr = child.stderr.take().expect("piped");
