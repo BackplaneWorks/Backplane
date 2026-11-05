@@ -274,7 +274,7 @@ private fun Empty(text: String) {
 @Composable
 private fun Tag(text: String) {
     Text(text, Modifier.background(MaterialTheme.colorScheme.surfaceVariant, square).padding(horizontal = 5.dp, vertical = 1.dp),
-        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace))
+        style = MaterialTheme.typography.labelSmall.copy(fontFamily = BpMono, fontFeatureSettings = NO_LIGATURES))
 }
 
 @Composable
@@ -318,7 +318,7 @@ private fun RoutinesTab(m: AppModel, b: BotView) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             if (r.kind == "reminder") Icon(Icons.Filled.Notifications, null, Modifier.size(14.dp))
                             Tag(r.label)
-                            Text(r.schedule, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelMedium)
+                            Text(r.schedule, style = MaterialTheme.typography.labelMedium.copy(fontFamily = BpMono, fontFeatureSettings = NO_LIGATURES))
                         }
                         if (r.done) Text(r.doneText, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
                         else if (r.next.isNotEmpty()) Text(
@@ -366,7 +366,7 @@ private fun RoutineDialog(m: AppModel, f: RoutineForm) {
                 OutlinedTextField(cron, { cron = it; m.field("ocron", it) }, Modifier.fillMaxWidth(), singleLine = true,
                     label = { Text(NativeMessages.native_routine_timefield(lang)) }, placeholder = { Text(NativeMessages.native_routine_examples(lang)) },
                     supportingText = { Text(f.hint.ifEmpty { NativeMessages.native_routine_hint(lang) }) },
-                    textStyle = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace),
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(fontFamily = BpMono, fontFeatureSettings = NO_LIGATURES),
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false))
                 OutlinedTextField(prompt, { prompt = it; m.field("oprompt", it) }, Modifier.fillMaxWidth(), minLines = 3, maxLines = 10,
                     label = { Text(NativeMessages.native_routine_prompt(lang)) })
@@ -394,7 +394,7 @@ private fun HooksTab(m: AppModel, b: BotView) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(NativeMessages.web_hooks_secret(lang), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.outline)
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(b.secret, Modifier.weight(1f), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+                    Text(b.secret, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall.copy(fontFamily = BpMono, fontFeatureSettings = NO_LIGATURES))
                     IconButton(onClick = { m.act("copy", b.secret) }) { Icon(Icons.Filled.ContentCopy, NativeMessages.common_copy(lang)) }
                 }
                 HorizontalDivider()
@@ -406,7 +406,7 @@ private fun HooksTab(m: AppModel, b: BotView) {
                 headlineContent = { Text(h.name, fontWeight = FontWeight.SemiBold) },
                 supportingContent = {
                     Column {
-                        Text(url, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall,
+                        Text(url, style = MaterialTheme.typography.bodySmall.copy(fontFamily = BpMono, fontFeatureSettings = NO_LIGATURES),
                             maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(if (h.last.isEmpty()) "${h.count}" else "${h.count} · ${h.last}", style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.outline)
@@ -520,7 +520,7 @@ private fun SettingsTab(m: AppModel, b: BotView, st: BotSettings) {
             TextButton(onClick = { m.act("peer-invite") }) { Text(NativeMessages.machines_invite(lang)) }
         }
         if (st.invite.isNotEmpty()) Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(st.invite, Modifier.weight(1f), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+            Text(st.invite, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall.copy(fontFamily = BpMono, fontFeatureSettings = NO_LIGATURES))
             IconButton(onClick = { m.act("copy", st.invite) }) { Icon(Icons.Filled.ContentCopy, NativeMessages.native_machine_invite_copy(lang)) }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {

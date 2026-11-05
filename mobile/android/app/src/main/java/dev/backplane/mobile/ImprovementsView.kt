@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -222,7 +223,7 @@ fun ImprovementsDialog(m: AppModel, close: () -> Unit) {
                     Text("The body below is sent exactly as edited. Review its OS family and app version too.")
                     Button(onClick = { prepare(false) }, enabled = !busy && !failedLoad && draft.report.isNotBlank()) { Text("Preview exact public issue body") }
                     preview?.let { value ->
-                        SelectionContainer { Text(value.body, fontFamily = FontFamily.Monospace, modifier = Modifier.testTag("improvements.preview")) }
+                        SelectionContainer { Text(value.body, style = TextStyle(fontFamily = BpMono, fontFeatureSettings = NO_LIGATURES), modifier = Modifier.testTag("improvements.preview")) }
                         Text("Only this body is prefilled. The selected screenshot is not attached. Your hub, project, paths, thread and account details are not added.")
                         Button(onClick = { if (draft.canOpen(value, image != null)) open(value.url, true) }, enabled = !busy && draft.canOpen(value, image != null), modifier = Modifier.testTag("improvements.open")) {
                             Text(if (draft.opened) "GitHub draft already opened" else "Open draft on GitHub")

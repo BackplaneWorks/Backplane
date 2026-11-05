@@ -935,7 +935,7 @@ private fun FolderPicker(m: AppModel, p: Folders) {
                     typed.add(t)
                     m.act("picker-type", t)
                 }, Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), singleLine = true,
-                    placeholder = { Text(p.hint) }, textStyle = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace),
+                    placeholder = { Text(p.hint) }, textStyle = MaterialTheme.typography.bodyLarge.copy(fontFamily = BpMono, fontFeatureSettings = NO_LIGATURES),
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false))
                 if (p.error.isNotEmpty()) Text(p.error, Modifier.padding(horizontal = 16.dp),
                     color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)

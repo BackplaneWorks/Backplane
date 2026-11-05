@@ -8,6 +8,7 @@ ROOT=$(cd "$(dirname "$0")/../.." && pwd); V=${1:-default}; cd "$ROOT"
 # build/ is dropped from boat-job manifests: stage the bridge where it is not (untracked, removed after)
 ST=scripts/gpui/android-bridge-stage; mkdir -p $ST; cp build/gpui/bridge/bridge.js $ST/bridge.js; trap "rm -rf $ST" EXIT
 ARG=""; [ "$V" = nosidebar ] && ARG=nosidebar
+ARG="$ARG host=${E2E_ANDROID_HOST:-backplane.tail9e0cf2.ts.net}"
 # --include-file means "upload only these": list the app, its shell assets, the job script and the staged bridge
 INC=""; for f in $(git ls-files -co --exclude-standard mobile/android mobile/shell) scripts/gpui/android-build-boat.sh scripts/gpui/android-bridge-stage/bridge.js; do INC="$INC --include-file $f"; done
 LOG=$(mktemp); scripts/boat-job.sh --no-setup-bend --timeout 2400 $INC --artifact build/gpui-apk-artifacts -- sh scripts/gpui/android-build-boat.sh $ARG 2>&1 | tee "$LOG"
