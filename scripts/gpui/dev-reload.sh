@@ -32,13 +32,17 @@ hub_same() { local b; b=$(in_use hub); [ -n "$b" ] && [ -f "$b" ] && cmp -s "$b"
 reload() {  # reload HUB CLIENT ASSETS COMMIT WHAT
   env HUB_BIN="$1" CLIENT_BIN="$2" ${3:+BACKPLANE_GPUI_ASSETS="$3"} ${4:+BACKPLANE_COMMIT="$4"} "$HERE/switch.sh" reload "$5"
 }
-# the window has drawn the thread list: the client's own `usable` line within 60 s
-window_up() {
-  local i=0
-  while [ $i -lt 120 ]; do
-    grep -q '"event":"usable"' "$SW/client.log" 2>/dev/null && return 0
-    kill -0 "$(cat "$SW/client.pid" 2>/dev/null)" 2>/dev/null || return 1
-    sleep 0.5; i=$((i+1))
+# the window has drawn the thread list: the client's own `usable` line. A hub on a real-size log answers /hello minutes before it can draw a view, and a
+# window from before the client retried stays on its refusal, so while the hub lives the window is opened again every WINDOW_TRY seconds, for HUB_BOOT seconds in all.
+WINDOW_TRY=${GPUI_RELOAD_WINDOW_TRY:-20}
+HUB_BOOT=${GPUI_RELOAD_HUB_BOOT:-420}
+window_drawn() { grep -q '"event":"usable"' "$SW/client.log" 2>/dev/null; }
+window_up() {  # window_up HUB CLIENT ASSETS COMMIT
+  local waited=0 i
+  while [ "$waited" -lt "$HUB_BOOT" ]; do
+    i=0; while [ $i -lt "$((WINDOW_TRY*2))" ]; do window_drawn && return 0; hub_up || return 1; sleep 0.5; i=$((i+1)); done
+    waited=$((waited+WINDOW_TRY)); say "the hub is still opening the log (${waited}s); opening the window again"
+    reload "$1" "$2" "$3" "$4" client || return 1
   done
   return 1
 }
@@ -70,12 +74,12 @@ apply() {  # apply BUILD WHAT
   ph=$(in_use hub); pc=$(in_use client); win=$(i3_windows)
   commit=$(head -1 "$b/COMMIT" 2>/dev/null || true); [ ! -d "$b/assets" ] || a=$b/assets
   say "relaunching on $1 ($what)"
-  if reload "$b/backplane-hub" "$b/backplane-gpui" "$a" "$commit" "$what" && window_up; then
+  if reload "$b/backplane-hub" "$b/backplane-gpui" "$a" "$commit" "$what" && window_up "$b/backplane-hub" "$b/backplane-gpui" "$a" "$commit"; then
     i3_back "$win"; printf '%s\n' "$1" > "$DEV/.shown"; tell "Now running $1"; return 0
   fi
   printf '%s\n' "$1" > "$DEV/.bad"; tell "Build $1 did not come up; going back. See $SW/hub.log and $SW/client.log"
   [ -n "$ph" ] && [ -n "$pc" ] && [ -x "$ph" ] && [ -x "$pc" ] || { say "nothing to go back to"; return 1; }
-  if reload "$ph" "$pc" "${BACKPLANE_GPUI_ASSETS:-}" "" both && window_up; then i3_back "$win"; say "back on the build before"
+  if reload "$ph" "$pc" "${BACKPLANE_GPUI_ASSETS:-}" "" both && window_up "$ph" "$pc" "${BACKPLANE_GPUI_ASSETS:-}" ""; then i3_back "$win"; say "back on the build before"
   else tell "Going back failed too: the app is down. Logs are in $SW"; fi
 }
 
