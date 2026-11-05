@@ -14,8 +14,8 @@ const R=process.env.BP_ROOT||new URL('../../..',import.meta.url).pathname.replac
 const root=`${R}/build/gpui/hub-run/prove-${port}`;rmSync(root,{recursive:true,force:true});mkdirSync(root+'/proj',{recursive:true});makeStandins(root+'/bin');
 const h=await startHub({bin,home:root+'/home',port:Number(port),standins:root+'/bin',cap:'3500M',extraArgs:hubArgs,extraEnv:{TZ:'Etc/UTC',FAKE_SECS:'60',FAKE_PER:'2',FAKE_CYCLE:'20'}});
 const refLog=[];const ref=await client(h,{onMsg:(o)=>{if(o.t==='log'||o.t==='changes')refLog.push(...(o.items||[]))}});const c=await client(h,{});
-c.send('project.add',{path:root+'/proj'});const pc=await c.until(10000,()=>c.seen.find(x=>x.$==='ProjectCreated'));
-for(let i=0;i<agents;i++)c.send('thread.create',{project:pc.id,title:'t'+i,env:'local'});
+// threads come from project.add (each makes a project and its first thread): the one method both hubs have for it
+for(let i=0;i<agents;i++){mkdirSync(`${root}/proj${i}`,{recursive:true});c.send('project.add',{path:`${root}/proj${i}`})}
 const ths=await c.until(30000,()=>{const t=c.seen.filter(x=>x.$==='ThreadCreated');return t.length>=agents?t:undefined});
 for(const t of ths)c.send('turn.start',{thread:t.id,text:'stream'});
 await sleep(4000);
