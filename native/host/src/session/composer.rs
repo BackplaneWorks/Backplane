@@ -50,6 +50,23 @@ pub fn send(cx: &SendCtx, session: &Value) -> Option<ActOut> {
     })
 }
 
+/// What the model knows about the selected thread that a send needs: the presenter implements it over its metadata projection.
+pub trait Facts { fn bot_thread(&self, thread: &str) -> bool; fn account_params(&self, thread: &str) -> bool; }
+
+/// The composer's actions as the presenter's action table calls them: `params` is the object the hub builds for a view request (`session`, `action`, `value`, `cid`, `hub`,
+/// `now` in milliseconds). `draft`, `send` and `send-alt` (the other follow-up mode: Follow.mode answers "steer" for both); everything else, and every case not ported, is None.
+pub fn act(params: &Value, facts: &dyn Facts) -> Option<ActOut> {
+    let (session, hub) = (&params["session"], s(params, "hub"));
+    match s(params, "action") {
+        "draft" => draft(hub, session, s(params, "value")),
+        "send" | "send-alt" => {
+            let sel = s(session, "sel");
+            send(&SendCtx { hub, cid: s(params, "cid"), now_s: params["now"].as_u64().unwrap_or(0) / 1000, bot_thread: facts.bot_thread(sel), account_params: facts.account_params(sel) }, session)
+        }
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -77,6 +94,19 @@ mod tests {
         assert_eq!(p["rid"], json!(3));
         assert_eq!(p["drafts"], json!({"t1700000002-3": "", "@att:t1700000002-3": "", "@reply:t1700000002-3": "", "@reply.q:t1700000002-3": ""}));
         assert_eq!(p["outbox"]["2"], o.cmds[1]["text"]);
+    }
+    struct Plain;
+    impl Facts for Plain { fn bot_thread(&self, _: &str) -> bool { false } fn account_params(&self, _: &str) -> bool { false } }
+    struct Bot;
+    impl Facts for Bot { fn bot_thread(&self, _: &str) -> bool { true } fn account_params(&self, _: &str) -> bool { false } }
+    #[test] fn the_action_table_routes_draft_send_and_send_alt_only() {
+        let p = |a: &str, v: &str| json!({"session": session(), "action": a, "value": v, "cid": "parity-gpui", "hub": "http://127.0.0.1:3820", "now": 1793864523123u64});
+        assert_eq!(act(&p("draft", "hello parity"), &Plain).unwrap().cmds.len(), 1);
+        let send_o = act(&p("send", ""), &Plain).unwrap();
+        assert_eq!(send_o.cmds[1]["text"].as_str().unwrap().contains("\"msg\":\"cparity-gpui1793864523-2\""), true, "now is milliseconds in the params, seconds in the msg id");
+        assert_eq!(act(&p("send-alt", ""), &Plain).unwrap().cmds, send_o.cmds, "Follow.mode answers steer for both");
+        assert!(act(&p("send", ""), &Bot).is_none(), "a bot's thread is Bots.say");
+        for a in ["select", "row-pin", "skill", "interrupt", ""] { assert!(act(&p(a, "x"), &Plain).is_none(), "{a}") }
     }
     #[test] fn what_is_not_ported_is_none() {
         let cx = SendCtx { hub: "h", cid: "c", now_s: 1, bot_thread: false, account_params: false };
