@@ -55,7 +55,7 @@ print("cat rigs:", n, "icons:", len(icons))
 PY
 cp assets/fonts/jetbrains-mono/OFL.txt build/gpui-artifacts/assets/OFL-JetBrainsMono.txt
 cp assets/fonts/jetbrains-mono/SOURCE.txt build/gpui-artifacts/assets/SOURCE-JetBrainsMono.txt
-if [ "${1:-}" = check ]; then cargo check --release --manifest-path native/gpui/Cargo.toml 2>&1 | grep -E '^(error|warning: unused)' -A12 | head -150; echo CHECK-DONE; exit 0; fi
+if [ "${1:-}" = check ]; then cargo check --release --manifest-path native/gpui/Cargo.toml > build/gpui-artifacts/check.log 2>&1; rc=$?; grep -E '^(error|warning: unused)' -A12 build/gpui-artifacts/check.log | head -150; echo CHECK-DONE; exit $rc; fi
 /usr/bin/time -v -o build/gpui-artifacts/build.time cargo build --release --manifest-path native/gpui/Cargo.toml
 cp native/gpui/Cargo.lock build/gpui-artifacts/Cargo.lock
 cp build/gpui-target/release/backplane-gpui build/gpui-artifacts/
