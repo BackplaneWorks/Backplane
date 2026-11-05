@@ -10,11 +10,14 @@ pub struct Req {
     pub body: Vec<u8>,
     /// the accepted socket's peer (owner trust asks the tailnet about this address); None in tests
     pub peer: Option<std::net::SocketAddr>,
+    /// The socket's peer is the owner's own device (decided by the tailnet listener's whois) or loopback. NEVER a credential by itself:
+    /// handlers still apply owner_pair / owner_peer / the credential (core/auth.bend Auth.trusted).
+    pub trusted: bool,
 }
 /// The most body bytes the hub reads for a request (/far bodies reach 256 KB).
 pub const BODY_MAX: usize = 1 << 20;
 impl Req {
-    pub fn new(method: &str, target: &str, headers: Vec<(String, String)>) -> Req { Req { method: method.into(), target: target.into(), headers, body: vec![], peer: None } }
+    pub fn new(method: &str, target: &str, headers: Vec<(String, String)>) -> Req { Req { method: method.into(), target: target.into(), headers, body: vec![], peer: None, trusted: false } }
     pub fn header(&self, name: &str) -> &str {
         self.headers.iter().find(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v.as_str()).unwrap_or("")
     }

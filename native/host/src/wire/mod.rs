@@ -205,7 +205,11 @@ pub async fn wire(hub: Arc<Hub>, s: TcpStream, since: usize, origin_asked: Strin
     }
 }
 
-pub async fn serve(hub: Arc<Hub>, s: TcpStream) -> Result<()> {
+/// A connection from a listener that has no opinion on its peer: untrusted.
+pub async fn serve(hub: Arc<Hub>, s: TcpStream) -> Result<()> { serve_with(hub, s, false).await }
+/// `trusted`: the listener decided this socket's peer is the owner's own device (the tailnet listener, after whois) or loopback
+/// (Accept.local). It reaches handlers as `Req.trusted`; it is never a credential.
+pub async fn serve_with(hub: Arc<Hub>, s: TcpStream, trusted: bool) -> Result<()> {
     let mut buf = vec![0u8; 16384];
     let mut tries = 0;
     let (head_len, req) = loop {
@@ -214,7 +218,7 @@ pub async fn serve(hub: Arc<Hub>, s: TcpStream) -> Result<()> {
         let mut r = httparse::Request::new(&mut hs);
         match r.parse(&buf[..n]) {
             Ok(httparse::Status::Complete(len)) => break (len, { let mut q = Req::new(r.method.unwrap_or(""), r.path.unwrap_or("/"),
-                r.headers.iter().map(|h| (h.name.to_string(), String::from_utf8_lossy(h.value).into_owned())).collect()); q.peer = s.peer_addr().ok(); q }),
+                r.headers.iter().map(|h| (h.name.to_string(), String::from_utf8_lossy(h.value).into_owned())).collect()); q.peer = s.peer_addr().ok(); q.trusted = trusted; q }),
             Ok(httparse::Status::Partial) if n < buf.len() && tries < 200 => { tries += 1; tokio::time::sleep(Duration::from_millis(10)).await }
             _ => { let mut s = s; s.write_all(&response("400 Bad Request", "text/plain; charset=utf-8", "", b"bad request")).await.ok(); return Ok(()) }
         }
