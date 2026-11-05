@@ -926,6 +926,10 @@ button.chip:hover { border-color: var(--bad); color: var(--bad); }
 .find-more { display: block; width: 100%; text-align: left; margin-top: 4px; padding: 7px 14px; background: none; border: 0; border-top: 1px solid var(--line); color: var(--accent); }
 .find-more:hover { text-decoration: underline; }
 .picker.search-threads footer { flex: none; padding: 6px 14px; border-top: 1px solid var(--line); color: var(--faint); font-size: calc(11px * var(--text-scale, 100) / 100); }
+/* (the panel keeps one height whatever the hits, so nothing in it moves as they land) */
+html:not(.phone) .picker.search-threads { height: 76vh; }
+html:not(.phone) .search-threads .find-rows { flex: 1; }
+html:not(.phone) .search-threads .find-rows:empty { display: block; }
 @media (max-width: 760px) {
   .picker.search-threads { top: 8px; max-height: calc(100dvh - 16px); }
   .find-hit { padding-left: 14px; }
