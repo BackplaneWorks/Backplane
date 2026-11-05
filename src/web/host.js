@@ -122,7 +122,9 @@ import { ReviewPosition } from "./review-position.js";
 const reviewPosition = new ReviewPosition(localStorage);
 const modelFeedback = new ModelFeedback(() => later());
 const subsFeedback = new SubsFeedback(() => later());
-const pressFeedback = new PressFeedback(() => later());
+// (what presses opened is kept per hub, pairing, bundle and language)
+const pressFeedback = new PressFeedback(() => later(), 64, { storage: localStorage,
+  scope: () => { try { return JSON.stringify([location.origin, cacheIdentity(document.cookie), import.meta.url, App.lang(ui)]); } catch { return ""; } } });
 const foldFeedback = new FoldFeedback(() => later());
 // the session the hub's picture is drawn over: the model menu and the
 // Subagents rows as clicked, ahead of the hub's answer
