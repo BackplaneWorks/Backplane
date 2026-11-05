@@ -161,6 +161,8 @@ pub fn content(line: &str) -> (bool, Vec<Value>) {
 pub async fn preview(hub: &Arc<Hub>, thread: &str, name: &str, args: &Value) -> (bool, Value) {
     let blocks = |ok: bool, b: Vec<Value>| (ok, json!({ "$content": b }));
     let Some(b) = get(hub) else { return blocks(false, vec![json!({"type":"text","text":"no browser in this Backplane"})]) };
+    // preview_open / preview_navigate bring the Browser tab forward in the thread's viewer, as the call starts (Hub.auto.k + Preview.view; Bend sends it for every thread that is not a bot's)
+    if matches!(name, "preview_open" | "preview_navigate") { hub.push_all(&json!({"t":"view","thread":thread,"kind":"browser","path":""})); }
     let line = b.ask_as(thread, &name[8..], args, true).await;
     let (ok, bl) = content(&line); blocks(ok, bl)
 }
