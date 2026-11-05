@@ -1,0 +1,8 @@
+{"$":"ProjectCreated","id":"p1","title":"proj","root":"/r","at":1793900000}
+{"$":"ThreadCreated","id":"t1","project":"p1","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1793900001}
+{"$":"ThreadCreated","id":"t2","project":"p1","title":"U","env":"local","branch":"","worktree":"","provider":"codex","model":"m","at":1793900002}
+{"$":"LockChanged","name":"merge","lock":{"holder":{"id":"a","kind":"thread","thread":"t1","note":"n","since":5,"lease":9},"waiters":[{"id":"b","kind":"client","thread":"","note":"","since":6,"lease":0},{"id":"c"}],"ready":false},"at":1793900037}
+{"$":"LockChanged","name":"build","lock":{"holder":null,"waiters":[],"ready":true,"outside":{"pid":4242,"cmd":"make \"x\"","since":7}},"at":1793900038}
+{"$":"LockChanged","name":"merge","lock":{"holder":null,"waiters":[],"ready":false},"at":1793900039}
+{"$":"LockChanged","name":"odd","lock":{"holder":"str","waiters":{},"outside":3},"at":1793900040}
+{"$":"LockChanged","name":"none","at":1793900041}
