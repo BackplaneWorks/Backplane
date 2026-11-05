@@ -218,6 +218,9 @@ const SVG_TAGS = new Set(["svg", "path"]);
 // The re-render harness (test/tools/rerender): a page whose window has
 // __bpRender (set before it loads) counts what each render does. Off otherwise.
 const RR = globalThis.__bpRender || null;
+// (a 3D tab on the page once: solid.js makes the page's first graphics
+// context ahead, when idle)
+let glWarmAsked = false;
 function create(v) {
   RR?.n("dom.create");
   if (is(v, "Txt")) return document.createTextNode(v.text);
@@ -1406,6 +1409,7 @@ function renderPage() {
   // and its model's last picture, when it has one (solid.js)
   if (pressFeedback.active?.kind === "viewer") { mountTools(true); Solid.picture(document.getElementById("solid")); requestAnimationFrame(() => requestAnimationFrame(mountViewers)); }
   else mountViewers();
+  if (!glWarmAsked && document.querySelector('[data-on-click="view-kind"][data-value="3d"]')) { glWarmAsked = true; Solid.warm(); }
   ViewerTools.chipInView();
   ViewerTools.focusToggle();
   Plot2d.inspectGone();
