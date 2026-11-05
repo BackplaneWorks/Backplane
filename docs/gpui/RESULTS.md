@@ -73,3 +73,26 @@ Fixture: `test/gpui/perf/gen_log.py` (seeded, fresh synthetic text; mix 40% Sett
 Writes (`thread.rename` request to ack, 4000 sequential, 1 client): p50 20.3 ms, p99 41 ms, max 160-200 ms at both 10k and 100k; ~47 writes/s sequential, which is the 20 ms ack floor again, not the store. 6-7 of 4000 exceed 50 ms. WAL stays at ~4.1 MB at both sizes (checkpointed, no growing WAL).
 
 What grows with the log: import time (~linear: 1.6, 12.3, 133 s), store.db (~0.44 KB per event), RSS after boot (399, 679, 935 MB), first-view and thread-switch bodies (77, 738 KB at 10k, 100k: 10x per 10x events) and their latency (40 to 174 ms). Opening a thread with 1,370 entries sends 799 KB, so the body is not bounded by the 32-entry message window; with 666 threads at 100k the shown sidebar structure is the likely driver, to be confirmed by splitting the body. What stays flat: ws-RPC and write ack latency (20 ms), WAL size, ping at idle.
+
+## Wire: what the hub sends a `renderer: mobile` client, 22 vs 301 threads (stand-in agents)
+
+One project with 22 or 301 threads (`THREADS=`), a mobile-renderer view client on one thread, 70 s per cell, 0 or 5 simulated agents streaming. `push` = fetch `view.update` only after a `view.changed` push; `poll` = fetch once a second. delta0 = no `viewDelta` offer (whole body every time), delta1 = offer. Raw: `build/gpui/results/perf/wire/`. Harness `test/gpui/perf/m2b_wire.mjs`, `wire_ops.mjs`. One run per cell, desktop loopback, hub without the sidebar bound beyond what this build does.
+
+| threads | agents | mode | whole bodies B/s | frame KB | keyed delta B/s |
+|---|---|---|---|---|---|
+| 22 | 0 | push | 2,464 | 34.4 | 44 |
+| 22 | 0 | poll 1/s | 33,931 | 34.4 | 287 |
+| 22 | 5 | push | 73,957 | 52.6 | 2,957 |
+| 22 | 5 | poll 1/s | 52,023 | 52.6 | 2,667 |
+| 301 | 0 | push | 23,989 | 336 | 355 |
+| 301 | 0 | poll 1/s | 315,051 | 335 | 591 |
+| 301 | 5 | push | 530,232 | 354 | 3,371 |
+| 301 | 5 | poll 1/s | 333,058 | 354 | 2,978 |
+
+Cause, by field. A whole mobile body is `{shown, overlay, window, session, ...}`. At 301 threads `shown` is 230-240 KB and `overlay` another 230-240 KB (`overlay.j.projects` repeats `shown.projects`): the thread list is sent twice, about 740 bytes per thread per copy, and it is not bounded in this build. At 22 threads `shown` is 24-34 KB. Frame size grows 9.8x for 13.7x the threads (34 -> 336 KB idle); with the polling clients the byte rate grows 9.3x (34 -> 315 KB/s).
+
+What changes each frame when idle: only each thread row's `ago` text ("3m", "8m"; paths `shown.projects.*.threads.*.ago` and `overlay.j.projects.*.threads.*.ago`). It ticks over once a minute for every thread; at 301 threads that is 903 ops in a minute over 5-6 consecutive frames (3-7 KB each, about 100 KB per minute) against 92 ops (10 KB per minute) at 22 threads. Everything else is quiet when idle: 0.07 pushes/s.
+
+With keyed deltas the traffic is nearly independent of thread count (idle: 287 B/s at 22 threads, 591 B/s at 301; the 5-agent runs are 3 KB/s at both, dominated by the streaming thread's entries). Without deltas it is whole-body repeats. The iOS client's ~20 MB in 70 s at 300 threads equals roughly 285 KB/s, the polled whole-body rate measured here (315-333 KB/s); that points at whole bodies each poll (no `viewDelta` offer taking effect, or delta replies not being applied and the app re-asking whole). The 40x versus 14x ratio was not reproduced: this bench sees 9x idle, 6.9x with 5 agents and polling. The app's frame-size records may double count, as the person said.
+
+Proposed fixes (for the coordinator; I did not edit src/**.bend): (1) make mobile and GPUI clients offer `viewDelta` and apply delta replies; (2) stop sending `overlay.j.projects` as a second copy of `shown.projects` when the client renders only one; (3) page the sidebar thread list (the request's `sidebarRegion` machinery exists for the web renderer) instead of sending all 301 rows; (4) make the `ago` text a client-side function of a timestamp so a clock tick is not 903 ops.

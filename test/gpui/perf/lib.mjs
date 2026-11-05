@@ -39,8 +39,8 @@ export async function startHub({bin,home,port,standins,host,extraEnv={},cap='4G'
 }
 export function stopHub(h){try{process.kill(h.pid,'SIGTERM')}catch{}}
 // Plain ws client (log + deltas), like agents_load.
-export async function client(h,{view=false,onMsg,since}={}){
- const ws=new WebSocket(`ws://${h.host}:${h.port}/ws?${view?'view=1&mobile=1&':''}${since!==undefined?`since=${since}&origin=1785000000&`:''}token=${encodeURIComponent(h.token)}`);ws.binaryType='arraybuffer';
+export async function client(h,{view=false,onMsg,since,origin}={}){
+ const ws=new WebSocket(`ws://${h.host}:${h.port}/ws?${view?'view=1&mobile=1&':''}${since!==undefined?`since=${since}&origin=${origin??1785000000}&`:''}token=${encodeURIComponent(h.token)}`);ws.binaryType='arraybuffer';
  const c={ws,seen:[],replies:new Map(),id:0,bytes:0,msgs:0,counting:true,lastMsg:Date.now()};
  ws.onmessage=e=>{const now=Date.now();const text=typeof e.data==='string';const n=text?e.data.length:e.data.byteLength;let o;try{o=text?JSON.parse(e.data):decode(e.data)}catch{return}
   if(!o||typeof o!=='object')return;if(c.counting){c.bytes+=n;c.msgs++}c.lastMsg=now;if(o.t==='log'&&o.origin!==undefined){c.origin=o.origin;c.logSince=o.since}
