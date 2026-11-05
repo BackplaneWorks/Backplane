@@ -135,7 +135,7 @@ cmd_start() {
   # a big log takes minutes to fold; wait for /hello, bounded
   echo "hub pid $hp, environment checked (stand-ins, copy guard). Waiting for it to open the log..."
   while [ $i -lt "${SWITCH_WAIT:-1800}" ]; do
-    alive "$hp" || { tail -5 "$SW/hub.log"; die "the hub exited while opening (see $SW/hub.log)"; }
+    alive "$hp" || { tail -5 "$SW/hub.log"; journalctl --user --since "-3min" 2>/dev/null | grep "run-p$hp" | cut -c1-200 | tail -4; die "the hub exited after ${i}s while opening (see $SW/hub.log; the journal lines above say how: signal, exit code, memory peak)"; }
     curl -s -m2 -o /dev/null "http://127.0.0.1:$PORT/hello" && break
     sleep 1; i=$((i+1))
   done
