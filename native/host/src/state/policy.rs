@@ -2,8 +2,8 @@
 //! committed batch (a channel send, never a lock on the writer's path); the Ticker asks it for the tick's events through the same queue; what
 //! it derives it commits in order through one sink. No mutex: batches, ticks and commits are serialized by the task.
 //! Pure of the hub (the sink is a closure), so it is tested here with a recording sink.
-use super::fam::autosettle;
-use super::State;
+use super::autosettle;
+use crate::state::State;
 use serde_json::Value;
 use std::collections::VecDeque;
 use std::future::Future;
