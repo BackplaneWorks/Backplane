@@ -64,7 +64,8 @@ impl Render for BrowserPage {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    // not `use super::*`: that glob brings gpui's own `test` attribute macro into scope and #[test] then expands into itself
+    use super::{decode_jpeg, fnv};
     fn jpeg(w: u32, h: u32, rgb: [u8; 3]) -> Vec<u8> {
         let img = image::RgbImage::from_pixel(w, h, image::Rgb(rgb)); let mut out = std::io::Cursor::new(Vec::new());
         image::DynamicImage::ImageRgb8(img).write_to(&mut out, image::ImageFormat::Jpeg).unwrap(); out.into_inner()

@@ -202,7 +202,7 @@ impl Render for SolidPage {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{decode_mesh, frame_mesh, render, Camera, BG};
     fn put(out: &mut Vec<u8>, mut v: u32) { loop { let b = (v & 0x7f) as u8; v >>= 7; if v == 0 { out.push(b); return } out.push(b | 0x80); } }
     fn zig(v: i32) -> u32 { ((v << 1) ^ (v >> 31)) as u32 }
     /// The encoder side of the documented format, for the tests: triangles of 10 um units with a colour each.
