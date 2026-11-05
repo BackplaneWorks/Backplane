@@ -48,7 +48,7 @@ for (const it of list) {
     paint50: m('paint'), paint95: m('paint', 0.95), px50: m('px'), px95: m('px', 0.95), content50: m('content'), content95: m('content', 0.95), confirm50: m('confirm'), confirm95: m('confirm', 0.95), dom50: m('dom'), settle50: m('settle'), settle95: m('settle', 0.95),
     cold: cold?.paint ?? null, coldSettle: cold?.settle ?? null,
     send50: m('send'), recv50: m('recv1'), recvN50: m('recvN'), nRecv50: m('nRecv'), recvKB50: Math.round((m('recvBytes') || 0) / 1024),
-    shift50: m('shift'), shiftMax: Math.max(0, ...warm.map((r) => r.shift || 0)), late50: m('nLate'), lateMax50: m('lateMax'),
+    shift50: m('shift'), shiftCls50: m('shiftCls'), shiftClsMax: Math.max(0, ...warm.map((r) => r.shiftCls || 0)), shiftMax: Math.max(0, ...warm.map((r) => r.shift || 0)), late50: m('nLate'), lateMax50: m('lateMax'),
     proc50: pct(warm.map((r) => Math.max(0, ...(r.events || []).map((e) => e.proc))), 0.5),
     loaf50: pct(warm.map((r) => (r.loafs || []).filter((l) => l.t < (r.paint || 0)).reduce((s, l) => s + l.dur, 0)), 0.5),
     local: warm.filter((r) => r.send == null || r.send > r.dom).length,

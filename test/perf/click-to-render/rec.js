@@ -130,7 +130,7 @@
   po('layout-shift', (e) => {
     if (e.startTime < R.t0) return;
     R.lastMut = Math.max(R.lastMut || 0, now());
-    R.shifts.push({ t: e.startTime - R.t0, v: e.value, src: (e.sources || []).slice(0, 5).map((s) => ({ n: desc(s.node), from: [s.previousRect.x, s.previousRect.y, s.previousRect.width, s.previousRect.height].map(Math.round), to: [s.currentRect.x, s.currentRect.y, s.currentRect.width, s.currentRect.height].map(Math.round) })) });
+    R.shifts.push({ t: e.startTime - R.t0, v: e.value, recent: !!e.hadRecentInput, src: (e.sources || []).slice(0, 5).map((s) => ({ n: desc(s.node), from: [s.previousRect.x, s.previousRect.y, s.previousRect.width, s.previousRect.height].map(Math.round), to: [s.currentRect.x, s.currentRect.y, s.currentRect.width, s.currentRect.height].map(Math.round) })) });
   });
   po('event', (e) => {
     if (e.startTime < R.t0 - 1) return;
@@ -184,7 +184,7 @@
           send: R.sends.length ? rel(R.sends[0][0]) : null, nSend: R.sends.length, sendBytes: R.sends.reduce((a, s) => a + s[1], 0),
           recv1: R.recvs.length ? rel(R.recvs[0][0]) : null, recvN: R.recvs.length ? rel(R.recvs[R.recvs.length - 1][0]) : null, nRecv: R.recvs.length, recvBytes: R.recvs.reduce((a, s) => a + s[1], 0),
           nMut: R.nMut, nMutBefore: R.nMutBefore,
-          shift: +R.shifts.reduce((a, s) => a + s.v, 0).toFixed(4), shifts: R.shifts.slice(0, 8),
+          shift: +R.shifts.reduce((a, s) => a + s.v, 0).toFixed(4), shiftCls: +R.shifts.reduce((a, s) => a + (s.recent ? 0 : s.v), 0).toFixed(4), shifts: R.shifts.slice(0, 8),
           events: R.events.slice(0, 8), longs: R.longs, loafs: R.loafs.slice(0, 6),
           late: late.slice(0, 20), nLate: late.length, lateMax: late.reduce((a, l) => Math.max(a, l.dt), 0),
           trace: tr.slice(0, 40), film: R.film, rr: Object.fromEntries(Object.entries(RT).map(([k, v]) => [k, +v.toFixed(1)])), rn: { ...RN },

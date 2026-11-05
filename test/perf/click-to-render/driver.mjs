@@ -45,6 +45,12 @@ export async function open(o) {
     async ready(ms = 60000) {
       await page.waitForFunction(() => document.documentElement.dataset.backplaneReady === 'true' || document.querySelector('.app .sidebar, .app .thread'), null, { timeout: ms });
       await sleep(1500);
+      // a fresh workspace's first-run tour covers the page: skip it as a person would
+      for (let i = 0; i < 3; i++) {
+        const skip = page.locator('[data-on-click="ob-skip"]').filter({ visible: true });
+        if (!(await skip.count())) break;
+        await skip.first().click().catch(() => {}); await sleep(600);
+      }
     },
     async throttle(rate) { await cdp.send('Emulation.setCPUThrottlingRate', { rate: rate || 1 }); h.cpu = rate || 1; },
     box: async (sel) => {
