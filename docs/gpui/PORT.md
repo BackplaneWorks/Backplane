@@ -163,7 +163,7 @@ port waits for the person's decision.
 
 <!-- law-map: generated below by scripts/gpui/law-map.py -->
 
-Laws in LAWS.bend: 3253. bend 1093, rust 302, unported 1249, client 482, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
+Laws in LAWS.bend: 3253. bend 1085, rust 312, unported 1247, client 482, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
 
 | law | status | seed | file | note |
 |---|---|---|---|---|
@@ -2921,13 +2921,13 @@ Laws in LAWS.bend: 3253. bend 1093, rust 302, unported 1249, client 482, window 
 | `timeline_virtual_follow_only_at_bottom` | bend | seed K +-10% | `src/core/timeline-virtual.bend` |  |
 | `private_no_implicit_publication` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `private_duplicate_publication_none` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `liveness_stalled_only_after_gap` | bend | seed K +-10% | `src/core/liveness.bend` |  |
-| `liveness_nudge_once_per_gap` | bend | seed K +-10% | `src/core/liveness.bend` |  |
-| `liveness_never_kills` | bend | seed K +-10% | `src/core/liveness.bend` |  |
-| `liveness_launcher_notified_once` | bend | seed K +-10% | `src/core/liveness.bend` |  |
-| `liveness_progress_clears_stall` | bend | seed K +-10% | `src/core/liveness.bend` |  |
-| `liveness_nudge_before_stall` | bend | seed K +-10% | `src/core/liveness.bend` |  |
-| `liveness_timeout_explicit_optout` | bend | seed K +-10% | `src/core/liveness.bend` |  |
+| `liveness_stalled_only_after_gap` | rust `liveness_stalled_only_after_gap` | map | `src/core/liveness.bend` |  |
+| `liveness_nudge_once_per_gap` | rust `liveness_nudge_once_per_gap` | map | `src/core/liveness.bend` |  |
+| `liveness_never_kills` | rust `liveness_never_kills` | map | `src/core/liveness.bend` |  |
+| `liveness_launcher_notified_once` | rust `liveness_launcher_notified_once` | map | `src/core/liveness.bend` |  |
+| `liveness_progress_clears_stall` | rust `liveness_progress_clears_stall` | map | `src/core/liveness.bend` |  |
+| `liveness_nudge_before_stall` | rust `liveness_nudge_before_stall` | map | `src/core/liveness.bend` |  |
+| `liveness_timeout_explicit_optout` | rust `liveness_timeout_explicit_optout` | map | `src/core/liveness.bend` |  |
 | `lock_lease_busy_retains_exclusion` | bend | seed K +-10% | `src/core/locks.bend` |  |
 | `lock_lease_warns_before_release` | bend | seed K +-10% | `src/core/locks.bend` |  |
 | `lock_lease_grace_before_release` | bend | seed K +-10% | `src/core/locks.bend` |  |
@@ -3202,9 +3202,9 @@ Laws in LAWS.bend: 3253. bend 1093, rust 302, unported 1249, client 482, window 
 | `stamp_mid_running_newest_shows` | rust `stamp_mid_running_newest_shows` | map | `src/core/model.bend` |  |
 | `subs_step_label_mcp` | client | seed C +-10% | `src/core/subs.bend` |  |
 | `subs_step_label_say` | client | seed C +-10% | `src/core/subs.bend` |  |
-| `star_nudge_rejected_accept` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `star_nudge_rejected_decision` | unported | seed R +-10% | `src/core/json.bend` |  |
-| `star_nudge_official_repository` | bend | seed K +-10% | `src/core/star-nudge.bend` |  |
+| `star_nudge_rejected_accept` | rust `star_nudge_rejected_accept` | map | `src/core/model.bend` |  |
+| `star_nudge_rejected_decision` | rust `star_nudge_rejected_decision` | map | `src/core/json.bend` |  |
+| `star_nudge_official_repository` | rust `star_nudge_official_repository` | map | `src/core/star-nudge.bend` |  |
 | `star_nudge_saved_send_waits` | bend | seed K +-10% | `src/core/diskq.bend` |  |
 | `settings_proposal_decline_no_write` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `settings_proposal_deadline_exclusive` | bend | seed K +-10% | `src/core/settingsproposal.bend` |  |
