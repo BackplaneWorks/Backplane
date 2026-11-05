@@ -15,7 +15,10 @@ S = [json.loads(l) for l in open(args[0]) if l.strip()]
 warm = float(args[1]) if len(args) > 1 else 1800.0
 T = lambda s: s.get('T', s['t'])
 S.sort(key=T)
-tcrit = lambda n: 1.96 if n > 30 else {2:12.7,3:4.30,4:3.18,5:2.78,6:2.57,7:2.45,8:2.36,9:2.31,10:2.26,12:2.18,15:2.13,20:2.09,30:2.04}.get(n, 2.1)
+_T = {1:12.706,2:4.303,3:3.182,4:2.776,5:2.571,6:2.447,7:2.365,8:2.306,9:2.262,10:2.228,11:2.201,12:2.179,13:2.160,14:2.145,15:2.131,16:2.120,17:2.110,18:2.101,19:2.093,20:2.086,21:2.080,22:2.074,23:2.069,24:2.064,25:2.060,26:2.056,27:2.052,28:2.048,29:2.045,30:2.042}
+def tcrit(df):  # two-sided 95% Student-t quantile for df degrees of freedom (df = n-2 of the fit, or n_eff-2)
+    df = max(1, int(round(df)))
+    return _T[df] if df <= 30 else (2.021 if df <= 40 else 2.0 if df <= 60 else 1.98 if df <= 120 else 1.96)
 def ols(xs, ys):
     n = len(xs); mx = sum(xs)/n; my = sum(ys)/n; sxx = sum((x-mx)**2 for x in xs)
     if sxx == 0 or n < 3: return None
@@ -24,7 +27,7 @@ def ols(xs, ys):
     s2 = sum(r*r for r in res)/max(1, n-2)
     r1 = sum(res[i]*res[i+1] for i in range(n-1))/max(1e-12, sum(r*r for r in res)) if n > 3 else 0
     r1 = max(min(r1, 0.95), 0)
-    neff = max(3, n*(1-r1)/(1+r1))
+    neff = max(3, n*(1-r1)/(1+r1))  # the CI uses df = n_eff-2 (>= 1)
     se_naive = math.sqrt(s2/sxx); se = se_naive*math.sqrt(n/neff)
     return dict(slope=b, intercept=a, n=n, ci95=tcrit(int(neff-2))*se, ci95_naive=tcrit(n-2)*se_naive, lag1=r1, n_eff=neff)
 def theil_sen(xs, ys, boot=400):
@@ -50,9 +53,13 @@ def theil_sen(xs, ys, boot=400):
     return dict(slope=b, lo=bs[int(.025*len(bs))], hi=bs[int(.975*len(bs))-1], n=n)
 def floors(key, binS=600, warm=warm):
     bins = {}
+    tmax = max(T(s) for s in S)
+    first_bin = int(math.ceil(warm/binS))   # start at a bin boundary: no partial first bin
     for s in S:
-        if T(s) < warm or key not in s or s[key] != s[key]: continue
-        bins.setdefault(int(T(s)//binS), []).append(s)
+        k = int(T(s)//binS)
+        if k < first_bin or key not in s or s[key] != s[key]: continue
+        if (k+1)*binS > tmax + 31: continue       # the last bin must be covered to its end (30 s sampling)
+        bins.setdefault(k, []).append(s)
     pts = []
     for k, v in sorted(bins.items()):
         m = min(v, key=lambda s: s[key]); pts.append(((k*binS+binS/2)/3600, m[key]/1024, m.get('events', 0)))
@@ -147,3 +154,13 @@ if len(hops) > 1:
     if len(ev_) >= 4:
         o = ols(*zip(*ev_)); print(f"  boot RSS vs log size: {o['slope']:+.1f} MB per million events (+-{o['ci95']:.1f}) = {o['slope']*1048576/1e6:+.1f} B/event (design: 18.7)"); res['boot_rss_MB_per_Mevents'] = o['slope']
     if out: json.dump(res, open(out, 'w'), indent=1, default=lambda x: None)
+
+if len(hops) > 2 and res.get('hops'):
+    sl = [h_['slope'] for h_ in res['hops'] if h_.get('slope') is not None]
+    if len(sl) >= 3:
+        m = sum(sl)/len(sl); sd = (sum((x-m)**2 for x in sl)/(len(sl)-1))**.5; ci = tcrit(len(sl)-1)*sd/len(sl)**.5
+        res['chain_floor_slope_mean_MB_per_h'] = m; res['chain_floor_slope_ci95'] = ci
+        v = 'rising inside the hops' if (m-ci > 0 and m > 1.0) else 'no rising floor inside the hops'
+        res['chain_verdict'] = v
+        print(f"\nchain verdict (mean of the per-hop floor slopes, restarts not pooled): {m:+.2f} MB/h +-{ci:.2f} over {len(sl)} hops -> {v}")
+        if out: json.dump(res, open(out, 'w'), indent=1, default=lambda x: None)

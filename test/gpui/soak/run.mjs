@@ -7,11 +7,13 @@ import {mkdirSync,rmSync,writeFileSync,appendFileSync,existsSync,readFileSync} f
 import {execSync} from 'node:child_process';
 import {histOf,makeStandins,seedLines,startHub,killHub,client,sleep,pct,rssKb,hwmKb,nthreads,cpuTicks,fdInfo,procs,descendants,zombies,dirBytes,diskFreeKb,originOf,countLines,alive,exists} from './lib.mjs';
 import {viewClient} from './view.mjs';
+import {guard} from './lib.mjs';
 const A=Object.fromEntries(process.argv.slice(2).map(a=>{const i=a.indexOf('=');return [a.slice(0,i),a.slice(i+1)]}));
 const secs=Number(A.secs??3600),agents=Number(A.agents??20),port=Number(A.port??3830),sampleS=Number(A.sample??30),hop=Number(A.hop??1);
 const home=A.home,out=A.out,bin=A.bin,policy=A.policy||undefined,stop=A.stop??'term',writeEvery=Number(A.write_every??10);
 const capKb=Number(A.cap_kb??3.7*1024*1024);
 if(!home||!out||!bin){console.error('need bin= home= out=');process.exit(2)}
+try{guard({home,port,paths:[out,bin]})}catch(e){console.error(e.message);process.exit(3)}
 mkdirSync(out,{recursive:true});
 const proj=`${home}/../proj-${port}`;
 const log=(...a)=>{const s=`${new Date().toISOString()} hop${hop} ${a.join(' ')}`;console.log(s);appendFileSync(`${out}/run.log`,s+'\n')};
@@ -27,6 +29,7 @@ const standins=`${home}/../standins`;makeStandins(standins);
 // thread ids: from the seed (ts000..) or, for a generated log, any ThreadCreated whose id starts with ts
 const ids=[...Array(agents)].map((_,i)=>`ts${String(i).padStart(3,'0')}`);
 const before=await countLines(`${home}/events.jsonl`);
+before.lines=before.valid; // the hub's cursor counts whole lines only
 if(!before.endsWithNewline)log('note: log ends without a newline (torn tail) before start');
 const origin=originOf(home);
 const dur=secs;
@@ -40,7 +43,7 @@ let ev0=before.lines;
 const stampRe=/@(\d{13})@/;
 const wire=await client(h,{since:before.lines,origin,onFrame:(o,t,wall)=>{
  if(o.t==='delta'){W.deltas++;W.perThread.set(o.thread,(W.perThread.get(o.thread)??0)+1);const m=stampRe.exec(o.text??'');if(m)W.lag.push(wall-Number(m[1]))}}});
-let eventsTotal=before.lines;wire.onItems=its=>{eventsTotal+=its.length};
+let eventsTotal=before.lines;wire.onItems=(its,o)=>{if(o.t==='log'||o.t==='changes')eventsTotal+=its.length};
 // the join: with since=n and the right origin the hub sends only what is newer than n
 const pinger=await client(h,{since:before.lines,origin});
 let stopping=false;
@@ -54,9 +57,11 @@ const writer=client(h,{since:before.lines,origin}).then(async wc=>{while(!stoppi
 let view=null;
 if(policy){try{view=await viewClient(h,{maxPerSec:Number(A.view_hz??5),onUpdate:r=>{if(r.ok)W.view.push(r.ms);else W.viewErr++}});log(`view client open: first view ${view.openMs?.toFixed(0)} ms`)}catch(e){log('view client failed: '+e.message)}}
 // agents: one long streaming turn per thread
-let started=0;
+let started=0;let fatalEarly=null;
 for(const id of ids){const r=await wire.rpc('turn.start',{thread:id,text:'stream',msg:`soak-h${hop}-${id}`},30000);if(r?.o?.ok)started++;else log(`turn.start ${id}: ${JSON.stringify(r?.o??'timeout')}`)}
 log(`${started}/${agents} turns started`);
+if(started<agents)fatalEarly=`only ${started}/${agents} turns started`;
+for(const k of Object.keys(W))if(Array.isArray(W[k]))W[k].length=0;W.ackFail=0;W.viewErr=0;W.deltas=0;W.perThread.clear(); // the first window starts here, after setup
 
 // ---- sampling ----
 const samples=`${out}/samples.jsonl`;const t0=Date.now();let lastCpu=cpuTicks(h.pid),lastT=t0,lastEv=eventsTotal,n=0,fatal=null;
@@ -81,7 +86,7 @@ const sample=async()=>{
  appendFileSync(samples,JSON.stringify(s)+'\n');
  if(s.rss>capKb)fatal=`hub RSS ${s.rss} kB over the cap ${capKb}`;
  return s};
-let exited=null;h.exited.then(e=>{exited=e});
+let exited=null;if(policy&&!view)fatalEarly=(fatalEarly?fatalEarly+'; ':'')+'policy given but the view client did not start';h.exited.then(e=>{exited=e});
 while(Date.now()-t0<dur*1000&&!fatal&&!exited){
  await sleep(Math.max(50,sampleS*1000-((Date.now()-t0)%(sampleS*1000))));
  if(exited)break;const s=await sample();
@@ -89,7 +94,8 @@ while(Date.now()-t0<dur*1000&&!fatal&&!exited){
 }
 stopping=true;
 if(exited)fatal=fatal??`hub exited during the run: ${JSON.stringify(exited)}`;
-if(!exited)await sample();
+if(!exited&&Date.now()-lastT>=15000)await sample();
+fatal=fatal??fatalEarly;
 const hubPid=h.pid;
 // ---- end of hop ----
 view?.c.close?.();wire.close();pinger.close();
@@ -103,6 +109,7 @@ if(!exited&&stop!=='none'){
  // children must not outlive the hub (stand-ins notice a dead parent within a second)
  let left=kidsBefore;const t2=Date.now();while(Date.now()-t2<10000){left=kidsBefore.filter(p=>exists(p)&&alive(p));if(!left.length)break;await sleep(100)}
  after={stop,stopMs,orphansAfter10s:left.length,zombiesAfter:zombies(procs(),hubPid).length,hubGone:!exists(hubPid)||!alive(hubPid)};
+ if(left.length)fatal=fatal??`${left.length} agent processes outlived the hub`;
 }
 const final=await countLines(`${home}/events.jsonl`);
 const sum={hop,machine,secs,agents,fatal,bootMs:h.bootMs,bootRssKb:bootRss,eventsBefore:before.lines,eventsAtEndByWire:endEv,logLinesAfterStop:final.lines,logEndsWithNewline:final.endsWithNewline,samples:n,turnsStarted:started,endRssKb:endRss,after,policy:!!policy,ackFailTotal:null};

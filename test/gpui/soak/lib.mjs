@@ -43,7 +43,8 @@ export function seedLines(projectRoot,agents){const L=[JSON.stringify({$:'Projec
  const ids=[];for(let i=0;i<agents;i++){const id=`ts${String(i).padStart(3,'0')}`;ids.push(id);L.push(JSON.stringify({$:'ThreadCreated',id,project:'p1',title:'soak '+i,env:'local',branch:'',worktree:'',provider:'claude',model:'',at:T0+1+i}))}
  return {lines:L,ids}}
 export const originOf=home=>{const fd=openSync(`${home}/events.jsonl`,'r');try{const b=Buffer.alloc(65536);const n=readSync(fd,b,0,65536,0);const s=b.subarray(0,n).toString('utf8');const nl=s.indexOf('\n');if(nl<0)return null;return createHash('sha256').update(s.slice(0,nl)).digest('hex').slice(0,12)}finally{closeSync(fd)}};
-export function countLines(path){return new Promise((res,rej)=>{let n=0,last=10;const s=createReadStream(path);s.on('data',b=>{for(let i=0;i<b.length;i++)if(b[i]===10)n++;last=b[b.length-1]});s.on('end',()=>res({lines:n,endsWithNewline:last===10||n===0}));s.on('error',rej)})}
+// lines = newlines; valid = lines that look like a whole object ('{' first, '}' last): the hub's cursor counts those, not torn fragments
+export function countLines(path){return new Promise((res,rej)=>{let n=0,valid=0,last=10,first=-1,prev=10;const s=createReadStream(path);s.on('data',b=>{for(let i=0;i<b.length;i++){const c=b[i];if(c===10){n++;if(first===123&&prev===125)valid++;first=-1}else{if(first<0)first=c}prev=c}last=b[b.length-1]});s.on('end',()=>res({lines:n,valid,endsWithNewline:last===10||n===0}));s.on('error',rej)})}
 
 // ---- the hub as a child -------------------------------------------------------------------------------------------
 // Returns {proc,pid,home,port,host,token,url,exited:Promise,bootMs}. pid is the hub's own (hub.lock), also under a scope.
@@ -105,4 +106,9 @@ export async function client(h,{since,origin,onFrame,view=false}={}){
 }
 // Plain GET with a timeout, for /hello probes. Returns ms or NaN.
 export async function hello(h,ms=2000){const t=performance.now();try{const r=await fetch(`${h.url}/hello`,{signal:AbortSignal.timeout(ms)});await r.arrayBuffer();return r.status===200?performance.now()-t:NaN}catch{return NaN}}
+// refuses before anything is deleted or started: a live home, a protected port, or the desktop unless SOAK_ALLOW_LOCAL=1 (the desktop is off limits)
+export function guard({home,port,paths=[]}){const all=[home,...paths].filter(Boolean).map(p=>String(p));
+ for(const p of all)if(/\.backplane-bend|\/\.backplane\/|\.local\/share\/backplane|\.backplane-gpui(?!-scratch)/.test(p))throw Error('live home refused: '+p);
+ if([3787,3788,3799].includes(Number(port)))throw Error('protected port '+port);
+ if(process.env.SOAK_ALLOW_LOCAL!=='1'&&(/^\/home\/h(\/|$)/.test(process.env.HOME??'')||process.env.USER==='h'))throw Error('refusing to run on the desktop (Boat only); SOAK_ALLOW_LOCAL=1 overrides for a unit check');}
 export const jsonl=path=>rd(path).split('\n').filter(Boolean);
