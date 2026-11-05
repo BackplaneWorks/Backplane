@@ -45,4 +45,5 @@ test('one-argument identity memo: the very same object answers once, an equal co
  let calls=0;const f=a=>{calls++;return {n:a.length}};const rows=[1,2],copy=[1,2];
  const r1=ctx.memo1('own',rows,f),r2=ctx.memo1('own',rows,f),r3=ctx.memo1('own',copy,f),r4=ctx.memo1('other',rows,f);
  assert.equal(r1,r2);assert.notEqual(r3,r1);assert.deepEqual(r3,r1);assert.notEqual(r4,r1);assert.equal(calls,3);
+ ctx.memo1('own',null,()=>{calls++;return 1});ctx.memo1('own',null,()=>{calls++;return 1});assert.equal(calls,5);
 });
