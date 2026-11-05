@@ -7,7 +7,7 @@
 //! Out for Claude: images/`$skill` input, the Backplane MCP server and runtime prompt in the agent's arguments,
 //! subagents and background tasks, todo tools, the allowance stream, the legacy queue, mail provenance beyond carry,
 //! and the hub's time-driven policies (liveness, autosettle, alert/told/summary, star nudge), which belong to M4.
-pub mod bg; pub mod launch; pub mod review; pub mod tasks; pub mod codex; pub mod providers; pub mod cmds; pub mod hist; pub mod host; pub mod inputs; pub mod lines; pub mod mcp; pub mod proc; pub mod prompt; pub mod prompt_text; pub mod rules; pub mod tools; pub mod world;
+pub mod bg; pub mod oneshot; pub mod launch; pub mod review; pub mod tasks; pub mod codex; pub mod providers; pub mod cmds; pub mod hist; pub mod host; pub mod inputs; pub mod lines; pub mod mcp; pub mod proc; pub mod prompt; pub mod prompt_text; pub mod rules; pub mod tools; pub mod world;
 #[cfg(test)] mod tests;
 #[cfg(test)] mod laws;
 
@@ -45,6 +45,7 @@ pub enum Cmd {
 
 /// The hub's one agent manager, for hub-side callers that were not handed it (commands, bots).
 static HANDLE: std::sync::OnceLock<Arc<Agents>> = std::sync::OnceLock::new();
+pub use oneshot::{summarizer, Summarizer};
 pub fn handle() -> Option<Arc<Agents>> { HANDLE.get().cloned() }
 
 pub struct Agents { pub hub: Arc<Hub>, pub cli: Cli, pub host: host::HostInfo, world: Mutex<World>, actors: StdMutex<HashMap<String, mpsc::Sender<Cmd>>>, pub stats: Stats, n: AtomicU64,
@@ -432,7 +433,8 @@ impl Actor {
                 if self.live.len() + d.len() <= LIVE_CAP { self.live.push_str(d) }
                 let _ = self.ag.hub.live_delta(&self.th, d).await;
             }
-            for e in fx.events {
+            for mut e in fx.events {
+                if e["$"] == "TurnChanged" && e["state"] != "running" { e["_end"] = json!(true) }
                 if e["$"] == "ActivityLogged" && e["tone"] == "tool" { if let Some(a) = e["act"].as_str() { self.jobs_step(a) } }
                 if e["$"] == "TurnChanged" && e["state"] != "running" {
                     self.cx.running = false; ended = true; clear = true; self.jobs_end();
@@ -494,9 +496,11 @@ impl Actor {
     }
 
     /// The turn ends in an error row and a failed turn (Hub.spawned.fail, Hub.agent_gone).
-    async fn fail(&mut self, text: String, kind: &str, act: &str) {
+    async fn fail(&mut self, text: String, kind: &str, act: &str) { self.fail_k(text, kind, act, false).await }
+    /// `ended`: the failure is an agent-gone end (Bend runs Ended.out for it); a spawn failure is not marked.
+    async fn fail_k(&mut self, text: String, kind: &str, act: &str, ended: bool) {
         let (now, th) = (now_s(), self.th.clone());
-        let mut ev = vec![json!({"$":"ActivityLogged","thread":th,"act":act,"tone":"error","kind":kind,"summary":text,"at":now}), json!({"$":"TurnChanged","thread":th,"state":"failed","at":now})];
+        let mut ev = vec![json!({"$":"ActivityLogged","thread":th,"act":act,"tone":"error","kind":kind,"summary":text,"at":now}), json!({"$":"TurnChanged","thread":th,"state":"failed","at":now})]; if ended { ev[1]["_end"] = json!(true) };
         if !self.last_user.is_empty() { ev.push(set(format!("failed.{}", self.last_user), "1".into(), now)) }
         self.live_end().await; self.commit(ev).await; self.cx.running = false; self.jobs_end();
     }
@@ -570,7 +574,8 @@ impl Actor {
                 if self.live.len() + d.len() <= LIVE_CAP { self.live.push_str(d) }
                 let _ = self.ag.hub.live_delta(&self.th, d).await;
             }
-            for e in fx.events {
+            for mut e in fx.events {
+                if e["$"] == "TurnChanged" && e["state"] != "running" { e["_end"] = json!(true) } // Ended.out runs for a turn an agent line ends (state's policy writes the end records and removes the marker)
                 if e["$"] == "MessagePosted" && e["role"] == "assistant" && !e["msg"].as_str().unwrap_or("").ends_with(":before") {
                     // Steer.whole: after a reply posted ahead, only what streamed after the cut is posted
                     let mut e = e; let text = e["text"].as_str().unwrap_or("").to_string();
@@ -614,7 +619,7 @@ impl Actor {
         self.live_proc = None; self.ag.stats.procs_exited.fetch_add(1, Relaxed);
         if self.cx.running {
             let code = e.code.or(e.signal.map(|s| 128 + s)).unwrap_or(1);
-            self.fail(match self.driver.as_ref().and_then(|d| d.exit_why(code)) { Some(w) => rules::exit_say(&w, code, &e.stderr), None => rules::exit_why(code) }, "exit", &hub_id("x", now_s(), 0)).await;
+            self.fail_k(match self.driver.as_ref().and_then(|d| d.exit_why(code)) { Some(w) => rules::exit_say(&w, code, &e.stderr), None => rules::exit_why(code) }, "exit", &hub_id("x", now_s(), 0), true).await;
         }
         self.cmds = cmds::Cmds::new(); self.wait.clear();
         let live = { let w = self.ag.world().await; w.threads.get(&self.th).map_or(false, |t| !t.archived && !t.deleted) };
