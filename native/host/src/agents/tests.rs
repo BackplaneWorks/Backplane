@@ -795,3 +795,18 @@ const TESTCLI: &str = "#!/bin/sh\nread hello\necho '{\"q\":1}'\nread ans\necho \
     assert!(ev.iter().any(|e| turn_is(e, "running") && e["thread"] == T1), "the parent's turn started with the result"); assert_eq!(ev.iter().filter(|e| is(e, "MessagePosted") && e["msg"] == format!("t:{child}:td-k1")).count(), 1, "the message is not posted twice");
     ag.shutdown();
 }
+
+#[tokio::test(flavor = "multi_thread")] async fn cancelling_a_task_does_not_wake_the_parent_live() {
+    let (hub, ag, _sd) = codex_start("cn1").await;
+    let (_, r) = ag.tool_delegate(T1, &json!({"prompt":"hang here"})).await; let task = r["taskId"].as_str().unwrap().to_string(); tokio::time::sleep(Duration::from_millis(500)).await;
+    let n = len(&hub).await; let (ok, _) = ag.tool_task_cancel(T1, &json!({"taskId":task})).await; assert!(ok); tokio::time::sleep(Duration::from_millis(2500)).await;
+    let ev = log_from(&hub, n).await; assert!(!ev.iter().any(|e| is(e, "MessagePosted") && e["thread"] == T1 && e["role"] == "system"), "the parent that cancelled hears nothing live: {ev:?}");
+    assert!(!ev.iter().any(|e| is(e, "TaskDelivered")), "undelivered until the next start's repair"); ag.shutdown();
+}
+#[tokio::test(flavor = "multi_thread")] async fn a_cut_child_that_will_not_carry_on_ends_its_task_at_recovery() {
+    let sd = dir("rc-bin"); script(&sd, "codex", CODEX_STANDIN); let child = "t1700001001-1";
+    let extra = format!("{{\"$\":\"SettingSet\",\"key\":\"restart.continue\",\"value\":\"off\",\"at\":1700000009}}\n{{\"$\":\"TaskDelegated\",\"task\":\"k1\",\"parent\":\"{T1}\",\"child\":\"{child}\",\"depth\":1,\"provider\":\"codex\",\"model\":\"\",\"at\":1700000010}}\n{{\"$\":\"TaskStateSet\",\"task\":\"k1\",\"state\":\"running\",\"summary\":\"\",\"at\":1700000011}}\n{{\"$\":\"MessagePosted\",\"thread\":\"{child}\",\"msg\":\"m1\",\"role\":\"user\",\"text\":\"work\",\"at\":1700000012}}\n{{\"$\":\"TurnChanged\",\"thread\":\"{child}\",\"state\":\"running\",\"at\":1700000013}}\n");
+    let (hub, ag, _h, _w) = start("rc", |w| base_log(w, 2, &extra).replace("\"provider\":\"claude\"", "\"provider\":\"codex\""), |_| Cli::standin(&sd)).await;
+    let ev = until(&hub, 0, 20, |ev| ev.iter().any(|e| is(e, "TaskDelivered"))).await;
+    assert!(ev.iter().any(|e| is(e, "TaskStateSet") && e["state"] == "failed"), "{ev:?}"); assert!(ev.iter().any(|e| is(e, "MessagePosted") && e["thread"] == T1 && e["text"].as_str().map_or(false, |t| t.contains("failed")))); ag.shutdown();
+}

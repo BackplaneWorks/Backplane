@@ -24,7 +24,7 @@ impl Tk { pub fn terminal(&self) -> bool { matches!(self.state.as_str(), "done" 
 pub struct Ask { pub thread: String, pub kind: String, pub tool: String, pub detail: String, pub options: String }
 
 #[derive(Default)]
-pub struct World { pub td_msgs: std::collections::HashSet<String>, pub launched: HashMap<String, (String, bool)>, pub projects: HashMap<String, (String, bool)>, pub tasks: HashMap<String, Tk>, pub deadlines: std::collections::HashSet<String>, pub asks: HashMap<String, Ask>, pub sessions: std::collections::HashSet<(String, String)>, pub threads: HashMap<String, T>, pub roots: HashMap<String, String>, pub st: HashMap<String, String>, seen: usize }
+pub struct World { pub queued: HashMap<String, Vec<String>>, pub parents: HashMap<String, String>, pub td_msgs: std::collections::HashSet<String>, pub launched: HashMap<String, (String, bool)>, pub projects: HashMap<String, (String, bool)>, pub tasks: HashMap<String, Tk>, pub deadlines: std::collections::HashSet<String>, pub asks: HashMap<String, Ask>, pub sessions: std::collections::HashSet<(String, String)>, pub threads: HashMap<String, T>, pub roots: HashMap<String, String>, pub st: HashMap<String, String>, seen: usize }
 
 const KEYS: &[&str] = &["watch.", "thread.parent.", "bg.", "wait.", "work.timeout.seconds", "allowance.claude", "effort.", "buy.", "kicad.ipc", "order.enabled", "agent.lang", "tz.machine", "agent.thinking", "restart.continue", "tok.epoch", "tok.recount", "tok.basis.", "turn.speed.", "turn.models.", "limit.claude.", "ride.", "agy.", "session."];
 fn tracked(k: &str) -> bool { KEYS.iter().any(|p| k == *p || (p.ends_with('.') && k.starts_with(p))) || k.starts_with("usage.") || k.starts_with("tok.key.") }
@@ -54,12 +54,16 @@ impl World {
 
     pub fn apply(&mut self, line: &str) {
         let Some(t) = line.strip_prefix("{\"$\":\"").and_then(|r| r.split('"').next()) else { return };
-        const READ: [&str; 27] = ["ProjectRemoved", "ThreadLaunched", "TaskDelegated", "TaskStateSet", "TaskDelivered", "WorkSet", "AskOpened", "AskClosed", "ThreadRenamed", "ProjectCreated", "ThreadCreated", "WorktreeSet", "ProviderSet", "ModesSet", "SessionSet", "TurnChanged", "MessagePosted", "ActivityLogged", "UsageSet", "SettingSet", "TurnUsage", "ThreadArchived", "ThreadDeleted", "ThreadForked", "QueueTaken", "TurnQueued", "ThreadWoke"];
+        const READ: [&str; 32] = ["TurnQueued", "QueueTaken", "QueueRemoved", "QueueTakenOne", "ThreadParentSet", "ProjectRemoved", "ThreadLaunched", "TaskDelegated", "TaskStateSet", "TaskDelivered", "WorkSet", "AskOpened", "AskClosed", "ThreadRenamed", "ProjectCreated", "ThreadCreated", "WorktreeSet", "ProviderSet", "ModesSet", "SessionSet", "TurnChanged", "MessagePosted", "ActivityLogged", "UsageSet", "SettingSet", "TurnUsage", "ThreadArchived", "ThreadDeleted", "ThreadForked", "QueueTaken", "TurnQueued", "ThreadWoke"];
         if !READ.contains(&t) { return }
         let Ok(v) = serde_json::from_str::<Value>(line) else { return };
         let g = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").to_string();
         match t {
             "ProjectCreated" => { self.roots.insert(g("id"), g("root")); self.projects.insert(g("id"), (g("title"), false)); }
+            "TurnQueued" => self.queued.entry(g("thread")).or_default().push(g("msg")),
+            "QueueTaken" => { self.queued.remove(&g("thread")); }
+            "QueueRemoved" | "QueueTakenOne" => if let Some(q) = self.queued.get_mut(&g("thread")) { let m = g("msg"); q.retain(|x| *x != m) },
+            "ThreadParentSet" => { self.parents.insert(g("id"), g("parent")); }
             "ProjectRemoved" => if let Some(p) = self.projects.get_mut(&g("id")) { p.1 = true },
             "ThreadLaunched" => { self.launched.insert(g("id"), (g("by"), v.get("report").and_then(Value::as_bool).unwrap_or(true))); }
             "TaskDelegated" => { self.tasks.insert(g("task"), Tk { parent: g("parent"), child: g("child"), depth: v.get("depth").and_then(Value::as_u64).unwrap_or(0), state: "queued".into(), provider: g("provider"), model: g("model"), ..Default::default() }); }
@@ -109,8 +113,18 @@ impl World {
         let n = name.trim().to_lowercase(); if n.is_empty() { return None }
         self.projects.iter().find(|(id, (title, removed))| !*removed && (id.to_lowercase() == n || title.to_lowercase() == n)).map(|(id, _)| id.clone())
     }
+    /// Queue.waiting: a real message waits (handed-over context alone never starts a turn).
+    pub fn queue_waiting(&self, th: &str) -> bool { self.queued.get(th).map_or(false, |q| q.iter().any(|m| !m.starts_with("handoff:"))) }
+    /// Tree.raw: a thread's parent as saved (the setting thread.parent.<id> overrides; empty is detached).
+    pub fn tree_raw(&self, id: &str) -> String { let k = format!("thread.parent.{id}"); if self.st.contains_key(&k) { self.st[&k].clone() } else { self.parents.get(id).cloned().unwrap_or_default() } }
+    /// Tree.chain(63, raw(parent), parent): the launcher's ancestry ends within 63 steps and never returns to it.
+    pub fn tree_chain_ok(&self, launcher: &str) -> bool {
+        let mut cur = self.tree_raw(launcher);
+        for _ in 0..63 { if cur.is_empty() { return true } if cur == launcher { return false } cur = self.tree_raw(&cur) }
+        cur.is_empty()
+    }
     /// Work.ready: the thread has no running work of its own (background or watched rows, tasks it delegated that still run). (A queued message also holds it in Bend; the Rust agents queue nothing.)
-    pub fn ready(&self, th: &str) -> bool { self.work(th).0 == 0 && !self.tasks.values().any(|k| k.parent == th && !k.terminal()) }
+    pub fn ready(&self, th: &str) -> bool { self.work(th).0 == 0 && !self.queue_waiting(th) && !self.tasks.values().any(|k| k.parent == th && !k.terminal()) }
     pub fn cwd(&self, th: &str) -> String {
         let Some(t) = self.threads.get(th) else { return String::new() };
         if !t.worktree.is_empty() { t.worktree.clone() } else { self.roots.get(&t.project).cloned().unwrap_or_default() }

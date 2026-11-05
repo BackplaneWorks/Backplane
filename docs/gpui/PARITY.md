@@ -113,6 +113,10 @@ Rust hub: 1 missing, 4 partial. GPUI desktop: 0 missing, 0 partial.
 - Threads and timeline / Token and context stats, rate limits, usage page: hub partial
 - MCP tools / viewer_show: hub partial
 - Viewers / KiStack skills in every thread, $ list: hub partial
+- Threads and timeline / Wt.name (a worktree thread's first message names its branch and folder, hub.bend Wt.name/Name.first): hub missing (not done in turn.start or Agents::start_queued)
+- Threads and timeline / Keyring.say (Turn.close adds a note when the keyring is locked): hub missing
+- Agents / thread_launch: the launcher's reports when a launched thread's turn ends (hub.bend Launch.tell / Lr.*): hub missing; the thread runs in the project folder with no worktree (Hub.new.env "auto"), so it edits the same files as its launcher; use commands' worktree spawn once it lands
+- Agents / omp prompt vault-masked (Vx.mask) and the agents' stderr tail beyond Exit.stderr: hub partial
 
 ### core (bend)
 

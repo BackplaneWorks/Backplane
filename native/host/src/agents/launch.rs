@@ -19,6 +19,7 @@ impl Agents {
         let Some(proj) = proj.filter(|p| !p.is_empty()) else { return fail("name an existing project (project_list shows them)") };
         let parent = if a.get("subthread").and_then(Value::as_bool).unwrap_or(true) && caller.is_some() { thread.to_string() } else { String::new() };
         if !parent.is_empty() { let ok = caller.as_ref().map_or(false, |c| !c.archived && !c.deleted && c.project == proj); if !ok { return fail("A subthread needs its launcher in the same project (maximum depth 64). Use subthread false only for an explicitly requested top-level conversation.") } }
+        if !parent.is_empty() && !self.world().await.tree_chain_ok(&parent) { return fail("A subthread needs its launcher in the same project (maximum depth 64). Use subthread false only for an explicitly requested top-level conversation.") } // ST.Tree.chain
         if prompt.trim().is_empty() { return fail("a prompt is needed") }
         let provider = if s(a, "provider").is_empty() { if default_prov.is_empty() { "claude".to_string() } else { default_prov } } else { s(a, "provider").to_string() };
         let model = if !s(a, "model").is_empty() { s(a, "model").to_string() } else if s(a, "provider").is_empty() { default_model } else { String::new() };
@@ -34,7 +35,7 @@ impl Agents {
         ev.push(json!({"$":"SettingSet","key":format!("autosettle.seed.{th}"),"value":mid,"at":now}));
         self.commit_events(ev).await;
         if let Err(e) = self.deliver_as("user", &th, &mid, &prompt, None, vec![]).await { return fail(&format!("could not start the thread: {e}")) }
-        let note = if report && !by.is_empty() { "Its reports will come to you as messages when its turn ends or it asks the person something. End your turn instead of polling." } else { "" };
+        let note = "The thread was started. Its reports are NOT delivered back to you by this hub yet: check it with thread_read / thread_wait when you need its result.";
         (true, json!({"threadId":th,"parent":parent,"title":title,"provider":provider,"state":"started","note":note}))
     }
 }
