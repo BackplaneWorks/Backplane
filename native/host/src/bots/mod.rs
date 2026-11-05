@@ -4,6 +4,7 @@
 //! A message into a bot's thread goes through `Inbox` (the agents module's `deliver`).
 pub mod clock;
 pub mod reply;
+pub mod routines;
 pub mod rpc;
 pub mod world;
 pub use rpc::{Bots, Inbox};

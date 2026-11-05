@@ -64,7 +64,7 @@ pub fn safe_id(id: &str) -> bool { !id.is_empty() && id.len() <= 80 && id.chars(
 
 impl Bots {
     /// Folds the log once, off the runtime's workers, then registers the `bots.*` requests.
-    pub async fn start(hub: Arc<Hub>, agents: Arc<Agents>) -> Arc<Bots> { Bots::start_with(hub, Arc::new(agents)).await }
+    pub async fn start(hub: Arc<Hub>, agents: Arc<Agents>) -> Arc<Bots> { let b = Bots::start_with(hub, Arc::new(agents)).await; b.start_ticker(); b }
     pub async fn start_with(hub: Arc<Hub>, inbox: Arc<dyn Inbox>) -> Arc<Bots> {
         let store = hub.store.clone();
         let w = tokio::task::spawn_blocking(move || { let mut w = World::default(); if let Err(e) = w.sync(&store) { eprintln!("bots: reading the log: {e:#}") } w }).await.unwrap_or_default();
@@ -85,6 +85,9 @@ impl Bots {
         g
     }
     /// B.Hub.id(prefix, now, seq): seq is the log's length; one request at a time makes it unique within a prefix
+    pub(super) fn hub_id(&self, prefix: &str, now: u64) -> String { self.id(prefix, now) }
+    pub(super) async fn commit_reply_pub(&self, id: &Value, events: Vec<Value>) -> Vec<Value> { self.commit_reply(id, events).await }
+    pub(super) async fn inbox_deliver(&self, k: &super::routines::Wake) -> Result<(), String> { self.inbox.deliver(&k.thread, &k.msg, &k.text, k.origin.clone()).await }
     fn id(&self, prefix: &str, now: u64) -> String { hub_id(prefix, now, self.hub.store.len() as u64) }
 
     async fn commit_reply(&self, id: &Value, events: Vec<Value>) -> Vec<Value> {
@@ -228,7 +231,7 @@ const BACKUP_SH: &str = "set -e; d=\"$1/backups/uber-$2-$3\"; mkdir -p \"$d\"; i
 
 struct Rpc(Arc<Bots>);
 impl RpcHandler for Rpc {
-    fn methods(&self) -> &'static [&'static str] { &["bots.create", "bots.edit", "bots.delete", "bots.say", "bots.room", "bots.room_delete", "bots.post", "bots.remember", "bots.forget", "bots.space", "bots.uber"] }
+    fn methods(&self) -> &'static [&'static str] { &["bots.create", "bots.edit", "bots.delete", "bots.say", "bots.room", "bots.room_delete", "bots.post", "bots.remember", "bots.forget", "bots.space", "bots.uber", "bots.routine", "bots.routine_delete", "bots.routine_run"] }
     fn call<'a>(&'a self, _hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let b = &self.0;
@@ -244,6 +247,9 @@ impl RpcHandler for Rpc {
                 "bots.remember" => { let _w = b.world().await; b.commit_reply(id, vec![json!({"$":"MemorySaved","bot":gs(p, "bot"),"key":mem_key(gs(p, "key")),"kind":mem_kind(gs(p, "kind")),"text":gs(p, "text"),"tags":gs(p, "tags"),"at":now_s()})]).await }
                 "bots.space" => { let text = space_msg(gs(p, "action"), gs(p, "value")); b.say(id, gs(p, "bot"), &text, "", "").await }
                 "bots.uber" => b.uber(id, gs(p, "bot")).await,
+                "bots.routine" => b.routine(id, p).await,
+                "bots.routine_delete" => { let _w = b.world().await; b.commit_reply(id, vec![json!({"$":"RoutineDeleted","id":gs(p, "routine"),"at":now_s()})]).await }
+                "bots.routine_run" => b.routine_run(id, gs(p, "routine")).await,
                 _ => vec![err(id, "unknown bots request")],
             }
         })
