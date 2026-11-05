@@ -122,7 +122,8 @@ fn shape(ev: &[Value]) -> Vec<String> { ev.iter().map(norm).collect() }
     assert!(log_from(&hub, 0).await.iter().all(|e| !turn_is(e, "interrupted")), "interrupt_idle_nothing");
     let from = len(&hub).await;
     rpc(&hub, "turn.start", json!({"thread":T1,"text":"zqlong"})).await;
-    until(&hub, from, 20, |ev| ev.iter().any(|e| is(e, "MessagePosted") && e["role"] == "assistant")).await; tokio::time::sleep(Duration::from_millis(300)).await; // a block just ended, so the next is mid-stream (not a wall-clock guess, which a loaded runner breaks): mid-cycle: the stand-in ends a block every half second, and a text just posted leaves nothing streamed
+    until(&hub, from, 20, |ev| ev.iter().any(|e| is(e, "MessagePosted") && e["role"] == "assistant")).await; // a block ended; text streams after it
+    let d0 = ag.stats.deltas.load(Relaxed); let end = Instant::now() + Duration::from_secs(10); while ag.stats.deltas.load(Relaxed) == d0 && Instant::now() < end { tokio::time::sleep(Duration::from_millis(10)).await } // not a wall-clock guess: interrupt once new text has streamed
     assert_eq!(rpc(&hub, "turn.interrupt", json!({"thread":T1})).await["ok"], true);
     let ev = until(&hub, from, 5, |ev| ev.iter().any(|e| is(e, "SettingSet") && e["key"] == "provider.resume.t1700000001-2" && ev.iter().any(|x| turn_is(x, "interrupted")))).await;
     let c = core(&ev, T1); let sh = shape(&c);
@@ -193,8 +194,8 @@ const DEAF: &str = "#!/bin/sh\nsleep 600\n";
 }
 #[tokio::test(flavor = "multi_thread")] async fn other_providers_are_refused_not_dropped() {
     let sd = dir("o-bin"); script(&sd, "claude", EXITS);
-    let (hub, ag, _h, _w) = start("o", |w| base_log(w, 1, "").replace("\"provider\":\"claude\"", "\"provider\":\"grok\""), |_| Cli::standin(&sd)).await; let n = len(&hub).await;
-    let r = rpc(&hub, "turn.start", json!({"thread":T1,"text":"go"})).await; assert_eq!(r["ok"], false); assert!(r["error"].as_str().unwrap().contains("grok"));
+    let (hub, ag, _h, _w) = start("o", |w| base_log(w, 1, "").replace("\"provider\":\"claude\"", "\"provider\":\"nonesuch\""), |_| Cli::standin(&sd)).await; let n = len(&hub).await;
+    let r = rpc(&hub, "turn.start", json!({"thread":T1,"text":"go"})).await; assert_eq!(r["ok"], false); assert!(r["error"].as_str().unwrap().contains("nonesuch"));
     assert_eq!(len(&hub).await, n, "nothing is written for a message nobody can run");
     assert_eq!(rpc(&hub, "turn.start", json!({"thread":"nope","text":"go"})).await["error"], "unknown thread");
     ag.shutdown();
@@ -701,4 +702,35 @@ const TESTCLI: &str = "#!/bin/sh\nread hello\necho '{\"q\":1}'\nread ans\necho \
     let ev = until(&hub, from, 20, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await;
     assert!(ev.iter().any(|e| is(e, "MessagePosted") && e["text"] == "answered accept"), "the answer reached the process");
     tokio::time::sleep(Duration::from_millis(500)).await; assert_eq!(ag.stats.procs_exited.load(Relaxed), 1, "the process ends with its turn (ends_on_turn_end)"); ag.shutdown();
+}
+
+// ---- seams for the commands lane: agents.stop, agents.start_queued, agents.steer ----
+#[tokio::test(flavor = "multi_thread")] async fn steer_codex_restarts() { // law steer_codex_restarts: a running Codex turn stops and starts again with the text
+    let (hub, ag, sd) = codex_start("st1").await; let from = len(&hub).await;
+    rpc(&hub, "turn.start", json!({"thread":T1,"text":"hang first"})).await; tokio::time::sleep(Duration::from_millis(500)).await;
+    let pid: u32 = std::fs::read_to_string(sd.join("pid")).unwrap().trim().parse().unwrap();
+    assert_eq!(rpc(&hub, "agents.steer", json!({"thread":T1,"text":"steered text"})).await["ok"], true);
+    let ev = until(&hub, from, 20, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await;
+    assert!(ev.iter().any(|e| is(e, "ActivityLogged") && e["kind"] == "steer"), "{ev:?}");
+    assert!(ev.iter().any(|e| is(e, "MessagePosted") && e["role"] == "assistant" && e["text"].as_str().unwrap().contains("steered text")));
+    let end = Instant::now() + Duration::from_secs(8); while proc::alive(pid) && Instant::now() < end { tokio::time::sleep(Duration::from_millis(100)).await }
+    assert!(!proc::alive(pid), "the first process ended"); assert_eq!(ag.stats.procs_spawned.load(Relaxed), 2); ag.shutdown();
+}
+#[tokio::test(flavor = "multi_thread")] async fn start_queued_runs_the_text_as_one_turn() {
+    let (hub, ag, _sd) = codex_start("sq1").await; let from = len(&hub).await;
+    assert_eq!(rpc(&hub, "agents.start_queued", json!({"thread":T1,"text":"queued words"})).await["ok"], true);
+    let ev = until(&hub, from, 20, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await;
+    assert!(ev.iter().any(|e| is(e, "QueueTaken")) && ev.iter().any(|e| turn_is(e, "running")));
+    assert!(ev.iter().any(|e| is(e, "MessagePosted") && e["text"].as_str().map_or(false, |t| t.contains("queued words"))));
+    ag.shutdown();
+}
+#[tokio::test(flavor = "multi_thread")] async fn agents_stop_ends_an_idle_process_and_writes_nothing() {
+    let sd = dir("as-bin"); perf_standin(&sd, 30);
+    let (hub, ag, _h, _w) = start("as", |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await;
+    rpc(&hub, "turn.start", json!({"thread":T1,"text":"zqshort hi"})).await;
+    until(&hub, 0, 30, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await; tokio::time::sleep(Duration::from_millis(300)).await;
+    let n = len(&hub).await; assert_eq!(ag.stats.procs_exited.load(Relaxed), 0, "claude's process stays between turns");
+    assert_eq!(rpc(&hub, "agents.stop", json!({"thread":T1})).await["ok"], true);
+    tokio::time::sleep(Duration::from_millis(800)).await; assert_eq!(len(&hub).await, n, "no events");
+    assert_eq!(ag.stats.procs_exited.load(Relaxed), 1, "the idle process was ended and reaped"); ag.shutdown();
 }

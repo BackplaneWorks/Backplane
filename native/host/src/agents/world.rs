@@ -20,7 +20,7 @@ pub struct Ask { pub thread: String, pub kind: String, pub tool: String, pub det
 #[derive(Default)]
 pub struct World { pub deadlines: std::collections::HashSet<String>, pub asks: HashMap<String, Ask>, pub sessions: std::collections::HashSet<(String, String)>, pub threads: HashMap<String, T>, pub roots: HashMap<String, String>, pub st: HashMap<String, String>, seen: usize }
 
-const KEYS: &[&str] = &["watch.", "thread.parent.", "bg.", "wait.", "work.timeout.seconds", "allowance.claude", "effort.", "buy.", "kicad.ipc", "order.enabled", "agent.lang", "tz.machine", "agent.thinking", "restart.continue", "tok.epoch", "tok.recount", "tok.basis.", "turn.speed.", "turn.models.", "limit.claude.", "ride.", "agy."];
+const KEYS: &[&str] = &["watch.", "thread.parent.", "bg.", "wait.", "work.timeout.seconds", "allowance.claude", "effort.", "buy.", "kicad.ipc", "order.enabled", "agent.lang", "tz.machine", "agent.thinking", "restart.continue", "tok.epoch", "tok.recount", "tok.basis.", "turn.speed.", "turn.models.", "limit.claude.", "ride.", "agy.", "session."];
 fn tracked(k: &str) -> bool { KEYS.iter().any(|p| k == *p || (p.ends_with('.') && k.starts_with(p))) || k.starts_with("usage.") || k.starts_with("tok.key.") }
 
 pub const CARRY_TEXT: &str = "Backplane restarted while you were working. Continue where you left off.";
@@ -56,7 +56,14 @@ impl World {
             "ProjectCreated" => { self.roots.insert(g("id"), g("root")); }
             "ThreadCreated" => { self.threads.insert(g("id"), T { project: g("project"), title: g("title"), provider: g("provider"), model: g("model"), worktree: g("worktree"), runtime: "full-access".into(), interaction: "default".into(), turn: "idle".into(), ..Default::default() }); }
             "WorktreeSet" => if let Some(x) = self.threads.get_mut(&g("id")) { x.worktree = g("worktree") },
-            "ProviderSet" => if let Some(x) = self.threads.get_mut(&g("id")) { x.provider = g("provider"); x.model = g("model") },
+            "ProviderSet" => { // State.switch.n: the old provider's session is kept as `session.<th>.<old>` and the new provider's is taken
+                let th = g("id");
+                if let Some(x) = self.threads.get_mut(&th) {
+                    self.st.insert(format!("session.{th}.{}", x.provider), x.session.clone());
+                    x.session = self.st.get(&format!("session.{th}.{}", g("provider"))).cloned().unwrap_or_default();
+                    x.provider = g("provider"); x.model = g("model");
+                }
+            }
             "ModesSet" => if let Some(x) = self.threads.get_mut(&g("id")) { x.runtime = g("runtime"); x.interaction = g("interaction"); x.model = g("model") },
             "SessionSet" => if let Some(x) = self.threads.get_mut(&g("id")) { x.session = g("session") },
             "ThreadRenamed" => if let Some(x) = self.threads.get_mut(&g("id")) { x.title = g("title") },
@@ -112,6 +119,17 @@ impl World {
 mod tests {
     use super::*;
     fn th(turn: &str) -> T { T { turn: turn.into(), provider: "claude".into(), ..Default::default() } }
+    #[test] fn a_provider_switch_keeps_each_providers_session_a_b_a() { // State.switch.n
+        let mut w = World::default();
+        for l in [r#"{"$":"ThreadCreated","id":"t","project":"p","title":"T","provider":"claude","model":"","at":1}"#, r#"{"$":"SessionSet","id":"t","session":"S-claude","at":2}"#,
+                  r#"{"$":"ProviderSet","id":"t","provider":"codex","model":"m","at":3}"#] { w.apply(l) }
+        assert_eq!(w.threads["t"].session, "", "a provider never seen has no session: the new one starts fresh");
+        w.apply(r#"{"$":"SessionSet","id":"t","session":"S-codex","at":4}"#);
+        w.apply(r#"{"$":"ProviderSet","id":"t","provider":"claude","model":"","at":5}"#);
+        assert_eq!((w.threads["t"].provider.as_str(), w.threads["t"].session.as_str()), ("claude", "S-claude"), "coming back resumes the first session");
+        w.apply(r#"{"$":"ProviderSet","id":"t","provider":"codex","model":"m","at":6}"#);
+        assert_eq!(w.threads["t"].session, "S-codex"); assert_eq!(w.setting("session.t.claude"), "S-claude");
+    }
     #[test] fn carry_continues() { assert!(carry_will(&th("running"), "")); assert!(carry_will(&th("running"), "on")); }
     #[test] fn carry_leaves_idle() { for s in ["completed", "idle", "failed", "interrupted"] { assert!(!carry_will(&th(s), "on")) } }
     #[test] fn carry_off_nothing() { assert!(!carry_will(&th("running"), "off")); }
