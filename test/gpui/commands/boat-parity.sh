@@ -16,7 +16,7 @@ bun test/gpui/parity/compare.mjs $O/recJ $O/recJ2 > $O/self-diff.txt 2>&1; tail 
 cat $O/build.txt
 HUB=${CARGO_TARGET_DIR:-$PWD/native/host/target}/release/backplane-hub; [ -x $HUB ] || exit 3
 # one job for everything (a start is scarce): the crate's tests too, before the replay
-(cd native/host && cargo test --bin backplane-hub 2>&1 | grep -E "^error|test result|FAILED|panicked" | head -20) > $O/test.txt 2>&1; cat $O/test.txt
+(cd native/host && cargo test --bin backplane-hub commands:: 2>&1 | grep -E "^error|test result|FAILED|panicked" | head -20) > $O/test.txt 2>&1; cat $O/test.txt
 PARITY_HUB_ARGS="--policy-bin $PWD/pstage/bp-policy-page --window-bin $PWD/pstage/window --version-string 0.1.0-dev --commit ${COMMIT:-0000000}" \
   systemd-run --user --scope -q -p MemoryMax=3700M -p MemorySwapMax=0 -- bun test/gpui/parity/replay.mjs --rec $O/recJ --bin $HUB --port 3828 --out $O/replay --all > $O/replay-diff.txt 2>&1
 grep -E "differences|identical" $O/replay-diff.txt; tail -60 $O/replay-diff.txt
