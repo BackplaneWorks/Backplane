@@ -210,7 +210,7 @@ impl Render for Backplane {
             let word = skill.get("word").or_else(|| skill.get("name")).and_then(Value::as_str).unwrap_or("").to_string();
             let label = skill.get("label").and_then(Value::as_str).unwrap_or(&word).to_string();
             let desc = ["text", "hint", "desc", "detail", "about"].iter().find_map(|k| skill.get(*k).and_then(Value::as_str)).unwrap_or("").to_string();
-            if self.popup { ctl.push(CtlEntry { id: format!("skill:{word}"), label: label.clone(), ctl: Ctl::Skill(word.clone()) }); }
+            ctl.push(CtlEntry { id: format!("skill:{word}"), label: label.clone(), ctl: Ctl::Skill(word.clone()) });
             popup = popup.child(div().id(("skill", index)).flex().gap_3().px_3().py_1().cursor_pointer().hover(|s| s.bg(c("raise")))
                 .child(div().font_weight(FontWeight::BOLD).flex_shrink_0().child(label)).child(div().flex_1().overflow_hidden().whitespace_nowrap().text_color(c("dim")).child(desc))
                 .on_click(cx.listener(move |this, _, window, cx| {

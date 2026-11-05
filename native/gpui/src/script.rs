@@ -235,7 +235,7 @@ impl Backplane {
             Ctl::Home(pid) => { let _ = self.tx.try_send(Command::Action("select".into(), format!("project-home-{pid}"))); "view.action select project-home".into() }
             Ctl::Fold(v) => { let _ = self.tx.try_send(Command::Action("fold".into(), v.clone())); "view.action fold".into() }
             Ctl::Send => { self.do_send(cx); self.ui_epoch += 1; "send".into() }
-            Ctl::Skill(w) => { let _ = self.tx.try_send(Command::Action("skill".into(), w.clone())); self.set_text(format!("{w} "), cx); self.popup = false; self.ui_epoch += 1; "view.action skill".into() }
+            Ctl::Skill(w) => { let _ = self.tx.try_send(Command::Action("skill".into(), w.clone())); self.await_completion(cx); self.ui_epoch += 1; "view.action skill".into() }
             Ctl::Page(v) => { let _ = self.tx.try_send(Command::Page(v.clone())); "view.action native-sidebar-page".into() }
             Ctl::Node(a, p) => { let _ = self.tx.try_send(Command::Action(a.clone(), p.clone())); format!("view.action {a}") }
         }
