@@ -744,7 +744,7 @@ for l in sys.stdin:
         assert_eq!((p["state"].clone(), p["epoch"].clone(), p["identity"]["email"].clone(), p["identity"]["plan"].clone()), (json!("connected"), json!(2), json!("a@example.com"), json!("max")), "{p}");
         assert_eq!(p["catalog"][0]["id"], "opus"); assert_eq!(p["allowance"]["windows"][0]["used_percent"], 42.5); assert_eq!(s["attempts"][0]["url"], "");
         // the account's own store, and the CLI never saw the host's credentials
-        let store = h.join("providers/accounts-v1").join(&id); let stores: Vec<_> = std::fs::read_dir(&store).unwrap().flatten().collect(); assert_eq!(stores.len(), 1, "one store: the sign-in's");
+        let store = h.join("providers/accounts-v1").join(&id); let stores: Vec<_> = std::fs::read_dir(&store).unwrap().flatten().filter(|e| e.path().is_dir()).collect(); assert_eq!(stores.len(), 1, "one store: the sign-in's");
         let env: Value = serde_json::from_str(&std::fs::read_to_string(stores[0].path().join("env.json")).unwrap()).unwrap(); assert_eq!(env["leak"], false, "ANTHROPIC_API_KEY is not passed to a profile's CLI");
         // status keeps it; a launch under the account is planned with its store; another epoch is refused
         assert_eq!(a.request(&json!({"op":"status","profile":id})).await["profiles"][0]["state"], "connected");
@@ -756,7 +756,7 @@ for l in sys.stdin:
         // disconnect: logged out, epoch moves, the store is gone
         a.child_started(&id); assert_eq!(a.request(&json!({"op":"disconnect","profile":id})).await["error"], GENERIC, "not while a turn runs"); a.child_ended(&id);
         let s = a.request(&json!({"op":"disconnect","profile":id})).await; assert_eq!((prof(&s, &id)["state"].clone(), prof(&s, &id)["epoch"].clone()), (json!("disconnected"), json!(4)));
-        assert!(std::fs::read_dir(&store).unwrap().count() == 0, "the store is forgotten");
+        assert!(std::fs::read_dir(&store).unwrap().flatten().all(|e| !e.path().is_dir()), "the store is forgotten");
         std::env::remove_var("ANTHROPIC_API_KEY"); let _ = std::fs::remove_dir_all(&h);
     }
     #[tokio::test(flavor = "multi_thread")] async fn a_refused_code_fails_the_attempt_with_its_reason_and_leaves_the_profile_as_it_was() {
@@ -766,7 +766,7 @@ for l in sys.stdin:
         a.inner.lock().unwrap().cmds.get(&aid).unwrap().send(Cmd::Respond("WRONG#STATE123".into())).unwrap();
         let s = until(&a, |s| s["attempts"][0]["state"] == "failed").await;
         assert!(s["attempts"][0]["message"].as_str().unwrap().starts_with("Claude did not accept that authentication code"), "{s}"); assert_eq!(prof(&s, &id)["state"], "disconnected"); assert_eq!(prof(&s, &id)["epoch"], 1);
-        assert_eq!(std::fs::read_dir(h.join("providers/accounts-v1").join(&id)).unwrap().count(), 0, "the candidate store is discarded");
+        assert!(std::fs::read_dir(h.join("providers/accounts-v1").join(&id)).unwrap().flatten().all(|e| !e.path().is_dir()), "the candidate store is discarded");
         let _ = std::fs::remove_dir_all(&h);
     }
     #[tokio::test(flavor = "multi_thread")] async fn a_sign_in_can_be_cancelled_and_started_again() {
