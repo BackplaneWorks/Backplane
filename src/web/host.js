@@ -802,8 +802,11 @@ function warmDestinations() {
     const target={kind:el.getAttribute("data-on-click")==="bot"?"bot":el.getAttribute("data-on-click")==="proj-home"?"project":"thread",id:el.getAttribute("data-value")};
     const key = targetKey(target), row = el.className.replace(/(^|\s)on(?=\s|$)/g, "") + "\u0000" + el.textContent, seen = warmRows.get(key);
     warmRows.set(key, row);
-    // (the picture of the one on show is the hub's own, kept as it comes)
-    if (key !== current) previewViews.enqueue(target, false, seen !== undefined && seen !== row);
+    // (the picture of the one on show is the hub's own, kept as it comes; a
+    // thread's is fetched again once per page load: one kept from an earlier
+    // load has its long messages cut to previews, a fetched one has them
+    // whole, which its first visit then draws until their pages come)
+    if (key !== current) previewViews.enqueue(target, false, seen === undefined ? target.kind === "thread" : seen !== row);
   }
 }
 for (const name of ["pointerover", "touchstart"]) document.addEventListener(name, event=>{
