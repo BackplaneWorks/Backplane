@@ -15,7 +15,7 @@ pub fn metric(started: Instant, event: &str, mut fields: Value) {
 pub enum Step { Home(usize), Select(usize), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), Imp(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Mark(String), Fit, Unsupported(String) }
 /// What a click on a registered control does; the e2e harness's controls inventory and `click` step use these.
 #[derive(Clone, Debug)]
-pub enum Ctl { None, Rail(String), PickFiles, ToggleSidebar, Select(String), Home(String), Fold(String), Send, Skill(String), Page(String), Node(String, String), More, RenameSave(String), Imp(String) }
+pub enum Ctl { None, Rail(String), PickFiles, ToggleSidebar, Select(String), Home(String), Fold(String), Send, Skill(String), Page(String), Node(String, String), More, RenameSave(String), Imp(String), FocusSearch }
 #[derive(Clone, Debug)]
 pub struct CtlEntry { pub id: String, pub label: String, pub ctl: Ctl }
 #[derive(Clone, Debug)]
