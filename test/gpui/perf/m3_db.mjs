@@ -14,7 +14,7 @@ function save(){writeFileSync(`${out}/result.json`,JSON.stringify(R,null,1))}
 const stat=a=>({n:a.length,p50:pct(a,50),p95:pct(a,95),p99:pct(a,99),max:Math.max(...a)});
 async function boot(tag){
  const t0=performance.now();const cpu0=0;
- const h=await startHub({bin:REPO+'/build/gpui/backplane-serve',home:root+'/home',port,standins:root+'/bin',extraEnv:{},cap:'8G',log:out+`/hub-${tag}.log`});
+ const h=await startHub({bin:REPO+'/build/gpui/backplane-serve',home:root+'/home',port,standins:root+'/bin',extraEnv:{},cap:'3700M',log:out+`/hub-${tag}.log`});
  const tHello=performance.now()-t0;
  const v=await viewClient(h,{mobile:true,delta:true});const tg=performance.now()-t0;
  const r=await v.open();const tView=performance.now()-t0;

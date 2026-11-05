@@ -46,15 +46,15 @@ if(scenario==='drop'){
  const ref=await client(h);const ids=a=>a.map(x=>JSON.stringify(x));
  const first=await client(h,{});await sleep(1500);const origin=first.origin??'';
  // count items the first client holds, then drop it
- const held=first.seen.length;first.ws.close();const dropAt=Date.now();
+ const held=first.logItems.length;R.heldAllSeen=first.seen.length;R.otherFrameItems=(first.otherItems||[]).map(x=>x[0]).reduce((a,t)=>(a[t]=(a[t]||0)+1,a),{});first.ws.close();const dropAt=Date.now();
  await sleep(Number(arg||3000));const t0=performance.now();
  // reconnect with since=held
  const h2={...h};
  const ws=new WebSocket(`ws://${h.host}:${h.port}/ws?since=${held}&origin=${encodeURIComponent(origin)}&token=${encodeURIComponent(st.token)}`);ws.binaryType='arraybuffer';
  const {decode}=await import('../wire.mjs');const got=[];let firstFrame=null,logFrame=null;
- ws.onmessage=e=>{const o=typeof e.data==='string'?JSON.parse(e.data):decode(e.data);if(firstFrame===null)firstFrame=performance.now()-t0;if(o.t==='log'){logFrame=performance.now()-t0;R.logSince=o.since}for(const it of o.items??[])got.push(it)};
+ ws.onmessage=e=>{const o=typeof e.data==='string'?JSON.parse(e.data):decode(e.data);if(firstFrame===null)firstFrame=performance.now()-t0;if(o.t==='log'){logFrame=performance.now()-t0;R.logSince=o.since}if(o.t==='log'||o.t==='changes')for(const it of o.items??[])got.push(it)};
  await new Promise(r=>ws.onopen=r);await sleep(3000);
- const refAll=ids(ref.seen),firstAll=ids(first.seen.slice(0,held)),reAll=ids(got);
+ const refAll=ids(ref.logItems),firstAll=ids(first.logItems.slice(0,held)),reAll=ids(got);
  // after resume the union first+re should equal ref (events, not live deltas)
  const joined=[...firstAll,...reAll];
  R.itemsHeldBeforeDrop=held;R.refItems=refAll.length;R.resumeItems=reAll.length;R.firstFrameMs=firstFrame;R.logFrameMs=logFrame;

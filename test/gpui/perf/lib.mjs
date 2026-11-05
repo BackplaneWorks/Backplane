@@ -21,7 +21,7 @@ export const size=p=>{try{return statSync(p).size}catch{return 0}};
 export function dirSizes(home){const o={};for(const f of ['events.jsonl','store.db','store.db-wal','store.db-shm'])o[f]=size(`${home}/${f}`);return o}
 export function makeStandins(dir,env={}){mkdirSync(dir,{recursive:true});writeFileSync(`${dir}/claude`,standinScript);chmodSync(`${dir}/claude`,0o755);
  for(const n of['codex','grok','muse']){writeFileSync(`${dir}/${n}`,'#!/bin/sh\nexit 1\n');chmodSync(`${dir}/${n}`,0o755)}}
-export async function startHub({bin,home,port,standins,host,extraEnv={},cap='4G',log}){
+export async function startHub({bin,home,port,standins,host,extraEnv={},cap='3700M',log}){
  if(home.includes('.backplane-bend')||home.includes('/.backplane/'))throw Error('live home refused');
  mkdirSync(home,{recursive:true});
  const args=['--user','--scope','--quiet','-p',`MemoryMax=${cap}`,'-p','MemorySwapMax=0',bin,'--home',home,'--port',String(port),'--no-tailscale','--foreground'];
@@ -41,15 +41,19 @@ export function stopHub(h){try{process.kill(h.pid,'SIGTERM')}catch{}}
 // Plain ws client (log + deltas), like agents_load.
 export async function client(h,{view=false,onMsg,since,origin}={}){
  const ws=new WebSocket(`ws://${h.host}:${h.port}/ws?${view?'view=1&mobile=1&':''}${since!==undefined?`since=${since}&origin=${origin??1785000000}&`:''}token=${encodeURIComponent(h.token)}`);ws.binaryType='arraybuffer';
- const c={ws,seen:[],replies:new Map(),id:0,bytes:0,msgs:0,counting:true,lastMsg:Date.now()};
+ const c={ws,waiters:new Map(),seen:[],logItems:[],replies:new Map(),id:0,bytes:0,msgs:0,counting:true,lastMsg:Date.now()};
  ws.onmessage=e=>{const now=Date.now();const text=typeof e.data==='string';const n=text?e.data.length:e.data.byteLength;let o;try{o=text?JSON.parse(e.data):decode(e.data)}catch{return}
   if(!o||typeof o!=='object')return;if(c.counting){c.bytes+=n;c.msgs++}c.lastMsg=now;if(o.t==='log'&&o.origin!==undefined){c.origin=o.origin;c.logSince=o.since}
-  for(const it of o.items??[])c.seen.push(it);if(o.t==='reply')c.replies.set(Number(o.id),{now,o});
+  for(const it of o.items??[]){c.seen.push(it);if(o.t==='log'||o.t==='changes')c.logItems.push(it);else (c.otherItems??=[]).push([o.t,it])}if(o.t==='reply'){c.replies.set(Number(o.id),{now,o});const w=c.waiters.get(Number(o.id));if(w){c.waiters.delete(Number(o.id));w({now,o})}}
   onMsg?.(o,now,n)};
  await new Promise((r,j)=>{ws.onopen=r;ws.onerror=j});
  c.send=(m,p)=>{const i=++c.id;ws.send(encode({id:i,m,p}));return i};
- c.until=async(ms,f)=>{const end=Date.now()+ms;for(;;){const v=f();if(v)return v;if(Date.now()>end)return undefined;await sleep(20)}};
- c.rpc=async(m,p,ms=30000)=>{const i=c.send(m,p);const t0=performance.now();const r=await c.until(ms,()=>c.replies.get(i));return r?{ms:performance.now()-t0,o:r.o}:undefined};
+ c.until=async(ms,f)=>{const end=Date.now()+ms;for(;;){const v=f();if(v)return v;if(Date.now()>end)return undefined;await sleep(2)}};
+ // event-driven: resolved in onmessage (the old version polled with sleep(20), which quantised every timed RPC to ~20 ms)
+ c.rpc=(m,p,ms=30000)=>new Promise(res=>{const t0=performance.now();const i=++c.id;
+  const to=setTimeout(()=>{c.waiters.delete(i);res(undefined)},ms);
+  c.waiters.set(i,({now,o})=>{clearTimeout(to);res({ms:performance.now()-t0,o})});
+  ws.send(encode({id:i,m,p}))});
  return c;
 }
 export async function debugPerf(h){return await (await fetch(`${h.url}/debug/perf?token=${encodeURIComponent(h.token)}`)).text()}
