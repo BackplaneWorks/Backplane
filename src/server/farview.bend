@@ -67,7 +67,7 @@ def Fvs.ver.sh() -> String:
 
 # one file: its size and where it really is
 def Fvs.get.sh() -> String:
-  Fvs.lib() ++ "case \"$2\" in .backplane.json) ;; .*|*/.*|\"\") echo 'no such file'; exit 1;; esac\nok \"$2\" || { echo 'no such file'; exit 1; }\ns=$(wc -c < \"./$2\" | tr -d ' ')\nd=$(cd \"$(dirname \"./$2\")\" && pwd -P)\nprintf '%s\\t%s' \"$s\" \"$d/$(basename \"$2\")\"\n"
+  Fvs.lib() ++ "case \"$2\" in .backplane.json) ;; .*|*/.*|\"\") echo 'no such file'; exit 1;; esac\nok \"$2\" || { echo 'no such file'; exit 1; }\ns=$(wc -c < \"./$2\" | tr -d ' ')\nprintf '%s\\t%s' \"$s\" \"$rr\"\n"
 
 def Fvs.ver.done(r: P.Ran, +root: String, +thread: String) -> List<&2, U32>:
   match r:
@@ -90,43 +90,60 @@ def Fvs.nat(+s: String) -> Nat:
   Maybe.default(&2, Nat, Nat.read(String.trim(s)), 0n)
 
 # A file to stream rather than bytes: the answer is a mark, a 0 byte (no
-# HTTP response starts with one) then "<size>\t<path>", which the
-# connection (server.bend's Conn.bot.answer) turns into the head and the
-# file sent from disk a piece at a time (H.Sock.send_path). The bytes never
-# pass through a Bend list or the hub's memory.
-def Stream.mark(+size: Nat, +path: String) -> List<&2, U32>:
-  0 <> U.Utf8.encode(Nat.show(size) ++ "\t" ++ path)
+# HTTP response starts with one) then "<size>\t<root length>\t<rel length>\t"
+# and root, rel and home written one after the other, which the connection
+# (server.bend's Conn.bot.answer) turns into the file sent from a descriptor
+# opened then, within root, a piece at a time (Zip.file): the answer names
+# the file, never a path that was checked and is reopened later. The bytes
+# never pass through a Bend list or the hub's memory.
+def Stream.mark(+size: Nat, +root: String, +rel: String, +home: String) -> List<&2, U32>:
+  0 <> U.Utf8.encode(Nat.show(size) ++ "\t" ++ Nat.show(String.length(root)) ++ "\t" ++ Nat.show(String.length(rel)) ++ "\t" ++ root ++ rel ++ home)
 
-# a mark's size and path (its text after the 0 byte; a path may hold tabs)
+# a mark's parts (its text after the 0 byte)
 def Stream.size(+text: String) -> Nat:
   Fvs.nat(Fvs.field(String.split(text, '\t'), 0n))
 
+# (the Files tab's attachment limit shares the "<size>\t<path>" form: its path)
 def Stream.path(+text: String) -> String:
   String.join(List.drop(&2, String, String.split(text, '\t'), 1n), "\t")
 
-def Fvs.get.read.k(big: Bool, empty: Bool, +size: Nat, +path: String) -> IO(List<&2, U32>):
+def Stream.body(+text: String) -> String:
+  String.join(List.drop(&2, String, String.split(text, '\t'), 3n), "\t")
+
+def Stream.root(+text: String) -> String:
+  String.take(Stream.body(text), Fvs.nat(Fvs.field(String.split(text, '\t'), 1n)))
+
+def Stream.rel(+text: String) -> String:
+  String.take(String.drop(Stream.body(text), Fvs.nat(Fvs.field(String.split(text, '\t'), 1n))), Fvs.nat(Fvs.field(String.split(text, '\t'), 2n)))
+
+def Stream.home(+text: String) -> String:
+  String.drop(Stream.body(text), Nat.add(Fvs.nat(Fvs.field(String.split(text, '\t'), 1n)), Fvs.nat(Fvs.field(String.split(text, '\t'), 2n))))
+
+def Fvs.get.read.k(big: Bool, empty: Bool, +size: Nat, +root: String, +rel: String, +home: String) -> IO(List<&2, U32>):
   match big empty:
     case True{} _:
       IO.pure(List<&2, U32>, W.Http.text("413 Payload Too Large", "too large to send"))
     case False{} True{}:
       IO.pure(List<&2, U32>, W.Http.response.c("200 OK", "application/octet-stream", Nil{}, "no-store", ""))
     case False{} False{}:
-      IO.pure(List<&2, U32>, Stream.mark(size, path))
+      IO.pure(List<&2, U32>, Stream.mark(size, root, rel, home))
 
-def Fvs.get.read(+size: Nat, +path: String) -> IO(List<&2, U32>):
-  Fvs.get.read.k(Nat.is_gt(size, FV.Fv.cap()), Nat.is_eq(size, 0n), size, path)
+def Fvs.get.read(+size: Nat, +root: String, +rel: String, +home: String) -> IO(List<&2, U32>):
+  Fvs.get.read.k(Nat.is_gt(size, FV.Fv.cap()), Nat.is_eq(size, 0n), size, root, rel, home)
 
-def Fvs.get.done(r: P.Ran) -> IO(List<&2, U32>):
+# (the shell answers the size and the folder's real path; it only decides
+# the 404 and the 413: what is sent is opened by descriptor when it is sent)
+def Fvs.get.done(r: P.Ran, +rel: String, +home: String) -> IO(List<&2, U32>):
   match r:
     case P.Ran{0, +out}:
-      Fvs.get.read(Fvs.nat(Fvs.field(String.split(out, '\t'), 0n)), String.trim(Fvs.field(String.split(out, '\t'), 1n)))
+      Fvs.get.read(Fvs.nat(Fvs.field(String.split(out, '\t'), 0n)), String.trim(Fvs.field(String.split(out, '\t'), 1n)), rel, home)
     case P.Ran{_, _}:
       IO.pure(List<&2, U32>, W.Http.text("404 Not Found", "no such file"))
 
 # view.get: one file's bytes (a 404 when it is not a plain file inside the
 # folder, a 413 over Fv.cap())
-def Fvs.get(+root: String, +rel: String) -> IO(List<&2, U32>):
-  IO.bind(P.Ran, List<&2, U32>, P.Proc.run("sh", ["-c", Fvs.get.sh(), "sh", root, rel], "/"), Fvs.get.done)
+def Fvs.get(+root: String, +rel: String, +home: String) -> IO(List<&2, U32>):
+  IO.bind(P.Ran, List<&2, U32>, P.Proc.run("sh", ["-c", Fvs.get.sh(), "sh", root, rel], "/"), r => Fvs.get.done(r, rel, home))
 
 # The hub the client is on
 # ------------------------

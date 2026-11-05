@@ -78,16 +78,21 @@ def Render.said(ok: Bool, +out: String) -> IO(Unit):
     case False{}:
       IO.print_err("backplane --render: could not write " ++ out)
 
-def Render.view(vs: List<&2, MC.MView>, +m: MS.Model, +c: MS.Cam, +model: String, +w: U32, +h: U32) -> IO(Bool):
+# where a picture goes: renders/<stem>.<view>.png beside the model, or with
+# --out a folder (the hub's own, for a model it staged) and --stem the name
+def Render.dest(+out: String, +stem: String, +model: String, +view: String) -> String:
+  Bool.pick(String, String.is_empty(out), MC.Mech.render(model, view), out ++ "/" ++ Bool.pick(String, String.is_empty(stem), MC.Mech.stem(model), stem) ++ "." ++ view ++ ".png")
+
+def Render.view(vs: List<&2, MC.MView>, +m: MS.Model, +c: MS.Cam, +model: String, +w: U32, +h: U32, +out: String, +stem: String) -> IO(Bool):
   match vs:
     case Nil{}:
       IO.pure(Bool, True{})
     case MC.MView{+name, +yaw, +pitch} <> t:
       do IO<Bool>:
-        +out : String = MC.Mech.render(model, name)
-        +ok : Bool <- Render.write(out, PN.Png.rgb(D.Snap.rgb(MS.Mesh.render(w, h, m, MS.Cam.face(c, yaw, pitch), Render.ground()), w, h), w, h))
-        Render.said(ok, out)
-        rest : Bool <- Render.view(t, m, c, model, w, h)
+        +dest : String = Render.dest(out, stem, model, name)
+        +ok : Bool <- Render.write(dest, PN.Png.rgb(D.Snap.rgb(MS.Mesh.render(w, h, m, MS.Cam.face(c, yaw, pitch), Render.ground()), w, h), w, h))
+        Render.said(ok, dest)
+        rest : Bool <- Render.view(t, m, c, model, w, h, out, stem)
         return Bool.and(ok, rest)
 
 def Render.tris.k(step: Bool, ts: List<&2, G.Tri3>) -> List<&2, G.Tri3>:
@@ -105,22 +110,22 @@ def Render.failed(why: String) -> IO(Bool):
     IO.print_err("backplane --render: " ++ why)
     return False{}
 
-def Render.ready(r: P.Ran, +m: MS.Model, +model: String, +w: U32, +h: U32) -> IO(Bool):
+def Render.ready(r: P.Ran, +m: MS.Model, +model: String, +w: U32, +h: U32, +out: String, +stem: String) -> IO(Bool):
   match r:
     case P.Ran{0, _}:
-      Render.view(MC.Mech.views(), m, MS.Model.fit(m), model, w, h)
+      Render.view(MC.Mech.views(), m, MS.Model.fit(m), model, w, h, out, stem)
     case P.Ran{_, out}:
       Render.failed("could not create render directory for " ++ model ++ ": " ++ String.trim(out))
 
-def Render.decoded(empty: Bool, +m: MS.Model, +model: String, +w: U32, +h: U32) -> IO(Bool):
+def Render.decoded(empty: Bool, +m: MS.Model, +model: String, +w: U32, +h: U32, +out: String, +stem: String) -> IO(Bool):
   match empty:
     case True{}:
       Render.failed("no renderable triangles in " ++ model ++ ". Nothing was drawn.")
     case False{}:
-      IO.bind(P.Ran, Bool, P.Proc.run("mkdir", ["-p", MC.Mech.parent(MC.Mech.render(model, "iso"))], "/"),
-        r => Render.ready(r, m, model, w, h))
+      IO.bind(P.Ran, Bool, P.Proc.run("mkdir", ["-p", Bool.pick(String, String.is_empty(out), MC.Mech.parent(MC.Mech.render(model, "iso")), out)], "/"),
+        r => Render.ready(r, m, model, w, h, out, stem))
 
-def Render.go.k(none: Bool, +model: String, +glb: String, +w: U32, +h: U32) -> IO(Bool):
+def Render.go.k(none: Bool, +model: String, +glb: String, +w: U32, +h: U32, +out: String, +stem: String) -> IO(Bool):
   match none:
     case True{}:
       Render.failed("could not mesh " ++ model ++ " (a STEP or GLB file; a large STEP needs FreeCAD installed). Nothing was drawn.")
@@ -128,10 +133,10 @@ def Render.go.k(none: Bool, +model: String, +glb: String, +w: U32, +h: U32) -> I
       do IO<Bool>:
         bs : List<&2, U32> <- K.Io.bytes(glb)
         +m : MS.Model = MS.Model.of(Render.tris(MC.Mech.is_step(model), bs))
-        Render.decoded(MS.Model.is_empty(m), m, model, w, h)
+        Render.decoded(MS.Model.is_empty(m), m, model, w, h, out, stem)
 
-def Render.go(+model: String, +glb: String, +w: U32, +h: U32) -> IO(Bool):
-  Render.go.k(String.is_empty(glb), model, glb, w, h)
+def Render.go(+model: String, +glb: String, +w: U32, +h: U32, +out: String, +stem: String) -> IO(Bool):
+  Render.go.k(String.is_empty(glb), model, glb, w, h, out, stem)
 
 def Render.abs(+cwd: String, +p: String) -> String:
   Bool.pick(String, String.starts_with(p, "/"), p, cwd ++ "/" ++ p)
@@ -144,7 +149,7 @@ def Render.cwd(r: P.Ran) -> String:
     case _:
       "/"
 
-def Render.run(+model: String, +size: String) -> IO(Bool):
+def Render.run(+model: String, +size: String, +out: String, +stem: String) -> IO(Bool):
   do IO<Bool>:
     here : P.Ran <- P.Proc.run("pwd", ["-P"], ".")
     +path : String = Render.abs(Render.cwd(here), model)
@@ -152,10 +157,10 @@ def Render.run(+model: String, +size: String) -> IO(Bool):
     +cache : String <- PT.Parts.cache()
     mk : P.Ran <- P.Proc.run("mkdir", ["-p", cache], "/")
     +glb : String <- PT.Parts.glb(path, cache, step)
-    Render.go(path, glb, Render.num(size, 0n, 800), Render.num(size, 1n, 600))
+    Render.go(path, glb, Render.num(size, 0n, 800), Render.num(size, 1n, 600), out, stem)
 
 def Render.usage() -> IO(Unit):
-  IO.die(Unit, 2, "usage: backplane --render MODEL.step [MORE.step ...] [--size WxH]  (writes renders/<name>.<view>.png beside each)")
+  IO.die(Unit, 2, "usage: backplane --render MODEL.step [MORE.step ...] [--size WxH] [--out DIR [--stem NAME]]  (writes renders/<name>.<view>.png beside each, or <NAME>.<view>.png in DIR)")
 
 # the models named (every argument but --size and its value)
 def Render.keep(drop: Bool, +a: String, acc: List<&2, String>) -> List<&2, String>:
@@ -165,24 +170,27 @@ def Render.keep(drop: Bool, +a: String, acc: List<&2, String>) -> List<&2, Strin
     case False{}:
       a <> acc
 
+def Render.flag(+a: String) -> Bool:
+  Bool.or(String.eq(a, "--size"), Bool.or(String.eq(a, "--out"), String.eq(a, "--stem")))
+
 def Render.models.go(xs: List<&2, String>, +skip: Bool, acc: List<&2, String>) -> List<&2, String>:
   match xs:
     case Nil{}:
       List.reverse(&2, String, acc)
     case +a <> t:
-      Render.models.go(t, String.eq(a, "--size"), Render.keep(Bool.or(skip, String.eq(a, "--size")), a, acc))
+      Render.models.go(t, Render.flag(a), Render.keep(Bool.or(skip, Render.flag(a)), a, acc))
 
 def Render.models(xs: List<&2, String>) -> List<&2, String>:
   Render.models.go(xs, False{}, Nil{})
 
-def Render.all(ms: List<&2, String>, +size: String) -> IO(Bool):
+def Render.all(ms: List<&2, String>, +size: String, +out: String, +stem: String) -> IO(Bool):
   match ms:
     case Nil{}:
       IO.pure(Bool, True{})
     case +m <> t:
       do IO<Bool>:
-        ok : Bool <- Render.run(m, size)
-        rest : Bool <- Render.all(t, size)
+        ok : Bool <- Render.run(m, size, out, stem)
+        rest : Bool <- Render.all(t, size, out, stem)
         return Bool.and(ok, rest)
 
 def Render.finish(ok: Bool) -> IO(Unit):
@@ -192,17 +200,17 @@ def Render.finish(ok: Bool) -> IO(Unit):
     case False{}:
       IO.die(Unit, 1, "backplane --render: one or more models could not be rendered")
 
-def Render.main.k(ms: List<&2, String>, +size: String) -> IO(Unit):
+def Render.main.k(ms: List<&2, String>, +size: String, +out: String, +stem: String) -> IO(Unit):
   match ms:
     case Nil{}:
       Render.usage()
     case _ <> _:
-      IO.bind(Bool, Unit, Render.all(ms, size), Render.finish)
+      IO.bind(Bool, Unit, Render.all(ms, size, out, stem), Render.finish)
 
 def Render.main(xs: List<&2, String>) -> IO(Unit):
   match xs:
     case _ <> +rest:
-      Render.main.k(Render.models(rest), Render.opt(rest, "--size"))
+      Render.main.k(Render.models(rest), Render.opt(rest, "--size"), Render.opt(rest, "--out"), Render.opt(rest, "--stem"))
     case _:
       Render.usage()
 

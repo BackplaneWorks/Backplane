@@ -3061,26 +3061,56 @@ def Mech.rendered(+err: String, l: P.Ran, +inbox: Chan(Msg), +client: U32, +id: 
       GitJob.reply(inbox, client, id, True{}, J.Json.obj([J.KV{"mech", J.Str{out}}, J.KV{"root", J.Str{cwd}}, J.KV{"thread", J.Str{thread}},
         J.KV{"rendered", J.Str{path}}, J.KV{"error", J.Str{err}}, J.KV{"primary", J.Str{primary}}]))
 
-def Mech.render.file(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +path: String) -> IO(Unit):
+# The model is never handed to the renderer by its project path (which the
+# renderer would open again by the time it runs) and its pictures are not
+# written by path into the project: the model is staged (Zip.stage: opened
+# by descriptor within the project, copied into the hub's own stage folder),
+# the renderer reads that copy and writes into a private folder of the hub's
+# own (--out), and the pictures are published into renders/ beside the model
+# through descriptors (Zip.publish: a link at their place is replaced, never
+# followed). The files and the report the Mech page reads are as before.
+def Mech.render.fail(+inbox: Chan(Msg), +client: U32, +id: String) -> IO(Unit):
+  GitJob.reply(inbox, client, id, False{}, J.Json.obj([J.KV{"text", J.Str{"that model is unavailable or outside this project"}}]))
+
+def Mech.render.done(+err: String, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +path: String) -> IO(Unit):
   do IO<Unit>:
-    exe : String <- H.Sys.exe_path()
-    r : P.Ran <- P.Proc.run(EX.Exe.child(exe), ["--render", path], cwd)
     l : P.Ran <- P.Proc.run("sh", ["-c", Mech.cmd()], cwd)
     text : String <- K.Io.text(cwd ++ "/.backplane.json")
-    Mech.rendered(Mech.said(r), l, inbox, client, id, thread, cwd, path, MCH.Mech.config(text))
+    Mech.rendered(err, l, inbox, client, id, thread, cwd, path, MCH.Mech.config(text))
 
-def Mech.render.at(at: List<&2, String>, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String) -> IO(Unit):
-  match at:
-    case root <> rel <> "f" <> Nil{}:
-      Mech.render.file(inbox, client, id, thread, cwd, root ++ "/" ++ rel)
-    case _:
-      GitJob.reply(inbox, client, id, False{}, J.Json.obj([J.KV{"text", J.Str{"that model is unavailable or outside this project"}}]))
-
-def Mech.render(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +path: String) -> IO(Unit):
+def Mech.render.out(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +root: String, +rel: String, +home: String, +staged: String, +dir: String) -> IO(Unit):
   do IO<Unit>:
-    home : String <- Env.get("BACKPLANE_HOME", "")
+    exe : String <- H.Sys.exe_path()
+    r : P.Ran <- P.Proc.run(EX.Exe.child(exe), ["--render", staged, "--out", dir, "--stem", MCH.Mech.stem(rel)], "/")
+    pub : List<&2, String> <- ZIP.Zip.publish(root, MCH.Mech.in(MCH.Mech.parent(rel), "renders"), dir, home)
+    gone : P.Ran <- P.Proc.run("rm", ["-rf", dir], "/")
+    Mech.render.done(Mech.said(r), inbox, client, id, thread, cwd, root ++ "/" ++ rel)
+
+def Mech.render.run(sc: List<&2, String>, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +root: String, +rel: String, +home: String, +staged: String) -> IO(Unit):
+  match sc:
+    case dir <> Nil{}:
+      Mech.render.out(inbox, client, id, thread, cwd, root, rel, home, staged, dir)
+    case _:
+      Mech.render.fail(inbox, client, id)
+
+def Mech.render.file(st: List<&2, String>, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +root: String, +rel: String, +home: String) -> IO(Unit):
+  match st:
+    case staged <> Nil{}:
+      IO.bind(List<&2, String>, Unit, ZIP.Zip.scratch(home ++ "/stage"), sc => Mech.render.run(sc, inbox, client, id, thread, cwd, root, rel, home, staged))
+    case _:
+      Mech.render.fail(inbox, client, id)
+
+def Mech.render.at(at: List<&2, String>, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +home: String) -> IO(Unit):
+  match at:
+    case +root <> +rel <> "f" <> Nil{}:
+      IO.bind(List<&2, String>, Unit, ZIP.Zip.stage(root, rel, home, home ++ "/stage"), st => Mech.render.file(st, inbox, client, id, thread, cwd, root, rel, home))
+    case _:
+      Mech.render.fail(inbox, client, id)
+
+def Mech.render(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +path: String, +home: String) -> IO(Unit):
+  do IO<Unit>:
     at : List<&2, String> <- ZIP.Zip.inside(cwd, Bool.pick(String, FP.Folder.absolute(path), FMP.Fm.rel(cwd, path), path), home)
-    Mech.render.at(at, inbox, client, id, thread, cwd)
+    Mech.render.at(at, inbox, client, id, thread, cwd, home)
 
 # the board picker opened (boards.list, hub.bend's Hub.nav): the
 # project's boards read again, as the card finds them (orderio.bend's
@@ -3366,7 +3396,7 @@ def GitJob.run.k(i: Nat, +tx: TextScope, +job: String, +inbox: Chan(Msg), +clien
     case 9n:
       Mech.list(inbox, client, id, thread, cwd)
     case 10n:
-      Mech.render(inbox, client, id, thread, cwd, a)
+      Mech.render(inbox, client, id, thread, cwd, a, home)
     case 11n:
       StepJob.run(inbox, thread, cwd, a, b, home)
     case 12n:
@@ -15854,8 +15884,8 @@ def Far.view.step(step: B.Step, +st: M.State, +home: String, +reply: Chan(List<&
 def Far.view.ver.job(+root: String, +thread: String, +want: String, +have: String, +reply: Chan(List<&2, U32>)) -> IO(Unit):
   IO.bind(List<&2, U32>, Unit, FVS.Fvs.ver(root, thread, want, have), bs => Bot.answer(reply, bs))
 
-def Far.view.get.job(+root: String, +path: String, +reply: Chan(List<&2, U32>)) -> IO(Unit):
-  IO.bind(List<&2, U32>, Unit, FVS.Fvs.get(root, path), bs => Bot.answer(reply, bs))
+def Far.view.get.job(+root: String, +path: String, +home: String, +reply: Chan(List<&2, U32>)) -> IO(Unit):
+  IO.bind(List<&2, U32>, Unit, FVS.Fvs.get(root, path, home), bs => Bot.answer(reply, bs))
 
 def Hub.far.view.k(i: Nat, h: Hub, +o: J.Json, +text: String, +reply: Chan(List<&2, U32>), +now: Nat) -> IO(Hub):
   match i h:
@@ -15864,9 +15894,9 @@ def Hub.far.view.k(i: Nat, h: Hub, +o: J.Json, +text: String, +reply: Chan(List<
         IO.spawn(Unit, Far.view.ver.job(Far.view.cwd(st, J.Json.get_str(J.Json.get_obj(o, "p"), "thread", "")), J.Json.get_str(J.Json.get_obj(o, "p"), "thread", ""),
           J.Json.get_str(J.Json.get_obj(o, "p"), "want", ""), J.Json.get_str(J.Json.get_obj(o, "p"), "have", ""), reply))
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
-    case 1n Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+    case 1n Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       do IO<Hub>:
-        IO.spawn(Unit, Far.view.get.job(Far.view.cwd(st, J.Json.get_str(J.Json.get_obj(o, "p"), "thread", "")), J.Json.get_str(J.Json.get_obj(o, "p"), "path", ""), reply))
+        IO.spawn(Unit, Far.view.get.job(Far.view.cwd(st, J.Json.get_str(J.Json.get_obj(o, "p"), "thread", "")), J.Json.get_str(J.Json.get_obj(o, "p"), "path", ""), Cfg.home(cfg), reply))
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
     case _ Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       do IO<Hub>:
@@ -16293,12 +16323,12 @@ def View.git.sent(bs: List<&2, U32>, +reply: Chan(List<&2, U32>)) -> IO(Unit):
 def View.git.job(+path: String, +reply: Chan(List<&2, U32>)) -> IO(Unit):
   IO.bind(List<&2, U32>, Unit, GT.Git.version(path), bs => View.git.sent(bs, reply))
 
-def Hub.bot.view.k(ok: Bool, +kind: Nat, h: Hub, +root: String, +th: String, +want: String, +have: String, +path: String, +reply: Chan(List<&2, U32>)) -> IO(Hub):
+def Hub.bot.view.k(ok: Bool, +kind: Nat, h: Hub, +root: String, +th: String, +want: String, +have: String, +path: String, +home: String, +reply: Chan(List<&2, U32>)) -> IO(Hub):
   match ok:
     case True{}:
       do IO<Hub>:
         IO.spawn(Unit, Bool.pick(IO(Unit), Nat.is_eq(kind, 1n), Far.view.ver.job(root, th, want, have, reply),
-          Bool.pick(IO(Unit), Nat.is_eq(kind, 2n), Far.view.get.job(root, path, reply), View.git.job(path, reply))))
+          Bool.pick(IO(Unit), Nat.is_eq(kind, 2n), Far.view.get.job(root, path, home, reply), View.git.job(path, reply))))
         return h
     case False{}:
       Hub.answer(h, reply, W.Http.text("403 Forbidden", "not a thread of this machine, or not a file the viewers read"))
@@ -16308,7 +16338,7 @@ def Hub.bot.view(h: Hub, +arg: String, +reply: Chan(List<&2, U32>)) -> IO(Hub):
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       Hub.bot.view.k(RVW.Rview.ask.ok(W.Http.route(arg), RVW.Rview.root(Cfg.home(cfg), st, AT.Att.unpct(W.Http.param(arg, "thread")), AT.Att.unpct(W.Http.param(arg, "root"))), RVW.Rview.proot(st, AT.Att.unpct(W.Http.param(arg, "thread"))), AT.Att.unpct(W.Http.param(arg, "want")), AT.Att.unpct(W.Http.param(arg, "path"))),
         RVW.Rview.kind(W.Http.route(arg)), Hub{st, f, ls, cl, as, inbox, cfg, note}, RVW.Rview.root(Cfg.home(cfg), st, AT.Att.unpct(W.Http.param(arg, "thread")), AT.Att.unpct(W.Http.param(arg, "root"))),
-        AT.Att.unpct(W.Http.param(arg, "thread")), AT.Att.unpct(W.Http.param(arg, "want")), AT.Att.unpct(W.Http.param(arg, "have")), AT.Att.unpct(W.Http.param(arg, "path")), reply)
+        AT.Att.unpct(W.Http.param(arg, "thread")), AT.Att.unpct(W.Http.param(arg, "want")), AT.Att.unpct(W.Http.param(arg, "have")), AT.Att.unpct(W.Http.param(arg, "path")), Cfg.home(cfg), reply)
 
 # GET /bots/<id>/tasks/shot?run=<run>&n=<n> (or &f=<file>): a picture of a
 # task run (a pause's, or a step's), only from that bot's own tasks folder;
@@ -16539,20 +16569,20 @@ def Conn.bot.page_ok(+id: String) -> Bool:
 def Conn.bot.page_id(+r: String) -> String:
   Bool.pick(String, Conn.bot.page_ok(String.take(String.drop(r, 6n), Nat.sub(String.length(r), 17n))), String.take(String.drop(r, 6n), Nat.sub(String.length(r), 17n)), "")
 
-# a far view.get's file (farview.bend's Stream.mark): the head, then the
-# file from disk a piece at a time. Fvs.get.read already bounds size by
-# Fv.cap (4000 MB), so it fits the send_path effect's U32 byte count.
-def Conn.bot.stream(s: Socket, +size: Nat, +path: String) -> IO(Unit):
+# a far view.get's file (farview.bend's Stream.mark): opened by descriptor
+# within its folder as it is sent (Zip.file: the head from the open file's
+# size, the file a piece at a time; a link anywhere below the folder is a
+# 404). Fvs.get.read already bounds the size the check saw by Fv.cap.
+def Conn.bot.stream(s: Socket, +root: String, +rel: String, +home: String) -> IO(Unit):
   do IO<Unit>:
-    s2 : Socket <- Conn.send(s, U.Utf8.encode(BRANGE.Rng.head(BRANGE.Rng.whole(size), size, "application/octet-stream", "no-store")))
-    sent : Socket & Result<&1, &1, U32 & String, Unit> <- H.Sock.send_path(s2, path, 0, U32.from_nat(size))
+    sent : Socket & Result<&1, &1, U32 & String, Unit> <- ZIP.Zip.file(s, root, rel, home, "attachment", "", Nil{})
     s3 : Socket <- Conn.sent(sent)
     Socket.close(s3)
 
 def Conn.bot.mark(mark: Bool, s: Socket, +bs: List<&2, U32>) -> IO(Unit):
   match mark:
     case True{}:
-      Conn.bot.stream(s, FVS.Stream.size(U.Utf8.decode(List.drop(&2, U32, bs, 1n))), FVS.Stream.path(U.Utf8.decode(List.drop(&2, U32, bs, 1n))))
+      Conn.bot.stream(s, FVS.Stream.root(U.Utf8.decode(List.drop(&2, U32, bs, 1n))), FVS.Stream.rel(U.Utf8.decode(List.drop(&2, U32, bs, 1n))), FVS.Stream.home(U.Utf8.decode(List.drop(&2, U32, bs, 1n))))
     case False{}:
       Conn.finish(s, bs)
 

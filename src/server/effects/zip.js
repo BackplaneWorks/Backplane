@@ -617,10 +617,174 @@ function zip_file(socket, root, rel, home, disposition, range, rules, k) {
   }, () => fs.closeSync(fd));
 }
 
+// Staging and publishing, for the pathname-only converters and renderers.
+// A converter that takes a path reopens whatever that path names by the time
+// it runs, so it is never given a project's path: the file is opened here
+// through descriptors (zip_open: every component O_NOFOLLOW from the root's
+// real path, a regular single-link file), copied into a folder of the hub's
+// own, named by its content, and the converter reads that copy. What a
+// renderer writes is written into a folder of the hub's own too, and
+// published from there into the project through descriptors (zip_publish).
+// A symlink anywhere below the root refuses; the root itself may be an alias
+// (its real path is taken once, then every step is bound to a descriptor).
+const STAGE_CAP = 256 * 1024 * 1024;
+
+function zip_ours(fs, dir) {
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const st = fs.lstatSync(dir);
+  if (!st.isDirectory() || st.isSymbolicLink()) throw Error('stage is not a folder');
+  if (process.platform !== 'win32' && (st.uid !== process.getuid() || (st.mode & 0o077) !== 0)) throw Error('stage is not private');
+}
+
+function zip_ext(rel) {
+  const m = /(\.[a-z0-9]{1,8})$/.exec(rel.slice(rel.lastIndexOf('/') + 1).toLowerCase());
+  return m ? m[1] : '';
+}
+
+function zip_write(fs, fd, buf, n) {
+  for (let at = 0; at < n;) at += fs.writeSync(fd, buf, at, n - at);
+}
+
+// rel of root copied to <stage>/<sha256 of its bytes><extension>: [that path],
+// or [] when it cannot be opened safely (a link, not a regular file, too big)
+function zip_stage(root, rel, home, stage) {
+  const fs = require('fs'), pathm = require('path'), crypto = require('crypto');
+  let src, out = -1, part = null;
+  try {
+    if (typeof root !== 'string' || typeof rel !== 'string' || typeof stage !== 'string' || !stage || (root + rel + stage).includes('\0')) throw Error('invalid');
+    zip_ours(fs, stage);
+    src = zip_open(fs, pathm, fs.realpathSync(root), rel, home, []);
+    if (!src.st.isFile() || src.st.size > STAGE_CAP) throw Error('not a file or too big');
+    const C = fs.constants, hash = crypto.createHash('sha256'), buf = Buffer.allocUnsafe(1 << 20);
+    part = pathm.join(stage, '.part-' + crypto.randomBytes(12).toString('hex'));
+    out = fs.openSync(part, C.O_WRONLY | C.O_CREAT | C.O_EXCL | (C.O_NOFOLLOW || 0), 0o600);
+    for (let total = 0;;) {
+      const n = fs.readSync(src.fd, buf, 0, buf.length, null);
+      if (!n) break;
+      total += n;
+      if (total > STAGE_CAP) throw Error('too big');
+      hash.update(buf.subarray(0, n)); zip_write(fs, out, buf, n);
+    }
+    fs.closeSync(out); out = -1;
+    const final = pathm.join(stage, hash.digest('hex') + zip_ext(rel));
+    // the same content is already there: keep it (its modification time is
+    // part of the converters' cache keys)
+    if (fs.existsSync(final)) fs.unlinkSync(part); else fs.renameSync(part, final);
+    part = null;
+    return zip_bend_list([final]);
+  } catch { return zip_bend_list([]); }
+  finally {
+    if (src) try { fs.closeSync(src.fd); } catch {}
+    if (out >= 0) try { fs.closeSync(out); } catch {}
+    if (part) try { fs.unlinkSync(part); } catch {}
+  }
+}
+
+// a new private folder of the hub's own for one job's output: [its path]
+function zip_scratch(stage) {
+  const fs = require('fs'), pathm = require('path');
+  try {
+    if (typeof stage !== 'string' || !stage || stage.includes('\0')) throw Error('invalid');
+    zip_ours(fs, stage);
+    return zip_bend_list([fs.mkdtempSync(pathm.join(stage, 'run-'))]);
+  } catch { return zip_bend_list([]); }
+}
+
+// the next component of a directory chain, made if missing
+function zip_dirat(fs, parent, name, abs) {
+  try { return zip_child(fs, parent, name, true, abs); }
+  catch (e) {
+    if (e.code !== 'ENOENT') throw e;
+    if (process.platform === 'linux') fs.mkdirSync('/proc/self/fd/' + parent + '/' + name, 0o755);
+    else if (process.platform === 'darwin') {
+      const ffi = require('bun:ffi');
+      const lib = globalThis.BACKPLANE_ZIP_MKDIRAT ??= ffi.dlopen('/usr/lib/libSystem.B.dylib', { mkdirat: { args: ['i32', 'ptr', 'i32'], returns: 'i32' } });
+      if (lib.symbols.mkdirat(parent, ffi.ptr(Buffer.from(name + '\0')), 0o755) < 0) throw Error('cannot make folder');
+    } else fs.mkdirSync(abs, 0o755);
+    return zip_child(fs, parent, name, true, abs);
+  }
+}
+
+// a new file in a folder held by descriptor (never an existing one)
+function zip_newat(fs, dir, name, abs) {
+  if (!name || name === '.' || name === '..' || /[\/\\\0]/.test(name)) throw Error('invalid component');
+  const C = fs.constants, flags = C.O_WRONLY | C.O_CREAT | C.O_EXCL | (C.O_NOFOLLOW || 0);
+  if (process.platform === 'linux') return fs.openSync('/proc/self/fd/' + dir + '/' + name, flags, 0o644);
+  if (process.platform === 'darwin') {
+    const ffi = require('bun:ffi'), vari = process.arch === 'arm64';
+    const lib = globalThis.BACKPLANE_ZIP_OPENAT ??= ffi.dlopen('/usr/lib/libSystem.B.dylib', {
+      openat: { args: vari ? ['i32','ptr','i32','i64','i64','i64','i64','i64','i32'] : ['i32','ptr','i32','i32'], returns: 'i32' }
+    });
+    const n = Buffer.from(name + '\0');
+    const fd = vari ? lib.symbols.openat(dir, ffi.ptr(n), flags, 0,0,0,0,0, 0o644) : lib.symbols.openat(dir, ffi.ptr(n), flags, 0o644);
+    if (fd < 0) throw Error('cannot create');
+    return fd;
+  }
+  return fs.openSync(abs, flags, 0o644);
+}
+
+function zip_renameat(fs, dir, from, to, abs) {
+  if (process.platform === 'linux') return fs.renameSync('/proc/self/fd/' + dir + '/' + from, '/proc/self/fd/' + dir + '/' + to);
+  if (process.platform === 'darwin') {
+    const ffi = require('bun:ffi');
+    const lib = globalThis.BACKPLANE_ZIP_RENAMEAT ??= ffi.dlopen('/usr/lib/libSystem.B.dylib', { renameat: { args: ['i32', 'ptr', 'i32', 'ptr'], returns: 'i32' } });
+    if (lib.symbols.renameat(dir, ffi.ptr(Buffer.from(from + '\0')), dir, ffi.ptr(Buffer.from(to + '\0'))) < 0) throw Error('cannot rename');
+    return;
+  }
+  return fs.renameSync(abs + '/' + from, abs + '/' + to);
+}
+
+// The pictures (*.png, plain names) of src, a folder of the hub's own, put
+// into relDir of root, made if missing, through descriptors: each is written
+// as a new ".part" file beside its place and renamed over it, so a link at
+// its place is replaced, never followed. Answers the names published ([] if
+// the folder cannot be reached safely; a name that fails is left out).
+function zip_publish(root, relDir, src, home) {
+  const fs = require('fs'), pathm = require('path');
+  let dir = -1; const done = [];
+  try {
+    if (typeof root !== 'string' || typeof relDir !== 'string' || typeof src !== 'string' || (root + relDir + src).includes('\0')
+        || !root || pathm.isAbsolute(relDir) || /[\\]/.test(relDir) || relDir.split('/').includes('..')) throw Error('invalid');
+    const top = fs.realpathSync(root), at = pathm.resolve(top, relDir || '.');
+    if (!zip_below(pathm, top, at) || zip_protected(fs, pathm, top, at, home)) throw Error('protected');
+    const anchor = pathm.parse(top).root;
+    dir = fs.openSync(anchor, zip_flags(fs, true));
+    let abs = anchor;
+    for (const name of pathm.relative(anchor, at).split(pathm.sep).filter(Boolean)) {
+      abs = pathm.join(abs, name);
+      const next = zip_dirat(fs, dir, name, abs);
+      fs.closeSync(dir); dir = next;
+    }
+    const actual = zip_fdpath(fs, dir);
+    if (!zip_below(pathm, top, actual) || zip_protected(fs, pathm, top, actual, home)) throw Error('left the root');
+    for (const name of fs.readdirSync(src).sort()) {
+      if (!/^[A-Za-z0-9][A-Za-z0-9._-]*\.png$/.test(name)) continue;
+      let from = -1, to = -1; const part = name + '.part';
+      try {
+        from = fs.openSync(pathm.join(src, name), fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+        const st = fs.fstatSync(from);
+        if (!st.isFile() || st.size > STAGE_CAP) continue;
+        to = zip_newat(fs, dir, part, pathm.join(actual, part));
+        const buf = Buffer.allocUnsafe(1 << 20);
+        for (;;) { const n = fs.readSync(from, buf, 0, buf.length, null); if (!n) break; zip_write(fs, to, buf, n); }
+        fs.closeSync(to); to = -1;
+        zip_renameat(fs, dir, part, name, actual);
+        done.push(name);
+      } catch { try { if (to >= 0) fs.closeSync(to); } catch {} to = -1; try { fs.unlinkSync(pathm.join(actual, part)); } catch {} }
+      finally { if (from >= 0) try { fs.closeSync(from); } catch {} if (to >= 0) try { fs.closeSync(to); } catch {} }
+    }
+    return zip_bend_list(done);
+  } catch { return zip_bend_list([]); }
+  finally { if (dir >= 0) try { fs.closeSync(dir); } catch {} }
+}
+
 // Test access to the same transport and writer used by the hub.
-globalThis.BP_ZIP = { zip_skip, zip_within, zip_entry, zip_store, zip_where, zip_open, zip_walk, zip_writer, zip_stream, zip_send, zip_file };
+globalThis.BP_ZIP = { zip_skip, zip_within, zip_entry, zip_store, zip_where, zip_open, zip_walk, zip_writer, zip_stream, zip_send, zip_file, zip_stage, zip_scratch, zip_publish };
 io_eff(CID(Zip.inside), zip_inside);
 io_eff(CID(Zip.send), zip_send);
 io_eff(CID(Zip.file), zip_file);
+io_eff(CID(Zip.stage), zip_stage);
+io_eff(CID(Zip.scratch), zip_scratch);
+io_eff(CID(Zip.publish), zip_publish);
 
 io_eff(CID(Zip.list), zip_listing);
