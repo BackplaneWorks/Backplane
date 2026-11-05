@@ -10,5 +10,6 @@ pub mod files {
 pub mod kicad {
   #[path = "../../../../../../native/host/src/kicad/plot.rs"] pub mod plot;
   #[path = "../../../../../../native/host/src/kicad/project.rs"] pub mod project;
+  #[path = "../../../../../../native/host/src/kicad/boards.rs"] pub mod boards;
   #[path = "../../../../../../native/host/src/kicad/kserve.rs"] pub mod kserve;
 }

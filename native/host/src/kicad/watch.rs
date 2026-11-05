@@ -12,6 +12,7 @@ use std::{collections::HashMap, path::PathBuf, sync::{Arc, Mutex}, time::Duratio
 const READERS: usize = 2;
 const POLL_MS: u64 = 150;
 const KEPT: usize = 4; // sources no client watches are kept (plots included): Src.kept
+const VERSIONS_KEPT: usize = 8; // saved versions no view watches: Src.versions.kept
 
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct Stamp { rev: String, ok: bool }
@@ -81,11 +82,24 @@ impl Plots {
     }
     fn gc(&self, st: &mut State) {
         let watched: std::collections::HashSet<String> = st.subs.values().flatten().map(|s| s.key.clone()).collect();
-        let mut idle: Vec<String> = st.srcs.keys().filter(|k| !watched.contains(*k)).cloned().collect();
-        idle.sort_by_key(|k| !st.idle.contains(k)); // already idle ones are the older
-        let drop = idle.len().saturating_sub(KEPT);
-        for k in idle.iter().take(drop) { st.srcs.remove(k); }
-        st.idle = idle.into_iter().skip(drop).collect();
+        let mut keep_idle: Vec<String> = vec![];
+        for (limit, versions) in [(KEPT, false), (VERSIONS_KEPT, true)] {
+            let mut idle: Vec<String> = st.srcs.iter().filter(|(k, s)| !watched.contains(*k) && is_version(&s.file) == versions).map(|(k, _)| k.clone()).collect();
+            idle.sort_by_key(|k| !st.idle.contains(k)); // already idle ones are the older
+            let drop = idle.len().saturating_sub(limit);
+            for k in idle.iter().take(drop) { st.srcs.remove(k); }
+            keep_idle.extend(idle.into_iter().skip(drop));
+        }
+        st.idle = keep_idle;
+    }
+    /// kicad.warm / PWarm: a saved version plotted ahead and kept, no view watching it (scrubbing the history comes back to it at once).
+    pub fn warm(self: &Arc<Self>, hub: &Arc<Hub>, kind: u32, root: &str, path: &str) {
+        if path.is_empty() || kind > 1 { return }
+        let ky = key(kind, root, path);
+        let need = { let mut st = self.st.lock().unwrap();
+            let s = st.srcs.entry(ky.clone()).or_insert_with(|| Src { kind, file: path.to_string(), ..Default::default() });
+            let need = s.plot.is_none() && !s.busy; self.gc(&mut st); need };
+        if need { self.read(hub, &ky) }
     }
 
     /// Bring watchers of `key` (or just `only`) up to its plot; a source with none yet is read.
@@ -223,7 +237,7 @@ pub fn family(ky: &str) -> String {
 
 pub struct KicadRpc(pub Arc<Plots>);
 impl RpcHandler for KicadRpc {
-    fn methods(&self) -> &'static [&'static str] { &["kicad.watch", "kicad.info"] }
+    fn methods(&self) -> &'static [&'static str] { &["kicad.watch", "kicad.info", "kicad.warm"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let s = |k: &str| p.get(k).and_then(Value::as_str).unwrap_or("").to_string();
@@ -232,6 +246,14 @@ impl RpcHandler for KicadRpc {
                     let (kind, root, path) = (s("kind"), s("root"), s("path"));
                     if !kind.is_empty() && !super::known_root(hub, &root, &path).await { return vec![json!({"t":"reply","id":id,"ok":false,"error":"that folder is not in this project"})] }
                     self.0.watch(hub, who.client, kind_of(&kind), &root, &path, &s("tree"));
+                    vec![json!({"t":"reply","id":id,"ok":true})]
+                }
+                "kicad.warm" => { // the saved versions before and after a step, plotted ahead (hub.bend's Warm.outs)
+                    let (kind, root) = (s("kind"), s("root"));
+                    for path in [s("before"), s("after")] {
+                        if path.is_empty() || !super::known_root(hub, &root, &path).await { continue }
+                        self.0.warm(hub, if kind == "schematic" { 1 } else { 0 }, &root, &path);
+                    }
                     vec![json!({"t":"reply","id":id,"ok":true})]
                 }
                 _ => { // kicad.info
