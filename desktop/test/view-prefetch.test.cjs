@@ -61,3 +61,17 @@ test('a thread’s shut runs are read ahead open once, handed to folds, never ke
  assert.equal(sent.length,1,'asked even though a picture of the thread is held');assert.deepEqual(sent[0].p.session.info,{'fold:r1':'1','fold:r2':'1'});
  p.stop();
 });
+test('a thread’s viewers are read ahead open, once each, with their kept reads, and handed to viewer only',async()=>{
+ const {ViewPrefetch}=await import('../../src/web/view-prefetch.js'),{VIEW_LIMITS}=await import('../../src/web/thin.js');
+ const sent=[],pictures=[];let socket;
+ const scope={origin:'https://hub',identity:'owner',epoch:'e',language:'en'};
+ const p=new ViewPrefetch({hub:scope.origin,scope:()=>scope,has:()=>true,idle:()=>true,encode:x=>x,decode:x=>x,socket:()=>socket={send:r=>sent.push(r),close(){}},picture:(...a)=>pictures.push(a),viewer(){}});
+ const opens=[{action:'fm',value:'',kind:'files'},{action:'view-kind',value:'board',kind:'board'}];
+ p.enqueueViewers({kind:'thread',id:'t'},opens);p.enqueueViewers({kind:'thread',id:'t'},opens);assert.equal(p.queue.length,2,'once per viewer');
+ p.enqueueViewers({kind:'bot',id:'b'},opens);assert.equal(p.queue.length,2,'threads only');
+ clearTimeout(p.timer);p.timer=null;p.pump();
+ socket.onmessage({data:{t:'view',version:1,renderer:'web',generation:'1',epoch:'e',limits:VIEW_LIMITS}});
+ assert.equal(sent.length,1,'asked even though a picture of the thread is held');
+ assert.deepEqual(sent[0].p.session.info,{'panel:t':'1','view.kind:t':'files','view.path:t':''});assert.equal(sent[0].p.session.panel,true);assert.equal(sent[0].p.cid,'ahead-files');
+ p.stop();
+});

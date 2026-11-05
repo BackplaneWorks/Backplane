@@ -137,10 +137,11 @@ const blank = n => {
   const attrs = field ? list(items(n.attrs).filter(a => !is(a, 'At') || !['value', 'checked', 'selected'].includes(a.name))) : n.attrs;
   return { ...n, attrs, kids: n.tag === 'textarea' ? list([]) : list(items(n.kids).map(blank)) };
 };
+const AHEADS = 32;
 const shaped = n => n === null || is(n, 'El') && typeof n.tag === 'string' && n.attrs && n.kids;
 export class PressFeedback {
   // store: {storage (localStorage), scope: () => a key for this hub and page, or ''}
-  constructor(changed, limit = 64, store = null) { this.changed = changed;this.limit = limit;this.store = store;this.learned = new Map();this.tabs = new Map();this.closer = null;this.shelves = new Map();this.clear(); }
+  constructor(changed, limit = 64, store = null) { this.changed = changed;this.limit = limit;this.store = store;this.learned = new Map();this.aheads = new Map();this.tabs = new Map();this.closer = null;this.shelves = new Map();this.clear(); }
   restore() {
     const scope = this.store?.scope?.() || '';
     if (!scope || scope === this.storedFor) return;
@@ -218,13 +219,32 @@ export class PressFeedback {
     const revision = ++this.revision, press = { key, target, before: this.now, settled: false, revision, by: action + '\u0000' + String(value ?? '') };
     this.press = press;
     if (SHELVES.has(action)) { press.shelf = JSON.stringify([target, action, String(value ?? '')]);press.sections = sections(this.seenNode); }
-    const known = (press.shelf ? this.shelfFor(press) : this.learned.get(key)) || this.opening(action, action + '\u0000' + String(value ?? '')) || this.closing(back);
+    const known = (press.shelf ? this.shelfFor(press) : this.learned.get(key) || this.aheads.get(key)) || this.opening(action, action + '\u0000' + String(value ?? '')) || this.closing(back);
     this.active = known ? { ...known, revision, rail: known.kind === 'viewer' ? this.railKind(action, value, known) : undefined } : null;
     if (known) this.changed();
     return () => {
       press.settled = true;
       if (this.active?.revision === revision) { this.active = null;this.changed(); }
     };
+  }
+  // A viewer as the hub draws it open, read ahead for the thread on show
+  // (view-prefetch.js's enqueueViewers): what its rail tab's press gives, so
+  // the first open of each viewer draws at the press too. Kept apart from
+  // what presses taught (never stored, never pushes a menu out), at most
+  // AHEADS, the oldest out; a press's own answer is learned over it.
+  ahead(page, target, action, value, kind) {
+    if (!this.now || this.nowFor !== target || !VIEWER.has(action)) return;
+    const after = regions(page).get('viewer');
+    // (only the viewer it was asked for: class "viewer <kind>")
+    if (!after || !classes(after.node).includes(kind)) return;
+    const entry = { kind: 'viewer', node: after.node, parent: after.parent, parentClass: after.parentClass, index: after.index, prev: after.prev, along: [] };
+    // (pressed from the thread alone or with another viewer open)
+    const base = shape(this.now), at = REGIONS.findIndex(([k]) => k === 'viewer');
+    for (const open of ['0', '1']) {
+      const key = JSON.stringify([target, action, String(value ?? ''), base.slice(0, at) + open + base.slice(at + 1)]);
+      this.aheads.delete(key);this.aheads.set(key, entry);
+    }
+    while (this.aheads.size > AHEADS) this.aheads.delete(this.aheads.keys().next().value);
   }
   // (the one section a shelf's press changed, as the hub drew it after)
   learnShelf(p, page) {
@@ -407,5 +427,5 @@ export class PressFeedback {
   }
   // (another destination picked: a press on its way is the hub's to answer)
   drop() { this.revision++;this.active = null;this.press = null; }
-  clear() { this.revision = (this.revision || 0) + 1;this.active = null;this.press = null;this.now = null;this.shell = null;this.nowFor = '';this.seenNode = null;this.learned?.clear();this.tabs?.clear();this.closer = null;this.shelves?.clear(); }
+  clear() { this.revision = (this.revision || 0) + 1;this.active = null;this.press = null;this.now = null;this.shell = null;this.nowFor = '';this.seenNode = null;this.learned?.clear();this.aheads?.clear();this.tabs?.clear();this.closer = null;this.shelves?.clear(); }
 }

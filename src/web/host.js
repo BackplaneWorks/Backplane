@@ -759,6 +759,10 @@ function transitionScope(target = presentationTarget(currentSession())) {
 }
 let lastInput = 0;
 for (const name of ["pointerdown", "keydown", "wheel"]) addEventListener(name, () => { lastInput = performance.now(); }, { capture: true, passive: true });
+// the rail's viewer tabs read ahead for the thread on show (the press each
+// tab sends, and the view.kind it opens)
+const VIEWER_OPENS = [["fm", "", "files"], ["diff", "", "diff"], ["view-kind", "board", "board"], ["view-kind", "schematic", "schematic"],
+  ["view-kind", "3d", "3d"], ["view-kind", "browser", "browser"], ["rv-page", "bom", "review"]].map(([action, value, kind]) => ({ action, value, kind }));
 const previewViews = new ViewPrefetch({
   hub:location.origin, scope:()=>transitionScope(),
   has:target=>!!transitionViews.destination(transitionScope(), target),
@@ -772,6 +776,11 @@ const previewViews = new ViewPrefetch({
     transitionViews.put({...scope,target,selected:session.sel,route:session.route||null,settings:false},shown);
     // (its messages whole: a first visit draws them so before their pages come)
     if (target.kind === "thread") bodyWindows.wholes(pictureNode(shown));
+  },
+  // (a viewer of the thread on show, as the hub draws it open)
+  viewer:(shown, target, open)=>{
+    if (targetKey(target) !== shownFor) return;
+    pressFeedback.ahead(pictureNode(shown), targetKey(presentationTarget(currentSession())), open.action, open.value, open.kind);
   },
   // (the thread on show with its runs open: only what they hold is kept)
   folds:(shown, target, window)=>{
@@ -4139,6 +4148,9 @@ async function startThin(again = false, reason = "initial") {
         void transitionViews.warm(transitionScope(detail.target)).then(warmDestinations);
         // (its shut runs of tool calls read ahead: a first open draws at the click)
         if (detail.target?.kind === "thread") previewViews.enqueueFolds(detail.target, foldFeedback.unseen(node));
+        // (and its viewers, each as the hub draws it open: a first open of
+        // each draws at the click too; not on a phone, where data costs)
+        if (detail.target?.kind === "thread" && !PHONE) previewViews.enqueueViewers(detail.target, VIEWER_OPENS);
         trace("thin-view", { entries: detail.window?.ids?.length || 0 });
         const region = historyRegion(detail, projection);
         if (region === "page") later();else laterRegions(region.split(" ").filter(Boolean));
