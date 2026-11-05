@@ -10,8 +10,10 @@ use crate::hub::Hub;
 use serde_json::json;
 use std::{collections::HashMap, sync::{Arc, Mutex}, time::Duration};
 
+/// Waiting items kept per link; more than this and the link is sent the gap form instead.
+pub const MAX_WAITING: usize = 10_000;
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct Out { pub acked: u64, pub clean: bool, pub busy: bool, pub from: u64, pub to: u64, pub items: Vec<Item>, pub flight: Vec<Item>, pub ffrom: u64, pub hold: bool, pub fails: u64 }
+pub struct Out { pub lost: bool, pub flight_lost: bool, pub acked: u64, pub clean: bool, pub busy: bool, pub from: u64, pub to: u64, pub items: Vec<Item>, pub flight: Vec<Item>, pub ffrom: u64, pub hold: bool, pub fails: u64 }
 /// A batch to send: what it follows, where it ends, its items.
 #[derive(Debug, PartialEq)]
 pub struct Send { pub since: u64, pub to: u64, pub items: Vec<Item> }
@@ -22,27 +24,39 @@ impl Out {
         if xs.is_empty() { self.to = to; return }
         if self.items.is_empty() { self.from = from }
         self.to = to; self.items.extend(xs);
+        self.cap();
     }
+    /// A link that takes nothing (a 403, a wedged hub) must not hold every shared line in memory: past the limit the
+    /// items are dropped and the next push is the gap form (`since = to`, no items), so the other end pulls when it is back.
+    fn cap(&mut self) { if self.items.len() > MAX_WAITING { self.items.clear(); self.lost = true; self.clean = false; self.from = self.to } }
     /// The push to start now, if one is due (none out, not holding, something waiting).
     pub fn next(&mut self) -> Option<Send> {
-        if self.busy || self.hold || self.items.is_empty() { return None }
+        if self.busy || self.hold || (self.items.is_empty() && !self.lost) { return None }
+        if self.items.is_empty() {
+            // the gap form: the other end is told only where this log ends
+            self.lost = false; self.flight_lost = true; self.busy = true; self.flight.clear(); self.ffrom = self.to;
+            return Some(Send { since: self.to, to: self.to, items: vec![] });
+        }
         let xs = std::mem::take(&mut self.items);
+        self.lost = false; // (what follows the loss says where it begins: since = from, past the other end's head)
         let s = Send { since: if self.clean { self.acked } else { self.from }, to: self.to, items: xs.clone() };
         self.busy = true; self.flight = xs; self.ffrom = self.from;
         Some(s)
     }
     /// The push out ended: through (up to `to`), or not (its items go back first).
     pub fn done(&mut self, ok: bool, to: u64) {
-        if ok { self.acked = to; self.clean = true; self.busy = false; self.flight.clear(); self.ffrom = 0; self.hold = false; self.fails = 0 }
+        if ok { self.flight_lost = false; self.acked = to; self.clean = true; self.busy = false; self.flight.clear(); self.ffrom = 0; self.hold = false; self.fails = 0 }
         else {
             let fl = std::mem::take(&mut self.flight);
             if !fl.is_empty() { self.from = self.ffrom }
             let mut back = fl; back.append(&mut self.items); self.items = back;
+            if self.flight_lost { self.lost = true; self.flight_lost = false }
+            self.cap();
             self.clean = false; self.busy = false; self.ffrom = 0; self.hold = true; self.fails += 1;
         }
     }
     pub fn release(&mut self) { self.hold = false }
-    pub fn due(&self) -> bool { !self.busy && !self.hold && !self.items.is_empty() }
+    pub fn due(&self) -> bool { !self.busy && !self.hold && (!self.items.is_empty() || self.lost) }
 }
 /// Seconds to hold after `n` failures in a row: 2, 4, 8, 16, 32, 60.
 pub fn delay(n: u64) -> u64 { let mut d = 2; for _ in 0..n.saturating_sub(1) { d = if d >= 32 { 60 } else { d * 2 } } d }

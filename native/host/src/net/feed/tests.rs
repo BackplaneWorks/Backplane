@@ -52,20 +52,20 @@ async fn hub(tag: &str) -> (Arc<Hub>, std::path::PathBuf) {
         json!({"$":"DeviceRegistered","token":"SECRETTOKEN","platform":"ios","kind":"alert","thread":"","env":"production","bundle":"b","at":4}),
         json!({"$":"MessagePosted","thread":"t1","msg":"b1","role":"user","text":big,"at":5}), json!({"$":"MessagePosted","thread":"t1","msg":"b2","role":"user","text":big,"at":6}),
         json!({"$":"MessagePosted","thread":"t1","msg":"b3","role":"user","text":"tail","at":7})]).await.unwrap();
-    let f = Feed::new(); assert!(f.answer(&hub, 0, "", json!([])).is_none(), "not ready: the asker pulls again");
+    let f = Feed::new(); assert!(f.answer(&hub, 0, "", json!([])).await.is_none(), "not ready: the asker pulls again");
     f.start(&hub).await;
     let cat = f.catalog(&hub).await;
     assert_eq!((cat[0]["id"].as_str(), cat[0]["title"].as_str(), cat[0]["n"].as_u64()), (Some("p1"), Some("P"), Some(n0 + 7)), "{cat}");
-    let p1 = f.answer(&hub, 0, "", cat.clone()).unwrap();
+    let p1 = f.answer(&hub, 0, "", cat.clone()).await.unwrap();
     assert_eq!(p1["epoch"], epoch(&hub)); assert_eq!(p1["since"], 0);
     let ns: Vec<u64> = p1["items"].as_array().unwrap().iter().map(|i| i["n"].as_u64().unwrap()).collect();
     assert_eq!(ns, vec![n0 + 1, n0 + 2, n0 + 3, n0 + 5], "the device registration is not shared; the first big message fits, the second starts the next page");
     assert_eq!((p1["more"].as_bool(), p1["head"].as_u64()), (Some(true), Some(n0 + 5)));
-    let p2 = f.answer(&hub, n0 + 5, &epoch(&hub), cat.clone()).unwrap();
+    let p2 = f.answer(&hub, n0 + 5, &epoch(&hub), cat.clone()).await.unwrap();
     assert_eq!(p2["items"].as_array().unwrap().iter().map(|i| i["n"].as_u64().unwrap()).collect::<Vec<_>>(), vec![n0 + 6, n0 + 7]);
     assert_eq!((p2["more"].as_bool(), p2["head"].as_u64()), (Some(false), Some(hub.store.len() as u64)));
     // another history's epoch is asked from the start
-    assert_eq!(f.answer(&hub, n0 + 5, "sha256=other", cat).unwrap()["since"], 0);
+    assert_eq!(f.answer(&hub, n0 + 5, "sha256=other", cat).await.unwrap()["since"], 0);
     assert!(!p1.to_string().contains("SECRETTOKEN"));
     let _ = std::fs::remove_dir_all(h);
 }
@@ -85,5 +85,23 @@ async fn hub(tag: &str) -> (Arc<Hub>, std::path::PathBuf) {
     let (from, to, items) = rx.try_recv().unwrap();
     assert_eq!((from, to, items.iter().map(|i| i.n).collect::<Vec<_>>()), (n0 + 1, n0 + 3, vec![n0 + 2, n0 + 3]));
     assert_eq!(items[1].c["text"], "hi");
+    let _ = std::fs::remove_dir_all(h);
+}
+
+#[tokio::test] async fn far_a_pull_across_many_slices_and_a_commit_while_it_reads() {
+    let (hub, h) = hub("slices").await;
+    let n0 = hub.store.len() as u64;
+    let evs: Vec<Value> = (0..9000).map(|i| msg("t", i + 10)).collect();
+    hub.commit_many(&[json!({"$":"ProjectCreated","id":"p1","title":"P","root":"/p","at":1}), created("t", "p1", 2)]).await.unwrap();
+    for c in evs.chunks(1000) { hub.commit_many(c).await.unwrap(); }
+    let f = Feed::new(); f.start(&hub).await;
+    // the observer is not held up while a pull runs (the lock is taken only to copy numbers)
+    let f2 = f.clone(); let hub2 = hub.clone();
+    let pull = tokio::spawn(async move { f2.answer(&hub2, 0, "", json!([])).await.unwrap() });
+    for i in 0..50u32 { f.observe(&[msg("t", 100_000 + i as u64)], hub.store.len() as u32 + 1 + i) }
+    let a = pull.await.unwrap();
+    let ns: Vec<u64> = a["items"].as_array().unwrap().iter().map(|i| i["n"].as_u64().unwrap()).collect();
+    assert!(ns.windows(2).all(|w| w[0] < w[1]) && ns[0] == n0 + 1, "in order, from the start");
+    assert!(a["more"].as_bool().unwrap() || ns.len() >= 9000, "{} items, more={}", ns.len(), a["more"]);
     let _ = std::fs::remove_dir_all(h);
 }
