@@ -25,6 +25,14 @@ difference between two readings (`PF.Stats.since`), so the overlay,
   ui.perfetto.dev. Each area (ui, hub, boot, ...) gets its own row. Events
   reach the file whole, so a killed process leaves a file that still
   loads.
+- **Request timing**: `BACKPLANE_TIMING=1` logs a `[bp-timing] {...}` line
+  per request a connection sends: what it was (the WebSocket frame's
+  method, or the HTTP request line), its size, the fibers waiting when it
+  came (`runnable`), `in_to_out_ms`, from its first bytes in to the first
+  bytes the hub writes back on that connection, and `cpu_ms`, the process CPU
+  spent meanwhile (src/server/effects/loop.js).
+  A connection's next write can be a broadcast rather than the answer: read
+  it by the method.
 - **Logs**: `BACKPLANE_LOG=error|warn|info|debug|trace` (default info),
   `BACKPLANE_LOG_FILE=<file>` to keep a copy. A line looks like
   `backplane 12:03:04 warn slow: ui.frame took 213.2 ms` (UTC).
