@@ -67,14 +67,4 @@ impl Backplane {
         self.screens.attacher.show(raw);
         if let Some(y) = self.screens.offsets.get(raw).copied() { self.scroll.set_offset(point(px(0.), px(y))); }
     }
-    /// Repaint a few times a second while an image is still arriving, then stop (no standing repaint loop).
-    pub(crate) fn poll_images(&mut self, cx: &mut Context<Self>) {
-        if self.screens.img_poll || !self.screens.images.loading() { return; }
-        self.screens.img_poll = true;
-        cx.spawn(async move |weak, cx| loop {
-            cx.background_executor().timer(std::time::Duration::from_millis(150)).await;
-            let Ok(more) = weak.update(cx, |this, cx| { cx.notify(); let more = this.screens.images.loading(); if !more { this.screens.img_poll = false; } more }) else { return };
-            if !more { return; }
-        }).detach();
-    }
 }

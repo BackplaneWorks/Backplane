@@ -168,16 +168,14 @@ pub fn blocks(cx: &mut Context<Backplane>, reg: &Reg, light: bool, nodes: &[Valu
 }
 
 /// Images a message names: each as its picture when it has arrived, a placeholder while it loads or when it cannot.
-pub fn images(cx: &mut Context<Backplane>, light: bool, list: &Value, key: &str) -> Option<AnyElement> {
+pub fn images(light: bool, list: &Value, key: &str, target: Option<&super::attach::Target>, imgs: &super::images::Images) -> Option<AnyElement> {
     let c = |n: &str| theme::color(light, n);
     let items = list.as_array().filter(|a| !a.is_empty())?;
-    let target = cx.entity().read(cx).screens.attacher.target.clone();
-    let imgs = cx.entity().read(cx).screens.images.clone();
     let mut row = div().flex().flex_wrap().gap_2();
     for (i, it) in items.iter().take(12).enumerate() {
         let url = it["url"].as_str().unwrap_or("");
         let name = it["path"].as_str().unwrap_or("").rsplit('/').next().unwrap_or("").to_string();
-        let el = match imgs.get(target.as_ref(), url) {
+        let el = match imgs.get(target, url) {
             Slot::Ready(img) => gpui::img(ImageSource::Image(img)).max_w(px(480.)).max_h(px(360.)).object_fit(ObjectFit::Contain).into_any_element(),
             Slot::Loading => div().px_2().py_1().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("dim")).child(format!("Loading {name}…")).into_any_element(),
             Slot::Failed => div().px_2().py_1().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("bad")).child(format!("Could not load {name}")).into_any_element(),
@@ -185,6 +183,15 @@ pub fn images(cx: &mut Context<Backplane>, light: bool, list: &Value, key: &str)
         row = row.child(div().id(SharedString::from(format!("img-{key}-{i}"))).child(el));
     }
     Some(row.into_any_element())
+}
+
+/// Repaint a few times a second while an image is still arriving, then stop (no standing repaint loop).
+pub fn poll(cx: &mut Context<Backplane>) {
+    cx.spawn(async move |weak, cx| loop {
+        cx.background_executor().timer(std::time::Duration::from_millis(150)).await;
+        let Ok(more) = weak.update(cx, |this, cx| { cx.notify(); let more = this.screens.images.loading(); if !more { this.screens.img_poll = false; } more }) else { return };
+        if !more { return; }
+    }).detach();
 }
 
 impl Backplane {
