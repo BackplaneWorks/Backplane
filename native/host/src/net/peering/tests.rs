@@ -17,12 +17,14 @@ pub(crate) async fn node(tag: &str, trusted: bool) -> Node {
 }
 pub(crate) async fn node_with(tag: &str, trusted: bool, own_device: bool) -> Node { node_extra(tag, trusted, own_device, None).await }
 /// `trusted`: loopback-style trust; `own_device`: the tailnet listener's whois verdict.
+/// A test that needs its hub on a fixed port (the JS-peer test, ports 3915-3919) sets this before `node_extra`; 0 is any port.
+pub(crate) static FIXED_PORT: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(0);
 pub(crate) async fn node_extra(tag: &str, trusted: bool, own_device: bool, extra: Option<Extra>) -> Node {
     let home = home(tag);
     std::fs::write(home.join("token"), format!("token-{tag}\n")).unwrap();
     let hub = Hub::start(Cfg { home: home.clone(), version: "0.14.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() },
         Arc::new(Canned { reply: json!({}) })).await.unwrap();
-    let l = TcpListener::bind("127.0.0.1:0").await.unwrap(); let port = l.local_addr().unwrap().port();
+    let l = TcpListener::bind(("127.0.0.1", FIXED_PORT.load(std::sync::atomic::Ordering::SeqCst))).await.unwrap(); let port = l.local_addr().unwrap().port();
     let (reg, routes) = super::super::start::open(&home, "127.0.0.1", port).unwrap();
     let table = PeerTable::new(); table.start(&hub).await;
     let p = Arc::new(Peering::new(home.clone(), reg, table, routes, false, "127.0.0.1", port));
