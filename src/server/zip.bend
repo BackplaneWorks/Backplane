@@ -38,3 +38,22 @@ def Zip.send(sock: Socket, plan: ZipPlan) -> IO(Socket & Result<&1, &1, U32 & St
 # A file opened within the same confined root as a zip, streamed with ranges.
 def Zip.file(sock: Socket, root: String, rel: String, home: String, disposition: String, range: String, rules: List<&2, String>) -> IO(Socket & Result<&1, &1, U32 & String, Unit>):
   import "./effects/zip.js"
+
+# rel of root (which may be an alias: its real path is taken, then every step
+# is bound to a descriptor, no link below it followed) copied to a file of
+# stage, a private folder of the hub's own, named by the content: [that path].
+# [] when it cannot be opened safely (a link, not a regular file, over 256 MB).
+# A converter that takes a path is given this copy, never the project's path.
+def Zip.stage(root: String, rel: String, home: String, stage: String) -> IO(List<&2, String>):
+  import "./effects/zip.js"
+
+# a new private folder in stage for one job's output: [its path]
+def Zip.scratch(stage: String) -> IO(List<&2, String>):
+  import "./effects/zip.js"
+
+# the pictures (*.png) in src, a folder made by Zip.scratch, put into relDir
+# of root through descriptors (the folder made if missing, each picture a new
+# file renamed over its place, a link there replaced and never followed):
+# the names published, [] when relDir cannot be reached safely.
+def Zip.publish(root: String, relDir: String, src: String, home: String) -> IO(List<&2, String>):
+  import "./effects/zip.js"

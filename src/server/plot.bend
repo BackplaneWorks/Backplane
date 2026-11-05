@@ -19,6 +19,7 @@ import ../core/hier.bend as HI
 import ../core/hist.bend as HS
 import ../core/look.bend as LO
 import ./git.bend as GT
+import ./zip.bend as ZIP
 
 # The phones' viewer. One actor owns every board, schematic or 3D model a
 # phone watches and what each phone holds of it. It polls the files (every
@@ -1269,16 +1270,66 @@ def Pv.read.checked(before: U32 & String, after: U32 & String, r: PR.Ran, key: S
   (a, b) = after
   Pv.read.stable(Bool.and(U32.is_eq(a, c), String.eq(b, d)), (c, d), r, key, kind, q)
 
-def Pv.read.run(fits: Bool, +size: U32, st: U32 & String, low: Bool, +key: String, +kind: U32, +path: String, +q: Chan(PMsg), +dir: String) -> IO(Unit):
+def Pv.read.run(fits: Bool, +size: U32, st: U32 & String, low: Bool, +key: String, +kind: U32, +path: String, +use: String, +q: Chan(PMsg), +dir: String) -> IO(Unit):
   match fits:
     case True{}:
       do IO<Unit>:
         exe : String <- H.Sys.exe_path()
-        r : PR.Ran <- Pv.run(Pv.locked(Pv.solid.kind(kind), U32.is_eq(kind, 0), dir, Pv.argv(low, EX.Exe.child(exe), ["--plot", U32.show(kind), path, Pv.infos(dir, key)])))
+        r : PR.Ran <- Pv.run(Pv.locked(Pv.solid.kind(kind), U32.is_eq(kind, 0), dir, Pv.argv(low, EX.Exe.child(exe), ["--plot", U32.show(kind), use, Pv.infos(dir, key)])))
         after : U32 & String <- Pv.stamp.of(path)
         Pv.read.checked(st, after, r, key, kind, q)
     case False{}:
       Pv.read.k(st, PR.Ran{3, P.Solid.big(size)}, key, kind, q)
+
+# A STEP or GLB model is converted from a copy, not from the path the
+# watch names: the path is opened once, through descriptors within the
+# project (Zip.stage: no link below the folder, a plain file; the folder of
+# an explicitly shown file outside the project is that file's own), and the
+# converter reads the hub's copy, named by its content, so what it opens is
+# what was checked. Boards and schematics (several files, read by the
+# child) and a board's 3D export are not staged. "" when it cannot be
+# opened safely.
+def Pv.hub(+dir: String) -> String:
+  Bool.pick(String, String.ends_with(dir, "/plot"), String.take(dir, Nat.sub(String.length(dir), 5n)), dir)
+
+def Pv.name(+p: String) -> String:
+  Maybe.default(&2, String, List.last(&2, String, String.split(p, '/')), "")
+
+def Pv.parent(+p: String) -> String:
+  String.take(p, Nat.sub(String.length(p), Nat.add(String.length(Pv.name(p)), 1n)))
+
+def Pv.stage.in(+key: String, +path: String) -> Bool:
+  Bool.and(Bool.not(String.is_empty(HS.Hist.at(String.split(key, '|'), 1n))), String.starts_with(path, HS.Hist.at(String.split(key, '|'), 1n) ++ "/"))
+
+def Pv.stage.root(inside: Bool, +key: String, +path: String) -> String:
+  Bool.pick(String, inside, HS.Hist.at(String.split(key, '|'), 1n), Pv.parent(path))
+
+def Pv.stage.rel(inside: Bool, +key: String, +path: String) -> String:
+  Bool.pick(String, inside, String.drop(path, 1n+String.length(HS.Hist.at(String.split(key, '|'), 1n))), Pv.name(path))
+
+def Pv.staged.got(m: List<&2, String>) -> String:
+  match m:
+    case +p <> Nil{}: p
+    case _: ""
+
+def Pv.staged.go(+key: String, +path: String, +dir: String) -> IO(String):
+  IO.bind(List<&2, String>, String, ZIP.Zip.stage(Pv.stage.root(Pv.stage.in(key, path), key, path), Pv.stage.rel(Pv.stage.in(key, path), key, path), Pv.hub(dir), Pv.hub(dir) ++ "/stage"),
+    m => IO.pure(String, Pv.staged.got(m)))
+
+def Pv.staged(wants: Bool, +key: String, +path: String, +dir: String) -> IO(String):
+  match wants:
+    case True{}: Pv.staged.go(key, path, dir)
+    case False{}: IO.pure(String, path)
+
+def Pv.read.now(+use: String, st: U32 & String, low: Bool, +key: String, +kind: U32, +path: String, +q: Chan(PMsg), +dir: String) -> IO(Unit):
+  do IO<Unit>:
+    +size : U32 <- Pv.solid.known(Pv.solid.kind(kind), kind, use)
+    Pv.read.run(P.Solid.fits(size), size, st, low, key, kind, path, use, q, dir)
+
+def Pv.read.use(refused: Bool, +use: String, st: U32 & String, low: Bool, +key: String, +kind: U32, +path: String, +q: Chan(PMsg), +dir: String) -> IO(Unit):
+  match refused:
+    case True{}: Pv.read.k(st, PR.Ran{1, "the model cannot be opened safely: a link, or not a plain file"}, key, kind, q)
+    case False{}: Pv.read.now(use, st, low, key, kind, path, q, dir)
 
 # (a model whose GLB is known too big is refused here, at once: its child
 # would first wait for solid.lock behind any other model's read, and the 3D
@@ -1287,8 +1338,8 @@ def Pv.read.run(fits: Bool, +size: U32, st: U32 & String, low: Bool, +key: Strin
 def Pv.read.at(low: Bool, +key: String, +kind: U32, +path: String, +q: Chan(PMsg), +dir: String) -> IO(Unit):
   do IO<Unit>:
     st : U32 & String <- Pv.stamp.of(path)
-    +size : U32 <- Pv.solid.known(Pv.solid.kind(kind), kind, path)
-    Pv.read.run(P.Solid.fits(size), size, st, low, key, kind, path, q, dir)
+    +use : String <- Pv.staged(Bool.and(Pv.solid.kind(kind), Bool.or(Pv.is_step(path), String.ends_with(path, ".glb"))), key, path, dir)
+    Pv.read.use(String.is_empty(use), use, st, low, key, kind, path, q, dir)
 
 # a 3D model's read (a board through kicad-cli's export, a STEP through
 # step2glb) runs at low priority (nice) too: it takes seconds of CPU, and a
