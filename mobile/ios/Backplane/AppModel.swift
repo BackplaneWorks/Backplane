@@ -413,6 +413,7 @@ final class AppModel {
     }
 
     init() {
+        Boot.mark("init-enter")
         performanceStart(.startup)
         engine.onFlush = { [weak self] out, generation in
             Task { @MainActor [weak self] in self?.apply(out, generation: generation) }
@@ -420,11 +421,13 @@ final class AppModel {
         #if DEBUG
         if let l = ProcessInfo.processInfo.environment["BACKPLANE_LINK"] { links = l.split(separator: " ").map(String.init) }
         #endif
+        Boot.mark("before-cache")
         let cacheStarted = PerformanceTrace.shared.begin()
         let cachedData = recentScreen.load(links: links, profile: Self.cid)
         let cachedScreen = cachedData.flatMap { try? JSONDecoder().decode(Screen.self, from: $0) }
         PerformanceTrace.shared.end(.cache, operation: .startup, started: cacheStarted,
                                     bytes: UInt64(cachedData?.count ?? 0), outcome: cachedScreen == nil ? .skipped : .success)
+        Boot.mark("cache-decoded")
         if cachedData != nil, cachedScreen == nil { NSLog("Backplane screen-cache miss_native_decode") }
         if let cached = cachedScreen {
             screen = cached
@@ -449,6 +452,7 @@ final class AppModel {
             } else if let tab = AppTab(rawValue: settings.defaultTab), tab != .settings { self.tab = tab }
             else { tab = cached.uber == nil ? .threads : .home }
         }
+        Boot.mark("cached-applied")
         notifier.open = { [weak self] id in self?.alertOpened(id) }
         paths.pathUpdateHandler = { [weak self] path in
             let names = path.availableInterfaces.map(\.name)
@@ -476,20 +480,50 @@ final class AppModel {
         webWire()
         #endif
         if let d = try? Data(contentsOf: Self.settingsFile), let m = try? JSONDecoder().decode([String: Settings].self, from: d) { hubSettings = m }
+        Boot.mark("init-tasks")
         let e = engine
+        // The engine starts now, off the main thread, while SwiftUI draws the cached screen: a Task made here only begins when the
+        // main thread is free again (about 400 ms after init on a relaunch, which is the first cached paint), and the engine's own
+        // start (140 ms) and first view (up to 360 ms cold) then ran after it.
+        let cid = Self.cid, drafts = UserDefaults.standard.string(forKey: "drafts") ?? "{}", list = settings.threadList
+        // the four language/renderer settings the main task applied one engine call at a time after the first view (about 400 ms
+        // cold, each a whole screen) go to the engine in the same chain
+        let lang = [("mailroom-renderer", "ios-v1"), ("lang-preview", settings.langPreview ? "1" : ""), ("lang", settings.lang), ("lang-os", Locale.preferredLanguages.first ?? "")]
+        let langGeneration = pairingGeneration
+        let early = Task.detached(priority: .userInitiated) { () -> (Out?, Out?, [Out?]) in
+            let started = await e.start(cid, drafts)
+            Boot.mark("engine-started")
+            let view = await e.local("view", list)
+            Boot.mark("local-view")
+            var langs: [Out?] = []
+            for (k, v) in lang { langs.append(await e.local(k, v)) }
+            Boot.mark("language-engine")
+            return (started, view, langs)
+        }
         Task {
-            apply(await e.start(Self.cid, UserDefaults.standard.string(forKey: "drafts") ?? "{}"))
-            apply(await e.local("view", settings.threadList))
-            await languageLocal(e)
+            Boot.mark("task-begin")
+            let (started, view, langs) = await early.value
+            Boot.mark("early-awaited")
+            apply(started)
+            Boot.mark("applied-started")
+            apply(view)
+            Boot.mark("applied-view")
+            for o in langs {
+                guard langGeneration == pairingGeneration else { break }
+                apply(o, generation: langGeneration)
+            }
+            Boot.mark("language")
             // Bounded choices only; a miss never opens the canonical StateStore.
             let paired = links, profile = Self.cid, store = presentationStore
             if let text = await Task.detached(priority: .userInitiated, operation: { store.load(links: paired, profile: profile) }).value, paired == links {
                 let restored = await e.loadPresentation(text)
                 if paired == links { apply(restored) }
             }
+            Boot.mark("presentation")
             ready = true
             island = IslandController { [weak self] kind, token, hub in self?.register(kind, token, hub: hub) }
             connect()
+            Boot.mark("connect-called")
             #if DEBUG
             // headless checks pair from the environment: no permission prompt over the screen
             if ProcessInfo.processInfo.environment["BACKPLANE_LINK"] == nil, !links.isEmpty { notifier.setUp() }
@@ -2582,7 +2616,7 @@ final class AppModel {
                                 default: break
                                 }
                                 if kv[0] == "@cstate" || kv[0].hasPrefix("@ime") {
-                                    NSLog("Backplane composer view=%@ marked=%@ sel=%d,%d model=%@ undo=%@", String(v.text.prefix(40)), String(v.markedTextRange != nil), v.selectedRange.location, v.selectedRange.length, String(self.composer.prefix(40)), String(v.undoManager?.canUndo ?? false))
+                                    NSLog("Backplane composer [%@] view=%@ marked=%@ sel=%d,%d model=%@ undo=%@", kv[0] == "@cstate" && kv.count > 1 ? kv[1] : kv[0], String(v.text.prefix(40)), String(v.markedTextRange != nil), v.selectedRange.location, v.selectedRange.length, String(self.composer.prefix(40)), String(v.undoManager?.canUndo ?? false))
                                 }
                             } else { NSLog("Backplane composer none") }
                             continue

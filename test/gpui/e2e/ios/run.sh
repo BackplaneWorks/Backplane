@@ -20,7 +20,7 @@ xcrun simctl install "$SIM_UDID" "$APP" || { echo "no app at $APP"; exit 1; }
 xcodebuild build-for-testing -quiet -project "$HERE/E2E.xcodeproj" -scheme BackplaneE2E -sdk iphonesimulator \
   -destination "platform=iOS Simulator,id=$SIM_UDID" -derivedDataPath "$DD" CODE_SIGNING_ALLOWED=NO > "$OUT/build.log" 2>&1 \
   || { tail -30 "$OUT/build.log"; echo "build-for-testing failed"; exit 1; }
-IDS="pair projects-threads send-image stream switch-fast popups bots-rooms viewers downloads settings reconnect long-session"
+IDS="pair projects-threads send-image stream switch-fast popups composer-keys bots-rooms viewers downloads settings reconnect long-session"
 [ "$J" = all ] || IDS=$*
 for id in $IDS; do
   fn=$(echo "$id" | tr - _)
@@ -51,7 +51,7 @@ done
 /usr/bin/python3 - "$OUT" <<'PY'
 import json,glob,os,sys,datetime
 out=sys.argv[1]; res=[]
-items={"pair":"Pair","projects-threads":"Open projects and threads","send-image":"Send, reply and paste an image","stream":"Watch a running turn stream","switch-fast":"Switch threads fast","popups":"Mention and command popups","bots-rooms":"Bots and rooms","viewers":"Open Board, Schematic and 3D viewers","downloads":"Download files","settings":"Settings","reconnect":"Reconnect after sleep","long-session":"Long session with 20 simulated agents"}
+items={"pair":"Pair","projects-threads":"Open projects and threads","send-image":"Send, reply and paste an image","stream":"Watch a running turn stream","switch-fast":"Switch threads fast","popups":"Mention and command popups","composer-keys":"Return, Shift+Return and autocorrect","bots-rooms":"Bots and rooms","viewers":"Open Board, Schematic and 3D viewers","downloads":"Download files","settings":"Settings","reconnect":"Reconnect after sleep","long-session":"Long session with 20 simulated agents"}
 for f in sorted(glob.glob(out+"/*.json")):
     if f.endswith("summary.json"): continue
     r=json.load(open(f)); r["item"]=items.get(r["journey"],r["journey"]); res.append(r)

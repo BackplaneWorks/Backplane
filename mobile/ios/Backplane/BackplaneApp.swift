@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 struct BackplaneApp: App {
     @UIApplicationDelegateAdaptor private var delegate: AppDelegate
     @Environment(\.scenePhase) private var phase
+    private let bootMark: Void = Boot.mark("app-struct")
     @State private var model = AppModel()
     // JetBrains Mono (Mono.swift): registered before any view draws
     private let monoFonts: Void = Mono.register()
@@ -28,6 +29,7 @@ struct BackplaneApp: App {
     var body: some Scene {
         WindowGroup {
             AppRoot(model: model)
+                .onAppear { Boot.mark("root-appear") }
                 #if DEBUG
                 .overlay { if model.showFonts { FontsProbe() } }
                 #endif

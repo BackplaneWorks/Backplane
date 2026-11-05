@@ -90,14 +90,29 @@ final class ComposerUITextView: UITextView {
     var onPasteImages: (([UIImage]) -> Void)?
 
     // Return on a hardware keyboard sends, Shift+Return (and the software keyboard's Return) inserts a newline
+    // A press we consume gets none of the later phases passed to UIKit (all phases of a press, or none).
+    private var consumed = Set<UIPress>()
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-        if markedTextRange == nil,
-           let p = presses.first(where: { $0.key?.keyCode == .keyboardReturnOrEnter }), let key = p.key,
-           key.modifierFlags.intersection([.shift, .alternate, .control, .command]).isEmpty, onSend != nil {
+        if markedTextRange == nil, onSend != nil,
+           let p = presses.first(where: { press in
+               guard let key = press.key, key.keyCode == .keyboardReturnOrEnter || key.keyCode == .keypadEnter else { return false }
+               return key.modifierFlags.intersection([.shift, .alternate, .control, .command]).isEmpty
+           }) {
+            consumed.insert(p)
             onSend?()
+            let rest = presses.subtracting([p])
+            if !rest.isEmpty { super.pressesBegan(rest, with: event) }
             return
         }
         super.pressesBegan(presses, with: event)
+    }
+    override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        let rest = presses.subtracting(consumed); consumed.subtract(presses)
+        if !rest.isEmpty { super.pressesEnded(rest, with: event) }
+    }
+    override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        let rest = presses.subtracting(consumed); consumed.subtract(presses)
+        if !rest.isEmpty { super.pressesCancelled(rest, with: event) }
     }
 
     // paste: pictures are attachments; anything else is the system's text paste
@@ -107,7 +122,7 @@ final class ComposerUITextView: UITextView {
         super.paste(sender)
     }
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
-        if action == #selector(UIResponderStandardEditActions.paste(_:)), UIPasteboard.general.hasImages { return true }
+        if action == #selector(UIResponderStandardEditActions.paste(_:)), isEditable, UIPasteboard.general.hasImages { return true }
         return super.canPerformAction(action, withSender: sender)
     }
 }
@@ -166,6 +181,10 @@ struct UIKitField: UIViewRepresentable {
         // it, a restore, another device): a composition in progress is ended first, the selection is kept (clamped), and the
         // undo history, which points at the old ranges, is dropped (shake-to-undo crashed on those).
         if v.text != text {
+            // unmarkText() and the text change both tell the delegate; the model is what is being applied here, so the
+            // coordinator must not send either back as an edit (that wrote the old text over the new one)
+            context.coordinator.applying = true
+            defer { context.coordinator.applying = false }
             if v.markedTextRange != nil { v.unmarkText() }
             let sel = v.selectedRange
             v.text = text
@@ -210,8 +229,10 @@ struct UIKitField: UIViewRepresentable {
 
     final class Coordinator: NSObject, UITextViewDelegate {
         var parent: UIKitField
+        var applying = false
         init(_ p: UIKitField) { parent = p }
         func textViewDidChange(_ v: UITextView) {
+            if applying { v.viewWithTag(77)?.isHidden = !v.text.isEmpty; return }
             v.viewWithTag(77)?.isHidden = !v.text.isEmpty
             parent.onChange(v.text)
         }
