@@ -64,7 +64,8 @@ pub fn start_with(hub: &Arc<Hub>, host: &str, port: u16, tailnet: bool) -> Arc<A
             let _ = ROUTES.set(routes.clone());
             let _ = PEERING.set(peering.clone());
             if tokio::runtime::Handle::try_current().is_ok() {
-                super::peerhttp::spawn_loops(hub.clone(), table, peering.clone());
+                super::peerhttp::spawn_loops(hub.clone(), table.clone(), peering.clone());
+                super::farhttp_start(hub.clone(), peering.clone());
                 if tailnet {
                     // the tailnet listener: owner trust by whois, the pairing link, and what clients are told ("tailscale")
                     let (h, r, host) = (hub.clone(), routes.clone(), host.to_string());

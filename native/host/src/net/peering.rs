@@ -229,4 +229,4 @@ pub fn plain(to: &str, at: &str, proof: &str) -> bool {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
