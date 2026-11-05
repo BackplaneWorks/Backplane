@@ -1,174 +1,180 @@
-// Effects-host spike. Rust owns sockets and SQLite; the policy (the real /hello
-// answer, the history page's rows -> blocks -> ids) is native Bend in a child
-// process (native/bend/policy.bend), handed one request file per call.
-use rusqlite::{Connection, OpenFlags};
-use std::cell::RefCell;
-use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
-use std::process::Command;
-use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
-use std::sync::Arc;
-use std::time::Instant;
+//! backplane-hub: the Backplane hub for native clients (GPUI, SwiftUI, Compose).
+//! HTTP + authenticated WebSocket; renderer `mobile`; the picture comes from the presenter.
+mod auth; mod cbor; mod hub; mod presenter; mod store;
 
-struct Cfg { db: String, policy: String, version: String, commit: String, busy: String, tmp: String }
-#[derive(Default)]
-struct Stats { n: AtomicU64, sql_us: AtomicU64, ser_us: AtomicU64, policy_us: AtomicU64, fmt_us: AtomicU64,
-               hello_n: AtomicU64, hello_us: AtomicU64, req_bytes: AtomicU64, rep_bytes: AtomicU64 }
-static SEQ: AtomicU64 = AtomicU64::new(0);
-thread_local! { static DB: RefCell<Option<Connection>> = RefCell::new(None); }
+use anyhow::{Context, Result};
+use auth::Req;
+use futures_util::{SinkExt, StreamExt};
+use hub::{Conn, Hub};
+use serde_json::{json, Value};
+use std::{path::PathBuf, sync::Arc, time::Duration};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
+use tokio_tungstenite::tungstenite::{handshake::server::ErrorResponse, protocol::WebSocketConfig, Message};
 
-const PAGE_SQL: &str = "SELECT * FROM (SELECT * FROM (SELECT seq, ord, id, thread, src, kind, role, akind, CASE WHEN kind = 'msg' THEN text ELSE substr(text, 1, 513) END AS text, at FROM entry WHERE thread = ?1 AND seq < ?2 ORDER BY seq DESC LIMIT ?3) UNION ALL SELECT * FROM (SELECT seq, ord, id, thread, src, kind, role, akind, CASE WHEN kind = 'msg' THEN text ELSE substr(text, 1, 513) END AS text, at FROM entry WHERE src = ?1 AND src <> '' AND seq < ?2 ORDER BY seq DESC LIMIT ?3)) ORDER BY seq DESC LIMIT ?3";
-const SEQ_AT: &str = "SELECT coalesce((SELECT seq FROM entry WHERE ord >= ?1 ORDER BY ord LIMIT 1), 140737488355328)";
-const TOP: i64 = 140737488355328;
+const USAGE: &str = "usage: backplane-hub --home DIR --port N [--host ADDR] [--policy-bin PATH] [--no-tailscale] [--foreground] [--headless]\n       backplane-hub --help | --version\n";
 
-fn esc(s: &str, out: &mut String) {
-    for c in s.chars() { match c { '\\' => out.push_str("\\\\"), '\t' => out.push_str("\\t"), '\n' => out.push_str("\\n"), c => out.push(c) } }
-}
+struct Args { home: PathBuf, port: u16, host: String, policy: Option<PathBuf>, version: String, commit: String }
 
-// one call to the native Bend policy: request text in a file, answer on stdout
-fn policy(cfg: &Cfg, request: &str) -> String {
-    let path = format!("{}/req-{}-{}", cfg.tmp, std::process::id(), SEQ.fetch_add(1, Relaxed));
-    std::fs::write(&path, request).expect("write request");
-    let out = Command::new(&cfg.policy).arg(&path).output().expect("spawn policy");
-    let _ = std::fs::remove_file(&path);
-    String::from_utf8_lossy(&out.stdout).into_owned()
-}
-
-fn hello_body(cfg: &Cfg, st: &Stats) -> Vec<u8> {
-    let t = Instant::now();
-    let hex = policy(cfg, &format!("hello\t{}\t{}\t{}\n", cfg.version, cfg.busy, cfg.commit));
-    let hex = hex.trim();
-    let bytes: Vec<u8> = (0..hex.len() / 2).map(|i| u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).unwrap_or(0)).collect();
-    st.hello_n.fetch_add(1, Relaxed); st.hello_us.fetch_add(t.elapsed().as_micros() as u64, Relaxed);
-    bytes
-}
-
-fn history(cfg: &Cfg, st: &Stats, thread: &str) -> String {
-    let t0 = Instant::now();
-    let mut req = String::with_capacity(64 * 1024);
-    req.push_str("page\t"); req.push_str(thread); req.push('\n');
-    DB.with(|cell| {
-        let mut slot = cell.borrow_mut();
-        if slot.is_none() { *slot = Some(Connection::open_with_flags(&cfg.db, OpenFlags::SQLITE_OPEN_READ_ONLY).expect("open db")); }
-        let db = slot.as_ref().unwrap();
-        let seq: i64 = db.query_row(SEQ_AT, [TOP], |r| r.get(0)).unwrap();
-        let mut q = db.prepare_cached(PAGE_SQL).unwrap();
-        let mut rows = q.query(rusqlite::params![thread, seq, 49i64]).unwrap();
-        let t1 = Instant::now();
-        st.sql_us.fetch_add(t1.duration_since(t0).as_micros() as u64, Relaxed);
-        while let Some(r) = rows.next().unwrap() {
-            for i in 0..10 {
-                if i > 0 { req.push('\t'); }
-                let v: rusqlite::types::Value = r.get(i).unwrap();
-                match v {
-                    rusqlite::types::Value::Integer(n) => req.push_str(&n.to_string()),
-                    rusqlite::types::Value::Text(s) => esc(&s, &mut req),
-                    _ => {}
-                }
-            }
-            req.push('\n');
+fn parse() -> std::result::Result<Args, i32> {
+    let a: Vec<String> = std::env::args().skip(1).collect();
+    let (mut home, mut port, mut host, mut policy) = (None, None, "127.0.0.1".to_string(), None);
+    let (mut version, mut commit) = ("0.14.0".to_string(), std::env::var("BACKPLANE_COMMIT").unwrap_or_else(|_| "unknown".into()));
+    let mut i = 0;
+    while i < a.len() {
+        let value = |i: usize| a.get(i + 1).cloned().ok_or_else(|| { eprint!("{USAGE}"); 2 });
+        match a[i].as_str() {
+            "--help" | "-h" => { print!("{USAGE}"); return Err(0) }
+            "--version" => { println!("backplane-hub {}", env!("CARGO_PKG_VERSION")); return Err(0) }
+            "--home" => { home = Some(PathBuf::from(value(i)?)); i += 1 }
+            "--port" => { port = Some(value(i)?.parse::<u16>().map_err(|_| { eprint!("{USAGE}"); 2 })?); i += 1 }
+            "--host" => { host = value(i)?; i += 1 }
+            "--policy-bin" => { policy = Some(PathBuf::from(value(i)?)); i += 1 }
+            "--version-string" => { version = value(i)?; i += 1 }
+            "--commit" => { commit = value(i)?; i += 1 }
+            "--no-tailscale" | "--foreground" | "--headless" => {}
+            _ => { eprint!("{USAGE}"); return Err(2) }
         }
-    });
-    let t2 = Instant::now();
-    st.req_bytes.fetch_add(req.len() as u64, Relaxed);
-    let out = policy(cfg, &req);
-    let t3 = Instant::now();
-    st.policy_us.fetch_add(t3.duration_since(t2).as_micros() as u64, Relaxed);
-    // format the canonical answer: ids, rows newest first
-    let mut ids = "";
-    let mut rows: Vec<(u64, Vec<u64>)> = vec![];
-    for l in out.lines() {
-        if let Some(r) = l.strip_prefix("ids ") { ids = r; }
-        else if let Some(r) = l.strip_prefix("row ") {
-            let mut p = r.split(' ');
-            let ord: u64 = p.next().unwrap().parse().unwrap();
-            rows.push((ord, p.map(|x| x.parse().unwrap()).collect()));
-        }
+        i += 1;
     }
-    rows.sort_by(|a, b| b.0.cmp(&a.0));
-    let mut js = format!("{{\"thread\":{},\"ids\":[{}],\"rows\":[", json_str(thread), ids);
-    for (i, (ord, lens)) in rows.iter().enumerate() {
-        if i > 0 { js.push(','); }
-        js.push_str(&format!("[{},[{}]]", ord, lens.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",")));
-    }
-    js.push_str("]}");
-    st.fmt_us.fetch_add(t3.elapsed().as_micros() as u64, Relaxed);
-    st.ser_us.fetch_add(t2.duration_since(t0).as_micros() as u64 - 0, Relaxed);
-    st.rep_bytes.fetch_add(out.len() as u64, Relaxed);
-    st.n.fetch_add(1, Relaxed);
-    js
+    if policy.is_none() { policy = std::env::var("BACKPLANE_POLICY_BIN").ok().filter(|p| !p.is_empty()).map(PathBuf::from); }
+    // no default home or port: this binary must never land on a live hub's by accident
+    match (home, port) { (Some(home), Some(port)) => Ok(Args { home, port, host, policy, version, commit }), _ => { eprint!("{USAGE}"); Err(2) } }
 }
 
-fn json_str(s: &str) -> String {
-    let mut o = String::from("\"");
-    for c in s.chars() { match c { '"' => o.push_str("\\\""), '\\' => o.push_str("\\\\"), c if (c as u32) < 32 => o.push_str(&format!("\\u{:04x}", c as u32)), c => o.push(c) } }
-    o.push('"'); o
+/// One hub per home: an exclusive flock on <home>/hub.lock, which says "<pid> <port> flock".
+fn take_lock(home: &std::path::Path, port: u16) -> Result<std::fs::File> {
+    use std::os::fd::AsRawFd;
+    let path = home.join("hub.lock");
+    let f = std::fs::OpenOptions::new().create(true).read(true).write(true).truncate(false).open(&path)?;
+    if unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+        let said = std::fs::read_to_string(&path).unwrap_or_default();
+        let mut it = said.split_whitespace();
+        eprintln!("a hub already serves {} (pid {}, port {})", home.display(), it.next().unwrap_or("?"), it.next().unwrap_or("?"));
+        std::process::exit(1);
+    }
+    f.set_len(0)?;
+    use std::io::Write; (&f).write_all(format!("{} {} flock\n", std::process::id(), port).as_bytes())?;
+    Ok(f)
 }
 
-fn http(status: &str, ctype: &str, body: &[u8]) -> Vec<u8> {
-    // the same header lines, in the same order, as the JS hub's W.Http.response
-    let mut v = format!("HTTP/1.1 {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n", status, ctype, body.len()).into_bytes();
+fn ensure_token(home: &std::path::Path) -> Result<()> {
+    let p = home.join("token");
+    if !p.exists() {
+        let mut b = [0u8; 24]; std::fs::File::open("/dev/urandom")?.read_exact_sync(&mut b)?;
+        use std::os::unix::fs::OpenOptionsExt; use std::io::Write;
+        std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&p)?.write_all(hex::encode(b).as_bytes())?;
+    }
+    Ok(())
+}
+trait ReadExactSync { fn read_exact_sync(&mut self, b: &mut [u8]) -> std::io::Result<()>; }
+impl ReadExactSync for std::fs::File { fn read_exact_sync(&mut self, b: &mut [u8]) -> std::io::Result<()> { std::io::Read::read_exact(self, b) } }
+
+fn response(status: &str, ctype: &str, extra: &str, body: &[u8]) -> Vec<u8> {
+    // core/http.bend Http.response: the same header lines in the same order
+    let mut v = format!("HTTP/1.1 {status}\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nCache-Control: no-cache\r\nConnection: close\r\n{extra}\r\n", body.len()).into_bytes();
     v.extend_from_slice(body); v
 }
 
-fn query_thread(target: &str) -> String {
-    target.split('?').nth(1).unwrap_or("").split('&').find_map(|kv| kv.strip_prefix("thread=")).unwrap_or("").to_string()
-}
-
-fn handle(mut s: TcpStream, cfg: Arc<Cfg>, st: Arc<Stats>) {
-    let mut peek = [0u8; 2048];
-    let n = match s.peek(&mut peek) { Ok(n) => n, Err(_) => return };
-    let head = String::from_utf8_lossy(&peek[..n]).to_lowercase();
-    if head.contains("upgrade: websocket") {
-        let mut ws = match tungstenite::accept(s) { Ok(w) => w, Err(_) => return };
-        while let Ok(m) = ws.read() {
-            match m {
-                tungstenite::Message::Text(t) => {
-                    let reply = if let Some(th) = t.strip_prefix("history ") { history(&cfg, &st, th) } else { "error".into() };
-                    if ws.send(tungstenite::Message::Text(reply)).is_err() { break; }
-                }
-                tungstenite::Message::Close(_) => break,
-                _ => {}
-            }
+async fn http(hub: &Hub, mut s: TcpStream, req: Req) -> Result<()> {
+    let out = match req.route() {
+        "/hello" => {
+            let body = cbor::encode(&json!({"backplane":hub.cfg.version,"busy":0,"commit":hub.cfg.commit}));
+            response("200 OK", "application/cbor", "", &body)
         }
-        return;
-    }
-    let mut buf = vec![0u8; 8192]; let mut len = 0;
-    loop {
-        let k = match s.read(&mut buf[len..]) { Ok(0) | Err(_) => return, Ok(k) => k };
-        len += k;
-        if buf[..len].windows(4).any(|w| w == b"\r\n\r\n") || len == buf.len() { break; }
-    }
-    let text = String::from_utf8_lossy(&buf[..len]).into_owned();
-    let line = text.lines().next().unwrap_or("");
-    let target = line.split(' ').nth(1).unwrap_or("/");
-    let path = target.split('?').next().unwrap_or("/");
-    let reply = match path {
-        "/hello" => http("200 OK", "application/cbor", &hello_body(&cfg, &st)),
-        "/history" => http("200 OK", "application/json", history(&cfg, &st, &query_thread(target)).as_bytes()),
-        "/stats" => {
-            let g = |a: &AtomicU64| a.load(Relaxed);
-            let n = g(&st.n).max(1); let hn = g(&st.hello_n).max(1);
-            let rss = std::fs::read_to_string("/proc/self/status").unwrap_or_default().lines().filter(|l| l.starts_with("VmHWM") || l.starts_with("VmRSS")).collect::<Vec<_>>().join(" ").replace('\t', " ");
-            let b = format!("{{\"history_n\":{},\"avg_sql_us\":{},\"avg_serialize_and_sql_us\":{},\"avg_policy_child_us\":{},\"avg_format_us\":{},\"avg_request_bytes\":{},\"avg_reply_bytes\":{},\"hello_n\":{},\"avg_hello_policy_us\":{},\"proc\":{}}}",
-                g(&st.n), g(&st.sql_us) / n, g(&st.ser_us) / n, g(&st.policy_us) / n, g(&st.fmt_us) / n, g(&st.req_bytes) / n, g(&st.rep_bytes) / n, g(&st.hello_n), g(&st.hello_us) / hn, json_str(&rss));
-            http("200 OK", "application/json", b.as_bytes())
-        }
-        _ => http("404 Not Found", "text/plain", b"not found"),
+        "/client/capabilities" => if hub.auth.paired_request(&req) {
+            response("200 OK", "application/json", "Cache-Control: no-store\r\n", serde_json::to_string(&hub::capabilities())?.as_bytes())
+        } else { response("401 Unauthorized", "text/plain", "Cache-Control: no-store\r\n", b"paired authentication required") },
+        _ => response("404 Not Found", "text/plain; charset=utf-8", "", b"not found"),
     };
-    let _ = s.write_all(&reply);
+    s.write_all(&out).await?; s.shutdown().await.ok(); Ok(())
 }
 
-fn main() {
-    let a: Vec<String> = std::env::args().collect();
-    let get = |k: &str, d: &str| a.iter().position(|x| x == k).and_then(|i| a.get(i + 1)).cloned().unwrap_or(d.to_string());
-    let cfg = Arc::new(Cfg { db: get("--db", "store.db"), policy: get("--policy", "policy"), version: get("--version", "0.14.0"),
-        commit: get("--commit", "unknown"), busy: get("--busy", "0"), tmp: get("--tmp", "/tmp") });
-    let st = Arc::new(Stats::default());
-    let l = TcpListener::bind(format!("127.0.0.1:{}", get("--port", "3811"))).expect("bind");
-    eprintln!("bphost listening on {}", l.local_addr().unwrap());
-    for s in l.incoming().flatten() {
-        let (c, t) = (cfg.clone(), st.clone());
-        std::thread::spawn(move || handle(s, c, t));
+fn pack(c: &Conn, v: &Value) -> Message {
+    if c.cbor { Message::Binary(cbor::encode(v).into()) } else { Message::Text(serde_json::to_string(v).unwrap_or_default().into()) }
+}
+
+async fn socket(hub: Arc<Hub>, s: TcpStream, cbor_wanted: bool) -> Result<()> {
+    let mut cfg = WebSocketConfig::default(); cfg.max_message_size = Some(524288); cfg.max_frame_size = Some(524288);
+    let (mut tx, mut rx) = tokio_tungstenite::accept_async_with_config(s, Some(cfg)).await?.split();
+    let (mut conn, greeting) = hub.connect(cbor_wanted);
+    tx.send(pack(&conn, &greeting)).await?;
+    let mut changes = hub.changed.subscribe();
+    let mut beat = tokio::time::interval(Duration::from_millis(15000)); beat.tick().await;
+    let mut due: Option<tokio::time::Instant> = None;
+    loop {
+        tokio::select! {
+            m = rx.next() => {
+                let Some(m) = m else { return Ok(()) };
+                let v: Value = match m? { Message::Binary(b) => match cbor::decode(&b) { Ok(v) => v, Err(_) => continue }, Message::Text(t) => match serde_json::from_str(t.as_str()) { Ok(v) => v, Err(_) => continue }, Message::Close(_) => return Ok(()), _ => continue };
+                for f in hub.request(&mut conn, &v).await { tx.send(pack(&conn, &f)).await?; }
+            }
+            n = changes.recv() => { match n { Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => if due.is_none() && !conn.view_id.is_empty() { due = Some(tokio::time::Instant::now() + Duration::from_millis(50)) }, Err(_) => return Ok(()) } }
+            _ = async { match due { Some(t) => tokio::time::sleep_until(t).await, None => std::future::pending().await } } => {
+                due = None; let rev = hub.revision().await;
+                if rev != conn.lastrev { tx.send(pack(&conn, &hub.notice(&conn, rev))).await?; }
+            }
+            _ = beat.tick() => { tx.send(pack(&conn, &json!({"t":"hb"}))).await?; }
+        }
+    }
+}
+
+async fn serve(hub: Arc<Hub>, s: TcpStream) -> Result<()> {
+    let mut buf = vec![0u8; 16384];
+    let mut tries = 0;
+    let (head_len, req) = loop {
+        let n = s.peek(&mut buf).await?; if n == 0 { return Ok(()) }
+        let mut hs = [httparse::EMPTY_HEADER; 64];
+        let mut r = httparse::Request::new(&mut hs);
+        match r.parse(&buf[..n]) {
+            Ok(httparse::Status::Complete(len)) => break (len, Req { method: r.method.unwrap_or("").to_string(), target: r.path.unwrap_or("/").to_string(),
+                headers: r.headers.iter().map(|h| (h.name.to_string(), String::from_utf8_lossy(h.value).into_owned())).collect() }),
+            Ok(httparse::Status::Partial) if n < buf.len() && tries < 200 => { tries += 1; tokio::time::sleep(Duration::from_millis(10)).await }
+            _ => { let mut s = s; s.write_all(&response("400 Bad Request", "text/plain; charset=utf-8", "", b"bad request")).await.ok(); return Ok(()) }
+        }
+    };
+    let mut s = s;
+    if req.route() == "/ws" && req.header("upgrade").eq_ignore_ascii_case("websocket") {
+        if !hub.auth.allowed(&req) {
+            let mut sink = vec![0u8; head_len]; s.read_exact(&mut sink).await?;
+            s.write_all(&response("401 Unauthorized", "text/plain; charset=utf-8", "", b"this Backplane needs its pairing token")).await?; s.shutdown().await.ok(); return Ok(());
+        }
+        let (view, mobile) = (req.param("view") == "1", req.param("mobile") == "1");
+        if !(view && mobile) { // plain wire streams belong to the web client, which this hub does not serve
+            let mut sink = vec![0u8; head_len]; s.read_exact(&mut sink).await?;
+            s.write_all(&response("400 Bad Request", "text/plain; charset=utf-8", "", b"this hub serves view=1&mobile=1 only")).await?; s.shutdown().await.ok(); return Ok(());
+        }
+        return socket(hub, s, req.param("enc") == "cbor").await;
+    }
+    let mut sink = vec![0u8; head_len]; s.read_exact(&mut sink).await?;
+    http(&hub, s, req).await
+}
+
+fn rejected(e: &str) -> ErrorResponse { let mut r = ErrorResponse::new(Some(e.to_string())); *r.status_mut() = 401.try_into().unwrap(); r }
+
+#[tokio::main]
+async fn main() {
+    let args = match parse() { Ok(a) => a, Err(code) => std::process::exit(code) };
+    if let Err(e) = run(args).await { eprintln!("backplane-hub: {e:#}"); std::process::exit(1) }
+}
+
+async fn run(a: Args) -> Result<()> {
+    let _ = rejected; // reserved for the handshake callback once the query rules grow
+    std::fs::create_dir_all(&a.home)?;
+    let _lock = take_lock(&a.home, a.port)?;
+    ensure_token(&a.home)?;
+    let presenter: Arc<dyn presenter::Presenter> = match &a.policy {
+        Some(p) => Arc::new(presenter::BpPolicy::spawn(p).await?),
+        None => Arc::new(presenter::Canned { reply: json!({"remoteReady":false,"cmds":[],"session":{}}) }),
+    };
+    let listen = format!("{}:{}", a.host, a.port);
+    let hub = Hub::start(hub::Cfg { home: a.home.clone(), version: a.version, commit: a.commit, listen: listen.clone(), os: "linux".into(), arch: "x64".into() }, presenter).await?;
+    let l = TcpListener::bind(&listen).await.with_context(|| format!("bind {listen}"))?;
+    eprintln!("Backplane listening on http://{listen}");
+    eprintln!("presenter: {}; events: {}; torn tail bytes: {}", hub.presenter.name(), hub.store.lock().await.len(), hub.store.lock().await.torn_bytes);
+    loop {
+        let (s, _) = l.accept().await?; s.set_nodelay(true).ok();
+        let h = hub.clone();
+        tokio::spawn(async move { let _ = serve(h, s).await; });
     }
 }
