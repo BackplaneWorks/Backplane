@@ -70,7 +70,9 @@ impl Bots {
         self.file_body(w, Body { conv: c, mail, text: text.into() }).await
     }
     /// Mail.file.body + MailJob.append: the journal first, then ConvSet (a new conversation), MailPosted and the owner ticket, in one commit
-    pub async fn file_body(&self, w: &World, body: Body) -> Result<bool, String> {
+    pub async fn file_body(&self, w: &World, body: Body) -> Result<bool, String> { self.file_body_with(w, body, None).await }
+    /// `extra`: the changes that replace Owner.track's (an imported owner mail brings its own ticket and receipt)
+    pub async fn file_body_with(&self, w: &World, body: Body, extra: Option<Vec<Value>>) -> Result<bool, String> {
         if w.mail.has(&body.mail.id) { return Ok(false) }
         let home = self.hub.cfg.home.clone(); let b2 = body.clone();
         if let Err(e) = tokio::task::spawn_blocking(move || store::append(&home, &b2)).await.map_err(|e| e.to_string())? {
@@ -80,7 +82,7 @@ impl Bots {
         let mut ev: Vec<Value> = vec![];
         if w.mail.conv(&body.conv.id).id.is_empty() { ev.push(conv_event(&body.conv)) }
         ev.push(header_event(&body.mail));
-        ev.extend(self.owner_track(w, &body).await);
+        match extra { Some(x) => ev.extend(x), None => ev.extend(self.owner_track(w, &body).await) }
         self.hub.commit_many(&ev).await.map_err(|e| format!("{e:#}"))?;
         if let Some(r) = self.router.get() { r.routed(&body) }
         Ok(true)
