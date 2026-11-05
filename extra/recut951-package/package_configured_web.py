@@ -22,9 +22,11 @@ def ref(f):
         return {'path': str(f), 'sha256': hashlib.file_digest(stream, 'sha256').hexdigest(), 'bytes': f.stat().st_size}
 def write(f, d): f.write_text(json.dumps(d, indent=2)+'\n')
 build, auth = read(b/'BUILD.json'), read(b/'BUILD-AUTHORIZATION.json')
-assert build['sourceCommit'] == commit and build['sourceTree'] == tree
+assert build['source_commit'] == commit and build['source_tree'] == tree
 assert build['testOnly'] is True and build['releaseQualified'] is False
 assert auth['releaseUseAuthorized'] is True
+assert auth['sourceCommit'] == commit and auth['sourceTree'] == tree
+assert ref(b/'BUILD.json')['sha256'] == auth['buildReceipt']['sha256']
 web, emission = read(b/'WEB.json'), read(b/'WEB-EMISSION.json')
 assert web['sourceCommit'] == commit and web['sourceTree'] == tree
 assert emission['webManifestSha256'] == ref(b/'WEB.json')['sha256']
