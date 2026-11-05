@@ -230,7 +230,7 @@ impl Hub {
     pub fn set_far(&self, f: Arc<dyn FarView>) { let _ = self.far.set(f); }
     pub fn far(&self) -> Option<Arc<dyn FarView>> { self.far.get().cloned() }
     /// Mirrored events (already renamed to `<link>~<id>` ids) to the presenter's state only: never the log, never `Model`, never a client's
-    /// log stream. The presenter shows them in the sidebar and thread views as it shows local ones.
+    /// log stream. That state lives only in the presenter: a presenter restart loses the mirrors, so the caller re-feeds them. The presenter shows them in the sidebar and thread views as it shows local ones.
     pub async fn fold_mirror(&self, events: &[Value]) { let _ = self.presenter.fold(&json!({"t":"changes","items":events,"now":now_ms()})).await; }
     pub fn register_view(&self, h: Arc<dyn ViewMethod>) { let mut v = self.views.write().unwrap(); for m in h.methods() { v.push((m, h.clone())) } }
     pub fn view_for(&self, method: &str) -> Option<Arc<dyn ViewMethod>> { self.views.read().unwrap().iter().find(|(n, _)| *n == method).map(|(_, h)| h.clone()) }

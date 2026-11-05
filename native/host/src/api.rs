@@ -43,9 +43,10 @@ pub trait HttpHandler: Send + Sync {
     /// True for a POST route whose body streams (an upload): the hub then calls `call_body` instead of `call`, after the credential check
     /// (or none, with `own_auth`) and a size check, and reads no body itself.
     fn takes_body(&self) -> bool { false }
-    /// The streaming body: `body.len` is the Content-Length (the hub refuses a missing one with 411, chunked with 411, more than
-    /// `STREAM_MAX` with 413); `body` reads exactly that many bytes and no more; `body.proceed().await` answers `Expect: 100-continue`
-    /// (call it once you accept the size). The connection closes after the reply.
+    /// The streaming body: `body.len` is the Content-Length (the hub refuses a missing one or a chunked one with 411 and nothing else:
+    /// refuse a size you will not take with your own answer BEFORE `proceed()`); `body` reads exactly that many bytes and no more, and
+    /// fails with TimedOut when no byte arrives for `Body::IDLE`; `body.proceed().await` answers `Expect: 100-continue` (call it once you
+    /// accept the size). The connection closes after the reply.
     fn call_body<'a>(&'a self, _hub: &'a Arc<Hub>, _req: &'a Req, _body: Body<'a>) -> Fut<'a, HttpReply> { Box::pin(async { HttpReply::text("405 Method Not Allowed", "this route takes no body") }) }
     /// The most body bytes read for this route when it is `own_auth` (default `auth::BODY_MAX`, 1 MiB). Over it: 413 before anything is read.
     fn body_max(&self) -> usize { crate::auth::BODY_MAX }
@@ -95,12 +96,14 @@ pub trait AuthRoute: Send + Sync {
     fn unpeer(&self, _link: &str) {}
 }
 
-/// The most a streaming body may be (attachments). Larger: 413 before anything is read.
-pub const STREAM_MAX: u64 = 256 << 20;
+/// A ceiling a streaming handler may use for its own refusal. The hub does NOT enforce it: the handler decides every size (the file goes to disk, and its limit is a setting).
+pub const STREAM_MAX: u64 = 4000 << 20;
 /// A request body read straight off the connection: at most `len` bytes. `AsyncRead` ends at `len`.
-pub struct Body<'a> { pub len: u64, io: tokio::io::Take<&'a mut tokio::net::TcpStream>, expect: bool }
+pub struct Body<'a> { pub len: u64, io: tokio::io::Take<&'a mut tokio::net::TcpStream>, expect: bool, idle: Pin<Box<tokio::time::Sleep>> }
 impl<'a> Body<'a> {
-    pub fn new(s: &'a mut tokio::net::TcpStream, len: u64, expect: bool) -> Body<'a> { Body { len, io: tokio::io::AsyncReadExt::take(s, len), expect } }
+    /// No byte for this long ends a read with TimedOut (a stalled upload does not hold its connection and half-written file).
+    pub const IDLE: std::time::Duration = std::time::Duration::from_secs(60);
+    pub fn new(s: &'a mut tokio::net::TcpStream, len: u64, expect: bool) -> Body<'a> { Body { len, io: tokio::io::AsyncReadExt::take(s, len), expect, idle: Box::pin(tokio::time::sleep(Self::IDLE)) } }
     /// Writes `HTTP/1.1 100 Continue` once, if the client sent `Expect: 100-continue` (the Bend hub does so after checking the size).
     pub async fn proceed(&mut self) -> std::io::Result<()> {
         if !std::mem::take(&mut self.expect) { return Ok(()) }
@@ -110,17 +113,12 @@ impl<'a> Body<'a> {
     pub fn left(&self) -> u64 { self.io.limit() }
 }
 impl tokio::io::AsyncRead for Body<'_> {
-    fn poll_read(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>, buf: &mut tokio::io::ReadBuf<'_>) -> std::task::Poll<std::io::Result<()>> { Pin::new(&mut self.io).poll_read(cx, buf) }
-}
-
-/// Threads mirrored from the owner's other machines: NOT in this hub's log or `Model` (the Bend hub reads and writes the same
-/// events.jsonl; a mirror there would fold as local ids). Their events live in the net lane's per-link store and reach the
-/// presenter through `Hub::fold_mirror` (renamed to `<link>~<id>`); pages of a mirrored thread come from here.
-pub trait FarView: Send + Sync {
-    /// whether `thread` (an id like "<link>~<id>") is a mirrored thread
-    fn has(&self, thread: &str) -> bool;
-    /// the page as `Model::page` gives it for a local thread: rows older than ordinal `before` (0: newest), at most `limit` plus lookahead
-    fn page(&self, thread: &str, before: u64, limit: usize) -> Option<crate::model::Page>;
-    /// the newest rows up to the latest human prompt and assistant text (`Model::latest_context`)
-    fn latest_context(&self, thread: &str) -> Vec<crate::model::Row>;
+    fn poll_read(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>, buf: &mut tokio::io::ReadBuf<'_>) -> std::task::Poll<std::io::Result<()>> {
+        use std::task::Poll;
+        let before = buf.filled().len();
+        match Pin::new(&mut self.io).poll_read(cx, buf) {
+            Poll::Ready(r) => { if buf.filled().len() > before { self.idle.as_mut().reset(tokio::time::Instant::now() + Self::IDLE); } Poll::Ready(r) }
+            Poll::Pending => match self.idle.as_mut().poll(cx) { Poll::Ready(()) => Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "upload stalled"))), Poll::Pending => Poll::Pending },
+        }
+    }
 }
