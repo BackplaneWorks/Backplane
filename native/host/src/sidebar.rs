@@ -225,6 +225,8 @@ pub fn projects(st: &State, o: &Opts) -> Vec<Value> {
     let mut ps: Vec<P> = vec![];
     for (id, p) in &st.projects {
         if p.removed { continue }
+        // Side.projs.keep: the Scratch project (conversations that belong to no project) is not listed among projects
+        if id.rsplit('~').next() == Some("scratch") && !id.contains('~') || id.split_once('~').map_or(false, |(_, l)| l == "scratch") { continue }
         let raw = shelves_of(st, id, o.now, &kids);
         // Side.latest: a thread's last move for its project's place; settling by hand counts
         let mut latest = p.created;
