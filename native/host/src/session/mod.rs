@@ -84,7 +84,7 @@ impl Hub {
             (Some("bot"), Some(id)) => { let me = self.arc(); crate::bots::chat_thread(&me, id).await.map(|t| (id.to_string(), t)) }
             _ => None,
         };
-        actor::set_bot(c.client, bot);
+        actor::set_bot(c.client, bot.clone());
         let before = actor::page(c.client, &view_id, m, p["action"].as_str().unwrap_or(""), &p["target"], if m == "view.page" { page_before(&p) } else { 0 });
         // the conversation the target shows: a thread's own, a bot's chat thread (a bot view without its window stays on "Updating conversation...")
         let shown: Option<String> = match p["target"]["kind"].as_str() { Some("thread") => p["target"]["id"].as_str().map(str::to_string), Some("bot") => bot.as_ref().map(|(_, t)| t.clone()), _ => None };
