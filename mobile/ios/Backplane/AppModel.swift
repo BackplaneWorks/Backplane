@@ -68,6 +68,9 @@ final class AppModel {
     @ObservationIgnored private var readingPages: [String: (seen: String, count: Int, away: Bool)] = [:]
     // Skip pressed while the hub view was not ready (see act)
     var tourHeld = false
+    #if DEBUG
+    var showFonts = false
+    #endif
     var contentReady: Bool {
         guard ready, !cachedPresentation, let screen else { return false }
         if startup[screen.hub] == .compatibilityChosen { return conn[screen.hub]?.phase == .online && conn[screen.hub]?.stage == "live" }
@@ -2510,6 +2513,7 @@ final class AppModel {
                             } else if let c = kv[0] == "@pagenext" ? pg?.next : pg?.previous { self.act(c.action, c.value) }
                             continue
                         }
+                        if kv[0] == "@fonts" { self.showFonts = true; continue }
                         if kv[0] == "@times" { NSLog("Backplane taps %@", tapTimes.joined(separator: "; ")); continue }
                         // "@type=<text>": the composer's text, as typing it does (editComposer: one key's path)
                         if kv[0] == "@type" { draft(kv.count > 1 ? kv[1] : ""); continue }

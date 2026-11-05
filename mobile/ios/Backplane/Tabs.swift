@@ -483,6 +483,10 @@ struct AppSettingsTab: View {
                 Button(NativeMessages.settings_tour_show(tag)) { model.act("ob-open") }
             }
             Section {
+                NavigationLink { LicencesView() } label: { Text(tag == "ja" ? "ライセンス" : "Licences") }
+                    .accessibilityIdentifier("settings.licences")
+            }
+            Section {
                 Button("Improvements") { improvements = true }
                     .accessibilityIdentifier("settings.improvements")
             }

@@ -291,7 +291,7 @@ private struct MemoryTab: View {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
                         Text(m.key).font(.subheadline.weight(.semibold)).lineLimit(1)
-                        Text(m.kind).font(.caption2.monospaced())
+                        Text(m.kind).font(.mono(.caption2))
                             .padding(.horizontal, 5).padding(.vertical, 1)
                             .background(.quaternary, in: .rect(cornerRadius: 2))
                         Spacer()
@@ -340,7 +340,7 @@ private struct RoutinesTab: View {
                             Label(r.label ?? NativeMessages.sched_kind_repeat(lang), systemImage: routineIcon(r.kind))
                                 .font(.caption2).padding(.horizontal, 5).padding(.vertical, 1)
                                 .background(Color.secondary.opacity(0.15))
-                            Text(r.when).font(.caption.monospaced()).foregroundStyle(.secondary)
+                            Text(r.when).font(.mono(.caption)).foregroundStyle(.secondary)
                         }
                         if r.done == true {
                             Text(r.doneText ?? NativeMessages.tour_done(lang)).font(.caption).foregroundStyle(.secondary)
@@ -384,7 +384,7 @@ private struct RoutineSheet: View {
                 TextField(NativeMessages.bots_name(lang), text: $name).onChange(of: name) { _, t in model.field("oname", t) }
                 Section {
                     TextField(NativeMessages.native_routine_examples(lang), text: $cron)
-                        .font(.body.monospaced())
+                        .font(.mono(.body))
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .onChange(of: cron) { _, t in model.field("ocron", t) }
@@ -428,7 +428,7 @@ private struct HooksTab: View {
             }
             if let s = bot.secret, !s.isEmpty {
                 Section {
-                    Text(s).font(.caption.monospaced()).textSelection(.enabled)
+                    Text(s).font(.mono(.caption)).textSelection(.enabled)
                     Button(NativeMessages.common_copy(lang), systemImage: "doc.on.doc") { model.act("copy", s) }
                 } header: {
                     Text(NativeMessages.native_hook_secret(lang))
@@ -441,7 +441,7 @@ private struct HooksTab: View {
                     let url = model.hubURL(h.path, token: false)?.absoluteString ?? h.path
                     VStack(alignment: .leading, spacing: 3) {
                         Text(h.name).font(.subheadline.weight(.semibold))
-                        Text(url).font(.caption.monospaced()).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+                        Text(url).font(.mono(.caption)).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
                         Text(h.last.isEmpty ? "\(h.count)" : "\(h.count) · " + h.last).font(.caption2).foregroundStyle(.secondary)
                     }
                     .contextMenu { Button(NativeMessages.native_hook_copyurl(lang), systemImage: "doc.on.doc") { model.act("copy", url) } }
@@ -549,7 +549,7 @@ private struct SettingsTab: View {
                     Button(NativeMessages.machines_invite(lang)) { model.act("peer-invite") }
                 }
                 if !settings.invite.isEmpty {
-                    Text(settings.invite).font(.caption.monospaced()).textSelection(.enabled)
+                    Text(settings.invite).font(.mono(.caption)).textSelection(.enabled)
                     Button(NativeMessages.native_machine_invite_copy(lang), systemImage: "doc.on.doc") { model.act("copy", settings.invite) }
                 }
                 HStack {

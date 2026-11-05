@@ -78,7 +78,7 @@ struct ReflowView: View {
                     DisclosureGroup("Edit profile points") {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("JSON pairs: [seconds, furnace °C]. Apply validates time order and limits in the shared planner.").font(.caption)
-                            TextEditor(text: $profile).font(.system(.caption, design: .monospaced)).frame(minHeight: 130).border(.secondary)
+                            TextEditor(text: $profile).font(.mono(.caption)).frame(minHeight: 130).border(.secondary)
                                 .accessibilityLabel("Profile points as seconds and furnace Celsius pairs")
                             HStack {
                                 Button("Apply") { Task { await rebuild() } }

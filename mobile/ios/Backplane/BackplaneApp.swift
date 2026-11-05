@@ -18,11 +18,16 @@ struct BackplaneApp: App {
     @UIApplicationDelegateAdaptor private var delegate: AppDelegate
     @Environment(\.scenePhase) private var phase
     @State private var model = AppModel()
+    // JetBrains Mono (Mono.swift): registered before any view draws
+    private let monoFonts: Void = Mono.register()
     @State private var grace: UIBackgroundTaskIdentifier = .invalid
 
     var body: some Scene {
         WindowGroup {
             AppRoot(model: model)
+                #if DEBUG
+                .overlay { if model.showFonts { FontsProbe() } }
+                #endif
                 .sheet(isPresented: $model.showingDevices) { if let link = model.devicesLink { DeviceManagerView(link: link) } }
                 .tint(BackplaneDesign.accent)
                 .accentColor(BackplaneDesign.accent)
@@ -30,7 +35,7 @@ struct BackplaneApp: App {
                     #if DEBUG && targetEnvironment(simulator)
                     if ProcessInfo.processInfo.environment["BACKPLANE_QUALIFICATION"] == "1" {
                         Text("Simulator connection: " + model.qualificationConnection)
-                            .font(.caption2.monospaced())
+                            .font(.mono(.caption2))
                             .padding(3)
                             .background(.ultraThinMaterial)
                             .frame(maxWidth: .infinity, alignment: .leading)
