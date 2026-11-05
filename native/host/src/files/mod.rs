@@ -2,7 +2,10 @@
 //! Registers its handlers with the hub through api.rs; the one line in main.rs is `files::start`.
 pub mod dir;
 pub mod export10;
+pub mod attach;
 pub mod fm;
+pub mod imgroutes;
+pub mod mimg;
 pub mod git;
 pub mod misc;
 pub mod rv;
@@ -24,6 +27,7 @@ pub fn start(hub: Arc<Hub>) {
     hub.register_rpc(Arc::new(rv::Rv));
     hub.register_rpc(Arc::new(export10::Export10));
     kicad::start(&hub);
+    imgroutes::start(&hub);
 }
 
 /// ThreadPath.of for the read model (threadpath.rs): the folder of a thread or `project-home-<id>`, None when it does not resolve.
