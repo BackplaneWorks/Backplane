@@ -191,7 +191,7 @@ mod e2e {
     const PI: &str = include_str!("../../../../../test/gpui/agents/prov-pi/standin-pi.sh");
     const OMP: &str = include_str!("../../../../../test/gpui/agents/prov-pi/standin-omp.sh");
 
-    fn dir(name: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-pi-{}-{}", std::process::id(), name)); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
+    fn dir(name: &str) -> PathBuf { static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0); let p = std::env::temp_dir().join(format!("bp-pi-{}-{}-{}", std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::Relaxed), name)); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
     fn script(d: &Path, name: &str, body: &str) { use std::os::unix::fs::PermissionsExt; let p = d.join(name); std::fs::write(&p, body).unwrap(); std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap(); }
     /// Ids and clocks: a run of 3+ digits is N, and a hub's own counter after a dash (`m17N-150`, `c9-171`) is S.
     fn digits(s: &str) -> String {
