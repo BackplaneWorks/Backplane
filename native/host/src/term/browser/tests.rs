@@ -6,7 +6,7 @@ use super::super::tests::Tap;
 const STANDIN: &str = r#"#!/bin/sh
 # stand-in backplane-browser: echoes each request line back in result.line; "open" also announces a frame; "big" answers a screenshot
 while IFS= read -r l; do
-  [ -n "$BP_STANDIN_LOG" ] && printf '%s\n' "$l" >> "$BP_STANDIN_LOG"
+  printf '%s\n' "$l" >> "$(dirname "$0")/standin.log"
   id=$(printf '%s' "$l" | sed 's/.*"id":\([0-9]*\).*/\1/')
   esc=$(printf '%s' "$l" | sed 's/\\/\\\\/g; s/"/\\"/g')
   case "$l" in
@@ -25,10 +25,13 @@ pub(crate) async fn hub_with_helper(name: &str) -> (Arc<Hub>, PathBuf) {
     use std::os::unix::fs::PermissionsExt;
     let d = std::env::temp_dir().join(format!("bp-br-{}-{}", std::process::id(), name)); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap();
     let exe = d.join("backplane-browser"); std::fs::write(&exe, STANDIN).unwrap(); std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
-    std::env::set_var("BACKPLANE_BROWSER", &exe);
-    std::fs::write(d.join("events.jsonl"), "{\"$\":\"ProjectCreated\",\"id\":\"p1\",\"title\":\"f\",\"root\":\"/tmp\",\"at\":1700000000}\n").unwrap();
+    let mut log = String::from("{\"$\":\"ProjectCreated\",\"id\":\"p1\",\"title\":\"f\",\"root\":\"/tmp\",\"at\":1700000000}\n");
+    for t in ["t1", "t2", "b1", "b2", "b9"] { log += &format!("{{\"$\":\"ThreadCreated\",\"id\":\"{t}\",\"project\":\"p1\",\"title\":\"T\",\"env\":\"local\",\"branch\":\"\",\"worktree\":\"\",\"provider\":\"claude\",\"model\":\"\",\"at\":1700000001}}\n"); }
+    std::fs::write(d.join("events.jsonl"), log).unwrap();
     let hub = Hub::start(Cfg { home: d.clone(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
-    super::super::start(hub.clone()); (hub, d)
+    // the helper is found when the driver starts: the variable and the start are one step, or a parallel test would give this hub its own helper
+    { static ENV: std::sync::Mutex<()> = std::sync::Mutex::new(()); let _g = ENV.lock().unwrap(); std::env::set_var("BACKPLANE_BROWSER", &exe); super::super::start(hub.clone()); }
+    (hub, d)
 }
 fn text(body: &Value) -> String { body["$content"][0]["text"].as_str().unwrap().to_string() }
 

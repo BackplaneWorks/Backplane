@@ -1,6 +1,6 @@
 //! The teach and task driver against a real Hub and the stand-in helper (see browser/tests.rs): requests, recorder events, saving, task runs and the pause.
 use super::*;
-use crate::hub::Hub;
+use crate::{auth::Req, hub::Hub};
 use super::super::{browser::tests::hub_with_helper, tests::Tap};
 use std::time::{Duration, Instant};
 
@@ -9,15 +9,13 @@ async fn rpc(hub: &Arc<Hub>, m: &str, p: Value) -> Value { let h = hub.rpc_for(m
 async fn wait<F: FnMut() -> bool>(secs: u64, mut f: F) -> bool { let end = Instant::now() + Duration::from_secs(secs); while Instant::now() < end { if f() { return true } tokio::time::sleep(Duration::from_millis(25)).await } f() }
 fn sent(log: &std::path::Path) -> Vec<Value> { std::fs::read_to_string(log).unwrap_or_default().lines().filter_map(|l| serde_json::from_str(l).ok()).collect() }
 async fn setup(name: &str) -> (Arc<Hub>, Arc<Driver>, PathBuf) {
-    let log = std::env::temp_dir().join(format!("bp-drv-{}-{name}.log", std::process::id())); let _ = std::fs::remove_file(&log); std::env::set_var("BP_STANDIN_LOG", &log);
-    let (hub, _d) = hub_with_helper(name).await; (hub.clone(), get(&hub).unwrap(), log)
+    let (hub, d) = hub_with_helper(name).await; let log = d.join("standin.log"); (hub.clone(), get(&hub).unwrap(), log)
 }
 
 #[tokio::test] async fn teaching_records_the_persons_steps_and_a_save_makes_a_task_the_bot_is_woken_with() {
     let (hub, d, log) = setup("teach").await; let tap = Tap::new(&hub, 1);
     let woke: Arc<std::sync::Mutex<Vec<(String, String)>>> = Default::default(); let w2 = woke.clone(); d.set_wake(Arc::new(move |b, t| w2.lock().unwrap().push((b.into(), t))));
     assert_eq!(rpc(&hub, "bots.teach", json!({"bot":"b1","op":"start"})).await["ok"], true);
-    assert_eq!(rpc(&hub, "bots.teach", json!({"bot":"b1","op":"start"})).await["ok"], false, "one teach at a time");
     assert!(!d.br.agent_drives_ok("b1").await, "the agent is refused while the person teaches");
     assert!(wait(5, || sent(&log).iter().any(|r| r["op"] == "record" && r["on"] == true && r["page"] == "b1")).await);
     // the helper's recorder steps join the draft; a secret keeps only its label
@@ -31,7 +29,7 @@ async fn setup(name: &str) -> (Arc<Hub>, Arc<Driver>, PathBuf) {
     let infos: Vec<Value> = { tokio::time::sleep(Duration::from_millis(100)).await; tap.take().into_iter().filter(|v| v["t"] == "info").collect() };
     assert!(infos.iter().any(|v| v["info"]["drive.b1"] == "teach" && v["info"]["teach.b1"].as_str().map_or(false, |t| t.starts_with("rec ")))); assert!(!infos.iter().any(|v| v.to_string().contains("hunter2")));
     rpc(&hub, "bots.teach", json!({"bot":"b1","op":"stop"})).await; assert_eq!(d.st.lock().await.teach.get("b1").mode, "review");
-    assert_eq!(rpc(&hub, "bots.teach", json!({"bot":"b1","op":"save","name":" "})).await["error"], "name the task");
+    assert_eq!(rpc(&hub, "bots.teach", json!({"bot":"b1","op":"save","name":" "})).await["error"], "name the task and record at least one step");
     let r = rpc(&hub, "bots.teach", json!({"bot":"b1","op":"save","name":"Order status","description":"look up","params":[{"step":2,"name":"order","label":"Order number"}]})).await; assert_eq!(r["ok"], true, "{r}");
     // logged as TaskSet, copied to a file, listed to the bot, the bot woken with what it was shown, the page the bot's again
     let ev: Value = (0..hub.store.len()).rev().filter_map(|i| serde_json::from_str::<Value>(&hub.store.get(i).unwrap()).ok()).find(|v| v["$"] == "TaskSet").unwrap();
@@ -50,7 +48,8 @@ async fn setup(name: &str) -> (Arc<Hub>, Arc<Driver>, PathBuf) {
     assert_eq!(rpc(&hub, "bots.browser", json!({"bot":"b1","op":"click","x":500,"y":1000})).await["ok"], true);
     assert_eq!(rpc(&hub, "bots.browser", json!({"bot":"b1","op":"mouse","type":"drag","x":0,"y":0})).await["ok"], true);
     assert_eq!(rpc(&hub, "bots.browser", json!({"bot":"b1","op":"scroll","dy":120})).await["ok"], true);
-    assert_eq!(rpc(&hub, "bots.browser", json!({"bot":"b1","op":"explode"})).await["ok"], false);
+    assert_eq!(rpc(&hub, "bots.browser", json!({"bot":"b1","op":"explode"})).await["ok"], true, "an unknown op while the person drives is a no-op, as in Bend");
+    assert!(wait(10, || { let r = sent(&log); ["click", "mouse", "scroll"].iter().all(|o| r.iter().any(|x| x["op"] == *o)) }).await, "the queued input reached the helper");
     let reqs = sent(&log); let click = reqs.iter().find(|r| r["op"] == "click").unwrap(); assert_eq!((click["x"].as_u64(), click["y"].as_u64(), click["page"].as_str()), (Some(640), Some(799), Some("b1")));
     assert_eq!(reqs.iter().find(|r| r["op"] == "mouse").unwrap()["type"], "move", "only move, down or up");
     assert_eq!(reqs.iter().find(|r| r["op"] == "scroll").unwrap()["dy"], 120);
@@ -107,4 +106,59 @@ async fn setup(name: &str) -> (Arc<Hub>, Arc<Driver>, PathBuf) {
     let (_hub, d, _log) = setup("shield").await;
     d.event(&json!({"event":"shield-click","page":"b1"})).await; assert_eq!(d.st.lock().await.teach.get("b1").drive, "takeover");
     d.event(&json!({"event":"record","page":"b1","step":{"do":"click"}})).await; assert!(d.st.lock().await.teach.get("b1").steps.is_empty(), "not recording");
+}
+
+#[tokio::test] async fn a_runs_pictures_are_served_only_from_the_bots_own_tasks_folder() {
+    let (hub, d, _log) = setup("shot").await; let run = "look-up-5";
+    let dir = d.run_dir("b1", run); std::fs::create_dir_all(&dir).unwrap(); std::fs::write(dir.join("pause-3.jpg"), b"JPEG3").unwrap(); std::fs::write(dir.join("1.jpg"), b"JPEG1").unwrap(); std::fs::write(d.dir("b1").join("secret.jpg"), b"NO").unwrap();
+    let get = |t: &str| Req { method: "GET".into(), target: t.into(), headers: vec![] };
+    let call = |t: String| { let hub = hub.clone(); async move { hub.http_for("/bots/b1/tasks/shot").unwrap().call(&hub, &get(&t)).await } };
+    let r = call("/bots/b1/tasks/shot?run=look-up-5&n=3".into()).await; assert_eq!((r.status, r.ctype.as_str(), r.body.as_slice()), ("200 OK", "image/jpeg", &b"JPEG3"[..]));
+    assert_eq!(call("/bots/b1/tasks/shot?run=look-up-5&f=1.jpg".into()).await.body, b"JPEG1");
+    for bad in ["/bots/b1/tasks/shot?run=look-up-5&f=../../secret.jpg", "/bots/b1/tasks/shot?run=..-1&n=3", "/bots/b1/tasks/shot?run=look-up-5&f=nope.jpg", "/bots/b2/tasks/shot?run=look-up-5&n=3", "/bots/../tasks/shot?run=look-up-5&n=3", "/bots/b1/tasks/shot?run=look-up-5&f=%2e%2e%2fsecret.jpg", "/bots/b1/other"] {
+        assert_eq!(call(bad.into()).await.status, "404 Not Found", "{bad}");
+    }
+}
+
+#[tokio::test] async fn an_unknown_owner_is_refused_and_the_words_are_bends() {
+    let (hub, d, _log) = setup("owner").await;
+    assert_eq!(rpc(&hub, "bots.browser", json!({"bot":"nobody","op":"takeover"})).await["error"], "unknown browser owner");
+    assert_eq!(rpc(&hub, "bots.browser", json!({"bot":"","op":"takeover"})).await["error"], "unknown browser owner");
+    assert_eq!(rpc(&hub, "bots.browser", json!({"bot":"../x","op":"takeover"})).await["error"], "unknown browser owner");
+    assert_eq!(rpc(&hub, "bots.browser", json!({"bot":"b1","op":"click"})).await["error"], "take over the browser first");
+    assert_eq!(rpc(&hub, "bots.teach", json!({"bot":"b1","op":"dance"})).await["error"], "unknown teach request");
+    assert!(d.st.lock().await.teach.get("nobody").idle());
+}
+#[tokio::test] async fn the_persons_input_runs_in_order_on_one_queue_per_page() {
+    let (hub, _d, log) = setup("order").await; rpc(&hub, "bots.browser", json!({"bot":"b1","op":"takeover"})).await;
+    for t in ["down", "move", "up"] { assert_eq!(rpc(&hub, "bots.browser", json!({"bot":"b1","op":"mouse","type":t,"x":10,"y":10})).await["ok"], true) }
+    for k in ["a", "b", "c"] { rpc(&hub, "bots.browser", json!({"bot":"b1","op":"press","key":k})).await; }
+    assert!(wait(10, || sent(&log).iter().filter(|r| r["op"] == "press").count() == 3).await);
+    let ops: Vec<String> = sent(&log).iter().filter(|r| r["op"] == "mouse" || r["op"] == "press").map(|r| r["type"].as_str().or(r["key"].as_str()).unwrap().to_string()).collect();
+    assert_eq!(ops, vec!["down", "move", "up", "a", "b", "c"]);
+}
+#[tokio::test] async fn a_toolbar_command_takes_the_page_over_and_its_reply_comes_later() {
+    let (hub, d, log) = setup("toolbar").await; let tap = Tap::new(&hub, 1);
+    assert_eq!(rpc(&hub, "bots.browser", json!({"bot":"b1","op":"toolbar","command":"explode"})).await["error"], "unsupported browser toolbar command");
+    let h = hub.rpc_for("bots.browser").unwrap(); let frames = h.call(&hub, &caller(), &json!(42), "bots.browser", &json!({"bot":"b1","op":"toolbar","command":"navigate","url":"example.com/x"})).await; assert!(frames.is_empty(), "the reply is the helper's, later");
+    assert_eq!(d.st.lock().await.teach.get("b1").drive, "takeover");
+    let mut reply = None; assert!(wait(10, || { reply = tap.take().into_iter().find(|v| v["t"] == "reply" && v["id"] == 42); reply.is_some() }).await); assert_eq!(reply.unwrap()["ok"], true);
+    assert_eq!(sent(&log).iter().find(|r| r["op"] == "navigate").unwrap()["url"], "https://example.com/x");
+    assert_eq!((cef_url("localhost:3000"), cef_url("host.test:8080/p"), cef_url("a b"), cef_url("javascript:x"), cef_url(" about:blank "), cef_url("")), ("http://localhost:3000".to_string(), "http://host.test:8080/p".to_string(), String::new(), String::new(), "about:blank".to_string(), String::new()));
+    assert_eq!(toolbar_args("tabs", &json!({"new":true}))["new"], "https://www.google.com/"); assert_eq!(toolbar_args("tabs", &json!({"selectId":"e1"})), json!({"selectId":"e1"})); assert_eq!(toolbar_args("tabs", &json!({"closeId":"e2"})), json!({"closeId":"e2"})); assert_eq!(toolbar_args("back", &json!({})), json!({}));
+}
+#[tokio::test] async fn a_pause_marks_the_thread_pending_frees_its_waiter_when_dropped_and_closes_an_unheard_ask() {
+    let (hub, d, _log) = setup("pend").await; let run = "r-1".to_string(); std::fs::create_dir_all(d.run_dir("b1", &run)).unwrap();
+    let find = |kind: &str| { let mut out = vec![]; for i in 0..hub.store.len() { if let Ok(v) = serde_json::from_str::<Value>(&hub.store.get(i).unwrap()) { if v["$"] == kind { out.push(v) } } } out };
+    let (d2, r2) = (d.clone(), run.clone()); let h = tokio::spawn(async move { d2.tool("b1", "task_pause", &json!({"run":r2,"n":1})).await });
+    assert!(wait(10, || !find("AskOpened").is_empty()).await); assert_eq!(find("PendingChanged").last().unwrap()["count"], 1);
+    assert_eq!(d.waiters.lock().unwrap().len(), 1);
+    h.abort(); let _ = h.await; assert!(wait(5, || d.waiters.lock().unwrap().is_empty()).await, "an aborted tool call leaves no waiter behind");
+    // the ask nobody hears is closed, with the count back down
+    d.pause_ms.store(200, std::sync::atomic::Ordering::Relaxed);
+    let (ok, e) = d.tool("b1", "task_pause", &json!({"run":run,"n":2})).await; assert!(!ok && e["error"] == "nobody answered the question");
+    let closed = find("AskClosed"); assert_eq!(closed.last().unwrap()["answer"], ""); assert!(d.waiters.lock().unwrap().is_empty());
+    for i in 0..MAX_WAITERS { d.waiters.lock().unwrap().insert(format!("w{i}"), ("b1".into(), oneshot::channel().0)); }
+    let (ok, e) = d.tool("b1", "task_pause", &json!({"run":run,"n":3})).await; assert!(!ok && e["error"].as_str().unwrap().contains("too many"), "per thread: {e}");
+    let (d3, r3) = (d.clone(), run.clone()); let (ok, _) = tokio::spawn(async move { d3.tool("b2", "task_pause", &json!({"run":r3,"n":4})).await }).await.unwrap(); assert!(!ok, "b2 is a different thread: it asks, and times out here");
 }
