@@ -15,6 +15,7 @@ use std::{path::PathBuf, sync::Arc};
 
 pub fn start(hub: Arc<Hub>) {
     hub.register_http(Arc::new(Img));
+    hub.register_http(Arc::new(Downloads));
     hub.register_rpc(Arc::new(Files));
     hub.register_rpc(Arc::new(GitRpc));
     hub.register_rpc(Arc::new(misc::Misc));
@@ -44,6 +45,22 @@ impl HttpHandler for Img {
             };
             let (ct, range) = (fm::ctype(&path), req.header("range").to_string());
             tokio::task::spawn_blocking(move || serve::send(&real, ct, &range)).await.unwrap_or_else(|_| HttpReply::text("500 Internal Server Error", "cannot read preview"))
+        })
+    }
+}
+
+/// /files/get and /files/zip (the web's downloads) and /view/* (a window on another machine): no native client calls them, so the Rust hub
+/// serves none; it still keeps the boundary: a path outside the project is 400, a thread with no folder is 404 "no such thread" (FilesHttp.safe,
+/// FilesHttp.root), and only then 501.
+struct Downloads;
+impl HttpHandler for Downloads {
+    fn routes(&self) -> &'static [&'static str] { &["/files/get", "/files/zip", "/view/get", "/view/ver", "/view/git"] }
+    fn call<'a>(&'a self, hub: &'a Arc<Hub>, req: &'a Req) -> Fut<'a, HttpReply> {
+        Box::pin(async move {
+            let thread = fm::from_uri(&req.param("thread"));
+            if req.route().starts_with("/files/") && !fm::files_safe(&fm::from_uri(&req.param("path"))) { return HttpReply::text("400 Bad Request", "that path is not in this project") }
+            if root_of(hub, &thread).await.is_none() { return HttpReply::text("404 Not Found", "no such thread") }
+            HttpReply::text("501 Not Implemented", "this route is not served by this hub")
         })
     }
 }
