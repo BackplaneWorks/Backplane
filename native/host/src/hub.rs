@@ -375,6 +375,31 @@ mod tests {
         for (k, v) in extra.as_object().into_iter().flatten() { p[k] = v.clone() }
         json!({"id":id,"m":m,"p":p})
     }
+    // what the presenter is told of the hub: the native sidebar's key, the new view's id, the request's revision (policy: Ns.prepare)
+    #[tokio::test] async fn the_presenter_is_given_the_native_key_the_view_id_and_the_request_revision() {
+        struct Spy(std::sync::Mutex<Vec<Value>>);
+        impl Presenter for Spy {
+            fn name(&self) -> &'static str { "spy" }
+            fn wants_log(&self) -> bool { false }
+            fn fold<'a>(&'a self, _f: &'a Value) -> crate::api::Fut<'a, ()> { Box::pin(async { Ok(()) }) }
+            fn view<'a>(&'a self, p: &'a Value) -> crate::api::Fut<'a, Value> { self.0.lock().unwrap().push(p.clone()); Box::pin(async { Ok(json!({"remoteReady":true,"shown":{},"session":{},"cmds":[]})) }) }
+            fn ping(&self) -> crate::api::Fut<'_, ()> { Box::pin(async { Ok(()) }) }
+        }
+        let spy = Arc::new(Spy(Default::default()));
+        let h = Hub::start(cfg(&home("spy")), spy.clone()).await.unwrap();
+        let (mut c, _g) = h.connect(true);
+        let r0 = req(&c, &h, "view.open", (1 << 47) + 5, json!({"nativeSidebar":1})); let _ = h.request(&mut c, &r0).await;
+        let r1 = req(&c, &h, "view.update", (1 << 47) + 6, json!({"nativeSidebar":1, "viewId": format!("{}:{}", c.gen, (1u64 << 47) + 5)})); let _ = h.request(&mut c, &r1).await;
+        let seen = spy.0.lock().unwrap().clone(); assert_eq!(seen.len(), 2);
+        for p in &seen {
+            let k = p["nativeKey"].as_str().unwrap_or(""); assert!(k.len() == 32 && k.bytes().all(|b| b.is_ascii_hexdigit()), "nativeKey: {k}");
+            assert_eq!(p["nativeKey"], seen[0]["nativeKey"], "one key for the hub's run");
+            assert_eq!(p["revision"], p["requestRevision"], "revision is the request's");
+            assert_eq!(p["viewId"], format!("{}:{}", c.gen, (1u64 << 47) + 5), "the open view's id");
+            assert_eq!(p["nativeSidebar"], 1, "the client's offer passes through");
+        }
+    }
+
     #[tokio::test] async fn open_assembles_identity_in_js_order() {
         let h = Hub::start(cfg(&home("open")), Arc::new(Canned { reply: json!({"remoteReady":true,"shown":{"a":1},"session":{"sel":""},"cmds":[]}) })).await.unwrap();
         let (mut c, g) = h.connect(true); assert_eq!(g["renderer"], "mobile");
