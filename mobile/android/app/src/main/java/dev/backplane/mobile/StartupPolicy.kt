@@ -4,7 +4,10 @@ package dev.backplane.mobile
 // that refuses the pairing token is PAIRING_REFUSED: pair the phone again. The
 // whole-log compatibility sync is retired: COMPATIBILITY_CHOSEN is never set
 // (the app loads the recent window and pages back, never all history).
-enum class StartupPolicy { DISCOVERING, THIN, COMPATIBILITY_REQUIRED, COMPATIBILITY_CHOSEN, PAIRING_REFUSED }
+enum class StartupPolicy { DISCOVERING, THIN, COMPATIBILITY_REQUIRED, COMPATIBILITY_CHOSEN, PAIRING_REFUSED,
+    // the hub answered a view the client refused (thin.js: "invalid view reply", ...): said on screen with Retry,
+    // never left as "Connecting…"
+    VIEW_FAILED }
 
 // Owner identity alone cannot distinguish two tabs of the same bot.
 class ThinPresentationFence {

@@ -21,6 +21,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     fun composerSendAct(t: ThreadView) = patch(t)?.sendAct ?: t.sendAct
     val contentReady get() = core.contentReady
     val startup get() = core.startup
+    val viewFailure get() = core.viewFailure
     // the hub's socket is up (for a screen that says online)
     fun linkUp(hub: String) = hub.isEmpty() || core.linkUp[hub] != false
     fun retryView(key: String) = core.retryView(key)

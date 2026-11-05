@@ -10,8 +10,8 @@ create) mkdir -p "$ANDROID_AVD_HOME"
   echo no | $ANDROID_HOME/cmdline-tools/latest/bin/avdmanager create avd -n bp-gpui-android -k "$IMG" -d pixel_6 --force ;;
 start)
   [ -f "$W/emu.pid" ] && kill -0 "$(cat "$W/emu.pid")" 2>/dev/null && { echo "running $(cat "$W/emu.pid")"; exit 1; }
-  nohup systemd-run --user --scope -q -p MemoryMax=6G -p MemorySwapMax=0 nice -n 10 \
-    $ANDROID_HOME/emulator/emulator -avd bp-gpui-android -port 5584 -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -memory 3072 -cores 4 \
+  nohup systemd-run --user --scope -q -p MemoryMax=8G -p MemorySwapMax=0 nice -n 10 \
+    $ANDROID_HOME/emulator/emulator -avd bp-gpui-android -port 5584 -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -memory 2560 -cores 4 \
     > "$W/emulator.log" 2>&1 &
   echo $! > "$W/emu.pid"; echo "scope launcher pid $(cat "$W/emu.pid")"
   $ADB wait-for-device
