@@ -31,11 +31,9 @@ impl Driver for GrokDriver {
         vec![acp::init()]
     }
     fn on_line(&mut self, line: &Value) -> Reaction { let o = acp::line(&mut self.a, &self.turn, line); Reaction { send: o.send, shapes: o.shapes } }
-    fn on_exit(&mut self, _code: Option<i32>) -> Vec<Value> { if self.a.done { vec![] } else { self.a.done = true; vec![acp::failed(GONE)] } }
     fn ask_info(&self, r: &Value) -> Option<super::AskInfo> { acp::ask_of(r) }
     fn answer(&mut self, r: &Value, answer: &str) -> Vec<String> { acp::answer_of(r, answer) }
     fn ends_on_turn_end(&self) -> bool { true }
-    fn exit_why(&self, _code: i32) -> Option<String> { Some(GONE.into()) }
 }
 pub fn driver(provider: &str) -> Option<Made> { if provider == "grok" { Some(Made { cli: "grok", driver: Box::new(GrokDriver::new()) }) } else { None } }
 
@@ -51,11 +49,6 @@ mod tests {
     }
     // law interrupt_grok_stops: Stop on a Grok thread is AgentStop alone: nothing is written to the process
     #[test] fn interrupt_grok_stops() { let mut d = GrokDriver::new(); assert!(d.on_stop().is_empty()); assert!(driver("grok").is_some() && driver("opencode").is_none()) }
-    #[test] fn a_process_that_ends_before_its_turn_fails_it_once_with_the_signed_in_hint() {
-        let mut d = GrokDriver::new(); let v = d.on_exit(Some(1)); assert_eq!(v.len(), 1); assert_eq!(v[0].to_string(), r#"{"type":"turn.failed","message":"grok exited before the turn ended (is it signed in? run `grok login`)"}"#);
-        assert!(d.on_exit(Some(1)).is_empty());
-        let mut e = GrokDriver::new(); e.a.done = true; assert!(e.on_exit(Some(0)).is_empty());
-    }
     #[test] fn the_first_line_is_initialize_and_a_turn_through_the_driver_ends() {
         let a = TurnIn { thread: "t".into(), cwd: "/tmp/p".into(), runtime: "full-access".into(), text: "hi".into(), prompt: "R".into(), mcp_url: "http://u".into(), ..Default::default() };
         let mut d = GrokDriver::new(); let st = d.start(&a); assert_eq!(st.len(), 1); assert!(st[0].contains(r#""method":"initialize""#));

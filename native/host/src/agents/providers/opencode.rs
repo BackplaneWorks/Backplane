@@ -63,10 +63,10 @@ fn reply(a: &mut Acp, t: &OcpTurn, o: &Value) -> Out {
 /// Ocp.where: what a call works on: its file, pattern, URL or query, else the first place it names.
 pub fn where_(u: &Value, cwd: &str) -> String {
     let raw = u.get("rawInput").unwrap_or(&Value::Null);
-    let first = |ks: &[&str]| ks.iter().map(|k| acp::s(raw, k)).find(|x| !x.is_empty()).unwrap_or("").to_string();
-    let a = first(&["filePath", "path"]);
-    let b = if !a.is_empty() { a } else { let p = first(&["pattern", "url", "query"]); if !p.is_empty() { p } else { u.get("locations").and_then(Value::as_array).and_then(|l| l.first()).map(|l| acp::s(l, "path").to_string()).unwrap_or_default() } };
-    rel(cwd, &b)
+    let a = acp::gs(raw, "filePath", acp::gs(raw, "path", ""));
+    let p = acp::gs(raw, "pattern", acp::gs(raw, "url", acp::gs(raw, "query", "")));
+    let l = u.get("locations").and_then(Value::as_array).and_then(|l| l.first()).map(|l| acp::gs(l, "path", "").to_string()).unwrap_or_default();
+    rel(cwd, &acp::or(a, &acp::or(p, &l)))
 }
 /// Ocp.say.k: the tool's title (a shell's is its command) and what it works on, unless the title already says it.
 pub fn say_k(title: &str, what: &str) -> String { if what.is_empty() || title.contains(what) { title.into() } else { format!("{title} {what}") } }
@@ -113,11 +113,9 @@ impl Driver for OcDriver {
         vec![acp::init()]
     }
     fn on_line(&mut self, l: &Value) -> Reaction { let o = line(&mut self.a, &self.turn, l); Reaction { send: o.send, shapes: o.shapes } }
-    fn on_exit(&mut self, _: Option<i32>) -> Vec<Value> { if self.a.done { vec![] } else { self.a.done = true; vec![acp::failed(GONE)] } }
     fn ask_info(&self, r: &Value) -> Option<super::AskInfo> { acp::ask_of(r) }
     fn answer(&mut self, r: &Value, answer: &str) -> Vec<String> { acp::answer_of(r, answer) }
     fn ends_on_turn_end(&self) -> bool { true }
-    fn exit_why(&self, _code: i32) -> Option<String> { Some(GONE.into()) }
 }
 pub fn driver(provider: &str) -> Option<Made> { if provider == "opencode" { Some(Made { cli: "opencode", driver: Box::new(OcDriver::new()) }) } else { None } }
 

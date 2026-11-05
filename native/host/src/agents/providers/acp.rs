@@ -18,7 +18,9 @@ impl Acp { pub fn new() -> Acp { Acp::default() } pub fn open_now(&self) -> bool
 pub struct Out { pub send: Vec<String>, pub shapes: Vec<Value> }
 
 pub fn s<'a>(v: &'a Value, k: &str) -> &'a str { v.get(k).and_then(Value::as_str).unwrap_or("") }
-fn or(a: &str, b: &str) -> String { if a.is_empty() { b.into() } else { a.into() } }
+/// Acp.or / get_str: a present string field wins even when empty; the default only when the field is missing or not a string.
+pub fn gs<'a>(v: &'a Value, k: &str, d: &'a str) -> &'a str { v.get(k).and_then(Value::as_str).unwrap_or(d) }
+pub fn or(a: &str, b: &str) -> String { if a.is_empty() { b.into() } else { a.into() } }
 
 /// Acp.rpc
 pub fn rpc(id: u64, method: &str, params: Value) -> String { json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}).to_string() }
@@ -63,14 +65,14 @@ pub fn plan(es: &Value) -> Value { Value::Array(es.as_array().map(|a| a.iter().m
 pub fn update(a: &mut Acp, u: &Value) -> Vec<Value> {
     match s(u, "sessionUpdate") {
         "agent_message_chunk" => { let t = u.get("content").map(|c| s(c, "text")).unwrap_or(""); a.buf.push_str(t); vec![event("item.delta", json!({"text":t}))] }
-        "tool_call" => vec![event("item.completed", json!({"item":{"type":"command_execution","id":s(u, "toolCallId"),"command":or(s(u, "title"), &or(s(u, "kind"), "tool"))}}))],
+        "tool_call" => vec![event("item.completed", json!({"item":{"type":"command_execution","id":s(u, "toolCallId"),"command":gs(u, "title", gs(u, "kind", "tool"))}}))],
         "plan" => vec![event("item.updated", json!({"item":{"type":"todo_list","items":plan(u.get("entries").unwrap_or(&Value::Null))}}))],
         "tool_call_update" => if matches!(s(u, "status"), "completed" | "failed") { vec![event("tool.done", json!({"id":s(u, "toolCallId")}))] } else { vec![] },
         _ => vec![],
     }
 }
 
-fn allow_first(os: &[Value], first: &str) -> String { os.iter().find(|o| s(o, "kind").starts_with("allow")).map(|o| or(s(o, "optionId"), first)).unwrap_or_else(|| first.into()) }
+fn allow_first(os: &[Value], first: &str) -> String { os.iter().find(|o| s(o, "kind").starts_with("allow")).map(|o| gs(o, "optionId", first).to_string()).unwrap_or_else(|| first.into()) }
 fn options(params: &Value) -> Vec<Value> { params.get("options").and_then(Value::as_array).cloned().unwrap_or_default() }
 fn resp(id: &Value, result: Value) -> String { json!({"jsonrpc":"2.0","id":id,"result":result}).to_string() }
 /// Acp.permit: the agent asks before a tool runs; in full access, allow at once (the first option that allows).
@@ -95,12 +97,12 @@ pub fn permit_answer(body: &str, answer: &str) -> String {
     permit_reply(o.get("id").unwrap_or(&Value::Null), o.get("params").unwrap_or(&Value::Null), answer)
 }
 /// Acp.tool: what a request asks to run (its kind, else its title): what "Allow for session" remembers.
-pub fn tool(params: &Value) -> String { let tc = params.get("toolCall").unwrap_or(&Value::Null); or(s(tc, "kind"), &or(s(tc, "title"), "tool")) }
+pub fn tool(params: &Value) -> String { let tc = params.get("toolCall").unwrap_or(&Value::Null); or(gs(tc, "kind", ""), gs(tc, "title", "tool")) }
 /// Acp.detail: a line for the approval card.
 pub fn detail(params: &Value) -> String {
     let tc = params.get("toolCall").unwrap_or(&Value::Null); let raw = tc.get("rawInput").unwrap_or(&Value::Null);
-    let d = or(s(raw, "command"), &or(s(raw, "path"), &or(s(raw, "file_path"), s(raw, "filePath"))));
-    or(&d, &or(s(tc, "title"), &raw.to_string().chars().take(400).collect::<String>()))
+    let d = gs(raw, "command", gs(raw, "path", gs(raw, "file_path", gs(raw, "filePath", ""))));
+    or(d, &or(gs(tc, "title", ""), &raw.to_string().chars().take(400).collect::<String>()))
 }
 /// Driver::ask_info for a `bp.ask` shape whose request is the raw line (a string): an approval card for an ACP session/request_permission.
 pub fn ask_of(request: &Value) -> Option<super::AskInfo> {
@@ -110,6 +112,11 @@ pub fn ask_of(request: &Value) -> Option<super::AskInfo> {
 /// Driver::answer: the response line for the person's answer (accept | session | anything else declines).
 pub fn answer_of(request: &Value, answer: &str) -> Vec<String> { match request.as_str() { Some(l) => vec![permit_answer(l, answer)], None => vec![] } }
 /// A JSON-RPC id as Bend's `Ocp.id`/`Nat.read` read it: its digits as a number (0 when none, or a string id with none).
+/// Acp.reply.k's id for Grok: Nat.read of the id's raw text (a number, or a string of digits; anything else 0).
+pub fn nat_id(o: &Value) -> u64 {
+    match o.get("id") { Some(Value::Number(n)) => n.as_u64().unwrap_or(0), Some(Value::String(t)) if !t.is_empty() && t.chars().all(|c| c.is_ascii_digit()) => t.parse().unwrap_or(0), _ => 0 }
+}
+/// Ocp.id: the digits of the id's text as a number (opencode).
 pub fn num_id(o: &Value) -> u64 {
     let raw = match o.get("id") { Some(Value::Number(n)) => n.to_string(), Some(Value::String(t)) => t.clone(), _ => return 0 };
     raw.chars().filter_map(|c| c.to_digit(10)).fold(0u64, |a, d| a.saturating_mul(10).saturating_add(d as u64))
@@ -135,7 +142,7 @@ pub fn request(a: &mut Acp, t: &AcpTurn, o: &Value) -> Out {
 fn reply(a: &mut Acp, t: &AcpTurn, o: &Value) -> Out {
     let ok = o.get("error").map_or(true, Value::is_null);
     if !ok { return fail(a, &error(o, "grok failed")) }
-    match num_id(o) {
+    match nat_id(o) {
         1 => Out { send: vec![open(t)], shapes: vec![] },
         2 => { let sid = o.get("result").and_then(|r| r.get("sessionId")).and_then(Value::as_str).unwrap_or(&t.session).to_string(); opened(a, t, &sid) }
         3 => Out { send: vec![], shapes: finished(a) },
@@ -207,6 +214,15 @@ mod tests {
         assert_eq!(outs(&ln(&mut a, &tt, &u(r#"{"sessionUpdate":"tool_call_update","toolCallId":"c1","status":"completed"}"#))), r#"{"type":"tool.done","id":"c1"}"#);
         assert_eq!(outs(&ln(&mut a, &tt, &u(r#"{"sessionUpdate":"plan","entries":[{"content":"x","priority":"high","status":"in_progress"},{"content":"y"}]}"#))),
             r#"{"type":"item.updated","item":{"type":"todo_list","items":[{"text":"x","status":"in_progress"},{"text":"y","status":"pending"}]}}"#);
+    }
+    #[test] fn ids_and_empty_fields_read_as_bend_reads_them() {
+        let o = json!({"id":"x3"}); assert_eq!(nat_id(&o), 0, "Grok: Nat.read of x3"); assert_eq!(num_id(&o), 3, "opencode: the digits of the id's text");
+        assert_eq!(nat_id(&json!({"id":3})), 3); assert_eq!(nat_id(&json!({"id":"3"})), 3);
+        let mut a = Acp::new(); a.sid = "S".into();
+        let u = json!({"sessionUpdate":"tool_call","toolCallId":"c","title":"","kind":"read"});
+        assert_eq!(update(&mut a, &u)[0]["item"]["command"], "", "a present empty title is logged as it is (get_str)");
+        assert_eq!(tool(&json!({"toolCall":{"kind":"","title":""}})), "", "present but empty title: Bend's get_str default does not apply");
+        assert_eq!(tool(&json!({"toolCall":{}})), "tool");
     }
     // law todo_acp_plan (TD.Todo.codex over Acp.plan): the plan becomes todos, status kept
     #[test] fn todo_acp_plan() {
