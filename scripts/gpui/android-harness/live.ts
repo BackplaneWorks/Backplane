@@ -7,12 +7,28 @@ const token = readFileSync(tokf, "utf8").trim();
 (0, eval)(readFileSync(bridge, "utf8"));
 const B = (globalThis as any).Backplane; const ep0 = () => String(++epN); let epN = 0;
 const j = (x: any) => typeof x === "string" ? JSON.parse(x) : x;
+
+// minimal CBOR reader (tags dropped) for TRACE=1
+const CKEYS = ["$", "t", "id", "m", "p", "ok", "error", "items", "thread", "msg", "role", "text", "at", "state", "project", "title", "kind", "summary", "tone", "act", "session", "model", "provider", "runtime", "interaction", "since", "seq", "version", "info", "path", "value", "key", "task", "parent", "child", "depth", "branch", "env", "worktree", "root", "pinned", "settled", "name", "result", "content", "type", "cid", "count", "manual", "archived"];
+function cb(b: Buffer, o = { i: 0 }): any {
+  const ib = b[o.i++], mt = ib >> 5; let ai = ib & 31, n: number;
+  const arg = () => { if (ai < 24) return ai; if (ai === 24) return b[o.i++]; if (ai === 25) { const v = b.readUInt16BE(o.i); o.i += 2; return v; } if (ai === 26) { const v = b.readUInt32BE(o.i); o.i += 4; return v; } const v = Number(b.readBigUInt64BE(o.i)); o.i += 8; return v; };
+  if (mt === 0) return arg(); if (mt === 1) return -1 - arg();
+  if (mt === 2) { n = arg(); const v = b.subarray(o.i, o.i + n); o.i += n; return "<bytes " + n + ">"; }
+  if (mt === 3) { n = arg(); const v = b.toString("utf8", o.i, o.i + n); o.i += n; return v; }
+  if (mt === 4) { n = arg(); const a = []; for (let k = 0; k < n; k++) a.push(cb(b, o)); return a; }
+  if (mt === 5) { n = arg(); const m: any = {}; for (let k = 0; k < n; k++) { let key = cb(b, o); if (typeof key === "number") key = CKEYS[key] ?? key; m[key] = cb(b, o); } return m; }
+  if (mt === 6) { arg(); return cb(b, o); }
+  if (ai === 20) return false; if (ai === 21) return true; if (ai === 22 || ai === 23) return null; return "<simple>";
+}
+let csent = 0; const TRACE = !!process.env.TRACE; let seq = 0;
+const tok = (v: string) => { const q = v.indexOf("|"); try { return JSON.parse(v.slice(q + 1)); } catch { return null; } };
 const key = hp; const results: string[] = []; let failure = "";
 const pass = (s: string, ok: boolean, d = "") => { results.push(`${ok ? "PASS" : "FAIL"} ${s}${d ? " — " + d : ""}`); console.log(results[results.length - 1]); };
 let ws: WebSocket | null = null, ep = "", opened = false, frames = 0, screen: any = null;
 function run(o: any) {
   if (o.screen) screen = typeof o.screen === "string" ? JSON.parse(o.screen) : o.screen;
-  for (const c of o.cmds || []) if (c.type === "send") ws?.readyState === 1 && ws.send(Buffer.from(c.data, "base64"));
+  for (const c of o.cmds || []) if (c.type === "send") { const buf = Buffer.from(c.data, "base64"); if (TRACE) { try { const r = cb(buf); const p = r.p || {}; console.log("T#" + (++seq), "C->S", r.m, "p.keys", Object.keys(p).join(","), "viewId", p.viewId, "target", JSON.stringify(p.target), "epoch", p.epoch, "generation", p.generation, "hub", p.hub, "nativeSidebar", p.nativeSidebar, "info", Object.keys(p.session?.info || {}).join(","), "action", p.action, "value", typeof p.value === "string" ? JSON.stringify(tok(p.value)?.payload ?? p.value.slice(0, 60)) : ""); } catch (e: any) { console.log("T send undecodable", e.message); } } ws?.readyState === 1 && ws.send(buf); }
   const v = o.viewFailure || o.failure; if (v) failure = typeof v === "string" ? v : JSON.stringify(v);
 }
 function connect() {
@@ -20,10 +36,10 @@ function connect() {
   ws = new WebSocket(`ws://${hp}/ws?token=${token}&view=1&mobile=1`); ws.binaryType = "arraybuffer";
   B.connection(key, ep, "view-v1");
   ws.onopen = () => { opened = true; run(j(B.online(key, true, ep))); };
-  ws.onmessage = (e: any) => { frames++; if (process.env.DUMP && frames > 2) { const t = Buffer.from(e.data).toString("latin1"); console.log("frame", frames, "len", t.length, JSON.stringify(t.replace(/[^\x20-\x7e]/g, ".").slice(0, 500))); } try { run(j(B.recv(key, Buffer.from(e.data).toString("base64"), ep, false, false))); } catch (x: any) { failure = "bridge threw: " + x.message; } };
+  ws.onmessage = (e: any) => { frames++; if (process.env.SAVE) require("node:fs").writeFileSync(`${process.env.SAVE}/s2c_${frames}.bin`, Buffer.from(e.data)); if (TRACE && e.data.byteLength > 5) { try { const r = cb(Buffer.from(e.data)); const res = r.result || r; console.log("T#" + (++seq), "S->C len", e.data.byteLength, "m", r.m || "", "keys", Object.keys(r).join(","), "viewRevision", res.viewRevision ?? r.viewRevision, "viewId", res.viewId, "target", JSON.stringify(res.target), "threadsPage.offset", res.shown?.projects?.[0]?.threadsPage?.offset, "nextTok", JSON.stringify(tok(res.shown?.projects?.[0]?.threadsPage?.next?.value || "")?.payload)); } catch (e2: any) { console.log("T recv undecodable", e2.message); } } if (process.env.DUMP && frames > 2) { const t = Buffer.from(e.data).toString("latin1"); console.log("frame", frames, "len", t.length, JSON.stringify(t.replace(/[^\x20-\x7e]/g, ".").slice(0, 500))); } try { const oo = j(B.recv(key, Buffer.from(e.data).toString("base64"), ep, false, false)); if (process.env.RECV) console.log("R#" + frames, "recv keys", Object.keys(oo).join(","), "screen?", !!oo.screen, "offset", (typeof oo.screen === "string" ? JSON.parse(oo.screen) : oo.screen)?.projects?.[0]?.threadsPage?.offset, "sync", JSON.stringify(oo.sync)?.slice(0, 120), "cmds", JSON.stringify((oo.cmds || []).map((x: any) => x.type))); run(oo); } catch (x: any) { failure = "bridge threw: " + x.message; } };
   ws.onclose = () => { try { B.online(key, false, true); } catch {} };
 }
-const until = async (f: () => boolean, ms: number) => { const t = Date.now(); while (Date.now() - t < ms) { if (f()) return true; run(j(B.tick(Date.now()))); await Bun.sleep(100); } return f(); };
+const until = async (f: () => boolean, ms: number) => { const t = Date.now(); while (Date.now() - t < ms) { if (f()) return true; run(j(B.tick(Date.now()))); { const sc = j(B.screen()); if (sc && typeof sc === "object") screen = { ...(screen || {}), ...sc, thread: sc.thread ?? screen?.thread }; } await Bun.sleep(100); } return f(); };
 const rows = () => (screen?.projects || []).flatMap((p: any) => p.threads || []);
 if (flag !== "nosidebar") B.nativeSidebar?.(1);
 B.start("live", "{}"); B.hubs([key]); connect();
@@ -34,6 +50,7 @@ pass(`list (>= ${Math.min(+expect, 48)} rows; bounded sidebar at ${expect})`, li
 // pager: advance the thread list page by page with the pager controls the screen offers (Pager.next/previous: action native-sidebar-page)
 const nextCtl = () => { const pp = (screen?.projects || []).map((p: any) => p.threadsPage?.next).find(Boolean); return pp || (screen?.sidebarPages || []).flatMap((h: any) => [h.projects?.next, h.active?.next]).find(Boolean); };
 const prevCtl = () => { const pp = (screen?.projects || []).map((p: any) => p.threadsPage?.previous).find(Boolean); return pp || (screen?.sidebarPages || []).flatMap((h: any) => [h.projects?.previous, h.active?.previous]).find(Boolean); };
+if (TRACE) console.log("T-- pager step starts; next token", JSON.stringify(tok(nextCtl()?.value || "")?.payload));
 { const firsts = [rows()[0]?.id]; let moved = 0;
   for (let k = 0; k < 8 && nextCtl(); k++) { const c = nextCtl(); const f = rows()[0]?.id; const o0 = j(B.act(c.action, c.value)); if (moved === 0) console.log("act reply keys", Object.keys(o0 || {}).join(","), JSON.stringify((o0.cmds || []).map((x: any) => x.type))); run(o0); if (!(await until(() => rows()[0]?.id !== f, 8000))) break; firsts.push(rows()[0]?.id); moved++; }
   let back = 0; const start = firsts[0];
