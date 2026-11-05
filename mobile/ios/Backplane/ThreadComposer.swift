@@ -3,7 +3,7 @@ import UniformTypeIdentifiers
 
 struct ThreadComposer: View {
     // a draft above this many UTF-8 bytes is shown as a preview, not laid out in the field (see the composer row)
-    static let longDraftBytes = 8_000
+    static let longDraftBytes = 64_000
     @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let thread: ThreadView

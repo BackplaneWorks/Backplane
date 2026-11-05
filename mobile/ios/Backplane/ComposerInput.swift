@@ -3,7 +3,7 @@ import UIKit
 
 // The composer's text input. The SwiftUI multi-line TextField lays the whole draft out on the main thread whenever its view
 // is re-evaluated, which every screen update did (1.2 s at 4 KB, 1.7 s at 8 KB, 8-22 s from 20 KB: results/ios/stuck*).
-// Three implementations, picked by BACKPLANE_COMPOSER (debug builds; the default is `isolated` unless measured otherwise):
+// Three implementations, picked by BACKPLANE_COMPOSER (debug builds; the default is `uikit`, measured: results/ios/keys):
 //   swiftui   the original: the field is rebuilt with every ThreadComposer update
 //   isolated  the same TextField in an Equatable child that no screen update rebuilds (only a change of the draft, thread,
 //             language or editability does)
@@ -19,7 +19,7 @@ enum ComposerKind {
         default: break
         }
         #endif
-        return .isolated
+        return .uikit
     }()
 }
 

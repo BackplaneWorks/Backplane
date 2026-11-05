@@ -5,7 +5,7 @@
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer HUBURL=http://backplane.tail9e0cf2.ts.net:3811/ TOKFILE=~/bp-gpui-ios/seed7-token
 KIND=$1; N=$2; T=$3; U=${SIM_UDID:-E3BC1B9E-AE4D-498C-97AF-B22FE897B41F}
 xcrun simctl boot $U 2>/dev/null; xcrun simctl uninstall $U dev.backplane.gpui
-if [ "$N" -gt 0 ]; then TXT=$(python3 -c "print(('lorem ipsum dolor sit amet ' * 400)[:${N}000], end='')"); ACTS="ob-skip;;@type=$TXT;;@times;;@times;;@renders;;@keys=abcdefghij;;@times;;@renders"; else ACTS="ob-skip;;@times;;@times;;@renders;;@keys=abcdefghij;;@times;;@renders"; fi
+if [ "$N" -gt 0 ]; then TXT=$(python3 -c "print(('lorem ipsum dolor sit amet ' * 4000)[:${N}000], end='')"); ACTS="ob-skip;;@type=$TXT;;@times;;@times;;@renders;;@keys=abcdefghij;;@times;;@renders"; else ACTS="ob-skip;;@times;;@times;;@renders;;@keys=abcdefghij;;@times;;@renders"; fi
 COMP=${KIND%-slow}; FASTENV=""; case $KIND in *-slow) FASTENV="BACKPLANE_UIKIT_FAST=0";; esac
 export EXTRAENV="BACKPLANE_STALL=1 BACKPLANE_COMPOSER=$COMP BACKPLANE_PERFORMANCE=1 $FASTENV"
 sh ~/bp-gpui-ios/ios-shot.sh $U keys-$KIND-$N 48 "$ACTS" $T > /dev/null
