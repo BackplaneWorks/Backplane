@@ -270,7 +270,7 @@ mod auth_wire_tests {
     #[tokio::test] async fn a_body_is_read_for_own_auth_posts_only_with_a_length_and_under_the_cap() {
         let (_hub, port, _reg) = up("body").await;
         assert!(post(port, "/open", "Content-Length: 5\r\n", b"hello").await.ends_with("ran 5 peer=true"), "body and peer reach the handler");
-        assert!(post(port, "/open", "", b"").await.starts_with("HTTP/1.1 411"), "no length");
+        assert!(post(port, "/open", "", b"").await.ends_with("ran 0 peer=true"), "no Content-Length and no Transfer-Encoding is an empty body");
         assert!(post(port, "/open", "Transfer-Encoding: chunked\r\n", b"0\r\n\r\n").await.starts_with("HTTP/1.1 411"), "chunked");
         assert!(post(port, "/open", &format!("Content-Length: {}\r\n", (1 << 20) + 1), b"").await.starts_with("HTTP/1.1 413"), "over the cap");
         assert!(post(port, "/closed", "Content-Length: 5\r\n", b"hello").await.starts_with("HTTP/1.1 401"), "a handler that does not opt out gets no body and no credential-free answer");
@@ -297,7 +297,6 @@ mod auth_wire_tests {
         assert!(send(format!("{auth}Content-Length: 5\r\n"), b"hello".to_vec()).await.ends_with("got 5 of 5 (x)"));
         assert!(send(format!("{auth}Content-Length: 3\r\n"), b"hello".to_vec()).await.ends_with("got 3 of 3 (x)"), "no more than Content-Length is read");
         assert!(send(auth.clone(), vec![]).await.starts_with("HTTP/1.1 411"), "no length");
-        assert!(send(format!("{auth}Content-Length: {}\r\n", crate::api::STREAM_MAX + 1), vec![]).await.starts_with("HTTP/1.1 413"));
         let r = send(format!("{auth}Content-Length: 2\r\nExpect: 100-continue\r\n"), b"hi".to_vec()).await;
         assert!(r.starts_with("HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 200"), "{r}");
     }

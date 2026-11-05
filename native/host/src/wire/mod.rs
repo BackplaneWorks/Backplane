@@ -63,7 +63,8 @@ pub async fn http(hub: &Hub, mut s: TcpStream, mut req: Req) -> Result<()> {
         if req.method != "POST" { s.write_all(&response("405 Method Not Allowed", "text/plain; charset=utf-8", "", b"POST only")).await.ok(); return Ok(()) }
         if !(h.own_auth() || hub.auth.allowed(&req)) { s.write_all(&response("401 Unauthorized", "text/plain; charset=utf-8", "", b"this Backplane needs its pairing token")).await.ok(); return Ok(()) }
         let len = req.header("content-length").trim().parse::<u64>().ok();
-        let st = if !req.header("transfer-encoding").is_empty() || len.is_none() { Some("411 Length Required") } else if len.unwrap() > crate::api::STREAM_MAX { Some("413 Payload Too Large") } else { None };
+        // only the framing is the wire's: the handler refuses a size it will not take (with its own JSON answer) before `proceed()`
+        let st = if !req.header("transfer-encoding").is_empty() || len.is_none() { Some("411 Length Required") } else { None };
         if let Some(st) = st { s.write_all(&response(st, "text/plain; charset=utf-8", "", st.as_bytes())).await.ok(); return Ok(()) }
         let expect = req.header("expect").eq_ignore_ascii_case("100-continue");
         let r = h.call_body(&hub.arc(), &req, crate::api::Body::new(&mut s, len.unwrap(), expect)).await;
@@ -71,9 +72,11 @@ pub async fn http(hub: &Hub, mut s: TcpStream, mut req: Req) -> Result<()> {
         s.write_all(&out).await?; s.shutdown().await.ok(); return Ok(());
     }
     if req.method == "POST" && (req.route().starts_with("/auth/") || hub.http_for(req.route()).map_or(false, |h| h.own_auth())) {
-        let len = req.header("content-length").trim().parse::<usize>().ok();
+        // no Content-Length and no Transfer-Encoding is an empty body (Bend's Conn.bot.len defaults to 0); chunked is refused
+        let len = if req.header("content-length").trim().is_empty() && req.header("transfer-encoding").is_empty() { Some(0) } else { req.header("content-length").trim().parse::<usize>().ok() };
         let status = if !req.header("transfer-encoding").is_empty() || len.is_none() { Some("411 Length Required") } else if len.unwrap() > hub.http_for(req.route()).map_or(crate::auth::BODY_MAX, |h| h.body_max()) { Some("413 Payload Too Large") } else { None };
         if let Some(st) = status { s.write_all(&response(st, "text/plain; charset=utf-8", "", st.as_bytes())).await.ok(); return Ok(()) }
+        if len.unwrap() > 0 && req.header("expect").eq_ignore_ascii_case("100-continue") { s.write_all(b"HTTP/1.1 100 Continue\r\n\r\n").await.ok(); }
         let mut body = vec![0u8; len.unwrap()];
         match tokio::time::timeout(Duration::from_secs(10), s.read_exact(&mut body)).await {
             Ok(Ok(_)) => req.body = body,
