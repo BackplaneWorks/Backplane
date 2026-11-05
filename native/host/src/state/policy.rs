@@ -19,37 +19,39 @@ const KEEP: &[&str] = &["settle.", "autosettle.", "launch.", "launched.", "threa
 // is ported with that prune, not before.
 pub fn lean_keeps(k: &str) -> bool { KEEP.iter().any(|p| k.starts_with(p)) }
 
+/// What `Core::derive` makes of a batch, in log order (see there)
+pub struct Derived { pub core: Vec<Value>, pub end: Vec<Value>, pub marks: Vec<Value>, pub after: Vec<Value> }
 pub struct Core { pub st: State }
 impl Core {
     pub fn new() -> Core { let mut st = State::new(); st.lean = true; Core { st } }
     pub fn fold_line(&mut self, l: &str) { self.st.apply_line(l); }
-    /// fold a batch and return the events the policies derive from it (already folded here), quiet marks first and then the message metadata:
-    /// the marks are judged against the state before the batch, the metadata against the state before each change (Auto.messages.metadata)
-    pub fn derive(&mut self, events: &[Value]) -> Vec<Value> {
-        // judged against the state before the batch, as Bend's Hub.step does
+    /// fold a batch and return what the policies add to it. Judged against the state before the batch, as Bend's Hub.step does. The parts are in
+    /// Bend's log order: `core` (the batch without a failed end's marks), `end` (the summary clock and alert record of a marked end), `marks` (that
+    /// failed end's `failed.<msg>`, which Bend writes after the alert), then `after`: liveness records, told marks, quiet marks, message metadata.
+    pub fn derive(&mut self, events: &[Value]) -> Derived {
         let now = events.iter().map(|e| gnat(e, "at", 0)).max().unwrap_or(0);
+        let (core, marks) = turnend::split_fail_marks(events);
         let live = watchdog::after(&self.st, now, events);
         let quiet = autosettle::quiet(&self.st, events);
-        let ended: Vec<String> = turnend::ended_threads(events).into_iter().map(String::from).collect();
-        let ctx = turnend::told_ctx(&self.st, events, &ended);
-        let seq = self.st.seq + events.len() as u64; // Alert.seq(post): the changes applied after the step's own
-        // the state after the batch, to decide the turn's end on; the earlier state is kept for the clocks and the told text
+        let ended: Vec<String> = turnend::ended_threads(&core).into_iter().map(String::from).collect();
+        let ctx = turnend::told_ctx(&self.st, &core, &ended);
+        let seq = self.st.seq + core.len() as u64; // Alert.seq(post): the changes applied after the step's own, a failed end's mark not among them
         let pre_running: Vec<(String, bool)> = ended.iter().map(|t| (t.clone(), turnend::was_running(&self.st, t))).collect();
         let pre_due: Vec<(String, bool)> = ended.iter().map(|t| (t.clone(), turnend::sum_due(&self.st, t, now))).collect();
         let mut meta = vec![];
-        for e in events {
+        for e in &core {
             let m = autosettle::metadata(&self.st, e); // against the state before each change (Auto.messages.metadata)
             self.st.apply(e);
             for x in &m { self.st.apply(x); }
             meta.extend(m);
         }
-        let end = turnend::ended_events_from(&self.st, &pre_running, &pre_due, seq, now, events);
-        let mut list: Vec<Value> = events.to_vec();
-        list.extend(end.iter().cloned()); list.extend(live.iter().cloned());
-        let marks = turnend::told_marks(&ctx, &list);
-        for x in end.iter().chain(&live).chain(&marks).chain(&quiet) { self.st.apply(x); }
-        // the log order is Bend's: the batch, the turn's end records, the liveness records, the told marks, the quiet marks, then the message metadata
-        end.into_iter().chain(live).chain(marks).chain(quiet).chain(meta).collect()
+        let end = turnend::ended_events_from(&self.st, &pre_running, &pre_due, seq, now, &core);
+        let mut list: Vec<Value> = core.clone();
+        list.extend(end.iter().cloned()); list.extend(marks.iter().cloned()); list.extend(live.iter().cloned());
+        let told = turnend::told_marks(&ctx, &list);
+        for x in end.iter().chain(&marks).chain(&live).chain(&told).chain(&quiet) { self.st.apply(x); }
+        let after = live.into_iter().chain(told).chain(quiet).chain(meta).collect();
+        Derived { core, end, marks, after }
     }
     pub fn tick(&self, now_s: u64) -> Vec<Value> { autosettle::changes(&self.st, now_s) }
 }
@@ -67,10 +69,12 @@ impl Policy {
     /// remembered (and returned as it came); `finish_boot` derives for it afterwards.
     pub fn before_commit(&self, first_seq: u64, mut events: Vec<Value>) -> Vec<Value> {
         let mut g = self.inner.lock().unwrap();
-        if let Some(buf) = g.booting.as_mut() { buf.push((first_seq, events.clone())); return events }
-        let extra = g.core.derive(&events);
-        events.extend(extra);
-        events
+        if let Some(buf) = g.booting.as_mut() { buf.push((first_seq, events.clone())); turnend::strip_marks(&mut events); return events }
+        let d = g.core.derive(&events);
+        let mut out: Vec<Value> = d.core;
+        out.extend(d.end); out.extend(d.marks); out.extend(d.after);
+        turnend::strip_marks(&mut out);
+        out
     }
     /// A batch returned by `before_commit` could not be written. The copy now holds marks the log lacks: fold the log again. True when the
     /// caller must start that fold (`begin_resync` was needed).
@@ -89,7 +93,8 @@ impl Policy {
         let mut derived = vec![];
         for (seq, evs) in held {
             if evs.is_empty() || seq + evs.len() as u64 - 1 <= len { continue } // already inside the folded log
-            derived.extend(g.core.derive(&evs));
+            let d = g.core.derive(&evs);
+            derived.extend(d.end); derived.extend(d.after); // the batch itself is already in the log, and so are its marks
         }
         derived
     }
@@ -171,7 +176,7 @@ mod tests {
         for l in [P, T, r#"{"$":"MessagePosted","thread":"t1","msg":"mu1","role":"user","text":"do it","at":5}"#,
                   r#"{"$":"MessagePosted","thread":"t1","msg":"ma1","role":"assistant","text":"Done.\nmore","at":6}"#, r#"{"$":"TurnChanged","thread":"t1","state":"running","at":7}"#] { c.fold_line(l); }
         assert!(p.finish_boot(c, 5).is_empty());
-        let end = json!({"$":"TurnChanged","thread":"t1","state":"completed","at":100});
+        let end = json!({"$":"TurnChanged","thread":"t1","state":"completed","_end":true,"at":100});
         let out = p.before_commit(6, vec![end, json!({"$":"UsageSet","thread":"t1","used":1,"window":2,"at":100})]);
         let ks = keys(&out);
         assert_eq!(ks[0..3].to_vec(), vec!["summary.at.t1".to_string(), "alert.t1".to_string(), "told.k100-5-3".to_string()], "the clock, the alert record, then its mark numbered by its place (3)");
@@ -180,7 +185,34 @@ mod tests {
         let told = out.iter().find(|e| e["key"].as_str().map_or(false, |k| k.starts_with("told."))).unwrap()["value"].as_str().unwrap().to_string();
         assert_eq!(told, r#"{"key":"turn-t1","text":"T: Done.","channel":"alert","bot":"","at":100}"#);
         // the same person message does not alert twice: the memory holds it
-        let again = p.before_commit(10, vec![json!({"$":"TurnChanged","thread":"t1","state":"completed","at":200})]);
+        let again = p.before_commit(10, vec![json!({"$":"TurnChanged","thread":"t1","state":"completed","_end":true,"at":200})]);
         assert!(!keys(&again).contains(&"alert.t1".to_string()));
+    }
+    fn ended_world() -> Policy {
+        let p = Policy::new(); let mut c = Core::new();
+        for l in [P, T, r#"{"$":"MessagePosted","thread":"t1","msg":"mu1","role":"user","text":"do it","at":5}"#,
+                  r#"{"$":"MessagePosted","thread":"t1","msg":"ma1","role":"assistant","text":"Done.","at":6}"#, r#"{"$":"TurnChanged","thread":"t1","state":"running","at":7}"#] { c.fold_line(l); }
+        assert!(p.finish_boot(c, 5).is_empty()); p
+    }
+    #[test] fn a_stop_and_a_spawn_failure_write_no_clock_and_no_alert() {
+        // Bend does not run Ended.out for Retire.turn.f (Stop) or Hub.spawned.fail: their TurnChanged carries no end marker
+        let p = ended_world();
+        let stop = p.before_commit(6, vec![json!({"$":"TurnChanged","thread":"t1","state":"interrupted","at":100}), json!({"$":"SettingSet","key":"stopped.mu1","value":"1","at":100})]);
+        assert!(!keys(&stop).iter().any(|k| k.starts_with("summary.at.") || k.starts_with("alert.") || k.starts_with("told.")), "{:?}", keys(&stop));
+        let p = ended_world();
+        let spawn = p.before_commit(6, vec![json!({"$":"ActivityLogged","thread":"t1","act":"g1","tone":"error","kind":"spawn","summary":"no cli","at":100}), json!({"$":"TurnChanged","thread":"t1","state":"failed","at":100}), json!({"$":"SettingSet","key":"failed.mu1","value":"1","at":100})]);
+        assert!(!keys(&spawn).iter().any(|k| k.starts_with("summary.at.") || k.starts_with("alert.") || k.starts_with("told.")), "{:?}", keys(&spawn));
+    }
+    #[test] fn a_failed_end_has_bends_order_stamp_and_told_index_and_loses_its_marker() {
+        let p = ended_world();
+        let out = p.before_commit(6, vec![json!({"$":"ActivityLogged","thread":"t1","act":"g1","tone":"error","kind":"agent","summary":"boom","at":100}),
+            json!({"$":"TurnChanged","thread":"t1","state":"failed","_end":true,"at":100}), json!({"$":"SettingSet","key":"failed.mu1","value":"1","at":100})]);
+        let ks = keys(&out);
+        assert_eq!(ks[0..4].to_vec(), vec!["summary.at.t1".to_string(), "alert.t1".to_string(), "failed.mu1".to_string(), "liveness.t1".to_string()], "the batch, the clock, the alert, THEN the failed mark (Stamp.fail.mark), then liveness");
+        assert!(out.iter().all(|e| e.get("_end").is_none()), "the marker is not written");
+        let alert = out.iter().find(|e| e["key"] == "alert.t1").unwrap()["value"].as_str().unwrap().to_string();
+        assert_eq!(alert, "fail\tturn-t1\tmu1\t100.7\t", "stamp: 5 + the 2 events of the end, the mark not counted");
+        let told = out.iter().find(|e| e["key"].as_str().map_or(false, |k| k.starts_with("told."))).unwrap();
+        assert_eq!(told["key"], "told.k100-5-3", "the alert sits at index 3 of [act, turn, summary.at, alert]... as the list Bend marks");
     }
 }

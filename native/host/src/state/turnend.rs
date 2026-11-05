@@ -8,17 +8,19 @@ use crate::state::{State, Thread, Turn};
 use serde_json::{json, Value};
 
 fn take(s: &str, n: usize) -> String { s.chars().take(n).collect() }
+/// String.trim: Bend's Char.is_space is only the space and 9..13 (tab, newline, vertical tab, form feed, carriage return)
+pub fn bend_trim(s: &str) -> &str { s.trim_matches(|c: char| c == ' ' || ('\t'..='\r').contains(&c)) }
 
 /// Policy.direct: a message the person typed (no sender thread; not an envelope unless it is the person's own)
 pub fn policy_direct(id: &str, text: &str) -> bool { crate::state::link_from(id).is_empty() && (!text.starts_with('[') || text.starts_with("[message from person@")) }
 /// Told.first: the first line of a reply, at most 200 characters
-pub fn told_first(text: &str) -> String { take(take(text.trim(), 400).split('\n').next().unwrap_or("").trim(), 200) }
+pub fn told_first(text: &str) -> String { take(take(bend_trim(text), 400).split('\n').next().map_or("", bend_trim), 200) }
 fn told_line(title: &str, line: &str) -> String { if line.is_empty() { title.to_string() } else { format!("{title}: {line}") } }
-fn text_cut(t: &str) -> String { take(t.trim(), 280).trim().to_string() }
+fn text_cut(t: &str) -> String { bend_trim(&take(bend_trim(t), 280)).to_string() }
 /// Told.key.norm: trimmed, lower case, each run of other characters one "-", at most 120 characters
 pub fn key_norm(s: &str) -> String {
     let (mut n, mut dash, mut out) = (0usize, false, String::new());
-    for c in s.trim().chars() {
+    for c in bend_trim(s).chars() {
         if n >= 120 { break }
         let l = if c.is_ascii_uppercase() { c.to_ascii_lowercase() } else { c };
         if l.is_ascii_lowercase() || l.is_ascii_digit() || matches!(l, '.' | '_' | ':' | '-') { out.push(l); n += 1; dash = false; }
@@ -33,13 +35,33 @@ pub fn sum_due(st: &State, id: &str, now: u64) -> bool {
     let at = st.get(&format!("summary.at.{id}"), "");
     at.is_empty() || now.saturating_sub(num(&at)) >= 600
 }
-/// Ended.state: how the thread's turn ended in the batch ("" for none). A stop already ended its turn; only a turn still running is interrupted.
+/// The marker the writer of an end sets on its TurnChanged event (`"_end": true`) when the Bend hub runs `Ended.out` for that end: only the
+/// agent line handlers and agent-gone do (hub.bend: Hub.agent_line, Claude.line, Hub.agent_gone). A Stop (Retire.turn.f), a spawn failure
+/// (Hub.spawned.fail), a restart cut and a task cancel commit their TurnChanged without it and get no summary clock and no alert record.
+/// `Policy::before_commit` removes the marker before the batch is written.
+pub const END_MARK: &str = "_end";
+pub fn is_end(c: &Value) -> bool { gstr(c, "$", "") == "TurnChanged" && c.get(END_MARK).and_then(|v| v.as_bool()) == Some(true) }
+/// the batch without the end markers (what is written)
+pub fn strip_marks(events: &mut [Value]) { for e in events { if let Some(o) = e.as_object_mut() { o.remove(END_MARK); } } }
+
+/// Ended.state: how the thread's turn ended in the batch ("" for none), over the ends the writer marked. A stop already ended its turn; only a
+/// turn still running is interrupted.
 pub fn ended_state(batch: &[Value], thread: &str, was_running: bool) -> &'static str {
     for c in batch {
-        if gstr(c, "$", "") != "TurnChanged" || gstr(c, "thread", "") != thread { continue }
+        if !is_end(c) || gstr(c, "thread", "") != thread { continue }
         match gstr(c, "state", "") { "completed" => return "completed", "failed" => return "failed", "interrupted" if was_running => return "interrupted", _ => {} }
     }
     ""
+}
+
+/// A failed end's mark (`failed.<msg>`): Bend writes it (Stamp.fail.mark) AFTER the alert record, outside the state the policy decided on; the
+/// agents put it in the batch next to the TurnChanged. Split the batch into what the end decides on and those marks, so the stamp, the order
+/// and the told numbering are Bend's. Empty marks when no marked end failed.
+pub fn split_fail_marks(events: &[Value]) -> (Vec<Value>, Vec<Value>) {
+    let failed = events.iter().any(|c| is_end(c) && gstr(c, "state", "") == "failed");
+    if !failed { return (events.to_vec(), vec![]) }
+    let is_mark = |c: &Value| gstr(c, "$", "") == "SettingSet" && gstr(c, "key", "").starts_with("failed.");
+    (events.iter().filter(|c| !is_mark(c)).cloned().collect(), events.iter().filter(|c| is_mark(c)).cloned().collect())
 }
 
 /// Policy.on: the setting notify.<name>; needs, settled and reminders default on, all off
@@ -153,8 +175,8 @@ pub fn ended_events(pre: &State, post: &State, seq: u64, now: u64, batch: &[Valu
     let due: Vec<(String, bool)> = ths.iter().map(|t| (t.clone(), sum_due(pre, t, now))).collect();
     ended_events_from(post, &run, &due, seq, now, batch)
 }
-/// the threads with a TurnChanged in the batch, in order
-pub fn ended_threads(batch: &[Value]) -> Vec<&str> { batch.iter().filter(|c| gstr(c, "$", "") == "TurnChanged").map(|c| gstr(c, "thread", "")).filter(|t| !t.is_empty()).collect() }
+/// the threads with a marked end in the batch, in order
+pub fn ended_threads(batch: &[Value]) -> Vec<&str> { batch.iter().filter(|c| is_end(c)).map(|c| gstr(c, "thread", "")).filter(|t| !t.is_empty()).collect() }
 pub fn was_running(pre: &State, th: &str) -> bool { pre.threads.get(th).map_or(false, |t| t.turn == Turn::Running) }
 
 #[cfg(test)]
@@ -168,8 +190,27 @@ mod tests {
         assert!(policy_direct("m1", "hello") && !policy_direct("m1", "[routine: x]") && policy_direct("m1", "[message from person@box] hi") && !policy_direct("t:a:1", "hello"));
     }
     #[test] fn ended_state_reads_the_first_end_of_the_thread() {
-        let b = [json!({"$":"TurnChanged","thread":"a","state":"interrupted"}), json!({"$":"TurnChanged","thread":"t","state":"interrupted"}), json!({"$":"TurnChanged","thread":"t","state":"failed"})];
+        let b = [json!({"$":"TurnChanged","thread":"a","state":"interrupted","_end":true}), json!({"$":"TurnChanged","thread":"t","state":"interrupted","_end":true}), json!({"$":"TurnChanged","thread":"t","state":"failed","_end":true})];
         assert_eq!(ended_state(&b, "t", false), "failed", "a stop already ended its turn: not a second end");
         assert_eq!(ended_state(&b, "t", true), "interrupted"); assert_eq!(ended_state(&b, "x", true), "");
+    }
+    #[test] fn only_a_marked_end_is_an_end() {
+        let stop = [json!({"$":"TurnChanged","thread":"t","state":"interrupted"})];
+        assert_eq!(ended_state(&stop, "t", true), "", "a Stop (Retire.turn.f) is not Ended.out");
+        let mut marked = vec![json!({"$":"TurnChanged","thread":"t","state":"completed","_end":true})];
+        assert_eq!(ended_state(&marked, "t", true), "completed"); strip_marks(&mut marked);
+        assert!(marked[0].get("_end").is_none(), "the marker is not written");
+    }
+    #[test] fn bends_trim_is_the_space_and_nine_to_thirteen_only() {
+        assert_eq!(bend_trim(" \t\n\r\x0b\x0cx \n"), "x");
+        assert_eq!(bend_trim("\u{a0}x\u{3000}"), "\u{a0}x\u{3000}", "NBSP and U+3000 are not spaces to Bend");
+        assert_eq!(told_first("\u{a0}lead"), "\u{a0}lead");
+    }
+    #[test] fn a_failed_ends_marks_are_split_off() {
+        let b = vec![json!({"$":"ActivityLogged","thread":"t","act":"g","tone":"error","kind":"x","summary":"s","at":1}), json!({"$":"TurnChanged","thread":"t","state":"failed","_end":true,"at":1}), json!({"$":"SettingSet","key":"failed.m1","value":"1","at":1})];
+        let (core, marks) = split_fail_marks(&b);
+        assert_eq!((core.len(), marks.len()), (2, 1));
+        let ok = vec![b[1].clone(), b[2].clone()]; let mut ok2 = ok.clone(); ok2[0]["state"] = json!("completed");
+        assert_eq!(split_fail_marks(&ok2).1.len(), 0, "a completed end keeps whatever else is in its batch");
     }
 }

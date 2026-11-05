@@ -205,7 +205,8 @@ impl State {
             "ProjectOrdered" => { let (id, key) = (s(e, "id")?, s(e, "key")?); n(e, "at")?; self.order_keys.entry(format!("project:{id}")).or_default().1 = key.into(); }
             "RunSet" => { let (th, bot) = (s(e, "thread")?, s(e, "bot")?); s(e, "conv")?; s(e, "mail")?; n(e, "at")?; self.runs.insert(th.into(), bot.into()); }
             "UberSet" => { let (bot, uid) = (s(e, "bot")?, s(e, "uid")?); self.set("uber.bot", bot); self.set("uber.uid", uid); }
-            "BotSet" => { let (id, th) = (s(e, "id")?, s(e, "thread")?); self.bot_threads.insert(id.into(), th.into()); }
+            "BotSet" => { let (id, th) = (s(e, "id")?, s(e, "thread")?); // Bot.keep.k: an edit with an empty thread keeps the one the bot has
+                if !th.is_empty() || !self.bot_threads.contains_key(id) { self.bot_threads.insert(id.into(), th.into()); } }
             "BotDeleted" => { let id = s(e, "id")?; self.bot_threads.remove(id); }
             "TaskDelegated" => {
                 let (task, parent, child) = (s(e, "task")?, s(e, "parent")?, s(e, "child")?); n(e, "depth")?;
@@ -409,5 +410,13 @@ mod tests {
         assert_eq!((s.seq, s.settings["launch.a"].as_str()), (1, "1b"));
         let s = fold(&[PC, TC, r#"{"$":"ThreadSettled","id":"t1","manual":true,"at":"60"}"#]);
         assert_eq!((s.seq, s.threads["t1"].settled_at), (3, 60));
+    }
+    #[test] fn a_bot_edit_with_an_empty_thread_keeps_its_thread() {
+        // Bot.keep.k (bot.bend): bots.edit logs thread "" and must not unhook the bot from its thread
+        let s = fold(&[r#"{"$":"BotSet","id":"b1","name":"Bub","thread":"tb","look":0,"persona":"","at":1}"#, r#"{"$":"BotSet","id":"b1","name":"Bub2","thread":"","look":1,"persona":"x","at":2}"#]);
+        assert_eq!(s.bot_threads["b1"], "tb");
+        let s = fold(&[r#"{"$":"BotSet","id":"b1","name":"Bub","thread":"tb","look":0,"persona":"","at":1}"#, r#"{"$":"BotSet","id":"b1","name":"Bub","thread":"tc","look":0,"persona":"","at":2}"#]);
+        assert_eq!(s.bot_threads["b1"], "tc", "a non-empty thread replaces it");
+        assert_eq!(fold(&[r#"{"$":"BotSet","id":"b2","name":"N","thread":"","look":0,"persona":"","at":1}"#]).bot_threads["b2"], "", "a new bot with no thread has none");
     }
 }
