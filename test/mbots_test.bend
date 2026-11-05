@@ -54,10 +54,10 @@ def bot(+h: H.Hubs) -> J.Json:
   J.Json.get_obj(H.Hubs.screen(h), "bot")
 
 def botpost() -> H.Hubs:
-  H.Hubs.after(H.Hubs.recv(two(), "box:3787", log([M.RoomPosted{"x2", "r1", "b1", "hi", 0n, 125n}])))
+  H.Hubs.after(H.Hubs.recv(two(), "box:3787", changes([M.RoomPosted{"x2", "r1", "b1", "hi", 0n, 125n}])))
 
 def stranger() -> H.Hubs:
-  H.Hubs.after(H.Hubs.recv(two(), "box:3787", log([M.RoomPosted{"x3", "r1", "Ghost@far", "boo", 0n, 126n}])))
+  H.Hubs.after(H.Hubs.recv(two(), "box:3787", changes([M.RoomPosted{"x3", "r1", "Ghost@far", "boo", 0n, 126n}])))
 
 def go(+h: H.Hubs, +a: String, +v: String) -> H.Hubs:
   H.Hubs.after(H.Hubs.act(h, a, v))
