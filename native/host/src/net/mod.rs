@@ -16,6 +16,7 @@ pub mod machines;
 pub mod origin;
 pub mod owner;
 pub mod pairing;
+pub mod peerhttp;
 pub mod peering;
 pub mod peers;
 pub mod qr;
