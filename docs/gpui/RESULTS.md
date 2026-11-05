@@ -258,7 +258,7 @@ Same software-rendered, JS-hub run, now with control rectangles and the composer
 
 ## GPUI input driver with a harness self-check (Boat job j20261105144124-70308; 06:35 GPUI build, llvmpipe, JS hub; 2026-11-05)
 `test/gpui/e2e/input/preflight.mjs` runs before GPUI starts and proves, against plain X clients, the pointer, keys, wheel, clipboard text/image/files, PRIMARY, TARGETS, an XDND drop, the ibus daemon + engine switch + XIM server registration, and that a **plain XIM client (xev) gets 한 from `g k s space`**; core-input failures stop the run as `harness`, a failed tool marks only its own action `harness`. `input-run` also proves the client receives pointer events (click another thread row, require 48,866 changed pixels in the main area: passed) and clears clipboard/PRIMARY before the actions (xclip forks, so a leftover from the preflight had produced two false passes: fixed and checked by `selections-cleared-after-preflight`). Earlier "all false" results (job j20261105141708-3946944 and mine before today's fixes) came partly from the harness: missing tools in a fresh sandbox (python3-xlib, ibus-hangul), stale selections, an ibus started after the client.
-Per action, now that the harness checks pass (except IME):
+Per action on the 06:35 build (SUPERSEDED by the current-tip run below: that build predates screens' Ctrl-C, PRIMARY, paste and drop fixes, and two of these falses were also my harness's):
 - drag-select: **false, app**. Nothing is selected (PRIMARY empty); GPUI receives the drag (pointer proven).
 - Ctrl-C: **false, app**. Clipboard empty (`read selection` is `supported:false`).
 - paste-image: **false, app**. The image uploads (1,229-byte file on the hub) but the "Uploading pasted-….png…" chip never clears and the sent message is text only (no image reference in `MessagePosted` or any other new event).
@@ -266,3 +266,18 @@ Per action, now that the harness checks pass (except IME):
 - ime-hangul: **harness, not run**. The IME check fails in the preflight itself: ibus runs with the Hangul engine (engine process present, XIM server registered, UTF-8 locale) but a plain XIM client gets no filtered keys (`XFilterEvent: False`). Not solved; GPUI is not blamed. (Earlier raw-"gks" result from the composer read stands as a fact about GPUI only if XIM composition is first shown to work in a plain client.)
 - paperclip: **the client's own click works, the OS click missed**. GPUI's scripted `click ui:Attach` calls the file-chooser portal (stand-in logged `OpenFile`, returned the picked file); an xdotool click aimed at the reported control rect (1113,847,40,44) changed nothing and never reached the portal, because the painted button sits about 25 px higher (screenshot overlay: red rect below the button): the `controls` rect for `ui:Attach` is offset in y.
 - link click: blocked (`links` supported:false).
+
+
+### Input actions on a client built from the current gpui tip (the verdicts that stand; 2026-11-05)
+Client: built on Boat (job j20261105144704-134325, `scripts/gpui/boat-build.sh`, large sandbox, 5 min 33 s) from my worktree at `db29b9cee`, which is `gpui` at `8c2701e772` plus test-only commits; `native/gpui` is byte-identical between `8c2701e772` and the current `gpui` tip `b7802aac97`, so this is the current tip's client. Run: Boat job j20261105151657-419917 (software rendering llvmpipe, JS hub, harness commit `c5a18df6e8` on `gpui-perf`). The 06:35 binary's falses are retired.
+Harness fixes that changed verdicts (each was a false result of mine, found by reading the evidence): preflight left text in the clipboard/PRIMARY (two false passes); the pointer-sanity click chose the empty "New thread" row and the drag then ran in an empty thread (a false fail); pointer delivery was first judged on the main area only, which does not change between two seeded threads with identical text (now also the sidebar highlight); the image check first matched the word `images` in the key `"images":[]` (a false pass).
+| action | verdict now | evidence |
+|---|---|---|
+| drag-select | **pass-so-far** (partial: software render, JS hub) | PRIMARY holds the dragged assistant text |
+| Ctrl-C | **pass-so-far** | the clipboard holds the same text, targets UTF8_STRING, text/plain;charset=utf-8 |
+| paste image | **false, app** | the image uploads (1,229-byte file on the hub) but the thread the hub shows has `"images":[]` and the sent message is text only |
+| drop file | **false, app, changed** | now uploads (new since 06:35: `paste.png` on the hub) but the same: nothing attached to the message |
+| paperclip | **unverified** | the client's own `click ui:Attach` calls the OS chooser (stand-in logged one OpenFile); an OS click aimed at the reported rect does nothing: the rect is ~25 px below the painted button |
+| IME | **harness, not run** | one attempt each with ibus+Hangul and fcitx5 (XIM frontend + hangul): a plain XIM client (xev) never gets 한 (`XFilterEvent: False`; ibus engine runs, fcitx5 reports no active engine), so GPUI cannot be judged; parked for a real-hardware run |
+| link click | blocked | GPUI has no link detection (`links` supported:false) |
+None of these counts as a pass: the gate needs the Rust hub on real hardware.
