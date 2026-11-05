@@ -171,7 +171,7 @@ Today's Bend hub is a JS service on Bun and runs on Linux, macOS (darwin-arm64, 
 
 <!-- law-map: generated below by scripts/gpui/law-map.py -->
 
-Laws in LAWS.bend: 3253. bend 911, rust 603, unported 1142, client 470, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`, `src/core/msp.bend`, `src/core/agy.bend`, `src/core/opencode.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
+Laws in LAWS.bend: 3253. bend 903, rust 611, unported 1142, client 470, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`, `src/core/msp.bend`, `src/core/agy.bend`, `src/core/opencode.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
 
 | law | status | seed | file | note |
 |---|---|---|---|---|
@@ -1573,13 +1573,13 @@ Laws in LAWS.bend: 3253. bend 911, rust 603, unported 1142, client 470, window 1
 | `review_other_tone` | rust `review_other_tone` | map | `src/core/review.bend` |  |
 | `review_moved` | rust `review_moved` | map | `src/core/review.bend` |  |
 | `review_not_moved` | rust `review_not_moved` | map | `src/core/review.bend` |  |
-| `slash_typing_word` | bend | seed K +-10% | `src/core/slash.bend` |  |
-| `slash_typing_alone` | bend | seed K +-10% | `src/core/slash.bend` |  |
-| `slash_not_after_space` | bend | seed K +-10% | `src/core/slash.bend` |  |
-| `slash_not_midline` | bend | seed K +-10% | `src/core/slash.bend` |  |
-| `slash_claude_prefix` | bend | seed K +-10% | `src/core/slash.bend` |  |
-| `slash_others_own_only` | bend | seed K +-10% | `src/core/slash.bend` |  |
-| `slash_none_unknown` | bend | seed K +-10% | `src/core/slash.bend` |  |
+| `slash_typing_word` | rust `slash_typing_word` | map | `src/core/slash.bend` |  |
+| `slash_typing_alone` | rust `slash_typing_alone` | map | `src/core/slash.bend` |  |
+| `slash_not_after_space` | rust `slash_not_after_space` | map | `src/core/slash.bend` |  |
+| `slash_not_midline` | rust `slash_not_midline` | map | `src/core/slash.bend` |  |
+| `slash_claude_prefix` | rust `slash_claude_prefix` | map | `src/core/slash.bend` |  |
+| `slash_others_own_only` | rust `slash_others_own_only` | map | `src/core/slash.bend` |  |
+| `slash_none_unknown` | rust `slash_none_unknown` | map | `src/core/slash.bend` |  |
 | `uber_promote_far_refused` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `uber_demote_clears` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `uber_promote_sets` | unported | seed R +-10% | `src/core/model.bend` |  |
@@ -3105,7 +3105,7 @@ Laws in LAWS.bend: 3253. bend 911, rust 603, unported 1142, client 470, window 1
 | `refs_blank_spaces` | bend | seed K +-10% | `src/core/refs.bend` |  |
 | `refs_blank_word` | bend | seed K +-10% | `src/core/refs.bend` |  |
 | `refs_blank_trailing` | bend | seed K +-10% | `src/core/refs.bend` |  |
-| `slash_typing_needs_slash` | bend | seed K +-10% | `src/core/slash.bend` |  |
+| `slash_typing_needs_slash` | rust `slash_typing_needs_slash` | map | `src/core/slash.bend` |  |
 | `refs_word_padded` | bend | seed K +-10% | `src/core/refs.bend` |  |
 | `refs_word_longer` | bend | seed K +-10% | `src/core/refs.bend` |  |
 | `refs_word_more` | bend | seed K +-10% | `src/core/refs.bend` |  |
