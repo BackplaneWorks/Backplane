@@ -314,6 +314,35 @@
   }
  },
  {
+  "name": "bot_create",
+  "description": "Make a sub-bot: a new persistent bot (its own cat, memory and thread) for a lasting role you want to hand off, like watching a queue or owning an area. You are its maker. Bots made by bots go at most two levels deep, and each bot keeps at most eight. For one-off work start a thread with thread_launch and its `project` instead.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string",
+     "description": "Its name: 1 to 24 letters, digits, - or _."
+    },
+    "persona": {
+     "type": "string",
+     "description": "Who it is and what it does, in a few sentences."
+    },
+    "provider": {
+     "type": "string",
+     "description": "claude, codex, grok, muse, antigravity, opencode, pi or omp (default: yours)."
+    },
+    "model": {
+     "type": "string",
+     "description": "Its model (default: the provider's)."
+    }
+   },
+   "required": [
+    "name",
+    "persona"
+   ]
+  }
+ },
+ {
   "name": "remind_person",
   "description": "Alert the person at a time, with no agent turn: a notification on their desktop and phone, and a reminder line in your thread. Use it for 'remind me...', not routine_set. Times as in routine_set's `at`, in the person's time zone unless `tz` says otherwise.",
   "inputSchema": {
