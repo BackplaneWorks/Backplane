@@ -210,6 +210,7 @@ fn drain(rx: &Tap, key: &str, acc: &mut Vec<u8>, resets: &mut Vec<Value>) {
     // it reads again: it gets a snapshot (a reset to the screen's size) and the stale mark is gone
     let got = tokio::spawn(async move { let mut resets = 0; while let Ok(Some(o)) = tokio::time::timeout(Duration::from_secs(5), stalled.recv()).await { if let Out::Value(v) = o { if v["t"] == "term" && v.get("reset").is_some() { resets += 1; break } } } resets });
     assert_eq!(got.await.unwrap(), 1, "one snapshot reached the client that caught up");
+    hub.detach(2); // its reader is gone: a gone client is forgotten
     assert!(wait(5, || t.inner.try_lock().map_or(false, |g| g.skipped.is_empty())).await);
     rpc(&hub, "term.input", json!({"thread":"t1","b":"exit\n".bytes().collect::<Vec<u8>>()})).await;
 }
