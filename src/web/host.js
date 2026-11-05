@@ -67,7 +67,8 @@ import { installWorkspaceHints } from "./workspace-hints.js";
 // probe goes off its plots at once, as its chip's x does through the hub
 const composerKeeper = installComposerFocus({ phone: () => composerPhone() });
 installPhoneThread({ list: el => timelineList(el), latest: () => holdBottom(), newest: () => thin?.atNewest?.() !== false });
-installWorkspaceKeys({ dispatch, escNext: (term, probe, viewer) => App.esc_next(term, probe, viewer), composer: composerKeeper,
+// (a key's result drawn in its own handler too, as a mouse press's is)
+installWorkspaceKeys({ dispatch: (action, value, timer) => { const done = dispatch(action, value, timer);renderNow();return done; }, escNext: (term, probe, viewer) => App.esc_next(term, probe, viewer), composer: composerKeeper,
   clearProbe: () => { Plot2d.setProbe("");Solid.setProbe("");dispatch("probe", ""); } });
 installWorkspaceHints();
 installFloatingTerminal({ dispatch });
@@ -2403,6 +2404,8 @@ for (const ev of EVENTS) {
       document.documentElement.style.setProperty("--my", e.clientY + "px");
     }
     dispatch(ev === "click" ? phoneClickAction(document, el, action) : action, ev === "input" ? inputValue(el) : valueOf(el));
+    // (a row's menu, at the right press, in this frame)
+    if (ev === "contextmenu") renderNow();
     // A mouse send or stop leaves the next keystroke in the message box.
     if (ev === "click" && el.closest(".composer") && ["send", "send-alt", "interrupt"].includes(action)) composerKeeper.activate(e);
   });
