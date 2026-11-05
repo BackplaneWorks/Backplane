@@ -134,3 +134,15 @@ pub trait Transform: Send + Sync {
     /// The batch returned above could not be written (disk full, closed log): the policy must resync / mark its copy stale.
     fn commit_failed(&self, first_seq: u64);
 }
+
+/// Threads mirrored from the owner's other machines: NOT in this hub's log or `Model` (the Bend hub reads and writes the same
+/// events.jsonl; a mirror there would fold as local ids). Their events live in the net lane's per-link store and reach the
+/// presenter through `Hub::fold_mirror` (renamed to `<link>~<id>`); pages of a mirrored thread come from here.
+pub trait FarView: Send + Sync {
+    /// whether `thread` (an id like "<link>~<id>") is a mirrored thread
+    fn has(&self, thread: &str) -> bool;
+    /// the page as `Model::page` gives it for a local thread: rows older than ordinal `before` (0: newest), at most `limit` plus lookahead
+    fn page(&self, thread: &str, before: u64, limit: usize) -> Option<crate::model::Page>;
+    /// the newest rows up to the latest human prompt and assistant text (`Model::latest_context`)
+    fn latest_context(&self, thread: &str) -> Vec<crate::model::Row>;
+}
