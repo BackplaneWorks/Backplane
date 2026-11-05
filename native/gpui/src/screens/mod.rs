@@ -14,6 +14,7 @@ pub mod improvements;
 pub mod capture;
 pub mod md;
 pub mod picker;
+pub mod place;
 pub mod plot;
 pub mod projects;
 pub mod plotview;

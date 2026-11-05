@@ -7,7 +7,7 @@
 //! Out for Claude: images/`$skill` input, the Backplane MCP server and runtime prompt in the agent's arguments,
 //! subagents and background tasks, todo tools, the allowance stream, the legacy queue, mail provenance beyond carry,
 //! and the hub's time-driven policies (liveness, autosettle, alert/told/summary, star nudge), which belong to M4.
-pub mod bg; pub mod refs; pub mod person; pub mod work; pub mod textgen; pub mod launch; pub mod review; pub mod tasks; pub mod codex; pub mod providers; pub mod cmds; pub mod hist; pub mod host; pub mod inputs; pub mod lines; pub mod mcp; pub mod proc; pub mod prompt; pub mod prompt_text; pub mod rules; pub mod tools; pub mod wake; pub mod world;
+mod devturns; pub mod bg; pub mod refs; pub mod person; pub mod work; pub mod textgen; pub mod launch; pub mod review; pub mod tasks; pub mod codex; pub mod providers; pub mod cmds; pub mod hist; pub mod host; pub mod inputs; pub mod lines; pub mod mcp; pub mod proc; pub mod prompt; pub mod prompt_text; pub mod rules; pub mod tools; pub mod wake; pub mod world;
 #[cfg(test)] mod tests;
 #[cfg(test)] mod laws;
 
@@ -85,6 +85,7 @@ impl Agents {
         ag.recover().await;
         let _ = HANDLE.set(ag.clone()); tasks::watch(&ag); { let a = ag.clone(); tokio::spawn(async move { a.work_rearm().await }); } if !repair.is_empty() { let a = ag.clone(); tokio::spawn(async move { a.task_repair_run(repair).await }); }
         hub.register_rpc(Arc::new(Rpc(ag.clone())));
+        hub.register_http(Arc::new(devturns::DevTurns(ag.clone())));
         wake::Wakes::start(ag.clone()).await; // wake_on / wake_list / wake_cancel
         Ok(ag)
     }

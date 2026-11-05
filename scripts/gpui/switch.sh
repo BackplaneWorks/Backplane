@@ -4,6 +4,7 @@
 #   scripts/gpui/switch.sh try [--no-client]     seeded synthetic home: a first thing to click on, nothing real in it
 #   scripts/gpui/switch.sh start [--no-client]   fresh copy, hub (+ policy helper), then the GPUI client
 #   scripts/gpui/switch.sh stop                  stop what start made; the copy stays (to look at, or to start again on)
+#   scripts/gpui/switch.sh reload [hub|client|both]  the binaries in HUB_BIN/CLIENT_BIN on the SAME copy: nothing copied, nothing deleted (dev-reload.sh runs it)
 #   scripts/gpui/switch.sh status                what runs, memory of each process, counts only
 #   scripts/gpui/switch.sh rollback              stop and delete the copy. There is nothing to undo: today's app never stopped.
 #
@@ -165,6 +166,7 @@ cmd_start() {
   if [ -e "$SW" ] && ! owned && [ -n "$(ls -A "$SW" 2>/dev/null)" ]; then die "$SW exists and this script did not make it (no .switch-owned): refusing to use or delete it"; fi
   [ -d "$SW" ] && keeplogs
   mkdir -p "$SW"; chmod 700 "$SW"; echo "backplane switch.sh state; rollback may delete $H" > "$SW/.switch-owned"
+  echo "$MODE" > "$SW/mode"
   alive "$(pidof_file hub)" && ours "$(pidof_file hub)" hub && die "already running (pid $(pidof_file hub)); stop first"
   local src=; if [ "$MODE" = try ]; then :; else src=$(source_file); [ -f "$src" ] || die "no $src"; fi
   [ -z "$(ss -ltn "sport = :$PORT" 2>/dev/null | tail -n +2)" ] || die "port $PORT is in use"
@@ -186,6 +188,11 @@ PY
   # a copy must not resume the turns its log says were running (they would run in the real folders)
   printf '{"$":"SettingSet","key":"restart.continue","value":"off","at":%s}\n' "$(date +%s)" >> "$H/events.jsonl"
   echo "copied $(wc -l < "$H/events.jsonl") events ($need MB) from $([ "$SRC" = live ] && echo 'the live store (read only)' || echo "$SRC")"; fi
+  launch_hub; idle_check; launch_client "$@"
+}
+
+# the hub, on what is in $H. The stand-ins and every environment check run at each launch, a reload's too.
+launch_hub() {
   # stand-in agents: nothing may call a model
   printf '#!/bin/sh\nexec %s %s "$@"\n' "$(command -v bun)" "$HERE/test/tools/claude_standin.ts" > "$SW/bin/claude"; chmod +x "$SW/bin/claude"
   local n; for n in codex grok muse; do printf '#!/bin/sh\nexit 1\n' > "$SW/bin/$n"; chmod +x "$SW/bin/$n"; done
@@ -214,7 +221,7 @@ PY
   if [ "$MODE" = side ]; then printf '%s\n' "$ev" | grep -qx "BACKPLANE_SIDE_BY_SIDE=1" || okenv=0; printf '%s\n' "$ev" | grep -qx "BACKPLANE_PASSIVE=1" || okenv=0; printf '%s\n' "$ev" | grep -qx "HOME=$SW/fakehome" || okenv=0; [ "$SBS_AGENTS" = 1 ] || { printf '%s\n' "$ev" | grep -q '^BACKPLANE_AGENTS=' && okenv=0; }
   else printf '%s\n' "$ev" | grep -qx "BACKPLANE_AGENTS=$SW/bin" || okenv=0; fi
   [ $okenv = 1 ] || { kill "$hp" 2>/dev/null; rm -f "$SW/hub.pid"; die "hub $hp's environment is not the one required for mode $MODE (copy guard, stand-ins or side-by-side flag, no session bus): stopped"; }
-  rm -f "$SW/sample.stop"; "$HERE/test/gpui/switch/sample.sh" "$SW" "$SW/rss.tsv" 5 < /dev/null > /dev/null 2>&1 &
+  rm -f "$SW/sample.stop"; [ "${RELOADING:-}" = 1 ] || "$HERE/test/gpui/switch/sample.sh" "$SW" "$SW/rss.tsv" 5 < /dev/null > /dev/null 2>&1 &   # it reads hub.pid each round: a reload keeps it
   # a big log takes minutes to fold; wait for /hello, bounded
   echo "hub pid $hp, environment checked (stand-ins, copy guard). Waiting for it to open the log..."
   while [ $i -lt "${SWITCH_WAIT:-1800}" ]; do
@@ -224,11 +231,17 @@ PY
   done
   curl -s -m2 -o /dev/null "http://127.0.0.1:$PORT/hello" || die "no /hello after ${i}s; hub still running as pid $hp, see $SW/hub.log"
   echo "hub answers on http://127.0.0.1:$PORT after ${i}s"
+}
+
+idle_check() {
   if [ "$MODE" = side ]; then  # the first-run check: nothing may act by itself; 30 s idle may add only a few settings, by count
     local l0 l1; l0=$(wc -l < "$H/events.jsonl"); sleep 30; l1=$(wc -l < "$H/events.jsonl")
     echo "idle 30 s: the copy's log grew by $((l1 - l0)) events"
     [ $((l1 - l0)) -le 50 ] || { cmd_stop >/dev/null; die "the copy's log grew by $((l1 - l0)) events while idle: something acts by itself; stopped (logs kept)"; }
   fi
+}
+
+launch_client() {
   if [ "${1:-}" != "--no-client" ]; then
     [ -x "$CLIENT_BIN" ] || die "no client $CLIENT_BIN (use --no-client to run the hub alone)"
     [ -n "$DISP" ] || die "no display: set SWITCH_DISPLAY (:61 is the isolated one) or pass --no-client"
@@ -239,6 +252,40 @@ PY
     echo $! > "$SW/client.pid"; echo "$CLIENT_BIN" > "$SW/client.bin"; echo "client pid $(cat "$SW/client.pid") on $DISP"
   fi
   echo "Running beside today's Backplane (untouched on 3787). To go back: scripts/gpui/switch.sh rollback"
+}
+
+# one process stopped and only that one. A TERM asks; a client saves where the person is and quits, and a second TERM ends one too stuck to.
+stop_one() {
+  local who=$1 p i=0; p=$(pidof_file "$who")
+  if alive "$p"; then
+    ours "$p" "$who" || die "pid $p is not our $who (stale pid file): left alone"
+    kill "$p" 2>/dev/null || true
+    while alive "$p" && [ $i -lt 60 ]; do sleep 0.25; i=$((i+1)); [ $i != 16 ] || kill "$p" 2>/dev/null || true; done
+    ! alive "$p" || die "$who ($p) did not stop; look at it, I kill nothing else"
+  fi
+  rm -f "${SW:?}/$who.pid"; [ ! -f "$SW/$who.log" ] || mv -f "$SW/$who.log" "$SW/$who.log.prev"
+}
+
+# what a running or last session was: `mode` is written at start; a session an older script started says so in its hub's environment
+mode_of() {
+  local h; h=$(pidof_file hub)
+  if [ -f "$SW/mode" ]; then cat "$SW/mode"
+  elif alive "$h" && tr '\0' '\n' < "/proc/$h/environ" 2>/dev/null | grep -qx BACKPLANE_SIDE_BY_SIDE=1; then echo side
+  elif alive "$h"; then echo copy
+  else die "no mode in $SW and no hub running: start one first"; fi
+}
+
+# new binaries on the same copy. This never makes or deletes a copy, so what was done on it stays. Every check a start makes still holds: on a real store
+# guard_source wants the person's yes and a terminal, and the hub's environment is checked again. The window opens as soon as the hub answers; the idle check runs after it.
+cmd_reload() {
+  local what=${1:-both}; case "$what" in hub|client|both) ;; *) die "reload [hub|client|both]";; esac
+  owned || die "$SW has no .switch-owned: reload works only on a copy this script made"
+  [ -f "$H/events.jsonl" ] || die "no copy in $H: reload never makes one; start first"
+  MODE=$(mode_of); case "$MODE" in side) SRC=live; guards source;; *) guards;; esac
+  RELOADING=1
+  if [ "$what" != client ]; then stop_one hub; launch_hub; fi
+  if [ "$what" != hub ]; then stop_one client; launch_client; fi
+  [ "$what" = client ] || idle_check
 }
 
 cmd_status() {
@@ -313,6 +360,7 @@ case "${1:-}" in
   start) shift; MODE=copy; cmd_start "$@";;
   try) shift; MODE=try; cmd_start "$@";;
   side) shift; MODE=side; SRC=live; cmd_start "$@";;
+  reload) shift; cmd_reload "$@";;
   stop) cmd_stop;;
   status) cmd_status;;
   rollback) cmd_rollback;;
