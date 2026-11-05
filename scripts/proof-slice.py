@@ -94,8 +94,137 @@ def scan_module(text, origin):
     return imports, digests, effects
 
 
+def _js_code(text, where):
+    """Light JavaScript scanner: returns (code with comments removed and every string literal replaced by
+    a \\x00S<n>\\x00 placeholder, strings). A template literal containing ${...} becomes \\x00T\\x00 AFTER its
+    interpolated expressions have been scanned as code (nested strings, templates and comments included), so a
+    require/import inside an interpolation is seen and checked like any other. Regex literals are skipped.
+    Unterminated strings/comments/templates/interpolations raise."""
+    out, strings, n = [], [], len(text)
+    state = {'prev': ''}
+
+    def fail(what):
+        raise ValueError('effect companion %s: unterminated %s' % (where, what))
+
+    def template(i):
+        j, computed = i + 1, False
+        while j < n and text[j] != '`':
+            if text[j] == '\\':
+                j += 2
+                continue
+            if text[j] == '$' and text[j+1:j+2] == '{':
+                computed = True
+                out.append(' ( ')
+                j = walk(j + 2, True)
+                out.append(' ) ')
+                j += 1
+                continue
+            j += 1
+        if j >= n:
+            fail('template')
+        if computed:
+            out.append('\x00T\x00')
+        else:
+            strings.append(text[i+1:j])
+            out.append('\x00S%d\x00' % (len(strings) - 1))
+        state['prev'] = 'S'
+        return j + 1
+
+    def walk(i, in_expr):
+        depth = 0
+        while i < n:
+            c = text[i]
+            if c == '/' and text[i+1:i+2] == '/':
+                j = text.find('\n', i)
+                i = n if j < 0 else j
+                continue
+            if c == '/' and text[i+1:i+2] == '*':
+                j = text.find('*/', i + 2)
+                if j < 0:
+                    fail('comment')
+                i = j + 2
+                continue
+            if c in '\'"':
+                j = i + 1
+                while j < n and text[j] != c:
+                    if text[j] == '\\':
+                        j += 1
+                    if j < n and text[j] == '\n':
+                        fail('string')
+                    j += 1
+                if j >= n:
+                    fail('string')
+                strings.append(text[i+1:j])
+                out.append('\x00S%d\x00' % (len(strings) - 1))
+                i, state['prev'] = j + 1, 'S'
+                continue
+            if c == '`':
+                i = template(i)
+                continue
+            if c == '/' and (state['prev'] == '' or state['prev'] in '(,=:[!&|?{};'):
+                j, cls = i + 1, False
+                while j < n and (text[j] != '/' or cls):
+                    if text[j] == '\\':
+                        j += 1
+                    elif text[j] == '[':
+                        cls = True
+                    elif text[j] == ']':
+                        cls = False
+                    elif text[j] == '\n':
+                        fail('regex')
+                    j += 1
+                i, state['prev'] = j + 1, 'S'
+                out.append('\x00R\x00')
+                continue
+            if in_expr:
+                if c == '{':
+                    depth += 1
+                elif c == '}':
+                    if depth == 0:
+                        return i
+                    depth -= 1
+            out.append(c)
+            if not c.isspace():
+                state['prev'] = c
+            i += 1
+        if in_expr:
+            fail('template interpolation')
+        return i
+
+    walk(0, False)
+    return ''.join(out), strings
+
+
+JS_WORD = re.compile(r"\b(require|import)\b")
+JS_STR = r"\x00S(\d+)\x00"
+
+
+def js_dependencies(text, where):
+    """Relative module specifiers a JS effect file loads. Comments and string contents are ignored, but
+    every `require`/`import` in code must be a static import / `from` with a string literal, or a call
+    whose ENTIRE argument is one string literal. Concatenation, template substitution, a comma, a
+    conditional, `import.meta`, a variable or any other computed form raises, so a computed target is
+    never treated as its literal prefix."""
+    code, strings = _js_code(text, where)
+    found = []
+    for m in JS_WORD.finditer(code):
+        rest = code[m.end():]
+        call = re.match(r"\s*\(\s*" + JS_STR + r"\s*\)", rest)
+        static = re.match(r"\s*" + JS_STR, rest) if m[1] == 'import' else None
+        if not static and m[1] == 'import' and not rest.lstrip().startswith('('):
+            static = re.match(r"[^;()]*?\bfrom\s*" + JS_STR, rest)
+        hit = call or static
+        if not hit:
+            raise ValueError('effect companion %s has a %s that is not a static or single string-literal form' % (where, m[1]))
+        found.append(strings[int(hit.group(1))])
+    found += [strings[int(m[1])] for m in re.finditer(r"\bfrom\s*" + JS_STR, code)]   # export ... from "x"
+    return [f for f in dict.fromkeys(found) if f.startswith(('./', '../'))]
+
+
 def effect_closure(root, module, path):
-    """Repo-relative effect files a module's `import "x"` needs: the file and its local #include "y.h" headers."""
+    """Repo-relative effect files a module's `import "x"` needs: the file, its local #include "y.h"
+    headers, and for .js the relative files it requires/imports. A dynamic import/require whose
+    target is not a string literal cannot be followed, so it raises (fail closed)."""
     root = Path(root)
     found, pending = set(), [(root/module).parent.joinpath(path).resolve()]
     while pending:
@@ -106,11 +235,18 @@ def effect_closure(root, module, path):
         if not f.is_file():
             raise ValueError('effect companion missing: %s (from %s)' % (rel, module))
         found.add(rel)
+        text = f.read_text() if f.suffix in ('.c', '.h', '.js', '.cjs', '.mjs') else ''
         if f.suffix in ('.c', '.h'):
-            for line in f.read_text().splitlines():
+            for line in text.splitlines():
                 m = INCLUDE.match(line)
                 if m:
                     pending.append((f.parent/m[1]).resolve())
+        elif f.suffix in ('.js', '.cjs', '.mjs'):
+            for spec in js_dependencies(text, rel):
+                target = (f.parent/spec).resolve()
+                if not target.suffix:
+                    target = target.with_suffix('.js')
+                pending.append(target)
     return found
 
 
@@ -297,7 +433,10 @@ class Slicer:
                 if first in imports and imports[first] != 'Base':
                     used.setdefault(b['mod'], set()).add(first)
                     if rest:
-                        for x in self.module(imports[first]).find(rest):
+                        hits = self.module(imports[first]).find(rest)
+                        if not hits and t not in mod.by_name:
+                            raise ValueError('unresolved reference %s in %s %s (%s): not found in %s' % (t, b['kind'], b['name'], b['mod'], imports[first]))
+                        for x in hits:
                             push(x)
                     # `Laws.x` is also a local declaration name in PROOF.bend
                     for x in mod.by_name.get(t, ()):
@@ -424,3 +563,37 @@ class Slicer:
 
     def law_seeds(self, law):
         return self.blocks('LAWS.bend', law, 'law') + self.blocks('PROOF.bend', 'Laws.' + law, 'def')
+
+
+def verify_plan(root, shards):
+    """Independent root/law coverage. `shards`: [{'id', 'kept': set of (module, kind, name), 'laws': [names]}].
+    The canonical set is rebuilt here from the files bend would read (scripts/bend-closure.py on
+    LAWS.bend and PROOF.bend) with the separate plain scanner; nothing comes from the slicer's own parser or
+    from the shards' roots. Requires: every canonical declaration kept by some shard, nothing kept that is
+    not canonical, every `law` of LAWS.bend named by exactly one shard and no unknown law."""
+    import subprocess
+    import sys
+    root = Path(root).resolve()
+    closure = subprocess.check_output([sys.executable, str(Path(__file__).resolve().parent/'bend-closure.py'), './LAWS.bend', './PROOF.bend'],
+                                      cwd=root, text=True).split()
+    canonical, laws = set(), []
+    for rel in sorted(set(closure) | {'LAWS.bend', 'PROOF.bend'}):
+        if not rel.endswith('.bend'):
+            continue
+        _, digests, _ = scan_module((root/rel).read_text(), rel)
+        canonical |= {(rel, k, n) for k, n in digests}
+        if rel == 'LAWS.bend':
+            laws = sorted(n for k, n in digests if k == 'law')
+    kept = set()
+    for shard in shards:
+        kept |= set(shard['kept'])
+    if kept - canonical:
+        raise ValueError('shards keep %d declarations that are not canonical' % len(kept - canonical))
+    if canonical - kept:
+        raise ValueError('%d canonical declarations are checked by no shard, e.g. %s %s %s' % ((len(canonical - kept),) + sorted(canonical - kept)[0]))
+    named = sorted(n for shard in shards for n in shard.get('laws', []))
+    if named != laws:
+        missing, extra = set(laws) - set(named), set(named) - set(laws)
+        dup = {n for n in named if named.count(n) > 1}
+        raise ValueError('law partition differs from LAWS.bend: %d missing, %d unknown, %d duplicated' % (len(missing), len(extra), len(dup)))
+    return {'canonical_declarations': len(canonical), 'laws': len(laws), 'shards': len(shards)}

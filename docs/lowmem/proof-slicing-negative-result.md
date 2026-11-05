@@ -60,3 +60,32 @@ recursion is not what keeps it whole. The cost is call depth: `Main.boot` reache
 335 modules / 7.2 MB, `Hub.handle` 23,310; the median `server.bend` declaration reaches only 135
 declarations / 52 KB and the 90th percentile 10,812 / 2.9 MB. Roots near the top of the call tree cannot
 be separated from their callees by name-reachability slicing. 32 effect companions are in the closure.
+
+## Exact limits of the merged prototype (after independent review of #871) and the controls added
+Limits of `verify_output` as merged: it checks the emitted shard against a caller-supplied kept set, not
+against an independently established full root/law set; `reach()` is name based, so a reference it cannot
+resolve silently contributed no dependency; `effect_closure` followed only the named effect file and quoted
+C/H includes, not JS-local requires or dynamic imports.
+
+Controls now in `proof-slice.py` (all light, no Bend run; 22 tests):
+- `verify_plan(root, shards)` rebuilds the canonical declaration set and the law set independently
+  (`scripts/bend-closure.py` on `LAWS.bend`/`PROOF.bend` plus the separate plain scanner) and requires every
+  canonical declaration kept by some shard, nothing kept that is not canonical, and every `law` named by
+  exactly one shard (no missing, unknown or duplicate). On current sources: 43,544 declarations, 3,165 laws,
+  221 shards pass. The first attempt, built from an out-of-date manifest, was REJECTED for
+  `src/core/message-context.bend Context.units`, which shows the control works.
+- `reach()` now raises on an alias-qualified reference it cannot resolve (no real source triggers it).
+  Unqualified unresolved names (builtins, locals) are still not errors: that part stays name-based and is
+  not proven complete.
+- `effect_closure` follows relative specifiers of `.js` effect files through a comment/string-aware scanner
+  (`js_dependencies`): each `require`/`import` must be a static import/`from` with a literal, or a call whose
+  ENTIRE argument is one string literal. Concatenation (`require("./a.js" + s)`), template substitution, a comma,
+  a conditional, `import.meta`, a variable or any computed form raises, so a literal prefix is never mistaken for the
+  whole target (found by independent audit of #872). The scanner is light, not a JavaScript parser: it is conservative
+  by rejection and its handling of regex literals and unusual syntax is untested beyond its unit tests. All current
+  `src/**/effects/*.js` files pass.
+Still open: this is name-based slicing, not a proof that the sliced program checks the same statements as
+the whole; gate/cache use requires independent review. Deep roots (`Main.boot` reaches 25,399
+declarations) are NOT addressed by slicing. Decision: investigate compiler-level bounded memory or
+structural sharing with lanes 1/2/5; do not replace callee implementations by signatures or axioms inside a
+proof unless the compiler supports a sound interface with an equivalence proof.
