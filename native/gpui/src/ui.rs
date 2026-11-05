@@ -110,6 +110,8 @@ impl Render for Backplane {
         if self.gallery { return crate::swatch::gallery(light).into_any_element(); }
         if self.fonts { return crate::swatch::fonts(light).into_any_element(); }
         let c = |name: &str| theme::color(light, name);
+        self.screens.reg.borrow_mut().blocks.clear();
+        let reg = self.screens.reg.clone();
         if self.input.read(cx).light != light { self.input.update(cx, |i, _| i.light = light); for i in self.screens.ask_inputs.values() { i.update(cx, |i, _| i.light = light); } }
         // bots: (name, mood, note, look seed) copied out so the cat cache can be filled
         let bot_data: Vec<(String, String, String, u64)> = self.data["bots"].as_array().into_iter().flatten()
@@ -157,7 +159,8 @@ impl Render for Backplane {
         }
         // timeline
         let mut entries: Vec<AnyElement> = Vec::new();
-        for e in thread["entries"].as_array().into_iter().flatten() {
+        for (ei, e) in thread["entries"].as_array().into_iter().flatten().enumerate() {
+            reg.borrow_mut().entry = ei;
             let kind = e["kind"].as_str().unwrap_or("");
             let id = string(e, "id");
             let text = string(e, "text");
@@ -165,7 +168,7 @@ impl Render for Backplane {
             match kind {
                 "user" => entries.push(div().id(SharedString::from(format!("e-{id}"))).w_full().flex().justify_end().py_2().child(
                     div().max_w(px(640.)).px_3().py_2().bg(c("raise")).border_1().border_color(c("line")).flex().flex_col().gap_1()
-                        .child(text).child(div().flex().justify_end().text_size(px(11.)).text_color(c("faint")).child(stamp))).into_any_element()),
+                        .child(crate::screens::timeline::user_text(&reg, light, &text)).child(div().flex().justify_end().text_size(px(11.)).text_color(c("faint")).child(stamp))).into_any_element()),
                 "fold" => {
                     let value = string(e, "value");
                     ctl.push(CtlEntry { id: format!("fold:{id}"), label: text.clone(), ctl: Ctl::Fold(value.clone()) });
@@ -178,9 +181,10 @@ impl Render for Backplane {
                 "assistant" => {
                     let mut col = div().id(SharedString::from(format!("e-{id}"))).w_full().py_2().flex().flex_col().gap_2();
                     match e["blocks"].as_array() {
-                        Some(blocks) if !blocks.is_empty() => { for b in blocks.iter().take(200) { col = col.child(block(b, light, 0)); } }
-                        _ => { col = col.child(text); }
+                        Some(blocks) if !blocks.is_empty() => { for el in crate::screens::timeline::blocks(cx, &reg, light, blocks, &id) { col = col.child(el); } }
+                        _ => { col = col.child(crate::screens::timeline::user_text(&reg, light, &text)); }
                     }
+                    if let Some(im) = crate::screens::timeline::images(cx, light, &e["images"], &id) { col = col.child(im); }
                     entries.push(col.child(div().text_size(px(11.)).text_color(c("faint")).child(stamp)).into_any_element());
                 }
                 _ => if !text.is_empty() {
@@ -230,6 +234,7 @@ impl Render for Backplane {
         ctl.push(CtlEntry { id: "ui:Attach".into(), label: "Attach".into(), ctl: Ctl::PickFiles });
         if !self.sidebar_open { ctl.push(CtlEntry { id: "ui:Unfold sidebar".into(), label: "Unfold sidebar".into(), ctl: Ctl::ToggleSidebar }); }
         let connected = self.status == "Connected";
+        self.poll_images(cx);
 
         let el = div().size_full().flex().flex_col().bg(c("bg")).text_color(c("text")).text_size(px(13.)).font_family("Noto Sans Mono CJK JP").line_height(px(20.))
             .on_action(cx.listener(Self::send)).on_action(cx.listener(Self::close_popup))
@@ -258,7 +263,9 @@ impl Render for Backplane {
                         .child(div().px_3().flex().gap_2().text_size(px(11.)).child(div().text_color(c("faint")).child("STATE")).child(div().size(px(6.)).mt(px(7.)).bg(c("ok"))).child(string(thread, "phase").split(':').next().unwrap_or("").to_lowercase()))
                         .when(!todo.is_empty(), |d| d.child(div().px_3().h_full().flex().items_center().gap_2().border_l_1().border_color(c("line")).text_size(px(11.)).child(div().text_color(c("faint")).child("TO-DO")).child(todo.clone()).child(ic(light, "chevron-down", 12., "faint"))))))
                     .when(has_home, |d| d.child(div().id("home").overflow_y_scroll().flex_1().flex().justify_center().child(div().w_full().max_w(px(930.)).p_4().flex().flex_col().gap_3().children(home_els))))
-                    .when(!has_home, |d| d.child(div().id("timeline").overflow_y_scroll().track_scroll(&self.scroll).flex_1().flex().justify_center().child(div().w_full().max_w(px(930.)).px_4().flex().flex_col().justify_end().min_h_full().children({
+                    .when(!has_home, |d| d.child(div().id("timeline").overflow_y_scroll().track_scroll(&self.scroll)
+                        .on_mouse_down(MouseButton::Left, cx.listener(|this, e, _, cx| this.timeline_down(e, cx))).on_mouse_down(MouseButton::Right, cx.listener(|this, e, _, cx| this.timeline_down(e, cx)))
+                        .on_mouse_move(cx.listener(|this, e, _, cx| this.timeline_move(e, cx))).on_mouse_up(MouseButton::Left, cx.listener(|this, e, _, cx| this.timeline_up(e, cx))).on_mouse_up_out(MouseButton::Left, cx.listener(|this, e, _, cx| this.timeline_up(e, cx))).flex_1().flex().justify_center().child(div().w_full().max_w(px(930.)).px_4().flex().flex_col().justify_end().min_h_full().children({
                         if entries.is_empty() { entries.push(div().py_6().text_color(c("dim")).child(if has_thread && thread["loading"] == true { "Loading…" } else if has_thread { "Start a conversation." } else { "Pick a thread, or start one with + next to a project." }).into_any_element()); }
                         entries
                     }))))
