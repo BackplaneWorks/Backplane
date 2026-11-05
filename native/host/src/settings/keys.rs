@@ -100,6 +100,7 @@ fn write(home: &Path, text: &str) -> Result<(), String> {
         std::fs::rename(&tmp, path(home))
     })();
     if w.is_err() { let _ = std::fs::remove_file(&tmp); return Err("error: the keys file could not be written".into()) }
+    super::mask::reload_api(); // masked from this instant, not from the cache's next read
     Ok(())
 }
 

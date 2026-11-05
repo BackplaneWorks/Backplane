@@ -57,6 +57,19 @@ fn rebuild() {
     *out = Some(Arc::new(m));
 }
 
+/// api.env was just written by this process (add or delete a key): read it NOW. The one-second cache below exists for edits made by someone else; a
+/// key the person saves in Settings must never wait out the cache, or it sits unmasked in the log for up to a second (found by the end-to-end leak test).
+pub fn reload_api() {
+    {
+        let mut g = API.lock().unwrap();
+        let Some(c) = g.as_mut() else { return };
+        c.at = std::time::Instant::now();
+        c.mtime = std::fs::metadata(&c.path).and_then(|m| m.modified()).ok();
+        c.vals = if c.mtime.is_none() { vec![] } else { std::fs::read_to_string(&c.path).map(|t| crate::settings::keys::values(&t)).unwrap_or_default() };
+    }
+    rebuild();
+}
+
 fn refresh_api() {
     let changed = {
         let mut g = API.lock().unwrap();
@@ -214,5 +227,21 @@ mod tests {
             let t = std::time::Instant::now(); for _ in 0..5 { assert!(clean_with(&vals, &mask_with(&vals, &dirty))); } let d = t.elapsed() / 5;
             println!("MASKCOST secrets={n}: clean 1 MB {c:?}; 1 MB holding a value {d:?}");
         }
+    }
+
+    /// The leak the end-to-end test found: a key saved right after the api.env cache was read stayed unmasked until the cache expired.
+    #[test] fn an_api_key_is_masked_the_instant_it_is_saved_not_when_the_cache_expires() {
+        let _l = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let home = std::env::temp_dir().join(format!("bp-apirace-{}", std::process::id())); let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap();
+        clear_api(); set_vault_values(vec![]); set_api_path(crate::settings::keys::path(&home));
+        for i in 0..20 {
+            let _ = snapshot(); // a commit just read (and cached) the file, which has no such key yet
+            let key = format!("apikey-Race-{i:04}-xyz");
+            crate::settings::keys::add(&home, &format!("RACE_{i}"), &key).unwrap();
+            assert_eq!(mask(&format!("a {key} b")), format!("a {} b", "\u{2022}".repeat(key.len())), "key {i} leaked");
+            let mut ev = vec![json!({"$":"MessagePosted","text":format!("x {key}")})]; events(&mut ev); assert!(!ev[0].to_string().contains(&key));
+        }
+        crate::settings::keys::del(&home, "RACE_3").unwrap(); assert_eq!(mask("apikey-Race-0003-xyz"), "apikey-Race-0003-xyz", "a deleted key is no longer masked");
+        clear_api(); let _ = std::fs::remove_dir_all(&home);
     }
 }
