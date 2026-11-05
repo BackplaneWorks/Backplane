@@ -3,6 +3,9 @@
 //! bp-plot --tree FILE and bp-plot --info FILE SIG IDX answer as `--plot-tree` and `--plot-info` do. Kinds 2, 3 and 4 read 3D models (kicad-cli from
 //! BACKPLANE_KICAD_CLI, the mesher as the hub picks it, BACKPLANE_HOME for its managed FreeCAD); bp-plot --render MODEL... is `backplane --render`.
 #![allow(dead_code)]
+// the process gate (proc.rs, copy.rs): the helper makes its git / kicad-cli / step children through it like the hub
+#[path = "../copy.rs"] mod copy;
+#[path = "../proc.rs"] mod proc;
 #[path = "../kicad/fl.rs"] mod fl;
 #[path = "../kicad/sexpr.rs"] mod sexpr;
 #[path = "../kicad/strokefont.rs"] mod strokefont;
