@@ -44,7 +44,7 @@ DISPLAY=$DISP i3 -c $R/i3.conf > $R/i3.log 2>&1 &
 echo $! > $R/i3.pid; sleep 1
 export DISPLAY=$DISP VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json LP_NUM_THREADS=2 BACKPLANE_GPUI_ASSETS=$ASSETS BACKPLANE_GPUI_RECTS=1
 if [ -n "${GPUI_ATTACH:-}" ]; then cp "$GPUI_ATTACH" $R/attach.png; cat > $R/script.json <<JSON
-[{"select":0},{"wait":1500},{"attach":"$R/attach.png"},{"wait":2500},{"type":"see attach"},{"wait":300},{"send":true},{"wait":2000}]
+[{"select":0},{"wait":1500},{"attach":"$R/attach.png"},{"wait":2500},{"type":"see attach"},{"wait":2500},{"send":true},{"wait":2500}]
 JSON
 else
 cat > $R/script.json <<JSON
@@ -53,7 +53,7 @@ JSON
 fi
 $CLIENT --url http://127.0.0.1:$PORT --token-file $R/home/token --script $R/script.json --exit-after 80 > $OUT/$N.client.log 2>&1 &
 echo $! > $R/client.pid
-if [ -n "${GPUI_ATTACH:-}" ]; then sleep 8; import -window root $SH/$N-attach.png; else sleep 7; import -window root $SH/$N-board.png
+if [ -n "${GPUI_ATTACH:-}" ]; then sleep 5; import -window root $SH/$N-attach.png; sleep 2; import -window root $SH/$N-attach-sent.png; else sleep 7; import -window root $SH/$N-board.png
 sleep 6; import -window root $SH/$N-schematic.png
 sleep 8; import -window root $SH/$N-3d.png
 sleep 9; import -window root $SH/$N-mech.png; fi
