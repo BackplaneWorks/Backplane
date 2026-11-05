@@ -653,3 +653,38 @@ mod mail_tests {
         assert_eq!(store::read(&store::path(&hub.cfg.home, "routine:r9")).len(), 2);
     }
 }
+
+mod store_tests {
+    use super::super::mail::*;
+    use super::*;
+    fn body(conv: &str, id: &str) -> Body {
+        Body { conv: Conv { id: conv.into(), subject: "s".into(), kind: "pair".into(), parts: vec![], project: String::new(), tags: vec![], made: 1, last: 1, n: 0 },
+            mail: Hdr { id: id.into(), conv: conv.into(), from: "a".into(), to: "b".into(), kind: "bot".into(), r#ref: String::new(), want: "fyi".into(), head: "h".into(), size: 1, at: 1 }, text: "SECRET".into() }
+    }
+    fn home(name: &str) -> std::path::PathBuf { let h = std::env::temp_dir().join(format!("bp-store-{}-{name}", std::process::id())); let _ = std::fs::remove_dir_all(&h); std::fs::create_dir_all(&h).unwrap(); h }
+    #[test] fn the_journal_is_not_opened_through_a_link() {
+        use std::os::unix::fs::symlink;
+        let h = home("links"); let outside = home("links-outside");
+        // a link in the journal's place: refused, and what it points at is not written
+        std::fs::create_dir_all(h.join("mail")).unwrap(); let target = outside.join("elsewhere"); std::fs::write(&target, b"").unwrap();
+        symlink(&target, store::path(&h, "c1")).unwrap();
+        assert_eq!(store::append(&h, &body("c1", "m1")), Err(store::StoreError::Link)); assert_eq!(std::fs::read(&target).unwrap().len(), 0);
+        assert!(store::read(&store::path(&h, "c1")).is_empty() && store::headers(&store::path(&h, "c1")).is_empty(), "nor read through it");
+        // a second name for a journal: refused for a write
+        assert_eq!(store::append(&h, &body("c2", "m1")), Ok(false)); std::fs::hard_link(store::path(&h, "c2"), h.join("mail").join("alias")).unwrap();
+        assert_eq!(store::append(&h, &body("c2", "m2")), Err(store::StoreError::Hardlink)); assert_eq!(store::read(&store::path(&h, "c2")).len(), 1);
+        // not a regular file
+        std::fs::create_dir(store::path(&h, "c3")).unwrap(); assert_eq!(store::append(&h, &body("c3", "m1")), Err(store::StoreError::NotRegular));
+        // the directory itself a link
+        let h2 = home("links-dir"); symlink(&outside, h2.join("mail")).unwrap();
+        assert_eq!(store::append(&h2, &body("c4", "m1")), Err(store::StoreError::Link)); assert!(!outside.join("c4.jsonl").exists());
+        // errors say the kind, never the conversation
+        assert!(!format!("{}", store::StoreError::Link).contains("c1"));
+    }
+    #[test] fn headers_drop_the_text_and_a_new_journal_is_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let h = home("hdr"); store::append(&h, &body("c", "m1")).unwrap(); store::append(&h, &body("c", "m2")).unwrap();
+        let hs = store::headers(&store::path(&h, "c")); assert_eq!(hs.iter().map(|(_, m)| m.id.as_str()).collect::<Vec<_>>(), vec!["m1", "m2"]);
+        assert_eq!(std::fs::metadata(store::path(&h, "c")).unwrap().permissions().mode() & 0o777, 0o600);
+    }
+}
