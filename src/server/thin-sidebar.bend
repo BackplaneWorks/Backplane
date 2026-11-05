@@ -36,19 +36,44 @@ def Sidebar.info(xs: List<&2, Sigma<&2, &2, String, _ => String>>) -> List<&2, J
     case (+k, v) <> rest:
       List.append(&2, J.KV, Bool.pick(List<&2, J.KV>, String.eq(k, "models.v"), Nil{}, [J.KV{k, J.Str{v}}]), Sidebar.info(rest))
 
+# The private ordinary image also leaves out what moves on every request but
+# no sidebar reads: the fab lookup's own mark ("@fab.at", client.bend's
+# Fab.sync), the per-request reply bookkeeping ("@rp.req:<id>",
+# "@telemetry.req:<id>", read only by their reply handlers) and the desks'
+# watched threads (info "desk", read only by the phones' alerts). With them
+# in, the image missed on the action and the update after every view.open
+# (2026-11-05: three full sidebar renders a click, 8-12 ms each).
+def Sidebar.image.omit(+key: String) -> Bool:
+  Bool.or(String.eq(key, "@fab.at"), Bool.or(String.starts_with(key, "@rp.req:"), String.starts_with(key, "@telemetry.req:")))
+
+def Sidebar.image.drafts(xs: List<&2, Sigma<&2, &2, String, _ => String>>) -> List<&2, Sigma<&2, &2, String, _ => String>>:
+  match xs:
+    case Nil{}: Nil{}
+    case (+k, v) <> rest: SD.Input.keep(Bool.not(Sidebar.image.omit(k)), k, v, Sidebar.image.drafts(rest))
+
+def Sidebar.image.info(xs: List<&2, Sigma<&2, &2, String, _ => String>>) -> List<&2, Sigma<&2, &2, String, _ => String>>:
+  match xs:
+    case Nil{}: Nil{}
+    case (+k, v) <> rest: SD.Input.keep(Bool.not(String.eq(k, "desk")), k, v, Sidebar.image.info(rest))
+
+def Sidebar.input_info(image: Bool, xs: List<&2, Sigma<&2, &2, String, _ => String>>) -> List<&2, J.KV>:
+  match image:
+    case False{}: Sidebar.info(xs)
+    case True{}: Sidebar.info(Sidebar.image.info(xs))
+
 # Keep the original full draft map for picture/transport keys. The private
 # ordinary image uses the reviewed scratch input; the three pre-existing
 # Settings-only omissions above remain identical in both modes.
 def Sidebar.input_drafts(image: Bool, xs: List<&2, Sigma<&2, &2, String, _ => String>>) -> List<&2, J.KV>:
   match image:
     case False{}: Sidebar.drafts(xs)
-    case True{}: Sidebar.drafts(SD.Input.fields(SD.Input.of(xs)))
+    case True{}: Sidebar.drafts(Sidebar.image.drafts(SD.Input.fields(SD.Input.of(xs))))
 
 # The trusted hub revision can replace the full sequence only for the
 # metadata-only server sidebar. It excludes exactly the three history-only
 # events proved for sidebar-read.Input. Clock/UI/info/scope fences stay exact.
 # The legacy entry below keeps its full-sequence independent oracle.
-def Sidebar.key.input(image: Bool, u: U.Ui, epoch: String, view: String, revision: Nat) -> String:
+def Sidebar.key.input(+image: Bool, u: U.Ui, epoch: String, view: String, revision: Nat) -> String:
   match u:
     case U.Ui{_, sel, dr, live, op, on, now, ad, pa, version, _, want, error, note, nf, outbox, _}:
       J.Json.show(J.Json.obj([J.KV{"epoch", J.Str{epoch}}, J.KV{"view", J.Str{view}}, J.KV{"seq", J.Json.nat(revision)},
@@ -56,7 +81,7 @@ def Sidebar.key.input(image: Bool, u: U.Ui, epoch: String, view: String, revisio
         J.KV{"live", J.Json.obj(P.Session.strings(Map.to_list(&2, String, live)))}, J.KV{"open", J.Json.obj(Sidebar.flags(Map.to_list(&2, Bool, op)))},
         J.KV{"online", J.Flag{on}}, J.KV{"clock", J.Json.nat(now)}, J.KV{"adding", J.Flag{ad}}, J.KV{"panel", J.Flag{pa}}, J.KV{"version", J.Str{version}},
         J.KV{"want", J.Flag{want}}, J.KV{"error", J.Str{error}}, J.KV{"note", J.Str{note}},
-        J.KV{"info", J.Json.obj(Sidebar.info(Map.to_list(&2, String, nf)))}, J.KV{"outbox", J.Json.obj(P.Session.strings(Map.to_list(&2, String, outbox)))}]))
+        J.KV{"info", J.Json.obj(Sidebar.input_info(image, Map.to_list(&2, String, nf)))}, J.KV{"outbox", J.Json.obj(P.Session.strings(Map.to_list(&2, String, outbox)))}]))
 
 def Sidebar.key.revision(u: U.Ui, epoch: String, view: String, revision: Nat) -> String:
   Sidebar.key.input(False{}, u, epoch, view, revision)
