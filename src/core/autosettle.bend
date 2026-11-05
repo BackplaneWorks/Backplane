@@ -255,8 +255,28 @@ def Auto.read.summary(summary: Summary, +s: M.State, +th: String, +now: Nat) -> 
 # Completion of owned work starts a fresh grace period too. These small
 # durable watermarks are added at the ordinary commit boundary, not on a
 # timer. A repeated identical work observation does not postpone settling.
+# the thread's newest own assistant message (what Auto.summary's output
+# is), the walk stopping there: the read receipt walked and classified
+# every message of the thread for it on each desk.look, 135-400 ms of the
+# hub's time per thread switch on a 33k-event thread
+def Auto.recent.go(xs: List<&2, M.Entry>, +th: String, done: Bool, +acc: String) -> String:
+  match xs done:
+    case _ True{}: acc
+    case Nil{} False{}: acc
+    case M.Msg{+id, +t, +role, _, _} <> rest False{}:
+      +hit = Bool.and(Bool.and(String.eq(t, th), Auto.assistant(role)), Bool.not(String.is_empty(id)))
+      Auto.recent.go(rest, th, hit, Bool.pick(String, hit, id, acc))
+    case M.Act{_, _, _, _, _, _} <> rest False{}: Auto.recent.go(rest, th, False{}, acc)
+
+# (the summary is walked only when no output watermark is set: it is the
+# fallback Auto.output takes then)
+def Auto.read.recent(set: Bool, +s: M.State, +th: String) -> String:
+  match set:
+    case True{}: ""
+    case False{}: Auto.recent.go(M.State.mine(s, th), th, False{}, "")
+
 def Auto.read(+s: M.State, +th: String, +now: Nat) -> List<&2, M.Change>:
-  Auto.read.summary(Auto.summary(M.State.mine(s, th), th, "", Summary{0n, False{}, False{}, "", 0n, 0n}), s, th, now)
+  Auto.read.summary(Summary{0n, False{}, False{}, Auto.read.recent(Bool.not(String.is_empty(Auto.output(s, th, ""))), s, th), 0n, 0n}, s, th, now)
 
 def Auto.quiet.ask(xs: List<&2, M.Ask>, +id: String, +at: Nat, m: Map<&2, Nat>) -> Map<&2, Nat>:
   match xs:
