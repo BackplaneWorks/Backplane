@@ -184,3 +184,15 @@ test('a shelf press draws the one sidebar section it changed as the hub drew it,
  f.seen(page('',7,[row('new')]),'thread:A');s=f.choice('toggle-settled','settled:p1','thread:A');assert.equal(f.showing,false);s(true);
  assert.equal(f.choice('toggle-settled','settled:p1','thread:B'),undefined,'another destination: nothing seen there');
 });
+test('a learned shelf is kept across a reload with the rest',async()=>{
+ const {PressFeedback,T}=await load();
+ const mem=new Map(),storage={getItem:k=>mem.has(k)?mem.get(k):null,setItem:(k,v)=>mem.set(k,v),removeItem:k=>mem.delete(k),key:i=>[...mem.keys()][i],get length(){return mem.size;}};
+ const el=(tag,key,attrs,ks=[])=>({$:T.El,tag,key,attrs:L(Object.entries(attrs).map(([name,value])=>({$:T.At,name,value}))),kids:L(ks)});
+ const proj=open=>el('section','p1',{class:'project'},[el('button','',{class:open?'shelf open':'shelf'}),...(open?[el('bp-memo','s1',{fn:'row'})]:[])]);
+ const page=(open,n=0)=>el('div','',{},[el('div','app',{class:'app'},[el('aside','sidebar',{class:'sidebar'},[proj(open)]),el('main','main',{class:'thread-view'},[el('div','tl',{id:'timeline'},[el('div','r'+n,{})])])])]);
+ const f=new PressFeedback(()=>{},64,{storage,scope:()=>'hubA'});
+ f.seen(page(false),'thread:A');f.choice('toggle-settled','settled:p1','thread:A')(true);f.seen(page(true,1),'thread:A');
+ await new Promise(r=>setTimeout(r,2100));
+ const g=new PressFeedback(()=>{},64,{storage,scope:()=>'hubA'});g.seen(page(false,2),'thread:A');
+ g.choice('toggle-settled','settled:p1','thread:A');assert.equal(g.active?.kind,'section','after a reload: drawn at the first press');
+});
