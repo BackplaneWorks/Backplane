@@ -7,6 +7,7 @@ O=out/commands-parity; mkdir -p $O
 export PATH="$HOME/.cargo/bin:$HOME/.bun/bin:$PATH"
 which bun >/dev/null 2>&1 || { curl -fsSL https://bun.sh/install | BUN_INSTALL=$HOME/.bun bash >/dev/null 2>&1; export PATH="$HOME/.bun/bin:$PATH"; }
 chmod +x pstage/backplane-serve pstage/bp-policy-page pstage/window test/gpui/slim/check_agents.sh 2>/dev/null
+rm -rf /tmp/parity-work  # a shared host keeps the last run: folders it made (proj/made, proj/fresh, .backplane/intent.md) must not be there
 export BACKPLANE_PARITY_ROOT=$PWD PARITY_WORK=/tmp/parity-work
 bun test/gpui/parity/record.mjs --bin $PWD/pstage/backplane-serve --out $O/recJ --port 3820 --tag A --only commands > $O/recJ.log 2>&1
 bun test/gpui/parity/record.mjs --bin $PWD/pstage/backplane-serve --out $O/recJ2 --port 3822 --tag B --only commands > $O/recJ2.log 2>&1
