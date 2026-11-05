@@ -58,6 +58,10 @@ pub fn event_type(line: &str) -> Option<&str> {
     r.split('"').next()
 }
 
+/// The fields of the presenter's params only the hub makes: the thread's `window` and `page` (rows read from the index), `reads` and `local`. A client's own copy would
+/// be taken for the hub's (an unported native page for indexed rows), so every one is removed from the request's clone before the hub's go in.
+fn strip_hub_owned(params: &mut Value) { if let Some(o) = params.as_object_mut() { for k in ["window", "page", "reads", "local", "wants"] { o.remove(k); } } }
+
 /// PRESENTER_UNAVAILABLE is retryable on the wire: a target the Rust presenter has not ported (the helper is not running) or a helper that is restarting answers "not yet", never "no"
 /// (Hub::error has retryable:false for every code).
 fn unavailable(id: &Value) -> Value { json!({"t":"reply","id":id,"ok":false,"error":{"code":"PRESENTER_UNAVAILABLE","retryable":true,"compatibilityRequired":false}}) }
@@ -96,6 +100,7 @@ impl Hub {
         let view_id = if m == "view.open" { format!("{}:{}", c.gen, rid) } else { c.view_id.clone() };
         let rev = self.revision().await;
         let mut params = p.clone();
+        strip_hub_owned(&mut params);   // window, page, reads and local are the hub's: whatever the client sent is gone before the hub's own are put in
         if let Some(o) = params.as_object_mut() {
             // what the presenter needs of the hub (native-sidebar.bend Ns.prepare): the view's id, the hub's signal revision (SignalRevision: the context's metadataRevision;
             // saved sidebar pages are kept only while it, the view and the choices stay the same: activity lines and assistant text do not move it), this run's key
@@ -272,6 +277,11 @@ mod read_tests {
         assert_eq!(event_type("not json"), None);
         assert_eq!(event_type(r#"{"$":5}"#), None);
         assert_eq!(event_type(""), None);
+    }
+    #[test] fn client_supplied_hub_fields_are_stripped() {
+        let mut p = json!({"target": {"kind": "thread", "id": "t1"}, "window": {"ids": ["x"]}, "page": {"rows": []}, "reads": [1], "local": {"a": "b"}, "wants": [2], "session": {}});
+        strip_hub_owned(&mut p);
+        assert_eq!(p, json!({"target": {"kind": "thread", "id": "t1"}, "session": {}}));
     }
     #[test] fn an_unavailable_presenter_is_retryable_and_the_others_are_not() {
         let e = unavailable(&json!(5));
