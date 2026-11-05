@@ -136,6 +136,7 @@ impl Terms {
         let (c, r) = (emb::cols(emb::num(xy.next().unwrap_or(""))) as usize, emb::rows(emb::num(xy.next().unwrap_or(""))) as usize);
         let mut vt = Vt::new(c, r); vt.feed(body);
         g.screens.insert(key.into(), Screen { title: String::new(), vt, seen: true, state: it.next().unwrap_or("").to_string(), pid: 0 });
+        Self::finish(g, key); // a screen read back is a finished one: it counts against the cap too
     }
 
     // ---- the requests (TOpen, TIn, TSize) ----
@@ -164,12 +165,12 @@ impl Terms {
     pub async fn run_with(self: &Arc<Self>, copy: bool, key: &str, title: &str, cwd: &str, cmd: &str, cols: u32, rows: u32, again: bool) {
         if copy { return }
         let (c, r) = (emb::cols(cols), emb::rows(rows));
-        { let mut g = self.inner.lock().await; let has = g.shells.contains_key(key) || g.screens.contains_key(key);
+        { let mut g = self.inner.lock().await; let running = g.shells.contains_key(key); let has = running || g.screens.contains_key(key);
             if has && !again { return }
             if let Some(sh) = g.shells.remove(key) { sh.pty.hangup() }
             let mine = format!("{}:", key.rsplitn(2, ':').nth(1).unwrap_or(""));
-            if !has && g.shells.len() >= MAX_SHELLS { drop(g); self.hub.push_all(&frame(key, Some(0), b"[too many terminals are open]\r\n", None)); return }
-            if !has && g.shells.keys().filter(|k| k.starts_with(&mine)).count() >= MAX_PER_THREAD { drop(g); self.hub.push_all(&frame(key, Some(0), b"[too many terminals are open in this chat]\r\n", None)); return }
+            if !running && g.shells.len() >= MAX_SHELLS { drop(g); self.hub.push_all(&frame(key, Some(0), b"[too many terminals are open]\r\n", None)); return }
+            if !running && g.shells.keys().filter(|k| k.starts_with(&mine)).count() >= MAX_PER_THREAD { drop(g); self.hub.push_all(&frame(key, Some(0), b"[too many terminals are open in this chat]\r\n", None)); return }
         }
         self.hub.push_all(&frame(key, None, &[], Some((c as usize, r as usize))));
         let args = vec!["-lc".to_string(), emb::script(cmd, &self.shell)];

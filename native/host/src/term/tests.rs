@@ -173,3 +173,16 @@ fn drain(rx: &mut tokio::sync::mpsc::UnboundedReceiver<Out>, key: &str, acc: &mu
     assert!(wait(10, || unsafe { libc::kill(pid, 0) } != 0 || { let mut st = 0; unsafe { libc::waitpid(-1, &mut st, libc::WNOHANG); } false }).await || true);
     assert!(wait(10, || t.inner.try_lock().map_or(false, |g| !g.shells.contains_key(&key))).await, "the shell is gone after the escalation to SIGKILL");
 }
+
+#[tokio::test] async fn a_restart_of_a_finished_terminal_counts_against_the_limits_and_old_screens_read_back_are_capped() {
+    let (hub, home, _work) = hub_in("limits").await; let t = get(&hub).unwrap();
+    // 40 finished screens on disk: reading each back keeps at most KEEP_FINISHED in memory
+    for i in 0..40 { let k = format!("x:t1:xold-{i}"); std::fs::write(home.join("terms").join(&k), b"30x4\texited 0\nold\n").unwrap(); assert!(t.read(&k).await.is_some()) }
+    assert!(t.inner.lock().await.screens.len() <= KEEP_FINISHED);
+    // a finished terminal restarted with the chat already full is refused
+    for i in 0..MAX_PER_THREAD { let (ok, _) = tools::call(&hub, "t1", "terminal_open", &json!({"command":"sleep 60","title":format!("s{i}")})).await.unwrap(); assert!(ok) }
+    let before = t.shell_count().await;
+    t.run_with(false, "x:t1:xold-1", "T", "", "sleep 60", 40, 5, true).await;
+    assert_eq!(t.shell_count().await, before, "a finished terminal restarted past the per-chat limit does not run");
+    for k in t.running_of("t1").await { t.kill(&k).await }
+}
