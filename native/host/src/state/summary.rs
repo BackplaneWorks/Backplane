@@ -12,6 +12,14 @@ fn take(s: &str, n: usize) -> String { s.chars().take(n).collect() }
 pub fn thread_input(title: &str, project_title: &str, earlier: &str, last_user: &str, last_reply: &str) -> String {
     format!("Thread title: {title}\nProject: {project_title}\nEarlier summary: {earlier}\n\nThe user's latest message:\n{}\n\nThe agent's latest reply:\n{}", take(last_user, 2000), take(last_reply, 2000))
 }
+/// Sum.thread.input over the state: a thread's title, its project's, its summary so far and the newest user message and reply
+pub fn thread_input_of(st: &State, id: &str) -> String {
+    let t = st.threads.get(id);
+    let title = t.map_or("", |t| t.title.as_str());
+    let pt = t.and_then(|t| st.projects.get(&t.project)).map_or("", |p| p.title.as_str());
+    let x = st.ext.sum.get(id);
+    thread_input(title, pt, &st.get(&format!("summary.{id}"), ""), x.map_or("", |x| x.last_user.as_str()), x.map_or("", |x| x.last_reply.as_str()))
+}
 /// Sum.lines + Sum.threads: the newest threads of a project, a line each ("- title" and ": summary" when it has one); archived and deleted ones left out
 pub fn project_lines(st: &State, pid: &str) -> Vec<String> {
     let mut ts: Vec<(&String, &crate::state::Thread)> = st.threads.iter().filter(|(_, t)| t.project == pid && !t.archived && !t.deleted).collect();
@@ -57,6 +65,12 @@ pub fn asked(events: &[Value]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn the_thread_input_reads_the_newest_user_message_and_reply() {
+        let mut st = fold(&W);
+        st.apply_line(r#"{"$":"MessagePosted","thread":"a","msg":"u1","role":"user","text":"fix the bug","at":30}"#);
+        st.apply_line(r#"{"$":"MessagePosted","thread":"a","msg":"a1","role":"assistant","text":"fixed it","at":31}"#);
+        assert_eq!(thread_input_of(&st, "a"), thread_input("Alpha", "Proj", "", "fix the bug", "fixed it"));
+    }
     fn fold(lines: &[&str]) -> State { let mut s = State::new(); for l in lines { s.apply_line(l); } s }
     const W: [&str; 5] = [r#"{"$":"ProjectCreated","id":"p","title":"Proj","root":"/r","at":1}"#,
         r#"{"$":"ThreadCreated","id":"a","project":"p","title":"Alpha","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":10}"#,

@@ -11,7 +11,16 @@ use std::sync::{Arc, OnceLock};
 
 struct Host { policy: Arc<Policy>, hub: OnceLock<Arc<Hub>> }
 impl Transform for Host {
-    fn before_commit(&self, first_seq: u64, events: Vec<Value>) -> Vec<Value> { self.policy.before_commit(first_seq, events) }
+    fn before_commit(&self, first_seq: u64, events: Vec<Value>) -> Vec<Value> {
+        let (out, asks) = self.policy.before_commit_asks(first_seq, events);
+        if !asks.is_empty() {
+            // Sum.out: the writer is asked for once the batch is written (a failed write only costs a summary the next due end asks for again)
+            if let (Some(hub), Ok(rt)) = (self.hub.get(), tokio::runtime::Handle::try_current()) {
+                for (id, input) in asks { rt.spawn(summarize(self.policy.clone(), hub.clone(), "thread", id, input)); }
+            }
+        }
+        out
+    }
     fn commit_failed(&self, first_seq: u64) {
         if self.policy.commit_failed(first_seq) {
             eprintln!("state policies: a commit failed (log line {first_seq}); folding the log again");
@@ -54,6 +63,20 @@ impl Policies {
     /// Watchdog.line: call for every provider line of a thread's agent (the stream-json line as parsed), commit the events it returns
     pub fn line(&self, thread: &str, now_s: u64, line: &Value) -> Vec<Value> { self.policy.line(thread, now_s, line) }
     pub async fn read(&self, thread: &str, now_s: u64) -> Vec<Value> { self.policy.read(thread, now_s) }
+}
+
+/// Sum.go: ask the text model (the agents lane's `Summarizer`) for a thread's or project's summary, keep its answer (`Policy::summary_done`) and, for a
+/// thread whose project is due, ask for the project's next. Nothing when no summarizer is up or it answers nothing.
+async fn summarize(policy: Arc<Policy>, hub: Arc<Hub>, kind: &'static str, id: String, input: String) {
+    let (mut kind, mut id, mut input) = (kind, id, input);
+    loop {
+        let Some(sm) = crate::agents::summarizer() else { return };
+        let Some(text) = sm.summarize(kind, &id, &input).await else { return };
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let (ev, next) = policy.summary_done(kind, &id, &text, now);
+        if !ev.is_empty() && hub.commit_many(&ev).await.is_err() { return }
+        match next { Some((p, i)) if kind == "thread" => { kind = "project"; id = p; input = i; } _ => return }
+    }
 }
 
 async fn boot_task(policy: Arc<Policy>, hub: Arc<Hub>) {

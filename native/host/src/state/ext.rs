@@ -16,6 +16,9 @@ pub struct Sum {
     /// id of its newest own assistant message, and the time of the newest
     pub output: String,
     pub output_at: u64,
+    /// the text (first 2000 characters) of its newest own user message and assistant reply: what the summary writer reads (Sum.last)
+    pub last_user: String,
+    pub last_reply: String,
     /// the newest time it sent a link message into each thread (key: the target thread)
     pub sent: HashMap<String, u64>,
     /// id of the newest message the person typed in it (Policy.person: a user message of its own that Policy.direct reads as theirs)
@@ -78,9 +81,10 @@ pub fn on_post(st: &mut State, th: &str, id: &str, at: u64, msg: Option<(&str, &
     if let Some((role, text)) = msg {
         if role == "user" {
             own.found = true;
+            own.last_user = text.chars().take(2000).collect();
             if own.person.len() < 2 && !own.person.iter().any(|x| x == id) && direct(id, text) { own.person.push(id.to_string()); }
             if super::turnend::policy_direct(id, text) { own.person_id = id.to_string(); }
-        } else if role == "assistant" { own.output = id.to_string(); own.output_at = own.output_at.max(at); own.reply_line = super::turnend::told_first(text); }
+        } else if role == "assistant" { own.output = id.to_string(); own.output_at = own.output_at.max(at); own.reply_line = super::turnend::told_first(text); own.last_reply = text.chars().take(2000).collect(); }
     }
     if !from.is_empty() && from != th {
         let s = st.ext.sum.entry(from).or_default();
