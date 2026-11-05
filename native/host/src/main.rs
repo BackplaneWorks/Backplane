@@ -13,7 +13,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::tungstenite::{handshake::server::ErrorResponse, protocol::WebSocketConfig, Message};
 
-const USAGE: &str = "usage: backplane-hub --home DIR --port N [--host ADDR] [--policy-bin PATH] [--no-tailscale] [--foreground] [--headless]\n       backplane-hub --help | --version\n";
+const USAGE: &str = "usage: backplane-hub --home DIR --port N [--host ADDR] [--policy-bin PATH] [--no-tailscale] [--foreground] [--headless]\n       backplane-hub --render MODEL...\n       backplane-hub --help | --version\n";
 
 struct Args { window: Option<PathBuf>, home: PathBuf, port: u16, host: String, policy: Option<PathBuf>, version: String, commit: String, tailscale: bool }
 
@@ -75,8 +75,21 @@ fn ensure_token(home: &std::path::Path) -> Result<()> {
 trait ReadExactSync { fn read_exact_sync(&mut self, b: &mut [u8]) -> std::io::Result<()>; }
 impl ReadExactSync for std::fs::File { fn read_exact_sync(&mut self, b: &mut [u8]) -> std::io::Result<()> { std::io::Read::read_exact(self, b) } }
 
+/// `backplane-hub --render MODEL...` (what the agent prompt tells agents to run): each model's standard views as PNGs beside it
+/// (app/render.bend's `backplane --render`; kicad/render.rs). Returns the exit code.
+fn render_cli() -> i32 {
+    let a: Vec<String> = std::env::args().skip(2).collect();
+    let ms: Vec<&str> = a.iter().map(String::as_str).collect();
+    let cwd = std::env::current_dir().map(|d| d.to_string_lossy().into_owned()).unwrap_or_else(|_| "/".into());
+    let tools = files::kicad::stepglb::machine(std::path::Path::new(&std::env::var("BACKPLANE_HOME").unwrap_or_default()));
+    let r = files::kicad::render::run(&ms, &cwd, &tools);
+    if !r.out.is_empty() { println!("{}", r.out) }
+    r.code
+}
+
 #[tokio::main]
 async fn main() {
+    if std::env::args().nth(1).as_deref() == Some("--render") { std::process::exit(render_cli()) }
     let args = match parse() { Ok(a) => a, Err(code) => std::process::exit(code) };
     if let Err(e) = run(args).await { eprintln!("backplane-hub: {e:#}"); std::process::exit(1) }
 }
