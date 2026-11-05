@@ -117,3 +117,32 @@ async fn push(a: &Node, b: &Node, link: &str, body: Value) -> botnet::Resp {
     p.fold(&json!({"$":"SettingSet","key":"sync.desk","value":"","at":3})); p.fold(&json!({"$":"SettingSet","key":"peer.own.p1","value":"no","at":3})); assert!(!own_link(&p, &j, "p1"), "the owner said it is not theirs");
     p.fold(&json!({"$":"SettingSet","key":"peer.own.p1","value":"tailnet","at":4})); p.fold(&ps("p1", "", true)); assert!(!own_link(&p, &j, "p1"), "revoked");
 }
+
+/// A presenter that counts what it is told, to see the seam: restart, fold the log again (the hub's), then the mirrors.
+struct Spy { restarts: std::sync::atomic::AtomicUsize, order: Arc<Mutex<Vec<String>>> }
+impl crate::presenter::Presenter for Spy {
+    fn name(&self) -> &'static str { "spy" }
+    fn fold<'a>(&'a self, f: &'a Value) -> crate::presenter::Fut<'a, ()> { let o = self.order.clone(); let t = f["t"].as_str().unwrap_or("?").to_string(); let n = f["items"].as_array().map_or(0, Vec::len); Box::pin(async move { o.lock().unwrap().push(format!("{t}:{n}")); Ok(()) }) }
+    fn view<'a>(&'a self, _p: &'a Value) -> crate::presenter::Fut<'a, Value> { Box::pin(async { Ok(json!({})) }) }
+    fn ping(&self) -> crate::presenter::Fut<'_, ()> { Box::pin(async { Ok(()) }) }
+    fn restart(&self) -> crate::presenter::Fut<'_, ()> { self.restarts.fetch_add(1, std::sync::atomic::Ordering::SeqCst); self.order.lock().unwrap().push("restart".into()); Box::pin(async { Ok(()) }) }
+}
+#[tokio::test] async fn far_a_new_epoch_makes_the_presenter_forget_the_old_rows_and_take_the_mirrors_again() {
+    let order = Arc::new(Mutex::new(vec![]));
+    let h = std::env::temp_dir().join(format!("bp-forget-{}", std::process::id())); let _ = std::fs::remove_dir_all(&h); std::fs::create_dir_all(&h).unwrap();
+    let spy = Arc::new(Spy { restarts: Default::default(), order: order.clone() });
+    let hub = Hub::start(crate::hub::Cfg { home: h.clone(), version: "0.14.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() }, spy.clone()).await.unwrap();
+    let store = FarStore::open(&h).unwrap();
+    hub.set_mirror_feed(Arc::new(Refeed(store.clone())));
+    store.take("L", "old", 0, 2, &[Item { n: 1, c: json!({"$":"ThreadCreated","id":"t","project":"","title":"T","env":"","branch":"","worktree":"","provider":"claude","model":"","at":1}) }, Item { n: 2, c: json!({"$":"MessagePosted","thread":"t","msg":"m1","role":"user","text":"old","at":2}) }]).unwrap();
+    let t = store.take("L", "new", 0, 1, &[Item { n: 1, c: json!({"$":"ThreadCreated","id":"u","project":"","title":"U","env":"","branch":"","worktree":"","provider":"claude","model":"","at":3}) }]).unwrap();
+    assert!(t.reset);
+    order.lock().unwrap().clear();
+    hub.forget_mirror().await;
+    let o = order.lock().unwrap().clone();
+    assert_eq!(spy.restarts.load(Ordering::SeqCst), 1, "{o:?}");
+    assert_eq!(o.first().map(String::as_str), Some("restart"), "restart first: {o:?}");
+    let last = o.last().unwrap(); assert!(last.starts_with("changes:") && last != "changes:0", "then the mirrors (only the new history: one thread), last: {o:?}");
+    assert!(!o.iter().any(|x| x == "changes:2"), "the old history is not given again: {o:?}");
+    let _ = std::fs::remove_dir_all(h);
+}

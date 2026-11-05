@@ -16,7 +16,7 @@ pub struct Hub {
     pub store: Store, pub model: Mutex<Model>, gen: AtomicU64, pub changed: broadcast::Sender<u64>, pub frames: broadcast::Sender<Value>, pub native_key: String,
     commits: tokio::sync::mpsc::UnboundedSender<Commit>,
     rpc: std::sync::RwLock<Vec<(&'static str, Arc<dyn RpcHandler>)>>, http: std::sync::RwLock<Vec<(&'static str, Arc<dyn HttpHandler>)>>,
-    views: std::sync::RwLock<Vec<(&'static str, Arc<dyn ViewMethod>)>>, observers: std::sync::RwLock<Vec<Arc<dyn Observer>>>, transforms: std::sync::RwLock<Vec<Arc<dyn Transform>>>, far: std::sync::OnceLock<Arc<dyn FarView>>, pairing: std::sync::OnceLock<Arc<dyn Pairing>>, auth_route: std::sync::OnceLock<Arc<dyn AuthRoute>>,
+    views: std::sync::RwLock<Vec<(&'static str, Arc<dyn ViewMethod>)>>, observers: std::sync::RwLock<Vec<Arc<dyn Observer>>>, transforms: std::sync::RwLock<Vec<Arc<dyn Transform>>>, far: std::sync::OnceLock<Arc<dyn FarView>>, mirror_feed: std::sync::OnceLock<Arc<dyn crate::api::MirrorFeed>>, pairing: std::sync::OnceLock<Arc<dyn Pairing>>, auth_route: std::sync::OnceLock<Arc<dyn AuthRoute>>,
     live: std::sync::Mutex<std::collections::HashMap<String, String>>,
     pub window_bin: std::sync::OnceLock<PathBuf>,
     me: std::sync::OnceLock<std::sync::Weak<Hub>>, next_client: AtomicU64,
@@ -84,7 +84,7 @@ impl Hub {
         let (ftx, _) = broadcast::channel(1024);
         let model = Model::build(&store)?;
         let hub = Arc::new(Hub { cfg, auth, epoch, presenter, store: store.clone(), commits: ctx, model: Mutex::new(model), gen: AtomicU64::new(1), changed: tx, frames: ftx, native_key: { let mut b = [0u8; 16]; if let Ok(mut f) = std::fs::File::open("/dev/urandom") { let _ = std::io::Read::read_exact(&mut f, &mut b); } hex::encode(b) },
-            rpc: Default::default(), http: Default::default(), views: Default::default(), observers: Default::default(), transforms: Default::default(), far: Default::default(), pairing: Default::default(), auth_route: Default::default(), outbox_max: std::sync::atomic::AtomicUsize::new(OUTBOX_MAX), signal_seq: AtomicU64::new(store.len() as u64), id_alloc: AtomicU64::new(0), need_resync: Default::default(), extra_info: Default::default(), live: Default::default(), window_bin: Default::default(), me: Default::default(), next_client: AtomicU64::new(1), outboxes: Default::default() });
+            rpc: Default::default(), http: Default::default(), views: Default::default(), observers: Default::default(), transforms: Default::default(), far: Default::default(), mirror_feed: Default::default(), pairing: Default::default(), auth_route: Default::default(), outbox_max: std::sync::atomic::AtomicUsize::new(OUTBOX_MAX), signal_seq: AtomicU64::new(store.len() as u64), id_alloc: AtomicU64::new(0), need_resync: Default::default(), extra_info: Default::default(), live: Default::default(), window_bin: Default::default(), me: Default::default(), next_client: AtomicU64::new(1), outboxes: Default::default() });
         let _ = hub.me.set(Arc::downgrade(&hub));
         hub.bootstrap()?;
         hub.signal_seq.store(hub.store.len() as u64, Relaxed); // start-up housekeeping counts: a restart is a new signal
@@ -195,7 +195,14 @@ impl Hub {
         self.need_resync.store(true, Relaxed);
         let (done, rx) = tokio::sync::oneshot::channel();
         if self.commits.send(Commit { events: vec![], done }).is_ok() { let _ = rx.await; }
+        // the mirrors live only in the presenter (net lane): give them back
+        if let Some(f) = self.mirror_feed.get().cloned() { f.replay(&self.arc()).await }
     }
+    /// Installs what re-feeds the mirrors after the presenter lost them (net lane).
+    pub fn set_mirror_feed(&self, f: Arc<dyn crate::api::MirrorFeed>) { let _ = self.mirror_feed.set(f); }
+    /// A mirror's history was replaced (another epoch on its owner): the presenter forgets every mirror and is given the ones that stay
+    /// (the caller has already replaced the forgotten one) by restarting it, folding the log, and the registered `MirrorFeed`.
+    pub async fn forget_mirror(&self) { if self.presenter.restart().await.is_ok() { self.resync_presenter().await } }
     pub async fn commit_many(&self, events: &[Value]) -> Result<u64> {
         let (done, rx) = tokio::sync::oneshot::channel();
         // settings lane: a stored secret never reaches the log, the model, the presenter or a client (Hub.step.go, Secret.changes)
