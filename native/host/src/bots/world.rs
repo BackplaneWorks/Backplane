@@ -31,6 +31,8 @@ pub struct World {
     pub inflight: HashSet<(String, String)>,
     /// the uberbot's ops and registers, folded by the state lane's fold (UberOp, UberSet, machine.id, uber.offer, uber.link.*): only those lines reach it
     pub ub: crate::state::State,
+    /// the mailroom (ML.Box)
+    pub mail: super::mail::mailbox::Box,
     seen: usize, line: usize,
 }
 /// the settings the bots lane reads: the new bot's provider and model, the mail switch, the uberbot
@@ -97,8 +99,8 @@ impl World {
     }
     pub fn apply_line(&mut self, line: &str) {
         let Some(t) = line.strip_prefix("{\"$\":\"").and_then(|r| r.split('"').next()) else { return };
-        const READ: [&str; 24] = ["BotSet", "BotDeleted", "RoomSet", "RoomDeleted", "RoomPosted", "HookSet", "HookHit", "RoutineSet", "RoutineDeleted", "RoutineFired",
-            "MemorySaved", "MemoryForgot", "SpaceSet", "SpacePageSet", "PeerSet", "RoutinePlan", "RoutineSlot", "RoutineDone", "SettingSet", "MessagePosted", "ThreadCreated", "TaskSet", "UberSet", "UberOp"];
+        const READ: [&str; 28] = ["BotSet", "BotDeleted", "RoomSet", "RoomDeleted", "RoomPosted", "HookSet", "HookHit", "RoutineSet", "RoutineDeleted", "RoutineFired",
+            "MemorySaved", "MemoryForgot", "SpaceSet", "SpacePageSet", "PeerSet", "RoutinePlan", "RoutineSlot", "RoutineDone", "SettingSet", "MessagePosted", "ThreadCreated", "TaskSet", "UberSet", "UberOp", "ConvSet", "MailPosted", "MailMarked", "MailTagged"];
         if !READ.contains(&t) { return }
         // cheap tests before a parse: most lines of a big log are messages of other threads and settings nobody here reads
         if t == "SettingSet" && !["agent.", "mail.on", "uber.", "person.tz", "tz.", "machine.id"].iter().any(|k| line.contains(k)) { return }
@@ -120,15 +122,21 @@ impl World {
                 let (created, deleted, th) = old.map_or((0, true, String::new()), |o| (o.created, o.deleted, o.thread));
                 let thread = if s(e, "thread").is_empty() { th } else { s(e, "thread").to_string() };
                 self.bot_threads.insert(thread.clone());
+                self.mail.bot_named(&id, s(e, "name"));
                 self.bots.insert(id.clone(), Bot { id, name: s(e, "name").into(), thread, look: n(e, "look"), persona: s(e, "persona").into(), created: if deleted { at } else { created }, deleted: false });
             }
-            "BotDeleted" => { if let Some(x) = self.bots.get_mut(&id) { x.deleted = true } else { self.bots.insert(id.clone(), Bot { id, name: String::new(), thread: String::new(), look: 0, persona: String::new(), created: 0, deleted: true }); } }
+            "BotDeleted" => { self.mail.bot_deleted(&id); if let Some(x) = self.bots.get_mut(&id) { x.deleted = true } else { self.bots.insert(id.clone(), Bot { id, name: String::new(), thread: String::new(), look: 0, persona: String::new(), created: 0, deleted: true }); } }
             "RoomSet" => {
                 let (created, deleted) = self.rooms.get(&id).map_or((0, true), |r| (r.created, r.deleted));
+                self.mail.room_set(&id, s(e, "name"), s(e, "members"), at);
                 self.rooms.insert(id.clone(), Room { id, name: s(e, "name").into(), members: members_of(s(e, "members")), created: if deleted { at } else { created }, deleted: false });
             }
             "RoomDeleted" => { if let Some(r) = self.rooms.get_mut(&id) { r.deleted = true } else { self.rooms.insert(id.clone(), Room { id, name: String::new(), members: vec![], created: 0, deleted: true }); } }
-            "RoomPosted" => { self.post_ids.insert(id); }
+            "RoomPosted" => { if self.settings.get("mail.on").map_or(true, |v| v != "on") { self.mail.room_post(&id, s(e, "room"), s(e, "from"), s(e, "text"), at); } self.post_ids.insert(id); }
+            "ConvSet" => { self.mail.conv_set(&id, s(e, "subject"), s(e, "kind"), super::mail::mailbox::lines_of(s(e, "parts")), s(e, "project"), super::mail::mailbox::lines_of(s(e, "tags")), at); }
+            "MailPosted" => { self.mail.mail(super::mail::Hdr { id, conv: s(e, "conv").into(), from: s(e, "from").into(), to: s(e, "to").into(), kind: s(e, "kind").into(), r#ref: s(e, "ref").into(), want: s(e, "want").into(), head: s(e, "head").into(), size: n(e, "size"), at }); }
+            "MailMarked" => { self.mail.marked(s(e, "bot"), s(e, "conv"), s(e, "status"), n(e, "seen"), n(e, "until")); }
+            "MailTagged" => { self.mail.tagged(s(e, "bot"), s(e, "conv"), super::mail::mailbox::lines_of(s(e, "tags"))); }
             "HookSet" => {
                 let old = self.hooks.get(&id).cloned();
                 let (bot, name) = (if s(e, "bot").is_empty() { old.as_ref().map(|o| o.bot.clone()).unwrap_or_default() } else { s(e, "bot").into() },

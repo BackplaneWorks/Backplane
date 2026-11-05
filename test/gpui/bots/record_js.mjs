@@ -14,7 +14,25 @@ await sleep(4000);
 const c=await client(h);
 const R=async(m,p)=>{const r=await c.rpc(m,p);const o=r?.o;return {ok:o?.ok,error:o?.error,bot:o?.bot}};
 const steps=[];const S=async(name,m,p)=>{const r=await R(m,p);steps.push({name,m,ok:r.ok,error:r.error??null});await sleep(250);return r};
-if(scen==='uber2'){
+if(scen==='mail1'){
+const ada=(await S('create ada','bots.create',{name:'ada'})).bot;
+const bob=(await S('create bob','bots.create',{name:'bob'})).bot;
+await S('mail on','setting.set',{key:'mail.on',value:'on'});
+await S('room r1','bots.room',{room:'r1',name:'lab',members:`${ada}\n${bob}`});
+await S('post p1 (mail on)','bots.post',{room:'r1',text:'hello all',msg:'p1'});
+await S('post p1 again','bots.post',{room:'r1',text:'hello all',msg:'p1'});
+await S('routine ro1','bots.routine',{bot:ada,routine:'ro1',name:'later',at:'in 3d',prompt:'do it'});
+await S('run ro1 (mail on)','bots.routine_run',{routine:'ro1'});
+await sleep(1500);
+await S('mail off','setting.set',{key:'mail.on',value:'off'});
+const bub=(await S('create bub uber','bots.create',{name:'bub',uber:true})).bot;
+await sleep(3000);
+await S('room r2 with the uberbot','bots.room',{room:'r2',name:'ops',members:`${bub}\n${ada}`});
+await S('post p2 (uberbot in the room)','bots.post',{room:'r2',text:'status?',msg:'p2'});
+await S('routine ro2 of the uberbot','bots.routine',{bot:bub,routine:'ro2',name:'morning',at:'in 3d',prompt:'plan the day'});
+await S('run ro2 (uberbot)','bots.routine_run',{routine:'ro2'});
+await sleep(2500);
+}else if(scen==='uber2'){
 const bub=(await S('create bub','bots.create',{name:'bub',persona:'dry'})).bot;
 await S('remember k1','bots.remember',{bot:bub,key:'k1',kind:'fact',text:'one',tags:'a'});await sleep(1200);
 await S('remember k2','bots.remember',{bot:bub,key:'k2',kind:'pref',text:'two',tags:''});await sleep(1200);
@@ -98,5 +116,5 @@ await S('post to deleted room','bots.post',{room:'r1',text:'x'});
 }
 await sleep(1000);stopHub(h);await sleep(1500);
 copyFileSync(home+'/events.jsonl',out+`/events-${scen}.jsonl`);
-writeFileSync(out+`/steps-${scen}.json`,JSON.stringify(steps,null,1));
+(()=>{try{execFileSync('cp',['-r',home+'/mail',out+`/mail-${scen}`])}catch{}})();writeFileSync(out+`/steps-${scen}.json`,JSON.stringify(steps,null,1));
 console.log('wrote',out+`/events-${scen}.jsonl`);process.exit(0);
