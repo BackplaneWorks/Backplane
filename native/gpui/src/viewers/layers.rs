@@ -52,9 +52,14 @@ pub fn strip_el(cx: &mut Context<Backplane>, light: bool, s: &Strip, open: bool)
     if s.rows.is_empty() { return div().into_any_element(); }
     let head = div().id("layers-btn").px_2().py_1().text_size(px(12.)).cursor_pointer().border_1().border_color(c("line")).bg(c("raise")).child(s.head.clone())
         .on_click(cx.listener(|this, _, _, cx| { let pv = &mut this.screens.plotview; pv.layers_open = !pv.layers_open; cx.notify(); }));
-    let mut col = div().flex().flex_col().px_3().py_1().gap_1().child(div().flex().child(head));
-    if !open { return col.into_any_element(); }
-    let mut panel = div().flex().flex_col().gap_1().p_2().border_1().border_color(c("line")).bg(c("panel"));
+    div().flex().px_3().py_1().child(head).into_any_element()
+}
+
+/// The open Layers panel: absolute over the canvas (the button row keeps its height, so the canvas never jumps), its own scroll past `max_h`.
+pub fn panel_el(cx: &mut Context<Backplane>, light: bool, s: &Strip, open: bool) -> Option<AnyElement> {
+    let c = |n: &str| theme::color(light, n);
+    if !open || s.rows.is_empty() { return None; }
+    let mut panel = div().id("layers-panel").absolute().top(px(4.)).left(px(12.)).max_h(px(280.)).overflow_y_scroll().flex().flex_col().gap_1().p_2().border_1().border_color(c("line")).bg(c("panel")).occlude();
     if s.modes {
         panel = panel.child(div().flex().gap_1().children(["All", "Dim", "Only"].iter().enumerate().map(|(i, label)| {
             let on = s.mode == i as u32; let d = div().id(SharedString::from(format!("layer-mode-{i}"))).px_2().text_size(px(12.)).cursor_pointer().border_1();
@@ -70,8 +75,7 @@ pub fn strip_el(cx: &mut Context<Backplane>, light: bool, s: &Strip, open: bool)
             .child(div().id(SharedString::from(format!("layer-name-{l}"))).cursor_pointer().text_color(if active { c("accent") } else { c("text") }).child(name)
                 .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("view-layer-pick".into(), l.to_string())); cx.notify(); }))));
     }
-    col = col.child(panel);
-    col.into_any_element()
+    Some(panel.into_any_element())
 }
 
 #[cfg(test)]

@@ -140,7 +140,9 @@ fn plot_page(cx: &mut Context<Backplane>, light: bool, open: &str, viewer: &Valu
     let present: std::collections::BTreeSet<u32> = frame.chunks.iter().map(|c| c.layer).collect();
     let strip = crate::viewers::layers::strip(viewer, &present);
     col = col.child(crate::viewers::layers::strip_el(cx, light, &strip, pv.layers_open));
-    col.child(super::plotview::canvas_el(cx, light, frame, view, crate::viewers::layers::masks(viewer))).into_any_element()
+    let mut area = div().relative().flex().flex_col().flex_1().min_h_0().child(super::plotview::canvas_el(cx, light, frame, view, crate::viewers::layers::masks(viewer)));
+    if let Some(p) = crate::viewers::layers::panel_el(cx, light, &strip, pv.layers_open) { area = area.child(p); }
+    col.child(area).into_any_element()
 }
 
 fn review_page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, review: &Value) -> AnyElement {
