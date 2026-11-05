@@ -464,6 +464,8 @@ data class BotGoogle(val status: String, val url: String, val gid: String, val g
 data class BotSettings(
     val persona: String, val personaField: String, val invite: String, val purl: String, val join: String,
     val google: BotGoogle, val peers: List<BotPeer>,
+    // the look picker (web's WB.looks): the current look's index, how many looks there are, its label
+    val look: Int = 0, val looks: Int = 0, val lookLabel: String = "Look",
 )
 // Browser tasks (src/core/client.bend's Teach.*). The strip: mode 0 idle,
 // 1 recording, 2 review (the save sheet), 3 the person has the browser; its
@@ -484,7 +486,8 @@ data class TaskParam(val field: String, val label: String, val example: String, 
 data class TaskItem(val slug: String, val name: String, val desc: String, val open: Boolean, val asking: Boolean, val last: String, val params: List<TaskParam>)
 data class TaskRun(val run: String, val slug: String, val status: String, val summary: String, val shots: List<String>)
 data class BotTasks(val items: List<TaskItem>, val runs: List<TaskRun>)
-data class BotPost(val id: String, val from: String, val text: String, val ago: String, val mine: Boolean)
+// cat: the author bot's cat key ("<look>:<mood>"), "" for a person (the web draws a 28 px cat beside a bot's post)
+data class BotPost(val id: String, val from: String, val text: String, val ago: String, val mine: Boolean, val cat: String = "")
 
 // what the main area shows when it is not a thread: a bot (kind "bot",
 // its tab's content; the chat is the screen's thread), a room, or a bot
@@ -844,10 +847,11 @@ private fun botView(o: JSONObject) = BotView(
         BotSettings(st.optString("persona"), st.optString("personaField"), st.optString("invite"), st.optString("purl"),
             st.optString("join"),
             BotGoogle(g.optString("status"), g.optString("url"), g.optString("gid"), g.optString("gsecret"), g.optString("gpaste"), strs(g.optJSONArray("accounts")), g.optString("sigFor"), g.optString("sigText")),
-            st.optJSONArray("peers").map { BotPeer(it.optString("id"), it.optString("name"), it.optString("url")) })
+            st.optJSONArray("peers").map { BotPeer(it.optString("id"), it.optString("name"), it.optString("url")) },
+            st.optInt("look"), st.optInt("looks"), st.optString("lookLabel", "Look"))
     },
     o.optJSONArray("posts").map {
-        BotPost(it.optString("id"), it.optString("from"), it.optString("text"), it.optString("ago"), it.optBoolean("mine"))
+        BotPost(it.optString("id"), it.optString("from"), it.optString("text"), it.optString("ago"), it.optBoolean("mine"), it.optString("cat"))
     },
     o.optString("title", o.optString("name")),
     o.optJSONObject("tasks")?.let(::botTasks),
