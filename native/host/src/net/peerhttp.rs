@@ -21,12 +21,12 @@ impl HttpHandler for PeerRoutes {
 }
 
 /// The machines list, kept fresh: tailscale's view of the owner's machines plus BACKPLANE_PEERS, each asked /hello.
-async fn find_once(hub: &Arc<Hub>, peering: &Peering, table: &PeerTable) { find_with(hub, peering, table, tailnet::status_json().await).await }
+async fn find_once(hub: &Arc<Hub>, peering: &Peering, table: &PeerTable) { find_with(hub, peering, table, tailnet::status_json().await, std::env::var("BACKPLANE_PEERS").unwrap_or_default()).await }
 /// (`status`: `tailscale status --json`, "" when there is none; a test passes its own so it never depends on the host)
-async fn find_with(hub: &Arc<Hub>, peering: &Peering, table: &PeerTable, status: String) {
-    let extra = std::env::var("BACKPLANE_PEERS").unwrap_or_default();
-    // (this machine first, at once: the probes of the others take seconds)
-    hub.set_info("machines", &tailnet::machines_json(&status, peering.port, &[]).to_string()).await;
+async fn find_with(hub: &Arc<Hub>, peering: &Peering, table: &PeerTable, status: String, extra: String) {
+    // (this machine first, at once, but only while nothing has been published: a later pass would take every peer off the list for the
+    // seconds the probes take and bring them back, a flicker in the switcher; Bend publishes only after a probe)
+    if peering.routes.machines_value().get("self").is_none() { hub.set_info("machines", &tailnet::machines_json(&status, peering.port, &[]).to_string()).await; }
     let j = tailnet::find(&status, peering.port, &extra).await;
     let verified: Vec<String> = table.with(|p| p.live().into_iter().filter(|x| p.verified(&x.id)).map(|x| x.url).collect());
     // the machines list clients switch between (info "machines": {"self":{name,url,domain},"peers":[...]}; self.name is "" with no tailnet)
@@ -70,12 +70,29 @@ mod tests {
     /// info "machines" is the switcher's JSON, as the Bend hub publishes it: self.name "" with no tailnet, its own url, peers named in BACKPLANE_PEERS.
     #[tokio::test] async fn machines_info_is_published_in_the_switchers_shape() {
         let a = super::super::peering::tests::node("minfo", false).await;
-        find_with(&a.hub, &a.p, &a.p.table, String::new()).await;
+        find_with(&a.hub, &a.p, &a.p.table, String::new(), String::new()).await;
         let info = a.hub.info_frame()["info"]["machines"].as_str().expect("info machines is a string").to_string();
         let j: serde_json::Value = serde_json::from_str(&info).unwrap();
         assert_eq!(j["self"], serde_json::json!({"name": "", "url": format!("http://127.0.0.1:{}", a.port), "domain": ""}), "{info}");
         assert_eq!(j["peers"], serde_json::json!([]));
         assert!(info.starts_with(r#"{"self":{"name":"","url":"http://127.0.0.1:"#), "key order as Bend's: {info}");
+    }
+    /// A later pass never shows a list without the peers the first found.
+    #[tokio::test] async fn machines_info_never_drops_the_peers_between_passes() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let a = super::super::peering::tests::node("minfo2", false).await;
+        // a stand-in hub that answers /hello
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap(); let other = format!("http://{}", l.local_addr().unwrap());
+        tokio::spawn(async move { loop { let Ok((mut c, _)) = l.accept().await else { return }; tokio::spawn(async move { let mut b = [0u8; 512]; let _ = c.read(&mut b).await; let body = crate::cbor::encode(&serde_json::json!({"backplane":"0.14.0"}));
+            let _ = c.write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", body.len()).as_bytes()).await; let _ = c.write_all(&body).await; }); } });
+        let (conn, _) = a.hub.connect(true); let mut ob = a.hub.attach(conn.client);
+        find_with(&a.hub, &a.p, &a.p.table, String::new(), other.clone()).await;       // pass 1: self, then self + the peer
+        find_with(&a.hub, &a.p, &a.p.table, String::new(), other.clone()).await;       // pass 2
+        let mut seen = vec![];
+        while let Ok(f) = ob.try_recv() { if let crate::hub::Out::Value(v) = f { if let Some(m) = v["info"]["machines"].as_str() { seen.push(serde_json::from_str::<serde_json::Value>(m).unwrap()) } } }
+        assert_eq!(seen.len(), 3, "self once, then a list after each probe: {seen:?}");
+        assert_eq!(seen[0]["peers"].as_array().unwrap().len(), 0);
+        assert!(seen[1..].iter().all(|j| j["peers"].as_array().unwrap().len() == 1), "after the first pass no list is without the peer: {seen:?}");
     }
     #[test] fn peer_preq_carries_the_sockets_trust_and_body() {
         let mut r = Req::new("POST", "/bots/link", vec![("Host".into(), "h".into())]); r.body = b"{}".to_vec(); r.trusted = true; // (loopback-style trust)
