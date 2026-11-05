@@ -132,7 +132,7 @@ mod tests {
         let a = AuthRoutes::new(r, host, 3787, |l| format!("QR:{l}")); a.address("https://me.tail.ts.net/ignored?x=1#y");
         (a, dir)
     }
-    fn req(method: &str, target: &str, hs: &[(&str, &str)]) -> Req { Req { method: method.into(), target: target.into(), headers: hs.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect() } }
+    fn req(method: &str, target: &str, hs: &[(&str, &str)]) -> Req { Req::new(method, target, hs.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect()) }
     fn body(o: &Outcome) -> Value { serde_json::from_slice(&o.reply.body).unwrap() }
     const ROOT: [(&str, &str); 2] = [("Authorization", "Bearer root"), ("Host", "me.tail.ts.net")];
 

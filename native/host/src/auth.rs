@@ -3,8 +3,18 @@
 use sha2::{Digest, Sha256};
 use std::path::Path;
 
-pub struct Req { pub method: String, pub target: String, pub headers: Vec<(String, String)> }
+#[derive(Clone, Debug)]
+pub struct Req {
+    pub method: String, pub target: String, pub headers: Vec<(String, String)>,
+    /// the request body, read by the hub only for POSTs to routes that decide for themselves (`own_auth`, /auth/*): at most `BODY_MAX`
+    pub body: Vec<u8>,
+    /// the accepted socket's peer (owner trust asks the tailnet about this address); None in tests
+    pub peer: Option<std::net::SocketAddr>,
+}
+/// The most body bytes the hub reads for a request (/far bodies reach 256 KB).
+pub const BODY_MAX: usize = 1 << 20;
 impl Req {
+    pub fn new(method: &str, target: &str, headers: Vec<(String, String)>) -> Req { Req { method: method.into(), target: target.into(), headers, body: vec![], peer: None } }
     pub fn header(&self, name: &str) -> &str {
         self.headers.iter().find(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v.as_str()).unwrap_or("")
     }
@@ -86,7 +96,7 @@ impl Auth {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn req(target: &str, hs: &[(&str, &str)]) -> Req { Req { method: "GET".into(), target: target.into(), headers: hs.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect() } }
+    fn req(target: &str, hs: &[(&str, &str)]) -> Req { Req::new("GET", target, hs.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect()) }
     fn h(k: &str, v: &str) -> (&'static str, String) { (Box::leak(k.to_string().into_boxed_str()), v.to_string()) }
     fn with(hs: &[(&str, &str)], path: &str) -> Req { req(path, hs) }
     // laws auth_* of LAWS.bend, stated over many paths and tokens
