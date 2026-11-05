@@ -47,6 +47,7 @@ async function boot(tag,extra={}){
 process.on('exit',()=>{try{if(globalThis.__hubpid)process.kill(globalThis.__hubpid,'SIGTERM')}catch{}});
 const phase=process.argv[2]||'all';
 process.on('exit',()=>{if(!process.env.KEEP_COPY)removeCopy()});
+assertSafePaths(); // once, before ANY phase (also a `later` phase on a kept copy), then the copy is made unless REUSE_COPY
 if(!process.env.REUSE_COPY)prepareCopy();
 const run=(n)=>phase==='all'||phase===n;
 let cur=null;
