@@ -6,6 +6,7 @@
 //! line to an agent, and `secret::prompt()` / `keys::prompt(..)` in the prompt. See docs/gpui/HUB-API.md.
 pub mod accounts;
 pub mod accounts_hub;
+pub mod binding;
 pub mod accounts_io;
 pub mod diagnostics;
 pub mod driver;
@@ -73,6 +74,10 @@ pub fn start(hub: Arc<Hub>, agents: Option<Arc<crate::agents::Agents>>) {
     hub.register_rpc(Arc::new(fab::FabRpc));
     hub.register_rpc(Arc::new(accounts::AccountsDefault));
     let _accounts = accounts_hub::start(&hub, agents.clone());
+    // Accounts.created for every writer: a new or forked thread freezes its account binding (settings/binding.rs)
+    let bindings = binding::Bindings::new();
+    hub.register_transform(bindings.clone()); hub.register_observer(bindings.clone());
+    { let (h, b) = (hub.clone(), bindings); tokio::spawn(async move { b.seed(&h).await }); }
     hub.register_ticker(Arc::new(driver::ResumeTicker));
     hub.register_rpc(Arc::new(misc::SettingsMisc));
     hub.register_rpc(Arc::new(improvements::ImprovementsRpc));
