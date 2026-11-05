@@ -233,7 +233,7 @@ L = dict(core="core (bend)", side="sidebar (slim)", files="files", agents="agent
 # ---- Sidebar
 A = "Sidebar"
 R(A, "Projects and threads list, selection", m=["view.open", "view.update", "view.action"], hub="partial", pf="side", c="pdd", lane=L["side"],
-  ev="Rust: view.* answered via the Bend presenter; parity-rust6 shows 127 differences (gate). GPUI: shots gpui-*-1-sidebar, rust-hub-first.png (drawn from Rust hub, bounded fields still absent). iOS/Android: shots/ios/list.png, shots/android/02-projects.png on the JS hub")
+  ev="Rust: view.* answered via the Bend presenter; parity-rust7 (gpui 0688158f6, uncapped) shows 1621 differences (gate; the old 127 was capped). GPUI: shots gpui-*-1-sidebar, rust-hub-first.png (drawn from Rust hub, bounded fields still absent). iOS/Android: shots/ios/list.png, shots/android/02-projects.png on the JS hub")
 R(A, "Bounded sidebar pages (Newer / Older, 48 rows)", m=["view.action"], hub="partial", pf=None, c="pdd", lane=L["side"],
   ev="nativeSidebar fields (sidebarPages, threadsPage, *Count) absent in Rust replies: 30 of the 42 differences per session scenario in parity-rust6; android 09a-c and n300 shots on JS hub")
 R(A, "Search / filter projects and threads", m=["view.action"], hub="partial", c="mpp", lane=L["gscreens"],
@@ -258,7 +258,7 @@ R(A, "Remove project, restore on re-add", m=["project.remove"], c="mpp", lane=L[
 R(A, "Scratch project and threads (ephemeral, sweep)", hub="missing", c="ppp", lane=L["cmd"], ev="hub makes <home>/scratch and sweeps (Scratch.sweep); not in Rust")
 R(A, "Thread tree: parent, detach, reparent", m=["thread.detach", "thread.reparent", "thread.worktree", "thread.note", "thread.local", "thread.merged", "thread.unrooted", "thread.titled"], c="mpp", lane=L["cmd"], ev="no Rust handler (sidebar.rs reads thread.tree.* settings only)")
 R(A, "Project badge colour/icon editor", m=["setting.set"], c="mpp", lane=L["cmd"], ev="no Rust handler")
-R(A, "Status colours, urgency order, counts", hub="partial", pf="side", c="pdd", lane=L["side"], ev="sidebar.rs/signal.rs/shelf.rs ported with tests; compared only through the 127-difference gate")
+R(A, "Status colours, urgency order, counts", hub="partial", pf="side", c="pdd", lane=L["side"], ev="sidebar.rs/signal.rs/shelf.rs ported with tests; compared only through the 1621-difference gate")
 R(A, "Machine switch / one list over machines", m=["view.action"], hub="missing", c="mpp", lane=L["net"], ev="needs far/links (see Machines)")
 
 # ---- Threads and timeline
@@ -442,7 +442,7 @@ A = "Hub core"
 R(A, "Event store: events.jsonl compatible, torn tail, windowed index", hub="done", pf="state", c="nnn", lane=L["core"], ev="store.rs 28 bytes/event, 1M events 38 MB RSS (HUB-M1.md), restart-boat.txt; read model equals store.db")
 R(A, "WebSocket join, log/changes/live/info frames, ping", r=["/ws"], hub="partial", c="ddd", lane=L["pedge"], ev="join and badauth identical; reconnect 1 difference")
 R(A, "CBOR framing, view.control segmentation (256 KB)", hub="done", pf="hub.rs tests (seg)", c="ddd", lane=L["core"], ev="hub.rs segmented-reply test; android verify-segmented.out on JS hub")
-R(A, "Keyed view deltas (viewDelta)", hub="partial", c="dnn", lane=L["pses"], ev="delta.rs + gpui delta.rs tests; session-gpuid still 42 differences")
+R(A, "Keyed view deltas (viewDelta)", hub="partial", c="dnn", lane=L["pses"], ev="delta.rs + gpui delta.rs tests; session-gpuid 977 differences (uncapped, parity-rust7)")
 R(A, "Copy guard (BACKPLANE_COPY)", hub="done", pf="copy.rs 15 tests", c="nnn", lane=L["core"], ev="copy.rs, test/gpui/hub/copy_gate.sh")
 R(A, "One hub per home (hub.lock flock)", hub="done", pf="main.rs", c="nnn", lane=L["core"], ev="main.rs takes hub.lock; no e2e result file read")
 R(A, "Startup and memory at scale", hub="done", pf="HUB-M1.md, results/hub", c="nnn", lane=L["soak"], ev="1M events 0.73 s; 24 h soak (M7) not run: gpui-soak lane holds a harness only")
@@ -491,7 +491,7 @@ def covered(rows):
 
 
 def gate():
-    d = os.path.join(ROOT, "build/gpui/results/parity-rust6/replay-diff.txt")
+    d = os.path.join(ROOT, "build/gpui/results/parity-rust7/replay-diff.txt")
     if not os.path.exists(d):
         return None
     rows = re.findall(r"^(\S+) (identical|\d+ differences)", open(d).read(), re.M)
@@ -552,7 +552,7 @@ def render(S, rows):
     if g:
         tot = sum(n for _, n in g)
         sess = sum(n for a, n in g if a.startswith("session"))
-        w("Source: `build/gpui/results/parity-rust6/replay-diff.txt` (recording A replayed against the Rust hub with the presenter, 2026-11-04 23:40, TZ pinned).\n")
+        w("Source: `build/gpui/results/parity-rust7/replay-diff.txt` (recording A replayed against the Rust hub with the presenter, gpui 0688158f6, uncapped compare with --all, Boat job j20261105072654-320657, TZ pinned). True total 1621 differences (the earlier 127 was a 40-per-scenario cap in compare.mjs).\n")
         w("| scenario | differences |")
         w("|---|---:|")
         for a, n in g:
@@ -565,7 +565,7 @@ def render(S, rows):
           "I found no newer diff file than rust6 and no number from `slim` after it: `results/slim` holds timings only, so I cannot confirm that slim's 126 is the same 126 until the coordinator asks `slim` for its latest run. "
           "The gate is not zero, so every row that depends on `view.*` is at most `partial` on the hub.\n")
     else:
-        w("`build/gpui/results/parity-rust6/replay-diff.txt` not found; not reconciled.\n")
+        w("`build/gpui/results/parity-rust7/replay-diff.txt` not found; not reconciled.\n")
     # lanes
     w("## Lanes\n")
     w("Owner per group of `missing` or `partial` rows. Existing lanes are from `docs/gpui/LANES.md`; **NEW** lanes are proposals with file ownership "
@@ -613,7 +613,7 @@ def render(S, rows):
     w(f"{len(ph)} rows have a phone cell that is not `done`; the cell is `partial` because the shipped app has the code but nothing was run against the Rust hub, or `missing` where the app has no code "
       "(Android Diagnostics). Their work is not blocked on new hub code for the rows whose hub cell is already `done` (files, git, review, kicad IPC, send/stop/ask): run those first. "
       "Every other row waits for its hub lane above.\n")
-    w("Existing lanes with nothing to do on this list: `soak` owns the 24 h run (M7), which has not run; `parity-session` and `parity-edge` own the 127-difference gate.\n")
+    w("Existing lanes with nothing to do on this list: `soak` owns the 24 h run (M7), which has not run; `parity-session` and `parity-edge` own the 1621-difference gate.\n")
     # tables
     w("## Checklist\n")
     w("Columns: Rust hub, GPUI desktop, iOS, Android. `[hub-blocked]` as defined above.\n")
