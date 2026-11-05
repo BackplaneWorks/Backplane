@@ -20,7 +20,7 @@ export async function replayOne(recording,{bin,port,work}){
   const volIds=new Set(frames.filter(f=>f.dir==='out'&&f.vol&&f.json&&f.json.id!==undefined).map(f=>f.c+'|'+f.json.id));
   // ids the client made itself (first seen in something it sent) are not the hub's and are never substituted
   for(const f of frames){if(f.dir==='out'&&f.json&&typeof f.json==='object'&&!f.vol)for(const s of ids(JSON.stringify(f.json)))seen.add(s);
-    if(f.dir!=='in'||(f.vol&&f.json?.t!=='reply')||!f.json||typeof f.json!=='object')continue;
+    if(f.dir!=='in'||!f.json||typeof f.json!=='object')continue;
     if(f.json.t==='reply'&&volIds.has(f.c+'|'+f.json.id))continue;
     if(f.json.t==='view')greet[f.c]=f.json;
     const vid=f.json.result?.viewId;if(vid&&!(viewIdsRec[f.c]??=[]).includes(vid))viewIdsRec[f.c].push(vid);
@@ -50,9 +50,35 @@ export async function replayOne(recording,{bin,port,work}){
   const replyAt=new Map();for(const f of frames)if(f.dir==='in'&&f.json?.t==='reply'&&!replyAt.has(f.c+'|'+f.json.id))replyAt.set(f.c+'|'+f.json.id,f.i);
   const outId=f=>f.json&&typeof f.json==='object'&&f.json.id;
   const owed=[];
+  // a poll run (volatile requests) in the recording waited for something; the replay waits for the same observable: thread state, entry count, thread count
+  const sigOf=x=>{const th=x?.result?.shown?.thread;return {state:th?.state??null,entries:(th?.entries||[]).length,threads:(x?.result?.shown?.projects||[]).reduce((a,p)=>a+(p.threads?.length||0),0)}};
+  const replyOf=new Map();for(const f of frames)if(f.dir==='in'&&f.json?.t==='reply'&&f.json.result?.viewRevision)replyOf.set(f.c+'|'+f.json.id,f.json);
+  const done=new Set();
   // the recording's own timing is replayed: a frame goes out no earlier than its recorded offset (the hub's counters and housekeeping depend on elapsed time)
   const first=frames.find(f=>f.dir==='out');const T0=Date.now()-(first?first.ms:0);
-  for(const f of frames){
+  for(let fi=0;fi<frames.length;fi++){
+    const f=frames[fi];
+    if(f.dir==='out'&&f.vol){
+      if(done.has(f.i))continue;
+      // the whole run of volatile requests that starts here
+      const run=[];for(let k=fi;k<frames.length;k++){const g=frames[k];if(g.dir==='out'&&g.vol&&g.kind==='bin')run.push(g);else if(g.dir==='out'&&!g.vol&&g.kind==='bin')break}
+      run.forEach(g=>done.add(g.i));
+      const c0=clients[run[0].c];if(!c0)continue;
+      const want=sigOf(replyOf.get(run[run.length-1].c+'|'+run[run.length-1].json.id));
+      const d=T0+run[0].ms-Date.now();if(d>0)await sleep(d);
+      const ok=x=>{const s=sigOf(x);return s.state===want.state&&s.entries>=want.entries&&s.threads>=want.threads};
+      rec.vol=true;
+      try{
+        let last=null,n=0;
+        for(const g of run){const cc=clients[g.c];for(const x of Object.values(clients))observe(x);
+          const obj=sub(cc,g.json);cc.send(obj);last=obj;n++;
+          const rep=await cc.until(x=>x.t==='reply'&&String(x.id)===String(obj.id),20000);if(rep&&ok(rep))break}
+        // not there yet: more polls, ids and revisions counting on from the last (the next real request is a thousand further on)
+        for(let extra=1;extra<=200&&last;extra++){
+          const rep0=await c0.until(x=>x.t==='reply'&&String(x.id)===String(last.id),20000);if(rep0&&ok(rep0))break;
+          await sleep(150);last=JSON.parse(JSON.stringify(last));last.id=Number(last.id)+1;last.p.requestRevision=Number(last.p.requestRevision)+1;c0.send(last)}
+      }finally{rec.vol=false}
+      continue}
     if(f.dir==='out'&&f.vol)continue;
     const c=clients[f.c];
     if(f.dir==='out'){
@@ -92,7 +118,7 @@ if(import.meta.main){
     const r=await replayOne(recd,{bin,port,work:`${WORK}/work-R`});
     writeFileSync(`${out}/${f}`,JSON.stringify(r));
     const a=normalise(recd.frames.filter(f=>f.kind!=='check')),b=normalise(r.frames);const d=[];
-    for(const c of new Set([...Object.keys(a),...Object.keys(b)]))for(const s of ['out','events','deltas','replies','views','other'])diff(a[c]?.[s],b[c]?.[s],`${c}.${s}`,d);
+    for(const c of new Set([...Object.keys(a),...Object.keys(b)]))for(const s of ['out','events','hk','deltas','replies','views','other'])diff(a[c]?.[s],b[c]?.[s],`${c}.${s}`,d);
     console.log(name,d.length?`${d.length} differences`:'identical');for(const x of d.slice(0,12))console.log('   ',x);total+=d.length;
   }
   console.log('TOTAL differences:',total);process.exit(total?1:0);
