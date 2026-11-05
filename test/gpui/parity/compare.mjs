@@ -88,8 +88,8 @@ export function normalise(frames){
 }
 export function diff(a,b,path='',out=[]){
   if(JSON.stringify(a)===JSON.stringify(b))return out;
-  if(Array.isArray(a)&&Array.isArray(b)){const n=Math.max(a.length,b.length);if(a.length!==b.length)out.push(`${path}: length ${a.length} vs ${b.length}`);for(let i=0;i<Math.min(a.length,b.length)&&out.length<40;i++)diff(a[i],b[i],`${path}[${i}]`,out);return out}
-  if(a&&b&&typeof a==='object'&&typeof b==='object'&&!Array.isArray(a)&&!Array.isArray(b)){for(const k of new Set([...Object.keys(a),...Object.keys(b)]))if(out.length<40)diff(a[k],b[k],`${path}.${k}`,out);return out}
+  if(Array.isArray(a)&&Array.isArray(b)){const n=Math.max(a.length,b.length);if(a.length!==b.length)out.push(`${path}: length ${a.length} vs ${b.length}`);for(let i=0;i<Math.min(a.length,b.length);i++)diff(a[i],b[i],`${path}[${i}]`,out);return out}
+  if(a&&b&&typeof a==='object'&&typeof b==='object'&&!Array.isArray(a)&&!Array.isArray(b)){for(const k of new Set([...Object.keys(a),...Object.keys(b)]))diff(a[k],b[k],`${path}.${k}`,out);return out}
   out.push(`${path}: ${JSON.stringify(a)?.slice(0,160)} vs ${JSON.stringify(b)?.slice(0,160)}`);return out;
 }
 export function compareDirs(A,B){
