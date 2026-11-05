@@ -9,6 +9,32 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
 
+/// A lone surrogate escape (\\ud83d with no partner, a pasted half emoji) is not valid JSON text for a Rust
+/// parser; the Bend hub reads it as U+FFFD (src/web/wire.js json()), and so does this: the line becomes valid.
+pub fn clean(line: &str) -> std::borrow::Cow<'_, str> {
+    if !line.contains("\\u") { return std::borrow::Cow::Borrowed(line) }
+    let b = line.as_bytes();
+    let hex4 = |i: usize| -> Option<u32> { b.get(i..i + 4).and_then(|h| std::str::from_utf8(h).ok()).and_then(|h| u32::from_str_radix(h, 16).ok()) };
+    let mut out = String::with_capacity(line.len());
+    let (mut i, mut changed) = (0, false);
+    while i < b.len() {
+        if b[i] != b'\\' { let n = line[i..].chars().next().unwrap().len_utf8(); out.push_str(&line[i..i + n]); i += n; continue }
+        match b.get(i + 1) {
+            Some(b'u') => match hex4(i + 2) {
+                Some(h) if (0xD800..0xDC00).contains(&h) => {
+                    if b.get(i + 6) == Some(&b'\\') && b.get(i + 7) == Some(&b'u') && hex4(i + 8).map_or(false, |l| (0xDC00..0xE000).contains(&l)) { out.push_str(&line[i..i + 12]); i += 12 }
+                    else { out.push_str("\\ufffd"); i += 6; changed = true }
+                }
+                Some(h) if (0xDC00..0xE000).contains(&h) => { out.push_str("\\ufffd"); i += 6; changed = true }
+                _ => { out.push_str(&line[i..(i + 2).min(line.len())]); i += 2 }
+            },
+            Some(_) => { out.push_str(&line[i..i + 2]); i += 2 }
+            None => { out.push('\\'); i += 1 }
+        }
+    }
+    if changed { std::borrow::Cow::Owned(out) } else { std::borrow::Cow::Borrowed(line) }
+}
+
 /// The log is never held as text: an index of (offset, length) per whole line, lines read back on demand.
 pub struct Store { path: PathBuf, file: File, idx: Vec<(u64, u32)>, size: u64, torn: bool, pub torn_bytes: usize, pub bad: usize }
 
@@ -26,7 +52,7 @@ impl Store {
                 if buf.last() != Some(&b'\n') { torn_bytes = n; size += n as u64; break } // after the last newline: not a line
                 let body = &buf[..n - 1];
                 if !body.is_empty() {
-                    if serde_json::from_slice::<IgnoredAny>(body).is_err() { bad += 1 } else { idx.push((size, body.len() as u32)) }
+                    if serde_json::from_str::<IgnoredAny>(&clean(&String::from_utf8_lossy(body))).is_err() { bad += 1 } else { idx.push((size, body.len() as u32)) }
                 }
                 size += n as u64;
             }
@@ -39,14 +65,14 @@ impl Store {
     pub fn get(&self, i: usize) -> Result<String> {
         let (off, len) = self.idx[i];
         let mut b = vec![0u8; len as usize]; self.file.read_exact_at(&mut b, off)?;
-        Ok(String::from_utf8_lossy(&b).into_owned())
+        Ok(clean(&String::from_utf8_lossy(&b)).into_owned())
     }
     /// Lines a..b (clamped), read in one pass over their byte range.
     pub fn range(&self, a: usize, b: usize) -> Result<Vec<String>> {
         let b = b.min(self.idx.len()); if a >= b { return Ok(vec![]) }
         let (start, last) = (self.idx[a].0, self.idx[b - 1]);
         let mut buf = vec![0u8; (last.0 + last.1 as u64 - start) as usize]; self.file.read_exact_at(&mut buf, start)?;
-        Ok(self.idx[a..b].iter().map(|(off, len)| String::from_utf8_lossy(&buf[(off - start) as usize..(off - start) as usize + *len as usize]).into_owned()).collect())
+        Ok(self.idx[a..b].iter().map(|(off, len)| clean(&String::from_utf8_lossy(&buf[(off - start) as usize..(off - start) as usize + *len as usize])).into_owned()).collect())
     }
     pub fn all(&self) -> Vec<String> { self.range(0, self.len()).unwrap_or_default() }
     /// Durable before it returns: the caller acknowledges only after this.
@@ -108,6 +134,13 @@ mod tests {
         let part = tmp("la-part"); std::fs::write(&part, xs.iter().map(|l| format!("{l}\n")).collect::<String>()).unwrap();
         let mut s = Store::open(&part).unwrap(); for y in &ys { s.append(y).unwrap(); }
         assert_eq!(Store::open(&part).unwrap().all(), Store::open(&whole).unwrap().all());
+    }
+    #[test] fn lone_surrogates_become_replacement_characters() {
+        assert_eq!(clean(r#"{"a":"x\ud83dy"}"#), r#"{"a":"x\ufffdy"}"#);   // lone high
+        assert_eq!(clean(r#"{"a":"\ude42"}"#), r#"{"a":"\ufffd"}"#);          // lone low
+        assert_eq!(clean(r#"{"a":"\ud83d\ude42"}"#), r#"{"a":"\ud83d\ude42"}"#); // a pair stays
+        assert_eq!(clean(r#"{"a":"\\ud83d"}"#), r#"{"a":"\\ud83d"}"#);        // an escaped backslash is not an escape
+        assert!(serde_json::from_str::<serde_json::Value>(&clean(r#"{"a":"\ud83d\u00e9"}"#)).is_ok());
     }
     #[test] fn unicode_and_blank_lines() {
         let p = tmp("uni"); std::fs::write(&p, "{\"$\":\"M\",\"text\":\"日本語🙂\"}\n\n{\"$\":\"N\"}\n").unwrap();

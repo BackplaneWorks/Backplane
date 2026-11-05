@@ -1,6 +1,6 @@
 //! backplane-hub: the Backplane hub for native clients (GPUI, SwiftUI, Compose).
 //! HTTP + authenticated WebSocket; renderer `mobile`; the picture comes from the presenter.
-mod auth; mod cbor; mod hub; mod presenter; mod store;
+mod auth; mod cbor; mod hub; mod model; mod presenter; mod store;
 
 use anyhow::{Context, Result};
 use auth::Req;
