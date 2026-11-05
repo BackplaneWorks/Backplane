@@ -485,6 +485,7 @@ fn norm_steps(s: &str, roots: &[&str]) -> String {
     o
 }
 #[tokio::test(flavor = "multi_thread")] async fn design_history_steps_are_logged_as_the_js_hub_logs_them() {
+    for (k, v) in [("GIT_CONFIG_GLOBAL", "/dev/null"), ("GIT_CONFIG_NOSYSTEM", "1"), ("GIT_AUTHOR_NAME", "t"), ("GIT_AUTHOR_EMAIL", "t@t"), ("GIT_COMMITTER_NAME", "t"), ("GIT_COMMITTER_EMAIL", "t@t")] { std::env::set_var(k, v) } // hermetic: no host git identity, config or hooks
     let sd = dir("st-bin"); script(&sd, "claude", PLAYER);
     std::fs::write(sd.join("replay.ndjson"), include_str!("../../../../test/gpui/agents/fixtures/replay-steps.ndjson")).unwrap();
     let home = dir("st-home"); let work = dir("st-work"); std::fs::write(home.join("events.jsonl"), base_log(&work, 1, "")).unwrap();
@@ -502,7 +503,7 @@ fn norm_steps(s: &str, roots: &[&str]) -> String {
     let f = |v: &[Value], r: &str| core(v, T1).iter().map(|e| norm_digits(&norm_steps(&norm(e), &[r]))).collect::<Vec<_>>();
     // the step Acts carry the commit, the previous commit, the git dir and top, and the files changed
     let steps: Vec<Value> = ev.iter().filter(|e| e["tone"] == "step").cloned().collect(); assert_eq!(steps.len(), 2, "{steps:?}");
-    let rec = |i: usize| -> Value { serde_json::from_str(steps[i]["summary"].as_str().unwrap()).unwrap() };
+    let rec = |i: usize| -> Value { let sm = steps[i]["summary"].as_str().unwrap_or(""); serde_json::from_str(sm).unwrap_or_else(|e| panic!("step {i}: the capture did not record a JSON step ({e}); its summary was: {sm:?}")) };
     assert_eq!(rec(0)["w"], "start"); assert_eq!(rec(0)["f"], json!(["A\tb.kicad_pcb"])); assert_eq!(rec(0)["p"], ""); assert_eq!(rec(1)["p"], rec(0)["c"]); assert_eq!(rec(1)["f"], json!(["M\tb.kicad_pcb"]));
     assert_eq!(rec(0)["g"], format!("{me}/.backplane/history.git")); assert_eq!(rec(0)["t"], me);
     let (g, w) = (f(&ev, &me), f(&lines_of(include_str!("../../../../test/gpui/agents/fixtures/js-steps.jsonl")), js_root));
