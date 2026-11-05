@@ -18,7 +18,7 @@ impl Inbox for Arc<Agents> {
     fn stop<'a>(&'a self, thread: &'a str) -> Fut<'a, ()> { Box::pin(async move { let _ = Agents::stop(self, thread).await; }) }
 }
 
-pub struct Bots { pub hub: Arc<Hub>, world: Mutex<World>, inbox: Arc<dyn Inbox>, pub(crate) router: std::sync::OnceLock<Arc<dyn super::mail::file::Router>> }
+pub struct Bots { pub hub: Arc<Hub>, world: Mutex<World>, inbox: Arc<dyn Inbox>, pub(crate) router: std::sync::OnceLock<Arc<dyn super::mail::file::Router>>, last_id: std::sync::Mutex<(u64, u64)> }
 
 fn ok(id: &Value) -> Value { json!({"t":"reply","id":id,"ok":true}) }
 fn err(id: &Value, e: &str) -> Value { json!({"t":"reply","id":id,"ok":false,"error":e}) }
@@ -59,7 +59,7 @@ impl Bots {
     pub async fn start_with(hub: Arc<Hub>, inbox: Arc<dyn Inbox>) -> Arc<Bots> {
         let store = hub.store.clone();
         let w = tokio::task::spawn_blocking(move || { let mut w = World::default(); if let Err(e) = w.sync(&store) { eprintln!("bots: reading the log: {e:#}") } w }).await.unwrap_or_default();
-        let b = Arc::new(Bots { hub: hub.clone(), world: Mutex::new(w), inbox, router: Default::default() });
+        let b = Arc::new(Bots { hub: hub.clone(), world: Mutex::new(w), inbox, router: Default::default(), last_id: Default::default() });
         hub.register_rpc(Arc::new(Rpc(b.clone())));
         super::api::register(&hub, &b);
         super::mail::requests::register(&hub, &b);
@@ -83,7 +83,13 @@ impl Bots {
     pub(super) async fn commit_reply_pub(&self, id: &Value, events: Vec<Value>) -> Vec<Value> { self.commit_reply(id, events).await }
     pub(super) async fn inbox_deliver_raw(&self, th: &str, msg: &str, text: &str, o: Option<(String, String, String)>) -> Result<(), String> { self.inbox.deliver(th, msg, text, o).await }
     pub(super) async fn inbox_deliver(&self, k: &super::routines::Wake) -> Result<(), String> { self.inbox.deliver(&k.thread, &k.msg, &k.text, k.origin.clone()).await }
-    fn id(&self, prefix: &str, now: u64) -> String { hub_id(prefix, now, self.hub.store.len() as u64) }
+    /// B.Hub.id(prefix, now, seq) with seq the log's length. A Bend Step is atomic, so two ids of one second never share a length; here a request decides
+    /// before it commits, so a second id asked for in the same second while the log has not grown gets the next number (an id stays what it was otherwise).
+    fn id(&self, prefix: &str, now: u64) -> String {
+        let len = self.hub.store.len() as u64; let mut l = self.last_id.lock().unwrap();
+        let seq = if l.0 == now && len <= l.1 { l.1 + 1 } else { len };
+        *l = (now, seq); hub_id(prefix, now, seq)
+    }
 
     async fn commit_reply(&self, id: &Value, events: Vec<Value>) -> Vec<Value> {
         match self.hub.commit_many(&events).await { Ok(_) => vec![ok(id)], Err(e) => vec![err(id, &format!("{e:#}"))] }
