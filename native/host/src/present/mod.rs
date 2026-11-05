@@ -1,6 +1,8 @@
 //! The Rust presenter (docs/gpui/PRESENTER-PORT.md). `Routed` is a `Presenter` that asks each ported `Screen` first and falls to the helper
 //! for what is not ported yet; a screen takes the same params the helper takes and returns what the helper's V returns.
-//! `BACKPLANE_PRESENTER_DUMP=<dir>` (copy runs only) writes every `(params, helper output)` pair to `<dir>/views.jsonl`: the input of the differential test.
+//! `BACKPLANE_PRESENTER_DUMP=<dir>` writes every `(params, helper output)` pair to `<dir>/views.jsonl` (0600): the input of the differential test.
+//! The dump holds message text, drafts and `session`: SYNTHETIC logs only. It is written only by a copy run, only while the helper is running, and only for a log under
+//! `copy::BIG_LOG` (a copy of a real store is far larger); `frames.jsonl` (the fold stream) and a frame index per view are the next step and not written yet.
 use crate::presenter::{Fut, Presenter};
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -15,15 +17,20 @@ pub trait Screen: Send + Sync {
 pub struct Routed { helper: Arc<dyn Presenter>, screens: Vec<Box<dyn Screen>>, dump: Option<Mutex<std::fs::File>> }
 
 impl Routed {
-    pub fn new(helper: Arc<dyn Presenter>, screens: Vec<Box<dyn Screen>>) -> Routed {
-        Routed { helper, screens, dump: Self::open_dump(std::env::var_os("BACKPLANE_PRESENTER_DUMP").map(PathBuf::from), crate::copy::on()) }
+    pub fn new(helper: Arc<dyn Presenter>, screens: Vec<Box<dyn Screen>>, home: &std::path::Path, helper_running: bool) -> Routed {
+        let log = std::fs::metadata(home.join("events.jsonl")).map(|m| m.len()).unwrap_or(0);
+        Routed { helper, screens, dump: Self::open_dump(std::env::var_os("BACKPLANE_PRESENTER_DUMP").map(PathBuf::from), crate::copy::on(), helper_running, log) }
     }
-    /// The dump holds hub content, so it is written only by a copy run (a throwaway home); anything else ignores the variable and says so.
-    fn open_dump(dir: Option<PathBuf>, copy: bool) -> Option<Mutex<std::fs::File>> {
+    /// Refused (said once) unless: a copy run, the helper is running (nothing to record otherwise), and the log is small (`copy::BIG_LOG`): a dump of a real-size copy would hold real content.
+    fn open_dump(dir: Option<PathBuf>, copy: bool, helper_running: bool, log_bytes: u64) -> Option<Mutex<std::fs::File>> {
+        use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
         let dir = dir?;
-        if !copy { eprintln!("BACKPLANE_PRESENTER_DUMP ignored: only a copy run (BACKPLANE_COPY=1) may write one"); return None }
-        std::fs::create_dir_all(&dir).ok()?;
-        match std::fs::OpenOptions::new().create(true).append(true).open(dir.join("views.jsonl")) {
+        if !copy || !helper_running || log_bytes > crate::copy::BIG_LOG {
+            eprintln!("BACKPLANE_PRESENTER_DUMP ignored: it needs a copy run (BACKPLANE_COPY=1), a running helper and a log under {} bytes (synthetic logs only)", crate::copy::BIG_LOG);
+            return None
+        }
+        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir).ok()?;
+        match std::fs::OpenOptions::new().create(true).append(true).mode(0o600).open(dir.join("views.jsonl")) {
             Ok(f) => Some(Mutex::new(f)),
             Err(e) => { eprintln!("BACKPLANE_PRESENTER_DUMP: {e}"); None }
         }
@@ -74,7 +81,7 @@ mod tests {
     }
     #[tokio::test] async fn the_dump_records_the_helper_pairs_and_only_on_a_copy_run() {
         let d = tmp("on");
-        let r = Routed { helper: helper(), screens: vec![Box::new(Mine)], dump: Routed::open_dump(Some(d.clone()), true) };
+        let r = Routed { helper: helper(), screens: vec![Box::new(Mine)], dump: Routed::open_dump(Some(d.clone()), true, true, 1000) };
         r.view(&json!({"target":{"kind":"recent"}})).await.unwrap();   // helper answered: recorded
         r.view(&json!({"target":{"kind":"thread","id":"t"}})).await.unwrap(); // rust answered: not recorded (nothing to compare with)
         let text = std::fs::read_to_string(d.join("views.jsonl")).unwrap();
@@ -82,6 +89,10 @@ mod tests {
         let l: Value = serde_json::from_str(text.lines().next().unwrap()).unwrap();
         assert_eq!(l["params"]["target"]["kind"], "recent"); assert_eq!(l["out"]["shown"]["by"], "helper");
         let d2 = tmp("off");
-        assert!(Routed::open_dump(Some(d2.clone()), false).is_none() && !d2.exists(), "a non-copy run writes no dump");
+        assert!(Routed::open_dump(Some(d2.clone()), false, true, 1000).is_none() && !d2.exists(), "a non-copy run writes no dump");
+        assert!(Routed::open_dump(Some(d2.clone()), true, false, 1000).is_none() && !d2.exists(), "no helper, nothing to record");
+        assert!(Routed::open_dump(Some(d2.clone()), true, true, crate::copy::BIG_LOG + 1).is_none() && !d2.exists(), "a log of real size is never dumped");
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(std::fs::metadata(d.join("views.jsonl")).unwrap().permissions().mode() & 0o777, 0o600, "the dump is private");
     }
 }

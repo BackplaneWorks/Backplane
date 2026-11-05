@@ -126,7 +126,7 @@ async fn run(a: Args) -> Result<()> {
         None => Arc::new(presenter::Canned { reply: json!({"remoteReady":false,"cmds":[],"session":{}}) }),
     };
     // the ported screens answer first, the helper the rest (docs/gpui/PRESENTER-PORT.md); none are ported yet, so this changes nothing but the optional dump
-    let presenter: Arc<dyn presenter::Presenter> = Arc::new(present::Routed::new(presenter, vec![]));
+    let presenter: Arc<dyn presenter::Presenter> = Arc::new(present::Routed::new(presenter, vec![], &a.home, a.policy.is_some()));
     let listen = format!("{}:{}", a.host, a.port);
     let hub = Hub::start(hub::Cfg { home: a.home.clone(), version: a.version, commit: a.commit, listen: listen.clone(), os: "linux".into(), arch: "x64".into() }, presenter).await?;
     session::start(&hub);

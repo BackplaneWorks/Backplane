@@ -6,6 +6,13 @@ what the hub needs moves to Rust. Start with exactly what opens the real log and
 indexed, never the whole log in memory. Bar: **same answers as today**, checked by replay against JS recordings. Measure on
 `~/.backplane-gpui-scratch/synthetic-real-size.jsonl` (1,691,620 events, 1.14 GB) only, never a store copy. `gpui-compact` is stopped (branch kept).
 
+## Decision needed from the person
+
+Your bar was memory **flat** at two log sizes. This port cannot meet that word: the log index and the read model grow with events (the store keeps an offset per event, `Model` an entry per
+message). Measured so far about 38 B/event all in (38 MB at 1M events; 18.7 B of RSS per committed event), so about 64 MB at 1.69M and 380 MB at 10M. What the port does give: no helper and no whole-log fold
+(the 3.6 GB at 1.69M events is gone), `meta` bounded by threads/projects/tasks, and a measured slope. Proposed replacement bar: slope at most 64 B/event, measured at 0.85M and 1.69M synthetic events, and RSS
+steady while no events arrive. Say if you want a different number, or flat as originally written (which would need the index on disk, a larger design).
+
 ## What the helper does now
 
 Two Bend child processes, each a line protocol the hub drives (`presenter.rs`):
@@ -67,8 +74,8 @@ Mirrors: `rebuild_presenter`, `forget_mirror` and far events change presenter st
 
 **The oracle, in two tools and a gate.**
 1. *Dumps (working tool, not the gate).* The helper's `V` depends on more than the params: everything folded through `Presenter::fold` (`log, changes, delta, info, live`).
-   With `BACKPLANE_PRESENTER_DUMP=<dir>` (copy runs only) a hub writes `frames.jsonl` (every fold frame, in order) and `views.jsonl` (each `(params, helper output, frames-so-far index)`).
-   The differential test replays the frames up to that index into a `RustPresenter` (its `fold` builds `meta`/info/live; the events go into a temp store so `Model` indexes them) and compares
+   With `BACKPLANE_PRESENTER_DUMP=<dir>` a hub writes `frames.jsonl` (every fold frame, in order) and `views.jsonl` (each `(params, helper output, frames-so-far index)`).
+   Dump safety: it holds message text, drafts and `session`, so it is for **synthetic logs only**; the hub writes it 0600, and only on a copy run, only while the helper runs, and never for a log above `copy::BIG_LOG` (256 MiB). The code writes `views.jsonl` today; `frames.jsonl` and the frame index are the next step and are what make this oracle work. The differential test replays the frames up to that index into a `RustPresenter` (its `fold` builds `meta`/info/live; the events go into a temp store so `Model` indexes them) and compares
    the view output. Exact comparison after only these normalisations: clock fields (`at`, `now`, `rid`, `clock`), view ids and message/thread ids by first appearance. Anything else is a difference.
 2. *The gate is the JS replay, not the helper.* The helper differs from JS today (`settingspages` 347 and `projecthome` 33 differences, still UNSETTLED), so 0 differences against dumps can mean
    copying the helper's bugs. A module lands when `test/gpui/parity` (scenario `session:gpui`, normalisations N1-N19 as listed in its README, none added) shows 0 differences against the JS recordings,
