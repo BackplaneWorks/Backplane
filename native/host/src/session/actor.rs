@@ -27,13 +27,23 @@ fn render_scratch(key: &str) -> bool { key.starts_with("@more.") || key == "@pil
 const VIEW_INFO: [&str; 5] = ["view.design:", "view.kind:", "view.path:", "view.sheet:", "view.tree:"];
 
 #[derive(Default)]
-pub struct ViewActor { view: String, target: Option<Value>, sel: Option<String>, keys: BTreeSet<String>, away: BTreeMap<String, String> }
+pub struct ViewActor { view: String, target: Option<Value>, sel: Option<String>, keys: BTreeSet<String>, away: BTreeMap<String, String>, page: Option<(String, Value, u64)> }
 
 /// The thread a target's draft and viewer belong to (V.Target.owner). Limits: a bot's thread (Target.thread) and a
 /// project home's owner are not modelled, so those targets get no "@away.<t>" and no seeds.
 fn owner(target: &Value) -> &str { if target["kind"] == "thread" { target["id"].as_str().unwrap_or("") } else { "" } }
 
 impl ViewActor {
+    /// The older page this view stands on (`before`, 0 = the newest window). A view.page sets it from its cursor; later
+    /// updates and actions of the same view and target keep it (the JS hub's actor holds the page it last served) until
+    /// a view.open or another target ends it. Measured on recA/session-gpuid requests 41..45.
+    pub fn page_at(&mut self, view: &str, method: &str, target: &Value, asked: u64) -> u64 {
+        let held = match &self.page { Some((v, t, b)) if v == view && t == target => *b, _ => 0 };
+        let before = match method { "view.open" => 0, "view.page" => asked, _ => held };
+        self.page = if before == 0 { None } else { Some((view.to_string(), target.clone(), before)) };
+        before
+    }
+
     /// `view` is the view's id, `req` the view request (target, away, session.drafts), `pol` the policy's session.
     pub fn reply(&mut self, view: &str, req: &Value, pol: &Value) -> Value {
         let Some(mut session) = pol.as_object().cloned() else { return pol.clone() };
@@ -94,6 +104,10 @@ pub fn apply(client: u64, view: &str, req: &Value, pol: &Value) -> Value {
     let mut out = pol.clone();
     out["session"] = s;
     out
+}
+/// `before` for this request: see `ViewActor::page_at`.
+pub fn page(client: u64, view: &str, method: &str, target: &Value, asked: u64) -> u64 {
+    ACTORS.lock().unwrap().entry(client).or_default().page_at(view, method, target, asked)
 }
 /// A connection ended (`Hub::detach`, from the connection's drop guard).
 pub fn forget(client: u64) { ACTORS.lock().unwrap().remove(&client); }
@@ -169,6 +183,20 @@ mod tests {
         assert_eq!(a.reply("v1", &req("thread", "t1"), &pol("t1", &[]))["drafts"]["@away.t1"], json!("m5"));
         let mut back = req("thread", "t1"); back["away"] = json!("");
         assert_eq!(a.reply("v1", &back, &pol("t1", &[]))["drafts"]["@away.t1"], json!(""));
+    }
+    #[test] fn a_page_position_holds_for_the_view_until_open_or_a_move() {
+        let mut a = ViewActor::default();
+        let t = json!({"kind": "thread", "id": "t1"});
+        assert_eq!(a.page_at("v1", "view.update", &t, 0), 0);
+        assert_eq!(a.page_at("v1", "view.page", &t, 131), 131);
+        assert_eq!(a.page_at("v1", "view.update", &t, 0), 131);
+        assert_eq!(a.page_at("v1", "view.action", &t, 0), 131);
+        assert_eq!(a.page_at("v1", "view.page", &t, 115), 115);
+        assert_eq!(a.page_at("v1", "view.update", &json!({"kind": "thread", "id": "t2"}), 0), 0);
+        assert_eq!(a.page_at("v1", "view.update", &t, 0), 0);
+        a.page_at("v1", "view.page", &t, 99);
+        assert_eq!(a.page_at("v1", "view.open", &t, 0), 0);
+        assert_eq!(a.page_at("v1", "view.update", &t, 0), 0);
     }
     #[test] fn forget_and_the_bound_keep_the_map_flat() {
         let mut m: HashMap<u64, ViewActor> = HashMap::new();
