@@ -21,9 +21,9 @@ t = dump()
 if cmd == "dump": print(len(nodes(t)))
 elif cmd in ("bounds", "rowbox"):
     # bounds TEXT [exact] [nth]  -> l t r b of the node; rowbox: of its nearest clickable ancestor
-    text = sys.argv[2]; nth = int(sys.argv[3]) if len(sys.argv) > 3 else 0
+    text = sys.argv[2]; rest = sys.argv[3:]; exact = "exact" in rest; nth = next((int(x) for x in rest if x.isdigit()), 0)
     par = {c: p for p in t.iter() for c in p}
-    ms = [n for n in nodes(t) if match(n, text, True)]
+    ms = [n for n in nodes(t) if match(n, text, exact)]
     n = ms[nth]
     if cmd == "rowbox":
         while n is not None and n.get("clickable") != "true": n = par.get(n)
