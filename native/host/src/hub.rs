@@ -383,9 +383,9 @@ mod tests {
         impl Presenter for Spy {
             fn name(&self) -> &'static str { "spy" }
             fn wants_log(&self) -> bool { false }
-            fn fold<'a>(&'a self, _f: &'a Value) -> crate::api::Fut<'a, ()> { Box::pin(async { Ok(()) }) }
-            fn view<'a>(&'a self, p: &'a Value) -> crate::api::Fut<'a, Value> { self.0.lock().unwrap().push(p.clone()); Box::pin(async { Ok(json!({"remoteReady":true,"shown":{},"session":{},"cmds":[]})) }) }
-            fn ping(&self) -> crate::api::Fut<'_, ()> { Box::pin(async { Ok(()) }) }
+            fn fold<'a>(&'a self, _f: &'a Value) -> crate::presenter::Fut<'a, ()> { Box::pin(async { Ok(()) }) }
+            fn view<'a>(&'a self, p: &'a Value) -> crate::presenter::Fut<'a, Value> { self.0.lock().unwrap().push(p.clone()); Box::pin(async { Ok(json!({"remoteReady":true,"shown":{},"session":{},"cmds":[]})) }) }
+            fn ping(&self) -> crate::presenter::Fut<'_, ()> { Box::pin(async { Ok(()) }) }
         }
         let spy = Arc::new(Spy(Default::default()));
         let h = Hub::start(cfg(&home("spy")), spy.clone()).await.unwrap();
