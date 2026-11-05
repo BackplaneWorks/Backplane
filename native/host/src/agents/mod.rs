@@ -315,7 +315,9 @@ impl Actor {
         self.cx.running = true; self.ag.stats.turns.fetch_add(1, Relaxed);
         self.jobs_start(&cwd, &msg);
         // the person's message starts the turn: the <terminals> note follows it (and the chat's unpinned terminals stop)
-        let agent_text = if role == "user" && origin.is_none() { let n = crate::term::tools::on_person_message(&self.ag.hub, &th).await; if n.is_empty() { text.clone() } else { format!("{text}\n\n{n}") } } else { text.clone() };
+        let rv_block = { let w = self.ag.world().await; let ops: Vec<_> = w.reviews.get(&th).map(|v| v.iter().filter_map(|(k, sm, at)| crate::files::kicad::review::of(crate::files::kicad::review::TONE, k, sm, *at)).collect()).unwrap_or_default(); crate::files::kicad::review::prompt(&crate::files::kicad::review::fold(&ops)) }; // Review.agent: the open comments follow every message
+        let text_rv = if rv_block.is_empty() { text.clone() } else { format!("{text}\n\n{rv_block}") };
+        let agent_text = if role == "user" && origin.is_none() { let n = crate::term::tools::on_person_message(&self.ag.hub, &th).await; if n.is_empty() { text_rv.clone() } else { format!("{text_rv}\n\n{n}") } } else { text_rv.clone() };
         if codex { let run = if ride.is_empty() { agent_text.clone() } else { format!("{}\n\n{}", codex::ride_input(&ride), agent_text) }; self.codex_run(&t, &cwd, &run).await; return Ok(()) }
         self.claude_send(&t, &cwd, &msg, &text, &agent_text, now).await;
         Ok(())
