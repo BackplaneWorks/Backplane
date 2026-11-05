@@ -164,3 +164,12 @@ async fn setup(name: &str) -> (Arc<Hub>, Arc<Driver>, PathBuf) {
     let (ok, e) = d.tool("b1", "task_pause", &json!({"run":run,"n":3})).await; assert!(!ok && e["error"].as_str().unwrap().contains("too many"), "per thread: {e}");
     let (d3, r3) = (d.clone(), run.clone()); let (ok, _) = tokio::spawn(async move { d3.tool("b2", "task_pause", &json!({"run":r3,"n":4})).await }).await.unwrap(); assert!(!ok, "b2 is a different thread: it asks, and times out here");
 }
+
+#[tokio::test] async fn the_pages_newest_frame_is_served_as_screen_jpg_and_never_cached() {
+    let (hub, d, _log) = setup("screen").await; let _ = d; let get = |t: &str| Req::new("GET", t, vec![]);
+    let call = |t: String| { let hub = hub.clone(); async move { hub.http_for("/bots/b1/screen.jpg").unwrap().call(&hub, &get(&t)).await } };
+    assert_eq!(call("/bots/b1/screen.jpg".into()).await.status, "404 Not Found");
+    std::fs::create_dir_all(hub.cfg.home.join("shots")).unwrap(); std::fs::write(hub.cfg.home.join("shots/b1.jpg"), b"FRAME").unwrap();
+    let r = call("/bots/b1/screen.jpg".into()).await; assert_eq!((r.status, r.ctype.as_str(), r.body.as_slice()), ("200 OK", "image/jpeg", &b"FRAME"[..])); assert!(r.extra.contains("no-store"));
+    for bad in ["/bots/../screen.jpg", "/bots/a%2fb/screen.jpg", "/bots//screen.jpg"] { assert_eq!(call(bad.into()).await.status, "404 Not Found", "{bad}") }
+}
