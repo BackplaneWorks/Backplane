@@ -299,7 +299,7 @@ R(A, "Grok, OpenCode (ACP)", prov=["acp", "grok", "opencode"], pf="agents", c="p
 R(A, "Muse Code (MSP), Antigravity", prov=["msp", "muse", "agy"], c="ppp", lane=L["msp"], ev="drivers landed (providers/{msp,muse,agy}.rs): stand-in turns equal the JS hub event for event (muse turn/approval, antigravity turn/permission; fixtures test/gpui/agents/prov); UNPROVEN: Antigravity install, probe, sign-in/out and Muse/Antigravity model lists (no job host), real CLIs never run")
 R(A, "Pi, Oh My Pi, bp/ask dialogs", prov=["pi", "omp", "dialog"], c="ppp", lane=L["pi"], ev="stubs on gpui; drivers on lane gpui-prov-pi/-pi2 (pi 366, omp 292, dialog 180 lines)")
 R(A, "Interrupt, resume, restart-in-place, stale process refusal", m=["turn.interrupt"], pf="agents", c="ppp", lane=L["agents"], ev="agents lifecycle replay; Gen.refused in mcp.rs")
-R(A, "Provider accounts, fallback chain, allowance", m=["accounts", "accounts.default", "accounts.select"], hub="partial", c="ppp", lane=L["sett"], ev="hub seeds accounts.inventory/allowance.codex at start only; no account requests, no fallback")
+R(A, "Provider accounts, fallback chain, allowance", m=["accounts", "accounts.default", "accounts.select"], hub="partial", c="ppp", lane=L["sett"], ev="accounts.default is gated as the JS hub gates a mobile client; accounts/select/fallback runtime need real provider CLIs: not ported (settings/accounts.rs docs)")
 R(A, "Launched threads report back (thread_launch)", t=["thread_launch"], c="ppp", lane=L["mcp"], ev="tool missing in Rust (Launch.tell absent)")
 R(A, "Delegated tasks (delegate_task, task_status/cancel)", m=["task.cancel", "work.cancel", "wake.cancel"], t=["delegate_task", "task_status", "task_cancel"], c="ppp", lane=L["mcp"], ev="no handler or tool in Rust")
 R(A, "Restart continues running turns (restart.continue)", hub="done", pf="agents", c="n/a".replace("n/a", "nnn"), lane=L["agents"], ev="agents carry_will, hub recover; tests.rs")
@@ -377,9 +377,9 @@ R(A, "Worktrees per thread, checkpoints", m=["thread.worktree"], c="ppp", lane=L
 A = "Settings"
 R(A, "Setting storage and echo (setting.set)", m=["setting.set"], c="mpp", lane=L["sett"], ev="settings/set.rs handles setting.set (peer.own, account gate, telemetry keys); unit-tested on Boat (49 settings tests); GPUI settings glyph still inert")
 R(A, "Appearance (theme, text size, look)", m=["setting.set"], c="mdd", lane=L["gscreens"], ev="GPUI theme tokens fixed light/dark (theme.rs test); not settable")
-R(A, "Threads page (settle, notify, snooze defaults, scratch days)", m=["setting.set"], c="mpp", lane=L["sett"], ev="no handler")
-R(A, "Agents page (providers, models, CLI install, API keys)", m=["setting.set", "models.refresh", "update.check"], c="mpp", lane=L["sett"], ev="no handler; models list info frames are empty strings in Rust (hub.rs info seed)")
-R(A, "Writing page (text model)", m=["setting.set"], c="mpp", lane=L["sett"], ev="no handler")
+R(A, "Threads page (settle, notify, snooze defaults, scratch days)", m=["setting.set"], c="mpp", lane=L["sett"], ev="setting.set (settings/set.rs) writes and echoes every key; the page is GPUI/screens work")
+R(A, "Agents page (providers, models, CLI install, API keys)", m=["setting.set", "models.refresh", "update.check"], c="mpp", lane=L["sett"], ev="setting.set, models.refresh (re-sends the built-in models info; CLI listings not ported), update.check (managed: empty version) answer; info models is settings/models.rs, byte-equal to the JS hub's for a machine with no CLI")
+R(A, "Writing page (text model)", m=["setting.set"], c="mpp", lane=L["sett"], ev="setting.set (settings/set.rs)")
 R(A, "CAD page (KiCad install, version, fork)", m=["kicad.install", "cad.install", "kicad.retry"], hub="partial", c="mpp", lane=L["files"], ev="info kicad.* seeded as empty; install not ported")
 R(A, "Ordering page and price estimates", m=["setting.set"], c="mpp", lane=L["orders"], ev="no handler")
 R(A, "Devices page, paired devices, revoke", m=["device.register", "device.drop"], r=["/auth/devices", "/auth/revoke", "/auth/known", "/auth/cache"], hub="partial", c="mpp", lane=L["net"], ev="LIVE: registry decides every credential, /auth/invitations|devices|revoke|known|enroll (net/, 40 Boat tests); device.register/drop (push) not yet")
@@ -387,12 +387,12 @@ R(A, "Network page (Tailscale, listen, pairing link)", r=["/auth/pair", "/auth/e
 R(A, "Voice page (engine, model, device, dictionary)", m=["bots.voice"], r=["/voice/in"], c="mpp", lane=L["voice"], ev="no Rust handler/route")
 R(A, "API keys (add/drop, api.env)", m=["bots.voice"], c="mpp", lane=L["sett"], ev="settings/keys.rs + keys_rpc: api-add/api-del/status answer names only; bots.voice other ops (voice) are the term lane's")
 R(A, "Antigravity account and sign-in", m=["bots.voice"], c="mpp", lane=L["msp"], ev="UNPROVEN: pure scripts and state machines in providers/agy.rs (install, probe, sign-in, callback check) unit-tested; no job host runs them, no bots.voice agy handler, no real sign-in")
-R(A, "Time zone page", m=["zone.report", "zone.set"], c="mpp", lane=L["sett"], ev="no handler")
+R(A, "Time zone page", m=["zone.report", "zone.set"], c="mpp", lane=L["sett"], ev="zone.report / zone.set (settings/zone.rs): JS-parity scenario 'settings' identical; POSIX rule evaluation not ported (routines, bots lane)")
 R(A, "Usage page and allowance windows", hub="partial", c="mpp", lane=L["sett"], ev="allowance.codex seeded; no updater")
 R(A, "About, version, update check, update now", m=["update.check", "update.now", "app.update"], r=["/hello"], hub="partial", c="mpp", lane=L["sett"], ev="/hello and version in hub.rs; no updater (BACKPLANE_NO_UPDATE)")
 R(A, "Privacy page and telemetry opt-out / reset", m=["telemetry.choice"], hub="missing", c="mpp", lane=L["sett"], ev="settings/telemetry.rs: choice, receipts, legacy off-only path ported; sender deliberately not ported (nothing is sent, no endpoint baked)")
-R(A, "Settings propose / approve (agent changes)", t=["settings_propose", "settings_inspect"], m=["setting.set"], c="mpp", lane=L["sett"], ev="no handler or tool")
-R(A, "Settings stick across restarts", m=["setting.set"], pf="state", c="ppp", lane=L["sett"], ev="SettingSet events fold in state/mod.rs; nothing writes them from a client")
+R(A, "Settings propose / approve (agent changes)", t=["settings_propose", "settings_inspect"], m=["setting.set"], c="mpp", lane=L["sett"], ev="settings_inspect/settings_propose tools, the ask answer hook and write invalidation (settings/proposal.rs, fallback.rs); Private.live check waits for bot private turns")
+R(A, "Settings stick across restarts", m=["setting.set"], pf="state", c="ppp", lane=L["sett"], ev="setting.set logs a SettingSet (no event when the value is unchanged, as the JS hub); survives a restart (test the_tours_skip_is_answered_logged_and_survives_a_restart)")
 
 # ---- Accounts, pairing, machines
 A = "Accounts, pairing, machines"
@@ -407,16 +407,16 @@ R(A, "Multi-hub phone list", hub="n/a", c="npp", lane=L["ios"], ev="client-side 
 
 # ---- Diagnostics, improvements, update, deploy
 A = "Diagnostics, deploy, update"
-R(A, "Diagnostics page and control (diagnostics.status/control)", m=["diagnostics.status", "diagnostics.control"], r=["/debug/diagnostics.json", "/debug/log"], c="mpm", lane=L["sett"], ev="no handler; no Diagnostics code in mobile/android (grep), iOS has two files")
-R(A, "Improvements (report a problem, context)", m=["improvements.context", "improvements.report"], c="mpp", lane=L["sett"], ev="no handler; ImprovementsView.swift/.kt")
+R(A, "Diagnostics page and control (diagnostics.status/control)", m=["diagnostics.status", "diagnostics.control"], r=["/debug/diagnostics.json", "/debug/log"], c="mpm", lane=L["sett"], ev="settings/diagnostics.rs: bounded local recorder, status/control/export; perf feeds and the exit record are not wired (pending reads 0)")
+R(A, "Improvements (report a problem, context)", m=["improvements.context", "improvements.report"], c="mpp", lane=L["sett"], ev="improvements.context / improvements.report (settings/improvements.rs); the thread itself is thread.create with a creationKey (commands lane)")
 R(A, "Perf endpoint, trace, log levels", r=["/debug/perf"], c="nnn", lane=L["soak"], ev="no /debug/perf in Rust; soak harness measures from outside")
 R(A, "Safe deploy and restart", m=["deploy.restart", "deploy.cancel", "deploy.status"], c="mpp", lane=L["mcp"], ev="no handler; deploy.bend not ported")
 R(A, "Named locks (Locks panel, release/cancel)", m=["lock.release", "lock.cancel"], r=["/lock/"], c="mpp", lane=L["mcp"], ev="no handler")
 R(A, "Work, wake, task watchers (Status rows)", m=["work.cancel", "wake.cancel", "task.cancel"], c="mpp", lane=L["mcp"], ev="no handler")
 R(A, "Device registration and push (APNs, FCM, hooks)", m=["device.register", "device.drop"], hub="missing", c="npp", lane=L["net"], ev="no push.bend port")
 R(A, "Notifications: desk look, desktop notify, islands", m=["desk.look"], c="mpp", lane=L["net"], ev="no handler; iOS Island.swift, Notifier.swift; GPUI none")
-R(A, "Webhook alerts (push.webhook.url)", hub="missing", c="nnn", lane=L["sett"], ev="wnote.bend not ported")
-R(A, "Update (self-update, managed installs)", m=["update.now", "update.check"], c="nnn", lane=L["sett"], ev="no updater")
+R(A, "Webhook alerts (push.webhook.url)", hub="missing", c="nnn", lane=L["sett"], ev="settings/webhook.rs: body, HMAC signature, mode 0/1/2, curl delivery to a local listener tested; the notification pipeline (net lane) must call webhook::deliver per alert")
+R(A, "Update (self-update, managed installs)", m=["update.now", "update.check"], c="nnn", lane=L["sett"], ev="a packaged hub never replaces itself: update.check answers an empty version, app.update clears update.wait and tells clients (JS managed-install behavior); no updater by design")
 
 # ---- Terminal, browser, voice, secrets
 A = "Terminal, browser, voice, secrets"
