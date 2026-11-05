@@ -30,6 +30,10 @@ struct Ev<'a> {
     #[serde(rename = "$", borrow)] t: Cow<'a, str>,
     #[serde(borrow)] thread: Option<Cow<'a, str>>, #[serde(borrow)] msg: Option<Cow<'a, str>>, #[serde(borrow)] act: Option<Cow<'a, str>>,
     #[serde(borrow)] id: Option<Cow<'a, str>>, at: Option<u64>,
+    #[serde(borrow)] title: Option<Cow<'a, str>>, #[serde(borrow)] project: Option<Cow<'a, str>>, #[serde(borrow)] root: Option<Cow<'a, str>>,
+    #[serde(borrow)] env: Option<Cow<'a, str>>, #[serde(borrow)] branch: Option<Cow<'a, str>>, #[serde(borrow)] worktree: Option<Cow<'a, str>>,
+    #[serde(borrow)] provider: Option<Cow<'a, str>>, #[serde(borrow)] model: Option<Cow<'a, str>>, #[serde(borrow)] session: Option<Cow<'a, str>>,
+    #[serde(borrow)] state: Option<Cow<'a, str>>, count: Option<u64>, archived: Option<bool>,
 }
 
 /// core/model.bend Link.from: "t:<thread>:<rest>" names the thread a message came from.
@@ -37,8 +41,12 @@ pub fn link_from(id: &str) -> &str {
     match id.strip_prefix("t:") { Some(r) if r.contains(':') => r.split(':').next().unwrap_or(""), _ => "" }
 }
 
-#[derive(Default)]
-pub struct ThreadMeta { pub project: String, pub title: String }
+/// What the hub needs to know of a thread without reading its entries (agents: where to run; views: its state).
+#[derive(Default, Clone, Debug)]
+pub struct ThreadMeta { pub project: String, pub title: String, pub env: String, pub branch: String, pub worktree: String, pub provider: String, pub model: String,
+    pub session: String, pub turn: String, pub pending: u64, pub created: u64, pub activity: u64, pub archived: bool, pub deleted: bool }
+#[derive(Default, Clone, Debug)]
+pub struct ProjectMeta { pub title: String, pub root: String, pub removed: bool }
 
 #[derive(Default)]
 pub struct Model {
@@ -47,7 +55,7 @@ pub struct Model {
     own: HashMap<String, Vec<Ent>>,         // thread -> its entries (seq ascending)
     sent: HashMap<String, Vec<Ent>>,        // thread -> messages it sent into other threads
     pub threads: HashMap<String, ThreadMeta>,
-    pub projects: HashMap<String, String>,
+    pub projects: HashMap<String, ProjectMeta>,
 }
 
 fn before_seq(v: &[Ent], s: u64) -> usize { v.partition_point(|e| (e.seq as u64) < s) }
@@ -68,10 +76,21 @@ impl Model {
             "MessagePosted" => (t(&e.thread), t(&e.msg)),
             "ActivityLogged" => (t(&e.thread), t(&e.act)),
             "Reminded" => (t(&e.thread), format!("remind:{}:{}", t(&e.id), e.at.unwrap_or(0))),
-            "ProjectCreated" => { self.projects.insert(t(&e.id), String::new()); return }
-            "ThreadCreated" => { self.threads.entry(t(&e.id)).or_default(); return }
+            "ProjectCreated" => { self.projects.insert(t(&e.id), ProjectMeta { title: t(&e.title), root: t(&e.root), removed: false }); return }
+            "ProjectRemoved" => { if let Some(p) = self.projects.get_mut(&t(&e.id)) { p.removed = true } return }
+            "ThreadCreated" => { self.threads.insert(t(&e.id), ThreadMeta { project: t(&e.project), title: t(&e.title), env: t(&e.env), branch: t(&e.branch), worktree: t(&e.worktree),
+                provider: t(&e.provider), model: t(&e.model), turn: "idle".into(), created: e.at.unwrap_or(0), activity: e.at.unwrap_or(0), ..Default::default() }); return }
+            "ThreadRenamed" => { if let Some(th) = self.threads.get_mut(&t(&e.id)) { th.title = t(&e.title) } return }
+            "TurnChanged" => { if let Some(th) = self.threads.get_mut(&t(&e.thread)) { th.turn = t(&e.state); th.activity = e.at.unwrap_or(th.activity) } return }
+            "PendingChanged" => { if let Some(th) = self.threads.get_mut(&t(&e.thread)) { th.pending = e.count.unwrap_or(0) } return }
+            "SessionSet" => { if let Some(th) = self.threads.get_mut(&t(&e.id)) { th.session = t(&e.session) } return }
+            "WorktreeSet" => { if let Some(th) = self.threads.get_mut(&t(&e.id)) { th.branch = t(&e.branch); th.worktree = t(&e.worktree) } return }
+            "ProviderSet" => { if let Some(th) = self.threads.get_mut(&t(&e.id)) { th.provider = t(&e.provider); th.model = t(&e.model) } return }
+            "ThreadArchived" => { if let Some(th) = self.threads.get_mut(&t(&e.id)) { th.archived = e.archived.unwrap_or(true) } return }
+            "ThreadDeleted" => { if let Some(th) = self.threads.get_mut(&t(&e.id)) { th.deleted = true } return }
             _ => return,
         };
+        if let Some(th) = self.threads.get_mut(&thread) { th.activity = e.at.unwrap_or(th.activity) }
         self.next_ord += 1;
         let ent = Ent { seq, ord: self.next_ord };
         self.all.push(seq);

@@ -163,7 +163,7 @@ port waits for the person's decision.
 
 <!-- law-map: generated below by scripts/gpui/law-map.py -->
 
-Laws in LAWS.bend: 3248. bend 1260, rust 28, unported 1349, client 483, window 128, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: none yet. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
+Laws in LAWS.bend: 3248. bend 1260, rust 29, unported 1348, client 483, window 128, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: none yet. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
 
 | law | status | seed | file | note |
 |---|---|---|---|---|
@@ -1212,7 +1212,7 @@ Laws in LAWS.bend: 3248. bend 1260, rust 28, unported 1349, client 483, window 1
 | `credit_drained_counts` | unported | seed R +-10% | `src/core/outbox.bend` |  |
 | `credit_drained_never_back` | unported | seed R +-10% | `src/core/outbox.bend` |  |
 | `boot_room_after_drain` | unported | seed R +-10% | `src/core/outbox.bend` |  |
-| `outbox_fifo` | unported | seed R +-10% | `src/core/outbox.bend` |  |
+| `outbox_fifo` | rust `outbox_fifo` | map | `src/core/outbox.bend` |  |
 | `join_window_same` | unported | seed R +-10% | `src/core/outbox.bend` |  |
 | `join_chunks_cover` | unported | seed R +-10% | `src/core/outbox.bend` |  |
 | `join_chunks_flat` | unported | seed R +-10% | `src/core/outbox.bend` |  |

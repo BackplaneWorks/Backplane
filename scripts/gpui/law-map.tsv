@@ -32,3 +32,4 @@ law fm_files_safe_down rust fm_safe_rules
 law fm_parent_top rust fm_parent_join
 law fm_parent_down rust fm_parent_join
 law fm_join_root rust fm_parent_join
+law outbox_fifo rust outbox_fifo
