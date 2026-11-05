@@ -4,9 +4,14 @@
 use super::{conv_event, header_event, store, Body, Conv, Hdr, Origin};
 use crate::bots::{rpc::Bots, world::World};
 use serde_json::{json, Value};
+use std::path::PathBuf;
 
 /// What happens after a mail is filed (Hub.mail.routed → B.Mail.route): triage runs and private threads. Slice 3.
-pub trait Router: Send + Sync { fn routed(&self, body: &Body); }
+pub trait Router: Send + Sync {
+    fn routed(&self, body: &Body);
+    /// the journal refused the body (B.Mail.failure: for mail to the uberbot, triage is told the delivery failed)
+    fn failed(&self, body: &Body, why: store::StoreError);
+}
 
 /// ML.Mail.encode / ML.Conv.encode as JSON values (Body.mail.encode, Body.conv.encode)
 pub fn mail_json(m: &Hdr) -> Value { json!({"id":m.id,"conv":m.conv,"from":m.from,"to":m.to,"kind":m.kind,"ref":m.r#ref,"want":m.want,"head":m.head,"size":m.size,"at":m.at}) }
@@ -34,19 +39,6 @@ impl World {
     pub fn mail_addr(&self, thread: &str) -> String { match self.bots.values().find(|b| !b.deleted && b.thread == thread) { Some(b) => format!("bot:{}", b.id), None => format!("thread:{thread}") } }
     /// Mail.sender: a post's sender as an address ("" is the person)
     pub fn mail_sender(&self, from: &str) -> String { if from.is_empty() { "person".into() } else { self.mail_addr(from) } }
-}
-
-/// Funnel (Mail.funnel): whether a message to `to` from this origin is delivered to the agent, filed as mail, or both
-#[derive(Debug, PartialEq, Clone, Copy)]
-pub enum Funnel { Deliver, File, Both }
-/// `owned`: the uberbot's address and not from the person (always filed, never delivered); `mail_on`: the mailroom is on
-pub fn funnel(w: &World, to: &str, o: &Origin) -> Funnel {
-    let mail_on = w.setting("mail.on", "off") == "on"; let person = o.kind == "person";
-    let ub = w.uber_bot();
-    if !ub.is_empty() && to == format!("bot:{ub}") && !person { return Funnel::File }
-    if mail_on && to.starts_with("bot:") && !person { return Funnel::File }
-    if mail_on && !person { return Funnel::Both }
-    Funnel::Deliver
 }
 
 impl Bots {
@@ -81,7 +73,10 @@ impl Bots {
     pub async fn file_body(&self, w: &World, body: Body) -> Result<bool, String> {
         if w.mail.has(&body.mail.id) { return Ok(false) }
         let home = self.hub.cfg.home.clone(); let b2 = body.clone();
-        tokio::task::spawn_blocking(move || store::append(&home, &b2)).await.map_err(|e| e.to_string())??;
+        if let Err(e) = tokio::task::spawn_blocking(move || store::append(&home, &b2)).await.map_err(|e| e.to_string())? {
+            // MailJob.failed: counted and logged (the kind only); the changes that led here stay committed, as in Bend; mail to the uberbot's triage is told by the router
+            eprintln!("mail: append failed: {e}"); if let Some(r) = self.router.get() { r.failed(&body, e) } return Err(e.to_string())
+        }
         let mut ev: Vec<Value> = vec![];
         if w.mail.conv(&body.conv.id).id.is_empty() { ev.push(conv_event(&body.conv)) }
         ev.push(header_event(&body.mail));
@@ -111,15 +106,16 @@ impl Bots {
     /// ConvSet (if the conversation is unknown) and MailPosted now. Re-seeding the owner's tickets for recovered mail is triage's (slice 3).
     pub async fn mail_recover(&self) -> usize {
         let w = self.world().await; let dir = self.hub.cfg.home.join("mail");
-        let bodies = tokio::task::spawn_blocking(move || {
-            let mut names: Vec<_> = std::fs::read_dir(&dir).map(|d| d.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.extension().map_or(false, |x| x == "jsonl")).collect()).unwrap_or_default(); names.sort();
-            names.iter().flat_map(|p| store::read(p)).collect::<Vec<Body>>()
-        }).await.unwrap_or_default();
+        let mut names: Vec<PathBuf> = tokio::task::spawn_blocking(move || std::fs::read_dir(&dir).map(|d| d.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.extension().map_or(false, |x| x == "jsonl")).collect()).unwrap_or_default()).await.unwrap_or_default();
+        names.sort();
         let (mut ev, mut seen, mut convs): (Vec<Value>, std::collections::HashSet<String>, std::collections::HashSet<String>) = (vec![], Default::default(), Default::default());
-        for b in &bodies {
-            if w.mail.has(&b.mail.id) || !seen.insert(b.mail.id.clone()) { continue }
-            if w.mail.conv(&b.conv.id).id.is_empty() && convs.insert(b.conv.id.clone()) { ev.push(conv_event(&b.conv)) }
-            ev.push(header_event(&b.mail));
+        for p in names { // one journal at a time, one line at a time: no body text survives, only the headers the box lacks
+            let hs = tokio::task::spawn_blocking(move || store::headers(&p)).await.unwrap_or_default();
+            for (c, m) in hs {
+                if w.mail.has(&m.id) || !seen.insert(m.id.clone()) { continue }
+                if w.mail.conv(&c.id).id.is_empty() && convs.insert(c.id.clone()) { ev.push(conv_event(&c)) }
+                ev.push(header_event(&m));
+            }
         }
         let n = ev.iter().filter(|e| e["$"] == "MailPosted").count();
         if n > 0 && self.hub.commit_many(&ev).await.is_err() { return 0 }
