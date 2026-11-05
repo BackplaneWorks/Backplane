@@ -289,3 +289,145 @@ fn running_log(work: &Path, extra: &str) -> String { base_log(work, 1, &format!(
     assert_eq!(ag.actors(), 20); ag.shutdown();
     tokio::time::sleep(Duration::from_millis(500)).await; assert_eq!(Store::open(&hub.cfg.home.join("events.jsonl")).unwrap().bad, 0);
 }
+
+// ---- the MCP server, prompt and inputs ----
+const MCP_INIT: &str = include_str!("../../../../test/gpui/agents/fixtures/mcp-initialize.json");
+const MCP_PING: &str = include_str!("../../../../test/gpui/agents/fixtures/mcp-ping.json");
+const MCP_BADTOOL: &str = include_str!("../../../../test/gpui/agents/fixtures/mcp-badtool.json");
+const MCP_THREADLIST: &str = include_str!("../../../../test/gpui/agents/fixtures/mcp-threadlist.json");
+
+async fn post(port: u16, path: &str, body: &str) -> (u16, String) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut s = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    s.write_all(format!("POST {path} HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+    let mut out = String::new(); s.read_to_string(&mut out).await.unwrap();
+    let status = out.split(' ').nth(1).unwrap_or("0").parse().unwrap_or(0); (status, out.split("\r\n\r\n").nth(1).unwrap_or("").to_string())
+}
+fn path_of(url: &str) -> String { format!("/{}", url.splitn(4, '/').nth(3).unwrap()) }
+async fn rpc_mcp(ag: &Arc<Agents>, thread: &str, gen: &str, method: &str, params: Value) -> (u16, Value) {
+    let m = ag.mcp.get().unwrap(); let (st, b) = post(m.port, &path_of(&m.url(thread, gen)), &json!({"jsonrpc":"2.0","id":1,"method":method,"params":params}).to_string()).await;
+    (st, if b.is_empty() { Value::Null } else { serde_json::from_str(&b).unwrap() })
+}
+fn tool_text(r: &Value) -> Value { serde_json::from_str(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap() }
+
+#[tokio::test(flavor = "multi_thread")] async fn the_mcp_server_answers_as_the_js_hub_does() {
+    let sd = dir("m-bin"); perf_standin(&sd, 1);
+    let (_hub, ag, _h, _w) = start("m", |w| base_log(w, 2, ""), |_| Cli::standin(&sd)).await;
+    let js = |s: &str| -> Value { serde_json::from_str(s).unwrap() };
+    assert_eq!(rpc_mcp(&ag, T1, "", "initialize", json!({"protocolVersion":"2025-06-18"})).await, (200, js(MCP_INIT)));
+    assert_eq!(rpc_mcp(&ag, T1, "", "ping", json!({})).await, (200, js(MCP_PING)));
+    assert_eq!(rpc_mcp(&ag, T1, "", "tools/call", json!({"name":"no_such_tool","arguments":{}})).await, (200, js(MCP_BADTOOL)));
+    assert_eq!(rpc_mcp(&ag, T1, "", "nope", json!({})).await, (202, Value::Null)); // unknown methods and notifications: no reply
+    assert_eq!(rpc_mcp(&ag, T1, "", "notifications/initialized", json!({})).await.0, 202);
+    let (_, l) = rpc_mcp(&ag, T1, "", "tools/list", json!({})).await; let all: Value = serde_json::from_str(mcp::TOOLS_JSON).unwrap();
+    let want: Vec<&Value> = all["result"]["tools"].as_array().unwrap().iter().filter(|t| mcp::IMPLEMENTED.contains(&t["name"].as_str().unwrap())).collect();
+    assert_eq!(l["result"]["tools"].as_array().unwrap().iter().collect::<Vec<_>>(), want, "the definitions are the JS hub's");
+    // thread_list: the JS hub's fields in its order
+    let (_, tl) = rpc_mcp(&ag, T1, "", "tools/call", json!({"name":"thread_list","arguments":{}})).await; let mine = tool_text(&tl); let theirs = tool_text(&js(MCP_THREADLIST));
+    let keys = |v: &Value| v["threads"][0].as_object().unwrap().keys().cloned().collect::<Vec<_>>(); assert_eq!(keys(&mine), keys(&theirs)); assert_eq!(mine["threads"].as_array().unwrap().len(), 2);
+    assert_eq!(mine["threads"][0]["phase"], "idle");
+}
+#[tokio::test(flavor = "multi_thread")] async fn the_mcp_server_refuses_what_has_no_key_and_what_is_not_a_post() {
+    let sd = dir("m2-bin"); perf_standin(&sd, 1);
+    let (_hub, ag, _h, _w) = start("m2", |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await; let m = ag.mcp.get().unwrap(); let body = r#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#;
+    assert_eq!(post(m.port, &format!("/mcp/{T1}"), body).await.0, 401);                       // no key
+    assert_eq!(post(m.port, &format!("/mcp/{T1}?k={}", "0".repeat(64)), body).await.0, 401);   // a wrong one
+    let other = path_of(&m.url("t1700001001-1", "")); assert_eq!(post(m.port, &other.replace("t1700001001-1", T1), body).await.0, 401); // another thread's key
+    assert_eq!(post(m.port, &path_of(&m.url(T1, "")), "{not json").await.1, json!({"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"parse error"}}).to_string());
+}
+#[tokio::test(flavor = "multi_thread")] async fn a_stale_process_may_read_but_not_change() {
+    let sd = dir("m3-bin"); perf_standin(&sd, 1);
+    let (hub, ag, _h, _w) = start("m3", |w| base_log(w, 2, ""), |_| Cli::standin(&sd)).await; ag.set_gen(T1, "g2"); let n = len(&hub).await;
+    let (_, r) = rpc_mcp(&ag, T1, "g1", "tools/call", json!({"name":"thread_list","arguments":{}})).await; assert_eq!(r["result"]["isError"], false);
+    let (_, r) = rpc_mcp(&ag, T1, "g1", "tools/call", json!({"name":"thread_send","arguments":{"threadId":"t1700001001-1","text":"x"}})).await;
+    assert_eq!(r["result"]["isError"], true); assert!(tool_text(&r)["error"].as_str().unwrap().starts_with("stale process")); assert_eq!(len(&hub).await, n);
+}
+#[tokio::test(flavor = "multi_thread")] async fn thread_tools_read_send_wait_update_and_interrupt() {
+    let sd = dir("m4-bin"); perf_standin(&sd, 1);
+    let (hub, ag, _h, _w) = start("m4", |w| base_log(w, 2, ""), |_| Cli::standin(&sd)).await; let other = "t1700001001-1";
+    let call = |name: &'static str, a: Value| { let ag = ag.clone(); async move { let (_, r) = rpc_mcp(&ag, T1, "", "tools/call", json!({"name":name,"arguments":a})).await; (r["result"]["isError"] == false, tool_text(&r)) } };
+    assert_eq!(call("thread_send", json!({"threadId":other,"text":"  "})).await, (false, json!({"error":"thread_send needs a non-empty `text` (the message); nothing was sent"})));
+    assert_eq!(call("thread_send", json!({"threadId":"nope","text":"hi"})).await, (false, json!({"error":"that thread is not in this project"})));
+    assert_eq!(call("thread_send", json!({"threadId":other,"message":"zqshort hello"})).await, (true, json!({"threadId":other,"state":"sent"})));
+    let r = call("thread_wait", json!({"threadId":other,"timeoutMs":20000})).await.1; assert_eq!(r["done"], true);
+    let ev = log_from(&hub, 0).await; let m = ev.iter().find(|e| is(e, "MessagePosted") && e["thread"] == other && e["role"] == "user").unwrap(); assert_eq!(m["msg"].as_str().unwrap().split(':').take(2).collect::<Vec<_>>(), ["t", T1]);
+    assert!(ev.iter().any(|e| is(e, "MessageFrom") && e["thread"] == other && e["from"] == format!("thread:{T1}") && e["kind"] == "thread"));
+    let read = call("thread_read", json!({"threadId":other,"limit":3})).await.1; assert_eq!(read["entries"].as_array().unwrap().len(), 3); assert_eq!(read["status"]["id"], other);
+    assert!(read["entries"].as_array().unwrap().iter().all(|e| e["kind"] == "message" || e["kind"] == "activity"));
+    assert_eq!(call("thread_update", json!({"threadId":other,"title":"Renamed"})).await, (true, json!({"threadId":other,"title":"Renamed"})));
+    assert_eq!(call("thread_interrupt", json!({"threadId":other})).await, (true, json!({"threadId":other,"state":"not running"})));
+    ag.shutdown();
+}
+#[tokio::test(flavor = "multi_thread")] async fn an_approval_waits_for_the_person_and_a_session_allowance_answers_the_next() {
+    let sd = dir("p-bin"); perf_standin(&sd, 1);
+    let (hub, ag, _h, _w) = start("p", |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await; let from = len(&hub).await;
+    let m = ag.mcp.get().unwrap().clone(); let path = path_of(&m.url(T1, ""));
+    let body = |tool: &str, input: Value| json!({"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"permission_prompt","arguments":{"tool_name":tool,"input":input}}}).to_string();
+    let first = { let (p, b) = (path.clone(), body("Bash", json!({"command":"rm -rf build"}))); tokio::spawn(async move { post(m.port, &p, &b).await }) };
+    let ev = until(&hub, from, 5, |ev| ev.iter().any(|e| is(e, "AskOpened"))).await; let ask = ev.iter().find(|e| is(e, "AskOpened")).unwrap().clone();
+    assert_eq!((ask["kind"].as_str().unwrap(), ask["tool"].as_str().unwrap(), ask["detail"].as_str().unwrap()), ("approval", "Bash", "rm -rf build")); assert!(!first.is_finished(), "the reply waits");
+    let id = ask["id"].as_str().unwrap();
+    assert_eq!(rpc(&hub, "ask.answer", json!({"id":id,"answer":"session"})).await["ok"], true);
+    let (st, b) = first.await.unwrap(); assert_eq!(st, 200); let v: Value = serde_json::from_str(&b).unwrap(); assert_eq!(v["id"], 7);
+    assert_eq!(serde_json::from_str::<Value>(v["result"]["content"][0]["text"].as_str().unwrap()).unwrap(), json!({"behavior":"allow","updatedInput":{"command":"rm -rf build"}}));
+    let ev = log_from(&hub, from).await; assert!(ev.iter().any(|e| is(e, "AskClosed") && e["id"] == id && e["answer"] == "session"));
+    assert!(ev.iter().any(|e| is(e, "ActivityLogged") && e["kind"] == "answer" && e["summary"] == "Allowed for this session: Bash rm -rf build"));
+    // ask_closes_once: answering again changes nothing
+    let n = len(&hub).await; assert_eq!(rpc(&hub, "ask.answer", json!({"id":id,"answer":"decline"})).await["ok"], true); assert_eq!(len(&hub).await, n);
+    // the same tool in the same thread is allowed at once now
+    let (_, b2) = post(ag.mcp.get().unwrap().port, &path, &body("Bash", json!({"command":"ls"}))).await; assert!(b2.contains("allow")); assert_eq!(log_from(&hub, n).await.iter().filter(|e| is(e, "AskOpened")).count(), 0);
+    ag.shutdown();
+}
+#[tokio::test(flavor = "multi_thread")] async fn a_question_is_answered_into_the_agents_input_and_a_plan_is_held_for_the_person() {
+    let sd = dir("q-bin2"); perf_standin(&sd, 1);
+    let (hub, ag, _h, _w) = start("q2", |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await; let from = len(&hub).await;
+    let m = ag.mcp.get().unwrap().clone(); let path = path_of(&m.url(T1, ""));
+    let q = json!({"questions":[{"question":"Which port?","options":[{"label":"USB-C","description":"reversible"},{"label":"Micro"}]}]});
+    let body = json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"permission_prompt","arguments":{"tool_name":"AskUserQuestion","input":q}}}).to_string();
+    let h = { let p = path.clone(); tokio::spawn(async move { post(m.port, &p, &body).await }) };
+    let ev = until(&hub, from, 5, |ev| ev.iter().any(|e| is(e, "AskOpened"))).await; let ask = ev.iter().find(|e| is(e, "AskOpened")).unwrap();
+    assert_eq!((ask["kind"].as_str().unwrap(), ask["detail"].as_str().unwrap(), ask["options"].as_str().unwrap()), ("input", "Which port?\nUSB-C: reversible", "USB-C\nMicro"));
+    rpc(&hub, "ask.answer", json!({"id":ask["id"],"answer":"USB-C"})).await;
+    let v: Value = serde_json::from_str(&h.await.unwrap().1).unwrap(); assert_eq!(serde_json::from_str::<Value>(v["result"]["content"][0]["text"].as_str().unwrap()).unwrap()["updatedInput"]["answers"]["Which port?"], "USB-C");
+    assert!(log_from(&hub, from).await.iter().any(|e| is(e, "ActivityLogged") && e["summary"] == "Which port? → USB-C"));
+    // ExitPlanMode: denied at once with the note, the plan is an ask the person answers
+    let plan = json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"permission_prompt","arguments":{"tool_name":"ExitPlanMode","input":{"plan":"1. do it"}}}}).to_string();
+    let (_, b) = post(ag.mcp.get().unwrap().port, &path, &plan).await; assert!(b.contains("Stop here and wait for the user"));
+    assert!(log_from(&hub, from).await.iter().any(|e| is(e, "AskOpened") && e["kind"] == "plan" && e["detail"] == "1. do it"));
+    ag.shutdown();
+}
+#[tokio::test(flavor = "multi_thread")] async fn a_restart_closes_open_asks_and_says_which_went_unanswered() {
+    let sd = dir("ra-bin"); perf_standin(&sd, 1);
+    let ask = format!("{{\"$\":\"AskOpened\",\"id\":\"q1\",\"thread\":\"{T1}\",\"kind\":\"approval\",\"tool\":\"Bash\",\"detail\":\"make all\",\"options\":\"\",\"at\":1700000101}}\n");
+    let (hub, ag, _h, _w) = start("ra", |w| running_log(w, &ask).replace("TurnChanged", "TurnChangedX"), |_| Cli::standin(&sd)).await; // (the turn is not running: only the ask)
+    let ev = log_from(&hub, 0).await; assert!(ev.iter().any(|e| is(e, "AskClosed") && e["id"] == "q1" && e["answer"] == ""));
+    let note = ev.iter().find(|e| is(e, "ActivityLogged") && e["kind"] == "restart").unwrap(); assert!(note["summary"].as_str().unwrap().ends_with("Its request to use Bash was not answered: \u{201C}make all\u{201D}"));
+    ag.shutdown();
+}
+#[tokio::test(flavor = "multi_thread")] async fn the_agent_is_started_with_the_arguments_and_prompt_the_js_hub_gives_it() {
+    use std::os::unix::fs::PermissionsExt;
+    let sd = dir("a-bin"); let argfile = sd.join("argv.json");
+    // a stand-in that writes its own argv as JSON, then behaves as a Claude that answers once
+    std::fs::write(sd.join("claude"), format!("#!/bin/sh\nprintf '%s\\0' \"$@\" > {a}.tmp\nmv {a}.tmp {a}\nread l\nsleep 600\n", a = argfile.display())).unwrap();
+    std::fs::set_permissions(sd.join("claude"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    let (hub, ag, home, work) = {
+        let home = dir("a-home"); let work = dir("a-work"); std::fs::write(home.join("events.jsonl"), base_log(&work, 1, "")).unwrap();
+        let hub = Hub::start(Cfg { home: home.clone(), version: "0.14.0".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        let host = host::HostInfo { home: home.clone(), fc: "/home/h/.local/bin/freecadcmd".into(), render: "/home/h/Documents/i2cjak/backplane-gpui/build/gpui/backplane-serve".into(), kicad: prompt::Kicad { status: "stock".into(), cli: "/home/h/.local/bin/kicad-cli".into(), version: "10.0.7".into(), ..Default::default() },
+            models: json!({"claude":["fable","opus","sonnet","haiku"],"codex":["gpt-6.1-sol","gpt-6-astra","gpt-6.1-terra","gpt-6-sol","gpt-6-luna","gpt-5.6-sol","gpt-5.6-terra","gpt-5.6-luna"]}), ..Default::default() };
+        let ag = Agents::start_host(hub.clone(), Cli::standin(&sd), host).await.unwrap(); (hub, ag, home, work)
+    };
+    rpc(&hub, "turn.start", json!({"thread":T1,"text":"hello"})).await;
+    for _ in 0..100 { if argfile.exists() { break } tokio::time::sleep(Duration::from_millis(50)).await }
+    let got: Vec<String> = { let raw = std::fs::read_to_string(&argfile).unwrap(); let mut v: Vec<String> = raw.split('\0').map(str::to_string).collect(); v.pop(); v };
+    let want: Vec<String> = serde_json::from_str(include_str!("../../../../test/gpui/agents/fixtures/argv-default.json")).unwrap();
+    assert_eq!(got.len(), want.len());
+    let norm = |v: &[String]| v.iter().map(|x| { let x = x.replace(&home.join("attachments").to_string_lossy().to_string(), "<home>/attachments").replace("/home/h/Documents/i2cjak/backplane-gpui/build/gpui/results/agents/argv/work/home/attachments", "<home>/attachments");
+        let x = x.replace(&work.to_string_lossy().to_string(), "<root>").replace("/home/h/Documents/i2cjak/backplane-gpui/build/gpui/results/agents/argv/work/fixroot", "<root>");
+        if x.contains("/mcp/") { let (a, b) = x.split_once("/mcp/").unwrap(); let _ = a; format!("mcp:{}", b.split('?').next().unwrap().split('.').next().unwrap()) } else { x } }).collect::<Vec<_>>();
+    // arguments, prompt and the MCP config (its port, generation and key differ by run)
+    let (g, w) = (norm(&got), norm(&want));
+    for (i, (a, b)) in g.iter().zip(w.iter()).enumerate() { if a.starts_with('{') && a.contains("mcpServers") { assert!(a.contains("\"pcbparts\":{\"type\":\"http\",\"url\":\"https://pcbparts.dev/mcp\"}") && b.contains("pcbparts")); continue }
+        assert_eq!(prompt::tests::strip_orch(a), prompt::tests::strip_orch(b), "argument {i}") }
+    assert!(got.last().unwrap().starts_with("{\"mcpServers\":{\"backplane\":{\"type\":\"http\",\"url\":\"http://127.0.0.1:")); ag.shutdown();
+}
