@@ -815,6 +815,38 @@ function warmPicture(target) {
     }
   });
 }
+// A retained picture of another destination is drawn with the sidebar on
+// screen (the hub's last view's): the picture's own was drawn when it was
+// fetched, with the sidebar's default shelves and trees, so projects and
+// rows jumped at the click and back when the hub's view came. The row
+// picked is marked (style.css's data-picked) until that view lands.
+let liveNode = null;
+const sidebarOf = n => nodeIn(n, v => v.tag === "aside" && v.key === "sidebar");
+const liveSided = new WeakMap();
+function withLiveSidebar(picture) {
+  if (!liveNode || transitionFor === shownFor) return picture;
+  // (only while the row picked is on screen in it: else the picture's own
+  // sidebar, which shows that row, is the one the hub's view will bring)
+  if (!transitionFor.startsWith("thread:") || !document.querySelector(`aside.sidebar .thread[data-value="${CSS.escape(transitionFor.slice(7))}"]`)) return picture;
+  const kept = liveSided.get(picture);
+  if (kept?.live === liveNode) return kept.out;
+  const side = sidebarOf(liveNode), theirs = sidebarOf(picture);
+  let out = picture;
+  if (side && theirs && side !== theirs) {
+    const walk = n => {
+      if (n === theirs) return side;
+      if (!is(n, "El") || n.tag === "bp-memo") return n;
+      const ks = [...each(n.kids)], mapped = ks.map(walk);
+      if (mapped.every((k, i) => k === ks[i])) return n;
+      let kids = { $: "Nil" };
+      for (let i = mapped.length - 1; i >= 0; i--) kids = { $: "Con", head: mapped[i], tail: kids };
+      return { ...n, kids };
+    };
+    out = walk(picture);
+  }
+  liveSided.set(picture, { live: liveNode, out });
+  return out;
+}
 // Nothing is drawn in between two views: a thread picked, a reconnect, a
 // failure keep the hub's last view on screen until the next one comes.
 function holdPicture() {
@@ -1207,7 +1239,7 @@ function renderPage() {
   // press-feedback.js)
   if (frontendNode) pressFeedback.seen(frontendNode, targetKey(presentationTarget(currentSession())));
   let page = frontendNode ? App.presentation_overlay(historyGaps(pressFeedback.project(frontendNode)), presentationJson(feedbackSession()))
-    : transitionNode ? App.presentation_overlay(pressFeedback.project(transitionNode), presentationJson(currentSession())) : focusedNode
+    : transitionNode ? App.presentation_overlay(pressFeedback.project(withLiveSidebar(transitionNode)), presentationJson(currentSession())) : focusedNode
     || (canonicalBoot ? App.view(ui) : App.presentation_node(presentationJson(themed(Wire.plain(App.presentation_view(App.presentation_wait(ui)))))));
   // Saved transition/startup pictures contain the server's unprojected partial
   // footer. Clean it before their first paint, without borrowing live readers
@@ -1227,6 +1259,11 @@ function renderPage() {
   patch(root, { $: T.El, tag: "div", key: "", attrs: { $: "Nil" }, kids: { $: "Con", head: page, tail: { $: "Nil" } } });
   starAttentionSync(root);
   bubMoveSync();
+  // (a picture of another thread drawn with the live sidebar: its row marked)
+  if (transitionNode && !frontendNode && transitionFor !== shownFor && transitionFor.startsWith("thread:")) {
+    const row = document.querySelector(`aside.sidebar .thread[data-value="${CSS.escape(transitionFor.slice(7))}"]`);
+    if (row) pickRow(row);
+  }
   terminalOutput.apply(true);
   phoneOther.rendered();
   appShell.rendered();
@@ -2348,6 +2385,10 @@ let pressedPick = null, pressedMenu = null, pickedTimer = 0;
 function markPicked(el) {
   if (el.getAttribute("data-on-click") !== "select" || !el.classList.contains("thread")) return;
   if (transitionViews.destination(transitionScope(), { kind: "thread", id: el.getAttribute("data-value") })) return;
+  pickRow(el);
+}
+function pickRow(el) {
+  if (el.hasAttribute("data-picked") && pickedTimer) return;
   unmarkPicked();
   el.setAttribute("data-picked", "");htmlData("picking", "1");
   pickedTimer = setTimeout(unmarkPicked, 5000);
@@ -3862,6 +3903,7 @@ async function startThin(again = false, reason = "initial") {
         else if (!remoteReady && !detail.historyReset) transitionPosition = transitionViews.position(transitionScope(detail.target)) || {atEnd:true};
         // (a pressed row's own mark goes once a view of another target lands)
         if (typeof unmarkPicked === "function" && targetKey(detail.target) !== shownFor) unmarkPicked();
+        liveNode = node;
         focusedView.remote(detail.epoch);remoteEpoch = detail.epoch;frontendNode = node;transitionNode = null;transitionFor = "";heldAt = 0;
         shownFor = targetKey(detail.target);shownTarget = detail.target;transitionViews.put(transitionScope(detail.target), detail.shown);
         void transitionViews.warm(transitionScope(detail.target)).then(warmDestinations);
