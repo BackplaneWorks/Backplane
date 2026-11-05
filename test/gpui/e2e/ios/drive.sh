@@ -12,7 +12,7 @@ rsync -a --exclude node_modules --exclude out test/gpui/ h@backplane:bp-gpui-e2e
 rsync -a test/tools/claude_standin.ts test/tools/perf_standin.ts h@backplane:bp-gpui-e2e-fixture/repo/test/tools/
 rsync -a src/web/wire.js h@backplane:bp-gpui-e2e-fixture/repo/src/web/; rsync -a src/core/cbor.bend h@backplane:bp-gpui-e2e-fixture/repo/src/core/
 rsync -a $HUB h@backplane:bp-gpui-e2e-fixture/hub
-$SB "cd $V/repo/test/gpui/e2e && nohup systemd-run --user --scope -q -p MemoryMax=3700M -p MemorySwapMax=0 \$HOME/.bun/bin/bun serve-fixture.mjs --hub-bin $V/hub --root $V/root --host $HOSTIP --port $PORT > $V/fixture.log 2>&1 &
+$SB "cd $V/repo/test/gpui/e2e && nohup systemd-run --user --scope -q -p MemoryMax=3700M -p MemorySwapMax=0 \$HOME/.bun/bin/bun serve-fixture.mjs --hub-bin $V/hub --root $V/root --host $HOSTIP --port $PORT < /dev/null > $V/fixture.log 2>&1 &
 sleep 25; tail -3 $V/fixture.log | cut -c1-200"
 $SB "cat $V/root/home/token" > /tmp/e2e-token
 RSYNC_RSH=$M rsync -a /tmp/e2e-token hs-mac-mini:bp-gpui-ios/e2e-token
