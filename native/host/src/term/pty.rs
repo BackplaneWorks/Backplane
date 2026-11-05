@@ -63,8 +63,9 @@ impl Pty {
             let mut buf = vec![0u8; CHUNK];
             loop {
                 // wake every 200 ms to see whether the Pty was dropped: the thread (and its dup of the master) must not outlive it
+                if c2.load(std::sync::atomic::Ordering::SeqCst) { break } // every turn: a program that floods and ignores the hang-up must not keep us reading
                 let mut pfd = libc::pollfd { fd: rd.as_raw_fd(), events: libc::POLLIN, revents: 0 };
-                if unsafe { libc::poll(&mut pfd, 1, 200) } == 0 { if c2.load(std::sync::atomic::Ordering::SeqCst) { break } continue }
+                if unsafe { libc::poll(&mut pfd, 1, 200) } == 0 { continue }
                 match rd.read(&mut buf) { Ok(0) | Err(_) => break, Ok(n) => if otx.blocking_send(buf[..n].to_vec()).is_err() { break } } }
         })?;
         // writer: bounded queue of writes
