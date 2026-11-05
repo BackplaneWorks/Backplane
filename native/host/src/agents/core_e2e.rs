@@ -57,6 +57,6 @@ fn reports(ev: &[Value], to: &str) -> Vec<String> { ev.iter().filter(|e| is(e, "
 }
 #[test] fn a_hub_on_a_copy_wakes_nobody_and_the_writing_tools_are_refused() {
     let me = std::env::current_exe().unwrap();
-    let o = std::process::Command::new(me).args(["agents::tests::core_e2e::wake_copy_child_probe", "--exact", "--nocapture", "--test-threads=1"]).env("BACKPLANE_COPY", "1").env("BP_WAKE_COPY_PROBE", "1").env_remove("BACKPLANE_AGENTS").output().unwrap();
+    let o = crate::proc::std_cmd(crate::proc::Kind::Local, me).args(["agents::tests::core_e2e::wake_copy_child_probe", "--exact", "--nocapture", "--test-threads=1"]).env("BACKPLANE_COPY", "1").env("BP_WAKE_COPY_PROBE", "1").env_remove("BACKPLANE_AGENTS").output().unwrap();
     assert!(o.status.success(), "{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr)); assert!(String::from_utf8_lossy(&o.stdout).contains("wake_copy_child_probe ... ok"));
 }

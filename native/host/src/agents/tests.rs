@@ -322,7 +322,9 @@ fn tool_text(r: &Value) -> Value { serde_json::from_str(r["result"]["content"][0
     assert_eq!(rpc_mcp(&ag, T1, "", "notifications/initialized", json!({})).await.0, 202);
     let (_, l) = rpc_mcp(&ag, T1, "", "tools/list", json!({})).await; let all: Value = serde_json::from_str(mcp::TOOLS_JSON).unwrap();
     let want: Vec<&Value> = all["result"]["tools"].as_array().unwrap().iter().filter(|t| mcp::IMPLEMENTED.contains(&t["name"].as_str().unwrap())).collect();
-    assert_eq!(l["result"]["tools"].as_array().unwrap().iter().collect::<Vec<_>>(), want, "the definitions are the JS hub's");
+    let listed: Vec<&Value> = l["result"]["tools"].as_array().unwrap().iter().collect();
+    assert_eq!(listed.iter().copied().filter(|t| mcp::IMPLEMENTED.contains(&t["name"].as_str().unwrap())).collect::<Vec<_>>(), want, "the definitions are the JS hub's");
+    for n in ["wake_on", "wake_list", "wake_cancel"] { let d = listed.iter().find(|t| t["name"] == n).unwrap_or_else(|| panic!("{n} is listed")); assert_eq!(*d, all["result"]["tools"].as_array().unwrap().iter().find(|t| t["name"] == n).unwrap(), "{n}: the JS hub's definition") } // tool sets add to the list
     // thread_list: the JS hub's fields in its order
     let (_, tl) = rpc_mcp(&ag, T1, "", "tools/call", json!({"name":"thread_list","arguments":{}})).await; let mine = tool_text(&tl); let theirs = tool_text(&js(MCP_THREADLIST));
     let keys = |v: &Value| v["threads"][0].as_object().unwrap().keys().cloned().collect::<Vec<_>>(); assert_eq!(keys(&mine), keys(&theirs)); assert_eq!(mine["threads"].as_array().unwrap().len(), 2);
