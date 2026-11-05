@@ -33,7 +33,7 @@ use std::sync::{atomic::{AtomicUsize, Ordering}, Arc};
     }
 }
 fn child(copy: bool) -> std::process::Output {
-    let mut c = std::process::Command::new(std::env::current_exe().unwrap());
+    let mut c = crate::proc::std_cmd(crate::proc::Kind::Local, std::env::current_exe().unwrap());
     c.args(["net::copy_outs::alert_outs_probe", "--exact", "--nocapture", "--test-threads=1"]).env("BP_OUTS_PROBE", "1").env_remove("BACKPLANE_AGENTS");
     if copy { c.env("BACKPLANE_COPY", "1"); } else { c.env_remove("BACKPLANE_COPY"); }
     c.output().unwrap()
