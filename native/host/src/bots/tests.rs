@@ -926,7 +926,7 @@ async fn owner_pair(tag: &str) -> Pair {
     let (hb, bb, _r) = start(&format!("owner{tag}B"), "").await;
     let r = rpc(&hb, "bots.create", json!({"name":"bub","uber":true})).await; assert_eq!(r["ok"], true);
     until(&hb, |l| l.iter().any(|e| e["$"] == "UberSet") && l.iter().any(|e| e["$"] == "WorktreeSet")).await;
-    assert!(bb.uber_init(now_s()).await > 0);
+    assert!(bb.uber_init_now(now_s()).await > 0);
     let lb = log(&hb); let uid = lb.iter().find(|e| e["$"] == "UberSet").unwrap()["uid"].as_str().unwrap().to_string();
     let bme = hb.setting("machine.id").await.unwrap(); let ubb = lb.iter().find(|e| e["$"] == "UberSet").unwrap()["bot"].as_str().unwrap().to_string();
     let (ha, ba, _ra) = start(&format!("owner{tag}A"), "").await;
@@ -1090,4 +1090,36 @@ async fn owner_planned(p: &Pair) {
     let (ok, r) = bots.tool_call(&ta, "bot_create", &json!({"name":"kidg","provider":"grok"})).await; assert!(ok, "{r}");
     let tg = th(r["bot"].as_str().unwrap());
     assert_eq!(hub.setting(&format!("account.thread.{tg}.grok")).await, None); assert_eq!(hub.setting(&format!("account.thread.{tg}.claude")).await, None);
+}
+/// the unprompted work of the lane: a due routine, the uberbot's first ops and a journal body whose header never reached the log
+fn unprompted_probe() {
+    let copy = crate::copy::on();
+    assert_eq!(copy, std::env::var("BP_UNPROMPTED_EXPECT").ok().as_deref() == Some("quiet"), "the probe runs the mode it expects");
+    tokio::runtime::Builder::new_multi_thread().worker_threads(4).enable_all().build().unwrap().block_on(async {
+        let (hub, bots, _r) = start(if copy { "unprompted-copy" } else { "unprompted-live" }, "").await;
+        let ada = bot(&hub, "ada").await;
+        assert_eq!(rpc(&hub, "bots.routine", json!({"bot":ada,"name":"r","cron":"* * * * *","prompt":"p"})).await["ok"], true);
+        let r = rpc(&hub, "bots.create", json!({"name":"bub","uber":true})).await; assert_eq!(r["ok"], true);
+        until(&hub, |l| l.iter().any(|e| e["$"] == "UberSet") && l.iter().any(|e| e["$"] == "WorktreeSet" && e["id"] != "x")).await;
+        let home = hub.cfg.home.clone();
+        let conv = mail::Conv { id: "pair:orphan".into(), subject: "s".into(), kind: "pair".into(), parts: vec![], project: String::new(), tags: vec![], made: 1, last: 1, n: 0 };
+        let mail = mail::Hdr { id: "orph1".into(), conv: "pair:orphan".into(), from: "a".into(), to: "b".into(), kind: "bot".into(), r#ref: String::new(), want: "fyi".into(), head: "h".into(), size: 1, at: 1 };
+        assert_eq!(mail::store::append(&home, &mail::Body { conv, mail, text: "t".into() }), Ok(false));
+        let n0 = hub.store.len();
+        let (ticks, init, rec) = (bots.tick_at(now_s() + 300).await, bots.uber_init(now_s()).await, bots.mail_recover().await);
+        if copy { assert_eq!((ticks, init, rec, hub.store.len()), (0, 0, 0, n0), "a hub on a copy fires no routine, makes no first ops, recovers no header, and writes nothing"); }
+        else { assert!(ticks > 0 && init > 0 && rec > 0, "the same work runs on a live hub: {ticks} {init} {rec}"); assert!(hub.store.len() > n0) }
+    });
+}
+#[test] fn unprompted_work_runs_live_and_not_on_a_copy_hub() {
+    if std::env::var("BP_UNPROMPTED").ok().as_deref() == Some("1") { return unprompted_probe() }
+    let me = std::env::current_exe().unwrap();
+    for (copy, expect) in [(true, "quiet"), (false, "work")] {
+        let mut c = std::process::Command::new(&me);
+        c.args(["bots::tests::unprompted_work_runs_live_and_not_on_a_copy_hub", "--exact", "--nocapture", "--test-threads=1"]).env("BP_UNPROMPTED", "1").env("BP_UNPROMPTED_EXPECT", expect).env_remove("BACKPLANE_AGENTS");
+        if copy { c.env("BACKPLANE_COPY", "1"); } else { c.env_remove("BACKPLANE_COPY"); }
+        let o = c.output().unwrap();
+        assert!(o.status.success(), "{expect}: {}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
+        assert!(String::from_utf8_lossy(&o.stdout).contains("unprompted_work_runs_live_and_not_on_a_copy_hub ... ok"), "the probe ran ({expect})");
+    }
 }
