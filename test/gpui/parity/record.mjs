@@ -11,7 +11,7 @@ import {R,WORK} from './hubs.mjs';
 const arg=(k,d)=>{const i=process.argv.indexOf('--'+k);return i>0?process.argv[i+1]:d};
 const bin=arg('bin',R+'/build/gpui/backplane-serve'),out=arg('out',R+'/build/gpui/parity/rec'),port=Number(arg('port',3820)),tag=arg('tag','A');
 const only=(arg('only','')||'').split(',').filter(Boolean);
-const ALL=['join','badauth','session:mobile','session:gpui','session:gpuid','reconnect','unresolved','settings','private','commands'];
+const ALL=['join','badauth','session:mobile','session:gpui','session:gpuid','reconnect','unresolved','settings','private','commands','bots','rooms','projecthome','settingspages'];
 mkdirSync(out,{recursive:true});
 export async function runOne(name,{bin,port,work}){
   const h=await startFixtureHub({bin,port,work,deleted:name==='unresolved',privateLines:name==='private'});
@@ -19,6 +19,8 @@ export async function runOne(name,{bin,port,work}){
   await (arg1?SCENARIOS[s].bind(null,arg1):SCENARIOS[s])({hub:h,rec});
   const sessions=await h.finish();
   const bad=rec.frames.filter(f=>f.kind==='check'&&f.json.deltaRebuildEqualsWhole===false);
+  const refused=rec.frames.filter(f=>f.kind==='check'&&f.json.viewRefused);
+  if(refused.length)throw Error('a scenario view was refused, so it compared nothing: '+JSON.stringify(refused[0].json));
   const leaks=rec.frames.filter(f=>f.kind==='check'&&f.json.privateLeaks?.length);
   if(leaks.length)throw Error('private lines reached a client: '+JSON.stringify(leaks[0].json.privateLeaks.slice(0,5)));
   if(bad.length)throw Error('keyed delta: the body rebuilt from ops differs from the whole view');
