@@ -2561,6 +2561,32 @@ final class AppModel {
                         if kv[0] == "@type" { draft(kv.count > 1 ? kv[1] : ""); continue }
                         // "@send": the composer's send button
                         if kv[0] == "@send" { send(); continue }
+                        // composer text-view drivers: "@ime=<text>" sets marked text as an IME does, "@imecommit=<text>" commits it,
+                        // "@undo"/"@redo", "@insert=<text>" (a paste of text), "@sel=<loc>,<len>", "@pasteimg" (the paste path with a picture),
+                        // "@cstate" logs the view's text, marked range and the model's draft
+                        if kv[0].hasPrefix("@ime") || ["@undo", "@redo", "@insert", "@sel", "@cstate", "@pasteimg", "@hwreturn"].contains(kv[0]) {
+                            if let v = ComposerHandle.view {
+                                switch kv[0] {
+                                case "@ime": v.becomeFirstResponder(); v.setMarkedText(kv.count > 1 ? kv[1] : "", selectedRange: NSRange(location: (kv.count > 1 ? kv[1] : "").utf16.count, length: 0))
+                                case "@imecommit": v.insertText(kv.count > 1 ? kv[1] : ""); v.unmarkText()
+                                case "@undo": v.undoManager?.undo()
+                                case "@redo": v.undoManager?.redo()
+                                case "@insert": v.insertText(kv.count > 1 ? kv[1] : "")
+                                case "@sel":
+                                    let p = (kv.count > 1 ? kv[1] : "0,0").split(separator: ",").compactMap { Int($0) }
+                                    if p.count == 2 { v.selectedRange = NSRange(location: p[0], length: p[1]) }
+                                case "@pasteimg":
+                                    UIPasteboard.general.image = UIGraphicsImageRenderer(size: CGSize(width: 40, height: 40)).image { c in UIColor.red.setFill(); c.fill(CGRect(x: 0, y: 0, width: 40, height: 40)) }
+                                    v.paste(nil)
+                                case "@hwreturn": (v as? ComposerUITextView)?.onSend?()
+                                default: break
+                                }
+                                if kv[0] == "@cstate" || kv[0].hasPrefix("@ime") {
+                                    NSLog("Backplane composer view=%@ marked=%@ sel=%d,%d model=%@ undo=%@", String(v.text.prefix(40)), String(v.markedTextRange != nil), v.selectedRange.location, v.selectedRange.length, String(self.composer.prefix(40)), String(v.undoManager?.canUndo ?? false))
+                                }
+                            } else { NSLog("Backplane composer none") }
+                            continue
+                        }
                         // "@renders": how often each counted view's body ran since the last (RenderCount)
                         if kv[0] == "@renders" { NSLog("Backplane renders %@", RenderCount.take()); continue }
                         if kv[0] == "@open", kv.count > 1 {
