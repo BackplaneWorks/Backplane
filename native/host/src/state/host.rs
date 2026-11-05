@@ -13,7 +13,8 @@ struct Host { policy: Arc<Policy>, hub: OnceLock<Arc<Hub>> }
 impl Transform for Host {
     fn before_commit(&self, first_seq: u64, events: Vec<Value>) -> Vec<Value> {
         let (out, asks) = self.policy.before_commit_asks(first_seq, events);
-        if !asks.is_empty() && !self.policy.passive() {
+        let asks = self.policy.summaries_to_ask(asks);
+        if !asks.is_empty() {
             // Sum.out: the writer is asked for once the batch is written (a failed write only costs a summary the next due end asks for again)
             if let (Some(hub), Ok(rt)) = (self.hub.get(), tokio::runtime::Handle::try_current()) {
                 for (id, input) in asks { rt.spawn(summarize(self.policy.clone(), hub.clone(), "thread", id, input)); }
@@ -107,8 +108,11 @@ static POLICIES: OnceLock<Arc<Policies>> = OnceLock::new();
 /// The policies, once `start` has run: for actors that cannot be handed them (agents: `Policies::line` per provider line, `read` on a view open)
 pub fn policies() -> Option<Arc<Policies>> { POLICIES.get().cloned() }
 
-pub fn start(hub: Arc<Hub>) -> Arc<Policies> {
+pub fn start(hub: Arc<Hub>) -> Arc<Policies> { start_with(hub, None) }
+/// `start`, with side-by-side mode decided by the caller (`Some(true)` passive, `Some(false)` active); `None` leaves the env (`BACKPLANE_PASSIVE`) to decide
+pub fn start_with(hub: Arc<Hub>, passive: Option<bool>) -> Arc<Policies> {
     let policy = Arc::new(Policy::new());
+    if let Some(on) = passive { policy.set_passive(on) }
     let host = Arc::new(Host { policy: policy.clone(), hub: OnceLock::new() });
     let _ = host.hub.set(hub.clone());
     hub.register_transform(host.clone());   // first: the log length is read after this, so no batch is missed
@@ -149,6 +153,49 @@ mod tests {
             text = hub.store.range(0, hub.store.len()).unwrap().join("\n");
             if text.contains("autosettle.delivery.") { break }
         }
+        assert!(text.contains(r#""key":"autosettle.delivery.w1\tthread:boss","value":"9""#), "the launch mail became a receipt: {}", text.lines().filter(|l| l.contains("autosettle")).collect::<Vec<_>>().join("\n"));
+        assert_eq!(text.matches(r#""key":"autosettle.version""#).count(), 1, "the version is set once, by the upgrade");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test] async fn a_passive_start_commits_nothing_on_a_legacy_home() {
+        let dir = std::env::temp_dir().join(format!("bp-statehost-passive-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();
+        let log = [json!({"$":"ProjectCreated","id":"p","title":"p","root":"/r","at":1}),
+            json!({"$":"ThreadCreated","id":"boss","project":"p","title":"boss","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1}),
+            json!({"$":"ThreadCreated","id":"w1","project":"p","title":"w1","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1}),
+            json!({"$":"ThreadLaunched","id":"w1","by":"boss","report":true,"at":2}),
+            json!({"$":"MessagePosted","thread":"w1","msg":"mw1","role":"user","text":"go","at":3}),
+            json!({"$":"MessagePosted","thread":"w1","msg":"aw1","role":"assistant","text":"done","at":4}),
+            json!({"$":"TurnChanged","thread":"w1","state":"completed","at":5}),
+            json!({"$":"MailPosted","id":"t:w1:lr-1","conv":"c","from":"thread:w1","to":"thread:boss","kind":"launch","ref":"","want":"","head":"","size":0,"at":9})];
+        std::fs::write(dir.join("events.jsonl"), log.iter().map(|e| e.to_string() + "\n").collect::<String>()).unwrap();
+        let cfg = Cfg { home: dir.clone(), version: "0.14.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() };
+        let hub = Hub::start(cfg, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        let p = start_with(hub.clone(), Some(true));
+        let mut text = String::new();
+        for _ in 0..100 { tokio::time::sleep(std::time::Duration::from_millis(50)).await; if p.booted() { break } }
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        text.push_str(&hub.store.range(0, hub.store.len()).unwrap().join("\n"));
+        assert!(p.booted(), "the policies folded the log");
+        assert!(!text.contains("autosettle.delivery.") && !text.contains("autosettle.version"), "passive: the boot commits nothing, the upgrade included: {}", text.lines().filter(|l| l.contains("autosettle")).collect::<Vec<_>>().join("\n"));
+        let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();
+        let log = [json!({"$":"ProjectCreated","id":"p","title":"p","root":"/r","at":1}),
+            json!({"$":"ThreadCreated","id":"boss","project":"p","title":"boss","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1}),
+            json!({"$":"ThreadCreated","id":"w1","project":"p","title":"w1","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1}),
+            json!({"$":"ThreadLaunched","id":"w1","by":"boss","report":true,"at":2}),
+            json!({"$":"MessagePosted","thread":"w1","msg":"mw1","role":"user","text":"go","at":3}),
+            json!({"$":"MessagePosted","thread":"w1","msg":"aw1","role":"assistant","text":"done","at":4}),
+            json!({"$":"TurnChanged","thread":"w1","state":"completed","at":5}),
+            json!({"$":"MailPosted","id":"t:w1:lr-1","conv":"c","from":"thread:w1","to":"thread:boss","kind":"launch","ref":"","want":"","head":"","size":0,"at":9})];
+        std::fs::write(dir.join("events.jsonl"), log.iter().map(|e| e.to_string() + "\n").collect::<String>()).unwrap();
+        let cfg = Cfg { home: dir.clone(), version: "0.14.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() };
+        let hub = Hub::start(cfg, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        let p = start_with(hub.clone(), Some(true));
+        let mut text = String::new();
+        for _ in 0..100 { tokio::time::sleep(std::time::Duration::from_millis(50)).await; if p.booted() { break } }
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        text.push_str(&hub.store.range(0, hub.store.len()).unwrap().join("\n"));
         assert!(text.contains(r#""key":"autosettle.delivery.w1\tthread:boss","value":"9""#), "the launch mail became a receipt: {}", text.lines().filter(|l| l.contains("autosettle")).collect::<Vec<_>>().join("\n"));
         assert_eq!(text.matches(r#""key":"autosettle.version""#).count(), 1, "the version is set once, by the upgrade");
         let _ = std::fs::remove_dir_all(&dir);
