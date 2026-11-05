@@ -843,13 +843,17 @@ function warmPicture(target) {
 // rows jumped at the click and back when the hub's view came. The row
 // picked is marked (style.css's data-picked) until that view lands.
 let liveNode = null;
+// (a project head's press, drawn ahead of its click: headPress below)
+let headPreview = null, headPress = null, headClick = null;
 const sidebarOf = n => nodeIn(n, v => v.tag === "aside" && v.key === "sidebar");
 const liveSided = new WeakMap();
 function withLiveSidebar(picture) {
   if (!liveNode || transitionFor === shownFor) return picture;
   // (only while the row picked is on screen in it: else the picture's own
   // sidebar, which shows that row, is the one the hub's view will bring)
-  if (!transitionFor.startsWith("thread:") || !document.querySelector(`aside.sidebar .thread[data-value="${CSS.escape(transitionFor.slice(7))}"]`)) return picture;
+  // (a project's home: while its section is on screen)
+  if (transitionFor.startsWith("project:") ? !document.querySelector(`aside.sidebar section[data-drag-to="${CSS.escape(transitionFor.slice(8))}"]`)
+    : !transitionFor.startsWith("thread:") || !document.querySelector(`aside.sidebar .thread[data-value="${CSS.escape(transitionFor.slice(7))}"]`)) return picture;
   const kept = liveSided.get(picture);
   if (kept?.live === liveNode) return kept.out;
   const side = sidebarOf(liveNode), theirs = sidebarOf(picture);
@@ -891,7 +895,7 @@ const withNodeAttr = (n, name, value) => {
 };
 function sidebarRegrouped(side, theirs) {
   const projectOf = id => id && document.querySelector(`aside.sidebar .thread[data-value="${CSS.escape(id)}"]`)?.closest("section")?.getAttribute("data-drag-to");
-  const pa = shownFor.startsWith("thread:") ? projectOf(shownFor.slice(7)) : "", pt = projectOf(transitionFor.slice(7));
+  const pa = shownFor.startsWith("thread:") ? projectOf(shownFor.slice(7)) : "", pt = transitionFor.startsWith("thread:") ? projectOf(transitionFor.slice(7)) : transitionFor.slice(8);
   const live = sectionsIn(side), pic = sectionsIn(theirs);
   if (!live || !pic || pa === pt) return side;
   const picBy = new Map(pic.ks.filter(k => is(k, "El") && k.tag === "section" && k.key).map(k => [k.key, k]));
@@ -1311,7 +1315,8 @@ function renderPage() {
   // before the overlay, so the draft and the pieces in it are the page's own;
   // press-feedback.js)
   if (frontendNode) pressFeedback.seen(frontendNode, targetKey(presentationTarget(currentSession())));
-  let page = frontendNode ? App.presentation_overlay(historyGaps(pressFeedback.project(frontendNode)), presentationJson(feedbackSession()))
+  let page = headPreview && frontendNode ? App.presentation_overlay(headPreview.node, presentationJson(currentSession()))
+    : frontendNode ? App.presentation_overlay(historyGaps(pressFeedback.project(frontendNode)), presentationJson(feedbackSession()))
     : transitionNode ? App.presentation_overlay(pressFeedback.project(withLiveSidebar(transitionNode)), presentationJson(currentSession())) : focusedNode
     || (canonicalBoot ? App.view(ui) : App.presentation_node(presentationJson(themed(Wire.plain(App.presentation_view(App.presentation_wait(ui)))))));
   // Saved transition/startup pictures contain the server's unprojected partial
@@ -1898,6 +1903,7 @@ function voiceMicHeard(envelope) {
 }
 
 function dispatch(action, value, timer) {
+  headPreview = null;
   if (action === "devices-open" || action === "settings-page" && value === "devices") { void pairingUI.devices();return true; }
   if (action === "voice" && !timer) value = voiceMicPress(value);
   if (action === "fork") reviewPosition.fork(value || currentSession().sel);
@@ -2349,6 +2355,54 @@ document.addEventListener("drop", (e) => {
   void uploadFiles(el.getAttribute("data-drop"), files);
 });
 
+// A project's head drags (to reorder projects), so its name (the project's
+// home) and its badge (the colour and icon picker) act at the click. What
+// they open is drawn at the mouse press all the same, as a preview with
+// nothing sent: the home's retained picture (with the sidebar on screen),
+// the picker as the hub drew it for the same press. The release sends the
+// action (the hub's answer then draws the same in place); a drag starting
+// puts the page back as it was, and nothing is sent.
+const HEAD_PRESS = 'aside.sidebar .project-head [data-on-click="proj-home"], aside.sidebar .project-head [data-on-click="look"]';
+function headUndo() {
+  if (!headPress) return;
+  const p = headPress;headPress = null;
+  if (p.look) pressFeedback.drop();
+  if (headPreview || p.look) { headPreview = null;later();renderNow(); }
+}
+document.addEventListener("pointerdown", e => {
+  if (!e.isTrusted || e.button !== 0 || e.pointerType !== "mouse" || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+  const el = e.target.closest?.(HEAD_PRESS), value = el?.getAttribute("data-value");
+  if (!el || !value || !frontendNode || !remoteReady) return;
+  if (el.getAttribute("data-on-click") === "proj-home") {
+    // (the picture the click's selection draws: its scope names the home as selected)
+    const shown = transitionViews.get({ ...transitionScope({ kind: "project", id: value }), selected: "project-home-" + value, settings: false, route: null });
+    if (!shown || shownFor === "project:" + value) return;
+    // (drawn as the click will draw it: with the sidebar on screen)
+    const before = transitionFor;transitionFor = "project:" + value;
+    try { headPreview = { node: withLiveSidebar(pictureNode(shown)) }; } finally { transitionFor = before; }
+    headPress = { action: "proj-home", value };
+  } else {
+    headPress = { action: "look", value, look: true };
+    pressFeedback.choice("look", value, targetKey(presentationTarget(currentSession())));
+    if (!pressFeedback.showing) { headPress = null;return; }
+  }
+  later();renderNow();
+}, true);
+// A release with no drag is the click: its action goes then (what the press
+// drew may lie under the pointer, the picker's shade: the browser's own
+// click lands there, and is swallowed); dispatch takes over from the preview.
+document.addEventListener("dragstart", headUndo, true);
+document.addEventListener("pointercancel", headUndo, true);
+document.addEventListener("pointerup", e => {
+  const p = headPress;
+  if (!p || e.button !== 0) return;
+  headPress = null;headClick = { at: e.timeStamp, x: e.clientX, y: e.clientY };
+  dispatch(p.action, p.value);later();renderNow();
+}, true);
+document.addEventListener("click", e => {
+  const c = headClick;headClick = null;
+  if (c && e.timeStamp - c.at < 1000 && Math.abs(e.clientX - c.x) < 8 && Math.abs(e.clientY - c.y) < 8) { e.preventDefault();e.stopImmediatePropagation(); }
+}, true);
 // Row drags: a [data-drag] element dropped on a [data-drag-to] one with the
 // same data-drag-act sends that action "dragged|target" (app.bend decides
 // what moves where)
