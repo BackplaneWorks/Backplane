@@ -74,6 +74,11 @@ def main():
     edit(service, 'compiler = {"version": request["toolchain"]["bend"]["version"], "sha256": request["toolchain"]["bend"]["sha256"]}',
          'compiler = {"version": request["toolchain"]["bend"]["version"], "sha256": request["toolchain"]["bend"]["sha256"], "kind": "experimental-source-compiler-manifest", "releaseQualified": False}')
     edit('scripts/service-runtime.py', NORMAL, TEST)
+    # Use the producer's existing fail-closed NTFS membership projection;
+    # preserve original receipts and every hash/type/size/member constraint.
+    edit('desktop/prepare-components.cjs',
+         "check(p.canonical(p.inventory(path.join(dest, 'payload'), target)) === p.canonical(old.members), 'Vendor Electron payload differs from its receipt: ' + target);",
+         "p.membership(path.join(dest, 'payload'), old.members, target);")
     edit('desktop/produce-release.cjs', '/^VERIFIED_GENUINE/.test(build.status)',
          "(build.status==='AUTHORIZED_COMPOSITE_SERVICE_BUILD'&&build.testOnly===true&&build.releaseQualified===false)")
     edit('desktop/produce-release.cjs', "status:'STAGED_UNQUALIFIED',target,release:",
