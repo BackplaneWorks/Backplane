@@ -4,7 +4,8 @@
 //  - every acked write (ProjectCreated root = acked path) is present exactly once
 //  - the last TurnChanged state of every thread
 import {createReadStream} from 'node:fs';
-export async function verifyLog(home,{acked=new Set(),expectFragments=null}={}){
+import {StringDecoder} from 'node:string_decoder';
+export async function verifyLog(home,{acked=new Set(),ackedThreads=new Set(),expectFragments=null}={}){
  const seen={msg:new Set(),act:new Set(),pid:new Set(),tid:new Set()},roots=new Map(),dups=[],idDups=[],bad=[],turn=new Map();
  let lines=0,valid=0,tail='',tailBad=false;
  const handle=(line,idx)=>{lines++;
@@ -16,11 +17,12 @@ export async function verifyLog(home,{acked=new Set(),expectFragments=null}={}){
    case 'ProjectCreated':{if(seen.pid.has(e.id))idDups.push(['ProjectCreated',e.id]);else seen.pid.add(e.id);roots.set(e.root,(roots.get(e.root)??0)+1);break}
    case 'ThreadCreated':{if(seen.tid.has(e.id))idDups.push(['ThreadCreated',e.id]);else seen.tid.add(e.id);break}
    case 'TurnChanged':turn.set(e.thread,e.state);break}};
- await new Promise((res,rej)=>{const s=createReadStream(`${home}/events.jsonl`,{highWaterMark:4<<20});let carry='',idx=0;
-  s.on('data',b=>{const t=carry+b.toString('utf8');const parts=t.split('\n');carry=parts.pop();for(const l of parts){if(l.length)handle(l,idx);idx++}});
+ await new Promise((res,rej)=>{const s=createReadStream(`${home}/events.jsonl`,{highWaterMark:4<<20});const dec=new StringDecoder('utf8');let carry='',idx=0;
+  s.on('data',b=>{const t=carry+dec.write(b);const parts=t.split('\n');carry=parts.pop();for(const l of parts){if(l.length)handle(l,idx);idx++}});
   s.on('end',()=>{tail=carry;res()});s.on('error',rej)});
  if(tail.length){tailBad=true}
+ const missingThreads=[...ackedThreads].filter(t=>!seen.tid.has(t));
  const missing=[],multi=[];for(const p of acked){const n=roots.get(p)??0;if(n===0)missing.push(p);else if(n>1)multi.push([p,n])}
  const unexpectedBad=bad.length-(expectFragments??0);
- return {idDups,lines,valid,bad,tail:tail.length?{len:tail.length,head:tail.slice(0,60)}:null,dups,missing,multi,turn,ackedChecked:acked.size,
-  ok:dups.length===0&&missing.length===0&&multi.length===0&&(expectFragments===null?true:unexpectedBad<=0)}}
+ return {missingThreads,idDups,lines,valid,bad,tail:tail.length?{len:tail.length,head:tail.slice(0,60)}:null,dups,missing,multi,turn,ackedChecked:acked.size,
+  ok:dups.length===0&&idDups.length===0&&missingThreads.length===0&&missing.length===0&&multi.length===0&&(expectFragments===null?true:unexpectedBad<=0)}}

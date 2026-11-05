@@ -11,9 +11,11 @@ import {mkdirSync,rmSync,writeFileSync,appendFileSync,existsSync,statSync,trunca
 import {execSync,spawnSync} from 'node:child_process';
 import {makeStandins,seedLines,startHub,killHub,client,sleep,pct,rssKb,hwmKb,procs,descendants,zombies,originOf,countLines,alive,exists,hello,fdInfo} from './lib.mjs';
 import {verifyLog} from './verify.mjs';
+import {guard} from './lib.mjs';
 const A=Object.fromEntries(process.argv.slice(2).map(a=>{const i=a.indexOf('=');return [a.slice(0,i),a.slice(i+1)]}));
 const bin=A.bin,out=A.out,scenario=A.scenario,rounds=Number(A.rounds??10),policy=A.policy||undefined,port0=Number(A.port??3850);
 if(!bin||!out||!scenario){console.error('need bin= out= scenario=');process.exit(2)}
+try{guard({home:A.work??out,port:port0,paths:[out,bin]})}catch(e){console.error(e.message);process.exit(3)}
 mkdirSync(out,{recursive:true});
 const work=A.work??`${out}/work-${scenario}`;
 const log=(...a)=>{const s=`${new Date().toISOString()} [${scenario}] ${a.join(' ')}`;console.log(s);appendFileSync(`${out}/${scenario}.log`,s+'\n')};
@@ -114,7 +116,7 @@ S['agent']=async()=>{fresh();const b=await boot();const per=new Map();
  const c=await client(b.h,{since:b.n0,origin:b.origin,onFrame:o=>{if(o.t==='delta')per.set(o.thread,(per.get(o.thread)??0)+1)}});
  for(const id of ids)await c.rpc('turn.start',{thread:id,text:'stream',msg:`ag-${id}`},20000);await sleep(5000);
  for(let r=1;r<=rounds;r++){
-  const ag=descendants(b.h.pid).filter(p=>p.comm==='claude');const victims=ag.sort(()=>Math.random()-.5).slice(0,3);
+  const ag=descendants(b.h.pid).filter(p=>p.comm==='claude');const victims=ag.sort(()=>Math.random()-.5).slice(0,3);check(`round ${r}: there were agents to kill`,victims.length>0,{agents:ag.length});
   const t0=Date.now();for(const v of victims)try{process.kill(v.pid,'SIGKILL')}catch{}
   await sleep(6000);const zl=zombies(procs(),b.h.pid);const z=zl.length;const zinfo=zl.map(p=>({pid:p.pid,ppid:p.ppid,comm:p.comm,parentIsHub:p.ppid===b.h.pid}));await sleep(9000);const zlate=zombies(procs(),b.h.pid).filter(p=>zl.some(q=>q.pid===p.pid)).length;const hubUp=!!(await hello(b.h))&&alive(b.h.pid);
   const after=descendants(b.h.pid).filter(p=>p.comm==='claude').length;
@@ -204,4 +206,4 @@ R.seconds=Math.round((Date.now()-t0)/1000);R.passed=R.failures.length===0&&!R.sk
 const bs=R.rounds_data.map(x=>x.bootMs).filter(Boolean);if(bs.length)R.bootMs={n:bs.length,p50:pct(bs,50),p95:pct(bs,95),max:Math.max(...bs)};
 writeFileSync(`${out}/${scenario}.json`,JSON.stringify(R,null,1));
 log(R.passed?'PASS':R.skipped?'SKIPPED':'FAIL',`${R.assert.length-R.failures.length}/${R.assert.length} assertions`,R.failures.map(f=>f.name).slice(0,8).join(' | '));
-process.exit(R.passed?0:R.skipped?0:1);
+process.exit(R.passed?0:R.skipped?77:1);
