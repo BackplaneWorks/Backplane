@@ -13,7 +13,7 @@ fn pager_row(cx: &mut Context<Backplane>, id: String, pager: &Value, light: bool
             let value = value.to_string();
             row = row.child(div().id(SharedString::from(format!("{id}-{key}"))).cursor_pointer().text_color(c("accent")).hover(|s| s.bg(c("raise"))).px_1()
                 .child(format!("{} ({})", name, pager["total"]))
-                .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.send(Command::Page(value.clone())); cx.notify(); })));
+                .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Page(value.clone())); cx.notify(); })));
         }
     }
     if any { Some(row.into_any_element()) } else { None }
@@ -102,7 +102,7 @@ impl Render for Backplane {
                     entries.push(div().id(SharedString::from(format!("e-{id}"))).py_2().child(
                         div().id(SharedString::from(format!("f-{id}"))).flex().gap_2().px_2().py_1().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("dim")).cursor_pointer()
                             .hover(|s| s.bg(c("raise")))
-                            .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.send(Command::Action("fold".into(), value.clone())); cx.notify(); }))
+                            .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("fold".into(), value.clone())); cx.notify(); }))
                             .child(if e["open"] == true { "▾" } else { "›" }).child(text)).into_any_element());
                 }
                 "assistant" => {
@@ -127,9 +127,9 @@ impl Render for Backplane {
             let label = skill.get("label").and_then(Value::as_str).unwrap_or(&word).to_string();
             let desc = ["text", "hint", "desc", "detail", "about"].iter().find_map(|k| skill.get(*k).and_then(Value::as_str)).unwrap_or("").to_string();
             popup = popup.child(div().id(("skill", index)).flex().gap_3().px_3().py_1().cursor_pointer().hover(|s| s.bg(c("raise")))
-                .child(div().font_weight(FontWeight::BOLD).child(label)).child(div().text_color(c("dim")).child(desc))
+                .child(div().font_weight(FontWeight::BOLD).flex_shrink_0().child(label)).child(div().flex_1().overflow_hidden().whitespace_nowrap().text_color(c("dim")).child(desc))
                 .on_click(cx.listener(move |this, _, window, cx| {
-                    let _ = this.tx.send(Command::Action("skill".into(), word.clone()));
+                    let _ = this.tx.try_send(Command::Action("skill".into(), word.clone()));
                     this.input.update(cx, |input, cx| input.set(word.clone() + " ", cx));
                     this.popup = false; this.input.focus_handle(cx).focus(window); cx.notify();
                 })));
@@ -170,7 +170,7 @@ impl Render for Backplane {
                     .when(has_thread, |d| d.child(div().h(px(32.)).flex_shrink_0().flex().items_center().border_b_1().border_color(c("line"))
                         .child(div().px_3().flex().gap_2().text_size(px(11.)).child(div().text_color(c("faint")).child("STATE")).child(div().size(px(6.)).mt(px(7.)).bg(c("ok"))).child(string(thread, "phase").split(':').next().unwrap_or("").to_lowercase()))
                         .when(!todo.is_empty(), |d| d.child(div().px_3().h_full().flex().items_center().gap_2().border_l_1().border_color(c("line")).text_size(px(11.)).child(div().text_color(c("faint")).child("TO-DO")).child(todo.clone())))))
-                    .child(div().id("timeline").overflow_y_scroll().flex_1().flex().justify_center().child(div().w_full().max_w(px(930.)).px_4().flex().flex_col().justify_end().min_h_full().children({
+                    .child(div().id("timeline").overflow_y_scroll().track_scroll(&self.scroll).flex_1().flex().justify_center().child(div().w_full().max_w(px(930.)).px_4().flex().flex_col().justify_end().min_h_full().children({
                         if entries.is_empty() { entries.push(div().py_6().text_color(c("dim")).child(if has_thread { "Start a conversation." } else { "Pick a thread, or start one with + next to a project." }).into_any_element()); }
                         entries
                     })))

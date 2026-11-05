@@ -3,7 +3,7 @@ use anyhow::{ensure, Context, Result};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use std::{collections::HashMap, path::PathBuf, time::{Duration, SystemTime, UNIX_EPOCH}};
-use tokio::sync::mpsc::{self, UnboundedSender};
+use tokio::sync::mpsc::{self, Sender};
 use tokio_tungstenite::tungstenite::{Message, protocol::WebSocketConfig};
 
 #[derive(Debug)] pub enum Command { Select(String), Send(String), Draft(String), Action(String,String), Page(String) }
@@ -53,8 +53,8 @@ impl View {
         json!({"id":self.next,"m":method,"p":p})
     }
 }
-pub fn connect(config:Config)->(UnboundedSender<Command>,async_channel::Receiver<Event>) {
-    let (tx,mut commands)=mpsc::unbounded_channel();let (events,rx)=async_channel::unbounded();
+pub fn connect(config:Config)->(Sender<Command>,async_channel::Receiver<Event>) {
+    let (tx,mut commands)=mpsc::channel(256);let (events,rx)=async_channel::bounded(64);
     std::thread::Builder::new().name("hub".into()).spawn(move || {
         let runtime=tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
         runtime.block_on(async move {
@@ -74,7 +74,7 @@ pub fn connect(config:Config)->(UnboundedSender<Command>,async_channel::Receiver
         });
     }).expect("hub worker");(tx,rx)
 }
-async fn session(config:&Config,commands:&mut mpsc::UnboundedReceiver<Command>,events:&async_channel::Sender<Event>,v:&mut View)->Result<()> {
+async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&async_channel::Sender<Event>,v:&mut View)->Result<()> {
     let token=std::fs::read_to_string(&config.token_file)?;
     ensure!(token.trim().chars().all(|c|c.is_ascii_alphanumeric()||c=='-'||c=='_'),"invalid token file");
     let url=format!("{}/ws?view=1&mobile=1&token={}",config.hub.trim_end_matches('/'),token.trim());
