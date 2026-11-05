@@ -8,7 +8,7 @@ const out=`${REPO}/build/gpui/results/perf/m2-${name}`;mkdirSync(out,{recursive:
 const h=await startHub({bin:REPO+'/build/gpui/backplane-serve',home:root+'/home',port,host,standins:root+'/bin',extraEnv:{FAKE_SECS:'3000',FAKE_PER:'2',FAKE_CYCLE:'20'},log:out+'/hub.log'});
 const c=await client({...h,host:'127.0.0.1'}).catch(async()=>client(h));
 mkdirSync(root+'/proj',{recursive:true});c.send('project.add',{path:root+'/proj'});const pc=await c.until(10000,()=>c.seen.find(x=>x.$==='ProjectCreated'));
-const n=Math.max(agents,3);
+const n=Math.max(agents,Number(process.env.THREADS||0),3);
 for(let i=0;i<n;i++)c.send('thread.create',{project:pc.id,title:'perf '+i,env:'local'});
 const ths=await c.until(30000,()=>{const t=c.seen.filter(x=>x.$==='ThreadCreated');return t.length>=n?t:undefined});
 // seed some history in thread 0 and 1 (a short stand-in turn each) so views have content
