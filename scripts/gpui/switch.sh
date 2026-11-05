@@ -221,7 +221,7 @@ launch_hub() {
   if [ "$MODE" = side ]; then printf '%s\n' "$ev" | grep -qx "BACKPLANE_SIDE_BY_SIDE=1" || okenv=0; printf '%s\n' "$ev" | grep -qx "BACKPLANE_PASSIVE=1" || okenv=0; printf '%s\n' "$ev" | grep -qx "HOME=$SW/fakehome" || okenv=0; [ "$SBS_AGENTS" = 1 ] || { printf '%s\n' "$ev" | grep -q '^BACKPLANE_AGENTS=' && okenv=0; }
   else printf '%s\n' "$ev" | grep -qx "BACKPLANE_AGENTS=$SW/bin" || okenv=0; fi
   [ $okenv = 1 ] || { kill "$hp" 2>/dev/null; rm -f "$SW/hub.pid"; die "hub $hp's environment is not the one required for mode $MODE (copy guard, stand-ins or side-by-side flag, no session bus): stopped"; }
-  rm -f "$SW/sample.stop"; [ "${RELOADING:-}" = 1 ] || "$HERE/test/gpui/switch/sample.sh" "$SW" "$SW/rss.tsv" 5 < /dev/null > /dev/null 2>&1 &   # it reads hub.pid each round: a reload keeps it
+  rm -f "$SW/sample.stop"; if [ "${RELOADING:-}" != 1 ]; then "$HERE/test/gpui/switch/sample.sh" "$SW" "$SW/rss.tsv" 5 < /dev/null > /dev/null 2>&1 & fi   # it reads hub.pid each round: a reload keeps it. One command: a list here would keep this script's stdout open
   # a big log takes minutes to fold; wait for /hello, bounded
   echo "hub pid $hp, environment checked (stand-ins, copy guard). Waiting for it to open the log..."
   while [ $i -lt "${SWITCH_WAIT:-1800}" ]; do
