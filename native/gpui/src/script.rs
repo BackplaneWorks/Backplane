@@ -337,6 +337,7 @@ impl Backplane {
             Ctl::Send => { self.do_send(cx); self.ui_epoch += 1; "send".into() }
             Ctl::Skill(w) => { let _ = self.tx.try_send(Command::Action("skill".into(), w.clone())); self.await_completion(cx); self.ui_epoch += 1; "view.action skill".into() }
             Ctl::Page(v) => { let _ = self.tx.try_send(Command::Page(v.clone())); "view.action native-sidebar-page".into() }
+            Ctl::FocusSearch => { self.focus_search(cx); self.ui_epoch += 1; "focus search".into() }
             Ctl::More => { self.screens.menu_open = !self.screens.menu_open; self.ui_epoch += 1; cx.notify(); "thread menu".into() }
             Ctl::RenameSave(id) => { let text = self.screens.fields.get("title").map(|s| s.input.read(cx).content.to_string()).unwrap_or_default(); if let Some(c) = crate::screens::tools::rename_save(id, &text) { let _ = self.tx.try_send(c); } "view.action rename-save".into() }
             Ctl::Imp(id) => { crate::screens::improvements::act(self, id, cx); self.ui_epoch += 1; format!("improvements {id}") }
