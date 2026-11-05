@@ -12,7 +12,7 @@ if ! need Xvfb || ! need i3 || ! need import; then
 fi
 python3 -m pip install --user -q pillow cairosvg numpy > $V/pip.log 2>&1 || python3 -m pip install --user -q --break-system-packages pillow cairosvg numpy >> $V/pip.log 2>&1 || say "pip install failed"
 say "tools: Xvfb=$(need Xvfb && echo yes || echo no) i3=$(need i3 && echo yes || echo no) import=$(need import && echo yes || echo no) lvp=$(ls /usr/share/vulkan/icd.d/lvp_icd.json 2>/dev/null || echo none)"
-printf 'font pango:monospace 8\ndefault_border none\ndefault_floating_border none\nhide_edge_borders both\n' > $V/i3.conf
+printf 'font pango:monospace 8\nnew_window none\nfor_window [class=".*"] border none\ndefault_border none\ndefault_floating_border none\nhide_edge_borders both\n' > $V/i3.conf
 export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json
 shoot() { # name display W H dpi flags...
   n=$1; d=$2; w=$3; h=$4; dpi=$5; shift 5
