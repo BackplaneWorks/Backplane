@@ -11,6 +11,10 @@ fn home(tag: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-pe
 /// A node: a hub on a fresh home, its token, registry, peer table, and a front that serves `Peering::handle`.
 /// `trusted`: the front tags every socket as the owner's own device (what the tailnet listener would do after whois).
 async fn node(tag: &str, trusted: bool) -> Node {
+    node_with(tag, trusted, trusted).await
+}
+/// `trusted`: loopback-style trust; `own_device`: the tailnet listener's whois verdict.
+async fn node_with(tag: &str, trusted: bool, own_device: bool) -> Node {
     let home = home(tag);
     std::fs::write(home.join("token"), format!("token-{tag}\n")).unwrap();
     let hub = Hub::start(Cfg { home: home.clone(), version: "0.14.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() },
@@ -38,7 +42,7 @@ async fn node(tag: &str, trusted: bool) -> Node {
             let head = String::from_utf8_lossy(&buf[..head_end - 4]).to_string(); let mut lines = head.lines();
             let first: Vec<&str> = lines.next().unwrap_or("").split(' ').collect();
             let headers = lines.filter_map(|l| l.split_once(':').map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))).collect();
-            let req = PReq { method: first[0].into(), target: first.get(1).unwrap_or(&"/").to_string(), headers, body: buf[head_end..].to_vec(), trusted };
+            let req = PReq { method: first[0].into(), target: first.get(1).unwrap_or(&"/").to_string(), headers, body: buf[head_end..].to_vec(), trusted, own_device };
             let rep = match p.handle(&h, &req).await { Some(r) => r, None => HttpReply::text("404 Not Found", "not found") };
             let _ = s.write_all(format!("HTTP/1.1 {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n{}\r\n", rep.status, rep.ctype, rep.body.len(), rep.extra).as_bytes()).await;
             let _ = s.write_all(&rep.body).await;
@@ -102,6 +106,19 @@ async fn settle() { for _ in 0..50 { tokio::time::sleep(std::time::Duration::fro
     let r = ask("zz".into(), now, to.clone()).await;
     assert_eq!((r.code, r.body.as_str()), (403, "not a pairing request for this hub"));
     assert!(live_ids(&a).is_empty() && live_ids(&b).is_empty());
+}
+#[tokio::test] async fn pair_loopback_trust_is_not_owner_trust() {
+    // a local process reaches the main listener (trusted: loopback) with the right Host and no credential: no invite as the owner
+    let (a, b) = (node_with("a9", true, false).await, node("b9", false).await);
+    know(&a, &b);
+    a.p.set_own_hosts("127.0.0.1", "");
+    let r = botnet::plain(&format!("{}/bots/pair?name=127.0.0.1&url={}", url(&a), url(&b))).await;
+    assert_eq!(r.code, 401, "loopback is trusted, not the owner's device: {}", r.body);
+    assert!(live_ids(&a).is_empty());
+    // with a proof it takes the lan path and the link is NOT recorded as the owner's
+    b.p.ask(&b.hub, &url(&a), &url(&b), false).await; settle().await;
+    let l = live_ids(&a); assert_eq!(l.len(), 1);
+    assert_eq!(a.p.table.with(|p| p.own_how(&l[0]).to_string()), "", "unverified: the owner answers in Settings");
 }
 #[tokio::test] async fn pair_ask_is_refused_without_credential_trust_or_proof() {
     let (a, b) = (node("a4", false).await, node("b4", false).await);

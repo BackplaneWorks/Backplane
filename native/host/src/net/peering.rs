@@ -15,9 +15,10 @@ use crate::{api::HttpReply, hub::Hub};
 use serde_json::{json, Value};
 use std::{path::PathBuf, sync::{Arc, Mutex}};
 
-/// What a handler needs of a request. `trusted`: the socket's peer is the owner's own device (whois) or loopback
-/// (never a credential by itself).
-pub struct PReq { pub method: String, pub target: String, pub headers: Vec<(String, String)>, pub body: Vec<u8>, pub trusted: bool }
+/// What a handler needs of a request. `trusted`: loopback or the owner's device (never a credential by itself).
+/// `own_device`: the connection came through the TAILNET listener and its peer passed the whois verdict: the only
+/// thing owner trust (`Auth.owner.pair`/`peer`) may rest on. A loopback socket is `trusted` and never `own_device`.
+pub struct PReq { pub method: String, pub target: String, pub headers: Vec<(String, String)>, pub body: Vec<u8>, pub trusted: bool, pub own_device: bool }
 impl PReq {
     pub fn route(&self) -> &str { self.target.split('?').next().unwrap_or("") }
     pub fn header(&self, n: &str) -> &str { owner::header(&self.headers, n) }
@@ -80,7 +81,7 @@ impl Peering {
     /// credential is `lan`; anything else is refused.
     async fn pair(&self, hub: &Arc<Hub>, r: &PReq) -> HttpReply {
         let own_hosts = self.own_hosts.lock().unwrap().clone();
-        let own = self.credential(r) || owner::owner_pair(r.trusted, &own_hosts, &r.headers, &r.method, r.route());
+        let own = self.credential(r) || owner::owner_pair(r.own_device, &own_hosts, &r.headers, &r.method, r.route());
         let asked = owner::browser(&r.headers) && r.header("origin").is_empty() && !r.param("proof").is_empty();
         if !own && !asked { return text("401 Unauthorized", "this Backplane needs its pairing token") }
         let (name, url) = (botnet::clean(&unpct(&r.param("name"))), unpct(&r.param("url")));
