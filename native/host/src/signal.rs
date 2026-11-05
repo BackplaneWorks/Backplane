@@ -17,6 +17,10 @@ pub fn waits_is(n: u8) -> bool { n == 6 || n == 7 }
 pub fn active(n: u8) -> bool { bits(n) % 2 == 1 }
 pub fn blocked(n: u8) -> bool { bits(n) >= 2 }
 pub fn merge(a: u8, b: u8) -> u8 { (if active(a) || active(b) { 1 } else { 0 }) + (if blocked(a) || blocked(b) { 2 } else { 0 }) }
+/// Signal.out.k: idle (0) or finished (5) with work out waits (7)
+pub fn out_k(out: bool, n: u8) -> u8 { if out && (n == 0 || n == 5) { 7 } else { n } }
+/// Signal.waits: active (1) with its own turn not running waits (6) on the work it started or its children's
+pub fn waits(n: u8, running: bool) -> u8 { if n == 1 && !running { 6 } else { n } }
 /// Signal.name: the word, which is also the colour everywhere
 pub fn name(n: u8) -> &'static str {
     if blocked(n) { "blocked" } else if waits_is(n) { "waiting" } else if active(n) { "active" } else if n == 4 { "settled" } else if n == 5 { "finished" } else { "inactive" }
@@ -58,7 +62,7 @@ fn own(st: &State, asks: &HashMap<&str, u8>, kids: &HashMap<&str, u32>, id: &str
     let base = done(t.turn == Turn::Completed && q.is_empty(), compose(is_blocked, is_active, settled));
     // Signal.out: what the hub still waits on, confirmed running or not
     let out = kids.get(id).copied().unwrap_or(0) > 0 || !bg.is_empty() || !watch.is_empty() || !setting(st, format!("order.wait.{id}")).is_empty();
-    if out && (base == 0 || base == 5) { 7 } else { base }
+    out_k(out, base)
 }
 
 /// Signal.index: every thread's signal. Own values first, then bits flow from children (delegated tasks, launches) to their parents.
@@ -88,7 +92,7 @@ pub fn index(st: &State) -> HashMap<String, u8> {
         } }
     }
     // Signal.waits: active (1) with its own turn not running waits (6) on the work it started or its children's
-    for id in &ids { let n = m[*id]; if n == 1 && st.threads[*id].turn != Turn::Running { m.insert((*id).clone(), 6); } }
+    for id in &ids { let n = waits(m[*id], st.threads[*id].turn == Turn::Running); m.insert((*id).clone(), n); }
     m
 }
 
@@ -105,6 +109,24 @@ mod tests {
     const PC: &str = r#"{"$":"ProjectCreated","id":"p1","title":"proj","root":"/r","at":10}"#;
     fn tc(id: &str) -> String { format!(r#"{{"$":"ThreadCreated","id":"{id}","project":"p1","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":11}}"#) }
 
+    // ---- laws (LAWS.bend), restated ----
+    #[test] fn signal_finished_named() { assert_eq!(name(done(true, 0)), "finished"); }
+    #[test] fn signal_finished_keeps_rest() { assert_eq!([1, 2, 3, 4].map(|n| done(true, n)), [1, 2, 3, 4]); }
+    #[test] fn signal_finished_needs_completed() { for n in 0..=255u8 { assert_eq!(done(false, n), n); } }
+    #[test] fn signal_finished_quiet() { assert!(!(active(5) || blocked(5))); }
+    #[test] fn signal_waiting_named() { assert_eq!([name(6), name(7)], ["waiting", "waiting"]); }
+    #[test] fn signal_waiting_active() { assert_eq!([active(6), blocked(6), active(7), blocked(7)], [true, false, false, false]); }
+    #[test] fn signal_waiting_not_finished() { assert_eq!([out_k(true, done(true, 0)), out_k(true, 0)], [7, 7]); }
+    #[test] fn signal_waiting_keeps_rest() { assert_eq!([1, 2, 3, 4].map(|n| out_k(true, n)), [1, 2, 3, 4]); }
+    #[test] fn signal_waiting_turn_over() { assert_eq!([waits(1, false), waits(1, true), waits(3, false)], [6, 1, 3]); }
+    #[test] fn signal_failed_dot_truthful() { assert_eq!(dot_name("blocked", Turn::Failed, 0), "failed"); }
+    #[test] fn signal_asked_dot_stays_blocked() { assert_eq!(dot_name("blocked", Turn::Failed, 1), "blocked"); }
+    #[test] fn signal_failed_display_name() {
+        let s = fold(&[&tc("t"), r#"{"$":"TurnChanged","thread":"t","state":"failed","at":2}"#]); assert_eq!(display_name(&s, 2, "t"), "failed");
+    }
+    #[test] fn signal_pending_display_blocked() {
+        let s = fold(&[&tc("t"), r#"{"$":"TurnChanged","thread":"t","state":"failed","at":2}"#, r#"{"$":"PendingChanged","thread":"t","count":1,"at":3}"#]); assert_eq!(display_name(&s, 2, "t"), "blocked");
+    }
     #[test] fn the_value_table_names_its_words() {
         for (n, w) in [(0, "inactive"), (1, "active"), (2, "blocked"), (3, "blocked"), (4, "settled"), (5, "finished"), (6, "waiting"), (7, "waiting")] { assert_eq!(name(n), w, "n={n}"); }
         assert_eq!((bits(6), bits(7), bits(4), bits(5), bits(3)), (1, 0, 0, 0, 3));
