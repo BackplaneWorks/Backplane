@@ -864,3 +864,18 @@ fn tool_norm(v: &Value) -> Value {
     let s = rpc(&hub, "mail.list", json!({"skip":205,"n":10})).await["result"].clone(); assert_eq!(s["convs"].as_array().unwrap().len(), 6);
     assert_eq!(rpc(&hub, "mail.list", json!({"n":3})).await["result"]["convs"].as_array().unwrap().len(), 3);
 }
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn two_sends_in_one_tick_get_two_message_ids_and_both_are_delivered() {
+    // the id is decided before the commit: two sends of one second used to share `mail<now>-<len>`, and the second delivery was skipped with an ok
+    let (hub, bots, rec) = start("sameid", "").await;
+    let _ada = bot(&hub, "ada").await;
+    hub.commit(&json!({"$":"ThreadCreated","id":"tw","project":"","title":"work","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2})).await.unwrap();
+    let (a, b) = tokio::join!(rpc(&hub, "mail.send", json!({"to":"thread:tw","text":"one"})), rpc(&hub, "mail.send", json!({"to":"thread:tw","text":"two"})));
+    assert_eq!((a["ok"].clone(), b["ok"].clone()), (json!(true), json!(true)));
+    let got = rec.got.lock().unwrap().clone();
+    let ids: std::collections::HashSet<_> = got.iter().filter(|g| g.0 == "tw").map(|g| g.1.clone()).collect();
+    assert_eq!(got.iter().filter(|g| g.0 == "tw").count(), 2, "{got:?}"); assert_eq!(ids.len(), 2, "two ids: {ids:?}");
+    assert_eq!(rpc(&hub, "mail.list", json!({})).await["result"]["total"], 1, "one conversation, two mails");
+    let c = rpc(&hub, "mail.list", json!({})).await["result"]["convs"][0]["n"].clone(); assert_eq!(c, 2);
+    // ids asked for in one second are distinct whatever the log's length
+    let ids: std::collections::HashSet<String> = (0..50).map(|_| bots.hub_id("x", 5)).collect(); assert_eq!(ids.len(), 50);
+}
