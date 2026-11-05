@@ -9134,9 +9134,9 @@ def Mate.due.go(ms: List<&2, J.Json>, +tailnet: Bool, +ps: List<&2, BT.Peer>, +s
         J.Json.get_str(m, "name", ""), J.Json.get_str(m, "url", ""), Mate.due.go(t, tailnet, ps, s, me, domain))
 
 # the machines (the switcher's JSON) this hub should ask to pair now. A
-# hub started with --no-tailscale (tailnet False) pairs only with those
-# BACKPLANE_PEERS names ("named"): a throwaway hub never links itself to
-# the real ones (nor, since TN.Tailnet.seen, lists or asks them at all).
+# hub started with --no-tailscale (tailnet False) still lists the owner's
+# tailnet machines to switch to, but pairs only with those BACKPLANE_PEERS
+# names ("named"): a throwaway hub never links itself to the real ones.
 def Mate.due(+tailnet: Bool, +j: J.Json, +ps: List<&2, BT.Peer>, +s: M.State) -> List<&2, MRow>:
   Mate.due.go(J.Json.elems(J.Json.get_obj(j, "peers")), tailnet, ps, s, J.Json.get_str(J.Json.get_obj(j, "self"), "url", ""), J.Json.get_str(J.Json.get_obj(j, "self"), "domain", ""))
 
