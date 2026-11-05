@@ -190,9 +190,12 @@ Rust hub: 3 missing, 1 partial. GPUI desktop: 0 missing, 0 partial.
 - Terminal, browser, voice, secrets / Told ledger (already told): hub partial
 - Onboarding and polish / Star nudge: hub missing
 
-Deliberate gaps (state lane), not to be dropped quietly:
-- Autosettle legacy upgrade (`Auto.upgrade`, `autosettle.version` not "1"): the Bend hub reads launch reports out of the mail box once to seed `autosettle.delivery.*`. The Rust autosettle (`state/autosettle.rs`) treats that reports map as empty, which is what Bend does at version 1. Reason: the Rust fold keeps no mail box, and a home that reaches the Rust hub through a Bend hub is already at version 1 (the Bend tick writes it). A home still below version 1 would settle some launched threads one tick early; migrate such a home with the Bend hub first.
-- `Shelve.tick.post` (ThreadWoke after a snooze ends, run with the settle tick) is not ported yet.
+Deliberate gap (state lane), the only one that stays out:
+- Autosettle legacy upgrade (`Auto.upgrade`, `autosettle.version` not "1"): the Bend hub reads launch reports out of the mail box once to seed `autosettle.delivery.*`. The Rust autosettle (`state/autosettle.rs`) treats that reports map as empty, which is what Bend does at version 1. Reason: the Rust fold keeps no mail box, and a home that reaches the Rust hub through a Bend hub is already at version 1. A home still below version 1 would settle some launched threads one tick early; migrate such a home with the Bend hub first.
+
+Open work (state lane), to be ported for full parity, in this order, after alert, told and summary:
+- `Shelve.tick.post`: the wake (`ThreadWoke`) when a snooze ends, run with the settle tick.
+- Liveness deliveries: the nudge into the stalled thread and the notice to its launcher or Bub (`Watchdog.decided`: `Lr.send`, `Bots.wake`), plus the lock heartbeat and the work-timeout / provider-resume / retry ticks `Watchdog.tick.after` runs. These touch the agents and bots seams; their owners (`agents`, `bend`) are asked before the code goes in.
 
 ### NEW bots
 
