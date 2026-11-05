@@ -16,7 +16,7 @@ pub trait ViewMethod: Send + Sync {
 
 /// Registers this lane's handlers. Nothing yet.
 mod actor;
-pub use actor::forget;
+pub use actor::{forget, replied};
 pub fn start(_hub: &Arc<Hub>) {}
 
 pub const REPLY_BYTES: usize = 262144;
