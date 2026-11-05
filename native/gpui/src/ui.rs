@@ -257,5 +257,6 @@ impl Render for Backplane {
                 )
                 // right rail
                 .child(div().w(px(72.)).h_full().flex_shrink_0().border_l_1().border_color(c("line")).flex().flex_col().py_2().children(rail)))
+            .into_any_element()
     }
 }
