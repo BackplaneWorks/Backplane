@@ -81,19 +81,11 @@ pub fn reap_orphans(home: &str) -> usize {
     }
     n
 }
-/// macOS and other Unix: no /proc; `ps eww` prints each process's environment after its command line.
+/// macOS and other Unix: no /proc, and no way to read another process's environment that is exact (`ps eww` joins argv and environment with spaces, so a
+/// text match could end a process that only quotes the mark, or one whose home has a space). Until it reads KERN_PROCARGS2 entry by entry, or keeps a pid file with
+/// start times, this ends nothing: an orphan left running is better than killing the wrong process.
 #[cfg(not(target_os = "linux"))]
-pub fn reap_orphans(home: &str) -> usize {
-    let mark = format!("BACKPLANE_AGENT_OWNER={home}"); let me = std::process::id(); let mut n = 0;
-    let Ok(o) = crate::proc::std_cmd(crate::proc::Kind::Local, "ps").args(["eww", "-A", "-o", "pid=,command="]).output() else { return 0 };
-    for l in String::from_utf8_lossy(&o.stdout).lines() {
-        let l = l.trim_start(); let Some((pid, rest)) = l.split_once(' ') else { continue };
-        let Ok(pid) = pid.parse::<u32>() else { continue }; if pid == me { continue }
-        // the owner mark is a whole word of the environment part: " BACKPLANE_AGENT_OWNER=<home>" followed by a space or the end
-        if let Some(at) = rest.find(&format!(" {mark}")) { let after = &rest[at + 1 + mark.len()..]; if after.is_empty() || after.starts_with(' ') { unsafe { libc::kill(pid as i32, libc::SIGKILL); } n += 1 } }
-    }
-    n
-}
+pub fn reap_orphans(_home: &str) -> usize { 0 }
 
 pub fn spawn(program: &Path, args: &[String], cwd: &Path, extra_path: Option<&Path>, env: &[(String, String)]) -> std::io::Result<Proc> {
     let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Agent, program);
