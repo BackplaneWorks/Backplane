@@ -284,10 +284,9 @@ mod e2e {
         }
         Value::Object(o).to_string()
     }
-    /// PendingChanged (the open-ask count) is left out of both sides: no Rust code writes it yet (not Claude's ask path either), agents lane / M4; reported, not hidden.
     fn core(ev: &[Value]) -> Vec<Value> {
         let policy = ["liveness.", "autosettle.", "alert.", "told.", "summary.at.", "star.nudge", "machine.id", "accounts.", "allowance.", "tz."];
-        ev.iter().filter(|e| { let key = e["key"].as_str().unwrap_or(""); !policy.iter().any(|p| key.starts_with(p)) && e["$"] != "PendingChanged" && (e.to_string().contains(TH) || key.starts_with("stopped.") || key.starts_with("failed.")) }).cloned().collect()
+        ev.iter().filter(|e| { let key = e["key"].as_str().unwrap_or(""); !policy.iter().any(|p| key.starts_with(p)) && (e.to_string().contains(TH) || key.starts_with("stopped.") || key.starts_with("failed.")) }).cloned().collect()
     }
     /// The stand-in's lines, as make_acp_fixtures.py's norm_in: the folder, the MCP address and the runtime prompt replaced; a pid in a session id.
     fn norm_in(l: &str) -> String {
@@ -331,7 +330,7 @@ mod e2e {
     }
     fn expect(name: &str, r: &Run, fixture: &str) {
         let want: Value = serde_json::from_str(fixture).unwrap();
-        let (got, exp): (Vec<String>, Vec<String>) = (core(&r.events).iter().map(norm).collect(), want["events"].as_array().unwrap().iter().filter(|e| e["$"] != "PendingChanged").map(norm).collect());
+        let (got, exp): (Vec<String>, Vec<String>) = (core(&r.events).iter().map(norm).collect(), want["events"].as_array().unwrap().iter().map(norm).collect());
         assert_eq!(got.len(), exp.len(), "{name}: event counts rust {} js {}\nrust:\n{}\njs:\n{}", got.len(), exp.len(), got.join("\n"), exp.join("\n"));
         for (i, (a, b)) in got.iter().zip(exp.iter()).enumerate() { assert_eq!(a, b, "{name}: event {i}") }
         let gi: Vec<String> = r.fake.iter().map(|l| norm_in(l)).collect(); let wi: Vec<String> = want["fake"].as_array().unwrap().iter().map(|l| norm_in(l.as_str().unwrap())).collect();

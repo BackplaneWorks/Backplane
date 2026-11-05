@@ -116,6 +116,8 @@ impl Driver for OcDriver {
     fn ask_info(&self, r: &Value) -> Option<super::AskInfo> { acp::ask_of(r) }
     fn answer(&mut self, r: &Value, answer: &str) -> Vec<String> { acp::answer_of(r, answer) }
     fn ends_on_turn_end(&self) -> bool { true }
+    fn exit_why(&self, _code: i32) -> Option<String> { Some(GONE.into()) } // Proto.gone; the actor adds (exit N | signal N), OOM wording and the stderr tail (Exit.say)
+    fn install_hint(&self) -> Option<String> { Some(INSTALL.into()) }
 }
 pub fn driver(provider: &str) -> Option<Made> { if provider == "opencode" { Some(Made { cli: "opencode", driver: Box::new(OcDriver::new()) }) } else { None } }
 
