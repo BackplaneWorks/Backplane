@@ -959,6 +959,8 @@ export class NativeThinHost307265 {
         !!s.active || !!s.deferredNavigation || s.queue.length > 0 || !!s.followup));
       return true;
     }
+    // a reply the hub segments (view.control parts, then the reply naming them): thin.js reassembles it, as thin-host.js does
+    if (this.client.control(hub, envelope)) return true;
     if (envelope?.t !== 'reply') {
       this.fail(hub, 'Unexpected thin frame; compatibility must be chosen explicitly'); return true;
     }
