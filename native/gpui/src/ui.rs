@@ -49,6 +49,48 @@ fn block(node: &Value, light: bool, depth: usize) -> AnyElement {
     }
 }
 
+/// The hub's project-home cards: generic nodes {tag, className, label, action, payload, kids|text}.
+fn node_text(n: &Value, out: &mut String) {
+    if let Some(t) = n["text"].as_str() { out.push_str(t); }
+    for k in n["kids"].as_array().into_iter().flatten() { node_text(k, out); }
+}
+fn node_el(cx: &mut Context<Backplane>, n: &Value, light: bool, depth: usize, path: &str) -> AnyElement {
+    let c = |name: &str| theme::color(light, name);
+    if let Some(t) = n["text"].as_str() { return div().child(t.to_string()).into_any_element(); }
+    if depth > 14 { return div().into_any_element(); }
+    let tag = n["tag"].as_str().unwrap_or("div");
+    let class = n["className"].as_str().unwrap_or("");
+    let kids = |cx: &mut Context<Backplane>| -> Vec<AnyElement> {
+        n["kids"].as_array().into_iter().flatten().take(200).enumerate().map(|(i, k)| node_el(cx, k, light, depth + 1, &format!("{path}.{i}"))).collect()
+    };
+    match tag {
+        "svg" | "path" | "img" => div().into_any_element(),
+        "button" => {
+            let (action, payload) = (string(n, "action"), string(n, "payload"));
+            let mut label = String::new(); node_text(n, &mut label);
+            if label.is_empty() { label = string(n, "label"); }
+            if action.is_empty() || label.is_empty() { return div().flex().gap_1().children(kids(cx)).into_any_element(); }
+            div().id(SharedString::from(format!("n{path}"))).px_2().py_1().border_1().border_color(c("line")).bg(c("raise")).text_size(px(12.)).cursor_pointer().hover(|s| s.bg(c("panel")))
+                .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action(action.clone(), payload.clone())); cx.notify(); })).child(label).into_any_element()
+        }
+        "h1" => { let mut t = String::new(); node_text(n, &mut t); div().text_size(px(22.)).font_weight(FontWeight::BOLD).child(t).into_any_element() }
+        "h2" | "h3" => { let mut t = String::new(); node_text(n, &mut t); div().font_weight(FontWeight::BOLD).text_size(px(13.)).child(t).into_any_element() }
+        "span" | "p" | "a" | "label" | "code" => {
+            let mut t = String::new(); node_text(n, &mut t);
+            let mut d = div().child(t);
+            if class.contains("eyebrow") || class.contains("faint") || class.contains("dim") { d = d.text_size(px(11.)).text_color(c("faint")); }
+            if class.contains("error") { d = d.text_color(c("bad")); }
+            d.into_any_element()
+        }
+        "section" if class.contains("card") => div().flex().flex_col().gap_2().p_3().border_1().border_color(c("line")).bg(c("panel")).children(kids(cx)).into_any_element(),
+        _ => {
+            let row = class.contains("name") || class.contains("row") || class.contains("head") || class.contains("meta");
+            let d = div().flex().gap_2();
+            (if row { d.items_center() } else { d.flex_col() }).children(kids(cx)).into_any_element()
+        }
+    }
+}
+
 fn chip(light: bool, label: String) -> Div {
     let c = |name: &str| theme::color(light, name);
     div().px_3().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).whitespace_nowrap().child(label)
@@ -70,7 +112,9 @@ impl Render for Backplane {
         // sidebar rows
         let mut rows: Vec<AnyElement> = Vec::new();
         for project in self.data["projects"].as_array().into_iter().flatten() {
-            rows.push(div().flex().items_center().gap_2().px_3().pt_3().pb_1().text_size(px(11.)).text_color(c("dim"))
+            let pid = string(project, "id"); let pid = pid.rsplit_once('|').map_or(pid.as_str(), |(_, r)| r).to_string();
+            rows.push(div().id(SharedString::from(format!("proj-{pid}"))).flex().items_center().gap_2().px_3().pt_3().pb_1().text_size(px(11.)).text_color(c("dim")).cursor_pointer().hover(|s| s.text_color(c("text")))
+                .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("select".into(), format!("project-home-{pid}"))); cx.notify(); }))
                 .child("▾").child(string(project, "title").to_uppercase()).into_any_element());
             for t in project["threads"].as_array().into_iter().flatten().chain(project["settled"].as_array().into_iter().flatten()) {
                 let id = string(t, "id");
@@ -132,6 +176,12 @@ impl Render for Backplane {
             }
         }
         for live in thread["live"].as_array().into_iter().flatten() { entries.push(div().py_2().child(string(live, "text")).into_any_element()); }
+        // project home replaces the thread when the hub selected it
+        let home = &self.data["projectHome"];
+        let has_home = home.is_object();
+        let home_els: Vec<AnyElement> = if has_home {
+            home["cards"].as_array().into_iter().flatten().take(60).enumerate().map(|(i, k)| node_el(cx, k, light, 0, &format!("h{i}"))).collect()
+        } else { Vec::new() };
         // popup
         let skills = thread["skills"].as_array();
         let mut popup = div().flex().flex_col().border_1().border_color(c("line")).bg(c("panel")).py_1();
@@ -184,10 +234,11 @@ impl Render for Backplane {
                     .when(has_thread, |d| d.child(div().h(px(32.)).flex_shrink_0().flex().items_center().border_b_1().border_color(c("line"))
                         .child(div().px_3().flex().gap_2().text_size(px(11.)).child(div().text_color(c("faint")).child("STATE")).child(div().size(px(6.)).mt(px(7.)).bg(c("ok"))).child(string(thread, "phase").split(':').next().unwrap_or("").to_lowercase()))
                         .when(!todo.is_empty(), |d| d.child(div().px_3().h_full().flex().items_center().gap_2().border_l_1().border_color(c("line")).text_size(px(11.)).child(div().text_color(c("faint")).child("TO-DO")).child(todo.clone())))))
-                    .child(div().id("timeline").overflow_y_scroll().track_scroll(&self.scroll).flex_1().flex().justify_center().child(div().w_full().max_w(px(930.)).px_4().flex().flex_col().justify_end().min_h_full().children({
+                    .when(has_home, |d| d.child(div().id("home").overflow_y_scroll().flex_1().flex().justify_center().child(div().w_full().max_w(px(930.)).p_4().flex().flex_col().gap_3().children(home_els))))
+                    .when(!has_home, |d| d.child(div().id("timeline").overflow_y_scroll().track_scroll(&self.scroll).flex_1().flex().justify_center().child(div().w_full().max_w(px(930.)).px_4().flex().flex_col().justify_end().min_h_full().children({
                         if entries.is_empty() { entries.push(div().py_6().text_color(c("dim")).child(if has_thread { "Start a conversation." } else { "Pick a thread, or start one with + next to a project." }).into_any_element()); }
                         entries
-                    })))
+                    }))))
                     .when(!self.error.is_empty(), |d| d.child(div().px_5().py_2().text_color(c("bad")).child(self.error.clone())))
                     .child(div().flex_shrink_0().border_t_1().border_color(c("line")).flex().justify_center().child(div().w_full().max_w(px(930.)).px_4().py_3().flex().flex_col().gap_2()
                         .when(show_popup, |d| d.child(popup))
