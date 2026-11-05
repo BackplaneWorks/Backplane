@@ -74,7 +74,9 @@ impl Bots {
         let me = b.clone(); tokio::spawn(async move { let n = me.mail_recover().await; if n > 0 { eprintln!("bots: {n} mail header(s) recovered from the journal") } });
         b
     }
-    /// the threads that are live bots' (a tool list asks without waiting for the world lock)
+    /// the threads that are live bots' (a tool list asks without waiting for the world lock). Refreshed only when the world catches up (`world()`): a path that starts a bot's agent
+    /// without touching the world first would list no bot tools for that whole process (tools/list is read once at start), and a deleted bot's thread stays listed until the
+    /// next catch-up (its calls are refused). Today a bot's first turn goes through `say`, which does; a new path (bot_create, a far-mirrored bot, uber promotion) must refresh.
     fn refresh_threads(&self, w: &World) { *self.threads.write().unwrap() = w.bots.values().filter(|b| !b.deleted && !b.thread.is_empty()).map(|b| b.thread.clone()).collect(); }
     pub fn is_bot_thread(&self, th: &str) -> bool { self.threads.read().unwrap().contains(th) }
     /// The world caught up with the log; the guard is the lock a request holds from decision to commit.

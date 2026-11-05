@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 pub const TOOLS_JSON: &str = include_str!("tools.json");
 pub const NAMES: &[&str] = &["bot_whoami", "bot_list", "bot_send", "room_list", "room_create", "room_post", "room_read", "memory_save", "memory_recall", "memory_forget", "memory_list",
-    "space_set", "space_get", "space_page", "routine_list", "routine_set", "routine_delete", "project_list", "remind_person", "person_timezone"];
+    "space_set", "space_get", "space_page", "routine_list", "routine_set", "routine_delete", "project_list", "bot_create", "remind_person", "person_timezone"];
 const HOP_MAX: u64 = 6;
 const MAX_PAGE: usize = 262_144;
 
@@ -82,7 +82,7 @@ impl Bots {
     pub async fn tool_bot(&self, thread: &str) -> bool { self.world().await.bots.values().any(|b| !b.deleted && b.thread == thread) }
 
     /// One tools/call from the agent of `thread`: (ok, body)
-    pub async fn tool_call(&self, thread: &str, name: &str, a: &Value) -> Res {
+    pub async fn tool_call(self: &Arc<Self>, thread: &str, name: &str, a: &Value) -> Res {
         let mut w = self.world().await;
         let mut later: Option<(Pending, u64)> = None;
         let r = self.tool_decide(&w, thread, name, a, &mut later).await;
@@ -92,7 +92,7 @@ impl Bots {
         r
     }
 
-    async fn tool_decide(&self, w: &World, thread: &str, name: &str, a: &Value, later: &mut Option<(Pending, u64)>) -> Res {
+    async fn tool_decide(self: &Arc<Self>, w: &World, thread: &str, name: &str, a: &Value, later: &mut Option<(Pending, u64)>) -> Res {
         let Some(b) = w.bots.values().find(|b| !b.deleted && b.thread == thread).cloned() else { return fail("unknown tool") };
         let now = now_s();
         match name {
@@ -160,6 +160,7 @@ impl Bots {
                 self.t_commit(w, now, vec![json!({"$":"RoutineDeleted","id":id,"at":now})]).await.map_or_else(|e| fail(&e), |_| said("deleted"))
             }
             "project_list" => (true, Value::Array(w.projects.iter().filter(|(_, p)| !p.2).map(|(id, p)| json!({"id":id,"name":p.0,"folder":p.1})).collect())),
+            "bot_create" => self.t_spawn(w, &b, now, a).await,
             "remind_person" => {
                 let text = gs(a, "text").trim().to_string();
                 if text.is_empty() { return fail("say what to remind them of (text)") }
@@ -240,6 +241,28 @@ impl Bots {
                 self.t_commit(w, now, evs).await.map_or_else(|e| fail(&e), |_| said(&note))
             }
         }
+    }
+
+    /// Bots.spawn: a sub-bot (a persistent bot of its own, this one its maker): at most Spawn.max levels below a person-made bot, Spawn.kids of them each
+    async fn t_spawn(self: &Arc<Self>, w: &World, b: &Bot, now: u64, a: &Value) -> Res {
+        const MAX_DEPTH: u64 = 2; const KIDS: usize = 8;
+        let name = gs(a, "name").trim().to_string();
+        // Spawn.depth: how far below a person-made bot this one sits (walks at most four makers)
+        let (mut depth, mut cur) = (0u64, b.id.clone());
+        for _ in 0..4 { let p = self.hub.setting(&format!("bot.parent.{cur}")).await.unwrap_or_default(); if !p.is_empty() { depth += 1 } cur = p }
+        if depth + 1 > MAX_DEPTH { return fail("bots made by bots go at most 2 levels deep; ask the person, or a bot higher up") }
+        let mut kids = 0; for x in w.bots.values().filter(|x| !x.deleted) { if self.hub.setting(&format!("bot.parent.{}", x.id)).await.unwrap_or_default() == b.id { kids += 1 } }
+        if kids >= KIDS { return fail("you keep 8 sub-bots already; ask the person to retire one") }
+        if !super::rpc::name_ok(&name) { return fail("a bot's name is 1 to 24 letters, digits, - or _") }
+        if w.named(&name).is_some() { return fail(&format!("a bot named {name} already exists")) }
+        let (bot, th) = (self.hub_id("b", now), self.hub_id("t", now));
+        let provider = { let p = gs(a, "provider"); if p.is_empty() { self.hub.model().await.threads.get(&b.thread).map(|t| t.provider.clone()).unwrap_or_default() } else { p.to_string() } };
+        let evs = vec![json!({"$":"ThreadCreated","id":th,"project":"","title":name,"env":"local","branch":"","worktree":"","provider":provider,"model":gs(a, "model"),"at":now}),
+            json!({"$":"BotSet","id":bot,"name":name,"thread":th,"look":super::rpc::seed(&name),"persona":gs(a, "persona"),"at":now}),
+            json!({"$":"SettingSet","key":format!("bot.parent.{bot}"),"value":b.id,"at":now})];
+        if let Err(e) = self.t_commit(w, now, evs).await { return fail(&e) }
+        let me = self.clone(); let (b2, t2) = (bot.clone(), th.clone()); tokio::spawn(async move { me.home_pub(&b2, &t2).await }); // BotFx home
+        (true, json!({"bot":bot,"name":name,"note":format!("{name} is made: talk to it with bot_send")}))
     }
 
     async fn t_zone(&self, w: &World, now: u64, zone: &str) -> Res {

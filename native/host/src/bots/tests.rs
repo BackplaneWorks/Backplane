@@ -1047,3 +1047,29 @@ async fn owner_planned(p: &Pair) {
     let tb = log(&hub).iter().find(|e| e["$"] == "BotSet" && e["id"] == bob.as_str()).unwrap()["thread"].as_str().unwrap().to_string();
     bots.world().await; assert!(set.list(&tb).len() > 0);
 }
+#[tokio::test] async fn bot_create_makes_a_sub_bot_within_the_depth_and_kid_limits() {
+    // Bots.spawn: the maker is recorded, the provider defaults to the maker's, the home job runs; 2 levels below a person-made bot, 8 kids, a valid free name
+    let (hub, bots, _r) = start("spawn", "").await;
+    let top = bot(&hub, "top").await;
+    let thread_of = |id: &str| log(&hub).iter().find(|e| e["$"] == "BotSet" && e["id"] == id).unwrap()["thread"].as_str().unwrap().to_string();
+    let t0 = thread_of(&top);
+    let (ok, r) = bots.tool_call(&t0, "bot_create", &json!({"name":" kid1 ","persona":"p"})).await; assert!(ok, "{r}");
+    assert_eq!((r["name"].as_str().unwrap(), r["note"].as_str().unwrap()), ("kid1", "kid1 is made: talk to it with bot_send"));
+    let kid = r["bot"].as_str().unwrap().to_string();
+    until(&hub, |l| l.iter().any(|e| e["$"] == "WorktreeSet" && e["id"] == thread_of(&kid).as_str())).await;
+    assert_eq!(hub.setting(&format!("bot.parent.{kid}")).await.as_deref(), Some(top.as_str()));
+    let l = log(&hub); let tc = l.iter().find(|e| e["$"] == "ThreadCreated" && e["title"] == "kid1").unwrap(); assert_eq!((tc["provider"].as_str().unwrap(), tc["project"].as_str().unwrap()), ("claude", ""));
+    let bs = l.iter().find(|e| e["$"] == "BotSet" && e["id"] == kid.as_str()).unwrap(); assert_eq!((bs["persona"].as_str().unwrap(), bs["look"].clone()), ("p", json!(seed("kid1"))));
+    // the sub-bot's own sub-bot is the second level; a third is refused
+    let (ok, r2) = bots.tool_call(&thread_of(&kid), "bot_create", &json!({"name":"kid2"})).await; assert!(ok, "{r2}");
+    let kid2 = r2["bot"].as_str().unwrap().to_string();
+    let (ok, e) = bots.tool_call(&thread_of(&kid2), "bot_create", &json!({"name":"kid3"})).await; assert!(!ok); assert_eq!(e["error"], "bots made by bots go at most 2 levels deep; ask the person, or a bot higher up");
+    // names: invalid and taken
+    assert_eq!(bots.tool_call(&t0, "bot_create", &json!({"name":"a b"})).await.1["error"], "a bot's name is 1 to 24 letters, digits, - or _");
+    assert_eq!(bots.tool_call(&t0, "bot_create", &json!({"name":"KID1"})).await.1["error"], "a bot named KID1 already exists");
+    // eight kids at most (kid1 is one)
+    for i in 2..=8 { assert!(bots.tool_call(&t0, "bot_create", &json!({"name":format!("k{i}")})).await.0) }
+    assert_eq!(bots.tool_call(&t0, "bot_create", &json!({"name":"k9"})).await.1["error"], "you keep 8 sub-bots already; ask the person to retire one");
+    // the new bot is listed at once in its own thread
+    bots.world().await; assert!(bots.is_bot_thread(&thread_of(&kid)));
+}
