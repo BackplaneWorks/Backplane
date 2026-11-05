@@ -1,6 +1,8 @@
 //! The provider-limit driver (hub.bend `Fallback.line` / `AccountFallback.line` / `ProviderResume.*` / `Fallback.use` / `AccountFallback.use`): what happens when
 //! a running turn's agent line says its provider ran out of allowance. It reads each line the agents' actor already parsed (two touch points there: `on_line`
 //! right after the line's events are built, `spawn_act` after the batch is committed) and decides with the pure planner in fallback.rs.
+//! NOT WIRED YET: `on_line` and `spawn_act` have no caller (the agents lane adds the two hooks once this is on `gpui`), so the limit fallback does not run in this hub;
+//! only `ResumeTicker` is registered, and it follows ProviderResume.ready / .one.
 //!
 //! * A limit seen in a turn that has not ended is only remembered (`fallback.pending.<thread>` or `account.failover.pending.<thread>`).
 //! * A limit on the line that ends the turn (or a remembered one still in force when the turn ends badly) is acted on: the hold is written (a provider/model outage,
@@ -156,10 +158,20 @@ pub async fn on_line(hub: &Arc<Hub>, thread: &str, v: &Value, terminal: bool) ->
     let t = v["type"].as_str().unwrap_or("");
     let shaped = matches!(t, "turn.failed" | "error" | "result" | "rate_limit_event" | "assistant");
     if !shaped { return Verdict::default() }
-    let Some(w) = load(hub, thread).await else { return Verdict::default() };
-    let lim = fb::classify(&w.provider, &w.model, v);
-    let lim = match (lim, terminal) { (Some(l), _) => Some(l), (None, true) => pending_of(&w).filter(|p| due(p, w.now)), (None, false) => None };
+    // classify first: it needs only the thread's provider and model; the settings are read only for a limit, or for a terminal line that may close a remembered one
+    let (provider, model, running) = { let m = hub.model().await; match m.threads.get(thread) { Some(t) => (t.provider.clone(), t.model.clone(), t.turn == "running"), None => return Verdict::default() } };
+    if !running { return Verdict::default() }
+    let mut lim = fb::classify(&provider, &model, v);
+    if lim.is_none() {
+        if !terminal { return Verdict::default() }
+        let mut mine = HashMap::new();
+        for k in [format!("account.failover.pending.{thread}"), format!("fallback.pending.{thread}")] { if let Some(x) = hub.setting(&k).await { mine.insert(k, x); } }
+        if mine.is_empty() { return Verdict::default() }
+        let probe = World { now: now_ms() / 1000, thread: thread.into(), provider: provider.clone(), model: model.clone(), settings: mine, caps: Value::Null };
+        lim = pending_of(&probe).filter(|p| due(p, probe.now));
+    }
     let Some(lim) = lim else { return Verdict::default() };
+    let Some(w) = load(hub, thread).await else { return Verdict::default() };
     let orig = original(hub, thread).await;
     on_limit(&w, &lim, terminal, &orig)
 }
@@ -188,32 +200,43 @@ async fn load_idle(hub: &Arc<Hub>, thread: &str, provider: String, model: String
     Some(World { now: now_ms() / 1000, thread: thread.into(), provider, model, settings, caps })
 }
 
-/// ProviderResume: a thread that waited for a reported reset continues once it has passed (once a minute). Unknown resets wait for the person.
+/// What ProviderResume.ready reads of one thread.
+#[derive(Debug, Clone, Default)]
+pub struct ResumeFacts { pub exists: bool, pub live: bool, pub held: bool, pub dormant: bool, pub ephemeral: bool, pub interrupted: bool, pub pending: u64, pub target: String }
+/// ProviderResume.ready: the thread is alive and not held, dormant or ephemeral, its turn is exactly Interrupted with nothing queued, the record's reset has come, and the
+/// record's target is still the thread's current provider/model (a person who changed it is not resumed on the old one).
+pub fn resume_ready(f: &ResumeFacts, rec: &Value, now: u64) -> bool {
+    let reset = rec["reset"].as_u64().unwrap_or(0);
+    f.exists && f.live && !(f.held || f.dormant || f.ephemeral) && f.interrupted && reset > 0 && now >= reset && f.pending == 0 && rec["target"].as_str().unwrap_or("") == f.target
+}
+pub const RESUME_TEXT: &str = "[Backplane] The provider's reported limit reset has arrived. Continue from your last step. Check completed tool results and any work still running before repeating an action.";
+/// ProviderResume.one: the record is cleared and the note logged in the same commit as the message that runs the thread again.
+pub fn resume_events(key: &str, th: &str, now: u64) -> Vec<Value> {
+    vec![set(key, "", now), json!({"$":"ActivityLogged","thread":th,"act":format!("quota-{now}"),"tone":"info","kind":"provider-resume","summary":"Provider limit reset; continuing from the last step","at":now})]
+}
+async fn resume_facts(hub: &Arc<Hub>, th: &str) -> ResumeFacts {
+    let held = hub.setting(&format!("thread.config.hold.{th}")).await.as_deref() == Some("on");
+    let t = { let m = hub.model().await; match m.threads.get(th) { Some(t) => t.clone(), None => return ResumeFacts::default() } };
+    let dormant = hub.setting(&format!("project.dormant.{}", t.project)).await.as_deref() == Some("on");
+    ResumeFacts { exists: true, live: !(t.archived || t.deleted), held, dormant, ephemeral: th.starts_with("run") || th.starts_with("mailcoord-"), interrupted: t.turn == "interrupted", pending: t.pending, target: format!("{}/{}", t.provider, t.model) }
+}
+
+/// ProviderResume: a thread that waited for a reported reset continues once it has passed. Unknown resets wait for the person.
 pub struct ResumeTicker;
 impl Ticker for ResumeTicker {
     fn every_s(&self) -> u64 { 30 }
     fn tick<'a>(&'a self, hub: &'a Arc<Hub>, now_s: u64) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let Some(ag) = crate::agents::handle() else { return vec![] };
-            let due: Vec<(String, String)> = {
-                let keys: Vec<String> = { let m = hub.model().await; m.settings_with_prefix("provider.resume.").map(|(k, _)| k.to_string()).collect() };
-                let mut v = vec![];
-                for k in keys {
-                    let th = k.trim_start_matches("provider.resume.").to_string();
-                    let rec: Value = serde_json::from_str(&hub.setting(&k).await.unwrap_or_default()).unwrap_or(Value::Null);
-                    let reset = rec["reset"].as_u64().unwrap_or(0);
-                    let idle = { let m = hub.model().await; m.threads.get(&th).map_or(false, |t| !t.deleted && t.turn != "running") };
-                    if reset > 0 && now_s >= reset && idle { v.push((th, k)) }
-                }
-                v
-            };
-            let mut ev = vec![];
-            for (th, k) in due {
-                ev.push(set(&k, "", now_s));
-                let text = continue_text(&original(hub, &th).await);
-                let ag2 = ag.clone(); tokio::spawn(async move { let _ = ag2.start_queued(&th, &text).await; });
+            let keys: Vec<String> = { let m = hub.model().await; m.settings_with_prefix("provider.resume.").map(|(k, _)| k.to_string()).collect() };
+            for k in keys {
+                let th = k.trim_start_matches("provider.resume.").to_string();
+                let rec: Value = serde_json::from_str(&hub.setting(&k).await.unwrap_or_default()).unwrap_or(Value::Null);
+                if !resume_ready(&resume_facts(hub, &th).await, &rec, now_s) { continue }
+                // the message and the record's clearing are one commit; a failed start leaves the record for the next tick
+                let _ = ag.deliver(&th, &format!("resume{now_s}"), RESUME_TEXT, None, resume_events(&k, &th, now_s)).await;
             }
-            ev
+            vec![]
         })
     }
 }
@@ -273,4 +296,20 @@ mod tests {
         let (ev, start) = plan_switch(&both, "go"); assert!(start.is_none()); let rec: Value = serde_json::from_str(ev[0]["value"].as_str().unwrap()).unwrap(); assert_eq!(rec["reset"].as_u64().unwrap() / 10, (now_ms() / 1000 + 4000) / 10, "an unknown reset is skipped (Reset.earliest): the known one is waited for");
     }
     #[test] fn the_ticker_continues_only_what_waited_for_a_reset_that_has_come() { /* the ticker is exercised with the agents; here: the record's reset gate */ assert!(due(&lim("c", 0), 5) && due(&lim("c", 9), 5) && !due(&lim("c", 5), 5)); }
+    fn facts() -> ResumeFacts { ResumeFacts { exists: true, live: true, interrupted: true, target: "claude/opus".into(), ..Default::default() } }
+    fn rec(reset: u64) -> Value { json!({"target":"claude/opus","reset":reset,"reason":"x"}) }
+    #[test] fn a_resume_waits_for_exactly_an_interrupted_thread_whose_reset_has_come_and_whose_target_is_unchanged() {
+        assert!(resume_ready(&facts(), &rec(50), 50), "the reset has come");
+        assert!(!resume_ready(&facts(), &rec(51), 50), "not yet"); assert!(!resume_ready(&facts(), &rec(0), 50), "an unknown reset waits for the person");
+        for (name, f) in [("completed", ResumeFacts { interrupted: false, ..facts() }), ("held", ResumeFacts { held: true, ..facts() }), ("dormant", ResumeFacts { dormant: true, ..facts() }),
+            ("ephemeral", ResumeFacts { ephemeral: true, ..facts() }), ("archived or deleted", ResumeFacts { live: false, ..facts() }), ("a queued message", ResumeFacts { pending: 1, ..facts() }),
+            ("the person changed provider/model", ResumeFacts { target: "codex/gpt-6".into(), ..facts() }), ("no thread", ResumeFacts::default())] {
+            assert!(!resume_ready(&f, &rec(50), 50), "{name}: refused");
+        }
+    }
+    #[test] fn a_resume_clears_its_record_and_logs_the_note_in_one_batch() {
+        let ev = resume_events("provider.resume.t1", "t1", 77);
+        assert_eq!(keys(&ev), ["provider.resume.t1", "ActivityLogged"]); assert_eq!((ev[0]["value"].clone(), ev[1]["kind"].clone(), ev[1]["summary"].clone()), (json!(""), json!("provider-resume"), json!("Provider limit reset; continuing from the last step")));
+        assert!(RESUME_TEXT.starts_with("[Backplane] The provider's reported limit reset has arrived."));
+    }
 }
