@@ -1,4 +1,152 @@
-//! acp: see mod.rs. Owned by the provider lane named there.
+//! Grok's ACP (Agent Client Protocol: JSON-RPC over stdio), one process per turn: initialize, session/new (or session/load), session/prompt.
+//! A port of src/core/acp.bend. What the agent says is reported as Codex shapes (thread.started, item.completed, item.delta, tool.done,
+//! turn.completed, turn.failed), which `Cx::codex_line` turns into events. Shared with opencode.rs and, for `update` and the permission
+//! pieces, agy.rs. A permission request that goes to the person is the shape `{"type":"bp.ask","request":"<raw request line>"}`.
+use serde_json::{json, Map, Value};
+
+/// AcpTurn: what a turn needs.
+#[derive(Clone, Debug, Default)]
+pub struct AcpTurn { pub cwd: String, pub mcp: String, pub prompt: String, pub text: String, pub session: String, pub ask: bool }
+
+/// Acp: the session id once known, the reply text so far, whether the turn ended, and the tool calls already logged ("\n<id>\n" each).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Acp { pub sid: String, pub buf: String, pub done: bool, pub seen: String }
+impl Acp { pub fn new() -> Acp { Acp::default() } pub fn open_now(&self) -> bool { !self.sid.is_empty() } }
+
+/// AcpOut: lines to write, shapes to report (permission asks are `bp.ask` shapes).
+#[derive(Debug, Default, PartialEq)]
+pub struct Out { pub send: Vec<String>, pub shapes: Vec<Value> }
+
+pub fn s<'a>(v: &'a Value, k: &str) -> &'a str { v.get(k).and_then(Value::as_str).unwrap_or("") }
+fn or(a: &str, b: &str) -> String { if a.is_empty() { b.into() } else { a.into() } }
+
+/// Acp.rpc
+pub fn rpc(id: u64, method: &str, params: Value) -> String { json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}).to_string() }
+/// Acp.event: `{"type":ty, ...kvs}`
+pub fn event(ty: &str, kvs: Value) -> Value { let mut m = Map::new(); m.insert("type".into(), json!(ty)); if let Value::Object(o) = kvs { for (k, v) in o { m.insert(k, v); } } Value::Object(m) }
+/// Acp.init: the first line of every turn.
+pub fn init() -> String { rpc(1, "initialize", json!({"protocolVersion":1,"clientCapabilities":{"fs":{"readTextFile":false,"writeTextFile":false},"terminal":false}})) }
+/// Acp.mcp
+pub fn mcp(url: &str) -> Value { json!([{"type":"http","name":"backplane","url":url,"headers":[]}]) }
+/// Acp.open: session/new, or session/load for the thread's own session.
+pub fn open(t: &AcpTurn) -> String {
+    if t.session.is_empty() { rpc(2, "session/new", json!({"cwd":t.cwd,"mcpServers":mcp(&t.mcp)})) }
+    else { rpc(2, "session/load", json!({"sessionId":t.session,"cwd":t.cwd,"mcpServers":mcp(&t.mcp)})) }
+}
+fn say_rpc(sid: &str, text: &str) -> String { rpc(3, "session/prompt", json!({"sessionId":sid,"prompt":[{"type":"text","text":text}]})) }
+/// Acp.say.k: a new session gets Backplane's instructions first.
+pub fn say(fresh: bool, t: &AcpTurn, sid: &str) -> String {
+    if fresh { say_rpc(sid, &format!("<backplane_instructions>\n{}\n</backplane_instructions>\n\n{}", t.prompt, t.text)) } else { say_rpc(sid, &t.text) }
+}
+pub fn failed(msg: &str) -> Value { event("turn.failed", json!({"message":msg})) }
+/// Acp.hint: a sign-in problem says how to fix it.
+pub fn hint(msg: &str) -> String { let l = msg.to_lowercase(); if l.contains("auth") || l.contains("login") { format!("{msg} (sign in once with `grok login`)") } else { msg.into() } }
+/// Acp.error
+pub fn error(o: &Value, default: &str) -> String { o.get("error").and_then(|e| e.get("message")).and_then(Value::as_str).unwrap_or(default).to_string() }
+pub fn fail(a: &mut Acp, msg: &str) -> Out { a.done = true; Out { send: vec![], shapes: vec![failed(&hint(msg))] } }
+
+/// Acp.finished: the reply, then the turn's end.
+pub fn finished(a: &mut Acp) -> Vec<Value> {
+    a.done = true;
+    let mut v = vec![]; if !a.buf.is_empty() { v.push(event("item.completed", json!({"item":{"type":"agent_message","text":a.buf}}))) }
+    v.push(event("turn.completed", json!({}))); v
+}
+/// Acp.opened: the session is open: the prompt, and the thread's session known.
+pub fn opened(a: &mut Acp, t: &AcpTurn, sid: &str) -> Out {
+    a.sid = sid.into();
+    Out { send: vec![say(t.session.is_empty(), t, sid)], shapes: vec![event("thread.started", json!({"thread_id":sid}))] }
+}
+/// Acp.plan: an ACP plan's entries as todo items.
+pub fn plan(es: &Value) -> Value { Value::Array(es.as_array().map(|a| a.iter().map(|e| json!({"text":s(e, "content"), "status": e.get("status").and_then(Value::as_str).unwrap_or("pending")})).collect()).unwrap_or_default()) }
+
+/// Acp.update.k: the four session updates (the caller checks the session is open).
+pub fn update(a: &mut Acp, u: &Value) -> Vec<Value> {
+    match s(u, "sessionUpdate") {
+        "agent_message_chunk" => { let t = u.get("content").map(|c| s(c, "text")).unwrap_or(""); a.buf.push_str(t); vec![event("item.delta", json!({"text":t}))] }
+        "tool_call" => vec![event("item.completed", json!({"item":{"type":"command_execution","id":s(u, "toolCallId"),"command":or(s(u, "title"), &or(s(u, "kind"), "tool"))}}))],
+        "plan" => vec![event("item.updated", json!({"item":{"type":"todo_list","items":plan(u.get("entries").unwrap_or(&Value::Null))}}))],
+        "tool_call_update" => if matches!(s(u, "status"), "completed" | "failed") { vec![event("tool.done", json!({"id":s(u, "toolCallId")}))] } else { vec![] },
+        _ => vec![],
+    }
+}
+
+fn allow_first(os: &[Value], first: &str) -> String { os.iter().find(|o| s(o, "kind").starts_with("allow")).map(|o| or(s(o, "optionId"), first)).unwrap_or_else(|| first.into()) }
+fn options(params: &Value) -> Vec<Value> { params.get("options").and_then(Value::as_array).cloned().unwrap_or_default() }
+fn resp(id: &Value, result: Value) -> String { json!({"jsonrpc":"2.0","id":id,"result":result}).to_string() }
+/// Acp.permit: the agent asks before a tool runs; in full access, allow at once (the first option that allows).
+pub fn permit_auto(id: &Value, params: &Value) -> String {
+    let os = options(params); let first = os.first().map(|o| s(o, "optionId")).unwrap_or("");
+    resp(id, json!({"outcome":{"outcome":"selected","optionId":allow_first(&os, first)}}))
+}
+fn kind_find(os: &[Value], kind: &str) -> String { os.iter().find(|o| s(o, "kind") == kind).map(|o| s(o, "optionId").to_string()).unwrap_or_default() }
+/// Acp.choose: "accept" picks allow-once, "session" allow-always, anything else a reject; none of that kind: "".
+pub fn choose(answer: &str, os: &[Value]) -> String {
+    let (ao, aa) = (kind_find(os, "allow_once"), kind_find(os, "allow_always"));
+    match answer { "accept" => or(&ao, &aa), "session" => or(&aa, &ao), _ => or(&kind_find(os, "reject_once"), &kind_find(os, "reject_always")) }
+}
+/// Acp.permit.reply: the response line for a permission request, once the person answered (none of the kind: cancelled).
+pub fn permit_reply(id: &Value, params: &Value, answer: &str) -> String {
+    let opt = choose(answer, &options(params));
+    resp(id, json!({"outcome": if opt.is_empty() { json!({"outcome":"cancelled"}) } else { json!({"outcome":"selected","optionId":opt}) }}))
+}
+/// Acp.permit.answer: the response for a parked request line.
+pub fn permit_answer(body: &str, answer: &str) -> String {
+    let o: Value = serde_json::from_str(body).unwrap_or(Value::Null);
+    permit_reply(o.get("id").unwrap_or(&Value::Null), o.get("params").unwrap_or(&Value::Null), answer)
+}
+/// Acp.tool: what a request asks to run (its kind, else its title): what "Allow for session" remembers.
+pub fn tool(params: &Value) -> String { let tc = params.get("toolCall").unwrap_or(&Value::Null); or(s(tc, "kind"), &or(s(tc, "title"), "tool")) }
+/// Acp.detail: a line for the approval card.
+pub fn detail(params: &Value) -> String {
+    let tc = params.get("toolCall").unwrap_or(&Value::Null); let raw = tc.get("rawInput").unwrap_or(&Value::Null);
+    let d = or(s(raw, "command"), &or(s(raw, "path"), &or(s(raw, "file_path"), s(raw, "filePath"))));
+    or(&d, &or(s(tc, "title"), &raw.to_string().chars().take(400).collect::<String>()))
+}
+/// Driver::ask_info for a `bp.ask` shape whose request is the raw line (a string): an approval card for an ACP session/request_permission.
+pub fn ask_of(request: &Value) -> Option<super::AskInfo> {
+    let o: Value = serde_json::from_str(request.as_str()?).ok()?; let p = o.get("params")?;
+    Some(super::AskInfo { kind: "approval".into(), tool: tool(p), detail: detail(p), options: String::new() })
+}
+/// Driver::answer: the response line for the person's answer (accept | session | anything else declines).
+pub fn answer_of(request: &Value, answer: &str) -> Vec<String> { match request.as_str() { Some(l) => vec![permit_answer(l, answer)], None => vec![] } }
+/// A JSON-RPC id as Bend's `Ocp.id`/`Nat.read` read it: its digits as a number (0 when none, or a string id with none).
+pub fn num_id(o: &Value) -> u64 {
+    let raw = match o.get("id") { Some(Value::Number(n)) => n.to_string(), Some(Value::String(t)) => t.clone(), _ => return 0 };
+    raw.chars().filter_map(|c| c.to_digit(10)).fold(0u64, |a, d| a.saturating_mul(10).saturating_add(d as u64))
+}
+/// Acp.id: a request's id as JSON text, "" for a notification.
+pub fn id_json(o: &Value) -> Option<Value> { o.get("id").filter(|v| !v.is_null()).cloned() }
+
+/// Acp.permit.route: to the person (a `bp.ask` shape) or allowed at once.
+fn permit_route(ask: bool, o: &Value) -> Out {
+    if ask { Out { send: vec![], shapes: vec![json!({"type":"bp.ask","request":o.to_string()})] } }
+    else { Out { send: vec![permit_auto(o.get("id").unwrap_or(&Value::Null), o.get("params").unwrap_or(&Value::Null))], shapes: vec![] } }
+}
+/// Acp.request.k for a request from the agent: its method decides.
+pub fn request(a: &mut Acp, t: &AcpTurn, o: &Value) -> Out {
+    match s(o, "method") {
+        "session/update" => { if !a.open_now() { return Out::default() } // session/load replays the old conversation: only updates after the session is open belong to this turn
+            Out { send: vec![], shapes: update(a, o.get("params").and_then(|p| p.get("update")).unwrap_or(&Value::Null)) } }
+        "session/request_permission" => permit_route(t.ask, o),
+        _ => Out { send: id_json(o).map(|id| vec![json!({"jsonrpc":"2.0","id":id,"error":{"code":-32601,"message":"not supported"}}).to_string()]).unwrap_or_default(), shapes: vec![] },
+    }
+}
+/// Acp.reply.k: the answer to one of our requests.
+fn reply(a: &mut Acp, t: &AcpTurn, o: &Value) -> Out {
+    let ok = o.get("error").map_or(true, Value::is_null);
+    if !ok { return fail(a, &error(o, "grok failed")) }
+    match num_id(o) {
+        1 => Out { send: vec![open(t)], shapes: vec![] },
+        2 => { let sid = o.get("result").and_then(|r| r.get("sessionId")).and_then(Value::as_str).unwrap_or(&t.session).to_string(); opened(a, t, &sid) }
+        3 => Out { send: vec![], shapes: finished(a) },
+        _ => Out::default(),
+    }
+}
+/// Acp.line: one line from the agent.
+pub fn line(a: &mut Acp, t: &AcpTurn, o: &Value) -> Out {
+    if !o.is_object() { return Out::default() }
+    if !s(o, "method").is_empty() { request(a, t, o) } else { reply(a, t, o) }
+}
 
 #[cfg(test)]
 mod tests {

@@ -96,7 +96,7 @@ pub fn line(a: &mut Acp, t: &OcpTurn, o: &Value) -> Out {
 /// Oc.perm / Oc.config / Oc.args: the model and permissions as config (no flag takes them).
 pub fn config(model: &str, runtime: &str) -> String {
     let perm = match runtime { "approval-required" => "ask", "auto-accept-edits" => "edit", _ => "allow" };
-    let mut m = Map::new(); if picked(model) { m.insert("model".into(), json!(model)) }
+    let mut m = Map::new(); if picked(model) { m.insert("model".into(), json!(model)); }
     m.insert("permission".into(), json!({"edit": if perm == "ask" { "ask" } else { "allow" }, "bash": if perm == "allow" { "allow" } else { "ask" }, "webfetch": if perm == "allow" { "allow" } else { "ask" }}));
     Value::Object(m).to_string()
 }
