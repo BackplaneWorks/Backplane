@@ -10,11 +10,11 @@ use tokio_tungstenite::tungstenite::{Message, protocol::WebSocketConfig};
 #[derive(Debug)] pub enum Event { NetWake, Picture(Value,Timing), Status(String), Accepted, Error(String) }
 /// Where a reply's time went before the UI saw it: send to frame received, decode, delta/merge, and the body's size.
 #[derive(Debug,Clone,Default)] pub struct Timing { pub rtt_ms:f64, pub decode_ms:f64, pub process_ms:f64, pub bytes:usize, pub delta:bool }
-#[derive(Clone)] pub struct Config { pub hub:String, pub token_file:PathBuf, pub exit_after:Option<f64>, pub script:Option<PathBuf>, pub swatches:bool, pub gallery:bool, pub fonts:bool, pub theme:Option<String> }
+#[derive(Clone)] pub struct Config { pub hub:String, pub token_file:PathBuf, pub exit_after:Option<f64>, pub script:Option<PathBuf>, pub swatches:bool, pub gallery:bool, pub fonts:bool, pub solid_demo:Option<String>, pub theme:Option<String> }
 impl Config {
     pub fn parse() -> Result<Self> {
         let home=std::env::var("HOME")?;
-        let mut config=Self{hub:"ws://100.64.84.41:3799".into(),token_file:PathBuf::from(&home).join(".backplane-gpui/token"),exit_after:None,swatches:false,gallery:false,fonts:false,theme:None,script:std::env::var_os("BACKPLANE_GPUI_SCRIPT").map(PathBuf::from)};
+        let mut config=Self{hub:"ws://100.64.84.41:3799".into(),token_file:PathBuf::from(&home).join(".backplane-gpui/token"),exit_after:None,swatches:false,gallery:false,fonts:false,solid_demo:None,theme:None,script:std::env::var_os("BACKPLANE_GPUI_SCRIPT").map(PathBuf::from)};
         let mut args=std::env::args().skip(1);
         while let Some(arg)=args.next() { match arg.as_str() {
             "--hub"|"--url"=>config.hub=args.next().context("--url needs a URL")?,
@@ -22,10 +22,11 @@ impl Config {
             "--swatches"=>config.swatches=true,
             "--gallery"=>config.gallery=true,
             "--fonts"=>config.fonts=true,
+            "--solid-demo"=>config.solid_demo=Some(args.next().context("--solid-demo needs TRIS[,STEPS]")?),
             "--theme"=>config.theme=Some(args.next().context("--theme needs light|dark")?),
             "--script"=>config.script=Some(PathBuf::from(args.next().context("--script needs a file")?)),
             "--token-file"=>config.token_file=PathBuf::from(args.next().context("--token-file needs a path")?),
-            _=>anyhow::bail!("usage: backplane-gpui [--url http://HOST:PORT] [--token-file FILE] [--exit-after SECONDS] [--script FILE] [--swatches] [--gallery] [--fonts] [--theme light|dark]")
+            _=>anyhow::bail!("usage: backplane-gpui [--url http://HOST:PORT] [--token-file FILE] [--exit-after SECONDS] [--script FILE] [--swatches] [--gallery] [--fonts] [--solid-demo TRIS[,STEPS]] [--theme light|dark]")
         }}
         config.hub=config.hub.trim_end_matches('/').to_string();
         if let Some(rest)=config.hub.strip_prefix("http://") {config.hub=format!("ws://{rest}");}
