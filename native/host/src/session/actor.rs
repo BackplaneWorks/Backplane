@@ -125,10 +125,10 @@ impl ViewActor {
     }
     /// A reply to one of the hub's own reads for this view (`fab.look`, `review.page`, `telemetry.share`), kept for the next V
     /// request of that view (the policy applies it to its Ui as the JS actor does). Bounded: the oldest go first.
-    pub fn record_read(&mut self, view: &str, kind: &str, id: u64, result: Value) {
+    pub fn record_read(&mut self, view: &str, kind: &str, id: u64, ok: bool, result: Value) {
         // kept with the view AND the target it was read for (Bend's `same` is both; a move keeps the view id)
         let target = self.target.clone().unwrap_or(Value::Null);
-        self.reads.push((view.to_string(), target, json!({"kind": kind, "id": id, "result": result})));
+        self.reads.push((view.to_string(), target, json!({"kind": kind, "id": id, "ok": ok, "result": result})));
         let n = self.reads.len();
         if n > MAX_READS { self.reads.drain(..n - MAX_READS); }
     }
@@ -282,11 +282,12 @@ pub fn mask_page_reply(req: &Value, reply: &mut Value) {
     }
 }
 /// The hub answered one of its own reads for this connection's view: keep the reply for the policy (see `ViewActor::record_read`).
-/// `kind` is "fab.look", "review.page" or "telemetry.share"; `id` is the RPC id of the reply as the hub sent it (0 for fab.look);
+/// `kind` is "fab.look", "review.page" or "telemetry.share"; `id` is the RPC id of the reply as the hub sent it (0 for fab.look); `ok` is the reply's ok (a failed Rp reply
+/// clears its `@rp.req:N` differently); `result` is the reply's `result` (for a failure, what the hub sent in its place);
 /// `result` is the RPC reply's `result` as the hub sent it. The
 /// reply is the hub's own, never the client's.
-pub fn record_read(client: u64, view_id: &str, kind: &str, id: u64, result: Value) {
-    ACTORS.lock().unwrap().entry(client).or_default().record_read(view_id, kind, id, result);
+pub fn record_read(client: u64, view_id: &str, kind: &str, id: u64, ok: bool, result: Value) {
+    ACTORS.lock().unwrap().entry(client).or_default().record_read(view_id, kind, id, ok, result);
 }
 /// The reads recorded since the last V request, for `reads` in the next one.
 pub fn take_reads(client: u64, view_id: &str, target: &Value) -> Vec<Value> {
@@ -526,17 +527,17 @@ mod tests {
         let mut a = ViewActor::default();
         let t1 = json!({"kind": "thread", "id": "t1"}); let t2 = json!({"kind": "thread", "id": "t2"});
         a.reply("v1", &req("thread", "t1"), &pol("t1", &[]));
-        for i in 0..40 { a.record_read("v1", "fab.look", 0, json!({"n": i})); }
+        for i in 0..40 { a.record_read("v1", "fab.look", 0, true, json!({"n": i})); }
         let r = a.take_reads("v1", &t1);
         assert_eq!(r.len(), MAX_READS);
-        assert_eq!(r[0]["result"]["n"], json!(24)); assert_eq!(r[15]["result"]["n"], json!(39)); assert_eq!(r[0]["kind"], json!("fab.look")); assert_eq!(r[0]["id"], json!(0));
+        assert_eq!(r[0]["result"]["n"], json!(24)); assert_eq!(r[15]["result"]["n"], json!(39)); assert_eq!(r[0]["kind"], json!("fab.look")); assert_eq!(r[0]["id"], json!(0)); assert_eq!(r[0]["ok"], json!(true));
         assert!(a.take_reads("v1", &t1).is_empty());
         // a read never reaches another view ...
-        a.record_read("v1", "fab.look", 1, json!({}));
+        a.record_read("v1", "fab.look", 1, false, json!({}));
         assert!(a.take_reads("v2", &t1).is_empty());
         assert!(a.take_reads("v1", &t1).is_empty(), "dropped with the move");
         // ... nor another target of the same view (a move keeps the view id)
-        a.record_read("v1", "fab.look", 2, json!({}));
+        a.record_read("v1", "fab.look", 2, true, json!({}));
         assert!(a.take_reads("v1", &t2).is_empty());
         assert!(a.take_reads("v1", &t1).is_empty());
     }
