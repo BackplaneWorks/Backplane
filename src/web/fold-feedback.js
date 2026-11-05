@@ -64,6 +64,8 @@ export class FoldFeedback {
     return () => { if (this.active?.revision === revision) { this.active = null;this.changed(); } };
   }
   get showing() { return !!this.active; }
+  // the rows a run opened at the click puts back (their ids)
+  restored() { return this.active?.open ? new Set(this.active.rows.map(r => attr(r, 'data-id') || r.key).filter(Boolean)) : null; }
   project(page) {
     const a = this.active;
     if (!a) return page;

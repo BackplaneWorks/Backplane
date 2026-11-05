@@ -1304,17 +1304,19 @@ function renderPage() {
   // or request authority from the currently selected conversation.
   const tc = RR ? pnow() : 0;
   if (RR) RR.t("render.overlay", tc - t0);
+  // a run of tool calls opened or shut at the click (fold-feedback.js),
+  // before the continuations: its rows get the same controls the hub's do
+  if (frontendNode) foldFeedback.seen(frontendNode);
+  if (frontendNode || transitionNode) page = foldFeedback.project(page);
   // (a retained picture of a thread read before: its long messages drawn
   // with the pages read for them then, as the hub's view will draw them)
   const heldBodies = !frontendNode && transitionNode ? bodyWindows.heldParts(transitionFor) : null;
   if (frontendNode || transitionNode || focusedNode) page = thinContinuations.project(page,
-    node => node.tag === "bp-memo" && (frontendNode ? bodyWindows.parts : heldBodies?.parts)?.get(node.key)?.automatic === true && !(heldBodies && node.key.startsWith("@live:")) ? node : expand(node), !!frontendNode);
+    node => node.tag === "bp-memo" && (frontendNode ? bodyWindows.parts : heldBodies?.parts)?.get(node.key)?.automatic === true && !(heldBodies && node.key.startsWith("@live:")) ? node : expand(node), !!frontendNode,
+    frontendNode ? foldFeedback.restored() : null);
   const tb = RR ? pnow() : 0;
   if (frontendNode) page = bodyWindows.project(page);
   else if (heldBodies) page = bodyWindows.projectHeld(page, transitionFor);
-  // a run of tool calls opened or shut at the click (fold-feedback.js)
-  if (frontendNode) foldFeedback.seen(frontendNode);
-  if (frontendNode || transitionNode) page = foldFeedback.project(page);
   if (frontendNode && remoteReady || transitionNode && transitionFor === targetKey(presentationTarget(currentSession()))) page = pendingPresentation(page);
   const t1 = PERF || RR ? pnow() : 0;
   if (RR) { RR.t("render.continuations", tb - tc);RR.t("render.bodies", t1 - tb); }
