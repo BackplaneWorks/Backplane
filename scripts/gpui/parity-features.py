@@ -397,7 +397,7 @@ R(A, "Settings stick across restarts", m=["setting.set"], pf="state", c="ppp", l
 # ---- Accounts, pairing, machines
 A = "Accounts, pairing, machines"
 R(A, "Pairing token and bearer / cookie auth", r=["/hello", "/ws", "/client/capabilities"], hub="partial", pf="side", c="ddd", lane=L["core"], ev="auth.rs laws; badauth scenario identical (parity-rust6)")
-R(A, "Pairing link, QR code, phone scan", r=["/auth/pair"], hub="missing", c="npp", lane=L["net"], ev="info pair/pair.qr seeded empty in Rust; phones: Pair.swift/Pair.kt scan; android 01-after-pair.png on JS hub")
+R(A, "Pairing link, QR code, phone scan", r=["/auth/pair"], hub="partial", c="npp", lane=L["net"], ev="/auth/pair, /auth/cache and the QR code of /auth/invitations (net/routes.rs, net/qr.rs); the info keys pair and pair.qr are always empty, as the Bend hub sends them (Hub.pair_msg.of: shared root credentials never leave the hub); phones: Pair.swift/Pair.kt scan; android 01-after-pair.png on JS hub")
 R(A, "Wrong pairing, reconnect banners", hub="partial", c="ddd", lane=L["pedge"], ev="badauth identical; android 08a view-failed banner shot")
 R(A, "Your machines, sync, far threads (<link>~<id>)", m=["view.action"], r=["/far/push", "/far/log", "/far/rpc"], hub="missing", c="mpp", lane=L["net"], ev="no far.rs; mirrors, catalog and routing absent")
 R(A, "Agents across machines (mcp.call, thread_send to a machine)", m=["mcp.call"], c="nnn", lane=L["net"], ev="no fmcp port")
