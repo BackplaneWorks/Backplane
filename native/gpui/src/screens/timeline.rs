@@ -361,10 +361,34 @@ impl Backplane {
     }
 }
 
+/// How near its end (px) the timeline still counts as there, as the web planner's End.at.
+const END_SLACK: f32 = 4.;
+/// `y` is the scroll offset (0 at the top, negative below it), `max` the scroll range. An offset past the range (a jump to the end not painted yet) is at the end.
+pub fn at_end(y: f32, max: f32) -> bool { -y >= max - END_SLACK }
+/// Whether a new picture takes the timeline to its end. Only a reader already there follows; a thread newly on screen opens at its end
+/// unless it has a remembered place. `restoring`: that place was just put back, and `max` still measures the thread before it.
+pub fn follows(same_thread: bool, remembered: bool, restoring: bool, y: f32, max: f32) -> bool {
+    if same_thread { !restoring && at_end(y, max) } else { !remembered }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use core::prelude::v1::test;
+    #[test] fn a_reader_at_the_end_follows_and_one_who_scrolled_up_stays() {
+        assert!(follows(true, false, false, -1000., 1000.)); assert!(follows(true, false, false, -997., 1000.));
+        assert!(!follows(true, false, false, -700., 1000.)); assert!(!follows(true, false, false, 0., 1000.));
+    }
+    #[test] fn a_thread_shorter_than_the_list_is_at_its_end_and_a_jump_not_painted_yet_counts() {
+        assert!(at_end(0., 0.)); assert!(at_end(-1_000_000., 1000.));
+    }
+    #[test] fn a_thread_newly_on_screen_opens_at_its_end_unless_it_has_a_place() {
+        assert!(follows(false, false, false, 0., 1000.)); assert!(!follows(false, true, false, -1000., 1000.));
+    }
+    #[test] fn a_place_put_back_survives_the_last_threads_scroll_range() {
+        // the place is deeper than the short thread before it reached: it reads as "at the end" until this thread's first picture lands
+        assert!(at_end(-500., 100.)); assert!(!follows(true, true, true, -500., 100.));
+    }
     #[test] fn a_sent_messages_attachments_split_into_pictures_and_file_chips() {
         let l: Value = serde_json::from_str(r#"[{"label":"a.png","path":"/h/attachments/t1/k-a.png","image":true,"url":"/img?p=1"},{"label":"b.pdf","path":"/h/attachments/t1/k-b.pdf","image":false,"url":""}]"#).unwrap();
         let (p, f) = split_attachments(&l); assert_eq!(p.len(), 1); assert_eq!(f, vec!["b.pdf".to_string()]); assert_eq!(split_attachments(&Value::Null), (vec![], vec![]));
