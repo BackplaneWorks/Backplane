@@ -396,6 +396,11 @@ impl Hub {
     /// One inbound request -> the frames to send back, in order.
     pub async fn request(&self, c: &mut Conn, msg: &Value) -> Vec<Value> {
         let out = self.request_one(c, msg).await;
+        // the Files tab and its kin are reads of the hub for a hub-drawn view: the policy applies the reply (Fm.reply, Pdf.got, Mech.after ...) on the view's next request
+        let method = msg.get("m").and_then(Value::as_str).unwrap_or("");
+        if matches!(method, "files.dir" | "pdf.page" | "mech.list" | "mech.render" | "boards.list" | "history.refs") && !c.view_id.is_empty() {
+            if let Some(r) = out.first().filter(|r| r["t"] == "reply") { crate::session::record_read(c.client, &c.view_id, method, r["id"].as_u64().unwrap_or(0), r["ok"].as_bool().unwrap_or(true), r["result"].clone()); }
+        }
         // the view actor folds the answer of a request its own commands sent (session/actor.rs: @rp.req, @telemetry.req)
         if !msg.get("m").and_then(Value::as_str).unwrap_or("").starts_with("view.") { if let Some(id) = msg.get("id").and_then(Value::as_u64) { let m = msg.get("m").and_then(Value::as_str).unwrap_or(""); if crate::session::is_job(m) { crate::session::replied_late(c.client, id) } else { crate::session::replied(c.client, id) } } }
         out
