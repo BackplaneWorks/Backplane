@@ -3,6 +3,7 @@
 pub mod dir;
 pub mod fm;
 pub mod git;
+pub mod misc;
 pub mod serve;
 #[path = "../kicad/mod.rs"]
 pub mod kicad;
@@ -15,6 +16,7 @@ pub fn start(hub: Arc<Hub>) {
     hub.register_http(Arc::new(Img));
     hub.register_rpc(Arc::new(Files));
     hub.register_rpc(Arc::new(GitRpc));
+    hub.register_rpc(Arc::new(misc::Misc));
     kicad::start(&hub);
 }
 
