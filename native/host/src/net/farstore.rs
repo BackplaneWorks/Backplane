@@ -12,12 +12,18 @@
 use super::{far::{self, Got, Item}, origin};
 use crate::{api::FarView, model::{Model, Page, Row}, store::Store};
 use serde_json::{json, Value};
-use std::{collections::HashMap, path::{Path, PathBuf}, sync::{Arc, Mutex}};
+use std::{collections::HashMap, path::{Path, PathBuf}, sync::{Arc, Mutex, RwLock}};
 
-struct Mirror { epoch: String, head: u64, items: Store, events: Store, model: Model }
-pub struct FarStore { dir: PathBuf, m: Mutex<HashMap<String, Mirror>> }
+/// One mirror. The writer (epoch, head, the items file) is behind its own lock, held through the fsyncs of `take` and
+/// nothing else; the derived events store is read without any lock (`Store` readers never wait for a writer); the
+/// `Model` has a read-write lock held only to apply or to read an index. So a view of a mirrored thread never waits for a
+/// disk write, and one link never waits for another.
+struct Mirror { w: Mutex<Writer>, events: Store, model: RwLock<Model> }
+struct Writer { epoch: String, head: u64, items: Store }
+pub struct FarStore { dir: PathBuf, m: RwLock<HashMap<String, Arc<Mirror>>> }
 
-/// What a batch did: the new head, whether a gap came first, and the renamed events for the presenter.
+/// What a batch did: the new head, whether a gap came first, and the renamed events for the presenter. `reset`: the
+/// epoch changed and the mirror started over: the presenter must forget the link's old rows first (`Fr.forget`).
 pub struct Taken { pub got: Got, pub events: Vec<Value>, pub reset: bool }
 
 fn safe(link: &str) -> bool { super::botnet::safe(link) }
@@ -31,7 +37,7 @@ impl Mirror {
         for e in ["jsonl", "events"] { let _ = std::fs::remove_file(path(dir, link, e)); }
         let items = Store::open(&path(dir, link, "jsonl"))?;
         items.append(&json!({"epoch": epoch, "tail": 0}).to_string())?;
-        Ok(Mirror { epoch: epoch.into(), head: 0, items, events: Store::open(&path(dir, link, "events"))?, model: Model::default() })
+        Ok(Mirror { w: Mutex::new(Writer { epoch: epoch.into(), head: 0, items }), events: Store::open(&path(dir, link, "events"))?, model: RwLock::new(Model::default()) })
     }
     /// Read a mirror back: the items file, then the derived events rebuilt from it.
     fn load(dir: &Path, link: &str) -> anyhow::Result<Mirror> {
@@ -49,7 +55,7 @@ impl Mirror {
             if !out.is_empty() { events.append_many(&out.iter().map(String::as_str).collect::<Vec<_>>())?; }
         }
         let model = Model::build(&events)?;
-        Ok(Mirror { epoch, head, items, events, model })
+        Ok(Mirror { w: Mutex::new(Writer { epoch, head, items }), events, model: RwLock::new(model) })
     }
 }
 
@@ -62,72 +68,85 @@ impl FarStore {
             let p = e.path();
             if p.extension().and_then(|x| x.to_str()) != Some("jsonl") { continue }
             let Some(link) = p.file_stem().and_then(|s| s.to_str()).map(str::to_string) else { continue };
-            if safe(&link) { m.insert(link.clone(), Mirror::load(&dir, &link)?); }
+            if safe(&link) { m.insert(link.clone(), Arc::new(Mirror::load(&dir, &link)?)); }
         }
-        Ok(Arc::new(FarStore { dir, m: Mutex::new(m) }))
+        Ok(Arc::new(FarStore { dir, m: RwLock::new(m) }))
     }
-    pub fn head(&self, link: &str) -> u64 { self.m.lock().unwrap().get(link).map_or(0, |m| m.head) }
-    pub fn epoch(&self, link: &str) -> String { self.m.lock().unwrap().get(link).map(|m| m.epoch.clone()).unwrap_or_default() }
-    pub fn links(&self) -> Vec<String> { let mut v: Vec<String> = self.m.lock().unwrap().keys().cloned().collect(); v.sort(); v }
+    fn get(&self, link: &str) -> Option<Arc<Mirror>> { self.m.read().unwrap().get(link).cloned() }
+    pub fn head(&self, link: &str) -> u64 { self.get(link).map_or(0, |m| m.w.lock().unwrap().head) }
+    pub fn epoch(&self, link: &str) -> String { self.get(link).map(|m| m.w.lock().unwrap().epoch.clone()).unwrap_or_default() }
+    pub fn links(&self) -> Vec<String> { let mut v: Vec<String> = self.m.read().unwrap().keys().cloned().collect(); v.sort(); v }
     /// Fr.recv: a batch from `link` that follows `since` and ends at `to`. A different epoch starts the mirror over; a
     /// batch past a gap changes nothing; of an overlapping batch only the new items are taken, durably, in order.
-    /// (Blocking: fsyncs.)
+    /// (Blocking: fsyncs, under this link's writer lock only.)
     pub fn take(&self, link: &str, epoch: &str, since: u64, to: u64, items: &[Item]) -> anyhow::Result<Taken> {
         anyhow::ensure!(safe(link), "not a link id");
-        let mut g = self.m.lock().unwrap();
-        let reset = g.get(link).map_or(false, |m| epoch_changed(&m.epoch, epoch));
-        if reset || !g.contains_key(link) { g.insert(link.to_string(), Mirror::fresh(&self.dir, link, epoch)?); }
-        let m = g.get_mut(link).unwrap();
-        if m.epoch.is_empty() && !epoch.is_empty() { m.epoch = epoch.to_string() }
-        let got = far::take(m.head, since, to, items);
+        let mut reset = false;
+        let mirror = {
+            let cur = self.get(link);
+            let changed = match &cur { Some(m) => epoch_changed(&m.w.lock().unwrap().epoch, epoch), None => false };
+            if changed || cur.is_none() {
+                // (a new mirror is made before the map is locked: its files are written without holding up other links)
+                let fresh = Arc::new(Mirror::fresh(&self.dir, link, epoch)?);
+                reset = changed;
+                self.m.write().unwrap().insert(link.to_string(), fresh.clone());
+                fresh
+            } else { cur.unwrap() }
+        };
+        let mut w = mirror.w.lock().unwrap();
+        let got = far::take(w.head, since, to, items);
         if got.gap { return Ok(Taken { got, events: vec![], reset }) }
         let mut lines: Vec<String> = got.items.iter().map(|i| i.json().to_string()).collect();
         lines.push(json!({"head": got.head}).to_string());
-        m.items.append_many(&lines.iter().map(String::as_str).collect::<Vec<_>>())?;
+        w.items.append_many(&lines.iter().map(String::as_str).collect::<Vec<_>>())?;
         let events: Vec<Value> = got.items.iter().filter_map(|i| rename(link, &i.c)).collect();
         if !events.is_empty() {
             let texts: Vec<String> = events.iter().map(Value::to_string).collect();
-            let first = m.events.append_many(&texts.iter().map(String::as_str).collect::<Vec<_>>())?;
-            for (i, t) in texts.iter().enumerate() { m.model.apply_line((first + i + 1) as u32, t) }
+            let first = mirror.events.append_many(&texts.iter().map(String::as_str).collect::<Vec<_>>())?;
+            let mut model = mirror.model.write().unwrap();
+            for (i, t) in texts.iter().enumerate() { model.apply_line((first + i + 1) as u32, t) }
         }
-        m.head = got.head;
+        w.head = got.head;
         Ok(Taken { got, events, reset })
     }
     /// What the presenter needs to show a mirror after a restart: every event except the history of messages and
-    /// activity, plus the last message of each thread (sidebar rows and previews), not the whole mirror.
+    /// activity, plus the last message of each thread (sidebar rows and previews), not the whole mirror. Reads the
+    /// derived store in chunks without any lock and keeps one message per thread while it scans (blocking).
     pub fn replay_events(&self, link: &str) -> Vec<Value> {
-        let g = self.m.lock().unwrap();
-        let Some(m) = g.get(link) else { return vec![] };
+        let Some(m) = self.get(link) else { return vec![] };
+        let events = m.events.clone();
         let mut last: HashMap<String, usize> = HashMap::new();
-        let mut all: Vec<Value> = vec![];
-        for a in (0..m.events.len()).step_by(4096) {
-            for l in m.events.range(a, a + 4096).unwrap_or_default() {
+        let mut all: Vec<Option<Value>> = vec![];
+        for a in (0..events.len()).step_by(4096) {
+            for l in events.range(a, a + 4096).unwrap_or_default() {
+                // (a message's text is parsed only to keep it if it is its thread's newest so far)
+                let kind = if l.contains("\"$\":\"MessagePosted\"") { 1 } else if ["MessageFrom", "ActivityLogged", "TodosChanged", "TodosSet", "WorkSet"].iter().any(|k| l.contains(&format!("\"$\":\"{k}\""))) { 2 } else { 0 };
+                if kind == 2 { continue }
                 let Ok(e) = serde_json::from_str::<Value>(&l) else { continue };
-                match e["$"].as_str().unwrap_or("") {
-                    "MessagePosted" => { last.insert(e["thread"].as_str().unwrap_or("").to_string(), all.len()); all.push(e) }
-                    "MessageFrom" | "ActivityLogged" | "TodosChanged" | "TodosSet" | "WorkSet" => {}
-                    _ => all.push(e),
+                if kind == 1 {
+                    let th = e["thread"].as_str().unwrap_or("").to_string();
+                    if let Some(&old) = last.get(&th) { all[old] = None } // the previous one is dropped as soon as a newer one is seen
+                    last.insert(th, all.len());
                 }
+                all.push(Some(e));
             }
         }
-        let keep: std::collections::HashSet<usize> = last.values().copied().collect();
-        all.into_iter().enumerate().filter(|(i, e)| e["$"] != "MessagePosted" || keep.contains(i)).map(|(_, e)| e).collect()
+        all.into_iter().flatten().collect()
     }
 }
 
 impl FarView for FarStore {
     fn has(&self, thread: &str) -> bool {
         let l = far::link(thread);
-        !l.is_empty() && self.m.lock().unwrap().get(&l).map_or(false, |m| m.model.threads.contains_key(thread))
+        !l.is_empty() && self.get(&l).map_or(false, |m| m.model.read().unwrap().threads.contains_key(thread))
     }
     fn page(&self, thread: &str, before: u64, limit: usize) -> Option<Page> {
-        let g = self.m.lock().unwrap();
-        let m = g.get(&far::link(thread))?;
-        m.model.threads.contains_key(thread).then(|| m.model.page(&m.events, thread, before, limit).ok()).flatten()
+        let m = self.get(&far::link(thread))?;
+        let model = m.model.read().unwrap();
+        model.threads.contains_key(thread).then(|| model.page(&m.events, thread, before, limit).ok()).flatten()
     }
     fn latest_context(&self, thread: &str) -> Vec<Row> {
-        let g = self.m.lock().unwrap();
-        g.get(&far::link(thread)).and_then(|m| m.model.latest_context(&m.events, thread).ok()).unwrap_or_default()
+        self.get(&far::link(thread)).and_then(|m| m.model.read().unwrap().latest_context(&m.events, thread).ok()).unwrap_or_default()
     }
 }
 
@@ -183,6 +202,28 @@ mod tests {
         assert!(!fs.has("L~t") && fs.has("L~u"), "what the old history held is gone");
         let t = fs.take("L", "", 1, 1, &[]).unwrap(); assert!(!t.reset, "a batch with no epoch (legacy) keeps the mirror");
         assert_eq!(fs.take("L", "new", 1, 1, &[]).unwrap().reset, false);
+        let _ = std::fs::remove_dir_all(h);
+    }
+    #[test] fn far_the_first_epoch_replaces_a_legacy_projection_and_survives_a_restart() {
+        let h = home("late");
+        { let fs = FarStore::open(&h).unwrap();
+          fs.take("L", "", 0, 1, &[thread(1, "t")]).unwrap();           // a legacy push: no epoch yet
+          let t = fs.take("L", "learned", 0, 2, &[thread(1, "u"), msg(2, "u", "user", "x")]).unwrap();
+          assert!(t.reset, "Bend: the first epoch-aware pull replaces the legacy projection (Fr.epoch.changed \"\" -> e)"); }
+        let fs = FarStore::open(&h).unwrap();
+        assert_eq!((fs.epoch("L"), fs.head("L")), ("learned".to_string(), 2), "the epoch is in the file's header: a restart keeps it");
+        assert!(fs.has("L~u") && !fs.has("L~t"));
+        let _ = std::fs::remove_dir_all(h);
+    }
+    #[test] fn far_a_slow_writer_does_not_hold_up_a_view_or_another_link() {
+        let h = home("lock"); let fs = FarStore::open(&h).unwrap();
+        fs.take("A", "e", 0, 2, &[thread(1, "t"), msg(2, "t", "user", "one")]).unwrap(); fs.take("B", "e", 0, 1, &[thread(1, "u")]).unwrap();
+        // hold A's writer lock as a take in its fsync does: reads of A and takes on B go on
+        let a = fs.get("A").unwrap(); let _w = a.w.lock().unwrap();
+        use crate::api::FarView;
+        assert!(fs.has("A~t") && fs.page("A~t", 0, 32).is_some() && !fs.latest_context("A~t").is_empty(), "views of A do not wait for A's writer");
+        fs.take("B", "e", 1, 2, &[msg(2, "u", "user", "two")]).unwrap();
+        assert_eq!(fs.page("B~u", 0, 32).unwrap().rows.len(), 1, "another link takes meanwhile");
         let _ = std::fs::remove_dir_all(h);
     }
     #[test] fn far_what_stays_home_never_reaches_a_mirror() {
