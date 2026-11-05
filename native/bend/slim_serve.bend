@@ -213,7 +213,7 @@ def Pol.local.scan.k(ok: Bool, +k: String, +v: String, acc: List<&2, J.KV>) -> L
 def Pol.local.scan(xs: List<&2, Sigma<&2, &2, String, _ => String>>, acc: List<&2, J.KV>) -> List<&2, J.KV>:
   match xs:
     case Nil{}: acc
-    case (k, v) <> t: Pol.local.scan(t, Pol.local.scan.k(Pol.local.extra(k), k, v, acc))
+    case (+k, +v) <> t: Pol.local.scan(t, Pol.local.scan.k(Pol.local.extra(k), k, v, acc))
 
 def Pol.local.get(+u: U.Ui) -> J.Json:
   J.Json.obj(Pol.local.scan(Map.to_list(&2, String, U.Ui.infos(u)), [J.KV{Pol.local.k1(), J.Json.str(U.Ui.info(u, Pol.local.k1()))}, J.KV{Pol.local.k2(), J.Json.str(U.Ui.info(u, Pol.local.k2()))},
