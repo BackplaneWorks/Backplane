@@ -362,7 +362,7 @@ R(A, "Design history bar, playback, steps", m=["history.refs"], hub="partial", p
 R(A, "Compare versions, overlay, Old/Diff/New, per layer", m=["history.resolve", "history.refs", "kicad.warm"], hub="partial", pf="review", c="mpp", lane=L["files"], ev="history.resolve/refs/warm registered; hist/cmp UI unproven")
 R(A, "Review tab: BOM, Checks, Comments, Release", m=["review.bom", "review.checks", "review.tick", "review.comment", "review.release"], pf="review", c="mpp", lane=L["gview"], ev="Rust: 5 requests with tests; ReviewView.swift/.kt exist; GPUI none")
 R(A, "Review comments pinned on board/schematic", m=["review.comment"], t=["review_comment", "review_comments"], c="mpp", lane=L["mcp"], ev="request done, agent tools missing")
-R(A, "Browser tab (agent's page), screen frames", r=["/screen.jpg"], c="mpp", lane=L["term"], ev="no browser helper in Rust")
+R(A, "Browser tab (agent's page), screen frames", r=["/screen.jpg"], pf="term", c="mpp", lane=L["term"], ev="term/driver.rs serves GET /bots/<id>/screen.jpg (newest JPEG frame, no-store) and the shot events; DECISION 2026-11-05: GPUI draws these frames with the viewers (option A, docs/gpui/BROWSER-EMBED.md), lane gpui-screens")
 R(A, "Viewer layout (split pane, folding, shortcuts)", hub="n/a", c="mpp", lane=L["gview"], ev="client-only; GPUI has no viewer pane")
 R(A, "KiCad over IPC (headless server per project)", m=["kicad.retry", "kicad.install", "kicad.open", "cad.install", "kicad.export10"], t=["kicad_ipc", "kicad_ipc_status"], hub="partial", pf="kipc", c="nnn", lane=L["files"], ev="kicad.retry, kicad.export10 done; kicad.install/open/cad.install not")
 R(A, "KiCad components list, render asset", m=["kicad.components", "kicad.renderAsset"], hub="partial", pf="files", c="mpp", lane=L["files"], ev="kicad.components registered; kicad.renderAsset has no handler")
@@ -421,7 +421,7 @@ R(A, "Update (self-update, managed installs)", m=["update.now", "update.check"],
 # ---- Terminal, browser, voice, secrets
 A = "Terminal, browser, voice, secrets"
 R(A, "Terminal in the viewer (pty, VT emulation)", m=["term.open", "term.input", "term.resize", "term.snap", "term.restart"], pf="term", c="mpp", lane=L["term"], ev="term/: pty + vt.rs + emb.rs")
-R(A, "Embedded browser (CEF), browser.place/embed", m=["browser.embed", "browser.place", "browser.seen"], c="npp", lane=L["term"], ev="no helper process in Rust")
+R(A, "Embedded browser (CEF), browser.place/embed", m=["browser.embed", "browser.place", "browser.seen"], c="npp", lane=L["term"], ev="DECISION 2026-11-05: not ported; GPUI shows the JPEG-frame Browser tab (option A) and no CEF spike is planned (docs/gpui/BROWSER-EMBED.md). The helper runs headless; engine.live stays empty")
 R(A, "Voice dictation, clarify words, Pebble ring", m=["bots.voice"], r=["/voice/in"], c="mpp", lane=L["voice"], ev="no handler; VoiceRecorder.swift/.kt")
 R(A, "Secret box (secret.set/del/list/dismiss, vault)", m=["secret.set", "secret.del", "secret.list", "secret.dismiss"], c="mpp", lane=L["sett"], ev="settings/vault.rs (AES-256-GCM, JS file format, fail-closed, staged writes) + secret.rs RPCs; masks in mask.rs, NOT yet called by commit_many / agent lines / MCP answers (core+agents seams)")
 R(A, "Rules and task board (rules.set/drop, board.set/drop)", m=["rules.set", "rules.drop", "board.set", "board.drop"], hub="partial", pf="state", c="mpp", lane=L["state"], ev="agents/rules.rs gates tools; the requests are unhandled; state keeps rule./board. settings")
