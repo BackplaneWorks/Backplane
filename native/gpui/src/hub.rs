@@ -6,7 +6,7 @@ use std::{collections::HashMap, path::PathBuf, time::{Duration, SystemTime, UNIX
 use tokio::sync::mpsc::{self, Sender};
 use tokio_tungstenite::tungstenite::{Message, protocol::WebSocketConfig};
 
-#[derive(Debug)] pub enum Command { Sleep(f64), Select(String), Send(String), Draft(String), Action(String,String), Page(String) }
+#[derive(Debug)] pub enum Command { Rpc(String,crate::screens::settings::Secret), Sleep(f64), Select(String), Send(String), Draft(String), Action(String,String), Page(String) }
 #[derive(Debug)] pub enum Event { Plot(Vec<u8>), NetWake, Picture(Value,Timing), Status(String), Accepted, Error(String) }
 /// Where a reply's time went before the UI saw it: send to frame received, decode, delta/merge, and the body's size.
 #[derive(Debug,Clone,Default)] pub struct Timing { pub rtt_ms:f64, pub decode_ms:f64, pub process_ms:f64, pub bytes:usize, pub delta:bool }
@@ -112,6 +112,7 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
             if let Command::Sleep(s)=&command {anyhow::bail!("net_sleep:{s}");}
             let request=match command {
                 Command::Sleep(_)=>unreachable!(),
+                Command::Rpc(m,p)=>{static RPC:std::sync::atomic::AtomicU64=std::sync::atomic::AtomicU64::new(1<<30);json!({"id":RPC.fetch_add(1,std::sync::atomic::Ordering::Relaxed),"m":m,"p":p.0})},
                 Command::Select(id)=>{let id=unqualify(&id);v.target=json!({"kind":"thread","id":id});v.session["sel"]=json!(id);v.view_id.clear();v.request("view.open",json!({}))},
                 Command::Send(text)=>{ensure!(!v.view_id.is_empty(),"view not ready");let id=v.target["id"].as_str().unwrap_or("").to_string();v.session["drafts"][id]=json!(text);v.request("view.action",json!({"action":"send","value":""}))},
                 Command::Draft(text)=>{let id=v.target["id"].as_str().unwrap_or("").to_string();v.session["drafts"][id]=json!(text);v.request("view.action",json!({"action":"draft","value":text}))},

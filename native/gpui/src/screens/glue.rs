@@ -72,6 +72,9 @@ impl Backplane {
     pub(crate) fn picture_applied(&mut self, cx: &mut Context<Self>) {
         self.draft_from_hub(cx);
         super::settings::sync(self, cx);
+        // settings opened: the keys go into it; closed: back to the composer
+        let open = self.data["settings"].is_object();
+        if open != self.screens.settings_was_open { self.screens.settings_was_open = open; if open { self.screens.focus_settings = true; } else { self.want_focus = true; } }
     }
     /// A plot frame arrived on the socket: apply it to what this client holds.
     pub(crate) fn plot_received(&mut self, bytes: &[u8]) {
