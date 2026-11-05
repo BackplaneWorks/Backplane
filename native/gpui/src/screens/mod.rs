@@ -2,6 +2,8 @@
 //! hub already sends the phones (src/mobile/screen.bend) and answers with a view action; no decision lives here.
 pub mod asks;
 pub mod attach;
+pub mod bar;
+pub mod blink;
 pub mod bots;
 pub mod drafts;
 pub mod composer;
