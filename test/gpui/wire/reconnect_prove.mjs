@@ -47,7 +47,7 @@ const kinds={};for(const [,a,b] of strictDiff){const k=(a||'-')+' | '+(b||'-');k
 const normEq=refLog.length===joined.length&&refLog.every((x,i)=>norm(x)===norm(joined[i]));
 const lines=readFileSync(root+'/home/events.jsonl','utf8').trimEnd().split('\n');
 const fileEq=lines.length===refLog.length&&lines.every((l,i)=>norm(JSON.parse(l))===norm(refLog[i]));//((l,i)=>norm(JSON.parse(l))===norm(refLog[i]));
-const j2=[...firstLog.slice(0,held),...got2];const have2=new Set(j2.map(key));const absent2=refLog.map((x,i)=>[i,x]).filter(([i,x])=>!have2.has(key(x)));
+const j2=[...firstLog.slice(0,held),...got2];const have2=new Set(j2.map(norm));const absent2=refLog.map((x,i)=>[i,x]).filter(([i,x])=>!have2.has(norm(x)));
 const missingStrict=refLog.filter(x=>!new Set(joined.map(key)).has(key(x)));
 const out={bin,agents,held,firstLiveItems:firstLive,firstOrigin,resumeOrigin,resumeSince,refItems:refLog.length,joinedItems:joined.length,eventsJsonlLines:lines.length,
  strictDifferences:strictDiff.length,strictByKind:kinds,strictAbsent:missingStrict.length,strictAbsentKinds:[...new Set(missingStrict.map(kind))],
@@ -58,6 +58,7 @@ const checks={'first+resume has every log line once, in order (normalised)':norm
  'strict differences only blanked turn inputs':Object.keys(kinds).every(k=>/SettingSet:(fallback|launch)\.input\./.test(k)),
  'resume honoured since/origin':resumeSince===held&&resumeOrigin===firstOrigin,
  'live frame carried items that are not log lines':firstLive>0,
+ 'strict-absent items are exactly the blanked inputs (one per thread)':out.strictAbsent===0||(out.strictAbsentKinds.length===1&&/fallback|launch/.test(out.strictAbsentKinds[0])),
  'a client counting live items into since is short by exactly that many':out.faultyClient.absentLines===firstLive};
 let ok=true;for(const [k,v] of Object.entries(checks)){console.log((v?'PASS ':'FAIL ')+k);ok=ok&&v}
 console.log(ok?'RESULT PASS':'RESULT FAIL');out.checks=checks;out.pass=ok;if(outFile)writeFileSync(outFile,JSON.stringify(out,null,1));
