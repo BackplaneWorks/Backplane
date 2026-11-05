@@ -125,6 +125,7 @@ export function got(o, at = { bytes: 0, t: performance.now() }) {
 }
 export function reset() {
   assets.reset();
+  parked?.dispose(); parked = null;
   if (view) { view.count = 0; view.box = null; view.expectedBox = null; view.restoreWanted = null; view.saying = false; view.ticking(true); view.later(); }
 }
 
@@ -734,13 +735,27 @@ export function setProbe(v) {
 // after each render: the canvas on the page (if any) shows the model its
 // data-key names, once the hub has sent it. Each source keeps its own pose
 // when tabs/canvases are remounted.
+// The view whose canvas left the page last is kept (viewer-tools.js keeps
+// its workbench, and host.js puts that very canvas back when the hub draws
+// the same one again): its graphics context and uploaded model come back
+// as they were, with no new context, shaders or upload in the press's frame.
+let parked = null;
 export function mount(canvas) {
   if (!canvas || (view && view.canvas !== canvas)) {
-    if (view) { assets.saveState(view.stateKey,view.snapshot()); view.dispose(); }
+    if (view) assets.saveState(view.stateKey,view.snapshot());
+    if (view && !canvas && !view.canvas.isConnected) { parked?.dispose(); parked = view; }
+    else view?.dispose();
     view = null;
   }
-  if (!canvas) { assets.pin(""); return; }
-  if (!view) { view = new View(canvas); view.probe = ""; }
+  if (!canvas) { assets.pin(parked?.key || ""); return; }
+  if (!view && parked?.canvas === canvas) {
+    view = parked; parked = null;
+    // (what came for its model while it was away, or changed in place as
+    // it decoded, is taken now: an unchanged model is not uploaded again)
+    const record = canvas.dataset.key === view.key ? assets.reuse(view.key) : null;
+    if (record) { view.asked = performance.now(); view.receive(record); }
+  }
+  if (!view) { parked?.dispose(); parked = null; view = new View(canvas); view.probe = ""; }
   const probe = canvas.dataset.probe ?? "";
   if (probe !== view.hubProbe) { view.hubProbe = probe; view.probe = probe; view.later(); }
   view.note = canvas.parentElement?.querySelector(".viewer-note") ?? null;
@@ -761,6 +776,12 @@ export function mount(canvas) {
     if (record) view.receive(record);
     else { view.ticking(true); view.later(); }
   } else view.later();
+}
+
+// the kept view of a canvas that will not come back (its workbench was let
+// go: viewer-tools.js), released with its graphics context
+export function forget(canvas) {
+  if (parked && parked.canvas === canvas) { parked.dispose(); parked = null; if (!view) assets.pin(""); }
 }
 
 // Read-only status for the host: no transport buffers are exposed.

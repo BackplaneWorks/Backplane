@@ -221,6 +221,11 @@ const RR = globalThis.__bpRender || null;
 function create(v) {
   RR?.n("dom.create");
   if (is(v, "Txt")) return document.createTextNode(v.text);
+  // the 3D workbench that left the page last, when the hub draws that very
+  // one again (viewer-tools.js: same model, thread and board), comes back
+  // with its drawn model, toolbar and graphics contexts, patched to v
+  const kept = v.key === "solid-workbench" ? ViewerTools.kept(nodeAttr(v, "data-key"), nodeAttr(v, "data-scope"), nodeAttr(v, "data-board-key")) : null;
+  if (kept && kept.__v?.tag === v.tag) { patch(kept, v); ViewerTools.restyle(kept); return kept; }
   const el = SVG_TAGS.has(v.tag) ? document.createElementNS(SVG_NS, v.tag) : document.createElement(v.tag);
   el.__v = { $: T.El, tag: v.tag, key: v.key, attrs: { $: "Nil" }, kids: { $: "Nil" } };
   el.__kids = [];
