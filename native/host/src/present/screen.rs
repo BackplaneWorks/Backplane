@@ -286,8 +286,8 @@ mod thread_binding_tests {
         for key in ["page","window"] { let mut q=p.clone(); q.as_object_mut().unwrap().remove(key); assert!(recent(&st,&q).is_none(),"{key}"); }
         let mut q=p.clone(); q["session"]["drafts"][&id]=json!("typing"); assert_eq!(recent(&st,&q).unwrap()["shown"]["thread"]["draft"],"typing");
         let mut q=p.clone(); q["action"]=json!("draft"); q["value"]=json!("typing"); assert_eq!(recent(&st,&q).unwrap()["shown"]["thread"]["draft"],"typing");
-        st.apply(&json!({"$":"SettingSet","key":"permissions.default","value":"1","at":1}));
-        assert!(recent(&st,&p).is_none(),"an unported setting survives the lean fold and refuses the static thread");
+        st.apply(&json!({"$":"ThreadRenamed","id":id,"title":"  ","at":1}));
+        assert!(recent(&st,&p).is_none(),"a thread with no title refuses (thread.title-empty)");
     }
 }
 
