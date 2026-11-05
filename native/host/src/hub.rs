@@ -108,7 +108,6 @@ impl Hub {
         let zone = machine_zone();
         let mut evs: Vec<Value> = vec![];
         let mut set = |k: &str, v: String| evs.push(json!({"$":"SettingSet","key":k,"value":v,"at":at}));
-        if !have("autosettle.version") { set("autosettle.version", "1".into()) }
         if !have("machine.id") { let mut b = [0u8; 24]; if let Ok(mut f) = std::fs::File::open("/dev/urandom") { let _ = std::io::Read::read_exact(&mut f, &mut b); } set("machine.id", format!("m{}", hex::encode(b))) }
         if !have("accounts.inventory") { set("accounts.inventory", "{\"version\":1,\"revision\":0,\"profiles\":[],\"error\":\"\"}".into()) }
         if !have("allowance.codex") { set("allowance.codex", format!("{{\"provider\":\"codex\",\"at\":0,\"attempted_at\":{at},\"state\":\"error\",\"auth\":\"unknown\",\"windows\":[],\"source\":\"codex-app-server\",\"phase\":\"complete\"}}")) }
