@@ -141,6 +141,20 @@ impl Model {
         let ids = ords.into_iter().filter(|n| before == 0 || *n < before).take(cap).map(|n| n.to_string()).collect();
         Ok(Page { ids, below, above, rows })
     }
+    /// The thread's newest entries, newest first, up to the latest human prompt and the latest assistant text.
+    pub fn latest_context(&self, store: &Store, thread: &str) -> Result<Vec<Row>> {
+        let (own, sent) = (self.own.get(thread).map(Vec::as_slice).unwrap_or(&[]), self.sent.get(thread).map(Vec::as_slice).unwrap_or(&[]));
+        let mut all: Vec<Ent> = own.iter().chain(sent.iter()).copied().collect();
+        all.sort_by(|a, b| b.seq.cmp(&a.seq));
+        let (mut human, mut agent, mut out) = (false, false, vec![]);
+        for e in all {
+            if human && agent { break }
+            let r = self.row(store, e, thread, true)?;
+            if r.kind == "msg" && r.role == "user" { human = true } else if r.kind == "msg" && r.role == "assistant" && !r.text.trim().is_empty() { agent = true }
+            out.push(r);
+        }
+        Ok(out)
+    }
     pub fn entries(&self) -> u32 { self.next_ord }
     /// The log line (1-based) of a setting's latest value, if it has one.
     pub fn setting_seq(&self, key: &str) -> Option<u32> { self.settings.get(key).copied() }

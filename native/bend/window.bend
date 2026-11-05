@@ -4,6 +4,7 @@ import ../../src/core/thin.bend as T
 import ../../src/core/thinq.bend as Q
 import ../../src/core/json.bend as J
 import ../../src/core/thin-live.bend as TL
+import ../../src/core/message-context.bend as MC
 import ../../src/server/thin-window.bend as TW
 import ./kcommon.bend as C
 import ./policy.bend as PO
@@ -25,21 +26,34 @@ def Wn.post(es: List<&2, M.Entry>, +st: M.State) -> M.State:
     case Nil{}: st
     case +e <> rest: Wn.post(rest, M.State.post(st, e))
 
-def Wn.show(+idx: T.Index, +th: String, +p: J.Json, +epoch: String, +ids: List<&2, String>) -> String:
-  J.Json.show(TW.Render.window.context(Wn.post(Wn.ents(ids, idx, Nil{}), M.State.empty()), TL.Stream.blank(), idx, th, p, epoch, ids))
+# The thread's latest human prompt and assistant text (message-context.bend's Context.latest) come from the whole
+# thread, not the page: the host sends its newest entries after a `ctx` line, newest first, for a page that is not the newest.
+def Wn.ctx(rows: List<&2, T.Row>) -> List<&2, M.Entry>:
+  match rows:
+    case Nil{}: Nil{}
+    case +r <> rest: T.Row.entry(r) <> Wn.ctx(rest)
 
-def Wn.page(+idx: T.Index, +th: String, +epoch: String, +before: Nat, +p: J.Json) -> String:
-  Wn.show(idx, th, p, epoch, T.Index.page(idx, th, before, 32n))
+def Wn.over(+w: J.Json, ctx: List<&2, M.Entry>) -> J.Json:
+  match ctx:
+    case Nil{}: w
+    case _: TW.Obj.put(w, "contextMessages", J.Json.arr(TW.Ids.json(MC.Context.latest(ctx, False{}, False{}))))
 
-def Wn.go(+th: String, +epoch: String, +before: Nat, +below: Nat, +above: Nat, +p: J.Json, cells: List<&2, List<&2, String>>) -> String:
-  Wn.page(T.Index.window.above(T.Index.window(Q.Q.rows(cells), th, below, T.Index.empty()), th, above), th, epoch, before, p)
+def Wn.show(+idx: T.Index, +th: String, +p: J.Json, +epoch: String, +ids: List<&2, String>, ctx: List<&2, M.Entry>) -> String:
+  J.Json.show(Wn.over(TW.Render.window.context(Wn.post(Wn.ents(ids, idx, Nil{}), M.State.empty()), TL.Stream.blank(), idx, th, p, epoch, ids), ctx))
 
-def Wn.head(cs: List<&2, String>, cells: List<&2, List<&2, String>>) -> String:
+def Wn.page(+idx: T.Index, +th: String, +epoch: String, +before: Nat, +p: J.Json, ctx: List<&2, M.Entry>) -> String:
+  Wn.show(idx, th, p, epoch, T.Index.page(idx, th, before, 32n), ctx)
+
+def Wn.go(+th: String, +epoch: String, +before: Nat, +below: Nat, +above: Nat, +p: J.Json, cells: List<&2, List<&2, String>>, ctx: List<&2, List<&2, String>>) -> String:
+  Wn.page(T.Index.window.above(T.Index.window(Q.Q.rows(cells), th, below, T.Index.empty()), th, above), th, epoch, before, p, Wn.ctx(Q.Q.rows(ctx)))
+
+def Wn.head(cs: List<&2, String>, +all: List<&2, List<&2, String>>) -> String:
   match cs:
-    case _ <> th <> epoch <> before <> below <> above <> pj <> Nil{}:
-      Wn.go(th, epoch, C.K.digits(before, 0n), C.K.digits(below, 0n), C.K.digits(above, 0n), Maybe.default(&2, J.Json, J.Json.parse(pj), J.Null{}), cells)
+    case _ <> th <> epoch <> before <> below <> above <> +n <> pj <> Nil{}:
+      Wn.go(th, epoch, C.K.digits(before, 0n), C.K.digits(below, 0n), C.K.digits(above, 0n), Maybe.default(&2, J.Json, J.Json.parse(pj), J.Null{}), List.drop(&2, List<&2, String>, all, C.K.digits(n, 0n)), List.take(&2, List<&2, String>, all, C.K.digits(n, 0n)))
     case _: "error request"
 
+# the first CTXN rows of the file are the thread's newest entries (newest first), the rest the page's rows
 def Wn.run(ls: List<&2, String>) -> String:
   match ls:
     case Nil{}: "error empty"

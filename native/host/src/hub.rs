@@ -49,6 +49,18 @@ pub fn error(id: &Value, code: &str) -> Value { json!({"t":"reply","id":id,"ok":
 fn empty_window() -> Value { json!({"contextMessages":[],"messageIds":[],"historyUnits":[],"partial":[],"ids":[],"anchor":{"id":"","offset":0},"older":"","olderNext":"","hasMore":false,"remaining":0,"newer":0,"total":0}) }
 
 fn within(s: &str, n: usize) -> bool { s.len() <= n }
+/// view.page's cursor ({version, epoch, target, query, before}, as an object or its JSON text): the ordinal to page before.
+fn page_before(p: &Value) -> u64 {
+    let c = match &p["cursor"] { Value::String(t) => serde_json::from_str::<Value>(t).unwrap_or(Value::Null), v => v.clone() };
+    match &c["before"] { Value::String(t) => t.parse().unwrap_or(0), v => v.as_u64().unwrap_or(0) }
+}
+
+/// The page as the presenter takes it: the thread's rows as strings (10 cells each) and the counts.
+fn page_json(thread: &str, before: u64, pg: &crate::model::Page) -> Value {
+    let rows: Vec<Value> = pg.rows.iter().map(|r| Value::Array(r.json().as_array().unwrap().iter().map(|c| Value::String(match c { Value::String(t) => t.clone(), v => v.to_string() })).collect())).collect();
+    json!({"thread":thread,"before":before,"below":pg.below,"above":pg.above,"rows":rows})
+}
+
 fn target_valid(t: &Value) -> bool {
     let Some(o) = t.as_object() else { return false };
     if o.len() != 2 { return false }
@@ -88,6 +100,12 @@ impl Hub {
         if !have("accounts.inventory") { set("accounts.inventory", "{\"version\":1,\"revision\":0,\"profiles\":[],\"error\":\"\"}".into()) }
         if !have("allowance.codex") { set("allowance.codex", format!("{{\"provider\":\"codex\",\"at\":0,\"attempted_at\":{at},\"state\":\"error\",\"auth\":\"unknown\",\"windows\":[],\"source\":\"codex-app-server\",\"phase\":\"complete\"}}")) }
         if !have("tz.machine") { set("tz.machine", zone.0.clone()); set(&format!("tz.rule.{}", zone.0), zone.1.clone()); set("tz.checked", at.to_string()) }
+        // projects whose root folder is gone: " <id> <id> " (start-up scan; the Bend hub keeps it as a setting)
+        let missing = { let m = self.model.try_lock().map_err(|_| anyhow::anyhow!("model busy at start"))?;
+            let mut ids: Vec<&String> = m.projects.iter().filter(|(_, p)| !p.removed && !p.root.is_empty() && !std::path::Path::new(&p.root).exists()).map(|(i, _)| i).collect(); ids.sort();
+            if ids.is_empty() { String::new() } else { format!(" {} ", ids.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(" ")) } };
+        let current = match self.model.try_lock() { Ok(m) => m.setting_seq("projects.missing").and_then(|s| self.store.get(s as usize - 1).ok()).and_then(|l| serde_json::from_str::<Value>(&l).ok()).and_then(|v| v["value"].as_str().map(str::to_string)).unwrap_or_default(), Err(_) => missing.clone() };
+        if missing != current { evs.push(json!({"$":"SettingSet","key":"projects.missing","value":missing,"at":at})); }
         if evs.is_empty() { return Ok(()) }
         let lines: Vec<String> = evs.iter().map(|e| e.to_string()).collect();
         let first = self.store.append_many(&lines.iter().map(String::as_str).collect::<Vec<_>>())?;
@@ -253,8 +271,8 @@ impl Hub {
             && target_valid(p.get("target").unwrap_or(&Value::Null));
         if !valid { return vec![error(&id, "STALE_CONNECTION")] }
         match m {
-            "view.open" | "view.update" | "view.action" => {}
-            "view.page" | "view.search" | "view.message" | "view.cancel" => return vec![error(&id, "UNSUPPORTED")],
+            "view.open" | "view.update" | "view.action" | "view.page" => {}
+            "view.search" | "view.message" | "view.cancel" => return vec![error(&id, "UNSUPPORTED")],
             _ => return vec![error(&id, "INVALID_REQUEST")],
         }
         if m != "view.open" && p.get("viewId").and_then(Value::as_str) != Some(c.view_id.as_str()) { return vec![error(&id, "STALE_VIEW")] }
@@ -263,8 +281,11 @@ impl Hub {
         let mut params = p.clone();
         if let Some(o) = params.as_object_mut() { o.insert("revision".into(), json!(rev)); o.insert("now".into(), json!(now_ms())); }
         // a thread's window: the page out of the Rust index, the fold/context logic in native Bend
-        let window = self.window_for(&p).await;
+        // view.page: the cursor names the page (`before`, an ordinal); the reply is a view.open-shaped one
+        let before = if m == "view.page" { page_before(&p) } else { 0 };
+        let (window, page) = match self.window_for(&p, before).await { Some((w, pg)) => (Some(w), Some(pg)), None => (None, None) };
         if let (Some(w), Some(o)) = (&window, params.as_object_mut()) { o.insert("window".into(), w.clone()); }
+        if let (Some(pg), Some(o)) = (&page, params.as_object_mut()) { o.insert("page".into(), page_json(p["target"]["id"].as_str().unwrap_or(""), before, pg)); }
         let pol = match self.presenter.view(&params).await { Ok(v) => v, Err(_) => return vec![error(&id, "PRESENTER_UNAVAILABLE")] };
         let target = p["target"].clone();
         if m == "view.open" { c.view_id = view_id.clone(); c.target = target.clone(); }
@@ -300,8 +321,14 @@ impl Hub {
         let title = path.trim_end_matches('/').rsplit('/').next().unwrap_or(path);
         let (pid, tid) = (format!("p{at}-{n}"), format!("t{at}-{}", n + 1));
         let evs = [json!({"$":"ProjectCreated","id":pid,"title":title,"root":path,"at":at}),
-            json!({"$":"ThreadCreated","id":tid,"project":pid,"title":"New thread","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":at}),
+            json!({"$":"ThreadCreated","id":tid,"project":pid,"title":"New thread","env":"worktree","branch":"","worktree":"","provider":"claude","model":"","at":at}),
             json!({"$":"SettingSet","key":format!("account.thread.{tid}.claude"),"value":"{\"id\":\"\",\"epoch\":0}","at":at})];
+        let mut evs = evs.to_vec();
+        // a folder that is not a git repository: the Bend hub says so on the new thread (act id g<at>-<n+3>)
+        if !std::path::Path::new(path).join(".git").exists() {
+            evs.push(json!({"$":"ActivityLogged","thread":tid,"act":format!("g{at}-{}", n + 3),"tone":"info","kind":"git","summary":"working in the project folder: not a git repository","at":at}));
+            evs.push(json!({"$":"WorktreeSkipped","id":tid,"at":at}));
+        }
         if self.commit_many(&evs).await.is_err() { return vec![json!({"t":"reply","id":id,"ok":false,"error":"store write failed"})] }
         vec![json!({"t":"reply","id":id,"ok":true,"thread":tid})]
     }
@@ -311,16 +338,19 @@ impl Hub {
     }
 
     /// The window object for a thread target (newest page); None for other targets or without the Bend program.
-    async fn window_for(&self, p: &Value) -> Option<Value> {
+    async fn window_for(&self, p: &Value, before: u64) -> Option<(Value, crate::model::Page)> {
         let bin = self.window_bin.get()?;
         let t = p.get("target")?;
         if t["kind"] != "thread" { return None }
         let thread = t["id"].as_str()?;
         if !self.model.lock().await.threads.contains_key(thread) { return None }
-        let page = { let m = self.model.lock().await; m.page(&self.store, thread, 0, 32).ok()? };
+        let page = { let m = self.model.lock().await; m.page(&self.store, thread, before, 32).ok()? };
         let mut req = Map::new(); req.insert("target".into(), t.clone());
         if let Some(a) = p.get("anchor") { req.insert("anchor".into(), a.clone()); }
-        crate::window::compute(bin, &std::env::temp_dir(), thread, &self.epoch, 0, &page, &Value::Object(req)).await
+        // an older page still names the thread's latest human prompt and assistant text (message-context.bend)
+        let ctx = if before == 0 { vec![] } else { let m = self.model.lock().await; m.latest_context(&self.store, thread).unwrap_or_default() };
+        let w = crate::window::compute(bin, &std::env::temp_dir(), thread, &self.epoch, before, &page, &ctx, &Value::Object(req)).await?;
+        Some((w, page))
     }
 
     /// turn.start: the person's message is committed (durable) and queued, then acknowledged. The
@@ -383,6 +413,7 @@ impl Hub {
             o.insert("cmds".into(), pol.get("cmds").cloned().unwrap_or(json!([])));
             o.insert("session".into(), pol.get("session").cloned().unwrap_or(Value::Null));
             o.insert("shown".into(), pol.get("shown").cloned().unwrap_or(Value::Null));
+            if let Some(ov) = pol.get("overlay") { o.insert("overlay".into(), ov.clone()); }
         }
         Value::Object(o)
     }

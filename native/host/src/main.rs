@@ -176,6 +176,8 @@ async fn wire(hub: Arc<Hub>, s: TcpStream, since: usize, origin: String) -> Resu
             m = rx.next() => {
                 let Some(m) = m else { return Ok(()) };
                 let v: Value = match m? { Message::Binary(b) => match cbor::decode(&b) { Ok(v) => v, Err(_) => continue }, Message::Text(t) => match serde_json::from_str(t.as_str()) { Ok(v) => v, Err(_) => continue }, Message::Close(_) => return Ok(()), _ => continue };
+                // a plain stream has no views: the Bend hub answers a view method there STALE_CONNECTION
+                if v.get("m").and_then(Value::as_str).map_or(false, |m| m.starts_with("view.")) { tx.send(pack(&conn, &hub::error(v.get("id").unwrap_or(&Value::Null), "STALE_CONNECTION"))).await?; continue }
                 for f in hub.request(&mut conn, &v).await { tx.send(pack(&conn, &f)).await?; }
             }
             n = changes.recv() => {
