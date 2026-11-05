@@ -13,8 +13,9 @@ def ViewerKept.drop(thread: String, key: String) -> IO(String):
   import "./effects/viewer_kept.js"
 
 # (only what changed after since, the "kept.seq:<t>" the view was last
-# given: a view's actor keeps what it was given; "" for all of it)
-def ViewerKept.info(thread: String, cwd: String, since: String) -> IO(String):
+# given: a view's actor keeps what it was given; "" for all of it), as keys
+# and values in turn
+def ViewerKept.info(thread: String, cwd: String, since: String) -> IO(List<&2, String>):
   import "./effects/viewer_kept.js"
 
 # "1": nothing kept under key (or kept longer ago than maxMs milliseconds)
