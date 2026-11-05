@@ -14,10 +14,10 @@ pub struct Ent { pub id: String, pub msg: bool, pub role: String, pub akind: Str
 pub fn ents(rows: &[Value], thread: &str) -> Option<Vec<Ent>> {
     let mut v: Vec<Ent> = Vec::new();
     for r in rows.iter().take(32) {
-        let c: Vec<&str> = (0..10).map(|i| r.get(i).and_then(Value::as_str).unwrap_or("")).collect();
+        let c: Vec<String> = (0..10).map(|i| match r.get(i) { Some(Value::String(s)) => s.clone(), Some(Value::Number(n)) => n.to_string(), _ => String::new() }).collect();
         if c[3] != thread || !c[4].is_empty() { return None } // a row sent to another thread
-        let msg = match c[5] { "msg" => true, "act" => false, _ => return None };
-        v.push(Ent { id: c[2].into(), msg, role: c[6].into(), akind: c[7].into(), text: c[8].into(), at: c[9].parse().ok()? });
+        let msg = match c[5].as_str() { "msg" => true, "act" => false, _ => return None };
+        v.push(Ent { id: c[2].clone(), msg, role: c[6].clone(), akind: c[7].clone(), text: c[8].clone(), at: c[9].parse().ok()? });
     }
     v.reverse();
     Some(v)
@@ -196,6 +196,10 @@ mod tests {
         let want = &p["out"]["shown"]["thread"];
         for (k, w) in want.as_object().unwrap() { assert_eq!(got.get(k), Some(w), "key {k}"); }
         assert_eq!(got.as_object().unwrap().len(), want.as_object().unwrap().len());
+    }
+    #[test] fn rows_may_carry_numbers_or_strings() {
+        let a = json!([["5", "5", "m1", "t", "", "msg", "user", "", "hi", "9"]]); let b = json!([[5, 5, "m1", "t", "", "msg", "user", "", "hi", 9]]);
+        assert_eq!(ents(a.as_array().unwrap(), "t").unwrap()[0].at, ents(b.as_array().unwrap(), "t").unwrap()[0].at);
     }
     #[test] fn civil_dates() { assert_eq!(civil(0), (1970, 1, 1)); assert_eq!(civil(19675), (2023, 11, 14)); assert_eq!(clock(1700002806, 0), "Tue 14 Nov 23:00"); }
     #[test] fn labels_name_three_kinds_and_the_live_one_says_what_runs() {
