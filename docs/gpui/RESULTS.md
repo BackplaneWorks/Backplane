@@ -154,3 +154,34 @@ Sampling: process-tree `/proc` (RSS, PSS from `smaps_rollup`, private = Private_
 - **Cold/warm.** The file-system cache is always warm (no root to drop it). "Cold" here is a fresh Electron profile (empty userData); GPUI keeps no profile, so its cold and warm are the same thing.
 - **Counts.** Startup: 30 launches per client. Idle and load: 3 launches, 60 s each. Latency: 40 events per cell from 2 fresh launches (20 threads each). One machine, one day.
 - **Earlier runs not used.** A first pass had a contaminated "idle" (agents from an earlier phase still streaming: GPUI 6-7 % CPU, Electron 90-97 %) and an Electron driver that timed out on the page's CSP (`eval` forbidden): both kept under `cmp/run1-*`, `run2-*`, `run3-*` and not quoted.
+
+## M0 baselines: JS hub on the store copy (`~/.backplane-gpui-copy`, 1,691,619 events, 1.56 GB log)
+
+Hub `build/gpui/backplane-serve` 0.14.0 on Bun, `BACKPLANE_COPY=1`, fake HOME, stand-in agents only (`BACKPLANE_AGENTS` verified from the hub's own environ), `127.0.0.1`-independent: bound to 100.64.84.41:3830, `--no-tailscale`, in a `systemd-run --user --scope -p MemoryMax=3700M -p MemorySwapMax=0` scope (no raised cap). Machine: desktop, 32 cores. Harness `test/gpui/perf/m0_baseline.mjs`, `m0_watch.mjs`; raw `build/gpui/results/perf/m0/` (m0.json, import-samples.jsonl, hub logs). The store copy stays on this machine, out of git, and nothing here prints conversation content: only counts, sizes and times. The runs appended events to the copy (my own stand-in project and threads, about 1.7k lines).
+
+### First start (no store.db): the import does NOT fit under 3.7 GiB
+| step | result |
+|---|---|
+| `store.db` build from `events.jsonl` | finished: 1,691,619 of 1,691,619 lines applied (`applied_seq`), 1.96 GB, about 6 minutes; RSS 175 MB at 30 s, 1.4 GB at 330 s, 2.6 GB at 360 s |
+| boot after the build (fold the log into in-memory state) | RSS 2.2-3.4 GB for 6 more minutes, then killed at **12 min 6 s** wall, before `/hello` answered. Sampled peak 3,556 MB; the scope reports "3.6G memory peak" at the 3,700M limit. I did not raise the cap. |
+So the first start of a 1.69M-event log needs more than 3.7 GiB with this JS hub; the point at which it stops is the boot fold, after the store is built (the database itself completes). Its memory use after boot was never observed in that first start.
+
+### Later starts (store.db present, hot boot)
+3 starts + the main run, all under the cap: `/hello` at 5.6, 8.9, 7.4 s (main run 7.4); first view (mobile renderer open) at 9.3, 12.0, 10.7 s (main 10.7); first-view body 214-239 KB; RSS 1108 / 1097 / 1081 MB after 30 s idle, boot peak (VmHWM) 1617 / 1605 / 1589 MB (the 1M-event synthetic hot boot peaked at 1.55 GB, for comparison). Warm page cache.
+
+### Steady and under load (same hub, after boot)
+- Steady idle (60 s after 60 s): RSS **1122 MB**, **3.7 % of a core with nothing happening**, 13 fds, 15 threads. `hub.tick` logs a 1.3-1.8 s stall once a minute at this log size, which accounts for the idle CPU and for pings that land behind it.
+- Sidebar holds 504 threads.
+- **20 simulated agents streaming (90 s): the hub does not keep up, so this run is INVALID by the plan's rule** (each stream >= 1 delta/s with longest gap <= 2 s): minimum rate 1.7 deltas/s but longest gap 6.2 s. Hub CPU **97 % of a core (saturated)**, RSS 1202-1526 MB (peak 1583), 40 child processes, delta lag p50 **21.5 s**, p95 38 s, max 40 s (3,637 deltas received, 35/s; on the 20-thread fixture hub the same agents give 165 ms lag at 20 % CPU), ping p50/p95/p99 488 / 772 / 2281 ms (event-driven client). Every Rust milestone is measured against this: the JS hub on a real-shaped 1.7M-event store cannot sustain the 20-agent load.
+
+### Click and popup latency (mobile-renderer view client over loopback to 100.64.84.41; 40 events each; event-driven)
+| action | idle p50 / p95 ms | body p50 | 20 agents p50 / p95 ms | body p50 |
+|---|---|---|---|---|
+| thread switch (`view.open`, my own thread) | 461 / 632 | 329 KB | 560 / 701 | 347 KB |
+| thread switch (a thread from the real sidebar) | 527 / 822 | 360 KB | 665 / 887 | 371 KB |
+| sidebar click (`view.action select`) | 12.5 / 442 | 15 KB | 96 / 615 | 23 KB |
+| composer popup (draft "/" then `view.update`) | 441 / 527 | 1.1 KB | 698 / 880 | 1.3 KB |
+These are request round trips to the hub (server time + transfer), not a client's input-to-pixels; the GPUI/Electron comparison above measures the client side on the small fixture. "Idle" here has the hub's 3.7 % background and its 1.4 s per-minute stall in it. The sidebar-click p50 of 12.5 ms is the select action alone returning a small body (16 KB); p95 442 ms is the clicks that land behind the minute tick.
+
+### Live hub, reference only (`/proc`, nothing sent to it)
+Hub pid 3890 at 22:57: RSS about 20.5 GB (peak 32.0 GB), 140 % of a core over 30 s, 16 threads. A single sample, not a baseline; it only shows the scale the production hub has reached.
