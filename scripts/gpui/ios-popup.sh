@@ -4,7 +4,7 @@
 cd "$(dirname "$0")/../.." || exit 1
 B=$PWD/build/gpui; M=$B/mac-ssh; SB='ssh -o BatchMode=yes h@backplane'; U=E3BC1B9E-AE4D-498C-97AF-B22FE897B41F; V=/home/h/bp-gpui-ios-hub
 RSYNC_RSH=$M rsync -a $B/bridge/bridge.js hs-mac-mini:bp-gpui-ios/bridge.js
-$SB "mkdir -p $V/home $V/proj $V/bin $V/tools $V/src/web $V/src/core $V/t"
+$SB "mkdir -p $V/home $V/proj $V/bin $V/src/web $V/src/core $V/t"
 rsync -a $B/hub/android/backplane-serve h@backplane:bp-gpui-ios-hub/hub
 rsync -a test/tools/claude_standin.ts test/gpui/seed-bots.mjs test/gpui/wire.mjs test/gpui/set-setting.mjs scripts/gpui/ios-seed.ts h@backplane:bp-gpui-ios-hub/t/tools/
 rsync -a src/web/wire.js h@backplane:bp-gpui-ios-hub/src/web/; rsync -a src/core/cbor.bend h@backplane:bp-gpui-ios-hub/src/core/
