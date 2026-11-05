@@ -86,9 +86,11 @@ impl Hub {
         };
         actor::set_bot(c.client, bot);
         let before = actor::page(c.client, &view_id, m, p["action"].as_str().unwrap_or(""), &p["target"], if m == "view.page" { page_before(&p) } else { 0 });
-        let (window, page) = match self.window_for(&p, before).await { Some((w, pg)) => (Some(w), Some(pg)), None => (None, None) };
+        // the conversation the target shows: a thread's own, a bot's chat thread (a bot view without its window stays on "Updating conversation...")
+        let shown: Option<String> = match p["target"]["kind"].as_str() { Some("thread") => p["target"]["id"].as_str().map(str::to_string), Some("bot") => bot.as_ref().map(|(_, t)| t.clone()), _ => None };
+        let (window, page) = match self.window_for(&p, before, shown.as_deref()).await { Some((w, pg)) => (Some(w), Some(pg)), None => (None, None) };
         if let (Some(w), Some(o)) = (&window, params.as_object_mut()) { o.insert("window".into(), w.clone()); }
-        if let (Some(pg), Some(o)) = (&page, params.as_object_mut()) { o.insert("page".into(), page_json(p["target"]["id"].as_str().unwrap_or(""), before, pg)); }
+        if let (Some(pg), Some(o)) = (&page, params.as_object_mut()) { o.insert("page".into(), page_json(shown.as_deref().unwrap_or(""), before, pg)); }
         if let (Some(o), true) = (params.as_object_mut(), p.get("session").map_or(false, Value::is_object)) { o.insert("session".into(), actor::input(c.client, &view_id, &p)); }
         { let reads = actor::take_reads(c.client, &view_id, &p["target"]); if let Some(o) = params.as_object_mut() { o.remove("reads"); if !reads.is_empty() { o.insert("reads".into(), Value::Array(reads)); } } }   // only the hub says what it read
         actor::set_local(&mut params, actor::local_in(c.client, &view_id, m, &p["target"]));
@@ -134,11 +136,11 @@ impl Hub {
     }
 
     /// The window object for a thread target (newest page); None for other targets or without the Bend program.
-    async fn window_for(&self, p: &Value, before: u64) -> Option<(Value, crate::model::Page)> {
+    /// `thread` is the conversation the target shows (V.Target.thread): a thread's own id, a bot's chat thread; none for the other targets.
+    async fn window_for(&self, p: &Value, before: u64, thread: Option<&str>) -> Option<(Value, crate::model::Page)> {
         let bin = self.window_bin.get()?;
         let t = p.get("target")?;
-        if t["kind"] != "thread" { return None }
-        let thread = t["id"].as_str()?;
+        let thread = thread?;
         if !self.model.lock().await.threads.contains_key(thread) { return None }
         let page = { let m = self.model.lock().await; m.page(&self.store, thread, before, 32).ok()? };
         let mut req = Map::new(); req.insert("target".into(), t.clone());
