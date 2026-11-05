@@ -27,3 +27,9 @@ test('the transform lands once on a real emit; drift in the entry, walk or add f
   console.log('negativeFences='+fences);
  }finally{fs.rmSync(temp,{recursive:true,force:true})}
 });
+test('identity memo: the same object and String answer what the pure def answered, once',()=>{
+ const ctx=vm.createContext({});vm.runInContext(fs.readFileSync(path.join(root,'scripts/js-memo.js'),'utf8')+';globalThis.memo=__bpMemo2;',ctx);
+ let calls=0;const f=(a,b)=>{calls++;return {of:a.k+':'+b}};const a={k:1},a2={k:1};
+ const r1=ctx.memo('t',a,'x',f),r2=ctx.memo('t',a,'x',f),r3=ctx.memo('t',a,'y',f),r4=ctx.memo('t',a2,'x',f),r5=ctx.memo('u',a,'x',f);
+ assert.equal(r1,r2);assert.deepEqual(r3,{of:'1:y'});assert.notEqual(r4,r1);assert.deepEqual(r4,r1);assert.notEqual(r5,r1);assert.equal(calls,4);
+});
