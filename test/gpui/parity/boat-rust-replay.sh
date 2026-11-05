@@ -11,6 +11,6 @@ cat $O/build.txt
 HUB=$PWD/native/host/target/release/backplane-hub; [ -x $HUB ] || exit 3
 chmod +x stage/bp-policy-page stage/window test/gpui/slim/check_agents.sh 2>/dev/null
 export BACKPLANE_PARITY_ROOT=$PWD PARITY_WORK=/tmp/parity-work
-PARITY_HUB_ARGS="--policy-bin $PWD/stage/bp-policy-page --window-bin $PWD/stage/window --commit ${COMMIT:-0000000}" \
+PARITY_HUB_ARGS="--policy-bin $PWD/stage/bp-policy-page --window-bin $PWD/stage/window --commit ${COMMIT:-94532cfb30a6a6b2579268424e03733c9b1cfe64}" \
   systemd-run --user --scope -q -p MemoryMax=3700M -p MemorySwapMax=0 -- bun test/gpui/parity/replay.mjs --rec $PWD/stage/recA --bin $HUB --port 3828 --out $O/replayA --all > $O/replay-diff.txt 2>&1
 grep -E "differences|identical" $O/replay-diff.txt
