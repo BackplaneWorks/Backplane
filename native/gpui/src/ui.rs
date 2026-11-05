@@ -229,8 +229,6 @@ impl Render for Backplane {
         let ctx = string(&thread["picker"], "label").split("ctx ").nth(1).map(|s| format!("ctx {}", s.split(' ').next().unwrap_or(""))).unwrap_or_default();
         let todo = thread["todos"]["count"].as_str().unwrap_or("").to_string();
         let mut rail: Vec<AnyElement> = Vec::new();
-        // the viewer opens with the panel action; a kind picked while it is shut opens it first
-        let viewer_open = crate::screens::viewer::is_open(thread);
         for (l, i) in [("Terminal", "terminal"), ("Commands", "search"), ("", ""), ("Board", "circuit-board"), ("Schematic", "cpu"), ("3D", "box"), ("Split", "layout-panel-left"), ("Mech", "layers"), ("", ""), ("Files", "folder"), ("Diff", "diff"), ("Review", "circle-check"), ("Browser", "globe")].iter() {
             if l.is_empty() { rail.push(div().h(px(12.)).into_any_element()); continue; }
             // the viewer's kinds are the hub's view-kind values; Diff is its own action
@@ -238,7 +236,7 @@ impl Render for Backplane {
             match act {
                 Some((a, v)) => {
                     ctl.push(CtlEntry { id: format!("rail:{l}"), label: l.to_string(), ctl: if a == "view-kind" { Ctl::Rail(v.into()) } else { Ctl::Node(a.into(), v.into()) } });
-                    rail.push(with_rect(div().id(SharedString::from(format!("rail-{l}"))), || format!("rail:{l}")).cursor_pointer().on_click(cx.listener(move |this, _, _, cx| { if a == "view-kind" && !viewer_open { let _ = this.tx.try_send(Command::Action("panel".into(), String::new())); } let _ = this.tx.try_send(Command::Action(a.into(), v.into())); cx.notify(); }))
+                    rail.push(with_rect(div().id(SharedString::from(format!("rail-{l}"))), || format!("rail:{l}")).cursor_pointer().on_click(cx.listener(move |this, _, _, cx| { let cmd = if a == "view-kind" { crate::screens::viewer::view_kind(v) } else { Command::Action(a.into(), v.into()) }; let _ = this.tx.try_send(cmd); cx.notify(); }))
                         .flex().flex_col().items_center().h(px(48.)).justify_center().gap_1().text_size(px(10.)).text_color(c("dim")).hover(|s| s.text_color(c("text"))).child(ic(light, i, 18., "dim")).child(*l).into_any_element());
                 }
                 None => rail.push(with_rect(div().opacity(0.45), || format!("rail:{l}")).flex().flex_col().items_center().h(px(48.)).justify_center().gap_1().text_size(px(10.)).text_color(c("dim")).child(ic(light, i, 18., "dim")).child(*l).into_any_element()),

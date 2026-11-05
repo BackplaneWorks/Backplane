@@ -7,12 +7,12 @@ set -eu
 ROOT=${GPUI_MAIN:-/home/h/Documents/i2cjak/backplane-gpui}; CLIENT=$1; ASSETS=$2; N=${3:-plot}
 R=$ROOT/build/gpui/desktop-plot; OUT=$ROOT/build/gpui/results/desktop; SH=$ROOT/build/gpui/shots/desktop
 X=$ROOT/build/gpui/xvfb; HUB=$ROOT/build/gpui/hub/new
-DEMO=/home/h/.backplane-bend/kicad/10.99.0-bp.4/share/kicad/demos/ecc83; PORT=3833; DISP=:61
+FIX=$ROOT/test/gpui/files/fixtures/plot; PORT=3833; DISP=:61
 mkdir -p $R $OUT $SH
 [ -x "$CLIENT" ] || { echo "no client binary"; exit 2; }
 [ ! -e /tmp/.X11-unix/X61 ] || { echo "display :61 is in use"; exit 2; }
-rm -rf $R/home $R/proj $R/bin; mkdir -p $R/home $R/proj $R/bin
-cp -r $DEMO/ecc83-pp.kicad_pcb $DEMO/ecc83-pp.kicad_pro $DEMO/ecc83-pp.kicad_sch $R/proj/
+rm -rf $R/home $R/proj $R/bin $R/fakehome; rm -f $R/*.pid; mkdir -p $R/home $R/proj $R/bin $R/fakehome/.cache
+cp $FIX/ecc83-pp.kicad_pcb $FIX/ecc83-pp.kicad_sch $R/proj/; echo '{}' > $R/proj/ecc83-pp.kicad_pro
 # stand-in agents: nothing may call a model
 printf '#!/bin/sh\nexec %s %s "$@"\n' "$(command -v bun)" "$ROOT/test/tools/claude_standin.ts" > $R/bin/claude; chmod +x $R/bin/claude
 for n in codex grok muse; do printf '#!/bin/sh\nexit 1\n' > $R/bin/$n; chmod +x $R/bin/$n; done
@@ -29,7 +29,7 @@ set -eu
 cleanup() { for f in client i3 xvfb hub; do [ -f '$R'/$f.pid ] && kill $(cat '$R'/$f.pid) 2>/dev/null || true; done; sleep 1; }
 trap cleanup EXIT INT TERM
 R='$R'; ROOT='$ROOT'; X='$X'; HUB='$HUB'; CLIENT='$CLIENT'; ASSETS='$ASSETS'; N='$N'; PORT='$PORT'; DISP='$DISP'; OUT='$OUT'; SH='$SH'
-export BACKPLANE_AGENTS=$R/bin BACKPLANE_NO_UPDATE=1 BP_STANDIN_MODE=stream
+export BACKPLANE_AGENTS=$R/bin BACKPLANE_NO_UPDATE=1 BP_STANDIN_MODE=stream HOME=$R/fakehome XDG_CACHE_HOME=$R/fakehome/.cache XDG_CONFIG_HOME=$R/fakehome/.config XDG_DATA_HOME=$R/fakehome/.local
 cd $R/proj
 $HUB/backplane-hub --home $R/home --port $PORT --host 127.0.0.1 --no-tailscale --foreground --policy-bin $ROOT/build/gpui/slim/bp-policy-page --window-bin $HUB/window > $R/hub.log 2>&1 &
 echo $! > $R/hub.pid; sleep 5
