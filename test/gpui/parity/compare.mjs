@@ -125,6 +125,7 @@ export function diff(a,b,path='',out=[]){
 }
 export function compareDirs(A,B){
   let total=0;const rep={};
+  if(!readdirSync(A).some(x=>x.endsWith('.json'))){console.error('compare: no recordings in '+A+' (an empty comparison proves nothing)');process.exit(2)}
   for(const f of readdirSync(A).filter(x=>x.endsWith('.json')).sort()){
     const a=normalise(JSON.parse(readFileSync(A+'/'+f)).frames),b=normalise(JSON.parse(readFileSync(B+'/'+f)).frames);
     const d=[];for(const c of new Set([...Object.keys(a),...Object.keys(b)]))for(const s of ['out','events','hk','deltas','replies','views','other'])diff(a[c]?.[s],b[c]?.[s],`${c}.${s}`,d);

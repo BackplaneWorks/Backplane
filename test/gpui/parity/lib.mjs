@@ -70,3 +70,14 @@ export async function attempt(hub,rec,name,mode){
   const r=await new Promise(res=>{const ws=new WebSocket(url);let done=false;ws.onopen=()=>{done=true;ws.close();res('opened')};ws.onerror=()=>{if(!done)res('refused')}});
   rec.push(name,'in','upgrade',null,{result:r});return r;
 }
+
+// Lines no client may ever be sent (scenario `private`): the sentinels the fixture puts in device tokens, riding mail and turn inputs.
+// Every inbound frame is searched as raw bytes (CBOR text is stored as UTF-8), so a field the decoder or a normalisation drops cannot hide one.
+const PRIV=/PRIV(TOKEN|DROPPED|RIDE|LAUNCH|FALLBACK|LIVE)/;
+export function privateLeaks(frames){
+  const out=[];
+  for(const f of frames){if(f.dir!=='in'||f.raw==null)continue;
+    const s=f.kind==='bin'?Buffer.from(f.raw,'base64').toString('latin1'):String(f.raw);
+    const m=PRIV.exec(s);if(m)out.push({c:f.c,i:f.i,kind:f.kind,marker:m[0]});}
+  return out;
+}

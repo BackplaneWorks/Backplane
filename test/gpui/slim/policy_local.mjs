@@ -2,7 +2,10 @@
 // 1. a V with nativeSidebar and a valid nativeKey answers a top-level `local` with the four keys, context and key set;
 // 2. sending `local` back unchanged keeps the same pages/context (the memory holds);
 // 3. a `local` whose pages differ is adopted before the view is drawn (the reply's pages follow it) while the context is unchanged;
-// 4. a different viewId makes the context differ, so the pages are dropped.
+// 4. a different viewId makes the context differ, so the pages are dropped;
+// 5. a native-sidebar-page action with a valid token moves the pages (local changes) and is not refused;
+// 6. the same action with a tampered token, or with no nativeSidebar offer, is refused (`refused`: true) and the pages stay put;
+// 7. an ordinary action is not refused.
 import {spawn} from 'node:child_process';import {readFileSync} from 'node:fs';import net from 'node:net';
 const [bin,log,port]=process.argv.slice(2);
 const p=spawn('sh',['-c',`ulimit -s 1048576; exec ${bin} ${port}`],{stdio:['ignore','pipe','inherit']});
@@ -28,4 +31,17 @@ const c=await v({local:{...a.local,[K[0]]:mark}});
 ck(c.local[K[0]].includes('marker')||c.local[K[0]]!==a.local[K[0]],'a changed pages is adopted before Ns.prepare (same context)');
 const d=await v({local:{...a.local,[K[0]]:mark},viewId:'v2'});
 ck(!d.local[K[0]].includes('marker'),'another viewId drops the pages');
+const find=o=>{if(o&&typeof o==='object'){if(o.action==='native-sidebar-page'&&typeof o.value==='string')return o;for(const k of Object.keys(o)){const r=find(o[k]);if(r)return r}}return null};
+const ctl=find(a.shown)||find(a.overlay);
+ck(!!ctl,'the first picture offers a page control (the log has more than one page)');
+if(ctl){
+  const pg=await v({action:'native-sidebar-page',value:ctl.value,local:a.local});
+  ck(!pg.refused&&pg.local[K[0]]!==a.local[K[0]],'a valid page token moves the pages and is not refused');
+  const bad1=await v({action:'native-sidebar-page',value:ctl.value.slice(0,-1)+(ctl.value.endsWith('A')?'B':'A'),local:a.local});
+  ck(bad1.refused===true&&bad1.local[K[0]]===a.local[K[0]],'a tampered token is refused and the pages stay put');
+  const bad2=await v({nativeSidebar:0,action:'native-sidebar-page',value:ctl.value,local:a.local});
+  ck(bad2.refused===true,'a page action with no nativeSidebar offer is refused');
+}
+const ord=await v({action:'noop-action',value:'x',local:a.local});
+ck(ord.refused!==true,'an ordinary action is not refused');
 p.kill();console.log(bad?'FAILED '+bad:'ALL OK');process.exit(bad?1:0);
