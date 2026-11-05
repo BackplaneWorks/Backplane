@@ -17,7 +17,7 @@ import ../../src/mobile/folded-actions.bend as FA
 #   F <frame json>      fold one wire frame (log, changes, delta, info, ...)   -> ok
 #   V <request json>    view.open/update/action params; optional p.now (ms since epoch: native IO.now()
 #                       is not the wall clock) and p.window (the host's window object, as Render.native_screen takes it)  -> view json
-#   C <ms>              set the wall clock (ms since epoch) the folded state reads              -> ok
+#   C <ms>              set the wall clock (ms since epoch; the model reads seconds) the folded state reads              -> ok
 #   P                   ping                                                    -> pong
 #   Q                   close
 #
@@ -79,8 +79,12 @@ def Pol.view.r(+r: J.Json, +want: J.Json, +window: J.Json) -> J.Json:
 
 # the session the client sent adopted onto the shared state, the action run,
 # the screen drawn
+# p.now is milliseconds since the epoch (the host's wall clock); the model's clock is seconds. Without it, the process's own.
+def Pol.clock(+ms: Nat, +own: Nat) -> Nat:
+  Bool.pick(Nat, Nat.is_eq(ms, 0n), own, Nat.div(ms, 1000n))
+
 def Pol.view(+u0: U.Ui, +now0: Nat, +p: J.Json) -> J.Json:
-  +now = J.Json.get_nat(p, "now", now0)
+  +now = Pol.clock(J.Json.get_nat(p, "now", 0n), now0)
   +key = J.Json.get_str(p, "hub", "")
   +cid = J.Json.get_str(p, "cid", "")
   +u1 = U.Ui.scratch_set(U.Ui.online(U.Ui.set_cid(MS.Session.adopt(U.Ui.tick(u0, now), J.Json.get_obj(p, "session")), cid), True{}), "@sync", "1")
@@ -112,7 +116,7 @@ def Pol.step.k(+op: String, +u: U.Ui, +line: String, +now: Nat) -> Step:
   match op:
     case "F": Step{Pol.fold(u, Pol.tail(line)), "ok", False{}}
     case "V": Step{u, J.Json.show(Pol.view(u, now, Maybe.default(&2, J.Json, J.Json.parse(Pol.tail(line)), J.Null{}))), False{}}
-    case "C": Step{U.Ui.tick(u, Maybe.default(&2, Nat, Nat.read(Pol.tail(line)), 0n)), "ok", False{}}
+    case "C": Step{U.Ui.tick(u, Pol.clock(Maybe.default(&2, Nat, Nat.read(Pol.tail(line)), 0n), now)), "ok", False{}}
     case "P": Step{u, "pong", False{}}
     case "Q": Step{u, "bye", True{}}
     case _: Step{u, "err", False{}}
