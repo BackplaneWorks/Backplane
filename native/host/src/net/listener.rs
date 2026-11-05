@@ -11,6 +11,17 @@ use std::{future::Future, pin::Pin, sync::Arc, time::Duration};
 use tokio::{net::{TcpListener, TcpStream}, process::Command};
 
 type Fut<T> = Pin<Box<dyn Future<Output = T> + Send>>;
+/// Connections the tailnet listener has verified as the owner's own device, by the peer's socket address (unique while
+/// the connection lives; removed when it ends). Owner trust (`Auth.owner.pair`/`peer`) belongs to THIS listener alone:
+/// the main listener's loopback `Req.trusted` is not it, or any local process could ask for an invite as the owner.
+static OWNED: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<std::net::SocketAddr>>> = std::sync::OnceLock::new();
+fn owned() -> &'static std::sync::Mutex<std::collections::HashSet<std::net::SocketAddr>> { OWNED.get_or_init(Default::default) }
+/// Whether a connection with this peer address came through the tailnet listener and passed its whois verdict.
+pub fn is_owner_conn(peer: Option<std::net::SocketAddr>) -> bool { peer.map_or(false, |p| owned().lock().unwrap().contains(&p)) }
+struct Marked(std::net::SocketAddr);
+impl Marked { fn new(a: std::net::SocketAddr) -> Marked { owned().lock().unwrap().insert(a); Marked(a) } }
+impl Drop for Marked { fn drop(&mut self) { owned().lock().unwrap().remove(&self.0); } }
+
 /// What the listener asks of Tailscale (a fake in tests; the CLI in production, nothing at all on a copied log).
 pub trait Tailscale: Send + Sync {
     fn ip4(&self) -> Fut<String>;
@@ -44,27 +55,34 @@ pub async fn start(hub: Arc<Hub>, ts: Arc<dyn Tailscale>, peering: Arc<Peering>,
     let ip = ts.ip4().await;
     if ip.is_empty() { return State::Unavailable }
     let owner = tailnet::login(&ts.whois(ip.clone()).await);
-    peering.set_own_hosts(&ip, &tailnet::dns_name(&ts.status().await));
     let base = format!("http://{ip}:{port}");
     routes.address(&base);
+    // a main listener that covers the address gets no owner trust: the authorities are set only once this listener is bound
     if tailnet::covered(host, &ip) { return State::Reachable { link: String::new() } }
     let Ok(l) = TcpListener::bind((ip.as_str(), port)).await else { return State::Unavailable };
+    peering.set_own_hosts(&ip, &tailnet::dns_name(&ts.status().await));
     let gate = Arc::new(tokio::sync::Semaphore::new(32));
-    tokio::spawn(accept(hub, ts, l, owner, gate));
+    let waiting = Arc::new(tokio::sync::Semaphore::new(128));
+    tokio::spawn(accept(hub, ts, l, owner, gate, waiting));
     State::Reachable { link: tailnet::link(&base, token) }
 }
-async fn accept(hub: Arc<Hub>, ts: Arc<dyn Tailscale>, l: TcpListener, owner: String, gate: Arc<tokio::sync::Semaphore>) {
+async fn accept(hub: Arc<Hub>, ts: Arc<dyn Tailscale>, l: TcpListener, owner: String, gate: Arc<tokio::sync::Semaphore>, waiting: Arc<tokio::sync::Semaphore>) {
     loop {
-        let Ok((s, peer)) = l.accept().await else { continue };
+        // (an accept error such as EMFILE would spin: back off)
+        let Ok((s, peer)) = l.accept().await else { tokio::time::sleep(Duration::from_millis(50)).await; continue };
+        // at most 128 connections wait for their whois verdict; more are dropped, not held open
+        let Ok(w) = waiting.clone().try_acquire_owned() else { continue };
         let (hub, ts, owner, gate) = (hub.clone(), ts.clone(), owner.clone(), gate.clone());
-        tokio::spawn(async move { conn(hub, ts, s, peer.ip().to_string(), owner, gate).await });
+        tokio::spawn(async move { conn(hub, ts, s, peer, owner, gate, w).await });
     }
 }
-async fn conn(hub: Arc<Hub>, ts: Arc<dyn Tailscale>, s: TcpStream, peer: String, owner: String, gate: Arc<tokio::sync::Semaphore>) {
+async fn conn(hub: Arc<Hub>, ts: Arc<dyn Tailscale>, s: TcpStream, peer: std::net::SocketAddr, owner: String, gate: Arc<tokio::sync::Semaphore>, waiting: tokio::sync::OwnedSemaphorePermit) {
     // (a bounded number of whois lookups at once: a flood of connections cannot spawn a flood of processes)
-    let Ok(_p) = gate.acquire().await else { return };
-    let trusted = verdict(ts.as_ref(), &owner, &peer).await;
-    drop(_p);
+    let Ok(p) = gate.acquire().await else { return };
+    let trusted = verdict(ts.as_ref(), &owner, &peer.ip().to_string()).await;
+    drop(p); drop(waiting);
+    // the owner mark lives exactly as long as the connection
+    let _mark = trusted.then(|| Marked::new(peer));
     let _ = wire::serve_with(hub, s, trusted).await;
 }
 
@@ -85,7 +103,7 @@ mod tests {
     impl HttpHandler for Echo {
         fn routes(&self) -> &'static [&'static str] { &["/_trust"] }
         fn own_auth(&self) -> bool { true }
-        fn call<'a>(&'a self, _h: &'a Arc<Hub>, r: &'a Req) -> AFut<'a, HttpReply> { Box::pin(async move { HttpReply::text("200 OK", &format!("trusted={}", r.trusted)) }) }
+        fn call<'a>(&'a self, _h: &'a Arc<Hub>, r: &'a Req) -> AFut<'a, HttpReply> { Box::pin(async move { HttpReply::text("200 OK", &format!("trusted={} owner_conn={}", r.trusted, is_owner_conn(r.peer))) }) }
     }
     async fn node(tag: &str) -> (Arc<Hub>, Arc<Peering>, Arc<AuthRoutes>, std::path::PathBuf) {
         let h = std::env::temp_dir().join(format!("bp-listener-{tag}-{}", std::process::id())); let _ = std::fs::remove_dir_all(&h); std::fs::create_dir_all(&h).unwrap();
@@ -111,7 +129,8 @@ mod tests {
         let st = start(hub.clone(), ts, p.clone(), routes.clone(), "127.0.0.1x", port, "tok").await;
         assert_eq!(st, State::Reachable { link: format!("http://127.0.0.1:{port}/#token=tok") });
         // the peer (127.0.0.1) and this node (127.0.0.1) are the same owner: trusted
-        assert!(get(&format!("127.0.0.1:{port}")).await.contains("trusted=true"));
+        let t = get(&format!("127.0.0.1:{port}")).await; assert!(t.contains("trusted=true") && t.contains("owner_conn=true"), "{t}");
+        assert!(!is_owner_conn(Some("127.0.0.1:9".parse().unwrap())), "the mark is gone with the connection (and never for another address)");
         let _ = std::fs::remove_dir_all(h);
     }
     #[tokio::test] async fn tailnet_a_stranger_or_a_failed_whois_is_not_trusted() {
@@ -124,7 +143,7 @@ mod tests {
             fn status(&self) -> Fut<String> { Box::pin(async { String::new() }) }
         }
         start(hub.clone(), Arc::new(Flip(0.into())), p, routes, "127.0.0.1x", port, "tok").await;
-        for _ in 0..3 { assert!(get(&format!("127.0.0.1:{port}")).await.contains("trusted=false")); }
+        for _ in 0..3 { let t = get(&format!("127.0.0.1:{port}")).await; assert!(t.contains("trusted=false") && t.contains("owner_conn=false"), "{t}"); }
         let _ = std::fs::remove_dir_all(h);
     }
     #[tokio::test] async fn tailnet_no_address_is_unavailable_and_sets_nothing() {
@@ -146,7 +165,11 @@ mod tests {
         let ts = Arc::new(Fake { ip: "127.0.0.1".into(), whois: [("127.0.0.1".to_string(), who("me@x.com"))].into(), status: r#"{"Self":{"DNSName":"Box.t.ts.net."}}"#.into() });
         start(hub, ts, p.clone(), routes, "0.0.0.0", port, "tok").await;
         // Auth.owner.hosts: the ip and the MagicDNS name, each bare and with the listener's port (port 1 here is Peering's own)
-        let own = p.own_hosts_for_test(); assert!(own.contains(&"127.0.0.1".to_string()) && own.contains(&"box.t.ts.net".to_string()) && own.contains(&"127.0.0.1:1".to_string()), "{own:?}");
+        assert!(p.own_hosts_for_test().is_empty(), "a covering main listener sets no owner authorities");
+        let port2 = free(); let ts2 = Arc::new(Fake { ip: "127.0.0.1".into(), whois: [("127.0.0.1".to_string(), who("me@x.com"))].into(), status: r#"{"Self":{"DNSName":"Box.t.ts.net."}}"#.into() });
+        let (hub2, p2, routes2, h2) = node("auth2").await;
+        start(hub2, ts2, p2.clone(), routes2, "127.0.0.1x", port2, "tok").await;
+        let own = p2.own_hosts_for_test(); let _ = std::fs::remove_dir_all(h2); assert!(own.contains(&"127.0.0.1".to_string()) && own.contains(&"box.t.ts.net".to_string()) && own.contains(&"127.0.0.1:1".to_string()), "{own:?}");
         let _ = std::fs::remove_dir_all(h);
     }
 }

@@ -9,7 +9,7 @@ use std::{sync::Arc, time::Duration};
 pub struct PeerRoutes(pub Arc<Peering>);
 impl PeerRoutes {
     /// Req → PReq (the socket's `trusted` comes from the acceptor; never a credential by itself).
-    pub fn preq(r: &Req) -> PReq { PReq { method: r.method.clone(), target: r.target.clone(), headers: r.headers.clone(), body: r.body.clone(), trusted: r.trusted } }
+    pub fn preq(r: &Req) -> PReq { PReq { method: r.method.clone(), target: r.target.clone(), headers: r.headers.clone(), body: r.body.clone(), trusted: r.trusted, own_device: super::listener::is_owner_conn(r.peer) } }
 }
 impl HttpHandler for PeerRoutes {
     fn routes(&self) -> &'static [&'static str] { &["/bots/pair", "/bots/link"] }
@@ -63,8 +63,8 @@ mod tests {
         Peering::new(h, reg, PeerTable::new(), routes, false, "127.0.0.1", 1)
     }
     #[test] fn peer_preq_carries_the_sockets_trust_and_body() {
-        let mut r = Req::new("POST", "/bots/link", vec![("Host".into(), "h".into())]); r.body = b"{}".to_vec(); r.trusted = true;
+        let mut r = Req::new("POST", "/bots/link", vec![("Host".into(), "h".into())]); r.body = b"{}".to_vec(); r.trusted = true; // (loopback-style trust)
         let p = PeerRoutes::preq(&r);
-        assert_eq!((p.method.as_str(), p.route(), p.body.as_slice(), p.trusted), ("POST", "/bots/link", &b"{}"[..], true));
+        assert_eq!((p.method.as_str(), p.route(), p.body.as_slice(), p.trusted, p.own_device), ("POST", "/bots/link", &b"{}"[..], true, false), "trusted is not owner trust");
     }
 }
