@@ -3,6 +3,7 @@ import ../../src/core/json.bend as J
 import ../../src/core/client.bend as U
 import ../../src/mobile/hubs.bend as H
 import ../../src/mobile/session.bend as MS
+import ../../src/core/native-sidebar.bend as NS
 
 # bp-policy: the slim backend's policy process, in machine code. It folds the
 # hub's wire frames incrementally into Backplane's own client state (the same
@@ -49,7 +50,8 @@ def Pol.view.r(+r: J.Json, +want: J.Json) -> J.Json:
 def Pol.view(+u0: U.Ui, +now: Nat, +p: J.Json) -> J.Json:
   +key = J.Json.get_str(p, "hub", "")
   +cid = J.Json.get_str(p, "cid", "")
-  +u = U.Ui.scratch_set(U.Ui.online(U.Ui.set_cid(MS.Session.adopt(U.Ui.tick(u0, now), J.Json.get_obj(p, "session")), cid), True{}), "@sync", "1")
+  +u1 = U.Ui.scratch_set(U.Ui.online(U.Ui.set_cid(MS.Session.adopt(U.Ui.tick(u0, now), J.Json.get_obj(p, "session")), cid), True{}), "@sync", "1")
+  +u = NS.Ns.prepare(u1, False{}, p, J.Json.get_str(p, "epoch", ""), J.Json.get_str(p, "viewId", ""), J.Json.get_nat(p, "revision", 0n), J.Json.get_str(p, "nativeKey", ""))
   Pol.view.r(MS.Session.result(MS.Session.act(u, key, cid, now, J.Json.get_str(p, "action", ""), J.Json.get_str(p, "value", "")), key), J.Json.get_obj(p, "target"))
 
 # ---- the fold --------------------------------------------------------------
