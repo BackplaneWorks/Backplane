@@ -31,7 +31,7 @@ fn boot(hub: &Hub) -> Core {
     let mut at = 0usize;
     while at < len {
         let to = (at + 2000).min(len);
-        for l in hub.store.range(at, to).unwrap_or_default() { core.fold_line(&l); }
+        match hub.store.range(at, to) { Ok(ls) => for l in ls { core.fold_line(&l); }, Err(e) => eprintln!("state policies: reading log lines {at}..{to} failed: {e}") }
         at = to;
     }
     core
@@ -54,7 +54,7 @@ pub fn start(hub: Arc<Hub>) -> Arc<Policies> {
     hub.register_ticker(Arc::new(Tick { tx: tx.clone() }));
     tokio::spawn(async move {
         let h = hub.clone();
-        let Ok(core) = tokio::task::spawn_blocking(move || boot(&h)).await else { return };
+        let core = match tokio::task::spawn_blocking(move || boot(&h)).await { Ok(c) => c, Err(e) => { eprintln!("state policies: the log fold failed, the policies are off: {e}"); return } };
         let sink: Sink = Box::new(move |evs: Vec<Value>| { let hub = hub.clone(); Box::pin(async move { hub.commit_many(&evs).await.is_ok() }) });
         policy::run(rx, core, sink).await;
     });

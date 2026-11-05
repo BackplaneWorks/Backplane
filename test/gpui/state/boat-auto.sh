@@ -23,10 +23,13 @@ for f in test/gpui/state/auto-logs/auto-*.jsonl; do n=$(basename $f .jsonl)
   for now in $(cat test/gpui/state/auto-logs/auto.now); do
     B=test/gpui/state/auto-logs/auto.batch
     ( ulimit -s 1048576; $O/probe $now $B $f ) | norm > $O/$n.$now.bend
-    target-state/release/state-probe $now $B $f | norm > $O/$n.$now.rust
-    total=$((total+1)); [ -s $O/$n.$now.bend ] && nonempty=$((nonempty+1))
-    if cmp -s $O/$n.$now.bend $O/$n.$now.rust; then :; else fail=$((fail+1)); echo "DIFF $n $now: bend $(wc -l < $O/$n.$now.bend) rust $(wc -l < $O/$n.$now.rust)" | tee -a $O/result.txt; diff $O/$n.$now.bend $O/$n.$now.rust | head -6 | tee -a $O/result.txt; fi
+    [ -s $O/$n.$now.bend ] && nonempty=$((nonempty+1))
+    for lean in 0 1; do
+      LEAN=$lean target-state/release/state-probe $now $B $f | norm > $O/$n.$now.rust$lean
+      total=$((total+1))
+      if cmp -s $O/$n.$now.bend $O/$n.$now.rust$lean; then :; else fail=$((fail+1)); echo "DIFF lean=$lean $n $now: bend $(wc -l < $O/$n.$now.bend) rust $(wc -l < $O/$n.$now.rust$lean)" | tee -a $O/result.txt; diff $O/$n.$now.bend $O/$n.$now.rust$lean | head -6 | tee -a $O/result.txt; fi
+    done
   done
 done
-echo "autosettle probe: $total runs, $nonempty with changes, $fail differ" | tee -a $O/result.txt
+echo "autosettle probe: $total runs (full and lean state each), $nonempty with changes, $fail differ" | tee -a $O/result.txt
 [ $fail = 0 ]

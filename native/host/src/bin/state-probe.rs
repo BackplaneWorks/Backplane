@@ -1,5 +1,5 @@
 //! state-probe NOW BATCH|none CHUNK...: fold the logs with the Rust State and print {tick, meta, quiet}: Auto.changes at NOW and the
-//! commit-path events for the BATCH file (the Rust side of native/bend/autosettle_probe.bend; synthetic logs only).
+//! commit-path events (LEAN=1: with the lean state the policy host runs on) for the BATCH file (the Rust side of native/bend/autosettle_probe.bend; synthetic logs only).
 #[path = "../state/mod.rs"]
 mod state;
 #[path = "../shelf.rs"]
@@ -14,7 +14,7 @@ fn lines(path: &str) -> Vec<String> {
     let f = std::fs::File::open(path).unwrap_or_else(|e| { eprintln!("state-probe: {path}: {e}"); std::process::exit(2) });
     BufReader::new(f).lines().map_while(Result::ok).filter(|l| !l.is_empty()).collect()
 }
-fn fold(paths: &[String]) -> state::State { let mut st = state::State::new(); for p in paths { for l in lines(p) { st.apply_line(&l); } } st }
+fn fold(paths: &[String]) -> state::State { let mut st = state::State::new(); st.lean = std::env::var("LEAN").map_or(false, |v| v == "1"); for p in paths { for l in lines(p) { st.apply_line(&l); } } st }
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let now: u64 = args[0].parse().unwrap_or(0);
