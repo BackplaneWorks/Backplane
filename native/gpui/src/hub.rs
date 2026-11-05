@@ -58,6 +58,7 @@ impl View {
         // Opt in to the bounded native sidebar (at most 48 rows a page, paged by controls).
         if ["view.open","view.page","view.update","view.action"].contains(&method) {
             p["nativeSidebar"]=json!(1);
+            p["accountProfiles"]=json!(1); // the account page: the hub offers its `accounts` grant only to a view that declares this version
             // Offer keyed deltas against the newest body held; the hub answers whole or with ops from it.
             p["viewDelta"]=json!({"version":1,"token":self.bases.newest});
             self.offered.insert(self.next,self.bases.newest.clone());
