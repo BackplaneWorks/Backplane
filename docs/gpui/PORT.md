@@ -163,7 +163,7 @@ port waits for the person's decision.
 
 <!-- law-map: generated below by scripts/gpui/law-map.py -->
 
-Laws in LAWS.bend: 3253. bend 1001, rust 439, unported 1216, client 470, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`, `src/core/msp.bend`, `src/core/agy.bend`, `src/core/opencode.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
+Laws in LAWS.bend: 3253. bend 939, rust 513, unported 1204, client 470, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`, `src/core/msp.bend`, `src/core/agy.bend`, `src/core/opencode.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
 
 | law | status | seed | file | note |
 |---|---|---|---|---|
@@ -807,20 +807,20 @@ Laws in LAWS.bend: 3253. bend 1001, rust 439, unported 1216, client 470, window 
 | `bots_away_cat_posed_once` | window | seed D +-10% | `src/app/bots.bend` | GPUI replaces this window code (native/gpui); equivalence unchecked, no law-level mapping yet |
 | `bots_moving_cat_follows_clock` | window | seed D +-10% | `src/app/bots.bend` | GPUI replaces this window code (native/gpui); equivalence unchecked, no law-level mapping yet |
 | `bots_cats_calm_on_input` | window | seed D +-10% | `src/app/bots.bend` | GPUI replaces this window code (native/gpui); equivalence unchecked, no law-level mapping yet |
-| `far_id_parts` | bend | seed K +-10% | `src/core/far.bend` |  |
-| `far_id_here` | bend | seed K +-10% | `src/core/far.bend` |  |
-| `far_change_names_link` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `far_sent_names_sender` | bend | seed K +-10% | `src/core/far.bend` |  |
-| `far_change_bot_named` | bend | seed K +-10% | `src/core/far.bend` |  |
-| `far_settings_stay_home` | bend | seed K +-10% | `src/core/far.bend` |  |
-| `far_peers_stay_home` | bend | seed K +-10% | `src/core/far.bend` |  |
-| `far_hooks_stay_home` | bend | seed K +-10% | `src/core/far.bend` |  |
-| `far_devices_stay_home` | bend | seed K +-10% | `src/core/far.bend` |  |
-| `far_rooms_stay_home` | bend | seed K +-10% | `src/core/far.bend` |  |
-| `far_gap_takes_nothing` | bend | seed K +-10% | `src/core/far.bend` |  |
-| `far_old_takes_nothing` | bend | seed K +-10% | `src/core/far.bend` |  |
-| `far_overlap_takes_new` | bend | seed K +-10% | `src/core/far.bend` |  |
-| `far_batch_again` | bend | seed K +-10% | `src/core/far.bend` |  |
+| `far_id_parts` | rust `far_id_parts` | map | `src/core/far.bend` |  |
+| `far_id_here` | rust `far_id_here` | map | `src/core/far.bend` |  |
+| `far_change_names_link` | rust `far_change_names_link` | map | `src/core/model.bend` |  |
+| `far_sent_names_sender` | rust `far_sent_names_sender` | map | `src/core/far.bend` |  |
+| `far_change_bot_named` | rust `far_change_bot_named` | map | `src/core/far.bend` |  |
+| `far_settings_stay_home` | rust `far_settings_stay_home` | map | `src/core/far.bend` |  |
+| `far_peers_stay_home` | rust `far_peers_stay_home` | map | `src/core/far.bend` |  |
+| `far_hooks_stay_home` | rust `far_settings_stay_home` | map | `src/core/far.bend` |  |
+| `far_devices_stay_home` | rust `far_settings_stay_home` | map | `src/core/far.bend` |  |
+| `far_rooms_stay_home` | rust `far_settings_stay_home` | map | `src/core/far.bend` |  |
+| `far_gap_takes_nothing` | rust `far_gap_takes_nothing` | map | `src/core/far.bend` |  |
+| `far_old_takes_nothing` | rust `far_old_takes_nothing` | map | `src/core/far.bend` |  |
+| `far_overlap_takes_new` | rust `far_overlap_takes_new` | map | `src/core/far.bend` |  |
+| `far_batch_again` | rust `far_batch_again` | map | `src/core/far.bend` |  |
 | `far_route_here_stays` | unported | seed R +-10% | `src/core/json.bend` |  |
 | `far_route_goes_home` | unported | seed R +-10% | `src/core/json.bend` |  |
 | `far_allowed_only_methods` | unported | seed R +-10% | `src/core/json.bend` |  |
@@ -1769,15 +1769,15 @@ Laws in LAWS.bend: 3253. bend 1001, rust 439, unported 1216, client 470, window 
 | `sched_zoned_once_per_slot` | bend | seed K +-10% | `src/core/tz.bend` |  |
 | `when_in_minutes` | bend | seed K +-10% | `src/core/tz.bend` |  |
 | `when_in_hours` | bend | seed K +-10% | `src/core/tz.bend` |  |
-| `task_secret_never_stored` | bend | seed K +-10% | `src/core/task.bend` |  |
-| `task_risky_needs_confirm` | bend | seed K +-10% | `src/core/task.bend` |  |
-| `run_confirm_runs` | bend | seed K +-10% | `src/core/task.bend` |  |
-| `run_stuck_alerts_once` | bend | seed K +-10% | `src/core/task.bend` |  |
-| `run_pause_alerts` | bend | seed K +-10% | `src/core/task.bend` |  |
-| `run_stop_ends` | bend | seed K +-10% | `src/core/task.bend` |  |
-| `drive_person_locks_bot` | bend | seed K +-10% | `src/core/task.bend` |  |
-| `task_slug_nonempty` | bend | seed K +-10% | `src/core/task.bend` |  |
-| `task_slug_empty` | bend | seed K +-10% | `src/core/task.bend` |  |
+| `task_secret_never_stored` | rust `task_secret_never_stored` | map | `src/core/task.bend` |  |
+| `task_risky_needs_confirm` | rust `run_laws` | map | `src/core/task.bend` |  |
+| `run_confirm_runs` | rust `run_laws` | map | `src/core/task.bend` |  |
+| `run_stuck_alerts_once` | rust `run_laws` | map | `src/core/task.bend` |  |
+| `run_pause_alerts` | rust `run_laws` | map | `src/core/task.bend` |  |
+| `run_stop_ends` | rust `run_laws` | map | `src/core/task.bend` |  |
+| `drive_person_locks_bot` | rust `drive_person_locks_bot` | map | `src/core/task.bend` |  |
+| `task_slug_nonempty` | rust `task_slug_rules` | map | `src/core/task.bend` |  |
+| `task_slug_empty` | rust `task_slug_rules` | map | `src/core/task.bend` |  |
 | `gmail_reply_subject_adds_re` | bend | seed K +-10% | `src/core/google.bend` |  |
 | `gmail_reply_subject_keeps_re` | bend | seed K +-10% | `src/core/google.bend` |  |
 | `gmail_references_appends` | bend | seed K +-10% | `src/core/google.bend` |  |
@@ -1827,25 +1827,25 @@ Laws in LAWS.bend: 3253. bend 1001, rust 439, unported 1216, client 470, window 
 | `teach_secret_row_no_chip` | client | seed C +-10% | `src/core/client.bend` |  |
 | `teach_tasks_tab` | client | seed C +-10% | `src/core/botui.bend` |  |
 | `teach_clock` | client | seed C +-10% | `src/core/client.bend` |  |
-| `teach_preview_refused_teaching` | bend | seed K +-10% | `src/core/teach.bend` |  |
-| `teach_preview_refused_takeover` | bend | seed K +-10% | `src/core/teach.bend` |  |
-| `teach_preview_other_bot_free` | bend | seed K +-10% | `src/core/teach.bend` |  |
-| `teach_preview_allowed_idle` | bend | seed K +-10% | `src/core/teach.bend` |  |
-| `teach_handback_returns_browser` | bend | seed K +-10% | `src/core/teach.bend` |  |
-| `teach_info_idle` | bend | seed K +-10% | `src/core/teach.bend` |  |
-| `teach_info_recording` | bend | seed K +-10% | `src/core/teach.bend` |  |
-| `teach_info_review` | bend | seed K +-10% | `src/core/teach.bend` |  |
-| `teach_pause_options_risky` | bend | seed K +-10% | `src/core/teach.bend` |  |
-| `teach_pause_options_plain` | bend | seed K +-10% | `src/core/teach.bend` |  |
-| `teach_scale_corner` | bend | seed K +-10% | `src/core/task.bend` |  |
-| `teach_scale_middle` | bend | seed K +-10% | `src/core/task.bend` |  |
-| `teach_run_no_slash` | bend | seed K +-10% | `src/core/teach.bend` |  |
-| `teach_run_no_dots` | bend | seed K +-10% | `src/core/teach.bend` |  |
-| `teach_file_no_traversal` | bend | seed K +-10% | `src/core/teach.bend` |  |
-| `teach_run_slug_roundtrip` | bend | seed K +-10% | `src/core/teach.bend` |  |
-| `teach_recording_expires` | bend | seed K +-10% | `src/core/teach.bend` |  |
-| `teach_recording_not_early` | bend | seed K +-10% | `src/core/teach.bend` |  |
-| `teach_draft_secret_no_value` | unported | seed R +-10% | `src/core/json.bend` |  |
+| `teach_preview_refused_teaching` | rust `teach_bot_may_follows_the_driver` | map | `src/core/teach.bend` |  |
+| `teach_preview_refused_takeover` | rust `teach_bot_may_follows_the_driver` | map | `src/core/teach.bend` |  |
+| `teach_preview_other_bot_free` | rust `teach_bot_may_follows_the_driver` | map | `src/core/teach.bend` |  |
+| `teach_preview_allowed_idle` | rust `teach_bot_may_follows_the_driver` | map | `src/core/teach.bend` |  |
+| `teach_handback_returns_browser` | rust `teach_bot_may_follows_the_driver` | map | `src/core/teach.bend` |  |
+| `teach_info_idle` | rust `teach_modes_and_info` | map | `src/core/teach.bend` |  |
+| `teach_info_recording` | rust `teach_modes_and_info` | map | `src/core/teach.bend` |  |
+| `teach_info_review` | rust `teach_modes_and_info` | map | `src/core/teach.bend` |  |
+| `teach_pause_options_risky` | rust `teach_pause_options` | map | `src/core/teach.bend` |  |
+| `teach_pause_options_plain` | rust `teach_pause_options` | map | `src/core/teach.bend` |  |
+| `teach_scale_corner` | rust `teach_scale` | map | `src/core/task.bend` |  |
+| `teach_scale_middle` | rust `teach_scale` | map | `src/core/task.bend` |  |
+| `teach_run_no_slash` | rust `teach_run_ids_and_files_are_plain_names` | map | `src/core/teach.bend` |  |
+| `teach_run_no_dots` | rust `teach_run_ids_and_files_are_plain_names` | map | `src/core/teach.bend` |  |
+| `teach_file_no_traversal` | rust `teach_run_ids_and_files_are_plain_names` | map | `src/core/teach.bend` |  |
+| `teach_run_slug_roundtrip` | rust `teach_run_ids_and_files_are_plain_names` | map | `src/core/teach.bend` |  |
+| `teach_recording_expires` | rust `teach_recording_expires_after_ten_minutes_not_before` | map | `src/core/teach.bend` |  |
+| `teach_recording_not_early` | rust `teach_recording_expires_after_ten_minutes_not_before` | map | `src/core/teach.bend` |  |
+| `teach_draft_secret_no_value` | rust `teach_draft_secret_no_value` | map | `src/core/json.bend` |  |
 | `mobile_browser_ask_card` | client | seed C +-10% | `src/core/client.bend` |  |
 | `mobile_other_ask_standard` | client | seed C +-10% | `src/mobile/screen.bend` |  |
 | `mobile_browser_card_only_browser` | unported | seed R +-10% | `src/core/json.bend` |  |
@@ -2870,30 +2870,30 @@ Laws in LAWS.bend: 3253. bend 1001, rust 439, unported 1216, client 470, window 
 | `life_owned_progress_held` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `life_fresh_child_wakes` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `life_later_manual_settle_held` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `hook_off_unset` | bend | seed K +-10% | `src/core/wnote.bend` |  |
-| `hook_on_set` | bend | seed K +-10% | `src/core/wnote.bend` |  |
-| `hook_url_https` | bend | seed K +-10% | `src/core/wnote.bend` |  |
-| `hook_url_file` | bend | seed K +-10% | `src/core/wnote.bend` |  |
-| `hook_url_space` | bend | seed K +-10% | `src/core/wnote.bend` |  |
-| `hook_live_blank` | bend | seed K +-10% | `src/core/wnote.bend` |  |
-| `hook_mode_unsigned` | bend | seed K +-10% | `src/core/wnote.bend` |  |
-| `hook_mode_default_file` | bend | seed K +-10% | `src/core/wnote.bend` |  |
-| `hook_mode_missing` | bend | seed K +-10% | `src/core/wnote.bend` |  |
-| `hook_mode_configured` | bend | seed K +-10% | `src/core/wnote.bend` |  |
-| `hook_stopped_word` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `hook_failed_word` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `hook_completed_word` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `hook_body_state` | unported | seed R +-10% | `src/core/json.bend` |  |
-| `hook_body_event` | unported | seed R +-10% | `src/core/json.bend` |  |
-| `hook_body_kind` | unported | seed R +-10% | `src/core/json.bend` |  |
-| `hook_body_ask_event` | unported | seed R +-10% | `src/core/json.bend` |  |
-| `hook_unsigned_header` | bend | seed K +-10% | `src/core/wnote.bend` |  |
-| `hook_signed_header` | bend | seed K +-10% | `src/core/wnote.bend` |  |
-| `hook_secret_default` | bend | seed K +-10% | `src/core/wnote.bend` |  |
-| `hook_secret_path` | bend | seed K +-10% | `src/core/wnote.bend` |  |
-| `hook_report_keeps_end` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `hook_report_keeps_fail` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `hook_report_fallback` | unported | seed R +-10% | `src/core/model.bend` |  |
+| `hook_off_unset` | rust `hook_off_unset` | map | `src/core/wnote.bend` |  |
+| `hook_on_set` | rust `hook_on_set` | map | `src/core/wnote.bend` |  |
+| `hook_url_https` | rust `hook_url_https` | map | `src/core/wnote.bend` |  |
+| `hook_url_file` | rust `hook_url_file` | map | `src/core/wnote.bend` |  |
+| `hook_url_space` | rust `hook_url_space` | map | `src/core/wnote.bend` |  |
+| `hook_live_blank` | rust `hook_live_blank` | map | `src/core/wnote.bend` |  |
+| `hook_mode_unsigned` | rust `hook_mode_unsigned` | map | `src/core/wnote.bend` |  |
+| `hook_mode_default_file` | rust `hook_mode_default_file` | map | `src/core/wnote.bend` |  |
+| `hook_mode_missing` | rust `hook_mode_missing` | map | `src/core/wnote.bend` |  |
+| `hook_mode_configured` | rust `hook_mode_configured` | map | `src/core/wnote.bend` |  |
+| `hook_stopped_word` | rust `hook_stopped_word` | map | `src/core/model.bend` |  |
+| `hook_failed_word` | rust `hook_failed_word` | map | `src/core/model.bend` |  |
+| `hook_completed_word` | rust `hook_completed_word` | map | `src/core/model.bend` |  |
+| `hook_body_state` | rust `hook_body_state` | map | `src/core/json.bend` |  |
+| `hook_body_event` | rust `hook_body_event` | map | `src/core/json.bend` |  |
+| `hook_body_kind` | rust `hook_body_kind` | map | `src/core/json.bend` |  |
+| `hook_body_ask_event` | rust `hook_body_ask_event` | map | `src/core/json.bend` |  |
+| `hook_unsigned_header` | rust `hook_unsigned_header` | map | `src/core/wnote.bend` |  |
+| `hook_signed_header` | rust `hook_signed_header` | map | `src/core/wnote.bend` |  |
+| `hook_secret_default` | rust `hook_secret_default` | map | `src/core/wnote.bend` |  |
+| `hook_secret_path` | rust `hook_secret_path` | map | `src/core/wnote.bend` |  |
+| `hook_report_keeps_end` | rust `hook_report_keeps_end` | map | `src/core/model.bend` |  |
+| `hook_report_keeps_fail` | rust `hook_report_keeps_fail` | map | `src/core/model.bend` |  |
+| `hook_report_fallback` | rust `hook_report_fallback` | map | `src/core/model.bend` |  |
 | `hook_follows_settle` | bend | seed K +-10% | `src/core/notice.bend` |  |
 | `hook_follows_stop` | bend | seed K +-10% | `src/core/notice.bend` |  |
 | `hook_follows_ask` | bend | seed K +-10% | `src/core/notice.bend` |  |
@@ -2902,14 +2902,14 @@ Laws in LAWS.bend: 3253. bend 1001, rust 439, unported 1216, client 470, window 
 | `hook_follows_fail` | bend | seed K +-10% | `src/core/notice.bend` |  |
 | `hook_follows_reminder` | bend | seed K +-10% | `src/core/notice.bend` |  |
 | `hook_follows_all` | bend | seed K +-10% | `src/core/notice.bend` |  |
-| `hook_route_done` | bend | seed K +-10% | `src/core/wnote.bend` |  |
-| `hook_route_fail` | bend | seed K +-10% | `src/core/wnote.bend` |  |
-| `hook_route_ask` | bend | seed K +-10% | `src/core/wnote.bend` |  |
-| `hook_route_merged` | bend | seed K +-10% | `src/core/wnote.bend` |  |
-| `hook_route_reminder` | bend | seed K +-10% | `src/core/wnote.bend` |  |
-| `hook_route_note` | bend | seed K +-10% | `src/core/wnote.bend` |  |
-| `hook_route_quiet` | bend | seed K +-10% | `src/core/wnote.bend` |  |
-| `accounts_legacy_allowed` | bend | seed K +-10% | `src/core/accounts.bend` |  |
+| `hook_route_done` | rust `hook_route_done` | map | `src/core/wnote.bend` |  |
+| `hook_route_fail` | rust `hook_route_fail` | map | `src/core/wnote.bend` |  |
+| `hook_route_ask` | rust `hook_route_ask` | map | `src/core/wnote.bend` |  |
+| `hook_route_merged` | rust `hook_route_merged` | map | `src/core/wnote.bend` |  |
+| `hook_route_reminder` | rust `hook_route_reminder` | map | `src/core/wnote.bend` |  |
+| `hook_route_note` | rust `hook_route_note` | map | `src/core/wnote.bend` |  |
+| `hook_route_quiet` | rust `hook_route_quiet` | map | `src/core/wnote.bend` |  |
+| `accounts_legacy_allowed` | rust `accounts_legacy_allowed` | map | `src/core/accounts.bend` |  |
 | `accounts_legacy_catalog` | unported | seed R +-10% | `src/core/json.bend` |  |
 | `accounts_profile_sessions_differ` | bend | seed K +-10% | `src/core/accounts.bend` |  |
 | `accounts_identity_sessions_differ` | bend | seed K +-10% | `src/core/accounts.bend` |  |
@@ -3431,20 +3431,3 @@ Laws that name a web-only file but also native-shared code, so kept (review by h
 
 - `stop_command_only_while_running` names `src/web/workspace.bend`
 - `terminal_empty_input_keeps_view` names `src/web/workspace.bend`
-
-### Open seam: stalled clients and terminal output (term lane, 2026-11-05)
-Terminal output goes out with `Hub::push_all` into each connection's unbounded outbox, so one stalled client plus a flood (`yes` in a terminal) grows the hub without limit. M3's "slow clients bounded" does not hold for terminal output, and M7 must not run with a stalled client until this is wired. The fix needs `Hub::push_budgeted(client, frame, bytes) -> bool` and `Hub::outbox_pending(client) -> usize` (owner: the `bend` lead; requested 2026-11-05) and a way to list connections; the term lane then drops a stalled client's term frames past its budget and sends one snapshot when it drains (`term/mod.rs` header).
-## Settings lane: known gaps (native/host/src/settings/)
-
-- `setting.set` of `kicad.path`: the Bend hub also sends `KiCadRetry` so the runtime is checked again at once. The Rust runtime reads the setting on each use (`kicad/ipc.rs`) and has no cached check to retry, so there is nothing to call; the next KiCad request picks the new path up.
-- Telemetry: the choice (opt-out, reset, receipts) is ported; the sender is not, and no endpoint is baked in, so nothing is ever sent.
-- Vault: Windows DPAPI key storage is not ported (the file and keyring/keychain backends are).
-- `vault::with` holds the vault lock through key-store commands (up to 5 s), as a blocking call; callers use `spawn_blocking`.
-- Settings propose: Bend's `Settings.propose` also refuses while `Private.live(thread)` (a bot's private-mail turn). Rust has no private turns yet; the bots lane must add that check to `settings::proposal::tool_propose` when they exist, or a private turn can open a hub-wide proposal.
-- Fallback outage classifier (`Error.classify`) and chain `pick`: not ported (they read provider error envelopes in the agents' turn handling).
-- Webhook: the `hook_follows_*` laws (the webhook posts exactly when Notify me for would notify) are about `notice.bend`'s Policy over the alert records; they stay with the notification pipeline (net lane). `settings::webhook::deliver` is the entry point it calls for each alert; `fires`/`route` hold the kinds the policy raises.
-- Time zones: `settings::zone` keeps each zone's POSIX rule as `tz.rule.<name>` but does not parse or evaluate it (`core/tz.bend`: offset at an instant, wall clock, gaps and overlaps); that belongs with the routines (bots lane). The hub does not yet write `tz.machine` at start nor refresh rules on a tick (`Hub.zone.tick`).
-- Improvements: `improvements.context` / `improvements.report` are ported; the thread itself is `thread.create` with a `creationKey` (commands lane; `settings::improvements::key`/`thread_for` are its rules).
-
-### Teach and task driver seams (term lane, 2026-11-05)
-`term/driver.rs` serves `bots.browser`, `bots.teach`, `bots.task` and the `task_*` tools with the page owner = the thread id. Open: (1) `known_owner` knows only threads (no bots yet), so a bot's own page is refused until the bots lane adds live bots to it; the bots lane gives the real owner (`BT.World.page`) and calls `Driver::set_wake` so a saved/run task wakes the bot; (2) the agents lane calls `Driver::answered(ask, answer)` when an ask of kind browser / tool task_pause is answered (it also hands the browser back); (3) the HTTP routes `/bots/<id>/tasks/shot` and the tasks listing are not served; (4) a joining client's `drive.<bot>`/`teach.<bot>` info comes from `Driver::info` once core's hub.info asks for it; (5) the browser engine (CEF) events `engine`/`helper-exit` handling and `browser.place/embed` are not ported.
