@@ -20,6 +20,9 @@ struct BackplaneApp: App {
     @State private var model = AppModel()
     // JetBrains Mono (Mono.swift): registered before any view draws
     private let monoFonts: Void = Mono.register()
+    #if DEBUG
+    private let stall: Void = Stall.start()
+    #endif
     @State private var grace: UIBackgroundTaskIdentifier = .invalid
 
     var body: some Scene {
