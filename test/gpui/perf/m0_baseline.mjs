@@ -4,7 +4,13 @@ import {mkdirSync,writeFileSync,readFileSync,existsSync,appendFileSync,readdirSy
 import {execSync} from 'node:child_process';
 import {makeStandins,startHub,stopHub,client,sleep,pct,rssKb,hwmKb,cpuTicks,fds,threads,tree,treeRssKb,dirSizes} from './lib.mjs';
 import {viewClient} from './view.mjs';
-const REPO='/home/h/Documents/i2cjak/backplane-gpui';const HOME=process.env.HOME+'/.backplane-gpui-copy';const PORT=3830,HOST='100.64.84.41';
+const REPO='/home/h/Documents/i2cjak/backplane-gpui';
+// The store copy ~/.backplane-gpui-copy is read-only and never written by a hub. Every run works on a throwaway copy under build/gpui/ (cp --reflink=auto), removed afterwards.
+const SRC=process.env.HOME+'/.backplane-gpui-copy';const HOME=REPO+'/build/gpui/perf-run/m0/home';
+function prepareCopy(){const free=Number(execSync("df -B1G --output=avail / | tail -1",{encoding:'utf8'}).trim());if(free<40)throw Error('df: only '+free+' GiB free on /, need >= 40');
+ mkdirSync(HOME,{recursive:true});execSync(`cp --reflink=auto ${SRC}/events.jsonl ${HOME}/events.jsonl`);if(process.env.WITH_STORE&&existsSync(SRC+'/store.db'))execSync(`cp --reflink=auto ${SRC}/store.db ${HOME}/store.db`);
+ if(existsSync(SRC+'/token'))execSync(`cp ${SRC}/token ${HOME}/token`);R.copy={made:new Date().toISOString(),dfFreeGiB:free,withStoreDb:!!process.env.WITH_STORE}}
+function removeCopy(){try{execSync(`rm -rf ${HOME}`)}catch{}}const PORT=3830,HOST='100.64.84.41';
 const root=REPO+'/build/gpui/perf-run/m0';mkdirSync(root+'/fakehome',{recursive:true});mkdirSync(root+'/proj',{recursive:true});makeStandins(root+'/bin');
 const out=REPO+'/build/gpui/results/perf/m0';mkdirSync(out,{recursive:true});
 const stat=a=>({n:a.length,p50:pct(a,50),p95:pct(a,95),p99:pct(a,99),max:Math.max(...a)});
@@ -24,11 +30,13 @@ async function boot(tag,extra={}){
 }
 process.on('exit',()=>{try{if(globalThis.__hubpid)process.kill(globalThis.__hubpid,'SIGTERM')}catch{}});
 const phase=process.argv[2]||'all';
+process.on('exit',()=>{if(!process.env.KEEP_COPY)removeCopy()});
+if(!process.env.REUSE_COPY)prepareCopy();
 const run=(n)=>phase==='all'||phase===n;
 let cur=null;
 async function stopWait(h){stopHub(h);for(let i=0;i<300;i++){if(!existsSync('/proc/'+h.pid))break;await sleep(200)}await sleep(500)}
 if(run('first')){
- if(existsSync(HOME+'/store.db')&&!process.env.ALLOW_RERUN_FIRST)throw Error('store.db exists: first start already done');
+ 
  R.liveReference=await liveRef(30);save();
  const rs=[];const t0=Date.now();
  const sampler=setInterval(()=>{},1000);
