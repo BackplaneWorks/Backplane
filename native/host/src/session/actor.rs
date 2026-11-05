@@ -31,9 +31,14 @@ pub struct ViewActor { view: String, target: Option<Value>, sel: Option<String>,
     /// ids of the requests this view's commands told the client to send (`cmds` of type send), and of those the hub has since answered
     sent: BTreeSet<u64>, replied: BTreeSet<u64>, late: BTreeSet<u64> }
 
-/// The thread a target's draft and viewer belong to (V.Target.owner). Limits: a bot's thread (Target.thread) and a
-/// project home's owner are not modelled, so those targets get no "@away.<t>" and no seeds.
-fn owner(target: &Value) -> &str { if target["kind"] == "thread" { target["id"].as_str().unwrap_or("") } else { "" } }
+/// The thread a target's draft and viewer belong to (V.Target.owner): a thread's own id, a project's home owner
+/// (`PH.Home.owner`: "project-home-<project>"). Limit: a bot's chat thread (Target.thread: `U.Bots.chat.of`) needs the bots
+/// lane's state, so a bot target gets no "@away.<t>", no seeds, and `@btab` stays "" (thin-view.bend Route.choose: the tab
+/// the route names, else the bot's default); a room has no owner.
+fn owner(target: &Value) -> String {
+    let id = target["id"].as_str().unwrap_or("");
+    match target["kind"].as_str() { Some("thread") => id.to_string(), Some("project") => format!("project-home-{id}"), _ => String::new() }
+}
 
 /// Actor.safe_input / Actor.local.key: the only drafts a page may supply (besides the thread's own text).
 const LOCAL_KEYS: [&str; 7] = ["@lang", "@lang.os", "@lang.tag", "@lang.preview", "@local.view", "@local.usage", "@desktop.browser"];
@@ -54,7 +59,7 @@ impl ViewActor {
         let mut session = req["session"].as_object().cloned().unwrap_or_default();
         let target = &req["target"];
         let first = self.target.is_none();
-        let th = owner(target).to_string();
+        let th = owner(target);
         let thread_ok = !th.is_empty() && !th.starts_with('@');
         let cd = session.get("drafts").and_then(Value::as_object).cloned().unwrap_or_default();
         let ci = session.get("info").and_then(Value::as_object).cloned().unwrap_or_default();
@@ -159,7 +164,7 @@ impl ViewActor {
         // Ui.reselect fires when the selection changes, whatever action did it.
         let sel = session.get("sel").and_then(Value::as_str).unwrap_or("").to_string();
         let reselected = self.sel.as_deref().map_or(true, |o| o != sel);
-        let th = owner(&target).to_string();
+        let th = owner(&target);
         let mut drafts = session.get("drafts").and_then(Value::as_object).cloned().unwrap_or_default();
         drafts.retain(|k, _| !render_scratch(k) && !k.starts_with("@away."));
         // Actor.away.input: a request without the mark leaves it as it was; the marks are kept per thread (Actor.scope.keep keeps @away.*).
@@ -540,6 +545,17 @@ mod tests {
         a.record_read("v1", "fab.look", 2, true, json!({}));
         assert!(a.take_reads("v1", &t2).is_empty());
         assert!(a.take_reads("v1", &t1).is_empty());
+    }
+    #[test] fn a_project_home_target_is_owned_by_its_home_thread() {
+        assert_eq!(owner(&json!({"kind": "project", "id": "p1"})), "project-home-p1");
+        assert_eq!(owner(&json!({"kind": "thread", "id": "t1"})), "t1");
+        assert_eq!(owner(&json!({"kind": "bot", "id": "b"})), "");
+        let mut a = ViewActor::default();
+        a.reply("v1", &req("recent", ""), &pol("", &[]));
+        let mut r = req("project", "p1"); r["away"] = json!("m9");
+        let s = a.reply("v1", &r, &pol("", &[]));
+        assert_eq!(s["drafts"]["@away.project-home-p1"], json!("m9"));
+        assert!(s["drafts"].get("@sch:project-home-p1").is_some() && s["info"]["view.kind:project-home-p1"] == json!(""));
     }
     #[test] fn forget_and_the_bound_keep_the_map_flat() {
         let mut m: HashMap<u64, ViewActor> = HashMap::new();
