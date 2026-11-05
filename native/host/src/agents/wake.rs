@@ -7,6 +7,8 @@ use super::{lines::hub_id, now_s, Agents};
 use serde_json::{json, Value};
 use std::{collections::HashMap, sync::{Arc, Mutex}};
 
+/// A copy of a log wakes nothing: a thread ending there must not start or feed another (the same gate as work.rs).
+pub const COPY_LINE: &str = "wake subscriptions are off on a copy of a log (BACKPLANE_COPY=1): nothing is subscribed, cancelled or woken here";
 const KINDS: [&str; 4] = ["thread", "work", "pr", "file"];
 const SERVED: [&str; 1] = ["thread"];
 
@@ -91,6 +93,7 @@ impl Wakes {
         let w = Arc::new(Wakes { ag: ag.clone(), book: Mutex::new(Book::default()), tailing: tokio::sync::Mutex::new(()) });
         w.catch_up();
         ag.add_tools(Arc::new(WakeTools(w.clone())));
+        if crate::copy::on() { return w } // the book is read for wake_list; nothing follows the log, nothing fires
         let me = w.clone(); let mut rx = ag.hub.subscribe();
         tokio::spawn(async move { loop {
             match rx.recv().await { Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => me.tail().await, Err(_) => return }
@@ -103,6 +106,7 @@ impl Wakes {
     }
     /// New log lines: fold them, and fire for the turn ends and asks among them.
     async fn tail(&self) {
+        if crate::copy::on() { return }
         let _one = self.tailing.lock().await; // one reader at a time: two would fire the same lines twice
         let store = &self.ag.hub.store; let total = store.len();
         let from = self.book.lock().unwrap().at; if from >= total { return }
@@ -125,6 +129,7 @@ impl Wakes {
         for (th, end, at, ask) in ends { self.fire(&th, end, at, ask).await }
     }
     async fn fire(&self, th: &str, end: u8, at: u64, ask: Option<(String, u64)>) {
+        if crate::copy::on() { return }
         let subs: Vec<Wake> = self.book.lock().unwrap().on("thread", th).into_iter().cloned().collect(); if subs.is_empty() { return }
         let (title, reply, idle, live, asked) = { let w = self.ag.world().await;
             let t = w.threads.get(th); let idle = end > 0 && w.ready(th) && !w.running(th);
@@ -161,6 +166,7 @@ impl Wakes {
         match name {
             "wake_list" => { (true, json!({"wakes": self.book.lock().unwrap().by(by).iter().map(|w| w.json()).collect::<Vec<_>>()})) }
             "wake_cancel" => {
+                if crate::copy::on() { return fail(COPY_LINE) }
                 let id = a.get("id").and_then(Value::as_str).unwrap_or("");
                 let own = !id.is_empty() && self.book.lock().unwrap().wakes.get(id).map_or(false, |w| w.by == by);
                 if !own { return fail("no such wake subscription owned by this thread") }
@@ -171,6 +177,7 @@ impl Wakes {
         }
     }
     async fn on(&self, by: &str, a: &Value) -> (bool, Value) {
+        if crate::copy::on() { return fail(COPY_LINE) }
         let (kind, target) = (a.get("kind").and_then(Value::as_str).unwrap_or(""), a.get("target").and_then(Value::as_str).unwrap_or(""));
         let events: Vec<String> = match a.get("events").and_then(Value::as_array) { Some(x) => x.iter().map(|e| e.as_str().unwrap_or("").to_string()).collect(), None => defaults(kind) };
         let e = error(by, kind, target, &events); if !e.is_empty() { return fail(&e) }
