@@ -14,7 +14,13 @@ coordinator confirms. `BACKPLANE_COPY=1` stays as it is (tests, rehearsals, stan
    line in the journal, so its end was something else, still unexplained; it is not reproduced by the synthetic log. Two things for core/slim before any
    design passes: the helper's whole-log fold has to fit (page it, trim it, or fold only a window), and the hub must say why when its helper dies
    (today it exits silently). Raw: `build/gpui/results/switchover/` (`diag28.log`, `logs/*/rss.tsv`).
-2. Every row marked **pending** or **unverified** in the actor table below is held, by code, and verified by a test.
+2. **The unexplained 28 s stop on the real log.** The first run on the real copy ended after 28 s with a 1.6 GB scope peak and no out-of-memory line in the
+   journal; the synthetic log does not reproduce it (it reproduces an OOM kill at 37 s instead). The real log has something the synthetic one lacks, or the
+   hub/helper fails on it: not understood, so a real run cannot be promised to open.
+3. **Bub.** Bub (the person's uberbot) and everything it does on its own (routines, reminders, hand-offs, reports back to the person) does not run on this hub: the
+   ticker, `uber_init` and mail are held off on a copy. Threads Bub launched keep their history but nothing reports to Bub. That is by design here, and it is a
+   difference the person will feel.
+4. Every row marked **pending** or **unverified** in the actor table below is held, by code, and verified by a test.
 
 ## What this is, honestly
 
@@ -125,14 +131,16 @@ unverified row may exist at the first real run.
 ## Known missing
 
 1. No sync either way: the live Backplane's later work is not here; this copy's threads never go back.
-2. No routines, reminders, bots, mail, uberbot; no notifications or push.
+2. No routines, reminders, bots, mail, **Bub (the uberbot)**; no notifications or push.
 3. No terminals, browser, `preview_*`, taught tasks, secrets box.
 4. **Agents are the person's real agents**: their file edits are real, rollback does not undo them, there is no history of them in this copy, and no gate
    covers what an agent does with its shell and real `HOME` (see above).
 5. No git commit/push/PR from the app, no file-open or release; no design history capture.
 6. A copied thread starts a fresh agent session: the agent does not know the thread's earlier conversation.
 7. No other machines, pairing, tailnet.
-8. A live turn that starts in a folder after the check is not detected; don't run the same folder in both apps.
+8. **The hub has not opened the real log yet** (the helper does not fit 3700M; the first real run stopped unexplained at 28 s): everything in this document is for a
+   hub that can.
+9. A live turn that starts in a folder after the check is not detected; don't run the same folder in both apps.
 
 ## Owners
 

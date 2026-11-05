@@ -48,8 +48,10 @@ die() { echo "switch: $*" >&2; exit 1; }
 alive() { [ -n "${1:-}" ] && kill -0 "$1" 2>/dev/null; }
 pidof_file() { [ -f "$SW/$1.pid" ] && cat "$SW/$1.pid" || true; }
 # a pid file is trusted only while /proc/<pid>/cmdline still names our binary and our home
-ours() { local c; c=$(tr '\0' ' ' < "/proc/$1/cmdline" 2>/dev/null) || return 1
-  case "$2" in hub) case "$c" in *"$HUB_BIN"*"$H"*) return 0;; esac;; client) case "$c" in *"$CLIENT_BIN"*"$H"*) return 0;; esac;; esac; return 1; }
+# The binary is the one RECORDED at launch ($SW/hub.bin, $SW/client.bin), never re-derived from CURRENT or the environment at stop time.
+ours() { local c b; c=$(tr '\0' ' ' < "/proc/$1/cmdline" 2>/dev/null) || return 1
+  b=$(cat "$SW/$2.bin" 2>/dev/null) || return 1; [ -n "$b" ] || return 1
+  case "$c" in *"$b"*"$H"*) return 0;; esac; return 1; }
 owned() { [ -f "$SW/.switch-owned" ]; }
 rss_mb() { awk '/^VmRSS/{printf "%d", $2/1024}' "/proc/$1/status" 2>/dev/null || echo "?"; }
 hwm_mb() { awk '/^VmHWM/{printf "%d", $2/1024}' "/proc/$1/status" 2>/dev/null || echo "?"; }
@@ -150,7 +152,7 @@ PY
       systemd-run --user --scope -q -p "MemoryMax=$MEM" -p MemorySwapMax=0 -- \
       env -u DBUS_SESSION_BUS_ADDRESS -u XDG_RUNTIME_DIR "$HUB_BIN" --home "$H" --port "$PORT" --host 127.0.0.1 --no-tailscale --foreground --policy-bin "$POLICY_BIN" \
       > "$SW/hub.log" 2>&1 < /dev/null ) &
-  echo $! > "$SW/hub.pid"
+  echo $! > "$SW/hub.pid"; echo "$HUB_BIN" > "$SW/hub.bin"
   local hp; hp=$(cat "$SW/hub.pid") i=0
   # before anything else: the stand-ins and the copy guard are in the hub's own environment
   sleep 1
@@ -183,7 +185,7 @@ PY
     ( exec env $sw DISPLAY="$DISP" ${VK_ICD_FILENAMES:+VK_ICD_FILENAMES="$VK_ICD_FILENAMES"} ${BACKPLANE_GPUI_ASSETS:+BACKPLANE_GPUI_ASSETS="$BACKPLANE_GPUI_ASSETS"} HOME="$HOME" \
         systemd-run --user --scope -q -p "MemoryMax=$MEM" -p MemorySwapMax=0 -- \
         "$CLIENT_BIN" --url "http://127.0.0.1:$PORT" --token-file "$H/token" ${SWITCH_CLIENT_ARGS:-} > "$SW/client.log" 2>&1 < /dev/null ) &
-    echo $! > "$SW/client.pid"; echo "client pid $(cat "$SW/client.pid") on $DISP"
+    echo $! > "$SW/client.pid"; echo "$CLIENT_BIN" > "$SW/client.bin"; echo "client pid $(cat "$SW/client.pid") on $DISP"
   fi
   echo "Running beside today's Backplane (untouched on 3787). To go back: scripts/gpui/switch.sh rollback"
 }
