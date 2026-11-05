@@ -79,9 +79,12 @@ export async function run(j,ctx){ // ctx: {gpuBin, display:{env,display}, hub:{s
     else{const inv=ctlEv.controls.map(c=>({id:c.id,label:c.label,enabled:c.enabled,visible:c.visible,wired:c.wired,disabledLook:c.disabled_look===true}));
       const prefix=script.filter(x=>!x.wait);const sweepScript=[...script.filter(x=>x.select!==undefined||x.home!==undefined).slice(-1),{wait:500},...inv.flatMap(c=>[{click:c.id},{wait:300}])];
       const second=await launch(sweepScript,j,ctx,'.sweep',{rects:true});const results={};
+      // ids that are not on screen when the second run starts (rows of a streaming thread, new every few seconds) are transient, not dead
+      const ctl2=second.metrics.find(m=>m.event==='controls'&&m.controls?.length);const ids2=new Set((ctl2?.controls||[]).map(c=>c.id));
+      const transient=ctl2?inv.filter(c=>!ids2.has(c.id)):[];if(ctl2)inv.splice(0,inv.length,...inv.filter(c=>ids2.has(c.id)));
       for(const m of second.metrics.filter(m=>m.event==='click'&&m.found!==false))results[m.id]={changed:!!m.changed,action:m.action!=null};
       for(const m of second.metrics.filter(m=>m.event==='input'&&m.step?.startsWith('click:')&&m.ok)){const id=m.step.slice(6);results[id]={changed:true,action:results[id]?.action||false}}
-      res.metrics.dead=deadControls(inv,results);res.metrics.dead.controlsFound=inv.length;
+      res.metrics.dead=deadControls(inv,results);res.metrics.dead.controlsFound=inv.length;res.metrics.dead.transientSkipped=transient.length;
       // Controls with no handler: drawn disabled (disabled_look) = 'disabled, not dead'; drawn enabled = dead. The gate item says every visible
       // button must do something, so the sweep's pass is false while ANY visible control has no handler; `passIfDisabledAccepted` is the other reading (the reviewer's call).
       const noHandler=inv.filter(c=>c.wired===false&&c.visible!==false);
