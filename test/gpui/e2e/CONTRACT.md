@@ -25,17 +25,25 @@ missing evidence. Statuses map to `docs/gpui/final-gate.json` as: pass -> pass, 
 ## GPUI (native/gpui) — exists today
 Script file (`--script`, `BACKPLANE_GPUI_SCRIPT`) steps: `select N`, `popup TEXT`, `type TEXT`, `send`, `wait MS`.
 Metrics on stderr, one `GPUI_METRIC {json}` per line: `process_start`, `gpu`, `first_frame`, `usable`, `input {step, ok, latency_ms}`
-(= `result`), `script_done`. That is enough for: switch-fast, popups, select, type, send; not for ack, frames, layout or controls.
+(= `result`), `script_done`, and now `ack`, `frames`, `layout`, `controls`, `click` (see the table below).
 
-### Requested additions (for the `desktop` stream; the GPUI adapter calls them as soon as they exist)
-| id | request | feeds |
-|---|---|---|
-| G1 | event `ack {step, ack_ms}`: first presented frame that differs after the injected event | click -> frame |
-| G2 | event `frame {t_ms}` for every presented frame (or `frames [..]` batched per second) while a script runs; step `{"record":"start|stop","name":..}` | scroll/stream frame times |
-| G3 | event `layout {t_ms, rects:{id:{x,y,w,h}}}` for the stable elements, on every change | layout shift |
-| G4 | event `controls [{id,label,enabled,visible}]` per screen, and step `{"click":"<id>"}` that reports `{changed, action}` | dead buttons |
-| G5 | steps `scroll N`, `paste_image PATH`, `open viewer KIND`, `open settings`, `files download NAME`, `net_sleep SECS` (drop the hub socket, reconnect) | the other journeys |
-Until G1-G5 land those journeys are `blocked` with the id above.
+### Hooks (G1-G5): owner and landing commit
+Owner of every GPUI hook: the GPUI desktop-client stream (thread t1793832589-1684371); the screens lane (t1793862844-1750692) owns the popup range and the screens behind G5. Landing commits are on the `gpui` branch.
+| id | hook | owner | landing commit | status |
+|---|---|---|---|---|
+| G1 | event `ack {step, ack_ms}`: the first presented frame after the injected event. **G1 decides the one-frame claim** ("every click answers within one frame" is judged on this `ack_ms` against one refresh period, never on `input.latency_ms` and never on the recording) | GPUI desktop stream | `c373ceb37` | landed; not yet consumed by the adapter on a real run |
+| G2 | steps `{"record":"start","name":..}` / `{"record":"stop"}`; event `frames {name, n, t_ms:[..]}` with a timestamp per drawn frame | GPUI desktop stream | `c373ceb37` | landed |
+| G3 | event `layout {rects:{id:{..}}}` on change (probes painted last frame) | GPUI desktop stream | `c373ceb37` | landed; emitted only when rect reporting is enabled (`art::enable_rects`, the check modes), so the adapter must start the client in that mode |
+| G4 | event `controls [{id,label,enabled,visible,wired}]` on change; step `{"click":"<id>"}` -> event `click {id, found, changed, action}` (a click with no change is reported after 1.5 s: a dead control) | GPUI desktop stream | `c373ceb37` | landed; same rect-reporting caveat |
+| G5 | steps `scroll px` and `net_sleep secs` (drop the hub socket and wait for the reconnect) | GPUI desktop stream | `c373ceb37` | landed |
+| G5 | steps `paste_image`, `open_viewer`, `open_settings`, `files_download` | screens lane | not landed | answer `ok:false, error:"not_implemented"` today; pair, bots/rooms and the `@ > %` popup range are not in the script contract yet either |
+The adapter still maps the not-landed steps to `blocked`; the landed hooks are wired into it next (it reads `ack`, `frames`, `layout`, `controls`, `click`).
+
+### Pass rule (the person, 2026-11-05)
+No journey is `pass` until it has run against the **Rust hub** on **real hardware** (hardware GPU or a device, not llvmpipe). `run.mjs` enforces it: a result the adapter would call pass is demoted to `partial` unless `--hub-kind rust` and `--real-hardware` are given and the client reported `software:false`. Boat runs (software, JS hub) can therefore never close a gate item.
+
+### Pending reruns
+When the screens lane lands the popup range (`@`, `>`, `%`, `#`), rerun the `popups` journey and the `long-session` random walk and confirm each trigger opens with the hub's own rows (the GPUI popup step only succeeds when the thread's skills/refs list is non-empty).
 
 ## Android — tooling that exists on any device
 `adb shell input tap/swipe`, `uiautomator dump` (controls: clickable/enabled/bounds, so the dead-control sweep and layout snapshots need

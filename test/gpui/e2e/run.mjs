@@ -4,7 +4,7 @@ import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';import {dirname,resolve} from 'node:path';
 const here=dirname(fileURLToPath(import.meta.url));
 const arg=(k,d)=>{const i=process.argv.indexOf('--'+k);return i>=0?process.argv[i+1]:d};const flag=k=>process.argv.includes('--'+k);
-const client=arg('client','gpui'),which=arg('journey','all'),out=resolve(arg('out','out/e2e')+'/'+client),hubBin=arg('hub-bin',process.env.HUB_BIN),gpuiBin=arg('gpui-bin',process.env.GPUI_BIN);
+const hubKind=arg('hub-kind','js'),realHw=flag('real-hardware');const client=arg('client','gpui'),which=arg('journey','all'),out=resolve(arg('out','out/e2e')+'/'+client),hubBin=arg('hub-bin',process.env.HUB_BIN),gpuiBin=arg('gpui-bin',process.env.GPUI_BIN);
 const J=JSON.parse(readFileSync(here+'/journeys.json','utf8'));const hz=Number(arg('hz',J.refresh_hz_budget[client]));
 const adapter=await import(`./adapters/${client}.mjs`);mkdirSync(out,{recursive:true});
 const todo=J.journeys.filter(j=>which==='all'||which===j.id);
@@ -33,6 +33,9 @@ try{
   }
 }catch(e){summary.fatal=String(e.stack||e).slice(0,600);console.error('fatal:',summary.fatal)}
 finally{try{await fx?.stop()}catch{}try{display?.stop()}catch{}}
+// pass rule (CONTRACT.md): a pass needs the Rust hub on real hardware; anything else is demoted
+for(const r of summary.results){if(r.status==='pass'&&!(hubKind==='rust'&&realHw&&r.gpu&&r.gpu.software===false)){r.status='partial';r.notes=[...(r.notes||[]),`would pass, but not on rust hub + real hardware (hub=${hubKind}, real-hardware=${realHw})`]}}
+summary.hubKind=hubKind;summary.realHardware=realHw;
 // gate mapping: pass -> pass, fail -> fail, everything else stays open
 summary.gate=Object.fromEntries(summary.results.map(r=>[r.item,r.status==='pass'?'pass':r.status==='fail'?'fail':'open']));
 summary.counts=summary.results.reduce((a,r)=>(a[r.status]=(a[r.status]||0)+1,a),{});
