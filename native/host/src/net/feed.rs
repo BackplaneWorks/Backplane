@@ -121,6 +121,12 @@ impl Feed {
     /// held only to copy a few line numbers; the lines are read from the log off the async workers, so a pull never holds
     /// up a commit's observer.
     pub async fn answer(&self, hub: &Hub, since: u64, asked_epoch: &str, catalog: Value) -> Option<Value> {
+        // The log's end is read ONCE, before any line: a line committed meanwhile is above `top`, so it is neither in the items
+        // nor under the head, and the push of that line (n > head) still lands.
+        let top = hub.store.len() as u64;
+        self.answer_at(hub, top, since, asked_epoch, catalog).await
+    }
+    pub async fn answer_at(&self, hub: &Hub, top: u64, since: u64, asked_epoch: &str, catalog: Value) -> Option<Value> {
         let own = epoch(hub);
         let from = if super::farstore::epoch_changed(asked_epoch, &own) { 0 } else { since };
         if !self.ready() { return None }
@@ -128,16 +134,16 @@ impl Feed {
         let (mut items, mut room, mut more, mut last, mut cursor) = (vec![], PAGE_CHARS as i64, false, from, from);
         'pages: loop {
             // a bounded slice of line numbers, copied under the lock
-            let nums: Vec<u32> = { let g = self.st.lock().unwrap(); g.0.shared_after(cursor).iter().take(SLICE).copied().collect() };
+            let nums: Vec<u32> = { let g = self.st.lock().unwrap(); g.0.shared_after(cursor).iter().take(SLICE).copied().take_while(|n| (*n as u64) <= top).collect() };
             if nums.is_empty() { break }
-            let (s, r) = (store.clone(), room);
+            let (s, r, page_empty) = (store.clone(), room, items.is_empty());
             let (got, left, stop) = tokio::task::spawn_blocking(move || {
                 let (mut out, mut room, mut stop) = (vec![], r, false);
                 for n in nums.iter().copied() {
                     let Ok(line) = s.get(n as usize - 1) else { continue };
                     let len = line.chars().count() as i64;
-                    if !out.is_empty() && len > room { stop = true; break }
-                    // (a page's first line goes alone however big; later ones only while they fit)
+                    // (a PAGE's first line goes alone however big; every later one only while it fits, across slices too)
+                    if !(page_empty && out.is_empty()) && len > room { stop = true; break }
                     room -= len; out.push((n, line));
                 }
                 (out, room, stop)
@@ -152,7 +158,7 @@ impl Feed {
             if stop { more = true; break 'pages }
             match full { Some(n) => cursor = n as u64, None => break }
         }
-        let head = if more { last } else { hub.store.len() as u64 };
+        let head = if more { last } else { top };
         Some(json!({"since": from, "catalog": catalog, "epoch": own, "head": head, "items": items, "more": more}))
     }
     /// Fr.catalog: every project this hub shares, so a mirror can list them all at once before their threads arrive.
