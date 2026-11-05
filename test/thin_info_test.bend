@@ -81,5 +81,36 @@ def main.source(+source: J.Json) -> IO(Unit):
     check("private usage cache is absent from serialized presentation session", Bool.not(String.contains(J.Json.show(V.Route.pack(A.Actor.ui(received(text)))), "boat.usage")))
     C.Check.str("refresh retains private info and rejects client spoof", U.Ui.info(A.Actor.ui(refreshed(text)), "boat.usage"), text)
 
+# The hub's "desk" info (which threads the desks show) is drawn by no view:
+# folding it must not mark the view dirty (each desk.look re-tells it to
+# every client), but any other key with it still does.
+def desk(+keys: List<&2, J.KV>) -> A.Actor:
+  A.Actor.message(actor(), True{}, "fixture-hub", J.Json.obj([J.KV{"t", J.Str{"info"}}, J.KV{"info", J.Json.obj(keys)}]))
+
+# An owned reply that changes nothing the view draws (asked again and
+# answered the same) leaves it clean; one that changes the error line, a
+# kept answer or the selection marks it dirty.
+def replied(+a: A.Actor, +o: String) -> A.Actor:
+  A.Actor.reply_if(True{}, a, True{}, "fixture-hub", obj(o))
+
+def secrets() -> String:
+  "{\"t\":\"reply\",\"id\":5,\"ok\":true,\"secrets\":\"[]\",\"vault\":\"{}\"}"
+
+def main.quiet() -> IO(Unit):
+  +once = A.Actor.clean(replied(actor(), secrets()))
+  do IO<Unit>:
+    C.Check.str("desk info is kept in the Ui", U.Ui.info(A.Actor.ui(desk([J.KV{"desk", J.Str{"t"}}])), "desk"), "t")
+    check("desk info alone leaves the view clean", Bool.not(A.Actor.dirty(desk([J.KV{"desk", J.Str{"t"}}]))))
+    check("desk info with another key still dirties", A.Actor.dirty(desk([J.KV{"desk", J.Str{"t"}}, J.KV{"boat.usage", J.Str{"x"}}])))
+    check("empty info dirties as before", A.Actor.dirty(desk(Nil{})))
+    check("a bare ok reply (its empty request slots cleared) changes nothing drawn", Bool.not(A.Actor.dirty(replied(once, "{\"t\":\"reply\",\"id\":8,\"ok\":true}"))))
+    check("an error reply dirties", A.Actor.dirty(replied(actor(), "{\"t\":\"reply\",\"id\":5,\"ok\":false,\"error\":\"boom\"}")))
+    check("a first secret list dirties", A.Actor.dirty(replied(actor(), secrets())))
+    C.Check.str("the secret list is kept", U.Ui.scratch(A.Actor.ui(once), "@secrets"), "[]")
+    check("the same secret list again leaves the view clean", Bool.not(A.Actor.dirty(replied(once, secrets()))))
+    check("a changed secret list dirties", A.Actor.dirty(replied(once, "{\"t\":\"reply\",\"id\":6,\"ok\":true,\"secrets\":\"[1]\",\"vault\":\"{}\"}")))
+
 def main() -> IO(Unit):
-  main.source(status())
+  do IO<Unit>:
+    main.source(status())
+    main.quiet()
