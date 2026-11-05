@@ -163,7 +163,7 @@ port waits for the person's decision.
 
 <!-- law-map: generated below by scripts/gpui/law-map.py -->
 
-Laws in LAWS.bend: 3253. bend 1010, rust 414, unported 1220, client 482, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`, `src/core/msp.bend`, `src/core/agy.bend`, `src/core/opencode.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
+Laws in LAWS.bend: 3253. bend 1001, rust 439, unported 1216, client 470, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`, `src/core/msp.bend`, `src/core/agy.bend`, `src/core/opencode.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
 
 | law | status | seed | file | note |
 |---|---|---|---|---|
@@ -301,8 +301,8 @@ Laws in LAWS.bend: 3253. bend 1010, rust 414, unported 1220, client 482, window 
 | `rename_blank_nothing` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `menu_settled_brings_back` | client | seed C +-10% | `src/core/client.bend` |  |
 | `caret_shows_when_moved` | window | seed D +-10% | `src/app/nui.bend` | GPUI input handling, native/gpui/src/input.rs (equivalence unchecked) |
-| `tailnet_no_owner_no_trust` | bend | seed K +-10% | `src/core/tailnet.bend` |  |
-| `tailnet_link_token` | bend | seed K +-10% | `src/core/tailnet.bend` |  |
+| `tailnet_no_owner_no_trust` | rust `tailnet_no_owner_no_trust` | map | `src/core/tailnet.bend` |  |
+| `tailnet_link_token` | rust `tailnet_link_token` | map | `src/core/tailnet.bend` |  |
 | `seek_made` | window | seed D +-10% | `src/gfx/tiles.bend` | GPUI replaces this window code (native/gpui); equivalence unchecked, no law-level mapping yet |
 | `tiles_again_exact` | window | seed D +-10% | `src/gfx/tiles.bend` | GPUI replaces this window code (native/gpui); equivalence unchecked, no law-level mapping yet |
 | `tile_keep` | window | seed D +-10% | `src/gfx/tiles.bend` | GPUI replaces this window code (native/gpui); equivalence unchecked, no law-level mapping yet |
@@ -638,10 +638,10 @@ Laws in LAWS.bend: 3253. bend 1010, rust 414, unported 1220, client 482, window 
 | `view_key_z_out` | window | seed D +-10% | `src/app/nui.bend` | GPUI input handling, native/gpui/src/input.rs (equivalence unchecked) |
 | `view_key_shift_z_in` | window | seed D +-10% | `src/app/nui.bend` | GPUI input handling, native/gpui/src/input.rs (equivalence unchecked) |
 | `view_key_other_none` | window | seed D +-10% | `src/app/nui.bend` | GPUI input handling, native/gpui/src/input.rs (equivalence unchecked) |
-| `sign_stale_rejected` | bend | seed K +-10% | `src/core/sign.bend` |  |
-| `sign_window_300` | bend | seed K +-10% | `src/core/sign.bend` |  |
-| `seen_add_has` | bend | seed K +-10% | `src/core/sign.bend` |  |
-| `invite_roundtrip` | bend | seed K +-10% | `src/core/sign.bend` |  |
+| `sign_stale_rejected` | rust `sign_stale_rejected` | map | `src/core/sign.bend` |  |
+| `sign_window_300` | rust `sign_window_300` | map | `src/core/sign.bend` |  |
+| `seen_add_has` | rust `seen_add_has` | map | `src/core/sign.bend` |  |
+| `invite_roundtrip` | rust `invite_roundtrip` | map | `src/core/sign.bend` |  |
 | `cron_next_after` | bend | seed K +-10% | `src/core/cron.bend` |  |
 | `cron_due_fires_once` | bend | seed K +-10% | `src/core/cron.bend` |  |
 | `space_caps` | bend | seed K +-10% | `src/core/space.bend` |  |
@@ -711,7 +711,7 @@ Laws in LAWS.bend: 3253. bend 1010, rust 414, unported 1220, client 482, window 
 | `index_stale_rejected` | bend | seed K +-10% | `src/core/sign.bend` |  |
 | `bearer_needs_token` | bend | seed K +-10% | `src/core/sign.bend` |  |
 | `ring_form_json` | bend | seed K +-10% | `src/core/ring.bend` |  |
-| `tailnet_serve_https` | bend | seed K +-10% | `src/core/tailnet.bend` |  |
+| `tailnet_serve_https` | rust `tailnet_serve_law_fixture` | map | `src/core/tailnet.bend` |  |
 | `bot_spawn_step` | unported | seed R +-10% | `src/core/bothub.bend` |  |
 | `bot_spawn_bounded` | unported | seed R +-10% | `src/core/bothub.bend` |  |
 | `bot_request_keep` | unported | seed R +-10% | `src/core/bothub.bend` |  |
@@ -749,11 +749,11 @@ Laws in LAWS.bend: 3253. bend 1010, rust 414, unported 1220, client 482, window 
 | `reply_peer_room` | unported | seed R +-10% | `src/core/bothub.bend` |  |
 | `reply_said_newest` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `reply_person_wakes_none` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `far_machine_magicdns` | unported | seed R +-10% | `src/core/json.bend` |  |
-| `far_machine_self` | unported | seed R +-10% | `src/core/json.bend` |  |
-| `far_machine_other_port` | unported | seed R +-10% | `src/core/json.bend` |  |
-| `far_machine_stranger` | unported | seed R +-10% | `src/core/json.bend` |  |
-| `tailnet_domain` | bend | seed K +-10% | `src/core/tailnet.bend` |  |
+| `far_machine_magicdns` | rust `far_machine_magicdns` | map | `src/core/json.bend` |  |
+| `far_machine_self` | rust `far_machine_self` | map | `src/core/json.bend` |  |
+| `far_machine_other_port` | rust `far_machine_other_port` | map | `src/core/json.bend` |  |
+| `far_machine_stranger` | rust `far_machine_stranger` | map | `src/core/json.bend` |  |
+| `tailnet_domain` | rust `tailnet_domain_law` | map | `src/core/tailnet.bend` |  |
 | `bot_newproj_asks` | unported | seed R +-10% | `src/core/bothub.bend` |  |
 | `bot_newproj_once` | unported | seed R +-10% | `src/core/bothub.bend` |  |
 | `bot_newproj_decline` | unported | seed R +-10% | `src/core/bothub.bend` |  |
@@ -1360,16 +1360,16 @@ Laws in LAWS.bend: 3253. bend 1010, rust 414, unported 1220, client 482, window 
 | `tour_scroll_up` | window | seed D +-10% | `src/app/nui.bend` | GPUI input handling, native/gpui/src/input.rs (equivalence unchecked) |
 | `tour_scroll_up_stops` | window | seed D +-10% | `src/app/nui.bend` | GPUI input handling, native/gpui/src/input.rs (equivalence unchecked) |
 | `tour_scroll_none` | window | seed D +-10% | `src/app/nui.bend` | GPUI input handling, native/gpui/src/input.rs (equivalence unchecked) |
-| `mate_lower_asks` | client | seed C +-10% | `src/core/client.bend` |  |
-| `mate_higher_waits` | client | seed C +-10% | `src/core/client.bend` |  |
-| `mate_linked_never_asks` | client | seed C +-10% | `src/core/client.bend` |  |
-| `mate_off_never_asks` | client | seed C +-10% | `src/core/client.bend` |  |
-| `mate_no_self_never_asks` | client | seed C +-10% | `src/core/client.bend` |  |
-| `mate_unnamed_without_tailnet` | client | seed C +-10% | `src/core/client.bend` |  |
-| `mate_answer_stranger` | client | seed C +-10% | `src/core/client.bend` |  |
-| `mate_answer_invites` | client | seed C +-10% | `src/core/client.bend` |  |
-| `mate_answer_off` | client | seed C +-10% | `src/core/client.bend` |  |
-| `mate_answer_linked` | client | seed C +-10% | `src/core/client.bend` |  |
+| `mate_lower_asks` | rust `mate_lower_asks` | map | `src/core/client.bend` |  |
+| `mate_higher_waits` | rust `mate_higher_waits` | map | `src/core/client.bend` |  |
+| `mate_linked_never_asks` | rust `mate_linked_never_asks` | map | `src/core/client.bend` |  |
+| `mate_off_never_asks` | rust `mate_off_never_asks` | map | `src/core/client.bend` |  |
+| `mate_no_self_never_asks` | rust `mate_no_self_never_asks` | map | `src/core/client.bend` |  |
+| `mate_unnamed_without_tailnet` | rust `mate_unnamed_without_tailnet` | map | `src/core/client.bend` |  |
+| `mate_answer_stranger` | rust `mate_answer_stranger` | map | `src/core/client.bend` |  |
+| `mate_answer_invites` | rust `mate_answer_invites` | map | `src/core/client.bend` |  |
+| `mate_answer_off` | rust `mate_answer_off` | map | `src/core/client.bend` |  |
+| `mate_answer_linked` | rust `mate_answer_linked` | map | `src/core/client.bend` |  |
 | `mate_off_hidden` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `mate_on_shown` | client | seed C +-10% | `src/core/client.bend` |  |
 | `far_catalog_stands_in` | client | seed C +-10% | `src/core/client.bend` |  |
@@ -1381,8 +1381,8 @@ Laws in LAWS.bend: 3253. bend 1010, rust 414, unported 1220, client 482, window 
 | `far_scope_project` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `refs_machine_word` | bend | seed K +-10% | `src/core/refs.bend` |  |
 | `refs_colon_after_stays_here` | bend | seed K +-10% | `src/core/refs.bend` |  |
-| `mate_loopback_lower_asks` | client | seed C +-10% | `src/core/client.bend` |  |
-| `mate_loopback_higher_waits` | client | seed C +-10% | `src/core/client.bend` |  |
+| `mate_loopback_lower_asks` | rust `mate_loopback_lower_asks` | map | `src/core/client.bend` |  |
+| `mate_loopback_higher_waits` | rust `mate_loopback_higher_waits` | map | `src/core/client.bend` |  |
 | `fview_file_up` | bend | seed K +-10% | `src/core/fview.bend` |  |
 | `fview_file_abs` | bend | seed K +-10% | `src/core/fview.bend` |  |
 | `fview_file_hidden` | bend | seed K +-10% | `src/core/fview.bend` |  |
@@ -2826,7 +2826,7 @@ Laws in LAWS.bend: 3253. bend 1010, rust 414, unported 1220, client 482, window 
 | `sec_json_total` | rust `sec_json_total` | map | `src/core/secret.bend` |  |
 | `sec_handle_shape` | rust `sec_handle_shape` | map | `src/core/json.bend` |  |
 | `sec_changes_empty` | rust `sec_changes_empty` | map | `src/core/model.bend` |  |
-| `tailnet_announce_off` | bend | seed K +-10% | `src/core/tailnet.bend` |  |
+| `tailnet_announce_off` | rust `tailnet_announce_off` | map | `src/core/tailnet.bend` |  |
 | `auth_owner_pair_untrusted` | rust `owner_pair_needs_everything` | map | `src/core/auth.bend` |  |
 | `auth_owner_pair_routes` | rust `owner_pair_needs_everything` | map | `src/core/auth.bend` |  |
 | `auth_owner_pair_rebound` | rust `owner_pair_needs_everything` | map | `src/core/auth.bend` |  |

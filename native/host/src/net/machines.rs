@@ -125,4 +125,26 @@ mod tests {
         let ps = vec![Peer { id: "p".into(), name: "desk".into(), url: "http://100.2.0.1:3787".into() }];
         assert!(due(true, &j, &ps, &no, &no).is_empty());
     }
+
+    // the laws' own fixtures (client.bend Mate.demo / Mate.demo.lo)
+    fn lo(port: &str) -> Value { json!({"self":{"name":"box","url":format!("http://100.9.0.1:{port}"),"domain":"t.ts.net"},"peers":[{"name":"127.0.0.1","url":"http://127.0.0.1:4002","version":"1","named":true}]}) }
+    fn p1() -> Vec<Peer> { vec![Peer { id: "p1".into(), name: "desk".into(), url: "http://desk.t.ts.net:3787".into() }] }
+    fn desk_row() -> Vec<(String, String)> { vec![("desk".into(), "http://100.2.0.1:3787".into())] }
+    #[test] fn mate_lower_asks() { assert_eq!(due(true, &demo("http://100.1.0.1:3787"), &[], &no, &no), desk_row()); }
+    #[test] fn mate_higher_waits() { assert!(due(true, &demo("http://100.3.0.1:3787"), &[], &no, &no).is_empty()); }
+    #[test] fn mate_linked_never_asks() { assert!(due(true, &demo("http://100.1.0.1:3787"), &p1(), &no, &no).is_empty()); }
+    #[test] fn mate_off_never_asks() { assert!(due(true, &demo("http://100.1.0.1:3787"), &[], &|n| n == "desk", &no).is_empty()); }
+    #[test] fn mate_no_self_never_asks() { assert!(due(true, &demo(""), &[], &no, &no).is_empty()); }
+    #[test] fn mate_unnamed_without_tailnet() { assert!(due(false, &demo("http://100.1.0.1:3787"), &[], &no, &no).is_empty()); }
+    #[test] fn mate_answer_stranger() { assert_eq!(answer(&demo("http://100.3.0.1:3787"), &[], &no, &no, "desk", "http://127.0.0.1:9999"), 3); }
+    #[test] fn mate_answer_invites() { assert_eq!(answer(&demo("http://100.3.0.1:3787"), &[], &no, &no, "desk", "http://desk.t.ts.net:3787"), 0); }
+    #[test] fn mate_answer_off() { assert_eq!(answer(&demo("http://100.3.0.1:3787"), &[], &|n| n == "desk", &no, "desk", "http://desk.t.ts.net:3787"), 1); }
+    #[test] fn mate_answer_linked() { assert_eq!(answer(&demo("http://100.3.0.1:3787"), &p1(), &no, &no, "desk", "http://desk.t.ts.net:3787"), 2); }
+    #[test] fn mate_loopback_lower_asks() { assert_eq!(due(false, &lo("4001"), &[], &no, &no), vec![("127.0.0.1".to_string(), "http://127.0.0.1:4002".to_string())]); }
+    #[test] fn mate_loopback_higher_waits() { assert!(due(false, &lo("4003"), &[], &no, &no).is_empty()); }
+    fn farj() -> Value { json!({"self":{"name":"desk","url":"http://100.64.0.1:3787","domain":"tail1.ts.net"},"peers":[{"name":"Box","url":"http://100.64.0.2:3787"}]}) }
+    #[test] fn far_machine_magicdns() { assert_eq!(machine(&farj(), "lab", "http://box.tail1.ts.net:3787"), Some("http://100.64.0.2:3787".into())); }
+    #[test] fn far_machine_self() { assert_eq!(machine(&farj(), "desk", "http://100.64.0.1:3787"), Some(String::new())); }
+    #[test] fn far_machine_other_port() { assert_eq!(machine(&farj(), "box", "http://box.tail1.ts.net:4000"), None); }
+    #[test] fn far_machine_stranger() { assert_eq!(machine(&farj(), "box", "http://box.tail9.ts.net:3787"), None); }
 }
