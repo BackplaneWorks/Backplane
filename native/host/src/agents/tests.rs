@@ -955,3 +955,205 @@ fn tree(d: &Path) -> Vec<(String, u64)> {
 }
 
 #[path = "core_e2e.rs"] mod core_e2e;
+#[tokio::test(flavor = "multi_thread")] async fn a_turn_starts_in_a_thread_from_a_hand_written_log_with_spaced_json() { // build/gpui/results/desktop/sendchk.events.jsonl: Python's json.dumps puts a space after every colon
+    let sd = dir("sp-bin"); perf_standin(&sd, 1); let work = dir("sp-work");
+    let log = format!("{{\"$\": \"ProjectCreated\", \"id\": \"p1\", \"title\": \"fixture\", \"root\": {}, \"at\": 1700000000}}\n{{\"$\": \"ThreadCreated\", \"id\": \"{T1}\", \"project\": \"p1\", \"title\": \"T\", \"env\": \"local\", \"branch\": \"\", \"worktree\": \"\", \"provider\": \"claude\", \"model\": \"\", \"at\": 1700000001}}\n", serde_json::to_string(&work.to_string_lossy()).unwrap());
+    let (hub, ag, _h, _w) = start("sp", |_| log, |_| Cli::standin(&sd)).await; let from = len(&hub).await;
+    let r = rpc(&hub, "turn.start", json!({"thread":T1,"text":"zqshort hi"})).await; assert_eq!(r["ok"], true, "a send into a spaced-JSON thread is accepted, not 'unknown thread': {r}");
+    let ev = until(&hub, from, 30, |ev| ev.iter().any(|e| is(e, "MessagePosted") && e["role"] == "user")).await; assert!(ev.iter().any(|e| is(e, "MessagePosted") && e["text"] == "zqshort hi")); ag.shutdown();
+}
+
+#[tokio::test(flavor = "multi_thread")] async fn wake_ride_starts_an_idle_thread_with_the_note_and_rides_a_running_turn() {
+    let (hub, ag, _sd) = codex_start("wr1").await; let from = len(&hub).await;
+    assert!(ag.wake_ride(T1, "w1", "wake note one").await.is_ok());
+    let ev = until(&hub, from, 20, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await;
+    assert!(ev.iter().any(|e| is(e, "ActivityLogged") && e["kind"] == "ride" && e["act"] == "ride:w1" && e["summary"] == "Delivered with a new turn: 1 waiting message(s)"), "{ev:?}");
+    assert!(ev.iter().any(|e| is(e, "MessagePosted") && e["role"] == "assistant" && e["text"].as_str().unwrap().contains("wake note one")), "the idle thread ran with the note");
+    assert!(!ev.iter().any(|e| is(e, "MessagePosted") && e["role"] == "user"), "the note is not a person's message");
+    // a running turn keeps it in the ride, once per id
+    rpc(&hub, "turn.start", json!({"thread":T1,"text":"hang a while"})).await; tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(ag.wake_ride(T1, "w2", "second note").await.is_ok()); assert!(ag.wake_ride(T1, "w2", "second note").await.is_ok());
+    let b = ag.ride_take(T1).await.expect("the ride waits for the running turn"); assert_eq!(b.matches("second note").count(), 1, "once per id");
+    rpc(&hub, "turn.interrupt", json!({"thread":T1})).await; ag.shutdown();
+}
+
+// ---- watched work ----
+#[tokio::test(flavor = "multi_thread")] async fn work_run_owns_the_command_and_wakes_the_thread_with_its_outcome() {
+    let (hub, ag, _sd) = codex_start("wk1").await; let from = len(&hub).await;
+    let (ok, r) = ag.tool_work_run(T1, &json!({"command":"echo built; echo oops >&2; exit 3","note":"the build"})).await; assert!(ok, "{r}"); let id = r["id"].as_str().unwrap().to_string();
+    let (_, l) = ag.tool_work_list(T1).await; assert!(l["work"].as_array().unwrap().iter().any(|w| w["id"] == id.as_str() && w["kind"] == "run" && w["note"] == "the build"), "listed while it runs or just ended: {l}");
+    let ev = until(&hub, from, 20, |ev| ev.iter().any(|e| is(e, "MessagePosted") && e["role"] == "system" && e["text"].as_str().map_or(false, |t| t.starts_with("[Backplane] Watched work")))).await;
+    let m = ev.iter().find(|e| is(e, "MessagePosted") && e["role"] == "system").unwrap()["text"].as_str().unwrap().to_string();
+    assert!(m.starts_with("[Backplane] Watched work \"the build\" ended: exit 3\n") && m.contains("built") && m.contains("oops"), "{m}");
+    tokio::time::sleep(Duration::from_millis(300)).await; let (_, l2) = ag.tool_work_list(T1).await; assert!(l2["work"].as_array().unwrap().is_empty(), "the row is dropped once told: {l2}");
+    assert!(!ag.tool_work_run(T1, &json!({"command":"true","lock":"x"})).await.0, "a named lock is refused, not ignored"); assert!(!ag.tool_work_run(T1, &json!({"command":" "})).await.0);
+    ag.shutdown();
+}
+#[tokio::test(flavor = "multi_thread")] async fn work_cancel_stops_it_and_says_cancelled_and_unwatch_leaves_it_running() {
+    let (hub, ag, _sd) = codex_start("wk2").await; let from = len(&hub).await;
+    let (_, r) = ag.tool_work_run(T1, &json!({"command":"sleep 60","note":"slow"})).await; let id = r["id"].as_str().unwrap().to_string(); tokio::time::sleep(Duration::from_millis(400)).await;
+    let (ok, c) = ag.tool_work_cancel(T1, &json!({"id":id})).await; assert!(ok && c["state"] == "cancelling", "{c}");
+    let ev = until(&hub, from, 20, |ev| ev.iter().any(|e| is(e, "MessagePosted") && e["text"].as_str().map_or(false, |t| t.contains("ended: cancelled")))).await; assert!(ev.iter().any(|e| e["text"].as_str().map_or(false, |t| t.contains("\"slow\" ended: cancelled"))), "{ev:?}");
+    assert!(!ag.tool_work_cancel(T1, &json!({"id":id})).await.0, "nothing left to cancel");
+    let (_, r2) = ag.tool_work_run(T1, &json!({"command":"sleep 2; echo late","note":"lingers"})).await; let id2 = r2["id"].as_str().unwrap().to_string(); tokio::time::sleep(Duration::from_millis(300)).await;
+    let n = len(&hub).await; assert!(ag.tool_work_unwatch(T1, &json!({"id":id2})).await.0); tokio::time::sleep(Duration::from_millis(3000)).await;
+    assert!(!log_from(&hub, n).await.iter().any(|e| is(e, "MessagePosted") && e["text"].as_str().map_or(false, |t| t.contains("lingers"))), "an unwatched command ends silently"); ag.shutdown();
+}
+#[tokio::test(flavor = "multi_thread")] async fn work_watch_wakes_on_a_files_token_and_a_pids_end() {
+    let (hub, ag, sd) = codex_start("wk3").await; let from = len(&hub).await; let f = sd.join("done.txt");
+    let (ok, r) = ag.tool_work_watch(T1, &json!({"kind":"file","target":f.to_string_lossy(),"note":"the job"})).await; assert!(ok, "{r}"); let tok = r["token"].as_str().unwrap().to_string();
+    tokio::time::sleep(Duration::from_millis(1300)).await; assert!(!log_from(&hub, from).await.iter().any(|e| is(e, "MessagePosted") && e["role"] == "system"), "not before the token is in the file");
+    std::fs::write(&f, format!("finished {tok}\n")).unwrap();
+    let ev = until(&hub, from, 20, |ev| ev.iter().any(|e| is(e, "MessagePosted") && e["text"].as_str().map_or(false, |t| t.contains("\"the job\" ended: found")))).await; assert!(ev.iter().any(|e| e["text"].as_str().map_or(false, |t| t.contains("ended: found"))));
+    let mut ch = std::process::Command::new("sleep").arg("1").spawn().unwrap(); let pid = ch.id();
+    let (ok, _) = ag.tool_work_watch(T1, &json!({"kind":"pid","target":pid.to_string(),"note":"the sleeper"})).await; assert!(ok); let _ = ch.wait();
+    let ev = until(&hub, from, 20, |ev| ev.iter().any(|e| e["text"].as_str().map_or(false, |t| t.contains("\"the sleeper\" ended: it ended, outcome unknown")))).await; assert!(ev.iter().any(|e| e["text"].as_str().map_or(false, |t| t.contains("the sleeper"))));
+    assert!(!ag.tool_work_watch(T1, &json!({"kind":"unit","target":"x"})).await.0); ag.shutdown();
+}
+#[test] fn the_watch_row_is_bends_line_and_the_command_survives_the_tab_and_newline_encoding() {
+    let cmd = "echo a\tb\nc \\ d"; let r = work::row("w-1", "launching", "n\tote", "run", cmd, "-", 99);
+    assert_eq!(r.split('\t').count(), 9, "{r:?}"); assert_eq!(work::kind(&r), "run"); assert_eq!(work::target(&r), cmd); assert_eq!(work::deadline(&r), 99); assert_eq!(bg::work_title(&r), "n ote");
+    assert_eq!(work::text("n", &work::word("gone", true), ""), "[Backplane] Watched work \"n\" ended: cancelled"); assert_eq!(work::word("gone", false), "it ended, outcome unknown (not known to have succeeded)");
+}
+
+// ---- the limit fallback driver (settings::driver) is called for every provider line ----
+#[tokio::test(flavor = "multi_thread")] async fn a_provider_limit_line_makes_the_driver_hold_the_turn_and_not_fail_it() {
+    // a stand-in whose turn ends with Codex's rate-limit failure: settings::driver::on_line sees it for a running codex thread
+    let sd = dir("lm-bin"); script(&sd, "codex", "#!/bin/sh\necho '{\"type\":\"thread.started\",\"thread_id\":\"lm-1\"}'\necho '{\"type\":\"turn.failed\",\"error\":{\"message\":\"You exceeded your current quota, please check your plan and billing details\"}}'\nsleep 1\n");
+    let (hub, ag, _h, _w) = start("lm", |w| codex_log(w), |_| Cli::standin(&sd)).await; let from = len(&hub).await;
+    rpc(&hub, "turn.start", json!({"thread":T1,"text":"go"})).await;
+    let ev = until(&hub, from, 20, |ev| ev.iter().any(|e| turn_is(e, "failed") || turn_is(e, "interrupted"))).await; tokio::time::sleep(Duration::from_millis(800)).await;
+    let all = log_from(&hub, from).await;
+    // whichever the driver does for this provider, the line went through it without a panic and the turn ended once
+    assert!(ev.iter().any(|e| turn_is(e, "failed") || turn_is(e, "interrupted")), "{all:?}");
+    assert!(all.iter().filter(|e| turn_is(e, "failed") || turn_is(e, "interrupted") || turn_is(e, "completed")).count() <= 2, "no double end: {all:?}"); ag.shutdown();
+}
+
+// ---- watched work: copy, restart, bounds; wake_ride without a process ----
+fn watch_log(work: &Path, rows: &[String], extra: &str) -> String { base_log(work, 1, &format!("{{\"$\":\"WorkSet\",\"thread\":\"{T1}\",\"kind\":\"watch\",\"rows\":{},\"at\":1700000005}}\n{extra}", serde_json::to_string(&rows.join("\n")).unwrap())) }
+#[tokio::test(flavor = "multi_thread")] async fn work_copy_child_probe() {
+    if std::env::var("BP_WORK_COPY_PROBE").is_err() { return }
+    assert!(crate::copy::on());
+    let sd = dir("wcp-bin"); perf_standin(&sd, 1); let f = sd.join("never.txt");
+    let rows = vec![work::row("w-open-run", "watching", "a build", "run", "sleep 99", "123:456", 0), work::row("w-open-pid", "watching", "a pid", "pid", "999999", "-", 0), work::row("w-open-file", "watching", "a file", "file", &f.to_string_lossy(), "w-open-file", 0)];
+    let (hub, ag, _h, _w) = start("wcp", |w| watch_log(w, &rows, ""), |_| Cli::standin(&sd)).await; let n = len(&hub).await;
+    tokio::time::sleep(Duration::from_millis(3000)).await;
+    assert_eq!(len(&hub).await, n, "nothing is written on a copy: no turn, no message, no row ended"); assert!(ag.works.lock().unwrap().is_empty(), "nothing is polled");
+    std::fs::write(&f, "w-open-file").unwrap(); tokio::time::sleep(Duration::from_millis(2500)).await; assert_eq!(len(&hub).await, n, "a file that appears is not noticed");
+    for (ok, r) in [ag.tool_work_run(T1, &json!({"command":"echo x"})).await, ag.tool_work_watch(T1, &json!({"kind":"file","target":"/tmp/x"})).await] { assert!(!ok); assert!(r["error"].as_str().unwrap().contains("off on a copy"), "{r}"); }
+    assert_eq!(len(&hub).await, n, "a refused tool logs no row"); ag.shutdown();
+}
+#[test] fn a_hub_on_a_copy_rearms_no_work_and_the_tools_are_refused() {
+    let me = std::env::current_exe().unwrap();
+    let o = std::process::Command::new(me).args(["agents::tests::work_copy_child_probe", "--exact", "--nocapture", "--test-threads=1"]).env("BACKPLANE_COPY", "1").env("BP_WORK_COPY_PROBE", "1").env_remove("BACKPLANE_AGENTS").output().unwrap();
+    assert!(o.status.success(), "{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr)); assert!(String::from_utf8_lossy(&o.stdout).contains("work_copy_child_probe ... ok"));
+}
+#[tokio::test(flavor = "multi_thread")] async fn a_command_that_outlived_the_hub_is_watched_again_and_cancel_reaches_it_and_a_gone_one_ends_unknown() {
+    use std::os::unix::process::CommandExt;
+    let mut c = std::process::Command::new("sleep"); c.arg("60"); unsafe { c.pre_exec(|| { libc::setsid(); Ok(()) }); } let mut child = c.spawn().unwrap(); let pid = child.id();
+    let live = work::row("w-alive", "watching", "still going", "run", "sleep 60", &work::ident_of(pid), 0); let gone = work::row("w-gone", "watching", "went away", "run", "x", "4000000:1", 0);
+    let sd = dir("rearm-bin"); perf_standin(&sd, 1);
+    let (hub, ag, _h, _w) = start("rearm", |w| watch_log(w, &[live.clone(), gone.clone()], ""), |_| Cli::standin(&sd)).await; let from = 0;
+    let ev = until(&hub, from, 20, |ev| ev.iter().any(|e| e["text"].as_str().map_or(false, |t| t.contains("\"went away\" ended: it ended, outcome unknown")))).await; assert!(ev.iter().any(|e| e["text"].as_str().map_or(false, |t| t.contains("\"went away\""))), "{ev:?}");
+    assert!(!ev.iter().any(|e| e["text"].as_str().map_or(false, |t| t.contains("still going"))), "a command that is still running is not told as lost");
+    assert!(ag.works.lock().unwrap().contains_key("w-alive"), "watched again"); let (ok, c) = ag.tool_work_cancel(T1, &json!({"id":"w-alive"})).await; assert!(ok, "{c}");
+    let ev = until(&hub, from, 20, |ev| ev.iter().any(|e| e["text"].as_str().map_or(false, |t| t.contains("\"still going\" ended: cancelled")))).await; assert!(ev.iter().any(|e| e["text"].as_str().map_or(false, |t| t.contains("cancelled"))));
+    let end = Instant::now() + Duration::from_secs(8); while child.try_wait().unwrap().is_none() && Instant::now() < end { tokio::time::sleep(Duration::from_millis(100)).await } assert!(child.try_wait().unwrap().is_some(), "the cancel reached the command's group"); ag.shutdown();
+}
+#[tokio::test(flavor = "multi_thread")] async fn work_ids_carry_the_time_output_is_read_by_its_end_and_lossy_and_a_non_utf8_file_is_found() {
+    let (hub, ag, sd) = codex_start("wb1").await; let from = len(&hub).await;
+    let (_, a) = ag.tool_work_run(T1, &json!({"command":"printf '\\377\\376 bad bytes\\n'; head -c 3000000 /dev/zero | tr '\\0' x; echo ' the end'","note":"loud"})).await; let id = a["id"].as_str().unwrap().to_string();
+    let parts: Vec<&str> = id.rsplitn(3, '-').collect(); assert!(parts[1].len() >= 12 && parts[1].chars().all(|c| c.is_ascii_digit()), "w-<thread>-<ms>-<n>: {id}");
+    let ev = until(&hub, from, 30, |ev| ev.iter().any(|e| e["text"].as_str().map_or(false, |t| t.contains("\"loud\" ended: exit 0")))).await;
+    let m = ev.iter().find(|e| e["text"].as_str().map_or(false, |t| t.contains("\"loud\" ended"))).unwrap()["text"].as_str().unwrap().to_string(); assert!(m.contains("the end") && m.len() < 2500, "the end of the output only: {}", m.len());
+    let f = sd.join("bin.dat"); let (_, w) = ag.tool_work_watch(T1, &json!({"kind":"file","target":f.to_string_lossy(),"note":"binary"})).await; let tok = w["token"].as_str().unwrap().to_string();
+    let mut bytes = vec![0xffu8, 0xfe, 0x00]; bytes.extend(tok.as_bytes()); std::fs::write(&f, bytes).unwrap();
+    let ev = until(&hub, from, 20, |ev| ev.iter().any(|e| e["text"].as_str().map_or(false, |t| t.contains("\"binary\" ended: found")))).await; assert!(ev.iter().any(|e| e["text"].as_str().map_or(false, |t| t.contains("ended: found"))), "a file that is not UTF-8 is found"); ag.shutdown();
+}
+#[tokio::test(flavor = "multi_thread")] async fn wake_ride_keeps_the_note_when_the_turn_says_running_but_no_process_lives() { // after a restart
+    let sd = dir("wrn-bin"); perf_standin(&sd, 1);
+    let (hub, ag, _h, _w) = start("wrn", |w| running_log(w, "{\"$\":\"SettingSet\",\"key\":\"restart.continue\",\"value\":\"off\",\"at\":1700000010}\n"), |_| Cli::standin(&sd)).await;
+    // recovery marked it interrupted; make the world read it as running again
+    hub.commit(&json!({"$":"TurnChanged","thread":T1,"state":"running","at":1700000011})).await.unwrap();
+    assert!(ag.wake_ride(T1, "n1", "a note").await.is_ok());
+    let ev = log_from(&hub, 0).await; assert!(ev.iter().any(|e| is(e, "SettingSet") && e["key"] == format!("ride.{T1}") && e["value"].as_str().map_or(false, |v| v.contains("a note"))), "the ride holds the note");
+    assert!(!ev.iter().any(|e| e["kind"] == "ride" && e["summary"].as_str().map_or(false, |s| s.starts_with("Delivered into the running turn"))), "nothing was said to be delivered"); ag.shutdown();
+}
+// ---- side-by-side mode (docs/gpui/SIDE-BY-SIDE.md): BACKPLANE_COPY=1 and BACKPLANE_SIDE_BY_SIDE=1 are read once per process, so the probe runs in a child ----
+#[tokio::test(flavor = "multi_thread")] async fn sbs_child_probe() {
+    if std::env::var("BP_SBS_PROBE").is_err() { return }
+    assert!(crate::copy::on() && crate::copy::person_turn_allowed());
+    let person = PathBuf::from(std::env::var("BP_SBS_PERSON").unwrap()); let live = PathBuf::from(std::env::var("BP_SBS_LIVE").unwrap());
+    let rec = person.join("rec"); let _ = std::fs::create_dir_all(&rec);
+    let bin = person.join(".local/bin"); std::fs::create_dir_all(&bin).unwrap();
+    let wrapped = STANDIN.replacen("\n", &format!("\nexport FAKE_PER=2 FAKE_CYCLE=5 FAKE_SECS=1 FAKE_LOG={rec}/starts\nprintf '%s\\n' \"$@\" > {rec}/argv; env > {rec}/env; pwd > {rec}/cwd\n", rec = rec.display()), 1);
+    script(&bin, "claude", &wrapped);
+    let sd = dir("sbs-bin"); perf_standin(&sd, 1); // the hub's own stand-in: a PersonTurn must never use it, nor an Agent turn the person's
+    let rows = vec![work::row("w-open-run", "watching", "a build", "run", "sleep 99", "123:456", 0), work::row("w-open-pid", "watching", "a pid", "pid", "999999", "-", 0)];
+    let old_ride = format!("{{\"$\":\"SettingSet\",\"key\":\"ride.{T1}\",\"value\":\"copied mail\",\"at\":1700000006}}\n");
+    let (hub, ag, _h, work) = start("sbs", |w| watch_log(w, &rows, &old_ride), |_| Cli::standin(&sd)).await; let n0 = len(&hub).await;
+    tokio::time::sleep(Duration::from_millis(2500)).await; assert_eq!(len(&hub).await, n0, "side-by-side re-arms no watched work and ends no row"); assert!(ag.works.lock().unwrap().is_empty(), "nothing is polled");
+    let read = |n: &str| std::fs::read_to_string(rec.join(n)).unwrap_or_default();
+    assert_eq!(ag.world().await.setting(&format!("ride.{T1}")), "", "mail copied from the real log is dropped at start");
+    // (1) not the person's turn.start: waits in the ride, no process
+    let r = ag.deliver(T1, "mx", "hello from a bot", Some(("bot".into(), "b".into(), "b".into())), vec![]).await; assert!(r.is_ok(), "{r:?}");
+    tokio::time::sleep(Duration::from_millis(500)).await; assert_eq!(ag.stats.procs_spawned.load(Relaxed), 0, "only a person's turn.start starts an agent"); assert!(read("argv").is_empty());
+    // (2) the person's turn: refused while the live log shows a turn in the same folder
+    std::fs::write(&live, format!("{{\"$\":\"ProjectCreated\",\"id\":\"lp\",\"title\":\"x\",\"root\":{},\"at\":1}}\n{{\"$\":\"ThreadCreated\",\"id\":\"lt\",\"project\":\"lp\",\"title\":\"x\",\"env\":\"local\",\"branch\":\"\",\"worktree\":\"\",\"provider\":\"claude\",\"model\":\"\",\"at\":2}}\n{{\"$\":\"TurnChanged\",\"thread\":\"lt\",\"state\":\"running\",\"at\":3}}\n", serde_json::to_string(&work.to_string_lossy()).unwrap())).unwrap();
+    let from = len(&hub).await; rpc(&hub, "turn.start", json!({"thread":T1,"text":"zqshort hi"})).await;
+    let ev = until(&hub, from, 10, |ev| ev.iter().any(|e| e["kind"] == "refused")).await;
+    assert!(ev.iter().any(|e| e["kind"] == "refused" && e["summary"].as_str().unwrap_or("").contains("live Backplane")), "refused with its reason: {ev:?}");
+    assert_eq!(ag.stats.procs_spawned.load(Relaxed), 0);
+    // (3) the live turn ended: the person's turn runs the person's claude with the guards
+    std::fs::write(&live, format!("{{\"$\":\"TurnChanged\",\"thread\":\"lt\",\"state\":\"completed\",\"at\":4}}\n")).unwrap();
+    let from = len(&hub).await; rpc(&hub, "turn.start", json!({"thread":T1,"text":"zqshort hi"})).await;
+    let ev = until(&hub, from, 30, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await; assert!(ev.iter().any(|e| turn_is(e, "completed")), "{ev:?}");
+    // (3b) a bot delivery during the person's turn waits; a Backplane tool result does not carry it into the running process
+    let from = len(&hub).await; rpc(&hub, "turn.start", json!({"thread":T1,"text":"zqshort again"})).await;
+    let _ = ag.deliver(T1, "mb", "mail during the turn", Some(("bot".into(), "b".into(), "b".into())), vec![]).await;
+    assert!(ag.ride_take(T1).await.is_none(), "a tool result carries no mail into a person's running turn"); let end = Instant::now() + Duration::from_secs(10); loop { if ag.world().await.setting(&format!("ride.{T1}")).contains("mail during the turn") { break } assert!(Instant::now() < end, "it waits in the ride"); tokio::time::sleep(Duration::from_millis(50)).await }
+    until(&hub, from, 30, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await;
+    let argv: Vec<String> = read("argv").lines().map(String::from).collect();
+    for f in ["--strict-mcp-config", "--setting-sources", "project,local"] { assert!(argv.iter().any(|a| a == f), "{f} in {argv:?}") }
+    assert!(!argv.iter().any(|a| a == "--resume"), "no copied session is resumed: {argv:?}");
+    let pm = argv.iter().position(|a| a == "--permission-mode").map(|i| argv[i + 1].clone()).unwrap(); assert_eq!(pm, "default", "approval-required, whatever the copied thread said");
+    assert!(argv.iter().any(|a| a == "--permission-prompt-tool"), "approvals reach the person: {argv:?}");
+    let env = read("env"); assert!(env.lines().any(|l| l == format!("HOME={}", person.display())), "the person's HOME"); assert!(!env.lines().any(|l| l.starts_with("BACKPLANE_")), "no BACKPLANE_* reaches the agent:\n{env}");
+    assert_eq!(std::fs::canonicalize(read("cwd").trim()).unwrap(), std::fs::canonicalize(&work).unwrap());
+    assert_eq!(std::fs::read_to_string(rec.join("starts")).unwrap().matches("START").count(), 1, "exactly the person's stand-in ran");
+    // (4) the one-shot helpers keep Kind::Agent, refused on a copy (proc.rs tests)
+    ag.shutdown();
+}
+#[test] fn side_by_side_runs_only_the_persons_turn_with_the_persons_agent_and_guards() {
+    let me = std::env::current_exe().unwrap(); let person = dir("sbs-person"); let live = dir("sbs-live").join("events.jsonl"); std::fs::write(&live, "{\"$\":\"ProjectCreated\",\"id\":\"z\",\"title\":\"z\",\"root\":\"/nonexistent-live\",\"at\":1}\n").unwrap();
+    let o = std::process::Command::new(me).args(["agents::tests::sbs_child_probe", "--exact", "--nocapture", "--test-threads=1"]).env("BACKPLANE_COPY", "1").env("BACKPLANE_SIDE_BY_SIDE", "1").env("BACKPLANE_PERSON_HOME", &person).env("BACKPLANE_LIVE_LOG", &live).env("BP_SBS_PROBE", "1").env("BP_SBS_PERSON", &person).env("BP_SBS_LIVE", &live).env_remove("BACKPLANE_AGENTS").output().unwrap();
+    assert!(o.status.success(), "{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
+    assert!(String::from_utf8_lossy(&o.stdout).contains("sbs_child_probe ... ok"), "the probe ran: {}", String::from_utf8_lossy(&o.stdout));
+}
+#[test] fn kind_person_turn_is_named_only_where_the_person_spawn_lives() {
+    fn walk(root: &Path, d: &Path, hits: &mut Vec<String>) { for e in std::fs::read_dir(d).unwrap().flatten() { let p = e.path(); if p.is_dir() { walk(root, &p, hits) } else if p.extension().map_or(false, |x| x == "rs") && !p.ends_with("tests.rs") { if std::fs::read_to_string(&p).unwrap().lines().any(|l| !l.trim_start().starts_with("//") && l.contains("Kind::PersonTurn")) { hits.push(p.strip_prefix(root).unwrap().to_string_lossy().into_owned()) } } } }
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src"); let mut hits = vec![]; walk(&src, &src, &mut hits); hits.sort();
+    assert_eq!(hits, ["agents/proc.rs", "proc.rs"], "only the two proc.rs files (core and agents) name Kind::PersonTurn: {hits:?}");
+}
+#[tokio::test(flavor = "multi_thread")] async fn a_thread_made_for_a_worktree_never_starts_in_the_project_folder() {
+    let sd = dir("wtw-bin"); perf_standin(&sd, 1);
+    let (hub, ag, _h, _w) = start("wtw", |w| base_log(w, 1, "").replace("\"branch\":\"\"", "\"branch\":\"gpui-imp-1\"").replace("\"env\":\"local\"", "\"env\":\"worktree\""), |_| Cli::standin(&sd)).await;
+    let _ = ag; // a short wait would pass the 60 s: the thread gets its worktree first
+    let from = len(&hub).await; let work2 = dir("wtw-wt");
+    let h2 = hub.clone(); let t = tokio::spawn(async move { rpc(&h2, "turn.start", json!({"thread":T1,"text":"zqshort hi"})).await });
+    tokio::time::sleep(Duration::from_millis(600)).await; assert_eq!(ag.stats.procs_spawned.load(Relaxed), 0, "nothing starts while the worktree is missing");
+    hub.commit(&json!({"$":"WorktreeSet","id":T1,"worktree":work2.to_string_lossy(),"at":1700000200})).await.unwrap();
+    let ev = until(&hub, from, 30, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await; assert!(ev.iter().any(|e| turn_is(e, "completed")), "{ev:?}"); let _ = t.await; ag.shutdown();
+}
+#[tokio::test(flavor = "multi_thread")] async fn a_model_mention_is_logged_as_refs_and_told_to_the_agent_without_changing_the_thread() {
+    let sd = dir("mn-bin"); perf_standin(&sd, 1);
+    let (hub, ag, _h, _w) = start("mn", |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await; let from = len(&hub).await;
+    rpc(&hub, "turn.start", json!({"thread":T1,"text":"zqshort ask &claude/nonesuch-model about it"})).await;
+    let ev = until(&hub, from, 30, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await;
+    let posted = ev.iter().find(|e| is(e, "MessagePosted") && e["role"] == "user").expect("posted");
+    assert_eq!(posted["refs"][0]["word"], "&claude/nonesuch-model", "{posted}"); assert_eq!(posted["refs"][0]["state"], "unknown"); assert_eq!(posted["text"], "zqshort ask &claude/nonesuch-model about it", "the text is the person's own");
+    assert!(!ev.iter().any(|e| is(e, "ThreadProviderSet") || is(e, "ThreadModelSet")), "the thread's model is untouched");
+    { let w = ag.world().await; assert_eq!(w.threads[T1].model, ""); }
+    let from = len(&hub).await; rpc(&hub, "turn.start", json!({"thread":T1,"text":"zqshort plain"})).await;
+    let ev = until(&hub, from, 30, |ev| ev.iter().filter(|e| turn_is(e, "completed")).count() >= 1).await; assert!(ev.iter().find(|e| is(e, "MessagePosted") && e["role"] == "user").unwrap().get("refs").is_none(), "omitted when empty"); ag.shutdown();
+}

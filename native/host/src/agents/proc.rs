@@ -36,9 +36,43 @@ impl Cli {
                 if exec && cp.starts_with(&cd) { Ok(cp) } else { Err(format!("{} has no runnable {cli}", d.display())) }
             }
             None if self.copy => Err(format!("a copy of a log runs agents only as stand-ins: {cli} refused")),
-            None => std::env::var_os("PATH").and_then(|p| std::env::split_paths(&p).map(|d| d.join(cli)).find(|c| c.is_file())).ok_or_else(|| format!("{cli} is not installed")),
+            None => search_dirs().iter().map(|d| d.join(cli)).find(|c| c.is_file()).ok_or_else(|| format!("{cli} is not installed (looked in the hub's PATH, the login shell's and the usual install directories)")),
         }
     }
+}
+
+// ---- where the provider CLIs are (clipath.bend): a hub started from a launcher or a service has a PATH without the login shell's additions (nvm, volta, ~/.local/bin...) ----
+/// CliPath.merge: each directory once, the first of each, in order, none empty.
+pub fn merge_dirs(parts: &[Vec<PathBuf>]) -> Vec<PathBuf> { let mut out: Vec<PathBuf> = vec![]; for d in parts.iter().flatten() { if !d.as_os_str().is_empty() && !out.contains(d) { out.push(d.clone()) } } out }
+fn semver_key(s: &str) -> (u64, u64, u64) { let mut p = s.trim_start_matches('v').split('.').map(|x| x.parse::<u64>().unwrap_or(0)); (p.next().unwrap_or(0), p.next().unwrap_or(0), p.next().unwrap_or(0)) }
+/// CliPath.usual: the usual install directories that exist (nvm's node versions newest first, volta, bun, ~/.local/bin, npm's global bin, homebrew, /usr/local/bin).
+pub fn usual_dirs(home: &Path) -> Vec<PathBuf> {
+    let mut v: Vec<PathBuf> = vec![];
+    if let Ok(rd) = std::fs::read_dir(home.join(".nvm/versions/node")) { let mut vs: Vec<String> = rd.flatten().filter_map(|e| e.file_name().into_string().ok()).collect(); vs.sort_by(|a, b| semver_key(b).cmp(&semver_key(a))); for n in vs { v.push(home.join(".nvm/versions/node").join(n).join("bin")) } }
+    for d in [".volta/bin", ".bun/bin", ".local/bin", ".npm-global/bin", ".cargo/bin"] { v.push(home.join(d)) }
+    for d in ["/opt/homebrew/bin", "/usr/local/bin"] { v.push(PathBuf::from(d)) }
+    v.into_iter().filter(|d| d.is_dir()).collect()
+}
+/// The login shell's PATH ($SHELL -lc, five seconds at most), as directories; empty when it cannot be read.
+fn login_dirs() -> Vec<PathBuf> { login_dirs_with(None) }
+/// The login shell's PATH; `home`: run it with that HOME (the person's real one in side-by-side mode, where the hub's own is a fake).
+pub fn login_dirs_with(home: Option<&Path>) -> Vec<PathBuf> {
+    let sh = std::env::var("SHELL").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "/bin/sh".into());
+    let mut c = crate::proc::std_cmd(crate::proc::Kind::Local, &sh); c.args(["-lc", "printf %s \"$PATH\""]).stdin(Stdio::null()).stderr(Stdio::null()); if let Some(h) = home { c.env("HOME", h); }
+    let Ok(mut child) = c.stdout(Stdio::piped()).spawn() else { return vec![] };
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop { match child.try_wait() { Ok(Some(_)) => break, Ok(None) if std::time::Instant::now() < end => std::thread::sleep(std::time::Duration::from_millis(20)), _ => { let _ = child.kill(); let _ = child.wait(); return vec![] } } }
+    let mut out = String::new(); if let Some(mut so) = child.stdout.take() { use std::io::Read; let _ = so.read_to_string(&mut out); }
+    std::env::split_paths(out.trim()).collect()
+}
+static SEARCH: std::sync::OnceLock<Vec<PathBuf>> = std::sync::OnceLock::new();
+/// Where an agent CLI is looked for (and the PATH an agent runs with): the hub's own PATH first, then the login shell's, then the usual install directories. Worked out once.
+pub fn search_dirs() -> &'static [PathBuf] {
+    SEARCH.get_or_init(|| {
+        let cur: Vec<PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
+        let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+        merge_dirs(&[cur, login_dirs(), usual_dirs(&home)])
+    })
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -101,13 +135,22 @@ pub fn reap_orphans(home: &str) -> usize {
 #[cfg(not(target_os = "linux"))]
 pub fn reap_orphans(_home: &str) -> usize { 0 }
 
-pub fn spawn(program: &Path, args: &[String], cwd: &Path, extra_path: Option<&Path>, env: &[(String, String)]) -> std::io::Result<Proc> {
-    let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Agent, program);
+/// What a person's real agent runs with (SIDE-BY-SIDE.md check 6): the real HOME and the PATH worked out from it; every `BACKPLANE_*` of this hub is removed from its environment.
+pub struct PersonChild { pub home: PathBuf, pub path: std::ffi::OsString }
+pub fn spawn(program: &Path, args: &[String], cwd: &Path, extra_path: Option<&Path>, env: &[(String, String)]) -> std::io::Result<Proc> { spawn_with(crate::proc::Kind::Agent, None, program, args, cwd, extra_path, env) }
+/// The only place a REAL agent CLI is made on a copy (`Kind::PersonTurn`, refused unless `copy::person_turn_allowed()`); the actor calls it only for a turn the person started.
+pub fn spawn_person(person: &PersonChild, program: &Path, args: &[String], cwd: &Path, env: &[(String, String)]) -> std::io::Result<Proc> { spawn_with(crate::proc::Kind::PersonTurn, Some(person), program, args, cwd, None, env) }
+fn spawn_with(kind: crate::proc::Kind, person: Option<&PersonChild>, program: &Path, args: &[String], cwd: &Path, extra_path: Option<&Path>, env: &[(String, String)]) -> std::io::Result<Proc> {
+    let mut c = crate::proc::tokio_cmd(kind, program);
     let args: Vec<String> = args.iter().map(|a| crate::settings::mask::mask(a)).collect(); // settings lane: Spawn.agent masks every launch argument
     c.args(&args).current_dir(cwd).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
+    if person.is_none() && extra_path.is_none() { if let Ok(j) = std::env::join_paths(search_dirs()) { c.env("PATH", j); } } // production: the agent runs with the merged PATH (its own children find node, git...)
     if let Some(d) = extra_path { let old = std::env::var_os("PATH").unwrap_or_default(); let mut v = vec![d.to_path_buf()]; v.extend(std::env::split_paths(&old)); if let Ok(j) = std::env::join_paths(v) { c.env("PATH", j); } }
     for (k, v) in env { c.env(k, v); }
-    if let Some(o) = OWNER.get() { c.env("BACKPLANE_AGENT_OWNER", o); }
+    match person {
+        None => { if let Some(o) = OWNER.get() { c.env("BACKPLANE_AGENT_OWNER", o); } }
+        Some(p) => { let (remove, set) = super::person::child_env(&p.home, &p.path, std::env::vars_os()); for k in remove { c.env_remove(k); } for (k, v) in set { c.env(k, v); } } // no BACKPLANE_* (so no owner mark either: PDEATHSIG ends it with the hub)
+    }
     // Linux: the kernel kills the agent when the hub dies (PDEATHSIG). macOS has no such call, and reap_orphans does nothing off Linux yet, so nothing ends a killed hub's agent there.
     unsafe { c.pre_exec(|| { libc::setsid(); #[cfg(target_os = "linux")] libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL); Ok(()) }); }
     let mut child = c.spawn()?;
@@ -142,6 +185,11 @@ pub fn alive(pid: u32) -> bool { pid > 0 && unsafe { libc::kill(pid as i32, 0) }
 
 #[cfg(test)]
 mod tests {
+    #[test] fn the_usual_directories_are_merged_once_with_the_newest_node_first() {
+        let h = dir("usual"); for v in ["v20.1.0", "v24.13.1", "v9.0.0"] { std::fs::create_dir_all(h.join(".nvm/versions/node").join(v).join("bin")).unwrap() } std::fs::create_dir_all(h.join(".local/bin")).unwrap();
+        let u = usual_dirs(&h); assert_eq!(u[0], h.join(".nvm/versions/node/v24.13.1/bin"), "{u:?}"); assert_eq!(u[1], h.join(".nvm/versions/node/v20.1.0/bin")); assert_eq!(u[2], h.join(".nvm/versions/node/v9.0.0/bin")); assert!(u.contains(&h.join(".local/bin")) && !u.contains(&h.join(".volta/bin")), "only those that exist");
+        let m = merge_dirs(&[vec![PathBuf::from("/a"), PathBuf::from("/b")], vec![PathBuf::from("/b"), PathBuf::from("/c"), PathBuf::new()], vec![PathBuf::from("/a"), PathBuf::from("/d")]]); assert_eq!(m, vec![PathBuf::from("/a"), PathBuf::from("/b"), PathBuf::from("/c"), PathBuf::from("/d")]);
+    }
     #[cfg(target_os = "linux")]
     #[test] fn reaping_leftovers_never_takes_this_processs_own_agents() { // two hubs' tests in one binary: a marked child of ours is not a dead hub's orphan
         let mut c = crate::proc::std_cmd(crate::proc::Kind::Local, "sleep"); c.arg("30").env("BACKPLANE_AGENT_OWNER", "reap-own-test-home");
