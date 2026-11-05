@@ -1,5 +1,5 @@
 # Goal
-Find how much smaller and faster Backplane can be with a GPUI desktop UI and a Rust backend, keeping Bend for small pure rules and preserving today's layout and theme.
+Reach full feature parity with today's Backplane on a Rust hub and native apps (GPUI desktop, SwiftUI, Compose), keeping Bend for small pure rules and today's layout and theme.
 
 # Parts
 GPUI experiment — native/gpui/ — Rust desktop client; software, nothing to order.
