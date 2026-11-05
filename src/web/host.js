@@ -2340,7 +2340,23 @@ const PRESS_PICKS = ['aside.sidebar [data-on-click="select"]', 'aside.sidebar [d
   'button.gear[data-on-click="flag"]', 'button[data-on-click="ws-palette-open"]',
   // (a run of tool calls' head and Settings' categories, as disclosures do)
   '#timeline button.fold[data-on-click="fold"]', '#settings-content [data-on-click="settings-page"]', '.settings-path [data-on-click="settings-page"]', '.settings-side [data-on-click="settings-page"]', '.topbar .crumbs [data-on-click="settings-page"]'].join(", ");
-let pressedPick = null, pressedMenu = null;
+let pressedPick = null, pressedMenu = null, pickedTimer = 0;
+// A thread row pressed with no retained picture of it draws nothing new
+// until the hub's view: the row at least is marked the chosen one at once
+// (style.css), until that view (or 5 s) puts the hub's own mark back.
+function markPicked(el) {
+  if (el.getAttribute("data-on-click") !== "select" || !el.classList.contains("thread")) return;
+  if (transitionViews.destination(transitionScope(), { kind: "thread", id: el.getAttribute("data-value") })) return;
+  unmarkPicked();
+  el.setAttribute("data-picked", "");htmlData("picking", "1");
+  pickedTimer = setTimeout(unmarkPicked, 5000);
+}
+function unmarkPicked() {
+  if (!pickedTimer) return;
+  clearTimeout(pickedTimer);pickedTimer = 0;
+  for (const row of document.querySelectorAll("[data-picked]")) row.removeAttribute("data-picked");
+  htmlData("picking", "");
+}
 document.addEventListener("pointerdown", e => {
   if (!e.isTrusted || e.button !== 0 || e.pointerType !== "mouse" || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
   // a menu (.local-menu: thread ▾, Views, the viewer's pickers) opens or
@@ -2350,6 +2366,7 @@ document.addEventListener("pointerdown", e => {
   const el = e.target.closest?.(PRESS_PICKS);
   if (!el || el.disabled || el.closest('[draggable="true"]') || el.closest("aside.sidebar") && !el.getAttribute("data-value")) return;
   pressedPick = { action: el.getAttribute("data-on-click"), value: el.getAttribute("data-value"), at: e.timeStamp };
+  markPicked(el);
   dispatch(phoneClickAction(document, el, el.getAttribute("data-on-click")), valueOf(el));
   renderNow();
 }, true);
@@ -3840,6 +3857,8 @@ async function startThin(again = false, reason = "initial") {
         bodyWindows.bind(location.origin, detail, detail.accountBinding || "", node, held);
         if (detail.position) transitionPosition = detail.position;
         else if (!remoteReady && !detail.historyReset) transitionPosition = transitionViews.position(transitionScope(detail.target)) || {atEnd:true};
+        // (a pressed row's own mark goes once a view of another target lands)
+        if (typeof unmarkPicked === "function" && targetKey(detail.target) !== shownFor) unmarkPicked();
         focusedView.remote(detail.epoch);remoteEpoch = detail.epoch;frontendNode = node;transitionNode = null;transitionFor = "";heldAt = 0;
         shownFor = targetKey(detail.target);shownTarget = detail.target;transitionViews.put(transitionScope(detail.target), detail.shown);
         void transitionViews.warm(transitionScope(detail.target)).then(warmDestinations);
