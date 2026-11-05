@@ -35,6 +35,12 @@ pub enum Cmd {
     Interrupt { reply: oneshot::Sender<()> },
     /// The person answered an ask a driver's process made (providers::AskInfo).
     Answer { ask: String, answer: String },
+    /// AgentStop: end the thread's agent process in any state, no events.
+    Stop { reply: oneshot::Sender<()> },
+    /// Wt.start: queued text runs as one turn (the caller logged the queue events it owns).
+    StartQueued { text: String, reply: oneshot::Sender<Result<(), String>> },
+    /// Steer.go: a running non-Claude turn stops and starts again with the text; Claude takes it in place.
+    Steer { text: String, reply: oneshot::Sender<Result<(), String>> },
 }
 
 pub struct Agents { pub hub: Arc<Hub>, pub cli: Cli, pub host: host::HostInfo, world: Mutex<World>, actors: StdMutex<HashMap<String, mpsc::Sender<Cmd>>>, pub stats: Stats, n: AtomicU64,
@@ -161,7 +167,7 @@ impl Agents {
 
 struct Rpc(Arc<Agents>);
 impl RpcHandler for Rpc {
-    fn methods(&self) -> &'static [&'static str] { &["turn.start", "turn.interrupt", "ask.answer"] }
+    fn methods(&self) -> &'static [&'static str] { &["turn.start", "turn.interrupt", "ask.answer", "agents.stop", "agents.start_queued", "agents.steer"] }
     fn call<'a>(&'a self, _hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             if method == "ask.answer" { return match self.0.answer(p.get("id").and_then(Value::as_str).unwrap_or(""), p.get("answer").and_then(Value::as_str).unwrap_or("")).await { Ok(()) => vec![ok(id)], Err(e) => vec![err(id, &e)] } }
@@ -172,6 +178,12 @@ impl RpcHandler for Rpc {
                     let text = p.get("text").and_then(Value::as_str).unwrap_or("");
                     let msg = p.get("msg").and_then(Value::as_str).filter(|m| !m.is_empty()).map(str::to_string).unwrap_or_else(|| hub_id("m", now_s(), self.0.seq()));
                     self.0.deliver(th, &msg, text, None, vec![]).await
+                }
+                "agents.stop" => { let tx = self.0.actor(th); let (reply, rx) = oneshot::channel(); if tx.try_send(Cmd::Stop { reply }).is_err() { Err("too many requests are waiting for this thread".into()) } else { rx.await.map_err(|_| "the thread's agent stopped".to_string()) } }
+                "agents.start_queued" | "agents.steer" => {
+                    let text = p.get("text").and_then(Value::as_str).unwrap_or("").to_string(); let tx = self.0.actor(th); let (reply, rx) = oneshot::channel();
+                    let c = if method == "agents.steer" { Cmd::Steer { text, reply } } else { Cmd::StartQueued { text, reply } };
+                    if tx.try_send(c).is_err() { Err("too many requests are waiting for this thread".into()) } else { rx.await.unwrap_or_else(|_| Err("the thread's agent stopped".into())) }
                 }
                 _ => self.0.interrupt(th).await,
             };
@@ -234,6 +246,9 @@ impl Actor {
         match c {
             Cmd::User { msg, text, role, origin, extra, reply } => { let r = self.user(msg, text, role, origin, extra).await; let _ = reply.send(r); }
             Cmd::Interrupt { reply } => { self.interrupt().await; let _ = reply.send(()); }
+            Cmd::Stop { reply } => { if self.live_proc.is_some() { self.ag.stats.procs_exited.fetch_add(1, Relaxed); } self.stop().await; self.lines = None; self.exit = None; self.next_ride = false; self.asked.clear(); self.live_proc = None; let _ = reply.send(()); }
+            Cmd::StartQueued { text, reply } => { let r = self.start_queued(text).await; let _ = reply.send(r); }
+            Cmd::Steer { text, reply } => { let r = self.steer(text).await; let _ = reply.send(r); }
             Cmd::Answer { ask, answer } => { if let Some(req) = self.asked.remove(&ask) { let lines = self.driver.as_mut().map(|d| d.answer(&req, &answer)).unwrap_or_default(); if let Some(p) = &self.live_proc { for l in lines { let _ = p.input.try_send(l); } } } }
         }
     }
@@ -277,18 +292,35 @@ impl Actor {
         // the person's message starts the turn: the <terminals> note follows it (and the chat's unpinned terminals stop)
         let agent_text = if role == "user" && origin.is_none() { let n = crate::term::tools::on_person_message(&self.ag.hub, &th).await; if n.is_empty() { text.clone() } else { format!("{text}\n\n{n}") } } else { text.clone() };
         if codex { let run = if ride.is_empty() { agent_text.clone() } else { format!("{}\n\n{}", codex::ride_input(&ride), agent_text) }; self.codex_run(&t, &cwd, &run).await; return Ok(()) }
-        let key = rules::agent_key(&t.model, &t.runtime, &t.interaction, self.cx.think);
-        if self.live_proc.as_ref().map_or(true, |p| p.key != key) {
-            self.stop().await; self.lines = None; self.exit = None;
-            if let Err(e) = self.spawn(&t, &cwd, key).await { self.fail(format!("could not start claude: {e}"), "spawn", &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); return Ok(()) }
-        }
-        let uuid = rules::hub_uuid(now, &format!("{th}/{msg}"));
-        self.cmds = self.cmds.accept(&uuid); self.sent.push_back((uuid.clone(), msg.clone(), text.clone())); if self.sent.len() > RECENT { self.sent.pop_front(); }
-        let line = { let (text2, cwd2, host, uuid2) = (agent_text.clone(), cwd.clone(), self.ag.host.clone(), uuid.clone()); // Media.claude: images read, `$skill` mentions made real
-            tokio::task::spawn_blocking(move || { let ss = if text2.contains('$') { inputs::scan(&host.user_home, &cwd2, host.kistack.as_deref()) } else { vec![] }; let body = inputs::expand_claude(&text2, &ss); let imgs = inputs::read_images(&text2); inputs::claude_line(&body, &imgs, &uuid2) }).await.unwrap_or_default() };
-        let sent = self.live_proc.as_ref().map(|p| p.input.try_send(line));
-        if matches!(sent, Some(Ok(()))) { self.cmds = self.cmds.sent(&uuid) } else { self.fail("the agent is not taking input".into(), "input", &hub_id("in", now, 0)).await }
+        self.claude_send(&t, &cwd, &msg, &text, &agent_text, now).await;
         Ok(())
+    }
+
+    /// Wt.start / Hub.resume: an idle thread's queued text runs as one turn (QueueTaken, TurnChanged running).
+    async fn start_queued(&mut self, text: String) -> Result<(), String> {
+        let (t, cwd, cx) = { let w = self.ag.world().await; let Some(t) = w.threads.get(&self.th).cloned() else { return Err("unknown thread".into()) }; (t, w.cwd(&self.th), w.cx(&self.th)) };
+        if self.cx.running || t.turn == "running" { return Err("the thread's turn is running".into()) }
+        if t.provider != "claude" && providers::driver(&t.provider).is_none() { return Err(format!("{} threads are not run by the Rust hub yet", t.provider)) }
+        let (now, th) = (now_s(), self.th.clone());
+        self.codex = t.provider != "claude"; self.prov = t.provider.clone(); self.model = t.model.clone(); self.cx = cx; self.cwd = cwd.clone();
+        self.commit(vec![json!({"$":"QueueTaken","thread":th,"at":now}), json!({"$":"TurnChanged","thread":th,"state":"running","at":now})]).await;
+        self.cx.running = true; self.ag.stats.turns.fetch_add(1, Relaxed); self.jobs_start(&cwd, "");
+        if self.codex { self.codex_run(&t, &cwd, &text).await } else { let msg = hub_id("q", now, self.ag.seq()); self.claude_send(&t, &cwd, &msg, &text, &text, now).await }
+        Ok(())
+    }
+
+    /// Steer.go: Claude takes the text on its input; any other provider's process stops and the turn starts again with it (and whatever waited in the ride).
+    async fn steer(&mut self, text: String) -> Result<(), String> {
+        let (t, cwd, ride) = { let w = self.ag.world().await; let Some(t) = w.threads.get(&self.th).cloned() else { return Err("unknown thread".into()) }; (t, w.cwd(&self.th), w.setting(&format!("ride.{}", self.th)).to_string()) };
+        let (now, th) = (now_s(), self.th.clone());
+        if t.provider == "claude" { if self.live_proc.is_none() { return Err("no running turn".into()) } let msg = hub_id("s", now, self.ag.seq()); self.claude_send(&t, &cwd, &msg, &text, &text, now).await; return Ok(()) }
+        if providers::driver(&t.provider).is_none() { return Err(format!("{} threads are not run by the Rust hub yet", t.provider)) }
+        self.stop().await; self.lines = None; self.exit = None; self.next_ride = false; self.live_proc = None; self.asked.clear();
+        let mut ev = vec![json!({"$":"ActivityLogged","thread":th,"act":hub_id("s", now, self.ag.seq()),"tone":"info","kind":"steer","summary":"Steered: the turn starts again with this message","at":now})];
+        let run = if ride.is_empty() { text.clone() } else { ev.extend(codex::ride_done(&th, &ride, "with the steer", now)); format!("{}\n\n{}", codex::ride_input(&ride), text) };
+        ev.push(json!({"$":"TurnChanged","thread":th,"state":"running","at":now}));
+        self.live_end().await; self.commit(ev).await; self.cwd = cwd.clone(); self.cx.running = true; self.codex = true; self.prov = t.provider.clone(); self.model = t.model.clone();
+        self.codex_run(&t, &cwd, &run).await; Ok(())
     }
 
     /// Hub.deliver.ride: a message for a running Codex turn is posted now and waits as the thread's ride.
@@ -386,6 +418,22 @@ impl Actor {
         self.commit(events).await;
         if ended && self.driver.as_ref().map_or(false, |d| d.ends_on_turn_end()) { self.stop().await; self.lines = None; self.exit = None; self.asked.clear(); self.live_proc = None; self.ag.stats.procs_exited.fetch_add(1, Relaxed); } // Grok.stop: SIGTERM after the turn's events
         if ended { if self.live_proc.is_none() { self.codex_next().await } else { self.next_ride = true } }
+    }
+
+    /// Claude: the process (started if it is not the right one) takes the message on its input.
+    async fn claude_send(&mut self, t: &world::T, cwd: &str, msg: &str, text: &str, agent_text: &str, now: u64) {
+        let th = self.th.clone(); let (cwd, msg, text, agent_text) = (cwd.to_string(), msg.to_string(), text.to_string(), agent_text.to_string());
+        let key = rules::agent_key(&t.model, &t.runtime, &t.interaction, self.cx.think);
+        if self.live_proc.as_ref().map_or(true, |p| p.key != key) {
+            self.stop().await; self.lines = None; self.exit = None;
+            if let Err(e) = self.spawn(t, &cwd, key).await { self.fail(format!("could not start claude: {e}"), "spawn", &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); return }
+        }
+        let uuid = rules::hub_uuid(now, &format!("{th}/{msg}"));
+        self.cmds = self.cmds.accept(&uuid); self.sent.push_back((uuid.clone(), msg.clone(), text.clone())); if self.sent.len() > RECENT { self.sent.pop_front(); }
+        let line = { let (text2, cwd2, host, uuid2) = (agent_text.clone(), cwd.clone(), self.ag.host.clone(), uuid.clone()); // Media.claude: images read, `$skill` mentions made real
+            tokio::task::spawn_blocking(move || { let ss = if text2.contains('$') { inputs::scan(&host.user_home, &cwd2, host.kistack.as_deref()) } else { vec![] }; let body = inputs::expand_claude(&text2, &ss); let imgs = inputs::read_images(&text2); inputs::claude_line(&body, &imgs, &uuid2) }).await.unwrap_or_default() };
+        let sent = self.live_proc.as_ref().map(|p| p.input.try_send(line));
+        if matches!(sent, Some(Ok(()))) { self.cmds = self.cmds.sent(&uuid) } else { self.fail("the agent is not taking input".into(), "input", &hub_id("in", now, 0)).await }
     }
 
     /// Hub.post.go: a new turn's design baseline (checkpoint 0 and a step), taken in the background.
