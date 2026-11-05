@@ -15,7 +15,7 @@ export function canonical(d){
   return JSON.stringify(go(o));
 }
 // settings families whose events the Rust fold does not model yet (uber ops, background shells, watches, wakes, locks): reported with counts, excluded from the hash
-export const SKIP=/^(uber\.|bg\.|watch\.|wake\.|wakes\.|lock\.|locks\.|tok\.|turn\.last\.)/;
+export const SKIP=/^(uber\.|bg\.|watch\.|wake\.|wakes\.|lock\.|locks\.|tok\.|turn\.last\.|deploy\.)/;
 export const without=(d,re)=>re?{...d,settings:(d.settings||[]).filter(x=>!re.test(x.key))}:d;
 export const skipped=(d,re)=>{const o={};for(const x of d.settings||[])if(re.test(x.key)){const k=x.key.split('.')[0]+'.';o[k]=(o[k]||0)+1}return o};
 export const digest=(d,re)=>createHash('sha256').update(canonical(without(d,re))).digest('hex');
