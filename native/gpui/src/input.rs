@@ -588,7 +588,6 @@ impl Render for TextInput {
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_move(cx.listener(Self::on_mouse_move))
-            .bg(rgb(0x0d0f12))
             .line_height(px(22.))
             .text_size(px(13.))
             .child(
@@ -596,7 +595,6 @@ impl Render for TextInput {
                     .h(px(22. + 4. * 2.))
                     .w_full()
                     .p(px(4.))
-                    .bg(rgb(0x0d0f12))
                     .child(TextElement { input: cx.entity() }),
             )
     }
@@ -611,7 +609,7 @@ impl Focusable for TextInput {
 
 impl TextInput {
     pub fn new(cx: &mut Context<Self>) -> Self { Self {
-        focus_handle: cx.focus_handle(), content: "".into(), placeholder: "Message…".into(),
+        focus_handle: cx.focus_handle(), content: "".into(), placeholder: "Ask anything: @bot, >thread, %project, #room, $skill, /btw".into(),
         selected_range: 0..0, selection_reversed: false, marked_range: None,
         last_layout: None, last_bounds: None, is_selecting: false,
     }}
