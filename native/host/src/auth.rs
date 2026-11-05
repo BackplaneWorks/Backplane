@@ -72,6 +72,20 @@ impl Auth {
 mod tests {
     use super::*;
     fn req(target: &str, hs: &[(&str, &str)]) -> Req { Req { method: "GET".into(), target: target.into(), headers: hs.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect() } }
+    fn h(k: &str, v: &str) -> (&'static str, String) { (Box::leak(k.to_string().into_boxed_str()), v.to_string()) }
+    fn with(hs: &[(&str, &str)], path: &str) -> Req { req(path, hs) }
+    // laws auth_* of LAWS.bend, stated over many paths and tokens
+    #[test] fn auth_foreign_origin_denied() {
+        for path in ["/ws", "/ws?token=secret", "/x?token=t&y=1", ""] { for token in ["secret", "t", "", "a b"] {
+            let a = Auth::with_root(token);
+            assert!(!a.allowed(&with(&[("origin", "https://foreign.example"), ("host", "localhost:3787")], path))); } }
+    }
+    #[test] fn auth_empty_remote_token_denied() { assert!(!Auth::with_root("").allowed(&with(&[], "/ws?token="))); }
+    #[test] fn auth_cookie_prefix_denied() { assert!(!Auth::with_root("secret").allowed(&with(&[("cookie", "bp_token=secret-extra")], "/ws"))); }
+    #[test] fn auth_loopback_host_needs_token() { assert!(!Auth::with_root("secret").allowed(&with(&[("host", "127.0.0.1:3787")], "/ws"))); }
+    #[test] fn auth_localhost_needs_token() { assert!(!Auth::with_root("secret").allowed(&with(&[("host", "localhost:3787")], "/mcp/t1"))); }
+    #[test] fn auth_no_host_needs_token() { assert!(!Auth::with_root("secret").allowed(&with(&[], "/ws"))); }
+    #[test] fn auth_loopback_with_token() { assert!(Auth::with_root("secret").allowed(&with(&[("host", "127.0.0.1:3787")], "/ws?token=secret"))); let _ = h; }
     #[test] fn token_forms() {
         let a = Auth::with_root("tok123");
         assert!(a.allowed(&req("/ws?token=tok123", &[]))); assert!(a.allowed(&req("/ws", &[("Authorization", "Bearer tok123")])));

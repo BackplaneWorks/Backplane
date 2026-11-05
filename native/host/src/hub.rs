@@ -22,6 +22,7 @@ pub struct Hub {
 /// One WebSocket connection's identity and its single open view.
 pub struct Conn { pub gen: String, pub view_id: String, pub target: Value, pub cbor: bool, pub lastrev: u64 }
 
+fn now_ms() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0) }
 pub fn limits() -> Value { json!({"replyBytes":262144,"entries":32,"recent":24,"searchResults":25,"searchCandidates":128,"chunkBytes":65536}) }
 pub fn capabilities() -> Value { json!({"version":1,"views":{"version":1,"websocketQuery":"view=1","renderers":["mobile"],"compatibility":"explicit-only"}}) }
 pub fn error(id: &Value, code: &str) -> Value { json!({"t":"reply","id":id,"ok":false,"error":{"code":code,"retryable":false,"compatibilityRequired":false}}) }
@@ -61,10 +62,11 @@ impl Hub {
         let items: Vec<Value> = { let s = self.store.lock().await; s.lines().iter().filter_map(|l| serde_json::from_str(l).ok()).collect() };
         let mut chunks = items.chunks(200);
         let first: Vec<Value> = chunks.next().map(|c| c.to_vec()).unwrap_or_default();
-        self.presenter.fold(&json!({"t":"log","since":0,"origin":self.epoch,"version":self.cfg.version,"info":self.info(),"items":first})).await?;
-        for c in chunks { self.presenter.fold(&json!({"t":"changes","items":c})).await?; }
-        self.presenter.fold(&json!({"t":"live","items":[]})).await?;
-        self.presenter.fold(&json!({"t":"info","info":{"pair":"","pair.qr":""}})).await?;
+        // version "": the JS hub's mobile pictures carry no hub version (compare.mjs, shown.version)
+        self.presenter.fold(&json!({"t":"log","since":0,"origin":self.epoch,"version":"","info":self.info(),"items":first,"now":now_ms()})).await?;
+        for c in chunks { self.presenter.fold(&json!({"t":"changes","items":c,"now":now_ms()})).await?; }
+        self.presenter.fold(&json!({"t":"live","items":[],"now":now_ms()})).await?;
+        self.presenter.fold(&json!({"t":"info","info":{"pair":"","pair.qr":""},"now":now_ms()})).await?;
         Ok(())
     }
 
@@ -72,7 +74,7 @@ impl Hub {
     pub async fn commit(&self, event: &Value) -> Result<u64> {
         let line = serde_json::to_string(event)?;
         let n = { let mut s = self.store.lock().await; s.append(&line)?; s.len() as u64 };
-        self.presenter.fold(&json!({"t":"changes","items":[event]})).await?;
+        self.presenter.fold(&json!({"t":"changes","items":[event],"now":now_ms()})).await?;
         let _ = self.changed.send(n);
         Ok(n)
     }
@@ -115,7 +117,7 @@ impl Hub {
         let view_id = if m == "view.open" { format!("{}:{}", c.gen, rid) } else { c.view_id.clone() };
         let rev = self.revision().await;
         let mut params = p.clone();
-        if let Some(o) = params.as_object_mut() { o.insert("revision".into(), json!(rev)); }
+        if let Some(o) = params.as_object_mut() { o.insert("revision".into(), json!(rev)); o.insert("now".into(), json!(now_ms())); }
         let pol = match self.presenter.view(&params).await { Ok(v) => v, Err(_) => return vec![error(&id, "PRESENTER_UNAVAILABLE")] };
         let target = p["target"].clone();
         if m == "view.open" { c.view_id = view_id.clone(); c.target = target.clone(); }

@@ -2,3 +2,16 @@
 # ported <src path>
 # law <name> bend
 # law <name> rust <test name>
+# Bend stream: laws stated by native/host tests (backplane-hub). The Bend code stays; these claim the Rust twin.
+law auth_foreign_origin_denied rust auth_foreign_origin_denied
+law auth_empty_remote_token_denied rust auth_empty_remote_token_denied
+law auth_cookie_prefix_denied rust auth_cookie_prefix_denied
+law auth_loopback_host_needs_token rust auth_loopback_host_needs_token
+law auth_localhost_needs_token rust auth_localhost_needs_token
+law auth_no_host_needs_token rust auth_no_host_needs_token
+law auth_loopback_with_token rust auth_loopback_with_token
+law store_torn_tail_newline rust store_torn_tail_newline
+law store_torn_tail_resyncs rust store_torn_tail_resyncs
+law store_load_append rust store_load_append
+law cbor_trees_exact rust cbor_trees_exact
+law hub_frames_cbor rust hub_frames_cbor

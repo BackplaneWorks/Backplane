@@ -117,5 +117,13 @@ mod tests {
         assert_eq!(encode(&json!(-1)), vec![0x20]); assert_eq!(encode(&json!(4294967295_u64)), vec![0x1a, 255, 255, 255, 255]);
         assert_eq!(encode(&json!(4294967296_u64)), { let mut x = vec![199u8, 0x6a]; x.extend(b"4294967296"); x });
     }
+    // law cbor_trees_exact: the encoder's lookup holds exactly the append-only dictionaries, each word at its list index
+    #[test] fn cbor_trees_exact() {
+        for (list, map) in [(KEYS, index(KEYS, &K)), (WORDS, index(WORDS, &W))] {
+            assert_eq!(map.len(), list.len(), "no duplicates in a dictionary");
+            for (i, w) in list.iter().enumerate() { assert_eq!(map.get(w), Some(&(i as u32))); }
+        }
+        let mut sorted = KEYS.to_vec(); sorted.sort(); sorted.dedup(); assert_eq!(sorted.len(), KEYS.len());
+    }
     #[test] fn reject_malformed() { for b in [&[0x7f][..], &[0x63, 0x61][..], &[0xf6, 0][..]] { assert!(decode(b).is_err()) } }
 }
