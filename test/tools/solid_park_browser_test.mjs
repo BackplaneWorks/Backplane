@@ -105,6 +105,10 @@ try {
     const v5 = S.testView;
     out.pictureKeepsPose = JSON.stringify(v5.restoreWanted.cam) === JSON.stringify(pic.state.cam);
     out.pictureNoNote = (v5.draw(), Q.querySelector('.viewer-note').textContent === '');
+    // the hub's view making the stats line again (empty) under the picture: filled again at once
+    const fresh = document.createElement('div'); fresh.className = 'viewer-stat'; Q.querySelector('.viewer-stat').replaceWith(fresh);
+    S.mount(Q.querySelector('canvas')); v5.draw();
+    out.pictureStatRefilled = fresh.textContent === pic.stat && !!pic.stat;
     record.stats.build = 900; // (this load's own time differs from the picture's)
     S.testAssets.entries.set(record.key, record); v5.receive(record); v5.draw();
     out.pictureDropped = !Q.querySelector('img.solid-picture') && v5.count === 3;
