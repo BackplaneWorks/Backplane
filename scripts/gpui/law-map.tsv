@@ -412,3 +412,8 @@ law telemetry_default_pending rust telemetry_default_pending
 law telemetry_all_off rust telemetry_all_off
 law telemetry_existing_optout_answered rust telemetry_existing_optout_answered
 law telemetry_choice_no_decision_no_replay rust telemetry_choice_no_decision_no_replay
+# settings: fallback chain and settings proposals (settings/fallback.rs, proposal.rs)
+law settings_proposal_decline_no_write rust settings_proposal_decline_no_write
+law settings_proposal_deadline_exclusive rust settings_proposal_deadline_exclusive
+law settings_proposal_write_invalidates rust settings_proposal_write_invalidates
+law fallback_never_wraps rust fallback_never_wraps

@@ -3443,3 +3443,5 @@ Terminal output goes out with `Hub::push_all` into each connection's unbounded o
 - Telemetry: the choice (opt-out, reset, receipts) is ported; the sender is not, and no endpoint is baked in, so nothing is ever sent.
 - Vault: Windows DPAPI key storage is not ported (the file and keyring/keychain backends are).
 - `vault::with` holds the vault lock through key-store commands (up to 5 s), as a blocking call; callers use `spawn_blocking`.
+- Settings propose: Bend's `Settings.propose` also refuses while `Private.live(thread)` (a bot's private-mail turn). Rust has no private turns yet; the bots lane must add that check to `settings::proposal::tool_propose` when they exist, or a private turn can open a hub-wide proposal.
+- Fallback outage classifier (`Error.classify`) and chain `pick`: not ported (they read provider error envelopes in the agents' turn handling).

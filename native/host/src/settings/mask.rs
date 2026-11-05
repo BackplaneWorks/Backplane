@@ -46,13 +46,15 @@ pub fn merge(vault: &[String], api: &[String]) -> Vec<String> {
 #[cfg(test)]
 pub fn clear_api() { *API.lock().unwrap() = None; rebuild(); }
 
+/// Rebuilds the merged set. MERGED's write lock is taken FIRST and held across reading both sources and publishing, so two overlapping
+/// rebuilds are serialized: the one that runs last read the newest VAULT/API, and an older view can never be written after a newer one (a
+/// person's saved secret would otherwise stay unmasked until the next change). Lock order: MERGED, then API, then VAULT; `set_vault_values`
+/// and `refresh_api` hold neither of the latter two when they call this.
 fn rebuild() {
-    // lock order: API, then VAULT (set_vault_values holds neither while it calls this)
-    let g = API.lock().unwrap();
-    let api: Vec<String> = g.as_ref().map(|c| c.vals.clone()).unwrap_or_default();
-    drop(g);
+    let mut out = MERGED.write().unwrap();
+    let api: Vec<String> = API.lock().unwrap().as_ref().map(|c| c.vals.clone()).unwrap_or_default();
     let m = merge(&VAULT.read().unwrap(), &api);
-    *MERGED.write().unwrap() = Some(Arc::new(m));
+    *out = Some(Arc::new(m));
 }
 
 fn refresh_api() {

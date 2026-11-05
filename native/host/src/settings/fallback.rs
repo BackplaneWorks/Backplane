@@ -46,4 +46,6 @@ mod tests {
         let c = parse("a/1,b/2,c/3"); assert_eq!(show(&up(&c, "c/3")), "a/1,c/3,b/2"); assert_eq!(show(&up(&c, "a/1")), "a/1,b/2,c/3"); assert_eq!(show(&remove(&c, "b/2")), "a/1,c/3");
         assert_eq!(show(&suffix(&c, "a/1")), "b/2,c/3"); assert_eq!(show(&suffix(&c, "x/9")), "a/1,b/2,c/3");
     }
+
+    #[test] fn fallback_never_wraps() { assert_eq!(show(&suffix(&parse("claude/sonnet,codex/gpt-6.1-sol"), "codex/gpt-6.1-sol")), ""); }
 }

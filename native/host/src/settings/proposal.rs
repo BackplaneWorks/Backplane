@@ -73,9 +73,13 @@ pub fn answer_events(accept: bool, ask: &str, thread: &str, options: &str, now: 
 }
 
 /// The agents' `answer` for an ask whose tool is `settings_proposal`: closes it and applies it when accepted and still current.
-pub async fn answer_ask(hub: &Arc<Hub>, ask: &str, thread: &str, options: &str, answer: &str, now: u64) -> Result<(), String> {
+/// `open` is every open settings proposal (the ask being answered included): an accepted proposal writes fallback.*, which closes the
+/// others "stale" in the same batch, as Bend's per-step Proposal.invalidate does. Rust has no per-step hook, so EVERY writer of
+/// `fallback.on` / `fallback.chain` must call `invalidate` on its batch (setting.set and this are the only two today).
+pub async fn answer_ask(hub: &Arc<Hub>, ask: &str, thread: &str, options: &str, answer: &str, now: u64, open: &[String]) -> Result<(), String> {
     let (on, chain) = effective(hub).await;
-    let (ev, err) = answer_events(answer == "accept", ask, thread, options, now, (&on, &chain));
+    let (mut ev, err) = answer_events(answer == "accept", ask, thread, options, now, (&on, &chain));
+    let extra = invalidate(&ev, open, now); ev.extend(extra);
     hub.commit_many(&ev).await.map_err(|e| format!("{e:#}"))?;
     match err { Some(e) => Err(e.to_string()), None => Ok(()) }
 }
@@ -130,5 +134,14 @@ mod tests {
         assert!(invalidate(&[json!({"$":"SettingSet","key":"other","value":"x","at":1})], &open, 5).is_empty());
         let both = vec![w[0].clone(), json!({"$":"AskClosed","id":"a","answer":"accept","at":1})];
         let ev = invalidate(&both, &open, 5); assert_eq!(ev.len(), 1); assert_eq!(ev[0]["id"], "b", "an ask closed in the same batch keeps its decision");
+    }
+
+    #[test] fn settings_proposal_deadline_exclusive() { assert!(!Proposal { old_on: "off".into(), old_chain: "".into(), new_on: "off".into(), new_chain: "".into(), expires: 100 }.snapshot(100, "off", "")); }
+    #[test] fn an_accepted_proposal_closes_the_other_open_ones_stale_in_the_same_batch() {
+        let o = p("on", "claude/opus").json().to_string();
+        let (mut ev, _) = answer_events(true, "s1", "t1", &o, 100, ("off", ""));
+        let extra = invalidate(&ev, &["s1".to_string(), "s2".to_string()], 100); ev.extend(extra);
+        let closed: Vec<(&str, &str)> = ev.iter().filter(|e| e["$"] == "AskClosed").map(|e| (e["id"].as_str().unwrap(), e["answer"].as_str().unwrap())).collect();
+        assert_eq!(closed, [("s1", "accept"), ("s2", "stale")], "the accepted ask keeps its decision");
     }
 }
