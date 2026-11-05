@@ -135,7 +135,7 @@ impl Hub {
         let c = &self.cfg;
         json!({"cad.install":"","accounts.live":"{\"version\":1,\"revision\":0,\"default_allowance\":null,\"error\":\"\",\"profiles\":[],\"attempts\":[]}",
             "telemetry.channel":"release","telemetry.id":"","telemetry.live":"","os":c.os,"arch":c.arch,"home":c.home.to_string_lossy(),
-            "listen":c.listen,"models":crate::settings::models::info(),"machines":"","bots.remote":"[]","tailnet":"off","update":"package","tailscale":"off",
+            "listen":c.listen,"models":crate::settings::models::info(),"models.all":crate::settings::models::all(),"machines":"","bots.remote":"[]","tailnet":"off","update":"package","tailscale":"off",
             "freecad":"","kicad.cli":"","kicad.fork":"","kicad.commit":"","kicad.status":"checking","kicad.source":"path","kicad.version":"",
             "kicad.api":"0","kicad.caps":"","kicad.why":"","kicad.min":"10.99.0-bp.4","kicad.can_install":"","kicad.ipc.servers":"",
             "browser.engine.live":"","browser.engine.err":""})
