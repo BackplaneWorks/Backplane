@@ -30,8 +30,8 @@ The person may be gaming on this desktop. Builds and long runs go to Boat, the M
 - Kill only PIDs you captured, never by name or pattern. Any window on the desktop goes on an isolated display, never the person's screen.
 
 ## Git and publishing
-- All streams share this worktree and branch. Commit only your own paths: `git commit -m "..." -- <paths>` (add new files with `git add <paths>` first). Retry if the index is locked. No stash, rebase, reset, or checkout of files you do not own.
-- Nothing reaches `gpui` before the reviewer's OK, and the OK covers the exact commits you land. Asking for a review is not an OK: wait for it, and anything committed after it goes back for review. Three lanes landed first on 2026-11-05. Test-only harness fixes count too, unless the coordinator says otherwise.
+- Every lane works in its own worktree on its own branch: `git worktree add ~/Documents/i2cjak/bp-gpui-lanes/<lane> -b gpui-<lane> gpui`. The main checkout `backplane-gpui` is not a place to edit or commit. Commit only your own paths. Pick up others' work with `git rebase gpui`.
+- `gpui` is guarded: a hook refuses every commit, cherry-pick or ref move onto it, in any worktree. It moves only by `scripts/gpui/land.sh <tip>`, run from your worktree with your branch rebased on `gpui`: that takes the `gpui-merge` lock, checks the reviewer recorded an OK (`scripts/gpui/review-ok.sh`) for every commit in `gpui..<tip>`, and fast-forwards. No exceptions: test harness, docs and regenerated files go through review too. Asking for a review is not an OK. A rebase that changes a commit's diff needs a new OK.
 - Never commit binaries, tarballs or generated output: nothing over 1 MB. Boat picks up untracked, unignored files, so leave them untracked, or list them with `--include-file`.
 - Do not push. The coordinator pushes.
 - No TestFlight or Play upload, no signed release build, no merge to main, no install over the real app, no `bend update`, no release tag.

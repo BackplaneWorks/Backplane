@@ -31,9 +31,10 @@ lane cannot break another lane's build.
 - Build and test from that worktree with `scripts/boat-job.sh`. Boat or the Mac only.
 - Pick up others' work with `git rebase gpui` in your own worktree.
 - Before landing, rebase on gpui and compile the whole crate on Boat. A batch that breaks gpui's build is backed out.
-- Land small and often: take the named lock `gpui-merge`, run
-  `git -C /home/h/Documents/i2cjak/backplane-gpui cherry-pick <sha>...`, release the lock.
-  If a cherry-pick refuses, abort it and tell the owner of the file. Never force anything.
+- Land small and often, from your own worktree: rebase on gpui, then `scripts/gpui/land.sh <tip>`.
+  It takes the `gpui-merge` lock, checks the reviewer's recorded OK for every commit in `gpui..<tip>`
+  and fast-forwards. `scripts/gpui/ref-guard.hook` refuses any other move of `gpui`, so commits,
+  cherry-picks and ref updates onto it fail in every worktree. Never force anything.
 - To change a file you do not own, ask its owner by `thread_send`.
 - A shared seam (one line in `main.rs`, one `mod` line) goes through the lead.
-- Before landing a batch, send the `reviewer` thread its commit range and wait for its OK. Land small batches, not every commit.
+- Before landing a batch, send the `reviewer` thread its commit range. The reviewer records the OK with `scripts/gpui/review-ok.sh BASE..TIP`; only that session can. Land small batches, not every commit.

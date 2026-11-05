@@ -1,0 +1,13 @@
+#!/bin/sh
+# reference-transaction hook. Installed as <common .git>/hooks/reference-transaction by
+# scripts/gpui/install-guard.sh. That hooks folder serves every worktree of this repository,
+# so this passes every ref but refs/heads/gpui and does nothing else.
+[ "$1" = prepared ] || { cat > /dev/null; exit 0; }
+hit=
+while read -r old new ref; do [ "$ref" = refs/heads/gpui ] && hit=1; done
+[ -n "$hit" ] || exit 0
+t=$(git rev-parse --git-common-dir)/gpui-land.token
+[ -n "${GPUI_LAND:-}" ] && [ -f "$t" ] && [ "$GPUI_LAND" = "$(cat "$t")" ] && exit 0
+echo "refused: gpui moves only through scripts/gpui/land.sh, for a range the reviewer OKed." >&2
+echo "Commit on your own branch (gpui-<lane>) in your own worktree: docs/gpui/LANES.md" >&2
+exit 1
