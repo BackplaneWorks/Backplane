@@ -42,6 +42,7 @@ impl Core {
         let (core, marks) = turnend::split_fail_marks(events);
         let live = watchdog::after(&self.st, now, events);
         let quiet = autosettle::quiet(&self.st, events);
+        let reopen = autosettle::reopen(&self.st, events);
         let ended: Vec<String> = turnend::ended_threads(&core).into_iter().map(String::from).collect();
         let ctx = turnend::told_ctx(&self.st, &core, &ended);
         let seq_before = self.st.seq;
@@ -63,8 +64,8 @@ impl Core {
         let asks = turnend::alert_asks(&self.st, seq_before + list.len() as u64, &list);
         let mut all = list.clone(); all.extend(asks.iter().cloned());
         let told = turnend::told_marks(&ctx, &all);
-        for x in asks.iter().chain(&told).chain(&quiet) { self.st.apply(x); }
-        let after = live.into_iter().chain(asks).chain(told).chain(quiet).chain(meta).collect();
+        for x in asks.iter().chain(&told).chain(&quiet).chain(&reopen) { self.st.apply(x); }
+        let after = live.into_iter().chain(asks).chain(told).chain(quiet).chain(meta).chain(reopen).collect();
         Derived { core, end, marks, after }
     }
     pub fn tick(&self, now_s: u64) -> Vec<Value> { let mut v = autosettle::changes(&self.st, now_s); v.extend(autosettle::tick_post(&self.st, now_s)); v.extend(turnend::told_prune(&self.st, now_s)); v }

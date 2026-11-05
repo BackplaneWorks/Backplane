@@ -1,0 +1,14 @@
+{"$":"MessagePosted","thread":"wk1","msg":"r1","role":"assistant","text":"x","at":1794060100}
+{"$":"MessagePosted","thread":"wk2","msg":"r2","role":"user","text":"x","at":1794060101}
+{"$":"MessagePosted","thread":"wk2","msg":"r2b","role":"assistant","text":"x","at":1794000005}
+{"$":"MessagePosted","thread":"wk3","msg":"r3","role":"assistant","text":"x","at":1794000012}
+{"$":"MessagePosted","thread":"wk9","msg":"mwk9","role":"user","text":"dup of an earlier id","at":1794060102}
+{"$":"MessagePosted","thread":"wk4","msg":"r4","role":"assistant","text":"x","at":1794060103}
+{"$":"ThreadSettled","id":"wk4","manual":false,"at":1794060103}
+{"$":"MessagePosted","thread":"wk5","msg":"r5","role":"assistant","text":"x","at":1794060104}
+{"$":"ThreadMerged","id":"wk5","url":"u","at":1794060104}
+{"$":"MessagePosted","thread":"old","msg":"r6","role":"assistant","text":"x","at":1794060105}
+{"$":"MessagePosted","thread":"setd","msg":"r7","role":"assistant","text":"x","at":1794060106}
+{"$":"MessagePosted","thread":"setd","msg":"r8","role":"user","text":"x","at":1794000020}
+{"$":"MessagePosted","thread":"ghost","msg":"r9","role":"assistant","text":"x","at":1794060107}
+{"$":"MessagePosted","thread":"wk6","msg":"r10","role":"system","text":"x","at":1794060108}

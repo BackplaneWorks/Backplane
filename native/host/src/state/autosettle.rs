@@ -211,6 +211,24 @@ fn working(st: &State, id: &str, t: &Thread) -> bool {
     t.turn == Turn::Running || t.pending > 0 || waiting || busy > 0
 }
 
+/// Shelve.auto.messages: a settled thread reopens (ThreadWoke) when a message is posted to it, unless the settle is a manual one made after the message,
+/// the batch settles it again (Shelve.held: a ThreadSettled or ThreadMerged for it), or the message was already posted (Shelve.input.seen). `pre` is the
+/// state before the batch; `list` the batch as it stands. The step's own wakes (Shelve.step: a turn starting, work out again...) are not ported yet.
+pub fn reopen(pre: &State, list: &[Value]) -> Vec<Value> {
+    let mut out = vec![];
+    for c in list {
+        if gstr(c, "$", "") != "MessagePosted" { continue }
+        let (th, id, at) = (gstr(c, "thread", ""), gstr(c, "msg", ""), gnat(c, "at", 0));
+        let Some(t) = pre.threads.get(th) else { continue };
+        if shelf_of(t) != Shelf::Settled { continue }
+        let recent = if t.override_ == Override::ForcedSettled { at >= t.settled_at } else { true };
+        let held = list.iter().any(|x| matches!(gstr(x, "$", ""), "ThreadSettled" | "ThreadMerged") && gstr(x, "id", "") == th);
+        let seen = pre.ext.sum.get(th).map_or(false, |s| s.recent_msgs.iter().any(|m| m == id));
+        if recent && !held && !seen { out.push(json!({"$": "ThreadWoke", "id": th, "at": at})); }
+    }
+    out
+}
+
 /// Auto.read: the person read the thread's newest reply (it opened in a viewer): the mark that stops it counting as unread. `st` is current.
 pub fn read(st: &State, th: &str, now: u64) -> Vec<Value> {
     let output = st.get(&format!("autosettle.output.{th}"), st.ext.sum.get(th).map_or("", |s| s.output.as_str()));
@@ -343,6 +361,18 @@ mod tests {
         st.apply_line(r#"{"$":"SettingSet","key":"autosettle.version","value":"1","at":9}"#);
         assert!(upgrade(&st, 100_000).is_empty(), "nothing at version 1");
         assert!(!changes(&st, 100_000).iter().any(|e| e["id"] == "w1" && e["$"] == "ThreadSettled"), "at version 1 the mail is no longer read: only the delivery setting counts, and it is not set here");
+    }
+    #[test] fn a_message_reopens_a_settled_thread_unless_held_seen_or_older_than_a_manual_settle() {
+        let mk = |id: &str| format!(r#"{{"$":"ThreadCreated","id":"{id}","project":"p","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1}}"#);
+        let mut st = State::new();
+        for id in ["auto", "manual", "active", "seen"] { st.apply_line(&mk(id)); }
+        st.apply_line(r#"{"$":"MessagePosted","thread":"seen","msg":"dup","role":"user","text":"x","at":2}"#);
+        for (id, manual) in [("auto", false), ("manual", true), ("seen", false)] { st.apply_line(&format!(r#"{{"$":"ThreadSettled","id":"{id}","manual":{manual},"at":10}}"#)); }
+        let m = |th: &str, id: &str, at: u64| json!({"$":"MessagePosted","thread":th,"msg":id,"role":"assistant","text":"x","at":at});
+        let woke = |l: &[Value]| reopen(&st, l).iter().map(|e| e["id"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+        assert_eq!(woke(&[m("auto", "a1", 11), m("active", "a2", 11), m("seen", "dup", 11), m("manual", "a3", 9), m("manual", "a4", 10)]), vec!["auto", "manual"], "auto: yes; active: not settled; seen: already posted; manual before its settle: no; at its settle second: yes");
+        assert!(woke(&[m("auto", "a1", 11), json!({"$":"ThreadSettled","id":"auto","manual":false,"at":11})]).is_empty(), "the batch settles it again: held");
+        assert!(woke(&[m("ghost", "a1", 11)]).is_empty());
     }
     #[test] fn auto_read_marks_the_newest_reply_once() {
         let mut st = State::new();

@@ -22,6 +22,8 @@ pub struct Sum {
     pub person_id: String,
     /// the first line (at most 200 characters) of its newest assistant message: what a "told" record says it was told (Told.first of Told.last)
     pub reply_line: String,
+    /// the ids of its newest messages (at most 64): `Shelve.input.seen` asks whether a message was already posted to the thread
+    pub recent_msgs: std::collections::VecDeque<String>,
 }
 #[derive(Default, Debug)]
 pub struct Ext {
@@ -71,6 +73,7 @@ pub fn on_post(st: &mut State, th: &str, id: &str, at: u64, msg: Option<(&str, &
     let from = link_from(id).to_string();
     let own = st.ext.sum.entry(th.to_string()).or_default();
     own.quiet = own.quiet.max(at);
+    if msg.is_some() { own.recent_msgs.push_back(id.to_string()); while own.recent_msgs.len() > 64 { own.recent_msgs.pop_front(); } }
     if from == th { let e = own.sent.entry(th.to_string()).or_insert(0); *e = (*e).max(at); }
     if let Some((role, text)) = msg {
         if role == "user" {
