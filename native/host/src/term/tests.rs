@@ -93,7 +93,7 @@ fn drain(rx: &Tap, key: &str, acc: &mut Vec<u8>, resets: &mut Vec<Value>) {
     assert!(wait(10, || { let mut s = String::new(); let t = get(&hub).unwrap(); if let Ok(g) = t.inner.try_lock() { if let Some(sc) = g.screens.get(&key) { s = emb::text(&sc.vt) } } s.contains("second") }).await);
     // a client that joins late gets the screen from a snapshot, as a reset to the terminal's size
     let (mut all, mut rs) = (vec![], vec![]); rx.take();
-    assert_eq!(rpc(&hub, "term.snap", json!({"key":key})).await["ok"], true); drain(&rx, &key, &mut all, &mut rs);
+    assert_eq!(rpc(&hub, "term.snap", json!({"key":key})).await["ok"], true); assert!(wait(5, || { drain(&rx, &key, &mut all, &mut rs); !rs.is_empty() }).await);
     assert_eq!(rs, vec![json!([60, 10])]); assert!(String::from_utf8_lossy(&all).contains("hello-term"));
     // unknown terminal; send/close into nothing
     let (ok, o) = tools::call(&hub, "t1", "terminal_send", &json!({"id":"nope","text":"x"})).await.unwrap(); assert!(!ok && o["error"] == "no terminal nope in this thread");
