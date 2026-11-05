@@ -5,6 +5,7 @@ pub mod attach;
 pub mod drafts;
 pub mod composer;
 pub mod edit;
+pub mod md;
 mod glue;
 
 use gpui::{Context, Entity};
