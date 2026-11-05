@@ -218,7 +218,7 @@ pub async fn read(root: &str, req: &Value) -> Value {
     let real_s = real.to_string_lossy().into_owned();
     let run = |args: Vec<&'static str>| { let c = real_s.clone(); async move {
         let a: Vec<&str> = args.clone();
-        match tokio::time::timeout(std::time::Duration::from_millis(1500), git::proc(a[0], &a[1..], &c, &[("GIT_TERMINAL_PROMPT", "0"), ("GIT_OPTIONAL_LOCKS", "0")])).await { Ok(r) if r.code == 0 => Some(r.out), _ => None } } };
+        match tokio::time::timeout(std::time::Duration::from_millis(1500), git::read(a[0], &a[1..], &c, &[("GIT_TERMINAL_PROMPT", "0"), ("GIT_OPTIONAL_LOCKS", "0")])).await { Ok(r) if r.code == 0 => Some(r.out), _ => None } } };
     let now = ms(std::time::SystemTime::now());
     let mut extra: Vec<Value> = vec![];
     if let Some(changes) = run(vec!["git", "-c", "core.fsmonitor=false", "log", "-6", "--format=%h %s"]).await {
@@ -228,7 +228,7 @@ pub async fn read(root: &str, req: &Value) -> Value {
         let r = remote.trim(); let tail = r.strip_prefix("https://github.com/").or_else(|| r.strip_prefix("git@github.com:")).map(|t| t.strip_suffix(".git").unwrap_or(t));
         if let Some(repo) = tail.filter(|t| t.split('/').count() == 2 && t.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-' | '/'))) {
             let c = real_s.clone(); let repo = repo.to_string();
-            let raw = match tokio::time::timeout(std::time::Duration::from_millis(1500), git::proc("gh", &["pr", "list", "--repo", &repo, "--state", "open", "--limit", "12", "--json", "number,title,url"], &c, &[("GIT_TERMINAL_PROMPT", "0")])).await { Ok(r) if r.code == 0 => Some(r.out), _ => None };
+            let raw = match tokio::time::timeout(std::time::Duration::from_millis(1500), git::read("gh", &["pr", "list", "--repo", &repo, "--state", "open", "--limit", "12", "--json", "number,title,url"], &c, &[("GIT_TERMINAL_PROMPT", "0")])).await { Ok(r) if r.code == 0 => Some(r.out), _ => None };
             let mut summary = "Pull requests could not be refreshed. Open the repository to inspect them.".to_string();
             if let Some(Ok(Value::Array(rows))) = raw.map(|r| serde_json::from_str::<Value>(&r)) {
                 summary = if rows.is_empty() { "No open pull requests in the saved snapshot.".into() } else { rows.iter().map(|r| format!("[{} (#{})]({})", st(r, "title").replace(['[', ']', '\n'], " "), r["number"], st(r, "url"))).collect::<Vec<_>>().join("\n\n") };
