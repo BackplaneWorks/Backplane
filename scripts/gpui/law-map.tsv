@@ -351,3 +351,12 @@ law hist_picker_scope rust hist_picker_scope
 law emb_summary_round rust emb_summary_round_trips_and_keeps_command_newlines
 law emb_size_round rust sizes_are_clamped_with_defaults
 law emb_note_none rust emb_text_leaves_blank_rows_out_and_reports_wrap_it
+law qr_format_m rust qr_format_m
+law qr_format_m1 rust qr_format_m1
+law qr_version7_bits rust qr_version7_bits
+law qr_version_fits rust qr_versions
+law qr_version_grows rust qr_versions
+law qr_version_none rust qr_versions
+law qr_gmul_wraps rust qr_gmul_wraps
+law qr_link_escapes rust qr_link_escapes
+law qr_link_none rust qr_link_escapes
