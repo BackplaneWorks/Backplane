@@ -1,0 +1,11 @@
+import {mkdirSync} from 'node:fs';import {makeStandins,startHub,stopHub,client,sleep} from './lib.mjs';import {viewClient} from './view.mjs';
+const REPO='/home/h/Documents/i2cjak/backplane-gpui';const root=REPO+'/build/gpui/perf-run/m2probe';mkdirSync(root,{recursive:true});makeStandins(root+'/bin');
+const h=await startHub({bin:REPO+'/build/gpui/backplane-serve',home:root+'/home2',port:3803,standins:root+'/bin',extraEnv:{FAKE_SECS:'30'}});
+const kinds={};
+const c=await client(h,{onMsg:(o,now,n)=>{const k=o.t+(o.items?'+items':'');kinds[k]=(kinds[k]||0)+1;if(o.t==='changes'||o.t==='log'||o.t==='live')console.log('KEYS',o.t,Object.keys(o),JSON.stringify(o).slice(0,200));if(kinds[k]<=0)console.log('PLAIN',JSON.stringify(o).slice(0,260))}});
+mkdirSync(root+'/proj',{recursive:true});c.send('project.add',{path:root+'/proj'});const pc=await c.until(10000,()=>c.seen.find(x=>x.$==='ProjectCreated'));
+c.send('thread.create',{project:pc.id,title:'t',env:'local'});const th=await c.until(10000,()=>c.seen.find(x=>x.$==='ThreadCreated'));
+const v=await viewClient(h,{mobile:true});const pk={};v.onPush=(x,n)=>{const k=x.t;pk[k]=(pk[k]||0)+1;if(pk[k]<=2)console.log('VIEWPUSH',n,JSON.stringify(x).slice(0,300))};
+await v.open();v.target={kind:'thread',id:th.id};v.viewId='';await v.req('view.open');
+c.send('turn.start',{thread:th.id,text:'go'});await sleep(4000);console.log(kinds,pk);
+stopHub(h);process.exit(0);

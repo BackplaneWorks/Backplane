@@ -30,18 +30,20 @@ export async function startHub({bin,home,port,standins,host,extraEnv={},cap='4G'
  const proc=spawn('systemd-run',args,{env,stdio:['ignore',log?'pipe':'ignore',log?'pipe':'ignore']});
  if(log){const fs=require('node:fs');const o=fs.openSync(log,'a');proc.stdout.on('data',d=>fs.writeSync(o,d));proc.stderr.on('data',d=>fs.writeSync(o,d))}
  const h=host||'127.0.0.1';
- for(let i=0;i<300;i++){try{if((await fetch(`http://${h}:${port}/hello`)).status===200)break}catch{}await sleep(100)}
+ for(let i=0;i<6000;i++){try{if((await fetch(`http://${h}:${port}/hello`)).status===200)break}catch{}await sleep(100)}
  // the hub pid: read hub.lock "<pid> <port> flock"
  let pid=NaN;for(let i=0;i<50;i++){const m=/^(\d+)/.exec(rd(`${home}/hub.lock`));if(m){pid=Number(m[1]);break}await sleep(100)}
+ // COMMON.md rule: verify from the hub's own environ that it runs stand-in agents only, before any turn
+ try{const env=readFileSync(`/proc/${pid}/environ`,'utf8').split('\0');const a=env.find(x=>x.startsWith('BACKPLANE_AGENTS='));if(!a||a.slice(17)!==standins){try{process.kill(pid,'SIGTERM')}catch{}throw Error('hub does not run stand-in agents only: '+a)}}catch(e){if(String(e).includes('stand-in'))throw e;throw Error('cannot verify BACKPLANE_AGENTS of hub '+pid+': '+e)}
  return {proc,pid,home,port,host:h,token:rd(`${home}/token`).trim(),url:`http://${h}:${port}`};
 }
 export function stopHub(h){try{process.kill(h.pid,'SIGTERM')}catch{}}
 // Plain ws client (log + deltas), like agents_load.
-export async function client(h,{view=false,onMsg}={}){
- const ws=new WebSocket(`ws://${h.host}:${h.port}/ws?${view?'view=1&mobile=1&':''}token=${encodeURIComponent(h.token)}`);ws.binaryType='arraybuffer';
+export async function client(h,{view=false,onMsg,since}={}){
+ const ws=new WebSocket(`ws://${h.host}:${h.port}/ws?${view?'view=1&mobile=1&':''}${since!==undefined?`since=${since}&origin=1785000000&`:''}token=${encodeURIComponent(h.token)}`);ws.binaryType='arraybuffer';
  const c={ws,seen:[],replies:new Map(),id:0,bytes:0,msgs:0,counting:true,lastMsg:Date.now()};
  ws.onmessage=e=>{const now=Date.now();const text=typeof e.data==='string';const n=text?e.data.length:e.data.byteLength;let o;try{o=text?JSON.parse(e.data):decode(e.data)}catch{return}
-  if(!o||typeof o!=='object')return;if(c.counting){c.bytes+=n;c.msgs++}c.lastMsg=now;
+  if(!o||typeof o!=='object')return;if(c.counting){c.bytes+=n;c.msgs++}c.lastMsg=now;if(o.t==='log'&&o.origin!==undefined){c.origin=o.origin;c.logSince=o.since}
   for(const it of o.items??[])c.seen.push(it);if(o.t==='reply')c.replies.set(Number(o.id),{now,o});
   onMsg?.(o,now,n)};
  await new Promise((r,j)=>{ws.onopen=r;ws.onerror=j});
