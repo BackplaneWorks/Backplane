@@ -464,43 +464,51 @@ def MBots.bot(+lc: I.Loc, +u: U.Ui, b: BT.Bot) -> J.Json:
 # Rooms and bots elsewhere
 # ------------------------
 
-# a post's author's cat, as the web's room posts draw it (bots.bend WB.post.bot: the bot's look in its mood now); "" for
-# a person, or an author no bot of this hub is
-def MBots.post.cat(m: Maybe<&2, BT.Bot>, +u: U.Ui, +now: Nat) -> J.Json:
+# a post's author's cat, as the web's posts draw it (bots.bend WB.post.k: a person's post has none; a bot of this hub shows
+# its look in its mood now; any other author the cat fl/fm: a room's is look 0 "away", a conversation with a bot on another
+# machine shows that bot's own)
+def MBots.post.cat(m: Maybe<&2, BT.Bot>, +u: U.Ui, +now: Nat, +fl: Nat, +fm: String) -> J.Json:
   match m:
     case Some{+b}:
       MBots.cat(BT.Bot.look(b), B.Mood.bot(U.Ui.state(u), now, b))
     case None{}:
-      J.Json.str("")
+      MBots.cat(fl, fm)
 
-def MBots.post.loc(+lc: I.Loc, p: BT.Post, +u: U.Ui, +now: Nat) -> J.Json:
+def MBots.post.cat.of(+you: Bool, +u: U.Ui, +from: String, +now: Nat, +fl: Nat, +fm: String) -> J.Json:
+  match you:
+    case True{}:
+      J.Json.str("")
+    case False{}:
+      MBots.post.cat(BT.World.find.id(BT.World.bot(M.State.bots(U.Ui.state(u)), from)), u, now, fl, fm)
+
+def MBots.post.loc(+lc: I.Loc, p: BT.Post, +u: U.Ui, +now: Nat, +fl: Nat, +fm: String) -> J.Json:
   match p:
     case BT.Post{i, _, +f, text, _, +at}:
       J.Json.obj([J.KV{"id", J.Json.str(i)}, J.KV{"from", J.Json.str(B.BU.member(u, f))}, J.KV{"text", J.Json.str(text)},
-        J.KV{"cat", MBots.post.cat(BT.World.find.id(BT.World.bot(M.State.bots(U.Ui.state(u)), f)), u, now)},
+        J.KV{"cat", MBots.post.cat.of(String.eq(f, "you"), u, f, now, fl, fm)},
         J.KV{"ago", J.Json.str(I.I18n.ago(lc, now, at))}, J.KV{"mine", J.Json.bool(String.eq(f, "you"))}])
 
 def MBots.post(p: BT.Post, +u: U.Ui, +now: Nat) -> J.Json:
-  MBots.post.loc(I.En{}, p, u, now)
+  MBots.post.loc(I.En{}, p, u, now, 0n, "away")
 
-def MBots.posts.loc(+lc: I.Loc, ps: List<&2, BT.Post>, +u: U.Ui, +now: Nat) -> List<&2, J.Json>:
+def MBots.posts.loc(+lc: I.Loc, ps: List<&2, BT.Post>, +u: U.Ui, +now: Nat, +fl: Nat, +fm: String) -> List<&2, J.Json>:
   match ps:
     case Nil{}:
       Nil{}
     case p <> t:
-      MBots.post.loc(lc, p, u, now) <> MBots.posts.loc(lc, t, u, now)
+      MBots.post.loc(lc, p, u, now, fl, fm) <> MBots.posts.loc(lc, t, u, now, fl, fm)
 
 # a room: who is in it, its posts, the composer ("bfield" rpost, "room-post")
 
 def MBots.posts(ps: List<&2, BT.Post>, +u: U.Ui, +now: Nat) -> List<&2, J.Json>:
-  MBots.posts.loc(I.En{}, ps, u, now)
+  MBots.posts.loc(I.En{}, ps, u, now, 0n, "away")
 
 def MBots.room.view.loc(+lc: I.Loc, +u: U.Ui, r: BT.Room) -> J.Json:
   match r:
     case BT.Room{+i, +n, +m, +c, +d}:
       J.Json.obj([J.KV{"kind", J.Json.str("room")}, J.KV{"id", J.Json.str(i)}, J.KV{"name", J.Json.str(n)},
         J.KV{"members", J.Json.str(B.BU.members(u, BT.Room{i, n, m, c, d}))},
-        J.KV{"posts", J.Json.arr(MBots.posts.loc(lc, B.BU.posts(u, i), u, U.Side.now(u)))},
+        J.KV{"posts", J.Json.arr(MBots.posts.loc(lc, B.BU.posts(u, i), u, U.Side.now(u), 0n, "away"))},
         J.KV{"draft", J.Json.str(B.BU.field(u, "rpost"))}])
 
 def MBots.room.view(+u: U.Ui, r: BT.Room) -> J.Json:
@@ -510,7 +518,7 @@ def MBots.far.m(+lc: I.Loc, m: B.BRow, +u: U.Ui, +id: String, +hd: B.Head) -> J.
   match m:
     case B.BRow{_, n, _, _, _, _, _, _, peer, _}:
       J.Json.obj(List.append(&2, J.KV, [J.KV{"kind", J.Json.str("remote")}, J.KV{"id", J.Json.str(id)}, J.KV{"name", J.Json.str(n)},
-        J.KV{"peer", J.Json.str(peer)}, J.KV{"posts", J.Json.arr(MBots.posts.loc(lc, B.BU.remote.posts(u, id), u, U.Side.now(u)))},
+        J.KV{"peer", J.Json.str(peer)}, J.KV{"posts", J.Json.arr(MBots.posts.loc(lc, B.BU.remote.posts(u, id), u, U.Side.now(u), B.Head.look(hd), B.Head.mood(hd)))},
         J.KV{"draft", J.Json.str(B.BU.field(u, "rtext"))}], MBots.head(lc, hd)))
 
 # a bot only reported by a linked machine: the same header as a bot's

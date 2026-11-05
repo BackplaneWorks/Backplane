@@ -56,6 +56,9 @@ def bot(+h: H.Hubs) -> J.Json:
 def botpost() -> H.Hubs:
   H.Hubs.after(H.Hubs.recv(two(), "box:3787", log([M.RoomPosted{"x2", "r1", "b1", "hi", 0n, 125n}])))
 
+def stranger() -> H.Hubs:
+  H.Hubs.after(H.Hubs.recv(two(), "box:3787", log([M.RoomPosted{"x3", "r1", "Ghost@far", "boo", 0n, 126n}])))
+
 def go(+h: H.Hubs, +a: String, +v: String) -> H.Hubs:
   H.Hubs.after(H.Hubs.act(h, a, v))
 
@@ -171,7 +174,8 @@ def main() -> IO(Unit):
     C.Check.str("a room", J.Json.get_str(bot(go(two(), "room", "box:3787|r1")), "members", ""), "Kit")
     C.Check.str("its posts", strs(J.Json.elems(J.Json.get_obj(bot(go(two(), "room", "box:3787|r1")), "posts")), "from"), "you;")
     C.Check.str("a person's post has no cat", J.Json.get_str(first(J.Json.elems(J.Json.get_obj(bot(go(two(), "room", "box:3787|r1")), "posts"))), "cat", "?"), "")
-    C.Check.str("a bot's post carries its author's cat (look 7, its mood)", Bool.pick(String, String.contains(strs(J.Json.elems(J.Json.get_obj(bot(go(botpost(), "room", "box:3787|r1")), "posts")), "cat"), "7:"), "yes", "no"), "yes")
+    C.Check.str("posts' cats: a person none, a bot its look in its mood", strs(J.Json.elems(J.Json.get_obj(bot(go(botpost(), "room", "box:3787|r1")), "posts")), "cat"), ";7:idle;")
+    C.Check.str("a post from nobody this hub knows shows the room's away cat", strs(J.Json.elems(J.Json.get_obj(bot(go(stranger(), "room", "box:3787|r1")), "posts")), "cat"), ";0:away;")
     C.Check.str("the look picker's numbers", Nat.show(J.Json.get_nat(J.Json.get_obj(tab("settings"), "settings"), "look", 999n)) ++ "/" ++ Nat.show(J.Json.get_nat(J.Json.get_obj(tab("settings"), "settings"), "looks", 0n)), "7/72")
     C.Check.str("back to the list", J.Json.show(bot(go(go(two(), "room", "box:3787|r1"), "select", ""))), "null")
     C.Check.str("the new bot form on its hub", H.Hubs.cur(go(two(), "bot-new", "box:3787|")), "box:3787")
