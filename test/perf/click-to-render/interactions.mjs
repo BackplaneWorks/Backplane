@@ -19,13 +19,18 @@ const row = (id) => `.thread[data-value="${id}"]`;
 // make sure a sidebar row is visible: open the project's shelves (Settled / Older) if needed
 export async function ensureRow(h, id) {
   const p = h.page;
-  for (let i = 0; i < 30; i++) {
+  for (let i = 0; i < 80; i++) {
     if (await p.locator(row(id)).filter({ visible: true }).count()) return true;
-    const shelves = p.locator('button.shelf:not(.open)').filter({ visible: true });
+    // closed shelves (Settled / Older / quiet projects), then closed projects (their disclosure shows chevron-right)
+    let shelves = p.locator('button.shelf:not(.open)').filter({ visible: true });
+    if (!(await shelves.count())) shelves = p.locator('button.project-disclosure:has(svg[data-icon="chevron-right"])').filter({ visible: true });
     const n = await shelves.count();
     if (!n) break;
+    // click it and wait until it really opened (a slow or remote hub redraws late; a second click would shut it)
+    const el = await shelves.nth(0).elementHandle().catch(() => null);
     await shelves.nth(0).click().catch(() => {});
-    await sleep(400);
+    if (el) await p.waitForFunction((e) => !e.isConnected || e.classList.contains('open') || !!e.querySelector('svg[data-icon="chevron-down"]'), el, { timeout: 4000 }).catch(() => {});
+    await sleep(150);
   }
   return !!(await p.locator(row(id)).filter({ visible: true }).count());
 }

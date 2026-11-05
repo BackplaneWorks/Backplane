@@ -57,10 +57,10 @@ export async function open(o) {
     // a person's click: the pointer arrives, rests ~150 ms (hover warming is real), press, release
     async click(sel, { hover = 150 } = {}) {
       const { x, y } = await h.box(sel);
-      if (h.touch) { await page.touchscreen.tap(x, y); return; }
+      if (h.touch) { if (h.press) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] }); await sleep(h.press); await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); } else await page.touchscreen.tap(x, y); return; }
       await page.mouse.move(x - 30, y); await page.mouse.move(x, y, { steps: 2 });
       if (hover) await sleep(hover);
-      await page.mouse.down(); await page.mouse.up();
+      await page.mouse.down(); if (h.press) await sleep(h.press); await page.mouse.up();
     },
     async key(k) { await page.keyboard.press(k); },
     async type(text, delay = 0) { await page.keyboard.type(text, { delay }); },

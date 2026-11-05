@@ -11,8 +11,12 @@ python3 test/perf/click-to-render/fixture.py COPY/events.jsonl > /tmp/fixture.js
 node test/perf/click-to-render/run.mjs --kind web --origin http://127.0.0.1:PORT --token TOKEN \
   --fixture /tmp/fixture.json --reps 8 --cpu 1 --out /tmp/c2r-before
 python3 test/perf/click-to-render/table.py /tmp/c2r-before          # markdown, slowest first
-# desktop app started with --remote-debugging-port=CDP:  --kind desktop --cdp CDP
-# a slower machine: --cpu 4 (Chromium CPU throttling during the measured reps)
+# desktop app started with --remote-debugging-port=CDP --ozone-platform=headless --ozone-override-screen-size=1920,1080
+#   (and its window bounds set first; under Xvfb software GL adds ~40 ms to every frame):  --kind desktop --cdp CDP
+#   Start the app fresh for every run: init scripts from an earlier DevTools session stay in a running app.
+# a slower machine: --cpu 4 (Chromium CPU throttling during the measured reps; setup runs unthrottled)
+# a person's press: --press 80 (ms between press and release; the client may act at the press)
+# the phone arrangement: --device iphone15 (touch, the PHONE list in interactions.mjs)
 # a network between client and hub: node relay.mjs 3910 PORT 100 (RTT 100 ms), then --origin http://127.0.0.1:3910 --rtt 100
 ```
 
@@ -38,8 +42,11 @@ so the sidebar changes as a run goes.
 2. Input: a click is the pointer arriving, resting 150 ms (a person's hover; hover prefetch is real), press, release.
 3. `t0` = the first trusted input event's `timeStamp` (when the browser received it, so a busy main thread counts).
 4. `dom` = the predicate first true (checked on every DOM mutation batch and every animation frame).
-5. `paint` = a task posted from the next `requestAnimationFrame` after `dom`: that frame's style, layout and paint are
-   done. **paint - t0 is the headline number** (input to pixels, minus the compositor's few ms).
+5. `px` = the end of the frame that holds the DOM change (host.js patches inside a rAF callback, so the pixels come
+   at the end of that frame; otherwise the next one), and `paint` = a task posted from the next rAF after `dom`.
+   **px - t0 is the headline number** (input to pixels, minus the compositor's few ms); paint is kept for runs
+   made before px existed. Threads also report `confirm` (the hub's view replaced a cached picture), viewers and
+   menus `content` (the last DOM change or canvas change inside them after they appeared).
 6. `settle` = the last DOM mutation or layout shift once quiet for 300 ms (cap 6 s).
 7. Also: every WebSocket send / receive (the breakdown: pre-send = client handler, hub = send -> first reply, patch =
    last reply -> DOM, frame = DOM -> pixels; "round trip" = a hub reply arrived before the result showed), layout-shift

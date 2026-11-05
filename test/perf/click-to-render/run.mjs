@@ -18,9 +18,9 @@ const pct = (xs, p) => { const s = xs.filter((x) => x != null).sort((x, y) => x 
 const log = (...m) => console.error(`[${new Date().toISOString().slice(11, 19)}]`, ...m);
 import { existsSync } from 'node:fs';
 const prev = existsSync(`${out}/summary.json`) ? JSON.parse(readFileSync(`${out}/summary.json`, 'utf8')) : null; // re-runs of some interactions merge
-const summary = { kind, state, cpu, reps, device, rtt: Number(opt('rtt', '0')), started: new Date().toISOString(), loadStart: (await import('node:os')).loadavg(), label: opt('label', ''), rows: prev ? prev.rows.filter((r) => !list.some((x) => x.id === r.id)) : [] };
+const summary = { kind, state, cpu, reps, device, press: Number(opt('press', '0')), rtt: Number(opt('rtt', '0')), started: new Date().toISOString(), loadStart: (await import('node:os')).loadavg(), label: opt('label', ''), rows: prev ? prev.rows.filter((r) => !list.some((x) => x.id === r.id)) : [] };
 let h = await open({ kind, origin: opt('origin'), token: opt('token'), cdp: opt('cdp'), device });
-h.S = S;
+h.S = S; h.press = Number(opt('press', '0')); // ms between press and release (a person: ~80)
 for (const it of list) {
   const runs = [];
   try {
@@ -45,7 +45,7 @@ for (const it of list) {
   const warm = runs.filter((r) => !r.cold && !r.error && r.paint != null), cold = runs.find((r) => r.cold && !r.error);
   const m = (k, p = 0.5) => pct(warm.map((r) => r[k]), p);
   const row = { id: it.id, what: it.what, n: warm.length, errors: runs.filter((r) => r.error).length,
-    paint50: m('paint'), paint95: m('paint', 0.95), content50: m('content'), content95: m('content', 0.95), confirm50: m('confirm'), confirm95: m('confirm', 0.95), dom50: m('dom'), settle50: m('settle'), settle95: m('settle', 0.95),
+    paint50: m('paint'), paint95: m('paint', 0.95), px50: m('px'), px95: m('px', 0.95), content50: m('content'), content95: m('content', 0.95), confirm50: m('confirm'), confirm95: m('confirm', 0.95), dom50: m('dom'), settle50: m('settle'), settle95: m('settle', 0.95),
     cold: cold?.paint ?? null, coldSettle: cold?.settle ?? null,
     send50: m('send'), recv50: m('recv1'), recvN50: m('recvN'), nRecv50: m('nRecv'), recvKB50: Math.round((m('recvBytes') || 0) / 1024),
     shift50: m('shift'), shiftMax: Math.max(0, ...warm.map((r) => r.shift || 0)), late50: m('nLate'), lateMax50: m('lateMax'),
