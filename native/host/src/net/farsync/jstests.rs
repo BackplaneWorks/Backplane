@@ -113,7 +113,7 @@ fn line(v: Value) -> String { v.to_string() }
     let head_of = |p: &std::path::Path| -> u64 { std::fs::read_to_string(p).unwrap().lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).filter_map(|o| o["head"].as_u64()).last().unwrap_or(0) };
     let (h2, h3) = (head_of(&j2.join(format!("far/{link2}.jsonl"))), head_of(&j2.join(format!("far/{link3}.jsonl"))));
     assert!(h2 > 0 && h3 > 0, "heads {h2} {h3}");
-    let asked: Arc<Mutex<Vec<(String, u64)>>> = Arc::new(Mutex::new(vec![]));
+    let asked: Arc<Mutex<Vec<(String, u64, String)>>> = Arc::new(Mutex::new(vec![]));
     let stub = tokio::net::TcpListener::bind(("127.0.0.1", 3918)).await.unwrap(); let a2 = asked.clone();
     tokio::spawn(async move { use tokio::io::{AsyncReadExt, AsyncWriteExt}; loop {
         let Ok((mut s, _)) = stub.accept().await else { return }; let a3 = a2.clone();
@@ -124,7 +124,7 @@ fn line(v: Value) -> String { v.to_string() }
                     let len = head.lines().find_map(|l| l.to_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse::<usize>().unwrap_or(0))).unwrap_or(0);
                     if buf.len() >= at + 4 + len { let peer = head.lines().find_map(|l| l.strip_prefix("X-Backplane-Peer: ")).unwrap_or("").to_string();
                         let since = serde_json::from_slice::<Value>(&buf[at + 4..]).ok().and_then(|v| v["since"].as_u64()).unwrap_or(u64::MAX);
-                        a3.lock().unwrap().push((peer, since)); break } } }
+                        a3.lock().unwrap().push((peer, since, String::from_utf8_lossy(&buf[at + 4..]).chars().take(300).collect())); break } } }
             let _ = s.write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 9\r\nConnection: close\r\n\r\nnot ready").await; }); } });
     let mut seed = vec![];
     for l in [link2, link3] {
@@ -135,10 +135,10 @@ fn line(v: Value) -> String { v.to_string() }
     std::fs::write(j2.join("events.jsonl"), seed.join("\n") + "\n").unwrap();
     let mut js2 = tokio::process::Command::new(&bin).args(["--home", j2.to_str().unwrap(), "--port", "3917", "--host", "127.0.0.1", "--no-tailscale", "--foreground"])
         .env("BACKPLANE_AGENTS", &standins).env("BACKPLANE_NO_UPDATE", "1").env("HOME", &root).stdout(Stdio::null()).stderr(Stdio::null()).kill_on_drop(true).spawn().expect("start the second JS hub");
-    let both = wait_for(90, || { let g = asked.lock().unwrap(); g.iter().any(|(p, _)| p == link2) && g.iter().any(|(p, _)| p == link3) }).await;
+    let both = wait_for(90, || { let g = asked.lock().unwrap(); g.iter().any(|(p, _, _)| p == link2) && g.iter().any(|(p, _, _)| p == link3) }).await;
     let got = asked.lock().unwrap().clone();
     assert!(both, "the second JS hub pulled both links (it asked: {got:?})");
-    let since = |l: &str| got.iter().find(|(p, _)| p == l).map(|x| x.1).unwrap();
+    let since = |l: &str| got.iter().find(|(p, _, _)| p == l).map(|x| x.1).unwrap();
     assert_eq!(since(link3), h3, "CONTROL: the Bend hub pulls from the head of the file the Bend hub wrote");
     assert_eq!(since(link2), h2, "the Bend hub read the mirror file Rust wrote (it pulls from its head {h2}, not from 0): asked {got:?}");
     let _ = js2.kill().await;
