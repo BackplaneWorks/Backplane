@@ -378,8 +378,8 @@ mod bounded_tests {
                     for id in ids.iter().skip(start).take(8) {
                         let actual=plan.project(id,&mut |_,rows|((row_offset..(row_offset+6).min(rows.len())).collect(),Value::Null)).unwrap();
                         let mut expected=full.iter().find(|p|p["id"]==format!("h|{id}")).unwrap().clone();
-                        expected["settledCount"]=json!(expected["settled"].as_array().unwrap().len());
-                        expected["archivedCount"]=json!(expected["archived"].as_array().unwrap().len());
+                        expected["settledCount"]=json!(expected["settled"].as_array().unwrap().iter().filter(|r|r["depth"]==0).count());
+                        expected["archivedCount"]=json!(expected["archived"].as_array().unwrap().iter().filter(|r|r["depth"]==0).count());
                         for (field,page) in [("threads","threadsPage"),("snoozed","snoozedPage"),("settled","settledPage"),("archived","archivedPage")] {
                             expected[field]=json!(expected[field].as_array().unwrap().iter().skip(row_offset).take(6).cloned().collect::<Vec<_>>()); expected[page]=Value::Null;
                         }

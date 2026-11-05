@@ -68,8 +68,17 @@ pub fn recent(st: &State,p: &Value) -> Option<Value> {
     }
     session["drafts"].as_object_mut()?.entry("@sync".to_string()).or_insert(json!("1"));
     let action=text(p,"action"); let value=text(p,"value"); let hub=text(p,"hub");
-    // Other actions are owned by composer/commands/select and are not claimed by this slice.
-    match action {
+    // The shared pure dispatcher owns composer/commands/select; this root owns private sidebar paging.
+    let mut adopted=p.clone(); adopted["session"]=session.clone();
+    let mut cmds=vec![];
+    let dispatched=crate::session::dispatch::dispatch(&crate::session::dispatch::StateFacts(st),&adopted);
+    if let Some(out)=dispatched {
+        session=out.session; cmds=out.cmds;
+        if let Some(target)=out.next_target {
+            return Some(json!({"remoteReady":false,"nextTarget":target,"session":session,"cmds":cmds,
+                "local":p.get("local").cloned().unwrap_or(json!({"local.native.sidebar.pages":"","local.native.sidebar.context":"","local.native.sidebar.key":"","local.native.sidebar.budget":""}))}));
+        }
+    } else { match action {
         "" | "native-sidebar-page" => {},
         "flag" | "side-older" => {
             let raw=value.strip_prefix(&format!("{hub}|" )).unwrap_or(value);
@@ -80,7 +89,7 @@ pub fn recent(st: &State,p: &Value) -> Option<Value> {
             let was=flag(&session,key); session["open"][key]=json!(!was);
         },
         _ => return None,
-    }
+    } }
     let local_mode=text(&session["drafts"],"@local.view");
     let mode=if ["projects","active"].contains(&local_mode) { local_mode } else if setting(st,"sidebar.view")=="active" { "active" } else { "projects" };
     // Active list and search are separate port slices; claiming them would hide projects silently.
@@ -111,7 +120,7 @@ pub fn recent(st: &State,p: &Value) -> Option<Value> {
     let mut overlay=shown.clone();
     for project in overlay["projects"].as_array_mut().unwrap() { project.as_object_mut().unwrap().remove("machine"); }
     let window=json!({"contextMessages":[],"messageIds":[],"historyUnits":[],"partial":[],"ids":[],"anchor":{"id":"","offset":0},"older":"","olderNext":"","hasMore":false,"remaining":0,"newer":0,"total":0});
-    Some(json!({"remoteReady":true,"shown":shown,"session":session,"cmds":[],"overlay":{"j":overlay,"key":hub,"name":hub.split(':').next().unwrap_or("")},"window":window,"local":ns.local()}))
+    Some(json!({"remoteReady":true,"shown":shown,"session":session,"cmds":cmds,"overlay":{"j":overlay,"key":hub,"name":hub.split(':').next().unwrap_or("")},"window":window,"local":ns.local()}))
 }
 
 #[cfg(test)]
@@ -205,5 +214,20 @@ mod state_tests {
         let out=recent(&st,&p).unwrap(); assert_eq!(out["shown"]["sidebarPages"][0]["projects"]["offset"],8);
         assert_eq!(out["shown"]["projects"].as_array().unwrap().len(),4); assert_eq!(out["cmds"],json!([])); assert_eq!(seq,st.seq);
         p["value"]=json!("forged"); assert_eq!(recent(&st,&p).unwrap()["refused"],true);
+    }
+}
+
+#[cfg(test)]
+mod dispatcher_tests {
+    use super::*;
+    #[test] fn recent_dispatches_selection_without_drawing_or_starting_the_target() {
+        let mut st=State::new(); st.lean=true;
+        st.apply(&json!({"$":"ThreadCreated","id":"t","project":"p","title":"T","at":1}));
+        let p=json!({"target":{"kind":"recent","id":""},"nativeSidebar":1,"hub":"h","action":"select","value":"t",
+            "session":{"rid":1,"sel":"","drafts":{},"open":{},"panel":false}});
+        let o=recent(&st,&p).unwrap();
+        assert_eq!(o["remoteReady"],false); assert_eq!(o["nextTarget"],json!({"kind":"thread","id":"t"}));
+        assert_eq!(o["session"]["sel"],"t"); assert!(o.get("shown").is_none()); assert!(o["local"].is_object());
+        assert!(o["cmds"].as_array().unwrap().iter().all(|c|!text(c,"text").contains("turn.start")));
     }
 }
