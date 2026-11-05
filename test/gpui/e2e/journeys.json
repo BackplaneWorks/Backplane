@@ -35,6 +35,9 @@
   {"id": "reconnect", "item": "Reconnect after sleep", "measure": ["click"],
    "steps": [{"do": "select_thread", "index": 0}, {"do": "sleep_network", "secs": 45}, {"do": "wake_network"}, {"do": "expect", "reconnected_within_s": 10, "no_lost_items": true}],
    "needs": ["select", "network_sleep"]},
+  {"id": "dead-controls", "item": "No dead buttons", "measure": ["click", "dead"],
+   "steps": [{"do": "select_thread", "index": 0}, {"do": "click_every_control", "scope": "screen"}],
+   "needs": ["select", "controls"]},
   {"id": "long-session", "item": "Long session with 20 simulated agents", "measure": ["stream", "scroll", "layout", "memory"],
    "steps": [{"do": "agents", "count": 20}, {"do": "session", "minutes": 30, "actions": "random_walk"}, {"do": "expect", "no_growth_rss": true}],
    "needs": ["select", "scroll", "popup", "agents", "memory"]}
