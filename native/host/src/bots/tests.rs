@@ -585,3 +585,71 @@ fn unclock(s: &str) -> String {
     }
     o
 }
+
+mod mail_tests {
+    use super::super::mail::*;
+    use super::*;
+    fn o(f: &str, k: &str, r: &str) -> Origin { Origin::new(f, k, r) }
+    #[test] fn mail_route_names_the_conversation() {
+        // Mail.route_kind: the conversation a mail belongs to, by the origin's kind
+        assert_eq!(route(&o("thread:b", "thread", ""), "bot:a"), "pair:bot:a|thread:b");
+        assert_eq!(route(&o("bot:a", "bot", ""), "bot:b"), "pair:bot:a|bot:b");
+        assert_eq!(route(&o("x", "room", "lab"), "room:lab"), "room:lab");
+        assert_eq!(route(&o("x", "room", "dm:ada:you"), "room:dm:ada:you"), "pair:bot:ada|person");
+        assert_eq!(route(&o("thread:t1", "launch", ""), "bot:a"), "launch:t1");
+        assert_eq!(route(&o("thread:t1", "task", ""), "bot:a"), "launch:t1");
+        assert_eq!(route(&o("thread:t1", "wake", ""), "bot:a"), "launch:t1");
+        assert_eq!(route(&o("thread:t1", "wake", "w9"), "bot:a"), "wake:w9");
+        assert_eq!(route(&o("routine:r", "routine", "r"), "bot:a"), "routine:r");
+        assert_eq!(route(&o("hook:h", "hook", "h"), "bot:a"), "hook:h");
+        assert_eq!(route(&o("peer:m2", "peer", "x"), "bot:a"), "peer:m2:x");
+        assert_eq!(route(&o("backplane", "deploy", ""), "bot:a"), "system:a");
+        assert_eq!(route(&o("person", "person", ""), "bot:a"), "");
+    }
+    #[test] fn mail_classify_reads_where_a_message_came_from() {
+        assert_eq!(classify("", "m1", false, "[message from you in #lab]\nx"), o("person", "room", "lab"));
+        assert_eq!(classify("", "m1", false, "[message from ada in #lab]\nx"), o("bot:ada", "room", "lab"));
+        assert_eq!(classify("", "m1", false, "[message from ada]\nx"), o("bot:ada", "bot", ""));
+        assert_eq!(classify("", "m1", false, "[message from person@m2]\nx"), o("person", "person", ""));
+        assert_eq!(classify("", "m1", false, "[message from kit@m2]\nx"), o("peer:kit@m2", "peer", ""));
+        assert_eq!(classify("", "m1", false, "[routine: later]\nx"), o("routine:later", "routine", "later"));
+        assert_eq!(classify("", "m1", false, "[webhook: gh]\nx"), o("hook:gh", "hook", "gh"));
+        assert_eq!(classify("", "m1", false, "Backplane restarted while you were working"), o("backplane", "carry", ""));
+        assert_eq!(classify("", "t:backplane:l1", true, "x"), o("backplane", "lost", ""));
+        assert_eq!(classify("deploy", "m1", true, "x"), o("backplane", "deploy", ""));
+        assert_eq!(classify("lock:merge", "m1", true, "x"), o("backplane", "lock", "merge"));
+        assert_eq!(classify("t9", "t:t9:td-1", false, "x"), o("thread:t9", "task", ""));
+        assert_eq!(classify("t9", "t:t9:lr-1", false, "x"), o("thread:t9", "launch", ""));
+        assert_eq!(classify("", "m1", false, "hello"), o("person", "person", ""));
+        assert_eq!(classify("", "m1", true, "hello"), o("backplane", "system", ""));
+        assert_eq!(classify("bot:ada", "m1", false, "hello"), o("bot:ada", "bot", ""));
+    }
+    #[test] fn mail_want_head_and_sizes() {
+        let f = |k: &str, t: &str| flags(&o("x", k, ""), t);
+        assert_eq!(want("room", "", &f("room", "t")), "fyi"); assert_eq!(want("routine", "", &f("routine", "t")), "act"); assert_eq!(want("launch", "", &f("launch", "it completed")), "fyi");
+        assert_eq!(want("launch", "", &f("launch", "failed")), "act"); assert_eq!(want("person", "", &f("person", "t")), "act"); assert_eq!(want("task", "", &f("task", "t")), "act");
+        assert_eq!(want("room", "act", &f("room", "t")), "act"); assert_eq!(want("routine", "fyi", &f("routine", "t")), "fyi");
+        assert_eq!(head("a\tb\r\nrest"), "a b "); assert_eq!(head(&"x".repeat(200)).len(), 160); assert_eq!(bytes("é€"), 5);
+    }
+    #[test] fn mail_body_line_is_what_bend_writes_and_reads_back() {
+        let b = Body { conv: Conv { id: "room:r1".into(), subject: "lab".into(), kind: "room".into(), parts: vec!["bot:b".into(), "person".into()], project: String::new(), tags: vec![], made: 5, last: 5, n: 0 },
+            mail: Hdr { id: "p1".into(), conv: "room:r1".into(), from: "person".into(), to: "room:r1".into(), kind: "room".into(), r#ref: "r1".into(), want: "fyi".into(), head: "h".into(), size: 3, at: 5 }, text: "a\"b\\c\nd\u{1}é".into() };
+        let line = body_line(&b);
+        assert_eq!(line, "{\"v\":1,\"conv\":{\"id\":\"room:r1\",\"subject\":\"lab\",\"kind\":\"room\",\"parts\":[\"bot:b\",\"person\"],\"project\":\"\",\"tags\":[],\"made\":5,\"last\":5,\"n\":0},\"mail\":{\"id\":\"p1\",\"conv\":\"room:r1\",\"from\":\"person\",\"to\":\"room:r1\",\"kind\":\"room\",\"ref\":\"r1\",\"want\":\"fyi\",\"head\":\"h\",\"size\":3,\"at\":5},\"text\":\"a\\\"b\\\\c\\nd\\u0001é\"}\n");
+        assert_eq!(body_parse(&line), Some(b));
+        assert_eq!(body_parse("{\"v\":2}"), None); assert_eq!(pct("pair:bot:b1|bot:b2"), "pair%3Abot%3Ab1%7Cbot%3Ab2"); assert_eq!(pct("é"), "%C3%A9");
+    }
+    #[tokio::test] async fn mail_recover_gives_a_journaled_body_its_header_once() {
+        let (hub, bots, _r) = start("mail-recover", "").await;
+        let b = Body { conv: Conv { id: "routine:r9".into(), subject: "s".into(), kind: "routine".into(), parts: vec!["routine:r9".into(), "bot:x".into()], project: String::new(), tags: vec![], made: 7, last: 7, n: 0 },
+            mail: Hdr { id: "m-lost".into(), conv: "routine:r9".into(), from: "routine:r9".into(), to: "bot:x".into(), kind: "routine".into(), r#ref: "r9".into(), want: "act".into(), head: "h".into(), size: 1, at: 7 }, text: "t".into() };
+        store::append(&hub.cfg.home, &b).unwrap();
+        // a torn last write is cut off by the next append, and does not count
+        { use std::io::Write; let mut f = std::fs::OpenOptions::new().append(true).open(store::path(&hub.cfg.home, "routine:r9")).unwrap(); f.write_all(b"{\"v\":1,\"conv").unwrap(); }
+        assert_eq!(bots.mail_recover().await, 1);
+        let ev = log(&hub); assert_eq!(ev.iter().filter(|e| e["$"] == "MailPosted" && e["id"] == "m-lost").count(), 1); assert!(ev.iter().any(|e| e["$"] == "ConvSet" && e["id"] == "routine:r9"));
+        assert_eq!(bots.mail_recover().await, 0, "once");
+        let mut b2 = b.clone(); b2.mail.id = "m-two".into(); assert_eq!(store::append(&hub.cfg.home, &b2), Ok(true), "the torn line was repaired");
+        assert_eq!(store::read(&store::path(&hub.cfg.home, "routine:r9")).len(), 2);
+    }
+}

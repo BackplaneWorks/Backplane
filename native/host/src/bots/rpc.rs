@@ -71,6 +71,7 @@ impl Bots {
         let b = Arc::new(Bots { hub: hub.clone(), world: Mutex::new(w), inbox, router: Default::default() });
         hub.register_rpc(Arc::new(Rpc(b.clone())));
         super::api::register(&hub, &b);
+        let me = b.clone(); tokio::spawn(async move { let n = me.mail_recover().await; if n > 0 { eprintln!("bots: {n} mail header(s) recovered from the journal") } });
         b
     }
     /// The world caught up with the log; the guard is the lock a request holds from decision to commit.
