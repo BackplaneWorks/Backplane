@@ -543,3 +543,30 @@ mod standin_tests {
     }
 }
 
+
+/// The laws of src/core (LAWS.bend), one test each, named as the law: scripts/gpui/law-map.tsv maps them.
+#[cfg(test)]
+mod laws {
+    use super::*;
+    fn turn_in() -> TurnIn { TurnIn { thread: "t1".into(), cwd: "/work/p".into(), home: "/nonexistent-agy-home".into(), model: "gm".into(), session: "S9".into(), runtime: "approval-required".into(), text: "do it".into(), mcp_url: "http://x/mcp".into(), ..Default::default() } }
+    #[test] fn agy_mode_supervised_asks() { assert_eq!(mode_k(0), "default"); assert_eq!(mode("approval-required"), "default") }
+    #[test] fn agy_mode_full_allows() { assert_eq!(mode_k(3), "yolo"); assert_eq!(mode("full-access"), "yolo") }
+    #[test] fn agy_default_api_key() { assert_eq!(method(""), "gemini-api-key") }
+    #[test] fn agy_google_warns() { assert_eq!(note_k(3), warn()) }
+    #[test] fn agy_callback_needs_signin() { for b in ["", "http://127.0.0.1:1/?code=a&state=b", "x"] { assert!(!callback_ok("", b)) } }
+    /// Stop on an Antigravity thread is AgentStop alone: nothing is written to the process first.
+    #[test] fn interrupt_antigravity_stops() { let mut d = driver("antigravity").unwrap().driver; d.start(&turn_in()); assert!(d.on_stop().is_empty()) }
+    /// An Antigravity thread's turn is one run of Google's agent, through the runner script, with the thread's cwd, model, session, mode and text (over ACP).
+    #[test] fn antigravity_run_turn() {
+        let made = driver("antigravity").unwrap(); assert_eq!(made.cli, "sh"); assert!(driver("muse").is_none());
+        let mut d = made.driver; let a = turn_in();
+        let v = d.argv(&a); assert_eq!(v[0], "/nonexistent-agy-home/antigravity/agy.sh"); assert_eq!(v[3], "gemini-api-key");
+        assert!(d.start(&a)[0].contains("\"initialize\""));
+        let feed = |d: &mut Box<dyn Driver>, l: &str| d.on_line(&serde_json::from_str(l).unwrap());
+        feed(&mut d, r#"{"id":1,"result":{}}"#); let r = feed(&mut d, r#"{"id":4,"result":{}}"#);
+        assert!(r.send[0].contains("\"session/resume\"") && r.send[0].contains("\"S9\"") && r.send[0].contains("\"cwd\":\"/work/p\""));
+        let r = feed(&mut d, r#"{"id":2,"result":{}}"#); assert!(r.send[0].contains("\"modeId\":\"default\""));
+        let r = feed(&mut d, r#"{"id":15,"result":{}}"#); assert!(r.send[0].contains("\"value\":\"gm\""));
+        let r = feed(&mut d, r#"{"id":16,"result":{}}"#); assert!(r.send[0].contains("session/prompt") && r.send[0].contains("do it"));
+    }
+}

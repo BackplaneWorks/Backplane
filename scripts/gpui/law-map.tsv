@@ -360,3 +360,17 @@ law qr_version_none rust qr_versions
 law qr_gmul_wraps rust qr_gmul_wraps
 law qr_link_escapes rust qr_link_escapes
 law qr_link_none rust qr_link_escapes
+# prov-msp: Muse (MSP) and Antigravity (ACP), native/host/src/agents/providers/{msp,muse,agy}.rs
+ported src/core/msp.bend
+ported src/core/agy.bend
+law msp_mode_supervised_asks rust msp_mode_supervised_asks
+law msp_mode_full_allows rust msp_mode_full_allows
+law interrupt_muse_stops rust interrupt_muse_stops
+law muse_run_turn rust muse_run_turn
+law agy_mode_supervised_asks rust agy_mode_supervised_asks
+law agy_mode_full_allows rust agy_mode_full_allows
+law agy_default_api_key rust agy_default_api_key
+law agy_google_warns rust agy_google_warns
+law agy_callback_needs_signin rust agy_callback_needs_signin
+law interrupt_antigravity_stops rust interrupt_antigravity_stops
+law antigravity_run_turn rust antigravity_run_turn
