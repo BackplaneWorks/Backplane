@@ -19,7 +19,8 @@ Paths resolve against the manifest's folder. Thresholds (all stated here, none h
                a dark logo on a light theme (or the reverse) fails                    -> FAIL wrong colours
   cat        : >= 2 distinct non-background colour bins (32 levels/channel, each >= 1% of the
                non-background pixels) and a non-background dominant colour that is > 24 from the background -> FAIL flat
-  reference  : both regions resized to 64x64: mean abs diff (0..1) <= 0.12 (logo) / 0.18 (cat: animation phase) -> FAIL differs
+  reference  : form A too: mean RGB of the non-background pixels within 24/255 of the reference's (a recoloured or
+               channel-rotated cat fails); both regions resized to 64x64: mean abs diff (0..1) <= 0.12 (logo) / 0.18 (cat: animation phase) -> FAIL differs
   form B only: mean RGB of non-background pixels within 24/255 of the web's; native Laplacian variance
                >= 0.5x the web's (a blurred raster fails)                             -> FAIL colour / blurry
 """
@@ -106,7 +107,10 @@ def run_item(item, base, default_scheme="dark"):
         r = check_region(im, kind, theme)
         if r: return iid, r
         if item.get("reference"):
-            diff = np.abs(small(im) - small(load(p(item["reference"])))).mean()
+            ref = load(p(item["reference"]))
+            d = np.abs(mean_rgb(arr(im)) - mean_rgb(arr(ref))).max()
+            if d > 24: return iid, f"colour: mean RGB of the foreground differs by {d:.0f}/255 from the reference (channels rotated or recoloured?)"
+            diff = np.abs(small(im) - small(ref)).mean()
             if diff > item.get("max_diff", MAX_DIFF[kind]): return iid, f"differs from the reference: mean abs diff {diff:.3f}"
         return iid, ""
     except Exception as e:
@@ -150,6 +154,8 @@ def selftest_bare():
             ({"id": "missing file", "kind": "logo", "theme": "dark", "image": "nope.png"}, False),
             ({"id": "cat on a flat fill", "kind": "cat", "theme": "dark", "image": save("e.png", Image.new("RGB", (96, 96), (214, 150, 80)))}, False),
             ({"id": "box outside image", "kind": "logo", "theme": "dark", "image": "a.png", "box": [50, 50, 200, 200]}, False),
+            ({"id": "good cat vs its own reference", "kind": "cat", "theme": "dark", "image": "c.png", "reference": "c.png"}, True),
+            ({"id": "cat with rotated channels vs reference", "kind": "cat", "theme": "dark", "image": save("g.png", Image.merge("RGB", tuple(synth_cat().split()[i] for i in (2, 0, 1)))), "reference": "c.png"}, False),
             ({"id": "cat differs from reference", "kind": "cat", "theme": "dark", "image": "c.png", "reference": save("f.png", synth_logo("light"))}, False),
         ]
         ok = True
