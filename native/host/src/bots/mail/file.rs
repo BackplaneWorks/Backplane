@@ -105,3 +105,24 @@ impl Bots {
             json!({"$":"SettingSet","key":format!("owner.mail.pending.{key}"),"value":r,"at":m.at})]
     }
 }
+
+impl Bots {
+    /// MailStore.recover + Hub.mail.recovered: a body that reached the journal but whose header never reached the log (a crash between the two) gets its
+    /// ConvSet (if the conversation is unknown) and MailPosted now. Re-seeding the owner's tickets for recovered mail is triage's (slice 3).
+    pub async fn mail_recover(&self) -> usize {
+        let w = self.world().await; let dir = self.hub.cfg.home.join("mail");
+        let bodies = tokio::task::spawn_blocking(move || {
+            let mut names: Vec<_> = std::fs::read_dir(&dir).map(|d| d.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.extension().map_or(false, |x| x == "jsonl")).collect()).unwrap_or_default(); names.sort();
+            names.iter().flat_map(|p| store::read(p)).collect::<Vec<Body>>()
+        }).await.unwrap_or_default();
+        let (mut ev, mut seen, mut convs): (Vec<Value>, std::collections::HashSet<String>, std::collections::HashSet<String>) = (vec![], Default::default(), Default::default());
+        for b in &bodies {
+            if w.mail.has(&b.mail.id) || !seen.insert(b.mail.id.clone()) { continue }
+            if w.mail.conv(&b.conv.id).id.is_empty() && convs.insert(b.conv.id.clone()) { ev.push(conv_event(&b.conv)) }
+            ev.push(header_event(&b.mail));
+        }
+        let n = ev.iter().filter(|e| e["$"] == "MailPosted").count();
+        if n > 0 && self.hub.commit_many(&ev).await.is_err() { return 0 }
+        n
+    }
+}
