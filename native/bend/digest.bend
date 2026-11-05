@@ -27,11 +27,15 @@ def Dg.ids(+es: List<&2, M.Entry>) -> List<&2, J.Json>:
     case Nil{}: Nil{}
     case e <> t: Dg.entry.id(e) <> Dg.ids(t)
 
+def Dg.project(+p: M.Project) -> J.Json:
+  match p:
+    case M.Project{id, title, root, _, removed}:
+      J.Json.obj([J.KV{"id", J.Str{id}}, J.KV{"title", J.Str{title}}, J.KV{"root", J.Str{root}}, J.KV{"removed", J.Json.bool(removed)}])
+
 def Dg.projects(+xs: List<&2, Sigma<&2, &2, String, _ => M.Project>>) -> List<&2, J.Json>:
   match xs:
     case Nil{}: Nil{}
-    case (_, M.Project{id, title, root, _, removed}) <> t:
-      J.Json.obj([J.KV{"id", J.Str{id}}, J.KV{"title", J.Str{title}}, J.KV{"root", J.Str{root}}, J.KV{"removed", J.Json.bool(removed)}]) <> Dg.projects(t)
+    case (_, p) <> t: Dg.project(p) <> Dg.projects(t)
 
 def Dg.thread(+st: M.State, +t: M.Thread) -> J.Json:
   match t:
@@ -70,9 +74,12 @@ def Dg.items(xs: List<&2, String>, acc: List<&2, J.Json>) -> List<&2, J.Json>:
     case Nil{}: List.reverse(&2, J.Json, acc)
     case x <> t: Dg.items(t, Dg.item(J.Json.parse(x), acc))
 
-def Dg.apply(+st: M.State, js: List<&2, J.Json>) -> M.State:
-  match U.Ui.decode.all(js, U.Decoded{Nil{}, 0n}):
+def Dg.apply.d(+d: U.Decoded, +st: M.State) -> M.State:
+  match d:
     case U.Decoded{cs, _}: M.State.replay(List.reverse(&2, M.Change, cs), st)
+
+def Dg.apply(+st: M.State, js: List<&2, J.Json>) -> M.State:
+  Dg.apply.d(U.Ui.decode.all(js, U.Decoded{Nil{}, 0n}), st)
 
 def Dg.read.k(r: File & Result<&1, &1, U32 & String, String>) -> IO(String):
   (f, res) = r
