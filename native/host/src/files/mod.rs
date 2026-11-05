@@ -192,8 +192,9 @@ mod boundary_tests {
         for thread in ["", "nope", "gone", "rm", "badwt", "badroot", "priv", "project-home-", "project-home-nope", "project-home-p2", "project-home-p3"] {
             for m in ROUTES {
                 if matches!(*m, "pdf.page" | "file.open") { continue } // explicit-path viewer APIs, not thread lookups (the doc's /img note)
+                if *m == "review.comment" && thread.is_empty() { continue } // judged first: an empty thread is a malformed comment, not a folder (Rv.comment.k)
                 let Some(h) = hub.rpc_for(m) else { panic!("{m} is not registered") };
-                let r = h.call(&hub, &who, &json!(9), m, &json!({"thread":thread,"path":"a.txt","action":"commit","message":"x","from":"0","to":"-1","a":"x","b":"y","ref":"HEAD","n":1})).await;
+                let r = h.call(&hub, &who, &json!(9), m, &json!({"thread":thread,"path":"a.txt","action":"commit","message":"x","from":"0","to":"-1","a":"x","b":"y","ref":"HEAD","n":1,"op":"add","text":"x"})).await;
                 assert_eq!(r, vec![refusal.clone()], "{m} for {thread:?}");
             }
         }
