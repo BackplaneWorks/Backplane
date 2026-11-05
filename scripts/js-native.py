@@ -307,6 +307,10 @@ BYTE_ESC, BYTE_STR = byte_loop("esc"), byte_loop("str")
 MEMO2 = (("Subs.aggs", r"\$\$\$\$047core\$047subs\$058Subs\$aggs\$", "_st_0", "_th_0"),)
 # pure defs of one object kept by identity; each a def of exactly this parameter, found once
 MEMO1 = (("SubHistory.own", r"\$subagent\$045history\$058SubHistory\$own\$", "_rows_0"),)
+# pure defs of two objects (by identity) and two Strings/numbers; found once
+MEMO4 = (("Subs.rows", r"\$\$\$\$047core\$047subs\$058Subs\$rows\$", "_st_0", "_info_0", "_th_0", "_now_0"),)
+def memo4_rx(entry, a, b, c, d):
+    return re.compile(r"function (" + entry + r")\(" + a + "," + b + "," + c + "," + d + r"\)\{")
 def memo1_rx(entry, a):
     return re.compile(r"function (" + entry + r")\(" + a + r"\)\{")
 def memo2_rx(entry, a, b):
@@ -491,6 +495,10 @@ for name, entry, a, b in MEMO2:
     found[name] = sum(len(memo2_rx(entry, a, b).findall(s)) for s in srcs.values()) if server else 0
     if server and found[name] != 1:
         sys.exit(f"js-native: {name} found {found[name]} times as a def of ({a}, {b}), not once")
+for name, entry, a, b, c, d in MEMO4:
+    found[name] = sum(len(memo4_rx(entry, a, b, c, d).findall(s)) for s in srcs.values()) if server else 0
+    if server and found[name] != 1:
+        sys.exit(f"js-native: {name} found {found[name]} times as a def of ({a}, {b}, {c}, {d}), not once")
 found["Tree.children"] = sum(len(TREE_KIDS.findall(s)) for s in srcs.values()) if server else 0
 if server and found["Tree.children"] != 1:
     sys.exit(f"js-native: Tree.children found {found['Tree.children']} times, not once")
@@ -608,6 +616,11 @@ for f, s in srcs.items():
             memos += len(rx.findall(s))
             s = rx.sub(lambda m: 'function %s(%s,%s){return __bpMemo2(%s,%s,%s,%s$raw)}function %s$raw(%s,%s){' %
                        (m.group(1), a, b, json.dumps(name), a, b, m.group(1), m.group(1), a, b), s)
+        for name, entry, a, b, c, d in MEMO4:
+            rx = memo4_rx(entry, a, b, c, d)
+            memos += len(rx.findall(s))
+            s = rx.sub(lambda m: 'function %s(%s,%s,%s,%s){return __bpMemo4(%s,%s,%s,%s,%s,%s$raw)}function %s$raw(%s,%s,%s,%s){' %
+                       (m.group(1), a, b, c, d, json.dumps(name), a, b, c, d, m.group(1), m.group(1), a, b, c, d), s)
         if memos:
             s = Path(__file__).with_name("js-memo.js").read_text(encoding="utf-8") + "\n" + s
         kids = [(m, tree_kids(s, m)) for m in TREE_KIDS.finditer(s)]

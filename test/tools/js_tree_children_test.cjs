@@ -33,6 +33,13 @@ test('identity memo: the same object and String answer what the pure def answere
  const r1=ctx.memo('t',a,'x',f),r2=ctx.memo('t',a,'x',f),r3=ctx.memo('t',a,'y',f),r4=ctx.memo('t',a2,'x',f),r5=ctx.memo('u',a,'x',f);
  assert.equal(r1,r2);assert.deepEqual(r3,{of:'1:y'});assert.notEqual(r4,r1);assert.deepEqual(r4,r1);assert.notEqual(r5,r1);assert.equal(calls,4);
 });
+test('four-argument memo: the same two objects and equal Strings/numbers answer once; no object is asked again',()=>{
+ const ctx=vm.createContext({});vm.runInContext(fs.readFileSync(path.join(root,'scripts/js-memo.js'),'utf8')+';globalThis.memo4=__bpMemo4;',ctx);
+ let calls=0;const f=(a,b,c,d)=>{calls++;return {of:[a&&a.k,b.k,c,String(d)].join(':')}};const st={k:1},nf={k:2},nf2={k:2};
+ const r1=ctx.memo4('rows',st,nf,'t',5n,f),r2=ctx.memo4('rows',st,nf,'t',5n,f),r3=ctx.memo4('rows',st,nf,'t',6n,f),r4=ctx.memo4('rows',st,nf2,'t',5n,f),r5=ctx.memo4('rows',st,nf,'u',5n,f),r6=ctx.memo4('rows',st,nf,'t','5',f);
+ assert.equal(r1,r2);assert.notEqual(r3,r1);assert.notEqual(r4,r1);assert.deepEqual(r4,r1);assert.notEqual(r5,r1);assert.notEqual(r6,r1);assert.equal(calls,5);
+ ctx.memo4('rows',null,nf,'t',5n,f);ctx.memo4('rows',null,nf,'t',5n,f);assert.equal(calls,7);
+});
 test('one-argument identity memo: the very same object answers once, an equal copy is asked again',()=>{
  const ctx=vm.createContext({});vm.runInContext(fs.readFileSync(path.join(root,'scripts/js-memo.js'),'utf8')+';globalThis.memo1=__bpMemo1;',ctx);
  let calls=0;const f=a=>{calls++;return {n:a.length}};const rows=[1,2],copy=[1,2];
