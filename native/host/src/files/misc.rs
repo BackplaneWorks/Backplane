@@ -20,12 +20,27 @@ pub fn mech_error(code: i32, out: &str) -> String {
     let fallback = if text.is_empty() { format!("backplane --render failed (exit {code})") } else { text.chars().take(300).collect() };
     text.split('\n').map(str::trim).find(|l| l.starts_with("backplane --render:")).map(|l| l.chars().take(300).collect()).unwrap_or(fallback)
 }
+/// FileList.cmd outside a repository: files up to eight folders down, not under a hidden folder or node_modules, 3000 at most (sorted: find's own order is unspecified).
+fn walk_files(root: &std::path::Path) -> Vec<String> {
+    fn go(dir: &std::path::Path, rel: &str, depth: usize, out: &mut Vec<String>) {
+        let Ok(rd) = std::fs::read_dir(dir) else { return };
+        let mut es: Vec<_> = rd.flatten().collect(); es.sort_by_key(|e| e.file_name());
+        for e in es {
+            let Some(name) = e.file_name().to_str().map(str::to_string) else { continue };
+            if name.starts_with('.') || out.len() >= 3000 { continue }
+            let Ok(ft) = e.file_type() else { continue };
+            let p = if rel.is_empty() { name.clone() } else { format!("{rel}/{name}") };
+            if ft.is_dir() { if depth < 8 && name != "node_modules" { go(&e.path(), &p, depth + 1, out) } } else if ft.is_file() { out.push(p) }
+        }
+    }
+    let mut v = vec![]; go(root, "", 1, &mut v); v
+}
 /// PdfJob.why
 fn pdf_why(out: &str) -> String { if out.contains("nopoppler") { "PDFs show here with poppler's pdftoppm (the poppler or poppler-utils package)".into() } else { out.trim().into() } }
 
 pub struct Misc;
 impl RpcHandler for Misc {
-    fn methods(&self) -> &'static [&'static str] { &["file.open", "pdf.page", "mech.list", "mech.render", "history.resolve", "boards.list"] }
+    fn methods(&self) -> &'static [&'static str] { &["file.open", "pdf.page", "mech.list", "mech.render", "history.resolve", "boards.list", "files.list", "review.bom", "review.checks", "review.tick", "review.release", "kicad.components", "kicad.export10"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let s = |k: &str| p.get(k).and_then(Value::as_str).unwrap_or("").to_string();
@@ -62,6 +77,23 @@ impl RpcHandler for Misc {
                     if r.code == 0 { let ls: Vec<&str> = r.out.split('\n').collect(); let at = |i: usize| ls.get(i).map(|x| x.trim()).unwrap_or("");
                         reply(true, json!({"resolved":{"thread":thread,"side":side,"ref":rf,"commit":at(0),"git":at(1),"top":at(2)}})) }
                     else { err(if r.out.trim().is_empty() { format!("could not resolve {rf}") } else { r.out.trim().to_string() }) }
+                }
+                // the file picker's list (FileList.cmd): git's view of the tree in a repository (cached + untracked, not ignored), else a bounded walk; 3000 at most
+                "files.list" => {
+                    let thread = s("thread");
+                    let Some(cwd_p) = super::root_of(hub, &thread).await else { return vec![super::threadpath::refusal(id)] };
+                    let cwd = cwd_p.to_string_lossy().into_owned();
+                    let files: Vec<String> = if super::git::is_repo(&cwd).await {
+                        let r = super::git::run(&cwd, &["ls-files", "-z", "--cached", "--others", "--exclude-standard"]).await;
+                        if r.code != 0 { return reply(false, json!({"text":r.out})) }
+                        r.out.split('\0').filter(|x| !x.is_empty()).take(3000).map(str::to_string).collect()
+                    } else { tokio::task::spawn_blocking(move || walk_files(std::path::Path::new(&cwd))).await.unwrap_or_default() };
+                    reply(true, json!({"files":files,"thread":thread}))
+                }
+                // jobs the Rust hub does not run yet: the folder is resolved first (a thread without one is refused as everywhere), then they say so
+                "review.bom" | "review.checks" | "review.tick" | "review.release" | "kicad.components" | "kicad.export10" => {
+                    if super::root_of(hub, &s("thread")).await.is_none() { return vec![super::threadpath::refusal(id)] }
+                    vec![json!({"t":"reply","id":id,"ok":false,"error":format!("{method} is not available in this hub yet")})]
                 }
                 "boards.list" => { // BoardsJob: the project's boards read again, as the card finds them
                     let thread = s("thread");
@@ -114,6 +146,11 @@ mod tests {
         let names: Vec<&str> = r.out.lines().map(|l| l.rsplit(' ').next().unwrap()).collect(); assert_eq!(names, ["mech/a.step", "mech/b.png", "mech/sub/c.glb"], "{}", r.out);
         let e = std::env::temp_dir().join(format!("bp-mech-empty-{}", std::process::id())); std::fs::create_dir_all(&e).unwrap();
         assert_eq!(proc("sh", &["-c", MECH_LIST], &e.to_string_lossy(), &[]).await.out, "");
+    }
+    #[test] fn file_picker_walk_skips_hidden_and_node_modules() {
+        let d = std::env::temp_dir().join(format!("bp-walk-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d);
+        for f in ["a.txt", "sub/b.txt", ".hid/c.txt", "node_modules/n.js", "sub/.dot", "x/y/z/w.txt"] { std::fs::create_dir_all(d.join(f).parent().unwrap()).unwrap(); std::fs::write(d.join(f), "").unwrap() }
+        assert_eq!(walk_files(&d), ["a.txt", "sub/b.txt", "x/y/z/w.txt"]);
     }
     #[tokio::test] async fn resolve_script_names_a_ref_as_a_commit() {
         let d = std::env::temp_dir().join(format!("bp-res-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap(); let cwd = d.to_string_lossy().into_owned();
