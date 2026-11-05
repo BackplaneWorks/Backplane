@@ -1,10 +1,11 @@
 //! server/plot.bend's actor in Rust: the board, schematic and 3D sources the clients watch (`kicad.watch`), polled every
-//! 150 ms while any is watched, each changed file read by the existing Bend child (`backplane --plot KIND FILE INFOS`),
-//! the plot sent to each client as the delta against what that client holds (core/plot.bend, kicad/plot.rs).
-//! Child decision (M6): the parser stays Bend (`BACKPLANE_PLOT_BIN`, default `backplane-serve` beside the hub). Reads run one
-//! process each (fresh heap, memory returned on exit), at most `READERS` at once; 3D reads one at a time and at low priority.
-//! Not ported yet: web stamps, `PWarm`, split views and `--plot-tree` sheets (listed in docs/gpui/PORT.md M6).
-use super::{plot::{self, Plot}, project};
+//! 150 ms while any is watched, each changed file read, the plot sent to each client as the delta against what that client
+//! holds (core/plot.bend, kicad/plot.rs). Boards and schematics (plots, sheet trees, info lookups) are read in this process
+//! (kicad/plotread.rs, the same bytes as the Bend child) on blocking threads, at most `READERS` at once; `BACKPLANE_PLOT_NATIVE=0`
+//! sends them to the child again. 3D models still go to the Bend child (`backplane --plot KIND FILE INFOS`, `BACKPLANE_PLOT_BIN`,
+//! default `backplane-serve` beside the hub), one at a time and at low priority.
+//! Not ported yet: web stamps, split views.
+use super::{plot::{self, Plot}, plotgen, plotread, project};
 use crate::{api::{Caller, Fut, RpcHandler}, hub::Hub};
 use serde_json::{json, Value};
 use std::{collections::HashMap, path::PathBuf, sync::{Arc, Mutex}, time::Duration};
@@ -142,11 +143,11 @@ impl Plots {
             let _slot = me.readers.acquire().await.ok();
             let _one = if solid_kind(kind) { Some(me.solid.lock().await) } else { None };
             let before = if is_version(&file) { Stamp::default() } else { stamp(&file) };
-            let out = me.run_child(kind, &file, &ky).await;
+            let out = if native(kind) { me.run_native(kind, &file, &ky).await } else { me.run_child(kind, &file, &ky).await.map(|(c, t)| (c, t, None)) };
             let after = if is_version(&file) { Stamp::default() } else { stamp(&file) };
-            let (code, text) = match out { Some((c, t)) => if before != after { (2, String::new()) } else { (c, t) }, None => (1, "cannot run the plot reader".into()) };
+            let (code, text, made) = match out { Some((c, t, m)) => if before != after { (2, String::new(), None) } else { (c, t, m) }, None => (1, "cannot run the plot reader".into(), None) };
             let mut again = false;
-            let plot = if code == 0 { Some(Arc::new(plot::parse_child(&text))) } else { None };
+            let plot = if code == 0 { Some(Arc::new(made.unwrap_or_else(|| plot::parse_child(&text)))) } else { None };
             { let mut st = me.st.lock().unwrap();
               if let Some(s) = st.srcs.get_mut(&ky) { s.busy = false; s.stamp = Some(before); again = std::mem::take(&mut s.again); if let Some(p) = &plot { s.plot = Some(p.clone()) } } }
             match (&plot, code) {
@@ -160,6 +161,22 @@ impl Plots {
             }
             if again { me.read(&hub, &ky) }
         });
+    }
+    /// `Pv.child` in this process (kicad/plotread.rs): the plot, its info file written, and the child's exit code and message.
+    /// A panic in a reader is an unread file, never the hub's end; a big board's memory goes back when it is done.
+    async fn run_native(&self, kind: u32, file: &str, ky: &str) -> Option<(i32, String, Option<Plot>)> {
+        let (f, infos) = (file.to_string(), self.infos(ky));
+        tokio::task::spawn_blocking(move || {
+            let r = std::panic::catch_unwind(|| plotread::read(kind, &f));
+            let o = match r {
+                Ok(plotgen::Read::Plot(p, t)) => { plotgen::write_infos(&infos.to_string_lossy(), &t); (0, String::new(), Some(*p)) }
+                Ok(plotgen::Read::Half) => (2, String::new(), None),
+                Ok(plotgen::Read::Fail(m)) => (3, m, None),
+                Err(_) => (3, plotgen::UNREAD.to_string(), None),
+            };
+            #[cfg(target_env = "gnu")] unsafe { libc::malloc_trim(0); }
+            o
+        }).await.ok()
     }
     async fn run_child(&self, kind: u32, file: &str, ky: &str) -> Option<(i32, String)> {
         let mut c = if solid_kind(kind) { let mut c = tokio::process::Command::new("nice"); c.args(["-n", "10"]).arg(&self.bin); c } else { tokio::process::Command::new(&self.bin) };
@@ -199,6 +216,12 @@ impl Plots {
         if file.is_empty() { return }
         let (me, hub, root, slot) = (self.clone(), hub.clone(), root.to_string(), tree_slot(path));
         tokio::spawn(async move {
+            if native(1) {
+                let f = file.clone();
+                let Ok(Ok(t)) = tokio::task::spawn_blocking(move || std::panic::catch_unwind(|| plotread::tree(&f))).await else { return };
+                hub.push(client, json!({"t":"sheets","root":root,"slot":slot,"gen":gen.to_string(),"rows":t.rows,"boxes":t.boxes,"ids":t.ids,"top":t.top,"refs":t.refs}));
+                return
+            }
             let Some(o) = tokio::process::Command::new(&me.bin).arg("--plot-tree").arg(&file).stdin(std::process::Stdio::null()).output().await.ok() else { return };
             if !o.status.success() { return }
             let text = String::from_utf8_lossy(&o.stdout).trim().to_string();
@@ -211,10 +234,16 @@ impl Plots {
     pub async fn info(&self, client: u64, key_: &str, at: usize, idx: usize) -> String {
         let sig = { let st = self.st.lock().unwrap(); st.subs.get(&client).and_then(|v| v.iter().find(|s| s.key == key_)).and_then(|s| s.held.get(at)).map(|c| c.sig) };
         let Some(sig) = sig else { return String::new() };
+        if native(0) {
+            let f = self.infos(key_);
+            return tokio::task::spawn_blocking(move || { let t = std::fs::read(f).unwrap_or_default(); plotgen::info_find(&String::from_utf8_lossy(&t), sig, idx).trim_end().to_string() }).await.unwrap_or_default();
+        }
         let o = tokio::process::Command::new(&self.bin).arg("--plot-info").arg(self.infos(key_)).arg(sig.to_string()).arg(idx.to_string()).stdin(std::process::Stdio::null()).output().await;
         match o { Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim_end().to_string(), _ => String::new() }
     }
 }
+/// Boards and schematics are read in this process unless BACKPLANE_PLOT_NATIVE=0 sends them to the Bend child; 3D models always go to the child.
+fn native(kind: u32) -> bool { kind <= 1 && std::env::var("BACKPLANE_PLOT_NATIVE").map_or(true, |v| v != "0") }
 /// Hist.kind: 0 a live file, 1 a file in a commit, 2 a comparison.
 pub fn hist_kind(p: &str) -> u8 { if p.starts_with("git\t") { 1 } else if p.starts_with("diff\n") { 2 } else { 0 } }
 /// Hist.rebase: another live file (abs) in the same commit as version p; abs itself when p is live.
@@ -244,6 +273,8 @@ impl RpcHandler for KicadRpc {
             match method {
                 "kicad.watch" => {
                     let (kind, root, path) = (s("kind"), s("root"), s("path"));
+                    // PR #960: an active request with neither an absolute root nor an absolute source has no folder and is refused (Hub.folder.out Watch)
+                    if !kind.is_empty() && !(crate::files::threadpath::absolute(&root) || crate::files::threadpath::absolute(&path)) { return vec![crate::files::threadpath::refusal(id)] }
                     if !kind.is_empty() && !super::known_root(hub, &root, &path).await { return vec![json!({"t":"reply","id":id,"ok":false,"error":"that folder is not in this project"})] }
                     self.0.watch(hub, who.client, kind_of(&kind), &root, &path, &s("tree"));
                     vec![json!({"t":"reply","id":id,"ok":true})]

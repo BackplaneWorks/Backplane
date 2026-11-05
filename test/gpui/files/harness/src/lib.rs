@@ -6,10 +6,19 @@ pub mod files {
   #[path = "../../../../../../native/host/src/files/dir.rs"] pub mod dir;
   #[path = "../../../../../../native/host/src/files/serve.rs"] pub mod serve;
   #[path = "../../../../../../native/host/src/files/git.rs"] pub mod git;
+  #[path = "../../../../../../native/host/src/files/threadpath.rs"] pub mod threadpath;
 }
 pub mod kicad {
   #[path = "../../../../../../native/host/src/kicad/plot.rs"] pub mod plot;
   #[path = "../../../../../../native/host/src/kicad/project.rs"] pub mod project;
   #[path = "../../../../../../native/host/src/kicad/boards.rs"] pub mod boards;
   #[path = "../../../../../../native/host/src/kicad/kserve.rs"] pub mod kserve;
+  #[path = "../../../../../../native/host/src/kicad/fl.rs"] pub mod fl;
+  #[path = "../../../../../../native/host/src/kicad/sexpr.rs"] pub mod sexpr;
+  #[path = "../../../../../../native/host/src/kicad/strokefont.rs"] pub mod strokefont;
+  #[path = "../../../../../../native/host/src/kicad/strokefont_data.rs"] pub mod strokefont_data;
+  #[path = "../../../../../../native/host/src/kicad/board.rs"] pub mod board;
+  #[path = "../../../../../../native/host/src/kicad/schematic.rs"] pub mod schematic;
+  #[path = "../../../../../../native/host/src/kicad/plotgen.rs"] pub mod plotgen;
+  #[path = "../../../../../../native/host/src/kicad/plotread.rs"] pub mod plotread;
 }

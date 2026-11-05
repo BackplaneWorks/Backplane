@@ -5,6 +5,7 @@ pub mod fm;
 pub mod git;
 pub mod misc;
 pub mod serve;
+pub mod threadpath;
 #[path = "../kicad/mod.rs"]
 pub mod kicad;
 
@@ -20,16 +21,12 @@ pub fn start(hub: Arc<Hub>) {
     kicad::start(&hub);
 }
 
-/// Hub.files.of: the folder a thread's Files tab reads (its worktree, else its project's root); a project
-/// id lists the project's folder. "" when the thread is unknown, deleted or its project is removed.
-pub async fn root_of(hub: &Arc<Hub>, id: &str) -> PathBuf {
+/// ThreadPath.of for the read model (threadpath.rs): the folder of a thread or `project-home-<id>`, None when it does not resolve.
+pub async fn root_of(hub: &Arc<Hub>, id: &str) -> Option<PathBuf> {
     let m = hub.model().await;
-    if let Some(t) = m.threads.get(id) {
-        if t.deleted { return PathBuf::new() }
-        let p = m.projects.get(&t.project).filter(|p| !p.removed);
-        return if !t.worktree.is_empty() { PathBuf::from(&t.worktree) } else { p.map(|p| PathBuf::from(&p.root)).unwrap_or_default() };
-    }
-    m.projects.get(id).filter(|p| !p.removed).map(|p| PathBuf::from(&p.root)).unwrap_or_default()
+    threadpath::resolve(id,
+        |i| m.threads.get(i).map(|t| threadpath::T { project: &t.project, worktree: &t.worktree, deleted: t.deleted }),
+        |i| m.projects.get(i).map(|p| threadpath::P { root: &p.root, removed: p.removed })).map(PathBuf::from)
 }
 
 struct Img;
@@ -68,13 +65,11 @@ impl RpcHandler for Files {
 /// `{text, fmEntries:"", fmError, fmDir, thread}`.
 async fn files_dir(hub: &Arc<Hub>, id: &Value, p: &Value) -> Value {
     let (thread, rel) = (p.get("thread").and_then(Value::as_str).unwrap_or(""), p.get("path").and_then(Value::as_str).unwrap_or(""));
-    // Hub.dir.k: a path that fails Fm.safe is refused before any job runs, with Reply.err
-    if !fm::safe(rel) { return json!({"t":"reply","id":id,"ok":false,"error":"that folder is not in this project"}) }
-    let root = root_of(hub, thread).await;
-    let listed = if root.as_os_str().is_empty() { Err("no such folder") } else {
-        let (r, rel) = (root.clone(), rel.to_string());
-        tokio::task::spawn_blocking(move || dir::list(&r, &rel)).await.unwrap_or(Err("no such folder"))
-    };
+    // Hub.dir.k: a path that fails Fm.files.safe is refused first, then a thread with no folder (Hub.folder.job)
+    if !fm::files_safe(rel) { return json!({"t":"reply","id":id,"ok":false,"error":"that folder is not in this project"}) }
+    let Some(root) = root_of(hub, thread).await else { return threadpath::refusal(id) };
+    let (r, rel_o) = (root.clone(), rel.to_string());
+    let listed = tokio::task::spawn_blocking(move || dir::list(&r, &rel_o)).await.unwrap_or(Err(dir::UNAVAILABLE));
     match listed {
         Ok(text) => json!({"t":"reply","id":id,"ok":true,"result":{"fmEntries":text,"fmDir":rel,"fmRoot":root.to_string_lossy(),"thread":thread}}),
         Err(e) => json!({"t":"reply","id":id,"ok":false,"result":{"text":e,"fmEntries":"","fmError":e,"fmDir":rel,"thread":thread}}),
@@ -91,7 +86,9 @@ impl RpcHandler for GitRpc {
             let raw = |k: &str, d: &str| match p.get(k) { Some(Value::String(x)) => x.clone(), Some(Value::Number(n)) => n.to_string(), _ => d.to_string() };
             let thread = s("thread");
             let reply = |ok: bool, r: Value| json!({"t":"reply","id":id,"ok":ok,"result":r});
-            let cwd_p = root_of(hub, &thread).await; let cwd = cwd_p.to_string_lossy().into_owned();
+            // Hub.git -> Hub.folder.job: with no resolved folder nothing is scheduled (law thread_folder_refuses_job)
+            let Some(cwd_p) = root_of(hub, &thread).await else { return vec![threadpath::refusal(id)] };
+            let cwd = cwd_p.to_string_lossy().into_owned();
             if method == "history.refs" {
                 let out = git::refs(&cwd, &thread).await;
                 let ls: Vec<&str> = out.split('\n').collect(); let at = |i: usize| ls.get(i).copied().unwrap_or("");
@@ -99,7 +96,7 @@ impl RpcHandler for GitRpc {
                 return vec![reply(true, json!({"thread":thread,"git":at(0),"top":at(1),"refs":ls.iter().skip(2).copied().collect::<Vec<_>>().join("\n"),"pcb":f.pcb,"sch":f.sch}))];
             }
             let init = method == "git.act" && s("action") == "init";
-            if cwd.is_empty() || (!init && !git::is_repo(&cwd).await) {
+            if !init && !git::is_repo(&cwd).await {
                 return vec![if method == "git.diff" { reply(true, json!({"diff":"","thread":thread,"nogit":cwd})) } else { reply(false, json!({"text":format!("not a git repository: {cwd}")})) }];
             }
             match method {

@@ -2,6 +2,13 @@
 name = "files-harness"
 version = "0.0.0"
 edition = "2021"
+[lib]
+path = "src/lib.rs"
+[[bin]]
+name = "bp-plot"
+path = "../../../../native/host/src/bin/bp-plot.rs"
+[profile.release]
+opt-level = 3
 [dependencies]
 libc = "0.2"
 serde_json = "1"

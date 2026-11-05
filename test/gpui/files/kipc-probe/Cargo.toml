@@ -1,0 +1,17 @@
+# The hub's KiCad IPC transport as a stand-alone binary with the Bun helper's interface (NDJSON on stdin/stdout), so the two can
+# be driven by the same script against the same KiCad. Test tooling only: the hub links these modules, not this crate.
+[package]
+name = "kipc-probe"
+version = "0.0.0"
+edition = "2021"
+
+[workspace]
+
+[dependencies]
+serde_json = { version = "1", features = ["preserve_order", "arbitrary_precision"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync", "time", "process", "macros", "fs", "io-std"] }
+prost = "0.14"
+prost-reflect = "0.16"
+
+[profile.release]
+opt-level = 3
