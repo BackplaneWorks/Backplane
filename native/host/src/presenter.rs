@@ -22,6 +22,8 @@ pub trait Presenter: Send + Sync {
     fn wants_log(&self) -> bool { true }
     /// The presenter lost its state (its process died): `restart` it, then the hub folds the log into it again.
     fn is_down(&self) -> bool { false }
+    /// Why it went down, once, for the log: how the helper process ended (a signal, an exit code) and the call that found it dead.
+    fn why_down(&self) -> Option<String> { None }
     fn restart(&self) -> Fut<'_, ()> { Box::pin(async { Ok(()) }) }
 }
 
@@ -42,12 +44,12 @@ struct Link { read: BufReader<tokio::net::tcp::OwnedReadHalf>, write: tokio::net
 /// The policy child. When it dies (kill -9, a crash, EOF) the link is dropped, every call answers "policy down" (the hub answers
 /// PRESENTER_UNAVAILABLE, retryable), and the hub's supervisor calls `restart`, then folds the whole log into the new child from the
 /// writer task (Hub::resync_presenter) so it holds exactly what the old one did.
-pub struct BpPolicy { bin: std::path::PathBuf, link: Mutex<Option<Link>>, child: std::sync::Mutex<Option<Child>>, down: std::sync::atomic::AtomicBool }
+pub struct BpPolicy { bin: std::path::PathBuf, link: Mutex<Option<Link>>, child: std::sync::Mutex<Option<Child>>, down: std::sync::atomic::AtomicBool, last_err: std::sync::Mutex<String> }
 
 impl BpPolicy {
     pub async fn spawn(bin: &Path) -> Result<BpPolicy> {
         let (link, child) = Self::start(bin).await?;
-        Ok(BpPolicy { bin: bin.to_path_buf(), link: Mutex::new(Some(link)), child: std::sync::Mutex::new(Some(child)), down: false.into() })
+        Ok(BpPolicy { bin: bin.to_path_buf(), link: Mutex::new(Some(link)), child: std::sync::Mutex::new(Some(child)), down: false.into(), last_err: Default::default() })
     }
     async fn start(bin: &Path) -> Result<(Link, Child)> {
         let port = { let l = std::net::TcpListener::bind("127.0.0.1:0")?; l.local_addr()?.port() };
@@ -76,7 +78,7 @@ impl BpPolicy {
             if n == 0 { bail!("policy closed") }
             Ok(line.trim_end().to_string())
         }.await;
-        if r.is_err() { *g = None; self.down.store(true, std::sync::atomic::Ordering::Relaxed); } // the next call finds it down; the supervisor restarts it
+        if let Err(e) = &r { *self.last_err.lock().unwrap() = format!("{e:#}"); *g = None; self.down.store(true, std::sync::atomic::Ordering::Relaxed); } // the next call finds it down; the supervisor restarts it
         r
     }
 }
@@ -92,6 +94,21 @@ impl Presenter for BpPolicy {
     }
     fn ping(&self) -> Fut<'_, ()> { Box::pin(async move { if self.call("P", "").await? != "pong" { bail!("no pong") } Ok(()) }) }
     fn is_down(&self) -> bool { self.down.load(std::sync::atomic::Ordering::Relaxed) }
+    fn why_down(&self) -> Option<String> {
+        use std::os::unix::process::ExitStatusExt;
+        let how = match self.child.lock().unwrap().as_mut().map(|c| c.try_wait()) {
+            Some(Ok(Some(st))) => match (st.signal(), st.code()) {
+                (Some(9), _) => "killed by SIGKILL (the kernel's out-of-memory killer, or kill -9)".to_string(),
+                (Some(n), _) => format!("killed by signal {n}"),
+                (None, Some(c)) => format!("exited with code {c}"),
+                _ => "ended".to_string(),
+            },
+            Some(Ok(None)) => "still running, but its link failed".to_string(),
+            Some(Err(e)) => format!("status unknown ({e})"),
+            None => "already gone".to_string(),
+        };
+        Some(format!("the policy helper died: {how}; the call that found it: {}", self.last_err.lock().unwrap()))
+    }
     fn restart(&self) -> Fut<'_, ()> {
         Box::pin(async move {
             if let Some(mut old) = self.child.lock().unwrap().take() { let _ = old.start_kill(); }
@@ -119,5 +136,20 @@ mod tests {
     use super::*; use serde_json::json;
     #[test] fn ascii_only_with_surrogate_pairs() {
         let t = ascii_json(&json!({"a":"é日🙂"})); assert!(t.is_ascii()); assert_eq!(serde_json::from_str::<Value>(&t).unwrap(), json!({"a":"é日🙂"}));
+    }
+    // the log says how a dead helper ended (an OOM kill is SIGKILL) and which call found it
+    #[tokio::test] async fn a_killed_helper_is_explained() {
+        let dir = std::env::temp_dir().join(format!("bp-why-{}", std::process::id())); std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("p.py");
+        std::fs::write(&script, "#!/usr/bin/env python3\nimport socket,sys\ns=socket.socket();s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);s.bind(('127.0.0.1',int(sys.argv[1])));s.listen(1)\nprint('listening',flush=True)\nc,_=s.accept();f=c.makefile('rwb')\nfor l in f:\n    f.write(b'pong\\n');f.flush()\n").unwrap();
+        { use std::os::unix::fs::PermissionsExt; std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap(); }
+        let p = BpPolicy::spawn(&script).await.unwrap();
+        p.ping().await.unwrap(); assert!(!p.is_down());
+        let pid = p.child.lock().unwrap().as_ref().and_then(|c| c.id()).unwrap();
+        unsafe { libc::kill(pid as i32, libc::SIGKILL); }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(p.ping().await.is_err()); assert!(p.is_down());
+        let why = p.why_down().unwrap();
+        assert!(why.contains("SIGKILL"), "{why}");
     }
 }

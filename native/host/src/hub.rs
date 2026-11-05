@@ -98,6 +98,7 @@ impl Hub {
         { let hub = hub.clone(); tokio::spawn(async move { loop {
             tokio::time::sleep(std::time::Duration::from_millis(250)).await;
             if hub.presenter.is_down() {
+                if let Some(why) = hub.presenter.why_down() { eprintln!("{why}; restarting it") }
                 match hub.rebuild_presenter().await { Rebuilt::Ran(true) => eprintln!("presenter restarted; folded the log and the mirrors again"), Rebuilt::Ran(false) => tokio::time::sleep(std::time::Duration::from_secs(2)).await, Rebuilt::Merged => {} }
             }
         } }); }
