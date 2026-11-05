@@ -18,9 +18,11 @@ function __bpMemo2(tab, a, b, f) {
 }
 
 // one argument, by identity (SubHistory.own: a read's rows as a state; db.js
-// answers an unchanged read with the very same rows)
+// answers an unchanged read with the very same rows; Slot.sidebar / Slot.count:
+// the region of the very same rendered page, each a walk of the whole page)
 const __bpMemo1Tabs = new Map();
 function __bpMemo1(tab, a, f) {
+  if (a === null || typeof a !== "object") return f(a);
   let w = __bpMemo1Tabs.get(tab);
   if (w === undefined) __bpMemo1Tabs.set(tab, w = new WeakMap());
   let r = w.get(a);

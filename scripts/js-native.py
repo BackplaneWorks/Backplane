@@ -306,7 +306,11 @@ BYTE_ESC, BYTE_STR = byte_loop("esc"), byte_loop("str")
 # each must be a def of exactly these two parameters, found once
 MEMO2 = (("Subs.aggs", r"\$\$\$\$047core\$047subs\$058Subs\$aggs\$", "_st_0", "_th_0"),)
 # pure defs of one object kept by identity; each a def of exactly this parameter, found once
-MEMO1 = (("SubHistory.own", r"\$subagent\$045history\$058SubHistory\$own\$", "_rows_0"),)
+MEMO1 = (("SubHistory.own", r"\$subagent\$045history\$058SubHistory\$own\$", "_rows_0"),
+         # the page's sidebar region, found by a walk of the whole page tree,
+         # asked ~3 times a render about the very same rendered page
+         ("Slot.sidebar", r"\$\$\$\$047web\$047sidebar\$045slot\$058Slot\$sidebar\$", "_o_0"),
+         ("Slot.count", r"\$\$\$\$047web\$047sidebar\$045slot\$058Slot\$count\$", "_o_0"))
 # pure defs of two objects (by identity) and two Strings/numbers; found once
 MEMO4 = (("Subs.rows", r"\$\$\$\$047core\$047subs\$058Subs\$rows\$", "_st_0", "_info_0", "_th_0", "_now_0"),)
 def memo4_rx(entry, a, b, c, d):
