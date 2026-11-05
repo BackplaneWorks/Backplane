@@ -6,16 +6,24 @@ what the hub needs moves to Rust. Start with exactly what opens the real log and
 indexed, never the whole log in memory. Bar: **same answers as today**, checked by replay against JS recordings. Measure on
 `~/.backplane-gpui-scratch/synthetic-real-size.jsonl` (1,691,620 events, 1.14 GB) only, never a store copy. `gpui-compact` is stopped (branch kept).
 
-## Decision needed from the person
+## The memory gate (accepted by the person)
 
-The memory bar is **not accepted**; this section is a proposal. Your wording asked for memory flat in the log. This port cannot be flat: the log index and the read model grow with events (the store keeps an
-offset per event, `Model` an entry per message). Measured so far: 1M events -> 38 MB RSS and 0.73 s to listening (HUB-M1.md, commit 89a5d610ed, 2026-11-04) on a hub that **predates** `state/`, the bots' and agents' folds and `Feed`, so it is not "all in" for today's hub. That is 38 B/event if the whole
-38 MB scales (380 MB at 10M, 64 MB at 1.69M), or 28 B/event (290 MB at 10M) if a fixed baseline of about 10 MB comes off first; that 10 MB is the earlier spike host's, not today's hub, so the second figure is a guess. Today's hub at 1M, 1.69M and 10M is unmeasured.
-What the port gives for certain: no helper and no whole-log fold (the 3.6 GB at 1.69M events is gone), `meta` bounded by threads/projects/tasks (not by events), and a measured slope once measured. The 24 h soak was dropped by the person (PARITY.md), so there is no long-duration figure either.
-Working proposal: slope at most 64 B/event, measured at 0.85M and 1.69M synthetic events, and RSS steady while no events arrive. **That proposal is over a 500 MB ceiling at 10M events** (64 B x 10M = 640 MB), which is the
-number Bub gave you; so the next section says how to make 500 MB at 10M possible and what it costs. Say which bar you want: the 64 B/event proposal, a hard 500 MB at 10M, or flat as first written (an on-disk index, a larger design).
+On a copy of the real log, with about 10 agents (stand-ins) and 5 views open: the **whole startup under 1 GB with building the store counted**, `/hello` answers, no OOM, and **steady hub RAM at most 500 MB**.
+This replaces "flat" and every earlier proposal (64 B/event, 500 MB at 10M); the 10M figures below are headroom information, not the gate. "Hub RAM" is read as the hub process's anonymous RSS (`VmHWM` for the start peak, `VmRSS` at rest, plus the cgroup's `anon`);
+page cache from reading the 1.5 GB log is reclaimable and is reported separately, and the loader asks the kernel to drop it (`posix_fadvise(DONTNEED)`) so it does not pressure the scope. To be confirmed with the person: whether agent child processes count (they are separate processes, not hub RAM).
 
-### What a hard 500 MB at 10M events takes
+**The real log, counted** (store copy, a count only: no hub, no content; `/tmp/count_copy.py` prints integers and event kind names): 1,698,796 events; 74 kinds; `SettingSet` 624k (37%), `ActivityLogged` 302k, `MessagePosted` 157k, `UsageSet` 105k, `TurnChanged` 98k;
+**12,561 `ThreadCreated`**, created steadily: 1,919 by 25% of the events, 5,728 by 50%, 9,371 by 75%, 12,561 by 100% (about 7.4 per 1,000 events, with no sign of flattening). So threads **do** grow in proportion to events in the real log (unlike the synthetic one, which makes its 11,277 threads in its first 13k lines):
+about 74k threads at 10M events if that rate holds. Messages and activities are 27% of events (459k of 1.70M), not 43% (the synthetic log's first 300k) and not a third.
+
+**Against the gate, at the real log's 1.70M events** (estimates until the per-structure breakdown; every row of the table below is unmeasured for today's hub):
+- At rest: index and read model today about 38 B/event, so about 65 MB (measured at 1M on the old hub, scaled); with change (b) about 6.7 B/event (4.5 + 0.27 x 8), so about 11 MB. Folds: `Sum` worst case 6 KB x 12.6k threads = 75 MB, real far less; the other folds unmeasured. Outboxes: 5 views x up to 8 MiB = 40 MB worst. Views' kept bodies: about 5 x 3 x 300 KB = 5 MB. Estimated steady total under 200 MB: **inside the 500 MB gate even with no change at all**; (b) adds margin, not a pass. Duration is unproven: the 24 h soak was dropped, so the claim is the steady-RSS run the gate itself asks for.
+- Start peak: the index `Vec` doubles while it grows (1.70M x 16 B = 27 MB, up to 54 MB while it is copied), plus `Model`, the folds replaying 1.70M lines, and the baseline: estimate 150 to 350 MB, well under 1 GB, **if the loader streams** (no retained lines, no whole-file read). Unmeasured; the gate run measures it.
+- (b), the cheaper index and entries (est. 3-4 days, low risk, no on-disk format change): needed for headroom at 10M (est. 70-125 MB for the index and model, about 74k threads of folds on top), not for this gate.
+- (c), a flat on-disk index (est. 1-2 weeks, larger design): not needed for this gate; only if a log of 10M events must stay under 500 MB and (b) plus the folds do not fit.
+- What the gate cannot show: 10M events. The per-structure breakdown at 0.85M and 1.70M gives B/event and B/thread, and the 10M number is that slope times 10M, labelled an extrapolation.
+
+### Headroom: what 500 MB at 10M events would take (not the gate)
 
 Budget: 500 MB / 10M events = 50 B/event, minus everything that is not the log index. That is more than the index and the read model, and **it is the likeliest place for this plan to be wrong**; none of the rows below the line is measured for today's hub.
 Allowance for the index and read model = 500 MB - (baseline + folds + page cache + outboxes). Assumption stated: outboxes cut from 8 MiB to 2 MiB x 20 clients = 40 MB (at 8 MiB they are 160 MB and the allowance is 320 MB, 32 B/event; at 4 MiB, 80 MB).
@@ -25,7 +33,7 @@ Allowance for the index and read model = 500 MB - (baseline + folds + page cache
 | hub baseline | about 10 MB | the earlier spike host; today's hub unmeasured (guess) |
 | page cache | 8 MB | a plan |
 | outboxes | 40 MB | assumption above; `OUTBOX_MAX` is 8 MiB today |
-| `state::State` (lean) per thread/project/task | unmeasured | the synthetic log has 11,277 threads in total, all created in its first ~13k lines, so it says nothing about how threads grow; 11k at 1.69M events is the one real-size figure, and 65k at 10M assumes threads grow in proportion to events (an assumption, not a measurement and not a bound) |
+| `state::State` (lean) per thread/project/task | unmeasured | the real log has 12,561 threads at 1.70M events, created at a steady rate (see the gate section): about 74k at 10M if that rate holds, an extrapolation (the synthetic log makes all 11,277 of its threads in the first 13k lines and says nothing about growth) |
 | `state/` `Sum` per thread (`last_user`/`last_reply` up to 2000 chars each, 64 recent message ids) | up to about 6 KB/thread worst case, 390 MB at 65k threads: the whole budget; real values far smaller, unmeasured | `state/summary.rs` |
 | agents `World`, bots `World`, `Feed` `Index` and `Bindings` (each its own fold) | unmeasured | `agents/`, `bots/`, `net/` |
 | `meta` for the presenter (`Extra`: runtime, fork source, usage, todos, background rows) | unmeasured | `present/meta.rs`, to be added |
@@ -40,7 +48,7 @@ Log index and read model, from the code:
 | `model.rs` `all: Vec<u32>` per entry | 4 B | kept | 4 B |
 | `model.rs` `own`/`sent` `Ent{seq,ord}` per entry | 8 B | drop `ord` (it is the position in `all`, which is sorted; recover by binary search) | 4 B |
 
-Entries are messages and activities only; on the first 300k events of the synthetic log that is 43% (72k messages + 58k activities of 300k), and the real log's share is unknown. Estimate: 4.5 B per event plus 8 B per entry, so about 7 to 12.5 B/event, 70 to 125 MB at 10M.
+Entries are messages and activities only: 27% of the real log's events (459k of 1.70M). Estimate: 4.5 B per event plus 8 B per entry, so about 6.7 B/event on the real mix (12.5 B/event if every event were an entry), 67 to 125 MB at 10M.
 These are estimates until measured: the first deliverable is a per-structure heap breakdown at 0.85M and 1.69M events, then the changes above, then the same run again. Also needed: start streams the file without retaining lines, so the start peak stays in the same
 budget (checked in the measurement); outboxes counted in the budget. If the estimate is wrong the fallback is a sidecar index file read through `mmap`/`pread` (anonymous memory stays flat; touched file pages count as reclaimable cache, which a cgroup limit may or may not
 count as used), a larger design that I would bring back to you before starting.
