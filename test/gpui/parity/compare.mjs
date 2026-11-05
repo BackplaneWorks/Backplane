@@ -14,7 +14,7 @@ export const NORMALISATIONS=[
  'N11 harness steps: `settle` and `end` pseudo-frames (the client program waiting or closing) are control, not wire traffic, and are not compared. Reason: a replay waits by reply id, not by the recorded quiet times.',
  'N7 streams: per client the sequence of events, deltas, replies and view replies are compared as separate ordered streams; relative order between streams is not compared. Reason: network timing.',
  'N9 info frames: all info frames of a client are merged into one item (keys unioned, later values win; environment keys dropped); position and repeat count are not compared. The `other` stream (http, upgrade, close, info) is compared as a sorted set. Reason: the hub repeats info on its own timer.',
- 'N10 housekeeping events: a contiguous run of events that concurrent hub jobs append (SettingSet keys machine.id, accounts.*, allowance.*, projects.missing, tz.*, autosettle.*, liveness.*, turn.from/speed.*, restart.*, provider.*, fallback.*, tok.*, summary.*, told.*, alert.*, account.*, star.*; ActivityLogged of kind git or spawn; WorktreeSkipped) is sorted canonically. The set is compared, not the order. Reason: start-up, git probes and settle bookkeeping finish in varying order.',
+ 'N10 housekeeping events: a contiguous run of events that concurrent hub jobs append (SettingSet keys machine.id, accounts.*, allowance.*, projects.missing, tz.*, autosettle.*, liveness.*, turn.from/speed.*, restart.*, provider.*, fallback.*, tok.*, summary.*, told.*, alert.*, account.*, star.*; ActivityLogged of kind git or spawn; WorktreeSkipped) is replaced by its distinct events in canonical order. The set is compared, not the order or the repeat count. Reason: start-up, git probes and settle/liveness bookkeeping finish in varying order and repeat with elapsed time.',
  'N15 counters: numeric seq and changes (the hub change count at the instant a view was drawn) -> <N>. Reason: housekeeping events land between draws.',
  'N8 info frames: home paths, ports, machine ids, tokens, pids -> placeholders. Reason: environment.',
 ];
@@ -77,7 +77,7 @@ export function normalise(frames){
     if(s.infoSeen){s.other.push({info:gof(Object.keys(per).find(k=>per[k]===s))(Object.fromEntries(Object.entries(s.infoSeen).filter(([k])=>!/^(home|listen|machines|models|update|accounts\.live|kicad\.|freecad|browser\.|telemetry\.|tailnet|tailscale|bots\.remote|machine\.id|os|arch)/.test(k))))});delete s.infoSeen}
     s.other.sort((a,b)=>JSON.stringify(a)<JSON.stringify(b)?-1:1);
     const ev=s.events,out=[];let i=0;
-    while(i<ev.length){if(hk(ev[i])){let j=i;while(j<ev.length&&hk(ev[j]))j++;out.push(...ev.slice(i,j).sort((a,b)=>JSON.stringify(a)<JSON.stringify(b)?-1:1));i=j}else out.push(ev[i++])}
+    while(i<ev.length){if(hk(ev[i])){let j=i;while(j<ev.length&&hk(ev[j]))j++;out.push(...[...new Set(ev.slice(i,j).map(e=>JSON.stringify(e)))].sort().map(x=>JSON.parse(x)));i=j}else out.push(ev[i++])}
     s.events=out}
   return per;
 }

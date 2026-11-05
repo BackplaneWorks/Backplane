@@ -70,8 +70,9 @@ export async function replayOne(recording,{bin,port,work}){
       if(f.kind==='settle'||f.kind==='check'){continue}
       if(f.kind==='end'){await c.end(f.json.quiet);continue}
       // wait for every reply owed to an earlier non-volatile request of this client
-      for(const oid of owed.filter(o=>o.c===f.c&&o.i<f.i&&(replyAt.get(o.c+'|'+o.id)??Infinity)<f.i)){if(!(await c.until(x=>x.t==='reply'&&String(x.id)===String(oid.id),20000)))break}
-      observe(c);
+      // every reply, from any client, that the recording had before this frame (one client's view update depends on another's request)
+      for(const oid of owed.filter(o=>o.i<f.i&&(replyAt.get(o.c+'|'+o.id)??Infinity)<f.i)){const oc=clients[oid.c];if(oc&&!(await oc.until(x=>x.t==='reply'&&String(x.id)===String(oid.id),20000)))break}
+      for(const x of Object.values(clients))observe(x);
       if(f.json.raw){c.sendRaw(Uint8Array.from(Buffer.from(f.raw,'base64')))}
       else{const own=outCmd.has(f.i)?cmdRep[f.c]?.[outCmd.get(f.i)]:undefined;const obj=own?JSON.parse(JSON.stringify(own)):sub(c,f.json);const t0=obj?.p?.viewDelta?.token;if(t0!==undefined){const i=(tokRec[f.c]||[]).indexOf(f.json.p.viewDelta.token);if(i>=0&&tokRep[f.c]?.[i]!==undefined)obj.p.viewDelta.token=tokRep[f.c][i]}for(const s of ids(JSON.stringify(obj)))repSeen.add(s);c.send(obj)}
       if(outId(f)!==undefined&&outId(f)!==null)owed.push({c:f.c,i:f.i,id:outId(f)});
