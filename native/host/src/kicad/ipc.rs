@@ -1,13 +1,14 @@
 //! KiCad IPC on the hub (src/server/kserve.bend's actor + server.bend's `KIpc.*`), in Rust.
 //!
-//! DECISION (M6): the transport stays the existing Bun helper `backplane-kipc` (tools/kipc, built by scripts/build-kipc.sh,
-//! NDJSON on stdio) as a child process of the hub; its path is env `BACKPLANE_KIPC_BIN`, else `backplane-kipc` beside the
-//! hub's binary, else on PATH. Rust owns the actor: one record per project, at most two servers, requests wait for a server
+//! The transport ([`Transport`]) is in the hub: pure-Rust nng and protobuf (kipc.rs over nng.rs and proto.rs), so no Bun or JS
+//! process runs under it. With env `BACKPLANE_KIPC_BIN` set it is the old Bun helper `backplane-kipc` (tools/kipc, NDJSON on
+//! stdio) as a child process instead, a fallback that speaks the same objects.
+//! Rust owns the actor: one record per project, at most two servers, requests wait for a server
 //! that is starting, the 1/5/30 s restart schedule, the `-bp.N` version check after Ping + GetVersion, the server a third
 //! project retires (asked to `kiapi.backplane.Shutdown`, never killed), the 18 commands a headless KiCad refuses, the bp.3
 //! guards and the words shown. The pure rules are in kserve.rs (a Rust twin of core/kserve.bend until the rules process is
 //! wired). NOTHING HERE SENDS A SIGNAL TO ANY PROCESS: KiCad's servers end themselves (`--parent-pid`, `--idle-exit`,
-//! `Shutdown`); the helper ends when its stdin closes (the hub is gone); a child is only ever `wait`ed for.
+//! `Shutdown`); the Bun helper, when used, ends when its stdin closes (the hub is gone); a child is only ever `wait`ed for.
 //!
 //! Entry points for the `agents` stream's MCP layer: [`kicad_ipc`] and [`kicad_ipc_status`] (the MCP tools of the same
 //! names), plus [`kicad_ipc_in`] / [`kicad_ipc_status_in`] which also take the calling thread so a fallback logs
@@ -17,7 +18,7 @@
 //! Not ported: KL.Library.prepare (managed library/config setup: BACKPLANE_KICAD_LIBRARY and KICAD_CONFIG_HOME are only
 //! passed through from the hub's environment), `kicad-cli --version` probe (health is read from the runtime's manifest.json),
 //! the info keys `kicad.*` / `kicad.ipc.servers` (the hub core owns info; [`servers`] returns the lines), Settings' install.
-use super::{kserve::{self as ks, Srv}, project};
+use super::{kipc, kserve::{self as ks, Srv}, project};
 use crate::{api::{Caller, Fut, RpcHandler}, hub::Hub};
 use serde_json::{json, Map, Value};
 use std::{collections::HashMap, path::{Path, PathBuf}, process::Stdio, sync::{Arc, OnceLock}, time::Duration};
@@ -35,7 +36,7 @@ enum Msg {
     Info(oneshot::Sender<String>),
     Argv { project: String, env: Env, reply: oneshot::Sender<String> },
     Clear,
-    Line(u64, String),
+    Line(u64, Value),
     Dead(u64),
     Up { project: String, version: String },
     Bad { project: String, why: String },
@@ -45,22 +46,26 @@ enum Msg {
 }
 
 struct Wt { project: String, ty: String, msg: Value, env: Env, reply: oneshot::Sender<Value> }
-struct Helper { input: mpsc::UnboundedSender<String>, gen: u64 }
+/// What carries the actor's requests. It takes the helper's request objects and answers, through the actor's mailbox, with
+/// the objects the helper writes (`Msg::Line`): replies by id, and `{"event":"line"|"exit"}` for a server.
+trait Transport: Send { fn send(&mut self, fields: Value) -> bool; } // false: it is gone, and nothing will answer
+/// The hub's own: the default.
+impl Transport for kipc::Native { fn send(&mut self, fields: Value) -> bool { self.handle(fields); true } }
+/// The Bun helper's stdin: BACKPLANE_KIPC_BIN only.
+struct Bun(mpsc::UnboundedSender<String>);
+impl Transport for Bun { fn send(&mut self, fields: Value) -> bool { self.0.send(fields.to_string()).is_ok() } }
+struct Helper { link: Box<dyn Transport>, gen: u64 }
 
 struct Actor {
-    me: mpsc::UnboundedSender<Msg>, home: String, rt: String, exe: String, hub_pid: u32,
+    me: mpsc::UnboundedSender<Msg>, home: String, rt: String, bun: Option<String>, hub_pid: u32,
     helper: Option<Helper>, gen: u64, pend: HashMap<String, oneshot::Sender<Value>>, next: u64,
     srvs: Vec<Srv>, wait: Vec<Wt>, shown: String, env: Env, lines: Arc<std::sync::Mutex<String>>,
 }
 
 pub fn now_s() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) }
 
-/// The helper's path: BACKPLANE_KIPC_BIN, else beside the hub's binary, else PATH (K.Helper.find).
-pub fn helper_path() -> String {
-    if let Some(p) = std::env::var_os("BACKPLANE_KIPC_BIN").filter(|p| !p.is_empty()) { return p.to_string_lossy().into() }
-    if let Some(p) = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("backplane-kipc"))).filter(|p| p.is_file()) { return p.to_string_lossy().into() }
-    "backplane-kipc".into()
-}
+/// The Bun helper's path, when it is asked for: BACKPLANE_KIPC_BIN.
+pub fn helper_path() -> Option<String> { std::env::var_os("BACKPLANE_KIPC_BIN").filter(|p| !p.is_empty()).map(|p| p.to_string_lossy().into()) }
 fn on_path(exe: &str) -> bool { if exe.contains('/') { return Path::new(exe).is_file() } std::env::var("PATH").unwrap_or_default().split(':').any(|d| Path::new(d).join(exe).is_file()) }
 
 impl Actor {
@@ -72,15 +77,20 @@ impl Actor {
     /// A request line registered for its reply (KServe.call). The helper is started on first use.
     fn call(&mut self, mut fields: Value, reply: oneshot::Sender<Value>) {
         if self.helper.is_none() { self.start_helper() }
-        let Some(h) = &self.helper else { let _ = reply.send(failed("the KiCad IPC helper could not start (is backplane-kipc installed next to Backplane?)")); return };
+        let Some(h) = &mut self.helper else { let _ = reply.send(failed("the KiCad IPC helper could not start (is backplane-kipc installed next to Backplane?)")); return };
         self.next += 1; let id = self.next.to_string();
         fields["id"] = json!(self.next);
-        if h.input.send(fields.to_string()).is_err() { let _ = reply.send(failed("the KiCad IPC helper exited")); return }
+        if !h.link.send(fields) { let _ = reply.send(failed("the KiCad IPC helper exited")); return }
         self.pend.insert(id, reply);
     }
     fn start_helper(&mut self) {
         self.gen += 1; let gen = self.gen;
-        let mut c = Command::new(&self.exe); c.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).current_dir("/").kill_on_drop(false);
+        let Some(exe) = self.bun.clone() else {
+            let me = self.me.clone();
+            self.helper = Some(Helper { link: Box::new(kipc::Native::new("", Arc::new(move |o| { let _ = me.send(Msg::Line(gen, o)); }))), gen });
+            return
+        };
+        let mut c = Command::new(&exe); c.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).current_dir("/").kill_on_drop(false);
         let Ok(mut child) = c.spawn() else { return };
         let (Some(mut stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else { return };
         let (tx, mut rx) = mpsc::unbounded_channel::<String>();
@@ -88,10 +98,10 @@ impl Actor {
         let me = self.me.clone();
         tokio::spawn(async move {
             let mut rd = BufReader::new(stdout).lines();
-            while let Ok(Some(l)) = rd.next_line().await { let _ = me.send(Msg::Line(gen, l)); }
+            while let Ok(Some(l)) = rd.next_line().await { if let Ok(o) = serde_json::from_str::<Value>(&l) { let _ = me.send(Msg::Line(gen, o)); } }
             let _ = child.wait().await; let _ = me.send(Msg::Dead(gen));
         });
-        self.helper = Some(Helper { input: tx, gen });
+        self.helper = Some(Helper { link: Box::new(Bun(tx)), gen });
     }
     fn sink(&mut self, fields: Value) { let (t, _r) = oneshot::channel(); self.call(fields, t) }
 
@@ -109,14 +119,14 @@ impl Actor {
     }
     fn launch(&mut self, project: &str) { // KServe.launch: helper present, then the server is started and gets 30 s to say it listens
         let now = now_s();
-        if !on_path(&self.exe) { let _ = self.me.send(Msg::Bad { project: project.into(), why: format!("the KiCad IPC helper was not found or is not executable: {}", self.exe) }); let s = self.srv(project).starting(now); self.put(s); return }
+        if let Some(exe) = self.bun.clone().filter(|e| !on_path(e)) { let _ = self.me.send(Msg::Bad { project: project.into(), why: format!("the KiCad IPC helper was not found or is not executable: {exe}") }); let s = self.srv(project).starting(now); self.put(s); return }
         let dir = ks::dir(&self.rt, &self.home, project);
         { use std::os::unix::fs::DirBuilderExt; let _ = std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir); }
         let argv = ks::argv(&self.env.cli, project, &dir, self.hub_pid, &self.env.caps);
         let envv: Map<String, Value> = ["BACKPLANE_KICAD_LIBRARY", "KICAD_CONFIG_HOME"].iter().map(|k| (k.to_string(), json!(std::env::var(k).unwrap_or_default()))).collect();
         self.sink(json!({"op":"spawn","key":project,"argv":argv,"memory":"1536M","env":envv}));
         let s = self.srv(project).starting(now); self.put(s);
-        if self.helper.is_some() { self.later(30.0, Msg::Late { project: project.into(), born: now }) } else { let _ = self.me.send(Msg::Bad { project: project.into(), why: format!("the KiCad IPC helper could not start: {}", self.exe) }); }
+        if self.helper.is_some() { self.later(30.0, Msg::Late { project: project.into(), born: now }) } else { let _ = self.me.send(Msg::Bad { project: project.into(), why: format!("the KiCad IPC helper could not start: {}", self.bun.clone().unwrap_or_default()) }); }
         self.emit();
     }
     fn close(&mut self, sock: &str) { if !sock.is_empty() { self.sink(json!({"op":"close","sock":sock})) } } // KServe.close
@@ -159,8 +169,7 @@ impl Actor {
         });
     }
 
-    fn line(&mut self, text: String) { // a line from the helper: a server's stdout line or exit, else a reply (by id)
-        let Ok(o) = serde_json::from_str::<Value>(&text) else { return };
+    fn line(&mut self, o: Value) { // what the transport said: a server's stdout line or exit, else a reply (by id)
         match o["event"].as_str() {
             Some("line") => {
                 let project = o["key"].as_str().unwrap_or("").to_string();
@@ -235,12 +244,12 @@ impl Actor {
 pub struct Ipc { tx: mpsc::UnboundedSender<Msg>, lines: Arc<std::sync::Mutex<String>> }
 static IPC: OnceLock<Ipc> = OnceLock::new();
 
-/// Start the actor (one line in kicad::start). The helper itself starts on the first request.
+/// Start the actor (one line in kicad::start). The transport itself starts on the first request.
 pub fn start(hub: &Arc<Hub>) {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let lines = Arc::new(std::sync::Mutex::new(String::new()));
     let home = hub.cfg.home.to_string_lossy().to_string();
-    let mut a = Actor { me: tx.clone(), home, rt: std::env::var("XDG_RUNTIME_DIR").unwrap_or_default(), exe: helper_path(), hub_pid: std::process::id(), helper: None, gen: 0, pend: HashMap::new(), next: 0,
+    let mut a = Actor { me: tx.clone(), home, rt: std::env::var("XDG_RUNTIME_DIR").unwrap_or_default(), bun: helper_path(), hub_pid: std::process::id(), helper: None, gen: 0, pend: HashMap::new(), next: 0,
         srvs: vec![], wait: vec![], shown: String::new(), env: Env::default(), lines: lines.clone() };
     tokio::spawn(async move { while let Some(m) = rx.recv().await { a.handle(m) } });
     if IPC.set(Ipc { tx, lines }).is_ok() { hub.register_rpc(Arc::new(IpcRpc)) }
@@ -366,4 +375,37 @@ mod tests {
         assert_eq!(failed("w")["fallback"], json!(true));
     }
     #[test] fn pro_paths() { assert_eq!(pro_of("/p/a.kicad_pro"), "/p/a.kicad_pro"); assert_eq!(pro_of("a.kicad_pro"), ""); }
+
+    /// The whole path through the actor on the default transport, no Bun: a request starts the server, waits while it starts,
+    /// Ping and GetVersion hand it over, and only then the request goes out; its clean exit leaves the record stopped.
+    #[tokio::test] async fn actor_over_the_rust_transport() {
+        use super::super::nng::tests as stand_in;
+        use std::os::unix::fs::PermissionsExt;
+        // the real server's answer to GetVersion (bp.4), and one with no message for what is not asked about
+        let version: Vec<u8> = { let h = "0a040a02746b120208011a5c0a3c747970652e676f6f676c65617069732e636f6d2f6b696170692e636f6d6d6f6e2e636f6d6d616e64732e47657456657273696f6e526573706f6e7365121c0a1a080a1063221431302e39392e302d756e6b6e6f776e2d62702e34"; (0..h.len() / 2).map(|i| u8::from_str_radix(&h[2 * i..2 * i + 2], 16).unwrap()).collect() };
+        let root = std::env::temp_dir().join(format!("ipc-actor-{}", std::process::id())); let _ = std::fs::remove_dir_all(&root); std::fs::create_dir_all(&root).unwrap();
+        let (rt, project) = (root.to_string_lossy().to_string(), "/p/a.kicad_pro".to_string());
+        let dir = ks::dir(&rt, "", &project); std::fs::create_dir_all(&dir).unwrap();
+        let sock = format!("{dir}/api.sock"); let l = tokio::net::UnixListener::bind(&sock).unwrap();
+        let cli = format!("{rt}/kicad-cli"); std::fs::write(&cli, "#!/bin/sh\necho \"KiCad API server listening at ipc://$4\"\nsleep 1\n").unwrap(); std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let answered = version.clone();
+        let srv = tokio::spawn(async move { // Ping, GetVersion, then the request itself
+            let (mut s, _) = stand_in::accept(&l).await; let mut asked = vec![];
+            for _ in 0..3 { let (id, b) = stand_in::read_req(&mut s).await.unwrap(); asked.push(String::from_utf8_lossy(&b).to_string()); stand_in::write_rep(&mut s, id, &answered).await }
+            asked
+        });
+        let (tx, mut rx) = mpsc::unbounded_channel(); let lines = Arc::new(std::sync::Mutex::new(String::new()));
+        let mut a = Actor { me: tx.clone(), home: String::new(), rt, bun: None, hub_pid: std::process::id(), helper: None, gen: 0, pend: HashMap::new(), next: 0, srvs: vec![], wait: vec![], shown: String::new(), env: Env::default(), lines: lines.clone() };
+        tokio::spawn(async move { while let Some(m) = rx.recv().await { a.handle(m) } });
+        let env = Env { cli, version: "10.99.0-bp.4".into(), ..Default::default() };
+        let (t, r) = oneshot::channel();
+        tx.send(Msg::Ask { project: project.clone(), env, ty: "kiapi.common.commands.GetVersion".into(), msg: json!({}), reply: t }).unwrap();
+        let o = tokio::time::timeout(Duration::from_secs(10), r).await.expect("an answer in time").unwrap();
+        assert_eq!(o["ok"], json!(true), "{o}"); assert_eq!(o["message"]["version"]["full_version"], json!("10.99.0-unknown-bp.4"));
+        let asked = srv.await.unwrap();
+        assert!(asked[0].ends_with("commands.Ping") && asked[1].ends_with("commands.GetVersion") && asked[2].ends_with("commands.GetVersion"), "{asked:?}");
+        assert_eq!(lines.lock().unwrap().clone(), format!("{project}|ready|"));
+        for _ in 0..40 { tokio::time::sleep(Duration::from_millis(100)).await; if lines.lock().unwrap().contains("|stopped|") { break } }
+        assert_eq!(lines.lock().unwrap().clone(), format!("{project}|stopped|"));
+    }
 }
