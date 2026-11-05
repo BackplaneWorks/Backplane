@@ -65,20 +65,30 @@ impl Index {
     pub fn last(&self, project: &str) -> u64 { self.lasts.get(project).copied().unwrap_or(0) }
 }
 
-pub struct Feed { st: Mutex<(Index, Vec<(u32, Vec<Value>)>)> }
+pub struct Feed { st: Mutex<(Index, Vec<(u32, Vec<Value>)>)>, tx: Mutex<Option<tokio::sync::mpsc::UnboundedSender<super::outbox::Batch>>> }
 const CHUNK: usize = 20_000;
 /// A page is cut at about this many characters (one bigger line goes alone).
 pub const PAGE_CHARS: usize = 400_000;
 
 impl Feed {
-    pub fn new() -> Arc<Feed> { Arc::new(Feed { st: Mutex::new((Index::default(), vec![])) }) }
+    pub fn new() -> Arc<Feed> { Arc::new(Feed { st: Mutex::new((Index::default(), vec![])), tx: Mutex::new(None) }) }
     pub fn ready(&self) -> bool { self.st.lock().unwrap().0.built }
     pub fn with<R>(&self, f: impl FnOnce(&Index) -> R) -> R { f(&self.st.lock().unwrap().0) }
     pub fn observe(&self, events: &[Value], first_seq: u32) {
         let mut g = self.st.lock().unwrap();
         if !g.0.built { g.1.push((first_seq, events.to_vec())); return }
+        let before = g.0.shared.len();
         for (i, e) in events.iter().enumerate() { let seq = first_seq + i as u32; if seq > g.0.applied { g.0.fold(seq, e) } }
+        // what this commit shares goes to the owner's other machines (the push machine, outbox.rs)
+        let ns: Vec<u32> = g.0.shared[before..].to_vec();
+        drop(g);
+        if !ns.is_empty() {
+            let items: Vec<super::far::Item> = ns.iter().filter_map(|n| { let e = &events[(*n - first_seq) as usize]; Hub::wire_item(&e.to_string()).map(|c| super::far::Item { n: *n as u64, c }) }).collect();
+            if let Some(tx) = self.tx.lock().unwrap().as_ref() { let _ = tx.send((first_seq as u64 - 1, first_seq as u64 + events.len() as u64 - 1, items)); }
+        }
     }
+    /// The receiver of what each commit shares (one batch per commit that shares anything).
+    pub fn pushes(&self) -> tokio::sync::mpsc::UnboundedReceiver<super::outbox::Batch> { let (tx, rx) = tokio::sync::mpsc::unbounded_channel(); *self.tx.lock().unwrap() = Some(tx); rx }
     fn finish(&self, mut local: Index) {
         let mut g = self.st.lock().unwrap();
         local.built = true;

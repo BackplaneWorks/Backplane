@@ -2,14 +2,13 @@
 //! (`POST /far/log`) that fills a gap or follows another history. Both end in `FarStore::take`, whose events go to the
 //! presenter (`Hub::fold_mirror`) renamed to this hub's ids, never to the log or `Model`. Admission is the signed
 //! intake (`Peering::signed_in`: fresh, genuine, once) plus "one of the owner's own machines" (`Far.own.id`: live,
-//! verified, sync not off, one of the machines this hub found). Not yet here: the owner side (`/far/log` served,
-//! pushes sent, `/far/rpc`), streamed text (`live`) and desk notes (`note`): those answer ok and are dropped.
+//! verified, sync not off, one of the machines this hub found). Served here too: `/far/log` (feed.rs) and the pushes (outbox.rs). Not yet: `/far/rpc`, streamed text (`live`) and desk notes (`note`): those answer ok and are dropped.
 use super::{far::Item, farstore::{epoch_changed, FarStore}, machines, peering::{PReq, Peering}, peers::Peers};
 use crate::{api::{Fut, HttpHandler, HttpReply}, hub::Hub};
 use serde_json::{json, Value};
 use std::{collections::HashMap, sync::{Arc, Mutex}};
 
-pub struct FarSync { pub store: Arc<FarStore>, pub peering: Arc<Peering>, catalogs: Mutex<HashMap<String, Value>>, pulling: Mutex<std::collections::HashSet<String>> }
+pub struct FarSync { pub store: Arc<FarStore>, pub peering: Arc<Peering>, pub feed: std::sync::OnceLock<Arc<super::feed::Feed>>, catalogs: Mutex<HashMap<String, Value>>, pulling: Mutex<std::collections::HashSet<String>> }
 
 /// Far.own.id: a live link that is one of the owner's machines (verified, not off, found by this hub).
 pub fn own_link(p: &Peers, machines_json: &Value, link: &str) -> bool {
@@ -20,7 +19,7 @@ fn items_of(o: &Value) -> Vec<Item> { o["items"].as_array().into_iter().flatten(
 fn forbidden() -> HttpReply { HttpReply::text("403 Forbidden", "threads are shared with the owner's own machines") }
 
 impl FarSync {
-    pub fn new(store: Arc<FarStore>, peering: Arc<Peering>) -> Arc<FarSync> { Arc::new(FarSync { store, peering, catalogs: Mutex::new(HashMap::new()), pulling: Default::default() }) }
+    pub fn new(store: Arc<FarStore>, peering: Arc<Peering>) -> Arc<FarSync> { Arc::new(FarSync { store, peering, feed: Default::default(), catalogs: Mutex::new(HashMap::new()), pulling: Default::default() }) }
     fn own(&self, link: &str) -> bool { let j = self.peering.routes.machines_value(); self.peering.table.with(|p| own_link(p, &j, link)) }
     pub fn catalog(&self, link: &str) -> Value { self.catalogs.lock().unwrap().get(link).cloned().unwrap_or(json!([])) }
 
@@ -35,6 +34,18 @@ impl FarSync {
         Ok(t.got.gap)
     }
 
+    /// POST /far/log: a page of what this hub shares after `since` (the Bend peer's pull, no codec: a plain body passes).
+    pub async fn log(self: &Arc<Self>, hub: &Arc<Hub>, r: &PReq) -> HttpReply {
+        let link = match self.peering.signed_in("far-log", r) { Ok(p) => p, Err(e) => return e };
+        if !self.own(&link) { return forbidden() }
+        let Ok(o) = serde_json::from_slice::<Value>(&r.body) else { return HttpReply::text("400 Bad Request", "not JSON") };
+        let Some(feed) = self.feed.get() else { return HttpReply::text("503 Service Unavailable", "not ready") };
+        let cat = feed.catalog(hub).await;
+        match feed.answer(hub, o["since"].as_u64().unwrap_or(0), o["epoch"].as_str().unwrap_or(""), cat) {
+            Some(v) => HttpReply { status: "200 OK", ctype: "application/json".into(), extra: String::new(), body: v.to_string().into_bytes() },
+            None => HttpReply::text("503 Service Unavailable", "not ready"),
+        }
+    }
     /// POST /far/push
     pub async fn push(self: &Arc<Self>, hub: &Arc<Hub>, r: &PReq) -> HttpReply {
         let link = match self.peering.signed_in("far-push", r) { Ok(p) => p, Err(e) => return e };
@@ -86,14 +97,14 @@ pub async fn fold_in_chunks(hub: &Arc<Hub>, events: &[Value]) { for c in events.
 
 pub struct FarRoutes(pub Arc<FarSync>);
 impl HttpHandler for FarRoutes {
-    fn routes(&self) -> &'static [&'static str] { &["/far/push"] }
+    fn routes(&self) -> &'static [&'static str] { &["/far/push", "/far/log"] }
     fn own_auth(&self) -> bool { true }
     fn body_max(&self) -> usize { 256 << 10 }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, req: &'a crate::auth::Req) -> Fut<'a, HttpReply> {
         Box::pin(async move {
             if req.method != "POST" { return HttpReply::text("404 Not Found", "not found") }
             let p = super::peerhttp::PeerRoutes::preq(req);
-            self.0.push(hub, &p).await
+            if req.route() == "/far/log" { self.0.log(hub, &p).await } else { self.0.push(hub, &p).await }
         })
     }
 }

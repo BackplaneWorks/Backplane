@@ -18,6 +18,7 @@ pub mod farstore;
 pub mod listener;
 pub mod machines;
 pub mod origin;
+pub mod outbox;
 pub mod owner;
 pub mod pairing;
 pub mod peerhttp;
@@ -45,6 +46,12 @@ pub fn farhttp_start(hub: std::sync::Arc<crate::hub::Hub>, peering: std::sync::A
             farsync::fold_in_chunks(&hub, &ev).await;
         }
         let sync = farsync::FarSync::new(store, peering.clone());
+        // the owner's side: the feed index (built from the log off the workers) answers pulls and drives the pushes
+        let feed = feed::Feed::new();
+        let rx = feed.pushes();
+        feed.start(&hub).await;
+        let _ = sync.feed.set(feed.clone());
+        tokio::spawn(outbox::run(hub.clone(), peering.clone(), outbox::Outbox::new(), rx));
         hub.register_http(std::sync::Arc::new(farsync::FarRoutes(sync.clone())));
         loop {
             let links: Vec<String> = peering.table.with(|p| p.live().into_iter().map(|x| x.id).collect());

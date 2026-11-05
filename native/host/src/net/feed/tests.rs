@@ -69,3 +69,21 @@ async fn hub(tag: &str) -> (Arc<Hub>, std::path::PathBuf) {
     assert!(!p1.to_string().contains("SECRETTOKEN"));
     let _ = std::fs::remove_dir_all(h);
 }
+
+#[test] fn far_epoch_on_unknown_lines() {
+    let body = |first: &str, len: usize, seq: usize| epoch_of(first, len, seq);
+    assert_eq!(body("x", 3, 3), sign::header("00", 0, "x|view:3")); assert_eq!(body("x", 5, 3), sign::header("00", 0, "x|unknown:2|view:3"));
+}
+#[test] fn far_epoch_view_bumped() { assert_ne!(epoch_of("x", 3, 3), sign::header("00", 0, "x|view:2")); }
+#[tokio::test] async fn far_a_commit_that_shares_goes_to_the_push_machine_in_wire_form() {
+    let (hub, h) = hub("push").await;
+    let f = Feed::new(); f.start(&hub).await; let mut rx = f.pushes();
+    let n0 = hub.store.len() as u64;
+    f.observe(&[json!({"$":"SettingSet","key":"k","value":"v","at":1})], n0 as u32 + 1);
+    assert!(rx.try_recv().is_err(), "a setting stays home");
+    f.observe(&[created("t", "", 2), msg("t", 3)], n0 as u32 + 2);
+    let (from, to, items) = rx.try_recv().unwrap();
+    assert_eq!((from, to, items.iter().map(|i| i.n).collect::<Vec<_>>()), (n0 + 1, n0 + 3, vec![n0 + 2, n0 + 3]));
+    assert_eq!(items[1].c["text"], "hi");
+    let _ = std::fs::remove_dir_all(h);
+}
