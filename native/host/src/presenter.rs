@@ -6,7 +6,7 @@ use serde_json::Value;
 use std::{future::Future, path::Path, pin::Pin, process::Stdio, time::Duration};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
-use tokio::process::{Child, Command};
+use tokio::process::Child;
 use tokio::sync::Mutex;
 
 pub type Fut<'a, T> = Pin<Box<dyn Future<Output = Result<T>> + Send + 'a>>;
@@ -20,6 +20,9 @@ pub trait Presenter: Send + Sync {
     fn ping(&self) -> Fut<'_, ()>;
     /// Whether the presenter wants the hub's log folded into it at start.
     fn wants_log(&self) -> bool { true }
+    /// The presenter lost its state (its process died): `restart` it, then the hub folds the log into it again.
+    fn is_down(&self) -> bool { false }
+    fn restart(&self) -> Fut<'_, ()> { Box::pin(async { Ok(()) }) }
 }
 
 /// JSON text made pure ASCII: non-ASCII becomes \uXXXX (UTF-16 pairs), as the policy requires.
@@ -36,10 +39,17 @@ pub fn ascii_json(v: &Value) -> String {
 }
 
 struct Link { read: BufReader<tokio::net::tcp::OwnedReadHalf>, write: tokio::net::tcp::OwnedWriteHalf }
-pub struct BpPolicy { link: Mutex<Link>, _child: Child }
+/// The policy child. When it dies (kill -9, a crash, EOF) the link is dropped, every call answers "policy down" (the hub answers
+/// PRESENTER_UNAVAILABLE, retryable), and the hub's supervisor calls `restart`, then folds the whole log into the new child from the
+/// writer task (Hub::resync_presenter) so it holds exactly what the old one did.
+pub struct BpPolicy { bin: std::path::PathBuf, link: Mutex<Option<Link>>, child: std::sync::Mutex<Option<Child>>, down: std::sync::atomic::AtomicBool }
 
 impl BpPolicy {
     pub async fn spawn(bin: &Path) -> Result<BpPolicy> {
+        let (link, child) = Self::start(bin).await?;
+        Ok(BpPolicy { bin: bin.to_path_buf(), link: Mutex::new(Some(link)), child: std::sync::Mutex::new(Some(child)), down: false.into() })
+    }
+    async fn start(bin: &Path) -> Result<(Link, Child)> {
         let port = { let l = std::net::TcpListener::bind("127.0.0.1:0")?; l.local_addr()?.port() };
         let mut child = crate::proc::tokio_cmd(crate::proc::Kind::Local, bin).arg(port.to_string()).stdout(Stdio::piped()).stderr(Stdio::inherit()).kill_on_drop(true)
             .spawn().with_context(|| format!("start {}", bin.display()))?;
@@ -54,15 +64,20 @@ impl BpPolicy {
         }
         let (r, w) = last.context("connect to policy")?.into_split();
         s_nodelay(&w);
-        Ok(BpPolicy { link: Mutex::new(Link { read: BufReader::new(r), write: w }), _child: child })
+        Ok((Link { read: BufReader::new(r), write: w }, child))
     }
     async fn call(&self, op: &str, body: &str) -> Result<String> {
-        let mut l = self.link.lock().await;
-        l.write.write_all(format!("{op} {body}\n").as_bytes()).await?;
-        let mut line = String::new();
-        let n = tokio::time::timeout(Duration::from_secs(120), l.read.read_line(&mut line)).await.context("policy timed out")??;
-        if n == 0 { bail!("policy closed") }
-        Ok(line.trim_end().to_string())
+        let mut g = self.link.lock().await;
+        let Some(l) = g.as_mut() else { bail!("policy down") };
+        let r: Result<String> = async {
+            l.write.write_all(format!("{op} {body}\n").as_bytes()).await?;
+            let mut line = String::new();
+            let n = tokio::time::timeout(Duration::from_secs(120), l.read.read_line(&mut line)).await.context("policy timed out")??;
+            if n == 0 { bail!("policy closed") }
+            Ok(line.trim_end().to_string())
+        }.await;
+        if r.is_err() { *g = None; self.down.store(true, std::sync::atomic::Ordering::Relaxed); } // the next call finds it down; the supervisor restarts it
+        r
     }
 }
 fn s_nodelay(_w: &tokio::net::tcp::OwnedWriteHalf) {}
@@ -76,6 +91,17 @@ impl Presenter for BpPolicy {
         Box::pin(async move { let r = self.call("V", &ascii_json(params)).await?; Ok(serde_json::from_str(&r).with_context(|| format!("policy reply: {}", &r[..r.len().min(200)]))?) })
     }
     fn ping(&self) -> Fut<'_, ()> { Box::pin(async move { if self.call("P", "").await? != "pong" { bail!("no pong") } Ok(()) }) }
+    fn is_down(&self) -> bool { self.down.load(std::sync::atomic::Ordering::Relaxed) }
+    fn restart(&self) -> Fut<'_, ()> {
+        Box::pin(async move {
+            if let Some(mut old) = self.child.lock().unwrap().take() { let _ = old.start_kill(); }
+            let (link, child) = Self::start(&self.bin).await?;
+            *self.child.lock().unwrap() = Some(child);
+            *self.link.lock().await = Some(link);
+            self.down.store(false, std::sync::atomic::Ordering::Relaxed);
+            Ok(())
+        })
+    }
 }
 
 /// A presenter with canned answers, for tests and for running the hub without the policy binary.

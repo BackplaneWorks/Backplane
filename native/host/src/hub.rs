@@ -20,7 +20,7 @@ pub struct Hub {
     live: std::sync::Mutex<std::collections::HashMap<String, String>>,
     pub window_bin: std::sync::OnceLock<PathBuf>,
     me: std::sync::OnceLock<std::sync::Weak<Hub>>, next_client: AtomicU64,
-    outboxes: std::sync::Mutex<std::collections::HashMap<u64, Slot>>, outbox_max: std::sync::atomic::AtomicUsize, signal_seq: AtomicU64, id_alloc: AtomicU64, extra_info: std::sync::Mutex<std::collections::BTreeMap<String, String>>,
+    outboxes: std::sync::Mutex<std::collections::HashMap<u64, Slot>>, outbox_max: std::sync::atomic::AtomicUsize, signal_seq: AtomicU64, id_alloc: AtomicU64, need_resync: std::sync::atomic::AtomicBool, extra_info: std::sync::Mutex<std::collections::BTreeMap<String, String>>,
 }
 
 /// One item of a connection's outbox: a value the hub encodes (CBOR with the dictionaries), or bytes that go out as
@@ -84,12 +84,19 @@ impl Hub {
         let (ftx, _) = broadcast::channel(1024);
         let model = Model::build(&store)?;
         let hub = Arc::new(Hub { cfg, auth, epoch, presenter, store: store.clone(), commits: ctx, model: Mutex::new(model), gen: AtomicU64::new(1), changed: tx, frames: ftx, native_key: { let mut b = [0u8; 16]; if let Ok(mut f) = std::fs::File::open("/dev/urandom") { let _ = std::io::Read::read_exact(&mut f, &mut b); } hex::encode(b) },
-            rpc: Default::default(), http: Default::default(), views: Default::default(), observers: Default::default(), transforms: Default::default(), far: Default::default(), pairing: Default::default(), auth_route: Default::default(), outbox_max: std::sync::atomic::AtomicUsize::new(OUTBOX_MAX), signal_seq: AtomicU64::new(store.len() as u64), id_alloc: AtomicU64::new(0), extra_info: Default::default(), live: Default::default(), window_bin: Default::default(), me: Default::default(), next_client: AtomicU64::new(1), outboxes: Default::default() });
+            rpc: Default::default(), http: Default::default(), views: Default::default(), observers: Default::default(), transforms: Default::default(), far: Default::default(), pairing: Default::default(), auth_route: Default::default(), outbox_max: std::sync::atomic::AtomicUsize::new(OUTBOX_MAX), signal_seq: AtomicU64::new(store.len() as u64), id_alloc: AtomicU64::new(0), need_resync: Default::default(), extra_info: Default::default(), live: Default::default(), window_bin: Default::default(), me: Default::default(), next_client: AtomicU64::new(1), outboxes: Default::default() });
         let _ = hub.me.set(Arc::downgrade(&hub));
         hub.bootstrap()?;
         hub.signal_seq.store(hub.store.len() as u64, Relaxed); // start-up housekeeping counts: a restart is a new signal
         hub.fold_log().await?;
         tokio::spawn(Hub::writer(hub.clone(), crx));
+        // the presenter's process died (kill -9, a crash): restart it and fold the log into it again from the writer task
+        { let hub = hub.clone(); tokio::spawn(async move { loop {
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            if hub.presenter.is_down() {
+                match hub.presenter.restart().await { Ok(()) => { eprintln!("presenter restarted; folding the log again"); hub.resync_presenter().await } Err(e) => { eprintln!("presenter restart failed: {e:#}"); tokio::time::sleep(std::time::Duration::from_secs(2)).await } }
+            }
+        } }); }
         Ok(hub)
     }
 
@@ -183,6 +190,13 @@ impl Hub {
 
     /// Events of one request. Requests queue to one writer task that group-commits everything waiting: one
     /// write and one fsync for the batch, the model and the presenter in log order, then every caller is told.
+    /// Fold the whole log into the presenter again, in the writer task (so no commit interleaves with it): the next batch, even an empty one,
+    /// is replaced by `fold_log`. Views answer PRESENTER_UNAVAILABLE meanwhile.
+    pub async fn resync_presenter(&self) {
+        self.need_resync.store(true, Relaxed);
+        let (done, rx) = tokio::sync::oneshot::channel();
+        if self.commits.send(Commit { events: vec![], done }).is_ok() { let _ = rx.await; }
+    }
     pub async fn commit_many(&self, events: &[Value]) -> Result<u64> {
         let (done, rx) = tokio::sync::oneshot::channel();
         // settings lane: a stored secret never reaches the log, the model, the presenter or a client (Hub.step.go, Secret.changes)
@@ -217,7 +231,9 @@ impl Hub {
                     { let mut m = hub.model.lock().await; for (i, l) in lines.iter().enumerate() { m.apply_line((first_idx + i + 1) as u32, l); } }
                     let all: Vec<Value> = batch.iter().flat_map(|c| c.events.iter().cloned()).collect();
                     { let obs: Vec<Arc<dyn Observer>> = hub.observers.read().unwrap().clone(); for o in obs { let first = (first_idx + 1) as u32; let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| o.committed(&hub, &all, first))); } }
-                    let _ = hub.presenter.fold(&json!({"t":"changes","items":all,"now":now_ms()})).await;
+                    // after a presenter restart the whole log (this batch included) is folded instead of the batch
+                    if hub.need_resync.swap(false, Relaxed) { if let Err(e) = hub.fold_log().await { eprintln!("presenter resync failed: {e:#}"); hub.need_resync.store(true, Relaxed); } }
+                    else { let _ = hub.presenter.fold(&json!({"t":"changes","items":all,"now":now_ms()})).await; }
                     let n = hub.store.len() as u64; if all.iter().any(signal_affects) { hub.signal_seq.store(n, Relaxed); } let _ = hub.changed.send(n);
                     let mut upto = first_idx;
                     for c in batch { upto += c.events.len(); let _ = c.done.send(Ok(upto as u64)); }
@@ -588,6 +604,50 @@ mod tests {
         all.sort(); let n = all.len();
         for w in all.windows(2) { assert!(w[1] >= w[0] + 4, "ranges overlap: {} then {}", w[0], w[1]); }
         assert_eq!(n, 1600);
+    }
+
+    // soak finding: kill -9 of the policy child was permanent. It is restarted and the log is folded into the new child again.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn a_killed_policy_child_is_restarted_and_refolded() {
+        let dir = home("policyrestart");
+        let script = dir.join("fakepolicy.py");
+        std::fs::write(&script, r#"#!/usr/bin/env python3
+import socket, sys, json, os
+port = int(sys.argv[1]); s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); s.bind(("127.0.0.1", port)); s.listen(1)
+print("listening", flush=True)
+c, _ = s.accept(); f = c.makefile("rwb"); frames = []; items = 0
+for raw in f:
+    line = raw.decode().rstrip("\n"); op, _, body = line.partition(" ")
+    if op == "F":
+        j = json.loads(body); frames.append(j.get("t")); items += len(j.get("items", []))
+        f.write(b"ok\n")
+    elif op == "V":
+        f.write((json.dumps({"remoteReady": True, "shown": {"pid": os.getpid(), "frames": frames[:3], "items": items}, "session": {}, "cmds": []}) + "\n").encode())
+    elif op == "P": f.write(b"pong\n")
+    f.flush()
+"#).unwrap();
+        { use std::os::unix::fs::PermissionsExt; std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap(); }
+        let h = Hub::start(cfg(&dir), Arc::new(crate::presenter::BpPolicy::spawn(&script).await.unwrap())).await.unwrap();
+        h.commit_many(&[json!({"$":"ProjectCreated","id":"p9","title":"x","root":"/x","at":9})]).await.unwrap();
+        let (mut c, _g) = h.connect(true);
+        let r0 = req(&c, &h, "view.open", (1 << 47) + 5, json!({})); let out = h.request(&mut c, &r0).await;
+        let pid = out[0]["result"]["shown"]["pid"].as_u64().expect("the first child answers");
+        unsafe { libc::kill(pid as i32, libc::SIGKILL); }
+        // while it is down a view is retryable, not a hang
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let r1 = req(&c, &h, "view.update", (1 << 47) + 6, json!({"viewId": format!("{}:{}", c.gen, (1u64 << 47) + 5)}));
+        let down = h.request(&mut c, &r1).await;
+        assert!(down[0]["ok"] == false || down[0]["result"]["shown"]["pid"].as_u64() != Some(pid), "{down:?}");
+        // and it comes back with the log folded in
+        let mut back = None;
+        for i in 0..80 {
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            let r = req(&c, &h, "view.update", (1 << 47) + 10 + i, json!({"viewId": format!("{}:{}", c.gen, (1u64 << 47) + 5)}));
+            let o = h.request(&mut c, &r).await;
+            if let Some(p2) = o[0]["result"]["shown"]["pid"].as_u64() { if p2 != pid { back = Some(o[0]["result"]["shown"].clone()); break } }
+        }
+        let shown = back.expect("a new policy child answers within 20 s");
+        assert_eq!(shown["frames"][0], "log", "the new child got the whole log first");
+        assert!(shown["items"].as_u64().unwrap() >= h.store.len() as u64, "all of the log is in it: {shown}");
     }
 
     #[tokio::test] async fn open_assembles_identity_in_js_order() {
