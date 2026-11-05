@@ -38,6 +38,28 @@ fn state_word(t: &Thread) -> &'static str { match t.turn { crate::state::Turn::R
 
 fn rank(t: &Thread) -> u64 { t.created.max(t.unsettled_at) }
 
+// ---- manual order keys (core/model.bend "Order keys"): a binary fraction 0.b1b2b3..., zeros after its last digit ----------
+fn key_read(hex: &str) -> Vec<bool> {
+    hex.bytes().flat_map(|c| { let v = match c { b'0'..=b'9' => c - b'0', b'a'..=b'f' => c - b'a' + 10, _ => 0 }; [v & 8 != 0, v & 4 != 0, v & 2 != 0, v & 1 != 0] }).collect()
+}
+/// Key.cmp: "1" and "10" are the same place
+fn key_cmp(a: &[bool], b: &[bool]) -> std::cmp::Ordering {
+    let n = a.len().max(b.len());
+    for i in 0..n { let (x, y) = (a.get(i).copied().unwrap_or(false), b.get(i).copied().unwrap_or(false)); if x != y { return if x { std::cmp::Ordering::Greater } else { std::cmp::Ordering::Less } } }
+    std::cmp::Ordering::Equal
+}
+fn order_key(st: &State, id: &str, section: &str) -> Vec<bool> { st.order_keys.get(id).map(|k| key_read(if section == "pinned" { &k.0 } else { &k.1 })).unwrap_or_default() }
+/// Slot.before for the pinned and active shelves: keyed threads first, by key; the rest newest first
+fn slot_cmp(st: &State, section: &str, a: &str, b: &str) -> std::cmp::Ordering {
+    let (ka, kb) = (order_key(st, a, section), order_key(st, b, section));
+    match (ka.is_empty(), kb.is_empty()) {
+        (false, false) => key_cmp(&ka, &kb),
+        (false, true) => std::cmp::Ordering::Less,
+        (true, false) => std::cmp::Ordering::Greater,
+        (true, true) => rank(&st.threads[b]).cmp(&rank(&st.threads[a])),
+    }
+}
+
 // ---- the thread tree (core/subthreads.bend) -------------------------------------------------------------------------------
 fn parent_raw<'a>(st: &'a State, id: &str) -> &'a str {
     let p = st.settings.get(&format!("thread.parent.{id}")).map(|s| s.as_str()).unwrap_or("");
@@ -140,8 +162,8 @@ fn shelves_of<'a>(st: &'a State, project: &str, now: u64) -> Shelves<'a> {
         match shelf_at(t, until, now) { Shelf::Pinned => s.pinned.push(id), Shelf::Active => s.active.push(id), Shelf::Settled => s.settled.push(id), Shelf::Hidden => s.hidden.push(id), Shelf::Snoozed => s.snoozed.push(id) }
     }
     // Sidebar.order.at: newest first (rank), settled by settle time, snoozed soonest to wake; ties keep id order
-    s.pinned.sort_by(|a, b| rank(&st.threads[*b]).cmp(&rank(&st.threads[*a])));
-    s.active.sort_by(|a, b| rank(&st.threads[*b]).cmp(&rank(&st.threads[*a])));
+    s.pinned.sort_by(|a, b| slot_cmp(st, "pinned", a, b));
+    s.active.sort_by(|a, b| slot_cmp(st, "active", a, b));
     s.settled.sort_by(|a, b| st.threads[*b].settled_at.cmp(&st.threads[*a].settled_at));
     s.snoozed.sort_by(|a, b| st.snooze_until.get(*a).copied().unwrap_or(0).cmp(&st.snooze_until.get(*b).copied().unwrap_or(0)));
     s
@@ -191,7 +213,7 @@ pub fn projects(st: &State, o: &Opts) -> Vec<Value> {
         all.sort_by(|a, b| tree_before(*a, *b));
         for (id, _) in all { let p = display_parent(st, id); if !p.is_empty() { kids_by.entry(p).or_default().push(id); } }
     }
-    struct P<'a> { id: &'a str, latest: u64, sh: Shelves<'a> }
+    struct P<'a> { id: &'a str, latest: u64, key: Vec<bool>, sh: Shelves<'a> }
     let mut ps: Vec<P> = vec![];
     for (id, p) in &st.projects {
         if p.removed { continue }
@@ -199,10 +221,16 @@ pub fn projects(st: &State, o: &Opts) -> Vec<Value> {
         // Side.latest: a thread's last move for its project's place; settling by hand counts
         let mut latest = p.created;
         for tid in st.threads.iter().filter(|(_, t)| t.project == *id).map(|(i, _)| i) { let t = &st.threads[tid]; let touched = if t.override_ == Override::ForcedSettled { t.activity.max(t.settled_at) } else { t.activity }; latest = latest.max(touched); }
-        ps.push(P { id: id.as_str(), latest, sh: tree_shelves(st, &raw) });
+        ps.push(P { id: id.as_str(), latest, key: order_key(st, &format!("project:{id}"), "active"), sh: tree_shelves(st, &raw) });
     }
-    // PSlot.before: no manual keys here; latest first, then id
-    ps.sort_by(|a, b| b.latest.cmp(&a.latest).then(a.id.cmp(b.id)));
+    // PSlot.before: keyed projects first, by key; then latest first, then id (SRow.before); equal keys fall back to SRow.before
+    ps.sort_by(|a, b| {
+        let by_row = b.latest.cmp(&a.latest).then(a.id.cmp(b.id));
+        match (a.key.is_empty(), b.key.is_empty()) {
+            (false, false) => match key_cmp(&a.key, &b.key) { std::cmp::Ordering::Equal => by_row, o => o },
+            (false, true) => std::cmp::Ordering::Less, (true, false) => std::cmp::Ordering::Greater, (true, true) => by_row,
+        }
+    });
     let (mut live, mut quiet, mut older) = (vec![], vec![], vec![]);
     for p in &ps {
         let is_live = !(p.sh.pinned.is_empty() && p.sh.active.is_empty() && p.sh.snoozed.is_empty());
@@ -229,7 +257,16 @@ mod tests {
         let v = projects(&s, &opts(&open, 100));
         let ids: Vec<&str> = v[0]["threads"].as_array().unwrap().iter().map(|t| t["id"].as_str().unwrap()).collect();
         assert_eq!(ids, ["h|b", "h|a"]); assert_eq!(v[0]["quiet"], false); assert_eq!(v[0]["shelf"], "Settled 0");
-        let v = projects(&s, &opts(&open, 10_000_000)); assert!(v.is_empty(), "past Quiet.days with nothing on a live shelf the project is Older and folded away");
+        // a project with threads on live shelves stays live however old; settle both by hand and it is Older once Quiet.days have passed
+        let s = fold(&[PC, &tc("a", 11), r#"{"$":"ThreadSettled","id":"a","manual":true,"at":20}"#]);
+        let v = projects(&s, &opts(&open, 100)); assert_eq!(v[0]["quiet"], true, "nothing on a live shelf: quiet, shown faded");
+        let v = projects(&s, &opts(&open, 10_000_000)); assert!(v.is_empty(), "past Quiet.days it is Older, and the folded shelf hides it");
+    }
+    #[test] fn manual_keys_put_keyed_threads_first_and_a_key_ignores_trailing_zeros() {
+        assert_eq!(key_cmp(&key_read("1"), &key_read("10")), std::cmp::Ordering::Equal); assert_eq!(key_cmp(&key_read("1"), &key_read("2")), std::cmp::Ordering::Less);
+        let s = fold(&[PC, &tc("a", 11), &tc("b", 12), &tc("c", 13), r#"{"$":"ThreadOrdered","id":"a","section":"active","key":"8","at":14}"#, r#"{"$":"ThreadOrdered","id":"b","section":"active","key":"4","at":15}"#]);
+        let open = HashSet::new(); let v = projects(&s, &opts(&open, 100));
+        let ids: Vec<&str> = v[0]["threads"].as_array().unwrap().iter().map(|t| t["id"].as_str().unwrap()).collect(); assert_eq!(ids, ["h|b", "h|a", "h|c"]);
     }
     #[test] fn a_child_thread_hangs_under_its_parent_when_the_parent_is_open() {
         let s = fold(&[PC, &tc("a", 11), &tc("b", 12), r#"{"$":"SettingSet","key":"thread.parent.b","value":"a","at":13}"#, r#"{"$":"SettingSet","key":"thread.tree.a","value":"1","at":14}"#]);

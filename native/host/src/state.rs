@@ -63,6 +63,8 @@ pub struct State {
     bot_threads: HashMap<String, String>,
     /// ThreadSnoozed: the time a thread's snooze ends (Nav.until); 0 / absent: never snoozed
     pub snooze_until: HashMap<String, u64>,
+    /// ThreadOrdered/ProjectOrdered: manual order keys (hex) per thread id, and per "project:<id>" for a project's place; (pinned key, active key)
+    pub order_keys: HashMap<String, (String, String)>,
     /// entries whose own thread is the key (Switch.count: the ones filed under a sender for other threads do not count)
     own: HashMap<String, u64>,
     /// events the fold counts but does not (fully) model, by kind: reported by rust-digest so a gap is never silent
@@ -168,6 +170,11 @@ impl State {
             "ThreadParentSet" => { let (id, p) = (s(e, "id")?, s(e, "parent")?); self.set(&format!("thread.parent.{id}"), p); }
             "ThreadForked" => { let (id, src) = (s(e, "id")?, s(e, "source")?); self.set(&format!("fork.{id}"), src); }
             "ThreadSnoozed" => { let (id, until) = (s(e, "id")?, n(e, "until")?); self.snooze_until.insert(id.into(), until); }
+            "ThreadOrdered" => {
+                let (id, section, key) = (s(e, "id")?, s(e, "section")?, s(e, "key")?); n(e, "at")?;
+                let k = self.order_keys.entry(id.into()).or_default(); if section == "pinned" { k.0 = key.into(); } else { k.1 = key.into(); }
+            }
+            "ProjectOrdered" => { let (id, key) = (s(e, "id")?, s(e, "key")?); n(e, "at")?; self.order_keys.entry(format!("project:{id}")).or_default().1 = key.into(); }
             "BotSet" => { let (id, th) = (s(e, "id")?, s(e, "thread")?); self.bot_threads.insert(id.into(), th.into()); }
             "BotDeleted" => { let id = s(e, "id")?; self.bot_threads.remove(id); }
             "TaskDelegated" => {
