@@ -6,8 +6,8 @@ use std::{collections::HashMap, path::PathBuf, time::{Duration, SystemTime, UNIX
 use tokio::sync::mpsc::{self, Sender};
 use tokio_tungstenite::tungstenite::{Message, protocol::WebSocketConfig};
 
-#[derive(Debug)] pub enum Command { Rpc(String,crate::screens::settings::Secret,&'static str), Sleep(f64), Select(String), Send(String), Draft(String), Action(String,String), Page(String), Ask(String,Value,u64) }
-#[derive(Debug)] pub enum Event { PlotTooBig(usize), Rpc(&'static str,bool,String), Answer(u64,Value), Plot(Vec<u8>), NetWake, Picture(Value,Timing), Status(String), Accepted, Error(String), /** the hub answered, and said no: shown, but the connection is fine */ Refused(String) }
+#[derive(Debug)] pub enum Command { Rpc(String,crate::screens::settings::Secret,&'static str), Sleep(f64), Select(String), Send(String), Draft(String), Action(String,String), Page(String), Ask(String,Value,u64), /** read this history page of the thread, then stand on the newest again */ History(String) }
+#[derive(Debug)] pub enum Event { PlotTooBig(usize), Rpc(&'static str,bool,String), Answer(u64,Value), Plot(Vec<u8>), NetWake, Picture(Value,Timing), Status(String), Accepted, /** a history page read for this cursor (None: its answer went stale) */ Older(String,Option<Value>), Error(String), /** the hub answered, and said no: shown, but the connection is fine */ Refused(String) }
 /// The connection label an event sets (None: it leaves the label alone). A refusal is a live connection, so it is not "Disconnected".
 pub fn status_for(ev:&Event)->Option<&'static str>{match ev{Event::Error(_)=>Some("Disconnected"),_=>None}}
 #[cfg(test)] mod status_tests{use super::*;use core::prelude::v1::test;
@@ -47,6 +47,8 @@ struct View {
     hub:String, cid:String, greeting:Value, target:Value, session:Value,
     view_id:String, revision:u64, next:u64, pending:HashMap<u64,(u64,Value,String)>,
     restored:bool, outgoing:HashMap<u64,bool>, rpc_names:HashMap<u64,String>, dirty:bool, controls:HashMap<u64,Control>, sent:HashMap<u64,std::time::Instant>, req_draft:HashMap<u64,String>, offered:HashMap<u64,String>, bases:delta::Bases,
+    /// The history page on its way (request id, cursor), and one waiting for the view's requests to settle: its picture must carry their session.
+    paging:Option<(u64,String)>, want_page:Option<String>,
 }
 #[derive(Default)] struct Control { next:u64, bytes:usize, parts:Vec<String>, done:bool }
 const MAX_CONTROLS:usize=4;const MAX_CONTROL_BYTES:usize=16*1024*1024;const MAX_CONTROL_PARTS:u64=4096;
@@ -54,7 +56,7 @@ impl View {
     fn new(config:&Config)->Self {let mut v=Self::fresh(config);if let Some((target,session))=crate::screens::place::take_view(){v.target=target;v.session=crate::screens::place::opened_session(&session,millis());v.restored=true;}v}
     fn fresh(config:&Config)->Self {Self {restored:false,rpcs:HashMap::new(),asks:HashMap::new(),hub:config.hub.replacen("ws://","http://",1),cid:format!("gpui-{}-{}",std::process::id(),millis()),
         greeting:Value::Null,target:json!({"kind":"recent","id":""}),session:json!({"sel":"","rid":millis(),"drafts":{},"open":{},"adding":false,"panel":false,"info":{}}),
-        view_id:String::new(),revision:0,next:(1_u64<<47)+millis(),pending:HashMap::new(),outgoing:HashMap::new(),rpc_names:HashMap::new(),dirty:false,controls:HashMap::new(),sent:HashMap::new(),req_draft:HashMap::new(),offered:HashMap::new(),bases:delta::Bases::default()}}
+        view_id:String::new(),revision:0,next:(1_u64<<47)+millis(),pending:HashMap::new(),outgoing:HashMap::new(),rpc_names:HashMap::new(),dirty:false,controls:HashMap::new(),sent:HashMap::new(),paging:None,want_page:None,req_draft:HashMap::new(),offered:HashMap::new(),bases:delta::Bases::default()}}
     fn request(&mut self, method:&str, extra:Value)->Value {
         self.next+=1;self.revision+=1;
         let mut p=json!({"version":1,"hub":self.hub,"generation":self.greeting["generation"],"epoch":self.greeting["epoch"],"requestRevision":self.revision,
@@ -77,6 +79,12 @@ impl View {
         if let Some(d)=self.session["sel"].as_str().and_then(|s|self.session["drafts"][s].as_str()).filter(|d|!d.is_empty()) {self.req_draft.insert(self.next,d.to_string());}
         json!({"id":self.next,"m":method,"p":p})
     }
+    /// view.page: a view stays on the page it asked for, so a history page is always followed by this with cursor "", the newest again.
+    fn page(&mut self, cursor:&str)->Value {
+        let request=self.request("view.page",json!({"cursor":cursor,"anchor":{"id":"","offset":0}}));
+        if !cursor.is_empty() {self.paging=Some((self.next,cursor.to_string()));}
+        request
+    }
 }
 pub fn connect(config:Config)->(Sender<Command>,async_channel::Receiver<Event>) {
     crate::screens::place::open(&config);
@@ -93,12 +101,12 @@ pub fn connect(config:Config)->(Sender<Command>,async_channel::Receiver<Event>) 
                         if let Some(secs)=format!("{error:#}").strip_prefix("net_sleep:").and_then(|s|s.parse::<f64>().ok()) {
                             // the e2e harness's net_sleep: the socket is gone for `secs`, then the normal reconnect runs
                             let _=events.send(Event::Status("Disconnected (net_sleep)".into())).await;
-                            view.pending.clear();view.outgoing.clear();view.rpc_names.clear();view.controls.clear();view.offered.clear();view.bases.clear();view.view_id.clear();view.greeting=Value::Null;
+                            view.pending.clear();view.outgoing.clear();view.rpc_names.clear();view.controls.clear();view.offered.clear();view.bases.clear();view.view_id.clear();view.greeting=Value::Null;view.paging=None;view.want_page=None;
                             tokio::time::sleep(Duration::from_secs_f64(secs)).await;let _=events.send(Event::NetWake).await;delay=1;continue;
                         }
                         let token=std::fs::read_to_string(&config.token_file).unwrap_or_default();let mut text=format!("{error:#}");if !token.trim().is_empty(){text=text.replace(token.trim(),"<token>");}eprintln!("GPUI_LOG {{\"disconnect\":{}}}",serde_json::Value::String(text));
                         let _=events.send(Event::Error("Hub disconnected. Draft kept; reconnecting. Check the experimental hub log.".into())).await;
-                        view.pending.clear();view.outgoing.clear();view.rpc_names.clear();view.controls.clear();view.offered.clear();view.bases.clear();view.view_id.clear();view.greeting=Value::Null;
+                        view.pending.clear();view.outgoing.clear();view.rpc_names.clear();view.controls.clear();view.offered.clear();view.bases.clear();view.view_id.clear();view.greeting=Value::Null;view.paging=None;view.want_page=None;
                         tokio::time::sleep(Duration::from_secs(delay)).await;delay=(delay*2).min(10);
                     }
                 }
@@ -122,9 +130,10 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                 Command::Sleep(_)=>unreachable!(),
                 Command::Rpc(m,p,tag)=>{static RPC:std::sync::atomic::AtomicU64=std::sync::atomic::AtomicU64::new(1<<30);let id=RPC.fetch_add(1,std::sync::atomic::Ordering::Relaxed);v.rpcs.insert(id,tag);if v.rpcs.len()>64 {v.rpcs.clear();}json!({"id":id,"m":m,"p":p.0})},
                 Command::Ask(m,p,tag)=>{static ASK:std::sync::atomic::AtomicU64=std::sync::atomic::AtomicU64::new(1<<31);let id=ASK.fetch_add(1,std::sync::atomic::Ordering::Relaxed);v.asks.insert(id,tag);if v.asks.len()>64 {v.asks.clear();}json!({"id":id,"m":m,"p":p})},
-                Command::Select(id)=>{let id=unqualify(&id);v.target=json!({"kind":"thread","id":id});v.session["sel"]=json!(id);v.view_id.clear();v.request("view.open",json!({}))},
+                Command::Select(id)=>{let id=unqualify(&id);v.want_page=None;v.target=json!({"kind":"thread","id":id});v.session["sel"]=json!(id);v.view_id.clear();v.request("view.open",json!({}))},
                 Command::Send(text)=>{ensure!(!v.view_id.is_empty(),"view not ready");let id=v.target["id"].as_str().unwrap_or("").to_string();v.session["drafts"][id]=json!(text);v.request("view.action",json!({"action":"send","value":""}))},
                 Command::Draft(text)=>{let id=v.target["id"].as_str().unwrap_or("").to_string();v.session["drafts"][id]=json!(text);v.request("view.action",json!({"action":"draft","value":text}))},
+                Command::History(cursor)=>{if v.view_id.is_empty()||!v.pending.is_empty()||v.paging.is_some(){v.want_page=Some(cursor);continue;}v.page(&cursor)},
                 Command::Page(value)=>{ensure!(!v.view_id.is_empty(),"view not ready");v.request("view.action",json!({"action":"native-sidebar-page","value":value}))},
                 Command::Action(action,value)=>{if action.starts_with("row-")||action.starts_with("delete")||action.starts_with("rename"){eprintln!("GPUI_LOG {{\"action\":{},\"value\":{}}}",Value::String(action.clone()),Value::String(value.chars().take(80).collect()));}v.request("view.action",json!({"action":action,"value":value}))},
             };
@@ -146,9 +155,10 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                         eprintln!("GPUI_LOG {}",json!({"rpc_reply":name,"ok":x["ok"]==true,"error":why.chars().take(160).collect::<String>()}));
                         if x["ok"]==true {if is_post {let _=events.send(Event::Accepted).await;}}else{let _=events.send(Event::Refused(format!("The hub refused it: {why}"))).await;}if v.dirty&&v.pending.is_empty()&&!v.view_id.is_empty(){v.dirty=false;let request=v.request("view.update",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;}continue;}
                     let Some((revision,target,method))=v.pending.remove(&id) else{continue};
+                    let paged=v.paging.take_if(|(page,_)|*page==id).map(|(_,cursor)|cursor);
                     // the place kept from the last run may be gone (a thread deleted since, a page this hub does not have): open as on a first run
                     if x["ok"]!=true&&v.restored&&method=="view.open" {v.restored=false;v.target=json!({"kind":"recent","id":""});v.session["sel"]=json!("");v.view_id.clear();let request=v.request("view.open",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;continue;}
-                    if x["ok"]!=true {let _=events.send(Event::Refused(format!("View request refused: {}",x["error"]["code"]))).await;continue;}
+                    if x["ok"]!=true {if let Some(cursor)=paged {let _=events.send(Event::Older(cursor,None)).await;}let _=events.send(Event::Refused(format!("View request refused: {}",x["error"]["code"]))).await;continue;}
                     let mut r:Value=x["result"].take();
                     if let Some(control)=r["controlId"].as_u64() {
                         let c=v.controls.remove(&control).filter(|c|c.done);
@@ -175,7 +185,14 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                     let decode_ms=decoded.duration_since(recv).as_secs_f64()*1000.0;
                     let timing=Timing{rtt_ms,decode_ms,process_ms,bytes:size,delta:is_delta};
                     let rv=r;let r=&rv;
-                    if target!=v.target||revision!=v.revision {v.dirty=true;continue;}
+                    if target!=v.target||revision!=v.revision {
+                        v.dirty=true;
+                        if let Some(cursor)=paged {
+                            let _=events.send(Event::Older(cursor,None)).await;
+                            if target==v.target {let request=v.page("");sink.send(Message::Binary(wire::encode(&request).into())).await?;}
+                        }
+                        continue;
+                    }
                     ensure!(r["version"]==1&&r["hub"]==v.hub&&r["generation"]==v.greeting["generation"]&&r["epoch"]==v.greeting["epoch"]&&r["requestRevision"]==revision&&r["target"]==target,"view identity mismatch");
                     v.view_id=r["viewId"].as_str().context("missing view id")?.to_string();
                     ensure!(r["session"].is_object(),"missing session");v.session=r["session"].clone();v.restored=false;crate::screens::place::note_view(&v.target,&v.session);
@@ -192,6 +209,10 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                         }
                     }
                     if r["nextTarget"].is_object(){v.target=r["nextTarget"].clone();v.view_id.clear();let request=v.request("view.open",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;}
+                    else if let Some(cursor)=paged {
+                        let _=events.send(Event::Older(cursor,Some(rv))).await;
+                        let request=v.page("");sink.send(Message::Binary(wire::encode(&request).into())).await?;
+                    }
                     else if r["shown"].is_object(){let _=events.send(Event::Picture(rv,timing)).await;let _=events.send(Event::Status("Connected".into())).await;}
                 },
                 "view.control"=>{
@@ -207,6 +228,7 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                 _=>{}
             }
             if v.dirty&&v.pending.is_empty()&&!v.view_id.is_empty(){v.dirty=false;let request=v.request("view.update",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;}
+            else if v.want_page.is_some()&&v.pending.is_empty()&&v.paging.is_none()&&!v.view_id.is_empty(){let cursor=v.want_page.take().unwrap_or_default();let request=v.page(&cursor);sink.send(Message::Binary(wire::encode(&request).into())).await?;}
         },
         _=heartbeat.tick()=>{ensure!(last.elapsed()<Duration::from_secs(35),"hub heartbeat timeout");sink.send(Message::Ping(Vec::new().into())).await?;}
     }}

@@ -48,9 +48,11 @@ check "no draft text in the place file" sh -c "! grep -q 'a draft kept' '$SW/hom
 check "/dev/turns needs the token" test "$(curl -s -m3 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/dev/turns")" = 401
 none_running() { [ "$(token_turns)" = '{"running":0}' ]; }
 wait_for 40 none_running; check "/dev/turns goes back to none when the turn ends" none_running
-y_of() { grep "\"name\":\"$1\"" "$SW/$2" 2>/dev/null | tail -1 | python3 -I -c 'import json,sys; t=sys.stdin.read(); print(round(json.loads(t.split(" ",1)[1])["y"])) if t else print("none")'; }
-Y0=$(y_of left client.log); echo "left the thread scrolled to y=$Y0"
-check "the thread was scrolled up from its end" test "$Y0" != none
+# a place is the row at the top and the px into it: `y` counts only the rows the list has measured, so it is not the same after a relaunch
+place_of() { grep "\"name\":\"$1\"" "$SW/$2" 2>/dev/null | tail -1 | python3 -I -c 'import json,sys; t=sys.stdin.read(); v=json.loads(t.split(" ",1)[1]) if t else None; print(v["top"]+"+"+str(round(v["px"])) if v else "none")'; }
+Y0=$(place_of left client.log); echo "left the thread scrolled to $Y0"
+scrolled() { case "$Y0" in ''|none|'(end)'*) return 1;; esac; }
+check "the thread was scrolled up from its end" scrolled
 L0=$(wc -l < "$SW/home/events.jsonl")
 
 # 2. the watcher follows; a build with the same hub swaps only the window, on SIGTERM, and the place comes back
@@ -62,8 +64,8 @@ check "the window is a new process" test "$(pid client)" != "$C0"
 check "the new window opened on the same thread" log_has "\"thread\":\"$T1\".*\"event\":\"place\"" client.log
 wait_for 10 log_has '"event":"usable"' client.log
 check "it shows that thread's entries" sh -c "grep '\"event\":\"usable\"' '$SW/client.log' | grep -qv '\"entries\":0'"
-wait_for 10 log_has '"name":"back"' client.log; Y1=$(y_of back client.log); echo "came back at y=$Y1"
-check "the scroll place came back" test "$Y1" = "$Y0"
+wait_for 10 log_has '"name":"back"' client.log; Y1=$(place_of back client.log); echo "came back at $Y1"
+check "the scroll place came back" sh -c "[ -n '$Y0' ] && [ '$Y1' = '$Y0' ]"
 sleep 1; DRAFTED=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get(sys.argv[2],""))' "$SW/home/gpui-drafts.json" "$T1")
 check "the draft is still kept" test "$DRAFTED" = "a draft kept across builds"
 check "the old window saved and quit by itself (its log has no panic)" sh -c "! grep -qi panic '$SW/client.log.prev'"
@@ -74,7 +76,7 @@ v2=$(variant hub2); H1=$(pid hub); c2=$(cut_build "$v2")
 wait_for 60 shown "$c2"; check "the hub build was taken up" shown "$c2"
 check "the hub is a new process" test "$(pid hub)" != "$H1"
 check "the copy was kept, not made again" test "$(wc -l < "$SW/home/events.jsonl")" -ge "$L0"
-wait_for 10 log_has '"name":"back"' client.log; check "the scroll place survived a hub restart too" test "$(y_of back client.log)" = "$Y0"
+wait_for 10 log_has '"name":"back"' client.log; Y2=$(place_of back client.log); check "the scroll place survived a hub restart too" sh -c "[ -n '$Y0' ] && [ '$Y2' = '$Y0' ]"
 check "the window came back on the same thread" log_has "\"thread\":\"$T1\".*\"event\":\"place\"" client.log
 
 # 4. a running turn holds a new hub back

@@ -11,7 +11,7 @@ use std::{cell::RefCell, ops::Range, rc::Rc};
 pub struct Registry {
     pub blocks: Vec<Info>, pub dragging: bool, pub entry: usize,
     /// The entry being drawn and how many blocks it has had so far: a block's identity is (entry id, index in entry).
-    pub entry_id: String, idx: usize, last_id: String,
+    entry_id: String, idx: usize,
     /// The selection as the person made it, by identity; `sel` is that resolved to this frame's ordinals.
     keyed: Option<(KPos, KPos)>, pub sel: Selection,
     /// Where each code block's Copy button was painted this frame (for the check harness), by index.
@@ -24,13 +24,17 @@ pub struct Info { pub text: String, pub entry: usize, pub id: String, pub idx: u
 pub type Reg = Rc<RefCell<Registry>>;
 
 impl Default for Registry {
-    fn default() -> Self { Self { blocks: Vec::new(), dragging: false, entry: 0, entry_id: String::new(), idx: 0, last_id: String::new(), keyed: None, sel: Selection::default(), copies: Vec::new(), copy_seen: 0 } }
+    fn default() -> Self { Self { blocks: Vec::new(), dragging: false, entry: 0, entry_id: String::new(), idx: 0, keyed: None, sel: Selection::default(), copies: Vec::new(), copy_seen: 0 } }
 }
 
 impl Registry {
     /// A new frame: forget the blocks, keep the selection (by identity).
-    pub fn begin(&mut self) { self.blocks.clear(); self.copies.clear(); self.copy_seen = 0; self.idx = 0; self.last_id.clear(); }
-    fn next_idx(&mut self) -> usize { if self.last_id != self.entry_id { self.last_id = self.entry_id.clone(); self.idx = 0; } let i = self.idx; self.idx += 1; i }
+    pub fn begin(&mut self) { self.blocks.clear(); self.copies.clear(); self.copy_seen = 0; self.idx = 0; self.entry = 0; self.entry_id.clear(); }
+    /// The list draws only the rows on screen, in its own order, and may draw one twice in a frame: the last drawing's blocks stand.
+    pub fn enter(&mut self, row: usize, id: &str) { self.blocks.retain(|b| b.id != id); self.entry = row; self.entry_id = id.to_string(); self.idx = 0; }
+    fn next_idx(&mut self) -> usize { let i = self.idx; self.idx += 1; i }
+    /// The block with this identity, as drawn this frame.
+    fn at(&self, id: &str, idx: usize) -> Option<usize> { self.blocks.iter().position(|b| b.id == id && b.idx == idx) }
     fn key(&self, p: Pos) -> Option<KPos> { let b = self.blocks.get(p.block)?; Some(KPos { entry: b.id.clone(), idx: b.idx, off: p.off.min(b.text.len()) }) }
     fn ord(&self, k: &KPos) -> Option<Pos> { self.blocks.iter().position(|b| b.id == k.entry && b.idx == k.idx).map(|block| Pos { block, off: k.off }) }
     /// Make `s` (ordinals of this frame) the selection.
@@ -38,10 +42,49 @@ impl Registry {
         self.keyed = self.key(s.anchor).zip(self.key(s.head));
         self.sel = s;
     }
-    /// After the frame's blocks are known: the selection by identity as ordinals. One whose message is gone clears.
-    pub fn resolve(&mut self) {
+    /// Move the selection's moving end; its other end stays what the person chose, even scrolled away.
+    pub fn extend(&mut self, head: Pos) {
+        match (self.keyed.clone(), self.key(head)) { (Some((a, _)), Some(h)) => { self.keyed = Some((a, h)); self.sel.head = head; } _ => self.select(Selection { anchor: head, head }) }
+    }
+    #[cfg(test)] pub fn resolve(&mut self) { self.resolve_by(|_| None) }
+    /// After the frame's blocks are known: in reading order, and the selection by identity as ordinals. An end scrolled off the rows drawn stands at the
+    /// edge of them on its side, so what is on screen of the selection still shows. `row_of`: where a row is in the thread; one that is not there clears it.
+    pub fn resolve_by(&mut self, row_of: impl Fn(&str) -> Option<usize>) {
+        self.blocks.sort_by_key(|b| b.entry);
         let Some((a, h)) = self.keyed.clone() else { self.sel = Selection::default(); return };
-        match self.ord(&a).zip(self.ord(&h)) { Some((anchor, head)) => self.sel = Selection { anchor, head }, None => { self.keyed = None; self.sel = Selection::default(); } }
+        if let Some((anchor, head)) = self.ord(&a).zip(self.ord(&h)) { self.sel = Selection { anchor, head }; return; }
+        let Some((ra, rh)) = row_of(&a.entry).zip(row_of(&h.entry)) else { self.keyed = None; self.sel = Selection::default(); return };
+        self.sel = self.end(&a, ra).zip(self.end(&h, rh)).map_or(Selection::default(), |(anchor, head)| Selection { anchor, head });
+    }
+    fn end(&self, k: &KPos, row: usize) -> Option<Pos> {
+        if let Some(p) = self.ord(k) { return Some(p); }
+        let (first, last) = (self.blocks.first()?, self.blocks.last()?);
+        if row < first.entry { Some(Pos { block: 0, off: 0 }) } else if row > last.entry { Some(Pos { block: self.blocks.len() - 1, off: last.text.len() }) } else { None }
+    }
+    /// The selected text. With an end scrolled away the rows between are read from the thread, whole where they are not drawn.
+    pub fn selected(&self, rows: &[serde_json::Value]) -> String {
+        let row_of = |id: &str| rows.iter().position(|e| e["id"].as_str() == Some(id));
+        let Some((a, h)) = self.keyed.clone() else { return select::extract(&self.texts(), &self.sel) };
+        if self.ord(&a).is_some() && self.ord(&h).is_some() { return select::extract(&self.texts(), &self.sel); }
+        let Some((ra, rh)) = row_of(&a.entry).zip(row_of(&h.entry)) else { return String::new() };
+        let (mut texts, mut anchor, mut head) = (Vec::new(), None, None);
+        for row in ra.min(rh)..=ra.max(rh) {
+            let id = rows[row]["id"].as_str().unwrap_or("");
+            let drawn: Vec<&Info> = self.blocks.iter().filter(|b| b.id == id).collect();
+            if drawn.is_empty() {
+                let text = rows[row]["text"].as_str().unwrap_or("").to_string(); let len = text.len(); let block = texts.len();
+                if row == ra { anchor = Some(Pos { block, off: if ra <= rh { 0 } else { len } }); }
+                if row == rh { head = Some(Pos { block, off: if rh < ra { 0 } else { len } }); }
+                texts.push(Text { text, entry: row });
+            } else {
+                for b in drawn {
+                    if b.id == a.entry && b.idx == a.idx { anchor = Some(Pos { block: texts.len(), off: a.off }); }
+                    if b.id == h.entry && b.idx == h.idx { head = Some(Pos { block: texts.len(), off: h.off }); }
+                    texts.push(Text { text: b.text.clone(), entry: row });
+                }
+            }
+        }
+        anchor.zip(head).map_or(String::new(), |(anchor, head)| select::extract(&texts, &Selection { anchor, head }))
     }
     pub fn anchor(&self) -> Selection { self.sel }
     pub fn texts(&self) -> Vec<Text> { self.blocks.iter().map(|b| Text { text: b.text.clone(), entry: b.entry }).collect() }
@@ -75,7 +118,7 @@ impl Registry {
 pub enum Kind { Body, Quote, Code, Head }
 
 /// A block of text that paints its own selection and reports its layout to the registry.
-pub struct SelText { spans: Vec<Span>, kind: Kind, light: bool, reg: Reg, ord: usize, styled: Option<StyledText>, tokens: Vec<(Range<usize>, Tok)> }
+pub struct SelText { spans: Vec<Span>, kind: Kind, light: bool, reg: Reg, id: String, idx: usize, styled: Option<StyledText>, tokens: Vec<(Range<usize>, Tok)> }
 
 impl SelText {
     pub fn new(reg: &Reg, spans: Vec<Span>, kind: Kind, light: bool) -> Self {
@@ -83,10 +126,9 @@ impl SelText {
         let mut at = 0usize; let mut links = Vec::new();
         for s in &spans { if let Some(l) = &s.style.link { links.push((at..at + s.text.len(), l.clone())); } at += s.text.len(); }
         let entry = r.entry; let (id, idx) = (r.entry_id.clone(), r.next_idx());
-        r.blocks.push(Info { text: md::plain(&spans), entry, id, idx, links, layout: None });
-        let ord = r.blocks.len() - 1;
+        r.blocks.push(Info { text: md::plain(&spans), entry, id: id.clone(), idx, links, layout: None });
         drop(r);
-        Self { spans, kind, light, reg: reg.clone(), ord, styled: None, tokens: Vec::new() }
+        Self { spans, kind, light, reg: reg.clone(), id, idx, styled: None, tokens: Vec::new() }
     }
     fn runs(&self, base: &TextStyle) -> Vec<TextRun> {
         let c = |n: &str| theme::color(self.light, n);
@@ -141,7 +183,7 @@ impl Element for SelText {
         let mut out = vec![(window.insert_hitbox(bounds, HitboxBehavior::Normal), CursorStyle::IBeam)];
         let Some(styled) = self.styled.as_ref() else { return out };
         let layout = styled.layout().clone(); let lh = layout.line_height();
-        let links: Vec<Range<usize>> = self.reg.borrow().blocks.get(self.ord).map(|b| b.links.iter().map(|(r, _)| r.clone()).collect()).unwrap_or_default();
+        let links: Vec<Range<usize>> = { let r = self.reg.borrow(); r.at(&self.id, self.idx).map(|o| r.blocks[o].links.iter().map(|(r, _)| r.clone()).collect()).unwrap_or_default() };
         for r in links {
             if let (Some(pa), Some(pb)) = (layout.position_for_index(r.start), layout.position_for_index(r.end)) {
                 let rect = if pa.y == pb.y { Bounds::from_corners(pa, point(pb.x, pb.y + lh)) } else { Bounds::from_corners(point(bounds.left(), pa.y), point(bounds.right(), pb.y + lh)) };
@@ -154,7 +196,7 @@ impl Element for SelText {
         let Some(styled) = self.styled.as_mut() else { return };
         let layout = styled.layout().clone();
         // the selection first, under the glyphs
-        let range = { let r = self.reg.borrow(); r.blocks.get(self.ord).and_then(|b| r.sel.within(self.ord, b.text.len())) };
+        let range = { let r = self.reg.borrow(); r.at(&self.id, self.idx).and_then(|o| r.sel.within(o, r.blocks[o].text.len())) };
         if let Some(range) = range {
             let lh = layout.line_height();
             let tint = select::highlight(self.light);
@@ -171,7 +213,7 @@ impl Element for SelText {
         }
         styled.paint(id, inspector, bounds, rl, &mut (), window, cx);
         for (h, style) in pre.iter() { window.set_cursor_style(*style, h); }
-        if let Some(b) = self.reg.borrow_mut().blocks.get_mut(self.ord) { b.layout = Some(layout); }
+        let mut r = self.reg.borrow_mut(); if let Some(o) = r.at(&self.id, self.idx) { r.blocks[o].layout = Some(layout); }
     }
 }
 
@@ -331,13 +373,13 @@ impl Backplane {
         match e.click_count {
             2 => { let w = select::word_at(&texts[pos.block].text, pos.off); r.select(Selection { anchor: Pos { block: pos.block, off: w.start }, head: Pos { block: pos.block, off: w.end } }); }
             n if n >= 3 => { if let Some(s) = select::block_range(&texts, pos.block) { r.select(s); } }
-            _ => { let s = if e.modifiers.shift { Selection { anchor: r.sel.anchor, head: pos } } else { Selection { anchor: pos, head: pos } }; r.select(s); r.dragging = true; }
+            _ => { if e.modifiers.shift { r.extend(pos); } else { r.select(Selection { anchor: pos, head: pos }); } r.dragging = true; }
         }
         drop(r); cx.notify();
     }
     pub(crate) fn timeline_move(&mut self, e: &MouseMoveEvent, cx: &mut Context<Self>) {
         if !self.screens.reg.borrow().dragging { return; }
-        if let Some(pos) = self.timeline_pos(e.position) { let mut r = self.screens.reg.borrow_mut(); let mut s = r.sel; s.head = pos; r.select(s); drop(r); cx.notify(); }
+        if let Some(pos) = self.timeline_pos(e.position) { self.screens.reg.borrow_mut().extend(pos); cx.notify(); }
     }
     pub(crate) fn timeline_up(&mut self, e: &MouseUpEvent, cx: &mut Context<Self>) {
         let was = std::mem::replace(&mut self.screens.reg.borrow_mut().dragging, false);
@@ -351,43 +393,30 @@ impl Backplane {
         }
         // a finished selection is the X11 PRIMARY selection too (middle-click paste in other apps)
         #[cfg(target_os = "linux")]
-        { let s = { let r = self.screens.reg.borrow(); select::extract(&r.texts(), &r.sel) }; if !s.is_empty() { cx.write_to_primary(ClipboardItem::new_string(s)); } }
+        { let s = self.timeline_selected(); if !s.is_empty() { cx.write_to_primary(ClipboardItem::new_string(s)); } }
         cx.notify();
     }
     /// Ctrl-C with the composer's selection empty: copy what is selected in the timeline.
     pub(crate) fn timeline_copy(&mut self, cx: &mut Context<Self>) {
-        let s = { let r = self.screens.reg.borrow(); select::extract(&r.texts(), &r.sel) };
+        let s = self.timeline_selected();
         if !s.is_empty() { cx.write_to_clipboard(ClipboardItem::new_string(s)); }
     }
+    fn timeline_selected(&self) -> String { self.screens.reg.borrow().selected(self.data["thread"]["entries"].as_array().map_or(&[], |r| r.as_slice())) }
 }
 
-/// How near its end (px) the timeline still counts as there, as the web planner's End.at.
-const END_SLACK: f32 = 4.;
-/// `y` is the scroll offset (0 at the top, negative below it), `max` the scroll range. An offset past the range (a jump to the end not painted yet) is at the end.
-pub fn at_end(y: f32, max: f32) -> bool { -y >= max - END_SLACK }
-/// Whether a new picture takes the timeline to its end. Only a reader already there follows; a thread newly on screen opens at its end
-/// unless it has a remembered place. `restoring`: that place was just put back, and `max` still measures the thread before it.
-pub fn follows(same_thread: bool, remembered: bool, restoring: bool, y: f32, max: f32) -> bool {
-    if same_thread { !restoring && at_end(y, max) } else { !remembered }
-}
+/// How far ahead of the reader rows are measured and history is asked for: about two screens, the web's runway. The two are one number on purpose: the
+/// list counts only rows it has measured, so a reader this near the top of the measured rows is this near the top of the rows held.
+pub const RUNWAY: f32 = 1600.;
+/// `y`: how far the list is scrolled from the top of the rows measured (past `max` at its end, where it is `max`); `max` its range.
+pub fn near_top(y: f32, max: f32) -> bool { y.min(max) < RUNWAY }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use core::prelude::v1::test;
-    #[test] fn a_reader_at_the_end_follows_and_one_who_scrolled_up_stays() {
-        assert!(follows(true, false, false, -1000., 1000.)); assert!(follows(true, false, false, -997., 1000.));
-        assert!(!follows(true, false, false, -700., 1000.)); assert!(!follows(true, false, false, 0., 1000.));
-    }
-    #[test] fn a_thread_shorter_than_the_list_is_at_its_end_and_a_jump_not_painted_yet_counts() {
-        assert!(at_end(0., 0.)); assert!(at_end(-1_000_000., 1000.));
-    }
-    #[test] fn a_thread_newly_on_screen_opens_at_its_end_unless_it_has_a_place() {
-        assert!(follows(false, false, false, 0., 1000.)); assert!(!follows(false, true, false, -1000., 1000.));
-    }
-    #[test] fn a_place_put_back_survives_the_last_threads_scroll_range() {
-        // the place is deeper than the short thread before it reached: it reads as "at the end" until this thread's first picture lands
-        assert!(at_end(-500., 100.)); assert!(!follows(true, true, true, -500., 100.));
+    #[test] fn history_is_asked_for_within_the_runway_of_the_top() {
+        assert!(near_top(0., 5000.)); assert!(near_top(RUNWAY - 1., 5000.)); assert!(!near_top(RUNWAY, 5000.));
+        assert!(near_top(9000., 300.), "at the end of a short list, past its range");
     }
     #[test] fn a_sent_messages_attachments_split_into_pictures_and_file_chips() {
         let l: Value = serde_json::from_str(r#"[{"label":"a.png","path":"/h/attachments/t1/k-a.png","image":true,"url":"/img?p=1"},{"label":"b.pdf","path":"/h/attachments/t1/k-b.pdf","image":false,"url":""}]"#).unwrap();
@@ -409,6 +438,32 @@ mod tests {
         assert_eq!(select::extract(&r.texts(), &r.sel), "cond\n\nthird", "same text after the shift");
         assert_eq!((r.sel.anchor.block, r.sel.head.block), (2, 3));
     }
+    #[test] fn a_row_drawn_twice_in_a_frame_stands_once() {
+        let mut r = Registry::default(); r.begin();
+        for _ in 0..2 { r.enter(3, "e3"); let i = r.next_idx(); r.blocks.push(Info { idx: i, ..info("e3", i, "hello") }); }
+        assert_eq!(r.blocks.len(), 1); assert_eq!(r.at("e3", 0), Some(0));
+    }
+    #[test] fn blocks_read_in_thread_order_however_the_list_drew_them() {
+        let mut r = Registry::default(); r.begin();
+        for (row, id) in [(7, "e7"), (2, "e2")] { r.enter(row, id); r.blocks.push(Info { entry: row, ..info(id, 0, id) }); }
+        r.resolve(); assert_eq!(r.blocks[0].id, "e2");
+    }
+    #[test] fn a_selection_scrolled_off_keeps_what_is_on_screen_and_its_other_end() {
+        let rows = |id: &str| ["e1", "e2", "e3"].iter().position(|x| *x == id);
+        let mut r = Registry::default(); frame(&mut r, &[("e1", 0, "one"), ("e2", 0, "two")]);
+        r.select(Selection { anchor: Pos { block: 0, off: 1 }, head: Pos { block: 1, off: 2 } });
+        r.begin(); r.blocks.push(info("e2", 0, "two")); r.blocks.push(info("e3", 0, "three")); r.resolve_by(rows);
+        assert_eq!(r.sel, Selection { anchor: Pos { block: 0, off: 0 }, head: Pos { block: 0, off: 2 } });
+        r.extend(Pos { block: 1, off: 3 });
+        assert_eq!(r.keyed.as_ref().map(|(a, _)| (a.entry.as_str(), a.off)), Some(("e1", 1)), "the end scrolled away is not moved");
+    }
+    #[test] fn copying_a_selection_scrolled_off_reads_the_rows_not_drawn() {
+        let thread: Vec<Value> = ["one", "two", "three"].iter().enumerate().map(|(i, t)| serde_json::json!({"id": format!("e{}", i + 1), "text": t})).collect();
+        let mut r = Registry::default(); frame(&mut r, &[("e1", 0, "one"), ("e3", 0, "three")]);
+        r.select(Selection { anchor: Pos { block: 0, off: 1 }, head: Pos { block: 1, off: 2 } });
+        r.begin(); r.blocks.push(info("e3", 0, "three")); r.resolve_by(|id| ["e1", "e2", "e3"].iter().position(|x| *x == id));
+        let s = r.selected(&thread); assert!(s.starts_with("one") && s.contains("two") && s.ends_with("th"), "{s}");
+    }
     #[test] fn a_selection_whose_message_is_gone_clears() {
         let mut r = Registry::default();
         frame(&mut r, &[("e2", 0, "second"), ("e3", 0, "third")]);
@@ -419,7 +474,7 @@ mod tests {
     }
     #[test] fn blocks_in_one_message_are_numbered_from_zero() {
         let mut r = Registry::default(); r.begin();
-        for id in ["a", "a", "b", "b", "b"] { r.entry_id = id.into(); let i = r.next_idx(); r.blocks.push(info(id, i, "x")); }
+        for (row, (id, n)) in [("a", 2), ("b", 3)].into_iter().enumerate() { r.enter(row, id); for _ in 0..n { let i = r.next_idx(); r.blocks.push(info(id, i, "x")); } }
         assert_eq!(r.blocks.iter().map(|b| b.idx).collect::<Vec<_>>(), [0, 1, 0, 1, 2]);
     }
     #[test] fn the_parse_cache_reparses_only_when_the_text_changes() {

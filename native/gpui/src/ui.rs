@@ -102,6 +102,58 @@ fn chip(light: bool, label: String) -> Div {
     div().px_3().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).whitespace_nowrap().child(label)
 }
 
+impl Backplane {
+    /// One row of the timeline, as the list asks for it: only rows on screen are drawn.
+    pub(crate) fn timeline_row(&mut self, ei: usize, cx: &mut Context<Self>) -> AnyElement {
+        let light = self.theme_override.unwrap_or(self.data["theme"] == "light");
+        let c = |name: &str| theme::color(light, name);
+        let reg = self.screens.reg.clone();
+        let e = self.data["thread"]["entries"][ei].clone();
+        let id = string(&e, "id");
+        reg.borrow_mut().enter(ei, &id);
+        let kind = e["kind"].as_str().unwrap_or("");
+        let text = string(&e, "text");
+        let stamp = string(&e, "stamp");
+        let row: AnyElement = match kind {
+            "user" => {
+                let wide = crate::screens::timeline::bubble_full_width(&text);
+                let body = crate::screens::timeline::user_text(&reg, light, &text);
+                let atts = crate::screens::timeline::attachments(light, &e["attachments"], &id, self.screens.attacher.target.as_ref(), &self.screens.images);
+                let stamp_row = div().flex().justify_end().text_size(px(11.)).text_color(c("faint")).child(stamp);
+                let row = div().id(SharedString::from(format!("e-{id}"))).w_full().py_2();
+                // A text that may wrap sits in block layout like a reply's (a shrink-to-fit flex bubble measured it at one width and painted it at another);
+                // a message of short lines keeps the snug flex bubble.
+                if wide {
+                    row.child(div().w_full().max_w(px(640.)).ml_auto().px_3().py_2().bg(c("raise")).border_1().border_color(c("line")).child(body).children(atts.into_iter().map(|a| div().mt_1().child(a))).child(div().mt_1().child(stamp_row))).into_any_element()
+                } else {
+                    row.flex().justify_end().child(div().max_w(px(640.)).px_3().py_2().bg(c("raise")).border_1().border_color(c("line")).flex().flex_col().gap_1().child(body).children(atts).child(stamp_row)).into_any_element()
+                }
+            }
+            "fold" => {
+                let value = string(&e, "value");
+                self.controls.push(CtlEntry { id: format!("fold:{id}"), label: text.clone(), ctl: Ctl::Fold(value.clone()) });
+                div().id(SharedString::from(format!("e-{id}"))).py_2().child(
+                    with_rect(div().id(SharedString::from(format!("f-{id}"))), || format!("fold:{id}")).flex().gap_2().px_2().py_1().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("dim")).cursor_pointer()
+                        .hover(|s| s.bg(c("raise")))
+                        .on_click(cx.listener(move |this, _, _, cx| { this.fold_click(value.clone()); cx.notify(); }))
+                        .child(ic(light, if e["open"] == true { "chevron-down" } else { "chevron-right" }, 14., "dim")).child(text)).into_any_element()
+            }
+            "assistant" => {
+                let mut col = div().id(SharedString::from(format!("e-{id}"))).w_full().py_2().flex().flex_col().gap_2();
+                match e["blocks"].as_array() {
+                    Some(blocks) if !blocks.is_empty() => { let parsed = self.screens.parsed.get(&id, &text, blocks); for el in crate::screens::timeline::blocks(cx, &reg, light, &parsed, &id) { col = col.child(el); } }
+                    _ => { col = col.child(crate::screens::timeline::user_text(&reg, light, &text)); }
+                }
+                if let Some(im) = crate::screens::timeline::images(light, &e["images"], &id, self.screens.attacher.target.as_ref(), &self.screens.images) { col = col.child(im); }
+                col.child(div().text_size(px(11.)).text_color(c("faint")).child(stamp)).into_any_element()
+            }
+            _ if !text.is_empty() => div().id(SharedString::from(format!("e-{id}"))).flex().gap_2().py_1().font(art::mono_font()).text_size(px(12.)).text_color(c("dim")).child(string(&e, "label")).child(text).into_any_element(),
+            _ => div().into_any_element(),
+        };
+        div().w_full().flex().justify_center().child(div().w_full().max_w(px(930.)).px_4().child(row)).into_any_element()
+    }
+}
+
 impl Render for Backplane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t_render = std::time::Instant::now();
@@ -181,54 +233,7 @@ impl Render for Backplane {
                 }
             }
         }
-        // timeline
-        let mut entries: Vec<AnyElement> = Vec::new();
-        for (ei, e) in thread["entries"].as_array().into_iter().flatten().enumerate() {
-            { let mut r = reg.borrow_mut(); r.entry = ei; r.entry_id = string(e, "id"); }
-            let kind = e["kind"].as_str().unwrap_or("");
-            let id = string(e, "id");
-            let text = string(e, "text");
-            let stamp = string(e, "stamp");
-            match kind {
-                "user" => {
-                    let wide = crate::screens::timeline::bubble_full_width(&text);
-                    let body = crate::screens::timeline::user_text(&reg, light, &text);
-                    let atts = crate::screens::timeline::attachments(light, &e["attachments"], &id, self.screens.attacher.target.as_ref(), &self.screens.images);
-                    let stamp_row = div().flex().justify_end().text_size(px(11.)).text_color(c("faint")).child(stamp);
-                    let row = div().id(SharedString::from(format!("e-{id}"))).w_full().py_2();
-                    // A text that may wrap sits in block layout like a reply's (a shrink-to-fit flex bubble measured it at one width and painted it at another);
-                    // a message of short lines keeps the snug flex bubble.
-                    entries.push(if wide {
-                        row.child(div().w_full().max_w(px(640.)).ml_auto().px_3().py_2().bg(c("raise")).border_1().border_color(c("line")).child(body).children(atts.into_iter().map(|a| div().mt_1().child(a))).child(div().mt_1().child(stamp_row))).into_any_element()
-                    } else {
-                        row.flex().justify_end().child(div().max_w(px(640.)).px_3().py_2().bg(c("raise")).border_1().border_color(c("line")).flex().flex_col().gap_1().child(body).children(atts).child(stamp_row)).into_any_element()
-                    });
-                }
-                "fold" => {
-                    let value = string(e, "value");
-                    ctl.push(CtlEntry { id: format!("fold:{id}"), label: text.clone(), ctl: Ctl::Fold(value.clone()) });
-                    entries.push(div().id(SharedString::from(format!("e-{id}"))).py_2().child(
-                        with_rect(div().id(SharedString::from(format!("f-{id}"))), || format!("fold:{id}")).flex().gap_2().px_2().py_1().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("dim")).cursor_pointer()
-                            .hover(|s| s.bg(c("raise")))
-                            .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("fold".into(), value.clone())); cx.notify(); }))
-                            .child(ic(light, if e["open"] == true { "chevron-down" } else { "chevron-right" }, 14., "dim")).child(text)).into_any_element());
-                }
-                "assistant" => {
-                    let mut col = div().id(SharedString::from(format!("e-{id}"))).w_full().py_2().flex().flex_col().gap_2();
-                    match e["blocks"].as_array() {
-                        Some(blocks) if !blocks.is_empty() => { let parsed = self.screens.parsed.get(&id, &text, blocks); for el in crate::screens::timeline::blocks(cx, &reg, light, &parsed, &id) { col = col.child(el); } }
-                        _ => { col = col.child(crate::screens::timeline::user_text(&reg, light, &text)); }
-                    }
-                    if let Some(im) = crate::screens::timeline::images(light, &e["images"], &id, self.screens.attacher.target.as_ref(), &self.screens.images) { col = col.child(im); }
-                    entries.push(col.child(div().text_size(px(11.)).text_color(c("faint")).child(stamp)).into_any_element());
-                }
-                _ => if !text.is_empty() {
-                    entries.push(div().id(SharedString::from(format!("e-{id}"))).flex().gap_2().py_1().font(art::mono_font()).text_size(px(12.)).text_color(c("dim")).child(string(e, "label")).child(text).into_any_element());
-                }
-            }
-        }
-        reg.borrow_mut().resolve();
-        for live in thread["live"].as_array().into_iter().flatten() { entries.push(div().py_2().child(string(live, "text")).into_any_element()); }
+        let no_rows = thread["entries"].as_array().map_or(true, |e| e.is_empty());
         // project home replaces the thread when the hub selected it
         let home = &self.data["projectHome"];
         let has_home = home.is_object();
@@ -330,13 +335,19 @@ impl Render for Backplane {
                         .when(!todo.is_empty(), |d| d.child(div().px_3().h_full().flex().items_center().gap_2().border_l_1().border_color(c("line")).text_size(px(11.)).child(div().text_color(c("faint")).child("TO-DO")).child(todo.clone()).child(ic(light, "chevron-down", 12., "faint"))))
                         .children(tools_strip)))
                     .when(has_home, |d| d.child(div().id("home").overflow_y_scroll().flex_1().flex().justify_center().child(div().w_full().max_w(px(930.)).p_4().flex().flex_col().gap_3().children(home_els))))
-                    // items_start: stretched to the list's own height, the rows spilled upward past the top, where no scroll reaches
-                    .when(!has_home, |d| d.child(div().id("timeline").overflow_y_scroll().track_scroll(&self.scroll)
+                    // a list: only the rows on screen are drawn, however much of the thread is held, and it keeps the reader's place as rows land above them
+                    .when(!has_home, |d| d.child(div().id("timeline").relative().flex_1().min_h_0().flex().flex_col()
                         .on_mouse_down(MouseButton::Left, cx.listener(|this, e, _, cx| this.timeline_down(e, cx))).on_mouse_down(MouseButton::Right, cx.listener(|this, e, _, cx| this.timeline_down(e, cx)))
-                        .on_mouse_move(cx.listener(|this, e, _, cx| this.timeline_move(e, cx))).on_mouse_up(MouseButton::Left, cx.listener(|this, e, _, cx| this.timeline_up(e, cx))).on_mouse_up_out(MouseButton::Left, cx.listener(|this, e, _, cx| this.timeline_up(e, cx))).flex_1().flex().justify_center().items_start().child(div().w_full().max_w(px(930.)).px_4().flex().flex_col().justify_end().min_h_full().children({
-                        if entries.is_empty() { entries.push(div().py_6().text_color(c("dim")).child(if has_thread && thread["loading"] == true { "Loading…" } else if has_thread { "Start a conversation." } else { "Pick a thread, or start one with + next to a project." }).into_any_element()); }
-                        entries
-                    }))))
+                        .on_mouse_move(cx.listener(|this, e, _, cx| this.timeline_move(e, cx))).on_mouse_up(MouseButton::Left, cx.listener(|this, e, _, cx| this.timeline_up(e, cx))).on_mouse_up_out(MouseButton::Left, cx.listener(|this, e, _, cx| this.timeline_up(e, cx)))
+                        .when(no_rows, |d| d.child(div().flex_1().flex().justify_center().items_end().child(div().w_full().max_w(px(930.)).px_4().py_6().text_color(c("dim")).child(if has_thread && thread["loading"] == true { "Loading…" } else if has_thread { "Start a conversation." } else { "Pick a thread, or start one with + next to a project." }))))
+                        .when(!no_rows, |d| d.child(list(self.timeline.clone(), cx.processor(|this, ix, _, cx| this.timeline_row(ix, cx))).flex_1().min_h_0()))
+                        .children(thread["live"].as_array().into_iter().flatten().map(|live| div().w_full().flex().justify_center().child(div().w_full().max_w(px(930.)).px_4().py_2().child(string(live, "text")))))
+                        // after the list has drawn its rows: put them in reading order, and see whether history is wanted
+                        .child(canvas({ let (me, reg) = (cx.entity().downgrade(), self.screens.reg.clone()); move |_, _, cx| {
+                            let Some(this) = me.upgrade() else { return };
+                            { let rows = &this.read(cx).data["thread"]["entries"]; reg.borrow_mut().resolve_by(|id| rows.as_array().and_then(|r| r.iter().position(|e| e["id"].as_str() == Some(id)))); }
+                            cx.defer(move |cx| this.update(cx, |this, _| this.history_want()));
+                        } }, |_, _, _, _| {}).absolute().size_0())))
                     .when(!self.error.is_empty(), |d| d.child(div().px_5().py_2().text_color(c("bad")).child(self.error.clone())))
                     .child(div().flex_shrink_0().relative().child(art::probe("composer")).border_t_1().border_color(c("line")).flex().justify_center().child(div().w_full().max_w(px(930.)).px_4().py_3().flex().flex_col().gap_2()
                         .when(show_popup, |d| d.child(popup))
