@@ -159,6 +159,8 @@ export class ThinHost {
     this.opening = false;
     this.client = new Views({ now: api.now,
       sidebarRegions: (api.renderer || 'web') === 'web',
+      // offered only to a hub whose greeting says it composes them
+      canonicalSidebar: (api.renderer || 'web') === 'web',
       // the hub's keyed view delta (view-delta.js); a page that turns it
       // off (api.viewDelta === false) gets whole views
       viewDelta: (api.renderer || 'web') === 'web' && api.viewDelta !== false,
