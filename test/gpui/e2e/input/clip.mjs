@@ -12,6 +12,7 @@ export function clip(display){
     getImage(sel='clipboard'){return read(sel,'image/png')},
     targets(sel='clipboard'){const t=read(sel,'TARGETS');return t?String(t).split('\n').filter(Boolean):[]},
     primary(){return read('primary',null)},          // what a drag-select leaves (the X11 convention)
-    clear(){for(const p of owners)try{p.kill()}catch{}owners.length=0},
+    // xclip forks into the background to serve a selection, so killing the process we hold does not release it: take ownership with empty data instead
+    clear(){for(const p of owners)try{p.kill()}catch{}owners.length=0;for(const sel of['clipboard','primary','secondary'])try{execFileSync('xclip',['-selection',sel,'-i','/dev/null'],{env,timeout:3000})}catch{}},
   };
 }

@@ -21,7 +21,8 @@ export async function preflight({display,env,ime,out,portalLog=null}){
     spawnSync('convert',['-size','8x8','xc:red',out+'/pf.png'],{env});cb.setImage(out+'/pf.png');await sleep(300);const img=cb.getImage();
     ok('clipboard-image',img&&img.length>50&&img.slice(1,4).toString()==='PNG',{bytes:img?.length});ok('clipboard-targets',cb.targets().includes('image/png'),{targets:cb.targets()});
     cb.setText('pf primary','primary');await sleep(300);ok('primary',cb.primary()==='pf primary',{got:cb.primary()});
-    cb.setFiles([resolve(out+'/pf.png')]);await sleep(300);ok('clipboard-files',cb.targets().includes('text/uri-list'),{targets:cb.targets()});cb.clear()});
+    cb.setFiles([resolve(out+'/pf.png')]);await sleep(300);ok('clipboard-files',cb.targets().includes('text/uri-list'),{targets:cb.targets()});cb.clear();await sleep(300);
+    const left=[cb.getText('clipboard'),cb.primary()].map(x=>x==null?'':String(x).trim());ok('selections-cleared-after-preflight',left[0]===''&&left[1]==='',{clipboard:left[0].slice(0,40),primary:left[1].slice(0,40)})});
   // 3. XDND: a drop onto an XDND-aware window is accepted and the target reads the path
   await guard('xdnd',async()=>{
     writeFileSync(out+'/pf-drop.txt','x');const done=out+'/pf-dropped.txt';try{execFileSync('rm',['-f',done,done+'.ready'])}catch{}
