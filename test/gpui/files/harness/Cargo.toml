@@ -5,3 +5,4 @@ edition = "2021"
 [dependencies]
 libc = "0.2"
 serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "process", "macros", "fs"] }
