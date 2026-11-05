@@ -135,8 +135,9 @@ pub fn line(st: &State, now: u64, th: &str, o: &Value) -> Vec<Value> {
             .find(|row| row.split('\t').next() == Some(id)).map_or("", |row| row.split('\t').nth(1).unwrap_or(""));
         gstr(o, "description", "") != known
     };
+    if !(line_is_output(o) || task) { return vec![] } // most lines are not output: no record is read for them
     let l = live(st, th);
-    if !((line_is_output(o) || task) && (now >= l.last.saturating_add(5) || l.nudged > 0)) { return vec![] }
+    if !(now >= l.last.saturating_add(5) || l.nudged > 0) { return vec![] }
     let mut out = vec![];
     progress(st, now, th, "agent tool or stream output", &mut out);
     out
