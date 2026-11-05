@@ -169,7 +169,7 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                             ensure!(command["hub"].is_null()||command["hub"]==v.hub,"cross-hub command refused");
                             let request:Value=serde_json::from_str(command["text"].as_str().context("missing command text")?)?;
                             let rpc_id=request["id"].as_u64().context("missing RPC id")?;
-                            let m=request["m"].as_str().unwrap_or("");ensure!(!m.starts_with("view.")&&rpc_id<(1<<47),"invalid product RPC");
+                            let m=request["m"].as_str().unwrap_or("");ensure!(!m.starts_with("view.")&&rpc_id<(1<<47),"invalid product RPC");eprintln!("GPUI_LOG {{\"rpc_sent\":\"{m}\"}}");
                             v.outgoing.insert(rpc_id,method=="view.action"&&["message.send","thread.send","send"].contains(&m));
                             // The send action's canonical command is named by the hub; ACK all sends from this action.
                             if method=="view.action" && m=="chat.send" {v.outgoing.insert(rpc_id,true);}
@@ -187,7 +187,7 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                     if c.done||part!=c.next||part>=MAX_CONTROL_PARTS||c.bytes+text.len()>MAX_CONTROL_BYTES {v.controls.remove(&id);continue;}
                     c.bytes+=text.len();c.parts.push(text.to_string());c.next+=1;c.done=x["last"]==true;
                 },
-                "view.changed"=>{if x["generation"]==v.greeting["generation"]&&x["epoch"]==v.greeting["epoch"]&&x["viewId"]==v.view_id&&x["target"]==v.target {v.dirty=true;}},
+                "view.changed"=>{eprintln!("GPUI_LOG {{\"view_changed\":true}}");if x["generation"]==v.greeting["generation"]&&x["epoch"]==v.greeting["epoch"]&&x["viewId"]==v.view_id&&x["target"]==v.target {v.dirty=true;}},
                 "hb"=>{sink.send(Message::Binary(wire::encode(&json!({"id":0,"m":"ping","p":{}})).into())).await?;},
                 _=>{}
             }
