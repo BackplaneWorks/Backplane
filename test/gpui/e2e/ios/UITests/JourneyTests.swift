@@ -7,11 +7,16 @@ final class Journeys: XCTestCase {
     override func setUp() { continueAfterFailure = false }
 
     private func rows() -> XCUIElementQuery { d.app.cells }
+    // the fixture's threads are titled "e2e thread N" (N from 0); a row is the button with identifier thread.row.<hub>|<id>
+    // (the thread.tree.* button next to it only unfolds subthreads)
     private func openThread(_ n: Int) -> Bool {
-        let want = "e2e thread \(n + 1)"
-        let row = d.label(want)
+        let want = "e2e thread \(n)"
+        let row = d.app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'thread.row.'"))
+            .containing(NSPredicate(format: "label == %@", want)).firstMatch
         return d.step("open \(want)", act: {
-            if !row.exists { d.app.swipeUp() }
+            var tries = 0
+            while !row.exists && tries < 6 { d.app.swipeUp(); tries += 1 }
+            if !row.isHittable { d.app.swipeDown() }
             row.tap()
         }, expect: { d.el("thread.composer").exists })
     }
@@ -35,7 +40,7 @@ final class Journeys: XCTestCase {
         d = Driver("projects-threads"); defer { d.finish() }
         d.launch()
         tab("Threads")
-        guard d.step("project list", act: {}, expect: { d.label("e2e").exists }) else { return }
+        guard d.step("project list", act: {}, expect: { d.app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'project.header.'")).firstMatch.exists }) else { return }
         guard openThread(0) else { return }
         d.step("scroll 3 screens", act: { for _ in 0..<3 { d.app.swipeUp(velocity: .fast) } }, expect: { true })
         back()
@@ -98,7 +103,7 @@ final class Journeys: XCTestCase {
         d.launch(); tab("Threads")
         guard openThread(0) else { return }
         let comp = d.el("thread.composer"); comp.tap()
-        for (sigil, want) in [("@", "@Bub"), (">", ">e2e"), ("%", "%e2e"), ("#", "#e2e"), ("$", "$"), ("/", "/btw")] {
+        for (sigil, want) in [("@", "@Bub"), (">", ">e2e"), ("%", "%proj"), ("#", "#e2e"), ("$", "$"), ("/", "/btw")] {
             d.step("type \(sigil) -> popup", act: { comp.typeText(sigil) }, expect: { want == "$" ? d.app.buttons.count > 12 : d.label(want).exists })
             comp.typeText(XCUIKeyboardKey.delete.rawValue)
         }
