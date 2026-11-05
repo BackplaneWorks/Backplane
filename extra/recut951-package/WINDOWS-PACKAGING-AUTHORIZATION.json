@@ -1,0 +1,32 @@
+{
+  "state": "EXPLICIT_USER_APPROVED_WINDOWS_NATIVE_ONLY_PACKAGING_CONTINUATION",
+  "sourceCommit": "be904cd4cb21ad6febe17e674918c96945113d07",
+  "sourceTree": "1034e9dc35fb517f1186ebcdb2d8f3351beb7a59",
+  "retainedLinkedRun": 41950650979,
+  "retainedLinkedArtifactId": 13381085855,
+  "retainedLinkedArtifactDigest": "sha256:5eb941d615a7b9b8be456aeff06db96e9c10bbb1efbc2018422fc820f7827634",
+  "existingHostedPagefileAllowed": true,
+  "requestedPackagingMemoryCapBytes": 3700000000,
+  "expectedPageRoundedKernelCapBytes": 3699998720,
+  "independentActualCapMustNotExceedBytes": 3700000000,
+  "ownedJobHandleMembershipNoBreakawayRequired": true,
+  "pagingRecorded": true,
+  "pagingCounterScope": "Record host-wide pagefile/paging observations without claiming per-job attribution.",
+  "changeHostPagefile": false,
+  "acceptanceMemoryCapBytesUnchanged": 8589934592,
+  "rebuildRelinkNewEmissionAuthorized": false,
+  "furtherIntakeAuthorized": false,
+  "solePackagingExecutor": "t1792726353-440155",
+  "soleWindowsAcceptanceExecutor": "t1793800964-1595316",
+  "sequence": [
+    "Native-only packaging from retained app",
+    "Exact new ZIP combined standard-user KiCad health/manual/install/OMP/msvcrt PASS",
+    "Root publish v0.14.2 as Latest",
+    "Delete transport draft and temporary artifacts",
+    "Coordinator reverts contents:write on both branches",
+    "Close927 and949 afterpublicshipment"
+  ],
+  "publicationPreauthorized": true,
+  "seedExpiryUtc": "2026-11-06T01:30:56Z",
+  "recordedEpoch": 1793845824.6001172
+}
