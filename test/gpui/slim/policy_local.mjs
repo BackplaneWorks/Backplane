@@ -55,6 +55,8 @@ ck(ord.refused!==true,'an ordinary action is not refused');
   ck((r2.session?.info||{})['fab.line:'+th]==='No goal yet. Edit to say what this project is for.','an empty goal reads as the placeholder line');
   const rs=await v({reads:[{kind:'secret.list',id:0,result:{secrets:[],vault:{}}},{kind:'bots.voice',id:0,result:{voiceKey:'k',voiceDict:'',voiceDevices:'{"default":"","devices":[]}'}}]});
   ck(rs.session?.drafts?.['@voice.key']==='k'&&rs.session?.drafts?.['@voice.set']==='1','a bots.voice read is applied: @voice.key and @voice.set');
+  const fd=await v({reads:[{kind:'files.dir',id:0,result:{fmEntries:'d\t0\tsrc\nf\t12\tREADME.md',fmDir:'',fmRoot:'/tmp/x',thread:th}}]});
+  ck(Object.keys(fd.session?.info||{}).some(k=>k.startsWith('fm.list'))||Object.keys(fd.session?.drafts||{}).some(k=>k.startsWith('fm.')),'a files.dir read is applied: the Files listing is kept (fm.list)');
   const r3=await v({reads:[{kind:'no.such.read',id:1,result:{thread:th,goal:'IGNORED'}}]});
   ck((r3.session?.info||{})['fab.line:'+th]!=='IGNORED','an unknown kind is ignored');
 }

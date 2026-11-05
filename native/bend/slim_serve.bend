@@ -212,16 +212,30 @@ def Pol.refuse(refused: Bool, +r: J.Json) -> J.Json:
     case True{}: NS.Obj.put(r, "refused", J.Flag{True{}})
     case False{}: r
 
-# The hub's own RPC replies for this view (fab.look, review.page, telemetry.share, secret.list, bots.voice: the Settings pages' status reads), oldest first, taken once: each is applied as the client
+# The hub's own RPC replies for this view (fab.look, review.page, telemetry.share, secret.list, bots.voice: the Settings pages' status reads; files.dir, pdf.page, mech.list, mech.render, boards.list, history.refs: the viewer's tabs), oldest first, taken once: each is applied as the client
 # applies a hub reply (U.Ui.recv: Fab.reply, the Rp and Share reply handlers) before the view is drawn. The session returned carries what they
 # changed (fab.*:<thread> info, the @rp.req:N and @telemetry.req:N drafts); the host holds it and sends it back. An entry may carry `ok`
 # (false for a failed reply, which the Rp path handles differently); without it the reply is taken as successful.
+def Pol.read.kinds() -> List<&2, String>:
+  ["fab.look", "review.page", "telemetry.share", "secret.list", "bots.voice", "files.dir", "pdf.page", "mech.list", "mech.render", "boards.list", "history.refs"]
+
+def Pol.read.has(xs: List<&2, String>, +kind: String) -> Bool:
+  match xs:
+    case Nil{}: False{}
+    case h <> t: Bool.or(String.eq(h, kind), Pol.read.has(t, kind))
+
 def Pol.read.ok(+kind: String) -> Bool:
-  Bool.or(Bool.or(Bool.or(String.eq(kind, "fab.look"), String.eq(kind, "review.page")), Bool.or(String.eq(kind, "telemetry.share"), String.eq(kind, "secret.list"))), String.eq(kind, "bots.voice"))
+  Pol.read.has(Pol.read.kinds(), kind)
+
+# the hub's reply as the client received it: a refusal is a top-level `error` (kept when the entry has one)
+def Pol.read.frame(has: Bool, +item: J.Json) -> J.Json:
+  match has:
+    case True{}: J.Json.obj([J.KV{"t", J.Json.str("reply")}, J.KV{"id", Maybe.default(&2, J.Json, J.Json.get(item, "id"), J.Num{"0"})}, J.KV{"ok", Maybe.default(&2, J.Json, J.Json.get(item, "ok"), J.Flag{True{}})}, J.KV{"error", J.Json.get_obj(item, "error")}, J.KV{"result", J.Json.get_obj(item, "result")}])
+    case False{}: J.Json.obj([J.KV{"t", J.Json.str("reply")}, J.KV{"id", Maybe.default(&2, J.Json, J.Json.get(item, "id"), J.Num{"0"})}, J.KV{"ok", Maybe.default(&2, J.Json, J.Json.get(item, "ok"), J.Flag{True{}})}, J.KV{"result", J.Json.get_obj(item, "result")}])
 
 def Pol.read.one(ok: Bool, +u: U.Ui, +item: J.Json) -> U.Ui:
   match ok:
-    case True{}: U.Ui.recv(u, J.Json.obj([J.KV{"t", J.Json.str("reply")}, J.KV{"id", Maybe.default(&2, J.Json, J.Json.get(item, "id"), J.Num{"0"})}, J.KV{"ok", Maybe.default(&2, J.Json, J.Json.get(item, "ok"), J.Flag{True{}})}, J.KV{"result", J.Json.get_obj(item, "result")}]))
+    case True{}: U.Ui.recv(u, Pol.read.frame(Maybe.is_some(&2, J.Json, J.Json.get(item, "error")), item))
     case False{}: u
 
 def Pol.reads.go(items: J.Json, +u: U.Ui) -> U.Ui:
