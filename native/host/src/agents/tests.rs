@@ -951,3 +951,5 @@ fn tree(d: &Path) -> Vec<(String, u64)> {
     assert!(o.status.success(), "{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
     assert!(String::from_utf8_lossy(&o.stdout).contains("copy_child_probe ... ok"), "the probe ran: {}", String::from_utf8_lossy(&o.stdout));
 }
+
+#[path = "core_e2e.rs"] mod core_e2e;
