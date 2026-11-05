@@ -311,8 +311,7 @@ fn done_md(o: &J, published: &str) -> String {
     format!("{}\n\n**Files** in `{}`\n\n{}{}", o.get_str("notes", ""), o.get_str("dir", ""), files.join("\n"), if published.is_empty() { String::new() } else { format!("\n\n{published}") })
 }
 /// RvJob.release: a release of the thread's folder at a resolved immutable commit
-async fn release_job(cli: &str, thread: &str, cwd: &str, tag: &str, publish_it: bool, force: bool, home: &str) -> Value { super::git::keep(release_job_run(cli, thread, cwd, tag, publish_it, force, home)).await }
-async fn release_job_run(cli: &str, thread: &str, cwd: &str, tag: &str, publish_it: bool, force: bool, home: &str) -> Value {
+async fn release_job(cli: &str, thread: &str, cwd: &str, tag: &str, publish_it: bool, force: bool, home: &str) -> Value {
     if !release::valid(tag) || cwd.is_empty() { return rel_report(thread, "", "invalid release tag or project folder") }
     if copy() { return rel_report(thread, "", "No release: a hub on a copied log makes no releases") }
     let r = sh(REL_SOURCE, &[cwd], "/").await;
