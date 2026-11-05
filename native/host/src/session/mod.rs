@@ -16,7 +16,7 @@ pub trait ViewMethod: Send + Sync {
 
 /// Registers this lane's handlers. Nothing yet.
 mod actor;
-pub use actor::{forget, replied};
+pub use actor::{forget, record_read, replied};
 pub fn start(_hub: &Arc<Hub>) {}
 
 pub const REPLY_BYTES: usize = 262144;
@@ -81,6 +81,7 @@ impl Hub {
         if let (Some(w), Some(o)) = (&window, params.as_object_mut()) { o.insert("window".into(), w.clone()); }
         if let (Some(pg), Some(o)) = (&page, params.as_object_mut()) { o.insert("page".into(), page_json(p["target"]["id"].as_str().unwrap_or(""), before, pg)); }
         if let (Some(o), true) = (params.as_object_mut(), p.get("session").map_or(false, Value::is_object)) { o.insert("session".into(), actor::input(c.client, &view_id, &p)); }
+        { let reads = actor::take_reads(c.client); if let Some(o) = params.as_object_mut() { o.remove("reads"); if !reads.is_empty() { o.insert("reads".into(), Value::Array(reads)); } } }   // only the hub says what it read
         actor::set_local(&mut params, actor::local_in(c.client, &view_id, m, &p["target"]));
         let mut pol = match self.presenter.view(&params).await { Ok(v) => v, Err(_) => return vec![error(&id, "PRESENTER_UNAVAILABLE")] };
         if pol.get("refused") == Some(&json!(true)) { return vec![error(&id, "INVALID_REQUEST")] }   // a refused native-sidebar-page action (Hub.thin.act.native)
