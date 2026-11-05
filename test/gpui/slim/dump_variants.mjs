@@ -49,6 +49,10 @@ const variants={
   opus:[{$:'ModesSet',id:T,model:'claude-opus-4',runtime:'',interaction:'',at:A}],
   completed:[{$:'TurnChanged',thread:T,state:'completed',at:A}],
   settledhand:[{$:'ThreadSettled',id:T,manual:true,at:A}],
+  askapproval:[{$:'AskOpened',id:'k1',thread:T,kind:'approval',tool:'Bash',detail:'rm -rf build',options:'',at:A}],
+  askinput:[{$:'AskOpened',id:'k2',thread:T,kind:'input',tool:'',detail:'Which board?',options:'A\nB',at:A}],
+  askplan:[{$:'AskOpened',id:'k3',thread:T,kind:'plan',tool:'',detail:'# Plan\n\n- step one\n- step two',options:'',at:A}],
+  asksend:[{$:'AskOpened',id:'k4',thread:T,kind:'approval',tool:'gmail_send',detail:'Draft: hi',options:'',at:A}],
   queued:[{$:'TurnQueued',thread:T,msg:'q1',text:'later please',at:A}],
 };
 const out={};
