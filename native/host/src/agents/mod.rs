@@ -7,7 +7,7 @@
 //! Out for Claude: images/`$skill` input, the Backplane MCP server and runtime prompt in the agent's arguments,
 //! subagents and background tasks, todo tools, the allowance stream, the legacy queue, mail provenance beyond carry,
 //! and the hub's time-driven policies (liveness, autosettle, alert/told/summary, star nudge), which belong to M4.
-pub mod bg; pub mod oneshot; pub mod launch; pub mod review; pub mod tasks; pub mod codex; pub mod providers; pub mod cmds; pub mod hist; pub mod host; pub mod inputs; pub mod lines; pub mod mcp; pub mod proc; pub mod prompt; pub mod prompt_text; pub mod rules; pub mod tools; pub mod world;
+pub mod bg; pub mod textgen; pub mod launch; pub mod review; pub mod tasks; pub mod codex; pub mod providers; pub mod cmds; pub mod hist; pub mod host; pub mod inputs; pub mod lines; pub mod mcp; pub mod proc; pub mod prompt; pub mod prompt_text; pub mod rules; pub mod tools; pub mod world;
 #[cfg(test)] mod tests;
 #[cfg(test)] mod laws;
 
@@ -45,7 +45,7 @@ pub enum Cmd {
 
 /// The hub's one agent manager, for hub-side callers that were not handed it (commands, bots).
 static HANDLE: std::sync::OnceLock<Arc<Agents>> = std::sync::OnceLock::new();
-pub use oneshot::{summarizer, Summarizer};
+pub use textgen::{summarizer, Summarizer};
 pub fn handle() -> Option<Arc<Agents>> { HANDLE.get().cloned() }
 
 pub struct Agents { pub hub: Arc<Hub>, pub cli: Cli, pub host: host::HostInfo, world: Mutex<World>, actors: StdMutex<HashMap<String, mpsc::Sender<Cmd>>>, pub stats: Stats, n: AtomicU64,
