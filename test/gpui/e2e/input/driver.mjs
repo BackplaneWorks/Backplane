@@ -24,5 +24,6 @@ export class Input{
   async imeCompose(ime,composerAt,g,engine='hangul'){this.xi.click(g.x+composerAt[0],g.y+composerAt[1]);await sleep(300);let now='';try{now=ime.setEngine(engine)}catch(e){return {ok:false,evidence:{error:'engine switch failed: '+String(e.stderr||e.message).slice(0,160)}}}
     const before=this.s('before-ime');for(const k of HANGUL_HAN){this.xi.key(k);await sleep(150)}await sleep(500);const after=this.s('after-ime');try{ime.setEngine('xkb:us::eng')}catch{}
     return {ok:true,evidence:{imeStatus:ime.status,engine:now,changedPixels:diffPixels(before,after)}}}
+  windows(){try{const ids=execFileSync('xdotool',['search','--onlyvisible','--name','.'],{env:{...process.env,DISPLAY:this.display},encoding:'utf8'}).trim().split('\n').filter(Boolean);return ids.map(id=>{let n='';try{n=execFileSync('xdotool',['getwindowname',id],{env:{...process.env,DISPLAY:this.display},encoding:'utf8'}).trim()}catch{}return {id,name:n}})}catch{return []}}
   clickAt(g,at,button=1){this.xi.click(g.x+at[0],g.y+at[1],button)}
 }
