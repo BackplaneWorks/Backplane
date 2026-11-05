@@ -1,7 +1,7 @@
 #!/bin/sh
 # Boat only: build the Rust hub, then replay the post-#960 `unresolved` recording against it (fixtures only, stand-in agents).
 # Output: out/unresolved/{replay.txt,expect.txt,self.json}. Needs bun and systemd-run --user in the sandbox (as test/gpui/parity/boat-run.sh).
-exec scripts/boat-job.sh --size default --timeout 2400 --idle 0 --no-reuse --artifact out/unresolved \
+exec scripts/boat-job.sh --size default --timeout 2400 --idle 3600 --artifact out/unresolved \
   --exclude 'mobile/**' --exclude 'desktop/**' --exclude 'build/**' --exclude 'docs/**' --exclude 'tools/**' \
   --exclude 'shots-snap/**' --exclude 'assets/**' --exclude 'i18n/**' --exclude 'deploy/**' --exclude 'order/**' \
   --exclude 'skills/**' --exclude 'extra/**' --exclude 'test/gpui/hub/policy-bin/**' -- sh -c '

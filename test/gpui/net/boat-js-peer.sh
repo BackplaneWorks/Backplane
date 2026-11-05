@@ -4,7 +4,7 @@
 set -u
 BIN=${1:-/home/h/Documents/i2cjak/backplane-gpui/build/gpui/backplane-serve}
 mkdir -p test/gpui/net/bin && cp "$BIN" test/gpui/net/bin/backplane-serve && chmod +x test/gpui/net/bin/backplane-serve
-scripts/boat-job.sh --size default --timeout 1500 --idle 0 --no-reuse --no-setup-bend --artifact out/net \
+scripts/boat-job.sh --size default --timeout 1500 --idle 3600 --no-setup-bend --artifact out/net \
   --exclude 'mobile/**' --exclude 'desktop/**' --exclude 'build/**' --exclude 'docs/**' --exclude 'tools/**' \
   --exclude 'shots-snap/**' --exclude 'assets/**' --exclude 'i18n/**' --exclude 'deploy/**' --exclude 'order/**' \
   --exclude 'skills/**' --exclude 'extra/**' --exclude 'test/gpui/hub/policy-bin/**' -- sh -c "mkdir -p out/net; export BACKPLANE_JS_HUB=\$PWD/test/gpui/net/bin/backplane-serve; cd native/host && (cargo test --bin backplane-hub net::farsync::jstests -- --ignored --nocapture --test-threads=1 2>&1 | tee ../../out/net/js-peer.log | tail -60)"

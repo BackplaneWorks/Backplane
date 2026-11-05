@@ -1,6 +1,6 @@
 #!/bin/sh
 # From the repo root: sh test/gpui/term/boat-chrome-job.sh   (a Boat sandbox: the driver against the real helper and real headless Chrome, on a page the test serves from loopback; no accounts, no real sites)
-exec scripts/boat-job.sh --size default --timeout 1500 --idle 0 --no-reuse --no-setup-bend --artifact out/term \
+exec scripts/boat-job.sh --size default --timeout 1500 --idle 3600 --no-setup-bend --artifact out/term \
   --exclude 'mobile/**' --exclude 'desktop/**' --exclude 'build/**' --exclude 'docs/**' --exclude 'shots-snap/**' --exclude 'assets/**' --exclude 'i18n/**' --exclude 'deploy/**' --exclude 'order/**' \
   --exclude 'skills/**' --exclude 'extra/**' --exclude 'test/gpui/hub/policy-bin/**' -- sh -c '
 set -e
