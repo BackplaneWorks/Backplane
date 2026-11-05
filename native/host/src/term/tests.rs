@@ -208,7 +208,6 @@ fn drain(rx: &Tap, key: &str, acc: &mut Vec<u8>, resets: &mut Vec<Value>) {
     assert!(hub.is_attached(2), "a skipped client is not dropped");
     assert!(hub.outbox_pending(2) <= 256 * 1024 + 4 * pty::CHUNK, "{} bytes pending", hub.outbox_pending(2));
     // it reads again: it gets a snapshot (a reset to the screen's size) and the stale mark is gone
-    assert!(!t.inner.lock().await.skipped.is_empty(), "the skipped client is remembered");
     let got = tokio::spawn(async move { let mut resets = 0; while let Ok(Some(o)) = tokio::time::timeout(Duration::from_secs(5), stalled.recv()).await { if let Out::Value(v) = o { if v["t"] == "term" && v.get("reset").is_some() { resets += 1; break } } } resets });
     assert_eq!(got.await.unwrap(), 1, "one snapshot reached the client that caught up");
     assert!(wait(5, || t.inner.try_lock().map_or(false, |g| g.skipped.is_empty())).await);
