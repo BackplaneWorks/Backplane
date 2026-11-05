@@ -55,7 +55,7 @@ impl Browser {
     pub async fn ask(self: &Arc<Self>, owner: &str, op: &str, args: &Value) -> String { self.ask_as(owner, op, args, false).await }
     /// `agent`: the call is an agent's, and is refused (never sent) if the person has the page now: checked under the same lock that sends it.
     pub async fn ask_as(self: &Arc<Self>, owner: &str, op: &str, args: &Value, agent: bool) -> String {
-        if crate::copy::on() { return fail(NO_HELPER) }
+        if crate::copy::on() { return fail(&crate::copy::refusal("the browser helper")) }
         let (id, rx) = {
             let mut st = self.st.lock().await;
             if agent && st.drive.get(owner).map_or(false, |m| !m.is_empty()) { return fail(REFUSAL) }
