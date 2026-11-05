@@ -2040,6 +2040,9 @@ final class AppModel {
         engine.sendAtNow(thread, action: action, text: text, edit: edit, generation: generation) { [weak self] out in
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                #if DEBUG
+                if out == nil { NSLog("Backplane send refused: draft=%d chars action=%@ %@", text.count, action, self.qualificationDetailsForLog) }
+                #endif
                 if out == nil, generation == self.pairingGeneration { self.restoreComposer(thread, text: text, edit: edit) }
                 self.apply(out, generation: generation)
             }
