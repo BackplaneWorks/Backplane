@@ -33,7 +33,7 @@ before.lines=before.valid; // the hub's cursor counts whole lines only
 if(!before.endsWithNewline)log('note: log ends without a newline (torn tail) before start');
 const origin=originOf(home);
 const dur=secs;
-const h=await startHub({bin,home,port,standins,policy,log:`${out}/hub-hop${hop}.log`,extraEnv:{FAKE_SECS:String(dur+900),FAKE_PER:A.fake_per??'2',FAKE_CYCLE:A.fake_cycle??'20',BACKPLANE_COPY:'1'}});
+const h=await startHub({bin,home,port,standins,policy,log:`${out}/hub-hop${hop}.log`,extraEnv:{FAKE_SECS:String(dur+900),FAKE_PER:A.fake_per??'2',FAKE_CYCLE:A.fake_cycle??'20'}});
 log(`hub pid ${h.pid} up after ${h.bootMs} ms; events before start ${before.lines}; BACKPLANE_AGENTS verified; policy ${policy?'yes':'no'}`);
 const bootRss=rssKb(h.pid);
 
@@ -57,7 +57,7 @@ const writer=client(h,{since:before.lines,origin}).then(async wc=>{while(!stoppi
 let view=null;
 if(policy){try{view=await viewClient(h,{maxPerSec:Number(A.view_hz??5),onUpdate:r=>{if(r.ok)W.view.push(r.ms);else W.viewErr++}});log(`view client open: first view ${view.openMs?.toFixed(0)} ms`)}catch(e){log('view client failed: '+e.message)}}
 // agents: one long streaming turn per thread
-let started=0;let fatalEarly=null;
+let started=0;let fatalEarly=null;let totalDeltas=0;
 for(const id of ids){const r=await wire.rpc('turn.start',{thread:id,text:'stream',msg:`soak-h${hop}-${id}`},30000);if(r?.o?.ok)started++;else log(`turn.start ${id}: ${JSON.stringify(r?.o??'timeout')}`)}
 log(`${started}/${agents} turns started`);
 if(started<agents)fatalEarly=`only ${started}/${agents} turns started`;
@@ -71,7 +71,7 @@ const sample=async()=>{
  const now=Date.now(),all=procs(),kids=descendants(h.pid,all),pol=kids.filter(k=>/policy/.test(k.comm));
  const polRss=pol.reduce((a,p)=>a+rssKb(p.pid),0);
  const lag=W.lag.splice(0),ping=W.ping.splice(0),ack=W.ack.splice(0),view_=W.view.splice(0);const rates=[...W.perThread.values()];const ackFail=W.ackFail,viewErr=W.viewErr;W.ackFail=0;W.viewErr=0;
- const perThread=ids.map(i=>W.perThread.get(i)??0);W.perThread.clear();const deltas=W.deltas;W.deltas=0;
+ const perThread=ids.map(i=>W.perThread.get(i)??0);W.perThread.clear();const deltas=W.deltas;W.deltas=0;totalDeltas+=deltas;
  const cpu=cpuTicks(h.pid),dt=(now-lastT)/1000;
  const fd=fdInfo(h.pid),files=dirBytes(home);
  const s={hop,t:Math.round((now-t0)/1000),T:Math.round((now-t0)/1000)+gOffset,at:now,rss:rssKb(h.pid),hwm:hwmKb(h.pid),polRss,treeRss:rssKb(h.pid)+kids.reduce((a,p)=>a+(rssKb(p.pid)||0),0),
@@ -84,6 +84,7 @@ const sample=async()=>{
   view:{n:view_.length,err:viewErr,p50:pct(view_,50),p95:pct(view_,95),max:view_.length?Math.max(...view_):NaN,h:histOf(view_)}};
  lastCpu=cpu;lastT=now;lastEv=eventsTotal;n++;
  appendFileSync(samples,JSON.stringify(s)+'\n');
+ if(s.t>=60&&agents>0&&totalDeltas===0)fatal='no agent stream after 60 s (stand-ins not running?)';
  if(s.rss>capKb)fatal=`hub RSS ${s.rss} kB over the cap ${capKb}`;
  return s};
 let exited=null;if(policy&&!view)fatalEarly=(fatalEarly?fatalEarly+'; ':'')+'policy given but the view client did not start';h.exited.then(e=>{exited=e});

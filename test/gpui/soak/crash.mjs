@@ -30,7 +30,7 @@ function fresh(events){rmSync(work,{recursive:true,force:true});mkdirSync(rig.ho
  const {lines}=seedLines(rig.proj,20);writeFileSync(`${rig.home}/events.jsonl`,lines.join('\n')+'\n')}
 let hubN=0;
 async function boot(extra={}){hubN++;const n0=(await countLines(`${rig.home}/events.jsonl`));const org=originOf(rig.home);
- const t0=performance.now();const h=await startHub({bin,home:rig.home,port:port0+(hubN%400),standins:rig.standins,policy:extra.policy===false?undefined:policy,log:`${out}/${scenario}-hub.log`,extraEnv:{FAKE_SECS:'86400',FAKE_PER:'2',FAKE_CYCLE:'20',BACKPLANE_COPY:'1',...(extra.env??{})}});
+ const t0=performance.now();const h=await startHub({bin,home:rig.home,port:port0+(hubN%400),standins:rig.standins,policy:extra.policy===false?undefined:policy,log:`${out}/${scenario}-hub.log`,extraEnv:{FAKE_SECS:'86400',FAKE_PER:'2',FAKE_CYCLE:'20',...(extra.env??{})}});
  rig.lastHub=h.pid;rig.lastHub=h.pid;const bootMs=performance.now()-t0;return {h,n0:n0.lines,tailUnterminated:!n0.endsWithNewline,origin:org,bootMs,rss:rssKb(h.pid)}}
 // closed-loop writers: each keeps one project.add in flight; `acked` gets a path only when the hub says ok
 async function writers(h,n,stopRef,tag,pathLen=0){const o=await boot_origin(h);const cs=[];
