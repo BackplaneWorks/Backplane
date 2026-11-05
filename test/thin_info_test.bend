@@ -6,6 +6,7 @@ import ../src/core/client.bend as U
 import ../src/core/usage.bend as Z
 import ../src/server/thin-actor.bend as A
 import ../src/server/thin-view.bend as V
+import ../src/core/thin-wire.bend as TW
 
 # Synthetic data only. A closed ledger larger than the actual rejected
 # frame must not cross the UI boundary or change any displayed usage row.
@@ -120,6 +121,8 @@ def main.quiet() -> IO(Unit):
     check("a first secret list dirties", A.Actor.dirty(replied(actor(), secrets())))
     C.Check.str("the secret list is kept", U.Ui.scratch(A.Actor.ui(once), "@secrets"), "[]")
     check("the same secret list again leaves the view clean", Bool.not(A.Actor.dirty(replied(once, secrets()))))
+    check("a web view's greeting says the hub asks the card itself", J.Json.get_bool(TW.Wire.greeting("web", "1", "e"), "fabSelf", False{}))
+    check("a phone's greeting does not", Bool.not(J.Json.get_bool(TW.Wire.greeting("mobile", "1", "e"), "fabSelf", False{})))
     C.Check.str("a shown thread's render asks for its order card itself", Nat.show(fab_reads(A.Actor.mail_ready(project_actor()))), "1")
     C.Check.str("and only once while the thread stays as it was", Nat.show(fab_reads(A.Actor.mail_ready(A.Actor.clean(A.Actor.mail_ready(project_actor()))))), "0")
     check("a changed secret list dirties", A.Actor.dirty(replied(once, "{\"t\":\"reply\",\"id\":6,\"ok\":true,\"secrets\":\"[1]\",\"vault\":\"{}\"}")))

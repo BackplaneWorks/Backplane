@@ -11,8 +11,17 @@ def Wire.limits() -> J.Json:
 def Wire.capabilities() -> J.Json:
   J.Json.obj([J.KV{"version", J.Num{"1"}}, J.KV{"views", J.Json.obj([J.KV{"version", J.Num{"1"}}, J.KV{"websocketQuery", J.Str{"view=1"}}, J.KV{"renderers", J.Json.arr([J.Str{"web"}, J.Str{"mobile"}])}, J.KV{"compatibility", J.Str{"explicit-only"}}])}])
 
-def Wire.greeting(renderer: String, generation: String, epoch: String) -> J.Json:
-  J.Json.obj([J.KV{"t", J.Str{"view"}}, J.KV{"version", J.Num{"1"}}, J.KV{"renderer", J.Str{renderer}}, J.KV{"generation", J.Str{generation}}, J.KV{"epoch", J.Str{epoch}}, J.KV{"limits", Wire.limits()}])
+# What a web page may leave to this hub: "fabSelf", the hub asks a shown
+# thread's ordering card in its own render (thin-actor.bend's mail_ready),
+# so the page need not send its "fab-look" action after each open (an old
+# hub, without the field, still needs it). Phones get none of it.
+def Wire.greeting.extra(+renderer: String) -> List<&2, J.KV>:
+  match renderer:
+    case "web": [J.KV{"fabSelf", J.Flag{True{}}}]
+    case _: Nil{}
+
+def Wire.greeting(+renderer: String, generation: String, epoch: String) -> J.Json:
+  J.Json.obj(List.append(&2, J.KV, [J.KV{"t", J.Str{"view"}}, J.KV{"version", J.Num{"1"}}, J.KV{"renderer", J.Str{renderer}}, J.KV{"generation", J.Str{generation}}, J.KV{"epoch", J.Str{epoch}}, J.KV{"limits", Wire.limits()}], Wire.greeting.extra(renderer)))
 
 def Wire.within.go(s: String, +left: Nat, valid: Bool) -> Bool:
   match s valid:

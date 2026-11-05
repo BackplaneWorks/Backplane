@@ -149,7 +149,7 @@
     "src/core/telemetry.bend": "280dcdf4f7e49568f3e35efdb17de0c5f73c0421f88eacbde81a5cecc7e3ec79",
     "src/core/textscale.bend": "6f3179e85bce1ed2f56191bcc25621fcd83dc4ecf239b60ceed9cb1fdf883b5c",
     "src/core/thin-chat.bend": "b654c26082a5b02b40a3eb6092744fd4e2f6befda5d4757eb2f8a55368fdceae",
-    "src/core/thin-wire.bend": "95299885f65f3dea85bf8a3bea4e0e5ae8bcbf3ebfb44b699cacb2cf6690454c",
+    "src/core/thin-wire.bend": "1ff6b258a0c5565023ab1565b2446d0df5e731b7292fe246b2f9db60ffe7b1fc",
     "src/core/thin.bend": "49445e60244e4820224d39989d0d22fc6ff59f049018d26bd29915b25ba091f0",
     "src/core/thinq.bend": "fb65373348a50fdae1a35947f0d66ea4573c389d221075dbe8ae373654b6afd4",
     "src/core/title.bend": "bac62f410792eb2feff74985b63f950130d03d9de75dc78fb6ac5f1e97f6d5eb",
@@ -1198,5 +1198,6 @@
     },
     "viewerInfo": "Also left out of the private image key: info keys of each thread's viewer and fold choices ('fold:', 'view.', 'panel:', 'panel.hand:', 'diff:', 'hist.at:', 'hist.back:', 'hist.diff:', 'cmp.a:', 'cmp.b:', 'cmp.al', 'cmp.bl', 'fm.want:'; client.bend's Reset.prefixes less 'subs:' and 'fab.'). Call-graph scan from every View.sidebar/project/row/tree/groups def (1161 reachable defs): no literal reader of these prefixes; the only info walk (Side.signals.ix \u2192 Signal.cache.work) reads '@signal:' keys. test/sidebar_draft_image_test.bend: fold and viewer choices reuse the image and the whole page with the kept sidebar equals the fresh one; 'subs:' still invalidates."
   },
-  "snappyDiffReview20261105": "client.bend Dv.open/Dv.mark/Dv.unwait, view.bend View.diff.wait, screen.bend Mob.diff.at.w: a Diff asked for by hand opens its viewer at once with a Loading head (diff.wait:t, diff.ask:<id>) until its answer or an error. Viewer/info keys only; no sidebar draft reader changed."
+  "snappyDiffReview20261105": "client.bend Dv.open/Dv.mark/Dv.unwait, view.bend View.diff.wait, screen.bend Mob.diff.at.w: a Diff asked for by hand opens its viewer at once with a Loading head (diff.wait:t, diff.ask:<id>) until its answer or an error. Viewer/info keys only; no sidebar draft reader changed.",
+  "snappyGreetingReview20261105": "thin-wire.bend: the web greeting adds \"fabSelf\": true (Wire.greeting.extra); no sidebar or draft data."
 }
