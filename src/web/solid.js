@@ -125,7 +125,9 @@ export function picture(canvas) {
   const stage = canvas?.parentElement;
   if (!stage || !pictures || (view && view.canvas === canvas && view.count) || parked?.canvas === canvas) return null;
   const pic = pictures.get(stateOf(canvas)), shown = stage.querySelector(":scope > img.solid-picture");
-  if (shown?.dataset.key === stateOf(canvas)) return pic;
+  // (its stats with it; a stats line the hub's view made again, empty, is filled again)
+  const fill = () => { const stat = stage.querySelector(":scope > .viewer-stat"); if (stat && !stat.textContent && pic?.stat) stat.textContent = pic.stat; };
+  if (shown?.dataset.key === stateOf(canvas)) { fill(); return pic; }
   shown?.remove();
   if (!pic || pic.w !== canvas.clientWidth || pic.h !== canvas.clientHeight || pic.dpr !== viewDpr()) return null;
   // (a pose this page remembers for the view, other than the picture's,
@@ -135,9 +137,7 @@ export function picture(canvas) {
   const img = pictures.image(stateOf(canvas));
   if (!img) return null;
   img.className = "solid-picture"; img.setAttribute("aria-hidden", "true"); img.dataset.key = stateOf(canvas);
-  canvas.after(img);
-  const stat = stage.querySelector(":scope > .viewer-stat");
-  if (stat && !stat.textContent) stat.textContent = pic.stat;
+  canvas.after(img); fill();
   return pic;
 }
 function dropPicture(canvas) { canvas?.parentElement?.querySelector(":scope > img.solid-picture")?.remove(); }
@@ -646,6 +646,7 @@ class View {
     // (the same model as its picture's, by size and triangles, keeps the
     // picture's line: only this load's timings would differ)
     const held = this.heldStat, same = held && record?.stats.bytes === held.bytes && this.count / 3 === held.tris;
+    if (this.stat && pictured && held?.text && !this.stat.textContent) this.stat.textContent = held.text;
     if (this.stat && !pictured) this.stat.textContent = this.count && record?.status === "ready" ? same ? held.text : this.statLine({ ...record.stats, build: record.stats.build / 1000, waited: this.waited || 0, tris: this.count / 3 }) : "";
     if (!this.count) return;
     let ready = false;
