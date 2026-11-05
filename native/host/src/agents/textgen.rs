@@ -61,7 +61,7 @@ impl Agents {
         let (provider, model) = pick(&tp, &tm);
         if provider != "claude" && provider != "codex" { return None }
         let prog = self.cli.resolve(provider).ok()?;
-        let p = proc::spawn(&prog, &args(provider, &model, system), &self.host.home, self.cli.dir(), &[]).ok()?;
+        let p = proc::spawn(&prog, &args(provider, &model, system), &self.hub.cfg.home, self.cli.dir(), &[]).ok()?;
         let (pid, mut lines, input_tx, exit) = (p.pid, p.lines, p.input, p.exit);
         let _ = input_tx.try_send(input.to_string()); drop(input_tx); // the text on stdin, then it closes
         let read = async { let mut out = String::new(); while let Some(l) = lines.recv().await { if out.len() + l.len() > OUT_CAP { break } out.push_str(&l); out.push('\n') } out };
