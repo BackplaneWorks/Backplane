@@ -61,6 +61,8 @@ impl RpcHandler for Files {
 /// `{text, fmEntries:"", fmError, fmDir, thread}`.
 async fn files_dir(hub: &Arc<Hub>, id: &Value, p: &Value) -> Value {
     let (thread, rel) = (p.get("thread").and_then(Value::as_str).unwrap_or(""), p.get("path").and_then(Value::as_str).unwrap_or(""));
+    // Hub.dir.k: a path that fails Fm.safe is refused before any job runs, with Reply.err
+    if !fm::safe(rel) { return json!({"t":"reply","id":id,"ok":false,"error":"that folder is not in this project"}) }
     let root = root_of(hub, thread).await;
     let listed = if root.as_os_str().is_empty() { Err("no such folder") } else {
         let (r, rel) = (root.clone(), rel.to_string());
