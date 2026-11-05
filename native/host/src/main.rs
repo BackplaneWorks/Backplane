@@ -144,6 +144,7 @@ async fn run(a: Args) -> Result<()> {
     eprintln!("Backplane listening on http://{listen}");
     // the policies (autosettle, alerts, told, summaries, liveness, star nudge...): keep the Arc, the view lane reads it
     let _policies = statehost::start(hub.clone());
+    { let p = _policies.clone(); _bots.set_star(std::sync::Arc::new(move |msg: &str, now: u64| p.star_prompt(msg, now))); } // the star nudge counts a person's bots.say / bots.post
     let (events, torn) = (hub.store.len(), hub.store.torn_bytes);
     eprintln!("presenter: {}; events: {}; torn tail bytes: {}", hub.presenter.name(), events, torn);
     loop {
