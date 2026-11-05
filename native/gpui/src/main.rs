@@ -14,7 +14,7 @@ use serde_json::Value;
 use std::{collections::{HashMap,VecDeque},time::{Duration,Instant}};
 use script::{Pending,Step};
 use hub::{Command,Event};
-actions!(backplane,[Send,ClosePopup]);
+actions!(backplane,[Send,ClosePopup,CopySelection]);
 pub struct Backplane {
     pub input:Entity<screens::composer::Composer>, data:Value, status:String, error:String,
     tx:tokio::sync::mpsc::Sender<Command>, selected:String,
@@ -111,6 +111,8 @@ impl Backplane {
         ids
     }
     fn user_entries(&self)->usize {self.data["thread"]["entries"].as_array().map_or(0,|e|e.iter().filter(|e|e["kind"]=="user").count())}
+    /// Ctrl/Cmd-C with no text field focused (a click in the timeline leaves none): copy what is selected there.
+    fn copy_selection(&mut self,_:&CopySelection,_:&mut Window,cx:&mut Context<Self>){self.timeline_copy(cx);}
     fn close_popup(&mut self,_:&ClosePopup,_:&mut Window,cx:&mut Context<Self>){if self.data["settings"].is_object() {let _=self.tx.try_send(Command::Action("flag".into(),"settings".into()));}else{let _=self.tx.try_send(Command::Action("skill-close".into(),String::new()));}cx.notify();}
 }
 fn main()->anyhow::Result<()> {
@@ -119,7 +121,7 @@ fn main()->anyhow::Result<()> {
     if config.swatches||config.gallery||config.fonts||std::env::var_os("BACKPLANE_GPUI_RECTS").is_some(){art::enable_rects();}
     script::metric(started,"process_start",serde_json::json!({}));
     Application::new().run(move|cx:&mut App|{
-        art::load_fonts(cx);input::bind(cx);screens::composer::bind(cx);cx.bind_keys([KeyBinding::new("enter",Send,Some("Composer")),KeyBinding::new("ctrl-enter",Send,Some("Composer")),KeyBinding::new("escape",ClosePopup,None)]);
+        art::load_fonts(cx);input::bind(cx);screens::composer::bind(cx);cx.bind_keys([KeyBinding::new("enter",Send,Some("Composer")),KeyBinding::new("ctrl-enter",Send,Some("Composer")),KeyBinding::new("escape",ClosePopup,None),KeyBinding::new("secondary-c",CopySelection,None)]);
         cx.on_window_closed(|cx|if cx.windows().is_empty(){cx.quit();}).detach();
         let bounds=Bounds::centered(None,size(px(1400.),px(900.)),cx);
         let opts=WindowOptions{window_bounds:Some(WindowBounds::Windowed(bounds)),titlebar:Some(TitlebarOptions{title:Some("Backplane GPUI · experimental".into()),..Default::default()}),..Default::default()};
