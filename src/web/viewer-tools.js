@@ -75,8 +75,10 @@ class Workbench {
       this.syncComponents();
       // A selection the person made opens the components pane; one restored by
       // a metadata refresh (readComponents) must not take the inspector from
-      // whatever pane is open, such as the reflow preview.
-      if (component && !this.state.components && !this.restoring) this.showComponents(true);
+      // whatever pane is open, such as the reflow preview. In Split the
+      // schematic and the board already show what was probed: the pane would
+      // take half of the 3D's (its Components button still opens it).
+      if (component && !this.state.components && !this.restoring && !this.root?.closest?.(".combo")) this.showComponents(true);
     });
     this.sync();
     if (this.state.components) this.showComponents(true); else this.showReflow(this.state.reflow);
