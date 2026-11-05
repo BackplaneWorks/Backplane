@@ -67,7 +67,8 @@ impl Core {
         let after = live.into_iter().chain(asks).chain(told).chain(quiet).chain(meta).collect();
         Derived { core, end, marks, after }
     }
-    pub fn tick(&self, now_s: u64) -> Vec<Value> { let mut v = autosettle::changes(&self.st, now_s); v.extend(autosettle::tick_post(&self.st, now_s)); v.extend(turnend::told_prune(&self.st, now_s)); v }
+    pub fn tick(&self, now_s: u64) -> Vec<Value> { if self.st.get("autosettle.version", "") != "1" { return autosettle::upgrade(&self.st, now_s) } // Hub.autosettle.upgrade, once, first
+        let mut v = autosettle::changes(&self.st, now_s); v.extend(autosettle::tick_post(&self.st, now_s)); v.extend(turnend::told_prune(&self.st, now_s)); v }
 }
 
 struct Inner {

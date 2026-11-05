@@ -16,7 +16,7 @@ tail -4 $O/test.txt; grep -E 'test-exit|build-exit' $O/test.txt $O/build.txt
 norm() { python3 -c "
 import sys,json
 d=json.load(sys.stdin)
-for k in ('tick','meta','quiet','live','end','wakes'):
+for k in ('tick','meta','quiet','live','end','wakes','upgrade'):
     for x in sorted(json.dumps(e,sort_keys=True) for e in d[k]): print(k,x)"; }
 fail=0; total=0; nonempty=0
 for f in test/gpui/state/auto-logs/auto-*.jsonl; do n=$(basename $f .jsonl)
