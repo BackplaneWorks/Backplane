@@ -1009,3 +1009,24 @@ async fn owner_planned(p: &Pair) {
     assert!(o.status.success(), "{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
     assert!(String::from_utf8_lossy(&o.stdout).contains("owner_copy_child_probe ... ok"), "the probe ran: {}", String::from_utf8_lossy(&o.stdout));
 }
+#[tokio::test] async fn a_prompt_a_person_types_counts_for_the_star_nudge_once() {
+    // Star.accepted: bots.say and bots.post from a client (not a retry, not blank) hand their message id to the state lane's count, whose events commit with the prompt's own;
+    // a room's fanout is one prompt, and bots.space, retries and blank text are not prompts
+    let (hub, bots, _r) = start("parity-star", "").await;
+    let (ada, bob) = (bot(&hub, "ada").await, bot(&hub, "bob").await);
+    assert_eq!(rpc(&hub, "bots.room", json!({"room":"r1","name":"lab","members":format!("{ada}\n{bob}")})).await["ok"], true);
+    let calls: Arc<StdMutex<Vec<String>>> = Default::default(); let c2 = calls.clone();
+    bots.set_star(Arc::new(move |msg: &str, now: u64| { c2.lock().unwrap().push(msg.to_string()); (vec![json!({"$":"SettingSet","key":format!("star.seen.{msg}"),"value":"1","at":now})], None) }));
+    assert_eq!(rpc(&hub, "bots.say", json!({"bot":ada,"text":"hi","msg":"m1"})).await["ok"], true);
+    assert_eq!(rpc(&hub, "bots.post", json!({"room":"r1","text":"hello room","msg":"p1"})).await["ok"], true);
+    assert_eq!(*calls.lock().unwrap(), ["m1", "p1"], "one count each, the room's two members are not two prompts");
+    assert_eq!(rpc(&hub, "bots.say", json!({"bot":ada,"text":"hi","msg":"m1"})).await["ok"], true); // the same msg again: already accepted
+    assert_eq!(rpc(&hub, "bots.say", json!({"bot":ada,"text":"again","msg":"m2","retry":true})).await["ok"], true);
+    assert_eq!(rpc(&hub, "bots.say", json!({"bot":ada,"text":"   ","msg":"m3"})).await["ok"], true);
+    assert_eq!(rpc(&hub, "bots.space", json!({"bot":ada,"action":"open","value":""})).await["ok"], true);
+    assert_eq!(*calls.lock().unwrap(), ["m1", "p1"]);
+    let l = log(&hub);
+    assert!(l.iter().any(|e| e["$"] == "SettingSet" && e["key"] == "star.seen.m1") && l.iter().any(|e| e["$"] == "SettingSet" && e["key"] == "star.seen.p1"));
+    // the star events are in the same commit as the prompt's own: right after the wake / with the room post
+    let i = l.iter().position(|e| e["key"] == "star.seen.m1").unwrap(); assert_eq!(l[i - 1]["$"], "BotWoke");
+}
