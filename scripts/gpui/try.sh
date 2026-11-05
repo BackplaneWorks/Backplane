@@ -1,6 +1,6 @@
 #!/bin/sh
-# Try the GPUI app on your own screen, over a throwaway copy of the store.
-#   scripts/gpui/try.sh start     test hub + GPUI window (first start imports the log: minutes)
+# Try the GPUI app on your own screen, over a throwaway, trimmed copy of the store.
+#   scripts/gpui/try.sh start     test hub + GPUI window (the hub loads the log first)
 #   scripts/gpui/try.sh stop      stop both and delete the copy
 #   scripts/gpui/try.sh status
 # Never the live hub or store: its own home and port, loopback only, BACKPLANE_COPY=1
@@ -25,8 +25,8 @@ start_hub() {
   [ -f "$SRC" ] || { echo "no store copy at $SRC" >&2; exit 1; }
   mkdir -p -m 700 "$H/home" "$H/fakehome" "$H/bin" "$H/locks"
   if [ ! -f "$H/home/events.jsonl" ]; then
-    echo "copying the store copy (1.5 GB)..."
-    cp "$SRC" "$H/home/events.jsonl"; chmod 600 "$H/home/events.jsonl"
+    echo "making a smaller copy with the ${GPUI_TRY_THREADS:-200} most recent threads..."
+    python3 "$ROOT/scripts/gpui/try-trim.py" "$SRC" "$H/home/events.jsonl" "${GPUI_TRY_THREADS:-200}"
   fi
   cp "$ROOT/build/gpui/backplane-serve-current" "$H/backplane-serve"
   printf '#!/bin/sh\nexec %s %s "$@"\n' "$(command -v bun)" "$ROOT/test/tools/claude_standin.ts" > "$H/bin/claude"
