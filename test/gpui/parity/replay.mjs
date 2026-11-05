@@ -8,7 +8,7 @@ import {startFixtureHub,WORK} from './hubs.mjs';
 import {normalise,diff} from './compare.mjs';
 import {encode} from '../wire.mjs';
 const arg=(k,d)=>{const i=process.argv.indexOf('--'+k);return i>0?process.argv[i+1]:d};
-const idRe=/\\b([ptgm]\\d{10}-\\d+(?::\\d+)?)\\b|\\bfake-\\d+\\b|\\b[mt][a-z]?\\d{3,8}-\\d+-\\d+(?::\\d+)?\\b|\\btu\\d+-\\d+-\\d+\\b|\\bc[a-z0-9-]*?\\d{10}-\\d+\\b/g;
+const idRe=/\\b([ptgm]\\d{10}-\\d+(?::\\d+)?)\\b|\\bfake-\\d+\\b|\\b[mt][a-z]?\\d{3,8}-\\d+-\\d+(?::\\d+)?\\b|(?<![A-Za-z])tu\\d+-\\d+-\\d+\\b|\\bc[a-z0-9-]*?\\d{10}-\\d+\\b/g;
 const ids=s=>[...String(s).matchAll(idRe)].map(m=>m[0]);
 const walkStr=(v,f)=>typeof v==='string'?f(v):Array.isArray(v)?v.map(x=>walkStr(x,f)):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).map(([k,x])=>[k,walkStr(x,f)])):v;
 
@@ -26,9 +26,16 @@ export async function replayOne(recording,{bin,port,work}){
     const vid=f.json.result?.viewId;if(vid&&!(viewIdsRec[f.c]??=[]).includes(vid))viewIdsRec[f.c].push(vid);
     const tk=f.json.result?.viewDelta?.token;if(tk&&!(tokRec[f.c]??=[]).includes(tk))tokRec[f.c].push(tk);
     for(const s of ids(JSON.stringify(f.json)))if(!seen.has(s)){seen.add(s);recIds.push(s)}}
+  // a client sends some requests only because a hub reply told it to (cmds of type send): the replay sends the command its own hub issued
+  const cmdRec={},outCmd=new Map();
+  for(const f of frames){
+    if(f.dir==='in'&&f.json?.t==='reply'&&!(f.vol&&volIds.has(f.c+'|'+f.json.id)))for(const cm of f.json.result?.cmds||[])if(cm.type==='send'){try{(cmdRec[f.c]??=[]).push({q:JSON.parse(cm.text),used:false})}catch{}}
+    if(f.dir==='out'&&f.kind==='bin'&&!f.vol&&f.json&&!f.json.raw){const k=(cmdRec[f.c]||[]).findIndex(x=>!x.used&&JSON.stringify(x.q)===JSON.stringify(f.json));if(k>=0){cmdRec[f.c][k].used=true;outCmd.set(f.i,k)}}}
+  const cmdRep={};
   const h=await startFixtureHub({bin,port,work});
   const rec=new Rec();const clients={};const repIds=[],repSeen=new Set();const viewIdsRep={};
-  const observe=(c)=>{for(const j of c.inbox.slice(c.obs||0)){const vid=j?.result?.viewId;if(vid&&!(viewIdsRep[c.name]??=[]).includes(vid))viewIdsRep[c.name].push(vid);
+  const observe=(c)=>{for(const j of c.inbox.slice(c.obs||0)){
+      if(j?.t==='reply'&&!(j.ok===false))for(const cm of j.result?.cmds||[])if(cm.type==='send'){try{(cmdRep[c.name]??=[]).push(JSON.parse(cm.text))}catch{}}const vid=j?.result?.viewId;if(vid&&!(viewIdsRep[c.name]??=[]).includes(vid))viewIdsRep[c.name].push(vid);
       const tk=j?.result?.viewDelta?.token;if(tk&&!(tokRep[c.name]??=[]).includes(tk))tokRep[c.name].push(tk);
       for(const s of ids(JSON.stringify(j)))if(!repSeen.has(s)){repSeen.add(s);repIds.push(s)}}c.obs=c.inbox.length};
   const sub=(c,v)=>walkStr(v,s=>{
@@ -66,7 +73,7 @@ export async function replayOne(recording,{bin,port,work}){
       for(const oid of owed.filter(o=>o.c===f.c&&o.i<f.i&&(replyAt.get(o.c+'|'+o.id)??Infinity)<f.i)){if(!(await c.until(x=>x.t==='reply'&&String(x.id)===String(oid.id),20000)))break}
       observe(c);
       if(f.json.raw){c.sendRaw(Uint8Array.from(Buffer.from(f.raw,'base64')))}
-      else{const obj=sub(c,f.json);const t0=obj?.p?.viewDelta?.token;if(t0!==undefined){const i=(tokRec[f.c]||[]).indexOf(f.json.p.viewDelta.token);if(i>=0&&tokRep[f.c]?.[i]!==undefined)obj.p.viewDelta.token=tokRep[f.c][i]}for(const s of ids(JSON.stringify(obj)))repSeen.add(s);c.send(obj)}
+      else{const own=outCmd.has(f.i)?cmdRep[f.c]?.[outCmd.get(f.i)]:undefined;const obj=own?JSON.parse(JSON.stringify(own)):sub(c,f.json);const t0=obj?.p?.viewDelta?.token;if(t0!==undefined){const i=(tokRec[f.c]||[]).indexOf(f.json.p.viewDelta.token);if(i>=0&&tokRep[f.c]?.[i]!==undefined)obj.p.viewDelta.token=tokRep[f.c][i]}for(const s of ids(JSON.stringify(obj)))repSeen.add(s);c.send(obj)}
       if(outId(f)!==undefined&&outId(f)!==null)owed.push({c:f.c,i:f.i,id:outId(f)});
       continue}
   }

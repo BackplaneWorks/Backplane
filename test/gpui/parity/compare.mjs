@@ -14,13 +14,14 @@ export const NORMALISATIONS=[
  'N11 harness steps: `settle` and `end` pseudo-frames (the client program waiting or closing) are control, not wire traffic, and are not compared. Reason: a replay waits by reply id, not by the recorded quiet times.',
  'N7 streams: per client the sequence of events, deltas, replies and view replies are compared as separate ordered streams; relative order between streams is not compared. Reason: network timing.',
  'N9 info frames: all info frames of a client are merged into one item (keys unioned, later values win; environment keys dropped); position and repeat count are not compared. The `other` stream (http, upgrade, close, info) is compared as a sorted set. Reason: the hub repeats info on its own timer.',
- 'N10 hub start-up settings: a contiguous run of SettingSet events whose key is machine.id, accounts.inventory, allowance.codex, projects.missing or tz.* is sorted by key. Reason: background start-up jobs finish in varying order.',
+ 'N10 housekeeping events: a contiguous run of events that concurrent hub jobs append (SettingSet keys machine.id, accounts.*, allowance.*, projects.missing, tz.*, autosettle.*, liveness.*, turn.from/speed.*, restart.*, provider.*, fallback.*, tok.*, summary.*, told.*, alert.*, account.*, star.*; ActivityLogged of kind git or spawn; WorktreeSkipped) is sorted canonically. The set is compared, not the order. Reason: start-up, git probes and settle bookkeeping finish in varying order.',
+ 'N15 counters: numeric seq and changes (the hub change count at the instant a view was drawn) -> <N>. Reason: housekeeping events land between draws.',
  'N8 info frames: home paths, ports, machine ids, tokens, pids -> placeholders. Reason: environment.',
 ];
 const CLOCK_KEYS=new Set(['at','rid','now','clock','last','nudged','attempted_at','eligibleAt','sentAt','checked']);
 function mkNorm(){
   const ids=new Map();const ord=v=>{if(!ids.has(v))ids.set(v,'ID'+(ids.size+1));return ids.get(v)};
-  const idRe=/\b([ptgm]\d{10}-\d+(?::\d+)?)\b|\bfake-\d+\b|\b[mt][a-z]?\d{3,8}-\d+-\d+(?::\d+)?\b|\btu\d+-\d+-\d+\b|\b\d+:\d{12,15}\b/g;
+  const idRe=/\b([ptgm]\d{10}-\d+(?::\d+)?)\b|\bfake-\d+\b|\b[mt][a-z]?\d{3,8}-\d+-\d+(?::\d+)?\b|(?<![A-Za-z])tu\d+-\d+-\d+\b|\b\d+:\d{12,15}\b/g;
   const str=(s,key)=>{
     s=s.replace(/@\d{13}@/g,'@<T>@').replace(/(?:\/[^"\s]*)?\/work-[A-Za-z0-9]+/g,'<work>').replace(/backplane[-\/][0-9a-f]{8}\b/g,'backplane-<wt>').replace(/\bc[a-z0-9-]*?\d{10}-\d+\b/g,m=>ord(m));
     s=s.replace(/\b1[78]\d{8}\b(?!-)/g,'<T>').replace(/\b1[78]\d{11}\b/g,'<T>');
@@ -30,6 +31,7 @@ function mkNorm(){
     return s;};
   const go=(v,key)=>{
     if(v===undefined||v===null||typeof v==='boolean')return v;
+    if((key==='seq'||key==='changes')&&typeof v==='number')return '<N>';
     if(typeof v==='number')return CLOCK_KEYS.has(key)?'<T>':(v>=1.7e9&&v<1.9e9?'<T>':(v>=1.7e12&&v<1.9e12?'<T>':v));
     if(typeof v==='string'){if(v!==''&&(key==='epoch'||key==='generation'||key==='origin'||key==='hub'||key==='viewId'||key==='token'||key==='base'))return ord(v);if(key==='viewRevision')return '<R>';return str(v,key)}
     if(Array.isArray(v))return v.map(x=>go(x,key));
@@ -68,12 +70,14 @@ export function normalise(frames){
     s.other.push(go(j));
   }
   for(const k of Object.keys(open)){const [c,th]=k.split('|');flush(c,th)}
-  const STARTUP=/^(machine\.id|accounts\.inventory|allowance\.codex|projects\.missing|tz\..*)$/;
+  // housekeeping events are appended by concurrent hub jobs (start-up, git probe, settle/liveness bookkeeping): the set matters, their order does not
+  const HK_SET=/^(machine\.id|accounts\.inventory|allowance\.codex|projects\.missing|tz\..*|autosettle\..*|liveness\..*|turn\.(from|speed)\..*|restart\..*|provider\..*|fallback\..*|tok\..*|summary\..*|told\..*|alert\..*|account\..*|star\..*)$/;
+  const hk=e=>(e.$==='SettingSet'&&HK_SET.test(e.key))||(e.$==='ActivityLogged'&&(e.kind==='git'||e.kind==='spawn'))||e.$==='WorktreeSkipped';
   for(const s of Object.values(per)){
     if(s.infoSeen){s.other.push({info:gof(Object.keys(per).find(k=>per[k]===s))(Object.fromEntries(Object.entries(s.infoSeen).filter(([k])=>!/^(home|listen|machines|models|update|accounts\.live|kicad\.|freecad|browser\.|telemetry\.|tailnet|tailscale|bots\.remote|machine\.id|os|arch)/.test(k))))});delete s.infoSeen}
     s.other.sort((a,b)=>JSON.stringify(a)<JSON.stringify(b)?-1:1);
     const ev=s.events,out=[];let i=0;
-    while(i<ev.length){if(ev[i].$==='SettingSet'&&STARTUP.test(ev[i].key)){let j=i;while(j<ev.length&&ev[j].$==='SettingSet'&&STARTUP.test(ev[j].key))j++;out.push(...ev.slice(i,j).sort((a,b)=>a.key<b.key?-1:1));i=j}else out.push(ev[i++])}
+    while(i<ev.length){if(hk(ev[i])){let j=i;while(j<ev.length&&hk(ev[j]))j++;out.push(...ev.slice(i,j).sort((a,b)=>JSON.stringify(a)<JSON.stringify(b)?-1:1));i=j}else out.push(ev[i++])}
     s.events=out}
   return per;
 }
