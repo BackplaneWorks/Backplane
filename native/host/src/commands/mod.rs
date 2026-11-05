@@ -6,6 +6,7 @@ pub mod fold;
 pub mod key;
 pub mod plan;
 pub mod fs;
+pub mod home;
 pub mod seam;
 pub mod worktree;
 #[cfg(test)]
@@ -28,13 +29,20 @@ struct Commands { fold: Arc<tokio::sync::Mutex<fold::Fold>> }
 impl RpcHandler for Commands {
     fn methods(&self) -> &'static [&'static str] { &["thread.pin", "thread.unpin", "thread.settle", "thread.unsettle", "thread.archive", "thread.unarchive", "thread.rename", "thread.delete", "thread.snooze",
         "thread.reorder", "thread.detach", "thread.reparent", "thread.create", "thread.modes", "thread.effort", "thread.provider", "thread.fork", "thread.back", "project.remove", "project.rename",
-        "project.reorder", "project.move", "project.add", "project.new", "project.create", "queue.edit", "queue.remove", "queue.move", "queue.steer", "queue.resume", "fs.list", "fs.mkdir", "fs.find"] }
+        "project.reorder", "project.move", "project.add", "project.new", "project.create", "project.start", "project.home", "thread.titled", "thread.unrooted", "thread.merged", "queue.edit", "queue.remove", "queue.move", "queue.steer", "queue.resume", "fs.list", "fs.mkdir", "fs.find"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             // one request at a time: the plan reads the fold the commit then moves on
             // the picker's folder requests (FsJob): the answer carries `result`, ok when it holds no `error`
             let answer = |r: Value| vec![json!({"t":"reply","id":id,"ok":r.get("error").is_none(),"result":r})];
             let path = p.get("path").and_then(Value::as_str).unwrap_or("").to_string();
+            if method == "project.home" {
+                // Home.request: a project that exists and is not removed; the snapshot is read off the log's folder (the Git job "project-home")
+                let root = { let m = hub.model().await; m.projects.get(p.get("project").and_then(Value::as_str).unwrap_or("")).filter(|x| !x.removed).map(|x| x.root.clone()).unwrap_or_default() };
+                if root.is_empty() { return vec![json!({"t":"reply","id":id,"ok":false,"error":"Choose an existing project."})] }
+                let r = home::read(&root, p).await;
+                return vec![json!({"t":"reply","id":id,"ok":r.get("error").is_none(),"result":r})];
+            }
             let create_in: Option<String> = match method {
                 "fs.list" => return answer(fs::list(&path).await),
                 "fs.mkdir" => return answer(fs::mkdir(&path).await),
@@ -74,7 +82,10 @@ impl RpcHandler for Commands {
             if method == "thread.delete" { if let Some(h) = hub.rpc_for("browser.close") { let th = p["thread"].as_str().unwrap_or(""); let _ = h.call(hub, who, &json!(0), "browser.close", &json!({"thread": th})).await; } }
             // BotFx scratch (an out, so after the changes): the folder exists before the reply, and before anything runs in it
             if let Some(th) = pl.scratch.clone() { scratch_folder(hub, &th); }
-            if let Some((kind, th, text)) = pl.act.clone() {
+            // Home.start: the first message is a turn.start of the new thread (the agents module posts it and queues it while the worktree is made)
+            if let Some(("post", th, text)) = pl.act.clone() {
+                if let Some(h) = hub.rpc_for("turn.start") { let msg = th.strip_prefix("home-").unwrap_or("").to_string(); let _ = h.call(hub, who, &json!(0), "turn.start", &json!({"thread": th, "text": text, "msg": msg})).await; }
+            } else if let Some((kind, th, text)) = pl.act.clone() {
                 if let Some(s) = seam::current() { match kind { "steer" => s.steer(&th, &text).await, "start_one" => s.start_one(&th, &text).await, _ => s.start_queued(&th, &text).await } }
             }
             if let Some((th, root, mode, src)) = pl.wt.clone() { let (pv, bd) = capture(&f, &th, &pl.events); worktree::spawn(hub.clone(), self.fold.clone(), th, root, mode, src, pv, bd) }

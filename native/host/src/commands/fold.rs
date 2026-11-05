@@ -7,7 +7,7 @@ use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
 
 #[derive(Clone, Debug, Default)]
-pub struct T { pub session: String, pub project: String, pub title: String, pub provider: String, pub model: String, pub branch: String, pub worktree: String, pub env: String, pub turn: String,
+pub struct T { pub pinned: bool, pub forced: u8, pub settled_at: u64, pub unsettled_at: u64, pub session: String, pub project: String, pub title: String, pub provider: String, pub model: String, pub branch: String, pub worktree: String, pub env: String, pub turn: String,
     pub archived: bool, pub deleted: bool, pub runtime: String, pub interaction: String }
 #[derive(Clone, Debug, Default)]
 pub struct P { pub title: String, pub root: String, pub at: u64, pub removed: bool }
@@ -26,7 +26,7 @@ pub struct Fold {
     pub alloc: Option<usize>,
 }
 
-const KEYS: &[&str] = &["thread.parent.", "bg.", "watch.", "thread.env", "agent.provider", "agent.model", "projects.missing", "provider.resume.", "restart.retry.", "resume.", "wt.again.", "thread.config.hold.", "seen.", "tz.machine", "account.thread.", "account.default."];
+const KEYS: &[&str] = &["thread.parent.", "bg.", "watch.", "thread.env", "agent.provider", "agent.model", "projects.missing", "merged.", "provider.resume.", "restart.retry.", "resume.", "wt.again.", "thread.config.hold.", "seen.", "tz.machine", "account.thread.", "account.default."];
 fn tracked(k: &str) -> bool { KEYS.iter().any(|p| k == *p || (p.ends_with('.') && k.starts_with(p))) }
 
 impl Fold {
@@ -54,7 +54,7 @@ impl Fold {
     pub fn apply(&mut self, line: &str) {
         let Some(t) = crate::session::event_type(line) else { return };
         const READ: &[&str] = &["ProjectCreated", "ProjectRemoved", "ThreadCreated", "ThreadRenamed", "ThreadArchived", "ThreadDeleted", "ThreadForked", "ThreadSnoozed", "ThreadOrdered", "ProjectOrdered",
-            "TurnQueued", "QueueTaken", "QueueEdited", "QueueRemoved", "QueueMoved", "QueueTakenOne", "AskOpened", "AskClosed", "SettingSet", "ProviderSet", "TurnChanged", "WorktreeSet", "ModesSet", "WorkSet", "WorktreeSkipped", "ThreadParentSet", "SessionSet", "MessagePosted", "ActivityLogged", "Reminded"];
+            "TurnQueued", "QueueTaken", "QueueEdited", "QueueRemoved", "QueueMoved", "QueueTakenOne", "AskOpened", "AskClosed", "SettingSet", "ProviderSet", "TurnChanged", "WorktreeSet", "ModesSet", "WorkSet", "WorktreeSkipped", "ThreadParentSet", "ThreadPinned", "ThreadSettled", "ThreadUnsettled", "ThreadMerged", "WorktreeRemoved", "SessionSet", "MessagePosted", "ActivityLogged", "Reminded"];
         if !READ.contains(&t) { return }
         let Ok(v) = serde_json::from_str::<Value>(line) else { return };
         let g = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").to_string();
@@ -93,8 +93,14 @@ impl Fold {
                     let x = self.threads.get_mut(&th).unwrap(); x.provider = g("provider"); x.model = g("model"); x.session = new_se;
                 }
             }
+            "ThreadPinned" => if let Some(x) = self.threads.get_mut(&g("id")) { x.pinned = v.get("pinned").and_then(Value::as_bool).unwrap_or(false) },
+            // Thread.settled: a manual settle forces the shelf, clears the pin; unsettled puts it back on top of the active shelf
+            "ThreadSettled" => if let Some(x) = self.threads.get_mut(&g("id")) { if v.get("manual").and_then(Value::as_bool).unwrap_or(false) { x.forced = 1 } x.settled_at = at; x.pinned = false },
+            "ThreadUnsettled" => if let Some(x) = self.threads.get_mut(&g("id")) { x.forced = 2; x.unsettled_at = x.settled_at.max(at) },
+            "ThreadMerged" => { let id = g("id"); if let Some(x) = self.threads.get_mut(&id) { x.forced = 1; x.settled_at = at; x.pinned = false } self.st.insert(format!("merged.{id}"), g("url")); }
+            "WorktreeRemoved" => if let Some(x) = self.threads.get_mut(&g("id")) { x.worktree = String::new() },
             "SessionSet" => if let Some(x) = self.threads.get_mut(&g("id")) { x.session = g("session") },
-            "MessagePosted" | "ActivityLogged" | "Reminded" => { let th = g("thread"); if !th.is_empty() { *self.count.entry(th).or_default() += 1 } }
+            "MessagePosted" | "ActivityLogged" | "Reminded" => { let th = g("thread"); if !th.is_empty() { if t == "MessagePosted" && g("role") == "user" { if let Some(x) = self.threads.get_mut(&th) { x.unsettled_at = at } } *self.count.entry(th).or_default() += 1 } }
             "TurnChanged" => if let Some(x) = self.threads.get_mut(&g("thread")) { x.turn = g("state") },
             "WorktreeSet" => if let Some(x) = self.threads.get_mut(&g("id")) { x.branch = g("branch"); x.worktree = g("worktree") },
             "ModesSet" => if let Some(x) = self.threads.get_mut(&g("id")) { x.runtime = g("runtime"); x.interaction = g("interaction"); x.model = g("model") },
