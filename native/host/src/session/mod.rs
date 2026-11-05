@@ -17,6 +17,7 @@ pub trait ViewMethod: Send + Sync {
 /// Registers this lane's handlers. Nothing yet.
 mod actor;
 #[allow(dead_code)] pub mod composer;
+#[allow(dead_code)] pub mod dispatch;
 #[allow(dead_code)] pub mod patch;
 #[allow(dead_code)] pub mod select;
 #[allow(dead_code)] pub mod slash;
