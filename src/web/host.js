@@ -116,11 +116,13 @@ import { TerminalOutputPane } from "./terminal-output.js";
 import { ModelFeedback } from "./model-feedback.js";
 import { SubsFeedback } from "./subs-feedback.js";
 import { PressFeedback } from "./press-feedback.js";
+import { FoldFeedback } from "./fold-feedback.js";
 import { ReviewPosition } from "./review-position.js";
 const reviewPosition = new ReviewPosition(localStorage);
 const modelFeedback = new ModelFeedback(() => later());
 const subsFeedback = new SubsFeedback(() => later());
 const pressFeedback = new PressFeedback(() => later());
+const foldFeedback = new FoldFeedback(() => later());
 // the session the hub's picture is drawn over: the model menu and the
 // Subagents rows as clicked, ahead of the hub's answer
 const feedbackSession = () => subsFeedback.project(modelFeedback.project(currentSession()));
@@ -1176,8 +1178,8 @@ function render() {
   const tb = RR ? pnow() : 0;
   if (frontendNode) page = bodyWindows.project(page);
   // a press not yet answered: what it opened the last time (press-feedback.js)
-  if (frontendNode) pressFeedback.seen(frontendNode, targetKey(presentationTarget(currentSession())));
-  if (frontendNode || transitionNode) page = pressFeedback.project(page);
+  if (frontendNode) { pressFeedback.seen(frontendNode, targetKey(presentationTarget(currentSession())));foldFeedback.seen(frontendNode); }
+  if (frontendNode || transitionNode) page = foldFeedback.project(pressFeedback.project(page));
   if (frontendNode && remoteReady || transitionNode && transitionFor === targetKey(presentationTarget(currentSession()))) page = pendingPresentation(page);
   const t1 = PERF || RR ? pnow() : 0;
   if (RR) { RR.t("render.continuations", tb - tc);RR.t("render.bodies", t1 - tb); }
@@ -1374,9 +1376,9 @@ function overlayRows(timeline, session) {
 function renderRegions() {
   const names = landQueued || new Set();landQueued = null;
   if (queued || !frontendNode) return;
-  pressFeedback.seen(frontendNode, targetKey(presentationTarget(currentSession())));
+  pressFeedback.seen(frontendNode, targetKey(presentationTarget(currentSession())));foldFeedback.seen(frontendNode);
   // (a region drawn at a press lives in the page's picture: the page is drawn)
-  if (pressFeedback.showing) { later();return; }
+  if (pressFeedback.showing || foldFeedback.showing) { later();return; }
   const parts = [];
   for (const r of LAND_REGIONS) if (names.has(r.name)) {
     const el = r.el(), hub = nodeIn(frontendNode, r.node);
@@ -1776,7 +1778,9 @@ function dispatch(action, value, timer) {
       // Commands: its field takes the keys in this frame)
       const press = pressFeedback.choice(action, value, targetKey(presentationTarget(currentSession())));
       if (pressFeedback.active?.kind === "palette" && pressFeedback.active.node) focus = "workspace-query";
-      const settled = menu || subs || press ? accepted => { menu?.(accepted);subs?.(accepted);press?.(accepted); } : undefined;
+      // (a run of tool calls opened or shut at the click: fold-feedback.js)
+      const fold = subs ? undefined : foldFeedback.choice(action, value);
+      const settled = menu || subs || press || fold ? accepted => { menu?.(accepted);subs?.(accepted);press?.(accepted);fold?.(accepted); } : undefined;
       const thread = currentSession().sel;
       const attachments = ["detach", "send", "send-alt"].includes(action) ? draftAttachmentPaths(currentSession(), thread) : [];
       return thin.request(action, value, accepted => {
@@ -3606,7 +3610,7 @@ async function startThin(again = false, reason = "initial") {
           historyNode = saved.node;historyDirection = saved.direction;resumedConversation = saved.conversation;
           for (const side of ["older", "newer"]) for (const id of saved.gone[side]) historyGone[side].add(id);
         }
-        modelFeedback.clear();subsFeedback.clear();pressFeedback.drop();
+        modelFeedback.clear();subsFeedback.clear();pressFeedback.drop();foldFeedback.drop();
         thinMailDraft.clear();thinContinuations.clear();bodyWindows.disconnect();
         if (target.kind === "thread") { ui = App.presentation_select(ui, target.id);void restoreFocused(); }
         else { focusedRequestedKey = null;focusedView.invalidate(); }
@@ -3748,7 +3752,7 @@ async function startThin(again = false, reason = "initial") {
         if (becameReady) deskCheck();
         if (remoteReady && (attachmentController !== thin || attachmentView !== thin?.client.links.get(thin.hub)?.viewId || attachmentSelection !== currentSession().sel)) restoreDraftAttachments(currentSession());
         if (!remoteReady) {
-          modelFeedback.clear();subsFeedback.clear();pressFeedback.drop();
+          modelFeedback.clear();subsFeedback.clear();pressFeedback.drop();foldFeedback.drop();
           // Keep the last validated tree as a read-only picture. The local Ui
           // has no canonical bot/catalog state in view mode. Falling back to
           // it here removed the sidebar and cats after a refusal or disconnect.

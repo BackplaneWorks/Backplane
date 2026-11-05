@@ -38,7 +38,7 @@ async function fixture(supported=false, legacyProbe=false, legacyPaint=false){
   fabLook(){},restoreTransition(){},transitionNode:null,transitionFor:'',shownFor:'',heldAt:0,transitionScope:()=>({}),transitionPosition:null,previewViews:{stop(){}},warmDestinations(){},transitionViews:{put(){},position:()=>null,warm:()=>Promise.resolve(false),destination:()=>null},
   thinReading:null,resumedConversation:null,readingIdentity:()=> 'fixture-account',historyDirection:'',
   historyFillMore(){calls.push('history-fill-cleared');},historyPageState(){},historyClear(){},thinSearchAnswer(){},thinSearchFailed(){},showThinMessage(){},keepViewer(){},held:null,
-  modelFeedback:{clear(){}},subsFeedback:new SubsFeedback(()=>{}),pressFeedback:{drop(){},seen(){},showing:false,project:p=>p,choice(){}},viewerFeedback:{choice(){}},
+  modelFeedback:{clear(){}},subsFeedback:new SubsFeedback(()=>{}),pressFeedback:{drop(){},seen(){},showing:false,project:p=>p,choice(){}},foldFeedback:{drop(){},seen(){},showing:false,project:p=>p,choice(){}},viewerFeedback:{choice(){}},
   // The extracted socket adapter shares these services with the full host.
   // Record peripheral lifecycle calls; wire admission/ownership still uses real ThinHost/ThinViews.
   RR:null,COARSE_POINTER:false,PHONE:false,phoneRequest,ViewerTools:{reset(){calls.push('viewer-tools-retired');}},viewerRpc:new ViewerRpc(()=>{throw Error('unexpected viewer RPC');}),
