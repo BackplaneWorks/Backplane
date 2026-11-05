@@ -45,6 +45,8 @@ fn read_log(hub: &Hub) -> (Core, u64) {
 /// handlers call it, then commit the events it returns with their own).
 pub struct Policies { policy: Arc<Policy> }
 impl Policies {
+    /// whether the policies have folded the log (diagnostics, tests)
+    pub fn booted(&self) -> bool { self.policy.booted() }
     /// Watchdog.line: call for every provider line of a thread's agent (the stream-json line as parsed), commit the events it returns
     pub fn line(&self, thread: &str, now_s: u64, line: &Value) -> Vec<Value> { self.policy.line(thread, now_s, line) }
     pub async fn read(&self, thread: &str, now_s: u64) -> Vec<Value> { self.policy.read(thread, now_s) }
@@ -105,6 +107,26 @@ mod tests {
         }
         assert!(text.contains(r#""key":"autosettle.delivery.w1\tthread:boss","value":"9""#), "the launch mail became a receipt: {}", text.lines().filter(|l| l.contains("autosettle")).collect::<Vec<_>>().join("\n"));
         assert_eq!(text.matches(r#""key":"autosettle.version""#).count(), 1, "the version is set once, by the upgrade");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // The records the JS hub writes next to a message — liveness.<t> and autosettle.quiet.<t> — are written by the Rust hub through a real Hub start:
+    // once the policies have folded the log, a user and an assistant message are committed and the log shows both records, in the same batch.
+    #[tokio::test] async fn a_real_hub_writes_liveness_and_quiet_next_to_a_message() {
+        let dir = std::env::temp_dir().join(format!("bp-statehost-live-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();
+        let cfg = Cfg { home: dir.clone(), version: "0.14.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() };
+        let hub = Hub::start(cfg, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        let p = start(hub.clone());
+        for _ in 0..200 { if p.booted() { break } tokio::time::sleep(std::time::Duration::from_millis(25)).await; }
+        assert!(p.booted(), "the policies folded the log");
+        hub.commit_many(&[json!({"$":"ProjectCreated","id":"p1","title":"p","root":"/r","at":1000}),
+            json!({"$":"ThreadCreated","id":"t1","project":"p1","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1000})]).await.unwrap();
+        let n0 = hub.store.len();
+        hub.commit_many(&[json!({"$":"MessagePosted","thread":"t1","msg":"mu1","role":"user","text":"hi","at":1001})]).await.unwrap();
+        hub.commit_many(&[json!({"$":"MessagePosted","thread":"t1","msg":"ma1","role":"assistant","text":"yo","at":1002})]).await.unwrap();
+        let text = hub.store.range(n0, hub.store.len()).unwrap().join("\n");
+        for want in [r#""key":"autosettle.quiet.t1""#, r#""key":"liveness.t1""#, r#""key":"autosettle.audience.t1""#, r#""key":"autosettle.output.t1""#] { assert!(text.contains(want), "{want} missing in:\n{text}"); }
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

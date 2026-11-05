@@ -90,6 +90,8 @@ impl Policy {
         })
     }
     /// true once after the lock was found poisoned: the caller starts the fold of the log again
+    /// whether the log has been folded: until then the policies decide nothing (and a batch is only remembered)
+    pub fn booted(&self) -> bool { self.lock().booting.is_none() }
     pub fn take_poisoned(&self) -> bool { self.poisoned.swap(false, Ordering::SeqCst) }
     /// The batch about to be written: the batch plus what the policies derive from it. While the log is being folded the batch is
     /// remembered (and returned as it came); `finish_boot` derives for it afterwards.
