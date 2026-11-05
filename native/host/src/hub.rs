@@ -224,7 +224,8 @@ impl Hub {
                 }
             }
             // `_end` is a policy-side end marker (agents lane): it never reaches the log or a client, whether a transform ran, panicked or none is registered
-            for c in batch.iter_mut() { for e in c.events.iter_mut() { if let Some(o) = e.as_object_mut() { o.shift_remove("_end"); } // shift_remove keeps the field order of the log line } }
+            // shift_remove keeps the field order of the log line
+            for c in batch.iter_mut() { for e in c.events.iter_mut() { if let Some(o) = e.as_object_mut() { o.shift_remove("_end"); } } }
             let lines: Vec<String> = batch.iter().flat_map(|c| c.events.iter().map(|e| serde_json::to_string(e).unwrap_or_default())).collect();
             let store = hub.store.clone(); let owned = lines.clone();
             let wrote = tokio::task::spawn_blocking(move || store.append_many(&owned.iter().map(String::as_str).collect::<Vec<_>>())).await;
