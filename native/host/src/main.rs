@@ -1,7 +1,7 @@
 //! backplane-hub: the Backplane hub for native clients (GPUI, SwiftUI, Compose).
 //! HTTP + authenticated WebSocket; renderer `mobile`; the picture comes from the presenter.
 mod agents; mod api; mod auth; mod bots; mod cbor; mod commands; mod copy; mod delta; mod files; mod hub; mod model; mod net; mod present;
-mod presenter; mod proc; mod session; mod settings; mod shelf; mod state; #[path = "state/host.rs"] mod statehost; mod store; mod term; mod wire; mod window;
+mod presenter; mod proc; mod session; mod settings; mod shelf; mod sidebar; mod signal; mod state; #[path = "state/host.rs"] mod statehost; mod store; mod term; mod wire; mod window;
 
 use anyhow::{Context, Result};
 use auth::Req;
@@ -125,10 +125,11 @@ async fn run(a: Args) -> Result<()> {
         Some(p) => Arc::new(presenter::BpPolicy::spawn(p).await?),
         None => Arc::new(present::NotPorted),
     };
-    // the ported screens answer first, the helper the rest (docs/gpui/PRESENTER-PORT.md); none are ported yet, so this changes nothing but the optional dump
-    let presenter: Arc<dyn presenter::Presenter> = Arc::new(present::Routed::new(presenter, vec![], &a.home, a.policy.is_some()));
+    let recent = present::screen::Recent::new();
+    let presenter: Arc<dyn presenter::Presenter> = Arc::new(present::Routed::new(presenter, vec![Box::new(recent.clone())], &a.home, a.policy.is_some()));
     let listen = format!("{}:{}", a.host, a.port);
     let hub = Hub::start(hub::Cfg { home: a.home.clone(), version: a.version, commit: a.commit, listen: listen.clone(), os: "linux".into(), arch: "x64".into() }, presenter).await?;
+    recent.bind(&hub);
     session::start(&hub);
     // pairing and the /auth routes, before the listener accepts (net lane)
     let _routes = net::start::start_full(&hub, &a.host, a.port, a.tailscale, a.https);

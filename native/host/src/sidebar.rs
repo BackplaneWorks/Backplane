@@ -211,8 +211,16 @@ fn project_json(st: &State, o: &Opts, ix: &HashMap<String, u8>, pid: &str, sh: &
            "settled": rows(&sh.settled, &shelf_num), "value": format!("{}|arch:{}", o.hub, pid), "archOpen": o.open.contains(&format!("arch:{pid}")), "archived": rows(&arch, &shelf_num)})
 }
 
-/// The projects as the sidebar groups them: live, then quiet, then (when its shelf is open) the older ones
-pub fn projects(st: &State, o: &Opts) -> Vec<Value> {
+struct Planned<'a> { id: &'a str, created: u64, latest: u64, key: Vec<bool>, sh: Shelves<'a> }
+
+/// A borrowed sidebar plan: existing ordering, shelves and tree metadata, with no row JSON yet.
+/// The caller pages its project identities first, then pages each visible list before rendering rows.
+pub struct Plan<'a> {
+    st: &'a State, o: &'a Opts<'a>, ix: HashMap<String,u8>, kids_by: HashMap<&'a str,Vec<&'a str>>,
+    projects: Vec<Planned<'a>>, order: Vec<(usize,bool)>,
+}
+
+pub fn plan<'a>(st: &'a State, o: &'a Opts<'a>) -> Plan<'a> {
     let ix = signal::index(st);
     let mut kids_by: HashMap<&str, Vec<&str>> = HashMap::new();
     {
@@ -221,8 +229,7 @@ pub fn projects(st: &State, o: &Opts) -> Vec<Value> {
         for (id, _) in all { let p = display_parent(st, id); if !p.is_empty() { kids_by.entry(p).or_default().push(id); } }
     }
     let kids = kids_hidden(st);
-    struct P<'a> { id: &'a str, created: u64, latest: u64, key: Vec<bool>, sh: Shelves<'a> }
-    let mut ps: Vec<P> = vec![];
+    let mut ps: Vec<Planned> = vec![];
     for (id, p) in &st.projects {
         if p.removed { continue }
         // Side.projs.keep: the Scratch project (conversations that belong to no project) is not listed among projects
@@ -231,7 +238,7 @@ pub fn projects(st: &State, o: &Opts) -> Vec<Value> {
         // Side.latest: a thread's last move for its project's place; settling by hand counts
         let mut latest = p.created;
         for tid in st.threads.iter().filter(|(i, t)| t.project == *id && !kids.contains(i.as_str()) && !st.run_hidden(i)).map(|(i, _)| i) { let t = &st.threads[tid]; let touched = if t.override_ == Override::ForcedSettled { t.activity.max(t.settled_at) } else { t.activity }; latest = latest.max(touched); }
-        ps.push(P { id: id.as_str(), created: p.created, latest, key: order_key(st, &format!("project:{id}"), "active"), sh: tree_shelves(st, &raw) });
+        ps.push(Planned { id: id.as_str(), created: p.created, latest, key: order_key(st, &format!("project:{id}"), "active"), sh: tree_shelves(st, &raw) });
     }
     // PSlot.before: keyed projects first, by key; then SRow.before. (`latest` is the group rank: live, quiet or older)
     ps.sort_by(|a, b| {
@@ -246,11 +253,57 @@ pub fn projects(st: &State, o: &Opts) -> Vec<Value> {
         let is_live = !(p.sh.pinned.is_empty() && p.sh.active.is_empty() && p.sh.snoozed.is_empty());
         if is_live { live.push(p) } else if p.latest + QUIET_DAYS > o.now { quiet.push(p) } else { older.push(p) }
     }
-    let mut out = vec![];
-    for p in &live { out.push(project_json(st, o, &ix, p.id, &p.sh, &kids_by, false)); }
-    for p in &quiet { out.push(project_json(st, o, &ix, p.id, &p.sh, &kids_by, true)); }
-    if o.older_open { for p in &older { out.push(project_json(st, o, &ix, p.id, &p.sh, &kids_by, true)); } }
-    out
+    let mut order=vec![];
+    for p in &live { order.push((ps.iter().position(|x| x.id==p.id).unwrap(),false)); }
+    for p in &quiet { order.push((ps.iter().position(|x| x.id==p.id).unwrap(),true)); }
+    if o.older_open { for p in &older { order.push((ps.iter().position(|x| x.id==p.id).unwrap(),true)); } }
+    Plan { st, o, ix, kids_by, projects:ps, order }
+}
+
+impl Plan<'_> {
+    pub fn ids(&self) -> Vec<&str> { self.order.iter().map(|(i,_)|self.projects[*i].id).collect() }
+    fn find(&self,id: &str) -> Option<(&Planned<'_>,bool)> {
+        self.order.iter().find(|(i,_)|self.projects[*i].id==id).map(|(i,quiet)|(&self.projects[*i],*quiet))
+    }
+    pub fn list_count(&self,ids: &[&str]) -> usize {
+        ids.iter().filter_map(|id|self.find(id)).map(|(p,_)| {
+            usize::from(!p.sh.pinned.is_empty() || !p.sh.active.is_empty()) + usize::from(!p.sh.snoozed.is_empty())
+                + usize::from(self.o.open.contains(p.id) && !p.sh.settled.is_empty())
+                + usize::from(self.o.open.contains(&format!("arch:{}",p.id)) && !p.sh.hidden.is_empty())
+        }).sum()
+    }
+    /// Build only the rows selected by `choose` (indices into each list of visible tree identities).
+    /// The chooser owns paging, not order/group/tree semantics. A hidden shelf offers an empty list.
+    pub fn project(&self,id: &str,choose: &mut dyn FnMut(&str,&[&str])->(Vec<usize>,Value)) -> Option<Value> {
+        let (p,quiet)=self.find(id)?; let st=self.st; let o=self.o; let sh=&p.sh;
+        let meta=&st.projects[id];
+        let mut live=sh.pinned.clone(); live.extend(sh.active.iter().copied());
+        let mut arch: Vec<&str>=sh.hidden.iter().copied().filter(|id|st.threads[*id].archived && !st.threads[*id].deleted).collect();
+        arch.sort_by(|a,b|rank(&st.threads[*b]).cmp(&rank(&st.threads[*a])));
+        let mut project=json!({"machine":"","quiet":quiet,"id":q(o,id),"title":meta.title,"root":meta.root,"icon":"folder","open":o.open.contains(id),
+            "snoozedShelf":"Snoozed","shelf":format!("Settled {}",sh.settled.len()),"settledCount":sh.settled.len(),"value":format!("{}|arch:{id}",o.hub),
+            "archOpen":o.open.contains(&format!("arch:{id}")),"archivedCount":arch.len()});
+        for (kind,page,roots,enabled) in [("threads","threadsPage",&live,true),("snoozed","snoozedPage",&sh.snoozed,true),
+            ("settled","settledPage",&sh.settled,o.open.contains(id)),("archived","archivedPage",&arch,o.open.contains(&format!("arch:{id}")))] {
+            let rows=if enabled { tree_rows(st,roots,o.selected,&self.kids_by) }else{vec![]};
+            let ids: Vec<&str>=rows.iter().map(|r|r.id).collect();
+            let (indices,pager)=choose(kind,&ids);
+            let values: Vec<Value>=indices.into_iter().filter_map(|i|rows.get(i)).map(|r| {
+                let until=st.snooze_until.get(r.id).copied().unwrap_or(0);
+                let shelf=match shelf_at(r.t,until,o.now) { Shelf::Settled=>1,Shelf::Snoozed=>2,Shelf::Hidden=>3,_=>0 };
+                thread_json(st,o,&self.ix,r,shelf,until)
+            }).collect();
+            project[kind]=json!(values); project[page]=pager;
+        }
+        Some(project)
+    }
+}
+
+/// The projects as the sidebar groups them: live, then quiet, then (when its shelf is open) the older ones.
+/// The full projection remains the parity oracle for the bounded API.
+pub fn projects(st: &State, o: &Opts) -> Vec<Value> {
+    let plan=plan(st,o);
+    plan.order.iter().map(|(i,quiet)| { let p=&plan.projects[*i]; project_json(st,o,&plan.ix,p.id,&p.sh,&plan.kids_by,*quiet) }).collect()
 }
 
 #[cfg(test)]
@@ -289,5 +342,51 @@ mod tests {
         let s = fold(&[PC, &tc("a", 11), &tc("b", 12), r#"{"$":"SettingSet","key":"thread.parent.b","value":"a","at":13}"#, r#"{"$":"SettingSet","key":"thread.tree.a","value":"1","at":14}"#]);
         let open = HashSet::new(); let v = projects(&s, &opts(&open, 100));
         let rows = v[0]["threads"].as_array().unwrap(); assert_eq!(rows.len(), 2); assert_eq!((rows[0]["id"].as_str().unwrap(), rows[0]["children"].as_u64().unwrap()), ("h|a", 1)); assert_eq!((rows[1]["id"].as_str().unwrap(), rows[1]["depth"].as_u64().unwrap()), ("h|b", 1));
+    }
+}
+
+#[cfg(test)]
+mod bounded_tests {
+    use super::*;
+    #[test] fn bounded_sidebar_equals_full_slices_at_12k_thread_boundaries() {
+        let mut st=State::new(); st.lean=true;
+        let now=1_000_000;
+        for i in 0..30 {
+            let pid=format!("p{i:02}"); st.apply(&json!({"$":"ProjectCreated","id":pid,"title":pid,"root":"/synthetic","at":100+i}));
+            if i%4==0 { st.apply(&json!({"$":"ProjectOrdered","id":pid,"key":if i%8==0{"4"}else{"8"},"at":600})); }
+            for j in 0..400 {
+                let id=format!("t{i:02}-{j:03}"); st.apply(&json!({"$":"ThreadCreated","id":id,"project":pid,"title":id,"at":200+j}));
+                if i%3!=0 || j%7==0 { st.apply(&json!({"$":"ThreadSettled","id":id,"manual":true,"at":if i%3==1{now-100-j}else{1000+j}})); }
+                if j%11==0 { st.apply(&json!({"$":"ThreadArchived","id":id,"archived":true,"at":600})); }
+                if i%3==0 && j%9==0 { st.apply(&json!({"$":"ThreadPinned","id":id,"pinned":true,"at":600})); }
+                if i%3==0 && j%13==0 { st.apply(&json!({"$":"ThreadSnoozed","id":id,"until":now+500-j,"at":600})); }
+                if j%17==0 { st.apply(&json!({"$":"ThreadOrdered","id":id,"section":"active","key":"4","at":600})); }
+                if j==2 { st.apply(&json!({"$":"SettingSet","key":format!("thread.parent.{id}"),"value":format!("t{i:02}-001"),"at":601})); }
+                if j==1 { st.apply(&json!({"$":"SettingSet","key":format!("thread.tree.{id}"),"value":"1","at":601})); }
+            }
+        }
+        assert_eq!(st.threads.len(),12_000);
+        for older_open in [false,true] {
+            let mut open=HashSet::new(); for i in 0..30 { open.insert(format!("p{i:02}")); open.insert(format!("arch:p{i:02}")); }
+            let opts=Opts{hub:"h",now,selected:"",open:&open,older_open};
+            let full=projects(&st,&opts); let plan=plan(&st,&opts); let ids=plan.ids();
+            assert_eq!(ids.len(),if older_open{30}else{20});
+            assert_eq!(ids,full.iter().map(|p|p["id"].as_str().unwrap().strip_prefix("h|").unwrap()).collect::<Vec<_>>());
+            // Project offsets cross manual-sort and live/quiet/older boundaries; row offsets cross each shelf's ends.
+            for start in [0,7,8,9,16,19,20,24,29] {
+                for row_offset in [0,1,5,47,48,399,400] {
+                    for id in ids.iter().skip(start).take(8) {
+                        let actual=plan.project(id,&mut |_,rows|((row_offset..(row_offset+6).min(rows.len())).collect(),Value::Null)).unwrap();
+                        let mut expected=full.iter().find(|p|p["id"]==format!("h|{id}")).unwrap().clone();
+                        expected["settledCount"]=json!(expected["settled"].as_array().unwrap().len());
+                        expected["archivedCount"]=json!(expected["archived"].as_array().unwrap().len());
+                        for (field,page) in [("threads","threadsPage"),("snoozed","snoozedPage"),("settled","settledPage"),("archived","archivedPage")] {
+                            expected[field]=json!(expected[field].as_array().unwrap().iter().skip(row_offset).take(6).cloned().collect::<Vec<_>>()); expected[page]=Value::Null;
+                        }
+                        assert_eq!(actual,expected,"older={older_open} project={id} project_offset={start} row_offset={row_offset}");
+                    }
+                }
+            }
+        }
     }
 }

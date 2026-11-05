@@ -1,0 +1,1978 @@
+{
+  "source": "build/gpui/results/parity/recA/session-gpui.json (JS recording, frames 0..7; transport raw/ms omitted)",
+  "frames": [
+    {
+      "i": 0,
+      "json": {
+        "mode": "good",
+        "profile": "gpui",
+        "query": "view=1&mobile=1"
+      }
+    },
+    {
+      "i": 1,
+      "json": {
+        "t": "view",
+        "version": 1,
+        "renderer": "mobile",
+        "generation": "3",
+        "epoch": "1700000000",
+        "limits": {
+          "replyBytes": 262144,
+          "entries": 32,
+          "recent": 24,
+          "searchResults": 25,
+          "searchCandidates": 128,
+          "chunkBytes": 65536
+        }
+      }
+    },
+    {
+      "i": 2,
+      "json": {
+        "mode": "good",
+        "profile": "raw",
+        "query": ""
+      }
+    },
+    {
+      "i": 3,
+      "json": {
+        "id": 140737488355429,
+        "m": "view.open",
+        "p": {
+          "nativeSidebar": 1,
+          "version": 1,
+          "hub": "http://127.0.0.1:3820",
+          "generation": "3",
+          "epoch": "1700000000",
+          "requestRevision": 1,
+          "target": {
+            "kind": "recent",
+            "id": ""
+          },
+          "viewId": "",
+          "session": {
+            "sel": "",
+            "rid": 1,
+            "drafts": {},
+            "open": {},
+            "adding": false,
+            "panel": false,
+            "info": {}
+          },
+          "cid": "parity-gpui"
+        }
+      }
+    },
+    {
+      "i": 4,
+      "json": {
+        "t": "log",
+        "since": 0,
+        "origin": "1700000000",
+        "version": "0.14.0",
+        "info": {
+          "accounts.live": "{\"version\":1,\"revision\":0,\"default_allowance\":null,\"error\":\"\",\"profiles\":[],\"attempts\":[]}",
+          "telemetry.channel": "release",
+          "telemetry.id": "",
+          "telemetry.live": "",
+          "os": "linux",
+          "arch": "x64",
+          "home": "/tmp/parity-work/work-A/home",
+          "listen": "127.0.0.1:3820",
+          "models": "{\"claude\":[\"fable\",\"opus\",\"sonnet\",\"haiku\"],\"codex\":[],\"grok\":[],\"muse\":[],\"antigravity\":[],\"opencode\":[],\"pi\":[],\"omp\":[],\"agy\":{\"pin\":\"1.3.0\",\"have\":\"\",\"old\":\"\",\"plat\":true,\"accts\":[],\"signed\":[]},\"about\":{\"claude\":{\"cli\":\"\",\"labels\":{\"default\":\"Claude Code's own default\",\"fable\":\"Fable 5.1 \u00b7 claude-fable-5-1\",\"opus\":\"Opus 5.5 \u00b7 claude-opus-5-5\",\"sonnet\":\"Sonnet 5 \u00b7 claude-sonnet-5\",\"haiku\":\"Haiku 4.5 \u00b7 claude-haiku-4-5\"}},\"codex\":{\"cli\":\"\",\"labels\":{\"default\":\"Codex's configured default\"}},\"grok\":{\"cli\":\"\",\"labels\":{}},\"muse\":{\"cli\":\"\",\"labels\":{}},\"antigravity\":{\"cli\":\"\",\"labels\":{\"default\":\"Antigravity's own default\"}},\"opencode\":{\"cli\":\"\",\"version\":\"\",\"labels\":{\"default\":\"opencode's configured default\"},\"error\":\"\"},\"pi\":{\"cli\":\"\",\"labels\":{\"default\":\"Pi's configured default\"},\"efforts\":{\"default\":[\"off\",\"minimal\",\"low\",\"medium\",\"high\"]}},\"omp\":{\"cli\":\"\",\"labels\":{\"default\":\"Oh My Pi's configured default\"},\"efforts\":{\"default\":[\"off\",\"auto\",\"minimal\",\"low\",\"medium\",\"high\"]}}}}",
+          "machines": "{\"self\":{\"name\":\"\",\"url\":\"http://127.0.0.1:3820\",\"domain\":\"\"},\"peers\":[]}",
+          "bots.remote": "[]",
+          "tailnet": "off",
+          "update": "package",
+          "tailscale": "off",
+          "freecad": "",
+          "kicad.cli": "",
+          "kicad.fork": "",
+          "kicad.commit": "",
+          "kicad.status": "missing",
+          "kicad.source": "",
+          "kicad.version": "",
+          "kicad.api": "0",
+          "kicad.caps": "",
+          "kicad.why": "no kicad-cli at ",
+          "kicad.min": "10.99.0-bp.4",
+          "kicad.can_install": "1",
+          "kicad.ipc.servers": "",
+          "browser.engine.live": "chrome",
+          "browser.engine.err": ""
+        },
+        "items": [
+          {
+            "$": "ProjectCreated",
+            "id": "p1700000000-1",
+            "title": "fixture",
+            "root": "/tmp/parity-work/work-A/fixroot",
+            "at": 1700000000
+          },
+          {
+            "$": "ThreadCreated",
+            "id": "t1700000001-2",
+            "project": "p1700000000-1",
+            "title": "Fixture short",
+            "env": "local",
+            "branch": "",
+            "worktree": "",
+            "provider": "claude",
+            "model": "",
+            "at": 1700000001
+          },
+          {
+            "$": "ThreadCreated",
+            "id": "t1700000002-3",
+            "project": "p1700000000-1",
+            "title": "Fixture long",
+            "env": "local",
+            "branch": "",
+            "worktree": "",
+            "provider": "claude",
+            "model": "",
+            "at": 1700000002
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000100-10",
+            "role": "user",
+            "text": "Question 0: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000010
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000101-11",
+            "role": "assistant",
+            "text": "Answer 1: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000011
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000102-12",
+            "role": "user",
+            "text": "Question 2: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000012
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000103-13",
+            "role": "assistant",
+            "text": "Answer 3: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000013
+          },
+          {
+            "$": "ActivityLogged",
+            "thread": "t1700000002-3",
+            "act": "g1700000103-303",
+            "tone": "tool",
+            "kind": "Bash",
+            "summary": "ls -la src/core | head -3",
+            "at": 1700000013
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000104-14",
+            "role": "user",
+            "text": "Question 4: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000014
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000105-15",
+            "role": "assistant",
+            "text": "Answer 5: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000015
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000106-16",
+            "role": "user",
+            "text": "Question 6: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000016
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000107-17",
+            "role": "assistant",
+            "text": "Answer 7: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000017
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000108-18",
+            "role": "user",
+            "text": "Question 8: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000018
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000109-19",
+            "role": "assistant",
+            "text": "Answer 9: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000019
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000110-20",
+            "role": "user",
+            "text": "Question 10: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000020
+          },
+          {
+            "$": "ActivityLogged",
+            "thread": "t1700000002-3",
+            "act": "g1700000110-310",
+            "tone": "tool",
+            "kind": "Bash",
+            "summary": "ls -la src/core | head -10",
+            "at": 1700000020
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000111-21",
+            "role": "assistant",
+            "text": "Answer 11: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000021
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000112-22",
+            "role": "user",
+            "text": "Question 12: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000022
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000113-23",
+            "role": "assistant",
+            "text": "Answer 13: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000023
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000114-24",
+            "role": "user",
+            "text": "Question 14: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000024
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000115-25",
+            "role": "assistant",
+            "text": "Answer 15: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000025
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000116-26",
+            "role": "user",
+            "text": "Question 16: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000026
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000117-27",
+            "role": "assistant",
+            "text": "Answer 17: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000027
+          },
+          {
+            "$": "ActivityLogged",
+            "thread": "t1700000002-3",
+            "act": "g1700000117-317",
+            "tone": "tool",
+            "kind": "Bash",
+            "summary": "ls -la src/core | head -17",
+            "at": 1700000027
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000118-28",
+            "role": "user",
+            "text": "Question 18: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000028
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000119-29",
+            "role": "assistant",
+            "text": "Answer 19: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000029
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000120-30",
+            "role": "user",
+            "text": "Question 20: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000030
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000121-31",
+            "role": "assistant",
+            "text": "Answer 21: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000031
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000122-32",
+            "role": "user",
+            "text": "Question 22: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000032
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000123-33",
+            "role": "assistant",
+            "text": "Answer 23: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000033
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000124-34",
+            "role": "user",
+            "text": "Question 24: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000034
+          },
+          {
+            "$": "ActivityLogged",
+            "thread": "t1700000002-3",
+            "act": "g1700000124-324",
+            "tone": "tool",
+            "kind": "Bash",
+            "summary": "ls -la src/core | head -24",
+            "at": 1700000034
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000125-35",
+            "role": "assistant",
+            "text": "Answer 25: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000035
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000126-36",
+            "role": "user",
+            "text": "Question 26: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000036
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000127-37",
+            "role": "assistant",
+            "text": "Answer 27: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000037
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000128-38",
+            "role": "user",
+            "text": "Question 28: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000038
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000129-39",
+            "role": "assistant",
+            "text": "Answer 29: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000039
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000130-40",
+            "role": "user",
+            "text": "Question 30: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000040
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000131-41",
+            "role": "assistant",
+            "text": "Answer 31: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000041
+          },
+          {
+            "$": "ActivityLogged",
+            "thread": "t1700000002-3",
+            "act": "g1700000131-331",
+            "tone": "tool",
+            "kind": "Bash",
+            "summary": "ls -la src/core | head -31",
+            "at": 1700000041
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000132-42",
+            "role": "user",
+            "text": "Question 32: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000042
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000133-43",
+            "role": "assistant",
+            "text": "Answer 33: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000043
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000134-44",
+            "role": "user",
+            "text": "Question 34: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000044
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000135-45",
+            "role": "assistant",
+            "text": "Answer 35: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000045
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000136-46",
+            "role": "user",
+            "text": "Question 36: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000046
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000137-47",
+            "role": "assistant",
+            "text": "Answer 37: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000047
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000138-48",
+            "role": "user",
+            "text": "Question 38: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000048
+          },
+          {
+            "$": "ActivityLogged",
+            "thread": "t1700000002-3",
+            "act": "g1700000138-338",
+            "tone": "tool",
+            "kind": "Bash",
+            "summary": "ls -la src/core | head -38",
+            "at": 1700000048
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000139-49",
+            "role": "assistant",
+            "text": "Answer 39: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000049
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000140-50",
+            "role": "user",
+            "text": "Question 40: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000050
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000141-51",
+            "role": "assistant",
+            "text": "Answer 41: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000051
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000142-52",
+            "role": "user",
+            "text": "Question 42: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000052
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000143-53",
+            "role": "assistant",
+            "text": "Answer 43: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000053
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000144-54",
+            "role": "user",
+            "text": "Question 44: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000054
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000145-55",
+            "role": "assistant",
+            "text": "Answer 45: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000055
+          },
+          {
+            "$": "ActivityLogged",
+            "thread": "t1700000002-3",
+            "act": "g1700000145-345",
+            "tone": "tool",
+            "kind": "Bash",
+            "summary": "ls -la src/core | head -45",
+            "at": 1700000055
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000146-56",
+            "role": "user",
+            "text": "Question 46: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000056
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000147-57",
+            "role": "assistant",
+            "text": "Answer 47: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000057
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000148-58",
+            "role": "user",
+            "text": "Question 48: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000058
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000149-59",
+            "role": "assistant",
+            "text": "Answer 49: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000059
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000150-60",
+            "role": "user",
+            "text": "Question 50: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000060
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000151-61",
+            "role": "assistant",
+            "text": "Answer 51: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000061
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000152-62",
+            "role": "user",
+            "text": "Question 52: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000062
+          },
+          {
+            "$": "ActivityLogged",
+            "thread": "t1700000002-3",
+            "act": "g1700000152-352",
+            "tone": "tool",
+            "kind": "Bash",
+            "summary": "ls -la src/core | head -52",
+            "at": 1700000062
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000153-63",
+            "role": "assistant",
+            "text": "Answer 53: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000063
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000154-64",
+            "role": "user",
+            "text": "Question 54: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000064
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000155-65",
+            "role": "assistant",
+            "text": "Answer 55: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000065
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000156-66",
+            "role": "user",
+            "text": "Question 56: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000066
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000157-67",
+            "role": "assistant",
+            "text": "Answer 57: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000067
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000158-68",
+            "role": "user",
+            "text": "Question 58: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000068
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000159-69",
+            "role": "assistant",
+            "text": "Answer 59: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000069
+          },
+          {
+            "$": "ActivityLogged",
+            "thread": "t1700000002-3",
+            "act": "g1700000159-359",
+            "tone": "tool",
+            "kind": "Bash",
+            "summary": "ls -la src/core | head -59",
+            "at": 1700000069
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000160-70",
+            "role": "user",
+            "text": "Question 60: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000070
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000161-71",
+            "role": "assistant",
+            "text": "Answer 61: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000071
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000162-72",
+            "role": "user",
+            "text": "Question 62: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000072
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000163-73",
+            "role": "assistant",
+            "text": "Answer 63: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000073
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000164-74",
+            "role": "user",
+            "text": "Question 64: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000074
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000165-75",
+            "role": "assistant",
+            "text": "Answer 65: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000075
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000166-76",
+            "role": "user",
+            "text": "Question 66: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000076
+          },
+          {
+            "$": "ActivityLogged",
+            "thread": "t1700000002-3",
+            "act": "g1700000166-366",
+            "tone": "tool",
+            "kind": "Bash",
+            "summary": "ls -la src/core | head -66",
+            "at": 1700000076
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000167-77",
+            "role": "assistant",
+            "text": "Answer 67: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000077
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000168-78",
+            "role": "user",
+            "text": "Question 68: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000078
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000169-79",
+            "role": "assistant",
+            "text": "Answer 69: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000079
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000170-80",
+            "role": "user",
+            "text": "Question 70: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000080
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000171-81",
+            "role": "assistant",
+            "text": "Answer 71: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000081
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000172-82",
+            "role": "user",
+            "text": "Question 72: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000082
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000173-83",
+            "role": "assistant",
+            "text": "Answer 73: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000083
+          },
+          {
+            "$": "ActivityLogged",
+            "thread": "t1700000002-3",
+            "act": "g1700000173-373",
+            "tone": "tool",
+            "kind": "Bash",
+            "summary": "ls -la src/core | head -73",
+            "at": 1700000083
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000174-84",
+            "role": "user",
+            "text": "Question 74: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000084
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000175-85",
+            "role": "assistant",
+            "text": "Answer 75: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000085
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000176-86",
+            "role": "user",
+            "text": "Question 76: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000086
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000177-87",
+            "role": "assistant",
+            "text": "Answer 77: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000087
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000178-88",
+            "role": "user",
+            "text": "Question 78: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000088
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000179-89",
+            "role": "assistant",
+            "text": "Answer 79: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000089
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000180-90",
+            "role": "user",
+            "text": "Question 80: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000090
+          },
+          {
+            "$": "ActivityLogged",
+            "thread": "t1700000002-3",
+            "act": "g1700000180-380",
+            "tone": "tool",
+            "kind": "Bash",
+            "summary": "ls -la src/core | head -80",
+            "at": 1700000090
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000181-91",
+            "role": "assistant",
+            "text": "Answer 81: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000091
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000182-92",
+            "role": "user",
+            "text": "Question 82: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000092
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000183-93",
+            "role": "assistant",
+            "text": "Answer 83: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000093
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000184-94",
+            "role": "user",
+            "text": "Question 84: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000094
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000185-95",
+            "role": "assistant",
+            "text": "Answer 85: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000095
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000186-96",
+            "role": "user",
+            "text": "Question 86: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000096
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000187-97",
+            "role": "assistant",
+            "text": "Answer 87: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000097
+          },
+          {
+            "$": "ActivityLogged",
+            "thread": "t1700000002-3",
+            "act": "g1700000187-387",
+            "tone": "tool",
+            "kind": "Bash",
+            "summary": "ls -la src/core | head -87",
+            "at": 1700000097
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000188-98",
+            "role": "user",
+            "text": "Question 88: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000098
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000189-99",
+            "role": "assistant",
+            "text": "Answer 89: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000099
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000190-100",
+            "role": "user",
+            "text": "Question 90: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000100
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000191-101",
+            "role": "assistant",
+            "text": "Answer 91: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000101
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000192-102",
+            "role": "user",
+            "text": "Question 92: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000102
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000193-103",
+            "role": "assistant",
+            "text": "Answer 93: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000103
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000194-104",
+            "role": "user",
+            "text": "Question 94: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000104
+          },
+          {
+            "$": "ActivityLogged",
+            "thread": "t1700000002-3",
+            "act": "g1700000194-394",
+            "tone": "tool",
+            "kind": "Bash",
+            "summary": "ls -la src/core | head -94",
+            "at": 1700000104
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000195-105",
+            "role": "assistant",
+            "text": "Answer 95: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000105
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000196-106",
+            "role": "user",
+            "text": "Question 96: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000106
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000197-107",
+            "role": "assistant",
+            "text": "Answer 97: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000107
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000198-108",
+            "role": "user",
+            "text": "Question 98: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000108
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m1700000199-109",
+            "role": "assistant",
+            "text": "Answer 99: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000109
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m17000001100-110",
+            "role": "user",
+            "text": "Question 100: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000110
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m17000001101-111",
+            "role": "assistant",
+            "text": "Answer 101: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000111
+          },
+          {
+            "$": "ActivityLogged",
+            "thread": "t1700000002-3",
+            "act": "g17000001101-401",
+            "tone": "tool",
+            "kind": "Bash",
+            "summary": "ls -la src/core | head -101",
+            "at": 1700000111
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m17000001102-112",
+            "role": "user",
+            "text": "Question 102: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000112
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m17000001103-113",
+            "role": "assistant",
+            "text": "Answer 103: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000113
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m17000001104-114",
+            "role": "user",
+            "text": "Question 104: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000114
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m17000001105-115",
+            "role": "assistant",
+            "text": "Answer 105: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000115
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m17000001106-116",
+            "role": "user",
+            "text": "Question 106: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000116
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m17000001107-117",
+            "role": "assistant",
+            "text": "Answer 107: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000117
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m17000001108-118",
+            "role": "user",
+            "text": "Question 108: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000118
+          },
+          {
+            "$": "ActivityLogged",
+            "thread": "t1700000002-3",
+            "act": "g17000001108-408",
+            "tone": "tool",
+            "kind": "Bash",
+            "summary": "ls -la src/core | head -108",
+            "at": 1700000118
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m17000001109-119",
+            "role": "assistant",
+            "text": "Answer 109: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000119
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m17000001110-120",
+            "role": "user",
+            "text": "Question 110: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000120
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m17000001111-121",
+            "role": "assistant",
+            "text": "Answer 111: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000121
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m17000001112-122",
+            "role": "user",
+            "text": "Question 112: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000122
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m17000001113-123",
+            "role": "assistant",
+            "text": "Answer 113: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000123
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m17000001114-124",
+            "role": "user",
+            "text": "Question 114: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000124
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m17000001115-125",
+            "role": "assistant",
+            "text": "Answer 115: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000125
+          },
+          {
+            "$": "ActivityLogged",
+            "thread": "t1700000002-3",
+            "act": "g17000001115-415",
+            "tone": "tool",
+            "kind": "Bash",
+            "summary": "ls -la src/core | head -115",
+            "at": 1700000125
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m17000001116-126",
+            "role": "user",
+            "text": "Question 116: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000126
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m17000001117-127",
+            "role": "assistant",
+            "text": "Answer 117: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000127
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m17000001118-128",
+            "role": "user",
+            "text": "Question 118: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000128
+          },
+          {
+            "$": "MessagePosted",
+            "thread": "t1700000002-3",
+            "msg": "m17000001119-129",
+            "role": "assistant",
+            "text": "Answer 119: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.",
+            "at": 1700000129
+          },
+          {
+            "$": "SettingSet",
+            "key": "autosettle.version",
+            "value": "1",
+            "at": 1793843605
+          },
+          {
+            "$": "SettingSet",
+            "key": "accounts.inventory",
+            "value": "{\"version\":1,\"revision\":0,\"profiles\":[],\"error\":\"\"}",
+            "at": 1793843605
+          },
+          {
+            "$": "SettingSet",
+            "key": "machine.id",
+            "value": "ma9ab2c52c2b6116172991c4dcb156aa99a4ca5f87361a955",
+            "at": 1793843605
+          },
+          {
+            "$": "SettingSet",
+            "key": "allowance.codex",
+            "value": "{\"provider\":\"codex\",\"at\":0,\"attempted_at\":1793843605,\"state\":\"error\",\"auth\":\"unknown\",\"windows\":[],\"source\":\"codex-app-server\",\"phase\":\"complete\"}",
+            "at": 1793843605
+          },
+          {
+            "$": "SettingSet",
+            "key": "tz.machine",
+            "value": "Etc/UTC",
+            "at": 1793843605
+          },
+          {
+            "$": "SettingSet",
+            "key": "tz.rule.Etc/UTC",
+            "value": "UTC0",
+            "at": 1793843605
+          },
+          {
+            "$": "SettingSet",
+            "key": "tz.checked",
+            "value": "1793843605",
+            "at": 1793843605
+          }
+        ]
+      }
+    },
+    {
+      "i": 5,
+      "json": {
+        "t": "live",
+        "items": []
+      }
+    },
+    {
+      "i": 6,
+      "json": {
+        "t": "info",
+        "info": {
+          "pair": "",
+          "pair.qr": ""
+        }
+      }
+    },
+    {
+      "i": 7,
+      "json": {
+        "t": "reply",
+        "id": 140737488355429,
+        "ok": true,
+        "result": {
+          "remoteReady": true,
+          "viewRevision": "8",
+          "renderer": "mobile",
+          "viewId": "3:140737488355429",
+          "target": {
+            "kind": "recent",
+            "id": ""
+          },
+          "requestRevision": 1,
+          "epoch": "1700000000",
+          "generation": "3",
+          "hub": "http://127.0.0.1:3820",
+          "version": 1,
+          "mailDraftContext": null,
+          "window": {
+            "contextMessages": [],
+            "messageIds": [],
+            "historyUnits": [],
+            "partial": [],
+            "ids": [],
+            "anchor": {
+              "id": "",
+              "offset": 0
+            },
+            "older": "",
+            "olderNext": "",
+            "hasMore": false,
+            "remaining": 0,
+            "newer": 0,
+            "total": 0
+          },
+          "cmds": [],
+          "session": {
+            "sel": "",
+            "drafts": {
+              "@boot": "",
+              "@bot": "",
+              "@bot.want": "",
+              "@btab": "",
+              "@del": "",
+              "@desk": "",
+              "@draft.bound": "",
+              "@mech.at": "",
+              "@presentation": "",
+              "@remote": "",
+              "@room": "",
+              "@solid.at": "",
+              "@sync": "1",
+              "@telemetry.dismiss": "",
+              "@thread.want": ""
+            },
+            "open": {},
+            "adding": false,
+            "panel": false,
+            "rid": 1,
+            "wantNew": false,
+            "error": "",
+            "note": "",
+            "info": {},
+            "outbox": {}
+          },
+          "shown": {
+            "thread": null,
+            "nativeSidebar": 1,
+            "sidebarPages": [
+              {
+                "version": 1,
+                "hub": "http://127.0.0.1:3820",
+                "projects": {
+                  "version": 1,
+                  "total": 1,
+                  "offset": 0,
+                  "limit": 8,
+                  "selectedOutside": false,
+                  "previous": null,
+                  "next": null
+                },
+                "active": null,
+                "legacy": null
+              }
+            ],
+            "bubHomes": [
+              {
+                "hub": "http://127.0.0.1:3820",
+                "home": {
+                  "uid": "",
+                  "holder": "",
+                  "term": "0",
+                  "stamp": "",
+                  "name": "This machine",
+                  "botName": "",
+                  "look": 0
+                }
+              }
+            ],
+            "online": true,
+            "version": "",
+            "error": "",
+            "note": "",
+            "sel": "",
+            "making": false,
+            "lang": {
+              "rows": [
+                {
+                  "label": "Language",
+                  "note": "",
+                  "buttons": [
+                    {
+                      "label": "Automatic",
+                      "action": "lang",
+                      "value": "http://127.0.0.1:3820|auto",
+                      "on": true
+                    },
+                    {
+                      "label": "English",
+                      "action": "lang",
+                      "value": "http://127.0.0.1:3820|en",
+                      "on": false
+                    }
+                  ],
+                  "local": true
+                },
+                {
+                  "label": "Agents reply in my language",
+                  "note": "",
+                  "buttons": [
+                    {
+                      "label": "Off",
+                      "action": "setting",
+                      "value": "http://127.0.0.1:3820|agent.lang=en",
+                      "on": false
+                    }
+                  ],
+                  "local": true
+                }
+              ]
+            },
+            "theme": "",
+            "empty": "Pick a thread, or start one in a project.",
+            "projects": [
+              {
+                "machine": "",
+                "quiet": false,
+                "id": "http://127.0.0.1:3820|p1700000000-1",
+                "title": "fixture",
+                "root": "/tmp/parity-work/work-A/fixroot",
+                "icon": "folder",
+                "open": false,
+                "threads": [
+                  {
+                    "depth": 0,
+                    "expanded": false,
+                    "children": 0,
+                    "id": "http://127.0.0.1:3820|t1700000002-3",
+                    "title": "Fixture long",
+                    "state": "idle",
+                    "ago": "1086d",
+                    "agents": "",
+                    "pinned": false,
+                    "status": "inactive",
+                    "canChild": true,
+                    "lead": [
+                      {
+                        "label": "Settle",
+                        "action": "row-settle",
+                        "value": "http://127.0.0.1:3820|t1700000002-3",
+                        "tone": "settle",
+                        "options": []
+                      }
+                    ],
+                    "trail": [
+                      {
+                        "label": "Delete",
+                        "action": "row-delete",
+                        "value": "http://127.0.0.1:3820|t1700000002-3",
+                        "tone": "danger",
+                        "options": []
+                      },
+                      {
+                        "label": "Snooze",
+                        "action": "row-snooze",
+                        "value": "",
+                        "tone": "",
+                        "options": [
+                          {
+                            "label": "1 hour",
+                            "value": "http://127.0.0.1:3820|t1700000002-3|1h"
+                          },
+                          {
+                            "label": "Tomorrow",
+                            "value": "http://127.0.0.1:3820|t1700000002-3|tomorrow"
+                          },
+                          {
+                            "label": "1 week",
+                            "value": "http://127.0.0.1:3820|t1700000002-3|1w"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "depth": 0,
+                    "expanded": false,
+                    "children": 0,
+                    "id": "http://127.0.0.1:3820|t1700000001-2",
+                    "title": "Fixture short",
+                    "state": "idle",
+                    "ago": "1086d",
+                    "agents": "",
+                    "pinned": false,
+                    "status": "inactive",
+                    "canChild": true,
+                    "lead": [
+                      {
+                        "label": "Settle",
+                        "action": "row-settle",
+                        "value": "http://127.0.0.1:3820|t1700000001-2",
+                        "tone": "settle",
+                        "options": []
+                      }
+                    ],
+                    "trail": [
+                      {
+                        "label": "Delete",
+                        "action": "row-delete",
+                        "value": "http://127.0.0.1:3820|t1700000001-2",
+                        "tone": "danger",
+                        "options": []
+                      },
+                      {
+                        "label": "Snooze",
+                        "action": "row-snooze",
+                        "value": "",
+                        "tone": "",
+                        "options": [
+                          {
+                            "label": "1 hour",
+                            "value": "http://127.0.0.1:3820|t1700000001-2|1h"
+                          },
+                          {
+                            "label": "Tomorrow",
+                            "value": "http://127.0.0.1:3820|t1700000001-2|tomorrow"
+                          },
+                          {
+                            "label": "1 week",
+                            "value": "http://127.0.0.1:3820|t1700000001-2|1w"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ],
+                "threadsPage": {
+                  "version": 1,
+                  "total": 2,
+                  "offset": 0,
+                  "limit": 48,
+                  "selectedOutside": false,
+                  "previous": null,
+                  "next": null
+                },
+                "snoozedShelf": "Snoozed",
+                "snoozed": [],
+                "snoozedPage": null,
+                "shelf": "Settled 0",
+                "settledCount": 0,
+                "settled": [],
+                "settledPage": null,
+                "value": "http://127.0.0.1:3820|arch:p1700000000-1",
+                "archOpen": false,
+                "archivedCount": 0,
+                "archived": [],
+                "archivedPage": null
+              }
+            ],
+            "older": null,
+            "settled": null,
+            "view": "projects",
+            "active": [],
+            "legacy": [],
+            "rowMenu": null,
+            "deleting": null,
+            "renaming": null,
+            "removing": null,
+            "search": {
+              "open": true,
+              "query": "",
+              "hint": "Search"
+            },
+            "folders": null,
+            "settings": null,
+            "tour": {
+              "step": 0,
+              "count": 11,
+              "counter": "1 of 11",
+              "title": "Welcome to Backplane",
+              "body": "A short tour of what is where. Skip it any time; More, Settings shows it again. Backplane is in beta. If something breaks or looks wrong, please report it.",
+              "first": true,
+              "off": "",
+              "next": "Next",
+              "back": "Back",
+              "skip": "Skip",
+              "choices": [
+                {
+                  "label": "Connect an agent",
+                  "action": "provider-setup-open",
+                  "value": ""
+                },
+                {
+                  "label": "Report an issue",
+                  "action": "open-url",
+                  "value": "http://127.0.0.1:3820|https://github.com/i2cjak/Backplane/issues/new?body=Version%3A%20unknown%0AOS%3A%20linux%20x64%0A%0AWhat%20happened%3A%0A"
+                }
+              ]
+            },
+            "starNudge": null,
+            "find": null,
+            "island": {
+              "running": 0,
+              "headline": "All agents idle",
+              "lines": []
+            },
+            "islands": [
+              {
+                "hub": "http://127.0.0.1:3820",
+                "island": {
+                  "running": 0,
+                  "headline": "All agents idle",
+                  "lines": []
+                }
+              }
+            ],
+            "projectHome": null,
+            "uber": null,
+            "bots": [],
+            "rooms": [],
+            "newBot": null,
+            "newRoom": null,
+            "bot": null,
+            "hub": "http://127.0.0.1:3820",
+            "hubs": [
+              {
+                "key": "http://127.0.0.1:3820",
+                "name": "http",
+                "online": true,
+                "version": "",
+                "changes": 147
+              }
+            ],
+            "usageMachines": [
+              {
+                "key": "http://127.0.0.1:3820",
+                "name": "http",
+                "online": true,
+                "rows": []
+              }
+            ],
+            "found": [],
+            "tabs": {
+              "home": {
+                "badge": 0
+              },
+              "bots": {
+                "badge": 0
+              },
+              "routines": {
+                "badge": 0,
+                "rows": []
+              }
+            }
+          },
+          "overlay": {
+            "j": {
+              "thread": null,
+              "machineUsage": [],
+              "tabs": {
+                "home": {
+                  "badge": 0
+                },
+                "bots": {
+                  "badge": 0
+                },
+                "routines": {
+                  "badge": 0,
+                  "rows": []
+                }
+              },
+              "sidebarPages": [
+                {
+                  "version": 1,
+                  "hub": "http://127.0.0.1:3820",
+                  "projects": {
+                    "version": 1,
+                    "total": 1,
+                    "offset": 0,
+                    "limit": 8,
+                    "selectedOutside": false,
+                    "previous": null,
+                    "next": null
+                  },
+                  "active": null,
+                  "legacy": null
+                }
+              ],
+              "nativeSidebar": 1,
+              "online": true,
+              "version": "",
+              "seq": 147,
+              "error": "",
+              "bubHome": {
+                "uid": "",
+                "holder": "",
+                "term": "0",
+                "stamp": "",
+                "name": "This machine",
+                "botName": "",
+                "look": 0
+              },
+              "lang": {
+                "rows": [
+                  {
+                    "label": "Language",
+                    "note": "",
+                    "buttons": [
+                      {
+                        "label": "Automatic",
+                        "action": "lang",
+                        "value": "http://127.0.0.1:3820|auto",
+                        "on": true
+                      },
+                      {
+                        "label": "English",
+                        "action": "lang",
+                        "value": "http://127.0.0.1:3820|en",
+                        "on": false
+                      }
+                    ],
+                    "local": true
+                  },
+                  {
+                    "label": "Agents reply in my language",
+                    "note": "",
+                    "buttons": [
+                      {
+                        "label": "Off",
+                        "action": "setting",
+                        "value": "http://127.0.0.1:3820|agent.lang=en",
+                        "on": false
+                      }
+                    ],
+                    "local": true
+                  }
+                ]
+              },
+              "note": "",
+              "sel": "",
+              "making": false,
+              "theme": "",
+              "empty": "Pick a thread, or start one in a project.",
+              "projects": [
+                {
+                  "quiet": false,
+                  "id": "http://127.0.0.1:3820|p1700000000-1",
+                  "title": "fixture",
+                  "root": "/tmp/parity-work/work-A/fixroot",
+                  "icon": "folder",
+                  "open": false,
+                  "threads": [
+                    {
+                      "depth": 0,
+                      "expanded": false,
+                      "children": 0,
+                      "id": "http://127.0.0.1:3820|t1700000002-3",
+                      "title": "Fixture long",
+                      "state": "idle",
+                      "ago": "1086d",
+                      "agents": "",
+                      "pinned": false,
+                      "status": "inactive",
+                      "canChild": true,
+                      "lead": [
+                        {
+                          "label": "Settle",
+                          "action": "row-settle",
+                          "value": "http://127.0.0.1:3820|t1700000002-3",
+                          "tone": "settle",
+                          "options": []
+                        }
+                      ],
+                      "trail": [
+                        {
+                          "label": "Delete",
+                          "action": "row-delete",
+                          "value": "http://127.0.0.1:3820|t1700000002-3",
+                          "tone": "danger",
+                          "options": []
+                        },
+                        {
+                          "label": "Snooze",
+                          "action": "row-snooze",
+                          "value": "",
+                          "tone": "",
+                          "options": [
+                            {
+                              "label": "1 hour",
+                              "value": "http://127.0.0.1:3820|t1700000002-3|1h"
+                            },
+                            {
+                              "label": "Tomorrow",
+                              "value": "http://127.0.0.1:3820|t1700000002-3|tomorrow"
+                            },
+                            {
+                              "label": "1 week",
+                              "value": "http://127.0.0.1:3820|t1700000002-3|1w"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "depth": 0,
+                      "expanded": false,
+                      "children": 0,
+                      "id": "http://127.0.0.1:3820|t1700000001-2",
+                      "title": "Fixture short",
+                      "state": "idle",
+                      "ago": "1086d",
+                      "agents": "",
+                      "pinned": false,
+                      "status": "inactive",
+                      "canChild": true,
+                      "lead": [
+                        {
+                          "label": "Settle",
+                          "action": "row-settle",
+                          "value": "http://127.0.0.1:3820|t1700000001-2",
+                          "tone": "settle",
+                          "options": []
+                        }
+                      ],
+                      "trail": [
+                        {
+                          "label": "Delete",
+                          "action": "row-delete",
+                          "value": "http://127.0.0.1:3820|t1700000001-2",
+                          "tone": "danger",
+                          "options": []
+                        },
+                        {
+                          "label": "Snooze",
+                          "action": "row-snooze",
+                          "value": "",
+                          "tone": "",
+                          "options": [
+                            {
+                              "label": "1 hour",
+                              "value": "http://127.0.0.1:3820|t1700000001-2|1h"
+                            },
+                            {
+                              "label": "Tomorrow",
+                              "value": "http://127.0.0.1:3820|t1700000001-2|tomorrow"
+                            },
+                            {
+                              "label": "1 week",
+                              "value": "http://127.0.0.1:3820|t1700000001-2|1w"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ],
+                  "threadsPage": {
+                    "version": 1,
+                    "total": 2,
+                    "offset": 0,
+                    "limit": 48,
+                    "selectedOutside": false,
+                    "previous": null,
+                    "next": null
+                  },
+                  "snoozedShelf": "Snoozed",
+                  "snoozed": [],
+                  "snoozedPage": null,
+                  "shelf": "Settled 0",
+                  "settledCount": 0,
+                  "settled": [],
+                  "settledPage": null,
+                  "value": "http://127.0.0.1:3820|arch:p1700000000-1",
+                  "archOpen": false,
+                  "archivedCount": 0,
+                  "archived": [],
+                  "archivedPage": null
+                }
+              ],
+              "legacy": [],
+              "older": null,
+              "view": "projects",
+              "active": [],
+              "settled": null,
+              "rowMenu": null,
+              "search": {
+                "open": true,
+                "query": "",
+                "hint": "Search"
+              },
+              "deleting": null,
+              "renaming": null,
+              "removing": null,
+              "tour": {
+                "step": 0,
+                "count": 11,
+                "counter": "1 of 11",
+                "title": "Welcome to Backplane",
+                "body": "A short tour of what is where. Skip it any time; More, Settings shows it again. Backplane is in beta. If something breaks or looks wrong, please report it.",
+                "first": true,
+                "off": "",
+                "next": "Next",
+                "back": "Back",
+                "skip": "Skip",
+                "choices": [
+                  {
+                    "label": "Connect an agent",
+                    "action": "provider-setup-open",
+                    "value": ""
+                  },
+                  {
+                    "label": "Report an issue",
+                    "action": "open-url",
+                    "value": "http://127.0.0.1:3820|https://github.com/i2cjak/Backplane/issues/new?body=Version%3A%20unknown%0AOS%3A%20linux%20x64%0A%0AWhat%20happened%3A%0A"
+                  }
+                ]
+              },
+              "starNudge": null,
+              "settings": null,
+              "find": null,
+              "folders": null,
+              "island": {
+                "running": 0,
+                "headline": "All agents idle",
+                "lines": []
+              },
+              "islandAt": 0,
+              "projectHome": null,
+              "uber": null,
+              "plane": null,
+              "bots": [],
+              "rooms": [],
+              "newBot": null,
+              "newRoom": null,
+              "bot": null
+            },
+            "key": "http://127.0.0.1:3820",
+            "name": "http"
+          }
+        }
+      }
+    }
+  ]
+}
