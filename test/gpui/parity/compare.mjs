@@ -20,6 +20,7 @@ export const NORMALISATIONS=[
  'N24 a thread\'s text deltas are joined until its delta_end (or the end of the recording), whatever other frames arrive in between. Reason: the split points of a stream depend on timing; their joined text does not. Guard: each joined run carries `streamed` (more than one delta frame arrived); a hub that sends the whole reply as one frame where the other streams it is a difference, equal frame counts are not required.',
  'N25 `<T>.<digits>` (a time and a sub-second count, as in the alert record) -> `<T>.<n>`. Reason: the count differs between two runs of the JS hub.',
  'N26 object keys are normalised like values (ids inside keys such as drafts @sch:<thread> -> ID n), then ordered. Reason: a thread a scenario creates has a different id in every run, and so does its key. Two keys that normalise to the same string are NOT merged silently: the key then holds {"@@collision":[the values, ordered]}, so one side with two and the other with one is a difference.',
+ 'N27 (TEMPORARY) in a room post (a `bot.posts[*]` object of shown or overlay) by the person (`from` "you") on both sides, `cat:""` in B (the Rust side) equals no `cat` in A (the JS baseline). One direction only; any other `cat` value, any other path, and `cat:""` in A against none in B stay differences. Reason: the JS baseline hub (post-#960 main c4606b5a9c) predates 166a115d99 and 43472d0cfd, which added the field (MBots.post.cat.of answers "" for the person). REMOVAL: when the baseline is rebuilt from a tip that contains 166a115d99. compareDirs checks the `BASELINE` file of A_DIR (a commit) and refuses to apply N27 to a baseline that contains 166a115d99 (when git can tell; otherwise it says so).',
  'N12 late volatile replies: volatile means a poll request and its reply, matched by client and request id, whenever the reply arrives; every other inbound frame is kept even if it arrived during a poll window (the recorder flags by arrival time, which is not a property of the frame).',
  'N6 dropped: hb frames, view.changed frames (their number and position follow timing; each reply carries the revision it saw), volatile frames (polls made while waiting for a turn). Reason: timing-driven counts.',
  'N11 harness steps: `settle` and `end` pseudo-frames (the client program waiting or closing) are control, not wire traffic, and are not compared. Reason: a replay waits by reply id, not by the recorded quiet times.',
@@ -129,7 +130,10 @@ function multiset(a0,b0,path,out){
   for(const [k,n] of cnt)if(n!==0)out.push(`${path}: ${n>0?'only in A':'only in B'}${Math.abs(n)>1?' x'+Math.abs(n):''}: ${k.slice(0,160)}`);
   return out;
 }
+export const n27={fired:0};
 export function diff(a,b,path='',out=[]){
+  if(JSON.stringify(a)===JSON.stringify(b))return out;
+  if(/\.bot\.posts\[\d+\]$/.test(path)&&a&&b&&typeof a==='object'&&typeof b==='object'&&!Array.isArray(a)&&!('cat' in a)&&b.cat===''&&a.from==='you'&&b.from==='you'){n27.fired++;const {cat,...rest}=b;b=rest}
   if(JSON.stringify(a)===JSON.stringify(b))return out;
   if(SETS.test(path)&&Array.isArray(a)&&Array.isArray(b))return multiset(a,b,path,out);
   if(Array.isArray(a)&&Array.isArray(b)&&a.length!==b.length&&a.length*b.length<=4e6)return keyed(a,b,path,out);
@@ -137,6 +141,14 @@ export function diff(a,b,path='',out=[]){
   if(a&&b&&typeof a==='object'&&typeof b==='object'&&!Array.isArray(a)&&!Array.isArray(b)){for(const k of new Set([...Object.keys(a),...Object.keys(b)]))diff(a[k],b[k],`${path}.${k}`,out);return out}
   out.push(`${path}: ${JSON.stringify(a)?.slice(0,160)} vs ${JSON.stringify(b)?.slice(0,160)}`);return out;
 }
+// N27 may only be applied to a baseline built before 166a115d99 (the field it forgives); A_DIR/BASELINE names the baseline's commit
+function n27check(A){
+  if(!n27.fired)return;
+  let c='';try{c=readFileSync(A+'/BASELINE','utf8').trim()}catch{}
+  if(!c){console.error('compare: N27 fired on '+n27.fired+' post(s) and '+A+'/BASELINE names no commit: it cannot be checked that the baseline predates 166a115d99');return}
+  const r=spawnSync('git',['merge-base','--is-ancestor','166a115d99',c],{encoding:'utf8'});
+  if(r.status===0){console.error('compare: N27 fired but baseline '+c+' contains 166a115d99: the normalisation is not allowed; remove N27');process.exit(4)}
+  if(r.status!==1)console.error('compare: N27 fired; git cannot tell whether baseline '+c+' predates 166a115d99 here (no history or unknown commit)')}
 let selftested=false;
 // every comparison first runs the comparator's own fixtures (compare_selftest.mjs): a change that stops it seeing a difference stops the run
 function selftest(){if(selftested)return;selftested=true;
@@ -144,12 +156,14 @@ function selftest(){if(selftested)return;selftested=true;
   if(r.status!==0){console.error('compare: the comparator self-test failed (compare_selftest.mjs); no comparison is trustworthy\n'+(r.stdout||'')+(r.stderr||''));process.exit(3)}}
 export function compareDirs(A,B){
   selftest();
+  n27.fired=0;
   let total=0;const rep={};
   if(!readdirSync(A).some(x=>x.endsWith('.json'))){console.error('compare: no recordings in '+A+' (an empty comparison proves nothing)');process.exit(2)}
   for(const f of readdirSync(A).filter(x=>x.endsWith('.json')).sort()){
     const a=normalise(JSON.parse(readFileSync(A+'/'+f)).frames),b=normalise(JSON.parse(readFileSync(B+'/'+f)).frames);
     const d=[];for(const c of new Set([...Object.keys(a),...Object.keys(b)]))for(const s of ['out','events','hk','deltas','replies','views','other'])diff(a[c]?.[s],b[c]?.[s],`${c}.${s}`,d);
     rep[f]=d;total+=d.length;}
+  n27check(A);
   return {total,rep};
 }
 if(import.meta.main){const {total,rep}=compareDirs(process.argv[2],process.argv[3]);

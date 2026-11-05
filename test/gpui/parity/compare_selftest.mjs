@@ -22,6 +22,15 @@ const dl=(n,txt='ab')=>[...Array.from({length:n},()=>frame({t:'delta',thread:'t1
 t('streamed in 3 frames vs sent as one frame is a difference',dtn(dl(3),dl(1,'ababab')).length>0);
 t('3 frames vs 2 frames, same joined text, is not',dtn(dl(3,'ab'),[...dl(2,'abab').slice(0,1),frame({t:'delta',thread:'t1',text:'ab'}),frame({t:'delta_end',thread:'t1'})]).length===0);
 t('same frame count, other text is a difference',dtn(dl(3,'ab'),dl(3,'ac')).length>0);
+// N27 (temporary): the person's room post, `cat:""` in B only
+import {n27} from './compare.mjs';
+const post=(extra)=>({shown:{bot:{posts:[{id:'p1',from:'you',text:'hi',ago:'now',mine:true,...extra}]}}});
+const dd=(a,b)=>diff(a,b,'x.views[0].result');
+t('N27: cat "" in B against none in A is equal',dd(post({}),post({cat:''})).length===0);
+t('N27: cat "fl" in B against none in A DIFFERS',dd(post({}),post({cat:'fl'})).length>0);
+t('N27: cat "" in A against none in B DIFFERS',dd(post({cat:''}),post({})).length>0);
+t('N27: cat "" outside bot.posts DIFFERS',diff({a:{from:'you'}},{a:{from:'you',cat:''}},'x.views[0].result').length>0);
+t('N27: a bot author with cat "" in B DIFFERS',dd({shown:{bot:{posts:[{id:'p',from:'bub',text:'t'}]}}},{shown:{bot:{posts:[{id:'p',from:'bub',text:'t',cat:''}]}}}).length>0);
 // N26: two keys normalising to the same string
 t('two colliding keys vs one is a difference',dtn([view({'@x 1793000001':'a','@x 1793000002':'b'})],[view({'@x 1793000001':'a'})]).length>0);
 t('two colliding keys vs two is not',dtn([view({'@x 1793000001':'a','@x 1793000002':'b'})],[view({'@x 1793000003':'a','@x 1793000004':'b'})]).length===0);
