@@ -3,7 +3,7 @@ import {mkdirSync,writeFileSync,copyFileSync,existsSync,rmSync,readFileSync} fro
 import {execSync} from 'node:child_process';
 import {makeStandins,startHub,stopHub,client,sleep} from '../../perf/lib.mjs';
 const PNG='iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAF0lEQVR4nGNgGAWjYBSMglEwCkbBKBgFAAAEIAAB4rJbrgAAAABJRU5ErkJggg=='; // 8x8 PNG
-export async function startFixtureHub({bin,root,port,threads=20,seedTurns=true,repo=process.env.PERF_REPO||process.cwd()}){
+export async function startFixtureHub({bin,root,port,threads=20,seedTurns=true,extraArgs=[],extraEnv={},repo=process.env.PERF_REPO||process.cwd()}){
   rmSync(root,{recursive:true,force:true});mkdirSync(root+'/proj/fixtures',{recursive:true});makeStandins(root+'/bin');
   writeFileSync(root+'/proj/fixtures/pic.png',Buffer.from(PNG,'base64'));writeFileSync(root+'/proj/readme.txt','e2e fixture file\n');
   for(const [src,dst] of [['test/fixtures/pcb-bottom-silk/asymmetric.kicad_pcb','e2e.kicad_pcb'],['test/fixtures/fork-viewers/aliases.kicad_sch','e2e.kicad_sch'],['test/gpui/files/fixtures/mesh/bracket.step','part.step']])
@@ -11,7 +11,7 @@ export async function startFixtureHub({bin,root,port,threads=20,seedTurns=true,r
   // a KiCad project next to the board and schematic, so the Board/Schematic/3D viewers have something to open
   writeFileSync(root+'/proj/e2e.kicad_pro',JSON.stringify({meta:{filename:'e2e.kicad_pro',version:1}}));writeFileSync(root+'/proj/.backplane.json',JSON.stringify({project:'e2e.kicad_pro'}));
   try{execSync('git init -q',{cwd:root+'/proj'})}catch{}
-  const h=await startHub({bin,home:root+'/home',port,standins:root+'/bin',extraEnv:{FAKE_SECS:'600',FAKE_PER:'2',FAKE_CYCLE:'20'},log:root+'/hub.log'});
+  const h=await startHub({bin,home:root+'/home',port,standins:root+'/bin',extraEnv:{FAKE_SECS:'600',FAKE_PER:'2',FAKE_CYCLE:'20',...extraEnv},extraArgs,log:root+'/hub.log'});
   const report={refused:[],ok:[]};const c=await client(h);
   const call=async(m,p)=>{const r=await c.rpc(m,p,10000);const ok=!!r?.o?.ok;(ok?report.ok:report.refused).push(ok?m:`${m}: ${r?.o?.error||'no reply'}`);return r?.o};
   const pr=await call('project.add',{path:root+'/proj'});

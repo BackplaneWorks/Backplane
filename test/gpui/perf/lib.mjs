@@ -27,6 +27,7 @@ export async function startHub({bin,home,port,standins,host,extraEnv={},extraArg
  const direct=!!process.env.NO_SCOPE; // on Boat the sandbox is the hard cap; on the desktop every hub runs in its own capped scope
  const args=direct?[]:['--user','--scope','--quiet','-p',`MemoryMax=${cap}`,'-p','MemorySwapMax=0',bin];if(direct)args.push('--home',home,'--port',String(port),'--no-tailscale','--foreground');else args.push('--home',home,'--port',String(port),'--no-tailscale','--foreground');
  if(host)args.push('--host',host);
+ for(const a of extraArgs)args.push(a); // e.g. the Rust hub's --policy-bin and --window-bin
  args.push(...extraArgs);
  const env={...process.env,DISPLAY:'',WAYLAND_DISPLAY:'',BACKPLANE_NO_UPDATE:'1',BACKPLANE_ORDER_SERVER:'http://127.0.0.1:9',BACKPLANE_KEYRING_LOCKED:'0',BACKPLANE_PEERS:'',BACKPLANE_AGENTS:standins,PATH:`${standins}:${process.env.PATH}`,FAKE_LOG:`${home}/fake.log`,...extraEnv};
  delete env.BUN_BE_BUN; // the script runner may be the hub binary itself in bun mode; the hub it starts must not be
