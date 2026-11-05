@@ -44,9 +44,9 @@ DISPLAY=$DISP i3 -c $R/i3.conf > $R/i3.log 2>&1 &
 echo $! > $R/i3.pid; sleep 1
 export DISPLAY=$DISP VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json LP_NUM_THREADS=2 BACKPLANE_GPUI_ASSETS=$ASSETS BACKPLANE_GPUI_RECTS=1
 cat > $R/script.json <<JSON
-[{"select":0},{"wait":1500},{"click":"rail:Board"},{"wait":6000},{"click":"rail:Schematic"},{"wait":6000},{"click":"rail:3D"},{"wait":8000},{"click":"rail:Mech"},{"wait":9000}]
+[{"select":0},{"wait":1500},{"click":"rail:Board"},{"wait":6000},{"click":"rail:Schematic"},{"wait":6000},{"click":"rail:3D"},{"wait":8000},{"click":"rail:Mech"},{"wait":3000},{"click":"mech-part-0"},{"wait":9000}]
 JSON
-$CLIENT --url http://127.0.0.1:$PORT --token-file $R/home/token --script $R/script.json --exit-after 70 > $OUT/$N.client.log 2>&1 &
+$CLIENT --url http://127.0.0.1:$PORT --token-file $R/home/token --script $R/script.json --exit-after 80 > $OUT/$N.client.log 2>&1 &
 echo $! > $R/client.pid
 sleep 7; import -window root $SH/$N-board.png
 sleep 6; import -window root $SH/$N-schematic.png
