@@ -76,12 +76,15 @@ export async function run(j,ctx){ // ctx: {gpuBin, display:{env,display}, hub:{s
   // G4: dead-control sweep: phase 2 clicks every control the first run reported on its final screen
   if(sweep){const ctlEv=[...metrics].reverse().find(m=>m.event==='controls'&&m.controls?.length);
     if(!ctlEv)res.notes.push('no controls event (G4) to sweep');
-    else{const inv=ctlEv.controls.map(c=>({id:c.id,label:c.label,enabled:c.enabled,visible:c.visible}));
+    else{const inv=ctlEv.controls.map(c=>({id:c.id,label:c.label,enabled:c.enabled,visible:c.visible,wired:c.wired}));
       const prefix=script.filter(x=>!x.wait);const sweepScript=[...script.filter(x=>x.select!==undefined||x.home!==undefined).slice(-1),{wait:500},...inv.flatMap(c=>[{click:c.id},{wait:300}])];
       const second=await launch(sweepScript,j,ctx,'.sweep',{rects:true});const results={};
       for(const m of second.metrics.filter(m=>m.event==='click'&&m.found!==false))results[m.id]={changed:!!m.changed,action:m.action!=null};
       for(const m of second.metrics.filter(m=>m.event==='input'&&m.step?.startsWith('click:')&&m.ok)){const id=m.step.slice(6);results[id]={changed:true,action:results[id]?.action||false}}
-      res.metrics.dead=deadControls(inv,results);res.metrics.dead.controlsFound=inv.length}}
+      res.metrics.dead=deadControls(inv,results);res.metrics.dead.controlsFound=inv.length;
+      // GPUI reports enabled = wired, so a visible control with nothing behind it looks 'disabled' to deadControls; list them and fail the sweep on them
+      const unwired=inv.filter(c=>c.wired===false&&c.visible!==false).map(c=>({id:c.id,label:c.label}));res.metrics.dead.unwired=unwired;res.metrics.dead.inventory=inv.map(c=>({id:c.id,label:c.label,wired:c.wired}));
+      if(unwired.length){res.metrics.dead.pass=false;res.metrics.dead.note=`${unwired.length} visible controls have nothing wired (GPUI marks them enabled:false; a visible button that does nothing is a dead button unless it is drawn as disabled: needs a separate disabled-look flag)`}}}
   if(!inputs.length)res.notes.push('no input metrics (script did not run?)');
   if(!done)res.notes.push('client did not finish its script in time');
   // status: pass only when every measured gate for this journey passes (the pass rule in run.mjs still demotes non-Rust/non-hardware runs)
