@@ -163,7 +163,7 @@ port waits for the person's decision.
 
 <!-- law-map: generated below by scripts/gpui/law-map.py -->
 
-Laws in LAWS.bend: 3253. bend 1058, rust 344, unported 1242, client 482, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`, `src/core/msp.bend`, `src/core/agy.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
+Laws in LAWS.bend: 3253. bend 1050, rust 356, unported 1238, client 482, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`, `src/core/msp.bend`, `src/core/agy.bend`, `src/core/opencode.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
 
 | law | status | seed | file | note |
 |---|---|---|---|---|
@@ -488,7 +488,7 @@ Laws in LAWS.bend: 3253. bend 1058, rust 344, unported 1242, client 482, window 
 | `interrupt_idle_nothing` | rust `interrupt_idle_nothing` | map | `src/core/hub.bend` |  |
 | `interrupt_claude_input` | rust `interrupt_claude_input` | map | `src/core/hub.bend` |  |
 | `interrupt_codex_stops` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `interrupt_grok_stops` | unported | seed R +-10% | `src/core/hub.bend` |  |
+| `interrupt_grok_stops` | rust `interrupt_grok_stops` | map | `src/core/hub.bend` |  |
 | `interrupt_muse_stops` | rust `interrupt_muse_stops` | map | `src/core/hub.bend` |  |
 | `muse_run_turn` | rust `muse_run_turn` | map | `src/core/hub.bend` |  |
 | `msp_mode_supervised_asks` | rust `msp_mode_supervised_asks` | map | `src/core/msp.bend` |  |
@@ -605,7 +605,7 @@ Laws in LAWS.bend: 3253. bend 1058, rust 344, unported 1242, client 482, window 
 | `todo_task_update` | unported | seed R +-10% | `src/core/json.bend` |  |
 | `todo_task_delete` | unported | seed R +-10% | `src/core/json.bend` |  |
 | `todo_codex_completed` | unported | seed R +-10% | `src/core/json.bend` |  |
-| `todo_acp_plan` | unported | seed R +-10% | `src/core/json.bend` |  |
+| `todo_acp_plan` | rust `todo_acp_plan` | map | `src/core/json.bend` |  |
 | `todo_shown_while_running` | bend | seed K +-10% | `src/core/todo.bend` |  |
 | `todo_shown_while_left` | bend | seed K +-10% | `src/core/todo.bend` |  |
 | `todo_hidden_when_done` | bend | seed K +-10% | `src/core/todo.bend` |  |
@@ -2715,16 +2715,16 @@ Laws in LAWS.bend: 3253. bend 1058, rust 344, unported 1242, client 482, window 
 | `auth_beat_asked` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `triage_duplicate_delivery_quiet` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `triage_unknown_run_quiet` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `oc_lost_session` | bend | seed K +-10% | `src/core/opencode.bend` |  |
-| `oc_other_folder_session` | bend | seed K +-10% | `src/core/opencode.bend` |  |
-| `oc_tool_names_target` | bend | seed K +-10% | `src/core/opencode.bend` |  |
-| `oc_tool_command_once` | bend | seed K +-10% | `src/core/opencode.bend` |  |
-| `oc_notice_kind` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `oc_notice_info` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `oc_models_usage_none` | bend | seed K +-10% | `src/core/opencode.bend` |  |
-| `oc_models_failed_says` | bend | seed K +-10% | `src/core/opencode.bend` |  |
-| `oc_models_empty_says` | bend | seed K +-10% | `src/core/opencode.bend` |  |
-| `oc_models_missing_quiet` | bend | seed K +-10% | `src/core/opencode.bend` |  |
+| `oc_lost_session` | rust `oc_lost_session` | map | `src/core/opencode.bend` |  |
+| `oc_other_folder_session` | rust `oc_other_folder_session` | map | `src/core/opencode.bend` |  |
+| `oc_tool_names_target` | rust `oc_tool_names_target` | map | `src/core/opencode.bend` |  |
+| `oc_tool_command_once` | rust `oc_tool_command_once` | map | `src/core/opencode.bend` |  |
+| `oc_notice_kind` | rust `oc_notice_kind` | map | `src/core/hub.bend` |  |
+| `oc_notice_info` | rust `oc_notice_info` | map | `src/core/hub.bend` |  |
+| `oc_models_usage_none` | rust `oc_models_usage_none` | map | `src/core/opencode.bend` |  |
+| `oc_models_failed_says` | rust `oc_models_failed_says` | map | `src/core/opencode.bend` |  |
+| `oc_models_empty_says` | rust `oc_models_empty_says` | map | `src/core/opencode.bend` |  |
+| `oc_models_missing_quiet` | rust `oc_models_missing_quiet` | map | `src/core/opencode.bend` |  |
 | `pi_run_turn` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `omp_run_turn` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `interrupt_pi_stops` | unported | seed R +-10% | `src/core/hub.bend` |  |
