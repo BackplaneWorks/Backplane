@@ -188,7 +188,7 @@ mod tests {
     }
     /// A real POST to a local listener: the body, the signed headers, the 0600 folder gone afterwards. Skipped when this machine has no curl.
     #[tokio::test(flavor = "multi_thread")] async fn a_notice_is_posted_signed_to_the_address_and_leaves_no_file_behind() {
-        if std::process::Command::new("curl").arg("--version").output().is_err() { eprintln!("no curl: skipped"); return }
+        if crate::proc::std_cmd(crate::proc::Kind::Net, "curl").arg("--version").output().is_err() { eprintln!("no curl: skipped"); return }
         use crate::{hub::Cfg, presenter::Canned};
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap(); let port = l.local_addr().unwrap().port();
