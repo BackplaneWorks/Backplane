@@ -6,7 +6,7 @@ use std::{collections::HashMap, path::PathBuf, time::{Duration, SystemTime, UNIX
 use tokio::sync::mpsc::{self, UnboundedSender};
 use tokio_tungstenite::tungstenite::{Message, protocol::WebSocketConfig};
 
-#[derive(Debug)] pub enum Command { Select(String), Send(String), Draft(String), Action(String,String) }
+#[derive(Debug)] pub enum Command { Select(String), Send(String), Draft(String), Action(String,String), Page(String) }
 #[derive(Debug)] pub enum Event { Picture(Value), Status(String), Accepted, Error(String) }
 #[derive(Clone)] pub struct Config { pub hub:String, pub token_file:PathBuf, pub exit_after:Option<f64>, pub script:Option<PathBuf> }
 impl Config {
@@ -34,17 +34,21 @@ fn millis()->u64 {SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_milli
 struct View {
     hub:String, cid:String, greeting:Value, target:Value, session:Value,
     view_id:String, revision:u64, next:u64, pending:HashMap<u64,(u64,Value,String)>,
-    outgoing:HashMap<u64,bool>, dirty:bool,
+    outgoing:HashMap<u64,bool>, dirty:bool, controls:HashMap<u64,Control>,
 }
+#[derive(Default)] struct Control { next:u64, bytes:usize, parts:Vec<String>, done:bool }
+const MAX_CONTROLS:usize=4;const MAX_CONTROL_BYTES:usize=16*1024*1024;const MAX_CONTROL_PARTS:u64=4096;
 impl View {
     fn new(config:&Config)->Self {Self {hub:config.hub.replacen("ws://","http://",1),cid:format!("gpui-{}-{}",std::process::id(),millis()),
         greeting:Value::Null,target:json!({"kind":"recent","id":""}),session:json!({"sel":"","rid":millis(),"drafts":{},"open":{},"adding":false,"panel":false,"info":{}}),
-        view_id:String::new(),revision:0,next:(1_u64<<47)+millis(),pending:HashMap::new(),outgoing:HashMap::new(),dirty:false}}
+        view_id:String::new(),revision:0,next:(1_u64<<47)+millis(),pending:HashMap::new(),outgoing:HashMap::new(),dirty:false,controls:HashMap::new()}}
     fn request(&mut self, method:&str, extra:Value)->Value {
         self.next+=1;self.revision+=1;
         let mut p=json!({"version":1,"hub":self.hub,"generation":self.greeting["generation"],"epoch":self.greeting["epoch"],"requestRevision":self.revision,
             "target":self.target,"viewId":self.view_id,"session":self.session,"cid":self.cid});
         for(k,v)in extra.as_object().into_iter().flatten(){p[k]=v.clone();}
+        // Opt in to the bounded native sidebar (at most 48 rows a page, paged by controls).
+        if ["view.open","view.page","view.update","view.action"].contains(&method) {p["nativeSidebar"]=json!(1);}
         self.pending.insert(self.next,(self.revision,self.target.clone(),method.into()));
         json!({"id":self.next,"m":method,"p":p})
     }
@@ -59,9 +63,10 @@ pub fn connect(config:Config)->(UnboundedSender<Command>,async_channel::Receiver
                 let _=events.send(Event::Status("Connecting…".into())).await;
                 match session(&config,&mut commands,&events,&mut view).await {
                     Ok(())=>break,
-                    Err(_error)=>{ // Do not put a handshake URL or its credential in logs.
+                    Err(error)=>{ // Never log the handshake URL or its credential.
+                        let token=std::fs::read_to_string(&config.token_file).unwrap_or_default();let mut text=format!("{error:#}");if !token.trim().is_empty(){text=text.replace(token.trim(),"<token>");}eprintln!("GPUI_LOG {{\"disconnect\":{}}}",serde_json::Value::String(text));
                         let _=events.send(Event::Error("Hub disconnected. Draft kept; reconnecting. Check the experimental hub log.".into())).await;
-                        view.pending.clear();view.outgoing.clear();view.view_id.clear();view.greeting=Value::Null;
+                        view.pending.clear();view.outgoing.clear();view.controls.clear();view.view_id.clear();view.greeting=Value::Null;
                         tokio::time::sleep(Duration::from_secs(delay)).await;delay=(delay*2).min(10);
                     }
                 }
@@ -73,7 +78,7 @@ async fn session(config:&Config,commands:&mut mpsc::UnboundedReceiver<Command>,e
     let token=std::fs::read_to_string(&config.token_file)?;
     ensure!(token.trim().chars().all(|c|c.is_ascii_alphanumeric()||c=='-'||c=='_'),"invalid token file");
     let url=format!("{}/ws?view=1&mobile=1&token={}",config.hub.trim_end_matches('/'),token.trim());
-    let limits=WebSocketConfig::default().max_message_size(Some(262144)).max_frame_size(Some(262144));
+    let limits=WebSocketConfig::default().max_message_size(Some(524288)).max_frame_size(Some(524288));
     let (socket,_)=tokio::time::timeout(Duration::from_secs(5),tokio_tungstenite::connect_async_with_config(url,Some(limits),true)).await??;
     let (mut sink,mut source)=socket.split();let mut last=tokio::time::Instant::now();
     let mut heartbeat=tokio::time::interval(Duration::from_secs(10));
@@ -84,6 +89,7 @@ async fn session(config:&Config,commands:&mut mpsc::UnboundedReceiver<Command>,e
                 Command::Select(id)=>{let id=unqualify(&id);v.target=json!({"kind":"thread","id":id});v.session["sel"]=json!(id);v.view_id.clear();v.request("view.open",json!({}))},
                 Command::Send(text)=>{ensure!(!v.view_id.is_empty(),"view not ready");let id=v.target["id"].as_str().unwrap_or("").to_string();v.session["drafts"][id]=json!(text);v.request("view.action",json!({"action":"send","value":""}))},
                 Command::Draft(text)=>{let id=v.target["id"].as_str().unwrap_or("").to_string();v.session["drafts"][id]=json!(text);v.request("view.action",json!({"action":"draft","value":text}))},
+                Command::Page(value)=>{ensure!(!v.view_id.is_empty(),"view not ready");v.request("view.action",json!({"action":"native-sidebar-page","value":value}))},
                 Command::Action(action,value)=>v.request("view.action",json!({"action":action,"value":value})),
             };
             sink.send(Message::Binary(wire::encode(&request).into())).await?;
@@ -98,7 +104,15 @@ async fn session(config:&Config,commands:&mut mpsc::UnboundedReceiver<Command>,e
                     if let Some(is_post)=v.outgoing.remove(&id) {if x["ok"]==true {if is_post {let _=events.send(Event::Accepted).await;}}else{let _=events.send(Event::Error(format!("Hub refused request: {}",x["error"]["code"]))).await;}continue;}
                     let Some((revision,target,method))=v.pending.remove(&id) else{continue};
                     if x["ok"]!=true {let _=events.send(Event::Error(format!("View request refused: {}",x["error"]["code"]))).await;continue;}
-                    let r=&x["result"];
+                    let merged;let r=if let Some(control)=x["result"]["controlId"].as_u64() {
+                        let c=v.controls.remove(&control).filter(|c|c.done);
+                        let Some(c)=c else{anyhow::bail!("segmented reply incomplete")};
+                        let values:Value=serde_json::from_str(&c.parts.concat())?;
+                        ensure!(values.is_object()&&values.get("shown").is_none(),"invalid control values");
+                        let mut m=x["result"].clone();m.as_object_mut().unwrap().remove("controlId");
+                        for(k,val)in values.as_object().unwrap(){if m.get(k).is_none(){m[k]=val.clone();}}
+                        merged=m;&merged
+                    } else {&x["result"]};
                     if target!=v.target||revision!=v.revision {v.dirty=true;continue;}
                     ensure!(r["version"]==1&&r["hub"]==v.hub&&r["generation"]==v.greeting["generation"]&&r["epoch"]==v.greeting["epoch"]&&r["requestRevision"]==revision&&r["target"]==target,"view identity mismatch");
                     v.view_id=r["viewId"].as_str().context("missing view id")?.to_string();
@@ -117,6 +131,14 @@ async fn session(config:&Config,commands:&mut mpsc::UnboundedReceiver<Command>,e
                     }
                     if r["nextTarget"].is_object(){v.target=r["nextTarget"].clone();v.view_id.clear();let request=v.request("view.open",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;}
                     else if r["shown"].is_object(){let _=events.send(Event::Picture(r.clone())).await;let _=events.send(Event::Status("Connected".into())).await;}
+                },
+                "view.control"=>{
+                    let id=x["id"].as_u64().unwrap_or(0);let part=x["part"].as_u64().unwrap_or(u64::MAX);let text=x["text"].as_str().unwrap_or("");
+                    if !v.pending.contains_key(&id)||text.len()>32768 {continue;}
+                    if !v.controls.contains_key(&id) {if part!=0||v.controls.len()>=MAX_CONTROLS{continue;}v.controls.insert(id,Control::default());}
+                    let c=v.controls.get_mut(&id).unwrap();
+                    if c.done||part!=c.next||part>=MAX_CONTROL_PARTS||c.bytes+text.len()>MAX_CONTROL_BYTES {v.controls.remove(&id);continue;}
+                    c.bytes+=text.len();c.parts.push(text.to_string());c.next+=1;c.done=x["last"]==true;
                 },
                 "view.changed"=>{if x["generation"]==v.greeting["generation"]&&x["epoch"]==v.greeting["epoch"]&&x["viewId"]==v.view_id&&x["target"]==v.target {v.dirty=true;}},
                 "hb"=>{sink.send(Message::Binary(wire::encode(&json!({"id":0,"m":"ping","p":{}})).into())).await?;},

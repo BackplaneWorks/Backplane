@@ -2,7 +2,7 @@
 use anyhow::{bail, ensure, Result};
 use serde_json::{Map, Value, Number};
 include!(concat!(env!("OUT_DIR"), "/wire_dict.rs"));
-const MAX_FRAME: usize = 262144;
+const MAX_FRAME: usize = 524288;
 fn arg(out: &mut Vec<u8>, major: u8, n: u32) {
     let h = major << 5;
     match n {
@@ -26,7 +26,7 @@ pub fn encode(value: &Value) -> Vec<u8> {
     let mut bytes = Vec::new(); go(value, &mut bytes); bytes
 }
 pub fn decode(bytes: &[u8]) -> Result<Value> {
-    ensure!(bytes.len() <= MAX_FRAME, "hub frame exceeds 256 KiB");
+    ensure!(bytes.len() <= MAX_FRAME, "hub frame exceeds 512 KiB");
     struct Reader<'a> { bytes: &'a [u8], at: usize, nodes: usize }
     impl Reader<'_> {
         fn byte(&mut self) -> Result<u8> { let b = *self.bytes.get(self.at).ok_or_else(|| anyhow::anyhow!("truncated CBOR"))?; self.at += 1; Ok(b) }

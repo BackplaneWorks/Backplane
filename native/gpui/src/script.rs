@@ -12,7 +12,7 @@ pub fn metric(started: Instant, event: &str, mut fields: Value) {
 }
 
 #[derive(Clone, Debug)]
-pub enum Step { Select(usize), Popup(String), Type(String), Send, Wait(u64), Key(String) }
+pub enum Step { Select(usize), Popup(String), Type(String), Send, Wait(u64) }
 #[derive(Clone, Debug)]
 pub enum Goal { Thread(String), Popup, Typed(String), Sent(usize), Sleep }
 pub struct Pending { pub label: String, pub started: Instant, pub goal: Goal, pub armed: bool, pub seq: u64 }
@@ -40,6 +40,10 @@ impl Backplane {
         if !self.first_frame {
             self.first_frame = true;
             window.on_next_frame(move |_, _| metric(started, "first_frame", json!({})));
+            match window.gpu_specs() {
+                Some(g) => metric(started, "gpu", json!({"device": g.device_name, "driver": g.driver_name, "driver_info": g.driver_info, "software": g.is_software_emulated})),
+                None => metric(started, "gpu", json!({"device": null})),
+            }
         }
         let draws = self.data["projects"].as_array().map_or(false, |p| !p.is_empty()) && self.data["thread"].is_object();
         if !self.usable && draws {
@@ -129,7 +133,6 @@ impl Backplane {
                     let _ = this.update(cx, |t, cx| { if t.pending.as_ref().map_or(false, |p| p.seq == seq) { t.pending = None; t.pump(cx); } });
                 }).detach();
             }
-            Step::Key(_) => self.pump(cx),
         }
     }
 

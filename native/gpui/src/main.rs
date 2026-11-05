@@ -6,7 +6,7 @@ mod wire;
 use gpui::{prelude::*, *, actions};
 use serde_json::Value;
 use std::{collections::{HashMap,VecDeque},time::{Duration,Instant}};
-use script::{Goal,Pending,Step};
+use script::{Pending,Step};
 use hub::{Command,Event};
 actions!(backplane,[Send,ClosePopup]);
 pub struct Backplane {
@@ -14,6 +14,18 @@ pub struct Backplane {
     tx:tokio::sync::mpsc::UnboundedSender<Command>, selected:String,
     drafts:HashMap<String,String>, popup:bool, started:Instant, usable:bool,
     first_frame:bool, script_done:bool, steps:VecDeque<Step>, pending:Option<Pending>, seq:u64, want_focus:bool, script_total:usize,
+}
+fn pager_row(cx:&mut Context<Backplane>,id:String,pager:&Value,c:&dyn Fn(&str)->Rgba)->Option<AnyElement> {
+    let mut row=div().flex().gap_2().px_3().py_1().text_size(px(11.));let mut any=false;
+    for (name,key) in [("Newer","previous"),("Older","next")] {
+        let control=&pager[key];
+        if let Some(value)=control["value"].as_str() {
+            any=true;let value=value.to_string();let label=format!("{} ({})",name,pager["total"]);
+            row=row.child(div().id(SharedString::from(format!("{id}-{key}"))).cursor_pointer().text_color(c("accent")).hover(|s|s.bg(c("raise"))).px_1().child(label)
+                .on_click(cx.listener(move|this,_,_,cx|{let _=this.tx.send(Command::Page(value.clone()));cx.notify();})));
+        }
+    }
+    if any {Some(row.into_any_element())} else {None}
 }
 fn string(v:&Value,key:&str)->String {v[key].as_str().unwrap_or("").to_string()}
 impl Backplane {
@@ -87,6 +99,9 @@ impl Render for Backplane {
                     .child(div().text_size(px(11.)).text_color(c("faint")).child(string(thread,"ago"))).into_any_element());
             }
         }
+        for page in self.data["sidebarPages"].as_array().cloned().unwrap_or_default() {
+            for key in ["projects","active","legacy"] {if let Some(row)=pager_row(cx,format!("pg-{key}"),&page[key],&c){rows.push(row);}}
+        }
         let thread=&self.data["thread"];let mut messages=Vec::new();
         for entry in thread["entries"].as_array().into_iter().flatten() {
             let own=entry["kind"]=="user";let text=string(entry,"text");
@@ -120,6 +135,7 @@ impl Render for Backplane {
     }
 }
 fn main()->anyhow::Result<()> {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
     let started=Instant::now();let config=hub::Config::parse()?;let exit_after=config.exit_after;
     script::metric(started,"process_start",serde_json::json!({}));
     Application::new().run(move|cx:&mut App|{
