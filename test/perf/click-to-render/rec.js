@@ -26,7 +26,7 @@
   const reset = () => Object.assign(R, {
     armed: false, t0: null, inputType: null, pred: null, tDom: null, tRaf: null, tPaint: null,
     lastMut: null, nMut: 0, nMutBefore: 0, sends: [], recvs: [], shifts: [], events: [], longs: [], loafs: [],
-    late: [], lateNodes: [], done: false, sample: null, film: [], contentSel: null, lastContent: null, pred2: null, tDom2: null, settled: null, tArm: null, error: null, hitHow: null, perfMark: 0,
+    late: [], lateNodes: [], done: false, sample: null, film: [], contentSel: null, lastContent: null, pred2: null, tDom2: null, tPx: null, settled: null, tArm: null, error: null, hitHow: null, perfMark: 0,
   });
   reset();
   const desc = (n) => {
@@ -38,13 +38,23 @@
     if (n.classList && n.classList.length) s += '.' + [...n.classList].slice(0, 3).join('.');
     return s;
   };
+  // px: the end of the frame that holds the DOM change. host.js patches inside a rAF callback: those pixels come at
+  // the end of the current frame (a task posted now runs after its rendering); otherwise at the end of the next one.
+  let frameOpen = false;
+  const fch = new MessageChannel(); fch.port1.onmessage = () => { frameOpen = false; };
+  const raf0 = window.requestAnimationFrame.bind(window);
+  window.requestAnimationFrame = (cb) => raf0((ts) => { if (!frameOpen) { frameOpen = true; fch.port2.postMessage(0); } cb(ts); });
+  const pxMark = () => {
+    const post = () => { const c = new MessageChannel(); c.port1.onmessage = () => { R.tPx = now(); }; c.port2.postMessage(0); };
+    if (frameOpen) post(); else raf0(() => { frameOpen = true; fch.port2.postMessage(0); post(); });
+  };
   const check = (how) => {
     if (R.armed && R.t0 != null && R.pred2 && R.tDom2 == null) { let ok2 = false; try { ok2 = !!R.pred2(); } catch {} if (ok2) R.tDom2 = now(); }
     if (!R.armed || R.tDom != null || R.t0 == null) return;
     let ok = false;
     try { ok = !!R.pred(); } catch (e) { ok = false; }
     if (!ok) return;
-    R.tDom = now(); R.hitHow = how;
+    R.tDom = now(); R.hitHow = how; pxMark();
     requestAnimationFrame(() => {
       R.tRaf = now();
       const ch = new MessageChannel();
@@ -168,7 +178,7 @@
         const rel = (x) => x == null ? null : +(x - R.t0).toFixed(1);
         res({
           inputType: R.inputType, hitHow: R.hitHow, queue: rel(R.tArm) == null ? null : null,
-          dom: rel(R.tDom), raf: rel(R.tRaf), paint: rel(R.tPaint),
+          dom: rel(R.tDom), raf: rel(R.tRaf), paint: rel(R.tPaint), px: rel(R.tPx),
           confirm: R.tDom2 == null ? null : +(R.tDom2 - R.t0).toFixed(1),
           content: R.contentSel ? +((Math.max(R.lastContent || 0, R.tPaint) - R.t0).toFixed(1)) : null, settle: +R.settled.at.toFixed(1), capped: R.settled.capped,
           send: R.sends.length ? rel(R.sends[0][0]) : null, nSend: R.sends.length, sendBytes: R.sends.reduce((a, s) => a + s[1], 0),
