@@ -5,7 +5,7 @@
 # usage: desktop-plot-run.sh CLIENT_BIN ASSETS_DIR OUTNAME          ->  build/gpui/shots/desktop/OUTNAME-*.png, build/gpui/results/desktop/OUTNAME.*
 set -eu
 ROOT=${GPUI_MAIN:-/home/h/Documents/i2cjak/backplane-gpui}; CLIENT=$1; ASSETS=$2; N=${3:-plot}
-R=$ROOT/build/gpui/desktop-plot; OUT=$ROOT/build/gpui/results/desktop; SH=$ROOT/build/gpui/shots/desktop
+R=$ROOT/build/gpui/desktop-plot-$N; OUT=$ROOT/build/gpui/results/desktop; SH=$ROOT/build/gpui/shots/desktop
 X=$ROOT/build/gpui/xvfb; HUB=$ROOT/build/gpui/hub/new
 FIX=$ROOT/test/gpui/files/fixtures/plot; PORT=${GPUI_PORT:-3833}; DISP=${GPUI_DISP:-:61}
 mkdir -p $R $OUT $SH
