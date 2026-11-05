@@ -96,3 +96,22 @@ What changes each frame when idle: only each thread row's `ago` text ("3m", "8m"
 With keyed deltas the traffic is nearly independent of thread count (idle: 287 B/s at 22 threads, 591 B/s at 301; the 5-agent runs are 3 KB/s at both, dominated by the streaming thread's entries). Without deltas it is whole-body repeats. The iOS client's ~20 MB in 70 s at 300 threads equals roughly 285 KB/s, the polled whole-body rate measured here (315-333 KB/s); that points at whole bodies each poll (no `viewDelta` offer taking effect, or delta replies not being applied and the app re-asking whole). The 40x versus 14x ratio was not reproduced: this bench sees 9x idle, 6.9x with 5 agents and polling. The app's frame-size records may double count, as the person said.
 
 Proposed fixes (for the coordinator; I did not edit src/**.bend): (1) make mobile and GPUI clients offer `viewDelta` and apply delta replies; (2) stop sending `overlay.j.projects` as a second copy of `shown.projects` when the client renders only one; (3) page the sidebar thread list (the request's `sidebarRegion` machinery exists for the web renderer) instead of sending all 301 rows; (4) make the `ago` text a client-side function of a timestamp so a clock tick is not 903 ops.
+
+## M4 Leaks: hub soak (2.09 h, 20 simulated agents, JS hub)
+
+`test/gpui/perf/m4_soak.mjs`, fit by `fit.py`. Fresh synthetic home, hub 0.14.0 in a 4 GiB scope, 20 stand-in turns streaming continuously (FAKE_PER=2), one client pinging, sampled every 30 s (252 samples). Raw `build/gpui/results/perf/m4-hub-soak/` (samples.jsonl, debug-perf-*.txt). Other benchmark runs shared the machine at times. Heap-only numbers are unmeasured (the JS runtime does not expose them through /debug/perf; RSS is what was sampled).
+
+| measure | result (after 30 min warm-up) |
+|---|---|
+| fds | flat: 77-81, slope -0.07/h +-0.31 |
+| sockets | flat: slope -0.04/h +-0.27 |
+| child processes | flat: 34-43 (the 20 stand-ins and their shells), slope -0.4/h +-1.2 |
+| threads | 15-17, slope +0.96/h +-0.23 (about +2 in 2 h; no growth trend worth calling a leak) |
+| WAL | flat 4.4-5.8 MB |
+| delta lag p50 / ping rtt p50 | 134-168 ms / 20.6 ms for the whole run, no drift |
+| hub RSS, 30-min medians | 518, 561, 530, 559, 587 MB (min 266, max 752) |
+| hub RSS floor (10-min minima) | 438, 466, 487, 497, 509, 515, 523, 542, 553, 562 MB |
+| RSS floor slope | **+76 MB/h +-9 (95%, 10 bins)**; raw RSS slope +38 MB/h +-15 |
+| log growth in the same period | events.jsonl +37.5 MB/h, store.db +53 MB/h (about 157k events/h at 20 simulated agents) |
+
+Reading: no leak of descriptors, sockets, processes or WAL. The RSS floor does rise, steadily, about 76 MB/h, or roughly 0.5 KB per logged event; the hub keeps state derived from the whole log in memory (consistent with the M3 boot figures: 399, 679, 935 MB at 10k, 100k, 1M events, about 0.5-0.9 KB/event). So the rising floor is growth with the log, not an unexplained leak; it is still unbounded, and at this event rate would add about 1.8 GB over 24 h. I cannot separate retention from a true leak with this run alone: the churn test below holds the log nearly constant. A 24 h projection is an extrapolation of a 2 h fit, not a measurement.
