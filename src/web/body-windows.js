@@ -107,7 +107,17 @@ export class BodyWindows {
     const h = this.heldParts(key);
     if (!h) return root;
     const saved = this.scopes.get(h.scope), parts = new Map([...h.parts].filter(([id]) => !id.startsWith('@live:')));
-    return this.project(root, { parts, reader: id => saved.get(id) || null });
+    // (only the timeline holds messages: the rest of the page, the sidebar
+    // first, is left as it is without being walked)
+    const held = { parts, reader: id => saved.get(id) || null };
+    const walk = n => {
+      if (!is(n, 'El') || n.tag === 'bp-memo') return n;
+      if (attr(n, 'id') === 'timeline') return this.project(n, held);
+      if (n.tag === 'aside' && n.key === 'sidebar') return n;
+      const ks = items(n.kids), mapped = ks.map(walk);
+      return mapped.every((k, i) => k === ks[i]) ? n : { ...n, kids: list(mapped) };
+    };
+    return walk(root);
   }
   // Prefetch metadata is read-only and can never establish a new scope or
   // picture. It may describe rows in the bounded adjacent reading bridge.
