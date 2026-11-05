@@ -44,6 +44,11 @@ fn target_valid(t: &Value) -> bool {
     within(i, 1024) && ((k == "recent" && i.is_empty()) || (!i.is_empty() && matches!(k, "project" | "thread" | "bot" | "room")))
 }
 
+/// The error a policy reply stands for: `refused` (page action not offered / token not held) is INVALID_REQUEST, `stale` (the target does not exist) STALE_VIEW.
+fn policy_error(pol: &Value) -> Option<&'static str> {
+    if pol.get("refused") == Some(&json!(true)) { Some("INVALID_REQUEST") } else if pol.get("stale") == Some(&json!(true)) { Some("STALE_VIEW") } else { None }
+}
+
 /// Hub.autosettle.read_view: only a rendered `view.open` of a thread that is not a mirror marks its newest reply read (view.update polls,
 /// view.page history pages and every other request do not).
 fn acknowledges(method: &str, mirror: bool) -> bool { method == "view.open" && !mirror }
@@ -96,8 +101,10 @@ impl Hub {
         { let reads = actor::take_reads(c.client, &view_id, &p["target"]); if let Some(o) = params.as_object_mut() { o.remove("reads"); if !reads.is_empty() { o.insert("reads".into(), Value::Array(reads)); } } }   // only the hub says what it read
         actor::set_local(&mut params, actor::local_in(c.client, &view_id, m, &p["target"]));
         let mut pol = match self.presenter.view(&params).await { Ok(v) => v, Err(_) => return vec![error(&id, "PRESENTER_UNAVAILABLE")] };
-        if pol.get("refused") == Some(&json!(true)) { return vec![error(&id, "INVALID_REQUEST")] }   // a refused native-sidebar-page action (Hub.thin.act.native)
-        if let Some(o) = pol.as_object_mut() { o.remove("refused"); }
+        // the policy's verdicts on the request: a refused native-sidebar-page action (Hub.thin.act.native) and a target that does not exist
+        // (an unknown bot, room or project: STALE_VIEW), answered before anything is stored
+        if let Some(code) = policy_error(&pol) { return vec![error(&id, code)] }
+        if let Some(o) = pol.as_object_mut() { o.remove("refused"); o.remove("stale"); }
         actor::local_out(c.client, &view_id, &p["target"], &mut pol);
         let mut pol = actor::apply(c.client, &view_id, &p, &pol);
         actor::mask_page_reply(&p, &mut pol);
@@ -211,6 +218,12 @@ impl Hub {
 mod read_tests {
     use super::*;
     // Hub.autosettle.read_view: view.open reads; view.update and view.page do not; a mirror does not
+    #[test] fn the_policys_verdicts_become_errors() {
+        assert_eq!(policy_error(&json!({"refused": true})), Some("INVALID_REQUEST"));
+        assert_eq!(policy_error(&json!({"stale": true})), Some("STALE_VIEW"));
+        assert_eq!(policy_error(&json!({"remoteReady": true, "stale": false})), None);
+        assert_eq!(policy_error(&json!({"remoteReady": true})), None);
+    }
     #[test] fn only_a_view_open_of_a_local_thread_acknowledges() {
         assert!(acknowledges("view.open", false));
         assert!(!acknowledges("view.open", true));
