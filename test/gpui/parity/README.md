@@ -11,6 +11,7 @@ Fixtures and stand-in agents only; every hub is checked from `/proc/<pid>/enviro
 | session:mobile | `renderer: mobile` view: open, update, project add, select, draft, send, a real stand-in turn with streamed deltas, paged history (`view.page`) |
 | session:gpui | the same as the GPUI client asks (`nativeSidebar`) |
 | session:gpuid | the same, offering the keyed view delta (`viewDelta {version, token}`); ops are applied with the client's own `src/web/view-delta.js`, and the rebuilt body is checked equal to a whole view |
+| settings | the Settings requests: setting.set (and its refusals), telemetry.choice, the secret box with a planted value (no frame may hold it), zone.report/set, diagnostics, models.refresh, update.check, app.update, improvements, accounts.default |
 | reconnect | resume from the log position and origin the client already has |
 
 ## Run
