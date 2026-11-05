@@ -840,8 +840,9 @@ function withLiveSidebar(picture) {
   const side = sidebarOf(liveNode), theirs = sidebarOf(picture);
   let out = picture;
   if (side && theirs && side !== theirs) {
+    const moved = sidebarRegrouped(side, theirs);
     const walk = n => {
-      if (n === theirs) return side;
+      if (n === theirs) return moved;
       if (!is(n, "El") || n.tag === "bp-memo") return n;
       const ks = [...each(n.kids)], mapped = ks.map(walk);
       if (mapped.every((k, i) => k === ks[i])) return n;
@@ -853,6 +854,56 @@ function withLiveSidebar(picture) {
   }
   liveSided.set(picture, { live: liveNode, out });
   return out;
+}
+// The open thread's project keeps its place among the live ones (it never
+// sinks under the reader: client.bend's Side.groups.at) only while that
+// thread is open: picking a thread in another project sinks it to the
+// quiet ones, and raises the picked thread's own. The picture's sidebar,
+// drawn with the picked thread open, says which of the two move: they are
+// moved in the live sidebar at the press (each placed after the section it
+// follows in the picture), every other section left where it is, so the
+// hub's view finds them in place. Only those two: the picture's sidebar may
+// be older than the live one for every other project.
+const sectionsIn = side => {
+  const at = nodeIn(side, v => [...each(v.kids)].some(k => is(k, "El") && k.tag === "section" && k.key && classOf(k).includes("project")));
+  return at ? { at, ks: [...each(at.kids)] } : null;
+};
+const classOf = n => (nodeAttr(n, "class") || "").split(/\s+/);
+const withNodeAttr = (n, name, value) => {
+  const as = [...each(n.attrs)];
+  let l = { $: "Nil" };for (let i = as.length - 1; i >= 0; i--) l = { $: "Con", head: is(as[i], "At") && as[i].name === name ? { ...as[i], value } : as[i], tail: l };
+  return { ...n, attrs: l };
+};
+function sidebarRegrouped(side, theirs) {
+  const projectOf = id => id && document.querySelector(`aside.sidebar .thread[data-value="${CSS.escape(id)}"]`)?.closest("section")?.getAttribute("data-drag-to");
+  const pa = shownFor.startsWith("thread:") ? projectOf(shownFor.slice(7)) : "", pt = projectOf(transitionFor.slice(7));
+  const live = sectionsIn(side), pic = sectionsIn(theirs);
+  if (!live || !pic || pa === pt) return side;
+  const picBy = new Map(pic.ks.filter(k => is(k, "El") && k.tag === "section" && k.key).map(k => [k.key, k]));
+  const quiet = n => classOf(n).includes("quiet");
+  const move = new Set([pa, pt].filter(id => id && live.ks.some(k => k.key === id) && picBy.has(id)
+    && quiet(live.ks.find(k => k.key === id)) !== quiet(picBy.get(id))));
+  if (!move.size) return side;
+  let kids = live.ks.filter(k => !move.has(k.key));
+  const order = pic.ks.map(k => k.key);
+  for (const id of order.filter(id => move.has(id))) {
+    const own = live.ks.find(k => k.key === id), cls = nodeAttr(picBy.get(id), "class");
+    const node = withNodeAttr(own, "class", cls);
+    // after the nearest section before it in the picture that is in place
+    let after = -1;
+    for (let i = order.indexOf(id) - 1; i >= 0 && after < 0; i--) after = kids.findIndex(k => k.key === order[i] && !move.has(order[i]));
+    if (after < 0 && order.indexOf(id) > 0) return side;
+    kids = [...kids.slice(0, after + 1), node, ...kids.slice(after + 1)];
+  }
+  const swap = n => {
+    if (n === live.at) { let l = { $: "Nil" };for (let i = kids.length - 1; i >= 0; i--) l = { $: "Con", head: kids[i], tail: l };return { ...n, kids: l }; }
+    if (!is(n, "El") || n.tag === "bp-memo") return n;
+    const ks = [...each(n.kids)], mapped = ks.map(swap);
+    if (mapped.every((k, i) => k === ks[i])) return n;
+    let l = { $: "Nil" };for (let i = mapped.length - 1; i >= 0; i--) l = { $: "Con", head: mapped[i], tail: l };
+    return { ...n, kids: l };
+  };
+  return swap(side);
 }
 // Nothing is drawn in between two views: a thread picked, a reconnect, a
 // failure keep the hub's last view on screen until the next one comes.
