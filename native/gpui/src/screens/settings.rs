@@ -44,30 +44,42 @@ pub fn is_vault_save(b: &Btn) -> bool { b.action == "secret-save" }
 
 /// The request a vault Save sends, straight to the hub (never a view action): an API key (`@apikey` + name) is `bots.voice`
 /// `api-add`; a secret ("name\u001fpurpose\u001fthread") is `secret.set`. Nothing is sent without a name and a value.
-pub fn save_request(packed: &str, typed_name: &str, value: &str) -> Option<(String, Value)> {
+pub fn save_request(packed: &str, typed_name: &str, value: &str) -> Result<(String, Value), &'static str> {
     let value = value.trim();
-    if value.is_empty() { return None; }
-    if let Some(rest) = packed.strip_prefix("@apikey\u{1f}") {
+    if packed.starts_with("@apikey\u{1f}") {
+        let rest = &packed["@apikey\u{1f}".len()..];
         let name = if typed_name.trim().is_empty() { rest.trim() } else { typed_name.trim() };
-        if name.is_empty() { return None; }
-        return Some(("bots.voice".into(), serde_json::json!({"op": "api-add", "name": name, "value": value})));
+        if name.is_empty() { return Err("Name the key first."); }
+        if value.is_empty() { return Err("Paste the key first."); }
+        return Ok(("bots.voice".into(), serde_json::json!({"op": "api-add", "name": name, "value": value})));
     }
     let mut it = packed.split('\u{1f}');
-    let (name, purpose, thread) = (it.next().unwrap_or("").trim(), it.next().unwrap_or(""), it.next().unwrap_or(""));
-    if name.is_empty() { return None; }
-    Some(("secret.set".into(), serde_json::json!({"name": name, "purpose": purpose, "thread": thread, "value": value})))
+    let (packed_name, purpose, thread) = (it.next().unwrap_or("").trim(), it.next().unwrap_or(""), it.next().unwrap_or(""));
+    let name = if typed_name.trim().is_empty() { packed_name } else { typed_name.trim() };
+    if name.is_empty() { return Err("Name the secret first."); }
+    if value.is_empty() { return Err("Paste the secret first."); }
+    Ok(("secret.set".into(), serde_json::json!({"name": name, "purpose": purpose, "thread": thread, "value": value})))
 }
 
-/// Recent texts sent for a field, so the hub's late echo of an older text is not mistaken for a change made elsewhere.
+/// Recent texts sent for a field, so the hub's late echo of an older text is not mistaken for a change made elsewhere. Replies come in
+/// order: once the hub echoes the newest text sent, everything earlier is settled and any other value is a real change.
 const SENT_KEPT: usize = 32;
-
-pub struct FieldSlot { pub input: Entity<Composer>, pub vault: bool, pub hub: String, pub sent: String, sent_log: std::collections::VecDeque<String>, pending: Option<String>, timer: bool }
-
-impl FieldSlot {
-    fn remember(&mut self, t: &str) { self.sent = t.to_string(); self.sent_log.push_back(t.to_string()); while self.sent_log.len() > SENT_KEPT { self.sent_log.pop_front(); } }
-    /// The hub's value is a real change from elsewhere (not an echo of anything we sent, not what is already typed).
-    pub fn takes_hub(&self, hub: &str, typed: &str) -> bool { hub != typed && !self.sent_log.iter().any(|s| s == hub) && hub != self.sent }
+#[derive(Default, Debug)]
+pub struct Echo { sent: String, log: std::collections::VecDeque<String> }
+impl Echo {
+    pub fn new(v: &str) -> Self { let mut e = Echo::default(); e.remember(v); e }
+    pub fn remember(&mut self, t: &str) { self.sent = t.to_string(); self.log.push_back(t.to_string()); while self.log.len() > SENT_KEPT { self.log.pop_front(); } }
+    pub fn sent(&self) -> &str { &self.sent }
+    /// The hub shows `hub` while `typed` is in the field: Some(true) take it, Some(false) ignore it (an echo or the same text).
+    pub fn on_hub(&mut self, hub: &str, typed: &str) -> bool {
+        if hub == self.sent { self.log.clear(); self.log.push_back(self.sent.clone()); return false; }   // caught up
+        hub != typed && !self.log.iter().any(|s| s == hub)
+    }
 }
+
+pub struct FieldSlot { pub input: Entity<Composer>, pub vault: bool, pub hub: String, echo: Echo, pending: Option<String>, timer: bool }
+
+impl FieldSlot { fn remember(&mut self, t: &str) { self.echo.remember(t); } }
 
 /// One composer per field name. A form field's typing goes out as `bfield`, coalesced (the first change at once, the rest the newest after
 /// 30 ms); the hub's value is taken only when it is a real change. A vault field holds its text here and sends nothing until Save.
@@ -80,7 +92,7 @@ pub fn sync(this: &mut Backplane, cx: &mut Context<Backplane>) {
             if slot.vault || slot.hub == f.value { continue; }
             slot.hub = f.value.clone();
             let typed = slot.input.read(cx).content.to_string();
-            if slot.takes_hub(&f.value, &typed) { let (input, v) = (slot.input.clone(), f.value.clone()); slot.remember(&v); input.update(cx, |i, cx| i.set(v, cx)); }
+            if slot.echo.on_hub(&f.value, &typed) { let (input, v) = (slot.input.clone(), f.value.clone()); slot.remember(&v); input.update(cx, |i, cx| i.set(v, cx)); }
             continue;
         }
         let input = cx.new(|cx| Composer::with_context(cx, "AskInput"));
@@ -91,15 +103,13 @@ pub fn sync(this: &mut Backplane, cx: &mut Context<Backplane>) {
             cx.observe(&input, move |this, input, cx| {
                 let text = input.read(cx).content.to_string();
                 let Some(slot) = this.screens.fields.get_mut(&field.name) else { return };
-                if slot.sent == text { return; }
+                if slot.echo.sent() == text { return; }
                 slot.pending = Some(text);
                 send_field(this, &field, cx);
             }).detach();
         }
         cx.subscribe(&input, |_, _, _: &ComposerEvent, _| {}).detach();
-        let mut slot = FieldSlot { input, vault: f.vault, hub: f.value.clone(), sent: f.value.clone(), sent_log: Default::default(), pending: None, timer: false };
-        slot.remember(&f.value);
-        this.screens.fields.insert(f.name.clone(), slot);
+        this.screens.fields.insert(f.name.clone(), FieldSlot { input, vault: f.vault, hub: f.value.clone(), echo: Echo::new(&f.value), pending: None, timer: false });
     }
 }
 
@@ -108,7 +118,7 @@ fn send_field(this: &mut Backplane, f: &Field, cx: &mut Context<Backplane>) {
     let Some(slot) = this.screens.fields.get_mut(&f.name) else { return };
     if slot.timer { return; }
     let Some(text) = slot.pending.take() else { return };
-    if text == slot.sent { return; }
+    if text == slot.echo.sent() { return; }
     let Some(cmd) = change(f, &text) else { return };
     match this.tx.try_send(cmd) { Ok(_) => slot.remember(&text), Err(_) => slot.pending = Some(text) }
     slot.timer = true;
@@ -122,21 +132,34 @@ fn send_field(this: &mut Backplane, f: &Field, cx: &mut Context<Backplane>) {
     }).detach();
 }
 
-/// A vault Save: the typed value leaves in one request straight to the hub, then the field is emptied (history too).
+/// A vault Save: the field is the button's (`@apikey` is `kval`, else `sval`); the typed value leaves in one request straight to the hub, and
+/// the field is emptied (history too) only when it was sent. Nothing sent says why, as the phones do (`key-err`, `secret-err`).
 pub fn save_vault(this: &mut Backplane, b: &Btn, cx: &mut Context<Backplane>) {
-    let vault: Vec<String> = this.screens.fields.iter().filter(|(_, s)| s.vault).map(|(n, _)| n.clone()).collect();
-    let Some(name) = vault.first().cloned() else { return };
-    let Some(input) = this.screens.fields.get(&name).map(|s| s.input.clone()) else { return };
-    let typed_name = this.screens.fields.get("kname").map(|s| s.input.read(cx).content.to_string()).unwrap_or_default();
+    let key = b.value.starts_with("@apikey\u{1f}");
+    let (field, err) = if key { ("kval", "key-err") } else { ("sval", "secret-err") };
+    let say = |this: &mut Backplane, why: &str| { let _ = this.tx.try_send(Command::Action(err.into(), why.into())); };
+    let Some(input) = this.screens.fields.get(field).map(|s| s.input.clone()) else { return };
+    let typed_name = this.screens.fields.get(if key { "kname" } else { "sname" }).map(|s| s.input.read(cx).content.to_string()).unwrap_or_default();
     let value = input.read(cx).content.to_string();
-    if let Some((m, p)) = save_request(&b.value, &typed_name, &value) {
-        let _ = this.tx.try_send(Command::Rpc(m, Secret(p)));
-        input.update(cx, |i, cx| i.set(String::new(), cx));
+    match save_request(&b.value, &typed_name, &value) {
+        Err(why) => say(this, why),
+        Ok((m, p)) => {
+            let tag = if key { "key" } else { "secret" };
+            if this.tx.try_send(Command::Rpc(m, Secret(p), tag)).is_ok() {
+                input.update(cx, |i, cx| i.set(String::new(), cx));
+                if key { let _ = this.tx.try_send(Command::Action("key-sent".into(), String::new())); }
+            } else { say(this, "The hub is not reachable. Try again."); }
+        }
     }
     cx.notify();
 }
 
-
+/// The hub answered a direct request: a secret's outcome is shown by the client (`secret-sent` shuts the box, `secret-err` says why).
+pub fn rpc_done(this: &mut Backplane, tag: &str, ok: bool, why: &str) {
+    if tag != "secret" { return; }
+    let (a, v) = if ok { ("secret-sent", String::new()) } else { ("secret-err", if why.is_empty() { "The hub refused the secret".to_string() } else { why.to_string() }) };
+    let _ = this.tx.try_send(Command::Action(a.into(), v));
+}
 
 fn qr(light: bool, lines: &[String]) -> AnyElement {
     let n = lines.len(); let cell = 4.0_f32;
@@ -210,19 +233,22 @@ mod tests {
         assert!(change(&vault, "sk-SECRET").is_none()); assert!(change(&plain, "OPENAI").is_some());
         let (m, p) = save_request("@apikey\u{1f}OPENAI", "", "sk-SECRET").unwrap();
         assert_eq!((m.as_str(), p["op"].as_str(), p["name"].as_str(), p["value"].as_str()), ("bots.voice", Some("api-add"), Some("OPENAI"), Some("sk-SECRET")));
-        let cmd = Command::Rpc(m, Secret(p));
+        let cmd = Command::Rpc(m, Secret(p), "key");
         assert!(!format!("{cmd:?}").contains("SECRET"), "Debug of a request shows no secret"); assert!(!format!("{vault:?}").contains("SECRET"));
         let (m, p) = save_request("db\u{1f}for the db\u{1f}t1", "", "pw").unwrap();
         assert_eq!((m.as_str(), p["name"].as_str(), p["purpose"].as_str(), p["thread"].as_str()), ("secret.set", Some("db"), Some("for the db"), Some("t1")));
-        assert!(save_request("@apikey\u{1f}X", "", "   ").is_none(), "no value, no request"); assert!(save_request("@apikey\u{1f}", "", "v").is_none(), "no name, no request");
+        assert!(save_request("@apikey\u{1f}X", "", "   ").is_err(), "no value, no request"); assert!(save_request("@apikey\u{1f}", "", "v").unwrap_err().contains("Name"), "no name says why");
         assert_eq!(save_request("@apikey\u{1f}old", "typed", "v").unwrap().1["name"], "typed", "the name typed last wins");
     }
-    /// Type "abc": the reply for "a" arrives late and must not put "a" back in the field.
-    #[test] fn a_late_echo_of_an_older_text_is_not_a_change_from_elsewhere() {
-        // FieldSlot needs an entity for `input`; the rule is on its log, so test it through the same helper on a bare log
-        let log: Vec<&str> = vec!["", "a", "ab", "abc"];
-        let takes = |hub: &str, typed: &str, sent: &str| hub != typed && !log.iter().any(|s| *s == hub) && hub != sent;
-        assert!(!takes("a", "abc", "abc"), "echo of an older send"); assert!(!takes("abc", "abc", "abc"), "the same text");
-        assert!(takes("changed on another device", "abc", "abc"), "a real change from elsewhere");
+    /// Type "abc": the reply for "a" arrives late and must not put "a" back; when the hub really clears the field afterwards, it is cleared.
+    #[test] fn echoes_are_ignored_and_a_real_clear_after_catching_up_is_taken() {
+        let mut e = Echo::new("");
+        for t in ["a", "ab", "abc"] { e.remember(t); }
+        assert!(!e.on_hub("a", "abc"), "a late echo of an older text"); assert!(!e.on_hub("ab", "abc"));
+        assert!(!e.on_hub("abc", "abc"), "caught up: the log is settled");
+        assert!(e.on_hub("", "abc"), "the hub cleared the field (a Save or a Set): that is a real change");
+        let mut f = Echo::new(""); f.remember("x");
+        assert!(f.on_hub("changed on another device", "x"), "a real change from elsewhere");
     }
+}
 }

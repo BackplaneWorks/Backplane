@@ -131,34 +131,37 @@ pub struct Frame { pub key: String, pub fam: String, pub bbox: [f32; 4], pub edg
 
 /// The chunks this client holds (the last plot applied), and the frame being drawn.
 #[derive(Default)]
-pub struct Store { held: Vec<Arc<Chunk>>, pub frame: Option<Frame> }
+pub struct Store { held: Vec<Arc<Chunk>>, held_key: String, pub frame: Option<Frame> }
 
 impl Store {
-    pub fn reset(&mut self) { self.held.clear(); self.frame = None; }
+    pub fn reset(&mut self) { self.held.clear(); self.held_key.clear(); self.frame = None; }
+    fn fail(&mut self, key: String, fam: String, why: &str) { self.held.clear(); self.held_key.clear(); self.frame = Some(Frame { key, fam, none: why.to_string(), ..Default::default() }); }
     /// Apply one plot frame. Err names a frame that cannot be used; the store is then empty, as on the phones.
     pub fn receive(&mut self, bytes: &[u8]) -> Result<(), &'static str> {
-        let o = decode(bytes).ok_or("undecodable plot frame")?;
+        let Some(o) = decode(bytes) else { self.fail(String::new(), String::new(), "The plot from the hub could not be read. Reopen the view to load it again."); return Err("undecodable plot frame") };
         let key = o.get("key").and_then(C::text).unwrap_or("").to_string();
         let fam = o.get("fam").and_then(C::text).filter(|s| !s.is_empty()).unwrap_or(&key).to_string();
         // a 3D model rides the same socket; the mesh viewer is separate
         if key.starts_with("2|") || key.starts_with("3|") || key.starts_with("4|") { return Ok(()); }
         if let Some(why) = o.get("none").and_then(C::text) {
-            self.held.clear();
-            self.frame = Some(Frame { key, fam, none: why.to_string(), ..Default::default() });
+            self.fail(key, fam, why);
             return Ok(());
         }
         let none: Vec<C> = Vec::new();
         let refs = match o.get("cs") { Some(C::Arr(a)) => a, _ => &none };
+        // `base` names the source this delta is against: held chunks from another source are not what its indexes mean
+        let base = o.get("base").and_then(C::text).unwrap_or("");
+        let stale_base = !base.is_empty() && base != self.held_key;
         let mut cs: Vec<Arc<Chunk>> = Vec::with_capacity(refs.len());
         for r in refs {
             match r {
-                C::U(k) if *k >= 0 && (*k as usize) < self.held.len() => cs.push(self.held[*k as usize].clone()),
+                C::U(k) if !stale_base && *k >= 0 && (*k as usize) < self.held.len() => cs.push(self.held[*k as usize].clone()),
                 C::Map(_) => cs.push(Arc::new(Chunk::decode(r))),
-                _ => { self.held.clear(); self.frame = Some(Frame { key, fam, none: "Invalid geometry reference. Retry to reload this view.".into(), ..Default::default() }); return Err("invalid geometry reference"); }
+                _ => { self.fail(key, fam, "Invalid geometry reference. Retry to reload this view."); return Err("invalid geometry reference"); }
             }
         }
         let four = |k: &str| -> [f32; 4] { match o.get(k) { Some(C::Arr(a)) if a.len() >= 4 => [0, 1, 2, 3].map(|i| a[i].int().unwrap_or(0) as f32), _ => [0.; 4] } };
-        self.held = cs.clone();
+        self.held = cs.clone(); self.held_key = key.clone();
         self.frame = Some(Frame { key, fam, bbox: four("box"), edge: four("edge"), thick: o.get("thick").and_then(C::int).unwrap_or(1600) as f32, chunks: cs, none: String::new() });
         Ok(())
     }
@@ -247,6 +250,57 @@ mod tests {
         let mut d = Vec::new(); head(&mut d, 5, 2); text(&mut d, "cs"); head(&mut d, 4, 1); head(&mut d, 5, 1); text(&mut d, "d"); head(&mut d, 2, 3); d.extend([0x80, 0x80, 0x80]);  // a varint that never ends
         text(&mut d, "key"); text(&mut d, "0|x|");
         let mut s = Store::default(); let _ = s.receive(&d);   // must not panic
+    }
+    /// The child's `.plot` text for a real project (ecc83's board, microwave): geometry made by the real generator, not by this file's encoder.
+    fn child_chunks(text: &str) -> (Vec<u32>, Vec<C>) {
+        let (mut cs, mut b) = (Vec::new(), Vec::new());
+        for line in text.split_inclusive('\n') {
+            let mut chars = line.chars();
+            match chars.next() {
+                Some('b') => { b = line[1..].trim_end().split(' ').filter_map(|n| n.parse().ok()).collect(); }
+                Some('c') => {
+                    let rest: Vec<char> = line[1..].chars().collect();
+                    let (mut nums, mut cur, mut at) = (Vec::new(), 0u32, 0usize);
+                    while at < rest.len() && nums.len() < 8 { let c = rest[at]; at += 1; if c == ' ' { nums.push(cur); cur = 0 } else { cur = cur * 10 + (c as u32 - 48) } }
+                    let dl = nums[6] as usize;
+                    let d: Vec<u8> = rest[at..at + dl].iter().map(|c| *c as u32 as u8).collect();
+                    let mut m = BTreeMap::new();
+                    for (k, i) in [("s", 0), ("l", 1), ("c", 2), ("a", 3), ("m", 4), ("w", 5)] { m.insert(k.to_string(), C::U(nums[i] as i64)); }
+                    m.insert("d".into(), C::Bytes(d)); cs.push(C::Map(m));
+                }
+                _ => {}
+            }
+        }
+        (b, cs)
+    }
+    #[test] fn real_plots_from_the_generator_decode_inside_their_box() {
+        for (name, text) in [("ecc83-pp", include_str!("../../../../test/gpui/files/fixtures/plot/ecc83-pp.kicad_pcb.plot")), ("microwave", include_str!("../../../../test/gpui/files/fixtures/plot/microwave.kicad_pcb.plot"))] {
+            let (b, cs) = child_chunks(text);
+            assert!(b.len() >= 4 && !cs.is_empty(), "{name}: parsed {} chunks", cs.len());
+            let (x0, y0, x1, y1) = (b[0] as f32, b[1] as f32, b[2] as f32, b[3] as f32);
+            let (mut caps, mut polys) = (0, 0);
+            for c in &cs {
+                let ch = Chunk::decode(c);
+                caps += ch.caps.len() / 5; polys += ch.polys.len();
+                let pad = 200_000.;   // a track's width and a little more
+                for s in ch.caps.chunks_exact(5) { for (x, y) in [(s[0], s[1]), (s[2], s[3])] { assert!(x >= x0 - pad && x <= x1 + pad && y >= y0 - pad && y <= y1 + pad, "{name}: ({x},{y}) outside {b:?}"); } }
+                for p in &ch.polys { for q in p.chunks_exact(2) { assert!(q[0] >= x0 - pad && q[0] <= x1 + pad && q[1] >= y0 - pad && q[1] <= y1 + pad, "{name}: polygon point outside"); } }
+            }
+            assert!(caps > 10 && polys > 0, "{name}: {caps} capsules, {polys} polygons");
+        }
+    }
+    #[test] fn a_delta_against_another_source_is_refused() {
+        let a = frame("0|/p|", &[chunk(1, 1, 1, 10, &[(0, 0), (5, 5)])], &[None], [0, 0, 10, 10]);
+        let mut s = Store::default(); s.receive(&a).unwrap();
+        // a frame naming a different base that keeps chunk 0 by index
+        let mut o = Vec::new(); head(&mut o, 5, 4); o.extend([1]); text(&mut o, "plot"); o.extend([0x18, 31]); text(&mut o, "1|/q|"); text(&mut o, "base"); text(&mut o, "0|/other|"); text(&mut o, "cs"); head(&mut o, 4, 1); head(&mut o, 0, 0);
+        assert!(s.receive(&o).is_err()); assert!(s.frame.as_ref().unwrap().none.contains("Invalid geometry"));
+    }
+    #[test] fn an_undecodable_frame_empties_the_store_and_says_why() {
+        let a = frame("0|/p|", &[chunk(1, 1, 1, 10, &[(0, 0), (5, 5)])], &[None], [0, 0, 10, 10]);
+        let mut s = Store::default(); s.receive(&a).unwrap();
+        assert!(s.receive(&[0xA1, 0x01, 0x64]).is_err());
+        let f = s.frame.as_ref().unwrap(); assert!(f.chunks.is_empty() && f.none.contains("could not be read"));
     }
     #[test] fn fit_centres_the_box_and_zoom_keeps_the_point_under_the_pointer() {
         let v = View::fit([0., 0., 2000., 1000.], 940., 500.);
