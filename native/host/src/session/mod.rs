@@ -83,8 +83,11 @@ impl Hub {
         if let (Some(o), true) = (params.as_object_mut(), p.get("session").map_or(false, Value::is_object)) { o.insert("session".into(), actor::input(c.client, &view_id, &p)); }
         actor::set_local(&mut params, actor::local_in(c.client, &view_id, m, &p["target"]));
         let mut pol = match self.presenter.view(&params).await { Ok(v) => v, Err(_) => return vec![error(&id, "PRESENTER_UNAVAILABLE")] };
+        if pol.get("refused") == Some(&json!(true)) { return vec![error(&id, "INVALID_REQUEST")] }   // a refused native-sidebar-page action (Hub.thin.act.native)
+        if let Some(o) = pol.as_object_mut() { o.remove("refused"); }
         actor::local_out(c.client, &view_id, &p["target"], &mut pol);
-        let pol = actor::apply(c.client, &view_id, &p, &pol);
+        let mut pol = actor::apply(c.client, &view_id, &p, &pol);
+        actor::mask_page_reply(&p, &mut pol);
         let target = p["target"].clone();
         if m == "view.open" { c.view_id = view_id.clone(); c.target = target.clone(); }
         c.lastrev = rev;

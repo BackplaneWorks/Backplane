@@ -239,6 +239,18 @@ pub fn set_local(params: &mut Value, held: Option<Value>) {
 pub fn page(client: u64, view: &str, method: &str, action: &str, target: &Value, asked: u64) -> u64 {
     ACTORS.lock().unwrap().entry(client).or_default().page_at(view, method, action, target, asked)
 }
+/// Actor.native.page_result.page: a read-only `native-sidebar-page` reply is not a channel for what the actor holds beyond what
+/// the page captured. The session's drafts, info and outbox keep only the keys of the page's own session (a mask, never
+/// data), and error/note go. `req` is the request as the client sent it.
+pub fn mask_page_reply(req: &Value, reply: &mut Value) {
+    if req["action"].as_str() != Some("native-sidebar-page") || req["nativeSidebar"] != json!(1) { return }
+    let Some(s) = reply.get_mut("session").and_then(Value::as_object_mut) else { return };
+    s.remove("error"); s.remove("note");
+    for f in ["drafts", "info", "outbox"] {
+        let mask = req["session"][f].as_object();
+        if let Some(Value::Object(o)) = s.get_mut(f) { o.retain(|k, _| mask.map_or(false, |m| m.contains_key(k))); }
+    }
+}
 /// A connection ended (`Hub::detach`, from the connection's drop guard).
 pub fn forget(client: u64) { ACTORS.lock().unwrap().remove(&client); }
 
@@ -451,6 +463,18 @@ mod tests {
         assert_eq!(s["drafts"]["@sch:t2"], json!("3")); assert_eq!(s["drafts"]["@split.sheet:t2"], json!("4"));
         assert_eq!(s["info"]["view.kind:t2"], json!("board")); assert_eq!(s["info"]["view.design:t2"], json!(""));
         assert!(s["info"].get("panel:t2").is_none(), "panel is for a fresh actor only");
+    }
+    #[test] fn a_page_action_reply_keeps_only_the_pages_own_keys() {
+        let mut req = req("thread", "t1");
+        req["action"] = json!("native-sidebar-page"); req["nativeSidebar"] = json!(1);
+        req["session"] = json!({"drafts": {"t1": "x"}, "info": {"fold:a": "1"}, "outbox": {}});
+        let mut r = json!({"session": {"error": "e", "note": "n", "drafts": {"t1": "x", "@rp.req:1": ""}, "info": {"fold:a": "1", "fab.line:t1": "held"}, "outbox": {"o": "1"}}});
+        mask_page_reply(&req, &mut r);
+        assert_eq!(r["session"], json!({"drafts": {"t1": "x"}, "info": {"fold:a": "1"}, "outbox": {}}));
+        let mut other = req.clone(); other["action"] = json!("draft");
+        let mut r2 = json!({"session": {"drafts": {"@rp.req:1": ""}}});
+        mask_page_reply(&other, &mut r2);
+        assert!(r2["session"]["drafts"].get("@rp.req:1").is_some());
     }
     #[test] fn forget_and_the_bound_keep_the_map_flat() {
         let mut m: HashMap<u64, ViewActor> = HashMap::new();
