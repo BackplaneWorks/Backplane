@@ -63,11 +63,15 @@ mod tests {
     #[test] fn liveness_nudge_once_per_gap() {
         let d = tick(true, 5000, 1200, 60, &l(100, 4000, false, false)); assert!(!d.nudge);
         let first = tick(true, 5000, 1200, 60, &l(100, 0, false, false)); assert!(first.nudge && first.live.nudged == 5000);
+        // inside the grace after a nudge: no second nudge and no notice; and not active: nothing
+        let inside = tick(true, 5000, 1200, 60, &l(100, 4990, false, false)); assert!(!inside.nudge && !inside.notify);
+        let idle = tick(false, 5000, 1200, 60, &l(100, 0, false, false)); assert!(!idle.nudge && !idle.notify);
     }
     #[test] fn liveness_never_kills() { // the Decision has no kill, interrupt, cancel or restart outcome: only nudge and notify
         let d = Decision { live: l(0, 0, false, false), nudge: true, notify: true }; assert!(d.nudge && d.notify);
     }
-    #[test] fn liveness_launcher_notified_once() { assert!(!escalate(true, &l(1, 2, false, true)).notify); assert!(escalate(true, &l(1, 2, false, false)).notify); }
+    #[test] fn liveness_launcher_notified_once() { assert!(!escalate(true, &l(1, 2, false, true)).notify); assert!(escalate(true, &l(1, 2, false, false)).notify);
+        assert!(!escalate(false, &l(1, 2, false, true)).notify); assert!(!escalate(false, &l(1, 2, false, false)).notify); }
     #[test] fn liveness_progress_clears_stall() { let p = progress(&l(50, 9, true, true), 10, "x"); assert!(!p.stalled && !p.reported && p.nudged == 0 && p.last == 50); }
     #[test] fn liveness_nudge_before_stall() { let d = tick(true, 5000, 1, 60, &l(100, 0, false, false)); assert!(!d.live.stalled && d.nudge); }
     #[test] fn liveness_timeout_explicit_optout() { assert_eq!(timeout(true, 0), 0); assert_eq!(timeout(false, 0), DEFAULT_GAP); }
