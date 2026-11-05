@@ -624,8 +624,6 @@ law switch_back_missed_nothing rust a_switch_changes_nothing_for_the_same_provid
 law queue_steer_one_leaves_rest rust queue_steer_and_resume_hand_the_text_to_the_agents_module
 law project_drive_root_absolute rust project_roots_are_kept_absolute
 law project_unc_root rust project_roots_are_kept_absolute
-# the test injects agents' interrupt contract (a running turn ends as interrupted) through the seam recorder; the real interrupt is stated by agents' own tests
-law archive_running_stops rust archive_running_stops
 law launch_reports_turn_end rust launch_reports_turn_end
 law launch_ask_at_once rust launch_ask_at_once
 law launch_fail_told rust launch_fail_told
