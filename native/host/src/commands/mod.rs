@@ -107,7 +107,7 @@ fn scratch_folder(hub: &Arc<Hub>, th: &str) {
     if std::fs::create_dir_all(&path).is_err() { return }
     let (hub, th, path) = (hub.clone(), th.to_string(), path.to_string_lossy().into_owned());
     tokio::spawn(async move {
-        let _ = crate::files::git::proc("git", &["init", "-q"], &path, &[]).await;
+        let _ = crate::files::git::proc_ro("git", &["init", "-q"], &path, &[]).await; // inside <home>/scratch: a home write
         let _ = hub.commit(&json!({"$":"WorktreeSet","id":th,"branch":"","worktree":path,"at":now_s()})).await;
     });
 }

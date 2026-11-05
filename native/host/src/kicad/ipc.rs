@@ -326,7 +326,15 @@ async fn log_fallback(hub: &Arc<Hub>, thread: Option<&str>, why: &str) {
 }
 /// One command for the project's headless KiCad (the MCP tool `kicad_ipc`): Ok({"type","message"}) or Err(text for the agent).
 pub async fn kicad_ipc(hub: &Arc<Hub>, path: &str, type_: &str, message: Value) -> Result<Value, String> { kicad_ipc_in(hub, None, path, type_, message).await }
-pub async fn kicad_ipc_in(hub: &Arc<Hub>, thread: Option<&str>, path: &str, type_: &str, message: Value) -> Result<Value, String> { run(hub, thread, path, type_, message, false).await }
+pub async fn kicad_ipc_in(hub: &Arc<Hub>, thread: Option<&str>, path: &str, type_: &str, message: Value) -> Result<Value, String> {
+    if let Some(why) = copy_ipc_refused(crate::copy::on(), type_) { return Err(why) }
+    run(hub, thread, path, type_, message, false).await
+}
+/// Default-deny on a copy (BACKPLANE_COPY=1): KiCad edits the real project's files (CreateItems, SaveDocument ...), so only the commands listed as reads run: `Get*` and `Ping`.
+pub fn copy_ipc_refused(copy: bool, type_: &str) -> Option<String> {
+    let name = type_.rsplit('.').next().unwrap_or(type_);
+    if copy && !(name.starts_with("Get") || name == "Ping") { Some(format!("a hub on a copied log (BACKPLANE_COPY=1) writes nothing outside its home: {name} is not a listed read")) } else { None }
+}
 /// The MCP tool `kicad_ipc_status`: Ok({"server","servers","argv","version","capabilities","detail"}); starts the server if it is not running.
 pub async fn kicad_ipc_status(hub: &Arc<Hub>, path: &str) -> Result<Value, String> { kicad_ipc_status_in(hub, None, path).await }
 pub async fn kicad_ipc_status_in(hub: &Arc<Hub>, thread: Option<&str>, path: &str) -> Result<Value, String> { run(hub, thread, path, "kiapi.backplane.GetCapabilities", json!({}), true).await }
@@ -407,5 +415,10 @@ mod tests {
         assert_eq!(lines.lock().unwrap().clone(), format!("{project}|ready|"));
         for _ in 0..40 { tokio::time::sleep(Duration::from_millis(100)).await; if lines.lock().unwrap().contains("|stopped|") { break } }
         assert_eq!(lines.lock().unwrap().clone(), format!("{project}|stopped|"));
+    }
+    #[test] fn a_copy_runs_only_the_listed_kicad_reads() {
+        for t in ["kiapi.board.commands.GetItems", "kiapi.common.commands.Ping", "kiapi.backplane.GetCapabilities"] { assert_eq!(copy_ipc_refused(true, t), None, "{t}") }
+        for t in ["kiapi.common.commands.SaveDocument", "kiapi.board.commands.CreateItems", "kiapi.board.commands.BeginCommit", "kiapi.board.commands.EndCommit", "kiapi.backplane.Shutdown", "", "GetItemsX.Delete"] { assert!(copy_ipc_refused(true, t).is_some(), "{t}") }
+        assert_eq!(copy_ipc_refused(false, "kiapi.common.commands.SaveDocument"), None);
     }
 }

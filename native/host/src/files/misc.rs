@@ -3,7 +3,7 @@
 //! Mech.list, Mech.render). The shell text is the Bend hub's (scripts/*.sh, extracted by test/gpui/files/extract_scripts.py);
 //! `mech.render` draws in this process (kicad/render.rs), one render at a time; `BACKPLANE_PLOT_NATIVE=0` runs the Bend renderer
 //! child again (`backplane --render`, BACKPLANE_PLOT_BIN is the same binary).
-use super::{fm, git::proc};
+use super::{fm, git::{proc, proc_ro}};
 use crate::{api::{Caller, Fut, RpcHandler}, hub::Hub};
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -64,7 +64,7 @@ impl RpcHandler for Misc {
                         return reply(true, json!({"pdfPath":path,"pdfPage":page,"pdfErr":"not a PDF path"}))
                     }
                     let dir = hub.cfg.home.join("pdf");
-                    let r = proc("sh", &["-c", PDF, "sh", &path, &page, &dir.to_string_lossy()], "/", &[]).await;
+                    let r = proc_ro("sh", &["-c", PDF, "sh", &path, &page, &dir.to_string_lossy()], "/", &[]).await;
                     if r.code == 0 {
                         let mut it = r.out.split('\t'); let png = it.next().unwrap_or("").to_string(); let pages = it.next().unwrap_or("0").trim().to_string();
                         reply(true, json!({"pdfPath":path,"pdfPage":page,"pdfPng":png,"pdfPages":pages}))
@@ -76,7 +76,7 @@ impl RpcHandler for Misc {
                     let cwd = cwd_p.to_string_lossy().into_owned();
                     let err = |why: String| reply(false, json!({"error":why}));
                     if rf.is_empty() || rf.starts_with('-') || rf.contains('\0') { return err(format!("no commit, branch or tag named {rf}")) }
-                    let r = proc("sh", &["-c", RESOLVE, "sh", &cwd, &rf], "/", &[]).await;
+                    let r = proc_ro("sh", &["-c", RESOLVE, "sh", &cwd, &rf], "/", &[]).await;
                     if r.code == 0 { let ls: Vec<&str> = r.out.split('\n').collect(); let at = |i: usize| ls.get(i).map(|x| x.trim()).unwrap_or("");
                         reply(true, json!({"resolved":{"thread":thread,"side":side,"ref":rf,"commit":at(0),"git":at(1),"top":at(2)}})) }
                     else { err(if r.out.trim().is_empty() { format!("could not resolve {rf}") } else { r.out.trim().to_string() }) }
@@ -87,7 +87,7 @@ impl RpcHandler for Misc {
                     let Some(cwd_p) = super::root_of(hub, &thread).await else { return vec![super::threadpath::refusal(id)] };
                     let cwd = cwd_p.to_string_lossy().into_owned();
                     let files: Vec<String> = if super::git::is_repo(&cwd).await {
-                        let r = super::git::run(&cwd, &["ls-files", "-z", "--cached", "--others", "--exclude-standard"]).await;
+                        let r = super::git::run_ro(&cwd, &["ls-files", "-z", "--cached", "--others", "--exclude-standard"]).await;
                         if r.code != 0 { return reply(false, json!({"text":r.out})) }
                         r.out.split('\0').filter(|x| !x.is_empty()).take(3000).map(str::to_string).collect()
                     } else { tokio::task::spawn_blocking(move || walk_files(std::path::Path::new(&cwd))).await.unwrap_or_default() };
@@ -114,6 +114,8 @@ impl RpcHandler for Misc {
                     let cwd = cwd_p.to_string_lossy().into_owned();
                     let (mut rendered, mut err) = (String::new(), String::new());
                     if method == "mech.render" {
+                        // mech.render writes renders/<part>.<view>.png into the project's folder: outside a copy's home, so a copy is told, not run
+                        if crate::copy::on() { return reply(false, json!({"text":crate::copy::GIT_TOLD.replace("runs no git that writes", "writes nothing outside its home: no renders into the project")})) }
                         let path = s("path");
                         // the model to draw lies in the project: a path from its root, or an absolute path under it
                         // Hub.folder.path.ok, then Mech.render.at: a path from the root or absolute under it, and a model that really lies inside (no link out)
@@ -134,7 +136,7 @@ impl RpcHandler for Misc {
                         };
                         err = mech_error(code, &out); rendered = path;
                     }
-                    let l = proc("sh", &["-c", MECH_LIST], &cwd, &[]).await;
+                    let l = proc_ro("sh", &["-c", MECH_LIST], &cwd, &[]).await;
                     let cfg = std::fs::read_to_string(format!("{cwd}/.backplane.json")).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).and_then(|v| v.get("mech").and_then(Value::as_str).map(str::to_string)).unwrap_or_default();
                     if method == "mech.render" { reply(true, json!({"mech":l.out,"root":cwd,"thread":thread,"rendered":rendered,"error":err,"primary":cfg})) }
                     else if l.code == 0 { reply(true, json!({"mech":l.out,"root":cwd,"thread":thread,"primary":cfg})) } else { reply(false, json!({"text":l.out})) }

@@ -44,14 +44,14 @@ fn is_tree(r: &Ran) -> bool { r.code == 0 && r.out.trim() == "tree" }
 /// Git.thread_wt: the thread's directory, "skip: <why>" when there is no repository to branch, or "error: ...".
 pub async fn thread_wt(cwd: &str, carry: bool, branch: &str) -> String {
     let b = sanitize(branch);
-    let r = git::run(cwd, &["rev-parse", "--show-toplevel"]).await;
+    let r = git::run_ro(cwd, &["rev-parse", "--show-toplevel"]).await;
     let top = if r.code == 0 { r.out.trim().to_string() } else { String::new() };
     if top.is_empty() { return "skip: not a git repository".into() }
-    let r = git::run(cwd, &["rev-parse", "--show-prefix"]).await; if r.code != 0 { return err(&r) }
+    let r = git::run_ro(cwd, &["rev-parse", "--show-prefix"]).await; if r.code != 0 { return err(&r) }
     let prefix = r.out.trim().to_string();
-    if git::run(cwd, &["rev-parse", "--verify", "-q", "HEAD"]).await.code != 0 { return "skip: no commit yet".into() }
+    if git::run_ro(cwd, &["rev-parse", "--verify", "-q", "HEAD"]).await.code != 0 { return "skip: no commit yet".into() }
     // Git.exclude: /.backplane/ in the repository's info/exclude, once
-    let r = git::run(&top, &["rev-parse", "--path-format=absolute", "--git-common-dir"]).await; if r.code != 0 { return err(&r) }
+    let r = git::run_ro(&top, &["rev-parse", "--path-format=absolute", "--git-common-dir"]).await; if r.code != 0 { return err(&r) }
     let common = r.out.trim().to_string();
     let r = git::proc("sh", &["-c", EXCLUDE, "sh", &common], &top, &[]).await; if r.code != 0 { return err(&r) }
     // Git.upstream: origin's default branch, fetched first; "" (HEAD) when there is no origin or uncommitted work is carried
@@ -60,9 +60,9 @@ pub async fn thread_wt(cwd: &str, carry: bool, branch: &str) -> String {
     let mut base = if r.code == 0 { r.out.trim().to_string() } else { String::new() };
     // a subdirectory project may only exist on the checked-out branch
     if !base.is_empty() && !prefix.is_empty() {
-        let r = git::run(&top, &["cat-file", "-t", &format!("{base}:{}", sub(&prefix))]).await;
+        let r = git::run_ro(&top, &["cat-file", "-t", &format!("{base}:{}", sub(&prefix))]).await;
         if !is_tree(&r) {
-            let h = git::run(&top, &["cat-file", "-t", &format!("HEAD:{}", sub(&prefix))]).await;
+            let h = git::run_ro(&top, &["cat-file", "-t", &format!("HEAD:{}", sub(&prefix))]).await;
             if is_tree(&h) { base = String::new() } else { return format!("error: project directory {} is not a directory in {base} or HEAD", sub(&prefix)) }
         }
     }
