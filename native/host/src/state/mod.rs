@@ -33,6 +33,11 @@ pub enum Override { None, ForcedSettled, ForcedActive }
 
 #[derive(Clone, Debug)]
 pub struct Project { pub title: String, pub root: String, pub created: u64, pub removed: bool }
+/// Navigation metadata only: no bot persona, posts, room history or second world fold.
+#[derive(Clone, Debug)]
+pub struct BotNav { pub name: String, pub thread: String, pub look: u64, pub created: u64, pub talked: u64 }
+#[derive(Clone, Debug)]
+pub struct RoomNav { pub name: String, pub members: usize }
 #[derive(Clone, Debug)]
 pub struct Thread {
     pub project: String, pub title: String, pub created: u64, pub activity: u64, pub turn: Turn, pub pending: u64,
@@ -64,6 +69,8 @@ pub struct State {
     pub queue: HashMap<String, Vec<(String, String)>>,
     /// bot id -> its thread (BotSet/BotDeleted): a task delegated by a bot's thread seeds no thread.parent
     bot_threads: HashMap<String, String>,
+    pub bots_nav: HashMap<String, BotNav>,
+    pub rooms_nav: HashMap<String, RoomNav>,
     /// ThreadSnoozed: the time a thread's snooze ends (Nav.until); 0 / absent: never snoozed
     pub snooze_until: HashMap<String, u64>,
     /// ThreadOrdered/ProjectOrdered: manual order keys (hex) per thread id, and per "project:<id>" for a project's place; (pinned key, active key)
@@ -207,8 +214,14 @@ impl State {
             "RunSet" => { let (th, bot) = (s(e, "thread")?, s(e, "bot")?); s(e, "conv")?; s(e, "mail")?; n(e, "at")?; self.runs.insert(th.into(), bot.into()); }
             "UberSet" => { let (bot, uid) = (s(e, "bot")?, s(e, "uid")?); self.set("uber.bot", bot); self.set("uber.uid", uid); }
             "BotSet" => { let (id, th) = (s(e, "id")?, s(e, "thread")?); // Bot.keep.k: an edit with an empty thread keeps the one the bot has
-                if !th.is_empty() || !self.bot_threads.contains_key(id) { self.bot_threads.insert(id.into(), th.into()); } }
-            "BotDeleted" => { let id = s(e, "id")?; self.bot_threads.remove(id); }
+                if !th.is_empty() || !self.bot_threads.contains_key(id) { self.bot_threads.insert(id.into(), th.into()); }
+                let old = self.bots_nav.get(id);
+                self.bots_nav.insert(id.into(), BotNav { name: s(e,"name")?.into(), thread: self.bot_threads[id].clone(), look:n(e,"look")?,
+                    created:old.map_or(n(e,"at")?,|b|b.created), talked:old.map_or(0,|b|b.talked) }); }
+            "BotDeleted" => { let id = s(e, "id")?; self.bot_threads.remove(id); self.bots_nav.remove(id); }
+            "RoomSet" => { self.rooms_nav.insert(s(e,"id")?.into(), RoomNav { name:s(e,"name")?.into(), members:s(e,"members")?.split('\n').filter(|s|!s.is_empty()).count() }); }
+            "RoomDeleted" => { self.rooms_nav.remove(s(e,"id")?); }
+            "RoomPosted" => { if let Some(bot)=self.bots_nav.get_mut(s(e,"from")?) { bot.talked=n(e,"at")?; } }
             "TaskDelegated" => {
                 let (task, parent, child) = (s(e, "task")?, s(e, "parent")?, s(e, "child")?); n(e, "depth")?;
                 let before = fam::ext::task_before(self, task);

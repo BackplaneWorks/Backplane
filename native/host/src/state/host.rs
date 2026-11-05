@@ -61,6 +61,8 @@ impl Policies {
     /// the returned offer frame to that connection only. Call it at the accepted-input boundary of turn.start and bots.say / post / tell from a client
     /// (not for a retry, an agent's mail or a forwarded hub). Returns nothing until the policies have folded the log.
     pub fn star_prompt(&self, msg_id: &str, now_s: u64) -> (Vec<Value>, Option<Value>) { self.policy.star_prompt(msg_id, now_s) }
+    /// Borrow the existing lean fold; no state clone or second log projection. None during boot/resync.
+    pub fn with_state<R>(&self, f: impl FnOnce(&crate::state::State) -> R) -> Option<R> { self.policy.with_state(f) }
     /// Watchdog.line: call for every provider line of a thread's agent (the stream-json line as parsed), commit the events it returns
     pub fn line(&self, thread: &str, now_s: u64, line: &Value) -> Vec<Value> { self.policy.line(thread, now_s, line) }
     /// Side-by-side mode: no tick, boot or summary action on its own (see `Policy::passive`)
