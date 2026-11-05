@@ -5,16 +5,19 @@ use super::*;
 use crate::{hub::{Cfg, Hub}, presenter::Canned};
 use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpListener};
 
-struct Node { hub: Arc<Hub>, p: Arc<Peering>, port: u16, home: PathBuf }
+pub(crate) struct Node { pub(crate) hub: Arc<Hub>, pub(crate) p: Arc<Peering>, pub(crate) port: u16, pub(crate) home: PathBuf }
+/// A handler tried before `Peering::handle` (a test's stand-in for the other routes).
+pub(crate) type Extra = Arc<dyn Fn(Arc<Hub>, PReq) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<HttpReply>> + Send>> + Send + Sync>;
 fn home(tag: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-peering-{tag}-{}-{}", std::process::id(), hex::encode(super::super::pairing::urandom(3)))); std::fs::create_dir_all(&p).unwrap(); p }
 
 /// A node: a hub on a fresh home, its token, registry, peer table, and a front that serves `Peering::handle`.
 /// `trusted`: the front tags every socket as the owner's own device (what the tailnet listener would do after whois).
-async fn node(tag: &str, trusted: bool) -> Node {
+pub(crate) async fn node(tag: &str, trusted: bool) -> Node {
     node_with(tag, trusted, trusted).await
 }
+pub(crate) async fn node_with(tag: &str, trusted: bool, own_device: bool) -> Node { node_extra(tag, trusted, own_device, None).await }
 /// `trusted`: loopback-style trust; `own_device`: the tailnet listener's whois verdict.
-async fn node_with(tag: &str, trusted: bool, own_device: bool) -> Node {
+pub(crate) async fn node_extra(tag: &str, trusted: bool, own_device: bool, extra: Option<Extra>) -> Node {
     let home = home(tag);
     std::fs::write(home.join("token"), format!("token-{tag}\n")).unwrap();
     let hub = Hub::start(Cfg { home: home.clone(), version: "0.14.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() },
@@ -24,10 +27,10 @@ async fn node_with(tag: &str, trusted: bool, own_device: bool) -> Node {
     let table = PeerTable::new(); table.start(&hub).await;
     let p = Arc::new(Peering::new(home.clone(), reg, table, routes, false, "127.0.0.1", port));
     p.set_own_hosts("127.0.0.1", "");
-    let (p2, h2) = (p.clone(), hub.clone());
+    let (p2, h2, ex) = (p.clone(), hub.clone(), extra);
     tokio::spawn(async move { loop {
         let Ok((mut s, _)) = l.accept().await else { return };
-        let (p, h) = (p2.clone(), h2.clone());
+        let (p, h, ex) = (p2.clone(), h2.clone(), ex.clone());
         tokio::spawn(async move {
             let mut buf = vec![]; let mut chunk = [0u8; 8192];
             let (head_end, len) = loop {
@@ -43,19 +46,20 @@ async fn node_with(tag: &str, trusted: bool, own_device: bool) -> Node {
             let first: Vec<&str> = lines.next().unwrap_or("").split(' ').collect();
             let headers = lines.filter_map(|l| l.split_once(':').map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))).collect();
             let req = PReq { method: first[0].into(), target: first.get(1).unwrap_or(&"/").to_string(), headers, body: buf[head_end..].to_vec(), trusted, own_device };
-            let rep = match p.handle(&h, &req).await { Some(r) => r, None => HttpReply::text("404 Not Found", "not found") };
+            let via = match &ex { Some(f) => f(h.clone(), PReq { method: req.method.clone(), target: req.target.clone(), headers: req.headers.clone(), body: req.body.clone(), trusted: req.trusted, own_device: req.own_device }).await, None => None };
+            let rep = match via { Some(r) => r, None => match p.handle(&h, &req).await { Some(r) => r, None => HttpReply::text("404 Not Found", "not found") } };
             let _ = s.write_all(format!("HTTP/1.1 {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n{}\r\n", rep.status, rep.ctype, rep.body.len(), rep.extra).as_bytes()).await;
             let _ = s.write_all(&rep.body).await;
         });
     } });
     Node { hub, p, port, home }
 }
-fn url(n: &Node) -> String { format!("http://127.0.0.1:{}", n.port) }
+pub(crate) fn url(n: &Node) -> String { format!("http://127.0.0.1:{}", n.port) }
 /// `a` knows `b` as one of the owner's machines (named, so a no-tailnet hub pairs with it).
-fn know(a: &Node, b: &Node) { a.p.routes.machines(json!({"self":{"name":"a","url":url(a),"domain":""},"peers":[{"name":"127.0.0.1","url":url(b),"version":"1","named":true}]}), vec![]); }
+pub(crate) fn know(a: &Node, b: &Node) { a.p.routes.machines(json!({"self":{"name":"a","url":url(a),"domain":""},"peers":[{"name":"127.0.0.1","url":url(b),"version":"1","named":true}]}), vec![]); }
 fn peerset(n: &Node, id: &str) -> Option<crate::net::peers::PeerRow> { n.p.table.with(|p| p.peer(id).cloned()) }
-fn live_ids(n: &Node) -> Vec<String> { n.p.table.with(|p| p.live().into_iter().map(|x| x.id).collect()) }
-async fn settle() { for _ in 0..50 { tokio::time::sleep(std::time::Duration::from_millis(20)).await; } }
+pub(crate) fn live_ids(n: &Node) -> Vec<String> { n.p.table.with(|p| p.live().into_iter().map(|x| x.id).collect()) }
+pub(crate) async fn settle() { for _ in 0..50 { tokio::time::sleep(std::time::Duration::from_millis(20)).await; } }
 
 #[tokio::test] async fn pair_two_hubs_link_through_the_owner_path() {
     let (a, b) = (node("a1", true).await, node("b1", false).await);
