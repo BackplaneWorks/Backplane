@@ -1,7 +1,7 @@
 //! The hub core for native clients: connection identity, view requests, reply assembly,
 //! segmentation, change notices. State is what the event log folds to; the picture comes from
 //! the presenter. (window/overlay for phones arrive with M2's windowed history.)
-use crate::{api::{AuthRoute, Caller, HttpHandler, Observer, Pairing, RpcHandler, Ticker}, auth::Auth, model::Model, presenter::Presenter, session::ViewMethod, store::Store};
+use crate::{api::{AuthRoute, Caller, FarView, HttpHandler, Observer, Pairing, RpcHandler, Ticker}, auth::Auth, model::Model, presenter::Presenter, session::ViewMethod, store::Store};
 use anyhow::Result;
 use serde_json::{json, Map, Value};
 use std::path::PathBuf;
@@ -16,7 +16,7 @@ pub struct Hub {
     pub store: Store, pub model: Mutex<Model>, gen: AtomicU64, pub changed: broadcast::Sender<u64>, pub frames: broadcast::Sender<Value>, pub native_key: String,
     commits: tokio::sync::mpsc::UnboundedSender<Commit>,
     rpc: std::sync::RwLock<Vec<(&'static str, Arc<dyn RpcHandler>)>>, http: std::sync::RwLock<Vec<(&'static str, Arc<dyn HttpHandler>)>>,
-    views: std::sync::RwLock<Vec<(&'static str, Arc<dyn ViewMethod>)>>, observers: std::sync::RwLock<Vec<Arc<dyn Observer>>>, pairing: std::sync::OnceLock<Arc<dyn Pairing>>, auth_route: std::sync::OnceLock<Arc<dyn AuthRoute>>,
+    views: std::sync::RwLock<Vec<(&'static str, Arc<dyn ViewMethod>)>>, observers: std::sync::RwLock<Vec<Arc<dyn Observer>>>, far: std::sync::OnceLock<Arc<dyn FarView>>, pairing: std::sync::OnceLock<Arc<dyn Pairing>>, auth_route: std::sync::OnceLock<Arc<dyn AuthRoute>>,
     live: std::sync::Mutex<std::collections::HashMap<String, String>>,
     pub window_bin: std::sync::OnceLock<PathBuf>,
     me: std::sync::OnceLock<std::sync::Weak<Hub>>, next_client: AtomicU64,
@@ -81,7 +81,7 @@ impl Hub {
         let (ftx, _) = broadcast::channel(1024);
         let model = Model::build(&store)?;
         let hub = Arc::new(Hub { cfg, auth, epoch, presenter, store: store.clone(), commits: ctx, model: Mutex::new(model), gen: AtomicU64::new(1), changed: tx, frames: ftx, native_key: { let mut b = [0u8; 16]; if let Ok(mut f) = std::fs::File::open("/dev/urandom") { let _ = std::io::Read::read_exact(&mut f, &mut b); } hex::encode(b) },
-            rpc: Default::default(), http: Default::default(), views: Default::default(), observers: Default::default(), pairing: Default::default(), auth_route: Default::default(), outbox_max: std::sync::atomic::AtomicUsize::new(OUTBOX_MAX), signal_seq: AtomicU64::new(store.len() as u64), extra_info: Default::default(), live: Default::default(), window_bin: Default::default(), me: Default::default(), next_client: AtomicU64::new(1), outboxes: Default::default() });
+            rpc: Default::default(), http: Default::default(), views: Default::default(), observers: Default::default(), far: Default::default(), pairing: Default::default(), auth_route: Default::default(), outbox_max: std::sync::atomic::AtomicUsize::new(OUTBOX_MAX), signal_seq: AtomicU64::new(store.len() as u64), extra_info: Default::default(), live: Default::default(), window_bin: Default::default(), me: Default::default(), next_client: AtomicU64::new(1), outboxes: Default::default() });
         let _ = hub.me.set(Arc::downgrade(&hub));
         hub.bootstrap()?;
         hub.signal_seq.store(hub.store.len() as u64, Relaxed); // start-up housekeeping counts: a restart is a new signal
@@ -223,6 +223,12 @@ impl Hub {
             }
         });
     }
+    /// Installs the mirrored threads' page source (net lane). Pages of a `<link>~<id>` thread come from it.
+    pub fn set_far(&self, f: Arc<dyn FarView>) { let _ = self.far.set(f); }
+    pub fn far(&self) -> Option<Arc<dyn FarView>> { self.far.get().cloned() }
+    /// Mirrored events (already renamed to `<link>~<id>` ids) to the presenter's state only: never the log, never `Model`, never a client's
+    /// log stream. The presenter shows them in the sidebar and thread views as it shows local ones.
+    pub async fn fold_mirror(&self, events: &[Value]) { let _ = self.presenter.fold(&json!({"t":"changes","items":events,"now":now_ms()})).await; }
     pub fn register_view(&self, h: Arc<dyn ViewMethod>) { let mut v = self.views.write().unwrap(); for m in h.methods() { v.push((m, h.clone())) } }
     pub fn view_for(&self, method: &str) -> Option<Arc<dyn ViewMethod>> { self.views.read().unwrap().iter().find(|(n, _)| *n == method).map(|(_, h)| h.clone()) }
     pub fn register_http(&self, h: Arc<dyn HttpHandler>) { let mut v = self.http.write().unwrap(); for r in h.routes() { v.retain(|(n, _)| n != r); v.push((r, h.clone())) } }
