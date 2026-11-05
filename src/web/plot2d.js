@@ -122,16 +122,21 @@ function revive(key) {
 const keeping = new Map();
 function keep(key) {
   const p = plots.get(key);
-  if (!p?.chunks || p.kept || !p.chunks.every((c) => c.raw)) return;
+  // (nothing new: every chunk is the kept one, as the hub sent it again)
+  if (!p?.chunks || p.kept || !p.chunks.every((c) => c.raw) || p.chunks.every((c) => c.kept)) return;
   clearTimeout(keeping.get(key));
   keeping.set(key, setTimeout(() => {
     keeping.delete(key);
     const q = plots.get(key);
     if (q !== p) return;
     const entry = { raw: p.chunks.map((c) => c.raw), box: p.box, fam: p.fam, thick: p.thick, at: Date.now(), bytes: p.chunks.reduce((n, c) => n + (c.raw.d?.length || 0) + 64, 0) };
+    if (!(entry.bytes <= 6 << 20)) { keptPlots.delete(key);void Keep.save(key, entry);return; }
     keptPlots.set(key, entry);
     void Keep.save(key, entry);
-  }, 1500));
+    const gone = Keep.over(keptPlots);
+    for (const k of gone) keptPlots.delete(k);
+    void Keep.drop(gone);
+  }, 4000));
 }
 // the source a plot without a "base" (an older hub's) is a delta against
 let lastKey = "";
