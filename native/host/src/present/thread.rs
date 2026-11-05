@@ -148,8 +148,9 @@ const STATIC: &str = include_str!("thread_static.json");
 /// settings that change those keys. Anything else is None (the helper draws it) until a dump of that case is matched.
 fn plain_thread(st: &State, id: &str) -> bool {
     let Some(t) = st.threads.get(id) else { return false };
-    if t.archived || t.deleted || t.pinned || t.turn != Turn::Idle || t.provider != "claude" || !t.model.is_empty() || t.title.trim().is_empty() { return false }
-    if !t.worktree.is_empty() || t.worktree_mode || st.snooze_until.get(id).copied().unwrap_or(0) != 0 { return false }
+    // pinned, archived, snoozed and settled threads are computed (present/keys.rs); a failed or stopped turn is not (its last stamp and error text), and keys() says so
+    if t.deleted || !matches!(t.turn, Turn::Idle | Turn::Running | Turn::Completed) || t.provider != "claude" || !t.model.is_empty() || t.title.trim().is_empty() { return false }
+    if !t.worktree.is_empty() || t.worktree_mode { return false }
     if st.tasks.values().any(|(p, c, _, _)| p == id || c == id) || st.asks.values().any(|(th, open)| th == id && *open) { return false }
     if st.queue.get(id).map_or(false, |q| !q.is_empty()) { return false }
     let gate = [format!("effort:{id}"), format!("wait.{id}"), format!("stop.{id}"), format!("fail.{id}"), "files.max.mb".into(), "person.tz".into(), "person.tz.device".into(), "tz.machine".into(), "think".into(), "permissions.default".into()];
@@ -179,7 +180,12 @@ pub fn thread_object(st: &State, hub: &str, thread: &str, params: &Value, draft:
     if page["thread"].as_str() != Some(thread) { return None }
     let es = ents(page["rows"].as_array()?, thread)?;
     let zone = person_zone(st);
-    let entries = entries(&es, false, &|_| false, params["now"].as_u64().unwrap_or(0), zone.as_ref())?;
+    let running = st.threads.get(thread).map_or(false, |t| t.turn == Turn::Running);
+    let now_ms = params["now"].as_u64().unwrap_or(0);
+    let mut entries = entries(&es, running, &|_| false, now_ms, zone.as_ref())?;
+    // Mob.pending: a thread that works shows the agent's "Working" row after its last entry
+    if running { entries.push(json!({"id": format!("@working:{thread}"), "kind": "assistant", "text": "Working", "blocks": md_blocks("Working"), "images": [], "stamp": ""})) }
+    let state_keys = super::keys::keys(st, thread, now_ms / 1000)?;
     let t = st.threads.get(thread)?;
     let mut o: serde_json::Map<String, Value> = serde_json::from_str(STATIC).ok()?;
     o.insert("id".into(), json!(format!("{hub}|{thread}")));
@@ -193,7 +199,8 @@ pub fn thread_object(st: &State, hub: &str, thread: &str, params: &Value, draft:
     // the composer's four keys: the draft, the send button and its action, the popup rows (parity-session's session::composer; ours are the `$ @ > % #` & rows, not ported:
     // a mention being typed shows no popup — see docs/gpui/slim-thread-known-missing.md). Another interface language is the helper's (None).
     let lang = st.settings.get("lang").map(String::as_str).unwrap_or("");
-    let c = crate::session::composer::fields(draft, false, false, true, &json!([]), lang)?;
+    let c = crate::session::composer::fields(draft, running, false, true, &json!([]), lang)?;
+    for (k, v) in state_keys { o.insert(k, v); }
     for k in ["draft", "skills", "send", "sendAct"] { o.insert(k.into(), c[k].clone()); }
     Some(Value::Object(o))
 }
@@ -250,6 +257,23 @@ mod tests {
         assert_eq!(o["skills"].as_array().map(Vec::len), Some(0), "a mention being typed: no popup yet, the thread is still drawn");
         st.apply_line(r#"{"$":"SettingSet","key":"lang","value":"ja","at":1}"#);
         assert!(thread_object(&st, "h", th, &p["params"], "").is_none(), "another language is the helper's");
+    }
+    #[test] fn every_state_variant_of_a_thread_is_the_helpers() {
+        let p = fixture(); let th = p["params"]["page"]["thread"].as_str().unwrap();
+        let v: Value = serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/gpui/slim/fixtures/thread-variants.json"))).unwrap();
+        let log = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/gpui/slim/fixtures/thread-log.jsonl")).unwrap();
+        let mut checked = Vec::new();
+        for (name, x) in v.as_object().unwrap() {
+            let mut st = State::new(); for l in log.lines() { st.apply_line(l); } for e in x["extra"].as_array().unwrap() { st.apply(e); }
+            let Some(got) = thread_object(&st, "h", th, &p["params"], "") else { assert!(matches!(name.as_str(), "failed" | "interrupted" | "queued" | "codex" | "opus"), "{name} should be drawn"); continue };
+            let (diff, tail) = (x["diff"].as_object().unwrap(), x["tail"].as_array().unwrap());
+            for (k, w) in diff { if !matches!(k.as_str(), "claude" | "picker") { assert_eq!(got.get(k), Some(w), "{name}: {k}"); } }
+            let es = got["entries"].as_array().unwrap();
+            assert_eq!(es.len() as u64, x["entries"].as_u64().unwrap(), "{name}: entries");
+            assert_eq!(&es[es.len() - 2..], tail.as_slice(), "{name}: tail");
+            checked.push(name.clone());
+        }
+        for n in ["base", "running", "completed", "pinned", "archived", "snoozed", "settledhand"] { assert!(checked.iter().any(|c| c == n), "{n} not checked: {checked:?}"); }
     }
     #[test] fn civil_dates() { assert_eq!(civil(0), (1970, 1, 1)); assert_eq!(civil(19675), (2023, 11, 14)); assert_eq!(clock(1700002806, 0, &Rule::utc()), "Tue 14 Nov 23:00"); }
     #[test] fn labels_name_three_kinds_and_the_live_one_says_what_runs() {
