@@ -1,5 +1,5 @@
 //! The window: layout and colours follow the web client (src/web/style.css tokens).
-use crate::{hub::Command, string, theme, Backplane, Send};
+use crate::{art, hub::Command, string, theme, Backplane, Send};
 use gpui::{prelude::*, *};
 use serde_json::Value;
 
@@ -60,6 +60,11 @@ impl Render for Backplane {
         self.frame_marks(window, cx);
         let light = self.data["theme"] == "light";
         let c = |name: &str| theme::color(light, name);
+        // bots: (name, mood, note, look seed) copied out so the cat cache can be filled
+        let bot_data: Vec<(String, String, String, u64)> = self.data["bots"].as_array().into_iter().flatten()
+            .map(|b| (string(b, "name"), string(b, "mood"), string(b, "note"), b["look"].as_u64().unwrap_or(0))).collect();
+        let bot_rigs: Vec<_> = bot_data.iter().map(|(_, mood, _, look)| self.cats.rig(*look, mood)).collect();
+        let started = self.started;
         let thread = &self.data["thread"];
         let has_thread = thread.is_object();
         // sidebar rows
@@ -85,6 +90,14 @@ impl Render for Backplane {
         }
         for name in ["BOTS", "ROOMS"] {
             rows.push(div().flex().justify_between().px_3().pt_4().text_size(px(11.)).text_color(c("dim")).child(name).child("+").into_any_element());
+            if name == "BOTS" {
+                for ((bname, mood, note, _), rig) in bot_data.iter().zip(bot_rigs.iter()) {
+                    let note_color = match mood.as_str() { "wait" | "error" => c("bad"), "work" | "talk" => c("accent"), _ => c("faint") };
+                    rows.push(div().flex().items_center().gap_2().px_3().py(px(3.)).child(art::cat(rig.clone(), mood, 28., started))
+                        .child(div().flex().flex_col().min_w_0().line_height(px(18.)).child(div().overflow_hidden().whitespace_nowrap().child(bname.clone()))
+                            .child(div().text_size(px(11.)).text_color(note_color).child(note.clone()))).into_any_element());
+                }
+            }
         }
         // timeline
         let mut entries: Vec<AnyElement> = Vec::new();
@@ -152,7 +165,8 @@ impl Render for Backplane {
             // top bar
             .child(div().h(px(36.)).flex_shrink_0().flex().items_center().justify_between().px_3().border_b_1().border_color(c("line")).bg(c("bg"))
                 .child(div().flex().items_center().gap_2()
-                    .child(div().size(px(14.)).bg(if connected { c("ok") } else { c("bad") }))
+                    .child(div().relative().size(px(18.)).child(art::logo(light, 18.))
+                        .child(div().absolute().right(px(-2.)).bottom(px(-1.)).size(px(6.)).bg(if connected { c("ok") } else { c("bad") })))
                     .child(div().font_weight(FontWeight::BOLD).child("Backplane"))
                     .child(div().text_color(c("faint")).child("/")).child(div().text_color(c("dim")).child(if has_thread { "Project".to_string() } else { "Projects".to_string() }))
                     .when(has_thread, |d| d.child(div().text_color(c("faint")).child("/")).child(div().font_weight(FontWeight::BOLD).child(string(thread, "title")))))
