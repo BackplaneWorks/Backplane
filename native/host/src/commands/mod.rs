@@ -152,6 +152,6 @@ async fn check_base(root: &str, base: &str) -> Result<(), String> {
     let plain = !base.starts_with('-') && !base.contains("..") && !base.ends_with('/') && !base.ends_with(".lock") && base.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '/' | '-'));
     if !plain { return Err(format!("base \"{base}\" is not a local branch name")) }
     if root.is_empty() { return Err("Choose an existing project and retry this request.".into()) }
-    let r = crate::files::git::run(root, &["rev-parse", "--verify", "-q", &format!("refs/heads/{base}^{{commit}}")]).await;
+    let r = crate::files::git::run_ro(root, &["rev-parse", "--verify", "-q", &format!("refs/heads/{base}^{{commit}}")]).await;
     if r.code == 0 { Ok(()) } else { Err(format!("base branch \"{base}\" does not exist in this project")) }
 }

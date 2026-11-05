@@ -56,7 +56,7 @@ pub async fn thread_wt(cwd: &str, carry: bool, branch: &str, onto: &str) -> Stri
     let r = git::proc("sh", &["-c", EXCLUDE, "sh", &common], &top, &[]).await; if r.code != 0 { return err(&r) }
     // A named base (an Improvements send): that LOCAL branch and nothing else: no fetch, no origin default, no carried work; a base that is not there is an error, never main
     if !onto.is_empty() {
-        let r = git::run(&top, &["rev-parse", "--verify", "-q", &format!("refs/heads/{onto}^{{commit}}")]).await;
+        let r = git::run_ro(&top, &["rev-parse", "--verify", "-q", &format!("refs/heads/{onto}^{{commit}}")]).await;
         if r.code != 0 { return format!("error: base branch {onto} does not exist") }
     }
     // Git.upstream: origin's default branch, fetched first; "" (HEAD) when there is no origin or uncommitted work is carried
@@ -64,10 +64,8 @@ pub async fn thread_wt(cwd: &str, carry: bool, branch: &str, onto: &str) -> Stri
     let r = if onto.is_empty() { git::proc("sh", &["-c", &script, "sh", if carry { "1" } else { "0" }], &top, &[]).await } else { git::Ran { code: 0, out: onto.to_string() } };
     let mut base = if r.code == 0 { r.out.trim().to_string() } else { String::new() };
     // a subdirectory project may only exist on the checked-out branch
-    if !base.is_empty() && !prefix.is_empty() {
-        let r = git::run_ro(&top, &["cat-file", "-t", &format!("{base}:{}", sub(&prefix))]).await;
     if onto.is_empty() && !base.is_empty() && !prefix.is_empty() {
-        let r = git::run(&top, &["cat-file", "-t", &format!("{base}:{}", sub(&prefix))]).await;
+        let r = git::run_ro(&top, &["cat-file", "-t", &format!("{base}:{}", sub(&prefix))]).await;
         if !is_tree(&r) {
             let h = git::run_ro(&top, &["cat-file", "-t", &format!("HEAD:{}", sub(&prefix))]).await;
             if is_tree(&h) { base = String::new() } else { return format!("error: project directory {} is not a directory in {base} or HEAD", sub(&prefix)) }
