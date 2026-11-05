@@ -8,7 +8,7 @@ import {startFixtureHub,WORK} from './hubs.mjs';
 import {normalise,diff} from './compare.mjs';
 import {encode} from '../wire.mjs';
 const arg=(k,d)=>{const i=process.argv.indexOf('--'+k);return i>0?process.argv[i+1]:d};
-const idRe=/\\b([ptgm]\\d{10}-\\d+(?::\\d+)?)\\b|\\bfake-\\d+\\b|\\b[mt][a-z]?\\d{3,8}-\\d+-\\d+(?::\\d+)?\\b|(?<![A-Za-z])tu\\d+-\\d+-\\d+\\b|\\bc[a-z0-9-]*?\\d{10}-\\d+\\b/g;
+const idRe=/\b([ptgmk]\d{10}-\d+(?::\d+)?)\b|\bfake-\d+\b|\b[mt][a-z]?\d{3,8}-\d+-\d+(?::\d+)?\b|(?<![A-Za-z])tu\d+-\d+-\d+\b|\bc[a-z0-9-]*?\d{10}-\d+\b/g;
 const ids=s=>[...String(s).matchAll(idRe)].map(m=>m[0]);
 const walkStr=(v,f)=>typeof v==='string'?f(v):Array.isArray(v)?v.map(x=>walkStr(x,f)):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).map(([k,x])=>[k,walkStr(x,f)])):v;
 
