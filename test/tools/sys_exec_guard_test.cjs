@@ -3,7 +3,35 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const test = require('node:test');
+const loopSource = fs.readFileSync('src/server/effects/loop.js', 'utf8');
 const source = fs.readFileSync('src/server/effects/host.js', 'utf8').replace(/CID\(([^)]+)\)/g, '"$1"');
+
+// Execute the real runtime table declarations and its publication statement.
+// The rest of loop.js owns event-loop resources and is outside this unit test.
+function errnoFor(platform, runtime = loopSource) {
+  const start = runtime.indexOf('const BP_LINUX_ERRNO =');
+  const end = runtime.indexOf('\nconst BP_TEXT =', start);
+  assert(start >= 0 && end > start, 'real errno declarations exist');
+  const publication = runtime.match(/^BP_H\.ERRNO = BP_ERRNO;$/m);
+  assert(publication, 'real runtime publishes BP_H.ERRNO');
+  const table = vm.runInNewContext(runtime.slice(start, end) + '\n' + publication[0] + '\nBP_H.ERRNO;', {
+    BP_WIN: platform === 'win32', BP_H: {},
+    require: name => { assert.equal(name, 'os'); return require(name); },
+  });
+  assert(Object.hasOwn(table, 'ENOSYS') && Number.isInteger(table.ENOSYS) && table.ENOSYS > 0,
+    'real runtime table must define a numeric ENOSYS');
+  return table;
+}
+
+test('the real runtime publishes a defined numeric ENOSYS', () => {
+  assert.equal(errnoFor('win32').ENOSYS, 38);
+});
+
+test('removing ENOSYS from the real runtime table is detected', () => {
+  const missing = loopSource.replace(/\bENOSYS: 38, /, '');
+  assert.notEqual(missing, loopSource);
+  assert.throws(() => errnoFor('win32', missing), /must define a numeric ENOSYS/);
+});
 
 function load(platform, text = source) {
   const effects = new Map();
@@ -13,7 +41,7 @@ function load(platform, text = source) {
     io_eff: (name, f) => effects.set(name, f),
     io_fail: error => ({ ok: false, error }),
     io_done: value => ({ ok: true, value }),
-    BP_H: { ERRNO: { ENOSYS: 38 } },
+    BP_H: { ERRNO: errnoFor(platform) },
   });
   vm.runInContext(text, context);
   return { context, run: effects.get('Sys.exec') };
@@ -27,7 +55,7 @@ test('Windows reexec refuses before libc, descriptor changes or handoff hooks', 
   context.BACKPLANE_ADOPT_EXEC = () => touched.push('adopt');
   context.BACKPLANE_HUBLOCK_EXEC = () => touched.push('hublock');
   const result = run('C:\\Backplane\\service.exe', { $: 'Nil' });
-  assert.equal(result.ok, false); assert.equal(result.error, 38);
+  assert.equal(result.ok, false); assert.equal(result.error, errnoFor('win32').ENOSYS);
   assert.deepEqual(touched, []);
 });
 
