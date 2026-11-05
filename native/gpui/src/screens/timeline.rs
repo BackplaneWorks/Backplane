@@ -297,7 +297,7 @@ impl Backplane {
 mod tests {
     use super::*;
     use core::prelude::v1::test;
-    fn info(id: &str, idx: usize, text: &str) -> Info { Info { text: text.into(), entry: 0, id: id.into(), idx, links: vec![], layout: None } }
+    fn info(id: &str, idx: usize, text: &str) -> Info { Info { text: text.into(), entry: id[1..].parse().unwrap_or(0), id: id.into(), idx, links: vec![], layout: None } }
     fn frame(r: &mut Registry, blocks: &[(&str, usize, &str)]) { r.begin(); for (id, idx, t) in blocks { r.blocks.push(info(id, *idx, t)); } r.resolve(); }
     #[test] fn a_selection_follows_its_text_when_blocks_are_added_above() {
         let mut r = Registry::default();
