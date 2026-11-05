@@ -454,13 +454,13 @@ impl Accounts {
         tokio::spawn(async move { me.run_attempt(aid, cand, mode, rx).await });
         Ok(())
     }
-    fn current(&self, aid: &str) -> Option<Attempt> { let g = self.inner.lock().unwrap(); let a = g.attempts.iter().find(|a| a.id == aid)?.clone(); if g.jobs.get(&a.profile).map(String::as_str) == Some(&format!("attempt:{aid}")) { Some(a) } else { None } }
+    fn current(&self, aid: &str) -> Option<Attempt> { let g = self.inner.lock().unwrap(); let a = g.attempts.iter().find(|a| a.id == aid)?.clone(); if g.jobs.get(&a.profile).map(String::as_str) == Some(format!("attempt:{aid}").as_str()) { Some(a) } else { None } }
     fn set_waiting(&self, aid: &str, url: String, code: String) { let mut g = self.inner.lock().unwrap(); if let Some(a) = g.attempts.iter_mut().find(|a| a.id == aid) { a.url = url; a.user_code = code; a.state = "waiting".into(); } g.revision += 1; }
     fn cancel(&self, aid: &str, state: &str, reason: &str) {
         let mut g = self.inner.lock().unwrap();
         let Some(i) = g.attempts.iter().position(|a| a.id == aid) else { return };
         let prof = g.attempts[i].profile.clone();
-        if g.jobs.get(&prof).map(String::as_str) != Some(&format!("attempt:{aid}")) { return }
+        if g.jobs.get(&prof).map(String::as_str) != Some(format!("attempt:{aid}").as_str()) { return }
         g.jobs.remove(&prof);
         let (store, prev) = (g.attempts[i].store.clone(), g.attempts[i].previous_state.clone());
         { let a = &mut g.attempts[i]; a.state = state.into(); a.url.clear(); a.user_code.clear(); a.message = if state == "failed" { failure_text(reason) } else { String::new() }; }
@@ -558,7 +558,7 @@ impl Accounts {
         }
     }
 }
-fn g_job_is(inner: &Mutex<Inner>, profile: &str, aid: &str) -> bool { inner.lock().unwrap().jobs.get(profile).map(String::as_str) == Some(&format!("attempt:{aid}")) }
+fn g_job_is(inner: &Mutex<Inner>, profile: &str, aid: &str) -> bool { inner.lock().unwrap().jobs.get(profile).map(String::as_str) == Some(format!("attempt:{aid}").as_str()) }
 
 // ---- launching a turn under an account, and the background refresh ----
 impl Accounts {
