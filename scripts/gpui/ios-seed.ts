@@ -17,6 +17,17 @@ const mapOf = (o: Record<string, any>): number[] => [...hd(0xa0, Object.keys(o).
 const send = (m: string, p: object) => ws.send(new Uint8Array(mapOf({ id: ++id, m, p })));
 await Bun.sleep(1500);
 const th = process.argv[5];
+if (th === "room") { // bun ios-seed.ts HP HOME PROJ room: a room "crew" with every bot, then two posts that mention bots
+  const evs = (await Bun.file(`${home}/events.jsonl`).text()).split("\n").map((l) => { try { return JSON.parse(l); } catch { return {}; } });
+  const bots = evs.filter((e) => e.$ === "BotSet");
+  const names = [...new Map(bots.map((b) => [b.name, b.id])).entries()];
+  send("bots.room", { room: "", name: "crew", members: names.map(([, id]) => id).join(",") });
+  await Bun.sleep(2500);
+  const room = (await Bun.file(`${home}/events.jsonl`).text()).split("\n").map((l) => { try { return JSON.parse(l); } catch { return {}; } }).filter((e) => e.$ === "RoomSet" || e.$ === "RoomCreated").map((e) => e.id).pop();
+  console.log("room", room);
+  for (const t of [`@${names[0][0]} hello crew`, `@${names[1][0]} and @${names[2][0]} say hi`]) { send("bots.post", { room, text: t }); await Bun.sleep(7000); }
+  process.exit(0);
+}
 if (th === "bulk") { // bun ios-seed.ts HP HOME PROJ bulk FROM TO [TURNS]: threads "bulk i" for i in FROM..TO, a tool turn in the first TURNS of them
   const pid = (await Bun.file(`${home}/events.jsonl`).text()).split("\n").map((l) => { try { return JSON.parse(l); } catch { return {}; } }).find((e) => e.$ === "ProjectCreated")?.id;
   const [from, to, turns = 0] = process.argv.slice(6).map(Number);

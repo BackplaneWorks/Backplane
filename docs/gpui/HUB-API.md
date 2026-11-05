@@ -32,3 +32,12 @@ One place to start modules, after `Hub::start`: `agents::Agents::start(hub.clone
 
 ## Rules process (Bend)
 Not wired yet. Planned call: one persistent native Bend process, a JSON line in, one out: `{"v":1,"fn":"Fm.safe","args":{...}}` -> `{"ok":..}`; 6.7 us round trip measured (docs/gpui/HUB-M1.md). Until then implement the rule in Rust with a corpus test and keep the Bend name in the test.
+
+## Agent providers (agents lane, commit 51b4ac53d)
+
+Contract: `native/host/src/agents/providers/mod.rs` (read its docs); reference driver: `providers/codex.rs`.
+A provider is a `Driver` built fresh per turn by `providers::driver(provider_id)` (one chain; a lane edits only its own file, each exports `pub fn driver(provider:&str)->Option<Made>`).
+The actor owns delivery (ride mail while a turn runs, steer/interrupt), the process (spawn, queues, reaping, stand-in-only in test mode), and the log: every Codex-shaped line a driver returns goes through `Cx::codex_line` (`agents/codex.rs`).
+Driver: `argv(&TurnIn)`, `env`, `start` (stdin lines after spawn), `on_line(&Value)->Reaction{send, shapes}` (non-JSON lines arrive as `Value::String`), `on_stop`, `on_exit`, `exit_why(code)` (Proto.gone text), `ends_on_turn_end` (Grok: process ended after turn.completed/failed), `ask_info`/`answer` (permissions).
+Permissions: put `{"type":"bp.ask","request":<raw JSON-RPC line string or envelope object>}` in `shapes`; the actor asks `ask_info`, answers `answer(request,"accept")` at once if the tool is allowed for the session, else opens an AskOpened and calls `answer(request, <person's answer>)` later; write the returned lines.
+Test one without a CLI: `providers::test_driver` + `a_drivers_permission_reaches_the_person_and_the_answer_goes_back` in `agents/tests.rs`; stand-ins are shell scripts in a temp folder (`Cli::standin`). Run the suite with `sh test/gpui/agents/boat-test-job.sh agents::`.

@@ -72,7 +72,7 @@ def items_web(dev, scheme, page):
 def geoms(dev, scheme, page):
     g = []
     for line in open(f"{lc}/ios-{dev}-{scheme}-{page}.geom"):
-        m = re.match(r"(cat:\S+) ([\d.-]+) ([\d.-]+) ([\d.-]+) ([\d.-]+)", line)
+        m = re.match(r"(cat\w*:\S+) ([\d.-]+) ([\d.-]+) ([\d.-]+) ([\d.-]+)", line)
         if m:
             g.append((m.group(1), [float(m.group(i)) for i in range(2, 6)]))
     seen, uniq = set(), []
@@ -123,7 +123,7 @@ for dev in ("phone", "ipad"):
         # cats: the bots page, in order down the page; then the bot's own header
         wb = [i for i in items_web(dev, scheme, "bots") if i["kind"] == "cat"]
         ib = geoms(dev, scheme, "bots")
-        ib = [(n, r) for n, r in ib if n.endswith(":28")]
+        ib = [(n, r) for n, r in ib if n.startswith("cat:") and n.endswith(":28")]
         if len(ib) != len(wb) or not wb:
             bad.append(f"{dev}/{scheme}: {len(ib)} cats on the bots page, the web has {len(wb)}")
         for k, ((n, r), w) in enumerate(zip(ib, wb)):
@@ -133,7 +133,7 @@ for dev in ("phone", "ipad"):
                           "web": {"png": rel(f"{web}/web-{PROFILE[dev]}-{scheme}-bots.png"), "rect": w["rect"]},
                           "native": {"png": rel(f"{lc}/ios-{dev}-{scheme}-bots.png"), "rect": [round(v * scale, 1) for v in r]}})
         wh = [i for i in items_web(dev, scheme, "bot") if i["kind"] == "cat" and not i["name"].endswith(":28")]
-        ih = [(n, r) for n, r in geoms(dev, scheme, "bot") if not n.endswith(":28") and r[0] >= 0 and r[1] >= 0]
+        ih = [(n, r) for n, r in geoms(dev, scheme, "bot") if n.startswith("cat:") and not n.endswith(":28") and r[0] >= 0 and r[1] >= 0]
         if len(wh) != 1 or len(ih) < 1:
             bad.append(f"{dev}/{scheme}: bot header cat: web {len(wh)}, ios {len(ih)}")
         else:
@@ -143,6 +143,39 @@ for dev in ("phone", "ipad"):
             items.append({"name": "cat-header-Bub", "kind": "cat",
                           "web": {"png": rel(f"{web}/web-{PROFILE[dev]}-{scheme}-bot.png"), "rect": wh[0]["rect"]},
                           "native": {"png": rel(f"{lc}/ios-{dev}-{scheme}-bot.png"), "rect": [round(v * scale, 1) for v in r]}})
+        # the look picker: the first six looks, drawn as each look's idle cat (40 px), paired by look index
+        wlk = {}
+        for i in items_web(dev, scheme, "look"):
+            mm_ = re.match(r"cat:(\d+):idle:40:", i["name"] + ":")
+            if i["kind"] == "cat" and mm_ and i["rect"][2] > 0:
+                wlk.setdefault(int(mm_.group(1)), i)
+        ilk = {}
+        for n, r in geoms(dev, scheme, "look"):
+            mm_ = re.match(r"catlook:(\d+):idle:40$", n)
+            if mm_ and r[0] >= 0 and r[1] >= 0:
+                ilk[int(mm_.group(1))] = r
+        picks = [k for k in range(6) if k in wlk and k in ilk]
+        if len(picks) < 6:
+            bad.append(f"{dev}/{scheme}: look picker: {len(picks)} of the first 6 looks on both sides (web {sorted(wlk)[:8]}, ios {sorted(ilk)[:8]})")
+        for k in picks:
+            if abs(ilk[k][2] * scale - wlk[k]["rect"][2]) > 1.5:
+                bad.append(f"{dev}/{scheme}: look {k} is {ilk[k][2]}pt, the web draws {wlk[k]['rect'][2]/scale:.1f}")
+            items.append({"name": f"cat-look-{k}", "kind": "cat",
+                          "web": {"png": rel(f"{web}/web-{PROFILE[dev]}-{scheme}-look.png"), "rect": wlk[k]["rect"]},
+                          "native": {"png": rel(f"{lc}/ios-{dev}-{scheme}-look.png"), "rect": [round(v * scale, 1) for v in ilk[k]]}})
+        # a room's posts: each carries its author's cat (a bot's, or 0:away for an unknown author), paired down the page
+        wr = [i for i in items_web(dev, scheme, "room") if i["kind"] == "cat" and i["rect"][2] > 0]
+        if dev == "ipad":  # the tablet web layout keeps the bots list beside the room: posts are to the right of it
+            wr = [i for i in wr if i["rect"][0] > 300]
+        ir = [(n, r) for n, r in geoms(dev, scheme, "room") if n.startswith("catpost:") and r[0] >= 0 and r[1] >= 0]
+        if len(wr) != len(ir) or not wr:
+            bad.append(f"{dev}/{scheme}: room posts: {len(ir)} cats on iOS, the web has {len(wr)}")
+        for k, ((n, r), w) in enumerate(zip(ir, wr)):
+            if abs(r[2] * scale - w["rect"][2]) > 1.5:
+                bad.append(f"{dev}/{scheme}: room post cat {k} is {r[2]}pt, the web draws {w['rect'][2]/scale:.1f}")
+            items.append({"name": f"cat-room-post-{k}", "kind": "cat",
+                          "web": {"png": rel(f"{web}/web-{PROFILE[dev]}-{scheme}-room.png"), "rect": w["rect"]},
+                          "native": {"png": rel(f"{lc}/ios-{dev}-{scheme}-room.png"), "rect": [round(v * scale, 1) for v in r]}})
         for it in items:  # whole pixels: check_logo_cats.py crops and resizes them
             for side in ("web", "native"):
                 it[side]["rect"] = [int(round(v)) for v in it[side]["rect"]]

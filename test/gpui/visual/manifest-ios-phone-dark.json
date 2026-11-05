@@ -200,6 +200,94 @@
      126
     ]
    }
+  },
+  {
+   "name": "cat-room-post-0",
+   "kind": "cat",
+   "web": {
+    "png": "../../../build/gpui/shots/logo-cats/web-phone-dark-room.png",
+    "rect": [
+     30,
+     1689,
+     84,
+     84
+    ]
+   },
+   "native": {
+    "png": "../../../build/gpui/results/ios/lc/ios-phone-dark-room.png",
+    "rect": [
+     48,
+     745,
+     84,
+     84
+    ]
+   }
+  },
+  {
+   "name": "cat-room-post-1",
+   "kind": "cat",
+   "web": {
+    "png": "../../../build/gpui/shots/logo-cats/web-phone-dark-room.png",
+    "rect": [
+     30,
+     1832,
+     84,
+     84
+    ]
+   },
+   "native": {
+    "png": "../../../build/gpui/results/ios/lc/ios-phone-dark-room.png",
+    "rect": [
+     48,
+     945,
+     84,
+     84
+    ]
+   }
+  },
+  {
+   "name": "cat-room-post-2",
+   "kind": "cat",
+   "web": {
+    "png": "../../../build/gpui/shots/logo-cats/web-phone-dark-room.png",
+    "rect": [
+     30,
+     1974,
+     84,
+     84
+    ]
+   },
+   "native": {
+    "png": "../../../build/gpui/results/ios/lc/ios-phone-dark-room.png",
+    "rect": [
+     48,
+     1145,
+     84,
+     84
+    ]
+   }
+  },
+  {
+   "name": "cat-room-post-3",
+   "kind": "cat",
+   "web": {
+    "png": "../../../build/gpui/shots/logo-cats/web-phone-dark-room.png",
+    "rect": [
+     30,
+     2116,
+     84,
+     84
+    ]
+   },
+   "native": {
+    "png": "../../../build/gpui/results/ios/lc/ios-phone-dark-room.png",
+    "rect": [
+     48,
+     1345,
+     84,
+     84
+    ]
+   }
   }
  ]
 }

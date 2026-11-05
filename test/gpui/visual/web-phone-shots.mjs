@@ -7,7 +7,7 @@ const [hub,token,out,scheme='dark',profile='phone']=process.argv.slice(2);
 const vp=profile==='tablet'?{width:1024,height:1366,deviceScaleFactor:2}:{width:393,height:852,deviceScaleFactor:3};
 const browser=await chromium.launch({executablePath:'/usr/bin/google-chrome',args:['--no-sandbox','--disable-gpu']});
 const ctx=await browser.newContext({viewport:{width:vp.width,height:vp.height},deviceScaleFactor:vp.deviceScaleFactor,isMobile:profile==='phone',hasTouch:true,colorScheme:scheme});
-const page=await ctx.newPage();
+let page=await ctx.newPage();
 await page.goto(`${hub}/#token=${token}`);await page.waitForTimeout(6000);
 const skip=page.getByText('Skip',{exact:true});if(await skip.count())await skip.first().click();
 await page.waitForTimeout(2500);
@@ -26,6 +26,17 @@ const bots=page.getByText('Bots',{exact:true});if(await bots.count()){await bots
 await shot('bots');
 const bub=page.getByText('Bub',{exact:true});if(await bub.count()){await bub.first().click();await page.waitForTimeout(2000);}
 await shot('bot');
+// a room's posts (each carries its author's cat) and a bot's look picker (Settings page, every look as its idle cat)
+await page.close();page=await (await browser.newContext({viewport:{width:vp.width,height:vp.height},deviceScaleFactor:vp.deviceScaleFactor,isMobile:profile==='phone',hasTouch:true,colorScheme:scheme})).newPage();await page.goto(`${hub}/#token=${token}`);await page.waitForTimeout(6000);
+{const b2=page.getByText('Bots',{exact:true});if(await b2.count()){await b2.first().click();await page.waitForTimeout(800);}
+ const room=page.getByText('crew',{exact:true});if(await room.count()){await room.first().click();await page.waitForTimeout(2500);}
+ await shot('room');}
+await page.close();page=await (await browser.newContext({viewport:{width:vp.width,height:vp.height},deviceScaleFactor:vp.deviceScaleFactor,isMobile:profile==='phone',hasTouch:true,colorScheme:scheme})).newPage();await page.goto(`${hub}/#token=${token}`);await page.waitForTimeout(6000);
+{const b3=page.getByText('Bub',{exact:true});if(await b3.count()){await b3.first().click();await page.waitForTimeout(2000);}
+ const clickText=(t)=>page.evaluate((t)=>{const c=[...document.querySelectorAll('button,summary,a,li,span,div')].filter(e=>e.children.length===0&&e.textContent.trim()===t&&e.getClientRects().length>0);const e=c[c.length-1];if(e)e.click();return !!e;},t);
+ await clickText('Pages');await page.waitForTimeout(800);
+ await clickText('Settings');await page.waitForTimeout(2200);
+ await shot('look');}
 // the logo alone at 48 css px (the iOS pair screen draws it that size, with no connection square): the same
 // --brand-image the header uses, so dark gets apple-touch-icon.png and light favicon-light.svg
 await page.evaluate(()=>{const d=document.createElement('div');d.id='logo48';d.style.cssText='position:fixed;left:40px;top:40px;width:48px;height:48px;z-index:99999;background:var(--brand-image) center/contain no-repeat';document.body.appendChild(d);});

@@ -28,6 +28,13 @@ elif cmd in ("bounds", "rowbox"):
     if cmd == "rowbox":
         while n is not None and n.get("clickable") != "true": n = par.get(n)
     print(*re.findall(r"\d+", n.get("bounds")))
+elif cmd == "clickables":
+    # clickables W H [tol]: bounds of clickable nodes of about that size, in document order
+    w, h = int(sys.argv[2]), int(sys.argv[3]); tol = int(sys.argv[4]) if len(sys.argv) > 4 else 4
+    for n in nodes(t):
+        if n.get("clickable") != "true": continue
+        l, tp, r, b = map(int, re.findall(r"\d+", n.get("bounds")))
+        if abs((r - l) - w) <= tol and abs((b - tp) - h) <= tol: print(l, tp, r, b)
 elif cmd in ("find", "has", "count"):
     text = sys.argv[2]; exact = len(sys.argv) > 3 and sys.argv[3] == "exact"
     ms = [n for n in nodes(t) if match(n, text, exact)]
