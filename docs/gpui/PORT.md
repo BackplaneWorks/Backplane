@@ -106,14 +106,14 @@ start only when the one before passes, except where noted.
 | M4 | Threads and sidebar status | Sidebar and settle state match on recorded logs; 300 and 6,666 threads stay fast |
 | M5 | Agent process management | Stand-in turns match event for event; interrupt, resume and restart tested |
 | M6 | Files and KiCad IPC | Files tab, viewers and `kicad_ipc` match; plots served to all clients |
-| M7 | 24 h run | 24 h with 20 simulated agents on the store copy, with no rising memory floor |
+| M7 | Dropped | The 24 h run was dropped by the person (2026-11-05). Memory flatness is shown by a run of up to about 1 h, if needed |
 
 ## Measurement
 
 Every milestone reports against the JS hub on the same store copy and machine:
 
 - Startup to usable
-- Steady memory (24 h at M7; a shorter simulated run before that, labelled as such)
+- Steady memory (a simulated run of up to about 1 h, labelled as such)
 - CPU under the 20-agent load
 - Click and popup latency: sidebar click, thread switch, composer popup
 - Build time and peak build memory; binary size
