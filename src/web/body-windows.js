@@ -26,8 +26,12 @@ export class BodyWindows {
     this.scopes = new Map();this.scope = '';this.fence = '';this.parts = new Map();this.pending = null;
     this.previews = new Map();this.previewBytes = 0;this.shells = new Map();
     this.runs = new Map();this.readGeneration = 0;
+    // each destination's last bound body-page metadata (the scope it was
+    // read in): its retained picture is drawn at a press with the bodies
+    // this page already read for it (held())
+    this.held = new Map();
   }
-  bind(hub, detail, owner, currentNode, holding = false) {
+  bind(hub, detail, owner, currentNode, holding = false, key = '') {
     const scope = JSON.stringify([hub, owner, detail.epoch, detail.target]);
     const fence = JSON.stringify([scope, detail.generation, detail.viewId]);
     const changedFence = fence !== this.fence;
@@ -88,6 +92,22 @@ export class BodyWindows {
     for (const id of currentMessages) if (authoritative.has(id) && !issued.has(id)) { this.parts.delete(id);saved.delete(id); }
     while (this.parts.size > 128) this.parts.delete(this.parts.keys().next().value);
     this.trim();
+    if (key) { this.held.delete(key);this.held.set(key, { scope, parts: new Map(this.parts) });while (this.held.size > 8) this.held.delete(this.held.keys().next().value); }
+  }
+  // A retained picture of `key` (not the destination bound now) drawn with
+  // the bodies read for it when it was last on show: the same windows the
+  // hub's view gets once it lands, so nothing in them is drawn again. Read
+  // only: no request, no reader made; a streaming row is left as it is.
+  heldParts(key) {
+    const h = this.held.get(key);
+    if (!h || h.scope === this.scope || !this.scopes.has(h.scope)) return null;
+    return h;
+  }
+  projectHeld(root, key) {
+    const h = this.heldParts(key);
+    if (!h) return root;
+    const saved = this.scopes.get(h.scope), parts = new Map([...h.parts].filter(([id]) => !id.startsWith('@live:')));
+    return this.project(root, { parts, reader: id => saved.get(id) || null });
   }
   // Prefetch metadata is read-only and can never establish a new scope or
   // picture. It may describe rows in the bounded adjacent reading bridge.
@@ -217,14 +237,15 @@ export class BodyWindows {
     }
     return rendered;
   }
-  project(root) {
+  project(root, held = null) {
+    const parts = held ? held.parts : this.parts, reader = held ? held.reader : id => this.reader(id);
     const walk = n => {
       if (!is(n, 'El')) return n;
       const memo = n.tag === 'bp-memo' && attr(n, 'fn') === 'msg';
       const activity = (attr(n, 'class') || '').split(/\s+/).includes('act');
-      const id = memo ? n.key : attr(n, 'data-id'), part = this.parts.get(id);
-      if (part && (memo || (attr(n, 'class') || '').split(/\s+/).includes('msg') || activity && this.reader(id)?.explicit)) {
-        const r = this.reader(id), pages = r?.pages || [];
+      const id = memo ? n.key : attr(n, 'data-id'), part = parts.get(id);
+      if (part && (memo || (attr(n, 'class') || '').split(/\s+/).includes('msg') || activity && reader(id)?.explicit)) {
+        const r = reader(id), pages = r?.pages || [];
         // Activity pages retain their source formatting. Message pages use
         // the same Bend Markdown renderer, once per retained small page.
         const body = [];

@@ -1253,10 +1253,14 @@ function renderPage() {
   // or request authority from the currently selected conversation.
   const tc = RR ? pnow() : 0;
   if (RR) RR.t("render.overlay", tc - t0);
+  // (a retained picture of a thread read before: its long messages drawn
+  // with the pages read for them then, as the hub's view will draw them)
+  const heldBodies = !frontendNode && transitionNode ? bodyWindows.heldParts(transitionFor) : null;
   if (frontendNode || transitionNode || focusedNode) page = thinContinuations.project(page,
-    node => frontendNode && node.tag === "bp-memo" && bodyWindows.parts.get(node.key)?.automatic === true ? node : expand(node), !!frontendNode);
+    node => node.tag === "bp-memo" && (frontendNode ? bodyWindows.parts : heldBodies?.parts)?.get(node.key)?.automatic === true && !(heldBodies && node.key.startsWith("@live:")) ? node : expand(node), !!frontendNode);
   const tb = RR ? pnow() : 0;
   if (frontendNode) page = bodyWindows.project(page);
+  else if (heldBodies) page = bodyWindows.projectHeld(page, transitionFor);
   // a run of tool calls opened or shut at the click (fold-feedback.js)
   if (frontendNode) foldFeedback.seen(frontendNode);
   if (frontendNode || transitionNode) page = foldFeedback.project(page);
@@ -3935,7 +3939,7 @@ async function startThin(again = false, reason = "initial") {
         const accepted = field === undefined ? undefined : thinMailDraft.matches(detail.mailDraftContext, detail.epoch) ? thin.fieldValue("mrreply", field) : field;
         thinMailDraft.bind(detail.mailDraftContext, detail.epoch, accepted);
         thinContinuations.bind(location.origin, detail);
-        bodyWindows.bind(location.origin, detail, detail.accountBinding || "", node, held);
+        bodyWindows.bind(location.origin, detail, detail.accountBinding || "", node, held, targetKey(detail.target));
         if (detail.position) transitionPosition = detail.position;
         else if (!remoteReady && !detail.historyReset) transitionPosition = transitionViews.position(transitionScope(detail.target)) || {atEnd:true};
         // (a pressed row's own mark goes once a view of another target lands)
