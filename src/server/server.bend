@@ -4317,13 +4317,13 @@ def Upgrade.done(force: Bool, +err: String, +inbox: Chan(Msg)) -> IO(Unit):
   Upgrade.done.k(String.is_empty(err), force, err, inbox)
 
 # how it went, for the KiCad notice ("kicad": client KN.install) and for
-# clients that only read state/error; success restarts to pick it up
+# clients that only read state/error; select the new runtime in this hub.
 def Install.done(ok: Bool, +err: String, +inbox: Chan(Msg)) -> IO(Unit):
   match ok:
     case True{}:
       do IO<Unit>:
         Upgrade.say(inbox, Upgrade.note([J.KV{"kicad", J.Str{"installed"}}, J.KV{"state", J.Str{"Backplane KiCad installed"}}]))
-        Upgrade.done(False{}, err, inbox)
+        Self.post(inbox, KProbe{True{}})
     case False{}:
       Upgrade.say(inbox, Upgrade.note([J.KV{"kicad", J.Str{"failed"}}, J.KV{"error", J.Str{err}}]))
 
