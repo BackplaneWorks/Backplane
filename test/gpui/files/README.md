@@ -35,3 +35,8 @@ Deliberate differences, all refusals, listed at the top of `rv.rs`: a version mu
 - `bun test/gpui/files/kipc_real.ts WORK RUNTIME PROBE BUN_MAIN [ROUNDS]`: Rust and the Bun helper against real KiCad, JSON compared, latency timed. `WORK` holds a copy of the `ecc83-pp` demo in `proj/`.
 - `bun test/gpui/files/kipc_hub_e2e.mjs HUB RUNTIME PORT WORK`: the hub, a stand-in agent and real KiCad through the MCP tools.
 - Goldens come from protobufjs: `kipc_golden.ts`, run from a copy with tools/kipc's `node_modules`.
+
+## Message images and attachments (gaps, for PARITY.md)
+- `/message-image` serves only a snapshot a ref names (made when an assistant message is committed, or by the Bend hub earlier). A message older than any ref answers 404 here; the Bend hub re-reads the text from store.db and snapshots on request.
+- A ref the Bend hub wrote has no `thread` field, so the deleted-thread check cannot apply to it: that image stays readable with the root token after its thread is deleted. Refs this hub writes carry the thread.
+- `POST /attach`: unknown, empty or deleted thread ids get 404 JSON (#960); size is decided by `files.max.mb` (the transport limit is being lifted).
