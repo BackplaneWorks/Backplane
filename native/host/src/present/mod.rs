@@ -4,6 +4,7 @@
 //! The dump holds message text, drafts and `session`: SYNTHETIC logs only. It is written only by a copy run, only while the helper is running, and only for a log under
 //! `copy::BIG_LOG` (a copy of a real store is far larger); `frames.jsonl` (the fold stream) and a frame index per view are the next step and not written yet.
 pub mod thread;
+pub mod window;
 use crate::presenter::{Fut, Presenter};
 use anyhow::Result;
 use serde_json::{json, Value};
