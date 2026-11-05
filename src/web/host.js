@@ -1337,6 +1337,10 @@ const LAND_REGIONS = [
     node: v => nodeAttr(v, "id") === "timeline", el: () => document.getElementById("timeline") },
   { name: "topbar", json: n => n?.tag === "header" && jsonClass(n, "topbar"),
     node: v => v.tag === "header" && (" " + (nodeAttr(v, "class") || "") + " ").includes(" topbar "), el: () => document.querySelector("header.topbar") },
+  // a keystroke's echo (the draft, its send button, the composer's popup)
+  // redraws the composer alone, not the page
+  { name: "composer", json: n => n?.tag === "div" && jsonClass(n, "composer"),
+    node: v => v.tag === "div" && (" " + (nodeAttr(v, "class") || "") + " ").includes(" composer "), el: () => document.querySelector(".thread-view .composer") },
 ];
 const landPaths = new Map();
 // a region's path in a reply's body: the last one first (regions seldom move)
@@ -1360,10 +1364,13 @@ function historyRegion(detail, projection) {
   const landing = detail.page && ["older", "newer"].includes(projection);
   const update = !detail.page && projection === "update" && !detail.historyReset && !detail.position;
   if (!(landing || update) || !Array.isArray(detail.changed) || detail.changed.some(p => !p.length) || searchJump || jump || scroll) return "page";
+  // (the session's drafts are the page's own, each keystroke's echo: the
+  // composer draws them, a region of its own; every echo drew the page)
+  const changed = detail.changed.filter(p => !(p[0] === "session" && p[1] === "drafts"));
   const lines = [];
   for (const r of LAND_REGIONS) { const p = landPathIn(detail.shown, r);if (p) lines.push([r.name, "shown", ...p].join("\t")); }
   if (!lines.length) return "page";
-  const region = History.landing(lines.join("\n"), detail.changed.map(p => p.map(String).join("\t")).join("\n"));
+  const region = History.landing(lines.join("\n"), changed.map(p => p.map(String).join("\t")).join("\n"));
   if (RR) RR.n("land.region." + (region.trim() || "none"));
   return region;
 }
@@ -1431,6 +1438,7 @@ function renderRegions() {
     if (RR) { RR.t("reg." + r.name + ".overlay", a1 - a0);RR.t("reg." + r.name + ".project", a2 - a1);RR.t("reg." + r.name + ".patch", pnow() - a2); }
   }
   if (names.has("sidebar")) bubMoveSync();
+  if (names.has("composer")) { attachmentPreviews();composerGeometry(); }
   if (names.has("timeline")) {
     const tl = document.getElementById("timeline"), list = timelineList(tl);
     if (activeTimeline && activeTimeline !== list) activeTimeline.destroy();
