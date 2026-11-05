@@ -818,3 +818,13 @@ const TESTCLI: &str = "#!/bin/sh\nread hello\necho '{\"q\":1}'\nread ans\necho \
     assert!(ev.iter().any(|e| turn_is(e, "running")) && !ev.iter().any(|e| is(e, "QueueTaken")) && !ev.iter().any(|e| e["kind"] == "steer"), "{ev:?}");
     assert!(ev.iter().any(|e| is(e, "MessagePosted") && e["role"] == "assistant" && e["text"].as_str().unwrap().contains("just this one"))); ag.shutdown();
 }
+
+#[tokio::test(flavor = "multi_thread")] async fn review_comment_logs_an_act_and_review_comments_reads_the_open_ones() {
+    let (hub, ag, _sd) = codex_start("rvc").await;
+    let (ok, r) = ag.tool_review_comment(T1, &json!({"op":"add","text":"check the clearance","file":"b.kicad_pcb","layer":"F.Cu","x":1,"y":2})).await; assert!(ok, "{r}"); let id = r["id"].as_str().unwrap().to_string();
+    assert!(!ag.tool_review_comment(T1, &json!({"op":"add","text":" "})).await.0, "an add needs text");
+    let (_, c) = ag.tool_review_comments(T1).await; assert_eq!(c["open"], 1); assert!(c["text"].as_str().unwrap().contains("check the clearance"), "{c}");
+    assert!(ag.tool_review_comment(T1, &json!({"op":"resolve","id":id})).await.0);
+    let (_, c) = ag.tool_review_comments(T1).await; assert_eq!((c["open"].as_u64(), c["resolved"].as_u64()), (Some(0), Some(1))); assert_eq!(c["text"], "No open comments.");
+    assert!(log_from(&hub, 0).await.iter().any(|e| is(e, "ActivityLogged") && e["tone"] == "review" && e["kind"] == "add")); ag.shutdown();
+}
