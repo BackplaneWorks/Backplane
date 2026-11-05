@@ -1,10 +1,25 @@
 // Scenarios: deterministic client programs. renderer: mobile only (phones, GPUI); the web page is not a target.
-import {connect,httpProbe,attempt,sleep} from './lib.mjs';
+import {connect,httpProbe,attempt,sleep,privateLeaks} from './lib.mjs';
 const until=async(f,ms=20000)=>{const end=Date.now()+ms;for(;;){const v=await f();if(v)return v;if(Date.now()>end)return null;await sleep(50)}};
 const threadsOf=r=>(r?.result?.shown?.projects||[]).flatMap(p=>p.threads||[]);
 const fixtureThread=r=>threadsOf(r).find(t=>/^Fixture long/.test(t.title||t.label||''))||threadsOf(r)[0];
 
 export const SCENARIOS={
+  // private lines: the log holds DeviceRegistered/DeviceDropped and ride.*, launch.input.*, fallback.input.* values (hubs.mjs privateLines).
+  // No frame to any client may carry them: not the join's `log`, not a resumed `changes` stream, not a live write, not a view.
+  async private({hub,rec}){
+    const a=await connect({hub,rec,name:'full',profile:'raw'});await a.settle(900);
+    const log=a.inbox.find(x=>x.t==='log');
+    const b=await connect({hub,rec,name:'resumed',profile:'raw',query:`since=3&origin=${log?.origin}`});await b.settle(900);
+    const th='t1700000002-3';
+    await a.rpc('setting.set',{key:'ride.'+th,value:'PRIVLIVE-0006 a live riding write'});
+    await a.rpc('setting.set',{key:'launch.input.'+th,value:'PRIVLIVE-0007 a live input'});
+    await a.settle(700);
+    const g=await connect({hub,rec,name:'gpui',profile:'gpui'});if(!g.failed){await g.vcall('view.open');await g.vcall('view.update');await g.settle(500)}
+    await a.end(500);await b.end(500);if(!g.failed)await g.end(500);
+    const leaks=privateLeaks(rec.frames);
+    rec.push('private','out','check',null,{privateLeaks:leaks});
+  },
   // 1. HTTP + raw join
   async join({hub,rec}){
     await httpProbe(hub,'/hello',rec,'http');

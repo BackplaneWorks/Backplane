@@ -3,7 +3,7 @@
 // Outbound frames are re-sent in recorded order; server-issued values (generation, epoch, view ids, thread/project/message ids,
 // hub URL, work paths) are substituted from what the target hub actually said. Waits are by reply id, not time.
 import {readFileSync,readdirSync,writeFileSync,mkdirSync} from 'node:fs';
-import {Rec,connect,httpProbe,attempt,sleep,PROFILES} from './lib.mjs';
+import {Rec,connect,httpProbe,attempt,sleep,PROFILES,privateLeaks} from './lib.mjs';
 import {startFixtureHub,WORK} from './hubs.mjs';
 import {normalise,diff} from './compare.mjs';
 import {encode} from '../wire.mjs';
@@ -32,7 +32,7 @@ export async function replayOne(recording,{bin,port,work}){
     if(f.dir==='in'&&f.json?.t==='reply'&&!(f.vol&&volIds.has(f.c+'|'+f.json.id)))for(const cm of f.json.result?.cmds||[])if(cm.type==='send'){try{(cmdRec[f.c]??=[]).push({q:JSON.parse(cm.text),used:false})}catch{}}
     if(f.dir==='out'&&f.kind==='bin'&&!f.vol&&f.json&&!f.json.raw){const k=(cmdRec[f.c]||[]).findIndex(x=>!x.used&&JSON.stringify(x.q)===JSON.stringify(f.json));if(k>=0){cmdRec[f.c][k].used=true;outCmd.set(f.i,k)}}}
   const cmdRep={};
-  const h=await startFixtureHub({bin,port,work,deleted:meta.scenario==='unresolved'});
+  const h=await startFixtureHub({bin,port,work,deleted:meta.scenario==='unresolved',privateLines:meta.scenario==='private'});
   const rec=new Rec();const clients={};const repIds=[],repSeen=new Set();const viewIdsRep={};
   const observe=(c)=>{for(const j of c.inbox.slice(c.obs||0)){
       if(j?.t==='reply'&&!(j.ok===false))for(const cm of j.result?.cmds||[])if(cm.type==='send'){try{(cmdRep[c.name]??=[]).push(JSON.parse(cm.text))}catch{}}const vid=j?.result?.viewId;if(vid&&!(viewIdsRep[c.name]??=[]).includes(vid))viewIdsRep[c.name].push(vid);
@@ -112,15 +112,18 @@ export async function replayOne(recording,{bin,port,work}){
 if(import.meta.main){
   const dir=arg('rec'),bin=arg('bin'),port=Number(arg('port',3824)),out=arg('out','/tmp/parity-replay');
   const only=(arg('only','')||'').split(',').filter(Boolean);mkdirSync(out,{recursive:true});
-  let total=0;
+  let total=0;let replayed=0;
+  if(!readdirSync(dir).some(x=>x.endsWith('.json'))){console.error('replay: no recordings in '+dir+' (an empty replay proves nothing)');process.exit(2)}
   for(const f of readdirSync(dir).filter(x=>x.endsWith('.json')).sort()){
-    const name=f.replace('.json','');if(only.length&&!only.includes(name))continue;
+    const name=f.replace('.json','');if(only.length&&!only.includes(name))continue;replayed++;
     const recd=JSON.parse(readFileSync(dir+'/'+f));
     const r=await replayOne(recd,{bin,port,work:`${WORK}/work-R`});
     writeFileSync(`${out}/${f}`,JSON.stringify(r));
     const a=normalise(recd.frames.filter(f=>f.kind!=='check')),b=normalise(r.frames);const d=[];
     for(const c of new Set([...Object.keys(a),...Object.keys(b)]))for(const s of ['out','events','hk','deltas','replies','views','other'])diff(a[c]?.[s],b[c]?.[s],`${c}.${s}`,d);
     console.log(name,d.length?`${d.length} differences`:'identical');for(const x of (process.argv.includes('--all')?d:d.slice(0,12)))console.log('   ',x);total+=d.length;
+    {const lk=privateLeaks(r.frames);if(lk.length){console.log(name,'PRIVATE LINES REACHED A CLIENT:',lk.length,JSON.stringify(lk.slice(0,5)));total+=lk.length}}
   }
+  if(!replayed){console.error('replay: nothing replayed (--only matched no recording)');process.exit(2)}
   console.log('TOTAL differences:',total);process.exit(total?1:0);
 }
