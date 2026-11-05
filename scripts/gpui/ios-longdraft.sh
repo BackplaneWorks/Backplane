@@ -15,18 +15,11 @@ $SB "cat $V/home/token" > /tmp/lc-token; RSYNC_RSH=$M rsync -a /tmp/lc-token hs-
 T=$($SB "grep -o '\"ThreadCreated\",\"id\":\"[^\"]*\"' $V/home/events.jsonl | sed -n 2p | cut -d'\"' -f6")
 T0=$($SB "grep -o '\"ThreadCreated\",\"id\":\"[^\"]*\"' $V/home/events.jsonl | sed -n 1p | cut -d'\"' -f6")
 K=backplane.tail9e0cf2.ts.net:3811
-LONG=$(python3 -c "print(('lorem ipsum dolor sit amet ' * 2600)[:70000])")
+python3 -c "print(('lorem ipsum dolor sit amet ' * 2600)[:70000], end='')" > /tmp/longdraft.txt
+RSYNC_RSH=$M rsync -a /tmp/longdraft.txt hs-mac-mini:bp-gpui-ios/longdraft.txt
+RSYNC_RSH=$M rsync -a scripts/gpui/ios-longdraft-mac.sh hs-mac-mini:bp-gpui-ios/
 scripts/gpui/ios-build.sh > $B/results/ios/build-longdraft.log 2>&1; grep -E "error:|build seconds" $B/results/ios/build-longdraft.log | head -2
-$M hs-mac-mini "export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer HUBURL=http://backplane.tail9e0cf2.ts.net:3811/ TOKFILE=~/bp-gpui-ios/seed7-token
-xcrun simctl boot $U 2>/dev/null; xcrun simctl uninstall $U dev.backplane.gpui
-sh ~/bp-gpui-ios/ios-shot.sh $U ld-typed 40 'ob-skip;;@type=$LONG' $T
-sh ~/bp-gpui-ios/ios-shot.sh $U ld-switched 50 'ob-skip;;@type=$LONG;;@back;;select=$K|$T0;;@back;;select=$K|$T' $T
-xcrun simctl terminate $U dev.backplane.gpui; sleep 2
-sh ~/bp-gpui-ios/ios-shot.sh $U ld-restart 30 'ob-skip' $T
-sh ~/bp-gpui-ios/ios-shot.sh $U ld-sent 60 'ob-skip;;@type=$LONG;;@send' $T
-sh ~/bp-gpui-ios/ios-shot.sh $U pop-at 35 'ob-skip;;@type=@B' $T
-sh ~/bp-gpui-ios/ios-shot.sh $U pop-gt 35 'ob-skip;;@type=>l' $T
-xcrun simctl shutdown $U"
+$M hs-mac-mini "sh ~/bp-gpui-ios/ios-longdraft-mac.sh $U $T $T0 $K"
 for n in ld-typed ld-switched ld-restart ld-sent pop-at pop-gt; do RSYNC_RSH=$M rsync -a hs-mac-mini:bp-gpui-ios/shots/$n.png $B/shots/ios/; done
 $SB "python3 - <<'PY'
 import json,os
