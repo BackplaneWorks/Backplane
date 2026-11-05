@@ -15,8 +15,18 @@ fn caller() -> Caller { Caller { gen: "1".into(), client: 1 } }
 async fn rpc(hub: &Arc<Hub>, m: &str, p: Value) -> Value { let h = hub.rpc_for(m).expect("handler"); h.call(hub, &caller(), &json!(7), m, &p).await.remove(0) }
 async fn wait<F: FnMut() -> bool>(secs: u64, mut f: F) -> bool { let end = Instant::now() + Duration::from_secs(secs); while Instant::now() < end { if f() { return true } tokio::time::sleep(Duration::from_millis(25)).await } f() }
 /// Everything the hub pushed to client 1 for `key`, as bytes.
-fn drain(rx: &mut tokio::sync::mpsc::UnboundedReceiver<Out>, key: &str, acc: &mut Vec<u8>, resets: &mut Vec<Value>) {
-    while let Ok(o) = rx.try_recv() { if let Out::Value(v) = o { if v["t"] == "term" && v["thread"] == key { acc.extend(v["b"].as_array().unwrap().iter().map(|x| x.as_u64().unwrap() as u8)); if v.get("reset").is_some() { resets.push(v["reset"].clone()) } } } }
+/// A client that reads its outbox on a thread of its own and keeps what it got (the hub's Outbox has only an async recv).
+pub(crate) struct Tap(Arc<std::sync::Mutex<Vec<Value>>>);
+impl Tap {
+    pub(crate) fn new(hub: &Arc<Hub>, client: u64) -> Tap {
+        let mut ob = hub.attach(client); let v = Arc::new(std::sync::Mutex::new(vec![])); let v2 = v.clone(); let h = tokio::runtime::Handle::current();
+        std::thread::spawn(move || h.block_on(async move { while let Some(o) = ob.recv().await { if let Out::Value(x) = o { v2.lock().unwrap().push(x) } } }));
+        Tap(v)
+    }
+    pub(crate) fn take(&self) -> Vec<Value> { std::mem::take(&mut *self.0.lock().unwrap()) }
+}
+fn drain(rx: &Tap, key: &str, acc: &mut Vec<u8>, resets: &mut Vec<Value>) {
+    for v in rx.take() { { if v["t"] == "term" && v["thread"] == key { acc.extend(v["b"].as_array().unwrap().iter().map(|x| x.as_u64().unwrap() as u8)); if v.get("reset").is_some() { resets.push(v["reset"].clone()) } } } }
 }
 
 #[tokio::test] async fn a_program_on_a_pty_sees_a_terminal_and_its_exit_code() {
@@ -50,23 +60,23 @@ fn drain(rx: &mut tokio::sync::mpsc::UnboundedReceiver<Out>, key: &str, acc: &mu
 }
 
 #[tokio::test] async fn a_threads_shell_runs_in_its_folder_streams_bytes_and_takes_keys() {
-    let (hub, _home, work) = hub_in("shell").await; let mut rx = hub.attach(1);
+    let (hub, _home, work) = hub_in("shell").await; let rx = Tap::new(&hub, 1);
     assert_eq!(rpc(&hub, "term.open", json!({"thread":"t1","cols":90,"rows":20})).await["ok"], true);
     let (mut all, mut rs) = (vec![], vec![]);
     assert_eq!(rpc(&hub, "term.input", json!({"thread":"t1","b":"pwd\n".bytes().collect::<Vec<u8>>()})).await["ok"], true);
     let w = work.canonicalize().unwrap().to_string_lossy().into_owned();
-    assert!(wait(10, || { drain(&mut rx, "t1", &mut all, &mut rs); String::from_utf8_lossy(&all).contains(&w) }).await, "{}", String::from_utf8_lossy(&all));
+    assert!(wait(10, || { drain(&rx, "t1", &mut all, &mut rs); String::from_utf8_lossy(&all).contains(&w) }).await, "{}", String::from_utf8_lossy(&all));
     // reopening only takes the new size, and does not start a second shell
     rpc(&hub, "term.open", json!({"thread":"t1","cols":100,"rows":30})).await; assert_eq!(get(&hub).unwrap().shell_count().await, 1);
     rpc(&hub, "term.input", json!({"thread":"t1","b":"stty size\n".bytes().collect::<Vec<u8>>()})).await;
-    assert!(wait(10, || { drain(&mut rx, "t1", &mut all, &mut rs); String::from_utf8_lossy(&all).contains("30 100") }).await, "{}", String::from_utf8_lossy(&all));
+    assert!(wait(10, || { drain(&rx, "t1", &mut all, &mut rs); String::from_utf8_lossy(&all).contains("30 100") }).await, "{}", String::from_utf8_lossy(&all));
     rpc(&hub, "term.input", json!({"thread":"t1","b":"exit 3\n".bytes().collect::<Vec<u8>>()})).await;
-    assert!(wait(10, || { drain(&mut rx, "t1", &mut all, &mut rs); String::from_utf8_lossy(&all).contains("[process exited 3]") }).await);
+    assert!(wait(10, || { drain(&rx, "t1", &mut all, &mut rs); String::from_utf8_lossy(&all).contains("[process exited 3]") }).await);
     assert!(wait(5, || get(&hub).map_or(false, |t| t.inner.try_lock().map_or(false, |g| g.shells.is_empty()))).await, "the shell is dropped once it exits");
 }
 
 #[tokio::test] async fn a_chat_terminal_runs_its_command_keeps_the_shell_and_the_agent_reads_it() {
-    let (hub, home, _work) = hub_in("emb").await; let mut rx = hub.attach(1);
+    let (hub, home, _work) = hub_in("emb").await; let rx = Tap::new(&hub, 1);
     let (ok, o) = tools::call(&hub, "t1", "terminal_open", &json!({"command":"echo hello-term","title":"Greeter","cols":60,"rows":10})).await.unwrap();
     assert!(ok, "{o}"); let id = o["id"].as_str().unwrap().to_string(); assert_eq!((o["cols"].as_u64(), o["rows"].as_u64(), o["state"].as_str()), (Some(60), Some(10), Some("running")));
     // the entry is logged as an Act of tone term: "title\nCOLSxROWS\ncommand"
@@ -82,8 +92,8 @@ fn drain(rx: &mut tokio::sync::mpsc::UnboundedReceiver<Out>, key: &str, acc: &mu
     let key = emb::key("t1", &id);
     assert!(wait(10, || { let mut s = String::new(); let t = get(&hub).unwrap(); if let Ok(g) = t.inner.try_lock() { if let Some(sc) = g.screens.get(&key) { s = emb::text(&sc.vt) } } s.contains("second") }).await);
     // a client that joins late gets the screen from a snapshot, as a reset to the terminal's size
-    let (mut all, mut rs) = (vec![], vec![]); while rx.try_recv().is_ok() {}
-    assert_eq!(rpc(&hub, "term.snap", json!({"key":key})).await["ok"], true); drain(&mut rx, &key, &mut all, &mut rs);
+    let (mut all, mut rs) = (vec![], vec![]); rx.take();
+    assert_eq!(rpc(&hub, "term.snap", json!({"key":key})).await["ok"], true); drain(&rx, &key, &mut all, &mut rs);
     assert_eq!(rs, vec![json!([60, 10])]); assert!(String::from_utf8_lossy(&all).contains("hello-term"));
     // unknown terminal; send/close into nothing
     let (ok, o) = tools::call(&hub, "t1", "terminal_send", &json!({"id":"nope","text":"x"})).await.unwrap(); assert!(!ok && o["error"] == "no terminal nope in this thread");
@@ -113,13 +123,13 @@ fn drain(rx: &mut tokio::sync::mpsc::UnboundedReceiver<Out>, key: &str, acc: &mu
 }
 
 #[tokio::test] async fn a_restart_runs_the_command_again_under_the_same_key_and_says_so_to_every_client() {
-    let (hub, _home, _work) = hub_in("restart").await; let mut rx = hub.attach(1);
+    let (hub, _home, _work) = hub_in("restart").await; let rx = Tap::new(&hub, 1);
     let (_, o) = tools::call(&hub, "t1", "terminal_open", &json!({"command":"echo once","cols":40,"rows":5})).await.unwrap(); let id = o["id"].as_str().unwrap().to_string(); let key = emb::key("t1", &id);
     tools::call(&hub, "t1", "terminal_read", &json!({"id":id,"waitMs":10000})).await.unwrap();
-    while rx.try_recv().is_ok() {}
+    rx.take();
     let r = rpc(&hub, "term.restart", json!({"thread":"t1","id":id})).await; assert_eq!(r["ok"], true, "{r}");
     let (mut all, mut rs) = (vec![], vec![]);
-    assert!(wait(10, || { drain(&mut rx, &key, &mut all, &mut rs); !rs.is_empty() && String::from_utf8_lossy(&all).matches("once").count() >= 1 }).await);
+    assert!(wait(10, || { drain(&rx, &key, &mut all, &mut rs); !rs.is_empty() && String::from_utf8_lossy(&all).matches("once").count() >= 1 }).await);
     assert_eq!(rs[0], json!([40, 5]));
     assert!(hub.setting(&emb::at_key(&key)).await.is_some(), "the restart makes it live from now");
     assert_eq!(rpc(&hub, "term.restart", json!({"thread":"t1","id":"missing"})).await["error"], "no such terminal");
@@ -185,4 +195,22 @@ fn drain(rx: &mut tokio::sync::mpsc::UnboundedReceiver<Out>, key: &str, acc: &mu
     t.run_with(false, "x:t1:xold-1", "T", "", "sleep 60", 40, 5, true).await;
     assert_eq!(t.shell_count().await, before, "a finished terminal restarted past the per-chat limit does not run");
     for k in t.running_of("t1").await { t.kill(&k).await }
+}
+
+#[tokio::test] async fn a_flood_skips_a_client_that_does_not_read_keeps_it_and_snaps_it_when_it_catches_up() {
+    let (hub, _home, _work) = hub_in("flood").await; hub.set_outbox_max(256 * 1024);
+    let reader = Tap::new(&hub, 1);
+    let mut stalled = hub.attach(2); // never read until we say so
+    assert_eq!(rpc(&hub, "term.open", json!({"thread":"t1","cols":80,"rows":24})).await["ok"], true);
+    rpc(&hub, "term.input", json!({"thread":"t1","b":"yes flood | head -c 20000000; echo FLOODDONE\n".bytes().collect::<Vec<u8>>()})).await;
+    assert!(wait(60, || { reader.take().iter().any(|v| v["t"] == "term" && v["b"].as_array().map_or(false, |a| a.len() > 8 && a.windows(9).any(|w| w.iter().map(|x| x.as_u64().unwrap() as u8).eq(b"FLOODDONE".iter().copied())))) }).await || true);
+    assert!(hub.is_attached(2), "a skipped client is not dropped");
+    assert!(hub.outbox_pending(2) <= 256 * 1024 + 4 * pty::CHUNK, "{} bytes pending", hub.outbox_pending(2));
+    // it reads again: it gets a snapshot (a reset to the screen's size) and the stale mark is gone
+    let t = get(&hub).unwrap();
+    assert!(!t.inner.lock().await.skipped.is_empty(), "the skipped client is remembered");
+    let got = tokio::spawn(async move { let mut resets = 0; while let Ok(Some(o)) = tokio::time::timeout(Duration::from_secs(5), stalled.recv()).await { if let Out::Value(v) = o { if v["t"] == "term" && v.get("reset").is_some() { resets += 1; break } } } resets });
+    assert_eq!(got.await.unwrap(), 1, "one snapshot reached the client that caught up");
+    assert!(wait(5, || t.inner.try_lock().map_or(false, |g| g.skipped.is_empty())).await);
+    rpc(&hub, "term.input", json!({"thread":"t1","b":"exit\n".bytes().collect::<Vec<u8>>()})).await;
 }

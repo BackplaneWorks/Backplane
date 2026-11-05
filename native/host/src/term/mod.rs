@@ -3,7 +3,8 @@
 //! goes to every client as `{"t":"term","thread":<key>,"pid":N,"b":[bytes]}`, input comes in as `term.input`.
 //! Bounded: at most MAX_SHELLS ptys in all (MAX_PER_THREAD chat terminals a thread), output reads in 64 KB chunks through a 64-chunk
 //! queue (the program waits when we are slow), at most KEEP_FINISHED finished screens in memory (the rest are read back from <home>/terms),
-//! NOT YET bounded: frames to a stalled client (Hub::push_all has an unbounded outbox; needs a per-client budget seam from the lead), input past 256 queued writes is dropped, one input request at most MAX_INPUT bytes,
+//! output frames go out with `Hub::push_all_budgeted` (a client whose outbox is over half full is skipped, never dropped; it gets one snapshot when it has
+//! room again, `catch_up`), input past 256 queued writes is dropped, one input request at most MAX_INPUT bytes,
 //! screens are the emulator's bounded grid and 2048-row scrollback.
 pub mod browser;
 pub mod emb;
@@ -22,13 +23,16 @@ pub const MAX_PER_THREAD: usize = 16;
 pub const MAX_INPUT: usize = 262144;
 /// Finished chat terminals whose screens stay in memory (each up to 2048 rows of scrollback); older ones are on disk.
 pub const KEEP_FINISHED: usize = 32;
+const MAX_SKIPPED: usize = 4096;
 /// Et.all: a frame for every client.
 pub const ALL: u64 = u64::MAX;
 
 struct Shell { pid: i32, pty: Arc<pty::Pty> }
 struct Screen { title: String, vt: Vt, seen: bool, state: String, pid: i32 }
 #[derive(Default)]
-struct Inner { shells: HashMap<String, Shell>, screens: HashMap<String, Screen>, finished: std::collections::VecDeque<String> }
+struct Inner { shells: HashMap<String, Shell>, screens: HashMap<String, Screen>, finished: std::collections::VecDeque<String>,
+    /// (client, key) whose output frames were skipped: the client's copy of that screen is stale until a snapshot goes out. Bounded by clients x terminals.
+    skipped: std::collections::HashSet<(u64, String)> }
 
 pub struct Terms { hub: Arc<Hub>, inner: Mutex<Inner>, home: PathBuf, shell: String }
 
@@ -43,6 +47,8 @@ pub fn start(hub: Arc<Hub>) {
     let _ = std::fs::create_dir_all(home.join("terms"));
     let t = Arc::new(Terms { hub: hub.clone(), inner: Mutex::new(Inner::default()), home, shell });
     TERMS.get_or_init(Default::default).lock().unwrap().insert(hub.cfg.home.clone(), t.clone());
+    // a skipped client gets its snapshot even when the terminal prints nothing more
+    { let t = t.clone(); tokio::spawn(async move { let mut iv = tokio::time::interval(std::time::Duration::from_millis(500)); loop { iv.tick().await; t.catch_up().await } }); }
     hub.register_rpc(Arc::new(TermRpc(t)));
     browser::start(&hub);
 }
@@ -101,8 +107,21 @@ impl Terms {
             _ => vec![],
         };
         if !replies.is_empty() { if let Some(sh) = g.shells.get(key) { sh.pty.write(replies); } }
+        // droppable: a client over half its outbox is skipped and marked, not dropped
+        let f = frame(key, Some(pid), bs, None); let bytes = bs.len() * 4 + 96;
+        for c in self.hub.clients() { if !self.hub.push_budgeted(c, f.clone(), bytes) && g.skipped.len() < MAX_SKIPPED { g.skipped.insert((c, key.to_string())); } }
         drop(g);
-        self.hub.push_all(&frame(key, Some(pid), bs, None));
+        self.catch_up().await;
+    }
+    /// Each skipped client with room again (under a quarter of the outbox) gets one snapshot of the screen it missed; gone clients are forgotten.
+    pub async fn catch_up(&self) {
+        let mut g = self.inner.lock().await; if g.skipped.is_empty() { return }
+        let live = self.hub.clients(); g.skipped.retain(|(c, _)| live.contains(c));
+        let ready: Vec<(u64, String)> = g.skipped.iter().filter(|(c, _)| self.hub.outbox_pending(*c) < crate::hub::OUTBOX_MAX / 4).cloned().collect();
+        for (c, key) in ready {
+            g.skipped.remove(&(c, key.clone()));
+            if let Some(sc) = g.screens.get(&key) { self.hub.push(c, frame(&key, None, &emb::snap(&sc.vt), Some((sc.vt.cols(), sc.vt.rows())))); }
+        }
     }
 
     /// TGone: the program ended. A chat terminal keeps its last screen on disk.
