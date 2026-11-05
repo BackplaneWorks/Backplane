@@ -1,4 +1,4 @@
-use crate::wire;
+use crate::{delta,wire};
 use anyhow::{ensure, Context, Result};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
@@ -34,21 +34,27 @@ fn millis()->u64 {SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_milli
 struct View {
     hub:String, cid:String, greeting:Value, target:Value, session:Value,
     view_id:String, revision:u64, next:u64, pending:HashMap<u64,(u64,Value,String)>,
-    outgoing:HashMap<u64,bool>, dirty:bool, controls:HashMap<u64,Control>,
+    outgoing:HashMap<u64,bool>, dirty:bool, controls:HashMap<u64,Control>, offered:HashMap<u64,String>, bases:delta::Bases,
 }
 #[derive(Default)] struct Control { next:u64, bytes:usize, parts:Vec<String>, done:bool }
 const MAX_CONTROLS:usize=4;const MAX_CONTROL_BYTES:usize=16*1024*1024;const MAX_CONTROL_PARTS:u64=4096;
 impl View {
     fn new(config:&Config)->Self {Self {hub:config.hub.replacen("ws://","http://",1),cid:format!("gpui-{}-{}",std::process::id(),millis()),
         greeting:Value::Null,target:json!({"kind":"recent","id":""}),session:json!({"sel":"","rid":millis(),"drafts":{},"open":{},"adding":false,"panel":false,"info":{}}),
-        view_id:String::new(),revision:0,next:(1_u64<<47)+millis(),pending:HashMap::new(),outgoing:HashMap::new(),dirty:false,controls:HashMap::new()}}
+        view_id:String::new(),revision:0,next:(1_u64<<47)+millis(),pending:HashMap::new(),outgoing:HashMap::new(),dirty:false,controls:HashMap::new(),offered:HashMap::new(),bases:delta::Bases::default()}}
     fn request(&mut self, method:&str, extra:Value)->Value {
         self.next+=1;self.revision+=1;
         let mut p=json!({"version":1,"hub":self.hub,"generation":self.greeting["generation"],"epoch":self.greeting["epoch"],"requestRevision":self.revision,
             "target":self.target,"viewId":self.view_id,"session":self.session,"cid":self.cid});
         for(k,v)in extra.as_object().into_iter().flatten(){p[k]=v.clone();}
         // Opt in to the bounded native sidebar (at most 48 rows a page, paged by controls).
-        if ["view.open","view.page","view.update","view.action"].contains(&method) {p["nativeSidebar"]=json!(1);}
+        if ["view.open","view.page","view.update","view.action"].contains(&method) {
+            p["nativeSidebar"]=json!(1);
+            // Offer keyed deltas against the newest body held; the hub answers whole or with ops from it.
+            p["viewDelta"]=json!({"version":1,"token":self.bases.newest});
+            self.offered.insert(self.next,self.bases.newest.clone());
+            if self.offered.len()>64 {self.offered.clear();}
+        }
         self.pending.insert(self.next,(self.revision,self.target.clone(),method.into()));
         json!({"id":self.next,"m":method,"p":p})
     }
@@ -66,7 +72,7 @@ pub fn connect(config:Config)->(Sender<Command>,async_channel::Receiver<Event>) 
                     Err(error)=>{ // Never log the handshake URL or its credential.
                         let token=std::fs::read_to_string(&config.token_file).unwrap_or_default();let mut text=format!("{error:#}");if !token.trim().is_empty(){text=text.replace(token.trim(),"<token>");}eprintln!("GPUI_LOG {{\"disconnect\":{}}}",serde_json::Value::String(text));
                         let _=events.send(Event::Error("Hub disconnected. Draft kept; reconnecting. Check the experimental hub log.".into())).await;
-                        view.pending.clear();view.outgoing.clear();view.controls.clear();view.view_id.clear();view.greeting=Value::Null;
+                        view.pending.clear();view.outgoing.clear();view.controls.clear();view.offered.clear();view.bases.clear();view.view_id.clear();view.greeting=Value::Null;
                         tokio::time::sleep(Duration::from_secs(delay)).await;delay=(delay*2).min(10);
                     }
                 }
@@ -96,7 +102,7 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
         },
         frame=source.next()=>{
             let frame=frame.context("hub closed")??;last=tokio::time::Instant::now();
-            let x=match frame {Message::Binary(bytes)=>wire::decode(&bytes)?,Message::Text(text)=>serde_json::from_str(&text)?,Message::Ping(bytes)=>{sink.send(Message::Pong(bytes)).await?;continue},Message::Close(_)=>anyhow::bail!("closed"),_=>continue};
+            let mut x=match frame {Message::Binary(bytes)=>wire::decode(&bytes)?,Message::Text(text)=>serde_json::from_str(&text)?,Message::Ping(bytes)=>{sink.send(Message::Pong(bytes)).await?;continue},Message::Close(_)=>anyhow::bail!("closed"),_=>continue};
             match x["t"].as_str().unwrap_or("") {
                 "view"=>{ensure!(x["version"]==1&&x["renderer"]=="mobile"&&x["generation"].is_string()&&x["epoch"].is_string(),"unsupported hub greeting");v.greeting=x;let request=v.request("view.open",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;},
                 "reply"=>{
@@ -104,15 +110,27 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                     if let Some(is_post)=v.outgoing.remove(&id) {if x["ok"]==true {if is_post {let _=events.send(Event::Accepted).await;}}else{let _=events.send(Event::Error(format!("Hub refused request: {}",x["error"]["code"]))).await;}continue;}
                     let Some((revision,target,method))=v.pending.remove(&id) else{continue};
                     if x["ok"]!=true {let _=events.send(Event::Error(format!("View request refused: {}",x["error"]["code"]))).await;continue;}
-                    let merged;let r=if let Some(control)=x["result"]["controlId"].as_u64() {
+                    let mut r:Value=x["result"].take();
+                    if let Some(control)=r["controlId"].as_u64() {
                         let c=v.controls.remove(&control).filter(|c|c.done);
                         let Some(c)=c else{anyhow::bail!("segmented reply incomplete")};
                         let values:Value=serde_json::from_str(&c.parts.concat())?;
                         ensure!(values.is_object()&&values.get("shown").is_none(),"invalid control values");
-                        let mut m=x["result"].clone();m.as_object_mut().unwrap().remove("controlId");
-                        for(k,val)in values.as_object().unwrap(){if m.get(k).is_none(){m[k]=val.clone();}}
-                        merged=m;&merged
-                    } else {&x["result"]};
+                        r.as_object_mut().unwrap().remove("controlId");
+                        for(k,val)in values.as_object().unwrap(){if r.get(k).is_none(){r[k]=val.clone();}}
+                    }
+                    let offered=v.offered.remove(&id).unwrap_or_default();
+                    if r.get("viewDelta").is_some() {
+                        let draft=v.session["sel"].as_str().and_then(|s|v.session["drafts"][s].as_str()).map(str::to_string);
+                        match delta::picture(r,&offered,revision,&v.bases,draft.as_deref()) {
+                            Ok((full,token,body))=>{v.bases.keep(token,body);r=full;},
+                            Err(error)=>{ // fail this reply and ask for the whole view next time
+                                eprintln!("GPUI_LOG {{\"delta\":{}}}",Value::String(format!("{error:#}")));
+                                v.bases.clear();v.dirty=true;continue;
+                            }
+                        }
+                    }
+                    let r=&r;
                     if target!=v.target||revision!=v.revision {v.dirty=true;continue;}
                     ensure!(r["version"]==1&&r["hub"]==v.hub&&r["generation"]==v.greeting["generation"]&&r["epoch"]==v.greeting["epoch"]&&r["requestRevision"]==revision&&r["target"]==target,"view identity mismatch");
                     v.view_id=r["viewId"].as_str().context("missing view id")?.to_string();
