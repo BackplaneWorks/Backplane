@@ -133,4 +133,16 @@ check('a picture of a thread read before draws the bodies read for it; never ano
  assert(read(b.projectHeld(rootB,'thread:a')).includes('b prefix'),'held parts only touch their own ids');
  assert.equal(requests.filter(r=>r.entryId==='n').length,0,'held drawing asks nothing');
 });
+check('a body not read yet whose whole text a prefetched picture had draws it as its first page will, and still reads the page',()=>{
+ const {b,requests}=setup();
+ b.renderBody=n=>({...n,tag:'div',kids:list([node('p','',{},[text(read(n))])])});
+ b.wholes(node('div','timeline',{id:'timeline'},[node('bp-memo','m',{fn:'msg',who:'a'},[text('the whole message')]),node('bp-memo','@live:x',{fn:'msg'},[text('streaming')])]));
+ const before=b.project(root());
+ assert(read(before).includes('the whole message'),'the whole text at once');assert(!read(before).includes('Loading message text'),'nothing says it is loading');
+ b.observe(timeline(b,false,'next',true,root()),true);assert.equal(requests.length,1,'the page is still read');
+ assert(b.accept({id:'m',thread:'a',version:'7',bodyPage:1,start:0,end:17,total:17,text:'the whole message',hasMore:false,complete:true,cursor:'',previous:''},requests[0]));
+ const after=b.project(root()),part=k=>JSON.stringify(elems(elems(k.kids).find(x=>attrs(x).class==='body body-window').kids)[0]);
+ assert.equal(part(elems(after.kids)[0]),part(elems(before.kids)[0]),'the page draws the very same part');
+ assert(!b.whole.has('@live:x'),'never a streaming row');
+});
 console.log(JSON.stringify({pass:true,checks,scope:'Read-only body source, bounded retention and current owner/version fences; no service or DOM/anchor qualification'}));

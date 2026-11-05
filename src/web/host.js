@@ -770,6 +770,8 @@ const previewViews = new ViewPrefetch({
   decode:data=>Wire.plain(Wire.cbor(new Uint8Array(data), KEYS, WORDS)),
   picture:(shown, session, target, scope)=>{
     transitionViews.put({...scope,target,selected:session.sel,route:session.route||null,settings:false},shown);
+    // (its messages whole: a first visit draws them so before their pages come)
+    if (target.kind === "thread") bodyWindows.wholes(pictureNode(shown));
   },
   // (the thread on show with its runs open: only what they hold is kept)
   folds:(shown, target, window)=>{
