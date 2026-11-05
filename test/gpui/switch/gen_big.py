@@ -1,46 +1,68 @@
 #!/usr/bin/env python3
-"""Synthetic events.jsonl of realistic shape (fresh data, no real content).
-usage: gen_log.py OUT N_EVENTS [SEED]
-Mix (from a stand-in hub log): SettingSet ~40%, MessagePosted ~25%, ActivityLogged ~20%, UsageSet ~10%, TurnChanged ~5%.
-One thread holds 3% of all events (a long conversation); the rest follow a heavy-tailed size."""
-import json,random,sys
-out,n=sys.argv[1],int(sys.argv[2]);rnd=random.Random(int(sys.argv[3]) if len(sys.argv)>3 else 1)
-t0=1_785_000_000; span=90*86400
-nproj=max(3,n//20000); nth=max(5,n//150)
-words="board layout net rail footprint pad via trace schematic symbol resistor capacitor regulator decoupling clearance drill copper pour thermal connector header ground power signal clock reset sensor antenna stackup impedance routing placement review revision gerber bom".split()
-def text(k):
-    return " ".join(rnd.choice(words) for _ in range(k))
-def para():
-    return ". ".join(text(rnd.randint(6,22)).capitalize() for _ in range(rnd.randint(8,36)))+"."
-w=open(out,"w",buffering=1<<20)
-def put(o):w.write(json.dumps(o,separators=(",",":"))+"\n")
-projs=[f"p{t0}-{i}" for i in range(nproj)]
-for i,p in enumerate(projs):put({"$":"ProjectCreated","id":p,"title":f"synthetic {i}","root":f"/tmp/synthetic/proj{i}","at":t0})
-ths=[f"t{t0}-{1000+i}" for i in range(nth)]
-for i,t in enumerate(ths):put({"$":"ThreadCreated","id":t,"project":projs[i%nproj],"title":f"Thread {i}","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":t0+i})
-# weights: thread 0 is the long one
-wts=[0.03*n]+[ (rnd.paretovariate(1.3)) for _ in ths[1:]]
-tot=sum(wts[1:]);wts=[wts[0]]+[x/tot*0.97*n for x in wts[1:]]
-cum=[];s=0
-for x in wts:s+=x;cum.append(s)
-import bisect
-c=0;used=nproj+nth
-mid=0
-while used<n:
-    r=rnd.random()*cum[-1];ti=bisect.bisect_left(cum,r);th=ths[min(ti,len(ths)-1)]
-    at=t0+int(span*used/n);k=rnd.random()
-    if k<0.40:
-        key=rnd.choice(["liveness","autosettle.quiet","autosettle.output","tok.basis","turn.from","provider.resume"])+"."+th
-        put({"$":"SettingSet","key":key,"value":json.dumps({"last":at,"n":c}) if key.startswith("liveness") else str(at),"at":at})
-    elif k<0.65:
-        mid+=1;role="user" if rnd.random()<0.2 else "assistant"
-        put({"$":"MessagePosted","thread":th,"msg":f"m{at}-{mid}","role":role,"text":para() if role=="assistant" else text(rnd.randint(4,30)),"at":at})
-    elif k<0.85:
-        mid+=1;put({"$":"ActivityLogged","thread":th,"act":f"g{at}-{mid}","tone":rnd.choice(["tool","tool","tool","info","step"]),"kind":rnd.choice(["Bash","Read","Edit","Grep"]),"summary":text(rnd.randint(30,110)),"at":at})
-    elif k<0.95:
-        put({"$":"UsageSet","thread":th,"used":20000+rnd.randint(0,150000),"window":0,"at":at})
-    else:
-        put({"$":"TurnChanged","thread":th,"state":rnd.choice(["completed","completed","failed"]),"at":at})
-    used+=1;c+=1
-put({"$":"SettingSet","key":"restart.continue","value":"off","at":t0+span})
+"""Synthetic events.jsonl shaped like the real store by COUNTS only (no content): python3 gen_big.py OUT [SEED]
+Counts from scripts/gpui/count_events.py on the store copy, as written in docs/gpui/PRESENTER-PORT.md:
+ 1,691,619 events; SettingSet 620,596 over 186,511 distinct keys (prefix sizes below, mean key 39.7 B, keys born steadily);
+ ActivityLogged 301,120, MessagePosted 156,608 (27.1% entries), UsageSet 103,704, TurnChanged 97,769, the rest small kinds;
+ 12,446 ThreadCreated created steadily (1,898 by 25% of the events, 5,714 by 50%, 9,317 by 75%), 65 projects at the start.
+Text sizes are tuned so the file lands near the real 1.48 GB. Text is random words from a pool, never anything real."""
+import json, random, sys, bisect
+out = sys.argv[1]; rnd = random.Random(int(sys.argv[2]) if len(sys.argv) > 2 else 7)
+N = 1_691_619; NTH = 12_446; NPROJ = 65; T0 = 1_785_000_000; SPAN = 90 * 86400
+C = dict(setting=620_596, activity=301_120, message=156_608, usage=103_704, turn=97_769)
+NKEYS = 186_511
+PREFIX = [("fallback", 23_500), ("run", 20_800), ("summary", 18_900), ("turn", 16_700), ("account", 16_300), ("restart", 11_500), ("provider", 11_500), ("tok", 11_300)]
+REST = ["liveness", "autosettle", "stopped", "launch", "told", "alert", "desk", "fab", "probe", "emb", "fold", "rule", "board", "split", "sch"]
+OTHER = ["ToolOpen", "ToolShut", "AskOpened", "AskAnswered", "NoticePosted", "TaskSet", "LockChanged", "BotWoke", "RoutineFired", "ProjectSet", "WorktreeSet",
+         "ThreadRenamed", "ThreadPinned", "QueueSet", "ReviewOp", "StepLogged", "TerminalOpened", "AlertSet", "SessionSet", "ModelSet"]
+n_other = N - NPROJ - NTH - sum(C.values())
+words = "board layout net rail footprint pad via trace schematic symbol resistor capacitor regulator decoupling clearance drill copper pour thermal connector header ground power signal clock reset sensor antenna stackup impedance routing placement silkscreen solder mask panel fiducial bracket enclosure mount tolerance datasheet package voltage current".split()
+pool = [" ".join(rnd.choice(words) for _ in range(rnd.randint(25, 160))).capitalize() + "." for _ in range(3000)]
+def text(k): return " ".join(rnd.choice(pool) for _ in range(k))
+# thread creation positions: piecewise-linear inverse of the real cumulative curve
+pts = [(0, 0), (.25, 1898), (.5, 5714), (.75, 9317), (1, NTH)]
+def pos_of(j):  # j-th thread (0-based) -> position in 0..1
+    for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+        if j < y1: return x0 + (x1 - x0) * (j - y0) / (y1 - y0)
+    return 1.0
+th_at = sorted(int(pos_of(j) * (N - NPROJ - NTH)) for j in range(NTH))
+# the non-thread schedule, exact counts, shuffled
+kinds = ["setting"] * C["setting"] + ["activity"] * C["activity"] + ["message"] * C["message"] + ["usage"] * C["usage"] + ["turn"] * C["turn"] + ["other"] * n_other
+rnd.shuffle(kinds)
+# setting keys: exact distinct count, born at random setting slots
+keys = []
+for pfx, n in PREFIX: keys += [f"{pfx}.{rnd.getrandbits(128):032x}" for _ in range(n)]
+rest = NKEYS - len(keys)
+for i in range(rest): keys.append(f"{REST[i % len(REST)]}.{rnd.getrandbits(128):032x}")
+rnd.shuffle(keys)
+birth = set(rnd.sample(range(1, C["setting"]), NKEYS - 1)) | {0}
+w = open(out, "w", buffering=1 << 20)
+def put(o): w.write(json.dumps(o, separators=(",", ":")) + "\n")
+projs = [f"p{T0}-{i}" for i in range(NPROJ)]
+for i, p in enumerate(projs): put({"$": "ProjectCreated", "id": p, "title": f"synthetic {i}", "root": f"/tmp/synthetic/proj{i}", "at": T0})
+ths = []; born = []; ki = 0; si = 0; mid = 0; ti = 0
+def pick_thread():
+    # heavy-tailed over the threads that exist (older threads busier), thread 0 holds ~3%
+    if rnd.random() < 0.03: return ths[0]
+    return ths[min(len(ths) - 1, int(len(ths) * (rnd.random() ** 1.7)))]
+for i, kd in enumerate(kinds):
+    while ti < NTH and th_at[ti] <= i:
+        t = f"t{T0}-{1000 + len(ths)}"; ths.append(t)
+        put({"$": "ThreadCreated", "id": t, "project": projs[len(ths) % NPROJ], "title": f"Thread {len(ths)}", "env": "local", "branch": "", "worktree": "", "provider": "claude", "model": "", "at": T0 + int(SPAN * i / N)}); ti += 1
+    at = T0 + int(SPAN * i / N)
+    if kd == "setting":
+        if si in birth: k = keys[ki]; ki += 1; born.append(k)
+        else: k = born[rnd.randrange(len(born))]
+        si += 1
+        put({"$": "SettingSet", "key": k, "value": json.dumps({"last": at, "n": si}) if k.startswith(("run", "turn")) else str(at), "at": at})
+    elif kd == "message" and ths:
+        mid += 1; role = "user" if rnd.random() < 0.2 else "assistant"
+        put({"$": "MessagePosted", "thread": pick_thread(), "msg": f"m{at}-{mid}", "role": role, "text": text(rnd.randint(1, 2) if role == "user" else rnd.randint(2, 12)), "at": at})
+    elif kd == "activity" and ths:
+        mid += 1; put({"$": "ActivityLogged", "thread": pick_thread(), "act": f"g{at}-{mid}", "tone": rnd.choice(["tool", "tool", "tool", "info", "step"]), "kind": rnd.choice(["Bash", "Read", "Edit", "Grep"]), "summary": text(rnd.randint(1, 6)), "at": at})
+    elif kd == "usage" and ths: put({"$": "UsageSet", "thread": pick_thread(), "used": 20000 + rnd.randint(0, 150000), "window": 0, "at": at})
+    elif kd == "turn" and ths: put({"$": "TurnChanged", "thread": pick_thread(), "state": rnd.choice(["completed", "completed", "failed"]), "at": at})
+    else: put({"$": rnd.choice(OTHER), "thread": ths[-1] if ths else "", "at": at})
+while ti < NTH:
+    t = f"t{T0}-{1000 + len(ths)}"; ths.append(t); put({"$": "ThreadCreated", "id": t, "project": projs[0], "title": "Thread", "env": "local", "branch": "", "worktree": "", "provider": "claude", "model": "", "at": T0 + SPAN}); ti += 1
+put({"$": "SettingSet", "key": "restart.continue", "value": "off", "at": T0 + SPAN})
 w.close()
