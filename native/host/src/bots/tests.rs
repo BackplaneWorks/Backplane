@@ -917,22 +917,27 @@ impl mail::owner::OwnerLink for ToHolder {
         Box::pin(async move { self.sent.lock().unwrap().push(link.to_string()); if link != "linkB" { return None } let o: Value = serde_json::from_str(&body).unwrap(); Some(self.holder.owner_received(&self.as_link, &o).await) })
     }
 }
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn owner_mail_moves_waiting_mail_to_the_holder_and_is_acknowledged_once() {
+struct Pair { hb: Arc<Hub>, bb: Arc<Bots>, ha: Arc<Hub>, ba: Arc<Bots>, ua: String, ubb: String, uid: String, ame: String, bme: String }
+/// machine B holds the uberbot's conversation; machine A has a replica of it (same uid, the lease held by B) and the two know each other's links
+async fn owner_pair(tag: &str) -> Pair {
     std::env::set_var("TZ", "Etc/UTC");
-    // machine B holds the uberbot's conversation; machine A has a replica and gets mail for it. The outbox plans the recipient, sends the signed request, and clears its ticket on "committed".
-    let (hb, bb, _r) = start("ownerB", "").await;
+    let (hb, bb, _r) = start(&format!("owner{tag}B"), "").await;
     let r = rpc(&hb, "bots.create", json!({"name":"bub","uber":true})).await; assert_eq!(r["ok"], true);
     until(&hb, |l| l.iter().any(|e| e["$"] == "UberSet") && l.iter().any(|e| e["$"] == "WorktreeSet")).await;
     assert!(bb.uber_init(now_s()).await > 0);
     let lb = log(&hb); let uid = lb.iter().find(|e| e["$"] == "UberSet").unwrap()["uid"].as_str().unwrap().to_string();
     let bme = hb.setting("machine.id").await.unwrap(); let ubb = lb.iter().find(|e| e["$"] == "UberSet").unwrap()["bot"].as_str().unwrap().to_string();
-    let (ha, ba, _ra) = start("ownerA", "").await;
+    let (ha, ba, _ra) = start(&format!("owner{tag}A"), "").await;
     let ua = bot(&ha, "ua").await; let ame = ha.setting("machine.id").await.unwrap(); assert_ne!(ame, bme);
     let mut evs: Vec<Value> = vec![json!({"$":"UberSet","bot":ua,"uid":uid,"at":5})];
     evs.extend(lb.iter().filter(|e| e["$"] == "UberOp").cloned());
     evs.push(json!({"$":"SettingSet","key":format!("uber.link.{uid}.{bme}"),"value":"linkB","at":6}));
     ha.commit_many(&evs).await.unwrap();
     hb.commit(&json!({"$":"SettingSet","key":format!("uber.link.{uid}.{ame}"),"value":"linkA","at":6})).await.unwrap();
+    Pair { hb, bb, ha, ba, ua, ubb, uid, ame, bme }
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn owner_mail_moves_waiting_mail_to_the_holder_and_is_acknowledged_once() {
+    let Pair { hb, bb, ha, ba, ua, ubb, uid, ame, bme } = owner_pair("main").await;
     let link = Arc::new(ToHolder { holder: bb.clone(), as_link: "linkA".into(), sent: Default::default() });
     ba.set_owner_link(link.clone());
     // mail for the uberbot arrives on A: filed, with a pending ticket
@@ -959,4 +964,48 @@ impl mail::owner::OwnerLink for ToHolder {
     assert_eq!(bb.owner_received("linkA", &req(1, "m-new")).await.0, 400, "a ticket whose body is not there is invalid");
     assert_eq!(rpc(&hb, "mail.list", json!({})).await["result"]["total"], 1);
     assert!(key.starts_with("owner:["));
+}
+
+/// a link whose request takes a while (and counts), standing in for a slow machine
+struct Slow { n: std::sync::atomic::AtomicUsize }
+impl mail::owner::OwnerLink for Slow {
+    fn post<'a>(&'a self, _l: &'a str, _b: String) -> Fut<'a, Option<(u16, String)>> { Box::pin(async move { self.n.fetch_add(1, std::sync::atomic::Ordering::SeqCst); tokio::time::sleep(std::time::Duration::from_millis(400)).await; None }) }
+}
+/// plan a pending ticket for A's outbox: file mail for the owner, then one walk that chooses the recipient
+async fn owner_planned(p: &Pair) {
+    assert_eq!(rpc(&p.ha, "mail.send", json!({"to":format!("bot:{}", p.ua),"text":"hi"})).await["ok"], true);
+    p.ba.owner_outbox().await;
+    assert_eq!(p.ba.owner_records().await[0]["to"], p.bme.as_str());
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn the_owner_outbox_has_one_walker_at_a_time_and_a_walk_ends() {
+    let p = owner_pair("walk").await; owner_planned(&p).await;
+    let link = Arc::new(Slow { n: Default::default() }); p.ba.set_owner_link(link.clone());
+    let (b1, b2) = (p.ba.clone(), p.ba.clone());
+    let (w1, w2) = (tokio::spawn(async move { b1.owner_outbox().await }), tokio::spawn(async move { tokio::time::sleep(std::time::Duration::from_millis(100)).await; b2.owner_outbox().await }));
+    let _ = tokio::join!(w1, w2);
+    assert_eq!(link.n.load(std::sync::atomic::Ordering::SeqCst), 1, "the second walk saw the first still going and left");
+    p.ba.owner_outbox().await;
+    assert_eq!(link.n.load(std::sync::atomic::Ordering::SeqCst), 2, "a walk that ended lets the next one run");
+}
+#[test] fn owner_copy_child_probe() {
+    if std::env::var("BP_OWNER_COPY_PROBE").ok().as_deref() != Some("1") { return }
+    assert!(crate::copy::on());
+    tokio::runtime::Builder::new_multi_thread().worker_threads(4).enable_all().build().unwrap().block_on(async {
+        let p = owner_pair("copy").await;
+        assert_eq!(rpc(&p.ha, "mail.send", json!({"to":format!("bot:{}", p.ua),"text":"hi"})).await["ok"], true);
+        // a walk plans nothing on a copy, so the ticket is given its recipient by hand: the one thing left to stop is the request
+        let r = p.ba.owner_records().await.remove(0); let next = mail::owner::attempt(&r, &p.bme, 1, "s");
+        p.ha.commit(&json!({"$":"SettingSet","key":mail::owner::pending_key(&mail::owner::key(&r)),"value":next.to_string(),"at":9})).await.unwrap();
+        let link = Arc::new(Slow { n: Default::default() }); p.ba.set_owner_link(link.clone());
+        p.ba.owner_outbox().await;
+        assert_eq!(link.n.load(std::sync::atomic::Ordering::SeqCst), 0, "a hub on a copy of a log sends no mail to anyone");
+        assert_eq!(p.ba.owner_records().await.len(), 1);
+    });
+}
+#[test] fn a_hub_on_a_copy_walks_no_owner_outbox() {
+    let me = std::env::current_exe().unwrap();
+    let o = std::process::Command::new(me).args(["bots::tests::owner_copy_child_probe", "--exact", "--nocapture", "--test-threads=1"])
+        .env("BACKPLANE_COPY", "1").env("BP_OWNER_COPY_PROBE", "1").env_remove("BACKPLANE_AGENTS").output().unwrap();
+    assert!(o.status.success(), "{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
+    assert!(String::from_utf8_lossy(&o.stdout).contains("owner_copy_child_probe ... ok"), "the probe ran: {}", String::from_utf8_lossy(&o.stdout));
 }

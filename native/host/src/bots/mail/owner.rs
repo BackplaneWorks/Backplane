@@ -12,10 +12,15 @@ use crate::{api::Fut, bots::{rpc::{now_s, Bots}, world::World}};
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-/// A signed request to a linked machine: (HTTP status, body) or None when it could not be made (no route, the link is not the owner's, a timeout)
+/// A signed request to a linked machine: (HTTP status, body) or None when it could not be made (no route, the link is not the owner's, a timeout).
+/// The implementation must send only to a link that is one of the owner's machines (Far.own.id: the request carries a ticket and the mail's text) and must end
+/// every call in bounded time (the walk waits for it; it also cuts a call off after `POST_TIMEOUT`).
 pub trait OwnerLink: Send + Sync {
     fn post<'a>(&'a self, link: &'a str, body: String) -> Fut<'a, Option<(u16, String)>>;
 }
+
+/// longest a walk waits on one request
+pub const POST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 fn gs<'a>(v: &'a Value, k: &str) -> &'a str { v.get(k).and_then(Value::as_str).unwrap_or("") }
 fn gn(v: &Value, k: &str) -> u64 { v.get(k).and_then(Value::as_u64).unwrap_or(0) }
@@ -114,8 +119,14 @@ impl Bots {
         out
     }
 
-    /// OwnerJob.records: each pending ticket is read back from the journal and either routed here, sent to its holder, or planned again
+    /// OwnerJob.records: each pending ticket is read back from the journal and either routed here, sent to its holder, or planned again.
+    /// Nothing on a hub started on a copy of a log (Copy.on: OwnerJob.start.on), one walker at a time (Fh.busy), and every decision about a ticket is made and
+    /// committed under the world lock: Owner.current is only meaningful if the check and the write are one step, as in Bend's actor.
     pub async fn owner_outbox(&self) {
+        if crate::copy::on() { return }
+        if self.owner_busy.swap(true, std::sync::atomic::Ordering::AcqRel) { return }
+        struct Idle<'a>(&'a std::sync::atomic::AtomicBool); impl Drop for Idle<'_> { fn drop(&mut self) { self.0.store(false, std::sync::atomic::Ordering::Release) } }
+        let _idle = Idle(&self.owner_busy);
         for r in self.owner_records().await {
             let (home, conv, id) = (self.hub.cfg.home.clone(), gs(&r, "conv").to_string(), gs(&r, "id").to_string());
             let ids: std::collections::HashSet<String> = [id].into();
@@ -124,16 +135,17 @@ impl Bots {
             let to = gs(&r, "to").to_string();
             if to.is_empty() {
                 let w = self.world().await;
-                if remote(&w) { let evs = self.owner_plan(&w, &r).await; drop(w); self.owner_commit(evs).await }
+                if remote(&w) { let evs = self.owner_plan(&w, &r).await; self.owner_commit(evs).await }
                 else if self.owner_current(&r).await { drop(w); if let Some(rt) = self.router.get() { rt.routed(&b) } } // Hub.owner.ready: Mail.route
                 continue
             }
             let (link, req) = { let w = self.world().await; (w.link_of(&to), self.owner_request(&w, &r, &b).await) };
             let Some(l) = self.owner_link.get() else { continue };
             if link.is_empty() { continue }
-            match l.post(&link, req).await {
-                Some((200, body)) if response_is(&body, &r, "committed") => { let w = self.world().await; let evs = self.owner_sent(&w, &r).await; drop(w); self.owner_commit(evs).await }
-                Some((409, body)) if response_is(&body, &r, "moved") => { let w = self.world().await; let evs = self.owner_plan(&w, &r).await; drop(w); self.owner_commit(evs).await }
+            let ans = tokio::time::timeout(POST_TIMEOUT, l.post(&link, req)).await.ok().flatten();
+            match ans {
+                Some((200, body)) if response_is(&body, &r, "committed") => { let w = self.world().await; let evs = self.owner_sent(&w, &r).await; self.owner_commit(evs).await }
+                Some((409, body)) if response_is(&body, &r, "moved") => { let w = self.world().await; let evs = self.owner_plan(&w, &r).await; self.owner_commit(evs).await }
                 _ => {}
             }
         }
