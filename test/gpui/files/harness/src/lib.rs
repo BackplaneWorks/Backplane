@@ -7,6 +7,8 @@ pub mod files {
   #[path = "../../../../../../native/host/src/files/dir.rs"] pub mod dir;
   #[path = "../../../../../../native/host/src/files/serve.rs"] pub mod serve;
   #[path = "../../../../../../native/host/src/files/git.rs"] pub mod git;
+  #[path = "../../../../../../native/host/src/files/attach.rs"] pub mod attach;
+  #[path = "../../../../../../native/host/src/files/mimg.rs"] pub mod mimg;
   #[path = "../../../../../../native/host/src/files/threadpath.rs"] pub mod threadpath;
 }
 pub mod kicad {
