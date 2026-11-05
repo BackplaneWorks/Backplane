@@ -33,3 +33,14 @@ law fm_parent_top rust fm_parent_join
 law fm_parent_down rust fm_parent_join
 law fm_join_root rust fm_parent_join
 law outbox_fifo rust outbox_fifo
+law interrupt_idle_nothing rust interrupt_idle_nothing
+law claude_result_after_stop_quiet rust claude_result_after_stop_quiet
+law claude_delta_after_stop_quiet rust claude_delta_after_stop_quiet
+law usage_same_nothing rust usage_same_nothing
+law carry_continues rust carry_continues
+law carry_leaves_idle rust carry_leaves_idle
+law carry_off_nothing rust carry_off_nothing
+law carry_once rust carry_once
+law carry_twice_once rust carry_twice_once
+law carry_skips_archived rust carry_skips_archived
+law steer_claude_in_place rust steer_claude_in_place
