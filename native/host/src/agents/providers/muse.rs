@@ -1,1 +1,3 @@
-//! muse: see mod.rs. Owned by the provider lane named there.
+//! The `muse` provider's driver (contract: providers/mod.rs; reference: providers/codex.rs). Owned by its lane.
+use super::Made;
+pub fn driver(_provider: &str) -> Option<Made> { None }
