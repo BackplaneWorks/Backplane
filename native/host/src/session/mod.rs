@@ -44,6 +44,9 @@ fn target_valid(t: &Value) -> bool {
     within(i, 1024) && ((k == "recent" && i.is_empty()) || (!i.is_empty() && matches!(k, "project" | "thread" | "bot" | "room")))
 }
 
+/// ThinContext.anchor == 0: the request asks for the newest window (no anchor, or the anchor at offset 0 with no id).
+fn read_anchor_newest(p: &Value) -> bool { p["anchor"]["offset"].as_u64().unwrap_or(0) == 0 && p["anchor"]["id"].as_str().map_or(true, str::is_empty) }
+
 impl Hub {
     /// The view branch of `Hub::request`: `m` starts with "view.".
     pub(crate) async fn view_request(&self, c: &mut Conn, id: Value, m: &str, msg: &Value) -> Vec<Value> {
@@ -102,6 +105,15 @@ impl Hub {
         let mut result = self.assemble(&p, &view_id, rev, &pol);
         if let (Some(w), Some(o)) = (window, result.as_object_mut()) { if o.contains_key("window") { o.insert("window".into(), w); } }
         let result = Self::delta_reply(c, &p, result);
+        // Hub.autosettle.read_view: explicitly opening a thread's newest conversation acknowledges its resident reply (not searches, history
+        // pages, stale or passive polls): the policies decide (0 or 1 SettingSet autosettle.read.<t>), committed here after the answer is built
+        if m == "view.open" && result["remoteReady"] == json!(true) && result.get("nextTarget").is_none() && read_anchor_newest(&p) {
+            let th = match p["target"]["kind"].as_str() { Some("thread") => p["target"]["id"].as_str().map(str::to_string), Some("bot") => bot.as_ref().map(|(_, t)| t.clone()), _ => None };
+            if let (Some(th), Some(pol)) = (th.filter(|t| !t.is_empty() && !self.far().map_or(false, |f| f.has(t))), crate::statehost::policies()) {
+                let me = self.arc();
+                tokio::spawn(async move { let evs = pol.read(&th, now_ms() / 1000).await; if !evs.is_empty() { let _ = me.commit_many(&evs).await; } });
+            }
+        }
         let answer = json!({"t":"reply","id":id,"ok":true,"result":result});
         let text = serde_json::to_string(&answer).unwrap_or_default();
         if text.len() <= REPLY_BYTES { return vec![answer] }
@@ -188,5 +200,17 @@ impl Hub {
             if let Some(ov) = pol.get("overlay") { o.insert("overlay".into(), ov.clone()); }
         }
         Value::Object(o)
+    }
+}
+
+#[cfg(test)]
+mod read_tests {
+    use super::*;
+    // ThinContext.anchor == 0 (Hub.autosettle.read_view): only a request for the newest window acknowledges a reply
+    #[test] fn only_the_newest_window_open_counts_as_a_read() {
+        assert!(read_anchor_newest(&json!({"target": {"kind": "thread", "id": "t1"}})));
+        assert!(read_anchor_newest(&json!({"anchor": {"id": "", "offset": 0}})));
+        assert!(!read_anchor_newest(&json!({"anchor": {"id": "m5", "offset": 0}})));
+        assert!(!read_anchor_newest(&json!({"anchor": {"id": "", "offset": 3}})));
     }
 }
