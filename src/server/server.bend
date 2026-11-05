@@ -13690,39 +13690,35 @@ def Hub.thin.page.memo(on: Bool, +st: M.State, +context: ThinContext, +base: Str
 # rows move): with 20 bots streaming those reads cost the hub ~3 s a minute.
 # (Not its diff: git.diff stages the work tree through the thread's own
 # index, and one ahead could take that index's lock from the Diff pressed)
-def Kept.fields(+es: J.Json, +fs: J.Json) -> J.Json:
-  match es:
-    case J.Field{+k, +v, +t}: J.Field{k, v, Kept.fields(t, fs)}
-    case _: fs
+# (what is kept comes as keys and values in turn, no JSON to parse: a
+# thread's listings and diff run to tens of KB, read on its first render)
+def Kept.pairs(xs: List<&2, String>, +key: String, value: Bool, +fs: J.Json) -> J.Json:
+  match xs value:
+    case Nil{} _: fs
+    case +h <> rest False{}: Kept.pairs(rest, h, True{}, fs)
+    case +h <> rest True{}: J.Field{key, J.Str{h}, Kept.pairs(rest, "", False{}, fs)}
 
-def Kept.with.obj(+info: J.Json, +es: J.Json) -> J.Json:
+def Kept.with(+info: J.Json, xs: List<&2, String>) -> J.Json:
   match info:
-    case J.Obj{+fs}: J.Obj{Kept.fields(es, fs)}
+    case J.Obj{+fs}: J.Obj{Kept.pairs(xs, "", False{}, fs)}
     case _: info
 
-def Kept.with.k(+info: J.Json, +extra: J.Json) -> J.Json:
-  match extra:
-    case J.Obj{+es}: Kept.with.obj(info, es)
-    case _: info
-
-def Kept.with(+info: J.Json, +text: String) -> J.Json:
-  Kept.with.k(info, Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}))
-
+# (a moment after the render, so the press's own answer goes out first)
 def Kept.ahead(go: Bool, +thread: String, +cwd: String) -> IO(Unit):
   match go:
-    case True{}: IO.spawn(Unit, DirJob.ahead(thread, cwd))
+    case True{}: IO.spawn(Unit, IO.bind(Unit, Unit, IO.sleep(300), _ => DirJob.ahead(thread, cwd)))
     case False{}: IO.pure(Unit, Unit{})
 
 def Kept.ahead.refs(go: Bool, +thread: String, +cwd: String) -> IO(Unit):
   match go:
-    case True{}: IO.spawn(Unit, RefsJob.ahead(thread, cwd))
+    case True{}: IO.spawn(Unit, IO.bind(Unit, Unit, IO.sleep(400), _ => RefsJob.ahead(thread, cwd)))
     case False{}: IO.pure(Unit, Unit{})
 
-def Kept.info.k(on: Bool, +thread: String, +cwd: String, +since: String) -> IO(String):
+def Kept.info.k(on: Bool, +thread: String, +cwd: String, +since: String) -> IO(List<&2, String>):
   match on:
-    case False{}: IO.pure(String, "{}")
+    case False{}: IO.pure(List<&2, String>, Nil{})
     case True{}:
-      do IO<String>:
+      do IO<List<&2, String>>:
         +go : String <- VKEPT.ViewerKept.claim(thread, cwd, "fm.kept:" ++ thread ++ "\n", "600000")
         +sent : Unit <- Kept.ahead(String.eq(go, "1"), thread, cwd)
         +refs : String <- VKEPT.ViewerKept.claim(thread, cwd, "refs.kept:" ++ thread, "300000")
@@ -13735,7 +13731,7 @@ def Kept.since(xs: List<&2, TA.Actor>, +thread: String) -> String:
     case Nil{}: ""
     case a <> _: UC.Ui.info(TA.Actor.ui(a), "kept.seq:" ++ thread)
 
-def Kept.info(+st: M.State, +thread: String, +since: String) -> IO(String):
+def Kept.info(+st: M.State, +thread: String, +since: String) -> IO(List<&2, String>):
   +cwd = B.Hub.cwd(st, B.Hub.thread(st, thread))
   Kept.info.k(Bool.and(Bool.not(String.is_empty(thread)), Bool.and(Bool.not(FR.Fr.is(thread)), Bool.not(String.is_empty(cwd)))), thread, cwd, since)
 
@@ -13748,7 +13744,7 @@ def Hub.thin.render.page.shown(+v: SEC.Vault, +pg: TSTO.Page, h: Hub, +client: U
       +rows = TBODY.Body.window.bounded(TSTO.Page.ids(pg), TSTO.Page.index(pg), p)
       +stream = TLIVE.Stream.get(Cfg.thin.streams(cfg), TV.Target.thread(st, J.Json.get_obj(p, "target")))
       do IO<Hub>:
-        +kept : String <- Kept.info(st, Bool.pick(String, String.eq(J.Json.get_str(p, "cid", ""), "preview"), "", thread), Kept.since(ThinContext.actors(context), thread))
+        +kept : List<&2, String> <- Kept.info(st, Bool.pick(String, String.eq(J.Json.get_str(p, "cid", ""), "preview"), "", thread), Kept.since(ThinContext.actors(context), thread))
         +actor : TA.Actor = TA.Actor.mail_cache(TA.Actor.refresh(ThinContext.actors(context), web, shown, Kept.with(Hub.thin.pair(cfg, SEC.Sec.json(v, Hub.info(cfg))), kept),
           J.Json.obj([J.KV{"t", J.Str{"live"}}, J.KV{"items", J.Json.arr(Nil{})}]), now, p, ThinContext.view(context)), ThinContext.actors(context), Cfg.thin.mail(cfg))
         +secret : String <- Hub.thin.native_key(NATIVE_SIDE.Ns.offered(web, p), actor, p, epoch, ThinContext.view(context))

@@ -40,20 +40,26 @@ function viewerkept_drop(thread, key) {
   if (e) { t.rows.delete(key);bp_kept.chars -= key.length + e.v.length; }
   return '';
 }
-// what is kept for a thread working in cwd: a JSON object, key -> value,
-// only what changed after since (the "kept.seq:<thread>" a view was last
-// given, which comes with it: a view keeps what it was given), all of it for
-// a view given nothing yet or a number this process never gave
-function viewerkept_info(thread, cwd, since) {
+// what is kept for a thread working in cwd: keys and values in turn (a Bend
+// list), only what changed after since (the "kept.seq:<thread>" a view was
+// last given, which comes with it: a view keeps what it was given), all of it
+// for a view given nothing yet or a number this process never gave
+function kept_list(o) {
+  let out = { $: CID(Nil) };
+  for (const k of Object.keys(o).reverse()) out = { $: CID(Con), head: k, tail: { $: CID(Con), head: o[k], tail: out } };
+  return out;
+}
+function viewerkept_object(thread, cwd, since) {
   const t = typeof thread === 'string' && thread ? kept_thread(thread, cwd, false) : undefined;
-  if (!t || !t.rows.size) return '{}';
+  if (!t || !t.rows.size) return {};
   let n = /^[0-9]+$/.test(since) ? Number(since) : 0;
   if (n > bp_kept.seq) n = 0;
-  if (n >= t.seq) return '{}';
+  if (n >= t.seq) return {};
   const o = {};for (const [k, e] of t.rows) if (e.s > n) o[k] = e.v;
   o['kept.seq:' + thread] = String(t.seq);
-  return JSON.stringify(o);
+  return o;
 }
+function viewerkept_info(thread, cwd, since) { return kept_list(viewerkept_object(thread, cwd, since)); }
 // "1": nothing kept under key for a thread working in cwd (or kept longer
 // ago than maxMs), and no read of it on its way: the caller reads it now
 // (a read on its way for 15 s at most)

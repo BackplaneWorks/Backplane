@@ -6,9 +6,10 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 const effects = new Map();
 const code = fs.readFileSync('src/server/effects/viewer_kept.js', 'utf8').replace(/CID\(([^)]+)\)/g, '"$1"');
+const unlist = (xs) => { const o = {};for (; xs.$ === 'Con'; xs = xs.tail.tail) o[xs.head] = xs.tail.head;return o; };
 new Function('io_eff', code)((name, fn) => effects.set(name, fn));
 const put = (...a) => effects.get('ViewerKept.put')(...a), drop = (...a) => effects.get('ViewerKept.drop')(...a);
-const raw = (t, cwd, since = '') => JSON.parse(effects.get('ViewerKept.info')(t, cwd, since)), claim = (...a) => effects.get('ViewerKept.claim')(...a);
+const raw = (t, cwd, since = '') => unlist(effects.get('ViewerKept.info')(t, cwd, since)), claim = (...a) => effects.get('ViewerKept.claim')(...a);
 // everything kept for a thread (a view given nothing yet), without the number it comes with
 const info = (t, cwd) => { const o = raw(t, cwd);delete o['kept.seq:' + t];return o; };
 
