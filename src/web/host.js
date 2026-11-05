@@ -1398,7 +1398,10 @@ function renderPage() {
   projectSplitters.sync();
   // (a viewer pane drawn at a press is painted first: a 3D or board canvas
   // starting up in the same frame held its first picture back ~500 ms)
-  if (pressFeedback.active?.kind === "viewer") requestAnimationFrame(() => requestAnimationFrame(mountViewers));
+  // (its toolbar, though, is built in the press's frame: built with the
+  // canvas, it filled in two frames late and the stage shrank under it)
+  // and its model's last picture, when it has one (solid.js)
+  if (pressFeedback.active?.kind === "viewer") { mountTools(true); Solid.picture(document.getElementById("solid")); requestAnimationFrame(() => requestAnimationFrame(mountViewers)); }
   else mountViewers();
   ViewerTools.chipInView();
   ViewerTools.focusToggle();
@@ -1434,9 +1437,15 @@ function renderPage() {
   saveFocusedSoon();
 }
 
+// (drawnOnly: a new workbench on the page only; a kept one comes back with
+// its canvas, in mountViewers)
+function mountTools(drawnOnly = false) {
+  const root = document.getElementById("solid-workbench");
+  if (!drawnOnly || root && !ViewerTools.isKept(root)) ViewerTools.mount(root, Solid, { components: (thread, options) => viewerRpc.components(thread, options), asset: (thread, path, kind, revision, options) => viewerRpc.renderAsset(thread, path, kind, revision, options), plot: Plot2d });
+}
 function mountViewers() {
   Solid.mount(document.getElementById("solid"));
-  ViewerTools.mount(document.getElementById("solid-workbench"), Solid, { components: (thread, options) => viewerRpc.components(thread, options), asset: (thread, path, kind, revision, options) => viewerRpc.renderAsset(thread, path, kind, revision, options), plot: Plot2d });
+  mountTools();
   Plot2d.mount([...document.querySelectorAll("canvas.plot2d")]);
 }
 

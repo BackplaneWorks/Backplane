@@ -4,6 +4,7 @@ import { fittedDistance } from "./solid-framing.js";
 import { SolidAssets, decodeMesh } from "./solid-assets.js";
 import { workerDecode } from "./mesh-worker.js";
 import { vertexShader as VS, fragmentShader as FS } from "./solid-materials.js";
+import { SolidPictures } from "./solid-pictures.js";
 
 // A part in 3D on the web page.
 //
@@ -114,6 +115,28 @@ export function mesh(o) {
 const assets = new SolidAssets({ decode: workerDecode(decodeMesh), onChange(record) {
   if (view && view.key === record.key) view.receive(record);
 } });
+// each view's last drawn picture (solid-pictures.js), read in at load
+const pictures = typeof indexedDB !== "undefined" ? new SolidPictures(indexedDB) : null;
+const stateOf = (canvas) => `${canvas.dataset.scope || ""}\0${canvas.dataset.key || ""}`;
+// The picture of this canvas's thread and model shown over it until its
+// model draws, when it was taken at this very size: what the person saw
+// last, in the frame the viewer opens (then the model, at that same pose)
+export function picture(canvas) {
+  const stage = canvas?.parentElement;
+  if (!stage || !pictures || (view && view.canvas === canvas && view.count) || parked?.canvas === canvas) return null;
+  const pic = pictures.get(stateOf(canvas)), shown = stage.querySelector(":scope > img.solid-picture");
+  if (shown?.dataset.key === stateOf(canvas)) return pic;
+  shown?.remove();
+  if (!pic || pic.w !== canvas.clientWidth || pic.h !== canvas.clientHeight || pic.dpr !== viewDpr()) return null;
+  const img = pictures.image(stateOf(canvas));
+  if (!img) return null;
+  img.className = "solid-picture"; img.setAttribute("aria-hidden", "true"); img.dataset.key = stateOf(canvas);
+  canvas.after(img);
+  const stat = stage.querySelector(":scope > .viewer-stat");
+  if (stat && !stat.textContent) stat.textContent = pic.stat;
+  return pic;
+}
+function dropPicture(canvas) { canvas?.parentElement?.querySelector(":scope > img.solid-picture")?.remove(); }
 const mb = (n) => (n >= 1 << 20 ? `${(n / (1 << 20)).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 
 export function got(o, at = { bytes: 0, t: performance.now() }) {
@@ -590,10 +613,16 @@ class View {
     const dof = this.count && this.projection === "perspective" && this.aperture !== "off" && this.dof?.begin(w,h);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-    if (this.note && !this.saying) this.note.textContent = this.count ? "" : assets.get(this.key)?.error || this.waiting();
     const record = assets.get(this.key);
-    if (this.stat) this.stat.textContent = this.count && record?.status === "ready" ? this.statLine({ ...record.stats, build: record.stats.build / 1000, waited: this.waited || 0, tris: this.count / 3 }) : "";
+    // (the picture shown meanwhile keeps its stats and needs no waiting
+    // note; a failure drops it and says why)
+    if (record?.status === "failed" && !this.count) dropPicture(c);
+    const pictured = !this.count && !!c.parentElement?.querySelector(":scope > img.solid-picture");
+    if (this.note && !this.saying) this.note.textContent = this.count || pictured ? "" : record?.error || this.waiting();
+    if (this.stat && !pictured) this.stat.textContent = this.count && record?.status === "ready" ? this.statLine({ ...record.stats, build: record.stats.build / 1000, waited: this.waited || 0, tris: this.count / 3 }) : "";
     if (!this.count) return;
+    dropPicture(c);
+    if (record?.status === "ready" && !record.stale && !this.picturing) this.pictureSoon();
     gl.enable(gl.DEPTH_TEST);
     gl.useProgram(this.prog);
     const cam = this.cam, eye = cam.eye();
@@ -638,6 +667,28 @@ View.prototype.statLine = function (st) {
   return App.solid_stats(document.documentElement.lang, mb(st.bytes), k, st.waited.toFixed(1), st.build.toFixed(1), st.waited > 0.5);
 };
 
+// the picture of a settled view (1.5 s after its last draw, then when the
+// page is idle), once per pose, size and model: drawn and read in one task
+// (the context keeps no drawing buffer), even under the original model
+View.prototype.pictureSoon = function () {
+  if (!pictures) return;
+  clearTimeout(this.pictureTimer);
+  this.pictureTimer = setTimeout(() => (globalThis.requestIdleCallback || setTimeout)(() => this.takePicture(), { timeout: 3000 }), 1500);
+};
+View.prototype.takePicture = function () {
+  const c = this.canvas, record = assets.get(this.key);
+  if (this.disposed || this.contextLost || !this.gl || this.gl.isContextLost() || !c.isConnected || !this.count || !c.clientWidth || !c.clientHeight
+    || record?.status !== "ready" || record.stale || this.thermal.enabled) return;
+  const state = this.snapshot(), dpr = viewDpr(), token = JSON.stringify([this.stateKey, record.revision, c.clientWidth, c.clientHeight, dpr, state]);
+  if (token === this.pictureToken) return;
+  this.pictureToken = token;
+  const visible = this.previewVisible;
+  let url = "";
+  this.picturing = true; this.previewVisible = true;
+  try { this.draw(); url = c.toDataURL("image/webp", 0.8); } catch {} finally { this.previewVisible = visible; this.picturing = false; }
+  if (url.startsWith("data:image/")) void pictures.put({ key: this.stateKey, url, w: c.clientWidth, h: c.clientHeight, dpr, state, stat: this.stat?.textContent || "", at: Date.now() });
+};
+
 View.prototype.say = function (text) {
   this.saying = true;
   if (this.note) this.note.textContent = text;
@@ -676,6 +727,7 @@ View.prototype.restore = function(state) {
 View.prototype.dispose = function() {
   if (this.disposed) return;
   this.disposed = true;
+  clearTimeout(this.pictureTimer);
   this.ticking(false); this.resize?.disconnect(); this.events?.abort(); this.canvas.classList.remove("dragging"); this.dof?.dispose();
   if (this.frame) cancelAnimationFrame(this.frame);
   cancelAnimationFrame(this.coasting);
@@ -766,6 +818,9 @@ export function mount(canvas) {
     assets.saveState(view.stateKey,view.snapshot());
     view.key = key; view.stateKey = stateKey; view.count = 0; view.saying = false; view.expectedBox = null;
     view.box = null; view.restoreWanted = assets.getState(stateKey);
+    // (its picture shown: the model comes in at the pose the picture has)
+    const pic = view.restoreWanted ? null : picture(canvas);
+    if (pic) view.restoreWanted = structuredClone(pic.state);
     if (!view.restoreWanted) {
       view.cam = new Orbit().aim(-0.6,0.5); view.projection = "perspective"; view.exposure = 0;
       view.thermal = {enabled:false,temperature:25,liquid:0}; view.selection = null;

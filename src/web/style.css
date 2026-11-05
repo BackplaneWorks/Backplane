@@ -586,6 +586,7 @@ section.subs > .subs-head[aria-expanded="false"] > svg { transform: rotate(-90de
 .viewer-stage canvas.dragging { cursor: grabbing; }
 /* the 3D model over a soft spot of light, so a dark board stands out */
 .viewer-stage canvas#solid { background: radial-gradient(ellipse at 50% 45%, color-mix(in srgb, var(--text) 22%, var(--bg)) 0%, color-mix(in srgb, var(--text) 6%, var(--bg)) 85%); }
+.viewer-stage > img.solid-picture { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .viewer-note { position: absolute; inset: 0; display: grid; place-items: center; color: var(--faint); pointer-events: none; padding: 24px; text-align: center; }
 .viewer-note:empty { display: none; }
 /* the 3D model's load line, on the viewer's background so the model
