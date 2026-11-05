@@ -118,7 +118,7 @@ fn post(home: &Path, thread: &str, url: &str, secret: &str, body: &str) -> Resul
     let r = (|| -> Result<String, String> {
         w(&file, body).map_err(|e| e.to_string())?;
         w(&cfg, &curl_config(url, &headers(secret, now, body), &file.to_string_lossy(), &out.to_string_lossy())).map_err(|e| e.to_string())?;
-        let o = std::process::Command::new("curl").args(["-sS", "--max-time", "10", "--retry", "2", "--retry-max-time", "20", "--proto", "=http,https", "--max-redirs", "0", "-X", "POST", "-K"]).arg(&cfg).current_dir(&d).output().map_err(|e| format!("curl: {e}"))?;
+        let o = crate::proc::std_cmd(crate::proc::Kind::Net, "curl").args(["-sS", "--max-time", "10", "--retry", "2", "--retry-max-time", "20", "--proto", "=http,https", "--max-redirs", "0", "-X", "POST", "-K"]).arg(&cfg).current_dir(&d).output().map_err(|e| format!("curl: {e}"))?;
         let s = String::from_utf8_lossy(&o.stdout).trim().to_string(); Ok(s.chars().rev().take(3).collect::<Vec<_>>().into_iter().rev().collect())
     })();
     let _ = std::fs::remove_dir_all(&d);

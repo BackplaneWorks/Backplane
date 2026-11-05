@@ -33,7 +33,7 @@ pub fn rule(name: &str) -> String {
     let text = String::from_utf8_lossy(&bytes);
     let footer = text.trim_end_matches('\n').rsplit('\n').next().unwrap_or("").trim().to_string();
     if plausible(&footer) { return footer }
-    let out = std::process::Command::new("date").arg("+%z").env("TZ", name).output().ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default();
+    let out = crate::proc::std_cmd(crate::proc::Kind::Local, "date").arg("+%z").env("TZ", name).output().ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default();
     if out.len() == 5 && (out.starts_with('+') || out.starts_with('-')) { fixed_rule(&out) } else { String::new() }
 }
 

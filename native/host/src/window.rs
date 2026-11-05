@@ -26,7 +26,7 @@ pub fn request_text(thread: &str, epoch: &str, before: u64, page: &Page, ctx: &[
 pub async fn compute(bin: &Path, tmp: &Path, thread: &str, epoch: &str, before: u64, page: &Page, ctx: &[Row], p: &Value) -> Option<Value> {
     let file: PathBuf = tmp.join(format!("win-{}-{}", std::process::id(), N.fetch_add(1, Relaxed)));
     tokio::fs::write(&file, request_text(thread, epoch, before, page, ctx, p)).await.ok()?;
-    let out = tokio::process::Command::new(bin).arg(&file).output().await.ok();
+    let out = crate::proc::tokio_cmd(crate::proc::Kind::Local, bin).arg(&file).output().await.ok();
     let _ = tokio::fs::remove_file(&file).await;
     serde_json::from_slice(&out?.stdout).ok()
 }

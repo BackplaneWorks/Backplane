@@ -41,7 +41,7 @@ impl Pty {
             libc::ioctl(m.as_raw_fd(), libc::TIOCSWINSZ, &ws);
             (File::from(m), File::from_raw_fd(s))
         };
-        let mut c = Command::new(cmd);
+        let mut c = crate::proc::std_cmd(crate::proc::Kind::Terminal, cmd);
         c.args(args).env("TERM", "xterm-256color").env("COLORTERM", "truecolor").env_remove("LINES").env_remove("COLUMNS");
         if !cwd.is_empty() { c.current_dir(Path::new(cwd)); }
         c.stdin(Stdio::from(slave.try_clone()?)).stdout(Stdio::from(slave.try_clone()?)).stderr(Stdio::from(slave));

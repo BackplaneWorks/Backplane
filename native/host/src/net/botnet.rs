@@ -66,7 +66,7 @@ fn parse_resp(out: &[u8]) -> Resp {
 /// curl with its headers on stdin; stderr dropped; none from a hub on a copied log.
 pub async fn curl(args: Vec<String>, headers: String) -> Resp {
     if super::super::copy::on() { return Resp { code: 0, body: "a hub on a copied log does not run curl".into() } }
-    let Ok(mut c) = Command::new("curl").args(&args).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).kill_on_drop(true).spawn() else { return Resp { code: 0, body: "curl is not installed".into() } };
+    let Ok(mut c) = crate::proc::tokio_cmd(crate::proc::Kind::Net, "curl").args(&args).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).kill_on_drop(true).spawn() else { return Resp { code: 0, body: "curl is not installed".into() } };
     if let Some(mut i) = c.stdin.take() { let _ = i.write_all(headers.as_bytes()).await; }
     match c.wait_with_output().await { Ok(o) => parse_resp(&o.stdout), Err(_) => Resp { code: 0, body: String::new() } }
 }
@@ -104,14 +104,14 @@ pub async fn url_here(tailnet: bool, host: &str, port: u16) -> String {
 }
 /// Self.DNSName of `tailscale status --json`, without the trailing dot; "" when there is none.
 pub async fn tailscale_dns() -> String {
-    let Ok(o) = tokio::time::timeout(std::time::Duration::from_secs(5), Command::new("tailscale").args(["status", "--json"]).stderr(Stdio::null()).output()).await else { return String::new() };
+    let Ok(o) = tokio::time::timeout(std::time::Duration::from_secs(5), crate::proc::tokio_cmd(crate::proc::Kind::Net, "tailscale").args(["status", "--json"]).stderr(Stdio::null()).output()).await else { return String::new() };
     let Ok(o) = o else { return String::new() };
     serde_json::from_slice::<serde_json::Value>(&o.stdout).ok().and_then(|j| j["Self"]["DNSName"].as_str().map(|s| s.trim_end_matches('.').to_string())).unwrap_or_default()
 }
 /// This machine's name for others: BACKPLANE_NAME, else its host name.
 pub async fn name() -> String {
     if let Ok(e) = std::env::var("BACKPLANE_NAME") { if !e.trim().is_empty() { return clean(e.trim()) } }
-    let h = Command::new("hostname").stderr(Stdio::null()).output().await.ok().map(|o| String::from_utf8_lossy(&o.stdout).lines().next().unwrap_or("").trim().to_string()).unwrap_or_default();
+    let h = crate::proc::tokio_cmd(crate::proc::Kind::Local, "hostname").stderr(Stdio::null()).output().await.ok().map(|o| String::from_utf8_lossy(&o.stdout).lines().next().unwrap_or("").trim().to_string()).unwrap_or_default();
     clean(&h)
 }
 

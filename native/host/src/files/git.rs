@@ -26,7 +26,7 @@ pub async fn proc(cmd: &str, args: &[&str], cwd: &str, env: &[(&str, &str)]) -> 
     if cwd.is_empty() { return Ran { code: 2, out: "No working folder: refusing to use the hub working directory".into() } }
     // a copy of a log runs no network command (copy.rs: curl, gh, ssh, git push/fetch..., also through sh -c)
     if crate::copy::refused(cmd, args) { return Ran { code: 126, out: crate::copy::refusal(cmd) } }
-    let mut c = Command::new(cmd);
+    let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Local, cmd);
     c.args(args).current_dir(cwd).stdin(std::process::Stdio::null()).envs(GIT_ENV.iter().copied()).envs(env.iter().copied());
     match c.output().await {
         Ok(o) => { let mut out = String::from_utf8_lossy(&o.stdout).into_owned(); out.push_str(&String::from_utf8_lossy(&o.stderr)); Ran { code: o.status.code().unwrap_or(1), out } }
@@ -137,7 +137,7 @@ pub async fn refs(cwd: &str, thread: &str) -> String {
     if !super::threadpath::absolute(cwd) { return String::new() } let r = sh(REFS, &[cwd, &b64url(thread)], "/", &[]).await; if r.code == 0 { r.out } else { String::new() } }
 /// Git.show: a file as a commit has it (`git --git-dir G show OBJ`), None when it is not there.
 pub async fn show(gitdir: &str, obj: &str) -> Option<Vec<u8>> {
-    let o = Command::new("sh").args(["-c", "exec 2>/dev/null; git --git-dir=\"$1\" show \"$2\"", "sh", gitdir, obj]).current_dir("/").stdin(std::process::Stdio::null()).envs(GIT_ENV.iter().copied()).output().await.ok()?;
+    let o = crate::proc::tokio_cmd(crate::proc::Kind::Local, "sh").args(["-c", "exec 2>/dev/null; git --git-dir=\"$1\" show \"$2\"", "sh", gitdir, obj]).current_dir("/").stdin(std::process::Stdio::null()).envs(GIT_ENV.iter().copied()).output().await.ok()?;
     if o.status.success() { Some(o.stdout) } else { None }
 }
 

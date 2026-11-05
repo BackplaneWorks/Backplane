@@ -96,7 +96,7 @@ pub fn machine(home: &Path) -> Vec<Mesher> {
 }
 
 fn low(c: &mut Command, nice: bool, program: &str) { if nice { c.args(["-n", "10", program]); } }
-fn command(nice: bool, program: &str) -> Command { let mut c = Command::new(if nice { "nice" } else { program }); low(&mut c, nice, program); c.stdin(Stdio::null()).current_dir("/"); c }
+fn command(nice: bool, program: &str) -> Command { let mut c = crate::proc::std_cmd(crate::proc::Kind::Local, if nice { "nice" } else { program }); low(&mut c, nice, program); c.stdin(Stdio::null()).current_dir("/"); c }
 /// a tool's exit code once it ends, or None when it had `secs` and did not (it is stopped then: its own PID, from this spawn)
 fn wait(c: &mut Command, secs: u64) -> Option<i32> {
     let mut p = c.spawn().ok()?; let end = Instant::now() + Duration::from_secs(secs);
@@ -134,7 +134,7 @@ fn via_console(cmd: &str, input: &str, out: &str, tol: &str, nice: bool) -> u64 
 }
 /// a tool's stdout and stderr together, as Proc.run gives them; exit 127 when it cannot start
 pub fn run_merged(argv: &[&str], nice: bool) -> Ran {
-    let mut c = Command::new("sh");
+    let mut c = crate::proc::std_cmd(crate::proc::Kind::Local, "sh");
     c.args(["-c", if nice { "exec nice -n 10 \"$@\" 2>&1" } else { "exec \"$@\" 2>&1" }, "sh"]).args(argv).stdin(Stdio::null()).current_dir("/");
     match c.output() { Ok(o) => Ran { code: o.status.code().unwrap_or(1), out: String::from_utf8_lossy(&o.stdout).into_owned() }, Err(e) => Ran { code: 127, out: e.to_string() } }
 }
