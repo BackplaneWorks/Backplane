@@ -546,6 +546,7 @@ def render(S, rows):
       "iOS and Android clients. No web page; the web client is only the reference for what exists.\n")
     gates = json.load(open(os.path.join(ROOT, "docs/gpui/perf-gates.json")))
     must = json.load(open(os.path.join(ROOT, "docs/gpui/must-pass.json")))
+    w(f"Port target: `main` frozen at `{json.load(open('docs/gpui/port-target.json'))['main']}` (`docs/gpui/port-target.json`). Later `main` commits wait for the second pass.\n")
     w("## Performance gates\n")
     w("Performance is a first-class target beside feature parity. All must pass. Numbers come from `docs/gpui/perf-gates.json`, updated at each milestone.\n")
     w("| Gate | Target | Status | Latest |")
