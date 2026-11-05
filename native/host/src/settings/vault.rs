@@ -54,7 +54,11 @@ fn sh(cmd: &str, args: &[&str], input: Option<&str>) -> (bool, String) {
 }
 
 /// The backend this machine offers, in order of preference.
-fn offer() -> String {
+fn offer() -> String { offer_with(crate::copy::on()) }
+/// A hub on a copy of a real log (BACKPLANE_COPY=1) acts on nothing outside its home: the OS keyring / keychain is the user's, so a copy keeps its vault key in a
+/// file in its own home and never reads or writes the real keyring.
+fn offer_with(copy: bool) -> String {
+    if copy { return "file".into() }
     if std::env::var("BACKPLANE_VAULT_KEYRING").as_deref() == Ok("file") { return "file".into() }
     if cfg!(target_os = "macos") && which("security") { return "keychain".into() }
     if cfg!(target_os = "linux") && which("secret-tool") && (std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_some() || std::env::var_os("XDG_RUNTIME_DIR").is_some()) { return "keyring".into() }
@@ -63,7 +67,9 @@ fn offer() -> String {
 
 fn hex_key(s: &str) -> Option<[u8; 32]> { let t = s.trim(); if t.len() != 64 { return None } let b = hex::decode(t).ok()?; b.try_into().ok() }
 
-fn key_get(v: &Vault, backend: &str) -> Option<[u8; 32]> {
+fn key_get(v: &Vault, backend: &str) -> Option<[u8; 32]> { key_get_with(crate::copy::on(), v, backend) }
+fn key_get_with(copy: bool, v: &Vault, backend: &str) -> Option<[u8; 32]> {
+    if copy && backend != "file" { return None } // a copy never reads the real keyring: a vault whose key lives there stays locked
     match backend {
         "file" => hex_key(&std::fs::read_to_string(spath(v, "vault.key")).ok()?),
         "keyring" => { let (ok, o) = sh("secret-tool", &["lookup", "service", "backplane-vault", "home", &vault_id(v)], None); if ok { hex_key(&o) } else { None } }
@@ -72,7 +78,9 @@ fn key_get(v: &Vault, backend: &str) -> Option<[u8; 32]> {
     }
 }
 
-fn key_put(v: &Vault, backend: &str, key: &[u8; 32]) -> bool {
+fn key_put(v: &Vault, backend: &str, key: &[u8; 32]) -> bool { key_put_with(crate::copy::on(), v, backend, key) }
+fn key_put_with(copy: bool, v: &Vault, backend: &str, key: &[u8; 32]) -> bool {
+    if copy && backend != "file" { return false } // nor writes it
     let h = hex::encode(key);
     let stored = match backend {
         "file" => { let r = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(spath(v, "vault.key")).and_then(|mut f| f.write_all(format!("{h}\n").as_bytes())); r.is_ok() }
@@ -448,6 +456,21 @@ mod tests {
     use super::*;
     fn env_file() { std::env::set_var("BACKPLANE_VAULT_KEYRING", "file"); }
 
+    #[test] fn a_copy_never_touches_the_real_keyring() {
+        let _l = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = std::env::temp_dir().join(format!("bp-fakekr-{}", std::process::id())); let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();
+        let mark = dir.join("called");
+        for n in ["secret-tool", "security"] { let f = dir.join(n); std::fs::write(&f, format!("#!/bin/sh\necho $0 >> {}\nexit 1\n", mark.display())).unwrap(); std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap(); }
+        let old = std::env::var_os("PATH").unwrap_or_default(); let mut p = vec![dir.clone()]; p.extend(std::env::split_paths(&old)); std::env::set_var("PATH", std::env::join_paths(p).unwrap());
+        std::env::remove_var("BACKPLANE_VAULT_KEYRING");
+        let v = Vault { home: dir.clone(), items: vec![], key: None, backend: String::new(), locked: false, why: String::new(), flush: String::new() };
+        assert_eq!(offer_with(true), "file", "a copy keeps its key in its own home");
+        for b in ["keyring", "keychain"] { assert_eq!(key_get_with(true, &v, b), None, "{b}: not read"); assert!(!key_put_with(true, &v, b, &[7u8; 32]), "{b}: not written"); }
+        assert!(!mark.exists(), "neither secret-tool nor security was run");
+        // the same fake tools ARE reached when this is not a copy, so the check above can fail
+        let _ = key_get_with(false, &v, "keyring"); assert!(mark.exists(), "the probe works: a real hub does reach the keyring tool");
+        std::env::set_var("PATH", old); let _ = std::fs::remove_dir_all(&dir);
+    }
     #[test] fn iso_now_has_the_javascript_shape() { let t = iso_now(); assert_eq!(t.len(), 24); assert!(t.ends_with('Z') && &t[10..11] == "T" && t.starts_with("20")); }
     #[test] fn a_value_is_sealed_at_rest_and_opens_again() {
         let _l = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner()); env_file();
