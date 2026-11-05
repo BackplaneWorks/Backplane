@@ -286,3 +286,24 @@ mod thread_binding_tests {
         assert!(recent(&st,&p).is_none(),"unsupported zone survives the lean fold and refuses the static thread");
     }
 }
+
+#[cfg(test)]
+mod selected_thread_tests {
+    use super::*;
+    #[test] fn a_selected_project_and_thread_outside_the_first_page_remain_in_source_order() {
+        let mut st=State::new(); st.lean=true;
+        for i in 0..12 {
+            st.apply(&json!({"$":"ProjectCreated","id":format!("p{i}"),"title":"P","root":"/tmp/synthetic","at":i+1}));
+            for j in 0..100 { st.apply(&json!({"$":"ThreadCreated","id":format!("t{i}-{j}"),"project":format!("p{i}"),"title":"T","provider":"claude","model":"","at":j+1})); }
+        }
+        let p=json!({"target":{"kind":"thread","id":"t0-0"},"nativeSidebar":1,"nativeKey":"00112233445566778899aabbccddeeff",
+            "hub":"h","generation":"g","epoch":"e","viewId":"v","revision":st.seq,"now":1000000,"session":{"drafts":{},"open":{}},
+            "window":{"remaining":0},"page":{"thread":"t0-0","rows":[]}});
+        let out=recent(&st,&p).unwrap(); let projects=out["shown"]["projects"].as_array().unwrap();
+        assert_eq!(out["shown"]["sidebarPages"][0]["projects"]["selectedOutside"],true);
+        assert_eq!(projects.len(),9); assert_eq!(projects.last().unwrap()["id"],"h|p0");
+        let chosen=projects.last().unwrap(); assert_eq!(chosen["threadsPage"]["selectedOutside"],true);
+        assert_eq!(chosen["threads"].as_array().unwrap().last().unwrap()["id"],"h|t0-0");
+        assert_eq!(out["shown"]["thread"]["id"],"h|t0-0");
+    }
+}

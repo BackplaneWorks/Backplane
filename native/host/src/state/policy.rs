@@ -20,7 +20,7 @@ const KEEP: &[&str] = &["settle.", "autosettle.", "launch.", "launched.", "threa
     "order.enabled", "order.estimates", "account.thread."]; // the action dispatcher's facts (Fab.at / Fab.want, Accounts.named): tiny values, one account key per thread
 // A thread screen must see its refusal gate's configuration even in the lean copy. Exact global keys keep their values;
 // per-thread keys keep only presence, never the possibly large body. stopped./failed. remain outside this allowlist.
-const GATE_EXACT: &[&str] = &["files.max.mb", "person.tz", "tz.machine", "think", "permissions.default"];
+const GATE_EXACT: &[&str] = &["files.max.mb", "person.tz", "person.tz.device", "tz.machine", "think", "permissions.default"];
 const GATE_PRESENCE: &[&str] = &["effort:", "wait.", "stop.", "fail."];
 pub fn gate_presence(k: &str) -> bool { GATE_PRESENCE.iter().any(|p| k.starts_with(p)) }
 // `told.` is a ledger that grows with the log until the minute tick prunes it (Told.prune: 30 days, 2000 records, run by `Core::tick`): only
@@ -214,7 +214,7 @@ mod tests {
     }
     #[test] fn lean_thread_screen_gate_preserves_exact_values_and_only_thread_key_presence() {
         let mut core=Core::new();
-        for (key,value) in [("files.max.mb","10"),("person.tz","America/New_York"),("tz.machine","Etc/UTC"),("think","off"),("permissions.default","ask")] {
+        for (key,value) in [("files.max.mb","10"),("person.tz","America/New_York"),("person.tz.device","Etc/UTC"),("tz.machine","Etc/UTC"),("think","off"),("permissions.default","ask")] {
             assert!(core.st.apply(&json!({"$":"SettingSet","key":key,"value":value,"at":1})));
             assert_eq!(core.st.settings.get(key).map(String::as_str),Some(value));
             assert!(!lean_keeps(&format!("{key}.unrelated")),"global config key is exact: {key}");
