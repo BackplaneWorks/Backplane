@@ -31,6 +31,7 @@ The person may be gaming on this desktop. Builds and long runs go to Boat, the M
 
 ## Git and publishing
 - All streams share this worktree and branch. Commit only your own paths: `git commit -m "..." -- <paths>` (add new files with `git add <paths>` first). Retry if the index is locked. No stash, rebase, reset, or checkout of files you do not own.
+- Nothing reaches `gpui` before the reviewer's OK, and the OK covers the exact commits you land. Asking for a review is not an OK: wait for it, and anything committed after it goes back for review. Three lanes landed first on 2026-11-05. Test-only harness fixes count too, unless the coordinator says otherwise.
 - Never commit binaries, tarballs or generated output: nothing over 1 MB. Boat picks up untracked, unignored files, so leave them untracked, or list them with `--include-file`.
 - Do not push. The coordinator pushes.
 - No TestFlight or Play upload, no signed release build, no merge to main, no install over the real app, no `bend update`, no release tag.
