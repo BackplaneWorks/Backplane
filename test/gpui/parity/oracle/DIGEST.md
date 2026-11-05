@@ -23,3 +23,8 @@ and by the Rust fold. Each prints one JSON object. `oracle.mjs` canonicalises bo
 `uber.*` (UberSet/UberOp), `bg.*`, `watch.*`, `wake.*`/`wakes.*`, `lock.*`/`locks.*`, and TurnUsage's token totals `tok.*`, `turn.last.*`, and `deploy.*` (DeployAsked/DeployBuilt). `oracle.mjs` prints the skipped families with counts
 (`skippedSettings`) and `--skip none` compares everything. Events the fold counts but does not fully model (e.g. TodosChanged other than
 `snapshot`) are listed by `rust-digest` on stderr.
+
+## Privacy rule (store copy)
+The digest holds project and thread titles, project paths, settings keys and full settings values. It must never be printed or kept.
+`rust-digest` prints only counts unless `--json` is its first argument; the oracle passes `--json` to read it into memory and prints hashes and counts only;
+`sdiff.mjs` prints key patterns and counts, never values, and must not be run on the store copy with its output kept. The oracle removes its temp chunk files on any exit.
