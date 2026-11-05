@@ -154,6 +154,7 @@ import { ViewPrefetch } from "./view-prefetch.js";
 import { validatePresentation } from "./startup.js";
 import { T, is, learnJson, learnDom } from "./wire.js";
 import { softFocus, ASKED_TO_TYPE } from "./touch-focus.js";
+import { PopupRows, popupWord, completeWord, sidebarRefs, indexRows, sidebarWord, skillRows, slashRows, pickWaits, PICK_WAIT_MS } from "./composer-popup.js";
 
 const CONNECTION_BUNDLE = bundleOf(import.meta.url);
 
@@ -251,6 +252,13 @@ function catUri(name) {
 // an IME composition in the composer (its listeners are by the input
 // listener below): the composer's text is not written meanwhile
 let composerComposing = false;
+// the composer's own completion popup (composerPopupSync, below)
+const popupRows = new PopupRows();
+let popupIndex = { node: null, index: null };
+let localPopup = null; // { el, word }
+const popupSkillList = new Map(); // thread -> its skills, or null while asked
+let heldPick = null; // { draft, timer }: Tab or Enter waiting for the hub's rows
+let popupClosedFor = "";
 function setAttrs(el, oldAttrs, attrs) {
   const seen = new Set();
   // Read the new attributes, not an old/recycled element's field owner.
@@ -1487,6 +1495,7 @@ function renderPage() {
   attachmentPreviews();
   previewTextFiles();
   previewMarkdownFiles((text, node) => create(App.md(text, App.lang(ui), node.dataset.mdRoot || "", node.dataset.mdPath || "")));
+  composerPopupSync();
   composerGeometry();
   earlierAsked = false;
   laterAsked = false;
@@ -1958,6 +1967,7 @@ function voiceMicHeard(envelope) {
 
 function dispatch(action, value, timer) {
   headPreview = null;
+  if (action === "skill" && viewMode !== "compatibility" && pickLocally(value)) return true;
   if (action === "devices-open" || action === "settings-page" && value === "devices") { void pairingUI.devices();return true; }
   if (action === "voice" && !timer) value = voiceMicPress(value);
   if (action === "fork") reviewPosition.fork(value || currentSession().sel);
@@ -3458,10 +3468,179 @@ function paintComposer() {
     if (!el) { later();return; }
     const t0 = RR ? pnow() : 0;
     patch(el, App.presentation_overlay(hub, presentationJson(feedbackSession())));
+    composerPopupSync();
     attachmentPreviews();
     composerGeometry();
     if (RR) { RR.n("render.part");RR.t("render.part", pnow() - t0); }
   });
+}
+// The completion popup in the keystroke's own frame (composer-popup.js).
+// The hub's composer holds its rows only once it re-rendered the whole view
+// for the draft; until then the page shows the rows the hub last drew for
+// this word or an earlier one (narrowed), else the sidebar's threads and
+// projects. Rows a hub composer holds for another draft are stale and go.
+const vAttr = (v, name) => { for (const a of each(v.attrs)) if (is(a, "At") && a.name === name) return a.value; return null; };
+const vText = v => { if (is(v, "Txt")) return v.text;let t = "";for (const k of each(v.kids)) t += vText(expand(k));return t; };
+// the rows and draft a hub composer node was drawn with
+function hubPopup(composer) {
+  let draft = null, rows = null;
+  const stack = [composer];
+  while (stack.length) {
+    const v = expand(stack.pop());
+    if (!is(v, "El")) continue;
+    if (v.tag === "textarea" && vAttr(v, "id") === "composer") draft = vAttr(v, "value") ?? "";
+    else if (vAttr(v, "class") === "skills") {
+      rows = [];
+      for (const b of each(v.kids)) {
+        const k = expand(b);
+        if (!is(k, "El") || k.tag !== "button") continue;
+        let desc = "";
+        for (const sp of each(k.kids)) if (is(sp, "El") && vAttr(sp, "class") === "desc") desc = vText(sp);
+        rows.push({ value: vAttr(k, "data-value") || "", desc });
+      }
+    } else for (const k of each(v.kids)) stack.push(k);
+  }
+  return { draft, rows };
+}
+// the threads and projects the hub's sidebar lists, read once per view
+function popupSidebar() {
+  if (popupIndex.node === frontendNode) return popupIndex.index;
+  const threads = [], projects = [], bots = [], rooms = [], seen = new Set();
+  const walk = (v, project) => {
+    v = expand(v);
+    if (!is(v, "El")) return;
+    const cls = vAttr(v, "class") || "";
+    if (v.tag === "section" && /(^| )project( |$)/.test(cls) && v.key) {
+      project = v.key;
+      let title = "";
+      const find = n => { n = expand(n);if (!is(n, "El") || title) return;if (n.tag === "button" && /(^| )name( |$)/.test(vAttr(n, "class") || "")) { title = vText(n).trim();return; }for (const k of each(n.kids)) find(k); };
+      find(v);
+      projects.push({ id: v.key, title });
+    }
+    if (/^(bot|room)-row( |$)/.test(cls)) {
+      const room = cls.startsWith("room"), want = room ? /(^| )title( |$)/ : /(^| )bot-name( |$)/;
+      let name = "";
+      const find = n => { n = expand(n);if (!is(n, "El") || name) return;if (want.test(vAttr(n, "class") || "")) { name = vText(n).trim();return; }for (const k of each(n.kids)) find(k); };
+      find(v);
+      (room ? rooms : bots).push({ id: vAttr(v, "data-value") || "", name });
+      return;
+    }
+    if (/^thread( |$)/.test(cls) && vAttr(v, "data-value") && !seen.has(vAttr(v, "data-value"))) {
+      const id = vAttr(v, "data-value");seen.add(id);
+      let title = "", pinned = false;
+      for (const k0 of each(v.kids)) { const k = expand(k0);if (!is(k, "El")) continue;const c = vAttr(k, "class");if (c === "title") title = vAttr(k, "title") ?? vText(k);if (c === "pin") pinned = true; }
+      threads.push({ id, title, project: vAttr(v, "data-shortcut-project") || project, pinned });
+      return;
+    }
+    for (const k of each(v.kids)) walk(k, project);
+  };
+  if (frontendNode) walk(frontendNode, "");
+  popupIndex = { node: frontendNode, index: sidebarRefs({ threads, projects, bots, rooms }, currentSession().sel) };
+  return popupIndex.index;
+}
+// a thread's skills, asked once while its composer has the keyboard: a small
+// reply, so `$` and `/` have their rows before the first key
+function popupSkills(sel) {
+  if (!sel || popupSkillList.has(sel)) return;
+  popupSkillList.set(sel, null);
+  viewerRpc.request("skills.list", { thread: sel }, "skills", 8000).then(list => {
+    popupSkillList.set(sel, Array.isArray(list) ? list : []);
+    if (popupWord(document.getElementById("composer")?.value || "")) composerPopupSync();
+  }, () => popupSkillList.delete(sel));
+}
+// rows known exactly, no hub view needed (null: none here)
+function popupExact(sel, el, draft, word) {
+  const skills = popupSkillList.get(sel);
+  if (word[0] === "$") return skills ? skillRows(skills, word) : null;
+  if (word[0] !== "/") return null;
+  const commands = JSON.parse(App.slash_rows(el.dataset.claude || "", word.slice(1)));
+  return slashRows(commands, skills || [], draft);
+}
+function composerPopupSync() {
+  const el = document.querySelector(".composer[data-lang]");
+  const field = document.getElementById("composer");
+  localPopup?.el.remove();localPopup = null;
+  if (!el || !field || viewMode === "compatibility") return;
+  const sel = currentSession().sel, draft = field.value, word = popupWord(draft);
+  if (document.activeElement === field) popupSkills(sel);
+  const hub = frontendNode && hubComposer(frontendNode), drawn = hub ? hubPopup(hub) : { draft: null, rows: null };
+  // what the hub drew, kept for the next time this word is typed
+  if (drawn.draft !== null && popupWord(drawn.draft)) popupRows.put(sel, popupWord(drawn.draft), drawn.rows || []);
+  if (heldPick && heldPick.draft !== draft) dropHeldPick();
+  if (drawn.draft === draft) {
+    popupClosedFor = "";
+    if (heldPick) { dropHeldPick();queueMicrotask(() => dispatch("skill", "")); }
+    return;
+  }
+  // the hub's own rows are for another draft: the overlay's slash commands
+  // (drawn for this draft) stay, references and skills drawn for an
+  // earlier word go
+  const shown = el.querySelector(":scope > .skills");
+  const slashHere = word[0] === "/" && shown && [...shown.querySelectorAll("button.skill")].some(b => (b.dataset.value || "").startsWith("/"));
+  if (slashHere) return;
+  if (shown) shown.remove();
+  if (!word || composerComposing || popupClosedFor === draft) return;
+  const known = popupExact(sel, el, draft, word) ?? popupRows.get(sel, word), rows = known ?? (sidebarWord(word) ? indexRows(popupSidebar(), word) : null);
+  if (!rows?.length) return;
+  const box = document.createElement("div");
+  box.className = "skills";box.dataset.local = "1";
+  rows.forEach((r, i) => {
+    const b = document.createElement("button");
+    b.className = i ? "skill" : "skill on";b.dataset.value = r.value;b.title = r.desc || "";
+    const n = document.createElement("span");n.className = "name";n.textContent = r.value;
+    const d = document.createElement("span");d.className = "desc";d.textContent = r.desc || "";
+    b.append(n, d);
+    b.addEventListener("mousedown", e => e.preventDefault());
+    b.addEventListener("click", e => { e.preventDefault();e.stopPropagation();dispatch("skill", r.value); });
+    box.append(b);
+  });
+  el.append(box);
+  localPopup = { el: box, word, guessed: !known, moved: false };
+}
+function dropHeldPick() { clearTimeout(heldPick?.timer);heldPick = null; }
+// Tab or Enter on guessed rows: the hub's first row is taken when its rows
+// come, the highlighted one here if they never do
+function holdPick(draft) {
+  dropHeldPick();
+  heldPick = { draft, timer: setTimeout(() => {
+    const still = heldPick?.draft === document.getElementById("composer")?.value;
+    dropHeldPick();
+    if (still) dispatch("skill", "");
+  }, PICK_WAIT_MS) };
+}
+// keys on the composer while the page's own popup is up: arrows move the
+// highlight, Tab and Enter pick it, Esc shuts it until the draft changes
+window.addEventListener("keydown", e => {
+  if (!localPopup?.el.isConnected || e.target?.id !== "composer" || e.isComposing || e.keyCode === 229 || e.ctrlKey || e.metaKey || e.altKey) return;
+  const rows = [...localPopup.el.querySelectorAll("button.skill")];
+  const at = Math.max(0, rows.findIndex(b => b.classList.contains("on")));
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    rows[at]?.classList.remove("on");rows[(at + (e.key === "ArrowDown" ? 1 : rows.length - 1)) % rows.length]?.classList.add("on");
+    localPopup.moved = true;
+  } else if ((e.key === "Tab" || e.key === "Enter") && !e.shiftKey) {
+    if (pickWaits(localPopup)) holdPick(e.target.value);
+    else dispatch("skill", rows[at]?.dataset.value || "");
+  } else if (e.key === "Escape") { dropHeldPick();popupClosedFor = e.target.value;localPopup.el.remove();localPopup = null;dispatch("skill-close", ""); }
+  else return;
+  e.preventDefault();e.stopImmediatePropagation();
+}, true);
+// A pick is a plain draft edit made here: the token is in the field in the
+// same frame (the hub's "skill" action waited on a whole-view round trip).
+// value: the row clicked, else the field's (the highlighted row is taken).
+function pickLocally(value) {
+  const field = document.getElementById("composer"), box = document.querySelector(".composer[data-lang] > .skills");
+  if (!thin || !field || !box || composerComposing) return false;
+  const rows = [...box.querySelectorAll("button.skill")];
+  const row = rows.find(b => b.dataset.value === value) || rows.find(b => b.classList.contains("on")) || rows[0];
+  const word = row?.dataset.value || "";
+  if (!word || !popupWord(field.value)) return false;
+  const text = completeWord(field.value, word);
+  box.remove();localPopup = null;
+  thin.request("draft", text);
+  if (field.value !== text) field.value = text;
+  field.focus({ preventScroll: true });
+  try { field.setSelectionRange(text.length, text.length); } catch {}
+  return true;
 }
 function adoptPresentation(session) { ui = App.presentation_handoff(ui, presentationJson(session)); }
 function performPresentation(operation) {
