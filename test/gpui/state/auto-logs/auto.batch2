@@ -15,3 +15,5 @@
 {"$":"MessagePosted","thread":"fresh","msg":"m-sys","role":"system","text":"x","at":1794060014}
 {"$":"MessagePosted","thread":"w-rep2","msg":"a-w-rep2","role":"assistant","text":"x","at":1794060015}
 {"$":"MessagePosted","thread":"ghost","msg":"a-ghost","role":"assistant","text":"x","at":1794060016}
+{"$":"MessagePosted","thread":"lk","msg":"a-lk-2","role":"assistant","text":"x","at":1794060030}
+{"$":"MessagePosted","thread":"lkw","msg":"a-lkw-2","role":"assistant","text":"x","at":1794060031}
