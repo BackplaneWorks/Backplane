@@ -207,16 +207,56 @@ class Workbench {
       if (overlayData && canvas) this.overlay = attachSolid(canvas, this.components, { projectPoint: this.solid.projectPoint, rayToBoard: this.solid.rayToBoard });
     }
   }
+  // back on the page after being kept off it: it catches up with the
+  // revisions heard meanwhile (sourceRevision/sourceStamp reach only the
+  // workbench on the page). Off it, nothing draws: the preview waits for
+  // its canvas to be connected, the original model draws only when asked
+  // (a path trace still finishes its bounded refinement).
+  park(on) {
+    if (on) return;
+    this.revision(this.boardKey || this.key);
+    this.sync();
+  }
   dispose() {
     this.alive = false; this.metadataGeneration++; this.readAbort?.abort(); this.quality?.dispose(); this.panel?.dispose(); this.componentPanel?.(); this.overlay?.(); this.unselect?.();
     this.services.plot?.setComponents?.(this.boardKey, null, null); this.root.removeEventListener("solid-camera-change", this.change); this.root.removeEventListener("solid-quality-change", this.change);
   }
 }
 
+// The workbench that left the page last (the viewer shut, or Board or
+// Schematic shown instead) is kept, with its canvases, their graphics
+// contexts, the original model's worker and the components it read:
+// the hub drawing the very same workbench again (same model, thread and
+// board: host.js asks kept() as it creates the element) gets it back as it
+// was, so the model, its stats and the toolbar are there in the press's
+// frame. Only one is kept, for PARK_MS; any other workbench disposes it.
+let parked = null, parkTimer = 0;
+const PARK_MS = 10 * 60 * 1000;
+const sameBench = (bench, root) => bench.scope === root.dataset.scope && bench.key === root.dataset.key && bench.boardKey === (root.dataset.boardKey || "");
+function unpark() { clearTimeout(parkTimer); const bench = parked; parked = null; return bench; }
+// a kept workbench let go, with the preview's kept graphics context
+function release(bench) { if (!bench) return; bench.solid.forget?.(bench.root.querySelector("#solid")); bench.dispose(); }
+export function kept(key, scope, boardKey) {
+  const root = parked?.root;
+  return root && !root.isConnected && parked.key === key && parked.scope === scope && parked.boardKey === (boardKey || "") ? root : null;
+}
+// (the hub's patch of a kept workbench sets its class back to the hub's:
+// what the workbench adds, the PCB beside it and the original model shown,
+// is put back in that same frame)
+export function restyle(root) {
+  if (parked?.root !== root) return;
+  root.classList.toggle("solid-split", parked.state.pcb);
+  root.classList.toggle("solid-original-visible", !!parked.quality?.visible);
+}
 export function mount(root, solid, services = {}) {
-  if (!root) { workbench?.dispose(); workbench = null; return; }
-  if (workbench?.root === root && workbench.scope === root.dataset.scope && workbench.key === root.dataset.key) { workbench.sync(); return; }
-  workbench?.dispose(); workbench = new Workbench(root, solid, services);
+  if (!root) {
+    if (workbench) { release(unpark()); parked = workbench; parked.park(true); parkTimer = setTimeout(() => release(unpark()), PARK_MS); }
+    workbench = null; return;
+  }
+  if (workbench?.root === root && sameBench(workbench, root)) { workbench.sync(); return; }
+  workbench?.dispose(); workbench = null;
+  if (parked?.root === root && sameBench(parked, root)) { workbench = unpark(); workbench.park(false); return; }
+  release(unpark()); workbench = new Workbench(root, solid, services);
 }
 // a board's assembly (2|root|path) and its PCB (0|root|path) on one saved file
 export function sameBoardFile(key, boardKey) {
@@ -243,7 +283,7 @@ export function sourceStamp(key, revision) {
   stamps.set(key, revision); if (stamps.size > 64) stamps.delete(stamps.keys().next().value);
   if (workbench && key === workbench.boardKey) workbench.stamp();
 }
-export function reset() { workbench?.dispose(); workbench = null; revisions.clear(); stamps.clear(); }
+export function reset() { workbench?.dispose(); workbench = null; release(unpark()); revisions.clear(); stamps.clear(); }
 
 // A phone's row of view chips (view.bend's View.viewer.chips) scrolls
 // sideways: after a render the view on show is brought into the row, once
