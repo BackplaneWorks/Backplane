@@ -1,0 +1,602 @@
+[
+ {
+  "name": "bot_whoami",
+  "args": {},
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"name\":\"ada\",\"id\":\"b1793887727-147\",\"hop\":0,\"maxHop\":6,\"rooms\":[],\"routines\":[],\"webhooks\":[]}"
+    }
+   ],
+   "isError": false
+  }
+ },
+ {
+  "name": "bot_list",
+  "args": {},
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"here\":[{\"name\":\"ada\",\"id\":\"b1793887727-147\",\"state\":\"ready\"},{\"name\":\"bob\",\"id\":\"b1793887728-151\",\"state\":\"ready\"}],\"elsewhere\":[]}"
+    }
+   ],
+   "isError": false
+  }
+ },
+ {
+  "name": "memory_save",
+  "args": {
+   "key": "Pref One",
+   "kind": "pref",
+   "text": "likes tea",
+   "tags": "drink"
+  },
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"ok\":true,\"note\":\"remembered pref-one\"}"
+    }
+   ],
+   "isError": false
+  }
+ },
+ {
+  "name": "memory_save",
+  "args": {
+   "key": "fact.two",
+   "kind": "weird",
+   "text": "two"
+  },
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"ok\":true,\"note\":\"remembered fact.two\"}"
+    }
+   ],
+   "isError": false
+  }
+ },
+ {
+  "name": "memory_recall",
+  "args": {
+   "query": "tea"
+  },
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "[{\"key\":\"pref-one\",\"kind\":\"pref\",\"text\":\"likes tea\",\"tags\":\"drink\",\"updated\":1793887733}]"
+    }
+   ],
+   "isError": false
+  }
+ },
+ {
+  "name": "memory_recall",
+  "args": {
+   "query": "zzz"
+  },
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "[]"
+    }
+   ],
+   "isError": false
+  }
+ },
+ {
+  "name": "memory_list",
+  "args": {},
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "[{\"key\":\"fact.two\",\"kind\":\"fact\",\"text\":\"two\",\"tags\":\"\",\"updated\":1793887734},{\"key\":\"pref-one\",\"kind\":\"pref\",\"text\":\"likes tea\",\"tags\":\"drink\",\"updated\":1793887733}]"
+    }
+   ],
+   "isError": false
+  }
+ },
+ {
+  "name": "memory_list",
+  "args": {
+   "kind": "pref"
+  },
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "[{\"key\":\"pref-one\",\"kind\":\"pref\",\"text\":\"likes tea\",\"tags\":\"drink\",\"updated\":1793887733}]"
+    }
+   ],
+   "isError": false
+  }
+ },
+ {
+  "name": "memory_forget",
+  "args": {
+   "key": "pref-one"
+  },
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"ok\":true,\"note\":\"forgotten\"}"
+    }
+   ],
+   "isError": false
+  }
+ },
+ {
+  "name": "memory_list",
+  "args": {},
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "[{\"key\":\"fact.two\",\"kind\":\"fact\",\"text\":\"two\",\"tags\":\"\",\"updated\":1793887734}]"
+    }
+   ],
+   "isError": false
+  }
+ },
+ {
+  "name": "space_set",
+  "args": {
+   "spec": "{\"title\":\"Hi\",\"blocks\":[{\"type\":\"text\",\"text\":\"x\"}]}"
+  },
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"ok\":true,\"note\":\"your space is updated\"}"
+    }
+   ],
+   "isError": false
+  }
+ },
+ {
+  "name": "space_set",
+  "args": {
+   "spec": "nope"
+  },
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"ok\":true,\"note\":\"your space is updated\"}"
+    }
+   ],
+   "isError": false
+  }
+ },
+ {
+  "name": "space_get",
+  "args": {},
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"spec\":\"nope\",\"page\":\"\"}"
+    }
+   ],
+   "isError": false
+  }
+ },
+ {
+  "name": "space_page",
+  "args": {
+   "html": "<p>x</p>"
+  },
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"ok\":true,\"note\":\"your page is updated\"}"
+    }
+   ],
+   "isError": false
+  }
+ },
+ {
+  "name": "space_get",
+  "args": {},
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"spec\":\"nope\",\"page\":\"<p>x</p>\"}"
+    }
+   ],
+   "isError": false
+  }
+ },
+ {
+  "name": "space_page",
+  "args": {
+   "html": ""
+  },
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"ok\":true,\"note\":\"your page is removed\"}"
+    }
+   ],
+   "isError": false
+  }
+ },
+ {
+  "name": "room_create",
+  "args": {
+   "name": "lab",
+   "members": "bob"
+  },
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"ok\":true,\"note\":\"room made\"}"
+    }
+   ],
+   "isError": false
+  }
+ },
+ {
+  "name": "room_list",
+  "args": {},
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "[{\"id\":\"r1793887740-185\",\"name\":\"lab\",\"members\":[\"b1793887727-147\",\"b1793887728-151\"]}]"
+    }
+   ],
+   "isError": false
+  }
+ },
+ {
+  "name": "bot_send",
+  "args": {
+   "to": "bob",
+   "text": "hi bob",
+   "topic": "greet"
+  },
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"ok\":true,\"room\":\"r1793887741-186\",\"roomName\":\"greet\",\"note\":\"posted in #greet, where the person can follow it; keep everything about this request there (bot_send with the same topic, or room_post)\"}"
+    }
+   ],
+   "isError": false
+  }
+ },
+ {
+  "name": "bot_send",
+  "args": {
+   "to": "bob",
+   "text": "a private word",
+   "direct": true
+  },
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"ok\":true,\"note\":\"sent to bob\"}"
+    }
+   ],
+   "isError": false
+  }
+ },
+ {
+  "name": "bot_send",
+  "args": {
+   "to": "nobody",
+   "text": "x"
+  },
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"error\":\"no bot by that name here (see bot_list)\"}"
+    }
+   ],
+   "isError": true
+  }
+ },
+ {
+  "name": "routine_set",
+  "args": {
+   "id": "rt1",
+   "name": "later",
+   "at": "in 3d",
+   "prompt": "p"
+  },
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"error\":\"that routine is not yours\"}"
+    }
+   ],
+   "isError": true
+  }
+ },
+ {
+  "name": "routine_set",
+  "args": {
+   "name": "daily",
+   "schedule": "daily 09:30",
+   "prompt": "q"
+  },
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"ok\":true,\"note\":\"routine saved: daily at 09:30, your time (Etc/UTC); next Fri 6 Nov 09:30 UTC\"}"
+    }
+   ],
+   "isError": false
+  }
+ },
+ {
+  "name": "routine_set",
+  "args": {
+   "name": "bad",
+   "schedule": "whenever",
+   "prompt": "q"
+  },
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"error\":\"I can't read that schedule (try: every 15m, daily 09:30, weekdays 08:00, @hourly, or a cron line), or give a one-time time with at\"}"
+    }
+   ],
+   "isError": true
+  }
+ },
+ {
+  "name": "routine_list",
+  "args": {},
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "[{\"id\":\"o1793887744-223\",\"name\":\"daily\",\"kind\":\"routine\",\"schedule\":\"30 9 * * *\",\"when\":\"daily at 09:30\",\"prompt\":\"q\",\"on\":true,\"last\":1793887744,\"tz\":\"person\",\"once\":\"\",\"next\":\"2026-11-06T09:30:00+00:00\",\"in\":\"in 19h 20m\",\"done\":false}]"
+    }
+   ],
+   "isError": false
+  }
+ },
+ {
+  "name": "routine_delete",
+  "args": {
+   "id": "rt1"
+  },
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"error\":\"that routine is not yours\"}"
+    }
+   ],
+   "isError": true
+  }
+ },
+ {
+  "name": "routine_delete",
+  "args": {
+   "id": "nope"
+  },
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"error\":\"that routine is not yours\"}"
+    }
+   ],
+   "isError": true
+  }
+ },
+ {
+  "name": "project_list",
+  "args": {},
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "[{\"id\":\"p1700000000-1\",\"name\":\"fixture\",\"folder\":\"/home/h/Documents/i2cjak/backplane-gpui/build/gpui/results/bots/rec6/work/fixroot\"}]"
+    }
+   ],
+   "isError": false
+  }
+ },
+ {
+  "name": "remind_person",
+  "args": {
+   "at": "in 20m",
+   "text": "water the plants"
+  },
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"ok\":true,\"note\":\"I'll remind them Thu 5 Nov 14:29 UTC (in 20m): water the plants\"}"
+    }
+   ],
+   "isError": false
+  }
+ },
+ {
+  "name": "remind_person",
+  "args": {
+   "at": "banana",
+   "text": "x"
+  },
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"error\":\"I can't read that time. I can read: 2026-10-14T09:00+03:00, 2026-10-14 09:00, in 20m, in 1h30m, in 3d, today 17:30, tomorrow 9am, monday 09:00, or just 9am.\"}"
+    }
+   ],
+   "isError": true
+  }
+ },
+ {
+  "name": "person_timezone",
+  "args": {},
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"zone\":\"Etc/UTC\",\"source\":\"machine\",\"offset\":\"+00:00\",\"abbreviation\":\"UTC\",\"localTime\":\"Thu 5 Nov 14:09 UTC\",\"iso\":\"2026-11-05T14:09:07+00:00\"}"
+    }
+   ],
+   "isError": false
+  }
+ },
+ {
+  "name": "person_timezone",
+  "args": {
+   "zone": "Europe/Helsinki"
+  },
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"ok\":true,\"note\":\"looking up Europe/Helsinki; the person's time zone changes from Etc/UTC when it resolves (person_timezone shows it)\"}"
+    }
+   ],
+   "isError": false
+  }
+ },
+ {
+  "name": "person_timezone",
+  "args": {
+   "zone": "Not/AZone"
+  },
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"ok\":true,\"note\":\"looking up Not/AZone; the person's time zone changes from Europe/Helsinki when it resolves (person_timezone shows it)\"}"
+    }
+   ],
+   "isError": false
+  }
+ },
+ {
+  "name": "voice_dictionary_add",
+  "args": {
+   "term": "Oulu"
+  },
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"ok\":true,\"note\":\"added Oulu to the voice dictionary\"}"
+    }
+   ],
+   "isError": false
+  }
+ },
+ {
+  "name": "no_such_tool",
+  "args": {},
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"error\":\"unknown tool\"}"
+    }
+   ],
+   "isError": true
+  }
+ },
+ {
+  "name": "room_post",
+  "args": {
+   "room": "r1793887740-185",
+   "text": "hello room"
+  },
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"ok\":true,\"note\":\"posted\"}"
+    }
+   ],
+   "isError": false
+  }
+ },
+ {
+  "name": "room_post",
+  "args": {
+   "room": "nope",
+   "text": "x"
+  },
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"error\":\"no such room (see room_list)\"}"
+    }
+   ],
+   "isError": true
+  }
+ },
+ {
+  "name": "room_read",
+  "args": {
+   "room": "r1793887740-185"
+  },
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "[{\"from\":\"ada\",\"text\":\"hello room\",\"at\":1793887749}]"
+    }
+   ],
+   "isError": false
+  }
+ },
+ {
+  "name": "room_read",
+  "args": {
+   "room": "nope"
+  },
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "[]"
+    }
+   ],
+   "isError": false
+  }
+ },
+ {
+  "name": "room_read",
+  "args": {
+   "room": "bob"
+  },
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "[{\"from\":\"ada\",\"text\":\"a private word\",\"at\":1793887741}]"
+    }
+   ],
+   "isError": false
+  }
+ }
+]

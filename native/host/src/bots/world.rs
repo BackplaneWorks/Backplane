@@ -42,6 +42,8 @@ pub struct World {
     pub turns: HashMap<String, String>, pub asks: HashMap<String, (String, String, bool)>,
     /// a room's posts as log lines (1-based), oldest first: the text is read from the log when a tool asks
     pub room_lines: HashMap<String, Vec<usize>>,
+    /// projects (id -> title, root, removed): project_list
+    pub projects: std::collections::BTreeMap<String, (String, String, bool)>,
     seen: usize, line: usize,
 }
 /// the settings the bots lane reads: the new bot's provider and model, the mail switch, the uberbot
@@ -108,8 +110,8 @@ impl World {
     }
     pub fn apply_line(&mut self, line: &str) {
         let Some(t) = line.strip_prefix("{\"$\":\"").and_then(|r| r.split('"').next()) else { return };
-        const READ: [&str; 33] = ["BotSet", "BotDeleted", "RoomSet", "RoomDeleted", "RoomPosted", "HookSet", "HookHit", "RoutineSet", "RoutineDeleted", "RoutineFired",
-            "MemorySaved", "MemoryForgot", "SpaceSet", "SpacePageSet", "PeerSet", "RoutinePlan", "RoutineSlot", "RoutineDone", "SettingSet", "MessagePosted", "ThreadCreated", "TaskSet", "UberSet", "UberOp", "ConvSet", "MailPosted", "MailMarked", "MailTagged", "TurnChanged", "AskOpened", "AskClosed", "QueueTaken", "BotWoke"];
+        const READ: [&str; 35] = ["BotSet", "BotDeleted", "RoomSet", "RoomDeleted", "RoomPosted", "HookSet", "HookHit", "RoutineSet", "RoutineDeleted", "RoutineFired",
+            "MemorySaved", "MemoryForgot", "SpaceSet", "SpacePageSet", "PeerSet", "RoutinePlan", "RoutineSlot", "RoutineDone", "SettingSet", "MessagePosted", "ThreadCreated", "TaskSet", "UberSet", "UberOp", "ConvSet", "MailPosted", "MailMarked", "MailTagged", "TurnChanged", "AskOpened", "AskClosed", "QueueTaken", "BotWoke", "ProjectCreated", "ProjectRemoved"];
         if !READ.contains(&t) { return }
         // cheap tests before a parse: most lines of a big log are messages of other threads and settings nobody here reads
         if t == "SettingSet" && !["agent.", "mail.on", "uber.", "person.tz", "tz.", "machine.id"].iter().any(|k| line.contains(k)) { return }
@@ -145,6 +147,8 @@ impl World {
                 self.rooms.insert(id.clone(), Room { id, name: s(e, "name").into(), members: members_of(s(e, "members")), created: if deleted { at } else { created }, deleted: false });
             }
             "RoomDeleted" => { if let Some(r) = self.rooms.get_mut(&id) { r.deleted = true } else { self.rooms.insert(id.clone(), Room { id, name: String::new(), members: vec![], created: 0, deleted: true }); } }
+            "ProjectCreated" => { self.projects.insert(id, (s(e, "title").into(), s(e, "root").into(), false)); }
+            "ProjectRemoved" => { if let Some(p) = self.projects.get_mut(&id) { p.2 = true } }
             "TurnChanged" => { self.turns.insert(s(e, "thread").into(), s(e, "state").into()); }
             "QueueTaken" => { let th = s(e, "thread"); if let Some(b) = self.bots.values().find(|b| !b.deleted && b.thread == th).map(|b| b.id.clone()) { let c = self.hops.entry(b).or_default(); *c = if c.held { Hops { now: c.wait, wait: 0, held: false } } else { Hops { now: c.now, wait: 0, held: false } } } }
             "AskOpened" => { self.asks.insert(id.clone(), (s(e, "thread").into(), s(e, "kind").into(), true)); }

@@ -211,8 +211,8 @@ impl TzRule {
     /// Tz.at: the instant a wall time happened; the earlier one when it happened twice, and in a gap the instant with the offset from before
     pub fn at(&self, w: u64) -> u64 { let ud = TzRule::sg_utc(self.doff, w); let us = TzRule::sg_utc(self.soff, w); if self.dst && self.is_dst(ud) { ud } else { us } }
 
-    fn offset_text(o: &TzOff) -> String { let s = o.off.unsigned_abs(); format!("{}{:02}:{:02}", if o.off >= 0 { "+" } else { "-" }, s / 3600, s % 3600 / 60) }
-    fn abbr(o: &TzOff) -> String { if o.abbr.is_empty() { TzRule::offset_text(o) } else { o.abbr.clone() } }
+    pub fn offset_text(o: &TzOff) -> String { let s = o.off.unsigned_abs(); format!("{}{:02}:{:02}", if o.off >= 0 { "+" } else { "-" }, s / 3600, s % 3600 / 60) }
+    pub fn abbr(o: &TzOff) -> String { if o.abbr.is_empty() { TzRule::offset_text(o) } else { o.abbr.clone() } }
     /// Tz.show: "Tue 14 Oct 09:30 EEST"
     pub fn show(&self, t: u64) -> String {
         const W: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]; const M: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];

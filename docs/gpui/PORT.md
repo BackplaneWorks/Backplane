@@ -163,7 +163,7 @@ port waits for the person's decision.
 
 <!-- law-map: generated below by scripts/gpui/law-map.py -->
 
-Laws in LAWS.bend: 3253. bend 912, rust 584, unported 1160, client 470, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`, `src/core/msp.bend`, `src/core/agy.bend`, `src/core/opencode.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
+Laws in LAWS.bend: 3253. bend 912, rust 585, unported 1159, client 470, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`, `src/core/msp.bend`, `src/core/agy.bend`, `src/core/opencode.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
 
 | law | status | seed | file | note |
 |---|---|---|---|---|
@@ -715,7 +715,7 @@ Laws in LAWS.bend: 3253. bend 912, rust 584, unported 1160, client 470, window 1
 | `bot_spawn_step` | unported | seed R +-10% | `src/core/bothub.bend` |  |
 | `bot_spawn_bounded` | unported | seed R +-10% | `src/core/bothub.bend` |  |
 | `bot_request_keep` | unported | seed R +-10% | `src/core/bothub.bend` |  |
-| `bot_request_in_room` | unported | seed R +-10% | `src/core/bothub.bend` |  |
+| `bot_request_in_room` | rust `js_bot_tools` | map | `src/core/bothub.bend` |  |
 | `bot_request_fresh_id` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `bot_delegate_needs_project` | bend | seed K +-10% | `src/core/mcp.bend` |  |
 | `kids_bot_child_shown` | rust `kids_bot_child_shown` | map | `src/core/client.bend` |  |

@@ -32,7 +32,7 @@ fn dir(home: &Path) -> Result<PathBuf, StoreError> {
 }
 /// open a journal without following a link; a regular file, and for a write exactly one link
 fn open(p: &Path, write: bool) -> Result<std::fs::File, StoreError> {
-    let mut o = OpenOptions::new(); o.read(true).custom_flags(libc::O_NOFOLLOW);
+    let mut o = OpenOptions::new(); o.read(true).custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     if write { o.append(true).create(true).mode(0o600); }
     let f = o.open(p).map_err(|e| match e.raw_os_error() { Some(libc::ELOOP) => StoreError::Link, Some(libc::EISDIR) => StoreError::NotRegular, _ => StoreError::Io })?;
     let m = f.metadata().map_err(|_| StoreError::Io)?;
@@ -68,13 +68,18 @@ pub fn append(home: &Path, b: &Body) -> Result<bool, StoreError> {
     f.write_all(body_line(b).as_bytes()).map_err(|_| StoreError::Io)?; f.flush().map_err(|_| StoreError::Io)?;
     Ok(repaired)
 }
+/// The lines of a file that are text: a line that is not UTF-8 is skipped (the journal is the person's data; one bad line must not hide the rest)
+fn text_lines(f: std::fs::File) -> impl Iterator<Item = String> {
+    let mut r = std::io::BufReader::new(f); let mut buf = vec![];
+    std::iter::from_fn(move || loop { buf.clear(); match std::io::BufRead::read_until(&mut r, b'\n', &mut buf) { Ok(0) | Err(_) => return None, Ok(_) => { if buf.last() == Some(&b'\n') { buf.pop(); } if let Ok(s) = String::from_utf8(buf.clone()) { return Some(s) } } } })
+}
 /// Every body of a file, in order; a malformed or incomplete line is skipped. (Whole bodies: for tests and small readers; start-up uses `headers`.)
 pub fn read(path: &Path) -> Vec<Body> {
     let Ok(f) = open(path, false) else { return vec![] };
-    std::io::BufReader::new(f).lines().map_while(Result::ok).filter_map(|l| body_parse(&l)).collect()
+    text_lines(f).filter_map(|l| body_parse(&l)).collect()
 }
 /// The conversation and header of every body of a file, one line at a time: the text of a body is dropped as soon as its line is read
 pub fn headers(path: &Path) -> Vec<(Conv, Hdr)> {
     let Ok(f) = open(path, false) else { return vec![] };
-    std::io::BufReader::new(f).lines().map_while(Result::ok).filter_map(|l| body_parse(&l)).map(|b| (b.conv, b.mail)).collect()
+    text_lines(f).filter_map(|l| body_parse(&l)).map(|b| (b.conv, b.mail)).collect()
 }

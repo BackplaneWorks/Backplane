@@ -662,6 +662,17 @@ mod store_tests {
             mail: Hdr { id: id.into(), conv: conv.into(), from: "a".into(), to: "b".into(), kind: "bot".into(), r#ref: String::new(), want: "fyi".into(), head: "h".into(), size: 1, at: 1 }, text: "SECRET".into() }
     }
     fn home(name: &str) -> std::path::PathBuf { let h = std::env::temp_dir().join(format!("bp-store-{}-{name}", std::process::id())); let _ = std::fs::remove_dir_all(&h); std::fs::create_dir_all(&h).unwrap(); h }
+    #[test] fn journal_reads_skip_a_line_that_is_not_text_and_open_without_blocking() {
+        use std::io::Write;
+        let h = home("nonutf"); let p = store::path(&h, "c1"); std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        let good = body_line(&body("c1", "m1"));
+        let mut f = std::fs::File::create(&p).unwrap(); f.write_all(good.as_bytes()).unwrap(); f.write_all(b"\n\xff\xfe broken\n").unwrap(); f.write_all(good.as_bytes()).unwrap(); f.write_all(b"\n").unwrap();
+        assert_eq!(store::read(&p).len(), 2, "the bytes that are no text cost one line, not the rest of the file");
+        assert_eq!(store::headers(&p).len(), 2);
+        // a FIFO in a journal's place is refused, never waited on
+        let q = store::path(&h, "c2"); assert!(std::process::Command::new("mkfifo").arg(&q).status().unwrap().success());
+        assert!(store::read(&q).is_empty() && store::headers(&q).is_empty());
+    }
     #[test] fn the_journal_is_not_opened_through_a_link() {
         use std::os::unix::fs::symlink;
         let h = home("links"); let outside = home("links-outside");
@@ -687,4 +698,82 @@ mod store_tests {
         let hs = store::headers(&store::path(&h, "c")); assert_eq!(hs.iter().map(|(_, m)| m.id.as_str()).collect::<Vec<_>>(), vec!["m1", "m2"]);
         assert_eq!(std::fs::metadata(store::path(&h, "c")).unwrap().permissions().mode() & 0o777, 0o600);
     }
+}
+
+// ---- the bots' MCP tools against the recorded JS hub (test/gpui/bots/record_tools.mjs) ----
+fn tool_norm(v: &Value) -> Value {
+    fn id_like(s: &str) -> bool { let b = s.as_bytes(); b.len() > 12 && "brotp".contains(b[0] as char) && b[1..11].iter().all(u8::is_ascii_digit) && b[11] == b'-' }
+    fn go(k: &str, v: &Value) -> Value {
+        match v {
+            Value::Object(o) => Value::Object(o.iter().map(|(k, v)| (k.clone(), go(k, v))).collect()),
+            Value::Array(a) => Value::Array(a.iter().map(|x| go(k, x)).collect()),
+            Value::Number(n) if ["at", "updated", "last"].contains(&k) && n.as_u64().map_or(false, |x| x > 1_000_000_000) => json!(0),
+            Value::String(s) if id_like(s) => json!("ID"),
+            Value::String(s) if ["in", "next", "localTime", "iso"].contains(&k) => json!(if s.is_empty() { "" } else { "TIME" }),
+            Value::String(s) => { // dates inside sentences: "Thu 5 Nov 14:29 UTC", "next Fri 6 Nov 09:30 UTC"
+                let mut out = String::new(); let w: Vec<&str> = s.split(' ').collect(); let mut i = 0;
+                while i < w.len() {
+                    let day = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].contains(&w[i]);
+                    if day && i + 3 < w.len() && w[i + 3].len() == 5 && w[i + 3].as_bytes()[2] == b':' { out.push_str("DATE"); i += 4; if i < w.len() && w[i] == "UTC" { i += 1 } } else { out.push_str(w[i]); i += 1 }
+                    if i < w.len() { out.push(' ') }
+                }
+                json!(out.trim_end().to_string())
+            }
+            _ => v.clone(),
+        }
+    }
+    go("", v)
+}
+#[tokio::test] async fn js_bot_tools() {
+    // every call the JS hub answered in the recording, replayed on a hub with the same bots: the same answers (ids, times and dates aside)
+    let calls: Vec<Value> = serde_json::from_str(include_str!("../../../../test/gpui/bots/fixtures/js-bot-calls.json")).unwrap();
+    let (hub, bots, rec) = start("tools", "{\"$\":\"SettingSet\",\"key\":\"tz.machine\",\"value\":\"Etc/UTC\",\"at\":1}\n{\"$\":\"ProjectCreated\",\"id\":\"p1700000000-1\",\"title\":\"fixture\",\"root\":\"/home/h/Documents/i2cjak/backplane-gpui/build/gpui/results/bots/rec6/work/fixroot\",\"at\":1700000000}\n").await;
+    let (ada, _bob) = (bot(&hub, "ada").await, bot(&hub, "bob").await);
+    let th = log(&hub).iter().find(|e| e["$"] == "BotSet" && e["id"] == ada.as_str()).unwrap()["thread"].as_str().unwrap().to_string();
+    let mut room = String::new(); let mut n = 0;
+    for c in &calls {
+        let name = c["name"].as_str().unwrap();
+        if !tools::owns(name) { continue }
+        let mut args = c["args"].clone();
+        if let Some(o) = args.as_object_mut() { for v in o.values_mut() { if v.as_str().map_or(false, |s| s.starts_with('r') && s.contains('-') && s[1..].chars().next().map_or(false, |x| x.is_ascii_digit())) { *v = json!(room) } } }
+        let (ok, body) = bots.tool_call(&th, name, &args).await;
+        let want: Value = serde_json::from_str(c["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(c["result"]["isError"].as_bool().unwrap(), !ok, "{name} {args}");
+        assert_eq!(tool_norm(&body), tool_norm(&want), "{name} {args}");
+        if name == "room_list" && room.is_empty() { room = body[0]["id"].as_str().unwrap().to_string() }
+        if name == "person_timezone" && args["zone"] == "Europe/Helsinki" { // the settings lane resolves the zone and sets it
+            hub.commit(&json!({"$":"SettingSet","key":"person.tz","value":"Europe/Helsinki","at":1})).await.unwrap();
+        }
+        n += 1;
+    }
+    assert!(n >= 38, "{n} calls replayed");
+    // the words that reached bob: the request in its room, the private word as a direct message
+    let got = rec.got.lock().unwrap().clone();
+    assert!(got.iter().any(|g| g.2 == "[message from ada in #greet]\nhi bob"), "{got:?}");
+    assert!(got.iter().any(|g| g.2 == "[message from ada]\na private word"), "{got:?}");
+}
+#[tokio::test] async fn bot_tools_listed_in_the_js_order_and_only_for_bots() {
+    let names: Vec<String> = tools::defs().iter().map(|d| d["name"].as_str().unwrap().to_string()).collect();
+    assert_eq!(names, tools::NAMES);
+    let (_hub, bots, _r) = start("tools-nobot", "").await;
+    assert_eq!(bots.tool_call("t-none", "bot_whoami", &json!({})).await, (false, json!({"error":"only bots have this tool"})));
+}
+#[tokio::test] async fn bot_messages_past_the_depth_bound_are_held_and_wake_nobody() {
+    // BT.Hop: a message goes out one hop past the turn that sent it, never past 6; the seventh is kept in its room for the person
+    let (hub, bots, rec) = start("tools-held", "").await;
+    let (ada, bob) = (bot(&hub, "ada").await, bot(&hub, "bob").await);
+    let lt = |b: &str| log(&hub).iter().find(|e| e["$"] == "BotSet" && e["id"] == b).unwrap()["thread"].as_str().unwrap().to_string();
+    let (ta, tb) = (lt(&ada), lt(&bob));
+    let mut hop = 0;
+    for i in 1..=7u64 {
+        let (from, to) = if i % 2 == 1 { (&ta, "bob") } else { (&tb, "ada") };
+        let before = rec.got.lock().unwrap().len();
+        let (ok, body) = bots.tool_call(from, "bot_send", &json!({"to":to,"text":format!("m{i}"),"direct":true})).await;
+        assert!(ok, "{body}");
+        let woke = rec.got.lock().unwrap().len() > before;
+        if i <= 6 { assert!(woke && body["held"].is_null(), "message {i}: {body}"); hop = i } else { assert!(!woke && body["held"] == true, "message {i}: {body}") }
+        // the person's turn does not end between them: the hop the last woken bot stands at is what the next message goes past
+        let _ = hop;
+    }
+    assert!(log(&hub).iter().any(|e| e["$"] == "RoomPosted" && e["hop"] == 7 && e["text"].as_str().unwrap().starts_with("[held: 6 messages")));
 }
