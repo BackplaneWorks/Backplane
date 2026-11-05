@@ -102,3 +102,11 @@ pub fn page(path: &Path, before: &str, n: usize) -> Result<Option<(Vec<Body>, bo
 }
 #[derive(Debug, PartialEq)]
 pub enum PageError { Cursor, Store(StoreError) }
+
+/// The bodies of the named mail ids in a journal, by id, in one streaming pass that stops once all are found (MailStore.exact for a page)
+pub fn exact(path: &Path, ids: &std::collections::HashSet<String>) -> std::collections::HashMap<String, Body> {
+    let mut out = std::collections::HashMap::new();
+    let Ok(f) = open(path, false) else { return out };
+    for l in text_lines(f) { if let Some(b) = body_parse(&l) { if ids.contains(&b.mail.id) { out.insert(b.mail.id.clone(), b); if out.len() == ids.len() { break } } } }
+    out
+}
