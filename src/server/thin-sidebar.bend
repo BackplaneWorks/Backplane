@@ -51,10 +51,25 @@ def Sidebar.image.drafts(xs: List<&2, Sigma<&2, &2, String, _ => String>>) -> Li
     case Nil{}: Nil{}
     case (+k, v) <> rest: SD.Input.keep(Bool.not(Sidebar.image.omit(k)), k, v, Sidebar.image.drafts(rest))
 
+# Each thread's viewer and fold choices live in the info map too (client.bend's
+# Reset.prefixes): a tool-call drawer opened ("fold:<id>"), a viewer tab, path
+# or panel ("view.", "panel:", "panel.hand:"), a diff, a history step or
+# comparison, a Files folder. The sidebar reads none of them (its one walk over
+# the info, Side.signals.ix, reads "@signal:" keys only), so a fold or a viewer
+# tab no longer draws the sidebar again (2026-11-05: every tool-call fold missed).
+def Sidebar.image.viewer.go(ps: List<&2, String>, +k: String, hit: Bool) -> Bool:
+  match ps hit:
+    case _ True{}: True{}
+    case Nil{} False{}: False{}
+    case +p <> rest False{}: Sidebar.image.viewer.go(rest, k, String.starts_with(k, p))
+
+def Sidebar.image.viewer(+k: String) -> Bool:
+  Sidebar.image.viewer.go(["fold:", "view.", "panel:", "panel.hand:", "diff:", "hist.at:", "hist.back:", "hist.diff:", "cmp.a:", "cmp.b:", "cmp.al", "cmp.bl", "fm.want:"], k, String.eq(k, "desk"))
+
 def Sidebar.image.info(xs: List<&2, Sigma<&2, &2, String, _ => String>>) -> List<&2, Sigma<&2, &2, String, _ => String>>:
   match xs:
     case Nil{}: Nil{}
-    case (+k, v) <> rest: SD.Input.keep(Bool.not(String.eq(k, "desk")), k, v, Sidebar.image.info(rest))
+    case (+k, v) <> rest: SD.Input.keep(Bool.not(Sidebar.image.viewer(k)), k, v, Sidebar.image.info(rest))
 
 def Sidebar.input_info(image: Bool, xs: List<&2, Sigma<&2, &2, String, _ => String>>) -> List<&2, J.KV>:
   match image:

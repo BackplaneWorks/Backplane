@@ -178,7 +178,7 @@
     "src/server/thin-body.bend": "779e72f8bb69990c74bf4acdd52f50fb1e0ceaa8771cd38044bef81d2c1a3680",
     "src/server/thin-mirror.bend": "b488dc7c45fe49bb1aa17966f454f1ee0e9cfef7db4d619c265c298c9bc94e92",
     "src/server/thin-side-index.bend": "92ac2f5fb70858c3db946f316e9e25f0833251b253727c759b01130f61f4a96d",
-    "src/server/thin-sidebar.bend": "2a2253426204d47f2c28fc33007f05951f1f798f626ebe732fafe2d5e1093e3b",
+    "src/server/thin-sidebar.bend": "e0ac0b6fe6cf0b250ed06be1c19062764f36ea04b05125fe376d5d7434cf01db",
     "src/server/thin-signal-text.bend": "3762209930cc3605902b3e5cf7cfbb3022629cbac924e7081d1fb5e1e804a9c3",
     "src/server/thin-signals.bend": "e2213ac2fab79b79dea8d14d4daac4ab9c640231759721079347be156bddebb7",
     "src/server/thin-splice.bend": "d1bc1c8e7710e0efba2abcf3fa599391d5d480eb37ced2a8a4f079d7b079a2be",
@@ -1194,7 +1194,8 @@
   "volatileImageInputsReview": {
     "scope": "The private ordinary image key (Sidebar.key.input with image) leaves out the scratch '@fab.at' (Fab.want/Fab.sync.k, action path), '@rp.req:<id>' (Rp.reply/Rp.failed) and '@telemetry.req:<id>' (Share.reply), reply handlers only, and the info 'desk' (read only by mobile/hubs.bend's alerts). None is read under src/web/view.bend, bots.bend or sidebar-slot.bend. The full picture/transport keys and the Settings path keep every input unchanged. test/sidebar_draft_image_test.bend: each omitted value reuses the image, a near key ('@fab.atx') still invalidates, and the whole page drawn with the retained sidebar equals the fresh page for each.",
     "files": {
-      "src/server/thin-sidebar.bend": "2a2253426204d47f2c28fc33007f05951f1f798f626ebe732fafe2d5e1093e3b"
-    }
+      "src/server/thin-sidebar.bend": "e0ac0b6fe6cf0b250ed06be1c19062764f36ea04b05125fe376d5d7434cf01db"
+    },
+    "viewerInfo": "Also left out of the private image key: info keys of each thread's viewer and fold choices ('fold:', 'view.', 'panel:', 'panel.hand:', 'diff:', 'hist.at:', 'hist.back:', 'hist.diff:', 'cmp.a:', 'cmp.b:', 'cmp.al', 'cmp.bl', 'fm.want:'; client.bend's Reset.prefixes less 'subs:' and 'fab.'). Call-graph scan from every View.sidebar/project/row/tree/groups def (1161 reachable defs): no literal reader of these prefixes; the only info walk (Side.signals.ix → Signal.cache.work) reads '@signal:' keys. test/sidebar_draft_image_test.bend: fold and viewer choices reuse the image and the whole page with the kept sidebar equals the fresh one; 'subs:' still invalidates."
   }
 }
