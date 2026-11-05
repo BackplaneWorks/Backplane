@@ -251,4 +251,3 @@ mod tests {
         assert!(f.on_hub("changed on another device", "x"), "a real change from elsewhere");
     }
 }
-}
