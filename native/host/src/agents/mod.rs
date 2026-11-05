@@ -7,7 +7,7 @@
 //! Out for Claude: images/`$skill` input, the Backplane MCP server and runtime prompt in the agent's arguments,
 //! subagents and background tasks, todo tools, the allowance stream, the legacy queue, mail provenance beyond carry,
 //! and the hub's time-driven policies (liveness, autosettle, alert/told/summary, star nudge), which belong to M4.
-pub mod lines; pub mod proc; pub mod rules; pub mod world;
+pub mod host; pub mod inputs; pub mod lines; pub mod mcp; pub mod proc; pub mod prompt; pub mod prompt_text; pub mod rules; pub mod tools; pub mod world;
 #[cfg(test)] mod tests;
 
 use crate::{api::{Caller, Fut, RpcHandler}, hub::Hub};
@@ -19,7 +19,6 @@ use std::{collections::{HashMap, VecDeque}, sync::{atomic::{AtomicU64, Ordering:
 use tokio::sync::{mpsc, oneshot, Mutex};
 use world::World;
 
-pub const PROMPT: &str = "Backplane (Rust hub): the runtime prompt is not ported yet.";
 pub const CMD_QUEUE: usize = 64;      // messages waiting for one thread's actor
 pub const BATCH_BYTES: usize = 64 << 10; // "one read" of the agent's output (Delta.merge)
 pub const LIVE_CAP: usize = 262144;   // Live.cap: a thread's streamed-but-unposted text
@@ -35,7 +34,8 @@ pub enum Cmd {
     Interrupt { reply: oneshot::Sender<()> },
 }
 
-pub struct Agents { pub hub: Arc<Hub>, pub cli: Cli, world: Mutex<World>, actors: StdMutex<HashMap<String, mpsc::Sender<Cmd>>>, pub stats: Stats, n: AtomicU64 }
+pub struct Agents { pub hub: Arc<Hub>, pub cli: Cli, pub host: host::HostInfo, world: Mutex<World>, actors: StdMutex<HashMap<String, mpsc::Sender<Cmd>>>, pub stats: Stats, n: AtomicU64,
+    pub mcp: std::sync::OnceLock<Arc<mcp::Mcp>>, gens: StdMutex<HashMap<String, String>>, pub parked: StdMutex<HashMap<String, mcp::Parked>> }
 
 pub fn now_s() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) }
 pub fn now_ms() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0) }
@@ -44,9 +44,12 @@ fn err(id: &Value, e: &str) -> Value { json!({"t":"reply","id":id,"ok":false,"er
 fn set(k: String, v: String, at: u64) -> Value { json!({"$":"SettingSet","key":k,"value":v,"at":at}) }
 
 impl Agents {
-    pub async fn start(hub: Arc<Hub>) -> Result<Arc<Agents>> { Agents::start_with(hub, Cli::from_env()).await }
-    pub async fn start_with(hub: Arc<Hub>, cli: Cli) -> Result<Arc<Agents>> {
-        let ag = Arc::new(Agents { hub: hub.clone(), cli, world: Mutex::new(World::default()), actors: StdMutex::new(HashMap::new()), stats: Stats::default(), n: AtomicU64::new(0) });
+    pub async fn start(hub: Arc<Hub>) -> Result<Arc<Agents>> { let h = host::HostInfo::probe(&hub.cfg.home); Agents::start_host(hub, Cli::from_env(), h).await }
+    pub async fn start_with(hub: Arc<Hub>, cli: Cli) -> Result<Arc<Agents>> { Agents::start_host(hub, cli, host::HostInfo::default()).await }
+    pub async fn start_host(hub: Arc<Hub>, cli: Cli, host: host::HostInfo) -> Result<Arc<Agents>> {
+        let ag = Arc::new(Agents { hub: hub.clone(), cli, host, world: Mutex::new(World::default()), actors: StdMutex::new(HashMap::new()), stats: Stats::default(), n: AtomicU64::new(0),
+            mcp: std::sync::OnceLock::new(), gens: StdMutex::new(HashMap::new()), parked: StdMutex::new(HashMap::new()) });
+        let _ = ag.mcp.set(mcp::Mcp::start(&ag).await?);
         ag.recover().await;
         hub.register_rpc(Arc::new(Rpc(ag.clone())));
         Ok(ag)
@@ -57,6 +60,19 @@ impl Agents {
         let mut w = self.world.lock().await;
         { if let Err(e) = w.sync(&self.hub.store) { eprintln!("agents: reading the log: {e:#}") } }
         w
+    }
+    /// Hub.prompt for one thread: the host's facts, the project's files, the settings that change the words.
+    pub async fn prompt_for(&self, th: &str, cwd: &str) -> String {
+        let (ipc, orders, lang, buy, names) = { let w = self.world().await;
+            (w.setting("kicad.ipc") != "off", w.setting("order.enabled") != "off", w.setting("agent.lang").to_string(), !w.setting(&format!("buy.{th}")).is_empty(), ()) };
+        let _ = names;
+        let (root, home, host) = (cwd.to_string(), self.host.home.clone(), self.host.clone());
+        tokio::task::spawn_blocking(move || {
+            let f = inputs::read(&root); let keys_path = home.join("secrets/api.env");
+            let keys = prompt::api_keys(&keys_path.to_string_lossy(), &prompt::key_names(&std::fs::read_to_string(&keys_path).unwrap_or_default())) + &prompt::secrets(&[]);
+            prompt::build(&prompt::PromptEnv { fc: host.fc.clone(), render: host.render.clone(), kicad: host.kicad.clone(), kicad_ipc: ipc, models: host.models_text(), may_delegate: true, orders_on: orders,
+                root, pro: f.pro, pcb: f.pcb, sch: f.sch, all: f.all, keys, machines: String::new(), buy, lang })
+        }).await.unwrap_or_default()
     }
     fn seq(&self) -> u64 { self.n.fetch_add(1, Relaxed) + 1 }
 
@@ -94,10 +110,17 @@ impl Agents {
     /// (and not repeating itself) it goes on with a message, BURST threads at once, the rest stay stopped.
     pub async fn recover(self: &Arc<Self>) {
         let (cut, carry): (Vec<Value>, Vec<String>) = {
-            let w = self.world().await; let now = now_s(); let zone = w.setting("tz.machine").to_string(); let mut ev = vec![]; let mut carry = vec![];
+            let w = self.world().await; let now = now_s(); let zone = w.setting("tz.machine").to_string(); let mut ev = vec![]; let mut carry = vec![]; let mut told = std::collections::HashSet::new();
+            // Rec.asks: an open ask is closed unanswered and its thread told which one went unanswered (an order's question stays open)
+            let mut asks: Vec<(&String, &world::Ask)> = w.asks.iter().filter(|(_, a)| !a.tool.starts_with("order_ask")).collect(); asks.sort_by(|a, b| a.0.cmp(b.0));
+            for (id, a) in asks {
+                ev.push(json!({"$":"AskClosed","id":id,"answer":"","at":now}));
+                if w.threads.contains_key(&a.thread) { told.insert(a.thread.clone());
+                    ev.push(json!({"$":"ActivityLogged","thread":a.thread,"act":hub_id("r", now, self.seq()),"tone":"error","kind":"restart","summary":format!("{}{}", rules::restart_cut(&zone, now), rules::unanswered(&a.kind, &a.tool, &a.detail)),"at":now})) }
+            }
             let mut ths: Vec<(&String, &world::T)> = w.threads.iter().filter(|(_, t)| t.turn == "running").collect(); ths.sort_by(|a, b| a.0.cmp(b.0));
             for (th, t) in ths {
-                ev.push(json!({"$":"ActivityLogged","thread":th,"act":hub_id("r", now, self.seq()),"tone":"error","kind":"restart","summary":rules::restart_cut(&zone, now),"at":now}));
+                if !told.contains(th) { ev.push(json!({"$":"ActivityLogged","thread":th,"act":hub_id("r", now, self.seq()),"tone":"error","kind":"restart","summary":rules::restart_cut(&zone, now),"at":now})) }
                 ev.push(json!({"$":"TurnChanged","thread":th,"state":"interrupted","at":now}));
                 if !t.last_user.is_empty() { ev.push(set(format!("stopped.{}", t.last_user), "1".into(), now)) }
                 let will = world::carry_will(t, w.setting("restart.continue"));
@@ -117,9 +140,10 @@ impl Agents {
 
 struct Rpc(Arc<Agents>);
 impl RpcHandler for Rpc {
-    fn methods(&self) -> &'static [&'static str] { &["turn.start", "turn.interrupt"] }
+    fn methods(&self) -> &'static [&'static str] { &["turn.start", "turn.interrupt", "ask.answer"] }
     fn call<'a>(&'a self, _hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
+            if method == "ask.answer" { return match self.0.answer(p.get("id").and_then(Value::as_str).unwrap_or(""), p.get("answer").and_then(Value::as_str).unwrap_or("")).await { Ok(()) => vec![ok(id)], Err(e) => vec![err(id, &e)] } }
             let th = p.get("thread").and_then(Value::as_str).unwrap_or("");
             if th.is_empty() || !self.0.world().await.threads.contains_key(th) { return vec![err(id, "unknown thread")] }
             let r = match method {
@@ -224,7 +248,9 @@ impl Actor {
             if let Err(e) = self.spawn(&t, &cwd, key).await { self.fail(format!("could not start claude: {e}"), "spawn", &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); return Ok(()) }
         }
         let uuid = rules::hub_uuid(now, &format!("{th}/{msg}"));
-        let sent = self.live_proc.as_ref().map(|p| p.input.try_send(rules::user_line(&text, &uuid)));
+        let line = { let (text2, cwd2, host) = (text.clone(), cwd.clone(), self.ag.host.clone()); // Media.claude: images read, `$skill` mentions made real
+            tokio::task::spawn_blocking(move || { let ss = if text2.contains('$') { inputs::scan(&host.user_home, &cwd2, host.kistack.as_deref()) } else { vec![] }; let body = inputs::expand_claude(&text2, &ss); let imgs = inputs::read_images(&text2); inputs::claude_line(&body, &imgs, &uuid) }).await.unwrap_or_default() };
+        let sent = self.live_proc.as_ref().map(|p| p.input.try_send(line));
         if !matches!(sent, Some(Ok(()))) { self.fail("the agent is not taking input".into(), "input", &hub_id("in", now, 0)).await }
         Ok(())
     }
@@ -232,7 +258,15 @@ impl Actor {
     async fn spawn(&mut self, t: &world::T, cwd: &str, key: String) -> Result<(), String> {
         if !std::path::Path::new(cwd).is_dir() { return Err(format!("its folder {cwd} is gone")) }
         let prog = self.ag.cli.resolve("claude")?;
-        let args = rules::claude_args(&t.model, &t.session, &t.runtime, &t.interaction, PROMPT);
+        let (now, th) = (now_s(), self.th.clone());
+        let gen = format!("{now}-{}", self.ag.seq()); // Hub.gen: the process's generation, which its MCP URL names
+        let prompt = self.ag.prompt_for(&th, cwd).await;
+        let mut dirs: Vec<String> = self.ag.host.kistack.iter().map(|k| k.to_string_lossy().into_owned()).collect(); dirs.push(self.ag.host.home.join("attachments").to_string_lossy().into_owned());
+        let plugins: Vec<String> = self.ag.host.kistack.iter().map(|k| k.to_string_lossy().into_owned()).collect();
+        let (effort, think) = { let w = self.ag.world().await; (w.setting(&format!("effort.{th}")).to_string(), self.cx.think) };
+        let url = self.ag.mcp.get().map(|m| m.url(&th, &gen)).unwrap_or_default();
+        let args = rules::claude_args(&rules::ArgsIn { model: &t.model, session: &t.session, runtime: &t.runtime, interaction: &t.interaction, prompt: &prompt, dirs: &dirs, effort: &effort, think, plugins: &plugins, mcp_url: &url });
+        self.ag.set_gen(&th, &gen);
         let p = proc::spawn(&prog, &args, std::path::Path::new(cwd), self.ag.cli.dir(), &[]).map_err(|e| e.to_string())?;
         self.ag.stats.procs_spawned.fetch_add(1, Relaxed);
         self.live_proc = Some(Live { input: p.input, pid: p.pid, key }); self.lines = Some(p.lines); self.exit = Some(p.exit);

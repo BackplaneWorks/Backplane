@@ -38,16 +38,27 @@ pub fn permission(runtime: &str, interaction: &str) -> &'static str {
     match runtime { "approval-required" => "default", "auto-accept-edits" => "acceptEdits", "auto" => "auto", _ => "bypassPermissions" }
 }
 
-/// Claude.args (prompt.bend). The runtime prompt, the Backplane MCP server and plugins are not ported yet: `prompt` is what the caller gives.
-pub fn claude_args(model: &str, session: &str, runtime: &str, interaction: &str, prompt: &str) -> Vec<String> {
-    let mut a: Vec<String> = ["-p", "--verbose", "--input-format", "stream-json", "--output-format", "stream-json", "--include-partial-messages", "--permission-mode"].iter().map(|s| s.to_string()).collect();
-    a.push(permission(runtime, interaction).into());
-    a.extend(["--disallowedTools", "Agent,Task", "--append-system-prompt"].iter().map(|s| s.to_string())); a.push(prompt.into());
-    if !(runtime == "full-access" && interaction == "default") && !runtime.is_empty() { a.extend(["--permission-prompt-tool", "mcp__backplane__permission_prompt"].iter().map(|s| s.to_string())); }
-    if !model.is_empty() { a.push("--model".into()); a.push(model.into()); }
-    if !session.is_empty() { a.push("--resume".into()); a.push(session.into()); }
-    a
+/// Claude.args (prompt.bend) then Hub.agent_args: effort, thinking, plugins and the MCP config follow.
+pub struct ArgsIn<'a> { pub model: &'a str, pub session: &'a str, pub runtime: &'a str, pub interaction: &'a str, pub prompt: &'a str, pub dirs: &'a [String], pub effort: &'a str, pub think: bool, pub plugins: &'a [String], pub mcp_url: &'a str }
+pub fn claude_args(a: &ArgsIn) -> Vec<String> {
+    let s = |x: &str| x.to_string();
+    let mut v: Vec<String> = ["-p", "--verbose", "--input-format", "stream-json", "--output-format", "stream-json", "--include-partial-messages", "--permission-mode"].iter().map(|x| s(x)).collect();
+    v.push(s(permission(a.runtime, a.interaction)));
+    v.extend(["--disallowedTools", "Agent,Task", "--append-system-prompt"].iter().map(|x| s(x))); v.push(s(a.prompt));
+    if !(a.runtime == "full-access" && a.interaction == "default") && !a.runtime.is_empty() { v.extend(["--permission-prompt-tool", "mcp__backplane__permission_prompt"].iter().map(|x| s(x))); }
+    if !a.model.is_empty() { v.push(s("--model")); v.push(s(a.model)); }
+    if !a.session.is_empty() { v.push(s("--resume")); v.push(s(a.session)); }
+    for d in a.dirs { v.push(s("--add-dir")); v.push(s(d)); }
+    if effort_ok(a.effort) { v.push(s("--effort")); v.push(s(a.effort)); }
+    if a.think { v.push(s("--thinking-display")); v.push(s("summarized")); }
+    for d in a.plugins { v.push(s("--plugin-dir")); v.push(s(d)); }
+    v.push(s("--mcp-config")); v.push(mcp_config(a.mcp_url));
+    v
 }
+/// AG.Effort.of("claude", e): the levels Claude takes.
+pub fn effort_ok(e: &str) -> bool { ["low", "medium", "high", "xhigh", "max"].contains(&e) }
+/// The MCP servers Claude is given: Backplane's own, and pcbparts (a free parts-search MCP).
+pub fn mcp_config(url: &str) -> String { format!("{{\"mcpServers\":{{\"backplane\":{{\"type\":\"http\",\"url\":{}}},\"pcbparts\":{{\"type\":\"http\",\"url\":\"https://pcbparts.dev/mcp\"}}}}}}", serde_json::to_string(url).unwrap_or_default()) }
 /// Agent.key: what a process was started with; a turn asking for another restarts it.
 pub fn agent_key(model: &str, runtime: &str, interaction: &str, think: bool) -> String { format!("{model}|{runtime}|{interaction}{}", if think { "|think" } else { "" }) }
 
@@ -66,6 +77,11 @@ pub fn clock(zone: &str, at: u64) -> String {
 pub fn restart_cut(zone: &str, at: u64) -> String { format!("Backplane restarted at {} during this turn.", clock(zone, at)) }
 /// Carry.cut
 pub const CARRY_CUT: &str = "If a tool call was running when it stopped, its result was lost, and what it started may still be running or have partly run: check its effect before running it again.";
+/// Rec.quote / Rec.unanswered: what went unanswered when the hub restarted.
+pub fn rec_quote(x: &str) -> String { let l = x.split('\n').next().unwrap_or("").trim(); if l.is_empty() { String::new() } else { format!(": \u{201C}{l}\u{201D}") } }
+pub fn unanswered(kind: &str, tool: &str, detail: &str) -> String {
+    match kind { "input" => format!(" Its question was not answered{}", rec_quote(detail)), "approval" => format!(" Its request to use {tool} was not answered{}", rec_quote(detail)), "plan" => " Its plan was not answered.".into(), _ => " Its request was not answered.".into() }
+}
 /// Exit.why: a SIGKILL (137) is most likely the kernel taking the process for memory.
 pub fn exit_why(code: i32) -> String { if code == 137 { "agent was killed (signal 9, likely out of memory)".into() } else { format!("agent exited with code {code}") } }
 
@@ -92,12 +108,16 @@ mod tests {
     #[test] fn titles_cut_at_sixty_characters() { assert_eq!(title_of("  hello\nworld"), "hello"); let t = title_of(&"é".repeat(80)); assert_eq!(t.chars().count(), 60); assert!(t.ends_with("...")); assert_eq!(title_of(&"a".repeat(60)).len(), 60); }
     #[test] fn modes_map_to_claudes_permission_flags() {
         assert_eq!(permission("full-access", "default"), "bypassPermissions"); assert_eq!(permission("approval-required", "default"), "default"); assert_eq!(permission("full-access", "plan"), "plan");
-        let a = claude_args("opus", "S", "full-access", "default", "P"); assert!(!a.contains(&"--permission-prompt-tool".to_string())); assert_eq!(&a[a.len() - 4..], ["--model", "opus", "--resume", "S"]);
-        assert!(claude_args("", "", "auto", "default", "P").contains(&"--permission-prompt-tool".to_string()));
+        let mk = |m: &'static str, s: &'static str, r: &'static str| ArgsIn { model: m, session: s, runtime: r, interaction: "default", prompt: "P", dirs: &[], effort: "", think: false, plugins: &[], mcp_url: "http://u" };
+        let a = claude_args(&mk("opus", "S", "full-access")); assert!(!a.contains(&"--permission-prompt-tool".to_string())); assert_eq!(&a[a.len() - 6..a.len() - 2], ["--model", "opus", "--resume", "S"]);
+        assert!(claude_args(&mk("", "", "auto")).contains(&"--permission-prompt-tool".to_string()));
+        let mut x = mk("", "", "full-access"); let dirs = vec!["/k".to_string(), "/h/attachments".to_string()]; x.dirs = &dirs; x.effort = "high"; x.think = true; x.plugins = &dirs[..1];
+        let a = claude_args(&x); assert_eq!(&a[a.len() - 12..a.len() - 2], ["--add-dir", "/k", "--add-dir", "/h/attachments", "--effort", "high", "--thinking-display", "summarized", "--plugin-dir", "/k"]); assert_eq!(a[a.len() - 2], "--mcp-config");
     }
     #[test] fn the_restart_note_reads_the_person_zone() {
         assert_eq!(clock("", 0), "00:00"); assert_eq!(clock("UTC", 3600 * 5 + 60 * 7), "05:07");
         assert_eq!(restart_cut("", 3600 * 6 + 240), "Backplane restarted at 06:04 during this turn.");
     }
+    #[test] fn unanswered_asks_are_named() { assert_eq!(unanswered("approval", "Bash", "ls -la\nx"), " Its request to use Bash was not answered: \u{201C}ls -la\u{201D}"); assert_eq!(unanswered("plan", "", ""), " Its plan was not answered."); assert_eq!(unanswered("input", "", " "), " Its question was not answered"); assert_eq!(unanswered("x", "", ""), " Its request was not answered."); }
     #[test] fn a_sigkill_is_named() { assert!(exit_why(137).contains("signal 9")); assert_eq!(exit_why(3), "agent exited with code 3"); }
 }
