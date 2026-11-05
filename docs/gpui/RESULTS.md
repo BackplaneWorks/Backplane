@@ -231,3 +231,11 @@ Harness for the 12 gate journeys and the frame measurements; design and the requ
 - Controls (G4): 44 visible controls on a thread screen, 23 wired, 0 dead among the wired; 21 visible controls are unwired (`wired:false`), which the sweep now fails. Defect to GPUI: `net_sleep` over 15 s always fails (15 s timer).
 - Popups `@`, `>`, `%`: still fail (15 of 65 steps in the 3-minute walk). Memory over 3 minutes: +24 +-11 MB/h (too short to read).
 - 6 journeys blocked on G5 steps not implemented (pair, paste image, bots/rooms, viewers, downloads, settings). The dead-controls rerun that saves the control list did not start: Boat refused ("start limit per day: 837 of 840"); reruns wait for the quota to reset.
+
+### e2e with the 839a84025 GPUI build (Boat, llvmpipe, JS hub; 2026-11-05 10:32-10:45)
+Still software-rendered and on the JS hub, so no journey is a pass (rule in CONTRACT.md). Raw: Boat jobs j20261105103241-2102997 (all journeys), j20261105104525-2228495 (dead-controls).
+- Popups: `@`, `>` and `%` now open (6 of 6 popup steps ok; a popup step succeeds only when the hub's rows are non-empty). In the 3-minute random walk 3 of 160 steps failed, all `$` popups (cause unknown).
+- Reconnect: `net_sleep` 45 s now succeeds (the secs+15 timer), so GPUI reconnects.
+- Dead controls: 48 visible controls on a thread screen: 25 wired, all 25 clicked, **0 dead**; 23 have no handler and are drawn disabled (Terminal, Commands, the 11 rail tabs, Jump or run a command, Improvements, Search, Settings, Add project / New thread / New bot / New room, Account, Edit, Context, Dictate). `dead.pass` is false because of them; `passIfDisabledAccepted` is true. Whether disabled-looking placeholders satisfy "no dead buttons" is the reviewer's call. (Rows of a streaming thread change ids every few seconds and are skipped as transient by the click step's `found:false`.)
+- Click ack p50 48-61 ms under llvmpipe (frame interval about 48 ms): the one-frame budget stays unjudged until real hardware. Long session (3 min): 160 inputs, +24 +-11 MB/h RSS, too short.
+- Boat note: the harness now keeps a warm sandbox for the thread (no new start per rerun); the day's start limit was 837/840 when I looked.
