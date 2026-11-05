@@ -14,7 +14,21 @@ await sleep(4000);
 const c=await client(h);
 const R=async(m,p)=>{const r=await c.rpc(m,p);const o=r?.o;return {ok:o?.ok,error:o?.error,bot:o?.bot}};
 const steps=[];const S=async(name,m,p)=>{const r=await R(m,p);steps.push({name,m,ok:r.ok,error:r.error??null});await sleep(250);return r};
-if(scen==='uber'){
+if(scen==='uber2'){
+const bub=(await S('create bub','bots.create',{name:'bub',persona:'dry'})).bot;
+await S('remember k1','bots.remember',{bot:bub,key:'k1',kind:'fact',text:'one',tags:'a'});await sleep(1200);
+await S('remember k2','bots.remember',{bot:bub,key:'k2',kind:'pref',text:'two',tags:''});await sleep(1200);
+await S('remember k3','bots.remember',{bot:bub,key:'k3',kind:'note',text:'three',tags:'c'});await sleep(1200);
+await S('remember k1 again','bots.remember',{bot:bub,key:'k1',kind:'fact',text:'one!',tags:'a'});await sleep(1200);
+await S('routine rz','bots.routine',{bot:bub,routine:'rz',name:'zed',at:'in 3d',prompt:'z'});
+await S('routine ra','bots.routine',{bot:bub,routine:'ra',name:'alpha',schedule:'daily 09:30',prompt:'a'});
+await S('routine rm','bots.routine',{bot:bub,routine:'rm',name:'mid',schedule:'weekdays 08:00',prompt:'m'});
+await S('routine rb','bots.routine',{bot:bub,routine:'rb',name:'beta',schedule:'every 2h',prompt:'b',on:false});
+await S('promote bub','bots.uber',{bot:bub});
+await sleep(130000);
+await S('uber_home as holder','bots.uber_home',{});
+await sleep(1500);
+}else if(scen==='uber'){
 const ada=(await S('create ada','bots.create',{name:'ada'})).bot;
 const bub=(await S('create bub uber','bots.create',{name:'bub',uber:true})).bot;
 await sleep(3000);
