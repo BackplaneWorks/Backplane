@@ -312,6 +312,9 @@ impl Backplane {
             if l.file { let _ = self.tx.try_send(Command::Action("file-open".into(), l.href)); }
             else if l.href.starts_with("https://") || l.href.starts_with("http://") { cx.open_url(&l.href); }
         }
+        // a finished selection is the X11 PRIMARY selection too (middle-click paste in other apps)
+        #[cfg(target_os = "linux")]
+        { let s = { let r = self.screens.reg.borrow(); select::extract(&r.texts(), &r.sel) }; if !s.is_empty() { cx.write_to_primary(ClipboardItem::new_string(s)); } }
         cx.notify();
     }
     /// Ctrl-C with the composer's selection empty: copy what is selected in the timeline.
