@@ -25,7 +25,17 @@ pub fn draft(hub: &str, session: &Value, value: &str) -> Option<ActOut> {
 }
 
 /// The facts of the thread and the setting a send needs, read from the model by the caller.
-pub struct SendCtx<'a> { pub hub: &'a str, pub cid: &'a str, pub now_s: u64, pub bot_thread: bool, pub account_params: bool }
+pub struct SendCtx<'a> { pub hub: &'a str, pub cid: &'a str, pub now_s: u64, pub bot_thread: bool, pub binding: Option<String> }
+
+/// Accounts.rpc.params: a request about a thread bound to a named account carries that binding's setting text first (`accountBinding`), any other copy of the key dropped.
+pub fn bind(p: Value, binding: Option<&str>) -> Value {
+    let Some(b) = binding else { return p };
+    let Value::Object(o) = p else { return p };
+    if !o.contains_key("thread") { return Value::Object(o) }
+    let mut out = Map::new(); out.insert("accountBinding".into(), json!(b));
+    for (k, v) in o { if k != "accountBinding" { out.insert(k, v); } }
+    Value::Object(out)
+}
 
 /// Ui.msg_id: "c" ++ cid ++ now ++ "-" ++ rid.
 pub fn msg_id(cid: &str, now_s: u64, rid: u64) -> String { format!("c{cid}{now_s}-{rid}") }
@@ -35,12 +45,13 @@ pub fn send(cx: &SendCtx, session: &Value) -> Option<ActOut> {
     let sel = s(session, "sel");
     let text = draft_of(session, sel).trim();
     if sel.is_empty() || !safe(sel) || text.is_empty() { return None }
-    if text.starts_with('/') || cx.bot_thread || cx.account_params { return None }
+    if text.starts_with('/') || cx.bot_thread { return None }
     let d = &session["drafts"];
     if !s(d, &format!("@att:{sel}")).is_empty() || !s(d, &format!("@reply:{sel}")).is_empty() || !s(d, &format!("@intent.edit:{sel}")).is_empty() || !s(d, "@draft.bound").is_empty() { return None }
     let rid = session["rid"].as_u64().unwrap_or(0);
     // Rpc.text: {"id":rid,"m":"turn.start","p":{thread,text,msg,mode}} in this key order
-    let request = format!("{{\"id\":{rid},\"m\":\"turn.start\",\"p\":{}}}", serde_json::to_string(&json!({"thread": sel, "text": text, "msg": msg_id(cx.cid, cx.now_s, rid), "mode": "steer"})).ok()?);
+    let p = bind(json!({"thread": sel, "text": text, "msg": msg_id(cx.cid, cx.now_s, rid), "mode": "steer"}), cx.binding.as_deref());
+    let request = format!("{{\"id\":{rid},\"m\":\"turn.start\",\"p\":{}}}", serde_json::to_string(&p).ok()?);
     let mut drafts = Map::new();
     for k in [sel.to_string(), format!("@att:{sel}"), format!("@reply:{sel}"), format!("@reply.q:{sel}")] { drafts.insert(k, json!("")); }
     let mut outbox = Map::new(); outbox.insert(rid.to_string(), json!(request));
@@ -78,7 +89,8 @@ pub fn fields(draft: &str, running: bool, attaching: bool, claude: bool, own_ski
 }
 
 /// What the model knows about the selected thread that a send needs: the presenter implements it over its metadata projection.
-pub trait Facts { fn bot_thread(&self, thread: &str) -> bool; fn account_params(&self, thread: &str) -> bool; }
+pub trait Facts { fn bot_thread(&self, thread: &str) -> bool; fn account_params(&self, thread: &str) -> bool; /// the thread's named account binding, as its setting text (Accounts.owner); None when it has none (Accounts.named)
+    fn account_binding(&self, _thread: &str) -> Option<String> { None } }
 
 /// The composer's actions as the presenter's action table calls them: `params` is the object the hub builds for a view request (`session`, `action`, `value`, `cid`, `hub`,
 /// `now` in milliseconds). `draft`, `send` and `send-alt` (the other follow-up mode: Follow.mode answers "steer" for both); everything else, and every case not ported, is None.
@@ -88,7 +100,7 @@ pub fn act(params: &Value, facts: &dyn Facts) -> Option<ActOut> {
         "draft" => draft(hub, session, s(params, "value")),
         "send" | "send-alt" => {
             let sel = s(session, "sel");
-            send(&SendCtx { hub, cid: s(params, "cid"), now_s: params["now"].as_u64().unwrap_or(0) / 1000, bot_thread: facts.bot_thread(sel), account_params: facts.account_params(sel) }, session)
+            send(&SendCtx { hub, cid: s(params, "cid"), now_s: params["now"].as_u64().unwrap_or(0) / 1000, bot_thread: facts.bot_thread(sel), binding: facts.account_binding(sel) }, session)
         }
         _ => None,
     }
@@ -111,7 +123,7 @@ mod tests {
         assert!(draft("h", &s, "plain").is_none());
     }
     #[test] fn send_is_what_the_js_hub_answered() {
-        let cx = SendCtx { hub: "http://127.0.0.1:3820", cid: "parity-gpui", now_s: 1793864523, bot_thread: false, account_params: false };
+        let cx = SendCtx { hub: "http://127.0.0.1:3820", cid: "parity-gpui", now_s: 1793864523, bot_thread: false, binding: None };
         let o = send(&cx, &session()).unwrap();
         assert_eq!(o.cmds, vec![
             json!({"type": "keep", "thread": "http://127.0.0.1:3820|t1700000002-3", "text": ""}),
@@ -158,13 +170,13 @@ mod tests {
         for a in ["select", "row-pin", "skill", "interrupt", ""] { assert!(act(&p(a, "x"), &Plain).is_none(), "{a}") }
     }
     #[test] fn what_is_not_ported_is_none() {
-        let cx = SendCtx { hub: "h", cid: "c", now_s: 1, bot_thread: false, account_params: false };
+        let cx = SendCtx { hub: "h", cid: "c", now_s: 1, bot_thread: false, binding: None };
         let with = |k: &str, v: &str| { let mut s = session(); s["drafts"][k] = json!(v); s };
         assert!(send(&cx, &with("t1700000002-3", "   ")).is_none(), "blank");
         assert!(send(&cx, &with("t1700000002-3", "/btw why")).is_none(), "slash commands");
         assert!(send(&cx, &with("@att:t1700000002-3", "a")).is_none(), "attachments");
         assert!(send(&cx, &with("@reply:t1700000002-3", "m1")).is_none(), "replies");
         assert!(send(&cx, &with("@draft.bound", "5 abc")).is_none(), "a bounded draft");
-        assert!(send(&SendCtx { bot_thread: true, ..SendCtx { hub: "h", cid: "c", now_s: 1, bot_thread: false, account_params: false } }, &session()).is_none(), "a bot's thread");
+        assert!(send(&SendCtx { bot_thread: true, ..SendCtx { hub: "h", cid: "c", now_s: 1, bot_thread: false, binding: None } }, &session()).is_none(), "a bot's thread");
     }
 }

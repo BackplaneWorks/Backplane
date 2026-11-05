@@ -2,7 +2,7 @@
 //! that is None for what it does not own or has not ported; the first answer wins, its patch is merged into a copy of the request's session (`patch::merge`), its commands are
 //! returned in order, and the shared post-hook of Bend's `Ui.act` that is mine, `Fab.sync` (a `send fab.look` after any action with a thread selected whose place changed), is
 //! appended for the answers that did not already include it (select does). None from here means the helper, or "not ported" on a hub without one.
-use super::{composer, patch, select};
+use super::{composer, patch, select, thread_actions};
 use crate::commands::actions as cmdact;
 use serde_json::{json, Value};
 
@@ -10,6 +10,8 @@ use serde_json::{json, Value};
 pub trait Facts: composer::Facts + select::Facts {
     /// a thread's title as the sidebar shows it (the field a rename starts from)
     fn title_of(&self, id: &str) -> String;
+    /// the folder a thread works in (Ui.root.thread: its worktree, else its project's root)
+    fn root_of(&self, id: &str) -> String;
 }
 
 pub struct Dispatched { pub session: Value, pub cmds: Vec<Value>, pub next_target: Option<Value> }
@@ -29,26 +31,16 @@ pub(crate) fn fab_tail<F: Facts>(f: &F, hub: &str, session: &mut Value, cmds: &m
     patch::merge(session, &json!({"rid": rid + 1, "drafts": {"@fab.at": at}}));
 }
 
-/// The thread screen's buttons that are one request (Ui.act): `answer` (Ui.answer: `ask.answer {id, answer}` from "id|answer…", a value with no id sends no params) and `interrupt`
-/// (Ui.on_thread "turn.interrupt"; a thread bound to an account is left alone, Accounts.rpc.params would add the binding); `copy` is the client's own (no request, no patch).
-fn thread_button<F: Facts>(f: &F, hub: &str, session: &Value, sel: &str, action: &str, value: &str) -> Option<composer::ActOut> {
-    let rid = session["rid"].as_u64().unwrap_or(1);
-    let (m, p) = match action {
-        "answer" => {
-            let mut parts = value.split('|');
-            let id = parts.next().unwrap_or("");
-            let p = if value.is_empty() { json!({}) } else { json!({"id": id, "answer": parts.collect::<Vec<_>>().join("|")}) };
-            ("ask.answer", p)
-        }
-        "interrupt" => {
-            if sel.is_empty() || composer::Facts::account_params(f, sel) { return None }
-            ("turn.interrupt", json!({"thread": sel}))
-        }
-        "copy" => return Some(composer::ActOut { session_patch: json!({}), cmds: vec![] }),
-        _ => return None,
-    };
-    let text = json!({"id": rid, "m": m, "p": p}).to_string();
-    Some(composer::ActOut { session_patch: json!({"rid": rid + 1}), cmds: vec![json!({"type": "send", "hub": hub, "text": text})] })
+/// Accounts.rpc.params for every request an action sends: one about a thread bound to a named account (`p.thread`) carries `accountBinding` first (Ui.rpc applies it to all of them).
+fn bind_all<F: Facts>(f: &F, cmds: &mut [Value]) {
+    for c in cmds.iter_mut() {
+        if c["type"] != "send" { continue }
+        let Some(mut req) = c["text"].as_str().and_then(|x| serde_json::from_str::<Value>(x).ok()) else { continue };
+        let Some(th) = req["p"]["thread"].as_str().map(str::to_string) else { continue };
+        let Some(b) = composer::Facts::account_binding(f, &th) else { continue };
+        req["p"] = composer::bind(req["p"].take(), Some(&b));
+        c["text"] = json!(req.to_string());
+    }
 }
 
 /// `params` is the object the hub builds for a view request (`session`, `action`, `value`, `cid`, `hub`, `now` in ms, `target`).
@@ -56,20 +48,21 @@ pub fn dispatch<F: Facts>(f: &F, params: &Value) -> Option<Dispatched> {
     let (hub, action, value) = (s(params, "hub"), s(params, "action"), s(params, "value"));
     if action.is_empty() { return None }
     let mut session = params["session"].clone();
-    // a viewer panel open: the actor's Dv/Mpage/Rp syncs would add commands: not ported
-    if session["panel"].as_bool().unwrap_or(false) { return None }
     let sel = if params["target"]["kind"] == "thread" { s(&params["target"], "id") } else { "" };
     let (cmds, next_target, has_fab) = if let Some(o) = composer::act(params, f) {
         patch::merge(&mut session, &o.session_patch); (o.cmds, None, false)
     } else if let Some(o) = cmdact::act(&cmdact::Req { hub, session: &params["session"], sel, action, value, title_of: &|t| f.title_of(t) }) {
         patch::merge(&mut session, &o.session_patch); (o.cmds, o.next_target, false)
-    } else if let Some(o) = thread_button(f, hub, &params["session"], sel, action, value) {
-        patch::merge(&mut session, &o.session_patch); (o.cmds, None, false)
+    } else if let Some(o) = thread_actions::act(f, hub, &params["session"], sel, action, value) {
+        patch::merge(&mut session, &o.session_patch); (o.cmds, None, !o.look)
     } else if action == "select" {
         let o = select::select(f, hub, &params["session"], value)?;
         patch::merge(&mut session, &o.session_patch); (o.cmds, Some(o.next_target), true)
     } else { return None };
+    // the post-hook's Dv.sync / Mpage.sync / Fv.sync would add commands for what is on show now: not ported (the helper's)
+    if thread_actions::syncs_pending(&session) { return None }
     let mut cmds = cmds;
+    bind_all(f, &mut cmds);
     if !has_fab { fab_tail(f, hub, &mut session, &mut cmds) }
     Some(Dispatched { session, cmds, next_target })
 }
@@ -79,14 +72,14 @@ pub fn dispatch<F: Facts>(f: &F, params: &Value) -> Option<Dispatched> {
 pub struct StateFacts<'a>(pub &'a crate::state::State);
 impl composer::Facts for StateFacts<'_> {
     fn bot_thread(&self, thread: &str) -> bool { self.0.bot_threads_has(thread) }
-    fn account_params(&self, thread: &str) -> bool {
-        let Some(t) = self.0.threads.get(thread) else { return false };
-        match self.0.settings.get(&format!("account.thread.{thread}.{}", t.provider)) {
-            None => false,
-            Some(raw) if raw.is_empty() => false,
-            // Accounts.named: the binding's id is not empty (an unparsable binding reads as "!invalid", also not empty)
-            Some(raw) => serde_json::from_str::<Value>(raw).ok().map_or(true, |j| !j["id"].as_str().unwrap_or("").is_empty()),
-        }
+    fn account_params(&self, thread: &str) -> bool { self.account_binding(thread).is_some() }
+    fn account_binding(&self, thread: &str) -> Option<String> {
+        let t = self.0.threads.get(thread)?;
+        let raw = self.0.settings.get(&format!("account.thread.{thread}.{}", t.provider))?;
+        if raw.is_empty() { return None }
+        // Accounts.named: the binding's id is not empty (an unparsable binding reads as "!invalid", also not empty)
+        let named = serde_json::from_str::<Value>(raw).ok().map_or(true, |j| !j["id"].as_str().unwrap_or("").is_empty());
+        named.then(|| raw.clone())
     }
 }
 impl select::Facts for StateFacts<'_> {
@@ -97,6 +90,10 @@ impl select::Facts for StateFacts<'_> {
 }
 impl Facts for StateFacts<'_> {
     fn title_of(&self, id: &str) -> String { self.0.threads.get(id).map_or(String::new(), |t| t.title.clone()) }
+    fn root_of(&self, id: &str) -> String {
+        let Some(t) = self.0.threads.get(id) else { return String::new() };
+        if !t.worktree.is_empty() { t.worktree.clone() } else { self.0.projects.get(&t.project).map_or(String::new(), |p| p.root.clone()) }
+    }
 }
 
 #[cfg(test)]
@@ -120,7 +117,7 @@ mod tests {
         fn order_enabled(&self) -> bool { true }
         fn estimates_on(&self) -> bool { true }
     }
-    impl Facts for M { fn title_of(&self, _: &str) -> String { "T".into() } }
+    impl Facts for M { fn title_of(&self, _: &str) -> String { "T".into() } fn root_of(&self, _: &str) -> String { "/w/r".into() } }
     const T: &str = "t1700000002-3";
     fn params(action: &str, value: &str, session: Value) -> Value {
         json!({"hub": "http://127.0.0.1:3820", "cid": "parity-gpui", "now": 1793864523000u64, "target": {"kind": "thread", "id": T}, "action": action, "value": value, "session": session})
@@ -157,11 +154,29 @@ mod tests {
         let d = dispatch(&f, &params("copy", "x", session())).unwrap();
         assert!(d.cmds.is_empty() && d.session["rid"] == json!(2));
     }
+    struct Acct(M);
+    impl composer::Facts for Acct { fn bot_thread(&self, _: &str) -> bool { false } fn account_params(&self, _: &str) -> bool { true } fn account_binding(&self, _: &str) -> Option<String> { Some("{\"id\":\"a1\",\"epoch\":2}".into()) } }
+    impl select::Facts for Acct {
+        fn thread_exists(&self, id: &str) -> bool { self.0.thread_exists(id) } fn turn_name(&self, id: &str) -> String { self.0.turn_name(id) }
+        fn order_enabled(&self) -> bool { true } fn estimates_on(&self) -> bool { true }
+    }
+    impl Facts for Acct { fn title_of(&self, _: &str) -> String { "T".into() } fn root_of(&self, _: &str) -> String { "/w/r".into() } }
+    #[test] fn a_thread_bound_to_an_account_carries_the_binding_first() {
+        let f = Acct(M { exists: T, running: false });
+        let d = dispatch(&f, &params("interrupt", "", session())).unwrap();
+        assert_eq!(d.cmds[0]["text"], json!("{\"id\":2,\"m\":\"turn.interrupt\",\"p\":{\"accountBinding\":\"{\\\"id\\\":\\\"a1\\\",\\\"epoch\\\":2}\",\"thread\":\"t1700000002-3\"}}"));
+        let d = dispatch(&f, &params("send", "", session())).unwrap();
+        let send = d.cmds.iter().find(|c| c["type"] == "send").unwrap()["text"].as_str().unwrap().to_string();
+        assert!(send.contains("\"p\":{\"accountBinding\":"), "{send}");
+        assert_eq!(d.session["outbox"]["2"].as_str().unwrap(), send, "the kept copy is the same text");
+        let d = dispatch(&f, &params("answer", "a|b", session())).unwrap();
+        assert!(!d.cmds[0]["text"].as_str().unwrap().contains("accountBinding"), "no thread in the params, no binding");
+    }
     #[test] fn what_nobody_owns_is_none() {
         let f = M { exists: T, running: false };
         for a in ["", "skill", "fm-open", "settings"] { assert!(dispatch(&f, &params(a, "x", session())).is_none(), "{a}") }
-        let mut open = session(); open["panel"] = json!(true);
-        assert!(dispatch(&f, &params("send", "", open)).is_none(), "a viewer panel open: the syncs are not ported");
+        let mut open = session(); open["panel"] = json!(true); open["info"] = json!({format!("view.kind:{T}"): "diff"});
+        assert!(dispatch(&f, &params("send", "", open)).is_none(), "a Diff on show: Dv.sync would ask again, not ported");
         assert!(dispatch(&f, &params("select", "h|unknown", session())).is_none());
     }
 }
