@@ -595,3 +595,13 @@ law queue_edit_in_place rust queue_edit_remove_move_log_their_events
 law queue_remove_one rust queue_edit_remove_move_log_their_events
 law queue_move_first rust queue_edit_remove_move_log_their_events
 law queue_move_unknown rust queue_edit_remove_move_log_their_events
+law far_fail_keeps_items rust far_fail_keeps_items
+law far_ack_removes_batch rust far_ack_removes_batch
+law far_ack_keeps_waiting rust far_ack_keeps_waiting
+law far_retry_order rust far_retry_order
+law far_retry_begins rust far_retry_begins
+law far_hold_waits rust far_hold_waits
+law far_release_resends rust far_release_resends
+law far_backoff rust far_backoff
+law far_epoch_on_unknown_lines rust far_epoch_on_unknown_lines
+law far_epoch_view_bumped rust far_epoch_view_bumped
