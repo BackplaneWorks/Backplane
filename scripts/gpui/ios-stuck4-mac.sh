@@ -12,6 +12,8 @@ for n in 0 20 40 60 100; do
   fi
   SIMCTL_CHILD_BACKPLANE_PERFORMANCE=1 sh ~/bp-gpui-ios/ios-shot.sh $U rd$n-b 50 "ob-skip" $T > /dev/null
   xcrun simctl spawn $U log show --last 90s --predicate 'process == "Backplane"' --style compact 2>/dev/null | grep -E "BPPerf|view failed" | sed 's/^.*Backplane\[[0-9:a-f]*\] ([A-Za-z]*) //' > ~/bp-gpui-ios/shots/rd$n.log
+  # the hub's own view of it: the slowest thin.rpc / hub.rpc so far (cumulative max, sizes ascend), from its /debug/perf
+  curl -s -m 5 -H "Authorization: Bearer $(cat ~/bp-gpui-ios/seed7-token)" http://backplane.tail9e0cf2.ts.net:3811/debug/perf | grep -E "^(thin.rpc|hub.rpc|thin.read.page)" | awk -v n=$n '{printf "  hub perf @%sKB: %s n=%s max=%sms\n", n, $1, $2, $7}'
   python3 - $n <<'PY'
 import re,sys
 n=sys.argv[1]; rows=[]; fails=0
