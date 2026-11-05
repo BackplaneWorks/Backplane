@@ -24,8 +24,10 @@ fn bit(mask: u32, layer: u32) -> bool { layer < 32 && (mask >> layer) & 1 == 1 }
 pub fn plan(layers: &[u32], m: &Masks) -> Vec<(usize, f32)> {
     let shown = |l: u32| !bit(m.off, l);
     let f = |l: u32| if bit(m.dim, l) { DIM } else { 1.0 };
-    let mut out: Vec<(usize, f32)> = layers.iter().enumerate().filter(|(_, &l)| shown(l) && l != m.lift).map(|(i, &l)| (i, f(l))).collect();
-    out.extend(layers.iter().enumerate().filter(|(_, &l)| shown(l) && l == m.lift).map(|(i, &l)| (i, f(l))));
+    let mut out: Vec<(usize, f32)> = Vec::with_capacity(layers.len());
+    for lifted in [false, true] {
+        for (i, l) in layers.iter().enumerate() { let l = *l; if shown(l) && (l == m.lift) == lifted { out.push((i, f(l))); } }
+    }
     out
 }
 
