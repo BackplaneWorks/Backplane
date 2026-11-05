@@ -190,7 +190,7 @@ impl Render for Backplane {
             let stamp = string(e, "stamp");
             match kind {
                 "user" => entries.push(div().id(SharedString::from(format!("e-{id}"))).w_full().flex().justify_end().py_2().child(
-                    div().max_w(px(640.)).px_3().py_2().bg(c("raise")).border_1().border_color(c("line")).flex().flex_col().gap_1()
+                    div().max_w(px(640.)).when(crate::screens::timeline::bubble_full_width(&text), |d| d.w_full()).px_3().py_2().bg(c("raise")).border_1().border_color(c("line")).flex().flex_col().gap_1()
                         .child(crate::screens::timeline::user_text(&reg, light, &text)).children(crate::screens::timeline::attachments(light, &e["attachments"], &id, self.screens.attacher.target.as_ref(), &self.screens.images)).child(div().flex().justify_end().text_size(px(11.)).text_color(c("faint")).child(stamp))).into_any_element()),
                 "fold" => {
                     let value = string(e, "value");
