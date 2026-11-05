@@ -260,6 +260,7 @@ impl Bots {
         let evs = vec![json!({"$":"ThreadCreated","id":th,"project":"","title":name,"env":"local","branch":"","worktree":"","provider":provider,"model":gs(a, "model"),"at":now}),
             json!({"$":"BotSet","id":bot,"name":name,"thread":th,"look":super::rpc::seed(&name),"persona":gs(a, "persona"),"at":now}),
             json!({"$":"SettingSet","key":format!("bot.parent.{bot}"),"value":b.id,"at":now})];
+        let evs = self.accounts_created(evs).await;
         if let Err(e) = self.t_commit(w, now, evs).await { return fail(&e) }
         let me = self.clone(); let (b2, t2) = (bot.clone(), th.clone()); tokio::spawn(async move { me.home_pub(&b2, &t2).await }); // BotFx home
         (true, json!({"bot":bot,"name":name,"note":format!("{name} is made: talk to it with bot_send")}))

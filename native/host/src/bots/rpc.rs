@@ -119,6 +119,7 @@ impl Bots {
         let look = gnat(p, "look").unwrap_or_else(|| seed(&name));
         let evs = vec![json!({"$":"ThreadCreated","id":th,"project":"","title":name,"env":"local","branch":"","worktree":"","provider":provider,"model":model,"at":now}),
             json!({"$":"BotSet","id":bot,"name":name,"thread":th,"look":look,"persona":gs(p, "persona"),"at":now})];
+        let evs = self.accounts_created(evs).await;
         let r = self.hub.commit_many(&evs).await;
         drop(w);
         if let Err(e) = r { return vec![err(id, &format!("{e:#}"))] }
@@ -165,6 +166,19 @@ impl Bots {
     }
 
     /// Bots.say.msg / Bots.space: a person talks to a bot, the conversation starts over at hop 0. `msg` names a retry (stored once).
+    /// Accounts.created: a thread of a provider with accounts starts on the default account (frozen at creation); the binding follows its ThreadCreated
+    pub(super) async fn accounts_created(&self, evs: Vec<Value>) -> Vec<Value> {
+        let mut out = Vec::with_capacity(evs.len() + 1);
+        for e in evs {
+            let bind = if e["$"] == "ThreadCreated" && matches!(e["provider"].as_str(), Some("claude") | Some("codex")) {
+                let p = e["provider"].as_str().unwrap_or("");
+                let v = self.hub.setting(&format!("account.default.{p}")).await.unwrap_or_else(|| "{\"id\":\"\",\"epoch\":0}".into());
+                Some(json!({"$":"SettingSet","key":format!("account.thread.{}.{p}", e["id"].as_str().unwrap_or("")),"value":v,"at":e["at"]}))
+            } else { None };
+            out.push(e); out.extend(bind);
+        }
+        out
+    }
     pub fn set_star(&self, f: Arc<StarPrompt>) { let _ = self.star.set(f); }
     /// Star.accepted: a prompt a person typed (a client request, not a retry, not blank) counts once; (events to commit with it, the offer frame to push after)
     pub(super) fn star_for(&self, client: Option<u64>, msg: &str, text: &str, now: u64) -> (Vec<Value>, Option<(u64, Value)>) {
