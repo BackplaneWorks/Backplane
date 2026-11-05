@@ -8,6 +8,7 @@
 #[path = "liveness.rs"] pub mod liveness;
 #[path = "star.rs"] pub mod star;
 #[path = "ext.rs"] pub mod ext;
+#[path = "policy.rs"] pub mod policy;
 #[path = "autosettle.rs"] pub mod autosettle;
 pub use ext::{on_post, Ext};
 use json::*;

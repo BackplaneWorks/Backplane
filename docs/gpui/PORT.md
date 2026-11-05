@@ -163,7 +163,7 @@ port waits for the person's decision.
 
 <!-- law-map: generated below by scripts/gpui/law-map.py -->
 
-Laws in LAWS.bend: 3253. bend 1016, rust 400, unported 1228, client 482, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`, `src/core/msp.bend`, `src/core/agy.bend`, `src/core/opencode.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
+Laws in LAWS.bend: 3253. bend 1010, rust 414, unported 1220, client 482, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`, `src/core/msp.bend`, `src/core/agy.bend`, `src/core/opencode.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
 
 | law | status | seed | file | note |
 |---|---|---|---|---|
@@ -3338,14 +3338,14 @@ Laws in LAWS.bend: 3253. bend 1016, rust 400, unported 1228, client 482, window 
 | `conversation_root_reference_envelope_bounded` | unported | seed R +-10% | `src/core/json.bend` |  |
 | `conversation_root_region_retained` | unported | seed R +-10% | `src/core/json.bend` |  |
 | `conversation_root_wire_picture_constant` | unported | seed R +-10% | `src/core/json.bend` |  |
-| `autosettle_owned_work_held` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `autosettle_pending_ask_held` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `autosettle_unread_held` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `autosettle_failed_held` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `autosettle_interrupted_held` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `autosettle_report_held` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `autosettle_grace_held` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `autosettle_ready` | unported | seed R +-10% | `src/core/model.bend` |  |
+| `autosettle_owned_work_held` | rust `autosettle_owned_work_held` | map | `src/core/model.bend` |  |
+| `autosettle_pending_ask_held` | rust `autosettle_pending_ask_held` | map | `src/core/model.bend` |  |
+| `autosettle_unread_held` | rust `autosettle_unread_held` | map | `src/core/model.bend` |  |
+| `autosettle_failed_held` | rust `autosettle_failed_held` | map | `src/core/model.bend` |  |
+| `autosettle_interrupted_held` | rust `autosettle_interrupted_held` | map | `src/core/model.bend` |  |
+| `autosettle_report_held` | rust `autosettle_report_held` | map | `src/core/model.bend` |  |
+| `autosettle_grace_held` | rust `autosettle_grace_held` | map | `src/core/model.bend` |  |
+| `autosettle_ready` | rust `autosettle_ready` | map | `src/core/model.bend` |  |
 | `autosettle_new_assistant_message_reopens` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `autosettle_new_turn_reopens` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `conversation_root_preserves_navigation` | unported | seed R +-10% | `src/core/json.bend` |  |
@@ -3354,14 +3354,14 @@ Laws in LAWS.bend: 3253. bend 1016, rust 400, unported 1228, client 482, window 
 | `home_split_requires_saved_documents` | unported | seed R +-10% | `src/core/json.bend` |  |
 | `home_3d_uses_saved_board` | bend | seed K +-10% | `src/core/project-home.bend` |  |
 | `websocket_orphan_continuation_is_rejected` | bend | seed K +-10% | `src/core/ws-fragments.bend` |  |
-| `autosettle_delegation_seed_not_personal` | bend | seed K +-10% | `src/core/autosettle.bend` |  |
-| `autosettle_human_followup_is_personal` | bend | seed K +-10% | `src/core/autosettle.bend` |  |
+| `autosettle_delegation_seed_not_personal` | rust `autosettle_delegation_seed_not_personal` | map | `src/core/autosettle.bend` |  |
+| `autosettle_human_followup_is_personal` | rust `autosettle_human_followup_is_personal` | map | `src/core/autosettle.bend` |  |
 | `context_tool_keeps_text_allowance` | bend | seed K +-10% | `src/core/message-context.bend` |  |
 | `context_closed_run_is_one_display_row` | client | seed C +-10% | `src/core/fold.bend` |  |
 | `stored_wire_cache_is_empty` | bend | seed K +-10% | `src/core/wire-retention.bend` |  |
 | `memory_wire_reference_is_exact` | bend | seed K +-10% | `src/core/wire-retention.bend` |  |
-| `autosettle_finished_work_wake_not_running` | bend | seed K +-10% | `src/core/autosettle.bend` |  |
-| `autosettle_live_thread_wake_held` | bend | seed K +-10% | `src/core/autosettle.bend` |  |
+| `autosettle_finished_work_wake_not_running` | rust `autosettle_finished_work_wake_not_running` | map | `src/core/autosettle.bend` |  |
+| `autosettle_live_thread_wake_held` | rust `autosettle_live_thread_wake_held` | map | `src/core/autosettle.bend` |  |
 | `home_viewer_size_keeps_owner` | client | seed C +-10% | `src/core/client.bend` |  |
 | `home_viewer_size_is_local` | client | seed C +-10% | `src/core/client.bend` |  |
 | `timeline_follow_grown_viewport` | bend | seed K +-10% | `src/core/timeline-virtual.bend` |  |
@@ -3395,8 +3395,8 @@ Laws in LAWS.bend: 3253. bend 1016, rust 400, unported 1228, client 482, window 
 | `auth_cache_key_sequence` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `auth_empty_threads_waits_none` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `native_locale_composition` | bend | seed K +-10% | `src/core/client-language.bend` |  |
-| `autosettle_live_work_subscription_never_expires` | bend | seed K +-10% | `src/core/autosettle.bend` |  |
-| `autosettle_active_file_subscription_never_expires` | bend | seed K +-10% | `src/core/autosettle.bend` |  |
+| `autosettle_live_work_subscription_never_expires` | rust `autosettle_live_work_subscription_never_expires` | map | `src/core/autosettle.bend` |  |
+| `autosettle_active_file_subscription_never_expires` | rust `autosettle_active_file_subscription_never_expires` | map | `src/core/autosettle.bend` |  |
 | `catalog_lookup_common_cancel` | bend | seed K +-10% | `src/core/i18n.bend` |  |
 | `catalog_lookup_parameterized_absent` | bend | seed K +-10% | `src/core/i18n.bend` |  |
 | `catalog_lookup_unknown_absent` | bend | seed K +-10% | `src/core/i18n.bend` |  |
