@@ -4,12 +4,12 @@ export const budgetMs=hz=>1000/hz;
 
 // Clicks: [{id, t_inject, t_ack, t_result}] in ms on one clock. ack = first frame that differs after the click (pressed/hover/state),
 // result = the frame that shows the expected state. "Answers within one frame": ack - inject <= one refresh period (+ slack for frame phase).
-export function clickStats(clicks,hz,slackMs=0){
+export function clickStats(clicks,hz,slackMs=0,resolutionMs=0){
   const b=budgetMs(hz)+slackMs;const ack=clicks.filter(c=>Number.isFinite(c.t_ack)).map(c=>c.t_ack-c.t_inject);
   const res=clicks.filter(c=>Number.isFinite(c.t_result)).map(c=>c.t_result-c.t_inject);
   const noAck=clicks.filter(c=>!Number.isFinite(c.t_ack)).map(c=>c.id);
   return {n:clicks.length,hz,budgetMs:b,ackMs:{p50:q(ack,50),p95:q(ack,95),max:ack.length?Math.max(...ack):NaN},resultMs:{p50:q(res,50),p95:q(res,95),max:res.length?Math.max(...res):NaN},
-    overBudget:ack.filter(x=>x>b).length,noAck:noAck.length,noAckIds:noAck.slice(0,20),pass:noAck.length===0&&ack.length>0&&ack.filter(x=>x>b).length===0}}
+    overBudget:ack.filter(x=>x>b).length,noAck:noAck.length,noAckIds:noAck.slice(0,20),resolutionMs,pass:resolutionMs>b?null:(noAck.length===0&&ack.length>0&&ack.filter(x=>x>b).length===0),note:resolutionMs>b?`evidence resolution ${resolutionMs.toFixed(0)} ms is coarser than the ${b.toFixed(1)} ms budget: pass is unknown, not true`:undefined}}
 
 // Frame times: ascending presentation timestamps in ms (one per presented frame) during a scroll or a stream.
 // jank = a frame interval over 2 refresh periods (a visibly missed frame); long = over 50 ms.

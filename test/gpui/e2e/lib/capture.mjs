@@ -16,7 +16,9 @@ export async function startDisplay(n=62,size='1440x900x24'){
   const env={...process.env,DISPLAY:`:${n}`,VK_ICD_FILENAMES:process.env.VK_ICD_FILENAMES||'/usr/share/vulkan/icd.d/lvp_icd.json'}; // llvmpipe on Boat: software rendering
   return {display:`:${n}`,env,stop:()=>{for(const p of[i3,xv])try{p.kill('SIGTERM')}catch{}}}}
 export function startRecording(display,file,fps=30){mkdirSync(file.replace(/\/[^/]+$/,''),{recursive:true});
-  if(!have('ffmpeg'))return {stop:async()=>({file:null,reason:'no ffmpeg'})};
-  const p=spawn('ffmpeg',['-y','-loglevel','error','-f','x11grab','-framerate',String(fps),'-video_size','1440x900','-i',display,'-c:v','libx264','-preset','ultrafast','-pix_fmt','yuv420p',file],{stdio:'ignore'});
-  return {stop:async()=>{try{p.kill('SIGINT')}catch{}await sleep(1500);return {file}}}}
+  if(!have('ffmpeg'))return {stop:async()=>({file:null,reason:'no ffmpeg'}),offsetMs:()=>NaN};
+  const offs=[];const p=spawn('ffmpeg',['-y','-loglevel','error','-progress','pipe:1','-stats_period','0.5','-f','x11grab','-framerate',String(fps),'-video_size','1440x900','-i',display,'-c:v','libx264','-preset','ultrafast','-pix_fmt','yuv420p',file],{stdio:['ignore','pipe','ignore']});
+  let buf='';p.stdout.on('data',d=>{buf+=d;let i;while((i=buf.indexOf('\n'))>=0){const l=buf.slice(0,i);buf=buf.slice(i+1);const m=/^out_time_us=(\d+)/.exec(l);if(m)offs.push(Date.now()-Number(m[1])/1000)}});
+  // epoch (ms) at which the recording's time 0 happened: median of (arrival time - out_time) over the progress lines; accurate to tens of ms
+  return {offsetMs:()=>{const s=[...offs].sort((a,b)=>a-b);return s.length?s[s.length>>1]:NaN},stop:async()=>{try{p.kill('SIGINT')}catch{}await sleep(1500);return {file}}}}
 export function screenshot(display,file){mkdirSync(file.replace(/\/[^/]+$/,''),{recursive:true});try{execSync(`import -window root ${file}`,{env:{...process.env,DISPLAY:display},stdio:'ignore'});return file}catch{return null}}
