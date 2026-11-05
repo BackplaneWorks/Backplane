@@ -14,6 +14,7 @@ export const NORMALISATIONS=[
  'N19 origin in a query string (the since/origin of a reconnect): the value is replaced by its FORM only: <origin:decimal> (Bend: the decimal `at` of the log\'s first change), <origin:hex>, <origin:empty> or <origin:other>. Reason: the value differs per log, but a hub that answers in another form is a real difference (a client resuming across hubs reads it), so the form is compared.',
  'N20 sets: the housekeeping events (hk) and the greeting\'s info keys (logInfoKeys) are compared as multisets, one difference per element found on one side only. Reason: the hub appends them in varying order; positional comparison turned one missing key into a difference at every later position.',
  'N21 arrays of different length are aligned by key (an object\'s id or key, else its JSON) with a longest common subsequence; an inserted or removed element is one difference. Reason: positional comparison made one insertion a difference at every later position. Equal-length arrays are still compared position by position.',
+ 'N22 liveness.<thread> housekeeping events are left out of the hk set. Reason: the hub\'s periodic tick writes them once agent output was seen, and whether a tick fell inside the recording differs between two runs of the JS hub itself (self-diff 1). The state lane\'s liveness policy has its own tests.',
  'N12 late volatile replies: volatile means a poll request and its reply, matched by client and request id, whenever the reply arrives; every other inbound frame is kept even if it arrived during a poll window (the recorder flags by arrival time, which is not a property of the frame).',
  'N6 dropped: hb frames, view.changed frames (their number and position follow timing; each reply carries the revision it saw), volatile frames (polls made while waiting for a turn). Reason: timing-driven counts.',
  'N11 harness steps: `settle` and `end` pseudo-frames (the client program waiting or closing) are control, not wire traffic, and are not compared. Reason: a replay waits by reply id, not by the recorded quiet times.',
@@ -106,7 +107,9 @@ function keyed(a,b,path,out){
 // housekeeping events (hk) and the greeting's info keys (logInfoKeys) are sets: the hub appends them in varying order, and one missing or
 // extra element must not shift (and so count) every later position. Compared as multisets: each element on one side only is one difference.
 const SETS=/\.(hk|logInfoKeys)$/;
-function multiset(a,b,path,out){
+function multiset(a0,b0,path,out){
+  // liveness.<thread> is written by the hub's periodic tick once agent output was seen: whether a tick fell inside the recording varies run to run on the JS hub itself
+  const drop=x=>!(path.endsWith('.hk')&&x&&typeof x.key==='string'&&x.key.startsWith('liveness.'));const a=a0.filter(drop),b=b0.filter(drop);
   const cnt=new Map();for(const x of a){const k=JSON.stringify(x);cnt.set(k,(cnt.get(k)||0)+1)}
   for(const x of b){const k=JSON.stringify(x);cnt.set(k,(cnt.get(k)||0)-1)}
   for(const [k,n] of cnt)if(n!==0)out.push(`${path}: ${n>0?'only in A':'only in B'}${Math.abs(n)>1?' x'+Math.abs(n):''}: ${k.slice(0,160)}`);
