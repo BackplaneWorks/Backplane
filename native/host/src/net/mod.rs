@@ -12,6 +12,7 @@
 pub mod botnet;
 pub mod far;
 pub mod machines;
+pub mod origin;
 pub mod owner;
 pub mod pairing;
 pub mod peering;
