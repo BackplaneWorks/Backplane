@@ -203,11 +203,11 @@ fn drain(rx: &Tap, key: &str, acc: &mut Vec<u8>, resets: &mut Vec<Value>) {
     let mut stalled = hub.attach(2); // never read until we say so
     assert_eq!(rpc(&hub, "term.open", json!({"thread":"t1","cols":80,"rows":24})).await["ok"], true);
     rpc(&hub, "term.input", json!({"thread":"t1","b":"yes flood | head -c 20000000; echo FLOODDONE\n".bytes().collect::<Vec<u8>>()})).await;
-    assert!(wait(60, || { reader.take().iter().any(|v| v["t"] == "term" && v["b"].as_array().map_or(false, |a| a.len() > 8 && a.windows(9).any(|w| w.iter().map(|x| x.as_u64().unwrap() as u8).eq(b"FLOODDONE".iter().copied())))) }).await || true);
+    let t = get(&hub).unwrap();
+    assert!(wait(90, || { reader.take(); t.inner.try_lock().map_or(false, |g| g.screens.get("t1").map_or(false, |sc| emb::text(&sc.vt).contains("FLOODDONE"))) }).await, "the flood ran to its end");
     assert!(hub.is_attached(2), "a skipped client is not dropped");
     assert!(hub.outbox_pending(2) <= 256 * 1024 + 4 * pty::CHUNK, "{} bytes pending", hub.outbox_pending(2));
     // it reads again: it gets a snapshot (a reset to the screen's size) and the stale mark is gone
-    let t = get(&hub).unwrap();
     assert!(!t.inner.lock().await.skipped.is_empty(), "the skipped client is remembered");
     let got = tokio::spawn(async move { let mut resets = 0; while let Ok(Some(o)) = tokio::time::timeout(Duration::from_secs(5), stalled.recv()).await { if let Out::Value(v) = o { if v["t"] == "term" && v.get("reset").is_some() { resets += 1; break } } } resets });
     assert_eq!(got.await.unwrap(), 1, "one snapshot reached the client that caught up");
