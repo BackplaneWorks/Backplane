@@ -14,7 +14,7 @@ function live(){const p=Number(readFileSync(process.env.HOME+'/.backplane-bend/h
 async function liveRef(secs){const a=live();await sleep(secs*1000);const b=live();return {rssMB:b.rssMB,cpuCorePct:(b.cpuTicks-a.cpuTicks)*10/(secs*1000)*100,fds:b.fds,threads:b.threads,secs}}
 async function boot(tag,extra={}){
  const t0=performance.now();
- const h=await startHub({bin:REPO+'/build/gpui/backplane-serve',home:HOME,port:PORT,host:HOST,standins:root+'/bin',cap:'12G',log:out+`/hub-${tag}.log`,extraEnv:{BACKPLANE_COPY:'1',HOME:root+'/fakehome',FAKE_SECS:'1200',FAKE_PER:'2',FAKE_CYCLE:'20',...extra}});
+ const h=await startHub({bin:REPO+'/build/gpui/backplane-serve',home:HOME,port:PORT,host:HOST,standins:root+'/bin',cap:'3700M',log:out+`/hub-${tag}.log`,extraEnv:{BACKPLANE_COPY:'1',HOME:root+'/fakehome',FAKE_SECS:'1200',FAKE_PER:'2',FAKE_CYCLE:'20',...extra}});
  const tHello=performance.now()-t0;
  const v=await viewClient(h,{mobile:true,delta:true});const tg=performance.now()-t0;
  const r=await v.open();const tv=performance.now()-t0;
