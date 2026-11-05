@@ -195,7 +195,15 @@ impl Render for Backplane {
             home["cards"].as_array().into_iter().flatten().take(60).enumerate().map(|(i, k)| node_el(cx, k, light, 0, &format!("h{i}"), &mut ctl)).collect()
         } else { Vec::new() };
         // popup
-        let skills = thread["skills"].as_array();
+        // The hub's rows for the draft; until they arrive a slash draft shows the commands the client knows (replaced as soon as the hub answers).
+        let draft_now = self.input.read(cx).content.to_string();
+        let local_rows: Vec<Value> = if draft_now.starts_with('/') && thread["skills"].as_array().map_or(true, |s| s.is_empty()) {
+            [("/btw", "Ask a side question; the thread never sees it"), ("/give", "Hand this conversation to a >thread, %project or @bot"), ("/secret", "Give an agent a key or token in a masked box, never in the chat"),
+             ("/compact", "Summarize the conversation to free context"), ("/context", "Show what fills the context window")]
+                .iter().filter(|(w, _)| w.starts_with(draft_now.trim_end())).map(|(w, d)| serde_json::json!({"word": w, "label": w, "text": d})).collect()
+        } else { Vec::new() };
+        let skills_hub = thread["skills"].as_array();
+        let skills: Option<&Vec<Value>> = if skills_hub.map_or(false, |s| !s.is_empty()) { skills_hub } else if !local_rows.is_empty() { Some(&local_rows) } else { skills_hub };
         let mut popup = div().flex().flex_col().border_1().border_color(c("line")).bg(c("panel")).py_1();
         for (index, skill) in skills.into_iter().flatten().take(8).enumerate() {
             let word = skill.get("word").or_else(|| skill.get("name")).and_then(Value::as_str).unwrap_or("").to_string();
@@ -254,7 +262,7 @@ impl Render for Backplane {
                         .when(!todo.is_empty(), |d| d.child(div().px_3().h_full().flex().items_center().gap_2().border_l_1().border_color(c("line")).text_size(px(11.)).child(div().text_color(c("faint")).child("TO-DO")).child(todo.clone()).child(ic(light, "chevron-down", 12., "faint"))))))
                     .when(has_home, |d| d.child(div().id("home").overflow_y_scroll().flex_1().flex().justify_center().child(div().w_full().max_w(px(930.)).p_4().flex().flex_col().gap_3().children(home_els))))
                     .when(!has_home, |d| d.child(div().id("timeline").overflow_y_scroll().track_scroll(&self.scroll).flex_1().flex().justify_center().child(div().w_full().max_w(px(930.)).px_4().flex().flex_col().justify_end().min_h_full().children({
-                        if entries.is_empty() { entries.push(div().py_6().text_color(c("dim")).child(if has_thread { "Start a conversation." } else { "Pick a thread, or start one with + next to a project." }).into_any_element()); }
+                        if entries.is_empty() { entries.push(div().py_6().text_color(c("dim")).child(if has_thread && thread["loading"] == true { "Loading…" } else if has_thread { "Start a conversation." } else { "Pick a thread, or start one with + next to a project." }).into_any_element()); }
                         entries
                     }))))
                     .when(!self.error.is_empty(), |d| d.child(div().px_5().py_2().text_color(c("bad")).child(self.error.clone())))

@@ -17,7 +17,7 @@ pub struct Backplane {
     pub input:Entity<input::TextInput>, data:Value, status:String, error:String,
     tx:tokio::sync::mpsc::Sender<Command>, selected:String,
     drafts:HashMap<String,String>, popup:bool, started:Instant, usable:bool,
-    first_frame:bool, script_done:bool, scroll:ScrollHandle, last_entries:usize, pub cats:art::Cats, pub ack_pending:Option<(String,Instant)>, pub recording:Option<(String,Vec<f64>)>, pub ui_epoch:u64, pub controls:Vec<script::CtlEntry>, pub ctl_last:String, pub last_layout:String, pub wake_at:Option<Instant>, pub reconnected:bool, pub click_info:Option<(String,String)>, pub timing:Option<hub::Timing>, pub applied_at:Option<Instant>, pub apply_ms:f64, pub render_us:u64, swatches:bool, gallery:bool, fonts:bool, theme_override:Option<bool>, steps:VecDeque<Step>, pending:Option<Pending>, seq:u64, want_focus:bool, script_total:usize,
+    first_frame:bool, script_done:bool, scroll:ScrollHandle, last_entries:usize, pub cats:art::Cats, pub thread_cache:Vec<(String,Value)>, pub thread_source:&'static str, pub confirm:Option<(String,Instant)>, pub ack_pending:Option<(String,Instant)>, pub recording:Option<(String,Vec<f64>)>, pub ui_epoch:u64, pub controls:Vec<script::CtlEntry>, pub ctl_last:String, pub last_layout:String, pub wake_at:Option<Instant>, pub reconnected:bool, pub click_info:Option<(String,String)>, pub timing:Option<hub::Timing>, pub applied_at:Option<Instant>, pub apply_ms:f64, pub render_us:u64, swatches:bool, gallery:bool, fonts:bool, theme_override:Option<bool>, steps:VecDeque<Step>, pending:Option<Pending>, seq:u64, want_focus:bool, script_total:usize,
 }
 fn pager_row(cx:&mut Context<Backplane>,id:String,pager:&Value,light:bool)->Option<AnyElement> {let c=|name:&str|theme::color(light,name);
     let mut row=div().flex().gap_2().px_3().py_1().text_size(px(11.));let mut any=false;
@@ -45,7 +45,7 @@ impl Backplane {
             if this.popup {let _=this.tx.try_send(Command::Draft(text));}
             cx.notify();
         }).detach();
-        Self{input,data:Value::Null,status:"Connecting…".into(),error:art::assets_missing().unwrap_or_default(),tx,selected:String::new(),drafts:HashMap::new(),popup:false,started,usable:false,first_frame:false,script_done:false,scroll:ScrollHandle::new(),last_entries:0,cats:art::Cats::new(),ack_pending:None,recording:None,ui_epoch:0,controls:Vec::new(),ctl_last:String::new(),last_layout:String::new(),wake_at:None,reconnected:false,click_info:None,timing:None,applied_at:None,apply_ms:0.0,render_us:0,swatches,gallery,fonts,theme_override:theme.as_deref().map(|t|t=="light"),steps,pending:None,seq:0,want_focus:false,script_total}
+        Self{input,data:Value::Null,status:"Connecting…".into(),error:art::assets_missing().unwrap_or_default(),tx,selected:String::new(),drafts:HashMap::new(),popup:false,started,usable:false,first_frame:false,script_done:false,scroll:ScrollHandle::new(),last_entries:0,cats:art::Cats::new(),thread_cache:Vec::new(),thread_source:"hub",confirm:None,ack_pending:None,recording:None,ui_epoch:0,controls:Vec::new(),ctl_last:String::new(),last_layout:String::new(),wake_at:None,reconnected:false,click_info:None,timing:None,applied_at:None,apply_ms:0.0,render_us:0,swatches,gallery,fonts,theme_override:theme.as_deref().map(|t|t=="light"),steps,pending:None,seq:0,want_focus:false,script_total}
     }
     fn receive(&mut self,event:Event,cx:&mut Context<Self>) {
         match event {
@@ -58,6 +58,8 @@ impl Backplane {
                 if entries!=self.last_entries {self.last_entries=entries;self.scroll.set_offset(point(px(0.),px(-1_000_000.)));}
                 let selected=string(&self.data["thread"],"id");
                 if !selected.is_empty() {self.selected=selected;}
+                self.thread_source="hub";
+                if let Some((label,t0))=self.confirm.take(){self.m("input",serde_json::json!({"step":label,"ok":true,"latency_ms":(t0.elapsed().as_secs_f64()*1e6).round()/1e3,"source":"hub"}));}
                 self.apply_ms=t_apply.elapsed().as_secs_f64()*1000.0;self.timing=Some(timing);self.applied_at=Some(Instant::now());
             },
             Event::Status(s)=>{self.status=s;if self.status=="Connected"{self.error.clear();}},
@@ -72,7 +74,21 @@ impl Backplane {
         self.drafts.insert(self.selected.clone(),self.input.read(cx).content.to_string());
         self.selected=raw.clone();let text=self.drafts.get(&raw).cloned().unwrap_or_default();
         self.input.update(cx,|input,cx|input.set(text,cx));self.popup=false;
+        // Stale-while-revalidate: the thread on screen goes into a small cache; a thread seen before is drawn from it at once and the hub's picture
+        // replaces it; one never seen shows its title (from the sidebar row) and "Loading…". Bounded at 12 threads.
+        let cur=string(&self.data["thread"],"id");let cur=cur.rsplit_once('|').map_or(cur.as_str(),|(_,i)|i).to_string();
+        if !cur.is_empty()&&self.data["thread"]["loading"]!=true {let t=self.data["thread"].take();self.thread_cache.retain(|(k,_)|*k!=cur);self.thread_cache.insert(0,(cur,t));self.thread_cache.truncate(12);}
+        if let Some(i)=self.thread_cache.iter().position(|(k,_)|*k==raw) {let (_,t)=self.thread_cache.remove(i);self.data["thread"]=t;self.thread_source="cache";}
+        else {let title=self.thread_title(&raw);self.data["thread"]=serde_json::json!({"id":raw,"title":title,"entries":[],"loading":true});self.thread_source="placeholder";}
         let _=self.tx.try_send(Command::Select(id));self.want_focus=true;cx.notify();
+    }
+    fn thread_title(&self,raw:&str)->String {
+        for project in self.data["projects"].as_array().into_iter().flatten() {
+            for t in project["threads"].as_array().into_iter().flatten().chain(project["settled"].as_array().into_iter().flatten()) {
+                let id=string(t,"id");if id.rsplit_once('|').map_or(id.as_str(),|(_,i)|i)==raw {return string(t,"title");}
+            }
+        }
+        String::new()
     }
     fn send(&mut self,_:&Send,_:&mut Window,cx:&mut Context<Self>) {self.do_send(cx);}
     fn do_send(&mut self,cx:&mut Context<Self>) {self.ui_epoch+=1;

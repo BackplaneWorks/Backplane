@@ -84,12 +84,12 @@ impl Backplane {
         let Some(p) = &self.pending else { return };
         if p.armed { return; }
         let done = match &p.goal {
-            Goal::Thread(id) => self.data["thread"]["id"].as_str().map_or(false, |t| t.rsplit_once('|').map_or(t, |(_, i)| i) == id),
+            Goal::Thread(id) => self.data["thread"]["id"].as_str().map_or(false, |t| t.rsplit_once('|').map_or(t, |(_, i)| i) == id) && self.data["thread"]["loading"] != true,
             Goal::Frame => true,
             Goal::Changed(epoch) => self.ui_epoch != *epoch,
             Goal::Reconnected => self.reconnected,
             Goal::Home => self.data["projectHome"].is_object(),
-            Goal::Popup => self.popup && self.data["thread"]["skills"].as_array().map_or(false, |s| !s.is_empty()),
+            Goal::Popup => self.popup && (self.data["thread"]["skills"].as_array().map_or(false, |s| !s.is_empty()) || self.input.read(cx).content.starts_with('/')),
             Goal::Typed(text) => self.input.read(cx).content.as_ref() == text,
             Goal::Sent(before) => self.user_entries() > *before,
             Goal::Sleep => false,
@@ -98,13 +98,16 @@ impl Backplane {
         let (label, t0, seq) = (p.label.clone(), p.started, p.seq);
         self.pending.as_mut().unwrap().armed = true;
         if let Some((id, action)) = self.click_info.take() { self.m("click", json!({"id": id, "changed": true, "action": action})); }
+        // where the result came from: the hub, the cache of a thread seen before, or rows drawn locally while the hub answers
+        let source = if self.popup_local() { "local" } else { self.thread_source };
+        if source != "hub" { self.confirm = Some((format!("{}:hub", self.pending.as_ref().map_or(String::new(), |p| p.label.clone())), self.pending.as_ref().map_or(Instant::now(), |p| p.started))); }
         // where the time went: hub round trip, decode, delta/merge, applying the body, building the tree, waiting for the frame
         let phases = match (&self.timing, self.applied_at) {
             (Some(t), Some(a)) => Some((t.clone(), self.apply_ms, self.render_us as f64 / 1000.0, a)),
             _ => None,
         };
         window.on_next_frame(move |_, cx| {
-            let mut fields = json!({"step": label, "ok": true, "latency_ms": (t0.elapsed().as_secs_f64() * 1e6).round() / 1e3});
+            let mut fields = json!({"step": label, "ok": true, "latency_ms": (t0.elapsed().as_secs_f64() * 1e6).round() / 1e3, "source": source});
             if let Some((t, apply_ms, render_ms, applied)) = phases {
                 let r = |v: f64| (v * 1e3).round() / 1e3;
                 fields["hub_rtt_ms"] = json!(r(t.rtt_ms)); fields["decode_ms"] = json!(r(t.decode_ms)); fields["process_ms"] = json!(r(t.process_ms));
@@ -237,6 +240,8 @@ impl Backplane {
             Ctl::Node(a, p) => { let _ = self.tx.try_send(Command::Action(a.clone(), p.clone())); format!("view.action {a}") }
         }
     }
+    /// The popup is showing the client's own slash rows because the hub has sent none yet.
+    pub fn popup_local(&self) -> bool { self.popup && self.data["thread"]["skills"].as_array().map_or(true, |s| s.is_empty()) && self.pending.as_ref().map_or(false, |p| matches!(p.goal, Goal::Popup)) }
     fn set_text(&mut self, text: String, cx: &mut Context<Self>) {
         self.input.update(cx, |i, cx| i.set(text, cx));
     }
