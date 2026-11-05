@@ -25,7 +25,7 @@ Allowance for the index and read model = 500 MB - (baseline + folds + page cache
 | hub baseline | about 10 MB | the earlier spike host; today's hub unmeasured (guess) |
 | page cache | 8 MB | a plan |
 | outboxes | 40 MB | assumption above; `OUTBOX_MAX` is 8 MiB today |
-| `state::State` (lean) per thread/project/task | unmeasured | the synthetic log has 11,277 threads in total, all created in its first ~13k lines, so it says nothing about how threads grow; 11k at 1.69M events is the one real-size figure, and 65k at 10M assumes threads grow in proportion to events (a worst case, not a measurement) |
+| `state::State` (lean) per thread/project/task | unmeasured | the synthetic log has 11,277 threads in total, all created in its first ~13k lines, so it says nothing about how threads grow; 11k at 1.69M events is the one real-size figure, and 65k at 10M assumes threads grow in proportion to events (an assumption, not a measurement and not a bound) |
 | `state/` `Sum` per thread (`last_user`/`last_reply` up to 2000 chars each, 64 recent message ids) | up to about 6 KB/thread worst case, 390 MB at 65k threads: the whole budget; real values far smaller, unmeasured | `state/summary.rs` |
 | agents `World`, bots `World`, `Feed` `Index` and `Bindings` (each its own fold) | unmeasured | `agents/`, `bots/`, `net/` |
 | `meta` for the presenter (`Extra`: runtime, fork source, usage, todos, background rows) | unmeasured | `present/meta.rs`, to be added |
