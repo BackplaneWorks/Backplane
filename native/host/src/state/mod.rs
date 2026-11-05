@@ -75,6 +75,8 @@ pub struct State {
     pub snooze_until: HashMap<String, u64>,
     /// ModesSet: a thread's permission mode when it is not the default ("approval-required", "auto-accept-edits", "auto"); absent: full access
     pub runtime: HashMap<String, String>,
+    /// AskOpened/AskClosed: the open asks' content, oldest first: (id, thread, kind, tool, detail, options). Bounded by the asks that are open.
+    pub ask_data: Vec<(String, String, String, String, String, String)>,
     /// ThreadOrdered/ProjectOrdered: manual order keys (hex) per thread id, and per "project:<id>" for a project's place; (pinned key, active key)
     pub order_keys: HashMap<String, (String, String)>,
     /// RunSet: thread -> the bot it runs for (a mail run's thread)
@@ -242,8 +244,9 @@ impl State {
                 let before = fam::ext::task_before(self, task);
                 let t = self.tasks.entry(task.into()).or_insert((String::new(), String::new(), true, TaskSt::Cancelled)); t.3 = TaskSt::next(t.3, want); t.2 = t.3.terminal();
                 fam::ext::task_index(self, task, before); }
-            "AskOpened" => { let (id, th) = (s(e, "id")?, s(e, "thread")?); self.asks.insert(id.into(), (th.into(), true)); }
-            "AskClosed" => { let id = s(e, "id")?; if self.lean { self.asks.remove(id); } else if let Some(a) = self.asks.get_mut(id) { a.1 = false; } else { self.asks.insert(id.into(), (String::new(), false)); } }
+            "AskOpened" => { let (id, th) = (s(e, "id")?, s(e, "thread")?); self.asks.insert(id.into(), (th.into(), true));
+                self.ask_data.retain(|a| a.0 != id); self.ask_data.push((id.into(), th.into(), s(e, "kind")?.into(), s(e, "tool")?.into(), s(e, "detail")?.into(), s(e, "options")?.into())); }
+            "AskClosed" => { let id = s(e, "id")?; self.ask_data.retain(|a| a.0 != id); if self.lean { self.asks.remove(id); } else if let Some(a) = self.asks.get_mut(id) { a.1 = false; } else { self.asks.insert(id.into(), (String::new(), false)); } }
             "TurnQueued" => { let (th, msg, text) = (s(e, "thread")?, s(e, "msg")?, s(e, "text")?); self.queue.entry(th.into()).or_default().push((msg.into(), text.into())); }
             "QueueTaken" => { let th = s(e, "thread")?; self.queue.insert(th.into(), vec![]); }
             "QueueEdited" => { let (th, msg, text) = (s(e, "thread")?, s(e, "msg")?, s(e, "text")?); for q in self.queue.entry(th.into()).or_default() { if q.0 == msg { q.1 = text.into(); } } }

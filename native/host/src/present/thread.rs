@@ -179,13 +179,7 @@ const STATIC: &str = include_str!("thread_static.json");
 pub fn metadata_refusal(st: &State, id: &str) -> Option<&'static str> {
     let Some(t)=st.threads.get(id) else { return Some("thread.missing") };
     if t.deleted { return Some("thread.deleted") }
-    if t.provider!="claude" { return Some("thread.provider") }
-    if !t.model.is_empty() { return Some("thread.model") }
     if t.title.trim().is_empty() { return Some("thread.title-empty") }
-    if !t.worktree.is_empty() || t.worktree_mode { return Some("thread.worktree") }
-    if st.tasks.values().any(|(p,c,_,_)|p==id || c==id) { return Some("thread.task") }
-    if st.asks.values().any(|(th,open)|th==id && *open) { return Some("thread.ask") }
-    if st.queue.get(id).map_or(false,|q|!q.is_empty()) { return Some("thread.queue") }
     for (key,reason) in [(format!("effort:{id}"),"setting.effort"),(format!("wait.{id}"),"setting.wait"),(format!("stop.{id}"),"setting.stop"),(format!("fail.{id}"),"setting.fail"),
         ("files.max.mb".into(),"setting.files.max.mb"),("person.tz".into(),"setting.person.tz"),("person.tz.device".into(),"setting.person.tz.device"),("tz.machine".into(),"setting.tz.machine"),
         ("think".into(),"setting.think"),("permissions.default".into(),"setting.permissions.default")] {
@@ -213,7 +207,6 @@ fn state_keys_refusal(st: &State,id: &str) -> &'static str {
     for (key,reason) in [("bg","setting.bg"),("watch","setting.watch"),("auth.wait","setting.auth.wait"),("order.wait","setting.order.wait"),("launch","setting.launch")] {
         if st.settings.get(&format!("{key}.{id}")).map_or(false,|v|!v.is_empty()) { return reason }
     }
-    if st.asks.values().any(|(th,_)|th==id) { return "thread.ask-record" }
     "thread.signal-or-turn"
 }
 
@@ -233,6 +226,37 @@ fn person_zone(st: &State) -> Option<Rule> {
 /// None unless every key is derived.
 pub fn thread_object(st: &State, hub: &str, thread: &str, params: &Value, draft: &str) -> Option<Value> {
     thread_object_checked(st,hub,thread,params,draft).ok()
+}
+
+/// Mob.asks / Mob.ask.std: the thread's open asks (newest first) as cards with their buttons (English). An ask of a buy thread or a browser task has its own card: not drawn here.
+fn asks_json(st: &State, thread: &str, draft: &str) -> Result<Vec<Value>, &'static str> {
+    let mine: Vec<_> = st.ask_data.iter().rev().filter(|a| a.1 == thread).collect();
+    if mine.is_empty() { return Ok(vec![]) }
+    if st.lean && !crate::state::fam::policy::lean_keeps(&format!("buy.{thread}")) { return Err("state.buy-not-retained") }
+    if st.settings.get(&format!("buy.{thread}")).map_or(false, |v| !v.is_empty()) { return Err("thread.ask-buy") }
+    let btn = |l: &str, v: String, primary: bool| json!({"label": l, "value": v, "primary": primary});
+    let mut out = Vec::new();
+    for (id, _, kind, tool, detail, options) in mine {
+        if kind == "browser" { return Err("thread.ask-browser") }
+        let head = match kind.as_str() {
+            "plan" => "Proposed plan".to_string(), "input" => "The agent asks".to_string(),
+            _ => match tool.as_str() {
+                "gmail_send" => if detail.starts_with("Draft:") { "Send this draft?".into() } else { "Send this email?".into() },
+                "calendar_create" => "Create this event?".into(), "calendar_update" => "Change this event?".into(), "calendar_delete" => "Delete this event?".into(),
+                "order_quote" => "Send these files for a quote?".into(), t => format!("Allow {t}?") } };
+        let bkind = if kind == "approval" && tool == "order_quote" { "send" } else { kind.as_str() };
+        let buttons: Vec<Value> = if tool == "settings_proposal" { vec![btn("Approve", format!("{id}|accept"), true), btn("Reject", format!("{id}|decline"), false)] } else {
+            match bkind {
+                "plan" => vec![btn("Implement", format!("{id}|implement"), true), btn("Dismiss", format!("{id}|dismiss"), false)],
+                "input" => { let mut v: Vec<Value> = options.split('\n').map(|l| btn(l, format!("{id}|{l}"), false)).collect();
+                    v.push(if draft.trim().is_empty() { btn("Dismiss", format!("{id}|"), false) } else { btn("Answer with draft", format!("{id}|{}", draft.trim()), true) }); v }
+                "send" => vec![btn("Send", format!("{id}|accept"), true), btn("Not now", format!("{id}|decline"), false)],
+                _ => vec![btn("Allow", format!("{id}|accept"), true), btn("Allow for session", format!("{id}|session"), false), btn("Deny", format!("{id}|decline"), false)],
+            } };
+        out.push(json!({"id": id, "kind": kind, "head": head, "detail": if kind == "plan" { String::new() } else { detail.clone() },
+            "blocks": if kind == "plan" { md_blocks(detail) } else { vec![] }, "buttons": buttons}));
+    }
+    Ok(out)
 }
 
 pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value, draft: &str) -> Result<Value,&'static str> {
@@ -267,8 +291,9 @@ pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value
     // the composer's four keys: the draft, the send button and its action, the popup rows (parity-session's session::composer; ours are the `$ @ > % #` & rows, not ported:
     // a mention being typed shows no popup — see docs/gpui/slim-thread-known-missing.md). Another interface language is the helper's (None).
     let lang = st.settings.get("lang").map(String::as_str).unwrap_or("");
-    let c = crate::session::composer::fields(draft, running, false, true, &json!([]), lang).ok_or("composer.language")?;
+    let c = crate::session::composer::fields(draft, running, false, t.provider == "claude", &json!([]), lang).ok_or("composer.language")?;
     for (k, v) in state_keys { o.insert(k, v); }
+    o.insert("asks".into(), Value::Array(asks_json(st, thread, draft)?));
     for k in ["draft", "skills", "send", "sendAct"] { o.insert(k.into(), c[k].clone()); }
     Ok(Value::Object(o))
 }
