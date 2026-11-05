@@ -3,25 +3,33 @@ import {validateThinResult} from './thin-results.js';
 // One serial, read-only transport for a few likely destinations. It never
 // shares the foreground actor, sends an action, follows history, executes a
 // command, acknowledges unread content, or installs a returned session.
+// Every destination the sidebar shows is fetched once (a click on any of them
+// then draws at once, with no round trip to wait for; the hub's own view
+// corrects it), one at a time and only while the page is idle, PACE apart.
+const QUEUE=24, ATTEMPTS=64, PACE=150;
 export class ViewPrefetch {
   constructor(api) {this.api=api;this.queue=[];this.attempted=new Set();this.generation=0;}
-  enqueue(target, priority=false) {
-    if (!viewTarget(target) || !['thread','bot','project'].includes(target.kind) || this.api.has(target)) return;
+  // fresh: the picture held is known to be behind (its sidebar row moved
+  // since): fetched again even though one is held
+  enqueue(target, priority=false, fresh=false) {
+    if (!viewTarget(target) || !['thread','bot','project'].includes(target.kind) || !fresh && this.api.has(target)) return;
     const scope=this.api.scope(),key=JSON.stringify([scope.origin,scope.identity,scope.epoch,target]);
-    if (!scope.identity || !scope.epoch || this.attempted.has(key)) return;
+    if (!scope.identity || !scope.epoch) return;
+    if (fresh) this.attempted.delete(key);
+    else if (this.attempted.has(key)) return;
     this.queue=this.queue.filter(x=>x.key!==key);
-    if (priority) this.queue.unshift({target,key});else this.queue.push({target,key});
-    this.queue=this.queue.slice(0,5);
+    if (priority) this.queue.unshift({target,key,fresh});else this.queue.push({target,key,fresh});
+    this.queue=this.queue.slice(0,QUEUE);
     if (!this.timer) this.timer=setTimeout(()=>{this.timer=null;this.pump();},priority?75:750);
   }
   pump() {
     if (this.active || !this.queue.length || !this.api.idle()) return;
-    while(this.queue.length && this.api.has(this.queue[0].target))this.queue.shift();
+    while(this.queue.length && !this.queue[0].fresh && this.api.has(this.queue[0].target))this.queue.shift();
     if(!this.queue.length)return;
     if(!this.socket){this.connect();return;}
     if(!this.greeted)return;
     const job=this.queue.shift(),scope=this.api.scope();
-    if(this.attempted.size>=16)return;
+    if(this.attempted.size>=ATTEMPTS)return;
     this.attempted.add(job.key);
     this.active={...job,scope};
     const target=job.target,session={sel:target.kind==='project'?'project-home-'+target.id:target.kind==='thread'?target.id:'',rid:1,drafts:{'@lang':scope.language},open:{},info:{},adding:false,panel:false,wantNew:false,
@@ -50,8 +58,8 @@ export class ViewPrefetch {
         clearTimeout(this.deadline);this.active=null;
         const current=this.api.scope();
         if(reply.remoteReady && reply.shown && !reply.result.cmds.length && current.identity===job.scope.identity && current.epoch===job.scope.epoch
-          && current.origin===job.scope.origin && !this.api.has(job.target))this.api.picture(reply.shown,reply.session,job.target,job.scope);
-        if(this.queue.length)this.timer=setTimeout(()=>{this.timer=null;this.pump();},750);
+          && current.origin===job.scope.origin && (job.fresh || !this.api.has(job.target)))this.api.picture(reply.shown,reply.session,job.target,job.scope);
+        if(this.queue.length)this.timer=setTimeout(()=>{this.timer=null;this.pump();},PACE);
       }catch{this.stop();}
     };
     socket.onclose=socket.onerror=()=>{if(this.generation===generation)this.stop();};
