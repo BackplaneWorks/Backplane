@@ -1,0 +1,86 @@
+[
+ {
+  "name": "create ada",
+  "m": "bots.create",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "create bob",
+  "m": "bots.create",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "mail on",
+  "m": "setting.set",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "room r1",
+  "m": "bots.room",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "post p1 (mail on)",
+  "m": "bots.post",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "post p1 again",
+  "m": "bots.post",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "routine ro1",
+  "m": "bots.routine",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "run ro1 (mail on)",
+  "m": "bots.routine_run",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "mail off",
+  "m": "setting.set",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "create bub uber",
+  "m": "bots.create",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "room r2 with the uberbot",
+  "m": "bots.room",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "post p2 (uberbot in the room)",
+  "m": "bots.post",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "routine ro2 of the uberbot",
+  "m": "bots.routine",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "run ro2 (uberbot)",
+  "m": "bots.routine_run",
+  "ok": true,
+  "error": null
+ }
+]

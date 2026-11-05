@@ -225,10 +225,14 @@ const JS_STEPS: &str = include_str!("../../../../test/gpui/bots/fixtures/js-step
 /// test/gpui/bots/filter.py: the events a bots scenario is about, without clocks
 fn filter(ev: &[Value]) -> Vec<Value> {
     let threads: std::collections::HashSet<String> = ev.iter().filter(|e| e["$"] == "BotSet" && !e["thread"].as_str().unwrap_or("").is_empty()).map(|e| e["thread"].as_str().unwrap().to_string()).collect();
-    const KEEP: [&str; 19] = ["BotSet", "BotDeleted", "RoomSet", "RoomDeleted", "RoomPosted", "BotWoke", "MemorySaved", "MemoryForgot", "SpaceSet", "WorktreeSet", "UberSet",
-        "RoutineSet", "RoutinePlan", "RoutineFired", "RoutineSlot", "RoutineDone", "RoutineDeleted", "Reminded", "UberOp"];
+    const KEEP: [&str; 22] = ["BotSet", "BotDeleted", "RoomSet", "RoomDeleted", "RoomPosted", "BotWoke", "MemorySaved", "MemoryForgot", "SpaceSet", "WorktreeSet", "UberSet",
+        "RoutineSet", "RoutinePlan", "RoutineFired", "RoutineSlot", "RoutineDone", "RoutineDeleted", "Reminded", "UberOp", "ConvSet", "MailPosted", "MailFile"];
     ev.iter().filter(|e| { let k = e["$"].as_str().unwrap_or(""); let th = e["thread"].as_str().unwrap_or("");
-        match k { "ThreadCreated" => e["project"] == "", "MessagePosted" => threads.contains(th) && e["role"] == "user", "MessageFrom" => threads.contains(th),
+        let s = serde_json::to_string(e).unwrap_or_default();
+        // what the JS hub's routing adds after a mail is filed (triage, escalations, claims) is slice 3: not compared
+        if s.contains("triage-") || (k == "ConvSet" && e["id"].as_str().unwrap_or("").starts_with("pair:")) || (k == "MailPosted" && e["conv"].as_str().unwrap_or("").starts_with("pair:"))
+            || (k == "MessageFrom" && e["kind"] == "escalation") || (k == "SettingSet" && e["key"].as_str().unwrap_or("").starts_with("owner.mail.") && e["value"] == "") { return false }
+        match k { "ThreadCreated" => e["project"] == "", "MessagePosted" => threads.contains(th) && e["role"] == "user", "MessageFrom" => threads.contains(th), "SettingSet" => e["key"].as_str().unwrap_or("").starts_with("owner.mail."),
             "WorktreeSet" => threads.contains(e["id"].as_str().unwrap_or("")), _ => KEEP.contains(&k) } })
         .map(|e| { let mut o = e.clone(); let m = o.as_object_mut().unwrap(); m.remove("at");
             for k in ["once", "slot"] { if m.get(k).and_then(Value::as_u64).map_or(false, |n| n > 0) { m.insert(k.into(), json!("<T>")); } } // instants are the run's own
@@ -534,4 +538,40 @@ const JS_UBER2_EVENTS: &str = include_str!("../../../../test/gpui/bots/fixtures/
     assert_eq!(log(&hub).len(), n + 1);
     { let w = bots.world().await; assert_eq!(w.lease(), (me.clone(), 3)); assert!(w.holder_me()); }
     assert_eq!(rpc(&hub, "bots.uber_home", json!({})).await["ok"], true); assert_eq!(log(&hub).len(), n + 1, "already the holder: nothing");
+}
+
+const JS_MAIL1_EVENTS: &str = include_str!("../../../../test/gpui/bots/fixtures/js-mail1.jsonl");
+const JS_MAIL1_STEPS: &str = include_str!("../../../../test/gpui/bots/fixtures/js-mail1-steps.json");
+
+#[tokio::test] async fn js_parity_mail_filing() {
+    // the mailroom on: a room post is filed, a routine's firing is filed instead of delivered; the uberbot's routine is filed with an owner ticket; mail off with the
+    // uberbot in a room files nothing (the post is already in the box). Compared with a JS-hub recording: events, and the journal files line by line.
+    std::env::set_var("TZ", "Etc/UTC");
+    let (hub, bots, rec) = start("parity-mail1", "").await;
+    let steps: Vec<Value> = serde_json::from_str(JS_MAIL1_STEPS).unwrap();
+    let step = |i: usize, r: &Value| { let want = &steps[i]; assert_eq!((r["ok"].as_bool().unwrap(), r.get("error").and_then(Value::as_str).map(str::to_string)), (want["ok"].as_bool().unwrap(), want["error"].as_str().map(str::to_string)), "step {} ({})", i, want["name"]) };
+    let ada = bot(&hub, "ada").await; let bob = bot(&hub, "bob").await;
+    hub.commit(&json!({"$":"SettingSet","key":"mail.on","value":"on","at":1})).await.unwrap();
+    step(3, &rpc(&hub, "bots.room", json!({"room":"r1","name":"lab","members":format!("{ada}\n{bob}")})).await);
+    step(4, &rpc(&hub, "bots.post", json!({"room":"r1","text":"hello all","msg":"p1"})).await);
+    step(5, &rpc(&hub, "bots.post", json!({"room":"r1","text":"hello all","msg":"p1"})).await);
+    step(6, &rpc(&hub, "bots.routine", json!({"bot":ada,"routine":"ro1","name":"later","at":"in 3d","prompt":"do it"})).await);
+    step(7, &rpc(&hub, "bots.routine_run", json!({"routine":"ro1"})).await);
+    assert!(rec.got.lock().unwrap().is_empty(), "with the mailroom on nothing is delivered to a bot's agent");
+    hub.commit(&json!({"$":"SettingSet","key":"mail.on","value":"off","at":2})).await.unwrap();
+    let r = rpc(&hub, "bots.create", json!({"name":"bub","uber":true})).await; step(9, &r); let bub = r["bot"].as_str().unwrap().to_string();
+    until(&hub, |l| l.iter().any(|e| e["$"] == "UberSet")).await;
+    until(&hub, |l| l.iter().filter(|e| e["$"] == "WorktreeSet").count() >= 3).await;
+    assert!(bots.uber_init(now_s()).await > 0);
+    step(10, &rpc(&hub, "bots.room", json!({"room":"r2","name":"ops","members":format!("{bub}\n{ada}")})).await);
+    step(11, &rpc(&hub, "bots.post", json!({"room":"r2","text":"status?","msg":"p2"})).await);
+    step(12, &rpc(&hub, "bots.routine", json!({"bot":bub,"routine":"ro2","name":"morning","at":"in 3d","prompt":"plan the day"})).await);
+    step(13, &rpc(&hub, "bots.routine_run", json!({"routine":"ro2"})).await);
+    let js: Vec<Value> = JS_MAIL1_EVENTS.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+    let mut ours = log(&hub);
+    let dir = hub.cfg.home.join("mail"); let mut names: Vec<String> = std::fs::read_dir(&dir).map(|d| d.filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default(); names.sort();
+    for n in names.iter().filter(|n| n.ends_with(".jsonl")) { let lines: Vec<String> = std::fs::read_to_string(dir.join(n)).unwrap().lines().map(str::to_string).collect(); ours.push(json!({"$":"MailFile","name":n,"lines":lines})); }
+    let (a, b) = (norm(&js), canon(&ours));
+    for (i, (x, y)) in a.iter().zip(b.iter()).enumerate() { assert_eq!(x, y, "event {i}: JS left, Rust right") }
+    assert_eq!(a.len(), b.len(), "same number of events\nJS: {a:#?}\nRust: {b:#?}");
 }

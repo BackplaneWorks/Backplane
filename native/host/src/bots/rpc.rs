@@ -195,7 +195,7 @@ impl Bots {
         }
         // B.Mail.room: with the mailroom on, or the uberbot in the room, the post is also filed once as the room's mail
         let ub = w.uber_bot(); let sender = "person".to_string();
-        let mut parts = super::mail::mailbox::room_parts(&room.members); if !parts.contains(&sender) { parts.insert(0, sender.clone()) }
+        let mut parts = super::mail::mailbox::room_parts(&room.members); if !parts.contains(&sender) { parts.insert(0, sender.clone()) } // Parts.add
         let filing = if mail || (!ub.is_empty() && parts.contains(&format!("bot:{ub}"))) { Some((parts, room.name.clone())) } else { None };
         drop(w);
         // as Bots.fan: each member in turn is logged as woken, then hears the note
