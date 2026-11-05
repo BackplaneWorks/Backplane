@@ -19,7 +19,7 @@ a = s.get('b1'); need(a and a['view'] == a['model'] and 'NIHAO' in a['view'], f'
 a = s.get('b2'); need(a and a['view'] == a['model'] and 'NIHAO' not in a['view'], f'undo reaches the model (b2={a})')
 a = s.get('b3'); need(a and a['view'] == a['model'] and 'pasted' in a['view'], f'text insert (b3={a})')
 a = s.get('b4'); need(a and a['view'] == a['model'] and a['view'].startswith('XY'), f'selection replaced (b4={a})')
-a = s.get('b6'); need(a and a['view'] == '' and a['model'] == '', f'hardware Return sends and clears (b6={a})')
+a = s.get('b6'); need(a and a['view'] == '' and a['model'] == '', f'the send handler clears (hardware Return not driven: @hwreturn calls onSend) (b6={a})')
 a = s.get('b7'); need(a and a['view'] == a['model'], f'undo after send keeps view == model (b7={a})')
 a = s.get('c1'); need(a and a['view'] == a['model'] == 'draft kept across relaunch', f'draft set (c1={a})')
 a = r.get('r1'); need(a and a['view'] == a['model'] == 'draft kept across relaunch', f'draft restored after relaunch (r1={a})')
