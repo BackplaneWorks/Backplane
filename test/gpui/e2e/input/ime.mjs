@@ -3,8 +3,9 @@
 import {spawn,execFileSync} from 'node:child_process';
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 export async function startIme(display,engine='hangul'){
-  const env={...process.env,DISPLAY:display,XMODIFIERS:'@im=ibus',GTK_IM_MODULE:'ibus',QT_IM_MODULE:'ibus',LANG:'en_US.UTF-8'};
-  const p=spawn('ibus-daemon',['-r','-x','--panel','disable','--address','unix:path=/tmp/e2e-ibus-'+display.replace(':','')],{env,stdio:'ignore'});await sleep(2500);
+  const addr='unix:path=/tmp/e2e-ibus-'+display.replace(':','');
+  const env={...process.env,DISPLAY:display,XMODIFIERS:'@im=ibus',GTK_IM_MODULE:'ibus',QT_IM_MODULE:'ibus',LANG:'en_US.UTF-8',IBUS_ADDRESS:addr}; // the CLI and the client must find this daemon's address
+  const p=spawn('ibus-daemon',['-r','-x','--panel','disable','--address',addr],{env,stdio:'ignore'});await sleep(3000);
   let status='started',engineNow='';
   try{execFileSync('ibus',['engine',engine],{env,timeout:8000});engineNow=execFileSync('ibus',['engine'],{env,encoding:'utf8',timeout:8000}).trim()}catch(e){status='engine not selectable: '+String(e.message).slice(0,160)}
   return {env,engine:engineNow,status,stop:()=>{try{p.kill('SIGTERM')}catch{}}};
