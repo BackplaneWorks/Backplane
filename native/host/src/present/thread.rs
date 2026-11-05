@@ -92,21 +92,39 @@ fn took(s: u64) -> String {
 
 fn md_blocks(text: &str) -> Vec<Value> { md::nodes_json(&md::render(text)) }
 
-/// An ApiErr / restart / attachment / image / thought / design-step / emb / review / reminder row is not drawn here.
-fn plain(e: &Ent) -> bool {
-    if e.msg {
-        let t = e.text.as_str();
-        if e.id.starts_with("@live:") || t.starts_with("API Error") || t.starts_with("Backplane") || t.starts_with("[Backplane]") { return false }
-        if e.role == "user" { return !t.contains("\n[attachment") && !t.contains("\u{1}") && !t.contains("attached:") }
-        if e.role == "assistant" {
-            let l = t.to_ascii_lowercase();
-            return !t.trim().is_empty() && ![".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", "![" ].iter().any(|x| l.contains(x));
-        }
-        false
-    } else {
-        // a tool call folds; any other tone draws as a plain row (Mob.act.k) except the ones with their own rows: design steps, terminals, reviews, reminders, thoughts, and the restart row (Fold.dup)
-        !matches!(e.role.as_str(), "emb" | "review" | "remind" | "think") && e.akind != "restart"
+/// Every row draws; where its own key is not ready it degrades (images are not found: `images` is empty; attachment lines stay in the text; a reminder, a terminal
+/// and a review comment show as plain activity rows; a thought shows only when the setting is on, and that setting refuses the thread). Kept for the refusal API.
+fn plain(_e: &Ent) -> bool { true }
+
+const CARRY: &str = "Backplane restarted while you were working. Continue where you left off.";
+fn api_err(x: &str) -> bool { x.starts_with("API Error") }
+fn white(s: &str) -> bool { s.chars().all(|c| matches!(c, ' ' | '\n' | '\r' | '\t')) }
+fn blank(e: &Ent) -> bool { e.msg && ((e.role == "assistant" && white(&e.text)) || (e.role == "system" && ["The quote is posted in this thread. ", "The quote could not be worked out: ", "The files were not taken: ", "The person chose not to send the files (Not now)."].iter().any(|h| e.text.starts_with(&format!("[Backplane] {h}"))))) }
+/// Fold.shown: blank messages left out, an error row an API error reply already says, and the restart row its continue message stands for
+fn fold_shown(es: &[Ent]) -> Vec<Ent> {
+    let (mut out, mut p) = (Vec::new(), String::new());
+    for e in es {
+        let b = blank(e);
+        let dup = !e.msg && ((e.akind == "restart" && e.text == "Continuing after the restart" && p.starts_with(CARRY))
+            || (api_err(&p) && e.role == "error" && e.akind == "result" && (e.text.trim().is_empty() || e.text.trim() == p.trim())));
+        if !(b || dup) { out.push(e.clone()) }
+        p = if b { p } else if e.msg && e.role == "assistant" { if api_err(&e.text) { e.text.clone() } else { String::new() } } else if e.msg && e.role == "user" { if e.text.starts_with(CARRY) { e.text.clone() } else { String::new() } } else { String::new() };
     }
+    out
+}
+/// FO.ApiErr.say: a provider's API error as one sentence (English)
+fn api_say(x: &str) -> String {
+    let r = x[9..].trim(); let r = r.strip_prefix(':').map(str::trim).unwrap_or(r);
+    let code: String = if r.chars().take(3).count() == 3 && r.chars().take(3).all(|c| c.is_ascii_digit()) { r.chars().take(3).collect() } else { String::new() };
+    let body = r[code.len()..].trim();
+    let o: Value = serde_json::from_str(body).unwrap_or(Value::Null);
+    let ty = o["error"]["type"].as_str().unwrap_or("");
+    let kind = if ty == "overloaded_error" || code == "529" { "overloaded" } else if ty == "rate_limit_error" || code == "429" { "rate" } else if ty == "api_error" || code.starts_with('5') { "server" } else if ty == "authentication_error" || code == "401" { "auth" } else { "other" };
+    let msg = o["error"]["message"].as_str().or_else(|| o["message"].as_str()).map(str::to_string).unwrap_or_else(|| if body.starts_with('{') { String::new() } else { body.to_string() });
+    let msg = msg.trim();
+    let why = if kind == "other" && !msg.is_empty() { format!(": {}", msg.strip_suffix('.').unwrap_or(msg)) } else { String::new() };
+    let head = match kind { "overloaded" => "Claude's API was overloaded", "rate" => "Claude's API hit its rate limit", "server" => "Claude's API had an internal error", "auth" => "Claude's API refused the sign-in", _ => "Claude's API answered with an error" };
+    format!("{head}{} and ended the turn{why}.", if code.is_empty() { String::new() } else { format!(" ({code})") })
 }
 
 /// `entries` of shown.thread for a plain page; `running`: the thread's turn runs; `open`: runs the person opened (the "fold:<id>" choices = "1");
@@ -116,17 +134,19 @@ pub fn entries(es: &[Ent], running: bool, open: &dyn Fn(&str) -> bool, now_ms: u
     // Hist.seen: the design as it was before is no row
     let seen: Vec<Ent> = es.iter().filter(|e| !step_base(e)).cloned().collect();
     let es = seen.as_slice();
+    // thoughts show only while the setting is on (it refuses the thread, so here they are hidden); then Fold.shown
+    let vis: Vec<Ent> = fold_shown(&es.iter().filter(|e| !(!e.msg && e.role == "think")).cloned().collect::<Vec<_>>());
     let now = now_ms / 1000;
     // Stamp.ends over the page, oldest first in, walked newest first
     let sx: Vec<stamp::E> = es.iter().map(|e| if e.msg && e.role == "user" { stamp::E::User { id: e.id.clone(), at: e.at } } else if e.msg { stamp::E::Assistant { id: e.id.clone(), at: e.at } } else { stamp::E::Other }).collect();
     let ends: HashMap<String, u64> = stamp::ends(&sx, running);
     let stops = stops(es, running, end, marks);
     let mut out = Vec::new(); let mut i = 0;
-    while i < es.len() {
-        let e = &es[i];
+    while i < vis.len() {
+        let e = &vis[i];
         if tool(e) {
-            let mut j = i; while j < es.len() && tool(&es[j]) { j += 1 }
-            let run = &es[i..j]; let live = j == es.len() && running; let id = &run[0].id;
+            let mut j = i; while j < vis.len() && tool(&vis[j]) { j += 1 }
+            let run = &vis[i..j]; let live = j == vis.len() && running; let id = &run[0].id;
             let o = open(id);
             out.push(json!({"id": format!("fold:{id}"), "kind": "fold", "text": label(run, live), "open": o, "live": live, "value": format!("{}{}", if o { "0" } else { "1" }, id)}));
             if o { for r in run { out.push(act(r, id)) } }
@@ -135,7 +155,9 @@ pub fn entries(es: &[Ent], running: bool, open: &dyn Fn(&str) -> bool, now_ms: u
         if !e.msg { out.push(plain_act(e)); i += 1; continue }
         // a zone that cannot be known degrades the time stamps (empty), not the screen
         let c = zone.map(|z| clock(e.at, now, z));
-        if e.role == "user" {
+        if e.role == "user" && e.text.starts_with(CARRY) {
+            out.push(json!({"id": e.id, "kind": "act", "tone": "info restart", "label": "restart", "text": "Continuing after the restart"}));
+        } else if e.role == "user" {
             out.push(json!({"id": e.id, "kind": "user", "text": e.text, "attachments": [], "stamp": c.unwrap_or_default()}));
         } else {
             let st = ends.get(&e.id).copied().unwrap_or(0);
@@ -143,7 +165,9 @@ pub fn entries(es: &[Ent], running: bool, open: &dyn Fn(&str) -> bool, now_ms: u
             let s = match c { None => String::new(), Some(c) => {
                 let took_s = |w: &str| if st > 1 { format!("{w} {c} · {}", took(e.at.saturating_sub(st))) } else { format!("{w} {c}") };
                 match stops.get(&e.id).copied().unwrap_or(0) { 1 => took_s("Stopped"), 3 => if st == 0 { c } else { took_s("Failed") }, _ => if st == 0 { c } else { took_s("Finished") } } } };
-            out.push(json!({"id": e.id, "kind": "assistant", "text": e.text, "blocks": md_blocks(&e.text), "images": [], "stamp": s}));
+            // a synthetic "@live:" row is the agent still working; an API error reply reads as one sentence, its raw text kept for Copy
+            let (text, blocks, s) = if e.id.starts_with("@live:") { ("Working".to_string(), md_blocks("Working"), String::new()) } else if api_err(&e.text) { (e.text.clone(), md_blocks(&api_say(&e.text)), s) } else { (e.text.clone(), md_blocks(&e.text), s) };
+            out.push(json!({"id": e.id, "kind": "assistant", "text": text, "blocks": blocks, "images": [], "stamp": s}));
         }
         i += 1;
     }
