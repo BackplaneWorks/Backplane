@@ -32,7 +32,7 @@ Owner of every GPUI hook: the GPUI desktop-client stream (thread t1793832589-168
 | id | hook | owner | landing commit | status |
 |---|---|---|---|---|
 | G1 | event `ack {step, ack_ms}`: the first presented frame after the injected event. **G1 decides the one-frame claim** ("every click answers within one frame" is judged on this `ack_ms` against one refresh period, never on `input.latency_ms` and never on the recording) | GPUI desktop stream | `c373ceb37` | landed; not yet consumed by the adapter on a real run |
-| G2 | steps `{"record":"start","name":..}` / `{"record":"stop"}`; event `frames {name, n, t_ms:[..]}` with a timestamp per drawn frame | GPUI desktop stream | `c373ceb37` | landed |
+| G2 | steps `{"record":"start","name":..}` / `{"record":"stop"}`; event `frames {name, n, t_ms:[..]}` with a timestamp per drawn frame (**defect at `c373ceb37`: `metric()` overwrites the payload's `t_ms` with the event time, so the array never reaches the log; it must be sent as `frames_ms`**) | GPUI desktop stream | `c373ceb37` | landed |
 | G3 | event `layout {rects:{id:{..}}}` on change (probes painted last frame) | GPUI desktop stream | `c373ceb37` | landed; emitted only when rect reporting is enabled (env `BACKPLANE_GPUI_RECTS=1`, or the check modes), which the adapter sets for the layout and dead-control journeys |
 | G4 | event `controls [{id,label,enabled,visible,wired}]` on change; step `{"click":"<id>"}` -> event `click {id, found, changed, action}` (a click with no change is reported after 1.5 s: a dead control) | GPUI desktop stream | `c373ceb37` | landed; same rect-reporting caveat |
 | G5 | steps `scroll px` and `net_sleep secs` (drop the hub socket and wait for the reconnect) | GPUI desktop stream | `c373ceb37` | landed |
