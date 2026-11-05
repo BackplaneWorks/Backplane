@@ -50,6 +50,19 @@ const NEVER = new Set(['select', 'bot', 'bot-tab', 'proj-home', 'send', 'send-al
   'thread-child', 'delete', 'row-archive', 'row-settle', 'row-pin', 'row-rename', 'rename-save', 'secret-save', 'sealed']);
 // presses that open the viewer pane (the rail's tabs, the header's Viewer)
 const VIEWER = new Set(['view-kind', 'fm', 'diff', 'mech', 'rv-page', 'panel']);
+// The rail beside a viewer press: the pressed tab marked as the one on
+// show and "Close the viewer" at its foot, as the hub draws them, so neither
+// pops in (and the rail's toggle drops) when the hub's view lands. Drawn
+// from the tabs and the button as the hub drew them in some earlier view
+// (both states of each tab); with any of them unknown the rail is left as
+// it is.
+const VIEW_TABS = new Set(['board', 'schematic', '3d', 'split', 'mech', 'files', 'diff', 'review', 'browser']);
+const TAB_OF = { fm: () => 'files', diff: () => 'diff', mech: () => 'mech', 'rv-page': () => 'review', 'view-kind': v => v };
+// (a tab never seen on show, as view.bend's View.workspace.button draws the
+// one on show: marked, and its click shuts the viewer, client.bend's Rail.act)
+const ON_ATTRS = { class: 'tab on', 'aria-current': 'page', 'aria-pressed': 'true', 'data-value': '' };
+const onTab = n => ({ ...n, attrs: list(items(n.attrs).map(a => is(a, 'At') ? (a.name in ON_ATTRS ? { ...a, value: ON_ATTRS[a.name] } : a) : a.event === 'click' ? { ...a, action: 'panel' } : a)) });
+const isRail = n => n.tag === 'nav' && n.key === 'workspace' && classes(n).includes('workspace-bar');
 const DEPTH = 7;
 const sig = n => n.tag + '\u0000' + n.key + '\u0000' + (n.key ? '' : classes(n)[0] || '');
 
@@ -93,13 +106,15 @@ const blank = n => {
 const shaped = n => n === null || is(n, 'El') && typeof n.tag === 'string' && n.attrs && n.kids;
 export class PressFeedback {
   // store: {storage (localStorage), scope: () => a key for this hub and page, or ''}
-  constructor(changed, limit = 64, store = null) { this.changed = changed;this.limit = limit;this.store = store;this.learned = new Map();this.clear(); }
+  constructor(changed, limit = 64, store = null) { this.changed = changed;this.limit = limit;this.store = store;this.learned = new Map();this.tabs = new Map();this.closer = null;this.clear(); }
   restore() {
     const scope = this.store?.scope?.() || '';
     if (!scope || scope === this.storedFor) return;
     this.storedFor = scope;
     try {
-      const rows = JSON.parse(this.store.storage.getItem(STORE + scope) || '[]');
+      const kept = JSON.parse(this.store.storage.getItem(STORE + scope) || '[]'), rows = Array.isArray(kept) ? kept : kept?.rows;
+      for (const [k, n] of Array.isArray(kept?.rail?.tabs) ? kept.rail.tabs : []) if (typeof k === 'string' && shaped(n) && n && !this.tabs.has(k)) this.tabs.set(k, n);
+      if (!this.closer && shaped(kept?.rail?.closer) && kept.rail.closer) this.closer = kept.rail.closer;
       for (const [key, e] of Array.isArray(rows) ? rows : []) {
         if (typeof key !== 'string' || this.learned.has(key) || !e || !REGIONS.some(([k]) => k === e.kind) || !shaped(e.node) || typeof e.parent !== 'string') continue;
         if (!(e.along || []).every(x => x && shaped(x.node) && x.node && typeof x.parent === 'string')) continue;
@@ -116,8 +131,9 @@ export class PressFeedback {
       const scope = this.storedFor;
       if (!scope) return;
       try {
-        let rows = [...this.learned].map(([key, e]) => [key, { ...e, node: e.node && blank(e.node), along: (e.along || []).map(x => ({ ...x, node: blank(x.node) })) }]), text = JSON.stringify(rows);
-        while (text.length > STORE_BYTES && rows.length) { rows = rows.slice(1);text = JSON.stringify(rows); }
+        const rail = { tabs: [...this.tabs], closer: this.closer };
+        let rows = [...this.learned].map(([key, e]) => [key, { ...e, node: e.node && blank(e.node), along: (e.along || []).map(x => ({ ...x, node: blank(x.node) })) }]), text = JSON.stringify({ rows, rail });
+        while (text.length > STORE_BYTES && rows.length) { rows = rows.slice(1);text = JSON.stringify({ rows, rail }); }
         const st = this.store.storage;
         for (let i = st.length - 1; i >= 0; i--) { const k = st.key(i);if (k && k.startsWith(STORE) && k !== STORE + scope) st.removeItem(k); }
         st.setItem(STORE + scope, text);
@@ -129,6 +145,7 @@ export class PressFeedback {
     if (page === this.seenNode) return;
     this.restore();
     this.seenNode = page;this.now = regions(page);this.nowFor = target;
+    this.learnRail(page);
     // (a pane as the hub drew it, any destination: the shape of a first open)
     if (this.now.has('viewer')) this.shell = this.now.get('viewer');
     const p = this.press;
@@ -164,7 +181,7 @@ export class PressFeedback {
     const revision = ++this.revision, press = { key, target, before: this.now, settled: false, revision, by: action + '\u0000' + String(value ?? '') };
     this.press = press;
     const known = this.learned.get(key) || this.opening(action, action + '\u0000' + String(value ?? '')) || this.closing(back);
-    this.active = known ? { ...known, revision } : null;
+    this.active = known ? { ...known, revision, rail: known.kind === 'viewer' ? this.railKind(action, value, known) : undefined } : null;
     if (known) this.changed();
     return () => {
       press.settled = true;
@@ -209,6 +226,62 @@ export class PressFeedback {
     return { node: { ...app, tag: 'aside', key: 'viewer', attrs: list([{ ...at, name: 'class', value: 'viewer' }, { ...at, name: 'id', value: 'viewer' }]), kids: list([]) },
       parent: sig(app), index: items(app.kids).length };
   }
+  // (each viewer tab as the hub drew it on and off, and its Close button)
+  learnRail(page) {
+    const rail = this.find(page, isRail);
+    if (!rail) return;
+    const walk = n => {
+      if (!is(n, 'El') || n.tag === 'details') return;
+      if (n.tag === 'button' && VIEW_TABS.has(n.key) && classes(n).includes('tab')) { const k = n.key + '\u0000' + (classes(n).includes('on') ? 1 : 0);if (this.tabs.get(k) !== n) { this.tabs.delete(k);this.tabs.set(k, n); } }
+      else if (n.tag === 'button' && classes(n).includes('viewer-close')) this.closer = n;
+      else for (const k of items(n.kids)) walk(k);
+    };
+    walk(rail);
+    while (this.tabs.size > 2 * VIEW_TABS.size) this.tabs.delete(this.tabs.keys().next().value);
+  }
+  find(n, test, d = 0) {
+    if (!is(n, 'El') || d > DEPTH || n.tag === 'bp-memo' || attr(n, 'id') === 'timeline') return null;
+    if (test(n)) return n;
+    for (const k of items(n.kids)) { const f = this.find(k, test, d + 1);if (f) return f; }
+    return null;
+  }
+  // the tab on show after a viewer press: the pressed one when it opens or
+  // switches the pane, none when it shuts it; undefined: unknown (the
+  // header's Viewer, which opens the last one)
+  railKind(action, value, known) {
+    if (!known.node) return '';
+    const tab = TAB_OF[action]?.(String(value ?? ''));
+    return VIEW_TABS.has(tab) ? tab : undefined;
+  }
+  railTo(page, on) {
+    let whole = true;
+    const swap = n => {
+      if (!is(n, 'El') || n.tag === 'details') return n;
+      if (n.tag === 'button' && VIEW_TABS.has(n.key) && classes(n).includes('tab')) {
+        const want = n.key === on;
+        if (want === classes(n).includes('on')) return n;
+        const v = this.tabs.get(n.key + '\u0000' + (want ? 1 : 0)) || (want ? onTab(n) : null);
+        if (!v) whole = false;
+        return v || n;
+      }
+      if (n.tag === 'div' && classes(n).includes('workspace-close')) {
+        if (on && !this.closer) { whole = false;return n; }
+        const ks = items(n.kids), want = on ? [this.closer] : [];
+        return ks.length === want.length && ks.every((k, i) => k === want[i]) ? n : { ...n, kids: list(want) };
+      }
+      const ks = items(n.kids), mapped = ks.map(swap);
+      return mapped.every((k, i) => k === ks[i]) ? n : { ...n, kids: list(mapped) };
+    };
+    let done = false;
+    const walk = (n, d) => {
+      if (done || !is(n, 'El') || d > DEPTH || n.tag === 'bp-memo' || attr(n, 'id') === 'timeline') return n;
+      if (isRail(n)) { done = true;const out = swap(n);return whole ? out : n; }
+      const ks = items(n.kids), mapped = ks.map(k => walk(k, d + 1));
+      return mapped.every((k, i) => k === ks[i]) ? n : { ...n, kids: list(mapped) };
+    };
+    const out = walk(page, 0);
+    return whole ? out : page;
+  }
   get showing() { return !!this.active; }
   project(page) {
     const a = this.active;
@@ -235,7 +308,8 @@ export class PressFeedback {
       return mapped.every((k, i) => k === ks[i]) ? n : { ...n, kids: list(mapped) };
     };
     const out = walk(page);
-    return (a.along || []).reduce((pg, x) => this.swap(pg, x), out);
+    const railed = a.rail === undefined ? out : this.railTo(out, a.rail);
+    return (a.along || []).reduce((pg, x) => this.swap(pg, x), railed);
   }
   // where a region goes among its parent's kids: after the sibling it came
   // after when the hub drew it (the kids may be more or fewer now), else at
@@ -259,5 +333,5 @@ export class PressFeedback {
   }
   // (another destination picked: a press on its way is the hub's to answer)
   drop() { this.revision++;this.active = null;this.press = null; }
-  clear() { this.revision = (this.revision || 0) + 1;this.active = null;this.press = null;this.now = null;this.shell = null;this.nowFor = '';this.seenNode = null;this.learned?.clear(); }
+  clear() { this.revision = (this.revision || 0) + 1;this.active = null;this.press = null;this.now = null;this.shell = null;this.nowFor = '';this.seenNode = null;this.learned?.clear();this.tabs?.clear();this.closer = null; }
 }

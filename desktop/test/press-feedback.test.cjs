@@ -137,3 +137,30 @@ test('a popover drawn with its shade before it is put in and taken away with the
  assert.deepEqual(comp(f.project(page(true,4))).map(k=>at(k,'class')),[undefined,'tok-chip','composer-foot'],'the shade goes with it (it would catch every click)');
  assert.equal(regions(page(true)).get('tokens').pre[0],shade);
 });
+test('a viewer press draws the rail with the pressed tab on show and Close the viewer at its foot, as the hub draws them',async()=>{
+ const {PressFeedback,T}=await load();const f=new PressFeedback(()=>{});
+ const el=(tag,key,attrs,ks=[],ons=[])=>({$:T.El,tag,key,attrs:L([...Object.entries(attrs).map(([name,value])=>({$:T.At,name,value})),...ons.map(([event,action])=>({$:'On',event,action}))]),kids:L(ks)});
+ const tab=(k,cur,act,val)=>el('button',k,{type:'button',class:cur===k?'tab on':'tab','aria-current':cur===k?'page':'false','aria-pressed':cur===k?'true':'false','data-value':cur===k?'':val},[],[['click',cur===k?'panel':act]]);
+ const closer=el('button','',{class:'viewer-close'});
+ const rail=cur=>el('nav','workspace',{class:'workspace-bar'},[el('div','',{class:'workspace-rail'},[el('div','',{class:'workspace-group'},[tab('board',cur,'view-kind','board'),tab('files',cur,'fm','')])]),
+  el('div','',{class:'workspace-close'},cur?[closer]:[]),el('button','rail-toggle',{class:'rail-toggle'})]);
+ const page=(cur,n=0)=>el('div','',{},[el('div','app',{class:'app'+(cur?' panel':'')},[el('main','main',{class:'thread-view'},[el('div','tl',{id:'timeline'},[el('div','r'+n,{class:'msg'})])]),
+  el('div','ws',{class:'workspace-thread'},[rail(cur)]),...(cur?[el('aside','viewer',{class:'viewer '+cur},[el('div','',{class:'viewer-bar'})])]:[])])]);
+ const railOf=pg=>kids(kids(kids(pg)[0]).find(k=>k.key==='ws'))[0];
+ const on=r=>kids(kids(kids(r)[0])[0]).filter(b=>at(b,'class')==='tab on').map(b=>b.key), shut=r=>kids(kids(r)[1]).length;
+ // nothing learned: the first open draws no rail change without its Close button
+ f.seen(page(''),'thread:A');let s=f.choice('view-kind','board','thread:A');assert.equal(f.active.kind,'viewer');
+ assert.deepEqual(on(railOf(f.project(page('',1)))),[],'Close never seen: the rail is the hub’s');s(true);
+ f.seen(page('board',2),'thread:A');f.seen(page('',3),'thread:A');
+ s=f.choice('view-kind','board','thread:A');let r=railOf(f.project(page('',4)));
+ assert.deepEqual(on(r),['board']);assert.equal(shut(r),1,'Close the viewer is there at the press');
+ s(true);f.seen(page('board',5),'thread:A');
+ // a tab never seen on show: drawn on as the hub draws one, its click shutting the viewer
+ s=f.choice('fm','','thread:A');r=railOf(f.project(page('board',6)));const files=kids(kids(kids(r)[0])[0])[1];
+ assert.deepEqual(on(r),['files']);assert.equal(at(files,'data-value'),'');
+ assert.deepEqual(JSON.stringify(files),JSON.stringify(tab('files','files','fm','')),'the same node the hub draws for it');
+ s(true);f.seen(page('files',7),'thread:A');
+ // the tab on show pressed again shuts the viewer: no tab on, no Close
+ s=f.choice('panel','','thread:A');s(true);f.seen(page('',8),'thread:A');f.seen(page('files',9),'thread:A');
+ s=f.choice('panel','','thread:A');assert.equal(f.active?.node,null);r=railOf(f.project(page('files',10)));assert.deepEqual(on(r),[]);assert.equal(shut(r),0);
+});
