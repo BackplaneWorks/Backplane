@@ -156,8 +156,12 @@ pub fn paint_cat(window: &mut Window, b: Bounds<Pixels>, rig: &Rig, ms: f32, siz
 pub struct Cats { dir: PathBuf, cache: HashMap<(u32, String), Option<Arc<Rig>>> }
 impl Cats {
     pub fn new() -> Self {
-        let dir = std::env::var_os("BACKPLANE_GPUI_CATS").map(PathBuf::from)
-            .or_else(|| std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.join("cat-rigs")))).unwrap_or_default();
+        // BACKPLANE_GPUI_CATS, else cat-rigs/ beside the binary, else the repo's build folder (a copied binary, as try.sh makes)
+        let mut candidates: Vec<PathBuf> = Vec::new();
+        if let Some(d) = std::env::var_os("BACKPLANE_GPUI_CATS") { candidates.push(PathBuf::from(d)); }
+        if let Some(p) = std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.join("cat-rigs"))) { candidates.push(p); }
+        if let Some(h) = std::env::var_os("HOME") { candidates.push(PathBuf::from(h).join("Documents/i2cjak/backplane-gpui/build/gpui/linux/cat-rigs")); }
+        let dir = candidates.iter().find(|d| d.is_dir()).cloned().unwrap_or_default();
         Cats { dir, cache: HashMap::new() }
     }
     pub fn rig(&mut self, seed: u64, mood: &str) -> Option<Arc<Rig>> {
