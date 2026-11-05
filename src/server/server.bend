@@ -973,7 +973,6 @@ def Wire.kept(over: Bool, c: Client) -> IO(Maybe<&2, Client>):
     case False{}:
       IO.pure(Maybe<&2, Client>, Some{c})
 
-
 def Wire.offer.k(c: Client, w: WIRE.Wire, +n: Nat) -> IO(Maybe<&2, Client>):
   match c:
     case Client{i, +o, l, +r, k, mb, +accountCap}:
@@ -11061,7 +11060,6 @@ def Hub.cad.request(h: Hub, +tool: String, +op: String) -> IO(Hub):
         IO.spawn(Unit, CadJob.ask(Cfg.home(cfg), tool, op, inbox))
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
 
-
 def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
   match h o:
     case Hub{+st, f, ls, cl, as, inbox, cfg, note} B.RunStart{+thread, conv, head}:
@@ -16589,6 +16587,31 @@ def Hub.bot.act(i: Nat, h: Hub, +arg: String, +body: String, +me: String, +reply
     case _ _:
       Hub.answer(h, reply, W.Http.text("404 Not Found", "not found"))
 
+# A genuine signed request from one of the owner's machines whose mirror
+# here is away is a return signal: its mirror is pulled now (one pull per
+# link at a time, Far.pull), not at this hub's next minute. A machine that
+# restarted was seen back only at that minute (60.0 s, lane B's
+# far_latency); its first request (the directory it asks for at start)
+# now brings it back. A mirror that is not away, or a link that is not
+# the owner's (Far.own.id), pulls nothing, so two hubs never bounce pulls.
+def Far.back.k(go: Bool, h: Hub, +link: String) -> IO(Hub):
+  match go:
+    case True{}:
+      Far.pull.here(h, link)
+    case False{}:
+      IO.pure(Hub, h)
+
+def Far.back.p(r: FR.In & Hub, own: Bool, +link: String) -> IO(Hub):
+  (i, h) = r
+  Far.back.k(Bool.and(own, FR.In.away(i)), h, link)
+
+def Far.back(peer: Bool, h: Hub, +link: String) -> IO(Hub):
+  match peer h:
+    case True{} Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      Far.back.p(Far.in.of(Far.fh(Hub{st, f, ls, cl, as, inbox, cfg, note}), link, link), Far.own.id(st, cfg, link), link)
+    case False{} _:
+      IO.pure(Hub, h)
+
 # a linked machine's genuine request that Tailscale says came from one of
 # the owner's own devices (Auth.owner.peer) makes its link one of the
 # owner's machines ("tailnet": UC.Far.own.key), unless this hub already
@@ -16617,31 +16640,6 @@ def Hub.bot.seen(bad: Bool, m: Maybe<&2, SG.Seen>, h: Hub, +why: String, +kind: 
           Hub{st, f, ls, cl, as, inbox, Cfg.with_bn(cfg, BN.Bn.with_seen(Cfg.bn(cfg), s)), note}, arg, now)
         h3 : Hub <- Far.back(Bool.not(String.eq(kind, "hook")), h2, arg)
         Hub.bot.act(C.Codec.pos(["hook", "deliver", "link", "dir", "far-push", "far-log", "far-rpc"], kind), h3, arg, body, me, reply, now)
-
-# A genuine signed request from one of the owner's machines whose mirror
-# here is away is a return signal: its mirror is pulled now (one pull per
-# link at a time, Far.pull), not at this hub's next minute. A machine that
-# restarted was seen back only at that minute (60.0 s, lane B's
-# far_latency); its first request (the directory it asks for at start)
-# now brings it back. A mirror that is not away, or a link that is not
-# the owner's (Far.own.id), pulls nothing, so two hubs never bounce pulls.
-def Far.back.k(go: Bool, h: Hub, +link: String) -> IO(Hub):
-  match go:
-    case True{}:
-      Far.pull.here(h, link)
-    case False{}:
-      IO.pure(Hub, h)
-
-def Far.back.p(r: FR.In & Hub, own: Bool, +link: String) -> IO(Hub):
-  (i, h) = r
-  Far.back.k(Bool.and(own, FR.In.away(i)), h, link)
-
-def Far.back(peer: Bool, h: Hub, +link: String) -> IO(Hub):
-  match peer h:
-    case True{} Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
-      Far.back.p(Far.in.of(Far.fh(Hub{st, f, ls, cl, as, inbox, cfg, note}), link, link), Far.own.id(st, cfg, link), link)
-    case False{} _:
-      IO.pure(Hub, h)
 
 # a signed request (or a webhook's bearer token), checked: genuine (key),
 # not seen before, then acted on; a refusal says why
@@ -17245,7 +17243,6 @@ def Conn.devices.request(ok: Bool, s: Socket, +hs: List<&2, W.Header>, +op: Stri
 def Conn.devices.fallback(denied: Bool, +token: String, s: Socket, +req: W.Request, rest: List<&2, U32>, +web: String, +id: U32, +inbox: Chan(Msg), +trusted: Bool) -> IO(Unit):
   Conn.route.auth(String.eq(W.Http.route(Conn.devices.path(req)), "/auth/pair"), s, req, rest, web, id, inbox, Bool.and(trusted, Bool.not(denied)), token)
 
-
 def Conn.devices.dispatch(route: String, +token: String, s: Socket, +req: W.Request, rest: List<&2, U32>, +web: String, +id: U32, +inbox: Chan(Msg), +trusted: Bool) -> IO(Unit):
   match route req:
     case "/auth/invitations" W.Request{method, _, +hs}: Conn.devices.request(Bool.and(String.eq(method, "POST"), AUTH.Auth.cache_request("GET", hs, token)), s, hs, "create", "", inbox)
@@ -17255,7 +17252,6 @@ def Conn.devices.dispatch(route: String, +token: String, s: Socket, +req: W.Requ
       Bool.pick(String, String.is_empty(W.Http.header_of(hs, "x-backplane-invitation")), W.Http.header_of(hs, "x-backplane-device"), W.Http.header_of(hs, "x-backplane-invitation")), inbox)
     case "/auth/known" W.Request{method, _, +hs}: Conn.devices.request(Bool.and(String.eq(method, "POST"), AUTH.Auth.cache_request("GET", hs, token)), s, hs, "known", W.Http.header_of(hs, "x-backplane-origin"), inbox)
     case _ _: Conn.devices.fallback(String.is_empty(token), token, s, req, rest, web, id, inbox, trusted)
-
 
 def Conn.devices.gate(enroll: Bool, s: Socket, +req: W.Request, rest: List<&2, U32>, +web: String, +id: U32, +inbox: Chan(Msg), +trusted: Bool, +root: String) -> IO(Unit):
   match enroll req:
