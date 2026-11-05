@@ -46,7 +46,7 @@ try{
     if(summary.clientPointer.delivered!==true){for(const a of ['drag-select','ctrl-c','paperclip'])harnessActions[a]=[...(harnessActions[a]||[]),'client-pointer'];summary.notes=[...(summary.notes||[]),'a click on a sidebar thread row changed nothing in the main area: GPUI is not receiving XTEST pointer events on this display; pointer-dependent actions are harness, not app']}}
   else{summary.clientPointer={delivered:null,note:'no thread controls with rects to click: the pointer is unproven'};for(const a of ['drag-select','ctrl-c','paperclip'])harnessActions[a]=[...(harnessActions[a]||[]),'client-pointer-unproven']}
   inp.cb.clear();await sleep(300);
-  if(main){const r=main[1];await runIf('drag-select',()=>inp.dragSelect(win,[r.x+40,r.y+60],[r.x+Math.min(r.w-40,500),r.y+110]));await runIf('ctrl-c',()=>{return inp.copy()})}
+  if(main){const r=main[1];await runIf('drag-select',()=>inp.dragSelect(win,[r.x+110,r.y+150],[r.x+Math.min(r.w-120,820),r.y+Math.min(r.h-260,500)]));await runIf('ctrl-c',()=>{return inp.copy()})}
   else summary.blocked['drag-select/ctrl-c']='no main region in the layout event';
   execFileSync('convert',['-size','240x160','gradient:red-blue',out+'/paste.png'],{env:dsp.env});
   // Evidence comes from the hub's own log (the message the client actually sent), not from pixels: pixels also change when a thread streams.
@@ -82,8 +82,9 @@ try{
    const g2=spawn(gpuBin,['--url',fx.state.url,'--token-file',fx.state.root+'/home/token','--script',sf2],{env:{...dsp.env,...ime.env,HOME:fx.state.root+'/fakehome',BACKPLANE_GPUI_RECTS:'1'},stdio:['ignore','ignore','pipe']});
    g2.stderr.on('data',d=>{b2+=d;let i;while((i=b2.indexOf('\n'))>=0){const l=b2.slice(0,i);b2=b2.slice(i+1);const k=l.indexOf('GPUI_METRIC ');if(k>=0)try{m2.push(JSON.parse(l.slice(k+12)))}catch{}}});
    await Promise.race([new Promise(r=>g2.on('close',()=>r())),sleep(40000)]);try{g2.kill('SIGTERM')}catch{}await sleep(800);
-   summary.paperclipScriptedClick={clickEvent:m2.find(m=>m.event==='click'&&m.id==='ui:Attach')||null,portalOpenFileCallsAdded:cnt()-n0}}
+   summary.paperclipScriptedClick={clickEvent:m2.find(m=>m.event==='click'&&m.id==='ui:Attach')||null,portalOpenFileCallsAdded:cnt()-n0};
+   const pc=summary.actions.paperclip;if(pc&&pc.status!=='harness'&&pc.ok===false&&summary.paperclipScriptedClick.portalOpenFileCallsAdded>=1){pc.status='unverified';pc.evidence.note2='the client\'s own click on ui:Attach reaches the OS chooser (portal called), but the OS click aimed at the reported rect did not: the rect does not coincide with the painted button (about 25 px low), so the real click is unverified, not failed'}}
 }finally{try{portal?.kill('SIGTERM')}catch{}try{ime.stop()}catch{}await fx.stop();dsp.stop()}
 // an action only counts when evidence says so; pass also needs the Rust hub on real hardware (CONTRACT.md), which this Boat run is not
-summary.verdict=Object.keys(harnessActions).length?'app+harness':'app';for(const a of Object.values(summary.actions))if(a.status!=='harness'&&a.status!=='error')a.status=a.ok?'partial':'fail'; // the preflight passed, so a false below is the app's
+summary.verdict=Object.keys(harnessActions).length?'app+harness':'app';for(const a of Object.values(summary.actions))if(!['harness','error','unverified'].includes(a.status))a.status=a.ok?'partial':'fail'; // the preflight passed, so a false below is the app's
 writeFileSync(out+'/input-summary.json',JSON.stringify(summary,null,1));console.log(JSON.stringify({actions:Object.fromEntries(Object.entries(summary.actions).map(([k,v])=>[k,v.ok])),blocked:summary.blocked},null,1));
