@@ -21,13 +21,17 @@ pub struct Hub {
     rpc: std::sync::RwLock<Vec<(&'static str, Arc<dyn RpcHandler>)>>, http: std::sync::RwLock<Vec<(&'static str, Arc<dyn HttpHandler>)>>,
     live: std::sync::Mutex<std::collections::HashMap<String, String>>,
     me: std::sync::OnceLock<std::sync::Weak<Hub>>, next_client: AtomicU64,
-    outboxes: std::sync::Mutex<std::collections::HashMap<u64, tokio::sync::mpsc::UnboundedSender<Value>>>,
+    outboxes: std::sync::Mutex<std::collections::HashMap<u64, tokio::sync::mpsc::UnboundedSender<Out>>>,
 }
+
+/// One item of a connection's outbox: a value the hub encodes (CBOR with the dictionaries), or bytes that go out as
+/// one binary frame exactly as given (plot frames carry byte strings and plain text the dictionaries would change).
+pub enum Out { Value(Value), Raw(Vec<u8>) }
 
 struct Commit { events: Vec<Value>, done: tokio::sync::oneshot::Sender<Result<u64>> }
 
 /// One WebSocket connection's identity and its single open view.
-pub struct Conn { pub client: u64, pub gen: String, pub view_id: String, pub target: Value, pub cbor: bool, pub lastrev: u64 }
+pub struct Conn { pub sent: Vec<(String, Value)>, pub client: u64, pub gen: String, pub view_id: String, pub target: Value, pub cbor: bool, pub lastrev: u64 }
 
 fn now_ms() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0) }
 pub fn limits() -> Value { json!({"replyBytes":262144,"entries":32,"recent":24,"searchResults":25,"searchCandidates":128,"chunkBytes":65536}) }
@@ -127,13 +131,23 @@ impl Hub {
     pub fn http_for(&self, route: &str) -> Option<Arc<dyn HttpHandler>> { self.http.read().unwrap().iter().filter(|(p, _)| route == *p || route.starts_with(&format!("{p}/"))).max_by_key(|(p, _)| p.len()).map(|(_, h)| h.clone()) }
     pub fn arc(&self) -> Arc<Hub> { self.me.get().and_then(|w| w.upgrade()).expect("hub is alive") }
     /// Send an unsolicited frame (a plot, a notice) to one connection; false when it has gone.
-    pub fn push(&self, client: u64, frame: Value) -> bool { self.outboxes.lock().unwrap().get(&client).map_or(false, |t| t.send(frame).is_ok()) }
+    pub fn push(&self, client: u64, frame: Value) -> bool { self.outboxes.lock().unwrap().get(&client).map_or(false, |t| t.send(Out::Value(frame)).is_ok()) }
+    /// Bytes as one binary WebSocket frame, not re-encoded (plot frames). False when the connection has gone.
+    pub fn push_raw(&self, client: u64, bytes: Vec<u8>) -> bool { self.outboxes.lock().unwrap().get(&client).map_or(false, |t| t.send(Out::Raw(bytes)).is_ok()) }
     /// ... to every connection.
-    pub fn push_all(&self, frame: &Value) { for t in self.outboxes.lock().unwrap().values() { let _ = t.send(frame.clone()); } }
-    pub fn attach(&self, client: u64) -> tokio::sync::mpsc::UnboundedReceiver<Value> { let (t, r) = tokio::sync::mpsc::unbounded_channel(); self.outboxes.lock().unwrap().insert(client, t); r }
+    pub fn push_all(&self, frame: &Value) { for t in self.outboxes.lock().unwrap().values() { let _ = t.send(Out::Value(frame.clone())); } }
+    pub fn attach(&self, client: u64) -> tokio::sync::mpsc::UnboundedReceiver<Out> { let (t, r) = tokio::sync::mpsc::unbounded_channel(); self.outboxes.lock().unwrap().insert(client, t); r }
+    /// True while the connection's outbox exists (it has not gone away).
+    pub fn is_attached(&self, client: u64) -> bool { self.outboxes.lock().unwrap().contains_key(&client) }
     pub fn detach(&self, client: u64) { self.outboxes.lock().unwrap().remove(&client); }
     /// Read access to the model: threads, projects, entry indexes, pages.
     pub async fn model(&self) -> tokio::sync::MutexGuard<'_, Model> { self.model.lock().await }
+    /// A setting's current value (None when it has none or was removed); read from the log line the model points at.
+    pub async fn setting(&self, key: &str) -> Option<String> {
+        let seq = self.model.lock().await.setting_seq(key)?;
+        let v: Value = serde_json::from_str(&self.store.get(seq as usize - 1).ok()?).ok()?;
+        v["value"].as_str().map(str::to_string)
+    }
     /// A receiver that hears the log's new length after every commit.
     pub fn subscribe(&self) -> broadcast::Receiver<u64> { self.changed.subscribe() }
     /// Streamed text of a running turn, not yet an event: shown to views as the thread's live reply.
@@ -176,7 +190,7 @@ impl Hub {
     pub fn connect(&self, cbor: bool) -> (Conn, Value) {
         let gen = self.gen.fetch_add(1, Relaxed).to_string();
         let g = json!({"t":"view","version":1,"renderer":"mobile","generation":gen,"epoch":self.epoch,"limits":limits()});
-        (Conn { client: self.next_client.fetch_add(1, Relaxed), gen, view_id: String::new(), target: Value::Null, cbor, lastrev: 0 }, g)
+        (Conn { sent: vec![], client: self.next_client.fetch_add(1, Relaxed), gen, view_id: String::new(), target: Value::Null, cbor, lastrev: 0 }, g)
     }
 
     pub fn notice(&self, c: &Conn, rev: u64) -> Value {
@@ -220,7 +234,9 @@ impl Hub {
         let target = p["target"].clone();
         if m == "view.open" { c.view_id = view_id.clone(); c.target = target.clone(); }
         c.lastrev = rev;
+        if m == "view.open" { c.sent.clear(); }
         let result = self.assemble(&p, &view_id, rev, &pol);
+        let result = Self::delta_reply(c, &p, result);
         let answer = json!({"t":"reply","id":id,"ok":true,"result":result});
         let text = serde_json::to_string(&answer).unwrap_or_default();
         if text.len() <= REPLY_BYTES { return vec![answer] }
@@ -250,6 +266,31 @@ impl Hub {
         let events = [json!({"$":"MessagePosted","thread":thread,"msg":msg,"role":"user","text":text,"at":at}), json!({"$":"TurnQueued","thread":thread,"msg":msg,"text":text,"at":at})];
         if self.commit_many(&events).await.is_err() { return vec![json!({"t":"reply","id":id,"ok":false,"error":"store write failed"})] }
         vec![json!({"t":"reply","id":id,"ok":true})]
+    }
+
+    /// Vd.output: a client that offered {viewDelta:{version:1, token}} holds the body sent under that token; it gets
+    /// the ops from it ({"viewDelta":{version, base, token, ops}}) in place of the body's fields, else the whole body
+    /// with a token to name it. The last three bodies of the view are kept.
+    fn delta_reply(c: &mut Conn, p: &Value, result: Value) -> Value {
+        let offered = p["viewDelta"]["version"] == json!(1);
+        let rev = p["requestRevision"].as_u64().unwrap_or(0);
+        if !(offered && result["remoteReady"] == json!(true) && result.get("shown").is_some() && result.get("nextTarget").is_none() && rev > 0) { return result }
+        let token = rev.to_string();
+        let base = p["viewDelta"]["token"].as_str().unwrap_or("").to_string();
+        let mut body = Map::new();
+        for k in ["shown", "session", "window", "overlay"] { if let Some(v) = result.get(k) { body.insert(k.into(), v.clone()); } }
+        let body = Value::Object(body);
+        let draft = p["session"]["drafts"][p["session"]["sel"].as_str().unwrap_or("")].as_str().unwrap_or("").to_string();
+        let old = if base.is_empty() { None } else { c.sent.iter().find(|(t, _)| *t == base).map(|(_, b)| b) };
+        let mut meta = Map::new(); meta.insert("version".into(), json!(1));
+        let strip = |r: &Value| { let mut o = Map::new(); for (k, v) in r.as_object().unwrap() { if !["shown", "session", "window", "overlay"].contains(&k.as_str()) { o.insert(k.clone(), v.clone()); } } o };
+        let out = match old.and_then(|b| crate::delta::diff(b, &body)) {
+            Some(ops) => { let mut o = strip(&result); meta.insert("base".into(), json!(base)); meta.insert("token".into(), json!(token)); meta.insert("ops".into(), crate::delta::ops_json(&ops, &draft)); o.insert("viewDelta".into(), Value::Object(meta)); Value::Object(o) }
+            None if crate::delta::draft_is_long(&draft) => { let mut o = strip(&result); meta.insert("base".into(), json!("")); meta.insert("token".into(), json!(token)); meta.insert("ops".into(), crate::delta::whole_ops(&body, &draft)); o.insert("viewDelta".into(), Value::Object(meta)); Value::Object(o) }
+            None => { let mut o = result.as_object().unwrap().clone(); meta.insert("base".into(), json!("")); meta.insert("token".into(), json!(token)); o.insert("viewDelta".into(), Value::Object(meta)); Value::Object(o) }
+        };
+        c.sent.insert(0, (token, body)); c.sent.truncate(3);
+        out
     }
 
     /// Hub.thin.result: identity fields in front, in the order the JS hub gives them.
