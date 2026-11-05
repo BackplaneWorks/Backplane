@@ -7,10 +7,10 @@ set -eu
 ROOT=${GPUI_MAIN:-/home/h/Documents/i2cjak/backplane-gpui}; CLIENT=$1; ASSETS=$2; N=${3:-plot}
 R=$ROOT/build/gpui/desktop-plot; OUT=$ROOT/build/gpui/results/desktop; SH=$ROOT/build/gpui/shots/desktop
 X=$ROOT/build/gpui/xvfb; HUB=$ROOT/build/gpui/hub/new
-FIX=$ROOT/test/gpui/files/fixtures/plot; PORT=3833; DISP=:61
+FIX=$ROOT/test/gpui/files/fixtures/plot; PORT=${GPUI_PORT:-3833}; DISP=${GPUI_DISP:-:61}
 mkdir -p $R $OUT $SH
 [ -x "$CLIENT" ] || { echo "no client binary"; exit 2; }
-[ ! -e /tmp/.X11-unix/X61 ] || { echo "display :61 is in use"; exit 2; }
+[ ! -e /tmp/.X11-unix/X${DISP#:} ] || { echo "display $DISP is in use (set GPUI_DISP=:6N)"; exit 2; }
 rm -rf $R/home $R/proj $R/bin $R/fakehome; rm -f $R/*.pid; mkdir -p $R/home $R/proj $R/bin $R/fakehome/.cache
 cp $FIX/ecc83-pp.kicad_pcb $FIX/ecc83-pp.kicad_sch $R/proj/; echo '{}' > $R/proj/ecc83-pp.kicad_pro; mkdir -p $R/proj/mech; cp $ROOT/test/gpui/files/fixtures/mesh/bracket.step $R/proj/mech/
 # stand-in agents: nothing may call a model
