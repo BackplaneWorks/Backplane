@@ -715,7 +715,7 @@ Laws in LAWS.bend: 3253. bend 912, rust 585, unported 1159, client 470, window 1
 | `bot_spawn_step` | unported | seed R +-10% | `src/core/bothub.bend` |  |
 | `bot_spawn_bounded` | unported | seed R +-10% | `src/core/bothub.bend` |  |
 | `bot_request_keep` | unported | seed R +-10% | `src/core/bothub.bend` |  |
-| `bot_request_in_room` | rust `js_bot_tools` | map | `src/core/bothub.bend` |  |
+| `bot_request_in_room` | rust `bot_request_in_room` | map | `src/core/bothub.bend` |  |
 | `bot_request_fresh_id` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `bot_delegate_needs_project` | bend | seed K +-10% | `src/core/mcp.bend` |  |
 | `kids_bot_child_shown` | rust `kids_bot_child_shown` | map | `src/core/client.bend` |  |
