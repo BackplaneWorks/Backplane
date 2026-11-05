@@ -109,7 +109,8 @@ pub fn sync(this: &mut Backplane, cx: &mut Context<Backplane>) {
                 send_field(this, &field, cx);
             }).detach();
         }
-        cx.subscribe(&input, |_, _, _: &ComposerEvent, _| {}).detach();
+        let sname = f.name.clone();
+        cx.subscribe(&input, move |this, _, ev: &ComposerEvent, cx| if matches!(ev, ComposerEvent::Submit) { submit(this, &sname, cx); }).detach();
         this.screens.fields.insert(f.name.clone(), FieldSlot { input, vault: f.vault, hub: f.value.clone(), echo: Echo::new(&f.value), pending: None, timer: false });
     }
 }
@@ -131,6 +132,22 @@ fn send_field(this: &mut Backplane, f: &Field, cx: &mut Context<Backplane>) {
             send_field(this, &f, cx);
         });
     }).detach();
+}
+
+/// Send every field's pending (coalesced) text now: called before any button action, so a fast press never overtakes the last keystrokes.
+pub fn flush_fields(this: &mut Backplane) {
+    let names: Vec<String> = this.screens.fields.iter().filter(|(_, s)| !s.vault && s.pending.is_some()).map(|(n, _)| n.clone()).collect();
+    for n in names {
+        let Some(slot) = this.screens.fields.get_mut(&n) else { continue };
+        let Some(text) = slot.pending.take() else { continue };
+        if text == slot.echo.sent() { continue; }
+        match this.tx.try_send(field_command(&n, &text)) { Ok(_) => slot.remember(&text), Err(_) => slot.pending = Some(text) }
+    }
+}
+
+/// Enter in a typed field: a room's or a remote bot's post box sends, as on the window.
+pub fn submit(this: &mut Backplane, name: &str, cx: &mut Context<Backplane>) {
+    match name { "rpost" => super::bots::send_post(this, "rpost", "room-post", cx), "rtext" => super::bots::send_post(this, "rtext", "remote-send", cx), _ => {} }
 }
 
 /// A vault Save: the field is the button's (`@apikey` is `kval`, else `sval`); the typed value leaves in one request straight to the hub, and
@@ -193,7 +210,7 @@ fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, Fie
             let b2 = b.clone();
             let d = div().id(SharedString::from(format!("set-{i}-{j}"))).px_3().py_1().text_size(px(12.)).cursor_pointer().border_1();
             let d = if b.on { d.bg(c("accent")).text_color(c("on-accent")).border_color(c("accent")) } else { d.bg(c("raise")).border_color(c("line")).hover(|s| s.bg(c("panel"))) };
-            d.child(b.label.clone()).on_click(cx.listener(move |this, _, _, cx| { if is_vault_save(&b2) { save_vault(this, &b2, cx); } else { let _ = this.tx.try_send(press(&b2)); } cx.notify(); })).into_any_element()
+            d.child(b.label.clone()).on_click(cx.listener(move |this, _, _, cx| { flush_fields(this); if is_vault_save(&b2) { save_vault(this, &b2, cx); } else { let _ = this.tx.try_send(press(&b2)); } cx.notify(); })).into_any_element()
         }).collect::<Vec<_>>()));
     }
     col.into_any_element()

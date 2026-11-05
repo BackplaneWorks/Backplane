@@ -71,8 +71,15 @@ impl Backplane {
     /// A picture was applied: the drafts, the asks' boxes and the settings fields follow what the hub just drew.
     pub(crate) fn picture_applied(&mut self, cx: &mut Context<Self>) {
         self.draft_from_hub(cx);
-        self.screens.rail_pending = None;
+        // the pressed rail kind gives way when the hub marks it (or after 2 s): a streamed picture arriving first does not flicker it back
+        if let Some(p) = self.screens.rail_pending.clone() {
+            let hub_on = super::viewer::active_kind(&self.data["thread"]["viewer"], None);
+            if hub_on == p || self.screens.rail_at.map_or(true, |t| t.elapsed() > std::time::Duration::from_secs(2)) { self.screens.rail_pending = None; self.screens.rail_at = None; }
+        }
         super::settings::sync(self, cx);
+        // a form or a room page opened: its first field takes the keys; closed: back to the composer
+        let open = super::bots::focus_target(&self.data);
+        if open != self.screens.bots_open { self.screens.bots_open = open.clone(); if open.is_empty() { self.want_focus = true; } else { self.screens.focus_field = Some(open); } }
         // settings opened: the keys go into it; closed: back to the composer
         let open = self.data["settings"].is_object();
         if open != self.screens.settings_was_open { self.screens.settings_was_open = open; if open { self.screens.focus_settings = true; } else { self.want_focus = true; } }
