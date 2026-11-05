@@ -237,7 +237,7 @@ impl Render for Backplane {
             let act: Option<(&'static str, &'static str)> = match *l { "Board" => Some(("view-kind", "board")), "Schematic" => Some(("view-kind", "schematic")), "3D" => Some(("view-kind", "3d")), "Split" => Some(("view-kind", "split")), "Mech" => Some(("view-kind", "mech")), "Files" => Some(("view-kind", "files")), "Review" => Some(("view-kind", "review")), "Diff" => Some(("diff", "")), _ => None };
             match act {
                 Some((a, v)) => {
-                    ctl.push(CtlEntry { id: format!("rail:{l}"), label: l.to_string(), ctl: Ctl::Node(a.into(), v.into()) });
+                    ctl.push(CtlEntry { id: format!("rail:{l}"), label: l.to_string(), ctl: if a == "view-kind" { Ctl::Rail(v.into()) } else { Ctl::Node(a.into(), v.into()) } });
                     rail.push(with_rect(div().id(SharedString::from(format!("rail-{l}"))), || format!("rail:{l}")).cursor_pointer().on_click(cx.listener(move |this, _, _, cx| { if a == "view-kind" && !viewer_open { let _ = this.tx.try_send(Command::Action("panel".into(), String::new())); } let _ = this.tx.try_send(Command::Action(a.into(), v.into())); cx.notify(); }))
                         .flex().flex_col().items_center().h(px(48.)).justify_center().gap_1().text_size(px(10.)).text_color(c("dim")).hover(|s| s.text_color(c("text"))).child(ic(light, i, 18., "dim")).child(*l).into_any_element());
                 }
