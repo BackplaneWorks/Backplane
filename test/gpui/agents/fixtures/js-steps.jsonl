@@ -1,0 +1,26 @@
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m1793846991-147","role":"user","text":"hello","at":1793846991}
+{"$":"TurnChanged","thread":"t1700000001-2","state":"running","at":1793846991}
+{"$":"SettingSet","key":"turn.from.t1700000001-2","value":"@m1793846991-147","at":1793846991}
+{"$":"SettingSet","key":"restart.retry.t1700000001-2","value":"","at":1793846991}
+{"$":"SettingSet","key":"provider.resume.t1700000001-2","value":"","at":1793846991}
+{"$":"SettingSet","key":"fallback.input.t1700000001-2","value":"hello","at":1793846991}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"step:148a6cfcefac816586553d5d4aac396fac4e991a","tone":"step","kind":"kicad","summary":"{\"e\":\"m1793846991-147\",\"c\":\"148a6cfcefac816586553d5d4aac396fac4e991a\",\"p\":\"\",\"g\":\"/home/h/Documents/i2cjak/bp-agents-scratch/modes/work-steps/fixroot/.backplane/history.git\",\"t\":\"/home/h/Documents/i2cjak/bp-agents-scratch/modes/work-steps/fixroot\",\"f\":[\"A\\tb.kicad_pcb\"],\"w\":\"start\"}","at":1793846991}
+{"$":"SessionSet","id":"t1700000001-2","session":"sess-2609087-1793846991650","at":1793846991}
+{"$":"SettingSet","key":"tok.basis.t1700000001-2","value":"c:0","at":1793846991}
+{"$":"SettingSet","key":"turn.speed.t1700000001-2","value":"0/0/0/0/0/0/0/0","at":1793846991}
+{"$":"UsageSet","thread":"t1700000001-2","used":11,"window":0,"at":1793846991}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"msg_2609087_1:0:1935588a","role":"assistant","text":"REPLY hello","at":1793846991}
+{"$":"UsageSet","thread":"t1700000001-2","used":15,"window":0,"at":1793846991}
+{"$":"UsageSet","thread":"t1700000001-2","used":0,"window":200000,"at":1793846991}
+{"$":"TurnChanged","thread":"t1700000001-2","state":"completed","at":1793846991}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m1793846997-171","role":"user","text":"again","at":1793846997}
+{"$":"TurnChanged","thread":"t1700000001-2","state":"running","at":1793846997}
+{"$":"SettingSet","key":"turn.from.t1700000001-2","value":"@m1793846997-171","at":1793846997}
+{"$":"SettingSet","key":"restart.retry.t1700000001-2","value":"","at":1793846997}
+{"$":"SettingSet","key":"provider.resume.t1700000001-2","value":"","at":1793846997}
+{"$":"SettingSet","key":"fallback.input.t1700000001-2","value":"again","at":1793846997}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"step:1d51c90e80b0a40c23123e11b955b838244f39dc","tone":"step","kind":"kicad","summary":"{\"e\":\"m1793846997-171\",\"c\":\"1d51c90e80b0a40c23123e11b955b838244f39dc\",\"p\":\"148a6cfcefac816586553d5d4aac396fac4e991a\",\"g\":\"/home/h/Documents/i2cjak/bp-agents-scratch/modes/work-steps/fixroot/.backplane/history.git\",\"t\":\"/home/h/Documents/i2cjak/bp-agents-scratch/modes/work-steps/fixroot\",\"f\":[\"M\\tb.kicad_pcb\"],\"w\":\"start\"}","at":1793846997}
+{"$":"UsageSet","thread":"t1700000001-2","used":11,"window":0,"at":1793846997}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"msg_2609087_2:0:a52373cf","role":"assistant","text":"REPLY again","at":1793846997}
+{"$":"UsageSet","thread":"t1700000001-2","used":15,"window":0,"at":1793846997}
+{"$":"TurnChanged","thread":"t1700000001-2","state":"completed","at":1793846997}

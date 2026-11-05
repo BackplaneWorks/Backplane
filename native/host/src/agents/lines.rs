@@ -444,6 +444,25 @@ mod tests {
         let tu = &a.events[4]; assert_eq!(tu["cost"], 12_300_000u64); assert_eq!(tu["known"], "irwoc"); assert_eq!(tu["basis"], "c:12300000");
         assert!(run(&mut c, l).events.iter().all(|e| e["$"] != "TurnUsage")); // a result line seen again is not counted twice
     }
+    #[test] fn a_rate_limit_event_updates_the_limit_settings_and_the_allowance_snapshot_once() {
+        let mut c = Cx::new("t1");
+        let l = r#"{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","unifiedWindows":{"five_hour":{"utilization":0.42,"resetsAt":1800000000},"seven_day":{"utilization":"bad","resetsAt":1800500000}}}}"#;
+        let a = run(&mut c, l); let keys: Vec<&str> = a.events.iter().map(|e| e["key"].as_str().unwrap()).collect();
+        assert_eq!(keys, ["limit.claude.five_hour", "limit.claude.seven_day", "allowance.claude"]); assert_eq!(a.events[0]["value"], "420/1800000000/allowed");
+        let snap: Value = serde_json::from_str(a.events[2]["value"].as_str().unwrap()).unwrap();
+        assert_eq!(snap["windows"][0], json!({"name":"5 h","scope":"shared","shared":true,"duration_minutes":300,"used_permille":420,"reported_utilization":0.42,"resets_at":1800000000}));
+        assert_eq!(snap["windows"][1], json!({"name":"7 d","scope":"shared","shared":true,"duration_minutes":10080,"used_permille":null,"resets_at":1800500000}), "an invalid window is an unknown row, never zero");
+        assert!(run(&mut c, l).events.is_empty(), "the same reading inside a minute writes nothing");
+        c.default_account = false; c.allowance.clear(); assert!(!run(&mut c, &l.replace("0.42", "0.43")).events.iter().any(|e| e["key"] == "allowance.claude"), "a named account has its own collector");
+    }
+    #[test] fn a_todo_write_says_where_the_list_stands_and_hands_the_model_the_tool_calls() {
+        let mut c = Cx::new("t1");
+        let a = run(&mut c, r#"{"type":"assistant","message":{"id":"m","content":[{"type":"tool_use","id":"tu1","name":"TodoWrite","input":{"todos":[{"content":"a","status":"completed"},{"content":"b","status":"in_progress"},{"content":"c","status":"pending"}]}}]}}"#);
+        assert_eq!(a.events[0]["summary"], "1 of 3 done · now: b"); assert_eq!(a.events[1]["$"], "TodosChanged"); assert_eq!(a.events[1]["who"], "tools"); assert!(a.events[1]["data"].as_str().unwrap().starts_with("[{\"type\":\"tool_use\""));
+        let n = run(&mut c, r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu2","content":"Task #7 created successfully: x"}]}}"#);
+        assert_eq!(n.events[0]["data"], json!([{"name":"TaskNamed","use":"tu2","number":"7"}]).to_string());
+        assert!(run(&mut c, r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu3","content":[{"type":"text","text":"ok"}]}]}}"#).events.is_empty());
+    }
     #[test] fn nusd_reads_plain_and_exponent_dollars() { assert_eq!(nusd("0.00070325"), 703_250); assert_eq!(nusd("7.5e-7"), 750); assert_eq!(nusd("1"), 1_000_000_000); assert_eq!(nusd(""), 0); }
     #[test] fn merge_joins_a_run_and_keeps_every_other_line_in_place() {
         let d = |i: u32, t: &str| format!(r#"{{"type":"stream_event","event":{{"type":"content_block_delta","index":{i},"delta":{{"type":"text_delta","text":"{t}"}}}}}}"#);

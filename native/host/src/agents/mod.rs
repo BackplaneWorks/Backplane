@@ -7,7 +7,7 @@
 //! Out for Claude: images/`$skill` input, the Backplane MCP server and runtime prompt in the agent's arguments,
 //! subagents and background tasks, todo tools, the allowance stream, the legacy queue, mail provenance beyond carry,
 //! and the hub's time-driven policies (liveness, autosettle, alert/told/summary, star nudge), which belong to M4.
-pub mod bg; pub mod cmds; pub mod host; pub mod inputs; pub mod lines; pub mod mcp; pub mod proc; pub mod prompt; pub mod prompt_text; pub mod rules; pub mod tools; pub mod world;
+pub mod bg; pub mod cmds; pub mod hist; pub mod host; pub mod inputs; pub mod lines; pub mod mcp; pub mod proc; pub mod prompt; pub mod prompt_text; pub mod rules; pub mod tools; pub mod world;
 #[cfg(test)] mod tests;
 
 use crate::{api::{Caller, Fut, RpcHandler}, hub::Hub};
@@ -166,7 +166,7 @@ struct Actor {
     ag: Arc<Agents>, th: String, cx: Cx, live_proc: Option<Live>,
     lines: Option<mpsc::Receiver<String>>, exit: Option<oneshot::Receiver<Exit>>,
     live: String, live_gen: u64, ahead: String, last_user: String, recent: VecDeque<String>, pacing: Option<Instant>, rid: u64,
-    cmds: cmds::Cmds, sent: VecDeque<(String, String, String)>, wait: String, prog: bg::Prog, heard: Instant,
+    cwd: String, cmds: cmds::Cmds, sent: VecDeque<(String, String, String)>, wait: String, prog: bg::Prog, heard: Instant,
 }
 
 async fn next_batch(rx: &mut mpsc::Receiver<String>) -> Option<Vec<String>> {
@@ -179,7 +179,7 @@ async fn recv_opt(r: &mut Option<mpsc::Receiver<String>>) -> Option<Vec<String>>
 async fn exit_opt(r: &mut Option<oneshot::Receiver<Exit>>) -> Result<Exit, oneshot::error::RecvError> { match r { Some(rx) => rx.await, None => std::future::pending().await } }
 
 impl Actor {
-    fn new(ag: Arc<Agents>, th: String) -> Actor { Actor { cx: Cx::new(&th), ag, th, live_proc: None, lines: None, exit: None, live: String::new(), live_gen: 0, ahead: String::new(), last_user: String::new(), recent: VecDeque::new(), pacing: None, rid: 0, cmds: cmds::Cmds::new(), sent: VecDeque::new(), wait: String::new(), prog: bg::Prog::default(), heard: Instant::now() } }
+    fn new(ag: Arc<Agents>, th: String) -> Actor { Actor { cx: Cx::new(&th), ag, th, live_proc: None, lines: None, exit: None, live: String::new(), live_gen: 0, ahead: String::new(), last_user: String::new(), recent: VecDeque::new(), pacing: None, rid: 0, cwd: String::new(), cmds: cmds::Cmds::new(), sent: VecDeque::new(), wait: String::new(), prog: bg::Prog::default(), heard: Instant::now() } }
 
     async fn run(mut self, mut rx: mpsc::Receiver<Cmd>) {
         let mut tick = tokio::time::interval(Duration::from_secs(1)); tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -224,7 +224,7 @@ impl Actor {
             (t, w.cwd(&self.th), w.cx(&self.th))
         };
         if t.provider != "claude" { return Err(format!("{} threads are not run by the Rust hub yet", if t.provider.is_empty() { "this provider's" } else { &t.provider })) }
-        self.cx = cx; self.last_user = msg.clone();
+        self.cx = cx; self.last_user = msg.clone(); self.cwd = cwd.clone();
         let (now, th) = (now_s(), self.th.clone());
         let mut ev: Vec<Value> = vec![];
         if t.title == "New thread" { ev.push(json!({"$":"ThreadRenamed","id":th,"title":rules::title_of(&text),"at":now})) }
@@ -246,6 +246,7 @@ impl Actor {
         self.commit(ev).await;
         self.recent.push_back(msg.clone()); if self.recent.len() > RECENT { self.recent.pop_front(); }
         self.cx.running = true; self.ag.stats.turns.fetch_add(1, Relaxed);
+        self.jobs_start(&cwd, &msg);
         let key = rules::agent_key(&t.model, &t.runtime, &t.interaction, self.cx.think);
         if self.live_proc.as_ref().map_or(true, |p| p.key != key) {
             self.stop().await; self.lines = None; self.exit = None;
@@ -259,6 +260,15 @@ impl Actor {
         if matches!(sent, Some(Ok(()))) { self.cmds = self.cmds.sent(&uuid) } else { self.fail("the agent is not taking input".into(), "input", &hub_id("in", now, 0)).await }
         Ok(())
     }
+
+    /// Hub.post.go: a new turn's design baseline (checkpoint 0 and a step), taken in the background.
+    fn jobs_start(&self, cwd: &str, entry: &str) {
+        let (hub, th, home) = (self.ag.hub.clone(), self.th.clone(), self.ag.host.home.to_string_lossy().into_owned()); let (cwd, entry) = (cwd.to_string(), entry.to_string());
+        tokio::spawn(async move { hist::checkpoint0(cwd.clone(), th.clone()).await; hist::step(hub, th, cwd, entry, home, "start").await });
+    }
+    /// A tool call ended (Steps.claude): a step after it. A turn ended (Ended.out): a step and a checkpoint.
+    fn jobs_step(&self, entry: &str) { let (hub, th, home, cwd) = (self.ag.hub.clone(), self.th.clone(), self.ag.host.home.to_string_lossy().into_owned(), self.cwd.clone()); let entry = entry.to_string(); tokio::spawn(async move { hist::step(hub, th, cwd, entry, home, "").await }); }
+    fn jobs_end(&self) { let (hub, th, home, cwd) = (self.ag.hub.clone(), self.th.clone(), self.ag.host.home.to_string_lossy().into_owned(), self.cwd.clone()); tokio::spawn(async move { hist::step(hub.clone(), th.clone(), cwd.clone(), String::new(), home, "").await; hist::checkpoint(cwd, th).await }); }
 
     async fn spawn(&mut self, t: &world::T, cwd: &str, key: String) -> Result<(), String> {
         if !std::path::Path::new(cwd).is_dir() { return Err(format!("its folder {cwd} is gone")) }
@@ -284,7 +294,7 @@ impl Actor {
         let (now, th) = (now_s(), self.th.clone());
         let mut ev = vec![json!({"$":"ActivityLogged","thread":th,"act":act,"tone":"error","kind":kind,"summary":text,"at":now}), json!({"$":"TurnChanged","thread":th,"state":"failed","at":now})];
         if !self.last_user.is_empty() { ev.push(set(format!("failed.{}", self.last_user), "1".into(), now)) }
-        self.live_end().await; self.commit(ev).await; self.cx.running = false;
+        self.live_end().await; self.commit(ev).await; self.cx.running = false; self.jobs_end();
     }
 
     /// Hub.interrupt: only a running turn is stopped. What streamed so far is posted as the reply; Claude keeps its process.
@@ -311,7 +321,7 @@ impl Actor {
             let say = if n == 1 { format!("Stop cancelled a message the agent had not read yet: {q}. Send it again if you still want it.") } else { format!("Stop cancelled {n} messages the agent had not read yet: {q}. Send them again if you still want them.") };
             ev.push(json!({"$":"ActivityLogged","thread":th,"act":hub_id("u", now, self.ag.seq()),"tone":"error","kind":"stop","summary":say,"at":now}));
         }
-        self.live_end().await; self.commit(ev).await; self.cx.running = false;
+        self.live_end().await; self.commit(ev).await; self.cx.running = false; self.jobs_end();
     }
 
     /// One read's lines: deltas merged, each line judged by the command ledger and turned into events, the events committed together.
@@ -349,6 +359,9 @@ impl Actor {
                     let mut fx = self.cx.line_flow(&v, at, Flow::Stream); ev.append(&mut fx.events); fx.events = ev; fx
                 }
             };
+            if v["type"] == "user" && v["parent_tool_use_id"].as_str().unwrap_or("").is_empty() { // Steps.claude: a step after the first tool result of a line
+                if let Some(id) = v["message"]["content"].as_array().and_then(|a| a.iter().find(|b| b["type"] == "tool_result")).and_then(|b| b["tool_use_id"].as_str()) { if !id.is_empty() { self.jobs_step(id) } } }
+            if fx.events.iter().any(|e| e["$"] == "TurnChanged" && (e["state"] == "completed" || e["state"] == "failed" || e["state"] == "interrupted")) { self.jobs_end() }
             for d in &fx.deltas {
                 self.ag.stats.deltas.fetch_add(1, Relaxed);
                 if self.live.is_empty() { self.live_gen = now_ms() }
