@@ -40,7 +40,7 @@ those edits: only the person's own git. Nothing else acts by itself.
 
 ## The mode, and the new process kind
 
-`BACKPLANE_SIDE_BY_SIDE=1` is honoured only with `BACKPLANE_COPY=1` (alone: refused at start). `copy::on()` stays true, so every copy gate holds.
+`BACKPLANE_SIDE_BY_SIDE=1` is honoured only with `BACKPLANE_COPY=1` (alone: refused at start). `side` mode also exports `BACKPLANE_PASSIVE=1` (state's flag: the policies do nothing on their own); the hub will derive it from `BACKPLANE_SIDE_BY_SIDE` once that lands, and the script's first-run check requires both in the hub's environment. `copy::on()` stays true, so every copy gate holds.
 The mode adds **one new process kind, not a flag consulted by existing ones**:
 
 - `proc::Kind::PersonTurn`. The only place a real agent CLI is made. Constructed only on the person's `turn.start` path in the agents actor, after the
