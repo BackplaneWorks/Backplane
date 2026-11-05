@@ -122,6 +122,11 @@ impl Policy {
         let g = self.lock();
         if g.booting.is_some() { vec![] } else { g.core.tick(now_s) }
     }
+    /// Watchdog.line for one provider line of a thread's agent: the events that move its liveness record (to be committed by the caller)
+    pub fn line(&self, thread: &str, now_s: u64, o: &Value) -> Vec<Value> {
+        let g = self.lock();
+        if g.booting.is_some() { vec![] } else { watchdog::line(&g.core.st, now_s, thread, o) }
+    }
     pub fn read(&self, thread: &str, now_s: u64) -> Vec<Value> {
         let g = self.lock();
         if g.booting.is_some() { vec![] } else { autosettle::read(&g.core.st, thread, now_s) }

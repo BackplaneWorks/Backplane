@@ -45,6 +45,8 @@ fn read_log(hub: &Hub) -> (Core, u64) {
 /// handlers call it, then commit the events it returns with their own).
 pub struct Policies { policy: Arc<Policy> }
 impl Policies {
+    /// Watchdog.line: call for every provider line of a thread's agent (the stream-json line as parsed), commit the events it returns
+    pub fn line(&self, thread: &str, now_s: u64, line: &Value) -> Vec<Value> { self.policy.line(thread, now_s, line) }
     pub async fn read(&self, thread: &str, now_s: u64) -> Vec<Value> { self.policy.read(thread, now_s) }
 }
 
