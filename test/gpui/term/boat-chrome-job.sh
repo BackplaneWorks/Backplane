@@ -11,4 +11,4 @@ bun --version >out/term/bun-version.txt 2>&1 || { echo "no bun"; exit 3; }
 printf "#!/bin/sh\nexec bun %s/tools/browser/src/main.ts \"\$@\"\n" "$R" > out/term/backplane-browser; chmod +x out/term/backplane-browser
 printf "#!/bin/sh\nexec /usr/bin/google-chrome --no-sandbox --disable-dev-shm-usage \"\$@\"\n" > out/term/chrome; chmod +x out/term/chrome
 export BP_REAL_BROWSER=$R/out/term/backplane-browser BACKPLANE_CHROME=$R/out/term/chrome
-cd native/host && cargo test --bin backplane-hub term::browser::chrome -- --ignored --nocapture --test-threads=1 2>&1 | tee ../../out/term/chrome-test.log | tail -80'
+cd native/host && cargo test --bin backplane-hub term::browser::chrome -- --ignored --nocapture --test-threads=1 > ../../out/term/chrome-test.log 2>&1; rc=$?; tail -80 ../../out/term/chrome-test.log; exit $rc'
