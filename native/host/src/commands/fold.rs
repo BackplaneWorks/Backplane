@@ -22,7 +22,8 @@ pub struct Fold {
     pub threads: BTreeMap<String, T>, pub projects: BTreeMap<String, P>, pub navs: HashMap<String, Nav>,
     pub queues: HashMap<String, Vec<(String, String)>>, pub asks: BTreeMap<String, Ask>, pub forks: HashMap<String, String>,
     pub st: HashMap<String, String>, /// Switch.count: entries filed under each thread by that thread
-    pub count: HashMap<String, usize>,
+    pub count: HashMap<String, usize>, /// the number the request's ids are built from (Hub::alloc_n), else the log length
+    pub alloc: Option<usize>,
 }
 
 const KEYS: &[&str] = &["thread.parent.", "bg.", "watch.", "thread.env", "agent.provider", "agent.model", "projects.missing", "provider.resume.", "restart.retry.", "resume.", "wt.again.", "thread.config.hold.", "seen.", "tz.machine", "account.thread.", "account.default."];
@@ -30,7 +31,7 @@ fn tracked(k: &str) -> bool { KEYS.iter().any(|p| k == *p || (p.ends_with('.') &
 
 impl Fold {
     /// Events seen: the Bend hub's `Hub.seq` (the id source for generated ids).
-    pub fn n(&self) -> usize { self.seen }
+    pub fn n(&self) -> usize { self.alloc.unwrap_or(self.seen) }
     pub fn setting(&self, k: &str) -> &str { self.st.get(k).map(String::as_str).unwrap_or("") }
     /// M.Setting.get(s, k, d): a stored value, an empty one included, else d.
     pub fn get<'a>(&'a self, k: &str, d: &'a str) -> &'a str { self.st.get(k).map(String::as_str).unwrap_or(d) }
