@@ -158,6 +158,9 @@ impl Hub {
     /// The window object for a thread target (newest page); None for other targets or without the Bend program.
     /// `thread` is the conversation the target shows (V.Target.thread): a thread's own id, a bot's chat thread; none for the other targets.
     async fn window_for(&self, p: &Value, before: u64, thread: Option<&str>) -> Option<(Value, crate::model::Page)> {
+        // the window helper is a Bend child process the policy helper's V needs: a hub without the helper (no policy, or the Rust presenter alone) starts nothing for any target,
+        // whatever BACKPLANE_WINDOW_BIN says (wants_log is false while the helper is not running)
+        if !self.presenter.wants_log() { return None }
         let bin = self.window_bin.get()?;
         let t = p.get("target")?;
         let thread = thread?;
@@ -222,6 +225,28 @@ impl Hub {
             if let Some(ov) = pol.get("overlay") { o.insert("overlay".into(), ov.clone()); }
         }
         Value::Object(o)
+    }
+}
+
+#[cfg(test)]
+mod nohelper_tests {
+    use super::*;
+    // the person's rule: a hub with no helper starts no process for a thread view, BACKPLANE_WINDOW_BIN or not
+    #[tokio::test] async fn without_the_helper_window_for_starts_nothing() {
+        let home = std::env::temp_dir().join(format!("bp-nohelper-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(home.join("events.jsonl"), "{\"$\":\"ProjectCreated\",\"id\":\"p1\",\"title\":\"x\",\"root\":\"/tmp\",\"at\":1}\n{\"$\":\"ThreadCreated\",\"id\":\"t1\",\"project\":\"p1\",\"title\":\"T\",\"env\":\"local\",\"branch\":\"\",\"worktree\":\"\",\"provider\":\"claude\",\"model\":\"\",\"at\":1}\n").unwrap();
+        let spy = home.join("spy-ran"); let script = home.join("window-spy.sh");
+        std::fs::write(&script, format!("#!/bin/sh\ntouch {}\n", spy.display())).unwrap();
+        { use std::os::unix::fs::PermissionsExt; std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap(); }
+        let cfg = crate::hub::Cfg { home: home.clone(), version: "0.1.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() };
+        let h = Hub::start(cfg, std::sync::Arc::new(crate::presenter::Canned { reply: json!({}) })).await.unwrap();
+        let _ = h.window_bin.set(script);
+        let out = h.window_for(&json!({"target": {"kind": "thread", "id": "t1"}}), 0, Some("t1")).await;
+        assert!(out.is_none(), "no helper, no window");
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert!(!spy.exists(), "the window helper must never have been started");
+        let _ = std::fs::remove_dir_all(&home);
     }
 }
 
