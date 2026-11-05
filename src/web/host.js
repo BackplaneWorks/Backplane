@@ -717,6 +717,7 @@ let focusedNode = null, focusedAtEnd = true, focusedSaveTimer = 0;
 let focusedRequestedKey = null;
 const COARSE_POINTER = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
 let thin = null, thinSocket = null, thinAttempt = 0, thinExpiry = 0, thinGreetingTimer = 0, thinDraftTimer = 0, thinFieldTimer = 0;
+let paletteAsked = -Infinity;
 let thinReading = null, resumedConversation = null;
 const readingIdentity = () => JSON.stringify([location.origin, cacheIdentity(document.cookie)]);
 function keepThinReading() {
@@ -3951,7 +3952,14 @@ async function startThin(again = false, reason = "initial") {
       // (a touch screen's keys wait a little longer for the hub's echo, so
       // its page is not patched under every key while the person types)
       draftRefresh: refresh => { clearTimeout(thinDraftTimer);thinDraftTimer = setTimeout(() => { if (current()) refresh(); }, COARSE_POINTER ? 200 : 75); },
-      fieldRefresh: refresh => { clearTimeout(thinFieldTimer);thinFieldTimer = setTimeout(() => { if (current()) refresh(); }, 75); },
+      // (the palette's results: the first key of a burst asks at once, the
+      // rest of it 75 ms after its last key, as Search's)
+      fieldRefresh: (refresh, name) => {
+        clearTimeout(thinFieldTimer);thinFieldTimer = setTimeout(() => { if (current()) refresh(); }, 75);
+        const now = performance.now();
+        if (name === "wspalette" && now - paletteAsked >= 75 && current()) refresh();
+        if (name === "wspalette") paletteAsked = now;
+      },
       fieldsChanged: (name, text) => { if (name === "mrreply") thinMailDraft.edit(text);later(); },
       operationScope: (action, value) => action === "mail-send" ? thinMailDraft.scope(true) : action === "bfield" && value.startsWith("mrreply\u001f") ? thinMailDraft.scope() : undefined,
       blocked: () => showViewStatus("Wait for the current conversation to connect."),
