@@ -18,8 +18,6 @@ impl RpcHandler for SettingSet {
             if key.starts_with("peer.own.") { return vec![json!({"t":"reply","id":id,"ok":false,"error":"that setting is the hub's own"})] }
             if telemetry::reserved(key) { return vec![telemetry::legacy(hub, id, key, value).await] }
             let at = now_ms() / 1000;
-            // the Bend hub folds a setting to the value it already holds without logging a change (the JS recording shows no event)
-            if hub.setting(key).await.unwrap_or_default() == value { return vec![json!({"t":"reply","id":id,"ok":true})] }
             let mut batch = vec![json!({"$":"SettingSet","key":key,"value":value,"at":at})];
             // a write to either fallback setting closes the open settings proposals in the same batch (Proposal.invalidate)
             if let Some(a) = &self.agents { let open: Vec<String> = a.world().await.asks.iter().filter(|(_, k)| k.tool == super::proposal::TOOL).map(|(i, _)| i.clone()).collect(); let extra = super::proposal::invalidate(&batch.clone(), &open, at); batch.extend(extra); batch = super::proposal::with_pending(a, batch, at).await; }
@@ -62,5 +60,26 @@ mod tests {
         let r = call(&again, "telemetry.choice", json!({"value":"off","expected":"","decision":"d1","popup":true})).await;
         assert_eq!(r["ok"], true); assert_eq!(again.setting("telemetry.share").await.as_deref(), Some("off")); assert_eq!(again.setting("telemetry.asked").await.as_deref(), Some("1"));
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    // slim's `private` scenario: a client writes a turn's input; the JS hub logs it whole and sends it blank
+    #[tokio::test(flavor = "multi_thread")] async fn a_turn_input_written_by_a_client_is_logged_whole_and_goes_out_blank() {
+        let home = std::env::temp_dir().join(format!("bp-set-input-{}", std::process::id())); let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(home.join("events.jsonl"), "{\"$\":\"SettingSet\",\"key\":\"launch.input.t1\",\"value\":\"PRIVLAUNCH-0004 a turn input\",\"at\":1}\n").unwrap();
+        let hub = start(&home).await;
+        let mut rx = hub.frames.subscribe();
+        for k in ["launch.input.t1", "fallback.input.t1", "ride.t1"] {
+            let r = call(&hub, "setting.set", json!({"key":k,"value":format!("PRIVLIVE-0007 live for {k}")})).await; assert_eq!(r["ok"], true);
+            assert_eq!(hub.setting(k).await.unwrap(), format!("PRIVLIVE-0007 live for {k}"), "the log keeps the value: {k}");
+        }
+        let log = std::fs::read_to_string(home.join("events.jsonl")).unwrap();
+        assert_eq!(log.matches("PRIVLIVE-0007").count(), 3, "three events in the log, value whole: {log}");
+        // a client's frame holds the value blank (Hub::wire_item)
+        let line = log.lines().find(|l| l.contains("launch.input.t1") && l.contains("PRIVLIVE")).unwrap();
+        assert_eq!(Hub::wire_item(line, true).unwrap()["value"], "", "blank on the wire");
+        // clearing it is an event too, and an empty value over nothing is not 'no change' for these keys (they are kept blank, not removed, in the log)
+        assert_eq!(call(&hub, "setting.set", json!({"key":"launch.input.t9","value":""})).await["ok"], true);
+        assert!(std::fs::read_to_string(home.join("events.jsonl")).unwrap().contains("\"key\":\"launch.input.t9\",\"value\":\"\""), "an empty write is logged");
+        let _ = rx.try_recv(); let _ = std::fs::remove_dir_all(&home);
     }
 }
