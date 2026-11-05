@@ -909,3 +909,12 @@ impl mcp::ToolSet for TestTools {
     tokio::time::sleep(Duration::from_millis(250)).await; assert_eq!(*done.lock().unwrap(), vec![r#"End("/w")"#], "the hung start was given up; the end ran");
     assert!(tokio::time::timeout(Duration::from_secs(3), w).await.is_ok(), "an idle worker ends by itself (a deleted thread's sends nothing more)"); let _ = tx;
 }
+#[tokio::test(flavor = "multi_thread")] async fn delta_end_is_sent_where_bend_sends_it_one_per_assistant_line_and_none_at_a_turns_end() { // Claude.assistant's Broadcast is Bend's only delta_end
+    let sd = dir("de-bin"); script(&sd, "claude", PLAYER); std::fs::write(sd.join("replay.ndjson"), include_str!("../../../../test/gpui/agents/fixtures/replay-lifecycle.ndjson")).unwrap();
+    let (hub, ag, _h, _w) = start("de", |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await; let mut rx = hub.frames.subscribe(); let from = len(&hub).await;
+    rpc(&hub, "turn.start", json!({"thread":T1,"text":"hello"})).await;
+    until(&hub, from, 30, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await; tokio::time::sleep(Duration::from_millis(700)).await;
+    let mut kinds = vec![]; while let Ok(f) = rx.try_recv() { if f["thread"] == T1 && (f["t"] == "delta" || f["t"] == "delta_end") { kinds.push(f["t"].as_str().unwrap().to_string()) } }
+    let assistant_lines = include_str!("../../../../test/gpui/agents/fixtures/replay-lifecycle.ndjson").lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).filter(|o| o["type"] == "assistant" && o["parent_tool_use_id"].as_str().unwrap_or("").is_empty()).count();
+    assert_eq!(kinds.iter().filter(|k| *k == "delta_end").count(), assistant_lines, "one delta_end per assistant line, none extra at the turn's end: {kinds:?}"); ag.shutdown();
+}
