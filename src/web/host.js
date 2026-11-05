@@ -1623,6 +1623,9 @@ function notify(c) {
 const fabLooked = new Map();
 function fabLook(target) {
   if (target?.kind !== "thread" || !target.id || !thin?.ready) return;
+  // (a hub that asks for a shown thread's card itself says so in its
+  // greeting: the look would only cost it another render and a round trip)
+  if (thin.client?.links?.get(location.origin)?.greeting?.fabSelf === true) return;
   const now = Date.now(), last = fabLooked.get(target.id) || 0;
   if (now - last < 20000) return;
   fabLooked.set(target.id, now);
