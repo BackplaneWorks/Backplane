@@ -80,6 +80,11 @@ impl Agents {
                 root, pro: f.pro, pcb: f.pcb, sch: f.sch, all: f.all, keys, machines: String::new(), buy, lang })
         }).await.unwrap_or_default()
     }
+    /// PendingChanged: the number of open asks on a thread, written after an ask opens or closes (`extra` asks counted on top).
+    pub async fn pending_ev(&self, thread: &str, extra: usize, skip: &str, at: u64) -> Value {
+        let n = { let w = self.world().await; w.asks.iter().filter(|(id, a)| a.thread == thread && id.as_str() != skip).count() };
+        json!({"$":"PendingChanged","thread":thread,"count":n + extra,"at":at})
+    }
     fn seq(&self) -> u64 { self.n.fetch_add(1, Relaxed) + 1 }
 
     fn actor(self: &Arc<Self>, th: &str) -> mpsc::Sender<Cmd> {
@@ -130,6 +135,7 @@ impl Agents {
             let mut asks: Vec<(&String, &world::Ask)> = w.asks.iter().filter(|(_, a)| !a.tool.starts_with("order_ask")).collect(); asks.sort_by(|a, b| a.0.cmp(b.0));
             for (id, a) in asks {
                 ev.push(json!({"$":"AskClosed","id":id,"answer":"","at":now}));
+                ev.push(json!({"$":"PendingChanged","thread":a.thread,"count":w.asks.values().filter(|x| x.thread == a.thread && x.tool.starts_with("order_ask")).count(),"at":now})); // Pend.*: what stays open (an order's question)
                 if w.threads.contains_key(&a.thread) { told.insert(a.thread.clone());
                     ev.push(json!({"$":"ActivityLogged","thread":a.thread,"act":hub_id("r", now, self.seq()),"tone":"error","kind":"restart","summary":format!("{}{}", rules::restart_cut(&zone, now), rules::unanswered(&a.kind, &a.tool, &a.detail)),"at":now})) }
             }
@@ -268,7 +274,9 @@ impl Actor {
         self.recent.push_back(msg.clone()); if self.recent.len() > RECENT { self.recent.pop_front(); }
         self.cx.running = true; self.ag.stats.turns.fetch_add(1, Relaxed);
         self.jobs_start(&cwd, &msg);
-        if codex { let run = if ride.is_empty() { text.clone() } else { format!("{}\n\n{}", codex::ride_input(&ride), text) }; self.codex_run(&t, &cwd, &run).await; return Ok(()) }
+        // the person's message starts the turn: the <terminals> note follows it (and the chat's unpinned terminals stop)
+        let agent_text = if role == "user" && origin.is_none() { let n = crate::term::tools::on_person_message(&self.ag.hub, &th).await; if n.is_empty() { text.clone() } else { format!("{text}\n\n{n}") } } else { text.clone() };
+        if codex { let run = if ride.is_empty() { agent_text.clone() } else { format!("{}\n\n{}", codex::ride_input(&ride), agent_text) }; self.codex_run(&t, &cwd, &run).await; return Ok(()) }
         let key = rules::agent_key(&t.model, &t.runtime, &t.interaction, self.cx.think);
         if self.live_proc.as_ref().map_or(true, |p| p.key != key) {
             self.stop().await; self.lines = None; self.exit = None;
@@ -276,7 +284,7 @@ impl Actor {
         }
         let uuid = rules::hub_uuid(now, &format!("{th}/{msg}"));
         self.cmds = self.cmds.accept(&uuid); self.sent.push_back((uuid.clone(), msg.clone(), text.clone())); if self.sent.len() > RECENT { self.sent.pop_front(); }
-        let line = { let (text2, cwd2, host, uuid2) = (text.clone(), cwd.clone(), self.ag.host.clone(), uuid.clone()); // Media.claude: images read, `$skill` mentions made real
+        let line = { let (text2, cwd2, host, uuid2) = (agent_text.clone(), cwd.clone(), self.ag.host.clone(), uuid.clone()); // Media.claude: images read, `$skill` mentions made real
             tokio::task::spawn_blocking(move || { let ss = if text2.contains('$') { inputs::scan(&host.user_home, &cwd2, host.kistack.as_deref()) } else { vec![] }; let body = inputs::expand_claude(&text2, &ss); let imgs = inputs::read_images(&text2); inputs::claude_line(&body, &imgs, &uuid2) }).await.unwrap_or_default() };
         let sent = self.live_proc.as_ref().map(|p| p.input.try_send(line));
         if matches!(sent, Some(Ok(()))) { self.cmds = self.cmds.sent(&uuid) } else { self.fail("the agent is not taking input".into(), "input", &hub_id("in", now, 0)).await }
@@ -300,16 +308,18 @@ impl Actor {
         self.cx.running = true; self.ag.stats.turns.fetch_add(1, Relaxed);
         if !std::path::Path::new(cwd).is_dir() { self.fail(format!("could not start codex: its folder {cwd} is gone"), "spawn", &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); return }
         let Some(made) = providers::driver(&t.provider) else { self.fail(format!("{} threads are not run by the Rust hub yet", t.provider), "spawn", &format!("spawn-{now}")).await; return };
-        let prog = match self.ag.cli.resolve(made.cli) { Ok(p) => p, Err(e) => { self.fail(format!("could not start {}: {e}", made.cli), "spawn", &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); return } };
+        let prog = match self.ag.cli.resolve(made.cli) { Ok(p) => p, Err(e) => { let hint = made.driver.install_hint().map(|h| format!(". {h}")).unwrap_or_default(); self.fail(format!("could not start {}: {e}{hint}", made.cli), "spawn", &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); return } };
         self.stop().await; self.lines = None; self.exit = None;
         let gen = format!("{now}-{}", self.ag.seq()); self.ag.set_gen(&th, &gen);
         let prompt = self.ag.prompt_for(&th, cwd).await;
         let (effort, think, session) = { let w = self.ag.world().await; (w.setting(&format!("effort.{th}")).to_string(), self.cx.think, w.threads.get(&th).map(|x| x.session.clone()).unwrap_or_else(|| t.session.clone())) };
         let url = self.ag.mcp.get().map(|m| m.url(&th, &gen)).unwrap_or_default();
         let (host, cwd2, text2) = (self.ag.host.clone(), cwd.to_string(), text.to_string());
-        let (body, imgs) = tokio::task::spawn_blocking(move || { let ss = if text2.contains('$') { inputs::scan(&host.user_home, &cwd2, host.kistack.as_deref()) } else { vec![] }; (inputs::expand_claude(&text2, &ss), inputs::att_paths(&text2).into_iter().filter(|p| !inputs::mime(p).is_empty()).collect::<Vec<_>>()) }).await.unwrap_or_default();
-        let a = providers::TurnIn { thread: th.clone(), cwd: cwd.into(), home: self.ag.host.home.to_string_lossy().into_owned(), model: t.model.clone(), session, runtime: t.runtime.clone(), interaction: t.interaction.clone(), effort, think, text: body, images: imgs, prompt, mcp_url: url, pcbparts_url: "https://pcbparts.dev/mcp".into() };
-        let mut driver = made.driver; let (args, env, start) = (driver.argv(&a), driver.env(&a), driver.start(&a));
+        let (body, imgs) = tokio::task::spawn_blocking(move || { let ss = if text2.contains('$') { inputs::scan(&host.user_home, &cwd2, host.kistack.as_deref()) } else { vec![] }; (inputs::mention_others(&text2, &ss), inputs::att_paths(&text2).into_iter().filter(|p| !inputs::mime(p).is_empty()).collect::<Vec<_>>()) }).await.unwrap_or_default();
+        let a = providers::TurnIn { thread: th.clone(), cwd: cwd.into(), home: self.ag.host.home.to_string_lossy().into_owned(), model: t.model.clone(), session, runtime: t.runtime.clone(), interaction: t.interaction.clone(), effort, think, text: body, images: imgs, prompt, mcp_url: url, pcbparts_url: "https://pcbparts.dev/mcp".into(), gen: gen.clone(), settings: { let w = self.ag.world().await; providers::SETTINGS.iter().map(|k| (k.to_string(), w.setting(k).to_string())).collect() } };
+        let mut driver = made.driver;
+        if let Err(e) = driver.prepare(&a) { let hint = driver.install_hint().map(|h| format!(". {h}")).unwrap_or_default(); self.fail(format!("could not start {}: {e}{hint}", made.cli), "spawn", &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); return }
+        let (args, env, start) = (driver.argv(&a), driver.env(&a), driver.start(&a));
         match proc::spawn(&prog, &args, std::path::Path::new(cwd), self.ag.cli.dir(), &env) {
             Ok(p) => { self.ag.stats.procs_spawned.fetch_add(1, Relaxed); self.heard = Instant::now(); for l in start { let _ = p.input.try_send(l); } self.driver = Some(driver); self.live_proc = Some(Live { input: p.input, pid: p.pid, key: String::new() }); self.lines = Some(p.lines); self.exit = Some(p.exit) }
             Err(e) => { self.fail(format!("could not start {}: {e}", made.cli), "spawn", &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); }
@@ -317,14 +327,15 @@ impl Actor {
     }
 
     /// A permission/question the process asked (providers::Driver docs): allowed-for-session answers at once, else an ask for the person.
-    async fn driver_ask(&mut self, request: &Value, at: u64) -> Option<Value> {
+    async fn driver_ask(&mut self, request: &Value, at: u64) -> Option<Vec<Value>> {
         let info = self.driver.as_ref()?.ask_info(request)?; let th = self.th.clone();
         let session_ok = info.kind == "approval" && self.ag.world().await.sessions.contains(&(th.clone(), info.tool.clone())); // Perm.session_ok
         if session_ok { let lines = self.driver.as_mut().map(|d| d.answer(request, "accept")).unwrap_or_default(); if let Some(p) = &self.live_proc { for l in lines { let _ = p.input.try_send(l); } } return None }
         if self.asked.len() >= 16 { let lines = self.driver.as_mut().map(|d| d.answer(request, "deny")).unwrap_or_default(); if let Some(p) = &self.live_proc { for l in lines { let _ = p.input.try_send(l); } } return None } // bounded: too many waiting
         let ask = hub_id("q", at, self.ag.seq());
         self.asked.insert(ask.clone(), request.clone()); self.ag.driver_asks.lock().unwrap().insert(ask.clone(), th.clone());
-        Some(json!({"$":"AskOpened","id":ask,"thread":th,"kind":info.kind,"tool":info.tool,"detail":info.detail,"options":info.options,"at":at}))
+        let pend = self.ag.pending_ev(&th, 1, "", at).await;
+        Some(vec![json!({"$":"AskOpened","id":ask,"thread":th,"kind":info.kind,"tool":info.tool,"detail":info.detail,"options":info.options,"at":at}), pend])
     }
 
     /// Ride.after: a turn that ended with mail waiting starts the next at once with it (Ride.run).
@@ -351,7 +362,7 @@ impl Actor {
             if let Some(p) = &self.live_proc { for s in re.send { let _ = p.input.try_send(s); } }
             if !self.cx.running { continue } // stopped_turn_quiet: what a stopped turn's process still says is old news
             for v in re.shapes {
-            if v["type"] == "bp.ask" { if let Some(e) = self.driver_ask(&v["request"], at).await { events.push(e) } continue }
+            if v["type"] == "bp.ask" { if let Some(e) = self.driver_ask(&v["request"], at).await { events.extend(e) } continue }
             let fx = self.cx.codex_line(&v, &self.prov.clone(), &self.model.clone(), at);
             if let Some(id) = codex::step_for(&v) { self.jobs_step(&id) }
             for d in &fx.deltas {
@@ -493,7 +504,7 @@ impl Actor {
                 if e["$"] == "TurnChanged" && e["state"] != "running" { clear = true }
                 events.push(e);
             }
-            if fx.delta_end { clear = true }
+            if fx.delta_end { self.live_end().await } // Claude.assistant's Broadcast: the end comes in line order with the deltas of the lines around it
             if cmds::moves(&v) { // Wait.line: the messages the CLI has not read yet
                 let ids: Vec<&str> = self.cmds.unread().iter().filter_map(|u| self.sent.iter().find(|(x, _, _)| x == u).map(|(_, m, _)| m.as_str())).collect::<Vec<_>>().into_iter().map(|s| s).collect();
                 let w = ids.join(" "); if w != self.wait { events.push(set(format!("wait.{}", self.th), w.clone(), at)); self.wait = w }
@@ -526,7 +537,7 @@ impl Actor {
         self.live_proc = None; self.ag.stats.procs_exited.fetch_add(1, Relaxed);
         if self.cx.running {
             let code = e.code.or(e.signal.map(|s| 128 + s)).unwrap_or(1);
-            self.fail(self.driver.as_ref().and_then(|d| d.exit_why(code)).unwrap_or_else(|| rules::exit_why(code)), "exit", &hub_id("x", now_s(), 0)).await;
+            self.fail(match self.driver.as_ref().and_then(|d| d.exit_why(code)) { Some(w) => rules::exit_say(&w, code, &e.stderr), None => rules::exit_why(code) }, "exit", &hub_id("x", now_s(), 0)).await;
         }
         self.cmds = cmds::Cmds::new(); self.wait.clear();
         let live = { let w = self.ag.world().await; w.threads.get(&self.th).map_or(false, |t| !t.archived && !t.deleted) };

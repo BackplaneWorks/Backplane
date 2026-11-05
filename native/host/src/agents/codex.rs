@@ -66,7 +66,7 @@ impl Cx {
         match s(o, "type") {
             "thread.started" => {
                 let sid = s(o, "thread_id"); let same = self.session == sid;
-                self.init(&json!({"session_id": sid}), at, out);
+                if !same { out.push(json!({"$":"SessionSet","id":th,"session":sid,"at":at})); self.session = sid.to_string(); } // Claude.init.k only; Codex adds no c:0 basis or speed reset
                 if !same { let b = format!("x:{sid}:0/0/0/0/0"); self.tok_basis = b.clone(); out.push(setting(format!("tok.basis.{th}"), b, at)) }
             }
             "item.completed" => {
