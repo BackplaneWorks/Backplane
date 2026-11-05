@@ -20,7 +20,6 @@ run() { # name spec [env]
 }
 grep -m1 '"event":"gpu"' /dev/null
 run drop-100k "100000,400"
-run nodrop-100k "100000,400" SOLID_DEMO_NO_DROP=1
 run drop-800k "800000,60"
 kill $IP $XP 2>/dev/null; wait $IP $XP 2>/dev/null
 nproc | sed 's/^/cores: /' | tee -a $V/results.txt

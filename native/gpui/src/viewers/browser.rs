@@ -18,25 +18,25 @@ fn fnv(bytes: &[u8]) -> u64 { bytes.iter().fold(0xcbf29ce484222325u64, |h, b| (h
 
 pub struct BrowserPage { image: Option<Arc<RenderImage>>, retired: Vec<Arc<RenderImage>>, pub status: String, stop: Arc<AtomicBool>, visible: Arc<AtomicBool> }
 impl BrowserPage {
-    /// `base` like http://127.0.0.1:3821 (http only: this client has no TLS), `owner` the page's owner as the hub names it (a bot's id, or the thread's id
+    /// `base` like http://127.0.0.1:3821 (http only for now: this client has no TLS, so an https base never starts the poller), `owner` the page's owner as the hub names it (a bot's id, or the thread's id
     /// for a thread's page: the host passes `BT.World.page`'s value), `token` the hub token (a Bearer header, never logged). The poller fetches only while
     /// `set_visible(true)`; mount the page with the tab and call `set_visible(false)` when another tab is shown.
     pub fn new(cx: &mut Context<Self>, base: String, owner: String, token: String) -> Self {
         let https = base.starts_with("https://");
-        let stop = Arc::new(AtomicBool::new(false)); let visible = Arc::new(AtomicBool::new(true)); let vis = visible.clone();
-        let (tx, rx) = async_channel::bounded::<Result<Arc<RenderImage>, String>>(2);
+        let stop = Arc::new(AtomicBool::new(false)); let visible = Arc::new(AtomicBool::new(false)); let vis = visible.clone(); // fetches only after set_visible(true)
+        let (tx, rx) = async_channel::bounded::<Result<Option<Arc<RenderImage>>, String>>(2); // Ok(None): a good fetch of the frame already shown
         let flag = stop.clone();
-        std::thread::Builder::new().name("browser-frames".into()).spawn(move || {
+        if !https { std::thread::Builder::new().name("browser-frames".into()).spawn(move || {
             let url = format!("{}/bots/{}/screen.jpg", base.trim_end_matches('/'), owner);
-            let mut last = 0u64;
+            let (mut last, mut failing) = (0u64, false);
             while !flag.load(Ordering::Relaxed) {
                 if !vis.load(Ordering::Relaxed) { std::thread::sleep(Duration::from_millis(POLL_MS)); continue } // another tab is shown: no requests
                 let out = match ureq::get(&url).set("Authorization", &format!("Bearer {token}")).timeout(Duration::from_secs(3)).call() {
                     Ok(resp) => {
                         let mut body = Vec::new();
                         match std::io::Read::read_to_end(&mut std::io::Read::take(resp.into_reader(), MAX_JPEG), &mut body) {
-                            Ok(_) if fnv(&body) == last => None, // the same frame: nothing to draw
-                            Ok(_) => { last = fnv(&body); Some(decode_jpeg(&body).ok_or_else(|| "frame is not a JPEG".to_string())) }
+                            Ok(_) if fnv(&body) == last => if failing { failing = false; Some(Ok(None)) } else { None }, // the same frame: nothing to draw (but a recovery clears the status)
+                            Ok(_) => { last = fnv(&body); failing = false; Some(decode_jpeg(&body).map(Some).ok_or_else(|| "frame is not a JPEG".to_string())) }
                             Err(e) => Some(Err(format!("read: {e}"))),
                         }
                     }
@@ -44,13 +44,14 @@ impl BrowserPage {
                     Err(ureq::Error::Status(c, _)) => Some(Err(format!("hub answered {c}"))),
                     Err(ureq::Error::Transport(t)) => Some(Err(format!("hub unreachable: {}", t.kind()))),
                 };
+                if matches!(out, Some(Err(_))) { failing = true; }
                 if let Some(msg) = out { if tx.try_send(msg).is_err() && tx.is_closed() { return } }
                 std::thread::sleep(Duration::from_millis(POLL_MS));
             }
-        }).ok();
+        }).ok(); }
         cx.spawn(async move |weak, cx| {
             while let Ok(msg) = rx.recv().await {
-                if weak.update(cx, |this, cx| { match msg { Ok(i) => { if let Some(old) = this.image.replace(i) { this.retired.push(old); } this.status.clear(); } Err(e) => this.status = e } cx.notify(); }).is_err() { break }
+                if weak.update(cx, |this, cx| { match msg { Ok(Some(i)) => { if let Some(old) = this.image.replace(i) { this.retired.push(old); } this.status.clear(); } Ok(None) => this.status.clear(), Err(e) => this.status = e } cx.notify(); }).is_err() { break }
             }
         }).detach();
         let status = if https { "https hubs are not supported by this page yet (the client has no TLS)".to_string() } else { "Waiting for the first frame".to_string() };
