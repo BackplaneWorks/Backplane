@@ -7,8 +7,11 @@
 //! room again, `catch_up`), input past 256 queued writes is dropped, one input request at most MAX_INPUT bytes,
 //! screens are the emulator's bounded grid and 2048-row scrollback.
 pub mod browser;
+pub mod driver;
 pub mod emb;
 pub mod pty;
+pub mod task;
+pub mod teach;
 pub mod tools;
 pub mod vt;
 
