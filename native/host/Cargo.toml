@@ -1,14 +1,27 @@
 [package]
-name = "bphost"
-version = "0.0.1"
+name = "backplane-hub"
+version = "0.0.2"
 edition = "2021"
-description = "Backplane effects-host spike: sockets + SQLite in Rust, policy in native Bend (child process)"
+description = "Backplane hub in Rust (gpui branch). Native clients only: renderer mobile, bp-policy as presenter, no JS."
+
+[[bin]]
+name = "backplane-hub"
+path = "src/main.rs"
 
 [dependencies]
-rusqlite = { version = "0.32", features = ["bundled"] }
-tungstenite = "0.24"
+anyhow = "1"
+libc = "0.2"
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+httparse = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order", "arbitrary_precision"] }
+sha2 = "0.10"
+hex = "0.4"
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync", "time", "process", "macros", "fs"] }
+tokio-tungstenite = "0.24"
 
 [profile.release]
 opt-level = 3
-lto = true
-codegen-units = 1
+lto = "thin"
+codegen-units = 4
+strip = true
