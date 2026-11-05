@@ -12,10 +12,10 @@ pub fn metric(started: Instant, event: &str, mut fields: Value) {
 }
 
 #[derive(Clone, Debug)]
-pub enum Step { Home(usize), Select(usize), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Mark(String), Fit, Unsupported(String) }
+pub enum Step { Home(usize), Select(usize), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), Imp(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Mark(String), Fit, Unsupported(String) }
 /// What a click on a registered control does; the e2e harness's controls inventory and `click` step use these.
 #[derive(Clone, Debug)]
-pub enum Ctl { None, Rail(String), PickFiles, ToggleSidebar, Select(String), Home(String), Fold(String), Send, Skill(String), Page(String), Node(String, String), More, RenameSave(String) }
+pub enum Ctl { None, Rail(String), PickFiles, ToggleSidebar, Select(String), Home(String), Fold(String), Send, Skill(String), Page(String), Node(String, String), More, RenameSave(String), Imp(String) }
 #[derive(Clone, Debug)]
 pub struct CtlEntry { pub id: String, pub label: String, pub ctl: Ctl }
 #[derive(Clone, Debug)]
@@ -38,6 +38,7 @@ pub fn load(path: &Path) -> VecDeque<Step> {
         else if let Some(ms) = v["wait"].as_u64() { Some(Step::Wait(ms)) }
         else if let Some(r) = v["record"].as_str() { Some(Step::Record(if r == "start" { Some(v["name"].as_str().unwrap_or("rec").to_string()) } else { None })) }
         else if let Some(id) = v["click"].as_str() { Some(Step::Click(id.into())) }
+        else if let Some(op) = v["imp"].as_str() { Some(Step::Imp(op.into())) }
         else if let Some(what) = v["read"].as_str() { Some(Step::Read(what.into())) }
         else if let Some(on) = v["layers"].as_bool() { Some(Step::Layers(on, v["max_h"].as_f64().map(|x| x as f32), v["scroll"].as_f64().unwrap_or(0.0) as f32)) }
         else if let Some(name) = v["mark"].as_str() { Some(Step::Mark(name.into())) }
@@ -296,6 +297,13 @@ impl Backplane {
                 self.pending = Some(Pending { label: "action".into(), started: Instant::now(), goal: Goal::Sleep, armed: true, seq });
                 cx.spawn(async move |this, cx| { cx.background_executor().timer(Duration::from_millis(100)).await; let _ = this.update(cx, |t, cx| { if t.pending.as_ref().map_or(false, |p| p.seq == seq) { t.pending = None; t.pump(cx); } }); }).detach();
             }
+            Step::Imp(op) => {
+                // Improvements e2e hook (screens::improvements::script_op): the same code as the panel, then a short wait for its effect
+                crate::screens::improvements::script_op(self, &op, cx);
+                self.seq += 1; let seq = self.seq;
+                self.pending = Some(Pending { label: "imp".into(), started: Instant::now(), goal: Goal::Sleep, armed: true, seq });
+                cx.spawn(async move |this, cx| { cx.background_executor().timer(Duration::from_millis(250)).await; let _ = this.update(cx, |t, cx| { if t.pending.as_ref().map_or(false, |p| p.seq == seq) { t.pending = None; t.pump(cx); } }); }).detach();
+            }
             Step::Attach(path) => {
                 // the e2e hook for a dropped or picked file: the same path as a drop on the window (screens::glue::attach_event)
                 self.attach_event(&crate::screens::composer::ComposerEvent::Files(vec![std::path::PathBuf::from(path)]), cx);
@@ -331,6 +339,7 @@ impl Backplane {
             Ctl::Page(v) => { let _ = self.tx.try_send(Command::Page(v.clone())); "view.action native-sidebar-page".into() }
             Ctl::More => { self.screens.menu_open = !self.screens.menu_open; self.ui_epoch += 1; cx.notify(); "thread menu".into() }
             Ctl::RenameSave(id) => { let text = self.screens.fields.get("title").map(|s| s.input.read(cx).content.to_string()).unwrap_or_default(); if let Some(c) = crate::screens::tools::rename_save(id, &text) { let _ = self.tx.try_send(c); } "view.action rename-save".into() }
+            Ctl::Imp(id) => { crate::screens::improvements::act(self, id, cx); self.ui_epoch += 1; format!("improvements {id}") }
             Ctl::Node(a, p) => { let _ = self.tx.try_send(Command::Action(a.clone(), p.clone())); format!("view.action {a}") }
         }
     }

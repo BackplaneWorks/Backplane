@@ -105,6 +105,7 @@ fn chip(light: bool, label: String) -> Div {
 impl Render for Backplane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t_render = std::time::Instant::now();
+        crate::screens::improvements::tick(self, window, cx);
         if self.want_focus { self.want_focus = false; self.input.focus_handle(cx).focus(window); }
         if let Some(n) = self.screens.focus_field.take() { if let Some(s) = self.screens.fields.get(&n) { window.focus(&s.input.focus_handle(cx)); } }
         if self.screens.focus_settings { self.screens.focus_settings = false; window.focus(&self.screens.settings_focus); }
@@ -276,7 +277,8 @@ impl Render for Backplane {
         if let Some(p) = self.data["projects"].as_array().and_then(|p| p.first()) { let id = string(p, "id"); let id = id.rsplit_once('|').map_or(id.as_str(), |(_, r)| r).to_string(); ctl.push(CtlEntry { id: "ui:New thread".into(), label: "New thread".into(), ctl: Ctl::Node("new-thread".into(), id) }); }
         ctl.push(CtlEntry { id: "send".into(), label: "Send".into(), ctl: Ctl::Send });
         for l in ["Terminal", "Commands"] { ctl.push(CtlEntry { id: format!("rail:{l}"), label: l.into(), ctl: Ctl::None }); }
-        for l in ["Jump or run a command", "Improvements", "Search", "Add project", "Account", "Edit", "Context", "Dictate"] { ctl.push(CtlEntry { id: format!("ui:{l}"), label: l.into(), ctl: Ctl::None }); }
+        for l in ["Jump or run a command", "Search", "Add project", "Account", "Edit", "Context", "Dictate"] { ctl.push(CtlEntry { id: format!("ui:{l}"), label: l.into(), ctl: Ctl::None }); }
+        crate::screens::improvements::controls(self, &mut ctl);
         ctl.push(CtlEntry { id: "ui:Fold sidebar".into(), label: "Fold sidebar".into(), ctl: Ctl::ToggleSidebar });
         ctl.push(CtlEntry { id: "ui:Attach".into(), label: "Attach".into(), ctl: Ctl::PickFiles });
         if !self.sidebar_open { ctl.push(CtlEntry { id: "ui:Unfold sidebar".into(), label: "Unfold sidebar".into(), ctl: Ctl::ToggleSidebar }); }
@@ -285,7 +287,7 @@ impl Render for Backplane {
 
         let el = div().size_full().flex().flex_col().bg(c("bg"))
             .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| this.attach_event(&crate::screens::composer::ComposerEvent::Files(paths.paths().to_vec()), cx))).text_color(c("text")).text_size(px(13.)).font_family("Noto Sans Mono CJK JP").line_height(px(20.))
-            .on_action(cx.listener(Self::send)).on_action(cx.listener(Self::close_popup)).on_action(cx.listener(Self::copy_selection))
+            .relative().on_action(cx.listener(|this, _: &crate::screens::improvements::Toggle, _, cx| crate::screens::improvements::toggle(this, cx))).on_action(cx.listener(Self::send)).on_action(cx.listener(Self::close_popup)).on_action(cx.listener(Self::copy_selection))
             // top bar
             .child(div().h(px(36.)).flex_shrink_0().relative().child(art::probe("topbar")).flex().items_center().justify_between().px_3().border_b_1().border_color(c("line")).bg(c("bg"))
                 .child(div().flex().items_center().gap_2()
@@ -297,7 +299,7 @@ impl Render for Backplane {
                     .when(has_thread, |d| d.child(div().text_color(c("faint")).child("/")).child(div().id("thread-title").cursor_pointer().on_click(cx.listener(|this, _, _, cx| { let id = string(&this.data["thread"], "id"); let id = crate::screens::attach::raw_id(&id).to_string(); let _ = this.tx.try_send(Command::Action("row-rename".into(), id)); cx.notify(); })).font_weight(FontWeight::BOLD).child(string(thread, "title"))).child(ic(light, "chevron-down", 14., "dim"))))
                 .child(div().flex().items_center().gap_3()
                     .child(with_rect(div().opacity(0.45), || "ui:Jump or run a command".to_string()).w(px(260.)).px_2().flex().items_center().gap_2().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("faint")).child(ic(light, "chevron-right", 13., "faint")).child("Jump or run a command"))
-                    .child(with_rect(div().opacity(0.45), || "ui:Improvements".to_string()).px_2().flex().items_center().gap_2().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("dim")).child(ic(light, "message-square", 15., "dim")).child("Improvements"))
+                    .child(with_rect(div().id("improvements-btn"), || "ui:Improvements".to_string()).cursor_pointer().on_click(cx.listener(|this, _, _, cx| crate::screens::improvements::toggle(this, cx))).px_2().flex().items_center().gap_2().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("dim")).child(ic(light, "message-square", 15., "dim")).child("Improvements"))
                     .child(with_rect(div().opacity(0.45), || "ui:Search".to_string()).child(ic(light, "search", 15., "dim"))).child(with_rect(div().id("gear"), || "ui:Settings".to_string()).cursor_pointer().on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(Command::Action("flag".into(), "settings".into())); cx.notify(); })).child(ic(light, "settings", 15., "dim")))))
             .child(div().flex_1().min_h_0().flex()
                 // sidebar
@@ -339,10 +341,12 @@ impl Render for Backplane {
                     .children(crate::screens::tools::questions(cx, light, &self.screens.fields, &self.data))
                     .children(crate::screens::bots::forms(cx, light, &self.screens.fields, &self.data))
                     .children(crate::screens::settings::view(cx, light, &self.screens.fields, &self.data["settings"], &self.screens.settings_focus, &self.screens.settings_ui))
+                    .children(crate::screens::improvements::view(cx, light, &self.screens.imp))
                 )
                 .children(crate::screens::viewer::view(cx, &reg, light, thread, &self.screens.plot, &mut self.screens.plotview, self.screens.solid.as_ref(), self.screens.browser.as_ref().map(|(_, b)| b)))
                 // right rail
                 .child(div().w(px(72.)).h_full().flex_shrink_0().relative().child(art::probe("rail")).border_l_1().border_color(c("line")).flex().flex_col().py_2().children(rail)))
+            .children(crate::screens::improvements::indicator(cx, light, &self.screens.imp))
             .into_any_element();
         self.controls = ctl;
         self.render_us = t_render.elapsed().as_micros() as u64;

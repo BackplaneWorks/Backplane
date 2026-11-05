@@ -483,6 +483,7 @@ dependencies = [
  "tokio-tungstenite",
  "unicode-segmentation",
  "ureq",
+ "x11rb",
 ]
 
 [[package]]

@@ -9,6 +9,9 @@ pub mod drafts;
 pub mod composer;
 pub mod edit;
 pub mod images;
+pub mod improv_model;
+pub mod improvements;
+pub mod capture;
 pub mod md;
 pub mod picker;
 pub mod plot;
@@ -58,10 +61,12 @@ pub struct Screens {
     /// The newest draft not yet sent to the hub, and whether the 30 ms timer that sends it is running.
     pub pending_draft: Option<String>,
     pub draft_timer: bool,
+    pub imp: improvements::Imp,
 }
 
 impl Screens {
     pub fn new<T: 'static>(_cx: &mut Context<T>, target: Option<attach::Target>, drafts_path: std::path::PathBuf, saved: HashMap<String, String>) -> Self {
-        Self { ask_inputs: HashMap::new(), attacher: attach::Attacher::new(target), drafts: drafts::Writer::start(drafts_path, saved), offsets: HashMap::new(), reg: Default::default(), menu_open: false, solid: None, browser: None, rail_pending: None, rail_at: None, focus_field: None, bots_open: String::new(), plot_click: None, plot: Default::default(), plotview: Default::default(), picker_open: false, fields: HashMap::new(), settings_focus: _cx.focus_handle(), focus_settings: false, settings_was_open: false, settings_ui: Default::default(), parsed: Default::default(), images: Default::default(), img_poll: false, await_draft: None, pending_draft: None, draft_timer: false }
+        let imp = improvements::Imp::new(&drafts_path, target.clone());
+        Self { ask_inputs: HashMap::new(), attacher: attach::Attacher::new(target), drafts: drafts::Writer::start(drafts_path, saved), offsets: HashMap::new(), reg: Default::default(), menu_open: false, solid: None, browser: None, rail_pending: None, rail_at: None, focus_field: None, bots_open: String::new(), plot_click: None, plot: Default::default(), plotview: Default::default(), picker_open: false, fields: HashMap::new(), settings_focus: _cx.focus_handle(), focus_settings: false, settings_was_open: false, settings_ui: Default::default(), parsed: Default::default(), images: Default::default(), img_poll: false, await_draft: None, pending_draft: None, draft_timer: false, imp }
     }
 }
