@@ -4,11 +4,13 @@
 //! Masking is the one thing other lanes must do: `mask::events(&mut events)` before a step's events are written (Hub.step.go,
 //! Secret.changes), `mask::json(&mut answer)` on every MCP answer (Mcp.masked), `mask::mask(line)` on every agent output line and every
 //! line to an agent, and `secret::prompt()` / `keys::prompt(..)` in the prompt. See docs/gpui/HUB-API.md.
+pub mod fallback;
 pub mod keys;
 #[cfg(test)]
 mod e2e;
 pub mod mask;
 pub mod models;
+pub mod proposal;
 pub mod secret;
 pub mod set;
 pub mod telemetry;
@@ -26,7 +28,7 @@ pub fn open(home: &std::path::Path) {
 
 /// Registers the handlers (after `open`).
 pub fn start(hub: Arc<Hub>, agents: Option<Arc<crate::agents::Agents>>) {
-    hub.register_rpc(Arc::new(set::SettingSet));
+    hub.register_rpc(Arc::new(set::SettingSet { agents: agents.clone() }));
     hub.register_rpc(Arc::new(telemetry::TelemetryRpc));
     hub.register_rpc(Arc::new(secret::SecretRpc { agents }));
     if hub.rpc_for("bots.voice").is_none() { hub.register_rpc(Arc::new(keys_rpc::VoiceKeys)); }

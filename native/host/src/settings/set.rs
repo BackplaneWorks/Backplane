@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 pub const ACCOUNT_GATE: &str = "This thread uses a named account. Use updated Backplane web or desktop to continue; your draft is preserved.";
 
-pub struct SettingSet;
+pub struct SettingSet { pub agents: Option<Arc<crate::agents::Agents>> }
 impl RpcHandler for SettingSet {
     fn methods(&self) -> &'static [&'static str] { &["setting.set"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, _method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
@@ -18,7 +18,10 @@ impl RpcHandler for SettingSet {
             if key.starts_with("peer.own.") { return vec![json!({"t":"reply","id":id,"ok":false,"error":"that setting is the hub's own"})] }
             if telemetry::reserved(key) { return vec![telemetry::legacy(hub, id, key, value).await] }
             let at = now_ms() / 1000;
-            match hub.commit(&json!({"$":"SettingSet","key":key,"value":value,"at":at})).await {
+            let mut batch = vec![json!({"$":"SettingSet","key":key,"value":value,"at":at})];
+            // a write to either fallback setting closes the open settings proposals in the same batch (Proposal.invalidate)
+            if let Some(a) = &self.agents { let open: Vec<String> = a.world().await.asks.iter().filter(|(_, k)| k.tool == super::proposal::TOOL).map(|(i, _)| i.clone()).collect(); batch.extend(super::proposal::invalidate(&batch.clone(), &open, at)); }
+            match hub.commit_many(&batch).await {
                 Ok(_) => vec![json!({"t":"reply","id":id,"ok":true})],
                 Err(e) => vec![json!({"t":"reply","id":id,"ok":false,"error":format!("{e:#}")})],
             }
@@ -34,7 +37,7 @@ mod tests {
         Hub::start(Cfg { home: home.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap()
     }
     async fn call(hub: &Arc<Hub>, m: &'static str, p: Value) -> Value {
-        hub.register_rpc(Arc::new(SettingSet)); hub.register_rpc(Arc::new(telemetry::TelemetryRpc));
+        hub.register_rpc(Arc::new(SettingSet { agents: None })); hub.register_rpc(Arc::new(telemetry::TelemetryRpc));
         let h = hub.rpc_for(m).unwrap(); h.call(hub, &Caller { gen: "1".into(), client: 1 }, &json!(5), m, &p).await.remove(0)
     }
     // the tour's Skip: the app sends setting.set onboard.done=1 (and onboard.uber=1); it must be answered, logged and still there after a restart
