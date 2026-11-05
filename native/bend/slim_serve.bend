@@ -222,12 +222,31 @@ def Pol.reads(+u: U.Ui, +arr: J.Json) -> U.Ui:
     case J.Arr{items}: Pol.reads.go(items, u)
     case _: u
 
+# The host may send the hub's real change count (`seq`) when the log it feeds the policy is compacted: the policy's own count of folded events is
+# then too small. The screen's `seq` (hubs[].changes, overlay.j.seq) is the State's, so it is set before the view is drawn.
+def Pol.seq.st(+s: M.State, +n: Nat) -> M.State:
+  match s:
+    case M.State{ps, ts, es, _, tk, sg, qu, ak, dv, nv, bw}: M.State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, bw}
+
+def Pol.seq.ui(+u: U.Ui, +n: Nat) -> U.Ui:
+  match u:
+    case U.Ui{st, sel, dr, live, op, on, now, ad, pa, ve, rid, w, er, note, nf, ob, tr}: U.Ui{Pol.seq.st(st, n), sel, dr, live, op, on, now, ad, pa, ve, rid, w, er, note, nf, ob, tr}
+
+def Pol.seq.k(has: Bool, +u: U.Ui, +n: Nat) -> U.Ui:
+  match has:
+    case True{}: Pol.seq.ui(u, n)
+    case False{}: u
+
+def Pol.seq(+u: U.Ui, +p: J.Json) -> U.Ui:
+  Pol.seq.k(Maybe.is_some(&2, J.Json, J.Json.get(p, "seq")), u, J.Json.get_nat(p, "seq", 0n))
+
 def Pol.view(+u0: U.Ui, +now0: Nat, +p: J.Json) -> J.Json:
   +now = Pol.clock(J.Json.get_nat(p, "now", 0n), now0)
   +key = J.Json.get_str(p, "hub", "")
   +cid = J.Json.get_str(p, "cid", "")
   +u1 = U.Ui.scratch_set(U.Ui.online(U.Ui.set_cid(Pol.bind(MS.Session.adopt(U.Ui.tick(u0, now), J.Json.get_obj(p, "session")), J.Json.get_obj(p, "target")), cid), True{}), "@sync", "1")
-  +u = NS.Ns.prepare(Pol.reads(Pol.local.put(Pol.pick(Pol.is_obj(J.Json.get_obj(p, "page")), u1, J.Json.get_obj(p, "page")), J.Json.get_obj(p, "local")), Maybe.default(&2, J.Json, J.Json.get(p, "reads"), J.Null{})), False{}, p, J.Json.get_str(p, "epoch", ""), J.Json.get_str(p, "viewId", ""), J.Json.get_nat(p, "revision", 0n), J.Json.get_str(p, "nativeKey", ""))
+  +uq = NS.Ns.prepare(Pol.reads(Pol.local.put(Pol.pick(Pol.is_obj(J.Json.get_obj(p, "page")), u1, J.Json.get_obj(p, "page")), J.Json.get_obj(p, "local")), Maybe.default(&2, J.Json, J.Json.get(p, "reads"), J.Null{})), False{}, p, J.Json.get_str(p, "epoch", ""), J.Json.get_str(p, "viewId", ""), J.Json.get_nat(p, "revision", 0n), J.Json.get_str(p, "nativeKey", ""))
+  +u = Pol.seq(uq, p)
   +isPage = String.eq(J.Json.get_str(p, "action", ""), "native-sidebar-page")
   +ok = Bool.and(Bool.and(isPage, NS.Ns.offered(False{}, p)), NS.Ns.valid(u, J.Json.get_str(p, "value", "")))
   +ua = Pol.act(ok, isPage, u, key, cid, now, J.Json.get_str(p, "action", ""), J.Json.get_str(p, "value", ""))

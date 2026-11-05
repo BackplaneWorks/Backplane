@@ -56,4 +56,10 @@ ck(ord.refused!==true,'an ordinary action is not refused');
   const r3=await v({reads:[{kind:'no.such.read',id:1,result:{thread:th,goal:'IGNORED'}}]});
   ck((r3.session?.info||{})['fab.line:'+th]!=='IGNORED','an unknown kind is ignored');
 }
+{
+  const s1=await v({seq:12345});
+  ck(s1.shown?.hubs?.[0]?.changes===12345&&s1.overlay?.j?.seq===12345,'a `seq` in V is the screen\'s change count (shown.hubs[0].changes and overlay.j.seq)');
+  const s0=await v({});
+  ck(s0.shown?.hubs?.[0]?.changes!==12345,'without `seq` the policy counts its own');
+}
 p.kill();console.log(bad?'FAILED '+bad:'ALL OK');process.exit(bad?1:0);
