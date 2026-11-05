@@ -238,7 +238,9 @@ export class ViewerQuality {
     }
   }
   sync() {
-    if (!this.renderer) return;
+    // (off the page, kept by viewer-tools.js: the camera on the page is
+    // another view's; it syncs when it is back)
+    if (!this.renderer || !this.root.isConnected) return;
     const pose = this.solid.cameraSnapshot?.(); if (!pose) return;
     const text = JSON.stringify(pose);
     // Until the main view has fitted its own model (or has a saved pose to
