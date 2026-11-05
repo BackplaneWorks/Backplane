@@ -186,7 +186,7 @@ impl Hub {
     pub fn attach(&self, client: u64) -> tokio::sync::mpsc::UnboundedReceiver<Out> { let (t, r) = tokio::sync::mpsc::unbounded_channel(); self.outboxes.lock().unwrap().insert(client, t); r }
     /// True while the connection's outbox exists (it has not gone away).
     pub fn is_attached(&self, client: u64) -> bool { self.outboxes.lock().unwrap().contains_key(&client) }
-    pub fn detach(&self, client: u64) { self.outboxes.lock().unwrap().remove(&client); if let Some(p) = self.pairing.get() { p.forget(client) } }
+    pub fn detach(&self, client: u64) { self.outboxes.lock().unwrap().remove(&client); if let Some(p) = self.pairing.get() { p.forget(client) } crate::session::forget(client); }
     /// Installs the pairing registry and the /auth routes (net lane). Call it BEFORE the listener accepts: until then, devices-v1.json read once at start
     /// decides and no /auth route exists. Afterwards the registry decides every request.
     pub fn set_pairing(&self, p: Arc<dyn Pairing>, r: Arc<dyn AuthRoute>) { self.auth.set_pairing(p.clone()); let _ = self.pairing.set(p); let _ = self.auth_route.set(r); }
