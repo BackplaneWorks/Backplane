@@ -59,12 +59,15 @@ try {
  if(next){const page=await req('view.action',{action:next.action,value:next.value});if(!page.r.ok||page.r.result.shown.sidebarPages[0].projects.offset!==8)throw Error('project cursor did not advance');}
  const bad=await req('view.action',{action:'native-sidebar-page',value:'forged'});if(bad.r.ok||bad.r.error?.code!=='INVALID_REQUEST')throw Error('forged sidebar cursor was not refused');
  const threadChecks=[];
- if(process.env.ROOT_THREAD_ID){
-  const thread=process.env.ROOT_THREAD_ID; target={kind:'thread',id:thread}; viewId='';
+ const requestedTitle=process.env.ROOT_THREAD_TITLE;
+ const requestedRow=requestedTitle?shown.projects.flatMap(p=>['threads','settled','snoozed','archived'].flatMap(k=>p[k]||[])).find(t=>t.title===requestedTitle):null;
+ if(requestedTitle&&!requestedRow)throw Error('requested synthetic thread is outside the visible sidebar');
+ if(process.env.ROOT_THREAD_ID||requestedRow){
+  const thread=process.env.ROOT_THREAD_ID||requestedRow.id.split('|').at(-1); target={kind:'thread',id:thread}; viewId='';
   const openedThread=await req('view.open');
   if(!openedThread.r.ok||openedThread.r.result.shown?.thread?.id!==`${url}|${thread}`)throw Error(`thread open failed: ${JSON.stringify(openedThread.r.error)}`);
   const firstWindow=openedThread.r.result.window,firstEntries=openedThread.r.result.shown.thread.entries;
-  if(!firstEntries.length||!firstWindow.ids.length)throw Error('thread entries/window missing');
+  if(firstWindow.total>0&&(!firstEntries.length||!firstWindow.ids.length))throw Error('thread entries/window missing');
   threadChecks.push({method:'view.open',ms:openedThread.ms,entries:firstEntries.length,windowIds:firstWindow.ids.length,total:firstWindow.total,remaining:firstWindow.remaining});
   const updatedThread=await req('view.update');if(!updatedThread.r.ok)throw Error('thread update failed');
   threadChecks.push({method:'view.update',ms:updatedThread.ms});
@@ -74,8 +77,9 @@ try {
    if(older.r.result.shown.thread.earlier!==older.r.result.window.remaining)throw Error('earlier does not match the native window');
    threadChecks.push({method:'view.page',ms:older.ms,windowIds:older.r.result.window.ids.length,newer:older.r.result.window.newer,remaining:older.r.result.window.remaining});
   }
-  const draft=await req('view.action',{action:'draft',value:'unsupported draft'});
-  if(draft.r.ok||draft.r.error?.code!=='PRESENTER_UNAVAILABLE'||!draft.r.error.retryable)throw Error('nonempty draft falsely acknowledged');
+  const draft=await req('view.action',{action:'draft',value:'Smoke draft'});
+  if(!draft.r.ok||draft.r.result.shown.thread.draft!=='Smoke draft')throw Error('typed draft was not drawn');
+  const cleared=await req('view.action',{action:'draft',value:''});if(!cleared.r.ok||cleared.r.result.shown.thread.draft!=='')throw Error('draft did not clear');
   target={kind:'recent',id:''};viewId='';if(!(await req('view.open')).r.ok)throw Error('return to recent failed');
  }
  const unsupported=[];

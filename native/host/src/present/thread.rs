@@ -206,6 +206,17 @@ fn row_refusal(e: &Ent) -> Option<&'static str> {
     } else if e.akind=="restart" { "row.restart" }else if e.role=="step" { "row.design-step" }else{ "row.activity-kind" })
 }
 
+fn state_keys_refusal(st: &State,id: &str) -> &'static str {
+    if st.threads.get(id).map_or(false,|t|t.pending>0) { return "thread.pending" }
+    if crate::signal::stalled(st,id) { return "thread.stalled" }
+    if st.lean && !crate::state::fam::policy::lean_keeps(&format!("fork.{id}")) { return "state.fork-not-retained" }
+    for (key,reason) in [("bg","setting.bg"),("watch","setting.watch"),("auth.wait","setting.auth.wait"),("order.wait","setting.order.wait"),("launch","setting.launch")] {
+        if st.settings.get(&format!("{key}.{id}")).map_or(false,|v|!v.is_empty()) { return reason }
+    }
+    if st.asks.values().any(|(th,_)|th==id) { return "thread.ask-record" }
+    "thread.signal-or-turn"
+}
+
 /// Zone.person / Sched.person: the person's zone as a rule. UTC names are built in; any other is the rule the hub stored (`tz.rule.<name>`);
 /// a zone with no usable rule reads as UTC, as Sched.person.k does. None: a lean State may have dropped the rule, so the time stamps degrade.
 fn person_zone(st: &State) -> Option<Rule> {
@@ -242,7 +253,7 @@ pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value
     if running { entries.push(json!({"id": format!("@working:{thread}"), "kind": "assistant", "text": "Working", "blocks": md_blocks("Working"), "images": [], "stamp": ""})) }
     // Signal.why: the first error of the thread's last turn (newest first, stopping at the person's message), at most 400 characters
     let why: String = es.iter().rev().take_while(|e| !(e.msg && e.role == "user")).find(|e| !e.msg && e.role == "error").map(|e| e.text.trim().chars().take(400).collect()).unwrap_or_default();
-    let state_keys = super::keys::keys(st, thread, now_ms / 1000, &why).ok_or("thread.signal-or-turn")?;
+    let state_keys = super::keys::keys(st, thread, now_ms / 1000, &why).ok_or_else(||state_keys_refusal(st,thread))?;
     let t = st.threads.get(thread).ok_or("thread.missing")?;
     let mut o: serde_json::Map<String, Value> = serde_json::from_str(STATIC).map_err(|_|"thread.template")?;
     o.insert("id".into(), json!(format!("{hub}|{thread}")));
