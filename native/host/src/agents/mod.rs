@@ -75,7 +75,7 @@ impl Agents {
         let (root, home, host) = (cwd.to_string(), self.host.home.clone(), self.host.clone());
         tokio::task::spawn_blocking(move || {
             let f = inputs::read(&root); let keys_path = home.join("secrets/api.env");
-            let keys = prompt::api_keys(&keys_path.to_string_lossy(), &prompt::key_names(&std::fs::read_to_string(&keys_path).unwrap_or_default())) + &prompt::secrets(&[]);
+            let keys = prompt::api_keys(&keys_path.to_string_lossy(), &prompt::key_names(&std::fs::read_to_string(&keys_path).unwrap_or_default())) + &prompt::secrets(&crate::settings::vault::names());
             prompt::build(&prompt::PromptEnv { fc: host.fc.clone(), render: host.render.clone(), kicad: host.kicad.clone(), kicad_ipc: ipc, models: host.models_text(), may_delegate: true, orders_on: orders,
                 root, pro: f.pro, pcb: f.pcb, sch: f.sch, all: f.all, keys, machines: String::new(), buy, lang })
         }).await.unwrap_or_default()
