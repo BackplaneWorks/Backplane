@@ -1,0 +1,28 @@
+{"$":"ThreadCreated","id":"t1793869565-147","project":"","title":"ada","env":"local","branch":"","worktree":"","provider":"claude","model":""}
+{"$":"BotSet","id":"b1793869565-147","name":"ada","thread":"t1793869565-147","look":304951,"persona":"dry"}
+{"$":"WorktreeSet","id":"t1793869565-147","branch":"","worktree":"/home/h/Documents/i2cjak/backplane-gpui/build/gpui/results/bots/rec/work/home/bots/b1793869565-147"}
+{"$":"ThreadCreated","id":"t1793869566-151","project":"","title":"bob","env":"local","branch":"","worktree":"","provider":"claude","model":""}
+{"$":"BotSet","id":"b1793869566-151","name":"bob","thread":"t1793869566-151","look":306254,"persona":""}
+{"$":"WorktreeSet","id":"t1793869566-151","branch":"","worktree":"/home/h/Documents/i2cjak/backplane-gpui/build/gpui/results/bots/rec/work/home/bots/b1793869566-151"}
+{"$":"BotSet","id":"b1793869565-147","name":"ada","thread":"","look":304951,"persona":"new"}
+{"$":"RoomSet","id":"r1","name":"lab","members":"b1793869565-147\nb1793869566-151\nzed@far"}
+{"$":"RoomPosted","id":"p1","room":"r1","from":"you","text":"hello all","hop":0}
+{"$":"BotWoke","bot":"b1793869565-147","hop":0}
+{"$":"MessagePosted","thread":"t1793869565-147","msg":"m1793869567-157.0","role":"user","text":"[message from you in #lab]\nhello all"}
+{"$":"MessageFrom","thread":"t1793869565-147","msg":"m1793869567-157.0","from":"person","kind":"room","ref":"lab"}
+{"$":"BotWoke","bot":"b1793869566-151","hop":0}
+{"$":"MessagePosted","thread":"t1793869566-151","msg":"m1793869567-157.1","role":"user","text":"[message from you in #lab]\nhello all"}
+{"$":"MessageFrom","thread":"t1793869566-151","msg":"m1793869567-157.1","from":"person","kind":"room","ref":"lab"}
+{"$":"BotWoke","bot":"b1793869565-147","hop":0}
+{"$":"MessagePosted","thread":"t1793869565-147","msg":"m1","role":"user","text":"hi"}
+{"$":"MemorySaved","bot":"b1793869565-147","key":"my-key-","kind":"pref","text":"t","tags":"x"}
+{"$":"MemorySaved","bot":"b1793869565-147","key":"k2","kind":"fact","text":"u","tags":""}
+{"$":"MemoryForgot","bot":"b1793869565-147","key":"k2"}
+{"$":"BotWoke","bot":"b1793869565-147","hop":0}
+{"$":"MessagePosted","thread":"t1793869565-147","msg":"m1793869574-246","role":"user","text":"[space] go: x"}
+{"$":"BotDeleted","id":"b1793869566-151"}
+{"$":"RoomPosted","id":"p2","room":"r1","from":"you","text":"second","hop":0}
+{"$":"BotWoke","bot":"b1793869565-147","hop":0}
+{"$":"MessagePosted","thread":"t1793869565-147","msg":"m1793869578-270.0","role":"user","text":"[message from you in #lab]\nsecond"}
+{"$":"MessageFrom","thread":"t1793869565-147","msg":"m1793869578-270.0","from":"person","kind":"room","ref":"lab"}
+{"$":"RoomDeleted","id":"r1"}

@@ -1,0 +1,134 @@
+[
+ {
+  "name": "create ada",
+  "m": "bots.create",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "create ADA again",
+  "m": "bots.create",
+  "ok": false,
+  "error": "a bot named ADA already exists"
+ },
+ {
+  "name": "create bob",
+  "m": "bots.create",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "create bad name",
+  "m": "bots.create",
+  "ok": false,
+  "error": "a bot's name is 1 to 24 letters, digits, - or _"
+ },
+ {
+  "name": "edit ada",
+  "m": "bots.edit",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "edit nobody",
+  "m": "bots.edit",
+  "ok": false,
+  "error": "no such bot"
+ },
+ {
+  "name": "room r1",
+  "m": "bots.room",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "post p1",
+  "m": "bots.post",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "post p1 again",
+  "m": "bots.post",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "post to nobody",
+  "m": "bots.post",
+  "ok": false,
+  "error": "no such room"
+ },
+ {
+  "name": "say ada m1",
+  "m": "bots.say",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "say ada m1 again",
+  "m": "bots.say",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "remember",
+  "m": "bots.remember",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "remember odd kind",
+  "m": "bots.remember",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "forget",
+  "m": "bots.forget",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "space",
+  "m": "bots.space",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "delete bob",
+  "m": "bots.delete",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "delete bob again",
+  "m": "bots.delete",
+  "ok": false,
+  "error": "no such bot"
+ },
+ {
+  "name": "say dead bob",
+  "m": "bots.say",
+  "ok": false,
+  "error": "no such bot"
+ },
+ {
+  "name": "post with a deleted member",
+  "m": "bots.post",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "room_delete",
+  "m": "bots.room_delete",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "post to deleted room",
+  "m": "bots.post",
+  "ok": false,
+  "error": "no such room"
+ }
+]

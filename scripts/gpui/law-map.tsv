@@ -572,3 +572,15 @@ law device_token_never_sent rust device_token_never_sent
 law device_drop_never_sent rust device_drop_never_sent
 law input_wire_blank rust input_wire_blank
 law ride_wire_blank rust ride_wire_blank
+law bots_say_once rust bots_say_once
+law bots_post_once rust bots_post_once_and_wakes_other_members_here
+law bot_held_wakes_none rust bot_held_wakes_none
+law cron_next_after rust cron_next_after
+law cron_due_fires_once rust cron_due_fires_once
+law tz_fixed_wall rust tz_fixed_wall
+law sched_done_never rust sched_done_never
+law sched_once_due rust sched_once_due
+law sched_legacy_same rust sched_legacy_same
+law sched_zoned_once_per_slot rust sched_zoned_once_per_slot
+law when_in_minutes rust when_in_minutes
+law when_in_hours rust when_in_hours
