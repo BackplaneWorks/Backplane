@@ -56,7 +56,8 @@ start)
   [ "${GPUI_TRY_NOAPP:-}" = 1 ] && exit 0
   running $APP && { echo "GPUI is already open"; exit 0; }
   cp "$ROOT/build/gpui/linux/backplane-gpui" "$H/backplane-gpui"
-  rm -rf "$H/cat-rigs"; cp -r "$ROOT/build/gpui/linux/cat-rigs" "$H/cat-rigs"
+  # assets/ (cat rigs, icons.json) beside the binary; the app logs asset_missing and shows it in the window when it is not there
+  rm -rf "$H/assets" "$H/cat-rigs"; cp -r "$ROOT/build/gpui/linux/assets" "$H/assets"
   systemd-run --user --unit=$APP --collect -q $CAP --working-directory="$H" \
     --setenv=DISPLAY="$DISPLAY_TO" --setenv=XAUTHORITY="${XAUTHORITY:-/run/user/$(id -u)/gdm/Xauthority}" --setenv=VK_ICD_FILENAMES="$ICD" \
     "$H/backplane-gpui" --url "$URL" --token-file "$H/home/token"

@@ -154,6 +154,21 @@ pub fn paint_cat(window: &mut Window, b: Bounds<Pixels>, rig: &Rig, ms: f32, siz
     }
 }
 
+// ---- fonts: JetBrains Mono (SIL OFL, assets/fonts/jetbrains-mono), bundled for code and mono labels, ligatures off ----
+pub const MONO: &str = "JetBrains Mono";
+static MONO_REGULAR: &[u8] = include_bytes!("../../../assets/fonts/jetbrains-mono/JetBrainsMono-Regular.ttf");
+static MONO_BOLD: &[u8] = include_bytes!("../../../assets/fonts/jetbrains-mono/JetBrainsMono-Bold.ttf");
+/// Registers the bundled faces; logs GPUI_LOG {"font":...,"loaded":bool} (loudly false when the family did not appear).
+pub fn load_fonts(cx: &mut App) {
+    let added = cx.text_system().add_fonts(vec![std::borrow::Cow::Borrowed(MONO_REGULAR), std::borrow::Cow::Borrowed(MONO_BOLD)]);
+    let loaded = added.is_ok() && cx.text_system().all_font_names().iter().any(|n| n == MONO);
+    match added { Ok(()) => eprintln!("GPUI_LOG {{\"font\":\"{MONO}\",\"loaded\":{loaded}}}"), Err(e) => eprintln!("GPUI_LOG {{\"font\":\"{MONO}\",\"loaded\":false,\"error\":{}}}", Value::String(format!("{e:#}"))) }
+}
+/// JetBrains Mono with ligatures (calt) off; CJK and anything it lacks falls back to the system font.
+pub fn mono_font() -> Font {
+    Font { family: MONO.into(), features: FontFeatures::disable_ligatures(), fallbacks: None, weight: FontWeight::NORMAL, style: FontStyle::Normal }
+}
+
 // ---- generated assets (cat rigs, icons): found beside the binary, loud when missing --------------------
 /// BACKPLANE_GPUI_ASSETS, else `assets/` beside the binary, else the repo's build folder (a copied binary).
 pub fn assets_dir() -> PathBuf {
