@@ -15,3 +15,20 @@ law store_torn_tail_resyncs rust store_torn_tail_resyncs
 law store_load_append rust store_load_append
 law cbor_trees_exact rust cbor_trees_exact
 law hub_frames_cbor rust hub_frames_cbor
+# files stream (M6): native/host/src/files/fm.rs, the Rust twin of core/fm.bend's pure rules until the rules process is wired. The Bend defs stay; the corpus test/gpui/files/hostile_paths.tsv is the golden input for diffing them.
+law fm_kind_board rust fm_kind
+law fm_kind_schematic rust fm_kind
+law fm_kind_model rust fm_kind
+law fm_kind_pdf rust fm_kind
+law fm_kind_image rust fm_kind
+law fm_kind_other rust fm_kind
+law fm_safe_up rust fm_safe_rules
+law fm_safe_abs rust fm_safe_rules
+law fm_safe_down rust fm_safe_rules
+law fm_files_safe_backslash rust fm_safe_rules
+law fm_files_safe_drive rust fm_safe_rules
+law fm_files_safe_share rust fm_safe_rules
+law fm_files_safe_down rust fm_safe_rules
+law fm_parent_top rust fm_parent_join
+law fm_parent_down rust fm_parent_join
+law fm_join_root rust fm_parent_join

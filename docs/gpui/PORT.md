@@ -163,7 +163,7 @@ port waits for the person's decision.
 
 <!-- law-map: generated below by scripts/gpui/law-map.py -->
 
-Laws in LAWS.bend: 3248. bend 1276, rust 12, unported 1349, client 483, window 128, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: none yet. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
+Laws in LAWS.bend: 3248. bend 1260, rust 28, unported 1349, client 483, window 128, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: none yet. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
 
 | law | status | seed | file | note |
 |---|---|---|---|---|
@@ -960,18 +960,18 @@ Laws in LAWS.bend: 3248. bend 1276, rust 12, unported 1349, client 483, window 1
 | `md_head_first` | client | seed C +-10% | `src/web/dom.bend` |  |
 | `md_head_only_first` | client | seed C +-10% | `src/web/dom.bend` |  |
 | `md_fence_any` | client | seed C +-10% | `src/web/dom.bend` |  |
-| `fm_kind_board` | bend | seed K +-10% | `src/core/fm.bend` |  |
-| `fm_kind_schematic` | bend | seed K +-10% | `src/core/fm.bend` |  |
-| `fm_kind_model` | bend | seed K +-10% | `src/core/fm.bend` |  |
-| `fm_kind_pdf` | bend | seed K +-10% | `src/core/fm.bend` |  |
-| `fm_kind_image` | bend | seed K +-10% | `src/core/fm.bend` |  |
-| `fm_kind_other` | bend | seed K +-10% | `src/core/fm.bend` |  |
-| `fm_safe_up` | bend | seed K +-10% | `src/core/fm.bend` |  |
-| `fm_safe_abs` | bend | seed K +-10% | `src/core/fm.bend` |  |
-| `fm_safe_down` | bend | seed K +-10% | `src/core/fm.bend` |  |
-| `fm_parent_top` | bend | seed K +-10% | `src/core/fm.bend` |  |
-| `fm_parent_down` | bend | seed K +-10% | `src/core/fm.bend` |  |
-| `fm_join_root` | bend | seed K +-10% | `src/core/fm.bend` |  |
+| `fm_kind_board` | rust `fm_kind` | map | `src/core/fm.bend` |  |
+| `fm_kind_schematic` | rust `fm_kind` | map | `src/core/fm.bend` |  |
+| `fm_kind_model` | rust `fm_kind` | map | `src/core/fm.bend` |  |
+| `fm_kind_pdf` | rust `fm_kind` | map | `src/core/fm.bend` |  |
+| `fm_kind_image` | rust `fm_kind` | map | `src/core/fm.bend` |  |
+| `fm_kind_other` | rust `fm_kind` | map | `src/core/fm.bend` |  |
+| `fm_safe_up` | rust `fm_safe_rules` | map | `src/core/fm.bend` |  |
+| `fm_safe_abs` | rust `fm_safe_rules` | map | `src/core/fm.bend` |  |
+| `fm_safe_down` | rust `fm_safe_rules` | map | `src/core/fm.bend` |  |
+| `fm_parent_top` | rust `fm_parent_join` | map | `src/core/fm.bend` |  |
+| `fm_parent_down` | rust `fm_parent_join` | map | `src/core/fm.bend` |  |
+| `fm_join_root` | rust `fm_parent_join` | map | `src/core/fm.bend` |  |
 | `fm_zip_skips_git` | bend | seed K +-10% | `src/core/fm.bend` |  |
 | `fm_zip_skips_history` | bend | seed K +-10% | `src/core/fm.bend` |  |
 | `fm_zip_skips_worktrees` | bend | seed K +-10% | `src/core/fm.bend` |  |
@@ -999,10 +999,10 @@ Laws in LAWS.bend: 3248. bend 1276, rust 12, unported 1349, client 483, window 1
 | `fm_zip_deflates_boards` | bend | seed K +-10% | `src/core/fm.bend` |  |
 | `fm_zip_entry_backslash` | bend | seed K +-10% | `src/core/fm.bend` |  |
 | `fm_zip_top_windows` | bend | seed K +-10% | `src/core/fm.bend` |  |
-| `fm_files_safe_backslash` | bend | seed K +-10% | `src/core/fm.bend` |  |
-| `fm_files_safe_drive` | bend | seed K +-10% | `src/core/fm.bend` |  |
-| `fm_files_safe_share` | bend | seed K +-10% | `src/core/fm.bend` |  |
-| `fm_files_safe_down` | bend | seed K +-10% | `src/core/fm.bend` |  |
+| `fm_files_safe_backslash` | rust `fm_safe_rules` | map | `src/core/fm.bend` |  |
+| `fm_files_safe_drive` | rust `fm_safe_rules` | map | `src/core/fm.bend` |  |
+| `fm_files_safe_share` | rust `fm_safe_rules` | map | `src/core/fm.bend` |  |
+| `fm_files_safe_down` | rust `fm_safe_rules` | map | `src/core/fm.bend` |  |
 | `emb_summary_round` | bend | seed K +-10% | `src/core/emb.bend` |  |
 | `emb_size_round` | bend | seed K +-10% | `src/core/emb.bend` |  |
 | `emb_pinned_live` | bend | seed K +-10% | `src/core/emb.bend` |  |
