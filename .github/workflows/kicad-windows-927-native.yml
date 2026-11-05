@@ -1,17 +1,8 @@
 name: Issue 927 exact Windows package consumer
-# The preceding attempt stopped at wrapper usage exit 64 before either native
-# check; this revision fixes argv transport and captures wrapper diagnostics.
-# Logon-created wrapper is explicitly admitted to the same 8 GiB job before
-# its independent guard; an observed zero job limit remains a hard refusal.
-# Query the exact capped ancestor through a query-only duplicated handle,
-# rather than relying on Windows' implicit current-job lookup.
-# Pass actual non-secret hosted-run metadata across the standard-user logon;
-# preserve its real identity/profile rather than inheriting the admin profile.
-# Optional diagnostics use a readable exact runtime copy; a probe setup error
-# cannot skip the independent canonical ABI and application checks.
-# Canonical verifier uses Python UTF-8 mode for exact frozen UTF-8 JS bytes.
-# Install-only continuation: no Program Files/PATH/manual runtime fixtures and
-# no artificial manual override. Prior cache corruption remains a known failure.
+# Sole final be904cd4 package consumer; authenticated fixed artifact only.
+# Fresh install + canonical ABI precede discovery/manual + real packaged OMP.
+# Both standard-user phases share an actual 8 GiB no-breakaway job and the
+# explicitly authorized existing pagefile, with measured paging and cleanup.
 on:
   push:
     branches: [backplane/verify-kicad-windows-927]
@@ -47,14 +38,14 @@ jobs:
       - name: Frozen product JS for canonical native measurement
         uses: actions/checkout@v4
         with:
-          ref: afa9679273206b3e9b1da4c966c9b63fb6f57ab4
+          ref: be904cd4cb21ad6febe17e674918c96945113d07
           path: build/frozen-source
           persist-credentials: false
           sparse-checkout: src
       - name: Separately pinned merged canonical verifier
         uses: actions/checkout@v4
         with:
-          ref: 2823fe4641bbadcb41a6cf49f91fe2c7fbc77978
+          ref: be904cd4cb21ad6febe17e674918c96945113d07
           path: build/canonical-946
           persist-credentials: false
           sparse-checkout-cone-mode: false
@@ -63,13 +54,13 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           github-token: ${{ github.token }}
-          run-id: '41886983230'
-          artifact-ids: '13352107148'
+          run-id: '41956764458'
+          artifact-ids: '13383063412'
           merge-multiple: true
           path: build/927-input
       - name: Enforce resource gate, then native standard-user package acceptance
         shell: pwsh
-        run: ./extra/kicad-927-consumer/bootstrap.ps1 -ArtifactDirectory '${{ github.workspace }}\build\927-input' -InstallOnly
+        run: ./extra/kicad-927-consumer/bootstrap.ps1 -ArtifactDirectory '${{ github.workspace }}\build\927-input' -Combined
       - name: Preserve evidence even on failure or resource refusal
         uses: actions/upload-artifact@v4
         if: always()
@@ -80,7 +71,12 @@ jobs:
             build/kicad-927-native/*.jsonl
             build/kicad-927-native/*.log
             build/kicad-927-native/*.txt
-            build/kicad-927-native/*.png
-            build/kicad-927-native/home-*/kicad-health.json
+            build/kicad-927-native/phase-*/**/*.json
+            build/kicad-927-native/phase-*/**/*.jsonl
+            build/kicad-927-native/phase-*/**/*.log
+            build/kicad-927-native/phase-*/**/*.txt
+            build/kicad-927-native/phase-*/**/*.png
+            build/kicad-927-native/phase-*/omp-models.yml
+            build/kicad-927-native/phase-*/omp-observer-extension.js
           if-no-files-found: error
           retention-days: 30

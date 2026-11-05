@@ -49,11 +49,15 @@ function cleanEnvironment() {
   return env;
 }
 const apps=[];
-async function openCase(name, pathRoot) {
+async function openCase(name, pathRoot, options={}) {
   const home=path.join(out,'home-'+name+' 日本');
   assert(!fs.existsSync(home),'Acceptance home must be new');
   const env=cleanEnvironment();env.BACKPLANE_HOME=home;
   if(pathRoot) env.PATH=path.join(pathRoot,'bin')+';'+env.PATH;
+  Object.assign(env,options.env||{});
+  // Only the explicit OMP case can use a real provider. The disposable profile
+  // and sanitized PATH contain the freshly hash-verified OMP installation.
+  if(options.realOMP===true) delete env.BACKPLANE_AGENTS;
   const {_electron}=require(path.resolve(cfg.playwrightModule));
   const app=await _electron.launch({executablePath:cfg.executable,args:[],env,chromiumSandbox:true,timeout:90000});
   apps.push(app);
@@ -136,6 +140,9 @@ async function main() {
   assert(cfg.buildProvenance && typeof cfg.buildProvenance.compilerMode==='string' && cfg.buildProvenance.compilerMode.length>0,'Actual compiler mode required in test evidence');
   assert(typeof cfg.buildProvenance.producerWorkId==='string' && cfg.buildProvenance.producerWorkId.length>0,'Actual producer work identity required');
   result.buildProvenance=cfg.buildProvenance;
+  assert.equal(cfg.releaseUseAuthorized,true,'Actual current release-use authorization required');
+  assert.equal(cfg.byteQualification,'NO_CURRENT_SOURCE_STOCK_COMPARISON_CARRIED_OVER_OPTION2_AFA96792');
+  result.releaseUseAuthorized=cfg.releaseUseAuthorized;result.byteQualification=cfg.byteQualification;result.producerArtifact=cfg.producerArtifact;
   result.releaseBuildApproved=false;
   assert(/^[a-f0-9]{40}$/.test(cfg.sourceCommit));assert(/^[a-f0-9]{40}$/.test(cfg.sourceTree));
   assert(/^[a-f0-9]{64}$/.test(cfg.packageSHA256));
@@ -152,20 +159,27 @@ async function main() {
   result.resourcePolicy=cfg.resourcePolicy;
   result.resourcesStart=resources;
   const build=json(path.join(path.dirname(cfg.executable),'resources','DESKTOP-BUILD.json'));
+  assert.equal(sha(path.join(path.dirname(cfg.executable),'resources','DESKTOP-BUILD.json')),'fc89366ce2f2dc95f2c7567905e8af761c05bc981f6312c50dd05443b0af1bdf');
+  assert.equal(sha(cfg.executable),'ede316a237497aecc025cc31ac994b5af269a6ba81bf3cb2b612b4f2df4977d0');
   assert.equal(build.sourceCommit,cfg.sourceCommit,'Package source commit mismatch');
   assert.equal(build.sourceTree,cfg.sourceTree,'Package source tree mismatch');
   assert.equal(build.serviceVersion,cfg.version,'Package version mismatch');
   assert.equal(build.testOnly,true);assert.equal(build.releaseQualified,false);
+  assert.equal(build.stockEquivalent,false);
   assert.equal(build.buildProvenance.releaseBuildApproved,false);
   assert.deepEqual(build.buildProvenance,cfg.buildProvenance,'Compiler provenance mismatch');
   result.package={sourceCommit:build.sourceCommit,sourceTree:build.sourceTree,version:build.serviceVersion,zipSHA256:cfg.packageSHA256,executableSHA256:sha(cfg.executable)};
   const serviceDir=path.join(path.dirname(cfg.executable),'resources','backplane-service');
   const serviceBuild=json(path.join(serviceDir,'BUILD.json'));
+  assert.equal(sha(path.join(serviceDir,'BUILD.json')),'f63b4727dc6aeb956de4fbb5a3664e6b75c532bee1d57376e403d37956930c9d');
+  assert.equal(serviceBuild.source_commit,cfg.sourceCommit);assert.equal(serviceBuild.source_tree,cfg.sourceTree);
+  assert.equal(serviceBuild.telemetryChannel,'release');assert.equal(serviceBuild.releaseUseAuthorized,true);
   assert.deepEqual(serviceBuild.buildProvenance,cfg.buildProvenance);
   const serviceSHA=sha(path.join(serviceDir,'backplane-serve.exe'));
-  assert.equal(serviceSHA,'11f53c9619d095e0ccd520c5616743155ee240b9637021d4d5a0bea4707aadd1');
+  assert.equal(serviceSHA,'d0cb5b3b2d572a072cd41d639147ca93e9b1c1e981272ee7fce82735c5572bc4');
   assert.equal(serviceSHA,serviceBuild.binary_sha256);result.package.serviceSHA256=serviceSHA;
   result.acceptanceMode=cfg.acceptanceMode||'full';
+  assert(['full','install-only','discovery-only'].includes(result.acceptanceMode),'Unknown acceptance phase');
   if(cfg.acceptanceMode!=='install-only') {
   assert(normal(cfg.programFilesRoot).startsWith(normal(process.env.ProgramFiles)+'/kicad/'),'Program Files fixture must be under actual Program Files');
   for(const root of [cfg.programFilesRoot,cfg.pathRoot,...cfg.manualRoots]) {
@@ -201,7 +215,7 @@ async function main() {
     });
   }
   }
-  await check('real-install',async()=>{
+  if(cfg.acceptanceMode!=='discovery-only') await check('real-install',async()=>{
   const install=await openCase('real-install');
   async function installInput(value,status) {
     for(let attempt=0;attempt<2;attempt++) {
@@ -259,10 +273,17 @@ async function main() {
   }
   await install.page.screenshot({path:path.join(out,'real-install-complete.png')});
   });
+  if(cfg.omp?.enabled===true) {
+    await check('packaged-omp',async()=>{
+      await require('./omp-packaged.cjs').run({cfg,out,openCase,until,save,result});
+    });
+  }
   assert.equal(result.failures?.length||0,0,'One or more native acceptance cases failed; see failures and partial evidence');
   result.status='PASS';result.scope=cfg.acceptanceMode==='install-only'
     ? 'Install-only continuation; exact packaged source and genuine empty home; no full #927 acceptance claim'
-    : 'Exact packaged source; native Program Files/PATH discovery, literal UI typing/persistence/reload, real in-app install and CLI launch as standard user';save();
+    : cfg.acceptanceMode==='discovery-only'
+      ? 'Discovery/manual phase; exact package, native Program Files/PATH and literal UI typing/persistence/reload; installation is a separate required phase'
+      : 'Exact packaged source; native Program Files/PATH discovery, literal UI typing/persistence/reload, real in-app install and CLI launch as standard user';save();
 }
 main().catch(e=>{
   result.status='FAIL';result.error=e.stack;process.exitCode=1;

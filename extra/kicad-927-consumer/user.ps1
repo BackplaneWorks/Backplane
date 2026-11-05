@@ -38,12 +38,14 @@ try {
     $resources | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8 (Join-Path $cfg.out 'resources-start.json')
     Assert-BP927Resources $resources $cfg.resourcePolicy.allowExistingPagefile
     $env:PYTHONDONTWRITEBYTECODE = '1'
-    try { & $cfg.node (Join-Path $PSScriptRoot 'argv-probe.cjs') $ConfigPath 'node' *> (Join-Path $cfg.out 'argv-probe-node.log') }
-    catch { $_ | Out-String | Set-Content (Join-Path $cfg.out 'argv-probe-node-error.txt') }
-    try { & $cfg.bunProbe (Join-Path $PSScriptRoot 'argv-probe.cjs') $ConfigPath 'bun' *> (Join-Path $cfg.out 'argv-probe-bun.log') }
-    catch { $_ | Out-String | Set-Content (Join-Path $cfg.out 'argv-probe-bun-error.txt') }
-    & $cfg.python -X utf8 (Join-Path $PSScriptRoot 'canonical-946.py') $ConfigPath *> (Join-Path $cfg.out 'canonical-946.log')
-    $abiCode = $LASTEXITCODE
+    # Historical argv-probe.cjs lifts the removed printf writer and cannot
+    # represent this fixed package. Retry literal paths through its real UI
+    # and production health cache in accept.cjs instead.
+    $abiCode = 0
+    if ($cfg.runCanonical -ne $false) {
+        & $cfg.python -X utf8 (Join-Path $PSScriptRoot 'canonical-946.py') $ConfigPath *> (Join-Path $cfg.out 'canonical-946.log')
+        $abiCode = $LASTEXITCODE
+    }
     & $cfg.node (Join-Path $PSScriptRoot 'accept.cjs') $ConfigPath *> (Join-Path $cfg.out 'consumer.log')
     $code = $LASTEXITCODE
     if ($abiCode -ne 0 -and $code -eq 0) { $code = $abiCode }
