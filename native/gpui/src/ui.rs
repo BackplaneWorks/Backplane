@@ -13,7 +13,7 @@ fn pager_row(cx: &mut Context<Backplane>, id: String, pager: &Value, light: bool
             any = true;
             let value = value.to_string();
             ctl.push(CtlEntry { id: format!("{id}-{key}"), label: name.to_string(), ctl: Ctl::Page(value.clone()) });
-            row = row.child(div().id(SharedString::from(format!("{id}-{key}"))).cursor_pointer().text_color(c("accent")).hover(|s| s.bg(c("raise"))).px_1()
+            row = row.child(with_rect(div().id(SharedString::from(format!("{id}-{key}"))), || format!("{id}-{key}")).cursor_pointer().text_color(c("accent")).hover(|s| s.bg(c("raise"))).px_1()
                 .child(format!("{} ({})", name, pager["total"]))
                 .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Page(value.clone())); cx.notify(); })));
         }
@@ -73,7 +73,7 @@ fn node_el(cx: &mut Context<Backplane>, n: &Value, light: bool, depth: usize, pa
             if label.is_empty() { label = string(n, "label"); }
             if !action.is_empty() && !label.is_empty() { ctl.push(CtlEntry { id: format!("node:{path}"), label: label.clone(), ctl: Ctl::Node(action.clone(), payload.clone()) }); }
             if action.is_empty() || label.is_empty() { return div().flex().gap_1().children(kids(cx, ctl)).into_any_element(); }
-            div().id(SharedString::from(format!("n{path}"))).px_2().py_1().border_1().border_color(c("line")).bg(c("raise")).text_size(px(12.)).cursor_pointer().hover(|s| s.bg(c("panel")))
+            with_rect(div().id(SharedString::from(format!("n{path}"))), || format!("node:{path}")).px_2().py_1().border_1().border_color(c("line")).bg(c("raise")).text_size(px(12.)).cursor_pointer().hover(|s| s.bg(c("panel")))
                 .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action(action.clone(), payload.clone())); cx.notify(); })).child(label).into_any_element()
         }
         "h1" => { let mut t = String::new(); node_text(n, &mut t); div().text_size(px(22.)).font_weight(FontWeight::BOLD).child(t).into_any_element() }
@@ -94,6 +94,8 @@ fn node_el(cx: &mut Context<Backplane>, n: &Value, light: bool, depth: usize, pa
     }
 }
 
+/// In check mode the control records its window rectangle under its id (the e2e driver aims clicks with it); otherwise nothing is added.
+fn with_rect<E: ParentElement + Styled>(e: E, id: impl FnOnce() -> String) -> E { if art::rects_on() { e.relative().child(art::probe_rect(id())) } else { e } }
 fn ic(light: bool, name: &'static str, size: f32, tok: &str) -> AnyElement { art::icon(name, size, theme::color(light, tok)) }
 fn chip(light: bool, label: String) -> Div {
     let c = |name: &str| theme::color(light, name);
@@ -126,16 +128,16 @@ impl Render for Backplane {
         for project in self.data["projects"].as_array().into_iter().flatten() {
             let pid = string(project, "id"); let pid = pid.rsplit_once('|').map_or(pid.as_str(), |(_, r)| r).to_string();
             ctl.push(CtlEntry { id: format!("project:{pid}"), label: string(project, "title"), ctl: Ctl::Home(pid.clone()) });
-            rows.push(div().id(SharedString::from(format!("proj-{pid}"))).flex().items_center().gap_2().px_3().pt_3().pb_1().text_size(px(11.)).text_color(c("dim")).cursor_pointer().hover(|s| s.text_color(c("text")))
+            rows.push(with_rect(div().id(SharedString::from(format!("proj-{pid}"))), || format!("project:{pid}")).flex().items_center().gap_2().px_3().pt_3().pb_1().text_size(px(11.)).text_color(c("dim")).cursor_pointer().hover(|s| s.text_color(c("text")))
                 .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("select".into(), format!("project-home-{pid}"))); cx.notify(); }))
-                .child(ic(light, "chevron-down", 14., "dim")).child(ic(light, "folder", 14., "ok")).child(div().flex_1().child(string(project, "title").to_uppercase())).child(div().opacity(0.45).child(ic(light, "plus", 16., "dim"))).into_any_element());
+                .child(ic(light, "chevron-down", 14., "dim")).child(ic(light, "folder", 14., "ok")).child(div().flex_1().child(string(project, "title").to_uppercase())).child(with_rect(div().opacity(0.45), || "ui:New thread".to_string()).child(ic(light, "plus", 16., "dim"))).into_any_element());
             for t in project["threads"].as_array().into_iter().flatten().chain(project["settled"].as_array().into_iter().flatten()) {
                 let id = string(t, "id");
                 let raw = id.rsplit_once('|').map_or(id.as_str(), |(_, i)| i);
                 let selected = raw == self.selected;
                 let dot = match t["state"].as_str().unwrap_or("") { "running" => c("accent"), "failed" => c("bad"), _ => c("ok") };
                 ctl.push(CtlEntry { id: format!("thread:{raw}"), label: string(t, "title"), ctl: Ctl::Select(id.clone()) });
-                rows.push(div().id(SharedString::from(format!("thread-{id}"))).flex().items_center().gap_2().pl(px(22.)).pr_3().h(px(32.))
+                rows.push(with_rect(div().id(SharedString::from(format!("thread-{id}"))), || format!("thread:{raw}")).flex().items_center().gap_2().pl(px(22.)).pr_3().h(px(32.))
                     .border_l_2().border_color(if selected { c("ok") } else { c("panel") })
                     .bg(if selected { c("raise") } else { c("panel") }).hover(|s| s.bg(c("raise"))).cursor_pointer()
                     .on_click(cx.listener(move |this, _, window, cx| this.select(id.clone(), window, cx)))
@@ -147,7 +149,7 @@ impl Render for Backplane {
             for key in ["projects", "active", "legacy"] { if let Some(row) = pager_row(cx, format!("pg-{key}"), &page[key], light, &mut ctl) { rows.push(row); } }
         }
         for name in ["BOTS", "ROOMS"] {
-            rows.push(div().flex().justify_between().px_3().pt_4().text_size(px(11.)).text_color(c("dim")).child(name).child(div().opacity(0.45).child(ic(light, "plus", 16., "dim"))).into_any_element());
+            rows.push(div().flex().justify_between().px_3().pt_4().text_size(px(11.)).text_color(c("dim")).child(name).child(with_rect(div().opacity(0.45), || format!("ui:New {}", if name == "BOTS" { "bot" } else { "room" })).child(ic(light, "plus", 16., "dim"))).into_any_element());
             if name == "BOTS" {
                 for ((bname, mood, note, _), rig) in bot_data.iter().zip(bot_rigs.iter()) {
                     let note_color = match mood.as_str() { "wait" | "error" => c("bad"), "work" | "talk" => c("accent"), _ => c("faint") };
@@ -173,7 +175,7 @@ impl Render for Backplane {
                     let value = string(e, "value");
                     ctl.push(CtlEntry { id: format!("fold:{id}"), label: text.clone(), ctl: Ctl::Fold(value.clone()) });
                     entries.push(div().id(SharedString::from(format!("e-{id}"))).py_2().child(
-                        div().id(SharedString::from(format!("f-{id}"))).flex().gap_2().px_2().py_1().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("dim")).cursor_pointer()
+                        with_rect(div().id(SharedString::from(format!("f-{id}"))), || format!("fold:{id}")).flex().gap_2().px_2().py_1().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("dim")).cursor_pointer()
                             .hover(|s| s.bg(c("raise")))
                             .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("fold".into(), value.clone())); cx.notify(); }))
                             .child(ic(light, if e["open"] == true { "chevron-down" } else { "chevron-right" }, 14., "dim")).child(text)).into_any_element());
@@ -209,7 +211,7 @@ impl Render for Backplane {
             let label = skill.get("label").and_then(Value::as_str).unwrap_or(&word).to_string();
             let desc = ["text", "hint", "desc", "detail", "about"].iter().find_map(|k| skill.get(*k).and_then(Value::as_str)).unwrap_or("").to_string();
             ctl.push(CtlEntry { id: format!("skill:{word}"), label: label.clone(), ctl: Ctl::Skill(word.clone()) });
-            popup = popup.child(div().id(("skill", index)).flex().gap_3().px_3().py_1().cursor_pointer().hover(|s| s.bg(c("raise")))
+            popup = popup.child(with_rect(div().id(("skill", index)), || format!("skill:{word}")).flex().gap_3().px_3().py_1().cursor_pointer().hover(|s| s.bg(c("raise")))
                 .child(div().font_weight(FontWeight::BOLD).flex_shrink_0().child(label)).child(div().flex_1().overflow_hidden().whitespace_nowrap().text_color(c("dim")).child(desc))
                 .on_click(cx.listener(move |this, _, window, cx| {
                     let _ = this.tx.try_send(Command::Action("skill".into(), word.clone())); this.await_completion(cx);
@@ -225,7 +227,7 @@ impl Render for Backplane {
         let ctx = string(&thread["picker"], "label").split("ctx ").nth(1).map(|s| format!("ctx {}", s.split(' ').next().unwrap_or(""))).unwrap_or_default();
         let todo = thread["todos"]["count"].as_str().unwrap_or("").to_string();
         let rail: Vec<AnyElement> = [("Terminal", "terminal"), ("Commands", "search"), ("", ""), ("Board", "circuit-board"), ("Schematic", "cpu"), ("3D", "box"), ("Split", "layout-panel-left"), ("Mech", "layers"), ("", ""), ("Files", "folder"), ("Diff", "diff"), ("Review", "circle-check"), ("Browser", "globe")].iter().map(|(l, i)| {
-            if l.is_empty() { div().h(px(12.)).into_any_element() } else { div().opacity(0.45).flex().flex_col().items_center().h(px(48.)).justify_center().gap_1().text_size(px(10.)).text_color(c("dim")).child(ic(light, i, 18., "dim")).child(*l).into_any_element() }
+            if l.is_empty() { div().h(px(12.)).into_any_element() } else { with_rect(div().opacity(0.45), || format!("rail:{l}")).flex().flex_col().items_center().h(px(48.)).justify_center().gap_1().text_size(px(10.)).text_color(c("dim")).child(ic(light, i, 18., "dim")).child(*l).into_any_element() }
         }).collect();
         // controls with no handler yet are registered too, so the harness finds them dead instead of missing
         ctl.push(CtlEntry { id: "send".into(), label: "Send".into(), ctl: Ctl::Send });
@@ -242,20 +244,20 @@ impl Render for Backplane {
             // top bar
             .child(div().h(px(36.)).flex_shrink_0().relative().child(art::probe("topbar")).flex().items_center().justify_between().px_3().border_b_1().border_color(c("line")).bg(c("bg"))
                 .child(div().flex().items_center().gap_2()
-                    .when(!self.sidebar_open, |d| d.child(div().id("unfold-sidebar").cursor_pointer().child(ic(light, "chevron-right", 16., "dim")).on_click(cx.listener(|this, _, _, cx| { this.sidebar_open = true; this.ui_epoch += 1; cx.notify(); }))))
+                    .when(!self.sidebar_open, |d| d.child(with_rect(div().id("unfold-sidebar"), || "ui:Unfold sidebar".to_string()).cursor_pointer().child(ic(light, "chevron-right", 16., "dim")).on_click(cx.listener(|this, _, _, cx| { this.sidebar_open = true; this.ui_epoch += 1; cx.notify(); }))))
                     .child(div().relative().size(px(18.)).child(art::logo(light, 18., "logo"))
                         .child(div().absolute().right(px(-2.)).bottom(px(-1.)).size(px(6.)).bg(if connected { c("ok") } else { c("bad") })))
                     .child(div().font_weight(FontWeight::BOLD).child("Backplane"))
                     .child(div().text_color(c("faint")).child("/")).child(div().text_color(c("dim")).child(if has_thread { "Project".to_string() } else { "Projects".to_string() }))
                     .when(has_thread, |d| d.child(div().text_color(c("faint")).child("/")).child(div().font_weight(FontWeight::BOLD).child(string(thread, "title"))).child(ic(light, "chevron-down", 14., "dim"))))
                 .child(div().flex().items_center().gap_3()
-                    .child(div().opacity(0.45).w(px(260.)).px_2().flex().items_center().gap_2().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("faint")).child(ic(light, "chevron-right", 13., "faint")).child("Jump or run a command"))
-                    .child(div().opacity(0.45).px_2().flex().items_center().gap_2().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("dim")).child(ic(light, "message-square", 15., "dim")).child("Improvements"))
-                    .child(div().opacity(0.45).child(ic(light, "search", 15., "dim"))).child(div().opacity(0.45).child(ic(light, "settings", 15., "dim")))))
+                    .child(with_rect(div().opacity(0.45), || "ui:Jump or run a command".to_string()).w(px(260.)).px_2().flex().items_center().gap_2().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("faint")).child(ic(light, "chevron-right", 13., "faint")).child("Jump or run a command"))
+                    .child(with_rect(div().opacity(0.45), || "ui:Improvements".to_string()).px_2().flex().items_center().gap_2().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("dim")).child(ic(light, "message-square", 15., "dim")).child("Improvements"))
+                    .child(with_rect(div().opacity(0.45), || "ui:Search".to_string()).child(ic(light, "search", 15., "dim"))).child(with_rect(div().opacity(0.45), || "ui:Settings".to_string()).child(ic(light, "settings", 15., "dim")))))
             .child(div().flex_1().min_h_0().flex()
                 // sidebar
                 .child(div().w(px(if self.sidebar_open { 264. } else { 0. })).overflow_hidden().h_full().flex_shrink_0().relative().child(art::probe("sidebar")).bg(c("bg")).border_r_1().border_color(c("line")).flex().flex_col()
-                    .child(div().flex().items_center().gap_2().p_2().child(div().id("fold-sidebar").cursor_pointer().child(ic(light, "chevron-left", 16., "dim")).on_click(cx.listener(|this, _, _, cx| { this.sidebar_open = false; this.ui_epoch += 1; cx.notify(); }))).child(div().flex_1().px_2().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).text_color(c("faint")).child("Search projects")).child(div().opacity(0.45).child(ic(light, "plus", 16., "dim"))))
+                    .child(div().flex().items_center().gap_2().p_2().child(with_rect(div().id("fold-sidebar"), || "ui:Fold sidebar".to_string()).cursor_pointer().child(ic(light, "chevron-left", 16., "dim")).on_click(cx.listener(|this, _, _, cx| { this.sidebar_open = false; this.ui_epoch += 1; cx.notify(); }))).child(div().flex_1().px_2().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).text_color(c("faint")).child("Search projects")).child(with_rect(div().opacity(0.45), || "ui:Add project".to_string()).child(ic(light, "plus", 16., "dim"))))
                     .child(div().id("sidebar").overflow_y_scroll().flex_1().children(rows))
                     .child(div().px_3().py_1().border_t_1().border_color(c("line")).text_size(px(11.)).text_color(c("dim")).child(self.status.clone())))
                 // main
@@ -278,12 +280,12 @@ impl Render for Backplane {
                         .child(div().border_1().border_color(c("accent")).bg(c("view")).px_3().py_2().min_h(px(60.)).child(self.input.clone()))
                         .child(div().flex().gap_2().items_center()
                             .child(div().flex_1().px_3().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).font(art::mono_font()).child(format!("claude / {} / {}", if model_short.is_empty() { "default" } else { &model_short }, if effort.is_empty() { "auto" } else { &effort })))
-                            .child(chip(light, String::new()).opacity(0.45).flex().items_center().gap_2().child(ic(light, "user", 16., "text")).child("Default"))
-                            .child(chip(light, String::new()).opacity(0.45).child(ic(light, "square-pen", 16., "dim")))
-                            .child(chip(light, String::new()).opacity(0.45).flex().items_center().gap_2().child(ic(light, "gauge", 14., "dim")).child(ctx))
-                            .child(chip(light, String::new()).id("attach").cursor_pointer().on_click(cx.listener(|this, _, _, cx| this.pick_files(cx))).child(ic(light, "paperclip", 16., "dim")))
-                            .child(chip(light, String::new()).opacity(0.45).child(ic(light, "mic", 16., "dim")))
-                            .child(div().id("send").px_4().py_1().bg(c("accent")).text_color(c("on-accent")).cursor_pointer().child("Send").on_click(cx.listener(|this, _, window, cx| this.send(&Send, window, cx)))))))
+                            .child(with_rect(chip(light, String::new()).opacity(0.45), || "ui:Account".to_string()).flex().items_center().gap_2().child(ic(light, "user", 16., "text")).child("Default"))
+                            .child(with_rect(chip(light, String::new()).opacity(0.45), || "ui:Edit".to_string()).child(ic(light, "square-pen", 16., "dim")))
+                            .child(with_rect(chip(light, String::new()).opacity(0.45), || "ui:Context".to_string()).flex().items_center().gap_2().child(ic(light, "gauge", 14., "dim")).child(ctx))
+                            .child(with_rect(chip(light, String::new()).id("attach"), || "ui:Attach".to_string()).cursor_pointer().on_click(cx.listener(|this, _, _, cx| this.pick_files(cx))).child(ic(light, "paperclip", 16., "dim")))
+                            .child(with_rect(chip(light, String::new()).opacity(0.45), || "ui:Dictate".to_string()).child(ic(light, "mic", 16., "dim")))
+                            .child(with_rect(div().id("send"), || "send".to_string()).px_4().py_1().bg(c("accent")).text_color(c("on-accent")).cursor_pointer().child("Send").on_click(cx.listener(|this, _, window, cx| this.send(&Send, window, cx)))))))
                 )
                 // right rail
                 .child(div().w(px(72.)).h_full().flex_shrink_0().relative().child(art::probe("rail")).border_l_1().border_color(c("line")).flex().flex_col().py_2().children(rail)))
