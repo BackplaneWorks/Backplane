@@ -172,7 +172,7 @@ def main() -> IO(Unit):
     C.Check.str("its posts", strs(J.Json.elems(J.Json.get_obj(bot(go(two(), "room", "box:3787|r1")), "posts")), "from"), "you;")
     C.Check.str("a person's post has no cat", J.Json.get_str(first(J.Json.elems(J.Json.get_obj(bot(go(two(), "room", "box:3787|r1")), "posts"))), "cat", "?"), "")
     C.Check.str("a bot's post carries its author's cat (look 7, its mood)", Bool.pick(String, String.contains(strs(J.Json.elems(J.Json.get_obj(bot(go(botpost(), "room", "box:3787|r1")), "posts")), "cat"), "7:"), "yes", "no"), "yes")
-    C.Check.str("the look picker's numbers", J.Json.show(J.Json.get(J.Json.get_obj(tab("settings"), "settings"), "look")) ++ "/" ++ J.Json.show(J.Json.get(J.Json.get_obj(tab("settings"), "settings"), "looks")), "7/72")
+    C.Check.str("the look picker's numbers", Nat.show(J.Json.get_nat(J.Json.get_obj(tab("settings"), "settings"), "look", 999n)) ++ "/" ++ Nat.show(J.Json.get_nat(J.Json.get_obj(tab("settings"), "settings"), "looks", 0n)), "7/72")
     C.Check.str("back to the list", J.Json.show(bot(go(go(two(), "room", "box:3787|r1"), "select", ""))), "null")
     C.Check.str("the new bot form on its hub", H.Hubs.cur(go(two(), "bot-new", "box:3787|")), "box:3787")
     C.Check.str("its providers", strs(J.Json.elems(J.Json.get_obj(J.Json.get_obj(H.Hubs.screen(go(two(), "bot-new", "box:3787|")), "newBot"), "providers")), "provider"), "claude;codex;grok;muse;antigravity;opencode;pi;omp;")
