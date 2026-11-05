@@ -228,6 +228,10 @@ impl Hub {
     /// A connection id for an HTTP request (the /auth routes remember it).
     pub fn fresh_client(&self) -> u64 { self.next_client.fetch_add(1, Relaxed) }
     /// A /ws connection presenting `token` may proceed: its credential resolves and its device is not revoked.
+    /// `admit` off the async threads (the registry fsyncs now and then).
+    pub async fn admit_blocking(&self, client: u64, token: String) -> bool {
+        match self.pairing.get().cloned() { None => true, Some(p) => tokio::task::spawn_blocking(move || !token.is_empty() && p.resolve(&token, client, "/ws") == token && p.active(client)).await.unwrap_or(false) }
+    }
     pub fn admit(&self, client: u64, token: &str) -> bool {
         match self.pairing.get() { None => true, // the snapshot path decided in `serve` (Auth::allowed)
             // pairing.js resolve answers the credential that holds for this connection (the hub token for an empty one): it holds only if it is the one presented
@@ -421,7 +425,7 @@ mod write_tests {
     // a client that never reads never grows the hub: past the bound it is dropped (plain push), droppable frames are skipped sooner
     #[tokio::test] async fn a_client_that_never_reads_cannot_grow_the_outbox_past_its_bound() {
         let dir = std::env::temp_dir().join(format!("bp-outbox-{}", std::process::id())); let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();
-        let hub = Hub::start(cfg(&dir), Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        let hub = Hub::start(Cfg { home: dir.clone(), version: "0.14.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
         hub.set_outbox_max(100_000);
         let _never = hub.attach(1); let _reads = hub.attach(2);
         let frame = json!({"t":"term","data":"x".repeat(1000)}); let n = frame_bytes(&frame);

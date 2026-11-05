@@ -60,7 +60,9 @@ pub async fn http(hub: &Hub, mut s: TcpStream, req: Req) -> Result<()> {
     // the /auth routes decide for themselves (enrollment proves itself with its invitation); nothing else does
     if let Some(ar) = hub.auth_route() {
         let client = hub.fresh_client();
-        if let Some(o) = ar.handle(&req, client) {
+        // the registry fsyncs now and then: off the async threads
+        let (ar2, req2) = (ar.clone(), Req { method: req.method.clone(), target: req.target.clone(), headers: req.headers.clone() });
+        if let Some(o) = tokio::task::spawn_blocking(move || ar2.handle(&req2, client)).await.ok().flatten() {
             hub.close_clients(&o.close);
             if let Some(link) = &o.unpeer { ar.unpeer(link) }
             let r = o.reply; let out = response_for(r.status, &r.ctype, &r.extra, &r.body);
@@ -101,7 +103,7 @@ pub async fn socket_inner(hub: Arc<Hub>, s: TcpStream, cbor_wanted: bool, token:
     struct Detach(Arc<Hub>, u64); impl Drop for Detach { fn drop(&mut self) { self.0.detach(self.1) } }
     let _detach = Detach(hub.clone(), conn.client);
     // attached first, then admitted: a revoke after this point finds the outbox and closes the stream; before it, the credential no longer holds
-    if !hub.admit(conn.client, &token) { return Ok(()) }
+    if !hub.admit_blocking(conn.client, token.clone()).await { return Ok(()) }
     tx.send(pack(&conn, &greeting)).await?;
     let mut changes = hub.changed.subscribe();
     let mut beat = tokio::time::interval(Duration::from_millis(15000)); beat.tick().await;
@@ -136,7 +138,7 @@ pub async fn wire(hub: Arc<Hub>, s: TcpStream, since: usize, origin_asked: Strin
     let mut outbox = hub.attach(conn.client);
     struct Detach(Arc<Hub>, u64); impl Drop for Detach { fn drop(&mut self) { self.0.detach(self.1) } }
     let _detach = Detach(hub.clone(), conn.client);
-    if !hub.admit(conn.client, &token) { return Ok(()) }
+    if !hub.admit_blocking(conn.client, token.clone()).await { return Ok(()) }
     // atomic join point: the length now, and a subscription taken under the same lock as commits
     let (mut changes, mut deltas) = (hub.changed.subscribe(), hub.frames.subscribe());
     let n0 = hub.store.len(); // subscribed first: a commit after this point is announced, and the cursor below reads from `sent`
