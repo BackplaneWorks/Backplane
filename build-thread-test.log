@@ -1,0 +1,6 @@
+provisional: commit f24a6c75a6, dirty tree possible, host backplane
+bash: line 1: FAILED: command not found
+bash: line 1: panicked: command not found
+bash: line 1: left:: command not found
+bash: line 1: right:: command not found
+bash: line 1: ^test: command not found
