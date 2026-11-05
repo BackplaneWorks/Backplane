@@ -10,7 +10,7 @@ const h=await startHub({bin,home:root+'/home',port,standins:root+'/bin',extraEnv
 mkdirSync(root+'/proj',{recursive:true});
 const log=[];const ws=new WebSocket(`ws://127.0.0.1:${port}/ws?view=1&mobile=1&token=${h.token}`);ws.binaryType='arraybuffer';
 let greet,rev=0,target={kind:'recent',id:''},viewId='',next=2**47+100;const session={sel:'',rid:Date.now(),drafts:{},open:{},adding:false,panel:false,info:{}};
-const req=(m,extra={})=>{const id=++next;const p={...extra,version:1,hub:h.url,generation:greet.generation,epoch:greet.epoch,requestRevision:++rev,target,viewId,session,cid:'cap'};log.push({dir:'out',ts:performance.now(),o:{id,m,p}});ws.send(encode({id,m,p}))};
+const req=(m,extra={})=>{const id=++next;const p={...extra,...(process.env.NATIVE==='1'?{nativeSidebar:1}:{}),version:1,hub:h.url,generation:greet.generation,epoch:greet.epoch,requestRevision:++rev,target,viewId,session,cid:'cap'};log.push({dir:'out',ts:performance.now(),o:{id,m,p}});ws.send(encode({id,m,p}))};
 const raw=(id,m,p)=>{log.push({dir:'out',o:{id,m,p}});ws.send(encode({id,m,p}))};
 ws.onmessage=({data})=>{const x=decode(data);log.push({dir:'in',ts:performance.now(),n:data.byteLength,o:x});
  if(x.t==='view'){greet=x;req('view.open')}
