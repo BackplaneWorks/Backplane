@@ -9,5 +9,6 @@ fn main() {
         let f = std::fs::File::open(&path).unwrap_or_else(|e| { eprintln!("rust-digest: {path}: {e}"); std::process::exit(2) });
         for line in BufReader::new(f).lines().map_while(Result::ok) { if !line.is_empty() { st.apply_line(&line); } }
     }
+    if !st.unmodelled.is_empty() { let mut u: Vec<_> = st.unmodelled.iter().collect(); u.sort(); eprintln!("rust-digest: events counted but not modelled: {u:?}"); }
     println!("{}", serde_json::to_string(&st.digest_json()).unwrap());
 }

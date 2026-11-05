@@ -46,6 +46,10 @@ pub struct State {
     pub entries: HashMap<String, Vec<String>>,
     pub settings: HashMap<String, String>,
     pub seq: u64,
+    /// bot id -> its thread (BotSet/BotDeleted): a task delegated by a bot's thread seeds no thread.parent
+    bot_threads: HashMap<String, String>,
+    /// events the fold counts but does not (fully) model, by kind: reported by rust-digest so a gap is never silent
+    pub unmodelled: HashMap<String, u64>,
 }
 
 /// every event name the Bend decoder (core/codec.bend Change.decode) knows
@@ -57,6 +61,12 @@ const KNOWN: &[&str] = &["ProjectCreated", "ProjectRemoved", "ThreadCreated", "T
     "MemorySaved", "MemoryForgot", "SpaceSet", "PeerSet", "BotWoke", "SpacePageSet", "WorkSet", "UberSet", "UberOp", "ThreadLaunched", "WakeSet", "WakeDropped",
     "LockChanged", "RoutinePlan", "RoutineSlot", "RoutineDone", "Reminded", "TaskSet", "TaskDeleted", "MessageFrom", "ConvSet", "MailPosted", "MailMarked", "MailTagged",
     "RunSet", "CharterSet", "DecisionLogged", "TurnUsage", "DeployAsked", "DeployBuilt", "ThreadParentSet", "ThreadWoke", "TodosChanged"];
+
+/// Link.from: the sender in a link id "t:<from>:<n>" ("" for any other id): the second ':'-field when the first is "t" and a third follows
+fn link_from(id: &str) -> &str {
+    let Some(rest) = id.strip_prefix("t:") else { return "" };
+    match rest.split_once(':') { Some((from, _)) => from, None => "" }
+}
 
 fn s<'a>(e: &'a Value, k: &str) -> Option<&'a str> { e.get(k)?.as_str() }
 fn n(e: &Value, k: &str) -> Option<u64> { e.get(k)?.as_u64() }
@@ -102,7 +112,7 @@ impl State {
             "MessagePosted" => {
                 let th = s(e, "thread")?; let id = s(e, "msg")?; let role = s(e, "role")?; let at = n(e, "at")?; s(e, "text")?;
                 if role == "user" { let t = self.thread_mut(th); t.activity = at; t.unsettled_at = at; }
-                self.entries.entry(th.into()).or_default().push(id.into());
+                self.post(th, id);
             }
             "TurnChanged" => {
                 let th = s(e, "thread")?; let st = Turn::parse(s(e, "state")?)?; let at = n(e, "at")?;
@@ -110,7 +120,7 @@ impl State {
                 let t = self.thread_mut(th); t.activity = t.activity.max(at); t.turn = st;
             }
             "PendingChanged" => { let th = s(e, "thread")?; let c = n(e, "count")?; self.thread_mut(th).pending = c; }
-            "ActivityLogged" => { let th = s(e, "thread")?; let id = s(e, "act")?; self.entries.entry(th.into()).or_default().push(id.into()); }
+            "ActivityLogged" => { let th = s(e, "thread")?; let id = s(e, "act")?; s(e, "tone")?; s(e, "kind")?; s(e, "summary")?; n(e, "at")?; self.post(th, id); }
             "ThreadSettled" => {
                 let id = s(e, "id")?; let manual = e.get("manual")?.as_bool()?; let at = n(e, "at")?;
                 let t = self.thread_mut(id); if manual { t.override_ = Override::ForcedSettled } t.settled_at = at; t.pinned = false;
@@ -131,7 +141,7 @@ impl State {
             "WorktreeSkipped" => { let id = s(e, "id")?; let t = self.thread_mut(id); t.worktree_mode = false; t.branch.clear(); t.worktree.clear(); }
             "WorktreeRemoved" => { let id = s(e, "id")?; self.thread_mut(id).worktree.clear(); }
             "SessionSet" => { let id = s(e, "id")?; let se = s(e, "session")?.to_string(); self.thread_mut(id).session = se; }
-            "ModesSet" => { let id = s(e, "id")?; self.thread_mut(id); }
+            "ModesSet" => { let id = s(e, "id")?; let m = s(e, "model")?.to_string(); s(e, "runtime")?; s(e, "interaction")?; self.thread_mut(id).model = m; }
             "ThreadMerged" => {
                 let id = s(e, "id")?; let url = s(e, "url")?.to_string(); let at = n(e, "at")?;
                 let t = self.thread_mut(id); t.override_ = Override::ForcedSettled; t.settled_at = at; t.pinned = false;
@@ -140,6 +150,33 @@ impl State {
             "SettingSet" => { let (k, v) = (s(e, "key")?, s(e, "value")?); self.set(k, v); }
             "ThreadParentSet" => { let (id, p) = (s(e, "id")?, s(e, "parent")?); self.set(&format!("thread.parent.{id}"), p); }
             "ThreadForked" => { let (id, src) = (s(e, "id")?, s(e, "source")?); self.set(&format!("fork.{id}"), src); }
+            "BotSet" => { let (id, th) = (s(e, "id")?, s(e, "thread")?); self.bot_threads.insert(id.into(), th.into()); }
+            "BotDeleted" => { let id = s(e, "id")?; self.bot_threads.remove(id); }
+            "TaskDelegated" => {
+                // State.delegated -> State.task_parent: seed thread.parent.<child> once, unless a bot's thread delegated
+                let (parent, child) = (s(e, "parent")?, s(e, "child")?);
+                if !self.bot_threads.values().any(|t| t == parent) {
+                    let k = format!("thread.parent.{child}");
+                    if !self.settings.contains_key(&k) { self.set(&k, parent); }
+                }
+            }
+            "ThreadLaunched" => {
+                // Launch.fold: launch.<id> = report flag + launcher; launched.<by> lists the ids, oldest first, once each
+                let (id, by) = (s(e, "id")?, s(e, "by")?); let report = e.get("report")?.as_bool()?;
+                self.set(&format!("launch.{id}"), &format!("{}{by}", if report { "1" } else { "0" }));
+                let lk = format!("launched.{by}"); let old = self.get(&lk, "");
+                if !old.split('\n').any(|l| l == id) { let v = if old.is_empty() { id.to_string() } else { format!("{old}\n{id}") }; self.set(&lk, &v); }
+            }
+            "TodosSet" => { let (th, todos) = (s(e, "thread")?, s(e, "todos")?); self.todos_put(th, todos, todos, "1"); }
+            "TodosChanged" => {
+                let (th, who, data) = (s(e, "thread")?, s(e, "who")?, s(e, "data")?);
+                if who == "snapshot" {
+                    let p: Value = serde_json::from_str(data).unwrap_or(Value::Null);
+                    let g = |k: &str, d: &str| p.get(k).and_then(|v| v.as_str()).unwrap_or(d).to_string();
+                    let (c, b, v) = (g("current", ""), g("base", ""), g("visible", "0"));
+                    self.todos_put(th, &c, &b, &v);
+                } else { *self.unmodelled.entry(format!("TodosChanged/{who}")).or_default() += 1; }
+            }
             "UsageSet" => {
                 // State.usage: a new reading over the old one; 0 keeps the old part
                 let (th, used, window) = (s(e, "thread")?, n(e, "used")?, n(e, "window")?);
@@ -156,16 +193,42 @@ impl State {
         Some(())
     }
 
+    /// State.post -> Idx.post: an entry is filed under its thread, and a message another thread sent ("t:<from>:<n>") under the sender too.
+    fn post(&mut self, th: &str, id: &str) {
+        self.entries.entry(th.into()).or_default().push(id.into());
+        let from = link_from(id);
+        if !from.is_empty() && from != th && !from.is_empty() { self.sent_link(from, id, th); }
+    }
+    fn sent_link(&mut self, from: &str, id: &str, _th: &str) { self.entries.entry(from.into()).or_default().push(id.into()); }
+
+    fn todos_put(&mut self, th: &str, current: &str, base: &str, visible: &str) {
+        self.set(&format!("todos.{th}"), current); self.set(&format!("todos.base.{th}"), base); self.set(&format!("todos.visible.{th}"), visible);
+    }
+    /// Todos.of: statuses of the thread's list (Todo.status.of: completed and in_progress stay, anything else is pending)
+    fn todos_status(&self, th: &str) -> Vec<&'static str> {
+        let text = self.get(&format!("todos.{th}"), "");
+        match serde_json::from_str::<Value>(&text) {
+            Ok(Value::Array(xs)) => xs.iter().map(|x| match x.get("status").and_then(|v| v.as_str()).unwrap_or("") { "completed" => "completed", "in_progress" => "in_progress", _ => "pending" }).collect(),
+            _ => vec![],
+        }
+    }
     /// Todos.turn: a turn starting hides a list nobody has touched; a turn ending clears a completed or never-shown one.
-    /// The lists themselves are not modelled: an empty list is the only case this covers exactly (see PORT.md).
-    fn todos_turn(&mut self, st: Turn, th: &str, _at: u64) {
+    fn todos_turn(&mut self, st: Turn, th: &str, at: u64) {
         if st == Turn::Running {
             let was = self.threads.get(th).map_or(false, |t| t.turn == Turn::Running);
             if !was { self.set(&format!("todos.visible.{th}"), "0"); }
         } else {
+            let list = self.todos_status(th);
+            let complete = !list.is_empty() && list.iter().all(|x| *x == "completed");
             let visible = self.get(&format!("todos.visible.{th}"), "1") != "0";
-            if !visible {
-                self.set(&format!("todos.{th}"), ""); self.set(&format!("todos.base.{th}"), ""); self.set(&format!("todos.visible.{th}"), "0");
+            if complete || !visible {
+                let empty = list.is_empty();
+                self.todos_put(th, "", "", "0");
+                if !empty {
+                    let gk = format!("todos.gen.{th}"); let old = self.get(&gk, "");
+                    let next = if old == at.to_string() { format!("{old}+") } else { at.to_string() };
+                    self.set(&gk, &next);
+                }
             }
         }
     }
@@ -236,6 +299,21 @@ mod tests {
     #[test] fn usage_keeps_the_old_part_when_the_new_one_is_zero() {
         let s = fold(&[r#"{"$":"UsageSet","thread":"t1","used":100,"window":200,"at":1}"#, r#"{"$":"UsageSet","thread":"t1","used":0,"window":300,"at":2}"#, r#"{"$":"UsageSet","thread":"t1","used":7,"window":0,"at":3}"#]);
         assert_eq!(s.settings["usage.t1"], "7/300");
+    }
+    #[test] fn a_link_message_is_filed_under_its_sender_too() {
+        let s = fold(&[PC, TC, r#"{"$":"MessagePosted","thread":"t1","msg":"t:tOther:7","role":"user","text":"x","at":5}"#]);
+        assert_eq!(s.entries["tOther"], vec!["t:tOther:7".to_string()]); assert_eq!(s.entries["t1"].len(), 1);
+        assert_eq!(link_from("t:a:b"), "a"); assert_eq!(link_from("t:a"), ""); assert_eq!(link_from("m:a:b"), ""); assert_eq!(link_from("ta:b:c"), "");
+    }
+    #[test] fn a_completed_list_clears_at_the_end_of_the_turn_with_a_generation() {
+        let done = r#"[{"id":"1","text":"a","form":"","status":"completed"}]"#;
+        let ev = format!(r#"{{"$":"TodosSet","thread":"t1","todos":{},"at":1}}"#, serde_json::to_string(done).unwrap());
+        let s = fold(&[PC, TC, &ev, r#"{"$":"TurnChanged","thread":"t1","state":"completed","at":9}"#]);
+        assert_eq!((s.settings["todos.t1"].as_str(), s.settings["todos.visible.t1"].as_str(), s.settings["todos.gen.t1"].as_str()), ("", "0", "9"));
+    }
+    #[test] fn launches_list_each_thread_once_and_delegation_seeds_the_parent_once() {
+        let s = fold(&[r#"{"$":"ThreadLaunched","id":"a","by":"b","report":true,"at":1}"#, r#"{"$":"ThreadLaunched","id":"c","by":"b","report":false,"at":2}"#, r#"{"$":"ThreadLaunched","id":"a","by":"b","report":true,"at":3}"#]);
+        assert_eq!(s.settings["launched.b"], "a\nc"); assert_eq!(s.settings["launch.c"], "0b");
     }
     #[test] fn an_empty_ledger_setting_removes_the_key_others_keep_the_empty_value() {
         let s = fold(&[r#"{"$":"SettingSet","key":"told.k1","value":"x","at":1}"#, r#"{"$":"SettingSet","key":"told.k1","value":"","at":2}"#, r#"{"$":"SettingSet","key":"other","value":"","at":3}"#]);

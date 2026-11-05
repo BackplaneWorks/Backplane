@@ -1,7 +1,8 @@
 // Differential oracle: events.jsonl -> Bend State.replay vs the Rust fold -> equal canonical digests.
 //   bun oracle.mjs --log events.jsonl --bend "/path/digest" [--rust "cmd args"] [--chunk 4194304]
 // Fixture or hub-generated logs only (the store copy never leaves its machine).
-import {readFileSync,writeFileSync,mkdtempSync,rmSync} from 'node:fs';
+import {readFileSync,writeFileSync,mkdtempSync,rmSync,createReadStream} from 'node:fs';
+import {createInterface} from 'node:readline';
 import {tmpdir} from 'node:os';
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
@@ -14,17 +15,20 @@ export function canonical(d){
   return JSON.stringify(go(o));
 }
 export const digest=d=>createHash('sha256').update(canonical(d)).digest('hex');
-export function chunks(logPath,size,dir){
-  const text=readFileSync(logPath,'utf8').split('\n');const files=[];let cur=[],n=0;
+// stream the log (a store copy is 1.5 GB: never read it whole); at most max lines
+export async function chunks(logPath,size,dir,max=Infinity){
+  const files=[];let cur=[],n=0,total=0;
   const flush=()=>{if(!cur.length)return;const f=`${dir}/chunk-${files.length}.jsonl`;writeFileSync(f,cur.join('\n')+'\n');files.push(f);cur=[];n=0};
-  for(const l of text){if(!l)continue;cur.push(l);n+=l.length+1;if(n>=size)flush()}flush();return files;
+  const rl=createInterface({input:createReadStream(logPath),crlfDelay:Infinity});
+  for await(const l of rl){if(!l)continue;if(total>=max)break;cur.push(l);total++;n+=l.length+1;if(n>=size)flush()}
+  rl.close();flush();return files;
 }
 const run=(cmd,files)=>{const [bin,...a]=cmd.split(/\s+/);return JSON.parse(execFileSync(bin,[...a,...files],{maxBuffer:1<<28,env:process.env}).toString())};
 if(import.meta.main){
   const log=arg('log'),bend=arg('bend'),rust=arg('rust'),size=Number(arg('chunk',4194304));
-  const dir=mkdtempSync(tmpdir()+'/oracle-');const files=chunks(log,size,dir);
+  const max=Number(arg('lines','Infinity'));const dir=mkdtempSync(tmpdir()+'/oracle-');const files=await chunks(log,size,dir,max);
   const b=run(bend,files);const hb=digest(b);
-  console.log(JSON.stringify({log,chunks:files.length,bend:{sha256:hb,projects:b.projects.length,threads:b.threads.length,settings:b.settings.length,seq:b.seq}}));
+  console.log(JSON.stringify({log:log.replace(/.*\//,'…/'),lines:max,chunks:files.length,bend:{sha256:hb,projects:b.projects.length,threads:b.threads.length,settings:b.settings.length,seq:b.seq}}));
   let rc=0;
   if(rust){const r=run(rust,files);const hr=digest(r);console.log(JSON.stringify({rust:{sha256:hr,seq:r.seq},equal:hb===hr}));
     if(hb!==hr){rc=1;const cb=JSON.parse(canonical(b)),cr=JSON.parse(canonical(r));
