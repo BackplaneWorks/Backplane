@@ -61,7 +61,7 @@ pub fn tool_summary(name: &str, input: &Value) -> String {
 fn uid(uuid: &str) -> String { if uuid.is_empty() { String::new() } else { format!(":{}", uuid.chars().take(8).collect::<String>()) } }
 
 impl Cx {
-    pub fn new(thread: &str) -> Cx { Cx { thread: thread.into(), ..Default::default() } }
+    pub fn new(thread: &str) -> Cx { Cx { thread: thread.into(), default_account: true, ..Default::default() } }
 
     fn used_event(&mut self, used: u64, at: u64, out: &mut Vec<Value>) {
         if used > 0 && used != self.used { self.used = used; out.push(json!({"$":"UsageSet","thread":self.thread,"used":used,"window":0,"at":at})) }
@@ -129,13 +129,8 @@ impl Cx {
         self.tok_key = s(o, "uuid").to_string(); self.tok_basis = new_basis;
         // Speed.claude
         if o.get("duration_api_ms").is_some() {
-            let api = n(o, "duration_api_ms"); let outt: u64 = o.get("modelUsage").and_then(Value::as_object).map_or(0, |m| m.values().map(|v| n(v, "outputTokens")).sum());
-            let old = self.speed.clone(); let known = !old.is_empty();
-            let rise = |nowv: u64, before: u64| if nowv >= before { nowv - before } else { nowv };
-            let a = if known { rise(api, part(&old, 0)) } else { 0 }; let oo = if known { rise(outt, part(&old, 1)) } else { 0 };
-            let told = a > 0 && oo > 0;
-            let t = |x: u64| if told { x } else { 0 };
-            let v = [api, outt, t(a), t(oo), n(o, "duration_ms"), part(&old, 5) + t(a), part(&old, 6) + t(oo), n(o, "num_turns")].iter().map(u64::to_string).collect::<Vec<_>>().join("/");
+            let outt: u64 = o.get("modelUsage").and_then(Value::as_object).map_or(0, |m| m.values().map(|v| n(v, "outputTokens")).sum());
+            let v = speed_value(&self.speed, n(o, "duration_api_ms"), outt, n(o, "duration_ms"), n(o, "num_turns"));
             self.speed = v.clone(); out.push(setting(format!("turn.speed.{}", self.thread), v, at));
         }
         // Mu.claude: the session's totals per model, logged when they change
@@ -332,6 +327,13 @@ impl Cx {
         fx
     }
 
+    /// Claude.line.v.k 6: Claude started a turn by itself (a background task ended, a wakeup): the thread runs again, with an Act saying why.
+    /// `newest` is the thread's newest entry (the turn's start mark).
+    pub fn wake_start(&mut self, why: &str, newest: &str, seq: u64, at: u64) -> Vec<Value> {
+        let th = self.thread.clone(); self.running = true;
+        vec![json!({"$":"TurnChanged","thread":th,"state":"running","at":at}), setting(format!("turn.from.{th}"), format!("@{newest}"), at), setting(format!("restart.retry.{th}"), String::new(), at), setting(format!("provider.resume.{th}"), String::new(), at),
+            json!({"$":"ActivityLogged","thread":th,"act":hub_id("k", at, seq),"tone":"info","kind":"wake","summary":why,"at":at})]
+    }
     /// The ledger ended the turn (verdicts 3 ok, 4 failed, 5 stopped): the turn's own events, then the rows settled.
     pub fn end(&mut self, verdict: u8, text: &str, at: u64) -> Vec<Value> {
         let mut ev = vec![];
@@ -354,6 +356,22 @@ pub fn todo_summary(input: &Value) -> String {
     let ts: Vec<&Value> = input.get("todos").and_then(Value::as_array).into_iter().flatten().collect();
     let done = ts.iter().filter(|x| st(x) == "completed").count(); let now = ts.iter().find(|x| st(x) == "in_progress").map(|x| s(x, "content")).unwrap_or("");
     format!("{done} of {} done{}", ts.len(), if now.is_empty() { String::new() } else { format!(" · now: {now}") })
+}
+
+/// Speed.value (hub.bend): "<api ms>/<out>/<turn api ms>/<turn out>/<turn wall ms>/<timed api ms>/<timed out>/<steps>": the running totals, the last turn's share and its
+/// wall time, the thread's turns whose share was told, and the turn's model calls. A turn's share is the rise since the last result; a session unseen before is not told.
+pub fn speed_value(old: &str, api: u64, out: u64, wall: u64, steps: u64) -> String {
+    let known = !old.is_empty(); let rise = |nowv: u64, before: u64| if nowv >= before { nowv - before } else { nowv };
+    let a = if known { rise(api, part(old, 0)) } else { 0 }; let o = if known { rise(out, part(old, 1)) } else { 0 };
+    let told = a > 0 && o > 0; let tt = |x: u64| if told { x } else { 0 };
+    [api, out, tt(a), tt(o), wall, part(old, 5) + tt(a), part(old, 6) + tt(o), steps].iter().map(u64::to_string).collect::<Vec<_>>().join("/")
+}
+/// Wake.text: what the Act of a turn Claude started by itself says. A task killed by a Stop woke the agent too, so the status is named.
+pub fn wake_text(lifecycle: bool, rows: &[String], o: &Value) -> String {
+    if lifecycle { return "Resumed after Stop".into() }
+    let sum = s(o, "summary").to_string();
+    let title = if !sum.is_empty() { sum } else { let id = bg::clean(s(o, "task_id")); let r = rows.iter().find(|r| bg::field(r, 0) == id).map(|r| { let t = bg::field(r, 3); if t.is_empty() { bg::doing(r) } else { t } }).unwrap_or_default(); if r.is_empty() { "background work".into() } else { r } };
+    let status = s(o, "status"); format!("Woken: {title}{}", if status.is_empty() || status == "completed" { String::new() } else { format!(" ({status})") })
 }
 
 /// Delta.merge: within one read's lines a run of the main agent's text deltas to one block becomes one line,

@@ -20,7 +20,7 @@ pub struct Ask { pub thread: String, pub kind: String, pub tool: String, pub det
 #[derive(Default)]
 pub struct World { pub deadlines: std::collections::HashSet<String>, pub asks: HashMap<String, Ask>, pub sessions: std::collections::HashSet<(String, String)>, pub threads: HashMap<String, T>, pub roots: HashMap<String, String>, pub st: HashMap<String, String>, seen: usize }
 
-const KEYS: &[&str] = &["thread.parent.", "bg.", "wait.", "work.timeout.seconds", "allowance.claude", "effort.", "buy.", "kicad.ipc", "order.enabled", "agent.lang", "tz.machine", "agent.thinking", "restart.continue", "tok.epoch", "tok.recount", "tok.basis.", "turn.speed.", "turn.models.", "limit.claude."];
+const KEYS: &[&str] = &["watch.", "thread.parent.", "bg.", "wait.", "work.timeout.seconds", "allowance.claude", "effort.", "buy.", "kicad.ipc", "order.enabled", "agent.lang", "tz.machine", "agent.thinking", "restart.continue", "tok.epoch", "tok.recount", "tok.basis.", "turn.speed.", "turn.models.", "limit.claude."];
 fn tracked(k: &str) -> bool { KEYS.iter().any(|p| k == *p || (p.ends_with('.') && k.starts_with(p))) || k.starts_with("usage.") || k.starts_with("tok.key.") }
 
 pub const CARRY_TEXT: &str = "Backplane restarted while you were working. Continue where you left off.";
@@ -75,7 +75,7 @@ impl World {
                 let keep = |new: u64, old: u64| if new == 0 { old } else { new };
                 let ps: Vec<u64> = old.split('/').map(num).collect(); self.st.insert(k, format!("{}/{}", keep(u, *ps.first().unwrap_or(&0)), keep(w, *ps.get(1).unwrap_or(&0)))); }
             "TurnUsage" => { self.st.insert(format!("tok.key.{}", g("thread")), g("key")); self.st.insert(format!("tok.basis.{}", g("thread")), g("basis")); }
-            "WorkSet" => if g("kind") == "bg" { self.st.insert(format!("bg.{}", g("thread")), g("rows")); },
+            "WorkSet" => if g("kind") == "bg" || g("kind") == "watch" { self.st.insert(format!("{}.{}", g("kind"), g("thread")), g("rows")); },
             "SettingSet" => { let k = g("key"); if tracked(&k) { self.st.insert(k.clone(), g("value")); } if k.starts_with("work.deadline.") { if g("value").is_empty() { self.deadlines.remove(&k); } else { self.deadlines.insert(k); } } }
             _ => {}
         }
@@ -85,6 +85,12 @@ impl World {
     pub fn cwd(&self, th: &str) -> String {
         let Some(t) = self.threads.get(th) else { return String::new() };
         if !t.worktree.is_empty() { t.worktree.clone() } else { self.roots.get(&t.project).cloned().unwrap_or_default() }
+    }
+    /// Work.busy (without delegated tasks, which this module does not run): the thread's background and watched rows, ended ones included
+    /// (their outcome is still owed), and what they are called.
+    pub fn work(&self, th: &str) -> (usize, Vec<String>) {
+        let rows: Vec<String> = super::bg::lines(self.setting(&format!("bg.{th}"))).into_iter().chain(super::bg::lines(self.setting(&format!("watch.{th}")))).collect();
+        (rows.len(), rows.iter().map(|l| super::bg::work_title(l)).collect())
     }
     pub fn running(&self, th: &str) -> bool { self.threads.get(th).map_or(false, |t| t.turn == "running") }
 

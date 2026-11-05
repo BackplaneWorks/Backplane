@@ -510,3 +510,43 @@ fn norm_steps(s: &str, roots: &[&str]) -> String {
     assert_eq!(gs, ws); let (mut a, mut b): (Vec<_>, Vec<_>) = (g.iter().filter(|x| x.contains("\"tone\":\"step\"")).collect(), w.iter().filter(|x| x.contains("\"tone\":\"step\"")).collect()); a.sort(); b.sort(); assert_eq!(a, b);
     ag.shutdown();
 }
+
+// ---- laws that are about what the hub does with a message and a restart ----
+/// The log after messages sent to an idle thread, into a running turn, and into one that is streaming, by the person and by another thread.
+async fn deliveries() -> Vec<Value> {
+    let sd = dir("dl-bin"); perf_standin(&sd, 5);
+    let (hub, ag, _h, _w) = start("dl", |w| base_log(w, 2, ""), |_| Cli::standin(&sd)).await; let other = "t1700001001-1"; let from = len(&hub).await;
+    rpc(&hub, "turn.start", json!({"thread":T1,"text":"zqshort one"})).await; tokio::time::sleep(Duration::from_millis(400)).await;       // idle -> starts
+    rpc(&hub, "turn.start", json!({"thread":T1,"text":"two"})).await; tokio::time::sleep(Duration::from_millis(200)).await;                  // into the running turn
+    let (_, r) = rpc_mcp(&ag, other, "", "tools/call", json!({"name":"thread_send","arguments":{"threadId":T1,"text":"three"}})).await; assert_eq!(r["result"]["isError"], false); // another thread's message into it
+    tokio::time::sleep(Duration::from_millis(300)).await; let ev = log_from(&hub, from).await; ag.shutdown(); ev
+}
+fn held(ev: &[Value]) -> bool { ev.iter().any(|e| is(e, "TurnQueued") && !e["msg"].as_str().unwrap_or("").starts_with("handoff:")) }
+#[tokio::test(flavor = "multi_thread")] async fn deliver_never_waits() { assert!(!held(&deliveries().await)) }
+#[tokio::test(flavor = "multi_thread")] async fn deliver_held_go() { let ev = deliveries().await; assert!(!held(&ev) && ev.iter().filter(|e| turn_is(e, "running")).count() >= 1) }
+#[tokio::test(flavor = "multi_thread")] async fn deliver_held_steer() { let ev = deliveries().await; assert!(!held(&ev) && ev.iter().filter(|e| is(e, "MessagePosted") && e["role"] == "user").count() == 3) }
+#[tokio::test(flavor = "multi_thread")] async fn deliver_held_steer_k() { assert!(!held(&deliveries().await)) }
+#[tokio::test(flavor = "multi_thread")] async fn deliver_held_restart() {
+    let sd = dir("dr-bin"); perf_standin(&sd, 1);
+    let (hub, ag, _h, _w) = start("dr", |w| running_log(w, ""), |_| Cli::standin(&sd)).await; tokio::time::sleep(Duration::from_millis(500)).await; assert!(!held(&log_from(&hub, 0).await)); ag.shutdown()
+}
+#[tokio::test(flavor = "multi_thread")] async fn deliver_claude_running() {
+    let ev = deliveries().await; let i = ev.iter().position(|e| is(e, "MessagePosted") && e["text"] == "two").unwrap();
+    assert_eq!((ev[i + 1]["$"].as_str().unwrap(), ev[i + 1]["state"].as_str().unwrap()), ("TurnChanged", "running")); assert!(!ev.iter().any(|e| is(e, "QueueTaken")))
+}
+/// post_running_delivers / inbox_running_delivers: a message into a running turn lands the same whoever sent it: posted, the turn running again, the same marks
+#[tokio::test(flavor = "multi_thread")] async fn post_running_delivers() { let ev = deliveries().await; let i = ev.iter().position(|e| is(e, "MessagePosted") && e["text"] == "two").unwrap(); assert!(is(&ev[i + 1], "TurnChanged") && ev[i + 2]["key"].as_str().unwrap().starts_with("turn.from.")) }
+#[tokio::test(flavor = "multi_thread")] async fn inbox_running_delivers() {
+    let ev = deliveries().await; let i = ev.iter().position(|e| is(e, "MessagePosted") && e["text"] == "three").unwrap();
+    assert!(is(&ev[i + 1], "MessageFrom") && turn_is(&ev[i + 2], "running") && ev[i + 3]["key"].as_str().unwrap().starts_with("turn.from."))
+}
+async fn recovered(extra: &str, state: &str) -> Vec<Value> {
+    let sd = dir(&format!("rc-{state}-bin")); perf_standin(&sd, 1);
+    let (hub, ag, _h, _w) = start(&format!("rc-{state}"), |w| { let l = running_log(w, extra); if state == "idle" { l.replace("\"state\":\"running\"", "\"state\":\"completed\"") } else { l } }, |_| Cli::standin(&sd)).await;
+    tokio::time::sleep(Duration::from_millis(400)).await; let ev = log_from(&hub, 0).await; ag.shutdown(); ev
+}
+#[tokio::test(flavor = "multi_thread")] async fn recover_interrupts_running() { let ev = recovered("{\"$\":\"SettingSet\",\"key\":\"restart.continue\",\"value\":\"off\",\"at\":1700000101}\n", "run").await; let last = ev.iter().rev().find(|e| is(e, "TurnChanged")).unwrap(); assert_eq!(last["state"], "interrupted") }
+#[tokio::test(flavor = "multi_thread")] async fn recover_closes_asks() { let ask = format!("{{\"$\":\"AskOpened\",\"id\":\"q9\",\"thread\":\"{T1}\",\"kind\":\"approval\",\"tool\":\"Bash\",\"detail\":\"ls\",\"options\":\"\",\"at\":1700000101}}\n"); let ev = recovered(&ask, "run").await; assert!(ev.iter().any(|e| is(e, "AskClosed") && e["id"] == "q9")) }
+#[tokio::test(flavor = "multi_thread")] async fn recover_keeps_order_ask() { let ask = format!("{{\"$\":\"AskOpened\",\"id\":\"q8\",\"thread\":\"{T1}\",\"kind\":\"input\",\"tool\":\"order_ask.typed\",\"detail\":\"Ship to which country?\",\"options\":\"\",\"at\":1700000101}}\n"); let ev = recovered(&ask, "idle").await; assert!(!ev.iter().any(|e| is(e, "AskClosed"))) }
+#[tokio::test(flavor = "multi_thread")] async fn recover_leaves_idle() { let ev = recovered("", "idle").await; assert!(!ev.iter().any(|e| turn_is(e, "interrupted")) && !ev.iter().any(|e| e["kind"] == "restart")) }
+#[tokio::test(flavor = "multi_thread")] async fn recover_empty_nothing() { let sd = dir("re-bin"); perf_standin(&sd, 1); let (hub, ag, _h, _w) = start("re", |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await; let n = len(&hub).await; tokio::time::sleep(Duration::from_millis(300)).await; assert_eq!(len(&hub).await, n); ag.shutdown() }

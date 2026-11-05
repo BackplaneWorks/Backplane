@@ -16,6 +16,10 @@ pub fn show(ls: &[String]) -> String { ls.join("\n") }
 pub fn log(th: &str) -> String { format!("@sub:{th}") }
 /// Bg.kind: the word for a task type.
 pub fn kind(tt: &str) -> &'static str { match tt { "local_agent" | "remote_agent" | "in_process_teammate" => "subagent", "local_bash" => "shell", "local_workflow" => "workflow", t if t.starts_with("monitor_") => "monitor", _ => "task" } }
+/// Bg.add: a task started (listed once, last)
+pub fn add(ls: &[String], id: &str, doing: &str) -> Vec<String> { let mut v = ls.to_vec(); if !has(ls, id) { v.push(line(id, doing)) } v }
+/// Bg.set: what task id does now (a task not listed stays out)
+pub fn set(ls: &[String], id: &str, doing: &str) -> Vec<String> { ls.iter().map(|l| if is(l, id) { format!("{}{}", line(id, doing), rest(l)) } else { l.clone() }).collect() }
 /// Bg.start: listed once, last, with its call, title and kind.
 pub fn start(ls: &[String], id: &str, doing: &str, call: &str, title: &str, kind: &str) -> Vec<String> {
     let mut v = ls.to_vec(); if !has(ls, id) { v.push(format!("{}\t{}\t{}\t{}", line(id, doing), clean(call), clean(title), clean(kind))) } v
@@ -43,7 +47,8 @@ pub fn listed(o: &serde_json::Value) -> bool {
 
 /// Lost.why / Lost.row / Lost.text / Lost.new / Lost.unknown (hub.bend): the work lost when the process that owned it goes.
 pub fn lost_why(why: &str) -> String { match why { "restart" => "A restart of Backplane".into(), "exit" => "The agent process exiting".into(), "replaced" => "Restarting the agent for a new model or mode".into(), w => w.to_string() } }
-fn work_title(l: &str) -> String { let t = field(l, 3); if t.is_empty() { doing(l) } else { t } }
+/// Work.row.title: a row's title, else what it does
+pub fn work_title(l: &str) -> String { let t = field(l, 3); if t.is_empty() { doing(l) } else { t } }
 pub fn lost_text(ls: &[String], why: &str) -> String {
     let rows: String = ls.iter().map(|l| format!("\n- {} {}: {}{}", { let k = field(l, 4); if k.is_empty() { "task".to_string() } else { k } }, field(l, 0), work_title(l), if ended(l) { format!(" (it had ended: {}, its outcome not yet handed to you)", doing(l).strip_prefix(ENDED).unwrap_or("")) } else { String::new() })).collect();
     format!("[Backplane] {} ended your background work. Ownership was lost; the outcome is unknown.{rows}\nCheck what finished before rerunning.", lost_why(why))
