@@ -128,8 +128,10 @@ export class TimelineScroller {
     if (changed || followChanged) {
       if (!defer) this._request('update');
       else {
-        // ('update' reads the list's height again: a switch may change it)
-        this._view = null;
+        // (a switch may change the list's height: read again with the rows'
+        // sizes, in the same layout, not now before the plan: a forced layout
+        // of the patched page of its own)
+        this._viewStale = true;
         if (!this._pending || !['restore', 'bottom', 'key'].includes(this._pending.mode)) this._pending = { mode: 'update' };
         // (a host that never refreshes still gets its plan, before the frame)
         if (!this._deferring) { this._deferring = true;queueMicrotask(() => { this._deferring = false;if (this._pending && !this._busy) this.refresh(); }); }
@@ -278,7 +280,13 @@ export class TimelineScroller {
         // track can be much shorter than the measured rows, especially during
         // streaming. Feeding that temporary browser clamp into readback used
         // to translate the entire track by hundreds of pixels.
-        if (this._readSizes()) {
+        const sized = this._readSizes();
+        if (this._viewStale) {
+          this._viewStale = false;
+          const view = this.el.clientHeight;
+          if (view !== plan.view) { this._view = view;this._pending = { mode: 'measure', top: plan.top };continue; }
+        }
+        if (sized) {
           this._pending = { mode: 'measure', top: plan.top };
           continue;
         }
