@@ -109,7 +109,7 @@ mod tests {
         let cli = crate::agents::proc::Cli::from_env();
         // the resolver one_shot, the accounts manager and the CLI probes all use: a copy without a stand-in folder has no agent to run
         let (c, x) = (cli.resolve("claude"), cli.resolve("codex"));
-        let mgr = crate::settings::accounts_io::Accounts::open(&h, Arc::new({ let cli = cli.clone(); move |p: &str| cli.resolve(p) }));
+        let mgr = Arc::new(crate::settings::accounts_io::Accounts::open(&h, Arc::new({ let cli = cli.clone(); move |p: &str| cli.resolve(p) })));
         let s = mgr.request(&json!({"op":"add","provider":"claude","label":"Work"})).await; let id = s["profiles"][0]["id"].as_str().unwrap_or("").to_string();
         let _ = mgr.request(&json!({"op":"status","profile":id})).await; let _ = mgr.request(&json!({"op":"login","profile":id})).await;
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
