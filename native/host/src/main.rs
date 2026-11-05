@@ -1,6 +1,6 @@
 //! backplane-hub: the Backplane hub for native clients (GPUI, SwiftUI, Compose).
 //! HTTP + authenticated WebSocket; renderer `mobile`; the picture comes from the presenter.
-mod agents; mod api; mod auth; mod cbor; mod files; mod hub; mod model; mod presenter; mod store;
+mod agents; mod api; mod auth; mod cbor; mod delta; mod files; mod hub; mod model; mod presenter; mod store;
 
 use anyhow::{Context, Result};
 use auth::Req;
@@ -137,7 +137,7 @@ async fn socket_inner(hub: Arc<Hub>, s: TcpStream, cbor_wanted: bool) -> Result<
                 due = None; let rev = hub.revision().await;
                 if rev != conn.lastrev { tx.send(pack(&conn, &hub.notice(&conn, rev))).await?; }
             }
-            f = outbox.recv() => { let Some(f) = f else { return Ok(()) }; tx.send(pack(&conn, &f)).await?; }
+            f = outbox.recv() => { let Some(f) = f else { return Ok(()) }; tx.send(match f { hub::Out::Value(v) => pack(&conn, &v), hub::Out::Raw(b) => Message::Binary(b.into()) }).await?; }
             _ = beat.tick() => { tx.send(pack(&conn, &json!({"t":"hb"}))).await?; }
         }
     }
@@ -188,7 +188,7 @@ async fn wire(hub: Arc<Hub>, s: TcpStream, since: usize, origin: String) -> Resu
                 }
             }
             d = deltas.recv() => { if let Ok(f) = d { tx.send(pack(&conn, &f)).await?; } }
-            f = outbox.recv() => { let Some(f) = f else { return Ok(()) }; tx.send(pack(&conn, &f)).await?; }
+            f = outbox.recv() => { let Some(f) = f else { return Ok(()) }; tx.send(match f { hub::Out::Value(v) => pack(&conn, &v), hub::Out::Raw(b) => Message::Binary(b.into()) }).await?; }
             _ = beat.tick() => { tx.send(pack(&conn, &json!({"t":"hb"}))).await?; }
         }
     }
@@ -265,7 +265,7 @@ mod tests {
     use super::*;
     // law hub_frames_cbor: for every text t, the hub's frame for it is one binary CBOR frame
     #[test] fn hub_frames_cbor() {
-        let (c, _) = (Conn { client: 1, gen: "1".into(), view_id: String::new(), target: Value::Null, cbor: false, lastrev: 0 }, ());
+        let (c, _) = (Conn { sent: vec![], client: 1, gen: "1".into(), view_id: String::new(), target: Value::Null, cbor: false, lastrev: 0 }, ());
         for t in ["", "x", "日本語🙂", "reply", "\u{0}\n\t", &"y".repeat(70000)] {
             let m = pack(&c, &json!({"t": t}));
             match m { Message::Binary(b) => assert_eq!(cbor::decode(&b).unwrap(), json!({"t": t})), other => panic!("not binary: {other:?}") }

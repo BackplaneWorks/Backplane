@@ -34,6 +34,7 @@ struct Ev<'a> {
     #[serde(borrow)] env: Option<Cow<'a, str>>, #[serde(borrow)] branch: Option<Cow<'a, str>>, #[serde(borrow)] worktree: Option<Cow<'a, str>>,
     #[serde(borrow)] provider: Option<Cow<'a, str>>, #[serde(borrow)] model: Option<Cow<'a, str>>, #[serde(borrow)] session: Option<Cow<'a, str>>,
     #[serde(borrow)] state: Option<Cow<'a, str>>, count: Option<u64>, archived: Option<bool>,
+    #[serde(borrow)] key: Option<Cow<'a, str>>, #[serde(borrow)] value: Option<Cow<'a, str>>, #[serde(borrow)] role: Option<Cow<'a, str>>,
 }
 
 /// core/model.bend Link.from: "t:<thread>:<rest>" names the thread a message came from.
@@ -44,7 +45,7 @@ pub fn link_from(id: &str) -> &str {
 /// What the hub needs to know of a thread without reading its entries (agents: where to run; views: its state).
 #[derive(Default, Clone, Debug)]
 pub struct ThreadMeta { pub project: String, pub title: String, pub env: String, pub branch: String, pub worktree: String, pub provider: String, pub model: String,
-    pub session: String, pub turn: String, pub pending: u64, pub created: u64, pub activity: u64, pub archived: bool, pub deleted: bool }
+    pub session: String, pub last_user_msg: String, pub last_entry: String, pub turn: String, pub pending: u64, pub created: u64, pub activity: u64, pub archived: bool, pub deleted: bool }
 #[derive(Default, Clone, Debug)]
 pub struct ProjectMeta { pub title: String, pub root: String, pub removed: bool }
 
@@ -56,6 +57,9 @@ pub struct Model {
     sent: HashMap<String, Vec<Ent>>,        // thread -> messages it sent into other threads
     pub threads: HashMap<String, ThreadMeta>,
     pub projects: HashMap<String, ProjectMeta>,
+    /// setting key -> the 1-based log line of its latest value (an empty value removes the key). Bounded by the
+    /// number of distinct keys, not by events; the value is read from the log on demand (Hub::setting).
+    settings: std::collections::BTreeMap<String, u32>,
 }
 
 fn before_seq(v: &[Ent], s: u64) -> usize { v.partition_point(|e| (e.seq as u64) < s) }
@@ -76,6 +80,7 @@ impl Model {
             "MessagePosted" => (t(&e.thread), t(&e.msg)),
             "ActivityLogged" => (t(&e.thread), t(&e.act)),
             "Reminded" => (t(&e.thread), format!("remind:{}:{}", t(&e.id), e.at.unwrap_or(0))),
+            "SettingSet" => { let k = t(&e.key); if e.value.as_deref().unwrap_or("").is_empty() { self.settings.remove(&k); } else { self.settings.insert(k, seq); } return }
             "ProjectCreated" => { self.projects.insert(t(&e.id), ProjectMeta { title: t(&e.title), root: t(&e.root), removed: false }); return }
             "ProjectRemoved" => { if let Some(p) = self.projects.get_mut(&t(&e.id)) { p.removed = true } return }
             "ThreadCreated" => { self.threads.insert(t(&e.id), ThreadMeta { project: t(&e.project), title: t(&e.title), env: t(&e.env), branch: t(&e.branch), worktree: t(&e.worktree),
@@ -90,7 +95,10 @@ impl Model {
             "ThreadDeleted" => { if let Some(th) = self.threads.get_mut(&t(&e.id)) { th.deleted = true } return }
             _ => return,
         };
-        if let Some(th) = self.threads.get_mut(&thread) { th.activity = e.at.unwrap_or(th.activity) }
+        if let Some(th) = self.threads.get_mut(&thread) {
+            th.activity = e.at.unwrap_or(th.activity); th.last_entry = id.clone();
+            if &*e.t == "MessagePosted" && e.role.as_deref() == Some("user") { th.last_user_msg = id.clone(); }
+        }
         self.next_ord += 1;
         let ent = Ent { seq, ord: self.next_ord };
         self.all.push(seq);
@@ -134,6 +142,13 @@ impl Model {
         Ok(Page { ids, below, above, rows })
     }
     pub fn entries(&self) -> u32 { self.next_ord }
+    /// The log line (1-based) of a setting's latest value, if it has one.
+    pub fn setting_seq(&self, key: &str) -> Option<u32> { self.settings.get(key).copied() }
+    /// Keys starting with `prefix`, in order, with the log line of their latest value.
+    pub fn settings_with_prefix<'a>(&'a self, prefix: &'a str) -> impl Iterator<Item = (&'a str, u32)> + 'a {
+        self.settings.range(prefix.to_string()..).take_while(move |(k, _)| k.starts_with(prefix)).map(|(k, s)| (k.as_str(), *s))
+    }
+    pub fn settings_count(&self) -> usize { self.settings.len() }
     pub fn all_ents(&self) -> impl Iterator<Item = Ent> + '_ { self.all.iter().enumerate().map(|(i, s)| Ent { seq: *s, ord: i as u32 + 1 }) }
 }
 
@@ -169,6 +184,17 @@ mod tests {
             assert_eq!(Value::Array(page.rows.iter().map(Row::json).collect()), p["rows"], "rows {ctx}"); n += 1;
         }
         assert!(n >= 80, "{n} pages compared");
+    }
+    #[test] fn settings_hold_the_latest_value_by_key_and_removal() {
+        let t = std::env::temp_dir().join(format!("bp-model-set-{}.jsonl", std::process::id()));
+        std::fs::write(&t, "{\"$\":\"SettingSet\",\"key\":\"restart.continue\",\"value\":\"on\",\"at\":1}\n{\"$\":\"SettingSet\",\"key\":\"tok.a\",\"value\":\"1\",\"at\":1}\n{\"$\":\"SettingSet\",\"key\":\"restart.continue\",\"value\":\"off\",\"at\":2}\n{\"$\":\"SettingSet\",\"key\":\"tok.a\",\"value\":\"\",\"at\":3}\n").unwrap();
+        let s = Store::open(&t).unwrap(); let m = Model::build(&s).unwrap();
+        assert_eq!(m.setting_seq("restart.continue"), Some(3)); assert_eq!(m.setting_seq("tok.a"), None); assert_eq!(m.settings_count(), 1);
+        assert!(s.get(m.setting_seq("restart.continue").unwrap() as usize - 1).unwrap().contains("\"off\""));
+    }
+    #[test] fn threads_know_their_last_user_message_and_newest_entry() {
+        let s = store(); let m = Model::build(&s).unwrap();
+        let t7 = &m.threads["t7"]; assert_eq!(t7.last_user_msg, "u19"); assert_eq!(t7.last_entry, "u19");
     }
     #[test] fn a_torn_tail_does_not_move_the_ordinals() {
         let t = std::env::temp_dir().join(format!("bp-model-torn-{}.jsonl", std::process::id()));
