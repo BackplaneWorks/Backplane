@@ -41,14 +41,30 @@ pub fn open(home: &std::path::Path, host: &str, port: u16) -> Result<(Arc<Regist
 /// Call after the token exists and before the listener accepts. Returns the routes so the listener can
 /// report its confirmed addresses (`address`) and the machine finder the owner's machines (`machines`);
 /// until it does, invitations carry only the Host header's route and /auth/known knows this listener only.
+static PEERING: std::sync::OnceLock<Arc<super::peering::Peering>> = std::sync::OnceLock::new();
+/// The peer machinery (handshake, signed intake), for the far routes and the tailnet listener.
+pub fn peering() -> Option<Arc<super::peering::Peering>> { PEERING.get().cloned() }
 static ROUTES: std::sync::OnceLock<Arc<AuthRoutes>> = std::sync::OnceLock::new();
 /// The installed routes, for the listener (`address(link)` once Serve/the tailnet bind is confirmed) and the
 /// machine finder (`machines(json, peers)`). None before `start`.
 pub fn routes() -> Option<Arc<AuthRoutes>> { ROUTES.get().cloned() }
 
-pub fn start(hub: &Arc<Hub>, host: &str, port: u16) -> Arc<AuthRoutes> {
+pub fn start(hub: &Arc<Hub>, host: &str, port: u16) -> Arc<AuthRoutes> { start_with(hub, host, port, false) }
+/// `tailnet`: this hub uses Tailscale (started without --no-tailscale): it names itself by its MagicDNS name and pairs with
+/// every machine of the owner's it finds, not only those BACKPLANE_PEERS names.
+pub fn start_with(hub: &Arc<Hub>, host: &str, port: u16, tailnet: bool) -> Arc<AuthRoutes> {
     match open(&hub.cfg.home, host, port) {
-        Ok((reg, routes)) => { hub.register_rpc(Arc::new(super::devices::Devices)); hub.set_pairing(reg, Arc::new(Wired { routes: routes.clone(), hub: Arc::downgrade(hub) })); let _ = ROUTES.set(routes.clone()); routes }
+        Ok((reg, routes)) => {
+            hub.register_rpc(Arc::new(super::devices::Devices));
+            let table = super::peers::PeerTable::new();
+            let peering = Arc::new(super::peering::Peering::new(hub.cfg.home.clone(), reg.clone(), table.clone(), routes.clone(), tailnet, host, port));
+            hub.register_http(Arc::new(super::peerhttp::PeerRoutes(peering.clone())));
+            hub.set_pairing(reg, Arc::new(Wired { routes: routes.clone(), hub: Arc::downgrade(hub) }));
+            let _ = ROUTES.set(routes.clone());
+            let _ = PEERING.set(peering.clone());
+            if tokio::runtime::Handle::try_current().is_ok() { super::peerhttp::spawn_loops(hub.clone(), table, peering) }
+            routes
+        }
         Err(e) => { eprintln!("backplane: {e}"); std::process::exit(1) }
     }
 }
