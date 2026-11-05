@@ -8,6 +8,7 @@ export function xinput(display){
   return {
     display,
     geometry(name){const id=xd('search','--onlyvisible','--name',name).split('\n')[0];const g=Object.fromEntries(xd('getwindowgeometry','--shell',id).split('\n').map(l=>l.split('=')));return {id,x:+g.X,y:+g.Y,w:+g.WIDTH,h:+g.HEIGHT}},
+    geometryByClass(cls){const id=xd('search','--onlyvisible','--class',cls).split('\n')[0];const g=Object.fromEntries(xd('getwindowgeometry','--shell',id).split('\n').map(l=>l.split('=')));return {id,x:+g.X,y:+g.Y,w:+g.WIDTH,h:+g.HEIGHT}},
     focus(id){xd('windowfocus','--sync',id)},
     move(x,y){xd('mousemove',String(Math.round(x)),String(Math.round(y)))},
     click(x,y,button=1){this.move(x,y);xd('click',String(button))},

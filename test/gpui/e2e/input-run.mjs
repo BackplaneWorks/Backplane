@@ -1,6 +1,6 @@
 // The must-pass GPUI input actions with real OS input on Xvfb (Boat): drag-select, Ctrl-C, paste an image, drop a file, IME, paperclip, link click.
 // bun test/gpui/e2e/input-run.mjs --hub-bin PATH --gpui-bin PATH [--out DIR]   (Boat only; see boat-run.sh input-run)
-import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';import {spawn,execFileSync} from 'node:child_process';import {resolve} from 'node:path';
+import {readFileSync,writeFileSync,mkdirSync,appendFileSync,existsSync} from 'node:fs';import {spawn,execFileSync} from 'node:child_process';import {resolve} from 'node:path';
 import {startDisplay,installMissing} from './lib/capture.mjs';import {startFixtureHub} from './lib/hubfx.mjs';import {Input,diffPixels} from './input/driver.mjs';import {startIme} from './input/ime.mjs';import {viewClient} from './lib/../../perf/view.mjs';import {preflight} from './input/preflight.mjs';
 const arg=(k,d)=>{const i=process.argv.indexOf('--'+k);return i>=0?process.argv[i+1]:d};const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const hubBin=resolve(arg('hub-bin')),gpuBin=resolve(arg('gpui-bin')),out=resolve(arg('out','out/e2e/input'));mkdirSync(out,{recursive:true});
@@ -26,9 +26,23 @@ const fx=await startFixtureHub({bin:hubBin,root:resolve('out/e2e-run/input'),por
 try{
   const sf=out+'/hold.script.json';const holdSteps=Array.from({length:80},()=>[{wait:1500},{read:'composer'}]).flat();// (the client's own paperclip click is a separate, later client run: it must never land inside another action)
   writeFileSync(sf,JSON.stringify([{select:0},...holdSteps])); // G6: the client reports its composer text every 1.5 s
-  const metrics=[];let buf='';const g=spawn(gpuBin,['--url',fx.state.url,'--token-file',fx.state.root+'/home/token','--script',sf],{env:{...dsp.env,...ime.env,HOME:fx.state.root+'/fakehome',BACKPLANE_GPUI_RECTS:'1'},stdio:['ignore','ignore','pipe']});
-  g.stderr.on('data',d=>{buf+=d;let i;while((i=buf.indexOf('\n'))>=0){const l=buf.slice(0,i);buf=buf.slice(i+1);const k=l.indexOf('GPUI_METRIC ');if(k>=0)try{metrics.push(JSON.parse(l.slice(k+12)))}catch{}}});
-  await sleep(6000);const inp=new Input(dsp.display,out);const win=inp.win('backplane');inp.xi.focus(win.id);await sleep(500);
+  const metrics=[];let buf='';const clientLog=out+'/client.stderr.log',clientOut=out+'/client.stdout.log';writeFileSync(clientLog,'');writeFileSync(clientOut,'');
+  const hubLogCopy=()=>{try{execFileSync('cp',[fx.state.root+'/hub.log',out+'/hub.log'])}catch{}};
+  const tokenPath=fx.state.root+'/home/token';
+  const g=spawn(gpuBin,['--url',fx.state.url,'--token-file',tokenPath,'--script',sf],{env:{...dsp.env,...ime.env,HOME:fx.state.root+'/fakehome',BACKPLANE_GPUI_RECTS:'1'},stdio:['ignore','pipe','pipe']});
+  let gExit=null;g.on('exit',(c,sg)=>{gExit={code:c,signal:sg}});g.stdout.on('data',d=>appendFileSync(clientOut,d));
+  g.stderr.on('data',d=>{appendFileSync(clientLog,d);buf+=d;let i;while((i=buf.indexOf('\n'))>=0){const l=buf.slice(0,i);buf=buf.slice(i+1);const k=l.indexOf('GPUI_METRIC ');if(k>=0)try{metrics.push(JSON.parse(l.slice(k+12)))}catch{}}});
+  const inp=new Input(dsp.display,out);let win=null;
+  for(let k=0;k<40&&!win;k++){await sleep(1000);for(const find of [()=>inp.win('backplane'),()=>inp.win('GPUI'),()=>inp.winClass('backplane')])try{win=find();if(win)break}catch{}if(gExit&&!win)break}
+  if(!win){ // a missing window is a HARNESS failure with its reasons in the artifact, never a quiet exit 0
+    hubLogCopy();const tail=(f,n)=>{try{return readFileSync(f,'utf8').split('\n').slice(-n).join('\n')}catch{return '(no file)'}};
+    let tree='';try{tree=execFileSync('xwininfo',['-root','-tree'],{env:dsp.env,encoding:'utf8'}).split('\n').slice(0,40).join('\n')}catch(e){tree='xwininfo failed: '+e.message}
+    summary.verdict='harness';summary.reason='GPUI window never appeared (client '+(gExit?('exited '+JSON.stringify(gExit)):'still running')+')';
+    summary.windowSearch={clientExit:gExit,clientAlive:!gExit,tokenFileExists:existsSync(tokenPath),assetsDirExists:existsSync(process.env.BACKPLANE_GPUI_ASSETS||''),assetsDir:process.env.BACKPLANE_GPUI_ASSETS||null,gpuiBin,url:fx.state.url,clientStderrTail:tail(clientLog,40),clientStdoutTail:tail(clientOut,10),hubLogTail:tail(out+'/hub.log',30),metricsSeen:metrics.map(m=>m.event).slice(0,20),xwininfoTree:tree};
+    summary.actions=Object.fromEntries(ACTIONS.map(a=>[a,{ok:null,status:'harness',evidence:{reason:summary.reason}}]));
+    try{g.kill('SIGTERM')}catch{}try{portal?.kill('SIGTERM')}catch{}try{ime.stop()}catch{}try{await fx.stop()}catch{}dsp.stop();
+    writeFileSync(out+'/input-summary.json',JSON.stringify(summary,null,1));console.error('HARNESS FAILURE: '+summary.reason+'\n'+summary.windowSearch.clientStderrTail);process.exit(4)}
+  inp.xi.focus(win.id);await sleep(1500);
   summary.window=win;summary.gpu=metrics.find(m=>m.event==='gpu')||null;
   // regions the client reports (G3 layout rects, window-relative physical px); the composer is the click/paste/drop/IME target
   const lay=[...metrics].reverse().find(m=>m.event==='layout');const flat={};const walk=(p,v)=>{if(v&&typeof v==='object'&&'x' in v&&'w' in v)flat[p]=v;else if(v&&typeof v==='object')for(const[k,x]of Object.entries(v))walk(p?p+'/'+k:k,x)};walk('',lay?.rects||{});
@@ -87,7 +101,7 @@ try{
    await Promise.race([new Promise(r=>g2.on('close',()=>r())),sleep(40000)]);try{g2.kill('SIGTERM')}catch{}await sleep(800);
    summary.paperclipScriptedClick={clickEvent:m2.find(m=>m.event==='click'&&m.id==='ui:Attach')||null,portalOpenFileCallsAdded:cnt()-n0};
    const pc=summary.actions.paperclip;if(pc&&pc.status!=='harness'&&pc.ok===false&&summary.paperclipScriptedClick.portalOpenFileCallsAdded>=1){pc.status='unverified';pc.evidence.note2='the client\'s own click on ui:Attach reaches the OS chooser (portal called), but the OS click aimed at the reported rect did not: the rect does not coincide with the painted button (about 25 px low), so the real click is unverified, not failed'}}
-}finally{try{portal?.kill('SIGTERM')}catch{}try{ime.stop()}catch{}await fx.stop();dsp.stop()}
+}finally{try{execFileSync('cp',[fx.state.root+'/hub.log',out+'/hub.log'])}catch{}try{portal?.kill('SIGTERM')}catch{}try{ime.stop()}catch{}await fx.stop();dsp.stop()}
 // an action only counts when evidence says so; pass also needs the Rust hub on real hardware (CONTRACT.md), which this Boat run is not
 summary.verdict=Object.keys(harnessActions).length?'app+harness':'app';for(const a of Object.values(summary.actions))if(!['harness','error','unverified'].includes(a.status))a.status=a.ok?'partial':'fail'; // the preflight passed, so a false below is the app's
 writeFileSync(out+'/input-summary.json',JSON.stringify(summary,null,1));console.log(JSON.stringify({actions:Object.fromEntries(Object.entries(summary.actions).map(([k,v])=>[k,v.ok])),blocked:summary.blocked},null,1));
