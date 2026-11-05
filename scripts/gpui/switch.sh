@@ -35,6 +35,8 @@ MEM=${SWITCH_MEM:-3700M}
 SRC=${SWITCH_SOURCE:-$HOME/.backplane-gpui-copy}
 HUB_BIN=${HUB_BIN:-$ROOT/build/gpui/hub/prov/backplane-hub-full}
 POLICY_BIN=${POLICY_BIN:-$ROOT/build/gpui/slim/bp-policy-bp}
+# the "live" store: ~/.backplane-bend, or SWITCH_LIVE=<dir> (a synthetic one, for tests; the real one still needs SWITCH_ALLOW_LIVE=person)
+LIVE=${SWITCH_LIVE:-$HOME/.backplane-bend}
 # the newest commit-named client build (client-<10 hex>), with its assets beside it; CLIENT_BIN overrides
 DB=$ROOT/build/gpui/desktop-bin
 # build/gpui/desktop-bin/CURRENT names the client to use (one line: a file name beside it), set by whoever lands a newer build
@@ -65,13 +67,14 @@ guards() {
   case "$PORT" in ''|*[!0-9]*) die "bad port";; esac
   case "$SW" in "$HOME/.backplane-bend"*|"$HOME/.local/share/backplane"*|"$ROOT"*|"$HERE"*) die "state dir $SW is not allowed there";; esac
   case "$SW" in ""|"/"|"$HOME"|"$HOME/") die "state dir $SW is not allowed";; esac
-  [ "$SRC" != live ] || [ "${SWITCH_ALLOW_LIVE:-}" = person ] || die "SWITCH_SOURCE=live reads ~/.backplane-bend: only with SWITCH_ALLOW_LIVE=person, set by the person"
+  [ "$SRC" != live ] || [ "$(realpath -m "$LIVE")" != "$(realpath -m "$HOME/.backplane-bend")" ] || [ "${SWITCH_ALLOW_LIVE:-}" = person ] || die "SWITCH_SOURCE=live reads ~/.backplane-bend: only with SWITCH_ALLOW_LIVE=person, set by the person"
   [ -x "$HUB_BIN" ] || die "no hub binary $HUB_BIN"
-  [ -x "$POLICY_BIN" ] || die "no policy helper $POLICY_BIN"
+  # a hub without --policy-bin (Bend off the runtime) needs no helper; one with it does
+  if "$HUB_BIN" --help 2>&1 | grep -q -- --policy-bin; then USE_POLICY=1; [ -x "$POLICY_BIN" ] || die "no policy helper $POLICY_BIN"; else USE_POLICY=0; fi
 }
 
 source_file() {
-  if [ "$SRC" = live ]; then echo "$HOME/.backplane-bend/events.jsonl"; else echo "$SRC/events.jsonl"; fi
+  if [ "$SRC" = live ]; then echo "$LIVE/events.jsonl"; else echo "$SRC/events.jsonl"; fi
 }
 
 # a small synthetic home: 3 projects (folders under $SW/proj), 12 threads with a few messages each; nothing from any real store
@@ -92,6 +95,11 @@ open(f"{H}/events.jsonl","w").write("".join(json.dumps(e,separators=(",",":"))+"
 PY
 }
 
+# the memory bar is HUB RSS only (not the helper, not agents): the peak while starting and the last reading, from the sampler's column 2
+rss_summary() {
+  [ -f "$SW/rss.tsv" ] || return 0
+  awk 'NF>=2 && $2!="" {n++; if ($2>m) m=$2; l=$2} END {if (n) printf "hub RSS: peak %d MB, last %d MB (%d samples; the bar: startup under 1000 MB, at rest under 500 MB)\n", m, l, n}' "$SW/rss.tsv"
+}
 # every run's logs outlive its cleanup: copied (never the store) to ~/.backplane-gpui-switch-logs/<time>-<mode>/ at each stop and rollback
 keeplogs() {
   local f d; [ -d "$SW" ] || return 0; ls "$SW"/*.log "$SW"/*.tsv >/dev/null 2>&1 || return 0
@@ -112,7 +120,7 @@ cmd_stop() {
     sleep 0.5; i=$((i+1))
   done
   for who in client hub; do p=$(pidof_file $who); alive "$p" && ours "$p" $who && die "$who ($(pidof_file $who)) did not stop; look at it, I kill nothing else"; rm -f "$SW/$who.pid"; done
-  touch "$SW/sample.stop"; sleep 1; keeplogs
+  touch "$SW/sample.stop"; sleep 1; rss_summary; keeplogs
   echo "stopped. The copy is kept in $H (rollback deletes it)."
 }
 
@@ -146,14 +154,18 @@ PY
   printf '#!/bin/sh\nexec %s %s "$@"\n' "$(command -v bun)" "$HERE/test/tools/claude_standin.ts" > "$SW/bin/claude"; chmod +x "$SW/bin/claude"
   local n; for n in codex grok muse; do printf '#!/bin/sh\nexit 1\n' > "$SW/bin/$n"; chmod +x "$SW/bin/$n"; done
   # the hub in its own capped scope, a fake HOME (no real credentials), copy guard on, loopback only
+  local pol=(); [ "$USE_POLICY" = 0 ] || pol=(--policy-bin "$POLICY_BIN")
   local envx; if [ "$MODE" = side ]; then
     # the hub itself has the FAKE home; the real one goes only to a person's-turn child (BACKPLANE_PERSON_HOME, which the hub strips from
     # that child with every other BACKPLANE_*); BACKPLANE_LIVE_LOG is read-only, for the same-folder check; no BACKPLANE_AGENTS
-    envx=(HOME="$SW/fakehome" XDG_CACHE_HOME="$SW/fakehome/.cache" BACKPLANE_PERSON_HOME="$HOME" BACKPLANE_LIVE_LOG="$HOME/.backplane-bend/events.jsonl" BACKPLANE_COPY=1 BACKPLANE_SIDE_BY_SIDE=1 BACKPLANE_PASSIVE=1 BACKPLANE_NO_UPDATE=1)
+    # a test on a synthetic live store may use stand-ins (SWITCH_STANDIN=1); against the real store never
+    if [ "${SWITCH_STANDIN:-}" = 1 ] && [ -n "${SWITCH_LIVE:-}" ] && [ "$(realpath -m "$LIVE")" != "$(realpath -m "$HOME/.backplane-bend")" ]; then SBS_AGENTS=1; else SBS_AGENTS=0; fi
+    envx=(HOME="$SW/fakehome" XDG_CACHE_HOME="$SW/fakehome/.cache" BACKPLANE_PERSON_HOME="$HOME" BACKPLANE_LIVE_LOG="$LIVE/events.jsonl" BACKPLANE_COPY=1 BACKPLANE_SIDE_BY_SIDE=1 BACKPLANE_PASSIVE=1 BACKPLANE_NO_UPDATE=1)
+    [ "$SBS_AGENTS" = 0 ] || envx+=(BACKPLANE_AGENTS="$SW/bin" BP_STANDIN_MODE=stream)
   else envx=(HOME="$SW/fakehome" XDG_CACHE_HOME="$SW/fakehome/.cache" BACKPLANE_COPY=1 BACKPLANE_AGENTS="$SW/bin" BACKPLANE_NO_UPDATE=1 BP_STANDIN_MODE=stream); fi
-  ( cd "$SW/proj" && exec env -i PATH="$PATH" LC_ALL=C XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}" DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}" "${envx[@]}" \
+  ( cd "$SW/proj" && exec setsid env -i PATH="$PATH" LC_ALL=C XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}" DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}" "${envx[@]}" \
       systemd-run --user --scope -q -p "MemoryMax=$MEM" -p MemorySwapMax=0 -- \
-      env -u DBUS_SESSION_BUS_ADDRESS -u XDG_RUNTIME_DIR "$HUB_BIN" --home "$H" --port "$PORT" --host 127.0.0.1 --no-tailscale --foreground --policy-bin "$POLICY_BIN" \
+      env -u DBUS_SESSION_BUS_ADDRESS -u XDG_RUNTIME_DIR "$HUB_BIN" --home "$H" --port "$PORT" --host 127.0.0.1 --no-tailscale --foreground "${pol[@]}" \
       > "$SW/hub.log" 2>&1 < /dev/null ) &
   echo $! > "$SW/hub.pid"; echo "$HUB_BIN" > "$SW/hub.bin"
   local hp; hp=$(cat "$SW/hub.pid") i=0
@@ -163,7 +175,7 @@ PY
   local ev; ev=$(tr '\0' '\n' < "/proc/$hp/environ")
   local okenv=1; printf '%s\n' "$ev" | grep -qx "BACKPLANE_COPY=1" || okenv=0
   printf '%s\n' "$ev" | grep -q '^DBUS_SESSION_BUS_ADDRESS=\|^XDG_RUNTIME_DIR=' && okenv=0
-  if [ "$MODE" = side ]; then printf '%s\n' "$ev" | grep -qx "BACKPLANE_SIDE_BY_SIDE=1" || okenv=0; printf '%s\n' "$ev" | grep -qx "BACKPLANE_PASSIVE=1" || okenv=0; printf '%s\n' "$ev" | grep -qx "HOME=$SW/fakehome" || okenv=0; printf '%s\n' "$ev" | grep -q '^BACKPLANE_AGENTS=' && okenv=0
+  if [ "$MODE" = side ]; then printf '%s\n' "$ev" | grep -qx "BACKPLANE_SIDE_BY_SIDE=1" || okenv=0; printf '%s\n' "$ev" | grep -qx "BACKPLANE_PASSIVE=1" || okenv=0; printf '%s\n' "$ev" | grep -qx "HOME=$SW/fakehome" || okenv=0; [ "$SBS_AGENTS" = 1 ] || { printf '%s\n' "$ev" | grep -q '^BACKPLANE_AGENTS=' && okenv=0; }
   else printf '%s\n' "$ev" | grep -qx "BACKPLANE_AGENTS=$SW/bin" || okenv=0; fi
   [ $okenv = 1 ] || { kill "$hp" 2>/dev/null; rm -f "$SW/hub.pid"; die "hub $hp's environment is not the one required for mode $MODE (copy guard, stand-ins or side-by-side flag, no session bus): stopped"; }
   rm -f "$SW/sample.stop"; "$HERE/test/gpui/switch/sample.sh" "$SW" "$SW/rss.tsv" 5 < /dev/null > /dev/null 2>&1 &
@@ -185,7 +197,7 @@ PY
     [ -x "$CLIENT_BIN" ] || die "no client $CLIENT_BIN (use --no-client to run the hub alone)"
     [ -n "$DISP" ] || die "no display: set SWITCH_DISPLAY (:61 is the isolated one) or pass --no-client"
     local sw=; case "${VK_ICD_FILENAMES:-}" in *lvp*) sw="BACKPLANE_GPUI_RECTS=1 LP_NUM_THREADS=2";; esac  # software Vulkan draws only in rects mode
-    ( exec env $sw DISPLAY="$DISP" ${VK_ICD_FILENAMES:+VK_ICD_FILENAMES="$VK_ICD_FILENAMES"} ${BACKPLANE_GPUI_ASSETS:+BACKPLANE_GPUI_ASSETS="$BACKPLANE_GPUI_ASSETS"} HOME="$HOME" \
+    ( exec setsid env $sw DISPLAY="$DISP" ${VK_ICD_FILENAMES:+VK_ICD_FILENAMES="$VK_ICD_FILENAMES"} ${BACKPLANE_GPUI_ASSETS:+BACKPLANE_GPUI_ASSETS="$BACKPLANE_GPUI_ASSETS"} HOME="$HOME" \
         systemd-run --user --scope -q -p "MemoryMax=$MEM" -p MemorySwapMax=0 -- \
         "$CLIENT_BIN" --url "http://127.0.0.1:$PORT" --token-file "$H/token" ${SWITCH_CLIENT_ARGS:-} > "$SW/client.log" 2>&1 < /dev/null ) &
     echo $! > "$SW/client.pid"; echo "$CLIENT_BIN" > "$SW/client.bin"; echo "client pid $(cat "$SW/client.pid") on $DISP"
@@ -223,7 +235,7 @@ cmd_selftest() {
   # never a screen that exists: `import -window root` would save the whole screen of whoever is on it. The selftest makes its own Xvfb.
   [ "$DISP" != "${DISPLAY:-}" ] || die "SWITCH_DISPLAY is your own \$DISPLAY ($DISP): refused (the screenshot is of the whole screen)"
   local n=${DISP#:}; [ ! -e "/tmp/.X11-unix/X$n" ] || die "display $DISP already exists (someone's screen or another lane's): pick a free number, the selftest starts its own"
-  XP=; IP=; RC=0
+  XP=; IP=; RC=0; DONE=0
   local out=${SWITCH_LOGS:-$HOME/.backplane-gpui-switch-logs}/shots; mkdir -p "$out"
   # whatever fails below, the hub, the client and the Xvfb are stopped (only the pids this function started)
   trap 'selftest_cleanup' EXIT INT TERM
@@ -233,7 +245,7 @@ cmd_selftest() {
   if command -v i3 >/dev/null; then printf 'font pango:monospace 8\nnew_window none\nfor_window [class=".*"] border none\ndefault_border none\nhide_edge_borders both\n' > "$SW.i3.conf"
     ( DISPLAY=$DISP exec i3 -c "$SW.i3.conf" ) > /dev/null 2>&1 < /dev/null & IP=$!; sleep 1; fi
   mkdir -p "$SW"; echo '[{"select":0},{"wait":3000},{"type":"selftest message"},{"wait":300},{"send":true},{"wait":30000}]' > "$SW.selftest.json"
-  SWITCH_CLIENT_ARGS="--script $SW.selftest.json" MODE=try cmd_start || RC=1
+  SWITCH_CLIENT_ARGS="--script $SW.selftest.json" cmd_start || RC=1
   if [ $RC = 0 ]; then
     local f="$out/$(date +%Y%m%d-%H%M%S)-selftest.png" l0 l1 colours=0
     l0=$(wc -l < "$H/events.jsonl") || true; sleep 16
@@ -245,22 +257,23 @@ from PIL import Image
 im=Image.open(sys.argv[1]).convert('RGB'); print(len(set(im.getdata())))
 PY
 ); fi
+    rss_summary
     echo "selftest: shot $f has ${colours:-0} colours; the log has ${l1:-?} events (${l0:-?} before the wait)"
     [ "${colours:-0}" -ge 50 ] 2>/dev/null || { echo "selftest FAILED: the window is flat (under 50 colours)"; RC=1; }
     [ "$(grep -c 'selftest message' "$H/events.jsonl" 2>/dev/null)" -ge 1 ] || { echo "selftest FAILED: the sent message never reached the log"; RC=1; }
   fi
-  return $RC
+  DONE=1; return $RC
 }
 selftest_cleanup() {
   trap - EXIT INT TERM
   cmd_rollback > /dev/null 2>&1 || true
   [ -z "${IP:-}" ] || kill "$IP" 2>/dev/null || true; [ -z "${XP:-}" ] || kill "$XP" 2>/dev/null || true
   rm -f "$SW.i3.conf" "$SW.selftest.json"
-  [ "${RC:-1}" = 0 ] && echo "selftest ok" || echo "selftest FAILED (logs in ${SWITCH_LOGS:-$HOME/.backplane-gpui-switch-logs})"
+  [ "${RC:-1}" = 0 ] && [ "${DONE:-0}" = 1 ] && echo "selftest ok" || echo "selftest FAILED (logs in ${SWITCH_LOGS:-$HOME/.backplane-gpui-switch-logs})"
 }
 
 case "${1:-}" in
-  selftest) MODE=try; cmd_selftest && rc=0 || rc=$?; selftest_cleanup; exit $rc;;
+  selftest) MODE=${2:-try}; case "$MODE" in try) ;; side) [ -n "${SWITCH_LIVE:-}" ] || die "selftest side needs SWITCH_LIVE=<a synthetic live store>"; SRC=live; SWITCH_STANDIN=1;; *) die "selftest [try|side]";; esac; cmd_selftest && rc=0 || rc=$?; selftest_cleanup; exit $rc;;
   start) shift; MODE=copy; cmd_start "$@";;
   try) shift; MODE=try; cmd_start "$@";;
   side) shift; MODE=side; SRC=live; cmd_start "$@";;
