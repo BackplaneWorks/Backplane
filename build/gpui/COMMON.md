@@ -4,8 +4,8 @@ The experiment: how much faster and smaller Backplane gets with a GPUI (Zed's Ru
 
 Worktree: /home/h/Documents/i2cjak/backplane-gpui, branch `gpui`. Work there; `cd` to it if your folder differs.
 
-## Desktop is off limits for now
-The person needs this desktop's RTX 5080 and CPU. Until the coordinator says otherwise, run NOTHING on it: no hubs, tests, replays, emulators, Xvfb or GPUI windows, not even small ones. Compile and test on Boat (fixtures only) or run on h@backplane. Editing files here and starting Boat jobs is fine. The store copy cannot leave this machine, so store-copy work waits.
+## Keep the desktop quiet
+The person may be gaming on this desktop. Builds and long runs go to Boat, the Mac or h@backplane. On this desktop only small, short, capped tests: 3.7 GiB, zero swap, no GPU use, nothing that competes for CPU. Starting Boat jobs from here is fine. Store-copy reads wait for the coordinator.
 
 ## Compiling
 - Builds run on Boat or the Mac, never on this desktop, including Android and the Rust hub. Linux builds go to Boat; iOS goes to the Mac.
