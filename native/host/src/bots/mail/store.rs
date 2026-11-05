@@ -21,7 +21,8 @@ fn tail(f: &mut std::fs::File, size: u64) -> std::io::Result<(Vec<u8>, u64, u64)
 pub fn append(home: &Path, b: &Body) -> Result<bool, String> {
     let p = path(home, &b.conv.id); let err = |e: std::io::Error| format!("{}: {e}", p.display());
     std::fs::create_dir_all(home.join("mail")).map_err(err)?;
-    let mut f = OpenOptions::new().read(true).append(true).create(true).open(&p).map_err(err)?;
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut f = OpenOptions::new().read(true).append(true).create(true).mode(0o600).open(&p).map_err(err)?;
     let size = f.metadata().map_err(err)?.len(); let mut repaired = false;
     if size > 0 {
         let (buf, off, after) = tail(&mut f, size).map_err(err)?;

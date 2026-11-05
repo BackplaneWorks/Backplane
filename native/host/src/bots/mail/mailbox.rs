@@ -22,8 +22,8 @@ pub struct Box {
 fn parts_add(mut xs: Vec<String>, k: &str) -> Vec<String> { if !xs.iter().any(|x| x == k) { xs.insert(0, k.to_string()) } xs }
 /// BT.Room.members.of: one entry per line, empty lines dropped
 pub fn lines_of(s: &str) -> Vec<String> { s.split('\n').filter(|x| !x.is_empty()).map(str::to_string).collect() }
-/// M.MailRoom.parts: "person" for a room with no members, else its bots
-pub fn room_parts(members: &[String]) -> Vec<String> { if members.is_empty() { vec!["person".into()] } else { members.iter().map(|m| format!("bot:{m}")).collect() } }
+/// M.MailRoom.parts: its bots, then the person (the recursion ends in ["person"])
+pub fn room_parts(members: &[String]) -> Vec<String> { members.iter().map(|m| format!("bot:{m}")).chain(std::iter::once("person".to_string())).collect() }
 
 impl Box {
     pub fn conv(&self, id: &str) -> Conv { self.convs.get(id).cloned().unwrap_or_default() }

@@ -13,8 +13,14 @@ def norm(s):  # this run's machine id and uberbot id, and the seconds of a stamp
     if uid: s = s.replace(uid, "<uid>")
     s = re.sub(r"\b\d{10}\.(\d{6})\.<me>", r"<S>.<c>.<me>", s)
     return re.sub(r'once\\":[1-9][0-9]*', 'once\\":<T>', s)  # a one-time routine's instant inside an op body
+def routed(e):  # what the JS hub's routing adds after a mail is filed (triage, escalations, claims): slice 3, not compared
+    s = json.dumps(e, ensure_ascii=False)
+    return ("triage-" in s or (e["$"] in ("ConvSet", "MailPosted") and str(e.get("id", "")).startswith("pair:")) or (e["$"] == "ConvSet" and e.get("id", "").startswith("pair:"))
+        or (e["$"] == "MailPosted" and e.get("conv", "").startswith("pair:")) or (e["$"] == "MessageFrom" and e.get("kind") == "escalation")
+        or (e["$"] == "SettingSet" and e.get("key", "").startswith("owner.mail.") and e.get("value", "x") == ""))
 for e in ev:
     k = e["$"]
+    if routed(e): continue
     if k == "ThreadCreated": ok = e.get("project") == ""
     elif k in ("MessagePosted", "MessageFrom"): ok = e.get("thread") in bot_threads and (k == "MessageFrom" or e.get("role") == "user")
     elif k == "WorktreeSet": ok = e["id"] in bot_threads
@@ -27,5 +33,6 @@ for e in ev:
 import os
 if len(sys.argv) > 2 and os.path.isdir(sys.argv[2]):
     for name in sorted(os.listdir(sys.argv[2])):
+        if name.endswith(".idx") or name.startswith("pair%3A"): continue  # the hash index is rebuilt by whoever reads it; pair journals are triage's
         lines = [l.rstrip("\n") for l in open(os.path.join(sys.argv[2], name), encoding="utf-8")]
         print(norm(json.dumps({"$": "MailFile", "name": name, "lines": lines}, separators=(",", ":"), ensure_ascii=False)))
