@@ -14,7 +14,7 @@ export const NORMALISATIONS=[
  'N19 origin in a query string (the since/origin of a reconnect): the value is replaced by its FORM only: <origin:decimal> (Bend: the decimal `at` of the log\'s first change), <origin:hex>, <origin:empty> or <origin:other>. Reason: the value differs per log, but a hub that answers in another form is a real difference (a client resuming across hubs reads it), so the form is compared.',
  'N20 multisets: the housekeeping events (hk) and the greeting\'s info keys (logInfoKeys) are compared as multisets with their REAL counts: one difference per element (or per extra copy) found on one side only. Reason: the hub appends them in varying order; positional comparison turned one missing key into a difference at every later position. A hub that writes an event twice is a difference.',
  'N21 arrays of different length are aligned by key (an object\'s id or key, else its JSON) with a longest common subsequence; an inserted or removed element is one difference. Reason: positional comparison made one insertion a difference at every later position. Equal-length arrays are still compared position by position.',
- 'N22 liveness.<thread> housekeeping events are compared by PRESENCE: which liveness keys (with their values) appear, not how many times. Reason: the hub\'s periodic tick writes them again and again once agent output was seen, and how many ticks fell inside the recording differs between two runs of the JS hub itself. A hub that never writes one is still a difference.',
+ 'N22 liveness.<thread> housekeeping events are compared by PRESENCE of the KEY: which liveness.<thread> keys appear, not their values or how many times. Reason: the hub\'s periodic tick writes them again and again once agent output was seen; how many ticks fell inside the recording, and the `reason` text each carries (the last agent output at that tick), differ between two runs of the JS hub itself (self-diff parity-960s recA/recB: liveness.ID4 "agent output" vs "Bash: ls ..."). A hub that never writes one is still a difference.',
  'N23 a bot\'s `look` (a random number the hub draws) -> <N>; WorktreeSet events join the housekeeping set (N10). Reason: the hub draws the look at creation, and a bot\'s folder is made by a job that lands before or after the bot\'s thread.',
  'N24 a thread\'s text deltas are joined until its delta_end (or the end of the recording), whatever other frames arrive in between. Reason: the split points of a stream depend on timing; their joined text does not.',
  'N25 `<T>.<digits>` (a time and a sub-second count, as in the alert record) -> `<T>.<n>`. Reason: the count differs between two runs of the JS hub.',
@@ -97,7 +97,8 @@ export function normalise(frames){
     s.other.sort((a,b)=>JSON.stringify(a)<JSON.stringify(b)?-1:1);
     // real counts (N20); liveness ticks by presence only (N22)
     const all=s.hkEv.map(e=>JSON.stringify(e)),live=a=>/"key":"liveness\./.test(a);
-    s.hk=[...all.filter(a=>!live(a)),...new Set(all.filter(live))].sort().map(x=>JSON.parse(x));delete s.hkEv}
+    const keyOnly=a=>{const e=JSON.parse(a);return JSON.stringify({$:e.$,key:e.key})};
+    s.hk=[...all.filter(a=>!live(a)),...new Set(all.filter(live).map(keyOnly))].sort().map(x=>JSON.parse(x));delete s.hkEv}
   // deltas still open when the recording ends (no delta_end seen): one run each, in the order they began
   for(const k of Object.keys(open)){const [c,th]=[k.slice(0,k.indexOf('|')),k.slice(k.indexOf('|')+1)];flush(c,th)}
   return per;

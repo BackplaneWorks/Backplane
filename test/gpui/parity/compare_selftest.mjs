@@ -13,7 +13,8 @@ t('same hk events in another order are not',dtn([changes([set('alert.t1'),set('t
 // N22: liveness by presence
 t('liveness missing on one side is a difference',dtn([changes([set('liveness.t1','a')])],[changes([])]).length>0);
 t('liveness ticks 1 vs 3 are not',dtn([changes([set('liveness.t1','a')])],[changes([set('liveness.t1','a'),set('liveness.t1','a'),set('liveness.t1','a')])]).length===0);
-t('liveness with another value is a difference',dtn([changes([set('liveness.t1','a')])],[changes([set('liveness.t1','b')])]).length>0);
+t('liveness with another value is not (the reason text varies)',dtn([changes([set('liveness.t1','a')])],[changes([set('liveness.t1','b')])]).length===0);
+t('liveness for another thread is a difference',dtn([changes([set('liveness.t1','a')])],[changes([set('liveness.t2','a')])]).length>0);
 // N26: two keys normalising to the same string
 t('two colliding keys vs one is a difference',dtn([view({'@x 1793000001':'a','@x 1793000002':'b'})],[view({'@x 1793000001':'a'})]).length>0);
 t('two colliding keys vs two is not',dtn([view({'@x 1793000001':'a','@x 1793000002':'b'})],[view({'@x 1793000003':'a','@x 1793000004':'b'})]).length===0);
