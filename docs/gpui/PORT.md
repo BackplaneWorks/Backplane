@@ -163,7 +163,7 @@ port waits for the person's decision.
 
 <!-- law-map: generated below by scripts/gpui/law-map.py -->
 
-Laws in LAWS.bend: 3253. bend 1077, rust 321, unported 1246, client 482, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
+Laws in LAWS.bend: 3253. bend 1065, rust 333, unported 1246, client 482, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
 
 | law | status | seed | file | note |
 |---|---|---|---|---|
@@ -1003,13 +1003,13 @@ Laws in LAWS.bend: 3253. bend 1077, rust 321, unported 1246, client 482, window 
 | `fm_files_safe_drive` | rust `fm_safe_rules` | map | `src/core/fm.bend` |  |
 | `fm_files_safe_share` | rust `fm_safe_rules` | map | `src/core/fm.bend` |  |
 | `fm_files_safe_down` | rust `fm_safe_rules` | map | `src/core/fm.bend` |  |
-| `emb_summary_round` | bend | seed K +-10% | `src/core/emb.bend` |  |
-| `emb_size_round` | bend | seed K +-10% | `src/core/emb.bend` |  |
+| `emb_summary_round` | rust `emb_summary_round_trips_and_keeps_command_newlines` | map | `src/core/emb.bend` |  |
+| `emb_size_round` | rust `sizes_are_clamped_with_defaults` | map | `src/core/emb.bend` |  |
 | `emb_pinned_live` | bend | seed K +-10% | `src/core/emb.bend` |  |
 | `emb_message_ends` | bend | seed K +-10% | `src/core/emb.bend` |  |
 | `emb_fresh_live` | bend | seed K +-10% | `src/core/emb.bend` |  |
 | `emb_idle_ends` | bend | seed K +-10% | `src/core/emb.bend` |  |
-| `emb_note_none` | bend | seed K +-10% | `src/core/emb.bend` |  |
+| `emb_note_none` | rust `emb_text_leaves_blank_rows_out_and_reports_wrap_it` | map | `src/core/emb.bend` |  |
 | `emb_focus_round` | bend | seed K +-10% | `src/core/emb.bend` |  |
 | `cmds_foreign_result_quiet` | rust `cmds_foreign_result_quiet` | map | `src/core/cmds.bend` |  |
 | `cmds_foreign_result_keeps_running` | rust `cmds_foreign_result_keeps_running` | map | `src/core/hub.bend` |  |
@@ -1301,15 +1301,15 @@ Laws in LAWS.bend: 3253. bend 1077, rust 321, unported 1246, client 482, window 
 | `live_head_rest` | client | seed C +-10% | `src/core/client.bend` |  |
 | `live_prefix_exact` | client | seed C +-10% | `src/web/dom.bend` |  |
 | `live_prefix_exact_open_fence` | client | seed C +-10% | `src/web/dom.bend` |  |
-| `qr_format_m` | bend | seed K +-10% | `src/core/qr.bend` |  |
-| `qr_format_m1` | bend | seed K +-10% | `src/core/qr.bend` |  |
-| `qr_version7_bits` | bend | seed K +-10% | `src/core/qr.bend` |  |
-| `qr_version_fits` | bend | seed K +-10% | `src/core/qr.bend` |  |
-| `qr_version_grows` | bend | seed K +-10% | `src/core/qr.bend` |  |
-| `qr_version_none` | bend | seed K +-10% | `src/core/qr.bend` |  |
-| `qr_gmul_wraps` | bend | seed K +-10% | `src/core/qr.bend` |  |
-| `qr_link_escapes` | bend | seed K +-10% | `src/core/qr.bend` |  |
-| `qr_link_none` | bend | seed K +-10% | `src/core/qr.bend` |  |
+| `qr_format_m` | rust `qr_format_m` | map | `src/core/qr.bend` |  |
+| `qr_format_m1` | rust `qr_format_m1` | map | `src/core/qr.bend` |  |
+| `qr_version7_bits` | rust `qr_version7_bits` | map | `src/core/qr.bend` |  |
+| `qr_version_fits` | rust `qr_versions` | map | `src/core/qr.bend` |  |
+| `qr_version_grows` | rust `qr_versions` | map | `src/core/qr.bend` |  |
+| `qr_version_none` | rust `qr_versions` | map | `src/core/qr.bend` |  |
+| `qr_gmul_wraps` | rust `qr_gmul_wraps` | map | `src/core/qr.bend` |  |
+| `qr_link_escapes` | rust `qr_link_escapes` | map | `src/core/qr.bend` |  |
+| `qr_link_none` | rust `qr_link_escapes` | map | `src/core/qr.bend` |  |
 | `pair_qr_none` | client | seed C +-10% | `src/core/client.bend` |  |
 | `onboard_steps_sound` | client | seed C +-10% | `src/core/onboard.bend` |  |
 | `onboard_nav_every_step` | client | seed C +-10% | `src/core/onboard.bend` |  |
@@ -3431,11 +3431,3 @@ Laws that name a web-only file but also native-shared code, so kept (review by h
 
 - `stop_command_only_while_running` names `src/web/workspace.bend`
 - `terminal_empty_input_keeps_view` names `src/web/workspace.bend`
-
-### Open seam: stalled clients and terminal output (term lane, 2026-11-05)
-Terminal output goes out with `Hub::push_all` into each connection's unbounded outbox, so one stalled client plus a flood (`yes` in a terminal) grows the hub without limit. M3's "slow clients bounded" does not hold for terminal output, and M7 must not run with a stalled client until this is wired. The fix needs `Hub::push_budgeted(client, frame, bytes) -> bool` and `Hub::outbox_pending(client) -> usize` (owner: the `bend` lead; requested 2026-11-05) and a way to list connections; the term lane then drops a stalled client's term frames past its budget and sends one snapshot when it drains (`term/mod.rs` header).
-
-### Browser driver gaps (term lane, 2026-11-05)
-- `tabs` events are pushed as `browser.tabs.<page>` info to the connected clients; a client that connects later does not get them until the core's hub.info keeps them (`Browser::tabs_of` holds the latest per page).
-- The page owner is the thread id until the bots lane says which threads are a bot's (`BT.World.page`).
-- record, navigated, load, shield-click and engine events are published to `Browser::events()` for the teach driver (not written yet).
