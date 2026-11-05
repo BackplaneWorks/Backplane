@@ -47,6 +47,10 @@ impl Peers {
     pub fn setting(&self, key: &str) -> &str { self.settings.get(key).map(String::as_str).unwrap_or("") }
     /// Mate.off
     pub fn sync_off(&self, name: &str) -> bool { self.setting(&super::machines::sync_key(name)) == "off" }
+    /// The names (lowercased) whose sync is off here.
+    pub fn sync_off_names(&self) -> std::collections::HashSet<String> {
+        self.settings.iter().filter(|(k, v)| k.starts_with("sync.") && v.as_str() == "off").map(|(k, _)| k[5..].to_string()).collect()
+    }
     /// Far.own.how: "pair" (paired through POST /bots/pair, Tailscale vouched), "tailnet", "owner", "no", or "".
     pub fn own_how(&self, link: &str) -> &str { self.setting(&format!("peer.own.{link}")) }
     /// Far.verified: the link is one of the owner's own machines.
