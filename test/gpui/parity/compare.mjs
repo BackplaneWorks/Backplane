@@ -18,6 +18,7 @@ export const NORMALISATIONS=[
  'N23 a bot\'s `look` (a random number the hub draws) -> <N>; WorktreeSet events join the housekeeping set (N10). Reason: the hub draws the look at creation, and a bot\'s folder is made by a job that lands before or after the bot\'s thread.',
  'N24 a thread\'s text deltas are joined until its delta_end (or the end of the recording), whatever other frames arrive in between. Reason: the split points of a stream depend on timing; their joined text does not.',
  'N25 `<T>.<digits>` (a time and a sub-second count, as in the alert record) -> `<T>.<n>`. Reason: the count differs between two runs of the JS hub.',
+ 'N26 object keys are normalised like values (ids inside keys such as drafts @sch:<thread> -> ID n), then ordered. Reason: a thread a scenario creates has a different id in every run, and so does its key.',
  'N12 late volatile replies: volatile means a poll request and its reply, matched by client and request id, whenever the reply arrives; every other inbound frame is kept even if it arrived during a poll window (the recorder flags by arrival time, which is not a property of the frame).',
  'N6 dropped: hb frames, view.changed frames (their number and position follow timing; each reply carries the revision it saw), volatile frames (polls made while waiting for a turn). Reason: timing-driven counts.',
  'N11 harness steps: `settle` and `end` pseudo-frames (the client program waiting or closing) are control, not wire traffic, and are not compared. Reason: a replay waits by reply id, not by the recorded quiet times.',
@@ -33,7 +34,7 @@ function mkNorm(){
   const idRe=/\b([ptgmkbro]\d{10}-\d+(?::\d+)?)\b|\bfake-\d+\b|\b[mt][a-z]?\d{3,8}-\d+-\d+(?::\d+)?\b|(?<![A-Za-z])tu\d+-\d+-\d+\b|\b\d+:\d{12,15}\b/g;
   const str=(s,key)=>{
     s=s.replace(/([?&]origin=)([^&"\s]*)/g,(m,a,v)=>a+(/^\d+$/.test(v)?'<origin:decimal>':/^[0-9a-f]{8,}$/.test(v)?'<origin:hex>':v===''?'<origin:empty>':'<origin:other>'));
-    s=s.replace(/@\d{13}@/g,'@<T>@').replace(/(?:\/[^"\s]*)?\/work-[A-Za-z0-9]+/g,'<work>').replace(/backplane[-\/][0-9a-f]{8}\b/g,'backplane-<wt>').replace(/\bc[a-z0-9-]*?\d{10}-\d+\b/g,m=>ord(m));
+    s=s.replace(/@\d{13,19}@/g,'@<T>@').replace(/(?:\/[^"\s]*)?\/work-[A-Za-z0-9]+/g,'<work>').replace(/backplane[-\/][0-9a-f]{8}\b/g,'backplane-<wt>').replace(/\bc[a-z0-9-]*?\d{10}-\d+\b/g,m=>ord(m));
     s=s.replace(/\b1[78]\d{8}\b(?!-)/g,'<T>').replace(/\b1[78]\d{11}\b/g,'<T>');
     s=s.replace(/<T>\.\d+\b/g,'<T>.<n>');
     s=s.replace(idRe,m=>ord(m));
@@ -46,7 +47,8 @@ function mkNorm(){
     if(typeof v==='number')return key==='look'?'<N>':CLOCK_KEYS.has(key)?'<T>':(v>=1.7e9&&v<1.9e9?'<T>':(v>=1.7e12&&v<1.9e12?'<T>':v));
     if(typeof v==='string'){if(v!==''&&(key==='epoch'||key==='generation'||key==='origin'||key==='hub'||key==='viewId'||key==='token'||key==='base'))return ord(v);if(key==='viewRevision')return '<R>';return str(v,key)}
     if(Array.isArray(v))return v.map(x=>go(x,key));
-    const o={};for(const k of Object.keys(v).sort())o[k]=go(v[k],k);return o;};
+    // keys can carry ids too (drafts "@sch:<thread>"): normalised like values, then ordered
+    const o={};for(const k of Object.keys(v).sort()){const nk=str(k,'');o[nk]=go(v[k],k)}return Object.fromEntries(Object.entries(o).sort((a,b)=>a[0]<b[0]?-1:a[0]>b[0]?1:0));};
   go.readonly=f=>{ro=true;try{return f()}finally{ro=false}};
   return go;
 }
@@ -54,7 +56,7 @@ export function normalise(frames){
   const G={};const gof=cl=>G[cl]??(G[cl]=mkNorm());let go=null;const per={};
   const S=(c)=>per[c]??(per[c]={out:[],events:[],hkEv:[],deltas:[],replies:[],views:[],other:[],hk:[]});
   const open={}; // per client+thread delta accumulation
-  const flush=(c,th)=>{const k=c+'|'+th;if(open[k]!==undefined){S(c).deltas.push({delta:gof(c)(th),text:gof(c)(open[k].replace(/@\d{13}@/g,''))});delete open[k]}};
+  const flush=(c,th)=>{const k=c+'|'+th;if(open[k]!==undefined){S(c).deltas.push({delta:gof(c)(th),text:gof(c)(open[k].replace(/@\d{13,19}@/g,''))});delete open[k]}};
   const HK_RAW=/^(machine\.id|accounts\.inventory|allowance\.codex|projects\.missing|tz\..*|autosettle\..*|liveness\..*|turn\.(from|speed)\..*|restart\..*|provider\..*|fallback\..*|tok\..*|summary\..*|told\..*|alert\..*|account\..*|star\..*)$/;
   const hkRaw=e=>(e.$==='SettingSet'&&HK_RAW.test(e.key))||(e.$==='ActivityLogged'&&(e.kind==='git'||e.kind==='spawn'))||e.$==='WorktreeSkipped'||e.$==='WorktreeSet';
   const evNorm=(c,it)=>hkRaw(it)?{hk:true,v:gof(c).readonly(()=>gof(c)(it))}:{hk:false,v:gof(c)(it)};
@@ -96,7 +98,7 @@ export function normalise(frames){
 }
 // Arrays of different lengths are aligned by key (an object's `id` or `key`, else its JSON) with a longest common subsequence: an element
 // inserted or removed is one difference, and the elements after it are still compared with their own counterparts, not shifted ones.
-const keyOf=x=>x&&typeof x==='object'&&!Array.isArray(x)?(typeof x.id==='string'?'id:'+x.id:typeof x.key==='string'?'key:'+x.key+(x.value!==undefined?'='+JSON.stringify(x.value):''):JSON.stringify(x)):JSON.stringify(x);
+const keyOf=x=>x&&typeof x==='object'&&!Array.isArray(x)?((typeof x.id==='string'||typeof x.id==='number')?'id:'+x.id:typeof x.key==='string'?'key:'+x.key+(x.value!==undefined?'='+JSON.stringify(x.value):''):JSON.stringify(x)):JSON.stringify(x);
 function keyed(a,b,path,out){
   const ka=a.map(keyOf),kb=b.map(keyOf),n=a.length,m=b.length;
   const L=Array.from({length:n+1},()=>new Int32Array(m+1));
