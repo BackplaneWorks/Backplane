@@ -20,7 +20,12 @@ impl Transform for Host {
     }
 }
 impl Ticker for Host {
-    fn tick<'a>(&'a self, _hub: &'a Arc<Hub>, now_s: u64) -> Fut<'a, Vec<Value>> { Box::pin(async move { self.policy.tick(now_s) }) }
+    fn tick<'a>(&'a self, hub: &'a Arc<Hub>, now_s: u64) -> Fut<'a, Vec<Value>> {
+        Box::pin(async move {
+            if self.policy.take_poisoned() { eprintln!("state policies: the policy lock was poisoned by a panic; folding the log again"); tokio::spawn(boot_task(self.policy.clone(), hub.clone())); }
+            self.policy.tick(now_s)
+        })
+    }
 }
 
 /// the lean fold of the whole log, on a blocking thread; the length is read first and the fold stops there

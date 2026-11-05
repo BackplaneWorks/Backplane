@@ -8,7 +8,8 @@ use super::turnend;
 use super::watchdog;
 use crate::state::State;
 use serde_json::Value;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, MutexGuard};
 
 /// Settings the lean copy keeps: what the policies read (autosettle, liveness, wakes, locks, launches, the star ledger, told/alert/summary
 /// records) and nothing that grows with the log for its own sake (`stopped.<msg>`, `failed.<msg>`, token totals, uber op lines, session and
@@ -62,13 +63,24 @@ struct Inner {
     booting: Option<Vec<(u64, Vec<Value>)>>,
 }
 /// The policies behind one short lock. `before_commit` is the writer's call; `tick` and `read` are the ticker's and the viewers'.
-pub struct Policy { inner: Mutex<Inner> }
+pub struct Policy { inner: Mutex<Inner>, poisoned: AtomicBool }
 impl Policy {
-    pub fn new() -> Policy { Policy { inner: Mutex::new(Inner { core: Core::new(), booting: Some(vec![]) }) } }
+    pub fn new() -> Policy { Policy { inner: Mutex::new(Inner { core: Core::new(), booting: Some(vec![]) }), poisoned: AtomicBool::new(false) } }
+    /// The lock, even after a panic inside it: the copy may be half-folded then, so it is flagged and the host folds the log again
+    /// (`take_poisoned`); until that finishes the policies decide nothing, and a later batch never panics on the poisoned lock.
+    fn lock(&self) -> MutexGuard<'_, Inner> {
+        self.inner.lock().unwrap_or_else(|p| {
+            self.poisoned.store(true, Ordering::SeqCst);
+            self.inner.clear_poison(); // the flag, not the lock, remembers it from here
+            let mut g = p.into_inner(); g.booting = Some(vec![]); g
+        })
+    }
+    /// true once after the lock was found poisoned: the caller starts the fold of the log again
+    pub fn take_poisoned(&self) -> bool { self.poisoned.swap(false, Ordering::SeqCst) }
     /// The batch about to be written: the batch plus what the policies derive from it. While the log is being folded the batch is
     /// remembered (and returned as it came); `finish_boot` derives for it afterwards.
     pub fn before_commit(&self, first_seq: u64, mut events: Vec<Value>) -> Vec<Value> {
-        let mut g = self.inner.lock().unwrap();
+        let mut g = self.lock();
         if let Some(buf) = g.booting.as_mut() { buf.push((first_seq, events.clone())); turnend::strip_marks(&mut events); return events }
         let d = g.core.derive(&events);
         let mut out: Vec<Value> = d.core;
@@ -79,7 +91,7 @@ impl Policy {
     /// A batch returned by `before_commit` could not be written. The copy now holds marks the log lacks: fold the log again. True when the
     /// caller must start that fold (`begin_resync` was needed).
     pub fn commit_failed(&self, first_seq: u64) -> bool {
-        let mut g = self.inner.lock().unwrap();
+        let mut g = self.lock();
         if let Some(buf) = g.booting.as_mut() { buf.retain(|(s, _)| *s < first_seq); return false } // the writer calls this once with the batch's base: nothing at or past it was written
         g.booting = Some(vec![]);
         true
@@ -87,7 +99,7 @@ impl Policy {
     /// The log through line `len` was folded into `core` (read AFTER the transform was registered): install it, replay the batches seen
     /// since past `len`, and return the events they derive (to be committed by the caller).
     pub fn finish_boot(&self, core: Core, len: u64) -> Vec<Value> {
-        let mut g = self.inner.lock().unwrap();
+        let mut g = self.lock();
         g.core = core;
         let held = g.booting.take().unwrap_or_default();
         let mut derived = vec![];
@@ -99,11 +111,11 @@ impl Policy {
         derived
     }
     pub fn tick(&self, now_s: u64) -> Vec<Value> {
-        let g = self.inner.lock().unwrap();
+        let g = self.lock();
         if g.booting.is_some() { vec![] } else { g.core.tick(now_s) }
     }
     pub fn read(&self, thread: &str, now_s: u64) -> Vec<Value> {
-        let g = self.inner.lock().unwrap();
+        let g = self.lock();
         if g.booting.is_some() { vec![] } else { autosettle::read(&g.core.st, thread, now_s) }
     }
 }
@@ -214,5 +226,15 @@ mod tests {
         assert_eq!(alert, "fail\tturn-t1\tmu1\t100.7\t", "stamp: 5 + the 2 events of the end, the mark not counted");
         let told = out.iter().find(|e| e["key"].as_str().map_or(false, |k| k.starts_with("told."))).unwrap();
         assert_eq!(told["key"], "told.k100-5-3", "the alert sits at index 3 of [act, turn, summary.at, alert]... as the list Bend marks");
+    }
+    #[test] fn a_poisoned_lock_does_not_panic_the_next_batch_and_asks_for_a_resync() {
+        let p = std::sync::Arc::new(booted());
+        let q = p.clone();
+        let _ = std::thread::spawn(move || { let _g = q.inner.lock().unwrap(); panic!("a panic inside the policy"); }).join();
+        let out = p.before_commit(3, vec![json!({"$":"TurnChanged","thread":"t1","state":"completed","_end":true,"at":9})]);
+        assert_eq!(out.len(), 1, "the batch goes through as it came, with no records and no marker");
+        assert!(out[0].get("_end").is_none(), "the marker is stripped even then");
+        assert!(p.take_poisoned(), "the host is told to fold the log again"); assert!(!p.take_poisoned());
+        assert!(p.tick(10).is_empty(), "nothing is decided until the fold is done");
     }
 }
