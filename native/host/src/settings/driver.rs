@@ -261,7 +261,7 @@ mod tests {
     #[test] fn a_thread_not_held_is_restarted_where_it_was() { let w = world("claude", "opus", &[("fallback.on", "on".into()), ("fallback.chain", "claude/opus,codex/gpt-6".into())]); assert_eq!(plan_switch(&w, "go"), (vec![], Some("go".to_string()))); }
     #[test] fn on_a_managed_provider_the_hold_is_on_the_account_and_the_restart_moves_to_the_best_other_account() {
         let profiles = json!([{"id":"w","provider":"claude","state":"connected","epoch":2,"label":"Work","catalog":[{"id":"opus"}]},{"id":"p","provider":"claude","state":"connected","epoch":1,"label":"Personal","catalog":[{"id":"opus"}],
-            "allowance":{"state":"ok","provider":"claude","windows":[{"scope":"five_hour","used_percent":10.0}]}}]);
+            "allowance":{"state":"ok","at":now_ms() / 1000,"provider":"claude","windows":[{"scope":"five_hour","used_percent":10.0}]}}]);
         let (k, i) = inv(profiles); let binding = ("account.thread.t1.claude", accounts::binding_show("w", 2));
         let w = world("claude", "opus", &[(k, i), binding.clone()]);
         let v = on_limit(&w, &lim("claude", 0), true, "go"); assert_eq!(keys(&v.events), ["account.limit.6:claude1:w2:", "account.failover.pending.t1", "account.failover.continuing.t1", "TurnChanged"]);

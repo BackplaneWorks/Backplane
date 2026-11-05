@@ -205,7 +205,7 @@ mod outage_tests {
         assert_eq!(pick(&parse("claude/opus"), &get, &caps, 100), None, "an exhausted chain holds the work, it does not wrap");
     }
     fn prof(id: &str, epoch: u64, left: Option<f64>) -> Value {
-        let allow = left.map(|u| json!({"state":"ok","provider":"claude","windows":[{"scope":"five_hour","used_percent":u}]})).unwrap_or(Value::Null);
+        let allow = left.map(|u| json!({"state":"ok","provider":"claude","at":10,"windows":[{"scope":"five_hour","used_percent":u}]})).unwrap_or(Value::Null);
         json!({"id":id,"provider":"claude","state":"connected","epoch":epoch,"catalog":[{"id":"opus"}],"allowance":allow})
     }
     #[test] fn the_account_with_the_most_allowance_left_is_picked_and_unknown_comes_after_known() {
