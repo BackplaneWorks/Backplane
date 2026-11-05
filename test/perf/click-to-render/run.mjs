@@ -22,7 +22,7 @@ const summary = { kind, state, cpu, reps, device, press: Number(opt('press', '0'
 let h = await open({ kind, origin: opt('origin'), token: opt('token'), cdp: opt('cdp'), device });
 h.S = S; h.press = Number(opt('press', '0')); // ms between press and release (a person: ~80)
 for (const it of list) {
-  const runs = [];
+  const runs = []; const st0 = {};
   try {
     await h.page.reload(); // (a goto to the same URL#hash would not reload: cold = really after a load)
     await h.throttle(1);
@@ -33,8 +33,9 @@ for (const it of list) {
     for (let i = 0; i <= reps; i++) {
       if (cpu > 1) await h.throttle(1);
       const st = await it.step(h, S, i); // setup unthrottled; only the measured part runs at --cpu
+      if (!st.cpred) { st.cpred = st.pred; if (!st.cpredSame) st0.same = true; } st0.cpred = true; // no separate content: content = the frame's predicate
       if (cpu > 1) { await h.throttle(cpu); await h.idle(300); }
-      const r = await h.measure(it.id, { pred: st.pred, go: st.go, quiet: st.quiet || 300, cap: st.cap || 6000, sample: st.sample, content: st.content, confirm: st.confirm, timeout: st.timeout || 15000 });
+      const r = await h.measure(it.id, { pred: st.pred, go: st.go, quiet: st.quiet || 300, cap: st.cap || 6000, sample: st.sample, content: st.content, confirm: st.confirm, cpred: st.cpred, csig: st.csig, timeout: st.timeout || 15000 });
       r.rep = i; r.cold = i === 0; runs.push(r);
       if (r.error) log(it.id, i, 'ERROR', r.error);
       if (st.undo) { await h.throttle(1); await st.undo(h); await h.throttle(cpu); }
@@ -45,6 +46,7 @@ for (const it of list) {
   const warm = runs.filter((r) => !r.cold && !r.error && r.paint != null), cold = runs.find((r) => r.cold && !r.error);
   const m = (k, p = 0.5) => pct(warm.map((r) => r[k]), p);
   const row = { id: it.id, what: it.what, n: warm.length, errors: runs.filter((r) => r.error).length,
+    cnt50: m('cnt'), cnt95: m('cnt', 0.95), cnt1_50: m('cnt1'), nC50: m('nC'), cntMissing: warm.filter((r) => st0.cpred && r.cnt == null).length, cntPre: warm.filter((r) => r.cPre).length, contentIsFrame: !!st0.same, cHub: warm.filter((r) => (r.cRecv || 0) > 0).length, cHubLast50: m('cRecvLast'),
     paint50: m('paint'), paint95: m('paint', 0.95), px50: m('px'), px95: m('px', 0.95), content50: m('content'), content95: m('content', 0.95), confirm50: m('confirm'), confirm95: m('confirm', 0.95), dom50: m('dom'), settle50: m('settle'), settle95: m('settle', 0.95),
     cold: cold?.paint ?? null, coldSettle: cold?.settle ?? null,
     send50: m('send'), recv50: m('recv1'), recvN50: m('recvN'), nRecv50: m('nRecv'), recvKB50: Math.round((m('recvBytes') || 0) / 1024),
@@ -54,8 +56,12 @@ for (const it of list) {
     local: warm.filter((r) => r.send == null || r.send > r.dom).length,
     roundTrip: warm.filter((r) => r.recv1 != null && r.recv1 <= r.dom).length,
     hubWait50: pct(warm.map((r) => r.recvN != null && r.send != null && r.recvN <= r.dom ? r.recvN - r.send : 0), 0.5) };
+  // late after the press frame: what appeared after the frame predicate's paint, grouped over the warm reps
+  const lg = new Map();
+  for (const r of warm) { const seen = new Set(); for (const l of r.late || []) { const k = l.el + ' "' + (l.text || '').replace(/\d+/g, '#').slice(0, 40) + '"'; if (seen.has(k)) continue; seen.add(k); const e = lg.get(k) || { k, n: 0, dts: [] }; e.n++; e.dts.push(l.dt); lg.set(k, e); } }
+  row.lateTop = [...lg.values()].filter((e) => e.n * 2 >= warm.length).map((e) => ({ what: e.k, reps: e.n, dt50: pct(e.dts, 0.5) })).sort((x, y) => x.dt50 - y.dt50).slice(0, 14);
   summary.rows = summary.rows.filter((r) => r.id !== row.id); summary.rows.push(row);
-  log(it.id.padEnd(16), `paint p50 ${row.paint50} p95 ${row.paint95} | dom ${row.dom50} | settle ${row.settle50} | cold ${row.cold} | send ${row.send50} recv ${row.recv50}..${row.recvN50} (${row.nRecv50} msg ${row.recvKB50} KB) | shift ${row.shift50} late ${row.late50} | err ${row.errors}`);
+  log(it.id.padEnd(16), `px p50 ${row.px50} CONTENT p50 ${row.cnt50} p95 ${row.cnt95} (missing ${row.cntMissing}) | paint p50 ${row.paint50} p95 ${row.paint95} | dom ${row.dom50} | settle ${row.settle50} | cold ${row.cold} | send ${row.send50} recv ${row.recv50}..${row.recvN50} (${row.nRecv50} msg ${row.recvKB50} KB) | shift ${row.shift50} late ${row.late50} | err ${row.errors}`);
   writeFileSync(`${out}/summary.json`, JSON.stringify(summary, null, 1));
 }
 summary.errorsPage = h.errors; summary.loadEnd = (await import('node:os')).loadavg();

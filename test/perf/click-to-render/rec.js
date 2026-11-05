@@ -26,7 +26,7 @@
   const reset = () => Object.assign(R, {
     armed: false, t0: null, inputType: null, pred: null, tDom: null, tRaf: null, tPaint: null,
     lastMut: null, nMut: 0, nMutBefore: 0, sends: [], recvs: [], shifts: [], events: [], longs: [], loafs: [],
-    late: [], lateNodes: [], done: false, sample: null, film: [], contentSel: null, lastContent: null, pred2: null, tDom2: null, tPx: null, settled: null, tArm: null, error: null, hitHow: null, perfMark: 0,
+    late: [], lateNodes: [], done: false, cpred: null, csig: null, recvsAll: [], cOk: false, cSigLast: null, tC: null, tCpx: null, tC1: null, nC: 0, cLog: [], sample: null, film: [], contentSel: null, lastContent: null, pred2: null, tDom2: null, tPx: null, settled: null, tArm: null, error: null, hitHow: null, perfMark: 0,
   });
   reset();
   const desc = (n) => {
@@ -48,7 +48,24 @@
     const post = () => { const c = new MessageChannel(); c.port1.onmessage = () => { R.tPx = now(); }; c.port2.postMessage(0); };
     if (frameOpen) post(); else raf0(() => { frameOpen = true; fch.port2.postMessage(0); post(); });
   };
+  // CONTENT (round 2): cpred = the content the person came for is on screen; csig = a string of that content.
+  // tC = the last time it became true or its signature changed while true (the content is final from then on);
+  // tCpx = the end of the frame holding that change. Content that goes away again resets it (not final).
+  const ccheck = () => {
+    if (!R.armed || R.t0 == null || !R.cpred) return;
+    let ok = false, sg = '';
+    try { ok = !!R.cpred(); if (ok && R.csig) sg = String(R.csig()); } catch { ok = false; }
+    if (ok && (!R.cOk || sg !== R.cSigLast)) {
+      const t = now(); R.tC = t; R.tCpx = null; if (R.tC1 == null) R.tC1 = t; R.nC++;
+      if (R.cLog.length < 12) R.cLog.push([+(t - R.t0).toFixed(1), sg.slice(0, 160)]);
+      const mark = t; const post = () => { const c = new MessageChannel(); c.port1.onmessage = () => { if (R.tC === mark) R.tCpx = now(); }; c.port2.postMessage(0); };
+      if (frameOpen) post(); else raf0(() => { frameOpen = true; fch.port2.postMessage(0); post(); });
+      R.lastMut = Math.max(R.lastMut || 0, t);
+    } else if (!ok && R.cOk) { R.tC = null; R.tCpx = null; if (R.cLog.length < 12) R.cLog.push([+(now() - R.t0).toFixed(1), '(gone)']); }
+    R.cOk = ok; R.cSigLast = ok ? sg : null;
+  };
   const check = (how) => {
+    ccheck();
     if (R.armed && R.t0 != null && R.pred2 && R.tDom2 == null) { let ok2 = false; try { ok2 = !!R.pred2(); } catch {} if (ok2) R.tDom2 = now(); }
     if (!R.armed || R.tDom != null || R.t0 == null) return;
     let ok = false;
@@ -80,6 +97,7 @@
         super(...a);
         this.addEventListener('message', (e) => {
           if (R.armed && R.t0 != null && R.tDom == null) R.recvs.push([now(), e.data?.byteLength ?? e.data?.length ?? e.data?.size ?? 0]);
+          if (R.armed && R.t0 != null && R.recvsAll.length < 200) R.recvsAll.push(now());
         });
       }
     };
@@ -91,7 +109,7 @@
       if (R.t0 == null) { R.nMutBefore += recs.length; return; }
       R.nMut += recs.length; R.lastMut = t;
       if (R.contentSel) for (const r of recs) { const el = r.target.nodeType === 1 ? r.target : r.target.parentElement; if (el?.closest?.(R.contentSel)) { R.lastContent = t; break; } }
-      if (R.tDom == null || (R.pred2 && R.tDom2 == null)) { check('mutation'); if (R.tDom == null) return; }
+      if (R.tDom == null || (R.pred2 && R.tDom2 == null)) { check('mutation'); if (R.tDom == null) return; } else ccheck();
       if (R.tPaint != null && R.lateNodes.length < 400) {
         for (const r of recs) {
           if (r.type === 'childList') for (const n of r.addedNodes) {
@@ -113,6 +131,19 @@
     for (const c of [...cs].slice(0, 3)) {
       if (!c.width || !c.height) continue;
       try { g.clearRect(0, 0, 16, 16); g.drawImage(c, 0, 0, 16, 16); const d = g.getImageData(0, 0, 16, 16).data; let hsh = 0; for (let i = 0; i < d.length; i += 4) hsh = (hsh * 31 + d[i] + d[i + 1] * 3 + d[i + 2] * 7) | 0; sig += hsh + ','; } catch { sig += 'x,'; }
+    }
+    return sig;
+  };
+  // __c2r.cv(sel): a signature of the canvases under sel ('' = none drawn, 'blank' = drawn but one colour)
+  R.cv = (sel) => {
+    const cs = document.querySelectorAll(sel); if (!cs.length) return '';
+    probe = probe || Object.assign(document.createElement('canvas'), { width: 16, height: 16 });
+    const g = probe.getContext('2d', { willReadFrequently: true }); let sig = '';
+    for (const c of [...cs].slice(0, 2)) {
+      if (!c.width || !c.height || !c.getClientRects().length) continue;
+      try { g.clearRect(0, 0, 16, 16); g.drawImage(c, 0, 0, 16, 16); const d = g.getImageData(0, 0, 16, 16).data; let hsh = 0, mn = 1e9, mx = -1;
+        for (let i = 0; i < d.length; i += 4) { const v = d[i] + d[i + 1] * 3 + d[i + 2] * 7 + d[i + 3] * 11; hsh = (hsh * 31 + v) | 0; if (v < mn) mn = v; if (v > mx) mx = v; }
+        sig += (mx - mn < 8 ? 'blank' : hsh) + ','; } catch { sig += 'x,'; }
     }
     return sig;
   };
@@ -142,12 +173,15 @@
     R.loafs.push({ t: e.startTime - R.t0, dur: e.duration, block: e.blockingDuration, render: e.renderStart ? e.startTime + e.duration - e.renderStart : 0, style: e.styleAndLayoutStart ? e.startTime + e.duration - e.styleAndLayoutStart : 0,
       scripts: (e.scripts || []).slice(0, 4).map((s) => ({ dur: Math.round(s.duration), inv: s.invoker, fn: s.sourceFunctionName, src: (s.sourceURL || '').split('/').pop() + ':' + s.sourceCharPosition, fsl: Math.round(s.forcedStyleAndLayoutDuration || 0) })) });
   });
-  R.arm = (src, sample, contentSel, confirm) => {
+  R.arm = (src, sample, contentSel, confirm, cpred, csig) => {
     reset(); for (const k in RT) delete RT[k]; for (const k in RN) delete RN[k];
     if (sample) R.sample = new Function('return (' + sample + ')');
     R.contentSel = contentSel || null; lastSig = '';
     R.pred2 = confirm ? new Function('return (' + confirm + ')') : null;
     R.pred = new Function('return (' + src + ')');
+    R.cpred = cpred ? new Function('return (' + cpred + ')') : null; R.csig = csig ? new Function('return (' + csig + ')') : null;
+    let cpre = false; try { cpre = !!(R.cpred && R.cpred()); } catch {}
+    R.cPre = cpre;
     let pre = false; try { pre = !!R.pred(); } catch {}
     if (pre) { R.error = 'predicate already true before input'; return false; }
     R.perfMark = window.__bpPerf.trace.length;
@@ -186,7 +220,8 @@
           nMut: R.nMut, nMutBefore: R.nMutBefore,
           shift: +R.shifts.reduce((a, s) => a + s.v, 0).toFixed(4), shiftCls: +R.shifts.reduce((a, s) => a + (s.recent ? 0 : s.v), 0).toFixed(4), shifts: R.shifts.slice(0, 8),
           events: R.events.slice(0, 8), longs: R.longs, loafs: R.loafs.slice(0, 6),
-          late: late.slice(0, 20), nLate: late.length, lateMax: late.reduce((a, l) => Math.max(a, l.dt), 0),
+          late: late.slice(0, 40), nLate: late.length, lateMax: late.reduce((a, l) => Math.max(a, l.dt), 0),
+          cnt: R.tC == null ? null : +(((R.tCpx ?? R.tC) - R.t0)).toFixed(1), cntDom: R.tC == null ? null : +(R.tC - R.t0).toFixed(1), cRecv: R.tC == null ? null : R.recvsAll.filter((t) => t <= R.tC).length, cRecvLast: R.tC == null ? null : (() => { const x = R.recvsAll.filter((t) => t <= R.tC); return x.length ? +(x[x.length - 1] - R.t0).toFixed(1) : null; })(), cnt1: R.tC1 == null ? null : +(R.tC1 - R.t0).toFixed(1), nC: R.nC, cLog: R.cLog, cPre: !!R.cPre,
           trace: tr.slice(0, 40), film: R.film, rr: Object.fromEntries(Object.entries(RT).map(([k, v]) => [k, +v.toFixed(1)])), rn: { ...RN },
         });
       } else setTimeout(tick, 50);

@@ -64,6 +64,25 @@ home, thread menu, palette open and typing, Search conversations open and typing
 workspace viewer (Files, Diff, Board, Schematic, 3D, Browser), tool-call fold, wheel up in a long thread, a composer
 keystroke, send (Enter -> my bubble), Esc back, window resize.
 
+## Content, not the frame (round 2)
+
+Each rep also records **CONTENT** (`cnt`): the content the person came for is on screen and final, not just its
+frame. A step returns `cpred` (JS: the content is there: Files rows, the Diff summary and file list, the plotted
+board + history bar + Close button, the 3D model's stats, a popover's body, the thread's rows in view with a message
+body, a Settings page with its controls, palette / search results) and `csig` (JS: a string of that content: text
+length + head + tail, canvas signatures via `__c2r.cv(selector)`). The recorder takes the last time `cpred` became
+true or `csig` changed while it was true (a stale picture the hub corrects counts at the correction), to the end of
+that frame. Steps without a `cpred` use the frame predicate. `cLog` lists the content changes per rep; `late` lists
+the visible text / elements added after the frame's paint (`lateTop` in summary.json: grouped over the warm reps).
+`C2R_GL=rtx` runs Chromium on the machine's GPU (ANGLE GL) instead of SwiftShader, for the 3D viewer.
+
+`python3 m2table.py RUN_DIR [MAIN_CELL]` prints frame / CONTENT per interaction and cell, ranked by content, with
+the late list; `m2owners.py` splits it by owner area.
+
+Added interactions: viewer-review, viewer-switch (Files open -> Diff), viewer-board-sch (Board <-> Schematic), fm-in /
+fm-up (a Files folder in / Up), reload-fm / reload-board / reload-diff / reload-thread (reload the page, then the
+click), shelf-open (a project's Settled shelf); phone: ph-viewer-fm / -diff / -schematic / -3d.
+
 ## Results
 
 See [RESULTS.md](RESULTS.md) (before / after for the 2026-11-05 snappiness branch, per interaction, state and machine).
