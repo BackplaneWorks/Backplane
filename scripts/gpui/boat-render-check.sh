@@ -3,6 +3,7 @@
 # variants: A plain, B HOME=a missing dir (the harness sets HOME to the hub's fakehome), C against the Rust hub without its policy helper (canned presenter).
 # Needs test/gpui/hubbin/{gpui,assets,backplane-hub} (untracked). Output build/gpui-render/ (stderr, screenshot, RSS per variant).
 set -u
+[ "$(id -un)" = user ] || { echo "boat-render-check.sh: not a Boat sandbox (user $(id -un)); refusing" >&2; exit 3; }
 V=build/gpui-render; mkdir -p $V; : > $V/results.txt
 say() { echo "$*" | tee -a $V/results.txt; }
 need() { command -v "$1" >/dev/null 2>&1; }
@@ -16,7 +17,7 @@ run() { # name, extra env, url, token
   env DISPLAY=:62 VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json BACKPLANE_GPUI_ASSETS=$PWD/test/gpui/hubbin/assets "$@" > $V/$n.log 2>&1 & GP=$!
   sleep 12; RSS=$(grep VmRSS /proc/$GP/status 2>/dev/null | tr -s ' '); DISPLAY=:62 import -window root $V/$n.png
   say "$n: pid alive=$(kill -0 $GP 2>/dev/null && echo yes || echo no) $RSS; first_frame=$(grep -c first_frame $V/$n.log) process_start=$(grep -c process_start $V/$n.log)"
-  kill $GP 2>/dev/null; kill $IP $XP 2>/dev/null; wait 2>/dev/null
+  kill $GP 2>/dev/null; kill $IP $XP 2>/dev/null; wait $GP $IP $XP 2>/dev/null
 }
 mkdir -p /tmp/h-token && echo tok0123456789abcdef0123456789abcdef > /tmp/h-token/token
 run A $BIN --url http://127.0.0.1:1 --token-file /tmp/h-token/token --exit-after 20

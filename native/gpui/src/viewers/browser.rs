@@ -16,17 +16,20 @@ pub fn decode_jpeg(bytes: &[u8]) -> Option<Arc<RenderImage>> {
 }
 fn fnv(bytes: &[u8]) -> u64 { bytes.iter().fold(0xcbf29ce484222325u64, |h, b| (h ^ *b as u64).wrapping_mul(0x100000001b3)) }
 
-pub struct BrowserPage { image: Option<Arc<RenderImage>>, pub status: String, stop: Arc<AtomicBool> }
+pub struct BrowserPage { image: Option<Arc<RenderImage>>, retired: Vec<Arc<RenderImage>>, pub status: String, stop: Arc<AtomicBool>, visible: Arc<AtomicBool> }
 impl BrowserPage {
-    /// `base` like http://127.0.0.1:3821, `bot` the bot's id, `token` the hub token (sent as a Bearer header, never logged).
-    pub fn new(cx: &mut Context<Self>, base: String, bot: String, token: String) -> Self {
-        let stop = Arc::new(AtomicBool::new(false));
+    /// `base` like http://127.0.0.1:3821 (http only: this client has no TLS), `owner` the page's owner as the hub names it (a bot's id, or the thread's id
+    /// for a thread's page: the host passes `BT.World.page`'s value), `token` the hub token (a Bearer header, never logged). The poller fetches only while
+    /// `set_visible(true)`; mount the page with the tab and call `set_visible(false)` when another tab is shown.
+    pub fn new(cx: &mut Context<Self>, base: String, owner: String, token: String) -> Self {
+        let stop = Arc::new(AtomicBool::new(false)); let visible = Arc::new(AtomicBool::new(true)); let vis = visible.clone();
         let (tx, rx) = async_channel::bounded::<Result<Arc<RenderImage>, String>>(2);
         let flag = stop.clone();
         std::thread::Builder::new().name("browser-frames".into()).spawn(move || {
-            let url = format!("{}/bots/{}/screen.jpg", base.trim_end_matches('/'), bot);
+            let url = format!("{}/bots/{}/screen.jpg", base.trim_end_matches('/'), owner);
             let mut last = 0u64;
             while !flag.load(Ordering::Relaxed) {
+                if !vis.load(Ordering::Relaxed) { std::thread::sleep(Duration::from_millis(POLL_MS)); continue } // another tab is shown: no requests
                 let out = match ureq::get(&url).set("Authorization", &format!("Bearer {token}")).timeout(Duration::from_secs(3)).call() {
                     Ok(resp) => {
                         let mut body = Vec::new();
@@ -46,18 +49,26 @@ impl BrowserPage {
         }).ok();
         cx.spawn(async move |weak, cx| {
             while let Ok(msg) = rx.recv().await {
-                if weak.update(cx, |this, cx| { match msg { Ok(i) => { this.image = Some(i); this.status.clear(); } Err(e) => this.status = e } cx.notify(); }).is_err() { break }
+                if weak.update(cx, |this, cx| { match msg { Ok(i) => { if let Some(old) = this.image.replace(i) { this.retired.push(old); } this.status.clear(); } Err(e) => this.status = e } cx.notify(); }).is_err() { break }
             }
         }).detach();
-        BrowserPage { image: None, status: "Waiting for the first frame".into(), stop }
+        let status = if base.starts_with("https://") { "https hubs are not supported by this page yet (the client has no TLS)".to_string() } else { "Waiting for the first frame".to_string() };
+        BrowserPage { image: None, retired: Vec::new(), status, stop, visible }
     }
+    pub fn set_visible(&mut self, visible: bool) { self.visible.store(visible, Ordering::Relaxed); }
+    /// Give the images back to the atlas (call before dropping the page, with the window).
+    pub fn release(&mut self, window: &mut Window) { for i in self.retired.drain(..).chain(self.image.take()) { let _ = window.drop_image(i); } }
 }
 impl Drop for BrowserPage { fn drop(&mut self) { self.stop.store(true, Ordering::Relaxed); } }
 impl Render for BrowserPage {
-    fn render(&mut self, _w: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        for old in self.retired.drain(..) { let _ = window.drop_image(old); } // a painted RenderImage stays in the atlas until it is dropped
+        let status = self.status.clone();
         match &self.image {
-            Some(i) => div().id("browser-page").size_full().child(img(i.clone()).size_full().object_fit(ObjectFit::Contain)).into_any_element(),
-            None => div().id("browser-page").size_full().flex().items_center().justify_center().text_color(rgb(0x8a93a3)).child(self.status.clone()).into_any_element(),
+            // a dead hub must not look like a live, frozen page: the status shows over the last frame
+            Some(i) => div().id("browser-page").size_full().relative().child(img(i.clone()).size_full().object_fit(ObjectFit::Contain))
+                .when(!status.is_empty(), |d| d.child(div().absolute().bottom_2().left_2().px_2().text_size(px(12.)).bg(rgb(0x1a1e25)).text_color(rgb(0xf06a6a)).child(status))).into_any_element(),
+            None => div().id("browser-page").size_full().flex().items_center().justify_center().text_color(rgb(0x8a93a3)).child(status).into_any_element(),
         }
     }
 }

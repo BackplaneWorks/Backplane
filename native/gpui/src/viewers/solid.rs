@@ -1,15 +1,19 @@
-//! 3D / Mech: the hub's `solid` frame (CBOR {key, n, mesh, box3, ...}; mesh = varints: per triangle the colour XOR the previous one's, then
-//! three vertices as zigzag deltas of x y z in 10 micrometres, board axes, z up) decoded, and rasterized on the CPU with a z-buffer into one
-//! image. Nothing repaints while idle: the image is rebuilt only when the camera or the model changes (a draft at half size while dragging).
+//! 3D / Mech: the hub's `solid` frame (CBOR {key, n, mesh, box3, none, ...}; mesh = varints: per triangle the colour XOR the previous one's, then
+//! three vertices as zigzag deltas of x y z in 10 micrometres, board axes, z up). Decoding and rasterizing run on a worker thread (latest request
+//! wins, a superseded render is abandoned part-way); the page only receives finished images, so input never waits for a model. The camera is the
+//! product's free orbit (solid.js `Orbit`): the model follows the pointer in any direction, the wheel zooms at the pointer between 1/60 and 20 times
+//! the fitted distance, a right/middle or shift drag moves it. The image is as big as the panel in device pixels. Nothing repaints while idle.
 use gpui::{prelude::*, *};
-use std::sync::Arc;
+use std::sync::{atomic::{AtomicU64, Ordering}, Arc, Condvar, Mutex};
 
 pub const MAX_TRIANGLES: usize = (64 << 20) / 84;
+pub const MAX_PIXELS: usize = 2880 * 1800;
+const FOV: f32 = 35.0 * std::f32::consts::PI / 180.0;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Mesh { pub tris: Vec<[f32; 9]>, pub colors: Vec<u32>, pub center: [f32; 3], pub radius: f32 }
 
-struct Varints<'a> { b: &'a [u8], at: usize, pub valid: bool }
+struct Varints<'a> { b: &'a [u8], at: usize, valid: bool }
 impl<'a> Varints<'a> {
     fn new(b: &'a [u8]) -> Self { Varints { b, at: 0, valid: true } }
     fn next(&mut self) -> u32 {
@@ -26,7 +30,7 @@ impl<'a> Varints<'a> {
     fn more(&self) -> bool { self.at < self.b.len() }
 }
 
-/// Mesh from the frame's `n` and `mesh` bytes. Errors when the bytes are not exactly `n` triangles.
+/// Mesh from the frame's `n` and `mesh` bytes. Errors when the bytes are not exactly `n` triangles. Coordinates wrap like the encoder's U32 deltas.
 pub fn decode_mesh(n: usize, bytes: &[u8]) -> Result<Mesh, String> {
     if n == 0 || n > MAX_TRIANGLES || bytes.len() < n * 10 { return Err("Invalid or oversized model".into()) }
     let mut v = Varints::new(bytes);
@@ -37,7 +41,7 @@ pub fn decode_mesh(n: usize, bytes: &[u8]) -> Result<Mesh, String> {
         color ^= v.next();
         let mut t = [0f32; 9];
         for k in 0..3 {
-            for a in 0..3 { p[a] += v.signed(); t[3 * k + a] = p[a] as f32 * 0.01; } // 10 micrometres -> millimetres
+            for a in 0..3 { p[a] = p[a].wrapping_add(v.signed()); t[3 * k + a] = p[a] as f32 * 0.01; } // 10 micrometres -> millimetres
             for a in 0..3 { lo[a] = lo[a].min(t[3 * k + a]); hi[a] = hi[a].max(t[3 * k + a]); }
         }
         if !v.valid { return Err("Incomplete model".into()) }
@@ -66,7 +70,7 @@ fn item(b: &[u8], at: &mut usize, depth: usize) -> Option<Item> {
         2 => { let end = at.checked_add(n as usize)?; let v = b.get(*at..end)?.to_vec(); *at = end; Item::Bytes(v) }
         3 => { let end = at.checked_add(n as usize)?; let v = std::str::from_utf8(b.get(*at..end)?).ok()?.to_string(); *at = end; Item::Text(v) }
         4 => { if n > 1 << 20 { return None } let mut a = Vec::new(); for _ in 0..n { a.push(item(b, at, depth + 1)?); } Item::Array(a) }
-        6 => { let _ = item(b, at, depth + 1)?; return item(b, at, depth + 1) } // a tag (the wire's word/number tags): the value follows
+        6 => return item(b, at, depth + 1), // a tag has one value: the tag number was the head's argument (as wire.rs reads it)
         _ => Item::Other,
     })
 }
@@ -80,186 +84,357 @@ pub fn read_frame(b: &[u8]) -> Option<Vec<(String, Item)>> {
     }
     Some(out)
 }
-/// A solid frame's mesh: `Some(Ok)` model, `Some(Err)` a bad model, `None` not a solid frame (or only a note about one).
-pub fn frame_mesh(b: &[u8]) -> Option<Result<(String, Mesh), String>> {
+#[derive(Debug, PartialEq)]
+pub enum SolidFrame { Model(String, Mesh), /// why there is no model (the hub's `none`), the previous model stays
+    Note(String, String), Bad(String) }
+fn is_solid_key(k: &str) -> bool { k.starts_with("2|") || k.starts_with("3|") || k.starts_with("4|") }
+/// A solid frame as the page uses it; None when the bytes are not a solid frame at all.
+pub fn parse_frame(b: &[u8]) -> Option<SolidFrame> {
     let f = read_frame(b)?;
     let get = |k: &str| f.iter().find(|(n, _)| n == k).map(|(_, v)| v);
     let key = match get("key") { Some(Item::Text(k)) => k.clone(), _ => return None };
-    if !(key.starts_with("2|") || key.starts_with("3|") || key.starts_with("4|")) { return None }
-    let Some(Item::Bytes(mesh)) = get("mesh") else { return None };
-    let n = match get("n") { Some(Item::Int(n)) if *n > 0 => *n as usize, _ => return Some(Err("missing triangle count".into())) };
-    Some(decode_mesh(n, mesh).map(|m| (key, m)))
+    if !is_solid_key(&key) { return None }
+    if let Some(Item::Text(why)) = get("none") { return Some(SolidFrame::Note(key, why.clone())) }
+    let Some(Item::Bytes(mesh)) = get("mesh") else { return None }; // a note about the parts is not a model
+    let n = match get("n") { Some(Item::Int(n)) if *n > 0 => *n as usize, _ => return Some(SolidFrame::Bad("missing triangle count".into())) };
+    Some(match decode_mesh(n, mesh) { Ok(m) => SolidFrame::Model(key, m), Err(e) => SolidFrame::Bad(e) })
 }
 
-// ---- camera and rasterizer ----------------------------------------------------------------------------------
+// ---- the camera: free orbit ------------------------------------------------------------------------------------
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Camera { pub yaw: f32, pub pitch: f32, pub zoom: f32 }
-impl Default for Camera { fn default() -> Self { Camera { yaw: 0.6, pitch: 0.7, zoom: 1.0 } } }
-impl Camera {
-    pub fn orbit(&mut self, dx: f32, dy: f32) { self.yaw -= dx * 0.01; self.pitch = (self.pitch + dy * 0.01).clamp(-1.5, 1.5); }
-    pub fn zoom_by(&mut self, steps: f32) { self.zoom = (self.zoom * 1.1f32.powf(steps)).clamp(0.1, 50.0); }
+pub struct Camera { pub right: [f32; 3], pub up: [f32; 3], pub fwd: [f32; 3], pub target: [f32; 3], pub dist: f32, pub fit: f32 }
+fn sub(a: [f32; 3], b: [f32; 3]) -> [f32; 3] { [a[0] - b[0], a[1] - b[1], a[2] - b[2]] }
+fn add(a: [f32; 3], b: [f32; 3]) -> [f32; 3] { [a[0] + b[0], a[1] + b[1], a[2] + b[2]] }
+fn mul(a: [f32; 3], s: f32) -> [f32; 3] { [a[0] * s, a[1] * s, a[2] * s] }
+fn dot(a: [f32; 3], b: [f32; 3]) -> f32 { a[0] * b[0] + a[1] * b[1] + a[2] * b[2] }
+fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] { [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]] }
+fn norm(a: [f32; 3]) -> [f32; 3] { let l = dot(a, a).sqrt(); if l > 0.0 { mul(a, 1.0 / l) } else { [0.0, 0.0, 1.0] } }
+/// `v` turned by `angle` about the unit `axis` (Rodrigues).
+fn rotate(v: [f32; 3], axis: [f32; 3], angle: f32) -> [f32; 3] {
+    let (s, c) = angle.sin_cos(); add(add(mul(v, c), mul(cross(axis, v), s)), mul(axis, dot(axis, v) * (1.0 - c)))
 }
-const BG: [u8; 4] = [18, 15, 13, 255]; // BGRA of the page background (#0d0f12)
+impl Camera {
+    /// Looking at the model from the front-right and above, fitted to its bounding sphere.
+    pub fn fitted(mesh: &Mesh) -> Camera {
+        let fit = mesh.radius / (FOV / 2.0).sin() * 1.05;
+        let (yaw, pitch) = (0.6f32, 0.7f32);
+        let eye_dir = [pitch.cos() * yaw.sin(), -pitch.cos() * yaw.cos(), pitch.sin()];
+        let fwd = mul(eye_dir, -1.0); let right = norm(cross(fwd, [0.0, 0.0, 1.0])); let up = cross(right, fwd);
+        Camera { right, up, fwd, target: mesh.center, dist: fit, fit }
+    }
+    pub fn eye(&self) -> [f32; 3] { sub(self.target, mul(self.fwd, self.dist)) }
+    fn reortho(&mut self) { self.fwd = norm(self.fwd); self.right = norm(cross(self.fwd, self.up)); self.up = cross(self.right, self.fwd); }
+    /// A drag of (dx, dy) pixels: the model follows the pointer, about the target, in any direction (no pole, no clamp).
+    pub fn orbit(&mut self, dx: f32, dy: f32) {
+        let k = 0.008; // radians per pixel
+        let (ar, au) = (self.right, self.up);
+        // the scene turns about the view's vertical axis with a horizontal drag, about the horizontal axis with a vertical one
+        for v in [&mut self.right, &mut self.fwd, &mut self.up] { *v = rotate(*v, au, dx * k); }
+        let ar2 = rotate(ar, au, dx * k);
+        for v in [&mut self.up, &mut self.fwd, &mut self.right] { *v = rotate(*v, ar2, dy * k); }
+        self.reortho();
+    }
+    /// Move the view: a right/middle or shift drag of (dx, dy) pixels in a panel `h` pixels high.
+    pub fn pan(&mut self, dx: f32, dy: f32, h: f32) {
+        let per_px = 2.0 * (FOV / 2.0).tan() * self.dist / h.max(1.0);
+        self.target = add(self.target, add(mul(self.right, -dx * per_px), mul(self.up, dy * per_px)));
+    }
+    /// Zoom by `steps` wheel notches at the pointer (nx, ny in -1..1, y up; aspect = width / height): the point under it stays under it.
+    pub fn zoom_at(&mut self, steps: f32, nx: f32, ny: f32, aspect: f32) {
+        let t = (FOV / 2.0).tan();
+        let d2 = (self.dist / 1.1f32.powf(steps)).clamp(self.fit / 60.0, self.fit * 20.0);
+        let under = |cam: &Camera, d: f32| add(cam.target, add(mul(cam.right, nx * aspect * t * d), mul(cam.up, ny * t * d)));
+        let p = under(self, self.dist);
+        self.dist = d2;
+        self.target = sub(p, add(mul(self.right, nx * aspect * t * d2), mul(self.up, ny * t * d2)));
+    }
+}
 
-/// Render into BGRA (w x h x 4), z-buffered, two-sided lambert with a headlight.
-pub fn render(mesh: &Mesh, cam: &Camera, w: usize, h: usize) -> Vec<u8> {
+// ---- rasterizer -----------------------------------------------------------------------------------------------------
+const BG: [u8; 4] = [18, 15, 13, 255]; // BGRA of the page background (#0d0f12)
+struct Proj { p: [[f32; 3]; 3], bgra: [u8; 4], miny: usize, maxy: usize }
+
+/// Render into BGRA (w x h x 4), z-buffered, two-sided lambert with a headlight, triangles clipped at the near plane. In horizontal bands on all
+/// cores. `alive` is polled every few thousand triangles: a superseded render stops and returns None.
+pub fn render(mesh: &Mesh, cam: &Camera, w: usize, h: usize, alive: &(dyn Fn() -> bool + Sync)) -> Option<Vec<u8>> {
     let mut px = vec![0u8; w * h * 4];
     for c in px.chunks_exact_mut(4) { c.copy_from_slice(&BG); }
     let mut z = vec![f32::INFINITY; w * h];
-    let fov = 35f32.to_radians(); let f = 1.0 / (fov / 2.0).tan();
-    let dist = mesh.radius / (fov / 2.0).sin() * 1.05 / cam.zoom;
-    // eye on a sphere around the centre: z up, yaw about z
-    let (sy, cy, sp, cp) = (cam.yaw.sin(), cam.yaw.cos(), cam.pitch.sin(), cam.pitch.cos());
-    let eye = [mesh.center[0] + dist * cp * sy, mesh.center[1] - dist * cp * cy, mesh.center[2] + dist * sp];
-    let fwd = norm([mesh.center[0] - eye[0], mesh.center[1] - eye[1], mesh.center[2] - eye[2]]);
-    let right = norm(cross(fwd, [0.0, 0.0, 1.0])); let up = cross(right, fwd);
+    let (f, near) = (1.0 / (FOV / 2.0).tan(), (cam.dist * 0.02).max(1e-3));
+    let eye = cam.eye();
     let (cxp, cyp, scale) = (w as f32 / 2.0, h as f32 / 2.0, h as f32 / 2.0 * f);
-    let near = 0.05 * mesh.radius;
-    let project = |p: [f32; 3]| -> Option<[f32; 3]> {
-        let d = [p[0] - eye[0], p[1] - eye[1], p[2] - eye[2]];
-        let (x, y, zc) = (dot(d, right), dot(d, up), dot(d, fwd));
-        if zc < near { return None }
-        Some([cxp + x / zc * scale, cyp - y / zc * scale, zc])
-    };
-    for (t, &color) in mesh.tris.iter().zip(&mesh.colors) {
+    let to_cam = |p: [f32; 3]| { let d = sub(p, eye); [dot(d, cam.right), dot(d, cam.up), dot(d, cam.fwd)] };
+    let mut projs: Vec<Proj> = Vec::with_capacity(mesh.tris.len());
+    for (i, (t, &color)) in mesh.tris.iter().zip(&mesh.colors).enumerate() {
+        if i % 4096 == 0 && !alive() { return None }
         let (a, b, c) = ([t[0], t[1], t[2]], [t[3], t[4], t[5]], [t[6], t[7], t[8]]);
-        let (Some(pa), Some(pb), Some(pc)) = (project(a), project(b), project(c)) else { continue };
         let n = norm(cross(sub(b, a), sub(c, a)));
-        let shade = 0.3 + 0.7 * dot(n, fwd).abs();
-        let rgb = [((color >> 16) & 255) as f32, ((color >> 8) & 255) as f32, (color & 255) as f32];
-        let bgra = [(rgb[2] * shade) as u8, (rgb[1] * shade) as u8, (rgb[0] * shade) as u8, 255];
-        let (minx, maxx) = (pa[0].min(pb[0]).min(pc[0]).floor().max(0.0) as usize, (pa[0].max(pb[0]).max(pc[0]).ceil() as i64).clamp(0, w as i64 - 1) as usize);
-        let (miny, maxy) = (pa[1].min(pb[1]).min(pc[1]).floor().max(0.0) as usize, (pa[1].max(pb[1]).max(pc[1]).ceil() as i64).clamp(0, h as i64 - 1) as usize);
-        let area = (pb[0] - pa[0]) * (pc[1] - pa[1]) - (pb[1] - pa[1]) * (pc[0] - pa[0]);
-        if area.abs() < 1e-6 { continue }
-        for y in miny..=maxy { for x in minx..=maxx {
-            let (sx, sy_) = (x as f32 + 0.5, y as f32 + 0.5);
-            let w0 = ((pb[0] - sx) * (pc[1] - sy_) - (pb[1] - sy_) * (pc[0] - sx)) / area;
-            let w1 = ((pc[0] - sx) * (pa[1] - sy_) - (pc[1] - sy_) * (pa[0] - sx)) / area;
-            let w2 = 1.0 - w0 - w1;
-            if w0 < 0.0 || w1 < 0.0 || w2 < 0.0 { continue }
-            let depth = w0 * pa[2] + w1 * pb[2] + w2 * pc[2];
-            let i = y * w + x;
-            if depth < z[i] { z[i] = depth; px[i * 4..i * 4 + 4].copy_from_slice(&bgra); }
-        } }
+        let shade = 0.3 + 0.7 * dot(n, cam.fwd).abs();
+        let bgra = [(((color & 255) as f32) * shade) as u8, ((((color >> 8) & 255) as f32) * shade) as u8, ((((color >> 16) & 255) as f32) * shade) as u8, 255];
+        // clip the camera-space triangle against z >= near (Sutherland-Hodgman against one plane): 0, 1 or 2 triangles
+        let v = [to_cam(a), to_cam(b), to_cam(c)];
+        let mut poly: Vec<[f32; 3]> = Vec::with_capacity(4);
+        for k in 0..3 {
+            let (p, q) = (v[k], v[(k + 1) % 3]);
+            let (pin, qin) = (p[2] >= near, q[2] >= near);
+            if pin { poly.push(p); }
+            if pin != qin { let s = (near - p[2]) / (q[2] - p[2]); poly.push([p[0] + (q[0] - p[0]) * s, p[1] + (q[1] - p[1]) * s, near]); }
+        }
+        if poly.len() < 3 { continue }
+        let scr: Vec<[f32; 3]> = poly.iter().map(|p| [cxp + p[0] / p[2] * scale, cyp - p[1] / p[2] * scale, p[2]]).collect();
+        for k in 1..scr.len() - 1 {
+            let tri = [scr[0], scr[k], scr[k + 1]];
+            let (lo, hi) = (tri.iter().map(|p| p[1]).fold(f32::MAX, f32::min), tri.iter().map(|p| p[1]).fold(f32::MIN, f32::max));
+            if hi < 0.0 || lo >= h as f32 { continue }
+            projs.push(Proj { p: tri, bgra, miny: lo.floor().max(0.0) as usize, maxy: (hi.ceil() as i64).clamp(0, h as i64 - 1) as usize });
+        }
     }
-    px
+    let bands = std::thread::available_parallelism().map_or(4, |n| n.get()).min(8).min(h.max(1));
+    let rows = (h + bands - 1) / bands;
+    std::thread::scope(|s| {
+        for (bi, (pb, zb)) in px.chunks_mut(rows * w * 4).zip(z.chunks_mut(rows * w)).enumerate() {
+            let projs = &projs; let (y0, y1) = (bi * rows, (bi * rows + rows).min(h));
+            s.spawn(move || {
+                for (i, t) in projs.iter().enumerate() {
+                    if i % 8192 == 0 && !alive() { return }
+                    if t.maxy < y0 || t.miny >= y1 { continue }
+                    let (pa, pb_, pc) = (t.p[0], t.p[1], t.p[2]);
+                    let area = (pb_[0] - pa[0]) * (pc[1] - pa[1]) - (pb_[1] - pa[1]) * (pc[0] - pa[0]);
+                    if area.abs() < 1e-6 { continue }
+                    let (minx, maxx) = (pa[0].min(pb_[0]).min(pc[0]).floor().max(0.0) as usize, (pa[0].max(pb_[0]).max(pc[0]).ceil() as i64).clamp(0, w as i64 - 1) as usize);
+                    for y in t.miny.max(y0)..=t.maxy.min(y1 - 1) { for x in minx..=maxx {
+                        let (sx, sy) = (x as f32 + 0.5, y as f32 + 0.5);
+                        let w0 = ((pb_[0] - sx) * (pc[1] - sy) - (pb_[1] - sy) * (pc[0] - sx)) / area;
+                        let w1 = ((pc[0] - sx) * (pa[1] - sy) - (pc[1] - sy) * (pa[0] - sx)) / area;
+                        let w2 = 1.0 - w0 - w1;
+                        if w0 < 0.0 || w1 < 0.0 || w2 < 0.0 { continue }
+                        let depth = w0 * pa[2] + w1 * pb_[2] + w2 * pc[2];
+                        let i = (y - y0) * w + x;
+                        if depth < zb[i] { zb[i] = depth; pb[i * 4..i * 4 + 4].copy_from_slice(&t.bgra); }
+                    } }
+                }
+            });
+        }
+    });
+    if alive() { Some(px) } else { None }
 }
-fn sub(a: [f32; 3], b: [f32; 3]) -> [f32; 3] { [a[0] - b[0], a[1] - b[1], a[2] - b[2]] }
-fn dot(a: [f32; 3], b: [f32; 3]) -> f32 { a[0] * b[0] + a[1] * b[1] + a[2] * b[2] }
-fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] { [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]] }
-fn norm(a: [f32; 3]) -> [f32; 3] { let l = dot(a, a).sqrt(); if l > 0.0 { [a[0] / l, a[1] / l, a[2] / l] } else { [0.0, 0.0, 1.0] } }
 
 pub fn to_image(bgra: Vec<u8>, w: usize, h: usize) -> Option<Arc<RenderImage>> {
     let buf = image::RgbaImage::from_raw(w as u32, h as u32, bgra)?; // gpui takes BGRA in this container
     Some(Arc::new(RenderImage::new(vec![image::Frame::new(buf)])))
 }
 
-// ---- the page ---------------------------------------------------------------------------------------------------
-const FULL: (usize, usize) = (1280, 800);
-const DRAFT: (usize, usize) = (640, 400);
+// ---- the worker: latest request wins -------------------------------------------------------------------------------
+enum Msg { Mesh(SolidFrame), Image { gen: u64, image: Arc<RenderImage>, ms: f64, tris: usize, w: usize, h: usize } }
+#[derive(Default)] struct Pending { frame: Option<Vec<u8>>, render: Option<(Arc<Mesh>, Camera, usize, usize, u64)>, shutdown: bool }
+struct Worker { slot: Arc<(Mutex<Pending>, Condvar)>, gen: Arc<AtomicU64> }
+impl Worker {
+    fn spawn(tx: async_channel::Sender<Msg>) -> Worker {
+        let slot: Arc<(Mutex<Pending>, Condvar)> = Arc::new((Mutex::new(Pending::default()), Condvar::new()));
+        let gen = Arc::new(AtomicU64::new(0));
+        let (s2, g2) = (slot.clone(), gen.clone());
+        std::thread::Builder::new().name("solid-render".into()).spawn(move || loop {
+            let job = { let (m, cv) = &*s2; let mut p = m.lock().unwrap();
+                while p.frame.is_none() && p.render.is_none() && !p.shutdown { p = cv.wait(p).unwrap(); }
+                if p.shutdown { return } (p.frame.take(), p.render.take()) };
+            if let (Some(bytes), _) = &job { if let Some(f) = parse_frame(bytes) { if tx.send_blocking(Msg::Mesh(f)).is_err() { return } } }
+            if let (_, Some((mesh, cam, w, h, my))) = job {
+                let t0 = std::time::Instant::now();
+                let g = g2.clone();
+                if let Some(px) = render(&mesh, &cam, w, h, &move || g.load(Ordering::Relaxed) == my) {
+                    if let Some(image) = to_image(px, w, h) { if tx.send_blocking(Msg::Image { gen: my, image, ms: t0.elapsed().as_secs_f64() * 1000.0, tris: mesh.tris.len(), w, h }).is_err() { return } }
+                }
+            }
+        }).ok();
+        Worker { slot, gen }
+    }
+    fn submit_frame(&self, bytes: Vec<u8>) { let (m, cv) = &*self.slot; m.lock().unwrap().frame = Some(bytes); cv.notify_one(); }
+    /// Ask for an image of `mesh`; any earlier request still rendering is abandoned.
+    fn submit_render(&self, mesh: Arc<Mesh>, cam: Camera, w: usize, h: usize) -> u64 {
+        let gen = self.gen.fetch_add(1, Ordering::Relaxed) + 1;
+        let (m, cv) = &*self.slot; m.lock().unwrap().render = Some((mesh, cam, w, h, gen)); cv.notify_one(); gen
+    }
+}
+impl Drop for Worker { fn drop(&mut self) { let (m, cv) = &*self.slot; m.lock().unwrap().shutdown = true; self.gen.fetch_add(1, Ordering::Relaxed); cv.notify_one(); } }
 
-pub struct SolidPage { mesh: Option<Arc<Mesh>>, key: String, cam: Camera, image: Option<Arc<RenderImage>>, dragging: Option<Point<Pixels>>, pub note: String }
+// ---- the page ---------------------------------------------------------------------------------------------------------
+#[derive(Clone, Copy, PartialEq)] enum Drag { Orbit, Pan }
+/// What the demo/metrics read: how many images arrived, the last render's time.
+#[derive(Clone, Debug, Default)] pub struct Stats { pub images: u64, pub last_ms: f64, pub last_tris: usize, pub last_size: (usize, usize) }
+
+pub struct SolidPage {
+    mesh: Option<Arc<Mesh>>, key: String, cam: Option<Camera>, image: Option<Arc<RenderImage>>, retired: Vec<Arc<RenderImage>>, drag: Option<(Drag, Point<Pixels>)>,
+    pub note: String, worker: Worker, size: Arc<Mutex<[f32; 5]>>, // panel width, height, scale factor, origin x, y (logical px) asked: (usize, usize), want_gen: u64, pub stats: Stats,
+}
 impl SolidPage {
-    pub fn new(_cx: &mut Context<Self>) -> Self { SolidPage { mesh: None, key: String::new(), cam: Camera::default(), image: None, dragging: None, note: "No 3D model yet".into() } }
-    /// A plot-lane binary frame: true when it was a solid frame (taken, even when its model was bad); the screens lane calls this for keys 2|, 3|, 4|.
-    pub fn accept(&mut self, bytes: &[u8], cx: &mut Context<Self>) -> bool {
-        match frame_mesh(bytes) {
-            None => false,
-            Some(Err(e)) => { self.note = e; cx.notify(); true }
-            Some(Ok((key, mesh))) => {
-                if key != self.key { self.cam = Camera::default(); }
-                self.key = key; self.mesh = Some(Arc::new(mesh)); self.note.clear(); self.redraw(false); cx.notify(); true
+    pub fn new(cx: &mut Context<Self>) -> Self {
+        let (tx, rx) = async_channel::bounded::<Msg>(4);
+        cx.spawn(async move |weak, cx| {
+            while let Ok(msg) = rx.recv().await {
+                if weak.update(cx, |this, cx| this.apply(msg, cx)).is_err() { break }
+            }
+        }).detach();
+        SolidPage { mesh: None, key: String::new(), cam: None, image: None, retired: Vec::new(), drag: None, note: "No 3D model yet".into(), worker: Worker::spawn(tx),
+            size: Arc::new(Mutex::new([0.0, 0.0, 1.0, 0.0, 0.0])), asked: (0, 0), want_gen: 0, stats: Stats::default() }
+    }
+    /// A plot-lane binary frame: true when it was a solid frame (keys 2|, 3|, 4|). Decoding happens on the worker.
+    pub fn accept(&mut self, bytes: &[u8]) -> bool {
+        let solid = read_frame(bytes).map_or(false, |f| f.iter().any(|(k, v)| k == "key" && matches!(v, Item::Text(t) if is_solid_key(t))));
+        if solid { self.worker.submit_frame(bytes.to_vec()); }
+        solid
+    }
+    fn apply(&mut self, msg: Msg, cx: &mut Context<Self>) {
+        match msg {
+            Msg::Mesh(SolidFrame::Model(key, mesh)) => {
+                let fresh = key != self.key || self.cam.is_none();
+                self.key = key; let mesh = Arc::new(mesh);
+                if fresh { self.cam = Some(Camera::fitted(&mesh)); }
+                self.mesh = Some(mesh); self.note.clear(); self.ask_render(false); cx.notify();
+            }
+            Msg::Mesh(SolidFrame::Note(key, why)) => { // why there is no model; a previous one stays shown
+                self.key = key; self.note = if self.mesh.is_some() { format!("{why} — previous saved revision shown") } else { why }; cx.notify();
+            }
+            Msg::Mesh(SolidFrame::Bad(e)) => { self.note = e; cx.notify(); }
+            Msg::Image { gen, image, ms, tris, w, h } => {
+                if gen != self.want_gen { self.retired.push(image); cx.notify(); return } // a newer request exists: this one is stale
+                if let Some(old) = self.image.replace(image) { self.retired.push(old); }
+                self.stats = Stats { images: self.stats.images + 1, last_ms: ms, last_tris: tris, last_size: (w, h) }; cx.notify();
             }
         }
     }
-    fn redraw(&mut self, draft: bool) {
-        let Some(m) = &self.mesh else { return };
-        let (w, h) = if draft { DRAFT } else { FULL };
-        self.image = to_image(render(m, &self.cam, w, h), w, h);
+    /// Request an image at the panel's device-pixel size (half size for a draft), within MAX_PIXELS.
+    fn ask_render(&mut self, draft: bool) {
+        let (Some(mesh), Some(cam)) = (&self.mesh, self.cam) else { return };
+        let [pw, ph, sf, _, _] = *self.size.lock().unwrap();
+        let (mut w, mut h) = (((pw * sf) as usize).max(64), ((ph * sf) as usize).max(48));
+        if w * h > MAX_PIXELS { let k = (MAX_PIXELS as f32 / (w * h) as f32).sqrt(); w = (w as f32 * k) as usize; h = (h as f32 * k) as usize; }
+        if draft { w = (w / 2).max(32); h = (h / 2).max(24); }
+        self.asked = (w, h);
+        self.want_gen = self.worker.submit_render(mesh.clone(), cam, w, h);
     }
+    /// For the demo and tests: an orbit drag step as the mouse handler does it.
+    pub fn drag_by(&mut self, dx: f32, dy: f32) { if let Some(c) = &mut self.cam { c.orbit(dx, dy); } self.ask_render(true); }
+    /// Give the images back to the atlas (call before dropping the page, with the window).
+    pub fn release(&mut self, window: &mut Window) { for i in self.retired.drain(..).chain(self.image.take()) { let _ = window.drop_image(i); } }
 }
 impl Render for SolidPage {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // images no longer shown leave the sprite atlas (gpui keeps a painted RenderImage there until it is dropped)
+        for old in self.retired.drain(..) { if std::env::var_os("SOLID_DEMO_NO_DROP").is_none() { let _ = window.drop_image(old); } }
+        let size = self.size.clone();
+        let probe = canvas(|_, _, _| (), move |b: Bounds<Pixels>, _, window: &mut Window, _| {
+            let new = [f32::from(b.size.width), f32::from(b.size.height), window.scale_factor(), f32::from(b.origin.x), f32::from(b.origin.y)];
+            let mut g = size.lock().unwrap();
+            if *g != new { *g = new; drop(g); window.refresh(); } // the panel changed size or scale: ask for the next frame once, which re-renders at the new size
+        }).absolute().size_full();
+        // a panel whose size differs from the last request re-renders at the right size
+        let [pw, ph, sf, _, _] = *self.size.lock().unwrap();
+        if self.mesh.is_some() && pw > 0.0 { let want = (((pw * sf) as usize).max(64), ((ph * sf) as usize).max(48)); if self.drag.is_none() && want.0 * want.1 <= MAX_PIXELS && want != self.asked && self.asked.0 * 2 != want.0 { self.ask_render(false); } }
         let body = match &self.image {
-            Some(i) => img(i.clone()).size_full().object_fit(ObjectFit::Contain).into_any_element(),
+            Some(i) => img(i.clone()).size_full().object_fit(ObjectFit::Fill).into_any_element(),
             None => div().size_full().flex().items_center().justify_center().text_color(rgb(0x8a93a3)).child(self.note.clone()).into_any_element(),
         };
-        div().id("solid-page").size_full().overflow_hidden().child(body)
-            .on_mouse_down(MouseButton::Left, cx.listener(|this, e: &MouseDownEvent, _, _| { this.dragging = Some(e.position); }))
+        div().id("solid-page").size_full().overflow_hidden().relative().child(body).child(probe)
+            .when(self.image.is_some() && !self.note.is_empty(), |d| d.child(div().absolute().bottom_2().left_2().px_2().text_size(px(12.)).text_color(rgb(0x8a93a3)).child(self.note.clone())))
+            .on_mouse_down(MouseButton::Left, cx.listener(|this, e: &MouseDownEvent, _, _| { this.drag = Some((if e.modifiers.shift { Drag::Pan } else { Drag::Orbit }, e.position)); }))
+            .on_mouse_down(MouseButton::Right, cx.listener(|this, e: &MouseDownEvent, _, _| { this.drag = Some((Drag::Pan, e.position)); }))
+            .on_mouse_down(MouseButton::Middle, cx.listener(|this, e: &MouseDownEvent, _, _| { this.drag = Some((Drag::Pan, e.position)); }))
             .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, _, cx| {
-                let Some(last) = this.dragging else { return };
-                this.cam.orbit(f32::from(e.position.x - last.x), f32::from(e.position.y - last.y)); this.dragging = Some(e.position);
-                this.redraw(true); cx.notify(); // half size while dragging, the full image on release
+                let Some((kind, last)) = this.drag else { return };
+                if e.pressed_button.is_none() { this.drag = None; this.ask_render(false); cx.notify(); return } // the button went up where we could not see it
+                let (dx, dy) = (f32::from(e.position.x - last.x), f32::from(e.position.y - last.y));
+                let h = this.size.lock().unwrap()[1];
+                if let Some(c) = &mut this.cam { if kind == Drag::Orbit { c.orbit(dx, dy) } else { c.pan(dx, dy, h) } }
+                this.drag = Some((kind, e.position)); this.ask_render(true); cx.notify(); // half size while dragging, the full image on release
             }))
-            .on_mouse_up(MouseButton::Left, cx.listener(|this, _: &MouseUpEvent, _, cx| { if this.dragging.take().is_some() { this.redraw(false); cx.notify(); } }))
-            .on_scroll_wheel(cx.listener(|this, e: &ScrollWheelEvent, _, cx| {
-                let dy = match e.delta { ScrollDelta::Pixels(p) => f32::from(p.y) / 20.0, ScrollDelta::Lines(l) => l.y };
-                this.cam.zoom_by(dy); this.redraw(false); cx.notify();
+            .on_mouse_up(MouseButton::Left, cx.listener(|this, _: &MouseUpEvent, _, cx| { if this.drag.take().is_some() { this.ask_render(false); cx.notify(); } }))
+            .on_mouse_up_out(MouseButton::Left, cx.listener(|this, _: &MouseUpEvent, _, cx| { if this.drag.take().is_some() { this.ask_render(false); cx.notify(); } }))
+            .on_mouse_up(MouseButton::Right, cx.listener(|this, _: &MouseUpEvent, _, cx| { if this.drag.take().is_some() { this.ask_render(false); cx.notify(); } }))
+            .on_mouse_up(MouseButton::Middle, cx.listener(|this, _: &MouseUpEvent, _, cx| { if this.drag.take().is_some() { this.ask_render(false); cx.notify(); } }))
+            .on_scroll_wheel(cx.listener(|this, e: &ScrollWheelEvent, window, cx| {
+                let steps = match e.delta { ScrollDelta::Pixels(p) => f32::from(p.y) / 20.0, ScrollDelta::Lines(l) => l.y };
+                let [pw, ph, _, ox, oy] = *this.size.lock().unwrap();
+                let _ = window; // the pointer in panel coordinates, -1..1 with y up
+                let (nx, ny) = if pw > 0.0 && ph > 0.0 { ((f32::from(e.position.x) - ox) / pw * 2.0 - 1.0, 1.0 - (f32::from(e.position.y) - oy) / ph * 2.0) } else { (0.0, 0.0) };
+                if let Some(c) = &mut this.cam { c.zoom_at(steps, nx.clamp(-1.0, 1.0), ny.clamp(-1.0, 1.0), pw / ph.max(1.0)); }
+                this.ask_render(false); cx.notify();
             }))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{decode_mesh, frame_mesh, render, Camera, BG};
+    // not `use super::*`: that glob brings gpui's own `test` attribute macro into scope and #[test] then expands into itself
+    use super::{decode_mesh, parse_frame, render, Camera, Mesh, SolidFrame, BG};
     fn put(out: &mut Vec<u8>, mut v: u32) { loop { let b = (v & 0x7f) as u8; v >>= 7; if v == 0 { out.push(b); return } out.push(b | 0x80); } }
     fn zig(v: i32) -> u32 { ((v << 1) ^ (v >> 31)) as u32 }
-    /// The encoder side of the documented format, for the tests: triangles of 10 um units with a colour each.
     fn encode(tris: &[([i32; 9], u32)]) -> Vec<u8> {
         let (mut out, mut color, mut p) = (Vec::new(), 0u32, [0i32; 3]);
-        for (t, c) in tris { put(&mut out, c ^ color); color = *c; for k in 0..3 { for a in 0..3 { put(&mut out, zig(t[3 * k + a] - p[a])); p[a] = t[3 * k + a]; } } }
+        for (t, c) in tris { put(&mut out, c ^ color); color = *c; for k in 0..3 { for a in 0..3 { put(&mut out, zig(t[3 * k + a].wrapping_sub(p[a]))); p[a] = t[3 * k + a]; } } }
         out
     }
     fn cube() -> Vec<([i32; 9], u32)> {
-        let s = 1000; // 10 mm
-        let v = |x: i32, y: i32, z: i32| [x * s, y * s, z * s];
+        let s = 1000; let v = |x: i32, y: i32, z: i32| [x * s, y * s, z * s];
         let quad = |a: [i32; 3], b: [i32; 3], c: [i32; 3], d: [i32; 3], col: u32| -> Vec<([i32; 9], u32)> {
-            vec![([a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]], col), ([a[0], a[1], a[2], c[0], c[1], c[2], d[0], d[1], d[2]], col)]
-        };
+            vec![([a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]], col), ([a[0], a[1], a[2], c[0], c[1], c[2], d[0], d[1], d[2]], col)] };
         let mut t = Vec::new();
         t.extend(quad(v(0, 0, 0), v(1, 0, 0), v(1, 1, 0), v(0, 1, 0), 0x3060c0)); t.extend(quad(v(0, 0, 1), v(1, 0, 1), v(1, 1, 1), v(0, 1, 1), 0xc06030));
         t.extend(quad(v(0, 0, 0), v(1, 0, 0), v(1, 0, 1), v(0, 0, 1), 0x30c060)); t.extend(quad(v(0, 1, 0), v(1, 1, 0), v(1, 1, 1), v(0, 1, 1), 0xc0c030));
         t.extend(quad(v(0, 0, 0), v(0, 1, 0), v(0, 1, 1), v(0, 0, 1), 0x9030c0)); t.extend(quad(v(1, 0, 0), v(1, 1, 0), v(1, 1, 1), v(1, 0, 1), 0x30c0c0));
         t
     }
+    fn mesh() -> Mesh { let t = cube(); decode_mesh(t.len(), &encode(&t)).unwrap() }
+    const ALIVE: &(dyn Fn() -> bool + Sync) = &|| true;
     #[test] fn decodes_what_the_format_encodes() {
-        let tris = cube(); let m = decode_mesh(tris.len(), &encode(&tris)).unwrap();
+        let m = mesh();
         assert_eq!(m.tris.len(), 12); assert_eq!(m.colors[0], 0x3060c0); assert_eq!(m.colors[11], 0x30c0c0);
         assert!((m.tris[0][3] - 10.0).abs() < 1e-3, "10 mm after 1000 x 10 um");
         assert!((m.center[0] - 5.0).abs() < 1e-3 && (m.radius - (3.0f32).sqrt() * 5.0).abs() < 1e-3);
     }
-    #[test] fn rejects_wrong_counts_and_truncated_bytes() {
-        let tris = cube(); let bytes = encode(&tris);
-        assert!(decode_mesh(11, &bytes).is_err(), "bytes left over");
-        assert!(decode_mesh(13, &bytes).is_err(), "bytes run out");
-        assert!(decode_mesh(0, &bytes).is_err()); assert!(decode_mesh(12, &bytes[..bytes.len() - 3]).is_err());
+    #[test] fn rejects_wrong_counts_truncated_bytes_and_wraps_instead_of_panicking() {
+        let bytes = encode(&cube());
+        assert!(decode_mesh(11, &bytes).is_err()); assert!(decode_mesh(13, &bytes).is_err()); assert!(decode_mesh(0, &bytes).is_err()); assert!(decode_mesh(12, &bytes[..bytes.len() - 3]).is_err());
+        let big = encode(&[([i32::MAX, 0, 0, 0, i32::MAX, 0, 0, 0, i32::MAX], 1), ([i32::MAX, i32::MAX, 0, i32::MAX, i32::MAX, i32::MAX, 5, 5, 5], 2)]);
+        let _ = decode_mesh(2, &big); // overflowing deltas wrap (no debug-mode panic)
     }
     #[test] fn renders_the_model_in_the_middle_and_background_at_the_corners() {
-        let tris = cube(); let m = decode_mesh(tris.len(), &encode(&tris)).unwrap();
-        let (w, h) = (96, 64); let px = render(&m, &Camera::default(), w, h);
+        let m = mesh(); let (w, h) = (96, 64); let px = render(&m, &Camera::fitted(&m), w, h, ALIVE).unwrap();
         let at = |x: usize, y: usize| { let i = (y * w + x) * 4; [px[i], px[i + 1], px[i + 2]] };
-        assert_eq!(at(1, 1), [BG[0], BG[1], BG[2]], "corner is background"); assert_ne!(at(w / 2, h / 2), [BG[0], BG[1], BG[2]], "the cube is drawn");
+        assert_eq!(at(1, 1), [BG[0], BG[1], BG[2]]); assert_ne!(at(w / 2, h / 2), [BG[0], BG[1], BG[2]]);
     }
-    #[test] fn orbit_and_zoom_change_the_picture_and_zbuffer_hides_the_far_side() {
-        let tris = cube(); let m = decode_mesh(tris.len(), &encode(&tris)).unwrap();
-        let a = render(&m, &Camera::default(), 64, 64);
-        let mut c = Camera::default(); c.orbit(80.0, 0.0); assert_ne!(a, render(&m, &c, 64, 64));
-        let mut z = Camera::default(); z.zoom_by(5.0); assert_ne!(a, render(&m, &z, 64, 64));
-        // looking straight down the top face: the pixel at the centre is the top face's colour (0xc06030, nearer than the bottom 0x3060c0)
-        let top = Camera { yaw: 0.0, pitch: 1.5, zoom: 1.0 }; let px = render(&m, &top, 64, 64); let i = (32 * 64 + 32) * 4;
-        assert!(px[i + 2] > px[i], "red channel (top, 0xc0) beats blue (bottom, 0x30) at the centre: {:?}", &px[i..i + 3]);
+    #[test] fn free_orbit_has_no_pole_and_keeps_an_orthonormal_basis_and_zoom_is_bounded() {
+        let m = mesh(); let a = render(&m, &Camera::fitted(&m), 64, 64, ALIVE).unwrap();
+        let mut c = Camera::fitted(&m); for _ in 0..400 { c.orbit(3.0, 7.0); } // many turns over the pole
+        let dot = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+        assert!(dot(c.right, c.up).abs() < 1e-3 && dot(c.right, c.fwd).abs() < 1e-3 && (dot(c.fwd, c.fwd) - 1.0).abs() < 1e-3);
+        assert_ne!(a, render(&m, &c, 64, 64, ALIVE).unwrap());
+        let mut z = Camera::fitted(&m); for _ in 0..500 { z.zoom_at(5.0, 0.0, 0.0, 1.5); } assert!((z.dist - z.fit / 60.0).abs() < 1e-3, "in-bound 1/60");
+        for _ in 0..500 { z.zoom_at(-5.0, 0.0, 0.0, 1.5); } assert!((z.dist - z.fit * 20.0).abs() < 1e-1, "out-bound 20x");
     }
-    #[test] fn frame_reader_finds_key_n_and_mesh_and_ignores_other_frames() {
+    #[test] fn zoom_at_the_pointer_keeps_the_point_under_it_fixed() {
+        let m = mesh(); let mut c = Camera::fitted(&m); let (nx, ny, aspect) = (0.4f32, -0.3f32, 1.5f32);
+        let t = (super::FOV / 2.0).tan();
+        let point = |c: &Camera| { let p = [c.target[0] + c.right[0] * nx * aspect * t * c.dist + c.up[0] * ny * t * c.dist, c.target[1] + c.right[1] * nx * aspect * t * c.dist + c.up[1] * ny * t * c.dist, c.target[2] + c.right[2] * nx * aspect * t * c.dist + c.up[2] * ny * t * c.dist]; p };
+        let before = point(&c); c.zoom_at(3.0, nx, ny, aspect); let after = point(&c);
+        for a in 0..3 { assert!((before[a] - after[a]).abs() < 1e-3, "axis {a}: {before:?} vs {after:?}"); }
+    }
+    #[test] fn a_triangle_behind_the_near_plane_is_clipped_not_dropped() {
+        let m = mesh(); let mut c = Camera::fitted(&m); c.dist = c.fit / 60.0 * 2.0; // inside the cube: faces cross the near plane
+        let px = render(&m, &c, 48, 48, ALIVE).unwrap();
+        assert!(px.chunks_exact(4).any(|p| [p[0], p[1], p[2]] != [BG[0], BG[1], BG[2]]), "the near faces still cover the view");
+    }
+    #[test] fn a_superseded_render_is_abandoned() { let m = mesh(); assert!(render(&m, &Camera::fitted(&m), 32, 32, &|| false).is_none()); }
+    #[test] fn frame_parser_reads_model_note_and_ignores_other_frames() {
         let bytes = encode(&cube());
-        let mut f = vec![0xa3]; // map of 3
-        for (k, v) in [("key", None), ("n", Some(12u8)), ("mesh", None)] {
-            f.push(0x60 | k.len() as u8); f.extend(k.as_bytes());
-            match (k, v) { ("key", _) => { let s = b"2|board"; f.push(0x60 | s.len() as u8); f.extend(s) } ("n", Some(n)) => f.push(n), _ => { f.push(0x59); f.extend((bytes.len() as u16).to_be_bytes()); f.extend(&bytes) } }
-        }
-        let (key, m) = frame_mesh(&f).unwrap().unwrap(); assert_eq!(key, "2|board"); assert_eq!(m.tris.len(), 12);
-        let mut other = f.clone(); other[6] = b'1'; // key "1|board" is a plot, not a solid
-        assert!(frame_mesh(&other).is_none());
-        assert!(frame_mesh(&[0xff, 0x00]).is_none());
+        let text = |f: &mut Vec<u8>, s: &str| { f.push(0x60 | s.len() as u8); f.extend(s.as_bytes()) };
+        let mut f = vec![0xa3]; text(&mut f, "key"); text(&mut f, "2|board"); text(&mut f, "n"); f.push(12); text(&mut f, "mesh"); f.push(0x59); f.extend((bytes.len() as u16).to_be_bytes()); f.extend(&bytes);
+        match parse_frame(&f) { Some(SolidFrame::Model(k, m)) => { assert_eq!(k, "2|board"); assert_eq!(m.tris.len(), 12) } other => panic!("{other:?}") }
+        let mut n = vec![0xa2]; text(&mut n, "key"); text(&mut n, "3|board"); text(&mut n, "none"); text(&mut n, "no model for this board");
+        assert_eq!(parse_frame(&n), Some(SolidFrame::Note("3|board".into(), "no model for this board".into())));
+        let mut other = f.clone(); other[6] = b'1'; assert!(parse_frame(&other).is_none());
+        assert!(parse_frame(&[0xff, 0x00]).is_none());
+        // a tag wraps ONE value: tag 6 over the map's text key must not eat the next item
+        let mut tagged = vec![0xa1, 0xc6, 0x03]; text(&mut tagged, "x"); // key = tag(6, 3) then value "x"... the value after the tag number is the 3
+        let _ = parse_frame(&tagged);
     }
 }

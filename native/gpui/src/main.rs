@@ -121,7 +121,13 @@ fn main()->anyhow::Result<()> {
         art::load_fonts(cx);input::bind(cx);screens::composer::bind(cx);cx.bind_keys([KeyBinding::new("enter",Send,Some("Composer")),KeyBinding::new("ctrl-enter",Send,Some("Composer")),KeyBinding::new("escape",ClosePopup,None)]);
         cx.on_window_closed(|cx|if cx.windows().is_empty(){cx.quit();}).detach();
         let bounds=Bounds::centered(None,size(px(1400.),px(900.)),cx);
-        cx.open_window(WindowOptions{window_bounds:Some(WindowBounds::Windowed(bounds)),titlebar:Some(TitlebarOptions{title:Some("Backplane GPUI · experimental".into()),..Default::default()}),..Default::default()},move|window,cx|cx.new(|cx|Backplane::new(window,cx,config,started))).expect("open GPUI window");
+        let opts=WindowOptions{window_bounds:Some(WindowBounds::Windowed(bounds)),titlebar:Some(TitlebarOptions{title:Some("Backplane GPUI · experimental".into()),..Default::default()}),..Default::default()};
+        if let Some(spec)=config.solid_demo.clone() { // --solid-demo TRIS[,STEPS]: the 3D page alone on a synthetic model (measurement, check mode)
+            let mut it=spec.split(',');let tris=it.next().and_then(|t|t.parse().ok()).unwrap_or(100_000);let steps=it.next().and_then(|t|t.parse().ok()).unwrap_or(200);
+            cx.open_window(opts,move|_,cx|cx.new(|cx|viewers::demo::Demo::new(cx,tris,steps,started))).expect("open GPUI window");
+        } else {
+            cx.open_window(opts,move|window,cx|cx.new(|cx|Backplane::new(window,cx,config,started))).expect("open GPUI window");
+        }
         cx.activate(true);
         if let Some(secs)=exit_after {cx.spawn(async move|cx|{cx.background_executor().timer(Duration::from_secs_f64(secs)).await;let _=cx.update(|cx|cx.quit());}).detach();}
     });Ok(())
