@@ -31,8 +31,15 @@ def SubHistory.failed(rows: List<&2, List<&2, String>>) -> Bool:
     case r <> _: String.eq(SN.Snap.col(r, 0n), "\u{0000}fail")
     case Nil{}: False{}
 
+# the rows as a state of their own: a pure function of the rows alone, so
+# the server bundle keeps it per rows by identity (scripts/js-native.py's
+# MEMO1): db.js answers an unchanged read with the very same rows, and posting
+# them again was 20 ms a render on a thread with many subagents (2026-11-05)
+def SubHistory.own(rows: List<&2, List<&2, String>>) -> M.State:
+  SubHistory.post(rows, M.State.empty())
+
 def SubHistory.attach(+st: M.State, +thread: String, +rows: List<&2, List<&2, String>>) -> M.State:
-  +own = SubHistory.post(rows, M.State.empty())
+  +own = SubHistory.own(rows)
   +starts = SB.Subs.starts(own, thread)
   V.State.window.subs.calls(starts, own, V.State.window.file(V.State.window.file(st, M.Bg.log(thread), M.State.mine(own, M.Bg.log(thread))), M.Idx.sub.starts(M.Bg.log(thread)), starts))
 
