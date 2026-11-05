@@ -32,8 +32,9 @@ final class Journeys: XCTestCase {
         let addr = d.el("pair.address")
         guard d.step("pairing screen", act: {}, expect: { addr.exists }) else { return }
         d.step("type the pairing link", act: { d.tap(addr); d.type(addr, d.link) }, expect: { d.el("pair.connect").isEnabled })
-        d.step("connect", timeout: 30, act: { d.tap(d.el("pair.connect")) }, expect: { d.app.tabBars.buttons.firstMatch.exists })
-        d.skipTour(); d.shot("paired")
+        d.step("connect", timeout: 30, act: { d.tap(d.el("pair.connect")) }, expect: { d.app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'thread.row.' OR identifier BEGINSWITH 'project.header.'")).firstMatch.exists || d.app.buttons["Skip"].exists })
+        for _ in 0..<4 { d.skipTour() }
+        d.shot("paired")
     }
 
     func test_projects_threads() {
@@ -107,6 +108,14 @@ final class Journeys: XCTestCase {
         guard openThread(0) else { return }
         let comp = d.el("thread.composer"); d.tap(comp)
         for (sigil, want) in [("@", "@Bub"), (">", ">e2e"), ("%", "%proj"), ("#", "#e2e"), ("$", "$"), ("/", "/btw")] {
+            if sigil == "#" {
+                // rooms: only when the fixture seeded one (a hub that refused rooms.create leaves none)
+                d.type(comp, sigil); Thread.sleep(forTimeInterval: 2.5)
+                let has = d.label("#e2e").exists
+                d.steps.append(["do": "type # -> popup", "tap_epoch_ms": (Date().timeIntervalSince1970 * 1000).rounded(), "tap_ms": 0, "result_ms": 0, "ok": true, "skipped": !has])
+                if !has { d.note("no room in the fixture hub: the # popup has no rows to show") }
+                d.type(comp, XCUIKeyboardKey.delete.rawValue); continue
+            }
             d.step("type \(sigil) -> popup", act: { d.type(comp, sigil) }, expect: { want == "$" ? d.app.buttons.count > 12 : d.label(want).exists })
             d.type(comp, XCUIKeyboardKey.delete.rawValue)
         }
@@ -119,25 +128,35 @@ final class Journeys: XCTestCase {
         d.step("bots list", act: {}, expect: { d.label("Bub").exists })
         d.step("open Bub", act: { d.tap(d.label("Bub")) }, expect: { d.el("thread.composer").exists || d.label("ready").exists })
         d.shot("bot"); back()
-        d.step("rooms", act: { d.app.buttons["Rooms"].tap() }, expect: { d.label("e2e-room").exists })
+        d.step("rooms", act: { d.tap(d.app.buttons["Rooms"]) }, expect: { d.label("e2e-room").exists || d.label("No rooms yet").exists })
+        if d.label("No rooms yet").exists { d.block("fixture: the hub has no room (rooms.create refused or not implemented)"); d.shot("no-rooms"); return }
         d.step("open the room", act: { d.tap(d.label("e2e-room")) }, expect: { d.app.textFields.firstMatch.exists })
         let post = d.app.textFields.firstMatch
         d.step("post to the room", act: { d.tap(post); d.type(post, "hello room zqshort\n") }, expect: { d.label("hello room").exists })
         d.shot("room")
     }
 
+    // the thread's viewer panel: viewer.open opens it, viewer.source picks Board / Schematic / 3D / Files ...
+    private func openViewer(_ kind: String) -> Bool {
+        let open = d.el("viewer.open")
+        return d.step("open \(kind)", timeout: 25, act: {
+            if !d.el("viewer.close").exists { d.tap(open) }
+            if kind != "Board" { d.tap(d.el("viewer.source")); d.tap(d.app.buttons[kind].firstMatch) }
+        }, expect: { d.el("viewer.close").exists })
+    }
+
     func test_viewers() {
         d = Driver("viewers"); defer { d.finish() }
         d.launch(); tab("Threads")
         guard openThread(0) else { return }
-        // the thread's viewer panel lists Board / Schematic / 3D when the project holds them
-        let open = d.el("viewer.open").exists ? d.el("viewer.open") : d.app.buttons.matching(NSPredicate(format: "label CONTAINS[c] 'viewer' OR label CONTAINS[c] 'board'")).firstMatch
         for kind in ["Board", "Schematic", "3D"] {
-            if !open.exists { d.block("viewer button not found"); break }
-            d.step("open \(kind)", timeout: 25, act: { if d.label(kind).exists { d.tap(d.label(kind)) } else { open.tap(); d.tap(d.label(kind)) } }, expect: { d.el("viewer.close").exists })
+            guard openViewer(kind) else { break }
+            Thread.sleep(forTimeInterval: 3)
+            if d.label("in this project yet").exists { d.block("fixture: no \(kind.lowercased()) in the project (the hub's project has no KiCad project/STEP the viewer lists)") }
+            if d.label("Loading 3D").exists { d.note("3D model still loading after 3 s (STEP conversion)") }
             d.app.swipeLeft(); d.app.pinch(withScale: 1.5, velocity: 1)
             d.shot("viewer-\(kind)")
-            if d.el("viewer.close").exists { d.tap(d.el("viewer.close")) }
+            if d.el("viewer.close").exists { d.el("viewer.close").tap() }
         }
     }
 
@@ -145,10 +164,9 @@ final class Journeys: XCTestCase {
         d = Driver("downloads"); defer { d.finish() }
         d.launch(); tab("Threads")
         guard openThread(0) else { return }
-        let files = d.app.buttons.matching(NSPredicate(format: "label CONTAINS[c] 'files'")).firstMatch
-        guard files.exists || d.label("Files").exists else { d.block("files tab not found"); return }
-        d.step("open Files", act: { (files.exists ? files : d.label("Files")).tap() }, expect: { d.label("readme.txt").exists })
-        d.step("open readme.txt", act: { d.tap(d.label("readme.txt")) }, expect: { d.app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] 'readme' OR label CONTAINS[c] 'hello'")).count > 0 })
+        guard openViewer("Files") else { return }
+        d.step("the Files list shows the fixture's readme", act: {}, expect: { d.label("readme.txt").exists })
+        d.step("open readme.txt", act: { d.tap(d.label("readme.txt")) }, expect: { d.app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] 'hello' OR label CONTAINS[c] 'readme'")).count > 1 })
         d.shot("file")
     }
 

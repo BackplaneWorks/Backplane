@@ -21,7 +21,7 @@ tail -2 $B/results/ios/e2e-fixture.log | cut -c1-200
 $SB "cat $V/root/home/token" > /tmp/e2e-token
 RSYNC_RSH=$M rsync -a /tmp/e2e-token hs-mac-mini:bp-gpui-ios/e2e-token
 RSYNC_RSH=$M rsync -a --delete test/gpui/e2e/ios/ hs-mac-mini:bp-gpui-ios/e2e/
-$M hs-mac-mini "cd ~/bp-gpui-ios/e2e && rm -rf ~/bp-gpui-ios/e2e-out && SIM_UDID=$U OUT=\$HOME/bp-gpui-ios/e2e-out HUB_HOST=$HOSTDNS HUB_PORT=$PORT HUB_TOKEN_FILE=\$HOME/bp-gpui-ios/e2e-token HUB_CTL=http://$HOSTDNS:$((PORT+1)) LONG_SECS=\${LONG_SECS:-300} sh ./run.sh $J; xcrun simctl shutdown $U"
+$M hs-mac-mini "cd ~/bp-gpui-ios/e2e && rm -rf ~/bp-gpui-ios/e2e-out && SIM_UDID=$U OUT=\$HOME/bp-gpui-ios/e2e-out HUB_HOST=$HOSTDNS HUB_PORT=$PORT HUB_TOKEN_FILE=\$HOME/bp-gpui-ios/e2e-token HUB_CTL=http://$HOSTDNS:$((PORT+1)) LONG_SECS=${LONG_SECS:-300} sh ./run.sh $J; xcrun simctl shutdown $U"
 RSYNC_RSH=$M rsync -a hs-mac-mini:bp-gpui-ios/e2e-out/ $OUT/
 kill $FIXSSH 2>/dev/null
 $SB "P=\$(ss -ltnp | grep ':$PORT ' | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2); echo fixture pid \$P; [ -n \"\$P\" ] && kill \$P; sleep 5; ss -ltn | grep -cE ':385[01] |:4850 ' ; rm -rf $V; ls -d $V 2>&1 | tail -1"
