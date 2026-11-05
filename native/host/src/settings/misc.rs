@@ -15,7 +15,7 @@ impl RpcHandler for SettingsMisc {
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, method: &'a str, _p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             match method {
-                "models.refresh" => { hub.push_all(&json!({"t":"info","info":{"models":models::info()}})); vec![json!({"t":"reply","id":id,"ok":true})] }
+                "models.refresh" => { hub.push_all(&json!({"t":"info","info":{"models":models::info(),"models.all":models::all()}})); vec![json!({"t":"reply","id":id,"ok":true})] }
                 "update.check" => {
                     let channel = hub.setting("update.channel").await.filter(|c| !c.is_empty()).unwrap_or_else(|| "stable".into());
                     vec![json!({"t":"reply","id":id,"ok":true,"result":{"version":"","channel":channel}})]
