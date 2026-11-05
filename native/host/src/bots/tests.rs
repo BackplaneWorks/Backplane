@@ -756,7 +756,7 @@ fn tool_norm(v: &Value) -> Value {
     let names: Vec<String> = tools::defs().iter().map(|d| d["name"].as_str().unwrap().to_string()).collect();
     assert_eq!(names, tools::NAMES);
     let (_hub, bots, _r) = start("tools-nobot", "").await;
-    assert_eq!(bots.tool_call("t-none", "bot_whoami", &json!({})).await, (false, json!({"error":"only bots have this tool"})));
+    assert_eq!(bots.tool_call("t-none", "bot_whoami", &json!({})).await, (false, json!({"error":"unknown tool"})));
 }
 #[tokio::test] async fn bot_messages_past_the_depth_bound_are_held_and_wake_nobody() {
     // BT.Hop: a message goes out one hop past the turn that sent it, never past 6; the seventh is kept in its room for the person
@@ -1029,4 +1029,21 @@ async fn owner_planned(p: &Pair) {
     assert!(l.iter().any(|e| e["$"] == "SettingSet" && e["key"] == "star.seen.m1") && l.iter().any(|e| e["$"] == "SettingSet" && e["key"] == "star.seen.p1"));
     // the star events are in the same commit as the prompt's own: right after the wake / with the room post
     let i = l.iter().position(|e| e["key"] == "star.seen.m1").unwrap(); assert_eq!(l[i - 1]["$"], "BotWoke");
+}
+
+#[tokio::test] async fn the_bots_tools_reach_a_bots_agent_through_the_tool_set() {
+    use crate::agents::mcp::ToolSet;
+    let (hub, bots, _r) = start("toolset", "").await;
+    let ada = bot(&hub, "ada").await;
+    let th = log(&hub).iter().find(|e| e["$"] == "BotSet" && e["id"] == ada.as_str()).unwrap()["thread"].as_str().unwrap().to_string();
+    let set = tools::BotToolSet(bots.clone());
+    assert_eq!(set.list(&th).len(), tools::NAMES.len(), "a bot's thread lists every bot tool");
+    assert!(set.list("t-other").is_empty(), "a thread that is no bot's lists none");
+    assert!(set.owns("memory_save") && !set.owns("thread_list"));
+    let (ok, body) = set.call(&th, "memory_save", &json!({"key":"k","text":"v"})).await; assert!(ok, "{body}");
+    assert_eq!(set.call("t-other", "memory_save", &json!({})).await, (false, json!({"error":"unknown tool"})));
+    // a bot made after the start is listed at once (its creation went through the world)
+    let bob = bot(&hub, "bob").await;
+    let tb = log(&hub).iter().find(|e| e["$"] == "BotSet" && e["id"] == bob.as_str()).unwrap()["thread"].as_str().unwrap().to_string();
+    bots.world().await; assert!(set.list(&tb).len() > 0);
 }
