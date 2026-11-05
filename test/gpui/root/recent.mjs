@@ -1,4 +1,4 @@
-// Recent-only, helper-free smoke and RSS sample on a throwaway SYNTHETIC log copy.
+// Recent and optional plain-thread helper-free smoke and RSS sample on a throwaway SYNTHETIC log copy.
 // bun test/gpui/root/recent.mjs BINARY SYNTHETIC_LOG [PORT]
 import {spawn,execFileSync} from 'node:child_process';
 import {mkdirSync,mkdtempSync,writeFileSync,readFileSync,chmodSync,rmSync,statSync} from 'node:fs';
@@ -15,7 +15,7 @@ for(const n of ['claude','codex','grok','muse']){writeFileSync(`${fake}/${n}`,'#
 execFileSync('cp',['--reflink=auto',source,`${home}/events.jsonl`]);
 const out=resolve('build/gpui/results/root'); mkdirSync(out,{recursive:true});
 const eventsBytes=statSync(source).size;
-const env={...process.env,BACKPLANE_COPY:'1',BACKPLANE_PASSIVE:'1',BACKPLANE_NO_UPDATE:'1',BACKPLANE_AGENTS:fake,BACKPLANE_PEERS:'',BACKPLANE_ORDER_SERVER:'http://127.0.0.1:9',DISPLAY:'',WAYLAND_DISPLAY:'',PATH:`${fake}:${process.env.PATH}`};
+const env={...process.env,TZ:'Etc/UTC',BACKPLANE_COPY:'1',BACKPLANE_PASSIVE:'1',BACKPLANE_NO_UPDATE:'1',BACKPLANE_AGENTS:fake,BACKPLANE_PEERS:'',BACKPLANE_ORDER_SERVER:'http://127.0.0.1:9',DISPLAY:'',WAYLAND_DISPLAY:'',PATH:`${fake}:${process.env.PATH}`};
 const start=performance.now();
 const proc=spawn('systemd-run',['--user','--scope','--quiet','-p','MemoryMax=3700M','-p','MemorySwapMax=0',resolve(bin),'--home',home,'--port',port,'--no-tailscale','--foreground'],{env,stdio:['ignore','pipe','pipe']});
 let pid=0,ws,log=''; const timer=setTimeout(()=>{if(pid)process.kill(pid,'SIGKILL');process.exitCode=1;console.error('root recent timeout');},120000);
@@ -45,7 +45,7 @@ try {
  const waiting=new Map();
  const greeting=new Promise((res,rej)=>{ws.onerror=rej;ws.onmessage=e=>{const v=decode(e.data);if(v.t==='view'){greet=v;res();}if(v.t==='reply'){const w=waiting.get(v.id);if(w){waiting.delete(v.id);w(v);}}};});
  await greeting;
- const target={kind:'recent',id:''};
+ let target={kind:'recent',id:''};
  const req=async(m,extra={})=>{const requestId=id++;const response=new Promise(r=>waiting.set(requestId,r));const t=performance.now();
   ws.send(encode({id:requestId,m,p:{nativeSidebar:1,version:1,hub:url,generation:greet.generation,epoch:greet.epoch,requestRevision:++revision,target,viewId,session,cid:'root-recent',...extra}}));
   const r=await response;if(r.ok){viewId=r.result.viewId;session=r.result.session;}return {r,ms:performance.now()-t};};
@@ -58,13 +58,33 @@ try {
  const next=shown.sidebarPages?.[0]?.projects?.next;
  if(next){const page=await req('view.action',{action:next.action,value:next.value});if(!page.r.ok||page.r.result.shown.sidebarPages[0].projects.offset!==8)throw Error('project cursor did not advance');}
  const bad=await req('view.action',{action:'native-sidebar-page',value:'forged'});if(bad.r.ok||bad.r.error?.code!=='INVALID_REQUEST')throw Error('forged sidebar cursor was not refused');
+ const threadChecks=[];
+ if(process.env.ROOT_THREAD_ID){
+  const thread=process.env.ROOT_THREAD_ID; target={kind:'thread',id:thread}; viewId='';
+  const openedThread=await req('view.open');
+  if(!openedThread.r.ok||openedThread.r.result.shown?.thread?.id!==`${url}|${thread}`)throw Error(`thread open failed: ${JSON.stringify(openedThread.r.error)}`);
+  const firstWindow=openedThread.r.result.window,firstEntries=openedThread.r.result.shown.thread.entries;
+  if(!firstEntries.length||!firstWindow.ids.length)throw Error('thread entries/window missing');
+  threadChecks.push({method:'view.open',ms:openedThread.ms,entries:firstEntries.length,windowIds:firstWindow.ids.length,total:firstWindow.total,remaining:firstWindow.remaining});
+  const updatedThread=await req('view.update');if(!updatedThread.r.ok)throw Error('thread update failed');
+  threadChecks.push({method:'view.update',ms:updatedThread.ms});
+  if(firstWindow.older){
+   const older=await req('view.page',{cursor:firstWindow.older});if(!older.r.ok)throw Error(`older thread page failed: ${JSON.stringify(older.r.error)}`);
+   if(JSON.stringify(older.r.result.window.ids)===JSON.stringify(firstWindow.ids))throw Error('older cursor did not change window');
+   if(older.r.result.shown.thread.earlier!==older.r.result.window.remaining)throw Error('earlier does not match the native window');
+   threadChecks.push({method:'view.page',ms:older.ms,windowIds:older.r.result.window.ids.length,newer:older.r.result.window.newer,remaining:older.r.result.window.remaining});
+  }
+  const draft=await req('view.action',{action:'draft',value:'unsupported draft'});
+  if(draft.r.ok||draft.r.error?.code!=='PRESENTER_UNAVAILABLE'||!draft.r.error.retryable)throw Error('nonempty draft falsely acknowledged');
+  target={kind:'recent',id:''};viewId='';if(!(await req('view.open')).r.ok)throw Error('return to recent failed');
+ }
  const unsupported=[];
  for(const kind of ['thread','bot','room','project']){const r=await req('view.open',{target:{kind,id:'unported'}});if(r.r.ok||r.r.error?.code!=='PRESENTER_UNAVAILABLE'||r.r.error.retryable!==true)throw Error(`unported ${kind} was claimed`);unsupported.push({kind,retryable:r.r.error.retryable});}
  const children=readFileSync(`/proc/${pid}/task/${pid}/children`,'utf8').trim().split(/\s+/).filter(Boolean).map(Number);
  if(children.length)throw Error(`unexpected child processes after views: ${children.length}`);
  const usage=execFileSync('python3',['-c','import json,sys; f=open(sys.argv[1]); f.seek(int(sys.argv[2])); print(sum(1 for l in f if json.loads(l).get("$")=="TurnUsage"))',`${home}/events.jsonl`,String(eventsBytes)],{encoding:'utf8'}).trim();
- const result={machine:'desktop',commit:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),dirty:execFileSync('git',['status','--porcelain'],{encoding:'utf8'}).length>0,eventsBytes,scope:{memoryMax:cap,swapMax:swap},before,after,firstOpenMs:opened.ms,updates,projects:shown.projects.length,rows:shown.projects.reduce((n,p)=>n+['threads','settled','snoozed','archived'].reduce((n,k)=>n+(p[k]?.length??0),0),0),bodyBytes:Buffer.byteLength(JSON.stringify(opened.r.result)),unsupported,childrenAfter:children.length,turnUsageEvents:Number(usage),elapsedMs:performance.now()-start};
- writeFileSync(`${out}/recent-rss.json`,JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify(result,null,2));
+ const result={machine:'desktop',commit:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),dirty:execFileSync('git',['status','--porcelain'],{encoding:'utf8'}).length>0,eventsBytes,scope:{memoryMax:cap,swapMax:swap},before,after,firstOpenMs:opened.ms,updates,projects:shown.projects.length,rows:shown.projects.reduce((n,p)=>n+['threads','settled','snoozed','archived'].reduce((n,k)=>n+(p[k]?.length??0),0),0),bodyBytes:Buffer.byteLength(JSON.stringify(opened.r.result)),threadChecks,unsupported,childrenAfter:children.length,turnUsageEvents:Number(usage),elapsedMs:performance.now()-start};
+ writeFileSync(`${out}/${process.env.ROOT_RESULT_NAME||"recent-rss"}.json`,JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify(result,null,2));
 } finally {
  clearTimeout(timer);try{ws?.close();}catch{}if(pid){try{process.kill(pid,'SIGTERM');}catch{}}await exited;
  writeFileSync(`${out}/hub.log`,log,{mode:0o600});rmSync(home,{recursive:true,force:true});
