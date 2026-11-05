@@ -78,7 +78,7 @@ impl Book {
     pub fn by(&self, by: &str) -> Vec<&Wake> { let mut v: Vec<&Wake> = self.wakes.values().filter(|w| w.by == by).collect(); v.sort_by(|a, b| a.created.cmp(&b.created).then(a.id.cmp(&b.id))); v }
 }
 
-pub struct Wakes { ag: Arc<Agents>, book: Mutex<Book> }
+pub struct Wakes { ag: Arc<Agents>, book: Mutex<Book>, tailing: tokio::sync::Mutex<()> }
 
 pub fn defs(names: &[&str]) -> Vec<Value> {
     let all: Value = serde_json::from_str(super::mcp::TOOLS_JSON).unwrap_or_default();
@@ -88,7 +88,7 @@ pub fn defs(names: &[&str]) -> Vec<Value> {
 impl Wakes {
     /// Catch up with the log (no firing for what is already in it), register the tools and follow the log.
     pub async fn start(ag: Arc<Agents>) -> Arc<Wakes> {
-        let w = Arc::new(Wakes { ag: ag.clone(), book: Mutex::new(Book::default()) });
+        let w = Arc::new(Wakes { ag: ag.clone(), book: Mutex::new(Book::default()), tailing: tokio::sync::Mutex::new(()) });
         w.catch_up();
         ag.add_tools(Arc::new(WakeTools(w.clone())));
         let me = w.clone(); let mut rx = ag.hub.subscribe();
@@ -103,6 +103,7 @@ impl Wakes {
     }
     /// New log lines: fold them, and fire for the turn ends and asks among them.
     async fn tail(&self) {
+        let _one = self.tailing.lock().await; // one reader at a time: two would fire the same lines twice
         let store = &self.ag.hub.store; let total = store.len();
         let from = self.book.lock().unwrap().at; if from >= total { return }
         let lines = match store.range(from, total) { Ok(l) => l, Err(_) => return };
@@ -156,6 +157,7 @@ impl super::mcp::ToolSet for WakeTools {
 
 impl Wakes {
     async fn call(&self, by: &str, name: &str, a: &Value) -> (bool, Value) {
+        self.tail().await; // the book is the log as of now (a drop committed with a message is seen)
         match name {
             "wake_list" => { (true, json!({"wakes": self.book.lock().unwrap().by(by).iter().map(|w| w.json()).collect::<Vec<_>>()})) }
             "wake_cancel" => {
