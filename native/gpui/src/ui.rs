@@ -189,9 +189,20 @@ impl Render for Backplane {
             let text = string(e, "text");
             let stamp = string(e, "stamp");
             match kind {
-                "user" => entries.push(div().id(SharedString::from(format!("e-{id}"))).w_full().flex().justify_end().py_2().child(
-                    div().max_w(px(640.)).when(crate::screens::timeline::bubble_full_width(&text), |d| d.w_full()).px_3().py_2().bg(c("raise")).border_1().border_color(c("line")).flex().flex_col().gap_1()
-                        .child(crate::screens::timeline::user_text(&reg, light, &text)).children(crate::screens::timeline::attachments(light, &e["attachments"], &id, self.screens.attacher.target.as_ref(), &self.screens.images)).child(div().flex().justify_end().text_size(px(11.)).text_color(c("faint")).child(stamp))).into_any_element()),
+                "user" => {
+                    let wide = crate::screens::timeline::bubble_full_width(&text);
+                    let body = crate::screens::timeline::user_text(&reg, light, &text);
+                    let atts = crate::screens::timeline::attachments(light, &e["attachments"], &id, self.screens.attacher.target.as_ref(), &self.screens.images);
+                    let stamp_row = div().flex().justify_end().text_size(px(11.)).text_color(c("faint")).child(stamp);
+                    let row = div().id(SharedString::from(format!("e-{id}"))).w_full().py_2();
+                    // A text that may wrap sits in block layout like a reply's (a shrink-to-fit flex bubble measured it at one width and painted it at another);
+                    // a message of short lines keeps the snug flex bubble.
+                    entries.push(if wide {
+                        row.child(div().w_full().max_w(px(640.)).ml_auto().px_3().py_2().bg(c("raise")).border_1().border_color(c("line")).child(body).children(atts.into_iter().map(|a| div().mt_1().child(a))).child(div().mt_1().child(stamp_row))).into_any_element()
+                    } else {
+                        row.flex().justify_end().child(div().max_w(px(640.)).px_3().py_2().bg(c("raise")).border_1().border_color(c("line")).flex().flex_col().gap_1().child(body).children(atts).child(stamp_row)).into_any_element()
+                    });
+                }
                 "fold" => {
                     let value = string(e, "value");
                     ctl.push(CtlEntry { id: format!("fold:{id}"), label: text.clone(), ctl: Ctl::Fold(value.clone()) });
