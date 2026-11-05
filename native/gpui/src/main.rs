@@ -17,7 +17,7 @@ pub struct Backplane {
     pub input:Entity<input::TextInput>, data:Value, status:String, error:String,
     tx:tokio::sync::mpsc::Sender<Command>, selected:String,
     drafts:HashMap<String,String>, popup:bool, started:Instant, usable:bool,
-    first_frame:bool, script_done:bool, scroll:ScrollHandle, last_entries:usize, pub cats:art::Cats, swatches:bool, gallery:bool, fonts:bool, theme_override:Option<bool>, steps:VecDeque<Step>, pending:Option<Pending>, seq:u64, want_focus:bool, script_total:usize,
+    first_frame:bool, script_done:bool, scroll:ScrollHandle, last_entries:usize, pub cats:art::Cats, pub timing:Option<hub::Timing>, pub applied_at:Option<Instant>, pub apply_ms:f64, pub render_us:u64, swatches:bool, gallery:bool, fonts:bool, theme_override:Option<bool>, steps:VecDeque<Step>, pending:Option<Pending>, seq:u64, want_focus:bool, script_total:usize,
 }
 fn pager_row(cx:&mut Context<Backplane>,id:String,pager:&Value,light:bool)->Option<AnyElement> {let c=|name:&str|theme::color(light,name);
     let mut row=div().flex().gap_2().px_3().py_1().text_size(px(11.));let mut any=false;
@@ -45,16 +45,18 @@ impl Backplane {
             if this.popup {let _=this.tx.try_send(Command::Draft(text));}
             cx.notify();
         }).detach();
-        Self{input,data:Value::Null,status:"Connecting…".into(),error:art::assets_missing().unwrap_or_default(),tx,selected:String::new(),drafts:HashMap::new(),popup:false,started,usable:false,first_frame:false,script_done:false,scroll:ScrollHandle::new(),last_entries:0,cats:art::Cats::new(),swatches,gallery,fonts,theme_override:theme.as_deref().map(|t|t=="light"),steps,pending:None,seq:0,want_focus:false,script_total}
+        Self{input,data:Value::Null,status:"Connecting…".into(),error:art::assets_missing().unwrap_or_default(),tx,selected:String::new(),drafts:HashMap::new(),popup:false,started,usable:false,first_frame:false,script_done:false,scroll:ScrollHandle::new(),last_entries:0,cats:art::Cats::new(),timing:None,applied_at:None,apply_ms:0.0,render_us:0,swatches,gallery,fonts,theme_override:theme.as_deref().map(|t|t=="light"),steps,pending:None,seq:0,want_focus:false,script_total}
     }
     fn receive(&mut self,event:Event,cx:&mut Context<Self>) {
         match event {
-            Event::Picture(r)=>{
+            Event::Picture(r,timing)=>{
+                let t_apply=Instant::now();
                 let mut r=r;self.data=r["shown"].take();
                 let entries=self.data["thread"]["entries"].as_array().map_or(0,|e|e.len());
                 if entries!=self.last_entries {self.last_entries=entries;self.scroll.set_offset(point(px(0.),px(-1_000_000.)));}
                 let selected=string(&self.data["thread"],"id");
                 if !selected.is_empty() {self.selected=selected;}
+                self.apply_ms=t_apply.elapsed().as_secs_f64()*1000.0;self.timing=Some(timing);self.applied_at=Some(Instant::now());
             },
             Event::Status(s)=>{self.status=s;if self.status=="Connected"{self.error.clear();}},
             Event::Accepted=>{self.input.update(cx,|input,cx|input.set(String::new(),cx));self.drafts.remove(&self.selected);self.popup=false;},
