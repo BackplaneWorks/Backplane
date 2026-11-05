@@ -465,6 +465,8 @@ def WS.row.face(thread: Bool, +u: U.Ui, +label: String, +place: String, +v: Stri
       +t = U.Ui.thread(U.Ui.state(u), v)
       WS.row.thread(u, U.Palette.dot(u, t), t, label, place)
 
+# (a thread's row names it, data-thread: the page reads its picture ahead
+# while it is the one chosen, host.js's paletteAhead)
 def WS.rows(xs: List<&2, U.PItem>, +u: U.Ui, +st: M.State, +chosen: Nat, +i: Nat) -> List<&2, D.Node>:
   match xs:
     case Nil{}: Nil{}
@@ -472,7 +474,7 @@ def WS.rows(xs: List<&2, U.PItem>, +u: U.Ui, +st: M.State, +chosen: Nat, +i: Nat
       +thread = String.eq(a, "select")
       D.El{"button", "command:" ++ Nat.show(i), [D.At{"type", "button"}, D.At{"role", "option"}, D.At{"id", "workspace-command-" ++ Nat.show(i)},
         D.At{"aria-selected", Bool.pick(String, Nat.is_eq(chosen, i), "true", "false")}, D.At{"class", Bool.pick(String, Nat.is_eq(chosen, i), "workspace-command on", "workspace-command") ++ Bool.pick(String, thread, " thread", "")},
-        D.At{"title", Bool.pick(String, thread, "Thread · " ++ U.Palette.place(st, a, v), label)}, D.At{"data-value", Nat.show(i)}, D.On{"click", "ws-palette-run"}], WS.row.face(thread, u, label, U.Palette.place(st, a, v), v)} <> WS.rows(tail, u, st, chosen, 1n+i)
+        D.At{"title", Bool.pick(String, thread, "Thread · " ++ U.Palette.place(st, a, v), label)}, D.At{"data-value", Nat.show(i)}, D.At{"data-thread", Bool.pick(String, thread, v, "")}, D.On{"click", "ws-palette-run"}], WS.row.face(thread, u, label, U.Palette.place(st, a, v), v)} <> WS.rows(tail, u, st, chosen, 1n+i)
 
 # Nothing matches: a word said in a thread is not a command, a thread's or a
 # project's name. The search of every conversation (host.js's

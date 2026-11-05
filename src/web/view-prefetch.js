@@ -15,7 +15,9 @@ export class ViewPrefetch {
   constructor(api) {this.api=api;this.queue=[];this.attempted=new Set();this.generation=0;this.fetchedAt=new Map();this.later=new Map();}
   // fresh: the picture held is known to be behind (its sidebar row moved
   // since): fetched again even though one is held
-  enqueue(target, priority=false, fresh=false) {
+  // soon: asked for now, not after two seconds without input (the palette's
+  // chosen thread: the next press is likely its Enter)
+  enqueue(target, priority=false, fresh=false, soon=false) {
     if (!viewTarget(target) || !['thread','bot','project'].includes(target.kind) || !fresh && this.api.has(target)) return;
     const scope=this.api.scope(),key=JSON.stringify([scope.origin,scope.identity,scope.epoch,target]);
     if (!scope.identity || !scope.epoch) return;
@@ -29,14 +31,14 @@ export class ViewPrefetch {
     }
     else if (this.attempted.has(key)) return;
     this.queue=this.queue.filter(x=>x.key!==key);
-    if (priority) this.queue.unshift({target,key,fresh});else this.queue.push({target,key,fresh});
+    if (priority) this.queue.unshift({target,key,fresh,soon});else this.queue.push({target,key,fresh,soon});
     this.queue=this.queue.slice(0,QUEUE);
     if (!this.timer) this.timer=setTimeout(()=>{this.timer=null;this.pump();},priority?75:750);
   }
   pump() {
     if (this.active || !this.queue.length) return;
     // (not idle: tried again later, never dropped)
-    if (!this.api.idle()) { if (!this.timer) this.timer=setTimeout(()=>{this.timer=null;this.pump();},PACE*3);return; }
+    if (!this.api.idle(this.queue[0].soon)) { if (!this.timer) this.timer=setTimeout(()=>{this.timer=null;this.pump();},this.queue[0].soon?PACE/4:PACE*3);return; }
     while(this.queue.length && !this.queue[0].fresh && this.api.has(this.queue[0].target))this.queue.shift();
     if(!this.queue.length)return;
     if(!this.socket){this.connect();return;}
