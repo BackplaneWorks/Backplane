@@ -163,7 +163,7 @@ port waits for the person's decision.
 
 <!-- law-map: generated below by scripts/gpui/law-map.py -->
 
-Laws in LAWS.bend: 3253. bend 912, rust 595, unported 1149, client 470, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`, `src/core/msp.bend`, `src/core/agy.bend`, `src/core/opencode.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
+Laws in LAWS.bend: 3253. bend 911, rust 599, unported 1146, client 470, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`, `src/core/msp.bend`, `src/core/agy.bend`, `src/core/opencode.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
 
 | law | status | seed | file | note |
 |---|---|---|---|---|
@@ -2506,11 +2506,11 @@ Laws in LAWS.bend: 3253. bend 912, rust 595, unported 1149, client 470, window 1
 | `exe_server_path` | bend | seed K +-10% | `src/core/exe.bend` |  |
 | `exe_app_name` | bend | seed K +-10% | `src/core/exe.bend` |  |
 | `exe_server_exact` | bend | seed K +-10% | `src/core/exe.bend` |  |
-| `fallback_empty_exhausted` | bend | seed K +-10% | `src/core/fallback.bend` |  |
+| `fallback_empty_exhausted` | rust `fallback_empty_exhausted` | map | `src/core/fallback.bend` |  |
 | `fallback_never_wraps` | rust `fallback_never_wraps` | map | `src/core/fallback.bend` |  |
-| `fallback_auth_is_not_quota` | unported | seed R +-10% | `src/core/json.bend` |  |
-| `fallback_unknown_reset_held` | unported | seed R +-10% | `src/core/json.bend` |  |
-| `fallback_reset_boundary` | unported | seed R +-10% | `src/core/json.bend` |  |
+| `fallback_auth_is_not_quota` | rust `fallback_auth_is_not_quota` | map | `src/core/json.bend` |  |
+| `fallback_unknown_reset_held` | rust `fallback_unknown_reset_held` | map | `src/core/json.bend` |  |
+| `fallback_reset_boundary` | rust `fallback_reset_boundary` | map | `src/core/json.bend` |  |
 | `fallback_no_recovery_while_locked` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `sidebar_row_key_sound` | window | seed D +-10% | `src/app/side_row_types.bend` | GPUI replaces this window code (native/gpui); equivalence unchecked, no law-level mapping yet |
 | `sidebar_row_paint_exact` | window | seed D +-10% | `src/app/side_rows.bend` | GPUI replaces this window code (native/gpui); equivalence unchecked, no law-level mapping yet |
