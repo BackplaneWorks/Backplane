@@ -11,7 +11,7 @@ import {R,WORK} from './hubs.mjs';
 const arg=(k,d)=>{const i=process.argv.indexOf('--'+k);return i>0?process.argv[i+1]:d};
 const bin=arg('bin',R+'/build/gpui/backplane-serve'),out=arg('out',R+'/build/gpui/parity/rec'),port=Number(arg('port',3820)),tag=arg('tag','A');
 const only=(arg('only','')||'').split(',').filter(Boolean);
-const ALL=['join','badauth','session:mobile','session:gpui','session:gpuid','reconnect','unresolved','settings','private'];
+const ALL=['join','badauth','session:mobile','session:gpui','session:gpuid','reconnect','unresolved','settings','private','commands'];
 mkdirSync(out,{recursive:true});
 export async function runOne(name,{bin,port,work}){
   const h=await startFixtureHub({bin,port,work,deleted:name==='unresolved',privateLines:name==='private'});

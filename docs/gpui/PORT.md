@@ -163,7 +163,7 @@ port waits for the person's decision.
 
 <!-- law-map: generated below by scripts/gpui/law-map.py -->
 
-Laws in LAWS.bend: 3253. bend 922, rust 547, unported 1187, client 470, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`, `src/core/msp.bend`, `src/core/agy.bend`, `src/core/opencode.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
+Laws in LAWS.bend: 3253. bend 922, rust 557, unported 1177, client 470, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`, `src/core/msp.bend`, `src/core/agy.bend`, `src/core/opencode.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
 
 | law | status | seed | file | note |
 |---|---|---|---|---|
@@ -179,9 +179,9 @@ Laws in LAWS.bend: 3253. bend 922, rust 547, unported 1187, client 470, window 1
 | `sidebar_split_at_count` | rust `sidebar_split_at_count` | map | `src/core/model.bend` |  |
 | `settle_never_snoozed` | rust `settle_never_snoozed` | map | `src/core/model.bend` |  |
 | `snooze_wakes` | rust `snooze_wakes` | map | `src/core/model.bend` |  |
-| `key_after` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `key_mid_above` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `key_mid_below` | unported | seed R +-10% | `src/core/model.bend` |  |
+| `key_after` | rust `key_mid_and_after_fall_in_order` | map | `src/core/model.bend` |  |
+| `key_mid_above` | rust `key_mid_and_after_fall_in_order` | map | `src/core/model.bend` |  |
+| `key_mid_below` | rust `key_mid_and_after_fall_in_order` | map | `src/core/model.bend` |  |
 | `project_keyed_first` | client | seed C +-10% | `src/core/client.bend` |  |
 | `project_unkeyed_below` | client | seed C +-10% | `src/core/client.bend` |  |
 | `status_approval_first` | unported | seed R +-10% | `src/core/model.bend` |  |
@@ -298,7 +298,7 @@ Laws in LAWS.bend: 3253. bend 922, rust 547, unported 1187, client 470, window 1
 | `menu_renames_settled` | client | seed C +-10% | `src/core/client.bend` |  |
 | `menu_renames_open` | client | seed C +-10% | `src/core/client.bend` |  |
 | `project_back_no_thread` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `rename_blank_nothing` | unported | seed R +-10% | `src/core/hub.bend` |  |
+| `rename_blank_nothing` | rust `rename_trims_and_a_blank_title_changes_nothing` | map | `src/core/hub.bend` |  |
 | `menu_settled_brings_back` | client | seed C +-10% | `src/core/client.bend` |  |
 | `caret_shows_when_moved` | window | seed D +-10% | `src/app/nui.bend` | GPUI input handling, native/gpui/src/input.rs (equivalence unchecked) |
 | `tailnet_no_owner_no_trust` | rust `tailnet_no_owner_no_trust` | map | `src/core/tailnet.bend` |  |
@@ -494,8 +494,8 @@ Laws in LAWS.bend: 3253. bend 922, rust 547, unported 1187, client 470, window 1
 | `msp_mode_supervised_asks` | rust `msp_mode_supervised_asks` | map | `src/core/msp.bend` |  |
 | `msp_mode_full_allows` | rust `msp_mode_full_allows` | map | `src/core/msp.bend` |  |
 | `archive_running_stops` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `archive_idle_no_turn` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `archive_closes_approval` | unported | seed R +-10% | `src/core/hub.bend` |  |
+| `archive_idle_no_turn` | rust `archive_closes_asks_clears_background_rows_and_wakes_a_snooze` | map | `src/core/hub.bend` |  |
+| `archive_closes_approval` | rust `archive_closes_asks_clears_background_rows_and_wakes_a_snooze` | map | `src/core/hub.bend` |  |
 | `delete_running_stops` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `interrupt_closes_approval` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `interrupt_keeps_plan` | unported | seed R +-10% | `src/core/hub.bend` |  |
@@ -550,10 +550,10 @@ Laws in LAWS.bend: 3253. bend 922, rust 547, unported 1187, client 470, window 1
 | `steer_claude_in_place` | rust `steer_claude_in_place` | map | `src/core/hub.bend` |  |
 | `steer_codex_restarts` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `queue_joined` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `queue_edit_in_place` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `queue_remove_one` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `queue_move_first` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `queue_move_unknown` | unported | seed R +-10% | `src/core/model.bend` |  |
+| `queue_edit_in_place` | rust `queue_edit_remove_move_log_their_events` | map | `src/core/model.bend` |  |
+| `queue_remove_one` | rust `queue_edit_remove_move_log_their_events` | map | `src/core/model.bend` |  |
+| `queue_move_first` | rust `queue_edit_remove_move_log_their_events` | map | `src/core/model.bend` |  |
+| `queue_move_unknown` | rust `queue_edit_remove_move_log_their_events` | map | `src/core/model.bend` |  |
 | `queue_steer_one_leaves_rest` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `queue_row_running` | client | seed C +-10% | `src/core/client.bend` |  |
 | `queue_row_held` | client | seed C +-10% | `src/core/client.bend` |  |

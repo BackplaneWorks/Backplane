@@ -584,3 +584,14 @@ law sched_legacy_same rust sched_legacy_same
 law sched_zoned_once_per_slot rust sched_zoned_once_per_slot
 law when_in_minutes rust when_in_minutes
 law when_in_hours rust when_in_hours
+# commands lane: native/host/src/commands/ (thread, project and queue requests as planners over a log fold; tests run the requests through Hub::request)
+law key_after rust key_mid_and_after_fall_in_order
+law key_mid_above rust key_mid_and_after_fall_in_order
+law key_mid_below rust key_mid_and_after_fall_in_order
+law rename_blank_nothing rust rename_trims_and_a_blank_title_changes_nothing
+law archive_closes_approval rust archive_closes_asks_clears_background_rows_and_wakes_a_snooze
+law archive_idle_no_turn rust archive_closes_asks_clears_background_rows_and_wakes_a_snooze
+law queue_edit_in_place rust queue_edit_remove_move_log_their_events
+law queue_remove_one rust queue_edit_remove_move_log_their_events
+law queue_move_first rust queue_edit_remove_move_log_their_events
+law queue_move_unknown rust queue_edit_remove_move_log_their_events
