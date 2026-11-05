@@ -3,6 +3,7 @@
 pub mod dir;
 pub mod export10;
 pub mod attach;
+pub mod attach_http;
 pub mod fm;
 pub mod imgroutes;
 pub mod mimg;

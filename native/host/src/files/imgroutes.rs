@@ -9,6 +9,7 @@ pub fn start(hub: &Arc<Hub>) {
     // `retained`: how many log lines the snapshot loop has read; a request waits for it to reach the log's length it saw on arrival
     let retained = Arc::new(AtomicUsize::new(hub.store.len()));
     hub.register_http(Arc::new(MessageImage { retained: retained.clone() }));
+    hub.register_http(Arc::new(super::attach_http::Attach));
     let h = hub.clone();
     tokio::spawn(async move { retain_loop(h, retained).await });
 }
@@ -45,7 +46,12 @@ impl HttpHandler for MessageImage {
             let target = hub.store.len(); let t0 = std::time::Instant::now();
             while self.retained.load(Ordering::Acquire) < target && t0.elapsed() < CATCH_UP { tokio::time::sleep(std::time::Duration::from_millis(25)).await }
             let (h, e, p) = (home.clone(), entry.clone(), path.clone());
-            let Ok(Ok(s)) = tokio::task::spawn_blocking(move || mimg::lookup(&h, &e, &p)).await else { return unavailable() };
+            let looked = tokio::task::spawn_blocking(move || mimg::lookup(&h, &e, &p)).await;
+            // no ref: a message from before this hub kept refs (the Bend hub made them at commit, or none was made). Find it in the recent log, as the
+            // Bend hub reads store.db, and let the message's own text authorize the path (Img.message_allowed); bounded so a bad id costs little.
+            let s = match looked { Ok(Ok(s)) => s, _ => {
+                let (hub2, e, p) = (hub.clone(), entry.clone(), path.clone());
+                match tokio::task::spawn_blocking(move || snapshot_from_log(&hub2, &e, &p)).await { Ok(Some(s)) => s, _ => return unavailable() } } };
             // a message of a deleted thread grants nothing (the Bend hub joins `thread.deleted = 0`)
             if let Some(t) = &s.thread { if hub.model().await.threads.get(t).map_or(false, |m| m.deleted) { return unavailable() } }
             let (p, ct) = (s.path.to_string_lossy().into_owned(), fm::ctype(&s.path.to_string_lossy()));
@@ -72,6 +78,27 @@ async fn retain_loop(hub: Arc<Hub>, retained: Arc<AtomicUsize>) {
         }
     }
 }
+/// How far back a request looks for a message with no ref: lines and time.
+const SCAN_LINES: usize = 200_000;
+const SCAN_TIME: std::time::Duration = std::time::Duration::from_secs(2);
+fn snapshot_from_log(hub: &Hub, entry: &str, path: &str) -> Option<mimg::Snap> {
+    let (mut to, floor, t0) = (hub.store.len(), hub.store.len().saturating_sub(SCAN_LINES), std::time::Instant::now());
+    let needle = format!("\"{}\"", entry.replace('\\', "\\\\").replace('"', "\\\""));
+    while to > floor && t0.elapsed() < SCAN_TIME {
+        let from = to.saturating_sub(CHUNK * 5).max(floor);
+        for l in hub.store.range(from, to).ok()?.iter().rev() {
+            if !l.contains("\"MessagePosted\"") || !l.contains(&needle) { continue }
+            let v: Value = serde_json::from_str(l).ok()?;
+            if v["$"] == "MessagePosted" && v["role"] == "assistant" && v["msg"].as_str() == Some(entry) {
+                let (thread, text) = (v["thread"].as_str().unwrap_or(""), v["text"].as_str().unwrap_or(""));
+                if hub.model.blocking_lock().threads.get(thread).map_or(true, |t| t.deleted) { return None } // a deleted thread grants nothing
+                return if mimg::message_allowed(text, path) { mimg::snapshot(&hub.cfg.home, entry, path, thread).ok() } else { None };
+            }
+        }
+        to = from;
+    }
+    None
+}
 pub fn retain_line(home: &std::path::Path, line: &str) {
     if !line.contains("\"MessagePosted\"") || !line.contains("assistant") { return }
     let Ok(v) = serde_json::from_str::<Value>(line) else { return };
@@ -84,6 +111,7 @@ pub fn retain_line(home: &std::path::Path, line: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
     #[test] fn only_assistant_messages_make_snapshots() {
         let home = std::env::temp_dir().join(format!("bp-ir-{}", std::process::id())); let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap();
         let src = home.join("src"); std::fs::create_dir_all(&src).unwrap();
@@ -94,5 +122,35 @@ mod tests {
         retain_line(&home, &line("assistant", "m2")); let s = mimg::lookup(&home, "m2", &p).unwrap(); assert_eq!(s.thread.as_deref(), Some("t1")); assert_eq!(std::fs::read(&s.path).unwrap(), png);
         assert!(mimg::lookup(&home, "m2", "/other.png").is_err()); // only the exact spelling the message used
         assert_eq!(pct("%2Fa%20b+c%zz"), "/a b+c%zz");
+    }
+
+    fn png() -> Vec<u8> { let mut p = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, b'I', b'H', b'D', b'R', 0, 0, 0, 4, 0, 0, 0, 4, 8, 6, 0, 0, 0]; p.extend([0u8; 16]); p }
+    async fn get(hub: &Arc<Hub>, tok: &str, entry: &str, path: &str) -> HttpReply {
+        let req = Req { method: "GET".into(), target: format!("/message-image?entry={entry}&path={}&token={tok}", path.replace('/', "%2F")), headers: vec![] };
+        MessageImage { retained: Arc::new(AtomicUsize::new(usize::MAX)) }.call(hub, &req).await
+    }
+    // Hub.thread: a message committed live is snapshotted by the loop; one that is only in the log (no ref) is found by the bounded scan;
+    // deleted threads, other entries, other spellings and a wrong credential get nothing
+    #[tokio::test] async fn message_images_live_scanned_and_refused() {
+        let home = std::env::temp_dir().join(format!("bp-mih-{}", std::process::id())); let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap();
+        let (a, b) = (home.join("src/a.png"), home.join("src/b.png")); std::fs::create_dir_all(a.parent().unwrap()).unwrap(); std::fs::write(&a, png()).unwrap(); std::fs::write(&b, png()).unwrap();
+        let (pa, pb) = (a.to_string_lossy().into_owned(), b.to_string_lossy().into_owned());
+        let ev = |v: Value| v.to_string();
+        std::fs::write(home.join("events.jsonl"), [ev(json!({"$":"ProjectCreated","id":"p1","title":"p","root":"/x","at":1})), ev(json!({"$":"ThreadCreated","id":"t1","project":"p1","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2})),
+            ev(json!({"$":"ThreadCreated","id":"t2","project":"p1","title":"D","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":3})), ev(json!({"$":"ThreadDeleted","id":"t2","at":4})),
+            ev(json!({"$":"MessagePosted","thread":"t1","msg":"old1","role":"assistant","text":format!("older {pb}"),"at":5})), ev(json!({"$":"MessagePosted","thread":"t2","msg":"gone1","role":"assistant","text":format!("gone {pb}"),"at":6}))].join("\n") + "\n").unwrap();
+        let cfg = crate::hub::Cfg { home: home.clone(), version: "0.14.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() };
+        let hub = Hub::start(cfg, Arc::new(crate::presenter::Canned { reply: json!({}) })).await.unwrap();
+        start(&hub);
+        let tok = std::fs::read_to_string(home.join("token")).unwrap().trim().to_string();
+        // live: committed after start, snapshotted by the loop
+        hub.commit(&json!({"$":"MessagePosted","thread":"t1","msg":"live1","role":"assistant","text":format!("see {pa} please"),"at":7})).await.unwrap();
+        for _ in 0..100 { if mimg::lookup(&home, "live1", &pa).is_ok() { break } tokio::time::sleep(std::time::Duration::from_millis(50)).await }
+        let r = get(&hub, &tok, "live1", &pa).await; assert_eq!((r.status, r.body.as_slice()), ("200 OK", png().as_slice())); assert!(r.extra.contains("Accept-Ranges: bytes") && r.ctype == "image/png");
+        // an older message: no ref, found in the log, authorised by its own text
+        let r = get(&hub, &tok, "old1", &pb).await; assert_eq!(r.status, "200 OK");
+        // refusals: a deleted thread's message, a path the message did not name, an unknown entry, a wrong or missing credential, a non-image path
+        for (e, p) in [("gone1", pb.as_str()), ("old1", pa.as_str()), ("live1", pb.as_str()), ("nope", pa.as_str()), ("live1", "/etc/passwd"), ("live1", "/x/../a.png")] { assert_eq!(get(&hub, &tok, e, p).await.status, "404 Not Found", "{e} {p}") }
+        assert_eq!(get(&hub, "wrong", "live1", &pa).await.status, "401 Unauthorized"); assert_eq!(get(&hub, "", "live1", &pa).await.status, "401 Unauthorized");
     }
 }
