@@ -12,7 +12,7 @@ $SB "cd $V && ln -sfn t/tools tools; sh run.sh start | tail -2; B=\$HOME/.bun/bi
 $SB "cat $V/home/token" > /tmp/lc-token; RSYNC_RSH=$M rsync -a /tmp/lc-token hs-mac-mini:bp-gpui-ios/seed7-token
 T=$($SB "grep -o '\"ThreadCreated\",\"id\":\"[^\"]*\"' $V/home/events.jsonl | sed -n 2p | cut -d'\"' -f6")
 for n in 60 70; do python3 -c "print(('lorem ipsum dolor sit amet ' * 4000)[:${n}000], end='')" > /tmp/longdraft$n.txt; RSYNC_RSH=$M rsync -a /tmp/longdraft$n.txt hs-mac-mini:bp-gpui-ios/longdraft$n.txt; done
-RSYNC_RSH=$M rsync -a scripts/gpui/ios-stuck-mac.sh scripts/gpui/ios-stuck2-mac.sh scripts/gpui/ios-stuck3-mac.sh hs-mac-mini:bp-gpui-ios/
+RSYNC_RSH=$M rsync -a scripts/gpui/ios-stuck-mac.sh scripts/gpui/ios-stuck2-mac.sh scripts/gpui/ios-stuck3-mac.sh scripts/gpui/ios-stuck4-mac.sh hs-mac-mini:bp-gpui-ios/
 scripts/gpui/ios-build.sh > $B/results/ios/build-stuck.log 2>&1; grep -E "error:|build seconds" $B/results/ios/build-stuck.log | head -2
 T0=$($SB "grep -o '\"ThreadCreated\",\"id\":\"[^\"]*\"' $V/home/events.jsonl | sed -n 1p | cut -d'\"' -f6")
 K=backplane.tail9e0cf2.ts.net:3811
