@@ -76,15 +76,20 @@ export async function run(j,ctx){ // ctx: {gpuBin, display:{env,display}, hub:{s
   // G4: dead-control sweep: phase 2 clicks every control the first run reported on its final screen
   if(sweep){const ctlEv=[...metrics].reverse().find(m=>m.event==='controls'&&m.controls?.length);
     if(!ctlEv)res.notes.push('no controls event (G4) to sweep');
-    else{const inv=ctlEv.controls.map(c=>({id:c.id,label:c.label,enabled:c.enabled,visible:c.visible,wired:c.wired}));
+    else{const inv=ctlEv.controls.map(c=>({id:c.id,label:c.label,enabled:c.enabled,visible:c.visible,wired:c.wired,disabledLook:c.disabled_look===true}));
       const prefix=script.filter(x=>!x.wait);const sweepScript=[...script.filter(x=>x.select!==undefined||x.home!==undefined).slice(-1),{wait:500},...inv.flatMap(c=>[{click:c.id},{wait:300}])];
       const second=await launch(sweepScript,j,ctx,'.sweep',{rects:true});const results={};
       for(const m of second.metrics.filter(m=>m.event==='click'&&m.found!==false))results[m.id]={changed:!!m.changed,action:m.action!=null};
       for(const m of second.metrics.filter(m=>m.event==='input'&&m.step?.startsWith('click:')&&m.ok)){const id=m.step.slice(6);results[id]={changed:true,action:results[id]?.action||false}}
       res.metrics.dead=deadControls(inv,results);res.metrics.dead.controlsFound=inv.length;
-      // GPUI reports enabled = wired, so a visible control with nothing behind it looks 'disabled' to deadControls; list them and fail the sweep on them
-      const unwired=inv.filter(c=>c.wired===false&&c.visible!==false).map(c=>({id:c.id,label:c.label}));res.metrics.dead.unwired=unwired;res.metrics.dead.inventory=inv.map(c=>({id:c.id,label:c.label,wired:c.wired}));
-      if(unwired.length){res.metrics.dead.pass=false;res.metrics.dead.note=`${unwired.length} visible controls have nothing wired (GPUI marks them enabled:false; a visible button that does nothing is a dead button unless it is drawn as disabled: needs a separate disabled-look flag)`}}}
+      // Controls with no handler: drawn disabled (disabled_look) = 'disabled, not dead'; drawn enabled = dead. The gate item says every visible
+      // button must do something, so the sweep's pass is false while ANY visible control has no handler; `passIfDisabledAccepted` is the other reading (the reviewer's call).
+      const noHandler=inv.filter(c=>c.wired===false&&c.visible!==false);
+      const disabledNoHandler=noHandler.filter(c=>c.disabledLook).map(c=>({id:c.id,label:c.label}));const deadLooksEnabled=noHandler.filter(c=>!c.disabledLook).map(c=>({id:c.id,label:c.label}));
+      res.metrics.dead.disabledNoHandler=disabledNoHandler;res.metrics.dead.deadLooksEnabled=deadLooksEnabled;res.metrics.dead.inventory=inv.map(c=>({id:c.id,label:c.label,wired:c.wired,disabledLook:c.disabledLook}));
+      const wiredDead=res.metrics.dead.dead.length;res.metrics.dead.passIfDisabledAccepted=wiredDead===0&&deadLooksEnabled.length===0&&res.metrics.dead.clickable>0;
+      res.metrics.dead.pass=res.metrics.dead.passIfDisabledAccepted&&disabledNoHandler.length===0;
+      if(noHandler.length)res.metrics.dead.note=`${noHandler.length} visible controls have no handler: ${disabledNoHandler.length} drawn disabled, ${deadLooksEnabled.length} drawn enabled (dead). Pass stays false while any exists; whether disabled-looking counts as not dead is the reviewer's decision.`}}
   if(!inputs.length)res.notes.push('no input metrics (script did not run?)');
   if(!done)res.notes.push('client did not finish its script in time');
   // status: pass only when every measured gate for this journey passes (the pass rule in run.mjs still demotes non-Rust/non-hardware runs)
