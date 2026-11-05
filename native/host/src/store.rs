@@ -90,7 +90,14 @@ impl Store {
         let mut at = w.size + buf.len() as u64;
         let mut spans = Vec::with_capacity(lines.len());
         for l in lines { debug_assert!(!l.contains('\n')); spans.push((at, l.len() as u32)); buf.extend(l.as_bytes()); buf.push(b'\n'); at += l.len() as u64 + 1; }
-        w.file.write_all(&buf)?; w.file.sync_data()?;
+        // A write that fails part way (ENOSPC, EFBIG, EIO) leaves a fragment: cut the file back to the last whole line before answering, or the
+        // next append would glue onto the fragment and lose an acknowledged write. If even the cut fails, the next append starts with a newline.
+        let wrote = w.file.write_all(&buf).and_then(|_| w.file.sync_data());
+        if let Err(e) = wrote {
+            let size = w.size;
+            if w.file.set_len(size).is_err() { w.torn = true; }
+            return Err(e.into());
+        }
         w.size += buf.len() as u64; w.torn = false;
         let mut idx = self.inner.idx.write().unwrap(); let first = idx.len(); idx.extend(spans);
         Ok(first)
@@ -161,5 +168,34 @@ mod tests {
     #[test] fn unicode_and_blank_lines() {
         let p = tmp("uni"); std::fs::write(&p, "{\"$\":\"M\",\"text\":\"日本語🙂\"}\n\n{\"$\":\"N\"}\n").unwrap();
         let s = Store::open(&p).unwrap(); assert_eq!(s.len(), 2); assert!(s.all()[0].contains("日本語🙂"));
+    }
+
+    // A write that fails part way must not lose the next acknowledged write (soak finding: ENOSPC glued the next line onto a fragment).
+    // RLIMIT_FSIZE makes write_all fail after a partial write; it is process-wide, so the test runs in a child process.
+    #[test] fn a_failed_partial_write_is_cut_back_and_the_next_append_is_whole() {
+        if std::env::var("BP_STORE_FSIZE_CHILD").is_err() {
+            let o = std::process::Command::new(std::env::current_exe().unwrap()).args(["store::tests::a_failed_partial_write_is_cut_back_and_the_next_append_is_whole", "--exact", "--nocapture", "--test-threads=1"])
+                .env("BP_STORE_FSIZE_CHILD", "1").output().unwrap();
+            assert!(o.status.success(), "{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
+            return
+        }
+        unsafe { libc::signal(libc::SIGXFSZ, libc::SIG_IGN); }
+        let p = tmp("fsize");
+        let s = Store::open(&p).unwrap();
+        s.append_many(&["{\"$\":\"A\",\"at\":1}", "{\"$\":\"B\",\"at\":2}"]).unwrap();
+        let size = std::fs::metadata(&p).unwrap().len();
+        let lim = libc::rlimit { rlim_cur: size + 40, rlim_max: libc::RLIM_INFINITY };
+        unsafe { libc::setrlimit(libc::RLIMIT_FSIZE, &lim); }
+        let big = format!("{{\"$\":\"C\",\"at\":3,\"text\":\"{}\"}}", "x".repeat(500));
+        assert!(s.append_many(&[big.as_str()]).is_err(), "the write fails part way");
+        assert_eq!(s.len(), 2, "the failed append is not indexed");
+        let none = libc::rlimit { rlim_cur: libc::RLIM_INFINITY, rlim_max: libc::RLIM_INFINITY };
+        unsafe { libc::setrlimit(libc::RLIMIT_FSIZE, &none); }
+        s.append_many(&["{\"$\":\"D\",\"at\":4}"]).unwrap();
+        assert_eq!(s.len(), 3);
+        let again = Store::open(&p).unwrap();
+        assert_eq!(again.len(), 3, "the reopened log holds A, B, D");
+        assert_eq!((again.bad, again.torn_bytes), (0, 0), "no bad line, no fragment");
+        assert_eq!(again.get(2).unwrap(), "{\"$\":\"D\",\"at\":4}", "the acknowledged write is whole");
     }
 }
