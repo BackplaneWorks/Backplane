@@ -105,3 +105,38 @@ async fn hub(tag: &str) -> (Arc<Hub>, std::path::PathBuf) {
     assert!(a["more"].as_bool().unwrap() || ns.len() >= 9000, "{} items, more={}", ns.len(), a["more"]);
     let _ = std::fs::remove_dir_all(h);
 }
+
+#[tokio::test] async fn far_a_shared_commit_landing_mid_answer_reaches_the_mirror_by_the_next_pull() {
+    let (hub, h) = hub("mid").await;
+    hub.commit_many(&[json!({"$":"ProjectCreated","id":"p1","title":"P","root":"/p","at":1}), created("t1", "p1", 2), msg("t1", 3)]).await.unwrap();
+    let f = Feed::new(); f.start(&hub).await;
+    let top = hub.store.len() as u64;                       // the answer read the end here ...
+    hub.commit(&msg("t1", 4)).await.unwrap();               // ... and a shared line lands before it finished
+    f.observe(&[msg("t1", 4)], top as u32 + 1);             // (the writer's observer; the test hub has none of ours registered)
+    let a = f.answer_at(&hub, top, 0, "", json!([])).await.unwrap();
+    assert!(a["items"].as_array().unwrap().iter().all(|i| i["n"].as_u64().unwrap() <= top), "no line above the end that was read");
+    assert_eq!((a["head"].as_u64(), a["more"].as_bool()), (Some(top), Some(false)), "the head is that end, not the log's end now");
+    // the mirror takes it: head = top. The push of the new line (n = top + 1, since = top) then lands, not filtered out
+    let mirror = crate::net::farstore::FarStore::open(&h).unwrap();
+    let items: Vec<far::Item> = a["items"].as_array().unwrap().iter().map(far::Item::of).collect();
+    mirror.take("L", "e", 0, top, &items).unwrap();
+    let pushed = mirror.take("L", "e", top, top + 1, &[far::Item { n: top + 1, c: msg("t1", 4) }]).unwrap();
+    assert_eq!(pushed.events.len(), 1, "the line the pull did not carry arrives with its push");
+    // and the next pull carries it too
+    let next = f.answer_at(&hub, top + 1, top, &epoch(&hub), json!([])).await.unwrap();
+    assert_eq!(next["items"].as_array().unwrap().iter().map(|i| i["n"].as_u64().unwrap()).collect::<Vec<_>>(), vec![top + 1]);
+    let _ = std::fs::remove_dir_all(h);
+}
+#[tokio::test] async fn far_a_big_line_opening_a_new_slice_still_waits_for_a_page_with_room() {
+    let (hub, h) = hub("slice-big").await;
+    // 4096 small shared lines fill one slice; the big one is the first of the next
+    let small: Vec<Value> = (0..4096).map(|i| msg("t", i + 10)).collect();
+    hub.commit_many(&[json!({"$":"ProjectCreated","id":"p1","title":"P","root":"/p","at":1}), created("t", "p1", 2)]).await.unwrap();
+    for c in small.chunks(1000) { hub.commit_many(c).await.unwrap(); }
+    hub.commit(&json!({"$":"MessagePosted","thread":"t","msg":"big","role":"user","text":"x".repeat(700_000),"at":9})).await.unwrap();
+    let f = Feed::new(); f.start(&hub).await;
+    let a = f.answer(&hub, 0, "", json!([])).await.unwrap();
+    let texts: usize = a["items"].as_array().unwrap().iter().map(|i| i["c"]["text"].as_str().map_or(0, |t| t.len())).sum();
+    assert!(texts < 700_000 && a["more"] == true, "the 700k line did not join a page that already holds thousands of lines ({} chars, more={})", texts, a["more"]);
+    let _ = std::fs::remove_dir_all(h);
+}
