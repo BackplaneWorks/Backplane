@@ -771,6 +771,8 @@ const previewViews = new ViewPrefetch({
   picture:(shown, session, target, scope)=>{
     transitionViews.put({...scope,target,selected:session.sel,route:session.route||null,settings:false},shown);
   },
+  // (the thread on show with its runs open: only what they hold is kept)
+  folds:(shown, target)=>{ if (targetKey(target) === shownFor) foldFeedback.seen(pictureNode(shown)); },
 });
 // The palette's chosen row, when it is a thread, is read ahead once the
 // list has stayed 200 ms (its Enter then draws the thread's picture with
@@ -4092,6 +4094,8 @@ async function startThin(again = false, reason = "initial") {
         focusedView.remote(detail.epoch);remoteEpoch = detail.epoch;frontendNode = node;transitionNode = null;transitionFor = "";heldAt = 0;
         shownFor = targetKey(detail.target);shownTarget = detail.target;transitionViews.put(transitionScope(detail.target), detail.shown);
         void transitionViews.warm(transitionScope(detail.target)).then(warmDestinations);
+        // (its shut runs of tool calls read ahead: a first open draws at the click)
+        if (detail.target?.kind === "thread") previewViews.enqueueFolds(detail.target, foldFeedback.unseen(node));
         trace("thin-view", { entries: detail.window?.ids?.length || 0 });
         const region = historyRegion(detail, projection);
         if (region === "page") later();else laterRegions(region.split(" ").filter(Boolean));

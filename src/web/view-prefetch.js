@@ -35,11 +35,23 @@ export class ViewPrefetch {
     this.queue=this.queue.slice(0,QUEUE);
     if (!this.timer) this.timer=setTimeout(()=>{this.timer=null;this.pump();},priority?75:750);
   }
+  // A thread's view with its shut runs of tool calls open (ids: their first
+  // entries): what each run holds is learned (fold-feedback.js), so a run's
+  // first open draws at the click too. Never a picture; once per thread and
+  // page load; only while the page is idle, like the rest.
+  enqueueFolds(target, ids) {
+    if (!viewTarget(target) || target.kind !== 'thread' || !ids.length) return;
+    const scope=this.api.scope(),key=JSON.stringify([scope.origin,scope.identity,scope.epoch,target,'folds']);
+    if (!scope.identity || !scope.epoch || this.attempted.has(key) || this.queue.some(x=>x.key===key)) return;
+    this.queue.push({target,key,folds:ids.slice()});
+    this.queue=this.queue.slice(0,QUEUE);
+    if (!this.timer) this.timer=setTimeout(()=>{this.timer=null;this.pump();},750);
+  }
   pump() {
     if (this.active || !this.queue.length) return;
     // (not idle: tried again later, never dropped)
     if (!this.api.idle(this.queue[0].soon)) { if (!this.timer) this.timer=setTimeout(()=>{this.timer=null;this.pump();},this.queue[0].soon?PACE/4:PACE*3);return; }
-    while(this.queue.length && !this.queue[0].fresh && this.api.has(this.queue[0].target))this.queue.shift();
+    while(this.queue.length && !this.queue[0].fresh && !this.queue[0].folds && this.api.has(this.queue[0].target))this.queue.shift();
     if(!this.queue.length)return;
     if(!this.socket){this.connect();return;}
     if(!this.greeted)return;
@@ -47,7 +59,7 @@ export class ViewPrefetch {
     if(this.attempted.size>=ATTEMPTS)return;
     this.attempted.add(job.key);this.fetchedAt.set(job.key,(this.api.now||performance.now.bind(performance))());
     this.active={...job,scope};
-    const target=job.target,session={sel:target.kind==='project'?'project-home-'+target.id:target.kind==='thread'?target.id:'',rid:1,drafts:{'@lang':scope.language},open:{},info:{},adding:false,panel:false,wantNew:false,
+    const target=job.target,session={sel:target.kind==='project'?'project-home-'+target.id:target.kind==='thread'?target.id:'',rid:1,drafts:{'@lang':scope.language},open:{},info:job.folds?Object.fromEntries(job.folds.map(id=>['fold:'+id,'1'])):{},adding:false,panel:false,wantNew:false,
       ...(target.kind==='bot'?{route:{kind:'bot-tab',bot:target.id,tab:'chat'}}:{})};
     const result=this.client.select(this.api.hub,target,session,'preview');
     if(result.failed){this.active=null;return;}
@@ -72,8 +84,9 @@ export class ViewPrefetch {
         if(!reply)return;
         clearTimeout(this.deadline);this.active=null;
         const current=this.api.scope();
-        if(reply.remoteReady && reply.shown && !reply.result.cmds.length && current.identity===job.scope.identity && current.epoch===job.scope.epoch
-          && current.origin===job.scope.origin && (job.fresh || !this.api.has(job.target)))this.api.picture(reply.shown,reply.session,job.target,job.scope);
+        const same=reply.remoteReady && reply.shown && !reply.result.cmds.length && current.identity===job.scope.identity && current.epoch===job.scope.epoch && current.origin===job.scope.origin;
+        if(same && job.folds)this.api.folds?.(reply.shown,job.target);
+        else if(same && (job.fresh || !this.api.has(job.target)))this.api.picture(reply.shown,reply.session,job.target,job.scope);
         if(this.queue.length)this.timer=setTimeout(()=>{this.timer=null;this.pump();},PACE);
       }catch{this.stop();}
     };

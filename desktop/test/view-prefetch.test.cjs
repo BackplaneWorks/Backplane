@@ -50,3 +50,14 @@ test('a destination asked for soon goes while input is recent; the others still 
  assert.equal(sent.length,1);assert.equal(sent[0].p.session.sel,'far','the soon one first, while typing');
  p.stop();
 });
+test('a thread’s shut runs are read ahead open once, handed to folds, never kept as its picture',async()=>{
+ const {ViewPrefetch}=await import('../../src/web/view-prefetch.js'),{VIEW_LIMITS}=await import('../../src/web/thin.js');
+ const sent=[],pictures=[],folds=[];let socket;
+ const scope={origin:'https://hub',identity:'owner',epoch:'e',language:'en'};
+ const p=new ViewPrefetch({hub:scope.origin,scope:()=>scope,has:()=>true,idle:()=>true,encode:x=>x,decode:x=>x,socket:()=>socket={send:r=>sent.push(r),close(){}},picture:(...a)=>pictures.push(a),folds:(...a)=>folds.push(a)});
+ p.enqueueFolds({kind:'thread',id:'t'},['r1','r2']);p.enqueueFolds({kind:'thread',id:'t'},['r1','r2','r3']);assert.equal(p.queue.length,1,'once per thread');
+ clearTimeout(p.timer);p.timer=null;p.pump();
+ socket.onmessage({data:{t:'view',version:1,renderer:'web',generation:'1',epoch:'e',limits:VIEW_LIMITS}});
+ assert.equal(sent.length,1,'asked even though a picture of the thread is held');assert.deepEqual(sent[0].p.session.info,{'fold:r1':'1','fold:r2':'1'});
+ p.stop();
+});
