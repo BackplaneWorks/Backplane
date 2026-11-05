@@ -131,8 +131,8 @@ fn is_progress(o: &Value) -> bool { gstr(o, "type", "") == "system" && gstr(o, "
 pub fn line(st: &State, now: u64, th: &str, o: &Value) -> Vec<Value> {
     let task = is_progress(o) && {
         let id = gstr(o, "task_id", "");
-        let known = st.get(&format!("bg.{th}"), "").split('\n').filter(|l| !l.is_empty())
-            .find(|row| row.split('\t').next() == Some(id)).map_or("", |row| row.split('\t').nth(1).unwrap_or(""));
+        let rows = st.get(&format!("bg.{th}"), "");
+        let known = rows.split('\n').filter(|l| !l.is_empty()).find(|row| row.split('\t').next() == Some(id)).map_or("", |row| row.split('\t').nth(1).unwrap_or(""));
         gstr(o, "description", "") != known
     };
     if !(line_is_output(o) || task) { return vec![] } // most lines are not output: no record is read for them
