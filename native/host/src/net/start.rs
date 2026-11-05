@@ -11,11 +11,22 @@ impl Pairing for Registry {
     fn active(&self, client: u64) -> bool { Registry::active(self, client) }
     fn forget(&self, client: u64) { Registry::forget(self, client) }
 }
-impl AuthRoute for AuthRoutes {
+/// The routes plus the hub, for the one thing a revoke asks of it: removing the link a machine invite made.
+pub struct Wired { routes: Arc<AuthRoutes>, hub: std::sync::Weak<Hub> }
+impl AuthRoute for Wired {
     fn handle(&self, req: &Req, client: u64) -> Option<AuthOutcome> {
-        AuthRoutes::handle(self, req, client).map(|o| AuthOutcome { reply: o.reply, close: o.close, unpeer: o.unpeer })
+        self.routes.handle(req, client).map(|o| AuthOutcome { reply: o.reply, close: o.close, unpeer: o.unpeer })
+    }
+    /// Conn.devices.unpeer: the link is removed as bots.unpeer removes it (its secret is gone already).
+    fn unpeer(&self, link: &str) {
+        let (Some(hub), Ok(rt)) = (self.hub.upgrade(), tokio::runtime::Handle::try_current()) else { return };
+        let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+        let ev = unpeer_event(link, at);
+        rt.spawn(async move { let _ = hub.commit(&ev).await; });
     }
 }
+/// M.PeerSet{peer, "", "", revoked True, now}
+pub fn unpeer_event(link: &str, at: u64) -> serde_json::Value { serde_json::json!({"$":"PeerSet","id":link,"name":"","url":"","revoked":true,"at":at}) }
 
 /// Pairing.start: a registry that is invalid, or belongs to another hub token, stops the hub with its
 /// reason and leaves the file as it was ("existing pairings were preserved").
@@ -27,7 +38,7 @@ pub fn open(home: &std::path::Path, host: &str, port: u16) -> Result<(Arc<Regist
 
 pub fn start(hub: &Arc<Hub>, host: &str, port: u16) {
     match open(&hub.cfg.home, host, port) {
-        Ok((reg, routes)) => hub.set_pairing(reg, routes),
+        Ok((reg, routes)) => hub.set_pairing(reg, Arc::new(Wired { routes, hub: Arc::downgrade(hub) })),
         Err(e) => { eprintln!("backplane: {e}"); std::process::exit(1) }
     }
 }
@@ -36,6 +47,18 @@ pub fn start(hub: &Arc<Hub>, host: &str, port: u16) {
 mod tests {
     use super::*;
     use crate::api::Pairing;
+    #[test] fn pair_unpeer_event_is_a_revoked_peerset() {
+        assert_eq!(unpeer_event("p0123456789abcdef", 7).to_string(), r#"{"$":"PeerSet","id":"p0123456789abcdef","name":"","url":"","revoked":true,"at":7}"#);
+    }
+    #[test] fn pair_holds_means_token_or_live_device() {
+        let dir = std::env::temp_dir().join(format!("bp-net-holds-{}", std::process::id())); std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("token"), "roottoken").unwrap();
+        let (reg, _) = open(&dir, "127.0.0.1", 3787).unwrap();
+        assert!(reg.holds("roottoken") && !reg.holds("") && !reg.holds("nope"));
+        let tok = reg.enroll(reg.create(&["https://m.ts.net".to_string()])["code"].as_str().unwrap(), "P")["token"].as_str().unwrap().to_string();
+        assert!(reg.holds(&tok));
+        let _ = std::fs::remove_dir_all(dir);
+    }
     #[test] fn pair_start_refuses_a_registry_it_cannot_own_and_keeps_it() {
         let dir = std::env::temp_dir().join(format!("bp-net-start-{}", std::process::id())); std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("token"), "roottoken\n").unwrap();

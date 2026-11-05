@@ -114,13 +114,9 @@ impl Registry {
         if route == "/ws" { g.clients.insert(client, d["id"].as_str().unwrap_or("").to_string()); }
         token.to_string()
     }
-    /// Whether a device credential holds right now (Auth's check against the live registry).
-    pub fn holds(&self, token: &str) -> bool { !self.resolve_quiet(token).is_empty() }
-    fn resolve_quiet(&self, token: &str) -> String {
-        if token.len() != 32 { return String::new() }
-        let g = self.inner.lock().unwrap(); let h = digest(token);
-        if g.devices.iter().any(|d| live(d) && same(d["hash"].as_str().unwrap_or(""), &h)) { token.into() } else { String::new() }
-    }
+    /// Whether a credential holds right now: the hub token or a live device's. A device is stamped as
+    /// `resolve` stamps it (Bend resolves per request, so HTTP-only devices do not look stale).
+    pub fn holds(&self, token: &str) -> bool { !token.is_empty() && self.resolve(token, 0, "") == token }
 
     /// POST /auth/invitations: a private invitation, recorded before it is handed out, good ten minutes.
     pub fn create(&self, routes: &[String]) -> Value {
