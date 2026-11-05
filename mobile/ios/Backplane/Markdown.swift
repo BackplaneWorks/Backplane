@@ -31,7 +31,7 @@ private func inline(_ bs: [Block]) -> AttributedString {
         var part = inline(b.kids ?? [])
         switch b.tag {
         case "code":
-            part.font = .body.monospaced()
+            part.font = .mono(.body)
             part.backgroundColor = Color(.secondarySystemFill)
         case "strong":
             part.font = .body.weight(.semibold)
@@ -192,7 +192,7 @@ private struct CodeBlockView: View {
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             Text(text)
-                .font(.callout.monospaced())
+                .font(.mono(.callout))
                 .fixedSize(horizontal: true, vertical: true)
                 .padding(12)
                 .padding(.trailing, 56)

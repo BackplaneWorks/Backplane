@@ -260,11 +260,11 @@ private struct ConnectionStartupView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    Text("BACKPLANE").font(.system(.caption, design: .monospaced).weight(.bold))
+                    Text("BACKPLANE").font(.mono(.caption, weight: .bold))
                         .tracking(2).foregroundStyle(BackplaneDesign.accent)
                     Text(HubDot.word(connection.phase, tag))
                         .font(.title2.weight(.semibold))
-                    Text(key).font(.system(.body, design: .monospaced)).textSelection(.enabled)
+                    Text(key).font(.mono(.body)).textSelection(.enabled)
                     if failedKeys.count > 1 {
                         Menu(NativeMessages.native_settings_hubs(tag)) {
                             ForEach(failedKeys, id: \.self) { failed in
@@ -352,7 +352,7 @@ struct PairView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     BrandMark(size: 48)
                     Text("BACKPLANE")
-                        .font(.system(.caption, design: .monospaced).weight(.bold))
+                        .font(.mono(.caption, weight: .bold))
                         .tracking(2).foregroundStyle(BackplaneDesign.accent)
                     Text(repair ? "Re-pair this device" : "Connect to your Backplane hub").font(.largeTitle.weight(.bold))
                     Text("On your paired computer, open Settings → Devices → Add a device.").foregroundStyle(.secondary)
@@ -1038,7 +1038,7 @@ private struct FoldersSheet: View {
             List {
                 Section {
                     TextField(folders.hint, text: $text)
-                        .font(.body.monospaced())
+                        .font(.mono(.body))
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .onChange(of: text) { _, t in

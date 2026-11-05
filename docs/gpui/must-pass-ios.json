@@ -1,7 +1,7 @@
 {
  "note": "iOS column of docs/gpui/must-pass.json, from the real app in the simulator against a seeded stand-in hub; statuses: pass, fail, open (not driven here), fix-untested.",
  "extra": {
-  "mention popup (not on the list)": "FAIL on iOS: typing '@B' in a thread composer shows no popup rows (web shows @Bub, @Ember); slash popup works. Reproduce: ACTS '@type=@B' on a thread; bridge draftRefresh view.update appears not to reach the app"
+  "mention popup (not on the list)": "PASS with bridge 4ca2caee: '@B' lists @Bub and @Ember, '>l' lists >load-2, '/' lists the slash commands (shots popup-at/gt/slash.png, scripts/gpui/ios-popup.sh)"
  },
  "items": [
   {
@@ -131,10 +131,10 @@
    "test": "sbs-md shots"
   },
   {
-   "item": "Text rendering matches the web: fonts, weights, antialiasing",
-   "ios": "fail",
-   "evidence": "iOS draws SF Pro; the web's stack is Noto Sans Mono CJK JP then Hiragino Sans (style.css --sans), so Latin glyphs differ; a design decision, not a bug",
-   "test": "sbs-md shots"
+   "item": "Text rendering: JetBrains Mono for code blocks and mono labels (ligatures off), body text system",
+   "ios": "pass",
+   "evidence": "JetBrains Mono 2.304 bundled (mobile/ios/Backplane/Fonts, registered by Mono.swift, ligatures and calt off, OFL notice under Settings > Licences); check_fonts_ios.py passes lines 0,1,4 and CJK fallback on iPhone and iPad, dark and light, and fails a swapped face (selftest); shots fonts-*.png, code-phone-*.png",
+   "test": "test/gpui/visual/check_fonts_ios.py via scripts/gpui/ios-fonts.sh"
   },
   {
    "item": "Colours match the web's tokens",

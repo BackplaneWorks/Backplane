@@ -69,7 +69,7 @@ struct ImprovementsView: View {
                             .disabled(busy || failedLoad || !loaded || draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
                     Section("Editable complete issue body") {
-                        TextEditor(text: $draft.report).font(.system(.body, design: .monospaced)).frame(minHeight: 200)
+                        TextEditor(text: $draft.report).font(.mono(.body)).frame(minHeight: 200)
                             .disabled(busy || failedLoad || !loaded).accessibilityIdentifier("improvements.report")
                         Toggle("I reviewed the report’s evidence: an image to attach manually, or a thorough behavior description", isOn: $draft.evidenceReviewed)
                             .disabled(busy || failedLoad || !loaded)
@@ -79,7 +79,7 @@ struct ImprovementsView: View {
                         Button("Preview exact public issue body") { prepare(fill: false) }
                             .disabled(busy || failedLoad || !loaded || draft.report.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         if let preview {
-                            Text(verbatim: preview.body).font(.system(.body, design: .monospaced)).textSelection(.enabled)
+                            Text(verbatim: preview.body).font(.mono(.body)).textSelection(.enabled)
                                 .accessibilityIdentifier("improvements.preview")
                             Text("Only this body is prefilled. The selected screenshot is not attached. Your hub, project, paths, thread and account details are not added.")
                             Button(draft.opened ? "GitHub draft already opened" : "Open draft on GitHub") { openPublic(preview) }
