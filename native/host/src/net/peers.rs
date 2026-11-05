@@ -77,19 +77,17 @@ impl PeerTable {
     pub fn observe(&self, events: &[Value], first_seq: u32) {
         let mut g = self.st.lock().unwrap();
         if !g.peers.replayed { g.pending.push((first_seq, events.to_vec())); return }
-        for (i, e) in events.iter().enumerate() {
-            let seq = first_seq + i as u32;
-            if seq <= g.peers.applied { continue }
-            g.peers.fold(e); g.peers.applied = seq;
-        }
+        apply(&mut g.peers, events, first_seq);
     }
-    /// Swap the replayed table in, then apply what was buffered past it.
+    /// Swap the replayed table in and apply what was buffered past it, in one critical section: a commit that
+    /// arrives meanwhile waits on the lock and is applied after the older batches, so `applied` never jumps ahead
+    /// of a batch still pending (which the seq check would then drop).
     pub fn finish(&self, mut local: Peers) {
         let mut g = self.st.lock().unwrap();
         local.replayed = true;
         let pending = std::mem::take(&mut g.pending);
-        g.peers = local; drop(g);
-        for (first, evs) in pending { self.observe(&evs, first) }
+        g.peers = local;
+        for (first, evs) in pending { apply(&mut g.peers, &evs, first) }
     }
     /// Register on the hub (so every later commit is seen), then read the log as it stands in chunks off the async
     /// workers, folding only the lines that can matter into a local table; the lock is held only to swap it in.
@@ -107,6 +105,14 @@ impl PeerTable {
             local.applied = len as u32; local
         }).await.unwrap_or_default();
         self.finish(local);
+    }
+}
+/// Fold the events of a batch whose first line is `first_seq`, skipping those already applied.
+fn apply(p: &mut Peers, events: &[Value], first_seq: u32) {
+    for (i, e) in events.iter().enumerate() {
+        let seq = first_seq + i as u32;
+        if seq <= p.applied { continue }
+        p.fold(e); p.applied = seq;
     }
 }
 /// Only a line that names `PeerSet` or `SettingSet` is parsed.
