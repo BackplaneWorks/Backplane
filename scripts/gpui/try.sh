@@ -56,6 +56,7 @@ start)
   [ "${GPUI_TRY_NOAPP:-}" = 1 ] && exit 0
   running $APP && { echo "GPUI is already open"; exit 0; }
   cp "$ROOT/build/gpui/linux/backplane-gpui" "$H/backplane-gpui"
+  rm -rf "$H/cat-rigs"; cp -r "$ROOT/build/gpui/linux/cat-rigs" "$H/cat-rigs"
   systemd-run --user --unit=$APP --collect -q $CAP --working-directory="$H" \
     --setenv=DISPLAY="$DISPLAY_TO" --setenv=XAUTHORITY="${XAUTHORITY:-/run/user/$(id -u)/gdm/Xauthority}" --setenv=VK_ICD_FILENAMES="$ICD" \
     "$H/backplane-gpui" --url "$URL" --token-file "$H/home/token"
