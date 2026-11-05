@@ -172,6 +172,7 @@ async fn say(h: &Arc<Hub>, th: &str, role: &str, text: &str, n: u32) { h.commit(
     assert_eq!(e[3], json!({"$":"ThreadForked","id":th,"source":"t1","at":0}));
     assert_eq!((e[4]["key"].as_str().unwrap(), e[5]["key"].as_str().unwrap()), (format!("account.thread.{th}.claude").as_str(), format!("account.thread.{th}.codex").as_str()));
     assert_eq!(e[6]["msg"], "handoff:t1"); assert!(e[6]["text"].as_str().unwrap().contains("This thread is a fork of \"One\" (t1)") && e[6]["text"].as_str().unwrap().contains("User: hello"));
+    { let mut fo = super::fold::Fold::default(); fo.sync(&h.store).unwrap(); assert!(!fo.waiting(&th), "handed-over context alone does not wait for a turn"); assert_eq!(fo.forks[&th], "t1"); }
     assert_eq!(e[7]["summary"], "Forked into \"Fork: One\""); assert_eq!(e[7]["thread"], "t1");
     assert!(e[8]["summary"].as_str().unwrap().starts_with("working in the project folder with \"One\""));
     let (e, r) = ask(&h, "thread.back", json!({"thread":th})).await; assert_eq!(r, ok());
@@ -304,6 +305,7 @@ async fn queue(h: &Arc<Hub>, th: &str, msg: &str, text: &str) { h.commit(&json!(
 #[tokio::test] async fn queue_steer_and_resume_hand_the_text_to_the_agents_module() {
     let h = hub("steer").await; mk(&h, "u1").await; queue(&h, "u1", "q1", "first").await; queue(&h, "u1", "q2", "second").await; mk(&h, "u2").await;
     let (e, r) = ask(&h, "queue.steer", json!({"thread":"u1","msg":"q2"})).await; assert_eq!(r, ok()); assert_eq!(e, vec![json!({"$":"QueueTakenOne","thread":"u1","msg":"q2","at":0})]); assert_eq!(calls("u1"), vec![("start_one", "second".to_string())]);
+    { let mut fo = super::fold::Fold::default(); fo.sync(&h.store).unwrap(); assert_eq!(fo.queue("u1"), [("q1".to_string(), "first".to_string())], "steering one leaves the others waiting, in order"); }
     // running: into the running turn (steer)
     mk(&h, "u5").await; queue(&h, "u5", "r", "now").await; h.commit(&json!({"$":"TurnChanged","thread":"u5","state":"running","at":9})).await.unwrap();
     ask(&h, "queue.steer", json!({"thread":"u5","msg":"r"})).await; assert_eq!(calls("u5"), vec![("steer", "now".to_string())]);
@@ -318,4 +320,29 @@ async fn queue(h: &Arc<Hub>, th: &str, msg: &str, text: &str) { h.commit(&json!(
     let (e, r) = ask(&h, "queue.resume", json!({"thread":"u1"})).await; assert_eq!(r, ok()); assert_eq!(e, vec![json!({"$":"SettingSet","key":"thread.config.hold.u1","value":"","at":0})]);
     assert_eq!(calls("u1"), vec![("start_one", "second".to_string()), ("start_queued", "first".to_string())]);
     let (e, _) = ask(&h, "queue.resume", json!({"thread":"u2"})).await; assert!(e.is_empty()); assert_eq!(calls("u2"), vec![], "nothing waits");
+}
+
+// switch_same_nothing / switch_hands_new_provider / switch_back_missed_nothing / switch_effort_offered / the session laws
+#[tokio::test] async fn a_switch_changes_nothing_for_the_same_provider_and_hands_nothing_to_one_that_missed_nothing() {
+    let h = hub("switch2").await;
+    mk(&h, "w1").await; let (e, r) = ask(&h, "thread.provider", json!({"thread":"w1","provider":"claude"})).await; assert_eq!(r, ok()); assert!(e.is_empty(), "same provider, nothing waiting: {e:?}");
+    // an effort the new provider does not offer is kept as its default
+    let (e, _) = ask(&h, "thread.provider", json!({"thread":"w1","provider":"codex","effort":"max"})).await; assert_eq!(e[1], json!({"$":"SettingSet","key":"effort.w1","value":"","at":0}));
+    // each provider keeps its own session: a new one starts fresh, coming back resumes the one it had (State.switch.n)
+    mk(&h, "w2").await; h.commit(&json!({"$":"SessionSet","id":"w2","session":"S1","at":9})).await.unwrap();
+    h.commit(&json!({"$":"ProviderSet","id":"w2","provider":"codex","model":"","at":9})).await.unwrap();
+    let mut fo = super::fold::Fold::default(); fo.sync(&h.store).unwrap(); assert_eq!(fo.threads["w2"].session, "", "a provider new to the thread starts fresh");
+    h.commit(&json!({"$":"SessionSet","id":"w2","session":"S2","at":9})).await.unwrap();
+    h.commit(&json!({"$":"ProviderSet","id":"w2","provider":"claude","model":"","at":9})).await.unwrap(); fo.sync(&h.store).unwrap(); assert_eq!(fo.threads["w2"].session, "S1", "coming back resumes the session it had");
+    h.commit(&json!({"$":"ProviderSet","id":"w2","provider":"codex","model":"","at":9})).await.unwrap(); fo.sync(&h.store).unwrap(); assert_eq!(fo.threads["w2"].session, "S2", "both keep theirs");
+    // a provider new to a thread is handed it all; one coming back that missed nothing is handed nothing
+    mk(&h, "w3").await; say(&h, "w3", "user", "hello", 1).await;
+    let (e, _) = ask(&h, "thread.provider", json!({"thread":"w3","provider":"grok"})).await; assert_eq!(e.iter().filter(|v| v["$"] == "TurnQueued").count(), 1);
+    mk(&h, "w4").await; say(&h, "w4", "user", "hello", 2).await;
+    for p in ["codex", "claude"] { h.commit(&json!({"$":"ProviderSet","id":"w4","provider":p,"model":"","at":9})).await.unwrap(); }
+    let (e, _) = ask(&h, "thread.provider", json!({"thread":"w4","provider":"codex"})).await; assert_eq!(e.iter().filter(|v| v["$"] == "TurnQueued").count(), 0, "codex missed nothing");
+}
+// project_drive_root_absolute / project_unc_root: Hub.root.norm
+#[test] fn project_roots_are_kept_absolute() {
+    for (a, b) in [("C:/", "C:/"), ("//server/share/", "//server/share"), ("/a/b//", "/a/b"), ("/", "/"), ("c://", "c:/")] { assert_eq!(super::plan::norm_root(a), b, "{a}") }
 }

@@ -46,6 +46,8 @@ impl Fold {
     }
     /// Queue.texts: the waiting messages as one text, a blank line between; an empty one at the head is skipped (Queue.join).
     pub fn queue_text(&self, th: &str) -> String { self.queue(th).iter().fold(String::new(), |acc, (_, t)| if acc.is_empty() { t.clone() } else { format!("{acc}\n\n{t}") }) }
+    /// Queue.waiting: a message waits (handed-over context alone never starts a turn).
+    pub fn waiting(&self, th: &str) -> bool { self.queue(th).iter().any(|(m, _)| !m.starts_with("handoff:")) }
     pub fn queue(&self, th: &str) -> &[(String, String)] { self.queues.get(th).map(Vec::as_slice).unwrap_or(&[]) }
     pub fn nav(&self, id: &str) -> Nav { self.navs.get(id).cloned().unwrap_or_default() }
 

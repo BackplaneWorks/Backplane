@@ -163,7 +163,7 @@ port waits for the person's decision.
 
 <!-- law-map: generated below by scripts/gpui/law-map.py -->
 
-Laws in LAWS.bend: 3253. bend 912, rust 567, unported 1177, client 470, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`, `src/core/msp.bend`, `src/core/agy.bend`, `src/core/opencode.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
+Laws in LAWS.bend: 3253. bend 912, rust 583, unported 1161, client 470, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`, `src/core/msp.bend`, `src/core/agy.bend`, `src/core/opencode.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
 
 | law | status | seed | file | note |
 |---|---|---|---|---|
@@ -297,7 +297,7 @@ Laws in LAWS.bend: 3253. bend 912, rust 567, unported 1177, client 470, window 1
 | `active_fold_shut` | client | seed C +-10% | `src/core/client.bend` |  |
 | `menu_renames_settled` | client | seed C +-10% | `src/core/client.bend` |  |
 | `menu_renames_open` | client | seed C +-10% | `src/core/client.bend` |  |
-| `project_back_no_thread` | unported | seed R +-10% | `src/core/hub.bend` |  |
+| `project_back_no_thread` | rust `a_folder_becomes_a_project_once_and_a_removed_one_comes_back` | map | `src/core/hub.bend` |  |
 | `rename_blank_nothing` | rust `rename_trims_and_a_blank_title_changes_nothing` | map | `src/core/hub.bend` |  |
 | `menu_settled_brings_back` | client | seed C +-10% | `src/core/client.bend` |  |
 | `caret_shows_when_moved` | window | seed D +-10% | `src/app/nui.bend` | GPUI input handling, native/gpui/src/input.rs (equivalence unchecked) |
@@ -554,7 +554,7 @@ Laws in LAWS.bend: 3253. bend 912, rust 567, unported 1177, client 470, window 1
 | `queue_remove_one` | rust `queue_edit_remove_move_log_their_events` | map | `src/core/model.bend` |  |
 | `queue_move_first` | rust `queue_edit_remove_move_log_their_events` | map | `src/core/model.bend` |  |
 | `queue_move_unknown` | rust `queue_edit_remove_move_log_their_events` | map | `src/core/model.bend` |  |
-| `queue_steer_one_leaves_rest` | unported | seed R +-10% | `src/core/model.bend` |  |
+| `queue_steer_one_leaves_rest` | rust `queue_steer_and_resume_hand_the_text_to_the_agents_module` | map | `src/core/model.bend` |  |
 | `queue_row_running` | client | seed C +-10% | `src/core/client.bend` |  |
 | `queue_row_held` | client | seed C +-10% | `src/core/client.bend` |  |
 | `hand_newest_fit` | unported | seed R +-10% | `src/core/model.bend` |  |
@@ -563,22 +563,22 @@ Laws in LAWS.bend: 3253. bend 912, rust 567, unported 1177, client 470, window 1
 | `handoff_never_runs_alone` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `handoff_with_message_runs` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `handoff_goes_first` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `fork_records_source` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `fork_waits_with_context` | unported | seed R +-10% | `src/core/hub.bend` |  |
+| `fork_records_source` | rust `a_fork_carries_the_conversation_and_comes_back_into_its_source` | map | `src/core/hub.bend` |  |
+| `fork_waits_with_context` | rust `a_fork_carries_the_conversation_and_comes_back_into_its_source` | map | `src/core/hub.bend` |  |
 | `back_needs_fork` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `switch_between_turns` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `switch_same_nothing` | unported | seed R +-10% | `src/core/hub.bend` |  |
+| `switch_between_turns` | rust `a_provider_switch_hands_over_what_the_new_one_missed` | map | `src/core/hub.bend` |  |
+| `switch_same_nothing` | rust `a_switch_changes_nothing_for_the_same_provider_and_hands_nothing_to_one_that_missed_nothing` | map | `src/core/hub.bend` |  |
 | `switch_initial_choice_quiet` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `config_hold_keeps_queue_stopped` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `config_running_not_held` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `switch_new_session` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `switch_keeps_sessions` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `switch_keeps_sessions_both` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `switch_hands_new_provider` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `switch_back_missed_nothing` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `switch_takes_model_effort` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `switch_effort_offered` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `switch_model_between_turns` | unported | seed R +-10% | `src/core/hub.bend` |  |
+| `switch_new_session` | rust `a_switch_changes_nothing_for_the_same_provider_and_hands_nothing_to_one_that_missed_nothing` | map | `src/core/model.bend` |  |
+| `switch_keeps_sessions` | rust `a_switch_changes_nothing_for_the_same_provider_and_hands_nothing_to_one_that_missed_nothing` | map | `src/core/model.bend` |  |
+| `switch_keeps_sessions_both` | rust `a_switch_changes_nothing_for_the_same_provider_and_hands_nothing_to_one_that_missed_nothing` | map | `src/core/model.bend` |  |
+| `switch_hands_new_provider` | rust `a_switch_changes_nothing_for_the_same_provider_and_hands_nothing_to_one_that_missed_nothing` | map | `src/core/hub.bend` |  |
+| `switch_back_missed_nothing` | rust `a_switch_changes_nothing_for_the_same_provider_and_hands_nothing_to_one_that_missed_nothing` | map | `src/core/hub.bend` |  |
+| `switch_takes_model_effort` | rust `a_provider_switch_hands_over_what_the_new_one_missed` | map | `src/core/model.bend` |  |
+| `switch_effort_offered` | rust `a_switch_changes_nothing_for_the_same_provider_and_hands_nothing_to_one_that_missed_nothing` | map | `src/core/model.bend` |  |
+| `switch_model_between_turns` | rust `a_provider_switch_hands_over_what_the_new_one_missed` | map | `src/core/hub.bend` |  |
 | `mcp_launch_in_project` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `mcp_other_project_refused` | bend | seed K +-10% | `src/core/mcp.bend` |  |
 | `mcp_interrupt_idle_nothing` | bend | seed K +-10% | `src/core/mcp.bend` |  |
@@ -3238,8 +3238,8 @@ Laws in LAWS.bend: 3253. bend 912, rust 567, unported 1177, client 470, window 1
 | `settings_row_information` | client | seed C +-10% | `src/core/client.bend` |  |
 | `voice_model_needs_runtime` | unported | seed R +-10% | `src/core/json.bend` |  |
 | `pcb_usage_fixed_fields` | bend | seed K +-10% | `src/core/usage-counts.bend` |  |
-| `project_drive_root_absolute` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `project_unc_root` | unported | seed R +-10% | `src/core/hub.bend` |  |
+| `project_drive_root_absolute` | rust `project_roots_are_kept_absolute` | map | `src/core/hub.bend` |  |
+| `project_unc_root` | rust `project_roots_are_kept_absolute` | map | `src/core/hub.bend` |  |
 | `plot_stamp_opt_out` | unported | seed R +-10% | `src/server/plot.bend` |  |
 | `plot_stamp_other_client` | unported | seed R +-10% | `src/server/plot.bend` |  |
 | `allowance_remaining_reported` | bend | seed K +-10% | `src/core/allowance.bend` |  |
