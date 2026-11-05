@@ -302,6 +302,8 @@ impl SolidPage {
         SolidPage { mesh: None, key: String::new(), cam: None, image: None, retired: Vec::new(), drag: None, note: "No 3D model yet".into(), worker: Worker::spawn(tx),
             size: Arc::new(Mutex::new([0.0, 0.0, 1.0, 0.0, 0.0])), asked: (0, 0), want_gen: 0, stats: Stats::default() }
     }
+    /// The key of the model the page holds now (set when a decoded frame is applied, not when one is queued): "" before any.
+    pub fn key(&self) -> &str { &self.key }
     /// A plot-lane binary frame (keys 2|, 3|, 4| are solids).
     /// None: taken (a solid frame, decoded on the worker; the bytes are moved, not copied). Some(bytes): not a solid frame, handed back unread.
     pub fn accept(&mut self, bytes: Vec<u8>) -> Option<Vec<u8>> {

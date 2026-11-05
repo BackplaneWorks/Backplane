@@ -90,11 +90,10 @@ impl Backplane {
         if self.screens.solid.is_none() { self.screens.solid = Some(cx.new(crate::viewers::solid::SolidPage::new)); }
         let solid = self.screens.solid.clone().unwrap();
         if let Some(k) = crate::viewers::solid::peek_key(&bytes) { eprintln!("GPUI_LOG {{\"plot_frame\":{{\"key\":{},\"bytes\":{}}}}}", serde_json::Value::String(k), bytes.len()); }
-        let key = crate::viewers::solid::peek_key(&bytes);
-        let Some(bytes) = solid.update(cx, |p, _| p.accept(bytes)) else { if let Some(k) = key { self.screens.solid_key = k; } cx.notify(); return };
+        let Some(bytes) = solid.update(cx, |p, _| p.accept(bytes)) else { cx.notify(); return };
         if let Err(e) = self.screens.plot.receive(&bytes) { eprintln!("GPUI_LOG {{\"plot\":\"{e}\"}}"); }
     }
-    /// The Browser page exists while the Browser kind is open (one per thread, polling only while shown); the hub's page owner is the thread for now.
+    /// The Browser page exists while the Browser kind is open (one per thread, polling only while shown); the owner is `browser_owner` (the bot's id on a bot's screen, else the thread).
     pub(crate) fn browser_page(&mut self, cx: &mut Context<Self>) {
         let open = self.data["thread"]["viewer"]["open"].as_str() == Some("browser");
         let owner = browser_owner(&self.data, &self.selected);

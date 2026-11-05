@@ -156,7 +156,7 @@ fn review_page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, review: &Val
 }
 
 /// The panel (None while nothing is open). 520 px wide, between the thread and the rail.
-pub fn view(cx: &mut Context<Backplane>, reg: &Reg, light: bool, thread: &Value, plot: &super::plot::Store, pv: &mut super::plotview::PlotView, solid: Option<&Entity<crate::viewers::solid::SolidPage>>, solid_key: &str, browser: Option<&Entity<crate::viewers::browser::BrowserPage>>) -> Option<AnyElement> {
+pub fn view(cx: &mut Context<Backplane>, reg: &Reg, light: bool, thread: &Value, plot: &super::plot::Store, pv: &mut super::plotview::PlotView, solid: Option<&Entity<crate::viewers::solid::SolidPage>>, browser: Option<&Entity<crate::viewers::browser::BrowserPage>>) -> Option<AnyElement> {
     if !is_open(thread) { return None; }
     let c = |n: &str| theme::color(light, n);
     let viewer = &thread["viewer"];
@@ -173,7 +173,9 @@ pub fn view(cx: &mut Context<Backplane>, reg: &Reg, light: bool, thread: &Value,
         else if matches!(open, "3d" | "mech") {
             let key_empty = string(viewer, "key").is_empty();
             let want = string(viewer, "key");
-            let model: AnyElement = if open == "mech" && key_empty { div().into_any_element() } else { match solid { Some(s) if solid_ready(&want, solid_key) => div().flex_1().min_h_0().child(s.clone()).into_any_element(), _ => div().p_3().text_color(c("dim")).child("Loading the model…").into_any_element() } };
+            // what the page HOLDS, not what was queued for it: a big model's decode, a frame that fails or is replaced in the worker's slot
+            let have = solid.map(|s| s.read(cx).key().to_string()).unwrap_or_default();
+            let model: AnyElement = if open == "mech" && key_empty { div().into_any_element() } else { match solid { Some(s) if solid_ready(&want, &have) => div().flex_1().min_h_0().child(s.clone()).into_any_element(), _ => div().p_3().text_color(c("dim")).child("Loading the model…").into_any_element() } };
             if open == "mech" { div().size_full().flex().flex_col().child(mech_chrome(cx, light, viewer, key_empty)).child(model).into_any_element() } else { div().size_full().flex().flex_col().child(model).into_any_element() }
         }
         else if open == "browser" { match browser { Some(b) => div().size_full().child(b.clone()).into_any_element(), None => div().p_3().text_color(c("dim")).child("The browser page needs a hub on plain http://.").into_any_element() } }
@@ -203,6 +205,8 @@ mod tests {
     #[test] fn the_3d_page_waits_for_its_own_frame() {
         assert!(solid_ready("2|/a|", "2|/a|")); assert!(!solid_ready("2|/b|", "2|/a|"), "another project's model stays off the screen");
         assert!(!solid_ready("2|/a|mech/new.step", "2|/a|mech/old.step"), "a new part waits for its frame"); assert!(solid_ready("", ""));
+        // a frame accepted but not decoded yet: the page still holds nothing (or the old key), so it is not ready
+        assert!(!solid_ready("2|/a|", "")); assert!(!solid_ready("2|/b|", "2|/a|"));
     }
     #[test] fn mech_parts_parse_from_the_pages_choices() {
         let v = j(r#"{"mech":{"parts":[{"label":"bracket","value":"mech/bracket.step","on":true},{"label":"lid","value":"mech/lid.step","on":false}],"say":"","rel":"mech/bracket.step"}}"#);
