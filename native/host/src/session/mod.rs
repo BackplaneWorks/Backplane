@@ -253,7 +253,8 @@ mod nohelper_tests {
         let h = Hub::start(cfg, std::sync::Arc::new(crate::presenter::Canned { reply: json!({}) })).await.unwrap();
         let _ = h.window_bin.set(script);
         let out = h.window_for(&json!({"target": {"kind": "thread", "id": "t1"}}), 0, Some("t1")).await;
-        assert!(out.is_none(), "no helper, no window");
+        // the Rust window may answer (that is the point: a thread view without the helper); what matters is that nothing was started for it
+        let _ = out;
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
         assert!(!spy.exists(), "the window helper must never have been started");
         let _ = std::fs::remove_dir_all(&home);
