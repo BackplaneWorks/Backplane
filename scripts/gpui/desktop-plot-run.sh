@@ -17,9 +17,9 @@ cp $FIX/ecc83-pp.kicad_pcb $FIX/ecc83-pp.kicad_sch $R/proj/; echo '{}' > $R/proj
 printf '#!/bin/sh\nexec %s %s "$@"\n' "$(command -v bun)" "$ROOT/test/tools/claude_standin.ts" > $R/bin/claude; chmod +x $R/bin/claude
 for n in codex grok muse; do printf '#!/bin/sh\nexit 1\n' > $R/bin/$n; chmod +x $R/bin/$n; done
 python3 - "$R" <<'PY'
-import json,sys
-R=sys.argv[1]
-ev=[{"$":"ProjectCreated","id":"p1","title":"ecc","root":R+"/proj","at":1},{"$":"ThreadCreated","id":"t1","project":"p1","title":"ecc83 board","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2}]
+import json,sys,time
+R=sys.argv[1]; NOW=int(time.time())
+ev=[{"$":"ProjectCreated","id":"p1","title":"ecc","root":R+"/proj","at":NOW},{"$":"ThreadCreated","id":"t1","project":"p1","title":"ecc83 board","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":NOW}]
 open(R+"/home/events.jsonl","w").write("".join(json.dumps(e)+"\n" for e in ev))
 PY
 export LC_ALL=C
