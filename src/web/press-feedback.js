@@ -2,8 +2,9 @@
 // hub, so a press that opens a menu, a popover or a viewer pane waited a
 // whole round trip for anything to change. A press the hub has answered
 // once by opening, closing or changing one region of the page (the command
-// palette, the viewer pane, the account and token pickers, a row's menu) is
-// remembered with the region it gave: the same press on the same
+// palette, the viewer pane, the account and token pickers, a row's menu, a
+// project's colour picker) is remembered with the region it gave (and the
+// shade drawn before it): the same press on the same
 // destination, with the same regions open, puts that region into the page
 // at once (or takes it away), until the hub's own answer settles the press.
 // Presentation only: the press still goes once through the ordered path;
@@ -28,6 +29,8 @@ export const REGIONS = [
   ['account', n => classes(n).includes('account-picker')],
   ['tokens', n => classes(n).includes('tok-pop')],
   ['rowmenu', n => classes(n).includes('rowmenu')],
+  // a project's colour and icon picker, in its sidebar section
+  ['look', n => n.tag === 'div' && classes(n).includes('look')],
   // Settings takes the place of the thread's main (its pages too)
   ['settings', n => n.tag === 'main' && classes(n).includes('settings-view')],
 ];
@@ -60,13 +63,19 @@ export function regions(page) {
     const [n, parent, index, depth] = stack.pop();
     if (!is(n, 'El') || n.tag === 'bp-memo' || depth > DEPTH || attr(n, 'id') === 'timeline') continue;
     const kind = REGIONS.find(([k, test]) => !found.has(k) && test(n));
-    if (kind && parent) { found.set(kind[0], { node: n, parent: sig(parent), parentClass: attr(parent, 'class'), index, prev: index ? sig(items(parent.kids)[index - 1]) : '' });continue; }
+    if (kind && parent) {
+      // (a popover's shade, drawn just before it: comes and goes with it, so
+      // the hub's next view finds both where it puts them)
+      const ks = items(parent.kids), shade = index && isShade(ks[index - 1]) ? ks[index - 1] : null, at = shade ? index - 1 : index;
+      found.set(kind[0], { node: n, parent: sig(parent), parentClass: attr(parent, 'class'), index: at, prev: at ? sig(ks[at - 1]) : '', ...shade ? { pre: [shade] } : {} });continue;
+    }
     for (const [k, test] of Object.values(ALONG).flat()) if (!found.has('+' + k) && parent && test(n)) found.set('+' + k, { node: n, parent: sig(parent), index });
     const ks = items(n.kids);
     for (let i = ks.length - 1; i >= 0; i--) stack.push([ks[i], n, i, depth + 1]);
   }
   return found;
 }
+const isShade = n => is(n, 'El') && n.tag === 'div' && !n.key && classes(n).includes('shade') && !items(n.kids).length;
 const shape = found => REGIONS.map(([k]) => found.has(k) ? '1' : '0').join('');
 
 // What was learned is kept across reloads (an app start drew each menu's
@@ -94,6 +103,7 @@ export class PressFeedback {
       for (const [key, e] of Array.isArray(rows) ? rows : []) {
         if (typeof key !== 'string' || this.learned.has(key) || !e || !REGIONS.some(([k]) => k === e.kind) || !shaped(e.node) || typeof e.parent !== 'string') continue;
         if (!(e.along || []).every(x => x && shaped(x.node) && x.node && typeof x.parent === 'string')) continue;
+        if (e.pre !== undefined && !(Array.isArray(e.pre) && e.pre.every(isShade))) continue;
         this.learned.set(key, e);
       }
       while (this.learned.size > this.limit) this.learned.delete(this.learned.keys().next().value);
@@ -134,7 +144,7 @@ export class PressFeedback {
     const parent = after || before, parentClass = after ? after.parentClass : before && this.parentClass(before.parent);
     this.learned.delete(p.key);
     const along = (ALONG[kind] || []).map(([k]) => this.now.get('+' + k)).filter(Boolean);
-    this.learned.set(p.key, { kind, node: after?.node || null, parent: parent.parent, parentClass, index: parent.index, prev: parent.prev, along });
+    this.learned.set(p.key, { kind, node: after?.node || null, parent: parent.parent, parentClass, index: parent.index, prev: parent.prev, along, ...parent.pre ? { pre: parent.pre } : {} });
     while (this.learned.size > this.limit) this.learned.delete(this.learned.keys().next().value);
     this.persist();
   }
@@ -212,8 +222,11 @@ export class PressFeedback {
         let ks = items(n.kids), at = ks.findIndex(test);
         const away = REPLACES[a.kind];
         if (away && at < 0) { const i = ks.findIndex(away);if (i >= 0) { ks = ks.map((k, j) => j === i ? a.node : k);at = i; } }
-        const kids = at >= 0 ? (a.node ? ks.map((k, i) => i === at ? a.node : k) : ks.filter((_, i) => i !== at))
-          : a.node ? (at => [...ks.slice(0, at), a.node, ...ks.slice(at)])(this.place(ks, a)) : ks;
+        // (its shade before it, as the hub draws them: put in with it, taken away with it)
+        const pre = a.pre || [], shaded = at > 0 && isShade(ks[at - 1]);
+        const kids = at >= 0 ? (a.node ? [...ks.slice(0, at), ...shaded ? [] : pre, a.node, ...ks.slice(at + 1)]
+          : ks.filter((_, i) => i !== at && !(shaded && i === at - 1)))
+          : a.node ? (at => [...ks.slice(0, at), ...pre, a.node, ...ks.slice(at)])(this.place(ks, a)) : ks;
         const out = { ...n, kids: list(kids) };
         if (a.addClass) { const c = attr(out, 'class') || '';return c.split(/\s+/).includes(a.addClass) ? out : withAttr(out, 'class', (c + ' ' + a.addClass).trim()); }
         return a.parentClass === undefined ? out : withAttr(out, 'class', a.parentClass);
