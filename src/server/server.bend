@@ -1014,13 +1014,23 @@ def Client.thin.message(c: Client, +o: J.Json) -> Client:
 def Client.thin.reply(c: Client, +text: String) -> Client:
   Client.thin.message(c, Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}))
 
-def Wire.text.thin.send(send: Bool, +c: Client, text: String) -> IO(Maybe<&2, Client>):
+# A thin view's message was parsed here already (o): a socket client's writer
+# gets that tree (WJson, the same charge, encoded in the host as the very
+# bytes W.Ws.cbor(text) makes), not the text to parse and encode again (a 3D
+# viewer's ~160 KB component pages: ~30 ms each, 2026-11-05). The hub's own
+# window and links still get the text.
+def Wire.text.thin.k(native: Bool, c: Client, +o: J.Json, +text: String) -> IO(Maybe<&2, Client>):
+  match native:
+    case True{}: Wire.text.k(True{}, c, text)
+    case False{}: Wire.offer(c, WIRE.WJson{o, WIRE.Wire.text.charge(text)}, WIRE.Wire.text.charge(text))
+
+def Wire.text.thin.send(send: Bool, +c: Client, +o: J.Json, text: String) -> IO(Maybe<&2, Client>):
   match send:
     case False{}: IO.pure(Maybe<&2, Client>, Some{c})
-    case True{}: Wire.text.k(Wire.native(c), c, text)
+    case True{}: Wire.text.thin.k(Wire.native(c), c, o, text)
 
 def Wire.text.thin(+c: Client, +o: J.Json, text: String) -> IO(Maybe<&2, Client>):
-  Wire.text.thin.send(TA.Message.on_wire(o), Client.thin.message(c, o), text)
+  Wire.text.thin.send(TA.Message.on_wire(o), Client.thin.message(c, o), o, text)
 
 def Wire.text.route(thin: Bool, +c: Client, +text: String) -> IO(Maybe<&2, Client>):
   match thin:
