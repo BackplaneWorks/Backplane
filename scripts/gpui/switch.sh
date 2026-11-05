@@ -12,8 +12,8 @@
 # runs with a fake HOME and BACKPLANE_COPY=1, which makes every outside-reaching action a no-op, docs/gpui/COPY-GUARD.md).
 #
 # Environment (all optional):
-#   SWITCH_SOURCE   the store to copy: a folder holding events.jsonl. Default ~/.backplane-gpui-copy (the verified copy).
-#                   `live` reads ~/.backplane-bend/events.jsonl, read-only, and only with SWITCH_ALLOW_LIVE=person (the person's call).
+#   SWITCH_SOURCE   `start`: the store to copy, a folder holding events.jsonl, REQUIRED and synthetic (real stores are refused: the hold).
+#                   `side` reads the live store only through side-by-side.sh (typed yes), and not while HOLD=1.
 #   `try` (no copy at all): a seeded synthetic home (3 projects, 12 threads), stand-in agents, nothing real in it.
 #   SWITCH_PORT     default 3790 (3787, 3788, 3799, 3821 are refused: the live hub, its dev hub, the shared test hub)
 #   SWITCH_DIR      state: home, logs, pids. Default ~/.backplane-gpui-switch (mode 700; never under the repo)
@@ -32,7 +32,8 @@ HERE=$(cd "$(dirname "$0")/../.." && pwd)
 SW=${SWITCH_DIR:-$HOME/.backplane-gpui-switch}
 PORT=${SWITCH_PORT:-3790}
 MEM=${SWITCH_MEM:-3700M}
-SRC=${SWITCH_SOURCE:-$HOME/.backplane-gpui-copy}
+# `start` needs an explicit source and it must be synthetic: no default store (the hold, below)
+SRC=${SWITCH_SOURCE:-}
 HUB_BIN=${HUB_BIN:-$ROOT/build/gpui/hub/prov/backplane-hub-full}
 POLICY_BIN=${POLICY_BIN:-$ROOT/build/gpui/slim/bp-policy-bp}
 # the "live" store: ~/.backplane-bend, or SWITCH_LIVE=<dir> (a synthetic one, for tests; the real one still needs SWITCH_ALLOW_LIVE=person)
@@ -62,12 +63,45 @@ rss_mb() { awk '/^VmRSS/{printf "%d", $2/1024}' "/proc/$1/status" 2>/dev/null ||
 hwm_mb() { awk '/^VmHWM/{printf "%d", $2/1024}' "/proc/$1/status" 2>/dev/null || echo "?"; }
 helper_pid() { local h; h=$(pidof_file hub); alive "$h" && ours "$h" hub && pgrep -P "$h" 2>/dev/null | head -1 || true; }
 
-guards() {
+# THE HOLD (coordinator's, 2026-11-05): no hub on a copy of any real log. Lifted only by a reviewed commit that sets HOLD=0; even then a real store is
+# reached only by `side` with SWITCH_ALLOW_LIVE=person, which side-by-side.sh sets after the person's typed yes. Test variables (SWITCH_SOURCE,
+# SWITCH_LIVE, SWITCH_STANDIN) may point only at synthetic stores.
+HOLD=1
+real_store() {   # is this path (after realpath) a real store?
+  local p r; p=$(realpath -m "$1") || return 0
+  for r in "$HOME/.backplane-bend" "$HOME/.backplane-gpui-copy" "$HOME/.backplane-gpui" "$HOME/.local/share/backplane" "$HOME/.backplane-gpui-scratch/store-copy-backup"* "$HOME/.backplane-gpui-scratch/person-"*; do
+    r=$(realpath -m "$r"); case "$p" in "$r"|"$r"/*) return 0;; esac
+  done
+  return 1
+}
+guard_source() {
+  local d
+  if [ "$MODE" = try ]; then return 0; fi
+  if [ "$MODE" = side ]; then
+    d=$LIVE
+    if [ "${SWITCH_STANDIN:-}" = 1 ]; then   # stand-ins: synthetic only, whatever else is set
+      [ -n "${SWITCH_LIVE:-}" ] || die "SWITCH_STANDIN needs SWITCH_LIVE=<a synthetic store>"
+      ! real_store "$d" || die "SWITCH_STANDIN with a real store ($d) is refused: test variables may point only at synthetic logs"
+    else
+      [ "${SWITCH_ALLOW_LIVE:-}" = person ] || die "side mode needs the person's typed yes (SWITCH_ALLOW_LIVE=person, set by side-by-side.sh): refused"
+      if real_store "$d"; then
+        [ "$(realpath -m "$d")" = "$(realpath -m "$HOME/.backplane-bend")" ] || die "side mode reads only ~/.backplane-bend as a real store; $d is another real store: refused"
+        [ "$HOLD" = 0 ] || die "the hold: no hub on a copy of a real log yet (HOLD=1 in switch.sh, lifted by a reviewed commit)"
+      fi
+    fi
+  else   # start: an explicit synthetic source
+    [ -n "$SRC" ] || die "start needs SWITCH_SOURCE=<a synthetic store folder>: no default store (the hold)"
+    if [ "$SRC" = live ]; then die "start does not read the live store; use side-by-side.sh"; fi
+    ! real_store "$SRC" || die "the hold: $SRC is a real store; start takes only a synthetic source"
+  fi
+}
+
+guards() {   # `guards source` (start only) adds the source/hold check; rollback and stop never read a source
+  [ "${1:-}" != source ] || guard_source
   case "$PORT" in 3787|3788|3799|3821) die "port $PORT belongs to another hub";; esac
   case "$PORT" in ''|*[!0-9]*) die "bad port";; esac
   case "$SW" in "$HOME/.backplane-bend"*|"$HOME/.local/share/backplane"*|"$ROOT"*|"$HERE"*) die "state dir $SW is not allowed there";; esac
   case "$SW" in ""|"/"|"$HOME"|"$HOME/") die "state dir $SW is not allowed";; esac
-  [ "$SRC" != live ] || [ "$(realpath -m "$LIVE")" != "$(realpath -m "$HOME/.backplane-bend")" ] || [ "${SWITCH_ALLOW_LIVE:-}" = person ] || die "SWITCH_SOURCE=live reads ~/.backplane-bend: only with SWITCH_ALLOW_LIVE=person, set by the person"
   [ -x "$HUB_BIN" ] || die "no hub binary $HUB_BIN"
   # a hub without --policy-bin (Bend off the runtime) needs no helper; one with it does
   if "$HUB_BIN" --help 2>&1 | grep -q -- --policy-bin; then USE_POLICY=1; [ -x "$POLICY_BIN" ] || die "no policy helper $POLICY_BIN"; else USE_POLICY=0; fi
@@ -125,7 +159,7 @@ cmd_stop() {
 }
 
 cmd_start() {
-  guards
+  guards source
   if [ -e "$SW" ] && ! owned && [ -n "$(ls -A "$SW" 2>/dev/null)" ]; then die "$SW exists and this script did not make it (no .switch-owned): refusing to use or delete it"; fi
   [ -d "$SW" ] && keeplogs
   mkdir -p "$SW"; chmod 700 "$SW"; echo "backplane switch.sh state; rollback may delete $H" > "$SW/.switch-owned"
