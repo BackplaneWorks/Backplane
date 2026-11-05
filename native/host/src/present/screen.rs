@@ -19,9 +19,10 @@ impl Recent {
 impl super::Screen for Recent {
     fn name(&self) -> &'static str { "recent/thread (native sidebar)" }
     fn view(&self, params: &Value) -> Option<Value> {
-        if !mine(params) { return None }
-        let _hub = self.hub.get()?.upgrade()?;
-        crate::statehost::policies()?.with_state(|st| recent(st, params)).flatten()
+        if !mine(params) { return refused("target.or-native-sidebar") }
+        let Some(_hub)=self.hub.get().and_then(Weak::upgrade) else { return refused("screen.hub-not-bound") };
+        let Some(policies)=crate::statehost::policies() else { return refused("state.not-started") };
+        match policies.with_state(|st|recent(st,params)) { Some(out)=>out,None=>refused("state.booting") }
     }
 }
 fn mine(p: &Value) -> bool {
@@ -30,6 +31,7 @@ fn mine(p: &Value) -> bool {
 }
 fn setting<'a>(st: &'a State,k: &str) -> &'a str { st.settings.get(k).map(String::as_str).unwrap_or("") }
 fn flag(s: &Value,k: &str) -> bool { s["open"][k].as_bool().unwrap_or(false) }
+fn refused<T>(reason: &'static str) -> Option<T> { super::refusal::report(reason); None }
 
 fn bots(st: &State, hub: &str, now: u64) -> Vec<Value> {
     let mut bots: Vec<_>=st.bots_nav.iter().filter(|(id,_)|!id.contains('~')).collect();
@@ -57,7 +59,7 @@ fn rooms(st: &State, hub: &str) -> Vec<Value> {
 
 /// Pure root, shared by the oracle and the hub's bound Screen. Session/local are per view, never kept here.
 pub fn recent(st: &State,p: &Value) -> Option<Value> {
-    if !mine(p) { return None }
+    if !mine(p) { return refused("target.or-native-sidebar") }
     let mut session=p.get("session").filter(|s|s.is_object()).cloned().unwrap_or(json!({}));
     // Ui.blank + Target.bind(recent). The actor reshapes this adopted session after presentation.
     for (k,v) in [("sel",json!("")),("adding",json!(false)),("panel",json!(false)),("rid",json!(0)),
@@ -88,25 +90,27 @@ pub fn recent(st: &State,p: &Value) -> Option<Value> {
             let raw=value.strip_prefix(&format!("{hub}|" )).unwrap_or(value);
             let key=if action=="side-older" { "old-projects" } else { raw };
             let known=key=="old-projects" || st.projects.contains_key(key.strip_prefix("arch:").unwrap_or(key));
-            if !known { return None }
+            if !known { return refused("action.sidebar-flag") }
             if !session["open"].is_object() { session["open"]=json!({}); }
             let was=flag(&session,key); session["open"][key]=json!(!was);
         },
-        _ => return None,
+        _ => return refused("action.unported"),
     } }
     // A thread is drawn only when the async session seam supplied a native window and indexed page.
-    // The first thread cut supports an empty draft. Refusing after dispatch also refuses a draft action
-    // that would otherwise acknowledge text while drawing a blank composer.
+    // Composer fields are drawn from the same adopted draft that the action dispatcher patches.
     let shown_thread=if thread.is_empty() { Value::Null }else{
-        if !p["window"].is_object() || !text(&session["drafts"],thread).is_empty() { return None }
+        if !p["window"].is_object() { return refused("window.missing") }
         let mut params=p.clone(); params["session"]=session.clone();
-        super::thread::thread_object(st,hub,thread,&params,"")?
+        match super::thread::thread_object_checked(st,hub,thread,&params,text(&session["drafts"],thread)) {
+            Ok(value)=>value, Err(reason)=>return refused(reason),
+        }
     };
     let local_mode=text(&session["drafts"],"@local.view");
     let mode=if ["projects","active"].contains(&local_mode) { local_mode } else if setting(st,"sidebar.view")=="active" { "active" } else { "projects" };
     // Active list and search are separate port slices; claiming them would hide projects silently.
-    if mode!="projects" || !text(&session["drafts"],"@f.pq").is_empty() { return None }
-    let mut ns=NativeSidebar::prepare(p,mode,"",&session["open"],st.projects.keys().cloned().collect())?;
+    if mode!="projects" { return refused("sidebar.active-mode") }
+    if !text(&session["drafts"],"@f.pq").is_empty() { return refused("sidebar.search") }
+    let Some(mut ns)=NativeSidebar::prepare(p,mode,"",&session["open"],st.projects.keys().cloned().collect()) else { return refused("sidebar.key-or-capability") };
     if action=="native-sidebar-page" && !ns.accept(value) { return Some(json!({"refused":true,"local":p.get("local").cloned().unwrap_or(json!({}))})) }
     if action=="native-sidebar-page" { session["drafts"]["@menu"]=json!(""); session["drafts"]["@del"]=json!(""); }
     let open: HashSet<String>=session["open"].as_object().into_iter().flatten().filter(|(_,v)|v.as_bool()==Some(true)).map(|(k,_)|k.clone()).collect();
@@ -116,7 +120,7 @@ pub fn recent(st: &State,p: &Value) -> Option<Value> {
     let selected_project=st.threads.get(thread).map(|t|t.project.as_str()).unwrap_or("");
     // For now an explicitly opened thread in a folded Older project is unported. The recent list
     // already offers only visible projects; forcing an excluded project needs the filter exception port.
-    if !selected_project.is_empty() && !ids.contains(&selected_project) { return None }
+    if !selected_project.is_empty() && !ids.contains(&selected_project) { return refused("sidebar.selected-project-hidden") }
     let (mut indices,projects_page)=ns.slice_ids(&ids,"projects","",project_limit,selected_project);
     indices.sort_unstable(); // Mob.native.keep_projects keeps source order, including the selected exception.
     let selected: Vec<&str>=indices.into_iter().map(|i|ids[i]).collect();
@@ -277,11 +281,11 @@ mod thread_binding_tests {
             assert_eq!(out["shown"]["nativeSidebar"],1); assert_eq!(out["cmds"],json!([]));
         }
     }
-    #[test] fn thread_root_refuses_missing_indexed_inputs_nonempty_drafts_and_unported_config() {
+    #[test] fn thread_root_keeps_drafts_and_refuses_missing_indexed_inputs_and_unported_config() {
         let (mut st,p,_)=fixture(true); let id=text(&p["target"],"id").to_string();
         for key in ["page","window"] { let mut q=p.clone(); q.as_object_mut().unwrap().remove(key); assert!(recent(&st,&q).is_none(),"{key}"); }
-        let mut q=p.clone(); q["session"]["drafts"][&id]=json!("typing"); assert!(recent(&st,&q).is_none());
-        let mut q=p.clone(); q["action"]=json!("draft"); q["value"]=json!("typing"); assert!(recent(&st,&q).is_none(),"a draft cannot be acknowledged with an empty picture");
+        let mut q=p.clone(); q["session"]["drafts"][&id]=json!("typing"); assert_eq!(recent(&st,&q).unwrap()["shown"]["thread"]["draft"],"typing");
+        let mut q=p.clone(); q["action"]=json!("draft"); q["value"]=json!("typing"); assert_eq!(recent(&st,&q).unwrap()["shown"]["thread"]["draft"],"typing");
         st.apply(&json!({"$":"SettingSet","key":"think","value":"1","at":1}));
         assert!(recent(&st,&p).is_none(),"an unported setting survives the lean fold and refuses the static thread");
     }

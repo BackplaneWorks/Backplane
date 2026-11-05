@@ -175,18 +175,35 @@ const STATIC: &str = include_str!("thread_static.json");
 /// Whether this thread is the one configuration whose static keys (tools, menu, permissions, picker, viewer, voice ...) were checked against the
 /// helper: idle, not pinned/archived/snoozed, Claude with the default model, no worktree, no task links, no open ask, nothing queued, and none of the
 /// settings that change those keys. Anything else is None (the helper draws it) until a dump of that case is matched.
-fn plain_thread(st: &State, id: &str) -> bool {
-    let Some(t) = st.threads.get(id) else { return false };
-    // pinned, archived, snoozed and settled threads are computed (present/keys.rs); a failed or stopped turn is not (its last stamp and error text), and keys() says so
-    if t.deleted || !matches!(t.turn, Turn::Idle | Turn::Running | Turn::Completed | Turn::Failed | Turn::Interrupted) || t.provider != "claude" || !t.model.is_empty() || t.title.trim().is_empty() { return false }
-    if !t.worktree.is_empty() || t.worktree_mode { return false }
-    if st.tasks.values().any(|(p, c, _, _)| p == id || c == id) || st.asks.values().any(|(th, open)| th == id && *open) { return false }
-    if st.queue.get(id).map_or(false, |q| !q.is_empty()) { return false }
-    let gate = [format!("effort:{id}"), format!("wait.{id}"), format!("stop.{id}"), format!("fail.{id}"), "files.max.mb".into(), "person.tz".into(), "person.tz.device".into(), "tz.machine".into(), "think".into(), "permissions.default".into()];
-    // A lean State drops the settings it does not keep: there, "the key is absent" proves nothing, so a gate key it may have dropped means refuse
-    // (the state lane keeps these keys bounded; until it does this answers None on a lean State rather than a false supported case).
-    if st.lean && gate.iter().any(|k| !crate::state::fam::policy::lean_keeps(k)) { return false }
-    !gate.iter().any(|k| st.settings.contains_key(k) && !matches!(k.as_str(), "person.tz" | "person.tz.device" | "tz.machine"))
+/// First refusal gate, with fixed labels only: never a thread id, title, setting value or body.
+pub fn metadata_refusal(st: &State, id: &str) -> Option<&'static str> {
+    let Some(t)=st.threads.get(id) else { return Some("thread.missing") };
+    if t.deleted { return Some("thread.deleted") }
+    if t.provider!="claude" { return Some("thread.provider") }
+    if !t.model.is_empty() { return Some("thread.model") }
+    if t.title.trim().is_empty() { return Some("thread.title-empty") }
+    if !t.worktree.is_empty() || t.worktree_mode { return Some("thread.worktree") }
+    if st.tasks.values().any(|(p,c,_,_)|p==id || c==id) { return Some("thread.task") }
+    if st.asks.values().any(|(th,open)|th==id && *open) { return Some("thread.ask") }
+    if st.queue.get(id).map_or(false,|q|!q.is_empty()) { return Some("thread.queue") }
+    for (key,reason) in [(format!("effort:{id}"),"setting.effort"),(format!("wait.{id}"),"setting.wait"),(format!("stop.{id}"),"setting.stop"),(format!("fail.{id}"),"setting.fail"),
+        ("files.max.mb".into(),"setting.files.max.mb"),("person.tz".into(),"setting.person.tz"),("person.tz.device".into(),"setting.person.tz.device"),("tz.machine".into(),"setting.tz.machine"),
+        ("think".into(),"setting.think"),("permissions.default".into(),"setting.permissions.default")] {
+        if st.lean && !crate::state::fam::policy::lean_keeps(&key) { return Some("state.gate-key-not-retained") }
+        if st.settings.contains_key(&key) && !matches!(key.as_str(),"person.tz"|"person.tz.device"|"tz.machine") { return Some(reason) }
+    }
+    None
+}
+fn row_refusal(e: &Ent) -> Option<&'static str> {
+    if plain(e) && (!tool(e) || e.role=="tool") { return None }
+    Some(if e.msg {
+        if e.id.starts_with("@live:") { "row.live" }
+        else if e.text.starts_with("API Error") { "row.api-error" }
+        else if e.text.starts_with("Backplane") || e.text.starts_with("[Backplane]") { "row.backplane-note" }
+        else if e.role=="user" { "row.attachment" }
+        else if e.role=="assistant" { "row.image-or-blank" }
+        else { "row.message-role" }
+    } else if e.akind=="restart" { "row.restart" }else if e.role=="step" { "row.design-step" }else{ "row.activity-kind" })
 }
 
 /// Zone.person / Sched.person: the person's zone as a rule. UTC names are built in; any other is the rule the hub stored (`tz.rule.<name>`);
@@ -204,24 +221,30 @@ fn person_zone(st: &State) -> Option<Rule> {
 /// shown.thread for a plain idle thread, from the page rows. `hub` is the request's hub key (the id is `<hub>|<thread>`), `draft` the composer's text.
 /// None unless every key is derived.
 pub fn thread_object(st: &State, hub: &str, thread: &str, params: &Value, draft: &str) -> Option<Value> {
-    if !plain_thread(st, thread) { return None }
-    let page = params.get("page")?;
-    if page["thread"].as_str() != Some(thread) { return None }
-    let es = ents(page["rows"].as_array()?, thread)?;
+    thread_object_checked(st,hub,thread,params,draft).ok()
+}
+
+pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value, draft: &str) -> Result<Value,&'static str> {
+    if let Some(reason)=metadata_refusal(st,thread) { return Err(reason) }
+    let page = params.get("page").ok_or("page.missing")?;
+    if page["thread"].as_str() != Some(thread) { return Err("page.owner") }
+    let rows=page["rows"].as_array().ok_or("page.rows-missing")?;
+    let es = ents(rows, thread).ok_or("row.malformed-or-foreign")?;
+    if let Some(reason)=es.iter().find_map(row_refusal) { return Err(reason) }
     let zone = person_zone(st);
     let running = st.threads.get(thread).map_or(false, |t| t.turn == Turn::Running);
     let now_ms = params["now"].as_u64().unwrap_or(0);
     let mark = |msg: &str| -> u8 { if st.settings.get(&format!("stopped.{msg}")).map_or(false, |v| v == "1") { 1 } else if st.settings.get(&format!("failed.{msg}")).map_or(false, |v| v == "1") { 3 } else { 0 } };
     let turn = st.threads.get(thread).map(|t| t.turn);
     let end = match turn { Some(Turn::Interrupted) => 1, Some(Turn::Failed) => 3, _ => 0 };
-    let mut entries = entries(&es, running, &|_| false, now_ms, zone.as_ref(), &mark, end)?;
+    let mut entries = entries(&es, running, &|_| false, now_ms, zone.as_ref(), &mark, end).ok_or("rows.unsupported")?;
     // Mob.pending: a thread that works shows the agent's "Working" row after its last entry
     if running { entries.push(json!({"id": format!("@working:{thread}"), "kind": "assistant", "text": "Working", "blocks": md_blocks("Working"), "images": [], "stamp": ""})) }
     // Signal.why: the first error of the thread's last turn (newest first, stopping at the person's message), at most 400 characters
     let why: String = es.iter().rev().take_while(|e| !(e.msg && e.role == "user")).find(|e| !e.msg && e.role == "error").map(|e| e.text.trim().chars().take(400).collect()).unwrap_or_default();
-    let state_keys = super::keys::keys(st, thread, now_ms / 1000, &why)?;
-    let t = st.threads.get(thread)?;
-    let mut o: serde_json::Map<String, Value> = serde_json::from_str(STATIC).ok()?;
+    let state_keys = super::keys::keys(st, thread, now_ms / 1000, &why).ok_or("thread.signal-or-turn")?;
+    let t = st.threads.get(thread).ok_or("thread.missing")?;
+    let mut o: serde_json::Map<String, Value> = serde_json::from_str(STATIC).map_err(|_|"thread.template")?;
     o.insert("id".into(), json!(format!("{hub}|{thread}")));
     o.insert("title".into(), json!(t.title));
     o.insert("branch".into(), json!(t.branch));
@@ -233,10 +256,10 @@ pub fn thread_object(st: &State, hub: &str, thread: &str, params: &Value, draft:
     // the composer's four keys: the draft, the send button and its action, the popup rows (parity-session's session::composer; ours are the `$ @ > % #` & rows, not ported:
     // a mention being typed shows no popup — see docs/gpui/slim-thread-known-missing.md). Another interface language is the helper's (None).
     let lang = st.settings.get("lang").map(String::as_str).unwrap_or("");
-    let c = crate::session::composer::fields(draft, running, false, true, &json!([]), lang)?;
+    let c = crate::session::composer::fields(draft, running, false, true, &json!([]), lang).ok_or("composer.language")?;
     for (k, v) in state_keys { o.insert(k, v); }
     for k in ["draft", "skills", "send", "sendAct"] { o.insert(k.into(), c[k].clone()); }
-    Some(Value::Object(o))
+    Ok(Value::Object(o))
 }
 
 #[cfg(test)]

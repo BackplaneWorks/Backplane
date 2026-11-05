@@ -13,7 +13,7 @@ rc=$?
 grep -A10 '^error' /tmp/bp-root-sidebar.log
 tail -8 /tmp/bp-root-sidebar.log
 [ "$rc" = 0 ] || exit "$rc"
-cargo build --release --bin backplane-hub --bin sidebar-check > /tmp/bp-root-build.log 2>&1
+cargo build --release --bin backplane-hub --bin sidebar-check --bin screen-audit > /tmp/bp-root-build.log 2>&1
 rc=$?
 grep -A10 '^error' /tmp/bp-root-build.log
 tail -3 /tmp/bp-root-build.log
