@@ -15,7 +15,7 @@ def norm(s):  # this run's machine id and uberbot id, and the seconds of a stamp
     return re.sub(r'once\\":[1-9][0-9]*', 'once\\":<T>', s)  # a one-time routine's instant inside an op body
 def routed(e):  # what the JS hub's routing adds after a mail is filed (triage, escalations, claims): slice 3, not compared
     s = json.dumps(e, ensure_ascii=False)
-    return ("triage-" in s or (e["$"] in ("ConvSet", "MailPosted") and str(e.get("id", "")).startswith("pair:")) or (e["$"] == "ConvSet" and e.get("id", "").startswith("pair:"))
+    return ("triage-" in s or (e["$"] == "ThreadCreated" and (e.get("id", "").startswith("run") or e.get("id", "").startswith("mailcoord-"))) or (e["$"] in ("ConvSet", "MailPosted") and str(e.get("id", "")).startswith("pair:")) or (e["$"] == "ConvSet" and e.get("id", "").startswith("pair:"))
         or (e["$"] == "MailPosted" and e.get("conv", "").startswith("pair:")) or (e["$"] == "MessageFrom" and e.get("kind") == "escalation")
         or (e["$"] == "SettingSet" and e.get("key", "").startswith("owner.mail.") and e.get("value", "x") == ""))
 for e in ev:
