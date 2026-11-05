@@ -477,7 +477,7 @@ R(A, "CBOR framing, view.control segmentation (256 KB)", hub="done", pf="hub.rs 
 R(A, "Keyed view deltas (viewDelta)", hub="partial", c="dnn", lane=L["pses"], ev="delta.rs + gpui delta.rs tests; session-gpuid 977 differences (uncapped, parity-rust7)")
 R(A, "Copy guard (BACKPLANE_COPY)", hub="done", pf="copy.rs 15 tests", c="nnn", lane=L["core"], ev="copy.rs, test/gpui/hub/copy_gate.sh")
 R(A, "One hub per home (hub.lock flock)", hub="done", pf="main.rs", c="nnn", lane=L["core"], ev="main.rs takes hub.lock; no e2e result file read")
-R(A, "Startup and memory at scale", hub="done", pf="HUB-M1.md, results/hub", c="nnn", lane=L["soak"], ev="1M events 0.73 s; 24 h soak (M7) not run: gpui-soak lane holds a harness only")
+R(A, "Startup and memory at scale", hub="done", pf="HUB-M1.md, results/hub", c="nnn", lane=L["soak"], ev="1M events 0.73 s; the 24 h soak (M7) was dropped by the person, 2026-11-05: gpui-soak lane holds a harness only")
 R(A, "Bend rules sidecar (presenter) process", hub="partial", c="nnn", lane=L["core"], ev="presenter.rs calls bp-policy/window children; without flags the hub answers a canned reply (main.rs)")
 R(A, "Cross-hub import of a Bend hub's log (and back)", hub="done", pf="state", c="nnn", lane=L["state"], ev="model.rs vs store.db fixtures; reverse direction unmeasured")
 # FEATURES_END
@@ -659,7 +659,7 @@ def render(S, rows):
     w(f"{len(ph)} rows have a phone cell that is not `done`; the cell is `partial` because the shipped app has the code but nothing was run against the Rust hub, or `missing` where the app has no code "
       "(Android Diagnostics). Their work is not blocked on new hub code for the rows whose hub cell is already `done` (files, git, review, kicad IPC, send/stop/ask): run those first. "
       "Every other row waits for its hub lane above.\n")
-    w("Existing lanes with nothing to do on this list: `soak` owns the 24 h run (M7), which has not run; `parity-session` and `parity-edge` own the 1621-difference gate.\n")
+    w("Existing lanes with nothing to do on this list: the `soak` lane is closed (the 24 h run was dropped); `parity-session` and `parity-edge` own the 1621-difference gate.\n")
     # tables
     w("## Checklist\n")
     w("Columns: Rust hub, GPUI desktop, iOS, Android. `[hub-blocked]` as defined above.\n")
