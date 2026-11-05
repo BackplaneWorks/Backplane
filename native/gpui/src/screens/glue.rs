@@ -71,6 +71,7 @@ impl Backplane {
     /// A picture was applied: the drafts, the asks' boxes and the settings fields follow what the hub just drew.
     pub(crate) fn picture_applied(&mut self, cx: &mut Context<Self>) {
         self.draft_from_hub(cx);
+        self.screens.rail_pending = None;
         super::settings::sync(self, cx);
         // settings opened: the keys go into it; closed: back to the composer
         let open = self.data["settings"].is_object();

@@ -53,6 +53,8 @@ pub fn canvas_el(cx: &mut Context<Backplane>, light: bool, frame: &Frame, view: 
         this.update(cx, |app, _| { app.screens.plotview.bounds = Some(b); });
         let Some(v) = view else { return };
         window.with_content_mask(Some(ContentMask { bounds: b }), |window| { for ch in &chunks { paint_chunk(window, ch, &v, b.origin, w, h); } });
+        // click to the first painted plot: what the person feels (the metric the gate asks for)
+        this.update(cx, |app, _| { if let Some(t) = app.screens.plot_click.take() { app.m("plot_painted", serde_json::json!({"ms": (t.elapsed().as_secs_f64() * 1e6).round() / 1e3, "chunks": chunks.len()})); } });
     }).size_full();
     div().id("plot").flex_1().min_h_0().bg(c("view")).child(el)
         .on_mouse_down(MouseButton::Left, cx.listener(|this, e: &MouseDownEvent, _, cx| { this.screens.plotview.drag = Some((f32::from(e.position.x), f32::from(e.position.y))); cx.notify(); }))
