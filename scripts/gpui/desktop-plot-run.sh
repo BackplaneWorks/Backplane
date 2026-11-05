@@ -12,7 +12,7 @@ mkdir -p $R $OUT $SH
 [ -x "$CLIENT" ] || { echo "no client binary"; exit 2; }
 [ ! -e /tmp/.X11-unix/X61 ] || { echo "display :61 is in use"; exit 2; }
 rm -rf $R/home $R/proj $R/bin $R/fakehome; rm -f $R/*.pid; mkdir -p $R/home $R/proj $R/bin $R/fakehome/.cache
-cp $FIX/ecc83-pp.kicad_pcb $FIX/ecc83-pp.kicad_sch $R/proj/; echo '{}' > $R/proj/ecc83-pp.kicad_pro
+cp $FIX/ecc83-pp.kicad_pcb $FIX/ecc83-pp.kicad_sch $R/proj/; echo '{}' > $R/proj/ecc83-pp.kicad_pro; mkdir -p $R/proj/mech; cp $ROOT/test/gpui/files/fixtures/mesh/bracket.step $R/proj/mech/
 # stand-in agents: nothing may call a model
 printf '#!/bin/sh\nexec %s %s "$@"\n' "$(command -v bun)" "$ROOT/test/tools/claude_standin.ts" > $R/bin/claude; chmod +x $R/bin/claude
 for n in codex grok muse; do printf '#!/bin/sh\nexit 1\n' > $R/bin/$n; chmod +x $R/bin/$n; done
@@ -44,11 +44,13 @@ DISPLAY=$DISP i3 -c $R/i3.conf > $R/i3.log 2>&1 &
 echo $! > $R/i3.pid; sleep 1
 export DISPLAY=$DISP VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json LP_NUM_THREADS=2 BACKPLANE_GPUI_ASSETS=$ASSETS BACKPLANE_GPUI_RECTS=1
 cat > $R/script.json <<JSON
-[{"select":0},{"wait":1500},{"click":"rail:Board"},{"wait":6000},{"wait":100},{"click":"rail:Schematic"},{"wait":6000}]
+[{"select":0},{"wait":1500},{"click":"rail:Board"},{"wait":6000},{"click":"rail:Schematic"},{"wait":6000},{"click":"rail:3D"},{"wait":8000},{"click":"rail:Mech"},{"wait":9000}]
 JSON
-$CLIENT --url http://127.0.0.1:$PORT --token-file $R/home/token --script $R/script.json --exit-after 40 > $OUT/$N.client.log 2>&1 &
+$CLIENT --url http://127.0.0.1:$PORT --token-file $R/home/token --script $R/script.json --exit-after 70 > $OUT/$N.client.log 2>&1 &
 echo $! > $R/client.pid
 sleep 7; import -window root $SH/$N-board.png
 sleep 6; import -window root $SH/$N-schematic.png
+sleep 8; import -window root $SH/$N-3d.png
+sleep 9; import -window root $SH/$N-mech.png
 wait $(cat $R/client.pid) || true
 '
