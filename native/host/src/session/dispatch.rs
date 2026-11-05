@@ -41,6 +41,13 @@ pub fn dispatch<F: Facts>(f: &F, params: &Value) -> Option<Dispatched> {
         patch::merge(&mut session, &o.session_patch); (o.cmds, None, false)
     } else if let Some(o) = cmdact::act(&cmdact::Req { hub, session: &params["session"], sel, action, value, title_of: &|t| f.title_of(t) }) {
         patch::merge(&mut session, &o.session_patch); (o.cmds, o.next_target, false)
+    } else if action == "answer" && !value.is_empty() {
+        // Ui.answer: "askid|answer" -> `ask.answer {id, answer}` (the answer may hold '|'), sent with the next rid like Ui.rpc
+        let (id, ans) = value.split_once('|').unwrap_or((value, ""));
+        let rid = params["session"]["rid"].as_u64().unwrap_or(0);
+        let text = format!("{{\"id\":{rid},\"m\":\"ask.answer\",\"p\":{{\"id\":{},\"answer\":{}}}}}", serde_json::to_string(id).unwrap_or_default(), serde_json::to_string(ans).unwrap_or_default());
+        patch::merge(&mut session, &json!({"rid": rid + 1}));
+        (vec![json!({"type": "send", "hub": hub, "text": text})], None, false)
     } else if action == "select" {
         let o = select::select(f, hub, &params["session"], value)?;
         patch::merge(&mut session, &o.session_patch); (o.cmds, Some(o.next_target), true)
@@ -75,6 +82,16 @@ impl Facts for StateFacts<'_> {
     fn title_of(&self, id: &str) -> String { self.0.threads.get(id).map_or(String::new(), |t| t.title.clone()) }
 }
 
+#[cfg(test)]
+mod answer_tests {
+    use super::*;
+    #[test] fn an_answer_action_becomes_ask_answer_with_the_next_rid() {
+        // the shape Ui.answer makes: askid|answer, the answer may hold '|'
+        let rid = 7u64; let (id, ans) = "q1-9|yes|always".split_once('|').unwrap();
+        let text = format!("{{\"id\":{rid},\"m\":\"ask.answer\",\"p\":{{\"id\":{},\"answer\":{}}}}}", serde_json::to_string(id).unwrap(), serde_json::to_string(ans).unwrap());
+        assert_eq!(text, r#"{"id":7,"m":"ask.answer","p":{"id":"q1-9","answer":"yes|always"}}"#);
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
