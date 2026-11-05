@@ -139,7 +139,7 @@ fn line(v: Value) -> String { v.to_string() }
     let got = asked.lock().unwrap().clone();
     assert!(both, "the second JS hub pulled both links (it asked: {got:?})");
     let since = |l: &str| got.iter().find(|(p, _, _)| p == l).map(|x| x.1).unwrap();
-    assert_eq!(since(link3), h3, "CONTROL: the Bend hub pulls from the head of the file the Bend hub wrote");
+    assert_eq!(since(link3), h3, "CONTROL: the Bend hub pulls from the head of the file the Bend hub wrote: asked {got:?}");
     assert_eq!(since(link2), h2, "the Bend hub read the mirror file Rust wrote (it pulls from its head {h2}, not from 0): asked {got:?}");
     let _ = js2.kill().await;
     let _ = std::fs::remove_dir_all(&root);
