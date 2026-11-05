@@ -21,6 +21,13 @@ pub mod kicad {
   #[path = "../../../../../../native/host/src/kicad/schematic.rs"] pub mod schematic;
   #[path = "../../../../../../native/host/src/kicad/plotgen.rs"] pub mod plotgen;
   #[path = "../../../../../../native/host/src/kicad/plotread.rs"] pub mod plotread;
+  #[path = "../../../../../../native/host/src/kicad/glb.rs"] pub mod glb;
+  #[path = "../../../../../../native/host/src/kicad/mesh.rs"] pub mod mesh;
+  #[path = "../../../../../../native/host/src/kicad/png.rs"] pub mod png;
+  #[path = "../../../../../../native/host/src/kicad/render.rs"] pub mod render;
+  #[path = "../../../../../../native/host/src/kicad/solid.rs"] pub mod solid;
+  #[path = "../../../../../../native/host/src/kicad/solidread.rs"] pub mod solidread;
+  #[path = "../../../../../../native/host/src/kicad/stepglb.rs"] pub mod stepglb;
   #[path = "../../../../../../native/host/src/kicad/bj.rs"] pub mod bj;
   #[path = "../../../../../../native/host/src/kicad/cad.rs"] pub mod cad;
   #[path = "../../../../../../native/host/src/kicad/bom.rs"] pub mod bom;

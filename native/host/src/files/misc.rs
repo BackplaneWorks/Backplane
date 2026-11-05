@@ -1,7 +1,8 @@
 //! The smaller Files-tab and Mechanical-tab requests: `file.open` (a file link opened or shown on the hub's own machine),
 //! `pdf.page` (a PDF page drawn by poppler for the window), `mech.list` and `mech.render` (server.bend's FileJob, PdfJob,
 //! Mech.list, Mech.render). The shell text is the Bend hub's (scripts/*.sh, extracted by test/gpui/files/extract_scripts.py);
-//! `mech.render` stays the existing Bend renderer child (`backplane --render`, BACKPLANE_PLOT_BIN is the same binary).
+//! `mech.render` draws in this process (kicad/render.rs), one render at a time; `BACKPLANE_PLOT_NATIVE=0` runs the Bend renderer
+//! child again (`backplane --render`, BACKPLANE_PLOT_BIN is the same binary).
 use super::{fm, git::proc};
 use crate::{api::{Caller, Fut, RpcHandler}, hub::Hub};
 use serde_json::{json, Value};
@@ -12,6 +13,8 @@ const FILE_REVEAL: &str = include_str!("scripts/file_reveal.sh");
 const PDF: &str = include_str!("scripts/pdf.sh");
 const MECH_LIST: &str = include_str!("scripts/mech_list.sh");
 const RESOLVE: &str = include_str!("scripts/resolve.sh");
+/// a render takes seconds of every core and memory for the whole model: one at a time, the next waits
+static RENDER: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
 
 /// Mech.error: "" when the render worked, else the child's own `backplane --render:` line, else its first 300 chars.
 pub fn mech_error(code: i32, out: &str) -> String {
@@ -116,9 +119,19 @@ impl RpcHandler for Misc {
                         if !super::threadpath::path_in(&cwd, &path) { return vec![json!({"t":"reply","id":id,"ok":false,"error":"that path is not in this project"})] }
                         let rel = path.strip_prefix(&format!("{cwd}/")).unwrap_or(&path);
                         if fm::contained(std::path::Path::new(&cwd), rel).is_none() { return reply(false, json!({"text":"that model is unavailable or outside this project"})) }
-                        let bin = std::env::var_os("BACKPLANE_PLOT_BIN").map(std::path::PathBuf::from).unwrap_or_else(|| "backplane-serve".into());
-                        let r = proc(&bin.to_string_lossy(), &["--render", &path], &cwd, &[]).await;
-                        err = mech_error(r.code, &r.out); rendered = path;
+                        let (code, out) = if crate::files::kicad::watch::native() {
+                            let _one = RENDER.acquire().await.ok();
+                            let (m, c, home) = (path.clone(), cwd.clone(), hub.cfg.home.clone());
+                            let r = tokio::task::spawn_blocking(move || { use crate::files::kicad::{render, stepglb};
+                                let r = std::panic::catch_unwind(|| render::run(&[m.as_str()], &c, &stepglb::machine(&home)));
+                                #[cfg(target_env = "gnu")] unsafe { libc::malloc_trim(0); }
+                                r }).await;
+                            match r { Ok(Ok(r)) => (r.code, r.out), _ => (1, "backplane --render: the renderer stopped".to_string()) }
+                        } else {
+                            let bin = std::env::var_os("BACKPLANE_PLOT_BIN").map(std::path::PathBuf::from).unwrap_or_else(|| "backplane-serve".into());
+                            let r = proc(&bin.to_string_lossy(), &["--render", &path], &cwd, &[]).await; (r.code, r.out)
+                        };
+                        err = mech_error(code, &out); rendered = path;
                     }
                     let l = proc("sh", &["-c", MECH_LIST], &cwd, &[]).await;
                     let cfg = std::fs::read_to_string(format!("{cwd}/.backplane.json")).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).and_then(|v| v.get("mech").and_then(Value::as_str).map(str::to_string)).unwrap_or_default();
@@ -134,6 +147,9 @@ impl RpcHandler for Misc {
 mod tests {
     use super::*;
     // laws mech_error_*: Mech.error
+    #[test] fn mech_render_success_quiet() { for out in ["", "anything", "backplane --render: nothing", "/p/renders/a.iso.png\n"] { assert_eq!(mech_error(0, out), "") } }
+    #[test] fn mech_render_failure_visible() { assert!(!mech_error(1, "").is_empty()) }
+    #[test] fn mech_render_failure_diagnostic() { assert_eq!(mech_error(1, "/p/renders/fixture.iso.png\nbackplane --render: could not write /p/renders/fixture.front.png\n"), "backplane --render: could not write /p/renders/fixture.front.png") }
     #[test] fn mech_error_words() {
         assert_eq!(mech_error(0, "anything"), ""); assert_eq!(mech_error(2, ""), "backplane --render failed (exit 2)");
         assert_eq!(mech_error(1, "noise\n  backplane --render: no GLB \nmore"), "backplane --render: no GLB");

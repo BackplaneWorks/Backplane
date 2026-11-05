@@ -1,11 +1,11 @@
 //! server/plot.bend's actor in Rust: the board, schematic and 3D sources the clients watch (`kicad.watch`), polled every
 //! 150 ms while any is watched, each changed file read, the plot sent to each client as the delta against what that client
-//! holds (core/plot.bend, kicad/plot.rs). Boards and schematics (plots, sheet trees, info lookups) are read in this process
-//! (kicad/plotread.rs, the same bytes as the Bend child) on blocking threads, at most `READERS` at once; `BACKPLANE_PLOT_NATIVE=0`
-//! sends them to the child again. 3D models still go to the Bend child (`backplane --plot KIND FILE INFOS`, `BACKPLANE_PLOT_BIN`,
-//! default `backplane-serve` beside the hub), one at a time and at low priority.
+//! holds (core/plot.bend, kicad/plot.rs). Every source (boards, schematics, sheet trees, info lookups: kicad/plotread.rs; 3D models:
+//! kicad/solidread.rs) is read in this process, the same bytes as the Bend child, on blocking threads, at most `READERS` at once and one
+//! 3D model at a time. `BACKPLANE_PLOT_NATIVE=0` sends them all to the child again (`backplane --plot KIND FILE INFOS`, `BACKPLANE_PLOT_BIN`,
+//! default `backplane-serve` beside the hub).
 //! Not ported yet: web stamps, split views.
-use super::{plot::{self, Plot}, plotgen, plotread, project};
+use super::{plot::{self, Plot}, plotgen, plotread, project, solid, solidread, stepglb};
 use crate::{api::{Caller, Fut, RpcHandler}, hub::Hub};
 use serde_json::{json, Value};
 use std::{collections::HashMap, path::PathBuf, sync::{Arc, Mutex}, time::Duration};
@@ -36,13 +36,13 @@ struct Sub { key: String, held: Vec<plot::Chunk>, mesh: Vec<u8>, fresh: bool, ba
 #[derive(Default)]
 struct State { srcs: HashMap<String, Src>, subs: HashMap<u64, Vec<Sub>>, polling: bool, idle: Vec<String> }
 
-pub struct Plots { gen: std::sync::atomic::AtomicU64, st: Mutex<State>, bin: PathBuf, dir: PathBuf, readers: tokio::sync::Semaphore, solid: tokio::sync::Mutex<()> }
+pub struct Plots { gen: std::sync::atomic::AtomicU64, st: Mutex<State>, bin: PathBuf, dir: PathBuf, home: PathBuf, readers: tokio::sync::Semaphore, solid: tokio::sync::Mutex<()> }
 
 impl Plots {
     pub fn new(home: &std::path::Path) -> Arc<Plots> {
         let bin = std::env::var_os("BACKPLANE_PLOT_BIN").map(PathBuf::from).unwrap_or_else(|| std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("backplane-serve"))).unwrap_or_else(|| "backplane-serve".into()));
         let dir = home.join("plot"); let _ = std::fs::create_dir_all(&dir);
-        Arc::new(Plots { gen: Default::default(), st: Mutex::new(State::default()), bin, dir, readers: tokio::sync::Semaphore::new(READERS), solid: tokio::sync::Mutex::new(()) })
+        Arc::new(Plots { gen: Default::default(), st: Mutex::new(State::default()), bin, dir, home: home.to_path_buf(), readers: tokio::sync::Semaphore::new(READERS), solid: tokio::sync::Mutex::new(()) })
     }
     fn infos(&self, key: &str) -> PathBuf { self.dir.join(format!("{}.info", fnv(key))) }
 
@@ -58,8 +58,9 @@ impl Plots {
             hub.push(client, json!({"t":"plot","key":key(kind, root, path),"none": if kind == 1 { "No schematic in this project yet" } else { "No board in this project yet" }}));
             return
         }
+        let is_board = file.ends_with(".kicad_pcb"); // Pv.watch.go: only a board's model has a board beside it
         let mut views = vec![(kind, key(kind, root, path), file)];
-        if solid_kind(kind) { views.push((0, key(0, root, path), board(0))) }
+        if solid_kind(kind) && is_board { views.push((0, key(0, root, path), board(0))) }
         let mut todo = vec![];
         { let mut st = self.st.lock().unwrap();
           let carry = st.subs.get(&client).and_then(|v| v.iter().find(|s| s.key.starts_with("0|") || s.key.starts_with("1|"))).map(|s| (s.held.clone(), s.base.clone())).unwrap_or_default();
@@ -105,8 +106,8 @@ impl Plots {
 
     /// Bring watchers of `key` (or just `only`) up to its plot; a source with none yet is read.
     fn fan_one(self: &Arc<Self>, hub: &Arc<Hub>, ky: &str, only: Option<u64>) {
-        let (plot, need_read) = { let st = self.st.lock().unwrap(); match st.srcs.get(ky) { Some(s) => (s.plot.clone(), s.plot.is_none() && !s.busy), None => return } };
-        if let Some(p) = plot { self.send_to(hub, ky, &p, only); self.revision(hub, ky, only) }
+        let (plot, need_read, kind) = { let st = self.st.lock().unwrap(); match st.srcs.get(ky) { Some(s) => (s.plot.clone(), s.plot.is_none() && !s.busy, s.kind), None => return } };
+        if let Some(p) = plot { self.send_to(hub, ky, &p, only); self.revision(hub, ky, only); if solid_kind(kind) { self.note(hub, ky, only) } }
         if need_read { self.read(hub, ky) }
     }
     /// Pv.revision.ready: the exact revision of the file the plot is of, to the watchers (nothing for a version).
@@ -116,6 +117,12 @@ impl Plots {
              st.subs.iter().filter(|(c, v)| only.map_or(true, |o| o == **c) && v.iter().any(|s| s.key == ky)).map(|(c, _)| *c).collect()) };
         if rev.is_empty() { return }
         for c in who { hub.push(c, json!({"t":"plotrevision","key":ky,"revision":rev})); }
+    }
+    /// Pv.note: a 3D model's note (in its source's info file: the parts with no 3D model on this machine) to its watchers
+    fn note(&self, hub: &Arc<Hub>, ky: &str, only: Option<u64>) {
+        let text = std::fs::read_to_string(self.infos(ky)).unwrap_or_default();
+        let who: Vec<u64> = { let st = self.st.lock().unwrap(); st.subs.iter().filter(|(c, v)| only.map_or(true, |o| o == **c) && v.iter().any(|s| s.key == ky)).map(|(c, _)| *c).collect() };
+        for c in who { hub.push(c, json!({"t":"plotnote","key":ky,"text":text.trim()})); }
     }
     fn send_to(&self, hub: &Arc<Hub>, ky: &str, p: &Arc<Plot>, only: Option<u64>) {
         let mut gone = vec![];
@@ -141,9 +148,11 @@ impl Plots {
         let (me, hub, ky) = (self.clone(), hub.clone(), ky.to_string());
         tokio::spawn(async move {
             let _slot = me.readers.acquire().await.ok();
-            let _one = if solid_kind(kind) { Some(me.solid.lock().await) } else { None };
+            // Pv.read.at: a model whose GLB is known too big is refused at once, not behind another model's read
+            let known = if solid_kind(kind) { solidread::known(kind, &file) } else { 0 };
+            let _one = if solid_kind(kind) && solid::fits(known) { Some(me.solid.lock().await) } else { None };
             let before = if is_version(&file) { Stamp::default() } else { stamp(&file) };
-            let out = if native(kind) { me.run_native(kind, &file, &ky).await } else { me.run_child(kind, &file, &ky).await.map(|(c, t)| (c, t, None)) };
+            let out = if !solid::fits(known) { Some((3, solid::big(known), None)) } else if native() { me.run_native(&hub, kind, &file, &ky).await } else { me.run_child(kind, &file, &ky).await.map(|(c, t)| (c, t, None)) };
             let after = if is_version(&file) { Stamp::default() } else { stamp(&file) };
             let (code, text, made) = match out { Some((c, t, m)) => if before != after { (2, String::new(), None) } else { (c, t, m) }, None => (1, "cannot run the plot reader".into(), None) };
             let mut again = false;
@@ -152,20 +161,31 @@ impl Plots {
               if let Some(s) = st.srcs.get_mut(&ky) { s.busy = false; s.stamp = Some(before); again = std::mem::take(&mut s.again); if let Some(p) = &plot { s.plot = Some(p.clone()) } } }
             match (&plot, code) {
                 (Some(p), _) => { me.send_to(&hub, &ky, p, None); me.revision(&hub, &ky, None) }
-                (None, 0 | 2) => {} // half written: the next poll sees the file change again
+                (None, 0 | 2) => {} // half written or read again: the next poll sees the file change
                 (None, _) => { // Pv.fail: every watcher told why, and holding nothing
                     let why: String = text.trim().chars().take(200).collect();
                     let mut st = me.st.lock().unwrap(); let mut gone = vec![];
                     for (c, subs) in st.subs.iter_mut() { for s in subs.iter_mut().filter(|s| s.key == ky) { s.held.clear(); if !hub.push(*c, json!({"t":"plot","key":ky,"none":why})) { gone.push(*c) } } }
                     drop(st); for c in gone { me.stop(c) } }
             }
+            if matches!(code, 0 | 2) && (ky.starts_with("2|") || ky.starts_with("3|")) { me.note(&hub, &ky, None) } // Pv.handle PGot
             if again { me.read(&hub, &ky) }
         });
     }
-    /// `Pv.child` in this process (kicad/plotread.rs): the plot, its info file written, and the child's exit code and message.
-    /// A panic in a reader is an unread file, never the hub's end; a big board's memory goes back when it is done.
-    async fn run_native(&self, kind: u32, file: &str, ky: &str) -> Option<(i32, String, Option<Plot>)> {
+    /// `Pv.child` in this process (kicad/plotread.rs, kicad/solidread.rs): the plot, its info file written, and the child's exit code and
+    /// message. A panic in a reader is an unread file, never the hub's end; a big file's memory goes back when it is done.
+    async fn run_native(&self, hub: &Arc<Hub>, kind: u32, file: &str, ky: &str) -> Option<(i32, String, Option<Plot>)> {
         let (f, infos) = (file.to_string(), self.infos(ky));
+        if solid_kind(kind) {
+            let (cli, home) = (super::ipc::runtime(hub).await.cli, self.home.clone());
+            return tokio::task::spawn_blocking(move || {
+                let i = infos.to_string_lossy().into_owned();
+                let r = std::panic::catch_unwind(|| solidread::read(kind, &f, &cli, &stepglb::machine(&home), &i));
+                let o = match r { Ok(g) => (g.code, g.text, g.plot), Err(_) => (3, plotgen::UNREAD.to_string(), None) };
+                #[cfg(target_env = "gnu")] unsafe { libc::malloc_trim(0); }
+                o
+            }).await.ok()
+        }
         tokio::task::spawn_blocking(move || {
             let r = std::panic::catch_unwind(|| plotread::read(kind, &f));
             let o = match r {
@@ -216,7 +236,7 @@ impl Plots {
         if file.is_empty() { return }
         let (me, hub, root, slot) = (self.clone(), hub.clone(), root.to_string(), tree_slot(path));
         tokio::spawn(async move {
-            if native(1) {
+            if native() {
                 let f = file.clone();
                 let Ok(Ok(t)) = tokio::task::spawn_blocking(move || std::panic::catch_unwind(|| plotread::tree(&f))).await else { return };
                 hub.push(client, json!({"t":"sheets","root":root,"slot":slot,"gen":gen.to_string(),"rows":t.rows,"boxes":t.boxes,"ids":t.ids,"top":t.top,"refs":t.refs}));
@@ -234,7 +254,7 @@ impl Plots {
     pub async fn info(&self, client: u64, key_: &str, at: usize, idx: usize) -> String {
         let sig = { let st = self.st.lock().unwrap(); st.subs.get(&client).and_then(|v| v.iter().find(|s| s.key == key_)).and_then(|s| s.held.get(at)).map(|c| c.sig) };
         let Some(sig) = sig else { return String::new() };
-        if native(0) {
+        if native() {
             let f = self.infos(key_);
             return tokio::task::spawn_blocking(move || { let t = std::fs::read(f).unwrap_or_default(); plotgen::info_find(&String::from_utf8_lossy(&t), sig, idx).trim_end().to_string() }).await.unwrap_or_default();
         }
@@ -242,8 +262,8 @@ impl Plots {
         match o { Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim_end().to_string(), _ => String::new() }
     }
 }
-/// Boards and schematics are read in this process unless BACKPLANE_PLOT_NATIVE=0 sends them to the Bend child; 3D models always go to the child.
-fn native(kind: u32) -> bool { kind <= 1 && std::env::var("BACKPLANE_PLOT_NATIVE").map_or(true, |v| v != "0") }
+/// Every source is read in this process unless BACKPLANE_PLOT_NATIVE=0 sends it to the Bend child.
+pub fn native() -> bool { std::env::var("BACKPLANE_PLOT_NATIVE").map_or(true, |v| v != "0") }
 /// Hist.kind: 0 a live file, 1 a file in a commit, 2 a comparison.
 pub fn hist_kind(p: &str) -> u8 { if p.starts_with("git\t") { 1 } else if p.starts_with("diff\n") { 2 } else { 0 } }
 /// Hist.rebase: another live file (abs) in the same commit as version p; abs itself when p is live.
