@@ -47,3 +47,15 @@ What took the groups out between the 29 run and the 22 (named commits, not count
 
 The 22 MAY be an undercount. This run used comparator a955d2e9c3 (hk as a set, liveness dropped). With 2ac7925275 real hk counts and `liveness` are checked for the first time; until the rerun
 they are unchecked. The rerun of all scenarios with the new comparator, wide ones included, is what can settle this file; the milestone is 0 across all of them.
+
+## Wide scenarios (UNSETTLED): rooms, from gate2 (job j20261105160055-804575, tip 2ac7925275, comparator 2ac7925275)
+
+rooms 13 lines, classified. Baseline drift is named as such: the JS baseline (post-#960 main c4606b5a9c, two sandbox edits, not an ancestor of gpui; merge-base 7c9b3c223c)
+lacks 6 gpui commits in src/core, mobile, server, web and gpui lacks 11 main commits since; replacing it with a baseline emitted from the gpui tip is a gate item.
+
+| Lines | What | Class | Owner / status |
+|---|---|---|---|
+| 8 | `bot.posts[0..1].cat`: Rust `"cat":""` on the person's room posts (2 posts x 2 views x shown/overlay) | baseline drift: 166a115d99 / 43472d0cfd (2026-11-04) added the field after c4606b5a9c | N27 (temporary, landed c387657cc): `cat:""` in B equals none in A, one direction, `bot.posts[*]`, person only; remove with a rebuilt baseline |
+| 2 | `hk` only in JS: `account.thread.<id>.claude` for the two bot threads | REAL, not drift: the writer is in src/core/accounts.bend and hub.bend at the merge-base 7c9b3c223c, and neither side changed `account.thread` since (git log -S empty on both) | bots (sticky account at thread creation) |
+| 1 | `hk` only in JS: `star.nudge.v1` | REAL, not drift: src/core/star-nudge.bend and server.bend have it at the merge-base, unchanged since | state (star.rs has no caller) |
+| 2 | view.open of room `ghost`: JS `STALE_VIEW`, Rust a normal view (`replies[0]`, `views[4]`) | REAL: the policy flagged `stale`, the host did not map it | session: fixed in 427447a427 (landed c387657cc), to be shown by the rerun |
