@@ -13,6 +13,14 @@ fn pct(s: &str) -> String { // Att.unpct
 }
 fn json(status: &'static str, v: serde_json::Value) -> HttpReply { HttpReply { status, ctype: "application/json".into(), extra: String::new(), body: v.to_string().into_bytes() } }
 
+/// A refusal that leaves the body unread would close the socket with data still in flight, and the client may get a reset instead of the reply.
+/// Read (and drop) what the client already sent, up to 1 MiB and 2 s; a bigger body is the client's to stop (it waits for 100 Continue, or is cut off).
+async fn drain(body: &mut Body<'_>) {
+    use tokio::io::AsyncReadExt;
+    let mut left = body.left().min(1 << 20) as usize; let mut buf = [0u8; 16384];
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(2), async { while left > 0 { match body.read(&mut buf[..left.min(16384)]).await { Ok(0) | Err(_) => break, Ok(n) => left -= n } } }).await;
+}
+
 impl HttpHandler for Attach {
     fn routes(&self) -> &'static [&'static str] { &["/attach"] }
     fn takes_body(&self) -> bool { true }
@@ -22,11 +30,11 @@ impl HttpHandler for Attach {
             let (thread, key, name) = (pct(&req.param("thread")), pct(&req.param("key")), pct(&req.param("name")));
             // PR #960: an unknown, empty or deleted thread gets no attachment folder
             let known = !thread.is_empty() && hub.model().await.threads.get(&thread).map_or(false, |t| !t.deleted);
-            if !known { return json("404 Not Found", attach::failed_plain(&thread, "No folder for this thread or project: unknown, deleted, removed or unavailable")) }
+            if !known { drain(&mut body).await; return json("404 Not Found", attach::failed_plain(&thread, "No folder for this thread or project: unknown, deleted, removed or unavailable")) }
             let lim = hub.setting(attach::KEY).await.unwrap_or_default();
             let len = body.len;
             // refuse a body that cannot fit before telling the client to send it (Upload.into.k: 413 before 100 Continue)
-            if len > attach::max_bytes(&lim) { return json("413 Payload Too Large", attach::failure(&thread, "upload.cap", &attach::mb(&lim).to_string())) }
+            if len > attach::max_bytes(&lim) { drain(&mut body).await; return json("413 Payload Too Large", attach::failure(&thread, "upload.cap", &attach::mb(&lim).to_string())) }
             let _ = body.proceed().await;
             let (status, v) = attach::receive(&hub.cfg.home, &thread, &key, &name, len, &lim, u64::MAX, &mut body).await;
             json(status, v)
@@ -67,7 +75,7 @@ mod tests {
             s.write_all(format!("POST /attach?{q} HTTP/1.1\r\nHost: x\r\nContent-Length: {len}\r\n{}Connection: close\r\n\r\n", if expect { "Expect: 100-continue\r\n" } else { "" }).as_bytes()).await.unwrap();
             if expect { let mut c = [0u8; 25]; s.read_exact(&mut c).await.unwrap(); assert_eq!(&c, b"HTTP/1.1 100 Continue\r\n\r\n"); }
             s.write_all(&body).await.unwrap(); s.shutdown().await.unwrap(); // the client is done sending: a short body ends instead of waiting
-            let mut out = Vec::new(); s.read_to_end(&mut out).await.unwrap(); let t = String::from_utf8_lossy(&out).into_owned();
+            let mut out = Vec::new(); let _ = s.read_to_end(&mut out).await; /* a reset after the reply is read is no failure of the reply */ let t = String::from_utf8_lossy(&out).into_owned();
             let (head, body) = t.split_once("\r\n\r\n").unwrap(); (head.to_string(), serde_json::from_str::<Value>(body).unwrap()) };
         let data: Vec<u8> = (0..300_000u32).map(|i| (i % 253) as u8).collect();
         let (head, j) = post("thread=t1&key=k9&name=pic.png".into(), data.len(), data.clone(), true).await;
