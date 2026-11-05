@@ -3,7 +3,7 @@
 //! `Ticker` (the minute tick) and hands out `Policies` (Auto.read for the viewers). The log is folded at start in `spawn_blocking`, read
 //! AFTER the transform is registered; batches seen meanwhile are replayed past the folded length. A failed commit makes the copy fold the
 //! log again. Declared from main.rs as `#[path = "state/host.rs"] mod statehost;`, started with `statehost::start(hub.clone())`.
-use crate::api::{Fut, Ticker, Transform};
+use crate::api::{Caller, Fut, RpcHandler, Ticker, Transform};
 use crate::hub::Hub;
 use crate::state::fam::policy::{Core, Policy};
 use serde_json::Value;
@@ -47,6 +47,10 @@ pub struct Policies { policy: Arc<Policy> }
 impl Policies {
     /// whether the policies have folded the log (diagnostics, tests)
     pub fn booted(&self) -> bool { self.policy.booted() }
+    /// The star nudge's count for one accepted human prompt (see `Policy::star_prompt`): commit the events with the prompt, then `hub.push(client, frame)`
+    /// the returned offer frame to that connection only. Call it at the accepted-input boundary of turn.start and bots.say / post / tell from a client
+    /// (not for a retry, an agent's mail or a forwarded hub). Returns nothing until the policies have folded the log.
+    pub fn star_prompt(&self, msg_id: &str, now_s: u64) -> (Vec<Value>, Option<Value>) { self.policy.star_prompt(msg_id, now_s) }
     /// Watchdog.line: call for every provider line of a thread's agent (the stream-json line as parsed), commit the events it returns
     pub fn line(&self, thread: &str, now_s: u64, line: &Value) -> Vec<Value> { self.policy.line(thread, now_s, line) }
     pub async fn read(&self, thread: &str, now_s: u64) -> Vec<Value> { self.policy.read(thread, now_s) }
@@ -60,6 +64,20 @@ async fn boot_task(policy: Arc<Policy>, hub: Arc<Hub>) {
     if !derived.is_empty() { let _ = hub.commit_many(&derived).await; }
 }
 
+/// star.nudge {token, action}: the person opened the suggestion or dismissed it (terminal; reliable, so the reply follows the commit)
+struct StarRpc { policy: Arc<Policy> }
+impl RpcHandler for StarRpc {
+    fn methods(&self) -> &'static [&'static str] { &["star.nudge"] }
+    fn call<'a>(&'a self, hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, _method: &'a str, params: &'a Value) -> Fut<'a, Vec<Value>> {
+        Box::pin(async move {
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+            let ev = self.policy.star_decide(params.get("token").and_then(|v| v.as_str()).unwrap_or(""), params.get("action").and_then(|v| v.as_str()).unwrap_or(""), now);
+            if !ev.is_empty() && hub.commit_many(&ev).await.is_err() { return vec![serde_json::json!({"t":"reply","id":id,"ok":false,"error":"store write failed"})] }
+            vec![serde_json::json!({"t":"reply","id":id,"ok":true})]
+        })
+    }
+}
+
 static POLICIES: OnceLock<Arc<Policies>> = OnceLock::new();
 /// The policies, once `start` has run: for actors that cannot be handed them (agents: `Policies::line` per provider line, `read` on a view open)
 pub fn policies() -> Option<Arc<Policies>> { POLICIES.get().cloned() }
@@ -69,6 +87,7 @@ pub fn start(hub: Arc<Hub>) -> Arc<Policies> {
     let host = Arc::new(Host { policy: policy.clone(), hub: OnceLock::new() });
     let _ = host.hub.set(hub.clone());
     hub.register_transform(host.clone());   // first: the log length is read after this, so no batch is missed
+    hub.register_rpc(Arc::new(StarRpc { policy: policy.clone() }));
     hub.register_ticker(host);
     tokio::spawn(boot_task(policy.clone(), hub));
     let p = Arc::new(Policies { policy });

@@ -90,6 +90,22 @@ impl Policy {
         })
     }
     /// true once after the lock was found poisoned: the caller starts the fold of the log again
+    /// The star nudge's count (STARN Star.accept) for one accepted human prompt (the caller's accepted-input boundary: turn.start, bots.say/post/tell from a
+    /// client, not a retry, not agent mail): the events to commit WITH the prompt, and the targeted offer frame when this prompt made it the fifth (sent). The
+    /// caller commits first, then pushes the frame to that connection only.
+    pub fn star_prompt(&self, msg_id: &str, now_s: u64) -> (Vec<Value>, Option<Value>) {
+        let g = self.lock();
+        if g.booting.is_some() { return (vec![], None) }
+        let ev = super::star::accept(&g.core.st.get(super::star::KEY, ""), msg_id, now_s);
+        let sent = ev.first().and_then(|e| e["value"].as_str()).map_or(false, |v| v.contains("\"status\":\"sent\""));
+        let offer = if sent { Some(serde_json::json!({"t": "info", "info": {"star.nudge.offer": msg_id}})) } else { None };
+        (ev, offer)
+    }
+    /// star.nudge {token, action}: the decision (opened / dismissed), terminal, only for the offered token
+    pub fn star_decide(&self, token: &str, action: &str, now_s: u64) -> Vec<Value> {
+        let g = self.lock();
+        if g.booting.is_some() { vec![] } else { super::star::decide(&g.core.st.get(super::star::KEY, ""), token, action, now_s) }
+    }
     /// whether the log has been folded: until then the policies decide nothing (and a batch is only remembered)
     pub fn booted(&self) -> bool { self.lock().booting.is_none() }
     pub fn take_poisoned(&self) -> bool { self.poisoned.swap(false, Ordering::SeqCst) }
@@ -273,5 +289,17 @@ mod tests {
         assert!(p2.finish_boot(c2, 3, 5000).is_empty(), "nothing at version 1");
         let p3 = Policy::new(); let c3 = Core::new();
         assert_eq!(keys(&p3.finish_boot(c3, 0, 5000)), vec!["autosettle.version".to_string()], "a fresh home gets the version, as Auto.upgrade does on an empty state");
+    }
+    #[test] fn the_fifth_human_prompt_commits_with_a_sent_ledger_and_offers_once() {
+        let p = booted();
+        let apply = |p: &Policy, evs: &[Value]| { for e in evs { let _ = p.before_commit(99, vec![e.clone()]); } };
+        for i in 1..=4 { let (ev, offer) = p.star_prompt(&format!("m{i}"), 10 + i); assert_eq!(ev.len(), 1); assert!(offer.is_none()); apply(&p, &ev); }
+        let (ev, offer) = p.star_prompt("m5", 20);
+        assert!(ev[0]["value"].as_str().unwrap().contains(r#""status":"sent""#));
+        assert_eq!(offer.unwrap(), json!({"t":"info","info":{"star.nudge.offer":"m5"}}), "a targeted info frame, never broadcast");
+        apply(&p, &ev);
+        assert_eq!(p.star_prompt("m6", 21), (vec![], None), "after the offer nothing more is counted or offered");
+        let done = p.star_decide("m5", "open", 22); assert!(done[0]["value"].as_str().unwrap().contains("opened"));
+        assert!(p.star_decide("stale", "open", 22).is_empty());
     }
 }
