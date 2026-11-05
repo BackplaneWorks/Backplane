@@ -13,7 +13,7 @@ pub struct Cfg { pub home: PathBuf, pub version: String, pub commit: String, pub
 
 pub struct Hub {
     pub cfg: Cfg, pub auth: Auth, pub epoch: String, pub presenter: Arc<dyn Presenter>,
-    pub store: Store, pub model: Mutex<Model>, gen: AtomicU64, pub changed: broadcast::Sender<u64>, pub frames: broadcast::Sender<Value>, pub origin: String, pub native_key: String,
+    pub store: Store, pub model: Mutex<Model>, gen: AtomicU64, pub changed: broadcast::Sender<u64>, pub frames: broadcast::Sender<Value>, pub native_key: String,
     commits: tokio::sync::mpsc::UnboundedSender<Commit>,
     rpc: std::sync::RwLock<Vec<(&'static str, Arc<dyn RpcHandler>)>>, http: std::sync::RwLock<Vec<(&'static str, Arc<dyn HttpHandler>)>>,
     views: std::sync::RwLock<Vec<(&'static str, Arc<dyn ViewMethod>)>>,
@@ -54,9 +54,8 @@ impl Hub {
         let (ctx, crx) = tokio::sync::mpsc::unbounded_channel::<Commit>();
         let (tx, _) = broadcast::channel(64);
         let (ftx, _) = broadcast::channel(1024);
-        let origin = crate::wire::origin_of(store.get(0).ok().as_deref());
         let model = Model::build(&store)?;
-        let hub = Arc::new(Hub { cfg, auth, epoch, presenter, store: store.clone(), commits: ctx, model: Mutex::new(model), gen: AtomicU64::new(1), changed: tx, frames: ftx, origin, native_key: { let mut b = [0u8; 16]; if let Ok(mut f) = std::fs::File::open("/dev/urandom") { let _ = std::io::Read::read_exact(&mut f, &mut b); } hex::encode(b) },
+        let hub = Arc::new(Hub { cfg, auth, epoch, presenter, store: store.clone(), commits: ctx, model: Mutex::new(model), gen: AtomicU64::new(1), changed: tx, frames: ftx, native_key: { let mut b = [0u8; 16]; if let Ok(mut f) = std::fs::File::open("/dev/urandom") { let _ = std::io::Read::read_exact(&mut f, &mut b); } hex::encode(b) },
             rpc: Default::default(), http: Default::default(), views: Default::default(), live: Default::default(), window_bin: Default::default(), me: Default::default(), next_client: AtomicU64::new(1), outboxes: Default::default() });
         let _ = hub.me.set(Arc::downgrade(&hub));
         hub.bootstrap()?;
@@ -109,7 +108,7 @@ impl Hub {
         let chunk = |a: usize| async move { self.store.range(a, a + 200).map(|ls| ls.iter().filter_map(|l| serde_json::from_str::<Value>(l).ok()).collect::<Vec<Value>>()) };
         let first: Vec<Value> = chunk(0).await?;
         // version "": the JS hub's mobile pictures carry no hub version (compare.mjs, shown.version)
-        self.presenter.fold(&json!({"t":"log","since":0,"origin":self.origin,"version":"","info":self.info(),"items":first,"now":now_ms()})).await?;
+        self.presenter.fold(&json!({"t":"log","since":0,"origin":crate::wire::origin(self),"version":"","info":self.info(),"items":first,"now":now_ms()})).await?;
         let mut at = 200;
         while at < total { let c = chunk(at).await?; self.presenter.fold(&json!({"t":"changes","items":c,"now":now_ms()})).await?; at += 200; }
         self.presenter.fold(&json!({"t":"live","items":[],"now":now_ms()})).await?;

@@ -14,6 +14,8 @@ use tokio_tungstenite::tungstenite::{handshake::server::ErrorResponse, protocol:
 
 /// Bend `Hub.origin`: the decimal `at` of the log's first change ("0" for an empty log or a first line without `at`).
 /// A client resumes (`since`) only into the log it came from.
+/// Read from the log at every join (Bend reads the first line per message): a home that starts empty has "0" until its first commit.
+pub fn origin(hub: &Hub) -> String { origin_of(hub.store.get(0).ok().as_deref()) }
 pub fn origin_of(first_line: Option<&str>) -> String {
     first_line.and_then(|l| serde_json::from_str::<Value>(l).ok()).and_then(|v| v.get("at").and_then(Value::as_u64)).unwrap_or(0).to_string()
 }
@@ -112,7 +114,7 @@ pub async fn socket_inner(hub: Arc<Hub>, s: TcpStream, cbor_wanted: bool) -> Res
 /// The plain wire stream (what the Bend hub gives a client that did not ask for views): `log` from `since`
 /// (honoured only for this log's `origin`), `live`, `info`, then every commit as `changes`, streamed text as
 /// `delta`/`delta_end`. One cursor (`sent`) over the log: no commit is skipped or repeated, whatever the timing.
-pub async fn wire(hub: Arc<Hub>, s: TcpStream, since: usize, origin: String) -> Result<()> {
+pub async fn wire(hub: Arc<Hub>, s: TcpStream, since: usize, origin_asked: String) -> Result<()> {
     let mut cfg = WebSocketConfig::default(); cfg.max_message_size = Some(524288); cfg.max_frame_size = Some(524288);
     let (mut tx, mut rx) = tokio_tungstenite::accept_async_with_config(s, Some(cfg)).await?.split();
     let (mut conn, _) = hub.connect(true);
@@ -122,14 +124,15 @@ pub async fn wire(hub: Arc<Hub>, s: TcpStream, since: usize, origin: String) -> 
     // atomic join point: the length now, and a subscription taken under the same lock as commits
     let (mut changes, mut deltas) = (hub.changed.subscribe(), hub.frames.subscribe());
     let n0 = hub.store.len(); // subscribed first: a commit after this point is announced, and the cursor below reads from `sent`
-    let from = if origin == hub.origin && since <= n0 { since } else { 0 };
+    let mine = origin(&hub);
+    let from = if origin_asked == mine && since <= n0 { since } else { 0 };
     let mut sent = from;
     let mut first = true;
     while sent < n0 || first {
         let to = (sent + 2000).min(n0);
         let lines = hub.store.range(sent, to)?;
         let items: Vec<Value> = lines.iter().filter_map(|l| Hub::wire_item(l, false)).collect();
-        let frame = if first { json!({"t":"log","since":from,"origin":hub.origin,"version":hub.cfg.version,"info":hub.log_info(),"items":items}) } else { json!({"t":"changes","items":items}) };
+        let frame = if first { json!({"t":"log","since":from,"origin":mine,"version":hub.cfg.version,"info":hub.log_info(),"items":items}) } else { json!({"t":"changes","items":items}) };
         tx.send(pack(&conn, &frame)).await?; sent = to; first = false;
     }
     tx.send(pack(&conn, &hub.live_frame())).await?;
