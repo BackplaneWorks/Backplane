@@ -7,7 +7,7 @@ import {makeStandins,startHub,stopHub} from '../perf/lib.mjs';
 import {Rec,sleep} from './lib.mjs';
 import {SCENARIOS} from './scenarios.mjs';
 import {startFixtureHub} from './hubs.mjs';
-const R='/home/h/Documents/i2cjak/backplane-gpui';
+import {R} from './hubs.mjs';
 const arg=(k,d)=>{const i=process.argv.indexOf('--'+k);return i>0?process.argv[i+1]:d};
 const bin=arg('bin',R+'/build/gpui/backplane-serve'),out=arg('out',R+'/build/gpui/parity/rec'),port=Number(arg('port',3820)),tag=arg('tag','A');
 const only=(arg('only','')||'').split(',').filter(Boolean);
