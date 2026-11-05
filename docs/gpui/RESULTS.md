@@ -118,3 +118,39 @@ Proposed fixes (for the coordinator; I did not edit src/**.bend): (1) make mobil
 | log growth in the same period | events.jsonl +37.5 MB/h, store.db +53 MB/h (about 157k events/h at 20 simulated agents) |
 
 Reading: no leak of descriptors, sockets, processes or WAL. The RSS floor does rise, steadily, about 76 MB/h, or roughly 0.5 KB per logged event; the hub keeps state derived from the whole log in memory (consistent with the M3 boot figures: 399, 679, 935 MB at 10k, 100k, 1M events, about 0.5-0.9 KB/event). So the rising floor is growth with the log, not an unexplained leak; it is still unbounded, and at this event rate would add about 1.8 GB over 24 h. I cannot separate retention from a true leak with this run alone: the churn test below holds the log nearly constant. A 24 h projection is an extrapolation of a 2 h fit, not a measurement.
+
+## Electron vs GPUI on Linux (RTX 5080), 2026-11-04
+
+Both clients on the same machine, hub, fixture and display. Raw and drivers: `build/gpui/results/perf/cmp/`, `test/gpui/perf/cmp_run.mjs`, `cmp_hub.mjs`, `cdp.mjs`, `scripts/gpui/bench-electron-launch.sh`. Simulated agents only (the hub's `BACKPLANE_AGENTS` read back from `/proc/<pid>/environ` before use).
+
+**GPU / display (logged for both).** Isolated Xvfb `:62` (1440x900x24) with i3 on an empty config; nothing on the person's display or workspace. Adapter: **NVIDIA GeForce RTX 5080, driver 595.99.02, Vulkan, software=false** for both. GPUI logs it (`GPUI_METRIC gpu`). Electron needs flags to leave software rendering on this display: default launch used `llvmpipe` with `gpu_compositing: disabled_software` (measured, not used); the runs use `--use-angle=vulkan --enable-features=Vulkan,DefaultANGLEVulkan,VulkanFromANGLE --ignore-gpu-blocklist --disable-gpu-sandbox --enable-gpu-rasterization --enable-zero-copy` with `VK_ICD_FILENAMES=nvidia_icd.json`, and `SystemInfo.getInfo` reports `ANGLE (NVIDIA, Vulkan 1.4.329 (NVIDIA GeForce RTX 5080))`, `gpu_compositing: enabled`, `vulkan: enabled_on`. Xvfb has no scanout: frames are presented through its software copy path for both clients, so this is GPU rendering into an offscreen X server, not a real on-screen display (unmeasured: true scanout on the person's monitor).
+
+**Hub:** `build/gpui/backplane-serve` 0.14.0 (JS), one project, 20 threads each with a short seeded history, loopback 127.0.0.1:3807, in a 3700M scope. Each client ran in its own `systemd-run --user --scope -p MemoryMax=3700M -p MemorySwapMax=0`. For the load rows the same hub streams 20 stand-in agents (FAKE_PER=2, one delta batch per 100 ms each).
+
+### Results
+
+| | GPUI (`build/gpui/linux/backplane-gpui`, 9.6 MB) | Electron 0.13.0 (installed, packaged) |
+|---|---|---|
+| Startup to usable: sidebar drawn, median / p95 ms, 10 cold, 20 warm launches | cold 515 / 560; warm 511 / 570 | fresh profile 1065 / 1146; reused profile 782 / 875 |
+| First frame, median / p95 ms | cold 472 / 525; warm 471 / 517 | first contentful paint (n=2 fresh, 18 reused): fresh 1136; reused 780 / 842 |
+| Idle, thread open, no agents: CPU % of one core (median of 3 x 60 s) | 0.3 | 7.9 |
+| Idle RSS / PSS / private MB (client tree) | 284 / 269 / 262 | 719 / 392 / 298 |
+| Processes / open fds | 1 / 76 | 9 / 303 |
+| 20 agents streaming, thread open: CPU % of one core | 6.7 | 114.8 |
+| 20 agents: RSS / PSS / private MB | 288 / 254 / 241 | 716 / 369 / 280 |
+| Sidebar click -> thread shown, idle, p50 / p95 / max ms (n=40) | 80 / 96 / 112 | 67 / 98 / 102 |
+| Composer popup (type "/"), idle, p50 / p95 / max ms (n=40) | 48 / 112 / 112 | 141 / 154 / 154 |
+| Sidebar click, 20 agents streaming | 80 / 160 / 192 | 150 / 243 / 263 |
+| Composer popup, 20 agents streaming | 80 / 160 / 352 | 195 / 353 / 362 |
+| Size, client only (hub excluded) | 9.6 MB binary, 4.3 MB gzipped; 11 shared libraries from the system | about 288 MB installed (389 MB package minus the 101 MB bundled hub), 9 processes |
+
+Sampling: process-tree `/proc` (RSS, PSS from `smaps_rollup`, private = Private_Clean+Private_Dirty, utime+stime, fds) at 1 Hz for 60 s after 30 s idle (10 s with agents); the figures are medians of 3 launches. GPU memory per client is unmeasured (system-wide `nvidia-smi` only, which moved 1.2-1.7 GB between runs from other users of the card).
+
+### Where the two are not equal (read before quoting)
+- **Not the same feature set.** Electron is the full web app (tour, settings, viewers, bots, every panel); GPUI draws only the sidebar, thread, composer and popup so far. GPUI's lower memory/CPU partly reflects doing less.
+- **Version.** Electron is the packaged 0.13.0 client; GPUI is built from the gpui branch. The hub is 0.14.0 for both: the Electron app refuses a hub of another version, so it ran with `BACKPLANE_SERVICE_VERSION=0.14.0`. Electron also runs a splash page and joins the hub (`/auth/pair`, discovery) before the page loads; GPUI connects over its own WebSocket.
+- **"Usable" differs.** GPUI: first frame with the sidebar drawn (its `usable` metric, taken externally as epoch of the metric minus spawn time, which adds the exec cost). Electron: first sidebar row in the DOM, found by polling over CDP every 20 ms (so +/-20 ms), spawn to detection. Neither includes a selected history or editable composer.
+- **Input latency is not like for like.** Electron: real mouse/keyboard events injected through CDP `Input.dispatch*` into Chromium's input pipeline; end = the message-channel callback after the animation frame that follows the DOM showing the thread (a good proxy for the frame, not a scanout measurement). GPUI: the scripted step calls its handler directly (no X11 input path) and ends on the next frame callback after the state shows, so it omits input delivery that Electron includes. GPUI's values come in 16 ms steps (47.8, 63.9, 79.8, 95.8 ...) because it reports on a ~60 Hz frame grid. Both include a round trip to the hub (select, skills list), so the hub's speed is in both. Popup medians moved between the two idle runs I made (GPUI popup p50 96 ms in one run, 48 ms in the final one): with 40 samples and a 16 ms grid, differences under about 30 ms between runs are not meaningful.
+- **Cold/warm.** The file-system cache is always warm (no root to drop it). "Cold" here is a fresh Electron profile (empty userData); GPUI keeps no profile, so its cold and warm are the same thing.
+- **Counts.** Startup: 30 launches per client. Idle and load: 3 launches, 60 s each. Latency: 40 events per cell from 2 fresh launches (20 threads each). One machine, one day.
+- **Earlier runs not used.** A first pass had a contaminated "idle" (agents from an earlier phase still streaming: GPUI 6-7 % CPU, Electron 90-97 %) and an Electron driver that timed out on the page's CSP (`eval` forbidden): both kept under `cmp/run1-*`, `run2-*`, `run3-*` and not quoted.

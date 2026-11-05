@@ -27,7 +27,7 @@ async function launchEl({fresh}){if(fresh){rmSync(ELHOME,{recursive:true,force:t
  let c=null;let usableEpoch=null;const dl=Date.now()+60000;
  while(Date.now()<dl&&usableEpoch===null){try{if(!c)c=await cdp(9231,u=>u.includes(':3807'));if(await c.ev(`document.querySelectorAll('.thread[data-value]').length>0`))usableEpoch=Date.now()}catch{c=null}await sleep(20)}
  if(c&&usableEpoch!==null){ // dismiss the first-run tour once (persists in the hub's settings); not part of the timing
-  for(let k=0;k<14;k++){const p=await c.ev(`(()=>{const b=[...document.querySelectorAll('button')].find(e=>e.textContent.trim()==='Skip'&&e.offsetParent!==null);if(!b)return null;const r=b.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`);if(!p)break;await click(c,p.x,p.y);await sleep(300)}}
+  for(let k=0,idle=0;k<14&&idle<12;k++){const p=await c.ev(`(()=>{const b=[...document.querySelectorAll('button')].find(e=>e.textContent.trim()==='Skip'&&e.offsetParent!==null);if(!b)return null;const r=b.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`);if(!p){idle++;await sleep(250);k--;continue}idle=0;await click(c,p.x,p.y);await sleep(300)}}
  return {p,pid:p.pid,spawnEpoch,usableEpoch,c,usableMs:usableEpoch&&usableEpoch-spawnEpoch}}
 function launchGp(script,exitAfter){const m={};const spawnEpoch=Date.now();
  const args=[...CAP,'env','DISPLAY=:62',`HOME=${GPHOME}`,`VK_ICD_FILENAMES=${NV}`,REPO+'/build/gpui/linux/backplane-gpui','--url',st.url,'--token-file',HOME+'/token'];if(script)args.push('--script',script);if(exitAfter)args.push('--exit-after',String(exitAfter));
@@ -35,13 +35,15 @@ function launchGp(script,exitAfter){const m={};const spawnEpoch=Date.now();
  return {p,pid:p.pid,spawnEpoch,metrics,ev:e=>metrics.find(x=>x.event===e)}}
 const waitFor=async(f,ms)=>{const d=Date.now()+ms;while(Date.now()<d){const v=f();if(v)return v;await sleep(20)}return null};
 // ---- electron latency step helpers (real input events through CDP; end = frame after the state shows)
-const ARM=`window.__arm=(pred)=>new Promise(res=>{const chk=()=>{let ok=false;try{ok=!!eval(pred)}catch(e){}if(!ok){requestAnimationFrame(chk);return}requestAnimationFrame(()=>{const mc=new MessageChannel();mc.port1.onmessage=()=>res(performance.timeOrigin+performance.now());mc.port2.postMessage(0)})};chk()})`;
+// no eval (the page's CSP forbids it): fixed predicates. End = the message channel after the rAF that follows the state change.
+const ARM=`window.__frame=(f)=>new Promise(res=>{const chk=()=>{if(!f()){requestAnimationFrame(chk);return}requestAnimationFrame(()=>{const mc=new MessageChannel();mc.port1.onmessage=()=>res(performance.timeOrigin+performance.now());mc.port2.postMessage(0)})};chk()});
+window.__armSel=(id)=>window.__frame(()=>{const e=document.querySelector('.thread[data-value="'+id+'"]');return !!(e&&e.getAttribute('aria-current')==='page'&&document.querySelectorAll('.msg').length>0&&document.querySelector('textarea#composer'))});
+window.__armPop=()=>window.__frame(()=>{const p=document.querySelector('.skills');return !!(p&&p.offsetParent!==null&&p.querySelectorAll('.skill').length>0)});true`;
 async function click(c,x,y){for(const t of['mousePressed','mouseReleased'])await c.send('Input.dispatchMouseEvent',{type:t,x,y,button:'left',clickCount:1})}
-async function elSelect(c,i){await c.ev(`window.__arm||(${ARM})`);const pos=await c.ev(`(()=>{const e=[...document.querySelectorAll('.thread[data-value]')][${i}];if(!e)return null;e.scrollIntoView({block:'nearest'});const r=e.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2,id:e.dataset.value}})()`);if(!pos)return null;
- const pred=`(()=>{const e=document.querySelector('.thread[data-value=\\"${pos.id}\\"]');return e&&e.getAttribute('aria-current')==='page'&&document.querySelectorAll('.msg').length>0&&document.querySelector('textarea#composer')})()`;
- const w=c.ev(`window.__arm(${JSON.stringify(pred)})`);const t0=Date.now()+0;const t0p=performance.now();const e0=performance.timeOrigin+t0p;await click(c,pos.x,pos.y);const e1=await Promise.race([w,sleep(15000).then(()=>null)]);return e1===null?null:e1-e0}
-async function elPopup(c){await c.ev(`window.__arm||(${ARM})`);await c.ev(`(()=>{const t=document.querySelector('textarea#composer');t.focus()})()`);const pred=`document.querySelector('.skills')&&document.querySelectorAll('.skills .skill').length>0&&document.querySelector('.skills').offsetParent!==null`;
- const w=c.ev(`window.__arm(${JSON.stringify(pred)})`);const e0=performance.timeOrigin+performance.now();await c.send('Input.insertText',{text:'/'});const e1=await Promise.race([w,sleep(15000).then(()=>null)]);return e1===null?null:e1-e0}
+async function elSelect(c,i){await c.ev(`(()=>{if(!window.__armSel){${ARM}}})()`);const pos=await c.ev(`(()=>{const e=[...document.querySelectorAll('.thread[data-value]')][${i}];if(!e)return null;e.scrollIntoView({block:'nearest'});const r=e.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2,id:e.dataset.value}})()`);if(!pos)return null;
+ const w=c.ev(`window.__armSel(${JSON.stringify(pos.id)})`);const e0=performance.timeOrigin+performance.now();await click(c,pos.x,pos.y);const e1=await Promise.race([w,sleep(15000).then(()=>null)]);return e1===null?null:e1-e0}
+async function elPopup(c){await c.ev(`(()=>{if(!window.__armPop){${ARM}}})()`);await c.ev(`document.querySelector('textarea#composer').focus()`);
+ const w=c.ev(`window.__armPop()`);const e0=performance.timeOrigin+performance.now();await c.send('Input.insertText',{text:'/'});const e1=await Promise.race([w,sleep(15000).then(()=>null)]);return e1===null?null:e1-e0}
 const GPSCRIPT=(n=20)=>{const s=[];for(let i=0;i<n;i++){s.push({select:i},{wait:400},{popup:'/'},{wait:400})}return s};
 // ---- phases
 const R=existsSync(`${OUT}/${phase}.json`)?JSON.parse(readFileSync(`${OUT}/${phase}.json`,'utf8')):{};
@@ -75,7 +77,7 @@ if(phase==='latency'||phase==='latencyLoad'){
   const g2=launchGp(sf,0);await waitFor(()=>g2.metrics.find(x=>x.event==='script_done'),120000);
   for(const x of g2.metrics.filter(x=>x.event==='input'&&x.step!=='wait')){if(!x.ok){R.gpui.fail++;continue}(x.step.startsWith('select')?R.gpui.select:R.gpui.popup).push(x.latency_ms)}
   await killTree(g2.pid);await sleep(1500);
-  const e=await launchEl({fresh:true});if(e.c){await e.c.ev(ARM);for(let i=0;i<20;i++){const a=await elSelect(e.c,i);if(a===null)R.electron.fail++;else R.electron.select.push(a);await sleep(400);const b=await elPopup(e.c);if(b===null)R.electron.fail++;else R.electron.popup.push(b);await sleep(400)}}
+  const e=await launchEl({fresh:true});if(e.c){for(let i=0;i<20;i++){const a=await elSelect(e.c,i);if(a===null)R.electron.fail++;else R.electron.select.push(a);await sleep(400);const b=await elPopup(e.c);if(b===null)R.electron.fail++;else R.electron.popup.push(b);await sleep(400)}}
   try{e.c?.close()}catch{}await killTree(e.pid);await sleep(1500);save()}
  for(const k of['gpui','electron'])for(const m of['select','popup'])R[k][m+'Stats']=stat(R[k][m]);
  save();
