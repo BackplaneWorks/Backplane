@@ -83,6 +83,11 @@ No memo or protocol/client changes; scripts/js-json-show.js holds the helper.
 Server-only Json.bytes.esc/str count code-point UTF-8 widths without slicing
 a fresh string tail per character. Exact JSON escapes, raw lexemes and Nat
 overflow remain the pure counter's; no whole-tree or cap predicate changes.
+Server-only Json.bytes(j) counts the same total over the tree and keeps each
+object's and array's size by identity (a WeakMap: immutable values, so a
+size never changes), so the several measurements of one reply on its way out
+count it once (3-7 ms a view on a real home, 2026-11-05). Malformed chains
+count as Json.bytes.go counts them; an unknown constructor goes to go.
 
 Server-only ContentEq.same compares actual JSON constructors and fields, with
 an identity fast path for immutable values. It does not compare dependency
@@ -282,6 +287,8 @@ def byte_loop(kind):
                       ("chr" if kind == "esc" else "raw") + r"\$)" + re.escape(after))
 
 BYTE_ESC, BYTE_STR = byte_loop("esc"), byte_loop("str")
+# Json.bytes(j), exactly the pure entry over its own Json.bytes.go
+BYTES = re.compile(r"function (" + I + r"\$058Json\$bytes\$)\(_j_0\)\{return (" + I + r"\$058Json\$bytes\$go\$)\(_j_0,!0,0\)\}")
 # Lexer-only surrogate repair reviewed; byte counters/callees remain unchanged.
 JSON_BYTES_SOURCE_SHA256 = "f500b30686fc4eea0f6d7ac00bda03e524676f59dd00c6244696e678536560af"
 
@@ -430,7 +437,7 @@ if server:
                     sys.exit("js-native: encoding/folding callee changed")
 found["Json.show"] = sum(len(SHOW.findall(s)) for s in srcs.values()) if server else 0
 found["ContentEq.same"] = sum(len(CONTENT_EQ.findall(s)) for s in srcs.values()) if server else 0
-for name, rx in (("Json.bytes.esc", BYTE_ESC), ("Json.bytes.str", BYTE_STR)):
+for name, rx in (("Json.bytes.esc", BYTE_ESC), ("Json.bytes.str", BYTE_STR), ("Json.bytes", BYTES)):
     found[name] = sum(len(rx.findall(s)) for s in srcs.values()) if server else 0
     if server and found[name] != 1:
         sys.exit(f"js-native: {name} found {found[name]} times, not once")
@@ -443,6 +450,9 @@ if server:
                 expected = match.group(1).replace("$058Json$bytes$" + kind + "$", "$058Json$bytes$" + callee + "$")
                 if match.group(2) != expected or len(re.findall(r"function " + re.escape(expected) + r"\(", s)) != 1:
                     sys.exit(f"js-native: Json.bytes.{kind} needs its exact character callee once")
+        for match in BYTES.finditer(s):
+            if match.group(2) != match.group(1) + "go$" or len(re.findall(r"function " + re.escape(match.group(2)) + r"\(", s)) != 1:
+                sys.exit("js-native: Json.bytes needs its exact Json.bytes.go once")
         if len(re.findall(r"function nat_chk\(", s)) != 1:
             sys.exit("js-native: Json.bytes needs its exact Nat guard once")
 if server and found["ContentEq.same"] != 1:
@@ -524,6 +534,7 @@ for f, s in srcs.items():
     if server:
         s = BYTE_ESC.sub(lambda m: 'function %s($0,$1){return __bpJsonBytesEsc($0,$1,nat_chk)}' % m.group(1), s)
         s = BYTE_STR.sub(lambda m: 'function %s($0,$1){return __bpJsonBytesStr($0,$1,nat_chk)}' % m.group(1), s)
+        s = BYTES.sub(lambda m: 'function %s(_j_0){return __bpJsonBytes(_j_0,%s,nat_chk)}' % (m.group(1), m.group(2)), s)
         s = Path(__file__).with_name("js-json-bytes.js").read_text(encoding="utf-8") + "\n" + s
     if SEC_FINE.search(s):
         s = SEC_FINE.sub(lambda m: 'function %s(%s,%s){return __bpSecFine(%s,%s)}' % (m.group(1), m.group(2), m.group(3), m.group(2), m.group(3)), s)
@@ -549,6 +560,7 @@ for name, call in (("Map.bit", "{return __bpMapBit("), ("Map.diff", "{return __b
                    ("Utf8.decode", "){return __bpUtf8Decode("), ("Lines.feed", "){return __bpLinesFeed("),
                    ("Json.show", "){return __bpJsonShow("), ("ContentEq.same", "){return __bpContentEq("),
                    ("Json.bytes.esc", "){return __bpJsonBytesEsc("), ("Json.bytes.str", "){return __bpJsonBytesStr("),
+                   ("Json.bytes", "){return __bpJsonBytes(_j_0,"),
                    ("Sec.fine", "){return __bpSecFine("), ("Refs.last.go", "){return __bpRefsLast(")):
     n = outs.count(call)
     if n != found[name]:
