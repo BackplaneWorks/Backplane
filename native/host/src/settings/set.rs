@@ -18,6 +18,8 @@ impl RpcHandler for SettingSet {
             if key.starts_with("peer.own.") { return vec![json!({"t":"reply","id":id,"ok":false,"error":"that setting is the hub's own"})] }
             if telemetry::reserved(key) { return vec![telemetry::legacy(hub, id, key, value).await] }
             let at = now_ms() / 1000;
+            // the Bend hub folds a setting to the value it already holds without logging a change (the JS recording shows no event)
+            if hub.setting(key).await.unwrap_or_default() == value { return vec![json!({"t":"reply","id":id,"ok":true})] }
             let mut batch = vec![json!({"$":"SettingSet","key":key,"value":value,"at":at})];
             // a write to either fallback setting closes the open settings proposals in the same batch (Proposal.invalidate)
             if let Some(a) = &self.agents { let open: Vec<String> = a.world().await.asks.iter().filter(|(_, k)| k.tool == super::proposal::TOOL).map(|(i, _)| i.clone()).collect(); let extra = super::proposal::invalidate(&batch.clone(), &open, at); batch.extend(extra); batch = super::proposal::with_pending(a, batch, at).await; }
