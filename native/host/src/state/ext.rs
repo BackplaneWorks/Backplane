@@ -32,6 +32,9 @@ pub struct Ext {
     /// the tasks whose child is a thread (smallest task id first: the one `parent_of` reads)
     pub kids_open: HashMap<String, u32>,
     pub child_tasks: HashMap<String, BTreeSet<String>>,
+    /// MailPosted launch mails, newest time per "<sender thread>\t<to address>": the receipts `Auto.old.reports` reads before the one-time migration
+    /// (autosettle.version "1"). Bounded by thread pairs. (Bend drops a mail whose id it already holds; the same id carries the same time.)
+    pub reports: HashMap<String, u64>,
 }
 
 fn until(s: &str, end: char) -> String { s.chars().take_while(|c| *c != end).collect() }
@@ -103,6 +106,10 @@ pub fn task_of_child<'a>(st: &'a State, child: &str) -> Option<(&'a str, bool)> 
 /// Work.kids through the index: a thread's unfinished child tasks
 pub fn open_kids(st: &State, parent: &str) -> usize { st.ext.kids_open.get(parent).copied().unwrap_or(0) as usize }
 
+pub fn mail_posted(st: &mut State, id: &str, to: &str, kind: &str, at: u64) {
+    if kind != "launch" { return }
+    let e = st.ext.reports.entry(format!("{}\t{}", link_from(id), to)).or_insert(0); *e = (*e).max(at);
+}
 pub fn delivered(st: &mut State, task: &str) { st.ext.delivered.insert(task.to_string()); }
 #[allow(dead_code)] pub fn digits(s: &str) -> Option<u64> { nat_read(s) }
 

@@ -1,9 +1,8 @@
 //! Automatic settling (src/core/autosettle.bend, `Auto.changes`): which completed, idle threads settle by themselves, and
 //! which wake subscriptions end. Pure: the caller hands the folded `State` and the time, and commits the events returned.
-//! Deliberate gap (docs/gpui/PARITY.md): the legacy upgrade (`Auto.upgrade`, reports read from the mail box when `autosettle.version` is not
-//! "1"). The Rust hub reads logs the Bend hub wrote, so a home can still be below version 1; the reports map is then empty here. A launched
-//! thread (one that must report to its launcher before it settles) then can only be held, never settled early: with no mail receipt it waits
-//! for `autosettle.report.<th>` or `autosettle.delivery.<th>\t<addr>`, so the error is toward not settling.
+//! The legacy upgrade (`Auto.upgrade`, `autosettle.version` below "1") is ported too: until it has run, a launched thread's report receipts are
+//! read from the launch mails the log holds (`ext.reports`, `Auto.old.reports`), and `upgrade` turns them into `autosettle.delivery.*` and sets
+//! the version, as the Bend hub does at start. The tick runs it first on such a home.
 use super::ext::Sum;
 use super::json::*;
 use crate::state::{Override, State, Thread, Turn};
@@ -121,8 +120,11 @@ fn reported(st: &State, th: &str, sum: &Sum, activity: u64) -> bool {
     let rep = st.get(&format!("autosettle.report.{th}"), "");
     if !rep.is_empty() && nat_read(&rep).unwrap_or(0) >= after { return true }
     let report = sum.sent.get(&by).copied().unwrap_or(0);
-    let delivery = num_setting(st, &format!("autosettle.delivery.{th}\t{}", addr(st, &by)), 0);
-    report.max(delivery) >= after
+    let a = addr(st, &by);
+    let delivery = num_setting(st, &format!("autosettle.delivery.{th}\t{a}"), 0);
+    // Auto.old.reports: before the migration the launch mails themselves are the receipts
+    let mail = if st.get("autosettle.version", "") != "1" { st.ext.reports.get(&format!("{th}\t{a}")).copied().unwrap_or(0) } else { 0 };
+    report.max(mail.max(delivery)) >= after
 }
 fn snooze(st: &State, th: &str) -> u64 { st.snooze_until.get(th).copied().unwrap_or(0) }
 
@@ -144,11 +146,30 @@ pub fn due(st: &State, th: &str, t: &Thread, now: u64, ix: &Index) -> bool {
     allow(t.turn, ix.owned.contains(th), t.pending > 0, unread, reported(st, th, sum, t.activity), quiet, shelf_of(t), t.override_)
 }
 
+/// Auto.go: ThreadSettled for the threads that are due
+fn settles(st: &State, now: u64, ix: &Index) -> Vec<Value> {
+    st.threads.iter().filter(|(th, t)| due(st, th, t, now, ix)).map(|(th, _)| json!({"$": "ThreadSettled", "id": th, "manual": false, "at": now})).collect()
+}
+/// Auto.upgrade: on a home below version 1, the settles by the old (mail) receipts, the receipts of threads still on a shelf kept as
+/// `autosettle.delivery.*`, and the version. Nothing at version 1.
+pub fn upgrade(st: &State, now: u64) -> Vec<Value> {
+    if st.get("autosettle.version", "") == "1" { return vec![] }
+    let ix = index(st);
+    let mut out = settles(st, now, &ix);
+    let mut rs: Vec<(&String, &u64)> = st.ext.reports.iter().collect(); rs.sort();
+    for (key, at) in rs {
+        let th = key.split('\t').next().unwrap_or("");
+        let blank = Thread::blank(); let t = st.threads.get(th).unwrap_or(&blank);
+        if matches!(shelf_of(t), Shelf::Active | Shelf::Pinned | Shelf::Snoozed) { out.push(set_ev(format!("autosettle.delivery.{key}"), at.to_string(), now)); }
+    }
+    out.push(set_ev("autosettle.version".into(), "1".into(), now));
+    out
+}
+
 /// Auto.changes: ThreadSettled for the threads that are due, WakeDropped for the subscriptions that ended
 pub fn changes(st: &State, now: u64) -> Vec<Value> {
     let ix = index(st);
-    let mut out = vec![];
-    for (th, t) in &st.threads { if due(st, th, t, now, &ix) { out.push(json!({"$": "ThreadSettled", "id": th, "manual": false, "at": now})); } }
+    let mut out = settles(st, now, &ix);
     let window = seconds(st, "settle.idle.minutes", 15);
     for key in keys_pre(st, "wakes.by.") {
         let th = &key[9..];
@@ -299,6 +320,29 @@ mod tests {
         st.apply_line(r#"{"$":"SettingSet","key":"project.dormant.pd","value":"on","at":1}"#);
         let woke: Vec<String> = tick_post(&st, 50).iter().map(|e| e["id"].as_str().unwrap().to_string()).collect();
         assert_eq!(woke, vec!["auto".to_string(), "msg".to_string(), "queued".to_string()], "auto (never holds), msg (a message after the manual settle), queued; not manual (no message since), idle, or dormant");
+    }
+    #[test] fn the_legacy_upgrade_turns_launch_mails_into_receipts_and_sets_the_version() {
+        let mk = |id: &str| format!(r#"{{"$":"ThreadCreated","id":"{id}","project":"p","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1}}"#);
+        let mut st = State::new();
+        for l in [mk("boss"), mk("w1"), mk("w2")] { st.apply_line(&l); }
+        for w in ["w1", "w2"] {
+            st.apply_line(&format!(r#"{{"$":"ThreadLaunched","id":"{w}","by":"boss","report":true,"at":2}}"#));
+            st.apply_line(&format!(r#"{{"$":"MessagePosted","thread":"{w}","msg":"m{w}","role":"user","text":"go","at":3}}"#));
+            st.apply_line(&format!(r#"{{"$":"MessagePosted","thread":"{w}","msg":"a{w}","role":"assistant","text":"done","at":4}}"#));
+            st.apply_line(&format!(r#"{{"$":"TurnChanged","thread":"{w}","state":"completed","at":5}}"#));
+            st.apply_line(&format!(r#"{{"$":"SettingSet","key":"autosettle.read.{w}","value":"a{w}","at":5}}"#));
+        }
+        // w1's launch mail came after its activity (a receipt), w2 has none
+        st.apply_line(r#"{"$":"MailPosted","id":"t:w1:lr-1","conv":"c","from":"thread:w1","to":"thread:boss","kind":"launch","ref":"","want":"","head":"","size":0,"at":9}"#);
+        st.apply_line(r#"{"$":"MailPosted","id":"t:w1:x","conv":"c","from":"thread:w1","to":"thread:boss","kind":"fyi","ref":"","want":"","head":"","size":0,"at":99}"#); // not a launch mail
+        let up = upgrade(&st, 100_000);
+        let settled: Vec<&str> = up.iter().filter(|e| e["$"] == "ThreadSettled").map(|e| e["id"].as_str().unwrap()).collect();
+        assert_eq!(settled, vec!["w1"], "w2 never reported; w1's launch mail is its receipt");
+        assert!(up.iter().any(|e| e["key"] == "autosettle.delivery.w1\tthread:boss" && e["value"] == "9"));
+        assert_eq!(up.last().unwrap()["key"], "autosettle.version"); assert_eq!(up.last().unwrap()["value"], "1");
+        st.apply_line(r#"{"$":"SettingSet","key":"autosettle.version","value":"1","at":9}"#);
+        assert!(upgrade(&st, 100_000).is_empty(), "nothing at version 1");
+        assert!(!changes(&st, 100_000).iter().any(|e| e["id"] == "w1" && e["$"] == "ThreadSettled"), "at version 1 the mail is no longer read: only the delivery setting counts, and it is not set here");
     }
     #[test] fn auto_read_marks_the_newest_reply_once() {
         let mut st = State::new();

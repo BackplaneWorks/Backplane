@@ -73,6 +73,9 @@ const tune=(name,kv)=>writeFileSync(`${out}/${name}.jsonl`,[...ls,...Object.entr
 tune('auto-read',Object.fromEntries(reads.map(th=>['autosettle.read.'+th,'a'+th])));
 tune('auto-read-lifecycle',{...Object.fromEntries(reads.map(th=>['autosettle.read.'+th,'a'+th])),'settle.done':'on'});
 writeFileSync(`${out}/auto-notify.jsonl`,[...ls,set('notify.settled','off',T0+100)].join('\n')+'\n');
+// a home below autosettle.version 1 with launch mails (the receipts Auto.old.reports reads): one after the launched thread's activity, one before, one for a settled thread
+const mail=(id,from,to,at,kind='launch')=>E({$:'MailPosted',id,conv:'c1',from,to,kind,ref:'',want:'',head:'',size:0},at);
+writeFileSync(`${out}/auto-legacy.jsonl`,[...ls.filter(l=>!l.includes('autosettle.version')),mail('t:w-launched:lr-1','thread:w-launched','thread:boss',T0+9000),mail('t:w-rep2:lr-1','thread:w-rep2','thread:boss2',T0+5),mail('t:setd:lr-1','thread:setd','thread:boss',T0+7000),mail('t:old:fyi','thread:old','thread:boss',T0+8000,'fyi')].join('\n')+'\n');
 tune('auto-lifecycle',{'settle.done':'on'});tune('auto-short',{'settle.idle.minutes':'1','settle.personal.minutes':'2'});tune('auto-zero',{'settle.personal.minutes':'0'});
 const endB=(th,state)=>{const ev=[JSON.stringify({$:'TurnChanged',thread:th,state,_end:true,at:T0+60000}),JSON.stringify({$:'UsageSet',thread:th,used:5,window:100,at:T0+60000})];
   // a failed end is what the agents commit: an error act first, the failed mark of the turn's message next to the TurnChanged

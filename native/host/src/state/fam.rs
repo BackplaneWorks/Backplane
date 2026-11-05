@@ -24,6 +24,7 @@ fn n(e: &Value, k: &str) -> u64 { gnat(e, k, 0) }
 /// Kinds this module folds; `None` never (the decoder is lenient: every field defaults). Other kinds are not ours: `Some(())`.
 pub fn fold(st: &mut State, kind: &str, e: &Value) -> Option<()> {
     match kind {
+        "MailPosted" => ext::mail_posted(st, s(e, "id"), s(e, "to"), s(e, "kind"), n(e, "at")),
         "TaskDelivered" => ext::delivered(st, s(e, "task")),
         "Reminded" => { let (id, th, at) = (s(e, "id"), s(e, "thread"), n(e, "at")); let rid = format!("remind:{id}:{at}"); st.post(th, &rid); on_post(st, th, &rid, at, None); }
         "UberOp" => st.uberop(s(e, "uid"), s(e, "origin"), n(e, "n"), s(e, "stamp"), s(e, "op"), n(e, "at")),
