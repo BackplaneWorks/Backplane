@@ -374,3 +374,17 @@ law agy_google_warns rust agy_google_warns
 law agy_callback_needs_signin rust agy_callback_needs_signin
 law interrupt_antigravity_stops rust interrupt_antigravity_stops
 law antigravity_run_turn rust antigravity_run_turn
+# prov-acp lane: native/host/src/agents/providers/{acp,grok,opencode}.rs
+ported src/core/opencode.bend
+law interrupt_grok_stops rust interrupt_grok_stops
+law oc_lost_session rust oc_lost_session
+law oc_other_folder_session rust oc_other_folder_session
+law oc_tool_names_target rust oc_tool_names_target
+law oc_tool_command_once rust oc_tool_command_once
+law oc_notice_kind rust oc_notice_kind
+law oc_notice_info rust oc_notice_info
+law oc_models_usage_none rust oc_models_usage_none
+law oc_models_failed_says rust oc_models_failed_says
+law oc_models_empty_says rust oc_models_empty_says
+law oc_models_missing_quiet rust oc_models_missing_quiet
+law todo_acp_plan rust todo_acp_plan
