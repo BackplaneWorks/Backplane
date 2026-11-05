@@ -28,8 +28,10 @@ fun BrandMark(online: Boolean, modifier: Modifier = Modifier) {
     Box(modifier.size(18.dp)) {
         Image(painterResource(if (light) R.drawable.brand_light else R.drawable.brand_dark), "Backplane",
             Modifier.size(18.dp), contentScale = ContentScale.Fit)
-        Box(Modifier.align(androidx.compose.ui.Alignment.BottomEnd).offset(2.dp, 1.dp).size(11.dp).background(ring)) {
-            Box(Modifier.align(androidx.compose.ui.Alignment.Center).size(7.dp).background(if (online) ok else bad))
+        // .conn is 7 px with a 1 px border (a 5 px square inside) and a 1 px ring outside: 9 px of panel colour,
+        // its right edge 3 px beyond the mark and its bottom 2 px (right: -2px; bottom: -1px)
+        Box(Modifier.align(androidx.compose.ui.Alignment.BottomEnd).offset(3.dp, 2.dp).size(9.dp).background(ring)) {
+            Box(Modifier.align(androidx.compose.ui.Alignment.Center).size(5.dp).background(if (online) ok else bad))
         }
     }
 }
