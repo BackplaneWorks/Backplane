@@ -7,7 +7,7 @@ use tokio::sync::mpsc::{self, Sender};
 use tokio_tungstenite::tungstenite::{Message, protocol::WebSocketConfig};
 
 #[derive(Debug)] pub enum Command { Sleep(f64), Select(String), Send(String), Draft(String), Action(String,String), Page(String) }
-#[derive(Debug)] pub enum Event { NetWake, Picture(Value,Timing), Status(String), Accepted, Error(String) }
+#[derive(Debug)] pub enum Event { Plot(Vec<u8>), NetWake, Picture(Value,Timing), Status(String), Accepted, Error(String) }
 /// Where a reply's time went before the UI saw it: send to frame received, decode, delta/merge, and the body's size.
 #[derive(Debug,Clone,Default)] pub struct Timing { pub rtt_ms:f64, pub decode_ms:f64, pub process_ms:f64, pub bytes:usize, pub delta:bool }
 #[derive(Clone)] pub struct Config { pub hub:String, pub token_file:PathBuf, pub exit_after:Option<f64>, pub script:Option<PathBuf>, pub swatches:bool, pub gallery:bool, pub fonts:bool, pub solid_demo:Option<String>, pub theme:Option<String> }
@@ -102,7 +102,7 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
     let token=std::fs::read_to_string(&config.token_file)?;
     ensure!(token.trim().chars().all(|c|c.is_ascii_alphanumeric()||c=='-'||c=='_'),"invalid token file");
     let url=format!("{}/ws?view=1&mobile=1&token={}",config.hub.trim_end_matches('/'),token.trim());
-    let limits=WebSocketConfig::default().max_message_size(Some(524288)).max_frame_size(Some(524288));
+    let limits=WebSocketConfig::default().max_message_size(Some(16<<20)).max_frame_size(Some(16<<20));
     let (socket,_)=tokio::time::timeout(Duration::from_secs(5),tokio_tungstenite::connect_async_with_config(url,Some(limits),true)).await??;
     let (mut sink,mut source)=socket.split();let mut last=tokio::time::Instant::now();
     let mut heartbeat=tokio::time::interval(Duration::from_secs(10));
@@ -121,7 +121,7 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
             sink.send(Message::Binary(wire::encode(&request).into())).await?;
         },
         frame=source.next()=>{
-            let frame=frame.context("hub closed")??;last=tokio::time::Instant::now();let recv=std::time::Instant::now();let mut size=0usize;
+            let frame=frame.context("hub closed")??;last=tokio::time::Instant::now();if let Message::Binary(b)=&frame {if crate::screens::plot::is_plot(b) {let _=events.send(Event::Plot(b.to_vec())).await;continue;}}let recv=std::time::Instant::now();let mut size=0usize;
             let mut x=match frame {Message::Binary(bytes)=>{size=bytes.len();wire::decode(&bytes)?},Message::Text(text)=>serde_json::from_str(&text)?,Message::Ping(bytes)=>{sink.send(Message::Pong(bytes)).await?;continue},Message::Close(_)=>anyhow::bail!("closed"),_=>continue};
             let decoded=std::time::Instant::now();
             match x["t"].as_str().unwrap_or("") {

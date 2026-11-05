@@ -86,6 +86,19 @@ fn diff_page(cx: &mut Context<Backplane>, light: bool, diff: &Value) -> AnyEleme
     col.into_any_element()
 }
 
+/// Board or schematic: the plot the hub sent for this file, or what it says instead, with the hub's layer list beside it.
+fn plot_page(cx: &mut Context<Backplane>, light: bool, open: &str, viewer: &Value, plot: &super::plot::Store, pv: &mut super::plotview::PlotView) -> AnyElement {
+    let c = |n: &str| theme::color(light, n);
+    let Some(frame) = plot.frame.as_ref() else { return div().p_3().text_color(c("dim")).child(if open == "board" { "Loading the board…" } else { "Loading the schematic…" }).into_any_element() };
+    if !frame.none.is_empty() { return div().p_3().text_color(c("dim")).child(frame.none.clone()).into_any_element(); }
+    let (w, h) = pv.bounds.map_or((480., 600.), |b| (f32::from(b.size.width), f32::from(b.size.height)));
+    let view = super::plotview::ensure_view(pv, frame, w, h);
+    let mut col = div().size_full().flex().flex_col();
+    let note = string(viewer, "note");
+    if !note.is_empty() { col = col.child(div().px_3().py_1().text_size(px(11.)).text_color(c("dim")).child(note)); }
+    col.child(super::plotview::canvas_el(cx, light, frame, view)).into_any_element()
+}
+
 fn review_page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, review: &Value) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let mut col = div().flex().flex_col().gap_2().p_3();
@@ -99,7 +112,7 @@ fn review_page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, review: &Val
 }
 
 /// The panel (None while nothing is open). 520 px wide, between the thread and the rail.
-pub fn view(cx: &mut Context<Backplane>, reg: &Reg, light: bool, thread: &Value) -> Option<AnyElement> {
+pub fn view(cx: &mut Context<Backplane>, reg: &Reg, light: bool, thread: &Value, plot: &super::plot::Store, pv: &mut super::plotview::PlotView) -> Option<AnyElement> {
     if !is_open(thread) { return None; }
     let c = |n: &str| theme::color(light, n);
     let viewer = &thread["viewer"];
@@ -112,7 +125,8 @@ pub fn view(cx: &mut Context<Backplane>, reg: &Reg, light: bool, thread: &Value)
     let body: AnyElement = if diff_on { diff_page(cx, light, &thread["diff"]) }
         else if open == "files" && viewer["files"].is_object() { files_page(cx, light, &viewer["files"]) }
         else if open == "review" && viewer["review"].is_object() { review_page(cx, reg, light, &viewer["review"]) }
-        else { div().p_3().text_color(c("dim")).child(match open { "board" | "schematic" | "3d" | "split" => "Drawing from the hub's plot…", "mech" => "Mechanical parts", _ => "Opening…" }).into_any_element() };
+        else if matches!(open, "board" | "schematic") { plot_page(cx, light, open, viewer, plot, pv) }
+        else { div().p_3().text_color(c("dim")).child(match open { "3d" | "split" => "3D and split views are drawn from the hub's model", "mech" => "Mechanical parts", _ => "Opening…" }).into_any_element() };
     Some(div().w(px(520.)).h_full().flex_shrink_0().border_l_1().border_color(c("line")).flex().flex_col()
         .child(bar).child(div().id("viewer-body").flex_1().min_h_0().overflow_y_scroll().child(body)).into_any_element())
 }
