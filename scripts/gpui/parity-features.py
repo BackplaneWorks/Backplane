@@ -1,0 +1,682 @@
+#!/usr/bin/env python3
+"""Feature parity checklist generator (stream `audit`).
+
+Reads git objects only (no builds, no hubs, no store). It
+
+  1. extracts, from the Bend source at BASE (default `gpui`), every hub request method
+     (the `*.methods` lists and the `"m"` literals in src/server), every HTTP route and every
+     MCP tool (`Tool.def("name"`);
+  2. extracts, from the Rust hub (native/host/src) at BASE and at every `gpui-*` lane branch,
+     the methods the hub registers (`fn methods` / `fn routes`, the literal `m == "..."` tests in
+     hub.rs, the `view.*` family), the MCP tools it implements (`IMPLEMENTED`), and which agent
+     providers are more than a stub;
+  3. derives the Rust hub column of every feature row from those sets (the clients' columns
+     and the evidence notes are written by hand in FEATURES below, next to the row);
+  4. writes docs/gpui/PARITY.md (counts, rules, protocol gate, lanes, the table).
+
+  python3 scripts/gpui/parity-features.py --write        # rewrite docs/gpui/PARITY.md
+  python3 scripts/gpui/parity-features.py --sets         # print the extracted sets (JSON)
+  python3 scripts/gpui/parity-features.py --check        # rows cover every Bend method/tool; exit 1 if not
+
+Rules for the Rust hub column of a row (rules text is also written into PARITY.md):
+  missing  none of the row's requests/tools/routes is registered on BASE or on any lane branch
+           (an "unknown method" reply), or the only code is a stub (<= 3 lines).
+  partial  some are registered, or all are registered on BASE but the row has no proof, or all are
+           registered only on a lane branch that has not landed on BASE.
+  done     every request/tool/route of the row is registered on BASE AND the row names a proof
+           (a Rust test, a parity scenario, a results file).
+Rows with no request (pure rendering) carry an explicit hub status written by hand with the same rules.
+"""
+import json, re, subprocess, sys, os, datetime
+
+ROOT = subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True,
+                               cwd=os.path.dirname(os.path.abspath(__file__))).strip()
+BASE = os.environ.get("PARITY_BASE", "gpui")
+
+
+def git(*a):
+    return subprocess.run(["git", "-C", ROOT, *a], capture_output=True, text=True)
+
+
+def show(ref, path):
+    r = git("show", f"{ref}:{path}")
+    return r.stdout if r.returncode == 0 else ""
+
+
+def files(ref, prefix, ext):
+    r = git("ls-tree", "-r", "--name-only", ref, prefix)
+    return [f for f in r.stdout.split("\n") if f.endswith(ext)] if r.returncode == 0 else []
+
+
+def strings(text):
+    return re.findall(r'"((?:[^"\\]|\\.)*)"', text)
+
+
+# ---------------------------------------------------------------- Bend side
+def bend_sets(ref):
+    core = {}  # method -> set(source names)
+    def add(m, src):
+        if re.fullmatch(r"[a-z][a-z0-9_]*(\.[A-Za-z0-9_]+)+|accounts", m):
+            core.setdefault(m, set()).add(src)
+    srcs = files(ref, "src", ".bend")
+    for f in srcs:
+        t = show(ref, f)
+        # lists declared by a def named *methods* (Hub.methods, Hub.methods.git, Rv.methods, Fr.methods, Bots.methods, Ledger.methods)
+        for m in re.finditer(r"^def ((?:Hub|Rv|Fr|Bots|Ledger)\.methods[A-Za-z.]*)\(\)[^\n]*:\n((?:[ \t]+[^\n]*\n)+)", t, re.M):
+            for s in strings(m.group(2)):
+                add(s, m.group(1))
+        if f.startswith(("src/server/", "src/core/")):
+            for s in re.findall(r'get_str\(o, "m", ""\),\s*"([A-Za-z_.]+)"', t):
+                add(s, "server literal")
+            for m in re.finditer(r'C\.Codec\.pos\(\[([^\]]*)\],\s*J\.Json\.get_str\(o, "m", ""\)\)', t):
+                for s in strings(m.group(1)):
+                    add(s, "server list")
+            for s in re.findall(r'String\.eq\(m, "([a-z_.]+)"', t):
+                add(s, "server m literal")
+    tools = {}
+    for f in srcs:
+        for n in re.findall(r'Tool\.def\("([a-z_]+)"', show(ref, f)):
+            tools[n] = f
+    routes = set()
+    for f in files(ref, "src/server", ".bend"):
+        for s in re.findall(r'"(/[a-z0-9/_.-]+)"', show(ref, f)):
+            if s in ROUTES_BEND:
+                routes.add(s)
+    return core, tools, sorted(routes)
+
+
+# HTTP routes a client or agent uses (checked to exist in the Bend source by bend_sets)
+ROUTES_BEND = ["/hello", "/ws", "/img", "/plot/info", "/files/get", "/files/zip", "/view/get", "/view/ver", "/view/git",
+               "/mcp/", "/message-image", "/viewer-asset", "/voice/in", "/screen.jpg", "/auth/pair", "/auth/devices",
+               "/auth/enroll", "/auth/invitations", "/auth/revoke", "/auth/known", "/auth/cache", "/client/capabilities",
+               "/bots/pair", "/bots/dir", "/bots/link", "/bots/deliver", "/far/push", "/far/log", "/far/rpc",
+               "/oauth/google", "/hook/", "/lock/", "/tasks", "/debug/perf", "/debug/diagnostics.json", "/debug/log",
+               "/runs"]
+
+
+# ---------------------------------------------------------------- Rust side
+def strip_tests(t):
+    m = re.search(r"#\[cfg\(test\)\]\s*(?:pub )?mod \w+\s*\{", t)  # an inline test module, not `mod tests;`
+    return t if not m else t[:m.start()]
+
+
+def rust_sets(ref):
+    methods, routes, tools, providers = {}, set(), set(), {}
+    for f in files(ref, "native/host/src", ".rs"):
+        t = strip_tests(show(ref, f))
+        for m in re.finditer(r"fn methods\(&self\)[^{]*\{\s*&\[(.*?)\]", t, re.S):
+            for s in strings(m.group(1)):
+                methods.setdefault(s, set()).add(f)
+        for m in re.finditer(r"fn routes\(&self\)[^{]*\{\s*&\[(.*?)\]", t, re.S):
+            for s in strings(m.group(1)):
+                routes.add(s)
+        if f.endswith("/hub.rs") or f == "native/host/src/hub.rs":
+            for s in re.findall(r'\bm == "([a-z_.]+)"', t):
+                methods.setdefault(s, set()).add(f)
+        if f.endswith("wire/mod.rs"):
+            for s in ("/hello", "/ws", "/client/capabilities"):
+                if f'"{s}"' in t:
+                    routes.add(s)
+        if f.endswith("session/mod.rs"):
+            for s in re.findall(r'"(view\.[a-z]+)"', t):
+                methods.setdefault(s, set()).add(f)
+        if f.endswith("agents/mcp.rs"):
+            if '"/mcp/"' in t:
+                routes.add("/mcp/")
+            for m in re.finditer(r"const IMPLEMENTED[^=]*=\s*&\[(.*?)\];", t, re.S):
+                tools.update(strings(m.group(1)))
+        if "/providers/" in f and not f.endswith("mod.rs"):
+            providers[os.path.basename(f)[:-3]] = len(show(ref, f).splitlines())
+    if "view.open" in methods:
+        for v in ("view.open", "view.update", "view.action", "view.page", "view.search", "view.message", "view.cancel"):
+            methods.setdefault(v, set()).add("native/host/src/session/mod.rs")
+    return {k: sorted(v) for k, v in methods.items()}, sorted(routes), sorted(tools), providers
+
+
+def lane_branches():
+    out = git("branch", "--list", "gpui-*", "--format=%(refname:short)").stdout.split()
+    return sorted(out)
+
+
+def collect():
+    bm, bt, br = bend_sets(BASE)
+    rb = rust_sets(BASE)
+    lanes = {b: rust_sets(b) for b in lane_branches()}
+    return {"bend_methods": {k: sorted(v) for k, v in sorted(bm.items())}, "bend_tools": bt, "bend_routes": br,
+            "rust": {"methods": rb[0], "routes": rb[1], "tools": rb[2], "providers": rb[3]},
+            "lanes": {b: {"methods": sorted(v[0]), "routes": v[1], "tools": v[2], "providers": v[3]} for b, v in lanes.items()}}
+
+
+def where(S, kind, name):
+    """'base' | lane branch names | ''"""
+    key = {"m": "methods", "t": "tools", "r": "routes"}[kind]
+    if name in S["rust"][key]:
+        return "base"
+    return ",".join(b for b, v in S["lanes"].items() if name in v[key])
+
+
+def hub_status(S, row):
+    """Derive the Rust hub status from the row's needs; returns (status, note)."""
+    needs = [("m", x) for x in row["m"]] + [("t", x) for x in row["t"]] + [("r", x) for x in row["r"]] + [("p", x) for x in row["prov"]]
+    if not needs:
+        return row["hub"], ""
+    have = []
+    for k, n in needs:
+        if k == "p":
+            if S["rust"]["providers"].get(n, 0) > 5:
+                have.append("base")
+            else:
+                have.append(",".join(b for b, v in S["lanes"].items() if v["providers"].get(n, 0) > 5))
+        else:
+            have.append(where(S, k, n))
+    base = sum(1 for h in have if h == "base")
+    lane = sum(1 for h in have if h and h != "base")
+    miss = [n for (k, n), h in zip(needs, have) if not h]
+    laned = sorted({x for h in have if h and h != "base" for x in h.split(",")})
+    note = []
+    if miss:
+        note.append("no handler: " + ", ".join(miss[:6]) + (f" (+{len(miss) - 6})" if len(miss) > 6 else ""))
+    if lane:
+        note.append("code only on lane " + "/".join(laned))
+    if base == len(needs):
+        st = "done" if row.get("proof") else "partial"
+        if not row.get("proof"):
+            note.append("registered, no proof")
+    elif base + lane == 0:
+        st = "missing"
+    else:
+        st = "partial"
+    if row.get("hub"):
+        st = min_status(st, row["hub"])
+    return st, "; ".join(note)
+
+
+ORDER = {"missing": 0, "partial": 1, "done": 2, "n/a": 3}
+
+
+def min_status(a, b):
+    return a if ORDER[a] <= ORDER[b] else b
+
+
+# ---------------------------------------------------------------- features
+# FEATURES_BEGIN
+# Every row: R(area, name, m=[requests], t=[mcp tools], r=[routes], prov=[providers], hub=<status when no request>,
+#              pf=<proof key>, c="GIA" (GPUI, iOS, Android: d/p/m/n), lane=<owning lane>, ev=<evidence note>)
+# Client letters follow the same rules as the hub (see RULES below). A client that depends on a hub request that the
+# Rust hub lacks keeps its own status here (what the client does against any conformant hub) and the row is flagged
+# [hub-blocked] in the table.
+PF = {
+    "agents": "agents/tests.rs (704 lines), results/agents/rust, test/gpui/agents/fixtures",
+    "files": "results/files/parity-2.json (175/178 identical), bench-1.json",
+    "git": "results/files/git-1.json (8/9 identical, 1 deliberate)",
+    "plot": "results/files/plot-2.json, plot-native-*.json (sha256-identical frames)",
+    "solid": "results/files/solid-e2e-*.json, mesh-*.json",
+    "review": "kicad/review.rs 24 tests, bom.rs 16, checks.rs 16, release.rs 15; results/files/review-1,2.json",
+    "kipc": "results/files/kipc-hub-e2e.txt, kicad/ipc.rs + kserve.rs tests",
+    "state": "state/ tests (fam, liveness, todo, uber, star), model.rs vs store.db (895 entries, 100 pages)",
+    "side": "sidebar.rs 5 tests, bin/sidebar-check, results/slim",
+}
+F = []
+
+
+def R(area, name, m=(), t=(), r=(), prov=(), hub=None, pf=None, c="ppp", lane="", ev=""):
+    F.append(dict(area=area, name=name, m=list(m), t=list(t), r=list(r), prov=list(prov), hub=hub, proof=PF.get(pf, pf),
+                  c=c, lane=lane, ev=ev))
+
+
+L = dict(core="core (bend)", side="sidebar (slim)", files="files", agents="agents", pses="parity-session", pedge="parity-edge",
+         acp="prov-acp", msp="prov-msp", pi="prov-pi", state="state", soak="soak",
+         cmd="NEW commands", sett="NEW settings", bots="NEW bots", net="NEW net", term="NEW term", mcp="NEW mcp2",
+         orders="NEW orders", gscreens="NEW gpui-screens", gview="NEW gpui-viewers", gthread="NEW gpui-thread",
+         ios="NEW ios-rust", andr="NEW android-rust", voice="NEW voice", i18n="NEW i18n")
+
+# ---- Sidebar
+A = "Sidebar"
+R(A, "Projects and threads list, selection", m=["view.open", "view.update", "view.action"], hub="partial", pf="side", c="pdd", lane=L["side"],
+  ev="Rust: view.* answered via the Bend presenter; parity-rust6 shows 127 differences (gate). GPUI: shots gpui-*-1-sidebar, rust-hub-first.png (drawn from Rust hub, bounded fields still absent). iOS/Android: shots/ios/list.png, shots/android/02-projects.png on the JS hub")
+R(A, "Bounded sidebar pages (Newer / Older, 48 rows)", m=["view.action"], hub="partial", pf=None, c="pdd", lane=L["side"],
+  ev="nativeSidebar fields (sidebarPages, threadsPage, *Count) absent in Rust replies: 30 of the 42 differences per session scenario in parity-rust6; android 09a-c and n300 shots on JS hub")
+R(A, "Search / filter projects and threads", m=["view.action"], hub="partial", c="mpp", lane=L["gscreens"],
+  ev="Find.* is client state, no request; GPUI draws a search glyph only (no field); phones: ProjectSearchIntent.swift, no shot")
+R(A, "Older / quiet projects fold, faded rows", hub="partial", c="mpp", lane=L["side"], ev="presenter output, not compared on recorded logs with old projects; no phone shot")
+R(A, "Active view and Settled fold (sidebar.view)", m=["setting.set"], c="mpp", lane=L["cmd"], ev="setting.set has no handler in Rust; Active.rows is presenter code")
+R(A, "Row menu (right-click / long press): pin, settle, snooze, archive, delete", m=["thread.pin", "thread.unpin", "thread.settle", "thread.unsettle", "thread.snooze", "thread.archive", "thread.unarchive", "thread.delete"], c="mpp", lane=L["cmd"],
+  ev="none of the eight thread requests has a Rust handler; GPUI draws presenter buttons only; no menu proof on phones")
+R(A, "Pins", m=["thread.pin", "thread.unpin"], c="mpp", lane=L["cmd"], ev="no Rust handler")
+R(A, "Settle / unsettle, autosettle", m=["thread.settle", "thread.unsettle"], hub="partial", c="mpp", lane=L["cmd"],
+  ev="state/liveness.rs (8 tests) folds settle state; the settle requests are unhandled; autosettle.version only seeded at start")
+R(A, "Snooze", m=["thread.snooze"], c="mpp", lane=L["cmd"], ev="no Rust handler")
+R(A, "Archive / unarchive", m=["thread.archive", "thread.unarchive"], c="mpp", lane=L["cmd"], ev="no Rust handler")
+R(A, "Delete thread (asks first)", m=["thread.delete"], c="mpp", lane=L["cmd"], ev="no Rust handler")
+R(A, "Rename thread / project", m=["thread.rename", "project.rename"], c="mpp", lane=L["cmd"], ev="no Rust handler; thread_update tool renames via ThreadRenamed event (agents)")
+R(A, "Fork thread, bring back", m=["thread.fork", "thread.back", "thread.branch"], c="mpp", lane=L["cmd"], ev="no Rust handler")
+R(A, "Reorder threads and projects", m=["thread.reorder", "project.reorder", "project.move"], c="mpp", lane=L["cmd"], ev="no Rust handler")
+R(A, "New thread", m=["thread.create"], c="mpp", lane=L["cmd"], ev="no Rust handler: GPUI/phones cannot create a thread on the Rust hub")
+R(A, "Add project (folder picker, mkdir, find)", m=["project.add", "fs.list", "fs.mkdir", "fs.find", "project.new", "project.create"], hub="partial", c="mpp", lane=L["cmd"],
+  ev="project.add handled (hub.rs, hub test project.add + first thread); fs.list/mkdir/find, project.new/create not; phones' picker code exists, no shot")
+R(A, "Remove project, restore on re-add", m=["project.remove"], c="mpp", lane=L["cmd"], ev="no Rust handler")
+R(A, "Scratch project and threads (ephemeral, sweep)", hub="missing", c="ppp", lane=L["cmd"], ev="hub makes <home>/scratch and sweeps (Scratch.sweep); not in Rust")
+R(A, "Thread tree: parent, detach, reparent", m=["thread.detach", "thread.reparent", "thread.worktree", "thread.note", "thread.local", "thread.merged", "thread.unrooted", "thread.titled"], c="mpp", lane=L["cmd"], ev="no Rust handler (sidebar.rs reads thread.tree.* settings only)")
+R(A, "Project badge colour/icon editor", m=["setting.set"], c="mpp", lane=L["cmd"], ev="no Rust handler")
+R(A, "Status colours, urgency order, counts", hub="partial", pf="side", c="pdd", lane=L["side"], ev="sidebar.rs/signal.rs/shelf.rs ported with tests; compared only through the 127-difference gate")
+R(A, "Machine switch / one list over machines", m=["view.action"], hub="missing", c="mpp", lane=L["net"], ev="needs far/links (see Machines)")
+
+# ---- Threads and timeline
+A = "Threads and timeline"
+R(A, "Open a thread, windowed history (view.page, anchors, newer/older)", m=["view.page", "view.open"], hub="partial", pf="state", c="pdd", lane=L["pses"],
+  ev="model.rs pages equal store.db on 100 pages; parity session:* runs view.page; gate not zero. GPUI shows <=32 entries (README); phones tl-4..tl-40 shots")
+R(A, "Messages, Markdown (lists, tables, code, quotes)", hub="partial", c="pdd", lane=L["gthread"], ev="presenter nodes. GPUI: inline styles missing (README known gaps); shots gpui-*-2-thread; phones Markdown.swift/.kt, thread shots")
+R(A, "Streaming reply (deltas, live row)", m=["turn.start"], hub="partial", pf="agents", c="pdd", lane=L["pses"], ev="Rust delta.rs/live_delta; parity scenario with streamed deltas inside the gate")
+R(A, "Tool-call folds, running label", hub="partial", c="mdd", lane=L["gthread"], ev="presenter; android 03b-tool-fold-open.png; GPUI draws no fold nodes distinct from text (unproven)")
+R(A, "Message stamps (time, Finished, duration)", hub="done", pf="stamp.rs", c="ppp", lane=L["gthread"], ev="native/host/src/stamp.rs; clients draw the entry's stamp, no shot of it")
+R(A, "Agent to-do list (To-do 3/7, edit, retire)", m=["todos.edit"], c="mpp", lane=L["cmd"], ev="state/todo.rs folds todos (2 tests) but todos.edit has no handler")
+R(A, "Subagents panel, Subagents badge", hub="partial", pf="agents", c="mpp", lane=L["agents"], ev="agents/bg.rs ledger (Bg.*) writes the entries; presenter draws; no panel proof anywhere")
+R(A, "Asks and approvals (Allow / session / deny, questions, plans)", m=["ask.answer"], t=["permission_prompt"], pf="agents", c="mpp", lane=L["gthread"], ev="agents/mcp.rs permit + answer, 'decisions_stay_in_the_thread' tests; GPUI has no ask UI; phones unproven")
+R(A, "Stop a turn (interrupt)", m=["turn.interrupt"], pf="agents", c="ppp", lane=L["gthread"], ev="agents lifecycle/interrupt events equal the JS hub (results/agents); stop button only as a generic presenter button in GPUI")
+R(A, "Send a message (composer, draft kept)", m=["turn.start"], pf="agents", c="dpd", lane=L["gthread"], ev="hub test turn.start commits MessagePosted; GPUI send in shots (rust-hub-first, gpui-dark-2); android 05-send-roundtrip.png; iOS shots/ios/send1.png")
+R(A, "Multi-line composer, paste, selection, IME", c="mdd", hub="n/a", lane=L["gthread"], ev="GPUI single-line input (README gap); phones native text fields")
+R(A, "Queue while busy, steer, edit, remove, resume", m=["queue.move", "queue.remove", "queue.resume", "queue.steer", "queue.edit"], c="mpp", lane=L["cmd"], ev="no Rust handler; agents has a steer path (inputs.rs) but not the queue requests")
+R(A, "Model, effort and provider picker", m=["thread.provider", "thread.effort", "thread.modes", "models.refresh"], c="mpd", lane=L["cmd"], ev="no Rust handler (thread.modes = runtime/permissions too); GPUI picker not drawn; android/ios pop/settings shots show the picker on JS hub")
+R(A, "Slash commands and $skill / @ > % # popups", m=["skills.list"], hub="partial", c="dpd", lane=L["agents"], ev="slash popup drawn from presenter in GPUI (gpui-*-3-popup, side-*-popup); skills.list has no Rust handler (skills come from the view only); iOS pop.png, android 04-composer-popup.png")
+R(A, "/btw side question", m=["thread.btw"], c="mpp", lane=L["cmd"], ev="no Rust handler")
+R(A, "/give hand-off, references, summaries", m=["bots.give", "summary.set"], c="mpp", lane=L["bots"], ev="no Rust handler")
+R(A, "Images in messages (/message-image, lightbox)", r=["/message-image"], c="mpp", lane=L["files"], ev="route not registered in Rust; GPUI draws no image node (img => empty div)")
+R(A, "Attachments (upload, file, paste image)", m=["attach.put", "attach.file"], c="mpp", lane=L["files"], ev="no Rust handler")
+R(A, "File and web links, open in folder, copy path", m=["file.open"], pf="files", c="mpp", lane=L["gthread"], ev="files/misc.rs file.open (5 tests); client link menus unproven")
+R(A, "Reading position, 'N new' pill, history jump", m=["view.action"], hub="partial", c="mpp", lane=L["pses"], ev="presenter + window fields; no shot")
+R(A, "In-thread search (view.search) and cancel", m=["view.search", "view.cancel", "view.message"], hub="partial", c="mpp", lane=L["pses"], ev="session/mod.rs routes the names; behaviour unrecorded by the parity scenarios")
+R(A, "Thread header tools (stop, pin, settle, fork, terminal, viewer)", m=["view.action"], hub="partial", c="ppp", lane=L["gthread"], ev="tools.bend list via presenter; handlers for the actions are in 'Sidebar'")
+R(A, "Token and context stats, rate limits, usage page", hub="partial", pf="agents", c="ppp", lane=L["agents"], ev="UsageSet/context.usage events written by agents/lines.rs; usage page needs setting/allowance info")
+R(A, "Reconnect keeps drafts, resume from log position", m=["view.open"], hub="partial", c="ddd", lane=L["pedge"], ev="reconnect scenario: 1 difference (origin is hex in Rust vs decimal at in Bend, N19); android 07a-c; GPUI keeps session")
+R(A, "Terminal-in-chat rows (emb)", m=["term.open", "term.input", "term.resize", "term.snap", "term.restart"], c="mpp", lane=L["term"], ev="no pty in Rust")
+
+# ---- Agents and providers
+A = "Agents and providers"
+R(A, "Claude (stream-json, one process per thread)", hub="done", pf="agents", c="ppp", lane=L["agents"], ev="agents/{proc,lines,prompt,mcp}.rs, replay fixtures equal event for event (lifecycle, agents, modes)")
+R(A, "Codex (codex exec --json)", prov=["codex"], pf="agents", c="ppp", lane=L["agents"], ev="providers/codex.rs + agents/codex.rs (187 lines), tests.rs")
+R(A, "Grok, OpenCode (ACP)", prov=["acp", "grok", "opencode"], pf="agents", c="ppp", lane=L["acp"], ev="stubs on gpui; WIP drivers on lane gpui-prov-acp (acp 187, opencode 281 lines)")
+R(A, "Muse Code (MSP), Antigravity", prov=["msp", "muse", "agy"], c="ppp", lane=L["msp"], ev="stubs (1-3 lines) on gpui and gpui-prov-msp; results/prov-msp has only test logs")
+R(A, "Pi, Oh My Pi, bp/ask dialogs", prov=["pi", "omp", "dialog"], c="ppp", lane=L["pi"], ev="stubs on gpui; drivers on lane gpui-prov-pi/-pi2 (pi 366, omp 292, dialog 180 lines)")
+R(A, "Interrupt, resume, restart-in-place, stale process refusal", m=["turn.interrupt"], pf="agents", c="ppp", lane=L["agents"], ev="agents lifecycle replay; Gen.refused in mcp.rs")
+R(A, "Provider accounts, fallback chain, allowance", m=["accounts", "accounts.default", "accounts.select"], hub="partial", c="ppp", lane=L["sett"], ev="hub seeds accounts.inventory/allowance.codex at start only; no account requests, no fallback")
+R(A, "Launched threads report back (thread_launch)", t=["thread_launch"], c="ppp", lane=L["mcp"], ev="tool missing in Rust (Launch.tell absent)")
+R(A, "Delegated tasks (delegate_task, task_status/cancel)", m=["task.cancel", "work.cancel", "wake.cancel"], t=["delegate_task", "task_status", "task_cancel"], c="ppp", lane=L["mcp"], ev="no handler or tool in Rust")
+R(A, "Restart continues running turns (restart.continue)", hub="done", pf="agents", c="n/a".replace("n/a", "nnn"), lane=L["agents"], ev="agents carry_will, hub recover; tests.rs")
+R(A, "Stand-in agents / BACKPLANE_AGENTS isolation", hub="done", pf="agents", c="nnn", lane=L["agents"], ev="Cli::standin, standin-blocks; slim-stand-in rule")
+
+# ---- MCP tools
+A = "MCP tools"
+R(A, "thread_list, thread_read, thread_send, thread_update, thread_wait, thread_interrupt", t=["thread_list", "thread_read", "thread_send", "thread_update", "thread_wait", "thread_interrupt"], pf="agents", c="nnn", lane=L["agents"], ev="agents/tools.rs + mcp.rs; the_tool_list_is_the_js_hubs_for_every_tool_we_serve")
+R(A, "orchestrator_capabilities, machine_list", t=["orchestrator_capabilities", "machine_list"], pf="agents", c="nnn", lane=L["mcp"], ev="orchestrator_capabilities ported; machine_list not")
+R(A, "kicad_ipc, kicad_ipc_status", t=["kicad_ipc", "kicad_ipc_status"], pf="kipc", c="nnn", lane=L["files"], ev="files lane: kicad/ipc.rs + kserve.rs, results/files/kipc-hub-e2e.txt")
+R(A, "viewer_show", t=["viewer_show"], c="ppp", lane=L["agents"], ev="mcp.rs pushes a {t:view} frame to all clients; no test; clients' reaction unproven")
+R(A, "work_run / work_watch / work_list / work_cancel / work_unwatch", t=["work_run", "work_watch", "work_list", "work_cancel", "work_unwatch"], c="nnn", lane=L["mcp"], ev="no tool in Rust")
+R(A, "wake_on / wake_list / wake_cancel", t=["wake_on", "wake_list", "wake_cancel"], c="nnn", lane=L["mcp"], ev="no tool in Rust")
+R(A, "lock_acquire / lock_release / lock_list / lock_cancel", t=["lock_acquire", "lock_release", "lock_list", "lock_cancel"], c="nnn", lane=L["mcp"], ev="no tool in Rust (locks.bend projection not ported)")
+R(A, "deploy_main / deploy_restart / deploy_status / deploy_cancel", t=["deploy_main", "deploy_restart", "deploy_status", "deploy_cancel"], c="nnn", lane=L["mcp"], ev="no tool in Rust")
+R(A, "terminal_open / read / send / close", t=["terminal_open", "terminal_read", "terminal_send", "terminal_close"], c="nnn", lane=L["term"], ev="no tool in Rust")
+R(A, "preview_* browser tools (open, navigate, snapshot, click, type, press, scroll, evaluate, wait_for, resize, status)", t=["preview_open", "preview_navigate", "preview_snapshot", "preview_click", "preview_type", "preview_press", "preview_scroll", "preview_evaluate", "preview_wait_for", "preview_resize", "preview_status"], c="nnn", lane=L["term"], ev="no tool in Rust")
+R(A, "review_comment, review_comments", t=["review_comment", "review_comments"], c="nnn", lane=L["mcp"], ev="Rust has review.comment request (kicad/review.rs) but no agent tool")
+R(A, "secret_request / secret_list / secret_run", t=["secret_request", "secret_list", "secret_run"], c="nnn", lane=L["mcp"], ev="no vault in Rust")
+R(A, "settings_inspect, settings_propose", t=["settings_inspect", "settings_propose"], c="nnn", lane=L["mcp"], ev="no tool in Rust")
+R(A, "told_check, told_mark, task_board_*", t=["told_check", "told_mark", "task_board_add", "task_board_import", "task_board_list", "task_board_remove", "task_board_update"], c="nnn", lane=L["mcp"], ev="no tool in Rust; settings told.*/board.* pass through state/mod.rs only")
+R(A, "Bot tools: bot_*, room_*, routine_*, space_*, memory_*, project_*, plane_read, notify_person, tell_person, remind_person, person_timezone, decide, escalate, charter_set, voice_dictionary_add, task_* (browser skills)", t=["bot_create", "bot_list", "bot_send", "bot_whoami", "room_create", "room_list", "room_post", "room_read", "routine_delete", "routine_list", "routine_set", "space_get", "space_page", "space_set", "memory_forget", "memory_list", "memory_recall", "memory_save", "project_create", "project_list", "plane_read", "notify_person", "tell_person", "remind_person", "person_timezone", "decide", "escalate", "charter_set", "voice_dictionary_add", "task_delete", "task_end", "task_get", "task_list", "task_pause", "task_run", "task_save", "task_step"], c="nnn", lane=L["bots"], ev="none exist in Rust")
+R(A, "Mail and Google tools (mail*, gmail_*, calendar_*, google_accounts)", t=["mail", "mail_context", "mail_dispose", "mail_done", "mail_list", "mail_read", "mail_search", "mail_snooze", "mail_tag", "gmail_draft", "gmail_read", "gmail_search", "gmail_send", "calendar_create", "calendar_delete", "calendar_events", "calendar_update", "google_accounts"], c="nnn", lane=L["bots"], ev="none exist in Rust")
+
+# ---- Bots
+A = "Bots"
+R(A, "Bots list, create, edit, delete, cats and looks", m=["bots.create", "bots.edit", "bots.delete", "bots.pin"], c="mdd", lane=L["bots"], ev="no Rust handler. Cats: GPUI logo/cats vector paths (shots/logo-cats/gpui-*), phones native Cat.swift/Cat.kt with shots; interaction missing in GPUI")
+R(A, "Bot tabs (Status, Chat, Space, Routines, Memory, Hooks)", m=["bots.say", "bots.tell", "bots.forget", "bots.remember", "bots.hook", "bots.hook_revoke", "bots.hook_token"], c="mdd", lane=L["bots"], ev="no Rust handler; android-dark-3-bot / ios-*-bot shots (JS hub)")
+R(A, "Bot space (blocks, pages, links)", m=["bots.space"], c="mpp", lane=L["bots"], ev="no Rust handler; SpaceView.swift/.kt, /space.html")
+R(A, "Rooms (create, post, mention, delete)", m=["bots.room", "bots.room_delete", "bots.post"], c="mdd", lane=L["bots"], ev="no Rust handler; ios/android room shots (JS hub)")
+R(A, "Status plane (need, run, bots, rooms, routines, machines)", t=["plane_read"], hub="missing", c="mpp", lane=L["bots"], ev="Plane.* is presenter code; no data sources in Rust (bots, routines)")
+R(A, "Uberbot, promotion, sync across machines", m=["bots.uber", "bots.uber_join", "bots.uber_home", "uber.sync"], hub="partial", pf="state", c="mpp", lane=L["state"], ev="state/uber.rs folds UberOp (2 tests); no requests or sync job")
+R(A, "Routines (set, run, delete, schedule, time zones)", m=["bots.routine", "bots.routine_delete", "bots.routine_run", "zone.report", "zone.set"], c="mpp", lane=L["bots"], ev="no Rust handler; hub seeds tz.machine at start only")
+R(A, "Reminders and notifications to the person", m=["bots.answered"], c="mpp", lane=L["bots"], ev="no Rust handler")
+R(A, "Webhooks (bot hooks, /hook/)", r=["/hook/"], c="mpp", lane=L["net"], ev="no route in Rust")
+R(A, "Browser teach and task skills", m=["bots.browser", "bots.teach", "bots.task"], r=["/tasks", "/runs"], c="mpp", lane=L["term"], ev="no Rust handler; TasksView.swift/.kt exist")
+R(A, "Peers: invite, join, unpeer, own", m=["bots.invite", "bots.join", "bots.unpeer", "bots.peer_own"], r=["/bots/pair", "/bots/dir", "/bots/link", "/bots/deliver"], c="mpp", lane=L["net"], ev="no Rust handler or route")
+R(A, "Google sign-in for bots (mail, calendar)", m=["bots.google"], r=["/oauth/google"], c="mpp", lane=L["bots"], ev="no Rust handler or route")
+R(A, "Mail (mail.list/read/find/mark/tag/send, owner.mail)", m=["mail.list", "mail.read", "mail.find", "mail.mark", "mail.tag", "mail.send", "owner.mail"], c="mpp", lane=L["bots"], ev="no Rust handler; Mailroom.swift/.kt exist")
+
+# ---- Project home, ordering
+A = "Project home and ordering"
+R(A, "Project home (goal, intent, parts, boards)", m=["project.home", "project.start", "fab.look", "fab.intent"], hub="partial", c="pdd", lane=L["orders"], ev="fab.look handled in hub.rs (no test); project.home/start, fab.intent not; GPUI shot gpui-light-4-project-home.png (cards, generic nodes)")
+R(A, "Ready to order bar, Buy it, price estimate", m=["fab.look", "order.buy"], c="mpp", lane=L["orders"], ev="order.buy no handler; order server client (orderio) not ported")
+R(A, "Order progress, quote, approvals, notes", m=["order.buy"], c="mpp", lane=L["orders"], ev="no Od.* watcher in Rust")
+R(A, "Manufacturing review (order_review) and .fab.json", t=["order_review"] if False else [], hub="missing", c="mpp", lane=L["orders"], ev="order_review tool absent from the Bend Tool.def list and from Rust; Order.prompt.review is Bend prompt text")
+R(A, "Board picker (several boards)", m=["boards.list"], pf="files", c="mpp", lane=L["files"], ev="files/misc.rs boards.list (kicad/boards.rs 2 tests); picker UI unproven in clients")
+
+# ---- Viewers
+A = "Viewers"
+R(A, "MCP endpoint for agents (/mcp/<thread>.<gen>?k=)", r=["/mcp/"], pf="agents", c="nnn", lane=L["agents"], ev="agents/mcp.rs listener with HMAC key per thread and generation; unit tests hmac, url key")
+R(A, "Board viewer (layers, high contrast, pan/zoom, pick)", m=["kicad.watch", "kicad.info"], pf="plot", c="mdd", lane=L["gview"], ev="Rust plots equal the JS hub byte for byte (plot-2.json); GPUI has no canvas (README gap); phones PlotView (ios vboard.png)")
+R(A, "Schematic viewer, sheets, hierarchy navigation", m=["kicad.watch", "kicad.info"], hub="partial", pf="plot", c="mdd", lane=L["files"], ev="plot-2.json equal; '--plot-tree' sheets not ported (files README); ios vsch.png")
+R(A, "Split view and cross-probing", m=["kicad.watch", "kicad.info"], hub="partial", c="mpp", lane=L["files"], ev="README: not ported yet: web stamps, PWarm, split views; phones PlotView, no shot")
+R(A, "3D board viewer", m=["kicad.watch"], r=["/viewer-asset"], hub="partial", pf="solid", c="mdd", lane=L["gview"], ev="solid/mesh e2e files; /viewer-asset route missing in Rust; ios view.png")
+R(A, "Mech tab: STEP/GLB parts, renders, FreeCAD", m=["mech.list", "mech.render"], pf="files", c="mpp", lane=L["gview"], ev="files/misc.rs; step2glb child; no client shot")
+R(A, "Files tab (list, open, images, PDF, notes)", m=["files.dir", "files.list", "pdf.page"], r=["/img", "/files/get", "/files/zip", "/view/get", "/view/ver", "/view/git"], pf="files", c="mpp", lane=L["gview"], ev="parity-2.json: 175/178 identical (3 deliberate); client FilesView.swift/.kt exist, no shot")
+R(A, "Diff viewer (git.diff)", m=["git.diff"], pf="git", c="mpp", lane=L["gview"], ev="git-1.json; clients unproven")
+R(A, "Design history bar, playback, steps", m=["history.refs"], hub="partial", pf="git", c="mpp", lane=L["files"], ev="Git.step.capture checkpoints not in the Rust list (no step job); history.refs handled")
+R(A, "Compare versions, overlay, Old/Diff/New, per layer", m=["history.resolve", "history.refs", "kicad.warm"], hub="partial", pf="review", c="mpp", lane=L["files"], ev="history.resolve/refs/warm registered; hist/cmp UI unproven")
+R(A, "Review tab: BOM, Checks, Comments, Release", m=["review.bom", "review.checks", "review.tick", "review.comment", "review.release"], pf="review", c="mpp", lane=L["gview"], ev="Rust: 5 requests with tests; ReviewView.swift/.kt exist; GPUI none")
+R(A, "Review comments pinned on board/schematic", m=["review.comment"], t=["review_comment", "review_comments"], c="mpp", lane=L["mcp"], ev="request done, agent tools missing")
+R(A, "Browser tab (agent's page), screen frames", r=["/screen.jpg"], c="mpp", lane=L["term"], ev="no browser helper in Rust")
+R(A, "Viewer layout (split pane, folding, shortcuts)", hub="n/a", c="mpp", lane=L["gview"], ev="client-only; GPUI has no viewer pane")
+R(A, "KiCad over IPC (headless server per project)", m=["kicad.retry", "kicad.install", "kicad.open", "cad.install", "kicad.export10"], t=["kicad_ipc", "kicad_ipc_status"], hub="partial", pf="kipc", c="nnn", lane=L["files"], ev="kicad.retry, kicad.export10 done; kicad.install/open/cad.install not")
+R(A, "KiCad components list, render asset", m=["kicad.components", "kicad.renderAsset"], hub="partial", pf="files", c="mpp", lane=L["files"], ev="kicad.components registered; kicad.renderAsset has no handler")
+R(A, "KiStack skills in every thread, $ list", hub="partial", c="ppp", lane=L["agents"], ev="deploy/kistack shipped; Rust skills.list missing; prompt gating in agents/prompt.rs")
+
+# ---- Git
+A = "Git and PR"
+R(A, "Git status, commit, push, PR (git.act)", m=["git.status", "git.act", "git.diff", "git.revert"], pf="git", c="mpp", lane=L["files"], ev="git-1.json; copy guard refuses writes on copies (copy.rs 15 tests); client buttons unproven")
+R(A, "Worktrees per thread, checkpoints", m=["thread.worktree"], c="ppp", lane=L["cmd"], ev="no Rust handler; thread.create is where worktrees are made")
+
+# ---- Settings
+A = "Settings"
+R(A, "Setting storage and echo (setting.set)", m=["setting.set"], c="mpp", lane=L["sett"], ev="no Rust handler; hub only seeds a few keys; GPUI settings glyph is inert")
+R(A, "Appearance (theme, text size, look)", m=["setting.set"], c="mdd", lane=L["gscreens"], ev="GPUI theme tokens fixed light/dark (theme.rs test); not settable")
+R(A, "Threads page (settle, notify, snooze defaults, scratch days)", m=["setting.set"], c="mpp", lane=L["sett"], ev="no handler")
+R(A, "Agents page (providers, models, CLI install, API keys)", m=["setting.set", "models.refresh", "update.check"], c="mpp", lane=L["sett"], ev="no handler; models list info frames are empty strings in Rust (hub.rs info seed)")
+R(A, "Writing page (text model)", m=["setting.set"], c="mpp", lane=L["sett"], ev="no handler")
+R(A, "CAD page (KiCad install, version, fork)", m=["kicad.install", "cad.install", "kicad.retry"], hub="partial", c="mpp", lane=L["files"], ev="info kicad.* seeded as empty; install not ported")
+R(A, "Ordering page and price estimates", m=["setting.set"], c="mpp", lane=L["orders"], ev="no handler")
+R(A, "Devices page, paired devices, revoke", m=["device.register", "device.drop"], r=["/auth/devices", "/auth/revoke", "/auth/known", "/auth/cache"], hub="partial", c="mpp", lane=L["net"], ev="auth.rs reads devices-v1.json; register/drop/revoke not")
+R(A, "Network page (Tailscale, listen, pairing link)", r=["/auth/pair", "/auth/enroll", "/auth/invitations"], hub="missing", c="mpp", lane=L["net"], ev="info 'tailnet' seeded as off; no tailscale")
+R(A, "Voice page (engine, model, device, dictionary)", m=["bots.voice"], r=["/voice/in"], c="mpp", lane=L["voice"], ev="no Rust handler/route")
+R(A, "API keys (add/drop, api.env)", m=["bots.voice"], c="mpp", lane=L["sett"], ev="goes through bots.voice op api-add: no handler")
+R(A, "Antigravity account and sign-in", m=["bots.voice"], c="mpp", lane=L["msp"], ev="no handler")
+R(A, "Time zone page", m=["zone.report", "zone.set"], c="mpp", lane=L["sett"], ev="no handler")
+R(A, "Usage page and allowance windows", hub="partial", c="mpp", lane=L["sett"], ev="allowance.codex seeded; no updater")
+R(A, "About, version, update check, update now", m=["update.check", "update.now", "app.update"], r=["/hello"], hub="partial", c="mpp", lane=L["sett"], ev="/hello and version in hub.rs; no updater (BACKPLANE_NO_UPDATE)")
+R(A, "Privacy page and telemetry opt-out / reset", m=["telemetry.choice"], hub="missing", c="mpp", lane=L["sett"], ev="telemetry.bend (planner, sender) not ported; info telemetry.* seeded empty")
+R(A, "Settings propose / approve (agent changes)", t=["settings_propose", "settings_inspect"], m=["setting.set"], c="mpp", lane=L["sett"], ev="no handler or tool")
+R(A, "Settings stick across restarts", m=["setting.set"], pf="state", c="ppp", lane=L["sett"], ev="SettingSet events fold in state/mod.rs; nothing writes them from a client")
+
+# ---- Accounts, pairing, machines
+A = "Accounts, pairing, machines"
+R(A, "Pairing token and bearer / cookie auth", r=["/hello", "/ws", "/client/capabilities"], hub="partial", pf="side", c="ddd", lane=L["core"], ev="auth.rs laws; badauth scenario identical (parity-rust6)")
+R(A, "Pairing link, QR code, phone scan", r=["/auth/pair"], hub="missing", c="npp", lane=L["net"], ev="info pair/pair.qr seeded empty in Rust; phones: Pair.swift/Pair.kt scan; android 01-after-pair.png on JS hub")
+R(A, "Wrong pairing, reconnect banners", hub="partial", c="ddd", lane=L["pedge"], ev="badauth identical; android 08a view-failed banner shot")
+R(A, "Your machines, sync, far threads (<link>~<id>)", m=["view.action"], r=["/far/push", "/far/log", "/far/rpc"], hub="missing", c="mpp", lane=L["net"], ev="no far.rs; mirrors, catalog and routing absent")
+R(A, "Agents across machines (mcp.call, thread_send to a machine)", m=["mcp.call"], c="nnn", lane=L["net"], ev="no fmcp port")
+R(A, "Viewers for threads elsewhere (far.view)", hub="missing", c="mpp", lane=L["net"], ev="no fview port")
+R(A, "Window on another hub (remote view cache)", r=["/view/get", "/view/ver", "/view/git"], pf="files", c="pnn", lane=L["files"], ev="routes done in Rust; GPUI joins a hub by URL only")
+R(A, "Multi-hub phone list", hub="n/a", c="npp", lane=L["ios"], ev="client-side Hubs.* in bridge.js; untested against Rust hub")
+
+# ---- Diagnostics, improvements, update, deploy
+A = "Diagnostics, deploy, update"
+R(A, "Diagnostics page and control (diagnostics.status/control)", m=["diagnostics.status", "diagnostics.control"], r=["/debug/diagnostics.json", "/debug/log"], c="mpm", lane=L["sett"], ev="no handler; no Diagnostics code in mobile/android (grep), iOS has two files")
+R(A, "Improvements (report a problem, context)", m=["improvements.context", "improvements.report"], c="mpp", lane=L["sett"], ev="no handler; ImprovementsView.swift/.kt")
+R(A, "Perf endpoint, trace, log levels", r=["/debug/perf"], c="nnn", lane=L["soak"], ev="no /debug/perf in Rust; soak harness measures from outside")
+R(A, "Safe deploy and restart", m=["deploy.restart", "deploy.cancel", "deploy.status"], c="mpp", lane=L["mcp"], ev="no handler; deploy.bend not ported")
+R(A, "Named locks (Locks panel, release/cancel)", m=["lock.release", "lock.cancel"], r=["/lock/"], c="mpp", lane=L["mcp"], ev="no handler")
+R(A, "Work, wake, task watchers (Status rows)", m=["work.cancel", "wake.cancel", "task.cancel"], c="mpp", lane=L["mcp"], ev="no handler")
+R(A, "Device registration and push (APNs, FCM, hooks)", m=["device.register", "device.drop"], hub="missing", c="npp", lane=L["net"], ev="no push.bend port")
+R(A, "Notifications: desk look, desktop notify, islands", m=["desk.look"], c="mpp", lane=L["net"], ev="no handler; iOS Island.swift, Notifier.swift; GPUI none")
+R(A, "Webhook alerts (push.webhook.url)", hub="missing", c="nnn", lane=L["sett"], ev="wnote.bend not ported")
+R(A, "Update (self-update, managed installs)", m=["update.now", "update.check"], c="nnn", lane=L["sett"], ev="no updater")
+
+# ---- Terminal, browser, voice, secrets
+A = "Terminal, browser, voice, secrets"
+R(A, "Terminal in the viewer (pty, VT emulation)", m=["term.open", "term.input", "term.resize", "term.snap", "term.restart"], c="mpp", lane=L["term"], ev="no pty/vt in Rust")
+R(A, "Embedded browser (CEF), browser.place/embed", m=["browser.embed", "browser.place", "browser.seen"], c="npp", lane=L["term"], ev="no helper process in Rust")
+R(A, "Voice dictation, clarify words, Pebble ring", m=["bots.voice"], r=["/voice/in"], c="mpp", lane=L["voice"], ev="no handler; VoiceRecorder.swift/.kt")
+R(A, "Secret box (secret.set/del/list/dismiss, vault)", m=["secret.set", "secret.del", "secret.list", "secret.dismiss"], c="mpp", lane=L["sett"], ev="no vault in Rust; Secret masking of agent lines absent")
+R(A, "Rules and task board (rules.set/drop, board.set/drop)", m=["rules.set", "rules.drop", "board.set", "board.drop"], hub="partial", pf="state", c="mpp", lane=L["state"], ev="agents/rules.rs gates tools; the requests are unhandled; state keeps rule./board. settings")
+R(A, "Told ledger (already told)", hub="partial", pf="state", c="nnn", lane=L["state"], ev="told.* settings kept; tools missing")
+
+# ---- Onboarding, nudge, i18n
+A = "Onboarding and polish"
+R(A, "First-run tour", m=["setting.set"], c="mdd", lane=L["gscreens"], ev="onboard.done is a setting (no handler); ios build-tour.log, tour-timeline.png; android pair shot shows tour")
+R(A, "Star nudge", m=["star.nudge"], pf="state", c="mpp", lane=L["state"], ev="state/star.rs (4 tests); star.nudge request no handler")
+R(A, "Command palette and shortcuts (alt/ctrl digits, hints)", hub="n/a", c="pnn", lane=L["gscreens"], ev="GPUI input.rs bindings only; palette missing")
+R(A, "i18n (en, ja)", hub="partial", c="mdd", lane=L["i18n"], ev="Rust prompt language T::PROMPT_LANG_K; iOS en/ja lproj, Android NativeLocale; GPUI strings are English literals")
+R(A, "Light and dark themes, tokens", hub="n/a", c="dpp", lane=L["gscreens"], ev="GPUI theme.rs tokens, shots light/dark; phones' BackplaneTheme/Design")
+R(A, "Logo and cats art", hub="n/a", c="ddd", lane=L["gscreens"], ev="shots/logo-cats checked by test/gpui/visual/check_logo_cats.py (manifests)")
+R(A, "Window sizes, iPad split, phone layouts", hub="n/a", c="pdd", lane=L["gscreens"], ev="ipad-split.png, android emulator; GPUI fixed layout")
+R(A, "Typing keeps up / streaming smoothness", hub="n/a", c="dpp", lane=L["gthread"], ev="GPUI input latency metrics (README contract); phones measured in results/ios/hubperf, results/android/measure.txt")
+
+# ---- Core hub
+A = "Hub core"
+R(A, "Event store: events.jsonl compatible, torn tail, windowed index", hub="done", pf="state", c="nnn", lane=L["core"], ev="store.rs 28 bytes/event, 1M events 38 MB RSS (HUB-M1.md), restart-boat.txt; read model equals store.db")
+R(A, "WebSocket join, log/changes/live/info frames, ping", r=["/ws"], hub="partial", c="ddd", lane=L["pedge"], ev="join and badauth identical; reconnect 1 difference")
+R(A, "CBOR framing, view.control segmentation (256 KB)", hub="done", pf="hub.rs tests (seg)", c="ddd", lane=L["core"], ev="hub.rs segmented-reply test; android verify-segmented.out on JS hub")
+R(A, "Keyed view deltas (viewDelta)", hub="partial", c="dnn", lane=L["pses"], ev="delta.rs + gpui delta.rs tests; session-gpuid still 42 differences")
+R(A, "Copy guard (BACKPLANE_COPY)", hub="done", pf="copy.rs 15 tests", c="nnn", lane=L["core"], ev="copy.rs, test/gpui/hub/copy_gate.sh")
+R(A, "One hub per home (hub.lock flock)", hub="done", pf="main.rs", c="nnn", lane=L["core"], ev="main.rs takes hub.lock; no e2e result file read")
+R(A, "Startup and memory at scale", hub="done", pf="HUB-M1.md, results/hub", c="nnn", lane=L["soak"], ev="1M events 0.73 s; 24 h soak (M7) not run: gpui-soak lane holds a harness only")
+R(A, "Bend rules sidecar (presenter) process", hub="partial", c="nnn", lane=L["core"], ev="presenter.rs calls bp-policy/window children; without flags the hub answers a canned reply (main.rs)")
+R(A, "Cross-hub import of a Bend hub's log (and back)", hub="done", pf="state", c="nnn", lane=L["state"], ev="model.rs vs store.db fixtures; reverse direction unmeasured")
+# FEATURES_END
+
+
+# ---------------------------------------------------------------- output
+STAT = {"d": "done", "p": "partial", "m": "missing", "n": "n/a"}
+AREAS = []
+for _r in F:
+    if _r["area"] not in AREAS:
+        AREAS.append(_r["area"])
+COLS = ["Rust hub", "GPUI desktop", "iOS", "Android"]
+
+
+def resolve(S):
+    rows = []
+    for r in F:
+        hub, hnote = hub_status(S, r)
+        cs = [STAT[ch] for ch in r["c"]]
+        rows.append(dict(r, hub_s=hub, hub_note=hnote, cl=cs))
+    return rows
+
+
+def counts(rows):
+    out = {}
+    for i, name in enumerate(COLS):
+        c = {"done": 0, "partial": 0, "missing": 0, "n/a": 0}
+        for r in rows:
+            c[r["hub_s"] if i == 0 else r["cl"][i - 1]] += 1
+        out[name] = c
+    return out
+
+
+def blocked(r):
+    return r["hub_s"] in ("partial", "missing") and any(c in ("done", "partial") for c in r["cl"]) and r["hub_s"] != "n/a"
+
+
+def covered(rows):
+    ms = {m for r in rows for m in r["m"]}
+    ts = {t for r in rows for t in r["t"]}
+    rs = {x for r in rows for x in r["r"]}
+    return ms, ts, rs
+
+
+def gate():
+    d = os.path.join(ROOT, "build/gpui/results/parity-rust6/replay-diff.txt")
+    if not os.path.exists(d):
+        return None
+    rows = re.findall(r"^(\S+) (identical|\d+ differences)", open(d).read(), re.M)
+    return [(a, 0 if b == "identical" else int(b.split()[0])) for a, b in rows]
+
+
+def render(S, rows):
+    base = git("rev-parse", "--short", BASE).stdout.strip()
+    head = git("log", "-1", "--format=%h %cs", BASE).stdout.strip()
+    today = datetime.date.today().isoformat()
+    cnt = counts(rows)
+    o = []
+    w = o.append
+    w("# Feature parity: Rust hub and native clients\n")
+    w(f"Generated by `scripts/gpui/parity-features.py --write` on {today} from commit `{base}` (branch `{BASE}`, {head}), "
+      f"{len(rows)} rows. Do not edit the tables by hand: edit `FEATURES` in the script and run it again. "
+      "Hub columns come from the source (registered requests, routes, tools, providers on `gpui` and every `gpui-*` lane branch); "
+      "client columns and evidence are written by hand next to each row in the script.\n")
+    w("Goal (2026-11-05): everything a user can do in today's Backplane works on the Rust hub (`native/host`) with the GPUI desktop, "
+      "iOS and Android clients. No web page; the web client is only the reference for what exists.\n")
+    w("## Counts\n")
+    w("| Column | done | partial | missing | n/a | rows counted |")
+    w("|---|---:|---:|---:|---:|---:|")
+    for k, c in cnt.items():
+        w(f"| {k} | {c['done']} | {c['partial']} | {c['missing']} | {c['n/a']} | {len(rows) - c['n/a']} |")
+    nb = sum(1 for r in rows if blocked(r))
+    w(f"\n{nb} rows carry **[hub-blocked]**: a client column is `done` or `partial` but the Rust hub row is not `done`, so the user cannot do it on the Rust hub yet.\n")
+    w("## Rules for each status\n")
+    w("- **done**: the code is present AND there is evidence it works: a test, a parity scenario, a results file or a screenshot, named in the evidence note. "
+      "A feature only counts for a client when it works against the hub it is judged with.")
+    w("- **partial**: code present without proof (no test, scenario or shot), or proof of only part of the row, or code that exists only on a lane branch that has not landed on `gpui`, "
+      "or a row whose hub path is not yet at protocol parity (see the gate).")
+    w("- **missing**: no code, a stub of 3 lines or less, or the request answers `unknown method`.")
+    w("- **n/a**: the column truly does not apply (a desktop-only or phone-only feature, or a hub-internal row for a client).")
+    w("- **Rust hub column** is derived: `missing` when none of the row's requests/tools/routes/providers is registered anywhere; `partial` when only some are, "
+      "or all are registered but the row names no proof, or the only code is on a lane branch; `done` when every one is registered on `gpui` and the row names a proof. "
+      "Rows without requests carry a hand-written hub status under the same rules. A client never makes a hub row better, and the hub row is not credited because Bend's presenter draws the screen.")
+    w("- The iOS and Android apps run today's Bend client (`bridge.js`) inside native screens, so the code exists for most rows; their proof so far is on the JS hub "
+      "(`build/gpui/shots/{ios,android}`, `build/gpui/results/{ios,android}`), none on the Rust hub. A phone cell is `done` only where a shot or result file shows that feature, otherwise `partial`.\n")
+    w("## Protocol gate (parity differences)\n")
+    g = gate()
+    if g:
+        tot = sum(n for _, n in g)
+        sess = sum(n for a, n in g if a.startswith("session"))
+        w("Source: `build/gpui/results/parity-rust6/replay-diff.txt` (recording A replayed against the Rust hub with the presenter, 2026-11-04 23:40, TZ pinned).\n")
+        w("| scenario | differences |")
+        w("|---|---:|")
+        for a, n in g:
+            w(f"| {a} | {n} |")
+        w(f"| **total** | **{tot}** |\n")
+        w(f"The two figures in use reconcile: **{sess}** are the three session scenarios (3 x 42) and **{tot}** is that plus the one `reconnect` difference "
+          "(origin is a hex hash in Rust, the decimal `at` of the first change in Bend; harness note N19). `badauth` and `join` are identical. "
+          "Per session scenario, 30 of the 42 are the bounded sidebar fields (`nativeSidebar`, `sidebarPages`, `threadsPage`, `settledPage`, `archivedPage`, `snoozedPage`, counts) "
+          "that the JS hub sends and the Rust reply lacks, which is slim's lane (`sidebar.rs`); the rest are empty scratch keys and `view.*` info keys (`build/gpui/results/parity-rust5/GAPS.md`). "
+          "I found no newer diff file than rust6 and no number from `slim` after it: `results/slim` holds timings only, so I cannot confirm that slim's 126 is the same 126 until the coordinator asks `slim` for its latest run. "
+          "The gate is not zero, so every row that depends on `view.*` is at most `partial` on the hub.\n")
+    else:
+        w("`build/gpui/results/parity-rust6/replay-diff.txt` not found; not reconciled.\n")
+    # lanes
+    w("## Lanes\n")
+    w("Owner per group of `missing` or `partial` rows. Existing lanes are from `docs/gpui/LANES.md`; **NEW** lanes are proposals with file ownership "
+      "(one owner per file, own worktree `~/Documents/i2cjak/bp-gpui-lanes/<lane>`, branch `gpui-<lane>`). A lane that needs a request in `main.rs`/`hub.rs` asks the core lane for one `mod` line.\n")
+    LANEFILES = {
+        L["cmd"]: "`native/host/src/commands/` (thread.*, project.*, queue.*, fs.*, attach is files): registers one RpcHandler per family over `Hub::commit_many`; keeps the Bend rules (Fm.safe, settle, fork, queue) in Rust or calls the presenter child",
+        L["sett"]: "`native/host/src/settings/` (setting.set and echo, accounts and fallback, models.refresh, telemetry, diagnostics, improvements, update, secrets vault, API keys, zones, usage, webhook)",
+        L["bots"]: "`native/host/src/bots/` (bots.*, rooms, routines and clock, hooks, space, memory, mail, Google, uber ops, bot tools; `bots` MCP tools registered through the agents lane's tool table)",
+        L["net"]: "`native/host/src/net/` (pairing and /auth/*, QR info, devices, push, far/machines and links, fmcp, /bots/* peers, desk.look, notifications)",
+        L["term"]: "`native/host/src/term/` (pty, VT emulator, terminal tools, embedded terminals, the browser helper process, preview_* tools, teach and task runs)",
+        L["mcp"]: "`native/host/src/agents/tools/` extension file set agreed with the agents lane: work/wake/lock/deploy/secret/settings/task tools and their requests (`work.cancel`, `wake.cancel`, `lock.*`, `deploy.*`)",
+        L["orders"]: "`native/host/src/orders/` (fab.intent, order.buy, orderio watcher, project.home/start, order_review)",
+        L["voice"]: "`native/host/src/voice/` (/voice/in, bots.voice ops, dictionary, key file)",
+        L["i18n"]: "`native/host/src/text/` plus `native/gpui/src/strings.rs` (one string table, en and ja, from `src/core/i18n*`)",
+        L["gscreens"]: "`native/gpui/src/screens/` (settings, onboarding tour, bots, rooms, forms, search field, palette, menus)",
+        L["gview"]: "`native/gpui/src/viewers/` (board, schematic, 3D, Mech, Files, Diff, Review canvases and panes; reads the plot/GLB frames the files lane already serves)",
+        L["gthread"]: "`native/gpui/src/thread/` (timeline rows, folds, asks and approvals, queue, images, attachments, multi-line composer)",
+        L["ios"]: "`test/gpui/ios-rust/` + `mobile/ios` fixes: run the iOS app against the Rust hub on the store-copy-free fixtures and file a shot per row",
+        L["andr"]: "`test/gpui/android-rust/` + `mobile/android` fixes: same for Android",
+    }
+    gl = {"Viewers": L["gview"], "Threads and timeline": L["gthread"], "Git and PR": L["gview"]}
+    by = {}
+    for r in rows:
+        if r["hub_s"] in ("missing", "partial"):
+            by.setdefault(r["lane"], []).append((r, "hub", r["hub_s"]))
+        if r["cl"][0] in ("missing", "partial"):
+            gln = r["lane"] if r["lane"].startswith("NEW gpui") else gl.get(r["area"], L["gscreens"])
+            by.setdefault(gln, []).append((r, "gpui", r["cl"][0]))
+    for lane in sorted(by, key=lambda x: (x.startswith("NEW"), x)):
+        rs = by[lane]
+        hm = sum(1 for r, k, s in rs if k == "hub" and s == "missing")
+        hp = sum(1 for r, k, s in rs if k == "hub" and s == "partial")
+        gm = sum(1 for r, k, s in rs if k == "gpui" and s == "missing")
+        gp = sum(1 for r, k, s in rs if k == "gpui" and s == "partial")
+        w(f"### {lane}\n")
+        if lane.startswith("NEW"):
+            w(f"Proposed. Owns: {LANEFILES.get(lane, '(files to be agreed)')}.\n")
+        w(f"Rust hub: {hm} missing, {hp} partial. GPUI desktop: {gm} missing, {gp} partial.\n")
+        for r, k, s in rs:
+            w(f"- {r['area']} / {r['name']}: {k} {s}")
+        w("")
+    ph = [r for r in rows if any(c in ("missing", "partial") for c in r["cl"][1:])]
+    w(f"### NEW ios-rust and NEW android-rust\n")
+    w(f"Proposed. Own {LANEFILES[L['ios']]}; and {LANEFILES[L['andr']]}.\n")
+    w(f"{len(ph)} rows have a phone cell that is not `done`; the cell is `partial` because the shipped app has the code but nothing was run against the Rust hub, or `missing` where the app has no code "
+      "(Android Diagnostics). Their work is not blocked on new hub code for the rows whose hub cell is already `done` (files, git, review, kicad IPC, send/stop/ask): run those first. "
+      "Every other row waits for its hub lane above.\n")
+    w("Existing lanes with nothing to do on this list: `soak` owns the 24 h run (M7), which has not run; `parity-session` and `parity-edge` own the 127-difference gate.\n")
+    # tables
+    w("## Checklist\n")
+    w("Columns: Rust hub, GPUI desktop, iOS, Android. `[hub-blocked]` as defined above.\n")
+    for area in AREAS:
+        w(f"### {area}\n")
+        w("| Feature | Rust hub | GPUI | iOS | Android | Evidence |")
+        w("|---|---|---|---|---|---|")
+        for r in rows:
+            if r["area"] != area:
+                continue
+            flag = " **[hub-blocked]**" if blocked(r) else ""
+            ev = r["ev"].replace("|", "/")
+            if r["hub_note"]:
+                ev += " (hub: " + r["hub_note"].replace("|", "/") + ")"
+            if r["proof"] and r["hub_s"] == "done":
+                ev += " Proof: " + str(r["proof"]).replace("|", "/") + "."
+            w(f"| {r['name'].replace('|', '/')}{flag} | {r['hub_s']} | {r['cl'][0]} | {r['cl'][1]} | {r['cl'][2]} | {ev} |")
+        w("")
+    # coverage appendices
+    ms, ts, rs = covered(rows)
+    w("## Appendix: requests, tools and routes (generated)\n")
+    w("Every Bend request method, MCP tool and HTTP route, and where the Rust hub has it (`gpui` = landed, `gpui-<lane>` = only on that branch, blank = unknown method).\n")
+    w("| Request | Bend source | Rust |")
+    w("|---|---|---|")
+    for m, src in S["bend_methods"].items():
+        wh = where(S, "m", m)
+        w(f"| `{m}` | {', '.join(src)} | {wh.replace('base', 'gpui') or '**none**'} |")
+    w("\n| MCP tool | Rust |")
+    w("|---|---|")
+    for t_ in sorted(S["bend_tools"]):
+        wh = where(S, "t", t_)
+        w(f"| `{t_}` | {wh.replace('base', 'gpui') or '**none**'} |")
+    w("\n| Route | Rust |")
+    w("|---|---|")
+    rr = set(S["bend_routes"]) | set(S["rust"]["routes"])
+    for x in sorted(rr):
+        wh = where(S, "r", x)
+        w(f"| `{x}` | {wh.replace('base', 'gpui') or ('core (wire/auth)' if x in ('/hello', '/ws', '/client/capabilities') else '**none**')} |")
+    w("\n| Provider | gpui lines | lane branches with code |")
+    w("|---|---:|---|")
+    for p_ in sorted(set(S["rust"]["providers"]) | {"claude"}):
+        ln = S["rust"]["providers"].get(p_, "core (agents/proc.rs)")
+        lb = ",".join(b for b, v in S["lanes"].items() if v["providers"].get(p_, 0) > 5 and not (S["rust"]["providers"].get(p_, 0) > 5))
+        w(f"| {p_} | {ln} | {lb} |")
+    return "\n".join(o) + "\n"
+
+
+def check(S, rows):
+    ms, ts, rs = covered(rows)
+    bad = []
+    skip_m = {"view.get", "view.ver", "view.send", "view.body", "mobile.screen", "mobile.history", "frontend.screen", "frontend.history",
+              "view.error", "view.show"}
+    unc_m = [m for m in S["bend_methods"] if m not in ms and m not in skip_m]
+    unc_t = [t for t in S["bend_tools"] if t not in ts]
+    unc_r = [r for r in S["bend_routes"] if r not in rs and r not in ("/plot/info",)]  # /plot/info: the web client only
+    unk = [x for x in ms if x not in S["bend_methods"]] + [x for x in ts if x not in S["bend_tools"]]
+    for h in F:
+        if h["hub"] == "done" and not h["proof"] and not (h["m"] or h["t"] or h["r"] or h["prov"]):
+            bad.append("hub done without proof: " + h["name"])
+    return unc_m, unc_t, unc_r, unk, bad
+
+
+if __name__ == "__main__":
+    S = collect()
+    rows = resolve(S)
+    if "--sets" in sys.argv:
+        print(json.dumps(S, indent=1))
+    elif "--check" in sys.argv:
+        um, ut, ur, unk, bad = check(S, rows)
+        print("uncovered requests:", um)
+        print("uncovered tools:", ut)
+        print("uncovered routes:", ur)
+        print("rows naming something Bend does not have:", unk)
+        print("problems:", bad)
+        sys.exit(1 if (um or ut or ur or unk or bad) else 0)
+    else:
+        text = render(S, rows)
+        if "--write" in sys.argv:
+            open(os.path.join(ROOT, "docs/gpui/PARITY.md"), "w").write(text)
+            print("wrote docs/gpui/PARITY.md", len(text), "bytes;", {k: v for k, v in counts(rows).items()})
+        else:
+            print(text)
