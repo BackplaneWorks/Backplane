@@ -271,6 +271,7 @@ impl Render for Backplane {
         // the Mechanical page's parts are controls too (the harness presses them by index)
         for (i, p) in crate::screens::viewer::mech_parts(&thread["viewer"]).into_iter().enumerate() { ctl.push(CtlEntry { id: format!("mech-part-{i}"), label: p.label, ctl: Ctl::Node("mech-part".into(), p.value) }); }
         // controls with no handler yet are registered too, so the harness finds them dead instead of missing
+        for (id, label, c) in crate::screens::tools::controls(&self.data, self.screens.menu_open) { ctl.push(CtlEntry { id, label, ctl: c }); }
         ctl.push(CtlEntry { id: "ui:Settings".into(), label: "Settings".into(), ctl: Ctl::Node("flag".into(), "settings".into()) });
         if let Some(p) = self.data["projects"].as_array().and_then(|p| p.first()) { let id = string(p, "id"); let id = id.rsplit_once('|').map_or(id.as_str(), |(_, r)| r).to_string(); ctl.push(CtlEntry { id: "ui:New thread".into(), label: "New thread".into(), ctl: Ctl::Node("new-thread".into(), id) }); }
         ctl.push(CtlEntry { id: "send".into(), label: "Send".into(), ctl: Ctl::Send });
