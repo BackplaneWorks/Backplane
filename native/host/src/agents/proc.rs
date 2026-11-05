@@ -69,6 +69,18 @@ static OWNER: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 /// Every agent process carries BACKPLANE_AGENT_OWNER=<home>: after a hub is SIGKILLed (the kernel kills the agent itself, PDEATHSIG, but not what it
 /// started), the next hub on that home ends what is left. One hub per home, so nothing live is taken.
 pub fn set_owner(home: &str) { let _ = OWNER.set(home.to_string()); }
+/// Whether `me` is an ancestor of `pid` (parent chain from /proc/<pid>/stat, bounded).
+#[cfg(target_os = "linux")]
+fn descends_from(pid: u32, me: u32) -> bool {
+    let mut cur = pid;
+    for _ in 0..16 {
+        let Ok(s) = std::fs::read_to_string(format!("/proc/{cur}/stat")) else { return false };
+        let Some(rest) = s.rsplit_once(')').map(|x| x.1) else { return false };
+        let ppid: u32 = rest.split_whitespace().nth(1).and_then(|x| x.parse().ok()).unwrap_or(0);
+        if ppid == me { return true } if ppid <= 1 { return false } cur = ppid;
+    }
+    false
+}
 /// Linux: the process table is /proc, each environment is /proc/<pid>/environ.
 #[cfg(target_os = "linux")]
 pub fn reap_orphans(home: &str) -> usize {
@@ -77,7 +89,9 @@ pub fn reap_orphans(home: &str) -> usize {
     for e in rd.flatten() {
         let Some(pid) = e.file_name().to_str().and_then(|s| s.parse::<u32>().ok()) else { continue }; if pid == me { continue }
         let Ok(env) = std::fs::read(format!("/proc/{pid}/environ")) else { continue };
-        if env.split(|b| *b == 0).any(|kv| kv == mark.as_slice()) { unsafe { libc::kill(pid as i32, libc::SIGKILL); } n += 1 }
+        if !env.split(|b| *b == 0).any(|kv| kv == mark.as_slice()) { continue }
+        if descends_from(pid, me) { continue } // this process's own agents are not orphans (only a previous hub's, reparented, are)
+        unsafe { libc::kill(pid as i32, libc::SIGKILL); } n += 1
     }
     n
 }
@@ -129,6 +143,13 @@ pub fn alive(pid: u32) -> bool { pid > 0 && unsafe { libc::kill(pid as i32, 0) }
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "linux")]
+    #[test] fn reaping_leftovers_never_takes_this_processs_own_agents() { // two hubs' tests in one binary: a marked child of ours is not a dead hub's orphan
+        let mut c = crate::proc::std_cmd(crate::proc::Kind::Local, "sleep"); c.arg("30").env("BACKPLANE_AGENT_OWNER", "reap-own-test-home");
+        let mut child = c.spawn().unwrap(); let pid = child.id();
+        assert_eq!(reap_orphans("reap-own-test-home"), 0, "our own child is left alone"); assert!(alive(pid));
+        let _ = child.kill(); let _ = child.wait();
+    }
     use super::*;
     fn dir(name: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-agents-{}-{}", std::process::id(), name)); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
     fn script(d: &Path, name: &str, body: &str) -> PathBuf { use std::os::unix::fs::PermissionsExt; let p = d.join(name); std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap(); std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap(); p }
