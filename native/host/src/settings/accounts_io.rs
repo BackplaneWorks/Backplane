@@ -34,6 +34,23 @@ pub fn new_id() -> String {
 fn fingerprint(profile: &str, identity: &Value) -> String { use sha2::{Digest, Sha256}; hex::encode(Sha256::digest(json!([profile, identity]).to_string().as_bytes())) }
 fn failure_text(reason: &str) -> String { FAILURES.iter().find(|(k, _)| *k == reason).map_or(SIGNIN_DEFAULT, |(_, v)| *v).to_string() }
 
+/// `application/x-www-form-urlencoded` decoding of one query component: `+` is a space, `%XX` a byte (what `URL.searchParams` does before keys are compared).
+fn form_decode(c: &str) -> String {
+    let b = c.as_bytes(); let mut out = Vec::with_capacity(b.len()); let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'+' => { out.push(b' '); i += 1 }
+            b'%' if i + 2 < b.len() + 0 && b[i + 1].is_ascii_hexdigit() && b[i + 2].is_ascii_hexdigit() => { out.push(u8::from_str_radix(&c[i + 1..i + 3], 16).unwrap_or(b'%')); i += 3 }
+            x => { out.push(x); i += 1 }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+/// The decoded query pairs of a link (the fragment is not part of the query).
+pub fn query_pairs(url: &str) -> Vec<(String, String)> {
+    let q = url.split_once('?').map(|(_, q)| q.split('#').next().unwrap_or("")).unwrap_or("");
+    q.split('&').filter(|s| !s.is_empty()).map(|kv| { let (k, v) = kv.split_once('=').unwrap_or((kv, "")); (form_decode(k), form_decode(v)) }).collect()
+}
 /// A sign-in link the person may be sent to: https on the provider's own hosts, no credentials in it (accounts.js `url`).
 pub fn sign_in_url(value: &str, provider: &str) -> String {
     let Some(rest) = value.strip_prefix("https://") else { return String::new() };
@@ -41,13 +58,12 @@ pub fn sign_in_url(value: &str, provider: &str) -> String {
     if host_port.contains('@') || host_port.contains(':') || value.len() > 8192 || value.chars().any(|c| c.is_whitespace() || c.is_control()) { return String::new() }
     let hosts: &[&str] = if provider == "codex" { &["auth.openai.com", "chatgpt.com"] } else { &["claude.ai", "claude.com", "platform.claude.com", "console.anthropic.com"] };
     if !hosts.contains(&host_port) { return String::new() }
-    let q = path_q.split_once('?').map(|(_, q)| q.split('#').next().unwrap_or("")).unwrap_or("");
-    let pairs: Vec<(&str, &str)> = q.split('&').filter(|s| !s.is_empty()).map(|s| s.split_once('=').unwrap_or((s, ""))).collect();
-    if pairs.iter().any(|(k, _)| *k == "access_token" || *k == "refresh_token") { return String::new() }
-    let codes: Vec<&&str> = pairs.iter().filter(|(k, _)| *k == "code").map(|(_, v)| v).collect();
+    let pairs = query_pairs(value);
+    if pairs.iter().any(|(k, _)| k == "access_token" || k == "refresh_token") { return String::new() }
+    let codes: Vec<&String> = pairs.iter().filter(|(k, _)| k == "code").map(|(_, v)| v).collect();
     let path = path_q.split(['?', '#']).next().unwrap_or("");
     // Claude Code's authorization link uses code=true to request its code entry flow; that boolean is not an OAuth callback's code.
-    let claude_flow = provider == "claude" && host_port == "claude.com" && path == "/cai/oauth/authorize" && codes.len() == 1 && *codes[0] == "true";
+    let claude_flow = provider == "claude" && host_port == "claude.com" && path == "/cai/oauth/authorize" && codes.len() == 1 && codes[0].as_str() == "true";
     if !codes.is_empty() && !claude_flow { return String::new() }
     value.to_string()
 }
@@ -70,12 +86,12 @@ impl Profile {
         json!({"id":self.id,"provider":self.provider,"label":self.label,"epoch":self.epoch,"state":self.state,"identity":self.identity,"checkedAt":self.checked_at,"catalog":self.catalog,"allowance":allowance,"message":self.message})
     }
 }
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 struct Attempt { id: String, profile: String, state: String, url: String, user_code: String, expires_at: u64, message: String, previous_state: String, store: String }
 
 enum Cmd { Respond(String), Cancel }
 #[derive(Default)]
-struct Inner { profiles: Vec<Profile>, attempts: Vec<Attempt>, jobs: HashMap<String, String>, cmds: HashMap<String, mpsc::UnboundedSender<Cmd>>, revision: u64, load_error: String, default_allowance: Option<Value>, default_identity: String, refresh_at: HashMap<String, u64>, busy: HashMap<String, usize> }
+struct Inner { profiles: Vec<Profile>, attempts: Vec<Attempt>, jobs: HashMap<String, String>, cmds: HashMap<String, mpsc::UnboundedSender<Cmd>>, revision: u64, load_error: String, default_allowance: Option<Value>, default_identity: String, refresh_at: HashMap<String, u64>, busy: HashMap<String, usize>, launching: HashMap<String, usize>, launch_locks: HashMap<String, Arc<tokio::sync::Mutex<()>>> }
 
 pub struct Accounts { root: PathBuf, inner: Mutex<Inner>, resolve: Arc<dyn Fn(&str) -> Result<PathBuf, String> + Send + Sync> }
 
@@ -93,10 +109,10 @@ fn private_dir(dir: &Path) -> std::io::Result<()> {
 /// Codex's app-server over JSON lines on stdio: requests with ids, notifications to a channel. Closed after its timeout.
 struct Rpc { stdin: ChildStdin, next: u64, pending: Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Value, ()>>>>>, notes: mpsc::UnboundedReceiver<Value>, child: Child }
 impl Rpc {
-    async fn open(prog: &Path, env: &[(String, String)], clear: bool) -> Result<Rpc, ()> {
+    async fn open(prog: &Path, env: &[(String, String)], named: bool) -> Result<Rpc, ()> {
         let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Agent, prog);
         c.args(["-c", "cli_auth_credentials_store=\"file\"", "-c", "features.daemon_auto_start=false", "-c", "analytics.enabled=false", "app-server", "--listen", "stdio://"]);
-        apply_env(&mut c, env, clear);
+        apply_env(&mut c, env, named);
         c.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).kill_on_drop(true);
         let mut child = c.spawn().map_err(|_| ())?;
         let (stdin, stdout) = (child.stdin.take().ok_or(())?, child.stdout.take().ok_or(())?);
@@ -126,10 +142,12 @@ impl Rpc {
         self.request("initialize", json!({"clientInfo":{"name":"backplane_accounts","version":"1"},"capabilities":{"experimentalApi":true}}), 12).await?;
         self.stdin.write_all(b"{\"method\":\"initialized\",\"params\":{}}\n").await.map_err(|_| ())
     }
-    fn close(mut self) { let _ = self.child.start_kill(); }
+    async fn close(mut self) { let _ = self.child.start_kill(); let _ = self.child.wait().await; }
 }
-fn apply_env(c: &mut tokio::process::Command, env: &[(String, String)], _clear: bool) {
-    for (k, _) in std::env::vars() { if unset_env(&k) { c.env_remove(&k); } }
+/// The host's environment, minus every provider credential variable when the child is a NAMED profile's (its own store is then put in). The CLI's own login
+/// (`named` false) keeps the host's environment as it is, as the JS hub's `environment(null)` does.
+fn apply_env(c: &mut tokio::process::Command, env: &[(String, String)], named: bool) {
+    if named { for (k, _) in std::env::vars_os() { if let Some(k) = k.to_str() { if unset_env(k) { c.env_remove(k); } } } }
     for (k, v) in env { c.env(k, v); }
 }
 
@@ -160,12 +178,22 @@ impl Accounts {
         }
         Accounts { root, inner: Mutex::new(inner), resolve }
     }
-    fn save(&self, g: &mut Inner) {
+    /// Writes the registry (temp file, then rename). The revision moves only when the file is good; a failure is the op's failure.
+    fn save(&self, g: &mut Inner) -> Result<(), ()> {
         let body = json!({"version":1,"profiles":g.profiles.iter().map(|p| json!({"id":p.id,"provider":p.provider,"label":p.label,"epoch":p.epoch,"fingerprint":p.fingerprint,"store":p.store})).collect::<Vec<_>>()}).to_string();
         let tmp = self.root.join(format!("profiles.json.{}.tmp", new_id()));
-        let w = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp).and_then(|mut f| std::io::Write::write_all(&mut f, body.as_bytes())).and_then(|_| std::fs::rename(&tmp, self.root.join("profiles.json")));
-        if w.is_err() { let _ = std::fs::remove_file(&tmp); }
-        g.revision += 1;
+        let w = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp).and_then(|mut f| { std::io::Write::write_all(&mut f, body.as_bytes())?; f.sync_all() }).and_then(|_| std::fs::rename(&tmp, self.root.join("profiles.json")));
+        if w.is_err() { let _ = std::fs::remove_file(&tmp); return Err(()) }
+        g.revision += 1; Ok(())
+    }
+    /// One profile changed and the registry written.
+    fn update(&self, id: &str, f: impl FnOnce(&mut Profile)) -> Result<(), ()> { self.mutate_save(|g| { if let Some(p) = g.profiles.iter_mut().find(|p| p.id == id) { f(p) } }) }
+    /// Change the profiles and write them; if the write fails the profiles are as they were.
+    fn mutate_save(&self, f: impl FnOnce(&mut Inner)) -> Result<(), ()> {
+        let mut g = self.inner.lock().unwrap(); let backup = g.profiles.clone(); let (rev, atts) = (g.revision, g.attempts.clone());
+        f(&mut g);
+        if self.save(&mut g).is_err() { g.profiles = backup; g.revision = rev; g.attempts = atts; return Err(()) }
+        Ok(())
     }
     /// The profile's private directory (made 0700): its store inside when it has one.
     pub fn directory(&self, p: &Profile) -> std::io::Result<PathBuf> {
@@ -180,19 +208,21 @@ impl Accounts {
         if let Ok(m) = std::fs::symlink_metadata(&d) { if m.is_dir() && !m.file_type().is_symlink() { let _ = std::fs::remove_dir_all(&d); } }
     }
     /// The environment a profile's CLI runs with: the host's, minus every provider credential variable, plus the profile's own store.
-    pub fn environment(&self, p: Option<&Profile>) -> Vec<(String, String)> {
-        let Some(p) = p else { return vec![] };
+    pub fn environment(&self, p: Option<&Profile>) -> Result<Vec<(String, String)>, ()> {
+        let Some(p) = p else { return Ok(vec![]) };
         let mut env: Vec<(String, String)> = vec![("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".into(), "1".into()), ("DISABLE_AUTOUPDATER".into(), "1".into()), ("MCP_TOOL_TIMEOUT".into(), "86400000".into()), ("CLAUDE_CODE_ENABLE_TODO_TOOLS".into(), "1".into())];
-        let dir = self.directory(p).map(|d| d.to_string_lossy().to_string()).unwrap_or_default();
+        // a store that cannot be made or verified is a failure of the op: an empty value would let the CLI fall back to the person's own login
+        let dir = self.directory(p).map_err(|_| ())?.to_string_lossy().to_string();
+        if dir.is_empty() { return Err(()) }
         if p.provider == "codex" { env.push(("CODEX_HOME".into(), dir)); env.push(("RUST_LOG".into(), "error".into())); } else { env.push(("CLAUDE_CONFIG_DIR".into(), dir)); }
-        env
+        Ok(env)
     }
 
     /// One-shot `<provider> <args>`: stdout JSON (not for logout), 12 s, 128 KB.
     async fn cli(&self, p: Option<&Profile>, program: &str, args: &[&str]) -> Result<(i32, Value), ()> {
         let prog = (self.resolve)(program).map_err(|_| ())?;
         let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Agent, &prog);
-        c.args(args); apply_env(&mut c, &self.environment(p), true);
+        c.args(args); c.current_dir(&self.root); apply_env(&mut c, &self.environment(p)?, p.is_some());
         c.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).kill_on_drop(true);
         let mut child = c.spawn().map_err(|_| ())?;
         let mut out = child.stdout.take().ok_or(())?;
@@ -209,7 +239,7 @@ impl Accounts {
         let prog = (self.resolve)("claude").ok()?;
         let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Agent, &prog);
         c.args(["--setting-sources", "user", "--settings", "{\"forceLoginMethod\":\"claudeai\"}", "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"]);
-        apply_env(&mut c, &self.environment(p), true);
+        c.current_dir(&self.root); apply_env(&mut c, &self.environment(p).ok()?, p.is_some());
         c.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).kill_on_drop(true);
         let mut child = c.spawn().ok()?;
         let (mut stdin, stdout) = (child.stdin.take()?, child.stdout.take()?);
@@ -289,7 +319,7 @@ impl Accounts {
             }
         } else {
             let prog = (self.resolve)("codex")?;
-            let mut rpc = Rpc::open(&prog, &self.environment(Some(&p)), true).await.map_err(|_| "Codex could not start".to_string())?;
+            let mut rpc = Rpc::open(&prog, &self.environment(Some(&p)).map_err(|_| "Codex could not start".to_string())?, true).await.map_err(|_| "Codex could not start".to_string())?;
             let r = async {
                 rpc.initialize().await?;
                 let a = rpc.request("account/read", json!({"refreshToken":false}), 12).await?;
@@ -307,7 +337,7 @@ impl Accounts {
                 let al = if fresh || windows.is_empty() { p.allowance.clone() } else { Some(json!({"provider":"codex","state":"ok","at":n,"attempted_at":n,"auth":"chatgpt","source":"codex-app-server","windows":windows})) };
                 Ok::<_, ()>((ident, fp, cat, al))
             }.await;
-            rpc.close();
+            rpc.close().await;
             let (i, f, c, a) = r.map_err(|_| "Codex ChatGPT sign-in could not be verified".to_string())?;
             identity = i; fp_identity = f; catalog = c; allowance = a;
         }
@@ -349,8 +379,12 @@ impl Accounts {
     pub fn child_started(&self, id: &str) { *self.inner.lock().unwrap().busy.entry(id.to_string()).or_insert(0) += 1 }
     pub fn child_ended(&self, id: &str) { let mut g = self.inner.lock().unwrap(); if let Some(n) = g.busy.get_mut(id) { *n = n.saturating_sub(1); if *n == 0 { g.busy.remove(id); } } }
 
-    fn begin(&self, id: &str, what: &str) -> Result<(), ()> {
-        let mut g = self.inner.lock().unwrap(); if g.jobs.contains_key(id) || g.busy.get(id).copied().unwrap_or(0) > 0 { return Err(()) } g.jobs.insert(id.to_string(), what.to_string()); Ok(())
+    /// A request on a profile: refused while another is in progress, or a launch is queued (accounts.js `jobs` / `launchQueues`). `check_busy`: also while a provider
+    /// child (a turn) runs on it; only login and refresh ask that (disconnect and remove check it themselves), a status, a rename and a launch do not.
+    fn begin(&self, id: &str, what: &str, check_busy: bool) -> Result<(), ()> {
+        let mut g = self.inner.lock().unwrap();
+        if g.jobs.contains_key(id) || g.launching.get(id).copied().unwrap_or(0) > 0 || (check_busy && g.busy.get(id).copied().unwrap_or(0) > 0) { return Err(()) }
+        g.jobs.insert(id.to_string(), what.to_string()); Ok(())
     }
     fn end(&self, id: &str, what: &str) { let mut g = self.inner.lock().unwrap(); if g.jobs.get(id).map(String::as_str) == Some(what) { g.jobs.remove(id); } }
 
@@ -377,7 +411,7 @@ impl Accounts {
             if !matches!(provider, "claude" | "codex") || lab.is_empty() || g.profiles.len() >= 12 { return Err(None) }
             let p = Profile { id: new_id(), provider: provider.into(), label: lab, epoch: 1, fingerprint: String::new(), store: String::new(), state: "disconnected".into(), identity: json!({}), catalog: vec![], allowance: None, checked_at: 0, message: String::new() };
             self.directory(&p).map_err(|_| None)?;
-            g.profiles.push(p); self.save(&mut g); drop(g); return Ok(self.snapshot());
+            g.profiles.push(p); if self.save(&mut g).is_err() { g.profiles.pop(); return Err(None) } drop(g); return Ok(self.snapshot());
         }
         let pid = r["profile"].as_str().unwrap_or("").to_string();
         let p = self.profile(&pid).map_err(|_| None)?;
@@ -393,7 +427,7 @@ impl Accounts {
                 let ok = att.as_ref().map_or(false, |a| g_job_is(&self.inner, &pid, aid) && a.state == "waiting" && now_ms() < a.expires_at) && p.provider == "claude" && code.len() <= 4096 && !code.contains(['\r', '\n', '\0']);
                 if !ok { return Err(None) }
                 let att = att.unwrap(); let parts: Vec<&str> = code.trim().split('#').collect();
-                let state = att.url.split_once('?').map(|(_, q)| q).unwrap_or("").split('&').find_map(|kv| kv.strip_prefix("state=")).unwrap_or("").to_string();
+                let state = query_pairs(&att.url).into_iter().find(|(k, _)| k == "state").map(|(_, v)| v).unwrap_or_default();
                 let error = if parts.len() != 2 || parts[0].is_empty() || parts[1].is_empty() { "Paste the complete authentication code from Claude's sign-in page, including # and everything after it. API keys and setup-tokens cannot complete this sign-in." }
                     else if state.is_empty() || parts[1] != state { "That code belongs to a different sign-in attempt. Open this attempt's provider sign-in link and copy its new authentication code." } else { "" };
                 if !error.is_empty() { { let mut g = self.inner.lock().unwrap(); if let Some(a) = g.attempts.iter_mut().find(|a| a.id == aid) { a.message = error.into() } g.revision += 1; } let mut s = self.snapshot(); s["error"] = json!(error); return Ok(s) }
@@ -405,12 +439,12 @@ impl Accounts {
             "login" => { self.start(&p, r["mode"].as_str().unwrap_or("device")).await.map_err(|_| None)?; return Ok(self.snapshot()) }
             _ => {}
         }
-        self.begin(&pid, "status").map_err(|_| None)?;
+        self.begin(&pid, "status", false).map_err(|_| None)?;
         let res: Result<(), ()> = async {
             match op {
                 "status" => {
                     match self.verify(&p, false).await {
-                        Ok(np) => { self.with_profile(&pid, |slot, g| { *slot = np; g.revision += 1; }); self.save_now(); }
+                        Ok(np) => { self.update(&pid, |slot| *slot = np)?; }
                         Err(_) => { self.with_profile(&pid, |slot, g| { slot.state = "disconnected".into(); slot.identity = json!({}); slot.catalog = vec![]; slot.allowance = None; slot.message = "Account status could not be verified.".into(); g.revision += 1; }); }
                     }
                     Ok(())
@@ -418,16 +452,17 @@ impl Accounts {
                 "disconnect" => {
                     if self.busy(&pid) { return Err(()) }
                     if p.provider == "claude" { let (code, _) = self.cli(Some(&p), "claude", &["auth", "logout"]).await?; if code != 0 { return Err(()) } }
-                    else { let prog = (self.resolve)("codex").map_err(|_| ())?; let mut rpc = Rpc::open(&prog, &self.environment(Some(&p)), true).await?; let r = async { rpc.initialize().await?; rpc.request("account/logout", json!({}), 12).await.map(|_| ()) }.await; rpc.close(); r?; }
-                    self.with_profile(&pid, |slot, _| { slot.epoch += 1; slot.state = "disconnected".into(); slot.fingerprint.clear(); slot.identity = json!({}); slot.catalog = vec![]; slot.allowance = None; });
-                    self.save_now(); self.remove_store(&pid, &p.store); Ok(())
+                    else { let prog = (self.resolve)("codex").map_err(|_| ())?; let mut rpc = Rpc::open(&prog, &self.environment(Some(&p))?, true).await?; let r = async { rpc.initialize().await?; rpc.request("account/logout", json!({}), 12).await.map(|_| ()) }.await; rpc.close().await; r?; }
+                    // the registry is written first: a store is removed only once the file no longer names it
+                    self.update(&pid, |slot| { slot.epoch += 1; slot.state = "disconnected".into(); slot.fingerprint.clear(); slot.identity = json!({}); slot.catalog = vec![]; slot.allowance = None; })?;
+                    self.remove_store(&pid, &p.store); Ok(())
                 }
-                "rename" => { let l = label(r["label"].as_str().unwrap_or("")); if l.is_empty() { return Err(()) } self.with_profile(&pid, |slot, _| slot.label = l); self.save_now(); Ok(()) }
+                "rename" => { let l = label(r["label"].as_str().unwrap_or("")); if l.is_empty() { return Err(()) } self.update(&pid, |slot| slot.label = l) }
                 "remove" => {
                     if self.busy(&pid) { return Err(()) }
-                    let base = self.root.join(&pid); private_dir(&base).map_err(|_| ())?; let _ = std::fs::remove_dir_all(&base);
-                    { let mut g = self.inner.lock().unwrap(); g.profiles.retain(|x| x.id != pid); g.attempts.retain(|a| a.profile != pid); self.save(&mut g); }
-                    Ok(())
+                    let base = self.root.join(&pid); private_dir(&base).map_err(|_| ())?;
+                    self.mutate_save(|g| { g.profiles.retain(|x| x.id != pid); g.attempts.retain(|a| a.profile != pid); })?;
+                    let _ = std::fs::remove_dir_all(&base); Ok(())
                 }
                 _ => Err(()),
             }
@@ -435,7 +470,6 @@ impl Accounts {
         self.end(&pid, "status");
         res.map(|_| self.snapshot()).map_err(|_| None)
     }
-    fn save_now(&self) { let mut g = self.inner.lock().unwrap(); self.save(&mut g) }
     // ---- sign-in attempts ----
     async fn start(self: &Arc<Self>, p: &Profile, mode: &str) -> Result<(), ()> {
         let aid = new_id();
@@ -467,8 +501,14 @@ impl Accounts {
         { let a = &mut g.attempts[i]; a.state = state.into(); a.url.clear(); a.user_code.clear(); a.message = if state == "failed" { failure_text(reason) } else { String::new() }; }
         let active = g.profiles.iter().find(|p| p.id == prof).map(|p| p.store.clone()).unwrap_or_default();
         if let Some(slot) = g.profiles.iter_mut().find(|p| p.id == prof) { slot.state = prev }
-        g.revision += 1; g.cmds.remove(aid); drop(g);
-        if store != active { self.remove_store(&prof, &store); }
+        g.revision += 1; g.cmds.remove(aid); let _ = (store, active);
+        // the candidate store is removed when the attempt's child is gone (`discard`): a CLI finishing a sign-in must not recreate credentials after the delete
+    }
+    /// The attempt ended and its provider child with it: its candidate store goes unless it became the profile's.
+    fn discard(&self, aid: &str) {
+        let (prof, store, active, done) = { let g = self.inner.lock().unwrap(); let Some(a) = g.attempts.iter().find(|a| a.id == aid) else { return };
+            (a.profile.clone(), a.store.clone(), g.profiles.iter().find(|p| p.id == a.profile).map(|p| p.store.clone()).unwrap_or_default(), a.state == "done") };
+        if !done && store != active { self.remove_store(&prof, &store); }
     }
     async fn finish(self: &Arc<Self>, aid: &str, cand: &Profile, success: bool, reason: &str) {
         let Some(a) = self.current(aid) else { return };
@@ -477,22 +517,25 @@ impl Accounts {
         match self.verify(cand, true).await {
             Ok(np) => {
                 if self.current(aid).is_none() { return }
-                let mut g = self.inner.lock().unwrap();
-                let Some(slot) = g.profiles.iter_mut().find(|p| p.id == a.profile) else { return };
-                let old_store = slot.store.clone(); *slot = np; slot.store = a.store.clone();
-                g.jobs.remove(&a.profile); g.cmds.remove(aid);
-                if let Some(att) = g.attempts.iter_mut().find(|x| x.id == aid) { att.state = "done".into(); att.url.clear(); att.user_code.clear(); }
-                self.save(&mut g); drop(g);
+                let old_store = self.profile(&a.profile).map(|p| p.store).unwrap_or_default();
+                let saved = self.mutate_save(|g| { if let Some(slot) = g.profiles.iter_mut().find(|p| p.id == a.profile) { *slot = np.clone(); slot.store = a.store.clone(); } });
+                if saved.is_err() { return self.cancel(aid, "failed", "storage") }
+                { let mut g = self.inner.lock().unwrap(); g.jobs.remove(&a.profile); g.cmds.remove(aid); if let Some(att) = g.attempts.iter_mut().find(|x| x.id == aid) { att.state = "done".into(); att.url.clear(); att.user_code.clear(); } g.revision += 1; }
                 if !old_store.is_empty() { self.remove_store(&a.profile, &old_store); }
             }
             Err(e) => self.cancel(aid, "failed", if e == DIRECTORY_ERR { "directory" } else { "verification" }),
         }
     }
-    async fn run_attempt(self: Arc<Self>, aid: String, cand: Profile, mode: String, mut cmds: mpsc::UnboundedReceiver<Cmd>) {
+    async fn run_attempt(self: Arc<Self>, aid: String, cand: Profile, mode: String, cmds: mpsc::UnboundedReceiver<Cmd>) {
+        self.run_attempt_inner(aid.clone(), cand, mode, cmds).await;
+        self.discard(&aid);
+    }
+    async fn run_attempt_inner(self: &Arc<Self>, aid: String, cand: Profile, mode: String, mut cmds: mpsc::UnboundedReceiver<Cmd>) {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(600);
         if cand.provider == "codex" {
             let Ok(prog) = (self.resolve)("codex") else { return self.cancel(&aid, "failed", "") };
-            let Ok(mut rpc) = Rpc::open(&prog, &self.environment(Some(&cand)), true).await else { return self.cancel(&aid, "failed", "") };
+            let Ok(env) = self.environment(Some(&cand)) else { return self.cancel(&aid, "failed", "") };
+            let Ok(mut rpc) = Rpc::open(&prog, &env, true).await else { return self.cancel(&aid, "failed", "") };
             let started = async {
                 rpc.initialize().await?;
                 let r = rpc.request("account/login/start", json!({"type": if mode == "browser" { "chatgpt" } else { "chatgptDeviceCode" }}), 30).await?;
@@ -500,23 +543,23 @@ impl Accounts {
                 let url = sign_in_url(r["verificationUrl"].as_str().or(r["authUrl"].as_str()).unwrap_or(""), "codex"); if url.is_empty() { return Err(()) }
                 Ok::<_, ()>((id, url, label(r["userCode"].as_str().unwrap_or(""))))
             }.await;
-            let Ok((login_id, url, code)) = started else { rpc.close(); return self.cancel(&aid, "failed", "") };
-            if self.current(&aid).is_none() { rpc.close(); return }
+            let Ok((login_id, url, code)) = started else { rpc.close().await; return self.cancel(&aid, "failed", "") };
+            if self.current(&aid).is_none() { rpc.close().await; return }
             self.set_waiting(&aid, url, code);
             let outcome = loop {
                 tokio::select! {
                     n = rpc.notes.recv() => match n { Some(m) if m["method"] == "account/login/completed" && m["params"]["loginId"] == login_id => break Some(m["params"]["success"] == true), Some(_) => {}, None => break Some(false) },
-                    c = cmds.recv() => match c { Some(Cmd::Cancel) | None => { let _ = rpc.request("account/login/cancel", json!({"loginId":login_id}), 5).await; rpc.close(); return }, Some(Cmd::Respond(_)) => {} },
+                    c = cmds.recv() => match c { Some(Cmd::Cancel) | None => { let _ = rpc.request("account/login/cancel", json!({"loginId":login_id}), 5).await; rpc.close().await; return }, Some(Cmd::Respond(_)) => {} },
                     _ = tokio::time::sleep_until(deadline) => break None,
                 }
             };
-            rpc.close();
+            rpc.close().await;
             match outcome { Some(ok) => self.finish(&aid, &cand, ok, "").await, None => self.cancel(&aid, "expired", "") }
         } else {
             let Ok(prog) = (self.resolve)("claude") else { return self.cancel(&aid, "failed", "cli_start") };
             let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Agent, &prog);
             c.args(["auth", "login", "--claudeai"]);
-            let mut env = self.environment(Some(&cand)); env.push(("BROWSER".into(), "/bin/true".into())); // the CLI prints its own authorization link; no browser is opened here
+            let Ok(mut env) = self.environment(Some(&cand)) else { return self.cancel(&aid, "failed", "cli_start") }; env.push(("BROWSER".into(), "/bin/true".into())); // the CLI prints its own authorization link; no browser is opened here
             apply_env(&mut c, &env, true);
             c.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).kill_on_drop(true);
             let Ok(mut child) = c.spawn() else { return self.cancel(&aid, "failed", "cli_start") };
@@ -545,7 +588,7 @@ impl Accounts {
                         Some(b) => { output.push_str(&String::from_utf8_lossy(&b)); if output.len() > 131072 { break Err("failed") } if let Some(u) = scan(&output, &mut reason) { if self.current(&aid).is_some() { self.set_waiting(&aid, u, String::new()); } } }
                         None => open = false,
                     },
-                    cmd = cmds.recv() => match cmd { Some(Cmd::Respond(code)) => { let _ = stdin.write_all(format!("{code}\n").as_bytes()).await; } Some(Cmd::Cancel) | None => { let _ = child.start_kill(); return } },
+                    cmd = cmds.recv() => match cmd { Some(Cmd::Respond(code)) => { let _ = stdin.write_all(format!("{code}\n").as_bytes()).await; } Some(Cmd::Cancel) | None => { let _ = child.start_kill(); let _ = child.wait().await; return } },
                     st = child.wait() => {
                         // whatever it printed last still counts (why a code was refused)
                         while let Ok(Some(b)) = tokio::time::timeout(Duration::from_millis(200), orx.recv()).await { output.push_str(&String::from_utf8_lossy(&b)); let _ = scan(&output, &mut reason); }
@@ -554,7 +597,7 @@ impl Accounts {
                     _ = tokio::time::sleep_until(deadline) => break Err("expired"),
                 }
             };
-            let _ = child.start_kill();
+            let _ = child.start_kill(); let _ = child.wait().await;
             match outcome { Ok(ok) => self.finish(&aid, &cand, ok, &reason).await, Err("expired") => self.cancel(&aid, "expired", ""), Err(_) => self.cancel(&aid, "failed", "") }
         }
     }
@@ -569,18 +612,24 @@ impl Accounts {
         const NO: &str = "Reconnect and select this account before starting a turn";
         let p = self.profile(profile).map_err(|_| NO.to_string())?;
         if !matches!(p.state.as_str(), "connected" | "unchecked") || p.epoch.to_string() != epoch || cmd != p.provider { return Err(NO.into()) }
-        self.begin(profile, "launch").map_err(|_| NO.to_string())?;
+        // launches on one profile queue one behind another; any other request on it is refused while one is queued or running
+        let lock = { let mut g = self.inner.lock().unwrap();
+            if g.jobs.contains_key(profile) { return Err(NO.to_string()) }
+            *g.launching.entry(profile.to_string()).or_insert(0) += 1;
+            g.launch_locks.entry(profile.to_string()).or_default().clone() };
+        let _turn = lock.lock().await;
         let r = async {
             let np = self.verify(&p, false).await.map_err(|_| NO.to_string())?;
             // the verified identity is kept even when the turn is refused: the epoch it moved to is what the person must select again
-            self.with_profile(profile, |slot, g| { *slot = np.clone(); g.revision += 1; }); self.save_now();
+            self.update(profile, |slot| *slot = np.clone()).map_err(|_| "Account storage failed".to_string())?;
             if np.epoch.to_string() != epoch || np.state != "connected" { return Err("Account identity changed; select this account again".to_string()) }
             let program = (self.resolve)(cmd)?;
             let args: Vec<String> = if np.provider == "codex" { vec!["-c".into(), "cli_auth_credentials_store=\"file\"".into(), "-c".into(), "model_provider=\"openai\"".into()] }
                 else { vec!["--setting-sources".into(), "user".into(), "--settings".into(), "{\"forceLoginMethod\":\"claudeai\"}".into()] };
-            Ok(LaunchPlan { program, env: self.environment(Some(&np)), args })
+            Ok(LaunchPlan { program, env: self.environment(Some(&np)).map_err(|_| NO.to_string())?, args })
         }.await;
-        self.end(profile, "launch"); r
+        { let mut g = self.inner.lock().unwrap(); if let Some(n) = g.launching.get_mut(profile) { *n = n.saturating_sub(1); if *n == 0 { g.launching.remove(profile); } } }
+        r
     }
     /// A current Claude child may publish its passive usage windows (accounts.js `observe`); anything else changes nothing.
     pub fn observe(&self, profile: &str, epoch: &str, raw: &str) -> Value {
@@ -608,8 +657,8 @@ impl Accounts {
             .filter(|p| { let at = g.refresh_at.get(&p.id).copied().unwrap_or(0).max(p.allowance.as_ref().and_then(|a| a["at"].as_u64()).unwrap_or(0)); at == 0 || now.saturating_sub(at) >= 300 }).map(|p| p.id.clone()).collect() };
         for id in ids {
             self.inner.lock().unwrap().refresh_at.insert(id.clone(), now);
-            if self.begin(&id, "refresh").is_err() { continue }
-            if let Ok(p) = self.profile(&id) { if let Ok(np) = self.verify(&p, false).await { self.with_profile(&id, |slot, g| { *slot = np; g.revision += 1; }); self.save_now(); } }
+            if self.begin(&id, "refresh", true).is_err() { continue }
+            if let Ok(p) = self.profile(&id) { if let Ok(np) = self.verify(&p, false).await { let _ = self.update(&id, |slot| *slot = np); } }
             self.end(&id, "refresh");
         }
         let due = { let g = self.inner.lock().unwrap(); let at = g.refresh_at.get("default-claude").copied().unwrap_or(0); at == 0 || now.saturating_sub(at) >= 300 };

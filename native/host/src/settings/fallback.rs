@@ -126,6 +126,9 @@ fn applies(w: &Value, model: &str) -> bool {
 pub fn usage_score(profile: &Value, now: u64, model: &str) -> Option<u32> {
     let a = &profile["allowance"];
     if a["state"] != "ok" || a["phase"].as_str().unwrap_or("complete") != "complete" || a["provider"].as_str().unwrap_or(profile["provider"].as_str().unwrap_or("")) != profile["provider"].as_str().unwrap_or("") { return None }
+    // a reading older than five minutes, from the future, or undated says nothing about the account now
+    let at = a["at"].as_u64().unwrap_or(0);
+    if at == 0 || at > now || now - at > 300 { return None }
     let mut used: Option<u32> = None;
     for w in a["windows"].as_array().cloned().unwrap_or_default() {
         let reset = w["resets_at"].as_u64().unwrap_or(0);
@@ -185,6 +188,13 @@ mod outage_tests {
         assert_eq!(classify("claude", "o", &json!({"type":"assistant","message":{"content":[{"text":"the weekly limit of my patience"}]}})), None, "an assistant message is not an error envelope");
         assert_eq!(classify("claude", "o", &json!({"type":"result","is_error":true,"result":"authentication failed: usage limit"})), None);
         assert_eq!(classify("claude", "o", &json!({"type":"error","error":{"message":"turn cancelled: weekly limit"}})), None); assert_eq!(classify("claude", "o", &json!({"type":"result","is_error":false,"result":"usage limit reached"})), None);
+    }
+    #[test] fn a_stale_future_or_undated_allowance_scores_nothing() {
+        let mk = |at: Value| json!({"provider":"claude","allowance":{"state":"ok","phase":"complete","provider":"claude","at":at,"windows":[{"scope":"five_hour","used_percent":10.0}]}});
+        assert!(usage_score(&mk(json!(1000)), 1100, "m").is_some(), "fresh");
+        assert_eq!(usage_score(&mk(json!(1000)), 1301, "m"), None, "older than five minutes");
+        assert_eq!(usage_score(&mk(json!(2000)), 1100, "m"), None, "from the future");
+        assert_eq!(usage_score(&mk(json!(0)), 1100, "m"), None, "undated");
     }
     #[test] fn the_limit_record_keeps_four_fields_and_a_cut_reason() { let l = Limit { scope: "claude".into(), reason: "x".repeat(500), reset: 7 }; let v: Value = serde_json::from_str(&l.json(3)).unwrap(); assert_eq!((v["reason"].as_str().unwrap().len(), v["reset"].clone(), v["at"].clone()), (400, json!(7), json!(3))); assert_eq!(Limit::key("codex/m"), "fallback.outage.codex/m"); }
     #[test] fn a_chain_target_is_held_by_its_provider_or_its_model_and_the_pick_skips_it() {
