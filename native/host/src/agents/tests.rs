@@ -1211,3 +1211,22 @@ fn watch_log(work: &Path, rows: &[String], extra: &str) -> String { base_log(wor
     let (_, r) = rpc_mcp(&ag, T1, "", "tools/call", json!({"name":"thread_list","arguments":{}})).await; assert_ne!(r["result"]["isError"], true, "the person's word unlocks it: {r}");
     ag.shutdown();
 }
+#[test] fn slugs_and_reference_words_are_bends() {
+    use refs::{slug_of, slug_take};
+    assert_eq!(slug_of("Fix the perf lag!"), "fix-the-perf-lag"); assert_eq!(slug_of("  --Ünï cödé 2--"), "n-c-d-2"); assert_eq!(slug_of(&"ab ".repeat(30)), "ab-ab-ab-ab-ab-ab-ab-ab-ab-ab-ab-ab-ab-ab"[..40].trim_end_matches('-'));
+    assert_eq!(slug_take("fix-it, now"), "fix-it"); assert_eq!(slug_take("a_b:c"), "a_b"); assert_eq!(slug_take(".x"), "");
+}
+#[tokio::test(flavor = "multi_thread")] async fn the_references_in_a_message_are_named_to_the_agent_once_each() {
+    let sd = dir("rf-bin"); let rec = sd.join("in.jsonl"); let inner = sd.join("standin.sh"); std::fs::write(&inner, STANDIN.replacen("\n", "\nexport FAKE_PER=2 FAKE_CYCLE=5 FAKE_SECS=1 FAKE_LOG=/dev/null\n", 1)).unwrap();
+    script(&sd, "claude", &format!("#!/bin/sh\ntee -a {} | sh {}\n", rec.display(), inner.display()));
+    let extra = [json!({"$":"ProjectCreated","id":"p2","title":"Radio board","root":"/r/radio","at":1700000002}), json!({"$":"ThreadCreated","id":"t1700000009-7","project":"p2","title":"Fix the perf lag","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1700000003}),
+        json!({"$":"SettingSet","key":"summary.t1700000009-7","value":"Profiling the render loop","at":1700000004}), json!({"$":"BotSet","id":"b1","name":"Ada","thread":"t1700000050-9","at":1700000005}), json!({"$":"RoomSet","id":"r1","name":"Ops Room","members":"b1","at":1700000006})];
+    let extra = extra.iter().map(|e| e.to_string() + "\n").collect::<String>();
+    let (hub, _ag, _h, _w) = start("rf", |w| base_log(w, 1, &extra), |_| Cli::standin(&sd)).await; let from = len(&hub).await;
+    rpc(&hub, "turn.start", json!({"thread":T1,"text":"zqshort see >fix-the-perf-lag and %radio-board, ask @ada in #ops-room, again >fix-the-perf-lag, @nobody, >elsewhere:thing"})).await;
+    until(&hub, from, 30, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await;
+    let got = std::fs::read_to_string(&rec).unwrap(); let line = got.lines().find(|l| l.contains("zqshort see")).unwrap(); let v: Value = serde_json::from_str(line).unwrap();
+    let text = v["message"]["content"].as_str().map(str::to_string).or_else(|| v["message"]["content"][0]["text"].as_str().map(str::to_string)).unwrap();
+    let want = "\n\n<references>\n>fix-the-perf-lag is the thread \"Fix the perf lag\" (id t1700000009-7, project \"Radio board\"): Profiling the render loop. Read it with thread_read.\n%radio-board is the project \"Radio board\" (id p2, folder /r/radio).\n@Ada is the bot \"Ada\"; it has been sent this message and may answer in this thread.\n#ops-room is the group chat \"Ops Room\"; this message was posted there.\n</references>";
+    assert!(text.ends_with(want), "{text}");
+}
