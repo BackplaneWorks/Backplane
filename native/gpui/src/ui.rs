@@ -117,9 +117,9 @@ impl Render for Backplane {
         let reg = self.screens.reg.clone();
         if self.input.read(cx).light != light { self.input.update(cx, |i, _| i.light = light); for i in self.screens.ask_inputs.values() { i.update(cx, |i, _| i.light = light); } }
         // bots: (name, mood, note, look seed) copied out so the cat cache can be filled
-        let bot_data: Vec<(String, String, String, u64)> = self.data["bots"].as_array().into_iter().flatten()
-            .map(|b| (string(b, "name"), string(b, "mood"), string(b, "note"), b["look"].as_u64().unwrap_or(0))).collect();
-        let bot_rigs: Vec<_> = bot_data.iter().map(|(_, mood, _, look)| self.cats.rig(*look, mood)).collect();
+        let bot_data: Vec<(String, String, String, u64, String, bool)> = self.data["bots"].as_array().into_iter().flatten()
+            .map(|b| (string(b, "name"), string(b, "mood"), string(b, "note"), b["look"].as_u64().unwrap_or(0), string(b, "id"), b["sel"].as_bool().unwrap_or(false))).collect();
+        let bot_rigs: Vec<_> = bot_data.iter().map(|(_, mood, _, look, _, _)| self.cats.rig(*look, mood)).collect();
         let started = self.started;
         let thread = &self.data["thread"];
         let has_thread = thread.is_object();
@@ -151,13 +151,30 @@ impl Render for Backplane {
             for key in ["projects", "active", "legacy"] { if let Some(row) = pager_row(cx, format!("pg-{key}"), &page[key], light, &mut ctl) { rows.push(row); } }
         }
         for name in ["BOTS", "ROOMS"] {
-            rows.push(div().flex().justify_between().px_3().pt_4().text_size(px(11.)).text_color(c("dim")).child(name).child(with_rect(div().opacity(0.45), || format!("ui:New {}", if name == "BOTS" { "bot" } else { "room" })).child(ic(light, "plus", 16., "dim"))).into_any_element());
+            let (plus_id, plus_action) = if name == "BOTS" { ("ui:New bot", "bot-new") } else { ("ui:New room", "room-new") };
+            ctl.push(CtlEntry { id: plus_id.into(), label: plus_id.trim_start_matches("ui:").into(), ctl: Ctl::Node(plus_action.into(), String::new()) });
+            rows.push(div().flex().justify_between().px_3().pt_4().text_size(px(11.)).text_color(c("dim")).child(name)
+                .child(with_rect(div().id(plus_id), || plus_id.to_string()).cursor_pointer().on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action(plus_action.into(), String::new())); cx.notify(); })).child(ic(light, "plus", 16., "dim"))).into_any_element());
             if name == "BOTS" {
-                for ((bname, mood, note, _), rig) in bot_data.iter().zip(bot_rigs.iter()) {
+                for ((bname, mood, note, _, bid, bsel), rig) in bot_data.iter().zip(bot_rigs.iter()) {
                     let note_color = match mood.as_str() { "wait" | "error" => c("bad"), "work" | "talk" => c("accent"), _ => c("faint") };
-                    rows.push(div().flex().items_center().gap_2().px_3().py(px(3.)).child(art::cat(rig.clone(), mood, 28., started, if art::rects_on() { format!("cat:{bname}") } else { String::new() }))
+                    ctl.push(CtlEntry { id: format!("bot:{bname}"), label: bname.clone(), ctl: Ctl::Node("bot".into(), bid.clone()) });
+                    let bid2 = bid.clone();
+                    rows.push(with_rect(div().id(SharedString::from(format!("bot-{bid}"))), || format!("bot:{bname}")).flex().items_center().gap_2().px_3().py(px(3.)).cursor_pointer().when(*bsel, |d| d.bg(c("raise"))).hover(|s| s.bg(c("raise")))
+                        .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("bot".into(), bid2.clone())); cx.notify(); }))
+                        .child(art::cat(rig.clone(), mood, 28., started, if art::rects_on() { format!("cat:{bname}") } else { String::new() }))
                         .child(div().flex().flex_col().min_w_0().line_height(px(18.)).child(div().overflow_hidden().whitespace_nowrap().child(bname.clone()))
                             .child(div().text_size(px(11.)).text_color(note_color).child(note.clone()))).into_any_element());
+                }
+            } else {
+                for r in self.data["rooms"].as_array().into_iter().flatten() {
+                    let (rid, rname, sel) = (string(r, "id"), string(r, "name"), r["sel"].as_bool().unwrap_or(false));
+                    ctl.push(CtlEntry { id: format!("room:{rname}"), label: rname.clone(), ctl: Ctl::Node("room".into(), rid.clone()) });
+                    let rid2 = rid.clone();
+                    rows.push(with_rect(div().id(SharedString::from(format!("room-{rid}"))), || format!("room:{rname}")).flex().items_center().gap_2().px_3().py_1().cursor_pointer().when(sel, |d| d.bg(c("raise"))).hover(|s| s.bg(c("raise")))
+                        .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("room".into(), rid2.clone())); cx.notify(); }))
+                        .child(div().text_color(c("faint")).child("#")).child(div().flex_1().overflow_hidden().whitespace_nowrap().child(rname.clone()))
+                        .child(div().text_size(px(11.)).text_color(c("faint")).child(format!("{}", r["members"]))).into_any_element());
                 }
             }
         }
@@ -249,7 +266,7 @@ impl Render for Backplane {
         if let Some(p) = self.data["projects"].as_array().and_then(|p| p.first()) { let id = string(p, "id"); let id = id.rsplit_once('|').map_or(id.as_str(), |(_, r)| r).to_string(); ctl.push(CtlEntry { id: "ui:New thread".into(), label: "New thread".into(), ctl: Ctl::Node("new-thread".into(), id) }); }
         ctl.push(CtlEntry { id: "send".into(), label: "Send".into(), ctl: Ctl::Send });
         for l in ["Terminal", "Commands", "Browser"] { ctl.push(CtlEntry { id: format!("rail:{l}"), label: l.into(), ctl: Ctl::None }); }
-        for l in ["Jump or run a command", "Improvements", "Search", "Add project", "New bot", "New room", "Account", "Edit", "Context", "Dictate"] { ctl.push(CtlEntry { id: format!("ui:{l}"), label: l.into(), ctl: Ctl::None }); }
+        for l in ["Jump or run a command", "Improvements", "Search", "Add project", "Account", "Edit", "Context", "Dictate"] { ctl.push(CtlEntry { id: format!("ui:{l}"), label: l.into(), ctl: Ctl::None }); }
         ctl.push(CtlEntry { id: "ui:Fold sidebar".into(), label: "Fold sidebar".into(), ctl: Ctl::ToggleSidebar });
         ctl.push(CtlEntry { id: "ui:Attach".into(), label: "Attach".into(), ctl: Ctl::PickFiles });
         if !self.sidebar_open { ctl.push(CtlEntry { id: "ui:Unfold sidebar".into(), label: "Unfold sidebar".into(), ctl: Ctl::ToggleSidebar }); }
@@ -280,6 +297,7 @@ impl Render for Backplane {
                     .child(div().px_3().py_1().border_t_1().border_color(c("line")).text_size(px(11.)).text_color(c("dim")).child(self.status.clone())))
                 // main
                 .child(div().flex_1().min_w_0().h_full().relative().child(art::probe("main")).flex().flex_col()
+                    .children(crate::screens::bots::bar(cx, light, &self.data["bot"]))
                     .when(has_thread, |d| d.child(div().h(px(32.)).flex_shrink_0().flex().items_center().border_b_1().border_color(c("line"))
                         .child(div().px_3().flex().gap_2().text_size(px(11.)).child(div().text_color(c("faint")).child("STATE")).child(div().size(px(6.)).mt(px(7.)).bg(c("ok"))).child(string(thread, "phase").split(':').next().unwrap_or("").to_lowercase()))
                         .when(!todo.is_empty(), |d| d.child(div().px_3().h_full().flex().items_center().gap_2().border_l_1().border_color(c("line")).text_size(px(11.)).child(div().text_color(c("faint")).child("TO-DO")).child(todo.clone()).child(ic(light, "chevron-down", 12., "faint"))))))
@@ -305,6 +323,8 @@ impl Render for Backplane {
                             .child(with_rect(chip(light, String::new()).id("attach"), || "ui:Attach".to_string()).cursor_pointer().on_click(cx.listener(|this, _, _, cx| this.pick_files(cx))).child(ic(light, "paperclip", 16., "dim")))
                             .child(with_rect(chip(light, String::new()).opacity(0.45), || "ui:Dictate".to_string()).child(ic(light, "mic", 16., "dim")))
                             .child(with_rect(div().id("send"), || "send".to_string()).flex_shrink_0().px_4().py_1().bg(c("accent")).text_color(c("on-accent")).cursor_pointer().child("Send").on_click(cx.listener(|this, _, window, cx| this.send(&Send, window, cx)))))))
+                    .children(crate::screens::bots::page(cx, light, &self.screens.fields, &self.data["bot"]))
+                    .children(crate::screens::bots::forms(cx, light, &self.screens.fields, &self.data))
                     .children(crate::screens::settings::view(cx, light, &self.screens.fields, &self.data["settings"], &self.screens.settings_focus))
                 )
                 .children(crate::screens::viewer::view(cx, &reg, light, thread, &self.screens.plot, &mut self.screens.plotview))
