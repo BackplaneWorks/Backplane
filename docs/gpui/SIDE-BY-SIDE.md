@@ -118,7 +118,7 @@ unverified row may exist at the first real run.
 | `secret_run` shell, vault | `settings/` | `Kind::Shell` not started; no session bus, fake HOME | held | empty secrets box |
 | Git writes, `file.open`, release | `files/`, `commands/` | `copy::rpc_refused` + `files::git::proc` | held | one-line refusal |
 | Design history (`step`, `checkpoint`) | `agents/hist.rs` | fb25d984d1 landed: no capture on a copy | held (reviewer to confirm in the final binary) | history bar shows nothing new |
-| Hub-side file writes that are not git (intent, checklist, renders, exports, `kicad_ipc`) | `files/`, `kicad/` | files' audit: each writes only inside the copy's home or is refused | pending (files) | refused or written in the copy |
+| Hub-side file writes that are not git (intent, checklist, renders, exports, `kicad_ipc`) | `files/`, `kicad/` | files' audit: each writes only inside the copy's home or is refused | done (files): `mech.render`, `review.tick`, `fab.intent` and the project home intent op are refused on a copy (`copy::HOME_ONLY`); `kicad_ipc` runs only `Get*`/`Ping`; exports write only `<home>/exports`. Commit `d6ff126ce2`; tests `files::boundary_tests::a_copy_writes_no_render_checklist_or_intent_into_a_project` (child with `BACKPLANE_COPY=1`; project byte for byte unchanged), `kicad::ipc::tests::a_copy_runs_only_the_listed_kicad_reads`, `files::git::tests::a_copy_run_writes_nothing_outside_its_home`; audit table in COPY-GUARD.md | refused or written in the copy |
 | KiCad watch, KiCad IPC reads | `kicad/` | `Kind::Local`, read-only on the project | held | works |
 | Heartbeats, a running turn's 1 s beat | `wire/`, `agents/` | connection- or person-turn-bound | held | n/a |
 
