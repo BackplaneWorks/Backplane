@@ -15,6 +15,13 @@ t('liveness missing on one side is a difference',dtn([changes([set('liveness.t1'
 t('liveness ticks 1 vs 3 are not',dtn([changes([set('liveness.t1','a')])],[changes([set('liveness.t1','a'),set('liveness.t1','a'),set('liveness.t1','a')])]).length===0);
 t('liveness with another value is not (the reason text varies)',dtn([changes([set('liveness.t1','a')])],[changes([set('liveness.t1','b')])]).length===0);
 t('liveness for another thread is a difference',dtn([changes([set('liveness.t1','a')])],[changes([set('liveness.t2','a')])]).length>0);
+t('autosettle.quiet 6 vs 7 writes is not',dtn([changes(Array.from({length:6},()=>set('autosettle.quiet.t1','<q>')))],[changes(Array.from({length:7},()=>set('autosettle.quiet.t1','<q>')))]).length===0);
+t('autosettle.quiet written 3 times vs never is a difference',dtn([changes(Array.from({length:3},()=>set('autosettle.quiet.t1','<q>')))],[changes([])]).length>0);
+// N24: the shape of a stream
+const dl=(n,txt='ab')=>[...Array.from({length:n},()=>frame({t:'delta',thread:'t1',text:txt})),frame({t:'delta_end',thread:'t1'})];
+t('streamed in 3 frames vs sent as one frame is a difference',dtn(dl(3),dl(1,'ababab')).length>0);
+t('3 frames vs 2 frames, same joined text, is not',dtn(dl(3,'ab'),[...dl(2,'abab').slice(0,1),frame({t:'delta',thread:'t1',text:'ab'}),frame({t:'delta_end',thread:'t1'})]).length===0);
+t('same frame count, other text is a difference',dtn(dl(3,'ab'),dl(3,'ac')).length>0);
 // N26: two keys normalising to the same string
 t('two colliding keys vs one is a difference',dtn([view({'@x 1793000001':'a','@x 1793000002':'b'})],[view({'@x 1793000001':'a'})]).length>0);
 t('two colliding keys vs two is not',dtn([view({'@x 1793000001':'a','@x 1793000002':'b'})],[view({'@x 1793000003':'a','@x 1793000004':'b'})]).length===0);

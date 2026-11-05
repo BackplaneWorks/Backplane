@@ -1,6 +1,7 @@
 // Normalise and compare two recordings (or a recording and a replay). usage: bun compare.mjs A_DIR B_DIR
 // Output: differences per scenario/client; exit 1 when any. NORMALISATIONS lists every rewrite, with its reason.
 import {readFileSync,readdirSync} from 'node:fs';
+import {spawnSync} from 'node:child_process';
 export const NORMALISATIONS=[
  'N1 clocks: numeric fields at, rid, now, clock, last, since-time keys -> <T>; 10-digit (17xxxxxxxx/18xxxxxxxx) and 13-digit epoch numbers inside strings -> <T>; hh:mm and durations (e.g. "Finished 18:26 · 2s") -> <time>. Reason: wall clock.',
  'N16 housekeeping events read the id table but never add to it, so their number and position cannot shift the ordinals of other events (an id first seen only there is <id>).',
@@ -14,9 +15,9 @@ export const NORMALISATIONS=[
  'N19 origin in a query string (the since/origin of a reconnect): the value is replaced by its FORM only: <origin:decimal> (Bend: the decimal `at` of the log\'s first change), <origin:hex>, <origin:empty> or <origin:other>. Reason: the value differs per log, but a hub that answers in another form is a real difference (a client resuming across hubs reads it), so the form is compared.',
  'N20 multisets: the housekeeping events (hk) and the greeting\'s info keys (logInfoKeys) are compared as multisets with their REAL counts: one difference per element (or per extra copy) found on one side only. Reason: the hub appends them in varying order; positional comparison turned one missing key into a difference at every later position. A hub that writes an event twice is a difference.',
  'N21 arrays of different length are aligned by key (an object\'s id or key, else its JSON) with a longest common subsequence; an inserted or removed element is one difference. Reason: positional comparison made one insertion a difference at every later position. Equal-length arrays are still compared position by position.',
- 'N22 liveness.<thread> housekeeping events are compared by PRESENCE of the KEY: which liveness.<thread> keys appear, not their values or how many times. Reason: the hub\'s periodic tick writes them again and again once agent output was seen; how many ticks fell inside the recording, and the `reason` text each carries (the last agent output at that tick), differ between two runs of the JS hub itself (self-diff parity-960s recA/recB: liveness.ID4 "agent output" vs "Bash: ls ..."). A hub that never writes one is still a difference.',
+ 'N22 tick-driven housekeeping (liveness.<thread> and autosettle.quiet.<thread>) is compared by PRESENCE of the KEY: which of these keys appear, not their values or how many times. Reason: the hub\'s periodic tick writes them again and again once agent output was seen; how many ticks fell inside the recording, and the `reason` text each carries (the last agent output at that tick), differ between two runs of the JS hub itself (self-diff parity-960s recA/recB: liveness.ID4 "agent output" vs "Bash: ls ..."). A hub that never writes one is still a difference.',
  'N23 a bot\'s `look` (a random number the hub draws) -> <N>; WorktreeSet events join the housekeeping set (N10). Reason: the hub draws the look at creation, and a bot\'s folder is made by a job that lands before or after the bot\'s thread.',
- 'N24 a thread\'s text deltas are joined until its delta_end (or the end of the recording), whatever other frames arrive in between. Reason: the split points of a stream depend on timing; their joined text does not.',
+ 'N24 a thread\'s text deltas are joined until its delta_end (or the end of the recording), whatever other frames arrive in between. Reason: the split points of a stream depend on timing; their joined text does not. Guard: each joined run carries `streamed` (more than one delta frame arrived); a hub that sends the whole reply as one frame where the other streams it is a difference, equal frame counts are not required.',
  'N25 `<T>.<digits>` (a time and a sub-second count, as in the alert record) -> `<T>.<n>`. Reason: the count differs between two runs of the JS hub.',
  'N26 object keys are normalised like values (ids inside keys such as drafts @sch:<thread> -> ID n), then ordered. Reason: a thread a scenario creates has a different id in every run, and so does its key. Two keys that normalise to the same string are NOT merged silently: the key then holds {"@@collision":[the values, ordered]}, so one side with two and the other with one is a difference.',
  'N12 late volatile replies: volatile means a poll request and its reply, matched by client and request id, whenever the reply arrives; every other inbound frame is kept even if it arrived during a poll window (the recorder flags by arrival time, which is not a property of the frame).',
@@ -60,7 +61,7 @@ export function normalise(frames){
   const G={};const gof=cl=>G[cl]??(G[cl]=mkNorm());let go=null;const per={};
   const S=(c)=>per[c]??(per[c]={out:[],events:[],hkEv:[],deltas:[],replies:[],views:[],other:[],hk:[]});
   const open={}; // per client+thread delta accumulation
-  const flush=(c,th)=>{const k=c+'|'+th;if(open[k]!==undefined){S(c).deltas.push({delta:gof(c)(th),text:gof(c)(open[k].replace(/@\d{13,19}@/g,''))});delete open[k]}};
+  const nfr={};const flush=(c,th)=>{const k=c+'|'+th;if(open[k]!==undefined){S(c).deltas.push({delta:gof(c)(th),text:gof(c)(open[k].replace(/@\d{13,19}@/g,'')),streamed:(nfr[k]||0)>1});delete open[k];delete nfr[k]}};
   const HK_RAW=/^(machine\.id|accounts\.inventory|allowance\.codex|projects\.missing|tz\..*|autosettle\..*|liveness\..*|turn\.(from|speed)\..*|restart\..*|provider\..*|fallback\..*|tok\..*|summary\..*|told\..*|alert\..*|account\..*|star\..*)$/;
   const hkRaw=e=>(e.$==='SettingSet'&&HK_RAW.test(e.key))||(e.$==='ActivityLogged'&&(e.kind==='git'||e.kind==='spawn'))||e.$==='WorktreeSkipped'||e.$==='WorktreeSet';
   const evNorm=(c,it)=>hkRaw(it)?{hk:true,v:gof(c).readonly(()=>gof(c)(it))}:{hk:false,v:gof(c)(it)};
@@ -79,7 +80,7 @@ export function normalise(frames){
     const t=j?.t;
     if(t==='hb')continue;
     if(t==='view.changed')continue;
-    if(t==='delta'){const k=c+'|'+j.thread;open[k]=(open[k]??'')+j.text;continue}
+    if(t==='delta'){const k=c+'|'+j.thread;open[k]=(open[k]??'')+j.text;nfr[k]=(nfr[k]||0)+1;continue}
     if(t==='delta_end'){flush(c,j.thread);s.deltas.push({delta_end:go(j.thread)});continue}
     if(t==='changes'||t==='log'){
       if(t==='log'){const {items,...rest}=j;s.events.push({log:go({...rest,info:undefined})});s.other.push({logInfoKeys:Object.keys(j.info||{}).sort()});for(const it of items||[]){const r=evNorm(c,it);(r.hk?s.hkEv:s.events).push(r.v)}}
@@ -96,7 +97,7 @@ export function normalise(frames){
     if(s.infoSeen){s.other.push({info:gof(Object.keys(per).find(k=>per[k]===s))(Object.fromEntries(Object.entries(s.infoSeen).filter(([k])=>!/^(home|listen|machines|models|update|accounts\.live|kicad\.|freecad|browser\.|telemetry\.|tailnet|tailscale|bots\.remote|machine\.id|os|arch)/.test(k))))});delete s.infoSeen}
     s.other.sort((a,b)=>JSON.stringify(a)<JSON.stringify(b)?-1:1);
     // real counts (N20); liveness ticks by presence only (N22)
-    const all=s.hkEv.map(e=>JSON.stringify(e)),live=a=>/"key":"liveness\./.test(a);
+    const all=s.hkEv.map(e=>JSON.stringify(e)),live=a=>/"key":"(liveness|autosettle\.quiet)\./.test(a);
     const keyOnly=a=>{const e=JSON.parse(a);return JSON.stringify({$:e.$,key:e.key})};
     s.hk=[...all.filter(a=>!live(a)),...new Set(all.filter(live).map(keyOnly))].sort().map(x=>JSON.parse(x));delete s.hkEv}
   // deltas still open when the recording ends (no delta_end seen): one run each, in the order they began
@@ -136,7 +137,13 @@ export function diff(a,b,path='',out=[]){
   if(a&&b&&typeof a==='object'&&typeof b==='object'&&!Array.isArray(a)&&!Array.isArray(b)){for(const k of new Set([...Object.keys(a),...Object.keys(b)]))diff(a[k],b[k],`${path}.${k}`,out);return out}
   out.push(`${path}: ${JSON.stringify(a)?.slice(0,160)} vs ${JSON.stringify(b)?.slice(0,160)}`);return out;
 }
+let selftested=false;
+// every comparison first runs the comparator's own fixtures (compare_selftest.mjs): a change that stops it seeing a difference stops the run
+function selftest(){if(selftested)return;selftested=true;
+  const r=spawnSync(process.execPath,[new URL('./compare_selftest.mjs',import.meta.url).pathname],{encoding:'utf8'});
+  if(r.status!==0){console.error('compare: the comparator self-test failed (compare_selftest.mjs); no comparison is trustworthy\n'+(r.stdout||'')+(r.stderr||''));process.exit(3)}}
 export function compareDirs(A,B){
+  selftest();
   let total=0;const rep={};
   if(!readdirSync(A).some(x=>x.endsWith('.json'))){console.error('compare: no recordings in '+A+' (an empty comparison proves nothing)');process.exit(2)}
   for(const f of readdirSync(A).filter(x=>x.endsWith('.json')).sort()){
