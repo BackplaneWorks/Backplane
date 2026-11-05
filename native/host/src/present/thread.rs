@@ -174,7 +174,7 @@ fn person_zone(st: &State) -> Option<Rule> {
 /// shown.thread for a plain idle thread, from the page rows. `hub` is the request's hub key (the id is `<hub>|<thread>`), `draft` the composer's text.
 /// None unless every key is derived.
 pub fn thread_object(st: &State, hub: &str, thread: &str, params: &Value, draft: &str) -> Option<Value> {
-    if !plain_thread(st, thread) || !draft.is_empty() { return None }
+    if !plain_thread(st, thread) { return None }
     let page = params.get("page")?;
     if page["thread"].as_str() != Some(thread) { return None }
     let es = ents(page["rows"].as_array()?, thread)?;
@@ -190,7 +190,11 @@ pub fn thread_object(st: &State, hub: &str, thread: &str, params: &Value, draft:
     // Render.native_screen: thread.earlier = window.remaining when the host sent a window, else the page's own hidden count (0 on the newest page)
     let earlier = if params["window"].is_object() { params["window"]["remaining"].as_u64().unwrap_or(0) } else { 0 };
     o.insert("earlier".into(), json!(earlier));
-    o.insert("draft".into(), json!(""));
+    // the composer's four keys: the draft, the send button and its action, the popup rows (parity-session's session::composer; ours are the `$ @ > % #` & rows, not ported:
+    // a mention being typed shows no popup — see docs/gpui/slim-thread-known-missing.md). Another interface language is the helper's (None).
+    let lang = st.settings.get("lang").map(String::as_str).unwrap_or("");
+    let c = crate::session::composer::fields(draft, false, false, true, &json!([]), lang)?;
+    for k in ["draft", "skills", "send", "sendAct"] { o.insert(k.into(), c[k].clone()); }
     Some(Value::Object(o))
 }
 
@@ -231,6 +235,21 @@ mod tests {
         assert_eq!(stamp(&ny), "Tue 14 Nov 17:51", "November: EST, five hours behind");
         assert_eq!(stamp(&with(&[("person.tz", "Europe/Helsinki"), ("tz.rule.Europe/Helsinki", "EET-2EEST,M3.5.0/3,M10.5.0/4"), ("tz.machine", "America/New_York")])), "Tue 14 Nov 00:51".replace("Tue 14", "Wed 15"), "person.tz wins over the machine's");
         assert_eq!(stamp(&with(&[("person.tz", "Mars/Olympus")])), utc, "a zone with no rule reads as UTC (Sched.person.k)");
+    }
+    #[test] fn the_drafts_composer_keys_come_from_session_composer() {
+        let p = fixture(); let th = p["params"]["page"]["thread"].as_str().unwrap();
+        let mut st = State::new();
+        for l in std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/gpui/slim/fixtures/thread-log.jsonl")).unwrap().lines() { st.apply_line(l); }
+        let o = thread_object(&st, "h", th, &p["params"], "hello").unwrap();
+        assert_eq!((o["draft"].as_str(), o["send"].as_str(), o["sendAct"].as_str(), o["skills"].as_array().map(Vec::len)), (Some("hello"), Some("Send"), Some("send"), Some(0)));
+        let o = thread_object(&st, "h", th, &p["params"], "/btw why").unwrap();
+        assert_eq!(o["send"], "Ask");
+        let o = thread_object(&st, "h", th, &p["params"], "/").unwrap();
+        assert!(!o["skills"].as_array().unwrap().is_empty(), "a slash being typed lists the commands");
+        let o = thread_object(&st, "h", th, &p["params"], "see @bob").unwrap();
+        assert_eq!(o["skills"].as_array().map(Vec::len), Some(0), "a mention being typed: no popup yet, the thread is still drawn");
+        st.apply_line(r#"{"$":"SettingSet","key":"lang","value":"ja","at":1}"#);
+        assert!(thread_object(&st, "h", th, &p["params"], "").is_none(), "another language is the helper's");
     }
     #[test] fn civil_dates() { assert_eq!(civil(0), (1970, 1, 1)); assert_eq!(civil(19675), (2023, 11, 14)); assert_eq!(clock(1700002806, 0, &Rule::utc()), "Tue 14 Nov 23:00"); }
     #[test] fn labels_name_three_kinds_and_the_live_one_says_what_runs() {
