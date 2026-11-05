@@ -148,7 +148,7 @@ mod tests {
         assert_eq!(d.session["rid"].as_u64(), Some(2 + d.cmds.iter().filter(|c| c["type"] == "send").count() as u64), "one rid per send: the pin's and the look's");
     }
     #[test] fn answer_and_interrupt_are_one_numbered_request_each() {
-        let f = M { exists: T, running: true };
+        let f = M { exists: T, running: false };
         let d = dispatch(&f, &params("answer", "ask1|yes|really", session())).unwrap();
         assert_eq!(d.cmds[0]["text"], json!("{\"id\":2,\"m\":\"ask.answer\",\"p\":{\"id\":\"ask1\",\"answer\":\"yes|really\"}}"));
         assert_eq!(d.session["rid"], json!(3));
