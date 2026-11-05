@@ -14,9 +14,14 @@ summary.ime={status:ime.status,engine:ime.engine};
 // HARNESS SELF-CHECK before the client exists: if the pointer, clipboard, XDND or input method do not work against plain X clients, no verdict about GPUI is possible
 const pf=await preflight({display:dsp.display,env:dsp.env,ime,out:out+'/preflight',portalLog});summary.preflight=pf;
 const ACTIONS=['drag-select','ctrl-c','paste-image','drop-file','ime-hangul','paperclip'];
-if(!pf.pass){try{portal?.kill('SIGTERM')}catch{}try{ime.stop()}catch{}dsp.stop();
-  summary.verdict='harness';summary.reason='preflight failed: '+pf.failed.join(', ')+' (no GPUI was started; nothing here says anything about the app)';summary.actions=Object.fromEntries(ACTIONS.map(a=>[a,{ok:null,status:'harness',evidence:{failedChecks:pf.failed}}]));
+// which actions each failed check takes down: core input (pointer, keys, clipboard) takes down the whole run; the rest only the action that needs it
+const failed=new Set(pf.failed);const coreFailed=pf.failed.filter(k=>/^(pointer|key-|wheel|clipboard|primary)/.test(k));
+const harnessFor={'drop-file':pf.failed.filter(k=>/^xdnd/.test(k)),'ime-hangul':pf.failed.filter(k=>/^(ime|xim)/.test(k)),'paperclip':pf.failed.filter(k=>/^portal/.test(k))};
+const harnessActions=Object.fromEntries(Object.entries(harnessFor).filter(([,v])=>v.length));
+if(coreFailed.length){try{portal?.kill('SIGTERM')}catch{}try{ime.stop()}catch{}dsp.stop();
+  summary.verdict='harness';summary.reason='preflight failed on core input: '+coreFailed.join(', ')+' (no GPUI was started; nothing here says anything about the app)';summary.actions=Object.fromEntries(ACTIONS.map(a=>[a,{ok:null,status:'harness',evidence:{failedChecks:pf.failed}}]));
   writeFileSync(out+'/input-summary.json',JSON.stringify(summary,null,1));console.log('HARNESS FAILURE: '+summary.reason);process.exit(3)}
+summary.harnessActions=harnessActions; // these actions are not run: their tool does not work here, so they cannot say anything about the app
 const fx=await startFixtureHub({bin:hubBin,root:resolve('out/e2e-run/input'),port:3813,threads:6});
 try{
   const sf=out+'/hold.script.json';writeFileSync(sf,JSON.stringify([{select:0},...Array.from({length:80},()=>[{wait:1500},{read:'composer'}]).flat()])); // G6: the client reports its composer text every 1.5 s
@@ -30,6 +35,7 @@ try{
   const mid=r=>[r.x+r.w/2,r.y+r.h/2];const comp=flat.composer?mid(flat.composer):null;
   const main=Object.entries(flat).filter(([k])=>!/sidebar|rail|composer/.test(k)).sort((a,b)=>b[1].w*b[1].h-a[1].w*a[1].h)[0];
   summary.mainRegion=main?main[0]:null;
+  const runIf=async(name,f)=>{if(harnessActions[name]){summary.actions[name]={ok:null,status:'harness',evidence:{failedChecks:harnessActions[name]}};return}await run(name,f)};
   const run=async(name,f)=>{try{summary.actions[name]=await f()}catch(e){summary.actions[name]={ok:false,evidence:{error:String(e.message).slice(0,200)}}}};
   if(main){const r=main[1];await run('drag-select',()=>inp.dragSelect(win,[r.x+40,r.y+60],[r.x+Math.min(r.w-40,500),r.y+110]));await run('ctrl-c',()=>inp.copy())}
   else summary.blocked['drag-select/ctrl-c']='no main region in the layout event';
@@ -44,16 +50,16 @@ try{
   if(comp){
     await run('paste-image',async()=>{await clearComposer();const t0=Math.floor(Date.now()/1000);inp.xi.type('see pic');const r=await inp.pasteImage(out+'/paste.png',win,comp);await sleep(6000);inp.s('before-send-paste');const m=await sendAndRead(t0);const blob=JSON.stringify(m||{});
       return {ok:!!m&&/png|image|pasted/i.test(blob)&&/see pic/.test(m.text||''),evidence:{...r.evidence,attachmentsOnHub:attachments(),newEvents:newEvents(t0),hubMessage:m?{keys:Object.keys(m),text:m.text}:null,mentionsImage:/png|image|pasted/i.test(blob)}}});
-    await run('drop-file',async()=>{await clearComposer();const t0=Math.floor(Date.now()/1000);inp.xi.type('see drop');const r=inp.dropFile(win,resolve(out+'/paste.png'),comp);await sleep(6000);inp.s('before-send-drop');const m=await sendAndRead(t0);const blob=JSON.stringify(m||{});
+    await runIf('drop-file',async()=>{await clearComposer();const t0=Math.floor(Date.now()/1000);inp.xi.type('see drop');const r=inp.dropFile(win,resolve(out+'/paste.png'),comp);await sleep(6000);inp.s('before-send-drop');const m=await sendAndRead(t0);const blob=JSON.stringify(m||{});
       return {ok:r.ok&&!!m&&/paste\.png|png|image/i.test(blob),evidence:{...r.evidence,attachmentsOnHub:attachments(),newEvents:newEvents(t0),hubMessage:m?{keys:Object.keys(m),text:m.text}:null,mentionsFile:/paste\.png/i.test(blob)}}});
-    await run('ime-hangul',async()=>{await clearComposer();const t0=Math.floor(Date.now()/1000);const r=await inp.imeCompose(ime,comp,win);const m=await sendAndRead(t0);
+    await runIf('ime-hangul',async()=>{await clearComposer();const t0=Math.floor(Date.now()/1000);const r=await inp.imeCompose(ime,comp,win);const m=await sendAndRead(t0);
       return {ok:!!m&&/한/.test(m.text||''),evidence:{...r.evidence,composerRead:composerText(),hubMessageText:m?.text??null,expected:'한 (composed); raw keys would arrive as "gks"'}}});
   } else summary.blocked['paste/drop/ime']='no composer region in the layout event';
   // G6: controls carry rects (physical window px; the first emission can be null, a later one has them)
   const ctlAll=metrics.filter(m=>m.event==='controls');const ctl=[...ctlAll].reverse().find(m=>m.controls?.some(c=>c.rect));
   const attach=ctl?.controls?.find(c=>c.id==='ui:Attach'&&c.rect);
   if(!attach)summary.blocked['paperclip']='no ui:Attach control with a rect in the controls event';
-  else await run('paperclip',async()=>{const w0=inp.windows();inp.s('before-paperclip');inp.clickAt(win,[attach.rect.x+attach.rect.w/2,attach.rect.y+attach.rect.h/2]);await sleep(3000);const w1=inp.windows();const shot=inp.s('after-paperclip');
+  else await runIf('paperclip',async()=>{const w0=inp.windows();inp.s('before-paperclip');inp.clickAt(win,[attach.rect.x+attach.rect.w/2,attach.rect.y+attach.rect.h/2]);await sleep(3000);const w1=inp.windows();const shot=inp.s('after-paperclip');
     const opened=w1.filter(x=>!w0.some(y=>y.id===x.id));let pl='';try{pl=readFileSync(portalLog,'utf8')}catch{}
     const called=/OpenFile/.test(pl);
     return {ok:called,evidence:{portalStandin:portal?'running':'not running',portalCalled:called,portalLog:pl.split('\n').slice(-4).join(' | '),newWindows:opened.map(x=>x.name).slice(0,5),screenshot:shot,note:'ok = the client asked the OS file chooser (xdg-desktop-portal FileChooser, via a stand-in on Boat); whether the chosen file then attaches is the upload chain measured by paste/drop'}}});
@@ -62,5 +68,5 @@ try{
   try{g.kill('SIGTERM')}catch{}
 }finally{try{portal?.kill('SIGTERM')}catch{}try{ime.stop()}catch{}await fx.stop();dsp.stop()}
 // an action only counts when evidence says so; pass also needs the Rust hub on real hardware (CONTRACT.md), which this Boat run is not
-summary.verdict='app';for(const a of Object.values(summary.actions))a.status=a.ok?'partial':'fail'; // the preflight passed, so a false below is the app's
+summary.verdict=Object.keys(harnessActions).length?'app+harness':'app';for(const a of Object.values(summary.actions))if(a.status!=='harness')a.status=a.ok?'partial':'fail'; // the preflight passed, so a false below is the app's
 writeFileSync(out+'/input-summary.json',JSON.stringify(summary,null,1));console.log(JSON.stringify({actions:Object.fromEntries(Object.entries(summary.actions).map(([k,v])=>[k,v.ok])),blocked:summary.blocked},null,1));
