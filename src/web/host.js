@@ -1287,9 +1287,10 @@ function render() {
   panes();
   secretSaves.paint();
   projectSplitters.sync();
-  Solid.mount(document.getElementById("solid"));
-  ViewerTools.mount(document.getElementById("solid-workbench"), Solid, { components: (thread, options) => viewerRpc.components(thread, options), asset: (thread, path, kind, revision, options) => viewerRpc.renderAsset(thread, path, kind, revision, options), plot: Plot2d });
-  Plot2d.mount([...document.querySelectorAll("canvas.plot2d")]);
+  // (a viewer pane drawn at a press is painted first: a 3D or board canvas
+  // starting up in the same frame held its first picture back ~500 ms)
+  if (pressFeedback.active?.kind === "viewer") requestAnimationFrame(() => requestAnimationFrame(mountViewers));
+  else mountViewers();
   ViewerTools.chipInView();
   ViewerTools.focusToggle();
   Plot2d.inspectGone();
@@ -1322,6 +1323,12 @@ function render() {
   settingsSync();
   phoneShell.rendered();
   saveFocusedSoon();
+}
+
+function mountViewers() {
+  Solid.mount(document.getElementById("solid"));
+  ViewerTools.mount(document.getElementById("solid-workbench"), Solid, { components: (thread, options) => viewerRpc.components(thread, options), asset: (thread, path, kind, revision, options) => viewerRpc.renderAsset(thread, path, kind, revision, options), plot: Plot2d });
+  Plot2d.mount([...document.querySelectorAll("canvas.plot2d")]);
 }
 
 // Live updates and page landings redraw only the regions their delta wrote

@@ -79,3 +79,14 @@ test('Settings takes the thread’s place at the press; its closing is the hub�
  const app=kids(f.project(page({n:2})))[0];assert.deepEqual(kids(app).map(k=>k.key),['sidebar','settings'],'the thread’s main is put away');
  s(true);
 });
+test('a region goes back after the sibling it came after',async()=>{
+ const {PressFeedback,regions,T}=await load();const f=new PressFeedback(()=>{}),{page}=fixture(T);
+ const el=(tag,key,attrs,ks=[])=>({$:T.El,tag,key,attrs:L(Object.entries(attrs).map(([name,value])=>({$:T.At,name,value}))),kids:L(ks)});
+ f.seen(page(),'thread:A');let s=f.choice('acct-open','','thread:A');s(true);f.seen(page({acct:true}),'thread:A');
+ s=f.choice('acct-open','','thread:A');s(true);f.seen(page({n:1}),'thread:A');
+ // the composer gained a piece in front since: the picker still follows the field
+ const p=page({n:2}),app=kids(p)[0],main=kids(app)[1],tc=kids(main),comp=tc[1];
+ const grown={...p,kids:L([{...app,kids:L([kids(app)[0],{...main,kids:L([tc[0],{...comp,kids:L([el('div','note',{class:'note'}),...kids(comp)])}])}])}])};
+ s=f.choice('acct-open','','thread:A');
+ const out=kids(kids(kids(kids(f.project(grown))[0])[1])[1]).map(k=>k.key);assert.deepEqual(out,['note','composer','acct','foot']);s(true);
+});
