@@ -14,6 +14,8 @@ pub mod driver;
 pub mod fab;
 pub mod fallback;
 pub mod improvements;
+pub mod issue_report;
+pub mod diagnostics_http;
 pub mod keys;
 #[cfg(test)]
 mod e2e;
@@ -82,6 +84,7 @@ pub fn start(hub: Arc<Hub>, agents: Option<Arc<crate::agents::Agents>>) {
     hub.register_ticker(Arc::new(driver::ResumeTicker));
     hub.register_rpc(Arc::new(misc::SettingsMisc));
     hub.register_rpc(Arc::new(improvements::ImprovementsRpc));
+    hub.register_http(Arc::new(diagnostics_http::DiagnosticsJson));
     hub.register_rpc(Arc::new(secret::SecretRpc { agents }));
     if hub.rpc_for("bots.voice").is_none() { hub.register_rpc(Arc::new(keys_rpc::VoiceKeys)); }
 }

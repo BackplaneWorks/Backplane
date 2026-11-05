@@ -15,10 +15,18 @@ pub fn limit(text: &str) -> String { if text.len() <= 120_000 { text.to_string()
 
 pub struct ImprovementsRpc;
 impl RpcHandler for ImprovementsRpc {
-    fn methods(&self) -> &'static [&'static str] { &["improvements.context", "improvements.report"] }
+    fn methods(&self) -> &'static [&'static str] { &["improvements.context", "improvements.report", "improvements.preview", "improvements.template", "improvements.prompt"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let data = |v: Value| vec![json!({"t":"reply","id":id,"ok":true,"result":v})];
+            let t = |k: &str| p.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+            match method {
+                // the pure report policy (issue_report.rs), for clients without the Bend bridge: a `body` previews it as it is, else the parts build one
+                "improvements.preview" => return data(if p.get("body").is_some() { super::issue_report::preview_body(&t("body")) } else { super::issue_report::preview(&t("text"), &t("os"), &t("version"), &t("details"), &t("diagnostics")) }),
+                "improvements.template" => return data(json!({"template": super::issue_report::TEMPLATE})),
+                "improvements.prompt" => return data(json!({"prompt": super::issue_report::prompt(&t("description"), &t("os"), &t("version"), &t("evidence"), &t("diagnostics"))})),
+                _ => {}
+            }
             if method == "improvements.context" { return data(context(hub, p.get("sourceThread").and_then(Value::as_str).unwrap_or("")).await) }
             data(report(hub, p.get("thread").and_then(Value::as_str).unwrap_or("")).await)
         })
