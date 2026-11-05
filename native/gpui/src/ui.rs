@@ -91,6 +91,7 @@ fn node_el(cx: &mut Context<Backplane>, n: &Value, light: bool, depth: usize, pa
     }
 }
 
+fn ic(light: bool, name: &'static str, size: f32, tok: &str) -> AnyElement { art::icon(name, size, theme::color(light, tok)) }
 fn chip(light: bool, label: String) -> Div {
     let c = |name: &str| theme::color(light, name);
     div().px_3().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).whitespace_nowrap().child(label)
@@ -100,7 +101,8 @@ impl Render for Backplane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if self.want_focus { self.want_focus = false; self.input.focus_handle(cx).focus(window); }
         self.frame_marks(window, cx);
-        let light = self.data["theme"] == "light";
+        let light = self.theme_override.unwrap_or(self.data["theme"] == "light");
+        if self.swatches { return crate::swatch::view(light).into_any_element(); }
         let c = |name: &str| theme::color(light, name);
         // bots: (name, mood, note, look seed) copied out so the cat cache can be filled
         let bot_data: Vec<(String, String, String, u64)> = self.data["bots"].as_array().into_iter().flatten()
@@ -115,7 +117,7 @@ impl Render for Backplane {
             let pid = string(project, "id"); let pid = pid.rsplit_once('|').map_or(pid.as_str(), |(_, r)| r).to_string();
             rows.push(div().id(SharedString::from(format!("proj-{pid}"))).flex().items_center().gap_2().px_3().pt_3().pb_1().text_size(px(11.)).text_color(c("dim")).cursor_pointer().hover(|s| s.text_color(c("text")))
                 .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("select".into(), format!("project-home-{pid}"))); cx.notify(); }))
-                .child("▾").child(string(project, "title").to_uppercase()).into_any_element());
+                .child(ic(light, "chevron-down", 14., "dim")).child(ic(light, "folder", 14., "ok")).child(div().flex_1().child(string(project, "title").to_uppercase())).child(ic(light, "plus", 16., "dim")).into_any_element());
             for t in project["threads"].as_array().into_iter().flatten().chain(project["settled"].as_array().into_iter().flatten()) {
                 let id = string(t, "id");
                 let raw = id.rsplit_once('|').map_or(id.as_str(), |(_, i)| i);
@@ -133,7 +135,7 @@ impl Render for Backplane {
             for key in ["projects", "active", "legacy"] { if let Some(row) = pager_row(cx, format!("pg-{key}"), &page[key], light) { rows.push(row); } }
         }
         for name in ["BOTS", "ROOMS"] {
-            rows.push(div().flex().justify_between().px_3().pt_4().text_size(px(11.)).text_color(c("dim")).child(name).child("+").into_any_element());
+            rows.push(div().flex().justify_between().px_3().pt_4().text_size(px(11.)).text_color(c("dim")).child(name).child(ic(light, "plus", 16., "dim")).into_any_element());
             if name == "BOTS" {
                 for ((bname, mood, note, _), rig) in bot_data.iter().zip(bot_rigs.iter()) {
                     let note_color = match mood.as_str() { "wait" | "error" => c("bad"), "work" | "talk" => c("accent"), _ => c("faint") };
@@ -160,7 +162,7 @@ impl Render for Backplane {
                         div().id(SharedString::from(format!("f-{id}"))).flex().gap_2().px_2().py_1().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("dim")).cursor_pointer()
                             .hover(|s| s.bg(c("raise")))
                             .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("fold".into(), value.clone())); cx.notify(); }))
-                            .child(if e["open"] == true { "▾" } else { "›" }).child(text)).into_any_element());
+                            .child(ic(light, if e["open"] == true { "chevron-down" } else { "chevron-right" }, 14., "dim")).child(text)).into_any_element());
                 }
                 "assistant" => {
                     let mut col = div().id(SharedString::from(format!("e-{id}"))).w_full().py_2().flex().flex_col().gap_2();
@@ -205,8 +207,8 @@ impl Render for Backplane {
         // Thread permissions are read-only here and are not drawn in the composer: the web's composer chip beside the model chip is the account chip.
         let ctx = string(&thread["picker"], "label").split("ctx ").nth(1).map(|s| format!("ctx {}", s.split(' ').next().unwrap_or(""))).unwrap_or_default();
         let todo = thread["todos"]["count"].as_str().unwrap_or("").to_string();
-        let rail: Vec<AnyElement> = ["Terminal", "Commands", "", "Board", "Schematic", "3D", "Split", "Mech", "", "Files", "Diff", "Review", "Browser"].iter().map(|l| {
-            if l.is_empty() { div().h(px(12.)).into_any_element() } else { div().flex().flex_col().items_center().h(px(48.)).justify_center().text_size(px(10.)).text_color(c("dim")).child(div().text_size(px(15.)).child("▫")).child(*l).into_any_element() }
+        let rail: Vec<AnyElement> = [("Terminal", "terminal"), ("Commands", "search"), ("", ""), ("Board", "circuit-board"), ("Schematic", "cpu"), ("3D", "box"), ("Split", "layout-panel-left"), ("Mech", "layers"), ("", ""), ("Files", "folder"), ("Diff", "diff"), ("Review", "circle-check"), ("Browser", "globe")].iter().map(|(l, i)| {
+            if l.is_empty() { div().h(px(12.)).into_any_element() } else { div().flex().flex_col().items_center().h(px(48.)).justify_center().gap_1().text_size(px(10.)).text_color(c("dim")).child(ic(light, i, 18., "dim")).child(*l).into_any_element() }
         }).collect();
         let connected = self.status == "Connected";
 
@@ -219,21 +221,22 @@ impl Render for Backplane {
                         .child(div().absolute().right(px(-2.)).bottom(px(-1.)).size(px(6.)).bg(if connected { c("ok") } else { c("bad") })))
                     .child(div().font_weight(FontWeight::BOLD).child("Backplane"))
                     .child(div().text_color(c("faint")).child("/")).child(div().text_color(c("dim")).child(if has_thread { "Project".to_string() } else { "Projects".to_string() }))
-                    .when(has_thread, |d| d.child(div().text_color(c("faint")).child("/")).child(div().font_weight(FontWeight::BOLD).child(string(thread, "title")))))
+                    .when(has_thread, |d| d.child(div().text_color(c("faint")).child("/")).child(div().font_weight(FontWeight::BOLD).child(string(thread, "title"))).child(ic(light, "chevron-down", 14., "dim"))))
                 .child(div().flex().items_center().gap_3()
-                    .child(div().w(px(260.)).px_2().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("faint")).child("› Jump or run a command"))
-                    .child(div().px_2().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("dim")).child("Improvements"))))
+                    .child(div().w(px(260.)).px_2().flex().items_center().gap_2().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("faint")).child(ic(light, "chevron-right", 13., "faint")).child("Jump or run a command"))
+                    .child(div().px_2().flex().items_center().gap_2().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("dim")).child(ic(light, "message-square", 15., "dim")).child("Improvements"))
+                    .child(ic(light, "search", 15., "dim")).child(ic(light, "settings", 15., "dim"))))
             .child(div().flex_1().min_h_0().flex()
                 // sidebar
                 .child(div().w(px(264.)).h_full().flex_shrink_0().bg(c("bg")).border_r_1().border_color(c("line")).flex().flex_col()
-                    .child(div().flex().gap_2().p_2().child(div().flex_1().px_2().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).text_color(c("faint")).child("Search projects")).child(div().px_2().text_color(c("dim")).child("+")))
+                    .child(div().flex().items_center().gap_2().p_2().child(ic(light, "chevron-left", 16., "dim")).child(div().flex_1().px_2().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).text_color(c("faint")).child("Search projects")).child(ic(light, "plus", 16., "dim")))
                     .child(div().id("sidebar").overflow_y_scroll().flex_1().children(rows))
                     .child(div().px_3().py_1().border_t_1().border_color(c("line")).text_size(px(11.)).text_color(c("dim")).child(self.status.clone())))
                 // main
                 .child(div().flex_1().min_w_0().h_full().flex().flex_col()
                     .when(has_thread, |d| d.child(div().h(px(32.)).flex_shrink_0().flex().items_center().border_b_1().border_color(c("line"))
                         .child(div().px_3().flex().gap_2().text_size(px(11.)).child(div().text_color(c("faint")).child("STATE")).child(div().size(px(6.)).mt(px(7.)).bg(c("ok"))).child(string(thread, "phase").split(':').next().unwrap_or("").to_lowercase()))
-                        .when(!todo.is_empty(), |d| d.child(div().px_3().h_full().flex().items_center().gap_2().border_l_1().border_color(c("line")).text_size(px(11.)).child(div().text_color(c("faint")).child("TO-DO")).child(todo.clone())))))
+                        .when(!todo.is_empty(), |d| d.child(div().px_3().h_full().flex().items_center().gap_2().border_l_1().border_color(c("line")).text_size(px(11.)).child(div().text_color(c("faint")).child("TO-DO")).child(todo.clone()).child(ic(light, "chevron-down", 12., "faint"))))))
                     .when(has_home, |d| d.child(div().id("home").overflow_y_scroll().flex_1().flex().justify_center().child(div().w_full().max_w(px(930.)).p_4().flex().flex_col().gap_3().children(home_els))))
                     .when(!has_home, |d| d.child(div().id("timeline").overflow_y_scroll().track_scroll(&self.scroll).flex_1().flex().justify_center().child(div().w_full().max_w(px(930.)).px_4().flex().flex_col().justify_end().min_h_full().children({
                         if entries.is_empty() { entries.push(div().py_6().text_color(c("dim")).child(if has_thread { "Start a conversation." } else { "Pick a thread, or start one with + next to a project." }).into_any_element()); }
@@ -245,10 +248,11 @@ impl Render for Backplane {
                         .child(div().border_1().border_color(c("accent")).bg(c("view")).px_3().py_2().min_h(px(60.)).child(self.input.clone()))
                         .child(div().flex().gap_2().items_center()
                             .child(div().flex_1().px_3().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).child(format!("claude / {} / {}", if model_short.is_empty() { "default" } else { &model_short }, if effort.is_empty() { "auto" } else { &effort })))
-                            .child(chip(light, "◉ Default".to_string()))
-                            .child(chip(light, "✎".to_string()))
-                            .child(chip(light, ctx))
-                            .child(chip(light, "⎘".to_string()))
+                            .child(chip(light, String::new()).flex().items_center().gap_2().child(ic(light, "user", 16., "text")).child("Default"))
+                            .child(chip(light, String::new()).child(ic(light, "square-pen", 16., "dim")))
+                            .child(chip(light, String::new()).flex().items_center().gap_2().child(ic(light, "gauge", 14., "dim")).child(ctx))
+                            .child(chip(light, String::new()).child(ic(light, "paperclip", 16., "dim")))
+                            .child(chip(light, String::new()).child(ic(light, "mic", 16., "dim")))
                             .child(div().id("send").px_4().py_1().bg(c("accent")).text_color(c("on-accent")).cursor_pointer().child("Send").on_click(cx.listener(|this, _, window, cx| this.send(&Send, window, cx)))))))
                 )
                 // right rail

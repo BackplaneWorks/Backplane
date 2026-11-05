@@ -6,7 +6,7 @@ use lyon::tessellation::{LineCap, LineJoin};
 use serde_json::Value;
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
-#[derive(Clone, Copy)] enum Seg { M(f32, f32), L(f32, f32), C(f32, f32, f32, f32, f32, f32), Q(f32, f32, f32, f32), Z }
+#[derive(Clone, Copy)] enum Seg { M(f32, f32), L(f32, f32), C(f32, f32, f32, f32, f32, f32), Q(f32, f32, f32, f32), A(f32, f32, f32, bool, bool, f32, f32), Z }
 
 fn parse_d(d: &str) -> Vec<Seg> {
     // absolute M L C Q Z (also comma separated, and "L" written with a leading letter glued to a number)
@@ -29,6 +29,7 @@ fn parse_d(d: &str) -> Vec<Seg> {
             'L' => { out.push(Seg::L(num(i), num(i + 1))); i += 2; }
             'C' => { out.push(Seg::C(num(i), num(i + 1), num(i + 2), num(i + 3), num(i + 4), num(i + 5))); i += 6; }
             'Q' => { out.push(Seg::Q(num(i), num(i + 1), num(i + 2), num(i + 3))); i += 4; }
+            'A' => { out.push(Seg::A(num(i), num(i + 1), num(i + 2), num(i + 3) != 0.0, num(i + 4) != 0.0, num(i + 5), num(i + 6))); i += 7; }
             _ => i += 1,
         }
     }
@@ -38,7 +39,7 @@ fn parse_d(d: &str) -> Vec<Seg> {
 fn rgb_alpha(c: u32, a: f32) -> Rgba { rgba((c << 8) | (a.clamp(0.0, 1.0) * 255.0).round() as u32) }
 
 /// One `GPUI_RECT` line per distinct drawn region (physical px), for the visual check.
-fn report(name: &str, b: Bounds<Pixels>, scale: f32) {
+pub fn report(name: &str, b: Bounds<Pixels>, scale: f32) {
     static SEEN: std::sync::Mutex<Option<std::collections::HashSet<String>>> = std::sync::Mutex::new(None);
     let line = format!("{{\"name\":\"{}\",\"x\":{:.1},\"y\":{:.1},\"w\":{:.1},\"h\":{:.1},\"scale\":{}}}", name,
         f32::from(b.origin.x) * scale, f32::from(b.origin.y) * scale, f32::from(b.size.width) * scale, f32::from(b.size.height) * scale, scale);
@@ -73,18 +74,19 @@ pub fn logo(light: bool, size: f32, name: &'static str) -> impl IntoElement {
         window.paint_quad(fill(b, rgb(l.bg)));
         let o = b.origin;
         let mut pb = PathBuilder::fill().with_style(PathStyle::Fill(FillOptions::even_odd().with_tolerance(0.02)));
-        trace(&mut pb, &l.segs, |x, y| point(o.x + px((l.tx + x * l.scale) * s), o.y + px((l.ty + y * l.scale) * s)));
+        trace(&mut pb, &l.segs, 1.0, |x, y| point(o.x + px((l.tx + x * l.scale) * s), o.y + px((l.ty + y * l.scale) * s)));
         if let Ok(path) = pb.build() { window.paint_path(path, rgb(l.fg)); }
     }).size(px(size))
 }
 
-fn trace(pb: &mut PathBuilder, segs: &[Seg], f: impl Fn(f32, f32) -> Point<Pixels>) {
+fn trace(pb: &mut PathBuilder, segs: &[Seg], rs: f32, f: impl Fn(f32, f32) -> Point<Pixels>) {
     for s in segs {
         match *s {
             Seg::M(x, y) => pb.move_to(f(x, y)),
             Seg::L(x, y) => pb.line_to(f(x, y)),
             Seg::C(a, b, c, d, x, y) => pb.cubic_bezier_to(f(x, y), f(a, b), f(c, d)),
             Seg::Q(a, b, x, y) => pb.curve_to(f(x, y), f(a, b)),
+            Seg::A(rx, ry, rot, large, sweep, x, y) => pb.arc_to(point(px(rx * rs), px(ry * rs)), px(rot), large, sweep, f(x, y)),
             Seg::Z => pb.close(),
         }
     }
@@ -140,36 +142,93 @@ pub fn paint_cat(window: &mut Window, b: Bounds<Pixels>, rig: &Rig, ms: f32, siz
         let f = |x: f32, y: f32| { let (x, y) = pose(&p.anims, ms, x, y); point(o.x + px(x * s), o.y + px(y * s)) };
         if let Some(c) = p.fill {
             let mut pb = PathBuilder::fill().with_style(PathStyle::Fill(FillOptions::even_odd().with_tolerance(0.02)));
-            trace(&mut pb, &p.segs, f);
+            trace(&mut pb, &p.segs, 1.0, f);
             if let Ok(path) = pb.build() { window.paint_path(path, rgb_alpha(c, al)); }
         }
         if let Some(c) = p.stroke {
             let w = p.sw * s;
             let mut pb = PathBuilder::stroke(px(w)).with_style(PathStyle::Stroke(StrokeOptions::default().with_line_width(w).with_line_cap(LineCap::Round).with_line_join(LineJoin::Round).with_tolerance(0.02)));
-            trace(&mut pb, &p.segs, f);
+            trace(&mut pb, &p.segs, 1.0, f);
             if let Ok(path) = pb.build() { window.paint_path(path, rgb_alpha(c, al)); }
         }
     }
 }
 
+// ---- generated assets (cat rigs, icons): found beside the binary, loud when missing --------------------
+/// BACKPLANE_GPUI_ASSETS, else `assets/` beside the binary, else the repo's build folder (a copied binary).
+pub fn assets_dir() -> PathBuf {
+    static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| {
+        let mut c: Vec<PathBuf> = Vec::new();
+        if let Some(d) = std::env::var_os("BACKPLANE_GPUI_ASSETS") { c.push(PathBuf::from(d)); }
+        if let Some(p) = std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.join("assets"))) { c.push(p); }
+        if let Some(h) = std::env::var_os("HOME") { c.push(PathBuf::from(h).join("Documents/i2cjak/backplane-gpui/build/gpui/linux/assets")); }
+        c.iter().find(|d| d.join("icons.json").is_file()).cloned().unwrap_or_else(|| c.into_iter().next().unwrap_or_default())
+    }).clone()
+}
+/// A message when the generated assets are not there; logged as GPUI_LOG and shown in the window.
+pub fn assets_missing() -> Option<String> {
+    let d = assets_dir();
+    let mut missing = Vec::new();
+    if !d.join("icons.json").is_file() { missing.push("icons.json"); }
+    if !d.join("cat-rigs").is_dir() { missing.push("cat-rigs/"); }
+    if missing.is_empty() { return None; }
+    let m = format!("assets missing in {}: {}", d.display(), missing.join(", "));
+    eprintln!("GPUI_LOG {{\"asset_missing\":{}}}", Value::String(m.clone()));
+    Some(m)
+}
+fn log_once(what: String) {
+    static SEEN: std::sync::Mutex<Option<std::collections::HashSet<String>>> = std::sync::Mutex::new(None);
+    if SEEN.lock().unwrap().get_or_insert_with(Default::default).insert(what.clone()) { eprintln!("GPUI_LOG {{\"asset_missing\":{}}}", Value::String(what)); }
+}
+
+struct IconLayer { segs: Vec<Seg>, fill: bool }
+fn icons() -> &'static HashMap<String, Vec<IconLayer>> {
+    static ICONS: std::sync::OnceLock<HashMap<String, Vec<IconLayer>>> = std::sync::OnceLock::new();
+    ICONS.get_or_init(|| {
+        let path = assets_dir().join("icons.json");
+        let v: Value = std::fs::read_to_string(&path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
+        v.as_object().into_iter().flatten().map(|(k, layers)| (k.clone(), layers.as_array().into_iter().flatten()
+            .map(|l| IconLayer { segs: parse_d(l["d"].as_str().unwrap_or("")), fill: l["fill"] == true }).collect())).collect()
+    })
+}
+/// A Lucide icon as vector paths on its 24 x 24 grid: a 2-unit round stroke, or a filled layer. `size` px square.
+pub fn icon(name: &'static str, size: f32, color: Rgba) -> AnyElement {
+    let Some(layers) = icons().get(name) else {
+        log_once(format!("icon {name} not in icons.json"));
+        return div().size(px(size)).into_any_element();
+    };
+    canvas(|_, _, _| (), move |b: Bounds<Pixels>, _, window: &mut Window, _| {
+        report(&format!("icon:{name}"), b, window.scale_factor());
+        let s = size / 24.0; let o = b.origin;
+        for l in layers {
+            let f = |x: f32, y: f32| point(o.x + px(x * s), o.y + px(y * s));
+            if l.fill {
+                let mut pb = PathBuilder::fill().with_style(PathStyle::Fill(FillOptions::even_odd().with_tolerance(0.02)));
+                trace(&mut pb, &l.segs, s, f);
+                if let Ok(p) = pb.build() { window.paint_path(p, color); }
+            } else {
+                let w = 2.0 * s;
+                let mut pb = PathBuilder::stroke(px(w)).with_style(PathStyle::Stroke(StrokeOptions::default().with_line_width(w).with_line_cap(LineCap::Round).with_line_join(LineJoin::Round).with_tolerance(0.02)));
+                trace(&mut pb, &l.segs, s, f);
+                if let Ok(p) = pb.build() { window.paint_path(p, color); }
+            }
+        }
+    }).size(px(size)).into_any_element()
+}
+
 /// Rigs by (look, mood): loaded once from the generated folder, at most 64 kept.
 pub struct Cats { dir: PathBuf, cache: HashMap<(u32, String), Option<Arc<Rig>>> }
 impl Cats {
-    pub fn new() -> Self {
-        // BACKPLANE_GPUI_CATS, else cat-rigs/ beside the binary, else the repo's build folder (a copied binary, as try.sh makes)
-        let mut candidates: Vec<PathBuf> = Vec::new();
-        if let Some(d) = std::env::var_os("BACKPLANE_GPUI_CATS") { candidates.push(PathBuf::from(d)); }
-        if let Some(p) = std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.join("cat-rigs"))) { candidates.push(p); }
-        if let Some(h) = std::env::var_os("HOME") { candidates.push(PathBuf::from(h).join("Documents/i2cjak/backplane-gpui/build/gpui/linux/cat-rigs")); }
-        let dir = candidates.iter().find(|d| d.is_dir()).cloned().unwrap_or_default();
-        Cats { dir, cache: HashMap::new() }
-    }
+    pub fn new() -> Self { Cats { dir: assets_dir().join("cat-rigs"), cache: HashMap::new() } }
     pub fn rig(&mut self, seed: u64, mood: &str) -> Option<Arc<Rig>> {
         let look = (seed % 72) as u32;
         if self.cache.len() > 64 { self.cache.clear(); }
         let moving = matches!(mood, "work" | "think" | "wait" | "talk");
         let dir = self.dir.clone();
-        self.cache.entry((look, mood.to_string())).or_insert_with(|| load_rig(&dir, look, mood, moving).map(Arc::new)).clone()
+        let r = self.cache.entry((look, mood.to_string())).or_insert_with(|| load_rig(&dir, look, mood, moving).map(Arc::new)).clone();
+        if r.is_none() { log_once(format!("cat rig {look}-{mood} missing in {}", dir.display())); }
+        r
     }
 }
 /// A cat, `size` px square. Only a moving mood asks for another frame, so an idle window never repaints.
