@@ -196,7 +196,7 @@ mod reconnect_tests {
         let live_seen = *first.lives.lock().unwrap();
         first.task.abort();                                   // the link drops
         tokio::time::sleep(Duration::from_millis(200)).await;
-        let resume = join(port, Some((held, hub.origin.clone()))).await;
+        let resume = join(port, Some((held, wire::origin(&hub)))).await;
         for w in writers { w.await.unwrap(); }
         tokio::time::sleep(Duration::from_millis(600)).await;
 

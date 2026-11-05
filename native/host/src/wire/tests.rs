@@ -98,3 +98,24 @@ async fn a_requests_changes_come_before_its_reply() {
     assert_eq!(all.len(), all.iter().collect::<std::collections::HashSet<_>>().len()); c.task.abort();
 }
 
+
+// Bend's origin follows the log (read at each join), and a client holding another origin, "0" included, is sent the whole log.
+// (Hub::start's bootstrap writes housekeeping events, so a started hub's log is never empty; the origin is still read per join.)
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn origin_is_read_at_each_join_and_a_zero_resumes_from_nothing() {
+    let (hub, port) = test_hub("wire-origin", "").await;
+    let first_at = |h: &Hub| h.store.get(0).ok().and_then(|l| serde_json::from_str::<Value>(&l).ok()).and_then(|v| v["at"].as_u64()).unwrap();
+    let a = join(port, None).await; tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(*a.origin.lock().unwrap(), first_at(&hub).to_string());
+    hub.commit(&json!({"$":"ProjectCreated","id":"p9","title":"p","root":"/x","at":1700000042})).await.unwrap();
+    let b = join(port, None).await; tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(*b.origin.lock().unwrap(), first_at(&hub).to_string(), "a join reports the log's first change's at");
+    assert_eq!(origin(&hub), first_at(&hub).to_string());
+    let n = hub.store.len();
+    let r = join(port, Some((n, "0".into()))).await; tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(*r.log_since.lock().unwrap(), Some(0), "origin 0 is not this log's origin");
+    assert_eq!(r.items.lock().unwrap().len(), n);
+    let ok = join(port, Some((n, origin(&hub)))).await; tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(*ok.log_since.lock().unwrap(), Some(n as u64)); assert_eq!(ok.items.lock().unwrap().len(), 0);
+    a.task.abort(); b.task.abort(); r.task.abort(); ok.task.abort();
+}
