@@ -6,22 +6,23 @@ import {makeStandins,startHub,stopHub,client,sleep,pct,rssKb,hwmKb,cpuTicks,fds,
 import {viewClient} from './view.mjs';
 const REPO='/home/h/Documents/i2cjak/backplane-gpui';
 // The store copy ~/.backplane-gpui-copy is read-only and never written by a hub. Every run works on a throwaway copy under build/gpui/ (cp --reflink=auto), removed afterwards.
-const SRC=process.env.HOME+'/.backplane-gpui-copy';const HOME=REPO+'/build/gpui/perf-run/m0/home';
+const SRC=process.env.SRC_HOME||(process.env.HOME+'/.backplane-gpui-copy');const HOME=process.env.M0_HOME||(REPO+'/build/gpui/perf-run/m0/home'); // M0_HOME: the throwaway copy (under build/gpui or ~/.backplane-gpui-scratch), removed on exit
 function prepareCopy(){const free=Number(execSync("df -B1G --output=avail / | tail -1",{encoding:'utf8'}).trim());if(free<40)throw Error('df: only '+free+' GiB free on /, need >= 40');
  mkdirSync(HOME,{recursive:true});execSync(`cp --reflink=auto ${SRC}/events.jsonl ${HOME}/events.jsonl`);if(process.env.WITH_STORE&&existsSync(SRC+'/store.db'))execSync(`cp --reflink=auto ${SRC}/store.db ${HOME}/store.db`);
- if(existsSync(SRC+'/token'))execSync(`cp ${SRC}/token ${HOME}/token`);R.copy={made:new Date().toISOString(),dfFreeGiB:free,withStoreDb:!!process.env.WITH_STORE}}
+ if(existsSync(SRC+'/token'))execSync(`cp ${SRC}/token ${HOME}/token`);execSync(`chmod -R u+rwX ${HOME}`); // the store copy is read-only: a throwaway copy has to be writable for a hub to append to it
+ R.copy={made:new Date().toISOString(),dfFreeGiB:free,withStoreDb:!!process.env.WITH_STORE}}
 function removeCopy(){try{execSync(`rm -rf ${HOME}`)}catch{}}const PORT=3830,HOST='100.64.84.41';
 const root=REPO+'/build/gpui/perf-run/m0';mkdirSync(root+'/fakehome',{recursive:true});mkdirSync(root+'/proj',{recursive:true});makeStandins(root+'/bin');
-const out=REPO+'/build/gpui/results/perf/m0';mkdirSync(out,{recursive:true});
+const out=process.env.M0_OUT||(REPO+'/build/gpui/results/perf/m0');mkdirSync(out,{recursive:true});
 const stat=a=>({n:a.length,p50:pct(a,50),p95:pct(a,95),p99:pct(a,99),max:Math.max(...a)});
-const R=existsSync(out+'/m0.json')?JSON.parse(readFileSync(out+'/m0.json','utf8')):{machine:'desktop 32 cores, 59 GiB, linux 7.0',hub:'build/gpui/backplane-serve 0.14.0 (JS on Bun)',store:'~/.backplane-gpui-copy',copyEnv:'BACKPLANE_COPY=1, fake HOME, stand-in agents'};
+const R=existsSync(out+'/m0.json')?JSON.parse(readFileSync(out+'/m0.json','utf8')):{machine:'desktop 32 cores, 59 GiB, linux 7.0',hub:process.env.HUB_LABEL||'build/gpui/backplane-serve 0.14.0 (JS on Bun)',store:'~/.backplane-gpui-copy',copyEnv:'BACKPLANE_COPY=1, fake HOME, stand-in agents'};
 const save=()=>writeFileSync(out+'/m0.json',JSON.stringify(R,null,1));
 // live hub reference, /proc only
 function live(){const p=Number(readFileSync(process.env.HOME+'/.backplane-bend/hub.lock','utf8').split(' ')[0]);return {pid:p,rssMB:rssKb(p)/1024,cpuTicks:cpuTicks(p),fds:fds(p),threads:threads(p)}}
 async function liveRef(secs){const a=live();await sleep(secs*1000);const b=live();return {rssMB:b.rssMB,cpuCorePct:(b.cpuTicks-a.cpuTicks)*10/(secs*1000)*100,fds:b.fds,threads:b.threads,secs}}
 async function boot(tag,extra={}){
  const t0=performance.now();
- const h=await startHub({bin:REPO+'/build/gpui/backplane-serve',home:HOME,port:PORT,host:HOST,standins:root+'/bin',cap:'3700M',log:out+`/hub-${tag}.log`,extraEnv:{BACKPLANE_COPY:'1',HOME:root+'/fakehome',FAKE_SECS:'1200',FAKE_PER:'2',FAKE_CYCLE:'20',...extra}});
+ const h=await startHub({bin:process.env.HUB_BIN||(REPO+'/build/gpui/backplane-serve'),extraArgs:JSON.parse(process.env.HUB_ARGS||'[]'),home:HOME,port:PORT,host:HOST,standins:root+'/bin',cap:'3700M',log:out+`/hub-${tag}.log`,extraEnv:{BACKPLANE_COPY:'1',HOME:root+'/fakehome',FAKE_SECS:'1200',FAKE_PER:'2',FAKE_CYCLE:'20',...extra}});
  const tHello=performance.now()-t0;
  const v=await viewClient(h,{mobile:true,delta:true});const tg=performance.now()-t0;
  const r=await v.open();const tv=performance.now()-t0;
