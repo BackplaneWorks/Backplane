@@ -27,6 +27,7 @@ The person needs this desktop's RTX 5080 and CPU. Until the coordinator says oth
 
 ## Git and publishing
 - All streams share this worktree and branch. Commit only your own paths: `git commit -m "..." -- <paths>` (add new files with `git add <paths>` first). Retry if the index is locked. No stash, rebase, reset, or checkout of files you do not own.
+- Never commit binaries, tarballs or generated output: nothing over 1 MB. Boat picks up untracked, unignored files, so leave them untracked, or list them with `--include-file`.
 - Do not push. The coordinator pushes.
 - No TestFlight or Play upload, no signed release build, no merge to main, no install over the real app, no `bend update`, no release tag.
 - Edits to `src/**.bend` affect the law checks: do not change them without asking the coordinator.
