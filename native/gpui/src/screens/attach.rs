@@ -94,7 +94,10 @@ pub fn upload_blocking(tx: &Sender<Command>, t: &Target, thread: &str, name: &st
     };
     let answer = run().ok().map(|r| body_of(&r)).filter(|b| serde_json::from_str::<Value>(b).is_ok())
         .unwrap_or_else(|| json!({"uiError": "upload.network", "thread": thread, "upload": true}).to_string());
-    if current.lock().map_or(false, |c| *c == thread) { let _ = tx.blocking_send(Command::Action("attach-end".into(), answer)); }
+    let on_screen = current.lock().map_or(false, |c| *c == thread);
+    let sent = on_screen && tx.blocking_send(Command::Action("attach-end".into(), answer.clone())).is_ok();
+    // what happened to the upload's end, without the path's directory (a diagnostic line for the harness)
+    eprintln!("GPUI_LOG {{\"attach_end\":{{\"sent\":{sent},\"thread_current\":{on_screen},\"answer_bytes\":{},\"ok\":{}}}}}", answer.len(), serde_json::from_str::<Value>(&answer).map_or(false, |v| v["attached"].is_string()));
 }
 
 pub fn upload(tx: Sender<Command>, t: Target, thread: String, name: String, body: Body, cap: u64, current: Current) {
