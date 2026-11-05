@@ -18,13 +18,17 @@ use std::sync::Arc;
 
 pub use plan::{plan, Ctx, Line, Plan};
 
-pub fn start(hub: Arc<Hub>) {
-    hub.register_rpc(Arc::new(Commands { fold: Arc::new(tokio::sync::Mutex::new(fold::Fold::default())) }));
+pub fn start(hub: Arc<Hub>) { start_with(hub, None) }
+/// `seam`: the agents module to call instead of the process-wide one (tests that run a real one).
+pub fn start_with(hub: Arc<Hub>, seam: Option<Arc<dyn seam::Seam>>) {
+    hub.register_rpc(Arc::new(Commands { fold: Arc::new(tokio::sync::Mutex::new(fold::Fold::default())), seam }));
 }
 
 pub fn now_s() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) }
 
-struct Commands { fold: Arc<tokio::sync::Mutex<fold::Fold>> }
+struct Commands { fold: Arc<tokio::sync::Mutex<fold::Fold>>, seam: Option<Arc<dyn seam::Seam>> }
+
+impl Commands { fn agents(&self) -> Option<Arc<dyn seam::Seam>> { self.seam.clone().or_else(seam::current) } }
 
 impl RpcHandler for Commands {
     fn methods(&self) -> &'static [&'static str] { &["thread.pin", "thread.unpin", "thread.settle", "thread.unsettle", "thread.archive", "thread.unarchive", "thread.rename", "thread.delete", "thread.snooze",
@@ -71,22 +75,23 @@ impl RpcHandler for Commands {
             if let Some(th) = pl.stop.clone() {
                 let running = f.threads.get(&th).map_or(false, |t| t.turn == "running");
                 if running {
-                    if let Some(s) = seam::current() { s.interrupt(&th).await }
+                    if let Some(s) = self.agents() { s.interrupt(&th).await }
                     if let Err(e) = f.sync(&hub.store) { return vec![json!({"t":"reply","id":id,"ok":false,"error":format!("{e:#}")})] }
                     if let Some(again) = plan(&f, now_s(), id, method, p, &cx) { pl = again }
                 }
-                if let Some(s) = seam::current() { s.stop(&th).await }
+                if let Some(s) = self.agents() { s.stop(&th).await }
             }
             if !pl.events.is_empty() && hub.commit_many(&pl.events).await.is_err() { return vec![json!({"t":"reply","id":id,"ok":false,"error":"store write failed"})] }
             // BotFx gone (thread.delete): the thread's browser page closes (the term lane's `browser.close`; no events)
-            if method == "thread.delete" { if let Some(h) = hub.rpc_for("browser.close") { let th = p["thread"].as_str().unwrap_or(""); let _ = h.call(hub, who, &json!(0), "browser.close", &json!({"thread": th})).await; } }
+            // (an out in Bend, after the step: a slow helper must not hold the reply or the next command, so it runs in a task)
+            if method == "thread.delete" { if let Some(h) = hub.rpc_for("browser.close") { let (hub, th) = (hub.clone(), p["thread"].as_str().unwrap_or("").to_string()); tokio::spawn(async move { let _ = h.call(&hub, &Caller { gen: String::new(), client: 0 }, &json!(0), "browser.close", &json!({"thread": th})).await; }); } }
             // BotFx scratch (an out, so after the changes): the folder exists before the reply, and before anything runs in it
             if let Some(th) = pl.scratch.clone() { scratch_folder(hub, &th); }
             // Home.start: the first message is a turn.start of the new thread (the agents module posts it and queues it while the worktree is made)
             if let Some(("post", th, text)) = pl.act.clone() {
                 if let Some(h) = hub.rpc_for("turn.start") { let msg = th.strip_prefix("home-").unwrap_or("").to_string(); let _ = h.call(hub, who, &json!(0), "turn.start", &json!({"thread": th, "text": text, "msg": msg})).await; }
             } else if let Some((kind, th, text)) = pl.act.clone() {
-                if let Some(s) = seam::current() { match kind { "steer" => s.steer(&th, &text).await, "start_one" => s.start_one(&th, &text).await, _ => s.start_queued(&th, &text).await } }
+                if let Some(s) = self.agents() { match kind { "steer" => s.steer(&th, &text).await, "start_one" => s.start_one(&th, &text).await, _ => s.start_queued(&th, &text).await } }
             }
             if let Some((th, root, mode, src)) = pl.wt.clone() { let (pv, bd) = capture(&f, &th, &pl.events); worktree::spawn(hub.clone(), self.fold.clone(), th, root, mode, src, pv, bd) }
             vec![pl.reply]

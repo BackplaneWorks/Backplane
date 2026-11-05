@@ -368,7 +368,9 @@ impl crate::api::RpcHandler for Arc<Close> {
     assert!(!running(&h, "r1"), "archive ends a running turn"); assert_eq!(calls("r1"), vec![("interrupt", String::new()), ("stop", String::new())]);
     // an idle thread gets no turn change (archive_idle_no_turn)
     mk(&h, "r3").await; let (e, _) = ask(&h, "thread.archive", json!({"thread":"r3"})).await; assert!(!e.iter().any(|v| v["$"] == "TurnChanged"));
-    ask(&h, "thread.delete", json!({"thread":"r2"})).await; assert!(!running(&h, "r2")); assert_eq!(*closes.0.lock().unwrap(), vec!["r2".to_string()], "thread.delete closes the thread's browser page");
+    ask(&h, "thread.delete", json!({"thread":"r2"})).await; assert!(!running(&h, "r2"));
+    for _ in 0..40 { if !closes.0.lock().unwrap().is_empty() { break } tokio::time::sleep(std::time::Duration::from_millis(25)).await }
+    assert_eq!(*closes.0.lock().unwrap(), vec!["r2".to_string()], "thread.delete closes the thread's browser page, after the reply");
 }
 
 // AG.Title.clean / Title.changes: the writer's title replaces the placeholder only while the thread still has it
@@ -409,4 +411,25 @@ impl crate::api::RpcHandler for Arc<Close> {
     h.commit(&json!({"$":"ProjectCreated","id":"ph","title":"h","root":d.to_str().unwrap(),"at":9})).await.unwrap();
     let (_, r) = ask(&h, "project.home", json!({"project":"ph"})).await; assert_eq!(r["ok"], true); assert_eq!(r["result"]["project_home"], "ph"); assert_eq!(r["result"]["artifacts"][0]["kind"], "readme");
     let (_, r) = ask(&h, "project.home", json!({"project":"ghost"})).await; assert_eq!(r["error"], "Choose an existing project.");
+}
+
+// archive_running_stops, through the real agents module (a stand-in agent that never answers): archiving a running thread ends its turn and its process
+#[tokio::test] async fn archive_running_stops_through_the_real_agents_module() {
+    use std::os::unix::fs::PermissionsExt;
+    let base = std::env::temp_dir().join(format!("bp-cmds-real-{}", std::process::id())); let _ = std::fs::remove_dir_all(&base);
+    let (home, bin, work) = (base.join("home"), base.join("bin"), base.join("work")); for d in [&home, &bin, &work] { std::fs::create_dir_all(d).unwrap() }
+    std::fs::write(bin.join("claude"), "#!/bin/sh\nsleep 600\n").unwrap(); std::fs::set_permissions(bin.join("claude"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::write(home.join("token"), "tok").unwrap();
+    std::fs::write(home.join("events.jsonl"), format!("{{\"$\":\"ProjectCreated\",\"id\":\"p1\",\"title\":\"p\",\"root\":{},\"at\":1}}\n{{\"$\":\"ThreadCreated\",\"id\":\"ta1\",\"project\":\"p1\",\"title\":\"T\",\"env\":\"local\",\"branch\":\"\",\"worktree\":\"\",\"provider\":\"claude\",\"model\":\"\",\"at\":2}}\n", serde_json::to_string(work.to_str().unwrap()).unwrap())).unwrap();
+    let h = Hub::start(Cfg { home, version: "0.14.0".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+    let ag = crate::agents::Agents::start_with(h.clone(), crate::agents::proc::Cli::standin(&bin)).await.unwrap();
+    super::start_with(h.clone(), Some(Arc::new(ag.clone()) as Arc<dyn super::seam::Seam>));
+    let (mut c, _) = h.connect(true);
+    let out = h.request(&mut c, &json!({"id":1,"m":"turn.start","p":{"thread":"ta1","text":"go"}})).await; assert_eq!(out[0]["ok"], true);
+    let state = |h: &Arc<Hub>| { let mut f = super::fold::Fold::default(); f.sync(&h.store).unwrap(); f.threads["ta1"].turn.clone() };
+    for _ in 0..100 { if state(&h) == "running" { break } tokio::time::sleep(std::time::Duration::from_millis(50)).await }
+    assert_eq!(state(&h), "running", "the stand-in holds the turn");
+    let out = h.request(&mut c, &json!({"id":2,"m":"thread.archive","p":{"thread":"ta1"}})).await; assert_eq!(out[0]["ok"], true);
+    assert_ne!(state(&h), "running", "archive ended the running turn"); assert_eq!(state(&h), "interrupted");
+    let mut f = super::fold::Fold::default(); f.sync(&h.store).unwrap(); assert!(f.threads["ta1"].archived);
 }
