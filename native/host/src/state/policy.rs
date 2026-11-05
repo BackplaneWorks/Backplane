@@ -81,9 +81,9 @@ struct Inner {
     booting: Option<Vec<(u64, Vec<Value>)>>,
 }
 /// The policies behind one short lock. `before_commit` is the writer's call; `tick` and `read` are the ticker's and the viewers'.
-pub struct Policy { inner: Mutex<Inner>, poisoned: AtomicBool }
+pub struct Policy { inner: Mutex<Inner>, poisoned: AtomicBool, passive: AtomicBool }
 impl Policy {
-    pub fn new() -> Policy { Policy { inner: Mutex::new(Inner { core: Core::new(), booting: Some(vec![]) }), poisoned: AtomicBool::new(false) } }
+    pub fn new() -> Policy { Policy { inner: Mutex::new(Inner { core: Core::new(), booting: Some(vec![]) }), poisoned: AtomicBool::new(false), passive: AtomicBool::new(std::env::var("BACKPLANE_PASSIVE").map_or(false, |v| v == "1")) } }
     /// The lock, even after a panic inside it: the copy may be half-folded then, so it is flagged and the host folds the log again
     /// (`take_poisoned`); until that finishes the policies decide nothing, and a later batch never panics on the poisoned lock.
     fn lock(&self) -> MutexGuard<'_, Inner> {
@@ -159,7 +159,12 @@ impl Policy {
         derived.extend(autosettle::upgrade(&g.core.st, now_s));
         derived
     }
+    /// Side-by-side mode (env `BACKPLANE_PASSIVE=1`, or set by the switchover): nothing the policies do on their own happens. The minute tick writes
+    /// nothing, the boot commits nothing (no Auto.upgrade), no summary is asked for. What a person's own action derives in the same batch still does.
+    pub fn passive(&self) -> bool { self.passive.load(Ordering::SeqCst) }
+    pub fn set_passive(&self, on: bool) { self.passive.store(on, Ordering::SeqCst) }
     pub fn tick(&self, now_s: u64) -> Vec<Value> {
+        if self.passive() { return vec![] }
         let g = self.lock();
         if g.booting.is_some() { vec![] } else { g.core.tick(now_s) }
     }
@@ -187,6 +192,11 @@ mod tests {
     #[test] fn lean_keeps_what_policies_read_and_drops_what_grows() {
         for k in ["autosettle.quiet.t1", "liveness.t1", "wake.w1", "lock.merge", "launch.t2", "alert.t1", "told.k1-1", "settle.done", "launch.input.t1", "fallback.input.t1"] { assert!(lean_keeps(k), "{k}"); }
         for k in ["stopped.m1", "failed.m1", "ride.t1", "tok.t.t1", "uber.op.u.m.1", "usage.t1", "todos.t1", "session.t1.claude"] { assert!(!lean_keeps(k), "{k}"); }
+    }
+    #[test] fn passive_mode_ticks_nothing() {
+        let p = booted();
+        p.set_passive(true); assert!(p.tick(9_999_999_999).is_empty());
+        p.set_passive(false); assert!(p.passive() == false);
     }
     #[test] fn a_batch_gets_its_derived_events_in_the_same_batch() {
         let p = booted();

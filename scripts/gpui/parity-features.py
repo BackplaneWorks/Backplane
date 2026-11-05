@@ -465,6 +465,7 @@ R(A, "Alert, told and summary writes at a turn's end (alert.<t>, told.<key>, sum
 # ---- Onboarding, nudge, i18n
 A = "Onboarding and polish"
 R(A, "First-run tour", m=["setting.set"], c="mdd", lane=L["gscreens"], ev="onboard.done is a setting (no handler); ios build-tour.log, tour-timeline.png; android pair shot shows tour")
+R(A, "Policies stay passive side by side (BACKPLANE_PASSIVE=1 / Policy::set_passive)", hub="done", pf="state", c="nnn", lane=L["state"], ev="no minute tick write, no boot commit (Auto.upgrade included), no summary call while passive; a person's own action still derives its events; unit test passive_mode_ticks_nothing")
 R(A, "Star nudge", m=["star.nudge"], pf="state", c="mpp", lane=L["state"], ev="state/star.rs (4 tests, 3 star_nudge_* laws mapped); the star.nudge request (open / dismiss) is ANSWERED by statehost (RpcHandler); the count is `Policies::star_prompt(msg_id, now)` (events to commit with the prompt + the targeted info frame) and is called by bots.say / bots.post (main.rs wires Bots::set_star to it); turn.start (agents) has its call written but not landed, bots.tell is not ported")
 R(A, "Command palette and shortcuts (alt/ctrl digits, hints)", hub="n/a", c="pnn", lane=L["gscreens"], ev="GPUI input.rs bindings only; palette missing")
 R(A, "i18n (en, ja)", hub="partial", c="mdd", lane=L["i18n"], ev="Rust prompt language T::PROMPT_LANG_K; iOS en/ja lproj, Android NativeLocale; GPUI strings are English literals")

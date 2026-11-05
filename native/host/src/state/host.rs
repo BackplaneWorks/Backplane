@@ -13,7 +13,7 @@ struct Host { policy: Arc<Policy>, hub: OnceLock<Arc<Hub>> }
 impl Transform for Host {
     fn before_commit(&self, first_seq: u64, events: Vec<Value>) -> Vec<Value> {
         let (out, asks) = self.policy.before_commit_asks(first_seq, events);
-        if !asks.is_empty() {
+        if !asks.is_empty() && !self.policy.passive() {
             // Sum.out: the writer is asked for once the batch is written (a failed write only costs a summary the next due end asks for again)
             if let (Some(hub), Ok(rt)) = (self.hub.get(), tokio::runtime::Handle::try_current()) {
                 for (id, input) in asks { rt.spawn(summarize(self.policy.clone(), hub.clone(), "thread", id, input)); }
@@ -62,6 +62,8 @@ impl Policies {
     pub fn star_prompt(&self, msg_id: &str, now_s: u64) -> (Vec<Value>, Option<Value>) { self.policy.star_prompt(msg_id, now_s) }
     /// Watchdog.line: call for every provider line of a thread's agent (the stream-json line as parsed), commit the events it returns
     pub fn line(&self, thread: &str, now_s: u64, line: &Value) -> Vec<Value> { self.policy.line(thread, now_s, line) }
+    /// Side-by-side mode: no tick, boot or summary action on its own (see `Policy::passive`)
+    pub fn set_passive(&self, on: bool) { self.policy.set_passive(on) }
     pub async fn read(&self, thread: &str, now_s: u64) -> Vec<Value> { self.policy.read(thread, now_s) }
 }
 
@@ -84,7 +86,7 @@ async fn boot_task(policy: Arc<Policy>, hub: Arc<Hub>) {
     let (core, len) = match tokio::task::spawn_blocking(move || read_log(&h)).await { Ok(x) => x, Err(e) => { eprintln!("state policies: the log fold failed, the policies stay off: {e}"); return } };
     let now_s = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     let derived = policy.finish_boot(core, len, now_s);
-    if !derived.is_empty() { let _ = hub.commit_many(&derived).await; }
+    if !derived.is_empty() && !policy.passive() { let _ = hub.commit_many(&derived).await; }
 }
 
 /// star.nudge {token, action}: the person opened the suggestion or dismissed it (terminal; reliable, so the reply follows the commit)
