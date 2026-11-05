@@ -262,6 +262,11 @@ impl Render for Backplane {
                 None => rail.push(with_rect(div().opacity(0.45), || format!("rail:{l}")).flex().flex_col().items_center().h(px(48.)).justify_center().gap_1().text_size(px(10.)).text_color(c("dim")).child(ic(light, i, 18., "dim")).child(*l).into_any_element()),
             }
         }
+        // the open asks' buttons are controls too (the harness answers them by index: ask:<i>:<j>)
+        for (i, a) in crate::screens::asks::parse(&thread["asks"]).into_iter().enumerate() {
+            for (j, b) in a.buttons.iter().enumerate() { ctl.push(CtlEntry { id: format!("ask:{i}:{j}"), label: b.label.clone(), ctl: Ctl::Node("answer".into(), b.value.clone()) }); }
+            if let Some(s) = &a.skip { ctl.push(CtlEntry { id: format!("ask:{i}:skip"), label: s.label.clone(), ctl: Ctl::Node("answer".into(), s.value.clone()) }); }
+        }
         // the Mechanical page's parts are controls too (the harness presses them by index)
         for (i, p) in crate::screens::viewer::mech_parts(&thread["viewer"]).into_iter().enumerate() { ctl.push(CtlEntry { id: format!("mech-part-{i}"), label: p.label, ctl: Ctl::Node("mech-part".into(), p.value) }); }
         // controls with no handler yet are registered too, so the harness finds them dead instead of missing
