@@ -47,6 +47,8 @@ pub struct State {
     pub seq: u64,
     /// bot id -> its thread (BotSet/BotDeleted): a task delegated by a bot's thread seeds no thread.parent
     bot_threads: HashMap<String, String>,
+    /// ThreadSnoozed: the time a thread's snooze ends (Nav.until); 0 / absent: never snoozed
+    pub snooze_until: HashMap<String, u64>,
     /// entries whose own thread is the key (Switch.count: the ones filed under a sender for other threads do not count)
     own: HashMap<String, u64>,
     /// events the fold counts but does not (fully) model, by kind: reported by rust-digest so a gap is never silent
@@ -151,6 +153,7 @@ impl State {
             "SettingSet" => { let (k, v) = (s(e, "key")?, s(e, "value")?); self.set(k, v); }
             "ThreadParentSet" => { let (id, p) = (s(e, "id")?, s(e, "parent")?); self.set(&format!("thread.parent.{id}"), p); }
             "ThreadForked" => { let (id, src) = (s(e, "id")?, s(e, "source")?); self.set(&format!("fork.{id}"), src); }
+            "ThreadSnoozed" => { let (id, until) = (s(e, "id")?, n(e, "until")?); self.snooze_until.insert(id.into(), until); }
             "BotSet" => { let (id, th) = (s(e, "id")?, s(e, "thread")?); self.bot_threads.insert(id.into(), th.into()); }
             "BotDeleted" => { let id = s(e, "id")?; self.bot_threads.remove(id); }
             "TaskDelegated" => {

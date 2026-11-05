@@ -2,6 +2,9 @@
 //! (the Rust side of the differential oracle, test/gpui/parity/oracle/DIGEST.md).
 #[path = "../state.rs"]
 mod state;
+#[path = "../shelf.rs"]
+#[allow(dead_code)]
+mod shelf;
 use std::io::{BufRead, BufReader};
 fn main() {
     let mut st = state::State::new();

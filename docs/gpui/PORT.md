@@ -163,22 +163,22 @@ port waits for the person's decision.
 
 <!-- law-map: generated below by scripts/gpui/law-map.py -->
 
-Laws in LAWS.bend: 3248. bend 1220, rust 81, unported 1336, client 483, window 128, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: none yet. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
+Laws in LAWS.bend: 3248. bend 1220, rust 91, unported 1326, client 483, window 128, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: none yet. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
 
 | law | status | seed | file | note |
 |---|---|---|---|---|
 | `string_eq_refl` | unported | none | `-` |  |
-| `settle_at_window` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `settle_fresh` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `settle_monotone` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `settle_never_running` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `settle_never_pending` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `settle_respects_unsettle` | unported | seed R +-10% | `src/core/model.bend` |  |
+| `settle_at_window` | rust `settle_at_window` | map | `src/core/model.bend` |  |
+| `settle_fresh` | rust `settle_fresh` | map | `src/core/model.bend` |  |
+| `settle_monotone` | rust `settle_monotone` | map | `src/core/model.bend` |  |
+| `settle_never_running` | rust `settle_never_running` | map | `src/core/model.bend` |  |
+| `settle_never_pending` | rust `settle_never_pending` | map | `src/core/model.bend` |  |
+| `settle_respects_unsettle` | rust `settle_respects_unsettle` | map | `src/core/model.bend` |  |
 | `replay_snoc` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `sidebar_split_count` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `sidebar_split_at_count` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `settle_never_snoozed` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `snooze_wakes` | unported | seed R +-10% | `src/core/model.bend` |  |
+| `sidebar_split_count` | rust `sidebar_split_count` | map | `src/core/model.bend` |  |
+| `sidebar_split_at_count` | rust `sidebar_split_at_count` | map | `src/core/model.bend` |  |
+| `settle_never_snoozed` | rust `settle_never_snoozed` | map | `src/core/model.bend` |  |
+| `snooze_wakes` | rust `snooze_wakes` | map | `src/core/model.bend` |  |
 | `key_after` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `key_mid_above` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `key_mid_below` | unported | seed R +-10% | `src/core/model.bend` |  |
