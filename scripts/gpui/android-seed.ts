@@ -3,7 +3,7 @@ const [hp, home, project, count, ...rest] = process.argv.slice(2);
 const tok = (await Bun.file(`${home}/token`).text()).trim();
 const ws = new WebSocket(`ws://${hp}/ws?token=${tok}`);
 await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; });
-const hd = (maj: number, n: number) => n < 24 ? [maj + n] : n < 256 ? [maj + 24, n] : [maj + 25, n >> 8, n & 255];
+const hd = (maj: number, n: number) => n < 24 ? [maj + n] : n < 256 ? [maj + 24, n] : n < 65536 ? [maj + 25, n >> 8, n & 255] : [maj + 26, (n >>> 24) & 255, (n >> 16) & 255, (n >> 8) & 255, n & 255];
 const txt = (t: string) => { const b = new TextEncoder().encode(t); return [...hd(0x60, b.length), ...b]; };
 const val = (v: any): number[] => typeof v === "number" ? hd(0x00, v) : v && typeof v === "object" ? mapOf(v) : txt(String(v));
 const mapOf = (o: Record<string, any>): number[] => [...hd(0xa0, Object.keys(o).length), ...Object.entries(o).flatMap(([k, v]) => [...txt(k), ...val(v)])];
