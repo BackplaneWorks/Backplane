@@ -51,9 +51,9 @@ pass("pair (token auth, view-v1 socket opens, greeting accepted)", opened && fra
 const n = rows().length; const pages = screen?.sidebarPages;
 pass(`list (>= ${Math.min(+expect, 48)} rows; bounded sidebar at ${expect})`, listed && n >= Math.min(+expect, 48), `rows ${n}${pages ? " pager " + JSON.stringify(pages).slice(0, 120) : ""}${failure ? " failure: " + failure : ""}`);
 // what the app does after start (Core.kt): the device choices, each of which refreshes the open view
-for (const [k, v] of [["mailroom-renderer", "android-v1"], ["lang-preview", ""], ["lang", "en"], ["lang-os", "en-US"]]) { try { run(j(B.local(k, v))); } catch {} }
+if (!process.env.NOSTART) for (const [k, v] of [["mailroom-renderer", "android-v1"], ["lang-preview", ""], ["lang", "en"], ["lang-os", "en-US"]]) { try { run(j(B.local(k, v))); } catch {} }
 // let the start-up follow-ups finish, as a person would (the screen is acknowledged, the hub echoes the session back)
-{ let last = -1, since = Date.now(); while (Date.now() - since < 2500) { run(j(B.tick(Date.now()))); await Bun.sleep(150); if (frames !== last) { last = frames; since = Date.now(); } } }
+if (!process.env.NOSTART) { let last = -1, since = Date.now(); while (Date.now() - since < 2500) { run(j(B.tick(Date.now()))); await Bun.sleep(150); if (frames !== last) { last = frames; since = Date.now(); } } }
 // pager: advance the thread list page by page with the pager controls the screen offers (Pager.next/previous: action native-sidebar-page)
 const nextCtl = () => { const pp = (screen?.projects || []).map((p: any) => p.threadsPage?.next).find(Boolean); return pp || (screen?.sidebarPages || []).flatMap((h: any) => [h.projects?.next, h.active?.next]).find(Boolean); };
 const prevCtl = () => { const pp = (screen?.projects || []).map((p: any) => p.threadsPage?.previous).find(Boolean); return pp || (screen?.sidebarPages || []).flatMap((h: any) => [h.projects?.previous, h.active?.previous]).find(Boolean); };
