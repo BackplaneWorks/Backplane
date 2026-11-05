@@ -97,6 +97,10 @@ fn render_cli() -> i32 {
 async fn main() {
     if std::env::args().nth(1).as_deref() == Some("--render") { std::process::exit(render_cli()) }
     let args = match parse() { Ok(a) => a, Err(code) => std::process::exit(code) };
+    // a signal that ends the hub says so in hub.log and exits nonzero (128 + the signal); SIGKILL cannot be caught
+    for (kind, name, n) in [(tokio::signal::unix::SignalKind::terminate(), "SIGTERM", 15), (tokio::signal::unix::SignalKind::interrupt(), "SIGINT", 2), (tokio::signal::unix::SignalKind::hangup(), "SIGHUP", 1)] {
+        if let Ok(mut sig) = tokio::signal::unix::signal(kind) { tokio::spawn(async move { sig.recv().await; eprintln!("backplane-hub: {name} received, exiting"); std::process::exit(128 + n) }); }
+    }
     if let Err(e) = run(args).await { eprintln!("backplane-hub: {e:#}"); std::process::exit(1) }
 }
 
