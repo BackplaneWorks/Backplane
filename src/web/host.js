@@ -2290,9 +2290,27 @@ document.addEventListener("input", (e) => {
   dispatch(el.getAttribute("data-text"), forKey(el) + v);
 });
 
+// A thread or bot in the sidebar is picked at the mouse press, not at its
+// release: a person holds a click 60-120 ms, and the switch (its picture
+// drawn from the client's cache) is under way meanwhile. Its click then
+// does nothing more. Touch keeps the tap (a press may start a scroll);
+// project heads, which drag, keep the click.
+let pressedPick = null;
+document.addEventListener("pointerdown", e => {
+  if (!e.isTrusted || e.button !== 0 || e.pointerType !== "mouse" || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+  const el = e.target.closest?.('aside.sidebar [data-on-click="select"], aside.sidebar [data-on-click="bot"]');
+  if (!el || !el.getAttribute("data-value") || el.closest('[draggable="true"]')) return;
+  pressedPick = { action: el.getAttribute("data-on-click"), value: el.getAttribute("data-value"), at: e.timeStamp };
+  dispatch(phoneClickAction(document, el, el.getAttribute("data-on-click")), valueOf(el));
+}, true);
 for (const ev of EVENTS) {
   document.addEventListener(ev, (e) => {
     const el = e.target.closest?.(`[data-on-${ev}]`);
+    if (ev === "click" && pressedPick) {
+      const p = pressedPick;pressedPick = null;
+      // (the same row, drawn again or not since the press)
+      if (el && el.getAttribute("data-on-click") === p.action && el.getAttribute("data-value") === p.value && e.timeStamp - p.at < 2000) return;
+    }
     if (!el) return;
     const action = el.getAttribute(`data-on-${ev}`);
     if (ev === "click" && action === "copy") {
