@@ -131,7 +131,7 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                 "reply"=>{
                     let id=x["id"].as_u64().unwrap_or(0);
                     if let Some(tag)=v.rpcs.remove(&id) {let why=crate::screens::settings::reply_error(&x);let _=events.send(Event::Rpc(tag,x["ok"]==true,why)).await;continue;}
-                    if let Some(is_post)=v.outgoing.remove(&id) {if !is_post {v.dirty=true;} /* a job's answer (mech.list, boards.list, fab.look...) is folded by the hub into this view: ask for it */ if x["ok"]==true {if is_post {let _=events.send(Event::Accepted).await;}}else{let _=events.send(Event::Error(format!("Hub refused request: {}",x["error"]["code"]))).await;}continue;}
+                    if let Some(is_post)=v.outgoing.remove(&id) {if !is_post {v.dirty=true;} /* a job's answer (mech.list, boards.list, fab.look...) is folded by the hub into this view: ask for it */ if x["ok"]==true {if is_post {let _=events.send(Event::Accepted).await;}}else{let _=events.send(Event::Error(format!("Hub refused request: {}",x["error"]["code"]))).await;}if v.dirty&&v.pending.is_empty()&&!v.view_id.is_empty(){v.dirty=false;let request=v.request("view.update",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;}continue;}
                     let Some((revision,target,method))=v.pending.remove(&id) else{continue};
                     if x["ok"]!=true {let _=events.send(Event::Error(format!("View request refused: {}",x["error"]["code"]))).await;continue;}
                     let mut r:Value=x["result"].take();
