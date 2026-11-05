@@ -390,7 +390,7 @@ law oc_models_missing_quiet rust oc_models_missing_quiet
 law todo_acp_plan rust todo_acp_plan
 # settings stream: native/host/src/settings/ (mask.rs, keys.rs, secret.rs, telemetry.rs)
 law sec_mask_total rust sec_mask_total
-law sec_vault_valid rust a_value_starting_with_the_mask_character_is_not_storable
+law sec_vault_valid rust sec_vault_valid
 law sec_vault_total rust sec_mask_total
 law sec_mask_idem rust sec_mask_idem
 law sec_mask_clean_id rust sec_mask_clean_id

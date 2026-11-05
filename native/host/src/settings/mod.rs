@@ -5,6 +5,8 @@
 //! Secret.changes), `mask::json(&mut answer)` on every MCP answer (Mcp.masked), `mask::mask(line)` on every agent output line and every
 //! line to an agent, and `secret::prompt()` / `keys::prompt(..)` in the prompt. See docs/gpui/HUB-API.md.
 pub mod keys;
+#[cfg(test)]
+mod e2e;
 pub mod mask;
 pub mod models;
 pub mod secret;
