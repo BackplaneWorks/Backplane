@@ -784,7 +784,7 @@ const TESTCLI: &str = "#!/bin/sh\nread hello\necho '{\"q\":1}'\nread ans\necho \
 
 #[tokio::test(flavor = "multi_thread")] async fn thread_launch_starts_a_subthread_with_its_first_message_and_reports_can_be_muted() {
     let (hub, ag, _sd) = codex_start("tl1").await; let from = len(&hub).await;
-    let (ok, r) = ag.tool_launch(T1, &json!({"prompt":"launched work","title":"Side"})).await; assert!(ok, "{r}");
+    let (ok, r) = ag.tool_launch(T1, &json!({"prompt":"launched work","title":"Side","provider":"codex"})).await; assert!(ok, "{r}");
     let th = r["threadId"].as_str().unwrap().to_string(); assert_eq!(r["parent"], T1); assert_eq!(r["state"], "started");
     let ev = until(&hub, from, 30, |ev| ev.iter().any(|e| turn_is(e, "completed") && e["thread"] == th.as_str())).await;
     assert!(ev.iter().any(|e| is(e, "ThreadParentSet") && e["id"] == th.as_str() && e["parent"] == T1) && ev.iter().any(|e| is(e, "ThreadLaunched") && e["by"] == T1 && e["report"] == true));
@@ -848,7 +848,7 @@ const TESTCLI: &str = "#!/bin/sh\nread hello\necho '{\"q\":1}'\nread ans\necho \
 }
 
 #[tokio::test(flavor = "multi_thread")] async fn the_summarizer_runs_the_stand_in_text_model_and_cleans_its_answer() { // never a real model: only the stand-in folder's claude runs
-    let sd = dir("sum-bin"); script(&sd, "claude", "#!/bin/sh\nIN=$(cat)\nprintf '{\"type\":\"result\",\"is_error\":false,\"result\":\"  Summary of: %s \\n second line\"}\\n' \"$(echo \"$IN\" | head -c 20)\"\n");
+    let sd = dir("sum-bin"); script(&sd, "claude", "#!/bin/sh\nIN=$(cat)\nprintf '{\"type\":\"result\",\"is_error\":false,\"result\":\"  Summary of: %s \\\\n second line\"}\\n' \"$(echo \"$IN\" | head -c 20)\"\n");
     let (_hub, ag, _h, _w) = start("sum", |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await;
     let s = Summarizer::summarize(&*ag, "thread", T1, "Thread title: Board work").await; assert_eq!(s.as_deref(), Some("Summary of: Thread title: Board"), "{s:?}");
     let none = dir("sum-none"); let (_h2, ag2, _h, _w) = start("sum2", |w| base_log(w, 1, ""), |_| Cli::standin(&none)).await;
@@ -857,7 +857,7 @@ const TESTCLI: &str = "#!/bin/sh\nread hello\necho '{\"q\":1}'\nread ans\necho \
 
 #[tokio::test(flavor = "multi_thread")] async fn a_launched_thread_reports_to_its_launcher_once_per_end_and_when_stopped() { // Launch.tell
     let (hub, ag, _sd) = codex_start("lt1").await; let from = len(&hub).await;
-    let (ok, r) = ag.tool_launch(T1, &json!({"prompt":"launched work"})).await; assert!(ok, "{r}"); let child = r["threadId"].as_str().unwrap().to_string();
+    let (ok, r) = ag.tool_launch(T1, &json!({"prompt":"launched work","provider":"codex"})).await; assert!(ok, "{r}"); let child = r["threadId"].as_str().unwrap().to_string();
     let ev = until(&hub, from, 30, |ev| ev.iter().any(|e| is(e, "MessagePosted") && e["thread"] == T1 && e["msg"].as_str().map_or(false, |m| m.contains(":lr-")))).await;
     let rep = ev.iter().find(|e| is(e, "MessagePosted") && e["thread"] == T1 && e["msg"].as_str().map_or(false, |m| m.contains(":lr-"))).unwrap();
     assert!(rep["msg"].as_str().unwrap().starts_with(&format!("t:{child}:lr-")) && rep["text"].as_str().unwrap().starts_with("[Backplane] Launched thread") && rep["text"].as_str().unwrap().contains("completed:\n\nre: launched work"), "{rep}");
@@ -865,11 +865,11 @@ const TESTCLI: &str = "#!/bin/sh\nread hello\necho '{\"q\":1}'\nread ans\necho \
     tokio::time::sleep(Duration::from_millis(1500)).await; let all = log_from(&hub, from).await;
     assert_eq!(all.iter().filter(|e| is(e, "MessagePosted") && e["thread"] == T1 && e["msg"].as_str().map_or(false, |m| m.contains(":lr-"))).count(), 1, "one report per end");
     // a running launched thread stopped by the person (archive stops it through interrupt): the launcher hears it was interrupted
-    let (_, r2) = ag.tool_launch(T1, &json!({"prompt":"hang for the stop"})).await; let c2 = r2["threadId"].as_str().unwrap().to_string(); tokio::time::sleep(Duration::from_millis(600)).await;
+    let (_, r2) = ag.tool_launch(T1, &json!({"prompt":"hang for the stop","provider":"codex"})).await; let c2 = r2["threadId"].as_str().unwrap().to_string(); tokio::time::sleep(Duration::from_millis(600)).await;
     let n = len(&hub).await; ag.interrupt(&c2).await.unwrap();
     let ev = until(&hub, n, 20, |ev| ev.iter().any(|e| is(e, "MessagePosted") && e["thread"] == T1 && e["text"].as_str().map_or(false, |t| t.contains("was interrupted")))).await; assert!(ev.iter().any(|e| is(e, "MessagePosted") && e["text"].as_str().map_or(false, |t| t.contains("was interrupted"))), "the stop is reported");
     // a launcher stopping its own thread is not told
-    let (_, r3) = ag.tool_launch(T1, &json!({"prompt":"hang again"})).await; let c3 = r3["threadId"].as_str().unwrap().to_string(); tokio::time::sleep(Duration::from_millis(600)).await;
+    let (_, r3) = ag.tool_launch(T1, &json!({"prompt":"hang again","provider":"codex"})).await; let c3 = r3["threadId"].as_str().unwrap().to_string(); tokio::time::sleep(Duration::from_millis(600)).await;
     let n = len(&hub).await; let (ok, _) = ag.tool_interrupt(T1, &json!({"threadId":c3})).await; assert!(ok); tokio::time::sleep(Duration::from_millis(2000)).await;
     assert!(!log_from(&hub, n).await.iter().any(|e| is(e, "MessagePosted") && e["thread"] == T1 && e["text"].as_str().map_or(false, |t| t.contains(&c3))), "own stop is quiet"); ag.shutdown();
 }
