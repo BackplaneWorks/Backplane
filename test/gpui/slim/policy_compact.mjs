@@ -12,6 +12,11 @@ for(let r=0;r<120;r++)for(const id of TH){
   if(rnd()<0.5)P({$:'ActivityLogged',thread:id,act:`g${t0+n}-${n+300}`,tone:'tool',kind:'Bash',summary:'ls -la src | head -'+(n%90)});n++;
   if(rnd()<0.1)P({$:'TurnChanged',thread:id,turn:rnd()<0.5?'running':'completed'});
 }
+// the rows the host puts in V `page` for a thread's newest page: [seq, ord, id, thread, src, kind, role, akind, text, at], oldest first
+const pageOf=(evs,th,n=40)=>{const rows=[];evs.forEach((e,i)=>{if(e.thread!==th)return;
+  if(e.$==='MessagePosted')rows.push([String(i+1),String(i+1),e.msg,th,'','msg',e.role,'',e.text,String(e.at)]);
+  else if(e.$==='ActivityLogged')rows.push([String(i+1),String(i+1),e.act,th,'','act',e.tone,e.kind,e.summary,String(e.at)])});
+  const last=rows.slice(-n);return {thread:th,before:0,below:rows.length-last.length,above:0,rows:last.slice().reverse()}};
 const compact=(evs,K)=>{const keep=new Set();const seen=new Map();
   for(let i=evs.length-1;i>=0;i--){const e=evs[i];if(e.$==='MessagePosted'||e.$==='ActivityLogged'){const k=e.$+'|'+e.thread;const c=seen.get(k)||0;if(c<K)keep.add(i);seen.set(k,c+1)}else keep.add(i)}
   return evs.filter((_,i)=>keep.has(i))};
@@ -24,19 +29,32 @@ async function run(evs){
   await ask('F '+JSON.stringify({t:'log',since:0,origin:'1',version:'x',info:{},items:evs.slice(0,200)}));
   for(let i=200;i<evs.length;i+=200)await ask('F '+JSON.stringify({t:'changes',items:evs.slice(i,i+200)}));
   const base={hub:'h',cid:'c',now:(t0+100000)*1000,action:'',value:''};
-  const V=async(sel,target)=>JSON.parse(await ask('V '+JSON.stringify({...base,session:{sel,rid:1,drafts:{},open:{},adding:false,panel:false,info:{}},target})));
-  const out={recent:await V('',{kind:'recent',id:''}),thread:await V(TH[3],{kind:'thread',id:TH[3]})};
+  const V=async(sel,target,extra={})=>JSON.parse(await ask('V '+JSON.stringify({...base,session:{sel,rid:1,drafts:{},open:{},adding:false,panel:false,info:{}},target,...extra})));
+  const out={recent:await V('',{kind:'recent',id:''}),thread:await V(TH[3],{kind:'thread',id:TH[3]}),threadPage:await V(TH[3],{kind:'thread',id:TH[3]},{page:pageOf(L,TH[3])})};
   p.kill();await new Promise(r=>setTimeout(r,300));return out;
 }
 const diff=(a,b,path,out)=>{if(JSON.stringify(a)===JSON.stringify(b))return;if(a&&b&&typeof a==='object'&&typeof b==='object'&&!Array.isArray(a)&&!Array.isArray(b)){for(const k of new Set([...Object.keys(a),...Object.keys(b)]))diff(a[k],b[k],path+'.'+k,out);return}
   if(Array.isArray(a)&&Array.isArray(b)&&a.length===b.length){a.forEach((x,i)=>diff(x,b[i],path+'['+i+']',out));return}out.push(path+': '+JSON.stringify(a)?.slice(0,80)+' vs '+JSON.stringify(b)?.slice(0,80))};
 const full=await run(L);const comp=await run(compact(L,K));
 console.log(`events full ${L.length}, compacted (K=${K}) ${compact(L,K).length}`);
-for(const v of ['recent','thread']){const d=[];diff(full[v].shown,comp[v].shown,'shown',d);diff(full[v].overlay,comp[v].overlay,'overlay',d);diff(full[v].session,comp[v].session,'session',d);
-  const c={};for(const x of d){const k=x.split(': ')[0].replace(/\[\d+\]/g,'[]');c[k]=(c[k]||0)+1}
-  console.log(`-- view ${v}: ${d.length} differing paths`);for(const [k,n] of Object.entries(c).slice(0,25))console.log('  ',n,k);if(d.length)console.log('   first:',d[0].slice(0,200))}
-// an equal-views CHECK: only the policy's own change count (the host sets the real one with V `seq`) and, on a thread view, the entries the page supplies may differ
-const ALLOWED=/^(shown|overlay\.j)\.(hubs\[\d+\]\.changes|seq|thread\.(entries|earlier)|j\.seq)/;let bad=0;
-for(const v of ['recent','thread']){const d=[];diff(full[v].shown,comp[v].shown,'shown',d);diff(full[v].overlay,comp[v].overlay,'overlay',d);diff(full[v].session,comp[v].session,'session',d);
-  for(const x of d){const path=x.split(': ')[0].replace(/^overlay\./,'overlay.j.').replace(/^overlay\.j\.j\./,'overlay.j.');if(!ALLOWED.test(path)&&!/^overlay\.j\.(seq|thread\.(entries|earlier))$/.test(path)&&!/^shown\.(hubs\[\d+\]\.changes|thread\.(entries|earlier))$/.test(path)){bad++;console.log('FAIL view',v,x.slice(0,200))}}}
-console.log(bad?`FAILED ${bad} unexpected differences`:'ALL OK: the compacted log gives the same screen');process.exit(bad?1:0);
+// ---- the check -----------------------------------------------------------------------------------------------------------------------------
+// Three view pairs, full log against compacted log:
+//   recent            : must be equal but for the policy's own change count (the host sets the real one with V `seq`)
+//   thread, no page   : the same, and the thread's entries/earlier may differ: the compacted log no longer holds the old messages (the page supplies them)
+//   thread WITH a page: the page's rows (built from the full log) are in V: now the whole screen must be equal, entries included, but for the change count
+const NUM=/^(shown\.hubs\[\d+\]\.changes|overlay\.j\.seq)$/, PAGE=/^(shown|overlay\.j)\.thread\.(entries|earlier)(\[|\.|$)/;
+let bad=0;const allowed=new Map();
+const pair=(label,a,b,allow)=>{const d=[];diff(a.shown,b.shown,'shown',d);diff(a.overlay,b.overlay,'overlay',d);diff(a.session,b.session,'session',d);
+  for(const x of d){const path=x.split(': ')[0];const norm=path.replace(/\[\d+\]/g,'[]');
+    if(allow.some(r=>r.test(path))){allowed.set(label+' '+norm,(allowed.get(label+' '+norm)||0)+1)}else{bad++;console.log('FAIL',label,x.slice(0,200))}}};
+pair('recent',full.recent,comp.recent,[NUM]);
+pair('thread(no page)',full.thread,comp.thread,[NUM,PAGE]);
+pair('thread(page)',full.threadPage,comp.threadPage,[NUM]);
+// and the page really supplies the thread's messages: the newest message of the page is on the compacted policy's screen
+const rows=pageOf(L,TH[3]).rows.filter(r=>r[5]==='msg');const newest=rows[0]?.[8];
+const texts=(comp.threadPage.shown?.thread?.entries||[]).map(e=>e.text);
+if(!newest||!texts.includes(newest)){bad++;console.log('FAIL the page\'s newest message is not on the compacted policy\'s thread screen:',JSON.stringify(newest)?.slice(0,80))}
+else console.log('ok   the page\'s newest message is on the compacted policy\'s thread screen ('+texts.length+' entries)');
+for(const [k,n] of allowed)console.log('allowed',n,k);
+console.log(bad?`FAILED ${bad} unexpected differences`:`ALL OK: 3 view pairs compared; ${allowed.size} allowed paths differ (change count; thread entries/earlier only when no page is supplied); with the page supplied the whole thread screen is equal, entries included`);
+process.exit(bad?1:0);
