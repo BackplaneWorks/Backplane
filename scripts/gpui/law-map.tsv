@@ -644,3 +644,11 @@ law far_allowed_only_methods rust far_allowed_only_methods_and_far_no_delete
 law far_no_delete rust far_allowed_only_methods_and_far_no_delete
 # the test runs the real Agents module with a stand-in that never answers: archive ends the running turn (interrupted) and archives; the recorder test (archive_running_stops) states the call order
 law archive_running_stops rust archive_running_stops_through_the_real_agents_module
+law slash_typing_word rust slash_typing_word
+law slash_typing_alone rust slash_typing_alone
+law slash_not_after_space rust slash_not_after_space
+law slash_not_midline rust slash_not_midline
+law slash_typing_needs_slash rust slash_typing_needs_slash
+law slash_claude_prefix rust slash_claude_prefix
+law slash_others_own_only rust slash_others_own_only
+law slash_none_unknown rust slash_none_unknown
