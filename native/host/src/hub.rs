@@ -94,7 +94,7 @@ impl Hub {
 
     fn info(&self) -> Value {
         let c = &self.cfg;
-        json!({"accounts.live":"{\"version\":1,\"revision\":0,\"default_allowance\":null,\"error\":\"\",\"profiles\":[],\"attempts\":[]}",
+        json!({"cad.install":"","accounts.live":"{\"version\":1,\"revision\":0,\"default_allowance\":null,\"error\":\"\",\"profiles\":[],\"attempts\":[]}",
             "telemetry.channel":"release","telemetry.id":"","telemetry.live":"","os":c.os,"arch":c.arch,"home":c.home.to_string_lossy(),
             "listen":c.listen,"models":"","machines":"","bots.remote":"[]","tailnet":"off","update":"package","tailscale":"off",
             "freecad":"","kicad.cli":"","kicad.fork":"","kicad.commit":"","kicad.status":"checking","kicad.source":"path","kicad.version":"",
