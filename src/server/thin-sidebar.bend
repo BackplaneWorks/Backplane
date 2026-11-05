@@ -30,11 +30,18 @@ def Sidebar.flags(xs: List<&2, Sigma<&2, &2, String, _ => Bool>>) -> List<&2, J.
 # Info.put.models increments this native-memo counter even for an identical
 # catalog on rehydration. Web sidebar reads neither counter; actual model
 # content and every other info field remain part of the exact private key.
+# (and never the viewer reads kept hub-wide, server.bend's Kept.info: whole
+# folders' listings, a diff; the sidebar reads none of them, and with them
+# the key outgrew Sidebar.bounded's 32 KB, so the sidebar was drawn afresh
+# on every render)
+def Sidebar.info.kept(+k: String) -> Bool:
+  Bool.or(Bool.or(String.starts_with(k, "fm.kept:"), String.starts_with(k, "refs.kept:")), Bool.or(String.starts_with(k, "diff.kept:"), String.starts_with(k, "kept.seq:")))
+
 def Sidebar.info(xs: List<&2, Sigma<&2, &2, String, _ => String>>) -> List<&2, J.KV>:
   match xs:
     case Nil{}: Nil{}
     case (+k, v) <> rest:
-      List.append(&2, J.KV, Bool.pick(List<&2, J.KV>, String.eq(k, "models.v"), Nil{}, [J.KV{k, J.Str{v}}]), Sidebar.info(rest))
+      List.append(&2, J.KV, Bool.pick(List<&2, J.KV>, Bool.or(String.eq(k, "models.v"), Sidebar.info.kept(k)), Nil{}, [J.KV{k, J.Str{v}}]), Sidebar.info(rest))
 
 # The private ordinary image also leaves out what moves on every request but
 # no sidebar reads: the fab lookup's own mark ("@fab.at", client.bend's

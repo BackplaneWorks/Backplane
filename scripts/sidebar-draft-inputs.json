@@ -173,12 +173,12 @@
     "src/core/winnote.bend": "f0cbd29916ff64103799874c96b8eee4945c05b1a83fbb3ba083bc1673031255",
     "src/core/wnote.bend": "019cf6a357f4428774176585931a2df17b83d2347b9e1078428f578968e445d5",
     "src/mobile/hubs.bend": "e8d78ec982828a8018c0845a36d03123c47bf9c94b5d4cee855f9358ccc293a3",
-    "src/mobile/screen.bend": "4d5ae2c126bfe06b6f697a87036a6b75e1c2db4db66c847e4088fbf728f29ec0",
+    "src/mobile/screen.bend": "354b867fec0e5a2bf900476c251bc33578e56f463a87382f6702061bd3ec4e58",
     "src/server/thin-actor.bend": "fc0909a5d7287c5daedd890ab68bbfa272f9f4c7dac8c3263214a30bad702a09",
     "src/server/thin-body.bend": "779e72f8bb69990c74bf4acdd52f50fb1e0ceaa8771cd38044bef81d2c1a3680",
     "src/server/thin-mirror.bend": "b488dc7c45fe49bb1aa17966f454f1ee0e9cfef7db4d619c265c298c9bc94e92",
     "src/server/thin-side-index.bend": "92ac2f5fb70858c3db946f316e9e25f0833251b253727c759b01130f61f4a96d",
-    "src/server/thin-sidebar.bend": "e0ac0b6fe6cf0b250ed06be1c19062764f36ea04b05125fe376d5d7434cf01db",
+    "src/server/thin-sidebar.bend": "d4b8d139a5ff1576065fce8a18fe3f51d86f4916fa099c9ae2a278922b085ba6",
     "src/server/thin-signal-text.bend": "3762209930cc3605902b3e5cf7cfbb3022629cbac924e7081d1fb5e1e804a9c3",
     "src/server/thin-signals.bend": "e2213ac2fab79b79dea8d14d4daac4ab9c640231759721079347be156bddebb7",
     "src/server/thin-splice.bend": "d1bc1c8e7710e0efba2abcf3fa599391d5d480eb37ced2a8a4f079d7b079a2be",
@@ -1201,5 +1201,5 @@
   "snappyDiffReview20261105": "client.bend Dv.open/Dv.mark/Dv.unwait, view.bend View.diff.wait, screen.bend Mob.diff.at.w: a Diff asked for by hand opens its viewer at once with a Loading head (diff.wait:t, diff.ask:<id>) until its answer or an error. Viewer/info keys only; no sidebar draft reader changed.",
   "snappyGreetingReview20261105": "thin-wire.bend: the web greeting adds \"fabSelf\": true (Wire.greeting.extra); no sidebar or draft data.",
   "snappySubsCountReview20261105": "subs.bend: Agg.kind 4 / Subs.count.of take a 'steps.count' act row's count (only from subagent-history.bend's SQL) as a call's step count; rows, titles and steps otherwise unchanged (test/tools/subagent_store.mjs compares with the old full read). No sidebar draft reader changed.",
-  "snappyViewerKeptReview20261105": "client.bend Fm.kept/Fm.shown/Fm.rows (fm.kept:<t>\\n<dir>), Rc.kept/Rc.held/Rc.own (refs.kept:<t>), Dv.text (diff.kept:t); view.bend View.fm.body via Fm.shown, View.diff.at/View.diff.kept/View.diff.loc.off: the viewer's Files rows, history bar file and Diff drawn from listings and answers kept per thread (this connection's, or the hub's given through info) while the hub is asked again. Viewer/info keys only; no sidebar draft reader changed."
+  "snappyViewerKeptReview20261105": "client.bend Fm.kept/Fm.shown/Fm.rows (fm.kept:<t>\\n<dir>), Rc.kept/Rc.held/Rc.own (refs.kept:<t>), Dv.text (diff.kept:t); view.bend View.fm.body via Fm.shown, View.diff.at/View.diff.kept/View.diff.loc.off: the viewer's Files rows, history bar file and Diff drawn from listings and answers kept per thread (this connection's, or the hub's given through info) while the hub is asked again. Viewer/info keys only; no sidebar draft reader changed. thin-sidebar.bend Sidebar.info leaves fm.kept:/refs.kept:/diff.kept:/kept.seq: out of both sidebar keys (no sidebar reader; with them the full key passed Sidebar.bounded's 32 KB and the sidebar was never kept); screen.bend Mob.diff.at draws diff.kept while diff.wait."
 }
