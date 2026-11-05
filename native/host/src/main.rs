@@ -1,6 +1,6 @@
 //! backplane-hub: the Backplane hub for native clients (GPUI, SwiftUI, Compose).
 //! HTTP + authenticated WebSocket; renderer `mobile`; the picture comes from the presenter.
-mod agents; mod api; mod auth; mod cbor; mod delta; mod files; mod hub; mod model; mod presenter; mod store;
+mod agents; mod api; mod auth; mod cbor; mod delta; mod files; mod hub; mod model; mod presenter; mod store; mod window;
 
 use anyhow::{Context, Result};
 use auth::Req;
@@ -14,11 +14,11 @@ use tokio_tungstenite::tungstenite::{handshake::server::ErrorResponse, protocol:
 
 const USAGE: &str = "usage: backplane-hub --home DIR --port N [--host ADDR] [--policy-bin PATH] [--no-tailscale] [--foreground] [--headless]\n       backplane-hub --help | --version\n";
 
-struct Args { home: PathBuf, port: u16, host: String, policy: Option<PathBuf>, version: String, commit: String }
+struct Args { window: Option<PathBuf>, home: PathBuf, port: u16, host: String, policy: Option<PathBuf>, version: String, commit: String }
 
 fn parse() -> std::result::Result<Args, i32> {
     let a: Vec<String> = std::env::args().skip(1).collect();
-    let (mut home, mut port, mut host, mut policy) = (None, None, "127.0.0.1".to_string(), None);
+    let (mut home, mut port, mut host, mut policy, mut window) = (None, None, "127.0.0.1".to_string(), None, None::<PathBuf>);
     let (mut version, mut commit) = ("0.14.0".to_string(), std::env::var("BACKPLANE_COMMIT").unwrap_or_else(|_| "unknown".into()));
     let mut i = 0;
     while i < a.len() {
@@ -30,6 +30,7 @@ fn parse() -> std::result::Result<Args, i32> {
             "--port" => { port = Some(value(i)?.parse::<u16>().map_err(|_| { eprint!("{USAGE}"); 2 })?); i += 1 }
             "--host" => { host = value(i)?; i += 1 }
             "--policy-bin" => { policy = Some(PathBuf::from(value(i)?)); i += 1 }
+            "--window-bin" => { window = Some(PathBuf::from(value(i)?)); i += 1 }
             "--version-string" => { version = value(i)?; i += 1 }
             "--commit" => { commit = value(i)?; i += 1 }
             "--no-tailscale" | "--foreground" | "--headless" => {}
@@ -37,9 +38,10 @@ fn parse() -> std::result::Result<Args, i32> {
         }
         i += 1;
     }
+    if window.is_none() { window = std::env::var("BACKPLANE_WINDOW_BIN").ok().filter(|p| !p.is_empty()).map(PathBuf::from); }
     if policy.is_none() { policy = std::env::var("BACKPLANE_POLICY_BIN").ok().filter(|p| !p.is_empty()).map(PathBuf::from); }
     // no default home or port: this binary must never land on a live hub's by accident
-    match (home, port) { (Some(home), Some(port)) => Ok(Args { home, port, host, policy, version, commit }), _ => { eprint!("{USAGE}"); Err(2) } }
+    match (home, port) { (Some(home), Some(port)) => Ok(Args { window, home, port, host, policy, version, commit }), _ => { eprint!("{USAGE}"); Err(2) } }
 }
 
 /// One hub per home: an exclusive flock on <home>/hub.lock, which says "<pid> <port> flock".
@@ -163,7 +165,7 @@ async fn wire(hub: Arc<Hub>, s: TcpStream, since: usize, origin: String) -> Resu
         let to = (sent + 2000).min(n0);
         let lines = hub.store.range(sent, to)?;
         let items: Vec<Value> = lines.iter().filter_map(|l| Hub::wire_item(l, false)).collect();
-        let frame = if first { json!({"t":"log","since":from,"origin":hub.origin,"version":"","info":hub.log_info(),"items":items}) } else { json!({"t":"changes","items":items}) };
+        let frame = if first { json!({"t":"log","since":from,"origin":hub.origin,"version":hub.cfg.version,"info":hub.log_info(),"items":items}) } else { json!({"t":"changes","items":items}) };
         tx.send(pack(&conn, &frame)).await?; sent = to; first = false;
     }
     tx.send(pack(&conn, &hub.live_frame())).await?;
@@ -249,6 +251,7 @@ async fn run(a: Args) -> Result<()> {
     let hub = Hub::start(hub::Cfg { home: a.home.clone(), version: a.version, commit: a.commit, listen: listen.clone(), os: "linux".into(), arch: "x64".into() }, presenter).await?;
     files::start(hub.clone());
     agents::Agents::start(hub.clone()).await?;
+    if let Some(w) = &a.window { let _ = hub.window_bin.set(w.clone()); }
     let l = TcpListener::bind(&listen).await.with_context(|| format!("bind {listen}"))?;
     eprintln!("Backplane listening on http://{listen}");
     let (events, torn) = (hub.store.len(), hub.store.torn_bytes);

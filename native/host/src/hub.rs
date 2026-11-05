@@ -20,6 +20,7 @@ pub struct Hub {
     commits: tokio::sync::mpsc::UnboundedSender<Commit>,
     rpc: std::sync::RwLock<Vec<(&'static str, Arc<dyn RpcHandler>)>>, http: std::sync::RwLock<Vec<(&'static str, Arc<dyn HttpHandler>)>>,
     live: std::sync::Mutex<std::collections::HashMap<String, String>>,
+    pub window_bin: std::sync::OnceLock<PathBuf>,
     me: std::sync::OnceLock<std::sync::Weak<Hub>>, next_client: AtomicU64,
     outboxes: std::sync::Mutex<std::collections::HashMap<u64, tokio::sync::mpsc::UnboundedSender<Out>>>,
 }
@@ -34,6 +35,14 @@ struct Commit { events: Vec<Value>, done: tokio::sync::oneshot::Sender<Result<u6
 pub struct Conn { pub sent: Vec<(String, Value)>, pub client: u64, pub gen: String, pub view_id: String, pub target: Value, pub cbor: bool, pub lastrev: u64 }
 
 fn now_ms() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0) }
+/// (zone name, POSIX rule): TZ or /etc/timezone or /etc/localtime, the rule from the zone file's footer.
+fn machine_zone() -> (String, String) {
+    let name = std::env::var("TZ").ok().filter(|z| !z.is_empty()).or_else(|| std::fs::read_to_string("/etc/timezone").ok().map(|s| s.trim().to_string()))
+        .or_else(|| std::fs::read_link("/etc/localtime").ok().and_then(|p| p.to_string_lossy().split("zoneinfo/").nth(1).map(str::to_string))).unwrap_or_else(|| "UTC".into());
+    let rule = std::fs::read(format!("/usr/share/zoneinfo/{name}")).ok().and_then(|b| { let s = String::from_utf8_lossy(&b).into_owned(); let t = s.trim_end_matches('\n'); t.rsplit('\n').next().map(str::to_string) })
+        .filter(|r| !r.is_empty() && r.len() < 80 && r.is_ascii()).unwrap_or_else(|| "UTC0".into());
+    (name, rule)
+}
 pub fn limits() -> Value { json!({"replyBytes":262144,"entries":32,"recent":24,"searchResults":25,"searchCandidates":128,"chunkBytes":65536}) }
 pub fn capabilities() -> Value { json!({"version":1,"views":{"version":1,"websocketQuery":"view=1","renderers":["mobile"],"compatibility":"explicit-only"}}) }
 pub fn error(id: &Value, code: &str) -> Value { json!({"t":"reply","id":id,"ok":false,"error":{"code":code,"retryable":false,"compatibilityRequired":false}}) }
@@ -58,11 +67,33 @@ impl Hub {
         let origin = { let s = store.get(0).ok().map(|l| { use sha2::{Digest, Sha256}; hex::encode(&Sha256::digest(l.as_bytes())[..6]) }); s.unwrap_or_else(|| epoch.clone()) };
         let model = Model::build(&store)?;
         let hub = Arc::new(Hub { cfg, auth, epoch, presenter, store: store.clone(), commits: ctx, model: Mutex::new(model), gen: AtomicU64::new(1), changed: tx, frames: ftx, origin,
-            rpc: Default::default(), http: Default::default(), live: Default::default(), me: Default::default(), next_client: AtomicU64::new(1), outboxes: Default::default() });
+            rpc: Default::default(), http: Default::default(), live: Default::default(), window_bin: Default::default(), me: Default::default(), next_client: AtomicU64::new(1), outboxes: Default::default() });
         let _ = hub.me.set(Arc::downgrade(&hub));
+        hub.bootstrap()?;
         hub.fold_log().await?;
         tokio::spawn(Hub::writer(hub.clone(), crx));
         Ok(hub)
+    }
+
+    /// The Bend hub's start-up housekeeping events, written once when the log lacks them (a hub that already ran
+    /// here has them): the machine's id, the time zone and its rule, empty account and allowance state.
+    fn bootstrap(&self) -> Result<()> {
+        let have = |k: &str| self.model.try_lock().map_or(true, |m| m.setting_seq(k).is_some());
+        let at = now_ms() / 1000;
+        let zone = machine_zone();
+        let mut evs: Vec<Value> = vec![];
+        let mut set = |k: &str, v: String| evs.push(json!({"$":"SettingSet","key":k,"value":v,"at":at}));
+        if !have("autosettle.version") { set("autosettle.version", "1".into()) }
+        if !have("machine.id") { let mut b = [0u8; 24]; if let Ok(mut f) = std::fs::File::open("/dev/urandom") { let _ = std::io::Read::read_exact(&mut f, &mut b); } set("machine.id", format!("m{}", hex::encode(b))) }
+        if !have("accounts.inventory") { set("accounts.inventory", "{\"version\":1,\"revision\":0,\"profiles\":[],\"error\":\"\"}".into()) }
+        if !have("allowance.codex") { set("allowance.codex", format!("{{\"provider\":\"codex\",\"at\":0,\"attempted_at\":{at},\"state\":\"error\",\"auth\":\"unknown\",\"windows\":[],\"source\":\"codex-app-server\",\"phase\":\"complete\"}}")) }
+        if !have("tz.machine") { set("tz.machine", zone.0.clone()); set(&format!("tz.rule.{}", zone.0), zone.1.clone()); set("tz.checked", at.to_string()) }
+        if evs.is_empty() { return Ok(()) }
+        let lines: Vec<String> = evs.iter().map(|e| e.to_string()).collect();
+        let first = self.store.append_many(&lines.iter().map(String::as_str).collect::<Vec<_>>())?;
+        let mut m = self.model.try_lock().map_err(|_| anyhow::anyhow!("model busy at start"))?;
+        for (i, l) in lines.iter().enumerate() { m.apply_line((first + i + 1) as u32, l); }
+        Ok(())
     }
 
     fn info(&self) -> Value {
@@ -201,8 +232,9 @@ impl Hub {
     pub async fn request(&self, c: &mut Conn, msg: &Value) -> Vec<Value> {
         let id = msg.get("id").cloned().unwrap_or(Value::Null);
         let m = msg.get("m").and_then(Value::as_str).unwrap_or("");
-        if m == "ping" { return vec![] }
-        if m == "load.ping" { return vec![json!({"t":"reply","id":id,"ok":true})] }
+        // `ping` and `load.ping` are not methods of the Bend hub: it answers them "unknown method" (recorded, parity/recA)
+        if m == "project.add" { return self.project_add(&id, msg.get("p").unwrap_or(&Value::Null)).await }
+        if m == "fab.look" { return vec![self.fab_look(&id, msg.get("p").unwrap_or(&Value::Null))] }
         if let Some(handler) = self.rpc_for(m) {
             let me = self.arc();
             return handler.call(&me, &Caller { gen: c.gen.clone(), client: c.client }, &id, m, msg.get("p").unwrap_or(&Value::Null)).await;
@@ -230,12 +262,16 @@ impl Hub {
         let rev = self.revision().await;
         let mut params = p.clone();
         if let Some(o) = params.as_object_mut() { o.insert("revision".into(), json!(rev)); o.insert("now".into(), json!(now_ms())); }
+        // a thread's window: the page out of the Rust index, the fold/context logic in native Bend
+        let window = self.window_for(&p).await;
+        if let (Some(w), Some(o)) = (&window, params.as_object_mut()) { o.insert("window".into(), w.clone()); }
         let pol = match self.presenter.view(&params).await { Ok(v) => v, Err(_) => return vec![error(&id, "PRESENTER_UNAVAILABLE")] };
         let target = p["target"].clone();
         if m == "view.open" { c.view_id = view_id.clone(); c.target = target.clone(); }
         c.lastrev = rev;
         if m == "view.open" { c.sent.clear(); }
-        let result = self.assemble(&p, &view_id, rev, &pol);
+        let mut result = self.assemble(&p, &view_id, rev, &pol);
+        if let (Some(w), Some(o)) = (window, result.as_object_mut()) { if o.contains_key("window") { o.insert("window".into(), w); } }
         let result = Self::delta_reply(c, &p, result);
         let answer = json!({"t":"reply","id":id,"ok":true,"result":result});
         let text = serde_json::to_string(&answer).unwrap_or_default();
@@ -254,6 +290,37 @@ impl Hub {
         picture.insert("controlId".into(), id.clone());
         out.push(json!({"t":"reply","id":id,"ok":true,"result":picture}));
         out
+    }
+
+    /// project.add: the project, its first thread and that thread's account setting, as the Bend hub logs them.
+    async fn project_add(&self, id: &Value, p: &Value) -> Vec<Value> {
+        let path = p.get("path").and_then(Value::as_str).unwrap_or("");
+        if path.is_empty() { return vec![json!({"t":"reply","id":id,"ok":false,"error":"path required"})] }
+        let (at, n) = (now_ms() / 1000, self.store.len());
+        let title = path.trim_end_matches('/').rsplit('/').next().unwrap_or(path);
+        let (pid, tid) = (format!("p{at}-{n}"), format!("t{at}-{}", n + 1));
+        let evs = [json!({"$":"ProjectCreated","id":pid,"title":title,"root":path,"at":at}),
+            json!({"$":"ThreadCreated","id":tid,"project":pid,"title":"New thread","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":at}),
+            json!({"$":"SettingSet","key":format!("account.thread.{tid}.claude"),"value":"{\"id\":\"\",\"epoch\":0}","at":at})];
+        if self.commit_many(&evs).await.is_err() { return vec![json!({"t":"reply","id":id,"ok":false,"error":"store write failed"})] }
+        vec![json!({"t":"reply","id":id,"ok":true,"thread":tid})]
+    }
+    /// fab.look: the card for a thread with no goal, intent or fab files (what the Bend hub answers for one).
+    fn fab_look(&self, id: &Value, p: &Value) -> Value {
+        json!({"t":"reply","id":id,"ok":true,"result":{"thread":p.get("thread").cloned().unwrap_or(json!("")),"intent":"","goal":"","parts":[],"boards":0,"label":"","estimate_problems":"","error":"","estimates":true,"board_files":[],"board_default":"","order":""}})
+    }
+
+    /// The window object for a thread target (newest page); None for other targets or without the Bend program.
+    async fn window_for(&self, p: &Value) -> Option<Value> {
+        let bin = self.window_bin.get()?;
+        let t = p.get("target")?;
+        if t["kind"] != "thread" { return None }
+        let thread = t["id"].as_str()?;
+        if !self.model.lock().await.threads.contains_key(thread) { return None }
+        let page = { let m = self.model.lock().await; m.page(&self.store, thread, 0, 32).ok()? };
+        let mut req = Map::new(); req.insert("target".into(), t.clone());
+        if let Some(a) = p.get("anchor") { req.insert("anchor".into(), a.clone()); }
+        crate::window::compute(bin, &std::env::temp_dir(), thread, &self.epoch, 0, &page, &Value::Object(req)).await
     }
 
     /// turn.start: the person's message is committed (durable) and queued, then acknowledged. The
@@ -361,8 +428,12 @@ mod tests {
     }
     #[tokio::test] async fn commit_is_durable_and_counts_revisions() {
         let dir = home("commit"); let h = Hub::start(cfg(&dir), Arc::new(Canned { reply: json!({}) })).await.unwrap();
-        let r0 = h.revision().await; h.commit(&json!({"$":"SettingSet","key":"k","value":"v","at":1})).await.unwrap();
-        assert_eq!(h.revision().await, r0 + 1); assert_eq!(Store::open(&dir.join("events.jsonl")).unwrap().len(), 1);
+        let (r0, n0) = (h.revision().await, h.store.len()); // the start-up housekeeping events are already in
+        assert!(n0 >= 5, "machine id, zone, accounts... are written once at start");
+        h.commit(&json!({"$":"SettingSet","key":"k","value":"v","at":1})).await.unwrap();
+        assert_eq!(h.revision().await, r0 + 1); assert_eq!(Store::open(&dir.join("events.jsonl")).unwrap().len(), n0 + 1);
+        assert_eq!(h.setting("k").await.as_deref(), Some("v"));
+        drop(h); let again = Hub::start(cfg(&dir), Arc::new(Canned { reply: json!({}) })).await.unwrap(); assert_eq!(again.store.len(), n0 + 1, "a restart writes no second set of housekeeping events");
     }
 }
 
@@ -374,10 +445,11 @@ mod write_tests {
         std::fs::write(dir.join("events.jsonl"), "{\"$\":\"ProjectCreated\",\"id\":\"p1\",\"title\":\"p\",\"root\":\"/x\",\"at\":1}\n{\"$\":\"ThreadCreated\",\"id\":\"t1\",\"project\":\"p1\",\"title\":\"T\",\"env\":\"local\",\"branch\":\"\",\"worktree\":\"\",\"provider\":\"claude\",\"model\":\"\",\"at\":1}\n").unwrap();
         let cfg = Cfg { home: dir.clone(), version: "0.14.0".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() };
         let h = Hub::start(cfg, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        let n0 = h.store.len();
         let (mut c, _) = h.connect(true);
         let out = h.request(&mut c, &json!({"id":9,"m":"turn.start","p":{"thread":"t1","text":"hello","msg":"m1"}})).await;
         assert_eq!(out[0]["ok"], true);
-        let disk = Store::open(&dir.join("events.jsonl")).unwrap(); assert_eq!(disk.len(), 4); assert!(disk.get(2).unwrap().contains("\"MessagePosted\""));
+        let disk = Store::open(&dir.join("events.jsonl")).unwrap(); assert_eq!(disk.len(), n0 + 2); assert!(disk.get(n0).unwrap().contains("\"MessagePosted\""));
         assert_eq!(h.model.lock().await.entries(), 1);
         let bad = h.request(&mut c, &json!({"id":10,"m":"turn.start","p":{"thread":"nope","text":"x"}})).await; assert_eq!(bad[0]["ok"], false);
     }

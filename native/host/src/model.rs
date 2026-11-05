@@ -158,7 +158,8 @@ mod tests {
     use std::path::PathBuf;
     fn fixtures() -> PathBuf { PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../test/gpui/hub/fixtures") }
     fn store() -> Store {
-        let t = std::env::temp_dir().join(format!("bp-model-{}.jsonl", std::process::id()));
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let t = std::env::temp_dir().join(format!("bp-model-{}-{}.jsonl", std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
         std::fs::copy(fixtures().join("pages.jsonl"), &t).unwrap(); Store::open(&t).unwrap()
     }
     #[test] fn link_from_matches_bend() {
