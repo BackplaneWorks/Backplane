@@ -46,15 +46,15 @@ struct View {
     rpcs:HashMap<u64,&'static str>, asks:HashMap<u64,u64>,
     hub:String, cid:String, greeting:Value, target:Value, session:Value,
     view_id:String, revision:u64, next:u64, pending:HashMap<u64,(u64,Value,String)>,
-    restored:bool, outgoing:HashMap<u64,bool>, rpc_names:HashMap<u64,String>, dirty:bool, controls:HashMap<u64,Control>, sent:HashMap<u64,std::time::Instant>, req_draft:HashMap<u64,String>, offered:HashMap<u64,String>, bases:delta::Bases,
+    restored:Restore, saved:Option<Value>, drawn:bool, outgoing:HashMap<u64,bool>, rpc_names:HashMap<u64,String>, dirty:bool, controls:HashMap<u64,Control>, sent:HashMap<u64,std::time::Instant>, req_draft:HashMap<u64,String>, offered:HashMap<u64,String>, bases:delta::Bases,
     /// The history page on its way (request id, cursor), and one waiting for the view's requests to settle: its picture must carry their session.
     paging:Option<(u64,String)>, want_page:Option<String>,
 }
 #[derive(Default)] struct Control { next:u64, bytes:usize, parts:Vec<String>, done:bool }
 const MAX_CONTROLS:usize=4;const MAX_CONTROL_BYTES:usize=16*1024*1024;const MAX_CONTROL_PARTS:u64=4096;
 impl View {
-    fn new(config:&Config)->Self {let mut v=Self::fresh(config);if let Some((target,session))=crate::screens::place::take_view(){v.target=target;v.session=crate::screens::place::opened_session(&session,millis());v.restored=true;}v}
-    fn fresh(config:&Config)->Self {Self {restored:false,rpcs:HashMap::new(),asks:HashMap::new(),hub:config.hub.replacen("ws://","http://",1),cid:format!("gpui-{}-{}",std::process::id(),millis()),
+    fn new(config:&Config)->Self {let mut v=Self::fresh(config);if let Some((target,session))=crate::screens::place::take_view(){v.target=target;v.session=crate::screens::place::opened_session(&session,millis());v.restored=Restore::First;}v}
+    fn fresh(config:&Config)->Self {Self {restored:Restore::None,saved:None,drawn:false,rpcs:HashMap::new(),asks:HashMap::new(),hub:config.hub.replacen("ws://","http://",1),cid:format!("gpui-{}-{}",std::process::id(),millis()),
         greeting:Value::Null,target:json!({"kind":"recent","id":""}),session:json!({"sel":"","rid":millis(),"drafts":{},"open":{},"adding":false,"panel":false,"info":{}}),
         view_id:String::new(),revision:0,next:(1_u64<<47)+millis(),pending:HashMap::new(),outgoing:HashMap::new(),rpc_names:HashMap::new(),dirty:false,controls:HashMap::new(),sent:HashMap::new(),paging:None,want_page:None,req_draft:HashMap::new(),offered:HashMap::new(),bases:delta::Bases::default()}}
     fn request(&mut self, method:&str, extra:Value)->Value {
@@ -144,7 +144,7 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
             let mut x=match frame {Message::Binary(bytes)=>{size=bytes.len();wire::decode(&bytes)?},Message::Text(text)=>serde_json::from_str(&text)?,Message::Ping(bytes)=>{sink.send(Message::Pong(bytes)).await?;continue},Message::Close(_)=>anyhow::bail!("closed"),_=>continue};
             let decoded=std::time::Instant::now();
             match x["t"].as_str().unwrap_or("") {
-                "view"=>{ensure!(x["version"]==1&&x["renderer"]=="mobile"&&x["generation"].is_string()&&x["epoch"].is_string(),"unsupported hub greeting");v.greeting=x;let request=v.request("view.open",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;},
+                "view"=>{ensure!(x["version"]==1&&x["renderer"]=="mobile"&&x["generation"].is_string()&&x["epoch"].is_string(),"unsupported hub greeting");v.greeting=x;v.drawn=false;if v.target["kind"]!="recent"&&v.restored==Restore::None&&v.saved.is_none(){v.restored=Restore::First;}let request=v.request("view.open",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;},
                 "reply"=>{
                     let id=x["id"].as_u64().unwrap_or(0);
                     if let Some(tag)=v.asks.remove(&id) {let _=events.send(Event::Answer(tag,x)).await;continue;}
@@ -156,10 +156,15 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                         if x["ok"]==true {if is_post {let _=events.send(Event::Accepted).await;}}else{let _=events.send(Event::Refused(format!("The hub refused it: {why}"))).await;}if v.dirty&&v.pending.is_empty()&&!v.view_id.is_empty(){v.dirty=false;let request=v.request("view.update",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;}continue;}
                     let Some((revision,target,method))=v.pending.remove(&id) else{continue};
                     let paged=v.paging.take_if(|(page,_)|*page==id).map(|(_,cursor)|cursor);
-                    // "not yet" (a hub still opening its log says this for minutes): ask again by itself, before anything reads the refusal as a place gone
-                    if retry_view(&x,&method) {let _=events.send(Event::Status("Hub is opening its log…".into())).await;tokio::time::sleep(Duration::from_secs(1)).await;let request=v.request("view.open",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;continue;}
-                    // the place kept from the last run may be gone (a thread deleted since, a page this hub does not have): open as on a first run
-                    if x["ok"]!=true&&v.restored&&method=="view.open" {v.restored=false;v.target=json!({"kind":"recent","id":""});v.session["sel"]=json!("");v.view_id.clear();let request=v.request("view.open",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;continue;}
+                    // A hub still opening its log says "not yet", and says the same of a thread it cannot show, for as long as it likes. So: the list first, asked for
+                    // until the first view of this connection, which proves the hub is up; then the saved place once. Refused then, it is gone.
+                    match view_refusal(&x,&method,v.drawn,v.restored) {
+                        Refusal::Show=>{}
+                        Refusal::Again=>{let _=events.send(Event::Status("Hub is opening its log…".into())).await;tokio::time::sleep(Duration::from_secs(1)).await;let request=v.request("view.open",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;continue;}
+                        Refusal::ListFirst=>{v.saved=Some(v.target.clone());v.restored=Restore::None;v.target=json!({"kind":"recent","id":""});v.session["sel"]=json!("");v.view_id.clear();let request=v.request("view.open",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;continue;}
+                        Refusal::Gone=>{v.restored=Restore::None;v.target=json!({"kind":"recent","id":""});v.session["sel"]=json!("");v.view_id.clear();let request=v.request("view.open",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;continue;}
+                    }
+                    if x["ok"]==true {if let Some(target)=v.saved.take(){v.drawn=true;v.session["sel"]=target["id"].clone();v.target=target;v.restored=Restore::AfterList;v.view_id.clear();let request=v.request("view.open",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;continue;}}
                     if x["ok"]!=true {if let Some(cursor)=paged {let _=events.send(Event::Older(cursor,None)).await;}let _=events.send(Event::Refused(format!("View request refused: {}",x["error"]["code"]))).await;continue;}
                     let mut r:Value=x["result"].take();
                     if let Some(control)=r["controlId"].as_u64() {
@@ -197,7 +202,7 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                     }
                     ensure!(r["version"]==1&&r["hub"]==v.hub&&r["generation"]==v.greeting["generation"]&&r["epoch"]==v.greeting["epoch"]&&r["requestRevision"]==revision&&r["target"]==target,"view identity mismatch");
                     v.view_id=r["viewId"].as_str().context("missing view id")?.to_string();
-                    ensure!(r["session"].is_object(),"missing session");v.session=r["session"].clone();v.restored=false;crate::screens::place::note_view(&v.target,&v.session);
+                    ensure!(r["session"].is_object(),"missing session");v.session=r["session"].clone();v.restored=Restore::None;v.drawn=true;crate::screens::place::note_view(&v.target,&v.session);
                     for command in r["cmds"].as_array().into_iter().flatten(){
                         if command["type"]=="send" {
                             ensure!(command["hub"].is_null()||command["hub"]==v.hub,"cross-hub command refused");
@@ -236,8 +241,21 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
     }}
 }
 
-/// A view.open the hub refused with "try again". Only the open: an action or an update refused this way is not repeated behind the person's back.
-pub fn retry_view(x:&Value,method:&str)->bool {x["ok"]!=true&&method=="view.open"&&x["error"]["retryable"]==true}
+/// A saved place on its way back: not asked yet / refused before the hub was known to be up / asked again now it is.
+#[derive(Clone,Copy,Debug,PartialEq)] pub enum Restore { None, First, AfterList }
+#[derive(Debug,PartialEq)] pub enum Refusal { /** nothing to do here: the reply goes on as it did */ Show, Again, ListFirst, Gone }
+/// What a view reply means for the open in progress. Only a view.open is ever repeated; an action is not repeated behind the person's back. Once this
+/// connection has drawn a view the hub is up, so a refusal is the hub's real answer, and the person sees it.
+pub fn view_refusal(x:&Value,method:&str,drawn:bool,restored:Restore)->Refusal {
+    if x["ok"]==true||method!="view.open" {return Refusal::Show;}
+    match restored {
+        Restore::AfterList=>Refusal::Gone,
+        Restore::First if x["error"]["retryable"]==true=>Refusal::ListFirst,
+        Restore::First=>Refusal::Gone,
+        Restore::None if x["error"]["retryable"]==true&&!drawn=>Refusal::Again,
+        Restore::None=>Refusal::Show,
+    }
+}
 
 /// The words for a failed product RPC's answer: the hub's error may be a plain string, an object with a message or a code, or something else.
 pub fn rpc_error(x:&Value)->String {
@@ -258,12 +276,17 @@ mod rpc_tests {
         assert_eq!(rpc_error(&json!({"ok":false})), "no reason given");
         assert!(rpc_error(&json!({"ok":false,"error":[1]})).contains('1'));
     }
-    #[test] fn only_an_open_refused_as_retryable_is_asked_again() {
-        let not_yet = json!({"ok":false,"error":{"code":"PRESENTER_UNAVAILABLE","retryable":true}});
-        assert!(super::retry_view(&not_yet, "view.open"));
-        assert!(!super::retry_view(&not_yet, "view.action"), "an action is not repeated");
-        assert!(!super::retry_view(&json!({"ok":false,"error":{"code":"nope","retryable":false}}), "view.open"));
-        assert!(!super::retry_view(&json!({"ok":true}), "view.open"));
+    #[test] fn a_hub_saying_not_yet_is_waited_for_and_a_thread_it_cannot_show_is_not() {
+        use super::{view_refusal as f, Refusal::*, Restore};
+        let no = json!({"ok":false,"error":{"code":"PRESENTER_UNAVAILABLE","retryable":true}}); let hard = json!({"ok":false,"error":{"code":"nope"}});
+        assert_eq!(f(&no, "view.open", false, Restore::None), Again, "booting: ask again");
+        assert_eq!(f(&no, "view.open", true, Restore::None), Show, "this connection has drawn: the hub is up, so a click on a thread it cannot show says so at once");
+        assert_eq!(f(&no, "view.action", false, Restore::None), Show, "an action is not repeated");
+        assert_eq!(f(&no, "view.open", false, Restore::First), ListFirst, "a saved place: booting or gone? the list says which");
+        assert_eq!(f(&no, "view.open", true, Restore::AfterList), Gone, "refused with the hub up: it is gone, and never asked again");
+        assert_eq!(f(&hard, "view.open", false, Restore::First), Gone);
+        assert_eq!(f(&hard, "view.open", false, Restore::None), Show);
+        assert_eq!(f(&json!({"ok":true}), "view.open", false, Restore::First), Show);
     }
     #[test] fn turn_start_is_a_post() { for m in ["turn.start","message.send","thread.send","send"] { assert!(is_post(m), "{m}"); } assert!(!is_post("fab.look") && !is_post("mech.list")); }
 }
