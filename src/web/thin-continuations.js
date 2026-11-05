@@ -12,16 +12,26 @@ const element = (tag, key, attrs, kids) => ({ $: T.El, tag, key,
 const label = (button, value, key) => ({ ...button, key,
   attrs: list(items(button.attrs).map(a => is(a, 'At') && a.name === 'title' ? { ...a, value } : a)), kids: list([text(value)]) });
 
+// the hub's own control for a partial row (thin-view.bend's Partial.button)
+const moreButton = id => ({ ...element('button', '', { class: 'thin-message-more', title: 'More', 'data-value': JSON.stringify({ entryId: id, cursor: '' }) }, [text('More')]),
+  attrs: list([...items(element('button', '', { class: 'thin-message-more', title: 'More', 'data-value': JSON.stringify({ entryId: id, cursor: '' }) }, []).attrs), { $: 'On', event: 'click', action: 'thin-message-more' }]) });
+
 // Presentation only: issued partial IDs/cursors remain the request authority.
 // Memo values are expanded before traversal and are never modified in place.
 export class ThinContinuations {
   constructor() { this.clear(); }
-  clear() { this.scope = '';this.partial = new Map();this.readers = new Map(); }
+  // (seen: this conversation's activity rows the hub has called partial on
+  // any page: a run opened again at the click, fold-feedback.js, draws its
+  // rows as the hub drew them, with their "Read full activity text"; the
+  // control asks nothing until the hub's own page names the row again)
+  clear() { this.scope = '';this.partial = new Map();this.readers = new Map();this.seen = new Map(); }
   bind(hub, detail) {
     const scope = JSON.stringify([hub, detail.epoch, detail.target.kind, detail.target.id]);
     if (scope !== this.scope) this.clear();
     this.scope = scope;
     const partial = new Map(detail.window.partial.map(p => [p.id, p]));
+    for (const [id, p] of partial) if (!(p.bodyPage === 1 && p.automatic)) { this.seen.delete(id);this.seen.set(id, p); }
+    while (this.seen.size > 256) this.seen.delete(this.seen.keys().next().value);
     for (const [id, reader] of this.readers) if (!partial.has(id) || partial.get(id).version !== reader.version) this.readers.delete(id);
     this.partial = partial;
   }
@@ -30,7 +40,10 @@ export class ThinContinuations {
     if (!this.readers.has(message.id) && this.readers.size >= 4) this.readers.delete(this.readers.keys().next().value);
     this.readers.set(message.id, message);return true;
   }
-  project(root, expand, interactive = true) {
+  // restored: the ids of rows a run opened at the click put back
+  // (fold-feedback.js): the hub draws their controls at the timeline's
+  // foot, not with the rows, so theirs are drawn here as the hub draws them
+  project(root, expand, interactive = true, restored = null) {
     const walk = (node, visit) => {
       if (!is(node, 'El')) return node;
       const expanded = expand(node);
@@ -55,6 +68,8 @@ export class ThinContinuations {
         const c = control(n);if (c) controls.set(c, [...controls.get(c) || [], n]);
         for (const k of items(n.kids)) scan(k);
       };scan(node);
+      for (const id of restored || []) if (!controls.has(id) && this.seen.has(id) && rows.get(id)?.length === 1 && classes(rows.get(id)[0]).includes('act'))
+        controls.set(id, [moreButton(id)]);
       // Only activity rows fold: message text always arrives whole, so a
       // message row never gets a reader or a "read more" control.
       const readerNodes = (id, button) => {
