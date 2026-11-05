@@ -13,7 +13,10 @@ static API: Mutex<Option<ApiCache>> = Mutex::new(None);
 struct ApiCache { at: std::time::Instant, mtime: Option<std::time::SystemTime>, vals: Vec<String>, path: std::path::PathBuf }
 
 /// The vault's open values (called by the vault after every change).
-pub fn set_vault_values(v: Vec<String>) { let mut w = VALUES.write().unwrap(); *w = Some(Arc::new(v.into_iter().filter(|x| ok(x)).collect())); }
+pub fn set_vault_values(v: Vec<String>) { let mut w = VALUES.write().unwrap(); *w = Some(Arc::new(storable(v))); }
+
+/// Sec.vault / Sec.keep: only the values the masks can cover (law sec_vault_valid: every one is `ok`).
+pub fn storable(v: Vec<String>) -> Vec<String> { v.into_iter().filter(|x| ok(x)).collect() }
 
 /// Sec.ok: not empty and not starting with the mask's own character.
 pub fn ok(s: &str) -> bool { !s.is_empty() && !s.starts_with(BULLET) }
@@ -122,5 +125,6 @@ mod tests {
         assert_eq!(j["n"], 1);
     }
     #[test] fn sec_changes_empty() { let mut e = vec![json!({"$":"X","a":"anything"})]; let before = e.clone(); json_with(&[], &mut e[0]); assert_eq!(e, before); }
+    #[test] fn sec_vault_valid() { let k = storable(v(&["", "\u{2022}abcdefgh", "abcdefgh", "\u{2022}", "x"])); assert_eq!(k, v(&["abcdefgh", "x"])); assert!(k.iter().all(|x| ok(x))); }
     #[test] fn a_value_starting_with_the_mask_character_is_not_storable() { assert!(!ok("•abc")); assert!(!ok("")); assert!(ok("abcdefgh")); }
 }

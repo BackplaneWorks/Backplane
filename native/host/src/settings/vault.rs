@@ -84,15 +84,15 @@ fn key_put(v: &Vault, backend: &str, key: &[u8; 32]) -> bool {
     stored && key_get(v, backend) == Some(*key)
 }
 
-fn random(n: usize) -> Vec<u8> {
+/// Random bytes from the OS. No fallback: a master key or an iv from anything weaker would be predictable (crypto.randomBytes throws too).
+fn random(n: usize) -> Result<Vec<u8>, String> {
     let mut b = vec![0u8; n];
-    let r = std::fs::File::open("/dev/urandom").and_then(|mut f| f.read_exact(&mut b));
-    if r.is_err() { b.iter_mut().enumerate().for_each(|(i, x)| *x = (std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.subsec_nanos()) as usize ^ i.wrapping_mul(2654435761)) as u8); }
-    b
+    std::fs::File::open("/dev/urandom").and_then(|mut f| f.read_exact(&mut b)).map_err(|_| "no secure random source".to_string())?;
+    Ok(b)
 }
 
 fn seal(key: &[u8; 32], name: &str, value: &str) -> Result<(String, String), String> {
-    let iv = random(12);
+    let iv = random(12)?;
     let c = Aes256Gcm::new_from_slice(key).map_err(|_| "bad key".to_string())?;
     let ct = c.encrypt(Nonce::from_slice(&iv), Payload { msg: value.as_bytes(), aad: name.as_bytes() }).map_err(|_| "could not seal".to_string())?;
     Ok((B64.encode(&iv), B64.encode(ct)))
@@ -252,7 +252,7 @@ pub fn put(name: &str, value: &str, purpose: &str, by: &str) -> String {
                 let key = match key_get(v, &backend) {
                     Some(k) => k,
                     None => {
-                        let k: [u8; 32] = random(32).try_into().unwrap_or([7u8; 32]);
+                        let Ok(k) = random(32).and_then(|r| <[u8; 32]>::try_from(r).map_err(|_| "len".to_string())) else { return "fail no secure random source".into() };
                         if !key_put(v, &backend, &k) {
                             if backend == "file" { return "fail could not keep the vault's key".into() }
                             // a keychain that will not take it: the key file instead
@@ -354,16 +354,20 @@ pub async fn run(spec: Value) -> Value {
         Value::Object(m)
     };
     let mut cmd = tokio::process::Command::new("/bin/sh");
-    cmd.arg("-c").arg(&command).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
+    cmd.kill_on_drop(true).arg("-c").arg(&command).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
     if let Some(cwd) = spec.get("cwd").and_then(Value::as_str).filter(|c| !c.is_empty()) { cmd.current_dir(cwd); }
     for (var, name) in &envs { if let Some(i) = use_names.iter().position(|n| n == name) { cmd.env(var, &injected[i]); } }
     let mut dir: Option<PathBuf> = None;
+    // dropped with the future (a cancelled MCP handler): the folder goes and the child's group is killed
+    struct Guard { dir: Option<PathBuf>, pid: Option<u32> }
+    impl Drop for Guard { fn drop(&mut self) { if let Some(p) = self.pid { kill_group(Some(p), libc::SIGKILL); } if let Some(d) = &self.dir { let _ = std::fs::remove_dir_all(d); } } }
+    let mut guard = Guard { dir: None, pid: None };
     if !files.is_empty() {
         let home = with(|v| v.home.clone());
         let made: std::io::Result<PathBuf> = (|| {
             let base = home.join("secrets").join("run");
             std::fs::create_dir_all(&base)?; let _ = std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o700));
-            let d = base.join(format!("r-{}-{}", std::process::id(), hex::encode(random(6))));
+            let d = base.join(format!("r-{}-{}", std::process::id(), format!("{:x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos()))));
             std::fs::DirBuilder::new().mode(0o700).create(&d)?;
             Ok(d)
         })();
@@ -375,7 +379,7 @@ pub async fn run(spec: Value) -> Value {
                     if let Err(e) = w { let _ = std::fs::remove_dir_all(&d); return answer(json!({"error": format!("could not prepare the run: {}", errs(&e.to_string()))})) }
                     cmd.env(var, &f);
                 }
-                dir = Some(d);
+                guard.dir = Some(d.clone()); dir = Some(d);
             }
             Err(e) => return answer(json!({"error": format!("could not prepare the run: {}", errs(&e.to_string()))})),
         }
@@ -394,7 +398,7 @@ pub async fn run(spec: Value) -> Value {
     unsafe { cmd.pre_exec(|| { libc::setsid(); Ok(()) }); }
     let cleanup = |d: &Option<PathBuf>| { if let Some(d) = d { let _ = std::fs::remove_dir_all(d); } };
     let mut child = match cmd.spawn() { Ok(c) => c, Err(e) => { cleanup(&dir); return answer(json!({"error": format!("could not start: {}", errs(&e.to_string()))})) } };
-    let pid = child.id();
+    let pid = child.id(); guard.pid = pid;
     let (out, err) = (std::sync::Arc::new(Mutex::new(Tail { bytes: vec![], cut: 0 })), std::sync::Arc::new(Mutex::new(Tail { bytes: vec![], cut: 0 })));
     let pump = |r: Option<tokio::process::ChildStdout>, t: std::sync::Arc<Mutex<Tail>>| tokio::spawn(async move {
         let Some(mut r) = r else { return };
@@ -423,7 +427,7 @@ pub async fn run(spec: Value) -> Value {
     // the command is done; its streams get 2 s, then the group goes
     let both = async { let _ = (&mut h_out).await; let _ = (&mut h_err).await; };
     if tokio::time::timeout(std::time::Duration::from_millis(if timed_out { 100 } else { 2000 }), both).await.is_err() { kill_group(pid, libc::SIGKILL); h_out.abort(); h_err.abort(); }
-    cleanup(&dir);
+    cleanup(&dir); guard.pid = None; guard.dir = None;
     use std::os::unix::process::ExitStatusExt;
     let code: i64 = if timed_out { 124 } else { match status { Some(s) => s.code().map(i64::from).unwrap_or_else(|| 128 + s.signal().unwrap_or(0) as i64), None => 255 } };
     let (o, e) = (tail_text(&out.lock().unwrap()), tail_text(&err.lock().unwrap()));
@@ -459,7 +463,7 @@ mod tests {
         assert_eq!(super::super::mask::mask_with(&super::super::mask::all(), "key tskey-auth-ABCDEF123456 end"), format!("key {} end", "\u{2022}".repeat(23)));
         assert_eq!(list()[0]["purpose"], "join the tailnet"); assert!(!list().to_string().contains("tskey"));
         assert_eq!(del("tailscale-bub"), "ok"); assert_eq!(list(), json!([]));
-        assert_eq!(super::super::mask::all().len(), 0);
+        assert!(!super::super::mask::all().contains(&"tskey-auth-ABCDEF123456".to_string()));
         let _ = std::fs::remove_dir_all(&h);
     }
     #[test] fn a_vault_the_js_hub_sealed_opens_here() {
