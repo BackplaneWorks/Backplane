@@ -683,7 +683,8 @@ const bodyWindows = new BodyWindows({renderBody: node => App.make(node), request
 let frontend = null, frontendNode = null, wantFrontend = true, fallbackIntent = null;
 let viewMode = "discovering", remoteReady = false, remoteEpoch = "", thinSession = null;
 let pairingAccepted = false;
-const transitionViews = new ViewTransition({ store: new RecentViews({ indexedDB, validate: (shown, scope) => {
+// (24 pictures: every destination the sidebar shows is prefetched, warmDestinations)
+const transitionViews = new ViewTransition({ limit: 24, store: new RecentViews({ indexedDB, limit: 24, bytes: 6 * 1024 * 1024, validate: (shown, scope) => {
   try { validatePresentation({ session: {sel:scope.selected, rid:0, drafts:{}}, view:shown, cmds:[] });return true; } catch {return false;}
 } }) });
 // The picture on screen while the next view is on its way: a retained
@@ -751,10 +752,19 @@ const previewViews = new ViewPrefetch({
     transitionViews.put({...scope,target,selected:session.sel,route:session.route||null,settings:false},shown);
   },
 });
+// Every destination the sidebar shows is fetched ahead (view-prefetch.js),
+// so a click on one draws its picture at once instead of waiting a round
+// trip. A row drawn differently since its picture was fetched (new activity,
+// a title, a state) has a picture that is behind: it is fetched again.
+const warmRows = new Map();
 function warmDestinations() {
-  for (const el of [...document.querySelectorAll('[data-on-click="select"],[data-on-click="bot"],[data-on-click="proj-home"]')].filter(el=>el.getAttribute("data-value")).slice(0,3)) {
+  const current = targetKey(thin?.target);
+  for (const el of [...document.querySelectorAll('[data-on-click="select"],[data-on-click="bot"],[data-on-click="proj-home"]')].filter(el=>el.getAttribute("data-value")).slice(0,24)) {
     const target={kind:el.getAttribute("data-on-click")==="bot"?"bot":el.getAttribute("data-on-click")==="proj-home"?"project":"thread",id:el.getAttribute("data-value")};
-    if (targetKey(target)!==targetKey(thin?.target)) previewViews.enqueue(target);
+    const key = targetKey(target), row = el.className.replace(/(^|\s)on(?=\s|$)/g, "") + "\u0000" + el.textContent, seen = warmRows.get(key);
+    warmRows.set(key, row);
+    // (the picture of the one on show is the hub's own, kept as it comes)
+    if (key !== current) previewViews.enqueue(target, false, seen !== undefined && seen !== row);
   }
 }
 for (const name of ["pointerover", "touchstart"]) document.addEventListener(name, event=>{
@@ -831,7 +841,7 @@ async function refreshFocusedIdentityFor(generation) {
   }
   if (before !== cacheIdentity(document.cookie) || result.state === "denied" || result.state === "invalid") {
     void draftAttachments.prune().catch(() => {});
-    previewViews.stop();transitionViews.clear();transitionNode = null;transitionFor = "";focusedView.invalidate();
+    previewViews.stop();transitionViews.clear();warmRows.clear();transitionNode = null;transitionFor = "";focusedView.invalidate();
     if (!canonicalBoot && !remoteReady) void restoreFocused();
     else saveFocusedSoon();
   }
