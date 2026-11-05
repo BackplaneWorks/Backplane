@@ -296,6 +296,6 @@ pub fn probe_rect(id: String) -> AnyElement {
         let m = g.get_or_insert_with(Default::default);
         if m.len() > 2048 { m.clear(); }
         m.insert(id, [f32::from(b.origin.x) * s, f32::from(b.origin.y) * s, f32::from(b.size.width) * s, f32::from(b.size.height) * s]);
-    }).absolute().size_full().into_any_element()
+    }).absolute().top_0().left_0().size_full().into_any_element()
 }
 pub fn ctl_rects() -> std::collections::HashMap<String, [f32; 4]> { CTL_RECTS.lock().unwrap().clone().unwrap_or_default() }
