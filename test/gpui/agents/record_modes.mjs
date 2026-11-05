@@ -9,10 +9,11 @@ const work=out+'/work-'+name;rmSync(work,{recursive:true,force:true});mkdirSync(
 const home=work+'/home';makeFixture(home,work+'/fixroot');const lines=work+'/lines.log';
 writeFileSync(work+'/bin/claude',`#!/bin/sh\nexec bun ${process.cwd()}/test/tools/claude_standin.ts "$@" | tee -a ${lines}\n`);chmodSync(work+'/bin/claude',0o755);
 for(const n of['codex','grok','muse'])writeFileSync(work+'/bin/'+n,'#!/bin/sh\nexit 1\n'),chmodSync(work+'/bin/'+n,0o755);
-const h=await startHub({bin:process.env.JS_HUB||'build/gpui/backplane-serve',home,port:Number(process.env.PORT||3844),standins:work+'/bin',extraEnv:{FAKE_LOG:work+'/fake.log',BP_STANDIN_MODE:mode,BP_STREAM_N:process.env.BP_STREAM_N||'6',BP_STREAM_MS:process.env.BP_STREAM_MS||'60',BP_WORK_MS:process.env.BP_WORK_MS||'800'}});
+const h=await startHub({bin:process.env.JS_HUB||'build/gpui/backplane-serve',home,port:Number(process.env.PORT||3844),standins:work+'/bin',log:work+'/hub.log',extraEnv:{FAKE_LOG:work+'/fake.log',BP_STANDIN_MODE:mode,BP_STREAM_N:process.env.BP_STREAM_N||'6',BP_STREAM_MS:process.env.BP_STREAM_MS||'60',BP_WORK_MS:process.env.BP_WORK_MS||'800'}});
 console.log(execFileSync('test/gpui/slim/check_agents.sh',[String(h.pid),work+'/bin']).toString().trim());
 await sleep(4000);const c=await client(h);const th='t1700000001-2';
-for(const m of msgs){c.send('turn.start',{thread:th,text:m});await sleep(Number(process.env.GAP_MS||300))}
+const board=work+'/fixroot/b.kicad_pcb';if(process.env.KICAD==='ecc83'){for(const f of ['ecc83-pp.kicad_pcb','ecc83-pp.kicad_pro','ecc83-pp.kicad_sch'])try{copyFileSync('/usr/share/kicad/demos/ecc83/'+f,work+'/fixroot/'+f)}catch{}}else if(process.env.KICAD)writeFileSync(board,'(kicad_pcb (version 20240108))\n');
+let k=0;for(const m of msgs){c.send('turn.start',{thread:th,text:m});await sleep(Number(process.env.GAP_MS||300));if(process.env.KICAD==='1'&&k++===0){await sleep(3000);writeFileSync(board,'(kicad_pcb (version 20240108))\n(footprint "R1")\n')}}
 const quiet=async(ms)=>{let n=-1;for(;;){await sleep(ms);if(c.msgs===n)return;n=c.msgs}};await quiet(Number(process.env.QUIET_MS||4000));
 if(process.env.INTERRUPT_MS){}
 stopHub(h);await sleep(1500);

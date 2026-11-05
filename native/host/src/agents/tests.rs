@@ -475,3 +475,38 @@ fn assert_same(got: &[String], want: &[String]) {
 #[tokio::test(flavor = "multi_thread")] async fn tool_calls_and_todos_match_the_js_hub() { let (g, w) = replay("todos", &["todos:4/2 tools:2 go"], 0).await; assert_same(&g, &w) }
 #[tokio::test(flavor = "multi_thread")] async fn background_subagents_match_the_js_hub() { let (g, w) = replay("agents", &["agents:2 agentsteps:2 go"], 0).await; assert_same(&g, &w) }
 #[tokio::test(flavor = "multi_thread")] async fn two_commands_are_ended_one_by_its_own_lifecycle() { let (g, w) = replay("pair", &["first", "second"], 300).await; assert_same(&g, &w) }
+
+fn norm_steps(s: &str, roots: &[&str]) -> String {
+    let mut s = s.to_string(); for r in roots { s = s.replace(r, "<root>") }
+    // 40 hex digits: a commit
+    let b: Vec<char> = s.chars().collect(); let mut o = String::new(); let mut i = 0;
+    while i < b.len() { if i + 40 <= b.len() && b[i..i + 40].iter().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()) && b[i..i + 40].iter().any(|c| c.is_ascii_alphabetic()) && (i == 0 || !b[i - 1].is_ascii_alphanumeric()) { o.push('H'); i += 40 } else { o.push(b[i]); i += 1 } }
+    o
+}
+#[tokio::test(flavor = "multi_thread")] async fn design_history_steps_are_logged_as_the_js_hub_logs_them() {
+    let sd = dir("st-bin"); script(&sd, "claude", PLAYER);
+    std::fs::write(sd.join("replay.ndjson"), include_str!("../../../../test/gpui/agents/fixtures/replay-steps.ndjson")).unwrap();
+    let home = dir("st-home"); let work = dir("st-work"); std::fs::write(home.join("events.jsonl"), base_log(&work, 1, "")).unwrap();
+    std::fs::write(work.join("b.kicad_pcb"), "(kicad_pcb (version 20240108))\n").unwrap();
+    let hub = Hub::start(Cfg { home: home.clone(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+    let host = host::HostInfo { home: home.clone(), ..Default::default() };
+    let ag = Agents::start_host(hub.clone(), Cli::standin(&sd), host).await.unwrap(); let from = len(&hub).await;
+    rpc(&hub, "turn.start", json!({"thread":T1,"text":"hello"})).await;
+    until(&hub, from, 30, |ev| ev.iter().any(|e| turn_is(e, "completed")) && ev.iter().any(|e| e["tone"] == "step")).await;
+    std::fs::write(work.join("b.kicad_pcb"), "(kicad_pcb (version 20240108))\n(footprint \"R1\")\n").unwrap();
+    rpc(&hub, "turn.start", json!({"thread":T1,"text":"again"})).await;
+    let ev = until(&hub, from, 30, |ev| ev.iter().filter(|e| turn_is(e, "completed")).count() == 2 && ev.iter().filter(|e| e["tone"] == "step").count() == 2).await; tokio::time::sleep(Duration::from_millis(800)).await;
+    let ev = { let e2 = log_from(&hub, from).await; if e2.len() > ev.len() { e2 } else { ev } };
+    let js_root = "/home/h/Documents/i2cjak/bp-agents-scratch/modes/work-steps/fixroot"; let me = work.to_string_lossy().to_string();
+    let f = |v: &[Value], r: &str| core(v, T1).iter().map(|e| norm_digits(&norm_steps(&norm(e), &[r]))).collect::<Vec<_>>();
+    // the step Acts carry the commit, the previous commit, the git dir and top, and the files changed
+    let steps: Vec<Value> = ev.iter().filter(|e| e["tone"] == "step").cloned().collect(); assert_eq!(steps.len(), 2, "{steps:?}");
+    let rec = |i: usize| -> Value { serde_json::from_str(steps[i]["summary"].as_str().unwrap()).unwrap() };
+    assert_eq!(rec(0)["w"], "start"); assert_eq!(rec(0)["f"], json!(["A\tb.kicad_pcb"])); assert_eq!(rec(0)["p"], ""); assert_eq!(rec(1)["p"], rec(0)["c"]); assert_eq!(rec(1)["f"], json!(["M\tb.kicad_pcb"]));
+    assert_eq!(rec(0)["g"], format!("{me}/.backplane/history.git")); assert_eq!(rec(0)["t"], me);
+    let (g, w) = (f(&ev, &me), f(&lines_of(include_str!("../../../../test/gpui/agents/fixtures/js-steps.jsonl")), js_root));
+    // the Acts land when the background capture ends, so their place among the turn's events varies: compare the rest in order, and the Acts as a set
+    let (gs, ws): (Vec<_>, Vec<_>) = (g.iter().filter(|x| !x.contains("\"tone\":\"step\"")).collect::<Vec<_>>(), w.iter().filter(|x| !x.contains("\"tone\":\"step\"")).collect::<Vec<_>>());
+    assert_eq!(gs, ws); let (mut a, mut b): (Vec<_>, Vec<_>) = (g.iter().filter(|x| x.contains("\"tone\":\"step\"")).collect(), w.iter().filter(|x| x.contains("\"tone\":\"step\"")).collect()); a.sort(); b.sort(); assert_eq!(a, b);
+    ag.shutdown();
+}
