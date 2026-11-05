@@ -84,6 +84,7 @@ impl Hub {
             rpc: Default::default(), http: Default::default(), views: Default::default(), observers: Default::default(), pairing: Default::default(), auth_route: Default::default(), outbox_max: std::sync::atomic::AtomicUsize::new(OUTBOX_MAX), signal_seq: AtomicU64::new(store.len() as u64), extra_info: Default::default(), live: Default::default(), window_bin: Default::default(), me: Default::default(), next_client: AtomicU64::new(1), outboxes: Default::default() });
         let _ = hub.me.set(Arc::downgrade(&hub));
         hub.bootstrap()?;
+        hub.signal_seq.store(hub.store.len() as u64, Relaxed); // start-up housekeeping counts: a restart is a new signal
         hub.fold_log().await?;
         tokio::spawn(Hub::writer(hub.clone(), crx));
         Ok(hub)
