@@ -120,7 +120,7 @@ mod tests {
     use super::*;
     fn snap(profiles: Value, error: &str) -> Value { json!({"version":1,"revision":3,"profiles":profiles,"error":error,"attempts":[{"id":"a","url":"https://claude.ai/x","userCode":"C"}]}) }
     #[test] fn only_a_granted_client_may_manage_accounts() {
-        let rpc = AccountsRpc::new(Arc::new(Accounts::open(&std::env::temp_dir().join(format!("bp-acc-{}", std::process::id())), Arc::new(|p: &str| Ok(p.to_string())))));
+        let rpc = AccountsRpc::new(Arc::new(Accounts::open(&std::env::temp_dir().join(format!("bp-acc-{}", std::process::id())), Arc::new(|p: &str| Ok(std::path::PathBuf::from(p))))));
         let (a, b) = (Caller { gen: "g".into(), client: 1 }, Caller { gen: "g".into(), client: 2 });
         assert!(!rpc.allowed(&a)); rpc.grant(&a); assert!(rpc.allowed(&a) && !rpc.allowed(&b), "per connection"); rpc.revoke(&a); assert!(!rpc.allowed(&a));
     }
