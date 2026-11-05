@@ -163,6 +163,8 @@ impl Policy {
     /// nothing, the boot commits nothing (no Auto.upgrade), no summary is asked for. What a person's own action derives in the same batch still does.
     pub fn passive(&self) -> bool { self.passive.load(Ordering::SeqCst) }
     pub fn set_passive(&self, on: bool) { self.passive.store(on, Ordering::SeqCst) }
+    /// the summaries to ask the text model for: none while passive
+    pub fn summaries_to_ask(&self, asks: Vec<(String, String)>) -> Vec<(String, String)> { if self.passive() { vec![] } else { asks } }
     pub fn tick(&self, now_s: u64) -> Vec<Value> {
         if self.passive() { return vec![] }
         let g = self.lock();
@@ -193,10 +195,18 @@ mod tests {
         for k in ["autosettle.quiet.t1", "liveness.t1", "wake.w1", "lock.merge", "launch.t2", "alert.t1", "told.k1-1", "settle.done", "launch.input.t1", "fallback.input.t1"] { assert!(lean_keeps(k), "{k}"); }
         for k in ["stopped.m1", "failed.m1", "ride.t1", "tok.t.t1", "uber.op.u.m.1", "usage.t1", "todos.t1", "session.t1.claude"] { assert!(!lean_keeps(k), "{k}"); }
     }
-    #[test] fn passive_mode_ticks_nothing() {
+    #[test] fn passive_mode_ticks_nothing_and_asks_for_no_summary() {
         let p = booted();
-        p.set_passive(true); assert!(p.tick(9_999_999_999).is_empty());
-        p.set_passive(false); assert!(p.passive() == false);
+        // a turn input of an idle thread: the minute tick prunes it unless passive
+        p.before_commit(3, vec![json!({"$":"SettingSet","key":"launch.input.t1","value":"x","at":1100})]);
+        let ev = p.tick(2_000_000_000);
+        assert!(keys(&ev).contains(&"launch.input.t1".to_string()), "active: the tick prunes the input: {ev:?}");
+        p.set_passive(true);
+        assert!(p.tick(2_000_000_000).is_empty(), "passive: the same tick writes nothing");
+        let ask = vec![("t1".to_string(), "input".to_string())];
+        assert_eq!(p.summaries_to_ask(ask.clone()), vec![], "passive: no summary asked for");
+        p.set_passive(false);
+        assert_eq!(p.summaries_to_ask(ask.clone()), ask);
     }
     #[test] fn a_batch_gets_its_derived_events_in_the_same_batch() {
         let p = booted();
