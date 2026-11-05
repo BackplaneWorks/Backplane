@@ -23,11 +23,11 @@ def ink_box(l, bg_l):
     m = np.abs(l - bg_l) > 24
     if not m.any(): return None
     ys, xs = np.where(m); return xs.min(), ys.min(), xs.max() + 1, ys.max() + 1
+def draw(d, xy, text, font, fill):
+    try: d.text(xy, text, font=font, fill=fill, features=["-calt", "-liga", "-clig"])
+    except (KeyError, ValueError, OSError): d.text(xy, text, font=font, fill=fill)
 def reference(text, font, scheme):
-    im = Image.new("RGB", (900, 24), BG[scheme]); d = ImageDraw.Draw(im)
-    try: d.text((0, 5), text, font=font, fill=FG[scheme], features=["-calt", "-liga", "-clig"])  # the app turns ligatures off; raqm applies the same
-    except (KeyError, ValueError, OSError): d.text((0, 5), text, font=font, fill=FG[scheme])  # basic layout never ligates
-    return im
+    im = Image.new("RGB", (900, 24), BG[scheme]); draw(ImageDraw.Draw(im), (0, 5), text, font, FG[scheme]); return im  # ligatures off, as in the app
 
 def files_check(d):
     out = []
@@ -85,7 +85,7 @@ def selftest(fontdir):
         im = Image.new("RGB", (1000, 160), BG["dark"]); d = ImageDraw.Draw(im)
         for i, t in enumerate(LINES): fn(d, i, t)
         return im
-    good = sheet(lambda d, i, t: d.text((16, 16 + 24 * i + 5), t, font=bold if i == 4 else reg, fill=FG["dark"]))
+    good = sheet(lambda d, i, t: draw(d, (16, 16 + 24 * i + 5), t, bold if i == 4 else reg, FG["dark"]))
     good = good  # the CJK line needs wide glyphs: draw ideographs as blocks like a fallback font would
     gd = ImageDraw.Draw(good); gd.rectangle((16, 16 + 72 + 5, 16 + 7.8 * 8 + 8, 16 + 72 + 18), outline=FG["dark"])
     wrong = sheet(lambda d, i, t: d.text((16, 16 + 24 * i + 5), t, font=ImageFont.load_default(), fill=FG["dark"]))
