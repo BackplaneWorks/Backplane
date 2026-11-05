@@ -399,9 +399,9 @@ impl Render for SolidPage {
 #[cfg(test)]
 mod tests {
     #[test] fn a_note_for_another_source_drops_the_old_model_and_the_same_sources_keeps_it() {
-        assert!(note_keeps_model("2|/a|", "2|/a|"), "the same model: its previous revision stays with the note");
-        assert!(!note_keeps_model("2|/a|", "2|/b|"), "thread B's model could not be made: A's must not show under B's key");
-        assert!(!note_keeps_model("", "2|/b|"));
+        assert!(super::note_keeps_model("2|/a|", "2|/a|"), "the same model: its previous revision stays with the note");
+        assert!(!super::note_keeps_model("2|/a|", "2|/b|"), "thread B's model could not be made: A's must not show under B's key");
+        assert!(!super::note_keeps_model("", "2|/b|"));
     }
     // not `use super::*`: that glob brings gpui's own `test` attribute macro into scope and #[test] then expands into itself
     use super::{decode_mesh, parse_frame, render, Camera, Mesh, SolidFrame, BG};
