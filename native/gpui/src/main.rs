@@ -80,9 +80,10 @@ impl Backplane {
     fn select(&mut self,id:String,window:&mut Window,cx:&mut Context<Self>) {self.select_id(id,cx);self.input.focus_handle(cx).focus(window);}
     fn select_id(&mut self,id:String,cx:&mut Context<Self>) {self.ui_epoch+=1;
         let raw=id.rsplit_once('|').map_or(id.as_str(),|(_,id)|id).to_string();
-        self.drafts.insert(self.selected.clone(),self.input.read(cx).content.to_string());
+        let current=self.input.read(cx).content.to_string();
+        let text=screens::drafts::switch(&mut self.drafts,&self.selected,&raw,&current);
         self.thread_switch(&raw);
-        self.selected=raw.clone();let text=self.drafts.get(&raw).cloned().unwrap_or_default();
+        self.selected=raw.clone();
         self.input.update(cx,|input,cx|input.set(text,cx));
         // Stale-while-revalidate: the thread on screen goes into a small cache; a thread seen before is drawn from it at once and the hub's picture
         // replaces it; one never seen shows its title (from the sidebar row) and "Loading…". Bounded at 12 threads.

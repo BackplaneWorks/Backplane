@@ -1,5 +1,6 @@
 //! Drafts per thread survive a restart: one small JSON file (0600; drafts can hold pasted secrets) beside the
 //! token. Pure load/save plus one background writer that debounces keystrokes and flushes on request.
+use super::attach::raw_id;
 use std::{collections::HashMap, path::{Path, PathBuf}, sync::mpsc, time::Duration};
 
 pub const MAX_BYTES: usize = 256 * 1024;
@@ -11,7 +12,27 @@ const DEBOUNCE: Duration = Duration::from_millis(400);
 pub fn load(path: &Path) -> HashMap<String, String> {
     if std::fs::metadata(path).map_or(true, |m| m.len() > MAX_FILE) { return HashMap::new(); }
     let m: HashMap<String, String> = std::fs::read_to_string(path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
-    m.into_iter().filter(|(k, v)| !k.is_empty() && v.len() <= MAX_ONE).collect()
+    normalize(m.into_iter().filter(|(k, v)| !k.is_empty() && v.len() <= MAX_ONE).collect())
+}
+
+/// Drafts saved before the client always used the thread's own id carry `<hub>|<id>` keys as well: strip them. When both forms hold a draft the
+/// longer is kept (a draft being typed grows; the file has no times to say which was last), ties go to the plain key.
+pub fn normalize(m: HashMap<String, String>) -> HashMap<String, String> {
+    let mut out: HashMap<String, String> = HashMap::new();
+    // qualified keys first, plain ones after: a plain key wins a tie (`>=`), the longer text wins otherwise
+    let mut keys: Vec<&String> = m.keys().collect(); keys.sort_by_key(|k| (!k.contains('|'), (*k).clone()));
+    for k in keys {
+        let (r, v) = (raw_id(k).to_string(), m[k].clone());
+        if out.get(&r).map_or(true, |old| v.len() >= old.len()) { out.insert(r, v); }
+    }
+    out
+}
+
+/// Switching threads: the draft in the box is saved under the thread being left (by its own id) and the target's draft is returned.
+pub fn switch(map: &mut HashMap<String, String>, old: &str, new: &str, current: &str) -> String {
+    let o = raw_id(old);
+    if !o.is_empty() { if current.trim().is_empty() { map.remove(o); } else { map.insert(o.to_string(), current.to_string()); } }
+    map.get(raw_id(new)).cloned().unwrap_or_default()
 }
 
 /// Which drafts are kept: not blank, none over MAX_ONE, and in key order while the total stays within MAX_BYTES.
@@ -75,6 +96,23 @@ mod tests {
         assert_eq!(back.len(), 1); assert_eq!(back["t1"], "line one\nline two 😀");
         assert!(load(&d.join("none.json")).is_empty());
         let _ = std::fs::remove_dir_all(d);
+    }
+    #[test] fn a_draft_survives_a_switch_away_and_back_after_a_hub_set_selection() {
+        // the selection was set by the hub's picture, in its qualified form; the person types, switches to t2 and back
+        let mut map = HashMap::new();
+        let back_at_t2 = switch(&mut map, "127.0.0.1:3834|t1", "t2", "hello world"); assert_eq!(back_at_t2, "");
+        let back_at_t1 = switch(&mut map, "t2", "127.0.0.1:3834|t1", ""); assert_eq!(back_at_t1, "hello world", "the draft written under the qualified form must come back");
+        assert!(!map.contains_key("127.0.0.1:3834|t1"), "one form only"); assert_eq!(map["t1"], "hello world");
+        // a cleared box forgets the draft
+        let _ = switch(&mut map, "t1", "t2", "  "); assert!(!map.contains_key("t1"));
+    }
+    #[test] fn saved_drafts_under_qualified_keys_are_not_lost_on_load() {
+        let mut m = HashMap::new();
+        m.insert("h:1|t1".to_string(), "typed under the hub id".to_string()); m.insert("t2".into(), "plain".into());
+        m.insert("t3".to_string(), "short".to_string()); m.insert("h:1|t3".to_string(), "the longer one is kept".to_string());
+        let n = normalize(m);
+        assert_eq!(n["t1"], "typed under the hub id"); assert_eq!(n["t2"], "plain"); assert_eq!(n["t3"], "the longer one is kept"); assert!(n.keys().all(|k| !k.contains('|')));
+        let mut tie = HashMap::new(); tie.insert("h|x".to_string(), "aaaa".to_string()); tie.insert("x".to_string(), "bbbb".to_string()); assert_eq!(normalize(tie)["x"], "bbbb", "a tie goes to the plain key");
     }
     #[test] fn one_huge_draft_does_not_drop_the_others() {
         let mut m = HashMap::new(); m.insert("a".to_string(), "x".repeat(MAX_ONE + 1)); m.insert("b".into(), "ok".into()); m.insert("c".into(), "y".repeat(MAX_ONE));
