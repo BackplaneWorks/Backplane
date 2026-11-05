@@ -75,11 +75,13 @@ impl World {
     pub fn init_bodies(&self, bot: &str) -> Vec<String> {
         let Some(b) = self.bots.get(bot) else { return vec![] };
         let me = self.me(); let mut out = vec![b_who(&b.name, b.look, &b.persona)];
-        let mut mems: Vec<_> = self.mems.values().filter(|m| m.bot == bot).collect(); mems.sort_by(|a, c| a.key.cmp(&c.key));
+        // World.mems: newest first (Mem.newer, by the time last saved; the Bend sort leaves equal times in no stated order: the key decides here)
+        let mut mems: Vec<_> = self.mems.values().filter(|m| m.bot == bot).collect(); mems.sort_by(|a, c| c.updated.cmp(&a.updated).then_with(|| a.key.cmp(&c.key)));
         out.extend(mems.iter().map(|m| b_mem(&m.key, &m.kind, &m.text, &m.tags)));
         if let Some(sp) = self.spaces.get(bot).filter(|s| !s.is_empty()) { out.push(b_space(sp)) }
         if let Some((h, _)) = self.pages.get(bot).filter(|(h, _)| !h.is_empty()) { out.push(b_page(h)) }
-        let mut rs: Vec<_> = self.routines.values().filter(|r| r.bot == bot && !r.deleted).collect(); rs.sort_by(|a, c| (a.created, &a.id).cmp(&(c.created, &c.id)));
+        // Map.values: by id (the JS hub's first ops list rz, ra, rm, rb as ra, rb, rm, rz)
+        let mut rs: Vec<_> = self.routines.values().filter(|r| r.bot == bot && !r.deleted).collect(); rs.sort_by(|a, c| a.id.cmp(&c.id));
         out.extend(rs.iter().map(|r| self.routine_pin_body(r, "")));
         out.push(b_lease(&me, 1)); out.push(b_bind(&me, bot, &b.thread, &b.name));
         out

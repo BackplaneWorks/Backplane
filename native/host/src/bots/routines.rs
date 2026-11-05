@@ -129,7 +129,7 @@ impl Bots {
         let w = self.world().await;
         let z = Zones { settings: &w.settings }; let (mo, me) = machine_off(&z, now);
         let mut due: Vec<&Routine> = w.routines.values().filter(|r| plan_of(r).due(&z, now, mo, me)).collect();
-        due.sort_by(|a, b| (a.created, &a.id).cmp(&(b.created, &b.id)));
+        due.sort_by(|a, b| a.id.cmp(&b.id)); // Map.values: by id
         let mut n = 0;
         for (i, r) in due.into_iter().enumerate() { if let Ok(true) = self.fire_commit(r, &w, now, i).await { n += 1 } }
         n

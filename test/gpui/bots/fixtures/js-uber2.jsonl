@@ -1,0 +1,26 @@
+{"$":"ThreadCreated","id":"t1793876808-147","project":"","title":"bub","env":"local","branch":"","worktree":"","provider":"claude","model":""}
+{"$":"BotSet","id":"b1793876808-147","name":"bub","thread":"t1793876808-147","look":306440,"persona":"dry"}
+{"$":"WorktreeSet","id":"t1793876808-147","branch":"","worktree":"/home/h/Documents/i2cjak/backplane-gpui/build/gpui/results/bots/rec4/work/home/bots/b1793876808-147"}
+{"$":"MemorySaved","bot":"b1793876808-147","key":"k1","kind":"fact","text":"one","tags":"a"}
+{"$":"MemorySaved","bot":"b1793876808-147","key":"k2","kind":"pref","text":"two","tags":""}
+{"$":"MemorySaved","bot":"b1793876808-147","key":"k3","kind":"note","text":"three","tags":"c"}
+{"$":"MemorySaved","bot":"b1793876808-147","key":"k1","kind":"fact","text":"one!","tags":"a"}
+{"$":"RoutineSet","id":"rz","bot":"b1793876808-147","name":"zed","cron":"","prompt":"z","on":true}
+{"$":"RoutinePlan","id":"rz","once":"<T>","tz":"person","kind":""}
+{"$":"RoutineSet","id":"ra","bot":"b1793876808-147","name":"alpha","cron":"30 9 * * *","prompt":"a","on":true}
+{"$":"RoutinePlan","id":"ra","once":0,"tz":"person","kind":""}
+{"$":"RoutineSet","id":"rm","bot":"b1793876808-147","name":"mid","cron":"0 8 * * 1-5","prompt":"m","on":true}
+{"$":"RoutinePlan","id":"rm","once":0,"tz":"person","kind":""}
+{"$":"RoutineSet","id":"rb","bot":"b1793876808-147","name":"beta","cron":"0 */2 * * *","prompt":"b","on":false}
+{"$":"RoutinePlan","id":"rb","once":0,"tz":"person","kind":""}
+{"$":"UberSet","bot":"b1793876808-147","uid":"<uid>"}
+{"$":"UberOp","uid":"<uid>","origin":"<me>","n":1,"stamp":"<S>.<c>.<me>","op":"{\"k\":\"who\",\"name\":\"bub\",\"look\":306440,\"persona\":\"dry\"}"}
+{"$":"UberOp","uid":"<uid>","origin":"<me>","n":2,"stamp":"<S>.<c>.<me>","op":"{\"k\":\"mem\",\"key\":\"k1\",\"kind\":\"fact\",\"text\":\"one!\",\"tags\":\"a\"}"}
+{"$":"UberOp","uid":"<uid>","origin":"<me>","n":3,"stamp":"<S>.<c>.<me>","op":"{\"k\":\"mem\",\"key\":\"k3\",\"kind\":\"note\",\"text\":\"three\",\"tags\":\"c\"}"}
+{"$":"UberOp","uid":"<uid>","origin":"<me>","n":4,"stamp":"<S>.<c>.<me>","op":"{\"k\":\"mem\",\"key\":\"k2\",\"kind\":\"pref\",\"text\":\"two\",\"tags\":\"\"}"}
+{"$":"UberOp","uid":"<uid>","origin":"<me>","n":5,"stamp":"<S>.<c>.<me>","op":"{\"k\":\"routine\",\"id\":\"<me>:ra\",\"name\":\"alpha\",\"cron\":\"30 9 * * *\",\"prompt\":\"a\",\"on\":true,\"pin\":\"\",\"once\":0,\"tz\":\"person\",\"kind\":\"\"}"}
+{"$":"UberOp","uid":"<uid>","origin":"<me>","n":6,"stamp":"<S>.<c>.<me>","op":"{\"k\":\"routine\",\"id\":\"<me>:rb\",\"name\":\"beta\",\"cron\":\"0 */2 * * *\",\"prompt\":\"b\",\"on\":false,\"pin\":\"\",\"once\":0,\"tz\":\"person\",\"kind\":\"\"}"}
+{"$":"UberOp","uid":"<uid>","origin":"<me>","n":7,"stamp":"<S>.<c>.<me>","op":"{\"k\":\"routine\",\"id\":\"<me>:rm\",\"name\":\"mid\",\"cron\":\"0 8 * * 1-5\",\"prompt\":\"m\",\"on\":true,\"pin\":\"\",\"once\":0,\"tz\":\"person\",\"kind\":\"\"}"}
+{"$":"UberOp","uid":"<uid>","origin":"<me>","n":8,"stamp":"<S>.<c>.<me>","op":"{\"k\":\"routine\",\"id\":\"<me>:rz\",\"name\":\"zed\",\"cron\":\"\",\"prompt\":\"z\",\"on\":true,\"pin\":\"\",\"once\":<T>,\"tz\":\"person\",\"kind\":\"\"}"}
+{"$":"UberOp","uid":"<uid>","origin":"<me>","n":9,"stamp":"<S>.<c>.<me>","op":"{\"k\":\"lease\",\"holder\":\"<me>\",\"term\":1}"}
+{"$":"UberOp","uid":"<uid>","origin":"<me>","n":10,"stamp":"<S>.<c>.<me>","op":"{\"k\":\"bind\",\"machine\":\"<me>\",\"bot\":\"b1793876808-147\",\"thread\":\"t1793876808-147\",\"name\":\"bub\"}"}
