@@ -12,7 +12,7 @@ pub fn metric(started: Instant, event: &str, mut fields: Value) {
 }
 
 #[derive(Clone, Debug)]
-pub enum Step { Home(usize), Select(usize), Popup(String), Type(String), Send, Wait(u64), Record(Option<String>), Click(String), Read(String), View(String), Layers(bool), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Unsupported(String) }
+pub enum Step { Home(usize), Select(usize), Popup(String), Type(String), Send, Wait(u64), Record(Option<String>), Click(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Unsupported(String) }
 /// What a click on a registered control does; the e2e harness's controls inventory and `click` step use these.
 #[derive(Clone, Debug)]
 pub enum Ctl { None, Rail(String), PickFiles, ToggleSidebar, Select(String), Home(String), Fold(String), Send, Skill(String), Page(String), Node(String, String) }
@@ -36,7 +36,8 @@ pub fn load(path: &Path) -> VecDeque<Step> {
         else if let Some(r) = v["record"].as_str() { Some(Step::Record(if r == "start" { Some(v["name"].as_str().unwrap_or("rec").to_string()) } else { None })) }
         else if let Some(id) = v["click"].as_str() { Some(Step::Click(id.into())) }
         else if let Some(what) = v["read"].as_str() { Some(Step::Read(what.into())) }
-        else if let Some(on) = v["layers"].as_bool() { Some(Step::Layers(on)) }
+        else if let Some(on) = v["layers"].as_bool() { Some(Step::Layers(on, v["max_h"].as_f64().map(|x| x as f32), v["scroll"].as_f64().unwrap_or(0.0) as f32)) }
+        else if let Some(what) = v["expect"].as_str() { Some(Step::Expect(what.into())) }
         else if let Some(kind) = v["view"].as_str() { Some(Step::View(kind.into())) }
         else if let Some(a) = v["pan"].as_array() { Some(Step::Pan(a.first().and_then(Value::as_f64).unwrap_or(0.0) as f32, a.get(1).and_then(Value::as_f64).unwrap_or(0.0) as f32)) }
         else if let Some(a) = v["zoom"].as_array() { Some(Step::Zoom(a.first().and_then(Value::as_f64).unwrap_or(0.0) as f32, a.get(1).and_then(Value::as_f64).unwrap_or(0.5) as f32, a.get(2).and_then(Value::as_f64).unwrap_or(0.5) as f32)) }
@@ -195,7 +196,7 @@ impl Backplane {
             Step::Record(None) => {
                 if let Some((name, frames)) = self.recording.take() {
                     self.m("frames", json!({"name": name, "n": frames.len(), "frames_ms": frames}));
-                    // the plot canvas's own CPU per paint while the record was open (stroke meshes, culling, path submission), not the rasterizer's time
+                    // the plot canvas's own CPU per paint while the record was open (culling, path building, tessellation, submission), not the rasterizer's time
                     let mut ms = std::mem::take(&mut self.screens.plotview.paint_ms);
                     if !ms.is_empty() {
                         ms.sort_by(|a, b| a.partial_cmp(b).unwrap()); let p = |q: f32| ms[((ms.len() - 1) as f32 * q).round() as usize];
@@ -219,7 +220,13 @@ impl Backplane {
             Step::View(kind) => { // open a viewer page like the rail does (the idempotent `view` action)
                 let _ = self.tx.try_send(crate::screens::viewer::view_kind(&kind)); self.m("view", json!({"kind": kind})); cx.notify(); self.pump(cx);
             }
-            Step::Layers(on) => { self.screens.plotview.layers_open = on; self.ui_epoch += 1; self.begin("layers".into(), Goal::Frame, cx); cx.notify(); }
+            Step::Expect(what) => { // a run that cannot measure what it claims stops itself: "canvas" needs a plot canvas with real height
+                let h = self.screens.plotview.bounds.map_or(0.0, |b| f32::from(b.size.height));
+                if what == "canvas" && h < 200.0 { self.m("not_usable", json!({"why": "plot canvas has no height", "canvas_h": h})); eprintln!("expect canvas: height {h} px: stopping"); std::process::exit(4); }
+                self.m("expect", json!({"what": what, "canvas_h": h})); self.pump(cx);
+            }
+            Step::Layers(on, cap, scroll) => { let pv = &mut self.screens.plotview; pv.layers_cap = cap; pv.layers_scroll.set_offset(point(px(0.), px(-scroll)));
+                self.screens.plotview.layers_open = on; self.ui_epoch += 1; self.begin("layers".into(), Goal::Frame, cx); cx.notify(); }
             Step::Pan(dx, dy) => { // a drag of the plot canvas by (dx, dy) window px
                 let pv = &mut self.screens.plotview; if let Some(v) = pv.view { pv.view = Some(v.pan(dx, dy)); }
                 self.ui_epoch += 1; self.begin("pan".into(), Goal::Frame, cx); cx.notify();

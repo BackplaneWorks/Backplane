@@ -141,7 +141,7 @@ fn plot_page(cx: &mut Context<Backplane>, light: bool, open: &str, viewer: &Valu
     let strip = crate::viewers::layers::strip(viewer, &present);
     col = col.child(crate::viewers::layers::strip_el(cx, light, &strip, pv.layers_open));
     let mut area = div().relative().flex().flex_col().flex_1().min_h_0().child(super::plotview::canvas_el(cx, light, frame, view, crate::viewers::layers::masks(viewer)));
-    if let Some(p) = crate::viewers::layers::panel_el(cx, light, &strip, pv.layers_open) { area = area.child(p); }
+    if let Some(p) = crate::viewers::layers::panel_el(cx, light, &strip, pv.layers_open, pv.layers_cap.unwrap_or(280.), &pv.layers_scroll) { area = area.child(p); }
     col.child(area).into_any_element()
 }
 
