@@ -54,44 +54,61 @@ runs: `files.dir`, `mail.*`, ...) go through `session::run_wants(hub, conn, targ
 
 ## The seam: a drop-in for `Presenter::view`
 
-The contract is the one that exists, so nothing outside `present/` changes. `RustPresenter::view(&params) -> Option<Value>` takes the **same params the
+The contract is the one that exists, so nothing outside `present/` changes. A `Screen::view(&params) -> Option<Value>` (inside `Routed`, which implements `Presenter::view -> Fut<Value>`) takes the **same params the
 hub builds for the helper** (`session/mod.rs view_request`): `version, generation, epoch, hub, requestRevision, target, session` (the actor's input), `action`/`value`,
 `revision` (= `signal_seq`), `viewId`, `nativeKey`, `now`, `window`, `page {thread, before, below, above, rows}` (32 rows in the cells `seq ord id thread src kind
 role akind text at`), `reads`, `local`, `seq`. It returns the **same object the helper's `V` returns**: `shown`, `session`, `cmds`, `wants`, `nextTarget`,
-`overlay`, `local`, `refused`, `stale`, `window`. `None` means not ported: the router asks the helper (stage 1) or answers "not ported". The actor, `assemble`,
+`overlay`, `local`, `refused`, `stale`, `window`. `wants` is not emitted by any Bend on `gpui` (it is gpui-slim dbadca0f2e, unbuilt, now dropped): the port introduces it as the Rust presenter's way to ask the host for read-only RPCs (`files.dir`, `mail.*`, ...), served by parity-session's `session::run_wants`. `None` means not ported: `Routed` asks the helper if it is allowed to run (stage 1 rules below), else answers a retryable "not ported". The actor, `assemble`,
 deltas, segmentation and `local` stay as they are.
 
-This makes the oracle exact and cheap: with `BACKPLANE_PRESENTER_DUMP=<dir>` a hub (copy mode, synthetic log) writes each `(params, helper output)` pair; the
-differential test feeds the dumped params to `RustPresenter` and compares outputs (after the harness' normalisations: clocks, ids). Each module lands at 0 differences over
-the dumps of the `session:gpui` scenarios (the JS recordings' trace through the same requests), then the network replay (`test/gpui/parity`) confirms end to end.
+The other `Presenter` methods under `Routed`: `fold` feeds `meta` (state::State lean), the info map and the live rows, and also the helper if it is running; `wants_log` is false while the helper is not
+running (the hub then does not fold the whole log into anything but `Model`/`meta`); `ping` answers for the Rust side; `is_down`/`restart` concern only the helper, and only when it was started.
+Mirrors: `rebuild_presenter`, `forget_mirror` and far events change presenter state only, so `meta.rs` keeps `<link>~<id>` threads in a map of their own (per link, dropped by `forget_mirror(prefix)`), never in `Model`.
+
+**The oracle, in two tools and a gate.**
+1. *Dumps (working tool, not the gate).* The helper's `V` depends on more than the params: everything folded through `Presenter::fold` (`log, changes, delta, info, live`).
+   With `BACKPLANE_PRESENTER_DUMP=<dir>` (copy runs only) a hub writes `frames.jsonl` (every fold frame, in order) and `views.jsonl` (each `(params, helper output, frames-so-far index)`).
+   The differential test replays the frames up to that index into a `RustPresenter` (its `fold` builds `meta`/info/live; the events go into a temp store so `Model` indexes them) and compares
+   the view output. Exact comparison after only these normalisations: clock fields (`at`, `now`, `rid`, `clock`), view ids and message/thread ids by first appearance. Anything else is a difference.
+2. *The gate is the JS replay, not the helper.* The helper differs from JS today (`settingspages` 347 and `projecthome` 33 differences, still UNSETTLED), so 0 differences against dumps can mean
+   copying the helper's bugs. A module lands when `test/gpui/parity` (scenario `session:gpui`, normalisations N1-N19 as listed in its README, none added) shows 0 differences against the JS recordings,
+   on the baseline rebuilt from the frozen main. Where the helper and JS disagree, JS wins and the difference is listed with the module.
+3. *Scale.* The helper cannot open the real-size log, so `session:gpui` never reaches multi-page threads, cursors or `remaining`/`total` at scale. Add a synthetic log the helper can still fold
+   (about 100k events, threads of 100+ entries, several pages each) to the dumps and the replay, and a JS-hub spot check on the 1.69M synthetic log on Boat for `window`/`pages` if it fits in the budget; if it does not, say "unmeasured".
+4. *No table fitted to the scenarios.* A `shown` key GPUI does not read is either computed from state or left out and named as an approved difference with the reason; never a constant that matches only because the recording is small.
+   Actions get a coverage list generated from client.bend's `Ui.act` cases (every action name, with: covered by a replayed pair / ported with a hand-written case / not ported -> helper). A dumped pair is a test, not the contract: branches no scenario reached are listed, not assumed.
 
 Actions are a table in `actions.rs`: `fn act(cx: &Ctx, req: &Req) -> Option<ActOut>` where `ActOut { session_patch, cmds, next_target }` and `req.action`/`req.value` are the
 `view.action` pair (`pin`, `row-pin`, `row-settle`, `row-archive`, `new-thread`, `rename-save` ...). The names and the `cmds` they produce are read from the dumps and
 client.bend's `Ui.act` (the cases for `Menu.*`, `Ren.*`, `Made.*`); the RPCs under them (`thread.create/pin/settle/rename/archive`) are done and parity-tested (commands).
-Nothing is guessed from the Bend source alone: an action's contract is its dumped `(action, value) -> (session, cmds, nextTarget)`.
+An action's contract is JS behaviour: the dumped pair is evidence for the branches a scenario reached, the coverage list above says which ones those are.
 
 ## The indexed read model
 
 - Log: offset index (28 B/event), unchanged. Entries are read by `seq` from the store through a bounded page cache (decoded pages, LRU, a few MB), never folded.
-- `meta.rs`: threads (11k at real size), projects, settings, asks, queues, bots, rooms, usage. Per thread: counters (total, last message id/preview/time, status) updated at apply. Memory grows with objects, not with events.
+- `meta.rs`: threads (11k at real size), projects, settings, asks, queues, bots, rooms, usage. Per thread: counters (total, last message id/preview/time, status) updated at apply. `meta` grows with objects (threads, projects, tasks, kept settings), not with events; the log index does grow with events.
 - A thread's page = rows read via `model.rs` (`ids`, `ord`, lookahead 17), as today; `window` is computed from the page plus the thread's latest human/assistant text (`message-context`), read from the index tail.
-- Start reads the log once to build `meta` and `model` (streaming, no retained lines). Targets to prove on the synthetic log, at two sizes (0.85M and 1.69M events): start-to-listening, peak and steady RSS, view latency, 20 stand-in agents. The Rust hub alone was 38 MB at 1M events; the helper was the 3.6 GB.
+- Start reads the log once to build `meta` and `model` (streaming, no retained lines). The real slope is not zero: `store.rs` keeps an offset per event and `Model` keeps `all: Vec<u32>` plus `own`/`sent` entries (8 B each) per event. Measured: 38 MB RSS at 1M events with no helper alive (the earlier 71 MB figure came from a hub whose helper had died, so it is not a steady number). The measurement states B/event and checks it against a number: at 0.85M and 1.69M synthetic events, start-to-listening, peak and steady RSS, slope between the two sizes (bar: at most 64 B/event, flat after start under 20 stand-in agents), view latency.
+- `meta.rs` keeps only the settings `fam::policy::lean_keeps` lists, with `lean_value` caps, because values reach 10-20 KB (state needed it); everything else is read from the log or the hub when asked.
 
 ## `--policy-bin` and `--window-bin` go away in stages
 
-1. **Router, flag `--presenter rust|helper|auto`** (default `helper`): `RustPresenter` serves what it has ported (sidebar page, thread view, window, pages, composer, the listed actions) and sends everything else to the helper, which is **started lazily** on the first request that needs it and folded then (compacted, from `gpui-compact`); GPUI's main screens never start it, so the real log opens without its memory. Unported and no helper: the reply says so (retryable error), never a wrong screen.
+1. **Router, flag `--presenter rust|helper|auto`** (default `helper`): `RustPresenter` serves what it has ported; for the rest, `auto` starts the helper only when the log is below a size limit
+   (`BACKPLANE_HELPER_MAX_EVENTS`, default 150,000 events: what the helper folded in under 400 MB) and otherwise answers a retryable "not ported", **never starting it**. A started helper has no restart loop on a failed or killed fold (it is
+   marked unavailable until the hub restarts) and a resident-size cap (killed and marked unavailable, not restarted, above it), so a click on an unported screen cannot end the hub on real data. `gpui-compact` is not part of this.
 2. **Default `rust`**: the helper is only for screens GPUI desktop does not use (phones' extras, bots/rooms tabs, settings subpages, viewers) until they are ported in the same module layout, in the order the apps need them.
 3. **Delete**: when the replay oracle shows 0 differences on every scenario and the phones need nothing from the helper: remove the helper, `window`, `native/bend/*` runtime use, `--policy-bin`, `--window-bin` (accepted and ignored with a warning for one build, then refused by `Cli`), the Boat/bp-build steps that build them.
 
 ## Laws and tests
 
-Each ported def gets a Rust property test named after the Bend law it guards (seeded generator, no new crates), and a row in `scripts/gpui/law-map.tsv`
-marking it `rust-test:<path>`; laws not ported stay `bend` and are not claimed. Bend proofs do not gate the runtime. The oracle is the bar, not the tests: a module
-lands only with replay differences at 0 for its scenarios (or each difference named and approved).
+Each ported def gets a Rust property test (seeded generator, no new crates) named after the Bend law it guards, and a line `law NAME rust TEST` in `scripts/gpui/law-map.tsv`
+(the tool's own format; `python3 scripts/gpui/law-map.py --check` must pass in every PR). Laws still served by the helper stay `law NAME bend`; at stage 3 every
+such row must become `rust TEST`, `unported` or `retired <reason>` in the same PR that deletes the helper, since `bend` means Rust calls it and PROOF still checks it. No row is left claiming a
+check that no longer runs. Bend proofs do not gate the runtime. The gate for a module is the JS replay (see the oracle), not these tests.
 
 ## Order of work and honest limits
 
 1. Day 1: slim inventories what `native/gpui/src/screens` reads from `shown` (keys, shapes) from the recordings; bend lands the `present/` seam with an empty router (no behaviour change).
 2. Then in parallel: thread/window/pages (slim); composer/popups/oracle (parity-session); actions (commands); `meta.rs` and the lazy helper (bend).
 3. Not known yet: the exact `shown` surface GPUI depends on, and how many of client.bend's behaviours (tour, star nudge, find, tabs) show up as non-constant output. Until slim's inventory, any estimate is a guess; I will give one after it.
-4. The phones use the same `shown`; they stay on the helper until their screens are ported (stage 2), so the helper's memory problem for them remains until then (their data is small; `gpui-compact` is the stopgap if needed).
+4. The phones use the same `shown`, and the helper folds the hub's log whichever client connects: **phones do not work on a real-size Rust hub until stage 2 or 3** (every screen not yet ported is "not ported" there). On the small hubs the helper can fold they keep working.
