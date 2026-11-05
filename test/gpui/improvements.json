@@ -1,0 +1,23 @@
+[
+ {"wait": 3000},
+ {"click": "ui:Improvements"}, {"wait": 1200}, {"imp": "snap improvements-01-open"},
+ {"imp": "text The sidebar rows jump when I fold and unfold it.\\nSecond line of my words."},
+ {"imp": "evidence Fold the sidebar twice. The rows jump by a few pixels each time."},
+ {"imp": "details Seen on the Rust hub, Linux, GPUI."},
+ {"wait": 500},
+ {"click": "imp:capture"}, {"wait": 3500},
+ {"click": "imp:chk-shot"}, {"click": "imp:chk-diag"}, {"click": "imp:chk-details"}, {"wait": 500},
+ {"imp": "snap improvements-02-evidence"},
+ {"click": "imp:primary"}, {"wait": 2500}, {"imp": "snap improvements-03-review"},
+ {"click": "imp:chk-evidence"}, {"click": "imp:copy"}, {"click": "imp:save"}, {"click": "imp:open-github"}, {"wait": 800}, {"imp": "snap improvements-04-opened"},
+ {"imp": "state"},
+ {"click": "imp:allow-again"},
+ {"click": "imp:wproj:p1"}, {"click": "imp:write"}, {"wait": 6000}, {"imp": "state"}, {"imp": "snap improvements-05-writer-started"},
+ {"click": "imp:load"}, {"wait": 2500}, {"imp": "snap improvements-06-report-loaded"},
+ {"click": "imp:record"}, {"wait": 4500}, {"imp": "snap improvements-07-recording"},
+ {"click": "imp:rec-stop"}, {"wait": 4000},
+ {"click": "imp:rec-play"}, {"click": "imp:chk-rec"}, {"wait": 600}, {"imp": "snap improvements-08-recording-kept"},
+ {"click": "imp:dest-internal"}, {"click": "imp:chk-rec"}, {"wait": 600}, {"imp": "snap improvements-09-internal"},
+ {"click": "imp:primary"}, {"wait": 8000}, {"imp": "state"}, {"imp": "snap improvements-10-handed-off"},
+ {"wait": 1500}
+]
