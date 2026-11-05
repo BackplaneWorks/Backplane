@@ -6,6 +6,7 @@
 //! line to an agent, and `secret::prompt()` / `keys::prompt(..)` in the prompt. See docs/gpui/HUB-API.md.
 pub mod accounts;
 pub mod diagnostics;
+pub mod fab;
 pub mod fallback;
 pub mod improvements;
 pub mod keys;
@@ -39,6 +40,7 @@ pub fn start(hub: Arc<Hub>, agents: Option<Arc<crate::agents::Agents>>) {
     hub.register_rpc(Arc::new(telemetry::TelemetryRpc));
     hub.register_rpc(Arc::new(diagnostics::DiagnosticsRpc));
     hub.register_rpc(Arc::new(zone::ZoneRpc));
+    hub.register_rpc(Arc::new(fab::FabRpc));
     hub.register_rpc(Arc::new(accounts::AccountsDefault));
     hub.register_rpc(Arc::new(misc::SettingsMisc));
     hub.register_rpc(Arc::new(improvements::ImprovementsRpc));

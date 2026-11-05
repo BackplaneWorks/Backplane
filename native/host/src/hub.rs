@@ -408,7 +408,7 @@ impl Hub {
         if crate::copy::rpc_refused(m) { return vec![json!({"t":"reply","id":id,"ok":false,"error":crate::copy::GIT_TOLD})] }
         if m == "project.add" { return self.project_add(&id, msg.get("p").unwrap_or(&Value::Null)).await }
         if m == "fab.look" {
-            let reply = self.fab_look(&id, msg.get("p").unwrap_or(&Value::Null));
+            let reply = crate::settings::fab::reply(&self.arc(), &id, "fab.look", msg.get("p").unwrap_or(&Value::Null)).await; // settings/fab.rs: the project card
             // the hub's own read, applied to this view's held state by the policy on its next V (Fab.reply)
             if !c.view_id.is_empty() { crate::session::record_read(c.client, &c.view_id, "fab.look", id.as_u64().unwrap_or(0), reply["ok"].as_bool().unwrap_or(true), reply["result"].clone()); }
             return vec![reply];
@@ -442,10 +442,6 @@ impl Hub {
         }
         if self.commit_many(&evs).await.is_err() { return vec![json!({"t":"reply","id":id,"ok":false,"error":"store write failed"})] }
         vec![json!({"t":"reply","id":id,"ok":true,"thread":tid})]
-    }
-    /// fab.look: the card for a thread with no goal, intent or fab files (what the Bend hub answers for one).
-    fn fab_look(&self, id: &Value, p: &Value) -> Value {
-        json!({"t":"reply","id":id,"ok":true,"result":{"thread":p.get("thread").cloned().unwrap_or(json!("")),"intent":"","goal":"","parts":[],"boards":0,"label":"","estimate_problems":"","error":"","estimates":true,"board_files":[],"board_default":"","order":""}})
     }
 
 
