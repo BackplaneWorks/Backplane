@@ -23,19 +23,20 @@ f = lambda x: '—' if x is None else f'{x:.0f}'
 def band(xs, t): xs = [x for x in xs if x is not None]; return f"{sum(x <= t for x in xs)}/{len(xs)}" if xs else '—'
 print(f'## Before (base) -> after ({os.path.basename(tip)}), metric {METRIC}\n')
 regress = []
-print('| cell | n | median p50 before -> after | slowest 80 %: mean p50 before -> after | geo-mean speed-up | within 16 ms | within 50 ms | within 100 ms | shift>0.01 | late>0 |')
-print('|---|---:|---|---|---:|---|---|---|---|---|')
+print('| cell | n | median p50 before -> after | slowest 80 %: mean p50 before -> after | geo-mean speed-up | within 16 ms | within 50 ms | within 100 ms | shift>0.01 (all) | shift>0.01 (CLS: no recent input) | late>0 |')
+print('|---|---:|---|---|---:|---|---|---|---|---|---|')
 for c in cells:
     ids = [i for i in B[c] if i in T[c] and B[c][i]['paint50'] is not None and T[c][i]['paint50'] is not None]
     b = [B[c][i]['paint50'] for i in ids]; t = [T[c][i]['paint50'] for i in ids]
     med = lambda xs: sorted(xs)[len(xs) // 2] if xs else None
     sh = lambda D: sum(1 for i in ids if (D[c][i].get('shift50') or 0) > 0.01)
     la = lambda D: sum(1 for i in ids if (D[c][i].get('late50') or 0) > 0)
+    cl = lambda D: ('—' if any('shiftCls50' not in D[c][i] for i in ids) else str(sum(1 for i in ids if (D[c][i].get('shiftCls50') or 0) > 0.01)))
     import math
     k = max(1, round(len(ids) * 0.8)); slow = sorted(range(len(ids)), key=lambda j: -b[j])[:k]
     sb = sum(b[j] for j in slow) / k; st = sum(t[j] for j in slow) / k
     geo = math.exp(sum(math.log(max(b[j], 0.1) / max(t[j], 0.1)) for j in range(len(ids))) / len(ids)) if ids else 0
-    print(f"| {c} | {len(ids)} | {f(med(b))} -> {f(med(t))} | {sb:.0f} -> {st:.0f} ({sb / max(st, 0.1):.1f}x) | {geo:.1f}x | {band(b,16)} -> {band(t,16)} | {band(b,50)} -> {band(t,50)} | {band(b,100)} -> {band(t,100)} | {sh(B)} -> {sh(T)} | {la(B)} -> {la(T)} |")
+    print(f"| {c} | {len(ids)} | {f(med(b))} -> {f(med(t))} | {sb:.0f} -> {st:.0f} ({sb / max(st, 0.1):.1f}x) | {geo:.1f}x | {band(b,16)} -> {band(t,16)} | {band(b,50)} -> {band(t,50)} | {band(b,100)} -> {band(t,100)} | {sh(B)} -> {sh(T)} | {cl(B)} -> {cl(T)} | {la(B)} -> {la(T)} |")
 for c in cells:
     print(f'\n### {c}\n\n| interaction | before p50 / p95 | after p50 / p95 | speed-up p50 | confirmed by hub before -> after | settle before -> after | shift before -> after |')
     print('|---|---:|---:|---:|---|---|---|')

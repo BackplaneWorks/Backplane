@@ -3,7 +3,7 @@
 # in how many warm reps) and what appeared late (visible text/elements added after the result's frame: element, text,
 # how late), each late item marked "both" (also late on base) or "new" (late only on the tip: we now show earlier).
 import json, os, sys, collections
-args = [a for a in sys.argv[1:] if a != '--summary']; SUMMARY = '--summary' in sys.argv
+args = [a for a in sys.argv[1:] if a not in ('--summary', '--cls')]; SUMMARY = '--summary' in sys.argv; CLS = '--cls' in sys.argv  # --cls: only shifts without recent input (Chromium's CLS rule)
 base, tip = args[0], args[1]; cells = args[2:]
 cell = cells[0]
 def reps(run, i):
@@ -12,8 +12,9 @@ def reps(run, i):
 def shifts(rs):
     c = collections.defaultdict(list); tot = 0
     for r in rs:
-        tot += r.get('shift') or 0
+        tot += r.get('shiftCls' if CLS else 'shift') or 0
         for sh in r.get('shifts', []):
+            if CLS and sh.get('recent', True): continue
             for s in sh['src']:
                 f, t = s['from'], s['to']
                 c[s['n']].append((round(sh['t']), t[0] - f[0], t[1] - f[1], t[3] - f[3]))
