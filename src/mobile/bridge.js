@@ -829,7 +829,9 @@ globalThis.Backplane = {
         // No drain/draw/owed work, and do not cancel or renew an existing timer.
         return JSON.stringify({ screen: null, cmds: [], sync: [], deadline: currentDeadline(), inert: true });
       }
-      if (type === "reply") envelope.bend = o;
+      // not enumerable: thin.js measures JSON.stringify(envelope) against limits.replyBytes, and the Bend tree
+      // twin made that 6-9x the reply (a hub with 22 threads in one project failed as "invalid view reply")
+      if (type === "reply") Object.defineProperty(envelope, "bend", { value: o, enumerable: false, writable: true, configurable: true });
       thin.receive(k, envelope, transportEpoch.get(k));
       if (k === foregroundHub() && (quiet === true || owe === true)) owed = true;
       return direct(voiced.cmds, quiet !== true || owe === true);
