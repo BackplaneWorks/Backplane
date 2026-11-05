@@ -16,6 +16,6 @@ for(const s of steps){
  if(s.click){const id=s.click;m('click',{id,found:true,changed:id!==dead,action:id!==dead?'did':null});continue}
  if(['@','>','%'].includes(s.popup)&&process.env.FAKE_NOPOPUP==='1'){m('input',{step:label,ok:false,error:'timeout',latency_ms:15000});continue}
  m('ack',{step:label,ack_ms:9.5});m('input',{step:label,ok:true,latency_ms:55});
- if(process.env.FAKE_SHIFT==='1'&&s.select===1)layout(true);
+ if(process.env.FAKE_SHIFT==='1'&&s.select===1){await new Promise(r=>setTimeout(r,650));layout(true)} // a jump 650 ms after the input: outside the 500 ms quiet window
 }
 m('script_done',{steps:steps.length});
