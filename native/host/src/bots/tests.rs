@@ -894,3 +894,19 @@ fn tool_norm(v: &Value) -> Value {
     assert_eq!(rpc(&hub, "mail.read", json!({"conv":"room:r1","before":"nope"})).await["error"], "room:r1: unknown room conversation or mail cursor");
     assert_eq!(rpc(&hub, "mail.read", json!({"conv":"room:zz"})).await["error"], "room:zz: unknown room conversation or mail cursor");
 }
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn a_mail_read_does_not_hold_the_world_lock_for_its_file_work() {
+    // a deep page of a big room walks the log and the journal; meanwhile other bot requests must go through. The test reads a 4000-post room's oldest page while
+    // bots.say requests are served, and asserts that every say finished before the read did (they would all wait behind a read that held the lock).
+    let (hub, _bots, _r) = start("readlock", "").await;
+    let (ada, bob) = (bot(&hub, "ada").await, bot(&hub, "bob").await);
+    assert_eq!(rpc(&hub, "bots.room", json!({"room":"r1","name":"lab","members":format!("{ada}\n{bob}")})).await["ok"], true);
+    let evs: Vec<Value> = (0..4000).map(|i| json!({"$":"RoomPosted","id":format!("q{i}"),"room":"r1","from":"you","text":format!("post {i}"),"hop":0,"at":10})).collect();
+    hub.commit_many(&evs).await.unwrap();
+    let h2 = hub.clone();
+    let read = tokio::spawn(async move { let t = std::time::Instant::now(); let r = rpc(&h2, "mail.read", json!({"conv":"room:r1","n":3,"before":"q3"})).await; (r, t.elapsed()) });
+    let mut said = 0;
+    while !read.is_finished() && said < 200 { assert_eq!(rpc(&hub, "bots.edit", json!({"bot":ada,"persona":"x"})).await["ok"], true); said += 1; tokio::task::yield_now().await }
+    let (r, took) = read.await.unwrap();
+    assert_eq!(r["ok"], true, "{r}"); assert_eq!(r["result"]["mails"][0]["text"], "post 2");
+    eprintln!("read took {took:?}, {said} edits went through meanwhile");
+}
