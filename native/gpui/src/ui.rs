@@ -251,7 +251,7 @@ impl Render for Backplane {
         for (l, i) in [("Terminal", "terminal"), ("Commands", "search"), ("", ""), ("Board", "circuit-board"), ("Schematic", "cpu"), ("3D", "box"), ("Split", "layout-panel-left"), ("Mech", "layers"), ("", ""), ("Files", "folder"), ("Diff", "diff"), ("Review", "circle-check"), ("Browser", "globe")].iter() {
             if l.is_empty() { rail.push(div().h(px(12.)).into_any_element()); continue; }
             // the viewer's kinds are the hub's view-kind values; Diff is its own action
-            let act: Option<(&'static str, &'static str)> = match *l { "Board" => Some(("view-kind", "board")), "Schematic" => Some(("view-kind", "schematic")), "3D" => Some(("view-kind", "3d")), "Split" => Some(("view-kind", "split")), "Mech" => Some(("view-kind", "mech")), "Files" => Some(("view-kind", "files")), "Review" => Some(("view-kind", "review")), "Diff" => Some(("diff", "")), _ => None };
+            let act: Option<(&'static str, &'static str)> = match *l { "Board" => Some(("view-kind", "board")), "Schematic" => Some(("view-kind", "schematic")), "3D" => Some(("view-kind", "3d")), "Split" => Some(("view-kind", "split")), "Mech" => Some(("view-kind", "mech")), "Files" => Some(("view-kind", "files")), "Review" => Some(("view-kind", "review")), "Browser" => Some(("view-kind", "browser")), "Diff" => Some(("diff", "")), _ => None };
             match act {
                 Some((a, v)) => {
                     let active = a == "view-kind" && v == active_kind;
@@ -266,7 +266,7 @@ impl Render for Backplane {
         ctl.push(CtlEntry { id: "ui:Settings".into(), label: "Settings".into(), ctl: Ctl::Node("flag".into(), "settings".into()) });
         if let Some(p) = self.data["projects"].as_array().and_then(|p| p.first()) { let id = string(p, "id"); let id = id.rsplit_once('|').map_or(id.as_str(), |(_, r)| r).to_string(); ctl.push(CtlEntry { id: "ui:New thread".into(), label: "New thread".into(), ctl: Ctl::Node("new-thread".into(), id) }); }
         ctl.push(CtlEntry { id: "send".into(), label: "Send".into(), ctl: Ctl::Send });
-        for l in ["Terminal", "Commands", "Browser"] { ctl.push(CtlEntry { id: format!("rail:{l}"), label: l.into(), ctl: Ctl::None }); }
+        for l in ["Terminal", "Commands"] { ctl.push(CtlEntry { id: format!("rail:{l}"), label: l.into(), ctl: Ctl::None }); }
         for l in ["Jump or run a command", "Improvements", "Search", "Add project", "Account", "Edit", "Context", "Dictate"] { ctl.push(CtlEntry { id: format!("ui:{l}"), label: l.into(), ctl: Ctl::None }); }
         ctl.push(CtlEntry { id: "ui:Fold sidebar".into(), label: "Fold sidebar".into(), ctl: Ctl::ToggleSidebar });
         ctl.push(CtlEntry { id: "ui:Attach".into(), label: "Attach".into(), ctl: Ctl::PickFiles });
@@ -328,7 +328,7 @@ impl Render for Backplane {
                     .children(crate::screens::bots::forms(cx, light, &self.screens.fields, &self.data))
                     .children(crate::screens::settings::view(cx, light, &self.screens.fields, &self.data["settings"], &self.screens.settings_focus))
                 )
-                .children(crate::screens::viewer::view(cx, &reg, light, thread, &self.screens.plot, &mut self.screens.plotview))
+                .children(crate::screens::viewer::view(cx, &reg, light, thread, &self.screens.plot, &mut self.screens.plotview, self.screens.solid.as_ref(), self.screens.browser.as_ref().map(|(_, b)| b)))
                 // right rail
                 .child(div().w(px(72.)).h_full().flex_shrink_0().relative().child(art::probe("rail")).border_l_1().border_color(c("line")).flex().flex_col().py_2().children(rail)))
             .into_any_element();

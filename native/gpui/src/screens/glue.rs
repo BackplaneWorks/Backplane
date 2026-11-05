@@ -77,6 +77,7 @@ impl Backplane {
             if hub_on == p || self.screens.rail_at.map_or(true, |t| t.elapsed() > std::time::Duration::from_secs(2)) { self.screens.rail_pending = None; self.screens.rail_at = None; }
         }
         super::settings::sync(self, cx);
+        self.browser_page(cx);
         // a form or a room page opened: its first field takes the keys; closed: back to the composer
         let open = super::bots::focus_target(&self.data);
         if open != self.screens.bots_open { self.screens.bots_open = open.clone(); if open.is_empty() { self.want_focus = true; } else { self.screens.focus_field = Some(open); } }
@@ -84,8 +85,27 @@ impl Backplane {
         let open = self.data["settings"].is_object();
         if open != self.screens.settings_was_open { self.screens.settings_was_open = open; if open { self.screens.focus_settings = true; } else { self.want_focus = true; } }
     }
-    /// A plot frame arrived on the socket: apply it to what this client holds.
-    pub(crate) fn plot_received(&mut self, bytes: &[u8]) {
-        if let Err(e) = self.screens.plot.receive(bytes) { eprintln!("GPUI_LOG {{\"plot\":\"{e}\"}}"); }
+    /// A plot-lane frame arrived on the socket: a solid (3D) frame goes to the 3D page, anything else to the plot store.
+    pub(crate) fn plot_received(&mut self, bytes: Vec<u8>, cx: &mut Context<Self>) {
+        if self.screens.solid.is_none() { self.screens.solid = Some(cx.new(crate::viewers::solid::SolidPage::new)); }
+        let solid = self.screens.solid.clone().unwrap();
+        let Some(bytes) = solid.update(cx, |p, _| p.accept(bytes)) else { cx.notify(); return };
+        if let Err(e) = self.screens.plot.receive(&bytes) { eprintln!("GPUI_LOG {{\"plot\":\"{e}\"}}"); }
     }
+    /// The Browser page exists while the Browser kind is open (one per thread, polling only while shown); the hub's page owner is the thread for now.
+    pub(crate) fn browser_page(&mut self, cx: &mut Context<Self>) {
+        let open = self.data["thread"]["viewer"]["open"].as_str() == Some("browser");
+        let owner = self.selected.clone();
+        if let Some((o, page)) = &self.screens.browser { if *o != owner || !open { let page = page.clone(); page.update(cx, |p, _| p.set_visible(false)); if *o != owner { self.screens.browser = None; } } }
+        if !open || owner.is_empty() { return; }
+        if self.screens.browser.is_none() {
+            let Some(t) = self.screens.attacher.target.clone() else { return };
+            let (base, tok) = (format!("http://{}", t.addr), t.token.clone());
+            let o = owner.clone();
+            let page = cx.new(move |cx| crate::viewers::browser::BrowserPage::new(cx, base, o, tok));
+            self.screens.browser = Some((owner, page));
+        }
+        if let Some((_, page)) = &self.screens.browser { page.update(cx, |p, _| p.set_visible(true)); }
+    }
+
 }

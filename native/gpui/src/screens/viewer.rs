@@ -130,7 +130,7 @@ fn review_page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, review: &Val
 }
 
 /// The panel (None while nothing is open). 520 px wide, between the thread and the rail.
-pub fn view(cx: &mut Context<Backplane>, reg: &Reg, light: bool, thread: &Value, plot: &super::plot::Store, pv: &mut super::plotview::PlotView) -> Option<AnyElement> {
+pub fn view(cx: &mut Context<Backplane>, reg: &Reg, light: bool, thread: &Value, plot: &super::plot::Store, pv: &mut super::plotview::PlotView, solid: Option<&Entity<crate::viewers::solid::SolidPage>>, browser: Option<&Entity<crate::viewers::browser::BrowserPage>>) -> Option<AnyElement> {
     if !is_open(thread) { return None; }
     let c = |n: &str| theme::color(light, n);
     let viewer = &thread["viewer"];
@@ -144,7 +144,9 @@ pub fn view(cx: &mut Context<Backplane>, reg: &Reg, light: bool, thread: &Value,
         else if open == "files" && viewer["files"].is_object() { files_page(cx, light, &viewer["files"]) }
         else if open == "review" && viewer["review"].is_object() { review_page(cx, reg, light, &viewer["review"]) }
         else if matches!(open, "board" | "schematic") { plot_page(cx, light, open, viewer, plot, pv) }
-        else { div().p_3().text_color(c("dim")).child(match open { "3d" | "split" => "3D and split views are drawn from the hub's model", "mech" => "Mechanical parts", _ => "Opening…" }).into_any_element() };
+        else if matches!(open, "3d" | "mech") { match solid { Some(s) => div().size_full().child(s.clone()).into_any_element(), None => div().p_3().text_color(c("dim")).child("Loading the model…").into_any_element() } }
+        else if open == "browser" { match browser { Some(b) => div().size_full().child(b.clone()).into_any_element(), None => div().p_3().text_color(c("dim")).child("The browser page needs a hub on plain http://.").into_any_element() } }
+        else { div().p_3().text_color(c("dim")).child(match open { "split" => "Split is not drawn here yet", _ => "Opening…" }).into_any_element() };
     Some(div().w(px(520.)).h_full().flex_shrink_0().border_l_1().border_color(c("line")).flex().flex_col()
         .child(bar).child(div().id("viewer-body").flex_1().min_h_0().overflow_y_scroll().child(body)).into_any_element())
 }
