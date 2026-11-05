@@ -85,9 +85,10 @@ async fn junk_and_unknown_requests_get_the_replies_bend_gives() {
 async fn a_requests_changes_come_before_its_reply() {
     let (hub, port) = test_hub("wire-order", FIXTURE).await;
     crate::commands::start(hub.clone()); // project.add is the commands lane's handler
+    let proj = std::env::temp_dir().join(format!("wire-order-proj-{}", std::process::id())); std::fs::create_dir_all(&proj).unwrap(); // the handler refuses a folder that does not exist
     let mut c = join(port, None).await; tokio::time::sleep(Duration::from_millis(300)).await;
     let before = c.frames.lock().unwrap().len();
-    c.send(json!({"id":1,"m":"project.add","p":{"path":"/tmp/wire-order-proj"}})).await; tokio::time::sleep(Duration::from_millis(400)).await;
+    c.send(json!({"id":1,"m":"project.add","p":{"path":proj.to_string_lossy()}})).await; tokio::time::sleep(Duration::from_millis(400)).await;
     let frames: Vec<Value> = c.frames.lock().unwrap()[before..].to_vec();
     let at = |t: &str| frames.iter().position(|f| f["t"] == t).unwrap_or(usize::MAX);
     assert!(at("changes") < at("reply"), "changes {} reply {}", at("changes"), at("reply"));
