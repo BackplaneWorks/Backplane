@@ -83,6 +83,11 @@ No memo or protocol/client changes; scripts/js-json-show.js holds the helper.
 Server-only Json.bytes.esc/str count code-point UTF-8 widths without slicing
 a fresh string tail per character. Exact JSON escapes, raw lexemes and Nat
 overflow remain the pure counter's; no whole-tree or cap predicate changes.
+Server-only identity memos (js-memo.js) for pure core defs one render asks
+twice with the same values (MEMO2: Subs.aggs, the top bar's and the
+subagents panel's): the answer for the very same first argument (weakly)
+and an equal String is kept. Pure and immutable, so nothing is stale.
+
 Server-only Tree.children(s, id) (core/subthreads.bend) works out every
 thread's display parent once per state (a WeakMap: a state never changes)
 with the very display_parent and Thread.id its walk calls, in Tree.all's
@@ -295,6 +300,11 @@ def byte_loop(kind):
                       ("chr" if kind == "esc" else "raw") + r"\$)" + re.escape(after))
 
 BYTE_ESC, BYTE_STR = byte_loop("esc"), byte_loop("str")
+# pure core defs of an object and a String kept by identity (js-memo.js);
+# each must be a def of exactly these two parameters, found once
+MEMO2 = (("Subs.aggs", r"\$\$\$\$047core\$047subs\$058Subs\$aggs\$", "_st_0", "_th_0"),)
+def memo2_rx(entry, a, b):
+    return re.compile(r"function (" + entry + r")\(" + a + "," + b + r"\)\{")
 # Tree.children(s, id) = sort(Tree.children.go(Tree.all(s), s, id)), and that
 # walk exactly an in-order filter on display_parent through Tree.roots.add
 TREE_KIDS = re.compile(r"function (" + I + r"\$058Tree\$children\$)\(_s_0,_id_0\)\{return (" + I + r")\((" + I + r"\$058Tree\$children\$go\$)\((" + I + r"\$058Tree\$all\$)\(_s_0\),_s_0,_id_0\)\)\}")
@@ -467,6 +477,10 @@ def tree_kids(s, m):
         if len(re.findall(r"function " + re.escape(f) + r"\(", s)) != 1:
             return None
     return w.group(2), w.group(3)
+for name, entry, a, b in MEMO2:
+    found[name] = sum(len(memo2_rx(entry, a, b).findall(s)) for s in srcs.values()) if server else 0
+    if server and found[name] != 1:
+        sys.exit(f"js-native: {name} found {found[name]} times as a def of ({a}, {b}), not once")
 found["Tree.children"] = sum(len(TREE_KIDS.findall(s)) for s in srcs.values()) if server else 0
 if server and found["Tree.children"] != 1:
     sys.exit(f"js-native: Tree.children found {found['Tree.children']} times, not once")
@@ -573,6 +587,14 @@ for f, s in srcs.items():
         s = BYTE_ESC.sub(lambda m: 'function %s($0,$1){return __bpJsonBytesEsc($0,$1,nat_chk)}' % m.group(1), s)
         s = BYTE_STR.sub(lambda m: 'function %s($0,$1){return __bpJsonBytesStr($0,$1,nat_chk)}' % m.group(1), s)
         s = BYTES.sub(lambda m: 'function %s(_j_0){return __bpJsonBytes(_j_0,%s,nat_chk)}' % (m.group(1), m.group(2)), s)
+        memos = 0
+        for name, entry, a, b in MEMO2:
+            rx = memo2_rx(entry, a, b)
+            memos += len(rx.findall(s))
+            s = rx.sub(lambda m: 'function %s(%s,%s){return __bpMemo2(%s,%s,%s,%s$raw)}function %s$raw(%s,%s){' %
+                       (m.group(1), a, b, json.dumps(name), a, b, m.group(1), m.group(1), a, b), s)
+        if memos:
+            s = Path(__file__).with_name("js-memo.js").read_text(encoding="utf-8") + "\n" + s
         kids = [(m, tree_kids(s, m)) for m in TREE_KIDS.finditer(s)]
         for m, (parent, tid) in kids:
             s = s.replace(m.group(0), 'function %s(_s_0,_id_0){return __bpTreeChildren(_s_0,_id_0,%s,%s,%s,%s)}' % (m.group(1), m.group(4), parent, tid, m.group(2)))
@@ -605,6 +627,7 @@ for name, call in (("Map.bit", "{return __bpMapBit("), ("Map.diff", "{return __b
                    ("Json.bytes.esc", "){return __bpJsonBytesEsc("), ("Json.bytes.str", "){return __bpJsonBytesStr("),
                    ("Json.bytes", "){return __bpJsonBytes(_j_0,"),
                    ("Tree.children", "){return __bpTreeChildren(_s_0,_id_0,"),
+                   ("Subs.aggs", '){return __bpMemo2("Subs.aggs",'),
                    ("Sec.fine", "){return __bpSecFine("), ("Refs.last.go", "){return __bpRefsLast(")):
     n = outs.count(call)
     if n != found[name]:
