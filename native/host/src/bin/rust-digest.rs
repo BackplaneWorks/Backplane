@@ -5,6 +5,9 @@ mod state;
 #[path = "../shelf.rs"]
 #[allow(dead_code)]
 mod shelf;
+#[path = "../signal.rs"]
+#[allow(dead_code)]
+mod signal;
 use std::io::{BufRead, BufReader};
 fn main() {
     let mut st = state::State::new();

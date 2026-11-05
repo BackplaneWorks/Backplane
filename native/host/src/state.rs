@@ -18,6 +18,14 @@ impl Turn {
     fn parse(s: &str) -> Option<Turn> { Some(match s { "idle" => Turn::Idle, "running" => Turn::Running, "completed" => Turn::Completed, "interrupted" => Turn::Interrupted, "failed" => Turn::Failed, _ => return None }) }
 }
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TaskSt { Queued, Running, Done, Failed, Cancelled }
+impl TaskSt {
+    pub fn terminal(self) -> bool { matches!(self, TaskSt::Done | TaskSt::Failed | TaskSt::Cancelled) }
+    fn parse(s: &str) -> Option<TaskSt> { Some(match s { "queued" => TaskSt::Queued, "running" => TaskSt::Running, "done" => TaskSt::Done, "failed" => TaskSt::Failed, "cancelled" => TaskSt::Cancelled, _ => return None }) }
+    /// TaskState.next: terminal states stay; a running task never goes back to queued
+    fn next(cur: TaskSt, want: TaskSt) -> TaskSt { if cur.terminal() { cur } else if cur == TaskSt::Running && want == TaskSt::Queued { TaskSt::Running } else { want } }
+}
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Override { None, ForcedSettled, ForcedActive }
 
 #[derive(Clone, Debug)]
@@ -45,6 +53,12 @@ pub struct State {
     pub entries: HashMap<String, Vec<String>>,
     pub settings: HashMap<String, String>,
     pub seq: u64,
+    /// AskOpened/AskClosed: ask id -> (thread, open)
+    pub asks: HashMap<String, (String, bool)>,
+    /// TaskDelegated/TaskStateSet: task id -> (parent thread, child thread, terminal)
+    pub tasks: HashMap<String, (String, String, bool, TaskSt)>,
+    /// TurnQueued and its edits: a thread's waiting messages (msg id, text), next first
+    pub queue: HashMap<String, Vec<(String, String)>>,
     /// bot id -> its thread (BotSet/BotDeleted): a task delegated by a bot's thread seeds no thread.parent
     bot_threads: HashMap<String, String>,
     /// ThreadSnoozed: the time a thread's snooze ends (Nav.until); 0 / absent: never snoozed
@@ -157,6 +171,8 @@ impl State {
             "BotSet" => { let (id, th) = (s(e, "id")?, s(e, "thread")?); self.bot_threads.insert(id.into(), th.into()); }
             "BotDeleted" => { let id = s(e, "id")?; self.bot_threads.remove(id); }
             "TaskDelegated" => {
+                let (task, parent, child) = (s(e, "task")?, s(e, "parent")?, s(e, "child")?); n(e, "depth")?;
+                self.tasks.insert(task.into(), (parent.into(), child.into(), false, TaskSt::Queued));
                 // State.delegated -> State.task_parent: seed thread.parent.<child> once, unless a bot's thread delegated
                 let (parent, child) = (s(e, "parent")?, s(e, "child")?);
                 if !self.bot_threads.values().any(|t| t == parent) {
@@ -164,6 +180,20 @@ impl State {
                     if !self.settings.contains_key(&k) { self.set(&k, parent); }
                 }
             }
+            "TaskStateSet" => { let (task, want) = (s(e, "task")?, TaskSt::parse(s(e, "state")?)?); s(e, "summary")?;
+                let t = self.tasks.entry(task.into()).or_insert((String::new(), String::new(), true, TaskSt::Cancelled)); t.3 = TaskSt::next(t.3, want); t.2 = t.3.terminal(); }
+            "AskOpened" => { let (id, th) = (s(e, "id")?, s(e, "thread")?); self.asks.insert(id.into(), (th.into(), true)); }
+            "AskClosed" => { let id = s(e, "id")?; if let Some(a) = self.asks.get_mut(id) { a.1 = false; } else { self.asks.insert(id.into(), (String::new(), false)); } }
+            "TurnQueued" => { let (th, msg, text) = (s(e, "thread")?, s(e, "msg")?, s(e, "text")?); self.queue.entry(th.into()).or_default().push((msg.into(), text.into())); }
+            "QueueTaken" => { let th = s(e, "thread")?; self.queue.insert(th.into(), vec![]); }
+            "QueueEdited" => { let (th, msg, text) = (s(e, "thread")?, s(e, "msg")?, s(e, "text")?); for q in self.queue.entry(th.into()).or_default() { if q.0 == msg { q.1 = text.into(); } } }
+            "QueueRemoved" | "QueueTakenOne" => { let (th, msg) = (s(e, "thread")?, s(e, "msg")?); self.queue.entry(th.into()).or_default().retain(|q| q.0 != msg); }
+            "QueueMoved" => {
+                let (th, msg, to) = (s(e, "thread")?, s(e, "msg")?, n(e, "to")? as usize);
+                let q = self.queue.entry(th.into()).or_default();
+                if let Some(item) = q.iter().find(|x| x.0 == msg).cloned() { q.retain(|x| x.0 != msg); let at = to.min(q.len()); q.insert(at, item); }
+            }
+            "WorkSet" => { let (th, kind, rows) = (s(e, "thread")?, s(e, "kind")?, s(e, "rows")?); self.set(&format!("{kind}.{th}"), rows); }
             "ThreadLaunched" => {
                 // Launch.fold: launch.<id> = report flag + launcher; launched.<by> lists the ids, oldest first, once each
                 let (id, by) = (s(e, "id")?, s(e, "by")?); let report = e.get("report")?.as_bool()?;
