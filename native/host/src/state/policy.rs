@@ -1,14 +1,11 @@
-//! The policy core: one lean copy of the fold and the decisions made on it, owned by a single task. The hub's Observer only sends it each
-//! committed batch (a channel send, never a lock on the writer's path); the Ticker asks it for the tick's events through the same queue; what
-//! it derives it commits in order through one sink. No mutex: batches, ticks and commits are serialized by the task.
-//! Pure of the hub (the sink is a closure), so it is tested here with a recording sink.
+//! The policy core: one lean copy of the fold and the decisions made on it. It advances inside the hub's `Transform::before_commit` (on the
+//! writer, after the secret mask, in commit order), so it is always at the log's head and what a batch derives (quiet marks, message
+//! metadata) joins that batch. The Ticker and `Auto.read` take the same short lock. `before_commit` does no IO and no await: it folds and decides.
+//! Pure of the hub, so it is tested here.
 use super::autosettle;
 use crate::state::State;
 use serde_json::Value;
-use std::collections::VecDeque;
-use std::future::Future;
-use std::pin::Pin;
-use tokio::sync::{mpsc, oneshot};
+use std::sync::Mutex;
 
 /// Settings the lean copy keeps: what the policies read (autosettle, liveness, wakes, locks, launches, the star ledger, told/alert/summary
 /// records) and nothing that grows with the log for its own sake (`stopped.<msg>`, `failed.<msg>`, token totals, uber op lines, session and
@@ -19,27 +16,16 @@ const KEEP: &[&str] = &["settle.", "autosettle.", "launch.", "launched.", "threa
 // is ported with that prune, not before.
 pub fn lean_keeps(k: &str) -> bool { KEEP.iter().any(|p| k.starts_with(p)) }
 
-pub struct Core {
-    pub st: State,
-    /// log lines folded so far (1-based count): a batch already inside it is skipped
-    applied: u64,
-    /// events this core derived and folded already, waiting to come back through the log (skipped once, in order)
-    expect: VecDeque<Value>,
-}
+pub struct Core { pub st: State }
 impl Core {
-    pub fn new() -> Core { let mut st = State::new(); st.lean = true; Core { st, applied: 0, expect: VecDeque::new() } }
-    pub fn fold_line(&mut self, l: &str) { self.st.apply_line(l); self.applied += 1; }
-    /// fold a batch the hub committed and return the events the policies derive from it (already folded here)
-    pub fn batch(&mut self, first_seq: u64, events: &[Value]) -> Vec<Value> {
-        if events.is_empty() { return vec![] }
-        let end = first_seq + events.len() as u64 - 1;
-        if end <= self.applied { return vec![] }
-        let skip = self.applied.saturating_sub(first_seq.saturating_sub(1)) as usize;
-        let events = &events[skip.min(events.len())..];
+    pub fn new() -> Core { let mut st = State::new(); st.lean = true; Core { st } }
+    pub fn fold_line(&mut self, l: &str) { self.st.apply_line(l); }
+    /// fold a batch and return the events the policies derive from it (already folded here): quiet marks from the state before the batch,
+    /// message metadata from the state before each change (Auto.messages.metadata)
+    pub fn derive(&mut self, events: &[Value]) -> Vec<Value> {
         let quiet = autosettle::quiet(&self.st, events);
         let mut derived = vec![];
         for e in events {
-            if self.expect.front() == Some(e) { self.expect.pop_front(); continue }
             let meta = autosettle::metadata(&self.st, e);
             self.st.apply(e);
             for m in &meta { self.st.apply(m); }
@@ -47,30 +33,57 @@ impl Core {
         }
         for q in &quiet { self.st.apply(q); }
         derived.extend(quiet);
-        self.applied = end;
-        for d in &derived { self.expect.push_back(d.clone()); }
         derived
     }
-    /// a commit of derived events failed: they will not come back, so stop waiting for them
-    pub fn failed(&mut self, derived: &[Value]) { for d in derived { if let Some(i) = self.expect.iter().position(|x| x == d) { self.expect.remove(i); } } }
     pub fn tick(&self, now_s: u64) -> Vec<Value> { autosettle::changes(&self.st, now_s) }
 }
 
-pub enum Msg { Batch(u64, Vec<Value>), Tick(u64, oneshot::Sender<Vec<Value>>), Read(String, u64, oneshot::Sender<Vec<Value>>), #[cfg(test)] Waiting(oneshot::Sender<usize>) }
-pub type Sink = Box<dyn FnMut(Vec<Value>) -> Pin<Box<dyn Future<Output = bool> + Send>> + Send>;
-
-/// The task: handle messages in arrival order; commit what a batch derives before the next message is looked at.
-pub async fn run(mut rx: mpsc::UnboundedReceiver<Msg>, mut core: Core, mut sink: Sink) {
-    while let Some(m) = rx.recv().await {
-        match m {
-            Msg::Batch(seq, evs) => {
-                let derived = core.batch(seq, &evs);
-                if !derived.is_empty() && !sink(derived.clone()).await { core.failed(&derived); }
-            }
-            Msg::Tick(now, tx) => { let _ = tx.send(core.tick(now)); }
-            Msg::Read(th, now, tx) => { let _ = tx.send(autosettle::read(&core.st, &th, now)); }
-            #[cfg(test)] Msg::Waiting(tx) => { let _ = tx.send(core.expect.len()); }
+struct Inner {
+    core: Core,
+    /// while the log is being folded (at start, and again after a failed commit): the batches `before_commit` saw, with their first line
+    booting: Option<Vec<(u64, Vec<Value>)>>,
+}
+/// The policies behind one short lock. `before_commit` is the writer's call; `tick` and `read` are the ticker's and the viewers'.
+pub struct Policy { inner: Mutex<Inner> }
+impl Policy {
+    pub fn new() -> Policy { Policy { inner: Mutex::new(Inner { core: Core::new(), booting: Some(vec![]) }) } }
+    /// The batch about to be written: the batch plus what the policies derive from it. While the log is being folded the batch is
+    /// remembered (and returned as it came); `finish_boot` derives for it afterwards.
+    pub fn before_commit(&self, first_seq: u64, mut events: Vec<Value>) -> Vec<Value> {
+        let mut g = self.inner.lock().unwrap();
+        if let Some(buf) = g.booting.as_mut() { buf.push((first_seq, events.clone())); return events }
+        let extra = g.core.derive(&events);
+        events.extend(extra);
+        events
+    }
+    /// A batch returned by `before_commit` could not be written. The copy now holds marks the log lacks: fold the log again. True when the
+    /// caller must start that fold (`begin_resync` was needed).
+    pub fn commit_failed(&self, first_seq: u64) -> bool {
+        let mut g = self.inner.lock().unwrap();
+        if let Some(buf) = g.booting.as_mut() { buf.retain(|(s, _)| *s != first_seq); return false }
+        g.booting = Some(vec![]);
+        true
+    }
+    /// The log through line `len` was folded into `core` (read AFTER the transform was registered): install it, replay the batches seen
+    /// since past `len`, and return the events they derive (to be committed by the caller).
+    pub fn finish_boot(&self, core: Core, len: u64) -> Vec<Value> {
+        let mut g = self.inner.lock().unwrap();
+        g.core = core;
+        let held = g.booting.take().unwrap_or_default();
+        let mut derived = vec![];
+        for (seq, evs) in held {
+            if evs.is_empty() || seq + evs.len() as u64 - 1 <= len { continue } // already inside the folded log
+            derived.extend(g.core.derive(&evs));
         }
+        derived
+    }
+    pub fn tick(&self, now_s: u64) -> Vec<Value> {
+        let g = self.inner.lock().unwrap();
+        if g.booting.is_some() { vec![] } else { g.core.tick(now_s) }
+    }
+    pub fn read(&self, thread: &str, now_s: u64) -> Vec<Value> {
+        let g = self.inner.lock().unwrap();
+        if g.booting.is_some() { vec![] } else { autosettle::read(&g.core.st, thread, now_s) }
     }
 }
 
@@ -78,60 +91,53 @@ pub async fn run(mut rx: mpsc::UnboundedReceiver<Msg>, mut core: Core, mut sink:
 mod tests {
     use super::*;
     use serde_json::json;
-    use std::sync::{Arc, Mutex};
     fn msg(th: &str, id: &str, role: &str, at: u64) -> Value { json!({"$":"MessagePosted","thread":th,"msg":id,"role":role,"text":"hello","at":at}) }
+    const P: &str = r#"{"$":"ProjectCreated","id":"p","title":"p","root":"/r","at":1}"#;
+    const T: &str = r#"{"$":"ThreadCreated","id":"t1","project":"p","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1}"#;
+    fn booted() -> Policy { let p = Policy::new(); let mut c = Core::new(); c.fold_line(P); c.fold_line(T); assert!(p.finish_boot(c, 2).is_empty()); p }
+    fn keys(evs: &[Value]) -> Vec<String> { evs.iter().filter_map(|e| e["key"].as_str().map(String::from)).collect() }
 
     #[test] fn lean_keeps_what_policies_read_and_drops_what_grows() {
         for k in ["autosettle.quiet.t1", "liveness.t1", "wake.w1", "lock.merge", "launch.t2", "alert.t1", "settle.done"] { assert!(lean_keeps(k), "{k}"); }
         for k in ["stopped.m1", "failed.m1", "told.k1", "tok.t.t1", "uber.op.u.m.1", "usage.t1", "todos.t1", "session.t1.claude"] { assert!(!lean_keeps(k), "{k}"); }
     }
-    #[test] fn an_ordered_commit_of_two_back_to_back_batches() {
-        // the first batch's commit is slow, the second's fast: the log must still get the first's events first, and every echo is skipped in turn
-        let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(4).enable_all().build().unwrap();
-        rt.block_on(async {
-            let (tx, rx) = mpsc::unbounded_channel();
-            let log: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(vec![]));
-            let (l2, tx2) = (log.clone(), tx.clone());
-            let sink: Sink = Box::new(move |evs: Vec<Value>| {
-                let (l, tx) = (l2.clone(), tx2.clone());
-                Box::pin(async move {
-                    let slow = evs.iter().any(|e| e["value"].as_str() == Some("a1"));
-                    if slow { tokio::time::sleep(std::time::Duration::from_millis(60)).await; }
-                    let first = { let mut g = l.lock().unwrap(); g.extend(evs.iter().cloned()); g.len() as u64 - evs.len() as u64 + 1 };
-                    let _ = tx.send(Msg::Batch(first, evs)); // the observer's echo of our own commit
-                    true
-                })
-            });
-            let mut core = Core::new();
-            for l in [r#"{"$":"ProjectCreated","id":"p","title":"p","root":"/r","at":1}"#, r#"{"$":"ThreadCreated","id":"t1","project":"p","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1}"#] {
-                core.fold_line(l); log.lock().unwrap().push(serde_json::from_str(l).unwrap());
-            }
-            // the hub commits both messages at once, as two back-to-back batches
-            let (a1, a2) = (msg("t1", "a1", "assistant", 10), msg("t1", "a2", "assistant", 11));
-            log.lock().unwrap().push(a1.clone()); log.lock().unwrap().push(a2.clone());
-            let h = tokio::spawn(run(rx, core, sink));
-            tx.send(Msg::Batch(3, vec![a1])).unwrap();
-            tx.send(Msg::Batch(4, vec![a2])).unwrap();
-            let (ttx, trx) = oneshot::channel(); tx.send(Msg::Tick(20, ttx)).unwrap(); let _ = trx.await.unwrap();
-            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-            let (wtx, wrx) = oneshot::channel(); tx.send(Msg::Waiting(wtx)).unwrap();
-            assert_eq!(wrx.await.unwrap(), 0, "every echo of a derived event was matched in order and skipped");
-            h.abort();
-            let outs: Vec<String> = log.lock().unwrap().iter().filter(|e| e["key"].as_str().map_or(false, |k| k.starts_with("autosettle.output."))).map(|e| e["value"].as_str().unwrap().to_string()).collect();
-            assert_eq!(outs, vec!["a1".to_string(), "a2".to_string()], "output marks reach the log in the order of their batches");
-        });
+    #[test] fn a_batch_gets_its_derived_events_in_the_same_batch() {
+        let p = booted();
+        let out = p.before_commit(3, vec![msg("t1", "a1", "assistant", 10)]);
+        assert_eq!(out.len(), 3, "the message, then the policies' events");
+        assert_eq!(out[0]["msg"], "a1");
+        assert_eq!(keys(&out), vec!["autosettle.output.t1".to_string(), "autosettle.quiet.t1".to_string()]);
     }
-    #[test] fn a_batch_already_in_the_folded_log_is_skipped() {
-        let mut c = Core::new();
-        c.fold_line(r#"{"$":"ProjectCreated","id":"p","title":"p","root":"/r","at":1}"#);
-        c.fold_line(r#"{"$":"ThreadCreated","id":"t1","project":"p","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1}"#);
-        assert!(c.batch(1, &[json!({"$":"ProjectCreated","id":"p","title":"p","root":"/r","at":1})]).is_empty());
-        assert_eq!(c.batch(2, &[json!({"$":"ThreadCreated","id":"t1","project":"p","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1}), msg("t1", "a1", "assistant", 5)]).len(), 2, "only the message past the folded log counts: output + quiet");
+    #[test] fn two_back_to_back_batches_derive_in_order_from_the_state_the_first_left() {
+        let p = booted();
+        let a = p.before_commit(3, vec![msg("t1", "a1", "assistant", 10)]);
+        let b = p.before_commit(6, vec![msg("t1", "a2", "assistant", 11)]);
+        assert_eq!(a.iter().find(|e| e["key"].as_str() == Some("autosettle.output.t1")).unwrap()["value"], "a1");
+        assert_eq!(b.iter().find(|e| e["key"].as_str() == Some("autosettle.output.t1")).unwrap()["value"], "a2");
+        // the second batch's quiet mark is judged against the first's (10 -> 11), so it is written; a repeat at 11 is not
+        assert!(keys(&b).contains(&"autosettle.quiet.t1".to_string()));
+        let c = p.before_commit(9, vec![msg("t1", "a3", "assistant", 11)]);
+        assert!(!keys(&c).contains(&"autosettle.quiet.t1".to_string()));
     }
-    #[test] fn a_failed_commit_stops_the_wait_for_its_echo() {
-        let mut c = Core::new();
-        let d = c.batch(1, &[msg("t1", "a1", "assistant", 5)]); assert!(!d.is_empty());
-        c.failed(&d);
-        assert!(c.expect.is_empty());
+    #[test] fn batches_seen_while_booting_are_replayed_past_the_folded_log() {
+        let p = Policy::new();
+        // lines 1-2 are in the log the boot read (len 2); batches at 3 and 4 were transformed meanwhile, one of them already inside len
+        assert_eq!(p.before_commit(2, vec![msg("t1", "inside", "assistant", 5)]).len(), 1, "returned as it came while booting");
+        assert_eq!(p.before_commit(3, vec![msg("t1", "a1", "assistant", 10)]).len(), 1);
+        assert!(p.tick(100).is_empty() && p.read("t1", 100).is_empty(), "nothing is decided while booting");
+        let mut c = Core::new(); c.fold_line(P); c.fold_line(T);
+        let derived = p.finish_boot(c, 2);
+        assert_eq!(keys(&derived), vec!["autosettle.output.t1".to_string(), "autosettle.quiet.t1".to_string()], "only the batch past line 2 derives");
+        let again = p.before_commit(4, vec![msg("t1", "a2", "assistant", 11)]);
+        assert_eq!(again.len(), 3, "after boot the batch carries its own events");
+    }
+    #[test] fn a_failed_commit_asks_for_a_resync_and_buffers_until_it_is_done() {
+        let p = booted();
+        let _ = p.before_commit(3, vec![msg("t1", "a1", "assistant", 10)]);
+        assert!(p.commit_failed(3), "the copy holds marks the log lacks: fold again");
+        assert_eq!(p.before_commit(3, vec![msg("t1", "a2", "assistant", 12)]).len(), 1, "buffered while resyncing");
+        assert!(!p.commit_failed(3), "a failed batch seen while resyncing just leaves the buffer");
+        let mut c = Core::new(); c.fold_line(P); c.fold_line(T);
+        assert!(p.finish_boot(c, 2).is_empty(), "the failed batch is gone from the buffer");
     }
 }
