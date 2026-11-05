@@ -20,7 +20,7 @@ pub struct Hub {
     live: std::sync::Mutex<std::collections::HashMap<String, String>>,
     pub window_bin: std::sync::OnceLock<PathBuf>,
     me: std::sync::OnceLock<std::sync::Weak<Hub>>, next_client: AtomicU64,
-    outboxes: std::sync::Mutex<std::collections::HashMap<u64, Slot>>, outbox_max: std::sync::atomic::AtomicUsize, signal_seq: AtomicU64, extra_info: std::sync::Mutex<std::collections::BTreeMap<String, String>>,
+    outboxes: std::sync::Mutex<std::collections::HashMap<u64, Slot>>, outbox_max: std::sync::atomic::AtomicUsize, signal_seq: AtomicU64, id_alloc: AtomicU64, extra_info: std::sync::Mutex<std::collections::BTreeMap<String, String>>,
 }
 
 /// One item of a connection's outbox: a value the hub encodes (CBOR with the dictionaries), or bytes that go out as
@@ -84,7 +84,7 @@ impl Hub {
         let (ftx, _) = broadcast::channel(1024);
         let model = Model::build(&store)?;
         let hub = Arc::new(Hub { cfg, auth, epoch, presenter, store: store.clone(), commits: ctx, model: Mutex::new(model), gen: AtomicU64::new(1), changed: tx, frames: ftx, native_key: { let mut b = [0u8; 16]; if let Ok(mut f) = std::fs::File::open("/dev/urandom") { let _ = std::io::Read::read_exact(&mut f, &mut b); } hex::encode(b) },
-            rpc: Default::default(), http: Default::default(), views: Default::default(), observers: Default::default(), transforms: Default::default(), far: Default::default(), pairing: Default::default(), auth_route: Default::default(), outbox_max: std::sync::atomic::AtomicUsize::new(OUTBOX_MAX), signal_seq: AtomicU64::new(store.len() as u64), extra_info: Default::default(), live: Default::default(), window_bin: Default::default(), me: Default::default(), next_client: AtomicU64::new(1), outboxes: Default::default() });
+            rpc: Default::default(), http: Default::default(), views: Default::default(), observers: Default::default(), transforms: Default::default(), far: Default::default(), pairing: Default::default(), auth_route: Default::default(), outbox_max: std::sync::atomic::AtomicUsize::new(OUTBOX_MAX), signal_seq: AtomicU64::new(store.len() as u64), id_alloc: AtomicU64::new(0), extra_info: Default::default(), live: Default::default(), window_bin: Default::default(), me: Default::default(), next_client: AtomicU64::new(1), outboxes: Default::default() });
         let _ = hub.me.set(Arc::downgrade(&hub));
         hub.bootstrap()?;
         hub.signal_seq.store(hub.store.len() as u64, Relaxed); // start-up housekeeping counts: a restart is a new signal
@@ -153,6 +153,14 @@ impl Hub {
 
     /// The signal revision (core/signal.bend SignalRevision): the log position of the last batch that held something besides
     /// activity lines and assistant/system messages. The native sidebar keeps a saved page only while it is unchanged.
+    /// A fresh number for ids built from the log position (`p<at>-<n>`, `t<at>-<n+1>`, `g<at>-<n+3>`): the log length, or past a number
+    /// already handed out, so concurrent requests never share one (the log length alone is read before the commit lands). Reserves `width`.
+    pub fn alloc_n(&self, width: u64) -> u64 {
+        loop {
+            let cur = self.id_alloc.load(Relaxed); let base = cur.max(self.store.len() as u64);
+            if self.id_alloc.compare_exchange(cur, base + width, Relaxed, Relaxed).is_ok() { return base }
+        }
+    }
     pub fn signal_seq(&self) -> u64 { self.signal_seq.load(Relaxed) }
 
     /// The whole log, as the frames a client's join receives, into the presenter.
@@ -404,7 +412,7 @@ impl Hub {
     async fn project_add(&self, id: &Value, p: &Value) -> Vec<Value> {
         let path = p.get("path").and_then(Value::as_str).unwrap_or("");
         if path.is_empty() { return vec![json!({"t":"reply","id":id,"ok":false,"error":"path required"})] }
-        let (at, n) = (now_ms() / 1000, self.store.len());
+        let (at, n) = (now_ms() / 1000, self.alloc_n(4) as usize);
         let title = path.trim_end_matches('/').rsplit('/').next().unwrap_or(path);
         let (pid, tid) = (format!("p{at}-{n}"), format!("t{at}-{}", n + 1));
         let evs = [json!({"$":"ProjectCreated","id":pid,"title":title,"root":path,"at":at}),
@@ -569,6 +577,17 @@ mod tests {
         let reads = crate::session::take_reads(c.client, &c.view_id, &c.target);
         assert_eq!(reads.len(), 1, "{reads:?}");
         assert_eq!(reads[0]["kind"], "fab.look"); assert_eq!(reads[0]["result"]["thread"], "t1");
+    }
+
+    // soak finding: ids built from store.len() before the commit collided under concurrent project.add: id numbers are handed out past any given
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn concurrent_id_allocations_never_overlap() {
+        let h = Hub::start(cfg(&home("pids")), Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        let mut tasks = vec![];
+        for _ in 0..8 { let h = h.clone(); tasks.push(tokio::spawn(async move { let mut v = vec![]; for _ in 0..200 { v.push(h.alloc_n(4)); if v.len() % 50 == 0 { h.commit_many(&[json!({"$":"SettingSet","key":"k","value":"v","at":1})]).await.unwrap(); } } v })); }
+        let mut all: Vec<u64> = vec![]; for t in tasks { all.extend(t.await.unwrap()); }
+        all.sort(); let n = all.len();
+        for w in all.windows(2) { assert!(w[1] >= w[0] + 4, "ranges overlap: {} then {}", w[0], w[1]); }
+        assert_eq!(n, 1600);
     }
 
     #[tokio::test] async fn open_assembles_identity_in_js_order() {
