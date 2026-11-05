@@ -52,7 +52,7 @@ impl Fold {
     pub fn nav(&self, id: &str) -> Nav { self.navs.get(id).cloned().unwrap_or_default() }
 
     pub fn apply(&mut self, line: &str) {
-        let Some(t) = line.strip_prefix("{\"$\":\"").and_then(|r| r.split('"').next()) else { return };
+        let Some(t) = crate::session::event_type(line) else { return };
         const READ: &[&str] = &["ProjectCreated", "ProjectRemoved", "ThreadCreated", "ThreadRenamed", "ThreadArchived", "ThreadDeleted", "ThreadForked", "ThreadSnoozed", "ThreadOrdered", "ProjectOrdered",
             "TurnQueued", "QueueTaken", "QueueEdited", "QueueRemoved", "QueueMoved", "QueueTakenOne", "AskOpened", "AskClosed", "SettingSet", "ProviderSet", "TurnChanged", "WorktreeSet", "ModesSet", "WorkSet", "WorktreeSkipped", "ThreadParentSet", "SessionSet", "MessagePosted", "ActivityLogged", "Reminded"];
         if !READ.contains(&t) { return }

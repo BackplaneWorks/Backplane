@@ -53,7 +53,7 @@ impl World {
     }
 
     pub fn apply(&mut self, line: &str) {
-        let Some(t) = line.strip_prefix("{\"$\":\"").and_then(|r| r.split('"').next()) else { return };
+        let Some(t) = crate::session::event_type(line) else { return };
         const READ: [&str; 32] = ["TurnQueued", "QueueTaken", "QueueRemoved", "QueueTakenOne", "ThreadParentSet", "ProjectRemoved", "ThreadLaunched", "TaskDelegated", "TaskStateSet", "TaskDelivered", "WorkSet", "AskOpened", "AskClosed", "ThreadRenamed", "ProjectCreated", "ThreadCreated", "WorktreeSet", "ProviderSet", "ModesSet", "SessionSet", "TurnChanged", "MessagePosted", "ActivityLogged", "UsageSet", "SettingSet", "TurnUsage", "ThreadArchived", "ThreadDeleted", "ThreadForked", "QueueTaken", "TurnQueued", "ThreadWoke"];
         if !READ.contains(&t) { return }
         let Ok(v) = serde_json::from_str::<Value>(line) else { return };
@@ -162,6 +162,13 @@ impl World {
 mod tests {
     use super::*;
     fn th(turn: &str) -> T { T { turn: turn.into(), provider: "claude".into(), ..Default::default() } }
+    // the GPUI "send is dropped" report: a hand-written log (json.dumps puts a space after the colon) must fold like a compact one, as Model does
+    #[test] fn a_spaced_log_line_folds_like_a_compact_one() {
+        let mut w = World::default();
+        for l in [r#"{"$": "ProjectCreated", "id": "p1", "title": "ecc", "root": "/r", "at": 1}"#, r#"{"$": "ThreadCreated", "id": "t1", "project": "p1", "title": "T", "env": "local", "branch": "", "worktree": "", "provider": "claude", "model": "", "at": 1}"#] { w.apply(l) }
+        assert!(w.threads.contains_key("t1"), "turn.start for t1 would be answered unknown thread otherwise");
+        assert_eq!(w.threads["t1"].provider, "claude");
+    }
     #[test] fn a_provider_switch_keeps_each_providers_session_a_b_a() { // State.switch.n
         let mut w = World::default();
         for l in [r#"{"$":"ThreadCreated","id":"t","project":"p","title":"T","provider":"claude","model":"","at":1}"#, r#"{"$":"SessionSet","id":"t","session":"S-claude","at":2}"#,
