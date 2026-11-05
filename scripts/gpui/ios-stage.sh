@@ -3,8 +3,8 @@
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 U=$1; TAG=$2; PORT=$3; export TOKFILE=$4; ID=$5
 O=~/bp-gpui-ios/results; mkdir -p $O
-export HUBURL=http://desktop.tail9e0cf2.ts.net:$PORT/ SIMCTL_CHILD_BACKPLANE_PERFORMANCE=1
-KEY=desktop.tail9e0cf2.ts.net:$PORT
+export HUBURL=http://${HUBHOST:-backplane.tail9e0cf2.ts.net}:$PORT/ SIMCTL_CHILD_BACKPLANE_PERFORMANCE=1
+KEY=${HUBHOST:-backplane.tail9e0cf2.ts.net}:$PORT
 xcrun simctl terminate $U dev.backplane.gpui >/dev/null 2>&1
 xcrun simctl uninstall $U dev.backplane.gpui >/dev/null 2>&1
 sleep 1
