@@ -37,6 +37,13 @@ try{
   summary.mainRegion=main?main[0]:null;
   const runIf=async(name,f)=>{if(harnessActions[name]){summary.actions[name]={ok:null,status:'harness',evidence:{failedChecks:harnessActions[name]}};return}await run(name,f)};
   const run=async(name,f)=>{try{summary.actions[name]=await f()}catch(e){summary.actions[name]={ok:false,evidence:{error:String(e.message).slice(0,200)}}}};
+  // client-side pointer sanity (the plain-client preflight cannot prove GPUI receives XTEST pointer events: GPUI logs "Found no xinput mouse pointers" under Xvfb):
+  // click another thread's row, taken from its own controls event, and require the main area to change
+  const ctl0=[...metrics].reverse().find(m=>m.event==='controls'&&m.controls?.some(c=>c.rect));const threads=(ctl0?.controls||[]).filter(c=>/^thread:/.test(c.id)&&c.rect);
+  if(threads.length>=2&&main){const t=threads[threads.length-1].rect,r=main[1];const b4=inp.s('before-pointer-sanity');inp.clickAt(win,[t.x+t.w/2,t.y+t.h/2]);await sleep(2500);const af=inp.s('after-pointer-sanity');
+    const d=diffPixels(b4,af,`${Math.round(r.w)}x${Math.round(r.h)}+${Math.round(r.x)}+${Math.round(r.y)}`);summary.clientPointer={clickedControl:threads[threads.length-1].id,mainRegionChangedPixels:d,delivered:d>5000};
+    if(!summary.clientPointer.delivered){harnessActions['drag-select']=['client-pointer'];harnessActions['paperclip']=['client-pointer'];summary.notes=[...(summary.notes||[]),'a click on a sidebar thread row changed nothing in the main area: GPUI is not receiving XTEST pointer events on this display (it logs "Found no xinput mouse pointers"); pointer-dependent actions are harness, not app']}}
+  else summary.clientPointer={delivered:null,note:'no thread controls with rects to click'};
   inp.cb.clear();await sleep(300);
   if(main){const r=main[1];await run('drag-select',()=>inp.dragSelect(win,[r.x+40,r.y+60],[r.x+Math.min(r.w-40,500),r.y+110]));await run('ctrl-c',()=>{return inp.copy()})}
   else summary.blocked['drag-select/ctrl-c']='no main region in the layout event';
