@@ -110,4 +110,28 @@ export const SCENARIOS={
     for(const th of THREADS)for(const route of ['/view/get','/files/get','/files/zip'])await httpProbe(hub,`${route}?thread=${encodeURIComponent(th)}&path=note.txt`,rec,'raw',{auth:true});
     await c.end(800);
   },
+  // 8. the thread, project and queue requests (commands lane): every flag, order, tree and queue event, and their refusals
+  async commands({hub,rec}){
+    const c=await connect({hub,rec,name:'raw',profile:'raw'});await c.settle(800);
+    const T1='t1700000001-2',T2='t1700000002-3',P='p1700000000-1';
+    const r=await c.rpc('thread.create',{project:P,title:'Made by parity'});const A=r?.thread;
+    const r2=await c.rpc('thread.create',{project:P,env:'local',parent:T1});const B=r2?.thread;
+    await c.rpc('thread.create',{project:P,parent:'ghost'});
+    await c.rpc('thread.create',{project:P,creationKey:'0123456789abcdef0123456789abcdef'});
+    await c.rpc('thread.create',{project:P,creationKey:'0123456789abcdef0123456789abcdef'});
+    await c.rpc('thread.create',{project:P,creationKey:'short'});
+    for(const m of ['thread.pin','thread.unpin','thread.settle','thread.unsettle'])await c.rpc(m,{thread:T1});
+    await c.rpc('thread.rename',{thread:T1,title:'  Renamed by parity  '});await c.rpc('thread.rename',{thread:T1,title:'   '});
+    for(const p of [{for:'1h'},{for:'off'},{until:4102444800}])await c.rpc('thread.snooze',{thread:T1,...p});
+    await c.rpc('thread.reorder',{section:'active',thread:T2,ids:[T2,T1,A]});await c.rpc('thread.reorder',{section:'pinned',thread:A,ids:[A,T2]});await c.rpc('thread.reorder',{section:'settled',thread:A,ids:[]});
+    await c.rpc('project.reorder',{project:P,ids:[P]});
+    await c.rpc('thread.detach',{thread:'ghost'});await c.rpc('thread.reparent',{thread:'ghost',parent:T1});await c.rpc('thread.reparent',{thread:T2,parent:T1});await c.rpc('thread.reparent',{thread:T1,parent:T2});await c.rpc('thread.detach',{thread:T2});
+    for(const [m,p] of [['queue.edit',{msg:'q1',text:'edited'}],['queue.remove',{msg:'q1'}],['queue.move',{msg:'q1',to:1}]])await c.rpc(m,{thread:T2,...p});
+    await c.rpc('thread.modes',{thread:T1,runtime:'auto',interaction:'plan',model:'opus'});await c.rpc('thread.effort',{thread:T1,effort:'high'});await c.rpc('thread.provider',{thread:T1,provider:'claude'});await c.rpc('thread.provider',{thread:T1,provider:'codex',model:'gpt-x',effort:'high'});await c.rpc('thread.provider',{thread:T1,provider:'claude'});await c.rpc('queue.steer',{thread:T2,msg:'nope'});await c.rpc('queue.resume',{thread:T2});await c.rpc('fs.list',{path:hub.projectDir});await c.rpc('fs.mkdir',{path:hub.projectDir+'/made'});await c.rpc('fs.mkdir',{path:hub.projectDir+'/made'});await c.rpc('project.create',{path:'  '});await c.rpc('project.new',{path:hub.projectDir+'/fresh'});const F=(await c.rpc('thread.fork',{thread:T2}))?.thread;await c.rpc('thread.back',{thread:F||'x'});await c.rpc('thread.back',{thread:T1});await c.rpc('queue.steer',{thread:F||'x',msg:'handoff:'+T2});await c.rpc('thread.fork',{thread:'ghost'});await c.rpc('thread.snooze',{thread:T1,for:'tomorrow'});await c.rpc('thread.archive',{thread:A});await c.rpc('thread.unarchive',{thread:A});await c.rpc('thread.delete',{thread:B});
+    await c.rpc('project.rename',{project:P,title:' Parity project '});await c.rpc('project.rename',{project:P,title:' '});
+    await c.rpc('project.move',{project:P,path:'relative'});
+    const pa=await c.rpc('project.add',{path:hub.projectDir+'-2'});
+    await c.rpc('project.remove',{project:'p-unknown'});
+    await c.settle(1200);await c.end(800);
+  },
 };
