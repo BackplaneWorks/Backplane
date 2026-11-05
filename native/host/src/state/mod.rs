@@ -136,7 +136,7 @@ impl State {
     fn set(&mut self, k: &str, v: &str) {
         if self.lean && !fam::policy::lean_keeps(k) { return }
         let kept; let v = if self.lean { kept = fam::policy::lean_value(k, v); kept.as_str() } else { v };
-        if v.is_empty() && blank_gone(k) { self.settings.remove(k); } else { self.settings.insert(k.to_string(), v.to_string()); }
+        if v.is_empty() && (blank_gone(k) || self.lean && fam::policy::gate_presence(k)) { self.settings.remove(k); } else { self.settings.insert(k.to_string(), v.to_string()); }
     }
     fn get(&self, k: &str, d: &str) -> String { self.settings.get(k).cloned().unwrap_or_else(|| d.to_string()) }
 
