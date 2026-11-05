@@ -46,7 +46,7 @@ impl Bots {
         let m = self.hub.model().await;
         Names { bots: w.bots.values().filter(|b| !b.deleted).map(|b| (b.id.clone(), b.name.clone())).collect(), threads: m.threads.iter().map(|(k, t)| (k.clone(), t.title.clone())).collect() }
     }
-    async fn project_of(&self, w: &World, addr: &str) -> String {
+    pub(crate) async fn project_of(&self, w: &World, addr: &str) -> String {
         let th = if let Some(id) = addr.strip_prefix("thread:") { id.to_string() } else if let Some(id) = addr.strip_prefix("bot:") { w.bot(id).map(|b| b.thread.clone()).unwrap_or_default() } else { return String::new() };
         self.hub.model().await.threads.get(&th).map(|t| t.project.clone()).unwrap_or_default()
     }
