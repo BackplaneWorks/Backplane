@@ -3,7 +3,7 @@
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer HUBURL=http://backplane.tail9e0cf2.ts.net:3811/ TOKFILE=~/bp-gpui-ios/seed7-token
 U=$1; T=$2
 xcrun simctl boot $U 2>/dev/null
-for n in 0 20 40 60 100; do
+for n in ${SIZES:-0 20 40 60 100}; do
   xcrun simctl uninstall $U dev.backplane.gpui
   if [ $n -gt 0 ]; then
     python3 -c "print(('lorem ipsum dolor sit amet ' * 5000)[:${n}000], end='')" > /tmp/ld$n.txt

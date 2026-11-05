@@ -16,7 +16,7 @@ RSYNC_RSH=$M rsync -a scripts/gpui/ios-stuck-mac.sh scripts/gpui/ios-stuck2-mac.
 scripts/gpui/ios-build.sh > $B/results/ios/build-stuck.log 2>&1; grep -E "error:|build seconds" $B/results/ios/build-stuck.log | head -2
 T0=$($SB "grep -o '\"ThreadCreated\",\"id\":\"[^\"]*\"' $V/home/events.jsonl | sed -n 1p | cut -d'\"' -f6")
 K=backplane.tail9e0cf2.ts.net:3811
-$M hs-mac-mini "sh ~/bp-gpui-ios/ios-${MODE:-stuck}-mac.sh $U $T $T0 $K" | tee $B/results/ios/stuck-${MODE:-stuck}-js.txt
+$M hs-mac-mini "SIZES='${SIZES:-0 20 40 60 100}' sh ~/bp-gpui-ios/ios-${MODE:-stuck}-mac.sh $U $T $T0 $K" | tee $B/results/ios/stuck-${MODE:-stuck}-js.txt
 mkdir -p $B/shots/ios/stuck; for f in stuck-A1 stuck-A2 stuck-A3 stuck-B1 stuck-B2 stuck-B3 stuck-C1 stuck-C2 stuck-C3 sw60-1 sw60-2 sw70-1 sw70-2 rl60-a rl60-b rl60-c rl70-a rl70-b rl70-c; do RSYNC_RSH=$M rsync -a hs-mac-mini:bp-gpui-ios/shots/$f.png $B/shots/ios/stuck/ 2>/dev/null; done
 $SB "python3 - <<'PY'
 import json,os
