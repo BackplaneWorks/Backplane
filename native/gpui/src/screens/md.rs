@@ -18,7 +18,8 @@ pub enum Block {
     Heading(u8, Vec<Span>),
     List { ordered: bool, start: u64, items: Vec<Vec<Span>> },
     Quote(Vec<Span>),
-    Code(String),
+    /// The code and its highlight tokens, computed once when the block is parsed.
+    Code(String, Vec<(Range<usize>, Tok)>),
     Table { head: Vec<Vec<Span>>, rows: Vec<Vec<Vec<Span>>> },
     Rule,
 }
@@ -63,7 +64,7 @@ fn blocks_into(n: &Value, out: &mut Vec<Block>, depth: usize) {
             out.push(Block::List { ordered: tag == "ol", start, items: kids(n).iter().map(|li| spans(kids(li))).collect() });
         }
         "blockquote" => out.push(Block::Quote(spans(kids(n)))),
-        "pre" => { let mut t = String::new(); text_of(n, &mut t, 0); out.push(Block::Code(t.trim_end_matches('\n').to_string())); }
+        "pre" => { let mut t = String::new(); text_of(n, &mut t, 0); let t = t.trim_end_matches('\n').to_string(); let tokens = highlight(&t); out.push(Block::Code(t, tokens)); }
         "hr" => out.push(Block::Rule),
         "table" => {
             let rows: Vec<Vec<Vec<Span>>> = kids(n).iter().map(|tr| kids(tr).iter().map(|c| spans(kids(c))).collect()).collect();
@@ -77,7 +78,14 @@ fn blocks_into(n: &Value, out: &mut Vec<Block>, depth: usize) {
         _ => { if kids(n).iter().any(|k| k["tag"].is_string() && k["tag"] != "a" && k["tag"] != "span" && k["tag"] != "code" && k["tag"] != "strong" && k["tag"] != "em") { for k in kids(n) { blocks_into(k, out, depth + 1); } } else { let s = spans(std::slice::from_ref(n)); if !s.is_empty() { out.push(Block::Para(s)); } } }
     }
 }
-pub fn parse(nodes: &[Value]) -> Vec<Block> { let mut o = Vec::new(); for n in nodes.iter().take(400) { blocks_into(n, &mut o, 0); } o }
+pub const MAX_BLOCKS: usize = 400;
+/// At most MAX_BLOCKS blocks; the rest are said, not hidden.
+pub fn parse(nodes: &[Value]) -> Vec<Block> {
+    let mut o = Vec::new();
+    for n in nodes.iter().take(MAX_BLOCKS) { blocks_into(n, &mut o, 0); }
+    if nodes.len() > MAX_BLOCKS { o.push(Block::Para(vec![Span { text: format!("… {} more blocks", nodes.len() - MAX_BLOCKS), style: Style { italic: true, ..Default::default() } }])); }
+    o
+}
 
 pub fn plain(spans: &[Span]) -> String { spans.iter().map(|s| s.text.as_str()).collect() }
 /// The text of a block as copied: one line per item or row, tabs between cells.
@@ -85,7 +93,7 @@ pub fn block_text(b: &Block) -> String {
     match b {
         Block::Para(s) | Block::Heading(_, s) | Block::Quote(s) => plain(s),
         Block::List { ordered, start, items } => items.iter().enumerate().map(|(i, it)| if *ordered { format!("{}. {}", start + i as u64, plain(it)) } else { format!("- {}", plain(it)) }).collect::<Vec<_>>().join("\n"),
-        Block::Code(t) => t.clone(),
+        Block::Code(t, _) => t.clone(),
         Block::Table { head, rows } => {
             let line = |r: &Vec<Vec<Span>>| r.iter().map(|c| plain(c)).collect::<Vec<_>>().join("\t");
             let mut lines: Vec<String> = Vec::new();
@@ -152,13 +160,17 @@ mod tests {
     }
     #[test] fn a_fenced_block_is_its_code_without_the_copy_button_text() {
         let b = parse(&j(r#"[{"tag":"div","kids":[{"tag":"button","kids":[{"text":"Copy"}]},{"tag":"pre","kids":[{"tag":"code","kids":[{"text":"fn main() {}\n"}]}]}]}]"#));
-        assert_eq!(b, vec![Block::Code("fn main() {}".into())]);
+        assert!(matches!(&b[..], [Block::Code(t, toks)] if t == "fn main() {}" && !toks.is_empty()));
     }
     #[test] fn tables_have_a_head_only_when_th_cells_exist() {
         let t = |cell: &str| format!(r#"[{{"tag":"table","kids":[{{"tag":"tr","kids":[{{"tag":"{cell}","kids":[{{"text":"A"}}]}},{{"tag":"{cell}","kids":[{{"text":"B"}}]}}]}},{{"tag":"tr","kids":[{{"tag":"td","kids":[{{"text":"1"}}]}},{{"tag":"td","kids":[{{"text":"2"}}]}}]}}]}}]"#);
         let Block::Table { head, rows } = &parse(&j(&t("th")))[0] else { panic!() }; assert_eq!((head.len(), rows.len()), (2, 1));
         let Block::Table { head, rows } = &parse(&j(&t("td")))[0] else { panic!() }; assert_eq!((head.len(), rows.len()), (0, 2));
         assert_eq!(block_text(&parse(&j(&t("th")))[0]), "A\tB\n1\t2");
+    }
+    #[test] fn too_many_blocks_say_how_many_were_left_out() {
+        let nodes: Vec<Value> = (0..MAX_BLOCKS + 7).map(|i| serde_json::from_str(&format!(r#"{{"tag":"p","kids":[{{"text":"{i}"}}]}}"#)).unwrap()).collect();
+        let b = parse(&nodes); assert_eq!(b.len(), MAX_BLOCKS + 1); assert_eq!(block_text(b.last().unwrap()), "… 7 more blocks");
     }
     #[test] fn headings_and_rtl_text_survive() {
         let b = parse(&j(r#"[{"tag":"h2","kids":[{"text":"שלום 世界"}]}]"#));
