@@ -1,8 +1,10 @@
 //! The hub side of accounts (hub.bend `Hub.accounts.*`, server.bend `AccountsJob`, core/accounts.bend `Accounts.public/changes/created`): the `accounts` request, the
 //! live snapshot every client is told (info `accounts.live`), the inventory kept in the log (setting `accounts.inventory`, so a restart still knows the profiles' ids and
 //! epochs), a default that follows its profile away, and the threads whose account's identity changed or disconnected: their running turn is stopped, with the reason.
-//! The JS hub offers `accounts*` only to a client that declared the accounts capability (the web renderer's views do; phones and the GPUI client never do), so a
-//! request without `accountProfiles` is refused with the named-account message, exactly as there.
+//! The JS hub offers `accounts*` only to a client the hub knows to be an account-capable web view (thin mode `view-web` and a current `accountProfiles` version, kept per
+//! client). Here nothing grants that yet: `AccountsRpc::grant` has no production caller, so every client (GPUI's renderer is `mobile`, so it too) gets the named-account
+//! message and no client is sent the live profiles (they are not broadcast as info). Wiring it means granting from the connection's mode, revoking on close, and sending
+//! the snapshot to granted clients only.
 use super::{accounts, accounts_io::Accounts};
 use crate::{agents::Agents, api::{Caller, Fut, RpcHandler}, hub::{now_ms, Hub}};
 use serde_json::{json, Value};
@@ -119,10 +121,15 @@ pub fn start(hub: &Arc<Hub>, agents: Option<Arc<Agents>>) -> Arc<Accounts> {
 mod tests {
     use super::*;
     fn snap(profiles: Value, error: &str) -> Value { json!({"version":1,"revision":3,"profiles":profiles,"error":error,"attempts":[{"id":"a","url":"https://claude.ai/x","userCode":"C"}]}) }
-    #[test] fn only_a_granted_client_may_manage_accounts() {
-        let rpc = AccountsRpc::new(Arc::new(Accounts::open(&std::env::temp_dir().join(format!("bp-acc-{}", std::process::id())), Arc::new(|p: &str| Ok(std::path::PathBuf::from(p))))));
+    #[tokio::test(flavor = "multi_thread")] async fn only_a_granted_client_may_manage_accounts() {
+        let home = std::env::temp_dir().join(format!("bp-acc-hub-{}", std::process::id())); let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap();
+        let hub = Hub::start(crate::hub::Cfg { home: home.clone(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(crate::presenter::Canned { reply: json!({}) })).await.unwrap();
+        let rpc = AccountsRpc::new(Arc::new(Accounts::open(&home, Arc::new(|p: &str| Ok(std::path::PathBuf::from(p))))));
         let (a, b) = (Caller { gen: "g".into(), client: 1 }, Caller { gen: "g".into(), client: 2 });
-        assert!(!rpc.allowed(&a)); rpc.grant(&a); assert!(rpc.allowed(&a) && !rpc.allowed(&b), "per connection"); rpc.revoke(&a); assert!(!rpc.allowed(&a));
+        let ask = |who: &Caller| { let (rpc, hub, who) = (&rpc, hub.clone(), who.clone()); async move { rpc.call(&hub, &who, &json!(1), "accounts", &json!({"op":"list","accountProfiles":true})).await.remove(0) } };
+        assert_eq!(ask(&a).await["error"], accounts::GATE, "a request that claims the capability is not enough");
+        rpc.grant(&a); assert_eq!(ask(&a).await["ok"], true); assert_eq!(ask(&b).await["error"], accounts::GATE, "per connection");
+        rpc.revoke(&a); assert_eq!(ask(&a).await["error"], accounts::GATE); let _ = std::fs::remove_dir_all(&home);
     }
     #[test] fn clients_are_told_the_profiles_but_never_an_attempts_link_or_code() { let t = public(&snap(json!([{"id":"w"}]), "")); assert!(!t.contains("userCode") && !t.contains("https://") && t.contains("\"revision\":3") && t.contains("\"profiles\":[{\"id\":\"w\"}]")); }
     #[test] fn the_inventory_is_kept_when_it_moves_and_a_default_follows_its_profile_away() {
