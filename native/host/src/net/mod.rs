@@ -12,6 +12,7 @@
 pub mod botnet;
 pub mod devices;
 pub mod far;
+pub mod feed;
 pub mod farsync;
 pub mod farstore;
 pub mod listener;
@@ -37,7 +38,12 @@ pub fn farhttp_start(hub: std::sync::Arc<crate::hub::Hub>, peering: std::sync::A
         let home = hub.cfg.home.clone();
         let Ok(Ok(store)) = tokio::task::spawn_blocking(move || farstore::FarStore::open(&home)).await else { eprintln!("backplane: could not read the far mirrors"); return };
         hub.set_far(store.clone());
-        for l in store.links() { let ev = store.replay_events(&l); if !ev.is_empty() { hub.fold_mirror(&ev).await } }
+        for l in store.links() {
+            // (read off the async workers, and sent a chunk at a time)
+            let s = store.clone(); let link = l.clone();
+            let ev = tokio::task::spawn_blocking(move || s.replay_events(&link)).await.unwrap_or_default();
+            farsync::fold_in_chunks(&hub, &ev).await;
+        }
         let sync = farsync::FarSync::new(store, peering.clone());
         hub.register_http(std::sync::Arc::new(farsync::FarRoutes(sync.clone())));
         loop {

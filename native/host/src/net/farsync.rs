@@ -28,7 +28,10 @@ impl FarSync {
     async fn take(&self, hub: &Arc<Hub>, link: &str, epoch: &str, since: u64, to: u64, items: Vec<Item>) -> anyhow::Result<bool> {
         let (store, l, e) = (self.store.clone(), link.to_string(), epoch.to_string());
         let t = tokio::task::spawn_blocking(move || store.take(&l, &e, since, to, &items)).await??;
-        if !t.events.is_empty() { hub.fold_mirror(&t.events).await }
+        // GAP (PARITY): another history starts the mirror over, and Bend forgets the link's old rows first (Fr.forget). The
+        // presenter has no such seam yet, so the old rows stay until a restart: said, never silent.
+        if t.reset { eprintln!("far: the mirror of {link} started over (another history); the presenter keeps its old rows until restart") }
+        if !t.events.is_empty() { fold_in_chunks(hub, &t.events).await }
         Ok(t.got.gap)
     }
 
@@ -77,6 +80,9 @@ impl FarSync {
         false
     }
 }
+
+/// Events to the presenter a chunk at a time, so one frame is never a whole history.
+pub async fn fold_in_chunks(hub: &Arc<Hub>, events: &[Value]) { for c in events.chunks(500) { hub.fold_mirror(c).await } }
 
 pub struct FarRoutes(pub Arc<FarSync>);
 impl HttpHandler for FarRoutes {
