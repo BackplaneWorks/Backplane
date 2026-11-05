@@ -2975,6 +2975,18 @@ def GitJob.run.git(+tx: TextScope, +job: String, +inbox: Chan(Msg), +client: U32
     t : U32 <- H.Clock.epoch()
     GitJob.repo(Bool.or(ok, GitJob.init(job, a)), tx, job, inbox, client, id, thread, cwd, a, b, home, U32.to_nat(t))
 
+def Env.or(r: Result<&1, &1, U32 & String, String>, d: String) -> String:
+  match r:
+    case Done{+v}:
+      Bool.pick(String, String.is_empty(v), d, v)
+    case Fail{_}:
+      d
+
+def Env.get(name: String, d: String) -> IO(String):
+  do IO<String>:
+    r : Result<&1, &1, U32 & String, String> <- IO.get_env(name)
+    return Env.or(r, d)
+
 # Sidebar jobs
 # ------------
 # A thread's files for the file picker (git's view of the tree in a
@@ -3123,18 +3135,6 @@ def Snooze.tomorrow(+inbox: Chan(Msg), +client: U32, +id: String, +thread: Strin
     r : P.Ran <- P.Proc.run("date", ["+%z"], "/")
     GitJob.report(inbox, JobSnoozed{thread, M.Snooze.tomorrow(Maybe.default(&2, Nat, Nat.read(now), 0n), Snooze.tz(r))})
     GitJob.reply(inbox, client, id, True{}, J.Json.obj([J.KV{"thread", J.Str{thread}}]))
-
-def Env.or(r: Result<&1, &1, U32 & String, String>, d: String) -> String:
-  match r:
-    case Done{+v}:
-      Bool.pick(String, String.is_empty(v), d, v)
-    case Fail{_}:
-      d
-
-def Env.get(name: String, d: String) -> IO(String):
-  do IO<String>:
-    r : Result<&1, &1, U32 & String, String> <- IO.get_env(name)
-    return Env.or(r, d)
 
 # a tick at start (threads idle past the window settle at once), then
 # every minute
