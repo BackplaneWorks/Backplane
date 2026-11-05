@@ -14,6 +14,7 @@ export async function startIme(display,engine='xkb:us::eng'){
   try{execFileSync('ibus',['engine',engine],{env,timeout:8000,stdio:'pipe'});engineNow=execFileSync('ibus',['engine'],{env,encoding:'utf8',timeout:8000}).trim()}catch(e){status='engine not selectable (daemon answered: '+up+'): '+String(e.stderr||e.message).slice(0,160)+' | daemon log: '+log.slice(-300)}
   return {env,locale:loc,locales:locs.split('\n').filter(Boolean).slice(0,12),engine:engineNow,status,
     setEngine(e){execFileSync('ibus',['engine',e],{env,timeout:8000,stdio:'pipe'});return execFileSync('ibus',['engine'],{env,encoding:'utf8',timeout:8000}).trim()},
+    logTail:(n=1500)=>log.slice(-n),
     stop:()=>{try{p.kill('SIGTERM')}catch{}}};
 }
 // keys that compose '한' on the Hangul 2-set layout, then space to commit
