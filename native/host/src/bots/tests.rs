@@ -879,3 +879,18 @@ fn tool_norm(v: &Value) -> Value {
     // ids asked for in one second are distinct whatever the log's length
     let ids: std::collections::HashSet<String> = (0..50).map(|_| bots.hub_id("x", 5)).collect(); assert_eq!(ids.len(), 50);
 }
+#[tokio::test] async fn mail_read_of_a_room_conversation_pages_its_posts() {
+    // MailJob.room.*: with the mailroom off a room post is a header, its text read from the RoomPosted line; newest first, a cursor, `more`, unknown cursor/conversation
+    let (hub, _bots, _r) = start("roomread", "").await;
+    let (ada, bob) = (bot(&hub, "ada").await, bot(&hub, "bob").await);
+    assert_eq!(rpc(&hub, "bots.room", json!({"room":"r1","name":"lab","members":format!("{ada}\n{bob}")})).await["ok"], true);
+    for i in 0..5 { assert_eq!(rpc(&hub, "bots.post", json!({"room":"r1","text":format!("post {i}"),"msg":format!("p{i}")})).await["ok"], true) }
+    let r = rpc(&hub, "mail.read", json!({"conv":"room:r1","n":2})).await["result"].clone();
+    let t = |r: &Value| r["mails"].as_array().unwrap().iter().map(|m| m["text"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+    assert_eq!(t(&r), ["post 4", "post 3"]); assert_eq!(r["more"], true); assert_eq!(r["conv"]["subject"], "lab");
+    assert_eq!(r["mails"][0]["from"], "person"); assert_eq!(r["mails"][0]["kind"], "room");
+    let r2 = rpc(&hub, "mail.read", json!({"conv":"room:r1","n":2,"before":"p3"})).await["result"].clone(); assert_eq!((t(&r2), r2["more"].clone()), (vec!["post 2".to_string(), "post 1".to_string()], json!(true)));
+    let r3 = rpc(&hub, "mail.read", json!({"conv":"room:r1","n":2,"before":"p1"})).await["result"].clone(); assert_eq!((t(&r3), r3["more"].clone()), (vec!["post 0".to_string()], json!(false)));
+    assert_eq!(rpc(&hub, "mail.read", json!({"conv":"room:r1","before":"nope"})).await["error"], "room:r1: unknown room conversation or mail cursor");
+    assert_eq!(rpc(&hub, "mail.read", json!({"conv":"room:zz"})).await["error"], "room:zz: unknown room conversation or mail cursor");
+}

@@ -54,12 +54,12 @@ impl Bots {
     async fn mail_read(&self, id: &Value, p: &Value) -> Vec<Value> {
         let (conv, bot, n) = (gs(p, "conv"), gs(p, "bot"), limit(gn(p, "n", 50))); let before = gs(p, "before").to_string();
         let w = self.world().await;
-        if conv.starts_with("room:") { return vec![err(id, "a room's conversation is read from its posts: not ported yet")] }
         if !bot.is_empty() { // Mail.seen: reading opens it for that bot
             let now = now_s(); let c = w.mail.conv(conv);
             if let Err(e) = self.hub.commit(&json!({"$":"MailMarked","bot":bot,"conv":conv,"status":"open","seen":c.last,"until":0,"at":now})).await { return vec![err(id, &format!("{e:#}"))] }
         }
         let w = { drop(w); self.world().await };
+        if conv.starts_with("room:") { return match self.room_read(&w, conv, bot, &before, n).await { Ok(v) => vec![data(id, v)], Err(e) => vec![err(id, &e)] } }
         let path = store::path(&self.hub.cfg.home, conv);
         let r = tokio::task::spawn_blocking(move || store::page(&path, &before, n)).await.map_err(|e| e.to_string());
         let (bs, more) = match r {
@@ -69,6 +69,34 @@ impl Bots {
             Err(e) => return vec![err(id, &e)],
         };
         vec![data(id, json!({"conv":row(&w, bot, &w.mail.conv(conv)),"mails":bs.iter().map(body_row).collect::<Vec<_>>(),"more":more}))]
+    }
+
+    /// MailJob.room.*: a room's page by its headers (RoomHistory.page): the headers after the cursor, newest first, each with its text from the room's post in the log
+    /// (a legacy RoomPosted) or else from the journal; `more` is whether headers remain. A header whose text is in neither is an error, never a made-up body.
+    async fn room_read(&self, w: &World, conv: &str, bot: &str, before: &str, n: usize) -> Result<Value, String> {
+        let unknown = || format!("{conv}: unknown room conversation or mail cursor");
+        let c = w.mail.conv(conv); if c.id.is_empty() { return Err(unknown()) }
+        let hs = w.mail.headers(conv);
+        let rest = if before.is_empty() { hs } else { &hs[hs.iter().position(|h| h.id == before).ok_or_else(unknown)? + 1..] };
+        let page: Vec<Hdr> = rest.iter().take(n).cloned().collect(); let more = rest.len() > n;
+        // legacy posts: the room's RoomPosted lines, newest first, until every wanted text is found
+        let mut want: std::collections::HashSet<String> = page.iter().map(|h| h.id.clone()).collect();
+        let mut texts: std::collections::HashMap<String, String> = Default::default();
+        for line in w.room_lines.get(&conv[5..]).map(Vec::as_slice).unwrap_or(&[]).iter().rev() {
+            if want.is_empty() { break }
+            let Ok(raw) = self.hub.store.get(line - 1) else { continue };
+            let Ok(e) = serde_json::from_str::<Value>(&raw) else { continue };
+            let pid = e["id"].as_str().unwrap_or("");
+            if want.remove(pid) { texts.insert(pid.to_string(), e["text"].as_str().unwrap_or("").to_string()); }
+        }
+        let path = store::path(&self.hub.cfg.home, conv); let ids = want.clone();
+        let from_journal = if ids.is_empty() { Default::default() } else { tokio::task::spawn_blocking(move || store::exact(&path, &ids)).await.map_err(|e| e.to_string())? };
+        let mut mails = vec![];
+        for h in &page {
+            let text = match texts.get(&h.id) { Some(t) => t.clone(), None => match from_journal.get(&h.id) { Some(b) => b.text.clone(), None => return Err(format!("{conv}: mail body unavailable: {}", h.id)) } };
+            mails.push(body_row(&Body { conv: c.clone(), mail: h.clone(), text }));
+        }
+        Ok(json!({"conv":row(w, bot, &c),"mails":mails,"more":more}))
     }
 
     /// Mail.ui.request: the target must be a thread of this hub (a bot's address is its thread). A bot's thread: the mailbox only. Any other: the message is
