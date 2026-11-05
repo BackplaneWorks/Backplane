@@ -200,6 +200,138 @@
      84
     ]
    }
+  },
+  {
+   "name": "cat-room-post-0",
+   "kind": "cat",
+   "web": {
+    "png": "../../../build/gpui/shots/logo-cats/web-tablet-dark-room.png",
+    "rect": [
+     24,
+     536,
+     56,
+     56
+    ]
+   },
+   "native": {
+    "png": "../../../build/gpui/results/ios/lc/ios-ipad-dark-room.png",
+    "rect": [
+     40,
+     437,
+     56,
+     56
+    ]
+   }
+  },
+  {
+   "name": "cat-room-post-1",
+   "kind": "cat",
+   "web": {
+    "png": "../../../build/gpui/shots/logo-cats/web-tablet-dark-room.png",
+    "rect": [
+     24,
+     611,
+     56,
+     56
+    ]
+   },
+   "native": {
+    "png": "../../../build/gpui/results/ios/lc/ios-ipad-dark-room.png",
+    "rect": [
+     40,
+     571,
+     56,
+     56
+    ]
+   }
+  },
+  {
+   "name": "cat-room-post-2",
+   "kind": "cat",
+   "web": {
+    "png": "../../../build/gpui/shots/logo-cats/web-tablet-dark-room.png",
+    "rect": [
+     24,
+     685,
+     56,
+     56
+    ]
+   },
+   "native": {
+    "png": "../../../build/gpui/results/ios/lc/ios-ipad-dark-room.png",
+    "rect": [
+     40,
+     705,
+     56,
+     56
+    ]
+   }
+  },
+  {
+   "name": "cat-room-post-3",
+   "kind": "cat",
+   "web": {
+    "png": "../../../build/gpui/shots/logo-cats/web-tablet-dark-room.png",
+    "rect": [
+     24,
+     759,
+     56,
+     56
+    ]
+   },
+   "native": {
+    "png": "../../../build/gpui/results/ios/lc/ios-ipad-dark-room.png",
+    "rect": [
+     40,
+     839,
+     56,
+     56
+    ]
+   }
+  },
+  {
+   "name": "cat-room-post-4",
+   "kind": "cat",
+   "web": {
+    "png": "../../../build/gpui/shots/logo-cats/web-tablet-dark-room.png",
+    "rect": [
+     24,
+     834,
+     56,
+     56
+    ]
+   },
+   "native": {
+    "png": "../../../build/gpui/results/ios/lc/ios-ipad-dark-room.png",
+    "rect": [
+     40,
+     973,
+     56,
+     56
+    ]
+   }
+  },
+  {
+   "name": "cat-room-post-5",
+   "kind": "cat",
+   "web": {
+    "png": "../../../build/gpui/shots/logo-cats/web-tablet-dark-room.png",
+    "rect": [
+     24,
+     908,
+     56,
+     56
+    ]
+   },
+   "native": {
+    "png": "../../../build/gpui/results/ios/lc/ios-ipad-dark-room.png",
+    "rect": [
+     40,
+     1107,
+     56,
+     56
+    ]
+   }
   }
  ]
 }

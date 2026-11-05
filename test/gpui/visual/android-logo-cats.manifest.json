@@ -112,6 +112,76 @@
    "mood": "work"
   },
   {
+   "id": "cat-post-Bub-dark",
+   "kind": "cat",
+   "theme": "dark",
+   "image": "../../../build/gpui/shots/logo-cats/raw/android-dark-5-room.png",
+   "box": [
+    42,
+    501,
+    74,
+    74
+   ],
+   "reference": "../../../build/gpui/shots/logo-cats/ref/web-dark-cat-post-Bub.png",
+   "mood": "away"
+  },
+  {
+   "id": "cat-post-Mochi-dark",
+   "kind": "cat",
+   "theme": "dark",
+   "image": "../../../build/gpui/shots/logo-cats/raw/android-dark-5-room.png",
+   "box": [
+    42,
+    685,
+    74,
+    74
+   ],
+   "reference": "../../../build/gpui/shots/logo-cats/ref/web-dark-cat-post-Mochi.png",
+   "mood": "away"
+  },
+  {
+   "id": "cat-post-Pixel-dark",
+   "kind": "cat",
+   "theme": "dark",
+   "image": "../../../build/gpui/shots/logo-cats/raw/android-dark-5-room.png",
+   "box": [
+    42,
+    869,
+    74,
+    74
+   ],
+   "reference": "../../../build/gpui/shots/logo-cats/ref/web-dark-cat-post-Pixel.png",
+   "mood": "away"
+  },
+  {
+   "id": "cat-post-Ember-dark",
+   "kind": "cat",
+   "theme": "dark",
+   "image": "../../../build/gpui/shots/logo-cats/raw/android-dark-5-room.png",
+   "box": [
+    42,
+    1053,
+    74,
+    74
+   ],
+   "reference": "../../../build/gpui/shots/logo-cats/ref/web-dark-cat-post-Ember.png",
+   "mood": "away"
+  },
+  {
+   "id": "look-0-dark",
+   "kind": "cat",
+   "theme": "dark",
+   "image": "../../../build/gpui/shots/logo-cats/raw/android-dark-6-looks.png",
+   "box": [
+    20,
+    158,
+    105,
+    105
+   ],
+   "reference": "../../../build/gpui/shots/logo-cats/ref/web-dark-look-0.png",
+   "mood": "idle"
+  },
+  {
    "id": "logo-light",
    "kind": "logo",
    "theme": "light",
@@ -221,6 +291,76 @@
    ],
    "reference": "../../../build/gpui/shots/logo-cats/ref/web-light-cat-header.png",
    "mood": "work"
+  },
+  {
+   "id": "cat-post-Bub-light",
+   "kind": "cat",
+   "theme": "light",
+   "image": "../../../build/gpui/shots/logo-cats/raw/android-light-5-room.png",
+   "box": [
+    42,
+    501,
+    74,
+    74
+   ],
+   "reference": "../../../build/gpui/shots/logo-cats/ref/web-light-cat-post-Bub.png",
+   "mood": "away"
+  },
+  {
+   "id": "cat-post-Mochi-light",
+   "kind": "cat",
+   "theme": "light",
+   "image": "../../../build/gpui/shots/logo-cats/raw/android-light-5-room.png",
+   "box": [
+    42,
+    685,
+    74,
+    74
+   ],
+   "reference": "../../../build/gpui/shots/logo-cats/ref/web-light-cat-post-Mochi.png",
+   "mood": "away"
+  },
+  {
+   "id": "cat-post-Pixel-light",
+   "kind": "cat",
+   "theme": "light",
+   "image": "../../../build/gpui/shots/logo-cats/raw/android-light-5-room.png",
+   "box": [
+    42,
+    869,
+    74,
+    74
+   ],
+   "reference": "../../../build/gpui/shots/logo-cats/ref/web-light-cat-post-Pixel.png",
+   "mood": "away"
+  },
+  {
+   "id": "cat-post-Ember-light",
+   "kind": "cat",
+   "theme": "light",
+   "image": "../../../build/gpui/shots/logo-cats/raw/android-light-5-room.png",
+   "box": [
+    42,
+    1053,
+    74,
+    74
+   ],
+   "reference": "../../../build/gpui/shots/logo-cats/ref/web-light-cat-post-Ember.png",
+   "mood": "away"
+  },
+  {
+   "id": "look-0-light",
+   "kind": "cat",
+   "theme": "light",
+   "image": "../../../build/gpui/shots/logo-cats/raw/android-light-6-looks.png",
+   "box": [
+    20,
+    158,
+    105,
+    105
+   ],
+   "reference": "../../../build/gpui/shots/logo-cats/ref/web-light-look-0.png",
+   "mood": "idle"
   }
  ]
 }

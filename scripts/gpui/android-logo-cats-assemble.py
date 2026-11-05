@@ -10,7 +10,7 @@ S = root + "/build/gpui/shots/logo-cats"; raw = S + "/raw"; web = S + "/web-raw"
 scheme, boxes_file = sys.argv[1], sys.argv[2]
 A = json.load(open(boxes_file)); W = json.load(open(f"{web}/web-{scheme}-boxes.json"))
 names = {"1-threads": "threads", "2-bots": "bots", "3-bot": "bot"}
-for key, scr in (("1-threads", "threads"), ("2-bots", "bots"), ("3-bot", "bot")):
+for key, scr in (("1-threads", "threads"), ("2-bots", "bots"), ("3-bot", "bot"), ("4-mention", ""), ("5-room", ""), ("6-looks", "")):
     a = Image.open(f"{raw}/android-{scheme}-{key}.png").convert("RGB"); w = Image.open(f"{web}/web-{scheme}-{key}.png").convert("RGB")
     h = max(a.height, w.height); out = Image.new("RGB", (w.width + a.width + 24, h + 44), (128, 128, 128))
     out.paste(w, (0, 44)); out.paste(a, (w.width + 24, 44)); d = ImageDraw.Draw(out)
@@ -36,4 +36,16 @@ for b in [b for b in W["bots"] if b["kind"] == "cat" and b["where"] == "row"]:
 hb = [b for b in W["bot"] if b["where"] == "header"][0]
 r = crop(f"{web}/web-{scheme}-3-bot.png", hb["rect"], f"{ref}/web-{scheme}-cat-header.png")
 m["items"].append({"id": f"cat-header-Mochi-{scheme}", "kind": "cat", "theme": scheme, "image": rel(f"{raw}/android-{scheme}-3-bot.png"), "box": A["header"], "reference": rel(r), "mood": "work"})
+# room posts: the web draws a bot's post with look 0 "away" (the post's author is the bot's name, not its id): the same here
+for b in [b for b in W.get("room", []) if b["where"] == "post"]:
+    n = b["name"]
+    if n not in A.get("posts", {}): continue
+    r = crop(f"{web}/web-{scheme}-5-room.png", b["rect"], f"{ref}/web-{scheme}-cat-post-{n}.png")
+    m["items"].append({"id": f"cat-post-{n}-{scheme}", "kind": "cat", "theme": scheme, "image": rel(f"{raw}/android-{scheme}-5-room.png"), "box": A["posts"][n], "reference": rel(r), "mood": "away"})
+# the look picker: the first six looks as idle cats
+wl = [b for b in W.get("looks", []) if b["where"] == "look"]
+for i, box in enumerate(A.get("looks", [])):
+    if i >= len(wl): break
+    r = crop(f"{web}/web-{scheme}-6-looks.png", wl[i]["rect"], f"{ref}/web-{scheme}-look-{i}.png")
+    m["items"].append({"id": f"look-{i}-{scheme}", "kind": "cat", "theme": scheme, "image": rel(f"{raw}/android-{scheme}-6-looks.png"), "box": box, "reference": rel(r), "mood": "idle"})
 json.dump(m, open(mf, "w"), indent=1); print("manifest items:", len(m["items"]))

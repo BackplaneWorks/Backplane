@@ -31,7 +31,7 @@ function log({ecc,hier}){return [{$:'ProjectCreated',id:'p1',title:'e',root:ecc,
 function corpus(){const v=['0','-0','0.1','0.2','0.3','1','1.5','10.5','20.25','100','123.456','16777216','16777217','1e21','1e22','1e-7','1.5e-7','0.000001','0.0000001','3.4028235e38','3.5e38','1e39','1e-45','1e-46','nan','NaN','inf','-inf','Infinity','abc','',' 1','+.5','5.','.5','1e3','1E-2','0x10','1_0','--1','1 ','12.345678901234','0.30000001192092896','99999.99','-127.00001'];
  let s=12345;const r=()=>(s=(Math.imul(s,1103515245)+12345)>>>0)/4294967296;
  for(let i=0;i<600;i++)v.push(String(Math.fround((r()-0.5)*Math.pow(10,Math.floor(r()*12)-4))));for(let i=0;i<300;i++)v.push((r()*400).toFixed(Math.floor(r()*8)));return v}
-const norm=s=>JSON.stringify(s).replace(/\/tmp\/bp-(review|release)\.[A-Za-z0-9]+/g,'/tmp/bp-$1.X').replace(/\.pending\.[A-Za-z0-9]+/g,'.pending.X').replace(/\br\d{9,}-\d+/g,'rID').replace(/(checks:[0-9a-f]{64}:)\d+/g,'$1N').replace(/"at":\d+/g,'"at":0').replace(/export10:\d+:\d+:\d+/g,'export10:ID').replace(/\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ/g,'DATE');
+const norm=s=>String(JSON.stringify(s)).replace(/\/tmp\/bp-(review|release)\.[A-Za-z0-9]+/g,'/tmp/bp-$1.X').replace(/\.pending\.[A-Za-z0-9]+/g,'.pending.X').replace(/\br\d{9,}-\d+/g,'rID').replace(/(checks:[0-9a-f]{64}:)\d+/g,'$1N').replace(/"at":\d+/g,'"at":0').replace(/export10:\d+:\d+:\d+/g,'export10:ID').replace(/\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ/g,'DATE');
 async function run(name,bin,port){
  const w=fresh();const home=`${R}/home`;rmSync(home,{recursive:true,force:true});mkdirSync(home,{recursive:true});writeFileSync(home+'/events.jsonl',log(w));
  const fh=`${R}/w/fakehome`;mkdirSync(fh,{recursive:true});const ghlog=`${R}/w/gh.log`;
@@ -81,6 +81,7 @@ async function run(name,bin,port){
  r.reviewActs=ev.filter(e=>e.$==='ActivityLogged'&&e.tone==='review').map(e=>[e.kind,e.summary]);r.asks=ev.filter(e=>e.$==='AskOpened');r.kxActs=ev.filter(e=>e.kind==='kicad.export10');
  return r}
 const res={};for(const [n,b,p] of [['js',jsBin,3881],['rust',rustBin,3880]])if(!process.argv[6]||process.argv[6]===n)res[n]=await run(n,b,p);
+writeFileSync(out+'.raw',JSON.stringify(res));
 const diffs=[];let same=0;if(res.js&&res.rust)for(const k of new Set([...Object.keys(res.js),...Object.keys(res.rust)])){if(k==='reviewActs'){const a=res.js[k],b=res.rust[k];let d=0;for(let i=0;i<Math.max(a.length,b.length);i++){if(norm(a[i])===norm(b[i]))same++;else{d++;if(d<=20)diffs.push({k:`act${i}`,rust:b[i],js:a[i]})}}continue}
  if(norm(res.js[k])===norm(res.rust[k]))same++;else diffs.push({k,rust:res.rust[k],js:res.js[k]})}
 writeFileSync(out,JSON.stringify({res,diffs,same},null,1));console.log('same',same,'differences',diffs.length,'acts',res.js?.reviewActs?.length,res.rust?.reviewActs?.length);for(const d of diffs)console.log(JSON.stringify({k:d.k,rust:d.rust,js:d.js}).slice(0,600));process.exit(0);
