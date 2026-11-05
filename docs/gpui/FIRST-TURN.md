@@ -41,3 +41,12 @@ One `codex exec --json` process per turn, resumed with `exec resume <session>`; 
 | Costs | a real turn spends the person's quota/credits | the usage rows (`TurnUsage`) |
 
 Not covered by any test with a real agent: Claude's actual stream-json (the replays are recordings from the stand-ins and the JS hub), image input, the limit/quota fallback driver, Codex's real JSON, `$skill` expansion against real skill folders.
+
+## What a real turn leaves in the person's `~/.claude`
+
+A Claude turn through the hub runs with the real `HOME` (side-by-side mode passes `BACKPLANE_PERSON_HOME`; a plain hub passes its own), so the CLI keeps its usual state there. Observed after the first real turns on a scratch folder (`/tmp/bp-first-turn/proj`, five turns across two sessions, one a launched subthread):
+
+- `~/.claude/projects/<folder path with / turned into ->/<session id>.jsonl`: one transcript per session, the whole conversation with tool calls and the cached prompt text. The two sessions were 460 KB and 313 KB; 772 KB for the folder with its `memory/` directory (created empty or by the CLI's auto-memory).
+- Likely also (not checked one by one): shell snapshots, session env and debug logs under `~/.claude/`, an entry for the folder in `~/.claude.json`, and a line per prompt in `~/.claude/history.jsonl`.
+
+Nothing in `~/.claude` is created or removed by the hub itself, and tests never run with the real `HOME`. The hub deletes nothing there. Cleaning up a scratch session is the person's call (the folder named above is the one the first-turn runs wrote; it was left in place). A side-by-side turn on a real project adds its transcripts to that project's folder under `~/.claude/projects/` the same way, next to the person's own sessions for it; it never resumes them (fresh session) and never edits them.
