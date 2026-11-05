@@ -347,6 +347,12 @@ impl Hub {
 
     /// One inbound request -> the frames to send back, in order.
     pub async fn request(&self, c: &mut Conn, msg: &Value) -> Vec<Value> {
+        let out = self.request_one(c, msg).await;
+        // the view actor folds the answer of a request its own commands sent (session/actor.rs: @rp.req, @telemetry.req)
+        if !msg.get("m").and_then(Value::as_str).unwrap_or("").starts_with("view.") { if let Some(id) = msg.get("id").and_then(Value::as_u64) { crate::session::actor::replied(c.client, id) } }
+        out
+    }
+    async fn request_one(&self, c: &mut Conn, msg: &Value) -> Vec<Value> {
         let id = msg.get("id").cloned().unwrap_or(Value::Null);
         let m = msg.get("m").and_then(Value::as_str).unwrap_or("");
         // `ping` and `load.ping` are not methods of the Bend hub: it answers them "unknown method" (recorded, parity/recA)

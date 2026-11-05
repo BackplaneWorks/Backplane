@@ -27,7 +27,9 @@ fn render_scratch(key: &str) -> bool { key.starts_with("@more.") || key == "@pil
 const VIEW_INFO: [&str; 5] = ["view.design:", "view.kind:", "view.path:", "view.sheet:", "view.tree:"];
 
 #[derive(Default)]
-pub struct ViewActor { view: String, target: Option<Value>, sel: Option<String>, keys: BTreeSet<String>, away: BTreeMap<String, String>, page: Option<(String, Value, u64)>, local: Option<(String, Value, Value)> }
+pub struct ViewActor { view: String, target: Option<Value>, sel: Option<String>, keys: BTreeSet<String>, away: BTreeMap<String, String>, page: Option<(String, Value, u64)>, local: Option<(String, Value, Value)>,
+    /// ids of the requests this view's commands told the client to send (`cmds` of type send), and of those the hub has since answered
+    sent: BTreeSet<u64>, replied: BTreeSet<u64> }
 
 /// The thread a target's draft and viewer belong to (V.Target.owner). Limits: a bot's thread (Target.thread) and a
 /// project home's owner are not modelled, so those targets get no "@away.<t>" and no seeds.
@@ -81,6 +83,9 @@ impl ViewActor {
         let bound = req["session"]["drafts"]["@draft.bound"].as_str().filter(|b| b.chars().count() <= 128).unwrap_or("");
         drafts.insert("@draft.bound".into(), json!(bound));
         for k in ["@btab", "@presentation"] { drafts.entry(k).or_insert_with(|| json!("")); }
+        // Rp.reply and Telemetry.reply (client.bend) run on the reply of every request the actor's own commands sent, and each leaves the request's
+        // id behind, emptied ("@rp.req:<id>" is the page a review request asked for, cleared when its reply ends it: Rp.failed always sets it "").
+        for id in &self.replied { drafts.insert(format!("@rp.req:{id}"), json!("")); drafts.insert(format!("@telemetry.req:{id}"), json!("")); }
         let mut info = session.get("info").and_then(Value::as_object).cloned().unwrap_or_default();
         // Actor.refresh: a thread (or none) this actor has shown no viewer for takes the page's record, "" when it has none.
         if !first && !self.keys.contains(&format!("view.kind:{th}")) {
@@ -110,11 +115,22 @@ fn bound(m: &mut HashMap<u64, ViewActor>, keep: usize) {
 pub fn apply(client: u64, view: &str, req: &Value, pol: &Value) -> Value {
     let Some(s) = pol.get("session").filter(|s| s.is_object()) else { return pol.clone() };
     let mut m = ACTORS.lock().unwrap();
-    let s = m.entry(client).or_default().reply(view, req, s);
+    let a = m.entry(client).or_default();
+    for id in sent_ids(pol) { a.sent.insert(id); }
+    let s = a.reply(view, req, s);
     bound(&mut m, MAX_ACTORS);
     let mut out = pol.clone();
     out["session"] = s;
     out
+}
+/// The ids of the requests a policy answer's `cmds` tell the client to send (`{"type":"send","text":"{\"id\":1,\"m\":..}"}`).
+fn sent_ids(pol: &Value) -> Vec<u64> {
+    pol.get("cmds").and_then(Value::as_array).into_iter().flatten().filter(|c| c["type"] == "send")
+        .filter_map(|c| c["text"].as_str().and_then(|t| serde_json::from_str::<Value>(t).ok()).and_then(|j| j["id"].as_u64())).collect()
+}
+/// The hub answered request `id` of this connection: when it is one the view's commands sent, the actor now holds its marks (next reply's session).
+pub fn replied(client: u64, id: u64) {
+    if let Some(a) = ACTORS.lock().unwrap().get_mut(&client) { if a.sent.remove(&id) { a.replied.insert(id); } }
 }
 /// `local` to send the policy with this request.
 pub fn local_in(client: u64, view: &str, method: &str, target: &Value) -> Option<Value> {
@@ -151,6 +167,17 @@ mod tests {
     fn has(v: &Value, k: &str) -> bool { keys(v).contains(&k.to_string()) }
 
     /// law hist_picker_scope: Actor.scope.keep("@cmp.menu") == False (and the other scoped keys)
+    // @rp.req:<id> and @telemetry.req:<id> (session parity, recA/session-mobile 30..): only for requests the view's own commands sent, only once answered
+    #[test] fn answered_command_requests_leave_their_marks() {
+        let cmds = json!({"cmds":[{"type":"focus","id":"composer"},{"type":"send","hub":"h","text":"{\"id\":1,\"m\":\"fab.look\",\"p\":{}}"},{"type":"send","hub":"h","text":"not json"}]});
+        assert_eq!(sent_ids(&cmds), vec![1]);
+        let mut a = ViewActor::default(); a.sent.insert(1);
+        assert!(!has(&a.reply("v", &req("thread", "t1"), &pol("t1", &[])), "@rp.req:1"), "not before the reply");
+        a.replied.insert(1);
+        let s = a.reply("v", &req("thread", "t1"), &pol("t1", &[])); assert!(has(&s, "@rp.req:1") && has(&s, "@telemetry.req:1") && s["drafts"]["@rp.req:1"] == "");
+        let s = a.reply("v", &req("thread", "t2"), &pol("t2", &[])); assert!(has(&s, "@rp.req:1"), "kept across a move (Actor.scope.keep)");
+        replied(77, 1); // an unknown connection: nothing
+    }
     #[test] fn hist_picker_scope() {
         assert!(!scope_kept("@cmp.menu"));
         for k in ["@cmp.resolve:t1:a", "@mech.at", "@thread.want", "@f.title", "@mr.x"] { assert!(!scope_kept(k), "{k}") }
