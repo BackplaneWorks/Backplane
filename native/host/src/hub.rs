@@ -578,7 +578,7 @@ mod tests {
             if with { h.register_transform(Arc::new(P)); }
             let n0 = h.store.len();
             h.commit_many(&[ev()]).await.unwrap();
-            let line = h.store.get(n0 + 1).expect("written");
+            let line = h.store.get(n0).expect("written");
             assert!(!line.contains("_end"), "transform={with}: {line}");
             assert!(line.contains("TurnChanged"), "{line}");
         }
