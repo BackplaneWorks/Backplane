@@ -223,6 +223,8 @@ impl Hub {
                     seq += c.events.len() as u64;
                 }
             }
+            // `_end` is a policy-side end marker (agents lane): it never reaches the log or a client, whether a transform ran, panicked or none is registered
+            for c in batch.iter_mut() { for e in c.events.iter_mut() { if let Some(o) = e.as_object_mut() { o.remove("_end"); } } }
             let lines: Vec<String> = batch.iter().flat_map(|c| c.events.iter().map(|e| serde_json::to_string(e).unwrap_or_default())).collect();
             let store = hub.store.clone(); let owned = lines.clone();
             let wrote = tokio::task::spawn_blocking(move || store.append_many(&owned.iter().map(String::as_str).collect::<Vec<_>>())).await;
@@ -565,6 +567,21 @@ mod tests {
         let u2 = h.commit_many(&[json!({"$":"Boom"})]).await.unwrap();
         assert_eq!(u2, n0 + 3, "a panicking transform leaves the batch as it came");
         assert!(!t.1.load(Relaxed));
+    }
+
+    // the `_end` marker never reaches the log: not with a transform that panics on the batch, not with none registered
+    #[tokio::test] async fn the_end_marker_never_reaches_the_log() {
+        struct P; impl Transform for P { fn before_commit(&self, _f: u64, _e: Vec<Value>) -> Vec<Value> { panic!("a bad policy") } fn commit_failed(&self, _s: u64) {} }
+        let ev = || json!({"$":"TurnChanged","thread":"t","state":"completed","_end":true});
+        for with in [false, true] {
+            let dir = home(if with { "endmark1" } else { "endmark0" }); let h = Hub::start(cfg(&dir), Arc::new(Canned { reply: json!({}) })).await.unwrap();
+            if with { h.register_transform(Arc::new(P)); }
+            let n0 = h.store.len();
+            h.commit_many(&[ev()]).await.unwrap();
+            let line = h.store.get(n0 + 1).expect("written");
+            assert!(!line.contains("_end"), "transform={with}: {line}");
+            assert!(line.contains("TurnChanged"), "{line}");
+        }
     }
 
     // fab.look is a read the hub makes for a view: it is recorded for that view's next presenter call (session::record_read)
