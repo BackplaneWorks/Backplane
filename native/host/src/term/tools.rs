@@ -5,7 +5,9 @@ use crate::hub::Hub;
 use serde_json::{json, Value};
 use std::{sync::{atomic::{AtomicU64, Ordering}, Arc}, time::Duration};
 
-pub const NAMES: &[&str] = &["terminal_open", "terminal_read", "terminal_send", "terminal_close"];
+pub const TERMINAL: &[&str] = &["terminal_open", "terminal_read", "terminal_send", "terminal_close"];
+/// Every tool this lane serves (the agents lane lists them from the JS hub's definitions and routes them to `call`).
+pub const NAMES: &[&str] = &["terminal_open", "terminal_read", "terminal_send", "terminal_close", "preview_open", "preview_navigate", "preview_snapshot", "preview_click", "preview_type", "preview_press", "preview_scroll", "preview_evaluate", "preview_wait_for", "preview_resize", "preview_status"];
 static SEQ: AtomicU64 = AtomicU64::new(0);
 
 fn sv<'a>(v: &'a Value, k: &str) -> &'a str { v.get(k).and_then(Value::as_str).unwrap_or("") }
@@ -13,9 +15,11 @@ fn fail(m: &str) -> (bool, Value) { (false, json!({"error":m})) }
 fn n(v: &Value, k: &str) -> u64 { v.get(k).and_then(|x| x.as_u64().or_else(|| x.as_f64().map(|f| f.max(0.0) as u64))).unwrap_or(0) }
 
 /// None: not a terminal tool. Some((ok, body)): the tool's answer. A `Value::String` body (terminal_read) is the result's text as it is, not JSON
-/// (the JS hub's TermRead.answer); anything else is the JSON text.
+/// (the JS hub's TermRead.answer); an object `{"$content": [blocks]}` (preview_*) is the result's content array as it is (text and image blocks);
+/// anything else is the JSON text.
 pub async fn call(hub: &Arc<Hub>, thread: &str, name: &str, a: &Value) -> Option<(bool, Value)> {
     if !NAMES.contains(&name) { return None }
+    if name.starts_with("preview_") { return Some(super::browser::preview(hub, thread, name, a).await) }
     let Some(t) = get(hub) else { return Some(fail("terminals are not available")) };
     Some(match name {
         "terminal_open" => open(&t, hub, thread, a).await,
