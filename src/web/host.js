@@ -2470,8 +2470,9 @@ for (const ev of EVENTS) {
     }
     if (ev === "input" && el.id === "workspace-query") narrowPalette(el.value);
     dispatch(ev === "click" ? phoneClickAction(document, el, action) : action, ev === "input" ? inputValue(el) : valueOf(el));
-    // (a row's menu, at the right press, in this frame)
-    if (ev === "contextmenu") renderNow();
+    // (a row's menu, at the right press, in this frame; so is what a tap
+    // on what a mouse acts on at the press picks, and a send's bubble)
+    if (ev === "contextmenu" || ev === "click" && (e.pointerType === "touch" && el.matches(PRESS_PICKS) || action === "send")) renderNow();
     // A mouse send or stop leaves the next keystroke in the message box.
     if (ev === "click" && el.closest(".composer") && ["send", "send-alt", "interrupt"].includes(action)) composerKeeper.activate(e);
   });
