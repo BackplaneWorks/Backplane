@@ -84,6 +84,10 @@ try {
     const mode = M.querySelector('select.solid-render-mode'); mode.value = 'fast'; mode.dispatchEvent(new Event('change'));
     rescope('ta');
     out.rescopeOtherModeRebuilds = M.querySelector('.solid-toolbar').children[0] !== mtools[0];
+    // the mode chosen in tb stayed tb's (not written into ta's settings): back in tb, Fast again
+    const atools = [...M.querySelector('.solid-toolbar').children];
+    rescope('tb');
+    out.rescopeModeIsThreads = M.querySelector('.solid-toolbar').children[0] !== atools[0] && M.querySelector('select.solid-render-mode').value === 'fast';
     // the picture: taken from a drawn model, shown over a new canvas of the
     // same thread and model at the same size (its pose taken up), dropped
     // when the model draws; never for another thread or another size
