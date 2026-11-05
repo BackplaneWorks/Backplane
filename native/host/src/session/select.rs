@@ -32,11 +32,11 @@ pub fn select(f: &dyn Facts, hub: &str, session: &Value, value: &str) -> Option<
     let rid = session["rid"].as_u64().unwrap_or(0);
     let mut drafts = Map::new();
     // Ui.select.k
-    for k in ["@revert", "@del", "@bot", "@room", "@remote", "@bot.want", "@thread.want", "@intent"] { drafts.insert(k.into(), json!("")) }
+    for k in ["@revert", "@del", "@bot", "@room", "@remote", "@bot.want", "@thread.want", "@intent"] { drafts.insert(k.into(), json!("")); }
     let mut info_patch = Map::new();
     // Ui.reselect: only when the selection changes
     if old != id {
-        for k in ["@mech.at".to_string(), "@cmp.menu".into(), format!("@cmp.resolve:{old}:a"), format!("@cmp.resolve:{old}:b")] { drafts.insert(k, json!("")) }
+        for k in ["@mech.at".to_string(), "@cmp.menu".into(), format!("@cmp.resolve:{old}:a"), format!("@cmp.resolve:{old}:b")] { drafts.insert(k, json!("")); }
         info_patch.insert(format!("panel:{old}"), json!(if session["panel"].as_bool().unwrap_or(false) { "1" } else { "" }));   // Viewer.flag
         info_patch.insert(format!("hist.play:{old}"), json!(""));
     }
