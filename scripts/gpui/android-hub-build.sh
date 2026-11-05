@@ -3,8 +3,9 @@
 # Result: build/gpui/hub/android/backplane-serve
 cd "$(dirname "$0")/../.." || exit 1
 LOG=$(mktemp)
-scripts/boat-job.sh --size large --exclude "native/host/target/**" --exclude "stage/**" --exclude "stage-edge/**" --timeout 5400 --artifact build/backplane-serve -- sh scripts/gpui/ios-hub-boat.sh 2>&1 | tee "$LOG"
+scripts/boat-job.sh --size large --exclude "native/host/target/**" --exclude "stage/**" --exclude "stage-edge/**" --timeout 5400 --artifact build/backplane-serve -- sh scripts/gpui/ios-hub-boat.sh > "$LOG" 2>&1; RC=$?; cat "$LOG"
 ID=$(grep -o "job j[0-9]*-[0-9]*" "$LOG" | head -1 | cut -d" " -f2); rm -f "$LOG"
+[ "$RC" -eq 0 ] || { echo "boat-job exit $RC (refused or failed; the output is above)"; exit "$RC"; }
 [ -n "$ID" ] || { echo "no job id in boat-job output"; exit 1; }
 J="${XDG_STATE_HOME:-$HOME/.local/state}/backplane/boat/jobs/$ID"
 F=$(find "$J" -name backplane-serve -type f | head -1)
