@@ -110,8 +110,7 @@ pub fn spawn(program: &Path, args: &[String], cwd: &Path, extra_path: Option<&Pa
     if let Some(o) = OWNER.get() { c.env("BACKPLANE_AGENT_OWNER", o); }
     // Linux: the kernel kills the agent when the hub dies (PDEATHSIG). macOS has no such call, and reap_orphans does nothing off Linux yet, so nothing ends a killed hub's agent there.
     unsafe { c.pre_exec(|| { libc::setsid(); #[cfg(target_os = "linux")] libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL); Ok(()) }); }
-    // ETXTBSY: an executable written a moment ago is still open for writing in a child another thread just forked (until that child's exec): try again shortly
-    let mut child = { let mut n = 0; loop { match c.spawn() { Err(e) if e.raw_os_error() == Some(libc::ETXTBSY) && n < 10 => { n += 1; std::thread::sleep(std::time::Duration::from_millis(20)); } r => break r? } } };
+    let mut child = c.spawn()?;
     let pid = child.id().unwrap_or(0);
     let mut stdin = child.stdin.take().expect("piped"); let stdout = child.stdout.take().expect("piped"); let mut stderr = child.stderr.take().expect("piped");
     let (in_tx, mut in_rx) = mpsc::channel::<String>(IN_QUEUE);
