@@ -95,6 +95,8 @@ async fn run(a: Args) -> Result<()> {
     let listen = format!("{}:{}", a.host, a.port);
     let hub = Hub::start(hub::Cfg { home: a.home.clone(), version: a.version, commit: a.commit, listen: listen.clone(), os: "linux".into(), arch: "x64".into() }, presenter).await?;
     session::start(&hub);
+    // pairing and the /auth routes, before the listener accepts (net lane)
+    let _routes = net::start(&hub, &a.host, a.port);
     files::start(hub.clone());
     term::start(hub.clone());
     agents::Agents::start(hub.clone()).await?;
