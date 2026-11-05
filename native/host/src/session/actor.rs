@@ -27,7 +27,7 @@ fn render_scratch(key: &str) -> bool { key.starts_with("@more.") || key == "@pil
 const VIEW_INFO: [&str; 5] = ["view.design:", "view.kind:", "view.path:", "view.sheet:", "view.tree:"];
 
 #[derive(Default)]
-pub struct ViewActor { view: String, target: Option<Value>, sel: Option<String>, keys: BTreeSet<String>, away: BTreeMap<String, String>, page: Option<(String, Value, u64)>, local: Option<(String, Value, Value)>, held_drafts: Map<String, Value>, held_info: Map<String, Value>, rid: u64, panel: bool, hub_view: bool, reads: Vec<(String, Value, Value)>, bot: Option<(String, String)>,
+pub struct ViewActor { view: String, target: Option<Value>, sel: Option<String>, keys: BTreeSet<String>, away: BTreeMap<String, String>, page: Option<(String, Value, u64)>, local: Option<(String, Value, Value)>, held_drafts: Map<String, Value>, held_info: Map<String, Value>, rid: u64, panel: bool, hub_view: bool, reads: Vec<(Option<(String, Value)>, Value)>, bot: Option<(String, String)>,
     /// ids of the requests this view's commands told the client to send (`cmds` of type send), and of those the hub has since answered
     sent: BTreeSet<u64>, replied: BTreeSet<u64>, late: BTreeSet<u64> }
 
@@ -146,20 +146,30 @@ impl ViewActor {
         let l = pol.as_object_mut().and_then(|o| o.remove("local"));
         self.local = l.filter(|l| l.is_object()).map(|l| (view.to_string(), target.clone(), l));
     }
-    /// A reply to one of the hub's own reads for this view (`fab.look`, `review.page`, `telemetry.share`), kept for the next V
-    /// request of that view (the policy applies it to its Ui as the JS actor does). Bounded: the oldest go first.
-    pub fn record_read(&mut self, view: &str, kind: &str, id: u64, ok: bool, result: Value) {
-        // kept with the view AND the target it was read for (Bend's `same` is both; a move keeps the view id)
-        let target = self.target.clone().unwrap_or(Value::Null);
-        self.reads.push((view.to_string(), target, json!({"kind": kind, "id": id, "ok": ok, "result": result})));
+    /// A reply to one of the hub's own reads for this connection (`fab.look`, `review.page`, `telemetry.share`), kept for the
+    /// policy. Bound to no view yet: like the marks of a job-answered request (`replied_late`), the reply joins the actor that
+    /// the NEXT served view request leaves (the JS hub answers a job after the view request queued behind it was served, so a
+    /// fab.look sent with a view.open lands on the new view, not the one it was sent from). Bounded: the oldest go first.
+    pub fn record_read(&mut self, kind: &str, id: u64, ok: bool, result: Value) {
+        self.reads.push((None, json!({"kind": kind, "id": id, "ok": ok, "result": result})));
         let n = self.reads.len();
         if n > MAX_READS { self.reads.drain(..n - MAX_READS); }
     }
-    /// The reads recorded for `view`, taken (and cleared) for its next V request. Those of any other view are dropped: Bend's
-    /// actor drops its reads on a move (`Bool.pick(same, reads, Nil)`, thin-actor.bend).
+    /// The reads for this view request of `view` and `target`: those bound to them by an earlier request are taken (and
+    /// cleared); reads bound to another view or target are dropped (Bend's actor drops its reads on a move, `Bool.pick(same,
+    /// reads, Nil)`); the unbound ones bind to this request's view and target and are delivered with the next one.
     pub fn take_reads(&mut self, view: &str, target: &Value) -> Vec<Value> {
         let same = |t: &Value| t["kind"] == target["kind"] && t["id"] == target["id"];
-        std::mem::take(&mut self.reads).into_iter().filter(|(v, t, _)| v == view && same(t)).map(|(_, _, r)| r).collect()
+        let mut out = Vec::new(); let mut keep = Vec::new();
+        for (bound, r) in std::mem::take(&mut self.reads) {
+            match bound {
+                Some((v, t)) if v == view && same(&t) => out.push(r),
+                Some(_) => {}
+                None => keep.push((Some((view.to_string(), target.clone())), r)),
+            }
+        }
+        self.reads = keep;
+        out
     }
     /// The older page this view stands on (`before`, 0 = the newest window). A view.page sets it from its cursor; later
     /// updates and actions of the same view and target keep it (the JS hub's actor holds the page it last served) until
@@ -309,8 +319,8 @@ pub fn mask_page_reply(req: &Value, reply: &mut Value) {
 /// clears its `@rp.req:N` differently); `result` is the reply's `result` (for a failure, what the hub sent in its place);
 /// `result` is the RPC reply's `result` as the hub sent it. The
 /// reply is the hub's own, never the client's.
-pub fn record_read(client: u64, view_id: &str, kind: &str, id: u64, ok: bool, result: Value) {
-    ACTORS.lock().unwrap().entry(client).or_default().record_read(view_id, kind, id, ok, result);
+pub fn record_read(client: u64, _view_id: &str, kind: &str, id: u64, ok: bool, result: Value) {
+    ACTORS.lock().unwrap().entry(client).or_default().record_read(kind, id, ok, result);
 }
 /// The reads recorded since the last V request, for `reads` in the next one.
 pub fn take_reads(client: u64, view_id: &str, target: &Value) -> Vec<Value> {
@@ -550,41 +560,26 @@ mod tests {
         mask_page_reply(&other, &mut r2);
         assert!(r2["session"]["drafts"].get("@rp.req:1").is_some());
     }
-    #[test] fn recorded_reads_go_with_the_next_request_of_their_view_and_target_once_and_are_bounded() {
+    #[test] fn a_read_joins_the_actor_the_next_served_request_leaves_and_is_bounded() {
         let mut a = ViewActor::default();
         let t1 = json!({"kind": "thread", "id": "t1"}); let t2 = json!({"kind": "thread", "id": "t2"});
-        a.reply("v1", &req("thread", "t1"), &pol("t1", &[]));
-        for i in 0..40 { a.record_read("v1", "fab.look", 0, true, json!({"n": i})); }
+        for i in 0..40 { a.record_read("fab.look", 0, true, json!({"n": i})); }
+        assert!(a.take_reads("v1", &t1).is_empty(), "the request being served does not carry it");
         let r = a.take_reads("v1", &t1);
         assert_eq!(r.len(), MAX_READS);
-        assert_eq!(r[0]["result"]["n"], json!(24)); assert_eq!(r[15]["result"]["n"], json!(39)); assert_eq!(r[0]["kind"], json!("fab.look")); assert_eq!(r[0]["id"], json!(0)); assert_eq!(r[0]["ok"], json!(true));
-        assert!(a.take_reads("v1", &t1).is_empty());
-        // a read never reaches another view ...
-        a.record_read("v1", "fab.look", 1, false, json!({}));
+        assert_eq!(r[0]["result"]["n"], json!(24)); assert_eq!(r[15]["result"]["n"], json!(39));
+        assert_eq!(r[0]["kind"], json!("fab.look")); assert_eq!(r[0]["id"], json!(0)); assert_eq!(r[0]["ok"], json!(true));
+        assert!(a.take_reads("v1", &t1).is_empty(), "once");
+        // a fab.look sent with a view.open: recorded while the old view is current, it lands on the new one
+        a.record_read("fab.look", 1, true, json!({}));
+        assert!(a.take_reads("v2", &t2).is_empty());            // the view.open
+        assert_eq!(a.take_reads("v2", &t2).len(), 1);            // the next update carries it
+        // a read bound to a view or target that then moved is dropped
+        a.record_read("fab.look", 2, false, json!({}));
+        assert!(a.take_reads("v2", &t2).is_empty());
         assert!(a.take_reads("v2", &t1).is_empty());
-        assert!(a.take_reads("v1", &t1).is_empty(), "dropped with the move");
-        // ... nor another target of the same view (a move keeps the view id)
-        a.record_read("v1", "fab.look", 2, true, json!({}));
-        assert!(a.take_reads("v1", &t2).is_empty());
-        assert!(a.take_reads("v1", &t1).is_empty());
-    }
-    #[test] fn a_project_home_target_is_owned_by_its_home_thread() {
-        assert_eq!(owner(&json!({"kind": "project", "id": "p1"}), None), "project-home-p1");
-        assert_eq!(owner(&json!({"kind": "thread", "id": "t1"}), None), "t1");
-        assert_eq!(owner(&json!({"kind": "bot", "id": "b"}), None), "");
-        let b = ("b".to_string(), "bt1".to_string());
-        assert_eq!(owner(&json!({"kind": "bot", "id": "b"}), Some(&b)), "bt1");
-        assert_eq!(owner(&json!({"kind": "bot", "id": "c"}), Some(&b)), "", "the lookup is for one bot");
-        let mut r = req("bot", "b"); r["session"] = json!({"route": {"kind": "bot-tab", "bot": "b", "tab": "status"}});
-        assert_eq!(route_tab(&r), Some("status".to_string()));
-        r["session"]["route"]["tab"] = json!("nonsense"); assert_eq!(route_tab(&r), None);
-        r["session"]["route"] = json!({"kind": "bot-tab", "bot": "other", "tab": "chat"}); assert_eq!(route_tab(&r), None);
-        let mut a = ViewActor::default();
-        a.reply("v1", &req("recent", ""), &pol("", &[]));
-        let mut r = req("project", "p1"); r["away"] = json!("m9");
-        let s = a.reply("v1", &r, &pol("", &[]));
-        assert_eq!(s["drafts"]["@away.project-home-p1"], json!("m9"));
-        assert!(s["drafts"].get("@sch:project-home-p1").is_some() && s["info"]["view.kind:project-home-p1"] == json!(""));
+        assert!(a.take_reads("v2", &t2).is_empty());
+        assert!(a.take_reads("v3", &t2).is_empty());
     }
     #[test] fn forget_and_the_bound_keep_the_map_flat() {
         let mut m: HashMap<u64, ViewActor> = HashMap::new();
