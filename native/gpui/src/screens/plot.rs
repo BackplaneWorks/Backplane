@@ -289,6 +289,33 @@ mod tests {
             assert!(caps > 10 && polys > 0, "{name}: {caps} capsules, {polys} polygons");
         }
     }
+    /// The first frame the Rust hub sends after kicad.watch for the ecc83 demo (written by the hub's own plot::frame, test/gpui/files/fixtures/plot).
+    const BOARD: &[u8] = include_bytes!("../../../../test/gpui/files/fixtures/plot/ecc83-board.frame.cbor");
+    const SCH: &[u8] = include_bytes!("../../../../test/gpui/files/fixtures/plot/ecc83-sch.frame.cbor");
+    #[test] fn the_hubs_own_board_and_schematic_frames_decode() {
+        for (name, bytes, key) in [("board", BOARD, "0|/fixture/ecc83|"), ("schematic", SCH, "1|/fixture/ecc83|")] {
+            assert!(is_plot(bytes), "{name}: not recognised as a plot frame");
+            let mut s = Store::default(); s.receive(bytes).unwrap_or_else(|e| panic!("{name}: {e}"));
+            let f = s.frame.as_ref().unwrap();
+            assert_eq!(f.key, key, "{name}"); assert!(f.none.is_empty()); assert!(f.chunks.len() > 5, "{name}: {} chunks", f.chunks.len());
+            assert!(f.bbox[2] > f.bbox[0] && f.bbox[3] > f.bbox[1], "{name}: box {:?}", f.bbox);
+            let (mut caps, mut polys) = (0, 0);
+            for c in &f.chunks { caps += c.caps.len() / 5; polys += c.polys.len(); assert!(c.alpha > 0. && c.alpha <= 1.); }
+            assert!(caps > 10, "{name}: {caps} capsules"); if name == "board" { assert!(polys > 0, "no filled shapes on a board"); }
+            // every capsule end sits inside the box (a margin for a track's width)
+            let pad = 300_000.;
+            for c in &f.chunks { for sgm in c.caps.chunks_exact(5) { for (x, y) in [(sgm[0], sgm[1]), (sgm[2], sgm[3])] { assert!(x >= f.bbox[0] - pad && x <= f.bbox[2] + pad && y >= f.bbox[1] - pad && y <= f.bbox[3] + pad, "{name}: ({x},{y}) outside {:?}", f.bbox); } } }
+            let v = View::fit(f.bbox, 480., 600.); assert!(v.scale > 0. && v.scale.is_finite());
+        }
+    }
+    #[test] fn a_second_hub_frame_with_every_chunk_kept_is_the_same_plot() {
+        // a re-send of the same source: a delta keeping chunk i at i, which the real frame's chunks (all fresh) make possible to test
+        let mut s = Store::default(); s.receive(BOARD).unwrap();
+        let n = s.frame.as_ref().unwrap().chunks.len();
+        let mut o = Vec::new(); head(&mut o, 5, 3); o.extend([1]); text(&mut o, "plot"); o.extend([0x18, 31]); text(&mut o, "0|/fixture/ecc83|"); text(&mut o, "cs"); head(&mut o, 4, n);
+        for i in 0..n { head(&mut o, 0, i); }
+        s.receive(&o).unwrap(); assert_eq!(s.frame.as_ref().unwrap().chunks.len(), n);
+    }
     #[test] fn a_delta_against_another_source_is_refused() {
         let a = frame("0|/p|", &[chunk(1, 1, 1, 10, &[(0, 0), (5, 5)])], &[None], [0, 0, 10, 10]);
         let mut s = Store::default(); s.receive(&a).unwrap();
