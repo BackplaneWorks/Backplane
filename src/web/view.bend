@@ -3333,9 +3333,26 @@ def View.diff.at.k(git: Bool, +lc: I.Loc, +text: String, +none: String) -> List<
     case False{}:
       View.diff.nogit(lc, none)
 
-# (none: the folder the hub found no repository in, "diff.none:t")
-def View.diff.at(+lc: I.Loc, +text: String, +none: String) -> List<&2, D.Node>:
-  View.diff.at.k(String.is_empty(none), lc, text, none)
+# a Diff asked for and not answered yet (client.bend's Dv.open): the
+# pane's own head, its buttons off, "Loading…" where the summary goes
+def View.diff.wait(+lc: I.Loc) -> List<&2, D.Node>:
+  [D.El{"div", "", [D.At{"class", "diff-head"}], [
+      D.Dom.span("summary", MSG.T.viewer.loading(lc)),
+      D.El{"div", "", [D.At{"class", "diff-btns"}], [
+        View.diff.btn(True{}, "", "revert", "ask", MSG.T.diff.revert.tip(lc), MSG.T.palette.revert(lc)),
+        View.diff.btn(True{}, "", "git", "commit_push_pr", MSG.T.diff.pr.tip(lc), MSG.T.viewer.diff.pr(lc)),
+        View.diff.btn(True{}, "primary", "git", "commit_push", MSG.T.diff.commit.tip(lc), MSG.T.palette.commit(lc))]}]},
+    D.El{"div", "", [D.At{"class", "diff-body"}], Nil{}}]
+
+def View.diff.at.w(wait: Bool, +lc: I.Loc, +text: String, +none: String) -> List<&2, D.Node>:
+  match wait:
+    case True{}: View.diff.wait(lc)
+    case False{}: View.diff.at.k(String.is_empty(none), lc, text, none)
+
+# (none: the folder the hub found no repository in, "diff.none:t"; wait:
+# the asked Diff not answered yet, "diff.wait:t")
+def View.diff.at(+lc: I.Loc, +text: String, +none: String, +wait: String) -> List<&2, D.Node>:
+  View.diff.at.w(Bool.not(String.is_empty(wait)), lc, text, none)
 
 # The diff stays visible while the person decides what to discard.
 def View.revert.loc(on: Bool, +lc: I.Loc) -> List<&2, D.Node>:
@@ -5537,7 +5554,7 @@ def View.review(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
 def View.aside.k(+lc: I.Loc, i: Nat, +u: U.Ui) -> List<&2, D.Node>:
   match i:
     case 0n:
-      List.append(&2, D.Node, View.revert.loc(U.Ui.reverting(u), lc), View.diff.at(lc, U.Ui.view_get(u, "diff"), U.Ui.view_get(u, "diff.none")))
+      List.append(&2, D.Node, View.revert.loc(U.Ui.reverting(u), lc), View.diff.at(lc, U.Ui.view_get(u, "diff"), U.Ui.view_get(u, "diff.none"), U.Ui.view_get(u, "diff.wait")))
     case 1n:
       View.browser.loc(lc, u)
     case 2n:
