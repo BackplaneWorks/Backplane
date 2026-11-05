@@ -3,6 +3,7 @@
 turns, token usage, and the per-message housekeeping settings that grow with the log (stopped.<msg>, failed.<msg>, told.*)."""
 import sys, json, random
 out = sys.argv[1]; N = int(sys.argv[2]) if len(sys.argv) > 2 else 1_000_000; T = int(sys.argv[3]) if len(sys.argv) > 3 else 6666
+POLICY = len(sys.argv) > 4 and sys.argv[4] == "policy"   # every thread carries the settings the policies read
 random.seed(7)
 at = 1_790_000_000
 def w(f, o):
@@ -13,6 +14,19 @@ with open(out, 'w') as f:
         w(f, {"$": "ProjectCreated", "id": f"p{p}", "title": f"proj{p}", "root": f"/r/{p}", "at": at}); n += 1
     for t in range(T):
         w(f, {"$": "ThreadCreated", "id": f"t{t}", "project": f"p{t % 60}", "title": f"thread {t}", "env": "local", "branch": "", "worktree": "", "provider": "claude", "model": "", "at": at}); n += 1
+    if POLICY:
+        for t in range(T):
+            th = f"t{t}"
+            for k, v in [(f"autosettle.quiet.{th}", str(at)), (f"autosettle.output.{th}", f"a{t}"), (f"autosettle.audience.{th}", "person"), (f"autosettle.read.{th}", f"a{t}"),
+                         (f"liveness.{th}", json.dumps({"last": at, "nudged": 0, "stalled": False, "reported": False, "reason": "agent output"})), (f"alert.{th}", f"done\tturn-{th}\tc1\t{at}.1\t")]:
+                w(f, {"$": "SettingSet", "key": k, "value": v, "at": at}); n += 1
+            if t % 5 == 0:
+                w(f, {"$": "SettingSet", "key": f"bg.{th}", "value": "job1\tsleep 1\tx", "at": at}); w(f, {"$": "SettingSet", "key": f"launch.{th}", "value": f"1t{(t + 1) % T}", "at": at}); n += 2
+            if t % 10 == 0:
+                w(f, {"$": "SettingSet", "key": f"watch.{th}", "value": "w1\tpr", "at": at}); w(f, {"$": "SettingSet", "key": f"thread.parent.{th}", "value": f"t{(t + 7) % T}", "at": at}); n += 2
+            if t % 20 == 0:
+                w(f, {"$": "WakeSet", "id": f"w{t}", "by": th, "kind": "thread", "target": f"t{(t + 3) % T}", "events": ["done"], "once": True, "note": "", "at": at}); n += 1
+        w(f, {"$": "SettingSet", "key": "settle.idle.minutes", "value": "15", "at": at}); n += 1
     m = 0
     while n < N:
         t = random.randrange(T); th = f"t{t}"; at += 1; m += 1

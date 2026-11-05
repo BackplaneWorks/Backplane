@@ -24,6 +24,17 @@ fn main() {
     let mut changes = 0;
     for _ in 0..7 { let t = Instant::now(); changes = core.tick(2_000_000_000).len(); ticks.push(t.elapsed().as_secs_f64() * 1000.0); }
     ticks.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    // derive per batch: one user message on a random thread, 20,000 times (the writer-path cost of Transform::before_commit)
+    let mut ds = vec![];
+    let mut x: u64 = 88172645463325252;
+    for i in 0..20_000u64 {
+        x ^= x << 13; x ^= x >> 7; x ^= x << 17;
+        let th = format!("t{}", x % 6666);
+        let ev = serde_json::json!({"$": "MessagePosted", "thread": th, "msg": format!("mb{i}"), "role": if i % 2 == 0 { "user" } else { "assistant" }, "text": "please do the thing", "at": 1_900_000_000u64 + i});
+        let t = Instant::now(); let d = core.derive(&[ev]); ds.push((t.elapsed().as_secs_f64() * 1e6, d.len()));
+    }
+    let mut us: Vec<f64> = ds.iter().map(|x| x.0).collect(); us.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    println!("derive per batch (20000 single-message batches): mean {:.1} us median {:.1} us p99 {:.1} us max {:.1} us, {} extra events/batch", us.iter().sum::<f64>() / us.len() as f64, us[us.len() / 2], us[us.len() * 99 / 100], us[us.len() - 1], ds.iter().map(|x| x.1).sum::<usize>() as f64 / ds.len() as f64);
     println!("lines {n} lean {lean} threads {} settings {} fold {:.2} s ({:.0} k lines/s) rss_before {} KiB rss_after {} KiB added {} KiB tick median {:.2} ms max {:.2} ms (changes {changes})",
         core.st.threads.len(), core.st.settings.len(), fold.as_secs_f64(), n as f64 / fold.as_secs_f64() / 1000.0, r0, r1, r1.saturating_sub(r0), ticks[3], ticks[6]);
 }

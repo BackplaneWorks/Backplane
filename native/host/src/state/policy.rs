@@ -20,8 +20,8 @@ pub struct Core { pub st: State }
 impl Core {
     pub fn new() -> Core { let mut st = State::new(); st.lean = true; Core { st } }
     pub fn fold_line(&mut self, l: &str) { self.st.apply_line(l); }
-    /// fold a batch and return the events the policies derive from it (already folded here): quiet marks from the state before the batch,
-    /// message metadata from the state before each change (Auto.messages.metadata)
+    /// fold a batch and return the events the policies derive from it (already folded here), quiet marks first and then the message metadata:
+    /// the marks are judged against the state before the batch, the metadata against the state before each change (Auto.messages.metadata)
     pub fn derive(&mut self, events: &[Value]) -> Vec<Value> {
         let quiet = autosettle::quiet(&self.st, events);
         let mut derived = vec![];
@@ -32,8 +32,8 @@ impl Core {
             derived.extend(meta);
         }
         for q in &quiet { self.st.apply(q); }
-        derived.extend(quiet);
-        derived
+        // the log order is Bend's (Shelve.auto.fix): the batch, then the quiet marks, then the message metadata
+        quiet.into_iter().chain(derived).collect()
     }
     pub fn tick(&self, now_s: u64) -> Vec<Value> { autosettle::changes(&self.st, now_s) }
 }
@@ -60,7 +60,7 @@ impl Policy {
     /// caller must start that fold (`begin_resync` was needed).
     pub fn commit_failed(&self, first_seq: u64) -> bool {
         let mut g = self.inner.lock().unwrap();
-        if let Some(buf) = g.booting.as_mut() { buf.retain(|(s, _)| *s != first_seq); return false }
+        if let Some(buf) = g.booting.as_mut() { buf.retain(|(s, _)| *s < first_seq); return false } // the writer calls this once with the batch's base: nothing at or past it was written
         g.booting = Some(vec![]);
         true
     }
@@ -106,7 +106,7 @@ mod tests {
         let out = p.before_commit(3, vec![msg("t1", "a1", "assistant", 10)]);
         assert_eq!(out.len(), 3, "the message, then the policies' events");
         assert_eq!(out[0]["msg"], "a1");
-        assert_eq!(keys(&out), vec!["autosettle.output.t1".to_string(), "autosettle.quiet.t1".to_string()]);
+        assert_eq!(keys(&out), vec!["autosettle.quiet.t1".to_string(), "autosettle.output.t1".to_string()], "Bend's order: the batch, the quiet marks, then the metadata");
     }
     #[test] fn two_back_to_back_batches_derive_in_order_from_the_state_the_first_left() {
         let p = booted();
@@ -127,7 +127,7 @@ mod tests {
         assert!(p.tick(100).is_empty() && p.read("t1", 100).is_empty(), "nothing is decided while booting");
         let mut c = Core::new(); c.fold_line(P); c.fold_line(T);
         let derived = p.finish_boot(c, 2);
-        assert_eq!(keys(&derived), vec!["autosettle.output.t1".to_string(), "autosettle.quiet.t1".to_string()], "only the batch past line 2 derives");
+        assert_eq!(keys(&derived), vec!["autosettle.quiet.t1".to_string(), "autosettle.output.t1".to_string()], "only the batch past line 2 derives");
         let again = p.before_commit(4, vec![msg("t1", "a2", "assistant", 11)]);
         assert_eq!(again.len(), 3, "after boot the batch carries its own events");
     }
@@ -139,5 +139,15 @@ mod tests {
         assert!(!p.commit_failed(3), "a failed batch seen while resyncing just leaves the buffer");
         let mut c = Core::new(); c.fold_line(P); c.fold_line(T);
         assert!(p.finish_boot(c, 2).is_empty(), "the failed batch is gone from the buffer");
+    }
+    #[test] fn a_failed_batch_with_several_buffered_commits_forgets_all_of_them() {
+        // the writer's batch held three commits (seq 3, 4, 5) and calls commit_failed once with its base, 3; an earlier commit (2) was written
+        let p = Policy::new();
+        for (s, id) in [(2u64, "w"), (3, "x"), (4, "y"), (5, "z")] { let _ = p.before_commit(s, vec![msg("t1", id, "assistant", 10 + s)]); }
+        assert!(!p.commit_failed(3), "still booting: just forget");
+        let mut c = Core::new(); c.fold_line(P); c.fold_line(T);
+        let derived = p.finish_boot(c, 1);
+        let outs: Vec<&str> = derived.iter().filter(|e| e["key"].as_str() == Some("autosettle.output.t1")).map(|e| e["value"].as_str().unwrap()).collect();
+        assert_eq!(outs, vec!["w"], "only the commit before the failed base is replayed; x, y, z were never written");
     }
 }
