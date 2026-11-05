@@ -139,7 +139,7 @@ impl Render for Backplane {
         let model = thread["picker"]["models"].as_array().and_then(|m| m.iter().find(|x| x["on"] == true)).map(|m| string(m, "label")).unwrap_or_default();
         let model_short = if model.starts_with("Claude Code") { "default".to_string() } else { model.split(" · ").next().unwrap_or("").to_lowercase() };
         let effort = thread["picker"]["efforts"].as_array().and_then(|m| m.iter().find(|x| x["on"] == true)).map(|m| string(m, "label")).unwrap_or_default();
-        let perm = thread["permissions"]["choices"].as_array().and_then(|m| m.iter().find(|x| x["on"] == true)).map(|m| string(m, "label")).unwrap_or_default();
+        // Thread permissions are read-only here and are not drawn in the composer: the web's composer chip beside the model chip is the account chip.
         let ctx = string(&thread["picker"], "label").split("ctx ").nth(1).map(|s| format!("ctx {}", s.split(' ').next().unwrap_or(""))).unwrap_or_default();
         let todo = thread["todos"]["count"].as_str().unwrap_or("").to_string();
         let rail: Vec<AnyElement> = ["Terminal", "Commands", "", "Board", "Schematic", "3D", "Split", "Mech", "", "Files", "Diff", "Review", "Browser"].iter().map(|l| {
@@ -180,8 +180,10 @@ impl Render for Backplane {
                         .child(div().border_1().border_color(c("accent")).bg(c("view")).px_3().py_2().min_h(px(60.)).child(self.input.clone()))
                         .child(div().flex().gap_2().items_center()
                             .child(div().flex_1().px_3().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).child(format!("claude / {} / {}", if model_short.is_empty() { "default" } else { &model_short }, if effort.is_empty() { "auto" } else { &effort })))
-                            .child(chip(light, perm.trim_start_matches("Permissions: ").to_string()))
+                            .child(chip(light, "◉ Default".to_string()))
+                            .child(chip(light, "✎".to_string()))
                             .child(chip(light, ctx))
+                            .child(chip(light, "⎘".to_string()))
                             .child(div().id("send").px_4().py_1().bg(c("accent")).text_color(c("on-accent")).cursor_pointer().child("Send").on_click(cx.listener(|this, _, window, cx| this.send(&Send, window, cx)))))))
                 )
                 // right rail
