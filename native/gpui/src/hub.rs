@@ -40,14 +40,14 @@ fn millis()->u64 {SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_milli
 struct View {
     hub:String, cid:String, greeting:Value, target:Value, session:Value,
     view_id:String, revision:u64, next:u64, pending:HashMap<u64,(u64,Value,String)>,
-    outgoing:HashMap<u64,bool>, dirty:bool, controls:HashMap<u64,Control>, sent:HashMap<u64,std::time::Instant>, offered:HashMap<u64,String>, bases:delta::Bases,
+    outgoing:HashMap<u64,bool>, dirty:bool, controls:HashMap<u64,Control>, sent:HashMap<u64,std::time::Instant>, req_draft:HashMap<u64,String>, offered:HashMap<u64,String>, bases:delta::Bases,
 }
 #[derive(Default)] struct Control { next:u64, bytes:usize, parts:Vec<String>, done:bool }
 const MAX_CONTROLS:usize=4;const MAX_CONTROL_BYTES:usize=16*1024*1024;const MAX_CONTROL_PARTS:u64=4096;
 impl View {
     fn new(config:&Config)->Self {Self {hub:config.hub.replacen("ws://","http://",1),cid:format!("gpui-{}-{}",std::process::id(),millis()),
         greeting:Value::Null,target:json!({"kind":"recent","id":""}),session:json!({"sel":"","rid":millis(),"drafts":{},"open":{},"adding":false,"panel":false,"info":{}}),
-        view_id:String::new(),revision:0,next:(1_u64<<47)+millis(),pending:HashMap::new(),outgoing:HashMap::new(),dirty:false,controls:HashMap::new(),sent:HashMap::new(),offered:HashMap::new(),bases:delta::Bases::default()}}
+        view_id:String::new(),revision:0,next:(1_u64<<47)+millis(),pending:HashMap::new(),outgoing:HashMap::new(),dirty:false,controls:HashMap::new(),sent:HashMap::new(),req_draft:HashMap::new(),offered:HashMap::new(),bases:delta::Bases::default()}}
     fn request(&mut self, method:&str, extra:Value)->Value {
         self.next+=1;self.revision+=1;
         let mut p=json!({"version":1,"hub":self.hub,"generation":self.greeting["generation"],"epoch":self.greeting["epoch"],"requestRevision":self.revision,
@@ -64,6 +64,9 @@ impl View {
         self.pending.insert(self.next,(self.revision,self.target.clone(),method.into()));
         if self.sent.len()>64 {self.sent.clear();}
         self.sent.insert(self.next,std::time::Instant::now());
+        // the draft this request carried: a delta's "t" op puts back exactly that text (a later reply may have replaced the session since)
+        if self.req_draft.len()>64 {self.req_draft.clear();}
+        if let Some(d)=self.session["sel"].as_str().and_then(|s|self.session["drafts"][s].as_str()).filter(|d|!d.is_empty()) {self.req_draft.insert(self.next,d.to_string());}
         json!({"id":self.next,"m":method,"p":p})
     }
 }
@@ -140,7 +143,7 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                     let rtt_ms=v.sent.remove(&id).map_or(0.0,|t|recv.duration_since(t).as_secs_f64()*1000.0);
                     let is_delta=r.get("viewDelta").map_or(false,|d|d.get("ops").is_some());
                     if r.get("viewDelta").is_some() {
-                        let draft=v.session["sel"].as_str().and_then(|s|v.session["drafts"][s].as_str()).map(str::to_string);
+                        let draft=v.req_draft.remove(&id);
                         match delta::picture(r,&offered,revision,&v.bases,draft.as_deref()) {
                             Ok((full,token,body))=>{v.bases.keep(token,body);r=full;},
                             Err(error)=>{ // fail this reply and ask for the whole view next time
