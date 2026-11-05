@@ -133,7 +133,7 @@ fn send_field(this: &mut Backplane, f: &Field, cx: &mut Context<Backplane>) {
 }
 
 /// A vault Save: the field is the button's (`@apikey` is `kval`, else `sval`); the typed value leaves in one request straight to the hub, and
-/// the field is emptied (history too) only when it was sent. Nothing sent says why, as the phones do (`key-err`, `secret-err`).
+/// the field is emptied (history too) only when the hub accepted it. Nothing sent says why, as the phones do (`key-err`, `secret-err`).
 pub fn save_vault(this: &mut Backplane, b: &Btn, cx: &mut Context<Backplane>) {
     let key = b.value.starts_with("@apikey\u{1f}");
     let (field, err) = if key { ("kval", "key-err") } else { ("sval", "secret-err") };
@@ -145,19 +145,25 @@ pub fn save_vault(this: &mut Backplane, b: &Btn, cx: &mut Context<Backplane>) {
         Err(why) => say(this, why),
         Ok((m, p)) => {
             let tag = if key { "key" } else { "secret" };
-            if this.tx.try_send(Command::Rpc(m, Secret(p), tag)).is_ok() {
-                input.update(cx, |i, cx| i.set(String::new(), cx));
-                if key { let _ = this.tx.try_send(Command::Action("key-sent".into(), String::new())); }
-            } else { say(this, "The hub is not reachable. Try again."); }
+            // the field is kept until the hub's answer (rpc_done): accepted empties it and shuts the form, refused says why
+            if this.tx.try_send(Command::Rpc(m, Secret(p), tag)).is_err() { say(this, "The hub is not reachable. Try again."); }
         }
     }
     cx.notify();
 }
 
+/// Why the hub refused a request: its `error` is a plain string (`{"ok":false,"error":"..."}`); an object with `message` or `code` is read too.
+pub fn reply_error(x: &Value) -> String {
+    let e = &x["error"];
+    e.as_str().or_else(|| e["message"].as_str()).or_else(|| e["code"].as_str()).unwrap_or("").to_string()
+}
+
 /// The hub answered a direct request: a secret's outcome is shown by the client (`secret-sent` shuts the box, `secret-err` says why).
-pub fn rpc_done(this: &mut Backplane, tag: &str, ok: bool, why: &str) {
-    if tag != "secret" { return; }
-    let (a, v) = if ok { ("secret-sent", String::new()) } else { ("secret-err", if why.is_empty() { "The hub refused the secret".to_string() } else { why.to_string() }) };
+pub fn rpc_done(this: &mut Backplane, tag: &str, ok: bool, why: &str, cx: &mut Context<Backplane>) {
+    let (name, sent, err) = match tag { "key" => ("kval", "key-sent", "key-err"), "secret" => ("sval", "secret-sent", "secret-err"), _ => return };
+    let (a, v) = if ok { (sent, String::new()) } else { (err, if why.is_empty() { format!("The hub refused the {}", if tag == "key" { "key" } else { "secret" }) } else { why.to_string() }) };
+    // the typed value is kept until the hub accepted it, so a refusal can be corrected and sent again
+    if ok { if let Some(input) = this.screens.fields.get(name).map(|s| s.input.clone()) { input.update(cx, |i, cx| i.set(String::new(), cx)); } }
     let _ = this.tx.try_send(Command::Action(a.into(), v));
 }
 
@@ -241,6 +247,11 @@ mod tests {
         assert_eq!(save_request("@apikey\u{1f}old", "typed", "v").unwrap().1["name"], "typed", "the name typed last wins");
     }
     /// Type "abc": the reply for "a" arrives late and must not put "a" back; when the hub really clears the field afterwards, it is cleared.
+    #[test] fn the_hubs_reason_is_read_from_a_plain_error_string() {
+        assert_eq!(reply_error(&j(r#"{"t":"reply","id":1073741825,"ok":false,"error":"A secret is at least 8 characters"}"#)), "A secret is at least 8 characters");
+        assert_eq!(reply_error(&j(r#"{"ok":false,"error":{"message":"nope","code":"bad"}}"#)), "nope"); assert_eq!(reply_error(&j(r#"{"ok":false,"error":{"code":"bad"}}"#)), "bad");
+        assert_eq!(reply_error(&j(r#"{"ok":true}"#)), "");
+    }
     #[test] fn echoes_are_ignored_and_a_real_clear_after_catching_up_is_taken() {
         let mut e = Echo::new("");
         for t in ["a", "ab", "abc"] { e.remember(t); }

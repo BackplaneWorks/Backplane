@@ -91,10 +91,10 @@ fn diff_page(cx: &mut Context<Backplane>, light: bool, diff: &Value) -> AnyEleme
 fn plot_page(cx: &mut Context<Backplane>, light: bool, open: &str, viewer: &Value, plot: &super::plot::Store, pv: &mut super::plotview::PlotView) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let Some(frame) = plot.frame.as_ref() else { return div().p_3().text_color(c("dim")).child(if open == "board" { "Loading the board…" } else { "Loading the schematic…" }).into_any_element() };
-    if !frame.none.is_empty() { return div().p_3().text_color(c("dim")).child(frame.none.clone()).into_any_element(); }
     // the frame must be the source this viewer asks for: another project's board stays off the screen until its own plot arrives
     let want = string(viewer, "key");
-    if !want.is_empty() && frame.key != want { return div().p_3().text_color(c("dim")).child(if open == "board" { "Loading the board…" } else { "Loading the schematic…" }).into_any_element(); }
+    if !want.is_empty() && !frame.key.is_empty() && frame.key != want { return div().p_3().text_color(c("dim")).child(if open == "board" { "Loading the board…" } else { "Loading the schematic…" }).into_any_element(); }
+    if !frame.none.is_empty() { return div().p_3().text_color(c("dim")).child(frame.none.clone()).into_any_element(); }
     let (w, h) = pv.bounds.map_or((480., 600.), |b| (f32::from(b.size.width), f32::from(b.size.height)));
     let view = super::plotview::ensure_view(pv, frame, w, h);
     let mut col = div().size_full().flex().flex_col();

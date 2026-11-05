@@ -69,7 +69,8 @@ impl Backplane {
                 self.apply_ms=t_apply.elapsed().as_secs_f64()*1000.0;self.timing=Some(timing);self.applied_at=Some(Instant::now());
             },
             Event::Plot(b)=>self.plot_received(&b),
-            Event::Rpc(tag,ok,why)=>screens::settings::rpc_done(self,tag,ok,&why),
+            Event::Rpc(tag,ok,why)=>screens::settings::rpc_done(self,tag,ok,&why,cx),
+            Event::PlotTooBig(n)=>self.screens.plot.too_big(n),
             Event::Status(s)=>{self.status=s;if self.status=="Connected"{self.error.clear();}},
             Event::Accepted=>{self.input.update(cx,|input,cx|input.set(String::new(),cx));self.drafts.remove(&self.selected);},
             Event::Error(e)=>{self.error=e;self.status="Disconnected".into();},

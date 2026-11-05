@@ -136,6 +136,8 @@ pub struct Store { held: Vec<Arc<Chunk>>, held_key: String, pub frame: Option<Fr
 impl Store {
     pub fn reset(&mut self) { self.held.clear(); self.held_key.clear(); self.frame = None; }
     fn fail(&mut self, key: String, fam: String, why: &str) { self.held.clear(); self.held_key.clear(); self.frame = Some(Frame { key, fam, none: why.to_string(), ..Default::default() }); }
+    /// A frame the client will not take (over its size limit): said, not left on Loading.
+    pub fn too_big(&mut self, bytes: usize) { self.fail(String::new(), String::new(), &format!("This plot is {} MB, too large to show here.", bytes >> 20)); }
     /// Apply one plot frame. Err names a frame that cannot be used; the store is then empty, as on the phones.
     pub fn receive(&mut self, bytes: &[u8]) -> Result<(), &'static str> {
         let Some(o) = decode(bytes) else { self.fail(String::new(), String::new(), "The plot from the hub could not be read. Reopen the view to load it again."); return Err("undecodable plot frame") };
@@ -321,6 +323,7 @@ mod tests {
         for i in 0..n { head(&mut o, 0, i); }
         s.receive(&o).unwrap(); assert_eq!(s.frame.as_ref().unwrap().chunks.len(), n);
     }
+    #[test] fn an_oversized_plot_is_said() { let mut s = Store::default(); s.too_big(40 << 20); assert!(s.frame.as_ref().unwrap().none.contains("40 MB")); }
     #[test] fn a_delta_against_another_source_is_refused() {
         let a = frame("0|/p|", &[chunk(1, 1, 1, 10, &[(0, 0), (5, 5)])], &[None], [0, 0, 10, 10]);
         let mut s = Store::default(); s.receive(&a).unwrap();
