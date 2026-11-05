@@ -7,8 +7,8 @@
 //! ProjectCreated/Removed, ThreadCreated/Renamed/Settled/Unsettled/Woke/Archived/Pinned/Deleted, MessagePosted,
 //! ActivityLogged, TurnChanged (+ the todos bookkeeping it does to settings), PendingChanged, SessionSet,
 //! WorktreeSet/Skipped/Removed, ThreadMerged, SettingSet, ThreadParentSet, ThreadForked, ProviderSet (approximate:
-//! see `switch`), ModesSet. Not folded here (they touch parts of the Bend State the digest does not print): bots,
-//! mail, tasks, asks, devices, nav, queues, usage, deploy, routines, todos lists.
+//! see `switch`), ModesSet, UsageSet (the usage.<thread> setting). Not folded here (they touch parts of the Bend State the digest does not print): bots,
+//! mail, tasks, asks, devices, nav, queues, TurnUsage's token totals (tok.*), deploy, routines, todos lists.
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -140,6 +140,16 @@ impl State {
             "SettingSet" => { let (k, v) = (s(e, "key")?, s(e, "value")?); self.set(k, v); }
             "ThreadParentSet" => { let (id, p) = (s(e, "id")?, s(e, "parent")?); self.set(&format!("thread.parent.{id}"), p); }
             "ThreadForked" => { let (id, src) = (s(e, "id")?, s(e, "source")?); self.set(&format!("fork.{id}"), src); }
+            "UsageSet" => {
+                // State.usage: a new reading over the old one; 0 keeps the old part
+                let (th, used, window) = (s(e, "thread")?, n(e, "used")?, n(e, "window")?);
+                let key = format!("usage.{th}");
+                let old = self.get(&key, "");
+                let mut parts = old.split('/').map(|x| x.parse::<u64>().unwrap_or(0));
+                let (ou, ow) = (parts.next().unwrap_or(0), parts.next().unwrap_or(0));
+                let keep = |new: u64, old: u64| if new == 0 { old } else { new };
+                self.set(&key, &format!("{}/{}", keep(used, ou), keep(window, ow)));
+            }
             "ProviderSet" => { self.switch(s(e, "id")?, s(e, "provider")?, s(e, "model")?); }
             _ => {}
         }
@@ -222,6 +232,10 @@ mod tests {
         let s = fold(&[PC, TC, r#"{"$":"ThreadPinned","id":"t1","pinned":true,"at":1}"#, r#"{"$":"ThreadSettled","id":"t1","manual":false,"at":60}"#]);
         assert!(!s.threads["t1"].pinned); assert_eq!(s.threads["t1"].override_, Override::None);
         let s = fold(&[PC, TC, r#"{"$":"ThreadSettled","id":"t1","manual":true,"at":60}"#]); assert_eq!(s.threads["t1"].override_, Override::ForcedSettled);
+    }
+    #[test] fn usage_keeps_the_old_part_when_the_new_one_is_zero() {
+        let s = fold(&[r#"{"$":"UsageSet","thread":"t1","used":100,"window":200,"at":1}"#, r#"{"$":"UsageSet","thread":"t1","used":0,"window":300,"at":2}"#, r#"{"$":"UsageSet","thread":"t1","used":7,"window":0,"at":3}"#]);
+        assert_eq!(s.settings["usage.t1"], "7/300");
     }
     #[test] fn an_empty_ledger_setting_removes_the_key_others_keep_the_empty_value() {
         let s = fold(&[r#"{"$":"SettingSet","key":"told.k1","value":"x","at":1}"#, r#"{"$":"SettingSet","key":"told.k1","value":"","at":2}"#, r#"{"$":"SettingSet","key":"other","value":"","at":3}"#]);
