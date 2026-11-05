@@ -22,7 +22,7 @@ pub fn record(out: &str, entry: &str, when: &str) -> String {
 
 /// StepJob.run: one capture, logged as an Act when something changed.
 pub async fn step(hub: std::sync::Arc<crate::hub::Hub>, thread: String, cwd: String, entry: String, home: String, when: &str) {
-    if cwd.is_empty() { return }
+    if cwd.is_empty() || crate::copy::on() { return } // a copy runs no git that writes (Copy.git.reads): no hidden refs, no .backplane/history.git in a real folder
     let reg = format!("{home}/history.trusted");
     let out = fgit::step_capture(&cwd, &thread, &reg).await;
     let rec = record(&out, &entry, when); if rec.is_empty() { return }
@@ -30,9 +30,9 @@ pub async fn step(hub: std::sync::Arc<crate::hub::Hub>, thread: String, cwd: Str
     let _ = hub.commit(&json!({"$":"ActivityLogged","thread":thread,"act":format!("step:{commit}"),"tone":"step","kind":"kicad","summary":rec,"at":super::now_s()})).await;
 }
 /// GitJob checkpoint0: a new thread's first turn is checkpoint 0 (inside a git repository only).
-pub async fn checkpoint0(cwd: String, thread: String) { if cwd.is_empty() || !fgit::is_repo(&cwd).await { return } if fgit::checkpoint_count(&cwd, &thread).await == 0 { let _ = fgit::checkpoint_capture(&cwd, &thread, 0).await; } }
+pub async fn checkpoint0(cwd: String, thread: String) { if cwd.is_empty() || crate::copy::on() || !fgit::is_repo(&cwd).await { return } if fgit::checkpoint_count(&cwd, &thread).await == 0 { let _ = fgit::checkpoint_capture(&cwd, &thread, 0).await; } }
 /// GitJob checkpoint: the work tree at a turn's end, as the next turn number.
-pub async fn checkpoint(cwd: String, thread: String) { if cwd.is_empty() || !fgit::is_repo(&cwd).await { return } let n = fgit::checkpoint_count(&cwd, &thread).await; let _ = fgit::checkpoint_capture(&cwd, &thread, n).await; }
+pub async fn checkpoint(cwd: String, thread: String) { if cwd.is_empty() || crate::copy::on() || !fgit::is_repo(&cwd).await { return } let n = fgit::checkpoint_count(&cwd, &thread).await; let _ = fgit::checkpoint_capture(&cwd, &thread, n).await; }
 
 #[cfg(test)]
 mod tests {
