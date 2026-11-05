@@ -24,7 +24,7 @@ IDS="pair projects-threads send-image stream switch-fast popups bots-rooms viewe
 [ "$J" = all ] || IDS=$J
 for id in $IDS; do
   fn=$(echo "$id" | tr - _)
-  rm -f "$OUT/$id.json" "$OUT/$id.mp4"
+  rm -rf "$OUT/$id.json" "$OUT/$id.mp4" "$OUT/$id.xcresult"
   # the app starts fresh each journey (the test relaunches it; a pair journey must find it unpaired)
   xcrun simctl terminate "$SIM_UDID" dev.backplane.gpui >/dev/null 2>&1
   VS=$(now_ms)
@@ -38,13 +38,14 @@ for id in $IDS; do
   else MEM=; fi
   TEST_RUNNER_HUB_HOST=$HUB_HOST TEST_RUNNER_HUB_PORT=$HUB_PORT TEST_RUNNER_HUB_TOKEN_FILE=$HUB_TOKEN_FILE TEST_RUNNER_OUT=$OUT \
   TEST_RUNNER_HUB_CTL=${HUB_CTL:-} TEST_RUNNER_LONG_SECS=${LONG_SECS:-300} TEST_RUNNER_VIDEO_START_EPOCH_MS=$VS \
-  xcodebuild test-without-building -quiet -project "$HERE/E2E.xcodeproj" -scheme BackplaneE2E -sdk iphonesimulator \
+  xcodebuild test-without-building -resultBundlePath "$OUT/$id.xcresult" -project "$HERE/E2E.xcodeproj" -scheme BackplaneE2E -sdk iphonesimulator \
     -destination "platform=iOS Simulator,id=$SIM_UDID" -derivedDataPath "$DD" CODE_SIGNING_ALLOWED=NO \
     -only-testing:"BackplaneE2E/Journeys/test_$fn" > "$OUT/$id.xcodebuild.log" 2>&1
   rc=$?
   [ -n "$MEM" ] && kill "$MEM" 2>/dev/null
   kill -INT "$REC" 2>/dev/null; wait "$REC" 2>/dev/null
   [ -s "$OUT/$id.json" ] || printf '{"journey":"%s","client":"ios","status":"fail","blocked":[],"metrics":{"video_start_epoch_ms":%s},"notes":["the test did not write a result (xcodebuild exit %s): see %s.xcodebuild.log"],"capture":"%s/%s.mp4"}\n' "$id" "$VS" "$rc" "$id" "$OUT" "$id" > "$OUT/$id.json"
+  grep -E "error: -\[|JourneyTests.swift:[0-9]+: error|Driver.swift:[0-9]+: error|failed -" "$OUT/$id.xcodebuild.log" | head -3 > "$OUT/$id.assert.txt"
   echo "$id: xcodebuild exit $rc"
 done
 /usr/bin/python3 - "$OUT" <<'PY'
