@@ -15,7 +15,7 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun ViewStartupBanner(m: AppModel) {
     val hub = m.screen?.hub.orEmpty()
-    val parked = setOf(StartupPolicy.COMPATIBILITY_REQUIRED, StartupPolicy.PAIRING_REFUSED)
+    val parked = setOf(StartupPolicy.COMPATIBILITY_REQUIRED, StartupPolicy.PAIRING_REFUSED, StartupPolicy.VIEW_FAILED)
     val key = if (hub.isNotEmpty()) hub.takeIf { m.startup[it] in parked }
         else m.startup.keys.sorted().firstOrNull { m.startup[it] in parked }
     if (key == null) ReconnectLine(m, hub)
@@ -27,6 +27,7 @@ fun ViewStartupBanner(m: AppModel) {
             // refuses the link's token is not old: the phone pairs again.
             val text = if (m.startup[key] == StartupPolicy.PAIRING_REFUSED)
                 NativeMessages.native_hub_failure(m.screen?.locale ?: "en", "authentication", "")
+                else if (m.startup[key] == StartupPolicy.VIEW_FAILED) "View failed: ${m.viewFailure[key].orEmpty()}"
                 else "This hub needs an update"
             Text("$text · $key", style = MaterialTheme.typography.labelSmall)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
