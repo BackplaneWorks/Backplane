@@ -44,8 +44,9 @@ fn target_valid(t: &Value) -> bool {
     within(i, 1024) && ((k == "recent" && i.is_empty()) || (!i.is_empty() && matches!(k, "project" | "thread" | "bot" | "room")))
 }
 
-/// ThinContext.anchor == 0: the request asks for the newest window (no anchor, or the anchor at offset 0 with no id).
-fn read_anchor_newest(p: &Value) -> bool { p["anchor"]["offset"].as_u64().unwrap_or(0) == 0 && p["anchor"]["id"].as_str().map_or(true, str::is_empty) }
+/// Hub.autosettle.read_view: only a rendered `view.open` of a thread that is not a mirror marks its newest reply read (view.update polls,
+/// view.page history pages and every other request do not).
+fn acknowledges(method: &str, mirror: bool) -> bool { method == "view.open" && !mirror }
 
 impl Hub {
     /// The view branch of `Hub::request`: `m` starts with "view.".
@@ -107,11 +108,12 @@ impl Hub {
         let mut result = self.assemble(&p, &view_id, rev, &pol);
         if let (Some(w), Some(o)) = (window, result.as_object_mut()) { if o.contains_key("window") { o.insert("window".into(), w); } }
         let result = Self::delta_reply(c, &p, result);
-        // Hub.autosettle.read_view: explicitly opening a thread's newest conversation acknowledges its resident reply (not searches, history
-        // pages, stale or passive polls): the policies decide (0 or 1 SettingSet autosettle.read.<t>), committed here after the answer is built
-        if m == "view.open" && result["remoteReady"] == json!(true) && result.get("nextTarget").is_none() && read_anchor_newest(&p) {
+        // Hub.autosettle.read_view: runs after any rendered view.open (its context's anchor is always 0, `Hub.thin.dispatch` kind 0, so the request's
+        // own `anchor` plays no part); errors never get here. Only a mirror (hub.far().has) is left out. The policies decide (0 or 1 SettingSet
+        // autosettle.read.<t>); committed in a spawned task after the answer is built.
+        if m == "view.open" {
             let th = match p["target"]["kind"].as_str() { Some("thread") => p["target"]["id"].as_str().map(str::to_string), Some("bot") => bot.as_ref().map(|(_, t)| t.clone()), _ => None };
-            if let (Some(th), Some(pol)) = (th.filter(|t| !t.is_empty() && !self.far().map_or(false, |f| f.has(t))), crate::statehost::policies()) {
+            if let (Some(th), Some(pol)) = (th.filter(|t| !t.is_empty() && acknowledges(m, self.far().map_or(false, |f| f.has(t)))), crate::statehost::policies()) {
                 let me = self.arc();
                 tokio::spawn(async move { let evs = pol.read(&th, now_ms() / 1000).await; if !evs.is_empty() { let _ = me.commit_many(&evs).await; } });
             }
@@ -208,11 +210,10 @@ impl Hub {
 #[cfg(test)]
 mod read_tests {
     use super::*;
-    // ThinContext.anchor == 0 (Hub.autosettle.read_view): only a request for the newest window acknowledges a reply
-    #[test] fn only_the_newest_window_open_counts_as_a_read() {
-        assert!(read_anchor_newest(&json!({"target": {"kind": "thread", "id": "t1"}})));
-        assert!(read_anchor_newest(&json!({"anchor": {"id": "", "offset": 0}})));
-        assert!(!read_anchor_newest(&json!({"anchor": {"id": "m5", "offset": 0}})));
-        assert!(!read_anchor_newest(&json!({"anchor": {"id": "", "offset": 3}})));
+    // Hub.autosettle.read_view: view.open reads; view.update and view.page do not; a mirror does not
+    #[test] fn only_a_view_open_of_a_local_thread_acknowledges() {
+        assert!(acknowledges("view.open", false));
+        assert!(!acknowledges("view.open", true));
+        for m in ["view.update", "view.page", "view.action", "view.search", "view.message"] { assert!(!acknowledges(m, false), "{m}") }
     }
 }
