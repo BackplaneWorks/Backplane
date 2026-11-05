@@ -13,9 +13,9 @@ case $mode in
  proof)
   bun test/gpui/soak/selftest.mjs | tee $O/selftest.txt || exit 1
   H=$HOME/soak-home; rm -rf $H
-  bun test/gpui/soak/run.mjs bin=$HUB policy=$POL home=$H out=$O/proof fresh=1 secs=${1:-3600} sample=30 port=3830 stop=kill commit=$(git rev-parse --short HEAD 2>/dev/null)
+  bun test/gpui/soak/run.mjs bin=$HUB ${NOPOL:+} $([ -n "$NOPOL" ] || echo policy=$POL) home=$H out=$O/proof${NOPOL:+-nopolicy} fresh=1 secs=${1:-3600} sample=30 port=3830 stop=kill commit=$(git rev-parse --short HEAD 2>/dev/null)
   rc=$?
-  python3 test/gpui/soak/analyze.py $O/proof/samples.jsonl ${WARM:-900} --json $O/proof/analysis.json | tee $O/proof/analysis.txt
+  python3 test/gpui/soak/analyze.py $O/proof${NOPOL:+-nopolicy}/samples.jsonl ${WARM:-900} --json $O/proof${NOPOL:+-nopolicy}/analysis.json | tee $O/proof${NOPOL:+-nopolicy}/analysis.txt
   exit $rc ;;
  crash)
   scen=$1; rounds=${2:-10}; ev=${3:-1000000}
