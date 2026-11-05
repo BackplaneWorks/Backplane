@@ -656,6 +656,7 @@ if missing:
 (cd "$STAGE/$NAME" && find . -type f -print0 | sort -z | xargs -0 sha256sum) > "$OUT/manifest.sha256"
 REV=$(git -C "$SRC" rev-parse HEAD); DIRTY=$( [ -n "$(git -C "$SRC" status --porcelain)" ] && echo yes || echo no )
 echo "source: $SRC @ $REV (dirty: $DIRTY), $(wc -l < "$OUT/manifest.sha256") files, $(du -sh "$STAGE/$NAME" | cut -f1)"
+[ ${#INCLUDE[@]} -gt 0 ] && echo "include-file: uploading ONLY these ${#INCLUDE[@]} files (the whole tree is not sent)"
 
 # the sandbox. Every create request is recorded first (it counts against
 # Boat's start windows whatever its answer). Rate-limited: the reservation is
