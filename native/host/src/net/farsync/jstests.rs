@@ -102,25 +102,29 @@ fn line(v: Value) -> String { v.to_string() }
     let copy = root.join("copy"); std::fs::create_dir_all(copy.join("far")).unwrap(); std::fs::copy(&jfile, copy.join(format!("far/{me_link}.jsonl"))).unwrap();
     let again = FarStore::open(&copy).unwrap();
     assert!(again.has(&format!("{me_link}~trs1")), "FarStore reads a mirror file written by the Bend hub");
-    // ----- Bend reads a mirror file Rust wrote: a second JS hub starts on a file this side wrote (our mirror of the first hub's history) -----
+    // ----- Bend reads a mirror file Rust wrote: a second JS hub starts on it. A control: the same hub on a file the Bend hub wrote -----
     let _ = js.kill().await; tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-    let (j2, link2) = (root.join("js2"), "pmirrorfrom0001");
+    let (j2, link2, link3) = (root.join("js2"), "pmirrorfrom0001", "pmirrorfrom0002");
     std::fs::create_dir_all(j2.join("far")).unwrap();
-    std::fs::copy(b.home.join(format!("far/{me_link}.jsonl")), j2.join(format!("far/{link2}.jsonl"))).unwrap();
-    std::fs::write(j2.join("events.jsonl"), line(json!({"$":"PeerSet","id":link2,"name":"rustmirror","url":"http://127.0.0.1:1","revoked":false,"at":at(50)})) + "\n").unwrap();
+    std::fs::copy(b.home.join(format!("far/{me_link}.jsonl")), j2.join(format!("far/{link2}.jsonl"))).unwrap(); // written by Rust: JS-thread history
+    std::fs::copy(&jfile, j2.join(format!("far/{link3}.jsonl"))).unwrap();                                     // written by the Bend hub: our history
+    std::fs::write(j2.join("events.jsonl"), [link2, link3].iter().map(|l| line(json!({"$":"PeerSet","id":l,"name":format!("n{l}"),"url":"http://127.0.0.1:1","revoked":false,"at":at(50)}))).collect::<Vec<_>>().join("\n") + "\n").unwrap();
     let mut js2 = tokio::process::Command::new(&bin).args(["--home", j2.to_str().unwrap(), "--port", "3917", "--host", "127.0.0.1", "--no-tailscale", "--foreground"])
         .env("BACKPLANE_AGENTS", &standins).env("BACKPLANE_NO_UPDATE", "1").env("HOME", &root).stdout(Stdio::null()).stderr(Stdio::null()).kill_on_drop(true).spawn().expect("start the second JS hub");
     assert!(wait_for(60, || std::net::TcpStream::connect(("127.0.0.1", 3917)).is_ok() && j2.join("token").exists()).await, "the second JS hub listens");
     let token = std::fs::read_to_string(j2.join("token")).unwrap().trim().to_string();
     use futures_util::StreamExt;
     let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://127.0.0.1:3917/ws?token={token}&since=0")).await.expect("join the second JS hub");
-    let mut seen = String::new();
+    let (mut seen, mut kinds) = (String::new(), vec![]);
     let _ = tokio::time::timeout(std::time::Duration::from_secs(30), async { while let Some(Ok(m)) = ws.next().await {
         let text = match m { tokio_tungstenite::tungstenite::Message::Text(t) => t.to_string(), tokio_tungstenite::tungstenite::Message::Binary(b) => crate::cbor::decode(&b).map(|v| v.to_string()).unwrap_or_default(), _ => continue };
+        if let Ok(v) = serde_json::from_str::<Value>(&text) { kinds.push(format!("{}:{}", v["t"].as_str().unwrap_or("?"), v["link"].as_str().unwrap_or(""))) }
         seen.push_str(&text);
-        if seen.contains("short one") && seen.contains(&format!("{link2}~tjs1")) { break }
+        if seen.contains(&format!("{link2}~tjs1")) && seen.contains(&format!("{link3}~trs0")) { break }
     } }).await;
-    assert!(seen.contains(&format!("{link2}~tjs1")) && seen.contains("short one"), "the Bend hub folded the mirror file Rust wrote (frames: {} bytes)", seen.len());
+    // the control first: if the Bend hub's own file does not show here, the method is wrong, not the file
+    assert!(seen.contains(&format!("{link3}~trs0")), "CONTROL: the Bend hub folds the file the Bend hub wrote (frames {kinds:?}, {} bytes)", seen.len());
+    assert!(seen.contains(&format!("{link2}~tjs1")) && seen.contains("short one"), "the Bend hub folds the mirror file Rust wrote (frames {kinds:?}, {} bytes)", seen.len());
     let _ = js2.kill().await;
     let _ = std::fs::remove_dir_all(&root);
 }
