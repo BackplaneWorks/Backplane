@@ -99,6 +99,7 @@ fn chip(light: bool, label: String) -> Div {
 
 impl Render for Backplane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let t_render = std::time::Instant::now();
         if self.want_focus { self.want_focus = false; self.input.focus_handle(cx).focus(window); }
         self.frame_marks(window, cx);
         let light = self.theme_override.unwrap_or(self.data["theme"] == "light");
@@ -214,7 +215,7 @@ impl Render for Backplane {
         }).collect();
         let connected = self.status == "Connected";
 
-        div().size_full().flex().flex_col().bg(c("bg")).text_color(c("text")).text_size(px(13.)).font_family("Noto Sans Mono CJK JP").line_height(px(20.))
+        let el = div().size_full().flex().flex_col().bg(c("bg")).text_color(c("text")).text_size(px(13.)).font_family("Noto Sans Mono CJK JP").line_height(px(20.))
             .on_action(cx.listener(Self::send)).on_action(cx.listener(Self::close_popup))
             // top bar
             .child(div().h(px(36.)).flex_shrink_0().flex().items_center().justify_between().px_3().border_b_1().border_color(c("line")).bg(c("bg"))
@@ -259,6 +260,8 @@ impl Render for Backplane {
                 )
                 // right rail
                 .child(div().w(px(72.)).h_full().flex_shrink_0().border_l_1().border_color(c("line")).flex().flex_col().py_2().children(rail)))
-            .into_any_element()
+            .into_any_element();
+        self.render_us = t_render.elapsed().as_micros() as u64;
+        el
     }
 }

@@ -68,8 +68,20 @@ impl Backplane {
         if !done { return; }
         let (label, t0, seq) = (p.label.clone(), p.started, p.seq);
         self.pending.as_mut().unwrap().armed = true;
+        // where the time went: hub round trip, decode, delta/merge, applying the body, building the tree, waiting for the frame
+        let phases = match (&self.timing, self.applied_at) {
+            (Some(t), Some(a)) => Some((t.clone(), self.apply_ms, self.render_us as f64 / 1000.0, a)),
+            _ => None,
+        };
         window.on_next_frame(move |_, cx| {
-            metric(started, "input", json!({"step": label, "ok": true, "latency_ms": (t0.elapsed().as_secs_f64() * 1e6).round() / 1e3}));
+            let mut fields = json!({"step": label, "ok": true, "latency_ms": (t0.elapsed().as_secs_f64() * 1e6).round() / 1e3});
+            if let Some((t, apply_ms, render_ms, applied)) = phases {
+                let r = |v: f64| (v * 1e3).round() / 1e3;
+                fields["hub_rtt_ms"] = json!(r(t.rtt_ms)); fields["decode_ms"] = json!(r(t.decode_ms)); fields["process_ms"] = json!(r(t.process_ms));
+                fields["apply_ms"] = json!(r(apply_ms)); fields["render_build_ms"] = json!(r(render_ms));
+                fields["applied_to_frame_ms"] = json!(r(applied.elapsed().as_secs_f64() * 1000.0)); fields["bytes"] = json!(t.bytes); fields["delta"] = json!(t.delta);
+            }
+            metric(started, "input", fields);
             let _ = this.update(cx, |t, cx| { if t.pending.as_ref().map_or(false, |p| p.seq == seq) { t.pending = None; t.pump(cx); } });
         });
         cx.notify();
@@ -78,6 +90,7 @@ impl Backplane {
     fn begin(&mut self, label: String, goal: Goal, cx: &mut Context<Self>) {
         self.seq += 1;
         let seq = self.seq;
+        self.timing = None; self.applied_at = None;
         self.pending = Some(Pending { label, started: Instant::now(), goal, armed: false, seq });
         // A step whose result never shows is reported failed after 15 s so the script still ends.
         cx.spawn(async move |this, cx| {

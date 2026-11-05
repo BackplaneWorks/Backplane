@@ -7,7 +7,9 @@ use tokio::sync::mpsc::{self, Sender};
 use tokio_tungstenite::tungstenite::{Message, protocol::WebSocketConfig};
 
 #[derive(Debug)] pub enum Command { Select(String), Send(String), Draft(String), Action(String,String), Page(String) }
-#[derive(Debug)] pub enum Event { Picture(Value), Status(String), Accepted, Error(String) }
+#[derive(Debug)] pub enum Event { Picture(Value,Timing), Status(String), Accepted, Error(String) }
+/// Where a reply's time went before the UI saw it: send to frame received, decode, delta/merge, and the body's size.
+#[derive(Debug,Clone,Default)] pub struct Timing { pub rtt_ms:f64, pub decode_ms:f64, pub process_ms:f64, pub bytes:usize, pub delta:bool }
 #[derive(Clone)] pub struct Config { pub hub:String, pub token_file:PathBuf, pub exit_after:Option<f64>, pub script:Option<PathBuf>, pub swatches:bool, pub gallery:bool, pub fonts:bool, pub theme:Option<String> }
 impl Config {
     pub fn parse() -> Result<Self> {
@@ -38,14 +40,14 @@ fn millis()->u64 {SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_milli
 struct View {
     hub:String, cid:String, greeting:Value, target:Value, session:Value,
     view_id:String, revision:u64, next:u64, pending:HashMap<u64,(u64,Value,String)>,
-    outgoing:HashMap<u64,bool>, dirty:bool, controls:HashMap<u64,Control>, offered:HashMap<u64,String>, bases:delta::Bases,
+    outgoing:HashMap<u64,bool>, dirty:bool, controls:HashMap<u64,Control>, sent:HashMap<u64,std::time::Instant>, offered:HashMap<u64,String>, bases:delta::Bases,
 }
 #[derive(Default)] struct Control { next:u64, bytes:usize, parts:Vec<String>, done:bool }
 const MAX_CONTROLS:usize=4;const MAX_CONTROL_BYTES:usize=16*1024*1024;const MAX_CONTROL_PARTS:u64=4096;
 impl View {
     fn new(config:&Config)->Self {Self {hub:config.hub.replacen("ws://","http://",1),cid:format!("gpui-{}-{}",std::process::id(),millis()),
         greeting:Value::Null,target:json!({"kind":"recent","id":""}),session:json!({"sel":"","rid":millis(),"drafts":{},"open":{},"adding":false,"panel":false,"info":{}}),
-        view_id:String::new(),revision:0,next:(1_u64<<47)+millis(),pending:HashMap::new(),outgoing:HashMap::new(),dirty:false,controls:HashMap::new(),offered:HashMap::new(),bases:delta::Bases::default()}}
+        view_id:String::new(),revision:0,next:(1_u64<<47)+millis(),pending:HashMap::new(),outgoing:HashMap::new(),dirty:false,controls:HashMap::new(),sent:HashMap::new(),offered:HashMap::new(),bases:delta::Bases::default()}}
     fn request(&mut self, method:&str, extra:Value)->Value {
         self.next+=1;self.revision+=1;
         let mut p=json!({"version":1,"hub":self.hub,"generation":self.greeting["generation"],"epoch":self.greeting["epoch"],"requestRevision":self.revision,
@@ -60,6 +62,8 @@ impl View {
             if self.offered.len()>64 {self.offered.clear();}
         }
         self.pending.insert(self.next,(self.revision,self.target.clone(),method.into()));
+        if self.sent.len()>64 {self.sent.clear();}
+        self.sent.insert(self.next,std::time::Instant::now());
         json!({"id":self.next,"m":method,"p":p})
     }
 }
@@ -105,8 +109,9 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
             sink.send(Message::Binary(wire::encode(&request).into())).await?;
         },
         frame=source.next()=>{
-            let frame=frame.context("hub closed")??;last=tokio::time::Instant::now();
-            let mut x=match frame {Message::Binary(bytes)=>wire::decode(&bytes)?,Message::Text(text)=>serde_json::from_str(&text)?,Message::Ping(bytes)=>{sink.send(Message::Pong(bytes)).await?;continue},Message::Close(_)=>anyhow::bail!("closed"),_=>continue};
+            let frame=frame.context("hub closed")??;last=tokio::time::Instant::now();let recv=std::time::Instant::now();let mut size=0usize;
+            let mut x=match frame {Message::Binary(bytes)=>{size=bytes.len();wire::decode(&bytes)?},Message::Text(text)=>serde_json::from_str(&text)?,Message::Ping(bytes)=>{sink.send(Message::Pong(bytes)).await?;continue},Message::Close(_)=>anyhow::bail!("closed"),_=>continue};
+            let decoded=std::time::Instant::now();
             match x["t"].as_str().unwrap_or("") {
                 "view"=>{ensure!(x["version"]==1&&x["renderer"]=="mobile"&&x["generation"].is_string()&&x["epoch"].is_string(),"unsupported hub greeting");v.greeting=x;let request=v.request("view.open",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;},
                 "reply"=>{
@@ -124,6 +129,8 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                         for(k,val)in values.as_object().unwrap(){if r.get(k).is_none(){r[k]=val.clone();}}
                     }
                     let offered=v.offered.remove(&id).unwrap_or_default();
+                    let rtt_ms=v.sent.remove(&id).map_or(0.0,|t|recv.duration_since(t).as_secs_f64()*1000.0);
+                    let is_delta=r.get("viewDelta").map_or(false,|d|d.get("ops").is_some());
                     if r.get("viewDelta").is_some() {
                         let draft=v.session["sel"].as_str().and_then(|s|v.session["drafts"][s].as_str()).map(str::to_string);
                         match delta::picture(r,&offered,revision,&v.bases,draft.as_deref()) {
@@ -134,7 +141,10 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                             }
                         }
                     }
-                    let r=&r;
+                    let process_ms=decoded.elapsed().as_secs_f64()*1000.0;
+                    let decode_ms=decoded.duration_since(recv).as_secs_f64()*1000.0;
+                    let timing=Timing{rtt_ms,decode_ms,process_ms,bytes:size,delta:is_delta};
+                    let rv=r;let r=&rv;
                     if target!=v.target||revision!=v.revision {v.dirty=true;continue;}
                     ensure!(r["version"]==1&&r["hub"]==v.hub&&r["generation"]==v.greeting["generation"]&&r["epoch"]==v.greeting["epoch"]&&r["requestRevision"]==revision&&r["target"]==target,"view identity mismatch");
                     v.view_id=r["viewId"].as_str().context("missing view id")?.to_string();
@@ -152,7 +162,7 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                         }
                     }
                     if r["nextTarget"].is_object(){v.target=r["nextTarget"].clone();v.view_id.clear();let request=v.request("view.open",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;}
-                    else if r["shown"].is_object(){let _=events.send(Event::Picture(r.clone())).await;let _=events.send(Event::Status("Connected".into())).await;}
+                    else if r["shown"].is_object(){let _=events.send(Event::Picture(rv,timing)).await;let _=events.send(Event::Status("Connected".into())).await;}
                 },
                 "view.control"=>{
                     let id=x["id"].as_u64().unwrap_or(0);let part=x["part"].as_u64().unwrap_or(u64::MAX);let text=x["text"].as_str().unwrap_or("");
