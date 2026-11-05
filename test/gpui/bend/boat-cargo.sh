@@ -7,7 +7,7 @@ if [ "${1:-}" = core ]; then
 fi
 cd native/host
 echo "machine: $(nproc) vCPU, $(free -m | awk '/Mem/{print $2}') MiB, $(rustc --version)"
-/usr/bin/time -f "cargo test: %e s, peak %M KiB" cargo test --release 2>&1 | tail -60
-/usr/bin/time -f "cargo build --release: %e s, peak %M KiB" cargo build --release 2>&1 | tail -15
+/usr/bin/time -f "cargo test: %e s, peak %M KiB" cargo test --release --bin backplane-hub > /tmp/test.out 2>&1; grep -A14 "^error" /tmp/test.out | head -60; grep -E "test result|FAILED|panicked" /tmp/test.out | head -20
+/usr/bin/time -f "cargo build --release: %e s, peak %M KiB" cargo build --release --bin backplane-hub > /tmp/build.out 2>&1; grep -A14 "^error" /tmp/build.out | head -90; tail -3 /tmp/build.out
 ls -l target/release/backplane-hub
 mkdir -p ../../out/cargo && cp target/release/backplane-hub ../../out/cargo/ 2>/dev/null

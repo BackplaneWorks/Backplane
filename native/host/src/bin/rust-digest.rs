@@ -1,6 +1,6 @@
 //! rust-digest CHUNK1 [CHUNK2 ...]: fold events.jsonl files with the Rust State fold and print the canonical digest JSON
 //! (the Rust side of the differential oracle, test/gpui/parity/oracle/DIGEST.md).
-#[path = "../state.rs"]
+#[path = "../state/mod.rs"]
 mod state;
 #[path = "../shelf.rs"]
 #[allow(dead_code)]
