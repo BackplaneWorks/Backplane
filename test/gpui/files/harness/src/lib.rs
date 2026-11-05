@@ -41,5 +41,4 @@ pub mod kicad {
 }
 
 // The hub's process gate itself (native/host/src/proc.rs, copy.rs): the files modules call crate::proc.
-#[path = "../../../../../native/host/src/copy.rs"] pub mod copy;
 #[path = "../../../../../native/host/src/proc.rs"] pub mod proc;
