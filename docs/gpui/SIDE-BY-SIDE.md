@@ -84,8 +84,9 @@ unverified row may exist at the first real run.
 | Any agent start other than the person's `turn.start` (ride/wake_ride, start_queued/start_one/steer, task/launch children, work/lock results, limit fallback, `Launch.tell`, mail, bots' turns) | `agents/` | `Kind::Agent` stand-in-only; only `Kind::PersonTurn` is real | pending (agents) | a queued message waits: "starts only when you send" |
 | `one_shot` summaries, accounts' `claude auth` and usage refresh, models and CLI refresh/probes | `agents/`, `settings/` | `Kind::Agent` stand-in-only | pending (test above) | summaries and usage blank on a copy |
 | `ResumeTicker` | `settings/` | named-ticker list; no delivery on a copy | unverified | none |
-| Routine and reminder ticker, `uber_init` | `bots/routines.rs` | `if copy::on() { return }` in the loop and `tick_at` | pending (bots) | routines "paused on a copy" |
-| Mail recovery | `bots/` `Bots::start` | same gate | pending (bots) | none |
+| Routine and reminder ticker, `uber_init` | `bots/routines.rs` | `if copy::on() { return }` in the loop and `tick_at`; child-process test both modes (landed, gpui ff07f5c4d4) | held | routines "paused on a copy" |
+| Mail recovery | `bots/` `Bots::start` | same gate (landed) | held | none |
+| `bots.routine_run` (a person's request) | `bots/` | stays on, but the turn it triggers is not a `turn.start` from a client, so it is `Kind::Agent` (stand-in only), never `PersonTurn` | pending (agents' rule + test) | the routine runs against a stand-in; says so |
 | Owner outbox, `owner_kick` | `bots/mail/owner.rs` | returns on a copy; test proves it | held | none |
 | State policies ticker (autosettle, alerts, told, summaries, liveness, star nudge) | `state/host.rs` | its commits stay in the copy's log; every out that reaches outside (push, webhook, summary model, desk alerts) dropped | unverified (state lane must show it) | threads may settle; no alerts |
 | `work_run`/`work_watch` (agents' new tools), named locks | `agents/`, watch gate | `watch_argv` empty on a copy; the tools refused | pending (agents) | refused with the copy's line |

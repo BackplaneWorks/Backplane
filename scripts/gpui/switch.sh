@@ -83,6 +83,13 @@ open(f"{H}/events.jsonl","w").write("".join(json.dumps(e,separators=(",",":"))+"
 PY
 }
 
+# every run's logs outlive its cleanup: copied (never the store) to ~/.backplane-gpui-switch-logs/<time>-<mode>/ at each stop and rollback
+keeplogs() {
+  local f d; [ -d "$SW" ] || return 0; ls "$SW"/*.log "$SW"/*.tsv >/dev/null 2>&1 || return 0
+  d=${SWITCH_LOGS:-$HOME/.backplane-gpui-switch-logs}/$(date +%Y%m%d-%H%M%S)-$MODE; mkdir -p "$d"; chmod 700 "$d"
+  for f in "$SW"/*.log "$SW"/*.tsv; do [ -f "$f" ] && mv "$f" "$d/"; done; echo "logs kept in $d"
+}
+
 cmd_stop() {
   local who p
   for who in client hub; do
@@ -96,12 +103,14 @@ cmd_stop() {
     sleep 0.5; i=$((i+1))
   done
   for who in client hub; do p=$(pidof_file $who); alive "$p" && ours "$p" $who && die "$who ($(pidof_file $who)) did not stop; look at it, I kill nothing else"; rm -f "$SW/$who.pid"; done
+  touch "$SW/sample.stop"; sleep 1; keeplogs
   echo "stopped. The copy is kept in $H (rollback deletes it)."
 }
 
 cmd_start() {
   guards
   if [ -e "$SW" ] && ! owned && [ -n "$(ls -A "$SW" 2>/dev/null)" ]; then die "$SW exists and this script did not make it (no .switch-owned): refusing to use or delete it"; fi
+  [ -d "$SW" ] && keeplogs
   mkdir -p "$SW"; chmod 700 "$SW"; echo "backplane switch.sh state; rollback may delete $H" > "$SW/.switch-owned"
   alive "$(pidof_file hub)" && ours "$(pidof_file hub)" hub && die "already running (pid $(pidof_file hub)); stop first"
   local src=; if [ "$MODE" = try ]; then :; else src=$(source_file); [ -f "$src" ] || die "no $src"; fi
@@ -112,7 +121,15 @@ cmd_start() {
   # a fresh private copy: only the log (no tokens, no secrets, no vault); the source is only read
   [ "$H" = "$SW/home" ] && rm -rf "$H"; mkdir -p "$H" "$SW/bin" "$SW/fakehome/.cache" "$SW/proj"; chmod 700 "$H"
   if [ "$MODE" = try ]; then seed; echo "seeded $(wc -l < "$H/events.jsonl") events (synthetic)"; else
-  cp --reflink=auto "$src" "$H/events.jsonl"; chmod 600 "$H/events.jsonl"
+  if [ "$SRC" = live ]; then  # the live hub keeps appending: take the size now, cut to the last whole line
+    head -c "$(stat -c %s "$src")" "$src" > "$H/events.jsonl"
+    python3 - "$H/events.jsonl" <<'PY'
+import sys,os
+p=sys.argv[1]; f=open(p,'r+b'); n=os.path.getsize(p); back=min(n,1<<20); f.seek(n-back); tail=f.read(back); k=tail.rfind(b"\n")
+if k>=0 and k!=len(tail)-1: f.truncate(n-back+k+1)
+PY
+  else cp --reflink=auto "$src" "$H/events.jsonl"; fi
+  chmod 600 "$H/events.jsonl"
   # a copy must not resume the turns its log says were running (they would run in the real folders)
   printf '{"$":"SettingSet","key":"restart.continue","value":"off","at":%s}\n' "$(date +%s)" >> "$H/events.jsonl"
   echo "copied $(wc -l < "$H/events.jsonl") events ($need MB) from $([ "$SRC" = live ] && echo 'the live store (read only)' || echo "$SRC")"; fi
@@ -120,8 +137,11 @@ cmd_start() {
   printf '#!/bin/sh\nexec %s %s "$@"\n' "$(command -v bun)" "$HERE/test/tools/claude_standin.ts" > "$SW/bin/claude"; chmod +x "$SW/bin/claude"
   local n; for n in codex grok muse; do printf '#!/bin/sh\nexit 1\n' > "$SW/bin/$n"; chmod +x "$SW/bin/$n"; done
   # the hub in its own capped scope, a fake HOME (no real credentials), copy guard on, loopback only
-  ( cd "$SW/proj" && exec env -i PATH="$PATH" LC_ALL=C XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}" DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}" HOME="$SW/fakehome" XDG_CACHE_HOME="$SW/fakehome/.cache" \
-      BACKPLANE_COPY=1 BACKPLANE_AGENTS="$SW/bin" BACKPLANE_NO_UPDATE=1 BP_STANDIN_MODE=stream \
+  local envx; if [ "$MODE" = side ]; then
+    # real HOME and PATH (the providers' logins), a real agent only on a person's turn (the hub decides); no BACKPLANE_AGENTS
+    envx=(HOME="$HOME" BACKPLANE_COPY=1 BACKPLANE_SIDE_BY_SIDE=1 BACKPLANE_NO_UPDATE=1)
+  else envx=(HOME="$SW/fakehome" XDG_CACHE_HOME="$SW/fakehome/.cache" BACKPLANE_COPY=1 BACKPLANE_AGENTS="$SW/bin" BACKPLANE_NO_UPDATE=1 BP_STANDIN_MODE=stream); fi
+  ( cd "$SW/proj" && exec env -i PATH="$PATH" LC_ALL=C XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}" DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}" "${envx[@]}" \
       systemd-run --user --scope -q -p "MemoryMax=$MEM" -p MemorySwapMax=0 -- \
       env -u DBUS_SESSION_BUS_ADDRESS -u XDG_RUNTIME_DIR "$HUB_BIN" --home "$H" --port "$PORT" --host 127.0.0.1 --no-tailscale --foreground --policy-bin "$POLICY_BIN" \
       > "$SW/hub.log" 2>&1 < /dev/null ) &
@@ -130,8 +150,13 @@ cmd_start() {
   # before anything else: the stand-ins and the copy guard are in the hub's own environment
   sleep 1
   alive "$hp" || { tail -3 "$SW/hub.log"; die "the hub exited at once"; }
-  tr '\0' '\n' < "/proc/$hp/environ" | grep -qx "BACKPLANE_AGENTS=$SW/bin" && tr '\0' '\n' < "/proc/$hp/environ" | grep -qx "BACKPLANE_COPY=1" \
-    || { kill "$hp" 2>/dev/null; rm -f "$SW/hub.pid"; die "hub $hp has no BACKPLANE_AGENTS/BACKPLANE_COPY=1 in its environment: stopped"; }
+  local ev; ev=$(tr '\0' '\n' < "/proc/$hp/environ")
+  local okenv=1; printf '%s\n' "$ev" | grep -qx "BACKPLANE_COPY=1" || okenv=0
+  printf '%s\n' "$ev" | grep -q '^DBUS_SESSION_BUS_ADDRESS=\|^XDG_RUNTIME_DIR=' && okenv=0
+  if [ "$MODE" = side ]; then printf '%s\n' "$ev" | grep -qx "BACKPLANE_SIDE_BY_SIDE=1" || okenv=0; printf '%s\n' "$ev" | grep -q '^BACKPLANE_AGENTS=' && okenv=0
+  else printf '%s\n' "$ev" | grep -qx "BACKPLANE_AGENTS=$SW/bin" || okenv=0; fi
+  [ $okenv = 1 ] || { kill "$hp" 2>/dev/null; rm -f "$SW/hub.pid"; die "hub $hp's environment is not the one required for mode $MODE (copy guard, stand-ins or side-by-side flag, no session bus): stopped"; }
+  rm -f "$SW/sample.stop"; "$HERE/test/gpui/switch/sample.sh" "$SW" "$SW/rss.tsv" 5 < /dev/null > /dev/null 2>&1 &
   # a big log takes minutes to fold; wait for /hello, bounded
   echo "hub pid $hp, environment checked (stand-ins, copy guard). Waiting for it to open the log..."
   while [ $i -lt "${SWITCH_WAIT:-1800}" ]; do
@@ -141,6 +166,11 @@ cmd_start() {
   done
   curl -s -m2 -o /dev/null "http://127.0.0.1:$PORT/hello" || die "no /hello after ${i}s; hub still running as pid $hp, see $SW/hub.log"
   echo "hub answers on http://127.0.0.1:$PORT after ${i}s"
+  if [ "$MODE" = side ]; then  # the first-run check: nothing may act by itself; 30 s idle may add only a few settings, by count
+    local l0 l1; l0=$(wc -l < "$H/events.jsonl"); sleep 30; l1=$(wc -l < "$H/events.jsonl")
+    echo "idle 30 s: the copy's log grew by $((l1 - l0)) events"
+    [ $((l1 - l0)) -le 50 ] || { cmd_stop >/dev/null; die "the copy's log grew by $((l1 - l0)) events while idle: something acts by itself; stopped (logs kept)"; }
+  fi
   if [ "${1:-}" != "--no-client" ]; then
     [ -x "$CLIENT_BIN" ] || die "no client $CLIENT_BIN (use --no-client to run the hub alone)"
     [ -n "$DISP" ] || die "no display: set SWITCH_DISPLAY (:61 is the isolated one) or pass --no-client"
@@ -178,6 +208,7 @@ cmd_rollback() {
 case "${1:-}" in
   start) shift; MODE=copy; cmd_start "$@";;
   try) shift; MODE=try; cmd_start "$@";;
+  side) shift; MODE=side; SRC=live; cmd_start "$@";;
   stop) cmd_stop;;
   status) cmd_status;;
   rollback) cmd_rollback;;
