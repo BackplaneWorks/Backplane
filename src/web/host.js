@@ -855,14 +855,19 @@ const sidebarOf = n => nodeIn(n, v => v.tag === "aside" && v.key === "sidebar");
 const liveSided = new WeakMap();
 function withLiveSidebar(picture) {
   if (!liveNode || transitionFor === shownFor) return picture;
-  // (only while the row picked is on screen in it: else the picture's own
-  // sidebar, which shows that row, is the one the hub's view will bring)
+  // (only while the row picked is on screen in it, or under the shut Older
+  // shelf, which then shows its project: else the picture's own sidebar,
+  // which shows that row, is the one the hub's view will bring)
   // (a project's home: while its section is on screen)
+  const older = transitionFor.startsWith("thread:") && !document.querySelector(`aside.sidebar .thread[data-value="${CSS.escape(transitionFor.slice(7))}"]`);
   if (transitionFor.startsWith("project:") ? !document.querySelector(`aside.sidebar section[data-drag-to="${CSS.escape(transitionFor.slice(8))}"]`)
-    : !transitionFor.startsWith("thread:") || !document.querySelector(`aside.sidebar .thread[data-value="${CSS.escape(transitionFor.slice(7))}"]`)) return picture;
+    : !transitionFor.startsWith("thread:")) return picture;
   const kept = liveSided.get(picture);
   if (kept?.live === liveNode) return kept.out;
-  const side = sidebarOf(liveNode), theirs = sidebarOf(picture);
+  let side = sidebarOf(liveNode);
+  const theirs = sidebarOf(picture);
+  if (older) side = side && theirs ? olderFrom(side, theirs, transitionFor.slice(7)) : null;
+  if (!side) { liveSided.set(picture, { live: liveNode, out: picture });return picture; }
   let out = picture;
   if (side && theirs && side !== theirs) {
     const moved = sidebarRegrouped(side, theirs);
@@ -879,6 +884,31 @@ function withLiveSidebar(picture) {
   }
   liveSided.set(picture, { live: liveNode, out });
   return out;
+}
+// A thread picked from under the shut Older shelf (a palette jump, a
+// link): shut, the shelf shows just the open thread's project ("Older 7 ·
+// 1 shown"). The live sidebar takes the picture's shut shelf and the
+// projects it shows (the picture is drawn with that thread open), in place
+// of its own; null when either has it open or the picture's lacks the row.
+function olderFrom(side, theirs, id) {
+  const live = sectionsIn(side), pic = sectionsIn(theirs);
+  if (!live || !pic) return null;
+  const shelf = ks => ks.findIndex(k => is(k, "El") && k.tag === "button" && classOf(k).includes("older"));
+  const block = (ks, i) => { let j = i + 1;while (j < ks.length && is(ks[j], "El") && ks[j].tag === "section") j++;return j; };
+  const iL = shelf(live.ks), iP = shelf(pic.ks);
+  if (iL < 0 || iP < 0 || classOf(live.ks[iL]).includes("open") || classOf(pic.ks[iP]).includes("open")) return null;
+  const jL = block(live.ks, iL), jP = block(pic.ks, iP), shown = pic.ks.slice(iP + 1, jP);
+  if (!shown.some(n => JSON.stringify(n).includes(JSON.stringify(id)))) return null;
+  const kids = [...live.ks.slice(0, iL), pic.ks[iP], ...shown, ...live.ks.slice(jL)];
+  const swap = n => {
+    if (n === live.at) { let l = { $: "Nil" };for (let i = kids.length - 1; i >= 0; i--) l = { $: "Con", head: kids[i], tail: l };return { ...n, kids: l }; }
+    if (!is(n, "El") || n.tag === "bp-memo") return n;
+    const ks = [...each(n.kids)], mapped = ks.map(swap);
+    if (mapped.every((k, i) => k === ks[i])) return n;
+    let l = { $: "Nil" };for (let i = mapped.length - 1; i >= 0; i--) l = { $: "Con", head: mapped[i], tail: l };
+    return { ...n, kids: l };
+  };
+  return swap(side);
 }
 // The open thread's project keeps its place among the live ones (it never
 // sinks under the reader: client.bend's Side.groups.at) only while that
