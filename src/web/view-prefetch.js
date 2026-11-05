@@ -6,16 +6,27 @@ import {validateThinResult} from './thin-results.js';
 // Every destination the sidebar shows is fetched once (a click on any of them
 // then draws at once, with no round trip to wait for; the hub's own view
 // corrects it), one at a time and only while the page is idle, PACE apart.
-const QUEUE=24, ATTEMPTS=64, PACE=300;
+// A picture fetched again because its row moved waits REFRESH since its
+// last fetch (a streaming bot's row moves with every delta: it was fetched
+// again every ~340 ms, ~100 KB each, for as long as it streamed); a timer
+// asks once the floor has passed, so the last move is still fetched.
+const QUEUE=24, ATTEMPTS=64, PACE=300, REFRESH=30000;
 export class ViewPrefetch {
-  constructor(api) {this.api=api;this.queue=[];this.attempted=new Set();this.generation=0;}
+  constructor(api) {this.api=api;this.queue=[];this.attempted=new Set();this.generation=0;this.fetchedAt=new Map();this.later=new Map();}
   // fresh: the picture held is known to be behind (its sidebar row moved
   // since): fetched again even though one is held
   enqueue(target, priority=false, fresh=false) {
     if (!viewTarget(target) || !['thread','bot','project'].includes(target.kind) || !fresh && this.api.has(target)) return;
     const scope=this.api.scope(),key=JSON.stringify([scope.origin,scope.identity,scope.epoch,target]);
     if (!scope.identity || !scope.epoch) return;
-    if (fresh) this.attempted.delete(key);
+    if (fresh) {
+      const now=(this.api.now||performance.now.bind(performance))(),last=this.fetchedAt.get(key);
+      if (last!==undefined && now-last<REFRESH) {
+        if (!this.later.has(key)) this.later.set(key,setTimeout(()=>{this.later.delete(key);this.enqueue(target,false,true);},REFRESH-(now-last)));
+        return;
+      }
+      this.attempted.delete(key);
+    }
     else if (this.attempted.has(key)) return;
     this.queue=this.queue.filter(x=>x.key!==key);
     if (priority) this.queue.unshift({target,key,fresh});else this.queue.push({target,key,fresh});
@@ -32,7 +43,7 @@ export class ViewPrefetch {
     if(!this.greeted)return;
     const job=this.queue.shift(),scope=this.api.scope();
     if(this.attempted.size>=ATTEMPTS)return;
-    this.attempted.add(job.key);
+    this.attempted.add(job.key);this.fetchedAt.set(job.key,(this.api.now||performance.now.bind(performance))());
     this.active={...job,scope};
     const target=job.target,session={sel:target.kind==='project'?'project-home-'+target.id:target.kind==='thread'?target.id:'',rid:1,drafts:{'@lang':scope.language},open:{},info:{},adding:false,panel:false,wantNew:false,
       ...(target.kind==='bot'?{route:{kind:'bot-tab',bot:target.id,tab:'chat'}}:{})};
@@ -67,6 +78,7 @@ export class ViewPrefetch {
     socket.onclose=socket.onerror=()=>{if(this.generation===generation)this.stop();};
   }
   stop() {
+    for (const t of this.later.values()) clearTimeout(t);this.later.clear();
     this.generation++;clearTimeout(this.timer);clearTimeout(this.deadline);this.timer=null;this.active=null;this.queue=[];this.greeted=false;
     const socket=this.socket;this.socket=null;this.client=null;socket?.close();
   }
