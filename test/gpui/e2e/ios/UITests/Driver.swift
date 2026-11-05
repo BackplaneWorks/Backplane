@@ -102,7 +102,7 @@ final class Driver {
     }
 
     func finish() {
-        let status = !blocked.isEmpty && steps.isEmpty ? "blocked" : (failed ? "fail" : "pass")
+        let status = failed ? "fail" : (!blocked.isEmpty ? "blocked" : "pass")
         let r: [String: Any] = ["journey": journey, "client": "ios", "status": status, "blocked": blocked,
                                 "metrics": metrics.merging(["steps": steps, "wall_s": ms(started) / 1000, "video_start_epoch_ms": Double(env["VIDEO_START_EPOCH_MS"] ?? "") ?? NSNull()]) { a, _ in a },
                                 "notes": notes + ["tap_ms includes XCUITest's wait for the app to be idle; ack/fps are measured from the video"],
