@@ -44,7 +44,7 @@ fn parse() -> std::result::Result<Args, i32> {
     if window.is_none() { window = std::env::var("BACKPLANE_WINDOW_BIN").ok().filter(|p| !p.is_empty()).map(PathBuf::from); }
     if policy.is_none() { policy = std::env::var("BACKPLANE_POLICY_BIN").ok().filter(|p| !p.is_empty()).map(PathBuf::from); }
     // no default home or port: this binary must never land on a live hub's by accident
-    match (home, port) { (Some(home), Some(port)) => Ok(Args { window, home, port, host, policy, version, commit, tailscale: !no_tailscale }), _ => { eprint!("{USAGE}"); Err(2) } }
+    match (home, port) { (Some(home), Some(port)) => Ok(Args { window, home, port, host, policy, version, commit, tailscale: !no_tailscale && !copy::on() }), _ => { eprint!("{USAGE}"); Err(2) } }
 }
 
 /// One hub per home: an exclusive flock on <home>/hub.lock, which says "<pid> <port> flock".
