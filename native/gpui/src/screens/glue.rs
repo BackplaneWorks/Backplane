@@ -36,12 +36,12 @@ impl Backplane {
         let d = self.data["thread"]["draft"].as_str().unwrap_or("").to_string();
         if !d.is_empty() && d != at { self.screens.await_draft = None; self.input.update(cx, |i, cx| i.set(d, cx)); }
     }
-    /// Send the draft to the hub, coalesced: while the timer runs only the newest text is kept, so a burst of keys
-    /// is one request and the last text is never dropped.
+    /// Send the draft to the hub: the first change of a burst goes at once (leading edge, so a popup is not held back), the rest of the burst
+    /// is coalesced for 30 ms and only the newest text is kept, so the last text is never dropped.
     pub(crate) fn send_draft(&mut self, text: String, cx: &mut Context<Self>) {
-        self.screens.pending_draft = Some(text);
-        if self.screens.draft_timer { return; }
+        if self.screens.draft_timer { self.screens.pending_draft = Some(text); return; }
         self.screens.draft_timer = true;
+        let _ = self.tx.try_send(crate::hub::Command::Draft(text));
         cx.spawn(async move |weak, cx| {
             cx.background_executor().timer(std::time::Duration::from_millis(30)).await;
             let _ = weak.update(cx, |this, _| {
