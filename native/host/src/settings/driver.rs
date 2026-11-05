@@ -211,9 +211,11 @@ pub fn resume_ready(f: &ResumeFacts, rec: &Value, now: u64) -> bool {
 }
 pub const RESUME_TEXT: &str = "[Backplane] The provider's reported limit reset has arrived. Continue from your last step. Check completed tool results and any work still running before repeating an action.";
 /// ProviderResume.one: the record is cleared and the note logged in the same commit as the message that runs the thread again.
-pub fn resume_events(key: &str, th: &str, now: u64) -> Vec<Value> {
-    vec![set(key, "", now), json!({"$":"ActivityLogged","thread":th,"act":format!("quota-{now}"),"tone":"info","kind":"provider-resume","summary":"Provider limit reset; continuing from the last step","at":now})]
+/// Ids as Hub.id(prefix, now, Hub.seq): the log's length at that step, so threads resumed in one tick (they usually share a reset) never share a message or act id.
+pub fn resume_events(key: &str, th: &str, now: u64, seq: u64) -> Vec<Value> {
+    vec![set(key, "", now), json!({"$":"ActivityLogged","thread":th,"act":crate::agents::lines::hub_id("quota", now, seq),"tone":"info","kind":"provider-resume","summary":"Provider limit reset; continuing from the last step","at":now})]
 }
+/// `ephemeral` is by name only: Bend's Ephemeral.is also counts a mail run or private run by record (MR.Run.is), which is not ported yet; whoever ports Run.is uses it here.
 async fn resume_facts(hub: &Arc<Hub>, th: &str) -> ResumeFacts {
     let held = hub.setting(&format!("thread.config.hold.{th}")).await.as_deref() == Some("on");
     let t = { let m = hub.model().await; match m.threads.get(th) { Some(t) => t.clone(), None => return ResumeFacts::default() } };
@@ -234,7 +236,9 @@ impl Ticker for ResumeTicker {
                 let rec: Value = serde_json::from_str(&hub.setting(&k).await.unwrap_or_default()).unwrap_or(Value::Null);
                 if !resume_ready(&resume_facts(hub, &th).await, &rec, now_s) { continue }
                 // the message and the record's clearing are one commit; a failed start leaves the record for the next tick
-                let _ = ag.deliver(&th, &format!("resume{now_s}"), RESUME_TEXT, None, resume_events(&k, &th, now_s)).await;
+                // the log's length is read at each thread: the commit before it moved it
+                let seq = hub.revision().await;
+                let _ = ag.deliver(&th, &crate::agents::lines::hub_id("resume", now_s, seq), RESUME_TEXT, None, resume_events(&k, &th, now_s, seq)).await;
             }
             vec![]
         })
@@ -308,8 +312,10 @@ mod tests {
         }
     }
     #[test] fn a_resume_clears_its_record_and_logs_the_note_in_one_batch() {
-        let ev = resume_events("provider.resume.t1", "t1", 77);
+        let ev = resume_events("provider.resume.t1", "t1", 77, 5);
         assert_eq!(keys(&ev), ["provider.resume.t1", "ActivityLogged"]); assert_eq!((ev[0]["value"].clone(), ev[1]["kind"].clone(), ev[1]["summary"].clone()), (json!(""), json!("provider-resume"), json!("Provider limit reset; continuing from the last step")));
+        let other = resume_events("provider.resume.t2", "t2", 77, 6);
+        assert_ne!(ev[1]["act"], other[1]["act"], "two resumes in one tick get different act ids"); assert_ne!(crate::agents::lines::hub_id("resume", 77, 5), crate::agents::lines::hub_id("resume", 77, 6), "and different message ids");
         assert!(RESUME_TEXT.starts_with("[Backplane] The provider's reported limit reset has arrived."));
     }
 }
