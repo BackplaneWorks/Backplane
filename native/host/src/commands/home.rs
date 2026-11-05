@@ -52,7 +52,7 @@ fn metadata(path: &Path, keys: &[&str], maps: &[&str]) -> Result<Map<String, Val
     let mut out = Map::new();
     for (k, x) in o {
         let scalar = |x: &Value| match x { Value::String(s) => s.chars().count() <= 8192, Value::Number(_) | Value::Bool(_) | Value::Null => true, _ => false };
-        if keys.contains(&k.as_str()) && scalar(&x) { out.insert(k, x) }
+        if keys.contains(&k.as_str()) && scalar(&x) { out.insert(k, x); }
         else if maps.contains(&k.as_str()) { if let Value::Object(m) = x { out.insert(k, Value::Object(m.into_iter().filter(|(_, y)| scalar(y)).take(128).collect())); } }
     }
     Ok(out)
@@ -180,7 +180,7 @@ fn read_files(root: &str, req: &Value) -> (Value, bool, PathBuf) {
     }
     if pcb.is_some() || sch.is_some() {
         let mut cands: [Vec<F>; 2] = [vec![], vec![]];
-        let mut cand = |rel: &str, k: usize, c: &mut [Vec<F>; 2]| { if let Some(f) = h.file(rel) { c[k].push(f); c[k].sort_by(|a, b| b.mtime.partial_cmp(&a.mtime).unwrap_or(std::cmp::Ordering::Equal)); c[k].truncate(4) } };
+        let cand = |rel: &str, k: usize, c: &mut [Vec<F>; 2]| { if let Some(f) = h.file(rel) { c[k].push(f); c[k].sort_by(|a, b| b.mtime.partial_cmp(&a.mtime).unwrap_or(std::cmp::Ordering::Equal)); c[k].truncate(4) } };
         if let Ok(it) = std::fs::read_dir(real.join("build/reports")) { for e in it.flatten() {
             let n = e.file_name().to_string_lossy().into_owned(); let l = n.to_lowercase();
             if !e.file_type().map_or(false, |t| t.is_file()) || !l.ends_with(".json") || !(l.contains("drc") || l.contains("erc")) { continue }
