@@ -8,7 +8,7 @@ const summary={when:new Date().toISOString(),actions:{},blocked:{},env:installMi
 const dsp=await startDisplay(64);const ime=await startIme(dsp.display); // before the client, so it can connect to it through XIM
 summary.ime={status:ime.status,engine:ime.engine};const fx=await startFixtureHub({bin:hubBin,root:resolve('out/e2e-run/input'),port:3813,threads:6});
 try{
-  const sf=out+'/hold.script.json';writeFileSync(sf,JSON.stringify([{select:0},{wait:120000}]));
+  const sf=out+'/hold.script.json';writeFileSync(sf,JSON.stringify([{select:0},...Array.from({length:80},()=>[{wait:1500},{read:'composer'}]).flat()])); // G6: the client reports its composer text every 1.5 s
   const metrics=[];let buf='';const g=spawn(gpuBin,['--url',fx.state.url,'--token-file',fx.state.root+'/home/token','--script',sf],{env:{...dsp.env,...ime.env,HOME:fx.state.root+'/fakehome',BACKPLANE_GPUI_RECTS:'1'},stdio:['ignore','ignore','pipe']});
   g.stderr.on('data',d=>{buf+=d;let i;while((i=buf.indexOf('\n'))>=0){const l=buf.slice(0,i);buf=buf.slice(i+1);const k=l.indexOf('GPUI_METRIC ');if(k>=0)try{metrics.push(JSON.parse(l.slice(k+12)))}catch{}}});
   await sleep(6000);const inp=new Input(dsp.display,out);const win=inp.win('backplane');inp.xi.focus(win.id);await sleep(500);
@@ -27,6 +27,7 @@ try{
   const evPath=fx.state.root+'/home/events.jsonl';const sentSince=(t0)=>{try{return readFileSync(evPath,'utf8').split('\n').filter(l=>l.includes('"MessagePosted"')&&l.includes('"role":"user"')).map(l=>JSON.parse(l)).filter(e=>e.at>=t0&&!/zqshort/.test(e.text||''))}catch{return []}};
   const attachments=()=>{try{return execFileSync('sh',['-c',`find ${fx.state.root}/home -path '*attach*' -type f -printf '%f %s\\n' 2>/dev/null | head -10`],{encoding:'utf8'}).trim().split('\n').filter(Boolean)}catch{return []}};
   const newEvents=(t0)=>{try{const ev=readFileSync(evPath,'utf8').split('\n').filter(Boolean).map(l=>{try{return JSON.parse(l)}catch{return null}}).filter(e=>e&&e.at>=t0);return {kinds:Object.entries(ev.reduce((a,e)=>(a[e.$]=(a[e.$]||0)+1,a),{})),mentionsPng:ev.filter(e=>/png|pasted|attach|image/i.test(JSON.stringify(e))).map(e=>({kind:e.$,sample:JSON.stringify(e).slice(0,200)})).slice(0,4)}}catch{return null}};
+  const composerText=()=>{const r=[...metrics].reverse().find(m=>m.event==='read'&&m.what==='composer');return r?{text:r.text,supported:r.supported}:null};
   const sendAndRead=async(t0)=>{inp.xi.key('Return');await sleep(1500);const m=sentSince(t0);return m.at(-1)||null};
   const clearComposer=async()=>{inp.xi.click(win.x+comp[0],win.y+comp[1]);inp.xi.key('ctrl+a');inp.xi.key('BackSpace');await sleep(200)};
   if(comp){
@@ -35,13 +36,17 @@ try{
     await run('drop-file',async()=>{await clearComposer();const t0=Math.floor(Date.now()/1000);inp.xi.type('see drop');const r=inp.dropFile(win,resolve(out+'/paste.png'),comp);await sleep(6000);inp.s('before-send-drop');const m=await sendAndRead(t0);const blob=JSON.stringify(m||{});
       return {ok:r.ok&&!!m&&/paste\.png|png|image/i.test(blob),evidence:{...r.evidence,attachmentsOnHub:attachments(),newEvents:newEvents(t0),hubMessage:m?{keys:Object.keys(m),text:m.text}:null,mentionsFile:/paste\.png/i.test(blob)}}});
     await run('ime-hangul',async()=>{await clearComposer();const t0=Math.floor(Date.now()/1000);const r=await inp.imeCompose(ime,comp,win);const m=await sendAndRead(t0);
-      return {ok:!!m&&/한/.test(m.text||''),evidence:{...r.evidence,hubMessageText:m?.text??null,expected:'한 (composed); raw keys would arrive as "gks"'}}});
+      return {ok:!!m&&/한/.test(m.text||''),evidence:{...r.evidence,composerRead:composerText(),hubMessageText:m?.text??null,expected:'한 (composed); raw keys would arrive as "gks"'}}});
   } else summary.blocked['paste/drop/ime']='no composer region in the layout event';
-  // the paperclip and links need their rectangles: the controls event has none yet (request G6)
-  const ctl=[...metrics].reverse().find(m=>m.event==='controls');const attach=ctl?.controls?.find(c=>/attach/i.test(c.label+c.id));
-  summary.blocked['paperclip']=attach&&attach.rect?null:'controls event has no rect (G6): cannot aim a click at the paperclip';
-  summary.blocked['link-click']='no link rectangles or link events (G6)';
-  if(attach?.rect){const r=attach.rect;await run('paperclip',async()=>{inp.s('before-paperclip');inp.clickAt(win,[r.x+r.w/2,r.y+r.h/2]);await sleep(800);return {ok:true,evidence:{shot:inp.s('after-paperclip')}}});delete summary.blocked.paperclip}
+  // G6: controls carry rects (physical window px; the first emission can be null, a later one has them)
+  const ctlAll=metrics.filter(m=>m.event==='controls');const ctl=[...ctlAll].reverse().find(m=>m.controls?.some(c=>c.rect));
+  const attach=ctl?.controls?.find(c=>c.id==='ui:Attach'&&c.rect);
+  if(!attach)summary.blocked['paperclip']='no ui:Attach control with a rect in the controls event';
+  else await run('paperclip',async()=>{const w0=inp.windows();inp.s('before-paperclip');inp.clickAt(win,[attach.rect.x+attach.rect.w/2,attach.rect.y+attach.rect.h/2]);await sleep(2500);const w1=inp.windows();const shot=inp.s('after-paperclip');
+    const opened=w1.filter(x=>!w0.some(y=>y.id===x.id));inp.xi.key('Escape');
+    return {ok:opened.length>0,evidence:{newWindows:opened.map(x=>x.name).slice(0,5),screenshot:shot,note:'a picker is a new top-level window; pixels alone cannot tell it from the stream scrolling'}}});
+  const lk=[...metrics].reverse().find(m=>m.event==='links');summary.blocked['link-click']=lk&&lk.supported===false?'GPUI draws message text without link detection (links event supported:false)':(lk?null:'no links event');
+  const sel=[...metrics].reverse().find(m=>m.event==='read'&&m.what==='selection');if(sel)summary.selectionRead=sel;
   try{g.kill('SIGTERM')}catch{}
 }finally{try{ime.stop()}catch{}await fx.stop();dsp.stop()}
 // an action only counts when evidence says so; pass also needs the Rust hub on real hardware (CONTRACT.md), which this Boat run is not
