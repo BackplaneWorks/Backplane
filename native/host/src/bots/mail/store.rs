@@ -34,7 +34,7 @@ fn dir(home: &Path) -> Result<PathBuf, StoreError> {
 fn open(p: &Path, write: bool) -> Result<std::fs::File, StoreError> {
     let mut o = OpenOptions::new(); o.read(true).custom_flags(libc::O_NOFOLLOW);
     if write { o.append(true).create(true).mode(0o600); }
-    let f = o.open(p).map_err(|e| if e.raw_os_error() == Some(libc::ELOOP) { StoreError::Link } else { StoreError::Io })?;
+    let f = o.open(p).map_err(|e| match e.raw_os_error() { Some(libc::ELOOP) => StoreError::Link, Some(libc::EISDIR) => StoreError::NotRegular, _ => StoreError::Io })?;
     let m = f.metadata().map_err(|_| StoreError::Io)?;
     if !m.is_file() { return Err(StoreError::NotRegular) }
     if write && m.nlink() != 1 { return Err(StoreError::Hardlink) }
