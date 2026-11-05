@@ -6,8 +6,8 @@ use std::{collections::HashMap, path::PathBuf, time::{Duration, SystemTime, UNIX
 use tokio::sync::mpsc::{self, Sender};
 use tokio_tungstenite::tungstenite::{Message, protocol::WebSocketConfig};
 
-#[derive(Debug)] pub enum Command { Select(String), Send(String), Draft(String), Action(String,String), Page(String) }
-#[derive(Debug)] pub enum Event { Picture(Value,Timing), Status(String), Accepted, Error(String) }
+#[derive(Debug)] pub enum Command { Sleep(f64), Select(String), Send(String), Draft(String), Action(String,String), Page(String) }
+#[derive(Debug)] pub enum Event { NetWake, Picture(Value,Timing), Status(String), Accepted, Error(String) }
 /// Where a reply's time went before the UI saw it: send to frame received, decode, delta/merge, and the body's size.
 #[derive(Debug,Clone,Default)] pub struct Timing { pub rtt_ms:f64, pub decode_ms:f64, pub process_ms:f64, pub bytes:usize, pub delta:bool }
 #[derive(Clone)] pub struct Config { pub hub:String, pub token_file:PathBuf, pub exit_after:Option<f64>, pub script:Option<PathBuf>, pub swatches:bool, pub gallery:bool, pub fonts:bool, pub theme:Option<String> }
@@ -78,6 +78,12 @@ pub fn connect(config:Config)->(Sender<Command>,async_channel::Receiver<Event>) 
                 match session(&config,&mut commands,&events,&mut view).await {
                     Ok(())=>break,
                     Err(error)=>{ // Never log the handshake URL or its credential.
+                        if let Some(secs)=format!("{error:#}").strip_prefix("net_sleep:").and_then(|s|s.parse::<f64>().ok()) {
+                            // the e2e harness's net_sleep: the socket is gone for `secs`, then the normal reconnect runs
+                            let _=events.send(Event::Status("Disconnected (net_sleep)".into())).await;
+                            view.pending.clear();view.outgoing.clear();view.controls.clear();view.offered.clear();view.bases.clear();view.view_id.clear();view.greeting=Value::Null;
+                            tokio::time::sleep(Duration::from_secs_f64(secs)).await;let _=events.send(Event::NetWake).await;delay=1;continue;
+                        }
                         let token=std::fs::read_to_string(&config.token_file).unwrap_or_default();let mut text=format!("{error:#}");if !token.trim().is_empty(){text=text.replace(token.trim(),"<token>");}eprintln!("GPUI_LOG {{\"disconnect\":{}}}",serde_json::Value::String(text));
                         let _=events.send(Event::Error("Hub disconnected. Draft kept; reconnecting. Check the experimental hub log.".into())).await;
                         view.pending.clear();view.outgoing.clear();view.controls.clear();view.offered.clear();view.bases.clear();view.view_id.clear();view.greeting=Value::Null;
@@ -99,7 +105,9 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
     loop {tokio::select! {
         command=commands.recv(), if !v.greeting.is_null()=>{
             let Some(command)=command else{return Ok(())};
+            if let Command::Sleep(s)=&command {anyhow::bail!("net_sleep:{s}");}
             let request=match command {
+                Command::Sleep(_)=>unreachable!(),
                 Command::Select(id)=>{let id=unqualify(&id);v.target=json!({"kind":"thread","id":id});v.session["sel"]=json!(id);v.view_id.clear();v.request("view.open",json!({}))},
                 Command::Send(text)=>{ensure!(!v.view_id.is_empty(),"view not ready");let id=v.target["id"].as_str().unwrap_or("").to_string();v.session["drafts"][id]=json!(text);v.request("view.action",json!({"action":"send","value":""}))},
                 Command::Draft(text)=>{let id=v.target["id"].as_str().unwrap_or("").to_string();v.session["drafts"][id]=json!(text);v.request("view.action",json!({"action":"draft","value":text}))},

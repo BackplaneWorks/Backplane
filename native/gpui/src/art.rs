@@ -268,3 +268,20 @@ pub fn cat(rig: Option<Arc<Rig>>, mood: &str, size: f32, started: std::time::Ins
         None => div().size(px(size)).into_any_element(),
     }
 }
+
+// ---- layout probes (G3): the rectangle of a stable region, in check mode only -------------------
+static LAYOUT: std::sync::Mutex<Option<std::collections::BTreeMap<String, [f32; 4]>>> = std::sync::Mutex::new(None);
+/// An invisible overlay that records its parent's rectangle when painted (physical px); does nothing outside check mode.
+pub fn probe(name: &'static str) -> AnyElement {
+    canvas(|_, _, _| (), move |b: Bounds<Pixels>, _, window: &mut Window, _| {
+        if !rects_on() { return; }
+        let s = window.scale_factor();
+        LAYOUT.lock().unwrap().get_or_insert_with(Default::default).insert(name.to_string(), [f32::from(b.origin.x) * s, f32::from(b.origin.y) * s, f32::from(b.size.width) * s, f32::from(b.size.height) * s]);
+    }).absolute().size_full().into_any_element()
+}
+/// The recorded rectangles as a JSON object {name:{x,y,w,h}}.
+pub fn layout_snapshot() -> String {
+    let g = LAYOUT.lock().unwrap();
+    let m: serde_json::Map<String, Value> = g.iter().flatten().map(|(k, r)| (k.clone(), serde_json::json!({"x": r[0], "y": r[1], "w": r[2], "h": r[3]}))).collect();
+    Value::Object(m).to_string()
+}
