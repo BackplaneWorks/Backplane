@@ -170,6 +170,26 @@ fn put(m: &mut HashMap<String, u64>, th: &str, at: u64) { let e = m.entry(th.to_
 fn set_ev(key: String, value: String, at: u64) -> Value { json!({"$": "SettingSet", "key": key, "value": value, "at": at}) }
 fn improvement_seed(th: &str) -> String { if improvement(th) { format!("improvement-request-{}", &th[12..]) } else { String::new() } }
 
+/// Shelve.tick.post (as Shelve.auto.tick keeps it, only the wakes): a settled thread that works again wakes, unless its project is dormant. A manual
+/// settle holds until a message came after it; an automatic one never holds against work. `working` is Lifecycle.working: a turn, a pending ask
+/// count, a queued message, unfinished child tasks or rows.
+pub fn tick_post(st: &State, now: u64) -> Vec<Value> {
+    let mut out: Vec<(&String, &Thread)> = st.threads.iter().filter(|(_, t)| {
+        if shelf_of(t) != Shelf::Settled { return false }
+        let lapsed = if t.override_ == Override::ForcedSettled { t.unsettled_at > t.settled_at } else { true };
+        lapsed
+    }).collect();
+    out.sort_by(|a, b| a.0.cmp(b.0));
+    out.into_iter().filter(|(id, t)| working(st, id, t) && st.get(&format!("project.dormant.{}", t.project), "") != "on")
+        .map(|(id, _)| json!({"$": "ThreadWoke", "id": id, "at": now})).collect()
+}
+fn working(st: &State, id: &str, t: &Thread) -> bool {
+    let rows = |k: &str| st.get(&format!("{k}{id}"), "").split('\n').filter(|l| !l.is_empty()).count();
+    let waiting = st.queue.get(id).map_or(false, |q| q.iter().any(|(m, _)| !m.starts_with("handoff:")));
+    let busy = super::ext::open_kids(st, id) + rows("bg.") + rows("watch.") + if st.get(&format!("order.wait.{id}"), "").is_empty() { 0 } else { 1 };
+    t.turn == Turn::Running || t.pending > 0 || waiting || busy > 0
+}
+
 /// Auto.read: the person read the thread's newest reply (it opened in a viewer): the mark that stops it counting as unread. `st` is current.
 pub fn read(st: &State, th: &str, now: u64) -> Vec<Value> {
     let output = st.get(&format!("autosettle.output.{th}"), st.ext.sum.get(th).map_or("", |s| s.output.as_str()));
@@ -266,6 +286,20 @@ mod tests {
     }
     #[test] fn autosettle_live_work_subscription_never_expires() { for old in B { assert!(!expired_work("work", true, old)); } }
     #[test] fn autosettle_active_file_subscription_never_expires() { for live in B { for old in B { assert!(!expired_work("file", live, old)); } } }
+    #[test] fn a_settled_thread_that_works_wakes_unless_its_project_is_dormant() {
+        let mk = |id: &str, p: &str| format!(r#"{{"$":"ThreadCreated","id":"{id}","project":"{p}","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1}}"#);
+        let mut st = State::new();
+        for l in [mk("auto", "p"), mk("manual", "p"), mk("msg", "p"), mk("idle", "p"), mk("dorm", "pd"), mk("queued", "p")] { st.apply_line(&l); }
+        for (id, manual, at) in [("auto", false, 5), ("manual", true, 5), ("msg", true, 5), ("idle", false, 5), ("dorm", false, 5), ("queued", false, 5)] {
+            st.apply_line(&format!(r#"{{"$":"ThreadSettled","id":"{id}","manual":{manual},"at":{at}}}"#));
+        }
+        for id in ["auto", "manual", "msg", "dorm"] { st.apply_line(&format!(r#"{{"$":"TurnChanged","thread":"{id}","state":"running","at":6}}"#)); }
+        st.apply_line(r#"{"$":"TurnQueued","thread":"queued","msg":"q1","text":"x","at":6}"#);
+        st.apply_line(r#"{"$":"MessagePosted","thread":"msg","msg":"m9","role":"user","text":"more","at":7}"#); // after the manual settle: it gives way
+        st.apply_line(r#"{"$":"SettingSet","key":"project.dormant.pd","value":"on","at":1}"#);
+        let woke: Vec<String> = tick_post(&st, 50).iter().map(|e| e["id"].as_str().unwrap().to_string()).collect();
+        assert_eq!(woke, vec!["auto".to_string(), "msg".to_string(), "queued".to_string()], "auto (never holds), msg (a message after the manual settle), queued; not manual (no message since), idle, or dormant");
+    }
     #[test] fn auto_read_marks_the_newest_reply_once() {
         let mut st = State::new();
         st.apply_line(r#"{"$":"MessagePosted","thread":"t1","msg":"a1","role":"assistant","text":"x","at":5}"#);
