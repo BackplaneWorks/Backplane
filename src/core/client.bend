@@ -7651,7 +7651,7 @@ def Solid.sync.k(same: Bool, +u: Ui, +want: String, +kind: String, +path: String
       Act{u, cmds}
     case False{}:
       Ui.also(Ui.rpc(Ui.scratch_set(u, "@solid.at", want), "kicad.watch",
-        [J.KV{"kind", J.Str{Bool.pick(String, String.is_empty(want), "", Solid.ask(kind))}}, J.KV{"root", J.Str{root}}, J.KV{"path", J.Str{path}}, J.KV{"tree", J.Str{tree}},
+        [J.KV{"kind", J.Str{Bool.pick(String, String.is_empty(want), "", Solid.ask(kind))}}, J.KV{"thread", J.Str{Ui.sel(u)}}, J.KV{"root", J.Str{root}}, J.KV{"path", J.Str{path}}, J.KV{"tree", J.Str{tree}},
          J.KV{"sheet", J.Str{sheet}}, J.KV{"stamps", J.Str{Ui.info(u, "local.plotstamp")}}]), cmds)
 
 def Solid.sync.m(a: Act) -> Act:

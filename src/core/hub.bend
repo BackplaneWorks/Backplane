@@ -85,6 +85,10 @@ type Out is Data:
   # own; a project with several boards names the board's); sheet: the
   # combined view's schematic (kind "split:" and its panes)
   Watch{client: U32, kind: String, root: String, path: String, tree: String, sheet: String, stamps: String}
+  # kicad.watch asked for (req: its params as JSON): the server checks the
+  # root and the sources (core/watchpol.bend, git identity in a job) and
+  # only then answers and watches; a refusal keeps the previous watch
+  WatchReq{client: U32, id: String, req: String}
   # install the latest release and restart
   Upgrade{}
   # the same, asked on purpose (update.now) or after the wait ran out: its
@@ -207,6 +211,7 @@ def Out.kind(o: Out) -> String:
     case AgentSend{_, _}: "AgentSend"
     case AgentStop{_}: "AgentStop"
     case Watch{_, _, _, _, _, _, _}: "Watch"
+    case WatchReq{_, _, _}: "WatchReq"
     case Upgrade{}: "Upgrade"
     case UpgradeForce{}: "UpgradeForce"
     case Restart{}: "Restart"
@@ -10581,7 +10586,7 @@ def Hub.request.k(i: Nat, +s: M.State, +now: Nat, +client: U32, +id: String, +p:
     case 12n:
       Step.cat(Retire.archive(s, now, J.Json.get_str(p, "thread", ""), Step{[M.ThreadDeleted{J.Json.get_str(p, "thread", ""), now}], [Reply.ok(client, id), AgentStop{J.Json.get_str(p, "thread", "")}, BotFx{"gone", J.Json.get_str(p, "thread", ""), "", ""}]}), Watch.retire(s, now, J.Json.get_str(p, "thread", "")))
     case 13n:
-      Step.outs([Reply.ok(client, id), Watch{client, J.Json.get_str(p, "kind", ""), J.Json.get_str(p, "root", ""), J.Json.get_str(p, "path", ""), J.Json.get_str(p, "tree", ""), J.Json.get_str(p, "sheet", ""), J.Json.get_str(p, "stamps", "")}])
+      Step.outs([WatchReq{client, id, J.Json.show(p)}])
     case 14n:
       Hub.modes(s, now, client, id, p, Hub.thread(s, J.Json.get_str(p, "thread", "")))
     case 15n:

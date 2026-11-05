@@ -146,6 +146,7 @@ import ./farcodec.bend as FCODEC
 import ../core/far.bend as FR
 import ../core/fview.bend as FV
 import ../core/rview.bend as RVW
+import ../core/watchpol.bend as WP
 import ./farview.bend as FVS
 import ../core/xref.bend as XR
 import ../core/fmcp.bend as FM
@@ -4798,6 +4799,63 @@ def Plot.puts(ms: List<&2, PV.PMsg>, +m: Maybe<&2, Chan(PV.PMsg)>) -> IO(Unit):
       IO.pure(Unit, Unit{})
     case x <> t:
       IO.bind(Unit, Unit, Plot.put(m, x), u => Plot.puts(t, m))
+
+# kicad.watch and kicad.warm are judged before anything is answered or
+# watched (core/watchpol.bend for the folder and the sources, here the git
+# identity of each version, proven in the folder itself, only when a version
+# is named): a refusal answers with the reason and leaves the client's
+# previous watch alone. A warm request has no client to answer, so a refused
+# one is dropped, and never stops anything.
+def WatchChk.some(m: Maybe<&2, String>) -> Bool:
+  match m:
+    case Some{_}: True{}
+    case None{}: False{}
+
+def WatchChk.one(prev: Bool, +root: String, +p: String) -> IO(Bool):
+  match prev:
+    case False{}:
+      IO.pure(Bool, False{})
+    case True{}:
+      IO.bind(Maybe<&2, String>, Bool, GT.Git.ident(root, HI.Hist.git.dir(p)), m => IO.pure(Bool, WatchChk.some(m)))
+
+def WatchChk.gits(+ps: List<&2, String>, +root: String, ok: Bool) -> IO(Bool):
+  match ps:
+    case Nil{}:
+      IO.pure(Bool, ok)
+    case +p <> rest:
+      IO.bind(Bool, Bool, WatchChk.one(ok, root, p), r => WatchChk.gits(rest, root, r))
+
+def WatchChk.run(+st: M.State, +home: String, +kind: String, +thread: String, +root: String, +path: String, +tree: String, +sheet: String, +live: Bool) -> IO(Bool):
+  Bool.pick(IO(Bool), WP.Wp.ok(st, home, kind, thread, root, path, tree, sheet, live), WatchChk.gits(Bool.pick(List<&2, String>, String.is_empty(kind), Nil{}, WP.Wp.gits([path, tree, sheet])), root, True{}), IO.pure(Bool, False{}))
+
+def WatchChk.go(ok: Bool, +kind: String, +client: U32, +path: String, +root: String, +tree: String, +sheet: String, +stamps: String, +pv: Maybe<&2, Chan(PV.PMsg)>) -> IO(Unit):
+  match ok:
+    case True{}:
+      Plot.puts(Plot.watch.any(String.starts_with(kind, "warm:"), client, kind, root, path, tree, sheet, String.eq(stamps, "1")), pv)
+    case False{}:
+      IO.pure(Unit, Unit{})
+
+def WatchChk.reply(ok: Bool, +inbox: Chan(Msg), +client: U32, +id: String) -> IO(Unit):
+  match ok:
+    case True{}:
+      GitJob.reply(inbox, client, id, True{}, J.Json.obj([]))
+    case False{}:
+      GitJob.reply(inbox, client, id, False{}, J.Json.obj([J.KV{"text", J.Str{"that source is not one of this thread's: a folder this hub keeps, a file of it, a version of its repository, or what the agent showed"}}]))
+
+def WatchChk.req(+ok: Bool, +inbox: Chan(Msg), +client: U32, +id: String, +kind: String, +root: String, +path: String, +tree: String, +sheet: String, +stamps: String, +pv: Maybe<&2, Chan(PV.PMsg)>) -> IO(Unit):
+  do IO<Unit>:
+    WatchChk.go(ok, kind, client, path, root, tree, sheet, stamps, pv)
+    WatchChk.reply(ok, inbox, client, id)
+
+def WatchChk.warm(+st: M.State, +home: String, +client: U32, +kind: String, +root: String, +path: String, +tree: String, +sheet: String, +stamps: String, +pv: Maybe<&2, Chan(PV.PMsg)>) -> IO(Unit):
+  do IO<Unit>:
+    +ok : Bool <- WatchChk.run(st, home, kind, "", root, path, tree, sheet, False{})
+    WatchChk.go(Bool.and(ok, String.starts_with(kind, "warm:")), kind, client, path, root, tree, sheet, stamps, pv)
+
+def WatchChk.job(+inbox: Chan(Msg), +st: M.State, +home: String, +live: Bool, +client: U32, +id: String, +p: J.Json, +pv: Maybe<&2, Chan(PV.PMsg)>) -> IO(Unit):
+  do IO<Unit>:
+    +ok : Bool <- WatchChk.run(st, home, J.Json.get_str(p, "kind", ""), J.Json.get_str(p, "thread", ""), J.Json.get_str(p, "root", ""), J.Json.get_str(p, "path", ""), J.Json.get_str(p, "tree", ""), J.Json.get_str(p, "sheet", ""), live)
+    WatchChk.req(ok, inbox, client, id, J.Json.get_str(p, "kind", ""), J.Json.get_str(p, "root", ""), J.Json.get_str(p, "path", ""), J.Json.get_str(p, "tree", ""), J.Json.get_str(p, "sheet", ""), J.Json.get_str(p, "stamps", ""), pv)
 
 def Term.msg(+op: String, +thread: String, +cwd: String, data: List<&2, U32>, +cols: U32, +rows: U32) -> TM.TMsg:
   Bool.pick(TM.TMsg, String.eq(op, "open"), TM.TOpen{thread, cwd, cols, rows},
@@ -10982,9 +11040,14 @@ def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
       do IO<Hub>:
         Plot.put(Cfg.pv(cfg), PV.PInfo{client, id, key, at, idx})
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
-    case Hub{st, f, ls, cl, as, inbox, +cfg, note} B.Watch{+client, +kind, +root, +path, +tree, +sheet, +stamps}:
+    case Hub{+st, f, ls, cl, as, +inbox, +cfg, note} B.WatchReq{+client, +id, +req}:
       do IO<Hub>:
-        Plot.puts(Plot.watch.any(String.starts_with(kind, "warm:"), client, kind, root, path, tree, sheet, String.eq(stamps, "1")), Cfg.pv(cfg))
+        +p : J.Json = Maybe.default(&2, J.Json, J.Json.parse(req), J.Null{})
+        IO.spawn(Unit, WatchChk.job(inbox, st, Cfg.home(cfg), Bot.peer.live(st, FR.Fr.link(J.Json.get_str(p, "thread", ""))), client, id, p, Cfg.pv(cfg)))
+        return Hub{st, f, ls, cl, as, inbox, cfg, note}
+    case Hub{+st, f, ls, cl, as, +inbox, +cfg, note} B.Watch{+client, +kind, +root, +path, +tree, +sheet, +stamps}:
+      do IO<Hub>:
+        IO.spawn(Unit, WatchChk.warm(st, Cfg.home(cfg), client, kind, root, path, tree, sheet, stamps, Cfg.pv(cfg)))
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
     case Hub{+st, f, ls, cl, as, +inbox, +cfg, note} B.CodexTurn{+thread, +cwd, +model, +session, r, text}:
       do IO<Hub>:
@@ -18100,8 +18163,9 @@ def Hub.mcp.viewer(show: Bool, h: Hub, +thread: String, +o: J.Json, body: String
   match show h:
     case True{} Hub{+st, f, ls, cl, as, inbox, cfg, note}:
       do IO<Hub>:
-        +args : J.Json <- K.Files.request(B.Hub.cwd(st, B.Hub.thread(st, thread)), KIpc.args(o), J.Json.get_str(KIpc.args(o), "kind", "board"))
-        Hub.mcp.k(MC.Mcp.reply(J.Json.get_obj(o, "id"), MC.Mcp.view(thread, J.Json.get_str(args, "path", ""), J.Json.get_str(args, "kind", ""))), Hub{st, f, ls, cl, as, inbox, cfg, note}, reply, body)
+        +cwd : String = B.Hub.cwd(st, B.Hub.thread(st, thread))
+        +args : J.Json <- K.Files.request(cwd, KIpc.args(o), J.Json.get_str(KIpc.args(o), "kind", "board"))
+        Hub.mcp.k(MC.Mcp.reply(J.Json.get_obj(o, "id"), MC.Mcp.grant(MC.Mcp.view(thread, J.Json.get_str(args, "path", ""), J.Json.get_str(args, "kind", "")), thread, Bool.pick(String, String.starts_with(J.Json.get_str(args, "path", ""), "/"), J.Json.get_str(args, "path", ""), FMP.Fm.abs(cwd, J.Json.get_str(args, "path", ""))), now)), Hub{st, f, ls, cl, as, inbox, cfg, note}, reply, body)
     case False{} _: Hub.mcp.route(Preview.is(o), h, thread, o, body, reply, now)
 
 def Hub.mcp.ki(ki: Bool, h: Hub, +thread: String, +o: J.Json, body: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
