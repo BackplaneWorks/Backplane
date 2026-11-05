@@ -10,6 +10,7 @@ use super::routines::{plan, Pick};
 use super::sched_text::{person_rule, rel, routine_json, saved, zone_source};
 use super::world::{Bot, Routine, World};
 use serde_json::{json, Value};
+use std::sync::Arc;
 
 pub const TOOLS_JSON: &str = include_str!("tools.json");
 pub const NAMES: &[&str] = &["bot_whoami", "bot_list", "bot_send", "room_list", "room_create", "room_post", "room_read", "memory_save", "memory_recall", "memory_forget", "memory_list",
@@ -92,7 +93,7 @@ impl Bots {
     }
 
     async fn tool_decide(&self, w: &World, thread: &str, name: &str, a: &Value, later: &mut Option<(Pending, u64)>) -> Res {
-        let Some(b) = w.bots.values().find(|b| !b.deleted && b.thread == thread).cloned() else { return fail("only bots have this tool") };
+        let Some(b) = w.bots.values().find(|b| !b.deleted && b.thread == thread).cloned() else { return fail("unknown tool") };
         let now = now_s();
         match name {
             "bot_whoami" => {
@@ -269,4 +270,12 @@ fn lenient_json(s: &str) -> bool {
     let t = s.trim();
     if t.is_empty() { return false }
     serde_json::from_str::<Value>(t).is_ok() || !(t.starts_with('{') || t.starts_with('[') || t.starts_with('"'))
+}
+
+/// The bots' tools as the agents' MCP server serves them: listed in a bot's thread only (Bots.route: a thread that is no bot's lists and answers none of them)
+pub struct BotToolSet(pub Arc<Bots>);
+impl crate::agents::mcp::ToolSet for BotToolSet {
+    fn list(&self, thread: &str) -> Vec<Value> { if self.0.is_bot_thread(thread) { defs() } else { vec![] } }
+    fn owns(&self, name: &str) -> bool { owns(name) }
+    fn call<'a>(&'a self, thread: &'a str, name: &'a str, a: &'a Value) -> crate::api::Fut<'a, (bool, Value)> { Box::pin(async move { self.0.tool_call(thread, name, a).await }) }
 }

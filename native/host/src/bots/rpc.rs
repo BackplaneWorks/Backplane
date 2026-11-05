@@ -18,7 +18,7 @@ impl Inbox for Arc<Agents> {
     fn stop<'a>(&'a self, thread: &'a str) -> Fut<'a, ()> { Box::pin(async move { let _ = Agents::stop(self, thread).await; }) }
 }
 
-pub struct Bots { pub hub: Arc<Hub>, world: Mutex<World>, inbox: Arc<dyn Inbox>, pub(crate) router: std::sync::OnceLock<Arc<dyn super::mail::file::Router>>, last_id: std::sync::Mutex<(u64, u64)>, pub(crate) owner_link: std::sync::OnceLock<Arc<dyn super::mail::owner::OwnerLink>>, pub(crate) owner_busy: std::sync::atomic::AtomicBool, star: std::sync::OnceLock<Arc<StarPrompt>> }
+pub struct Bots { pub hub: Arc<Hub>, world: Mutex<World>, inbox: Arc<dyn Inbox>, pub(crate) router: std::sync::OnceLock<Arc<dyn super::mail::file::Router>>, last_id: std::sync::Mutex<(u64, u64)>, pub(crate) owner_link: std::sync::OnceLock<Arc<dyn super::mail::owner::OwnerLink>>, pub(crate) owner_busy: std::sync::atomic::AtomicBool, star: std::sync::OnceLock<Arc<StarPrompt>>, threads: std::sync::RwLock<std::collections::HashSet<String>> }
 /// the state lane's star-nudge count for a human prompt (statehost::policies()?.star_prompt): the events to commit with the prompt and, on the fifth, the offer for its connection
 pub type StarPrompt = dyn Fn(&str, u64) -> (Vec<Value>, Option<Value>) + Send + Sync;
 
@@ -57,11 +57,16 @@ pub fn safe_id(id: &str) -> bool { !id.is_empty() && id.len() <= 80 && id.chars(
 
 impl Bots {
     /// Folds the log once, off the runtime's workers, then registers the `bots.*` requests.
-    pub async fn start(hub: Arc<Hub>, agents: Arc<Agents>) -> Arc<Bots> { let b = Bots::start_with(hub, Arc::new(agents)).await; b.start_ticker(); b }
+    pub async fn start(hub: Arc<Hub>, agents: Arc<Agents>) -> Arc<Bots> {
+        let b = Bots::start_with(hub, Arc::new(agents.clone())).await; b.start_ticker();
+        agents.add_tools(Arc::new(super::tools::BotToolSet(b.clone()))); // the bots' own MCP tools join Backplane's in a bot's thread
+        b
+    }
     pub async fn start_with(hub: Arc<Hub>, inbox: Arc<dyn Inbox>) -> Arc<Bots> {
         let store = hub.store.clone();
         let w = tokio::task::spawn_blocking(move || { let mut w = World::default(); if let Err(e) = w.sync(&store) { eprintln!("bots: reading the log: {e:#}") } w }).await.unwrap_or_default();
-        let b = Arc::new(Bots { hub: hub.clone(), world: Mutex::new(w), inbox, router: Default::default(), last_id: Default::default(), owner_link: Default::default(), owner_busy: Default::default(), star: Default::default() });
+        let b = Arc::new(Bots { hub: hub.clone(), world: Mutex::new(w), inbox, router: Default::default(), last_id: Default::default(), owner_link: Default::default(), owner_busy: Default::default(), star: Default::default(), threads: Default::default() });
+        { let g = b.world.lock().await; b.refresh_threads(&g); }
         { let me = b.clone(); tokio::spawn(async move { loop { tokio::time::sleep(std::time::Duration::from_secs(20)).await; me.owner_outbox().await } }); } // OwnerJob: the outbox is walked again
         hub.register_rpc(Arc::new(Rpc(b.clone())));
         super::api::register(&hub, &b);
@@ -69,6 +74,9 @@ impl Bots {
         let me = b.clone(); tokio::spawn(async move { let n = me.mail_recover().await; if n > 0 { eprintln!("bots: {n} mail header(s) recovered from the journal") } });
         b
     }
+    /// the threads that are live bots' (a tool list asks without waiting for the world lock)
+    fn refresh_threads(&self, w: &World) { *self.threads.write().unwrap() = w.bots.values().filter(|b| !b.deleted && !b.thread.is_empty()).map(|b| b.thread.clone()).collect(); }
+    pub fn is_bot_thread(&self, th: &str) -> bool { self.threads.read().unwrap().contains(th) }
     /// The world caught up with the log; the guard is the lock a request holds from decision to commit.
     pub async fn world(&self) -> MutexGuard<'_, World> {
         let mut g = self.world.lock().await;
@@ -79,6 +87,7 @@ impl Bots {
         } else if behind > 0 {
             if let Err(e) = g.sync(&self.hub.store) { eprintln!("bots: reading the log: {e:#}") }
         }
+        if behind > 0 { self.refresh_threads(&g) }
         g
     }
     /// B.Hub.id(prefix, now, seq): seq is the log's length; one request at a time makes it unique within a prefix
