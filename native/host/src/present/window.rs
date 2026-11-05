@@ -149,7 +149,7 @@ pub fn window(page: &Page, ctx: &[Row], epoch: &str, before: u64, p: &Value) -> 
     let a = &p["anchor"];
     let anchor = if a["id"].as_str().map_or(false, |s| s.len() <= 1024) && a["offset"].as_u64().is_some() { json!({"id": a["id"], "offset": a["offset"]}) } else { json!({"id": "", "offset": 0}) };
     let partial: Vec<Value> = ids.iter().filter_map(|id| by.get(&num(id)).copied()).filter(|r| r.kind != "msg" && blocks(&r.text).1 > 1)
-        .map(|r| json!({"id": r.id, "version": r.ord.to_string(), "cursor": cursor(epoch, target, &format!("message:{}", r.id), 1), "hasMore": true, "complete": false, "reason": "byte-limit"})).collect();
+        .map(|r| json!({"id": r.id, "version": r.ord.to_string(), "cursor": cursor(epoch, target, &format!("message:{}", r.ord), 1), "hasMore": true, "complete": false, "reason": "byte-limit"})).collect();
     let mut w = Map::new();
     w.insert("ids".into(), json!(ids)); w.insert("anchor".into(), anchor); w.insert("older".into(), json!(older)); w.insert("olderNext".into(), json!(""));
     w.insert("hasMore".into(), json!(has_older)); w.insert("remaining".into(), json!(remaining)); w.insert("newer".into(), json!(newer));
