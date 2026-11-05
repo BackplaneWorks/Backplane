@@ -132,6 +132,7 @@ impl Bots {
         let mut ev = vec![json!({"$":"ThreadCreated","id":th,"project":"","title":name,"env":"local","branch":"","worktree":"","provider":provider,"model":model,"at":now}),
             json!({"$":"BotSet","id":bot,"name":name,"thread":th,"look":look,"persona":"","at":now}),
             json!({"$":"UberSet","bot":bot,"uid":uid,"at":now}), json!({"$":"SettingSet","key":"uber.offer","value":"","at":now})];
+        let mut ev = self.accounts_created(ev).await;
         ev.extend(w.ops_with(uid, now, &[b_bind(&w.me(), &bot, &th, &name)]));
         let r = self.hub.commit_many(&ev).await;
         drop(w);

@@ -503,7 +503,9 @@ const JS_UBER2_EVENTS: &str = include_str!("../../../../test/gpui/bots/fixtures/
     hub.commit(&json!({"$":"SettingSet","key":"uber.offer","value":"{\"uid\":\"u9-x\",\"name\":\"kit\",\"look\":7,\"machine\":\"m2\",\"link\":\"l1\"}","at":3})).await.unwrap();
     let n = log(&hub).len();
     let r = rpc(&hub, "bots.uber_join", json!({"uid":"u9-x"})).await; assert_eq!(r["ok"], true); let b = r["bot"].as_str().unwrap().to_string();
-    let ev = log(&hub); let new: Vec<&Value> = ev[n..].iter().filter(|e| e["$"] != "WorktreeSet").collect();
+    let ev = log(&hub); let all: Vec<&Value> = ev[n..].iter().filter(|e| e["$"] != "WorktreeSet").collect();
+    assert!(all[1]["$"] == "SettingSet" && all[1]["key"].as_str().unwrap().starts_with("account.thread."), "the thread's account binding follows its ThreadCreated");
+    let new: Vec<&Value> = all.iter().enumerate().filter(|(i, _)| *i != 1).map(|(_, e)| *e).collect();
     let kinds: Vec<&str> = new.iter().map(|e| e["$"].as_str().unwrap()).collect();
     assert_eq!(kinds, vec!["ThreadCreated", "BotSet", "UberSet", "SettingSet", "UberOp"]);
     assert_eq!((new[0]["title"].as_str().unwrap(), new[0]["project"].as_str().unwrap()), ("kit", ""));
@@ -1072,4 +1074,20 @@ async fn owner_planned(p: &Pair) {
     assert_eq!(bots.tool_call(&t0, "bot_create", &json!({"name":"k9"})).await.1["error"], "you keep 8 sub-bots already; ask the person to retire one");
     // the new bot is listed at once in its own thread
     bots.world().await; assert!(bots.is_bot_thread(&thread_of(&kid)));
+}
+#[tokio::test] async fn a_bots_thread_starts_on_the_default_account() {
+    // Accounts.created: the binding follows ThreadCreated for claude and codex (the default account, else none), for bots.create and bot_create; other providers get none
+    let (hub, bots, _r) = start("accounts", "").await;
+    hub.commit(&json!({"$":"SettingSet","key":"account.default.codex","value":"{\"id\":\"a1\",\"epoch\":2}","at":1})).await.unwrap();
+    let a = bot(&hub, "ada").await;
+    let th = |id: &str| log(&hub).iter().find(|e| e["$"] == "BotSet" && e["id"] == id).unwrap()["thread"].as_str().unwrap().to_string();
+    let ta = th(&a);
+    let l = log(&hub); let i = l.iter().position(|e| e["$"] == "ThreadCreated" && e["id"] == ta.as_str()).unwrap();
+    assert_eq!(l[i + 1], json!({"$":"SettingSet","key":format!("account.thread.{ta}.claude"),"value":"{\"id\":\"\",\"epoch\":0}","at":l[i]["at"]}), "right after its ThreadCreated");
+    let (ok, r) = bots.tool_call(&ta, "bot_create", &json!({"name":"kidx","provider":"codex"})).await; assert!(ok, "{r}");
+    let tk = th(r["bot"].as_str().unwrap());
+    assert_eq!(hub.setting(&format!("account.thread.{tk}.codex")).await.as_deref(), Some("{\"id\":\"a1\",\"epoch\":2}"));
+    let (ok, r) = bots.tool_call(&ta, "bot_create", &json!({"name":"kidg","provider":"grok"})).await; assert!(ok, "{r}");
+    let tg = th(r["bot"].as_str().unwrap());
+    assert_eq!(hub.setting(&format!("account.thread.{tg}.grok")).await, None); assert_eq!(hub.setting(&format!("account.thread.{tg}.claude")).await, None);
 }
