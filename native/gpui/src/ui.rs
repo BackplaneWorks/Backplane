@@ -26,7 +26,7 @@ fn inline_text(node: &Value, out: &mut String) {
     for k in node["kids"].as_array().into_iter().flatten() { inline_text(k, out); }
 }
 
-fn block(node: &Value, light: bool, depth: usize) -> AnyElement {
+pub(crate) fn block(node: &Value, light: bool, depth: usize) -> AnyElement {
     let c = |name: &str| theme::color(light, name);
     let tag = node["tag"].as_str().unwrap_or("p");
     let mut text = String::new();
@@ -110,6 +110,7 @@ impl Render for Backplane {
         if self.gallery { return crate::swatch::gallery(light).into_any_element(); }
         if self.fonts { return crate::swatch::fonts(light).into_any_element(); }
         let c = |name: &str| theme::color(light, name);
+        if self.input.read(cx).light != light { self.input.update(cx, |i, _| i.light = light); for i in self.screens.ask_inputs.values() { i.update(cx, |i, _| i.light = light); } }
         // bots: (name, mood, note, look seed) copied out so the cat cache can be filled
         let bot_data: Vec<(String, String, String, u64)> = self.data["bots"].as_array().into_iter().flatten()
             .map(|b| (string(b, "name"), string(b, "mood"), string(b, "note"), b["look"].as_u64().unwrap_or(0))).collect();
@@ -213,12 +214,11 @@ impl Render for Backplane {
             popup = popup.child(div().id(("skill", index)).flex().gap_3().px_3().py_1().cursor_pointer().hover(|s| s.bg(c("raise")))
                 .child(div().font_weight(FontWeight::BOLD).flex_shrink_0().child(label)).child(div().flex_1().overflow_hidden().whitespace_nowrap().text_color(c("dim")).child(desc))
                 .on_click(cx.listener(move |this, _, window, cx| {
-                    let _ = this.tx.try_send(Command::Action("skill".into(), word.clone()));
-                    this.input.update(cx, |input, cx| input.set(word.clone() + " ", cx));
-                    this.popup = false; this.input.focus_handle(cx).focus(window); cx.notify();
+                    let _ = this.tx.try_send(Command::Action("skill".into(), word.clone())); this.await_completion(cx);
+                    this.input.focus_handle(cx).focus(window); cx.notify();
                 })));
         }
-        let show_popup = self.popup && skills.map_or(false, |s| !s.is_empty());
+        let show_popup = skills.map_or(false, |s| !s.is_empty());
         // chips
         let model = thread["picker"]["models"].as_array().and_then(|m| m.iter().find(|x| x["on"] == true)).map(|m| string(m, "label")).unwrap_or_default();
         let model_short = if model.starts_with("Claude Code") { "default".to_string() } else { model.split(" · ").next().unwrap_or("").to_lowercase() };
@@ -268,13 +268,15 @@ impl Render for Backplane {
                     .when(!self.error.is_empty(), |d| d.child(div().px_5().py_2().text_color(c("bad")).child(self.error.clone())))
                     .child(div().flex_shrink_0().relative().child(art::probe("composer")).border_t_1().border_color(c("line")).flex().justify_center().child(div().w_full().max_w(px(930.)).px_4().py_3().flex().flex_col().gap_2()
                         .when(show_popup, |d| d.child(popup))
+                        .children(crate::screens::asks::view(cx, light, &self.screens.ask_inputs, &thread["asks"]))
+                        .children(crate::screens::attach::chips(cx, light, &self.screens.attacher.previews, thread))
                         .child(div().border_1().border_color(c("accent")).bg(c("view")).px_3().py_2().min_h(px(60.)).child(self.input.clone()))
                         .child(div().flex().gap_2().items_center()
                             .child(div().flex_1().px_3().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).font(art::mono_font()).child(format!("claude / {} / {}", if model_short.is_empty() { "default" } else { &model_short }, if effort.is_empty() { "auto" } else { &effort })))
                             .child(chip(light, String::new()).flex().items_center().gap_2().child(ic(light, "user", 16., "text")).child("Default"))
                             .child(chip(light, String::new()).child(ic(light, "square-pen", 16., "dim")))
                             .child(chip(light, String::new()).flex().items_center().gap_2().child(ic(light, "gauge", 14., "dim")).child(ctx))
-                            .child(chip(light, String::new()).child(ic(light, "paperclip", 16., "dim")))
+                            .child(chip(light, String::new()).id("attach").cursor_pointer().on_click(cx.listener(|this, _, _, cx| this.pick_files(cx))).child(ic(light, "paperclip", 16., "dim")))
                             .child(chip(light, String::new()).child(ic(light, "mic", 16., "dim")))
                             .child(div().id("send").px_4().py_1().bg(c("accent")).text_color(c("on-accent")).cursor_pointer().child("Send").on_click(cx.listener(|this, _, window, cx| this.send(&Send, window, cx)))))))
                 )

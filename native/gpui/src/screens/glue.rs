@@ -1,0 +1,77 @@
+//! The few places where the window hands control to the screens: all of Backplane's screen-specific
+//! methods live here so main.rs keeps one call at each seam.
+use super::{asks, attach::DEFAULT_CAP, composer::ComposerEvent};
+use crate::Backplane;
+use gpui::*;
+
+impl Backplane {
+    /// A composer event (paste, drop, picked files): start the uploads off the UI thread; say why when nothing starts.
+    pub(crate) fn attach_event(&mut self, event: &ComposerEvent, cx: &mut Context<Self>) {
+        let cap = self.data["thread"]["cap"].as_u64().unwrap_or(DEFAULT_CAP);
+        if let Err(e) = self.screens.attacher.event(&self.tx, &self.selected, cap, event) { self.error = e; }
+        cx.notify();
+    }
+    pub(crate) fn pick_files(&mut self, cx: &mut Context<Self>) {
+        let rx = cx.prompt_for_paths(PathPromptOptions { files: true, directories: false, multiple: true, prompt: None });
+        cx.spawn(async move |weak, cx| {
+            if let Ok(Ok(Some(paths))) = rx.await { let _ = weak.update(cx, |this, cx| this.attach_event(&ComposerEvent::Files(paths), cx)); }
+        }).detach();
+    }
+    /// The composer's text changed: keep it as this thread's draft (written in the background) and tell the hub,
+    /// which decides the popup rows (`thread.skills`) from it. True when the text really changed.
+    pub(crate) fn draft_changed(&mut self, text: &str) -> bool {
+        if self.drafts.get(&self.selected).map_or(text.is_empty(), |d| d == text) { return false; }
+        if self.selected.is_empty() { return true; }
+        if text.is_empty() { self.drafts.remove(&self.selected); } else { self.drafts.insert(self.selected.clone(), text.to_string()); }
+        self.screens.drafts.set(&self.selected, text);
+        true
+    }
+    /// A popup row was pressed: remember the draft at that moment and wait for the hub's completion of it.
+    pub(crate) fn await_completion(&mut self, cx: &App) { self.screens.await_draft = Some((self.input.read(cx).content.to_string(), std::time::Instant::now())); }
+    /// The hub's picture carries the completed draft after a row press. Wait for a draft that differs from the one at the
+    /// press (a picture already in flight carries the old one), give up after 2 s, and never overwrite what was typed since.
+    pub(crate) fn draft_from_hub(&mut self, cx: &mut Context<Self>) {
+        let Some((at, since)) = self.screens.await_draft.clone() else { return };
+        if since.elapsed() > std::time::Duration::from_secs(2) || self.input.read(cx).content != at { self.screens.await_draft = None; return; }
+        let d = self.data["thread"]["draft"].as_str().unwrap_or("").to_string();
+        if !d.is_empty() && d != at { self.screens.await_draft = None; self.input.update(cx, |i, cx| i.set(d, cx)); }
+    }
+    /// Send the draft to the hub, coalesced: while the timer runs only the newest text is kept, so a burst of keys
+    /// is one request and the last text is never dropped.
+    pub(crate) fn send_draft(&mut self, text: String, cx: &mut Context<Self>) {
+        self.screens.pending_draft = Some(text);
+        if self.screens.draft_timer { return; }
+        self.screens.draft_timer = true;
+        cx.spawn(async move |weak, cx| {
+            cx.background_executor().timer(std::time::Duration::from_millis(30)).await;
+            let _ = weak.update(cx, |this, _| {
+                this.screens.draft_timer = false;
+                if let Some(t) = this.screens.pending_draft.take() { let _ = this.tx.try_send(crate::hub::Command::Draft(t)); }
+            });
+        }).detach();
+    }
+    /// A picture arrived: the first selection restores its saved draft; open asks get their boxes.
+    pub(crate) fn picture_arrived(&mut self, selected: &str, cx: &mut Context<Self>) {
+        if !selected.is_empty() && self.selected.is_empty() {
+            self.screens.attacher.show(selected);
+            if let Some(d) = self.drafts.get(selected).cloned() { if self.input.read(cx).content.is_empty() { self.input.update(cx, |i, cx| i.set(d, cx)); } }
+        }
+        asks::sync(self, cx);
+    }
+    /// Leaving `self.selected` for `raw`: remember its picture and scroll, show the target's cached picture at once.
+    pub(crate) fn thread_switch(&mut self, raw: &str) {
+        self.screens.drafts.kick();
+        if !self.selected.is_empty() && self.data["thread"].is_object() {
+            let t = self.data["thread"].clone();
+            self.screens.pictures.put(&self.selected.clone(), t);
+            self.screens.offsets.insert(self.selected.clone(), f32::from(self.scroll.offset().y));
+        }
+        self.screens.attacher.show(raw);
+        if let Some(t) = self.screens.pictures.get(raw) {
+            self.data["thread"] = t;
+            self.last_entries = self.data["thread"]["entries"].as_array().map_or(0, |e| e.len());
+            let y = self.screens.offsets.get(raw).copied().unwrap_or(-1_000_000.);
+            self.scroll.set_offset(point(px(0.), px(y)));
+        }
+    }
+}
