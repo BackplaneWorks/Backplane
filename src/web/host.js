@@ -3606,11 +3606,16 @@ function showThinSearch(search, thread = "") {
       draw(search, !!(asked?.cursor && asked.text === search.query && f.shown === search.query));
     },
   };
+  // The first key of a burst asks at once (two letters or more); the keys
+  // after it wait for a 120 ms pause (ask keeps one search on its way and
+  // the newest behind it). Every query waited 180 ms first.
   query.addEventListener("input", () => {
     showTitles();
-    clearTimeout(f.timer);
+    const burst = !!f.timer;
+    clearTimeout(f.timer);f.timer = 0;
     if (!query.value.trim()) { ask("", "");return; }
-    f.timer = setTimeout(() => ask(query.value, ""), 180);
+    if (!burst && !f.asked && query.value.trim().length >= 2) { ask(query.value, "");f.timer = setTimeout(() => { f.timer = 0; }, 120);return; }
+    f.timer = setTimeout(() => { f.timer = 0;ask(query.value, ""); }, 120);
   });
   query.addEventListener("keydown", e => {
     if (e.isComposing) return;
