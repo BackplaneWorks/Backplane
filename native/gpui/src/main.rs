@@ -63,7 +63,7 @@ impl Backplane {
                 let entries=self.data["thread"]["entries"].as_array().map_or(0,|e|e.len());
                 if entries!=self.last_entries {self.last_entries=entries;self.scroll.set_offset(point(px(0.),px(-1_000_000.)));}
                 let selected=string(&self.data["thread"],"id");
-                if !selected.is_empty() {self.picture_arrived(&selected,cx);self.selected=selected;}
+                if !selected.is_empty() {let selected=screens::attach::raw_id(&selected).to_string();self.picture_arrived(&selected,cx);self.selected=selected;}
                 self.thread_source="hub";
                 if let Some((label,t0))=self.confirm.take(){self.m("input",serde_json::json!({"step":label,"ok":true,"latency_ms":(t0.elapsed().as_secs_f64()*1e6).round()/1e3,"source":"hub"}));}
                 self.apply_ms=t_apply.elapsed().as_secs_f64()*1000.0;self.timing=Some(timing);self.applied_at=Some(Instant::now());
