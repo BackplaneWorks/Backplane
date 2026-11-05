@@ -1,6 +1,7 @@
 //! The driver against a stand-in helper (a shell script that answers each request line and announces a frame on `open`): no Chrome.
 use super::*;
-use crate::{api::Caller, hub::{Cfg, Hub, Out}, presenter::Canned};
+use crate::{api::Caller, hub::{Cfg, Hub}, presenter::Canned};
+use super::super::tests::Tap;
 
 const STANDIN: &str = r#"#!/bin/sh
 # stand-in backplane-browser: echoes each request line back in result.line; "open" also announces a frame; "big" answers a screenshot
@@ -44,9 +45,9 @@ fn text(body: &Value) -> String { body["$content"][0]["text"].as_str().unwrap().
     let (ok, body) = preview(&hub, "t1", "preview_evaluate", &json!({"expression":"1"})).await; assert!(!ok); assert_eq!(text(&body), "boom");
 }
 #[tokio::test] async fn a_new_frame_is_announced_to_every_client() {
-    let (hub, _d) = hub_with_helper("frame").await; let mut rx = hub.attach(1);
+    let (hub, _d) = hub_with_helper("frame").await; let rx = Tap::new(&hub, 1);
     preview(&hub, "t1", "preview_open", &json!({"url":"example.com"})).await;
-    let mut got = None; for _ in 0..100 { if let Ok(Out::Value(v)) = rx.try_recv() { if v["t"] == "shot" { got = Some(v); break } } else { tokio::time::sleep(Duration::from_millis(20)).await } }
+    let mut got = None; for _ in 0..100 { if let Some(v) = rx.take().into_iter().find(|v| v["t"] == "shot") { got = Some(v); break } tokio::time::sleep(Duration::from_millis(20)).await }
     assert_eq!(got.unwrap(), json!({"t":"shot","bot":"t1","n":3}));
 }
 #[tokio::test] async fn while_the_person_drives_the_agents_calls_never_reach_the_helper() {
@@ -85,9 +86,9 @@ fn text(body: &Value) -> String { body["$content"][0]["text"].as_str().unwrap().
     let m = paged("t1", &json!({"op":"close","id":1,"type":"a","method":"b","keep":2})); assert_eq!(m.len(), 2); assert!(m.contains_key("page") && m.contains_key("keep"));
 }
 #[tokio::test] async fn tabs_events_become_info_and_others_go_to_the_teach_driver() {
-    let (hub, _d) = hub_with_helper("events").await; let b = get(&hub).unwrap(); let mut rx = hub.attach(1); let mut ev = b.events();
+    let (hub, _d) = hub_with_helper("events").await; let b = get(&hub).unwrap(); let rx = Tap::new(&hub, 1); let mut ev = b.events();
     b.line(r#"{"event":"tabs","page":"t1","tabs":[{"index":0}]}"#).await; b.line(r#"{"event":"navigated","page":"t1","url":"u"}"#).await; b.line(r#"{"event":"mystery"}"#).await;
-    let mut info = None; while let Ok(Out::Value(v)) = rx.try_recv() { if v["t"] == "info" { info = Some(v) } }
+    tokio::time::sleep(Duration::from_millis(100)).await; let info = rx.take().into_iter().find(|v| v["t"] == "info");
     assert!(info.unwrap()["info"]["browser.tabs.t1"].as_str().unwrap().contains("\"tabs\"")); assert!(b.tabs_of("t1").await.is_some());
     assert_eq!(ev.try_recv().unwrap()["event"], "navigated"); assert!(ev.try_recv().is_err());
 }
@@ -98,9 +99,9 @@ fn text(body: &Value) -> String { body["$content"][0]["text"].as_str().unwrap().
 }
 
 #[tokio::test] async fn open_and_navigate_bring_the_browser_tab_forward_and_other_calls_do_not() {
-    let (hub, _d) = hub_with_helper("view").await; let mut rx = hub.attach(1);
-    let views = |rx: &mut tokio::sync::mpsc::UnboundedReceiver<Out>| { let mut n = vec![]; while let Ok(Out::Value(v)) = rx.try_recv() { if v["t"] == "view" { n.push(v) } } n };
+    let (hub, _d) = hub_with_helper("view").await; let rx = Tap::new(&hub, 1);
+    let views = |rx: &Tap| -> Vec<Value> { std::thread::sleep(Duration::from_millis(100)); rx.take().into_iter().filter(|v| v["t"] == "view").collect() };
     preview(&hub, "t1", "preview_open", &json!({"url":"example.com"})).await; preview(&hub, "t1", "preview_navigate", &json!({"url":"example.org"})).await;
-    let v = views(&mut rx); assert_eq!(v.len(), 2); assert_eq!(v[0], json!({"t":"view","thread":"t1","kind":"browser","path":""}));
-    preview(&hub, "t1", "preview_snapshot", &json!({})).await; preview(&hub, "t1", "preview_click", &json!({"x":1,"y":1})).await; assert!(views(&mut rx).is_empty());
+    let v = views(&rx); assert_eq!(v.len(), 2); assert_eq!(v[0], json!({"t":"view","thread":"t1","kind":"browser","path":""}));
+    preview(&hub, "t1", "preview_snapshot", &json!({})).await; preview(&hub, "t1", "preview_click", &json!({"x":1,"y":1})).await; assert!(views(&rx).is_empty());
 }
