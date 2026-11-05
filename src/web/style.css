@@ -64,7 +64,6 @@ html.light, .app.light, .bub-move.light {
   --st-idle: var(--faint);
 }
 .app.light { background: var(--bg); color: var(--text); }
-html:has(.app.light), html:has(.app.light) body { background: #fafaf8; color: #1b1d21; }
 /* before the first frame: the theme the last one painted (host.js themeDocument) */
 html.light, html.light body { background: #fafaf8; color: #1b1d21; color-scheme: light; }
 
@@ -2002,8 +2001,10 @@ html:lang(ja) :is(.set-text, .set-ctl) { min-width: 0; }
    Share the app's columns without moving the navigation or conversation
    nodes: history, drafts and keyboard ownership keep their existing home. */
 @media (min-width: 761px) {
-  html:has(.app > .workspace-thread) { --workspace-w: 76px; }
-  html[data-rail="compact"]:has(.app > .workspace-thread) { --workspace-w: 44px; }
+  /* (html[data-workspace]: host.js writes it after each render; an html:has()
+     here restyled the whole page on every DOM change inside .app) */
+  html[data-workspace="thread"] { --workspace-w: 76px; }
+  html[data-rail="compact"][data-workspace="thread"] { --workspace-w: 44px; }
   .app:has(> .workspace-thread) { grid-template-columns: 264px minmax(0, 1fr) var(--workspace-w); }
   .app.panel:has(> .workspace-thread) { grid-template-columns: 264px minmax(0, 1fr) var(--viewer-w, minmax(0, 1.1fr)) var(--workspace-w); }
   html[data-side="shut"] .app:has(> .workspace-thread) { grid-template-columns: 44px minmax(0, 1fr) var(--workspace-w); }
@@ -2019,7 +2020,7 @@ html:lang(ja) :is(.set-text, .set-ctl) { min-width: 0; }
   .workspace-bar button.on { box-shadow: inset -2px 0 var(--accent); }
   .workspace-bar .rail-toggle svg { transform: scaleX(-1); }
   html[data-rail="compact"] .workspace-bar .rail-toggle svg { transform: none; }
-  html:has(.app > .workspace-thread) .toast { right: calc(var(--workspace-w) + 16px); max-width: calc(100vw - var(--workspace-w) - 32px); }
+  html[data-workspace="thread"] .toast { right: calc(var(--workspace-w) + 16px); max-width: calc(100vw - var(--workspace-w) - 32px); }
 }
 
 /* The top bar (view.bend's View.chrome.bar, for a host that asks for it,
@@ -3505,7 +3506,7 @@ html.phone {
 }
 html.phone.light, html.phone .app.light { --ph-card: #ffffff; --ph-fill: color-mix(in srgb, var(--text) 6%, transparent); }
 html.phone .app.phone.light { background: var(--panel); }
-html.phone:has(.app.light), html.phone:has(.app.light) body { background: var(--panel); }
+html.phone.light, html.phone.light body { background: var(--panel); }
 html.phone body, .app.phone { font-family: var(--ph-font); }
 .app.phone { -webkit-font-smoothing: antialiased; }
 /* text the interface owns reads in the UI font, also where the desktop asks for mono */
