@@ -373,7 +373,7 @@ impl Hub {
     pub async fn request(&self, c: &mut Conn, msg: &Value) -> Vec<Value> {
         let out = self.request_one(c, msg).await;
         // the view actor folds the answer of a request its own commands sent (session/actor.rs: @rp.req, @telemetry.req)
-        if !msg.get("m").and_then(Value::as_str).unwrap_or("").starts_with("view.") { if let Some(id) = msg.get("id").and_then(Value::as_u64) { crate::session::replied(c.client, id) } }
+        if !msg.get("m").and_then(Value::as_str).unwrap_or("").starts_with("view.") { if let Some(id) = msg.get("id").and_then(Value::as_u64) { let m = msg.get("m").and_then(Value::as_str).unwrap_or(""); if crate::session::is_job(m) { crate::session::replied_late(c.client, id) } else { crate::session::replied(c.client, id) } } }
         out
     }
     async fn request_one(&self, c: &mut Conn, msg: &Value) -> Vec<Value> {

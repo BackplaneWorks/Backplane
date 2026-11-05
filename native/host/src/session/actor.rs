@@ -29,7 +29,7 @@ const VIEW_INFO: [&str; 5] = ["view.design:", "view.kind:", "view.path:", "view.
 #[derive(Default)]
 pub struct ViewActor { view: String, target: Option<Value>, sel: Option<String>, keys: BTreeSet<String>, away: BTreeMap<String, String>, page: Option<(String, Value, u64)>, local: Option<(String, Value, Value)>, held_drafts: Map<String, Value>, held_info: Map<String, Value>, rid: u64, panel: bool, hub_view: bool, reads: Vec<(String, Value, Value)>,
     /// ids of the requests this view's commands told the client to send (`cmds` of type send), and of those the hub has since answered
-    sent: BTreeSet<u64>, replied: BTreeSet<u64> }
+    sent: BTreeSet<u64>, replied: BTreeSet<u64>, late: BTreeSet<u64> }
 
 /// The thread a target's draft and viewer belong to (V.Target.owner). Limits: a bot's thread (Target.thread) and a
 /// project home's owner are not modelled, so those targets get no "@away.<t>" and no seeds.
@@ -178,6 +178,9 @@ impl ViewActor {
         // Rp.reply and Telemetry.reply (client.bend) run on the reply of every request the actor's own commands sent, and each leaves the request's
         // id behind, emptied ("@rp.req:<id>" is the page a review request asked for, cleared when its reply ends it: Rp.failed always sets it "").
         for id in &self.replied { drafts.insert(format!("@rp.req:{id}"), json!("")); drafts.insert(format!("@telemetry.req:{id}"), json!("")); }
+        // an answer from a hub job (fab.look, files.dir, git.* ...) reaches the JS actor after the view request that was already being served, so it
+        // shows from the request after that one (recA/session-gpui: view.open sent right after fab.look carries none; the next update does)
+        let late = std::mem::take(&mut self.late); self.replied.extend(late); cap(&mut self.replied);
         let mut info = session.get("info").and_then(Value::as_object).cloned().unwrap_or_default();
         // Actor.refresh: a thread (or none) this actor has shown no viewer for takes the page's record, "" when it has none.
         if !first && !self.keys.contains(&format!("view.kind:{th}")) {
@@ -229,6 +232,15 @@ fn sent_ids(pol: &Value) -> Vec<u64> {
         .filter_map(|c| c["text"].as_str().and_then(|t| serde_json::from_str::<Value>(t).ok()).and_then(|j| j["id"].as_u64())).collect()
 }
 /// The hub answered request `id` of this connection: when it is one the view's commands sent, the actor now holds its marks (next reply's session).
+/// `replied` for a request a hub job answers (see `is_job`): its marks wait for one served view request.
+pub fn replied_late(client: u64, id: u64) {
+    if let Some(a) = ACTORS.lock().unwrap().get_mut(&client) { if a.sent.remove(&id) { a.late.insert(id); } }
+}
+/// The methods the Bend hub answers from a job (Git/Media/Jobs outs: the reply arrives after the synchronous requests queued behind it).
+pub fn is_job(method: &str) -> bool {
+    matches!(method, "fab.look" | "fab.intent" | "order.buy" | "boards.list" | "pdf.page" | "file.open" | "project.new" | "project.create" | "fs.list" | "fs.mkdir" | "fs.find")
+        || ["files.", "git.", "history.", "kicad.", "mech.", "review."].iter().any(|p| method.starts_with(p))
+}
 pub fn replied(client: u64, id: u64) {
     if let Some(a) = ACTORS.lock().unwrap().get_mut(&client) { if a.sent.remove(&id) { a.replied.insert(id); cap(&mut a.replied); } }
 }
@@ -307,6 +319,11 @@ mod tests {
         let s = a.reply("v", &req("thread", "t1"), &pol("t1", &[])); assert!(has(&s, "@rp.req:1") && has(&s, "@telemetry.req:1") && s["drafts"]["@rp.req:1"] == "");
         let s = a.reply("v", &req("thread", "t2"), &pol("t2", &[])); assert!(has(&s, "@rp.req:1"), "kept across a move (Actor.scope.keep)");
         replied(77, 1); // an unknown connection: nothing
+        // a job's answer waits for one served view request
+        let mut b = ViewActor::default(); b.sent.insert(5); b.late.insert(5);
+        assert!(!has(&b.reply("v", &req("thread", "t1"), &pol("t1", &[])), "@rp.req:5"), "the request already being served does not carry it");
+        assert!(has(&b.reply("v", &req("thread", "t1"), &pol("t1", &[])), "@rp.req:5"), "the next one does");
+        assert!(is_job("fab.look") && is_job("files.dir") && is_job("git.status") && !is_job("turn.start") && !is_job("project.add") && !is_job("setting.set"));
         let mut many: BTreeSet<u64> = (1..=1000).collect(); cap(&mut many); assert_eq!((many.len(), many.first().copied(), many.last().copied()), (256, Some(745), Some(1000)));
     }
     #[test] fn hist_picker_scope() {
