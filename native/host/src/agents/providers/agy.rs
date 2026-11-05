@@ -81,7 +81,9 @@ exit $r\n".into()
 pub fn write_runner(root: &str) -> std::io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
     std::fs::create_dir_all(root)?;
-    let tmp = format!("{root}/agy.sh.{}", std::process::id()); std::fs::write(&tmp, run_sh())?;
+    // a name of its own per call: two turns starting together never write the same file (pid + a counter, as pi.rs's write_atomic)
+    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let tmp = format!("{root}/agy.sh.{}.{}", std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)); std::fs::write(&tmp, run_sh())?;
     std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))?; std::fs::rename(&tmp, format!("{root}/agy.sh"))
 }
 
@@ -492,6 +494,14 @@ mod tests {
         let mut d = AgySign::default(); let o = d.line("", "/h", &j(r#"{"id":2,"result":{"configOptions":[{"id":"model","currentValue":"m","options":[{"value":"m","name":"M"}]}]}}"#)); assert!(o.say[0].starts_with("ok\t{\"models\"")); assert!(d.done);
         let mut e = AgySign::default(); assert_eq!(e.line("", "/h", &j(r#"{"id":4,"error":{"message":"SUBSCRIPTION_REQUIRED x"}}"#)).say[0], "fail\tGoogle needs an eligible Antigravity plan for this account.");
     }
+    #[test] fn the_runner_is_written_whole_by_turns_starting_together() {
+        let d = super::super::muse::e2e::dir("agy-runner"); let r = d.to_string_lossy().into_owned();
+        let hs: Vec<_> = (0..16).map(|_| { let r = r.clone(); std::thread::spawn(move || { for _ in 0..20 { write_runner(&r).unwrap(); let s = std::fs::read_to_string(format!("{r}/agy.sh")).unwrap(); assert_eq!(s, run_sh(), "a reader never sees half of it") } }) }).collect();
+        for h in hs { h.join().unwrap() }
+        assert_eq!(std::fs::read_dir(&d).unwrap().count(), 1, "no temporary file is left");
+    }
+    /// The words are the default the actor wraps (rules::exit_say: code, signal, OOM, scrubbed stderr tail) once the agents lane's helper lands; they do not claim a sign-in problem for a kill.
+    #[test] fn exit_words_are_the_default_for_the_actor() { let d = driver("antigravity").unwrap().driver; let w = d.exit_why(137).unwrap(); assert!(w.starts_with("antigravity exited before the turn ended")) }
     #[test] fn install_answers() { assert_eq!(install_err("working\nok\n"), ""); assert_eq!(install_err("x\nthe download failed\n"), "the download failed"); assert_eq!(install_err(""), "the install failed"); }
     #[test] fn the_driver() {
         let mut d = AgyDriver::new(); let a = TurnIn { thread: "t".into(), home: "/nonexistent-home".into(), cwd: "/tmp".into(), runtime: "approval-required".into(), settings: vec![("agy.auth".into(), "oauth-personal".into())], ..Default::default() };
