@@ -30,11 +30,11 @@ export async function chunks(logPath,size,dir,max=Infinity){
 const run=(cmd,files)=>{const [bin,...a]=cmd.split(/\s+/);return JSON.parse(execFileSync(bin,[...a,...files],{maxBuffer:1<<28,env:process.env}).toString())};
 if(import.meta.main){
   const log=arg('log'),bend=arg('bend'),rust=arg('rust'),size=Number(arg('chunk',4194304));
-  const max=Number(arg('lines','Infinity'));const dir=mkdtempSync(tmpdir()+'/oracle-');const files=await chunks(log,size,dir,max);
+  const max=Number(arg('lines','Infinity'));const dir=mkdtempSync(tmpdir()+'/oracle-');for(const sig of ['SIGTERM','SIGINT'])process.on(sig,()=>{rmSync(dir,{recursive:true,force:true});process.exit(143)});process.on('exit',()=>rmSync(dir,{recursive:true,force:true}));const files=await chunks(log,size,dir,max);
   const re=arg('skip','default')==='none'?null:SKIP;const b=run(bend,files);const hb=digest(b,re);
   console.log(JSON.stringify({log:log.replace(/.*\//,'…/'),lines:max,chunks:files.length,skippedSettings:re?skipped(b,re):{},bend:{sha256:hb,projects:b.projects.length,threads:b.threads.length,settings:b.settings.length,seq:b.seq}}));
   let rc=0;
-  if(rust){const r=run(rust,files);const hr=digest(r,re);console.log(JSON.stringify({rust:{sha256:hr,seq:r.seq},equal:hb===hr}));
+  if(rust){const r=run(rust+' --json',files);const hr=digest(r,re);console.log(JSON.stringify({rust:{sha256:hr,seq:r.seq},equal:hb===hr}));
     if(hb!==hr){rc=1;const cb=JSON.parse(canonical(without(b,re))),cr=JSON.parse(canonical(without(r,re)));
       for(const k of ['projects','threads','settings','seq']){if(JSON.stringify(cb[k])!==JSON.stringify(cr[k]))console.log('  differs in',k,JSON.stringify(cb[k]).length,'vs',JSON.stringify(cr[k]).length)}}}
   else{console.log('rust side not given: Bend digest only');rc=2}

@@ -4,8 +4,8 @@ import {execFileSync} from 'node:child_process';import {canonical,without,SKIP,c
 import {mkdtempSync,rmSync} from 'node:fs';import {tmpdir} from 'node:os';
 const [log,lines,b,r]=process.argv.slice(2);
 const dir=mkdtempSync(tmpdir()+'/sdiff-');const files=await chunks(log,4194304,dir,Number(lines));
-const run=bin=>JSON.parse(execFileSync(bin,files,{maxBuffer:1<<30}).toString());
-const A=JSON.parse(canonical(without(run(b),SKIP))),B=JSON.parse(canonical(without(run(r),SKIP)));
+const run=(bin,extra=[])=>JSON.parse(execFileSync(bin,[...extra,...files],{maxBuffer:1<<30}).toString());
+const A=JSON.parse(canonical(without(run(b),SKIP))),B=JSON.parse(canonical(without(run(r,['--json']),SKIP)));
 const pat=k=>k.replace(/[pt]\d{10}-\d+/g,'<id>').replace(/\d+/g,'#');
 const ma=new Map(A.settings.map(x=>[x.key,x.value])),mb=new Map(B.settings.map(x=>[x.key,x.value]));
 const kinds=new Map();
