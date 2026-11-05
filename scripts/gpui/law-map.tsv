@@ -87,3 +87,15 @@ law kicad_min_version rust kicad_runtime_status
 law kicad_old_runtime_is_old rust kicad_runtime_status
 law kicad_new_runtime_is_ok rust kicad_runtime_status
 law boards_list_offered rust boards_list_offered
+
+# native/host/src/shelf.rs: the settle rule, snooze and shelf split (tests carry the laws' names)
+law settle_at_window rust settle_at_window
+law settle_fresh rust settle_fresh
+law settle_monotone rust settle_monotone
+law settle_never_running rust settle_never_running
+law settle_never_pending rust settle_never_pending
+law settle_respects_unsettle rust settle_respects_unsettle
+law settle_never_snoozed rust settle_never_snoozed
+law snooze_wakes rust snooze_wakes
+law sidebar_split_count rust sidebar_split_count
+law sidebar_split_at_count rust sidebar_split_at_count
