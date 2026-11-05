@@ -163,7 +163,7 @@ port waits for the person's decision.
 
 <!-- law-map: generated below by scripts/gpui/law-map.py -->
 
-Laws in LAWS.bend: 3253. bend 922, rust 557, unported 1177, client 470, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`, `src/core/msp.bend`, `src/core/agy.bend`, `src/core/opencode.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
+Laws in LAWS.bend: 3253. bend 912, rust 567, unported 1177, client 470, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`, `src/core/msp.bend`, `src/core/agy.bend`, `src/core/opencode.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
 
 | law | status | seed | file | note |
 |---|---|---|---|---|
@@ -1276,16 +1276,16 @@ Laws in LAWS.bend: 3253. bend 922, rust 557, unported 1177, client 470, window 1
 | `settle_ix_eq` | client | seed C +-10% | `src/core/client.bend` |  |
 | `alerts_ids_same` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `alerts_ids_raise` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `far_fail_keeps_items` | bend | seed K +-10% | `src/core/far.bend` |  |
-| `far_ack_removes_batch` | bend | seed K +-10% | `src/core/far.bend` |  |
-| `far_ack_keeps_waiting` | bend | seed K +-10% | `src/core/far.bend` |  |
-| `far_retry_order` | bend | seed K +-10% | `src/core/far.bend` |  |
-| `far_retry_begins` | bend | seed K +-10% | `src/core/far.bend` |  |
-| `far_hold_waits` | bend | seed K +-10% | `src/core/far.bend` |  |
-| `far_release_resends` | bend | seed K +-10% | `src/core/far.bend` |  |
-| `far_backoff` | bend | seed K +-10% | `src/core/far.bend` |  |
-| `far_epoch_on_unknown_lines` | bend | seed K +-10% | `src/core/far.bend` |  |
-| `far_epoch_view_bumped` | bend | seed K +-10% | `src/core/far.bend` |  |
+| `far_fail_keeps_items` | rust `far_fail_keeps_items` | map | `src/core/far.bend` |  |
+| `far_ack_removes_batch` | rust `far_ack_removes_batch` | map | `src/core/far.bend` |  |
+| `far_ack_keeps_waiting` | rust `far_ack_keeps_waiting` | map | `src/core/far.bend` |  |
+| `far_retry_order` | rust `far_retry_order` | map | `src/core/far.bend` |  |
+| `far_retry_begins` | rust `far_retry_begins` | map | `src/core/far.bend` |  |
+| `far_hold_waits` | rust `far_hold_waits` | map | `src/core/far.bend` |  |
+| `far_release_resends` | rust `far_release_resends` | map | `src/core/far.bend` |  |
+| `far_backoff` | rust `far_backoff` | map | `src/core/far.bend` |  |
+| `far_epoch_on_unknown_lines` | rust `far_epoch_on_unknown_lines` | map | `src/core/far.bend` |  |
+| `far_epoch_view_bumped` | rust `far_epoch_view_bumped` | map | `src/core/far.bend` |  |
 | `hb_shows_nothing` | unported | seed R +-10% | `src/core/json.bend` |  |
 | `hubs_redraw_hb` | unported | seed R +-10% | `src/core/json.bend` |  |
 | `hb_ignored_by_fold` | client | seed C +-10% | `src/core/client.bend` |  |
