@@ -81,7 +81,7 @@ fn text(body: &Value) -> String { body["$content"][0]["text"].as_str().unwrap().
     let (hub, _d) = hub_with_helper("inject").await;
     let (ok, body) = preview(&hub, "t1", "preview_status", &json!({"op":"close","id":1,"type":"evaluate","method":"x","path":"/tmp/x"})).await;
     assert!(ok, "{body}"); let line: Value = serde_json::from_str(&text(&body)).unwrap(); let req: Value = serde_json::from_str(line["line"].as_str().unwrap()).unwrap();
-    assert_eq!(req["op"], "status"); assert!(req["id"].as_u64().unwrap() != 1 || true); assert!(req.get("type").is_none() && req.get("method").is_none());
+    assert_eq!(req["op"], "status"); assert!(req.get("type").is_none() && req.get("method").is_none());
     let m = paged("t1", &json!({"op":"close","id":1,"type":"a","method":"b","keep":2})); assert_eq!(m.len(), 2); assert!(m.contains_key("page") && m.contains_key("keep"));
 }
 #[tokio::test] async fn tabs_events_become_info_and_others_go_to_the_teach_driver() {
