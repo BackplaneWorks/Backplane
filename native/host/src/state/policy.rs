@@ -44,7 +44,8 @@ impl Core {
         let quiet = autosettle::quiet(&self.st, events);
         let ended: Vec<String> = turnend::ended_threads(&core).into_iter().map(String::from).collect();
         let ctx = turnend::told_ctx(&self.st, &core, &ended);
-        let seq = self.st.seq + core.len() as u64; // Alert.seq(post): the changes applied after the step's own, a failed end's mark not among them
+        let seq_before = self.st.seq;
+        let seq = seq_before + core.len() as u64; // Alert.seq(post): the changes applied after the step's own, a failed end's mark not among them
         let pre_running: Vec<(String, bool)> = ended.iter().map(|t| (t.clone(), turnend::was_running(&self.st, t))).collect();
         let pre_due: Vec<(String, bool)> = ended.iter().map(|t| (t.clone(), turnend::sum_due(&self.st, t, now))).collect();
         let mut meta = vec![];
@@ -57,9 +58,13 @@ impl Core {
         let end = turnend::ended_events_from(&self.st, &pre_running, &pre_due, seq, now, &core);
         let mut list: Vec<Value> = core.clone();
         list.extend(end.iter().cloned()); list.extend(marks.iter().cloned()); list.extend(live.iter().cloned());
-        let told = turnend::told_marks(&ctx, &list);
-        for x in end.iter().chain(&marks).chain(&live).chain(&told).chain(&quiet) { self.st.apply(x); }
-        let after = live.into_iter().chain(told).chain(quiet).chain(meta).collect();
+        // the asks the step opens get their alert records (Alerts.asks, over the state after the changes so far), then every record that alerts is marked
+        for x in end.iter().chain(&marks).chain(&live) { self.st.apply(x); }
+        let asks = turnend::alert_asks(&self.st, seq_before + list.len() as u64, &list);
+        let mut all = list.clone(); all.extend(asks.iter().cloned());
+        let told = turnend::told_marks(&ctx, &all);
+        for x in asks.iter().chain(&told).chain(&quiet) { self.st.apply(x); }
+        let after = live.into_iter().chain(asks).chain(told).chain(quiet).chain(meta).collect();
         Derived { core, end, marks, after }
     }
     pub fn tick(&self, now_s: u64) -> Vec<Value> { let mut v = autosettle::changes(&self.st, now_s); v.extend(autosettle::tick_post(&self.st, now_s)); v.extend(turnend::told_prune(&self.st, now_s)); v }

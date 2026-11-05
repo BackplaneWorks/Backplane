@@ -36,7 +36,12 @@ fn main() {
         let ths: Vec<String> = state::fam::turnend::ended_threads(&core).into_iter().map(String::from).collect();
         let ctx = state::fam::turnend::told_ctx(&pre, &core, &ths);
         let mut list = core.clone(); list.extend(ended.iter().cloned()); list.extend(marks.iter().cloned());
-        let mut v = ended; v.extend(marks); v.extend(state::fam::turnend::told_marks(&ctx, &list)); v
+        // the asks the step opens (Alerts.asks over the state after the changes so far), then the told marks over everything
+        let mut post2 = fold(&args[2..]);
+        for c in &list { post2.apply(c); }
+        let asks = state::fam::turnend::alert_asks(&post2, pre.seq + list.len() as u64, &list);
+        let mut all = list.clone(); all.extend(asks.iter().cloned());
+        let mut v = ended; v.extend(marks); v.extend(asks); v.extend(state::fam::turnend::told_marks(&ctx, &all)); v
     };
     let out = serde_json::json!({"tick": state::fam::autosettle::changes(&st, now), "meta": meta, "quiet": state::fam::autosettle::quiet(&st, &batch), "live": state::fam::watchdog::after(&st, now, &batch), "end": end, "wakes": state::fam::autosettle::tick_post(&st, now)});
     println!("{}", serde_json::to_string(&out).unwrap());

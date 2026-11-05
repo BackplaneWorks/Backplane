@@ -145,6 +145,30 @@ pub fn policy_end(post: &State, seq: u64, now: u64, thread: &str, state: &str) -
     }
 }
 
+/// Alert.clean / Alert.text: a text as one line (tab and newline become a space), cut to max characters after trimming
+fn alert_text(t: &str, max: usize) -> String { take(bend_trim(t), max).chars().map(|c| if c == '\t' || c == '\n' { ' ' } else { c }).collect() }
+/// Alert.ask.say: what an ask's alert says: a paused browser task its one-line question, an order's question or approval its detail, any other its tool and detail
+fn ask_say(tool: &str, detail: &str) -> String {
+    if tool == "task_pause" { return gstr(&parse_or_null(detail), "question", "").to_string() }
+    let plain = tool.starts_with("order_ask") || tool == "order_quote" || tool == "checks_ok";
+    if plain || tool.is_empty() { detail.to_string() } else { format!("{tool} {detail}") }
+}
+/// Alerts.asks: the alert record of every ask the step opens (kind "ask", or the quiet record when the person turned the needs alerts off).
+/// `post` is the state after the step's changes so far, `seq` the changes applied after them (Alert.seq(post)). Triage.managed reads false until mail lands.
+pub fn alert_asks(post: &State, seq: u64, list: &[Value]) -> Vec<Value> {
+    let mut out = vec![];
+    for c in list {
+        if gstr(c, "$", "") != "AskOpened" { continue }
+        let (th, tool, detail, at) = (gstr(c, "thread", ""), gstr(c, "tool", ""), gstr(c, "detail", ""), gnat(c, "at", 0));
+        let mem = parse(&post.get(&format!("alert.{th}"), "")).settled.to_string();
+        let on = notify_on(post, "needs");
+        out.push(if tool == "settings_proposal" {
+            if on { alert_set(seq, at, th, "ask", &format!("ask-{}", fr_local(th)), &mem, &alert_text("A settings proposal needs your review.", 180)) } else { alert_set(seq, at, th, "", "", &mem, "") }
+        } else if on { alert_set(seq, at, th, "ask", &format!("ask-{}", fr_local(th)), &mem, &alert_text(&ask_say(tool, detail), 180)) } else { alert_set(seq, at, th, "", "", &mem, "") });
+    }
+    out
+}
+
 /// What Told.alerts needs of the state before the step, for the threads whose alert records are in it
 pub struct ToldCtx { pub seq: u64, items: std::collections::HashMap<String, (String, String, String)> }
 pub fn told_ctx(pre: &State, batch: &[Value], extra_threads: &[String]) -> ToldCtx {
@@ -257,5 +281,18 @@ mod tests {
         assert!(gone.contains(&format!("told.k{}-1", now - TOLD_KEEP_S)), "past the newest 2000 the oldest go even when they are young enough");
         assert_eq!(gone.len(), 4, "{gone:?}");
         assert_eq!(told_prune(&st, now)[0]["value"], "");
+    }
+    #[test] fn an_opened_ask_gets_its_alert_record() {
+        let mut st = State::new();
+        st.apply_line(r#"{"$":"SettingSet","key":"alert.t1","value":"done\tturn-t1\tmem1\t1.1\t","at":1}"#);
+        let ask = |tool: &str, detail: &str| json!({"$":"AskOpened","id":"q","thread":"t1","kind":"approval","tool":tool,"detail":detail,"options":"","at":50});
+        let rec = |c: Value| alert_asks(&st, 9, &[c])[0]["value"].as_str().unwrap().to_string();
+        assert_eq!(rec(ask("Bash", "rm -rf x")), "ask\task-t1\tmem1\t50.9\tBash rm -rf x", "kind, key, the settle memory kept, stamp, tool and detail");
+        assert_eq!(rec(ask("order_ask", "Ship to?")), "ask\task-t1\tmem1\t50.9\tShip to?", "an order's question is plain words");
+        assert_eq!(rec(ask("task_pause", r#"{"question":"Log in?"}"#)), "ask\task-t1\tmem1\t50.9\tLog in?");
+        assert_eq!(rec(ask("settings_proposal", "x")), "ask\task-t1\tmem1\t50.9\tA settings proposal needs your review.");
+        assert_eq!(rec(ask("Bash", "a\tb\nc")), "ask\task-t1\tmem1\t50.9\tBash a b c", "one line");
+        st.apply_line(r#"{"$":"SettingSet","key":"notify.needs","value":"off","at":2}"#);
+        assert_eq!(alert_asks(&st, 9, &[ask("Bash", "x")])[0]["value"], "\t\tmem1\t50.9\t", "needs alerts off: the quiet record that keeps the memory");
     }
 }
