@@ -7,7 +7,7 @@ use tokio::sync::mpsc::{self, Sender};
 use tokio_tungstenite::tungstenite::{Message, protocol::WebSocketConfig};
 
 #[derive(Debug)] pub enum Command { Rpc(String,crate::screens::settings::Secret,&'static str), Sleep(f64), Select(String), Send(String), Draft(String), Action(String,String), Page(String) }
-#[derive(Debug)] pub enum Event { Rpc(&'static str,bool,String), Plot(Vec<u8>), NetWake, Picture(Value,Timing), Status(String), Accepted, Error(String) }
+#[derive(Debug)] pub enum Event { PlotTooBig(usize), Rpc(&'static str,bool,String), Plot(Vec<u8>), NetWake, Picture(Value,Timing), Status(String), Accepted, Error(String) }
 /// Where a reply's time went before the UI saw it: send to frame received, decode, delta/merge, and the body's size.
 #[derive(Debug,Clone,Default)] pub struct Timing { pub rtt_ms:f64, pub decode_ms:f64, pub process_ms:f64, pub bytes:usize, pub delta:bool }
 #[derive(Clone)] pub struct Config { pub hub:String, pub token_file:PathBuf, pub exit_after:Option<f64>, pub script:Option<PathBuf>, pub swatches:bool, pub gallery:bool, pub fonts:bool, pub solid_demo:Option<String>, pub theme:Option<String> }
@@ -123,14 +123,14 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
             sink.send(Message::Binary(wire::encode(&request).into())).await?;
         },
         frame=source.next()=>{
-            let frame=frame.context("hub closed")??;last=tokio::time::Instant::now();if let Message::Binary(b)=&frame {if crate::screens::plot::is_plot(b) {if b.len()<=(32<<20) {let _=events.send(Event::Plot(b.to_vec())).await;}continue;}}let recv=std::time::Instant::now();let mut size=0usize;
+            let frame=frame.context("hub closed")??;last=tokio::time::Instant::now();if let Message::Binary(b)=&frame {if crate::screens::plot::is_plot(b) {if b.len()<=(32<<20) {let _=events.send(Event::Plot(b.to_vec())).await;}else{let _=events.send(Event::PlotTooBig(b.len())).await;}continue;}}let recv=std::time::Instant::now();let mut size=0usize;
             let mut x=match frame {Message::Binary(bytes)=>{size=bytes.len();wire::decode(&bytes)?},Message::Text(text)=>serde_json::from_str(&text)?,Message::Ping(bytes)=>{sink.send(Message::Pong(bytes)).await?;continue},Message::Close(_)=>anyhow::bail!("closed"),_=>continue};
             let decoded=std::time::Instant::now();
             match x["t"].as_str().unwrap_or("") {
                 "view"=>{ensure!(x["version"]==1&&x["renderer"]=="mobile"&&x["generation"].is_string()&&x["epoch"].is_string(),"unsupported hub greeting");v.greeting=x;let request=v.request("view.open",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;},
                 "reply"=>{
                     let id=x["id"].as_u64().unwrap_or(0);
-                    if let Some(tag)=v.rpcs.remove(&id) {let why=x["error"]["message"].as_str().or(x["error"]["code"].as_str()).unwrap_or("").to_string();let _=events.send(Event::Rpc(tag,x["ok"]==true,why)).await;continue;}
+                    if let Some(tag)=v.rpcs.remove(&id) {let why=crate::screens::settings::reply_error(&x);let _=events.send(Event::Rpc(tag,x["ok"]==true,why)).await;continue;}
                     if let Some(is_post)=v.outgoing.remove(&id) {if x["ok"]==true {if is_post {let _=events.send(Event::Accepted).await;}}else{let _=events.send(Event::Error(format!("Hub refused request: {}",x["error"]["code"]))).await;}continue;}
                     let Some((revision,target,method))=v.pending.remove(&id) else{continue};
                     if x["ok"]!=true {let _=events.send(Event::Error(format!("View request refused: {}",x["error"]["code"]))).await;continue;}
