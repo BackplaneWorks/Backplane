@@ -61,4 +61,23 @@ const tick = () => new Promise(r => setImmediate(r));
   for (let i = 1; i < starts.length; i++) { await tick();answer(sent[i]); }
   assert.deepEqual((await read).components.map(c => c.id), all.map(c => c.id));
 }
-console.log('ok component pages asked ahead: listed offsets asked at once, taken in order, same rows; older hubs and bad lists page one by one, a wrong list falls back to the cursors');
+{
+  // pages in flight ahead never take a separate read's place: the original
+  // model's asset asked meanwhile is sent (it was refused as busy after a
+  // reload, and never asked again); separate reads keep their own bound
+  const {sent, rpc, answer} = endpoint(starts);
+  const read = rpc.components('thread-a');
+  answer(sent[0]);await tick();
+  assert.equal(sent.length, 5);
+  const asset = rpc.renderAsset('thread-a', 'board.kicad_pcb', '2', 'pcb-r1');
+  assert.equal(sent.length, 6);assert.equal(sent[5].m, 'kicad.renderAsset');
+  const more = [rpc.renderAsset('thread-a', 'b.kicad_pcb', '2', 'r'), rpc.renderAsset('thread-a', 'c.kicad_pcb', '2', 'r'), rpc.renderAsset('thread-a', 'd.kicad_pcb', '2', 'r')];
+  assert.equal(sent.length, 9);
+  await assert.rejects(rpc.renderAsset('thread-a', 'e.kicad_pcb', '2', 'r'), /busy/);
+  for (const s of sent.slice(1, 5).reverse()) answer(s);
+  assert.deepEqual((await read).components.map(c => c.id), all.map(c => c.id));
+  rpc.receive({t: 'reply', id: sent[5].id, ok: true, result: {asset: {url: '/a'}}});
+  assert.deepEqual(await asset, {url: '/a'});
+  rpc.reset();await Promise.allSettled(more);
+}
+console.log('ok component pages asked ahead: listed offsets asked at once, taken in order, same rows; older hubs and bad lists page one by one, a wrong list falls back to the cursors; pages ahead never refuse a separate read');

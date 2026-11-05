@@ -86,18 +86,22 @@ export class ViewerRpc {
   request(method, params, field, timeoutMs = this.timeoutMs, signal, room = READS) {
     if (signal?.aborted) return Promise.reject(new DOMException("Viewer read canceled", "AbortError"));
     if (!params.thread) return Promise.reject(new Error("No selected thread for model inspection."));
-    if (this.pending.size >= room) return Promise.reject(new Error("Viewer reads are busy; retry shortly."));
+    // (pages asked ahead have their own AHEAD: they never take a separate
+    // read's place, such as the original model's asset asked meanwhile)
+    const ahead = room > READS, taken = ahead ? this.pending.size : this.pending.size - this.aheadCount();
+    if (taken >= room) return Promise.reject(new Error("Viewer reads are busy; retry shortly."));
     const id = ++this.next;
     return new Promise((resolve, reject) => {
       const cleanup = () => { clearTimeout(timer); signal?.removeEventListener("abort", abort); this.pending.delete(id); };
       const abort = () => { cleanup(); reject(new DOMException("Viewer read canceled", "AbortError")); };
       const timer = setTimeout(() => { cleanup(); reject(new Error("Saved model read timed out. Retry after the save finishes.")); }, timeoutMs);
-      this.pending.set(id, { resolve, reject, timer, field, cleanup });
+      this.pending.set(id, { resolve, reject, timer, field, cleanup, ahead });
       signal?.addEventListener("abort", abort, { once: true });
       try { this.send({ id, m: method, p: params }); }
       catch (error) { cleanup(); reject(error); }
     });
   }
+  aheadCount() { let n = 0; for (const call of this.pending.values()) if (call.ahead) n++; return n; }
   receive(envelope) {
     if (envelope?.t !== "reply") return false;
     const call = this.pending.get(envelope.id); if (!call) return false;
