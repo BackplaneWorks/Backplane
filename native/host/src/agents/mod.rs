@@ -230,7 +230,9 @@ impl RpcHandler for Rpc {
 
 struct Live { input: mpsc::Sender<String>, pid: u32, key: String }
 
+enum HistJob { Start(String, String), Step(String, String), End(String) }
 struct Actor {
+    hist_tx: Option<mpsc::UnboundedSender<(JobGuard, HistJob)>>,
     ag: Arc<Agents>, th: String, cx: Cx, live_proc: Option<Live>,
     lines: Option<mpsc::Receiver<String>>, exit: Option<oneshot::Receiver<Exit>>,
     live: String, live_gen: u64, ahead: String, last_user: String, recent: VecDeque<String>, pacing: Option<Instant>, rid: u64,
@@ -249,7 +251,7 @@ async fn recv_opt(r: &mut Option<mpsc::Receiver<String>>) -> Option<Vec<String>>
 async fn exit_opt(r: &mut Option<oneshot::Receiver<Exit>>) -> Result<Exit, oneshot::error::RecvError> { match r { Some(rx) => rx.await, None => std::future::pending().await } }
 
 impl Actor {
-    fn new(ag: Arc<Agents>, th: String) -> Actor { Actor { cx: Cx::new(&th), ag, th, live_proc: None, lines: None, exit: None, live: String::new(), live_gen: 0, ahead: String::new(), last_user: String::new(), recent: VecDeque::new(), pacing: None, rid: 0, cwd: String::new(), cmds: cmds::Cmds::new(), sent: VecDeque::new(), wait: String::new(), prog: bg::Prog::default(), heard: Instant::now(), codex: false, prov: String::new(), model: String::new(), next_ride: false, driver: None, asked: HashMap::new() } }
+    fn new(ag: Arc<Agents>, th: String) -> Actor { Actor { hist_tx: None, cx: Cx::new(&th), ag, th, live_proc: None, lines: None, exit: None, live: String::new(), live_gen: 0, ahead: String::new(), last_user: String::new(), recent: VecDeque::new(), pacing: None, rid: 0, cwd: String::new(), cmds: cmds::Cmds::new(), sent: VecDeque::new(), wait: String::new(), prog: bg::Prog::default(), heard: Instant::now(), codex: false, prov: String::new(), model: String::new(), next_ride: false, driver: None, asked: HashMap::new() } }
 
     async fn run(mut self, mut rx: mpsc::Receiver<Cmd>) {
         let mut tick = tokio::time::interval(Duration::from_secs(1)); tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -479,13 +481,29 @@ impl Actor {
     }
 
     /// Hub.post.go: a new turn's design baseline (checkpoint 0 and a step), taken in the background.
-    fn jobs_start(&self, cwd: &str, entry: &str) {
-        let (hub, th, home) = (self.ag.hub.clone(), self.th.clone(), self.ag.host.home.to_string_lossy().into_owned()); let (cwd, entry) = (cwd.to_string(), entry.to_string());
-        let g = JobGuard::new(&self.ag); tokio::spawn(async move { let _g = g; hist::checkpoint0(cwd.clone(), th.clone()).await; hist::step(hub, th, cwd, entry, home, "start").await });
-    }
+    fn jobs_start(&mut self, cwd: &str, entry: &str) { self.hist(HistJob::Start(cwd.to_string(), entry.to_string())) }
     /// A tool call ended (Steps.claude): a step after it. A turn ended (Ended.out): a step and a checkpoint.
-    fn jobs_step(&self, entry: &str) { let (hub, th, home, cwd) = (self.ag.hub.clone(), self.th.clone(), self.ag.host.home.to_string_lossy().into_owned(), self.cwd.clone()); let entry = entry.to_string(); let g = JobGuard::new(&self.ag); tokio::spawn(async move { let _g = g; hist::step(hub, th, cwd, entry, home, "").await }); }
-    fn jobs_end(&self) { let (hub, th, home, cwd) = (self.ag.hub.clone(), self.th.clone(), self.ag.host.home.to_string_lossy().into_owned(), self.cwd.clone()); let g = JobGuard::new(&self.ag); tokio::spawn(async move { let _g = g; hist::step(hub.clone(), th.clone(), cwd.clone(), String::new(), home, "").await; hist::checkpoint(cwd, th).await }); }
+    fn jobs_step(&mut self, entry: &str) { let cwd = self.cwd.clone(); self.hist(HistJob::Step(cwd, entry.to_string())) }
+    fn jobs_end(&mut self) { let cwd = self.cwd.clone(); self.hist(HistJob::End(cwd)) }
+    /// A thread's design-history captures run one after another, in the order they were asked for: two captures overlapping on one thread's index could see each other's
+    /// changes (the step would be logged against the wrong entry, or an index lock fail one), and Bend's step for a turn's end comes before the next turn's start.
+    fn hist(&mut self, j: HistJob) {
+        let g = JobGuard::new(&self.ag);
+        if self.hist_tx.is_none() {
+            let (tx, mut rx) = mpsc::unbounded_channel::<(JobGuard, HistJob)>(); self.hist_tx = Some(tx);
+            let (hub, th, home) = (self.ag.hub.clone(), self.th.clone(), self.ag.host.home.to_string_lossy().into_owned());
+            tokio::spawn(async move {
+                while let Some((_g, j)) = rx.recv().await {
+                    match j {
+                        HistJob::Start(cwd, entry) => { hist::checkpoint0(cwd.clone(), th.clone()).await; hist::step(hub.clone(), th.clone(), cwd, entry, home.clone(), "start").await }
+                        HistJob::Step(cwd, entry) => hist::step(hub.clone(), th.clone(), cwd, entry, home.clone(), "").await,
+                        HistJob::End(cwd) => { hist::step(hub.clone(), th.clone(), cwd.clone(), String::new(), home.clone(), "").await; hist::checkpoint(cwd, th.clone()).await }
+                    }
+                }
+            });
+        }
+        let _ = self.hist_tx.as_ref().unwrap().send((g, j));
+    }
 
     async fn spawn(&mut self, t: &world::T, cwd: &str, key: String) -> Result<(), String> {
         if !std::path::Path::new(cwd).is_dir() { return Err(format!("its folder {cwd} is gone")) }
