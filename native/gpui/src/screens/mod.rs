@@ -30,6 +30,8 @@ pub struct Screens {
     pub reg: timeline::Reg,
     /// The 3D page (fed the hub's solid frames) and the Browser page (polls the thread's frame while it is shown); made when first needed.
     pub solid: Option<Entity<crate::viewers::solid::SolidPage>>,
+    /// The key of the newest solid frame given to it (what it holds), compared with the viewer's source before it is shown.
+    pub solid_key: String,
     pub browser: Option<(String, Entity<crate::viewers::browser::BrowserPage>)>,
     /// The kind asked for by a rail press, shown at once until the hub's picture answers; and when a plot was asked for (click to first paint).
     pub rail_pending: Option<String>,
@@ -57,6 +59,6 @@ pub struct Screens {
 
 impl Screens {
     pub fn new<T: 'static>(_cx: &mut Context<T>, target: Option<attach::Target>, drafts_path: std::path::PathBuf, saved: HashMap<String, String>) -> Self {
-        Self { ask_inputs: HashMap::new(), attacher: attach::Attacher::new(target), drafts: drafts::Writer::start(drafts_path, saved), offsets: HashMap::new(), reg: Default::default(), solid: None, browser: None, rail_pending: None, rail_at: None, focus_field: None, bots_open: String::new(), plot_click: None, plot: Default::default(), plotview: Default::default(), picker_open: false, fields: HashMap::new(), settings_focus: _cx.focus_handle(), focus_settings: false, settings_was_open: false, parsed: Default::default(), images: Default::default(), img_poll: false, await_draft: None, pending_draft: None, draft_timer: false }
+        Self { ask_inputs: HashMap::new(), attacher: attach::Attacher::new(target), drafts: drafts::Writer::start(drafts_path, saved), offsets: HashMap::new(), reg: Default::default(), solid: None, solid_key: String::new(), browser: None, rail_pending: None, rail_at: None, focus_field: None, bots_open: String::new(), plot_click: None, plot: Default::default(), plotview: Default::default(), picker_open: false, fields: HashMap::new(), settings_focus: _cx.focus_handle(), focus_settings: false, settings_was_open: false, parsed: Default::default(), images: Default::default(), img_poll: false, await_draft: None, pending_draft: None, draft_timer: false }
     }
 }
