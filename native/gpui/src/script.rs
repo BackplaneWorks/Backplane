@@ -12,16 +12,17 @@ pub fn metric(started: Instant, event: &str, mut fields: Value) {
 }
 
 #[derive(Clone, Debug)]
-pub enum Step { Select(usize), Popup(String), Type(String), Send, Wait(u64) }
+pub enum Step { Home(usize), Select(usize), Popup(String), Type(String), Send, Wait(u64) }
 #[derive(Clone, Debug)]
-pub enum Goal { Thread(String), Popup, Typed(String), Sent(usize), Sleep }
+pub enum Goal { Home, Thread(String), Popup, Typed(String), Sent(usize), Sleep }
 pub struct Pending { pub label: String, pub started: Instant, pub goal: Goal, pub armed: bool, pub seq: u64 }
 
 /// Steps: {"select":N} {"popup":"/"} {"type":"text"} {"send":true} {"wait":ms}.
 pub fn load(path: &Path) -> VecDeque<Step> {
     let list: Vec<Value> = std::fs::read_to_string(path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
     list.iter().filter_map(|v| {
-        if let Some(n) = v["select"].as_u64() { Some(Step::Select(n as usize)) }
+        if let Some(n) = v["home"].as_u64() { Some(Step::Home(n as usize)) }
+        else if let Some(n) = v["select"].as_u64() { Some(Step::Select(n as usize)) }
         else if let Some(t) = v["popup"].as_str() { Some(Step::Popup(t.into())) }
         else if let Some(t) = v["type"].as_str() { Some(Step::Type(t.into())) }
         else if v["send"].as_bool() == Some(true) { Some(Step::Send) }
@@ -58,6 +59,7 @@ impl Backplane {
         if p.armed { return; }
         let done = match &p.goal {
             Goal::Thread(id) => self.data["thread"]["id"].as_str().map_or(false, |t| t.rsplit_once('|').map_or(t, |(_, i)| i) == id),
+            Goal::Home => self.data["projectHome"].is_object(),
             Goal::Popup => self.popup && self.data["thread"]["skills"].as_array().map_or(false, |s| !s.is_empty()),
             Goal::Typed(text) => self.input.read(cx).content.as_ref() == text,
             Goal::Sent(before) => self.user_entries() > *before,
@@ -112,6 +114,12 @@ impl Backplane {
                     }
                     None => { self.m("input", json!({"step": format!("select:{i}"), "ok": false, "error": "no such thread"})); self.pump(cx); }
                 }
+            }
+            Step::Home(i) => {
+                let pid = self.data["projects"][i]["id"].as_str().unwrap_or("").to_string();
+                let raw = pid.rsplit_once('|').map_or(pid.as_str(), |(_, r)| r).to_string();
+                self.begin(format!("home:{i}"), Goal::Home, cx);
+                let _ = self.tx.try_send(crate::hub::Command::Action("select".into(), format!("project-home-{raw}")));
             }
             Step::Popup(text) => { self.begin(format!("popup:{text}"), Goal::Popup, cx); self.set_text(text, cx); }
             Step::Type(text) => {
