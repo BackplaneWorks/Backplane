@@ -163,7 +163,7 @@ port waits for the person's decision.
 
 <!-- law-map: generated below by scripts/gpui/law-map.py -->
 
-Laws in LAWS.bend: 3253. bend 1077, rust 320, unported 1247, client 482, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
+Laws in LAWS.bend: 3253. bend 1077, rust 321, unported 1246, client 482, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
 
 | law | status | seed | file | note |
 |---|---|---|---|---|
@@ -927,7 +927,7 @@ Laws in LAWS.bend: 3253. bend 1077, rust 320, unported 1247, client 482, window 
 | `hist_unresolved_track_empty` | client | seed C +-10% | `src/core/client.bend` |  |
 | `hist_empty_source_not_jumpable` | client | seed C +-10% | `src/core/client.bend` |  |
 | `hist_live_design_closes_picker` | client | seed C +-10% | `src/core/client.bend` |  |
-| `hist_picker_scope` | unported | seed R +-10% | `src/server/thin-actor.bend` |  |
+| `hist_picker_scope` | rust `hist_picker_scope` | map | `src/server/thin-actor.bend` |  |
 | `hist_tree_wire_file` | rust `hist_tree_wire_file` | map | `src/core/hier.bend` |  |
 | `hist_playback_same_scope` | unported | seed R +-10% | `src/server/thin-actor.bend` |  |
 | `look_plain_board` | rust `look_plain_board` | map | `src/core/look.bend` |  |
