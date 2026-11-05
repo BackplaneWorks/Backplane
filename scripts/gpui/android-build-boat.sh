@@ -28,7 +28,7 @@ yes | $SDK/cmdline-tools/latest/bin/sdkmanager --licenses >/dev/null 2>&1 || tru
 $SDK/cmdline-tools/latest/bin/sdkmanager "platforms;android-35" "build-tools;34.0.0" > $A/sdkmanager.log 2>&1 || { tail -20 $A/sdkmanager.log; exit 1; }
 S1=$(now)
 # bridge.js comes from the Boat bridge build (uploaded with --include-file), never built here
-mkdir -p mobile/build/assets; cp build/gpui/bridge/bridge.js mobile/build/assets/bridge.js
+mkdir -p mobile/build/assets; cp scripts/gpui/android-bridge-stage/bridge.js mobile/build/assets/bridge.js
 X=""; [ "${1:-}" = nosidebar ] && X="-PbpNativeSidebar=false"
 export GRADLE_USER_HOME=$PWD/build/gpui-gradle-home
 cd mobile/android

@@ -17,7 +17,7 @@ say "threads in log: $(grep -c ThreadCreated $HD/events.jsonl)"
 PL=$R/$L.proxy.log; rm -f $PL*; (cd /tmp && nohup bun $ROOT/scripts/gpui/android-proxy.ts 100.64.84.41:3815 100.64.84.41:3814 $PL >/dev/null 2>&1 & echo $! > $H/proxy.pid); sleep 1
 $E adb install -r $APK >/dev/null; $E adb shell pm clear dev.backplane.mobile.gpui >/dev/null; $E adb shell pm grant dev.backplane.mobile.gpui android.permission.POST_NOTIFICATIONS; $E adb logcat -c
 T0=$(date +%s.%N); PORT=3815 TOKENFILE=$HD/token $ROOT/scripts/gpui/android-pair.sh >/dev/null
-CT=""; for i in $(seq 1 60); do if $U has "Connected"; then CT=$(echo "$(date +%s.%N) - $T0" | bc); break; fi; done
+CT=""; for i in $(seq 1 60); do if $U has "Connected" || $U has "Skip" exact; then CT=$(echo "$(date +%s.%N) - $T0" | bc); break; fi; done
 say "pair -> Connected (uiautomator poll, ~1 s resolution): ${CT:-never} s"
 sleep 2
 if $U has "Skip" exact; then set -- $($U find Skip exact); $E adb shell input tap $1 $2; sleep 1; fi
@@ -37,16 +37,19 @@ big=[x for x in f if x[2]>5]
 sizes=[x[2] for x in f if x[2]>5]
 print(f"wire: ws conn#{c}: frames={len(f)} (heartbeats <=5 B: {len(f)-len(sizes)}); big frames in order: {sizes}; greeting->join reply {f[1][0]-f[0][0]:.3f} s (join reply = {sizes[1] if len(sizes)>1 else '-'} B)")
 P
+if [ "$N" -gt 48 ] && [ "${NOSIDEBAR:-0}" != 1 ]; then
+  for i in $(seq 1 14); do $E adb shell input swipe 540 1900 540 500 150; sleep 0.3; done; $E adb exec-out screencap -p > $S/$L-page1-bottom.png
+  if xy=$($U find Next); then say "page controls: Next found at page 1 bottom"; $E adb shell input tap $xy; sleep 4; for i in $(seq 1 14); do $E adb shell input swipe 540 1900 540 500 150; sleep 0.3; done; $E adb exec-out screencap -p > $S/$L-page2-bottom.png; $U find Previous >/dev/null && say "page controls: Previous found on page 2"; else say "page controls: NO Next control found"; fi
+  for i in $(seq 1 16); do $E adb shell input swipe 540 600 540 1900 150; sleep 0.2; done
+fi
 # open the first thread row, send, wait for the stand-in's reply
 set -- $($U find "Seed thread" ); $E adb shell input tap 450 ${2:-746}; sleep 4
 $E adb exec-out screencap -p > $S/$L-thread.png
 set -- $($U find "Ask the agent" ); $E adb shell input tap $1 $2; sleep 1; $E adb shell input text "hello%sfrom%s$L"; sleep 1
-set -- $($U find "Send" ); T1=$(date +%s.%N)
-$E adb shell input keyevent 66 >/dev/null 2>&1; sleep 1
-# the send button is the last control: tap it by its known position (right of the composer)
-$E adb shell input tap 996 2250 >/dev/null 2>&1
+set -- $($U find "Send" exact ); T1=$(date +%s.%N); $E adb shell input tap $1 $2
 RT=""; for i in $(seq 1 40); do if $U has "${L}11"; then RT=$(echo "$(date +%s.%N) - $T1" | bc); break; fi; done
 say "send -> stand-in reply visible: ${RT:-never} s"
 $E adb exec-out screencap -p > $S/$L-reply.png
+say "TurnUsage in the hub log (models): $(grep TurnUsage $HD/events.jsonl | grep -o '"model":"[^"]*"' | sort | uniq -c | tr '\n' ' ')"
 say "webview nodes: $($U count android.webkit.WebView) ; user message shown: $($U has "hello from $L" && echo yes || echo no)"
 $E adb logcat -d | grep -E "view failed" | cut -c1-120 | tee -a $OUT

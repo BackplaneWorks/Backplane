@@ -5,9 +5,12 @@
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd); V=${1:-default}; cd "$ROOT"
 [ -f build/gpui/bridge/bridge.js ] || { echo "no build/gpui/bridge/bridge.js"; exit 1; }
-before=$(ls -d "${XDG_STATE_HOME:-$HOME/.local/state}"/backplane/boat/jobs/*/ 2>/dev/null | sort | tail -1)
+# build/ is dropped from boat-job manifests: stage the bridge where it is not (untracked, removed after)
+ST=scripts/gpui/android-bridge-stage; mkdir -p $ST; cp build/gpui/bridge/bridge.js $ST/bridge.js; trap "rm -rf $ST" EXIT
 ARG=""; [ "$V" = nosidebar ] && ARG=nosidebar
-scripts/boat-job.sh --setup-bend --timeout 2400 --include-file build/gpui/bridge/bridge.js --artifact build/gpui-apk-artifacts -- sh scripts/gpui/android-build-boat.sh $ARG
+# --include-file means "upload only these": list the app, its shell assets, the job script and the staged bridge
+INC=""; for f in $(git ls-files -co --exclude-standard mobile/android mobile/shell) scripts/gpui/android-build-boat.sh scripts/gpui/android-bridge-stage/bridge.js; do INC="$INC --include-file $f"; done
+scripts/boat-job.sh --no-setup-bend --timeout 2400 $INC --artifact build/gpui-apk-artifacts -- sh scripts/gpui/android-build-boat.sh $ARG
 J=$(ls -dt "${XDG_STATE_HOME:-$HOME/.local/state}"/backplane/boat/jobs/*/ | head -1)
 mkdir -p build/gpui/android; cp "$J"artifacts/*/app-debug.apk "build/gpui/android/apk-$V.apk"
 echo "$(cat "$J"artifacts/*/timing.json | head -1 | sed 's/}$/,"commit":"'"$(git rev-parse --short HEAD)"'"}/')" | tee -a build/gpui/results/android/builds.jsonl
