@@ -32,7 +32,7 @@ impl Probe {
 async fn join(port: u16, since: Option<(usize, String)>) -> Probe {
     let q = since.map(|(s, o)| format!("&since={s}&origin={o}")).unwrap_or_default();
     let (ws, _) = connect_async(format!("ws://127.0.0.1:{port}/ws?token=tok{q}")).await.unwrap();
-    let items: Items = Default::default(); let frames: Items = Default::default(); let log_since = Default::default(); let origin: Arc<std::sync::Mutex<String>> = Default::default(); let lives: Arc<std::sync::Mutex<usize>> = Default::default();
+    let items: Items = Default::default(); let frames: Items = Default::default(); let log_since: Arc<std::sync::Mutex<Option<u64>>> = Default::default(); let origin: Arc<std::sync::Mutex<String>> = Default::default(); let lives: Arc<std::sync::Mutex<usize>> = Default::default();
     let (i2, f2, l2, o2, v2) = (items.clone(), frames.clone(), Arc::clone(&log_since), origin.clone(), lives.clone());
     let (tx, mut rx) = ws.split();
     let task = tokio::spawn(async move {
