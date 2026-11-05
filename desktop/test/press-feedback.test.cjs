@@ -90,3 +90,17 @@ test('a region goes back after the sibling it came after',async()=>{
  s=f.choice('acct-open','','thread:A');
  const out=kids(kids(kids(kids(f.project(grown))[0])[1])[1]).map(k=>k.key);assert.deepEqual(out,['note','composer','acct','foot']);s(true);
 });
+test('Settings shut at the press puts back the thread from the picture the host has of it',async()=>{
+ const {PressFeedback,T}=await load();const f=new PressFeedback(()=>{}),{page}=fixture(T);
+ const el=(tag,key,attrs,ks=[])=>({$:T.El,tag,key,attrs:L(Object.entries(attrs).map(([name,value])=>({$:T.At,name,value}))),kids:L(ks)});
+ const top=t=>el('header','',{class:'topbar'},[el('span','',{class:t})]);
+ const settings=el('main','settings',{class:'settings-view'},[]);
+ const open=(()=>{const p=page();const app=kids(p)[0];return {...p,kids:L([{...app,kids:L([top('settings'),kids(app)[0],settings])}])};})();
+ const picture=(()=>{const p=page({n:7});const app=kids(p)[0];return {...p,kids:L([{...app,kids:L([top('thread'),...kids(app)])}])};})();
+ f.seen(open,'thread:A');
+ assert.equal(f.choice('flag','settings','thread:A',null)&&f.showing,false,'no picture: the hub’s');
+ const s=f.choice('flag','settings','thread:A',picture);assert.equal(f.showing,true);
+ const app=kids(f.project(open))[0];
+ assert.deepEqual(kids(app).map(k=>k.tag),['header','aside','main']);assert.equal(at(kids(app)[2],'class'),'thread-view');
+ assert.equal(at(kids(kids(app)[0])[0],'class'),'thread','the thread’s top bar');s(true);assert.equal(f.showing,false);
+});
