@@ -84,6 +84,13 @@
    "ios": "open",
    "android": "open",
    "capture": ""
+  },
+  {
+   "item": "Account management: a client reaches accounts on the Rust hub (grant wired, not refused)",
+   "gpui": "open",
+   "ios": "open",
+   "android": "open",
+   "capture": ""
   }
  ],
  "fun": [
