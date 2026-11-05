@@ -3,6 +3,7 @@
 //! exactly (images, chat rows, reminders, thoughts, design steps, terminals, reviews, API errors, restart rows, attachments, other time zones,
 //! stop/fail marks, rows sent to another thread) makes the caller fall to the helper, so a `Some` is always the helper's answer.
 use crate::{md, stamp};
+use super::tz::Rule;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
@@ -60,11 +61,12 @@ fn civil(z: i64) -> (i64, usize, i64) {
     (if m <= 2 { y + 1 } else { y }, m as usize, d)
 }
 fn hm(w: u64) -> String { format!("{:02}:{:02}", (w % 86400) / 3600, (w % 3600) / 60) }
-/// Stamp.clock: "14:05" on the day it is now, "Tue 14 Nov 14:05" on another
-fn clock(at: u64, now: u64) -> String {
-    if at / 86400 == now / 86400 { return hm(at) }
-    let days = (at / 86400) as i64; let (_, m, d) = civil(days);
-    format!("{} {} {} {}", DAYS[((days + 3).rem_euclid(7)) as usize], d, MONS[m - 1], hm(at))
+/// Stamp.clock: "14:05" on the day it is now, "Tue 14 Nov 14:05" on another, both on the wall clock of the person's zone
+fn clock(at: u64, now: u64, zone: &Rule) -> String {
+    let (w, wn) = (zone.wall(at), zone.wall(now));
+    if w / 86400 == wn / 86400 { return hm(w) }
+    let days = (w / 86400) as i64; let (_, m, d) = civil(days);
+    format!("{} {} {} {}", DAYS[((days + 3).rem_euclid(7)) as usize], d, MONS[m - 1], hm(w))
 }
 fn took(s: u64) -> String {
     if s < 60 { format!("{s}s") } else if s < 3600 { format!("{}m {}s", s / 60, s % 60) } else { format!("{}h {}m", s / 3600, (s % 3600) / 60) }
@@ -90,7 +92,7 @@ fn plain(e: &Ent) -> bool {
 
 /// `entries` of shown.thread for a plain page; `running`: the thread's turn runs; `open`: runs the person opened (the "fold:<id>" choices = "1");
 /// `now_ms`: the request's clock. None when any row needs what this cut does not do.
-pub fn entries(es: &[Ent], running: bool, open: &dyn Fn(&str) -> bool, now_ms: u64) -> Option<Vec<Value>> {
+pub fn entries(es: &[Ent], running: bool, open: &dyn Fn(&str) -> bool, now_ms: u64, zone: Option<&Rule>) -> Option<Vec<Value>> {
     if !es.iter().all(|e| tool(e) && e.role == "tool" && plain(e) || !tool(e) && plain(e)) { return None }
     let now = now_ms / 1000;
     // Stamp.ends over the page, oldest first in, walked newest first
@@ -107,12 +109,13 @@ pub fn entries(es: &[Ent], running: bool, open: &dyn Fn(&str) -> bool, now_ms: u
             if o { for r in run { out.push(act(r, id)) } }
             i = j; continue;
         }
-        let c = clock(e.at, now);
+        // a zone that cannot be known degrades the time stamps (empty), not the screen
+        let c = zone.map(|z| clock(e.at, now, z));
         if e.role == "user" {
-            out.push(json!({"id": e.id, "kind": "user", "text": e.text, "attachments": [], "stamp": c}));
+            out.push(json!({"id": e.id, "kind": "user", "text": e.text, "attachments": [], "stamp": c.unwrap_or_default()}));
         } else {
             let st = ends.get(&e.id).copied().unwrap_or(0);
-            let s = if st == 0 { c } else if st > 1 { format!("Finished {c} · {}", took(e.at.saturating_sub(st))) } else { format!("Finished {c}") };
+            let s = match c { None => String::new(), Some(c) => if st == 0 { c } else if st > 1 { format!("Finished {c} · {}", took(e.at.saturating_sub(st))) } else { format!("Finished {c}") } };
             out.push(json!({"id": e.id, "kind": "assistant", "text": e.text, "blocks": md_blocks(&e.text), "images": [], "stamp": s}));
         }
         i += 1;
@@ -153,14 +156,20 @@ fn plain_thread(st: &State, id: &str) -> bool {
     // A lean State drops the settings it does not keep: there, "the key is absent" proves nothing, so a gate key it may have dropped means refuse
     // (the state lane keeps these keys bounded; until it does this answers None on a lean State rather than a false supported case).
     if st.lean && gate.iter().any(|k| !crate::state::fam::policy::lean_keeps(k)) { return false }
-    // The time stamps here are UTC only: a zone setting is supported when it names UTC (the hub records tz.machine=Etc/UTC on a UTC machine), any other zone is not
-    let utc = |k: &str| st.settings.get(k).map_or(true, |v| utc_name(v));
-    if !(utc("person.tz") && utc("person.tz.device") && utc("tz.machine")) { return false }
-    !gate.iter().filter(|k| !matches!(k.as_str(), "person.tz" | "person.tz.device" | "tz.machine")).any(|k| st.settings.contains_key(k))
+    !gate.iter().any(|k| st.settings.contains_key(k) && !matches!(k.as_str(), "person.tz" | "person.tz.device" | "tz.machine"))
 }
 
-/// the names of the zone with no offset (Tz: UTC0), as the hub writes them
-fn utc_name(v: &str) -> bool { matches!(v.trim(), "" | "UTC" | "Etc/UTC") }
+/// Zone.person / Sched.person: the person's zone as a rule. UTC names are built in; any other is the rule the hub stored (`tz.rule.<name>`);
+/// a zone with no usable rule reads as UTC, as Sched.person.k does. None: a lean State may have dropped the rule, so the time stamps degrade.
+fn person_zone(st: &State) -> Option<Rule> {
+    let get = |k: &str| st.settings.get(k).map(String::as_str).unwrap_or("");
+    let first = |a: &'static str, b: &'static str, c: &'static str| { for k in [a, b, c] { if !get(k).is_empty() { return get(k).to_string() } } "UTC".to_string() };
+    let name = first("person.tz", "person.tz.device", "tz.machine");
+    if matches!(name.as_str(), "UTC" | "Etc/UTC" | "Etc/UCT" | "UCT") { return Some(Rule::utc()) }
+    let key = format!("tz.rule.{name}");
+    if st.lean && !crate::state::fam::policy::lean_keeps(&key) { return None }
+    Some(Rule::parse(get(&key)).unwrap_or_else(Rule::utc))
+}
 
 /// shown.thread for a plain idle thread, from the page rows. `hub` is the request's hub key (the id is `<hub>|<thread>`), `draft` the composer's text.
 /// None unless every key is derived.
@@ -169,7 +178,8 @@ pub fn thread_object(st: &State, hub: &str, thread: &str, params: &Value, draft:
     let page = params.get("page")?;
     if page["thread"].as_str() != Some(thread) { return None }
     let es = ents(page["rows"].as_array()?, thread)?;
-    let entries = entries(&es, false, &|_| false, params["now"].as_u64().unwrap_or(0))?;
+    let zone = person_zone(st);
+    let entries = entries(&es, false, &|_| false, params["now"].as_u64().unwrap_or(0), zone.as_ref())?;
     let t = st.threads.get(thread)?;
     let mut o: serde_json::Map<String, Value> = serde_json::from_str(STATIC).ok()?;
     o.insert("id".into(), json!(format!("{hub}|{thread}")));
@@ -191,7 +201,7 @@ mod tests {
     #[test] fn the_entries_of_a_plain_page_are_the_helpers() {
         let p = fixture(); let th = p["params"]["page"]["thread"].as_str().unwrap();
         let es = ents(p["params"]["page"]["rows"].as_array().unwrap(), th).unwrap();
-        let got = entries(&es, false, &|_| false, p["params"]["now"].as_u64().unwrap()).unwrap();
+        let got = entries(&es, false, &|_| false, p["params"]["now"].as_u64().unwrap(), Some(&Rule::utc())).unwrap();
         let want = p["out"]["shown"]["thread"]["entries"].as_array().unwrap();
         assert_eq!(got.len(), want.len());
         for (g, w) in got.iter().zip(want) { assert_eq!(g, w); }
@@ -209,15 +219,20 @@ mod tests {
         let a = json!([["5", "5", "m1", "t", "", "msg", "user", "", "hi", "9"]]); let b = json!([[5, 5, "m1", "t", "", "msg", "user", "", "hi", 9]]);
         assert_eq!(ents(a.as_array().unwrap(), "t").unwrap()[0].at, ents(b.as_array().unwrap(), "t").unwrap()[0].at);
     }
-    #[test] fn a_utc_zone_setting_is_supported_and_another_zone_is_not() {
+    #[test] fn the_persons_zone_sets_the_stamps_and_an_unknown_one_reads_as_utc() {
         let p = fixture(); let th = p["params"]["page"]["thread"].as_str().unwrap();
         let log = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/gpui/slim/fixtures/thread-log.jsonl")).unwrap();
-        let with = |k: &str, v: &str| { let mut st = State::new(); for l in log.lines() { st.apply_line(l); } st.apply_line(&format!(r#"{{"$":"SettingSet","key":"{k}","value":"{v}","at":1}}"#)); st };
-        for (k, v, ok) in [("tz.machine", "Etc/UTC", true), ("person.tz", "UTC", true), ("tz.machine", "Europe/Helsinki", false), ("person.tz", "EET-2EEST,M3.5.0/3,M10.5.0/4", false), ("person.tz.device", "America/New_York", false)] {
-            assert_eq!(thread_object(&with(k, v), "h", th, &p["params"], "").is_some(), ok, "{k}={v}");
-        }
+        let with = |kv: &[(&str, &str)]| { let mut st = State::new(); for l in log.lines() { st.apply_line(l); } for (k, v) in kv { st.apply_line(&format!(r#"{{"$":"SettingSet","key":"{k}","value":"{v}","at":1}}"#)); } st };
+        let stamp = |st: &State| thread_object(st, "h", th, &p["params"], "").unwrap()["entries"][0]["stamp"].as_str().unwrap().to_string();
+        let utc = stamp(&with(&[]));
+        assert_eq!(utc, "Tue 14 Nov 22:51");
+        assert_eq!(stamp(&with(&[("tz.machine", "Etc/UTC")])), utc);
+        let ny = with(&[("tz.machine", "America/New_York"), ("tz.rule.America/New_York", "EST5EDT,M3.2.0,M11.1.0")]);
+        assert_eq!(stamp(&ny), "Tue 14 Nov 17:51", "November: EST, five hours behind");
+        assert_eq!(stamp(&with(&[("person.tz", "Europe/Helsinki"), ("tz.rule.Europe/Helsinki", "EET-2EEST,M3.5.0/3,M10.5.0/4"), ("tz.machine", "America/New_York")])), "Tue 14 Nov 00:51".replace("Tue 14", "Wed 15"), "person.tz wins over the machine's");
+        assert_eq!(stamp(&with(&[("person.tz", "Mars/Olympus")])), utc, "a zone with no rule reads as UTC (Sched.person.k)");
     }
-    #[test] fn civil_dates() { assert_eq!(civil(0), (1970, 1, 1)); assert_eq!(civil(19675), (2023, 11, 14)); assert_eq!(clock(1700002806, 0), "Tue 14 Nov 23:00"); }
+    #[test] fn civil_dates() { assert_eq!(civil(0), (1970, 1, 1)); assert_eq!(civil(19675), (2023, 11, 14)); assert_eq!(clock(1700002806, 0, &Rule::utc()), "Tue 14 Nov 23:00"); }
     #[test] fn labels_name_three_kinds_and_the_live_one_says_what_runs() {
         let t = |k: &str, x: &str| Ent { id: "a".into(), msg: false, role: "tool".into(), akind: k.into(), text: x.into(), at: 1 };
         let run = [t("Bash", "ls"), t("Read", "f"), t("Edit", "g"), t("Grep", "h"), t("Bash", "i")];
