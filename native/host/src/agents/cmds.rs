@@ -96,6 +96,8 @@ impl Cmds {
     pub fn idle(&self) -> bool { self.mode == 1 && !self.wake && !self.cs.iter().any(|c| c.st < 3) }
     /// how such a turn ends, as its verdict would have said: 5 stopped, 4 failed, else 3 ok
     pub fn idle_end(&self) -> u8 { if self.cs.iter().any(|c| c.st == 4) { 5 } else if self.cs.iter().any(|c| c.st == 3 && c.err) { 4 } else { 3 } }
+    /// Stuck.code.w: 0 nothing to do; else the verdict that ends a running turn whose ledger shows nothing at work after `wait` seconds of silence with no work out
+    pub fn stuck(&self, run: bool, heard: u64, now: u64, busy: usize, wait: u64) -> u8 { if run && self.idle() && busy == 0 && now >= heard + wait { self.idle_end() } else { 0 } }
     pub fn cleared(&self) -> Cmds { Cmds { cs: vec![], mode: self.mode, wake: false } }
     /// Kept across a restart in place (cmds_json_round)
     pub fn json(&self) -> Value { serde_json::json!({"cs":self.cs.iter().map(|c| serde_json::json!({"u":c.uuid,"s":c.st,"e":c.err,"t":c.text})).collect::<Vec<_>>(),"m":self.mode,"w":self.wake}) }
@@ -158,5 +160,5 @@ mod tests {
         let mut e = one("u1", 3, false); e.cs[0].err = true; assert_eq!(e.idle_end(), 4); assert_eq!(one("u1", 4, false).idle_end(), 5); assert_eq!(one("u1", 3, false).idle_end(), 3); assert!(e.cleared().cs.is_empty());
     }
     // law cmds_json_round
-    #[test] fn a_ledger_survives_a_restart_in_place() { let c = Cmds { cs: vec![Cmd { uuid: "u1".into(), st: 2, err: false, text: String::new() }, Cmd { uuid: "u2".into(), st: 3, err: true, text: "it \"failed\"\n".into() }], mode: 1, wake: true }; assert_eq!(Cmds::read(&c.json()), c); }
+    #[test] fn cmds_json_round() { let c = Cmds { cs: vec![Cmd { uuid: "u1".into(), st: 2, err: false, text: String::new() }, Cmd { uuid: "u2".into(), st: 3, err: true, text: "it \"failed\"\n".into() }], mode: 1, wake: true }; assert_eq!(Cmds::read(&c.json()), c); }
 }

@@ -5,6 +5,8 @@ use std::{sync::Arc, time::Duration};
 
 fn sv<'a>(v: &'a Value, k: &str) -> &'a str { v.get(k).and_then(Value::as_str).unwrap_or("") }
 fn fail(m: &str) -> (bool, Value) { (false, json!({"error":m})) }
+/// Wait.clamp: how many seconds a thread_wait lasts: at least one, at most ten minutes
+pub fn wait_clamp(ms: u64) -> u64 { if ms < 1000 { 1 } else if ms > 600000 { 600 } else { ms / 1000 } }
 const NOT_HERE: &str = "that thread is not in this project";
 
 impl Agents {
@@ -17,8 +19,9 @@ impl Agents {
 
     /// Mcp.phase: approval > input > by the turn (tasks and owned work are not ported).
     async fn phase(&self, th: &str, turn: &str, pending: u64) -> &'static str {
-        let w = self.world().await; let on = |k: &str| w.asks.values().any(|a| a.thread == th && a.kind == k);
-        if pending > 0 || on("approval") { "approval" } else if on("input") || on("plan") || on("browser") { "input" } else { match turn { "running" => "working", "failed" => "failed", "completed" => "complete", "interrupted" => "stopped", _ => "idle" } }
+        let w = self.world().await; let on = |k: &str| w.asks.values().any(|a| a.thread == th && a.kind == k); let busy = w.work(th).0;
+        if pending > 0 || on("approval") { "approval" } else if on("input") || on("plan") || on("browser") { "input" }
+        else { match turn { "running" => "working", "failed" => "failed", _ if busy > 0 => "monitoring", "completed" => "complete", "interrupted" => "stopped", _ => "idle" } }
     }
     /// Mcp.thread_json.w (without `parent`: the JS binary the fixtures come from does not write it)
     async fn thread_json(&self, id: &str) -> Option<Value> {
@@ -26,7 +29,8 @@ impl Agents {
         let phase = self.phase(id, &t.turn, t.pending).await;
         let parent = { let w = self.world().await; let p = w.setting(&format!("thread.parent.{id}")).to_string(); // Tree.raw: a link to a live thread of the same project, never to itself
             if !p.is_empty() && p != id && w.threads.get(&p).map_or(false, |x| !x.deleted && x.project == t.project) && w.threads.get(id).map_or(false, |x| !x.deleted) { p } else { String::new() } };
-        Some(json!({"id":id,"project":t.project,"title":t.title,"provider":t.provider,"model":t.model,"turn":t.turn,"activity":t.activity,"parent":parent,"phase":phase,"waiting":0,"work":[]}))
+        let (busy, titles) = self.world().await.work(id);
+        Some(json!({"id":id,"project":t.project,"title":t.title,"provider":t.provider,"model":t.model,"turn":t.turn,"activity":t.activity,"parent":parent,"phase":phase,"waiting":busy,"work":titles}))
     }
 
     pub async fn tool_caps(&self, thread: &str) -> (bool, Value) {
@@ -75,12 +79,12 @@ impl Agents {
     }
     pub async fn tool_wait(&self, thread: &str, a: &Value) -> (bool, Value) {
         let target = sv(a, "threadId"); if !self.same_project(thread, target).await { return fail(NOT_HERE) }
-        let ms = a.get("timeoutMs").and_then(Value::as_u64).unwrap_or(30000).min(600000); let end = tokio::time::Instant::now() + Duration::from_millis(ms);
+        let end = tokio::time::Instant::now() + Duration::from_secs(wait_clamp(a.get("timeoutMs").and_then(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse().ok()))).unwrap_or(30000)));
         loop {
-            let done = !self.world().await.running(target);
+            let (running, (busy, titles)) = { let w = self.world().await; (w.running(target), w.work(target)) }; let done = !running && busy == 0; // Mcp.done.w: nothing out of hand either
             if done || tokio::time::Instant::now() >= end {
                 let last = self.last_reply(target).await; let turn = self.hub.model().await.threads.get(target).map(|t| t.turn.clone()).unwrap_or_default();
-                return (true, json!({"threadId":target,"turn":turn,"done":done,"waiting":0,"work":[],"lastReply":last.chars().take(8000).collect::<String>()}))
+                return (true, json!({"threadId":target,"turn":turn,"done":done,"waiting":busy,"work":titles,"lastReply":last.chars().take(8000).collect::<String>()}))
             }
             tokio::time::sleep(Duration::from_millis(250)).await;
         }

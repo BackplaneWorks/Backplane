@@ -9,6 +9,7 @@
 //! and the hub's time-driven policies (liveness, autosettle, alert/told/summary, star nudge), which belong to M4.
 pub mod bg; pub mod cmds; pub mod hist; pub mod host; pub mod inputs; pub mod lines; pub mod mcp; pub mod proc; pub mod prompt; pub mod prompt_text; pub mod rules; pub mod tools; pub mod world;
 #[cfg(test)] mod tests;
+#[cfg(test)] mod laws;
 
 use crate::{api::{Caller, Fut, RpcHandler}, hub::Hub};
 use anyhow::Result;
@@ -348,14 +349,9 @@ impl Actor {
                 }
                 _ => { // 6: Claude started a turn by itself (a background task ended, a wakeup): the thread runs again, with an Act saying why
                     let th = self.th.clone(); let seq = self.ag.seq();
-                    let why = if v["type"] == "command_lifecycle" { "Resumed after Stop".to_string() } else {
-                        let sum = v["summary"].as_str().unwrap_or("").to_string(); let title = if !sum.is_empty() { sum } else { let id = v["task_id"].as_str().unwrap_or("");
-                            let r = self.cx.bg.iter().find(|r| bg::field(r, 0) == bg::clean(id)).map(|r| { let t = bg::field(r, 3); if t.is_empty() { bg::doing(r) } else { t } }).unwrap_or_default(); if r.is_empty() { "background work".into() } else { r } };
-                        let status = v["status"].as_str().unwrap_or(""); format!("Woken: {title}{}", if status.is_empty() || status == "completed" { String::new() } else { format!(" ({status})") }) };
+                    let why = lines::wake_text(v["type"] == "command_lifecycle", &self.cx.bg, &v);
                     let newest = { let m = self.ag.hub.model().await; m.threads.get(&th).map(|x| x.last_entry.clone()).unwrap_or_default() };
-                    self.cx.running = true;
-                    let mut ev = vec![json!({"$":"TurnChanged","thread":th,"state":"running","at":at}), set(format!("turn.from.{th}"), format!("@{newest}"), at), set(format!("restart.retry.{th}"), String::new(), at), set(format!("provider.resume.{th}"), String::new(), at),
-                        json!({"$":"ActivityLogged","thread":th,"act":hub_id("k", at, seq),"tone":"info","kind":"wake","summary":why,"at":at})];
+                    let mut ev = self.cx.wake_start(&why, &newest, seq, at);
                     let mut fx = self.cx.line_flow(&v, at, Flow::Stream); ev.append(&mut fx.events); fx.events = ev; fx
                 }
             };
@@ -396,8 +392,9 @@ impl Actor {
         let at = now_s(); let mut ev = vec![];
         if !self.prog.pend.is_empty() { let s = self.prog.beat(at); self.prog = bg::Prog { at: s.at, pend: s.pend }; if !s.flush.is_empty() { ev.extend(self.cx.progress(&s.flush, at)) } }
         let after = std::env::var("BACKPLANE_STUCK_S").ok().and_then(|s| s.parse().ok()).unwrap_or(120u64);
-        if self.cx.running && self.cmds.idle() && bg::running(&self.cx.bg) == 0 && self.heard.elapsed() >= Duration::from_secs(after) {
-            let code = self.cmds.idle_end(); self.cmds = self.cmds.cleared();
+        let code = self.cmds.stuck(self.cx.running, 0, self.heard.elapsed().as_secs(), self.cx.bg.len(), after);
+        if code != 0 {
+            self.cmds = self.cmds.cleared();
             ev.push(json!({"$":"ActivityLogged","thread":self.th,"act":hub_id("x", at, self.ag.seq()),"tone":"info","kind":"stuck","summary":"Its agent finished its last command but its turn never ended: ended now","at":at}));
             let text = String::new(); ev.extend(self.cx.end(code, &text, at)); if code == 4 && !self.last_user.is_empty() { ev.push(set(format!("failed.{}", self.last_user), "1".into(), at)) }
             self.live_end().await;
@@ -416,6 +413,7 @@ impl Actor {
         self.cmds = cmds::Cmds::new(); self.wait.clear();
         let live = { let w = self.ag.world().await; w.threads.get(&self.th).map_or(false, |t| !t.archived && !t.deleted) };
         if live { self.lost("exit").await }
+        let cleared = self.cx.bg_clear(now_s()); self.commit(cleared).await; // lostwork_exit_clears: the process is gone, and with it every row it filed
     }
 
     /// Bg.lost: the process that owned the thread's background work is gone; the agent is told once (a message), or with restart.continue off the timeline is.
