@@ -227,9 +227,20 @@ impl Render for Backplane {
         // Thread permissions are read-only here and are not drawn in the composer: the web's composer chip beside the model chip is the account chip.
         let ctx = string(&thread["picker"], "label").split("ctx ").nth(1).map(|s| format!("ctx {}", s.split(' ').next().unwrap_or(""))).unwrap_or_default();
         let todo = thread["todos"]["count"].as_str().unwrap_or("").to_string();
-        let rail: Vec<AnyElement> = [("Terminal", "terminal"), ("Commands", "search"), ("", ""), ("Board", "circuit-board"), ("Schematic", "cpu"), ("3D", "box"), ("Split", "layout-panel-left"), ("Mech", "layers"), ("", ""), ("Files", "folder"), ("Diff", "diff"), ("Review", "circle-check"), ("Browser", "globe")].iter().map(|(l, i)| {
-            if l.is_empty() { div().h(px(12.)).into_any_element() } else { with_rect(div().opacity(0.45), || format!("rail:{l}")).flex().flex_col().items_center().h(px(48.)).justify_center().gap_1().text_size(px(10.)).text_color(c("dim")).child(ic(light, i, 18., "dim")).child(*l).into_any_element() }
-        }).collect();
+        let mut rail: Vec<AnyElement> = Vec::new();
+        for (l, i) in [("Terminal", "terminal"), ("Commands", "search"), ("", ""), ("Board", "circuit-board"), ("Schematic", "cpu"), ("3D", "box"), ("Split", "layout-panel-left"), ("Mech", "layers"), ("", ""), ("Files", "folder"), ("Diff", "diff"), ("Review", "circle-check"), ("Browser", "globe")].iter() {
+            if l.is_empty() { rail.push(div().h(px(12.)).into_any_element()); continue; }
+            // the viewer's kinds are the hub's view-kind values; Diff is its own action
+            let act: Option<(&'static str, &'static str)> = match *l { "Board" => Some(("view-kind", "board")), "Schematic" => Some(("view-kind", "schematic")), "3D" => Some(("view-kind", "3d")), "Split" => Some(("view-kind", "split")), "Mech" => Some(("view-kind", "mech")), "Files" => Some(("view-kind", "files")), "Review" => Some(("view-kind", "review")), "Diff" => Some(("diff", "")), _ => None };
+            match act {
+                Some((a, v)) => {
+                    ctl.push(CtlEntry { id: format!("rail:{l}"), label: l.to_string(), ctl: Ctl::Node(a.into(), v.into()) });
+                    rail.push(with_rect(div().id(SharedString::from(format!("rail-{l}"))), || format!("rail:{l}")).cursor_pointer().on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action(a.into(), v.into())); cx.notify(); }))
+                        .flex().flex_col().items_center().h(px(48.)).justify_center().gap_1().text_size(px(10.)).text_color(c("dim")).hover(|s| s.text_color(c("text"))).child(ic(light, i, 18., "dim")).child(*l).into_any_element());
+                }
+                None => rail.push(with_rect(div().opacity(0.45), || format!("rail:{l}")).flex().flex_col().items_center().h(px(48.)).justify_center().gap_1().text_size(px(10.)).text_color(c("dim")).child(ic(light, i, 18., "dim")).child(*l).into_any_element()),
+            }
+        }
         // controls with no handler yet are registered too, so the harness finds them dead instead of missing
         ctl.push(CtlEntry { id: "send".into(), label: "Send".into(), ctl: Ctl::Send });
         for l in ["Terminal", "Commands", "Board", "Schematic", "3D", "Split", "Mech", "Files", "Diff", "Review", "Browser"] { ctl.push(CtlEntry { id: format!("rail:{l}"), label: l.into(), ctl: Ctl::None }); }
@@ -290,6 +301,7 @@ impl Render for Backplane {
                             .child(with_rect(chip(light, String::new()).opacity(0.45), || "ui:Dictate".to_string()).child(ic(light, "mic", 16., "dim")))
                             .child(with_rect(div().id("send"), || "send".to_string()).px_4().py_1().bg(c("accent")).text_color(c("on-accent")).cursor_pointer().child("Send").on_click(cx.listener(|this, _, window, cx| this.send(&Send, window, cx)))))))
                 )
+                .children(crate::screens::viewer::view(cx, &reg, light, thread))
                 // right rail
                 .child(div().w(px(72.)).h_full().flex_shrink_0().relative().child(art::probe("rail")).border_l_1().border_color(c("line")).flex().flex_col().py_2().children(rail)))
             .into_any_element();
