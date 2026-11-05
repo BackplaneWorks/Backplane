@@ -33,12 +33,14 @@ async function launch(script,j,ctx,tag,{record=false,rects=false}={}){
   const sf=`${ctx.outDir}/${j.id}${tag}.script.json`;writeFileSync(sf,JSON.stringify(script));
   const rec=record?startRecording(ctx.display.display,`${ctx.outDir}/${j.id}${tag}.mp4`):null;
   const metrics=[];let buf='';const memSamples=[];const t00=Date.now();
-  const g=spawn(ctx.gpuBin,['--url',ctx.hub.state.url,'--token-file',ctx.hub.state.root+'/home/token','--script',sf],{env:{...ctx.display.env,HOME:ctx.hub.state.root+'/fakehome',...(rects?{BACKPLANE_GPUI_RECTS:'1'}:{})},stdio:['ignore','ignore','pipe']});
-  g.stderr.on('data',d=>{buf+=d;let i;while((i=buf.indexOf('\n'))>=0){const l=buf.slice(0,i);buf=buf.slice(i+1);const k=l.indexOf('GPUI_METRIC ');if(k>=0)try{metrics.push({...JSON.parse(l.slice(k+12)),wall:Date.now()})}catch{}}});
+  let scriptDone;const sd=new Promise(r=>{scriptDone=r}); // the client quits itself after script_done: BACKPLANE_GPUI_HOLD keeps it up so the screenshot shows the window
+  const g=spawn(ctx.gpuBin,['--url',ctx.hub.state.url,'--token-file',ctx.hub.state.root+'/home/token','--script',sf],{env:{...ctx.display.env,HOME:ctx.hub.state.root+'/fakehome',BACKPLANE_GPUI_HOLD:'1',...(rects?{BACKPLANE_GPUI_RECTS:'1'}:{})},stdio:['ignore','ignore','pipe']});
+  g.stderr.on('data',d=>{buf+=d;let i;while((i=buf.indexOf('\n'))>=0){const l=buf.slice(0,i);buf=buf.slice(i+1);const k=l.indexOf('GPUI_METRIC ');if(k>=0)try{const m=JSON.parse(l.slice(k+12));metrics.push({...m,wall:Date.now()});if(m.event==='script_done')scriptDone(true)}catch{}}});
   const memTimer=setInterval(()=>{try{const sm=readFileSync(`/proc/${g.pid}/smaps_rollup`,'utf8');const k=n=>Number(new RegExp(n+':\\s+(\\d+)').exec(sm)?.[1]||0);memSamples.push({t_s:(Date.now()-t00)/1000,rssMB:k('Rss')/1024,pssMB:k('Pss')/1024})}catch{}},j.measure.includes('memory')?30000:5000);
-  const done=await Promise.race([new Promise(r=>g.on('close',()=>r(true))),sleep(script.reduce((a,x)=>a+(x.wait||600)+(x.net_sleep?x.net_sleep*1000:0),0)+90000).then(()=>false)]);
-  if(!done){try{g.kill('SIGTERM')}catch{}}
-  clearInterval(memTimer);const offsetMs=rec?.offsetMs?.();const capture=rec?(await rec.stop()).file:null;const screenshot=screenshot_(ctx,`${j.id}${tag}`);
+  const done=await Promise.race([new Promise(r=>g.on('close',()=>r(true))),sd,sleep(script.reduce((a,x)=>a+(x.wait||600)+(x.net_sleep?x.net_sleep*1000:0),0)+90000).then(()=>false)]);
+  const screenshot=screenshot_(ctx,`${j.id}${tag}`); // before the client goes away (a screenshot after it quit is just the i3 bar)
+  try{g.kill('SIGTERM')}catch{}
+  clearInterval(memTimer);const offsetMs=rec?.offsetMs?.();const capture=rec?(await rec.stop()).file:null;
   return {metrics,done,offsetMs,capture,screenshot,memSamples}}
 const screenshot_=(ctx,n)=>screenshot(ctx.display.display,`${ctx.outDir}/${n}.png`);
 const flatRects=r=>{const o={};const walk=(p,v)=>{if(v&&typeof v==='object'&&'x' in v&&'w' in v)o[p]=v;else if(v&&typeof v==='object')for(const [k,x] of Object.entries(v))walk(p?p+'/'+k:k,x)};walk('',r);return o};
