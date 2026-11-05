@@ -330,6 +330,7 @@ fn parse_iso(s: &str) -> Option<u64> {
 
 // ---- the snapshot and the ops ----
 
+#[derive(Debug)]
 pub struct LaunchPlan { pub program: PathBuf, pub env: Vec<(String, String)>, pub args: Vec<String> }
 
 impl Accounts {
