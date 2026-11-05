@@ -20,10 +20,12 @@ impl RpcHandler for SettingsMisc {
                     let channel = hub.setting("update.channel").await.filter(|c| !c.is_empty()).unwrap_or_else(|| "stable".into());
                     vec![json!({"t":"reply","id":id,"ok":true,"result":{"version":"","channel":channel}})]
                 }
-                _ => match hub.commit(&json!({"$":"SettingSet","key":"update.wait","value":"","at":now_ms() / 1000})).await {
-                    Ok(_) => vec![json!({"t":"reply","id":id,"ok":true})],
-                    Err(e) => vec![json!({"t":"reply","id":id,"ok":false,"error":format!("{e:#}")})],
-                },
+                _ => {
+                    // Upgrade.go on a packaged install: nothing is replaced, every client is told so
+                    let cleared = if hub.setting("update.wait").await.unwrap_or_default().is_empty() { Ok(0) } else { hub.commit(&json!({"$":"SettingSet","key":"update.wait","value":"","at":now_ms() / 1000})).await };
+                    hub.push_all(&json!({"t":"update","error":"this install updates through its package"}));
+                    match cleared { Ok(_) => vec![json!({"t":"reply","id":id,"ok":true})], Err(e) => vec![json!({"t":"reply","id":id,"ok":false,"error":format!("{e:#}")})] }
+                }
             }
         })
     }

@@ -55,20 +55,27 @@ pub fn created(change: &Value, get: &dyn Fn(&str) -> String) -> Vec<Value> {
     }
 }
 
+/// `accounts.default`. In the JS hub every `accounts*` request from a client that has not declared the accounts capability is refused with the named-account
+/// message (server.bend `Hub.rpc.account.client`, `Accounts.client.allowed`); only the web renderer's view requests declare it (`accountProfiles`), and phones and
+/// the GPUI client never do. This hub has no per-connection capability yet, so it refuses for everyone (what a mobile client gets from the JS hub); `make_default`
+/// is the real handler, ready for the day a connection can carry the capability.
 pub struct AccountsDefault;
+pub const GATE: &str = "This thread uses a named account. Use updated Backplane web or desktop to continue; your draft is preserved.";
 impl RpcHandler for AccountsDefault {
     fn methods(&self) -> &'static [&'static str] { &["accounts.default"] }
-    fn call<'a>(&'a self, hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, _m: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
-        Box::pin(async move {
-            let g = |k: &str| p.get(k).and_then(Value::as_str).unwrap_or("").to_string();
-            let (provider, prof, epoch) = (g("provider"), g("profile"), p.get("epoch").and_then(Value::as_u64).unwrap_or(0));
-            let inventory = hub.setting("accounts.inventory").await.unwrap_or_default();
-            let ok = supported(&provider) && ((prof.is_empty() && epoch == 0) || ready(&profile(&inventory, &prof), &provider, epoch));
-            if !ok { return vec![json!({"t":"reply","id":id,"ok":false,"error":"Check and reconnect this account before making it the default."})] }
-            match hub.commit(&json!({"$":"SettingSet","key":format!("account.default.{provider}"),"value":binding_show(&prof, epoch),"at":now_ms() / 1000})).await {
-                Ok(_) => vec![json!({"t":"reply","id":id,"ok":true})], Err(e) => vec![json!({"t":"reply","id":id,"ok":false,"error":format!("{e:#}")})],
-            }
-        })
+    fn call<'a>(&'a self, _hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, _m: &'a str, _p: &'a Value) -> Fut<'a, Vec<Value>> {
+        Box::pin(async move { vec![json!({"t":"reply","id":id,"ok":false,"error":GATE})] })
+    }
+}
+/// AccountsRpc.default.step: make a connected profile (or the CLI's own login) the default for new threads.
+pub async fn make_default(hub: &Arc<Hub>, id: &Value, p: &Value) -> Value {
+    let g = |k: &str| p.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+    let (provider, prof, epoch) = (g("provider"), g("profile"), p.get("epoch").and_then(Value::as_u64).unwrap_or(0));
+    let inventory = hub.setting("accounts.inventory").await.unwrap_or_default();
+    let ok = supported(&provider) && ((prof.is_empty() && epoch == 0) || ready(&profile(&inventory, &prof), &provider, epoch));
+    if !ok { return json!({"t":"reply","id":id,"ok":false,"error":"Check and reconnect this account before making it the default."}) }
+    match hub.commit(&json!({"$":"SettingSet","key":format!("account.default.{provider}"),"value":binding_show(&prof, epoch),"at":now_ms() / 1000})).await {
+        Ok(_) => json!({"t":"reply","id":id,"ok":true}), Err(e) => json!({"t":"reply","id":id,"ok":false,"error":format!("{e:#}")}),
     }
 }
 
@@ -90,11 +97,17 @@ mod tests {
         assert!(created(&json!({"$":"ThreadCreated","id":"t3","provider":"grok","at":5}), &get).is_empty());
         let f = created(&json!({"$":"ThreadForked","id":"t4","source":"src","at":6}), &get); assert_eq!(f.len(), 2); assert_eq!(f[0]["value"], json!(binding_show("w", 3))); assert_eq!(f[1]["value"], json!(binding_show("", 0)));
     }
+    #[tokio::test(flavor = "multi_thread")] async fn a_client_without_the_accounts_capability_is_refused_as_the_js_hub_refuses_it() {
+        let home = std::env::temp_dir().join(format!("bp-acct2-{}", std::process::id())); let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap();
+        let hub = Hub::start(Cfg { home: home.clone(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        let r = AccountsDefault.call(&hub, &Caller { gen: "1".into(), client: 1 }, &json!(2), "accounts.default", &json!({"provider":"claude","profile":"","epoch":0})).await.remove(0);
+        assert_eq!(r["error"], GATE); assert_eq!(hub.setting("account.default.claude").await, None); let _ = std::fs::remove_dir_all(&home);
+    }
     #[tokio::test(flavor = "multi_thread")] async fn only_a_connected_profile_or_the_legacy_login_becomes_the_default() {
         let home = std::env::temp_dir().join(format!("bp-acct-{}", std::process::id())); let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap();
         let hub = Hub::start(Cfg { home: home.clone(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
         hub.commit(&json!({"$":"SettingSet","key":"accounts.inventory","value":inv(),"at":1})).await.unwrap();
-        let call = |p: Value| { let hub = hub.clone(); async move { AccountsDefault.call(&hub, &Caller { gen: "1".into(), client: 1 }, &json!(2), "accounts.default", &p).await.remove(0) } };
+        let call = |p: Value| { let hub = hub.clone(); async move { make_default(&hub, &json!(2), &p).await } };
         let bad = "Check and reconnect this account before making it the default.";
         assert_eq!(call(json!({"provider":"claude","profile":"x","epoch":1})).await["error"], bad, "not that provider's"); assert_eq!(call(json!({"provider":"claude","profile":"w","epoch":2})).await["error"], bad, "stale epoch"); assert_eq!(call(json!({"provider":"grok","profile":"","epoch":0})).await["error"], bad);
         assert_eq!(call(json!({"provider":"claude","profile":"w","epoch":3})).await["ok"], true); assert_eq!(hub.setting("account.default.claude").await.as_deref(), Some(binding_show("w", 3).as_str()));
