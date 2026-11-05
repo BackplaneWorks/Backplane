@@ -65,11 +65,27 @@ pub async fn read_capped<R: AsyncBufReadExt + Unpin>(r: &mut R, cap: usize) -> s
     }
 }
 
+static OWNER: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+/// Every agent process carries BACKPLANE_AGENT_OWNER=<home>: after a hub is SIGKILLed (the kernel kills the agent itself, PDEATHSIG, but not what it
+/// started), the next hub on that home ends what is left. One hub per home, so nothing live is taken.
+pub fn set_owner(home: &str) { let _ = OWNER.set(home.to_string()); }
+pub fn reap_orphans(home: &str) -> usize {
+    let mark = format!("BACKPLANE_AGENT_OWNER={home}").into_bytes(); let me = std::process::id(); let mut n = 0;
+    let Ok(rd) = std::fs::read_dir("/proc") else { return 0 };
+    for e in rd.flatten() {
+        let Some(pid) = e.file_name().to_str().and_then(|s| s.parse::<u32>().ok()) else { continue }; if pid == me { continue }
+        let Ok(env) = std::fs::read(format!("/proc/{pid}/environ")) else { continue };
+        if env.split(|b| *b == 0).any(|kv| kv == mark.as_slice()) { unsafe { libc::kill(pid as i32, libc::SIGKILL); } n += 1 }
+    }
+    n
+}
+
 pub fn spawn(program: &Path, args: &[String], cwd: &Path, extra_path: Option<&Path>, env: &[(String, String)]) -> std::io::Result<Proc> {
     let mut c = Command::new(program);
     c.args(args).current_dir(cwd).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
     if let Some(d) = extra_path { let old = std::env::var_os("PATH").unwrap_or_default(); let mut v = vec![d.to_path_buf()]; v.extend(std::env::split_paths(&old)); if let Ok(j) = std::env::join_paths(v) { c.env("PATH", j); } }
     for (k, v) in env { c.env(k, v); }
+    if let Some(o) = OWNER.get() { c.env("BACKPLANE_AGENT_OWNER", o); }
     unsafe { c.pre_exec(|| { libc::setsid(); libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL); Ok(()) }); }
     let mut child = c.spawn()?;
     let pid = child.id().unwrap_or(0);
