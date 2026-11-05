@@ -39,3 +39,14 @@ test('a row that keeps moving (a streaming bot) is fetched again at most once pe
  clock=31000;p.later.clear();p.enqueue({kind:'thread',id:'A'},false,true);assert.equal(p.queue.length,1,'past the floor: fetched again');
  p.stop();assert.equal(p.later.size,0);
 });
+test('a destination asked for soon goes while input is recent; the others still wait for the page to be idle',async()=>{
+ const {ViewPrefetch}=await import('../../src/web/view-prefetch.js'),{VIEW_LIMITS}=await import('../../src/web/thin.js');
+ const sent=[];let socket,typing=true;
+ const scope={origin:'https://hub',identity:'owner',epoch:'e',language:'en'};
+ const p=new ViewPrefetch({hub:scope.origin,scope:()=>scope,has:()=>false,idle:soon=>soon||!typing,encode:x=>x,decode:x=>x,socket:()=>socket={send:r=>sent.push(r),close(){}},picture(){}});
+ p.enqueue({kind:'thread',id:'side'});clearTimeout(p.timer);p.timer=null;p.pump();assert.equal(socket,undefined,'not idle: nothing opened');clearTimeout(p.timer);p.timer=null;
+ p.enqueue({kind:'thread',id:'far'},true,false,true);clearTimeout(p.timer);p.timer=null;p.pump();
+ socket.onmessage({data:{t:'view',version:1,renderer:'web',generation:'1',epoch:'e',limits:VIEW_LIMITS}});
+ assert.equal(sent.length,1);assert.equal(sent[0].p.session.sel,'far','the soon one first, while typing');
+ p.stop();
+});

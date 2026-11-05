@@ -764,7 +764,7 @@ const previewViews = new ViewPrefetch({
   has:target=>!!transitionViews.destination(transitionScope(), target),
   // (and the person has not pressed, typed or scrolled for two seconds: the hub
   // answers one request at a time, and a prefetch ahead of a click delays it)
-  idle:()=>remoteReady && !document.hidden && !thin?.active && !thin?.paging && performance.now() - lastInput > 2000,
+  idle:soon=>remoteReady && !document.hidden && !thin?.active && !thin?.paging && (soon || performance.now() - lastInput > 2000),
   socket:()=>new WebSocket(location.origin.replace(/^http/, "ws") + "/ws?view=1&frontend=1"),
   encode:request=>fromList(App.wire_out_json(Wire.json(PHONE ? {...request,p:{...request.p,...phoneRequest(PHONE)}} : request))),
   decode:data=>Wire.plain(Wire.cbor(new Uint8Array(data), KEYS, WORDS)),
@@ -772,6 +772,17 @@ const previewViews = new ViewPrefetch({
     transitionViews.put({...scope,target,selected:session.sel,route:session.route||null,settings:false},shown);
   },
 });
+// The palette's chosen row, when it is a thread, is read ahead once the
+// list has stayed 200 ms (its Enter then draws the thread's picture with
+// the palette's answer, not a round trip after it): a thread far from the
+// sidebar has no other picture.
+let paletteAheadFor = null, paletteAheadTimer = 0;
+function paletteAhead() {
+  const id = document.querySelector("#workspace-commands .workspace-command.on.thread[data-thread]")?.getAttribute("data-thread") || null;
+  if (id === paletteAheadFor) return;
+  paletteAheadFor = id;clearTimeout(paletteAheadTimer);
+  if (id) paletteAheadTimer = setTimeout(() => { if (paletteAheadFor === id) previewViews.enqueue({ kind: "thread", id }, true, false, true); }, 200);
+}
 // Every destination the sidebar shows is fetched ahead (view-prefetch.js),
 // so a click on one draws its picture at once instead of waiting a round
 // trip. A row drawn differently since its picture was fetched (new activity,
@@ -1328,6 +1339,7 @@ function renderPage() {
   starAttentionSync(root);
   bubMoveSync();
   paletteCaughtUp();
+  paletteAhead();
   // (a picture of another thread drawn with the live sidebar: its row marked)
   if (transitionNode && !frontendNode && transitionFor !== shownFor && transitionFor.startsWith("thread:")) {
     const row = document.querySelector(`aside.sidebar .thread[data-value="${CSS.escape(transitionFor.slice(7))}"]`);
