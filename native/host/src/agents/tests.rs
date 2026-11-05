@@ -810,3 +810,11 @@ const TESTCLI: &str = "#!/bin/sh\nread hello\necho '{\"q\":1}'\nread ans\necho \
     let ev = until(&hub, 0, 20, |ev| ev.iter().any(|e| is(e, "TaskDelivered"))).await;
     assert!(ev.iter().any(|e| is(e, "TaskStateSet") && e["state"] == "failed"), "{ev:?}"); assert!(ev.iter().any(|e| is(e, "MessagePosted") && e["thread"] == T1 && e["text"].as_str().map_or(false, |t| t.contains("failed")))); ag.shutdown();
 }
+
+#[tokio::test(flavor = "multi_thread")] async fn start_one_runs_the_text_as_its_own_turn_without_steer_or_queue_taken() {
+    let (hub, ag, _sd) = codex_start("so1").await; let from = len(&hub).await;
+    assert!(ag.start_one(T1, "just this one").await.is_ok());
+    let ev = until(&hub, from, 20, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await;
+    assert!(ev.iter().any(|e| turn_is(e, "running")) && !ev.iter().any(|e| is(e, "QueueTaken")) && !ev.iter().any(|e| e["kind"] == "steer"), "{ev:?}");
+    assert!(ev.iter().any(|e| is(e, "MessagePosted") && e["role"] == "assistant" && e["text"].as_str().unwrap().contains("just this one"))); ag.shutdown();
+}
