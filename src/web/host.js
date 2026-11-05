@@ -501,7 +501,7 @@ const forcedLang = new URLSearchParams(location.search).get("lang");
 if (forcedLang === "ja" || forcedLang === "en") ui = App.lang_preview(ui);
 ui = App.act(ui, "lang", forcedLang === "ja" || forcedLang === "en" ? forcedLang : (localStorage.getItem("backplane-lang") || "auto")).ui;
 ui = App.act(ui, "lang-os", navigator.languages?.[0] || navigator.language || "").ui;
-document.documentElement.lang = App.lang(ui);
+pageLang(App.lang(ui));
 window.addEventListener("languagechange", () => dispatch("lang-os", navigator.languages?.[0] || navigator.language || ""));
 // opened from another hub to show one of this machine's bots ("#bot=<name>")
 if (location.hash) {
@@ -1119,6 +1119,12 @@ function jumpTo(tl, el, word = "") {
   el.classList.remove("jumped");
   void el.offsetWidth;
   el.classList.add("jumped");
+}
+// <html lang>: written only when it changes. Writing the same value is still
+// a :lang() invalidation of every element (each hub view wrote it: ~1,500
+// style invalidations a view on a thread)
+function pageLang(lang) {
+  if (document.documentElement.lang !== lang) document.documentElement.lang = lang;
 }
 // <html>'s data attributes (style.css reads them): written only when they
 // change, so a render that changes nothing there invalidates no style
@@ -1785,7 +1791,7 @@ function dispatch(action, value, timer) {
   }
   if (action === "select") try { localStorage.setItem("backplane-selected", value); } catch {}
   mailCheckpoint();
-  if (action === "lang" || action === "lang-os") document.documentElement.lang = App.lang(ui);
+  if (action === "lang" || action === "lang-os") pageLang(App.lang(ui));
   if (action === "subs-shut" || action === "subs-open") {
     try {
       const sep = value.indexOf("\t");
@@ -3055,11 +3061,14 @@ function showViewStatus(message) {
     const text = document.createElement("span");text.id = "view-connection-text";box.append(text);
     document.body.append(box);
   }
-  box.hidden = !message;
-  box.style.display = message ? "flex" : "none";
-  document.getElementById("view-connection-text").textContent = message;
+  // (each written only when it changes: most calls clear a bar already clear)
+  if (box.hidden !== !message) box.hidden = !message;
+  const display = message ? "flex" : "none", text = document.getElementById("view-connection-text");
+  if (box.style.display !== display) box.style.display = display;
+  if (text.textContent !== message) text.textContent = message;
   // The page shrinks above the bar instead of sliding under it.
-  document.documentElement.style.setProperty("--status-h", message ? box.offsetHeight + "px" : "0px");
+  const room = message ? box.offsetHeight + "px" : "0px";
+  if (document.documentElement.style.getPropertyValue("--status-h") !== room) document.documentElement.style.setProperty("--status-h", room);
 }
 
 
@@ -3605,7 +3614,7 @@ async function startThin(again = false, reason = "initial") {
           // Only live response choices cross this boundary. State and applied
           // cursor stay in the fresh unsynced recipient, never in a picture.
           ui = App.unsync(App.presentation_handoff(ui, presentationJson(keepDesk(session))));
-          document.documentElement.lang = App.lang(ui);
+          pageLang(App.lang(ui));
           keepViewer();
           // A hub action can open a thread too (Ctrl+N, Fork, the palette).
           // Keep the accepted selection as well as explicit sidebar clicks.
