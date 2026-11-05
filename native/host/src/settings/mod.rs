@@ -8,6 +8,8 @@ pub mod accounts;
 pub mod accounts_hub;
 pub mod binding;
 pub mod mentions;
+#[cfg(test)]
+mod copy_gate;
 pub mod accounts_io;
 pub mod diagnostics;
 pub mod driver;
