@@ -37,6 +37,8 @@ const REPLACES = { settings: n => is(n, 'El') && n.tag === 'main' };
 // what a region brings along, as the hub drew it with it (Settings' top bar
 // names Settings, not the thread): found, learned and drawn with it, never
 // on its own (the top bar changes with every turn's state)
+// (not the viewer's rail: drawn while loading, it is another height than the
+// hub's next one, and its buttons moved when that came)
 const ALONG = { settings: [['topbar', n => n.tag === 'header' && classes(n).includes('topbar')]] };
 // presses that move to another destination or change content: never
 // remembered (their answer is a view of something else, or the hub's alone)
@@ -58,7 +60,7 @@ export function regions(page) {
     const [n, parent, index, depth] = stack.pop();
     if (!is(n, 'El') || n.tag === 'bp-memo' || depth > DEPTH || attr(n, 'id') === 'timeline') continue;
     const kind = REGIONS.find(([k, test]) => !found.has(k) && test(n));
-    if (kind && parent) { found.set(kind[0], { node: n, parent: sig(parent), parentClass: attr(parent, 'class'), index });continue; }
+    if (kind && parent) { found.set(kind[0], { node: n, parent: sig(parent), parentClass: attr(parent, 'class'), index, prev: index ? sig(items(parent.kids)[index - 1]) : '' });continue; }
     for (const [k, test] of Object.values(ALONG).flat()) if (!found.has('+' + k) && parent && test(n)) found.set('+' + k, { node: n, parent: sig(parent), index });
     const ks = items(n.kids);
     for (let i = ks.length - 1; i >= 0; i--) stack.push([ks[i], n, i, depth + 1]);
@@ -88,7 +90,7 @@ export class PressFeedback {
     const parent = after || before, parentClass = after ? after.parentClass : before && this.parentClass(before.parent);
     this.learned.delete(p.key);
     const along = (ALONG[kind] || []).map(([k]) => this.now.get('+' + k)).filter(Boolean);
-    this.learned.set(p.key, { kind, node: after?.node || null, parent: parent.parent, parentClass, index: parent.index, along });
+    this.learned.set(p.key, { kind, node: after?.node || null, parent: parent.parent, parentClass, index: parent.index, prev: parent.prev, along });
     while (this.learned.size > this.limit) this.learned.delete(this.learned.keys().next().value);
   }
   parentClass(parentSig) {
@@ -152,7 +154,7 @@ export class PressFeedback {
         const away = REPLACES[a.kind];
         if (away && at < 0) { const i = ks.findIndex(away);if (i >= 0) { ks = ks.map((k, j) => j === i ? a.node : k);at = i; } }
         const kids = at >= 0 ? (a.node ? ks.map((k, i) => i === at ? a.node : k) : ks.filter((_, i) => i !== at))
-          : a.node ? [...ks.slice(0, a.index), a.node, ...ks.slice(a.index)] : ks;
+          : a.node ? (at => [...ks.slice(0, at), a.node, ...ks.slice(at)])(this.place(ks, a)) : ks;
         const out = { ...n, kids: list(kids) };
         if (a.addClass) { const c = attr(out, 'class') || '';return c.split(/\s+/).includes(a.addClass) ? out : withAttr(out, 'class', (c + ' ' + a.addClass).trim()); }
         return a.parentClass === undefined ? out : withAttr(out, 'class', a.parentClass);
@@ -162,6 +164,13 @@ export class PressFeedback {
     };
     const out = walk(page);
     return (a.along || []).reduce((pg, x) => this.swap(pg, x), out);
+  }
+  // where a region goes among its parent's kids: after the sibling it came
+  // after when the hub drew it (the kids may be more or fewer now), else at
+  // the same index
+  place(ks, a) {
+    if (a.prev !== undefined) { const i = a.prev ? ks.findIndex(k => is(k, 'El') && sig(k) === a.prev) : -1;if (i >= 0 || !a.prev) return i + 1; }
+    return Math.min(a.index, ks.length);
   }
   // a region drawn along: put in place of its kind in its parent
   swap(page, x) {
