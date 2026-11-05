@@ -15,7 +15,7 @@ pub fn metric(started: Instant, event: &str, mut fields: Value) {
 pub enum Step { Home(usize), Select(usize), Popup(String), Type(String), Send, Wait(u64), Record(Option<String>), Click(String), Scroll(f32), NetSleep(f64), Unsupported(String) }
 /// What a click on a registered control does; the e2e harness's controls inventory and `click` step use these.
 #[derive(Clone, Debug)]
-pub enum Ctl { None, Select(String), Home(String), Fold(String), Send, Skill(String), Page(String), Node(String, String) }
+pub enum Ctl { None, PickFiles, ToggleSidebar, Select(String), Home(String), Fold(String), Send, Skill(String), Page(String), Node(String, String) }
 #[derive(Clone, Debug)]
 pub struct CtlEntry { pub id: String, pub label: String, pub ctl: Ctl }
 #[derive(Clone, Debug)]
@@ -68,7 +68,7 @@ impl Backplane {
             let snap = crate::art::layout_snapshot();
             if snap != self.last_layout { self.last_layout = snap.clone(); metric(started, "layout", json!({"rects": serde_json::from_str::<Value>(&snap).unwrap_or(Value::Null)})); }
             // G4: the controls on screen, on change
-            let ctl: Vec<Value> = self.controls.iter().map(|c| json!({"id": c.id, "label": c.label, "enabled": !matches!(c.ctl, Ctl::None) , "visible": true, "wired": !matches!(c.ctl, Ctl::None)})).collect();
+            let ctl: Vec<Value> = self.controls.iter().map(|c| json!({"id": c.id, "label": c.label, "enabled": !matches!(c.ctl, Ctl::None), "visible": true, "wired": !matches!(c.ctl, Ctl::None), "disabled_look": matches!(c.ctl, Ctl::None)})).collect();
             let text = serde_json::to_string(&ctl).unwrap_or_default();
             if text != self.ctl_last { self.ctl_last = text; metric(started, "controls", json!({"controls": ctl})); }
         }
@@ -120,14 +120,16 @@ impl Backplane {
         cx.notify();
     }
 
-    fn begin(&mut self, label: String, goal: Goal, cx: &mut Context<Self>) {
+    fn begin(&mut self, label: String, goal: Goal, cx: &mut Context<Self>) { self.begin_for(label, goal, 15, cx) }
+    /// `fail_after`: seconds before a step whose result never shows is reported failed (a net_sleep is its sleep + 15).
+    fn begin_for(&mut self, label: String, goal: Goal, fail_after: u64, cx: &mut Context<Self>) {
         self.seq += 1;
         let seq = self.seq;
         self.timing = None; self.applied_at = None; self.ack_pending = Some((label.clone(), Instant::now()));
         self.pending = Some(Pending { label, started: Instant::now(), goal, armed: false, seq });
         // A step whose result never shows is reported failed after 15 s so the script still ends.
         cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(Duration::from_secs(15)).await;
+            cx.background_executor().timer(Duration::from_secs(fail_after)).await;
             let _ = this.update(cx, |t, cx| {
                 if let Some(p) = &t.pending { if p.seq == seq && !p.armed {
                     let (l, t0) = (p.label.clone(), p.started);
@@ -188,7 +190,7 @@ impl Backplane {
                 let o = self.scroll.offset(); self.scroll.set_offset(point(o.x, o.y - px(n))); self.ui_epoch += 1; cx.notify();
             }
             Step::NetSleep(secs) => {
-                self.reconnected = false; self.begin(format!("net_sleep:{secs}"), Goal::Reconnected, cx);
+                self.reconnected = false; self.begin_for(format!("net_sleep:{secs}"), Goal::Reconnected, secs.max(0.0) as u64 + 15, cx);
                 let _ = self.tx.try_send(crate::hub::Command::Sleep(secs));
             }
             Step::Unsupported(k) => { self.m("input", json!({"step": k, "ok": false, "error": "not_implemented"})); self.pump(cx); }
@@ -231,6 +233,8 @@ impl Backplane {
         use crate::hub::Command;
         match ctl {
             Ctl::None => "none".into(),
+            Ctl::PickFiles => { self.pick_files(cx); self.ui_epoch += 1; "attach picker".into() }
+            Ctl::ToggleSidebar => { self.sidebar_open = !self.sidebar_open; self.ui_epoch += 1; cx.notify(); "toggle sidebar".into() }
             Ctl::Select(id) => { self.select_id(id.clone(), cx); "view.open thread".into() }
             Ctl::Home(pid) => { let _ = self.tx.try_send(Command::Action("select".into(), format!("project-home-{pid}"))); "view.action select project-home".into() }
             Ctl::Fold(v) => { let _ = self.tx.try_send(Command::Action("fold".into(), v.clone())); "view.action fold".into() }

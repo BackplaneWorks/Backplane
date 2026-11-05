@@ -126,7 +126,7 @@ impl Render for Backplane {
             ctl.push(CtlEntry { id: format!("project:{pid}"), label: string(project, "title"), ctl: Ctl::Home(pid.clone()) });
             rows.push(div().id(SharedString::from(format!("proj-{pid}"))).flex().items_center().gap_2().px_3().pt_3().pb_1().text_size(px(11.)).text_color(c("dim")).cursor_pointer().hover(|s| s.text_color(c("text")))
                 .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("select".into(), format!("project-home-{pid}"))); cx.notify(); }))
-                .child(ic(light, "chevron-down", 14., "dim")).child(ic(light, "folder", 14., "ok")).child(div().flex_1().child(string(project, "title").to_uppercase())).child(ic(light, "plus", 16., "dim")).into_any_element());
+                .child(ic(light, "chevron-down", 14., "dim")).child(ic(light, "folder", 14., "ok")).child(div().flex_1().child(string(project, "title").to_uppercase())).child(div().opacity(0.45).child(ic(light, "plus", 16., "dim"))).into_any_element());
             for t in project["threads"].as_array().into_iter().flatten().chain(project["settled"].as_array().into_iter().flatten()) {
                 let id = string(t, "id");
                 let raw = id.rsplit_once('|').map_or(id.as_str(), |(_, i)| i);
@@ -145,7 +145,7 @@ impl Render for Backplane {
             for key in ["projects", "active", "legacy"] { if let Some(row) = pager_row(cx, format!("pg-{key}"), &page[key], light, &mut ctl) { rows.push(row); } }
         }
         for name in ["BOTS", "ROOMS"] {
-            rows.push(div().flex().justify_between().px_3().pt_4().text_size(px(11.)).text_color(c("dim")).child(name).child(ic(light, "plus", 16., "dim")).into_any_element());
+            rows.push(div().flex().justify_between().px_3().pt_4().text_size(px(11.)).text_color(c("dim")).child(name).child(div().opacity(0.45).child(ic(light, "plus", 16., "dim"))).into_any_element());
             if name == "BOTS" {
                 for ((bname, mood, note, _), rig) in bot_data.iter().zip(bot_rigs.iter()) {
                     let note_color = match mood.as_str() { "wait" | "error" => c("bad"), "work" | "talk" => c("accent"), _ => c("faint") };
@@ -220,12 +220,15 @@ impl Render for Backplane {
         let ctx = string(&thread["picker"], "label").split("ctx ").nth(1).map(|s| format!("ctx {}", s.split(' ').next().unwrap_or(""))).unwrap_or_default();
         let todo = thread["todos"]["count"].as_str().unwrap_or("").to_string();
         let rail: Vec<AnyElement> = [("Terminal", "terminal"), ("Commands", "search"), ("", ""), ("Board", "circuit-board"), ("Schematic", "cpu"), ("3D", "box"), ("Split", "layout-panel-left"), ("Mech", "layers"), ("", ""), ("Files", "folder"), ("Diff", "diff"), ("Review", "circle-check"), ("Browser", "globe")].iter().map(|(l, i)| {
-            if l.is_empty() { div().h(px(12.)).into_any_element() } else { div().flex().flex_col().items_center().h(px(48.)).justify_center().gap_1().text_size(px(10.)).text_color(c("dim")).child(ic(light, i, 18., "dim")).child(*l).into_any_element() }
+            if l.is_empty() { div().h(px(12.)).into_any_element() } else { div().opacity(0.45).flex().flex_col().items_center().h(px(48.)).justify_center().gap_1().text_size(px(10.)).text_color(c("dim")).child(ic(light, i, 18., "dim")).child(*l).into_any_element() }
         }).collect();
         // controls with no handler yet are registered too, so the harness finds them dead instead of missing
         ctl.push(CtlEntry { id: "send".into(), label: "Send".into(), ctl: Ctl::Send });
         for l in ["Terminal", "Commands", "Board", "Schematic", "3D", "Split", "Mech", "Files", "Diff", "Review", "Browser"] { ctl.push(CtlEntry { id: format!("rail:{l}"), label: l.into(), ctl: Ctl::None }); }
-        for l in ["Improvements", "Search", "Settings", "Fold sidebar", "Add project", "Account", "Edit", "Context", "Attach", "Dictate"] { ctl.push(CtlEntry { id: format!("ui:{l}"), label: l.into(), ctl: Ctl::None }); }
+        for l in ["Jump or run a command", "Improvements", "Search", "Settings", "Add project", "New thread", "New bot", "New room", "Account", "Edit", "Context", "Dictate"] { ctl.push(CtlEntry { id: format!("ui:{l}"), label: l.into(), ctl: Ctl::None }); }
+        ctl.push(CtlEntry { id: "ui:Fold sidebar".into(), label: "Fold sidebar".into(), ctl: Ctl::ToggleSidebar });
+        ctl.push(CtlEntry { id: "ui:Attach".into(), label: "Attach".into(), ctl: Ctl::PickFiles });
+        if !self.sidebar_open { ctl.push(CtlEntry { id: "ui:Unfold sidebar".into(), label: "Unfold sidebar".into(), ctl: Ctl::ToggleSidebar }); }
         let connected = self.status == "Connected";
 
         let el = div().size_full().flex().flex_col().bg(c("bg")).text_color(c("text")).text_size(px(13.)).font_family("Noto Sans Mono CJK JP").line_height(px(20.))
@@ -233,19 +236,20 @@ impl Render for Backplane {
             // top bar
             .child(div().h(px(36.)).flex_shrink_0().relative().child(art::probe("topbar")).flex().items_center().justify_between().px_3().border_b_1().border_color(c("line")).bg(c("bg"))
                 .child(div().flex().items_center().gap_2()
+                    .when(!self.sidebar_open, |d| d.child(div().id("unfold-sidebar").cursor_pointer().child(ic(light, "chevron-right", 16., "dim")).on_click(cx.listener(|this, _, _, cx| { this.sidebar_open = true; this.ui_epoch += 1; cx.notify(); }))))
                     .child(div().relative().size(px(18.)).child(art::logo(light, 18., "logo"))
                         .child(div().absolute().right(px(-2.)).bottom(px(-1.)).size(px(6.)).bg(if connected { c("ok") } else { c("bad") })))
                     .child(div().font_weight(FontWeight::BOLD).child("Backplane"))
                     .child(div().text_color(c("faint")).child("/")).child(div().text_color(c("dim")).child(if has_thread { "Project".to_string() } else { "Projects".to_string() }))
                     .when(has_thread, |d| d.child(div().text_color(c("faint")).child("/")).child(div().font_weight(FontWeight::BOLD).child(string(thread, "title"))).child(ic(light, "chevron-down", 14., "dim"))))
                 .child(div().flex().items_center().gap_3()
-                    .child(div().w(px(260.)).px_2().flex().items_center().gap_2().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("faint")).child(ic(light, "chevron-right", 13., "faint")).child("Jump or run a command"))
-                    .child(div().px_2().flex().items_center().gap_2().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("dim")).child(ic(light, "message-square", 15., "dim")).child("Improvements"))
-                    .child(ic(light, "search", 15., "dim")).child(ic(light, "settings", 15., "dim"))))
+                    .child(div().opacity(0.45).w(px(260.)).px_2().flex().items_center().gap_2().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("faint")).child(ic(light, "chevron-right", 13., "faint")).child("Jump or run a command"))
+                    .child(div().opacity(0.45).px_2().flex().items_center().gap_2().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("dim")).child(ic(light, "message-square", 15., "dim")).child("Improvements"))
+                    .child(div().opacity(0.45).child(ic(light, "search", 15., "dim"))).child(div().opacity(0.45).child(ic(light, "settings", 15., "dim")))))
             .child(div().flex_1().min_h_0().flex()
                 // sidebar
-                .child(div().w(px(264.)).h_full().flex_shrink_0().relative().child(art::probe("sidebar")).bg(c("bg")).border_r_1().border_color(c("line")).flex().flex_col()
-                    .child(div().flex().items_center().gap_2().p_2().child(ic(light, "chevron-left", 16., "dim")).child(div().flex_1().px_2().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).text_color(c("faint")).child("Search projects")).child(ic(light, "plus", 16., "dim")))
+                .child(div().w(px(if self.sidebar_open { 264. } else { 0. })).overflow_hidden().h_full().flex_shrink_0().relative().child(art::probe("sidebar")).bg(c("bg")).border_r_1().border_color(c("line")).flex().flex_col()
+                    .child(div().flex().items_center().gap_2().p_2().child(div().id("fold-sidebar").cursor_pointer().child(ic(light, "chevron-left", 16., "dim")).on_click(cx.listener(|this, _, _, cx| { this.sidebar_open = false; this.ui_epoch += 1; cx.notify(); }))).child(div().flex_1().px_2().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).text_color(c("faint")).child("Search projects")).child(div().opacity(0.45).child(ic(light, "plus", 16., "dim"))))
                     .child(div().id("sidebar").overflow_y_scroll().flex_1().children(rows))
                     .child(div().px_3().py_1().border_t_1().border_color(c("line")).text_size(px(11.)).text_color(c("dim")).child(self.status.clone())))
                 // main
@@ -266,11 +270,11 @@ impl Render for Backplane {
                         .child(div().border_1().border_color(c("accent")).bg(c("view")).px_3().py_2().min_h(px(60.)).child(self.input.clone()))
                         .child(div().flex().gap_2().items_center()
                             .child(div().flex_1().px_3().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).font(art::mono_font()).child(format!("claude / {} / {}", if model_short.is_empty() { "default" } else { &model_short }, if effort.is_empty() { "auto" } else { &effort })))
-                            .child(chip(light, String::new()).flex().items_center().gap_2().child(ic(light, "user", 16., "text")).child("Default"))
-                            .child(chip(light, String::new()).child(ic(light, "square-pen", 16., "dim")))
-                            .child(chip(light, String::new()).flex().items_center().gap_2().child(ic(light, "gauge", 14., "dim")).child(ctx))
+                            .child(chip(light, String::new()).opacity(0.45).flex().items_center().gap_2().child(ic(light, "user", 16., "text")).child("Default"))
+                            .child(chip(light, String::new()).opacity(0.45).child(ic(light, "square-pen", 16., "dim")))
+                            .child(chip(light, String::new()).opacity(0.45).flex().items_center().gap_2().child(ic(light, "gauge", 14., "dim")).child(ctx))
                             .child(chip(light, String::new()).id("attach").cursor_pointer().on_click(cx.listener(|this, _, _, cx| this.pick_files(cx))).child(ic(light, "paperclip", 16., "dim")))
-                            .child(chip(light, String::new()).child(ic(light, "mic", 16., "dim")))
+                            .child(chip(light, String::new()).opacity(0.45).child(ic(light, "mic", 16., "dim")))
                             .child(div().id("send").px_4().py_1().bg(c("accent")).text_color(c("on-accent")).cursor_pointer().child("Send").on_click(cx.listener(|this, _, window, cx| this.send(&Send, window, cx)))))))
                 )
                 // right rail
