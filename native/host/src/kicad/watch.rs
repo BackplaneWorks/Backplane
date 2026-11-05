@@ -4,7 +4,7 @@
 //! Child decision (M6): the parser stays Bend (`BACKPLANE_PLOT_BIN`, default `backplane-serve` beside the hub). Reads run one
 //! process each (fresh heap, memory returned on exit), at most `READERS` at once; 3D reads one at a time and at low priority.
 //! Not ported yet: web stamps, `PWarm`, split views and `--plot-tree` sheets (listed in docs/gpui/PORT.md M6).
-use super::{plot::{self, Plot, Ref}, project};
+use super::{plot::{self, Plot}, project};
 use crate::{api::{Caller, Fut, RpcHandler}, hub::Hub};
 use serde_json::{json, Value};
 use std::{collections::HashMap, path::PathBuf, sync::{Arc, Mutex}, time::Duration};
@@ -34,20 +34,20 @@ struct Sub { key: String, held: Vec<plot::Chunk>, mesh: Vec<u8>, fresh: bool, ba
 #[derive(Default)]
 struct State { srcs: HashMap<String, Src>, subs: HashMap<u64, Vec<Sub>>, polling: bool, idle: Vec<String> }
 
-pub struct Plots { st: Mutex<State>, bin: PathBuf, dir: PathBuf, readers: tokio::sync::Semaphore, solid: tokio::sync::Mutex<()> }
+pub struct Plots { gen: std::sync::atomic::AtomicU64, st: Mutex<State>, bin: PathBuf, dir: PathBuf, readers: tokio::sync::Semaphore, solid: tokio::sync::Mutex<()> }
 
 impl Plots {
     pub fn new(home: &std::path::Path) -> Arc<Plots> {
         let bin = std::env::var_os("BACKPLANE_PLOT_BIN").map(PathBuf::from).unwrap_or_else(|| std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("backplane-serve"))).unwrap_or_else(|| "backplane-serve".into()));
         let dir = home.join("plot"); let _ = std::fs::create_dir_all(&dir);
-        Arc::new(Plots { st: Mutex::new(State::default()), bin, dir, readers: tokio::sync::Semaphore::new(READERS), solid: tokio::sync::Mutex::new(()) })
+        Arc::new(Plots { gen: Default::default(), st: Mutex::new(State::default()), bin, dir, readers: tokio::sync::Semaphore::new(READERS), solid: tokio::sync::Mutex::new(()) })
     }
     fn infos(&self, key: &str) -> PathBuf { self.dir.join(format!("{}.info", fnv(key))) }
 
     /// kicad.watch: kind "board", "schematic", "3d", "3d-bare" or "3d-full" shows it, anything else stops. The client's
     /// other views are dropped; a new plot view starts from the chunks of the one it replaces (Sub.carry), a 3D view also
     /// watches the board's plot beside the model.
-    pub fn watch(self: &Arc<Self>, hub: &Arc<Hub>, client: u64, kind: Option<u32>, root: &str, path: &str) {
+    pub fn watch(self: &Arc<Self>, hub: &Arc<Hub>, client: u64, kind: Option<u32>, root: &str, path: &str, tree: &str) {
         let Some(kind) = kind else { self.stop(client); return };
         let board = |k: u32| if path.is_empty() { let f = project::read(root); if k == 1 { f.sch } else { f.pcb } } else { path.to_string() };
         let file = board(kind);
@@ -73,6 +73,7 @@ impl Plots {
           self.gc(&mut st);
           if !st.polling { st.polling = true; let me = self.clone(); let hub = hub.clone(); tokio::spawn(async move { me.poll(hub).await }); } }
         for ky in todo { self.fan_one(hub, &ky, Some(client)) }
+        if kind == 1 { self.sheets(hub, client, root, path, tree) }
     }
     pub fn stop(&self, client: u64) { self.drop_subs(client) }
     fn drop_subs(&self, client: u64) {
@@ -176,6 +177,22 @@ impl Plots {
         }
     }
 
+    /// Pv.tree: a schematic's sheets (and the boxes a tap on a sheet symbol opens), read by `--plot-tree FILE` and sent as
+    /// `{"t":"sheets", root, slot, gen, rows, boxes, ids, top, refs}`; `gen` only grows (the client takes a reply only if newer).
+    fn sheets(self: &Arc<Self>, hub: &Arc<Hub>, client: u64, root: &str, path: &str, tree: &str) {
+        let gen = self.gen.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+        let file = tree_root(&project::read(root).sch, path, tree);
+        if file.is_empty() { return }
+        let (me, hub, root, slot) = (self.clone(), hub.clone(), root.to_string(), tree_slot(path));
+        tokio::spawn(async move {
+            let Some(o) = tokio::process::Command::new(&me.bin).arg("--plot-tree").arg(&file).stdin(std::process::Stdio::null()).output().await.ok() else { return };
+            if !o.status.success() { return }
+            let text = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            let j: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+            let g = |k: &str, d: &str| j.get(k).and_then(Value::as_str).unwrap_or(d).to_string();
+            hub.push(client, json!({"t":"sheets","root":root,"slot":slot,"gen":gen.to_string(),"rows":g("rows", text.trim_end()),"boxes":g("boxes",""),"ids":g("ids",""),"top":g("top",""),"refs":g("refs","")}));
+        });
+    }
     /// kicad.info: what a tapped piece is, of the chunk the phone holds at `at` for `key`, by the child that reads the info file.
     pub async fn info(&self, client: u64, key_: &str, at: usize, idx: usize) -> String {
         let sig = { let st = self.st.lock().unwrap(); st.subs.get(&client).and_then(|v| v.iter().find(|s| s.key == key_)).and_then(|s| s.held.get(at)).map(|c| c.sig) };
@@ -184,6 +201,18 @@ impl Plots {
         match o { Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim_end().to_string(), _ => String::new() }
     }
 }
+/// Hist.kind: 0 a live file, 1 a file in a commit, 2 a comparison.
+pub fn hist_kind(p: &str) -> u8 { if p.starts_with("git\t") { 1 } else if p.starts_with("diff\n") { 2 } else { 0 } }
+/// Hist.rebase: another live file (abs) in the same commit as version p; abs itself when p is live.
+pub fn rebase(p: &str, abs: &str) -> String { if hist_kind(p) == 1 { let f: Vec<&str> = p.split('\t').collect(); format!("git\t{}\t{}\t{}\t{abs}", f.get(1).unwrap_or(&""), f.get(2).unwrap_or(&""), f.get(3).unwrap_or(&"")) } else { abs.to_string() } }
+/// Tree.root with Pv.tree.path: the file whose sheets are read (the project's root sheet, or `tree`, in the version shown; the file shown when there is none).
+pub fn tree_root(sch: &str, path: &str, tree: &str) -> String {
+    let shown = if hist_kind(path) == 2 { "" } else { path };
+    let top = if tree.is_empty() { sch } else { tree };
+    if top.is_empty() { shown.to_string() } else { rebase(shown, top) }
+}
+/// Pv.tree.slot: which tree it is: "" the live design's, else "<gitdir>\t<commit>" of the version watched.
+pub fn tree_slot(path: &str) -> String { if hist_kind(path) == 1 { let f: Vec<&str> = path.split('\t').collect(); format!("{}\t{}", f.get(1).unwrap_or(&""), f.get(2).unwrap_or(&"")) } else { String::new() } }
 /// Hist.key.family for a live source: "kind|root|path" with the path's family (the live file a version is of).
 pub fn family(ky: &str) -> String {
     let mut it = ky.splitn(3, '|'); let (k, r, p) = (it.next().unwrap_or(""), it.next().unwrap_or(""), it.next().unwrap_or(""));
@@ -202,7 +231,7 @@ impl RpcHandler for KicadRpc {
                 "kicad.watch" => {
                     let (kind, root, path) = (s("kind"), s("root"), s("path"));
                     if !kind.is_empty() && !super::known_root(hub, &root, &path).await { return vec![json!({"t":"reply","id":id,"ok":false,"error":"that folder is not in this project"})] }
-                    self.0.watch(hub, who.client, kind_of(&kind), &root, &path);
+                    self.0.watch(hub, who.client, kind_of(&kind), &root, &path, &s("tree"));
                     vec![json!({"t":"reply","id":id,"ok":true})]
                 }
                 _ => { // kicad.info
@@ -218,6 +247,11 @@ impl RpcHandler for KicadRpc {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn sheet_tree_roots() {
+        assert_eq!(tree_root("/p/top.kicad_sch", "", ""), "/p/top.kicad_sch"); assert_eq!(tree_root("/p/top.kicad_sch", "/p/sub.kicad_sch", "/p/other.kicad_sch"), "/p/other.kicad_sch");
+        assert_eq!(tree_root("", "/p/x.kicad_sch", ""), "/p/x.kicad_sch"); assert_eq!(tree_root("/p/top.kicad_sch", "diff\na\nb", ""), "/p/top.kicad_sch"); assert_eq!(tree_root("", "diff\na\nb", ""), "");
+        let v = "git\t/g\tabc\t2\t/p/sub.kicad_sch"; assert_eq!(tree_root("/p/top.kicad_sch", v, ""), "git\t/g\tabc\t2\t/p/top.kicad_sch"); assert_eq!(tree_slot(v), "/g\tabc"); assert_eq!(tree_slot("/p/x"), "");
+    }
     #[test] fn keys_and_families() {
         assert_eq!(key(0, "/p", ""), "0|/p|"); assert_eq!(fnv(""), 2166136261); assert_eq!(fnv("a"), 0xe40c292c);
         assert_eq!(family("0|/p|b.kicad_pcb"), "0|/p|b.kicad_pcb");

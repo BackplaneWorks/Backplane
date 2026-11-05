@@ -11,6 +11,7 @@ const FILE_OPEN: &str = include_str!("scripts/file_open.sh");
 const FILE_REVEAL: &str = include_str!("scripts/file_reveal.sh");
 const PDF: &str = include_str!("scripts/pdf.sh");
 const MECH_LIST: &str = include_str!("scripts/mech_list.sh");
+const RESOLVE: &str = include_str!("scripts/resolve.sh");
 
 /// Mech.error: "" when the render worked, else the child's own `backplane --render:` line, else its first 300 chars.
 pub fn mech_error(code: i32, out: &str) -> String {
@@ -24,7 +25,7 @@ fn pdf_why(out: &str) -> String { if out.contains("nopoppler") { "PDFs show here
 
 pub struct Misc;
 impl RpcHandler for Misc {
-    fn methods(&self) -> &'static [&'static str] { &["file.open", "pdf.page", "mech.list", "mech.render"] }
+    fn methods(&self) -> &'static [&'static str] { &["file.open", "pdf.page", "mech.list", "mech.render", "history.resolve"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let s = |k: &str| p.get(k).and_then(Value::as_str).unwrap_or("").to_string();
@@ -50,6 +51,16 @@ impl RpcHandler for Misc {
                         let mut it = r.out.split('\t'); let png = it.next().unwrap_or("").to_string(); let pages = it.next().unwrap_or("0").trim().to_string();
                         reply(true, json!({"pdfPath":path,"pdfPage":page,"pdfPng":png,"pdfPages":pages}))
                     } else { reply(true, json!({"pdfPath":path,"pdfPage":page,"pdfErr":pdf_why(&r.out)})) }
+                }
+                "history.resolve" => { // RvJob.resolve: a commit, branch or tag typed in, as the commit it names
+                    let (thread, side, rf) = (s("thread"), s("side"), s("ref"));
+                    let cwd_p = super::root_of(hub, &thread).await; let cwd = cwd_p.to_string_lossy().into_owned();
+                    let err = |why: String| reply(false, json!({"error":why}));
+                    if rf.is_empty() || rf.starts_with('-') || cwd.is_empty() || rf.contains('\0') { return err(format!("no commit, branch or tag named {rf}")) }
+                    let r = proc("sh", &["-c", RESOLVE, "sh", &cwd, &rf], "/", &[]).await;
+                    if r.code == 0 { let ls: Vec<&str> = r.out.split('\n').collect(); let at = |i: usize| ls.get(i).map(|x| x.trim()).unwrap_or("");
+                        reply(true, json!({"resolved":{"thread":thread,"side":side,"ref":rf,"commit":at(0),"git":at(1),"top":at(2)}})) }
+                    else { err(if r.out.trim().is_empty() { format!("could not resolve {rf}") } else { r.out.trim().to_string() }) }
                 }
                 _ => { // mech.list, mech.render
                     let thread = s("thread"); let cwd_p = super::root_of(hub, &thread).await; let cwd = cwd_p.to_string_lossy().into_owned();
@@ -90,6 +101,13 @@ mod tests {
         let names: Vec<&str> = r.out.lines().map(|l| l.rsplit(' ').next().unwrap()).collect(); assert_eq!(names, ["mech/a.step", "mech/b.png", "mech/sub/c.glb"], "{}", r.out);
         let e = std::env::temp_dir().join(format!("bp-mech-empty-{}", std::process::id())); std::fs::create_dir_all(&e).unwrap();
         assert_eq!(proc("sh", &["-c", MECH_LIST], &e.to_string_lossy(), &[]).await.out, "");
+    }
+    #[tokio::test] async fn resolve_script_names_a_ref_as_a_commit() {
+        let d = std::env::temp_dir().join(format!("bp-res-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap(); let cwd = d.to_string_lossy().into_owned();
+        let g = |a: &[&str]| { let o = std::process::Command::new("git").args(a).current_dir(&d).env("GIT_AUTHOR_NAME", "t").env("GIT_AUTHOR_EMAIL", "t@t").env("GIT_COMMITTER_NAME", "t").env("GIT_COMMITTER_EMAIL", "t@t").output().unwrap(); String::from_utf8_lossy(&o.stdout).trim().to_string() };
+        g(&["init", "-q"]); std::fs::write(d.join("f"), "x").unwrap(); g(&["add", "."]); g(&["commit", "-qm", "i"]); g(&["tag", "v1"]); let head = g(&["rev-parse", "HEAD"]);
+        let r = proc("sh", &["-c", RESOLVE, "sh", &cwd, "v1"], "/", &[]).await; let ls: Vec<&str> = r.out.split('\n').collect(); assert_eq!((r.code, ls[0]), (0, head.as_str())); assert!(ls[1].ends_with(".git") && ls[2].len() > 1);
+        let r = proc("sh", &["-c", RESOLVE, "sh", &cwd, "nope"], "/", &[]).await; assert_eq!(r.code, 1); assert!(r.out.contains("no commit, branch or tag named nope"));
     }
     #[tokio::test] async fn file_open_refuses_a_missing_file_and_the_pdf_script_a_missing_pdf() {
         let r = proc("sh", &["-c", FILE_OPEN, "sh", "/nonexistent/file"], "/", &[]).await; assert_eq!(r.code, 1); assert!(r.out.contains("No such file"));
