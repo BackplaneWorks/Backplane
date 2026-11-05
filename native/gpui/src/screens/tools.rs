@@ -83,6 +83,18 @@ pub fn dropdown(cx: &mut Context<Backplane>, light: bool, thread: &Value, open: 
     Some(div().id("thread-menu-away").absolute().inset_0().on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| { this.screens.menu_open = false; cx.notify(); })).child(col).into_any_element())
 }
 
+/// A thread id as the sidebar's rows carry it (`<hub>|<id>`), found in the picture by its raw part; the value a row's own menu sends.
+pub fn qualify(data: &Value, raw: &str) -> String {
+    fn walk(v: &Value, raw: &str) -> Option<String> {
+        match v {
+            Value::Object(m) => { if let Some(Value::String(id)) = m.get("id") { if id.rsplit_once('|').map_or(false, |(_, r)| r == raw) { return Some(id.clone()); } } m.values().find_map(|x| walk(x, raw)) }
+            Value::Array(a) => a.iter().find_map(|x| walk(x, raw)),
+            _ => None,
+        }
+    }
+    walk(&data["projects"], raw).unwrap_or_else(|| raw.to_string())
+}
+
 /// The More menu is drawn only while open, with a thread, and with items.
 pub fn menu_visible(open: bool, thread: &Value) -> bool { open && thread.is_object() && !menu(thread).is_empty() }
 /// Whether the menu stays open when the selected thread goes from `before` to `after`: only while it is the same one.
@@ -164,6 +176,10 @@ mod tests {
         let t = j(r#"{"menu":[{"label":"Diff","action":"diff","value":"","options":[]}]}"#);
         assert!(menu_visible(true, &t) && !menu_visible(false, &t) && !menu_visible(true, &Value::Null) && !menu_visible(true, &j(r#"{"menu":[]}"#)));
         assert!(menu_keeps(true, "t1", "t1") && !menu_keeps(true, "t1", "t2") && !menu_keeps(false, "t1", "t1"));
+    }
+    #[test] fn a_raw_id_is_qualified_from_the_sidebar_rows() {
+        let d = j(r#"{"projects":[{"id":"h|p1","threads":[{"id":"h|t3"},{"id":"h|t1"}]}]}"#);
+        assert_eq!(qualify(&d, "t3"), "h|t3"); assert_eq!(qualify(&d, "zz"), "zz");
     }
     #[test] fn delete_yes_sends_row_delete_with_the_asked_id() {
         let d = j(r#"{"thread":{"id":"t1"},"deleting":{"id":"t2"}}"#);

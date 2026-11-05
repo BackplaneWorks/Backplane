@@ -65,7 +65,7 @@ sleep 6; import -window root $SH/$N-schematic.png
 sleep 8; import -window root $SH/$N-3d.png
 sleep 9; import -window root $SH/$N-mech.png; fi
 wait $(cat $R/client.pid) || true
-if [ -n "${GPUI_THREADS:-}" ]; then echo "events:"; grep -E '"\$":"(Thread(Renamed|Deleted|Pinned|Archived)[A-Za-z]*|Thread[A-Za-z]*)"' $R/home/events.jsonl | cut -c1-200; grep -E 'rpc_sent|rpc_refused' $OUT/$N.client.log | tail -20; fi
+if [ -n "${GPUI_THREADS:-}" ]; then echo "events:"; grep -E "Thread(Created|Renamed|Deleted|Pinned|Archived)" $R/home/events.jsonl | cut -c1-200; grep -E "rpc_sent|rpc_refused" $OUT/$N.client.log | tail -20; fi
 if [ -n "${GPUI_DAILY:-}" ]; then echo "events:"; grep -E '"\$":"(MessagePosted|Ask[A-Za-z]*|TurnChanged|ToolCalled|PermissionAsked)"' $R/home/events.jsonl | cut -c1-220 | tail -8; fi
 if [ -n "${GPUI_ATTACH:-}" ]; then echo "attachments on the hub:"; ls -la $R/home/attachments/*/ 2>/dev/null | tail -3; echo "messages:"; grep MessagePosted $R/home/events.jsonl | tail -2 | cut -c1-300; fi
 '
