@@ -41,10 +41,10 @@ fn out(from: u64, to: u64, xs: &[u64]) -> Out { let mut o = Out::default(); o.ad
 
 #[test] fn far_a_link_that_takes_nothing_holds_a_bounded_queue_and_is_told_the_gap() {
     let mut o = Out::default();
-    for n in 1..=(MAX_WAITING as u64 + 5) { o.add(n - 1, n, vec![it(n)]); }
+    for n in 1..=(MAX_WAITING as u64 + 1) { o.add(n - 1, n, vec![it(n)]); }
     assert!(o.items.is_empty() && o.lost, "past the limit the items are dropped");
     let s = o.next().unwrap();
-    let last = MAX_WAITING as u64 + 5;
+    let last = MAX_WAITING as u64 + 1;
     assert_eq!(s, Send { since: last, to: last, items: vec![] }, "the gap form: only where the log ends");
     o.done(false, last); assert!(o.lost && o.items.is_empty(), "a failed gap is owed again, not forgotten"); o.release();
     o.add(last, last + 1, vec![it(last + 1)]);
