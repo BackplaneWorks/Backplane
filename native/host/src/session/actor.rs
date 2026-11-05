@@ -27,7 +27,7 @@ fn render_scratch(key: &str) -> bool { key.starts_with("@more.") || key == "@pil
 const VIEW_INFO: [&str; 5] = ["view.design:", "view.kind:", "view.path:", "view.sheet:", "view.tree:"];
 
 #[derive(Default)]
-pub struct ViewActor { view: String, target: Option<Value>, sel: Option<String>, keys: BTreeSet<String>, away: BTreeMap<String, String>, page: Option<(String, Value, u64)>, local: Option<(String, Value, Value)>, held_drafts: Map<String, Value>, held_info: Map<String, Value>, rid: u64, panel: bool, hub_view: bool, reads: Vec<(String, Value, Value)>,
+pub struct ViewActor { view: String, target: Option<Value>, sel: Option<String>, keys: BTreeSet<String>, away: BTreeMap<String, String>, page: Option<(String, Value, u64)>, local: Option<(String, Value, Value)>, held_drafts: Map<String, Value>, held_info: Map<String, Value>, rid: u64, panel: bool, hub_view: bool, reads: Vec<(String, Value, Value)>, bot: Option<(String, String)>,
     /// ids of the requests this view's commands told the client to send (`cmds` of type send), and of those the hub has since answered
     sent: BTreeSet<u64>, replied: BTreeSet<u64>, late: BTreeSet<u64> }
 
@@ -35,9 +35,27 @@ pub struct ViewActor { view: String, target: Option<Value>, sel: Option<String>,
 /// (`PH.Home.owner`: "project-home-<project>"). Limit: a bot's chat thread (Target.thread: `U.Bots.chat.of`) needs the bots
 /// lane's state, so a bot target gets no "@away.<t>", no seeds, and `@btab` stays "" (thin-view.bend Route.choose: the tab
 /// the route names, else the bot's default); a room has no owner.
-fn owner(target: &Value) -> String {
+fn owner(target: &Value, bot: Option<&(String, String)>) -> String {
     let id = target["id"].as_str().unwrap_or("");
-    match target["kind"].as_str() { Some("thread") => id.to_string(), Some("project") => format!("project-home-{id}"), _ => String::new() }
+    match target["kind"].as_str() {
+        Some("thread") => id.to_string(),
+        Some("project") => format!("project-home-{id}"),
+        // the bot's chat thread, looked up by the hub (bots::chat_thread) for this request's target
+        Some("bot") => bot.filter(|(b, _)| b == id).map(|(_, t)| t.clone()).unwrap_or_default(),
+        _ => String::new(),
+    }
+}
+
+/// Route.valid (thin-view.bend): the request's session.route names this bot target's tab: exactly kind/bot/tab strings, kind
+/// "bot-tab", the same bot, a tab of Route.tab's list. Limit: Route.restore also asks BU.nav.accept(BU.tabs.for(u, bot), tab),
+/// the tabs this bot offers, which the bots lane does not expose; an unoffered tab would fall back to BU.tab.default there.
+const BOT_TABS: [&str; 10] = ["chat", "mail", "status", "space", "browser", "tasks", "memory", "routines", "hooks", "settings"];
+fn route_tab(req: &Value) -> Option<String> {
+    let r = req["session"]["route"].as_object()?;
+    let t = &req["target"];
+    let ok = r.len() == 3 && r.values().all(Value::is_string) && r.get("kind")? == "bot-tab" && t["kind"] == "bot"
+        && r.get("bot")?.as_str().filter(|b| !b.is_empty()) == t["id"].as_str() && BOT_TABS.contains(&r.get("tab")?.as_str()?);
+    if ok { r.get("tab")?.as_str().map(str::to_string) } else { None }
 }
 
 /// Actor.safe_input / Actor.local.key: the only drafts a page may supply (besides the thread's own text).
@@ -59,7 +77,7 @@ impl ViewActor {
         let mut session = req["session"].as_object().cloned().unwrap_or_default();
         let target = &req["target"];
         let first = self.target.is_none();
-        let th = owner(target);
+        let th = owner(target, self.bot.as_ref());
         let thread_ok = !th.is_empty() && !th.starts_with('@');
         let cd = session.get("drafts").and_then(Value::as_object).cloned().unwrap_or_default();
         let ci = session.get("info").and_then(Value::as_object).cloned().unwrap_or_default();
@@ -97,7 +115,7 @@ impl ViewActor {
             d.insert("@bot".into(), json!(if kind == "bot" { id } else { "" }));
             d.insert("@room".into(), json!(if kind == "room" { id } else { "" }));
             d.insert("@remote".into(), json!(""));
-            d.insert("@btab".into(), json!(""));
+            d.insert("@btab".into(), json!(route_tab(req).unwrap_or_default()));
             d.insert("@sync".into(), json!("1"));
             for (k, v) in &ci { if pref(k) { i.insert(k.clone(), v.clone()); } }
             // Actor.seed.view: a thread the actor has shown no viewer for (its view.kind is empty) takes the page's record
@@ -164,7 +182,7 @@ impl ViewActor {
         // Ui.reselect fires when the selection changes, whatever action did it.
         let sel = session.get("sel").and_then(Value::as_str).unwrap_or("").to_string();
         let reselected = self.sel.as_deref().map_or(true, |o| o != sel);
-        let th = owner(&target);
+        let th = owner(&target, self.bot.as_ref());
         let mut drafts = session.get("drafts").and_then(Value::as_object).cloned().unwrap_or_default();
         drafts.retain(|k, _| !render_scratch(k) && !k.starts_with("@away."));
         // Actor.away.input: a request without the mark leaves it as it was; the marks are kept per thread (Actor.scope.keep keeps @away.*).
@@ -297,6 +315,10 @@ pub fn record_read(client: u64, view_id: &str, kind: &str, id: u64, ok: bool, re
 /// The reads recorded since the last V request, for `reads` in the next one.
 pub fn take_reads(client: u64, view_id: &str, target: &Value) -> Vec<Value> {
     ACTORS.lock().unwrap().get_mut(&client).map(|a| a.take_reads(view_id, target)).unwrap_or_default()
+}
+/// The hub's lookup for a bot target (bots::chat_thread): the bot id and its chat thread, held for this request.
+pub fn set_bot(client: u64, bot: Option<(String, String)>) {
+    ACTORS.lock().unwrap().entry(client).or_default().bot = bot;
 }
 /// A connection ended (`Hub::detach`, from the connection's drop guard).
 pub fn forget(client: u64) { ACTORS.lock().unwrap().remove(&client); }
@@ -547,9 +569,16 @@ mod tests {
         assert!(a.take_reads("v1", &t1).is_empty());
     }
     #[test] fn a_project_home_target_is_owned_by_its_home_thread() {
-        assert_eq!(owner(&json!({"kind": "project", "id": "p1"})), "project-home-p1");
-        assert_eq!(owner(&json!({"kind": "thread", "id": "t1"})), "t1");
-        assert_eq!(owner(&json!({"kind": "bot", "id": "b"})), "");
+        assert_eq!(owner(&json!({"kind": "project", "id": "p1"}), None), "project-home-p1");
+        assert_eq!(owner(&json!({"kind": "thread", "id": "t1"}), None), "t1");
+        assert_eq!(owner(&json!({"kind": "bot", "id": "b"}), None), "");
+        let b = ("b".to_string(), "bt1".to_string());
+        assert_eq!(owner(&json!({"kind": "bot", "id": "b"}), Some(&b)), "bt1");
+        assert_eq!(owner(&json!({"kind": "bot", "id": "c"}), Some(&b)), "", "the lookup is for one bot");
+        let mut r = req("bot", "b"); r["session"] = json!({"route": {"kind": "bot-tab", "bot": "b", "tab": "status"}});
+        assert_eq!(route_tab(&r), Some("status".to_string()));
+        r["session"]["route"]["tab"] = json!("nonsense"); assert_eq!(route_tab(&r), None);
+        r["session"]["route"] = json!({"kind": "bot-tab", "bot": "other", "tab": "chat"}); assert_eq!(route_tab(&r), None);
         let mut a = ViewActor::default();
         a.reply("v1", &req("recent", ""), &pol("", &[]));
         let mut r = req("project", "p1"); r["away"] = json!("m9");
