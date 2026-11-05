@@ -177,7 +177,7 @@ impl Backplane {
             }
             Step::Record(Some(name)) => { self.m("record", json!({"state": "start", "name": name})); self.recording = Some((name, Vec::new())); cx.notify(); self.pump(cx); }
             Step::Record(None) => {
-                if let Some((name, frames)) = self.recording.take() { self.m("frames", json!({"name": name, "n": frames.len(), "t_ms": frames})); }
+                if let Some((name, frames)) = self.recording.take() { self.m("frames", json!({"name": name, "n": frames.len(), "frames_ms": frames})); }
                 self.pump(cx);
             }
             Step::Scroll(n) => {
