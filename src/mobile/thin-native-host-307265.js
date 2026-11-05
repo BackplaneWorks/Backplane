@@ -647,6 +647,7 @@ export class NativeThinHost307265 {
       s.session = copy(intent.session);
       s.drafts.set(s.session.sel, { revision: s.revision, text: value });
       this.enqueue(hub, { type: 'keep', thread: hub + '|' + s.session.sel, text: value });
+      this.draftRefresh(s, s.session.sel, value);
       return true;
     }
     if (intent.kind === 'find') {
@@ -785,7 +786,21 @@ export class NativeThinHost307265 {
     s.drafts.set(thread, { revision: s.revision, text });
     s.session.drafts = { ...s.session.drafts, [thread]: text };
     this.enqueue(hub, { type: 'keep', thread: hub + '|' + thread, text });
+    this.draftRefresh(s, thread, text);
     return true;
+  }
+
+  // The hub draws a thread's popup rows ($skills and the references @bot >thread %project #room) from the draft in
+  // the session of a view request. The web asks again after each key (host.js draftRefresh: 75-200 ms, a view.update);
+  // so does a phone, but only while the last word is a reference or skill being typed (or was, so the rows clear):
+  // plain typing sends nothing, as before. The request goes out at the deadline's pulse (expire).
+  draftRefresh(s, thread, text) {
+    if (!s || s.mode !== 'view-v1' || typeof text !== 'string' || thread !== s.session.sel) return;
+    const word = text.slice(text.search(/\S*$/));
+    const sigil = /^[@>%#$]/.test(word);
+    if (!sigil && !s.sigil) return;
+    s.sigil = sigil;
+    s.draftDue = { at: this.api.now() + 150, thread };
   }
 
   sendAt(hub, thread, action, text, currentDraft) {
@@ -1195,6 +1210,15 @@ export class NativeThinHost307265 {
       else if (s) this.pump(s);
     }
     if (followups) for (const s of this.states.values()) {
+      const d = s.draftDue;
+      if (d && d.at <= this.api.now()) {
+        const link = this.client.links.get(s.hub);
+        if (!s.greeted || d.thread !== s.session.sel) s.draftDue = null;
+        else if (s.ready && !s.active && !s.deferredNavigation && !s.queue.length && link?.viewId) { s.draftDue = null; if (link) link.readInvalidated = true; this.update(s); }
+        else d.at = this.api.now() + 150;
+      }
+    }
+    if (followups) for (const s of this.states.values()) {
       const f = s.followup, link = this.client.links.get(s.hub);
       if (!f || f.at === null || f.at > this.api.now()) continue;
       s.followup = null;
@@ -1207,6 +1231,7 @@ export class NativeThinHost307265 {
     const calls = [...this.client.calls.values()];
     const deadlines = calls.map(c => c.began + 5000);
     for (const s of this.states.values()) if (s.followup?.at != null) deadlines.push(s.followup.at);
+    for (const s of this.states.values()) if (s.draftDue) deadlines.push(s.draftDue.at);
     return deadlines.length ? Math.min(...deadlines) : null;
   }
 

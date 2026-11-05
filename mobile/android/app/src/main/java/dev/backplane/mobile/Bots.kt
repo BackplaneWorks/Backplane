@@ -3,6 +3,7 @@ package dev.backplane.mobile
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -436,6 +437,7 @@ private fun Field(value: String, label: String, onChange: (String) -> Unit, modi
         keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false))
 }
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun SettingsTab(m: AppModel, b: BotView, st: BotSettings) {
     val lang = LocalBackplaneLanguage.current
@@ -453,6 +455,19 @@ private fun SettingsTab(m: AppModel, b: BotView, st: BotSettings) {
         SectionLabel(NativeMessages.bots_persona(lang))
         OutlinedTextField(persona, { persona = it; m.field("persona", it) }, Modifier.fillMaxWidth(), minLines = 4, maxLines = 14)
         OutlinedButton(onClick = { m.act("bot-edit") }, enabled = persona != st.persona, shape = square) { Text(NativeMessages.common_save(lang)) }
+
+        // style.css .look-pick: each of the looks as an idle cat (40 px) in a 3 px frame, the current one outlined in the accent
+        if (st.looks > 0) {
+            SectionLabel(st.lookLabel)
+            androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                for (i in 0 until st.looks) {
+                    val on = i == st.look
+                    Box(Modifier.size(48.dp).then(if (on) Modifier.background(MaterialTheme.colorScheme.surfaceVariant) else Modifier)
+                        .border(1.dp, if (on) MaterialTheme.colorScheme.primary else Color.Transparent)
+                        .clickable { m.act("bot-look", i.toString()) }.padding(3.dp)) { BotCat(m, "$i:idle", 40.dp) }
+                }
+            }
+        }
 
         SectionLabel("Google")
         val ctx = androidx.compose.ui.platform.LocalContext.current
@@ -581,7 +596,10 @@ private fun TalkScreen(m: AppModel, b: BotView, field: String, send: String) {
             start = 16.dp, end = 16.dp, top = pad.calculateTopPadding() + 8.dp, bottom = pad.calculateBottomPadding() + 8.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             items(b.posts, key = { it.id }) { p ->
-                Column(Modifier.fillMaxWidth(), horizontalAlignment = if (p.mine) Alignment.End else Alignment.Start,
+              Row(Modifier.fillMaxWidth(), horizontalArrangement = if (p.mine) Arrangement.End else Arrangement.spacedBy(8.dp)) {
+                // style.css .post > .cat: a bot's post has its author's cat (28 px) beside it; a person's none
+                if (p.cat.isNotEmpty()) BotCat(m, p.cat, 28.dp)
+                Column(Modifier.weight(1f, fill = !p.mine), horizontalAlignment = if (p.mine) Alignment.End else Alignment.Start,
                     verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(p.from, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
@@ -592,6 +610,7 @@ private fun TalkScreen(m: AppModel, b: BotView, field: String, send: String) {
                         Text(p.text, Modifier.padding(horizontal = 12.dp, vertical = 8.dp), style = MaterialTheme.typography.bodyLarge)
                     }
                 }
+              }
             }
         }
     }

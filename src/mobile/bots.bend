@@ -267,8 +267,11 @@ def MBots.google(+u: U.Ui) -> J.Json:
 # the persona (and the field that changes it, "bfield" persona then
 # "bot-edit"), Google, and the linked machines ("peer-invite" with purl,
 # "peer-join" with invite, "peer-revoke" id)
-def MBots.settings(+u: U.Ui, +persona: String) -> J.Json:
+# "look" is the bot's current look and "looks" how many there are: the apps draw the picker from them, each cat as
+# Backplane.cat("<i>:idle"), and a tap is the action "bot-look" with the index (the web's look-pick)
+def MBots.settings(+lc: I.Loc, +u: U.Ui, +persona: String, +look: Nat) -> J.Json:
   J.Json.obj([J.KV{"persona", J.Json.str(persona)}, J.KV{"personaField", J.Json.str(B.BU.field(u, "persona"))},
+    J.KV{"look", J.Json.nat(CT.Cat.look.index(look))}, J.KV{"looks", J.Json.nat(CT.Cat.looks())}, J.KV{"lookLabel", J.Json.str(MSG.T.bots.look(lc))},
     J.KV{"google", MBots.google(u)}, J.KV{"peers", J.Json.arr(MBots.peers(B.BU.peers(u)))},
     J.KV{"invite", J.Json.str(U.Ui.scratch(u, "@peer.invite"))}, MBots.str(u, "purl"), J.KV{"join", J.Json.str(B.BU.field(u, "invite"))}])
 
@@ -427,7 +430,7 @@ def MBots.tab.k(+lc: I.Loc, i: Nat, +u: U.Ui, b: BT.Bot, +id: String, +persona: 
        J.KV{"secretFor", J.Json.str(U.Ui.scratch(u, "@hook.id"))}, J.KV{"token", J.Json.str(U.Ui.scratch(u, "@hook.token"))},
        J.KV{"tokenFor", J.Json.str(U.Ui.scratch(u, "@hook.tokfor"))}, J.KV{"tokenUrl", J.Json.str(U.Ui.scratch(u, "@hook.tokurl"))}, MBots.str(u, "hname")]
     case 7n:
-      [J.KV{"settings", MBots.settings(u, persona)}]
+      [J.KV{"settings", MBots.settings(lc, u, persona, BT.Bot.look(b))}]
     case _:
       Nil{}
 
@@ -461,10 +464,20 @@ def MBots.bot(+lc: I.Loc, +u: U.Ui, b: BT.Bot) -> J.Json:
 # Rooms and bots elsewhere
 # ------------------------
 
+# a post's author's cat, as the web's room posts draw it (bots.bend WB.post.bot: the bot's look in its mood now); "" for
+# a person, or an author no bot of this hub is
+def MBots.post.cat(m: Maybe<&2, BT.Bot>, +u: U.Ui, +now: Nat) -> J.Json:
+  match m:
+    case Some{+b}:
+      MBots.cat(BT.Bot.look(b), B.Mood.bot(U.Ui.state(u), now, b))
+    case None{}:
+      J.Json.str("")
+
 def MBots.post.loc(+lc: I.Loc, p: BT.Post, +u: U.Ui, +now: Nat) -> J.Json:
   match p:
     case BT.Post{i, _, +f, text, _, +at}:
       J.Json.obj([J.KV{"id", J.Json.str(i)}, J.KV{"from", J.Json.str(B.BU.member(u, f))}, J.KV{"text", J.Json.str(text)},
+        J.KV{"cat", MBots.post.cat(BT.World.find.id(BT.World.bot(M.State.bots(U.Ui.state(u)), f)), u, now)},
         J.KV{"ago", J.Json.str(I.I18n.ago(lc, now, at))}, J.KV{"mine", J.Json.bool(String.eq(f, "you"))}])
 
 def MBots.post(p: BT.Post, +u: U.Ui, +now: Nat) -> J.Json:
