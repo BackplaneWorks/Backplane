@@ -17,6 +17,7 @@ pub struct Pty {
     master: Arc<File>,
     input: SyncSender<Vec<u8>>,
     gone: Arc<std::sync::atomic::AtomicBool>,
+    closed: Arc<std::sync::atomic::AtomicBool>,
 }
 pub struct Spawned { pub pty: Pty, pub output: mpsc::Receiver<Vec<u8>>, pub exit: oneshot::Receiver<i32> }
 
@@ -26,14 +27,16 @@ impl Pty {
     /// Run `cmd args` in `cwd` ("" keeps ours) on a new pty. Errors are the exec failure's (ENOENT for an unknown command).
     pub fn spawn(cmd: &str, args: &[String], cwd: &str, cols: u16, rows: u16) -> std::io::Result<Spawned> {
         let (master, slave) = unsafe {
-            let m = libc::posix_openpt(libc::O_RDWR | libc::O_NOCTTY | libc::O_CLOEXEC);
+            let m = libc::posix_openpt(libc::O_RDWR | libc::O_NOCTTY); // (Darwin takes only these two flags)
+            if m >= 0 { libc::fcntl(m, libc::F_SETFD, libc::FD_CLOEXEC); }
             if m < 0 { return Err(std::io::Error::last_os_error()) }
             let m = OwnedFd::from_raw_fd(m);
             if libc::grantpt(m.as_raw_fd()) != 0 || libc::unlockpt(m.as_raw_fd()) != 0 { return Err(std::io::Error::last_os_error()) }
             let mut name = [0 as libc::c_char; 128];
             if libc::ptsname_r(m.as_raw_fd(), name.as_mut_ptr(), name.len()) != 0 { return Err(std::io::Error::last_os_error()) }
-            let s = libc::open(name.as_ptr(), libc::O_RDWR | libc::O_NOCTTY | libc::O_CLOEXEC);
+            let s = libc::open(name.as_ptr(), libc::O_RDWR | libc::O_NOCTTY);
             if s < 0 { return Err(std::io::Error::last_os_error()) }
+            libc::fcntl(s, libc::F_SETFD, libc::FD_CLOEXEC);
             let ws = winsize(cols, rows);
             libc::ioctl(m.as_raw_fd(), libc::TIOCSWINSZ, &ws);
             (File::from(m), File::from_raw_fd(s))
@@ -55,9 +58,14 @@ impl Pty {
         // reader: blocking read, bounded queue; EIO is the pty's hang-up
         let (otx, orx) = mpsc::channel::<Vec<u8>>(OUT_QUEUE);
         let mut rd = master.try_clone()?;
+        let closed = Arc::new(std::sync::atomic::AtomicBool::new(false)); let c2 = closed.clone();
         std::thread::Builder::new().name("pty-read".into()).spawn(move || {
             let mut buf = vec![0u8; CHUNK];
-            loop { match rd.read(&mut buf) { Ok(0) | Err(_) => break, Ok(n) => if otx.blocking_send(buf[..n].to_vec()).is_err() { break } } }
+            loop {
+                // wake every 200 ms to see whether the Pty was dropped: the thread (and its dup of the master) must not outlive it
+                let mut pfd = libc::pollfd { fd: rd.as_raw_fd(), events: libc::POLLIN, revents: 0 };
+                if unsafe { libc::poll(&mut pfd, 1, 200) } == 0 { if c2.load(std::sync::atomic::Ordering::SeqCst) { break } continue }
+                match rd.read(&mut buf) { Ok(0) | Err(_) => break, Ok(n) => if otx.blocking_send(buf[..n].to_vec()).is_err() { break } } }
         })?;
         // writer: bounded queue of writes
         let (itx, irx) = sync_channel::<Vec<u8>>(IN_QUEUE);
@@ -71,7 +79,7 @@ impl Pty {
             g2.store(true, std::sync::atomic::Ordering::SeqCst);
             let _ = etx.send(code);
         })?;
-        Ok(Spawned { pty: Pty { pid, master, input: itx, gone }, output: orx, exit: erx })
+        Ok(Spawned { pty: Pty { pid, master, input: itx, gone, closed }, output: orx, exit: erx })
     }
     /// Keys, a paste. False when the queue is full (the program is not reading) or the pty is gone: the bytes are dropped.
     pub fn write(&self, bytes: Vec<u8>) -> bool { match self.input.try_send(bytes) { Ok(()) => true, Err(TrySendError::Full(_)) | Err(TrySendError::Disconnected(_)) => false } }
@@ -79,4 +87,9 @@ impl Pty {
     /// A hang-up for the whole process group (the leader's pid negated): the command the shell runs goes too.
     pub fn hangup(&self) { if self.pid > 1 && !self.gone.load(std::sync::atomic::Ordering::SeqCst) { unsafe { libc::kill(-self.pid, libc::SIGHUP); } } }
 }
-impl Drop for Pty { fn drop(&mut self) { self.hangup() } }
+impl Pty {
+    /// SIGKILL for a program that ignored the hang-up.
+    pub fn force(&self) { if self.pid > 1 && !self.gone.load(std::sync::atomic::Ordering::SeqCst) { unsafe { libc::kill(-self.pid, libc::SIGKILL); } } }
+}
+/// Dropping hangs up, stops the reader (which closes its dup of the master) and the writer (its queue closes).
+impl Drop for Pty { fn drop(&mut self) { self.hangup(); self.closed.store(true, std::sync::atomic::Ordering::SeqCst) } }

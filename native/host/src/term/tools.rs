@@ -51,7 +51,7 @@ async fn read(t: &Arc<Terms>, thread: &str, a: &Value) -> (bool, Value) {
     }
 }
 
-async fn exists(t: &Arc<Terms>, hub: &Arc<Hub>, thread: &str, id: &str) -> bool { t.read_known(&emb::key(thread, id)).await || find_act(hub, thread, id).is_some() }
+async fn exists(t: &Arc<Terms>, hub: &Arc<Hub>, thread: &str, id: &str) -> bool { t.read_known(&emb::key(thread, id)).await || find_act(hub, thread, id).await.is_some() }
 
 async fn send(t: &Arc<Terms>, hub: &Arc<Hub>, thread: &str, a: &Value) -> (bool, Value) {
     let id = sv(a, "id");

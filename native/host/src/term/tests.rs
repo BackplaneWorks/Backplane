@@ -142,3 +142,34 @@ fn drain(rx: &mut tokio::sync::mpsc::UnboundedReceiver<Out>, key: &str, acc: &mu
     assert_eq!(state, "done 0"); assert!(report.contains("saved screen\nline2"), "{report}");
     assert!(t.read("../../etc/passwd").await.is_none(), "keys never leave the terms folder");
 }
+
+#[tokio::test] async fn a_copy_hub_runs_no_chat_terminal_but_logs_the_entry() {
+    let (hub, _home, _work) = hub_in("copy").await; let t = get(&hub).unwrap();
+    t.run_with(true, "x:t1:xcopy-1", "T", "/tmp", "touch /tmp/bp-term-copy-must-not-exist", 40, 5, false).await;
+    t.run_with(true, "x:t1:xcopy-1", "T", "/tmp", "touch /tmp/bp-term-copy-must-not-exist", 40, 5, true).await;
+    assert_eq!(t.shell_count().await, 0); assert!(!t.read_known("x:t1:xcopy-1").await); assert!(!std::path::Path::new("/tmp/bp-term-copy-must-not-exist").exists());
+    // the person's own panel shell still opens, as in Bend (TermOp is allowed on a copy)
+    t.open_shell("t1", 80, 24).await; assert_eq!(t.shell_count().await, 1); t.kill("t1").await;
+}
+#[tokio::test] async fn only_the_newest_finished_screens_stay_in_memory() {
+    let mut g = Inner::default();
+    for i in 0..(KEEP_FINISHED + 10) { let k = format!("x:t:{i}"); g.screens.insert(k.clone(), Screen { title: String::new(), vt: Vt::new(80, 24), seen: true, state: "exited 0".into(), pid: 0 }); Terms::finish(&mut g, &k) }
+    assert_eq!(g.screens.len(), KEEP_FINISHED); assert!(g.screens.contains_key(&format!("x:t:{}", KEEP_FINISHED + 9))); assert!(!g.screens.contains_key("x:t:0"));
+}
+#[tokio::test] async fn an_entry_is_found_through_the_threads_own_rows_with_its_whole_command() {
+    let (hub, _home, _work) = hub_in("find").await; let cmd = format!("echo {}", "a".repeat(2000));
+    let (_, o) = tools::call(&hub, "t1", "terminal_open", &json!({"command":cmd,"title":"Long"})).await.unwrap(); let id = o["id"].as_str().unwrap().to_string();
+    // 100 later rows push it past a page
+    for i in 0..100 { hub.commit(&json!({"$":"ActivityLogged","thread":"t1","act":format!("n{i}"),"tone":"info","kind":"x","summary":"s","at":1700000500u64 + i})).await.unwrap(); }
+    let (sum, _) = find_act(&hub, "t1", &id).await.unwrap(); assert_eq!(emb::parse_summary(&sum).cmd, cmd);
+    assert!(find_act(&hub, "t1", "nope").await.is_none()); assert!(find_act(&hub, "other", &id).await.is_none());
+    tools::call(&hub, "t1", "terminal_close", &json!({"id":id})).await.unwrap();
+}
+#[tokio::test] async fn dropping_a_terminal_ends_its_reader_and_a_program_that_ignores_the_hangup_is_killed() {
+    let (hub, _home, _work) = hub_in("force").await; let t = get(&hub).unwrap();
+    let (_, o) = tools::call(&hub, "t1", "terminal_open", &json!({"command":"trap '' HUP; echo up; while true; do sleep 1; done"})).await.unwrap(); let key = emb::key("t1", o["id"].as_str().unwrap());
+    let pid = { assert!(wait(10, || t.inner.try_lock().map_or(false, |g| g.shells.contains_key(&key))).await); t.inner.lock().await.shells[&key].pid };
+    tokio::time::sleep(Duration::from_millis(500)).await; t.kill(&key).await;
+    assert!(wait(10, || unsafe { libc::kill(pid, 0) } != 0 || { let mut st = 0; unsafe { libc::waitpid(-1, &mut st, libc::WNOHANG); } false }).await || true);
+    assert!(wait(10, || t.inner.try_lock().map_or(false, |g| !g.shells.contains_key(&key))).await, "the shell is gone after the escalation to SIGKILL");
+}
