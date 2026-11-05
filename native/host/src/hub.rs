@@ -1,7 +1,7 @@
 //! The hub core for native clients: connection identity, view requests, reply assembly,
 //! segmentation, change notices. State is what the event log folds to; the picture comes from
 //! the presenter. (window/overlay for phones arrive with M2's windowed history.)
-use crate::{auth::Auth, presenter::Presenter, store::Store};
+use crate::{auth::Auth, model::Model, presenter::Presenter, store::Store};
 use anyhow::Result;
 use serde_json::{json, Map, Value};
 use std::path::PathBuf;
@@ -16,7 +16,7 @@ pub struct Cfg { pub home: PathBuf, pub version: String, pub commit: String, pub
 
 pub struct Hub {
     pub cfg: Cfg, pub auth: Auth, pub epoch: String, pub presenter: Arc<dyn Presenter>,
-    pub store: Mutex<Store>, gen: AtomicU64, pub changed: broadcast::Sender<u64>,
+    pub store: Mutex<Store>, pub model: Mutex<Model>, gen: AtomicU64, pub changed: broadcast::Sender<u64>,
 }
 
 /// One WebSocket connection's identity and its single open view.
@@ -42,7 +42,8 @@ impl Hub {
         let auth = Auth::load(&cfg.home);
         let epoch = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs().to_string();
         let (tx, _) = broadcast::channel(64);
-        let hub = Arc::new(Hub { cfg, auth, epoch, presenter, store: Mutex::new(store), gen: AtomicU64::new(1), changed: tx });
+        let model = Model::build(&store)?;
+        let hub = Arc::new(Hub { cfg, auth, epoch, presenter, store: Mutex::new(store), model: Mutex::new(model), gen: AtomicU64::new(1), changed: tx });
         hub.fold_log().await?;
         Ok(hub)
     }
@@ -75,7 +76,7 @@ impl Hub {
     /// Commit one event: durable, then folded, then announced. Callers acknowledge after this returns.
     pub async fn commit(&self, event: &Value) -> Result<u64> {
         let line = serde_json::to_string(event)?;
-        let n = { let mut s = self.store.lock().await; s.append(&line)?; s.len() as u64 };
+        let n = { let mut s = self.store.lock().await; s.append(&line)?; let n = s.len(); self.model.lock().await.apply_line(n as u32, &line); n as u64 };
         self.presenter.fold(&json!({"t":"changes","items":[event],"now":now_ms()})).await?;
         let _ = self.changed.send(n);
         Ok(n)
@@ -98,6 +99,7 @@ impl Hub {
         let id = msg.get("id").cloned().unwrap_or(Value::Null);
         let m = msg.get("m").and_then(Value::as_str).unwrap_or("");
         if m == "ping" { return vec![] }
+        if m == "turn.start" { return self.turn_start(&id, msg.get("p").unwrap_or(&Value::Null)).await }
         if !m.starts_with("view.") {
             return vec![json!({"t":"reply","id":id,"ok":false,"error":"unknown method"})];
         }
@@ -142,6 +144,19 @@ impl Hub {
         picture.insert("controlId".into(), id.clone());
         out.push(json!({"t":"reply","id":id,"ok":true,"result":picture}));
         out
+    }
+
+    /// turn.start: the person's message is committed (durable) and queued, then acknowledged. The
+    /// events are the JS hub's first two for it (MessagePosted, TurnQueued); the agent turn is M5.
+    async fn turn_start(&self, id: &Value, p: &Value) -> Vec<Value> {
+        let (thread, text) = (p.get("thread").and_then(Value::as_str).unwrap_or(""), p.get("text").and_then(Value::as_str).unwrap_or(""));
+        if thread.is_empty() || !self.model.lock().await.threads.contains_key(thread) { return vec![json!({"t":"reply","id":id,"ok":false,"error":"unknown thread"})] }
+        let at = now_ms() / 1000;
+        let msg = p.get("msg").and_then(Value::as_str).filter(|m| !m.is_empty()).map(str::to_string).unwrap_or_else(|| format!("m{at}-{}", id.as_u64().unwrap_or(0)));
+        for ev in [json!({"$":"MessagePosted","thread":thread,"msg":msg,"role":"user","text":text,"at":at}), json!({"$":"TurnQueued","thread":thread,"msg":msg,"text":text,"at":at})] {
+            if self.commit(&ev).await.is_err() { return vec![json!({"t":"reply","id":id,"ok":false,"error":"store write failed"})] }
+        }
+        vec![json!({"t":"reply","id":id,"ok":true})]
     }
 
     /// Hub.thin.result: identity fields in front, in the order the JS hub gives them.
@@ -214,5 +229,22 @@ mod tests {
         let dir = home("commit"); let h = Hub::start(cfg(&dir), Arc::new(Canned { reply: json!({}) })).await.unwrap();
         let r0 = h.revision().await; h.commit(&json!({"$":"SettingSet","key":"k","value":"v","at":1})).await.unwrap();
         assert_eq!(h.revision().await, r0 + 1); assert_eq!(Store::open(&dir.join("events.jsonl")).unwrap().len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod write_tests {
+    use super::*; use crate::presenter::Canned;
+    #[tokio::test] async fn turn_start_commits_a_message_and_acks_after_it_is_durable() {
+        let dir = std::env::temp_dir().join(format!("bp-hub-ts-{}", std::process::id())); let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("events.jsonl"), "{\"$\":\"ProjectCreated\",\"id\":\"p1\",\"title\":\"p\",\"root\":\"/x\",\"at\":1}\n{\"$\":\"ThreadCreated\",\"id\":\"t1\",\"project\":\"p1\",\"title\":\"T\",\"env\":\"local\",\"branch\":\"\",\"worktree\":\"\",\"provider\":\"claude\",\"model\":\"\",\"at\":1}\n").unwrap();
+        let cfg = Cfg { home: dir.clone(), version: "0.14.0".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() };
+        let h = Hub::start(cfg, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        let (mut c, _) = h.connect(true);
+        let out = h.request(&mut c, &json!({"id":9,"m":"turn.start","p":{"thread":"t1","text":"hello","msg":"m1"}})).await;
+        assert_eq!(out[0]["ok"], true);
+        let disk = Store::open(&dir.join("events.jsonl")).unwrap(); assert_eq!(disk.len(), 4); assert!(disk.get(2).unwrap().contains("\"MessagePosted\""));
+        assert_eq!(h.model.lock().await.entries(), 1);
+        let bad = h.request(&mut c, &json!({"id":10,"m":"turn.start","p":{"thread":"nope","text":"x"}})).await; assert_eq!(bad[0]["ok"], false);
     }
 }
