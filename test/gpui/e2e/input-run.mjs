@@ -22,10 +22,18 @@ try{
   if(main){const r=main[1];await run('drag-select',()=>inp.dragSelect(win,[r.x+40,r.y+60],[r.x+Math.min(r.w-40,500),r.y+110]));await run('ctrl-c',()=>inp.copy())}
   else summary.blocked['drag-select/ctrl-c']='no main region in the layout event';
   execFileSync('convert',['-size','240x160','gradient:red-blue',out+'/paste.png'],{env:dsp.env});
-  if(comp){await run('paste-image',()=>inp.pasteImage(out+'/paste.png',win,comp));
-    await run('drop-file',()=>inp.dropFile(win,resolve(out+'/paste.png'),comp));
-    await run('ime-hangul',()=>inp.ime(dsp.display,comp,win))}
-  else summary.blocked['paste/drop/ime']='no composer region in the layout event';
+  // Evidence comes from the hub's own log (the message the client actually sent), not from pixels: pixels also change when a thread streams.
+  const evPath=fx.state.root+'/home/events.jsonl';const sentSince=(t0)=>{try{return readFileSync(evPath,'utf8').split('\n').filter(l=>l.includes('"MessagePosted"')&&l.includes('"role":"user"')).map(l=>JSON.parse(l)).filter(e=>e.at>=t0&&!/zqshort/.test(e.text||''))}catch{return []}};
+  const sendAndRead=async(t0)=>{inp.xi.key('Return');await sleep(1500);const m=sentSince(t0);return m.at(-1)||null};
+  const clearComposer=async()=>{inp.xi.click(win.x+comp[0],win.y+comp[1]);inp.xi.key('ctrl+a');inp.xi.key('BackSpace');await sleep(200)};
+  if(comp){
+    await run('paste-image',async()=>{await clearComposer();const t0=Math.floor(Date.now()/1000);inp.xi.type('see pic');const r=await inp.pasteImage(out+'/paste.png',win,comp);const m=await sendAndRead(t0);const blob=JSON.stringify(m||{});
+      return {ok:!!m&&/png|image|pasted/i.test(blob)&&/see pic/.test(m.text||''),evidence:{...r.evidence,hubMessage:m?{keys:Object.keys(m),text:m.text}:null,mentionsImage:/png|image|pasted/i.test(blob)}}});
+    await run('drop-file',async()=>{await clearComposer();const t0=Math.floor(Date.now()/1000);inp.xi.type('see drop');const r=inp.dropFile(win,resolve(out+'/paste.png'),comp);await sleep(800);const m=await sendAndRead(t0);const blob=JSON.stringify(m||{});
+      return {ok:r.ok&&!!m&&/paste\.png|png|image/i.test(blob),evidence:{...r.evidence,hubMessage:m?{keys:Object.keys(m),text:m.text}:null,mentionsFile:/paste\.png/i.test(blob)}}});
+    await run('ime-hangul',async()=>{await clearComposer();const t0=Math.floor(Date.now()/1000);const r=await inp.ime(dsp.display,comp,win);const m=await sendAndRead(t0);
+      return {ok:!!m&&/한/.test(m.text||''),evidence:{...r.evidence,hubMessageText:m?.text??null,expected:'한 (composed); raw keys would arrive as "gks"'}}});
+  } else summary.blocked['paste/drop/ime']='no composer region in the layout event';
   // the paperclip and links need their rectangles: the controls event has none yet (request G6)
   const ctl=[...metrics].reverse().find(m=>m.event==='controls');const attach=ctl?.controls?.find(c=>/attach/i.test(c.label+c.id));
   summary.blocked['paperclip']=attach&&attach.rect?null:'controls event has no rect (G6): cannot aim a click at the paperclip';
