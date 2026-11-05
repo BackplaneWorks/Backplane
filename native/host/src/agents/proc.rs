@@ -94,7 +94,7 @@ pub fn spawn(program: &Path, args: &[String], cwd: &Path, extra_path: Option<&Pa
     if let Some(d) = extra_path { let old = std::env::var_os("PATH").unwrap_or_default(); let mut v = vec![d.to_path_buf()]; v.extend(std::env::split_paths(&old)); if let Ok(j) = std::env::join_paths(v) { c.env("PATH", j); } }
     for (k, v) in env { c.env(k, v); }
     if let Some(o) = OWNER.get() { c.env("BACKPLANE_AGENT_OWNER", o); }
-    // Linux: the kernel kills the agent when the hub dies (PDEATHSIG). macOS has no such call: the next hub on the home reaps what is left (reap_orphans).
+    // Linux: the kernel kills the agent when the hub dies (PDEATHSIG). macOS has no such call, and reap_orphans does nothing off Linux yet, so nothing ends a killed hub's agent there.
     unsafe { c.pre_exec(|| { libc::setsid(); #[cfg(target_os = "linux")] libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL); Ok(()) }); }
     let mut child = c.spawn()?;
     let pid = child.id().unwrap_or(0);
