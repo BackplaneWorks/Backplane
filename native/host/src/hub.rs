@@ -59,12 +59,14 @@ impl Hub {
 
     /// The whole log, as the frames a client's join receives, into the presenter.
     async fn fold_log(&self) -> Result<()> {
-        let items: Vec<Value> = { let s = self.store.lock().await; s.lines().iter().filter_map(|l| serde_json::from_str(l).ok()).collect() };
-        let mut chunks = items.chunks(200);
-        let first: Vec<Value> = chunks.next().map(|c| c.to_vec()).unwrap_or_default();
+        if !self.presenter.wants_log() { return Ok(()) }
+        let total = self.store.lock().await.len().min(std::env::var("BACKPLANE_FOLD_LIMIT").ok().and_then(|v| v.parse().ok()).unwrap_or(usize::MAX)); // dev: fold only the first N events
+        let chunk = |a: usize| async move { let s = self.store.lock().await; s.range(a, a + 200).map(|ls| ls.iter().filter_map(|l| serde_json::from_str::<Value>(l).ok()).collect::<Vec<Value>>()) };
+        let first: Vec<Value> = chunk(0).await?;
         // version "": the JS hub's mobile pictures carry no hub version (compare.mjs, shown.version)
         self.presenter.fold(&json!({"t":"log","since":0,"origin":self.epoch,"version":"","info":self.info(),"items":first,"now":now_ms()})).await?;
-        for c in chunks { self.presenter.fold(&json!({"t":"changes","items":c,"now":now_ms()})).await?; }
+        let mut at = 200;
+        while at < total { let c = chunk(at).await?; self.presenter.fold(&json!({"t":"changes","items":c,"now":now_ms()})).await?; at += 200; }
         self.presenter.fold(&json!({"t":"live","items":[],"now":now_ms()})).await?;
         self.presenter.fold(&json!({"t":"info","info":{"pair":"","pair.qr":""},"now":now_ms()})).await?;
         Ok(())

@@ -18,6 +18,8 @@ pub trait Presenter: Send + Sync {
     /// view.open / view.update / view.action parameters -> {remoteReady, shown|nextTarget, session, cmds}
     fn view<'a>(&'a self, params: &'a Value) -> Fut<'a, Value>;
     fn ping(&self) -> Fut<'_, ()>;
+    /// Whether the presenter wants the hub's log folded into it at start.
+    fn wants_log(&self) -> bool { true }
 }
 
 /// JSON text made pure ASCII: non-ASCII becomes \uXXXX (UTF-16 pairs), as the policy requires.
@@ -80,6 +82,7 @@ impl Presenter for BpPolicy {
 pub struct Canned { pub reply: Value }
 impl Presenter for Canned {
     fn name(&self) -> &'static str { "canned" }
+    fn wants_log(&self) -> bool { false }
     fn fold<'a>(&'a self, _f: &'a Value) -> Fut<'a, ()> { Box::pin(async { Ok(()) }) }
     fn view<'a>(&'a self, _p: &'a Value) -> Fut<'a, Value> { let r = self.reply.clone(); Box::pin(async move { Ok(r) }) }
     fn ping(&self) -> Fut<'_, ()> { Box::pin(async { Ok(()) }) }
