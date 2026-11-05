@@ -58,7 +58,7 @@ try{
   const sendAndRead=async(t0)=>{inp.xi.key('Return');await sleep(1500);const m=sentSince(t0);return m.at(-1)||null};
   // what the hub itself shows for the thread after the send (the same picture every client gets): does it carry the attachment?
   const hubShows=async(threadId)=>{try{const v=await viewClient(fx.hub,{mobile:true,delta:false,tag:'e2e-judge'});await v.open();v.target={kind:'thread',id:threadId};v.viewId='';const r=await v.req('view.open',{},20000);v.close();
-      const t=JSON.stringify(r?.x?.result?.shown?.thread||{});return {bytes:t.length,mentionsImage:/png|pasted|image|attachment|<img/i.test(t),sample:(t.match(/.{0,50}(pasted|\.png|image).{0,50}/i)||[''])[0]}}catch(e){return {error:String(e.message).slice(0,120)}}};
+      const t=JSON.stringify(r?.x?.result?.shown?.thread||{});return {bytes:t.length,mentionsImage:/"images":\[\{|pasted-\d+\.png|paste\.png/i.test(t),imagesKeyEmpty:/"images":\[\]/.test(t),sample:(t.match(/.{0,50}(pasted|\.png|image).{0,50}/i)||[''])[0]}}catch(e){return {error:String(e.message).slice(0,120)}}};
   const clearComposer=async()=>{inp.xi.click(win.x+comp[0],win.y+comp[1]);inp.xi.key('ctrl+a');inp.xi.key('BackSpace');await sleep(200)};
   if(comp){
     await run('paste-image',async()=>{await clearComposer();const t0=Math.floor(Date.now()/1000);inp.xi.type('see pic');const r=await inp.pasteImage(out+'/paste.png',win,comp);await sleep(6000);inp.s('before-send-paste');const m=await sendAndRead(t0);const blob=JSON.stringify(m||{});
