@@ -62,12 +62,18 @@ impl RpcHandler for Commands {
             // the conversation is read before the fold is taken: a long thread must not hold up every command
             let cx = if plan::needs_entries(method) { entries_of(hub, &p["thread"].as_str().unwrap_or("").to_string()).await } else { Ctx::default() };
             let mut f = self.fold.lock().await;
+            // thread.create with a creation key and a base (an Improvements send): the base must be a local branch of the project's repository, else the request is refused and no thread is made
+            if method == "thread.create" && p["creationKey"].as_str().map_or(false, |k| !k.is_empty()) { if let Some(base) = p["base"].as_str().filter(|b| !b.is_empty()) {
+                let _ = f.sync(&hub.store);
+                let root = f.projects.get(p["project"].as_str().unwrap_or("")).filter(|x| !x.removed).map(|x| x.root.clone()).unwrap_or_default();
+                if let Err(why) = check_base(&root, base).await { return vec![json!({"t":"reply","id":id,"ok":false,"error":why})] }
+            } }
             if let Err(e) = f.sync(&hub.store) { return vec![json!({"t":"reply","id":id,"ok":false,"error":format!("{e:#}")})] }
             f.alloc = Some(hub.alloc_n(4) as usize); // p<at>-<n>, t<at>-<n+1>, g<at>-<n+3>: a number no other request shares
             if let Some(root) = create_in {
                 let pl = plan::project_create(&f, now_s(), id, p, &root);
                 if !pl.events.is_empty() && hub.commit_many(&pl.events).await.is_err() { return vec![json!({"t":"reply","id":id,"ok":false,"error":"store write failed"})] }
-                if let Some((th, r, mode, src)) = pl.wt { let (pv, bd) = capture(&f, &th, &pl.events); worktree::spawn(hub.clone(), self.fold.clone(), th, r, mode, src, pv, bd) }
+                if let Some((th, r, mode, src, op)) = pl.wt { let (pv, bd) = capture(&f, &th, &pl.events); worktree::spawn(hub.clone(), self.fold.clone(), th, r, mode, src, pv, bd, op) }
                 return vec![pl.reply];
             }
             let Some(mut pl) = plan(&f, now_s(), id, method, p, &cx) else { return vec![json!({"t":"reply","id":id,"ok":false,"error":"unknown method"})] };
@@ -84,13 +90,13 @@ impl RpcHandler for Commands {
             }
             if !pl.events.is_empty() && hub.commit_many(&pl.events).await.is_err() { return vec![json!({"t":"reply","id":id,"ok":false,"error":"store write failed"})] }
             // BotFx gone (thread.delete): the thread's browser page closes (the term lane's `browser.close`; no events)
-            let wtc = pl.wt.clone().map(|(th, root, mode, src)| { let (pv, bd) = capture(&f, &th, &pl.events); (th, root, mode, src, pv, bd) });
+            let wtc = pl.wt.clone().map(|(th, root, mode, src, op)| { let (pv, bd) = capture(&f, &th, &pl.events); (th, root, mode, src, pv, bd, op) });
             drop(f); // what follows may wait on an agent or a helper: the next command must not wait with it
             // BotFx gone (thread.delete): the page closes after the reply, in a task (a slow helper must not hold anything)
             if method == "thread.delete" { if let Some(h) = hub.rpc_for("browser.close") { let (hub, th) = (hub.clone(), p["thread"].as_str().unwrap_or("").to_string()); tokio::spawn(async move { let _ = h.call(&hub, &Caller { gen: String::new(), client: 0 }, &json!(0), "browser.close", &json!({"thread": th})).await; }); } }
             // BotFx scratch (an out, so after the changes): the folder exists before the reply, and before anything runs in it
             if let Some(th) = pl.scratch.clone() { scratch_folder(hub, &th); }
-            if let Some((th, root, mode, src, pv, bd)) = wtc { worktree::spawn(hub.clone(), self.fold.clone(), th, root, mode, src, pv, bd) }
+            if let Some((th, root, mode, src, pv, bd, op)) = wtc { worktree::spawn(hub.clone(), self.fold.clone(), th, root, mode, src, pv, bd, op) }
             // Home.start: the first message is a turn.start of the new thread (the agents module posts it, queued while the worktree is made); its failure is the reply's
             if let Some(("post", th, text)) = pl.act.clone() {
                 let msg = th.strip_prefix("home-").unwrap_or("").to_string();
@@ -139,4 +145,13 @@ fn capture(f: &fold::Fold, th: &str, events: &[Value]) -> (String, String) {
     let key = format!("account.thread.{th}.{provider}");
     let binding = events.iter().find(|e| e["key"] == key.as_str()).and_then(|e| e["value"].as_str()).unwrap_or_else(|| f.setting(&key)).to_string();
     (provider, binding)
+}
+
+/// A base is a plain local branch name that exists in the project's repository (never origin's default, never "").
+async fn check_base(root: &str, base: &str) -> Result<(), String> {
+    let plain = !base.starts_with('-') && !base.contains("..") && !base.ends_with('/') && !base.ends_with(".lock") && base.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '/' | '-'));
+    if !plain { return Err(format!("base \"{base}\" is not a local branch name")) }
+    if root.is_empty() { return Err("Choose an existing project and retry this request.".into()) }
+    let r = crate::files::git::run(root, &["rev-parse", "--verify", "-q", &format!("refs/heads/{base}^{{commit}}")]).await;
+    if r.code == 0 { Ok(()) } else { Err(format!("base branch \"{base}\" does not exist in this project")) }
 }
