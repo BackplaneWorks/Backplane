@@ -55,10 +55,12 @@ pub fn driver(provider: &str) -> Option<Made> { if provider == "muse" { Some(Mad
 
 // ---- model/list (Muse.probe.sh, Muse.catalog, Models.muse, About.muse): what the Settings job reads ----
 pub fn probe_sh() -> String {
-    "tmo() { t=$1; shift; if command -v timeout >/dev/null 2>&1; then timeout -k 1 \"$t\" \"$@\"; else gtimeout -k 1 \"$t\" \"$@\"; fi; }; command -v muse >/dev/null && printf '%s\\n' \
-'{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"clientInfo\":{\"name\":\"backplane\",\"version\":\"1\"}}}' \
-'{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}' \
-'{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"model/list\",\"params\":{}}' | tmo 15 muse serve --no-session-log 2>/dev/null".into()
+    // Port.tmo: timeout, else gtimeout, else a perl one (a Mac without coreutils)
+    const PERL: &str = r#"use POSIX qw(setpgid); my $t=shift; my $p=fork; defined($p) or exit 125; if (!$p) { setpgid(0,0)==0 or exit 125; exec {$ARGV[0]} @ARGV; exit 127; } setpgid($p,$p); my $stop=sub { my ($sig,$code)=@_; kill $sig,-$p; sleep 1; kill "KILL",-$p; waitpid($p,0); exit $code; }; $SIG{ALRM}=sub { $stop->("TERM",124); }; $SIG{HUP}=sub { $stop->("HUP",129); }; $SIG{INT}=sub { $stop->("INT",130); }; $SIG{QUIT}=sub { $stop->("QUIT",131); }; $SIG{TERM}=sub { $stop->("TERM",143); }; alarm $t; my $r; do { $r=waitpid($p,0); } while ($r<0 && $!{EINTR}); my $s=$?; alarm 0; exit($r<0 ? 125 : ($s & 127) ? 128+($s & 127) : $s >> 8);"#;
+    format!("tmo() {{ t=$1; shift; if command -v timeout >/dev/null 2>&1; then timeout -k 1 \"$t\" \"$@\"; elif command -v gtimeout >/dev/null 2>&1; then gtimeout -k 1 \"$t\" \"$@\"; else perl -e '{PERL}' \"$t\" \"$@\"; fi; }}; command -v muse >/dev/null && printf '%s\\n' \
+'{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"clientInfo\":{{\"name\":\"backplane\",\"version\":\"1\"}}}}}}' \
+'{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}' \
+'{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"model/list\",\"params\":{{}}}}' | tmo 15 muse serve --no-session-log 2>/dev/null")
 }
 /// The models in the answer to request 2 among the lines Muse wrote.
 pub fn catalog(out: &str) -> Vec<Value> {
@@ -200,5 +202,30 @@ mod standin_tests {
         assert_eq!(got.last().unwrap(), r#"["TurnChanged","completed"]"#); assert!(got.contains(&r#"["SessionSet","OLDSESSION"]"#.to_string()));
         let m: Vec<&str> = wrote.iter().map(|w| w.as_str()).filter(|w| w.contains("session/resume") || w.contains("setApprovalMode") || w.contains("turn/start")).collect();
         assert!(m[0].contains("session/resume") && m[1].contains("setApprovalMode") && m[1].contains("onRequest") && m[2].contains("turn/start") && !m[2].contains("backplane_instructions"));
+    }
+}
+
+/// The laws of src/core (LAWS.bend), one test each, named as the law: scripts/gpui/law-map.tsv maps them.
+#[cfg(test)]
+mod laws {
+    use super::*;
+    fn turn_in() -> TurnIn { TurnIn { thread: "t1".into(), cwd: "/work/p".into(), model: "m1".into(), session: "S9".into(), runtime: "approval-required".into(), text: "do it".into(), gen: "17-3".into(), mcp_url: "http://x/mcp".into(), ..Default::default() } }
+    #[test] fn msp_mode_supervised_asks() { assert_eq!(msp::mode_k(0), "promptUnmatched"); assert_eq!(msp::mode("approval-required"), "promptUnmatched") }
+    #[test] fn msp_mode_full_allows() { assert_eq!(msp::mode_k(3), "allowAll"); assert_eq!(msp::mode("full-access"), "allowAll") }
+    /// Stop on a Muse thread is AgentStop alone: nothing is written to the process first (the actor ends it).
+    #[test] fn interrupt_muse_stops() { let mut d = driver("muse").unwrap().driver; d.start(&turn_in()); assert!(d.on_stop().is_empty()) }
+    /// A Muse thread's turn is one Muse process that carries the thread's cwd, model, session, runtime and text.
+    #[test] fn muse_run_turn() {
+        let made = driver("muse").unwrap(); assert_eq!(made.cli, "muse"); assert!(driver("antigravity").is_none());
+        let mut d = made.driver; let a = turn_in();
+        assert_eq!(d.argv(&a), ["serve", "--model", "m1", "--trust-workspace"]);
+        let s = d.start(&a); assert!(s[0].contains("\"initialize\""));
+        let r = d.on_line(&serde_json::from_str(r#"{"id":1,"result":{}}"#).unwrap());
+        assert!(r.send[1].contains("\"session/resume\"") && r.send[1].contains("\"S9\""));
+        let r = d.on_line(&serde_json::from_str(r#"{"id":2,"result":{"session":{"sessionId":"S9"}}}"#).unwrap());
+        assert!(r.send[0].contains("setApprovalMode") && r.send[0].contains("promptUnmatched") && r.send[1].contains("\"text\":\"do it\""));
+        let f = driver("muse").unwrap(); let _ = f; let mut full = TurnIn { runtime: "full-access".into(), session: String::new(), ..a };
+        full.model.clear(); let mut d2 = driver("muse").unwrap().driver; assert_eq!(d2.argv(&full), ["serve", "--trust-workspace", "--disable-sandbox"]); let _ = d2.start(&full);
+        let r = d2.on_line(&serde_json::from_str(r#"{"id":1,"result":{}}"#).unwrap()); assert!(r.send[1].contains("\"session/start\"") && r.send[1].contains("\"workspaceRoot\":\"/work/p\"") && r.send[1].contains("allowAll"));
     }
 }

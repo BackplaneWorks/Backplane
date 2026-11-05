@@ -163,7 +163,7 @@ port waits for the person's decision.
 
 <!-- law-map: generated below by scripts/gpui/law-map.py -->
 
-Laws in LAWS.bend: 3253. bend 1065, rust 333, unported 1246, client 482, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
+Laws in LAWS.bend: 3253. bend 1058, rust 344, unported 1242, client 482, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`, `src/core/msp.bend`, `src/core/agy.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
 
 | law | status | seed | file | note |
 |---|---|---|---|---|
@@ -489,10 +489,10 @@ Laws in LAWS.bend: 3253. bend 1065, rust 333, unported 1246, client 482, window 
 | `interrupt_claude_input` | rust `interrupt_claude_input` | map | `src/core/hub.bend` |  |
 | `interrupt_codex_stops` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `interrupt_grok_stops` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `interrupt_muse_stops` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `muse_run_turn` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `msp_mode_supervised_asks` | bend | seed K +-10% | `src/core/msp.bend` |  |
-| `msp_mode_full_allows` | bend | seed K +-10% | `src/core/msp.bend` |  |
+| `interrupt_muse_stops` | rust `interrupt_muse_stops` | map | `src/core/hub.bend` |  |
+| `muse_run_turn` | rust `muse_run_turn` | map | `src/core/hub.bend` |  |
+| `msp_mode_supervised_asks` | rust `msp_mode_supervised_asks` | map | `src/core/msp.bend` |  |
+| `msp_mode_full_allows` | rust `msp_mode_full_allows` | map | `src/core/msp.bend` |  |
 | `archive_running_stops` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `archive_idle_no_turn` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `archive_closes_approval` | unported | seed R +-10% | `src/core/hub.bend` |  |
@@ -1642,13 +1642,13 @@ Laws in LAWS.bend: 3253. bend 1065, rust 333, unported 1246, client 482, window 
 | `subs_launched_live_kept` | client | seed C +-10% | `src/core/subs.bend` |  |
 | `notice_report_quiet` | bend | seed K +-10% | `src/core/notice.bend` |  |
 | `launch_send_launcher` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `interrupt_antigravity_stops` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `antigravity_run_turn` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `agy_mode_supervised_asks` | bend | seed K +-10% | `src/core/agy.bend` |  |
-| `agy_mode_full_allows` | bend | seed K +-10% | `src/core/agy.bend` |  |
-| `agy_default_api_key` | bend | seed K +-10% | `src/core/agy.bend` |  |
-| `agy_google_warns` | bend | seed K +-10% | `src/core/agy.bend` |  |
-| `agy_callback_needs_signin` | bend | seed K +-10% | `src/core/agy.bend` |  |
+| `interrupt_antigravity_stops` | rust `interrupt_antigravity_stops` | map | `src/core/hub.bend` |  |
+| `antigravity_run_turn` | rust `antigravity_run_turn` | map | `src/core/hub.bend` |  |
+| `agy_mode_supervised_asks` | rust `agy_mode_supervised_asks` | map | `src/core/agy.bend` |  |
+| `agy_mode_full_allows` | rust `agy_mode_full_allows` | map | `src/core/agy.bend` |  |
+| `agy_default_api_key` | rust `agy_default_api_key` | map | `src/core/agy.bend` |  |
+| `agy_google_warns` | rust `agy_google_warns` | map | `src/core/agy.bend` |  |
+| `agy_callback_needs_signin` | rust `agy_callback_needs_signin` | map | `src/core/agy.bend` |  |
 | `mnav_bot_sel` | client | seed C +-10% | `src/core/botui.bend` |  |
 | `mnav_room_local` | unported | none | `-` |  |
 | `mnav_remote_local` | unported | none | `-` |  |
