@@ -1,2 +1,2 @@
-{"$":"TurnChanged","thread":"endD","state":"interrupted","at":1794060000}
+{"$":"TurnChanged","thread":"endD","state":"interrupted","_end":true,"at":1794060000}
 {"$":"UsageSet","thread":"endD","used":5,"window":100,"at":1794060000}

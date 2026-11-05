@@ -23,17 +23,20 @@ fn main() {
     // metadata sees the state before each change, advanced by the earlier ones and their own metadata (Auto.messages.metadata)
     let mut meta = vec![]; let mut st2 = fold(&args[2..]);
     for c in &batch { let one = state::fam::autosettle::metadata(&st2, c); meta.extend(one.iter().cloned()); st2.apply(c); for e in &one { st2.apply(e); } }
-    // a turn's end (Ended.out, then Alerts.changes' told marks over the batch and what the end added)
+    // a turn's end (Ended.out, then Alerts.changes' told marks over the batch and what the end added). The agents' batch has a failed end's mark
+    // inside it; Bend writes that mark after the alert, stamped with the step's now.
     let end = {
         let pre = fold(&args[2..]);
+        let (core, mut marks) = state::fam::turnend::split_fail_marks(&batch);
+        for m in &mut marks { m["at"] = serde_json::json!(now); }
         let mut post = fold(&args[2..]);
-        for c in &batch { post.apply(c); }
-        let seq = pre.seq + batch.len() as u64;
-        let ended = state::fam::turnend::ended_events(&pre, &post, seq, now, &batch);
-        let ths: Vec<String> = state::fam::turnend::ended_threads(&batch).into_iter().map(String::from).collect();
-        let ctx = state::fam::turnend::told_ctx(&pre, &batch, &ths);
-        let mut list = batch.clone(); list.extend(ended.iter().cloned());
-        let mut v = ended; v.extend(state::fam::turnend::told_marks(&ctx, &list)); v
+        for c in &core { post.apply(c); }
+        let seq = pre.seq + core.len() as u64;
+        let ended = state::fam::turnend::ended_events(&pre, &post, seq, now, &core);
+        let ths: Vec<String> = state::fam::turnend::ended_threads(&core).into_iter().map(String::from).collect();
+        let ctx = state::fam::turnend::told_ctx(&pre, &core, &ths);
+        let mut list = core.clone(); list.extend(ended.iter().cloned()); list.extend(marks.iter().cloned());
+        let mut v = ended; v.extend(marks); v.extend(state::fam::turnend::told_marks(&ctx, &list)); v
     };
     let out = serde_json::json!({"tick": state::fam::autosettle::changes(&st, now), "meta": meta, "quiet": state::fam::autosettle::quiet(&st, &batch), "live": state::fam::watchdog::after(&st, now, &batch), "end": end});
     println!("{}", serde_json::to_string(&out).unwrap());

@@ -68,7 +68,10 @@ tune('auto-read',Object.fromEntries(reads.map(th=>['autosettle.read.'+th,'a'+th]
 tune('auto-read-lifecycle',{...Object.fromEntries(reads.map(th=>['autosettle.read.'+th,'a'+th])),'settle.done':'on'});
 writeFileSync(`${out}/auto-notify.jsonl`,[...ls,set('notify.settled','off',T0+100)].join('\n')+'\n');
 tune('auto-lifecycle',{'settle.done':'on'});tune('auto-short',{'settle.idle.minutes':'1','settle.personal.minutes':'2'});tune('auto-zero',{'settle.personal.minutes':'0'});
-const endB=(th,state,extra=[])=>writeFileSync(`${out}/end-${th}-${state}.batch`,[JSON.stringify({$:'TurnChanged',thread:th,state,at:T0+60000}),JSON.stringify({$:'UsageSet',thread:th,used:5,window:100,at:T0+60000}),...extra].join('\n')+'\n');
+const endB=(th,state)=>{const ev=[JSON.stringify({$:'TurnChanged',thread:th,state,_end:true,at:T0+60000}),JSON.stringify({$:'UsageSet',thread:th,used:5,window:100,at:T0+60000})];
+  // a failed end is what the agents commit: an error act first, the failed mark of the turn's message next to the TurnChanged
+  if(state==='failed')ev.unshift(JSON.stringify({$:'ActivityLogged',thread:th,act:'g-'+th,tone:'error',kind:'agent',summary:'boom',at:T0+60000})),ev.push(JSON.stringify({$:'SettingSet',key:'failed.m'+th,value:'1',at:T0+60000}));
+  writeFileSync(`${out}/end-${th}-${state}.batch`,ev.join('\n')+'\n');};
 for(const [th,st] of [['endA','completed'],['endB','completed'],['endC','failed'],['endD','interrupted'],['endE','completed'],['endF','completed'],['endG','completed'],['endH','completed'],['endI','completed'],['endJ','completed'],['endK','completed'],['endL','completed'],['endM','completed'],['endD','completed'],['endA','failed'],['endA','stopped']])endB(th,st);
 writeFileSync(`${out}/auto.now`,[T0+700,T0+3000,T0+20000,T0+30000,T0+60000,T0+200000].join('\n')+'\n');
 console.log('ok');

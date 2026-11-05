@@ -95,6 +95,13 @@ def Ap.live(+st: M.State, +now: Nat, +cs: List<&2, M.Change>) -> J.Json:
 
 # Ended.out then Alerts.changes (the production order): the summary clock, the alert record and the told marks a turn's end writes. The
 # first TurnChanged's thread is the ended one; only the added part is printed
+# the agents commit a failed end's mark (failed.<msg>) in the batch; Bend writes it itself after the alert (Stamp.fail.mark), so it is left out here
+def Ap.nofail(cs: List<&2, M.Change>) -> List<&2, M.Change>:
+  match cs:
+    case Nil{}: Nil{}
+    case M.SettingSet{+k, v, at} <> t: Bool.pick(List<&2, M.Change>, String.starts_with(k, "failed."), Ap.nofail(t), M.SettingSet{k, v, at} <> Ap.nofail(t))
+    case c <> t: c <> Ap.nofail(t)
+
 def Ap.end.th(cs: List<&2, M.Change>) -> String:
   match cs:
     case Nil{}: ""
@@ -113,7 +120,7 @@ def Ap.out(+st: M.State, +now: Nat, +cs: List<&2, M.Change>) -> J.Json:
     J.KV{"meta", J.Json.arr(Ap.enc(A.Auto.messages.metadata(cs, st)))},
     J.KV{"quiet", J.Json.arr(Ap.enc(A.Auto.quiet.changes(Map.to_list(&2, Nat, A.Auto.quiet.collect(cs, st, Map.new(&2, Nat))), st)))},
     J.KV{"live", Ap.live(st, now, cs)},
-    J.KV{"end", Ap.end(st, now, cs)}])
+    J.KV{"end", Ap.end(st, now, Ap.nofail(cs))}])
 
 def main() -> IO(Unit):
   do IO<Unit>:
