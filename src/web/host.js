@@ -395,7 +395,7 @@ function patch(el, v) {
       timelineLists.set(el, scroller);
     }
     const u0 = RR ? pnow() : 0, rows = [...each(v.kids)].map(expand), u1 = RR ? pnow() : 0;
-    scroller.update(rows, { follow: entryHistory.active(historyFillOwner()) || !(thin && thin.atNewest?.() === false) });
+    scroller.update(rows, { follow: entryHistory.active(historyFillOwner()) || !(thin && thin.atNewest?.() === false), defer: true });
     if (RR) { RR.t("patch.tl.rows", u1 - u0);RR.t("patch.tl.update", pnow() - u1); }
     el.__v = v;
     return;
@@ -1212,9 +1212,11 @@ function render() {
   const list = timelineList(tl2);
   if (activeTimeline && activeTimeline !== list) activeTimeline.destroy();
   activeTimeline = list || null;
-  list?.refresh();
-  if (transitionPosition && list) { list.restore(transitionPosition);transitionPosition = null; }
-  else if (scroll) list?.scrollToEnd();
+  // (one plan for the patch's rows and this render's command: timeline-scroller.js)
+  let next = null;
+  if (transitionPosition && list) { next = { mode: "restore", bookmark: { ...transitionPosition } };transitionPosition = null; }
+  else if (scroll && list) next = { mode: "bottom" };
+  list?.refresh(next);
   // A live bot/mailroom update may change only the floating pill. Unchanged
   // virtual rows/geometry cause neither a plan nor a scroll callback; still
   // reconcile the accepted newest picture with the controller's read mark.
