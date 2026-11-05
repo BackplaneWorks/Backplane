@@ -22,7 +22,14 @@ pub struct TurnIn {
     pub thread: String, pub cwd: String, pub home: String, pub model: String, pub session: String,
     pub runtime: String, pub interaction: String, pub effort: String, pub think: bool,
     pub text: String, pub images: Vec<String>, pub prompt: String, pub mcp_url: String, pub pcbparts_url: String,
+    /// the turn's generation (Hub.gen, also in `mcp_url`): Muse's command ids are made from it
+    pub gen: String,
+    /// world settings a driver reads (`agy.auth`, `agy.account`, `agy.gcp.project`, `agy.gcp.location`); see `SETTINGS`
+    pub settings: Vec<(String, String)>,
 }
+/// The settings the actor copies into `TurnIn.settings` (add a key here when a driver needs one).
+pub const SETTINGS: &[&str] = &["agy.auth", "agy.account", "agy.gcp.project", "agy.gcp.location"];
+impl TurnIn { pub fn setting(&self, k: &str) -> &str { self.settings.iter().find(|(a, _)| a == k).map(|(_, v)| v.as_str()).unwrap_or("") } }
 
 /// What a driver answers to one line from its process: lines to write back (a reply, the next request) and Codex-shaped lines for the log.
 /// Shapes are the JSON objects `Cx::codex_line` reads: thread.started, item.completed {agent_message, command_execution, file_change, todo_list, reasoning},
@@ -50,9 +57,13 @@ pub trait Driver: Send {
     fn on_line(&mut self, line: &Value) -> Reaction;
     /// The person pressed Stop: lines to write before the process is ended (ACP session/cancel). The actor ends the process either way.
     fn on_stop(&mut self) -> Vec<String> { vec![] }
-    /// The process is gone (exit code); shapes to log last.
-    fn on_exit(&mut self, _code: Option<i32>) -> Vec<Value> { vec![] }
-    /// The text of the failure row when the process exits while the turn runs (Proto.gone); None: the actor's "agent exited with code N".
+    /// Before `argv`: Err(e) fails the turn as "could not start <cli>: <e>" without starting anything (OmpRun.prepared).
+    fn prepare(&mut self, _a: &TurnIn) -> Result<(), String> { Ok(()) }
+    /// The install sentence added after a failure to start ("Install Pi (https://pi.dev), then sign in: ..."; Proto.install).
+    fn install_hint(&self) -> Option<String> { None }
+    /// Proto.gone: the words for a process that exits while its turn runs, WITHOUT the exit code or stderr. The actor words the row as Bend's Exit.say:
+    /// `<these words, or "agent was killed (signal 9, likely out of memory)" for 137> (exit N | signal N)` and the scrubbed tail of stderr.
+    /// None: the actor's "agent exited with code N". (There is no on_exit: a turn that ends by itself says so in a turn.completed/turn.failed shape.)
     fn exit_why(&self, _code: i32) -> Option<String> { None }
     /// Per-turn processes the actor must end once the turn's own events are in (Grok: SIGTERM after turn.completed/turn.failed). Codex exits by itself.
     fn ends_on_turn_end(&self) -> bool { false }

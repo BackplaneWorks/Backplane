@@ -98,6 +98,17 @@ pub fn expand_claude(text: &str, ss: &[USkill]) -> String {
     text.split('\n').map(|l| l.split(' ').map(|w| { let n = mention_name(w); if !n.is_empty() && ss.iter().any(|s| s.user && s.name == n) { format!("/{}", &w[1..]) } else { w.to_string() } }).collect::<Vec<_>>().join(" ")).collect::<Vec<_>>().join("\n")
 }
 
+/// Mention.note / Mention.others: for providers without skills of their own, the text as written after one instruction per named skill (once each) to read its SKILL.md.
+pub fn mention_others(text: &str, ss: &[USkill]) -> String {
+    if !text.contains('$') { return text.to_string() }
+    let mut seen: Vec<String> = vec![]; let mut notes: Vec<String> = vec![];
+    for w in text.split('\n').flat_map(|l| l.split(' ')) {
+        let n = mention_name(w); if n.is_empty() || seen.contains(&n) { continue }
+        if let Some(s) = ss.iter().find(|s| s.user && s.name == n) { seen.push(n.clone()); notes.push(format!("The user invoked the ${} skill: read \"{}\" completely before anything else and follow its instructions for this request.", s.name, s.path)) }
+    }
+    if notes.is_empty() { text.to_string() } else { format!("<skill_invocations>\n{}\n</skill_invocations>\n\n{}", notes.join("\n"), text) }
+}
+
 // ---- attachments ----
 pub const INLINE_MAX: u64 = 3_932_160;
 fn is_att(l: &str) -> bool { let t = l.trim(); t.starts_with("[attachment: ") && t.ends_with(']') }
@@ -164,5 +175,16 @@ mod tests {
         let text = format!("hi\n\n[attachment: {}]\n[attachment: {}]\n[attachment: {}]", ok.display(), big.display(), empty.display());
         let imgs = read_images(&text); assert_eq!(imgs, vec![("image/png".to_string(), "AQID".to_string())]);
         let l: Value = serde_json::from_str(&claude_line(&text, &imgs, "U")).unwrap(); assert_eq!(l["uuid"], "U"); assert_eq!(l["message"]["content"][0]["type"], "image"); assert_eq!(l["message"]["content"][1]["text"], text.as_str());
+    }
+}
+
+#[cfg(test)] mod others_tests {
+    use super::*;
+    fn sk(n: &str) -> USkill { USkill { name: n.into(), description: String::new(), path: format!("/s/{n}/SKILL.md"), model: true, user: true } }
+    #[test] fn mention_others_names_each_skill_once_and_keeps_the_text() {
+        let t = "use $pcb, then $pcb again and $nope\nplus $bom."; let o = mention_others(t, &[sk("pcb"), sk("bom")]);
+        assert!(o.starts_with("<skill_invocations>\nThe user invoked the $pcb skill: read \"/s/pcb/SKILL.md\" completely before anything else and follow its instructions for this request.\nThe user invoked the $bom skill"));
+        assert!(o.ends_with("</skill_invocations>\n\nuse $pcb, then $pcb again and $nope\nplus $bom.")); assert_eq!(o.matches("$pcb skill").count(), 1);
+        assert_eq!(mention_others("no skills here", &[sk("pcb")]), "no skills here"); assert_eq!(mention_others("$unknown", &[sk("pcb")]), "$unknown");
     }
 }

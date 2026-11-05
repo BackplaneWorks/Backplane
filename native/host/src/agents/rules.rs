@@ -85,8 +85,36 @@ pub fn unanswered(kind: &str, tool: &str, detail: &str) -> String {
 /// Exit.why: a SIGKILL (137) is most likely the kernel taking the process for memory.
 pub fn exit_why(code: i32) -> String { if code == 137 { "agent was killed (signal 9, likely out of memory)".into() } else { format!("agent exited with code {code}") } }
 
+/// Err.scrub (errtail.bend): the text with its secrets dropped (token=/key=/secret=/password= values, Bearer tokens, key-shaped words).
+pub fn err_scrub(s: &str) -> String {
+    const KEYS: [&str; 5] = ["token=", "key=", "secret=", "password=", "Bearer "];
+    const STARTS: [&str; 10] = ["sk-", "ghp_", "gho_", "ghs_", "ghu_", "github_pat_", "xoxb-", "xoxp-", "AKIA", "AIza"];
+    let cs: Vec<char> = s.chars().collect(); let at = |i: usize, k: &str| k.chars().enumerate().all(|(j, c)| cs.get(i + j) == Some(&c));
+    let sec = |c: char| c.is_ascii_alphanumeric() || "_-.+/".contains(c);
+    let (mut out, mut i, mut edge) = (String::new(), 0, true);
+    while i < cs.len() {
+        let hit = KEYS.iter().find(|k| at(i, k)).or_else(|| if edge { STARTS.iter().find(|k| at(i, k)) } else { None });
+        match hit { Some(k) => { out.push_str(k); out.push('…'); i += k.chars().count(); while i < cs.len() && sec(cs[i]) { i += 1 } edge = false }
+                    None => { out.push(cs[i]); edge = !cs[i].is_ascii_alphanumeric(); i += 1 } }
+    }
+    out
+}
+/// Exit.say: `<Exit.why's words, else dflt> (exit N | signal N)` and the scrubbed tail of stderr (the last 2048 bytes are kept by the caller).
+pub fn exit_say(dflt: &str, code: i32, tail: &str) -> String {
+    let why = if code == 137 { "agent was killed (signal 9, likely out of memory)" } else { "" };
+    let c = if code >= 128 { format!("signal {}", code - 128) } else { format!("exit {code}") };
+    let tl = err_scrub(tail); let tl = tl.trim();
+    format!("{} ({c}){}", if why.is_empty() { dflt } else { why }, if tail.trim().is_empty() { String::new() } else { format!(": {tl}") })
+}
+
 #[cfg(test)]
 mod tests {
+    #[test] fn exit_say_words_the_exit_and_scrubs_the_tail() {
+        use super::*;
+        assert_eq!(exit_say("grok exited before the turn ended", 1, ""), "grok exited before the turn ended (exit 1)");
+        assert_eq!(exit_say("x", 137, ""), "agent was killed (signal 9, likely out of memory) (signal 9)");
+        assert_eq!(exit_say("x", 2, " boom token=abc123 and sk-LIVEKEY99 Bearer zzz \n"), "x (exit 2): boom token=… and sk-… Bearer …");
+    }
     use super::*;
     // law steer_head_tail (steer.bend Steer.head/Steer.tail): head ++ tail is the text, head ends at a line break
     #[test] fn steer_head_and_tail_split_the_text_at_its_last_line_break() {

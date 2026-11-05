@@ -99,7 +99,7 @@ impl Agents {
         let a = { let w = self.world().await; w.asks.get(ask).cloned() };
         let Some(a) = a else { return Ok(()) }; // ask_closes_once: an ask already closed (or never opened) changes nothing
         if crate::files::rv::checks_answer(&self.hub.cfg.home.to_string_lossy(), ask, answer) { // Checks.answer.k: a project's own checks ask closes with no "answer" activity
-            self.commit_events(vec![json!({"$":"AskClosed","id":ask,"answer":answer,"at":now_s()})]).await;
+            let pend = self.pending_ev(&a.thread, 0, ask, now_s()).await; self.commit_events(vec![json!({"$":"AskClosed","id":ask,"answer":answer,"at":now_s()}), pend]).await;
             if let Some(p) = self.parked.lock().unwrap().remove(ask) { let _ = p.tx.send(answer.to_string()); }
             return Ok(())
         }
@@ -108,6 +108,7 @@ impl Agents {
         let implement = a.kind == "plan" && answer == "implement";
         if implement { let t = { let w = self.world().await; w.threads.get(&th).cloned() }; if let Some(t) = t { ev.push(json!({"$":"ModesSet","id":th,"runtime":t.runtime,"interaction":"default","model":t.model,"at":now})) } }
         else if !th.is_empty() && (a.kind == "input" || a.kind == "approval") { ev.push(json!({"$":"ActivityLogged","thread":th,"act":hub_id("k", now, self.seq()),"tone":"info","kind":"answer","summary":mcp::ans_line(&a.kind, &a.tool, &a.detail, answer),"at":now})) }
+        let pend = self.pending_ev(&th, 0, ask, now).await; ev.push(pend);
         self.commit_events(ev).await;
         if let Some(p) = self.parked.lock().unwrap().remove(ask) { let _ = p.tx.send(answer.to_string()); }
         let th_of = self.driver_asks.lock().unwrap().remove(ask); if let Some(t) = th_of { let _ = self.actor(&t).try_send(super::Cmd::Answer { ask: ask.to_string(), answer: answer.to_string() }); }

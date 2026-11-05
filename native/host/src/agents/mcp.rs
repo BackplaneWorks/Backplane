@@ -12,7 +12,7 @@ use std::{sync::{Arc, Weak}, time::Duration};
 use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::{TcpListener, TcpStream}, sync::{oneshot, Semaphore}};
 
 pub const TOOLS_JSON: &str = include_str!("../../../../test/gpui/agents/fixtures/mcp-tools.json");
-pub const IMPLEMENTED: &[&str] = &["orchestrator_capabilities", "thread_list", "thread_read", "thread_send", "thread_update", "thread_wait", "thread_interrupt", "viewer_show", "permission_prompt", "kicad_ipc", "kicad_ipc_status"];
+pub const IMPLEMENTED: &[&str] = &["orchestrator_capabilities", "thread_list", "thread_read", "thread_send", "thread_update", "thread_wait", "thread_interrupt", "viewer_show", "permission_prompt", "kicad_ipc", "kicad_ipc_status", "terminal_open", "terminal_read", "terminal_send", "terminal_close"];
 const MAX_BODY: usize = 4 << 20;
 const MAX_CONNS: usize = 256;
 const MAX_PARKED_PER_THREAD: usize = 16;
@@ -32,6 +32,20 @@ fn same(a: &str, b: &str) -> bool { a.len() == b.len() && a.bytes().zip(b.bytes(
 pub fn result(id: &Value, r: Value) -> Value { json!({"jsonrpc":"2.0","id":id,"result":r}) }
 pub fn error(id: &Value, code: i64, msg: &str) -> Value { json!({"jsonrpc":"2.0","id":id,"error":{"code":code,"message":msg}}) }
 pub fn content(ok: bool, body: &Value) -> Value { json!({"content":[{"type":"text","text":body.to_string()}],"isError":!ok}) }
+/// The text of a result that does not pass through `content`'s JSON masking (a terminal's screen, a page's text blocks): the one place a mask is applied to it.
+/// The settings lane's vault mask is `crate::settings::mask::mask`; until it is on this branch this is the seam (see HUB-API.md).
+fn mask_text(s: &str) -> String { s.to_string() }
+/// A tool body's shapes (term/tools.rs docs): a String is the raw text, {"$content":[blocks]} is the content array (text blocks masked, images as they are), anything else JSON text.
+pub fn shaped(ok: bool, body: &Value) -> Value {
+    match body {
+        Value::String(s) => json!({"content":[{"type":"text","text":mask_text(s)}],"isError":!ok}),
+        Value::Object(o) if o.contains_key("$content") => {
+            let bs: Vec<Value> = o["$content"].as_array().cloned().unwrap_or_default().into_iter().map(|mut b| { if b["type"] == "text" { if let Some(t) = b["text"].as_str().map(mask_text) { b["text"] = json!(t) } } b }).collect();
+            json!({"content":bs,"isError":!ok})
+        }
+        _ => content(ok, body),
+    }
+}
 fn fail(msg: &str) -> (bool, Value) { (false, json!({"error":msg})) }
 
 /// Perm.* (mcp.bend): the verdicts and the ask cards.
@@ -150,10 +164,11 @@ impl Mcp {
             "kicad_ipc" => match crate::files::kicad::ipc::kicad_ipc_in(&ag.hub, Some(thread), sv(&a, "path"), sv(&a, "type"), a.get("message").cloned().unwrap_or(json!({}))).await { Ok(v) => (true, v), Err(e) => fail(&e) },
             "kicad_ipc_status" => match crate::files::kicad::ipc::kicad_ipc_status_in(&ag.hub, Some(thread), sv(&a, "path")).await { Ok(v) => (true, v), Err(e) => fail(&e) },
             "kicad_export10" => crate::files::export10::mcp(&ag.hub, sv(&a, "path"), a.get("force").and_then(Value::as_bool).unwrap_or(false)).await,
+            n if crate::term::tools::NAMES.contains(&n) => crate::term::tools::call(&ag.hub, thread, n, &a).await.unwrap_or_else(|| fail("unknown tool")),
             "viewer_show" => { ag.hub.push_all(&json!({"t":"view","thread":thread,"path":sv(&a, "path"),"kind":sv(&a, "kind")})); (true, json!({"shown":sv(&a, "path")})) }
             _ => fail("unknown tool"),
         };
-        let mut res = result(id, content(ok, &body));
+        let mut res = result(id, shaped(ok, &body));
         if let Some(block) = ag.ride_take(thread).await { if let Some(a) = res.pointer_mut("/result/content").and_then(Value::as_array_mut) { a.push(json!({"type":"text","text":block})) } }
         Some(res)
     }
@@ -166,11 +181,12 @@ impl Mcp {
         if kind == "approval" && ag.world().await.sessions.contains(&(thread.to_string(), tool.clone())) { // Perm.session_ok: allowed for this session
             return Some(result(id, perm_text(&perm_allow(&input)))) }
         let ev = json!({"$":"AskOpened","id":ask,"thread":thread,"kind":kind,"tool":tool,"detail":detail,"options":options,"at":now});
-        if kind == "plan" { ag.commit_events(vec![ev]).await; return Some(result(id, perm_text(&perm_deny(PLAN_NOTE)))) }
+        let pend = ag.pending_ev(thread, 1, "", now).await;
+        if kind == "plan" { ag.commit_events(vec![ev, pend]).await; return Some(result(id, perm_text(&perm_deny(PLAN_NOTE)))) }
         let (tx, mut rx) = oneshot::channel();
         { let mut m = ag.parked.lock().unwrap(); if m.values().filter(|x| x.thread == thread).count() >= MAX_PARKED_PER_THREAD { return Some(result(id, content(false, &json!({"error":"too many questions are waiting for the person"})))) }
           m.insert(ask.clone(), Parked { thread: thread.into(), tool: tool.clone(), input: input.clone(), id: id.clone(), tx }); }
-        ag.commit_events(vec![ev]).await;
+        ag.commit_events(vec![ev, pend]).await;
         // wait for the answer, or for the agent to hang up (its reply is then lost; the ask stays open for the person)
         let mut probe = [0u8; 1];
         let answer = loop { tokio::select! { a = &mut rx => break a.ok(), r = sock.read(&mut probe) => { if matches!(r, Ok(0) | Err(_)) { ag.parked.lock().unwrap().remove(&ask); return None } } } };
@@ -211,5 +227,15 @@ mod tests {
     #[test] fn the_tool_list_is_the_js_hubs_for_every_tool_we_serve() {
         let all: Value = serde_json::from_str(TOOLS_JSON).unwrap(); let names: Vec<&str> = all["result"]["tools"].as_array().unwrap().iter().map(|t| sv(t, "name")).collect();
         for n in IMPLEMENTED { assert!(names.contains(n), "{n} is not a tool the JS hub lists") }
+    }
+}
+
+#[cfg(test)] mod shape_tests {
+    use super::*;
+    #[test] fn a_string_body_is_the_raw_text_and_a_content_body_keeps_its_blocks() {
+        assert_eq!(shaped(true, &json!("line1\nline2"))["content"][0]["text"], "line1\nline2");
+        let r = shaped(true, &json!({"$content":[{"type":"text","text":"hi"},{"type":"image","data":"AAA","mimeType":"image/png"}]}));
+        assert_eq!(r["content"][0]["text"], "hi"); assert_eq!(r["content"][1]["data"], "AAA"); assert_eq!(r["isError"], false);
+        assert_eq!(shaped(false, &json!({"error":"x"}))["content"][0]["text"], "{\"error\":\"x\"}");
     }
 }
