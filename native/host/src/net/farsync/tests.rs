@@ -212,3 +212,19 @@ async fn spy_hub(tag: &str, fail_restart: bool) -> (Arc<Hub>, Arc<Spy>, Arc<Mute
     println!("SCALE events={} hub_start(spawn+first fold)={:.2}s forget_mirror={:.2}s ok={}", n + 2001, start.as_secs_f64(), rebuild_t.as_secs_f64(), ok);
     let _ = std::fs::remove_dir_all(h);
 }
+
+/// Many requests at once leave none unserved: when the last returns, nothing is pending (the gap between the runner's last `swap` and the
+/// release of its lock is a few instructions wide, so this is a stress, not a staging of that instant).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn far_many_rebuild_requests_leave_none_unserved() {
+    let (hub, spy, _order, h) = spy_hub("stress", false).await;
+    let mut tasks = vec![];
+    for i in 0..64u64 { let hub = hub.clone(); tasks.push(tokio::spawn(async move { for _ in 0..(i % 3) { tokio::task::yield_now().await } hub.rebuild_presenter().await })); }
+    let mut ran = 0; for t in tasks { if matches!(t.await.unwrap(), crate::hub::Rebuilt::Ran(_)) { ran += 1 } }
+    assert!(!hub.rebuild_pending(), "no request left set with nobody to act on it");
+    assert!(ran >= 1 && spy.restarts.load(Ordering::SeqCst) >= 1);
+    // after the storm, one more request is served by a pass of its own
+    let before = spy.restarts.load(Ordering::SeqCst);
+    assert_eq!(hub.rebuild_presenter().await, crate::hub::Rebuilt::Ran(true));
+    assert_eq!(spy.restarts.load(Ordering::SeqCst), before + 1);
+    let _ = std::fs::remove_dir_all(h);
+}
