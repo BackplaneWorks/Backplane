@@ -41,9 +41,9 @@ lane cannot break another lane's build.
 
 ## The ready push (2026-11-05)
 
-Ready means: GPUI desktop opens a copy of the person's real data on the Rust hub, a real Claude turn works, and Claude launches and drives a thread from inside. Improvements works end to end in GPUI on the Rust hub, handing off to a real Claude thread that can work on the `gpui` branch. Bend leaves the runtime path. Each lane works in its own worktree under `~/Documents/i2cjak/bp-gpui-lanes/` and lands only through `scripts/gpui/land.sh` after the reviewer's recorded OK.
+Ready means: (1) the Rust hub with no Bend helper opens a throwaway copy of the person's real data; (2) GPUI desktop shows the threads; (3) a real Claude turn works; (4) Claude launches and drives a thread; (5) Improvements hands off to a Claude thread. Plus the side-by-side basics: own port and home, no auto-resume or routines, history recording off, real folders only for turns the person starts. Deferred until the person is using it: the 10M-event and 1 h memory tests, parity counts, the gallery, broad review batches, phones, extra protocol scenarios. Each lane works in its own worktree under `~/Documents/i2cjak/bp-gpui-lanes/` and lands only through `scripts/gpui/land.sh`. The reviewer reads the copy guard and side-by-side; it records other ranges on the lane's test result.
 
-Memory gate, as the person accepted it: on a copy of the real log with about 10 agents and 5 views open, the whole startup stays under 1 GB, including building the store, `/hello` answers, nothing runs out of memory, and steady hub RAM stays at or under 500 MB. The slope bar in `PRESENTER-PORT.md` is a proposal, not this gate.
+Memory bar: `docs/gpui/perf-gates.json`: hub RSS only, startup peak under 1 GB, at rest under 500 MB.
 
 | Lane | Thread | Owns | Worktree |
 |---|---|---|---|
