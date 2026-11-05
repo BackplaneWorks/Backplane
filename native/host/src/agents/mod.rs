@@ -162,8 +162,8 @@ impl Agents {
     /// Hub.recover.k (Rec.turn) and Carry: a turn the restart cut short is marked stopped with a note; with restart.continue on
     /// (and not repeating itself) it goes on with a message, BURST threads at once, the rest stay stopped.
     pub async fn recover(self: &Arc<Self>) {
-        let (cut, carry): (Vec<Value>, Vec<String>) = {
-            let w = self.world().await; let now = now_s(); let zone = w.setting("tz.machine").to_string(); let mut ev = vec![]; let mut carry = vec![]; let mut told = std::collections::HashSet::new();
+        let (cut, carry, cut_threads): (Vec<Value>, Vec<String>, Vec<String>) = {
+            let w = self.world().await; let now = now_s(); let zone = w.setting("tz.machine").to_string(); let mut ev = vec![]; let mut carry = vec![]; let mut cut_threads: Vec<String> = vec![]; let mut told = std::collections::HashSet::new();
             // Rec.asks: an open ask is closed unanswered and its thread told which one went unanswered (an order's question stays open)
             let mut asks: Vec<(&String, &world::Ask)> = w.asks.iter().filter(|(_, a)| !a.tool.starts_with("order_ask")).collect(); asks.sort_by(|a, b| a.0.cmp(b.0));
             for (id, a) in asks {
@@ -175,14 +175,15 @@ impl Agents {
             let mut ths: Vec<(&String, &world::T)> = w.threads.iter().filter(|(_, t)| t.turn == "running").collect(); ths.sort_by(|a, b| a.0.cmp(b.0));
             for (th, t) in ths {
                 if !told.contains(th) { ev.push(json!({"$":"ActivityLogged","thread":th,"act":hub_id("r", now, self.seq()),"tone":"error","kind":"restart","summary":rules::restart_cut(&zone, now),"at":now})) }
-                ev.push(json!({"$":"TurnChanged","thread":th,"state":"interrupted","at":now}));
+                ev.push(json!({"$":"TurnChanged","thread":th,"state":"interrupted","at":now})); cut_threads.push(th.clone());
                 if !t.last_user.is_empty() { ev.push(set(format!("stopped.{}", t.last_user), "1".into(), now)) }
                 let will = world::carry_will(t, w.setting("restart.continue"));
                 if will && carry.len() < BURST { carry.push(th.clone()) }
             }
-            (ev, carry)
+            (ev, carry, cut_threads)
         };
         if !cut.is_empty() { if let Err(e) = self.hub.commit_many(&cut).await { eprintln!("agents: recovery: {e:#}") } }
+        for th in &cut_threads { if !carry.contains(th) { self.task_end(th, "interrupted").await } } // Rec.turn.k: a cut turn that will not carry on ends its task (a carried one is still its business)
         for th in carry {
             let now = now_s(); let id = hub_id("c", now, self.seq());
             let note = json!({"$":"ActivityLogged","thread":th,"act":hub_id("r", now, self.seq()),"tone":"info","kind":"restart","summary":"Continuing after the restart","at":now});

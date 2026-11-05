@@ -96,6 +96,9 @@ impl Agents {
 pub struct Finish { pub id: String, pub parent: String, pub child: String, pub want: &'static str, pub summary: String, pub deliver: Option<String> }
 pub fn finish_plan(w: &super::world::World, child: &str, ended: &str) -> Option<Finish> {
     let (id, k) = w.tasks.iter().find(|(_, k)| k.child == child)?;
+    if k.state == "cancelled" { return None } // the parent's own cancel is not an end to report (Mcp.cancel runs no Task.finish)
+    // Bend decides inside the step; here the child must still be at the end it was read at, with no ride that starts its next turn
+    if w.threads.get(child).map_or(true, |c| c.turn != ended) || !w.setting(&format!("ride.{child}")).is_empty() { return None }
     if ended == "completed" && !w.ready(child) { return None } // task_waits_for_child_work
     let (want, word) = if ended == "completed" { ("done", "finished") } else { ("failed", "failed") }; // task_failed_ends_even_busy
     let last = w.threads.get(child).map(|t| t.last_assistant.as_str()).unwrap_or("");
@@ -132,7 +135,7 @@ pub fn repair_plan(w: &super::world::World) -> Vec<Repair> {
         };
         let m = msg(&k.child, id); let p = w.threads.get(&k.parent);
         let has = w.td_msgs.contains(&m);
-        let wake = p.map_or(false, |p| p.turn != "running" && p.newest == m); // and nothing queued (the Rust agents queue nothing)
+        let wake = p.map_or(false, |p| p.turn != "running" && p.newest == m) && !w.queue_waiting(&k.parent);
         out.push(Repair { id: id.clone(), parent: k.parent.clone(), child: k.child.clone(), state_set, text, has, wake });
     }
     out
@@ -146,8 +149,12 @@ pub fn watch(ag: &Arc<Agents>) {
             match rx.recv().await { Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {} Err(_) => break }
             let Some(ag) = weak.upgrade() else { break };
             let total = ag.hub.store.len(); if total <= seen { continue }
-            let lines = ag.hub.store.range(seen, total).unwrap_or_default(); seen = total;
-            let evs: Vec<Value> = lines.iter().filter(|l| l.starts_with("{\"$\":\"TurnChanged\"")).filter_map(|l| serde_json::from_str(l).ok()).collect();
+            let mut evs: Vec<Value> = vec![];
+            while seen < total { // read in chunks; a failed read leaves `seen` where it was and is tried again at the next commit
+                let to = (seen + 4096).min(total);
+                let Ok(lines) = ag.hub.store.range(seen, to) else { break };
+                evs.extend(lines.iter().filter(|l| l.starts_with("{\"$\":\"TurnChanged\"")).filter_map(|l| serde_json::from_str::<Value>(l).ok())); seen = to;
+            }
             if evs.is_empty() { continue }
             let mut kids: Vec<String> = evs.iter().filter_map(|e| e["thread"].as_str().map(str::to_string)).collect(); kids.sort(); kids.dedup();
             for kid in kids { if let Some(end) = ended_last(&evs, &kid) { let a = ag.clone(); a.task_end(&kid, end).await } }
@@ -174,15 +181,15 @@ mod laws {
     fn demo(stage: u8) -> World { let mut v = vec![DONE]; let r = tc("t0", "running"); if stage >= 1 { v.push(MSG) } if stage >= 2 { v.push(&r) } let d = "{\"$\":\"TaskDelivered\",\"task\":\"k1\",\"at\":3}"; if stage >= 3 { v.push(d) } world(&v) }
 
     #[test] fn task_terminal_absorbing() { let w = world(&[DONE, "{\"$\":\"TaskStateSet\",\"task\":\"k1\",\"state\":\"failed\",\"summary\":\"later\",\"at\":4}"]); assert_eq!(w.tasks["k1"].state, "done"); assert_eq!(w.tasks["k1"].summary, "later", "the summary is replaced; the state sticks") }
-    #[test] fn task_delivered_once() { let w = world(&[DONE, "{\"$\":\"TaskDelivered\",\"task\":\"k1\",\"at\":4}"]); assert!(finish_plan(&w, "t1", "completed").unwrap().deliver.is_none()); assert!(repair_plan(&w).is_empty()) }
+    #[test] fn task_delivered_once() { let w = world(&[DONE, "{\"$\":\"TaskDelivered\",\"task\":\"k1\",\"at\":4}", &tc("t1", "completed")]); assert!(finish_plan(&w, "t1", "completed").unwrap().deliver.is_none()); assert!(repair_plan(&w).is_empty()) }
     #[test] fn task_ended_last_change() {
         let evs = |v: &[&str]| v.iter().map(|s| serde_json::from_str::<Value>(s).unwrap()).collect::<Vec<_>>();
         assert_eq!(ended_last(&evs(&[&tc("t1", "completed"), "{\"$\":\"QueueTaken\",\"thread\":\"t1\",\"at\":9}", &tc("t1", "running")]), "t1"), None);
         assert_eq!(ended_last(&evs(&[&tc("t1", "running"), &tc("t1", "completed")]), "t1"), Some("completed")); assert_eq!(ended_last(&evs(&[&tc("t2", "completed")]), "t1"), None);
     }
-    #[test] fn task_waits_for_child_work() { assert!(finish_plan(&world(&[busy()]), "t1", "completed").is_none(), "the child delegated work of its own that still runs") }
-    #[test] fn task_ends_when_ready() { let f = finish_plan(&world(&[]), "t1", "completed").unwrap(); assert_eq!((f.want, f.summary.as_str()), ("done", "done it")); assert!(f.deliver.unwrap().starts_with("[Backplane] Delegated task k1 (codex) finished:\n\ndone it")) }
-    #[test] fn task_failed_ends_even_busy() { let f = finish_plan(&world(&[busy()]), "t1", "failed").unwrap(); assert_eq!(f.want, "failed"); assert!(finish_plan(&world(&[busy()]), "t1", "interrupted").is_some()) }
+    #[test] fn task_waits_for_child_work() { assert!(finish_plan(&world(&[busy(), &tc("t1", "completed")]), "t1", "completed").is_none(), "the child delegated work of its own that still runs") }
+    #[test] fn task_ends_when_ready() { let f = finish_plan(&world(&[&tc("t1", "completed")]), "t1", "completed").unwrap(); assert_eq!((f.want, f.summary.as_str()), ("done", "done it")); assert!(f.deliver.unwrap().starts_with("[Backplane] Delegated task k1 (codex) finished:\n\ndone it")) }
+    #[test] fn task_failed_ends_even_busy() { let f = finish_plan(&world(&[busy(), &tc("t1", "failed")]), "t1", "failed").unwrap(); assert_eq!(f.want, "failed"); assert!(finish_plan(&world(&[busy(), &tc("t1", "interrupted")]), "t1", "interrupted").is_some()) }
     #[test] fn task_repair_delivers() { let p = repair_plan(&demo(0)); assert_eq!(p.len(), 1); assert!(!p[0].has && p[0].state_set.is_none() && p[0].text.contains("finished:\n\ndone it")) }
     #[test] fn task_repair_activates_idle() { let p = repair_plan(&demo(1)); assert_eq!(p.len(), 1); assert!(p[0].has && p[0].wake) }
     #[test] fn task_repair_running_marks_only() { let p = repair_plan(&demo(2)); assert_eq!(p.len(), 1); assert!(p[0].has && !p[0].wake) }
@@ -192,4 +199,20 @@ mod laws {
         let p = repair_plan(&w); assert_eq!(p.len(), 1); assert!(p[0].has && !p[0].wake, "the message is there, something followed it: only TaskDelivered") }
     #[test] fn task_repair_finishes_ended_child() { let w = world(&[&tc("t1", "completed")]); let p = repair_plan(&w); assert_eq!(p.len(), 1); assert_eq!(p[0].state_set.as_ref().unwrap().0, "done") }
     #[test] fn task_repair_leaves_working_child() { assert!(repair_plan(&world(&[&tc("t1", "running")])).is_empty()); assert!(repair_plan(&world(&[])).is_empty()) }
+
+    #[test] fn a_cancelled_task_is_not_reported_by_its_interrupted_turn() { let w = world(&["{\"$\":\"TaskStateSet\",\"task\":\"k1\",\"state\":\"cancelled\",\"summary\":\"cancelled by the parent\",\"at\":3}", &tc("t1", "interrupted")]); assert!(finish_plan(&w, "t1", "interrupted").is_none()) }
+    #[test] fn the_end_is_judged_against_the_child_as_it_is_now() {
+        assert!(finish_plan(&world(&[&tc("t1", "running")]), "t1", "completed").is_none(), "the child goes on");
+        assert!(finish_plan(&world(&[&tc("t1", "completed"), "{\"$\":\"SettingSet\",\"key\":\"ride.t1\",\"value\":\"[{}]\",\"at\":9}"]), "t1", "completed").is_none(), "a ride starts its next turn");
+        assert!(finish_plan(&world(&[&tc("t1", "completed")]), "t1", "completed").is_some()) }
+    #[test] fn a_queued_message_holds_the_child_and_the_parent() {
+        let q = "{\"$\":\"TurnQueued\",\"thread\":\"t1\",\"msg\":\"m1\",\"text\":\"x\",\"at\":9}";
+        assert!(finish_plan(&world(&[&tc("t1", "completed"), q]), "t1", "completed").is_none(), "Work.ready: a queued message keeps the task open");
+        let handoff = "{\"$\":\"TurnQueued\",\"thread\":\"t1\",\"msg\":\"handoff:1\",\"text\":\"x\",\"at\":9}"; assert!(finish_plan(&world(&[&tc("t1", "completed"), handoff]), "t1", "completed").is_some(), "handed-over context alone never holds");
+        let pq = "{\"$\":\"TurnQueued\",\"thread\":\"t0\",\"msg\":\"m2\",\"text\":\"x\",\"at\":9}"; let w = world(&[DONE, MSG, pq]); let p = repair_plan(&w); assert!(p[0].has && !p[0].wake, "Queue.waiting(parent) keeps the idle parent from waking");
+        let taken = "{\"$\":\"QueueTaken\",\"thread\":\"t0\",\"at\":9}"; assert!(repair_plan(&world(&[DONE, MSG, pq, taken]))[0].wake) }
+    #[test] fn the_launch_chain_is_bounded_and_acyclic() {
+        let mut w = world(&[]); for i in 0..70 { w.apply(&format!("{{\"$\":\"ThreadParentSet\",\"id\":\"c{i}\",\"parent\":\"c{}\",\"at\":1}}", i + 1)) }
+        assert!(!w.tree_chain_ok("c0"), "a chain beyond 63 is refused"); assert!(w.tree_chain_ok("c10"), "a short one is fine"); assert!(w.tree_chain_ok("t1"));
+        w.apply("{\"$\":\"ThreadParentSet\",\"id\":\"t0\",\"parent\":\"t1\",\"at\":1}"); w.apply("{\"$\":\"ThreadParentSet\",\"id\":\"t1\",\"parent\":\"t0\",\"at\":1}"); assert!(!w.tree_chain_ok("t0"), "a cycle is refused") }
 }
