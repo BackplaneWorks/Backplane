@@ -338,6 +338,10 @@ type Msg is Data:
   # asks in the thread (Hub.checks.ask)
   ChecksAsk{thread: String, hash: String, text: String}
   MachinesFound{machines: String}
+  # time to ask the machines this hub should pair with (Machines.loop:
+  # right after each machines list and once between two); the round sends
+  # on ack once it is over (TN.Pairing.ask)
+  PairDue{ack: Chan(Unit)}
   # the tailnet listener is up: the pairing link clients show in Settings
   LinkFound{link: String}
   # a Codex or Grok turn's process started: the one the hub now hears (and
@@ -968,7 +972,6 @@ def Wire.kept(over: Bool, c: Client) -> IO(Maybe<&2, Client>):
       IO.bind(Unit, Maybe<&2, Client>, Wire.cut(c), _ => IO.pure(Maybe<&2, Client>, None{}))
     case False{}:
       IO.pure(Maybe<&2, Client>, Some{c})
-
 
 def Wire.offer.k(c: Client, w: WIRE.Wire, +n: Nat) -> IO(Maybe<&2, Client>):
   match c:
@@ -6062,12 +6065,9 @@ def Net.models(n: Net) -> String:
 
 # Machines
 # --------
-# Every Machines.every() ms: the owner's online tailnet peers (tailscale
+# Every two minutes (TN.Pairing.plan): the owner's online tailnet peers (tailscale
 # status) and any hubs named in BACKPLANE_PEERS, each asked GET /hello;
 # those that answer run Backplane. The list goes to every client.
-
-def Machines.every() -> U32:
-  120000
 
 # a hub that may be there: a name and its base URL
 type Cand is Data:
@@ -6154,30 +6154,70 @@ def Machines.me(m: TN.Machine, +port: U32, +domain: String) -> J.Json:
 # hubs named in each other's BACKPLANE_PEERS still agree which asks to pair)
 # (domain: the tailnet's MagicDNS domain, how clients know a linked
 # machine's address is one of the owner's)
-def Machines.ask(+status: String, +port: U32, +extra: String) -> IO(String):
-  IO.bind(J.Json, String, Machines.peers(List.append(&2, Cand, Machines.cands(TN.Tailnet.online(TN.Tailnet.peers(status)), port), Machines.static(String.split(extra, ',')))),
-    ps => IO.pure(String, J.Json.show(J.Json.obj([J.KV{"self", Machines.me(TN.Tailnet.self(status), port, TN.Tailnet.domain(status))}, J.KV{"peers", ps}]))))
+# (on: the hub runs on the tailnet; a hub started with --no-tailscale lists
+# and asks only the hubs BACKPLANE_PEERS names: TN.Tailnet.seen)
+def Machines.ask(+on: Bool, +status: String, +port: U32, +extra: String) -> IO(String):
+  IO.bind(J.Json, String, Machines.peers(List.append(&2, Cand, Machines.cands(TN.Tailnet.asked(on, status), port), Machines.static(String.split(extra, ',')))),
+    ps => IO.pure(String, J.Json.show(J.Json.obj([J.KV{"self", Machines.me(TN.Tailnet.self(TN.Tailnet.seen(on, status)), port, TN.Tailnet.domain(TN.Tailnet.seen(on, status)))}, J.KV{"peers", ps}]))))
 
 def Machines.tell(+inbox: Chan(Msg), +now: String, +last: String) -> IO(String):
   Bool.pick(IO(String), String.eq(now, last), IO.pure(String, last),
     IO.bind(Result<&1, &1, Msg, Unit>, String, Chan.send(Msg, inbox, MachinesFound{now}), ok => IO.pure(String, now)))
 
-def Machines.loop(fuel: Nat, +inbox: Chan(Msg), +port: U32, +extra: String, +last: String) -> IO(Unit):
+# Pairing (Hub.pair) is asked for only here, by TN.Pairing.plan (its
+# laws: test/tailnet_seen_test.bend): right after each machines list and
+# half a period later, so asks stay a minute apart however late a list
+# comes, and the first no longer waits for a minute tick that ran before
+# any list was found (two hubs paired 60.5 s after start with the list
+# ready at 0.58 s: lane B's far_latency).
+def Machines.pair(+inbox: Chan(Msg), +ack: Chan(Unit)) -> IO(Unit):
+  do IO<Unit>:
+    ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, PairDue{ack})
+    return Unit{}
+
+# `tailscale status --json`, only on the tailnet: a hub started with
+# --no-tailscale never runs Tailscale for its machines list
+def Machines.status(on: Bool) -> IO(String):
+  match on:
+    case True{}:
+      IO.bind(P.Ran, String, P.Proc.run("sh", ["-c", (PT.Port.tmo() ++ "command -v tailscale >/dev/null && tmo 10 tailscale status --json")], "/"), st => IO.pure(String, Tailnet.out(st)))
+    case False{}:
+      IO.pure(String, "")
+
+# one period of TN.Pairing.plan; the machines list it last sent
+def Machines.run(ps: List<&2, TN.PStep>, +inbox: Chan(Msg), +ack: Chan(Unit), +on: Bool, +port: U32, +extra: String, +last: String) -> IO(String):
+  match ps:
+    case Nil{}:
+      IO.pure(String, last)
+    case TN.PFind{} <> t:
+      do IO<String>:
+        +st : String <- Machines.status(on)
+        found : String <- Machines.ask(on, st, port, extra)
+        now : String <- Machines.tell(inbox, found, last)
+        Machines.run(t, inbox, ack, on, port, extra, now)
+    case TN.PAsk{} <> t:
+      do IO<String>:
+        TN.Pairing.ask(u => Machines.pair(inbox, ack), ack)
+        Machines.run(t, inbox, ack, on, port, extra, last)
+    case TN.PWait{ms} <> t:
+      do IO<String>:
+        IO.sleep(U32.from_nat(ms))
+        Machines.run(t, inbox, ack, on, port, extra, last)
+
+def Machines.loop(fuel: Nat, +inbox: Chan(Msg), +ack: Chan(Unit), +on: Bool, +port: U32, +extra: String, +last: String) -> IO(Unit):
   match fuel:
     case 0n:
       IO.pure(Unit, Unit{})
     case 1n+f:
       do IO<Unit>:
-        st : P.Ran <- P.Proc.run("sh", ["-c", (PT.Port.tmo() ++ "command -v tailscale >/dev/null && tmo 10 tailscale status --json")], "/")
-        found : String <- Machines.ask(Tailnet.out(st), port, extra)
-        now : String <- Machines.tell(inbox, found, last)
-        IO.sleep(Machines.every())
-        Machines.loop(f, inbox, port, extra, now)
+        now : String <- Machines.run(TN.Pairing.plan(), inbox, ack, on, port, extra, last)
+        Machines.loop(f, inbox, ack, on, port, extra, now)
 
-def Machines.start(+inbox: Chan(Msg), +port: U32) -> IO(Unit):
+def Machines.start(+inbox: Chan(Msg), +on: Bool, +port: U32) -> IO(Unit):
   do IO<Unit>:
     extra : String <- Env.get("BACKPLANE_PEERS", "")
-    IO.spawn(Unit, Machines.loop(Fuel.forever(), inbox, port, extra, ""))
+    +ack : Chan(Unit) <- Chan.new(Unit, 1)
+    IO.spawn(Unit, Machines.loop(Fuel.forever(), inbox, ack, on, port, extra, ""))
 
 def Main.version() -> String:
   VR.Version.current()
@@ -11020,7 +11060,6 @@ def Hub.cad.request(h: Hub, +tool: String, +op: String) -> IO(Hub):
         IO.spawn(Unit, CadJob.ask(Cfg.home(cfg), tool, op, inbox))
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
 
-
 def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
   match h o:
     case Hub{+st, f, ls, cl, as, inbox, cfg, note} B.RunStart{+thread, conv, head}:
@@ -15128,11 +15167,12 @@ def Hub.dir.refresh(h: Hub, +peer: String) -> IO(Hub):
           J.Json.elems(Maybe.default(&2, J.Json, J.Json.parse(BN.Bn.dir(Cfg.bn(cfg))), J.Null{})), ps))))
         Hub.dir.queue(h2, BH.Dir.request(ps, peer))
 
-# Pairing the owner's machines (UC.Mate.*): each minute, every machine
-# of the owner's this hub should link to and is not linked to yet is
-# asked for an invite (POST /bots/pair), and the invite it answers is
-# joined like a pasted one. Only the minute asks, so two asks never
-# overlap (the ask and the link take at most 15 s each).
+# Pairing the owner's machines (UC.Mate.*): each minute (PairDue, from
+# Machines.loop only), every machine of the owner's this hub should link
+# to and is not linked to yet is asked for an invite (POST /bots/pair),
+# and the invite it answers is joined like a pasted one. Only that loop
+# asks, a minute apart, so two asks never overlap (the ask and the link
+# take at most 15 s each).
 # (own: the machine was asked over the tailnet, where Tailscale says whose
 # it is; one named in BACKPLANE_PEERS answered at a plain address, so its
 # link waits for the owner's word: UC.Far.unsure)
@@ -15177,21 +15217,35 @@ def Pair.named(ms: List<&2, J.Json>, +url: String) -> Bool:
     case +m <> t:
       Bool.or(Bool.and(String.eq(J.Json.get_str(m, "url", ""), url), J.Json.get_bool(m, "named", False{})), Pair.named(t, url))
 
-def Pair.go(ms: List<&2, UC.MRow>, +inbox: Chan(Msg), +cfg: Cfg) -> IO(Unit):
+# one round (TN.Pairing.one, close): every machine due asked at once, each in
+# its own job (its ask, and the link it joins, committed through the
+# inbox), ack once all are over, so the machines loop posts no next round
+# before this one is done and a slow machine never holds up a healthy one
+def Pair.spawn(ms: List<&2, UC.MRow>, +inbox: Chan(Msg), +cfg: Cfg, +done: Chan(Unit)) -> IO(Nat):
   match ms:
     case Nil{}:
-      IO.pure(Unit, Unit{})
+      IO.pure(Nat, 0n)
     case UC.MRow{_, +url, _} <> t:
-      do IO<Unit>:
-        IO.spawn(Unit, Pair.ask(url, TN.Tailnet.announce(Cfg.tailnet(cfg), J.Json.get_str(J.Json.get_obj(Far.machines(cfg), "self"), "url", "")), inbox, Cfg.home(cfg), Cfg.tailnet(cfg), Cfg.host(cfg), Cfg.port(cfg),
-          Net.token(Cfg.net(cfg)), Pair.named(J.Json.elems(J.Json.get_obj(Far.machines(cfg), "peers")), url)))
-        Pair.go(t, inbox, cfg)
+      do IO<Nat>:
+        IO.spawn(Unit, TN.Pairing.one(Pair.ask(url, TN.Tailnet.announce(Cfg.tailnet(cfg), J.Json.get_str(J.Json.get_obj(Far.machines(cfg), "self"), "url", "")), inbox, Cfg.home(cfg), Cfg.tailnet(cfg), Cfg.host(cfg), Cfg.port(cfg),
+          Net.token(Cfg.net(cfg)), Pair.named(J.Json.elems(J.Json.get_obj(Far.machines(cfg), "peers")), url)), done))
+        n : Nat <- Pair.spawn(t, inbox, cfg, done)
+        return Nat.add(n, 1n)
 
-def Hub.pair(h: Hub) -> IO(Hub):
+def Pair.round(ms: List<&2, UC.MRow>, +inbox: Chan(Msg), +cfg: Cfg, +ack: Chan(Unit)) -> IO(Unit):
+  do IO<Unit>:
+    +done : Chan(Unit) <- Chan.new(Unit, 256)
+    n : Nat <- Pair.spawn(ms, inbox, cfg, done)
+    TN.Pairing.close(n, done, ack)
+
+# (the machines to ask are read now, after every link an earlier round
+# joined was committed: that round's Commit reached the inbox before its
+# ack, so before this PairDue)
+def Hub.pair(h: Hub, +ack: Chan(Unit)) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, +inbox, +cfg, note}:
       do IO<Hub>:
-        Pair.go(UC.Mate.due(Cfg.tailnet(cfg), Far.machines(cfg), BO.World.peers(M.State.bots(st)), st), inbox, cfg)
+        IO.spawn(Unit, Pair.round(UC.Mate.due(Cfg.tailnet(cfg), Far.machines(cfg), BO.World.peers(M.State.bots(st)), st), inbox, cfg, ack))
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
 
 # The uberbot's sync (core/ubersync.bend, docs/uber.md)
@@ -15522,8 +15576,7 @@ def Hub.bot_tick(h: Hub, +tz: String, +now: Nat) -> IO(Hub):
     case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
       do IO<Hub>:
         h2 : Hub <- Hub.dir.refresh(Hub{st, f, ls, cl, as, inbox, cfg, note}, "")
-        h3 : Hub <- Hub.pair(h2)
-        h4s : Hub <- Hub.step(h3, BH.Bots.tick(st, now, BH.Tz{M.Snooze.tz.secs(tz), M.Snooze.tz.east(tz)}))
+        h4s : Hub <- Hub.step(h2, BH.Bots.tick(st, now, BH.Tz{M.Snooze.tz.secs(tz), M.Snooze.tz.east(tz)}))
         +every : String <- Env.get("BACKPLANE_WAKE_TICK_MS", "60000")
         h4 : Hub <- Hub.bot_wake(h4s, tz, Nat.add(now, Nat.div(U32.to_nat(WK.Wake.tick.ms(every)), 1000n)), now)
         h5 : Hub <- Hub.zone.tick(h4, now)
@@ -16534,6 +16587,31 @@ def Hub.bot.act(i: Nat, h: Hub, +arg: String, +body: String, +me: String, +reply
     case _ _:
       Hub.answer(h, reply, W.Http.text("404 Not Found", "not found"))
 
+# A genuine signed request from one of the owner's machines whose mirror
+# here is away is a return signal: its mirror is pulled now (one pull per
+# link at a time, Far.pull), not at this hub's next minute. A machine that
+# restarted was seen back only at that minute (60.0 s, lane B's
+# far_latency); its first request (the directory it asks for at start)
+# now brings it back. A mirror that is not away, or a link that is not
+# the owner's (Far.own.id), pulls nothing, so two hubs never bounce pulls.
+def Far.back.k(go: Bool, h: Hub, +link: String) -> IO(Hub):
+  match go:
+    case True{}:
+      Far.pull.here(h, link)
+    case False{}:
+      IO.pure(Hub, h)
+
+def Far.back.p(r: FR.In & Hub, own: Bool, +link: String) -> IO(Hub):
+  (i, h) = r
+  Far.back.k(Bool.and(own, FR.In.away(i)), h, link)
+
+def Far.back(peer: Bool, h: Hub, +link: String) -> IO(Hub):
+  match peer h:
+    case True{} Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      Far.back.p(Far.in.of(Far.fh(Hub{st, f, ls, cl, as, inbox, cfg, note}), link, link), Far.own.id(st, cfg, link), link)
+    case False{} _:
+      IO.pure(Hub, h)
+
 # a linked machine's genuine request that Tailscale says came from one of
 # the owner's own devices (Auth.owner.peer) makes its link one of the
 # owner's machines ("tailnet": UC.Far.own.key), unless this hub already
@@ -16560,7 +16638,8 @@ def Hub.bot.seen(bad: Bool, m: Maybe<&2, SG.Seen>, h: Hub, +why: String, +kind: 
           J.Json.elems(Maybe.default(&2, J.Json, J.Json.parse(BN.Bn.dir(Cfg.bn(cfg))), J.Null{})), arg)), inbox, arg)
         h2 : Hub <- Hub.bot.vouched(Bool.and(own, Bool.and(Bool.not(String.eq(kind, "hook")), String.is_empty(UC.Far.own.how(st, arg)))),
           Hub{st, f, ls, cl, as, inbox, Cfg.with_bn(cfg, BN.Bn.with_seen(Cfg.bn(cfg), s)), note}, arg, now)
-        Hub.bot.act(C.Codec.pos(["hook", "deliver", "link", "dir", "far-push", "far-log", "far-rpc"], kind), h2, arg, body, me, reply, now)
+        h3 : Hub <- Far.back(Bool.not(String.eq(kind, "hook")), h2, arg)
+        Hub.bot.act(C.Codec.pos(["hook", "deliver", "link", "dir", "far-push", "far-log", "far-rpc"], kind), h3, arg, body, me, reply, now)
 
 # a signed request (or a webhook's bearer token), checked: genuine (key),
 # not seen before, then acted on; a refusal says why
@@ -17164,7 +17243,6 @@ def Conn.devices.request(ok: Bool, s: Socket, +hs: List<&2, W.Header>, +op: Stri
 def Conn.devices.fallback(denied: Bool, +token: String, s: Socket, +req: W.Request, rest: List<&2, U32>, +web: String, +id: U32, +inbox: Chan(Msg), +trusted: Bool) -> IO(Unit):
   Conn.route.auth(String.eq(W.Http.route(Conn.devices.path(req)), "/auth/pair"), s, req, rest, web, id, inbox, Bool.and(trusted, Bool.not(denied)), token)
 
-
 def Conn.devices.dispatch(route: String, +token: String, s: Socket, +req: W.Request, rest: List<&2, U32>, +web: String, +id: U32, +inbox: Chan(Msg), +trusted: Bool) -> IO(Unit):
   match route req:
     case "/auth/invitations" W.Request{method, _, +hs}: Conn.devices.request(Bool.and(String.eq(method, "POST"), AUTH.Auth.cache_request("GET", hs, token)), s, hs, "create", "", inbox)
@@ -17174,7 +17252,6 @@ def Conn.devices.dispatch(route: String, +token: String, s: Socket, +req: W.Requ
       Bool.pick(String, String.is_empty(W.Http.header_of(hs, "x-backplane-invitation")), W.Http.header_of(hs, "x-backplane-device"), W.Http.header_of(hs, "x-backplane-invitation")), inbox)
     case "/auth/known" W.Request{method, _, +hs}: Conn.devices.request(Bool.and(String.eq(method, "POST"), AUTH.Auth.cache_request("GET", hs, token)), s, hs, "known", W.Http.header_of(hs, "x-backplane-origin"), inbox)
     case _ _: Conn.devices.fallback(String.is_empty(token), token, s, req, rest, web, id, inbox, trusted)
-
 
 def Conn.devices.gate(enroll: Bool, s: Socket, +req: W.Request, rest: List<&2, U32>, +web: String, +id: U32, +inbox: Chan(Msg), +trusted: Bool, +root: String) -> IO(Unit):
   match enroll req:
@@ -18568,6 +18645,8 @@ def Msg.kind(m: Msg) -> String:
       "checks_ask"
     case MachinesFound{_}:
       "machines"
+    case PairDue{_}:
+      "pair_due"
     case LinkFound{_}:
       "link"
     case TurnPid{_, _, _, _}:
@@ -19274,7 +19353,7 @@ def Listen.up(l: Listener, +web: String, +inbox: Chan(Msg), +cfg: Cfg, +addr: St
     Log.info("web server on: " ++ addr)
     IO.spawn(Unit, Accept.loop(Fuel.forever(), l, 1, web, inbox, True{}, Net.token(Cfg.net(cfg)), "", Nil{}))
     Tailnet.start(Cfg.net(cfg), Cfg.host(cfg), Cfg.port(cfg), web, inbox)
-    Machines.start(inbox, Cfg.port(cfg))
+    Machines.start(inbox, Cfg.tailnet(cfg), Cfg.port(cfg))
 
 def Listen.got(r: Result<&1, &1, U32 & String, Listener>, +web: String, +inbox: Chan(Msg), +cfg: Cfg, +addr: String, k: Unit -> IO(Unit)) -> IO(Unit):
   match r:
@@ -19957,6 +20036,8 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
       Hub.checks.ask(h, thread, hash, text, now)
     case MachinesFound{mc}:
       Hub.dir.returned(h, mc)
+    case PairDue{ack}:
+      Hub.pair(h, ack)
     case LinkFound{lk}:
       Hub.link(h, lk)
     case MailRecovered{changes}: Hub.mail.recovered(h, changes, now)
@@ -20147,7 +20228,7 @@ def Main.serve(l: Listener, h: Hub, +web: String, +inbox: Chan(Msg), +cfg: Cfg, 
     IO.spawn(Unit, AccountsJob.loop(Fuel.forever(), inbox, Cfg.home(cfg), ""))
     IO.spawn(Unit, Od.resume(inbox, Cfg.home(cfg)))
     Self.post(inbox, KProbe{True{}})
-    Machines.start(inbox, Cfg.port(cfg))
+    Machines.start(inbox, Cfg.tailnet(cfg), Cfg.port(cfg))
     IO.spawn(Unit, Hub.loop(Fuel.forever(), h, inbox, tok))
     Upgrade.start(cfg, inbox)
     front(inbox)

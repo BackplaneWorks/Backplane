@@ -110,6 +110,24 @@ def Tailnet.online(ms: List<&2, Machine>) -> List<&2, Machine>:
     case Machine{n, +ip, +on} <> t:
       Tailnet.online.k(Bool.and(on, Bool.not(String.is_empty(ip))), Machine{n, ip, on}, Tailnet.online(t))
 
+# What the machines list (server.bend's Machines.loop) is built from: the
+# hub's `tailscale status --json`, or nothing for a hub started with
+# --no-tailscale (on False). Such a hub neither runs Tailscale nor asks the
+# owner's tailnet machines GET /hello: it asks only the hubs BACKPLANE_PEERS
+# names, and names itself by its loopback address (Machines.me), so a
+# throwaway hub never reaches the owner's real machines and never waits on
+# one that does not answer.
+def Tailnet.seen(on: Bool, +status: String) -> String:
+  match on:
+    case True{}:
+      status
+    case False{}:
+      ""
+
+# the tailnet machines the machines list asks GET /hello
+def Tailnet.asked(on: Bool, +status: String) -> List<&2, Machine>:
+  Tailnet.online(Tailnet.peers(Tailnet.seen(on, status)))
+
 # the tailnet's MagicDNS domain ("box.tail1.ts.net." → "tail1.ts.net"):
 # every machine on it is named <host>.<domain>
 def Tailnet.domain.of(+dns: String) -> String:
@@ -197,3 +215,117 @@ def Tailnet.serve.of(o: J.Json, +port: String) -> String:
 # the hub's HTTPS address, "" when no entry proxies to its port
 def Tailnet.serve(+status: String, +port: String) -> String:
   Tailnet.serve.of(J.Json.get_obj(Maybe.default(&2, J.Json, J.Json.parse(status), J.Null{}), "Web"), port)
+
+# Pairing's schedule
+# ------------------
+# What server.bend's Machines.loop does each period, in order: find the
+# machines (tailscale status, GET /hello) and hand the list to the hub,
+# ask the hub to pair at once (PairDue: the list is already there, sent
+# first on the same channel), wait half a period, ask again, wait again.
+# Nothing else asks the hub to pair, so two asks are at least half a
+# period (60 s) apart however long finding the machines takes (a late
+# first list included), and the first ask follows the first list at once;
+# each ask also waits for the hub's round to end (Pairing.ask), so rounds
+# never overlap even when the hub's handling of them is late. Tailnet.asks runs this plan on given discovery times (laws:
+# test/tailnet_seen_test.bend).
+type PStep is Data:
+  PFind{}
+  PAsk{}
+  PWait{ms: Nat}
+
+# One pairing round, acknowledged: post asks the hub to pair (server.bend's
+# PairDue), then this waits until the hub says the round is over (every
+# ask it made has come back and any link it joined is committed: Pair.round
+# sends on ack last). The next round is posted only after that, so however
+# long the hub's inbox holds a PairDue (its handling stalled), at most one
+# is ever outstanding, and two rounds never ask the same machine at once;
+# a round that failed is simply asked again by the next. A round's remote
+# steps are bounded (curl -m 15, tmo 5); its local ones (hostname, the
+# peer file, the inbox) are not time-limited, so a hung local step would
+# hold the machines loop too.
+def Pairing.ask(post: Unit -> IO(Unit), +ack: Chan(Unit)) -> IO(Unit):
+  do IO<Unit>:
+    post(Unit{})
+    m : Maybe<&1, Unit> <- Chan.recv(Unit, ack)
+    return Unit{}
+
+# A round (server.bend's Pair.round): every machine due is asked at once,
+# each in its own job, and ack is sent once all are over (a barrier). A
+# slow machine never delays a healthy one; the round, and with it the
+# next, waits only for the slowest. Each machine is in one job only, so
+# none is asked twice at once.
+# (the caller spawns one Pairing.one per machine, counts them, then
+# Pairing.close: a function value cannot be shared among the jobs)
+def Pairing.one(ask: IO(Unit), +done: Chan(Unit)) -> IO(Unit):
+  do IO<Unit>:
+    ask
+    ok : Result<&1, &1, Unit, Unit> <- Chan.send(Unit, done, Unit{})
+    return Unit{}
+
+def Pairing.wait(n: Nat, +done: Chan(Unit)) -> IO(Unit):
+  match n:
+    case 0n:
+      IO.pure(Unit, Unit{})
+    case 1n+m:
+      IO.bind(Maybe<&1, Unit>, Unit, Chan.recv(Unit, done), x => Pairing.wait(m, done))
+
+# the barrier: once the round's n jobs are over, ack
+def Pairing.close(n: Nat, +done: Chan(Unit), +ack: Chan(Unit)) -> IO(Unit):
+  do IO<Unit>:
+    Pairing.wait(n, done)
+    ok : Result<&1, &1, Unit, Unit> <- Chan.send(Unit, ack, Unit{})
+    return Unit{}
+
+def Pairing.half() -> Nat:
+  60000n
+
+def Pairing.plan() -> List<&2, PStep>:
+  [PFind{}, PAsk{}, PWait{Pairing.half()}, PAsk{}, PWait{Pairing.half()}]
+
+# one period of a plan from time t, its finding taking f: the times it asks
+def Pairing.period.asks(ps: List<&2, PStep>, +f: Nat, +t: Nat) -> List<&2, Nat>:
+  match ps:
+    case Nil{}:
+      Nil{}
+    case PFind{} <> rest:
+      Pairing.period.asks(rest, f, Nat.add(t, f))
+    case PAsk{} <> rest:
+      t <> Pairing.period.asks(rest, f, t)
+    case PWait{ms} <> rest:
+      Pairing.period.asks(rest, f, Nat.add(t, ms))
+
+# and when it ends
+def Pairing.period.end(ps: List<&2, PStep>, +f: Nat, +t: Nat) -> Nat:
+  match ps:
+    case Nil{}:
+      t
+    case PFind{} <> rest:
+      Pairing.period.end(rest, f, Nat.add(t, f))
+    case PAsk{} <> rest:
+      Pairing.period.end(rest, f, t)
+    case PWait{ms} <> rest:
+      Pairing.period.end(rest, f, Nat.add(t, ms))
+
+# the times (ms from start) Pairing.plan asks, when each period's finding
+# takes the given time; one period per entry of finds
+def Tailnet.asks(finds: List<&2, Nat>, +t: Nat) -> List<&2, Nat>:
+  match finds:
+    case Nil{}:
+      Nil{}
+    case +f <> rest:
+      List.append(&2, Nat, Pairing.period.asks(Pairing.plan(), f, t), Tailnet.asks(rest, Pairing.period.end(Pairing.plan(), f, t)))
+
+# every two asks at least `gap` apart (asks in time order)
+def Tailnet.apart.k(ts: List<&2, Nat>, +a: Nat, +gap: Nat) -> Bool:
+  match ts:
+    case Nil{}:
+      True{}
+    case +b <> rest:
+      Bool.and(Nat.is_ge(Nat.sub(b, a), gap), Tailnet.apart.k(rest, b, gap))
+
+def Tailnet.apart(ts: List<&2, Nat>, +gap: Nat) -> Bool:
+  match ts:
+    case Nil{}:
+      True{}
+    case +a <> rest:
+      Tailnet.apart.k(rest, a, gap)
