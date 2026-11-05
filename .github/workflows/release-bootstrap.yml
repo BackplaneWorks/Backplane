@@ -8,6 +8,10 @@ on:
       sha256: {type: string, required: true}
       bytes: {type: string, required: true}
       name: {type: string, required: true}
+      phone_asset_id: {type: string, required: true}
+      phone_sha256: {type: string, required: true}
+      phone_bytes: {type: string, required: true}
+      phone_name: {type: string, required: true}
 permissions:
   contents: read
 concurrency:
@@ -16,11 +20,13 @@ concurrency:
 jobs:
   intake:
     runs-on: ubuntu-24.04
-    timeout-minutes: 8
+    timeout-minutes: 12
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with: {ref: '${{ github.sha }}', persist-credentials: false}
-      - name: Read exact draft and asset with unchanged read token; verify SHA before transfer
+      - name: Read exact draft and both approved assets; verify SHA before transfer (GET only)
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -29,9 +35,14 @@ jobs:
           EXPECTED_SHA: ${{ inputs.sha256 }}
           EXPECTED_BYTES: ${{ inputs.bytes }}
           EXPECTED_NAME: ${{ inputs.name }}
+          PHONE_ASSET_ID: ${{ inputs.phone_asset_id }}
+          PHONE_SHA: ${{ inputs.phone_sha256 }}
+          PHONE_BYTES: ${{ inputs.phone_bytes }}
+          PHONE_NAME: ${{ inputs.phone_name }}
         run: |
           set -euo pipefail
           systemd-run --user --scope -q -p MemoryAccounting=yes -p MemoryMax=536870912 -p MemorySwapMax=0 -- python3 extra/recut951-intake/seed_intake.py --release-id "$RELEASE_ID" --asset-id "$ASSET_ID" --sha256 "$EXPECTED_SHA" --bytes "$EXPECTED_BYTES" --name "$EXPECTED_NAME" --out "$GITHUB_WORKSPACE/build/seed"
+          systemd-run --user --scope -q -p MemoryAccounting=yes -p MemoryMax=536870912 -p MemorySwapMax=0 -- python3 extra/recut951-intake/seed_intake.py --release-id "$RELEASE_ID" --asset-id "$PHONE_ASSET_ID" --sha256 "$PHONE_SHA" --bytes "$PHONE_BYTES" --name "$PHONE_NAME" --out "$GITHUB_WORKSPACE/build/phone"
       - uses: actions/upload-artifact@v4
         id: seed
         with:
@@ -41,9 +52,19 @@ jobs:
           retention-days: 1
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
+        id: phone
+        with:
+          name: 0142-recut951-phone-inputs
+          path: build/phone/seed-inputs.tar.gz
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: 0142-recut951-intake-evidence
-          path: build/seed/INTAKE.json
+          path: |
+            build/seed/INTAKE.json
+            build/phone/INTAKE.json
           retention-days: 1
           if-no-files-found: warn
