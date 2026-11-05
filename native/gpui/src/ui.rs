@@ -93,7 +93,7 @@ impl Render for Backplane {
             if name == "BOTS" {
                 for ((bname, mood, note, _), rig) in bot_data.iter().zip(bot_rigs.iter()) {
                     let note_color = match mood.as_str() { "wait" | "error" => c("bad"), "work" | "talk" => c("accent"), _ => c("faint") };
-                    rows.push(div().flex().items_center().gap_2().px_3().py(px(3.)).child(art::cat(rig.clone(), mood, 28., started))
+                    rows.push(div().flex().items_center().gap_2().px_3().py(px(3.)).child(art::cat(rig.clone(), mood, 28., started, format!("cat:{bname}")))
                         .child(div().flex().flex_col().min_w_0().line_height(px(18.)).child(div().overflow_hidden().whitespace_nowrap().child(bname.clone()))
                             .child(div().text_size(px(11.)).text_color(note_color).child(note.clone()))).into_any_element());
                 }
@@ -165,7 +165,7 @@ impl Render for Backplane {
             // top bar
             .child(div().h(px(36.)).flex_shrink_0().flex().items_center().justify_between().px_3().border_b_1().border_color(c("line")).bg(c("bg"))
                 .child(div().flex().items_center().gap_2()
-                    .child(div().relative().size(px(18.)).child(art::logo(light, 18.))
+                    .child(div().relative().size(px(18.)).child(art::logo(light, 18., "logo"))
                         .child(div().absolute().right(px(-2.)).bottom(px(-1.)).size(px(6.)).bg(if connected { c("ok") } else { c("bad") })))
                     .child(div().font_weight(FontWeight::BOLD).child("Backplane"))
                     .child(div().text_color(c("faint")).child("/")).child(div().text_color(c("dim")).child(if has_thread { "Project".to_string() } else { "Projects".to_string() }))
