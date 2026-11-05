@@ -205,7 +205,7 @@ private fun OpeningDestination(m: AppModel, s: Screen, o: Core.Opening) {
             else if (t != null) ThreadScreen(m, page ?: s.copy(thread = t, bot = null), t)
             else Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    if (o.cat.isNotEmpty()) BotCat(m, o.cat, 48.dp)
+                    if (o.cat.isNotEmpty()) BotCat(m, o.cat, 40.dp)
                     Text(o.title, style = MaterialTheme.typography.titleLarge)
                 }
                 repeat(6) {
@@ -727,12 +727,15 @@ internal fun Projects(m: AppModel, s: Screen, onPair: () -> Unit, state: LazyLis
         topBar = {
             TopAppBar(
                 title = {
-                    Column {
-                        Text(NativeMessages.tour_title_threads(lang))
-                        val online = s.online && m.linkUp(s.hub)
-                        Text(NativeMessages.native_thread_online(lang, if (online) "online" else "connecting"),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = if (online) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline)
+                    val online = s.online && m.linkUp(s.hub)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        BrandMark(online)
+                        Column {
+                            Text(NativeMessages.tour_title_threads(lang))
+                            Text(NativeMessages.native_thread_online(lang, if (online) "online" else "connecting"),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = if (online) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline)
+                        }
                     }
                 },
                 actions = {
