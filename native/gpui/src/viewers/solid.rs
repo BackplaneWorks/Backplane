@@ -225,14 +225,14 @@ pub fn to_image(bgra: Vec<u8>, w: usize, h: usize) -> Option<Arc<RenderImage>> {
 }
 
 // ---- the worker: latest request wins -------------------------------------------------------------------------------
-enum Msg { Mesh(SolidFrame), Image { gen: u64, image: Arc<RenderImage>, ms: f64, tris: usize, w: usize, h: usize } }
+enum Msg { Mesh(SolidFrame), Image { ticket: u64, image: Arc<RenderImage>, ms: f64, tris: usize, w: usize, h: usize } }
 #[derive(Default)] struct Pending { frame: Option<Vec<u8>>, render: Option<(Arc<Mesh>, Camera, usize, usize, u64)>, shutdown: bool }
-struct Worker { slot: Arc<(Mutex<Pending>, Condvar)>, gen: Arc<AtomicU64> }
+struct Worker { slot: Arc<(Mutex<Pending>, Condvar)>, ticket: Arc<AtomicU64> }
 impl Worker {
     fn spawn(tx: async_channel::Sender<Msg>) -> Worker {
         let slot: Arc<(Mutex<Pending>, Condvar)> = Arc::new((Mutex::new(Pending::default()), Condvar::new()));
-        let gen = Arc::new(AtomicU64::new(0));
-        let (s2, g2) = (slot.clone(), gen.clone());
+        let ticket = Arc::new(AtomicU64::new(0));
+        let (s2, g2) = (slot.clone(), ticket.clone());
         std::thread::Builder::new().name("solid-render".into()).spawn(move || loop {
             let job = { let (m, cv) = &*s2; let mut p = m.lock().unwrap();
                 while p.frame.is_none() && p.render.is_none() && !p.shutdown { p = cv.wait(p).unwrap(); }
@@ -242,20 +242,20 @@ impl Worker {
                 let t0 = std::time::Instant::now();
                 let g = g2.clone();
                 if let Some(px) = render(&mesh, &cam, w, h, &move || g.load(Ordering::Relaxed) == my) {
-                    if let Some(image) = to_image(px, w, h) { if tx.send_blocking(Msg::Image { gen: my, image, ms: t0.elapsed().as_secs_f64() * 1000.0, tris: mesh.tris.len(), w, h }).is_err() { return } }
+                    if let Some(image) = to_image(px, w, h) { if tx.send_blocking(Msg::Image { ticket: my, image, ms: t0.elapsed().as_secs_f64() * 1000.0, tris: mesh.tris.len(), w, h }).is_err() { return } }
                 }
             }
         }).ok();
-        Worker { slot, gen }
+        Worker { slot, ticket }
     }
     fn submit_frame(&self, bytes: Vec<u8>) { let (m, cv) = &*self.slot; m.lock().unwrap().frame = Some(bytes); cv.notify_one(); }
     /// Ask for an image of `mesh`; any earlier request still rendering is abandoned.
     fn submit_render(&self, mesh: Arc<Mesh>, cam: Camera, w: usize, h: usize) -> u64 {
-        let gen = self.gen.fetch_add(1, Ordering::Relaxed) + 1;
-        let (m, cv) = &*self.slot; m.lock().unwrap().render = Some((mesh, cam, w, h, gen)); cv.notify_one(); gen
+        let ticket = self.ticket.fetch_add(1, Ordering::Relaxed) + 1;
+        let (m, cv) = &*self.slot; m.lock().unwrap().render = Some((mesh, cam, w, h, ticket)); cv.notify_one(); ticket
     }
 }
-impl Drop for Worker { fn drop(&mut self) { let (m, cv) = &*self.slot; m.lock().unwrap().shutdown = true; self.gen.fetch_add(1, Ordering::Relaxed); cv.notify_one(); } }
+impl Drop for Worker { fn drop(&mut self) { let (m, cv) = &*self.slot; m.lock().unwrap().shutdown = true; self.ticket.fetch_add(1, Ordering::Relaxed); cv.notify_one(); } }
 
 // ---- the page ---------------------------------------------------------------------------------------------------------
 #[derive(Clone, Copy, PartialEq)] enum Drag { Orbit, Pan }
@@ -295,8 +295,8 @@ impl SolidPage {
                 self.key = key; self.note = if self.mesh.is_some() { format!("{why} — previous saved revision shown") } else { why }; cx.notify();
             }
             Msg::Mesh(SolidFrame::Bad(e)) => { self.note = e; cx.notify(); }
-            Msg::Image { gen, image, ms, tris, w, h } => {
-                if gen != self.want_gen { self.retired.push(image); cx.notify(); return } // a newer request exists: this one is stale
+            Msg::Image { ticket, image, ms, tris, w, h } => {
+                if ticket != self.want_gen { self.retired.push(image); cx.notify(); return } // a newer request exists: this one is stale
                 if let Some(old) = self.image.replace(image) { self.retired.push(old); }
                 self.stats = Stats { images: self.stats.images + 1, last_ms: ms, last_tris: tris, last_size: (w, h) }; cx.notify();
             }
