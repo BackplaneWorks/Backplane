@@ -90,13 +90,14 @@ impl Backplane {
         if self.screens.solid.is_none() { self.screens.solid = Some(cx.new(crate::viewers::solid::SolidPage::new)); }
         let solid = self.screens.solid.clone().unwrap();
         if let Some(k) = crate::viewers::solid::peek_key(&bytes) { eprintln!("GPUI_LOG {{\"plot_frame\":{{\"key\":{},\"bytes\":{}}}}}", serde_json::Value::String(k), bytes.len()); }
-        let Some(bytes) = solid.update(cx, |p, _| p.accept(bytes)) else { cx.notify(); return };
+        let key = crate::viewers::solid::peek_key(&bytes);
+        let Some(bytes) = solid.update(cx, |p, _| p.accept(bytes)) else { if let Some(k) = key { self.screens.solid_key = k; } cx.notify(); return };
         if let Err(e) = self.screens.plot.receive(&bytes) { eprintln!("GPUI_LOG {{\"plot\":\"{e}\"}}"); }
     }
     /// The Browser page exists while the Browser kind is open (one per thread, polling only while shown); the hub's page owner is the thread for now.
     pub(crate) fn browser_page(&mut self, cx: &mut Context<Self>) {
         let open = self.data["thread"]["viewer"]["open"].as_str() == Some("browser");
-        let owner = self.selected.clone();
+        let owner = browser_owner(&self.data, &self.selected);
         if let Some((o, page)) = &self.screens.browser { if *o != owner || !open { let page = page.clone(); page.update(cx, |p, _| p.set_visible(false)); if *o != owner { self.screens.browser = None; } } }
         if !open || owner.is_empty() { return; }
         if self.screens.browser.is_none() {
@@ -109,4 +110,24 @@ impl Backplane {
         if let Some((_, page)) = &self.screens.browser { page.update(cx, |p, _| p.set_visible(true)); }
     }
 
+}
+
+/// Who owns the page the Browser tab shows: a bot's id on a bot's screen, else the thread's own id (as the hub's `BT.World.page` names it),
+/// without the `<hub>|` a phone-style id may carry.
+pub fn browser_owner(data: &serde_json::Value, selected: &str) -> String {
+    if data["bot"]["kind"] == "bot" { if let Some(id) = data["bot"]["id"].as_str().filter(|s| !s.is_empty()) { return id.rsplit('|').next().unwrap_or(id).to_string(); } }
+    selected.rsplit('|').next().unwrap_or(selected).to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use core::prelude::v1::test;
+    #[test] fn the_browser_pages_owner_is_the_bot_on_a_bots_screen_else_the_thread_without_its_hub() {
+        let d = |s: &str| serde_json::from_str::<serde_json::Value>(s).unwrap();
+        assert_eq!(browser_owner(&d(r#"{"bot":{"kind":"bot","id":"b7"}}"#), "t1"), "b7");
+        assert_eq!(browser_owner(&d(r#"{"bot":null}"#), "t1"), "t1");
+        assert_eq!(browser_owner(&d(r#"{}"#), "127.0.0.1:3833|t1"), "t1", "a qualified thread id is stripped");
+        assert_eq!(browser_owner(&d(r#"{"bot":{"kind":"bot","id":"h:1|b7"}}"#), "t1"), "b7");
+    }
 }
