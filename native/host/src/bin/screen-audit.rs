@@ -10,11 +10,13 @@
 #[path="../sidebar.rs"] mod sidebar;
 #[path="../session/slash.rs"] mod slash;
 #[path="../session/composer.rs"] pub mod composer;
-mod session { pub use crate::composer; }
+#[path="../session/patch.rs"] pub mod patch;
+mod session { pub use crate::{composer, patch}; }
 #[path="../present/tz.rs"] mod tz;
 #[path="../present/keys.rs"] mod keys;
 #[path="../present/thread.rs"] mod thread;
 #[path="../present/window.rs"] mod window;
+#[path="../present/viewer.rs"] mod viewer;
 use serde_json::json;
 use std::{collections::{BTreeMap,HashSet},path::Path};
 fn main() -> anyhow::Result<()> {
