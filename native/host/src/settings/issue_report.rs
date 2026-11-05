@@ -61,6 +61,30 @@ pub fn prompt(description: &str, os_: &str, version_: &str, evidence: &str, diag
     format!("{RULES}\nReport template v{TEMPLATE_VERSION}\n{TEMPLATE}\nSupplied Unslop skill, verbatim\n{UNSLOP}\nSupplied OS family\n{}\nSupplied app version\n{}\nSupplied evidence\n{evidence}\nSupplied optional diagnostics JSON\n{diagnostics}\nOriginal description, verbatim, until end of input\n{description}", os(os_), version(version_))
 }
 
+const METRICS: &[&str] = &["hub.rpc","hub.mcp","hub.tick","hub.join","hub.mobile_join","hub.join_here","hub.leave","hub.thin-read","hub.agent_line","hub.agent_gone","hub.heart","hub.commit","hub.push","hub.push_bin","hub.step.busy","hub.step.far","hub.step.outs","hub.step.pend","hub.step.commit","boot.store","boot.replay","boot.files","boot.kicad","boot.cfg","boot.thin","boot.mail","boot.origin","boot.helpers","boot.adopt","boot.listen","thin.warm","mail.warm","hub.clients","hub.agents","hub.busy","connection.join","connection.mobile_join","connection.leave","connection.drop","connection.connect","connection.disconnect","connection.reconnect","connection.failed"];
+const ERRORS: &[&str] = &["store_write","mail_append","disk_full","io","timeout","protocol","agent_exit","log_error","log_warn"];
+
+/// safeHubDiagnostics (web/issue-report.js): rebuild at most the newest 48 records from a closed list of names, codes and numbers; nothing else survives.
+pub fn safe_hub(doc: &Value) -> Vec<Value> {
+    let rows = doc.get("records").and_then(Value::as_array).or_else(|| doc.get("events").and_then(Value::as_array)).cloned().unwrap_or_default();
+    let skip = rows.len().saturating_sub(48);
+    let mut out = vec![];
+    for x in rows.into_iter().skip(skip) {
+        let Some(o) = x.as_object() else { continue };
+        let mut r = serde_json::Map::new();
+        if let Some(e) = o.get("event").and_then(Value::as_str).filter(|e| ["span", "latency", "error", "connection", "sample"].contains(e)) { r.insert("event".into(), json!(e)); }
+        if let Some(n) = o.get("name").and_then(Value::as_str).filter(|n| METRICS.contains(n)) { r.insert("name".into(), json!(n)); }
+        if let Some(c) = o.get("code").and_then(Value::as_str).filter(|c| ERRORS.contains(c)) { r.insert("code".into(), json!(c)); }
+        for k in ["at", "ms", "durationMs", "count", "maxMs", "meanMs", "p90Ms", "value", "us"] {
+            if let Some(n) = o.get(k).and_then(Value::as_f64).filter(|n| n.is_finite() && *n >= 0.0 && *n <= 1e12) { r.insert(k.into(), o[k].clone()); let _ = n; }
+        }
+        if r.contains_key("event") && (r.contains_key("name") || r.contains_key("code")) { out.push(Value::Object(r)); }
+    }
+    out
+}
+/// diagnosticReport for a client with no connection ring of its own (the GPUI app): schema 1, no connections, the hub's records allowlisted again.
+pub fn diagnostic_report(hub_doc: &Value) -> String { serde_json::to_string_pretty(&json!({"schema": 1, "connection": [], "hub": safe_hub(hub_doc)})).unwrap_or_default() }
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -98,6 +122,18 @@ mod tests {
         let d = "line one\r\n  two \u{1F600}"; let p = prompt(d, "linux", "0.14.0", "ev", "diag");
         assert!(p.ends_with(&format!("\nOriginal description, verbatim, until end of input\n{d}")));
         assert!(p.starts_with("Write an editable Backplane issue report") && p.contains("\nSupplied evidence\nev\nSupplied optional diagnostics JSON\ndiag"));
+    }
+    #[test] fn the_diagnostics_report_keeps_only_closed_names_and_numbers() {
+        let doc = json!({"events":[
+            {"event":"latency","name":"hub.rpc","count":2,"meanMs":3.5,"us":7000,"secret":"x","text":"hello"},
+            {"event":"latency","name":"hub.rpc user text","count":1}, {"event":"error","code":"free text"}, {"event":"nope","name":"hub.rpc"},
+            {"event":"error","code":"io","count":-1,"at":1e13}, "str", null,
+            {"event":"sample","name":"hub.clients","value":4}]});
+        let r = safe_hub(&doc);
+        assert_eq!(r, vec![json!({"event":"latency","name":"hub.rpc","count":2,"meanMs":3.5,"us":7000}), json!({"event":"error","code":"io"}), json!({"event":"sample","name":"hub.clients","value":4})]);
+        assert!(!diagnostic_report(&doc).contains("hello") && !diagnostic_report(&doc).contains("secret"));
+        let many = json!({"events": (0..100).map(|i| json!({"event":"sample","name":"hub.busy","value":i})).collect::<Vec<_>>()}); let r = safe_hub(&many); assert_eq!((r.len(), r[0]["value"].clone()), (48, json!(52)));
+        assert_eq!(serde_json::from_str::<Value>(&diagnostic_report(&json!({}))).unwrap(), json!({"schema":1,"connection":[],"hub":[]}));
     }
     #[test] fn target_defaults_to_the_public_issue() { assert_eq!((target("", false), target("internal", false), target("x", true), target("issue", true)), ("issue", "internal", "internal", "issue")); }
 }
