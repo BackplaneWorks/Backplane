@@ -36,6 +36,11 @@ pub fn diff_files(diff: &Value) -> Vec<DiffFile> {
 /// The sign and the kind of colour a diff line takes: 1 added, 2 removed, 4 a hunk header, the rest context.
 pub fn diff_sign(k: u32) -> &'static str { match k { 1 => "+", 2 => "-", _ => " " } }
 
+/// The kind the viewer shows: the hub's marked tab, or the one just pressed until the hub answers.
+pub fn active_kind(viewer: &Value, pending: Option<&str>) -> String {
+    pending.map(str::to_string).unwrap_or_else(|| tabs(viewer).into_iter().find(|t| t.on).map(|t| t.value).unwrap_or_default())
+}
+
 /// Whether the panel is open: a viewer page is on, or the thread has a diff.
 pub fn is_open(thread: &Value) -> bool { thread["diff"].is_object() || thread["viewer"]["open"].as_str().map_or(false, |o| !o.is_empty()) }
 
@@ -157,6 +162,10 @@ mod tests {
     #[test] fn opening_and_closing_are_the_idempotent_view_action_never_a_toggle() {
         for c in [view_kind("board"), view_kind("board"), view_kind("schematic")] { match c { Command::Action(a, v) => { assert_eq!(a, "view"); assert!(v == "board" || v == "schematic"); } c => panic!("{c:?}") } }
         match close() { Command::Action(a, v) => assert_eq!((a.as_str(), v.as_str()), ("view", "")), c => panic!("{c:?}") }
+    }
+    #[test] fn the_pressed_kind_shows_at_once_then_the_hubs_mark_does() {
+        let v = j(r#"{"choices":[{"label":"Board","value":"board","on":false},{"label":"Files","value":"files","on":true}]}"#);
+        assert_eq!(active_kind(&v, None), "files"); assert_eq!(active_kind(&v, Some("board")), "board"); assert_eq!(active_kind(&Value::Null, None), "");
     }
     #[test] fn the_panel_is_open_for_a_page_or_a_diff_only() {
         assert!(is_open(&j(r#"{"viewer":{"open":"board"}}"#))); assert!(is_open(&j(r#"{"diff":{"summary":"","files":[]}}"#)));

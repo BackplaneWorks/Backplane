@@ -246,7 +246,7 @@ impl Backplane {
         use crate::hub::Command;
         match ctl {
             Ctl::None => "none".into(),
-            Ctl::Rail(kind) => { let _ = self.tx.try_send(crate::screens::viewer::view_kind(kind)); self.ui_epoch += 1; "view.action view".into() }
+            Ctl::Rail(kind) => { self.screens.rail_pending = Some(kind.clone()); self.screens.plot_click = matches!(kind.as_str(), "board" | "schematic").then(Instant::now); let _ = self.tx.try_send(crate::screens::viewer::view_kind(kind)); self.ui_epoch += 1; "view.action view".into() }
             Ctl::PickFiles => { self.pick_files(cx); self.ui_epoch += 1; "attach picker".into() }
             Ctl::ToggleSidebar => { self.sidebar_open = !self.sidebar_open; self.ui_epoch += 1; cx.notify(); "toggle sidebar".into() }
             Ctl::Select(id) => { self.select_id(id.clone(), cx); "view.open thread".into() }
