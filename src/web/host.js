@@ -2395,7 +2395,7 @@ const PRESS_PICKS = ['aside.sidebar [data-on-click="select"]', 'aside.sidebar [d
   '.workspace-bar button[data-on-click="view-kind"]', '.workspace-bar button[data-on-click="fm"]', '.workspace-bar button[data-on-click="diff"]',
   '.workspace-bar button[data-on-click="mech"]', '.workspace-bar button[data-on-click="rv-page"]',
   'button.model-chip[data-on-click="flag"]', 'button.tok-chip[data-on-click="flag"]', 'button.account-chip[data-on-click="acct-open"]',
-  'button.gear[data-on-click="flag"]', 'button[data-on-click="ws-palette-open"]',
+  'button.gear[data-on-click="flag"]', 'button[data-on-click="ws-palette-open"]', 'button.find-open[data-on-click="thin-search-open"]',
   // (a run of tool calls' head and Settings' categories, as disclosures do)
   '#timeline button.fold[data-on-click="fold"]', '#settings-content [data-on-click="settings-page"]', '.settings-path [data-on-click="settings-page"]', '.settings-side [data-on-click="settings-page"]', '.topbar .crumbs [data-on-click="settings-page"]'].join(", ");
 let pressedPick = null, pressedMenu = null, pickedTimer = 0;
@@ -2427,7 +2427,9 @@ document.addEventListener("pointerdown", e => {
   if (summary) { const menu = summary.parentElement;menu.open = !menu.open;pressedMenu = { menu, at: e.timeStamp };return; }
   const el = e.target.closest?.(PRESS_PICKS);
   if (!el || el.disabled || el.closest('[draggable="true"]') || el.closest("aside.sidebar") && !el.getAttribute("data-value")) return;
-  pressedPick = { action: el.getAttribute("data-on-click"), value: el.getAttribute("data-value"), at: e.timeStamp };
+  pressedPick = { action: el.getAttribute("data-on-click"), value: el.getAttribute("data-value"), at: e.timeStamp, x: e.clientX, y: e.clientY };
+  // (Search's field takes the keyboard now: the press's own focus would take it back)
+  if (pressedPick.action === "thin-search-open") e.preventDefault();
   markPicked(el);
   dispatch(phoneClickAction(document, el, el.getAttribute("data-on-click")), valueOf(el));
   renderNow();
@@ -2441,8 +2443,10 @@ for (const ev of EVENTS) {
     const el = e.target.closest?.(`[data-on-${ev}]`);
     if (ev === "click" && pressedPick) {
       const p = pressedPick;pressedPick = null;
-      // (the same row, drawn again or not since the press)
-      if (el && el.getAttribute("data-on-click") === p.action && el.getAttribute("data-value") === p.value && e.timeStamp - p.at < 2000) return;
+      // (the same row, drawn again or not since the press; or whatever is
+      // there now: the hub's view may have landed before the click did, and
+      // a tab that opened the viewer is by then the one that shuts it)
+      if (e.timeStamp - p.at < 2000 && (el && el.getAttribute("data-on-click") === p.action && el.getAttribute("data-value") === p.value || e.detail > 0 && Math.abs(e.clientX - p.x) < 8 && Math.abs(e.clientY - p.y) < 8)) return;
     }
     if (!el) return;
     const action = el.getAttribute(`data-on-${ev}`);
