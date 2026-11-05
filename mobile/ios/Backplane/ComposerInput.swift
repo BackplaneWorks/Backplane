@@ -93,6 +93,8 @@ struct UIKitField: UIViewRepresentable {
         v.textContainerInset = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
         v.textContainer.lineFragmentPadding = 0
         v.isScrollEnabled = false
+        // TextKit lays out only the visible part of a long text
+        v.layoutManager.allowsNonContiguousLayout = true
         v.autocorrectionType = .default
         v.accessibilityIdentifier = "thread.composer"
         let label = UILabel()
@@ -114,9 +116,28 @@ struct UIKitField: UIViewRepresentable {
         v.viewWithTag(77)?.isHidden = !text.isEmpty
     }
 
+    // BACKPLANE_UIKIT_FAST=0 (debug) restores the full measurement, for the A/B in results/ios/keys
+    static let fast: Bool = {
+        #if DEBUG
+        return ProcessInfo.processInfo.environment["BACKPLANE_UIKIT_FAST"] != "0"
+        #else
+        return true
+        #endif
+    }()
+
     func sizeThatFits(_ proposal: ProposedViewSize, uiView v: UITextView, context: Context) -> CGSize? {
         let width = proposal.width ?? 280
         let line = v.font?.lineHeight ?? 20
+        #if DEBUG
+        let t0 = CACurrentMediaTime()
+        defer { if Stall.on { NSLog("Backplane field sizeThatFits %.1f ms bytes=%d fast=%@", (CACurrentMediaTime() - t0) * 1000, text.utf8.count, String(Self.fast)) } }
+        #endif
+        // Laying out the whole text to find its height costs time in proportion to its length at every edit. Beyond about
+        // 600 bytes the field is simply six lines tall and scrolls, and only the visible lines are laid out.
+        if Self.fast, text.utf8.count > 600 {
+            if !v.isScrollEnabled { v.isScrollEnabled = true }
+            return CGSize(width: width, height: line * 6)
+        }
         let fit = v.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude)).height
         let h = min(max(fit, line), line * 6)
         let scroll = fit > line * 6
