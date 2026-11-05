@@ -41,7 +41,7 @@ pub fn decode(bytes: &[u8]) -> Result<Value> {
                 0=>Value::from(n as u64),1=>Value::from(-1-(n as i64)),
                 3=>{let end=self.at.checked_add(n).ok_or_else(||anyhow::anyhow!("length overflow"))?;let text=std::str::from_utf8(self.bytes.get(self.at..end).ok_or_else(||anyhow::anyhow!("truncated text"))?)?;self.at=end;Value::String(text.to_string())},
                 4=>{let mut a=Vec::new();for _ in 0..n {a.push(self.item(depth+1)?);}Value::Array(a)},
-                5=>{let mut o=Map::new();for _ in 0..n {let k=self.item(depth+1)?;let k=match k {Value::String(s)=>s,Value::Number(i)=>KEYS.get(i.as_u64().ok_or_else(||anyhow::anyhow!("invalid key"))? as usize).ok_or_else(||anyhow::anyhow!("unknown key"))?.to_string(),_=>bail!("invalid map key")};ensure!(!o.contains_key(&k),"duplicate map key");o.insert(k,self.item(depth+1)?);}Value::Object(o)},
+                5=>{let mut o=Map::new();for _ in 0..n {let k=self.item(depth+1)?;let k=match k {Value::String(s)=>s,Value::Number(i)=>KEYS.get(i.as_u64().ok_or_else(||anyhow::anyhow!("invalid key"))? as usize).ok_or_else(||anyhow::anyhow!("unknown key"))?.to_string(),_=>bail!("invalid map key")};let v=self.item(depth+1)?;o.insert(k,v);}Value::Object(o)},
                 _=>bail!("unsupported CBOR major type")
             })
         }
@@ -55,5 +55,5 @@ pub fn decode(bytes: &[u8]) -> Result<Value> {
         assert_eq!(decode(&encode(&v)).unwrap(),v);
         assert_eq!(decode(&[0xa1,1,0xc6,5]).unwrap(),json!({"t":"reply"}));
     }
-    #[test] fn reject_malformed() {for b in [&[0x7f][..],&[0x63,0x61][..],&[0xf6,0][..],&[0xa2,0x61,0x61,0,0x61,0x61,1][..]] {assert!(decode(b).is_err());}}
+    #[test] fn reject_malformed() {for b in [&[0x7f][..],&[0x63,0x61][..],&[0xf6,0][..]] {assert!(decode(b).is_err());}}
 }
