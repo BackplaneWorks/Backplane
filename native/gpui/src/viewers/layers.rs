@@ -56,10 +56,10 @@ pub fn strip_el(cx: &mut Context<Backplane>, light: bool, s: &Strip, open: bool)
 }
 
 /// The open Layers panel: absolute over the canvas (the button row keeps its height, so the canvas never jumps), its own scroll past `max_h`.
-pub fn panel_el(cx: &mut Context<Backplane>, light: bool, s: &Strip, open: bool) -> Option<AnyElement> {
+pub fn panel_el(cx: &mut Context<Backplane>, light: bool, s: &Strip, open: bool, cap: f32, scroll: &ScrollHandle) -> Option<AnyElement> {
     let c = |n: &str| theme::color(light, n);
     if !open || s.rows.is_empty() { return None; }
-    let mut panel = div().id("layers-panel").absolute().top(px(4.)).left(px(12.)).max_h(px(280.)).overflow_y_scroll().flex().flex_col().gap_1().p_2().border_1().border_color(c("line")).bg(c("panel")).occlude();
+    let mut panel = div().id("layers-panel").absolute().top(px(4.)).left(px(12.)).max_h(px(cap)).overflow_y_scroll().track_scroll(scroll).flex().flex_col().gap_1().p_2().border_1().border_color(c("line")).bg(c("panel")).occlude();
     if s.modes {
         panel = panel.child(div().flex().gap_1().children(["All", "Dim", "Only"].iter().enumerate().map(|(i, label)| {
             let on = s.mode == i as u32; let d = div().id(SharedString::from(format!("layer-mode-{i}"))).px_2().text_size(px(12.)).cursor_pointer().border_1();

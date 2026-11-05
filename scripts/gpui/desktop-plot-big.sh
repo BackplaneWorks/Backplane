@@ -1,5 +1,6 @@
 #!/bin/sh
-# (big-board variant, item 2) Pan/zoom/stream paint numbers, cached vs --plot-nocache, on a board given as BOARD. Same caps as below.
+# (big-board variant, item 2) Pan/zoom/stream paint numbers, with a split into culling / lyon tessellation / submission, on a board given as BOARD; GPU=1 uses the NVIDIA ICD (nvidia-smi checked first).
+# The client stops itself if the plot canvas has no height ({"expect":"canvas"}). Same caps as below.
 # A real-hub check of the GPUI board and schematic viewers on this machine, kept small: the Rust hub on a temp home with the ecc83 demo
 # (never the store copy), stand-in agents only, loopback, isolated display :61 (Xvfb from build/gpui/xvfb, software rendering = llvmpipe,
 # NOT the GPU), every process in one scope capped at 3700M with swap 0, nice 19. The client binary comes from a Boat job (never built here).
@@ -48,7 +49,7 @@ ICD=/usr/share/vulkan/icd.d/lvp_icd.json; [ "${GPU:-}" = 1 ] && ICD=/usr/share/v
 export DISPLAY=$DISP VK_ICD_FILENAMES=$ICD LP_NUM_THREADS=2 BACKPLANE_GPUI_ASSETS=$ASSETS BACKPLANE_GPUI_RECTS=1
 python3 - <<PY
 import json
-st=[{"select":0},{"wait":1500},{"click":"rail:Board"},{"wait":15000},{"record":"start","name":"pan"}]
+st=[{"select":0},{"wait":1500},{"click":"rail:Board"},{"wait":15000},{"expect":"canvas"},{"record":"start","name":"pan"}]
 for i in range(60): st+=[{"pan":[(14 if i%2==0 else -14),(7 if i%3 else -7)]},{"wait":40}]
 st+=[{"record":"stop"},{"record":"start","name":"zoom"}]
 for i in range(30): st+=[{"zoom":[(-1 if i<15 else 1),0.5,0.5]},{"wait":50}]
@@ -65,11 +66,12 @@ wait $CP || true
 done
 # the Layers panel on the big board: closed, then open (its own scroll, over the canvas, no layout jump)
 cat > $R/script2.json <<JSON
-[{"select":0},{"wait":1500},{"click":"rail:Board"},{"wait":16000},{"layers":true},{"wait":12000}]
+[{"select":0},{"wait":1500},{"click":"rail:Board"},{"wait":9000},{"expect":"canvas"},{"wait":2000},{"layers":true},{"wait":6000},{"layers":true,"max_h":150,"scroll":90},{"wait":8000}]
 JSON
 $CLIENT --url http://127.0.0.1:$PORT --token-file $R/home/token --script $R/script2.json --exit-after 40 > $OUT/$N.layers.client.log 2>&1 &
 CP=$!; echo $CP > $R/client.pid
-sleep 14; import -window root $SH/$N-layers-closed.png
-sleep 12; import -window root $SH/$N-layers-open.png
+sleep 12; import -window root $SH/$N-layers-closed.png
+sleep 7; import -window root $SH/$N-layers-open.png
+sleep 8; import -window root $SH/$N-layers-capped.png
 wait $CP || true
 '

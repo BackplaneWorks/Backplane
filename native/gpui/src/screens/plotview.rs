@@ -16,27 +16,46 @@ pub struct PlotView {
     pub paint_ms: Vec<f32>,
     /// Where those paints go (ms per paint): the segment/polygon loop (culling + path building), lyon's tessellation (`PathBuilder::build`), and `paint_path` (submission).
     pub split: Vec<[f32; 3]>,
+    /// Timing is on only when a script drives the client (the e2e metrics); a production paint takes no timestamps.
+    pub measure: bool,
+    /// The Layers panel's scroll state and, for the e2e `layers` step, a smaller height cap (px) so a short list scrolls too.
+    pub layers_scroll: ScrollHandle, pub layers_cap: Option<f32>,
 }
 
 fn color(c: &Chunk, factor: f32) -> Hsla { let mut r = rgb(c.color); r.a = c.alpha * factor; r.into() }
 
 /// A chunk's stroke width in pixels: the hub's width is in micrometres on the capsule (radius = width / 2).
-fn paint_chunk(window: &mut Window, c: &Chunk, factor: f32, v: &View, o: Point<Pixels>, w: f32, h: f32, sp: &mut [f32; 3]) {
-    let lap = |t: &mut std::time::Instant| { let n = std::time::Instant::now(); let d = n.duration_since(*t).as_secs_f32() * 1000.0; *t = n; d };
-    let mut t = std::time::Instant::now();
-    let on = |x: f32, y: f32| { let (px, py) = v.to_px(x, y, w, h); (px >= -50. && px <= w + 50. && py >= -50. && py <= h + 50.).then_some((px, py)) };
+fn paint_chunk(window: &mut Window, c: &Chunk, factor: f32, v: &View, o: Point<Pixels>, w: f32, h: f32, mut sp: Option<&mut [f32; 3]>) {
+    // (script mode only) ms since the last lap, added to the culling/tessellation/submission split
+    let mut t = sp.as_ref().map(|_| std::time::Instant::now());
+    let mut lap = |k: usize, sp: &mut Option<&mut [f32; 3]>| { if let (Some(t), Some(sp)) = (t.as_mut(), sp.as_mut()) { let n = std::time::Instant::now(); sp[k] += n.duration_since(*t).as_secs_f32() * 1000.0; *t = n; } };
     if !c.caps.is_empty() {
         let width = (c.caps[4] * 2. * v.scale).max(1.0);
+        let rpx = width / 2.;
+        // a dot (a round pad, a via, a hole) is a zero-length capsule: a butt-capped stroke of no length draws nothing, so it is a filled circle;
+        // a stroke wide enough to see gets round ends the same way
+        let round_ends = width >= 3.0;
+        let n = ((6. + rpx * 2.) as usize).clamp(8, 32);
+        let circle = |pb: &mut PathBuilder, x: f32, y: f32| {
+            for k in 0..n { let t = std::f32::consts::TAU * k as f32 / n as f32; let q = point(o.x + px(x + rpx * t.cos()), o.y + px(y + rpx * t.sin())); if k == 0 { pb.move_to(q) } else { pb.line_to(q) } }
+            pb.close();
+        };
         let mut pb = PathBuilder::stroke(px(width)); let mut any = false;
+        let mut dots = PathBuilder::fill(); let mut any_dot = false;
+        let margin = 50. + rpx;
+        let near = |x: f32, y: f32| x >= -margin && x <= w + margin && y >= -margin && y <= h + margin;
         for s in c.caps.chunks_exact(5) {
             let (a, b) = (v.to_px(s[0], s[1], w, h), v.to_px(s[2], s[3], w, h));
-            if on(s[0], s[1]).is_none() && on(s[2], s[3]).is_none() { continue; }
+            if s[0] == s[2] && s[1] == s[3] { if near(a.0, a.1) { circle(&mut dots, a.0, a.1); any_dot = true; } continue; }
+            if !near(a.0, a.1) && !near(b.0, b.1) { continue; }
             pb.move_to(point(o.x + px(a.0), o.y + px(a.1)));
-            if (a.0 - b.0).abs() + (a.1 - b.1).abs() < 0.5 { pb.line_to(point(o.x + px(b.0 + 0.5), o.y + px(b.1))); } else { pb.line_to(point(o.x + px(b.0), o.y + px(b.1))); }
+            pb.line_to(point(o.x + px(b.0), o.y + px(b.1)));
             any = true;
+            if round_ends { circle(&mut dots, a.0, a.1); circle(&mut dots, b.0, b.1); any_dot = true; }
         }
-        sp[0] += lap(&mut t);
-        if any { if let Ok(path) = pb.build() { sp[1] += lap(&mut t); window.paint_path(path, color(c, factor)); sp[2] += lap(&mut t); } }
+        lap(0, &mut sp);
+        if any { if let Ok(path) = pb.build() { lap(1, &mut sp); window.paint_path(path, color(c, factor)); lap(2, &mut sp); } }
+        if any_dot { if let Ok(path) = dots.build() { lap(1, &mut sp); window.paint_path(path, color(c, factor)); lap(2, &mut sp); } }
     }
     if !c.polys.is_empty() {
         let mut pb = PathBuilder::fill(); let mut any = false;
@@ -48,8 +67,8 @@ fn paint_chunk(window: &mut Window, c: &Chunk, factor: f32, v: &View, o: Point<P
             for (i, p) in pts.iter().enumerate() { let q = point(o.x + px(p.0), o.y + px(p.1)); if i == 0 { pb.move_to(q) } else { pb.line_to(q) } }
             pb.close(); any = true;
         }
-        sp[0] += lap(&mut t);
-        if any { if let Ok(path) = pb.build() { sp[1] += lap(&mut t); window.paint_path(path, color(c, factor)); sp[2] += lap(&mut t); } }
+        lap(0, &mut sp);
+        if any { if let Ok(path) = pb.build() { lap(1, &mut sp); window.paint_path(path, color(c, factor)); lap(2, &mut sp); } }
     }
 }
 
@@ -64,10 +83,13 @@ pub fn canvas_el(cx: &mut Context<Backplane>, light: bool, frame: &Frame, view: 
         let (w, h) = (f32::from(b.size.width), f32::from(b.size.height));
         this.update(cx, |app, _| { app.screens.plotview.bounds = Some(b); });
         let Some(v) = view else { return };
-        let t0 = std::time::Instant::now(); let mut sp = [0f32; 3];
-        window.with_content_mask(Some(ContentMask { bounds: b }), |window| { for &(i, factor) in &order { paint_chunk(window, &chunks[i], factor, &v, b.origin, w, h, &mut sp); } });
-        let ms = t0.elapsed().as_secs_f32() * 1000.0;
-        this.update(cx, |app, _| { let pv = &mut app.screens.plotview; if pv.paint_ms.len() >= 4096 { pv.paint_ms.remove(0); } pv.paint_ms.push(ms); if pv.split.len() >= 4096 { pv.split.remove(0); } pv.split.push(sp); });
+        let measure = this.update(cx, |app, _| app.screens.plotview.measure);
+        let t0 = measure.then(std::time::Instant::now); let mut sp = [0f32; 3];
+        window.with_content_mask(Some(ContentMask { bounds: b }), |window| { for &(i, factor) in &order { paint_chunk(window, &chunks[i], factor, &v, b.origin, w, h, measure.then_some(&mut sp)); } });
+        if let Some(t0) = t0 {
+            let ms = t0.elapsed().as_secs_f32() * 1000.0;
+            this.update(cx, |app, _| { let pv = &mut app.screens.plotview; if pv.paint_ms.len() >= 4096 { pv.paint_ms.remove(0); } pv.paint_ms.push(ms); if pv.split.len() >= 4096 { pv.split.remove(0); } pv.split.push(sp); });
+        }
         // click to the first painted plot: what the person feels (the metric the gate asks for)
         this.update(cx, |app, _| { if let Some(t) = app.screens.plot_click.take() { app.m("plot_painted", serde_json::json!({"ms": (t.elapsed().as_secs_f64() * 1e6).round() / 1e3, "chunks": chunks.len()})); } });
     }).size_full();

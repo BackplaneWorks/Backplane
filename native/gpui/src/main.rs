@@ -131,7 +131,8 @@ fn main()->anyhow::Result<()> {
             let mut it=spec.split(',');let tris=it.next().and_then(|t|t.parse().ok()).unwrap_or(100_000);let steps=it.next().and_then(|t|t.parse().ok()).unwrap_or(200);
             cx.open_window(opts,move|_,cx|cx.new(|cx|viewers::demo::Demo::new(cx,tris,steps,started))).expect("open GPUI window");
         } else {
-            cx.open_window(opts,move|window,cx|cx.new(|cx|Backplane::new(window,cx,config,started))).expect("open GPUI window");
+            let measure=config.script.is_some();
+            cx.open_window(opts,move|window,cx|cx.new(|cx|{let mut b=Backplane::new(window,cx,config,started);b.screens.plotview.measure=measure;b})).expect("open GPUI window");
         }
         cx.activate(true);
         if let Some(secs)=exit_after {cx.spawn(async move|cx|{cx.background_executor().timer(Duration::from_secs_f64(secs)).await;let _=cx.update(|cx|cx.quit());}).detach();}
