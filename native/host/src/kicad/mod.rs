@@ -1,5 +1,7 @@
 //! M6 KiCad side: a project's design files, the plot actor behind `kicad.watch` / `kicad.info`, and (next) KiCad IPC.
 //! `files::start` registers it (the one line main.rs calls); no signal is sent to any process here.
+pub mod ipc;
+pub mod kserve;
 pub mod plot;
 pub mod project;
 pub mod watch;
@@ -10,6 +12,7 @@ use std::sync::Arc;
 pub fn start(hub: &Arc<Hub>) {
     let plots = watch::Plots::new(&hub.cfg.home);
     hub.register_rpc(Arc::new(watch::KicadRpc(plots)));
+    ipc::start(hub);
 }
 
 /// `kicad.watch` names a folder and maybe a file: both must lie under a folder the hub knows (a project's root or a
