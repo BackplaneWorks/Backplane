@@ -15,6 +15,7 @@ pub trait ViewMethod: Send + Sync {
 }
 
 /// Registers this lane's handlers. Nothing yet.
+mod actor;
 pub fn start(_hub: &Arc<Hub>) {}
 
 pub const REPLY_BYTES: usize = 262144;
@@ -78,6 +79,7 @@ impl Hub {
         if let (Some(w), Some(o)) = (&window, params.as_object_mut()) { o.insert("window".into(), w.clone()); }
         if let (Some(pg), Some(o)) = (&page, params.as_object_mut()) { o.insert("page".into(), page_json(p["target"]["id"].as_str().unwrap_or(""), before, pg)); }
         let pol = match self.presenter.view(&params).await { Ok(v) => v, Err(_) => return vec![error(&id, "PRESENTER_UNAVAILABLE")] };
+        let pol = actor::apply(c.client, &p, &pol);
         let target = p["target"].clone();
         if m == "view.open" { c.view_id = view_id.clone(); c.target = target.clone(); }
         c.lastrev = rev;
