@@ -163,7 +163,7 @@ port waits for the person's decision.
 
 <!-- law-map: generated below by scripts/gpui/law-map.py -->
 
-Laws in LAWS.bend: 3253. bend 935, rust 517, unported 1204, client 470, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`, `src/core/msp.bend`, `src/core/agy.bend`, `src/core/opencode.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
+Laws in LAWS.bend: 3253. bend 931, rust 535, unported 1190, client 470, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`, `src/core/msp.bend`, `src/core/agy.bend`, `src/core/opencode.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
 
 | law | status | seed | file | note |
 |---|---|---|---|---|
@@ -218,9 +218,9 @@ Laws in LAWS.bend: 3253. bend 935, rust 517, unported 1204, client 470, window 1
 | `attach_clean_ok` | bend | seed K +-10% | `src/core/attach.bend` |  |
 | `drop_non_file_ignored` | bend | seed K +-10% | `src/core/attach.bend` |  |
 | `drop_uri_list_example` | bend | seed K +-10% | `src/core/attach.bend` |  |
-| `task_terminal_absorbing` | unported | seed R +-10% | `src/core/model.bend` |  |
+| `task_terminal_absorbing` | rust `task_terminal_absorbing` | map | `src/core/model.bend` |  |
 | `task_never_requeued` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `task_delivered_once` | unported | seed R +-10% | `src/core/model.bend` |  |
+| `task_delivered_once` | rust `task_delivered_once` | map | `src/core/model.bend` |  |
 | `delegation_bounded` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `setting_default` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `nui_with_own_vw` | window | seed D +-10% | `src/app/nui.bend` | GPUI input handling, native/gpui/src/input.rs (equivalence unchecked) |
@@ -282,8 +282,8 @@ Laws in LAWS.bend: 3253. bend 935, rust 517, unported 1204, client 470, window 1
 | `hubs_screen_unfocused_thread_null` | unported | seed R +-10% | `src/core/json.bend` |  |
 | `hubs_unpaired_quiet` | unported | none | `-` |  |
 | `island_idle_empty` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `device_token_never_sent` | bend | seed K +-10% | `src/core/codec.bend` |  |
-| `device_drop_never_sent` | bend | seed K +-10% | `src/core/codec.bend` |  |
+| `device_token_never_sent` | rust `device_token_never_sent` | map | `src/core/codec.bend` |  |
+| `device_drop_never_sent` | rust `device_drop_never_sent` | map | `src/core/codec.bend` |  |
 | `device_blank_ignored` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `device_register_once` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `fuzzy_empty_matches` | bend | seed K +-10% | `src/core/fuzzy.bend` |  |
@@ -1127,26 +1127,26 @@ Laws in LAWS.bend: 3253. bend 935, rust 517, unported 1204, client 470, window 1
 | `island_lines_capped` | unported | seed R +-10% | `src/core/json.bend` |  |
 | `upload_thread_local` | client | seed C +-10% | `src/core/client.bend` |  |
 | `upload_thread_plain` | client | seed C +-10% | `src/core/client.bend` |  |
-| `task_waits_for_child_work` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `task_ends_when_ready` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `task_ended_last_change` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `task_failed_ends_even_busy` | unported | seed R +-10% | `src/core/hub.bend` |  |
+| `task_waits_for_child_work` | rust `task_waits_for_child_work` | map | `src/core/hub.bend` |  |
+| `task_ends_when_ready` | rust `task_ends_when_ready` | map | `src/core/hub.bend` |  |
+| `task_ended_last_change` | rust `task_ended_last_change` | map | `src/core/model.bend` |  |
+| `task_failed_ends_even_busy` | rust `task_failed_ends_even_busy` | map | `src/core/hub.bend` |  |
 | `bot_reply_captured_once` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `bot_reply_waits_for_work` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `phase_failed_before_monitoring` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `status_wait_f_keeps_failed` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `commit_text_joins` | bend | seed K +-10% | `src/core/store.bend` |  |
-| `task_finish_delivered_last` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `task_repair_delivers` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `task_repair_delivers_once` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `task_repair_activates_idle` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `task_repair_running_marks_only` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `task_repair_quiet_when_done` | unported | seed R +-10% | `src/core/hub.bend` |  |
+| `task_finish_delivered_last` | rust `a_delegated_task_runs_a_child_and_its_result_reaches_the_parent_once` | map | `src/core/model.bend` |  |
+| `task_repair_delivers` | rust `task_repair_delivers` | map | `src/core/hub.bend` |  |
+| `task_repair_delivers_once` | rust `task_repair_quiet_when_done` | map | `src/core/hub.bend` |  |
+| `task_repair_activates_idle` | rust `task_repair_activates_idle` | map | `src/core/model.bend` |  |
+| `task_repair_running_marks_only` | rust `task_repair_running_marks_only` | map | `src/core/hub.bend` |  |
+| `task_repair_quiet_when_done` | rust `task_repair_quiet_when_done` | map | `src/core/hub.bend` |  |
 | `store_torn_tail_resyncs` | rust `store_torn_tail_resyncs` | map | `src/core/store.bend` |  |
 | `store_torn_tail_newline` | rust `store_torn_tail_newline` | map | `src/core/store.bend` |  |
 | `store_fail_names_repair` | bend | seed K +-10% | `src/core/store.bend` |  |
-| `task_repair_finishes_ended_child` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `task_repair_leaves_working_child` | unported | seed R +-10% | `src/core/hub.bend` |  |
+| `task_repair_finishes_ended_child` | rust `task_repair_finishes_ended_child` | map | `src/core/hub.bend` |  |
+| `task_repair_leaves_working_child` | rust `task_repair_leaves_working_child` | map | `src/core/hub.bend` |  |
 | `recover_lost_told` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `recover_lost_clears` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `recover_no_work_quiet` | unported | seed R +-10% | `src/core/hub.bend` |  |
@@ -1862,7 +1862,7 @@ Laws in LAWS.bend: 3253. bend 935, rust 517, unported 1204, client 470, window 1
 | `busy_rows_move` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `commit_line_is_wire` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `commit_line_device_hides_token` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `input_wire_blank` | bend | seed K +-10% | `src/core/codec.bend` |  |
+| `input_wire_blank` | rust `input_wire_blank` | map | `src/core/codec.bend` |  |
 | `input_wire_other_kept` | bend | seed K +-10% | `src/core/codec.bend` |  |
 | `input_commit_line_is_wire` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `input_replayed_line_is_wire` | unported | seed R +-10% | `src/core/json.bend` |  |
@@ -3150,7 +3150,7 @@ Laws in LAWS.bend: 3253. bend 935, rust 517, unported 1204, client 470, window 1
 | `plane_list_same_stalled` | bend | seed K +-10% | `src/core/plane.bend` |  |
 | `uber_rows_same_count` | bend | seed K +-10% | `src/core/plane.bend` |  |
 | `side_rows_ix_tree_eq` | client | seed C +-10% | `src/core/client.bend` |  |
-| `ride_wire_blank` | bend | seed K +-10% | `src/core/codec.bend` |  |
+| `ride_wire_blank` | rust `ride_wire_blank` | map | `src/core/codec.bend` |  |
 | `ride_commit_line_is_wire` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `ride_store_wire` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `ride_state_kept` | unported | seed R +-10% | `src/core/model.bend` |  |

@@ -172,7 +172,7 @@ pub async fn wire(hub: Arc<Hub>, s: TcpStream, since: usize, origin_asked: Strin
     while sent < n0 || first {
         let to = (sent + 2000).min(n0);
         let lines = hub.store.range(sent, to)?;
-        let items: Vec<Value> = lines.iter().filter_map(|l| Hub::wire_item(l, false)).collect();
+        let items: Vec<Value> = lines.iter().filter_map(|l| Hub::wire_item(l)).collect();
         let frame = if first { json!({"t":"log","since":from,"origin":mine,"version":hub.cfg.version,"info":hub.log_info(),"items":items}) } else { json!({"t":"changes","items":items}) };
         tx.send(pack(&conn, &frame)).await?; sent = to; first = false;
     }
@@ -194,7 +194,7 @@ pub async fn wire(hub: Arc<Hub>, s: TcpStream, since: usize, origin_asked: Strin
                     let upto = hub.store.len(); if sent >= upto { break }
                     let to = (sent + 500).min(upto);
                     let lines = hub.store.range(sent, to)?;
-                    let items: Vec<Value> = lines.iter().filter_map(|l| Hub::wire_item(l, true)).collect();
+                    let items: Vec<Value> = lines.iter().filter_map(|l| Hub::wire_item(l)).collect();
                     sent = to; tx.send(pack(&conn, &json!({"t":"changes","items":items}))).await?;
                 }
                 for f in frames { tx.send(pack(&conn, &f)).await?; }
@@ -206,7 +206,7 @@ pub async fn wire(hub: Arc<Hub>, s: TcpStream, since: usize, origin_asked: Strin
                     let upto = hub.store.len(); if sent >= upto { break }
                     let to = (sent + 500).min(upto);
                     let lines = hub.store.range(sent, to)?;
-                    let items: Vec<Value> = lines.iter().filter_map(|l| Hub::wire_item(l, true)).collect();
+                    let items: Vec<Value> = lines.iter().filter_map(|l| Hub::wire_item(l)).collect();
                     sent = to; tx.send(pack(&conn, &json!({"t":"changes","items":items}))).await?;
                 }
             }

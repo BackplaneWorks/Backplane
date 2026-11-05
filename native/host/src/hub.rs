@@ -42,6 +42,9 @@ impl Outbox {
 }
 /// SignalRevision.affects: only activity lines and assistant/system messages leave the signal inputs alone; every other event,
 /// including one this hub does not know, counts.
+/// Setting.wire_blank: what clients get blank on the wire.
+pub fn wire_blank(key: &str) -> bool { key.starts_with("launch.input.") || key.starts_with("fallback.input.") || key.starts_with("ride.") }
+
 pub fn signal_affects(e: &Value) -> bool {
     match e["$"].as_str() { Some("ActivityLogged") => false, Some("MessagePosted") => !matches!(e["role"].as_str(), Some("assistant") | Some("system")), _ => true }
 }
@@ -321,14 +324,18 @@ impl Hub {
         let mut v = self.live_snapshot(); v.sort();
         json!({"t":"live","items":v.into_iter().map(|(t, x)| json!({"thread":t,"text":x,"trunc":false,"gen":0})).collect::<Vec<_>>()})
     }
-    /// A log line as a live client receives it: a turn's input travels blank (core/model.bend Setting.input,
-    /// codec.bend Change.wire); the log and a join's `log` frame keep it whole.
-    pub fn wire_item(line: &str, blank_inputs: bool) -> Option<Value> {
-        let mut v: Value = serde_json::from_str(line).ok()?;
-        if blank_inputs && v["$"] == "SettingSet" {
-            if let Some(k) = v["key"].as_str() { if k.starts_with("launch.input.") || k.starts_with("fallback.input.") { v["value"] = json!(""); } }
+    /// A stored log line as ANY client receives it, join or live (core/codec.bend Change.wire_line): a device's registration and drop
+    /// travel as `{"$","at"}` only (the push token, platform and bundle never leave the hub: laws device_token_never_sent,
+    /// device_drop_never_sent), and a turn's input and riding mail (`launch.input.`, `fallback.input.`, `ride.`) travel blank
+    /// (Setting.wire_blank). The log and the presenter keep the whole line.
+    pub fn wire_item(line: &str) -> Option<Value> {
+        let v: Value = serde_json::from_str(line).ok()?;
+        let at = v["at"].as_u64().unwrap_or(0);
+        match v["$"].as_str() {
+            Some(t @ ("DeviceRegistered" | "DeviceDropped")) => Some(json!({"$": t, "at": at})),
+            Some("SettingSet") if v["key"].as_str().map_or(false, wire_blank) => Some(json!({"$":"SettingSet","key":v["key"],"value":"","at":at})),
+            _ => Some(v),
         }
-        Some(v)
     }
     pub fn info_frame(&self) -> Value { let mut i = serde_json::Map::new(); i.insert("pair".into(), json!("")); i.insert("pair.qr".into(), json!("")); for (k, v) in self.extra_info.lock().unwrap().iter() { i.insert(k.clone(), json!(v)); } json!({"t":"info","info":Value::Object(i)}) }
     pub fn log_info(&self) -> Value { self.info() }
@@ -476,6 +483,34 @@ mod tests {
         assert!(!h.set_info("one-too-many", "v").await, "the map is bounded");
         assert!(h.set_info("k0", "changed").await, "an existing key can still change");
         assert!(!h.set_info("big", &"x".repeat(70_000)).await && !h.set_info(&"k".repeat(200), "v").await);
+    }
+
+    const TOKEN: &str = "apns-token-SECRET-0123456789abcdef";
+    // laws device_token_never_sent, device_drop_never_sent, input_wire_blank, ride_wire_blank (core/codec.bend Change.wire_line)
+    #[test] fn device_token_never_sent() {
+        let line = format!("{{\"$\":\"DeviceRegistered\",\"id\":\"d1\",\"token\":\"{TOKEN}\",\"platform\":\"ios\",\"bundle\":\"dev.backplane.mobile\",\"name\":\"Phone\",\"at\":42}}");
+        let w = Hub::wire_item(&line).unwrap();
+        assert_eq!(w, json!({"$":"DeviceRegistered","at":42}));
+        assert!(!w.to_string().contains(TOKEN) && !w.to_string().contains("ios") && !w.to_string().contains("dev.backplane"));
+    }
+    #[test] fn device_drop_never_sent() {
+        let w = Hub::wire_item(&format!("{{\"$\":\"DeviceDropped\",\"id\":\"d1\",\"token\":\"{TOKEN}\",\"at\":43}}")).unwrap();
+        assert_eq!(w, json!({"$":"DeviceDropped","at":43}));
+        assert!(!w.to_string().contains(TOKEN));
+    }
+    #[test] fn input_wire_blank() {
+        for k in ["launch.input.t1", "fallback.input.t1"] {
+            let w = Hub::wire_item(&format!("{{\"$\":\"SettingSet\",\"key\":\"{k}\",\"value\":\"a long prompt\",\"at\":5}}")).unwrap();
+            assert_eq!(w, json!({"$":"SettingSet","key":k,"value":"","at":5}));
+        }
+    }
+    #[test] fn ride_wire_blank() {
+        let w = Hub::wire_item("{\"$\":\"SettingSet\",\"key\":\"ride.t1\",\"value\":\"mail text\",\"at\":6}").unwrap();
+        assert_eq!(w["value"], "");
+        // everything else is untouched, key order included
+        let l = "{\"$\":\"SettingSet\",\"key\":\"theme\",\"value\":\"dark\",\"at\":7}";
+        assert_eq!(Hub::wire_item(l).unwrap().to_string(), l);
+        assert_eq!(Hub::wire_item("not json"), None);
     }
 
     #[tokio::test] async fn open_assembles_identity_in_js_order() {

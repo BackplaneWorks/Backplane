@@ -568,3 +568,7 @@ law task_repair_quiet_when_done rust task_repair_quiet_when_done
 law task_repair_finishes_ended_child rust task_repair_finishes_ended_child
 law task_repair_leaves_working_child rust task_repair_leaves_working_child
 law task_repair_delivers_once rust task_repair_quiet_when_done
+law device_token_never_sent rust device_token_never_sent
+law device_drop_never_sent rust device_drop_never_sent
+law input_wire_blank rust input_wire_blank
+law ride_wire_blank rust ride_wire_blank

@@ -346,3 +346,39 @@ mod auth_wire_tests {
         assert!(r.is_err(), "a revoked credential is refused at the upgrade (Auth::allowed)");
     }
 }
+
+#[cfg(test)]
+mod wire_private_tests {
+    use super::*;
+    use tokio_tungstenite::connect_async;
+    // join and live: a stored or new token, input and ride value never appears in a frame a client receives
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn a_stored_token_input_and_ride_value_never_reach_a_client_join_or_live() {
+        let dir = std::env::temp_dir().join(format!("bp-wirepriv-{}", std::process::id())); let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("token"), "tok").unwrap();
+        let log = [r#"{"$":"ProjectCreated","id":"p1","title":"p","root":"/x","at":1}"#,
+            r#"{"$":"DeviceRegistered","id":"d1","token":"STORED-PUSH-TOKEN-1","platform":"ios","bundle":"dev.backplane.mobile","name":"Phone","at":2}"#,
+            r#"{"$":"SettingSet","key":"launch.input.t1","value":"STORED-INPUT-SECRET","at":3}"#,
+            r#"{"$":"SettingSet","key":"ride.t1","value":"STORED-RIDE-MAIL","at":4}"#].join("\n") + "\n";
+        std::fs::write(dir.join("events.jsonl"), log).unwrap();
+        let cfg = hub::Cfg { home: dir.clone(), version: "0.14.0".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() };
+        let hub = Hub::start(cfg, Arc::new(presenter::Canned { reply: json!({}) })).await.unwrap();
+        let l = TcpListener::bind("127.0.0.1:0").await.unwrap(); let port = l.local_addr().unwrap().port();
+        { let hub = hub.clone(); tokio::spawn(async move { loop { let (s, _) = l.accept().await.unwrap(); let h = hub.clone(); tokio::spawn(async move { let _ = serve(h, s).await; }); } }); }
+        let (ws, _) = connect_async(format!("ws://127.0.0.1:{port}/ws?token=tok")).await.unwrap();
+        let (_tx, mut rx) = ws.split();
+        let frames: Arc<std::sync::Mutex<Vec<String>>> = Default::default(); let f2 = frames.clone();
+        let task = tokio::spawn(async move { while let Some(Ok(Message::Binary(b))) = rx.next().await { f2.lock().unwrap().push(cbor::decode(&b).unwrap().to_string()); } });
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        hub.commit_many(&[json!({"$":"DeviceRegistered","id":"d2","token":"LIVE-PUSH-TOKEN-2","platform":"android","bundle":"b","name":"x","at":9}),
+            json!({"$":"DeviceDropped","id":"d2","token":"LIVE-PUSH-TOKEN-2","at":10}),
+            json!({"$":"SettingSet","key":"fallback.input.t1","value":"LIVE-INPUT-SECRET","at":11}),
+            json!({"$":"SettingSet","key":"ride.t2","value":"LIVE-RIDE-MAIL","at":12})]).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        task.abort();
+        let all = frames.lock().unwrap().join("\n");
+        assert!(all.contains("ProjectCreated") && all.contains("DeviceRegistered"), "the frames carried the log (join) and the live batch");
+        for s in ["STORED-PUSH-TOKEN-1", "STORED-INPUT-SECRET", "STORED-RIDE-MAIL", "LIVE-PUSH-TOKEN-2", "LIVE-INPUT-SECRET", "LIVE-RIDE-MAIL", "dev.backplane.mobile", "android"] {
+            assert!(!all.contains(s), "a frame holds {s}");
+        }
+    }
+}
