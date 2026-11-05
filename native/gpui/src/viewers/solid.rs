@@ -287,6 +287,9 @@ impl Drop for Worker { fn drop(&mut self) { let (m, cv) = &*self.slot; m.lock().
 /// What the demo/metrics read: how many images arrived, the last render's time.
 #[derive(Clone, Debug, Default)] pub struct Stats { pub images: u64, pub last_ms: f64, pub last_tris: usize, pub last_size: (usize, usize) }
 
+/// A note (no model for this source) keeps the page's model only when it is the same source's: a different key drops it.
+pub fn note_keeps_model(page_key: &str, note_key: &str) -> bool { page_key == note_key }
+
 pub struct SolidPage {
     mesh: Option<Arc<Mesh>>, key: String, cam: Option<Camera>, image: Option<Arc<RenderImage>>, retired: Vec<Arc<RenderImage>>, drag: Option<(Drag, Point<Pixels>)>,
     pub note: String, worker: Worker, size: Arc<Mutex<[f32; 5]>> /* panel width, height, scale factor, origin x, y (logical px) */, asked: (usize, usize), want_gen: u64, pub stats: Stats,
@@ -317,7 +320,12 @@ impl SolidPage {
                 if fresh { self.cam = Some(Camera::fitted(&mesh)); }
                 self.mesh = Some(mesh); self.note.clear(); self.ask_render(false); cx.notify();
             }
-            Msg::Mesh(SolidFrame::Note(key, why)) => { // why there is no model; a previous one stays shown
+            Msg::Mesh(SolidFrame::Note(key, why)) => { // why there is no model; the same source's previous model stays shown
+                if !note_keeps_model(&self.key, &key) {
+                    // another source's model could not be made: the old source's model must not show under this key
+                    self.mesh = None; self.cam = None; if let Some(i) = self.image.take() { self.retired.push(i); }
+                    self.want_gen = u64::MAX; // a render of the old model still in flight is stale
+                }
                 self.key = key; self.note = if self.mesh.is_some() { format!("{why} — previous saved revision shown") } else { why }; cx.notify();
             }
             Msg::Mesh(SolidFrame::Bad(e)) => { self.note = e; cx.notify(); }
@@ -390,6 +398,11 @@ impl Render for SolidPage {
 
 #[cfg(test)]
 mod tests {
+    #[test] fn a_note_for_another_source_drops_the_old_model_and_the_same_sources_keeps_it() {
+        assert!(note_keeps_model("2|/a|", "2|/a|"), "the same model: its previous revision stays with the note");
+        assert!(!note_keeps_model("2|/a|", "2|/b|"), "thread B's model could not be made: A's must not show under B's key");
+        assert!(!note_keeps_model("", "2|/b|"));
+    }
     // not `use super::*`: that glob brings gpui's own `test` attribute macro into scope and #[test] then expands into itself
     use super::{decode_mesh, parse_frame, render, Camera, Mesh, SolidFrame, BG};
     fn put(out: &mut Vec<u8>, mut v: u32) { loop { let b = (v & 0x7f) as u8; v >>= 7; if v == 0 { out.push(b); return } out.push(b | 0x80); } }
