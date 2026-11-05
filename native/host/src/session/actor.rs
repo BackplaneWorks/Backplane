@@ -150,6 +150,14 @@ impl ViewActor {
     /// policy. Bound to no view yet: like the marks of a job-answered request (`replied_late`), the reply joins the actor that
     /// the NEXT served view request leaves (the JS hub answers a job after the view request queued behind it was served, so a
     /// fab.look sent with a view.open lands on the new view, not the one it was sent from). Bounded: the oldest go first.
+    /// The same for a whole reply frame: its `ok`, `result` and top-level `error` (a refusal has no result), as the policy rebuilds the frame.
+    pub fn record_reply(&mut self, kind: &str, reply: &Value) {
+        let mut e = json!({"kind": kind, "id": reply["id"].as_u64().unwrap_or(0), "ok": reply["ok"].as_bool().unwrap_or(true), "result": reply.get("result").cloned().unwrap_or(json!({}))});
+        if let Some(err) = reply.get("error") { e["error"] = err.clone(); }
+        self.reads.push((None, e));
+        let n = self.reads.len();
+        if n > MAX_READS { self.reads.drain(..n - MAX_READS); }
+    }
     pub fn record_read(&mut self, kind: &str, id: u64, ok: bool, result: Value) {
         self.reads.push((None, json!({"kind": kind, "id": id, "ok": ok, "result": result})));
         let n = self.reads.len();
@@ -322,6 +330,8 @@ pub fn mask_page_reply(req: &Value, reply: &mut Value) {
 pub fn record_read(client: u64, _view_id: &str, kind: &str, id: u64, ok: bool, result: Value) {
     ACTORS.lock().unwrap().entry(client).or_default().record_read(kind, id, ok, result);
 }
+/// `record_read` for a whole reply frame (keeps its top-level `error`).
+pub fn record_reply(client: u64, kind: &str, reply: &Value) { ACTORS.lock().unwrap().entry(client).or_default().record_reply(kind, reply); }
 /// The reads recorded since the last V request, for `reads` in the next one.
 pub fn take_reads(client: u64, view_id: &str, target: &Value) -> Vec<Value> {
     ACTORS.lock().unwrap().get_mut(&client).map(|a| a.take_reads(view_id, target)).unwrap_or_default()
@@ -363,6 +373,13 @@ mod tests {
         assert!(has(&b.reply("v", &req("thread", "t1"), &pol("t1", &[])), "@rp.req:5"), "the next one does");
         assert!(is_job("fab.look") && is_job("files.dir") && is_job("git.status") && !is_job("turn.start") && !is_job("project.add") && !is_job("setting.set"));
         let mut many: BTreeSet<u64> = (1..=1000).collect(); cap(&mut many); assert_eq!((many.len(), many.first().copied(), many.last().copied()), (256, Some(745), Some(1000)));
+    }
+    #[test] fn a_recorded_reply_keeps_its_error() {
+        let mut a = ViewActor::default(); let t = json!({"kind": "thread", "id": "t1"});
+        a.record_reply("files.dir", &json!({"t":"reply","id":9,"ok":false,"error":"No folder for this thread or project: unknown, deleted, removed or unavailable"}));
+        a.record_reply("files.dir", &json!({"t":"reply","id":10,"ok":true,"result":{"fmEntries":"f\t1\tr.txt\n","thread":"t1"}}));
+        assert!(a.take_reads("v", &t).is_empty()); let r = a.take_reads("v", &t);
+        assert_eq!((r[0]["id"].clone(), r[0]["ok"].clone(), r[0]["error"].as_str().unwrap().len() > 10), (json!(9), json!(false), true)); assert!(r[1].get("error").is_none() && r[1]["result"]["fmEntries"] == "f\t1\tr.txt\n");
     }
     #[test] fn hist_picker_scope() {
         assert!(!scope_kept("@cmp.menu"));
