@@ -396,7 +396,7 @@ mod tests {
         for p in &seen {
             let k = p["nativeKey"].as_str().unwrap_or(""); assert!(k.len() == 32 && k.bytes().all(|b| b.is_ascii_hexdigit()), "nativeKey: {k}");
             assert_eq!(p["nativeKey"], seen[0]["nativeKey"], "one key for the hub's run");
-            assert_eq!(p["revision"], p["requestRevision"], "revision is the request's");
+            assert!(p["revision"].as_u64().unwrap_or(0) > 0, "the hub revision"); assert_eq!(p["revision"], seen[0]["revision"], "the same while the log is unchanged: a page position survives later requests");
             assert_eq!(p["viewId"], format!("{}:{}", c.gen, (1u64 << 47) + 5), "the open view's id");
             assert_eq!(p["nativeSidebar"], 1, "the client's offer passes through");
         }
