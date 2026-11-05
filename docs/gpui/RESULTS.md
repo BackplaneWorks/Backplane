@@ -248,3 +248,10 @@ Software-rendered, JS hub, so nothing here is a pass; these are findings about t
 - Drop a file: the XDND drop is accepted (XdndFinished accepted) but no upload follows (no new attachment).
 - IME: with ibus + Hangul running before the client and `XMODIFIERS=@im=ibus`, typing `g k s space` arrives as the raw text "gks", not "한": no composition.
 - Not testable yet: paperclip and link clicks (the controls and link events carry no rectangles: request G6, to the GPUI desktop stream).
+
+### Input actions with the G6 build (06:35 binary; Boat job j20261105113556-2656130)
+Same software-rendered, JS-hub run, now with control rectangles and the composer read:
+- IME: the composer reads back `"gks "` (supported:true) with ibus + Hangul running first: confirmed, no composition. Drag-select and Ctrl-C: still nothing selected or copied (`read selection` is `supported:false`).
+- Paste image: the "Uploading pasted-….png…" chip never leaves the composer (still there more than 60 s later and after later messages were sent) although the 1.2 KB file is on the hub, and the sent message has no image reference: the upload completion is not being registered. Drop file: accepted by XDND, no upload.
+- Paperclip (aimed from the control's own rect): no new top-level window and nothing drawn after 2.5 s. On a Boat sandbox that may only mean there is no file-chooser portal service, so it is unverified rather than failed; a real-hardware run decides.
+- Link clicks: blocked, GPUI has no link detection yet (`links` supported:false).
