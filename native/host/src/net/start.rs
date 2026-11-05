@@ -48,7 +48,7 @@ pub fn routes() -> Option<Arc<AuthRoutes>> { ROUTES.get().cloned() }
 
 pub fn start(hub: &Arc<Hub>, host: &str, port: u16) -> Arc<AuthRoutes> {
     match open(&hub.cfg.home, host, port) {
-        Ok((reg, routes)) => { hub.set_pairing(reg, Arc::new(Wired { routes: routes.clone(), hub: Arc::downgrade(hub) })); let _ = ROUTES.set(routes.clone()); routes }
+        Ok((reg, routes)) => { hub.register_rpc(Arc::new(super::devices::Devices)); hub.set_pairing(reg, Arc::new(Wired { routes: routes.clone(), hub: Arc::downgrade(hub) })); let _ = ROUTES.set(routes.clone()); routes }
         Err(e) => { eprintln!("backplane: {e}"); std::process::exit(1) }
     }
 }
