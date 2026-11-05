@@ -1,6 +1,12 @@
 // Scenarios: deterministic client programs. renderer: mobile only (phones, GPUI); the web page is not a target.
 import {connect,httpProbe,attempt,sleep,privateLeaks} from './lib.mjs';
 const until=async(f,ms=20000)=>{const end=Date.now()+ms;for(;;){const v=await f();if(v)return v;if(Date.now()>end)return null;await sleep(50)}};
+// the first id a reply names (bot, room, thread...): enough to chain the next request; absent when the request was refused
+const idOf=r=>{const m=/"(?:bot|room|id|thread)":"([^"]+)"/.exec(JSON.stringify(r?.result??r??{}));return m?m[1]:''};
+// a client changes the view's target with a new view (view.open and no viewId); a view.update on another target is STALE_VIEW
+const goTo=async(g,target)=>{g.view.target=target;g.view.viewId='';const r=await g.vcall('view.open');
+  // a target that exists must be answered: a refused view would make the scenario compare nothing (record.mjs fails on this frame)
+  if(!r?.ok&&target.id!=='ghost'&&target.id!=='p-unknown')g.rec.push('guard','out','check',null,{viewRefused:target,code:r?.error?.code});return r};
 const threadsOf=r=>(r?.result?.shown?.projects||[]).flatMap(p=>p.threads||[]);
 const fixtureThread=r=>threadsOf(r).find(t=>/^Fixture long/.test(t.title||t.label||''))||threadsOf(r)[0];
 
@@ -132,6 +138,56 @@ export const SCENARIOS={
     await c.rpc('project.move',{project:P,path:'relative'});
     const pa=await c.rpc('project.add',{path:hub.projectDir+'-2'});
     await c.rpc('project.remove',{project:'p-unknown'});
-    await c.settle(1200);await c.end(800);
+    await c.settle(4500,15000);await c.end(800);
+  },
+  // 9. bots (src/core/bothub.bend): create, edit, say (a stand-in answers), refusals, delete, and the bot's own view (target kind "bot")
+  async bots({hub,rec}){
+    const raw=await connect({hub,rec,name:'raw',profile:'raw'});await raw.settle(800);
+    const A=idOf(await raw.rpc('bots.create',{name:'parity-bot',persona:'Be brief.',provider:'claude',model:''}));
+    const B=idOf(await raw.rpc('bots.create',{name:'second-bot',persona:'',provider:'claude',model:''}));
+    await raw.rpc('bots.create',{name:'   ',persona:'x',provider:'claude',model:''});
+    await raw.rpc('bots.edit',{bot:A,persona:'Be very brief.'});await raw.rpc('bots.edit',{bot:A,look:3});await raw.rpc('bots.edit',{bot:'ghost',persona:'x'});
+    await raw.rpc('bots.say',{bot:A,text:'hello bot'});await raw.settle(2500);
+    await raw.rpc('bots.say',{bot:'ghost',text:'hello'});await raw.rpc('bots.say',{bot:A,text:''});
+    const g=await connect({hub,rec,name:'gpui',profile:'gpui'});
+    if(!g.failed){await g.vcall('view.open');await g.vcall('view.update');
+      await goTo(g,{kind:'bot',id:A});await g.settle(600);await g.vcall('view.update');
+      await goTo(g,{kind:'bot',id:'ghost'});
+      await goTo(g,{kind:'recent',id:''});await g.end(600)}
+    await raw.rpc('bots.delete',{bot:B});await raw.rpc('bots.delete',{bot:'ghost'});await raw.settle(800);await raw.end(600);
+  },
+  // 10. rooms: a room of two bots, a post, the room's view (target kind "room"), refusals, delete
+  async rooms({hub,rec}){
+    const raw=await connect({hub,rec,name:'raw',profile:'raw'});await raw.settle(800);
+    const A=idOf(await raw.rpc('bots.create',{name:'room-bot-a',persona:'',provider:'claude',model:''}));
+    const B=idOf(await raw.rpc('bots.create',{name:'room-bot-b',persona:'',provider:'claude',model:''}));
+    const room=idOf(await raw.rpc('bots.room',{room:'parity-room',name:'Parity room',members:`${A},${B}`}))||'parity-room';
+    await raw.rpc('bots.room',{room:'',name:'',members:''});
+    await raw.rpc('bots.post',{room,text:'hello room'});await raw.rpc('bots.post',{room:'ghost',text:'x'});await raw.rpc('bots.post',{room,text:''});await raw.settle(2500);
+    const g=await connect({hub,rec,name:'gpui',profile:'gpui'});
+    if(!g.failed){await g.vcall('view.open');await g.vcall('view.update');
+      await goTo(g,{kind:'room',id:room});await g.settle(600);await g.vcall('view.update');
+      await goTo(g,{kind:'room',id:'ghost'});await g.end(600)}
+    await raw.rpc('bots.room_delete',{room});await raw.rpc('bots.room_delete',{room:'ghost'});await raw.settle(800);await raw.end(600);
+  },
+  // 11. a project's home (target kind "project") and Settings: every page the menu lists, opened and left, on the gpui profile
+  async projecthome({hub,rec}){
+    const g=await connect({hub,rec,name:'gpui',profile:'gpui'});if(g.failed)return;
+    await g.vcall('view.open');await g.vcall('view.update');
+    await goTo(g,{kind:'project',id:'p1700000000-1'});await g.settle(500);await g.vcall('view.update');
+    await goTo(g,{kind:'project',id:'p-unknown'});
+    await goTo(g,{kind:'recent',id:''});await g.end(600);
+  },
+  async settingspages({hub,rec}){
+    const g=await connect({hub,rec,name:'gpui',profile:'gpui'});if(g.failed)return;
+    await g.vcall('view.open');await g.vcall('view.update');
+    await g.vcall('view.action',{action:'flag',value:'settings'});await g.vcall('view.update');
+    for(const page of ['appearance','threads','agents','writing','cad','ordering','devices','network','voice','keys','timezone','usage','about','privacy','nosuchpage'])
+      {await g.vcall('view.action',{action:'settings-page',value:page});
+       // the page's hub-owned reads (voice status, keys, report requests) answer a little later: poll until the session stops changing
+       let same=0,last='';for(let i=0;i<30&&same<4;i++){await sleep(400);await g.poll();const k=JSON.stringify([g.view.session.drafts,g.view.session.info]);same=k===last?same+1:0;last=k}g.resync();
+       await g.vcall('view.update')}
+    await g.vcall('view.action',{action:'settings-page',value:'?'});
+    await g.vcall('view.action',{action:'flag',value:'settings'});await g.vcall('view.update');await g.end(600);
   },
 };
