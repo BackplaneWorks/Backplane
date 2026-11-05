@@ -20,7 +20,7 @@ function connect() {
   ws = new WebSocket(`ws://${hp}/ws?token=${token}&view=1&mobile=1`); ws.binaryType = "arraybuffer";
   B.connection(key, ep, "view-v1");
   ws.onopen = () => { opened = true; run(j(B.online(key, true, ep))); };
-  ws.onmessage = (e: any) => { frames++; try { run(j(B.recv(key, Buffer.from(e.data).toString("base64"), ep, false, false))); } catch (x: any) { failure = "bridge threw: " + x.message; } };
+  ws.onmessage = (e: any) => { frames++; if (process.env.DUMP && frames > 2) { const t = Buffer.from(e.data).toString("latin1"); console.log("frame", frames, "len", t.length, JSON.stringify(t.replace(/[^\x20-\x7e]/g, ".").slice(0, 500))); } try { run(j(B.recv(key, Buffer.from(e.data).toString("base64"), ep, false, false))); } catch (x: any) { failure = "bridge threw: " + x.message; } };
   ws.onclose = () => { try { B.online(key, false, true); } catch {} };
 }
 const until = async (f: () => boolean, ms: number) => { const t = Date.now(); while (Date.now() - t < ms) { if (f()) return true; run(j(B.tick(Date.now()))); await Bun.sleep(100); } return f(); };
@@ -35,9 +35,11 @@ pass(`list (>= ${Math.min(+expect, 48)} rows; bounded sidebar at ${expect})`, li
 const nextCtl = () => { const pp = (screen?.projects || []).map((p: any) => p.threadsPage?.next).find(Boolean); return pp || (screen?.sidebarPages || []).flatMap((h: any) => [h.projects?.next, h.active?.next]).find(Boolean); };
 const prevCtl = () => { const pp = (screen?.projects || []).map((p: any) => p.threadsPage?.previous).find(Boolean); return pp || (screen?.sidebarPages || []).flatMap((h: any) => [h.projects?.previous, h.active?.previous]).find(Boolean); };
 { const firsts = [rows()[0]?.id]; let moved = 0;
-  for (let k = 0; k < 8 && nextCtl(); k++) { const c = nextCtl(); const f = rows()[0]?.id; run(j(B.act(c.action, c.value))); if (!(await until(() => rows()[0]?.id !== f, 8000))) break; firsts.push(rows()[0]?.id); moved++; }
+  for (let k = 0; k < 8 && nextCtl(); k++) { const c = nextCtl(); const f = rows()[0]?.id; const o0 = j(B.act(c.action, c.value)); if (moved === 0) console.log("act reply keys", Object.keys(o0 || {}).join(","), JSON.stringify((o0.cmds || []).map((x: any) => x.type))); run(o0); if (!(await until(() => rows()[0]?.id !== f, 8000))) break; firsts.push(rows()[0]?.id); moved++; }
   let back = 0; const start = firsts[0];
   for (let k = 0; k < moved && prevCtl(); k++) { const c = prevCtl(); const f = rows()[0]?.id; run(j(B.act(c.action, c.value))); if (!(await until(() => rows()[0]?.id !== f, 8000))) break; back++; }
+  if (moved === 0) console.log("pager after act: offset", screen?.projects?.[0]?.threadsPage?.offset, "error", JSON.stringify(screen?.error), "note", JSON.stringify(screen?.note), "ids", rows().slice(0,2).map((r: any) => r.id).join(","), "failure", failure, "frames", frames, "ws", ws?.readyState);
+  if (moved === 0) console.log("pager debug: sidebarPages", JSON.stringify(screen?.sidebarPages)?.slice(0, 700), "| project[0].threadsPage", JSON.stringify(screen?.projects?.[0]?.threadsPage)?.slice(0, 300), "| rows", rows().length);
   const want = Math.min(Math.floor((+expect - 1) / 48), 8);
   pass(`pager (advance ${want} page(s), then back)`, moved >= want && back === moved && rows()[0]?.id === start && new Set(firsts).size === firsts.length, `forward ${moved}/${want}, back ${back}, first rows ${firsts.length}${failure ? " failure: " + failure : ""}`); }
 let id = rows()[0]?.id;
