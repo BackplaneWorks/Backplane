@@ -40,6 +40,13 @@ pub trait HttpHandler: Send + Sync {
     /// returns true takes the whole decision itself (enrollment, a peer's signed request): it must refuse every request
     /// that does not prove itself, and the hub gives it no credential check at all. Only `/hello` is public otherwise.
     fn own_auth(&self) -> bool { false }
+    /// True for a POST route whose body streams (an upload): the hub then calls `call_body` instead of `call`, after the credential check
+    /// (or none, with `own_auth`) and a size check, and reads no body itself.
+    fn takes_body(&self) -> bool { false }
+    /// The streaming body: `body.len` is the Content-Length (the hub refuses a missing one with 411, chunked with 411, more than
+    /// `STREAM_MAX` with 413); `body` reads exactly that many bytes and no more; `body.proceed().await` answers `Expect: 100-continue`
+    /// (call it once you accept the size). The connection closes after the reply.
+    fn call_body<'a>(&'a self, _hub: &'a Arc<Hub>, _req: &'a Req, _body: Body<'a>) -> Fut<'a, HttpReply> { Box::pin(async { HttpReply::text("405 Method Not Allowed", "this route takes no body") }) }
     /// `call` with the connection's id (Pairing.resolve remembers a connection's device by it). Handlers that do not
     /// need it implement `call` only.
     fn call_with<'a>(&'a self, hub: &'a Arc<Hub>, req: &'a Req, _client: u64) -> Fut<'a, HttpReply> { self.call(hub, req) }
@@ -84,4 +91,22 @@ pub trait AuthRoute: Send + Sync {
     fn handle(&self, req: &Req, client: u64) -> Option<AuthOutcome>;
     /// A used machine invitation was revoked: remove the link it made (Bend's uninvite). Called by the hub with `AuthOutcome.unpeer`.
     fn unpeer(&self, _link: &str) {}
+}
+
+/// The most a streaming body may be (attachments). Larger: 413 before anything is read.
+pub const STREAM_MAX: u64 = 256 << 20;
+/// A request body read straight off the connection: at most `len` bytes. `AsyncRead` ends at `len`.
+pub struct Body<'a> { pub len: u64, io: tokio::io::Take<&'a mut tokio::net::TcpStream>, expect: bool }
+impl<'a> Body<'a> {
+    pub fn new(s: &'a mut tokio::net::TcpStream, len: u64, expect: bool) -> Body<'a> { Body { len, io: tokio::io::AsyncReadExt::take(s, len), expect } }
+    /// Writes `HTTP/1.1 100 Continue` once, if the client sent `Expect: 100-continue` (the Bend hub does so after checking the size).
+    pub async fn proceed(&mut self) -> std::io::Result<()> {
+        if !std::mem::take(&mut self.expect) { return Ok(()) }
+        tokio::io::AsyncWriteExt::write_all(&mut **self.io.get_mut(), b"HTTP/1.1 100 Continue\r\n\r\n").await
+    }
+    /// Bytes still unread.
+    pub fn left(&self) -> u64 { self.io.limit() }
+}
+impl tokio::io::AsyncRead for Body<'_> {
+    fn poll_read(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>, buf: &mut tokio::io::ReadBuf<'_>) -> std::task::Poll<std::io::Result<()>> { Pin::new(&mut self.io).poll_read(cx, buf) }
 }
