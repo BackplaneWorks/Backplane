@@ -46,6 +46,8 @@ pub fn machine_off(z: &Zones, now: u64) -> (u64, bool) {
 }
 fn plan_of(r: &Routine) -> Plan<'_> { Plan { cron: &r.cron, on: r.on, deleted: r.deleted, done: r.done, last: r.last, once: r.once, tz: &r.tz, slot: r.slot } }
 
+/// A mail a firing files instead of delivering (the mailroom is on, or the bot is the uberbot: Mail.funnel)
+pub struct Filing { pub origin: super::mail::Origin, pub to: String, pub text: String, pub msg: String }
 /// One delivery a firing makes after its events are logged
 pub struct Wake { pub thread: String, pub msg: String, pub text: String, pub origin: Option<(String, String, String)> }
 
@@ -78,7 +80,7 @@ impl Bots {
 
     /// The events a routine firing logs, and the message its bot hears. `Bots.fire`: a reminder is delivered to the person, a routine wakes its bot at hop 0.
     /// None for the cases whose delivery is the mail or uber lane's (mail.on, the uberbot): nothing is logged then, so the routine stays due.
-    fn fire(&self, w: &World, r: &Routine, now: u64, i: usize, alert_prev: &str, notify_reminders: &str) -> Option<(Vec<Value>, Option<Wake>)> {
+    fn fire(&self, w: &World, r: &Routine, now: u64, i: usize, alert_prev: &str, notify_reminders: &str) -> Option<(Vec<Value>, Option<Wake>, Option<Filing>)> {
         let z = Zones { settings: &w.settings };
         let more = if r.once > 0 { vec![json!({"$":"RoutineDone","id":r.id,"at":now})] } else { let wall = plan_of(r).wall(&z, now); if wall > 0 { vec![json!({"$":"RoutineSlot","id":r.id,"slot":wall,"at":now})] } else { vec![] } };
         let fired = std::iter::once(json!({"$":"RoutineFired","id":r.id,"at":now})).chain(more);
@@ -93,24 +95,34 @@ impl Bots {
             let stamp = format!("{now}.{}", self.hub.store.len());
             let line = if on { format!("reminder\tremind-{}\t{memory}\t{stamp}\t{}", r.id, alert_text(&r.prompt, 500)) } else { format!("\t\t{memory}\t{stamp}\t") };
             ev.push(json!({"$":"SettingSet","key":format!("alert.{thread}"),"value":line,"at":now}));
-            return Some((ev, None));
+            return Some((ev, None, None));
         }
-        if w.setting("mail.on", "off") == "on" || w.triage_owner(&r.bot) { return None }
         let mut ev: Vec<Value> = fired.collect();
+        if w.setting("mail.on", "off") == "on" || w.triage_owner(&r.bot) { // Bots.wake.origin: the mailroom files it, with the routine's id as its reference
+            let filing = bot.map(|b| { ev.push(json!({"$":"BotWoke","bot":b.id,"hop":0,"at":now}));
+                Filing { origin: super::mail::Origin::new(&format!("routine:{}", r.id), "routine", &r.id), to: format!("bot:{}", b.id), text: format!("[routine: {}]\n{}", r.name, r.prompt), msg: format!("m{now}-{}.{i}", self.hub.store.len()) } });
+            return Some((ev, None, filing));
+        }
         let wake = bot.map(|b| {
             ev.push(json!({"$":"BotWoke","bot":b.id,"hop":0,"at":now}));
             let text = format!("[routine: {}]\n{}", r.name, r.prompt);
             Wake { thread: b.thread.clone(), msg: format!("m{now}-{}.{i}", self.hub.store.len()), origin: Some((format!("routine:{}", r.name), "routine".into(), r.name.clone())), text }
         });
-        Some((ev, wake))
+        Some((ev, wake, None))
     }
 
-    async fn fire_commit(&self, r: &Routine, w: &World, now: u64, i: usize) -> Result<bool, String> {
+    async fn fire_commit(&self, r: &Routine, w: &World, now: u64, i: usize, gate: bool) -> Result<bool, String> {
         let alert_prev = if r.kind == "remind" { let th = w.bot(&r.bot).map(|b| b.thread.clone()).unwrap_or_default(); self.hub.setting(&format!("alert.{th}")).await.unwrap_or_default() } else { String::new() };
         let nr = self.hub.setting("notify.reminders").await.unwrap_or_default();
-        let Some((ev, wake)) = self.fire(w, r, now, i, &alert_prev, &nr) else { return Ok(false) };
+        let Some((mut ev, wake, filing)) = self.fire(w, r, now, i, &alert_prev, &nr) else { return Ok(false) };
+        if gate { // the uberbot's routine: a "fired" op tells the other machines which slot ran (Bots.tick.uber)
+            let (z, uid) = (Zones { settings: &w.settings }, w.uid()); let (mo, me) = machine_off(&z, now);
+            let slot = plan_of(r).slot_next(&z, mo, me);
+            let ops = w.ops(now, &[super::uber::b_fired(&super::uber::gid(&w.me(), &r.id), slot)]); let _ = uid; ev.extend(ops);
+        }
         self.hub.commit_many(&ev).await.map_err(|e| format!("{e:#}"))?;
         if let Some(k) = wake { let _ = self.inbox_deliver(&k).await; }
+        if let Some(f) = filing { if let Err(e) = self.file_mail(w, now, &f.origin, &f.to, &f.text, &f.msg).await { eprintln!("bots: could not file a mail: {e}") } }
         Ok(true)
     }
 
@@ -119,7 +131,7 @@ impl Bots {
         let w = self.world().await;
         let Some(r) = w.routines.get(routine).cloned().filter(|r| !r.deleted && !r.done) else { return vec![err(id, "That routine is done or removed; edit its time to schedule it again.")] };
         let now = now_s();
-        let res = self.fire_commit(&r, &w, now, 0).await;
+        let res = self.fire_commit(&r, &w, now, 0, false).await;
         drop(w);
         match res { Ok(_) => vec![ok(id)], Err(e) => vec![err(id, &e)] }
     }
@@ -131,7 +143,15 @@ impl Bots {
         let mut due: Vec<&Routine> = w.routines.values().filter(|r| plan_of(r).due(&z, now, mo, me)).collect();
         due.sort_by(|a, b| a.id.cmp(&b.id)); // Map.values: by id
         let mut n = 0;
-        for (i, r) in due.into_iter().enumerate() { if let Ok(true) = self.fire_commit(r, &w, now, i).await { n += 1 } }
+        for (i, r) in due.into_iter().enumerate() {
+            let uber = w.uber_is(&r.bot);
+            if uber { // Ub.fires: a pinned routine only on its machine, any other only on the conversation's holder, each slot once
+                let gid = super::uber::gid(&w.me(), &r.id); let slot = plan_of(r).slot_next(&z, mo, me); let pin = w.pin(&gid);
+                let fired: u64 = w.ub.settings.get(&format!("uber.fired.{}.{gid}", w.uid())).and_then(|v| v.parse().ok()).unwrap_or(0);
+                if !(slot > fired && if pin.is_empty() { w.holder_me() } else { pin == w.me() }) { continue }
+            }
+            if let Ok(true) = self.fire_commit(r, &w, now, i, uber).await { n += 1 }
+        }
         n
     }
 

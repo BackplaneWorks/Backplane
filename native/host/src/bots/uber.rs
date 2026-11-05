@@ -29,6 +29,7 @@ pub fn b_routine_plan(id: &str, name: &str, cron: &str, prompt: &str, on: bool, 
     show(json!({"k":"routine","id":id,"name":name,"cron":cron,"prompt":prompt,"on":on,"pin":pin,"once":once,"tz":tz,"kind":kind}))
 }
 pub fn b_routine_del(id: &str) -> String { show(json!({"k":"routine-del","id":id})) }
+pub fn b_fired(routine: &str, slot: u64) -> String { show(json!({"k":"fired","routine":routine,"slot":slot})) }
 pub fn b_lease(holder: &str, term: u64) -> String { show(json!({"k":"lease","holder":holder,"term":term})) }
 pub fn b_bind(machine: &str, bot: &str, thread: &str, name: &str) -> String { show(json!({"k":"bind","machine":machine,"bot":bot,"thread":thread,"name":name})) }
 

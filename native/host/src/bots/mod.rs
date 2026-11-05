@@ -3,6 +3,7 @@
 //! changes and outs; here a request commits the same events through `Hub::commit_many`, then performs the outs.
 //! A message into a bot's thread goes through `Inbox` (the agents module's `deliver`).
 pub mod api;
+pub mod mail;
 pub mod clock;
 pub mod reply;
 pub mod routines;

@@ -18,7 +18,7 @@ impl Inbox for Arc<Agents> {
     fn stop<'a>(&'a self, thread: &'a str) -> Fut<'a, ()> { Box::pin(async move { let _ = Agents::stop(self, thread).await; }) }
 }
 
-pub struct Bots { pub hub: Arc<Hub>, world: Mutex<World>, inbox: Arc<dyn Inbox> }
+pub struct Bots { pub hub: Arc<Hub>, world: Mutex<World>, inbox: Arc<dyn Inbox>, pub(crate) router: std::sync::OnceLock<Arc<dyn super::mail::file::Router>> }
 
 fn ok(id: &Value) -> Value { json!({"t":"reply","id":id,"ok":true}) }
 fn err(id: &Value, e: &str) -> Value { json!({"t":"reply","id":id,"ok":false,"error":e}) }
@@ -68,7 +68,7 @@ impl Bots {
     pub async fn start_with(hub: Arc<Hub>, inbox: Arc<dyn Inbox>) -> Arc<Bots> {
         let store = hub.store.clone();
         let w = tokio::task::spawn_blocking(move || { let mut w = World::default(); if let Err(e) = w.sync(&store) { eprintln!("bots: reading the log: {e:#}") } w }).await.unwrap_or_default();
-        let b = Arc::new(Bots { hub: hub.clone(), world: Mutex::new(w), inbox });
+        let b = Arc::new(Bots { hub: hub.clone(), world: Mutex::new(w), inbox, router: Default::default() });
         hub.register_rpc(Arc::new(Rpc(b.clone())));
         super::api::register(&hub, &b);
         b
@@ -193,11 +193,16 @@ impl Bots {
                 wakes.push((b.id.clone(), b.thread.clone(), format!("m{now}-{seq}.{i}")));
             }
         }
+        // B.Mail.room: with the mailroom on, or the uberbot in the room, the post is also filed once as the room's mail
+        let ub = w.uber_bot(); let sender = "person".to_string();
+        let mut parts = super::mail::mailbox::room_parts(&room.members); if !parts.contains(&sender) { parts.insert(0, sender.clone()) }
+        let filing = if mail || (!ub.is_empty() && parts.contains(&format!("bot:{ub}"))) { Some((parts, room.name.clone())) } else { None };
         drop(w);
         // as Bots.fan: each member in turn is logged as woken, then hears the note
         for (bot, th, wake) in wakes {
             if self.hub.commit(&json!({"$":"BotWoke","bot":bot,"hop":0,"at":now})).await.is_ok() { let _ = self.inbox.deliver(&th, &wake, &n, note_origin(&n)).await; }
         }
+        if let Some((parts, name)) = filing { let w = self.world().await; if let Err(e) = self.file_room_mail(&w, now, &sender, &room.id, text, &mid, parts, &name).await { eprintln!("bots: could not file a mail: {e}") } }
         vec![ok(id)]
     }
 
