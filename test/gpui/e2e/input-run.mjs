@@ -24,7 +24,8 @@ if(coreFailed.length){try{portal?.kill('SIGTERM')}catch{}try{ime.stop()}catch{}d
 summary.harnessActions=harnessActions; // these actions are not run: their tool does not work here, so they cannot say anything about the app
 const fx=await startFixtureHub({bin:hubBin,root:resolve('out/e2e-run/input'),port:3813,threads:6});
 try{
-  const sf=out+'/hold.script.json';writeFileSync(sf,JSON.stringify([{select:0},...Array.from({length:80},()=>[{wait:1500},{read:'composer'}]).flat()])); // G6: the client reports its composer text every 1.5 s
+  const sf=out+'/hold.script.json';const holdSteps=Array.from({length:80},()=>[{wait:1500},{read:'composer'}]).flat();holdSteps.splice(2*45,0,{click:'ui:Attach'}); // at ~70 s the client itself clicks its paperclip: tells 'the real click missed' from 'the control does nothing'
+  writeFileSync(sf,JSON.stringify([{select:0},...holdSteps])); // G6: the client reports its composer text every 1.5 s
   const metrics=[];let buf='';const g=spawn(gpuBin,['--url',fx.state.url,'--token-file',fx.state.root+'/home/token','--script',sf],{env:{...dsp.env,...ime.env,HOME:fx.state.root+'/fakehome',BACKPLANE_GPUI_RECTS:'1'},stdio:['ignore','ignore','pipe']});
   g.stderr.on('data',d=>{buf+=d;let i;while((i=buf.indexOf('\n'))>=0){const l=buf.slice(0,i);buf=buf.slice(i+1);const k=l.indexOf('GPUI_METRIC ');if(k>=0)try{metrics.push(JSON.parse(l.slice(k+12)))}catch{}}});
   await sleep(6000);const inp=new Input(dsp.display,out);const win=inp.win('backplane');inp.xi.focus(win.id);await sleep(500);
@@ -71,6 +72,10 @@ try{
     const opened=w1.filter(x=>!w0.some(y=>y.id===x.id));let pl='';try{pl=readFileSync(portalLog,'utf8')}catch{}
     const called=/OpenFile/.test(pl);
     return {ok:called,evidence:{rect:attach.rect,rectChangedPixels:rectDiff,portalStandin:portal?'running':'not running',portalCalled:called,portalLog:pl.split('\n').slice(-4).join(' | '),newWindows:opened.map(x=>x.name).slice(0,5),screenshot:shot,note:'ok = the client asked the OS file chooser (xdg-desktop-portal FileChooser, via a stand-in on Boat); whether the chosen file then attaches is the upload chain measured by paste/drop'}}});
+  // the client's own click on its paperclip (G4 `click` step): does ITS handler reach the OS chooser?
+  for(let k=0;k<40&&!metrics.some(m=>m.event==='click'&&m.id==='ui:Attach');k++)await sleep(1500);
+  await sleep(1500);{const sc=metrics.find(m=>m.event==='click'&&m.id==='ui:Attach');let pl2='';try{pl2=readFileSync(portalLog,'utf8')}catch{}
+    summary.paperclipScriptedClick={clickEvent:sc||null,portalOpenFileCalls:(pl2.match(/OpenFile/g)||[]).length,portalLogTail:pl2.split('\n').slice(-3).join(' | ')}}
   const lk=[...metrics].reverse().find(m=>m.event==='links');summary.blocked['link-click']=lk&&lk.supported===false?'GPUI draws message text without link detection (links event supported:false)':(lk?null:'no links event');
   const sel=[...metrics].reverse().find(m=>m.event==='read'&&m.what==='selection');if(sel)summary.selectionRead=sel;
   try{g.kill('SIGTERM')}catch{}
