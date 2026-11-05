@@ -123,7 +123,7 @@ impl Browser {
                 "frame" => if o.get("page").is_some() { self.hub.push_all(&json!({"t":"shot","bot":page,"n":o.get("n").cloned().unwrap_or(json!(0))})); },
                 "tabs" => {
                     { let mut st = self.st.lock().await; if st.tabs.contains_key(page) || st.tabs.len() < MAX_OWNERS { st.tabs.insert(page.to_string(), o.to_string()); } }
-                    self.hub.push_all(&json!({"t":"info","info":{format!("browser.tabs.{page}"): o.to_string()}}));
+                    if !self.hub.set_info(&format!("browser.tabs.{page}"), &o.to_string()).await { eprintln!("term: info browser.tabs.{page} refused (bounded)") }
                 }
                 "record" | "navigated" | "load" | "shield-click" | "engine" => { let _ = self.events.send(o.clone()); }
                 _ => {}
@@ -179,7 +179,7 @@ impl crate::api::RpcHandler for Close {
         Box::pin(async move {
             let t = p.get("thread").and_then(Value::as_str).unwrap_or("");
             if !t.is_empty() && self.0.st.lock().await.input.is_some() { let _ = self.0.ask(t, "close", &json!({})).await; }
-            self.0.set_drive(t, "").await; self.0.st.lock().await.tabs.remove(t);
+            self.0.set_drive(t, "").await; self.0.st.lock().await.tabs.remove(t); self.0.hub.set_info(&format!("browser.tabs.{t}"), "").await;
             vec![json!({"t":"reply","id":id,"ok":true})]
         })
     }

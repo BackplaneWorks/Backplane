@@ -75,7 +75,7 @@ async fn real_chrome_through_the_driver_preview_teach_and_task() {
     let (d2, r2) = (drv.clone(), rid.clone()); let h = tokio::spawn(async move { d2.tool("t1", "task_pause", &json!({"run":r2,"n":1,"kind":"stuck","question":"Which one?"})).await });
     let mut ask = String::new(); assert!(wait(30, || { for i in (0..hub.store.len()).rev() { if let Ok(v) = serde_json::from_str::<Value>(&hub.store.get(i).unwrap()) { if v["$"] == "AskOpened" && v["tool"] == "task_pause" { ask = v["id"].as_str().unwrap().into(); return true } } } false }).await);
     assert!(wait(20, || drv.run_dir(bot, &rid).join("pause-1.jpg").exists()).await, "the pause's picture");
-    let req = crate::auth::Req { method: "GET".into(), target: format!("/bots/{bot}/tasks/shot?run={rid}&n=1"), headers: vec![] };
+    let req = crate::auth::Req::new("GET", &format!("/bots/{bot}/tasks/shot?run={rid}&n=1"), vec![]);
     let pic = driver::tasks_http(&hub, &req).await.unwrap(); assert_eq!(pic.status, "200 OK"); assert!(pic.body.len() > 500 && pic.body.starts_with(&[0xFF, 0xD8]), "a JPEG");
     assert!(drv.answered(&ask, "continue").await); let (ok, t) = h.await.unwrap(); assert!(ok && t.as_str().unwrap().contains("continue"));
     let (ok, _) = drv.tool(bot, "task_end", &json!({"run":rid,"status":"ok","summary":"done"})).await; assert!(ok);

@@ -9,6 +9,8 @@ use std::collections::HashMap;
 pub const MAX_STEPS: usize = 400;
 pub const MAX_BOTS: usize = 1024;
 pub const LIMIT: u64 = 600;
+/// The most bytes the draft takes in an info value (Hub::set_info allows 64 KiB).
+pub const INFO_MAX: usize = 60_000;
 pub const REFUSAL: &str = super::browser::REFUSAL;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -29,9 +31,14 @@ impl TeachBot {
     pub fn handback(mut self) -> TeachBot { if self.drive == "takeover" { self.drive.clear() } self }
     pub fn expired(&self, now: u64) -> bool { self.recording() && now.saturating_sub(self.start) >= LIMIT }
     pub fn mode_text(&self) -> String { if self.recording() { format!("rec {} {}", self.start, self.steps.len()) } else if self.mode == "review" { "review".into() } else { String::new() } }
-    pub fn draft_text(&self) -> String { if self.mode.is_empty() { String::new() } else { J::Array(self.steps.iter().map(task::step_json).collect()).to_string() } }
+    pub fn draft_text(&self) -> String { self.draft_text_max(usize::MAX) }
+    /// The draft as the info text; when it would pass `max` bytes the oldest steps are left out until it fits (the info value is bounded).
+    pub fn draft_text_max(&self, max: usize) -> String {
+        if self.mode.is_empty() { return String::new() }
+        let mut from = 0; loop { let t = J::Array(self.steps[from..].iter().map(task::step_json).collect()).to_string(); if t.len() <= max || from >= self.steps.len() { return if t.len() <= max { t } else { "[]".into() } } from += 1 + (self.steps.len() - from) / 8 }
+    }
     /// The three info keys of a bot (empty values when idle: clients clear them).
-    pub fn kvs(&self) -> Vec<(String, String)> { vec![(format!("drive.{}", self.bot), self.drive.clone()), (format!("teach.{}", self.bot), self.mode_text()), (format!("teach.draft.{}", self.bot), self.draft_text())] }
+    pub fn kvs(&self) -> Vec<(String, String)> { vec![(format!("drive.{}", self.bot), self.drive.clone()), (format!("teach.{}", self.bot), self.mode_text()), (format!("teach.draft.{}", self.bot), self.draft_text_max(INFO_MAX))] }
     /// {"t":"info","info":{...}} for one bot, sent to every client when it changes.
     pub fn msg(&self) -> J { json!({"t":"info","info": self.kvs().into_iter().map(|(k, v)| (k, J::String(v))).collect::<serde_json::Map<_, _>>()}) }
     /// The newest draft step as JSON text ("" when none): a line of the draft file.
@@ -176,6 +183,11 @@ mod tests {
         assert_eq!(TeachBot::blank("b1").add(&json!({"do":"click"})).steps.len(), 0, "only while recording");
         let mut f = TeachBot::started("b1", 1); for _ in 0..MAX_STEPS + 5 { f = f.add(&note("x")) } assert_eq!(f.steps.len(), MAX_STEPS);
         assert_eq!(b.last().contains("\"n\":1"), true);
+    }
+    #[test] fn a_long_draft_in_the_info_keeps_its_newest_steps_within_the_bound() {
+        let mut b = TeachBot::started("b1", 1); for i in 0..400 { b = b.add(&note(&format!("{i} {}", "x".repeat(900)))) }
+        let t = b.draft_text_max(INFO_MAX); assert!(t.len() <= INFO_MAX && t.len() > 10_000, "{}", t.len()); assert!(t.contains("399 xxx") && !t.contains("\"0 xxx"), "newest kept, oldest left out");
+        assert_eq!(b.draft_text().len() > INFO_MAX, true); assert_eq!(TeachBot::blank("b1").draft_text_max(10), "");
     }
     #[test] fn teach_pause_options() { assert_eq!(pause_options(true), "confirm\nskip\nstop"); assert_eq!(pause_options(false), "continue\nskip\nstop"); assert!(pause_reply("stop").contains("task_end")); assert_eq!(pause_reply("later"), "The person answered: later") }
     #[test] fn teach_run_ids_and_files_are_plain_names() {

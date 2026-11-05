@@ -93,7 +93,7 @@ fn text(body: &Value) -> String { body["$content"][0]["text"].as_str().unwrap().
     let (hub, _d) = hub_with_helper("events").await; let b = get(&hub).unwrap(); let rx = Tap::new(&hub, 1); let mut ev = b.events();
     b.line(r#"{"event":"tabs","page":"t1","tabs":[{"index":0}]}"#).await; b.line(r#"{"event":"navigated","page":"t1","url":"u"}"#).await; b.line(r#"{"event":"mystery"}"#).await;
     tokio::time::sleep(Duration::from_millis(100)).await; let info = rx.take().into_iter().find(|v| v["t"] == "info");
-    assert!(info.unwrap()["info"]["browser.tabs.t1"].as_str().unwrap().contains("\"tabs\"")); assert!(b.tabs_of("t1").await.is_some());
+    assert!(info.unwrap()["info"]["browser.tabs.t1"].as_str().unwrap().contains("\"tabs\"")); assert!(b.tabs_of("t1").await.is_some()); assert!(hub.info_frame()["info"]["browser.tabs.t1"].as_str().unwrap().contains("tabs"), "a client that joins later gets it");
     assert_eq!(ev.try_recv().unwrap()["event"], "navigated"); assert!(ev.try_recv().is_err());
 }
 #[tokio::test] async fn set_drive_fails_closed_past_the_owner_limit() {
