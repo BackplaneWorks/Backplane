@@ -94,7 +94,7 @@ fn link_from(id: &str) -> &str {
 
 // as Bend's Change.decode: a missing or mistyped field reads "" / 0 (get_str / get_nat defaults), so an event still counts in seq
 fn s<'a>(e: &'a Value, k: &str) -> Option<&'a str> { Some(e.get(k).and_then(|v| v.as_str()).unwrap_or("")) }
-fn n(e: &Value, k: &str) -> Option<u64> { Some(e.get(k).and_then(|v| v.as_u64()).unwrap_or(0)) }
+fn n(e: &Value, k: &str) -> Option<u64> { Some(fam::json::gnat(e, k, 0)) }
 
 /// Setting.blank_gone: an empty value removes these keys
 fn blank_gone(k: &str) -> bool {
@@ -135,7 +135,7 @@ impl State {
     pub fn apply(&mut self, e: &Value) -> bool {
         let Some(kind) = s(e, "$") else { return false };
         if !KNOWN.contains(&kind) { return false }
-        // the fields the Bend decoder insists on, for the events the model reads
+        // Change.decode is lenient: a missing or mistyped field takes its default and the event still counts; only an unknown `$` is dropped
         match self.fold(kind, e) { Some(()) => { self.seq += 1; true } None => false }
     }
 
@@ -157,14 +157,14 @@ impl State {
                 self.post(th, id);
             }
             "TurnChanged" => {
-                let th = s(e, "thread")?; let st = Turn::parse(s(e, "state")?)?; let at = n(e, "at")?;
+                let th = s(e, "thread")?; let st = Turn::parse(s(e, "state")?).unwrap_or(Turn::Idle); let at = n(e, "at")?;
                 self.todos_turn(st, th, at);
                 let t = self.thread_mut(th); t.activity = t.activity.max(at); t.turn = st;
             }
             "PendingChanged" => { let th = s(e, "thread")?; let c = n(e, "count")?; self.thread_mut(th).pending = c; }
             "ActivityLogged" => { let th = s(e, "thread")?; let id = s(e, "act")?; s(e, "tone")?; s(e, "kind")?; s(e, "summary")?; n(e, "at")?; self.post(th, id); }
             "ThreadSettled" => {
-                let id = s(e, "id")?; let manual = e.get("manual")?.as_bool()?; let at = n(e, "at")?;
+                let id = s(e, "id")?; let manual = fam::json::gbool(e, "manual", false); let at = n(e, "at")?;
                 let t = self.thread_mut(id); if manual { t.override_ = Override::ForcedSettled } t.settled_at = at; t.pinned = false;
             }
             "ThreadUnsettled" => {
@@ -176,8 +176,8 @@ impl State {
                 let t = self.thread_mut(id); t.override_ = Override::None;
                 if !(t.unsettled_at >= t.settled_at) { t.unsettled_at = t.settled_at.max(at); }
             }
-            "ThreadArchived" => { let id = s(e, "id")?; let b = e.get("archived").or_else(|| e.get("on")).and_then(|v| v.as_bool())?; self.thread_mut(id).archived = b; }
-            "ThreadPinned" => { let id = s(e, "id")?; let b = e.get("pinned").or_else(|| e.get("on")).and_then(|v| v.as_bool())?; self.thread_mut(id).pinned = b; }
+            "ThreadArchived" => { let id = s(e, "id")?; let b = fam::json::gbool(e, "archived", false); self.thread_mut(id).archived = b; }
+            "ThreadPinned" => { let id = s(e, "id")?; let b = fam::json::gbool(e, "pinned", false); self.thread_mut(id).pinned = b; }
             "ThreadDeleted" => { let id = s(e, "id")?; self.thread_mut(id).deleted = true; }
             "WorktreeSet" => { let id = s(e, "id")?; let (b, w) = (s(e, "branch")?.to_string(), s(e, "worktree")?.to_string()); let t = self.thread_mut(id); t.worktree_mode = true; t.branch = b; t.worktree = w; }
             "WorktreeSkipped" => { let id = s(e, "id")?; let t = self.thread_mut(id); t.worktree_mode = false; t.branch.clear(); t.worktree.clear(); }
@@ -212,7 +212,7 @@ impl State {
                     if !self.settings.contains_key(&k) { self.set(&k, parent); }
                 }
             }
-            "TaskStateSet" => { let (task, want) = (s(e, "task")?, TaskSt::parse(s(e, "state")?)?); s(e, "summary")?;
+            "TaskStateSet" => { let (task, want) = (s(e, "task")?, TaskSt::parse(s(e, "state")?).unwrap_or(TaskSt::Cancelled)); s(e, "summary")?;
                 let t = self.tasks.entry(task.into()).or_insert((String::new(), String::new(), true, TaskSt::Cancelled)); t.3 = TaskSt::next(t.3, want); t.2 = t.3.terminal(); }
             "AskOpened" => { let (id, th) = (s(e, "id")?, s(e, "thread")?); self.asks.insert(id.into(), (th.into(), true)); }
             "AskClosed" => { let id = s(e, "id")?; if let Some(a) = self.asks.get_mut(id) { a.1 = false; } else { self.asks.insert(id.into(), (String::new(), false)); } }
@@ -228,7 +228,7 @@ impl State {
             "WorkSet" => { let (th, kind, rows) = (s(e, "thread")?, s(e, "kind")?, s(e, "rows")?); self.set(&format!("{kind}.{th}"), rows); }
             "ThreadLaunched" => {
                 // Launch.fold: launch.<id> = report flag + launcher; launched.<by> lists the ids, oldest first, once each
-                let (id, by) = (s(e, "id")?, s(e, "by")?); let report = e.get("report")?.as_bool()?;
+                let (id, by) = (s(e, "id")?, s(e, "by")?); let report = fam::json::gbool(e, "report", true);
                 self.set(&format!("launch.{id}"), &format!("{}{by}", if report { "1" } else { "0" }));
                 let lk = format!("launched.{by}"); let old = self.get(&lk, "");
                 if !old.split('\n').any(|l| l == id) { let v = if old.is_empty() { id.to_string() } else { format!("{old}\n{id}") }; self.set(&lk, &v); }
@@ -385,5 +385,20 @@ mod tests {
     #[test] fn an_empty_ledger_setting_removes_the_key_others_keep_the_empty_value() {
         let s = fold(&[r#"{"$":"SettingSet","key":"told.k1","value":"x","at":1}"#, r#"{"$":"SettingSet","key":"told.k1","value":"","at":2}"#, r#"{"$":"SettingSet","key":"other","value":"","at":3}"#]);
         assert!(!s.settings.contains_key("told.k1")); assert_eq!(s.settings["other"], "");
+    }
+    #[test] fn a_mistyped_or_missing_field_still_counts_and_takes_bends_default() {
+        // one line of each kind the decoder is lenient about: seq and the folded value, as Change.decode reads them
+        let s = fold(&[PC, TC, r#"{"$":"TurnChanged","thread":"t1","state":"bogus","at":5}"#]);
+        assert_eq!((s.seq, s.threads["t1"].turn), (3, Turn::Idle));
+        let s = fold(&[PC, TC, r#"{"$":"ThreadSettled","id":"t1","at":60}"#]);
+        assert_eq!((s.seq, s.threads["t1"].override_, s.threads["t1"].settled_at), (3, Override::None, 60));
+        let s = fold(&[PC, TC, r#"{"$":"ThreadArchived","id":"t1","on":true,"at":1}"#, r#"{"$":"ThreadPinned","id":"t1","on":true,"at":2}"#]);
+        assert_eq!((s.seq, s.threads["t1"].archived, s.threads["t1"].pinned), (4, false, false));
+        let s = fold(&[r#"{"$":"TaskStateSet","task":"k","state":"bogus","summary":"","at":1}"#]);
+        assert_eq!((s.seq, s.tasks["k"].3), (1, TaskSt::Cancelled));
+        let s = fold(&[r#"{"$":"ThreadLaunched","id":"a","by":"b","at":1}"#]);
+        assert_eq!((s.seq, s.settings["launch.a"].as_str()), (1, "1b"));
+        let s = fold(&[PC, TC, r#"{"$":"ThreadSettled","id":"t1","manual":true,"at":"60"}"#]);
+        assert_eq!((s.seq, s.threads["t1"].settled_at), (3, 60));
     }
 }
