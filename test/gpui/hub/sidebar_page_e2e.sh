@@ -4,7 +4,7 @@
 case "$HOME" in /home/h|/home/h/*) echo "sidebar_page_e2e.sh refuses to run on the desktop" >&2; exit 3;; esac
 [ "$(id -un)" = user ] || { echo "sidebar_page_e2e.sh: not a Boat sandbox; refusing" >&2; exit 3; }
 R=$PWD; export BEND_NO_TELEMETRY=1; O=$R/out/sp; mkdir -p $O
-(cd native/host && cargo build --release --bin backplane-hub 2>&1 | grep -E '^error|Finished' | head -5)
+mkdir -p out; (cd native/host && rm -f target/release/backplane-hub && cargo build --release --bin backplane-hub > ../../out/hubbuild.log 2>&1); bh=$?; grep -E '^error|Finished' out/hubbuild.log | head -5; [ $bh -eq 0 ] || exit $bh
 bend native/bend/window.bend -o $O/window.c 2>&1 | tail -2; clang -std=c11 -O2 $O/window.c -lpthread -lm -o $O/window || exit 1
 H=$O/home; rm -rf $H; mkdir -p $H
 python3 - > $H/events.jsonl <<'PY'

@@ -11,7 +11,7 @@ export BACKPLANE_PARITY_ROOT=$PWD PARITY_WORK=/tmp/parity-work
 bun test/gpui/parity/record.mjs --bin $PWD/pstage/backplane-serve --out $O/recJ --port 3820 --tag A --only commands > $O/recJ.log 2>&1
 bun test/gpui/parity/record.mjs --bin $PWD/pstage/backplane-serve --out $O/recJ2 --port 3822 --tag B --only commands > $O/recJ2.log 2>&1
 bun test/gpui/parity/compare.mjs $O/recJ $O/recJ2 > $O/self-diff.txt 2>&1; tail -20 $O/self-diff.txt
-(cd native/host && systemd-run --user --scope -q -p MemoryMax=8G -p MemorySwapMax=0 -- cargo build --release --bin backplane-hub 2>&1 | grep -E '^error|Finished' | head -8) > $O/build.txt 2>&1
+(cd native/host && rm -f target/release/backplane-hub && systemd-run --user --scope -q -p MemoryMax=8G -p MemorySwapMax=0 -- cargo build --release --bin backplane-hub > ../../$O/build.log 2>&1); bh=$?; grep -E '^error|Finished' $O/build.log | head -8 > $O/build.txt; [ $bh -eq 0 ] || exit $bh
 cat $O/build.txt
 HUB=$PWD/native/host/target/release/backplane-hub; [ -x $HUB ] || exit 3
 PARITY_HUB_ARGS="--policy-bin $PWD/pstage/bp-policy-page --window-bin $PWD/pstage/window --version-string 0.1.0-dev --commit ${COMMIT:-0000000}" \

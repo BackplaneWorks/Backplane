@@ -20,7 +20,7 @@ export CARGO_TARGET_DIR=$HOME/bp-gpui-desktop/target
 [ "$COLD" = 1 ] && rm -rf "$CARGO_TARGET_DIR"
 df -h /System/Volumes/Data | tail -1
 rustc --version; cargo --version
-[ "$CHECK" = 1 ] && { cargo check --release "$@" 2>&1 | grep -vE "^\s+(Compiling|Checking)" | head -120; exit 0; }
+[ "$CHECK" = 1 ] && { cargo check --release "$@" > ~/bp-gpui-desktop/logs/check.log 2>&1; rc=$?; grep -vE "^\s+(Compiling|Checking)" ~/bp-gpui-desktop/logs/check.log | head -120; exit $rc; }
 /usr/bin/time -l cargo build --release "$@" 2> ~/bp-gpui-desktop/logs/build.err || { tail -60 ~/bp-gpui-desktop/logs/build.err; exit 1; }
 tail -25 ~/bp-gpui-desktop/logs/build.err
 cp "$CARGO_TARGET_DIR/release/backplane-gpui" ~/bp-gpui-desktop/dist/backplane-gpui

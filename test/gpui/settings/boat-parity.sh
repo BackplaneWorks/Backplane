@@ -11,7 +11,7 @@ systemd-run --user --scope -q -p MemoryMax=3700M -p MemorySwapMax=0 -- bun test/
 tail -3 $O/record.log
 # the planted value must be in no recorded frame, on either hub
 grep -c "PARITY-planted" $O/recJS/settings.json > $O/planted.txt 2>&1; cat $O/planted.txt
-(cd native/host && systemd-run --user --scope -q -p MemoryMax=8G -p MemorySwapMax=0 -- cargo build --release --bin backplane-hub 2>&1 | grep -E '^error|Finished' | head -8) > $O/build.txt 2>&1
+(cd native/host && rm -f target/release/backplane-hub && systemd-run --user --scope -q -p MemoryMax=8G -p MemorySwapMax=0 -- cargo build --release --bin backplane-hub > ../../$O/build.log 2>&1); bh=$?; grep -E '^error|Finished' $O/build.log | head -8 > $O/build.txt; [ $bh -eq 0 ] || exit $bh
 cat $O/build.txt
 HUB=$PWD/native/host/target/release/backplane-hub; [ -x $HUB ] || exit 3
 PARITY_HUB_ARGS="--policy-bin $PWD/stage/bp-policy-page --window-bin $PWD/stage/window" \

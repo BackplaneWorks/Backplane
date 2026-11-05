@@ -4,7 +4,7 @@
 case "$HOME" in /home/h|/home/h/*) echo "window_e2e.sh refuses to run on the desktop" >&2; exit 3;; esac
 [ "$(id -un)" = user ] || { echo "window_e2e.sh: not a Boat sandbox; refusing" >&2; exit 3; }
 R=$PWD; export BEND_NO_TELEMETRY=1; O=$R/out/we; mkdir -p $O
-(cd native/host && rm -rf src/agents src/files src/kicad && sed -i 's/mod agents; //; s/mod files; //; s/mod kicad; //; /agents::Agents::start/d; /files::start/d' src/main.rs && cargo build --release 2>&1 | tail -2)
+mkdir -p out; (cd native/host && rm -rf src/agents src/files src/kicad && sed -i 's/mod agents; //; s/mod files; //; s/mod kicad; //; /agents::Agents::start/d; /files::start/d' src/main.rs && rm -f target/release/backplane-hub && cargo build --release > ../../out/hubbuild.log 2>&1); bh=$?; tail -2 out/hubbuild.log; [ $bh -eq 0 ] || exit $bh
 bend native/bend/window.bend -o $O/window.c 2>&1 | tail -2; clang -std=c11 -O2 $O/window.c -lpthread -lm -o $O/window || exit 1
 H=$O/home; rm -rf $H; mkdir -p $H; cp test/gpui/hub/fixtures/pages.jsonl $H/events.jsonl
 $R/native/host/target/release/backplane-hub --home $H --port 3815 --policy-bin $R/test/gpui/hub/policy-bin/bp-policy-serve-O2-v3 --window-bin $O/window > $H/log 2>&1 & HP=$!

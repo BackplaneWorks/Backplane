@@ -3,7 +3,7 @@
 set -u
 STAGE=${STAGE:-stage}
 export PATH="$HOME/.cargo/bin:$PATH"
-(cd native/host && systemd-run --user --scope -q -p MemoryMax=8G -p MemorySwapMax=0 -- cargo build --release --bin backplane-hub 2>&1 | grep -E '^error|Finished' | head -8)
+mkdir -p out; (cd native/host && rm -f target/release/backplane-hub && systemd-run --user --scope -q -p MemoryMax=8G -p MemorySwapMax=0 -- cargo build --release --bin backplane-hub > ../../out/hubbuild.log 2>&1); bh=$?; grep -E '^error|Finished' out/hubbuild.log | head -8; [ $bh -eq 0 ] || exit $bh
 H=${CARGO_TARGET_DIR:-native/host/target}/release/backplane-hub
 [ -x $H ] || { echo "no hub at $H"; exit 3; }
 cp $H $STAGE/hub

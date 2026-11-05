@@ -6,7 +6,7 @@ set -u
 O=out/rust-replay; mkdir -p $O
 export PATH="$HOME/.cargo/bin:$HOME/.bun/bin:$PATH"
 which bun >/dev/null 2>&1 || { curl -fsSL https://bun.sh/install | BUN_INSTALL=$HOME/.bun bash >/dev/null 2>&1; export PATH="$HOME/.bun/bin:$PATH"; }
-(cd native/host && systemd-run --user --scope -q -p MemoryMax=8G -p MemorySwapMax=0 -- cargo build --release --bin backplane-hub 2>&1 | grep -E '^error|Finished' | head -8) > $O/build.txt 2>&1
+(cd native/host && rm -f target/release/backplane-hub && systemd-run --user --scope -q -p MemoryMax=8G -p MemorySwapMax=0 -- cargo build --release --bin backplane-hub > ../../$O/build.log 2>&1); bh=$?; grep -E '^error|Finished' $O/build.log | head -8 > $O/build.txt; [ $bh -eq 0 ] || exit $bh
 cat $O/build.txt
 HUB=$PWD/native/host/target/release/backplane-hub; [ -x $HUB ] || exit 3
 chmod +x stage/bp-policy-page stage/window test/gpui/slim/check_agents.sh 2>/dev/null
