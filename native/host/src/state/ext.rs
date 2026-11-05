@@ -18,6 +18,10 @@ pub struct Sum {
     pub output_at: u64,
     /// the newest time it sent a link message into each thread (key: the target thread)
     pub sent: HashMap<String, u64>,
+    /// id of the newest message the person typed in it (Policy.person: a user message of its own that Policy.direct reads as theirs)
+    pub person_id: String,
+    /// the first line (at most 200 characters) of its newest assistant message: what a "told" record says it was told (Told.first of Told.last)
+    pub reply_line: String,
 }
 #[derive(Default, Debug)]
 pub struct Ext {
@@ -69,7 +73,8 @@ pub fn on_post(st: &mut State, th: &str, id: &str, at: u64, msg: Option<(&str, &
         if role == "user" {
             own.found = true;
             if own.person.len() < 2 && !own.person.iter().any(|x| x == id) && direct(id, text) { own.person.push(id.to_string()); }
-        } else if role == "assistant" { own.output = id.to_string(); own.output_at = own.output_at.max(at); }
+            if super::turnend::policy_direct(id, text) { own.person_id = id.to_string(); }
+        } else if role == "assistant" { own.output = id.to_string(); own.output_at = own.output_at.max(at); own.reply_line = super::turnend::told_first(text); }
     }
     if !from.is_empty() && from != th {
         let s = st.ext.sum.entry(from).or_default();

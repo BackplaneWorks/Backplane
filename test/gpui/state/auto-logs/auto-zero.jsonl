@@ -189,5 +189,73 @@
 {"$":"SettingSet","key":"restart.retry.n.w-launched","value":"3","at":1794000000}
 {"$":"SettingSet","key":"provider.resume.w-parent","value":"1","at":1794000000}
 {"$":"SettingSet","key":"thread.config.hold.w-rep2","value":"on","at":1794000000}
+{"$":"ThreadCreated","id":"endA","project":"p1","title":"Thread endA","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"endA","msg":"mendA","role":"user","text":"do the thing","at":1794000010}
+{"$":"MessagePosted","thread":"endA","msg":"aendA","role":"assistant","text":"Done.\nsecond line\twith tab","at":1794000015}
+{"$":"TurnChanged","thread":"endA","state":"running","at":1794000016}
+{"$":"SettingSet","key":"summary.at.endA","value":"1794000690","at":1794000000}
+{"$":"ThreadCreated","id":"endB","project":"p1","title":"Thread endB","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"endB","msg":"mendB","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"endB","msg":"aendB","role":"assistant","text":"ok","at":1794000015}
+{"$":"TurnChanged","thread":"endB","state":"running","at":1794000016}
+{"$":"AskOpened","id":"qB","thread":"endB","kind":"approval","tool":"Bash","detail":"ls","options":"","at":1794000028}
+{"$":"ThreadCreated","id":"endC","project":"p1","title":"Thread endC","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"endC","msg":"mendC","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"endC","msg":"aendC","role":"assistant","text":"failed text","at":1794000015}
+{"$":"TurnChanged","thread":"endC","state":"running","at":1794000016}
+{"$":"ThreadCreated","id":"endD","project":"p1","title":"Thread endD","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"endD","msg":"mendD","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"endD","msg":"aendD","role":"assistant","text":"half","at":1794000015}
+{"$":"TurnChanged","thread":"endD","state":"running","at":1794000016}
+{"$":"ThreadCreated","id":"endE","project":"p1","title":"Thread endE","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"endE","msg":"mendE","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"endE","msg":"aendE","role":"assistant","text":"x","at":1794000015}
+{"$":"TurnChanged","thread":"endE","state":"running","at":1794000016}
+{"$":"ThreadCreated","id":"helperE","project":"p1","title":"helperE","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"ThreadLaunched","id":"helperE","by":"endE","report":true,"at":1794000029}
+{"$":"TurnChanged","thread":"helperE","state":"running","at":1794000017}
+{"$":"ThreadCreated","id":"endF","project":"p1","title":"Thread endF","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"endF","msg":"mendF","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"endF","msg":"aendF","role":"assistant","text":"x","at":1794000015}
+{"$":"TurnChanged","thread":"endF","state":"running","at":1794000016}
+{"$":"SettingSet","key":"alert.endF","value":"done\tturn-endF\tmendF\t1.1\t","at":1794000000}
+{"$":"ThreadCreated","id":"endG","project":"p1","title":"Thread endG","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"endG","msg":"mendG","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"endG","msg":"aendG","role":"assistant","text":"x","at":1794000015}
+{"$":"TurnChanged","thread":"endG","state":"running","at":1794000016}
+{"$":"ThreadCreated","id":"endGc","project":"p1","title":"endGc","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"TaskDelegated","task":"kG","parent":"endG","child":"endGc","depth":1,"provider":"claude","model":"","at":1794000030}
+{"$":"TurnChanged","thread":"endGc","state":"running","at":1794000017}
+{"$":"ThreadCreated","id":"endH","project":"p1","title":"Odd: \"title\" \\ ü","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"endH","msg":"mendH","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"endH","msg":"aendH","role":"assistant","text":"   long first line long first line long first line long first line long first line long first line long first line long first line long first line long first line long first line long first line long first line long first line long first line long first line long first line long first line long first line long first line long first line long first line long first line long first line long first line long first line long first line long first line long first line long first line \nsecond","at":1794000015}
+{"$":"TurnChanged","thread":"endH","state":"running","at":1794000016}
+{"$":"SettingSet","key":"summary.at.endH","value":"1794000010","at":1794000000}
+{"$":"ThreadCreated","id":"endI","project":"p1","title":"endI","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"endI","msg":"mI1","role":"user","text":"[message from botty] hi","at":1794000010}
+{"$":"MessagePosted","thread":"endI","msg":"aI","role":"assistant","text":"ok","at":1794000015}
+{"$":"TurnChanged","thread":"endI","state":"running","at":1794000016}
+{"$":"ThreadCreated","id":"endJ","project":"p1","title":"Thread endJ","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"endJ","msg":"mendJ","role":"user","text":"[message from person@box] hi again","at":1794000010}
+{"$":"MessagePosted","thread":"endJ","msg":"aendJ","role":"assistant","text":"reply J","at":1794000015}
+{"$":"TurnChanged","thread":"endJ","state":"running","at":1794000016}
+{"$":"BotSet","id":"bJ","name":"Bub","thread":"endJ","look":0,"persona":"","at":1794000031}
+{"$":"ThreadCreated","id":"endK","project":"p1","title":"Thread endK","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"endK","msg":"mendK","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"endK","msg":"aendK","role":"assistant","text":"x","at":1794000015}
+{"$":"TurnChanged","thread":"endK","state":"running","at":1794000016}
+{"$":"SettingSet","key":"bg.endK","value":"job\tsleep\tx","at":1794000000}
+{"$":"ThreadCreated","id":"endL","project":"p1","title":"Thread endL","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"endL","msg":"mendL","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"endL","msg":"aendL","role":"assistant","text":"x","at":1794000015}
+{"$":"TurnChanged","thread":"endL","state":"running","at":1794000016}
+{"$":"QueueTaken","thread":"endL","at":1794000032}
+{"$":"TurnQueued","thread":"endL","msg":"qq","text":"later","at":1794000033}
+{"$":"ThreadCreated","id":"endM","project":"p1","title":"Thread endM","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"endM","msg":"mendM","role":"user","text":"first","at":1794000010}
+{"$":"MessagePosted","thread":"endM","msg":"aendM","role":"assistant","text":"r1","at":1794000015}
+{"$":"TurnChanged","thread":"endM","state":"running","at":1794000016}
+{"$":"MessagePosted","thread":"endM","msg":"mM2","role":"user","text":"second ask","at":1794000012}
+{"$":"TurnChanged","thread":"endM","state":"running","at":1794000018}
 {"$":"SettingSet","key":"autosettle.version","value":"1","at":1794000000}
 {"$":"SettingSet","key":"settle.personal.minutes","value":"0","at":1794000100}

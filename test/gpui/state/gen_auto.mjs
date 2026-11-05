@@ -47,6 +47,18 @@ ls.push(E({$:'WakeSet',id:'w3',by:'setd',kind:'file',target:'/f',events:[],once:
 ls.push(E({$:'WakeSet',id:'w5',by:'pinned',kind:'pr',target:'7',events:[],once:true,note:''}),E({$:'WakeSet',id:'w6',by:'bg',kind:'work',target:'job1',events:[],once:true,note:''}));
 // liveness records and restart-retry counts the progress writes read
 ls.push(set('liveness.tc',JSON.stringify({last:T0+10,nudged:T0+500,stalled:true,reported:true,reason:'stuck'})),set('liveness.tp',JSON.stringify({last:T0+60000,nudged:0,stalled:false,reported:false,reason:'x'})),set('restart.retry.tc','2'),set('restart.retry.n.w-launched','3'),set('provider.resume.w-parent','1'),set('thread.config.hold.w-rep2','on'));
+// turn ends: person messages, replies, asks, helpers, memories, summaries, a bot
+const run_=(th,user,reply,extra={})=>[mk(th,{title:extra.title??('Thread '+th)}),msg(th,'m'+th,'user',user,T0+10),...(reply===null?[]:[msg(th,'a'+th,'assistant',reply,T0+15)]),turn(th,'running',T0+16)];
+ls.push(...run_('endA','do the thing',"Done.\nsecond line\twith tab"),set('summary.at.endA',String(T0+690)));
+ls.push(...run_('endB','do it','ok'),E({$:'AskOpened',id:'qB',thread:'endB',kind:'approval',tool:'Bash',detail:'ls',options:''}));
+ls.push(...run_('endC','do it','failed text'),...run_('endD','do it','half'),...run_('endE','do it','x'),mk('helperE'),E({$:'ThreadLaunched',id:'helperE',by:'endE',report:true}),turn('helperE','running',T0+17));
+ls.push(...run_('endF','do it','x'),set('alert.endF','done\tturn-endF\tmendF\t1.1\t'));
+ls.push(...run_('endG','do it','x'),mk('endGc'),E({$:'TaskDelegated',task:'kG',parent:'endG',child:'endGc',depth:1,provider:'claude',model:''}),turn('endGc','running',T0+17));
+ls.push(...run_('endH','do it','   '+'long first line '.repeat(30)+'\nsecond',{title:'Odd: "title" \\ ü'}),set('summary.at.endH',String(T0+10)));
+ls.push(mk('endI'),msg('endI','mI1','user','[message from botty] hi',T0+10),msg('endI','aI','assistant','ok',T0+15),turn('endI','running',T0+16));
+ls.push(...run_('endJ','[message from person@box] hi again','reply J'),E({$:'BotSet',id:'bJ',name:'Bub',thread:'endJ',look:0,persona:''}));
+ls.push(...run_('endK','do it','x'),set('bg.endK','job\tsleep\tx'),...run_('endL','do it','x'),E({$:'QueueTaken',thread:'endL'}),E({$:'TurnQueued',thread:'endL',msg:'qq',text:'later'}));
+ls.push(...run_('endM','first',"r1"),msg('endM','mM2','user','second ask',T0+12),turn('endM','running',T0+18));
 // legacy and defaults
 ls.push(set('autosettle.version','1'));
 writeFileSync(`${out}/auto-base.jsonl`,ls.join('\n')+'\n');
@@ -54,6 +66,9 @@ writeFileSync(`${out}/auto-base.jsonl`,ls.join('\n')+'\n');
 const tune=(name,kv)=>writeFileSync(`${out}/${name}.jsonl`,[...ls,...Object.entries(kv).map(([a,b])=>set(a,b,T0+100))].join('\n')+'\n');
 tune('auto-read',Object.fromEntries(reads.map(th=>['autosettle.read.'+th,'a'+th])));
 tune('auto-read-lifecycle',{...Object.fromEntries(reads.map(th=>['autosettle.read.'+th,'a'+th])),'settle.done':'on'});
+writeFileSync(`${out}/auto-notify.jsonl`,[...ls,set('notify.settled','off',T0+100)].join('\n')+'\n');
 tune('auto-lifecycle',{'settle.done':'on'});tune('auto-short',{'settle.idle.minutes':'1','settle.personal.minutes':'2'});tune('auto-zero',{'settle.personal.minutes':'0'});
+const endB=(th,state,extra=[])=>writeFileSync(`${out}/end-${th}-${state}.batch`,[JSON.stringify({$:'TurnChanged',thread:th,state,at:T0+60000}),JSON.stringify({$:'UsageSet',thread:th,used:5,window:100,at:T0+60000}),...extra].join('\n')+'\n');
+for(const [th,st] of [['endA','completed'],['endB','completed'],['endC','failed'],['endD','interrupted'],['endE','completed'],['endF','completed'],['endG','completed'],['endH','completed'],['endI','completed'],['endJ','completed'],['endK','completed'],['endL','completed'],['endM','completed'],['endD','completed'],['endA','failed'],['endA','stopped']])endB(th,st);
 writeFileSync(`${out}/auto.now`,[T0+700,T0+3000,T0+20000,T0+30000,T0+60000,T0+200000].join('\n')+'\n');
 console.log('ok');
