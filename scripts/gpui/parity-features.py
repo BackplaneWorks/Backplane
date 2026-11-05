@@ -265,7 +265,7 @@ R(A, "Machine switch / one list over machines", m=["view.action"], hub="missing"
 # ---- Platforms
 A = "Platforms"
 R(A, "Hub on macOS (darwin-arm64, darwin-x64)", hub="partial", c="ppp", lane=L["core"],
-  ev="today's Bend hub runs on macOS; Rust: Linux-only calls (prctl PDEATHSIG, ptsname_r, /proc) are behind cfg with macOS fallbacks (agents/proc.rs reap_orphans via ps, term/pty.rs ptsname); `cargo check --bin backplane-hub` passes on hs-mac-mini (darwin-arm64, 2026-11-05); tests and a run on macOS not done")
+  ev="today's Bend hub runs on macOS; Rust: Linux-only calls (prctl PDEATHSIG, ptsname_r, /proc) are behind cfg with macOS fallbacks (agents/proc.rs: reap_orphans does nothing off Linux, so an orphaned agent is left running after a hub SIGKILL until exact env reading (KERN_PROCARGS2) or a pid file lands; term/pty.rs ptsname); `cargo check --bin backplane-hub` passes on hs-mac-mini (darwin-arm64, 2026-11-05); tests and a run on macOS not done")
 R(A, "Hub on Windows (windows-x64)", hub="missing", c="ppp", lane=L["core"],
   ev="today's Bend hub is cross-built for windows-x64; the Rust hub is unix-only (libc flock/setsid/pty/ioctl, unix sockets, /proc): the plan and effort are in docs/gpui/PORT.md 'Platforms'")
 
