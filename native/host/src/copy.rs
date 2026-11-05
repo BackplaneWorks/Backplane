@@ -62,6 +62,8 @@ pub fn refusal(cmd: &str) -> String { format!("backplane: a hub on a copied log 
 
 /// Copy.git.reads: git jobs that only read the project. Viewer metadata and exports may populate the copy's own cache.
 pub fn git_reads(job: &str) -> bool { has(&["diff", "status", "name", "files", "kicad", "refs", "dir", "mech", "pdf", "boards", "rv.components", "rv.renderAsset"], job) }
+/// What a copy tells a client whose request would write into a project folder (outside its home).
+pub const HOME_ONLY: &str = "a hub on a copied log (BACKPLANE_COPY=1) writes nothing outside its home";
 /// Copy.fx.home: bot effects inside the home (scratch folders, the zone rule).
 pub fn fx_home(kind: &str) -> bool { has(&["scratch", "scratch-gone", "zone", "home"], kind) }
 

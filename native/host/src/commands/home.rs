@@ -96,6 +96,7 @@ fn fab_row(h: &Home, art: &mut Vec<Value>, issues: &mut Vec<String>, rel: &str) 
 }
 
 /// bp_project_home, blocking part: everything but the git and gh calls.
+#[cfg(test)] pub fn read_files_pub(root: &str, req: &Value) -> (Value, bool, PathBuf) { read_files(root, req) }
 fn read_files(root: &str, req: &Value) -> (Value, bool, PathBuf) {
     let real = match std::fs::canonicalize(root) { Ok(r) => r, Err(_) => return (json!({"project_home": req.get("project"), "root": root, "artifacts": [], "error": "Project folder is unavailable."}), false, PathBuf::new()) };
     let h = Home { real: real.clone() };
@@ -103,6 +104,8 @@ fn read_files(root: &str, req: &Value) -> (Value, bool, PathBuf) {
     let (mut art, mut issues): (Vec<Value>, Vec<String>) = (vec![], vec![]);
     let op = st(req, "op");
     if op == "intent" {
+        // .backplane/intent.md lies in the project folder, outside a copy's home
+        if crate::copy::on() { return (json!({"error": crate::copy::HOME_ONLY, "project_home": project}), false, real) }
         let dest = real.join(".backplane/intent.md"); let parent = dest.parent().unwrap().to_path_buf();
         let fail = |m: &str| (json!({"error": m, "project_home": project}), false, real.clone());
         if std::fs::create_dir_all(&parent).is_err() { return fail("Intent directory leaves this project.") }

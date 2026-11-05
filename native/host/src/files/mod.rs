@@ -232,4 +232,31 @@ mod boundary_tests {
         }
         assert_eq!(h.call(&hub, &who, &json!(4), "kicad.watch", &json!({"kind":""})).await[0]["ok"], true);
     }
+    /// A copy writes nothing into a project folder: mech.render (renders/), review.tick (.backplane/checklist.md) and both intent writers
+    /// (fab.intent, the project home's intent op) are refused, and the folder is byte for byte what it was. Run in a child with BACKPLANE_COPY=1 (copy::on reads it once).
+    #[test] fn copy_writes_probe() {
+        if std::env::var("BP_COPY_PROBE").ok().as_deref() != Some("1") { return }
+        assert!(crate::copy::on());
+        let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
+        rt.block_on(async {
+            let (hub, proj) = world().await;
+            std::fs::write(proj.join("m.step"), "ISO-10303-21;").unwrap(); std::fs::create_dir_all(proj.join(".backplane")).unwrap();
+            fn snap(d: &std::path::Path) -> Vec<(String, Vec<u8>)> { let mut v = vec![]; fn go(d: &std::path::Path, root: &std::path::Path, v: &mut Vec<(String, Vec<u8>)>) { for e in std::fs::read_dir(d).unwrap().flatten() { let p = e.path(); if p.is_dir() { go(&p, root, v) } else { v.push((p.strip_prefix(root).unwrap().to_string_lossy().into_owned(), std::fs::read(&p).unwrap())) } } } go(d, d, &mut v); v.sort(); v }
+            let before = snap(&proj);
+            let who = Caller { gen: "g".into(), client: 1 };
+            let call = |m: &'static str, p: Value| { let (hub, who) = (hub.clone(), Caller { gen: who.gen.clone(), client: 1 }); async move { hub.rpc_for(m).unwrap().call(&hub, &who, &json!(5), m, &p).await } };
+            let r = call("mech.render", json!({"thread":"ok","path":"m.step"})).await; assert_eq!(r[0]["ok"], false, "{r:?}"); assert_eq!(r[0]["result"]["text"], crate::copy::HOME_ONLY);
+            let r = call("review.tick", json!({"thread":"ok","index":0})).await; assert_eq!(r[0]["ok"], false, "{r:?}");
+            let r = crate::settings::fab::reply(&hub, &json!(5), "fab.intent", &json!({"thread":"ok","text":"# Goal\nx"})).await; assert_eq!(r["ok"], false, "{r:?}"); assert_eq!(r["error"], crate::copy::HOME_ONLY);
+            let (v, _, _) = crate::commands::home::read_files_pub(&proj.to_string_lossy(), &json!({"op":"intent","text":"x","revision":"","editor":0,"removeBytes":0,"project":"p1"}));
+            assert_eq!(v["error"], crate::copy::HOME_ONLY, "{v:?}");
+            assert_eq!(snap(&proj), before, "something was written into the project");
+            assert!(!proj.join("renders").exists());
+        });
+    }
+    #[test] fn a_copy_writes_no_render_checklist_or_intent_into_a_project() {
+        let o = std::process::Command::new(std::env::current_exe().unwrap()).args(["files::boundary_tests::copy_writes_probe", "--exact", "--nocapture", "--test-threads=1"])
+            .env("BACKPLANE_COPY", "1").env("BP_COPY_PROBE", "1").env_remove("BACKPLANE_AGENTS").output().unwrap();
+        assert!(o.status.success(), "{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
+    }
 }

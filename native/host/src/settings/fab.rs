@@ -210,7 +210,8 @@ pub fn look_in(home: &Path, cwd: Option<&Path>, thread: &str, est_on: bool, serv
 pub async fn reply(hub: &Arc<Hub>, id: &Value, method: &str, p: &Value) -> Value {
     let thread = p.get("thread").and_then(Value::as_str).unwrap_or("");
     if method == "fab.intent" {
-        // the person's own words for .backplane/intent.md, then the card
+        // the person's own words for .backplane/intent.md, then the card; a copy writes nothing into the project
+        if crate::copy::on() { return json!({"t":"reply","id":id,"ok":false,"error":crate::copy::HOME_ONLY}) }
         if let Some(cwd) = crate::files::root_of(hub, thread).await {
             let text = p.get("text").and_then(Value::as_str).unwrap_or("").trim().to_string();
             let c2 = cwd.clone();
