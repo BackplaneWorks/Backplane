@@ -9,6 +9,7 @@ pub mod post;
 pub mod reply;
 pub mod routines;
 pub mod rpc;
+pub mod tools;
 pub mod sched_text;
 pub mod uber;
 pub mod world;
