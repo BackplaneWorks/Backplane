@@ -7,7 +7,7 @@
 //! Out for Claude: images/`$skill` input, the Backplane MCP server and runtime prompt in the agent's arguments,
 //! subagents and background tasks, todo tools, the allowance stream, the legacy queue, mail provenance beyond carry,
 //! and the hub's time-driven policies (liveness, autosettle, alert/told/summary, star nudge), which belong to M4.
-pub mod bg; pub mod codex; pub mod cmds; pub mod hist; pub mod host; pub mod inputs; pub mod lines; pub mod mcp; pub mod proc; pub mod prompt; pub mod prompt_text; pub mod rules; pub mod tools; pub mod world;
+pub mod bg; pub mod codex; pub mod providers; pub mod cmds; pub mod hist; pub mod host; pub mod inputs; pub mod lines; pub mod mcp; pub mod proc; pub mod prompt; pub mod prompt_text; pub mod rules; pub mod tools; pub mod world;
 #[cfg(test)] mod tests;
 #[cfg(test)] mod laws;
 
@@ -33,10 +33,12 @@ pub struct Stats { pub turns: AtomicU64, pub procs_spawned: AtomicU64, pub procs
 pub enum Cmd {
     User { msg: String, text: String, role: String, origin: Option<(String, String, String)>, extra: Vec<Value>, reply: oneshot::Sender<Result<(), String>> },
     Interrupt { reply: oneshot::Sender<()> },
+    /// The person answered an ask a driver's process made (providers::AskInfo).
+    Answer { ask: String, answer: String },
 }
 
 pub struct Agents { pub hub: Arc<Hub>, pub cli: Cli, pub host: host::HostInfo, world: Mutex<World>, actors: StdMutex<HashMap<String, mpsc::Sender<Cmd>>>, pub stats: Stats, n: AtomicU64,
-    pub mcp: std::sync::OnceLock<Arc<mcp::Mcp>>, gens: StdMutex<HashMap<String, String>>, pub parked: StdMutex<HashMap<String, mcp::Parked>> }
+    pub driver_asks: StdMutex<HashMap<String, String>>, pub mcp: std::sync::OnceLock<Arc<mcp::Mcp>>, gens: StdMutex<HashMap<String, String>>, pub parked: StdMutex<HashMap<String, mcp::Parked>> }
 
 pub fn now_s() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) }
 pub fn now_ms() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0) }
@@ -49,7 +51,7 @@ impl Agents {
     pub async fn start_with(hub: Arc<Hub>, cli: Cli) -> Result<Arc<Agents>> { Agents::start_host(hub, cli, host::HostInfo::default()).await }
     pub async fn start_host(hub: Arc<Hub>, cli: Cli, host: host::HostInfo) -> Result<Arc<Agents>> {
         let ag = Arc::new(Agents { hub: hub.clone(), cli, host, world: Mutex::new(World::default()), actors: StdMutex::new(HashMap::new()), stats: Stats::default(), n: AtomicU64::new(0),
-            mcp: std::sync::OnceLock::new(), gens: StdMutex::new(HashMap::new()), parked: StdMutex::new(HashMap::new()) });
+            driver_asks: StdMutex::new(HashMap::new()), mcp: std::sync::OnceLock::new(), gens: StdMutex::new(HashMap::new()), parked: StdMutex::new(HashMap::new()) });
         let home = hub.cfg.home.to_string_lossy().into_owned(); proc::set_owner(&home);
         let left = tokio::task::spawn_blocking(move || proc::reap_orphans(&home)).await.unwrap_or(0);
         if left > 0 { eprintln!("agents: ended {left} process(es) a previous hub left behind") }
@@ -180,7 +182,7 @@ struct Actor {
     live: String, live_gen: u64, ahead: String, last_user: String, recent: VecDeque<String>, pacing: Option<Instant>, rid: u64,
     cwd: String, cmds: cmds::Cmds, sent: VecDeque<(String, String, String)>, wait: String, prog: bg::Prog, heard: Instant,
     /// Codex-shaped threads: one process per turn; the thread's provider and model; a ride waiting when the turn ended
-    codex: bool, prov: String, model: String, next_ride: bool,
+    codex: bool, prov: String, model: String, next_ride: bool, driver: Option<Box<dyn providers::Driver>>, asked: HashMap<String, Value>,
 }
 
 async fn next_batch(rx: &mut mpsc::Receiver<String>) -> Option<Vec<String>> {
@@ -193,7 +195,7 @@ async fn recv_opt(r: &mut Option<mpsc::Receiver<String>>) -> Option<Vec<String>>
 async fn exit_opt(r: &mut Option<oneshot::Receiver<Exit>>) -> Result<Exit, oneshot::error::RecvError> { match r { Some(rx) => rx.await, None => std::future::pending().await } }
 
 impl Actor {
-    fn new(ag: Arc<Agents>, th: String) -> Actor { Actor { cx: Cx::new(&th), ag, th, live_proc: None, lines: None, exit: None, live: String::new(), live_gen: 0, ahead: String::new(), last_user: String::new(), recent: VecDeque::new(), pacing: None, rid: 0, cwd: String::new(), cmds: cmds::Cmds::new(), sent: VecDeque::new(), wait: String::new(), prog: bg::Prog::default(), heard: Instant::now(), codex: false, prov: String::new(), model: String::new(), next_ride: false } }
+    fn new(ag: Arc<Agents>, th: String) -> Actor { Actor { cx: Cx::new(&th), ag, th, live_proc: None, lines: None, exit: None, live: String::new(), live_gen: 0, ahead: String::new(), last_user: String::new(), recent: VecDeque::new(), pacing: None, rid: 0, cwd: String::new(), cmds: cmds::Cmds::new(), sent: VecDeque::new(), wait: String::new(), prog: bg::Prog::default(), heard: Instant::now(), codex: false, prov: String::new(), model: String::new(), next_ride: false, driver: None, asked: HashMap::new() } }
 
     async fn run(mut self, mut rx: mpsc::Receiver<Cmd>) {
         let mut tick = tokio::time::interval(Duration::from_secs(1)); tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -226,6 +228,7 @@ impl Actor {
         match c {
             Cmd::User { msg, text, role, origin, extra, reply } => { let r = self.user(msg, text, role, origin, extra).await; let _ = reply.send(r); }
             Cmd::Interrupt { reply } => { self.interrupt().await; let _ = reply.send(()); }
+            Cmd::Answer { ask, answer } => { if let Some(req) = self.asked.remove(&ask) { let lines = self.driver.as_mut().map(|d| d.answer(&req, &answer)).unwrap_or_default(); if let Some(p) = &self.live_proc { for l in lines { let _ = p.input.try_send(l); } } } }
         }
     }
 
@@ -237,8 +240,8 @@ impl Actor {
             let Some(t) = w.threads.get(&self.th).cloned() else { return Err("unknown thread".into()) };
             (t, w.cwd(&self.th), w.cx(&self.th), w.setting(&format!("ride.{}", self.th)).to_string())
         };
-        if t.provider != "claude" && t.provider != "codex" { return Err(format!("{} threads are not run by the Rust hub yet", if t.provider.is_empty() { "this provider's" } else { &t.provider })) }
-        let codex = t.provider == "codex";
+        if t.provider != "claude" && providers::driver(&t.provider).is_none() { return Err(format!("{} threads are not run by the Rust hub yet", if t.provider.is_empty() { "this provider's" } else { &t.provider })) }
+        let codex = t.provider != "claude";
         if codex && (self.cx.running || t.turn == "running") { return self.codex_ride(&msg, &text, &role, origin).await } // Hub.deliver.ride: a running turn takes it on its next Backplane tool result
         self.codex = codex; self.prov = t.provider.clone(); self.model = t.model.clone();
         self.cx = cx; self.last_user = msg.clone(); self.cwd = cwd.clone();
@@ -296,7 +299,8 @@ impl Actor {
         let (now, th) = (now_s(), self.th.clone());
         self.cx.running = true; self.ag.stats.turns.fetch_add(1, Relaxed);
         if !std::path::Path::new(cwd).is_dir() { self.fail(format!("could not start codex: its folder {cwd} is gone"), "spawn", &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); return }
-        let prog = match self.ag.cli.resolve("codex") { Ok(p) => p, Err(e) => { self.fail(format!("could not start codex: {e}"), "spawn", &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); return } };
+        let Some(made) = providers::driver(&t.provider) else { self.fail(format!("{} threads are not run by the Rust hub yet", t.provider), "spawn", &format!("spawn-{now}")).await; return };
+        let prog = match self.ag.cli.resolve(made.cli) { Ok(p) => p, Err(e) => { self.fail(format!("could not start {}: {e}", made.cli), "spawn", &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); return } };
         self.stop().await; self.lines = None; self.exit = None;
         let gen = format!("{now}-{}", self.ag.seq()); self.ag.set_gen(&th, &gen);
         let prompt = self.ag.prompt_for(&th, cwd).await;
@@ -304,18 +308,30 @@ impl Actor {
         let url = self.ag.mcp.get().map(|m| m.url(&th, &gen)).unwrap_or_default();
         let (host, cwd2, text2) = (self.ag.host.clone(), cwd.to_string(), text.to_string());
         let (body, imgs) = tokio::task::spawn_blocking(move || { let ss = if text2.contains('$') { inputs::scan(&host.user_home, &cwd2, host.kistack.as_deref()) } else { vec![] }; (inputs::expand_claude(&text2, &ss), inputs::att_paths(&text2).into_iter().filter(|p| !inputs::mime(p).is_empty()).collect::<Vec<_>>()) }).await.unwrap_or_default();
-        let args = codex::args(&codex::ArgsIn { model: &t.model, session: &session, runtime: &t.runtime, effort: &effort, think, images: &imgs, mcp_url: &url, pcbparts: "https://pcbparts.dev/mcp", prompt: &prompt, text: &body });
-        match proc::spawn(&prog, &args, std::path::Path::new(cwd), self.ag.cli.dir(), &[]) {
-            Ok(p) => { self.ag.stats.procs_spawned.fetch_add(1, Relaxed); self.heard = Instant::now(); self.live_proc = Some(Live { input: p.input, pid: p.pid, key: String::new() }); self.lines = Some(p.lines); self.exit = Some(p.exit) }
-            Err(e) => { self.fail(format!("could not start codex: {e}"), "spawn", &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); }
+        let a = providers::TurnIn { thread: th.clone(), cwd: cwd.into(), home: self.ag.host.home.to_string_lossy().into_owned(), model: t.model.clone(), session, runtime: t.runtime.clone(), interaction: t.interaction.clone(), effort, think, text: body, images: imgs, prompt, mcp_url: url, pcbparts_url: "https://pcbparts.dev/mcp".into() };
+        let mut driver = made.driver; let (args, env, start) = (driver.argv(&a), driver.env(&a), driver.start(&a));
+        match proc::spawn(&prog, &args, std::path::Path::new(cwd), self.ag.cli.dir(), &env) {
+            Ok(p) => { self.ag.stats.procs_spawned.fetch_add(1, Relaxed); self.heard = Instant::now(); for l in start { let _ = p.input.try_send(l); } self.driver = Some(driver); self.live_proc = Some(Live { input: p.input, pid: p.pid, key: String::new() }); self.lines = Some(p.lines); self.exit = Some(p.exit) }
+            Err(e) => { self.fail(format!("could not start {}: {e}", made.cli), "spawn", &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); }
         }
+    }
+
+    /// A permission/question the process asked (providers::Driver docs): allowed-for-session answers at once, else an ask for the person.
+    async fn driver_ask(&mut self, request: &Value, at: u64) -> Option<Value> {
+        let info = self.driver.as_ref()?.ask_info(request)?; let th = self.th.clone();
+        let session_ok = info.kind == "approval" && self.ag.world().await.sessions.contains(&(th.clone(), info.tool.clone())); // Perm.session_ok
+        if session_ok { let lines = self.driver.as_mut().map(|d| d.answer(request, "accept")).unwrap_or_default(); if let Some(p) = &self.live_proc { for l in lines { let _ = p.input.try_send(l); } } return None }
+        if self.asked.len() >= 16 { let lines = self.driver.as_mut().map(|d| d.answer(request, "deny")).unwrap_or_default(); if let Some(p) = &self.live_proc { for l in lines { let _ = p.input.try_send(l); } } return None } // bounded: too many waiting
+        let ask = hub_id("q", at, self.ag.seq());
+        self.asked.insert(ask.clone(), request.clone()); self.ag.driver_asks.lock().unwrap().insert(ask.clone(), th.clone());
+        Some(json!({"$":"AskOpened","id":ask,"thread":th,"kind":info.kind,"tool":info.tool,"detail":info.detail,"options":info.options,"at":at}))
     }
 
     /// Ride.after: a turn that ended with mail waiting starts the next at once with it (Ride.run).
     async fn codex_next(&mut self) {
         let th = self.th.clone();
         let (t, cwd, ride) = { let w = self.ag.world().await; (w.threads.get(&th).cloned(), w.cwd(&th), w.setting(&format!("ride.{th}")).to_string()) };
-        let Some(t) = t else { return }; if ride.is_empty() || t.archived || t.deleted || t.provider != "codex" { return }
+        let Some(t) = t else { return }; if ride.is_empty() || t.archived || t.deleted || providers::driver(&t.provider).is_none() { return }
         let now = now_s(); let mut ev = codex::ride_done(&th, &ride, "with a new turn", now);
         ev.push(json!({"$":"TurnChanged","thread":th,"state":"running","at":now}));
         self.commit(ev).await; self.cwd = cwd.clone(); self.jobs_start(&cwd, &codex::ride_last(&ride));
@@ -329,8 +345,13 @@ impl Actor {
         let mut events: Vec<Value> = vec![]; let mut clear = false; let mut ended = false;
         for l in ls {
             if l.trim().is_empty() { continue }
-            let Ok(v) = serde_json::from_str::<Value>(&crate::store::clean(&l)) else { self.ag.stats.bad_lines.fetch_add(1, Relaxed); continue };
+            let raw = crate::store::clean(&l);
+            let line = serde_json::from_str::<Value>(&raw).unwrap_or_else(|_| { self.ag.stats.bad_lines.fetch_add(1, Relaxed); Value::String(raw.to_string()) });
+            let re = match self.driver.as_mut() { Some(d) => d.on_line(&line), None => continue };
+            if let Some(p) = &self.live_proc { for s in re.send { let _ = p.input.try_send(s); } }
             if !self.cx.running { continue } // stopped_turn_quiet: what a stopped turn's process still says is old news
+            for v in re.shapes {
+            if v["type"] == "bp.ask" { if let Some(e) = self.driver_ask(&v["request"], at).await { events.push(e) } continue }
             let fx = self.cx.codex_line(&v, &self.prov.clone(), &self.model.clone(), at);
             if let Some(id) = codex::step_for(&v) { self.jobs_step(&id) }
             for d in &fx.deltas {
@@ -348,9 +369,11 @@ impl Actor {
                 events.push(e);
             }
             if fx.delta_end { clear = true }
+            }
         }
         if clear { self.live_end().await }
         self.commit(events).await;
+        if ended && self.driver.as_ref().map_or(false, |d| d.ends_on_turn_end()) { self.stop().await; self.lines = None; self.exit = None; self.asked.clear() } // Grok.stop: SIGTERM after the turn's events
         if ended { if self.live_proc.is_none() { self.codex_next().await } else { self.next_ride = true } }
     }
 
@@ -415,6 +438,7 @@ impl Actor {
             ev.push(json!({"$":"ActivityLogged","thread":th,"act":hub_id("u", now, self.ag.seq()),"tone":"error","kind":"stop","summary":say,"at":now}));
         }
         self.live_end().await; self.commit(ev).await; self.cx.running = false; self.jobs_end();
+        if let (Some(d), Some(p)) = (self.driver.as_mut(), self.live_proc.as_ref()) { for s in d.on_stop() { let _ = p.input.try_send(s); } }
         if self.codex { self.stop().await; self.lines = None; self.exit = None; self.next_ride = false; self.codex_next().await } // AgentStop ends the process; mail waiting starts the next turn (ride_interrupted_starts)
     }
 
@@ -502,7 +526,7 @@ impl Actor {
         self.live_proc = None; self.ag.stats.procs_exited.fetch_add(1, Relaxed);
         if self.cx.running {
             let code = e.code.or(e.signal.map(|s| 128 + s)).unwrap_or(1);
-            self.fail(rules::exit_why(code), "exit", &hub_id("x", now_s(), 0)).await;
+            self.fail(self.driver.as_ref().and_then(|d| d.exit_why(code)).unwrap_or_else(|| rules::exit_why(code)), "exit", &hub_id("x", now_s(), 0)).await;
         }
         self.cmds = cmds::Cmds::new(); self.wait.clear();
         let live = { let w = self.ag.world().await; w.threads.get(&self.th).map_or(false, |t| !t.archived && !t.deleted) };

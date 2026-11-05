@@ -110,6 +110,7 @@ impl Agents {
         else if !th.is_empty() && (a.kind == "input" || a.kind == "approval") { ev.push(json!({"$":"ActivityLogged","thread":th,"act":hub_id("k", now, self.seq()),"tone":"info","kind":"answer","summary":mcp::ans_line(&a.kind, &a.tool, &a.detail, answer),"at":now})) }
         self.commit_events(ev).await;
         if let Some(p) = self.parked.lock().unwrap().remove(ask) { let _ = p.tx.send(answer.to_string()); }
+        let th_of = self.driver_asks.lock().unwrap().remove(ask); if let Some(t) = th_of { let _ = self.actor(&t).try_send(super::Cmd::Answer { ask: ask.to_string(), answer: answer.to_string() }); }
         if implement { return self.deliver(&th, &hub_id("m", now, self.seq()), "Implement the proposed plan.", None, vec![]).await }
         Ok(())
     }

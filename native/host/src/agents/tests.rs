@@ -689,3 +689,16 @@ async fn codex_start(name: &str) -> (Arc<Hub>, Arc<Agents>, PathBuf) {
     println!("SCAN events={} threads={} open_ms={} fold_ms={} {}", store.len(), w.threads.len(), open.as_millis(), fold.as_millis(), rss());
     let _ = std::fs::remove_dir_all(&d);
 }
+
+const TESTCLI: &str = "#!/bin/sh\nread hello\necho '{\"q\":1}'\nread ans\necho \"$ans\"\nsleep 30\n";
+#[tokio::test(flavor = "multi_thread")] async fn a_drivers_permission_reaches_the_person_and_the_answer_goes_back() {
+    let sd = dir("dr-bin"); script(&sd, "testcli", TESTCLI);
+    let (hub, ag, _h, _w) = start("dr", |w| base_log(w, 1, "").replace("\"provider\":\"claude\"", "\"provider\":\"testprov\""), |_| Cli::standin(&sd)).await; let from = len(&hub).await;
+    rpc(&hub, "turn.start", json!({"thread":T1,"text":"go"})).await;
+    let ev = until(&hub, from, 20, |ev| ev.iter().any(|e| is(e, "AskOpened"))).await;
+    let ask = ev.iter().find(|e| is(e, "AskOpened")).unwrap(); assert_eq!((ask["kind"].as_str(), ask["tool"].as_str(), ask["detail"].as_str()), (Some("approval"), Some("Bash"), Some("ls")));
+    assert_eq!(rpc(&hub, "ask.answer", json!({"id":ask["id"],"answer":"accept"})).await["ok"], true);
+    let ev = until(&hub, from, 20, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await;
+    assert!(ev.iter().any(|e| is(e, "MessagePosted") && e["text"] == "answered accept"), "the answer reached the process");
+    tokio::time::sleep(Duration::from_millis(500)).await; assert_eq!(ag.stats.procs_exited.load(Relaxed), 1, "the process ends with its turn (ends_on_turn_end)"); ag.shutdown();
+}
