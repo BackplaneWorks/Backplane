@@ -8,7 +8,6 @@ use serde_json::Value;
 use std::{cell::RefCell, ops::Range, rc::Rc};
 
 /// Everything the pointer needs about the blocks drawn this frame; rebuilt on every render, the selection survives.
-#[derive(Default)]
 pub struct Registry {
     pub blocks: Vec<Info>, pub dragging: bool, pub entry: usize,
     /// The entry being drawn and how many blocks it has had so far: a block's identity is (entry id, index in entry).
