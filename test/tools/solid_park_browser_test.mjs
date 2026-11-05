@@ -45,7 +45,8 @@ try {
     out.parkedView = S.testParked === v1 && !v1.disposed && S.testView === null;
     out.keptSame = T.kept('2|r|a.kicad_pcb', 't1', '') === A;
     out.keptOtherKey = T.kept('2|r|b.kicad_pcb', 't1', '') === null;
-    out.keptOtherThread = T.kept('2|r|a.kicad_pcb', 't2', '') === null;
+    // (the same model for another thread: mount takes it up for that thread)
+    out.keptOtherThread = T.kept('2|r|a.kicad_pcb', 't2', '') === A;
     out.keptOtherBoard = T.kept('2|r|a.kicad_pcb', 't1', '0|r|a.kicad_pcb') === null;
     // a model that came (or changed) while it was away is taken on its return
     const model = { pos: new Float32Array(9), nrm: new Float32Array(9), col: new Float32Array(9), count: 3, box: [0, 0, 0, 1, 1, 1] };
@@ -70,6 +71,19 @@ try {
     const v3 = S.testParked;
     T.reset();
     out.resetReleases = !!v3 && v3.disposed && S.testParked === null && T.kept('2|r|b.kicad_pcb', 't2', '') === null;
+    // another thread showing the same model in the same element (a thread
+    // switch with 3D open in both): the workbench and its toolbar are kept,
+    // the preview view re-keyed to that thread; a thread that renders
+    // differently gets a new workbench
+    show(null); T.reset();
+    const M = bench('2|r|m.kicad_pcb', 'ta'); show(M);
+    const mv = S.testView, mtools = [...M.querySelector('.solid-toolbar').children];
+    const rescope = (scope) => { M.dataset.scope = scope; M.querySelector('canvas').dataset.scope = scope; S.mount(M.querySelector('canvas')); T.mount(M, S, {}); };
+    rescope('tb');
+    out.rescopeKeeps = S.testView === mv && mv.stateKey === 'tb\0' + '2|r|m.kicad_pcb' && mtools.every((n, i) => M.querySelector('.solid-toolbar').children[i] === n);
+    const mode = M.querySelector('select.solid-render-mode'); mode.value = 'fast'; mode.dispatchEvent(new Event('change'));
+    rescope('ta');
+    out.rescopeOtherModeRebuilds = M.querySelector('.solid-toolbar').children[0] !== mtools[0];
     // the picture: taken from a drawn model, shown over a new canvas of the
     // same thread and model at the same size (its pose taken up), dropped
     // when the model draws; never for another thread or another size
