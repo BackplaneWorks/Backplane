@@ -120,6 +120,7 @@ final class AppModel {
               let screen, attempt.nav == nil || attempt.nav == Self.nav(screen) else { return }
         attempt.modelReady = true
         performanceAttempt = attempt
+        if attempt.operation == .startup { Boot.mark("model-ready") }
         PerformanceTrace.shared.end(.modelReady, operation: attempt.operation, started: attempt.started)
     }
 
@@ -132,6 +133,7 @@ final class AppModel {
         let isFresh = fresh && contentReady && screen?.thread?.id == thread && revision == performanceRevision
         if !attempt.usefulDisplay {
             attempt.usefulDisplay = true
+            if attempt.operation == .startup { Boot.mark(fresh ? "first-display-fresh" : "first-display") }
             attempt.freshDisplay = isFresh
             PerformanceTrace.shared.end(.display, operation: attempt.operation, started: attempt.started,
                                         outcome: isFresh ? .success : .stale)
@@ -418,7 +420,7 @@ final class AppModel {
         engine.onFlush = { [weak self] out, generation in
             Task { @MainActor [weak self] in self?.apply(out, generation: generation) }
         }
-        #if DEBUG
+        #if DEBUG || BP_MEASURE
         if let l = ProcessInfo.processInfo.environment["BACKPLANE_LINK"] { links = l.split(separator: " ").map(String.init) }
         #endif
         Boot.mark("before-cache")
@@ -524,7 +526,7 @@ final class AppModel {
             island = IslandController { [weak self] kind, token, hub in self?.register(kind, token, hub: hub) }
             connect()
             Boot.mark("connect-called")
-            #if DEBUG
+            #if DEBUG || BP_MEASURE
             // headless checks pair from the environment: no permission prompt over the screen
             if ProcessInfo.processInfo.environment["BACKPLANE_LINK"] == nil, !links.isEmpty { notifier.setUp() }
             #else

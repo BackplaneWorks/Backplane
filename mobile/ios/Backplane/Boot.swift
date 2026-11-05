@@ -12,7 +12,7 @@ enum Boot {
         return Double(t.tv_sec) + Double(t.tv_usec) / 1e6
     }()
     static func mark(_ name: String) {
-        #if DEBUG
+        #if DEBUG || BP_MEASURE
         NSLog("Backplane boot %@ %.0f", name, (Date().timeIntervalSince1970 - origin) * 1000)
         #endif
     }
