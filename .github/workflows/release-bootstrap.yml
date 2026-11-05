@@ -1,16 +1,12 @@
-name: Frozen0142 canonical-seed production packaging (artifact only)
-run-name: RC0142 be904 ${{ inputs.target }}
+name: Frozen0142 existing Windows linked service native packaging only
+run-name: RC0142 be904 Windows native-only continuation
 on:
   workflow_dispatch:
-    inputs:
-      target: {type: choice, required: true, options: [windows-x64, linux-x64, linux-arm64, darwin-arm64, android]}
-      runner: {type: string, required: true}
-      retained_run: {type: string, required: true}
 permissions:
   contents: read
   actions: read
 concurrency:
-  group: recut0142-be904-${{ inputs.target }}
+  group: recut0142-be904-windows-native-only
   cancel-in-progress: false
 env:
   PYTHONUTF8: '1'
@@ -18,47 +14,8 @@ env:
   BACKPLANE_TELEMETRY: 'off'
   NODE_OPTIONS: --max-old-space-size=512
 jobs:
-  js:
-    if: inputs.target != 'android'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@v4
-        with: {ref: be904cd4cb21ad6febe17e674918c96945113d07, fetch-depth: 0, persist-credentials: false}
-      - uses: actions/checkout@v4
-        with: {ref: '${{ github.sha }}', path: build/workflow, persist-credentials: false}
-      - uses: oven-sh/setup-bun@v2
-        with: {bun-version: '1.4.3'}
-      - uses: actions/download-artifact@v4
-        with:
-          artifact-ids: '13379817229'
-          run-id: '41949000992'
-          github-token: ${{ github.token }}
-          path: build/seed
-          merge-multiple: true
-      - name: Exact current authorized source compiler inputs; protected transform and target link only
-        shell: bash
-        env:
-          TARGET: ${{ inputs.target }}
-          BACKPLANE_GOOGLE_CLIENT_ID: ${{ secrets.BACKPLANE_GOOGLE_CLIENT_ID }}
-          BACKPLANE_GOOGLE_CLIENT_SECRET: ${{ secrets.BACKPLANE_GOOGLE_CLIENT_SECRET }}
-          BACKPLANE_TELEMETRY_KID: ${{ secrets.BACKPLANE_TELEMETRY_KID }}
-          BACKPLANE_TELEMETRY_KEY: ${{ secrets.BACKPLANE_TELEMETRY_KEY }}
-          BACKPLANE_TELEMETRY_URL: https://backplaneworks.com/api/v1/events
-        run: |
-          set -euo pipefail
-          systemd-run --user --scope -q -p MemoryAccounting=yes -p MemoryMax=3700000000 -p MemorySwapMax=0 -- python3 build/workflow/extra/recut951-package/link_driver.py --source "$GITHUB_WORKSPACE" --artifact "$GITHUB_WORKSPACE/build/seed" --tools-out "$RUNNER_TEMP/consumers" --inputs-out "$RUNNER_TEMP/inputs" --output "$GITHUB_WORKSPACE/build/bootstrap-js" --target "$TARGET"
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: configured-service-build-${{ inputs.target }}
-          path: build/bootstrap-js/
-          include-hidden-files: true
-          if-no-files-found: warn
   native:
-    if: inputs.target != 'android' && inputs.target != 'darwin-arm64'
-    needs: js
-    runs-on: ${{ inputs.runner }}
+    runs-on: windows-2025
     timeout-minutes: 25
     steps:
       - name: Preserve frozen source bytes
@@ -81,73 +38,41 @@ jobs:
           [BP927Job]::CapSelf()
           $r=Get-BP927Resources
           $r | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8 "$env:RUNNER_TEMP/package-admission.json"
-          Assert-BP927Resources $r
-          if($r.jobMemoryLimitBytes -ne 3700000000){throw 'Packaging cap differs'}
-      - uses: actions/download-artifact@v4
-        with: {name: 'configured-service-build-${{ inputs.target }}', path: build/test-service}
+          Assert-BP927Resources $r -AllowExistingPagefile $true
+          if($r.jobMemoryLimitBytes -ne 3699998720){throw 'Packaging cap differs'}
+      - name: Bind retained linked artifact identity before native-only packaging
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api repos/BackplaneWorks/Backplane/actions/artifacts/13381085855 > "$RUNNER_TEMP/retained-service-artifact.json"
+          python -c 'import json,sys;d=json.load(open(sys.argv[1]));assert d["id"]==13381085855 and d["workflow_run"]["id"]==41950650979 and d["name"]=="configured-service-build-windows-x64" and d["digest"]=="sha256:5eb941d615a7b9b8be456aeff06db96e9c10bbb1efbc2018422fc820f7827634" and d["expired"] is False' "$RUNNER_TEMP/retained-service-artifact.json"
       - uses: actions/download-artifact@v4
         with:
-          name: TEST-ONLY-package-${{ inputs.target }}
-          run-id: ${{ inputs.retained_run }}
+          artifact-ids: '13381085855'
+          run-id: '41950650979'
+          github-token: ${{ github.token }}
+          path: build/test-service
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: TEST-ONLY-package-windows-x64
+          run-id: 41881768723
           github-token: ${{ github.token }}
           path: build/retained
-      - name: Prepare isolated current-source consumer tools
-        shell: bash
-        run: python build/workflow/extra/recut951-package/prepare-tooling.py --source "$GITHUB_WORKSPACE" --output "$RUNNER_TEMP/native-tools"
       - name: Windows current source shell/runtime/stage/strict ZIP
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           & build/workflow/extra/recut951-package/run_native.ps1 -Source "$env:GITHUB_WORKSPACE" -Tools "$env:RUNNER_TEMP/native-tools" -Retained "$env:GITHUB_WORKSPACE/build/retained" -Out "$env:GITHUB_WORKSPACE/build/native"
-      - name: Unix current source shell/runtime/stage/strict archive
-        if: runner.os == 'Linux'
-        shell: bash
-        env:
-          TARGET: ${{ inputs.target }}
-        run: |
-          systemd-run --user --scope -q -p MemoryAccounting=yes -p MemoryMax=3700000000 -p MemorySwapMax=0 -- python3 build/workflow/extra/recut951-package/native_driver.py --source "$GITHUB_WORKSPACE" --tools "$RUNNER_TEMP/native-tools" --retained "$GITHUB_WORKSPACE/build/retained" --target "$TARGET" --out "$GITHUB_WORKSPACE/build/native"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: configured-desktop-package-${{ inputs.target }}
+          name: configured-desktop-package-windows-x64
           include-hidden-files: true
           path: |
             build/native/
             ${{ runner.temp }}/package-*.json
-          if-no-files-found: warn
-  android:
-    if: inputs.target == 'android'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 40
-    steps:
-      - uses: actions/checkout@v4
-        with: {ref: be904cd4cb21ad6febe17e674918c96945113d07, fetch-depth: 0, persist-credentials: false}
-      - uses: actions/checkout@v4
-        with: {ref: '${{ github.sha }}', path: build/workflow, persist-credentials: false}
-      - uses: actions/setup-java@v4
-        with: {distribution: temurin, java-version: '17'}
-      - uses: actions/download-artifact@v4
-        with:
-          artifact-ids: '13380136554'
-          run-id: '41949000992'
-          github-token: ${{ github.token }}
-          path: build/phone-seed
-          merge-multiple: true
-      - name: Exact fresh bridge signed APK/AAB; no Bend/mobile emit
-        shell: bash
-        env:
-          BACKPLANE_ANDROID_KEYSTORE_BASE64: ${{ secrets.BACKPLANE_ANDROID_KEYSTORE_BASE64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.BACKPLANE_ANDROID_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.BACKPLANE_ANDROID_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.BACKPLANE_ANDROID_KEY_PASSWORD }}
-        run: |
-          set -euo pipefail
-          python3 build/workflow/extra/recut951-package/unpack_seed.py --source "$GITHUB_WORKSPACE" --artifact "$GITHUB_WORKSPACE/build/phone-seed" --operation android --out "$RUNNER_TEMP/android-inputs"
-          systemd-run --user --scope -q -p MemoryAccounting=yes -p MemoryMax=3700000000 -p MemorySwapMax=0 -- python3 build/workflow/scripts/release-bootstrap.py run --source be904cd4cb21ad6febe17e674918c96945113d07 --operation android --checkout "$GITHUB_WORKSPACE" --directory "$RUNNER_TEMP/android-inputs"
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: configured-android-release
-          include-hidden-files: true
-          path: build/bootstrap-android/
+            ${{ runner.temp }}/package-paging-samples.jsonl
+            ${{ runner.temp }}/retained-service-artifact.json
           if-no-files-found: warn

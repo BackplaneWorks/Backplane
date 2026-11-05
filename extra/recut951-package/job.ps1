@@ -48,6 +48,10 @@ public static class BP927Job {
     var job=ObservedJob(); if(job==IntPtr.Zero) throw new InvalidOperationException("Explicit job membership handle required");
     bool member; Check(IsProcessInJob(Process.GetCurrentProcess().Handle,job,out member)); return member;
   }
+  public static bool ChildMember(IntPtr process) {
+    var job=ObservedJob(); if(job==IntPtr.Zero) throw new InvalidOperationException("Explicit job query handle required");
+    bool member; Check(IsProcessInJob(process,job,out member)); return member;
+  }
   public static long DuplicateQueryHandle(IntPtr targetProcess) {
     if(owned==IntPtr.Zero) throw new InvalidOperationException("No owned capped job");
     IntPtr target; Check(DuplicateHandle(Process.GetCurrentProcess().Handle,owned,targetProcess,out target,0x4,false,0));
