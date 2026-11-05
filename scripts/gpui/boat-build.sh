@@ -29,21 +29,28 @@ if ! { pkg-config --exists xkbcommon-x11 && [ -e /usr/lib/x86_64-linux-gnu/libxk
  export RUSTFLAGS="-L native=$PWD/build/gpui-sysroot/usr/lib/x86_64-linux-gnu ${RUSTFLAGS:-}"
  export LD_LIBRARY_PATH="$PWD/build/gpui-sysroot/usr/lib/x86_64-linux-gnu${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 fi
-# The cats' rigs come from Bend (core/cat.bend), generated here, never hand-copied.
+# The cats' rigs and the icon set come from Bend (core/cat.bend, core/icons.bend), generated here into
+# build/gpui-artifacts/assets/, never hand-copied. The app finds assets/ beside the binary.
 BEND=$(command -v bend || echo "$HOME/.bend/bin/bend")
-if [ -x "$BEND" ] || command -v "$BEND" >/dev/null 2>&1; then
- mkdir -p build/gpui-artifacts/cat-rigs
- BEND_NO_TELEMETRY=1 "$BEND" native/gpui/gen/cat_rigs.bend > build/gpui-artifacts/cat-rigs.txt 2> build/gpui-artifacts/cat-rigs.err || true
- python3 - <<'PY'
-import os
-n=0
-for line in open("build/gpui-artifacts/cat-rigs.txt"):
-    parts=line.rstrip("\n").split(" ",2)
-    if len(parts)==3 and parts[0].isdigit():
-        open("build/gpui-artifacts/cat-rigs/%s-%s.json"%(parts[0],parts[1]),"w").write(parts[2]); n+=1
-print("cat rigs:",n)
+mkdir -p build/gpui-artifacts/assets/cat-rigs
+for g in cat_rigs icons; do
+ BEND_NO_TELEMETRY=1 "$BEND" native/gpui/gen/$g.bend > build/gpui-artifacts/$g.txt 2> build/gpui-artifacts/$g.err || true
+done
+python3 - <<'PY'
+import json
+n = 0
+for line in open("build/gpui-artifacts/cat_rigs.txt"):
+    parts = line.rstrip("\n").split(" ", 2)
+    if len(parts) == 3 and parts[0].isdigit():
+        open("build/gpui-artifacts/assets/cat-rigs/%s-%s.json" % (parts[0], parts[1]), "w").write(parts[2]); n += 1
+icons = {}
+for line in open("build/gpui-artifacts/icons.txt"):
+    parts = line.rstrip("\n").split(" ", 2)
+    if len(parts) == 3 and parts[0] == "icon":
+        icons[parts[1]] = json.loads(parts[2])
+json.dump(icons, open("build/gpui-artifacts/assets/icons.json", "w"), separators=(",", ":"))
+print("cat rigs:", n, "icons:", len(icons))
 PY
-fi
 if [ "${1:-}" = check ]; then cargo check --release --manifest-path native/gpui/Cargo.toml 2>&1 | grep -E '^(error|warning: unused)' -A12 | head -150; echo CHECK-DONE; exit 0; fi
 /usr/bin/time -v -o build/gpui-artifacts/build.time cargo build --release --manifest-path native/gpui/Cargo.toml
 cp native/gpui/Cargo.lock build/gpui-artifacts/Cargo.lock
