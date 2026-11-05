@@ -147,7 +147,8 @@ impl Backplane {
             if self.script_total > 0 && !self.script_done {
                 self.script_done = true;
                 self.m("script_done", json!({"steps": self.script_total}));
-                cx.spawn(async move |_, cx| { cx.background_executor().timer(Duration::from_millis(300)).await; let _ = cx.update(|cx| cx.quit()); }).detach();
+                // BACKPLANE_GPUI_HOLD keeps the window up after the script (the harness screenshots it, then ends the process)
+                if std::env::var_os("BACKPLANE_GPUI_HOLD").is_none() { cx.spawn(async move |_, cx| { cx.background_executor().timer(Duration::from_millis(300)).await; let _ = cx.update(|cx| cx.quit()); }).detach(); }
             }
             return;
         };

@@ -36,6 +36,8 @@ pub fn string(v:&Value,key:&str)->String {v[key].as_str().unwrap_or("").to_strin
 impl Backplane {
     fn new(window:&mut Window,cx:&mut Context<Self>,config:hub::Config,started:Instant)->Self {
         let (swatches,gallery,fonts,theme)=(config.swatches,config.gallery,config.fonts,config.theme.clone());let steps:VecDeque<Step>=config.script.as_ref().map(|p|script::load(p)).unwrap_or_default();let script_total=steps.len();
+        // a client that never gets projects says so (a hub with a canned presenter, a refused token ...) instead of leaving a script waiting silently
+        cx.spawn(async move |weak,cx|{cx.background_executor().timer(Duration::from_secs(10)).await;let _=weak.update(cx,|this,_|{if !this.usable {this.m("not_usable",serde_json::json!({"after_s":10,"status":this.status,"error":this.error,"projects":this.data["projects"].as_array().map_or(0,|p|p.len())}));}});}).detach();
         let input=cx.new(screens::composer::Composer::new);input.focus_handle(cx).focus(window);
         let target=screens::attach::Target::from(&config.hub,&config.token_file);let drafts_path=config.token_file.with_file_name("gpui-drafts.json");let saved=screens::drafts::load(&drafts_path);
         let(tx,events)=hub::connect(config);
