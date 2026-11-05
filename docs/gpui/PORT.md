@@ -163,7 +163,7 @@ port waits for the person's decision.
 
 <!-- law-map: generated below by scripts/gpui/law-map.py -->
 
-Laws in LAWS.bend: 3253. bend 1166, rust 209, unported 1268, client 482, window 128, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: none yet. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
+Laws in LAWS.bend: 3253. bend 1093, rust 307, unported 1244, client 482, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
 
 | law | status | seed | file | note |
 |---|---|---|---|---|
@@ -378,7 +378,7 @@ Laws in LAWS.bend: 3253. bend 1166, rust 209, unported 1268, client 482, window 
 | `kicad_missing_prompt` | bend | seed K +-10% | `src/core/prompt.bend` |  |
 | `claude_kistack_plugin` | rust `claude_kistack_plugin` | map | `src/core/prompt.bend` |  |
 | `runtime_no_kistack_block` | bend | seed K +-10% | `src/core/prompt.bend` |  |
-| `mech_render_path` | bend | seed K +-10% | `src/core/mech.bend` |  |
+| `mech_render_path` | rust `mech_render_path` | map | `src/core/mech.bend` |  |
 | `mech_part_renders` | bend | seed K +-10% | `src/core/mech.bend` |  |
 | `mech_key_path` | bend | seed K +-10% | `src/core/mech.bend` |  |
 | `mech_default_assembly` | bend | seed K +-10% | `src/core/mech.bend` |  |
@@ -388,7 +388,7 @@ Laws in LAWS.bend: 3253. bend 1166, rust 209, unported 1268, client 482, window 
 | `mech_after_none` | bend | seed K +-10% | `src/core/mech.bend` |  |
 | `mech_gui_linux` | bend | seed K +-10% | `src/core/prompt.bend` |  |
 | `mech_gui_mac` | bend | seed K +-10% | `src/core/prompt.bend` |  |
-| `png_crc_iend` | bend | seed K +-10% | `src/core/png.bend` |  |
+| `png_crc_iend` | rust `png_crc_iend` | map | `src/core/png.bend` |  |
 | `freecad_missing_said` | client | seed C +-10% | `src/core/client.bend` |  |
 | `freecad_missing_prompt` | bend | seed K +-10% | `src/core/prompt.bend` |  |
 | `took_seconds` | unported | seed R +-10% | `src/core/model.bend` |  |
@@ -425,7 +425,7 @@ Laws in LAWS.bend: 3253. bend 1166, rust 209, unported 1268, client 482, window 
 | `scene3_late_parts_fade` | window | seed D +-10% | `src/gfx/face.bend` | GPUI replaces this window code (native/gpui); equivalence unchecked, no law-level mapping yet |
 | `scene3_fade_ends` | window | seed D +-10% | `src/gfx/face.bend` | GPUI replaces this window code (native/gpui); equivalence unchecked, no law-level mapping yet |
 | `scene3_stale_parts_dropped` | window | seed D +-10% | `src/gfx/face.bend` | GPUI replaces this window code (native/gpui); equivalence unchecked, no law-level mapping yet |
-| `cam_fit_turns_about` | window | seed D +-10% | `src/gfx/mesh.bend` | GPUI replaces this window code (native/gpui); equivalence unchecked, no law-level mapping yet |
+| `cam_fit_turns_about` | rust `cam_fit_turns_about` | map | `src/gfx/mesh.bend` |  |
 | `scene3_board_pivot` | window | seed D +-10% | `src/gfx/mesh.bend` | GPUI replaces this window code (native/gpui); equivalence unchecked, no law-level mapping yet |
 | `menu_rows_apart` | bend | seed K +-10% | `src/core/menu.bend` |  |
 | `menu_chips_apart` | bend | seed K +-10% | `src/core/menu.bend` |  |
@@ -1510,61 +1510,61 @@ Laws in LAWS.bend: 3253. bend 1166, rust 209, unported 1268, client 482, window 
 | `rv_sheet_plain` | client | seed C +-10% | `src/core/client.bend` |  |
 | `rv_sheet_compared` | bend | seed K +-10% | `src/core/hist.bend` |  |
 | `rv_bits_plain` | client | seed C +-10% | `src/core/client.bend` |  |
-| `bom_nat_c2_c10` | bend | seed K +-10% | `src/core/bom.bend` |  |
-| `bom_nat_r10_r2` | bend | seed K +-10% | `src/core/bom.bend` |  |
-| `bom_diff_self` | bend | seed K +-10% | `src/core/bom.bend` |  |
-| `bom_group_qty` | bend | seed K +-10% | `src/core/bom.bend` |  |
-| `bom_group_csv` | bend | seed K +-10% | `src/core/bom.bend` |  |
-| `bom_csv_quote` | bend | seed K +-10% | `src/core/bom.bend` |  |
-| `bom_csv_quote_inner` | bend | seed K +-10% | `src/core/bom.bend` |  |
-| `bom_csv_plain` | bend | seed K +-10% | `src/core/bom.bend` |  |
-| `bom_diff_line` | bend | seed K +-10% | `src/core/bom.bend` |  |
-| `bom_diff_md_none` | bend | seed K +-10% | `src/core/bom.bend` |  |
-| `bom_md_pipe` | bend | seed K +-10% | `src/core/bom.bend` |  |
-| `cad_of_kicad_board` | bend | seed K +-10% | `src/core/cad.bend` |  |
-| `cad_of_kicad_schematic` | bend | seed K +-10% | `src/core/cad.bend` |  |
-| `cad_of_case_ignored` | bend | seed K +-10% | `src/core/cad.bend` |  |
-| `cad_of_altium_not_drawn` | bend | seed K +-10% | `src/core/cad.bend` |  |
-| `cad_of_unknown` | bend | seed K +-10% | `src/core/cad.bend` |  |
-| `cad_fill_puts_vars_in` | bend | seed K +-10% | `src/core/cad.bend` |  |
-| `cad_fill_keeps_other_braces` | bend | seed K +-10% | `src/core/cad.bend` |  |
-| `cad_shell_quotes_a_quote` | bend | seed K +-10% | `src/core/cad.bend` |  |
-| `cad_shell_words` | bend | seed K +-10% | `src/core/cad.bend` |  |
-| `checklist_toggle_twice` | bend | seed K +-10% | `src/core/checks.bend` |  |
-| `checklist_toggle_flips_one` | bend | seed K +-10% | `src/core/checks.bend` |  |
-| `checklist_toggle_past_end` | bend | seed K +-10% | `src/core/checks.bend` |  |
-| `checks_gate_no_findings` | bend | seed K +-10% | `src/core/checks.bend` |  |
-| `checks_gate_no_findings_strict` | bend | seed K +-10% | `src/core/checks.bend` |  |
-| `checks_md_empty` | bend | seed K +-10% | `src/core/checks.bend` |  |
-| `checks_erc_error_counted` | bend | seed K +-10% | `src/core/checks.bend` |  |
-| `release_next_dotted` | bend | seed K +-10% | `src/core/release.bend` |  |
-| `release_next_letter` | bend | seed K +-10% | `src/core/release.bend` |  |
-| `release_next_plain` | bend | seed K +-10% | `src/core/release.bend` |  |
-| `release_next_first` | bend | seed K +-10% | `src/core/release.bend` |  |
-| `release_tag_valid` | bend | seed K +-10% | `src/core/release.bend` |  |
-| `release_tag_no_space` | bend | seed K +-10% | `src/core/release.bend` |  |
-| `release_tag_no_dotdot` | bend | seed K +-10% | `src/core/release.bend` |  |
-| `release_tag_no_dash_lead` | bend | seed K +-10% | `src/core/release.bend` |  |
-| `release_tag_no_lock_end` | bend | seed K +-10% | `src/core/release.bend` |  |
-| `release_tag_not_empty` | bend | seed K +-10% | `src/core/release.bend` |  |
-| `release_dir_in_repo` | bend | seed K +-10% | `src/core/release.bend` |  |
-| `release_gh_command` | bend | seed K +-10% | `src/core/release.bend` |  |
-| `review_fold_empty` | bend | seed K +-10% | `src/core/review.bend` |  |
-| `review_prompt_none` | bend | seed K +-10% | `src/core/review.bend` |  |
-| `review_unknown_ignored` | bend | seed K +-10% | `src/core/review.bend` |  |
-| `review_resolve` | bend | seed K +-10% | `src/core/review.bend` |  |
-| `review_reopen` | bend | seed K +-10% | `src/core/review.bend` |  |
-| `review_prompt_resolved` | bend | seed K +-10% | `src/core/review.bend` |  |
-| `review_drop` | bend | seed K +-10% | `src/core/review.bend` |  |
-| `review_reply_no_pin` | bend | seed K +-10% | `src/core/review.bend` |  |
-| `review_reply_counted` | bend | seed K +-10% | `src/core/review.bend` |  |
-| `review_orphan_ignored` | bend | seed K +-10% | `src/core/review.bend` |  |
-| `review_roundtrip_resolve` | bend | seed K +-10% | `src/core/review.bend` |  |
-| `review_roundtrip_edit` | bend | seed K +-10% | `src/core/review.bend` |  |
-| `review_roundtrip_drop` | bend | seed K +-10% | `src/core/review.bend` |  |
-| `review_other_tone` | bend | seed K +-10% | `src/core/review.bend` |  |
-| `review_moved` | bend | seed K +-10% | `src/core/review.bend` |  |
-| `review_not_moved` | bend | seed K +-10% | `src/core/review.bend` |  |
+| `bom_nat_c2_c10` | rust `bom_nat_c2_c10` | map | `src/core/bom.bend` |  |
+| `bom_nat_r10_r2` | rust `bom_nat_r10_r2` | map | `src/core/bom.bend` |  |
+| `bom_diff_self` | rust `bom_diff_self` | map | `src/core/bom.bend` |  |
+| `bom_group_qty` | rust `bom_group_qty` | map | `src/core/bom.bend` |  |
+| `bom_group_csv` | rust `bom_group_csv` | map | `src/core/bom.bend` |  |
+| `bom_csv_quote` | rust `bom_csv_quote` | map | `src/core/bom.bend` |  |
+| `bom_csv_quote_inner` | rust `bom_csv_quote_inner` | map | `src/core/bom.bend` |  |
+| `bom_csv_plain` | rust `bom_csv_plain` | map | `src/core/bom.bend` |  |
+| `bom_diff_line` | rust `bom_diff_line` | map | `src/core/bom.bend` |  |
+| `bom_diff_md_none` | rust `bom_diff_md_none` | map | `src/core/bom.bend` |  |
+| `bom_md_pipe` | rust `bom_md_pipe` | map | `src/core/bom.bend` |  |
+| `cad_of_kicad_board` | rust `cad_of_kicad_board` | map | `src/core/cad.bend` |  |
+| `cad_of_kicad_schematic` | rust `cad_of_kicad_schematic` | map | `src/core/cad.bend` |  |
+| `cad_of_case_ignored` | rust `cad_of_case_ignored` | map | `src/core/cad.bend` |  |
+| `cad_of_altium_not_drawn` | rust `cad_of_altium_not_drawn` | map | `src/core/cad.bend` |  |
+| `cad_of_unknown` | rust `cad_of_unknown` | map | `src/core/cad.bend` |  |
+| `cad_fill_puts_vars_in` | rust `cad_fill_puts_vars_in` | map | `src/core/cad.bend` |  |
+| `cad_fill_keeps_other_braces` | rust `cad_fill_keeps_other_braces` | map | `src/core/cad.bend` |  |
+| `cad_shell_quotes_a_quote` | rust `cad_shell_quotes_a_quote` | map | `src/core/cad.bend` |  |
+| `cad_shell_words` | rust `cad_shell_words` | map | `src/core/cad.bend` |  |
+| `checklist_toggle_twice` | rust `checklist_toggle_twice` | map | `src/core/checks.bend` |  |
+| `checklist_toggle_flips_one` | rust `checklist_toggle_flips_one` | map | `src/core/checks.bend` |  |
+| `checklist_toggle_past_end` | rust `checklist_toggle_past_end` | map | `src/core/checks.bend` |  |
+| `checks_gate_no_findings` | rust `checks_gate_no_findings` | map | `src/core/checks.bend` |  |
+| `checks_gate_no_findings_strict` | rust `checks_gate_no_findings_strict` | map | `src/core/checks.bend` |  |
+| `checks_md_empty` | rust `checks_md_empty` | map | `src/core/checks.bend` |  |
+| `checks_erc_error_counted` | rust `checks_erc_error_counted` | map | `src/core/checks.bend` |  |
+| `release_next_dotted` | rust `release_next_dotted` | map | `src/core/release.bend` |  |
+| `release_next_letter` | rust `release_next_letter` | map | `src/core/release.bend` |  |
+| `release_next_plain` | rust `release_next_plain` | map | `src/core/release.bend` |  |
+| `release_next_first` | rust `release_next_first` | map | `src/core/release.bend` |  |
+| `release_tag_valid` | rust `release_tag_valid` | map | `src/core/release.bend` |  |
+| `release_tag_no_space` | rust `release_tag_no_space` | map | `src/core/release.bend` |  |
+| `release_tag_no_dotdot` | rust `release_tag_no_dotdot` | map | `src/core/release.bend` |  |
+| `release_tag_no_dash_lead` | rust `release_tag_no_dash_lead` | map | `src/core/release.bend` |  |
+| `release_tag_no_lock_end` | rust `release_tag_no_lock_end` | map | `src/core/release.bend` |  |
+| `release_tag_not_empty` | rust `release_tag_not_empty` | map | `src/core/release.bend` |  |
+| `release_dir_in_repo` | rust `release_dir_in_repo` | map | `src/core/release.bend` |  |
+| `release_gh_command` | rust `release_gh_command` | map | `src/core/release.bend` |  |
+| `review_fold_empty` | rust `review_fold_empty` | map | `src/core/review.bend` |  |
+| `review_prompt_none` | rust `review_prompt_none` | map | `src/core/review.bend` |  |
+| `review_unknown_ignored` | rust `review_unknown_ignored` | map | `src/core/review.bend` |  |
+| `review_resolve` | rust `review_resolve` | map | `src/core/review.bend` |  |
+| `review_reopen` | rust `review_reopen` | map | `src/core/review.bend` |  |
+| `review_prompt_resolved` | rust `review_prompt_resolved` | map | `src/core/review.bend` |  |
+| `review_drop` | rust `review_drop` | map | `src/core/review.bend` |  |
+| `review_reply_no_pin` | rust `review_reply_no_pin` | map | `src/core/review.bend` |  |
+| `review_reply_counted` | rust `review_reply_counted` | map | `src/core/review.bend` |  |
+| `review_orphan_ignored` | rust `review_orphan_ignored` | map | `src/core/review.bend` |  |
+| `review_roundtrip_resolve` | rust `review_roundtrip_resolve` | map | `src/core/review.bend` |  |
+| `review_roundtrip_edit` | rust `review_roundtrip_edit` | map | `src/core/review.bend` |  |
+| `review_roundtrip_drop` | rust `review_roundtrip_drop` | map | `src/core/review.bend` |  |
+| `review_other_tone` | rust `review_other_tone` | map | `src/core/review.bend` |  |
+| `review_moved` | rust `review_moved` | map | `src/core/review.bend` |  |
+| `review_not_moved` | rust `review_not_moved` | map | `src/core/review.bend` |  |
 | `slash_typing_word` | bend | seed K +-10% | `src/core/slash.bend` |  |
 | `slash_typing_alone` | bend | seed K +-10% | `src/core/slash.bend` |  |
 | `slash_not_after_space` | bend | seed K +-10% | `src/core/slash.bend` |  |
@@ -2062,15 +2062,15 @@ Laws in LAWS.bend: 3253. bend 1166, rust 209, unported 1268, client 482, window 
 | `keyring_unknown_or_open_starts` | bend | seed K +-10% | `src/core/keyring.bend` |  |
 | `keyring_answers` | bend | seed K +-10% | `src/core/keyring.bend` |  |
 | `keyring_hint_only_locked` | bend | seed K +-10% | `src/core/keyring.bend` |  |
-| `ride_running_no_restart` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `ride_posted_at_once` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `ride_kept` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `ride_carries_block` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `ride_taken_empties` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `ride_nothing_waiting_same` | bend | seed K +-10% | `src/core/mcp.bend` |  |
-| `ride_turn_end_starts` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `ride_interrupted_starts` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `ride_turn_end_empties` | unported | seed R +-10% | `src/core/hub.bend` |  |
+| `ride_running_no_restart` | rust `ride_running_no_restart` | map | `src/core/hub.bend` |  |
+| `ride_posted_at_once` | rust `ride_running_no_restart` | map | `src/core/model.bend` |  |
+| `ride_kept` | rust `ride_kept` | map | `src/core/hub.bend` |  |
+| `ride_carries_block` | rust `ride_carries_block` | map | `src/core/hub.bend` |  |
+| `ride_taken_empties` | rust `ride_taken_empties` | map | `src/core/hub.bend` |  |
+| `ride_nothing_waiting_same` | rust `the_ride_is_taken_by_the_running_turns_tool_result_once` | map | `src/core/mcp.bend` |  |
+| `ride_turn_end_starts` | rust `a_message_to_a_running_codex_turn_rides_and_starts_the_next_turn` | map | `src/core/model.bend` |  |
+| `ride_interrupted_starts` | rust `ride_interrupted_starts` | map | `src/core/model.bend` |  |
+| `ride_turn_end_empties` | rust `a_message_to_a_running_codex_turn_rides_and_starts_the_next_turn` | map | `src/core/hub.bend` |  |
 | `ride_after_running_same` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `deliver_held_restart` | rust `deliver_held_restart` | map | `src/core/model.bend` |  |
 | `resume_turn_process_stopped` | bend | seed K +-10% | `src/core/adopt.bend` |  |
@@ -2344,12 +2344,12 @@ Laws in LAWS.bend: 3253. bend 1166, rust 209, unported 1268, client 482, window 
 | `kserve_desc_needs_cap` | bend | seed K +-10% | `src/core/kserve.bend` |  |
 | `kserve_desc_with_cap` | bend | seed K +-10% | `src/core/kserve.bend` |  |
 | `kserve_idle_needs_api2` | bend | seed K +-10% | `src/core/kserve.bend` |  |
-| `kexport_no_unmarked_clear` | bend | seed K +-10% | `src/core/kexport.bend` |  |
-| `kexport_no_unconsented_force` | bend | seed K +-10% | `src/core/kexport.bend` |  |
-| `kexport_block_force` | bend | seed K +-10% | `src/core/kexport.bend` |  |
-| `kexport_lossy_force` | bend | seed K +-10% | `src/core/kexport.bend` |  |
-| `kexport_no_outside_clear` | bend | seed K +-10% | `src/core/kexport.bend` |  |
-| `kexport_no_foreign_base` | bend | seed K +-10% | `src/core/kexport.bend` |  |
+| `kexport_no_unmarked_clear` | rust `kexport_no_unmarked_clear` | map | `src/core/kexport.bend` |  |
+| `kexport_no_unconsented_force` | rust `kexport_no_unconsented_force` | map | `src/core/kexport.bend` |  |
+| `kexport_block_force` | rust `kexport_block_force` | map | `src/core/kexport.bend` |  |
+| `kexport_lossy_force` | rust `kexport_lossy_force` | map | `src/core/kexport.bend` |  |
+| `kexport_no_outside_clear` | rust `kexport_no_outside_clear` | map | `src/core/kexport.bend` |  |
+| `kexport_no_foreign_base` | rust `kexport_no_foreign_base` | map | `src/core/kexport.bend` |  |
 | `foh_clean` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `fyi_never_spawns` | unported | none | `-` |  |
 | `act_one_run` | unported | none | `-` |  |
@@ -2683,20 +2683,20 @@ Laws in LAWS.bend: 3253. bend 1166, rust 209, unported 1268, client 482, window 
 | `http_count_is_length` | bend | seed K +-10% | `src/core/http.bend` |  |
 | `ws_unmask_go` | bend | seed K +-10% | `src/core/http.bend` |  |
 | `ws_unmask_take_go` | bend | seed K +-10% | `src/core/http.bend` |  |
-| `watch_copy_gate_none` | unported | seed R +-10% | `src/server/watch-plan.bend` |  |
-| `watch_live_gate_kept` | unported | seed R +-10% | `src/server/watch-plan.bend` |  |
-| `watch_copy_launch_none` | unported | seed R +-10% | `src/server/watch-plan.bend` |  |
-| `watch_copy_check_none` | unported | seed R +-10% | `src/server/watch-plan.bend` |  |
-| `watch_copy_stop_none` | unported | seed R +-10% | `src/server/watch-plan.bend` |  |
-| `watch_copy_intent_none` | unported | seed R +-10% | `src/server/watch-plan.bend` |  |
-| `copy_off_runs_all` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `copy_drops_outside` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `copy_keeps_inside` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `copy_git_write_told` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `copy_refuses_net` | unported | none | `-` |  |
-| `copy_off_refuses_none` | unported | none | `-` |  |
-| `adopt_copy_none` | bend | seed K +-10% | `src/core/adopt.bend` |  |
-| `copy_file_open_told` | unported | seed R +-10% | `src/core/hub.bend` |  |
+| `watch_copy_gate_none` | rust `watch_gate_none_on_a_copy_and_the_list_kept_off` | map | `src/server/watch-plan.bend` |  |
+| `watch_live_gate_kept` | rust `watch_gate_none_on_a_copy_and_the_list_kept_off` | map | `src/server/watch-plan.bend` |  |
+| `watch_copy_launch_none` | rust `watch_gate_none_on_a_copy_and_the_list_kept_off` | map | `src/server/watch-plan.bend` |  |
+| `watch_copy_check_none` | rust `watch_gate_none_on_a_copy_and_the_list_kept_off` | map | `src/server/watch-plan.bend` |  |
+| `watch_copy_stop_none` | rust `watch_gate_none_on_a_copy_and_the_list_kept_off` | map | `src/server/watch-plan.bend` |  |
+| `watch_copy_intent_none` | rust `watch_gate_none_on_a_copy_and_the_list_kept_off` | map | `src/server/watch-plan.bend` |  |
+| `copy_off_runs_all` | rust `a_hub_that_is_no_copy_runs_every_out` | map | `src/core/hub.bend` |  |
+| `copy_drops_outside` | rust `a_copy_drops_deploys_restarts_pushes_and_effects_outside_its_home` | map | `src/core/hub.bend` |  |
+| `copy_keeps_inside` | rust `a_copy_keeps_replies_reading_git_and_its_homes_folders` | map | `src/core/hub.bend` |  |
+| `copy_git_write_told` | rust `a_client_that_asked_for_git_that_writes_is_told` | map | `src/core/hub.bend` |  |
+| `copy_refuses_net` | rust `a_copy_refuses_network_commands_and_a_hub_that_is_no_copy_refuses_none` | map | `-` |  |
+| `copy_off_refuses_none` | rust `a_copy_refuses_network_commands_and_a_hub_that_is_no_copy_refuses_none` | map | `-` |  |
+| `adopt_copy_none` | rust `a_copy_adopts_none` | map | `src/core/adopt.bend` |  |
+| `copy_file_open_told` | rust `a_client_that_asked_for_git_that_writes_is_told` | map | `src/core/hub.bend` |  |
 | `pair_msg_kept` | unported | seed R +-10% | `src/server/pairing-info.bend` |  |
 | `pair_msg_other_link` | unported | seed R +-10% | `src/server/pairing-info.bend` |  |
 | `pair_msg_no_link_qr` | unported | seed R +-10% | `src/server/pairing-info.bend` |  |
@@ -2864,8 +2864,8 @@ Laws in LAWS.bend: 3253. bend 1166, rust 209, unported 1268, client 482, window 
 | `mail_failed_empty_preserved` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `mail_no_triage_grants_outside_run` | bend | seed K +-10% | `src/core/maildisposition.bend` |  |
 | `mail_silent_bot_envelope` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `codex_error_notice_kind` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `codex_error_notice_no_effects` | unported | seed R +-10% | `src/core/hub.bend` |  |
+| `codex_error_notice_kind` | rust `codex_error_notice_kind` | map | `src/core/hub.bend` |  |
+| `codex_error_notice_no_effects` | rust `codex_error_notice_kind` | map | `src/core/hub.bend` |  |
 | `life_fresh_owned_wakes` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `life_owned_progress_held` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `life_fresh_child_wakes` | unported | seed R +-10% | `src/core/model.bend` |  |
@@ -3031,8 +3031,8 @@ Laws in LAWS.bend: 3253. bend 1166, rust 209, unported 1268, client 482, window 
 | `terminal_new_process_starts_blank` | unported | seed R +-10% | `src/server/term.bend` |  |
 | `terminal_unicode_cell_widths` | client | seed C +-10% | `src/web/dom.bend` |  |
 | `model_picker_replaces_accounts` | client | seed C +-10% | `src/core/client.bend` |  |
-| `checks_detail_cap` | bend | seed K +-10% | `src/core/checks.bend` |  |
-| `checks_omitted_visible` | bend | seed K +-10% | `src/core/checks.bend` |  |
+| `checks_detail_cap` | rust `checks_detail_cap` | map | `src/core/checks.bend` |  |
+| `checks_omitted_visible` | rust `checks_omitted_visible` | map | `src/core/checks.bend` |  |
 | `viewer_report_keeps_board` | client | seed C +-10% | `src/core/client.bend` |  |
 | `viewer_part_keeps_board` | client | seed C +-10% | `src/core/client.bend` |  |
 | `fork_drawing_follows_worktree` | client | seed C +-10% | `src/core/client.bend` |  |
@@ -3051,7 +3051,7 @@ Laws in LAWS.bend: 3253. bend 1166, rust 209, unported 1268, client 482, window 
 | `component_fragment_keeps_fitting_row` | unported | seed R +-10% | `src/core/json.bend` |  |
 | `component_fragment_keeps_field` | unported | seed R +-10% | `src/core/json.bend` |  |
 | `component_fragment_only_last_field_completes` | unported | seed R +-10% | `src/core/json.bend` |  |
-| `copy_keeps_viewer_reads` | unported | seed R +-10% | `src/core/hub.bend` |  |
+| `copy_keeps_viewer_reads` | rust `a_copy_keeps_replies_reading_git_and_its_homes_folders` | map | `src/core/hub.bend` |  |
 | `sdb_up_parents_exact` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `sdb_up_parents_demo` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `sdb_up_keep_kinds` | unported | seed R +-10% | `src/core/model.bend` |  |
@@ -3287,9 +3287,9 @@ Laws in LAWS.bend: 3253. bend 1166, rust 209, unported 1268, client 482, window 
 | `path_records_keep_whitespace` | bend | seed K +-10% | `src/core/pathrecords.bend` |  |
 | `path_records_unterminated_last` | bend | seed K +-10% | `src/core/pathrecords.bend` |  |
 | `path_records_legacy_kept` | bend | seed K +-10% | `src/core/pathrecords.bend` |  |
-| `mech_render_success_quiet` | bend | seed K +-10% | `src/core/mech.bend` |  |
-| `mech_render_failure_visible` | bend | seed K +-10% | `src/core/mech.bend` |  |
-| `mech_render_failure_diagnostic` | bend | seed K +-10% | `src/core/mech.bend` |  |
+| `mech_render_success_quiet` | rust `mech_render_success_quiet` | map | `src/core/mech.bend` |  |
+| `mech_render_failure_visible` | rust `mech_render_failure_visible` | map | `src/core/mech.bend` |  |
+| `mech_render_failure_diagnostic` | rust `mech_render_failure_diagnostic` | map | `src/core/mech.bend` |  |
 | `mech_configured_primary` | bend | seed K +-10% | `src/core/mech.bend` |  |
 | `mech_primary_missing` | bend | seed K +-10% | `src/core/mech.bend` |  |
 | `mech_primary_selection` | bend | seed K +-10% | `src/core/mech.bend` |  |
@@ -3297,9 +3297,9 @@ Laws in LAWS.bend: 3253. bend 1166, rust 209, unported 1268, client 482, window 
 | `model_cache_empty_rejected` | unported | seed R +-10% | `src/server/modelcache.bend` |  |
 | `model_cache_directory_rejected` | unported | seed R +-10% | `src/server/modelcache.bend` |  |
 | `model_cache_file_accepted` | unported | seed R +-10% | `src/server/modelcache.bend` |  |
-| `checks_report_missing_erc` | bend | seed K +-10% | `src/core/checks.bend` |  |
-| `checks_report_missing_drc` | bend | seed K +-10% | `src/core/checks.bend` |  |
-| `checks_execution_keeps_identity` | bend | seed K +-10% | `src/core/checks.bend` |  |
+| `checks_report_missing_erc` | rust `checks_report_missing_erc` | map | `src/core/checks.bend` |  |
+| `checks_report_missing_drc` | rust `checks_report_missing_drc` | map | `src/core/checks.bend` |  |
+| `checks_execution_keeps_identity` | rust `checks_execution_keeps_identity` | map | `src/core/checks.bend` |  |
 | `owner_mail_local_holder` | bend | seed K +-10% | `src/core/mailowner.bend` |  |
 | `owner_mail_remote_holder` | bend | seed K +-10% | `src/core/mailowner.bend` |  |
 | `owner_mail_unknown_method_unacknowledged` | unported | seed R +-10% | `src/core/json.bend` |  |

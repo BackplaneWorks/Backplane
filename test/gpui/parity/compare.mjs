@@ -10,6 +10,7 @@ export const NORMALISATIONS=[
  'N3 viewRevision -> <R> (and checked non-decreasing per client). Reason: counts hub-internal changes, which coalesce with timing.',
  'N4 delta frames: consecutive delta frames of one thread joined into one item with "@<ms>@" stamps stripped; frame boundaries are not compared. Reason: coalescing follows read timing (200 ms pace).',
  'N5 changes frames: expanded to one item per event; batch boundaries are not compared. Reason: batching follows timing.',
+  'N18 http probe auth flag: an http-get probe with auth:false is compared as {path} only. Reason: recordings made before the harness wrote the flag omit it; false is its default.',
  'N12 late volatile replies: volatile means a poll request and its reply, matched by client and request id, whenever the reply arrives; every other inbound frame is kept even if it arrived during a poll window (the recorder flags by arrival time, which is not a property of the frame).',
  'N6 dropped: hb frames, view.changed frames (their number and position follow timing; each reply carries the revision it saw), volatile frames (polls made while waiting for a turn). Reason: timing-driven counts.',
  'N11 harness steps: `settle` and `end` pseudo-frames (the client program waiting or closing) are control, not wire traffic, and are not compared. Reason: a replay waits by reply id, not by the recorded quiet times.',
@@ -57,7 +58,7 @@ export function normalise(frames){
     if(f.dir==='out'&&f.vol)continue;const c=f.c,j=f.json,s=S(c);
     if(f.dir==='out'&&(f.kind==='settle'||f.kind==='end'))continue;
     if(f.dir==='out'&&f.kind==='check'){s.other.push(go(j));continue}
-    if(f.dir==='out'){s.out.push(go(j));continue}
+    if(f.dir==='out'){s.out.push(go(f.kind==='http-get'&&j&&j.auth===false?{path:j.path}:j));continue}
     if(f.kind==='http'){s.other.push(go({http:f.status,type:f.ctype,json:j}));continue}
     if(f.kind==='upgrade'||f.kind==='close'||f.kind==='connect-failed'){s.other.push(go({[f.kind]:j}));continue}
     const t=j?.t;

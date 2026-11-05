@@ -31,4 +31,11 @@ walk(A,B,'');
 const kinds={};for(const [pth] of diffs){const k=pth.replace(/\[\d+\]/g,'[]');kinds[k]=(kinds[k]||0)+1}
 console.log(JSON.stringify({lines:n,bendProjects:A.length,rustProjects:B.length,differences:diffs.length,byField:kinds}));
 if(flag==='--show')for(const d of diffs.slice(0,15))console.log(' ',JSON.stringify(d).slice(0,200));
+{ // content-safe order diagnostic: where each of Bend's projects sits in Rust's list, and the quiet flags of both
+  const rpos=new Map(B.map((x,i)=>[x.id,i]));
+  console.log('order: bend index -> rust index:',JSON.stringify(A.map(x=>rpos.has(x.id)?rpos.get(x.id):-1)));
+  console.log('quiet flags bend:',A.map(x=>x.quiet?1:0).join(''),' rust:',B.map(x=>x.quiet?1:0).join(''));
+  console.log('thread rows per project bend:',A.map(x=>x.threads.length+'/'+x.settled.length+'/'+x.snoozed.length+'/'+x.archived.length).join(' '));
+  console.log('thread rows per project rust:',B.map(x=>x.threads.length+'/'+x.settled.length+'/'+x.snoozed.length+'/'+x.archived.length).join(' '));
+}
 process.exit(0);
