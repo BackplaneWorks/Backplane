@@ -12,7 +12,7 @@ pub fn metric(started: Instant, event: &str, mut fields: Value) {
 }
 
 #[derive(Clone, Debug)]
-pub enum Step { Home(usize), Select(usize), Popup(String), Type(String), Send, Wait(u64), Record(Option<String>), Click(String), Read(String), Scroll(f32), NetSleep(f64), Unsupported(String) }
+pub enum Step { Home(usize), Select(usize), Popup(String), Type(String), Send, Wait(u64), Record(Option<String>), Click(String), Read(String), View(String), Layers(bool), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Unsupported(String) }
 /// What a click on a registered control does; the e2e harness's controls inventory and `click` step use these.
 #[derive(Clone, Debug)]
 pub enum Ctl { None, Rail(String), PickFiles, ToggleSidebar, Select(String), Home(String), Fold(String), Send, Skill(String), Page(String), Node(String, String) }
@@ -36,6 +36,10 @@ pub fn load(path: &Path) -> VecDeque<Step> {
         else if let Some(r) = v["record"].as_str() { Some(Step::Record(if r == "start" { Some(v["name"].as_str().unwrap_or("rec").to_string()) } else { None })) }
         else if let Some(id) = v["click"].as_str() { Some(Step::Click(id.into())) }
         else if let Some(what) = v["read"].as_str() { Some(Step::Read(what.into())) }
+        else if let Some(on) = v["layers"].as_bool() { Some(Step::Layers(on)) }
+        else if let Some(kind) = v["view"].as_str() { Some(Step::View(kind.into())) }
+        else if let Some(a) = v["pan"].as_array() { Some(Step::Pan(a.first().and_then(Value::as_f64).unwrap_or(0.0) as f32, a.get(1).and_then(Value::as_f64).unwrap_or(0.0) as f32)) }
+        else if let Some(a) = v["zoom"].as_array() { Some(Step::Zoom(a.first().and_then(Value::as_f64).unwrap_or(0.0) as f32, a.get(1).and_then(Value::as_f64).unwrap_or(0.5) as f32, a.get(2).and_then(Value::as_f64).unwrap_or(0.5) as f32)) }
         else if let Some(n) = v["scroll"].as_f64() { Some(Step::Scroll(n as f32)) }
         else if let Some(sec) = v["net_sleep"].as_f64() { Some(Step::NetSleep(sec)) }
         else if let Some(k) = ["paste_image", "open_viewer", "open_settings", "files_download"].iter().find(|k| v.get(**k).is_some()) { Some(Step::Unsupported((*k).to_string())) }
@@ -189,7 +193,18 @@ impl Backplane {
             }
             Step::Record(Some(name)) => { self.m("record", json!({"state": "start", "name": name})); self.recording = Some((name, Vec::new())); cx.notify(); self.pump(cx); }
             Step::Record(None) => {
-                if let Some((name, frames)) = self.recording.take() { self.m("frames", json!({"name": name, "n": frames.len(), "frames_ms": frames})); }
+                if let Some((name, frames)) = self.recording.take() {
+                    self.m("frames", json!({"name": name, "n": frames.len(), "frames_ms": frames}));
+                    // the plot canvas's own CPU per paint while the record was open (stroke meshes, culling, path submission), not the rasterizer's time
+                    let mut ms = std::mem::take(&mut self.screens.plotview.paint_ms);
+                    if !ms.is_empty() {
+                        ms.sort_by(|a, b| a.partial_cmp(b).unwrap()); let p = |q: f32| ms[((ms.len() - 1) as f32 * q).round() as usize];
+                        let sp = std::mem::take(&mut self.screens.plotview.split);
+                        let part = |k: usize| { let mut v: Vec<f32> = sp.iter().map(|x| x[k]).collect(); v.sort_by(|a, b| a.partial_cmp(b).unwrap()); if v.is_empty() { (0.0, 0.0) } else { (v[(v.len() - 1) / 2], v[((v.len() - 1) as f32 * 0.95).round() as usize]) } };
+                        let (lp, tess, sub) = (part(0), part(1), part(2));
+                        self.m("plot_paint", json!({"name": name, "n": ms.len(), "p50_ms": p(0.5), "p95_ms": p(0.95), "max_ms": p(1.0), "loop_cull_build_p50_p95_ms": [lp.0, lp.1], "tessellate_p50_p95_ms": [tess.0, tess.1], "paint_path_p50_p95_ms": [sub.0, sub.1]}));
+                    }
+                }
                 self.pump(cx);
             }
             Step::Scroll(n) => {
@@ -201,6 +216,22 @@ impl Backplane {
                 let _ = self.tx.try_send(crate::hub::Command::Sleep(secs));
             }
             Step::Unsupported(k) => { self.m("input", json!({"step": k, "ok": false, "error": "not_implemented"})); self.pump(cx); }
+            Step::View(kind) => { // open a viewer page like the rail does (the idempotent `view` action)
+                let _ = self.tx.try_send(crate::screens::viewer::view_kind(&kind)); self.m("view", json!({"kind": kind})); cx.notify(); self.pump(cx);
+            }
+            Step::Layers(on) => { self.screens.plotview.layers_open = on; self.ui_epoch += 1; self.begin("layers".into(), Goal::Frame, cx); cx.notify(); }
+            Step::Pan(dx, dy) => { // a drag of the plot canvas by (dx, dy) window px
+                let pv = &mut self.screens.plotview; if let Some(v) = pv.view { pv.view = Some(v.pan(dx, dy)); }
+                self.ui_epoch += 1; self.begin("pan".into(), Goal::Frame, cx); cx.notify();
+            }
+            Step::Zoom(steps, fx, fy) => { // wheel notches at (fx, fy) as fractions of the canvas
+                let pv = &mut self.screens.plotview;
+                if let (Some(v), Some(b)) = (pv.view, pv.bounds) {
+                    let (w, h) = (f32::from(b.size.width), f32::from(b.size.height));
+                    pv.view = Some(v.zoom((1.0 + steps * 16.0 * 0.0015).clamp(0.5, 2.0), fx * w, fy * h, w, h, pv.fitted));
+                }
+                self.ui_epoch += 1; self.begin("zoom".into(), Goal::Frame, cx); cx.notify();
+            }
             Step::Read(what) => {
                 // G6: the composer's text, or the thread selection (GPUI has no text selection yet: "" with supported:false)
                 let (text, supported) = match what.as_str() { "composer" => (self.input.read(cx).content.to_string(), true), _ => (String::new(), false) };
