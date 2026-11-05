@@ -29,7 +29,7 @@ fn main() -> anyhow::Result<()> {
     let open=HashSet::new();
     let opts=sidebar::Opts{hub:"audit",now,selected:"",open:&open,older_open:false};
     let plan=sidebar::plan(&st,&opts); let visible:HashSet<&str>=plan.ids().into_iter().collect();
-    let mut reasons:BTreeMap<&str,usize>=BTreeMap::new(); let mut selected_matches=0; let mut selected_reason="thread.not-found";
+    let mut reasons:BTreeMap<&str,usize>=BTreeMap::new(); let mut selected_matches=0; let mut selected_reason="thread.not-found"; let mut requested_775_utc_gate_count=0;
     for (id,t) in &st.threads {
         let reason=if let Some(reason)=thread::metadata_refusal(&st,id) { reason } else {
             match model.page(&store,id,0,32) {
@@ -47,8 +47,11 @@ fn main() -> anyhow::Result<()> {
             }
         };
         *reasons.entry(reason).or_default()+=1;
-        if t.title=="Thread 12415" { selected_matches+=1; selected_reason=reason; }
+        if t.title=="Thread 12415" { selected_matches+=1; selected_reason=reason;
+            // Historical 77542a24de accepted only these UTC strings for all three zone settings.
+            // Fixed counters expose that old gate without printing zone names or any setting values.
+            requested_775_utc_gate_count+=["person.tz","person.tz.device","tz.machine"].iter().filter(|k|st.settings.get(**k).map_or(false,|v|!matches!(v.trim(),""|"UTC"|"Etc/UTC"))).count(); }
     }
-    println!("{}",json!({"events":store.len(),"threads":st.threads.len(),"first_reason_histogram":reasons,"requested_thread_matches":selected_matches,"requested_thread_reason":selected_reason}));
+    println!("{}",json!({"events":store.len(),"threads":st.threads.len(),"first_reason_histogram":reasons,"requested_thread_matches":selected_matches,"requested_thread_reason":selected_reason,"requested_775_non_utc_zone_gate_count":requested_775_utc_gate_count}));
     Ok(())
 }
