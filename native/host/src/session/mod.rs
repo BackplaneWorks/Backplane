@@ -57,6 +57,10 @@ pub fn event_type(line: &str) -> Option<&str> {
     r.split('"').next()
 }
 
+/// PRESENTER_UNAVAILABLE is retryable on the wire: a target the Rust presenter has not ported (the helper is not running) or a helper that is restarting answers "not yet", never "no"
+/// (Hub::error has retryable:false for every code).
+fn unavailable(id: &Value) -> Value { json!({"t":"reply","id":id,"ok":false,"error":{"code":"PRESENTER_UNAVAILABLE","retryable":true,"compatibilityRequired":false}}) }
+
 /// The error a policy reply stands for: `refused` (page action not offered / token not held) is INVALID_REQUEST, `stale` (the target does not exist) STALE_VIEW.
 fn policy_error(pol: &Value) -> Option<&'static str> {
     if pol.get("refused") == Some(&json!(true)) { Some("INVALID_REQUEST") } else if pol.get("stale") == Some(&json!(true)) { Some("STALE_VIEW") } else { None }
@@ -113,7 +117,7 @@ impl Hub {
         if let (Some(o), true) = (params.as_object_mut(), p.get("session").map_or(false, Value::is_object)) { o.insert("session".into(), actor::input(c.client, &view_id, &p)); }
         { let reads = actor::take_reads(c.client, &view_id, &p["target"]); if let Some(o) = params.as_object_mut() { o.remove("reads"); if !reads.is_empty() { o.insert("reads".into(), Value::Array(reads)); } } }   // only the hub says what it read
         actor::set_local(&mut params, actor::local_in(c.client, &view_id, m, &p["target"]));
-        let mut pol = match self.presenter.view(&params).await { Ok(v) => v, Err(_) => return vec![error(&id, "PRESENTER_UNAVAILABLE")] };
+        let mut pol = match self.presenter.view(&params).await { Ok(v) => v, Err(_) => return vec![unavailable(&id)] };
         // the policy's verdicts on the request: a refused native-sidebar-page action (Hub.thin.act.native) and a target that does not exist
         // (an unknown bot, room or project: STALE_VIEW), answered before anything is stored
         if let Some(code) = policy_error(&pol) { return vec![error(&id, code)] }
@@ -263,6 +267,11 @@ mod read_tests {
         assert_eq!(event_type("not json"), None);
         assert_eq!(event_type(r#"{"$":5}"#), None);
         assert_eq!(event_type(""), None);
+    }
+    #[test] fn an_unavailable_presenter_is_retryable_and_the_others_are_not() {
+        let e = unavailable(&json!(5));
+        assert_eq!((e["error"]["code"].as_str(), e["error"]["retryable"].as_bool(), e["id"].as_u64()), (Some("PRESENTER_UNAVAILABLE"), Some(true), Some(5)));
+        assert_eq!(error(&json!(5), "STALE_VIEW")["error"]["retryable"], json!(false));
     }
     #[test] fn the_policys_verdicts_become_errors() {
         assert_eq!(policy_error(&json!({"refused": true})), Some("INVALID_REQUEST"));
