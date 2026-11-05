@@ -45,7 +45,7 @@ and downloads do not exist in GPUI yet), so the harness marks those journeys blo
 - **G1 `ack {step, ack_ms}`**: for every scripted step, the first frame presented after the event was injected: its local effect (pressed/selected row, typed text),
   before any hub round trip. `input.latency_ms` stays the frame that shows the result. GPUI draws on demand, so "differs from the frame before" is
   the first frame after the state change, not a pixel diff.
-- **G2 `frames {name, n, t_ms:[...]}`** at `record stop`: the start time of every frame drawn while the record was open (GPUI asks for frames while recording, so
+- **G2 `frames {name, n, frames_ms:[...]}` (the key is not t_ms: the event time overwrites that)** at `record stop`: the start time of every frame drawn while the record was open (GPUI asks for frames while recording, so
   this is the achievable rate, not the idle rate).
 - **G3 `layout {rects:{topbar,sidebar,main,rail,composer:{x,y,w,h}}}`** (physical px) whenever a stable region moved or resized; check modes only (`BACKPLANE_GPUI_RECTS=1`).
 - **G4 `controls {controls:[{id,label,enabled,visible,wired}]}`** per screen on change (same switch); `enabled`/`wired` is false for a control with no handler yet (the
