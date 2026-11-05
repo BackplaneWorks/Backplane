@@ -12,6 +12,7 @@
 pub mod botnet;
 pub mod devices;
 pub mod far;
+pub mod farstore;
 pub mod listener;
 pub mod machines;
 pub mod origin;
