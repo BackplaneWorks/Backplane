@@ -102,29 +102,45 @@ fn line(v: Value) -> String { v.to_string() }
     let copy = root.join("copy"); std::fs::create_dir_all(copy.join("far")).unwrap(); std::fs::copy(&jfile, copy.join(format!("far/{me_link}.jsonl"))).unwrap();
     let again = FarStore::open(&copy).unwrap();
     assert!(again.has(&format!("{me_link}~trs1")), "FarStore reads a mirror file written by the Bend hub");
-    // ----- Bend reads a mirror file Rust wrote: a second JS hub starts on it. A control: the same hub on a file the Bend hub wrote -----
+    // ----- Bend reads a mirror file Rust wrote. A second JS hub starts on it; it reads each link's mirror back from disk and pulls from
+    // the head it holds, so a stub peer that records what it is asked sees `since` = the file's head. A control: a file the Bend hub wrote. -----
     let _ = js.kill().await; tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     let (j2, link2, link3) = (root.join("js2"), "pmirrorfrom0001", "pmirrorfrom0002");
     std::fs::create_dir_all(j2.join("far")).unwrap();
-    std::fs::copy(b.home.join(format!("far/{me_link}.jsonl")), j2.join(format!("far/{link2}.jsonl"))).unwrap(); // written by Rust: JS-thread history
-    std::fs::copy(&jfile, j2.join(format!("far/{link3}.jsonl"))).unwrap();                                     // written by the Bend hub: our history
-    std::fs::write(j2.join("events.jsonl"), [link2, link3].iter().map(|l| line(json!({"$":"PeerSet","id":l,"name":format!("n{l}"),"url":"http://127.0.0.1:1","revoked":false,"at":at(50)}))).collect::<Vec<_>>().join("\n") + "\n").unwrap();
+    let rust_file = b.home.join(format!("far/{me_link}.jsonl"));
+    std::fs::copy(&rust_file, j2.join(format!("far/{link2}.jsonl"))).unwrap(); // written by Rust
+    std::fs::copy(&jfile, j2.join(format!("far/{link3}.jsonl"))).unwrap();     // written by the Bend hub
+    let head_of = |p: &std::path::Path| -> u64 { std::fs::read_to_string(p).unwrap().lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).filter_map(|o| o["head"].as_u64()).last().unwrap_or(0) };
+    let (h2, h3) = (head_of(&j2.join(format!("far/{link2}.jsonl"))), head_of(&j2.join(format!("far/{link3}.jsonl"))));
+    assert!(h2 > 0 && h3 > 0, "heads {h2} {h3}");
+    let asked: Arc<Mutex<Vec<(String, u64)>>> = Arc::new(Mutex::new(vec![]));
+    let stub = tokio::net::TcpListener::bind(("127.0.0.1", 3918)).await.unwrap(); let a2 = asked.clone();
+    tokio::spawn(async move { use tokio::io::{AsyncReadExt, AsyncWriteExt}; loop {
+        let Ok((mut s, _)) = stub.accept().await else { return }; let a3 = a2.clone();
+        tokio::spawn(async move {
+            let mut buf = vec![]; let mut chunk = [0u8; 8192];
+            loop { let n = s.read(&mut chunk).await.unwrap_or(0); if n == 0 { break } buf.extend_from_slice(&chunk[..n]);
+                if let Some(at) = buf.windows(4).position(|w| w == b"\r\n\r\n") { let head = String::from_utf8_lossy(&buf[..at]).to_string();
+                    let len = head.lines().find_map(|l| l.to_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse::<usize>().unwrap_or(0))).unwrap_or(0);
+                    if buf.len() >= at + 4 + len { let peer = head.lines().find_map(|l| l.strip_prefix("X-Backplane-Peer: ")).unwrap_or("").to_string();
+                        let since = serde_json::from_slice::<Value>(&buf[at + 4..]).ok().and_then(|v| v["since"].as_u64()).unwrap_or(u64::MAX);
+                        a3.lock().unwrap().push((peer, since)); break } } }
+            let _ = s.write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 9\r\nConnection: close\r\n\r\nnot ready").await; }); } });
+    let mut seed = vec![];
+    for l in [link2, link3] {
+        seed.push(line(json!({"$":"PeerSet","id":l,"name":format!("n{l}"),"url":"http://127.0.0.1:3918","revoked":false,"at":at(50)})));
+        seed.push(line(json!({"$":"SettingSet","key":format!("peer.own.{l}"),"value":"owner","at":at(51)})));
+        assert!(botnet::peer_save(&j2, l, &secret));
+    }
+    std::fs::write(j2.join("events.jsonl"), seed.join("\n") + "\n").unwrap();
     let mut js2 = tokio::process::Command::new(&bin).args(["--home", j2.to_str().unwrap(), "--port", "3917", "--host", "127.0.0.1", "--no-tailscale", "--foreground"])
         .env("BACKPLANE_AGENTS", &standins).env("BACKPLANE_NO_UPDATE", "1").env("HOME", &root).stdout(Stdio::null()).stderr(Stdio::null()).kill_on_drop(true).spawn().expect("start the second JS hub");
-    assert!(wait_for(60, || std::net::TcpStream::connect(("127.0.0.1", 3917)).is_ok() && j2.join("token").exists()).await, "the second JS hub listens");
-    let token = std::fs::read_to_string(j2.join("token")).unwrap().trim().to_string();
-    use futures_util::StreamExt;
-    let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://127.0.0.1:3917/ws?token={token}&since=0")).await.expect("join the second JS hub");
-    let (mut seen, mut kinds) = (String::new(), vec![]);
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(30), async { while let Some(Ok(m)) = ws.next().await {
-        let text = match m { tokio_tungstenite::tungstenite::Message::Text(t) => t.to_string(), tokio_tungstenite::tungstenite::Message::Binary(b) => crate::cbor::decode(&b).map(|v| v.to_string()).unwrap_or_default(), _ => continue };
-        if let Ok(v) = serde_json::from_str::<Value>(&text) { kinds.push(format!("{}:{}", v["t"].as_str().unwrap_or("?"), v["link"].as_str().unwrap_or(""))) }
-        seen.push_str(&text);
-        if seen.contains(&format!("{link2}~tjs1")) && seen.contains(&format!("{link3}~trs0")) { break }
-    } }).await;
-    // the control first: if the Bend hub's own file does not show here, the method is wrong, not the file
-    assert!(seen.contains(&format!("{link3}~trs0")), "CONTROL: the Bend hub folds the file the Bend hub wrote (frames {kinds:?}, {} bytes)", seen.len());
-    assert!(seen.contains(&format!("{link2}~tjs1")) && seen.contains("short one"), "the Bend hub folds the mirror file Rust wrote (frames {kinds:?}, {} bytes)", seen.len());
+    let both = wait_for(90, || { let g = asked.lock().unwrap(); g.iter().any(|(p, _)| p == link2) && g.iter().any(|(p, _)| p == link3) }).await;
+    let got = asked.lock().unwrap().clone();
+    assert!(both, "the second JS hub pulled both links (it asked: {got:?})");
+    let since = |l: &str| got.iter().find(|(p, _)| p == l).map(|x| x.1).unwrap();
+    assert_eq!(since(link3), h3, "CONTROL: the Bend hub pulls from the head of the file the Bend hub wrote");
+    assert_eq!(since(link2), h2, "the Bend hub read the mirror file Rust wrote (it pulls from its head {h2}, not from 0): asked {got:?}");
     let _ = js2.kill().await;
     let _ = std::fs::remove_dir_all(&root);
 }
