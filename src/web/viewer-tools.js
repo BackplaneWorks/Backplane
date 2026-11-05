@@ -91,6 +91,7 @@ class Workbench {
     this.solid.cameraAction?.(action, value); this.sync();
   }
   sync() {
+    if (!this.root.isConnected) return;
     this.root.classList.toggle("solid-split", this.state.pcb);
     this.syncComponents();
     this.quality?.sync();
