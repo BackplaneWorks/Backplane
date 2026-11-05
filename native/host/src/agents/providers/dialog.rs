@@ -193,7 +193,16 @@ mod e2e {
 
     fn dir(name: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-pi-{}-{}", std::process::id(), name)); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
     fn script(d: &Path, name: &str, body: &str) { use std::os::unix::fs::PermissionsExt; let p = d.join(name); std::fs::write(&p, body).unwrap(); std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap(); }
-    fn digits(s: &str) -> String { let mut o = String::new(); let mut run = 0; for c in s.chars() { if c.is_ascii_digit() { run += 1; if run == 3 { o.push('N') } else if run < 3 { o.push(c) } } else { run = 0; o.push(c) } } o }
+    /// Ids and clocks: a run of 3+ digits is N, and a hub's own counter after a dash (`m17N-150`, `c9-171`) is S.
+    fn digits(s: &str) -> String {
+        let b: Vec<char> = s.chars().collect(); let mut o = String::new(); let mut i = 0;
+        while i < b.len() {
+            if b[i] == '-' && i + 1 < b.len() && b[i + 1].is_ascii_digit() { o.push_str("-S"); i += 1; while i < b.len() && b[i].is_ascii_digit() { i += 1 } continue }
+            if b[i].is_ascii_digit() { let mut j = i; while j < b.len() && b[j].is_ascii_digit() { j += 1 } if j - i >= 3 { o.push('N') } else { o.extend(&b[i..j]) } i = j; continue }
+            o.push(b[i]); i += 1;
+        }
+        o
+    }
     const KEEP: &[&str] = &["MessagePosted", "TurnChanged", "ActivityLogged", "AskOpened", "AskClosed", "SessionSet", "UsageSet", "TurnUsage", "PendingChanged"];
     fn core(ev: &[Value]) -> Vec<String> {
         ev.iter().filter(|e| KEEP.contains(&e["$"].as_str().unwrap_or("")) && e["thread"].as_str().map_or(true, |t| t == T1) && !(e["$"] == "MessagePosted" && e["role"] == "user" && false))
@@ -216,13 +225,14 @@ mod e2e {
         let wait = |f: fn(&[Value]) -> bool| { let events = events.clone(); async move { let end = Instant::now() + Duration::from_secs(30); loop { let ev = events().await; if f(&ev) || Instant::now() > end { return ev } tokio::time::sleep(Duration::from_millis(50)).await } } };
         if let Some(a) = answer {
             let ev = wait(|ev| ev.iter().any(|e| e["$"] == "AskOpened")).await;
-            let id = ev.iter().find(|e| e["$"] == "AskOpened").expect("the ask opened")["id"].clone();
+            let id = ev.iter().find(|e| e["$"] == "AskOpened").unwrap_or_else(|| panic!("the ask opened; events so far: {:?}", ev))["id"].clone();
             assert_eq!(rpc("ask.answer", json!({"id":id,"answer":a})).await["ok"], true);
         }
         let ev = wait(|ev| ev.iter().any(|e| e["$"] == "TurnChanged" && (e["state"] == "completed" || e["state"] == "failed"))).await;
         tokio::time::sleep(Duration::from_millis(800)).await; let ev = if ev.is_empty() { ev } else { events().await }; ag.shutdown();
         let want: Vec<Value> = js.lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
         let (g, w) = (core(&ev), core(&want));
+        eprintln!("rust events for {prov} {msg:?}:\n{}", g.join("\n"));
         for (i, (a, b)) in g.iter().zip(w.iter()).enumerate() { assert_eq!(a, b, "event {i} of {} (rust) / {} (js)", g.len(), w.len()) }
         assert_eq!(g.len(), w.len(), "counts; extra rust: {:?}; extra js: {:?}", g.iter().skip(w.len()).collect::<Vec<_>>(), w.iter().skip(g.len()).collect::<Vec<_>>());
         let _ = std::fs::remove_dir_all(&home);
