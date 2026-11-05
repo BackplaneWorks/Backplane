@@ -177,9 +177,9 @@ pub fn entries(es: &[Ent], running: bool, open: &dyn Fn(&str) -> bool, now_ms: u
     let vis: Vec<Ent> = fold_shown(es);
     let now = now_ms / 1000;
     // Stamp.ends over the page, oldest first in, walked newest first
-    let sx: Vec<stamp::E> = es.iter().map(|e| if e.msg && e.role == "user" { stamp::E::User { id: e.id.clone(), at: e.at } } else if e.msg { stamp::E::Assistant { id: e.id.clone(), at: e.at } } else { stamp::E::Other }).collect();
+    let sx: Vec<stamp::E> = vis.iter().map(|e| if e.msg && e.role == "user" { stamp::E::User { id: e.id.clone(), at: e.at } } else if e.msg { stamp::E::Assistant { id: e.id.clone(), at: e.at } } else { stamp::E::Other }).collect();
     let ends: HashMap<String, u64> = stamp::ends(&sx, running);
-    let stops = stops(es, running, end, marks);
+    let stops = stops(&vis, running, end, marks);
     // Mob.imgs.seen: the images of the newest 30 replies are found
     let newest_replies: std::collections::HashSet<&str> = es.iter().rev().filter(|e| e.msg && e.role == "assistant").take(30).map(|e| e.id.as_str()).collect();
     let mut out = Vec::new(); let mut i = 0;
