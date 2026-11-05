@@ -128,6 +128,10 @@ export function picture(canvas) {
   if (shown?.dataset.key === stateOf(canvas)) return pic;
   shown?.remove();
   if (!pic || pic.w !== canvas.clientWidth || pic.h !== canvas.clientHeight || pic.dpr !== viewDpr()) return null;
+  // (a pose this page remembers for the view, other than the picture's,
+  // would move the model when it draws: then no picture)
+  const kept = assets.getState(stateOf(canvas));
+  if (kept && JSON.stringify(kept.cam) !== JSON.stringify(pic.state.cam)) return null;
   const img = pictures.image(stateOf(canvas));
   if (!img) return null;
   img.className = "solid-picture"; img.setAttribute("aria-hidden", "true"); img.dataset.key = stateOf(canvas);
@@ -639,7 +643,10 @@ class View {
     if (record?.status === "failed" && !this.count) dropPicture(c);
     const pictured = !this.count && !!c.parentElement?.querySelector(":scope > img.solid-picture");
     if (this.note && !this.saying) this.note.textContent = this.count || pictured ? "" : record?.error || this.waiting();
-    if (this.stat && !pictured) this.stat.textContent = this.count && record?.status === "ready" ? this.statLine({ ...record.stats, build: record.stats.build / 1000, waited: this.waited || 0, tris: this.count / 3 }) : "";
+    // (the same model as its picture's, by size and triangles, keeps the
+    // picture's line: only this load's timings would differ)
+    const held = this.heldStat, same = held && record?.stats.bytes === held.bytes && this.count / 3 === held.tris;
+    if (this.stat && !pictured) this.stat.textContent = this.count && record?.status === "ready" ? same ? held.text : this.statLine({ ...record.stats, build: record.stats.build / 1000, waited: this.waited || 0, tris: this.count / 3 }) : "";
     if (!this.count) return;
     let ready = false;
     try { ready = this.programReady(); } catch (e) { this.broken = true; this.say(e.message); return; }
@@ -709,7 +716,7 @@ View.prototype.takePicture = function () {
   let url = "";
   this.picturing = true; this.previewVisible = true;
   try { this.draw(); url = c.toDataURL("image/webp", 0.8); } catch {} finally { this.previewVisible = visible; this.picturing = false; }
-  if (url.startsWith("data:image/")) void pictures.put({ key: this.stateKey, url, w: c.clientWidth, h: c.clientHeight, dpr, state, stat: this.stat?.textContent || "", at: Date.now() });
+  if (url.startsWith("data:image/")) void pictures.put({ key: this.stateKey, url, w: c.clientWidth, h: c.clientHeight, dpr, state, stat: this.stat?.textContent || "", bytes: record.stats.bytes, tris: this.count / 3, at: Date.now() });
 };
 
 View.prototype.say = function (text) {
@@ -842,8 +849,9 @@ export function mount(canvas) {
     view.key = key; view.stateKey = stateKey; view.count = 0; view.saying = false; view.expectedBox = null;
     view.box = null; view.restoreWanted = assets.getState(stateKey);
     // (its picture shown: the model comes in at the pose the picture has)
-    const pic = view.restoreWanted ? null : picture(canvas);
-    if (pic) view.restoreWanted = structuredClone(pic.state);
+    const pic = picture(canvas);
+    if (pic && !view.restoreWanted) view.restoreWanted = structuredClone(pic.state);
+    view.heldStat = pic ? { text: pic.stat, bytes: pic.bytes, tris: pic.tris } : null;
     if (!view.restoreWanted) {
       view.cam = new Orbit().aim(-0.6,0.5); view.projection = "perspective"; view.exposure = 0;
       view.thermal = {enabled:false,temperature:25,liquid:0}; view.selection = null;

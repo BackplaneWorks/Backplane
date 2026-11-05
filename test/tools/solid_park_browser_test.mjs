@@ -16,7 +16,7 @@ const server = http.createServer((req, res) => {
   const name = new URL(req.url, 'http://fixture').pathname.slice(1);
   res.setHeader('Content-Type', name.endsWith('.js') || name.endsWith('.bend') ? 'text/javascript' : 'text/html');
   if (name === 'solid.js') res.end(fs.readFileSync(path.join(web, name), 'utf8') + '\nexport {view as testView, parked as testParked, assets as testAssets, pictures as testPictures};');
-  else if (name === 'app.bend') res.end('export default {solid_waiting:()=>"Preparing model",solid_stats:()=>"Ready"};');
+  else if (name === 'app.bend') res.end('export default {solid_waiting:()=>"Preparing model",solid_stats:(l,size,k,waited,built)=>size+" · "+k+" · built in "+built};');
   else if (/^[\w-]+\.js$/.test(name) && fs.existsSync(path.join(web, name))) res.end(fs.readFileSync(path.join(web, name)));
   else res.end('<style>html,body{margin:0;height:100%}.viewer-stage{position:relative;width:400px;height:300px}canvas{width:100%;height:100%;display:block}</style><div id="page"></div>');
 });
@@ -101,13 +101,20 @@ try {
     const v5 = S.testView;
     out.pictureKeepsPose = JSON.stringify(v5.restoreWanted.cam) === JSON.stringify(pic.state.cam);
     out.pictureNoNote = (v5.draw(), Q.querySelector('.viewer-note').textContent === '');
+    record.stats.build = 900; // (this load's own time differs from the picture's)
     S.testAssets.entries.set(record.key, record); v5.receive(record); v5.draw();
     out.pictureDropped = !Q.querySelector('img.solid-picture') && v5.count === 3;
+    // the same model keeps the picture's stats line (no late text change)
+    out.pictureStatKept = Q.querySelector('.viewer-stat').textContent === pic.stat && !!pic.stat;
     show(null); T.reset();
     const O = bench('2|r|a.kicad_pcb', 't2'); document.getElementById('page').replaceChildren(O);
     out.noPictureOtherThread = S.picture(O.querySelector('canvas')) === null && !O.querySelector('img.solid-picture');
     const W = bench('2|r|a.kicad_pcb', 't1'); W.querySelector('.viewer-stage').style.width = '420px'; document.getElementById('page').replaceChildren(W);
     out.noPictureOtherSize = S.picture(W.querySelector('canvas')) === null;
+    // a pose the page remembers for that view, other than the picture's: no picture (the model would move)
+    const st = S.testAssets.getState('t1\0' + '2|r|a.kicad_pcb'); st.cam.dist *= 2; S.testAssets.saveState('t1\0' + '2|r|a.kicad_pcb', st);
+    const V = bench('2|r|a.kicad_pcb', 't1'); document.getElementById('page').replaceChildren(V);
+    out.noPictureOtherPose = S.picture(V.querySelector('canvas')) === null;
     return out;
   });
   assert.deepEqual(errors, []);
