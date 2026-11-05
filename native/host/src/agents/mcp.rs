@@ -162,6 +162,10 @@ impl Mcp {
         const READS: [&str; 5] = ["orchestrator_capabilities", "thread_list", "thread_read", "thread_wait", "thread_wait_now"];
         if !gen.is_empty() && ag.gen_of(thread).map_or(true, |g| g != gen) && !READS.contains(&name) { // Gen.refused
             return Some(result(id, content(false, &json!({"error":"stale process: this agent process is no longer the thread's, so it may read but not change anything"})))) }
+        // Rules.gate: an enforced standing rule refuses the call (an error result; for the permission prompt, a deny) unless the person's latest message says its word
+        { let tool = if name == "permission_prompt" { sv(&a, "tool_name") } else { name };
+          let why = ag.rule_refusal(thread, tool).await;
+          if !why.is_empty() { return Some(if name == "permission_prompt" { result(id, perm_text(&perm_deny(&why))) } else { result(id, shaped(false, &json!(why))) }) } }
         if name == "permission_prompt" { return self.permit(ag, thread, id, &a, sock).await }
         let (ok, body) = match name {
             "orchestrator_capabilities" => ag.tool_caps(thread).await,

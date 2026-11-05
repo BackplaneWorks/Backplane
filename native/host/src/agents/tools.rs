@@ -102,6 +102,16 @@ impl Agents {
         page.and_then(|p| p.rows.into_iter().filter(|r| r.kind == "msg" && r.role == "assistant" && r.thread == target).max_by_key(|r| r.seq)).map(|r| r.text).unwrap_or_default()
     }
 
+    /// Rules.refusal for a tool call by this thread: the rules that apply, the person's newest message in the thread. "" lets it through.
+    pub async fn rule_refusal(self: &Arc<Self>, thread: &str, tool: &str) -> String {
+        if tool.is_empty() { return String::new() }
+        let rules = { let w = self.world().await; let project = w.threads.get(thread).map(|t| t.project.clone()).unwrap_or_default(); super::rules::rules_for(&w.st, w.bot(thread), &project) };
+        if !rules.iter().any(|o| o.get("enforce").and_then(Value::as_bool).unwrap_or(false)) { return String::new() }
+        let page = { let m = self.hub.model().await; m.page(&self.hub.store, thread, 0, 64).ok() };
+        let last = page.and_then(|p| p.rows.into_iter().filter(|r| r.kind == "msg" && r.role == "user" && r.thread == thread).max_by_key(|r| r.seq)).map(|r| r.text).unwrap_or_default();
+        super::rules::refusal(&rules, tool, &last)
+    }
+
     /// Hub.answer: the person answers an ask. It closes once; a parked agent request gets its reply; a plan answered "implement" leaves plan mode and asks for the work.
     pub async fn answer(self: &Arc<Self>, ask: &str, answer: &str) -> Result<(), String> {
         let a = { let w = self.world().await; w.asks.get(ask).cloned() };

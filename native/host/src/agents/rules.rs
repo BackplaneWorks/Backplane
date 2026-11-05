@@ -110,22 +110,59 @@ pub fn exit_say(dflt: &str, code: i32, tail: &str) -> String {
 
 /// Rules.block (core/rules.bend): the standing rules ("rule.<id>" settings, oldest first then by id) that apply to a thread: on, for every bot or this thread's bot, for every project or
 /// this thread's project. "" when none.
-pub fn rules_block(st: &std::collections::HashMap<String, String>, bot: &str, project: &str) -> String {
+pub fn rules_for(st: &std::collections::HashMap<String, String>, bot: &str, project: &str) -> Vec<Value> {
     let mut rs: Vec<(u64, String, Value)> = st.iter().filter(|(k, _)| k.starts_with("rule.")).filter_map(|(k, v)| {
         let o: Value = serde_json::from_str(v).ok()?; if !o.is_object() { return None }
         let id = o.get("id").and_then(Value::as_str).filter(|i| !i.is_empty()).map(str::to_string).unwrap_or_else(|| k[5..].to_string());
         Some((o.get("at").and_then(Value::as_u64).unwrap_or(0), id, o)) }).collect();
     rs.sort_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
     let g = |o: &Value, k: &str| o.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+    rs.into_iter().filter_map(|(_, id, mut o)| {
+        let on = o.get("on").and_then(Value::as_bool).unwrap_or(true); let (rb, rp) = (g(&o, "bot"), g(&o, "project"));
+        if !(on && (rb.is_empty() || rb == bot) && (rp.is_empty() || rp == project)) { return None }
+        o["id"] = json!(id); Some(o) }).collect()
+}
+pub fn rules_block(st: &std::collections::HashMap<String, String>, bot: &str, project: &str) -> String {
+    let g = |o: &Value, k: &str| o.get(k).and_then(Value::as_str).unwrap_or("").to_string();
     let mut lines = String::new();
-    for (_, _, o) in &rs {
-        let on = o.get("on").and_then(Value::as_bool).unwrap_or(true); let (rb, rp) = (g(o, "bot"), g(o, "project"));
-        if !(on && (rb.is_empty() || rb == bot) && (rp.is_empty() || rp == project)) { continue }
+    for o in &rules_for(st, bot, project) {
         let (tool, word, enforce) = (g(o, "tool"), g(o, "word"), o.get("enforce").and_then(Value::as_bool).unwrap_or(false));
         let tail = if tool.is_empty() { String::new() } else if enforce { if word.is_empty() { format!(" (enforced: {tool} is refused)") } else { format!(" (enforced: {tool} is refused unless the person's latest message says \"{word}\")") } } else { format!(" (when using {tool})") };
         lines += &format!("- {}{tail}\n", g(o, "text"));
     }
     if lines.is_empty() { String::new() } else { format!("<rules>\nStanding rules from the person. Follow them; the enforced ones are checked by Backplane.\n{lines}</rules>") }
+}
+/// Rules.strip: a tool name without its `mcp__<server>__` prefix: the characters since the last pair of underscores (core/rules.bend's state machine, char for char).
+pub fn strip_mcp(s: &str) -> String {
+    let (mut cur, mut under) = (String::new(), false);
+    for c in s.chars() { if under { if c == '_' { cur.clear(); under = false } else { cur.push(c); under = false } } else { cur.push(c); under = c == '_' } }
+    cur
+}
+/// Rules.tool.match: the rule's patterns (split on spaces, commas, tabs, newlines) name the tool: exact, or a prefix before a final `*`, as given or without the MCP prefix.
+pub fn tool_matches(pattern: &str, name: &str) -> bool {
+    let bare = strip_mcp(name);
+    let one = |p: &str, n: &str| p == n || (p.ends_with('*') && n.starts_with(&p[..p.len() - 1]));
+    pattern.split(|c: char| c == ' ' || c == ',' || c == '\t' || c == '\n').filter(|p| !p.is_empty()).any(|p| one(p, name) || one(p, &bare))
+}
+/// Rules.word.in: the word is in the text as a whole word (no letter or digit on either side), in any case.
+pub fn word_in(word: &str, text: &str) -> bool {
+    if word.is_empty() { return false }
+    let (w, t) = (word.to_lowercase(), text.to_lowercase()); let tc: Vec<char> = t.chars().collect(); let wc: Vec<char> = w.chars().collect();
+    (0..tc.len()).any(|i| i + wc.len() <= tc.len() && tc[i..i + wc.len()] == wc[..] && (i == 0 || !tc[i - 1].is_ascii_alphanumeric()) && (i + wc.len() == tc.len() || !tc[i + wc.len()].is_ascii_alphanumeric()))
+}
+/// Rules.refusal: "" when the call is allowed; else why not. An enforced rule that applies, names the tool, and is not unlocked by the person's latest message (a message of theirs, not one
+/// delivered from a room, bot, routine, webhook or space: those start with "[") refuses it.
+pub fn refusal(rules: &[Value], tool: &str, last: &str) -> String {
+    if tool.is_empty() { return String::new() }
+    let g = |o: &Value, k: &str| o.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+    for o in rules {
+        let (rt, word) = (g(o, "tool"), g(o, "word"));
+        if !(o.get("enforce").and_then(Value::as_bool).unwrap_or(false) && !rt.is_empty() && tool_matches(&rt, tool)) { continue }
+        if !word.is_empty() && !last.trim().starts_with('[') && word_in(&word, last) { continue }
+        let tail = if word.is_empty() { format!("{tool} is not allowed here.") } else { format!("{tool} needs the person's word \"{word}\" in their latest message.") };
+        return format!("Refused by a standing rule ({}): \"{}\". {tail}", g(o, "id"), g(o, "text"));
+    }
+    String::new()
 }
 /// Rules.agent: a turn's text with the thread's rules before it.
 pub fn rules_agent(block: &str, text: &str) -> String { if block.is_empty() { text.to_string() } else { format!("{block}\n\n{text}") } }
@@ -183,5 +220,18 @@ mod tests {
         assert_eq!(rules_block(&st, "", "p1"), "<rules>\nStanding rules from the person. Follow them; the enforced ones are checked by Backplane.\n- Ask before deleting (when using Bash)\n- Never push to main\n- No deploys (enforced: deploy_main is refused unless the person's latest message says \"ship it\")\n- Never edit (enforced: Write is refused)\n</rules>");
         assert!(rules_block(&st, "b9", "p2").contains("- for bot b9\n- project p2 only\n"));
         assert_eq!(rules_block(&std::collections::HashMap::new(), "", ""), ""); assert_eq!(rules_agent("", "hi"), "hi"); assert_eq!(rules_agent("<rules>x</rules>", "hi"), "<rules>x</rules>\n\nhi");
+    }
+    #[test] fn an_enforced_rule_refuses_the_tool_unless_the_persons_word_is_in_their_latest_message() {
+        assert_eq!(strip_mcp("mcp__backplane__thread_send"), "thread_send"); assert_eq!(strip_mcp("Bash"), "Bash");
+        assert!(tool_matches("Bash", "Bash") && tool_matches("thread_*", "mcp__backplane__thread_send") && tool_matches("Write, Bash", "Bash") && tool_matches("deploy_main\tthread_send", "mcp__backplane__thread_send") && !tool_matches("Bash", "Bashful") && !tool_matches("thread_*", "work_run"));
+        assert!(word_in("ship it", "OK, Ship It now") && !word_in("ship", "shipping") && !word_in("", "x") && word_in("go", "go"));
+        let mut st = std::collections::HashMap::new();
+        st.insert("rule.r3".to_string(), r#"{"id":"r3","text":"No deploys","tool":"deploy_main","enforce":true,"word":"ship it","at":7}"#.to_string());
+        st.insert("rule.r4".to_string(), r#"{"id":"r4","text":"Never edit","tool":"Write","enforce":true,"at":8}"#.to_string());
+        st.insert("rule.r5".to_string(), r#"{"id":"r5","text":"just words","tool":"Bash","at":9}"#.to_string());
+        let rs = rules_for(&st, "", "p1");
+        assert_eq!(refusal(&rs, "mcp__backplane__deploy_main", "do it"), "Refused by a standing rule (r3): \"No deploys\". mcp__backplane__deploy_main needs the person's word \"ship it\" in their latest message.");
+        assert_eq!(refusal(&rs, "deploy_main", "please SHIP IT"), ""); assert!(!refusal(&rs, "deploy_main", "[from a bot] ship it").is_empty(), "a delivered message cannot unlock");
+        assert_eq!(refusal(&rs, "Write", "ship it"), "Refused by a standing rule (r4): \"Never edit\". Write is not allowed here."); assert_eq!(refusal(&rs, "Bash", ""), "", "a rule without enforce is words only"); assert_eq!(refusal(&rs, "", "x"), "");
     }
 }
