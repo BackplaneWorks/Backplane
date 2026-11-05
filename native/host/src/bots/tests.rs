@@ -388,7 +388,7 @@ fn canon(raw: &[Value]) -> Vec<String> {
             if i + 10 <= cs.len() && cs[i..i + 10].iter().all(|c| c.is_ascii_digit()) && (i == 0 || !cs[i - 1].is_ascii_digit()) && st.len() >= 21 && &st[10..11] == "." && st[11..17].bytes().all(|b| b.is_ascii_digit()) && st[17..].starts_with(".<me>") { o += "<S>"; i += 10 } else { o.push(cs[i]); i += 1 }
         }
         let mut res = String::new(); let mut rest = o.as_str(); // once\":N inside an op body
-        while let Some(p) = rest.find("once\\\":") { let (a, b) = rest.split_at(p + 8); res += a; let d = b.bytes().take_while(u8::is_ascii_digit).count(); if d > 0 && !b.starts_with('0') { res += "<T>"; rest = &b[d..] } else { rest = b } }
+        while let Some(p) = rest.find("once\\\":") { let (a, b) = rest.split_at(p + 7); res += a; let d = b.bytes().take_while(u8::is_ascii_digit).count(); if d > 0 && !b.starts_with('0') { res += "<T>"; rest = &b[d..] } else { rest = b } }
         res + rest
     }).collect()
 }
