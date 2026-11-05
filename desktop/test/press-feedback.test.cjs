@@ -164,3 +164,23 @@ test('a viewer press draws the rail with the pressed tab on show and Close the v
  s=f.choice('panel','','thread:A');s(true);f.seen(page('',8),'thread:A');f.seen(page('files',9),'thread:A');
  s=f.choice('panel','','thread:A');assert.equal(f.active?.node,null);r=railOf(f.project(page('files',10)));assert.deepEqual(on(r),[]);assert.equal(shut(r),0);
 });
+test('a shelf press draws the one sidebar section it changed as the hub drew it, only from the same shape before',async()=>{
+ const {PressFeedback,T}=await load();const f=new PressFeedback(()=>{});
+ const el=(tag,key,attrs,ks=[])=>({$:T.El,tag,key,attrs:L(Object.entries(attrs).map(([name,value])=>({$:T.At,name,value}))),kids:L(ks)});
+ const row=id=>el('bp-memo',id,{fn:'row'});
+ const proj=(id,open,extra=[])=>el('section',id,{class:'project'},[el('div','',{class:'project-threads'},[row(id+'a'),el('button','',{class:open?'shelf open':'shelf','data-value':'settled:'+id}),...(open?[row(id+'s1'),row(id+'s2')]:[]),...extra])]);
+ const page=(openP,n=0,extra=[])=>el('div','',{},[el('div','app',{class:'app'},[el('aside','sidebar',{class:'sidebar'},[el('div','',{class:'list'},[proj('p1',openP==='p1',extra),proj('p2',openP==='p2')])]),
+  el('main','main',{class:'thread-view'},[el('div','tl',{id:'timeline'},[el('div','r'+n,{class:'msg'})])])])]);
+ const secs=pg=>kids(kids(kids(kids(pg)[0])[0])[0]);
+ f.seen(page(''),'thread:A');let s=f.choice('toggle-settled','settled:p1','thread:A');assert.equal(f.showing,false,'nothing known yet');s(true);
+ const opened=page('p1',1);f.seen(opened,'thread:A');
+ s=f.choice('toggle-settled','settled:p1','thread:A');assert.equal(f.showing,false,'the open shelf’s press (shut) is not known yet');s(true);f.seen(page('',2),'thread:A');
+ s=f.choice('toggle-settled','settled:p1','thread:A');assert.equal(f.active?.kind,'section');
+ const shown=f.project(page('',3));assert.equal(secs(shown)[0],secs(opened)[0],'the section as the hub drew it open');assert.equal(secs(shown)[1].key,'p2','the others as they are');
+ s(true);f.seen(page('p1',4),'thread:A');
+ s=f.choice('toggle-settled','settled:p1','thread:A');assert.equal(f.active?.kind,'section','the shut press, learned from the open shape');
+ assert.deepEqual(kids(kids(secs(f.project(page('p1',5)))[0])[0]).map(k=>k.key),['p1a','']);s(true);f.seen(page('',6),'thread:A');
+ // the section changed shape since (a new row): not drawn from what was learned
+ f.seen(page('',7,[row('new')]),'thread:A');s=f.choice('toggle-settled','settled:p1','thread:A');assert.equal(f.showing,false);s(true);
+ assert.equal(f.choice('toggle-settled','settled:p1','thread:B'),undefined,'another destination: nothing seen there');
+});

@@ -63,6 +63,13 @@ const TAB_OF = { fm: () => 'files', diff: () => 'diff', mech: () => 'mech', 'rv-
 const ON_ATTRS = { class: 'tab on', 'aria-current': 'page', 'aria-pressed': 'true', 'data-value': '' };
 const onTab = n => ({ ...n, attrs: list(items(n.attrs).map(a => is(a, 'At') ? (a.name in ON_ATTRS ? { ...a, value: ON_ATTRS[a.name] } : a) : a.event === 'click' ? { ...a, action: 'panel' } : a)) });
 const isRail = n => n.tag === 'nav' && n.key === 'workspace' && classes(n).includes('workspace-bar');
+// A sidebar shelf (a project's Settled, Older projects, Settled in the
+// active view, Conversation history) opens or shuts by its press: what the
+// hub drew for the same press, with its section the same shape before it
+// (so an open and a shut one never stand in for each other), is drawn at
+// the press: the one section of the sidebar that press changed, its rows as
+// the hub drew them then; the hub's view then draws it in place.
+const SHELVES = new Set(['toggle-settled', 'side-older', 'side-settled', 'thread-history']);
 const DEPTH = 7;
 const sig = n => n.tag + '\u0000' + n.key + '\u0000' + (n.key ? '' : classes(n)[0] || '');
 
@@ -89,6 +96,33 @@ export function regions(page) {
   return found;
 }
 const isShade = n => is(n, 'El') && n.tag === 'div' && !n.key && classes(n).includes('shade') && !items(n.kids).length;
+// the sidebar's sections, by their place's signature (null: two alike)
+function sections(page) {
+  let side = null;
+  const find = (n, d) => { if (side || !is(n, 'El') || d > DEPTH || n.tag === 'bp-memo') return;if (n.tag === 'aside' && n.key === 'sidebar') { side = n;return; }for (const k of items(n.kids)) find(k, d + 1); };
+  find(page, 0);
+  if (!side) return null;
+  const out = new Map(), walk = (n, d) => {
+    if (!is(n, 'El') || d > 3 || n.tag === 'bp-memo') return;
+    if (n.tag === 'section') { const k = sig(n);out.set(k, out.has(k) ? null : n);return; }
+    for (const k of items(n.kids)) walk(k, d + 1);
+  };
+  for (const k of items(side.kids)) walk(k, 0);
+  return out;
+}
+// a section's shape: its elements, keys and classes (not its text), hashed
+function shapeOf(n) {
+  let h = 2166136261;
+  const add = str => { for (let i = 0; i < str.length; i++) h = Math.imul(h ^ str.charCodeAt(i), 16777619); };
+  const walk = (x, d) => {
+    if (!is(x, 'El') || d > 9) return;
+    add('<' + x.tag + '\u0000' + x.key + '\u0000' + (x.tag === 'bp-memo' ? '' : attr(x, 'class') || ''));
+    if (x.tag !== 'bp-memo') for (const k of items(x.kids)) walk(k, d + 1);
+    add('>');
+  };
+  walk(n, 0);
+  return h >>> 0;
+}
 const shape = found => REGIONS.map(([k]) => found.has(k) ? '1' : '0').join('');
 
 // What was learned is kept across reloads (an app start drew each menu's
@@ -106,7 +140,7 @@ const blank = n => {
 const shaped = n => n === null || is(n, 'El') && typeof n.tag === 'string' && n.attrs && n.kids;
 export class PressFeedback {
   // store: {storage (localStorage), scope: () => a key for this hub and page, or ''}
-  constructor(changed, limit = 64, store = null) { this.changed = changed;this.limit = limit;this.store = store;this.learned = new Map();this.tabs = new Map();this.closer = null;this.clear(); }
+  constructor(changed, limit = 64, store = null) { this.changed = changed;this.limit = limit;this.store = store;this.learned = new Map();this.tabs = new Map();this.closer = null;this.shelves = new Map();this.clear(); }
   restore() {
     const scope = this.store?.scope?.() || '';
     if (!scope || scope === this.storedFor) return;
@@ -151,6 +185,7 @@ export class PressFeedback {
     const p = this.press;
     if (!p?.settled || p.target !== target) return;
     this.press = null;
+    if (p.shelf) this.learnShelf(p, page);
     // exactly one region opened, shut or changed: that is what the press gives
     const moved = REGIONS.map(([k]) => k).filter(k => p.before.get(k)?.node !== this.now.get(k)?.node);
     if (moved.length !== 1) return;
@@ -180,13 +215,37 @@ export class PressFeedback {
     const key = JSON.stringify([target, action, String(value ?? ''), shape(this.now)]);
     const revision = ++this.revision, press = { key, target, before: this.now, settled: false, revision, by: action + '\u0000' + String(value ?? '') };
     this.press = press;
-    const known = this.learned.get(key) || this.opening(action, action + '\u0000' + String(value ?? '')) || this.closing(back);
+    if (SHELVES.has(action)) { press.shelf = JSON.stringify([target, action, String(value ?? '')]);press.sections = sections(this.seenNode); }
+    const known = (press.shelf ? this.shelfFor(press) : this.learned.get(key)) || this.opening(action, action + '\u0000' + String(value ?? '')) || this.closing(back);
     this.active = known ? { ...known, revision, rail: known.kind === 'viewer' ? this.railKind(action, value, known) : undefined } : null;
     if (known) this.changed();
     return () => {
       press.settled = true;
       if (this.active?.revision === revision) { this.active = null;this.changed(); }
     };
+  }
+  // (the one section a shelf's press changed, as the hub drew it after)
+  learnShelf(p, page) {
+    const before = p.sections, after = sections(page);
+    if (!before || !after || before.size !== after.size) return;
+    const moved = [];
+    for (const [k, n] of before) {
+      const m = after.get(k);
+      if (!n || !m || m === undefined) return;
+      if (m !== n && JSON.stringify(m) !== JSON.stringify(n)) moved.push(k);
+    }
+    if (moved.length !== 1) return;
+    // (by the section and its shape before: an open and a shut shelf are two)
+    const key = p.shelf + '\u0000' + moved[0] + '\u0000' + shapeOf(before.get(moved[0]));
+    this.shelves.delete(key);this.shelves.set(key, { kind: 'section', sec: moved[0], node: after.get(moved[0]) });
+    while (this.shelves.size > this.limit) this.shelves.delete(this.shelves.keys().next().value);
+  }
+  shelfFor(press) {
+    for (const [k, n] of press.sections || []) {
+      const s = n && this.shelves.get(press.shelf + '\u0000' + k + '\u0000' + shapeOf(n));
+      if (s) return s;
+    }
+    return null;
   }
   // A viewer opened for the first time here: its pane, empty, where the hub
   // puts it (the same column and size), so the click shows at once and the
@@ -286,6 +345,7 @@ export class PressFeedback {
   project(page) {
     const a = this.active;
     if (!a) return page;
+    if (a.kind === 'section') return this.swapSection(page, a);
     const test = REGIONS.find(([k]) => k === a.kind)[1];
     let done = false;
     const walk = n => {
@@ -331,7 +391,18 @@ export class PressFeedback {
     };
     return walk(page);
   }
+  swapSection(page, a) {
+    let done = false;
+    const walk = (n, d, inSide) => {
+      if (done || !is(n, 'El') || n.tag === 'bp-memo' || d > DEPTH + 3) return n;
+      if (inSide && n.tag === 'section') { if (sig(n) !== a.sec) return n;done = true;return a.node; }
+      const side = inSide || n.tag === 'aside' && n.key === 'sidebar';
+      const ks = items(n.kids), mapped = ks.map(k => walk(k, d + 1, side));
+      return mapped.every((k, i) => k === ks[i]) ? n : { ...n, kids: list(mapped) };
+    };
+    return walk(page, 0, false);
+  }
   // (another destination picked: a press on its way is the hub's to answer)
   drop() { this.revision++;this.active = null;this.press = null; }
-  clear() { this.revision = (this.revision || 0) + 1;this.active = null;this.press = null;this.now = null;this.shell = null;this.nowFor = '';this.seenNode = null;this.learned?.clear();this.tabs?.clear();this.closer = null; }
+  clear() { this.revision = (this.revision || 0) + 1;this.active = null;this.press = null;this.now = null;this.shell = null;this.nowFor = '';this.seenNode = null;this.learned?.clear();this.tabs?.clear();this.closer = null;this.shelves?.clear(); }
 }
