@@ -833,3 +833,34 @@ fn tool_norm(v: &Value) -> Value {
     assert_eq!((bl["total"].clone(), bl["convs"][0]["tags"].clone()), (json!(1), json!(["a", "b"])));
     assert_eq!(rpc(&hub, "mail.find", json!({"bot":ada,"q":"b"})).await["result"]["total"], 1);
 }
+#[tokio::test] async fn mail_paging_scopes_filters_and_sends_to_a_plain_thread() {
+    let (hub, _bots, rec) = start("mailpage", "").await;
+    let ada = bot(&hub, "ada").await;
+    hub.commit(&json!({"$":"ProjectCreated","id":"p1","title":"proj","root":"/x","at":1})).await.unwrap();
+    hub.commit(&json!({"$":"ThreadCreated","id":"tw","project":"p1","title":"work","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2})).await.unwrap();
+    // a send to a plain thread: delivered to it as the person's, and filed (a thread: address, the project of the thread)
+    assert_eq!(rpc(&hub, "mail.send", json!({"to":"thread:tw","text":"do the thing","subject":"S"})).await["ok"], true);
+    assert!(rec.got.lock().unwrap().iter().any(|g| g.0 == "tw" && g.2 == "do the thing" && g.3.is_none()));
+    let l = rpc(&hub, "mail.list", json!({})).await["result"].clone(); assert_eq!(l["total"], 1); assert_eq!((l["convs"][0]["subject"].as_str().unwrap(), l["convs"][0]["project"].as_str().unwrap()), ("S", "p1"));
+    let tl = rpc(&hub, "mail.list", json!({"bot":"thread:tw"})).await["result"].clone(); assert_eq!(tl["total"], 1);
+    assert_eq!(rpc(&hub, "mail.list", json!({"bot":"thread:zz"})).await["result"]["total"], 0);
+    assert_eq!(rpc(&hub, "mail.list", json!({"project":"p1"})).await["result"]["total"], 1);
+    assert_eq!(rpc(&hub, "mail.list", json!({"project":"nope"})).await["result"]["total"], 0);
+    // a conversation with 5 mails, read two at a time; and 210 conversations to skip and cap
+    let cid = l["convs"][0]["id"].as_str().unwrap().to_string();
+    for i in 0..4 { assert_eq!(rpc(&hub, "mail.send", json!({"to":"thread:tw","conv":cid,"text":format!("m{i}")})).await["ok"], true) }
+    let mut before = String::new(); let mut got: Vec<String> = vec![]; let mut mores = vec![];
+    loop {
+        let r = rpc(&hub, "mail.read", json!({"conv":cid,"before":before,"n":2})).await["result"].clone();
+        let ms = r["mails"].as_array().unwrap().clone(); mores.push(r["more"].as_bool().unwrap());
+        got.extend(ms.iter().map(|m| m["text"].as_str().unwrap().to_string())); before = ms.last().unwrap()["id"].as_str().unwrap().to_string();
+        if !r["more"].as_bool().unwrap() { break }
+    }
+    assert_eq!(got, ["m3", "m2", "m1", "m0", "do the thing"]); assert_eq!(mores, [true, true, false], "a full page with older mail says more, the last does not");
+    assert_eq!(rpc(&hub, "mail.read", json!({"conv":cid,"n":0})).await["result"]["mails"], json!([]));
+    for i in 0..210 { assert_eq!(rpc(&hub, "mail.send", json!({"to":format!("bot:{ada}"),"conv":format!("c{i}"),"text":"x"})).await["ok"], true) }
+    let a = rpc(&hub, "mail.list", json!({"n":1000})).await["result"].clone();
+    assert_eq!((a["total"].clone(), a["convs"].as_array().unwrap().len()), (json!(211), 200), "n is capped at 200");
+    let s = rpc(&hub, "mail.list", json!({"skip":205,"n":10})).await["result"].clone(); assert_eq!(s["convs"].as_array().unwrap().len(), 6);
+    assert_eq!(rpc(&hub, "mail.list", json!({"n":3})).await["result"]["convs"].as_array().unwrap().len(), 3);
+}
