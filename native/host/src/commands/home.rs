@@ -261,7 +261,7 @@ mod tests {
         let rev = hash(b"# Goal\n\nold\n");
         let (v, _, _) = read_files(d.to_str().unwrap(), &json!({"project":"p","op":"intent","revision":"stale","editor":0,"removeBytes":0,"text":"x"}));
         assert_eq!(v["error"], "Goal and notes changed. Reload before saving; your edit is retained."); assert_eq!(std::fs::read_to_string(d.join(".backplane/intent.md")).unwrap(), "# Goal\n\nold\n");
-        let (v, _, _) = read_files(d.to_str().unwrap(), &json!({"project":"p","op":"intent","revision":rev,"editor":7,"removeBytes":3,"text":"new"}));
+        let (v, _, _) = read_files(d.to_str().unwrap(), &json!({"project":"p","op":"intent","revision":rev,"editor":8,"removeBytes":3,"text":"new"}));
         assert_eq!(std::fs::read_to_string(d.join(".backplane/intent.md")).unwrap(), "# Goal\n\nnew\n"); assert_eq!(v["intentSaved"], true);
         let (v, _, _) = read_files(d.to_str().unwrap(), &json!({"project":"p","op":"intent","revision":hash(b"# Goal\n\nnew\n"),"editor":999,"removeBytes":0,"text":"x"})); assert_eq!(v["error"], "This edit no longer matches the saved section.");
     }
