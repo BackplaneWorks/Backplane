@@ -1,6 +1,6 @@
 //! The few places where the window hands control to the screens: all of Backplane's screen-specific
 //! methods live here so main.rs keeps one call at each seam.
-use super::{asks, attach::DEFAULT_CAP, composer::ComposerEvent};
+use super::{asks, attach::{self, DEFAULT_CAP}, composer::ComposerEvent, timeline};
 use crate::Backplane;
 use gpui::*;
 
@@ -63,10 +63,26 @@ impl Backplane {
     /// (The picture itself is the window's `thread_cache`.)
     pub(crate) fn thread_switch(&mut self, raw: &str) {
         self.screens.drafts.kick();
-        if !self.selected.is_empty() { self.screens.offsets.insert(self.selected.clone(), f32::from(self.scroll.offset().y)); }
+        let (y, max) = (f32::from(self.scroll.offset().y), f32::from(self.scroll.max_offset().height));
+        if !self.selected.is_empty() {
+            if timeline::at_end(y, max) { self.screens.offsets.remove(&self.selected); } else { self.screens.offsets.insert(self.selected.clone(), y); }
+        }
         self.screens.attacher.show(raw);
         self.screens.images.retry();
-        if let Some(y) = self.screens.offsets.get(raw).copied() { self.scroll.set_offset(point(px(0.), px(y))); }
+        match self.screens.offsets.get(raw).copied() {
+            Some(y) => { self.scroll.set_offset(point(px(0.), px(y))); self.screens.restoring = true; }
+            None => { self.timeline_to_end(); self.screens.restoring = false; }
+        }
+    }
+    pub(crate) fn timeline_to_end(&self) { self.scroll.set_offset(point(px(0.), px(-1_000_000.))); }
+    /// A picture was applied: the timeline goes to its end only as `timeline::follows` says, so a reader who scrolled up stays where they are.
+    pub(crate) fn timeline_follow(&mut self) {
+        let id = crate::string(&self.data["thread"], "id"); let raw = attach::raw_id(&id).to_string();
+        if raw.is_empty() { return; }
+        let same = raw == self.selected;
+        let (y, max) = (f32::from(self.scroll.offset().y), f32::from(self.scroll.max_offset().height));
+        if timeline::follows(same, self.screens.offsets.contains_key(&raw), self.screens.restoring, y, max) { self.timeline_to_end(); }
+        if same { self.screens.restoring = false; }
     }
     /// A picture was applied: the drafts, the asks' boxes and the settings fields follow what the hub just drew.
     pub(crate) fn picture_applied(&mut self, cx: &mut Context<Self>) {

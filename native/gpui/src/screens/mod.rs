@@ -33,8 +33,10 @@ pub struct Screens {
     pub ask_inputs: HashMap<String, Entity<composer::Composer>>,
     pub attacher: attach::Attacher,
     pub drafts: drafts::Writer,
-    /// Timeline scroll offset per thread, so a thread left scrolled up keeps its place.
+    /// Timeline scroll offset per thread, so a thread left scrolled up keeps its place. A thread left at its end has none: it opens at its end.
     pub offsets: HashMap<String, f32>,
+    /// A remembered place was just put back and the new thread's first picture has not landed: the scroll range is still the last thread's.
+    pub restoring: bool,
     pub reg: timeline::Reg,
     pub menu_open: bool,
     pub projects: projects::Projects,
@@ -70,6 +72,6 @@ pub struct Screens {
 impl Screens {
     pub fn new<T: 'static>(_cx: &mut Context<T>, target: Option<attach::Target>, drafts_path: std::path::PathBuf, saved: HashMap<String, String>) -> Self {
         let imp = improvements::Imp::new(&drafts_path, target.clone());
-        Self { ask_inputs: HashMap::new(), attacher: attach::Attacher::new(target), drafts: drafts::Writer::start(drafts_path, saved), offsets: HashMap::new(), reg: Default::default(), menu_open: false, projects: Default::default(), solid: None, browser: None, rail_pending: None, rail_at: None, focus_field: None, bots_open: String::new(), plot_click: None, plot: Default::default(), plotview: Default::default(), picker_open: false, fields: HashMap::new(), settings_focus: _cx.focus_handle(), focus_settings: false, settings_was_open: false, settings_ui: Default::default(), parsed: Default::default(), images: Default::default(), img_poll: false, await_draft: None, pending_draft: None, draft_timer: false, imp }
+        Self { ask_inputs: HashMap::new(), attacher: attach::Attacher::new(target), drafts: drafts::Writer::start(drafts_path, saved), offsets: HashMap::new(), restoring: false, reg: Default::default(), menu_open: false, projects: Default::default(), solid: None, browser: None, rail_pending: None, rail_at: None, focus_field: None, bots_open: String::new(), plot_click: None, plot: Default::default(), plotview: Default::default(), picker_open: false, fields: HashMap::new(), settings_focus: _cx.focus_handle(), focus_settings: false, settings_was_open: false, settings_ui: Default::default(), parsed: Default::default(), images: Default::default(), img_poll: false, await_draft: None, pending_draft: None, draft_timer: false, imp }
     }
 }

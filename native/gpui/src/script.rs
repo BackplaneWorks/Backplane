@@ -12,7 +12,7 @@ pub fn metric(started: Instant, event: &str, mut fields: Value) {
 }
 
 #[derive(Clone, Debug)]
-pub enum Step { Home(usize), Select(usize), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), Imp(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Mark(String), Fit, Unsupported(String) }
+pub enum Step { ScrollState(String), Home(usize), Select(usize), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), Imp(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Mark(String), Fit, Unsupported(String) }
 /// What a click on a registered control does; the e2e harness's controls inventory and `click` step use these.
 #[derive(Clone, Debug)]
 pub enum Ctl { None, Rail(String), PickFiles, ToggleSidebar, Select(String), Home(String), Fold(String), Send, Skill(String), Page(String), Node(String, String), More, RenameSave(String), Imp(String), FocusSearch }
@@ -47,6 +47,7 @@ pub fn load(path: &Path) -> VecDeque<Step> {
         else if let Some(kind) = v["view"].as_str() { Some(Step::View(kind.into())) }
         else if let Some(a) = v["pan"].as_array() { Some(Step::Pan(a.first().and_then(Value::as_f64).unwrap_or(0.0) as f32, a.get(1).and_then(Value::as_f64).unwrap_or(0.0) as f32)) }
         else if let Some(a) = v["zoom"].as_array() { Some(Step::Zoom(a.first().and_then(Value::as_f64).unwrap_or(0.0) as f32, a.get(1).and_then(Value::as_f64).unwrap_or(0.5) as f32, a.get(2).and_then(Value::as_f64).unwrap_or(0.5) as f32)) }
+        else if let Some(n) = v["scroll_state"].as_str() { Some(Step::ScrollState(n.to_string())) }
         else if let Some(n) = v["scroll"].as_f64() { Some(Step::Scroll(n as f32)) }
         else if let Some(sec) = v["net_sleep"].as_f64() { Some(Step::NetSleep(sec)) }
         else if let Some(k) = ["paste_image", "open_viewer", "open_settings", "files_download"].iter().find(|k| v.get(**k).is_some()) { Some(Step::Unsupported((*k).to_string())) }
@@ -216,6 +217,12 @@ impl Backplane {
                         self.m("plot_paint", json!({"name": name, "n": ms.len(), "p50_ms": p(0.5), "p95_ms": p(0.95), "max_ms": p(1.0), "loop_cull_build_p50_p95_ms": [lp.0, lp.1], "tessellate_p50_p95_ms": [tess.0, tess.1], "paint_path_p50_p95_ms": [sub.0, sub.1]}));
                     }
                 }
+                self.pump(cx);
+            }
+            // where the timeline stands: e2e reads this, a picture cannot say whether a scroll held
+            Step::ScrollState(name) => {
+                let (y, max) = (f32::from(self.scroll.offset().y), f32::from(self.scroll.max_offset().height));
+                self.m("scroll", json!({"name": name, "y": y, "max": max, "entries": self.data["thread"]["entries"].as_array().map_or(0, |e| e.len())}));
                 self.pump(cx);
             }
             Step::Scroll(n) => {
