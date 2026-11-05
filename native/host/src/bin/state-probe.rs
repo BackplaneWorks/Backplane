@@ -38,6 +38,6 @@ fn main() {
         let mut list = core.clone(); list.extend(ended.iter().cloned()); list.extend(marks.iter().cloned());
         let mut v = ended; v.extend(marks); v.extend(state::fam::turnend::told_marks(&ctx, &list)); v
     };
-    let out = serde_json::json!({"tick": state::fam::autosettle::changes(&st, now), "meta": meta, "quiet": state::fam::autosettle::quiet(&st, &batch), "live": state::fam::watchdog::after(&st, now, &batch), "end": end});
+    let out = serde_json::json!({"tick": state::fam::autosettle::changes(&st, now), "meta": meta, "quiet": state::fam::autosettle::quiet(&st, &batch), "live": state::fam::watchdog::after(&st, now, &batch), "end": end, "wakes": state::fam::autosettle::tick_post(&st, now)});
     println!("{}", serde_json::to_string(&out).unwrap());
 }

@@ -59,6 +59,12 @@ ls.push(mk('endI'),msg('endI','mI1','user','[message from botty] hi',T0+10),msg(
 ls.push(...run_('endJ','[message from person@box] hi again','reply J'),E({$:'BotSet',id:'bJ',name:'Bub',thread:'endJ',look:0,persona:''}));
 ls.push(...run_('endK','do it','x'),set('bg.endK','job\tsleep\tx'),...run_('endL','do it','x'),E({$:'QueueTaken',thread:'endL'}),E({$:'TurnQueued',thread:'endL',msg:'qq',text:'later'}));
 ls.push(...run_('endM','first',"r1"),msg('endM','mM2','user','second ask',T0+12),turn('endM','running',T0+18));
+// settled threads that work again (Shelve.tick.post): automatic, manual held, manual given way, queued, kids, rows, pending, dormant project
+const wk=(th,manual,extra=[],p='p1')=>[mk(th,p==='p1'?{}:{project:p}),msg(th,'m'+th,'user','go',T0+10),turn(th,'completed',T0+11),E({$:'ThreadSettled',id:th,manual},T0+12),...extra];
+ls.push(...wk('wk1',false,[turn('wk1','running',T0+13)]),...wk('wk2',true,[turn('wk2','running',T0+13)]),...wk('wk3',true,[turn('wk3','running',T0+13),msg('wk3','mwk3b','user','again',T0+14)]));
+ls.push(...wk('wk4',false,[E({$:'TurnQueued',thread:'wk4',msg:'qw4',text:'x'})]),...wk('wk5',false,[mk('wk5c'),E({$:'TaskDelegated',task:'kw5',parent:'wk5',child:'wk5c',depth:1,provider:'claude',model:''})]));
+ls.push(...wk('wk6',false,[set('bg.wk6','job\tx\ty')]),...wk('wk7',false,[E({$:'PendingChanged',thread:'wk7',count:2})]),E({$:'ProjectCreated',id:'pd',title:'dorm',root:'/d'},T0),set('project.dormant.pd','on'),...wk('wk8',false,[turn('wk8','running',T0+13)],'pd'));
+ls.push(...wk('wk9',false,[]),...wk('wk10',false,[E({$:'QueueTaken',thread:'wk10'}),E({$:'TurnQueued',thread:'handoff-x',msg:'handoff:1',text:'ctx'}),E({$:'TurnQueued',thread:'wk10',msg:'handoff:2',text:'ctx'})]));
 // legacy and defaults
 ls.push(set('autosettle.version','1'));
 writeFileSync(`${out}/auto-base.jsonl`,ls.join('\n')+'\n');
