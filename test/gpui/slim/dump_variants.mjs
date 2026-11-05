@@ -66,6 +66,13 @@ const variants={
   tonethink:[{$:'ActivityLogged',thread:T,act:'h3',tone:'think',kind:'thinking',summary:'hmm',at:A}],
   imagereply:[{$:'MessagePosted',thread:T,msg:'mi1',role:'assistant',text:'see /tmp/board.png and ![x](y.jpg)',at:A}],
   attached:[{$:'MessagePosted',thread:T,msg:'mt1',role:'user',text:'look at this\n\n[attachment: /tmp/a.pdf]',at:A}],
+  effort:[{$:'SettingSet',key:'effort.'+T,value:'high',at:A}],
+  waitset:[{$:'SettingSet',key:'wait.'+T,value:'mq9',at:A}],
+  filesmax:[{$:'SettingSet',key:'files.max.mb',value:'1024',at:A}],
+  permdefault:[{$:'SettingSet',key:'permissions.default',value:'approval-required',at:A}],
+  stalled:[{$:'SettingSet',key:'liveness.'+T,value:JSON.stringify({last:1,nudged:0,stalled:true,reported:false,reason:'no output for 10m'}),at:A}],
+  askbrowser:[{$:'AskOpened',id:'kb',thread:T,kind:'browser',tool:'',detail:'Sign in please',options:'',at:A}],
+  askbuy:[{$:'SettingSet',key:'buy.'+T,value:'p1',at:A},{$:'AskOpened',id:'kq',thread:T,kind:'input',tool:'order_ask',detail:'Which finish?',options:'HASL\nENIG',at:A}],
   queued:[{$:'TurnQueued',thread:T,msg:'q1',text:'later please',at:A}],
 };
 const out={};

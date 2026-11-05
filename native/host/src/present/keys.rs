@@ -111,7 +111,6 @@ pub fn picker(provider: &str, model: &str, effort: &str, reading: &str) -> Value
 /// `state`, `tools`, `menu`, `working`, `phase` for a thread at clock `now_s`, or None for a case not computed here.
 pub fn keys(st: &State, id: &str, now_s: u64, why: &str) -> Option<Map<String, Value>> {
     let t = st.threads.get(id)?;
-    if signal::stalled(st, id) { return None }
     // a lean State may have dropped the fork record: then "forked" cannot be told
     let fork_key = format!("fork.{id}");
     if st.lean && !crate::state::fam::policy::lean_keeps(&fork_key) { return None }
@@ -120,11 +119,13 @@ pub fn keys(st: &State, id: &str, now_s: u64, why: &str) -> Option<Map<String, V
     let phase = signal::display_name(st, n, id);
     // Signal.label.shown: how the last turn ended says more than the signal when nothing else is going on
     let shown = signal::shown_k(signal::name(n), t.turn, t.pending);
-    let working = match shown {
+    // Signal.display.note: a stalled thread says why, in the liveness record's own words
+    let stalled_reason = st.settings.get(&format!("liveness.{id}")).and_then(|v| serde_json::from_str::<Value>(v).ok()).and_then(|v| v["reason"].as_str().map(str::to_string)).unwrap_or_default();
+    let working = if phase == "stalled" { format!("Stalled: {stalled_reason}") } else { match shown {
         "stopped" => "Stopped: nothing is running".to_string(),
         "failed" => format!("Failed{}{}", if why.is_empty() { String::new() } else { format!(": {why}") }, if signal::active(n) { "; work also active" } else { "" }),
         _ => label(phase)?.to_string(),
-    };
+    } };
     let until = st.snooze_until.get(id).copied().unwrap_or(0);
     let mut m = Map::new();
     m.insert("state".into(), json!(state_word(t.turn)));
