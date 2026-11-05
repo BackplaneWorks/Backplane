@@ -46,6 +46,9 @@ pub enum Cmd {
 /// The hub's one agent manager, for hub-side callers that were not handed it (commands, bots).
 static HANDLE: std::sync::OnceLock<Arc<Agents>> = std::sync::OnceLock::new();
 pub use textgen::{summarizer, Summarizer};
+/// Mark the turn ends Bend runs Ended.out for with `"_end": true` for state's policy (which writes alert/told/summary.at and removes the field before the write).
+/// Off until that step is on the tree: without it the field would reach the log. Set to true in the commit that lands with it.
+const MARK_ENDS: bool = false;
 /// A design-history job in flight (checkpoint, step): counted so a test, or a shutdown, can wait for what a turn's end left running.
 struct JobGuard(Arc<Agents>);
 impl JobGuard { fn new(a: &Arc<Agents>) -> JobGuard { a.stats.jobs.fetch_add(1, Relaxed); JobGuard(a.clone()) } }
@@ -438,7 +441,7 @@ impl Actor {
                 let _ = self.ag.hub.live_delta(&self.th, d).await;
             }
             for mut e in fx.events {
-                if e["$"] == "TurnChanged" && e["state"] != "running" { e["_end"] = json!(true) }
+                if MARK_ENDS && e["$"] == "TurnChanged" && e["state"] != "running" { e["_end"] = json!(true) }
                 if e["$"] == "ActivityLogged" && e["tone"] == "tool" { if let Some(a) = e["act"].as_str() { self.jobs_step(a) } }
                 if e["$"] == "TurnChanged" && e["state"] != "running" {
                     self.cx.running = false; ended = true; clear = true; self.jobs_end();
@@ -504,7 +507,7 @@ impl Actor {
     /// `ended`: the failure is an agent-gone end (Bend runs Ended.out for it); a spawn failure is not marked.
     async fn fail_k(&mut self, text: String, kind: &str, act: &str, ended: bool) {
         let (now, th) = (now_s(), self.th.clone());
-        let mut ev = vec![json!({"$":"ActivityLogged","thread":th,"act":act,"tone":"error","kind":kind,"summary":text,"at":now}), json!({"$":"TurnChanged","thread":th,"state":"failed","at":now})]; if ended { ev[1]["_end"] = json!(true) };
+        let mut ev = vec![json!({"$":"ActivityLogged","thread":th,"act":act,"tone":"error","kind":kind,"summary":text,"at":now}), json!({"$":"TurnChanged","thread":th,"state":"failed","at":now})]; if ended && MARK_ENDS { ev[1]["_end"] = json!(true) };
         if !self.last_user.is_empty() { ev.push(set(format!("failed.{}", self.last_user), "1".into(), now)) }
         self.live_end().await; self.commit(ev).await; self.cx.running = false; self.jobs_end();
     }
@@ -579,7 +582,7 @@ impl Actor {
                 let _ = self.ag.hub.live_delta(&self.th, d).await;
             }
             for mut e in fx.events {
-                if e["$"] == "TurnChanged" && e["state"] != "running" { e["_end"] = json!(true) } // Ended.out runs for a turn an agent line ends (state's policy writes the end records and removes the marker)
+                if MARK_ENDS && e["$"] == "TurnChanged" && e["state"] != "running" { e["_end"] = json!(true) } // Ended.out runs for a turn an agent line ends (state's policy writes the end records and removes the marker)
                 if e["$"] == "MessagePosted" && e["role"] == "assistant" && !e["msg"].as_str().unwrap_or("").ends_with(":before") {
                     // Steer.whole: after a reply posted ahead, only what streamed after the cut is posted
                     let mut e = e; let text = e["text"].as_str().unwrap_or("").to_string();
