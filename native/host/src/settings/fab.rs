@@ -152,7 +152,7 @@ fn curl(home: &Path, url: &str, headers: &[String], body: Option<&str>) -> (Stri
     if body.is_none() { c = c.lines().filter(|l| !l.starts_with("data-binary")).collect::<Vec<_>>().join("\n") + "\n" }
     let r = (|| -> Option<(String, String)> {
         w(&data, body.unwrap_or("")).ok()?; w(&cfg, &c).ok()?;
-        let o = std::process::Command::new("curl").args(["-sS", "--max-time", "20", "-K"]).arg(&cfg).output().ok()?;
+        let o = crate::proc::std_cmd(crate::proc::Kind::Net, "curl").args(["-sS", "--max-time", "20", "-K"]).arg(&cfg).output().ok()?;
         let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
         let code: String = s.chars().rev().take(3).collect::<Vec<_>>().into_iter().rev().collect();
         Some((if code.len() == 3 { code } else { "000".into() }, std::fs::read_to_string(&out).unwrap_or_default()))
