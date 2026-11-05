@@ -522,6 +522,19 @@ def render(S, rows):
     for g in gates["gates"]:
         w(f"| {g['gate']} | {g['target']} | {g['status']} | {g['latest']} |")
     w("")
+    final = json.load(open(os.path.join(ROOT, "docs/gpui/final-gate.json")))
+    w("## Final gate: end-to-end journeys and fun to use\n")
+    w("Run on each client against the Rust hub. Status lives in `docs/gpui/final-gate.json`; captures go in the gallery.\n")
+    w("| Journey | GPUI | iOS | Android | Capture |")
+    w("|---|---|---|---|---|")
+    for m in final["journeys"]:
+        w(f"| {m['item']} | {m['gpui']} | {m['ios']} | {m['android']} | {m['capture']} |")
+    w("")
+    w("| Fun to use | GPUI | iOS | Android | Evidence |")
+    w("|---|---|---|---|---|")
+    for m in final["fun"]:
+        w(f"| {m['item']} | {m['gpui']} | {m['ios']} | {m['android']} | {m['evidence']} |")
+    w("")
     w("## Must-pass interactions\n")
     w("Each needs a test, a check against the web and the reviewer's OK before it counts. Status lives in `docs/gpui/must-pass.json`.\n")
     w("| Item | GPUI | iOS | Android | Test |")
