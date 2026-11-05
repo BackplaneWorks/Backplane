@@ -158,7 +158,8 @@ pub fn snapshot(home: &Path, entry: &str, src: &str, thread: &str) -> Result<Sna
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn tmp(n: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-mi-{}-{n}", std::process::id())); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
+    // canonical: `source()` refuses a path with a link anywhere on it, so a TMPDIR that is itself a link (h@backplane, macOS /var) must be resolved first
+    fn tmp(n: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-mi-{}-{n}", std::process::id())); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); std::fs::canonicalize(&p).unwrap() }
     fn png(w: u32, h: u32) -> Vec<u8> { let mut v = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, b'I', b'H', b'D', b'R']; v.extend(w.to_be_bytes()); v.extend(h.to_be_bytes()); v.extend([8, 6, 0, 0, 0]); v.extend([0u8; 16]); v }
     // images.bend laws: Img.paths finds each image path once, in order; words over 1024 chars are no path
     #[test] fn img_paths() {
@@ -198,7 +199,7 @@ mod tests {
         assert!(snapshot(&home, "m3", &real.join("a.png").to_string_lossy(), "t").is_ok());
         // a ref pointing at something that is not its own hash is refused; ref names are the Bend hub's hash of entry NUL path
         assert_eq!(ref_name("e", "/p.png").len(), 64 + 5); assert_eq!(ref_name("e", "/p.png"), format!("{}.json", sha_hex(b"e\0/p.png")));
-        let name = std::fs::read_dir(home.join("message-images")).unwrap().filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().into_owned()).find(|n| n.ends_with(".png")).unwrap();
-        std::fs::write(home.join("message-images").join(&name), png(9, 9)).unwrap(); assert!(snapshot(&home, "m1", &fs, "t1").is_err());
+        // m1's own snapshot (not "the first .png in the folder": read_dir order differs between hosts) is replaced by another image: its hash no longer fits its name
+        std::fs::write(&s.path, png(9, 9)).unwrap(); assert!(snapshot(&home, "m1", &fs, "t1").is_err());
     }
 }
