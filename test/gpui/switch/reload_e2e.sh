@@ -27,6 +27,7 @@ finish() {
   [ -z "$WP" ] || kill "$WP" 2>/dev/null
   "$HERE/scripts/gpui/switch.sh" stop > /dev/null 2>&1
   [ -z "$IP" ] || kill "$IP" 2>/dev/null; [ -z "$XP" ] || kill "$XP" 2>/dev/null
+  [ ! -f "$SW/home/events.jsonl" ] || : > "$SW/home/events.jsonl"   # step 7's log is 700 MB
   echo "logs: $T"
 }
 trap finish EXIT INT TERM
@@ -121,9 +122,9 @@ python3 -I -c 'import json,sys; p=sys.argv[1]; v=json.load(open(p)); v["target"]
 "$HERE/scripts/gpui/switch.sh" stop > /dev/null 2>&1
 python3 -I -c '
 import json,sys
-p=sys.argv[1]
+p=sys.argv[1]; pad="x"*2000
 with open(p,"a") as f:
-    for i in range(1500000): f.write(json.dumps({"$":"SettingSet","key":"e2e.boot.%d"%(i%5000),"value":"x"*40,"at":1})+"\n")' "$SW/home/events.jsonl"
+    for i in range(350000): f.write(json.dumps({"$":"MessagePosted","thread":"t-seed-0","msg":"m-boot-%d"%i,"role":"assistant","text":pad,"at":1})+"\n")' "$SW/home/events.jsonl"
 python3 -I -c 'import json,sys; p=sys.argv[1]; v=json.load(open(p)); v["target"]={"kind":"thread","id":sys.argv[2]}; v["session"]["sel"]=sys.argv[2]; json.dump(v,open(p,"w"))' "$SW/home/gpui-place.json" "$T1"
 SWITCH_WAIT=120 env HUB_BIN="$(cat "$SW/hub.bin")" CLIENT_BIN="$B/backplane-gpui" "$HERE/scripts/gpui/switch.sh" reload both > /dev/null
 C7=$(pid client)
