@@ -4,7 +4,7 @@
 // them). A view draws what is kept at once while it reads again; derived
 // data only, bounded (entries and characters, least recently used out),
 // lost with the process.
-const bp_kept = { threads: new Map(), chars: 0, ahead: new Map() };
+const bp_kept = { threads: new Map(), chars: 0, ahead: new Map(), seq: 0 };
 const BP_KEPT_CHARS = 8 * 1024 * 1024, BP_KEPT_THREADS = 256, BP_KEPT_KEYS = 64, BP_KEPT_AHEAD_MS = 15000;
 function kept_size(t) { let n = 0;for (const [k, e] of t.rows) n += k.length + e.v.length;return n; }
 function kept_forget(thread) {
@@ -29,7 +29,7 @@ function viewerkept_put(thread, cwd, key, value) {
   if (key.length + value.length > BP_KEPT_CHARS / 8) { viewerkept_drop(thread, key);return ''; }
   const t = kept_thread(thread, cwd, true), old = t.rows.get(key);
   if (old) { bp_kept.chars -= key.length + old.v.length;t.rows.delete(key); }
-  t.rows.set(key, { v: value, at: Date.now() });bp_kept.chars += key.length + value.length;
+  t.rows.set(key, { v: value, at: Date.now(), s: ++bp_kept.seq });t.seq = bp_kept.seq;bp_kept.chars += key.length + value.length;
   while (t.rows.size > BP_KEPT_KEYS) { const [k, e] = t.rows.entries().next().value;t.rows.delete(k);bp_kept.chars -= k.length + e.v.length; }
   bp_kept.threads.set(thread, t);kept_trim();
   return '';
@@ -40,11 +40,18 @@ function viewerkept_drop(thread, key) {
   if (e) { t.rows.delete(key);bp_kept.chars -= key.length + e.v.length; }
   return '';
 }
-// what is kept for a thread working in cwd: a JSON object, key -> value
-function viewerkept_info(thread, cwd) {
+// what is kept for a thread working in cwd: a JSON object, key -> value,
+// only what changed after since (the "kept.seq:<thread>" a view was last
+// given, which comes with it: a view keeps what it was given), all of it for
+// a view given nothing yet or a number this process never gave
+function viewerkept_info(thread, cwd, since) {
   const t = typeof thread === 'string' && thread ? kept_thread(thread, cwd, false) : undefined;
   if (!t || !t.rows.size) return '{}';
-  const o = {};for (const [k, e] of t.rows) o[k] = e.v;
+  let n = /^[0-9]+$/.test(since) ? Number(since) : 0;
+  if (n > bp_kept.seq) n = 0;
+  if (n >= t.seq) return '{}';
+  const o = {};for (const [k, e] of t.rows) if (e.s > n) o[k] = e.v;
+  o['kept.seq:' + thread] = String(t.seq);
   return JSON.stringify(o);
 }
 // "1": nothing kept under key for a thread working in cwd (or kept longer

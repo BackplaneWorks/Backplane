@@ -8,7 +8,9 @@ const effects = new Map();
 const code = fs.readFileSync('src/server/effects/viewer_kept.js', 'utf8').replace(/CID\(([^)]+)\)/g, '"$1"');
 new Function('io_eff', code)((name, fn) => effects.set(name, fn));
 const put = (...a) => effects.get('ViewerKept.put')(...a), drop = (...a) => effects.get('ViewerKept.drop')(...a);
-const info = (...a) => JSON.parse(effects.get('ViewerKept.info')(...a)), claim = (...a) => effects.get('ViewerKept.claim')(...a);
+const raw = (t, cwd, since = '') => JSON.parse(effects.get('ViewerKept.info')(t, cwd, since)), claim = (...a) => effects.get('ViewerKept.claim')(...a);
+// everything kept for a thread (a view given nothing yet), without the number it comes with
+const info = (t, cwd) => { const o = raw(t, cwd);delete o['kept.seq:' + t];return o; };
 
 put('t1', '/p', 'fm.kept:t1\n', 'd\t0\tsrc\n');
 put('t1', '/p', 'fm.kept:t1\nsrc', 'f\t3\ta.c\n');
@@ -24,6 +26,19 @@ drop('t1', 'fm.kept:t1\nsrc');
 assert.equal(info('t1', '/p')['fm.kept:t1\nsrc'], undefined, 'a folder that can no longer be listed is dropped');
 assert.deepEqual(info('t1', '/elsewhere'), {}, 'a thread now working in another folder is given nothing');
 assert.deepEqual(info('t1', '/p'), {}, 'and what was kept for the old folder is gone');
+
+// a view is given only what changed after the number it was last given
+put('t8', '/p', 'fm.kept:t8\n', 'd\t0\tsrc\n');
+const first = raw('t8', '/p'), seq = first['kept.seq:t8'];
+assert.ok(seq && first['fm.kept:t8\n'] === 'd\t0\tsrc\n', 'a view given nothing yet gets all, and a number');
+assert.deepEqual(raw('t8', '/p', seq), {}, 'nothing changed since: nothing');
+put('t8', '/p', 'fm.kept:t8\nsrc', 'f\t1\tnew\n');
+const next = raw('t8', '/p', seq);
+assert.deepEqual(Object.keys(next).sort(), ['fm.kept:t8\nsrc', 'kept.seq:t8'], 'only what changed, with the new number');
+assert.ok(Number(next['kept.seq:t8']) > Number(seq));
+put('t2', '/q', 'fm.kept:t2\nx', '');
+assert.deepEqual(raw('t8', '/p', next['kept.seq:t8']), {}, 'another thread changing gives this one nothing');
+assert.deepEqual(Object.keys(raw('t8', '/p', '999999999')).length, 3, 'a number this process never gave: all of it');
 
 // claims: one read on its way at a time, again once what is kept is older than asked
 assert.equal(claim('t5', '/p', 'fm.kept:t5\n', '30000'), '1', 'nothing kept: read it');

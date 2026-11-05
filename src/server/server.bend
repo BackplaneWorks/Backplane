@@ -3372,7 +3372,7 @@ def DirJob.ahead.each(es: List<&2, FMP.FEnt>, +thread: String, +cwd: String, +re
         +sent : Unit <- DirJob.ahead.one(String.eq(go, "1"), thread, cwd, FMP.Fm.join(rel, name))
         DirJob.ahead.each(tail, thread, cwd, rel)
 
-# A folder listed for a view has its first folders (8 at most) listed
+# A folder the person lists has its first folders (8 at most) listed
 # ahead, each once in 30 s, so going into one draws its rows with the press's
 # answer
 def DirJob.children(r: P.Ran, +thread: String, +cwd: String, +rel: String) -> IO(Unit):
@@ -3387,13 +3387,9 @@ def DirJob.run(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +c
     DirJob.sent(r, inbox, client, id, thread, cwd, rel)
     DirJob.children(r, thread, cwd, rel)
 
-# A shown thread's Files root, listed ahead (Kept.ahead), with its first
-# folders
+# A shown thread's Files root, listed ahead (Kept.ahead)
 def DirJob.ahead(+thread: String, +cwd: String) -> IO(Unit):
-  do IO<Unit>:
-    +r : P.Ran <- P.Proc.run("sh", ["-c", DirJob.sh(), "sh", cwd, ""], "/")
-    +k : String <- DirJob.kept(r, thread, cwd, "")
-    DirJob.children(r, thread, cwd, "")
+  DirJob.ahead.at(thread, cwd, "")
 
 # a PDF's page drawn to a PNG for the window (which cannot draw a PDF), by
 # poppler's pdftoppm when this machine has it, kept in <home>/pdf per file
@@ -13685,9 +13681,13 @@ def Hub.thin.page.memo(on: Bool, +st: M.State, +context: ThinContext, +base: Str
 # A thin view's shown thread's viewer reads kept hub-wide (viewer-kept.bend),
 # given to its actor with the hub's info (client.bend's Fm.kept: a Files
 # folder seen before is drawn at the press), and that thread's Files root
-# listed ahead when none was listed in the last 30 s (DirJob.ahead: one
-# listing on its way at a time per thread), and what it may compare its
+# listed ahead when none was listed in the last 10 min (DirJob.ahead: one
+# listing on its way at a time per thread; the press lists it again anyway),
+# and what it may compare its
 # board with (history.refs, RefsJob.ahead) when not read in the last 5 min.
+# Not for a sidebar destination's picture fetched ahead (host.js's
+# previewViews: view.open with cid "preview", 24 of them, again as their
+# rows move): with 20 bots streaming those reads cost the hub ~3 s a minute.
 # (Not its diff: git.diff stages the work tree through the thread's own
 # index, and one ahead could take that index's lock from the Diff pressed)
 def Kept.fields(+es: J.Json, +fs: J.Json) -> J.Json:
@@ -13718,20 +13718,26 @@ def Kept.ahead.refs(go: Bool, +thread: String, +cwd: String) -> IO(Unit):
     case True{}: IO.spawn(Unit, RefsJob.ahead(thread, cwd))
     case False{}: IO.pure(Unit, Unit{})
 
-def Kept.info.k(on: Bool, +thread: String, +cwd: String) -> IO(String):
+def Kept.info.k(on: Bool, +thread: String, +cwd: String, +since: String) -> IO(String):
   match on:
     case False{}: IO.pure(String, "{}")
     case True{}:
       do IO<String>:
-        +go : String <- VKEPT.ViewerKept.claim(thread, cwd, "fm.kept:" ++ thread ++ "\n", "30000")
+        +go : String <- VKEPT.ViewerKept.claim(thread, cwd, "fm.kept:" ++ thread ++ "\n", "600000")
         +sent : Unit <- Kept.ahead(String.eq(go, "1"), thread, cwd)
         +refs : String <- VKEPT.ViewerKept.claim(thread, cwd, "refs.kept:" ++ thread, "300000")
         +asked : Unit <- Kept.ahead.refs(String.eq(refs, "1"), thread, cwd)
-        VKEPT.ViewerKept.info(thread, cwd)
+        VKEPT.ViewerKept.info(thread, cwd, since)
 
-def Kept.info(+st: M.State, +thread: String) -> IO(String):
+# (what the view was last given: its actor keeps it, "kept.seq:<t>")
+def Kept.since(xs: List<&2, TA.Actor>, +thread: String) -> String:
+  match xs:
+    case Nil{}: ""
+    case a <> _: UC.Ui.info(TA.Actor.ui(a), "kept.seq:" ++ thread)
+
+def Kept.info(+st: M.State, +thread: String, +since: String) -> IO(String):
   +cwd = B.Hub.cwd(st, B.Hub.thread(st, thread))
-  Kept.info.k(Bool.and(Bool.not(String.is_empty(thread)), Bool.and(Bool.not(FR.Fr.is(thread)), Bool.not(String.is_empty(cwd)))), thread, cwd)
+  Kept.info.k(Bool.and(Bool.not(String.is_empty(thread)), Bool.and(Bool.not(FR.Fr.is(thread)), Bool.not(String.is_empty(cwd)))), thread, cwd, since)
 
 def Hub.thin.render.page.shown(+v: SEC.Vault, +pg: TSTO.Page, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +p: J.Json, +key: String, +ms: Nat, +shown: M.State) -> IO(Hub):
   match h:
@@ -13742,7 +13748,7 @@ def Hub.thin.render.page.shown(+v: SEC.Vault, +pg: TSTO.Page, h: Hub, +client: U
       +rows = TBODY.Body.window.bounded(TSTO.Page.ids(pg), TSTO.Page.index(pg), p)
       +stream = TLIVE.Stream.get(Cfg.thin.streams(cfg), TV.Target.thread(st, J.Json.get_obj(p, "target")))
       do IO<Hub>:
-        +kept : String <- Kept.info(st, thread)
+        +kept : String <- Kept.info(st, Bool.pick(String, String.eq(J.Json.get_str(p, "cid", ""), "preview"), "", thread), Kept.since(ThinContext.actors(context), thread))
         +actor : TA.Actor = TA.Actor.mail_cache(TA.Actor.refresh(ThinContext.actors(context), web, shown, Kept.with(Hub.thin.pair(cfg, SEC.Sec.json(v, Hub.info(cfg))), kept),
           J.Json.obj([J.KV{"t", J.Str{"live"}}, J.KV{"items", J.Json.arr(Nil{})}]), now, p, ThinContext.view(context)), ThinContext.actors(context), Cfg.thin.mail(cfg))
         +secret : String <- Hub.thin.native_key(NATIVE_SIDE.Ns.offered(web, p), actor, p, epoch, ThinContext.view(context))
