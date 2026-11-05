@@ -50,6 +50,8 @@ impl Driver for MuseDriver {
     fn answer(&mut self, request: &Value, answer: &str) -> Vec<String> { request.as_str().map(|r| vec![msp::decide(r, answer)]).unwrap_or_default() }
     /// `muse serve` stays up after its turn: the actor ends it once the turn's own events are in (Grok.stop).
     fn ends_on_turn_end(&self) -> bool { true }
+    /// Proto.install
+    fn install_hint(&self) -> Option<String> { Some("Install Muse Code, then sign in with `muse login`.".into()) }
     /// Proto.gone
     fn exit_why(&self, _code: i32) -> Option<String> { Some("muse exited before the turn ended (is it signed in? run `muse login`)".into()) }
 }
@@ -107,7 +109,12 @@ mod tests {
         let id = |g: &str| { let mut d = MuseDriver::new(); let mut a = ti("full-access", ""); a.gen = g.into(); d.start(&a); msp::uuid(&d.turn.nonce, "3") };
         assert_ne!(id("1-1"), id("1-2")); let (x, y) = (id(""), { std::thread::sleep(std::time::Duration::from_millis(2)); id("") }); assert_ne!(x, y);
     }
-    #[test] fn exit_words_are_the_default_for_the_actor() { let d = MuseDriver::new(); assert!(d.exit_why(137).unwrap().starts_with("muse exited before the turn ended")) }
+    #[test] fn exit_words_name_the_code_and_hide_no_kill() {
+        let d = MuseDriver::new(); let w = d.exit_why(1).unwrap(); use crate::agents::rules::exit_say;
+        assert!(exit_say(&w, 137, "").starts_with("agent was killed (signal 9, likely out of memory) (signal 9)"), "an OOM-killed agent is not 'is it signed in?'");
+        let x = exit_say(&w, 1, "boom"); assert!(x.starts_with("muse exited before the turn ended") && x.contains("(exit 1): boom"));
+        assert!(d.install_hint().unwrap().contains("muse login"));
+    }
     #[test] fn the_probe_has_a_perl_fallback() { let s = probe_sh(); assert!(s.contains("gtimeout") && s.contains("perl -e 'use POSIX qw(setpgid)") && s.contains("tmo 15 muse serve")); }
     #[test] fn effort_is_one_muse_takes() { assert_eq!(effort("max"), "max"); assert_eq!(effort("off"), ""); assert_eq!(effort(""), ""); }
     #[test] fn model_list_reads_request_two() {
