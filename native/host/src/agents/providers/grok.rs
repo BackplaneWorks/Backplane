@@ -34,6 +34,8 @@ impl Driver for GrokDriver {
     fn ask_info(&self, r: &Value) -> Option<super::AskInfo> { acp::ask_of(r) }
     fn answer(&mut self, r: &Value, answer: &str) -> Vec<String> { acp::answer_of(r, answer) }
     fn ends_on_turn_end(&self) -> bool { true }
+    fn exit_why(&self, _code: i32) -> Option<String> { Some(GONE.into()) } // Proto.gone; the actor adds (exit N | signal N), OOM wording and the stderr tail (Exit.say)
+    fn install_hint(&self) -> Option<String> { Some(INSTALL.into()) }
 }
 pub fn driver(provider: &str) -> Option<Made> { if provider == "grok" { Some(Made { cli: "grok", driver: Box::new(GrokDriver::new()) }) } else { None } }
 
@@ -46,6 +48,11 @@ mod tests {
         assert_eq!(args("auto", "", "xhigh"), ["--permission-mode", "auto", "agent", "stdio"], "an effort grok does not take is dropped");
         assert_eq!(args("full-access", "", "low"), ["agent", "--always-approve", "--reasoning-effort", "low", "stdio"]);
         assert!(!asks("full-access") && asks("approval-required") && asks("auto") && asks("auto-accept-edits"));
+    }
+    #[test] fn a_process_that_exits_early_says_signed_in_and_how_to_install() {
+        let d = GrokDriver::new(); assert_eq!(d.exit_why(1).unwrap(), GONE); assert!(d.install_hint().unwrap().contains("grok login"));
+        let o = super::super::opencode::OcDriver::new(); assert!(o.exit_why(1).unwrap().contains("opencode auth login") && o.install_hint().unwrap().contains("opencode.ai"));
+        assert_eq!(crate::agents::rules::exit_say(&d.exit_why(137).unwrap(), 137, ""), "agent was killed (signal 9, likely out of memory) (signal 9)");
     }
     // law interrupt_grok_stops: Stop on a Grok thread is AgentStop alone: nothing is written to the process
     #[test] fn interrupt_grok_stops() { let mut d = GrokDriver::new(); assert!(d.on_stop().is_empty()); assert!(driver("grok").is_some() && driver("opencode").is_none()) }
