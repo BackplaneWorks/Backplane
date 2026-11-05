@@ -380,8 +380,10 @@ pub fn info_about(a: &Info) -> Value {
 pub struct AgyDriver { turn: AgyTurn, st: Acp }
 impl AgyDriver { pub fn new() -> AgyDriver { AgyDriver { turn: AgyTurn::default(), st: Acp::default() } } pub fn done(&self) -> bool { self.st.done } }
 impl Driver for AgyDriver {
+    /// Agx.write before the run: the runner script, renamed into place, so a turn starting from it never sees half of it.
+    fn prepare(&mut self, a: &TurnIn) -> Result<(), String> { write_runner(&root(&a.home)).map_err(|e| e.to_string()) }
     fn argv(&self, a: &TurnIn) -> Vec<String> {
-        let r = root(&a.home); let _ = write_runner(&r); // Agx.write: renamed into place, so a turn starting from it never sees half of it
+        let r = root(&a.home);
         args(&r, &format!("{}/secrets/api.env", a.home), a.setting("agy.auth"), a.setting("agy.account"), a.setting("agy.gcp.project"), a.setting("agy.gcp.location"))
     }
     fn start(&mut self, a: &TurnIn) -> Vec<String> {
@@ -402,6 +404,8 @@ impl Driver for AgyDriver {
     }
     fn answer(&mut self, request: &Value, answer: &str) -> Vec<String> { request.as_str().map(|r| vec![permit_answer(r, answer)]).unwrap_or_default() }
     fn ends_on_turn_end(&self) -> bool { true }
+    /// Proto.install
+    fn install_hint(&self) -> Option<String> { Some("Install it under Settings › Agents › Antigravity.".into()) }
     fn exit_why(&self, _code: i32) -> Option<String> { Some("antigravity exited before the turn ended (is it installed and signed in? see Settings › Agents › Antigravity)".into()) }
 }
 fn mode_runtime(r: &str) -> u8 { match r { "approval-required" => 0, "auto-accept-edits" => 1, "auto" => 2, _ => 3 } }
@@ -500,8 +504,17 @@ mod tests {
         for h in hs { h.join().unwrap() }
         assert_eq!(std::fs::read_dir(&d).unwrap().count(), 1, "no temporary file is left");
     }
-    /// The words are the default the actor wraps (rules::exit_say: code, signal, OOM, scrubbed stderr tail) once the agents lane's helper lands; they do not claim a sign-in problem for a kill.
-    #[test] fn exit_words_are_the_default_for_the_actor() { let d = driver("antigravity").unwrap().driver; let w = d.exit_why(137).unwrap(); assert!(w.starts_with("antigravity exited before the turn ended")) }
+    #[test] fn exit_words_name_the_code_and_hide_no_kill() {
+        let d = driver("antigravity").unwrap().driver; let w = d.exit_why(1).unwrap(); use crate::agents::rules::exit_say;
+        assert!(exit_say(&w, 137, "").starts_with("agent was killed (signal 9, likely out of memory) (signal 9)"), "an OOM-killed agent is not 'is it signed in?'");
+        let x = exit_say(&w, 1, "boom"); assert!(x.starts_with("antigravity exited before the turn ended") && x.contains("(exit 1): boom"));
+        assert!(d.install_hint().unwrap().contains("Settings › Agents › Antigravity"));
+    }
+    #[test] fn prepare_writes_the_runner_and_fails_the_turn_when_it_cannot() {
+        let d = super::super::muse::e2e::dir("agy-prepare"); let mut dr = AgyDriver::new();
+        dr.prepare(&TurnIn { home: d.to_string_lossy().into(), ..Default::default() }).unwrap(); assert_eq!(std::fs::read_to_string(d.join("antigravity/agy.sh")).unwrap(), run_sh());
+        std::fs::write(d.join("blocker"), "x").unwrap(); assert!(dr.prepare(&TurnIn { home: d.join("blocker").to_string_lossy().into(), ..Default::default() }).is_err());
+    }
     #[test] fn install_answers() { assert_eq!(install_err("working\nok\n"), ""); assert_eq!(install_err("x\nthe download failed\n"), "the download failed"); assert_eq!(install_err(""), "the install failed"); }
     #[test] fn the_driver() {
         let mut d = AgyDriver::new(); let a = TurnIn { thread: "t".into(), home: "/nonexistent-home".into(), cwd: "/tmp".into(), runtime: "approval-required".into(), settings: vec![("agy.auth".into(), "oauth-personal".into())], ..Default::default() };
@@ -529,7 +542,7 @@ mod standin_tests {
     }
     // Stand-in Antigravity (test/gpui/agents/prov/standin-agy.py behind the real runner script) through the driver: equal to the JS hub's events.
     #[tokio::test] async fn agy_turn_matches_the_js_hub() {
-        let (d, _) = setup("agy-turn"); let mut dr = AgyDriver::new(); let a = ti(&d, "full-access", "zq hello", "", vec![]);
+        let (d, _) = setup("agy-turn"); let mut dr = AgyDriver::new(); let a = ti(&d, "full-access", "zq hello", "", vec![]); dr.prepare(&a).unwrap();
         let mut argv = dr.argv(&a); let log = d.join("agy.log").to_string_lossy().into_owned();
         let script_path = argv.remove(0); let mut full = vec![script_path]; full.extend(argv);
         struct Sh(Vec<String>, AgyDriver); impl Driver for Sh { fn argv(&self, a: &TurnIn) -> Vec<String> { let _ = a; self.0.clone() } fn start(&mut self, a: &TurnIn) -> Vec<String> { self.1.start(a) } fn on_line(&mut self, l: &Value) -> Reaction { self.1.on_line(l) }
@@ -543,7 +556,7 @@ mod standin_tests {
         let settings = std::fs::read_to_string(d.join("antigravity/profiles/default/antigravity-acp/settings.json")).unwrap(); assert_eq!(settings.trim(), r#"{"auth":{"type":"gemini-api-key"}}"#);
     }
     #[tokio::test] async fn agy_permission_matches_the_js_hub() {
-        let (d, _) = setup("agy-perm"); let mut dr = AgyDriver::new(); let a = ti(&d, "approval-required", "zq perm please", "", vec![]);
+        let (d, _) = setup("agy-perm"); let mut dr = AgyDriver::new(); let a = ti(&d, "approval-required", "zq perm please", "", vec![]); dr.prepare(&a).unwrap();
         let argv = dr.argv(&a);
         struct Sh(Vec<String>, AgyDriver); impl Driver for Sh { fn argv(&self, _a: &TurnIn) -> Vec<String> { self.0.clone() } fn start(&mut self, a: &TurnIn) -> Vec<String> { self.1.start(a) } fn on_line(&mut self, l: &Value) -> Reaction { self.1.on_line(l) }
             fn ask_info(&self, r: &Value) -> Option<AskInfo> { self.1.ask_info(r) } fn answer(&mut self, r: &Value, x: &str) -> Vec<String> { self.1.answer(r, x) } }
