@@ -279,7 +279,7 @@ impl Backplane {
             }
             Step::Action(a, v) => {
                 // the e2e hook for a view action a menu or a row would send (e.g. a delete asked on a thread that is not selected)
-                let v = if a.starts_with("row-") { crate::screens::tools::qualify(&self.data, v) } else { v.clone() }; // a row's own menu sends the id as the sidebar carries it
+                let v = if a.starts_with("row-") { crate::screens::tools::qualify(&self.data, &v) } else { v.clone() }; // a row's own menu sends the id as the sidebar carries it
                 let _ = self.tx.try_send(crate::hub::Command::Action(a.clone(), v));
                 self.seq += 1; let seq = self.seq;
                 self.pending = Some(Pending { label: "action".into(), started: Instant::now(), goal: Goal::Sleep, armed: true, seq });

@@ -123,7 +123,7 @@ impl IntoElement for SelText { type Element = Self; fn into_element(self) -> Sel
 
 impl Element for SelText {
     type RequestLayoutState = ();
-    type PrepaintState = ();
+    type PrepaintState = Vec<(Hitbox, CursorStyle)>;
     fn id(&self) -> Option<ElementId> { None }
     fn source_location(&self) -> Option<&'static core::panic::Location<'static>> { None }
     fn request_layout(&mut self, id: Option<&GlobalElementId>, inspector: Option<&InspectorElementId>, window: &mut Window, cx: &mut App) -> (LayoutId, ()) {
@@ -134,10 +134,23 @@ impl Element for SelText {
         self.styled = Some(styled);
         r
     }
-    fn prepaint(&mut self, id: Option<&GlobalElementId>, inspector: Option<&InspectorElementId>, bounds: Bounds<Pixels>, state: &mut (), window: &mut Window, cx: &mut App) {
-        if let Some(s) = self.styled.as_mut() { s.prepaint(id, inspector, bounds, state, window, cx); }
+    fn prepaint(&mut self, id: Option<&GlobalElementId>, inspector: Option<&InspectorElementId>, bounds: Bounds<Pixels>, _: &mut (), window: &mut Window, cx: &mut App) -> Vec<(Hitbox, CursorStyle)> {
+        let mut unit = ();
+        if let Some(s) = self.styled.as_mut() { s.prepaint(id, inspector, bounds, &mut unit, window, cx); }
+        // the OS I-beam over selectable text, the hand over a link (the later request wins where they overlap)
+        let mut out = vec![(window.insert_hitbox(bounds, HitboxBehavior::Normal), CursorStyle::IBeam)];
+        let Some(styled) = self.styled.as_ref() else { return out };
+        let layout = styled.layout().clone(); let lh = layout.line_height();
+        let links: Vec<Range<usize>> = self.reg.borrow().blocks.get(self.ord).map(|b| b.links.iter().map(|(r, _)| r.clone()).collect()).unwrap_or_default();
+        for r in links {
+            if let (Some(pa), Some(pb)) = (layout.position_for_index(r.start), layout.position_for_index(r.end)) {
+                let rect = if pa.y == pb.y { Bounds::from_corners(pa, point(pb.x, pb.y + lh)) } else { Bounds::from_corners(point(bounds.left(), pa.y), point(bounds.right(), pb.y + lh)) };
+                out.push((window.insert_hitbox(rect, HitboxBehavior::Normal), CursorStyle::PointingHand));
+            }
+        }
+        out
     }
-    fn paint(&mut self, id: Option<&GlobalElementId>, inspector: Option<&InspectorElementId>, bounds: Bounds<Pixels>, rl: &mut (), pre: &mut (), window: &mut Window, cx: &mut App) {
+    fn paint(&mut self, id: Option<&GlobalElementId>, inspector: Option<&InspectorElementId>, bounds: Bounds<Pixels>, rl: &mut (), pre: &mut Vec<(Hitbox, CursorStyle)>, window: &mut Window, cx: &mut App) {
         let Some(styled) = self.styled.as_mut() else { return };
         let layout = styled.layout().clone();
         // the selection first, under the glyphs
@@ -156,18 +169,8 @@ impl Element for SelText {
                 }
             }
         }
-        styled.paint(id, inspector, bounds, rl, pre, window, cx);
-        // the OS I-beam over selectable text, the hand over a link
-        let hb = window.insert_hitbox(bounds, HitboxBehavior::Normal);
-        window.set_cursor_style(CursorStyle::IBeam, &hb);
-        let lh = layout.line_height();
-        let links: Vec<Range<usize>> = self.reg.borrow().blocks.get(self.ord).map(|b| b.links.iter().map(|(r, _)| r.clone()).collect()).unwrap_or_default();
-        for r in links {
-            if let (Some(pa), Some(pb)) = (layout.position_for_index(r.start), layout.position_for_index(r.end)) {
-                let rect = if pa.y == pb.y { Bounds::from_corners(pa, point(pb.x, pb.y + lh)) } else { Bounds::from_corners(point(bounds.left(), pa.y), point(bounds.right(), pb.y + lh)) };
-                let h = window.insert_hitbox(rect, HitboxBehavior::Normal); window.set_cursor_style(CursorStyle::PointingHand, &h);
-            }
-        }
+        styled.paint(id, inspector, bounds, rl, &mut (), window, cx);
+        for (h, style) in pre.iter() { window.set_cursor_style(*style, h); }
         if let Some(b) = self.reg.borrow_mut().blocks.get_mut(self.ord) { b.layout = Some(layout); }
     }
 }
