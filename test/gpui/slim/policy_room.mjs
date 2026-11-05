@@ -24,4 +24,10 @@ ck(rb.remoteReady===true&&!rb.nextTarget&&rb.stale!==true,'an existing bot targe
 ck(rr.remoteReady===true&&!rr.nextTarget&&rr.stale!==true,'an existing room target is served as asked');
 ck(gb.stale===true&&gr.stale===true,'an unknown bot and an unknown room are stale');
 ck(rc.remoteReady===true&&rc.stale!==true,'recent is served');
+const VT=async(draft)=>JSON.parse(await ask('V '+JSON.stringify({hub:'h',cid:'c',now:(at+100)*1000,session:{sel:BT,rid:1,drafts:{[BT]:draft},open:{},adding:false,panel:false,info:{}},target:{kind:'thread',id:BT},action:'',value:''})));
+const names=r=>(r.shown?.thread?.skills||[]).map(x=>x.name);
+const at1=await VT('@'),gt1=await VT('>'),dl=await VT('hello');
+ck(names(at1).includes('@room-bot-b'),'typing @ offers the bots as @name rows ('+names(at1).join(',').slice(0,60)+')');
+ck(names(gt1).some(n=>n.startsWith('>')),'typing > offers threads as >name rows ('+names(gt1).join(',').slice(0,60)+')');
+ck(names(dl).length===0,'a draft with no sigil offers none');
 p.kill();console.log(bad?'FAILED '+bad:'ALL OK');process.exit(bad?1:0);

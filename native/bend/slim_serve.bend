@@ -256,7 +256,9 @@ def Pol.view(+u0: U.Ui, +now0: Nat, +p: J.Json) -> J.Json:
   +now = Pol.clock(J.Json.get_nat(p, "now", 0n), now0)
   +key = J.Json.get_str(p, "hub", "")
   +cid = J.Json.get_str(p, "cid", "")
-  +u1 = U.Ui.scratch_set(U.Ui.online(U.Ui.set_cid(Pol.bind(MS.Session.adopt(U.Ui.tick(u0, now), J.Json.get_obj(p, "session")), J.Json.get_obj(p, "target")), cid), True{}), "@sync", "1")
+  # the composer's popup rows for a draft ending in @ > % # are worked out from the State once per edit (the JS actor does it after adopting the draft:
+  # thin-actor.bend Actor.composer/refresh) and read from the info map by the screen
+  +u1 = U.Refs.refresh(U.Ui.scratch_set(U.Ui.online(U.Ui.set_cid(Pol.bind(MS.Session.adopt(U.Ui.tick(u0, now), J.Json.get_obj(p, "session")), J.Json.get_obj(p, "target")), cid), True{}), "@sync", "1"))
   +uq = NS.Ns.prepare(Pol.reads(Pol.local.put(Pol.pick(Pol.is_obj(J.Json.get_obj(p, "page")), u1, J.Json.get_obj(p, "page")), J.Json.get_obj(p, "local")), Maybe.default(&2, J.Json, J.Json.get(p, "reads"), J.Null{})), False{}, p, J.Json.get_str(p, "epoch", ""), J.Json.get_str(p, "viewId", ""), J.Json.get_nat(p, "revision", 0n), J.Json.get_str(p, "nativeKey", ""))
   +u = Pol.seq(uq, p)
   +isPage = String.eq(J.Json.get_str(p, "action", ""), "native-sidebar-page")
