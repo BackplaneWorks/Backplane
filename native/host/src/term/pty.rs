@@ -26,6 +26,8 @@ fn winsize(cols: u16, rows: u16) -> libc::winsize { libc::winsize { ws_row: rows
 impl Pty {
     /// Run `cmd args` in `cwd` ("" keeps ours) on a new pty. Errors are the exec failure's (ENOENT for an unknown command).
     pub fn spawn(cmd: &str, args: &[String], cwd: &str, cols: u16, rows: u16) -> std::io::Result<Spawned> {
+        // a hub on a copied log runs no shell (proc.rs would make the program a path that does not exist): say why, and open no pty for it
+        if crate::copy::on() { return Err(std::io::Error::other(crate::copy::refusal("a terminal"))) }
         let (master, slave) = unsafe {
             let m = libc::posix_openpt(libc::O_RDWR | libc::O_NOCTTY); // (Darwin takes only these two flags)
             if m >= 0 { libc::fcntl(m, libc::F_SETFD, libc::FD_CLOEXEC); }

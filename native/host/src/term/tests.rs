@@ -214,3 +214,9 @@ fn drain(rx: &Tap, key: &str, acc: &mut Vec<u8>, resets: &mut Vec<Value>) {
     assert!(wait(5, || t.inner.try_lock().map_or(false, |g| g.skipped.is_empty())).await);
     rpc(&hub, "term.input", json!({"thread":"t1","b":"exit\n".bytes().collect::<Vec<u8>>()})).await;
 }
+
+#[test] fn on_a_copy_the_terminal_and_the_browser_answer_with_the_copy_refusal() {
+    // (copy::on() is the process's switch: here the words the callers show are checked)
+    assert_eq!(crate::copy::refusal("a terminal"), "backplane: a hub on a copied log (BACKPLANE_COPY=1) does not run a terminal");
+    assert!(crate::proc::refusal_with(true, crate::proc::Kind::Terminal, "/bin/sh", None).is_some() && crate::proc::refusal_with(true, crate::proc::Kind::Browser, "/x/backplane-browser", None).is_some());
+}
