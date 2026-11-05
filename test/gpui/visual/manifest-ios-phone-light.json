@@ -1,0 +1,205 @@
+{
+ "platform": "ios-phone",
+ "scheme": "light",
+ "scale": 3,
+ "items": [
+  {
+   "name": "logo-header",
+   "kind": "logo",
+   "web": {
+    "png": "../../../build/gpui/shots/logo-cats/web-phone-light-list.png",
+    "rect": [
+     30,
+     50,
+     54,
+     54
+    ]
+   },
+   "native": {
+    "png": "../../../build/gpui/results/ios/lc/ios-phone-light-list.png",
+    "rect": [
+     117,
+     225,
+     54,
+     54
+    ]
+   }
+  },
+  {
+   "name": "logo-pair-screen",
+   "kind": "logo",
+   "web": {
+    "png": "../../../build/gpui/shots/logo-cats/web-phone-light-logo48.png",
+    "rect": [
+     120,
+     120,
+     144,
+     144
+    ]
+   },
+   "native": {
+    "png": "../../../build/gpui/results/ios/lc/ios-phone-light-pair.png",
+    "rect": [
+     72,
+     258,
+     144,
+     144
+    ]
+   }
+  },
+  {
+   "name": "cat-list-0-306440",
+   "kind": "cat",
+   "web": {
+    "png": "../../../build/gpui/shots/logo-cats/web-phone-light-bots.png",
+    "rect": [
+     36,
+     933,
+     84,
+     84
+    ]
+   },
+   "native": {
+    "png": "../../../build/gpui/results/ios/lc/ios-phone-light-bots.png",
+    "rect": [
+     48,
+     745,
+     84,
+     84
+    ]
+   }
+  },
+  {
+   "name": "cat-list-1-304473115",
+   "kind": "cat",
+   "web": {
+    "png": "../../../build/gpui/shots/logo-cats/web-phone-light-bots.png",
+    "rect": [
+     36,
+     1063,
+     84,
+     84
+    ]
+   },
+   "native": {
+    "png": "../../../build/gpui/results/ios/lc/ios-phone-light-bots.png",
+    "rect": [
+     48,
+     945,
+     84,
+     84
+    ]
+   }
+  },
+  {
+   "name": "cat-list-2-307085023",
+   "kind": "cat",
+   "web": {
+    "png": "../../../build/gpui/shots/logo-cats/web-phone-light-bots.png",
+    "rect": [
+     36,
+     1192,
+     84,
+     84
+    ]
+   },
+   "native": {
+    "png": "../../../build/gpui/results/ios/lc/ios-phone-light-bots.png",
+    "rect": [
+     48,
+     1145,
+     84,
+     84
+    ]
+   }
+  },
+  {
+   "name": "cat-list-3-297024320",
+   "kind": "cat",
+   "web": {
+    "png": "../../../build/gpui/shots/logo-cats/web-phone-light-bots.png",
+    "rect": [
+     36,
+     1322,
+     84,
+     84
+    ]
+   },
+   "native": {
+    "png": "../../../build/gpui/results/ios/lc/ios-phone-light-bots.png",
+    "rect": [
+     48,
+     1345,
+     84,
+     84
+    ]
+   }
+  },
+  {
+   "name": "cat-list-4-9851967",
+   "kind": "cat",
+   "web": {
+    "png": "../../../build/gpui/shots/logo-cats/web-phone-light-bots.png",
+    "rect": [
+     36,
+     1452,
+     84,
+     84
+    ]
+   },
+   "native": {
+    "png": "../../../build/gpui/results/ios/lc/ios-phone-light-bots.png",
+    "rect": [
+     48,
+     1545,
+     84,
+     84
+    ]
+   }
+  },
+  {
+   "name": "cat-list-5-329010",
+   "kind": "cat",
+   "web": {
+    "png": "../../../build/gpui/shots/logo-cats/web-phone-light-bots.png",
+    "rect": [
+     36,
+     1581,
+     84,
+     84
+    ]
+   },
+   "native": {
+    "png": "../../../build/gpui/results/ios/lc/ios-phone-light-bots.png",
+    "rect": [
+     48,
+     1745,
+     84,
+     84
+    ]
+   }
+  },
+  {
+   "name": "cat-header-Bub",
+   "kind": "cat",
+   "web": {
+    "png": "../../../build/gpui/shots/logo-cats/web-phone-light-bot.png",
+    "rect": [
+     156,
+     15,
+     126,
+     126
+    ]
+   },
+   "native": {
+    "png": "../../../build/gpui/results/ios/lc/ios-phone-light-bot.png",
+    "rect": [
+     48,
+     375,
+     126,
+     126
+    ]
+   }
+  }
+ ]
+}

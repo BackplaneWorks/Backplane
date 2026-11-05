@@ -350,6 +350,7 @@ struct PairView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 VStack(alignment: .leading, spacing: 10) {
+                    BrandMark(size: 48)
                     Text("BACKPLANE")
                         .font(.system(.caption, design: .monospaced).weight(.bold))
                         .tracking(2).foregroundStyle(BackplaneDesign.accent)
@@ -555,7 +556,10 @@ struct HubsPill: View {
     var body: some View {
         Button(action: open) {
             HStack(spacing: 3) {
-                ForEach(hubs.prefix(4), id: \.key) { h in HubDot(phase: model.conn[h.key]?.phase ?? .connecting) }
+                BrandMark(size: 18, conn: hubs.contains { model.conn[$0.key]?.phase == .online }).padding(.trailing, hubs.count > 1 ? 3 : 0)
+                if hubs.count > 1 {
+                    ForEach(hubs.prefix(4), id: \.key) { h in HubDot(phase: model.conn[h.key]?.phase ?? .connecting) }
+                }
                 if hubs.count > 4 { Text("+\(hubs.count - 4)") }
             }
             .font(.system(size: 10))

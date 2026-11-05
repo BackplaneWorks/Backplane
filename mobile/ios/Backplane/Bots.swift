@@ -35,6 +35,7 @@ struct BotCat: View {
 
     var body: some View {
         CatView(rig: model.cats[key] ?? [], size: size)
+            .geomLog("cat:" + key + ":" + String(Int(size)))
             .task(id: key) { await model.cat(key) }
     }
 }
@@ -139,11 +140,15 @@ private struct BotHeader: View {
     let model: AppModel
     let bot: BotView
     let size: CGFloat
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    // the web's bot header cat (style.css .bot-head .cat) measures 42 px on a phone and on a tablet
+    private var catSize: CGFloat { 42 }
 
     var body: some View {
         HStack(spacing: 12) {
-            BotCat(model: model, key: bot.cat ?? "", size: size)
-                .saturation(bot.mood == "away" ? 0 : 1)
+            // style.css .cat-mood-away: opacity .5
+            BotCat(model: model, key: bot.cat ?? "", size: catSize)
+                .opacity(bot.mood == "away" ? 0.5 : 1)
             VStack(alignment: .leading, spacing: 2) {
                 Text(bot.title ?? bot.name).font(.title3.weight(.semibold)).lineLimit(1)
                 HStack(spacing: 5) {
@@ -572,6 +577,10 @@ struct TalkScreen: View {
                     ForEach(bot.posts ?? []) { p in
                         VStack(alignment: p.mine ? .trailing : .leading, spacing: 2) {
                             HStack(spacing: 6) {
+                                // a bot's post carries its cat, 28 px as on the web (matched by name)
+                                if !p.mine, let cat = model.screen?.bots.first(where: { $0.name == p.from })?.cat {
+                                    BotCat(model: model, key: cat, size: 28)
+                                }
                                 Text(p.from).font(.caption.weight(.semibold))
                                 Text(p.ago).font(.caption2).foregroundStyle(.secondary)
                             }
