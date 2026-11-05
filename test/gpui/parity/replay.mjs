@@ -44,7 +44,8 @@ export async function replayOne(recording,{bin,port,work}){
     const g=greet[c.name],gg=c.greet;
     if(g&&gg){if(s===g.generation)return gg.generation;if(s===g.epoch)return gg.epoch}
     const vi=(viewIdsRec[c.name]||[]).indexOf(s);if(vi>=0&&viewIdsRep[c.name]?.[vi])return viewIdsRep[c.name][vi];
-    return s.replace(idRe,m=>{const k=recIds.indexOf(m);return k>=0&&repIds[k]?repIds[k]:m})});
+    // an id the replay hub has already said (the fixture's own) is valid as it is; only ids the recorded hub made up are mapped
+    return s.replace(idRe,m=>{if(repSeen.has(m))return m;const k=recIds.indexOf(m);return k>=0&&repIds[k]?repIds[k]:m})});
   // reply ids owed before each non-volatile outbound: replies to earlier non-volatile requests
   // a reply is waited for only if the recorded client had it before sending the next frame
   const replyAt=new Map();for(const f of frames)if(f.dir==='in'&&f.json?.t==='reply'&&!replyAt.has(f.c+'|'+f.json.id))replyAt.set(f.c+'|'+f.json.id,f.i);
