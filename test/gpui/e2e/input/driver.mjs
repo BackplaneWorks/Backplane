@@ -12,6 +12,7 @@ export class Input{
   constructor(display,out){this.display=display;this.out=out;this.xi=xinput(display);this.cb=clip(display);mkdirSync(out,{recursive:true});this.n=0}
   s(name){return shot(this.display,`${this.out}/${String(++this.n).padStart(2,'0')}-${name}.png`)}
   win(name='backplane'){return this.xi.geometry(name)}
+  winClass(cls='backplane'){return this.xi.geometryByClass(cls)}
   // text drag-select between two window-relative points; the X11 convention puts the selection in PRIMARY
   async dragSelect(g,from,to){const before=this.s('before-drag');await this.xi.drag(g.x+from[0],g.y+from[1],g.x+to[0],g.y+to[1]);await sleep(300);const after=this.s('after-drag');
     const primary=this.cb.primary();return {ok:!!primary&&primary.length>0,evidence:{primarySelection:primary?.slice(0,200)??null,changedPixels:diffPixels(before,after)}}}
