@@ -29,6 +29,28 @@ fn fab_tail<F: Facts>(f: &F, hub: &str, session: &mut Value, cmds: &mut Vec<Valu
     patch::merge(session, &json!({"rid": rid + 1, "drafts": {"@fab.at": at}}));
 }
 
+/// The thread screen's buttons that are one request (Ui.act): `answer` (Ui.answer: `ask.answer {id, answer}` from "id|answer…", a value with no id sends no params) and `interrupt`
+/// (Ui.on_thread "turn.interrupt"; a thread bound to an account is left alone, Accounts.rpc.params would add the binding); `copy` is the client's own (no request, no patch).
+fn thread_button<F: Facts>(f: &F, hub: &str, session: &Value, sel: &str, action: &str, value: &str) -> Option<composer::ActOut> {
+    let rid = session["rid"].as_u64().unwrap_or(1);
+    let (m, p) = match action {
+        "answer" => {
+            let mut parts = value.split('|');
+            let id = parts.next().unwrap_or("");
+            let p = if value.is_empty() { json!({}) } else { json!({"id": id, "answer": parts.collect::<Vec<_>>().join("|")}) };
+            ("ask.answer", p)
+        }
+        "interrupt" => {
+            if sel.is_empty() || composer::Facts::account_params(f, sel) { return None }
+            ("turn.interrupt", json!({"thread": sel}))
+        }
+        "copy" => return Some(composer::ActOut { session_patch: json!({}), cmds: vec![] }),
+        _ => return None,
+    };
+    let text = json!({"id": rid, "m": m, "p": p}).to_string();
+    Some(composer::ActOut { session_patch: json!({"rid": rid + 1}), cmds: vec![json!({"type": "send", "hub": hub, "text": text})] })
+}
+
 /// `params` is the object the hub builds for a view request (`session`, `action`, `value`, `cid`, `hub`, `now` in ms, `target`).
 pub fn dispatch<F: Facts>(f: &F, params: &Value) -> Option<Dispatched> {
     let (hub, action, value) = (s(params, "hub"), s(params, "action"), s(params, "value"));
@@ -41,13 +63,8 @@ pub fn dispatch<F: Facts>(f: &F, params: &Value) -> Option<Dispatched> {
         patch::merge(&mut session, &o.session_patch); (o.cmds, None, false)
     } else if let Some(o) = cmdact::act(&cmdact::Req { hub, session: &params["session"], sel, action, value, title_of: &|t| f.title_of(t) }) {
         patch::merge(&mut session, &o.session_patch); (o.cmds, o.next_target, false)
-    } else if action == "answer" && !value.is_empty() {
-        // Ui.answer: "askid|answer" -> `ask.answer {id, answer}` (the answer may hold '|'), sent with the next rid like Ui.rpc
-        let (id, ans) = value.split_once('|').unwrap_or((value, ""));
-        let rid = params["session"]["rid"].as_u64().unwrap_or(0);
-        let text = format!("{{\"id\":{rid},\"m\":\"ask.answer\",\"p\":{{\"id\":{},\"answer\":{}}}}}", serde_json::to_string(id).unwrap_or_default(), serde_json::to_string(ans).unwrap_or_default());
-        patch::merge(&mut session, &json!({"rid": rid + 1}));
-        (vec![json!({"type": "send", "hub": hub, "text": text})], None, false)
+    } else if let Some(o) = thread_button(f, hub, &params["session"], sel, action, value) {
+        patch::merge(&mut session, &o.session_patch); (o.cmds, None, false)
     } else if action == "select" {
         let o = select::select(f, hub, &params["session"], value)?;
         patch::merge(&mut session, &o.session_patch); (o.cmds, Some(o.next_target), true)
@@ -129,6 +146,16 @@ mod tests {
         assert_eq!(last["type"], json!("send")); assert!(last["text"].as_str().unwrap().contains("\"m\":\"fab.look\""));
         assert_eq!(d.session["drafts"]["@fab.at"], json!("onon#t1700000002-3#idle"));
         assert_eq!(d.session["rid"].as_u64(), Some(2 + d.cmds.iter().filter(|c| c["type"] == "send").count() as u64), "one rid per send: the pin's and the look's");
+    }
+    #[test] fn answer_and_interrupt_are_one_numbered_request_each() {
+        let f = M { exists: T, running: true };
+        let d = dispatch(&f, &params("answer", "ask1|yes|really", session())).unwrap();
+        assert_eq!(d.cmds[0]["text"], json!("{\"id\":2,\"m\":\"ask.answer\",\"p\":{\"id\":\"ask1\",\"answer\":\"yes|really\"}}"));
+        assert_eq!(d.session["rid"], json!(3));
+        let d = dispatch(&f, &params("interrupt", "", session())).unwrap();
+        assert_eq!(d.cmds[0]["text"], json!("{\"id\":2,\"m\":\"turn.interrupt\",\"p\":{\"thread\":\"t1700000002-3\"}}"));
+        let d = dispatch(&f, &params("copy", "x", session())).unwrap();
+        assert!(d.cmds.is_empty() && d.session["rid"] == json!(2));
     }
     #[test] fn what_nobody_owns_is_none() {
         let f = M { exists: T, running: false };
