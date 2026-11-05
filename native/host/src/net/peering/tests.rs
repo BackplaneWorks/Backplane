@@ -156,7 +156,7 @@ async fn settle() { for _ in 0..50 { tokio::time::sleep(std::time::Duration::fro
     let now = (a.p.now)();
     let req = |ts: u64, sig: Option<String>, body: &str| PReq { method: "POST".into(), target: "/x".into(), trusted: false, body: body.as_bytes().to_vec(),
         headers: vec![("X-Backplane-Peer".into(), "p1".into()), ("X-Backplane-Timestamp".into(), ts.to_string()), ("X-Backplane-Signature".into(), sig.unwrap_or_else(|| sign::header(&secret, ts, body)))] };
-    assert_eq!(a.p.signed_in("deliver", &req(now, None, "{}")).unwrap(), "p1");
+    assert_eq!(a.p.signed_in("deliver", &req(now, None, "{}")).ok().unwrap(), "p1");
     assert_eq!(a.p.signed_in("deliver", &req(now, None, "{}")).unwrap_err().body, b"already seen");
     assert_eq!(a.p.signed_in("deliver", &req(now - 400, None, "{}")).unwrap_err().body, b"bad or stale signature");
     assert_eq!(a.p.signed_in("deliver", &req(now, Some("sha256=00".into()), "{}")).unwrap_err().status, "401 Unauthorized");
