@@ -358,15 +358,15 @@ mod tests {
         let mut checked = Vec::new();
         for (name, x) in v.as_object().unwrap() {
             let mut st = State::new(); for l in log.lines() { st.apply_line(l); } for e in x["extra"].as_array().unwrap() { st.apply(e); }
-            let Some(got) = thread_object(&st, "h", th, &p["params"], "") else { assert!(matches!(name.as_str(), "queued" | "codex" | "opus"), "{name} should be drawn"); continue };
+            let Some(got) = thread_object(&st, "h", th, &p["params"], "") else { panic!("{name} should be drawn"); };
             let (diff, tail) = (x["diff"].as_object().unwrap(), x["tail"].as_array().unwrap());
-            for (k, w) in diff { if !matches!(k.as_str(), "claude" | "picker") { assert_eq!(got.get(k), Some(w), "{name}: {k}"); } }
+            for (k, w) in diff { assert_eq!(got.get(k), Some(w), "{name}: {k}"); }
             let es = got["entries"].as_array().unwrap();
             assert_eq!(es.len() as u64, x["entries"].as_u64().unwrap(), "{name}: entries");
             assert_eq!(&es[es.len() - 2..], tail.as_slice(), "{name}: tail");
             checked.push(name.clone());
         }
-        for n in ["base", "running", "completed", "failed", "interrupted", "pinned", "archived", "snoozed", "settledhand"] { assert!(checked.iter().any(|c| c == n), "{n} not checked: {checked:?}"); }
+        for n in ["base", "running", "completed", "failed", "interrupted", "pinned", "archived", "snoozed", "settledhand", "codex", "opus", "queued", "askapproval", "askinput", "askplan", "asksend"] { assert!(checked.iter().any(|c| c == n), "{n} not checked: {checked:?}"); }
     }
     #[test] fn civil_dates() { assert_eq!(civil(0), (1970, 1, 1)); assert_eq!(civil(19675), (2023, 11, 14)); assert_eq!(clock(1700002806, 0, &Rule::utc()), "Tue 14 Nov 23:00"); }
     #[test] fn labels_name_three_kinds_and_the_live_one_says_what_runs() {
