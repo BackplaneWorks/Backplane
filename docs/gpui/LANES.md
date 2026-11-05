@@ -29,3 +29,4 @@ lane cannot break another lane's build.
   If a cherry-pick refuses, abort it and tell the owner of the file. Never force anything.
 - To change a file you do not own, ask its owner by `thread_send`.
 - A shared seam (one line in `main.rs`, one `mod` line) goes through the lead.
+- Before landing a batch, send the `reviewer` thread its commit range and wait for its OK. Land small batches, not every commit.

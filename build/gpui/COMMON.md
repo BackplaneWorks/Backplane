@@ -32,7 +32,11 @@ The person may be gaming on this desktop. Builds and long runs go to Boat, the M
 - No TestFlight or Play upload, no signed release build, no merge to main, no install over the real app, no `bend update`, no release tag.
 - Edits to `src/**.bend` affect the law checks: do not change them without asking the coordinator.
 
+## Cost
+Implementation lanes run on Sonnet. Mechanical work (test reruns, parity diff counts, screenshots, status relays, file moves) goes to the Haiku `mechanics` thread. Do not spawn sub-tasks on stronger models. One reviewer reads each lane's commit batch before it lands.
+
 ## Reporting
 - Raw numbers in build/gpui/results/<stream>/, PNG images in build/gpui/shots/<stream>/.
 - A measurement states its machine, commit, sample count and median/p95. Anything not measured is called unmeasured. A failure is reported with its output, never smoothed over. A smoke test is not called a load test.
+- Report at milestones only, in a few lines. No progress narration, no receipts, no hashes unless asked.
 - Keep working through your milestones without stopping to ask. End your turn when you finish, or when you truly need a decision. Your last message says briefly: what works, real numbers, image paths, what is left or blocked.
