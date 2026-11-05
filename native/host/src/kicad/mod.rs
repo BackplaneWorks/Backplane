@@ -3,7 +3,15 @@
 pub mod ipc;
 pub mod kserve;
 pub mod boards;
+pub mod board;
+pub mod fl;
 pub mod plot;
+pub mod plotgen;
+pub mod plotread;
+pub mod schematic;
+pub mod sexpr;
+pub mod strokefont;
+pub mod strokefont_data;
 pub mod project;
 pub mod watch;
 
