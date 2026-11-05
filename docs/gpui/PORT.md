@@ -80,11 +80,24 @@ agents only, never real ones.
 ## Laws
 
 `LAWS.bend` holds 3,248 laws and stays as it is: humans own it, and no law is weakened
-or deleted. A law guards ported logic in one of three ways, listed for every law below:
+or deleted. Each law has one of these statuses, listed for every law below:
 
 - **bend**: the logic stays in Bend and Rust calls it. The law still checks that code.
 - **rust**: the logic moved. A named Rust property test states the same claim.
 - **unported**: the logic has not moved. The law still stands on the Bend code.
+- **client**: client-side Bend in the web and phone bundles, unchanged.
+- **window**: native-window code GPUI replaces. The entry says what GPUI does instead,
+  or that it has no equivalent yet.
+
+First classification, by the file whose defs a law names (within about 10% until each
+law is checked; detail in `PORT-CLASSIFICATION.md`): 1,470 stay in Bend, 963 move to Rust,
+581 are client-side and 221 are native-window code.
+
+A function stays in Bend only if it is pure, takes and returns kilobytes rather than a
+state, is off the per-event and per-view hot paths, and has a law or security property
+that justifies it. Those rules run in one persistent process that can do no IO. Bend's
+`State.replay` stays as a differential oracle: every recorded log must give the same
+canonical state digest in Bend and in Rust.
 
 Porting a piece of logic changes its laws from `unported` to `bend` or `rust` in the same
 commit. `scripts/gpui/law-map.py` fails when ported code has a law with neither, or when
