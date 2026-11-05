@@ -4,7 +4,7 @@ use serde_json::{json, Value};
 
 pub struct Plan { pub events: Vec<Value>, pub reply: Value, /// a running turn to stop before the events (Retire.archive)
     pub stop: Option<String>, /// a worktree to make after the events are durable: (thread, project folder, mode, fork source)
-    pub wt: Option<(String, String, String, String)>, /// a scratch thread's own folder to make: (thread)
+    pub wt: Option<(String, String, String, String, super::worktree::Opts)>, /// a scratch thread's own folder to make: (thread)
     pub scratch: Option<String>, /// what the agents module does after the events: ("steer" | "resume", thread, text)
     pub act: Option<(&'static str, String, String)> }
 
@@ -253,7 +253,9 @@ fn create(f: &Fold, at: u64, id: &Value, p: &Value, new_root: Option<(&str, usiz
         ev.push(json!({"$":"SettingSet","key":format!("thread.tree.{parent}"),"value":"1","at":at}));
     }
     // the server's worktree job follows (it also says so when the folder is not a repository)
-    let wt = (mode == "worktree" && !scratch).then(|| (th.clone(), root.clone(), env.clone(), String::new()));
+    // an Improvements send names its base (a local branch that exists: the handler checked) and its branch; only with a creation key
+    let opts = if !key.is_empty() { super::worktree::Opts { base: s(p, "base", ""), branch: super::worktree::sanitize(&s(p, "branch", "")) } } else { Default::default() };
+    let wt = (mode == "worktree" && !scratch).then(|| (th.clone(), root.clone(), env.clone(), String::new(), opts));
     Some(Plan { events: ev, reply: made(id, &th), stop: None, wt, scratch: scratch.then(|| th.clone()), act: None })
 }
 
@@ -331,7 +333,7 @@ fn fork(f: &Fold, at: u64, id: &Value, src: &str, cx: &Ctx) -> Option<Plan> {
     if !scratch && t.worktree.is_empty() {
         ev.push(json!({"$":"ActivityLogged","thread":th,"act":hub_id("g", at, n),"tone":"info","kind":"git","summary":format!("working in the project folder with \"{}\" (no worktree of its own): its edits change the same files", t.title),"at":at}));
     }
-    let wt = (!scratch && !t.worktree.is_empty()).then(|| (th.clone(), root, "fork".to_string(), src.to_string()));
+    let wt = (!scratch && !t.worktree.is_empty()).then(|| (th.clone(), root, "fork".to_string(), src.to_string(), Default::default()));
     Some(Plan { events: ev, reply: made(id, &th), stop: None, wt, scratch: scratch.then(|| th.clone()), act: None })
 }
 

@@ -265,7 +265,7 @@ async fn settled(h: &Arc<Hub>, n0: usize, want: usize) -> Vec<Value> {
     h.commit(&json!({"$":"ThreadCreated","id":"tc","project":"pr","title":"x","env":"worktree","branch":"","worktree":"","provider":"claude","model":"","at":9})).await.unwrap();
     let fold = Arc::new(tokio::sync::Mutex::new(super::fold::Fold::default()));
     let n0 = h.store.len();
-    super::worktree::spawn_with(true, h.clone(), fold, "tc".into(), repo.to_str().unwrap().into(), "auto".into(), String::new(), "claude".into(), String::new());
+    super::worktree::spawn_with(true, h.clone(), fold, "tc".into(), repo.to_str().unwrap().into(), "auto".into(), String::new(), "claude".into(), String::new(), Default::default());
     let ev = settled(&h, n0, 2).await;
     assert_eq!(ev[0]["$"], "ActivityLogged"); assert_eq!(ev[0]["summary"], "working in the project folder: not a git repository"); assert_eq!(ev[0]["kind"], "git"); assert_eq!(ev[0]["tone"], "info");
     assert_eq!(ev[1]["$"], "WorktreeSkipped"); assert_eq!(ev[1]["id"], "tc");
@@ -280,7 +280,7 @@ async fn settled(h: &Arc<Hub>, n0: usize, want: usize) -> Vec<Value> {
     for (m, x) in [("w1", "hello"), ("w2", "there")] { h.commit(&json!({"$":"TurnQueued","thread":"t11","msg":m,"text":x,"at":9})).await.unwrap(); }
     h.commit(&json!({"$":"TurnQueued","thread":"t22","msg":"w3","text":"queued too","at":9})).await.unwrap();
     let n0 = h.store.len();
-    super::worktree::spawn_with(false, h.clone(), fold.clone(), "t11".into(), repo.to_str().unwrap().into(), "auto".into(), String::new(), "claude".into(), String::new());
+    super::worktree::spawn_with(false, h.clone(), fold.clone(), "t11".into(), repo.to_str().unwrap().into(), "auto".into(), String::new(), "claude".into(), String::new(), Default::default());
     let ev = settled(&h, n0, 2).await;
     assert_eq!(ev[0]["$"], "WorktreeSet", "{ev:?}"); assert!(ev[0]["worktree"].as_str().unwrap().contains("/.backplane/worktrees/backplane-"), "{}", ev[0]); assert!(std::path::Path::new(ev[0]["worktree"].as_str().unwrap()).is_dir());
     assert_eq!(ev[1]["$"], "ActivityLogged"); assert!(ev[1]["summary"].as_str().unwrap().starts_with("worktree "));
@@ -288,7 +288,7 @@ async fn settled(h: &Arc<Hub>, n0: usize, want: usize) -> Vec<Value> {
     // the thread changed provider while the job ran: the change is kept, nothing starts
     let n1 = h.store.len();
     h.commit(&json!({"$":"ProviderSet","id":"t22","provider":"codex","model":"","at":10})).await.unwrap();
-    super::worktree::spawn_with(false, h.clone(), fold, "t22".into(), repo.to_str().unwrap().into(), "auto".into(), String::new(), "claude".into(), String::new());
+    super::worktree::spawn_with(false, h.clone(), fold, "t22".into(), repo.to_str().unwrap().into(), "auto".into(), String::new(), "claude".into(), String::new(), Default::default());
     let ev = settled(&h, n1 + 1, 2).await; assert_eq!(ev[0]["$"], "WorktreeSet");
     assert_eq!(calls("t22"), vec![], "a stale report starts nothing");
 }
@@ -462,4 +462,33 @@ impl crate::api::RpcHandler for Arc<Starter> {
     let (e, r) = ask(&h, "project.start", p.clone()).await; assert!(e.iter().all(|v| v["$"] != "ThreadCreated"), "the thread is not made twice"); assert_eq!(r["ok"], true); assert_eq!(r["thread"], "home-hm9");
     assert_eq!(*st.1.lock().unwrap(), vec!["Make it".to_string()]);
     let (_, r) = ask(&h, "project.start", p).await; assert_eq!(r["ok"], true); assert_eq!(st.1.lock().unwrap().len(), 1, "a message that arrived is not posted again");
+}
+
+// thread.create with a creation key may name a base (a local branch that must exist) and a branch; no key: the params are ignored; a missing base refuses
+#[tokio::test] async fn an_improvements_send_branches_from_the_named_local_base() {
+    let h = hub("base").await; let repo = git_repo("base-repo");
+    let g = |a: &[&str]| assert!(std::process::Command::new("git").args(a).current_dir(&repo).output().unwrap().status.success());
+    g(&["branch", "gpui"]);
+    h.commit(&json!({"$":"ProjectCreated","id":"pb","title":"r","root":repo.to_str().unwrap(),"at":9})).await.unwrap();
+    let key = "0123456789abcdef0123456789abcdef";
+    let (e, r) = ask(&h, "thread.create", json!({"project":"pb","creationKey":key,"base":"nope","branch":"x"})).await; assert!(e.is_empty(), "no thread for a missing base"); assert_eq!(r["error"], "base branch \"nope\" does not exist in this project");
+    let (e, r) = ask(&h, "thread.create", json!({"project":"pb","creationKey":key,"base":"-x"})).await; assert!(e.is_empty()); assert!(r["error"].as_str().unwrap().contains("not a local branch name"));
+    let (e, r) = ask(&h, "thread.create", json!({"project":"pb","creationKey":key,"base":"gpui","branch":"gpui-imp-ab12cd34"})).await; assert_eq!(r["ok"], true, "{r}"); assert_eq!(e[0]["$"], "ThreadCreated");
+    // the job: branches from gpui, named gpui-imp-ab12cd34, under .backplane/worktrees
+    let fold = Arc::new(tokio::sync::Mutex::new(super::fold::Fold::default()));
+    let n0 = h.store.len();
+    super::worktree::spawn_with(false, h.clone(), fold.clone(), "t77".into(), repo.to_str().unwrap().into(), "auto".into(), String::new(), "claude".into(), String::new(), super::worktree::Opts { base: "gpui".into(), branch: "gpui-imp-ab12cd34".into() });
+    h.commit(&json!({"$":"ThreadCreated","id":"t77","project":"pb","title":"x","env":"worktree","branch":"","worktree":"","provider":"claude","model":"","at":9})).await.unwrap();
+    let ev = settled(&h, n0 + 1, 2).await;
+    let set = ev.iter().find(|v| v["$"] == "WorktreeSet").unwrap_or_else(|| panic!("{ev:?}"));
+    assert_eq!(set["branch"], "gpui-imp-ab12cd34"); assert!(set["worktree"].as_str().unwrap().ends_with("/.backplane/worktrees/gpui-imp-ab12cd34"));
+    // a base that vanished after the check: an error note, and NO WorktreeSkipped (the thread must not fall back to the project folder)
+    let n1 = h.store.len();
+    super::worktree::spawn_with(false, h.clone(), fold, "t78".into(), repo.to_str().unwrap().into(), "auto".into(), String::new(), "claude".into(), String::new(), super::worktree::Opts { base: "gone".into(), branch: "b2".into() });
+    let ev = settled(&h, n1, 1).await; tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let ev2: Vec<Value> = h.store.range(n1, h.store.len()).unwrap().iter().map(|l| serde_json::from_str(l).unwrap()).collect();
+    assert!(ev.iter().chain(ev2.iter()).any(|v| v["$"] == "ActivityLogged" && v["tone"] == "error" && v["summary"].as_str().unwrap().contains("could not make the worktree from gone")));
+    assert!(!ev2.iter().any(|v| v["$"] == "WorktreeSkipped"));
+    // no creation key: base and branch are ignored (today's thread.create), and nothing is checked
+    let (e, r) = ask(&h, "thread.create", json!({"project":"pb","base":"nope","branch":"x"})).await; assert_eq!(r["ok"], true); assert_eq!(e[0]["$"], "ThreadCreated");
 }

@@ -42,7 +42,7 @@ fn sub(prefix: &str) -> &str { prefix.strip_suffix('/').unwrap_or(prefix) }
 fn is_tree(r: &Ran) -> bool { r.code == 0 && r.out.trim() == "tree" }
 
 /// Git.thread_wt: the thread's directory, "skip: <why>" when there is no repository to branch, or "error: ...".
-pub async fn thread_wt(cwd: &str, carry: bool, branch: &str) -> String {
+pub async fn thread_wt(cwd: &str, carry: bool, branch: &str, onto: &str) -> String {
     let b = sanitize(branch);
     let r = git::run_ro(cwd, &["rev-parse", "--show-toplevel"]).await;
     let top = if r.code == 0 { r.out.trim().to_string() } else { String::new() };
@@ -54,13 +54,20 @@ pub async fn thread_wt(cwd: &str, carry: bool, branch: &str) -> String {
     let r = git::run_ro(&top, &["rev-parse", "--path-format=absolute", "--git-common-dir"]).await; if r.code != 0 { return err(&r) }
     let common = r.out.trim().to_string();
     let r = git::proc("sh", &["-c", EXCLUDE, "sh", &common], &top, &[]).await; if r.code != 0 { return err(&r) }
+    // A named base (an Improvements send): that LOCAL branch and nothing else: no fetch, no origin default, no carried work; a base that is not there is an error, never main
+    if !onto.is_empty() {
+        let r = git::run(&top, &["rev-parse", "--verify", "-q", &format!("refs/heads/{onto}^{{commit}}")]).await;
+        if r.code != 0 { return format!("error: base branch {onto} does not exist") }
+    }
     // Git.upstream: origin's default branch, fetched first; "" (HEAD) when there is no origin or uncommitted work is carried
     let script = format!("{SAFE}{UPSTREAM}");
-    let r = git::proc("sh", &["-c", &script, "sh", if carry { "1" } else { "0" }], &top, &[]).await;
+    let r = if onto.is_empty() { git::proc("sh", &["-c", &script, "sh", if carry { "1" } else { "0" }], &top, &[]).await } else { git::Ran { code: 0, out: onto.to_string() } };
     let mut base = if r.code == 0 { r.out.trim().to_string() } else { String::new() };
     // a subdirectory project may only exist on the checked-out branch
     if !base.is_empty() && !prefix.is_empty() {
         let r = git::run_ro(&top, &["cat-file", "-t", &format!("{base}:{}", sub(&prefix))]).await;
+    if onto.is_empty() && !base.is_empty() && !prefix.is_empty() {
+        let r = git::run(&top, &["cat-file", "-t", &format!("{base}:{}", sub(&prefix))]).await;
         if !is_tree(&r) {
             let h = git::run_ro(&top, &["cat-file", "-t", &format!("HEAD:{}", sub(&prefix))]).await;
             if is_tree(&h) { base = String::new() } else { return format!("error: project directory {} is not a directory in {base} or HEAD", sub(&prefix)) }
@@ -70,7 +77,7 @@ pub async fn thread_wt(cwd: &str, carry: bool, branch: &str) -> String {
     let mut args = vec!["worktree", "add", "--no-track", "-b", b.as_str(), path.as_str()]; if !base.is_empty() { args.push(&base) }
     let r = git::run(&top, &args).await; if r.code != 0 { return err(&r) }
     let cwd_out = if prefix.is_empty() { path.clone() } else { format!("{path}/{}", sub(&prefix)) };
-    if carry {
+    if carry && onto.is_empty() {
         let script = format!("{SAFE}{CARRY}");
         let r = git::proc("sh", &["-c", &script, "sh", &top, &path], &top, &[]).await; if r.code != 0 { return err(&r) }
     }
@@ -108,24 +115,34 @@ async fn ready(hub: &Arc<Hub>, fold: &Arc<tokio::sync::Mutex<super::fold::Fold>>
 /// The job's reports are logged as the server's job does: the note, then the thread's folder (or its skip).
 /// Tests of the requests keep the job quiet (its reports arrive on their own time).
 pub static SUPPRESS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-pub fn spawn(hub: Arc<Hub>, fold: Arc<tokio::sync::Mutex<super::fold::Fold>>, th: String, root: String, mode: String, src: String, provider: String, binding: String) {
+/// What an Improvements send names: the local branch to start from and the branch to make (both empty: today's worktree).
+#[derive(Clone, Default, Debug)]
+pub struct Opts { pub base: String, pub branch: String }
+
+pub fn spawn(hub: Arc<Hub>, fold: Arc<tokio::sync::Mutex<super::fold::Fold>>, th: String, root: String, mode: String, src: String, provider: String, binding: String, opts: Opts) {
     if cfg!(test) && SUPPRESS.load(std::sync::atomic::Ordering::Relaxed) { return }
-    spawn_with(crate::copy::on(), hub, fold, th, root, mode, src, provider, binding)
+    spawn_with(crate::copy::on(), hub, fold, th, root, mode, src, provider, binding, opts)
 }
-pub fn spawn_with(copy: bool, hub: Arc<Hub>, fold: Arc<tokio::sync::Mutex<super::fold::Fold>>, th: String, root: String, mode: String, src: String, provider: String, binding: String) {
+pub fn spawn_with(copy: bool, hub: Arc<Hub>, fold: Arc<tokio::sync::Mutex<super::fold::Fold>>, th: String, root: String, mode: String, src: String, provider: String, binding: String, opts: Opts) {
     if root.is_empty() { return }
     // a copy of a log runs no git that writes: its job runs on "/" (Copy.nowhere) and says at once that the thread uses the project folder
     let root = if copy { "/".to_string() } else { root };
     tokio::spawn(async move {
-        let carry = mode != "fork" && { let r = root.clone(); tokio::task::spawn_blocking(move || hardware(&r)).await.unwrap_or(false) };
-        let branch = temp_branch(seed(&th));
-        let mut r = thread_wt(&root, carry, &branch).await;
+        let named = !opts.base.is_empty();
+        let carry = mode != "fork" && !named && { let r = root.clone(); tokio::task::spawn_blocking(move || hardware(&r)).await.unwrap_or(false) };
+        let branch = if sanitize(&opts.branch).is_empty() { temp_branch(seed(&th)) } else { opts.branch.clone() };
+        let mut r = thread_wt(&root, carry, &branch, &opts.base).await;
         if mode == "fork" && !git::failed(&r) && !r.starts_with("skip: ") {
             let n = git::checkpoint_count(&r, &src).await;
             if n > 0 { let _ = git::checkpoint_revert(&r, &src, n - 1).await; }
         }
         if r.starts_with("skip: ") || git::failed(&r) {
             let (tone, why) = if r.starts_with("skip: ") { (if mode == "worktree" { "error" } else { "info" }, r[6..].to_string()) } else { r = r.trim().to_string(); ("error", r.clone()) };
+            if named {
+                // a base was asked for: this thread never falls back to the project folder from here (the folder is the guarded line)
+                let _ = hub.commit_many(&note(&hub, &th, "error", format!("could not make the worktree from {}: {why}", opts.base)).await).await;
+                return;
+            }
             let _ = hub.commit_many(&note(&hub, &th, tone, format!("working in the project folder: {why}")).await).await;
             ready(&hub, &fold, &th, &provider, &binding, json!({"$":"WorktreeSkipped","id":th,"at":super::now_s()})).await;
         } else {
@@ -146,16 +163,16 @@ mod tests {
     }
     #[tokio::test] async fn a_folder_that_is_not_a_repository_is_skipped() {
         let d = std::env::temp_dir().join(format!("bp-wt-{}", std::process::id())); std::fs::create_dir_all(&d).unwrap();
-        assert_eq!(thread_wt(d.to_str().unwrap(), false, "backplane/x").await, "skip: not a git repository");
+        assert_eq!(thread_wt(d.to_str().unwrap(), false, "backplane/x", "").await, "skip: not a git repository");
     }
     #[tokio::test] async fn a_repository_gets_a_worktree_on_its_own_branch_and_carries_the_boards_uncommitted_work() {
         let d = std::env::temp_dir().join(format!("bp-wt2-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap();
         let p = d.to_str().unwrap();
         let g = |a: &[&str]| { let o = std::process::Command::new("git").args(a).current_dir(p).env("GIT_AUTHOR_NAME", "t").env("GIT_AUTHOR_EMAIL", "t@t").env("GIT_COMMITTER_NAME", "t").env("GIT_COMMITTER_EMAIL", "t@t").output().unwrap(); assert!(o.status.success(), "{a:?}"); };
         g(&["init", "-q"]); std::fs::write(d.join("a.kicad_pro"), "{}").unwrap(); g(&["add", "."]); g(&["commit", "-qm", "x"]);
-        assert!(thread_wt(p, false, "backplane/none").await.starts_with("skip:") == false);
+        assert!(thread_wt(p, false, "backplane/none", "").await.starts_with("skip:") == false);
         std::fs::write(d.join("new.kicad_sch"), "uncommitted").unwrap();
-        let r = thread_wt(p, true, "backplane/carry1").await;
+        let r = thread_wt(p, true, "backplane/carry1", "").await;
         assert!(r.ends_with("/.backplane/worktrees/backplane-carry1"), "{r}");
         assert_eq!(std::fs::read_to_string(format!("{r}/new.kicad_sch")).unwrap(), "uncommitted");
     }
