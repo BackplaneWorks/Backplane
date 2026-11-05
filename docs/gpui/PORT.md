@@ -163,7 +163,7 @@ port waits for the person's decision.
 
 <!-- law-map: generated below by scripts/gpui/law-map.py -->
 
-Laws in LAWS.bend: 3248. bend 1260, rust 29, unported 1348, client 483, window 128, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: none yet. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
+Laws in LAWS.bend: 3248. bend 1260, rust 40, unported 1337, client 483, window 128, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: none yet. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
 
 | law | status | seed | file | note |
 |---|---|---|---|---|
@@ -485,7 +485,7 @@ Laws in LAWS.bend: 3248. bend 1260, rust 29, unported 1348, client 483, window 1
 | `far_feed_after_stops` | bend | seed K +-10% | `src/core/far.bend` |  |
 | `draft_restore_fills` | client | seed C +-10% | `src/core/client.bend` |  |
 | `draft_restore_keeps_typing` | client | seed C +-10% | `src/core/client.bend` |  |
-| `interrupt_idle_nothing` | unported | seed R +-10% | `src/core/hub.bend` |  |
+| `interrupt_idle_nothing` | rust `interrupt_idle_nothing` | map | `src/core/hub.bend` |  |
 | `interrupt_claude_input` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `interrupt_codex_stops` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `interrupt_grok_stops` | unported | seed R +-10% | `src/core/hub.bend` |  |
@@ -511,10 +511,10 @@ Laws in LAWS.bend: 3248. bend 1260, rust 29, unported 1348, client 483, window 1
 | `island_sync_not_twice` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `island_sync_quiet` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `retire_answers_empty` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `claude_result_after_stop_quiet` | unported | seed R +-10% | `src/core/hub.bend` |  |
+| `claude_result_after_stop_quiet` | rust `claude_result_after_stop_quiet` | map | `src/core/hub.bend` |  |
 | `claude_result_after_stop_interrupted` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `claude_result_running_completes` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `claude_delta_after_stop_quiet` | unported | seed R +-10% | `src/core/hub.bend` |  |
+| `claude_delta_after_stop_quiet` | rust `claude_delta_after_stop_quiet` | map | `src/core/hub.bend` |  |
 | `claude_delta_running_streams` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `stopped_turn_quiet` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `recover_interrupts_running` | unported | seed R +-10% | `src/core/hub.bend` |  |
@@ -522,12 +522,12 @@ Laws in LAWS.bend: 3248. bend 1260, rust 29, unported 1348, client 483, window 1
 | `recover_keeps_order_ask` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `recover_leaves_idle` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `recover_empty_nothing` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `carry_continues` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `carry_leaves_idle` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `carry_off_nothing` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `carry_once` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `carry_twice_once` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `carry_skips_archived` | unported | seed R +-10% | `src/core/hub.bend` |  |
+| `carry_continues` | rust `carry_continues` | map | `src/core/hub.bend` |  |
+| `carry_leaves_idle` | rust `carry_leaves_idle` | map | `src/core/hub.bend` |  |
+| `carry_off_nothing` | rust `carry_off_nothing` | map | `src/core/hub.bend` |  |
+| `carry_once` | rust `carry_once` | map | `src/core/hub.bend` |  |
+| `carry_twice_once` | rust `carry_twice_once` | map | `src/core/hub.bend` |  |
+| `carry_skips_archived` | rust `carry_skips_archived` | map | `src/core/hub.bend` |  |
 | `ask_makes_pending` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `answer_clears_pending` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `settle_waits_for_children` | unported | seed R +-10% | `src/core/model.bend` |  |
@@ -547,7 +547,7 @@ Laws in LAWS.bend: 3248. bend 1260, rust 29, unported 1348, client 483, window 1
 | `follow_stop_running` | client | seed C +-10% | `src/core/client.bend` |  |
 | `follow_stop_interrupts` | client | seed C +-10% | `src/core/client.bend` |  |
 | `queue_mode_delivers` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `steer_claude_in_place` | unported | seed R +-10% | `src/core/hub.bend` |  |
+| `steer_claude_in_place` | rust `steer_claude_in_place` | map | `src/core/hub.bend` |  |
 | `steer_codex_restarts` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `queue_joined` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `queue_edit_in_place` | unported | seed R +-10% | `src/core/model.bend` |  |
@@ -622,7 +622,7 @@ Laws in LAWS.bend: 3248. bend 1260, rust 29, unported 1348, client 483, window 1
 | `usage_text_share` | client | seed C +-10% | `src/core/client.bend` |  |
 | `usage_text_tokens` | client | seed C +-10% | `src/core/client.bend` |  |
 | `usage_nothing_yet` | client | seed C +-10% | `src/core/client.bend` |  |
-| `usage_same_nothing` | unported | seed R +-10% | `src/core/model.bend` |  |
+| `usage_same_nothing` | rust `usage_same_nothing` | map | `src/core/model.bend` |  |
 | `usage_change_logged` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `view_drag_rotates` | window | seed D +-10% | `src/app/nui.bend` | GPUI input handling, native/gpui/src/input.rs (equivalence unchecked) |
 | `view_drag_ctrl_pans` | window | seed D +-10% | `src/app/nui.bend` | GPUI input handling, native/gpui/src/input.rs (equivalence unchecked) |
