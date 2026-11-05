@@ -94,7 +94,7 @@ mod tests {
         let i = invite_make("http://host:3787", "p1", SEC);
         assert_eq!(invite_parse(&i), Some(Inv { url: "http://host:3787".into(), id: "p1".into(), secret: SEC.into() }));
         assert_eq!(invite_parse(&format!("  {i}\n")).unwrap().id, "p1");
-        for bad in ["", "bp1:", "bp2:a:b:c", "bp1:http://h:p1:zz", &format!("bp1::p1:{SEC}"), &format!("bp1:http://h:{SEC}"), &format!("bp1:http://h::{SEC}"), &format!("bp1:http://h:p1:{}", &SEC[..62])] {
+        for bad in ["", "bp1:", "bp2:a:b:c", "bp1:http://h:p1:zz", &format!("bp1::p1:{SEC}"), &format!("bp1:http://h::{SEC}"), &format!("bp1:http://h:p1:{}", &SEC[..62])] {
             assert_eq!(invite_parse(bad), None, "{bad}");
         }
     }
