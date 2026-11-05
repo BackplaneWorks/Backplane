@@ -222,6 +222,10 @@ final class Journeys: XCTestCase {
 
     func test_long_session() {
         d = Driver("long-session"); defer { d.finish() }
+        // the fixture starts 20 long-streaming stand-in agents (serve-fixture: POST /ctl/agents?count=20)
+        let agents = d.ctl("/ctl/agents?count=20")
+        d.metrics["agents_started"] = agents
+        if !agents { d.note("could not start the 20 simulated agents (HUB_CTL /ctl/agents refused): long session ran without them") }
         d.launch(); tab("Threads")
         let secs = Double(ProcessInfo.processInfo.environment["LONG_SECS"] ?? "") ?? 300
         let t0 = CFAbsoluteTimeGetCurrent(); var n = 0
