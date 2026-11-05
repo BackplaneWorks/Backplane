@@ -153,11 +153,15 @@ pub fn watch(ag: &Arc<Agents>) {
             while seen < total { // read in chunks; a failed read leaves `seen` where it was and is tried again at the next commit
                 let to = (seen + 4096).min(total);
                 let Ok(lines) = ag.hub.store.range(seen, to) else { break };
-                evs.extend(lines.iter().filter(|l| l.starts_with("{\"$\":\"TurnChanged\"")).filter_map(|l| serde_json::from_str::<Value>(l).ok())); seen = to;
+                evs.extend(lines.iter().filter(|l| l.starts_with("{\"$\":\"TurnChanged\"") || l.starts_with("{\"$\":\"AskOpened\"")).filter_map(|l| serde_json::from_str::<Value>(l).ok())); seen = to;
             }
             if evs.is_empty() { continue }
             let mut kids: Vec<String> = evs.iter().filter_map(|e| e["thread"].as_str().map(str::to_string)).collect(); kids.sort(); kids.dedup();
-            for kid in kids { if let Some(end) = ended_last(&evs, &kid) { let a = ag.clone(); a.task_end(&kid, end).await } }
+            for kid in kids {
+                if let Some(end) = ended_last(&evs, &kid) { let a = ag.clone(); a.task_end(&kid, end).await }
+                let from = ag.stopped_by.lock().unwrap().remove(&kid).unwrap_or_default(); // the launcher that stopped the thread itself is not told
+                ag.launch_tell(&kid, &evs, &from).await;
+            }
         }
     });
 }

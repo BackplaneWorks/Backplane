@@ -82,7 +82,8 @@ impl Agents {
     pub async fn tool_interrupt(self: &Arc<Self>, thread: &str, a: &Value) -> (bool, Value) {
         let target = sv(a, "threadId"); if !self.same_project(thread, target).await { return fail(NOT_HERE) }
         if !self.world().await.running(target) { return (true, json!({"threadId":target,"state":"not running"})) }
-        match self.interrupt(target).await { Ok(()) => (true, json!({"threadId":target,"state":"interrupted"})), Err(e) => fail(&e) }
+        self.stopped_by.lock().unwrap().insert(target.to_string(), thread.to_string()); // Launch.tell: a launcher that stops its own thread is not told
+        let r = self.interrupt(target).await; match r { Ok(()) => (true, json!({"threadId":target,"state":"interrupted"})), Err(e) => fail(&e) }
     }
     pub async fn tool_wait(&self, thread: &str, a: &Value) -> (bool, Value) {
         let target = sv(a, "threadId"); if !self.same_project(thread, target).await { return fail(NOT_HERE) }
