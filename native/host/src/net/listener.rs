@@ -31,7 +31,7 @@ pub trait Tailscale: Send + Sync {
 pub struct Cli;
 async fn run(args: Vec<String>) -> String {
     if crate::copy::on() { return String::new() }
-    match tokio::time::timeout(Duration::from_secs(5), Command::new("tailscale").args(&args).stderr(std::process::Stdio::null()).output()).await {
+    match tokio::time::timeout(Duration::from_secs(5), crate::proc::tokio_cmd(crate::proc::Kind::Net, "tailscale").args(&args).stderr(std::process::Stdio::null()).output()).await {
         Ok(Ok(o)) if o.status.success() => String::from_utf8_lossy(&o.stdout).into_owned(), _ => String::new() }
 }
 impl Tailscale for Cli {
