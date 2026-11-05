@@ -48,7 +48,8 @@ def main():
     result = {'schema': 1, 'status': 'INCOMPLETE', 'repository': REPO,
         'sourceCommit': SOURCE, 'releaseId': a.release_id, 'assetId': a.asset_id,
         'expectedSha256': a.sha256, 'expectedBytes': a.bytes,
-        'workflowPermissions': {'contents': 'read'}, 'permissionChanged': False,
+        'workflowPermissions': {'contents': 'write'}, 'permissionChanged': True,
+        'permissionChangeScope': 'User-approved one retry; jobs.intake only; revert after publication',
         'audience': 'User accepted signed-in public-repository Actions readers; not private storage',
         'draftCleanupOwner': 't1792701529-415584', 'temporaryArtifactCleanupRequired': True,
         'releasePublicationSupported': False, 'startedAt': time.time()}
@@ -66,7 +67,7 @@ def main():
             match = re.search(rb'HTTP\s+(\d{3})', r.stderr)
             result['httpFailure'] = int(match[1]) if match else None
             result['failedEndpoint'] = suffix
-            raise RuntimeError('Existing contents:read workflow token could not read the exact draft/asset; preserve evidence and report before requesting any permission change')
+            raise RuntimeError('Approved one-retry contents:write token could not read the exact draft/asset; STOP and report; no further retry or escalation')
         return None if binary else json.loads(r.stdout)
 
     try:

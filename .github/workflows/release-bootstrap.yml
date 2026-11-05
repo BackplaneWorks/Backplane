@@ -1,49 +1,55 @@
 name: Authenticated unpublished 0142 seed intake (never publish)
-run-name: RC0142 intake asset${{ inputs.asset_id }}
+run-name: RC0142 approved sole retry BOTH seeds
 on:
   workflow_dispatch:
     inputs:
       release_id: {type: string, required: true}
-      asset_id: {type: string, required: true}
-      sha256: {type: string, required: true}
-      bytes: {type: string, required: true}
-      name: {type: string, required: true}
 permissions:
   contents: read
 concurrency:
-  group: rc0142-seed-${{ inputs.release_id }}-${{ inputs.asset_id }}
+  group: rc0142-seed-approved-retry-${{ inputs.release_id }}
   cancel-in-progress: false
 jobs:
   intake:
+    permissions:
+      contents: write
     runs-on: ubuntu-24.04
     timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
         with: {ref: '${{ github.sha }}', persist-credentials: false}
-      - name: Read exact draft and asset with unchanged read token; verify SHA before transfer
+      - name: One approved job-only write-token retry, exact BOTH draft assets
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_ID: ${{ inputs.release_id }}
-          ASSET_ID: ${{ inputs.asset_id }}
-          EXPECTED_SHA: ${{ inputs.sha256 }}
-          EXPECTED_BYTES: ${{ inputs.bytes }}
-          EXPECTED_NAME: ${{ inputs.name }}
         run: |
           set -euo pipefail
-          systemd-run --user --scope -q -p MemoryAccounting=yes -p MemoryMax=536870912 -p MemorySwapMax=0 -- python3 extra/recut951-intake/seed_intake.py --release-id "$RELEASE_ID" --asset-id "$ASSET_ID" --sha256 "$EXPECTED_SHA" --bytes "$EXPECTED_BYTES" --name "$EXPECTED_NAME" --out "$GITHUB_WORKSPACE/build/seed"
+          [ "$RELEASE_ID" = 434527247 ]
+          systemd-run --user --scope -q -p MemoryAccounting=yes -p MemoryMax=536870912 -p MemorySwapMax=0 -- python3 extra/recut951-intake/seed_intake.py --release-id "$RELEASE_ID" --asset-id 711173981 --sha256 4708b3cc7c6f69d8e4fba0bd7e0651a6e58f7486c778960805b8ea46541dbf72 --bytes 11728502 --name 0142-recut951-service-inputs.tar.gz --out "$GITHUB_WORKSPACE/build/seed-service"
+          systemd-run --user --scope -q -p MemoryAccounting=yes -p MemoryMax=536870912 -p MemorySwapMax=0 -- python3 extra/recut951-intake/seed_intake.py --release-id "$RELEASE_ID" --asset-id 711192693 --sha256 bf2576829d84d213990b6d352b6b068c10fdf75f3af7273ae7870f1526bd2c14 --bytes 31730640 --name 0142-recut951-phone-inputs.tar.gz --out "$GITHUB_WORKSPACE/build/seed-phone"
       - uses: actions/upload-artifact@v4
-        id: seed
+        id: service
         with:
           name: 0142-recut951-inputs
-          path: build/seed/seed-inputs.tar.gz
+          path: build/seed-service/seed-inputs.tar.gz
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        id: phone
+        with:
+          name: 0142-recut951-phone-inputs
+          path: build/seed-phone/seed-inputs.tar.gz
           compression-level: 0
           retention-days: 1
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: 0142-recut951-intake-evidence
-          path: build/seed/INTAKE.json
+          name: 0142-recut951-intake-retry-evidence
+          path: |
+            build/seed-service/INTAKE.json
+            build/seed-phone/INTAKE.json
           retention-days: 1
           if-no-files-found: warn
