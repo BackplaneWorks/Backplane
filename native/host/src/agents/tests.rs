@@ -25,7 +25,7 @@ fn base_log(work: &Path, n: usize, extra: &str) -> String {
 async fn start(name: &str, log: impl FnOnce(&Path) -> String, cli: impl FnOnce(&Path) -> Cli) -> (Arc<Hub>, Arc<Agents>, PathBuf, PathBuf) {
     let home = dir(&format!("{name}-home")); let work = dir(&format!("{name}-work"));
     std::fs::write(home.join("events.jsonl"), log(&work)).unwrap();
-    let hub = Hub::start(Cfg { home: home.clone(), version: "0.14.0".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+    let hub = Hub::start(Cfg { home: home.clone(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
     let ag = Agents::start_with(hub.clone(), cli(&work)).await.unwrap();
     (hub, ag, home, work)
 }
@@ -122,7 +122,7 @@ fn shape(ev: &[Value]) -> Vec<String> { ev.iter().map(norm).collect() }
     assert!(log_from(&hub, 0).await.iter().all(|e| !turn_is(e, "interrupted")), "interrupt_idle_nothing");
     let from = len(&hub).await;
     rpc(&hub, "turn.start", json!({"thread":T1,"text":"zqlong"})).await;
-    tokio::time::sleep(Duration::from_millis(1500)).await;
+    tokio::time::sleep(Duration::from_millis(1350)).await; // mid-cycle: the stand-in ends a block every half second, and a text just posted leaves nothing streamed
     assert_eq!(rpc(&hub, "turn.interrupt", json!({"thread":T1})).await["ok"], true);
     let ev = until(&hub, from, 5, |ev| ev.iter().any(|e| is(e, "SettingSet") && e["key"] == "provider.resume.t1700000001-2" && ev.iter().any(|x| turn_is(x, "interrupted")))).await;
     let c = core(&ev, T1); let sh = shape(&c);
@@ -412,8 +412,8 @@ fn tool_text(r: &Value) -> Value { serde_json::from_str(r["result"]["content"][0
     std::fs::set_permissions(sd.join("claude"), std::fs::Permissions::from_mode(0o755)).unwrap();
     let (hub, ag, home, work) = {
         let home = dir("a-home"); let work = dir("a-work"); std::fs::write(home.join("events.jsonl"), base_log(&work, 1, "")).unwrap();
-        let hub = Hub::start(Cfg { home: home.clone(), version: "0.14.0".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
-        let host = host::HostInfo { home: home.clone(), fc: "/home/h/.local/bin/freecadcmd".into(), render: "/home/h/Documents/i2cjak/backplane-gpui/build/gpui/backplane-serve".into(), kicad: prompt::Kicad { status: "stock".into(), cli: "/home/h/.local/bin/kicad-cli".into(), version: "10.0.7".into(), ..Default::default() },
+        let hub = Hub::start(Cfg { home: home.clone(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        let host = host::HostInfo { home: home.clone(), fc: "/home/h/.local/bin/freecadcmd".into(), render: "/home/h/Documents/i2cjak/backplane-gpui/build/gpui/backplane-serve-current".into(), kicad: prompt::Kicad { status: "stock".into(), cli: "/home/h/.local/bin/kicad-cli".into(), version: "10.0.7".into(), ..Default::default() },
             models: json!({"claude":["fable","opus","sonnet","haiku"],"codex":["gpt-6.1-sol","gpt-6-astra","gpt-6.1-terra","gpt-6-sol","gpt-6-luna","gpt-5.6-sol","gpt-5.6-terra","gpt-5.6-luna"]}), ..Default::default() };
         let ag = Agents::start_host(hub.clone(), Cli::standin(&sd), host).await.unwrap(); (hub, ag, home, work)
     };
@@ -422,12 +422,56 @@ fn tool_text(r: &Value) -> Value { serde_json::from_str(r["result"]["content"][0
     let got: Vec<String> = { let raw = std::fs::read_to_string(&argfile).unwrap(); let mut v: Vec<String> = raw.split('\0').map(str::to_string).collect(); v.pop(); v };
     let want: Vec<String> = serde_json::from_str(include_str!("../../../../test/gpui/agents/fixtures/argv-default.json")).unwrap();
     assert_eq!(got.len(), want.len());
-    let norm = |v: &[String]| v.iter().map(|x| { let x = x.replace(&home.join("attachments").to_string_lossy().to_string(), "<home>/attachments").replace("/home/h/Documents/i2cjak/backplane-gpui/build/gpui/results/agents/argv/work/home/attachments", "<home>/attachments");
-        let x = x.replace(&work.to_string_lossy().to_string(), "<root>").replace("/home/h/Documents/i2cjak/backplane-gpui/build/gpui/results/agents/argv/work/fixroot", "<root>");
+    let norm = |v: &[String]| v.iter().map(|x| { let x = x.replace(&home.join("attachments").to_string_lossy().to_string(), "<home>/attachments").replace("/home/h/Documents/i2cjak/backplane-gpui/build/gpui/results/agents/argv2/work/home/attachments", "<home>/attachments");
+        let x = x.replace(&work.to_string_lossy().to_string(), "<root>").replace("/home/h/Documents/i2cjak/backplane-gpui/build/gpui/results/agents/argv2/work/fixroot", "<root>");
         if x.contains("/mcp/") { let (a, b) = x.split_once("/mcp/").unwrap(); let _ = a; format!("mcp:{}", b.split('?').next().unwrap().split('.').next().unwrap()) } else { x } }).collect::<Vec<_>>();
     // arguments, prompt and the MCP config (its port, generation and key differ by run)
     let (g, w) = (norm(&got), norm(&want));
     for (i, (a, b)) in g.iter().zip(w.iter()).enumerate() { if a.starts_with('{') && a.contains("mcpServers") { assert!(a.contains("\"pcbparts\":{\"type\":\"http\",\"url\":\"https://pcbparts.dev/mcp\"}") && b.contains("pcbparts")); continue }
-        assert_eq!(prompt::tests::strip_orch(a), prompt::tests::strip_orch(b), "argument {i}") }
+        assert_eq!(a, b, "argument {i}") }
     assert!(got.last().unwrap().starts_with("{\"mcpServers\":{\"backplane\":{\"type\":\"http\",\"url\":\"http://127.0.0.1:")); ag.shutdown();
 }
+
+// ---- replays of recorded stand-in output: the command ledger, background work, subagents, todos ----
+const PLAYER: &str = r#"#!/bin/sh
+dir=$(dirname "$0"); rf="$dir/replay.ndjson"; n=0; U1=; U2=
+need() { while [ $n -lt $1 ]; do IFS= read -r l || exit 0; case "$l" in *'"type":"user"'*) n=$((n+1)); u=$(printf '%s' "$l" | sed -n 's/.*"uuid":"\([^"]*\)".*/\1/p'); eval "U$n=\$u";; esac; done; }
+need 1
+while IFS= read -r line <&3; do
+  case "$line" in *__U2__*) need 2;; esac
+  printf '%s\n' "$line" | sed -e "s/__U1__/$U1/g" -e "s/__U2__/$U2/g"
+  sleep 0.02
+done 3< "$rf"
+exec cat >/dev/null
+"#;
+fn norm_digits(s: &str) -> String {
+    // uuids first, then any run of 3+ digits: ids and clocks only
+    let b: Vec<char> = s.chars().collect(); let mut o = String::new(); let mut i = 0;
+    let hex = |c: char| c.is_ascii_hexdigit();
+    while i < b.len() {
+        if i + 36 <= b.len() && [8, 13, 18, 23].iter().all(|k| b[i + k] == '-') && (0..36).all(|k| [8, 13, 18, 23].contains(&k) || hex(b[i + k])) { o.push('U'); i += 36; continue }
+        if b[i].is_ascii_digit() { let mut j = i; while j < b.len() && b[j].is_ascii_digit() { j += 1 } if j - i >= 3 { o.push('N') } else { o.extend(&b[i..j]) } i = j; continue }
+        o.push(b[i]); i += 1;
+    }
+    o.replace("N-0", "N-N").split("N-").enumerate().map(|(i, p)| if i == 0 { p.to_string() } else { let d = p.chars().take_while(|c| c.is_ascii_digit()).count(); format!("N-N{}", &p[d..]) }).collect::<String>().replace("N-NN", "N-N")
+}
+async fn replay(name: &str, messages: &[&str], gap_ms: u64) -> (Vec<String>, Vec<String>) {
+    let sd = dir(&format!("rp-{name}-bin")); script(&sd, "claude", PLAYER);
+    std::fs::write(sd.join("replay.ndjson"), match name { "lifecycle" => include_str!("../../../../test/gpui/agents/fixtures/replay-lifecycle.ndjson"), "todos" => include_str!("../../../../test/gpui/agents/fixtures/replay-todos.ndjson"),
+        "agents" => include_str!("../../../../test/gpui/agents/fixtures/replay-agents.ndjson"), _ => include_str!("../../../../test/gpui/agents/fixtures/replay-pair.ndjson") }).unwrap();
+    let (hub, ag, _h, _w) = start(&format!("rp-{name}"), |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await; let from = len(&hub).await;
+    for m in messages { assert_eq!(rpc(&hub, "turn.start", json!({"thread":T1,"text":m})).await["ok"], true); tokio::time::sleep(Duration::from_millis(gap_ms)).await }
+    let ev = until(&hub, from, 30, |ev| ev.iter().any(|e| turn_is(e, "completed") || turn_is(e, "failed"))).await; tokio::time::sleep(Duration::from_millis(1500)).await;
+    let mut ev = log_from(&hub, from).await; if ev.len() < 2 { ev = ev.clone() } ag.shutdown();
+    let want_raw = match name { "lifecycle" => include_str!("../../../../test/gpui/agents/fixtures/js-lifecycle.jsonl"), "todos" => include_str!("../../../../test/gpui/agents/fixtures/js-todos.jsonl"), "agents" => include_str!("../../../../test/gpui/agents/fixtures/js-agents.jsonl"), _ => include_str!("../../../../test/gpui/agents/fixtures/js-pair.jsonl") };
+    let f = |v: &[Value]| core(v, T1).iter().map(|e| norm_digits(&norm(e))).collect::<Vec<_>>();
+    (f(&ev), f(&lines_of(want_raw)))
+}
+fn assert_same(got: &[String], want: &[String]) {
+    for (i, (a, b)) in got.iter().zip(want.iter()).enumerate() { assert_eq!(a, b, "event {i} of {} (rust) / {} (js)", got.len(), want.len()) }
+    assert_eq!(got.len(), want.len(), "counts; extra rust: {:?}; extra js: {:?}", got.iter().skip(want.len()).collect::<Vec<_>>(), want.iter().skip(got.len()).collect::<Vec<_>>());
+}
+#[tokio::test(flavor = "multi_thread")] async fn a_lifecycle_turn_matches_the_js_hub_event_for_event() { let (g, w) = replay("lifecycle", &["hello"], 0).await; assert_same(&g, &w) }
+#[tokio::test(flavor = "multi_thread")] async fn tool_calls_and_todos_match_the_js_hub() { let (g, w) = replay("todos", &["todos:4/2 tools:2 go"], 0).await; assert_same(&g, &w) }
+#[tokio::test(flavor = "multi_thread")] async fn background_subagents_match_the_js_hub() { let (g, w) = replay("agents", &["agents:2 agentsteps:2 go"], 0).await; assert_same(&g, &w) }
+#[tokio::test(flavor = "multi_thread")] async fn two_commands_are_ended_one_by_its_own_lifecycle() { let (g, w) = replay("pair", &["first", "second"], 300).await; assert_same(&g, &w) }

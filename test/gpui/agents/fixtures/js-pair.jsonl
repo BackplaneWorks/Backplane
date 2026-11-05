@@ -1,0 +1,25 @@
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m1793845619-147","role":"user","text":"first","at":1793845619}
+{"$":"TurnChanged","thread":"t1700000001-2","state":"running","at":1793845619}
+{"$":"SettingSet","key":"turn.from.t1700000001-2","value":"@m1793845619-147","at":1793845619}
+{"$":"SettingSet","key":"restart.retry.t1700000001-2","value":"","at":1793845619}
+{"$":"SettingSet","key":"provider.resume.t1700000001-2","value":"","at":1793845619}
+{"$":"SettingSet","key":"fallback.input.t1700000001-2","value":"first","at":1793845619}
+{"$":"SessionSet","id":"t1700000001-2","session":"sess-2206416-1793845619658","at":1793845619}
+{"$":"SettingSet","key":"tok.basis.t1700000001-2","value":"c:0","at":1793845619}
+{"$":"SettingSet","key":"turn.speed.t1700000001-2","value":"0/0/0/0/0/0/0/0","at":1793845619}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m1793845619-160","role":"user","text":"second","at":1793845619}
+{"$":"TurnChanged","thread":"t1700000001-2","state":"running","at":1793845619}
+{"$":"SettingSet","key":"turn.from.t1700000001-2","value":"@m1793845619-160","at":1793845619}
+{"$":"SettingSet","key":"restart.retry.t1700000001-2","value":"","at":1793845619}
+{"$":"SettingSet","key":"provider.resume.t1700000001-2","value":"","at":1793845619}
+{"$":"SettingSet","key":"fallback.input.t1700000001-2","value":"second","at":1793845619}
+{"$":"SettingSet","key":"wait.t1700000001-2","value":"m1793845619-160","at":1793845619}
+{"$":"UsageSet","thread":"t1700000001-2","used":11,"window":0,"at":1793845621}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"msg_2206416_1:0:0fbd6f75","role":"assistant","text":"REPLY first","at":1793845621}
+{"$":"UsageSet","thread":"t1700000001-2","used":15,"window":0,"at":1793845621}
+{"$":"UsageSet","thread":"t1700000001-2","used":0,"window":200000,"at":1793845621}
+{"$":"SettingSet","key":"wait.t1700000001-2","value":"","at":1793845621}
+{"$":"UsageSet","thread":"t1700000001-2","used":11,"window":0,"at":1793845622}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"msg_2206416_2:0:ae4c1185","role":"assistant","text":"REPLY second","at":1793845622}
+{"$":"UsageSet","thread":"t1700000001-2","used":15,"window":0,"at":1793845622}
+{"$":"TurnChanged","thread":"t1700000001-2","state":"completed","at":1793845622}

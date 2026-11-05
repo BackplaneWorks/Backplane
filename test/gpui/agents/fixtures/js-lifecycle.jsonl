@@ -1,0 +1,14 @@
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m1793845575-147","role":"user","text":"hello","at":1793845575}
+{"$":"TurnChanged","thread":"t1700000001-2","state":"running","at":1793845575}
+{"$":"SettingSet","key":"turn.from.t1700000001-2","value":"@m1793845575-147","at":1793845575}
+{"$":"SettingSet","key":"restart.retry.t1700000001-2","value":"","at":1793845575}
+{"$":"SettingSet","key":"provider.resume.t1700000001-2","value":"","at":1793845575}
+{"$":"SettingSet","key":"fallback.input.t1700000001-2","value":"hello","at":1793845575}
+{"$":"SessionSet","id":"t1700000001-2","session":"sess-2174863-1793845575837","at":1793845575}
+{"$":"SettingSet","key":"tok.basis.t1700000001-2","value":"c:0","at":1793845575}
+{"$":"SettingSet","key":"turn.speed.t1700000001-2","value":"0/0/0/0/0/0/0/0","at":1793845575}
+{"$":"UsageSet","thread":"t1700000001-2","used":11,"window":0,"at":1793845576}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"msg_2174863_1:0:0fb441dd","role":"assistant","text":"REPLY hello","at":1793845576}
+{"$":"UsageSet","thread":"t1700000001-2","used":15,"window":0,"at":1793845576}
+{"$":"UsageSet","thread":"t1700000001-2","used":0,"window":200000,"at":1793845576}
+{"$":"TurnChanged","thread":"t1700000001-2","state":"completed","at":1793845576}

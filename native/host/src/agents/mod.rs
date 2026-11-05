@@ -7,12 +7,12 @@
 //! Out for Claude: images/`$skill` input, the Backplane MCP server and runtime prompt in the agent's arguments,
 //! subagents and background tasks, todo tools, the allowance stream, the legacy queue, mail provenance beyond carry,
 //! and the hub's time-driven policies (liveness, autosettle, alert/told/summary, star nudge), which belong to M4.
-pub mod host; pub mod inputs; pub mod lines; pub mod mcp; pub mod proc; pub mod prompt; pub mod prompt_text; pub mod rules; pub mod tools; pub mod world;
+pub mod bg; pub mod cmds; pub mod host; pub mod inputs; pub mod lines; pub mod mcp; pub mod proc; pub mod prompt; pub mod prompt_text; pub mod rules; pub mod tools; pub mod world;
 #[cfg(test)] mod tests;
 
 use crate::{api::{Caller, Fut, RpcHandler}, hub::Hub};
 use anyhow::Result;
-use lines::{hub_id, Cx};
+use lines::{hub_id, Cx, Flow};
 use proc::{Cli, Exit};
 use serde_json::{json, Value};
 use std::{collections::{HashMap, VecDeque}, sync::{atomic::{AtomicU64, Ordering::Relaxed}, Arc, Mutex as StdMutex}, time::{Duration, Instant}};
@@ -30,7 +30,7 @@ pub struct Stats { pub turns: AtomicU64, pub procs_spawned: AtomicU64, pub procs
     pub events: AtomicU64, pub commit_errors: AtomicU64, pub interrupts: AtomicU64, pub refused_full: AtomicU64, pub bad_lines: AtomicU64, pub max_batch_lines: AtomicU64 }
 
 pub enum Cmd {
-    User { msg: String, text: String, origin: Option<(String, String, String)>, extra: Vec<Value>, reply: oneshot::Sender<Result<(), String>> },
+    User { msg: String, text: String, role: String, origin: Option<(String, String, String)>, extra: Vec<Value>, reply: oneshot::Sender<Result<(), String>> },
     Interrupt { reply: oneshot::Sender<()> },
 }
 
@@ -89,10 +89,11 @@ impl Agents {
     pub fn actors(&self) -> usize { self.actors.lock().unwrap().len() }
 
     /// Hub.turn then Hub.post.go: take the person's message, start or feed the thread's agent. Acknowledged after the events are durable.
-    pub async fn deliver(self: &Arc<Self>, thread: &str, msg: &str, text: &str, origin: Option<(String, String, String)>, extra: Vec<Value>) -> Result<(), String> {
+    pub async fn deliver(self: &Arc<Self>, thread: &str, msg: &str, text: &str, origin: Option<(String, String, String)>, extra: Vec<Value>) -> Result<(), String> { self.deliver_as("user", thread, msg, text, origin, extra).await }
+    pub async fn deliver_as(self: &Arc<Self>, role: &str, thread: &str, msg: &str, text: &str, origin: Option<(String, String, String)>, extra: Vec<Value>) -> Result<(), String> {
         for _ in 0..3 {
             let tx = self.actor(thread); let (reply, rx) = oneshot::channel();
-            match tx.try_send(Cmd::User { msg: msg.into(), text: text.into(), origin: origin.clone(), extra: extra.clone(), reply }) {
+            match tx.try_send(Cmd::User { msg: msg.into(), text: text.into(), role: role.into(), origin: origin.clone(), extra: extra.clone(), reply }) {
                 Ok(()) => return rx.await.unwrap_or_else(|_| Err("the thread's agent stopped".into())),
                 Err(mpsc::error::TrySendError::Full(_)) => { self.stats.refused_full.fetch_add(1, Relaxed); return Err("too many messages are waiting for this thread".into()) }
                 Err(mpsc::error::TrySendError::Closed(_)) => { self.actors.lock().unwrap().remove(thread); }
@@ -165,6 +166,7 @@ struct Actor {
     ag: Arc<Agents>, th: String, cx: Cx, live_proc: Option<Live>,
     lines: Option<mpsc::Receiver<String>>, exit: Option<oneshot::Receiver<Exit>>,
     live: String, live_gen: u64, ahead: String, last_user: String, recent: VecDeque<String>, pacing: Option<Instant>, rid: u64,
+    cmds: cmds::Cmds, sent: VecDeque<(String, String, String)>, wait: String, prog: bg::Prog, heard: Instant,
 }
 
 async fn next_batch(rx: &mut mpsc::Receiver<String>) -> Option<Vec<String>> {
@@ -177,9 +179,10 @@ async fn recv_opt(r: &mut Option<mpsc::Receiver<String>>) -> Option<Vec<String>>
 async fn exit_opt(r: &mut Option<oneshot::Receiver<Exit>>) -> Result<Exit, oneshot::error::RecvError> { match r { Some(rx) => rx.await, None => std::future::pending().await } }
 
 impl Actor {
-    fn new(ag: Arc<Agents>, th: String) -> Actor { Actor { cx: Cx::new(&th), ag, th, live_proc: None, lines: None, exit: None, live: String::new(), live_gen: 0, ahead: String::new(), last_user: String::new(), recent: VecDeque::new(), pacing: None, rid: 0 } }
+    fn new(ag: Arc<Agents>, th: String) -> Actor { Actor { cx: Cx::new(&th), ag, th, live_proc: None, lines: None, exit: None, live: String::new(), live_gen: 0, ahead: String::new(), last_user: String::new(), recent: VecDeque::new(), pacing: None, rid: 0, cmds: cmds::Cmds::new(), sent: VecDeque::new(), wait: String::new(), prog: bg::Prog::default(), heard: Instant::now() } }
 
     async fn run(mut self, mut rx: mpsc::Receiver<Cmd>) {
+        let mut tick = tokio::time::interval(Duration::from_secs(1)); tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             let pace = self.pacing;
             tokio::select! {
@@ -190,6 +193,7 @@ impl Actor {
                 },
                 e = exit_opt(&mut self.exit), if self.exit.is_some() => { self.exit = None; let e = e.unwrap_or(Exit { code: None, signal: None, stderr: String::new() }); self.gone(e).await }
                 _ = tokio::time::sleep_until(pace.unwrap_or_else(Instant::now).into()), if pace.is_some() => { self.pacing = None }
+                _ = tick.tick(), if self.cx.running || !self.prog.pend.is_empty() => { self.beat().await }
             }
         }
         self.stop().await;
@@ -206,13 +210,13 @@ impl Actor {
 
     async fn cmd(&mut self, c: Cmd) {
         match c {
-            Cmd::User { msg, text, origin, extra, reply } => { let r = self.user(msg, text, origin, extra).await; let _ = reply.send(r); }
+            Cmd::User { msg, text, role, origin, extra, reply } => { let r = self.user(msg, text, role, origin, extra).await; let _ = reply.send(r); }
             Cmd::Interrupt { reply } => { self.interrupt().await; let _ = reply.send(()); }
         }
     }
 
     /// Hub.turn.go + Hub.post.go (the Claude path: the message goes straight to the process, running or not).
-    async fn user(&mut self, msg: String, text: String, origin: Option<(String, String, String)>, extra: Vec<Value>) -> Result<(), String> {
+    async fn user(&mut self, msg: String, text: String, role: String, origin: Option<(String, String, String)>, extra: Vec<Value>) -> Result<(), String> {
         if self.recent.contains(&msg) { return Ok(()) } // Hub.dup: a message resent is stored once
         let (t, cwd, cx) = {
             let w = self.ag.world().await;
@@ -231,7 +235,7 @@ impl Actor {
             let tail = rules::steer_tail(&self.live); self.ahead.push_str(&head); self.live_end().await;
             if !tail.is_empty() { self.live = tail.clone(); let _ = self.ag.hub.live_delta(&th, &tail).await; }
         }
-        ev.push(json!({"$":"MessagePosted","thread":th,"msg":msg,"role":"user","text":text,"at":now}));
+        ev.push(json!({"$":"MessagePosted","thread":th,"msg":msg,"role":role,"text":text,"at":now}));
         if let Some((from, kind, r)) = &origin { ev.push(json!({"$":"MessageFrom","thread":th,"msg":msg,"from":from,"kind":kind,"ref":r,"at":now})) }
         ev.push(json!({"$":"TurnChanged","thread":th,"state":"running","at":now}));
         ev.push(set(format!("turn.from.{th}"), format!("@{msg}"), now));            // Turn.mark: the newest entry then
@@ -248,10 +252,11 @@ impl Actor {
             if let Err(e) = self.spawn(&t, &cwd, key).await { self.fail(format!("could not start claude: {e}"), "spawn", &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); return Ok(()) }
         }
         let uuid = rules::hub_uuid(now, &format!("{th}/{msg}"));
-        let line = { let (text2, cwd2, host) = (text.clone(), cwd.clone(), self.ag.host.clone()); // Media.claude: images read, `$skill` mentions made real
-            tokio::task::spawn_blocking(move || { let ss = if text2.contains('$') { inputs::scan(&host.user_home, &cwd2, host.kistack.as_deref()) } else { vec![] }; let body = inputs::expand_claude(&text2, &ss); let imgs = inputs::read_images(&text2); inputs::claude_line(&body, &imgs, &uuid) }).await.unwrap_or_default() };
+        self.cmds = self.cmds.accept(&uuid); self.sent.push_back((uuid.clone(), msg.clone(), text.clone())); if self.sent.len() > RECENT { self.sent.pop_front(); }
+        let line = { let (text2, cwd2, host, uuid2) = (text.clone(), cwd.clone(), self.ag.host.clone(), uuid.clone()); // Media.claude: images read, `$skill` mentions made real
+            tokio::task::spawn_blocking(move || { let ss = if text2.contains('$') { inputs::scan(&host.user_home, &cwd2, host.kistack.as_deref()) } else { vec![] }; let body = inputs::expand_claude(&text2, &ss); let imgs = inputs::read_images(&text2); inputs::claude_line(&body, &imgs, &uuid2) }).await.unwrap_or_default() };
         let sent = self.live_proc.as_ref().map(|p| p.input.try_send(line));
-        if !matches!(sent, Some(Ok(()))) { self.fail("the agent is not taking input".into(), "input", &hub_id("in", now, 0)).await }
+        if matches!(sent, Some(Ok(()))) { self.cmds = self.cmds.sent(&uuid) } else { self.fail("the agent is not taking input".into(), "input", &hub_id("in", now, 0)).await }
         Ok(())
     }
 
@@ -268,6 +273,7 @@ impl Actor {
         let args = rules::claude_args(&rules::ArgsIn { model: &t.model, session: &t.session, runtime: &t.runtime, interaction: &t.interaction, prompt: &prompt, dirs: &dirs, effort: &effort, think, plugins: &plugins, mcp_url: &url });
         self.ag.set_gen(&th, &gen);
         let p = proc::spawn(&prog, &args, std::path::Path::new(cwd), self.ag.cli.dir(), &[]).map_err(|e| e.to_string())?;
+        self.cmds = cmds::Cmds::new(); self.wait.clear();
         self.ag.stats.procs_spawned.fetch_add(1, Relaxed);
         self.live_proc = Some(Live { input: p.input, pid: p.pid, key }); self.lines = Some(p.lines); self.exit = Some(p.exit);
         Ok(())
@@ -297,18 +303,52 @@ impl Actor {
         ev.push(set(format!("restart.retry.{th}"), String::new(), now)); ev.push(set(format!("provider.resume.{th}"), String::new(), now));
         self.rid += 1;
         if let Some(p) = &self.live_proc { let _ = p.input.try_send(rules::interrupt_line(&format!("int-{now}-{}", self.rid))); }
+        // Claude.unread: the commands the CLI held queued are cancelled unread; the person is told which
+        let waiting = self.cmds.waiting(); self.cmds = self.cmds.stop(&[]);
+        let xs: Vec<&String> = self.sent.iter().filter(|(u, _, _)| waiting.contains(u)).map(|(_, _, t)| t).collect();
+        if !xs.is_empty() {
+            let q = xs.iter().map(|x| format!("\u{201C}{}\u{201D}", x.trim().chars().take(80).collect::<String>().replace(['\t', '\n'], " "))).collect::<Vec<_>>().join(" · "); let n = xs.len();
+            let say = if n == 1 { format!("Stop cancelled a message the agent had not read yet: {q}. Send it again if you still want it.") } else { format!("Stop cancelled {n} messages the agent had not read yet: {q}. Send them again if you still want them.") };
+            ev.push(json!({"$":"ActivityLogged","thread":th,"act":hub_id("u", now, self.ag.seq()),"tone":"error","kind":"stop","summary":say,"at":now}));
+        }
         self.live_end().await; self.commit(ev).await; self.cx.running = false;
     }
 
-    /// One read's lines: deltas merged, each line turned into events, the events committed together.
+    /// One read's lines: deltas merged, each line judged by the command ledger and turned into events, the events committed together.
     async fn batch(&mut self, ls: Vec<String>) {
         let st = &self.ag.stats; st.lines.fetch_add(ls.len() as u64, Relaxed); st.max_batch_lines.fetch_max(ls.len() as u64, Relaxed);
-        let ls = lines::merge(ls); let pace = lines::streaming(&ls); let at = now_s();
-        let mut events: Vec<Value> = vec![]; let mut clear = false;
+        let ls = lines::merge(ls); let pace = lines::streaming(&ls); let at = now_s(); self.heard = Instant::now();
+        let mut events: Vec<Value> = vec![]; let mut clear = false; let mut sends: Vec<String> = vec![];
         for l in ls {
             if l.trim().is_empty() { continue }
             let Ok(v) = serde_json::from_str::<Value>(&crate::store::clean(&l)) else { self.ag.stats.bad_lines.fetch_add(1, Relaxed); continue };
-            let fx = self.cx.line(&v, at);
+            // Prog: a main-agent task_progress line is written at most once every few seconds (the newest of each task always lands)
+            if v["type"] == "system" && v["subtype"] == "task_progress" && v["parent_tool_use_id"].as_str().unwrap_or("").is_empty() {
+                let s = self.prog.line(at, v); self.prog = bg::Prog { at: s.at, pend: s.pend }; if !s.flush.is_empty() { events.extend(self.cx.progress(&s.flush, at)) } continue
+            }
+            let verdict = self.cmds.verdict(self.cx.running, &v); let text = self.cmds.text(&v); self.cmds = self.cmds.see(&v);
+            let fx = match verdict {
+                0 => self.cx.line(&v, at),
+                1 => self.cx.line_flow(&v, at, Flow::Quiet),
+                2 => self.cx.line_flow(&v, at, Flow::Stream),
+                3..=5 => {
+                    let text = if text.trim().is_empty() { lines::Cx::why_of(&v) } else { text };
+                    if verdict >= 4 { sends.extend(self.cx.bg_stop_lines(&format!("b{at}-{}", self.ag.seq()))) }
+                    lines::Fx { events: self.cx.end(verdict, &text, at), ..Default::default() }
+                }
+                _ => { // 6: Claude started a turn by itself (a background task ended, a wakeup): the thread runs again, with an Act saying why
+                    let th = self.th.clone(); let seq = self.ag.seq();
+                    let why = if v["type"] == "command_lifecycle" { "Resumed after Stop".to_string() } else {
+                        let sum = v["summary"].as_str().unwrap_or("").to_string(); let title = if !sum.is_empty() { sum } else { let id = v["task_id"].as_str().unwrap_or("");
+                            let r = self.cx.bg.iter().find(|r| bg::field(r, 0) == bg::clean(id)).map(|r| { let t = bg::field(r, 3); if t.is_empty() { bg::doing(r) } else { t } }).unwrap_or_default(); if r.is_empty() { "background work".into() } else { r } };
+                        let status = v["status"].as_str().unwrap_or(""); format!("Woken: {title}{}", if status.is_empty() || status == "completed" { String::new() } else { format!(" ({status})") }) };
+                    let newest = { let m = self.ag.hub.model().await; m.threads.get(&th).map(|x| x.last_entry.clone()).unwrap_or_default() };
+                    self.cx.running = true;
+                    let mut ev = vec![json!({"$":"TurnChanged","thread":th,"state":"running","at":at}), set(format!("turn.from.{th}"), format!("@{newest}"), at), set(format!("restart.retry.{th}"), String::new(), at), set(format!("provider.resume.{th}"), String::new(), at),
+                        json!({"$":"ActivityLogged","thread":th,"act":hub_id("k", at, seq),"tone":"info","kind":"wake","summary":why,"at":at})];
+                    let mut fx = self.cx.line_flow(&v, at, Flow::Stream); ev.append(&mut fx.events); fx.events = ev; fx
+                }
+            };
             for d in &fx.deltas {
                 self.ag.stats.deltas.fetch_add(1, Relaxed);
                 if self.live.is_empty() { self.live_gen = now_ms() }
@@ -323,14 +363,33 @@ impl Actor {
                     self.ahead.clear(); events.push(e); continue;
                 }
                 if e["$"] == "TurnChanged" && e["state"] == "failed" && !self.last_user.is_empty() { events.push(e); events.push(set(format!("failed.{}", self.last_user), "1".into(), at)); clear = true; continue }
-                if e["$"] == "TurnChanged" { clear = true }
+                if e["$"] == "TurnChanged" && e["state"] != "running" { clear = true }
                 events.push(e);
             }
             if fx.delta_end { clear = true }
+            if cmds::moves(&v) { // Wait.line: the messages the CLI has not read yet
+                let ids: Vec<&str> = self.cmds.unread().iter().filter_map(|u| self.sent.iter().find(|(x, _, _)| x == u).map(|(_, m, _)| m.as_str())).collect::<Vec<_>>().into_iter().map(|s| s).collect();
+                let w = ids.join(" "); if w != self.wait { events.push(set(format!("wait.{}", self.th), w.clone(), at)); self.wait = w }
+            }
         }
         if clear { self.live_end().await; }
         self.commit(events).await;
+        if let Some(p) = &self.live_proc { for s in sends { let _ = p.input.try_send(s); } }
         if pace { self.pacing = Some(Instant::now() + Duration::from_millis(lines::PACE_MS)) }
+    }
+
+    /// The once-a-second beat: held progress lands once its gap is over; a running turn whose ledger shows nothing at work ends (Stuck).
+    async fn beat(&mut self) {
+        let at = now_s(); let mut ev = vec![];
+        if !self.prog.pend.is_empty() { let s = self.prog.beat(at); self.prog = bg::Prog { at: s.at, pend: s.pend }; if !s.flush.is_empty() { ev.extend(self.cx.progress(&s.flush, at)) } }
+        let after = std::env::var("BACKPLANE_STUCK_S").ok().and_then(|s| s.parse().ok()).unwrap_or(120u64);
+        if self.cx.running && self.cmds.idle() && bg::running(&self.cx.bg) == 0 && self.heard.elapsed() >= Duration::from_secs(after) {
+            let code = self.cmds.idle_end(); self.cmds = self.cmds.cleared();
+            ev.push(json!({"$":"ActivityLogged","thread":self.th,"act":hub_id("x", at, self.ag.seq()),"tone":"info","kind":"stuck","summary":"Its agent finished its last command but its turn never ended: ended now","at":at}));
+            let text = String::new(); ev.extend(self.cx.end(code, &text, at)); if code == 4 && !self.last_user.is_empty() { ev.push(set(format!("failed.{}", self.last_user), "1".into(), at)) }
+            self.live_end().await;
+        }
+        self.commit(ev).await;
     }
 
     /// The process is gone: what it still wrote is handled first, then Hub.agent_gone: a running turn fails.
@@ -340,6 +399,24 @@ impl Actor {
         if self.cx.running {
             let code = e.code.or(e.signal.map(|s| 128 + s)).unwrap_or(1);
             self.fail(rules::exit_why(code), "exit", &hub_id("x", now_s(), 0)).await;
+        }
+        self.cmds = cmds::Cmds::new(); self.wait.clear();
+        let live = { let w = self.ag.world().await; w.threads.get(&self.th).map_or(false, |t| !t.archived && !t.deleted) };
+        if live { self.lost("exit").await }
+    }
+
+    /// Bg.lost: the process that owned the thread's background work is gone; the agent is told once (a message), or with restart.continue off the timeline is.
+    async fn lost(&mut self, why: &str) {
+        let rows = self.cx.bg.clone(); if !bg::lost_new(&rows) { return }
+        let (now, th) = (now_s(), self.th.clone()); let text = bg::lost_text(&rows, why);
+        let carry = { let w = self.ag.world().await; w.setting("restart.continue") != "off" };
+        if carry {
+            let cleared = self.cx.bg_clear(now); self.commit(cleared).await;
+            let id = format!("t:backplane:{}", hub_id("l", now, self.ag.seq()));
+            let ag = self.ag.clone(); tokio::spawn(async move { let _ = ag.deliver_as("system", &th, &id, &text, Some(("backplane".into(), "system".into(), String::new())), vec![]).await; });
+        } else {
+            let unknown = bg::unknown(&rows); let mut ev = vec![json!({"$":"ActivityLogged","thread":th,"act":hub_id("l", now, self.ag.seq()),"tone":"info","kind":"lost","summary":text,"at":now})];
+            ev.extend(self.cx.bg_replace(unknown, now)); self.commit(ev).await;
         }
     }
 }

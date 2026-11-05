@@ -115,20 +115,15 @@ pub fn build(e: &PromptEnv) -> String {
 pub(crate) mod tests {
     use super::*;
     const GOLD: &str = include_str!("../../../../test/gpui/agents/fixtures/argv-default.json");
-    /// The JS binary that recorded the golden argv is older than src/core/prompt.bend's commit 12c07a8c8b (the `thread_launch` wording in
-    /// <orchestration>); so that block is compared by its shape and everything outside it exactly.
-    pub fn strip_orch(s: &str) -> String { match (s.find("<orchestration>"), s.find("</orchestration>")) { (Some(a), Some(b)) => format!("{}<orchestration/>{}", &s[..a], &s[b + 16..]), _ => s.to_string() } }
     pub fn gold() -> (String, serde_json::Value) { let a: Vec<String> = serde_json::from_str(GOLD).unwrap(); let i = a.iter().position(|x| x == "--append-system-prompt").unwrap(); (a[i + 1].clone(), serde_json::json!(a)) }
     pub fn gold_env() -> PromptEnv {
-        PromptEnv { fc: "/home/h/.local/bin/freecadcmd".into(), render: "/home/h/Documents/i2cjak/backplane-gpui/build/gpui/backplane-serve".into(),
+        PromptEnv { fc: "/home/h/.local/bin/freecadcmd".into(), render: "/home/h/Documents/i2cjak/backplane-gpui/build/gpui/backplane-serve-current".into(),
             kicad: Kicad { status: "stock".into(), cli: "/home/h/.local/bin/kicad-cli".into(), version: "10.0.7".into(), ..Default::default() }, kicad_ipc: true,
             models: "claude (fable, opus, sonnet, haiku); codex (gpt-6.1-sol, gpt-6-astra, gpt-6.1-terra, gpt-6-sol, gpt-6-luna, gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna)".into(),
-            root: "/home/h/Documents/i2cjak/backplane-gpui/build/gpui/results/agents/argv/work/fixroot".into(), keys: secrets(&[]), ..Default::default() }
+            root: "/home/h/Documents/i2cjak/backplane-gpui/build/gpui/results/agents/argv2/work/fixroot".into(), keys: secrets(&[]), ..Default::default() }
     }
     #[test] fn the_prompt_equals_the_one_the_js_hub_gave_a_stand_in_claude() {
         let (want, _) = gold(); let got = build(&gold_env());
-        assert!(got.contains("<orchestration>Delegated work is a Backplane subthread.") && got.contains("Models available: claude (fable, opus, sonnet, haiku); codex (gpt-6.1-sol") && want.contains("<orchestration>Delegated work is a Backplane subthread."));
-        let (got, want) = (strip_orch(&got), strip_orch(&want));
         if got != want { let i = got.chars().zip(want.chars()).position(|(a, b)| a != b).unwrap_or(got.len().min(want.len())); panic!("differs at {i} (rust {} chars, js {}):\nrust …{}\njs   …{}", got.len(), want.len(), got.chars().skip(i.saturating_sub(40)).take(120).collect::<String>(), want.chars().skip(i.saturating_sub(40)).take(120).collect::<String>()) }
     }
     #[test] fn kicad_words_follow_the_status() {

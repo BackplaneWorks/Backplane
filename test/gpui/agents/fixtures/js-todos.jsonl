@@ -1,0 +1,19 @@
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m1793845590-147","role":"user","text":"todos:4/2 tools:2 go","at":1793845590}
+{"$":"TurnChanged","thread":"t1700000001-2","state":"running","at":1793845590}
+{"$":"SettingSet","key":"turn.from.t1700000001-2","value":"@m1793845590-147","at":1793845590}
+{"$":"SettingSet","key":"restart.retry.t1700000001-2","value":"","at":1793845590}
+{"$":"SettingSet","key":"provider.resume.t1700000001-2","value":"","at":1793845590}
+{"$":"SettingSet","key":"fallback.input.t1700000001-2","value":"todos:4/2 tools:2 go","at":1793845590}
+{"$":"SessionSet","id":"t1700000001-2","session":"sess-2185997-1793845590360","at":1793845590}
+{"$":"SettingSet","key":"tok.basis.t1700000001-2","value":"c:0","at":1793845590}
+{"$":"SettingSet","key":"turn.speed.t1700000001-2","value":"0/0/0/0/0/0/0/0","at":1793845590}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"toolu_e72867a4-fcc5-4e6f-bdca-c1fc59a85efc","tone":"tool","kind":"Bash","summary":"grep -n go board.kicad_pcb # 1","at":1793845590}
+{"$":"UsageSet","thread":"t1700000001-2","used":15,"window":0,"at":1793845590}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"toolu_a38e41cc-840c-4b3b-8e21-10dfd9c50ea0","tone":"tool","kind":"Bash","summary":"grep -n go board.kicad_pcb # 2","at":1793845590}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"toolu_6c1bbd07-57b5-476f-998c-7ba48576a2c1","tone":"tool","kind":"TodoWrite","summary":"2 of 4 done · now: Step 3 of go","at":1793845590}
+{"$":"TodosChanged","thread":"t1700000001-2","who":"tools","data":"[{\"type\":\"tool_use\",\"id\":\"toolu_6c1bbd07-57b5-476f-998c-7ba48576a2c1\",\"name\":\"TodoWrite\",\"input\":{\"todos\":[{\"content\":\"Step 1 of go\",\"activeForm\":\"Doing step 1\",\"status\":\"completed\"},{\"content\":\"Step 2 of go\",\"activeForm\":\"Doing step 2\",\"status\":\"completed\"},{\"content\":\"Step 3 of go\",\"activeForm\":\"Doing step 3\",\"status\":\"in_progress\"},{\"content\":\"Step 4 of go\",\"activeForm\":\"Doing step 4\",\"status\":\"pending\"}]}}]","at":1793845590}
+{"$":"UsageSet","thread":"t1700000001-2","used":11,"window":0,"at":1793845591}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"msg_2185997_1:0:af261f93","role":"assistant","text":"go0 go1 go2 go3 go4 go5 go6 go7 ","at":1793845591}
+{"$":"UsageSet","thread":"t1700000001-2","used":15,"window":0,"at":1793845591}
+{"$":"UsageSet","thread":"t1700000001-2","used":0,"window":200000,"at":1793845591}
+{"$":"TurnChanged","thread":"t1700000001-2","state":"completed","at":1793845591}
