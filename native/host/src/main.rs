@@ -90,9 +90,8 @@ async fn http(hub: &Hub, mut s: TcpStream, req: Req) -> Result<()> {
     s.write_all(&out).await?; s.shutdown().await.ok(); Ok(())
 }
 
-fn pack(c: &Conn, v: &Value) -> Message {
-    if c.cbor { Message::Binary(cbor::encode(v).into()) } else { Message::Text(serde_json::to_string(v).unwrap_or_default().into()) }
-}
+/// hub_frames_cbor: every frame the hub sends is binary (opcode 2, final): CBOR, never text.
+fn pack(_c: &Conn, v: &Value) -> Message { Message::Binary(cbor::encode(v).into()) }
 
 async fn socket(hub: Arc<Hub>, s: TcpStream, cbor_wanted: bool) -> Result<()> {
     let mut cfg = WebSocketConfig::default(); cfg.max_message_size = Some(524288); cfg.max_frame_size = Some(524288);
@@ -171,10 +170,24 @@ async fn run(a: Args) -> Result<()> {
     let hub = Hub::start(hub::Cfg { home: a.home.clone(), version: a.version, commit: a.commit, listen: listen.clone(), os: "linux".into(), arch: "x64".into() }, presenter).await?;
     let l = TcpListener::bind(&listen).await.with_context(|| format!("bind {listen}"))?;
     eprintln!("Backplane listening on http://{listen}");
-    eprintln!("presenter: {}; events: {}; torn tail bytes: {}", hub.presenter.name(), hub.store.lock().await.len(), hub.store.lock().await.torn_bytes);
+    let (events, torn) = { let s = hub.store.lock().await; (s.len(), s.torn_bytes) };
+    eprintln!("presenter: {}; events: {}; torn tail bytes: {}", hub.presenter.name(), events, torn);
     loop {
         let (s, _) = l.accept().await?; s.set_nodelay(true).ok();
         let h = hub.clone();
         tokio::spawn(async move { let _ = serve(h, s).await; });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    // law hub_frames_cbor: for every text t, the hub's frame for it is one binary CBOR frame
+    #[test] fn hub_frames_cbor() {
+        let (c, _) = (Conn { gen: "1".into(), view_id: String::new(), target: Value::Null, cbor: false, lastrev: 0 }, ());
+        for t in ["", "x", "日本語🙂", "reply", "\u{0}\n\t", &"y".repeat(70000)] {
+            let m = pack(&c, &json!({"t": t}));
+            match m { Message::Binary(b) => assert_eq!(cbor::decode(&b).unwrap(), json!({"t": t})), other => panic!("not binary: {other:?}") }
+        }
     }
 }

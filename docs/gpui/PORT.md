@@ -123,7 +123,7 @@ port waits for the person's decision.
 
 <!-- law-map: generated below by scripts/gpui/law-map.py -->
 
-Laws in LAWS.bend: 3248. bend 1287, rust 0, unported 1350, client 483, window 128, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: none yet. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
+Laws in LAWS.bend: 3248. bend 1276, rust 12, unported 1349, client 483, window 128, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: none yet. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
 
 | law | status | seed | file | note |
 |---|---|---|---|---|
@@ -354,7 +354,7 @@ Laws in LAWS.bend: 3248. bend 1287, rust 0, unported 1350, client 483, window 12
 | `took_seconds` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `took_minutes` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `took_hours` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `hub_frames_cbor` | bend | seed K +-10% | `src/core/http.bend` |  |
+| `hub_frames_cbor` | rust `hub_frames_cbor` | map | `src/core/http.bend` |  |
 | `hub_plot_frames_binary` | bend | seed K +-10% | `src/core/http.bend` |  |
 | `plot_delta_exact` | bend | seed K +-10% | `src/core/plot.bend` |  |
 | `plot_unchanged_sends_nothing` | bend | seed K +-10% | `src/core/plot.bend` |  |
@@ -550,7 +550,7 @@ Laws in LAWS.bend: 3248. bend 1287, rust 0, unported 1350, client 483, window 12
 | `models_cache_text` | bend | seed K +-10% | `src/core/boot.bend` |  |
 | `models_quiet` | bend | seed K +-10% | `src/core/boot.bend` |  |
 | `store_state_is_replay` | bend | seed K +-10% | `src/core/store.bend` |  |
-| `store_load_append` | bend | seed K +-10% | `src/core/store.bend` |  |
+| `store_load_append` | rust `store_load_append` | map | `src/core/store.bend` |  |
 | `link_from_id` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `link_from_plain` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `tl_memos_hit` | window | seed D +-10% | `src/app/layout.bend` | GPUI layout, native/gpui/src/main.rs (equivalence unchecked) |
@@ -1102,8 +1102,8 @@ Laws in LAWS.bend: 3248. bend 1287, rust 0, unported 1350, client 483, window 12
 | `task_repair_activates_idle` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `task_repair_running_marks_only` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `task_repair_quiet_when_done` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `store_torn_tail_resyncs` | bend | seed K +-10% | `src/core/store.bend` |  |
-| `store_torn_tail_newline` | bend | seed K +-10% | `src/core/store.bend` |  |
+| `store_torn_tail_resyncs` | rust `store_torn_tail_resyncs` | map | `src/core/store.bend` |  |
+| `store_torn_tail_newline` | rust `store_torn_tail_newline` | map | `src/core/store.bend` |  |
 | `store_fail_names_repair` | bend | seed K +-10% | `src/core/store.bend` |  |
 | `task_repair_finishes_ended_child` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `task_repair_leaves_working_child` | unported | seed R +-10% | `src/core/hub.bend` |  |
@@ -2486,13 +2486,13 @@ Laws in LAWS.bend: 3248. bend 1287, rust 0, unported 1350, client 483, window 12
 | `mail_age_relative_deadline` | unported | none | `-` |  |
 | `mail_plane_indexed_build` | client | seed C +-10% | `src/core/client.bend` |  |
 | `mail_plane_indexed_hidden` | window | seed D +-10% | `src/app/bots.bend` | GPUI replaces this window code (native/gpui); equivalence unchecked, no law-level mapping yet |
-| `auth_foreign_origin_denied` | bend | seed K +-10% | `src/core/http.bend` |  |
-| `auth_empty_remote_token_denied` | bend | seed K +-10% | `src/core/auth.bend` |  |
-| `auth_cookie_prefix_denied` | bend | seed K +-10% | `src/core/auth.bend` |  |
-| `auth_loopback_host_needs_token` | bend | seed K +-10% | `src/core/auth.bend` |  |
-| `auth_localhost_needs_token` | bend | seed K +-10% | `src/core/auth.bend` |  |
-| `auth_no_host_needs_token` | bend | seed K +-10% | `src/core/auth.bend` |  |
-| `auth_loopback_with_token` | bend | seed K +-10% | `src/core/auth.bend` |  |
+| `auth_foreign_origin_denied` | rust `auth_foreign_origin_denied` | map | `src/core/http.bend` |  |
+| `auth_empty_remote_token_denied` | rust `auth_empty_remote_token_denied` | map | `src/core/auth.bend` |  |
+| `auth_cookie_prefix_denied` | rust `auth_cookie_prefix_denied` | map | `src/core/auth.bend` |  |
+| `auth_loopback_host_needs_token` | rust `auth_loopback_host_needs_token` | map | `src/core/auth.bend` |  |
+| `auth_localhost_needs_token` | rust `auth_localhost_needs_token` | map | `src/core/auth.bend` |  |
+| `auth_no_host_needs_token` | rust `auth_no_host_needs_token` | map | `src/core/auth.bend` |  |
+| `auth_loopback_with_token` | rust `auth_loopback_with_token` | map | `src/core/auth.bend` |  |
 | `auth_oauth_post_denied` | bend | seed K +-10% | `src/core/auth.bend` |  |
 | `auth_oauth_other_route_denied` | bend | seed K +-10% | `src/core/auth.bend` |  |
 | `auth_oauth_foreign_origin_denied` | bend | seed K +-10% | `src/core/http.bend` |  |
@@ -2614,7 +2614,7 @@ Laws in LAWS.bend: 3248. bend 1287, rust 0, unported 1350, client 483, window 12
 | `oprep_task_not_in_chat` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `oprep_task_delivered_with_filing` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `oprep_other_thread_unchanged` | unported | seed R +-10% | `src/core/hub.bend` |  |
-| `cbor_trees_exact` | unported | none | `-` |  |
+| `cbor_trees_exact` | rust `cbor_trees_exact` | map | `-` |  |
 | `thin_pace_own_urgent` | unported | none | `-` |  |
 | `thin_pace_other_soft` | unported | none | `-` |  |
 | `thin_pace_all_urgent` | unported | none | `-` |  |
