@@ -6,8 +6,7 @@
 //! Covered: every event the Bend decoder knows counts toward `seq` (State.tick); these change state:
 //! ProjectCreated/Removed, ThreadCreated/Renamed/Settled/Unsettled/Woke/Archived/Pinned/Deleted, MessagePosted,
 //! ActivityLogged, TurnChanged (+ the todos bookkeeping it does to settings), PendingChanged, SessionSet,
-//! WorktreeSet/Skipped/Removed, ThreadMerged, SettingSet, ThreadParentSet, ThreadForked, ProviderSet (approximate:
-//! see `switch`), ModesSet, UsageSet (the usage.<thread> setting). Not folded here (they touch parts of the Bend State the digest does not print): bots,
+//! WorktreeSet/Skipped/Removed, ThreadMerged, SettingSet, ThreadParentSet, ThreadForked, ProviderSet, ModesSet, UsageSet (the usage.<thread> setting). Not folded here (they touch parts of the Bend State the digest does not print): bots,
 //! mail, tasks, asks, devices, nav, queues, TurnUsage's token totals (tok.*), deploy, routines, todos lists.
 use serde_json::Value;
 use std::collections::HashMap;
@@ -48,6 +47,8 @@ pub struct State {
     pub seq: u64,
     /// bot id -> its thread (BotSet/BotDeleted): a task delegated by a bot's thread seeds no thread.parent
     bot_threads: HashMap<String, String>,
+    /// entries whose own thread is the key (Switch.count: the ones filed under a sender for other threads do not count)
+    own: HashMap<String, u64>,
     /// events the fold counts but does not (fully) model, by kind: reported by rust-digest so a gap is never silent
     pub unmodelled: HashMap<String, u64>,
 }
@@ -187,6 +188,7 @@ impl State {
                 let keep = |new: u64, old: u64| if new == 0 { old } else { new };
                 self.set(&key, &format!("{}/{}", keep(used, ou), keep(window, ow)));
             }
+            "TurnUsage" => { *self.unmodelled.entry("TurnUsage (tok.*, turn.last.*)".into()).or_default() += 1; }
             "ProviderSet" => { self.switch(s(e, "id")?, s(e, "provider")?, s(e, "model")?); }
             _ => {}
         }
@@ -196,6 +198,7 @@ impl State {
     /// State.post -> Idx.post: an entry is filed under its thread, and a message another thread sent ("t:<from>:<n>") under the sender too.
     fn post(&mut self, th: &str, id: &str) {
         self.entries.entry(th.into()).or_default().push(id.into());
+        *self.own.entry(th.into()).or_default() += 1;
         let from = link_from(id);
         if !from.is_empty() && from != th && !from.is_empty() { self.sent_link(from, id, th); }
     }
@@ -234,10 +237,10 @@ impl State {
     }
 
     /// State.switch: the old provider's session and seen-count are kept as settings, the new provider's session is taken.
-    /// Approximation: the seen-count is the thread's entry count (Switch.count in model.bend reads more).
+    /// The seen-count is Switch.count: the thread's own entries.
     fn switch(&mut self, th: &str, p: &str, m: &str) {
         let (old, oldse) = { let t = self.thread_mut(th); (t.provider.clone(), t.session.clone()) };
-        let count = self.entries.get(th).map_or(0, |v| v.len());
+        let count = self.own.get(th).copied().unwrap_or(0);
         self.set(&format!("session.{th}.{old}"), &oldse);
         self.set(&format!("seen.{th}.{old}"), &count.to_string());
         let se = self.get(&format!("session.{th}.{p}"), "");
