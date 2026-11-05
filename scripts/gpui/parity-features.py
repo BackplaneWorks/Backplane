@@ -512,6 +512,22 @@ def render(S, rows):
       "client columns and evidence are written by hand next to each row in the script.\n")
     w("Goal (2026-11-05): everything a user can do in today's Backplane works on the Rust hub (`native/host`) with the GPUI desktop, "
       "iOS and Android clients. No web page; the web client is only the reference for what exists.\n")
+    gates = json.load(open(os.path.join(ROOT, "docs/gpui/perf-gates.json")))
+    must = json.load(open(os.path.join(ROOT, "docs/gpui/must-pass.json")))
+    w("## Performance gates\n")
+    w("Performance is a first-class target beside feature parity. All must pass. Numbers come from `docs/gpui/perf-gates.json`, updated at each milestone.\n")
+    w("| Gate | Target | Status | Latest |")
+    w("|---|---|---|---|")
+    for g in gates["gates"]:
+        w(f"| {g['gate']} | {g['target']} | {g['status']} | {g['latest']} |")
+    w("")
+    w("## Must-pass interactions\n")
+    w("Each needs a test, a check against the web and the reviewer's OK before it counts. Status lives in `docs/gpui/must-pass.json`.\n")
+    w("| Item | GPUI | iOS | Android | Test |")
+    w("|---|---|---|---|---|")
+    for m in must["items"]:
+        w(f"| {m['item']} | {m['gpui']} | {m['ios']} | {m['android']} | {m['test']} |")
+    w("")
     w("## Counts\n")
     w("| Column | done | partial | missing | n/a | rows counted |")
     w("|---|---:|---:|---:|---:|---:|")
