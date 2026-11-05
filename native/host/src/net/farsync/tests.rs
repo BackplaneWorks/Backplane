@@ -61,6 +61,7 @@ async fn push(a: &Node, b: &Node, link: &str, body: Value) -> botnet::Resp {
     let c = node("fc2", false).await; know(&c, &b); know(&b, &c);
     c.p.ask(&c.hub, &url(&b), &url(&c), false).await; settle().await;
     let other: Vec<String> = live_ids(&b).into_iter().filter(|x| *x != link).collect(); assert_eq!(other.len(), 1);
+    know(&b, &a); // (know replaces the list: B finds A again)
     let r = push(&c, &b, &other[0], body.clone()).await;
     assert_eq!((r.code, r.body.as_str()), (403, "threads are shared with the owner's own machines"), "linked but unverified");
     // sync off for A's name: 403
