@@ -30,7 +30,11 @@ export async function startHub({bin,home,port,standins,host,extraEnv={},cap='370
  const proc=spawn('systemd-run',args,{env,stdio:['ignore',log?'pipe':'ignore',log?'pipe':'ignore']});
  if(log){const fs=require('node:fs');const o=fs.openSync(log,'a');proc.stdout.on('data',d=>fs.writeSync(o,d));proc.stderr.on('data',d=>fs.writeSync(o,d))}
  const h=host||'127.0.0.1';
- for(let i=0;i<6000;i++){try{if((await fetch(`http://${h}:${port}/hello`)).status===200)break}catch{}await sleep(100)}
+ let seenPid=NaN;const tStart=Date.now();
+ for(let i=0;i<9000;i++){try{if((await fetch(`http://${h}:${port}/hello`)).status===200)break}catch{}
+  if(i%10===0){const m=/^(\d+)/.exec(rd(`${home}/hub.lock`));if(m){const q=Number(m[1]);if(q!==seenPid)seenPid=q}
+   if(Number.isFinite(seenPid)&&!existsSync(`/proc/${seenPid}`)&&Date.now()-tStart>3000){const e=new Error('hub exited before answering /hello after '+((Date.now()-tStart)/1000).toFixed(0)+' s (pid '+seenPid+')');e.hubExited=true;throw e}}
+  await sleep(100)}
  // the hub pid: read hub.lock "<pid> <port> flock"
  let pid=NaN;for(let i=0;i<50;i++){const m=/^(\d+)/.exec(rd(`${home}/hub.lock`));if(m){pid=Number(m[1]);break}await sleep(100)}
  // COMMON.md rule: verify from the hub's own environ that it runs stand-in agents only, before any turn

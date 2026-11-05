@@ -1,6 +1,7 @@
 // M0 baselines of the JS hub on the one store copy (~/.backplane-gpui-copy). Content is never printed or stored: sizes and times only.
 // bun m0_baseline.mjs [phase] ; phases run in order: first, later, steady, load, click
 import {mkdirSync,writeFileSync,readFileSync,existsSync,appendFileSync,readdirSync} from 'node:fs';
+import {execSync} from 'node:child_process';
 import {makeStandins,startHub,stopHub,client,sleep,pct,rssKb,hwmKb,cpuTicks,fds,threads,tree,treeRssKb,dirSizes} from './lib.mjs';
 import {viewClient} from './view.mjs';
 const REPO='/home/h/Documents/i2cjak/backplane-gpui';const HOME=process.env.HOME+'/.backplane-gpui-copy';const PORT=3830,HOST='100.64.84.41';
@@ -18,9 +19,10 @@ async function boot(tag,extra={}){
  const tHello=performance.now()-t0;
  const v=await viewClient(h,{mobile:true,delta:true});const tg=performance.now()-t0;
  const r=await v.open();const tv=performance.now()-t0;
- const peak=hwmKb(h.pid)/1024;
+ globalThis.__hubpid=h.pid;const peak=hwmKb(h.pid)/1024;
  return {h,v,b:{helloS:tHello/1000,greetingS:tg/1000,firstViewS:tv/1000,firstViewBytes:r?.bytes,rssMBAtUsable:rssKb(h.pid)/1024,hwmMB:peak,files:dirSizes(HOME),fds:fds(h.pid)}};
 }
+process.on('exit',()=>{try{if(globalThis.__hubpid)process.kill(globalThis.__hubpid,'SIGTERM')}catch{}});
 const phase=process.argv[2]||'all';
 const run=(n)=>phase==='all'||phase===n;
 let cur=null;
@@ -44,14 +46,17 @@ if(run('steady')||run('load')||run('click')){
  const {h}=cur;
  if(run('steady')){await sleep(60000);const a=cpuTicks(h.pid);await sleep(60000);R.steadyIdle={rssMB:rssKb(h.pid)/1024,cpuCorePct:(cpuTicks(h.pid)-a)*10/60000*100,fds:fds(h.pid),threads:threads(h.pid),kids:tree(h.pid).length,hwmMB:hwmKb(h.pid)/1024};save()}
  // plain client joined near the end of the log (a full join of this log is dropped by the hub)
- const hl=readFileSync(out+'/hub-main.log','utf8');const cnt=Number(/log count (\d+)/.exec(hl)?.[1]);const origin=/hub: origin (\S+)/.exec(hl)?.[1];
+ await sleep(4000); // let the hub's log lines (piped) reach the file before reading the log count
+ const hl=readFileSync(out+'/hub-main.log','utf8');const cnt=Number([...hl.matchAll(/log count (\d+)/g)].pop()?.[1]);const origin=[...hl.matchAll(/hub: origin (\S+)/g)].pop()?.[1];
  const per=new Map(),lag=[];let counting=false,got=0;
  const c=await client(h,{since:cnt,origin,onMsg:(o,now)=>{if(o.t!=='delta'||!counting)return;got++;(per.get(o.thread)??per.set(o.thread,[]).get(o.thread)).push(now);const m=/@(\d{13})@/.exec(o.text??'');if(m)lag.push(now-Number(m[1]))}});await sleep(500);
- c.send('project.add',{path:root+'/proj'});const pc=await c.until(20000,()=>c.seen.find(x=>x.$==='ProjectCreated'&&x.root?.includes('perf-run/m0')));
+ c.send('project.add',{path:root+'/proj'});let pc=await c.until(4000,()=>c.seen.find(x=>x.$==='ProjectCreated'&&x.root?.includes('perf-run/m0')));
+ if(!pc){ /* already added in an earlier phase: its id from the log line of my own project (grep, nothing else read) */ const g=execSync(`grep -m1 '"root":"${root}/proj"' ${HOME}/events.jsonl`,{encoding:'utf8'});pc=JSON.parse(g.trim().split('\n')[0])}
  if(!pc)throw Error('no project');
- const N=20;for(let i=0;i<N;i++)c.send('thread.create',{project:pc.id,title:'m0 sim '+i,env:'local'});
- const ths=await c.until(30000,()=>{const t=c.seen.filter(x=>x.$==='ThreadCreated'&&x.project===pc.id);return t.length>=N?t:undefined});
- if(!ths)throw Error('threads');
+ const N=20;const ths=[];
+ for(let i=0;i<N;i++){const r=await c.rpc('thread.create',{project:pc.id,title:'m0 sim '+i,env:'local'});if(!r?.o?.ok)throw Error('thread.create failed');ths.push({id:r.o.thread})}
+ for(const t of ths){const r=await c.rpc('thread.provider',{thread:t.id,provider:'claude',model:''});if(!r?.o?.ok)throw Error('thread.provider refused')}
+ R.simThreadsClaude='thread.provider acknowledged for all 20; validity checked by streams below';
  // click latency, idle: sidebar click (view.action select), thread switch (view.open), composer popup (draft "/" then update)
  const v=cur.v;
  // real thread ids from the sidebar body, held in memory only
