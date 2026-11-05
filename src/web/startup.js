@@ -21,7 +21,7 @@ export function validatePresentation(result) {
   const node = (n, depth) => {
     if (!n || --remaining < 0 || depth >= 64) throw Error('Invalid presentation tree');
     if (n.type === 'text' && typeof n.text === 'string') return;
-    if (n.type !== 'element' || typeof n.tag !== 'string' || !/^[a-z][a-z0-9-]*$/.test(n.tag) || ['script','base','meta','link','object','embed','bp-sidebar-ref'].includes(n.tag)
+    if (n.type !== 'element' || typeof n.tag !== 'string' || !/^[a-z][a-z0-9-]*$/.test(n.tag) || ['script','base','meta','link','object','embed','bp-sidebar-ref','bp-canonical-sidebar'].includes(n.tag)
       || typeof n.key !== 'string' || !Array.isArray(n.attrs) || n.attrs.length > 256 || !Array.isArray(n.kids)) throw Error('Invalid presentation element');
     for (const a of n.attrs) {
       if (typeof a?.event === 'string' && a.event && typeof a.action === 'string') continue;

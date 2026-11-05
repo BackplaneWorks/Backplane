@@ -1,8 +1,8 @@
-import { restoreFrameAliases, restoreWindowProjection } from './conversation-frame.js';
+import { restoreCanonicalSidebar, restoreFrameAliases, restoreWindowProjection } from './conversation-frame.js';
 import { terminalInputReply } from './terminal-input.js';
 import { modelMenuReply } from './model-menu-input.js';
-import { sidebarOffer, sidebarPicture } from './sidebar-region.js';
-import { deltaOffer, deltaPicture, deltaKeep, deltaBases, deltaBytes, deltaDraft, refill } from './view-delta.js';
+import { sidebarOffer, sidebarPicture, canonicalCapable, canonicalHistory, canonicalKeep, canonicalNewest, canonicalOffer, canonicalPicture } from './sidebar-region.js';
+import { applyViewDelta, deltaOffer, deltaPicture, deltaKeep, deltaBases, deltaBytes, deltaDraft, refill } from './view-delta.js';
 
 // Bounded view transport shared by the web and native bridge. Product actions
 // and rendering remain in Bend. No canonical replay is initiated here.
@@ -125,7 +125,7 @@ export class ThinViews {
   connect(hub, greeting) {
     if (!bounded(hub, 1024) || !hub || !viewGreeting(greeting)) return { compatibilityRequired: true, cmds: [] };
     const abandoned = this.disconnect(hub, 'connection changed');
-    const link = { hub, greeting: snapshot(greeting), revision: 0, pictureRevision: 0, terminalOwner: '', terminalOpen: false, viewId: '', target: null, shown: null, viewRevision: '', updatePending: false, updateId: null, invalidated: false, changedRevision: null, readInvalidated: false, bases: deltaBases() };
+    const link = { hub, greeting: snapshot(greeting), canonical: canonicalHistory(), revision: 0, pictureRevision: 0, terminalOwner: '', terminalOpen: false, viewId: '', target: null, shown: null, viewRevision: '', updatePending: false, updateId: null, invalidated: false, changedRevision: null, readInvalidated: false, bases: deltaBases() };
     this.links.set(hub, link);
     return { connected: true, abandoned, cmds: [] };
   }
@@ -189,10 +189,13 @@ export class ThinViews {
     const regionEnabled = this.api.sidebarRegions === true && l.greeting.renderer === 'web'
       && ['view.open','view.page','view.update','view.action'].includes(method);
     if (regionEnabled) p.sidebarRegion = sidebarOffer(l.sidebar);
+    const sideBase = this.api.canonicalSidebar === true && canonicalCapable(l.greeting)
+      && ['view.open','view.page','view.update','view.action'].includes(method) ? { entry: canonicalNewest(l.canonical) } : null;
+    if (sideBase) p.canonicalSidebar = canonicalOffer(sideBase.entry);
     // the keyed view delta (view-delta.js): offered by hosts that apply it
     if (this.api.viewDelta === true && ['view.open','view.page','view.update','view.action'].includes(method)) p.viewDelta = deltaOffer(l.bases);
     const call = { id, link: l, method, target: snapshot(l.target), revision: l.revision, viewId: l.viewId,
-      began: this.api.now(), input: snapshot(p), terminalInputIntent, bases: l.bases, sidebarBase: regionEnabled ? l.sidebar : null, explicitRead: method === 'view.update' && (l.readInvalidated || l.changedRevision === null) };
+      began: this.api.now(), input: snapshot(p), terminalInputIntent, bases: l.bases, sidebarBase: regionEnabled ? l.sidebar : null, canonicalBase: sideBase?.entry || null, explicitRead: method === 'view.update' && (l.readInvalidated || l.changedRevision === null) };
     if (method === 'view.update') { l.updatePending = true; l.updateId = id; l.invalidated = false; l.readInvalidated = false; }
     this.calls.set(id, call);
     return { id, cmds: [this.api.send(hub, { id, m: method, p })] };
@@ -294,6 +297,15 @@ export class ThinViews {
         return { failed: 'invalid view delta', id: e.id, method: c.method, retry: false, cmds: [] };
       }
     }
+    // the sidebar this reply carries, or the ops from one this call offered
+    let canonical = null;
+    if (Object.hasOwn(r, 'canonicalSidebar')) {
+      try {
+        if (!projected) throw Error('Invalid canonical sidebar');
+        canonical = canonicalPicture(r, c.input, c.canonicalBase, { replyBytes: l.greeting.limits.replyBytes, sidebarBytes: l.greeting.canonicalSidebar?.sidebarBytes || 0 }, utf8Bytes, applyViewDelta);
+      } catch { l.canonical = canonicalHistory();return { failed: 'invalid canonical sidebar', id: e.id, method: c.method, retry: false, cmds: [] }; }
+      const { canonicalSidebar: _, ...plain } = r;r = plain;
+    }
     let sidebar;
     if (!projected && Object.hasOwn(r, 'sidebarRegion')) {
       try {
@@ -305,17 +317,21 @@ export class ThinViews {
     try {
       if (r.windowProjection) {
         const wire = this.api.shape ? deltaDraft(this.api.shape(c.input, c.method)) : deltaDraft(c.input);
-        const full = deltaDraft(c.input), root = restoreWindowProjection(r.shown, r.windowProjection);
+        const slotted = restoreWindowProjection(r.shown, r.windowProjection);
+        const full = deltaDraft(c.input), root = canonical ? restoreCanonicalSidebar(slotted, canonical.node) : slotted;
         r = { ...r, shown: typeof wire === 'string' && typeof full === 'string' && wire !== full ? refill(root, wire, full) : root };
         picture = null;changed = null;unchanged = false;
       }
       if (r.entryAliases) r = { ...r, shown: restoreFrameAliases(r.shown, r.entryAliases, r.window) };
     }
-    catch { return { failed: 'invalid source aliases', id: e.id, method: c.method, retry: false, cmds: [] }; }
-    if (this.api.validateResult && this.api.validateResult(r, c.input) !== true) { l.bases = deltaBases();return { failed: 'invalid view presentation', id: e.id, method: c.method, retry: false, cmds: [] }; }
+    catch { if (projected && c.input.canonicalSidebar) l.canonical = canonicalHistory();return { failed: 'invalid source aliases', id: e.id, method: c.method, retry: false, cmds: [] }; }
+    if (this.api.validateResult && this.api.validateResult(r, c.input) !== true) { l.bases = deltaBases();if (projected && c.input.canonicalSidebar) l.canonical = canonicalHistory();return { failed: 'invalid view presentation', id: e.id, method: c.method, retry: false, cmds: [] }; }
     // a body the hub kept under this token: the base of a later delta,
     // whether or not this reply is the one shown
     if (picture && l.bases === c.bases) deltaKeep(l.bases, picture);
+    // a whole projected reply to an offer: the hub kept nothing to build on
+    if (canonical) canonicalKeep(l.canonical, canonical, l.greeting.canonicalSidebar.bases);
+    else if (projected && c.input.canonicalSidebar) l.canonical = canonicalHistory();
     if (c.terminalInputIntent && inputOnly) current = current && l.terminalOpen && l.terminalOwner === c.input.terminalOwner;
     // Only a fully validated, ready full fallback may promote an exempt intent
     // into picture authority. Its original ordinal cannot overtake navigation.
