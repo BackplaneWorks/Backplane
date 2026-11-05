@@ -350,8 +350,4 @@ law hist_picker_scope rust hist_picker_scope
 # term lane: native/host/src/term/emb.rs, the Rust twin of core/emb.bend (the Bend defs stay)
 law emb_summary_round rust emb_summary_round_trips_and_keeps_command_newlines
 law emb_size_round rust sizes_are_clamped_with_defaults
-law emb_pinned_live rust emb_live_rules
-law emb_message_ends rust emb_live_rules
-law emb_fresh_live rust emb_live_rules
-law emb_idle_ends rust emb_live_rules
 law emb_note_none rust emb_text_leaves_blank_rows_out_and_reports_wrap_it

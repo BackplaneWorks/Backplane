@@ -1,8 +1,9 @@
 //! The term lane: ptys and the terminals clients show (`term.open/input/resize/snap/restart`), terminals in the chat (`terminal_*` tools,
 //! emb.rs), the VT emulator (vt.rs). One actor owns every shell and screen (src/server/term.bend's `Term.*`/`Et.*`): what a program prints
 //! goes to every client as `{"t":"term","thread":<key>,"pid":N,"b":[bytes]}`, input comes in as `term.input`.
-//! Bounded throughout: at most MAX_SHELLS ptys (MAX_PER_THREAD chat terminals a thread), output reads in 64 KB chunks through a 64-chunk
-//! queue (the program waits when we are slow), input past 256 queued writes is dropped, one input request at most MAX_INPUT bytes,
+//! Bounded: at most MAX_SHELLS ptys in all (MAX_PER_THREAD chat terminals a thread), output reads in 64 KB chunks through a 64-chunk
+//! queue (the program waits when we are slow), at most KEEP_FINISHED finished screens in memory (the rest are read back from <home>/terms),
+//! NOT YET bounded: frames to a stalled client (Hub::push_all has an unbounded outbox; needs a per-client budget seam from the lead), input past 256 queued writes is dropped, one input request at most MAX_INPUT bytes,
 //! screens are the emulator's bounded grid and 2048-row scrollback.
 pub mod browser;
 pub mod emb;
@@ -19,13 +20,15 @@ use vt::Vt;
 pub const MAX_SHELLS: usize = 64;
 pub const MAX_PER_THREAD: usize = 16;
 pub const MAX_INPUT: usize = 262144;
+/// Finished chat terminals whose screens stay in memory (each up to 2048 rows of scrollback); older ones are on disk.
+pub const KEEP_FINISHED: usize = 32;
 /// Et.all: a frame for every client.
 pub const ALL: u64 = u64::MAX;
 
 struct Shell { pid: i32, pty: Arc<pty::Pty> }
 struct Screen { title: String, vt: Vt, seen: bool, state: String, pid: i32 }
 #[derive(Default)]
-struct Inner { shells: HashMap<String, Shell>, screens: HashMap<String, Screen> }
+struct Inner { shells: HashMap<String, Shell>, screens: HashMap<String, Screen>, finished: std::collections::VecDeque<String> }
 
 pub struct Terms { hub: Arc<Hub>, inner: Mutex<Inner>, home: PathBuf, shell: String }
 
@@ -109,6 +112,12 @@ impl Terms {
         if emb::is_key(key) {
             if let Some(sc) = g.screens.get_mut(key) { if sc.pid == pid { sc.seen = emb::stays(sc.seen, &sc.state); sc.state = format!("exited {code}"); self.save(key, sc) } }
         }
+        Self::finish(&mut g, key);
+    }
+    /// A finished terminal's screen stays in memory only among the newest KEEP_FINISHED (chat terminals are on disk; a shell's is not kept).
+    fn finish(g: &mut Inner, key: &str) {
+        g.finished.retain(|k| k != key); g.finished.push_back(key.into());
+        while g.finished.len() > KEEP_FINISHED { if let Some(old) = g.finished.pop_front() { if !g.shells.contains_key(&old) { g.screens.remove(&old); } } }
     }
 
     fn save(&self, key: &str, sc: &Screen) {
@@ -149,12 +158,17 @@ impl Terms {
         if let Some(sc) = g.screens.get_mut(key) { sc.vt.resize(cols as usize, rows as usize) }
     }
     /// A chat terminal's command on a pty of its own (TRun); `again` hangs up the one running first.
-    pub async fn run(self: &Arc<Self>, key: &str, title: &str, cwd: &str, cmd: &str, cols: u32, rows: u32, again: bool) {
+    pub async fn run(self: &Arc<Self>, key: &str, title: &str, cwd: &str, cmd: &str, cols: u32, rows: u32, again: bool) { self.run_with(crate::copy::on(), key, title, cwd, cmd, cols, rows, again).await }
+    /// On a copied log (BACKPLANE_COPY=1) no chat terminal runs: the command in the log is the real one, in the real folder (copy.bend: TermRun -> Nil).
+    /// The entry is still logged and the person's own panel shell (`open_shell`) still opens, as in Bend.
+    pub async fn run_with(self: &Arc<Self>, copy: bool, key: &str, title: &str, cwd: &str, cmd: &str, cols: u32, rows: u32, again: bool) {
+        if copy { return }
         let (c, r) = (emb::cols(cols), emb::rows(rows));
         { let mut g = self.inner.lock().await; let has = g.shells.contains_key(key) || g.screens.contains_key(key);
             if has && !again { return }
             if let Some(sh) = g.shells.remove(key) { sh.pty.hangup() }
             let mine = format!("{}:", key.rsplitn(2, ':').nth(1).unwrap_or(""));
+            if !has && g.shells.len() >= MAX_SHELLS { drop(g); self.hub.push_all(&frame(key, Some(0), b"[too many terminals are open]\r\n", None)); return }
             if !has && g.shells.keys().filter(|k| k.starts_with(&mine)).count() >= MAX_PER_THREAD { drop(g); self.hub.push_all(&frame(key, Some(0), b"[too many terminals are open in this chat]\r\n", None)); return }
         }
         self.hub.push_all(&frame(key, None, &[], Some((c as usize, r as usize))));
@@ -189,7 +203,7 @@ impl Terms {
     /// TKill: hang up the terminal's process group; running becomes stopped.
     pub async fn kill(&self, key: &str) {
         let mut g = self.inner.lock().await;
-        if let Some(sh) = g.shells.get(key) { sh.pty.hangup() }
+        if let Some(sh) = g.shells.get(key) { sh.pty.hangup(); let p = sh.pty.clone(); tokio::spawn(async move { tokio::time::sleep(std::time::Duration::from_secs(3)).await; p.force() }); }
         if let Some(sc) = g.screens.get_mut(key) { if sc.state == "running" { sc.state = "stopped".into() } }
     }
     /// The chat terminals of a thread that are running now.
@@ -199,20 +213,19 @@ impl Terms {
 
 // ---- reading the log for what the model does not index yet ----
 
-/// The summary of chat terminal `id` of `thread` (its ActivityLogged), scanning the newest lines first, at most SCAN of them.
-pub fn find_act(hub: &Arc<Hub>, thread: &str, id: &str) -> Option<(String, u64)> {
-    const SCAN: usize = 200_000;
-    let n = hub.store.len(); let low = n.saturating_sub(SCAN); let mut end = n;
-    while end > low {
-        let a = end.saturating_sub(2000).max(low);
-        for line in hub.store.range(a, end).ok()?.iter().rev() {
-            if !line.contains("\"ActivityLogged\"") || !line.contains(id) { continue }
-            let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
-            if s(&v, "$") == "ActivityLogged" && s(&v, "thread") == thread && s(&v, "act") == id && s(&v, "tone") == emb::TONE { return Some((s(&v, "summary").to_string(), u(&v, "at", 0))) }
+/// The summary of chat terminal `id` of `thread` (its ActivityLogged) and its time, from the model's per-thread entries (newest first,
+/// a page at a time: no scan of the whole log, and only this thread's rows are read).
+pub async fn find_act(hub: &Arc<Hub>, thread: &str, id: &str) -> Option<(String, u64)> {
+    let mut before = 0u64;
+    loop {
+        let page = { let m = hub.model().await; m.page(&hub.store, thread, before, 32).ok()? };
+        for r in page.rows.iter().filter(|r| r.kind == "act" && r.id == id && r.role == emb::TONE) {
+            let v: Value = serde_json::from_str(&hub.store.get(r.seq as usize - 1).ok()?).ok()?; // the row's text is cut; the log line is whole
+            return Some((s(&v, "summary").to_string(), u(&v, "at", 0)));
         }
-        end = a;
+        if page.below == 0 || page.rows.is_empty() { return None }
+        before = page.rows.iter().map(|r| r.ord).min()?;
     }
-    None
 }
 
 struct TermRpc(Arc<Terms>);
@@ -232,7 +245,7 @@ impl RpcHandler for TermRpc {
                 "term.snap" => { let r = ok(); t.snap(who.client, s(p, "key")).await; r }
                 "term.restart" => {
                     let term = s(p, "id");
-                    let Some((sum, _)) = find_act(hub, thread, term) else { return vec![json!({"t":"reply","id":id,"ok":false,"error":"no such terminal"})] };
+                    let Some((sum, _)) = find_act(hub, thread, term).await else { return vec![json!({"t":"reply","id":id,"ok":false,"error":"no such terminal"})] };
                     let key = emb::key(thread, term); let now = now_s(); let sm = emb::parse_summary(&sum);
                     let _ = hub.commit(&json!({"$":"SettingSet","key":emb::at_key(&key),"value":now.to_string(),"at":now})).await;
                     let cwd = t.cwd(thread).await;
