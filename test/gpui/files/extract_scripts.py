@@ -6,12 +6,13 @@ and other such defs) into native/host/src/files/scripts/*.sh, so the Rust hub ru
 """
 import re, sys, os
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-SRC = open(os.path.join(ROOT, "src/server/git.bend")).read()
+SRC = "\n".join(open(os.path.join(ROOT, f)).read() for f in ["src/server/git.bend", "src/server/pdf.bend", "src/core/links.bend", "src/server/server.bend"])
 OUT = os.path.join(ROOT, "native/host/src/files/scripts")
 WANT = {"Git.safe.sh": "safe.sh", "Git.index.seed.sh": "index_seed.sh", "Git.step.script": "step.sh", "Git.step.migrate.sh": "step_migrate.sh",
-        "Git.refs.script": "refs.sh", "Git.diff.cap.sh": "diff_cap.sh"}
+        "Git.refs.script": "refs.sh", "Git.diff.cap.sh": "diff_cap.sh",
+        "Pdf.sh": "pdf.sh", "Link.file.open": "file_open.sh", "Link.file.reveal": "file_reveal.sh", "Mech.cmd": "mech_list.sh"}
 defs = {}
-for m in re.finditer(r"^def (Git\.[A-Za-z_.]+)\(\) -> String:\n((?:  .*\n|\n)+?)(?=\S|\Z)", SRC, re.M):
+for m in re.finditer(r"^def ([A-Z][A-Za-z]*\.[A-Za-z_.]+)\(\) -> String:\n((?:  .*\n|\n)+?)(?=\S|\Z)", SRC, re.M):
     defs[m.group(1)] = m.group(2).strip("\n")
 
 def lit(s, i):
@@ -42,7 +43,7 @@ def ev(s):
                 if s[i] == ",": i += 1
             ws(); assert s[i] == ","; i += 1; sep = term(); ws(); assert s[i] == ")"; i += 1
             return sep.join(items)
-        m = re.match(r"(Git\.[A-Za-z_.]+)\(\)", s[i:])
+        m = re.match(r"([A-Z][A-Za-z]*\.[A-Za-z_.]+)\(\)", s[i:])
         if m:
             i += m.end(); return call(m.group(1))
         raise SystemExit("cannot evaluate at: " + s[i:i + 60])
