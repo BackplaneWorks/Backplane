@@ -70,9 +70,9 @@ impl Hub {
         let rev = self.revision().await;
         let mut params = p.clone();
         if let Some(o) = params.as_object_mut() {
-            // what the presenter needs of the hub (native-sidebar.bend Ns.prepare): the view's id, the hub's metadata revision (the context's metadataRevision:
-            // saved sidebar pages are kept only while it, the view and the choices stay the same, so it must NOT change per request), this run's key
-            o.insert("revision".into(), json!(rev)); o.insert("viewId".into(), json!(view_id)); o.insert("nativeKey".into(), json!(self.native_key)); o.insert("now".into(), json!(now_ms()));
+            // what the presenter needs of the hub (native-sidebar.bend Ns.prepare): the view's id, the hub's signal revision (SignalRevision: the context's metadataRevision;
+            // saved sidebar pages are kept only while it, the view and the choices stay the same: activity lines and assistant text do not move it), this run's key
+            o.insert("revision".into(), json!(self.signal_seq())); o.insert("viewId".into(), json!(view_id)); o.insert("nativeKey".into(), json!(self.native_key)); o.insert("now".into(), json!(now_ms()));
         }
         // a thread's window: the page out of the Rust index, the fold/context logic in native Bend
         // view.page: the cursor names the page (`before`, an ordinal); the reply is a view.open-shaped one

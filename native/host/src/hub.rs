@@ -20,7 +20,7 @@ pub struct Hub {
     live: std::sync::Mutex<std::collections::HashMap<String, String>>,
     pub window_bin: std::sync::OnceLock<PathBuf>,
     me: std::sync::OnceLock<std::sync::Weak<Hub>>, next_client: AtomicU64,
-    outboxes: std::sync::Mutex<std::collections::HashMap<u64, Slot>>, outbox_max: std::sync::atomic::AtomicUsize,
+    outboxes: std::sync::Mutex<std::collections::HashMap<u64, Slot>>, outbox_max: std::sync::atomic::AtomicUsize, signal_seq: AtomicU64, extra_info: std::sync::Mutex<std::collections::BTreeMap<String, String>>,
 }
 
 /// One item of a connection's outbox: a value the hub encodes (CBOR with the dictionaries), or bytes that go out as
@@ -40,6 +40,12 @@ impl Outbox {
     /// Without waiting (tests, drains): Err(Empty) when nothing is queued, Err(Disconnected) when the client was dropped and the queue is empty.
     pub fn try_recv(&mut self) -> Result<Out, tokio::sync::mpsc::error::TryRecvError> { let (o, n) = self.rx.try_recv()?; self.pending.fetch_sub(n, Relaxed); Ok(o) }
 }
+/// SignalRevision.affects: only activity lines and assistant/system messages leave the signal inputs alone; every other event,
+/// including one this hub does not know, counts.
+pub fn signal_affects(e: &Value) -> bool {
+    match e["$"].as_str() { Some("ActivityLogged") => false, Some("MessagePosted") => !matches!(e["role"].as_str(), Some("assistant") | Some("system")), _ => true }
+}
+
 /// A cheap size of a frame (its strings, numbers and structure), without encoding it.
 pub fn frame_bytes(v: &Value) -> usize {
     match v { Value::Null | Value::Bool(_) => 4, Value::Number(_) => 8, Value::String(s) => s.len() + 2,
@@ -75,7 +81,7 @@ impl Hub {
         let (ftx, _) = broadcast::channel(1024);
         let model = Model::build(&store)?;
         let hub = Arc::new(Hub { cfg, auth, epoch, presenter, store: store.clone(), commits: ctx, model: Mutex::new(model), gen: AtomicU64::new(1), changed: tx, frames: ftx, native_key: { let mut b = [0u8; 16]; if let Ok(mut f) = std::fs::File::open("/dev/urandom") { let _ = std::io::Read::read_exact(&mut f, &mut b); } hex::encode(b) },
-            rpc: Default::default(), http: Default::default(), views: Default::default(), observers: Default::default(), pairing: Default::default(), auth_route: Default::default(), outbox_max: std::sync::atomic::AtomicUsize::new(OUTBOX_MAX), live: Default::default(), window_bin: Default::default(), me: Default::default(), next_client: AtomicU64::new(1), outboxes: Default::default() });
+            rpc: Default::default(), http: Default::default(), views: Default::default(), observers: Default::default(), pairing: Default::default(), auth_route: Default::default(), outbox_max: std::sync::atomic::AtomicUsize::new(OUTBOX_MAX), signal_seq: AtomicU64::new(store.len() as u64), extra_info: Default::default(), live: Default::default(), window_bin: Default::default(), me: Default::default(), next_client: AtomicU64::new(1), outboxes: Default::default() });
         let _ = hub.me.set(Arc::downgrade(&hub));
         hub.bootstrap()?;
         hub.fold_log().await?;
@@ -118,7 +124,32 @@ impl Hub {
             "freecad":"","kicad.cli":"","kicad.fork":"","kicad.commit":"","kicad.status":"checking","kicad.source":"path","kicad.version":"",
             "kicad.api":"0","kicad.caps":"","kicad.why":"","kicad.min":"10.99.0-bp.4","kicad.can_install":"","kicad.ipc.servers":"",
             "browser.engine.live":"","browser.engine.err":""})
+        .as_object().map(|o| { let mut o = o.clone(); for (k, v) in self.extra_info.lock().unwrap().iter() { o.insert(k.clone(), json!(v)); } Value::Object(o) }).unwrap_or(Value::Null)
     }
+
+    /// Hub info a module publishes (a terminal's state, a browser engine's...): joining clients get it through `info()`, every
+    /// client now connected gets {"t":"info","info":{key:value}}; an empty value removes the key (the frame carries ""). The map is
+    /// bounded (256 keys, key 128 bytes, value 64 KiB): a key past the bound is refused (false), one that exists can still change.
+    pub async fn set_info(&self, key: &str, value: &str) -> bool {
+        if key.is_empty() || key.len() > 128 || value.len() > 64 * 1024 { return false }
+        {
+            let mut m = self.extra_info.lock().unwrap();
+            if value.is_empty() { if m.remove(key).is_none() { return true } }
+            else {
+                if m.get(key).map(String::as_str) == Some(value) { return true }
+                if !m.contains_key(key) && m.len() >= 256 { return false }
+                m.insert(key.to_string(), value.to_string());
+            }
+        }
+        let frame = json!({"t":"info","info":{key:value}});
+        self.push_all(&frame);
+        let _ = self.presenter.fold(&json!({"t":"info","info":{key:value},"now":now_ms()})).await;
+        true
+    }
+
+    /// The signal revision (core/signal.bend SignalRevision): the log position of the last batch that held something besides
+    /// activity lines and assistant/system messages. The native sidebar keeps a saved page only while it is unchanged.
+    pub fn signal_seq(&self) -> u64 { self.signal_seq.load(Relaxed) }
 
     /// The whole log, as the frames a client's join receives, into the presenter.
     async fn fold_log(&self) -> Result<()> {
@@ -161,7 +192,7 @@ impl Hub {
                     let all: Vec<Value> = batch.iter().flat_map(|c| c.events.iter().cloned()).collect();
                     { let obs: Vec<Arc<dyn Observer>> = hub.observers.read().unwrap().clone(); for o in obs { let first = (first_idx + 1) as u32; let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| o.committed(&hub, &all, first))); } }
                     let _ = hub.presenter.fold(&json!({"t":"changes","items":all,"now":now_ms()})).await;
-                    let n = hub.store.len() as u64; let _ = hub.changed.send(n);
+                    let n = hub.store.len() as u64; if all.iter().any(signal_affects) { hub.signal_seq.store(n, Relaxed); } let _ = hub.changed.send(n);
                     let mut upto = first_idx;
                     for c in batch { upto += c.events.len(); let _ = c.done.send(Ok(upto as u64)); }
                 }
@@ -292,7 +323,7 @@ impl Hub {
         }
         Some(v)
     }
-    pub fn info_frame(&self) -> Value { json!({"t":"info","info":{"pair":"","pair.qr":""}}) }
+    pub fn info_frame(&self) -> Value { let mut i = serde_json::Map::new(); i.insert("pair".into(), json!("")); i.insert("pair.qr".into(), json!("")); for (k, v) in self.extra_info.lock().unwrap().iter() { i.insert(k.clone(), json!(v)); } json!({"t":"info","info":Value::Object(i)}) }
     pub fn log_info(&self) -> Value { self.info() }
 
     pub async fn revision(&self) -> u64 { self.store.len() as u64 + 1 }
@@ -392,7 +423,21 @@ mod tests {
         let (mut c, _g) = h.connect(true);
         let r0 = req(&c, &h, "view.open", (1 << 47) + 5, json!({"nativeSidebar":1})); let _ = h.request(&mut c, &r0).await;
         let r1 = req(&c, &h, "view.update", (1 << 47) + 6, json!({"nativeSidebar":1, "viewId": format!("{}:{}", c.gen, (1u64 << 47) + 5)})); let _ = h.request(&mut c, &r1).await;
-        let seen = spy.0.lock().unwrap().clone(); assert_eq!(seen.len(), 2);
+        // activity lines and assistant/system text leave the revision alone (SignalRevision.affects); a user message, a setting or an unknown event move it
+        let vid = format!("{}:{}", c.gen, (1u64 << 47) + 5);
+        h.commit_many(&[json!({"$":"ActivityLogged","thread":"t1","act":"a1","tone":"tool","kind":"Bash","summary":"ls","at":5}),
+            json!({"$":"MessagePosted","thread":"t1","msg":"m9","role":"assistant","text":"streamed","at":6}),
+            json!({"$":"MessagePosted","thread":"t1","msg":"m10","role":"system","text":"note","at":6})]).await.unwrap();
+        let r2 = req(&c, &h, "view.update", (1 << 47) + 7, json!({"nativeSidebar":1, "viewId": vid.clone()})); let _ = h.request(&mut c, &r2).await;
+        h.commit_many(&[json!({"$":"MessagePosted","thread":"t1","msg":"m11","role":"user","text":"hi","at":7})]).await.unwrap();
+        let r3 = req(&c, &h, "view.update", (1 << 47) + 8, json!({"nativeSidebar":1, "viewId": vid.clone()})); let _ = h.request(&mut c, &r3).await;
+        h.commit_many(&[json!({"$":"SomethingNew","at":8})]).await.unwrap();
+        let r4 = req(&c, &h, "view.update", (1 << 47) + 9, json!({"nativeSidebar":1, "viewId": vid})); let _ = h.request(&mut c, &r4).await;
+        let all = spy.0.lock().unwrap().clone(); assert_eq!(all.len(), 5);
+        assert_eq!(all[2]["revision"], all[0]["revision"], "activity and assistant/system text do not move the revision");
+        assert!(all[3]["revision"].as_u64() > all[2]["revision"].as_u64(), "a user message moves it");
+        assert!(all[4]["revision"].as_u64() > all[3]["revision"].as_u64(), "an unknown event moves it");
+        let seen = all[..2].to_vec(); assert_eq!(seen.len(), 2);
         for p in &seen {
             let k = p["nativeKey"].as_str().unwrap_or(""); assert!(k.len() == 32 && k.bytes().all(|b| b.is_ascii_hexdigit()), "nativeKey: {k}");
             assert_eq!(p["nativeKey"], seen[0]["nativeKey"], "one key for the hub's run");
