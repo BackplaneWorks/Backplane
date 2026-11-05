@@ -179,7 +179,7 @@ fn text(reg: &Reg, light: bool, spans: Vec<Span>, kind: Kind) -> AnyElement { Se
 fn plain_spans(s: &str) -> Vec<Span> { vec![Span { text: s.to_string(), style: Default::default() }] }
 
 /// A user's message text.
-pub fn user_text(reg: &Reg, light: bool, s: &str) -> AnyElement { text(reg, light, plain_spans(s), Kind::Body) }
+pub fn user_text(reg: &Reg, light: bool, s: &str) -> AnyElement { text(reg, light, md::linkify(s), Kind::Body) }
 
 /// An invisible overlay that records where its parent was painted, for the check harness's control rectangles.
 fn copy_probe(reg: &Reg, ix: usize) -> impl IntoElement {

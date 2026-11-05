@@ -26,6 +26,30 @@ pub enum Block {
 
 const MAX_DEPTH: usize = 16;
 
+/// A person's own text (their message) cut into spans with web addresses and absolute file paths as links, as the other clients do
+/// (links.bend: `http(s)://…`, paths from `/` or `~/`, a trailing `.,;:!?)` left out, an optional `:12` kept). Pure.
+pub fn linkify(text: &str) -> Vec<Span> {
+    let mut out: Vec<Span> = Vec::new(); let mut plain = String::new();
+    let flush = |plain: &mut String, out: &mut Vec<Span>| if !plain.is_empty() { out.push(Span { text: std::mem::take(plain), style: Style::default() }); };
+    let b = text.as_bytes(); let mut i = 0;
+    while i < text.len() {
+        let rest = &text[i..];
+        let at_word = i == 0 || b[i - 1].is_ascii_whitespace() || matches!(b[i - 1], b'(' | b'[' | b'"' | b'\'' | b'`' | b'<');
+        let kind = if !at_word { 0 } else if rest.starts_with("http://") || rest.starts_with("https://") { 1 } else if (rest.starts_with('/') && rest.len() > 1 && !rest[1..].starts_with(|c: char| c.is_whitespace() || c == '/')) || rest.starts_with("~/") { 2 } else { 0 };
+        if kind == 0 { let ch = rest.chars().next().unwrap(); plain.push(ch); i += ch.len_utf8(); continue; }
+        let end = rest.find(|c: char| c.is_whitespace() || matches!(c, '<' | '>' | '"' | '`' | '\'')).unwrap_or(rest.len());
+        let mut word = &rest[..end];
+        while word.ends_with(|c: char| matches!(c, '.' | ',' | ';' | ':' | '!' | '?' | ')' | ']')) { word = &word[..word.len() - 1]; }
+        let min = if kind == 1 { 9 } else { 3 };
+        if word.len() < min || (kind == 2 && !word[1..].contains(|c: char| c.is_alphanumeric())) { let ch = rest.chars().next().unwrap(); plain.push(ch); i += ch.len_utf8(); continue; }
+        flush(&mut plain, &mut out);
+        out.push(Span { text: word.to_string(), style: Style { link: Some(Link { href: word.to_string(), file: kind == 2 }), ..Style::default() } });
+        i += word.len();
+    }
+    flush(&mut plain, &mut out);
+    out
+}
+
 fn inline(node: &Value, style: &Style, out: &mut Vec<Span>, depth: usize) {
     if depth > MAX_DEPTH { return; }
     if let Some(t) = node["text"].as_str() { push(out, t, style); return; }
@@ -188,3 +212,18 @@ mod tests {
         for code in ["let s = \"unterminated 世界", "# 見出し\nx = 'é'", "/* open", "日本語 ok 12abc"] { let h = highlight(code); assert_eq!(h.last().unwrap().0.end, code.len(), "{code}"); }
     }
 }
+
+#[cfg(test)]
+mod link_tests {
+    use super::*; use core::prelude::v1::test;
+    fn links(t: &str) -> Vec<(String, bool)> { linkify(t).into_iter().filter_map(|s| s.style.link.map(|l| (l.href, l.file))).collect() }
+    #[test] fn web_addresses_and_paths_become_links_without_trailing_punctuation() {
+        assert_eq!(links("see https://example.com/a?b=1, then /home/h/x.rs:12. ok"), vec![("https://example.com/a?b=1".to_string(), false), ("/home/h/x.rs:12".to_string(), true)]);
+        assert_eq!(links("(~/notes/a.md)"), vec![("~/notes/a.md".to_string(), true)]);
+    }
+    #[test] fn plain_words_slashes_and_mid_word_urls_are_not_links() {
+        assert!(links("and/or a / b // c http://").is_empty()); assert!(links("xhttps://example.com").is_empty());
+    }
+    #[test] fn the_spans_keep_every_character() { let t = "a https://x.io/p, b /tmp/q é"; assert_eq!(linkify(t).iter().map(|s| s.text.as_str()).collect::<String>(), t); }
+}
+
