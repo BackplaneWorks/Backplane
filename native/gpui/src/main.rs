@@ -1,6 +1,7 @@
 mod hub;
 mod input;
 mod script;
+mod ui;
 mod theme;
 mod wire;
 use gpui::{prelude::*, *, actions};
@@ -27,7 +28,7 @@ fn pager_row(cx:&mut Context<Backplane>,id:String,pager:&Value,light:bool)->Opti
     }
     if any {Some(row.into_any_element())} else {None}
 }
-fn string(v:&Value,key:&str)->String {v[key].as_str().unwrap_or("").to_string()}
+pub fn string(v:&Value,key:&str)->String {v[key].as_str().unwrap_or("").to_string()}
 impl Backplane {
     fn new(window:&mut Window,cx:&mut Context<Self>,config:hub::Config,started:Instant)->Self {
         let steps:VecDeque<Step>=config.script.as_ref().map(|p|script::load(p)).unwrap_or_default();let script_total=steps.len();
@@ -78,61 +79,6 @@ impl Backplane {
     }
     fn user_entries(&self)->usize {self.data["thread"]["entries"].as_array().map_or(0,|e|e.iter().filter(|e|e["kind"]=="user").count())}
     fn close_popup(&mut self,_:&ClosePopup,_:&mut Window,cx:&mut Context<Self>){self.popup=false;cx.notify();}
-}
-impl Render for Backplane {
-    fn render(&mut self,window:&mut Window,cx:&mut Context<Self>)->impl IntoElement {
-        if self.want_focus {self.want_focus=false;self.input.focus_handle(cx).focus(window);}
-        self.frame_marks(window,cx);
-        let light=self.data["theme"]=="light";let c=|name|theme::color(light,name);
-        let mut rows=Vec::new();
-        let projects=self.data["projects"].as_array().cloned().unwrap_or_default();
-        for project in projects {
-            rows.push(div().px_3().pt_3().pb_1().text_size(px(11.)).text_color(c("dim")).child(string(&project,"title").to_uppercase()).into_any_element());
-            for thread in project["threads"].as_array().into_iter().flatten().chain(project["settled"].as_array().into_iter().flatten()) {
-                let id=string(thread,"id");let raw=id.rsplit_once('|').map_or(id.as_str(),|(_,id)|id);
-                let selected=raw==self.selected;
-                let color=match thread["state"].as_str().unwrap_or(""){"running"=>c("accent"),"failed"=>c("bad"),_=>c("faint")};
-                rows.push(div().id(SharedString::from(format!("thread-{id}"))).flex().items_center().gap_2().px_3().py_1().border_l_2().border_color(if selected{c("accent")}else{c("panel")})
-                    .bg(if selected{c("raise")}else{c("panel")}).hover(|s|s.bg(c("raise"))).cursor_pointer()
-                    .on_click(cx.listener(move|this,_,window,cx|this.select(id.clone(),window,cx)))
-                    .child(div().size(px(6.)).bg(color)).child(div().flex_1().overflow_hidden().child(string(thread,"title")))
-                    .child(div().text_size(px(11.)).text_color(c("faint")).child(string(thread,"ago"))).into_any_element());
-            }
-        }
-        for page in self.data["sidebarPages"].as_array().cloned().unwrap_or_default() {
-            for key in ["projects","active","legacy"] {if let Some(row)=pager_row(cx,format!("pg-{key}"),&page[key],light){rows.push(row);}}
-        }
-        let thread=&self.data["thread"];let mut messages=Vec::new();
-        for entry in thread["entries"].as_array().into_iter().flatten() {
-            let own=entry["kind"]=="user";let text=string(entry,"text");
-            if text.is_empty(){continue;}
-            messages.push(div().id(SharedString::from(format!("entry-{}",string(entry,"id")))).w_full().py_3()
-                .child(div().text_size(px(11.)).text_color(if own{c("accent")}else{c("dim")}).mb_1().child(if own{"You"}else if entry["kind"]=="assistant"{"Assistant"}else{"Activity"}))
-                .child(div().px(if own{px(12.)}else{px(0.)}).py(if own{px(8.)}else{px(0.)}).bg(if own{c("raise")}else{c("bg")}).child(text))
-                .child(div().text_size(px(11.)).text_color(c("faint")).mt_1().child(string(entry,"stamp"))).into_any_element());
-        }
-        for live in thread["live"].as_array().into_iter().flatten(){messages.push(div().py_2().child(string(live,"text")).into_any_element());}
-        if messages.is_empty(){messages.push(div().py_6().text_color(c("dim")).child(if thread.is_object(){"Start a conversation."}else{"Select a thread."}).into_any_element());}
-        let skills=thread["skills"].as_array().cloned().unwrap_or_default();
-        let mut popup=div().flex().flex_col().border_1().border_color(c("line")).bg(c("panel"));
-        if self.popup {for (index,skill) in skills.iter().take(8).enumerate(){let word=skill.get("word").or_else(||skill.get("name")).and_then(Value::as_str).unwrap_or("").to_string();let label=skill.get("label").and_then(Value::as_str).unwrap_or(&word).to_string();popup=popup.child(div().id(("skill",index)).p_2().cursor_pointer().hover(|s|s.bg(c("raise"))).child(label).on_click(cx.listener(move|this,_,window,cx|{let _=this.tx.send(Command::Action("skill".into(),word.clone()));this.input.update(cx,|input,cx|input.set(word.clone()+" ",cx));this.popup=false;this.input.focus_handle(cx).focus(window);cx.notify();})));}}
-        div().size_full().flex().bg(c("bg")).text_color(c("text")).text_size(px(13.)).font_family("Noto Sans Mono CJK JP").line_height(px(20.))
-            .on_action(cx.listener(Self::send)).on_action(cx.listener(Self::close_popup))
-            .child(div().w(px(264.)).h_full().flex_shrink_0().bg(c("panel")).border_r_1().border_color(c("line")).flex().flex_col()
-                .child(div().px_3().py_3().border_b_1().border_color(c("line")).flex().items_center().gap_2().child(div().size(px(7.)).bg(if self.status=="Connected"{c("ok")}else{c("bad")})).child("Backplane").child(div().text_size(px(11.)).text_color(c("faint")).child("GPUI")))
-                .child(div().px_3().py_2().border_b_1().border_color(c("line")).text_color(c("dim")).child("Projects"))
-                .child(div().id("sidebar").overflow_y_scroll().flex_1().children(rows))
-                .child(div().px_3().py_2().border_t_1().border_color(c("line")).text_size(px(11.)).text_color(c("dim")).child(self.status.clone())))
-            .child(div().flex_1().min_w_0().h_full().flex().flex_col()
-                .child(div().px_5().py_3().border_b_1().border_color(c("line")).flex().justify_between().child(if thread.is_object(){string(thread,"title")}else{"Backplane GPUI".into()}).child(div().text_color(c("dim")).child(string(thread,"phase"))))
-                .child(div().id("timeline").overflow_y_scroll().flex_1().px_6().children(messages))
-                .when(!self.error.is_empty(),|d|d.child(div().px_5().py_2().text_color(c("bad")).child(self.error.clone())))
-                .child(div().px_5().py_3().border_t_1().border_color(c("line")).flex().flex_col().gap_2()
-                    .when(self.popup&&!skills.is_empty(),|d|d.child(popup))
-                    .child(div().border_1().border_color(c("line")).p_2().min_h(px(64.)).child(self.input.clone()))
-                    .child(div().flex().justify_between().items_center().child(div().text_size(px(11.)).text_color(c("dim")).child("Enter to send · / commands · $ skills"))
-                        .child(div().id("send").px_3().py_1().bg(c("accent")).text_color(c("on-accent")).cursor_pointer().child("Send").on_click(cx.listener(|this,_,window,cx|this.send(&Send,window,cx)))))))
-    }
 }
 fn main()->anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();

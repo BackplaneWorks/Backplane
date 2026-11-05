@@ -15,7 +15,7 @@ PID=$(grep ProjectCreated $HD/events.jsonl | grep -o '"id":"p[0-9-]*"' | cut -d'
 [ "$N" -gt 1 ] && timeout 400 bun $ROOT/scripts/gpui/android-seed.ts 100.64.84.41:3814 $HD $PID $((N-1)) >/dev/null 2>&1
 say "threads in log: $(grep -c ThreadCreated $HD/events.jsonl)"
 PL=$R/$L.proxy.log; rm -f $PL*; (cd /tmp && nohup bun $ROOT/scripts/gpui/android-proxy.ts 100.64.84.41:3815 100.64.84.41:3814 $PL >/dev/null 2>&1 & echo $! > $H/proxy.pid); sleep 1
-$E adb install -r $APK >/dev/null; $E adb shell pm clear dev.backplane.mobile.gpui >/dev/null; $E adb shell pm grant dev.backplane.mobile.gpui android.permission.POST_NOTIFICATIONS; $E adb logcat -c
+$E adb uninstall dev.backplane.mobile.gpui >/dev/null 2>&1; $E adb install $APK | tail -1 | tee -a $OUT; $E adb shell pm clear dev.backplane.mobile.gpui >/dev/null; $E adb shell pm grant dev.backplane.mobile.gpui android.permission.POST_NOTIFICATIONS; $E adb logcat -c
 T0=$(date +%s.%N); PORT=3815 TOKENFILE=$HD/token $ROOT/scripts/gpui/android-pair.sh >/dev/null
 CT=""; for i in $(seq 1 60); do if $U has "Connected" || $U has "Skip" exact; then CT=$(echo "$(date +%s.%N) - $T0" | bc); break; fi; done
 say "pair -> Connected (uiautomator poll, ~1 s resolution): ${CT:-never} s"
