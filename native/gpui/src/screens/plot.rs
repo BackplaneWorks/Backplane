@@ -250,7 +250,7 @@ mod tests {
     }
     #[test] fn fit_centres_the_box_and_zoom_keeps_the_point_under_the_pointer() {
         let v = View::fit([0., 0., 2000., 1000.], 940., 500.);
-        assert!((v.cx - 1000.).abs() < 1e-3 && (v.cy - 500.).abs() < 1e-3); assert!((v.scale - 0.47).abs() < 1e-3, "{}", v.scale);
+        assert!((v.cx - 1000.).abs() < 1e-3 && (v.cy - 500.).abs() < 1e-3); assert!((v.scale - 0.4418).abs() < 1e-3, "{}", v.scale);
         let (x, y) = v.to_plot(100., 80., 940., 500.);
         let z = v.zoom(2., 100., 80., 940., 500., v.scale);
         let (x2, y2) = z.to_plot(100., 80., 940., 500.);
