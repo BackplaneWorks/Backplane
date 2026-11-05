@@ -120,13 +120,18 @@ mod tests {
         s.write_all(format!("GET /_trust HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n").as_bytes()).await.unwrap();
         let mut b = vec![]; s.read_to_end(&mut b).await.unwrap(); String::from_utf8_lossy(&b).into_owned()
     }
-    /// A free port, found by binding and letting go.
+    /// A free port, found by binding and letting go (another test may take it before the listener does: `up` tries again).
     fn free() -> u16 { std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port() }
+    /// `start` on a free port, again on another when the bind lost the race to a parallel test.
+    async fn up(hub: &Arc<Hub>, ts: Arc<dyn Tailscale>, p: &Arc<Peering>, routes: &Arc<AuthRoutes>, host: &str) -> (State, u16) {
+        for _ in 0..10 { let port = free(); let st = start(hub.clone(), ts.clone(), p.clone(), routes.clone(), host, port, "tok").await; if st != State::Unavailable { return (st, port) } }
+        panic!("no free port to listen on")
+    }
 
     #[tokio::test] async fn tailnet_trust_comes_from_whois_of_each_connection() {
-        let (hub, p, routes, h) = node("trust").await; let port = free();
+        let (hub, p, routes, h) = node("trust").await;
         let ts = Arc::new(Fake { ip: "127.0.0.1".into(), whois: [("127.0.0.1".to_string(), who("me@x.com"))].into(), status: r#"{"Self":{"DNSName":"box.t.ts.net."}}"#.into() });
-        let st = start(hub.clone(), ts, p.clone(), routes.clone(), "127.0.0.1x", port, "tok").await;
+        let (st, port) = up(&hub, ts, &p, &routes, "127.0.0.1x").await;
         assert_eq!(st, State::Reachable { link: format!("http://127.0.0.1:{port}/#token=tok") });
         // the peer (127.0.0.1) and this node (127.0.0.1) are the same owner: trusted
         let t = get(&format!("127.0.0.1:{port}")).await; assert!(t.contains("trusted=true") && t.contains("owner_conn=true"), "{t}");
@@ -134,7 +139,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(h);
     }
     #[tokio::test] async fn tailnet_a_stranger_or_a_failed_whois_is_not_trusted() {
-        let (hub, p, routes, h) = node("stranger").await; let port = free();
+        let (hub, p, routes, h) = node("stranger").await;
         // this node's owner is me@x.com, but the peer 127.0.0.1 resolves to someone else after the first lookup
         struct Flip(std::sync::atomic::AtomicUsize);
         impl Tailscale for Flip {
@@ -142,18 +147,22 @@ mod tests {
             fn whois(&self, _ip: String) -> Fut<String> { let n = self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst); Box::pin(async move { match n { 0 => who("me@x.com"), 1 => who("friend@y.com"), 2 => who("tagged-devices"), _ => String::new() } }) }
             fn status(&self) -> Fut<String> { Box::pin(async { String::new() }) }
         }
-        start(hub.clone(), Arc::new(Flip(0.into())), p, routes, "127.0.0.1x", port, "tok").await;
+        let (_, port) = up(&hub, Arc::new(Flip(0.into())), &p, &routes, "127.0.0.1x").await;
         for _ in 0..3 { let t = get(&format!("127.0.0.1:{port}")).await; assert!(t.contains("trusted=false") && t.contains("owner_conn=false"), "{t}"); }
         let _ = std::fs::remove_dir_all(h);
     }
     /// What a phone is handed: once the listener is up on the tailnet address, an invitation (and its QR) names that address.
     #[tokio::test] async fn tailnet_the_pairing_link_and_qr_carry_the_listeners_address() {
-        let (hub, p, _unused, h) = node("link").await; let port = free();
+        let (hub, p, _unused, h) = node("link").await;
         // (routes made as the hub makes them: listening on 127.0.0.1:<port>, not the 0.0.0.0 fixture the other tests share)
         let h2 = std::env::temp_dir().join(format!("bp-listener-link2-{}", std::process::id())); let _ = std::fs::remove_dir_all(&h2); std::fs::create_dir_all(&h2).unwrap(); std::fs::write(h2.join("token"), "tok\n").unwrap();
-        let (_, routes) = super::super::start::open(&h2, "127.0.0.1", port).unwrap();
         let ts = Arc::new(Fake { ip: "127.0.0.1".into(), whois: [("127.0.0.1".to_string(), who("me@x.com"))].into(), status: String::new() });
-        start(hub, ts, p, routes.clone(), "127.0.0.1x", port, "tok").await;
+        let (mut port, mut routes) = (0, None);
+        for _ in 0..10 {
+            port = free(); let (_, r) = super::super::start::open(&h2, "127.0.0.1", port).unwrap();
+            if start(hub.clone(), ts.clone(), p.clone(), r.clone(), "127.0.0.1x", port, "tok").await != State::Unavailable { routes = Some(r); break }
+        }
+        let routes = routes.expect("a free port");
         let req = Req { method: "POST".into(), target: "/auth/invitations".into(), headers: vec![("Authorization".into(), "Bearer tok".into()), ("Host".into(), format!("127.0.0.1:{port}"))], body: vec![], peer: None, trusted: false };
         let out = routes.handle(&req, 1).unwrap(); assert_eq!(out.reply.status, "200 OK", "{}", String::from_utf8_lossy(&out.reply.body));
         let b: serde_json::Value = serde_json::from_slice(&out.reply.body).unwrap();
@@ -182,9 +191,9 @@ mod tests {
         start(hub, ts, p.clone(), routes, "0.0.0.0", port, "tok").await;
         // Auth.owner.hosts: the ip and the MagicDNS name, each bare and with the listener's port (port 1 here is Peering's own)
         assert!(p.own_hosts_for_test().is_empty(), "a covering main listener sets no owner authorities");
-        let port2 = free(); let ts2 = Arc::new(Fake { ip: "127.0.0.1".into(), whois: [("127.0.0.1".to_string(), who("me@x.com"))].into(), status: r#"{"Self":{"DNSName":"Box.t.ts.net."}}"#.into() });
+        let ts2 = Arc::new(Fake { ip: "127.0.0.1".into(), whois: [("127.0.0.1".to_string(), who("me@x.com"))].into(), status: r#"{"Self":{"DNSName":"Box.t.ts.net."}}"#.into() });
         let (hub2, p2, routes2, h2) = node("auth2").await;
-        start(hub2, ts2, p2.clone(), routes2, "127.0.0.1x", port2, "tok").await;
+        up(&hub2, ts2, &p2, &routes2, "127.0.0.1x").await;
         let own = p2.own_hosts_for_test(); let _ = std::fs::remove_dir_all(h2); assert!(own.contains(&"127.0.0.1".to_string()) && own.contains(&"box.t.ts.net".to_string()) && own.contains(&"127.0.0.1:1".to_string()), "{own:?}");
         let _ = std::fs::remove_dir_all(h);
     }
