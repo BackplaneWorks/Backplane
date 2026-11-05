@@ -18,6 +18,9 @@ for s in $(git rev-list --reverse "gpui..$tip"); do
   if [ -n "$p" ] && grep -q "^[0-9a-f]* $p " "$c/gpui-reviewed" 2>/dev/null; then continue; fi
   echo "not reviewed: $(git log -1 --format='%h %s' "$s")" >&2; bad=1
 done
+# nothing over 1 MB and no build output (the bundled fonts are the one exception: COMMON.md)
+big=$(git rev-list --objects "gpui..$tip" | git cat-file --batch-check='%(objecttype) %(objectsize) %(rest)' | awk '$1=="blob" && $3!="" && ($2>1000000 || $3 ~ /(^|\/)target\//) && $3 !~ /\.ttf$/ {print $2, $3}')
+if [ -n "$big" ]; then echo "$big" | head -20 >&2; echo "refused: files over 1 MB or build output in the range" >&2; bad=1; fi
 [ "$bad" = 0 ] || { echo "refused: nothing moved" >&2; exit 1; }
 [ "$n" -gt 0 ] || { echo "nothing to land"; exit 0; }
 w=$(git worktree list --porcelain | awk '/^worktree /{w=substr($0,10)} /^branch refs\/heads\/gpui$/{print w; exit}')

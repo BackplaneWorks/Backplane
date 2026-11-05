@@ -7,3 +7,6 @@ build/
 node_modules/
 .env
 __pycache__/
+# Rust build output
+native/host/target/
+native/gpui/target/
