@@ -24,7 +24,7 @@ impl Tk { pub fn terminal(&self) -> bool { matches!(self.state.as_str(), "done" 
 pub struct Ask { pub thread: String, pub kind: String, pub tool: String, pub detail: String, pub options: String }
 
 #[derive(Default)]
-pub struct World { pub said_to: HashMap<String, std::collections::HashSet<String>>, pub reviews: HashMap<String, Vec<(String, String, u64)>>, pub queued: HashMap<String, Vec<String>>, pub parents: HashMap<String, String>, pub td_msgs: std::collections::HashSet<String>, pub launched: HashMap<String, (String, bool)>, pub projects: HashMap<String, (String, bool)>, pub tasks: HashMap<String, Tk>, pub deadlines: std::collections::HashSet<String>, pub asks: HashMap<String, Ask>, pub sessions: std::collections::HashSet<(String, String)>, pub threads: HashMap<String, T>, pub roots: HashMap<String, String>, pub st: HashMap<String, String>, seen: usize }
+pub struct World { pub bot_of: HashMap<String, String>, pub said_to: HashMap<String, std::collections::HashSet<String>>, pub reviews: HashMap<String, Vec<(String, String, u64)>>, pub queued: HashMap<String, Vec<String>>, pub parents: HashMap<String, String>, pub td_msgs: std::collections::HashSet<String>, pub launched: HashMap<String, (String, bool)>, pub projects: HashMap<String, (String, bool)>, pub tasks: HashMap<String, Tk>, pub deadlines: std::collections::HashSet<String>, pub asks: HashMap<String, Ask>, pub sessions: std::collections::HashSet<(String, String)>, pub threads: HashMap<String, T>, pub roots: HashMap<String, String>, pub st: HashMap<String, String>, seen: usize }
 
 const KEYS: &[&str] = &["watch.", "thread.parent.", "bg.", "wait.", "work.timeout.seconds", "allowance.claude", "effort.", "buy.", "kicad.ipc", "order.enabled", "agent.lang", "tz.machine", "agent.thinking", "restart.continue", "tok.epoch", "tok.recount", "tok.basis.", "turn.speed.", "turn.models.", "limit.claude.", "ride.", "agy.", "session.", "launch.n."];
 fn tracked(k: &str) -> bool { KEYS.iter().any(|p| k == *p || (p.ends_with('.') && k.starts_with(p))) || k.starts_with("usage.") || k.starts_with("tok.key.") }
@@ -39,6 +39,8 @@ pub fn carry_will(t: &T, restart_continue: &str) -> bool {
 
 impl World {
     pub fn seen(&self) -> usize { self.seen }
+    /// The bot a thread belongs to ("" for a thread that is no bot's).
+    pub fn bot(&self, th: &str) -> &str { self.bot_of.get(th).map(String::as_str).unwrap_or("") }
     pub fn setting(&self, k: &str) -> &str { self.st.get(k).map(String::as_str).unwrap_or("") }
 
     /// Catch up with the store (whole lines past what was seen). A cheap substring test skips lines no rule reads.
@@ -54,7 +56,7 @@ impl World {
 
     pub fn apply(&mut self, line: &str) {
         let Some(t) = crate::session::event_type(line) else { return };
-        const READ: [&str; 32] = ["TurnQueued", "QueueTaken", "QueueRemoved", "QueueTakenOne", "ThreadParentSet", "ProjectRemoved", "ThreadLaunched", "TaskDelegated", "TaskStateSet", "TaskDelivered", "WorkSet", "AskOpened", "AskClosed", "ThreadRenamed", "ProjectCreated", "ThreadCreated", "WorktreeSet", "ProviderSet", "ModesSet", "SessionSet", "TurnChanged", "MessagePosted", "ActivityLogged", "UsageSet", "SettingSet", "TurnUsage", "ThreadArchived", "ThreadDeleted", "ThreadForked", "QueueTaken", "TurnQueued", "ThreadWoke"];
+        const READ: [&str; 33] = ["BotSet", "TurnQueued", "QueueTaken", "QueueRemoved", "QueueTakenOne", "ThreadParentSet", "ProjectRemoved", "ThreadLaunched", "TaskDelegated", "TaskStateSet", "TaskDelivered", "WorkSet", "AskOpened", "AskClosed", "ThreadRenamed", "ProjectCreated", "ThreadCreated", "WorktreeSet", "ProviderSet", "ModesSet", "SessionSet", "TurnChanged", "MessagePosted", "ActivityLogged", "UsageSet", "SettingSet", "TurnUsage", "ThreadArchived", "ThreadDeleted", "ThreadForked", "QueueTaken", "TurnQueued", "ThreadWoke"];
         if !READ.contains(&t) { return }
         let Ok(v) = serde_json::from_str::<Value>(line) else { return };
         let g = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").to_string();
@@ -65,6 +67,7 @@ impl World {
             "QueueRemoved" | "QueueTakenOne" => if let Some(q) = self.queued.get_mut(&g("thread")) { let m = g("msg"); q.retain(|x| *x != m) },
             "ThreadParentSet" => { self.parents.insert(g("id"), g("parent")); }
             "ProjectRemoved" => if let Some(p) = self.projects.get_mut(&g("id")) { p.1 = true },
+            "BotSet" => { let th = g("thread"); if !th.is_empty() { self.bot_of.insert(th, g("id")); } }
             "ThreadLaunched" => { self.launched.insert(g("id"), (g("by"), v.get("report").and_then(Value::as_bool).unwrap_or(true))); }
             "TaskDelegated" => { self.tasks.insert(g("task"), Tk { parent: g("parent"), child: g("child"), depth: v.get("depth").and_then(Value::as_u64).unwrap_or(0), state: "queued".into(), provider: g("provider"), model: g("model"), ..Default::default() }); }
             "TaskStateSet" => if let Some(k) = self.tasks.get_mut(&g("task")) { if !k.terminal() { k.state = g("state") } k.summary = g("summary") }, // Task.step: a terminal state sticks; the summary is replaced

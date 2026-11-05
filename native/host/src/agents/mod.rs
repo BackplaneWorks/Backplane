@@ -389,10 +389,11 @@ impl Actor {
         self.jobs_start(&cwd, &msg);
         // the person's message starts the turn: the <terminals> note follows it (and the chat's unpinned terminals stop)
         let rv_block = { let w = self.ag.world().await; let ops: Vec<_> = w.reviews.get(&th).map(|v| v.iter().filter_map(|(k, sm, at)| crate::files::kicad::review::of(crate::files::kicad::review::TONE, k, sm, *at)).collect()).unwrap_or_default(); crate::files::kicad::review::prompt(&crate::files::kicad::review::fold(&ops)) }; // Review.agent: the open comments follow every message
-        let text_rv = if rv_block.is_empty() { text.clone() } else { format!("{text}\n\n{rv_block}") };
+        let text_ref = format!("{text}{}", crate::settings::mentions::block(&refs)); // Refs.agent: the text, then what it references (the `&model` lines)
+        let text_rv = if rv_block.is_empty() { text_ref } else { format!("{text_ref}\n\n{rv_block}") };
         let agent_text = if role == "user" && origin.is_none() { let n = crate::term::tools::on_person_message(&self.ag.hub, &th).await; if n.is_empty() { text_rv.clone() } else { format!("{text_rv}\n\n{n}") } } else { text_rv.clone() };
         let agent_text = if sbs && !codex && !ride.is_empty() { format!("{}\n\n{}", codex::ride_input(&ride), agent_text) } else { agent_text }; // what waited for the person goes with their next message
-        let agent_text = format!("{agent_text}{}", crate::settings::mentions::block(&refs)); // the model mentions the person made: what each is, in one <references> block
+        let agent_text = { let w = self.ag.world().await; rules::rules_agent(&rules::rules_block(&w.st, w.bot(&th), &t.project), &agent_text) }; // Rules.agent: the standing rules come first
         if codex { let run = if ride.is_empty() { agent_text.clone() } else { format!("{}\n\n{}", codex::ride_input(&ride), agent_text) }; self.codex_run(&t, &cwd, &run).await; return Ok(()) }
         self.claude_send(&t, &cwd, &msg, &text, &agent_text, now).await;
         Ok(())

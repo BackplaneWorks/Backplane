@@ -107,6 +107,29 @@ pub fn exit_say(dflt: &str, code: i32, tail: &str) -> String {
     format!("{} ({c}){}", if why.is_empty() { dflt } else { why }, if tail.trim().is_empty() { String::new() } else { format!(": {tl}") })
 }
 
+
+/// Rules.block (core/rules.bend): the standing rules ("rule.<id>" settings, oldest first then by id) that apply to a thread: on, for every bot or this thread's bot, for every project or
+/// this thread's project. "" when none.
+pub fn rules_block(st: &std::collections::HashMap<String, String>, bot: &str, project: &str) -> String {
+    let mut rs: Vec<(u64, String, Value)> = st.iter().filter(|(k, _)| k.starts_with("rule.")).filter_map(|(k, v)| {
+        let o: Value = serde_json::from_str(v).ok()?; if !o.is_object() { return None }
+        let id = o.get("id").and_then(Value::as_str).filter(|i| !i.is_empty()).map(str::to_string).unwrap_or_else(|| k[5..].to_string());
+        Some((o.get("at").and_then(Value::as_u64).unwrap_or(0), id, o)) }).collect();
+    rs.sort_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
+    let g = |o: &Value, k: &str| o.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+    let mut lines = String::new();
+    for (_, _, o) in &rs {
+        let on = o.get("on").and_then(Value::as_bool).unwrap_or(true); let (rb, rp) = (g(o, "bot"), g(o, "project"));
+        if !(on && (rb.is_empty() || rb == bot) && (rp.is_empty() || rp == project)) { continue }
+        let (tool, word, enforce) = (g(o, "tool"), g(o, "word"), o.get("enforce").and_then(Value::as_bool).unwrap_or(false));
+        let tail = if tool.is_empty() { String::new() } else if enforce { if word.is_empty() { format!(" (enforced: {tool} is refused)") } else { format!(" (enforced: {tool} is refused unless the person's latest message says \"{word}\")") } } else { format!(" (when using {tool})") };
+        lines += &format!("- {}{tail}\n", g(o, "text"));
+    }
+    if lines.is_empty() { String::new() } else { format!("<rules>\nStanding rules from the person. Follow them; the enforced ones are checked by Backplane.\n{lines}</rules>") }
+}
+/// Rules.agent: a turn's text with the thread's rules before it.
+pub fn rules_agent(block: &str, text: &str) -> String { if block.is_empty() { text.to_string() } else { format!("{block}\n\n{text}") } }
+
 #[cfg(test)]
 mod tests {
     #[test] fn exit_say_words_the_exit_and_scrubs_the_tail() {
@@ -148,4 +171,17 @@ mod tests {
     }
     #[test] fn unanswered_asks_are_named() { assert_eq!(unanswered("approval", "Bash", "ls -la\nx"), " Its request to use Bash was not answered: \u{201C}ls -la\u{201D}"); assert_eq!(unanswered("plan", "", ""), " Its plan was not answered."); assert_eq!(unanswered("input", "", " "), " Its question was not answered"); assert_eq!(unanswered("x", "", ""), " Its request was not answered."); }
     #[test] fn a_sigkill_is_named() { assert!(exit_why(137).contains("signal 9")); assert_eq!(exit_why(3), "agent exited with code 3"); }
+    #[test] fn the_rules_block_is_bends_text_for_the_rules_that_apply() {
+        let mut st = std::collections::HashMap::new();
+        st.insert("rule.r1".to_string(), r#"{"id":"r1","text":"Never push to main","at":5}"#.to_string());
+        st.insert("rule.r2".to_string(), r#"{"text":"Ask before deleting","tool":"Bash","at":3}"#.to_string());
+        st.insert("rule.r3".to_string(), r#"{"id":"r3","text":"No deploys","tool":"deploy_main","enforce":true,"word":"ship it","at":7}"#.to_string());
+        st.insert("rule.r4".to_string(), r#"{"id":"r4","text":"Never edit","tool":"Write","enforce":true,"at":8}"#.to_string());
+        st.insert("rule.r5".to_string(), r#"{"id":"r5","text":"for bot b9","bot":"b9","at":9}"#.to_string());
+        st.insert("rule.r6".to_string(), r#"{"id":"r6","text":"off","on":false,"at":1}"#.to_string());
+        st.insert("rule.r7".to_string(), r#"{"id":"r7","text":"project p2 only","project":"p2","at":10}"#.to_string());
+        assert_eq!(rules_block(&st, "", "p1"), "<rules>\nStanding rules from the person. Follow them; the enforced ones are checked by Backplane.\n- Ask before deleting (when using Bash)\n- Never push to main\n- No deploys (enforced: deploy_main is refused unless the person's latest message says \"ship it\")\n- Never edit (enforced: Write is refused)\n</rules>");
+        assert!(rules_block(&st, "b9", "p2").contains("- for bot b9\n- project p2 only\n"));
+        assert_eq!(rules_block(&std::collections::HashMap::new(), "", ""), ""); assert_eq!(rules_agent("", "hi"), "hi"); assert_eq!(rules_agent("<rules>x</rules>", "hi"), "<rules>x</rules>\n\nhi");
+    }
 }

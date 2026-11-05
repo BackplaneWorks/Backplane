@@ -1181,3 +1181,16 @@ fn watch_log(work: &Path, rows: &[String], extra: &str) -> String { base_log(wor
     assert!(o.status.success(), "{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
     assert!(String::from_utf8_lossy(&o.stdout).contains("sbs_routine_probe ... ok"), "the probe ran: {}", String::from_utf8_lossy(&o.stdout));
 }
+#[tokio::test(flavor = "multi_thread")] async fn a_turns_text_starts_with_the_standing_rules_and_ends_with_what_it_references() {
+    let sd = dir("rl-bin"); let rec = sd.join("in.jsonl"); let inner = sd.join("standin.sh"); std::fs::write(&inner, STANDIN.replacen("\n", "\nexport FAKE_PER=2 FAKE_CYCLE=5 FAKE_SECS=1 FAKE_LOG=/dev/null\n", 1)).unwrap();
+    script(&sd, "claude", &format!("#!/bin/sh\ntee -a {} | sh {}\n", rec.display(), inner.display()));
+    let rule = r#"{"id":"r1","text":"Never push to main","tool":"Bash","enforce":true,"word":"ship it","at":5}"#;
+    let (hub, ag, _h, _w) = start("rl", |w| base_log(w, 1, &format!("{}\n", json!({"$":"SettingSet","key":"rule.r1","value":rule,"at":1700000005}))), |_| Cli::standin(&sd)).await; let from = len(&hub).await;
+    rpc(&hub, "turn.start", json!({"thread":T1,"text":"zqshort hello &claude/nonesuch"})).await;
+    until(&hub, from, 30, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await;
+    let got = std::fs::read_to_string(&rec).unwrap(); let line = got.lines().find(|l| l.contains("zqshort hello")).expect("the user line"); let v: Value = serde_json::from_str(line).unwrap();
+    let text = v["message"]["content"].as_str().map(str::to_string).or_else(|| v["message"]["content"][0]["text"].as_str().map(str::to_string)).expect("text");
+    assert!(text.starts_with("<rules>\nStanding rules from the person. Follow them; the enforced ones are checked by Backplane.\n- Never push to main (enforced: Bash is refused unless the person's latest message says \"ship it\")\n</rules>\n\nzqshort hello &claude/nonesuch"), "{text}");
+    assert!(text.contains("\n\n<references>\nmodel claude/nonesuch: ") && text.ends_with("</references>"), "{text}");
+    ag.shutdown();
+}
