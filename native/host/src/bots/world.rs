@@ -15,6 +15,9 @@ pub struct Routine { pub id: String, pub bot: String, pub name: String, pub cron
     pub once: u64, pub tz: String, pub kind: String, pub done: bool, pub slot: u64 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Hook { pub id: String, pub bot: String, pub name: String, pub created: u64, pub revoked: bool, pub last: u64, pub count: u64 }
+/// BT.Hops
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct Hops { pub now: u64, pub wait: u64, pub held: bool }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Peer { pub id: String, pub name: String, pub url: String, pub created: u64, pub revoked: bool }
 
@@ -33,6 +36,12 @@ pub struct World {
     pub ub: crate::state::State,
     /// the mailroom (ML.Box)
     pub mail: super::mail::mailbox::Box,
+    /// a bot's conversation depth (Hops: the hop of the turn it runs, the lowest waiting, and whether messages wait)
+    pub hops: HashMap<String, Hops>,
+    /// a bot thread's turn state, and the asks open on it (Bots.status)
+    pub turns: HashMap<String, String>, pub asks: HashMap<String, (String, String, bool)>,
+    /// a room's posts as log lines (1-based), oldest first: the text is read from the log when a tool asks
+    pub room_lines: HashMap<String, Vec<usize>>,
     seen: usize, line: usize,
 }
 /// the settings the bots lane reads: the new bot's provider and model, the mail switch, the uberbot
@@ -99,11 +108,15 @@ impl World {
     }
     pub fn apply_line(&mut self, line: &str) {
         let Some(t) = line.strip_prefix("{\"$\":\"").and_then(|r| r.split('"').next()) else { return };
-        const READ: [&str; 28] = ["BotSet", "BotDeleted", "RoomSet", "RoomDeleted", "RoomPosted", "HookSet", "HookHit", "RoutineSet", "RoutineDeleted", "RoutineFired",
-            "MemorySaved", "MemoryForgot", "SpaceSet", "SpacePageSet", "PeerSet", "RoutinePlan", "RoutineSlot", "RoutineDone", "SettingSet", "MessagePosted", "ThreadCreated", "TaskSet", "UberSet", "UberOp", "ConvSet", "MailPosted", "MailMarked", "MailTagged"];
+        const READ: [&str; 33] = ["BotSet", "BotDeleted", "RoomSet", "RoomDeleted", "RoomPosted", "HookSet", "HookHit", "RoutineSet", "RoutineDeleted", "RoutineFired",
+            "MemorySaved", "MemoryForgot", "SpaceSet", "SpacePageSet", "PeerSet", "RoutinePlan", "RoutineSlot", "RoutineDone", "SettingSet", "MessagePosted", "ThreadCreated", "TaskSet", "UberSet", "UberOp", "ConvSet", "MailPosted", "MailMarked", "MailTagged", "TurnChanged", "AskOpened", "AskClosed", "QueueTaken", "BotWoke"];
         if !READ.contains(&t) { return }
         // cheap tests before a parse: most lines of a big log are messages of other threads and settings nobody here reads
         if t == "SettingSet" && !["agent.", "mail.on", "uber.", "person.tz", "tz.", "machine.id"].iter().any(|k| line.contains(k)) { return }
+        if t == "TurnChanged" || t == "QueueTaken" {
+            let th = line.split_once("\"thread\":\"").and_then(|(_, r)| r.split('"').next()).unwrap_or("");
+            if !self.bot_threads.contains(th) { return }
+        }
         if t == "MessagePosted" {
             let th = line.split_once("\"thread\":\"").and_then(|(_, r)| r.split('"').next()).unwrap_or("");
             if !self.bot_threads.contains(th) { return }
@@ -132,7 +145,13 @@ impl World {
                 self.rooms.insert(id.clone(), Room { id, name: s(e, "name").into(), members: members_of(s(e, "members")), created: if deleted { at } else { created }, deleted: false });
             }
             "RoomDeleted" => { if let Some(r) = self.rooms.get_mut(&id) { r.deleted = true } else { self.rooms.insert(id.clone(), Room { id, name: String::new(), members: vec![], created: 0, deleted: true }); } }
-            "RoomPosted" => { if self.settings.get("mail.on").map_or(true, |v| v != "on") { self.mail.room_post(&id, s(e, "room"), s(e, "from"), s(e, "text"), at); } self.post_ids.insert(id); }
+            "TurnChanged" => { self.turns.insert(s(e, "thread").into(), s(e, "state").into()); }
+            "QueueTaken" => { let th = s(e, "thread"); if let Some(b) = self.bots.values().find(|b| !b.deleted && b.thread == th).map(|b| b.id.clone()) { let c = self.hops.entry(b).or_default(); *c = if c.held { Hops { now: c.wait, wait: 0, held: false } } else { Hops { now: c.now, wait: 0, held: false } } } }
+            "AskOpened" => { self.asks.insert(id.clone(), (s(e, "thread").into(), s(e, "kind").into(), true)); }
+            "AskClosed" => { if let Some(a) = self.asks.get_mut(&id) { a.2 = false } }
+            "BotWoke" => { let bot = s(e, "bot").to_string(); let busy = self.bots.get(&bot).map_or(false, |b| self.turns.get(&b.thread).map_or(false, |t| t == "running")); let h = n(e, "hop");
+                let c = self.hops.entry(bot).or_default(); *c = if busy { Hops { now: c.now, wait: if c.held { c.wait.min(h) } else { h }, held: true } } else { Hops { now: h, wait: 0, held: false } }; }
+            "RoomPosted" => { self.room_lines.entry(s(e, "room").to_string()).or_default().push(self.line); if self.settings.get("mail.on").map_or(true, |v| v != "on") { self.mail.room_post(&id, s(e, "room"), s(e, "from"), s(e, "text"), at); } self.post_ids.insert(id); }
             "ConvSet" => { self.mail.conv_set(&id, s(e, "subject"), s(e, "kind"), super::mail::mailbox::lines_of(s(e, "parts")), s(e, "project"), super::mail::mailbox::lines_of(s(e, "tags")), at); }
             "MailPosted" => { self.mail.mail(super::mail::Hdr { id, conv: s(e, "conv").into(), from: s(e, "from").into(), to: s(e, "to").into(), kind: s(e, "kind").into(), r#ref: s(e, "ref").into(), want: s(e, "want").into(), head: s(e, "head").into(), size: n(e, "size"), at }); }
             "MailMarked" => { self.mail.marked(s(e, "bot"), s(e, "conv"), s(e, "status"), n(e, "seen"), n(e, "until")); }
