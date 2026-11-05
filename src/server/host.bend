@@ -1,4 +1,5 @@
 import Base
+import ../core/json.bend as J
 
 # Host effects Base does not have. host.js implements them.
 
@@ -100,6 +101,20 @@ def Sock.send_until(sock: Socket, data: List<&2, U32>, ms: U32) ->
 # and words are Cbor.keys() and Cbor.words(), each joined by newlines.
 def Sock.send_cbor(sock: Socket, text: String, keys: String, words: String, ms: U32) ->
   IO(Socket & Result<&1, &1, U32 & String, Unit>):
+  import "./effects/host.js"
+
+# A message's Json tree as one binary WebSocket frame of its CBOR, sent with
+# a deadline as send_until: the same bytes as core/http.bend's
+# Ws.encode(2, core/cbor.bend's Cbor.encode(j)), made in the host (host.js's
+# jt_frame) straight from the tree. Bend's encoder built a list cell per byte
+# that the send copied back out (5-15 ms a 95 KB view). Done carries the
+# frame's size in bytes.
+def Sock.send_tree(sock: Socket, j: J.Json, keys: String, words: String, ms: U32) ->
+  IO(Socket & Result<&1, &1, U32 & String, U32>):
+  import "./effects/host.js"
+
+# the frame send_tree sends, as bytes (for tests)
+def Json.tree_frame(j: J.Json, keys: String, words: String) -> IO(List<&2, U32>):
   import "./effects/host.js"
 
 # the frame send_cbor sends, as bytes (for tests)

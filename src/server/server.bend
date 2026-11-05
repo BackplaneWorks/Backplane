@@ -1517,9 +1517,21 @@ def Conn.out.items(s: Socket, +hd: String, +pl: String, +sp: String, +xs: List<&
     H.Sock.send_items(s, hd, pl, sp, xs, tl, Bool.pick(U32, ends, 1, 0), U32.from_nat(OB.Join.most()), U32.from_nat(OB.Join.bytes()), Conn.keys(), Conn.words(), Conn.deadline()),
     r => Conn.sent.k(r, out, s2 => k(s2, 0n)))
 
+def Conn.sent.n(r: Socket & Result<&1, &1, U32 & String, U32>, +charge: Nat, +out: Chan(WIRE.Wire), k: Socket -> Nat -> IO(Unit)) -> IO(Unit):
+  (s, res) = r
+  match res:
+    case Done{n}:
+      Conn.written(s, U32.to_nat(n), charge, k)
+    case Fail{_}:
+      do IO<Unit>:
+        Chan.close(WIRE.Wire, out)
+        Conn.drain(Fuel.forever(), out)
+        Socket.close(s)
+
+# a message's tree as its CBOR frame, made and sent in the host
+# (H.Sock.send_tree: the bytes of W.Ws.encode(2, CB.Cbor.encode(j)))
 def Conn.json(+j: J.Json, +charge: Nat, s: Socket, +out: Chan(WIRE.Wire), k: Socket -> Nat -> IO(Unit)) -> IO(Unit):
-  +bs = W.Ws.encode(2, CB.Cbor.encode(j))
-  Conn.out(s, bs, out, s2 => Conn.written(s2, List.length(&2, U32, bs), charge, k))
+  IO.bind(Socket & Result<&1, &1, U32 & String, U32>, Unit, H.Sock.send_tree(s, j, Conn.keys(), Conn.words(), Conn.deadline()), r => Conn.sent.n(r, charge, out, k))
 
 def Conn.write(m: Maybe<&1, WIRE.Wire>, s: Socket, +out: Chan(WIRE.Wire), k: Socket -> Nat -> IO(Unit)) -> IO(Unit):
   match m:

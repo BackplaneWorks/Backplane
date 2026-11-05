@@ -808,7 +808,7 @@ function bp_list(b) {
 
 // Sock.send_until: the deadline renews after each send that made progress;
 // a stall for the whole span (or a failure) shuts the socket both ways
-function bp_send_until(socket, b, ms, k) {
+function bp_send_until(socket, b, ms, k, done = { $: "Unit" }) {
   const h = BP_H.get(socket);
   const span = Number(ms);
   let until = performance.now() + span;
@@ -829,7 +829,7 @@ function bp_send_until(socket, b, ms, k) {
       at += n;
       until = performance.now() + span;
     }
-    return io_tup(socket, io_done({ $: "Unit" }));
+    return io_tup(socket, io_done(done));
   };
   return go();
 }
@@ -904,6 +904,10 @@ function bp_host(old) {
     }],
     ["Sock.send_cbor", () => (s, text, keys, words, ms, k) =>
       bp_send_until(s, frame("Json.cbor_frame", text, keys, words), ms, k)],
+    ["Sock.send_tree", () => (s, j, keys, words, ms, k) => {
+      const b = globalThis.bp_jt_frame(j, keys, words);
+      return bp_send_until(s, b, ms, k, b.length);
+    }],
     ["Sock.send_items", () => (s, hd, plain, split, lines, tl, ends, most, bytes,
       keys, words, ms, k) => bp_send_until(s, frame("Json.items_frames", hd,
       plain, split, lines, tl, ends, most, bytes, keys, words), ms, k)],
