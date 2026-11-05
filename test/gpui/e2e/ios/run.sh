@@ -32,7 +32,7 @@ for id in $IDS; do
   REC=$!
   sleep 1
   if [ "$id" = long-session ]; then
-    ( echo "t_s,footprint"; t=0; while :; do p=$(xcrun simctl spawn "$SIM_UDID" launchctl list | awk '/dev.backplane.gpui/ {print $1}'); \
+    ( echo "t_s,footprint"; t=0; while :; do p=$(xcrun simctl spawn "$SIM_UDID" launchctl list | awk '/UIKitApplication:dev.backplane.gpui\[/ {print $1}'); \
         [ -n "$p" ] && [ "$p" != "-" ] && echo "$t,$(footprint "$p" 2>/dev/null | awk '/phys_footprint:/ {print $2,$3}')"; sleep 30; t=$((t+30)); done ) > "$OUT/long-session.mem.csv" &
     MEM=$!
   else MEM=; fi
