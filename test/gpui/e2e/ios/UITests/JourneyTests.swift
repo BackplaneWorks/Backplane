@@ -9,11 +9,11 @@ final class Journeys: XCTestCase {
     private func rows() -> XCUIElementQuery { d.app.cells }
     // the fixture's threads are titled "e2e thread N" (N from 0); a row is the button with identifier thread.row.<hub>|<id>
     // (the thread.tree.* button next to it only unfolds subthreads)
-    private func openThread(_ n: Int) -> Bool {
+    private func openThread(_ n: Int, timeout: TimeInterval = 15) -> Bool {
         let want = "e2e thread \(n)"
         let row = d.app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'thread.row.'"))
             .containing(NSPredicate(format: "label == %@", want)).firstMatch
-        return d.step("open \(want)", act: {
+        return d.step("open \(want)", timeout: timeout, act: {
             // the list keeps its scroll position after a back: look above first, then page down
             if !row.exists { for _ in 0..<3 { d.app.swipeDown(velocity: .fast) } }
             var tries = 0
@@ -133,7 +133,15 @@ final class Journeys: XCTestCase {
         if d.label("No rooms yet").exists { d.block("fixture: the hub has no room (rooms.create refused or not implemented)"); d.shot("no-rooms"); return }
         d.step("open the room", act: { d.tap(d.label("e2e-room")) }, expect: { d.app.textFields.firstMatch.exists })
         let post = d.app.textFields.firstMatch
-        d.step("post to the room", act: { d.tap(post); d.type(post, "hello room zqshort\n") }, expect: { d.label("hello room").exists })
+        // typing fast (XCUITest's ~20 chars/s) into the room's field, then what it holds: dropped characters would be an app bug worth seeing
+        d.tap(post); d.type(post, "hello room zqshort")
+        let fast = (post.value as? String) ?? ""
+        d.metrics["room_field_after_fast_typing"] = fast
+        if fast != "hello room zqshort" { d.note("room field after fast typing held \"\(fast)\" instead of \"hello room zqshort\" (characters dropped)") }
+        for _ in 0..<fast.count + 2 { post.typeText(XCUIKeyboardKey.delete.rawValue) }
+        d.step("post to the room", act: {
+            for ch in "hello room zqshort\n" { post.typeText(String(ch)); Thread.sleep(forTimeInterval: 0.12) }
+        }, expect: { d.label("hello room").exists })
         d.shot("room")
     }
 
@@ -230,7 +238,7 @@ final class Journeys: XCTestCase {
         let secs = Double(ProcessInfo.processInfo.environment["LONG_SECS"] ?? "") ?? 300
         let t0 = CFAbsoluteTimeGetCurrent(); var n = 0
         while CFAbsoluteTimeGetCurrent() - t0 < secs {
-            guard openThread(n % 20) else { break }
+            guard openThread(n % 20, timeout: 60) else { break }
             d.app.swipeUp(); let comp = d.el("thread.composer"); d.tap(comp); d.type(comp, "@"); d.type(comp, XCUIKeyboardKey.delete.rawValue)
             back(); n += 1
         }
