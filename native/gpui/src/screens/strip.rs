@@ -17,7 +17,7 @@ pub fn side_by_side(data: &Value) -> bool { truthy(&data["sideBySide"]) || truth
 pub fn view(light: bool, data: &Value) -> Option<AnyElement> {
     if !side_by_side(data) { return None; }
     let c = |n: &str| theme::color(light, n);
-    Some(div().id("side-by-side").h(px(H)).flex_shrink_0().w_full().flex().items_center().px_3().bg(c("raise")).border_b_1().border_color(c("line")).text_size(px(12.)).text_color(c("text")).overflow_hidden().whitespace_nowrap()
+    Some(div().id("side-by-side").h(px(H)).flex_shrink_0().w_full().flex().items_center().px_3().bg(c("raise")).border_b_1().border_color(c("line")).text_size(px(11.)).line_height(px(15.)).text_color(c("text")).overflow_hidden()
         .child(TEXT).into_any_element())
 }
 
