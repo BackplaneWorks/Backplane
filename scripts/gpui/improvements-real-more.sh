@@ -13,10 +13,10 @@ MODE=$1; CLIENT=$2; HUBBIN=$3; ASSETS=$4
 case "$MODE" in writer|edit) ;; *) echo "mode: writer or edit"; exit 2 ;; esac
 ROOT=${GPUI_MAIN:-/home/h/Documents/i2cjak/backplane-gpui}; HERE=$(cd "$(dirname "$0")" && pwd); REPO=$(cd "$HERE/../.." && pwd)
 R=$ROOT/build/gpui/imp-real-$MODE; OUT=$ROOT/build/gpui/results/improvements-real-$MODE; SH=$ROOT/build/gpui/shots/desktop
-X=$ROOT/build/gpui/xvfb; PORT=3836; DISP=:61
+X=$ROOT/build/gpui/xvfb; PORT=3836; DISP=${IMP_DISPLAY:-:61}
 mkdir -p $OUT $SH
 [ -x "$CLIENT" ] && [ -x "$HUBBIN" ] || { echo "need the client and hub binaries"; exit 2; }
-[ ! -e /tmp/.X11-unix/X61 ] || { echo "display :61 is in use"; exit 2; }
+[ ! -e /tmp/.X11-unix/X${DISP#:} ] || { echo "display $DISP is in use"; exit 2; }
 command -v claude >/dev/null || { echo "claude not on PATH"; exit 2; }
 rm -rf $R; mkdir -p $R/home $R/saved; rm -f $SH/improvements-real-$MODE-*.png
 P=$R/proj/backplane-gpui; mkdir -p $P/scripts/gpui $P/build/gpui

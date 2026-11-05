@@ -10,10 +10,10 @@ set -eu
 ROOT=${GPUI_MAIN:-/home/h/Documents/i2cjak/backplane-gpui}; HERE=$(cd "$(dirname "$0")" && pwd); REPO=$(cd "$HERE/../.." && pwd)
 CLIENT=$1; HUBBIN=$2; ASSETS=$3
 R=$ROOT/build/gpui/imp-e2e; OUT=$ROOT/build/gpui/results/improvements; SH=$ROOT/build/gpui/shots/desktop
-X=$ROOT/build/gpui/xvfb; PORT=3834; DISP=:61
+X=$ROOT/build/gpui/xvfb; PORT=3834; DISP=${IMP_DISPLAY:-:61}
 mkdir -p $OUT $SH
 [ -x "$CLIENT" ] && [ -x "$HUBBIN" ] || { echo "need the client and hub binaries"; exit 2; }
-[ ! -e /tmp/.X11-unix/X61 ] || { echo "display :61 is in use"; exit 2; }
+[ ! -e /tmp/.X11-unix/X${DISP#:} ] || { echo "display $DISP is in use"; exit 2; }
 rm -rf $R; mkdir -p $R/home $R/proj $R/bin $R/fakehome/.cache $R/saved; rm -f $SH/improvements-*.png
 # stand-in agents: nothing may call a model
 printf '#!/bin/sh\nexec %s %s "$@"\n' "$(command -v bun)" "$REPO/test/tools/claude_standin.ts" > $R/bin/claude; chmod +x $R/bin/claude

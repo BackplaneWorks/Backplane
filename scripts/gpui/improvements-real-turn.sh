@@ -8,10 +8,10 @@ set -eu
 ROOT=${GPUI_MAIN:-/home/h/Documents/i2cjak/backplane-gpui}; HERE=$(cd "$(dirname "$0")" && pwd); REPO=$(cd "$HERE/../.." && pwd)
 CLIENT=$1; HUBBIN=$2; ASSETS=$3
 R=$ROOT/build/gpui/imp-real; OUT=$ROOT/build/gpui/results/improvements-real; SH=$ROOT/build/gpui/shots/desktop
-X=$ROOT/build/gpui/xvfb; PORT=3835; DISP=:61
+X=$ROOT/build/gpui/xvfb; PORT=3835; DISP=${IMP_DISPLAY:-:61}
 mkdir -p $OUT $SH
 [ -x "$CLIENT" ] && [ -x "$HUBBIN" ] || { echo "need the client and hub binaries"; exit 2; }
-[ ! -e /tmp/.X11-unix/X61 ] || { echo "display :61 is in use"; exit 2; }
+[ ! -e /tmp/.X11-unix/X${DISP#:} ] || { echo "display $DISP is in use"; exit 2; }
 command -v claude >/dev/null || { echo "claude not on PATH"; exit 2; }
 rm -rf $R; mkdir -p $R/home $R/saved; rm -f $SH/improvements-real-*.png
 mkdir -p $R/proj/backplane-gpui
