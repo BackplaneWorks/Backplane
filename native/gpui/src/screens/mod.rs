@@ -16,7 +16,7 @@ pub mod timeline;
 pub mod viewer;
 mod glue;
 
-use gpui::{Context, Entity};
+use gpui::{Context, Entity, FocusHandle};
 use std::collections::HashMap;
 
 /// State the screens keep between frames (input boxes, caches); the hub owns everything else.
@@ -31,6 +31,9 @@ pub struct Screens {
     pub plotview: plotview::PlotView,
     pub picker_open: bool,
     pub fields: HashMap<String, settings::FieldSlot>,
+    pub settings_focus: FocusHandle,
+    pub focus_settings: bool,
+    pub settings_was_open: bool,
     pub parsed: timeline::ParseCache,
     pub images: images::Images,
     pub img_poll: bool,
@@ -43,6 +46,6 @@ pub struct Screens {
 
 impl Screens {
     pub fn new<T: 'static>(_cx: &mut Context<T>, target: Option<attach::Target>, drafts_path: std::path::PathBuf, saved: HashMap<String, String>) -> Self {
-        Self { ask_inputs: HashMap::new(), attacher: attach::Attacher::new(target), drafts: drafts::Writer::start(drafts_path, saved), offsets: HashMap::new(), reg: Default::default(), plot: Default::default(), plotview: Default::default(), picker_open: false, fields: HashMap::new(), parsed: Default::default(), images: Default::default(), img_poll: false, await_draft: None, pending_draft: None, draft_timer: false }
+        Self { ask_inputs: HashMap::new(), attacher: attach::Attacher::new(target), drafts: drafts::Writer::start(drafts_path, saved), offsets: HashMap::new(), reg: Default::default(), plot: Default::default(), plotview: Default::default(), picker_open: false, fields: HashMap::new(), settings_focus: _cx.focus_handle(), focus_settings: false, settings_was_open: false, parsed: Default::default(), images: Default::default(), img_poll: false, await_draft: None, pending_draft: None, draft_timer: false }
     }
 }
