@@ -1197,6 +1197,14 @@
       "src/web/project-home.bend"
     ],
     "scope": "Hardware projects: src/core/prompt.bend gains one sentence of agent text about .backplane.json's kind; src/core/project-home.bend and src/web/project-home.bend gain the project page's 'Design outside this folder' panel (Home.outside, read from the hub's project.home reply). The closure's file set is unchanged. No sidebar draft readers, unknown @ retention, private image keys or transport change. Reviewed by reading the diffs.",
-    "qualification": "PENDING on this head: test/sidebar_draft_image_test.bend not yet run here."
+    "qualification": {
+      "assertions": 24,
+      "job": "j20261104234506-1152570",
+      "work": "w-t1793812122-1616973-1691194",
+      "compiler": "composite 41262875, direct, no --check-only, 3.7e9 cap, swap 0",
+      "qualifiedHead": "572918de79c2c1367f11a01adb5266c335008c43",
+      "fullOutputLogSHA256": "cd83cd83cb66e6c0ea17d490d0baf8502c2b965f711f5e731bbd391a9cd5612c",
+      "oomKill": 0
+    }
   }
 }
