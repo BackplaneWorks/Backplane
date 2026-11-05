@@ -26,8 +26,11 @@ const tok = (v: string) => { const q = v.indexOf("|"); try { return JSON.parse(v
 const key = hp; const results: string[] = []; let failure = "";
 const pass = (s: string, ok: boolean, d = "") => { results.push(`${ok ? "PASS" : "FAIL"} ${s}${d ? " — " + d : ""}`); console.log(results[results.length - 1]); };
 let ws: WebSocket | null = null, ep = "", opened = false, frames = 0, screen: any = null;
+let deadline: any = null, deadlineTimer: any = null;
 function run(o: any) {
   if (o.screen) screen = typeof o.screen === "string" ? JSON.parse(o.screen) : o.screen;
+  // the app's deadline job (Core.kt): when out.deadline changes, pulse() at deadline + 10 ms
+  if (o.deadline !== deadline) { deadline = o.deadline; clearTimeout(deadlineTimer); if (deadline) { const d = deadline; deadlineTimer = setTimeout(() => { if (deadline === d) { try { run(j(B.pulse())); } catch {} } }, Math.max(0, d - Date.now()) + 10); } }
   for (const c of o.cmds || []) if (c.type === "send") { const buf = Buffer.from(c.data, "base64"); if (TRACE) { try { const r = cb(buf); const p = r.p || {}; console.log("T#" + (++seq), "C->S", r.m, "p.keys", Object.keys(p).join(","), "viewId", p.viewId, "target", JSON.stringify(p.target), "epoch", p.epoch, "generation", p.generation, "hub", p.hub, "nativeSidebar", p.nativeSidebar, "info", Object.keys(p.session?.info || {}).join(","), "action", p.action, "value", typeof p.value === "string" ? JSON.stringify(tok(p.value)?.payload ?? p.value.slice(0, 60)) : ""); } catch (e: any) { console.log("T send undecodable", e.message); } } ws?.readyState === 1 && ws.send(buf); }
   const v = o.viewFailure || o.failure; if (v) failure = typeof v === "string" ? v : JSON.stringify(v);
 }
@@ -47,6 +50,10 @@ const listed = await until(() => rows().length > 0, 25000);
 pass("pair (token auth, view-v1 socket opens, greeting accepted)", opened && frames > 0, `frames ${frames}`);
 const n = rows().length; const pages = screen?.sidebarPages;
 pass(`list (>= ${Math.min(+expect, 48)} rows; bounded sidebar at ${expect})`, listed && n >= Math.min(+expect, 48), `rows ${n}${pages ? " pager " + JSON.stringify(pages).slice(0, 120) : ""}${failure ? " failure: " + failure : ""}`);
+// what the app does after start (Core.kt): the device choices, each of which refreshes the open view
+for (const [k, v] of [["mailroom-renderer", "android-v1"], ["lang-preview", ""], ["lang", "en"], ["lang-os", "en-US"]]) { try { run(j(B.local(k, v))); } catch {} }
+// let the start-up follow-ups finish, as a person would (the screen is acknowledged, the hub echoes the session back)
+{ let last = -1, since = Date.now(); while (Date.now() - since < 2500) { run(j(B.tick(Date.now()))); await Bun.sleep(150); if (frames !== last) { last = frames; since = Date.now(); } } }
 // pager: advance the thread list page by page with the pager controls the screen offers (Pager.next/previous: action native-sidebar-page)
 const nextCtl = () => { const pp = (screen?.projects || []).map((p: any) => p.threadsPage?.next).find(Boolean); return pp || (screen?.sidebarPages || []).flatMap((h: any) => [h.projects?.next, h.active?.next]).find(Boolean); };
 const prevCtl = () => { const pp = (screen?.projects || []).map((p: any) => p.threadsPage?.previous).find(Boolean); return pp || (screen?.sidebarPages || []).flatMap((h: any) => [h.projects?.previous, h.active?.previous]).find(Boolean); };
@@ -55,7 +62,8 @@ if (TRACE) console.log("T-- pager step starts; next token", JSON.stringify(tok(n
   for (let k = 0; k < 8 && nextCtl(); k++) { const c = nextCtl(); const f = rows()[0]?.id; const o0 = j(B.act(c.action, c.value)); if (moved === 0) console.log("act reply keys", Object.keys(o0 || {}).join(","), JSON.stringify((o0.cmds || []).map((x: any) => x.type))); run(o0); if (!(await until(() => rows()[0]?.id !== f, 8000))) break; firsts.push(rows()[0]?.id); moved++; }
   let back = 0; const start = firsts[0];
   for (let k = 0; k < moved && prevCtl(); k++) { const c = prevCtl(); const f = rows()[0]?.id; run(j(B.act(c.action, c.value))); if (!(await until(() => rows()[0]?.id !== f, 8000))) break; back++; }
-  if (moved === 0) console.log("pager after act: offset", screen?.projects?.[0]?.threadsPage?.offset, "error", JSON.stringify(screen?.error), "note", JSON.stringify(screen?.note), "ids", rows().slice(0,2).map((r: any) => r.id).join(","), "failure", failure, "frames", frames, "ws", ws?.readyState);
+  if (moved === 0) if (process.env.VA) console.log("VA", JSON.stringify((globalThis as any).__va));
+  console.log("pager after act: offset", screen?.projects?.[0]?.threadsPage?.offset, "error", JSON.stringify(screen?.error), "note", JSON.stringify(screen?.note), "ids", rows().slice(0,2).map((r: any) => r.id).join(","), "failure", failure, "frames", frames, "ws", ws?.readyState);
   if (moved === 0) console.log("pager debug: sidebarPages", JSON.stringify(screen?.sidebarPages)?.slice(0, 700), "| project[0].threadsPage", JSON.stringify(screen?.projects?.[0]?.threadsPage)?.slice(0, 300), "| rows", rows().length);
   const want = Math.min(Math.floor((+expect - 1) / 48), 8);
   pass(`pager (advance ${want} page(s), then back)`, moved >= want && back === moved && rows()[0]?.id === start && new Set(firsts).size === firsts.length, `forward ${moved}/${want}, back ${back}, first rows ${firsts.length}${failure ? " failure: " + failure : ""}`); }
