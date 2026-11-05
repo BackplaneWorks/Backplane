@@ -102,3 +102,23 @@ law sidebar_split_at_count rust sidebar_split_at_count
 
 # thread-folder boundary (#960): the Rust hub refuses unresolved thread folders (native/host/src/files/threadpath.rs)
 law thread_folder_refuses_job rust thread_folder_refuses_job
+# files stream (M6) plots: native/host/src/kicad/{plotgen,plotread,board,schematic}.rs, the Rust twins of core/plot, hist, hier, board, pcb2d, look. Bend stays the reference; test/gpui/files/plot_*.py compare them byte for byte.
+law plot_hidden_not_sent rust plot_hidden_not_sent
+law plot_courtyard_hidden rust plot_courtyard_hidden
+law plot_tint_own_colour rust plot_tint_own_colour
+law tint_code_again rust tint_code_again
+law plot_numbers_exact rust plot_numbers_exact
+law look_plain_board rust look_plain_board
+law look_plain_sch rust look_plain_sch
+law look_marks_distinct rust look_marks_distinct
+law hist_mark_self rust hist_mark_self
+law rv_mark_on_all rust rv_mark_on_all
+law hier_resolve_absolute rust hier_resolve_absolute
+law hier_resolve_beside rust hier_resolve_beside
+law hier_loop_listed_once rust hier_loop_listed_once
+law hist_sheet_same_commit rust hist_sheet_same_commit
+law hist_tree_wire_file rust hist_tree_wire_file
+law fork_cache_legacy rust fork_cache_legacy
+law fork_cache_alias rust fork_cache_alias
+law fork_footprint_legacy_at rust fork_footprint_legacy_at
+law pcb2_hidden_text_draws_nothing rust pcb2_hidden_text_draws_nothing
