@@ -7,7 +7,7 @@ import ../../../src/core/json.bend as J
 # (looks 0..71 x the eight moods), then "done". scripts/gpui/boat-build.sh runs it
 # on Boat and splits the lines into cat-rigs/<look>-<mood>.json. Generated, never hand-copied.
 
-def rig(+look: Nat, mood: String) -> String:
+def rig(+look: Nat, +mood: String) -> String:
   Nat.show(look) ++ " " ++ mood ++ " " ++ J.Json.show(C.Cat.rig.json(look, mood))
 
 def moods(+look: Nat, ms: List<&2, String>) -> IO(Unit):
