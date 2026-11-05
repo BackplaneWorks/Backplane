@@ -3,25 +3,26 @@
 import {readFileSync,readdirSync} from 'node:fs';
 export const NORMALISATIONS=[
  'N1 clocks: numeric fields at, rid, now, clock, last, since-time keys -> <T>; 10-digit (17xxxxxxxx/18xxxxxxxx) and 13-digit epoch numbers inside strings -> <T>; hh:mm and durations (e.g. "Finished 18:26 · 2s") -> <time>. Reason: wall clock.',
+ 'N16 housekeeping events read the id table but never add to it, so their number and position cannot shift the ordinals of other events (an id first seen only there is <id>).',
  'N13 ordinals are per client: each client numbers the ids it sees by first appearance in its own stream, so what another client saw first cannot shift them.',
  'N14 delta tokens: viewDelta token and base strings (the hub revision a body was kept under) -> ordinals, like ids; an empty base (a whole reply) stays empty.',
  'N2 ids: p/t/g/m-ids with a 10-digit time part (p1793834744-7, t..., g..., m...), stand-in session/message ids (fake-<pid>, m<pid>-n-n, tu<pid>-..), view ids (<gen>:<n>), and the greeting generation and epoch -> ordinals by first appearance per recording (ID1, ID2...). Reason: ids embed time, pids and counters.',
  'N3 viewRevision -> <R> (and checked non-decreasing per client). Reason: counts hub-internal changes, which coalesce with timing.',
  'N4 delta frames: consecutive delta frames of one thread joined into one item with "@<ms>@" stamps stripped; frame boundaries are not compared. Reason: coalescing follows read timing (200 ms pace).',
  'N5 changes frames: expanded to one item per event; batch boundaries are not compared. Reason: batching follows timing.',
- 'N12 late volatile replies: a reply is volatile exactly when its request was a volatile poll (matched by client and request id), whenever it arrives; a reply to a real request that arrives during a poll window is kept.',
+ 'N12 late volatile replies: volatile means a poll request and its reply, matched by client and request id, whenever the reply arrives; every other inbound frame is kept even if it arrived during a poll window (the recorder flags by arrival time, which is not a property of the frame).',
  'N6 dropped: hb frames, view.changed frames (their number and position follow timing; each reply carries the revision it saw), volatile frames (polls made while waiting for a turn). Reason: timing-driven counts.',
  'N11 harness steps: `settle` and `end` pseudo-frames (the client program waiting or closing) are control, not wire traffic, and are not compared. Reason: a replay waits by reply id, not by the recorded quiet times.',
  'N7 streams: per client the sequence of events, deltas, replies and view replies are compared as separate ordered streams; relative order between streams is not compared. Reason: network timing.',
  'N9 info frames: all info frames of a client are merged into one item (keys unioned, later values win; environment keys dropped); position and repeat count are not compared. The `other` stream (http, upgrade, close, info) is compared as a sorted set. Reason: the hub repeats info on its own timer.',
- 'N10 housekeeping events: a contiguous run of events that concurrent hub jobs append (SettingSet keys machine.id, accounts.*, allowance.*, projects.missing, tz.*, autosettle.*, liveness.*, turn.from/speed.*, restart.*, provider.*, fallback.*, tok.*, summary.*, told.*, alert.*, account.*, star.*; ActivityLogged of kind git or spawn; WorktreeSkipped) is replaced by its distinct events in canonical order. The set is compared, not the order or the repeat count. Reason: start-up, git probes and settle/liveness bookkeeping finish in varying order and repeat with elapsed time.',
+ 'N10 housekeeping events: a contiguous run of events that concurrent hub jobs append (SettingSet keys machine.id, accounts.*, allowance.*, projects.missing, tz.*, autosettle.*, liveness.*, turn.from/speed.*, restart.*, provider.*, fallback.*, tok.*, summary.*, told.*, alert.*, account.*, star.*; ActivityLogged of kind git or spawn; WorktreeSkipped) is taken out of the event stream and compared as a set (distinct events, canonical order; no order, no repeat count, and not their position among the other events); every other event stays in order. Reason: start-up, git probes and settle/liveness bookkeeping finish in varying order and repeat with elapsed time.',
  'N15 counters: numeric seq and changes (the hub change count at the instant a view was drawn) -> <N>. Reason: housekeeping events land between draws.',
  'N8 info frames: home paths, ports, machine ids, tokens, pids -> placeholders. Reason: environment.',
 ];
 const CLOCK_KEYS=new Set(['at','rid','now','clock','last','nudged','attempted_at','eligibleAt','sentAt','checked']);
 function mkNorm(){
-  const ids=new Map();const ord=v=>{if(!ids.has(v))ids.set(v,'ID'+(ids.size+1));return ids.get(v)};
-  const idRe=/\b([ptgm]\d{10}-\d+(?::\d+)?)\b|\bfake-\d+\b|\b[mt][a-z]?\d{3,8}-\d+-\d+(?::\d+)?\b|(?<![A-Za-z])tu\d+-\d+-\d+\b|\b\d+:\d{12,15}\b/g;
+  const ids=new Map();let ro=false;const ord=v=>{if(!ids.has(v)){if(ro)return '<id>';ids.set(v,'ID'+(ids.size+1))}return ids.get(v)};
+  const idRe=/\b([ptgmk]\d{10}-\d+(?::\d+)?)\b|\bfake-\d+\b|\b[mt][a-z]?\d{3,8}-\d+-\d+(?::\d+)?\b|(?<![A-Za-z])tu\d+-\d+-\d+\b|\b\d+:\d{12,15}\b/g;
   const str=(s,key)=>{
     s=s.replace(/@\d{13}@/g,'@<T>@').replace(/(?:\/[^"\s]*)?\/work-[A-Za-z0-9]+/g,'<work>').replace(/backplane[-\/][0-9a-f]{8}\b/g,'backplane-<wt>').replace(/\bc[a-z0-9-]*?\d{10}-\d+\b/g,m=>ord(m));
     s=s.replace(/\b1[78]\d{8}\b(?!-)/g,'<T>').replace(/\b1[78]\d{11}\b/g,'<T>');
@@ -36,20 +37,24 @@ function mkNorm(){
     if(typeof v==='string'){if(v!==''&&(key==='epoch'||key==='generation'||key==='origin'||key==='hub'||key==='viewId'||key==='token'||key==='base'))return ord(v);if(key==='viewRevision')return '<R>';return str(v,key)}
     if(Array.isArray(v))return v.map(x=>go(x,key));
     const o={};for(const k of Object.keys(v).sort())o[k]=go(v[k],k);return o;};
+  go.readonly=f=>{ro=true;try{return f()}finally{ro=false}};
   return go;
 }
 export function normalise(frames){
   const G={};const gof=cl=>G[cl]??(G[cl]=mkNorm());let go=null;const per={};
-  const S=(c)=>per[c]??(per[c]={out:[],events:[],deltas:[],replies:[],views:[],other:[]});
+  const S=(c)=>per[c]??(per[c]={out:[],events:[],hkEv:[],deltas:[],replies:[],views:[],other:[],hk:[]});
   const open={}; // per client+thread delta accumulation
   const flush=(c,th)=>{const k=c+'|'+th;if(open[k]!==undefined){S(c).deltas.push({delta:th,text:gof(c)(open[k].replace(/@\d{13}@/g,''))});delete open[k]}};
+  const HK_RAW=/^(machine\.id|accounts\.inventory|allowance\.codex|projects\.missing|tz\..*|autosettle\..*|liveness\..*|turn\.(from|speed)\..*|restart\..*|provider\..*|fallback\..*|tok\..*|summary\..*|told\..*|alert\..*|account\..*|star\..*)$/;
+  const hkRaw=e=>(e.$==='SettingSet'&&HK_RAW.test(e.key))||(e.$==='ActivityLogged'&&(e.kind==='git'||e.kind==='spawn'))||e.$==='WorktreeSkipped';
+  const evNorm=(c,it)=>hkRaw(it)?{hk:true,v:gof(c).readonly(()=>gof(c)(it))}:{hk:false,v:gof(c)(it)};
   const lastRev={};
   // replies to volatile polls can arrive after the poll window closed: they are volatile too (matched by client and request id)
   const volIds=new Set(frames.filter(f=>f.dir==='out'&&f.vol&&f.json&&f.json.id!==undefined).map(f=>f.c+'|'+f.json.id));
   for(const f of frames){
     if(f.dir==='in'&&f.json&&f.json.t==='reply'&&volIds.has(f.c+'|'+f.json.id))continue;
     go=gof(f.c);const isReply=f.dir==='in'&&f.json&&f.json.t==='reply';
-    if(f.vol&&!isReply)continue;const c=f.c,j=f.json,s=S(c);
+    if(f.dir==='out'&&f.vol)continue;const c=f.c,j=f.json,s=S(c);
     if(f.dir==='out'&&(f.kind==='settle'||f.kind==='end'))continue;
     if(f.dir==='out'&&f.kind==='check'){s.other.push(go(j));continue}
     if(f.dir==='out'){s.out.push(go(j));continue}
@@ -62,8 +67,8 @@ export function normalise(frames){
     if(t==='delta_end'){flush(c,j.thread);s.deltas.push({delta_end:go(j.thread)});continue}
     for(const th of Object.keys(open).filter(k=>k.startsWith(c+'|')).map(k=>k.split('|')[1]))flush(c,th);
     if(t==='changes'||t==='log'){
-      if(t==='log'){const {items,...rest}=j;s.events.push({log:go({...rest,info:undefined})});s.other.push({logInfoKeys:Object.keys(j.info||{}).sort()});for(const it of items||[])s.events.push(go(it))}
-      else for(const it of j.items||[])s.events.push(go(it));continue}
+      if(t==='log'){const {items,...rest}=j;s.events.push({log:go({...rest,info:undefined})});s.other.push({logInfoKeys:Object.keys(j.info||{}).sort()});for(const it of items||[]){const r=evNorm(c,it);(r.hk?s.hkEv:s.events).push(r.v)}}
+      else for(const it of j.items||[]){const r=evNorm(c,it);(r.hk?s.hkEv:s.events).push(r.v)};continue}
     if(t==='reply'){const r=j.result;if(r&&r.viewRevision!==undefined){const n=Number(r.viewRevision);if(lastRev[c]!==undefined&&n<lastRev[c])s.views.push({revisionWentBackwards:true});lastRev[c]=n;s.views.push(go(j))}else s.replies.push(go(j));continue}
     if(t==='info'){s.infoSeen=Object.assign(s.infoSeen||{},j.info||{});continue}
     if(false){s.other.push(go({info:j.info&&Object.fromEntries(Object.entries(j.info).filter(([k])=>!/^(home|listen|machines|models|update|accounts\.live|kicad\.|freecad|browser\.|telemetry\.|tailnet|tailscale|bots\.remote|machine\.id)/.test(k)))}));continue}
@@ -71,14 +76,11 @@ export function normalise(frames){
   }
   for(const k of Object.keys(open)){const [c,th]=k.split('|');flush(c,th)}
   // housekeeping events are appended by concurrent hub jobs (start-up, git probe, settle/liveness bookkeeping): the set matters, their order does not
-  const HK_SET=/^(machine\.id|accounts\.inventory|allowance\.codex|projects\.missing|tz\..*|autosettle\..*|liveness\..*|turn\.(from|speed)\..*|restart\..*|provider\..*|fallback\..*|tok\..*|summary\..*|told\..*|alert\..*|account\..*|star\..*)$/;
-  const hk=e=>(e.$==='SettingSet'&&HK_SET.test(e.key))||(e.$==='ActivityLogged'&&(e.kind==='git'||e.kind==='spawn'))||e.$==='WorktreeSkipped';
+  const HK_SET_UNUSED=/^(machine\.id|accounts\.inventory|allowance\.codex|projects\.missing|tz\..*|autosettle\..*|liveness\..*|turn\.(from|speed)\..*|restart\..*|provider\..*|fallback\..*|tok\..*|summary\..*|told\..*|alert\..*|account\..*|star\..*)$/;
   for(const s of Object.values(per)){
     if(s.infoSeen){s.other.push({info:gof(Object.keys(per).find(k=>per[k]===s))(Object.fromEntries(Object.entries(s.infoSeen).filter(([k])=>!/^(home|listen|machines|models|update|accounts\.live|kicad\.|freecad|browser\.|telemetry\.|tailnet|tailscale|bots\.remote|machine\.id|os|arch)/.test(k))))});delete s.infoSeen}
     s.other.sort((a,b)=>JSON.stringify(a)<JSON.stringify(b)?-1:1);
-    const ev=s.events,out=[];let i=0;
-    while(i<ev.length){if(hk(ev[i])){let j=i;while(j<ev.length&&hk(ev[j]))j++;out.push(...[...new Set(ev.slice(i,j).map(e=>JSON.stringify(e)))].sort().map(x=>JSON.parse(x)));i=j}else out.push(ev[i++])}
-    s.events=out}
+    s.hk=[...new Set(s.hkEv.map(e=>JSON.stringify(e)))].sort().map(x=>JSON.parse(x));delete s.hkEv}
   return per;
 }
 export function diff(a,b,path='',out=[]){
@@ -91,7 +93,7 @@ export function compareDirs(A,B){
   let total=0;const rep={};
   for(const f of readdirSync(A).filter(x=>x.endsWith('.json')).sort()){
     const a=normalise(JSON.parse(readFileSync(A+'/'+f)).frames),b=normalise(JSON.parse(readFileSync(B+'/'+f)).frames);
-    const d=[];for(const c of new Set([...Object.keys(a),...Object.keys(b)]))for(const s of ['out','events','deltas','replies','views','other'])diff(a[c]?.[s],b[c]?.[s],`${c}.${s}`,d);
+    const d=[];for(const c of new Set([...Object.keys(a),...Object.keys(b)]))for(const s of ['out','events','hk','deltas','replies','views','other'])diff(a[c]?.[s],b[c]?.[s],`${c}.${s}`,d);
     rep[f]=d;total+=d.length;}
   return {total,rep};
 }
