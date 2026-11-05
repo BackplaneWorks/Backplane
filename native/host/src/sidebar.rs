@@ -161,7 +161,7 @@ fn kids_hidden<'a>(st: &'a State) -> HashSet<&'a str> {
 struct Shelves<'a> { pinned: Vec<&'a str>, active: Vec<&'a str>, settled: Vec<&'a str>, hidden: Vec<&'a str>, snoozed: Vec<&'a str> }
 
 fn shelves_of<'a>(st: &'a State, project: &str, now: u64, kids: &HashSet<&str>) -> Shelves<'a> {
-    let mut ids: Vec<&str> = st.threads.iter().filter(|(i, t)| t.project == project && !kids.contains(i.as_str())).map(|(i, _)| i.as_str()).collect();
+    let mut ids: Vec<&str> = st.threads.iter().filter(|(i, t)| t.project == project && !kids.contains(i.as_str()) && !st.run_hidden(i)).map(|(i, _)| i.as_str()).collect();
     ids.sort();
     let mut s = Shelves { pinned: vec![], active: vec![], settled: vec![], hidden: vec![], snoozed: vec![] };
     for id in ids {
@@ -230,7 +230,7 @@ pub fn projects(st: &State, o: &Opts) -> Vec<Value> {
         let raw = shelves_of(st, id, o.now, &kids);
         // Side.latest: a thread's last move for its project's place; settling by hand counts
         let mut latest = p.created;
-        for tid in st.threads.iter().filter(|(i, t)| t.project == *id && !kids.contains(i.as_str())).map(|(i, _)| i) { let t = &st.threads[tid]; let touched = if t.override_ == Override::ForcedSettled { t.activity.max(t.settled_at) } else { t.activity }; latest = latest.max(touched); }
+        for tid in st.threads.iter().filter(|(i, t)| t.project == *id && !kids.contains(i.as_str()) && !st.run_hidden(i)).map(|(i, _)| i) { let t = &st.threads[tid]; let touched = if t.override_ == Override::ForcedSettled { t.activity.max(t.settled_at) } else { t.activity }; latest = latest.max(touched); }
         ps.push(P { id: id.as_str(), created: p.created, latest, key: order_key(st, &format!("project:{id}"), "active"), sh: tree_shelves(st, &raw) });
     }
     // PSlot.before: keyed projects first, by key; then SRow.before. (`latest` is the group rank: live, quiet or older)

@@ -65,6 +65,8 @@ pub struct State {
     pub snooze_until: HashMap<String, u64>,
     /// ThreadOrdered/ProjectOrdered: manual order keys (hex) per thread id, and per "project:<id>" for a project's place; (pinned key, active key)
     pub order_keys: HashMap<String, (String, String)>,
+    /// RunSet: thread -> the bot it runs for (a mail run's thread)
+    pub runs: HashMap<String, String>,
     /// entries whose own thread is the key (Switch.count: the ones filed under a sender for other threads do not count)
     own: HashMap<String, u64>,
     /// events the fold counts but does not (fully) model, by kind: reported by rust-digest so a gap is never silent
@@ -97,6 +99,21 @@ fn blank_gone(k: &str) -> bool {
 
 impl State {
     pub fn new() -> State { State::default() }
+    /// Uber.is: the uberbot of this machine
+    fn uber_is(&self, bot: &str) -> bool { !bot.is_empty() && !bot.contains('~') && self.settings.get("uber.bot").map_or(false, |b| b == bot) }
+    /// Private.is: a coordinator's back office is a thread of its own, never the person's chat
+    pub fn private_thread(&self, thread: &str) -> bool {
+        let owner = self.settings.get(&format!("mail.private.owner.{thread}")).map(|s| s.as_str()).unwrap_or("");
+        !owner.is_empty() && self.uber_is(owner) && thread.starts_with(&format!("mailcoord-{owner}-"))
+    }
+    /// Run.is: a private thread, or a mail run the person's setting or triage makes visible work of a bot (Runs.keep hides these from the sidebar)
+    pub fn run_hidden(&self, thread: &str) -> bool {
+        if self.private_thread(thread) { return true }
+        match self.runs.get(thread) {
+            Some(bot) => self.settings.get("mail.on").map_or(false, |v| v == "on") || (self.uber_is(bot) && self.bot_threads.get(bot).map_or(false, |t| !t.is_empty())),
+            None => false,
+        }
+    }
     /// BotSet's thread: a task delegated by a bot's thread is not hidden under it
     pub fn bot_threads_has(&self, thread: &str) -> bool { self.bot_threads.values().any(|t| t == thread) }
 
@@ -177,6 +194,8 @@ impl State {
                 let k = self.order_keys.entry(id.into()).or_default(); if section == "pinned" { k.0 = key.into(); } else { k.1 = key.into(); }
             }
             "ProjectOrdered" => { let (id, key) = (s(e, "id")?, s(e, "key")?); n(e, "at")?; self.order_keys.entry(format!("project:{id}")).or_default().1 = key.into(); }
+            "RunSet" => { let (th, bot) = (s(e, "thread")?, s(e, "bot")?); s(e, "conv")?; s(e, "mail")?; n(e, "at")?; self.runs.insert(th.into(), bot.into()); }
+            "UberSet" => { let (bot, uid) = (s(e, "bot")?, s(e, "uid")?); self.set("uber.bot", bot); self.set("uber.uid", uid); }
             "BotSet" => { let (id, th) = (s(e, "id")?, s(e, "thread")?); self.bot_threads.insert(id.into(), th.into()); }
             "BotDeleted" => { let id = s(e, "id")?; self.bot_threads.remove(id); }
             "TaskDelegated" => {
