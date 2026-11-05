@@ -1,0 +1,35 @@
+{"$":"SettingSet","key":"autosettle.version","value":"1","at":1793862337}
+{"$":"SettingSet","key":"machine.id","value":"m344e0fd36d25f0782cc6049f42d133458aa408142160e669","at":1793862338}
+{"$":"SettingSet","key":"accounts.inventory","value":"{\"version\":1,\"revision\":0,\"profiles\":[],\"error\":\"\"}","at":1793862338}
+{"$":"SettingSet","key":"allowance.codex","value":"{\"provider\":\"codex\",\"at\":0,\"attempted_at\":1793862337,\"state\":\"error\",\"auth\":\"unknown\",\"windows\":[],\"source\":\"codex-app-server\",\"phase\":\"complete\"}","at":1793862338}
+{"$":"SettingSet","key":"tz.machine","value":"America/New_York","at":1793862338}
+{"$":"SettingSet","key":"tz.rule.America/New_York","value":"EST5EDT,M3.2.0,M11.1.0","at":1793862338}
+{"$":"SettingSet","key":"tz.checked","value":"1793862338","at":1793862338}
+{"$":"ModesSet","id":"t1700000001-2","runtime":"full-access","interaction":"default","model":"","at":1793862341}
+{"$":"SettingSet","key":"account.failover.preference.t1700000001-2","value":"","at":1793862341}
+{"$":"SettingSet","key":"fallback.intent.t1700000001-2","value":"","at":1793862341}
+{"$":"SettingSet","key":"star.nudge.v1","value":"{\"status\":\"counting\",\"ids\":[\"m1793862342-150\"],\"token\":\"m1793862342-150\",\"eligibleAt\":0,\"sentAt\":0}","at":1793862342}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m1793862342-150","role":"user","text":"zqquest go","at":1793862342}
+{"$":"TurnChanged","thread":"t1700000001-2","state":"running","at":1793862342}
+{"$":"SettingSet","key":"turn.from.t1700000001-2","value":"@m1793862342-150","at":1793862342}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793862342,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793862342}
+{"$":"SettingSet","key":"restart.retry.t1700000001-2","value":"","at":1793862342}
+{"$":"SettingSet","key":"provider.resume.t1700000001-2","value":"","at":1793862342}
+{"$":"SettingSet","key":"fallback.input.t1700000001-2","value":"zqquest go","at":1793862342}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793862342","at":1793862342}
+{"$":"SettingSet","key":"autosettle.audience.t1700000001-2","value":"person","at":1793862342}
+{"$":"SessionSet","id":"t1700000001-2","session":"bp-t1700000001-2-1793862342-160-0","at":1793862342}
+{"$":"SettingSet","key":"tok.basis.t1700000001-2","value":"x:bp-t1700000001-2-1793862342-160-0:0/0/0/0/0","at":1793862342}
+{"$":"AskOpened","id":"q1793862342-162","thread":"t1700000001-2","kind":"input","tool":"Pi","detail":"Which branch?","options":"main\ndev","at":1793862342}
+{"$":"SettingSet","key":"alert.t1700000001-2","value":"ask\task-t1700000001-2\t\t1793862342.163\tPi Which branch?","at":1793862342}
+{"$":"SettingSet","key":"told.k1793862342-162-1","value":"{\"key\":\"ask-t1700000001-2\",\"text\":\"Fixture short: Pi Which branch?\",\"channel\":\"alert\",\"bot\":\"\",\"at\":1793862342}","at":1793862342}
+{"$":"PendingChanged","thread":"t1700000001-2","count":1,"at":1793862342}
+{"$":"AskClosed","id":"q1793862342-162","answer":"dev","at":1793862342}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"k1793862342-166","tone":"info","kind":"answer","summary":"Which branch? → dev","at":1793862342}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793862342,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"request resolved\"}","at":1793862342}
+{"$":"PendingChanged","thread":"t1700000001-2","count":0,"at":1793862342}
+{"$":"TurnChanged","thread":"t1700000001-2","state":"completed","at":1793862342}
+{"$":"SettingSet","key":"summary.at.t1700000001-2","value":"1793862342","at":1793862342}
+{"$":"SettingSet","key":"alert.t1700000001-2","value":"done\tturn-t1700000001-2\tm1793862342-150\t1793862342.171\t","at":1793862342}
+{"$":"SettingSet","key":"told.k1793862342-170-2","value":"{\"key\":\"turn-t1700000001-2\",\"text\":\"Fixture short\",\"channel\":\"alert\",\"bot\":\"\",\"at\":1793862342}","at":1793862342}
+{"$":"SettingSet","key":"summary.at.p1700000000-1","value":"1793862342","at":1793862342}

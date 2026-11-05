@@ -1,0 +1,32 @@
+{"$":"SettingSet","key":"autosettle.version","value":"1","at":1793862283}
+{"$":"SettingSet","key":"machine.id","value":"m8ddf871634dcdcb3075c9810ed2a6a1eecad667c70de89af","at":1793862283}
+{"$":"SettingSet","key":"accounts.inventory","value":"{\"version\":1,\"revision\":0,\"profiles\":[],\"error\":\"\"}","at":1793862283}
+{"$":"SettingSet","key":"allowance.codex","value":"{\"provider\":\"codex\",\"at\":0,\"attempted_at\":1793862283,\"state\":\"error\",\"auth\":\"unknown\",\"windows\":[],\"source\":\"codex-app-server\",\"phase\":\"complete\"}","at":1793862283}
+{"$":"SettingSet","key":"tz.machine","value":"America/New_York","at":1793862283}
+{"$":"SettingSet","key":"tz.rule.America/New_York","value":"EST5EDT,M3.2.0,M11.1.0","at":1793862283}
+{"$":"SettingSet","key":"tz.checked","value":"1793862283","at":1793862283}
+{"$":"ModesSet","id":"t1700000001-2","runtime":"full-access","interaction":"default","model":"","at":1793862287}
+{"$":"SettingSet","key":"account.failover.preference.t1700000001-2","value":"","at":1793862287}
+{"$":"SettingSet","key":"fallback.intent.t1700000001-2","value":"","at":1793862287}
+{"$":"SettingSet","key":"star.nudge.v1","value":"{\"status\":\"counting\",\"ids\":[\"m1793862287-150\"],\"token\":\"m1793862287-150\",\"eligibleAt\":0,\"sentAt\":0}","at":1793862287}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m1793862287-150","role":"user","text":"hello pi","at":1793862287}
+{"$":"TurnChanged","thread":"t1700000001-2","state":"running","at":1793862287}
+{"$":"SettingSet","key":"turn.from.t1700000001-2","value":"@m1793862287-150","at":1793862287}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793862287,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793862287}
+{"$":"SettingSet","key":"restart.retry.t1700000001-2","value":"","at":1793862287}
+{"$":"SettingSet","key":"provider.resume.t1700000001-2","value":"","at":1793862287}
+{"$":"SettingSet","key":"fallback.input.t1700000001-2","value":"hello pi","at":1793862287}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793862287","at":1793862287}
+{"$":"SettingSet","key":"autosettle.audience.t1700000001-2","value":"person","at":1793862287}
+{"$":"SessionSet","id":"t1700000001-2","session":"bp-t1700000001-2-1793862287-160-0","at":1793862287}
+{"$":"SettingSet","key":"tok.basis.t1700000001-2","value":"x:bp-t1700000001-2-1793862287-160-0:0/0/0/0/0","at":1793862287}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"c1-162","tone":"tool","kind":"shell","summary":"ls -la","at":1793862287}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"c2-163","tone":"tool","kind":"shell","summary":"backplane thread_list","at":1793862287}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"c3-164","tone":"tool","kind":"shell","summary":"read board.kicad_pcb","at":1793862287}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"c1793862287-165-165","role":"assistant","text":"Looking at the board.\n\nAll good.","at":1793862287}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"c1793862287-165-165","at":1793862287}
+{"$":"TurnChanged","thread":"t1700000001-2","state":"completed","at":1793862287}
+{"$":"SettingSet","key":"summary.at.t1700000001-2","value":"1793862287","at":1793862287}
+{"$":"SettingSet","key":"alert.t1700000001-2","value":"done\tturn-t1700000001-2\tm1793862287-150\t1793862287.168\t","at":1793862287}
+{"$":"SettingSet","key":"told.k1793862287-167-2","value":"{\"key\":\"turn-t1700000001-2\",\"text\":\"Fixture short: Looking at the board.\",\"channel\":\"alert\",\"bot\":\"\",\"at\":1793862287}","at":1793862287}
+{"$":"SettingSet","key":"summary.at.p1700000000-1","value":"1793862287","at":1793862287}

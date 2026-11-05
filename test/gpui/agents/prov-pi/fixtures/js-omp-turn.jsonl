@@ -1,0 +1,35 @@
+{"$":"SettingSet","key":"autosettle.version","value":"1","at":1793862349}
+{"$":"SettingSet","key":"machine.id","value":"m96063eae3462ffa2fdce6af618fc060c5ecfa5662ee73000","at":1793862349}
+{"$":"SettingSet","key":"accounts.inventory","value":"{\"version\":1,\"revision\":0,\"profiles\":[],\"error\":\"\"}","at":1793862349}
+{"$":"SettingSet","key":"allowance.codex","value":"{\"provider\":\"codex\",\"at\":0,\"attempted_at\":1793862349,\"state\":\"error\",\"auth\":\"unknown\",\"windows\":[],\"source\":\"codex-app-server\",\"phase\":\"complete\"}","at":1793862349}
+{"$":"SettingSet","key":"tz.machine","value":"America/New_York","at":1793862349}
+{"$":"SettingSet","key":"tz.rule.America/New_York","value":"EST5EDT,M3.2.0,M11.1.0","at":1793862349}
+{"$":"SettingSet","key":"tz.checked","value":"1793862349","at":1793862349}
+{"$":"ModesSet","id":"t1700000001-2","runtime":"full-access","interaction":"default","model":"","at":1793862353}
+{"$":"SettingSet","key":"account.failover.preference.t1700000001-2","value":"","at":1793862353}
+{"$":"SettingSet","key":"fallback.intent.t1700000001-2","value":"","at":1793862353}
+{"$":"SettingSet","key":"star.nudge.v1","value":"{\"status\":\"counting\",\"ids\":[\"m1793862353-150\"],\"token\":\"m1793862353-150\",\"eligibleAt\":0,\"sentAt\":0}","at":1793862353}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m1793862353-150","role":"user","text":"hello omp","at":1793862353}
+{"$":"TurnChanged","thread":"t1700000001-2","state":"running","at":1793862353}
+{"$":"SettingSet","key":"turn.from.t1700000001-2","value":"@m1793862353-150","at":1793862353}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793862353,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793862353}
+{"$":"SettingSet","key":"restart.retry.t1700000001-2","value":"","at":1793862353}
+{"$":"SettingSet","key":"provider.resume.t1700000001-2","value":"","at":1793862353}
+{"$":"SettingSet","key":"fallback.input.t1700000001-2","value":"hello omp","at":1793862353}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793862353","at":1793862353}
+{"$":"SettingSet","key":"autosettle.audience.t1700000001-2","value":"person","at":1793862353}
+{"$":"SessionSet","id":"t1700000001-2","session":"omp-t1700000001-2","at":1793862353}
+{"$":"SettingSet","key":"tok.basis.t1700000001-2","value":"x:omp-t1700000001-2:0/0/0/0/0","at":1793862353}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"c1-162","tone":"tool","kind":"shell","summary":"ls","at":1793862353}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"c2-163","tone":"tool","kind":"shell","summary":"backplane thread_list","at":1793862353}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"c1793862353-164-164","role":"assistant","text":"Looking.\n\nDone.","at":1793862353}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"c1793862353-164-164","at":1793862353}
+{"$":"UsageSet","thread":"t1700000001-2","used":1500,"window":200000,"at":1793862353}
+{"$":"TurnChanged","thread":"t1700000001-2","state":"completed","at":1793862353}
+{"$":"SettingSet","key":"tok.epoch","value":"1","at":1793862353}
+{"$":"SettingSet","key":"tok.recount","value":"b","at":1793862353}
+{"$":"TurnUsage","thread":"t1700000001-2","provider":"omp","model":"default","key":"x:omp-t1700000001-2:150/25","input":120,"cread":30,"cwrite":4,"output":25,"reasoning":6,"cost":4200000,"known":"irwotc","basis":"x:omp-t1700000001-2:150/30/4/25/6/4200000","at":1793862353}
+{"$":"SettingSet","key":"summary.at.t1700000001-2","value":"1793862353","at":1793862353}
+{"$":"SettingSet","key":"alert.t1700000001-2","value":"done\tturn-t1700000001-2\tm1793862353-150\t1793862353.171\t","at":1793862353}
+{"$":"SettingSet","key":"told.k1793862353-167-5","value":"{\"key\":\"turn-t1700000001-2\",\"text\":\"Fixture short: Looking.\",\"channel\":\"alert\",\"bot\":\"\",\"at\":1793862353}","at":1793862353}
+{"$":"SettingSet","key":"summary.at.p1700000000-1","value":"1793862353","at":1793862353}

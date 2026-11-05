@@ -178,3 +178,63 @@ mod tests {
         assert_eq!(jshow(&serde_json::from_str::<Value>(r#"{"n":1.50,"b":[true,null]}"#).unwrap()), r#"{"n":1.50,"b":[true,null]}"#);
     }
 }
+
+/// End to end, stand-ins only: a Pi or Oh My Pi turn through the real actor against a real Hub on a temp home, its log compared event for event with the
+/// one the JS hub wrote for the same stand-in (test/gpui/agents/prov-pi/fixtures/js-*.jsonl, recorded by record_pi.mjs from build/gpui/backplane-serve-current),
+/// ids and clocks normalised. Settings and bookkeeping the JS hub also writes are not compared; the thread's messages, turn, activity, asks, session and usage are.
+#[cfg(test)]
+mod e2e {
+    use crate::{agents::{proc::Cli, Agents}, api::Caller, hub::{Cfg, Hub}, presenter::Canned};
+    use serde_json::{json, Value};
+    use std::{path::{Path, PathBuf}, sync::Arc, time::{Duration, Instant}};
+    const T1: &str = "t1700000001-2";
+    const PI: &str = include_str!("../../../../../test/gpui/agents/prov-pi/standin-pi.sh");
+    const OMP: &str = include_str!("../../../../../test/gpui/agents/prov-pi/standin-omp.sh");
+
+    fn dir(name: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-pi-{}-{}", std::process::id(), name)); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
+    fn script(d: &Path, name: &str, body: &str) { use std::os::unix::fs::PermissionsExt; let p = d.join(name); std::fs::write(&p, body).unwrap(); std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap(); }
+    fn digits(s: &str) -> String { let mut o = String::new(); let mut run = 0; for c in s.chars() { if c.is_ascii_digit() { run += 1; if run == 3 { o.push('N') } else if run < 3 { o.push(c) } } else { run = 0; o.push(c) } } o }
+    const KEEP: &[&str] = &["MessagePosted", "TurnChanged", "ActivityLogged", "AskOpened", "AskClosed", "SessionSet", "UsageSet", "TurnUsage", "PendingChanged"];
+    fn core(ev: &[Value]) -> Vec<String> {
+        ev.iter().filter(|e| KEEP.contains(&e["$"].as_str().unwrap_or("")) && e["thread"].as_str().map_or(true, |t| t == T1) && !(e["$"] == "MessagePosted" && e["role"] == "user" && false))
+            .map(|e| { let mut e = e.clone(); if let Some(o) = e.as_object_mut() { o.remove("at"); } digits(&e.to_string()) }).collect()
+    }
+    /// One scene: provider, stand-in, runtime, message, the answer to give an ask (None: no ask), the JS hub's events.
+    async fn scene(prov: &str, standin: &str, runtime: &str, msg: &str, answer: Option<&str>, js: &str) {
+        let sd = dir(&format!("{prov}-{runtime}-bin")); script(&sd, prov, standin);
+        for n in ["claude", "codex", "grok", "muse", "pi", "omp"] { if n != prov { script(&sd, n, "#!/bin/sh\nexit 1\n") } }
+        let home = dir(&format!("{prov}-{runtime}-{}-home", msg.len())); let work = dir(&format!("{prov}-{runtime}-{}-work", msg.len()));
+        let log = format!("{{\"$\":\"ProjectCreated\",\"id\":\"p1\",\"title\":\"fixture\",\"root\":{},\"at\":1700000000}}\n{{\"$\":\"ThreadCreated\",\"id\":\"{T1}\",\"project\":\"p1\",\"title\":\"Fixture 0\",\"env\":\"local\",\"branch\":\"\",\"worktree\":\"\",\"provider\":\"{prov}\",\"model\":\"\",\"at\":1700000001}}\n{{\"$\":\"ModesSet\",\"id\":\"{T1}\",\"runtime\":\"{runtime}\",\"interaction\":\"default\",\"model\":\"\",\"at\":1700000002}}\n",
+            serde_json::to_string(&work.to_string_lossy()).unwrap());
+        std::fs::write(home.join("events.jsonl"), log).unwrap();
+        let hub = Hub::start(Cfg { home: home.clone(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        let ag = Agents::start_with(hub.clone(), Cli::standin(&sd)).await.unwrap();
+        let from = hub.store.len();
+        let rpc = |m: &'static str, p: Value| { let hub = hub.clone(); async move { let h = hub.rpc_for(m).expect("handler"); h.call(&hub, &Caller { gen: "1".into(), client: 1 }, &json!(7), m, &p).await.remove(0) } };
+        let events = || { let hub = hub.clone(); async move { hub.store.range(from, usize::MAX).unwrap().iter().filter_map(|l| serde_json::from_str::<Value>(l).ok()).collect::<Vec<_>>() } };
+        assert_eq!(rpc("turn.start", json!({"thread":T1,"text":msg})).await["ok"], true);
+        let wait = |f: fn(&[Value]) -> bool| { let events = events.clone(); async move { let end = Instant::now() + Duration::from_secs(30); loop { let ev = events().await; if f(&ev) || Instant::now() > end { return ev } tokio::time::sleep(Duration::from_millis(50)).await } } };
+        if let Some(a) = answer {
+            let ev = wait(|ev| ev.iter().any(|e| e["$"] == "AskOpened")).await;
+            let id = ev.iter().find(|e| e["$"] == "AskOpened").expect("the ask opened")["id"].clone();
+            assert_eq!(rpc("ask.answer", json!({"id":id,"answer":a})).await["ok"], true);
+        }
+        let ev = wait(|ev| ev.iter().any(|e| e["$"] == "TurnChanged" && (e["state"] == "completed" || e["state"] == "failed"))).await;
+        tokio::time::sleep(Duration::from_millis(800)).await; let ev = if ev.is_empty() { ev } else { events().await }; ag.shutdown();
+        let want: Vec<Value> = js.lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
+        let (g, w) = (core(&ev), core(&want));
+        for (i, (a, b)) in g.iter().zip(w.iter()).enumerate() { assert_eq!(a, b, "event {i} of {} (rust) / {} (js)", g.len(), w.len()) }
+        assert_eq!(g.len(), w.len(), "counts; extra rust: {:?}; extra js: {:?}", g.iter().skip(w.len()).collect::<Vec<_>>(), w.iter().skip(g.len()).collect::<Vec<_>>());
+        let _ = std::fs::remove_dir_all(&home);
+    }
+    macro_rules! fx { ($n:literal) => { include_str!(concat!("../../../../../test/gpui/agents/prov-pi/fixtures/", $n)) } }
+    #[tokio::test(flavor = "multi_thread")] async fn pi_turn_matches_the_js_hub() { scene("pi", PI, "full-access", "hello pi", None, fx!("js-pi-turn.jsonl")).await }
+    #[tokio::test(flavor = "multi_thread")] async fn pi_failure_matches_the_js_hub() { scene("pi", PI, "full-access", "zqfail please", None, fx!("js-pi-fail.jsonl")).await }
+    #[tokio::test(flavor = "multi_thread")] async fn pi_allowed_tool_matches_the_js_hub() { scene("pi", PI, "approval-required", "zqask go", Some("accept"), fx!("js-pi-askaccept.jsonl")).await }
+    #[tokio::test(flavor = "multi_thread")] async fn pi_declined_tool_matches_the_js_hub() { scene("pi", PI, "approval-required", "zqask go", Some("decline"), fx!("js-pi-askdeny.jsonl")).await }
+    #[tokio::test(flavor = "multi_thread")] async fn pi_other_extensions_question_matches_the_js_hub() { scene("pi", PI, "full-access", "zqquest go", Some("dev"), fx!("js-pi-quest.jsonl")).await }
+    #[tokio::test(flavor = "multi_thread")] async fn omp_turn_matches_the_js_hub() { scene("omp", OMP, "full-access", "hello omp", None, fx!("js-omp-turn.jsonl")).await }
+    #[tokio::test(flavor = "multi_thread")] async fn omp_failure_matches_the_js_hub() { scene("omp", OMP, "full-access", "zqfail", None, fx!("js-omp-fail.jsonl")).await }
+    #[tokio::test(flavor = "multi_thread")] async fn omp_allowed_tool_matches_the_js_hub() { scene("omp", OMP, "approval-required", "zqask go", Some("accept"), fx!("js-omp-askaccept.jsonl")).await }
+    #[tokio::test(flavor = "multi_thread")] async fn omp_declined_tool_matches_the_js_hub() { scene("omp", OMP, "approval-required", "zqask go", Some("decline"), fx!("js-omp-askdeny.jsonl")).await }
+}
