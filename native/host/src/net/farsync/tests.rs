@@ -1,6 +1,7 @@
 //! Two throwaway hubs: A is the owner (it signs pushes and answers pulls with a canned log), B mirrors. Real curl over
 //! loopback; no real peers. The routes B serves are `FarRoutes` behind the same front the peering tests use.
 use super::*;
+use std::path::PathBuf;
 use crate::net::peering::tests::{know, live_ids, node, node_extra, settle, url, Extra, Node};
 use crate::net::{botnet, farstore::FarStore};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -119,30 +120,67 @@ async fn push(a: &Node, b: &Node, link: &str, body: Value) -> botnet::Resp {
 }
 
 /// A presenter that counts what it is told, to see the seam: restart, fold the log again (the hub's), then the mirrors.
-struct Spy { restarts: std::sync::atomic::AtomicUsize, order: Arc<Mutex<Vec<String>>> }
+struct Spy { restarts: std::sync::atomic::AtomicUsize, order: Arc<Mutex<Vec<String>>>, fail_restart: bool }
 impl crate::presenter::Presenter for Spy {
     fn name(&self) -> &'static str { "spy" }
     fn fold<'a>(&'a self, f: &'a Value) -> crate::presenter::Fut<'a, ()> { let o = self.order.clone(); let t = f["t"].as_str().unwrap_or("?").to_string(); let n = f["items"].as_array().map_or(0, Vec::len); Box::pin(async move { o.lock().unwrap().push(format!("{t}:{n}")); Ok(()) }) }
     fn view<'a>(&'a self, _p: &'a Value) -> crate::presenter::Fut<'a, Value> { Box::pin(async { Ok(json!({})) }) }
     fn ping(&self) -> crate::presenter::Fut<'_, ()> { Box::pin(async { Ok(()) }) }
-    fn restart(&self) -> crate::presenter::Fut<'_, ()> { self.restarts.fetch_add(1, std::sync::atomic::Ordering::SeqCst); self.order.lock().unwrap().push("restart".into()); Box::pin(async { Ok(()) }) }
+    fn restart(&self) -> crate::presenter::Fut<'_, ()> {
+        self.restarts.fetch_add(1, std::sync::atomic::Ordering::SeqCst); self.order.lock().unwrap().push("restart".into());
+        let fail = self.fail_restart; Box::pin(async move { if fail { anyhow::bail!("would not restart") } Ok(()) })
+    }
 }
-#[tokio::test] async fn far_a_new_epoch_makes_the_presenter_forget_the_old_rows_and_take_the_mirrors_again() {
+fn thread_item(n: u64, id: &str) -> Item { Item { n, c: json!({"$":"ThreadCreated","id":id,"project":"","title":"T","env":"","branch":"","worktree":"","provider":"claude","model":"","at":n}) } }
+async fn spy_hub(tag: &str, fail_restart: bool) -> (Arc<Hub>, Arc<Spy>, Arc<Mutex<Vec<String>>>, PathBuf) {
     let order = Arc::new(Mutex::new(vec![]));
-    let h = std::env::temp_dir().join(format!("bp-forget-{}", std::process::id())); let _ = std::fs::remove_dir_all(&h); std::fs::create_dir_all(&h).unwrap();
-    let spy = Arc::new(Spy { restarts: Default::default(), order: order.clone() });
+    let h = std::env::temp_dir().join(format!("bp-forget-{tag}-{}", std::process::id())); let _ = std::fs::remove_dir_all(&h); std::fs::create_dir_all(&h).unwrap();
+    let spy = Arc::new(Spy { restarts: Default::default(), order: order.clone(), fail_restart });
     let hub = Hub::start(crate::hub::Cfg { home: h.clone(), version: "0.14.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() }, spy.clone()).await.unwrap();
-    let store = FarStore::open(&h).unwrap();
-    hub.set_mirror_feed(Arc::new(Refeed(store.clone())));
-    store.take("L", "old", 0, 2, &[Item { n: 1, c: json!({"$":"ThreadCreated","id":"t","project":"","title":"T","env":"","branch":"","worktree":"","provider":"claude","model":"","at":1}) }, Item { n: 2, c: json!({"$":"MessagePosted","thread":"t","msg":"m1","role":"user","text":"old","at":2}) }]).unwrap();
-    let t = store.take("L", "new", 0, 1, &[Item { n: 1, c: json!({"$":"ThreadCreated","id":"u","project":"","title":"U","env":"","branch":"","worktree":"","provider":"claude","model":"","at":3}) }]).unwrap();
-    assert!(t.reset);
+    (hub, spy, order, h)
+}
+/// Through `FarSync::take`, a batch of another epoch: the presenter is restarted, given the log and then only the new history, once.
+#[tokio::test] async fn far_a_new_epoch_makes_the_presenter_forget_the_old_rows_and_take_the_mirrors_again() {
+    let (hub, spy, order, h) = spy_hub("reset", false).await;
+    let b = node("fg1", false).await;
+    let store = FarStore::open(&h).unwrap(); hub.set_mirror_feed(Arc::new(Refeed(store.clone())));
+    let fs = FarSync::new(store.clone(), b.p.clone());
+    assert!(!fs.take(&hub, "L", "old", 0, 2, vec![thread_item(1, "t"), Item { n: 2, c: json!({"$":"MessagePosted","thread":"t","msg":"m1","role":"user","text":"old","at":2}) }]).await.unwrap());
+    assert!(order.lock().unwrap().iter().any(|x| x == "changes:2"), "an ordinary batch is folded: {:?}", order.lock().unwrap());
     order.lock().unwrap().clear();
-    hub.forget_mirror().await;
+    fs.take(&hub, "L", "new", 0, 1, vec![thread_item(1, "u")]).await.unwrap();
     let o = order.lock().unwrap().clone();
     assert_eq!(spy.restarts.load(Ordering::SeqCst), 1, "{o:?}");
     assert_eq!(o.first().map(String::as_str), Some("restart"), "restart first: {o:?}");
-    let last = o.last().unwrap(); assert!(last.starts_with("changes:") && last != "changes:0", "then the mirrors (only the new history: one thread), last: {o:?}");
-    assert!(!o.iter().any(|x| x == "changes:2"), "the old history is not given again: {o:?}");
+    let folds: Vec<&String> = o.iter().filter(|x| x.starts_with("changes:") && *x != "changes:0").collect();
+    assert_eq!(folds, vec!["changes:1"], "the new history once (given by the replay, not folded again by the batch), never the old: {o:?}");
+    assert!(o.iter().position(|x| x == "changes:1") > o.iter().position(|x| x == "restart"), "after the restart: {o:?}");
+    let _ = std::fs::remove_dir_all(h);
+}
+/// The presenter would not restart: said, and the new history is folded anyway (the old rows stay, as they do).
+#[tokio::test] async fn far_a_failed_restart_still_folds_the_new_history() {
+    let (hub, spy, order, h) = spy_hub("failreset", true).await;
+    let b = node("fg2", false).await;
+    let store = FarStore::open(&h).unwrap(); hub.set_mirror_feed(Arc::new(Refeed(store.clone())));
+    let fs = FarSync::new(store.clone(), b.p.clone());
+    fs.take(&hub, "L", "old", 0, 1, vec![thread_item(1, "t")]).await.unwrap();
+    order.lock().unwrap().clear();
+    fs.take(&hub, "L", "new", 0, 1, vec![thread_item(1, "u")]).await.unwrap();
+    assert_eq!(spy.restarts.load(Ordering::SeqCst), 1);
+    assert!(order.lock().unwrap().iter().any(|x| x == "changes:1"), "the new history reached the presenter: {:?}", order.lock().unwrap());
+    assert!(!hub.forget_mirror().await, "forget_mirror says it failed");
+    let _ = std::fs::remove_dir_all(h);
+}
+/// Two resets at once: one rebuild runs, the second request makes exactly one following pass, and they never run alongside.
+#[tokio::test] async fn far_two_rebuilds_at_once_are_one_at_a_time_and_merge() {
+    let (hub, spy, order, h) = spy_hub("merge", false).await;
+    let (a, b) = (hub.clone(), hub.clone());
+    let (ra, rb) = tokio::join!(tokio::spawn(async move { a.forget_mirror().await }), tokio::spawn(async move { b.forget_mirror().await }));
+    assert!(ra.unwrap() && rb.unwrap());
+    let n = spy.restarts.load(Ordering::SeqCst);
+    assert!((1..=2).contains(&n), "one pass, or one following pass for the late request: {n}");
+    // each restart is followed by its own log fold before the next restart (never interleaved)
+    let o = order.lock().unwrap().clone(); let rs: Vec<usize> = o.iter().enumerate().filter(|(_, x)| *x == "restart").map(|(i, _)| i).collect();
+    for w in rs.windows(2) { assert!(o[w[0] + 1..w[1]].iter().any(|x| x.starts_with("log")), "a pass completes before the next restarts: {o:?}") }
     let _ = std::fs::remove_dir_all(h);
 }

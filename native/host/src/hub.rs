@@ -16,7 +16,7 @@ pub struct Hub {
     pub store: Store, pub model: Mutex<Model>, gen: AtomicU64, pub changed: broadcast::Sender<u64>, pub frames: broadcast::Sender<Value>, pub native_key: String,
     commits: tokio::sync::mpsc::UnboundedSender<Commit>,
     rpc: std::sync::RwLock<Vec<(&'static str, Arc<dyn RpcHandler>)>>, http: std::sync::RwLock<Vec<(&'static str, Arc<dyn HttpHandler>)>>,
-    views: std::sync::RwLock<Vec<(&'static str, Arc<dyn ViewMethod>)>>, observers: std::sync::RwLock<Vec<Arc<dyn Observer>>>, transforms: std::sync::RwLock<Vec<Arc<dyn Transform>>>, far: std::sync::OnceLock<Arc<dyn FarView>>, mirror_feed: std::sync::OnceLock<Arc<dyn crate::api::MirrorFeed>>, pairing: std::sync::OnceLock<Arc<dyn Pairing>>, auth_route: std::sync::OnceLock<Arc<dyn AuthRoute>>,
+    views: std::sync::RwLock<Vec<(&'static str, Arc<dyn ViewMethod>)>>, observers: std::sync::RwLock<Vec<Arc<dyn Observer>>>, transforms: std::sync::RwLock<Vec<Arc<dyn Transform>>>, far: std::sync::OnceLock<Arc<dyn FarView>>, mirror_feed: std::sync::OnceLock<Arc<dyn crate::api::MirrorFeed>>, mirror_gate: tokio::sync::Mutex<()>, rebuild_run: tokio::sync::Mutex<()>, rebuild_again: std::sync::atomic::AtomicBool, pairing: std::sync::OnceLock<Arc<dyn Pairing>>, auth_route: std::sync::OnceLock<Arc<dyn AuthRoute>>,
     live: std::sync::Mutex<std::collections::HashMap<String, String>>,
     pub window_bin: std::sync::OnceLock<PathBuf>,
     me: std::sync::OnceLock<std::sync::Weak<Hub>>, next_client: AtomicU64,
@@ -84,7 +84,7 @@ impl Hub {
         let (ftx, _) = broadcast::channel(1024);
         let model = Model::build(&store)?;
         let hub = Arc::new(Hub { cfg, auth, epoch, presenter, store: store.clone(), commits: ctx, model: Mutex::new(model), gen: AtomicU64::new(1), changed: tx, frames: ftx, native_key: { let mut b = [0u8; 16]; if let Ok(mut f) = std::fs::File::open("/dev/urandom") { let _ = std::io::Read::read_exact(&mut f, &mut b); } hex::encode(b) },
-            rpc: Default::default(), http: Default::default(), views: Default::default(), observers: Default::default(), transforms: Default::default(), far: Default::default(), mirror_feed: Default::default(), pairing: Default::default(), auth_route: Default::default(), outbox_max: std::sync::atomic::AtomicUsize::new(OUTBOX_MAX), signal_seq: AtomicU64::new(store.len() as u64), id_alloc: AtomicU64::new(0), need_resync: Default::default(), extra_info: Default::default(), live: Default::default(), window_bin: Default::default(), me: Default::default(), next_client: AtomicU64::new(1), outboxes: Default::default() });
+            rpc: Default::default(), http: Default::default(), views: Default::default(), observers: Default::default(), transforms: Default::default(), far: Default::default(), mirror_feed: Default::default(), mirror_gate: Default::default(), rebuild_run: Default::default(), rebuild_again: Default::default(), pairing: Default::default(), auth_route: Default::default(), outbox_max: std::sync::atomic::AtomicUsize::new(OUTBOX_MAX), signal_seq: AtomicU64::new(store.len() as u64), id_alloc: AtomicU64::new(0), need_resync: Default::default(), extra_info: Default::default(), live: Default::default(), window_bin: Default::default(), me: Default::default(), next_client: AtomicU64::new(1), outboxes: Default::default() });
         let _ = hub.me.set(Arc::downgrade(&hub));
         hub.bootstrap()?;
         hub.signal_seq.store(hub.store.len() as u64, Relaxed); // start-up housekeeping counts: a restart is a new signal
@@ -94,7 +94,7 @@ impl Hub {
         { let hub = hub.clone(); tokio::spawn(async move { loop {
             tokio::time::sleep(std::time::Duration::from_millis(250)).await;
             if hub.presenter.is_down() {
-                match hub.presenter.restart().await { Ok(()) => { eprintln!("presenter restarted; folding the log again"); hub.resync_presenter().await } Err(e) => { eprintln!("presenter restart failed: {e:#}"); tokio::time::sleep(std::time::Duration::from_secs(2)).await } }
+                if hub.forget_mirror().await { eprintln!("presenter restarted; folded the log and the mirrors again") } else { tokio::time::sleep(std::time::Duration::from_secs(2)).await }
             }
         } }); }
         Ok(hub)
@@ -191,7 +191,9 @@ impl Hub {
     /// write and one fsync for the batch, the model and the presenter in log order, then every caller is told.
     /// Fold the whole log into the presenter again, in the writer task (so no commit interleaves with it): the next batch, even an empty one,
     /// is replaced by `fold_log`. Views answer PRESENTER_UNAVAILABLE meanwhile.
-    pub async fn resync_presenter(&self) {
+    pub async fn resync_presenter(&self) { let _g = self.mirror_gate.lock().await; self.resync_held().await }
+    /// (the caller holds the mirror gate)
+    async fn resync_held(&self) {
         self.need_resync.store(true, Relaxed);
         let (done, rx) = tokio::sync::oneshot::channel();
         if self.commits.send(Commit { events: vec![], done }).is_ok() { let _ = rx.await; }
@@ -200,9 +202,26 @@ impl Hub {
     }
     /// Installs what re-feeds the mirrors after the presenter lost them (net lane).
     pub fn set_mirror_feed(&self, f: Arc<dyn crate::api::MirrorFeed>) { let _ = self.mirror_feed.set(f); }
-    /// A mirror's history was replaced (another epoch on its owner): the presenter forgets every mirror and is given the ones that stay
-    /// (the caller has already replaced the forgotten one) by restarting it, folding the log, and the registered `MirrorFeed`.
-    pub async fn forget_mirror(&self) { if self.presenter.restart().await.is_ok() { self.resync_presenter().await } }
+    /// One mirror fold, store-and-fold or snapshot-and-fold, at a time: the net lane holds this gate around "store a batch, fold it" and the
+    /// replay holds it around "snapshot a mirror, fold it", so a fold can neither overtake nor repeat what a replay gives (and a presenter
+    /// rebuild cannot start between a batch's storing and its folding).
+    pub async fn mirror_gate(&self) -> tokio::sync::MutexGuard<'_, ()> { self.mirror_gate.lock().await }
+    /// A mirror's history was replaced, or the presenter died: the presenter is restarted, the log folded again, and the registered
+    /// `MirrorFeed` gives it every mirror. One rebuild at a time: a request that arrives while one runs makes a following pass (what it
+    /// changed may be missing from the running one's snapshot) and returns at once. False: the presenter would not restart (said).
+    pub async fn forget_mirror(&self) -> bool {
+        self.rebuild_again.store(true, Relaxed);
+        let Ok(_run) = self.rebuild_run.try_lock() else { return true };
+        let mut ok = true;
+        while self.rebuild_again.swap(false, Relaxed) {
+            let _g = self.mirror_gate.lock().await;
+            match self.presenter.restart().await {
+                Ok(()) => self.resync_held().await,
+                Err(e) => { eprintln!("presenter restart failed: {e:#}"); ok = false; break }
+            }
+        }
+        ok
+    }
     pub async fn commit_many(&self, events: &[Value]) -> Result<u64> {
         let (done, rx) = tokio::sync::oneshot::channel();
         // settings lane: a stored secret never reaches the log, the model, the presenter or a client (Hub.step.go, Secret.changes)
@@ -281,7 +300,9 @@ impl Hub {
     pub fn far(&self) -> Option<Arc<dyn FarView>> { self.far.get().cloned() }
     /// Mirrored events (already renamed to `<link>~<id>` ids) to the presenter's state only: never the log, never `Model`, never a client's
     /// log stream. That state lives only in the presenter: a presenter restart loses the mirrors, so the caller re-feeds them. The presenter shows them in the sidebar and thread views as it shows local ones.
-    pub async fn fold_mirror(&self, events: &[Value]) { let _ = self.presenter.fold(&json!({"t":"changes","items":events,"now":now_ms()})).await; }
+    pub async fn fold_mirror(&self, events: &[Value]) { let _g = self.mirror_gate.lock().await; self.fold_mirror_held(events).await }
+    /// (the caller holds `mirror_gate`)
+    pub async fn fold_mirror_held(&self, events: &[Value]) { let _ = self.presenter.fold(&json!({"t":"changes","items":events,"now":now_ms()})).await; }
     pub fn register_view(&self, h: Arc<dyn ViewMethod>) { let mut v = self.views.write().unwrap(); for m in h.methods() { v.push((m, h.clone())) } }
     pub fn view_for(&self, method: &str) -> Option<Arc<dyn ViewMethod>> { self.views.read().unwrap().iter().find(|(n, _)| *n == method).map(|(_, h)| h.clone()) }
     pub fn register_http(&self, h: Arc<dyn HttpHandler>) { let mut v = self.http.write().unwrap(); for r in h.routes() { v.retain(|(n, _)| n != r); v.push((r, h.clone())) } }

@@ -44,8 +44,9 @@ pub fn farhttp_start(hub: std::sync::Arc<crate::hub::Hub>, peering: std::sync::A
         for l in store.links() {
             // (read off the async workers, and sent a chunk at a time)
             let s = store.clone(); let link = l.clone();
+            let _g = hub.mirror_gate().await; // (snapshot and fold together, against the pushes and a rebuild)
             let ev = tokio::task::spawn_blocking(move || s.replay_events(&link)).await.unwrap_or_default();
-            farsync::fold_in_chunks(&hub, &ev).await;
+            farsync::fold_held(&hub, &ev).await;
         }
         let sync = farsync::FarSync::new(store, peering.clone());
         // the owner's side: the feed index (built from the log off the workers) answers pulls and drives the pushes
