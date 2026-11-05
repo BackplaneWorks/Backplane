@@ -2015,22 +2015,49 @@ final class AppModel {
 
     private func publishDraft(_ thread: String, text: String, edit: UInt64) {
         let generation = pairingGeneration
+        #if DEBUG
+        let t0 = CACurrentMediaTime(), bytes = text.utf8.count
+        #endif
         engine.draftAtNow(thread, text: text, edit: edit, generation: generation) { [weak self] out in
-            Task { @MainActor [weak self] in self?.apply(out, generation: generation) }
+            #if DEBUG
+            let t1 = CACurrentMediaTime()
+            #endif
+            Task { @MainActor [weak self] in
+                #if DEBUG
+                let t2 = CACurrentMediaTime()
+                self?.apply(out, generation: generation)
+                if Stall.on { NSLog("Backplane draft round trip: engine %.1f ms, hop to main %.1f ms, apply %.1f ms draft=%d", (t1 - t0) * 1000, (t2 - t1) * 1000, (CACurrentMediaTime() - t2) * 1000, bytes) }
+                #else
+                self?.apply(out, generation: generation)
+                #endif
+            }
         }
     }
     func editComposer(_ text: String, for thread: String) {
         guard canEditComposer(for: thread) else { return }
         #if DEBUG
         Stall.draftBytes = text.utf8.count
+        let m0 = CACurrentMediaTime()
         #endif
         let edit = composerDrafts.change(thread, text)
         composerOwner = thread
+        #if DEBUG
+        let m1 = CACurrentMediaTime()
+        #endif
         composer = text
+        #if DEBUG
+        let m2 = CACurrentMediaTime()
+        #endif
         Self.keep(thread, text)
+        #if DEBUG
+        let m3 = CACurrentMediaTime()
+        #endif
         // This private write never sends a network request, even while offline.
         localDrafts[thread] = text
         publishDraft(thread, text: text, edit: edit)
+        #if DEBUG
+        if Stall.on { NSLog("Backplane edit sync: change %.1f, composer %.1f, keep(UserDefaults) %.1f, rest %.1f ms draft=%d", (m1 - m0) * 1000, (m2 - m1) * 1000, (m3 - m2) * 1000, (CACurrentMediaTime() - m3) * 1000, text.utf8.count) }
+        #endif
     }
     func sendComposer(_ action: String = "send", for thread: String) {
         guard canSendComposer(for: thread), ["send", "send-alt"].contains(action) else { return }
