@@ -30,6 +30,8 @@ impl AuthRoutes {
         if let Some(o) = origin { let mut g = self.state.lock().unwrap(); if !g.routes.contains(&o) { g.routes.insert(0, o) } }
     }
     /// Pairing.known: the owner's machines this hub found, and the urls of the links it verified as the owner's.
+    /// The machines list as the finder last reported it.
+    pub fn machines_value(&self) -> Value { self.state.lock().unwrap().machines.clone() }
     pub fn machines(&self, machines: Value, peers: Vec<String>) { let mut g = self.state.lock().unwrap(); g.machines = machines; g.peers = peers }
 
     fn secret(req: &Req) -> String {

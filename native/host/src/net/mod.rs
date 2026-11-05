@@ -13,6 +13,7 @@ pub mod botnet;
 pub mod machines;
 pub mod owner;
 pub mod pairing;
+pub mod peering;
 pub mod peers;
 pub mod qr;
 pub mod routes;
