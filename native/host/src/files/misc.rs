@@ -115,7 +115,7 @@ impl RpcHandler for Misc {
                     let (mut rendered, mut err) = (String::new(), String::new());
                     if method == "mech.render" {
                         // mech.render writes renders/<part>.<view>.png into the project's folder: outside a copy's home, so a copy is told, not run
-                        if crate::copy::on() { return reply(false, json!({"text":crate::copy::GIT_TOLD.replace("runs no git that writes", "writes nothing outside its home: no renders into the project")})) }
+                        if crate::copy::on() { return reply(false, json!({"text":crate::copy::HOME_ONLY})) }
                         let path = s("path");
                         // the model to draw lies in the project: a path from its root, or an absolute path under it
                         // Hub.folder.path.ok, then Mech.render.at: a path from the root or absolute under it, and a model that really lies inside (no link out)
