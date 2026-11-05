@@ -90,7 +90,7 @@ mod tests {
         find_with(&a.hub, &a.p, &a.p.table, String::new(), other.clone()).await;       // pass 2
         let mut seen = vec![];
         while let Ok(f) = ob.try_recv() { if let crate::hub::Out::Value(v) = f { if let Some(m) = v["info"]["machines"].as_str() { seen.push(serde_json::from_str::<serde_json::Value>(m).unwrap()) } } }
-        assert_eq!(seen.len(), 3, "self once, then a list after each probe: {seen:?}");
+        assert_eq!(seen.len(), 2, "self once, then the probed list; pass 2 found the same list (no change, no frame) and published no self-only one in between: {seen:?}");
         assert_eq!(seen[0]["peers"].as_array().unwrap().len(), 0);
         assert!(seen[1..].iter().all(|j| j["peers"].as_array().unwrap().len() == 1), "after the first pass no list is without the peer: {seen:?}");
     }
