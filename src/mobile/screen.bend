@@ -1353,8 +1353,14 @@ def Mob.diff.at.k(git: Bool, +lc: I.Loc, open: Bool, +text: String, +none: Strin
     case False{}:
       Mob.diff.none(open, J.Json.obj([J.KV{"summary", J.Json.str(MSG.T.viewer.diff.nogit.why(lc, none))}, J.KV{"files", J.Json.arr(Nil{})}]))
 
-def Mob.diff.at(+lc: I.Loc, open: Bool, +text: String, +none: String) -> J.Json:
-  Mob.diff.at.k(String.is_empty(none), lc, open, text, none)
+# (wait: a Diff asked for and not answered yet, client.bend's Dv.open)
+def Mob.diff.at.w(wait: Bool, +lc: I.Loc, open: Bool, +text: String, +none: String) -> J.Json:
+  match wait:
+    case True{}: Mob.diff.none(open, J.Json.obj([J.KV{"summary", J.Json.str(MSG.T.viewer.loading(lc))}, J.KV{"files", J.Json.arr(Nil{})}]))
+    case False{}: Mob.diff.at.k(String.is_empty(none), lc, open, text, none)
+
+def Mob.diff.at(+lc: I.Loc, open: Bool, +text: String, +none: String, +wait: String) -> J.Json:
+  Mob.diff.at.w(Bool.not(String.is_empty(wait)), lc, open, text, none)
 
 def Mob.runs(rs: List<&2, VT.VRun>) -> List<&2, J.Json>:
   match rs:
@@ -1672,7 +1678,7 @@ def Mob.thread(+lc: I.Loc, render: Bool, u: U.Ui, t: M.Thread, pend: List<&2, St
         J.KV{"attaching", J.Json.arr(Mob.chips(atts))}, J.KV{"uploading", J.Json.str(up)},
         J.KV{"chunk", J.Json.nat(AT.Att.chunk())},
         J.KV{"cap", J.Json.nat(AT.Att.max(M.Setting.get(st, AT.Att.key(), "")))},
-        J.KV{"diff", Mob.diff.at(lc, Bool.and(pa, String.eq(U.Str.get(nf, "view.kind:" ++ id), "diff")), U.Str.get(nf, "diff:" ++ id), U.Str.get(nf, "diff.none:" ++ id))},
+        J.KV{"diff", Mob.diff.at(lc, Bool.and(pa, String.eq(U.Str.get(nf, "view.kind:" ++ id), "diff")), U.Str.get(nf, "diff:" ++ id), U.Str.get(nf, "diff.none:" ++ id), U.Str.get(nf, "diff.wait:" ++ id))},
         J.KV{"term", term},
         J.KV{"embs", embs},
         J.KV{"viewer", vw}, J.KV{"voice", voice}])

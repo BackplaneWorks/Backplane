@@ -832,12 +832,12 @@ def Ui.diff.k(u: Ui, +th: String, +r: J.Json) -> Ui:
   match u:
     case Ui{+st, +sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, +nf, ob, tr}:
       Ui{st, sel, dr, live, op, on, now, ad, Bool.or(pa, String.eq(th, sel)), v, rid, w, er, note,
-        Viewer.put(Map.set(&2, String, Map.set(&2, String, Dv.text(nf, th, r), "diff.at:" ++ th, Dv.at(st, th)), "panel:" ++ th, "1"), th, "diff", ""), ob, tr}
+        Viewer.put(Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, Dv.text(nf, th, r), "diff.wait:" ++ th, ""), "diff.at:" ++ th, Dv.at(st, th)), "panel:" ++ th, "1"), th, "diff", ""), ob, tr}
 
 def Ui.diff.quiet(u: Ui, +th: String, +r: J.Json) -> Ui:
   match u:
     case Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, +nf, ob, tr}:
-      Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, Map.set(&2, String, Dv.text(nf, th, r), "diff.auto:" ++ th, ""), ob, tr}
+      Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, Map.set(&2, String, Map.set(&2, String, Dv.text(nf, th, r), "diff.wait:" ++ th, ""), "diff.auto:" ++ th, ""), ob, tr}
 
 def Ui.diff.by(auto: Bool, u: Ui, +th: String, +r: J.Json) -> Ui:
   match auto:
@@ -1861,12 +1861,28 @@ def Ui.diff(+u: Ui, +r: J.Json) -> Ui:
   +th = Viewer.of(J.Json.get_str(r, "thread", ""), Ui.sel(u))
   Ui.diff.by(String.eq(Ui.info(u, "diff.auto:" ++ th), "1"), u, th, r)
 
+# any other answer to a Diff asked for by hand (an error) ends its wait
+# (Dv.open): the viewer says what went wrong, not "Loading…" for ever
+def Dv.unwait.go(u: Ui, +id: String, +th: String) -> Ui:
+  match u:
+    case Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}:
+      Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, Map.set(&2, String, Map.set(&2, String, nf, "diff.ask:" ++ id, ""), "diff.wait:" ++ th, ""), ob, tr}
+
+def Dv.unwait.k(none: Bool, u: Ui, +id: String, +th: String) -> Ui:
+  match none:
+    case True{}: u
+    case False{}: Dv.unwait.go(u, id, th)
+
+def Dv.unwait(+u: Ui, +id: String) -> Ui:
+  +th = Ui.info(u, "diff.ask:" ++ id)
+  Dv.unwait.k(String.is_empty(th), u, id, th)
+
 def Ui.reply.diff(has: Bool, u: Ui, +o: J.Json) -> Ui:
   match has:
     case True{}:
       Ui.diff(Ui.reply.k(u, o), J.Json.get_obj(o, "result"))
     case False{}:
-      Ui.reply.k(u, o)
+      Dv.unwait(Ui.reply.k(u, o), J.Json.as_raw(J.Json.get(o, "id"), ""))
 
 # The hub's own view ("auto"), sent when an agent starts in a KiCad
 # project: it opens the thread's panel on its board (or schematic) only
@@ -7401,10 +7417,31 @@ def Mpage.sync.m(a: Act) -> Act:
 def Mpage.sync(a: Act) -> Act:
   Fv.sync(Mpage.sync.m(a))
 
-# Diff asked for by hand (the rail, ctrl+d, the palette): its answer opens
-# the viewer on it, even with one of Diff's own asks still out
+# Diff asked for by hand (the rail, ctrl+d, the palette) opens the viewer
+# at once, saying "Loading…" ("diff.wait:t"; the ask's id names the thread
+# in "diff.ask:<id>") until its answer fills it (Ui.diff.k), even with
+# one of Diff's own asks still out. It used to open only with the answer:
+# the click showed nothing for as long as git took (5 s on a big change).
+# What it is asked at is noted now too, or Dv.sync asks a second time.
+def Dv.open(u: Ui, +th: String) -> Ui:
+  match u:
+    case Ui{+st, +sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, +nf, ob, tr}:
+      Ui{st, sel, dr, live, op, on, now, ad, Bool.or(pa, String.eq(th, sel)), v, rid, w, er, note,
+        Viewer.put(Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, nf, "diff.wait:" ++ th, "1"), "diff.at:" ++ th, Dv.at(st, th)), "panel:" ++ th, "1"), th, "diff", ""), ob, tr}
+
+# the id of the ask a command list sends
+def Dv.sent.id(cs: List<&2, Cmd>) -> String:
+  match cs:
+    case Nil{}: ""
+    case Send{+t} <> _: J.Json.as_raw(J.Json.get(Maybe.default(&2, J.Json, J.Json.parse(t), J.Null{}), "id"), "")
+    case _ <> rest: Dv.sent.id(rest)
+
+def Dv.mark(a: Act, +th: String) -> Act:
+  match a:
+    case Act{u, +cmds}: Act{Ui.info_set(u, "diff.ask:" ++ Dv.sent.id(cmds), th), cmds}
+
 def Dv.ask(+u: Ui) -> Act:
-  Ui.on_thread.p(Ui.info_set(u, "diff.auto:" ++ Ui.sel(u), ""), "git.diff", [J.KV{"from", J.Num{"0"}}, J.KV{"to", J.Num{"-1"}}])
+  Dv.mark(Ui.on_thread.p(Dv.open(Ui.info_set(u, "diff.auto:" ++ Ui.sel(u), ""), Ui.sel(u)), "git.diff", [J.KV{"from", J.Num{"0"}}, J.KV{"to", J.Num{"-1"}}]), Ui.sel(u))
 
 # An open Diff follows the thread's changes: when the selected thread's
 # panel shows its Diff and the thread's turn or steps moved on from what
