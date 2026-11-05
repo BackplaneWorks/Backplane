@@ -1,19 +1,21 @@
-# Parity gate: 1621 differences (gpui 0688158f6, replay of parity-current/recA), by cause
+# Parity gate by cause
 
-Owner of this table: slim. Counts come from build/gpui/results/parity-rust7/replay-diff.txt (positional diff, before N20). Many lines are one
-difference repeated: a view reply repeats the same fault in `shown` and in `overlay` (x2), in every later view of the session, and a sorted list
-with one extra element shifts every later position. N20 (sets for `hk` and `logInfoKeys`) removes the second kind.
+Owner: slim. Baseline since 2026-11-05: the post-#960 JS hub (build/gpui/backplane-serve-960), recorded twice on Boat with TZ=Etc/UTC, self-diff 0
+(build/gpui/results/parity-960s/recA, recB). The old parity-current/recA lacked `cad.install` and is retired as a baseline. Replay: `REC=<dir>
+VERSION=0.1.0-dev sh test/gpui/parity/boat-rust-replay-launch.sh` (builds the hub from the tree, presenter flags, Boat). Harness normalisations N1-N22 in
+test/gpui/parity/README.md; arrays of different length are aligned by key (N21) and `hk`/`logInfoKeys` are sets (N20), so a count is differences, not shifted positions.
+
+## Now: 405 lines, 4 causes (hub from the tree @ d? 2026-11-05 07:44, vs parity-960s/recA)
 
 | Cause | Lines | Independent | Owner | What it is |
 |---|---:|---:|---|---|
-| A logInfoKeys | 208 | 1 | closed | Not a Rust fault: the source puts `cad.install` first in every log frame's info (src/server/server.bend Hub.info) and the post-#960 JS build records it; only parity-current/recA lacks it. Against the post-#960 recording (parity-edge/rec960) join, badauth, reconnect and unresolved replay at 0 differences on parity-edge's hub (9245a8dcd). The session recordings still need re-recording from the post-#960 JS hub. |
-| B housekeeping (raw `hk`) | 126 | about 12 | state + core | JS appends at a turn's end `alert.<t>`, `autosettle.{audience,output,quiet,read}.<t>`, `liveness.<t>`, `star.nudge.v1`, `summary.at.<t>`; Rust appends none of them and adds `autosettle.version`, `fallback.input.<t>`, `provider.resume.<t>`, `restart.retry.<t>`, `tok.basis.<t>`. The families exist in state/fam (liveness, star); the hub does not run them yet. |
-| C picker.models | 312 | 1 | agents (model catalog) | JS lists 5 Claude models (`Fable 5.1 · claude-fable-5-1`, Opus, Sonnet, Haiku and the default); Rust lists `default` only. Repeated x2 (shown/overlay) in every view of the thread. It is a catalog, not the host's CLI list: my earlier note was wrong. |
-| D session scratch keys | 246 | about 20 keys | parity-session | `drafts.@*` and `info.view.*` present or absent (JS "" keys, Rust `@away.<t>`, `@more.<t>`, `@bot.want`, `@cmp.*`, `@mech.at`, `@pill`, `@thread.want`), repeated per view. |
-| E gpuid page | 684 | 1 | core (view.page) with slim (window logic) | In gpuid views 12 and 13 JS answers an older page (`earlier` 66, first entry Question 58) and Rust the newest window (`earlier` 114, first entry Question 100). Every entry id, text, stamp, fold value and `window.ids`/`historyUnits`/`messageIds` difference follows from that one choice, x2 for shown/overlay. |
-| H raw deltas | 21 | 2 | agents / core (stream pacing) | Rust sends 8 delta frames where JS sends 12, and orders `delta`/`delta_end` differently; the text is the same once joined. |
-| Total | 1621 | about 40 | | |
+| C picker.models | 312 | 1 | agents (model catalog) | JS lists 5 Claude models (the default, `Fable 5.1 · claude-fable-5-1`, Opus 5.5, Sonnet 5, Haiku 4.5); Rust lists `default`. Repeated in every view, x2 for shown and overlay. |
+| B housekeeping (raw `hk`) | 36 | 12 events | state (pure) + core (runs them) | JS appends at a turn's end `alert.<t>`, `autosettle.{audience,output x4,quiet,read}.<t>`, `star.nudge.v1`, `summary.at.<t>` (x2), `told.<id>`; Rust none of them. |
+| D session scratch keys | 30 | 10 keys | parity-session | `drafts.@*` and `info.view.*` still present on one side only. |
+| H raw deltas | 27 | 1 | agents | JS streams delta/delta_end frames in the session; the Rust hub sends none of them (stand-in turn). |
+| Total | 405 | about 24 | | badauth, join, reconnect, unresolved: identical. |
 
-Not in this table any more: the bounded sidebar (landed), badauth junk replies, join commit, reconnect origin (gone from this run).
+## History
 
-Order of worth: E (684) and C (312) are one cause each. A is one key. After A, C and E the count falls to about 440, and D and B are the rest.
+1621 lines at gpui 0688158f6 on the old baseline: logInfoKeys 208 (one key; the baseline was the anomaly: closed), picker 312, scratch keys 246 -> 30,
+gpuid page 684 (one cause, fixed since), housekeeping 126 -> 36, deltas 21 -> 27.
