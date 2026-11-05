@@ -1,17 +1,41 @@
 {
-  "note": "Updated at each milestone by the mechanics thread. A gate passes only when measured on the Rust hub with the native client, on the hardware named. Partial evidence stays open.",
+  "note": "Updated at each milestone by the mechanics thread. A gate passes only when measured on the Rust hub with the native client, on the hardware named. Partial evidence stays open. Lead with real-copy figures and label Rust smoke or fixture figures as such. Order gates by how far they miss, worst first.",
   "gates": [
-    {"gate": "Startup to usable", "target": "1 s or less", "status": "open",
-     "latest": "GPUI + JS hub, small fixture: 511 ms. GPUI + JS hub, trimmed real copy: 1.16-3.3 s. Rust hub alone, 250 threads: 106 ms. GPUI + Rust hub, 192 events: 96 ms. Not measured with the Rust hub at real size."},
-    {"gate": "20 agents: hub + client CPU", "target": "10% of a core or less", "status": "open",
-     "latest": "Rust hub 1% (smoke, time-driven jobs not ported) + GPUI 6.7% = about 8% from two separate runs. Not measured together. JS hub + GPUI: about 30%."},
-    {"gate": "Click and popup p95", "target": "50 ms or less, median well under", "status": "failing",
-     "latest": "GPUI on JS hub, RTX: click 96 ms idle, 160 ms under 20 agents; popup 112 ms idle, 160 ms under load. Not measured on the Rust hub."},
-    {"gate": "Cached thread switch", "target": "100 ms or less", "status": "open",
-     "latest": "GPUI on JS hub, small fixture: p95 96 ms idle, 160 ms under load. No cache in GPUI yet. Trimmed real copy: up to 6 s."},
-    {"gate": "24 h memory", "target": "flat, not growing with the log", "status": "open",
-     "latest": "JS hub floor rises 76 MB/h. Rust store 18.7 bytes per event at 1M. GPUI 38 min falling. No 24 h run yet."},
-    {"gate": "Install size", "target": "small, tracked each milestone", "status": "open",
-     "latest": "GPUI 9.6 MB + Rust hub 6.4 MB + Bend helper 59 MB (being retired) + cat rigs 5.8 MB, against Electron 288 MB + hub 115 MB."}
+    {
+      "gate": "Cached thread switch",
+      "target": "100 ms or less",
+      "status": "failing on real data",
+      "latest": "Real copy (JS hub, trimmed): up to 6 s. Fixture: GPUI on JS hub p95 96 ms idle, 160 ms under load. No cache in GPUI yet."
+    },
+    {
+      "gate": "Startup to usable",
+      "target": "1 s or less",
+      "status": "failing on real data",
+      "latest": "Real copy (JS hub, trimmed): 1.16-3.3 s. Fixture: GPUI + JS hub 511 ms. Rust smoke: hub alone 106 ms at 250 threads; GPUI + Rust hub 96 ms at 192 events. Rust hub not measured at real size."
+    },
+    {
+      "gate": "20 agents: hub + client CPU",
+      "target": "10% of a core or less",
+      "status": "failing on real data",
+      "latest": "JS hub + GPUI: about 30%; on the full store copy the JS hub saturates at 97% of a core. Rust smoke: hub 1% (time-driven jobs not ported) + GPUI 6.7% from separate runs, not measured together."
+    },
+    {
+      "gate": "Click and popup p95",
+      "target": "50 ms or less, median well under",
+      "status": "failing",
+      "latest": "Fixture, GPUI on JS hub, RTX: click 96 ms idle, 160 ms under 20 agents; popup 112 ms idle, 160 ms under load. Real copy and Rust hub not measured."
+    },
+    {
+      "gate": "24 h memory",
+      "target": "flat, not growing with the log",
+      "status": "failing on real data",
+      "latest": "JS hub floor rises 76 MB/h. Rust smoke: store 18.7 bytes per event at 1M. GPUI 38 min falling. No 24 h run yet."
+    },
+    {
+      "gate": "Install size",
+      "target": "small, tracked each milestone",
+      "status": "open",
+      "latest": "GPUI 9.6 MB + Rust hub 6.4 MB + Bend helper 59 MB (being retired) + cat rigs 5.8 MB, against Electron 288 MB + hub 115 MB."
+    }
   ]
 }
