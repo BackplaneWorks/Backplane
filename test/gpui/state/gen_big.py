@@ -26,6 +26,14 @@ with open(out, 'w') as f:
                 w(f, {"$": "SettingSet", "key": f"watch.{th}", "value": "w1\tpr", "at": at}); w(f, {"$": "SettingSet", "key": f"thread.parent.{th}", "value": f"t{(t + 7) % T}", "at": at}); n += 2
             if t % 20 == 0:
                 w(f, {"$": "WakeSet", "id": f"w{t}", "by": th, "kind": "thread", "target": f"t{(t + 3) % T}", "events": ["done"], "once": True, "note": "", "at": at}); n += 1
+        # a realistic task table (parent/child chains up to 4 deep, half finished) and open asks
+        for i in range(2500):
+            child = random.randrange(T); parent = (child + 1 + i % 5) % T
+            w(f, {"$": "TaskDelegated", "task": f"k{i}", "parent": f"t{parent}", "child": f"t{child}", "depth": 1, "provider": "claude", "model": "", "at": at}); n += 1
+            if i % 2 == 0:
+                w(f, {"$": "TaskStateSet", "task": f"k{i}", "state": "done", "summary": "", "at": at}); n += 1
+        for i in range(400):
+            w(f, {"$": "AskOpened", "id": f"q{i}", "thread": f"t{random.randrange(T)}", "kind": "approval", "tool": "Bash", "detail": "rm x", "options": "", "at": at}); n += 1
         w(f, {"$": "SettingSet", "key": "settle.idle.minutes", "value": "15", "at": at}); n += 1
     m = 0
     while n < N:
