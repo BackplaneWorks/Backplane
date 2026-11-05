@@ -64,7 +64,7 @@ mod tests {
         r#"{"$":"SettingSet","key":"summary.a","value":"does alpha","at":11}"#,
         r#"{"$":"ThreadArchived","id":"b","archived":false,"at":21}"#];
     #[test] fn summary_clean_is_one_cleaned_line_of_at_most_200() {
-        assert_eq!(clean("  Fixes the \t login   flow.\nSecond line"), "Fixes the login flow."); assert_eq!(clean(""), ""); assert_eq!(clean(" \n x"), "");
+        assert_eq!(clean("  Fixes the \t login   flow.\nSecond line"), "Fixes the login flow."); assert_eq!(clean(""), ""); assert_eq!(clean(" \n x"), "x", "Bend trims the whole answer first, then takes its first line"); assert_eq!(clean(" \n \n"), "");
         let long = "w ".repeat(150); let c = clean(&long); assert_eq!(c.chars().count(), 200); assert!(c.ends_with("..."));
         assert_eq!(clean(&"a".repeat(200)).chars().count(), 200, "exactly 200 is not cut");
     }
