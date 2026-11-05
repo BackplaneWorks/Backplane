@@ -6,7 +6,7 @@ use super::edit::Editor;
 use crate::theme;
 use gpui::{
     actions, fill, point, prelude::*, px, relative, rgb, rgba, size, App, Bounds, ClipboardEntry, ClipboardItem, Context,
-    ContentMask, CursorStyle, ElementId, ElementInputHandler, Entity, EntityInputHandler, EventEmitter, ExternalPaths, FocusHandle,
+    ContentMask, CursorStyle, ElementId, ElementInputHandler, Entity, EntityInputHandler, EventEmitter, FocusHandle,
     Focusable, GlobalElementId, ImageFormat, KeyBinding, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
     Pixels, Point, SharedString, Style, TextAlign, TextRun, UTF16Selection, UnderlineStyle, WrappedLine, Window,
 };
@@ -342,7 +342,6 @@ impl Render for Composer {
             .on_action(cx.listener(Self::undo)).on_action(cx.listener(Self::redo)).on_action(cx.listener(Self::newline)).on_action(cx.listener(Self::go)).on_action(cx.listener(Self::palette))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down)).on_mouse_up(MouseButton::Left, cx.listener(Self::mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::mouse_up)).on_mouse_move(cx.listener(Self::mouse_move))
-            .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| { cx.emit(ComposerEvent::Files(paths.paths().to_vec())); let _ = this; }))
             .line_height(px(20.)).text_size(px(13.))
             .child(gpui::div().w_full().child(Element_ { input: cx.entity() }))
     }

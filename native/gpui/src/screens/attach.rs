@@ -45,6 +45,24 @@ pub fn body_of(response: &str) -> String {
     out
 }
 
+/// Read one HTTP response, stopping as soon as it is complete: by its Content-Length, by the last chunk, or at the end of the
+/// stream. A hub that answers and keeps the connection open must not hold the upload (and the attach-end) for the read timeout.
+pub fn read_response(s: &mut impl Read) -> std::io::Result<Vec<u8>> {
+    let (mut buf, mut chunk) = (Vec::new(), [0u8; 4096]);
+    loop {
+        if complete(&buf) { return Ok(buf); }
+        if buf.len() > (1 << 20) { return Ok(buf); }
+        match s.read(&mut chunk) { Ok(0) => return Ok(buf), Ok(n) => buf.extend_from_slice(&chunk[..n]), Err(e) if !buf.is_empty() && matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => return Ok(buf), Err(e) => return Err(e) }
+    }
+}
+fn complete(buf: &[u8]) -> bool {
+    let Some(at) = buf.windows(4).position(|w| w == b"\r\n\r\n") else { return false };
+    let head = String::from_utf8_lossy(&buf[..at]).to_ascii_lowercase();
+    let body = &buf[at + 4..];
+    if head.contains("transfer-encoding: chunked") { return body.ends_with(b"0\r\n\r\n"); }
+    match head.lines().find_map(|l| l.strip_prefix("content-length:")).and_then(|v| v.trim().parse::<usize>().ok()) { Some(n) => body.len() >= n, None => false }
+}
+
 pub enum Body { Bytes(Vec<u8>), File(PathBuf) }
 
 pub const DEFAULT_CAP: u64 = 536_870_912;
@@ -72,7 +90,7 @@ pub fn upload_blocking(tx: &Sender<Command>, t: &Target, thread: &str, name: &st
             // exactly `size` bytes: a file that grows or shrinks must not break the Content-Length
             Body::File(p) => { let n = std::io::copy(&mut std::fs::File::open(p)?.take(size), &mut s)?; if n != size { return Err(std::io::ErrorKind::UnexpectedEof.into()); } }
         }
-        let mut out = Vec::new(); s.take(1 << 20).read_to_end(&mut out)?; Ok(String::from_utf8_lossy(&out).into_owned())
+        read_response(&mut s).map(|b| String::from_utf8_lossy(&b).into_owned())
     };
     let answer = run().ok().map(|r| body_of(&r)).filter(|b| serde_json::from_str::<Value>(b).is_ok())
         .unwrap_or_else(|| json!({"uiError": "upload.network", "thread": thread, "upload": true}).to_string());
@@ -178,6 +196,24 @@ mod tests {
         let _ = std::fs::remove_dir_all(d);
     }
     #[test] fn answer_is_the_http_body() { assert_eq!(body_of("HTTP/1.1 200 OK\r\nA: b\r\n\r\n{\"attached\":\"/p\"}"), "{\"attached\":\"/p\"}"); }
+    /// A hub that replies and then holds the connection open (HTTP keep-alive) must not stall the attach-end.
+    #[test] fn the_reply_is_read_by_its_length_without_waiting_for_the_close() {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap(); let addr = l.local_addr().unwrap().to_string();
+        let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
+        let server = std::thread::spawn(move || {
+            let (mut s, _) = l.accept().unwrap(); let mut b = [0u8; 4096]; let _ = s.read(&mut b);
+            let body = "{\"attached\":\"/p\"}"; write!(s, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}", body.len(), body).unwrap();
+            let _ = done_rx.recv_timeout(Duration::from_secs(10));      // keeps the socket open
+        });
+        let mut s = TcpStream::connect(&addr).unwrap(); s.write_all(b"GET / HTTP/1.1\r\n\r\n").unwrap(); s.set_read_timeout(Some(Duration::from_secs(8))).unwrap();
+        let t0 = std::time::Instant::now(); let r = read_response(&mut s).unwrap();
+        assert!(t0.elapsed() < Duration::from_secs(3), "waited for the close"); assert_eq!(body_of(&String::from_utf8_lossy(&r)), "{\"attached\":\"/p\"}");
+        let _ = done_tx.send(()); server.join().unwrap();
+    }
+    #[test] fn completeness_by_length_chunks_and_partial_heads() {
+        assert!(!complete(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nab")); assert!(complete(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nab"));
+        assert!(complete(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\nab\r\n0\r\n\r\n")); assert!(!complete(b"HTTP/1.1 200 OK\r\nTransfer-Enc"));
+    }
     #[test] fn a_chunked_answer_is_joined() {
         let r = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n7\r\n{\"att\":\r\n5\r\n\"/p\"}\r\n0\r\n\r\n";
         assert_eq!(body_of(r), "{\"att\":\"/p\"}".to_string());
