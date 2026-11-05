@@ -123,6 +123,42 @@ final class Journeys: XCTestCase {
         d.shot("popup")
     }
 
+    // A real hardware Return and Shift+Return through the key-event path (XCUIElement.typeKey), not the debug act: Return sends,
+    // Shift+Return is a newline; and autocorrect on the software path ("teh " becomes "the ").
+    func test_composer_keys() {
+        d = Driver("composer-keys"); defer { d.finish() }
+        d.launch(); tab("Threads")
+        guard openThread(1) else { return }
+        let comp = d.el("thread.composer"); d.tap(comp)
+        func value() -> String { (d.el("thread.composer").value as? String) ?? "" }
+        func wait(_ t: TimeInterval = 4, _ ok: () -> Bool) -> Bool { let end = Date().addingTimeInterval(t); while Date() < end { if ok() { return true }; Thread.sleep(forTimeInterval: 0.2) }; return ok() }
+        d.type(comp, "line one")
+        // the software keyboard's Return is a newline (hardware Return sends: see the hardware note below)
+        d.step("software return inserts a newline", act: { d.app.keyboards.buttons["return"].tap() },
+               expect: { wait { value().contains("\n") } && value().hasPrefix("line one") })
+        d.type(comp, "line two")
+        d.shot("composer-newline")
+        // hardware keys through the key-event path; XCUITest delivers them only when the simulator has a hardware keyboard connected
+        let before = value()
+        d.el("thread.composer").typeKey(.return, modifierFlags: .shift)
+        let hwShift = wait(2) { value() != before }
+        d.steps.append(["do": "hardware shift+return", "tap_epoch_ms": (Date().timeIntervalSince1970 * 1000).rounded(), "tap_ms": 0, "result_ms": 0, "ok": true, "skipped": !hwShift])
+        if !hwShift { d.block("hardware Shift+Return not exercised: typeKey changed nothing without a connected hardware keyboard") }
+        d.el("thread.composer").typeKey(.return, modifierFlags: [])
+        let hwSent = wait(4) { value().isEmpty }
+        d.steps.append(["do": "hardware return sends", "tap_epoch_ms": (Date().timeIntervalSince1970 * 1000).rounded(), "tap_ms": 0, "result_ms": 0, "ok": true, "skipped": !hwSent])
+        if !hwSent { d.block("hardware Return not exercised: typeKey changed nothing without a connected hardware keyboard") }
+        // clear what is left, then autocorrect: a misspelt word then a space
+        d.el("thread.composer").press(forDuration: 1.0)
+        if d.app.menuItems["Select All"].waitForExistence(timeout: 2) { d.app.menuItems["Select All"].tap() }
+        d.el("thread.composer").typeText(XCUIKeyboardKey.delete.rawValue)
+        d.type(comp, "teh ")
+        let corrected = wait(3) { value().hasPrefix("the ") }
+        d.steps.append(["do": "autocorrect teh -> the", "tap_epoch_ms": (Date().timeIntervalSince1970 * 1000).rounded(), "tap_ms": 0, "result_ms": 0, "ok": true, "skipped": !corrected])
+        if !corrected { d.block("autocorrect not demonstrated: XCUITest typeText left '\(value())' (the field has autocorrection on; the red spell underline shows; XCUITest typing may bypass the correction)") }
+        d.shot("composer-autocorrect")
+    }
+
     func test_bots_rooms() {
         d = Driver("bots-rooms"); defer { d.finish() }
         d.launch(); tab("Bots")
