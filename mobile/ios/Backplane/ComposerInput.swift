@@ -44,10 +44,17 @@ struct ComposerInput: View {
             IsolatedField(model: model, thread: thread.id, lang: lang, shown: text, editable: model.canEditComposer(for: thread.id), focus: focus)
                 .equatable()
         case .uikit:
-            UIKitField(text: text, placeholder: NativeMessages.native_thread_composer(lang), editable: model.canEditComposer(for: thread.id)) {
-                model.editComposer($0, for: thread.id)
-            }
-            .accessibilityLabel(NativeMessages.native_thread_composer(lang))
+            UIKitField(text: text, placeholder: NativeMessages.native_thread_composer(lang), editable: model.canEditComposer(for: thread.id),
+                       onChange: { model.editComposer($0, for: thread.id) },
+                       // a hardware keyboard's Return sends (Shift+Return is a newline), as the web's composer does
+                       onSend: { if model.canSendComposer(for: thread.id) { model.sendComposer(for: thread.id) } },
+                       // an image on the pasteboard is attached, as the paperclip's Paste does
+                       onPasteImages: { imgs in
+                           for (i, image) in imgs.enumerated() { if let d = image.pngData() { model.attach(d, name: "pasted-\(i + 1).png", for: thread.id) } }
+                       })
+                .accessibilityLabel(NativeMessages.native_thread_composer(lang))
+                // one text view per thread: a composition or an undo history never follows the person to the next thread
+                .id(thread.id)
         }
     }
 }
@@ -78,14 +85,48 @@ struct IsolatedField: View, Equatable {
 }
 
 // A UITextView: lays out only what is visible, handles marked text (IME) and grows to six lines, then scrolls.
+final class ComposerUITextView: UITextView {
+    var onSend: (() -> Void)?
+    var onPasteImages: (([UIImage]) -> Void)?
+
+    // Return on a hardware keyboard sends, Shift+Return (and the software keyboard's Return) inserts a newline
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        if markedTextRange == nil,
+           let p = presses.first(where: { $0.key?.keyCode == .keyboardReturnOrEnter }), let key = p.key,
+           key.modifierFlags.intersection([.shift, .alternate, .control, .command]).isEmpty, onSend != nil {
+            onSend?()
+            return
+        }
+        super.pressesBegan(presses, with: event)
+    }
+
+    // paste: pictures are attachments; anything else is the system's text paste
+    override func paste(_ sender: Any?) {
+        let pb = UIPasteboard.general
+        if pb.hasImages, !pb.hasStrings, let imgs = pb.images, !imgs.isEmpty { onPasteImages?(imgs); return }
+        super.paste(sender)
+    }
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        if action == #selector(UIResponderStandardEditActions.paste(_:)), UIPasteboard.general.hasImages { return true }
+        return super.canPerformAction(action, withSender: sender)
+    }
+}
+
+// the composer's text view, for the debug acts that drive an IME composition or an undo (BACKPLANE_ACTS @ime, @imecommit, @undo)
+enum ComposerHandle { static weak var view: UITextView? }
+
 struct UIKitField: UIViewRepresentable {
     let text: String
     let placeholder: String
     let editable: Bool
     let onChange: (String) -> Void
+    let onSend: () -> Void
+    let onPasteImages: ([UIImage]) -> Void
 
     func makeUIView(context: Context) -> UITextView {
-        let v = UITextView()
+        let v = ComposerUITextView()
+        v.onSend = onSend
+        v.onPasteImages = onPasteImages
         v.delegate = context.coordinator
         v.font = UIFont.preferredFont(forTextStyle: .body)
         v.adjustsFontForContentSizeCategory = true
@@ -99,19 +140,39 @@ struct UIKitField: UIViewRepresentable {
         v.accessibilityIdentifier = "thread.composer"
         let label = UILabel()
         label.text = placeholder
-        label.font = v.font
+        label.font = UIFont.preferredFont(forTextStyle: .body)
+        label.adjustsFontForContentSizeCategory = true
+        label.numberOfLines = 1
+        label.lineBreakMode = .byTruncatingTail
         label.textColor = UIColor(BackplaneDesign.secondaryText)
         label.tag = 77
+        label.isAccessibilityElement = false   // the field's own label says it
         label.translatesAutoresizingMaskIntoConstraints = false
         v.addSubview(label)
-        NSLayoutConstraint.activate([label.leadingAnchor.constraint(equalTo: v.leadingAnchor), label.topAnchor.constraint(equalTo: v.topAnchor)])
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: v.leadingAnchor), label.topAnchor.constraint(equalTo: v.topAnchor),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: v.frameLayoutGuide.trailingAnchor),
+        ])
+        ComposerHandle.view = v
         return v
     }
 
     func updateUIView(_ v: UITextView, context: Context) {
         context.coordinator.parent = self
-        // a change made by the person (marked text, selection) is never overwritten while composing
-        if v.markedTextRange == nil, v.text != text { v.text = text }
+        (v as? ComposerUITextView)?.onSend = onSend
+        (v as? ComposerUITextView)?.onPasteImages = onPasteImages
+        if let label = v.viewWithTag(77) as? UILabel, label.text != placeholder { label.text = placeholder }   // a language change
+        // The model's text differs from the view's only when something other than the person's typing changed it (Send cleared
+        // it, a restore, another device): a composition in progress is ended first, the selection is kept (clamped), and the
+        // undo history, which points at the old ranges, is dropped (shake-to-undo crashed on those).
+        if v.text != text {
+            if v.markedTextRange != nil { v.unmarkText() }
+            let sel = v.selectedRange
+            v.text = text
+            let n = (text as NSString).length
+            v.selectedRange = NSRange(location: min(sel.location, n), length: min(sel.length, max(0, n - min(sel.location, n))))
+            v.undoManager?.removeAllActions()
+        }
         v.isEditable = editable
         v.viewWithTag(77)?.isHidden = !text.isEmpty
     }
