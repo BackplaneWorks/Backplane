@@ -40,7 +40,7 @@ fn pdf_why(out: &str) -> String { if out.contains("nopoppler") { "PDFs show here
 
 pub struct Misc;
 impl RpcHandler for Misc {
-    fn methods(&self) -> &'static [&'static str] { &["file.open", "pdf.page", "mech.list", "mech.render", "history.resolve", "boards.list", "files.list", "review.bom", "review.checks", "review.tick", "review.release", "kicad.components", "kicad.export10"] }
+    fn methods(&self) -> &'static [&'static str] { &["file.open", "pdf.page", "mech.list", "mech.render", "history.resolve", "boards.list", "files.list", "kicad.components"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let s = |k: &str| p.get(k).and_then(Value::as_str).unwrap_or("").to_string();
@@ -91,7 +91,7 @@ impl RpcHandler for Misc {
                     reply(true, json!({"files":files,"thread":thread}))
                 }
                 // jobs the Rust hub does not run yet: the folder is resolved first (a thread without one is refused as everywhere), then they say so
-                "review.bom" | "review.checks" | "review.tick" | "review.release" | "kicad.components" | "kicad.export10" => {
+                "kicad.components" => {
                     if super::root_of(hub, &s("thread")).await.is_none() { return vec![super::threadpath::refusal(id)] }
                     vec![json!({"t":"reply","id":id,"ok":false,"error":format!("{method} is not available in this hub yet")})]
                 }

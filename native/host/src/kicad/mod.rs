@@ -1,6 +1,11 @@
 //! M6 KiCad side: a project's design files, the plot actor behind `kicad.watch` / `kicad.info`, and (next) KiCad IPC.
 //! `files::start` registers it (the one line main.rs calls); no signal is sent to any process here.
+pub mod bj;
+pub mod bom;
+pub mod cad;
+pub mod checks;
 pub mod ipc;
+pub mod kexport;
 pub mod kipc;
 pub mod kserve;
 pub mod nng;
@@ -16,6 +21,8 @@ pub mod sexpr;
 pub mod strokefont;
 pub mod strokefont_data;
 pub mod project;
+pub mod release;
+pub mod review;
 pub mod watch;
 
 use crate::hub::Hub;
