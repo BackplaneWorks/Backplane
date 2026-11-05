@@ -1,0 +1,39 @@
+{"$":"SettingSet","key":"autosettle.version","value":"1","at":1793862314}
+{"$":"SettingSet","key":"machine.id","value":"mb3122df18df9eb665c38420825e7725fbb0aeecee315f9c9","at":1793862314}
+{"$":"SettingSet","key":"accounts.inventory","value":"{\"version\":1,\"revision\":0,\"profiles\":[],\"error\":\"\"}","at":1793862314}
+{"$":"SettingSet","key":"allowance.codex","value":"{\"provider\":\"codex\",\"at\":0,\"attempted_at\":1793862314,\"state\":\"error\",\"auth\":\"unknown\",\"windows\":[],\"source\":\"codex-app-server\",\"phase\":\"complete\"}","at":1793862314}
+{"$":"SettingSet","key":"tz.machine","value":"America/New_York","at":1793862314}
+{"$":"SettingSet","key":"tz.rule.America/New_York","value":"EST5EDT,M3.2.0,M11.1.0","at":1793862314}
+{"$":"SettingSet","key":"tz.checked","value":"1793862314","at":1793862314}
+{"$":"ModesSet","id":"t1700000001-2","runtime":"approval-required","interaction":"default","model":"","at":1793862318}
+{"$":"SettingSet","key":"account.failover.preference.t1700000001-2","value":"","at":1793862318}
+{"$":"SettingSet","key":"fallback.intent.t1700000001-2","value":"","at":1793862318}
+{"$":"SettingSet","key":"star.nudge.v1","value":"{\"status\":\"counting\",\"ids\":[\"m1793862318-150\"],\"token\":\"m1793862318-150\",\"eligibleAt\":0,\"sentAt\":0}","at":1793862318}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m1793862318-150","role":"user","text":"zqask go","at":1793862318}
+{"$":"TurnChanged","thread":"t1700000001-2","state":"running","at":1793862318}
+{"$":"SettingSet","key":"turn.from.t1700000001-2","value":"@m1793862318-150","at":1793862318}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793862318,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793862318}
+{"$":"SettingSet","key":"restart.retry.t1700000001-2","value":"","at":1793862318}
+{"$":"SettingSet","key":"provider.resume.t1700000001-2","value":"","at":1793862318}
+{"$":"SettingSet","key":"fallback.input.t1700000001-2","value":"zqask go","at":1793862318}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793862318","at":1793862318}
+{"$":"SettingSet","key":"autosettle.audience.t1700000001-2","value":"person","at":1793862318}
+{"$":"SessionSet","id":"t1700000001-2","session":"bp-t1700000001-2-1793862318-160-0","at":1793862318}
+{"$":"SettingSet","key":"tok.basis.t1700000001-2","value":"x:bp-t1700000001-2-1793862318-160-0:0/0/0/0/0","at":1793862318}
+{"$":"AskOpened","id":"q1793862318-162","thread":"t1700000001-2","kind":"approval","tool":"bash","detail":"rm -rf build","options":"","at":1793862318}
+{"$":"SettingSet","key":"alert.t1700000001-2","value":"ask\task-t1700000001-2\t\t1793862318.163\tbash rm -rf build","at":1793862318}
+{"$":"SettingSet","key":"told.k1793862318-162-1","value":"{\"key\":\"ask-t1700000001-2\",\"text\":\"Fixture short: bash rm -rf build\",\"channel\":\"alert\",\"bot\":\"\",\"at\":1793862318}","at":1793862318}
+{"$":"PendingChanged","thread":"t1700000001-2","count":1,"at":1793862318}
+{"$":"AskClosed","id":"q1793862318-162","answer":"accept","at":1793862319}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"k1793862319-166","tone":"info","kind":"answer","summary":"Allowed: bash rm -rf build","at":1793862319}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793862319,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"request resolved\"}","at":1793862319}
+{"$":"PendingChanged","thread":"t1700000001-2","count":0,"at":1793862319}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793862319","at":1793862319}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"c9-171","tone":"tool","kind":"shell","summary":"rm -rf build","at":1793862319}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"c1793862319-172-172","role":"assistant","text":"Removed it.","at":1793862319}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"c1793862319-172-172","at":1793862319}
+{"$":"TurnChanged","thread":"t1700000001-2","state":"completed","at":1793862319}
+{"$":"SettingSet","key":"summary.at.t1700000001-2","value":"1793862319","at":1793862319}
+{"$":"SettingSet","key":"alert.t1700000001-2","value":"done\tturn-t1700000001-2\tm1793862318-150\t1793862319.175\t","at":1793862319}
+{"$":"SettingSet","key":"told.k1793862319-174-2","value":"{\"key\":\"turn-t1700000001-2\",\"text\":\"Fixture short: Removed it.\",\"channel\":\"alert\",\"bot\":\"\",\"at\":1793862319}","at":1793862319}
+{"$":"SettingSet","key":"summary.at.p1700000000-1","value":"1793862319","at":1793862319}

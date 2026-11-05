@@ -1,0 +1,29 @@
+{"$":"SettingSet","key":"autosettle.version","value":"1","at":1793862303}
+{"$":"SettingSet","key":"machine.id","value":"m5f487f14a737d07a21d9d52d9b00d62024664f4c69a63d48","at":1793862303}
+{"$":"SettingSet","key":"accounts.inventory","value":"{\"version\":1,\"revision\":0,\"profiles\":[],\"error\":\"\"}","at":1793862303}
+{"$":"SettingSet","key":"allowance.codex","value":"{\"provider\":\"codex\",\"at\":0,\"attempted_at\":1793862303,\"state\":\"error\",\"auth\":\"unknown\",\"windows\":[],\"source\":\"codex-app-server\",\"phase\":\"complete\"}","at":1793862303}
+{"$":"SettingSet","key":"tz.machine","value":"America/New_York","at":1793862303}
+{"$":"SettingSet","key":"tz.rule.America/New_York","value":"EST5EDT,M3.2.0,M11.1.0","at":1793862303}
+{"$":"SettingSet","key":"tz.checked","value":"1793862303","at":1793862303}
+{"$":"ModesSet","id":"t1700000001-2","runtime":"full-access","interaction":"default","model":"","at":1793862307}
+{"$":"SettingSet","key":"account.failover.preference.t1700000001-2","value":"","at":1793862307}
+{"$":"SettingSet","key":"fallback.intent.t1700000001-2","value":"","at":1793862307}
+{"$":"SettingSet","key":"star.nudge.v1","value":"{\"status\":\"counting\",\"ids\":[\"m1793862307-150\"],\"token\":\"m1793862307-150\",\"eligibleAt\":0,\"sentAt\":0}","at":1793862307}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m1793862307-150","role":"user","text":"zqfail please","at":1793862307}
+{"$":"TurnChanged","thread":"t1700000001-2","state":"running","at":1793862307}
+{"$":"SettingSet","key":"turn.from.t1700000001-2","value":"@m1793862307-150","at":1793862307}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793862307,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793862307}
+{"$":"SettingSet","key":"restart.retry.t1700000001-2","value":"","at":1793862307}
+{"$":"SettingSet","key":"provider.resume.t1700000001-2","value":"","at":1793862307}
+{"$":"SettingSet","key":"fallback.input.t1700000001-2","value":"zqfail please","at":1793862307}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793862307","at":1793862307}
+{"$":"SettingSet","key":"autosettle.audience.t1700000001-2","value":"person","at":1793862307}
+{"$":"SessionSet","id":"t1700000001-2","session":"bp-t1700000001-2-1793862307-160-0","at":1793862307}
+{"$":"SettingSet","key":"tok.basis.t1700000001-2","value":"x:bp-t1700000001-2-1793862307-160-0:0/0/0/0/0","at":1793862307}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"e1793862307-162","tone":"error","kind":"pi","summary":"No API key for provider anthropic (sign Pi in once: run `pi` and use /login, or set the provider's API key)","at":1793862307}
+{"$":"TurnChanged","thread":"t1700000001-2","state":"failed","at":1793862307}
+{"$":"SettingSet","key":"summary.at.t1700000001-2","value":"1793862307","at":1793862307}
+{"$":"SettingSet","key":"alert.t1700000001-2","value":"fail\tturn-t1700000001-2\tm1793862307-150\t1793862307.164\t","at":1793862307}
+{"$":"SettingSet","key":"failed.m1793862307-150","value":"1","at":1793862307}
+{"$":"SettingSet","key":"told.k1793862307-162-3","value":"{\"key\":\"turn-t1700000001-2\",\"text\":\"Fixture short\",\"channel\":\"alert\",\"bot\":\"\",\"at\":1793862307}","at":1793862307}
+{"$":"SettingSet","key":"summary.at.p1700000000-1","value":"1793862307","at":1793862307}

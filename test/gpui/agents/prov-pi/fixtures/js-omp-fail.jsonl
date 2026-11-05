@@ -1,0 +1,29 @@
+{"$":"SettingSet","key":"autosettle.version","value":"1","at":1793862360}
+{"$":"SettingSet","key":"machine.id","value":"mc94b2f6a3880c781cf9784b4e5f7c653416bc4f9d85a5352","at":1793862361}
+{"$":"SettingSet","key":"accounts.inventory","value":"{\"version\":1,\"revision\":0,\"profiles\":[],\"error\":\"\"}","at":1793862361}
+{"$":"SettingSet","key":"allowance.codex","value":"{\"provider\":\"codex\",\"at\":0,\"attempted_at\":1793862360,\"state\":\"error\",\"auth\":\"unknown\",\"windows\":[],\"source\":\"codex-app-server\",\"phase\":\"complete\"}","at":1793862361}
+{"$":"SettingSet","key":"tz.machine","value":"America/New_York","at":1793862361}
+{"$":"SettingSet","key":"tz.rule.America/New_York","value":"EST5EDT,M3.2.0,M11.1.0","at":1793862361}
+{"$":"SettingSet","key":"tz.checked","value":"1793862361","at":1793862361}
+{"$":"ModesSet","id":"t1700000001-2","runtime":"full-access","interaction":"default","model":"","at":1793862364}
+{"$":"SettingSet","key":"account.failover.preference.t1700000001-2","value":"","at":1793862364}
+{"$":"SettingSet","key":"fallback.intent.t1700000001-2","value":"","at":1793862364}
+{"$":"SettingSet","key":"star.nudge.v1","value":"{\"status\":\"counting\",\"ids\":[\"m1793862365-150\"],\"token\":\"m1793862365-150\",\"eligibleAt\":0,\"sentAt\":0}","at":1793862365}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m1793862365-150","role":"user","text":"zqfail","at":1793862365}
+{"$":"TurnChanged","thread":"t1700000001-2","state":"running","at":1793862365}
+{"$":"SettingSet","key":"turn.from.t1700000001-2","value":"@m1793862365-150","at":1793862365}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793862365,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793862365}
+{"$":"SettingSet","key":"restart.retry.t1700000001-2","value":"","at":1793862365}
+{"$":"SettingSet","key":"provider.resume.t1700000001-2","value":"","at":1793862365}
+{"$":"SettingSet","key":"fallback.input.t1700000001-2","value":"zqfail","at":1793862365}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793862365","at":1793862365}
+{"$":"SettingSet","key":"autosettle.audience.t1700000001-2","value":"person","at":1793862365}
+{"$":"SessionSet","id":"t1700000001-2","session":"omp-t1700000001-2","at":1793862365}
+{"$":"SettingSet","key":"tok.basis.t1700000001-2","value":"x:omp-t1700000001-2:0/0/0/0/0","at":1793862365}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"e1793862365-162","tone":"error","kind":"omp","summary":"No API key for provider openai (sign Oh My Pi in once: run `omp` and use /login, or set the provider's API key)","at":1793862365}
+{"$":"TurnChanged","thread":"t1700000001-2","state":"failed","at":1793862365}
+{"$":"SettingSet","key":"summary.at.t1700000001-2","value":"1793862365","at":1793862365}
+{"$":"SettingSet","key":"alert.t1700000001-2","value":"fail\tturn-t1700000001-2\tm1793862365-150\t1793862365.164\t","at":1793862365}
+{"$":"SettingSet","key":"failed.m1793862365-150","value":"1","at":1793862365}
+{"$":"SettingSet","key":"told.k1793862365-162-3","value":"{\"key\":\"turn-t1700000001-2\",\"text\":\"Fixture short\",\"channel\":\"alert\",\"bot\":\"\",\"at\":1793862365}","at":1793862365}
+{"$":"SettingSet","key":"summary.at.p1700000000-1","value":"1793862365","at":1793862365}
