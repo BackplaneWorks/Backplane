@@ -4,6 +4,7 @@
 //! Masking is the one thing other lanes must do: `mask::events(&mut events)` before a step's events are written (Hub.step.go,
 //! Secret.changes), `mask::json(&mut answer)` on every MCP answer (Mcp.masked), `mask::mask(line)` on every agent output line and every
 //! line to an agent, and `secret::prompt()` / `keys::prompt(..)` in the prompt. See docs/gpui/HUB-API.md.
+pub mod accounts;
 pub mod diagnostics;
 pub mod fallback;
 pub mod improvements;
@@ -38,6 +39,7 @@ pub fn start(hub: Arc<Hub>, agents: Option<Arc<crate::agents::Agents>>) {
     hub.register_rpc(Arc::new(telemetry::TelemetryRpc));
     hub.register_rpc(Arc::new(diagnostics::DiagnosticsRpc));
     hub.register_rpc(Arc::new(zone::ZoneRpc));
+    hub.register_rpc(Arc::new(accounts::AccountsDefault));
     hub.register_rpc(Arc::new(misc::SettingsMisc));
     hub.register_rpc(Arc::new(improvements::ImprovementsRpc));
     hub.register_rpc(Arc::new(secret::SecretRpc { agents }));
