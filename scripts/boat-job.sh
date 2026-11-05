@@ -259,7 +259,7 @@ sweep() {
     [ "$until" -le "$now" ] || continue
     if printf '%s\n' "$l" | grep -qx "$id"; then
       u=$(usage_since "$id" "$wat"); [ -n "$u" ] || u=$reserved
-      if delete_verify "$id"; then ledger ev=deleted job="$job" id="$id" cost="$u" why=idle; say "deleted idle warm sandbox $id"
+      if delete_verify "$id"; then ledger ev=deleted job="$job" id="$id" cost="$u" why=idle; say "warm sandbox $id passed its idle window: deleted"
       else ledger ev=orphan job="$job" id="$id"; say "sweep could not delete warm sandbox $id"; fi
     else
       ledger ev=deleted job="$job" id="$id" cost="$reserved" why="gone (auto-stopped)"
