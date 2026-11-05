@@ -17,7 +17,7 @@ mkdir -p "$W/gradle-home"
 S=$(date +%s.%N)
 systemd-run --user --scope -q -p MemoryMax=8G -p MemorySwapMax=0 \
   env JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 ANDROID_HOME=$HOME/Android-sdk-writable ANDROID_SDK_ROOT=$HOME/Android-sdk-writable GRADLE_USER_HOME="$W/gradle-home" \
-  nice -n 19 taskset -c 0-5 sh -c 'cd "$1/src/mobile/android" && ./gradlew --no-daemon --console=plain --max-workers=2 -Dorg.gradle.jvmargs=-Xmx3g assembleDebug -PbpNative=true' sh "$W" \
+  nice -n 19 taskset -c 0-5 sh -c 'cd "$1/src/mobile/android" && ./gradlew --no-daemon --console=plain --max-workers=2 -Dorg.gradle.jvmargs=-Xmx3g assembleDebug -PbpNative=true ${GRADLE_EXTRA:-}' sh "$W" \
   > "$W/build-$MODE.log" 2>&1 || { tail -40 "$W/build-$MODE.log"; exit 1; }
 E=$(date +%s.%N)
 APK=$W/src/mobile/android/app/build/outputs/apk/debug/app-debug.apk
