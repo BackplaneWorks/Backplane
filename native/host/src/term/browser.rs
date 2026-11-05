@@ -38,13 +38,15 @@ pub fn fail(m: &str) -> String { json!({"ok":false,"error":m}).to_string() }
 pub fn start(hub: &Arc<Hub>) {
     let b = Arc::new(Browser { hub: hub.clone(), st: Mutex::new(St::default()), exe: helper_path(), events: tokio::sync::broadcast::channel(256).0 });
     BROWSERS.get_or_init(Default::default).lock().unwrap().insert(hub.cfg.home.clone(), b.clone());
-    hub.register_rpc(Arc::new(Close(b)));
+    hub.register_rpc(Arc::new(Close(b.clone())));
+    super::driver::start(hub, b);
 }
 
 /// The request's arguments with "page" set to this owner. Tool arguments cannot reach another owner's page, claim to be the person, or
-/// choose the op or the id (`id` picks the pending slot a reply goes to; `op`, and `type`/`method` the helper falls back to, pick what runs).
-pub fn paged(owner: &str, args: &Value) -> Map<String, Value> {
-    let mut m: Map<String, Value> = args.as_object().map(|o| o.iter().filter(|(k, _)| !matches!(k.as_str(), "page" | "__desktopActor" | "id" | "op" | "type" | "method")).map(|(k, v)| (k.clone(), v.clone())).collect()).unwrap_or_default();
+/// choose the op or the id (`id` picks the pending slot a reply goes to; `op`, and for an agent `type`/`method` the helper falls back to, pick what
+/// runs). The hub's own calls (the person's mouse events carry a `type`) keep `type` and `method`; `op` is always set, so they pick nothing.
+pub fn paged(owner: &str, args: &Value, agent: bool) -> Map<String, Value> {
+    let mut m: Map<String, Value> = args.as_object().map(|o| o.iter().filter(|(k, _)| !(matches!(k.as_str(), "page" | "__desktopActor" | "id" | "op") || (agent && matches!(k.as_str(), "type" | "method")))).map(|(k, v)| (k.clone(), v.clone())).collect()).unwrap_or_default();
     m.insert("page".into(), owner.into()); m
 }
 
@@ -60,7 +62,7 @@ impl Browser {
             if st.pending.len() >= MAX_PENDING { return fail("the browser is busy: too many calls are waiting") }
             if st.input.is_none() { match self.spawn(&mut st).await { Some(i) => st.input = Some(i), None => return fail(NO_HELPER) } }
             st.next += 1; let id = st.next; let (tx, rx) = oneshot::channel(); st.pending.insert(id, tx);
-            let mut o = Map::new(); o.insert("id".into(), id.into()); o.insert("op".into(), op.into()); for (k, v) in paged(owner, args) { o.insert(k, v); }
+            let mut o = Map::new(); o.insert("id".into(), id.into()); o.insert("op".into(), op.into()); for (k, v) in paged(owner, args, agent) { o.insert(k, v); }
             let line = Value::Object(o).to_string();
             if st.input.as_ref().unwrap().try_send(line).is_err() { st.pending.remove(&id); st.input = None; return fail("the browser is busy") }
             (id, rx)
@@ -113,7 +115,7 @@ impl Browser {
 
     /// A line from the helper: a reply (by id), or an event: a page's frame (`shot` to every client), `tabs` (the `browser.tabs.<page>` info),
     /// and record, navigated, load, shield-click, engine to the teach driver.
-    async fn line(&self, text: &str) {
+    pub(crate) async fn line(&self, text: &str) {
         let Ok(o) = serde_json::from_str::<Value>(text) else { return };
         if let Some(ev) = o.get("event").and_then(Value::as_str) {
             let page = o.get("page").and_then(Value::as_str).unwrap_or("");
@@ -139,6 +141,8 @@ impl Browser {
     }
     /// Helper events about pages for the teach driver: record, navigated, load, shield-click, engine, helper-exit (tabs also go to clients).
     pub fn events(&self) -> tokio::sync::broadcast::Receiver<Value> { self.events.subscribe() }
+    /// Whether the agent may use `owner`'s page now (tests and the teach driver).
+    pub async fn agent_drives_ok(&self, owner: &str) -> bool { self.st.lock().await.drive.get(owner).map_or(true, |m| m.is_empty()) }
     /// The latest `tabs` event of a page (what `browser.tabs.<page>` info carries).
     pub async fn tabs_of(&self, page: &str) -> Option<String> { self.st.lock().await.tabs.get(page).cloned() }
     }
@@ -182,4 +186,4 @@ impl crate::api::RpcHandler for Close {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

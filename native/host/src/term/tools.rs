@@ -7,7 +7,7 @@ use std::{sync::{atomic::{AtomicU64, Ordering}, Arc}, time::Duration};
 
 pub const TERMINAL: &[&str] = &["terminal_open", "terminal_read", "terminal_send", "terminal_close"];
 /// Every tool this lane serves (the agents lane lists them from the JS hub's definitions and routes them to `call`).
-pub const NAMES: &[&str] = &["terminal_open", "terminal_read", "terminal_send", "terminal_close", "preview_open", "preview_navigate", "preview_snapshot", "preview_click", "preview_type", "preview_press", "preview_scroll", "preview_evaluate", "preview_wait_for", "preview_resize", "preview_status"];
+pub const NAMES: &[&str] = &["terminal_open", "terminal_read", "terminal_send", "terminal_close", "preview_open", "preview_navigate", "preview_snapshot", "preview_click", "preview_type", "preview_press", "preview_scroll", "preview_evaluate", "preview_wait_for", "preview_resize", "preview_status", "task_list", "task_get", "task_save", "task_delete", "task_run", "task_step", "task_pause", "task_end"];
 static SEQ: AtomicU64 = AtomicU64::new(0);
 
 fn sv<'a>(v: &'a Value, k: &str) -> &'a str { v.get(k).and_then(Value::as_str).unwrap_or("") }
@@ -19,6 +19,7 @@ fn n(v: &Value, k: &str) -> u64 { v.get(k).and_then(|x| x.as_u64().or_else(|| x.
 /// anything else is the JSON text.
 pub async fn call(hub: &Arc<Hub>, thread: &str, name: &str, a: &Value) -> Option<(bool, Value)> {
     if !NAMES.contains(&name) { return None }
+    if name.starts_with("task_") { return Some(match super::driver::get(hub) { Some(d) => d.tool(thread, name, a).await, None => fail("tasks are not available") }) }
     if name.starts_with("preview_") { return Some(super::browser::preview(hub, thread, name, a).await) }
     let Some(t) = get(hub) else { return Some(fail("terminals are not available")) };
     Some(match name {

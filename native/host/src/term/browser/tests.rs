@@ -6,6 +6,7 @@ use super::super::tests::Tap;
 const STANDIN: &str = r#"#!/bin/sh
 # stand-in backplane-browser: echoes each request line back in result.line; "open" also announces a frame; "big" answers a screenshot
 while IFS= read -r l; do
+  [ -n "$BP_STANDIN_LOG" ] && printf '%s\n' "$l" >> "$BP_STANDIN_LOG"
   id=$(printf '%s' "$l" | sed 's/.*"id":\([0-9]*\).*/\1/')
   esc=$(printf '%s' "$l" | sed 's/\\/\\\\/g; s/"/\\"/g')
   case "$l" in
@@ -20,7 +21,7 @@ while IFS= read -r l; do
 done
 "#;
 
-async fn hub_with_helper(name: &str) -> (Arc<Hub>, PathBuf) {
+pub(crate) async fn hub_with_helper(name: &str) -> (Arc<Hub>, PathBuf) {
     use std::os::unix::fs::PermissionsExt;
     let d = std::env::temp_dir().join(format!("bp-br-{}-{}", std::process::id(), name)); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap();
     let exe = d.join("backplane-browser"); std::fs::write(&exe, STANDIN).unwrap(); std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -83,7 +84,7 @@ fn text(body: &Value) -> String { body["$content"][0]["text"].as_str().unwrap().
     let (ok, body) = preview(&hub, "t1", "preview_status", &json!({"op":"close","id":1,"type":"evaluate","method":"x","path":"/tmp/x"})).await;
     assert!(ok, "{body}"); let line: Value = serde_json::from_str(&text(&body)).unwrap(); let req: Value = serde_json::from_str(line["line"].as_str().unwrap()).unwrap();
     assert_eq!(req["op"], "status"); assert!(req.get("type").is_none() && req.get("method").is_none());
-    let m = paged("t1", &json!({"op":"close","id":1,"type":"a","method":"b","keep":2})); assert_eq!(m.len(), 2); assert!(m.contains_key("page") && m.contains_key("keep"));
+    let m = paged("t1", &json!({"op":"close","id":1,"type":"a","method":"b","keep":2}), true); assert_eq!(m.len(), 2); assert!(m.contains_key("page") && m.contains_key("keep"));
 }
 #[tokio::test] async fn tabs_events_become_info_and_others_go_to_the_teach_driver() {
     let (hub, _d) = hub_with_helper("events").await; let b = get(&hub).unwrap(); let rx = Tap::new(&hub, 1); let mut ev = b.events();
