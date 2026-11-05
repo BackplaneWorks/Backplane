@@ -163,7 +163,7 @@ port waits for the person's decision.
 
 <!-- law-map: generated below by scripts/gpui/law-map.py -->
 
-Laws in LAWS.bend: 3248. bend 1258, rust 42, unported 1337, client 483, window 128, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: none yet. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
+Laws in LAWS.bend: 3248. bend 1220, rust 80, unported 1337, client 483, window 128, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: none yet. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
 
 | law | status | seed | file | note |
 |---|---|---|---|---|
@@ -2299,44 +2299,44 @@ Laws in LAWS.bend: 3248. bend 1258, rust 42, unported 1337, client 483, window 1
 | `title_shown_en_new` | client | seed C +-10% | `src/core/client.bend` |  |
 | `title_shown_other` | client | seed C +-10% | `src/core/client.bend` |  |
 | `tl_entries_locale` | window | seed D +-10% | `src/app/layout.bend` | GPUI layout, native/gpui/src/main.rs (equivalence unchecked) |
-| `kserve_argv_parent_pid_with_idle` | bend | seed K +-10% | `src/core/kserve.bend` |  |
-| `kserve_argv_parent_pid_without_idle` | bend | seed K +-10% | `src/core/kserve.bend` |  |
-| `kserve_argv_socket_in_dir` | bend | seed K +-10% | `src/core/kserve.bend` |  |
-| `kserve_argv_idle_with_cap` | bend | seed K +-10% | `src/core/kserve.bend` |  |
-| `kserve_argv_no_idle_without_cap` | bend | seed K +-10% | `src/core/kserve.bend` |  |
-| `kserve_ready_line` | bend | seed K +-10% | `src/core/kserve.bend` |  |
-| `kserve_ready_other_line` | bend | seed K +-10% | `src/core/kserve.bend` |  |
-| `kserve_version_ok_exact` | bend | seed K +-10% | `src/core/kserve.bend` |  |
-| `kserve_version_ok_describe` | bend | seed K +-10% | `src/core/kserve.bend` |  |
-| `kserve_version_other_build` | bend | seed K +-10% | `src/core/kserve.bend` |  |
-| `kserve_version_longer_build` | bend | seed K +-10% | `src/core/kserve.bend` |  |
-| `kserve_version_not_fork` | bend | seed K +-10% | `src/core/kserve.bend` |  |
-| `kserve_retry_first` | bend | seed K +-10% | `src/core/kserve.bend` |  |
-| `kserve_retry_second` | bend | seed K +-10% | `src/core/kserve.bend` |  |
-| `kserve_retry_third` | bend | seed K +-10% | `src/core/kserve.bend` |  |
-| `kserve_retry_gives_up` | bend | seed K +-10% | `src/core/kserve.bend` |  |
-| `kserve_retry_old_failures_forgotten` | bend | seed K +-10% | `src/core/kserve.bend` |  |
-| `kserve_clean_exit_not_a_failure` | bend | seed K +-10% | `src/core/kserve.bend` |  |
-| `kserve_crash_is_a_failure` | bend | seed K +-10% | `src/core/kserve.bend` |  |
-| `kserve_clean_exit_stops` | bend | seed K +-10% | `src/core/kserve.bend` |  |
-| `kserve_three_crashes_restart` | bend | seed K +-10% | `src/core/kserve.bend` |  |
-| `kserve_fourth_crash_fails` | bend | seed K +-10% | `src/core/kserve.bend` |  |
-| `kserve_evict_least_recent` | bend | seed K +-10% | `src/core/kserve.bend` |  |
-| `kserve_no_evict_with_room` | bend | seed K +-10% | `src/core/kserve.bend` |  |
-| `kserve_third_project_evicts` | bend | seed K +-10% | `src/core/kserve.bend` |  |
-| `kserve_third_project_busy_without_shutdown` | bend | seed K +-10% | `src/core/kserve.bend` |  |
-| `kserve_running_server_is_used` | bend | seed K +-10% | `src/core/kserve.bend` |  |
-| `kserve_refused_selection` | bend | seed K +-10% | `src/core/kserve.bend` |  |
-| `kserve_refused_view` | bend | seed K +-10% | `src/core/kserve.bend` |  |
-| `kserve_refused_run_action` | bend | seed K +-10% | `src/core/kserve.bend` |  |
-| `kserve_get_items_allowed` | bend | seed K +-10% | `src/core/kserve.bend` |  |
-| `kserve_eighteen_refused` | bend | seed K +-10% | `src/core/kserve.bend` |  |
-| `kserve_gate_off` | bend | seed K +-10% | `src/core/kserve.bend` |  |
-| `kserve_gate_ok` | bend | seed K +-10% | `src/core/kserve.bend` |  |
-| `kserve_unavailable_names_fallback` | bend | seed K +-10% | `src/core/kserve.bend` |  |
-| `kicad_min_version` | bend | seed K +-10% | `src/core/kihealth.bend` |  |
-| `kicad_old_runtime_is_old` | bend | seed K +-10% | `src/core/kihealth.bend` |  |
-| `kicad_new_runtime_is_ok` | bend | seed K +-10% | `src/core/kihealth.bend` |  |
+| `kserve_argv_parent_pid_with_idle` | rust `kserve_argv` | map | `src/core/kserve.bend` |  |
+| `kserve_argv_parent_pid_without_idle` | rust `kserve_argv` | map | `src/core/kserve.bend` |  |
+| `kserve_argv_socket_in_dir` | rust `kserve_argv` | map | `src/core/kserve.bend` |  |
+| `kserve_argv_idle_with_cap` | rust `kserve_argv` | map | `src/core/kserve.bend` |  |
+| `kserve_argv_no_idle_without_cap` | rust `kserve_argv` | map | `src/core/kserve.bend` |  |
+| `kserve_ready_line` | rust `kserve_ready` | map | `src/core/kserve.bend` |  |
+| `kserve_ready_other_line` | rust `kserve_ready` | map | `src/core/kserve.bend` |  |
+| `kserve_version_ok_exact` | rust `kserve_version` | map | `src/core/kserve.bend` |  |
+| `kserve_version_ok_describe` | rust `kserve_version` | map | `src/core/kserve.bend` |  |
+| `kserve_version_other_build` | rust `kserve_version` | map | `src/core/kserve.bend` |  |
+| `kserve_version_longer_build` | rust `kserve_version` | map | `src/core/kserve.bend` |  |
+| `kserve_version_not_fork` | rust `kserve_version` | map | `src/core/kserve.bend` |  |
+| `kserve_retry_first` | rust `kserve_retry` | map | `src/core/kserve.bend` |  |
+| `kserve_retry_second` | rust `kserve_retry` | map | `src/core/kserve.bend` |  |
+| `kserve_retry_third` | rust `kserve_retry` | map | `src/core/kserve.bend` |  |
+| `kserve_retry_gives_up` | rust `kserve_retry` | map | `src/core/kserve.bend` |  |
+| `kserve_retry_old_failures_forgotten` | rust `kserve_retry` | map | `src/core/kserve.bend` |  |
+| `kserve_clean_exit_not_a_failure` | rust `kserve_fails` | map | `src/core/kserve.bend` |  |
+| `kserve_crash_is_a_failure` | rust `kserve_fails` | map | `src/core/kserve.bend` |  |
+| `kserve_clean_exit_stops` | rust `kserve_exited` | map | `src/core/kserve.bend` |  |
+| `kserve_three_crashes_restart` | rust `kserve_exited` | map | `src/core/kserve.bend` |  |
+| `kserve_fourth_crash_fails` | rust `kserve_exited` | map | `src/core/kserve.bend` |  |
+| `kserve_evict_least_recent` | rust `kserve_room_for_two` | map | `src/core/kserve.bend` |  |
+| `kserve_no_evict_with_room` | rust `kserve_room_for_two` | map | `src/core/kserve.bend` |  |
+| `kserve_third_project_evicts` | rust `kserve_room_for_two` | map | `src/core/kserve.bend` |  |
+| `kserve_third_project_busy_without_shutdown` | rust `kserve_room_for_two` | map | `src/core/kserve.bend` |  |
+| `kserve_running_server_is_used` | rust `kserve_room_for_two` | map | `src/core/kserve.bend` |  |
+| `kserve_refused_selection` | rust `kserve_refused` | map | `src/core/kserve.bend` |  |
+| `kserve_refused_view` | rust `kserve_refused` | map | `src/core/kserve.bend` |  |
+| `kserve_refused_run_action` | rust `kserve_refused` | map | `src/core/kserve.bend` |  |
+| `kserve_get_items_allowed` | rust `kserve_refused` | map | `src/core/kserve.bend` |  |
+| `kserve_eighteen_refused` | rust `kserve_refused` | map | `src/core/kserve.bend` |  |
+| `kserve_gate_off` | rust `kserve_gate_words` | map | `src/core/kserve.bend` |  |
+| `kserve_gate_ok` | rust `kserve_gate_words` | map | `src/core/kserve.bend` |  |
+| `kserve_unavailable_names_fallback` | rust `kserve_gate_words` | map | `src/core/kserve.bend` |  |
+| `kicad_min_version` | rust `kicad_runtime_status` | map | `src/core/kihealth.bend` |  |
+| `kicad_old_runtime_is_old` | rust `kicad_runtime_status` | map | `src/core/kihealth.bend` |  |
+| `kicad_new_runtime_is_ok` | rust `kicad_runtime_status` | map | `src/core/kihealth.bend` |  |
 | `prompt_kicad_ok_names_kicad_ipc` | bend | seed K +-10% | `src/core/prompt.bend` |  |
 | `prompt_kicad_ok_no_pcbnew_import` | bend | seed K +-10% | `src/core/prompt.bend` |  |
 | `prompt_kicad_ok_starts_no_server` | bend | seed K +-10% | `src/core/prompt.bend` |  |
