@@ -12,13 +12,16 @@ rsync -a --exclude node_modules --exclude out test/gpui/ h@backplane:bp-gpui-e2e
 rsync -a test/tools/claude_standin.ts test/tools/perf_standin.ts h@backplane:bp-gpui-e2e-fixture/repo/test/tools/
 rsync -a src/web/wire.js h@backplane:bp-gpui-e2e-fixture/repo/src/web/; rsync -a src/core/cbor.bend h@backplane:bp-gpui-e2e-fixture/repo/src/core/
 rsync -a $HUB h@backplane:bp-gpui-e2e-fixture/hub
-# start detached: a background job started inside an ssh command keeps that ssh session open, so use setsid with every fd redirected
-ssh -n -o BatchMode=yes h@backplane "cd $V/repo/test/gpui/e2e && setsid nohup systemd-run --user --scope -q -p MemoryMax=3700M -p MemorySwapMax=0 \$HOME/.bun/bin/bun serve-fixture.mjs --hub-bin $V/hub --root $V/root --host $HOSTIP --port $PORT > $V/fixture.log 2>&1 < /dev/null &" < /dev/null
+# the hub is started by an ssh session that stays open as long as the fixture lives: run it in the background of THIS script
+# (its pid is killed at the end) and never wait for it
+ssh -n -o BatchMode=yes h@backplane "cd $V/repo/test/gpui/e2e && exec systemd-run --user --scope -q -p MemoryMax=3700M -p MemorySwapMax=0 \$HOME/.bun/bin/bun serve-fixture.mjs --hub-bin $V/hub --root $V/root --host $HOSTIP --port $PORT" < /dev/null > $B/results/ios/e2e-fixture.log 2>&1 &
+FIXSSH=$!
 sleep 30
-$SB "tail -2 $V/fixture.log | cut -c1-200"
+tail -2 $B/results/ios/e2e-fixture.log | cut -c1-200
 $SB "cat $V/root/home/token" > /tmp/e2e-token
 RSYNC_RSH=$M rsync -a /tmp/e2e-token hs-mac-mini:bp-gpui-ios/e2e-token
 RSYNC_RSH=$M rsync -a --delete test/gpui/e2e/ios/ hs-mac-mini:bp-gpui-ios/e2e/
 $M hs-mac-mini "cd ~/bp-gpui-ios/e2e && rm -rf ~/bp-gpui-ios/e2e-out && SIM_UDID=$U OUT=\$HOME/bp-gpui-ios/e2e-out HUB_HOST=$HOSTDNS HUB_PORT=$PORT HUB_TOKEN_FILE=\$HOME/bp-gpui-ios/e2e-token HUB_CTL=http://$HOSTDNS:$((PORT+1)) LONG_SECS=\${LONG_SECS:-300} sh ./run.sh $J; xcrun simctl shutdown $U"
 RSYNC_RSH=$M rsync -a hs-mac-mini:bp-gpui-ios/e2e-out/ $OUT/
+kill $FIXSSH 2>/dev/null
 $SB "P=\$(ss -ltnp | grep ':$PORT ' | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2); echo fixture pid \$P; [ -n \"\$P\" ] && kill \$P; sleep 5; ss -ltn | grep -cE ':385[01] |:4850 ' ; rm -rf $V; ls -d $V 2>&1 | tail -1"
