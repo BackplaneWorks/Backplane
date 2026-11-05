@@ -143,6 +143,13 @@ pub trait Transform: Send + Sync {
 pub trait MirrorFeed: Send + Sync {
     fn replay<'a>(&'a self, hub: &'a Arc<Hub>) -> Fut<'a, ()>;
 }
+/// A client's request that names a thing on a linked machine (`<link>~<id>`, or `on`) goes to that machine instead (net lane, `/far/rpc`):
+/// consulted first by `Hub::request`. `wants` decides from the method and params; `call` answers (the owner's reply with the caller's id).
+pub trait FarRouter: Send + Sync {
+    fn wants(&self, method: &str, params: &Value) -> bool;
+    /// Answers at once with the frames to send now (an error, or none when the answer comes later through `Hub::push(client, ..)`): the connection never waits on another machine.
+    fn call<'a>(&'a self, hub: &'a Arc<Hub>, client: u64, id: &'a Value, method: &'a str, params: &'a Value) -> Fut<'a, Vec<Value>>;
+}
 pub trait FarView: Send + Sync {
     /// whether `thread` (an id like "<link>~<id>") is a mirrored thread
     fn has(&self, thread: &str) -> bool;

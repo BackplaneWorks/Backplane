@@ -27,6 +27,7 @@ pub mod peering;
 pub mod peers;
 pub mod qr;
 pub mod routes;
+pub mod rpc;
 pub mod sign;
 pub mod start;
 pub mod tailnet;
@@ -56,6 +57,18 @@ pub fn farhttp_start(hub: std::sync::Arc<crate::hub::Hub>, peering: std::sync::A
         let _ = sync.feed.set(feed.clone());
         tokio::spawn(outbox::run(hub.clone(), peering.clone(), outbox::Outbox::new(), rx));
         hub.register_http(std::sync::Arc::new(farsync::FarRoutes(sync.clone())));
+        // /far/rpc: asking (a client's request about a thing elsewhere goes there) and answering; the bots lane's owner.mail transport
+        hub.register_http(std::sync::Arc::new(rpc::RpcRoutes(sync.clone())));
+        hub.set_far_router(std::sync::Arc::new(rpc::Router::new(sync.clone())));
+        { // (the bots start on their own; the transport is handed over once they exist, looked for for ten minutes)
+            let (hub, sync) = (hub.clone(), sync.clone());
+            tokio::spawn(async move {
+                for _ in 0..300 {
+                    if let Some(b) = crate::bots::api::of(&hub) { b.set_owner_link(std::sync::Arc::new(rpc::Link { sync, hub: std::sync::Arc::downgrade(&hub), copy: crate::copy::on() })); return }
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                }
+            });
+        }
         loop {
             let links: Vec<String> = peering.table.with(|p| p.live().into_iter().map(|x| x.id).collect());
             for l in links { sync.pull(&hub, &l).await; }

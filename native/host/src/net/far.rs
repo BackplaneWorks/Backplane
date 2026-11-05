@@ -49,6 +49,38 @@ use K::*;
 /// ids. Settings, devices, links, webhooks, rooms (shared rooms travel on their own), ordering and usage are absent:
 /// they stay home.
 /// Every variant `change` renames; the test below checks each field against codec.bend's wire names.
+/// Requests to a thing elsewhere (core/far.bend, `Fr.methods`): only these may go to a linked machine (thread.delete is not one: law far_no_delete).
+pub const METHODS: &[&str] = &["turn.start", "turn.interrupt", "ask.answer", "queue.move", "queue.remove", "queue.resume", "queue.steer", "queue.edit",
+    "thread.settle", "thread.unsettle", "thread.back", "thread.rename", "thread.btw", "thread.modes", "thread.provider", "thread.effort", "bots.space", "bots.routine_run",
+    "thread.create", "thread.fork", "thread.archive", "thread.unarchive", "thread.pin", "thread.unpin",
+    "project.add", "project.new", "project.remove", "fs.list", "fs.mkdir", "fs.find", "thread.detach", "todos.edit"];
+pub fn may(m: &str) -> bool { METHODS.contains(&m) }
+/// The params that name a thing (the ones renamed on the way)
+const KEYS: &[&str] = &["thread", "id", "bot", "routine", "task", "parent", "child", "project", "ask"];
+/// `Fr.params.link`: the link a request's params name, "" for nothing elsewhere. The first field that decides wins: a renamed key holding a
+/// `<link>~<id>`, or `on` holding a machine's link that is not itself an id elsewhere.
+pub fn params_link(p: &Value) -> String {
+    let Some(o) = p.as_object() else { return String::new() };
+    for (k, v) in o {
+        let Some(v) = v.as_str() else { continue };
+        if KEYS.contains(&k.as_str()) && is(v) { return link(v) }
+        if k == "on" && !v.is_empty() && !is(v) { return v.to_string() }
+    }
+    String::new()
+}
+/// `Fr.params.local`: the params with that link's ids made local (the request as the owning hub takes it)
+pub fn params_local(p: &Value, l: &str) -> Value {
+    let Some(o) = p.as_object() else { return p.clone() };
+    Value::Object(o.iter().map(|(k, v)| (k.clone(), match v.as_str() { Some(s) if KEYS.contains(&k.as_str()) && link(s) == l && is(s) => Value::String(local(s)), _ => v.clone() })).collect())
+}
+/// `Fr.reply.on`: the owning hub's reply on the receiving hub: the caller's request id back, and the thread a reply names made an id here
+pub fn reply_on(mut r: Value, id: &Value, l: &str) -> Value {
+    if let Some(o) = r.as_object_mut() {
+        if o.contains_key("id") { o.insert("id".into(), id.clone()); }
+        if let Some(t) = o.get("thread").and_then(Value::as_str).map(str::to_string) { o.insert("thread".into(), Value::String(if is(&t) { t } else { opt(l, &t) })); }
+    }
+    r
+}
 pub const VARIANTS: &[&str] = &["ProjectCreated", "ProjectRemoved", "ThreadRenamed", "ThreadSettled", "ThreadUnsettled", "ThreadWoke", "ThreadArchived", "ThreadPinned",
     "ThreadDeleted", "ModesSet", "ProviderSet", "AskClosed", "BotDeleted", "RoutineDeleted", "RoutineFired", "RoutinePlan", "RoutineSlot", "RoutineDone", "ThreadCreated",
     "MessagePosted", "MessageFrom", "TurnChanged", "PendingChanged", "TurnQueued", "QueueTaken", "QueueEdited", "QueueRemoved", "QueueMoved", "QueueTakenOne", "TodosChanged",
