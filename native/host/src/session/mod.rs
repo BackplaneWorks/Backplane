@@ -21,6 +21,7 @@ mod actor;
 #[allow(dead_code)] pub mod patch;
 #[allow(dead_code)] pub mod select;
 #[allow(dead_code)] pub mod slash;
+pub mod thread_actions;
 pub use actor::{forget, is_job, record_read, record_reply, replied, replied_late, take_reads};
 pub fn start(_hub: &Arc<Hub>) {}
 
