@@ -709,7 +709,7 @@ const TESTCLI: &str = "#!/bin/sh\nread hello\necho '{\"q\":1}'\nread ans\necho \
     let (hub, ag, sd) = codex_start("st1").await; let from = len(&hub).await;
     rpc(&hub, "turn.start", json!({"thread":T1,"text":"hang first"})).await; tokio::time::sleep(Duration::from_millis(500)).await;
     let pid: u32 = std::fs::read_to_string(sd.join("pid")).unwrap().trim().parse().unwrap();
-    assert_eq!(rpc(&hub, "agents.steer", json!({"thread":T1,"text":"steered text"})).await["ok"], true);
+    assert!(ag.steer(T1, "steered text").await.is_ok()); assert!(hub.rpc_for("agents.steer").is_none() && hub.rpc_for("agents.stop").is_none() && hub.rpc_for("agents.start_queued").is_none(), "not client methods: a socket client cannot call them");
     let ev = until(&hub, from, 20, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await;
     assert!(ev.iter().any(|e| is(e, "ActivityLogged") && e["kind"] == "steer"), "{ev:?}");
     assert!(ev.iter().any(|e| is(e, "MessagePosted") && e["role"] == "assistant" && e["text"].as_str().unwrap().contains("steered text")));
@@ -718,7 +718,7 @@ const TESTCLI: &str = "#!/bin/sh\nread hello\necho '{\"q\":1}'\nread ans\necho \
 }
 #[tokio::test(flavor = "multi_thread")] async fn start_queued_runs_the_text_as_one_turn() {
     let (hub, ag, _sd) = codex_start("sq1").await; let from = len(&hub).await;
-    assert_eq!(rpc(&hub, "agents.start_queued", json!({"thread":T1,"text":"queued words"})).await["ok"], true);
+    assert!(ag.start_queued(T1, "queued words").await.is_ok());
     let ev = until(&hub, from, 20, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await;
     assert!(ev.iter().any(|e| is(e, "QueueTaken")) && ev.iter().any(|e| turn_is(e, "running")));
     assert!(ev.iter().any(|e| is(e, "MessagePosted") && e["text"].as_str().map_or(false, |t| t.contains("queued words"))));
@@ -730,7 +730,15 @@ const TESTCLI: &str = "#!/bin/sh\nread hello\necho '{\"q\":1}'\nread ans\necho \
     rpc(&hub, "turn.start", json!({"thread":T1,"text":"zqshort hi"})).await;
     until(&hub, 0, 30, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await; tokio::time::sleep(Duration::from_millis(300)).await;
     let n = len(&hub).await; assert_eq!(ag.stats.procs_exited.load(Relaxed), 0, "claude's process stays between turns");
-    assert_eq!(rpc(&hub, "agents.stop", json!({"thread":T1})).await["ok"], true);
+    assert!(ag.stop(T1).await.is_ok());
     tokio::time::sleep(Duration::from_millis(800)).await; assert_eq!(len(&hub).await, n, "no events");
     assert_eq!(ag.stats.procs_exited.load(Relaxed), 1, "the idle process was ended and reaped"); ag.shutdown();
+}
+
+#[tokio::test(flavor = "multi_thread")] async fn steering_claude_logs_running_and_starts_without_a_live_process() { // Steer.go for Claude
+    let sd = dir("sc-bin"); perf_standin(&sd, 2);
+    let (hub, ag, _h, _w) = start("sc", |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await; let from = len(&hub).await;
+    assert!(ag.steer(T1, "zqshort steer").await.is_ok());
+    let ev = until(&hub, from, 30, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await;
+    assert!(ev.iter().any(|e| turn_is(e, "running")), "TurnChanged running is logged"); assert_eq!(ag.stats.procs_spawned.load(Relaxed), 1, "a process was started for it"); ag.shutdown();
 }
