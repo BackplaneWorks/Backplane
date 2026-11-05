@@ -440,3 +440,98 @@ const JS_UBER_STEPS: &str = include_str!("../../../../test/gpui/bots/fixtures/js
     assert_eq!(stamp_next("0000000100.000007.m", 90, "m"), "0000000100.000008.m");
     assert_eq!(stamp_next("0000000100.000007.m", 101, "m"), "0000000101.000000.m");
 }
+
+const JS_UBER2_EVENTS: &str = include_str!("../../../../test/gpui/bots/fixtures/js-uber2.jsonl");
+
+#[tokio::test] async fn js_parity_uber_first_ops_of_a_bot_with_memories_and_routines() {
+    // a bot that has memories (newest first) and routines (by id) before it is promoted: Ub.init.bodies
+    std::env::set_var("TZ", "Etc/UTC");
+    let (hub, bots, _r) = start("parity-uber2", "").await;
+    let bub = rpc(&hub, "bots.create", json!({"name":"bub","persona":"dry"})).await["bot"].as_str().unwrap().to_string();
+    until(&hub, |l| l.iter().any(|e| e["$"] == "WorktreeSet")).await;
+    let pause = || tokio::time::sleep(std::time::Duration::from_millis(1200));
+    rpc(&hub, "bots.remember", json!({"bot":bub,"key":"k1","kind":"fact","text":"one","tags":"a"})).await; pause().await;
+    rpc(&hub, "bots.remember", json!({"bot":bub,"key":"k2","kind":"pref","text":"two","tags":""})).await; pause().await;
+    rpc(&hub, "bots.remember", json!({"bot":bub,"key":"k3","kind":"note","text":"three","tags":"c"})).await; pause().await;
+    rpc(&hub, "bots.remember", json!({"bot":bub,"key":"k1","kind":"fact","text":"one!","tags":"a"})).await; pause().await;
+    rpc(&hub, "bots.routine", json!({"bot":bub,"routine":"rz","name":"zed","at":"in 3d","prompt":"z"})).await;
+    rpc(&hub, "bots.routine", json!({"bot":bub,"routine":"ra","name":"alpha","schedule":"daily 09:30","prompt":"a"})).await;
+    rpc(&hub, "bots.routine", json!({"bot":bub,"routine":"rm","name":"mid","schedule":"weekdays 08:00","prompt":"m"})).await;
+    rpc(&hub, "bots.routine", json!({"bot":bub,"routine":"rb","name":"beta","schedule":"every 2h","prompt":"b","on":false})).await;
+    assert_eq!(rpc(&hub, "bots.uber", json!({"bot":bub})).await["ok"], true);
+    until(&hub, |l| l.iter().any(|e| e["$"] == "UberSet")).await;
+    assert_eq!(bots.uber_init(now_s()).await, 10);
+    assert_eq!(rpc(&hub, "bots.uber_home", json!({})).await["ok"], true);
+    let js: Vec<Value> = JS_UBER2_EVENTS.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+    let (a, b) = (norm(&js), canon(&log(&hub)));
+    for (i, (x, y)) in a.iter().zip(b.iter()).enumerate() { assert_eq!(x, y, "event {i}: JS left, Rust right") }
+    assert_eq!(a.len(), b.len(), "same number of events\nJS: {a:#?}\nRust: {b:#?}");
+}
+
+#[tokio::test] async fn uber_first_ops_carry_space_and_page_between_memories_and_routines() {
+    // Ub.init.bot: who, memories, space, page, routines, lease (term 1), bind; the expected text is the Bend text (ubop.bend Ub.b.*)
+    let (hub, bots, _r) = start("uber-sp", "").await;
+    let bub = bot(&hub, "bub").await; let th = bots.world().await.bot(&bub).unwrap().thread.clone();
+    rpc(&hub, "bots.remember", json!({"bot":bub,"key":"k","kind":"fact","text":"t","tags":""})).await;
+    hub.commit_many(&[json!({"$":"SpaceSet","bot":bub,"spec":"{\"title\":\"Home\"}","at":5}), json!({"$":"SpacePageSet","bot":bub,"html":"<p>hi</p>","at":6})]).await.unwrap();
+    rpc(&hub, "bots.routine", json!({"bot":bub,"routine":"r1","name":"n","schedule":"daily 09:30","prompt":"p"})).await;
+    hub.commit(&json!({"$":"UberSet","bot":bub,"uid":"u7-aa","at":9})).await.unwrap();
+    assert_eq!(bots.uber_init(1_800_000_000).await, 7);
+    let me = bots.world().await.me(); assert!(!me.is_empty());
+    let ops: Vec<Value> = log(&hub).into_iter().filter(|e| e["$"] == "UberOp").collect();
+    let bodies: Vec<&str> = ops.iter().map(|e| e["op"].as_str().unwrap()).collect();
+    assert_eq!(bodies, vec![
+        r#"{"k":"who","name":"bub","look":0,"persona":""}"#.replace("\"look\":0", &format!("\"look\":{}", seed("bub"))).as_str(),
+        r#"{"k":"mem","key":"k","kind":"fact","text":"t","tags":""}"#,
+        r#"{"k":"space","spec":"{\"title\":\"Home\"}"}"#,
+        r#"{"k":"page","html":"<p>hi</p>"}"#,
+        format!(r#"{{"k":"routine","id":"{me}:r1","name":"n","cron":"30 9 * * *","prompt":"p","on":true,"pin":"","once":0,"tz":"person","kind":""}}"#).as_str(),
+        format!(r#"{{"k":"lease","holder":"{me}","term":1}}"#).as_str(),
+        format!(r#"{{"k":"bind","machine":"{me}","bot":"{bub}","thread":"{th}","name":"bub"}}"#).as_str(),
+    ]);
+    assert_eq!((ops[0]["n"].as_u64(), ops[0]["origin"].as_str(), ops[0]["stamp"].as_str().unwrap()), (Some(1), Some(me.as_str()), format!("1800000000.000000.{me}").as_str()));
+    assert_eq!(ops[6]["stamp"], format!("1800000000.000006.{me}").as_str());
+}
+
+#[tokio::test] async fn uber_join_makes_a_replica_bot_tied_to_the_offered_uid() {
+    // Ub.joined: ThreadCreated, BotSet, UberSet, the offer cleared, then the bind op as this machine's first op under the uid
+    let (hub, bots, _r) = start("uber-join", "").await;
+    hub.commit(&json!({"$":"SettingSet","key":"uber.offer","value":"{\"uid\":\"u9-x\",\"name\":\"kit\",\"look\":7,\"machine\":\"m2\",\"link\":\"l1\"}","at":3})).await.unwrap();
+    let n = log(&hub).len();
+    let r = rpc(&hub, "bots.uber_join", json!({"uid":"u9-x"})).await; assert_eq!(r["ok"], true); let b = r["bot"].as_str().unwrap().to_string();
+    let ev = log(&hub); let new: Vec<&Value> = ev[n..].iter().filter(|e| e["$"] != "WorktreeSet").collect();
+    let kinds: Vec<&str> = new.iter().map(|e| e["$"].as_str().unwrap()).collect();
+    assert_eq!(kinds, vec!["ThreadCreated", "BotSet", "UberSet", "SettingSet", "UberOp"]);
+    assert_eq!((new[0]["title"].as_str().unwrap(), new[0]["project"].as_str().unwrap()), ("kit", ""));
+    assert_eq!((new[1]["id"].as_str().unwrap(), new[1]["look"].as_u64().unwrap(), new[1]["persona"].as_str().unwrap(), new[1]["thread"].as_str().unwrap()), (b.as_str(), 7, "", new[0]["id"].as_str().unwrap()));
+    assert_eq!((new[2]["bot"].as_str().unwrap(), new[2]["uid"].as_str().unwrap()), (b.as_str(), "u9-x"));
+    assert_eq!((new[3]["key"].as_str().unwrap(), new[3]["value"].as_str().unwrap()), ("uber.offer", ""));
+    let me = bots.world().await.me();
+    assert_eq!((new[4]["uid"].as_str().unwrap(), new[4]["origin"].as_str().unwrap(), new[4]["n"].as_u64().unwrap()), ("u9-x", me.as_str(), 1));
+    assert_eq!(new[4]["op"], format!(r#"{{"k":"bind","machine":"{me}","bot":"{b}","thread":"{}","name":"kit"}}"#, new[0]["id"].as_str().unwrap()).as_str());
+    assert_eq!(bots.world().await.uber_bot(), b);
+    // the offer is spent; a second join is refused as an uberbot already here
+    assert_eq!(rpc(&hub, "bots.uber_join", json!({"uid":"u9-x"})).await["error"], "that uberbot is not on offer here");
+    // a name taken: offer again under another uid with the name of a bot here
+    bot(&hub, "kit2").await;
+    hub.commit(&json!({"$":"SettingSet","key":"uber.offer","value":"{\"uid\":\"u10-y\",\"name\":\"kit2\",\"look\":1}","at":4})).await.unwrap();
+    assert_eq!(rpc(&hub, "bots.uber_join", json!({"uid":"u10-y"})).await["error"], "this machine has an uberbot already; make it not the uberbot first");
+}
+
+#[tokio::test] async fn uber_home_moves_the_lease_one_term_on_from_another_machines() {
+    // Ub.home: with another machine holding the lease at term 2, this machine's lease op is term 3 and its stamp is later than the last one seen
+    let (hub, bots, _r) = start("uber-home", "").await;
+    let bub = bot(&hub, "bub").await;
+    hub.commit(&json!({"$":"UberSet","bot":bub,"uid":"u5-z","at":9})).await.unwrap();
+    hub.commit(&json!({"$":"UberOp","uid":"u5-z","origin":"mX","n":1,"stamp":"4102444800.000004.mX","op":"{\"k\":\"lease\",\"holder\":\"mX\",\"term\":2}","at":9})).await.unwrap();
+    { let w = bots.world().await; assert_eq!(w.lease(), ("mX".to_string(), 2)); assert!(!w.holder_me()); }
+    let n = log(&hub).len();
+    assert_eq!(rpc(&hub, "bots.uber_home", json!({})).await["ok"], true);
+    let op = &log(&hub)[n]; let me = bots.world().await.me();
+    assert_eq!((op["$"].as_str().unwrap(), op["origin"].as_str().unwrap(), op["n"].as_u64().unwrap()), ("UberOp", me.as_str(), 1));
+    assert_eq!(op["op"], format!(r#"{{"k":"lease","holder":"{me}","term":3}}"#).as_str());
+    assert_eq!(op["stamp"], format!("4102444800.000005.{me}").as_str(), "later than the other machine's stamp whatever the clock says");
+    assert_eq!(log(&hub).len(), n + 1);
+    { let w = bots.world().await; assert_eq!(w.lease(), (me.clone(), 3)); assert!(w.holder_me()); }
+    assert_eq!(rpc(&hub, "bots.uber_home", json!({})).await["ok"], true); assert_eq!(log(&hub).len(), n + 1, "already the holder: nothing");
+}
