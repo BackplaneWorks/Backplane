@@ -2324,7 +2324,9 @@ const PRESS_PICKS = ['aside.sidebar [data-on-click="select"]', 'aside.sidebar [d
   '.workspace-bar button[data-on-click="view-kind"]', '.workspace-bar button[data-on-click="fm"]', '.workspace-bar button[data-on-click="diff"]',
   '.workspace-bar button[data-on-click="mech"]', '.workspace-bar button[data-on-click="rv-page"]',
   'button.model-chip[data-on-click="flag"]', 'button.tok-chip[data-on-click="flag"]', 'button.account-chip[data-on-click="acct-open"]',
-  'button.gear[data-on-click="flag"]', 'button[data-on-click="ws-palette-open"]'].join(", ");
+  'button.gear[data-on-click="flag"]', 'button[data-on-click="ws-palette-open"]',
+  // (a run of tool calls' head and Settings' categories, as disclosures do)
+  '#timeline button.fold[data-on-click="fold"]', '#settings-content [data-on-click="settings-page"]', '.settings-path [data-on-click="settings-page"]', '.settings-side [data-on-click="settings-page"]', '.topbar .crumbs [data-on-click="settings-page"]'].join(", ");
 let pressedPick = null, pressedMenu = null;
 document.addEventListener("pointerdown", e => {
   if (!e.isTrusted || e.button !== 0 || e.pointerType !== "mouse" || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
