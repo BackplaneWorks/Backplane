@@ -123,7 +123,7 @@ async fn run(a: Args) -> Result<()> {
     ensure_token(&a.home)?;
     let presenter: Arc<dyn presenter::Presenter> = match &a.policy {
         Some(p) => Arc::new(presenter::BpPolicy::spawn(p).await?),
-        None => Arc::new(presenter::Canned { reply: json!({"remoteReady":false,"cmds":[],"session":{}}) }),
+        None => Arc::new(present::NotPorted),
     };
     // the ported screens answer first, the helper the rest (docs/gpui/PRESENTER-PORT.md); none are ported yet, so this changes nothing but the optional dump
     let presenter: Arc<dyn presenter::Presenter> = Arc::new(present::Routed::new(presenter, vec![], &a.home, a.policy.is_some()));
