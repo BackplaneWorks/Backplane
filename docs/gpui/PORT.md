@@ -163,7 +163,7 @@ port waits for the person's decision.
 
 <!-- law-map: generated below by scripts/gpui/law-map.py -->
 
-Laws in LAWS.bend: 3253. bend 1093, rust 311, unported 1240, client 482, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
+Laws in LAWS.bend: 3253. bend 1093, rust 302, unported 1249, client 482, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
 
 | law | status | seed | file | note |
 |---|---|---|---|---|
@@ -2685,17 +2685,17 @@ Laws in LAWS.bend: 3253. bend 1093, rust 311, unported 1240, client 482, window 
 | `ws_unmask_take_go` | bend | seed K +-10% | `src/core/http.bend` |  |
 | `watch_copy_gate_none` | rust `watch_gate_none_on_a_copy_and_the_list_kept_off` | map | `src/server/watch-plan.bend` |  |
 | `watch_live_gate_kept` | rust `watch_gate_none_on_a_copy_and_the_list_kept_off` | map | `src/server/watch-plan.bend` |  |
-| `watch_copy_launch_none` | rust `watch_gate_none_on_a_copy_and_the_list_kept_off` | map | `src/server/watch-plan.bend` |  |
-| `watch_copy_check_none` | rust `watch_gate_none_on_a_copy_and_the_list_kept_off` | map | `src/server/watch-plan.bend` |  |
-| `watch_copy_stop_none` | rust `watch_gate_none_on_a_copy_and_the_list_kept_off` | map | `src/server/watch-plan.bend` |  |
-| `watch_copy_intent_none` | rust `watch_gate_none_on_a_copy_and_the_list_kept_off` | map | `src/server/watch-plan.bend` |  |
-| `copy_off_runs_all` | rust `a_hub_that_is_no_copy_runs_every_out` | map | `src/core/hub.bend` |  |
-| `copy_drops_outside` | rust `a_copy_drops_deploys_restarts_pushes_and_effects_outside_its_home` | map | `src/core/hub.bend` |  |
-| `copy_keeps_inside` | rust `a_copy_keeps_replies_reading_git_and_its_homes_folders` | map | `src/core/hub.bend` |  |
+| `watch_copy_launch_none` | unported | map | `src/server/watch-plan.bend` |  |
+| `watch_copy_check_none` | unported | map | `src/server/watch-plan.bend` |  |
+| `watch_copy_stop_none` | unported | map | `src/server/watch-plan.bend` |  |
+| `watch_copy_intent_none` | unported | map | `src/server/watch-plan.bend` |  |
+| `copy_off_runs_all` | unported | map | `src/core/hub.bend` |  |
+| `copy_drops_outside` | unported | map | `src/core/hub.bend` |  |
+| `copy_keeps_inside` | unported | map | `src/core/hub.bend` |  |
 | `copy_git_write_told` | rust `a_client_that_asked_for_git_that_writes_is_told` | map | `src/core/hub.bend` |  |
 | `copy_refuses_net` | rust `a_copy_refuses_network_commands_and_a_hub_that_is_no_copy_refuses_none` | map | `-` |  |
 | `copy_off_refuses_none` | rust `a_copy_refuses_network_commands_and_a_hub_that_is_no_copy_refuses_none` | map | `-` |  |
-| `adopt_copy_none` | rust `a_copy_adopts_none` | map | `src/core/adopt.bend` |  |
+| `adopt_copy_none` | unported | map | `src/core/adopt.bend` |  |
 | `copy_file_open_told` | rust `a_client_that_asked_for_git_that_writes_is_told` | map | `src/core/hub.bend` |  |
 | `pair_msg_kept` | unported | seed R +-10% | `src/server/pairing-info.bend` |  |
 | `pair_msg_other_link` | unported | seed R +-10% | `src/server/pairing-info.bend` |  |
@@ -3051,7 +3051,7 @@ Laws in LAWS.bend: 3253. bend 1093, rust 311, unported 1240, client 482, window 
 | `component_fragment_keeps_fitting_row` | unported | seed R +-10% | `src/core/json.bend` |  |
 | `component_fragment_keeps_field` | unported | seed R +-10% | `src/core/json.bend` |  |
 | `component_fragment_only_last_field_completes` | unported | seed R +-10% | `src/core/json.bend` |  |
-| `copy_keeps_viewer_reads` | rust `a_copy_keeps_replies_reading_git_and_its_homes_folders` | map | `src/core/hub.bend` |  |
+| `copy_keeps_viewer_reads` | unported | map | `src/core/hub.bend` |  |
 | `sdb_up_parents_exact` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `sdb_up_parents_demo` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `sdb_up_keep_kinds` | unported | seed R +-10% | `src/core/model.bend` |  |

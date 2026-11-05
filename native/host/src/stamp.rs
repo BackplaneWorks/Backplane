@@ -55,7 +55,13 @@ mod tests {
     use super::*;
     fn turn() -> Vec<E> { vec![E::User { id: "u".into(), at: 1 }, E::Assistant { id: "a1".into(), at: 2 }, E::Assistant { id: "a2".into(), at: 3 }] }
     fn a(id: &str) -> E { E::Assistant { id: id.into(), at: 0 } }
-    #[test] fn stamp_mid_never_user() { for at in [0u64, 1, 99] { assert!(!mid(&ends(&turn(), false), &E::User { id: "x".into(), at })); assert!(!mid(&HashMap::new(), &E::User { id: "".into(), at })); } }
+    #[test] fn stamp_mid_never_user() {
+        for at in [0u64, 1, 99] { assert!(!mid(&ends(&turn(), false), &E::User { id: "x".into(), at })); assert!(!mid(&HashMap::new(), &E::User { id: "".into(), at })); }
+        // a user entry whose id IS in ends (and one that is not): an impl reading ends.contains_key(id) for users must fail here
+        let e = ends(&turn(), false); assert!(e.contains_key("a2"));
+        assert!(!mid(&e, &E::User { id: "a2".into(), at: 3 })); assert!(!mid(&ends(&turn(), true), &E::User { id: "a2".into(), at: 3 }));
+        let e2 = ends(&turn(), false); assert!(mid(&e2, &a("a1")) && !mid(&e2, &E::User { id: "a1".into(), at: 2 }));
+    }
     #[test] fn stamp_mid_inside_turn() { assert!(mid(&ends(&turn(), false), &a("a1"))); }
     #[test] fn stamp_mid_turn_end_shows() { assert!(!mid(&ends(&turn(), false), &a("a2"))); }
     #[test] fn stamp_mid_running_newest_shows() { assert!(!mid(&ends(&turn(), true), &a("a2"))); }
