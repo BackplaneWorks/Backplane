@@ -124,7 +124,7 @@ fn line(v: Value) -> String { v.to_string() }
                     let len = head.lines().find_map(|l| l.to_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse::<usize>().unwrap_or(0))).unwrap_or(0);
                     if buf.len() >= at + 4 + len { let peer = head.lines().find_map(|l| l.strip_prefix("X-Backplane-Peer: ")).unwrap_or("").to_string();
                         let since = serde_json::from_slice::<Value>(&buf[at + 4..]).ok().and_then(|v| v["since"].as_u64()).unwrap_or(u64::MAX);
-                        a3.lock().unwrap().push((peer, since, String::from_utf8_lossy(&buf[at + 4..]).chars().take(300).collect())); break } } }
+                        a3.lock().unwrap().push((peer, since, head.replace('\r', "").replace('\n', " | ").chars().take(400).collect::<String>())); break } } }
             let _ = s.write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 9\r\nConnection: close\r\n\r\nnot ready").await; }); } });
     let mut seed = vec![];
     for l in [link2, link3] {
