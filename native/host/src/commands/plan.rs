@@ -363,7 +363,13 @@ fn account_forked(f: &Fold, th: &str, src: &str, at: u64) -> Vec<Value> {
 }
 
 /// Hub.root.norm: a root without trailing slashes ("/" stays).
-fn norm_root(r: &str) -> String { if r.len() > 1 && r.ends_with('/') { r.trim_end_matches('/').to_string() } else { r.to_string() } }
+pub fn norm_root(r: &str) -> String {
+    if !(r.len() > 1 && r.ends_with('/')) { return r.to_string() }
+    // Folder.root.fin: nothing left is "/", a bare drive ("C:") keeps its root slash
+    let t = r.trim_end_matches('/');
+    let b = t.as_bytes();
+    if t.is_empty() { "/".into() } else if b.len() == 2 && b[0].is_ascii_alphabetic() && b[1] == b':' { format!("{t}/") } else { t.to_string() }
+}
 
 /// Hub.project_add (`project.create`): a folder becomes a project once (the same root twice is refused; a removed project's folder brings that
 /// project back with its threads); a project made afresh starts with a thread, made as thread.create makes one.
