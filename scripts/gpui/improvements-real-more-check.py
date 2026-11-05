@@ -10,7 +10,8 @@ def check(ok, what, detail=""):
     print(("ok   " if ok else "FAIL ") + what + ((" -- " + str(detail)[:300]) if detail and not ok else ""))
     if not ok: fails.append(what)
 def sh(args, cwd, env=None, check_rc=False):
-    e = dict(os.environ); e.pop("GIT_DIR", None); e.update(env or {})
+    # a clean git environment: a job may inject GIT_CONFIG_* (hooks off), which would silently switch the scratch guard off
+    e = {k: v for k, v in os.environ.items() if not k.startswith("GIT_CONFIG") and k not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")}; e.update(env or {})
     r = subprocess.run(args, cwd=cwd, env=e, capture_output=True, text=True)
     return r.returncode, (r.stdout + r.stderr).strip()
 
