@@ -1,6 +1,6 @@
 //! backplane-hub: the Backplane hub for native clients (GPUI, SwiftUI, Compose).
 //! HTTP + authenticated WebSocket; renderer `mobile`; the picture comes from the presenter.
-mod agents; mod api; mod auth; mod cbor; mod copy; mod delta; mod files; mod hub; mod model; mod net; mod presenter; mod session; mod store; mod wire; mod window;
+mod agents; mod api; mod auth; mod cbor; mod copy; mod delta; mod files; mod hub; mod model; mod net; mod presenter; mod session; mod store; mod term; mod wire; mod window;
 
 use anyhow::{Context, Result};
 use auth::Req;
@@ -96,6 +96,7 @@ async fn run(a: Args) -> Result<()> {
     let hub = Hub::start(hub::Cfg { home: a.home.clone(), version: a.version, commit: a.commit, listen: listen.clone(), os: "linux".into(), arch: "x64".into() }, presenter).await?;
     session::start(&hub);
     files::start(hub.clone());
+    term::start(hub.clone());
     agents::Agents::start(hub.clone()).await?;
     if let Some(w) = &a.window { let _ = hub.window_bin.set(w.clone()); }
     let l = TcpListener::bind(&listen).await.with_context(|| format!("bind {listen}"))?;
