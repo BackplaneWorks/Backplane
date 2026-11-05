@@ -5,9 +5,11 @@
 pub mod api;
 pub mod mail;
 pub mod clock;
+pub mod post;
 pub mod reply;
 pub mod routines;
 pub mod rpc;
+pub mod sched_text;
 pub mod uber;
 pub mod world;
 pub use api::{chat_thread, default_tab};

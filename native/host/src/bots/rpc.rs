@@ -47,17 +47,8 @@ pub fn space_msg(action: &str, value: &str) -> String { format!("[space] {action
 pub fn note(from: &str, room: &str, name: &str, text: &str) -> String { format!("[message from {from}{}]\n{text}", if room.starts_with("dm:") { String::new() } else { format!(" in #{name}") }) }
 /// Mail.classify for the notes a person's post makes (`from` is empty): the origin filed under the woken bot's message
 pub fn note_origin(text: &str) -> Option<(String, String, String)> {
-    let head: String = text.chars().take(160).collect();
-    if !head.starts_with("[message from ") { return None }
-    let label = head.split(']').next().unwrap_or("");
-    let after: String = label.chars().skip(14).collect();
-    if label.contains(" in #") {
-        let name = after.split(' ').next().unwrap_or("");
-        let from = if name == "you" || name.starts_with("person@") { "person".to_string() } else if name.contains('@') { format!("peer:{}", name.rsplit('@').next().unwrap_or("")) } else { format!("bot:{name}") };
-        Some((from, "room".into(), label.rsplit('#').next().unwrap_or("").to_string()))
-    } else if after.starts_with("person@") { Some(("person".into(), "person".into(), String::new())) }
-    else if after.contains('@') { Some((format!("peer:{after}"), "peer".into(), String::new())) }
-    else { Some((format!("bot:{after}"), "bot".into(), String::new())) }
+    if !text.starts_with("[message from ") { return None }
+    let o = super::mail::classify("", "m", false, text); Some((o.from, o.kind, o.r#ref))
 }
 /// Bn.safe: a bot id fit to be a folder name
 pub fn safe_id(id: &str) -> bool { !id.is_empty() && id.len() <= 80 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') }
@@ -89,6 +80,7 @@ impl Bots {
     /// B.Hub.id(prefix, now, seq): seq is the log's length; one request at a time makes it unique within a prefix
     pub(super) fn hub_id(&self, prefix: &str, now: u64) -> String { self.id(prefix, now) }
     pub(super) async fn commit_reply_pub(&self, id: &Value, events: Vec<Value>) -> Vec<Value> { self.commit_reply(id, events).await }
+    pub(super) async fn inbox_deliver_raw(&self, th: &str, msg: &str, text: &str, o: Option<(String, String, String)>) -> Result<(), String> { self.inbox.deliver(th, msg, text, o).await }
     pub(super) async fn inbox_deliver(&self, k: &super::routines::Wake) -> Result<(), String> { self.inbox.deliver(&k.thread, &k.msg, &k.text, k.origin.clone()).await }
     fn id(&self, prefix: &str, now: u64) -> String { hub_id(prefix, now, self.hub.store.len() as u64) }
 
@@ -181,29 +173,10 @@ impl Bots {
         let Some(room) = w.room(gs(p, "room")).cloned() else { return vec![err(id, "no such room")] };
         if !msg.is_empty() && w.has_post(msg) { return vec![ok(id)] }
         let now = now_s(); let mid = if msg.is_empty() { self.id("p", now) } else { msg.to_string() };
-        let seq = self.hub.store.len() as u64;
-        let mail = w.setting("mail.on", "off") == "on";
-        if let Err(e) = self.hub.commit(&json!({"$":"RoomPosted","id":mid,"room":room.id,"from":"you","text":text,"hop":0,"at":now})).await { return vec![err(id, &format!("{e:#}"))] }
-        let n = note("you", &room.id, &room.name, text);
-        let mut wakes: Vec<(String, String, String)> = vec![];
-        if !mail && hop_live(0) {
-            for (i, m) in room.members.iter().enumerate() {
-                if m.contains('@') { continue }
-                let Some(b) = w.bot(m).filter(|b| !b.deleted) else { continue };
-                if w.triage_owner(&b.id) { continue }
-                wakes.push((b.id.clone(), b.thread.clone(), format!("m{now}-{seq}.{i}")));
-            }
-        }
-        // B.Mail.room: with the mailroom on, or the uberbot in the room, the post is also filed once as the room's mail
-        let ub = w.uber_bot(); let sender = "person".to_string();
-        let mut parts = super::mail::mailbox::room_parts(&room.members); if !parts.contains(&sender) { parts.insert(0, sender.clone()) } // Parts.add
-        let filing = if mail || (!ub.is_empty() && parts.contains(&format!("bot:{ub}"))) { Some((parts, room.name.clone())) } else { None };
+        let rr = super::post::RoomRef { id: room.id.clone(), name: room.name.clone(), members: room.members.clone() };
+        let pending = match self.post_decide(&w, now, "", "you", "", &rr, text, 0, &mid, vec![]).await { Ok(p) => p, Err(e) => return vec![err(id, &e)] };
         drop(w);
-        // as Bots.fan: each member in turn is logged as woken, then hears the note
-        for (bot, th, wake) in wakes {
-            if self.hub.commit(&json!({"$":"BotWoke","bot":bot,"hop":0,"at":now})).await.is_ok() { let _ = self.inbox.deliver(&th, &wake, &n, note_origin(&n)).await; }
-        }
-        if let Some((parts, name)) = filing { let w = self.world().await; if let Err(e) = self.file_room_mail(&w, now, &sender, &room.id, text, &mid, parts, &name).await { eprintln!("bots: could not file a mail: {e}") } }
+        self.post_finish(pending, 0).await;
         vec![ok(id)]
     }
 
