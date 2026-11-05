@@ -27,7 +27,7 @@ fn render_scratch(key: &str) -> bool { key.starts_with("@more.") || key == "@pil
 const VIEW_INFO: [&str; 5] = ["view.design:", "view.kind:", "view.path:", "view.sheet:", "view.tree:"];
 
 #[derive(Default)]
-pub struct ViewActor { view: String, target: Option<Value>, sel: Option<String>, keys: BTreeSet<String>, away: BTreeMap<String, String>, page: Option<(String, Value, u64)>, local: Option<(String, Value, Value)>, held_drafts: Map<String, Value>, held_info: Map<String, Value>, rid: u64, panel: bool, hub_view: bool, reads: Vec<Value>,
+pub struct ViewActor { view: String, target: Option<Value>, sel: Option<String>, keys: BTreeSet<String>, away: BTreeMap<String, String>, page: Option<(String, Value, u64)>, local: Option<(String, Value, Value)>, held_drafts: Map<String, Value>, held_info: Map<String, Value>, rid: u64, panel: bool, hub_view: bool, reads: Vec<(String, Value)>,
     /// ids of the requests this view's commands told the client to send (`cmds` of type send), and of those the hub has since answered
     sent: BTreeSet<u64>, replied: BTreeSet<u64> }
 
@@ -124,14 +124,17 @@ impl ViewActor {
         self.local = l.filter(|l| l.is_object()).map(|l| (view.to_string(), target.clone(), l));
     }
     /// A reply to one of the hub's own reads for this view (`fab.look`, `review.page`, `telemetry.share`), kept for the next V
-    /// request of the view (the policy applies it to its Ui as the JS actor does). Bounded: the oldest go first.
-    pub fn record_read(&mut self, kind: &str, id: u64, result: Value) {
-        self.reads.push(json!({"kind": kind, "id": id, "result": result}));
+    /// request of that view (the policy applies it to its Ui as the JS actor does). Bounded: the oldest go first.
+    pub fn record_read(&mut self, view: &str, kind: &str, id: u64, result: Value) {
+        self.reads.push((view.to_string(), json!({"kind": kind, "id": id, "result": result})));
         let n = self.reads.len();
         if n > MAX_READS { self.reads.drain(..n - MAX_READS); }
     }
-    /// The recorded reads, taken (and cleared) for the next V request.
-    pub fn take_reads(&mut self) -> Vec<Value> { std::mem::take(&mut self.reads) }
+    /// The reads recorded for `view`, taken (and cleared) for its next V request. Those of any other view are dropped: Bend's
+    /// actor drops its reads on a move (`Bool.pick(same, reads, Nil)`, thin-actor.bend).
+    pub fn take_reads(&mut self, view: &str) -> Vec<Value> {
+        std::mem::take(&mut self.reads).into_iter().filter(|(v, _)| v == view).map(|(_, r)| r).collect()
+    }
     /// The older page this view stands on (`before`, 0 = the newest window). A view.page sets it from its cursor; later
     /// updates and actions of the same view and target keep it (the JS hub's actor holds the page it last served) until
     /// a view.open or another target ends it. Measured on recA/session-gpuid requests 41..45.
@@ -267,12 +270,12 @@ pub fn mask_page_reply(req: &Value, reply: &mut Value) {
 /// `kind` is "fab.look", "review.page" or "telemetry.share"; `id` is the RPC id of the reply as the hub sent it (0 for fab.look);
 /// `result` is the RPC reply's `result` as the hub sent it. The
 /// reply is the hub's own, never the client's.
-pub fn record_read(client: u64, _view_id: &str, kind: &str, id: u64, result: Value) {
-    ACTORS.lock().unwrap().entry(client).or_default().record_read(kind, id, result);
+pub fn record_read(client: u64, view_id: &str, kind: &str, id: u64, result: Value) {
+    ACTORS.lock().unwrap().entry(client).or_default().record_read(view_id, kind, id, result);
 }
 /// The reads recorded since the last V request, for `reads` in the next one.
-pub fn take_reads(client: u64) -> Vec<Value> {
-    ACTORS.lock().unwrap().get_mut(&client).map(ViewActor::take_reads).unwrap_or_default()
+pub fn take_reads(client: u64, view_id: &str) -> Vec<Value> {
+    ACTORS.lock().unwrap().get_mut(&client).map(|a| a.take_reads(view_id)).unwrap_or_default()
 }
 /// A connection ended (`Hub::detach`, from the connection's drop guard).
 pub fn forget(client: u64) { ACTORS.lock().unwrap().remove(&client); }
@@ -499,13 +502,17 @@ mod tests {
         mask_page_reply(&other, &mut r2);
         assert!(r2["session"]["drafts"].get("@rp.req:1").is_some());
     }
-    #[test] fn recorded_reads_go_with_the_next_request_once_and_are_bounded() {
+    #[test] fn recorded_reads_go_with_the_next_request_of_their_view_once_and_are_bounded() {
         let mut a = ViewActor::default();
-        for i in 0..40 { a.record_read("fab.look", 0, json!({"n": i})); }
-        let r = a.take_reads();
+        for i in 0..40 { a.record_read("v1", "fab.look", 0, json!({"n": i})); }
+        let r = a.take_reads("v1");
         assert_eq!(r.len(), MAX_READS);
         assert_eq!(r[0]["result"]["n"], json!(24)); assert_eq!(r[15]["result"]["n"], json!(39)); assert_eq!(r[0]["kind"], json!("fab.look")); assert_eq!(r[0]["id"], json!(0));
-        assert!(a.take_reads().is_empty());
+        assert!(a.take_reads("v1").is_empty());
+        // a read for one view never reaches another, and the other view's request clears it
+        a.record_read("v1", "fab.look", 1, json!({}));
+        assert!(a.take_reads("v2").is_empty());
+        assert!(a.take_reads("v1").is_empty(), "dropped with the move");
     }
     #[test] fn forget_and_the_bound_keep_the_map_flat() {
         let mut m: HashMap<u64, ViewActor> = HashMap::new();
