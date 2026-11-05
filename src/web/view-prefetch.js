@@ -6,7 +6,7 @@ import {validateThinResult} from './thin-results.js';
 // Every destination the sidebar shows is fetched once (a click on any of them
 // then draws at once, with no round trip to wait for; the hub's own view
 // corrects it), one at a time and only while the page is idle, PACE apart.
-const QUEUE=24, ATTEMPTS=64, PACE=150;
+const QUEUE=24, ATTEMPTS=64, PACE=300;
 export class ViewPrefetch {
   constructor(api) {this.api=api;this.queue=[];this.attempted=new Set();this.generation=0;}
   // fresh: the picture held is known to be behind (its sidebar row moved
@@ -23,7 +23,9 @@ export class ViewPrefetch {
     if (!this.timer) this.timer=setTimeout(()=>{this.timer=null;this.pump();},priority?75:750);
   }
   pump() {
-    if (this.active || !this.queue.length || !this.api.idle()) return;
+    if (this.active || !this.queue.length) return;
+    // (not idle: tried again later, never dropped)
+    if (!this.api.idle()) { if (!this.timer) this.timer=setTimeout(()=>{this.timer=null;this.pump();},PACE*3);return; }
     while(this.queue.length && !this.queue[0].fresh && this.api.has(this.queue[0].target))this.queue.shift();
     if(!this.queue.length)return;
     if(!this.socket){this.connect();return;}
