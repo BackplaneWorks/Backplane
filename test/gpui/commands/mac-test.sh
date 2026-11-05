@@ -14,5 +14,5 @@ set -u
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer PATH="$HOME/.cargo/bin:/opt/homebrew/bin:$PATH"
 df -h /System/Volumes/Data | tail -1
 cd ~/bp-gpui-commands/native/host
-CARGO_TARGET_DIR=$HOME/bp-gpui-commands/target cargo test --bin backplane-hub "$1" -- --test-threads=2 2>&1 | grep -E "^error|-->|test result|FAILED|panicked|left:|right:" | head -60
+CARGO_TARGET_DIR=$HOME/bp-gpui-commands/target cargo test --bin backplane-hub "$1" -- --test-threads=2 > $HOME/bp-gpui-commands/test.log 2>&1; rc=$?; grep -E "^error|-->|test result|FAILED|panicked|left:|right:" $HOME/bp-gpui-commands/test.log | head -60; exit $rc
 REMOTE
