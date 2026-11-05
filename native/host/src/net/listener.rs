@@ -146,6 +146,19 @@ mod tests {
         for _ in 0..3 { let t = get(&format!("127.0.0.1:{port}")).await; assert!(t.contains("trusted=false") && t.contains("owner_conn=false"), "{t}"); }
         let _ = std::fs::remove_dir_all(h);
     }
+    /// What a phone is handed: once the listener is up on the tailnet address, an invitation (and its QR) names that address.
+    #[tokio::test] async fn tailnet_the_pairing_link_and_qr_carry_the_listeners_address() {
+        let (hub, p, routes, h) = node("link").await; let port = free();
+        let ts = Arc::new(Fake { ip: "127.0.0.1".into(), whois: [("127.0.0.1".to_string(), who("me@x.com"))].into(), status: String::new() });
+        start(hub, ts, p, routes.clone(), "127.0.0.1x", port, "tok").await;
+        let req = Req { method: "POST".into(), target: "/auth/invitations".into(), headers: vec![("Authorization".into(), "Bearer tok".into()), ("Host".into(), format!("127.0.0.1:{port}"))], body: vec![], peer: None, trusted: false };
+        let out = routes.handle(&req, 1).unwrap(); assert_eq!(out.reply.status, "200 OK", "{}", String::from_utf8_lossy(&out.reply.body));
+        let b: serde_json::Value = serde_json::from_slice(&out.reply.body).unwrap();
+        assert!(b["link"].as_str().unwrap().starts_with(&format!("http://127.0.0.1:{port}/pair#invite=")), "{b}");
+        assert_eq!(b["routes"], json!([format!("http://127.0.0.1:{port}")]));
+        assert_eq!(b["qr"], crate::net::qr::text(b["link"].as_str().unwrap()), "the QR encodes that link");
+        let _ = std::fs::remove_dir_all(h);
+    }
     #[tokio::test] async fn tailnet_no_address_is_unavailable_and_sets_nothing() {
         let (hub, p, routes, h) = node("none").await;
         let ts = Arc::new(Fake { ip: String::new(), whois: Default::default(), status: String::new() });
