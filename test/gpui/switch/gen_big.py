@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Synthetic events.jsonl shaped like the real store by COUNTS only (no content): python3 gen_big.py OUT [SEED]
+"""Synthetic events.jsonl shaped like the real store by COUNTS only (no content): python3 gen_big.py OUT [SEED [SCALE]]   (SCALE 1.0 = the real counts; 0.05 for a quick one)
 Counts from scripts/gpui/count_events.py on the store copy, as written in docs/gpui/PRESENTER-PORT.md:
  1,691,619 events; SettingSet 620,596 over 186,511 distinct keys (prefix sizes below, mean key 39.7 B, keys born steadily);
  ActivityLogged 301,120, MessagePosted 156,608 (27.1% entries), UsageSet 103,704, TurnChanged 97,769, the rest small kinds;
@@ -7,9 +7,11 @@ Counts from scripts/gpui/count_events.py on the store copy, as written in docs/g
 Text sizes are tuned so the file lands near the real 1.48 GB. Text is random words from a pool, never anything real."""
 import json, random, sys, bisect
 out = sys.argv[1]; rnd = random.Random(int(sys.argv[2]) if len(sys.argv) > 2 else 7)
-N = 1_691_619; NTH = 12_446; NPROJ = 65; T0 = 1_785_000_000; SPAN = 90 * 86400
-C = dict(setting=620_596, activity=301_120, message=156_608, usage=103_704, turn=97_769)
-NKEYS = 186_511
+SC = float(sys.argv[3]) if len(sys.argv) > 3 else 1.0
+sc = lambda n: max(1, int(n * SC))
+N = sc(1_691_619); NTH = sc(12_446); NPROJ = min(65, max(3, sc(65))); T0 = 1_785_000_000; SPAN = 90 * 86400
+C = {k: sc(v) for k, v in dict(setting=620_596, activity=301_120, message=156_608, usage=103_704, turn=97_769).items()}
+NKEYS = sc(186_511)
 PREFIX = [("fallback", 23_500), ("run", 20_800), ("summary", 18_900), ("turn", 16_700), ("account", 16_300), ("restart", 11_500), ("provider", 11_500), ("tok", 11_300)]
 REST = ["liveness", "autosettle", "stopped", "launch", "told", "alert", "desk", "fab", "probe", "emb", "fold", "rule", "board", "split", "sch"]
 OTHER = ["ToolOpen", "ToolShut", "AskOpened", "AskAnswered", "NoticePosted", "TaskSet", "LockChanged", "BotWoke", "RoutineFired", "ProjectSet", "WorktreeSet",
@@ -19,7 +21,7 @@ words = "board layout net rail footprint pad via trace schematic symbol resistor
 pool = [" ".join(rnd.choice(words) for _ in range(rnd.randint(25, 160))).capitalize() + "." for _ in range(3000)]
 def text(k): return " ".join(rnd.choice(pool) for _ in range(k))
 # thread creation positions: piecewise-linear inverse of the real cumulative curve
-pts = [(0, 0), (.25, 1898), (.5, 5714), (.75, 9317), (1, NTH)]
+pts = [(0, 0), (.25, NTH * 1898 // 12446), (.5, NTH * 5714 // 12446), (.75, NTH * 9317 // 12446), (1, NTH)]
 def pos_of(j):  # j-th thread (0-based) -> position in 0..1
     for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
         if j < y1: return x0 + (x1 - x0) * (j - y0) / (y1 - y0)
@@ -30,7 +32,7 @@ kinds = ["setting"] * C["setting"] + ["activity"] * C["activity"] + ["message"] 
 rnd.shuffle(kinds)
 # setting keys: exact distinct count, born at random setting slots
 keys = []
-for pfx, n in PREFIX: keys += [f"{pfx}.{rnd.getrandbits(128):032x}" for _ in range(n)]
+for pfx, n in PREFIX: keys += [f"{pfx}.{rnd.getrandbits(128):032x}" for _ in range(sc(n))]
 rest = NKEYS - len(keys)
 for i in range(rest): keys.append(f"{REST[i % len(REST)]}.{rnd.getrandbits(128):032x}")
 rnd.shuffle(keys)
