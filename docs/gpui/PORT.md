@@ -62,7 +62,7 @@ start only when the one before passes, except where noted.
 | # | Work | Gate |
 |---|---|---|
 | M0 | Parity harness; baselines; law map; store copy | Harness replays recorded traffic against today's hub and reports zero differences against itself |
-| M1 | Protocol: HTTP, authenticated WebSocket, join, view open/update/action, CBOR frames | Recorded sessions match the JS hub; phone and GPUI clients connect to the Rust hub on the store copy |
+| M1 | Protocol: HTTP, authenticated WebSocket, join, view open/update/action, CBOR frames | Recorded sessions match the JS hub; the phones' `window` and `overlay` fields match; GPUI opens a thread and sends; phone and GPUI clients connect to the Rust hub on the store copy |
 | M2 | Event store and windowed history | Same log, same pages; torn tail, restart and 1M-event tests pass |
 | M3 | Broadcast and fan-out | Keyed deltas match; slow clients bounded; 20-agent load valid |
 | M4 | Threads and sidebar status | Sidebar and settle state match on recorded logs; 300 and 6,666 threads stay fast |
@@ -116,6 +116,8 @@ port waits for the person's decision.
 ## Build and test rules
 
 - Builds run on Boat (8 GiB cap, zero swap) or the Mac, never on the desktop.
+- Nothing heavy runs on the desktop: processes there stay under 3.7 GiB. Scale and
+  out-of-memory tests run on Boat under a hard cap, on synthetic logs.
 - The hub runs on a copy of the event log on its own port, with phone access over the
   tailnet. It never touches `~/.backplane-bend` or port 3787.
 - The copy holds real conversations: it stays on this machine, out of git and off
