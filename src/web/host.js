@@ -2299,7 +2299,8 @@ document.addEventListener("input", (e) => {
 const PRESS_PICKS = ['aside.sidebar [data-on-click="select"]', 'aside.sidebar [data-on-click="bot"]',
   '.workspace-bar button[data-on-click="view-kind"]', '.workspace-bar button[data-on-click="fm"]', '.workspace-bar button[data-on-click="diff"]',
   '.workspace-bar button[data-on-click="mech"]', '.workspace-bar button[data-on-click="rv-page"]',
-  'button.model-chip[data-on-click="flag"]', 'button.tok-chip[data-on-click="flag"]', 'button.account-chip[data-on-click="acct-open"]'].join(", ");
+  'button.model-chip[data-on-click="flag"]', 'button.tok-chip[data-on-click="flag"]', 'button.account-chip[data-on-click="acct-open"]',
+  'button.gear[data-on-click="flag"]', 'button[data-on-click="ws-palette-open"]'].join(", ");
 let pressedPick = null, pressedMenu = null;
 document.addEventListener("pointerdown", e => {
   if (!e.isTrusted || e.button !== 0 || e.pointerType !== "mouse" || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;

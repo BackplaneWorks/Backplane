@@ -28,7 +28,16 @@ export const REGIONS = [
   ['account', n => classes(n).includes('account-picker')],
   ['tokens', n => classes(n).includes('tok-pop')],
   ['rowmenu', n => classes(n).includes('rowmenu')],
+  // Settings takes the place of the thread's main (its pages too)
+  ['settings', n => n.tag === 'main' && classes(n).includes('settings-view')],
 ];
+// what a region puts away where it is drawn (its sibling of this kind);
+// such a region is never taken away at a press (what comes back is the hub's)
+const REPLACES = { settings: n => is(n, 'El') && n.tag === 'main' };
+// what a region brings along, as the hub drew it with it (Settings' top bar
+// names Settings, not the thread): found, learned and drawn with it, never
+// on its own (the top bar changes with every turn's state)
+const ALONG = { settings: [['topbar', n => n.tag === 'header' && classes(n).includes('topbar')]] };
 // presses that move to another destination or change content: never
 // remembered (their answer is a view of something else, or the hub's alone)
 const NEVER = new Set(['select', 'bot', 'bot-tab', 'proj-home', 'send', 'send-alt', 'draft', 'bfield', 'detach',
@@ -45,11 +54,12 @@ export function regions(page) {
   // (regions sit a few levels under .app: the sidebar's rows and the like
   // below that are never walked)
   const found = new Map(), stack = [[page, null, 0, 0]];
-  while (stack.length && found.size < REGIONS.length) {
+  while (stack.length) {
     const [n, parent, index, depth] = stack.pop();
     if (!is(n, 'El') || n.tag === 'bp-memo' || depth > DEPTH || attr(n, 'id') === 'timeline') continue;
     const kind = REGIONS.find(([k, test]) => !found.has(k) && test(n));
     if (kind && parent) { found.set(kind[0], { node: n, parent: sig(parent), parentClass: attr(parent, 'class'), index });continue; }
+    for (const [k, test] of Object.values(ALONG).flat()) if (!found.has('+' + k) && parent && test(n)) found.set('+' + k, { node: n, parent: sig(parent), index });
     const ks = items(n.kids);
     for (let i = ks.length - 1; i >= 0; i--) stack.push([ks[i], n, i, depth + 1]);
   }
@@ -72,11 +82,13 @@ export class PressFeedback {
     const moved = REGIONS.map(([k]) => k).filter(k => p.before.get(k)?.node !== this.now.get(k)?.node);
     if (moved.length !== 1) return;
     const kind = moved[0], after = this.now.get(kind) || null, before = p.before.get(kind) || null;
+    if (!after && REPLACES[kind]) return;
     // (which press put the pane on show: the same press again shuts it)
     if (kind === 'viewer') this.viewerBy = after ? p.by : '';
     const parent = after || before, parentClass = after ? after.parentClass : before && this.parentClass(before.parent);
     this.learned.delete(p.key);
-    this.learned.set(p.key, { kind, node: after?.node || null, parent: parent.parent, parentClass, index: parent.index });
+    const along = (ALONG[kind] || []).map(([k]) => this.now.get('+' + k)).filter(Boolean);
+    this.learned.set(p.key, { kind, node: after?.node || null, parent: parent.parent, parentClass, index: parent.index, along });
     while (this.learned.size > this.limit) this.learned.delete(this.learned.keys().next().value);
   }
   parentClass(parentSig) {
@@ -136,13 +148,29 @@ export class PressFeedback {
       if (done || !is(n, 'El') || n.tag === 'bp-memo' || attr(n, 'id') === 'timeline') return n;
       if (sig(n) === a.parent) {
         done = true;
-        const ks = items(n.kids), at = ks.findIndex(test);
+        let ks = items(n.kids), at = ks.findIndex(test);
+        const away = REPLACES[a.kind];
+        if (away && at < 0) { const i = ks.findIndex(away);if (i >= 0) { ks = ks.map((k, j) => j === i ? a.node : k);at = i; } }
         const kids = at >= 0 ? (a.node ? ks.map((k, i) => i === at ? a.node : k) : ks.filter((_, i) => i !== at))
           : a.node ? [...ks.slice(0, a.index), a.node, ...ks.slice(a.index)] : ks;
         const out = { ...n, kids: list(kids) };
         if (a.addClass) { const c = attr(out, 'class') || '';return c.split(/\s+/).includes(a.addClass) ? out : withAttr(out, 'class', (c + ' ' + a.addClass).trim()); }
         return a.parentClass === undefined ? out : withAttr(out, 'class', a.parentClass);
       }
+      const ks = items(n.kids), mapped = ks.map(walk);
+      return mapped.every((k, i) => k === ks[i]) ? n : { ...n, kids: list(mapped) };
+    };
+    const out = walk(page);
+    return (a.along || []).reduce((pg, x) => this.swap(pg, x), out);
+  }
+  // a region drawn along: put in place of its kind in its parent
+  swap(page, x) {
+    const test = Object.values(ALONG).flat().find(([, t]) => t(x.node))?.[1];
+    if (!test) return page;
+    let done = false;
+    const walk = n => {
+      if (done || !is(n, 'El') || n.tag === 'bp-memo' || attr(n, 'id') === 'timeline') return n;
+      if (sig(n) === x.parent) { done = true;const ks = items(n.kids), at = ks.findIndex(test);return at < 0 ? n : { ...n, kids: list(ks.map((k, i) => i === at ? x.node : k)) }; }
       const ks = items(n.kids), mapped = ks.map(walk);
       return mapped.every((k, i) => k === ks[i]) ? n : { ...n, kids: list(mapped) };
     };
