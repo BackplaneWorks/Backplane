@@ -18,7 +18,9 @@ impl Inbox for Arc<Agents> {
     fn stop<'a>(&'a self, thread: &'a str) -> Fut<'a, ()> { Box::pin(async move { let _ = Agents::stop(self, thread).await; }) }
 }
 
-pub struct Bots { pub hub: Arc<Hub>, world: Mutex<World>, inbox: Arc<dyn Inbox>, pub(crate) router: std::sync::OnceLock<Arc<dyn super::mail::file::Router>>, last_id: std::sync::Mutex<(u64, u64)>, pub(crate) owner_link: std::sync::OnceLock<Arc<dyn super::mail::owner::OwnerLink>>, pub(crate) owner_busy: std::sync::atomic::AtomicBool }
+pub struct Bots { pub hub: Arc<Hub>, world: Mutex<World>, inbox: Arc<dyn Inbox>, pub(crate) router: std::sync::OnceLock<Arc<dyn super::mail::file::Router>>, last_id: std::sync::Mutex<(u64, u64)>, pub(crate) owner_link: std::sync::OnceLock<Arc<dyn super::mail::owner::OwnerLink>>, pub(crate) owner_busy: std::sync::atomic::AtomicBool, star: std::sync::OnceLock<Arc<StarPrompt>> }
+/// the state lane's star-nudge count for a human prompt (statehost::policies()?.star_prompt): the events to commit with the prompt and, on the fifth, the offer for its connection
+pub type StarPrompt = dyn Fn(&str, u64) -> (Vec<Value>, Option<Value>) + Send + Sync;
 
 fn ok(id: &Value) -> Value { json!({"t":"reply","id":id,"ok":true}) }
 fn err(id: &Value, e: &str) -> Value { json!({"t":"reply","id":id,"ok":false,"error":e}) }
@@ -59,7 +61,7 @@ impl Bots {
     pub async fn start_with(hub: Arc<Hub>, inbox: Arc<dyn Inbox>) -> Arc<Bots> {
         let store = hub.store.clone();
         let w = tokio::task::spawn_blocking(move || { let mut w = World::default(); if let Err(e) = w.sync(&store) { eprintln!("bots: reading the log: {e:#}") } w }).await.unwrap_or_default();
-        let b = Arc::new(Bots { hub: hub.clone(), world: Mutex::new(w), inbox, router: Default::default(), last_id: Default::default(), owner_link: Default::default(), owner_busy: Default::default() });
+        let b = Arc::new(Bots { hub: hub.clone(), world: Mutex::new(w), inbox, router: Default::default(), last_id: Default::default(), owner_link: Default::default(), owner_busy: Default::default(), star: Default::default() });
         { let me = b.clone(); tokio::spawn(async move { loop { tokio::time::sleep(std::time::Duration::from_secs(20)).await; me.owner_outbox().await } }); } // OwnerJob: the outbox is walked again
         hub.register_rpc(Arc::new(Rpc(b.clone())));
         super::api::register(&hub, &b);
@@ -152,7 +154,14 @@ impl Bots {
     }
 
     /// Bots.say.msg / Bots.space: a person talks to a bot, the conversation starts over at hop 0. `msg` names a retry (stored once).
-    async fn say(&self, id: &Value, bot: &str, text: &str, msg: &str, to: &str) -> Vec<Value> {
+    pub fn set_star(&self, f: Arc<StarPrompt>) { let _ = self.star.set(f); }
+    /// Star.accepted: a prompt a person typed (a client request, not a retry, not blank) counts once; (events to commit with it, the offer frame to push after)
+    pub(super) fn star_for(&self, client: Option<u64>, msg: &str, text: &str, now: u64) -> (Vec<Value>, Option<(u64, Value)>) {
+        let (Some(c), Some(f)) = (client, self.star.get()) else { return (vec![], None) };
+        if text.trim().is_empty() { return (vec![], None) }
+        let (evs, offer) = f(msg, now); (evs, offer.map(|o| (c, o)))
+    }
+    async fn say(&self, id: &Value, bot: &str, text: &str, msg: &str, to: &str, star: Option<u64>) -> Vec<Value> {
         let mut w = self.world().await;
         if !w.live(bot) { return vec![err(id, "no such bot")] }
         let th = w.bot(bot).map(|b| b.thread.clone()).unwrap_or_default();
@@ -161,7 +170,10 @@ impl Bots {
         let text = reply::resolve(to, q.as_deref(), text);
         let now = now_s(); let mid = if msg.is_empty() { self.id("m", now) } else { msg.to_string() };
         w.inflight.insert((th.clone(), mid.clone()));
-        let woke = self.hub.commit(&json!({"$":"BotWoke","bot":bot,"hop":0,"at":now})).await;
+        let (extra, offer) = self.star_for(star, &mid, &text, now);
+        let mut evs = vec![json!({"$":"BotWoke","bot":bot,"hop":0,"at":now})]; evs.extend(extra);
+        let woke = self.hub.commit_many(&evs).await;
+        if woke.is_ok() { if let Some((c, f)) = offer { self.hub.push(c, f); } }
         drop(w);
         let r = match woke { Ok(_) => self.inbox.deliver(&th, &mid, &text, None).await, Err(e) => Err(format!("{e:#}")) };
         self.world.lock().await.inflight.remove(&(th, mid));
@@ -175,14 +187,16 @@ impl Bots {
 
     /// Bots.post.id: a person's post in a room (hop 0): logged, then every other member here hears it (never a held one, never when the
     /// mail funnel files the post or the member is the uberbot: Bots.wake.room). Members elsewhere ("name@peer") are the net lane's.
-    async fn post(&self, id: &Value, p: &Value) -> Vec<Value> {
+    async fn post(&self, id: &Value, p: &Value, star: Option<u64>) -> Vec<Value> {
         let (msg, text) = (gs(p, "msg"), gs(p, "text"));
         let w = self.world().await;
         let Some(room) = w.room(gs(p, "room")).cloned() else { return vec![err(id, "no such room")] };
         if !msg.is_empty() && w.has_post(msg) { return vec![ok(id)] }
         let now = now_s(); let mid = if msg.is_empty() { self.id("p", now) } else { msg.to_string() };
         let rr = super::post::RoomRef { id: room.id.clone(), name: room.name.clone(), members: room.members.clone() };
-        let pending = match self.post_decide(&w, now, "", "you", "", &rr, text, 0, &mid, vec![]).await { Ok(p) => p, Err(e) => return vec![err(id, &e)] };
+        let (extra, offer) = self.star_for(star, &mid, text, now);
+        let pending = match self.post_decide(&w, now, "", "you", "", &rr, text, 0, &mid, extra).await { Ok(p) => p, Err(e) => return vec![err(id, &e)] };
+        if let Some((c, f)) = offer { self.hub.push(c, f); }
         drop(w);
         self.post_finish(pending, 0).await;
         vec![ok(id)]
@@ -219,23 +233,26 @@ impl Bots {
 }
 const BACKUP_SH: &str = "set -e; d=\"$1/backups/uber-$2-$3\"; mkdir -p \"$d\"; if [ -d \"$1/bots/$3\" ]; then cp -a \"$1/bots/$3\" \"$d/home\"; fi; grep -F -e \"$3\" -e \"$4\" \"$1/events.jsonl\" > \"$d/events.jsonl\" || [ $? -eq 1 ]";
 
+/// a person's prompt through a client connection (never a retry): the connection the star offer would go to
+fn human(who: &Caller, p: &Value) -> Option<u64> { if who.client > 0 && matches!(p.get("retry"), None | Some(Value::Null) | Some(Value::Bool(false))) { Some(who.client) } else { None } }
+
 struct Rpc(Arc<Bots>);
 impl RpcHandler for Rpc {
     fn methods(&self) -> &'static [&'static str] { &["bots.create", "bots.edit", "bots.delete", "bots.say", "bots.room", "bots.room_delete", "bots.post", "bots.remember", "bots.forget", "bots.space", "bots.uber", "bots.routine", "bots.routine_delete", "bots.routine_run", "bots.pin", "bots.uber_home", "bots.uber_join"] }
-    fn call<'a>(&'a self, _hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
+    fn call<'a>(&'a self, _hub: &'a Arc<Hub>, who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let b = &self.0;
             match method {
                 "bots.create" => b.create(id, p).await,
                 "bots.edit" => b.edit(id, p).await,
                 "bots.delete" => b.delete(id, p).await,
-                "bots.say" => b.say(id, gs(p, "bot"), gs(p, "text"), gs(p, "msg"), gs(p, "reply")).await,
+                "bots.say" => b.say(id, gs(p, "bot"), gs(p, "text"), gs(p, "msg"), gs(p, "reply"), human(who, p)).await,
                 "bots.room" => b.room(id, p).await,
                 "bots.room_delete" => { let _w = b.world().await; b.commit_reply(id, vec![json!({"$":"RoomDeleted","id":gs(p, "room"),"at":now_s()})]).await }
-                "bots.post" => b.post(id, p).await,
+                "bots.post" => b.post(id, p, human(who, p)).await,
                 "bots.forget" => { let w = b.world().await; let now = now_s(); b.commit_reply(id, w.also(now, vec![json!({"$":"MemoryForgot","bot":gs(p, "bot"),"key":gs(p, "key"),"at":now})])).await }
                 "bots.remember" => { let w = b.world().await; let now = now_s(); b.commit_reply(id, w.also(now, vec![json!({"$":"MemorySaved","bot":gs(p, "bot"),"key":mem_key(gs(p, "key")),"kind":mem_kind(gs(p, "kind")),"text":gs(p, "text"),"tags":gs(p, "tags"),"at":now})])).await }
-                "bots.space" => { let text = space_msg(gs(p, "action"), gs(p, "value")); b.say(id, gs(p, "bot"), &text, "", "").await }
+                "bots.space" => { let text = space_msg(gs(p, "action"), gs(p, "value")); b.say(id, gs(p, "bot"), &text, "", "", None).await }
                 "bots.uber" => b.uber(id, gs(p, "bot")).await,
                 "bots.routine" => b.routine(id, p).await,
                 "bots.routine_delete" => { let w = b.world().await; let now = now_s(); b.commit_reply(id, w.also(now, vec![json!({"$":"RoutineDeleted","id":gs(p, "routine"),"at":now})])).await }
