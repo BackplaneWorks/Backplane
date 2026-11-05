@@ -103,6 +103,7 @@ impl Render for Backplane {
         self.frame_marks(window, cx);
         let light = self.theme_override.unwrap_or(self.data["theme"] == "light");
         if self.swatches { return crate::swatch::view(light).into_any_element(); }
+        if self.gallery { return crate::swatch::gallery(light).into_any_element(); }
         let c = |name: &str| theme::color(light, name);
         // bots: (name, mood, note, look seed) copied out so the cat cache can be filled
         let bot_data: Vec<(String, String, String, u64)> = self.data["bots"].as_array().into_iter().flatten()

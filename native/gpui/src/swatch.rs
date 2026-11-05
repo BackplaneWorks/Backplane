@@ -26,3 +26,12 @@ pub fn view(light: bool) -> impl IntoElement {
         }
     }).size_full()
 }
+
+/// Every icon the web shows, large enough to measure, for the icon check: each reports `icon:<name>`.
+pub const WEB_ICONS: [&str; 26] = ["chevron-down", "pin", "circle-check", "archive", "trash", "git-fork", "message-square", "terminal", "search", "circuit-board", "cpu", "box",
+    "layout-panel-left", "layers", "folder", "diff", "globe", "chevron-right", "chevron-left", "settings", "plus", "user", "square-pen", "gauge", "paperclip", "mic"];
+pub fn gallery(light: bool) -> impl IntoElement {
+    let c = theme::color(light, "text");
+    div().size_full().bg(theme::color(light, "bg")).p(px(16.)).flex().flex_wrap().gap(px(20.))
+        .children(WEB_ICONS.iter().map(move |n| crate::art::icon(n, 36., c)))
+}
