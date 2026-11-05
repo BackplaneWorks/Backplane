@@ -1,7 +1,7 @@
 //! The hub core for native clients: connection identity, view requests, reply assembly,
 //! segmentation, change notices. State is what the event log folds to; the picture comes from
 //! the presenter. (window/overlay for phones arrive with M2's windowed history.)
-use crate::{api::{AuthRoute, Caller, FarView, HttpHandler, Observer, Pairing, RpcHandler, Ticker}, auth::Auth, model::Model, presenter::Presenter, session::ViewMethod, store::Store};
+use crate::{api::{AuthRoute, Caller, FarView, Transform, HttpHandler, Observer, Pairing, RpcHandler, Ticker}, auth::Auth, model::Model, presenter::Presenter, session::ViewMethod, store::Store};
 use anyhow::Result;
 use serde_json::{json, Map, Value};
 use std::path::PathBuf;
@@ -16,7 +16,7 @@ pub struct Hub {
     pub store: Store, pub model: Mutex<Model>, gen: AtomicU64, pub changed: broadcast::Sender<u64>, pub frames: broadcast::Sender<Value>, pub native_key: String,
     commits: tokio::sync::mpsc::UnboundedSender<Commit>,
     rpc: std::sync::RwLock<Vec<(&'static str, Arc<dyn RpcHandler>)>>, http: std::sync::RwLock<Vec<(&'static str, Arc<dyn HttpHandler>)>>,
-    views: std::sync::RwLock<Vec<(&'static str, Arc<dyn ViewMethod>)>>, observers: std::sync::RwLock<Vec<Arc<dyn Observer>>>, far: std::sync::OnceLock<Arc<dyn FarView>>, pairing: std::sync::OnceLock<Arc<dyn Pairing>>, auth_route: std::sync::OnceLock<Arc<dyn AuthRoute>>,
+    views: std::sync::RwLock<Vec<(&'static str, Arc<dyn ViewMethod>)>>, observers: std::sync::RwLock<Vec<Arc<dyn Observer>>>, transforms: std::sync::RwLock<Vec<Arc<dyn Transform>>>, far: std::sync::OnceLock<Arc<dyn FarView>>, pairing: std::sync::OnceLock<Arc<dyn Pairing>>, auth_route: std::sync::OnceLock<Arc<dyn AuthRoute>>,
     live: std::sync::Mutex<std::collections::HashMap<String, String>>,
     pub window_bin: std::sync::OnceLock<PathBuf>,
     me: std::sync::OnceLock<std::sync::Weak<Hub>>, next_client: AtomicU64,
@@ -84,7 +84,7 @@ impl Hub {
         let (ftx, _) = broadcast::channel(1024);
         let model = Model::build(&store)?;
         let hub = Arc::new(Hub { cfg, auth, epoch, presenter, store: store.clone(), commits: ctx, model: Mutex::new(model), gen: AtomicU64::new(1), changed: tx, frames: ftx, native_key: { let mut b = [0u8; 16]; if let Ok(mut f) = std::fs::File::open("/dev/urandom") { let _ = std::io::Read::read_exact(&mut f, &mut b); } hex::encode(b) },
-            rpc: Default::default(), http: Default::default(), views: Default::default(), observers: Default::default(), far: Default::default(), pairing: Default::default(), auth_route: Default::default(), outbox_max: std::sync::atomic::AtomicUsize::new(OUTBOX_MAX), signal_seq: AtomicU64::new(store.len() as u64), extra_info: Default::default(), live: Default::default(), window_bin: Default::default(), me: Default::default(), next_client: AtomicU64::new(1), outboxes: Default::default() });
+            rpc: Default::default(), http: Default::default(), views: Default::default(), observers: Default::default(), transforms: Default::default(), far: Default::default(), pairing: Default::default(), auth_route: Default::default(), outbox_max: std::sync::atomic::AtomicUsize::new(OUTBOX_MAX), signal_seq: AtomicU64::new(store.len() as u64), extra_info: Default::default(), live: Default::default(), window_bin: Default::default(), me: Default::default(), next_client: AtomicU64::new(1), outboxes: Default::default() });
         let _ = hub.me.set(Arc::downgrade(&hub));
         hub.bootstrap()?;
         hub.signal_seq.store(hub.store.len() as u64, Relaxed); // start-up housekeeping counts: a restart is a new signal
@@ -187,6 +187,20 @@ impl Hub {
         while let Some(first) = rx.recv().await {
             let mut batch = vec![first];
             while let Ok(c) = rx.try_recv() { batch.push(c); }
+            // the policies get the batch before it is written: their events join the same write and fsync (Shelve.auto.fix)
+            let transforms: Vec<Arc<dyn Transform>> = hub.transforms.read().unwrap().clone();
+            let base = hub.store.len() as u64 + 1; // the 1-based line of the batch's first event (only this task appends)
+            if !transforms.is_empty() {
+                let mut seq = base;
+                for c in batch.iter_mut() {
+                    for t in &transforms {
+                        let evs = std::mem::take(&mut c.events);
+                        let kept = evs.clone();
+                        c.events = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| t.before_commit(seq, evs))).unwrap_or(kept);
+                    }
+                    seq += c.events.len() as u64;
+                }
+            }
             let lines: Vec<String> = batch.iter().flat_map(|c| c.events.iter().map(|e| serde_json::to_string(e).unwrap_or_default())).collect();
             let store = hub.store.clone(); let owned = lines.clone();
             let wrote = tokio::task::spawn_blocking(move || store.append_many(&owned.iter().map(String::as_str).collect::<Vec<_>>())).await;
@@ -200,8 +214,8 @@ impl Hub {
                     let mut upto = first_idx;
                     for c in batch { upto += c.events.len(); let _ = c.done.send(Ok(upto as u64)); }
                 }
-                Ok(Err(e)) => { let m = format!("{e:#}"); for c in batch { let _ = c.done.send(Err(anyhow::anyhow!(m.clone()))); } }
-                Err(e) => { let m = format!("{e}"); for c in batch { let _ = c.done.send(Err(anyhow::anyhow!(m.clone()))); } }
+                Ok(Err(e)) => { for t in &transforms { t.commit_failed(base) } let m = format!("{e:#}"); for c in batch { let _ = c.done.send(Err(anyhow::anyhow!(m.clone()))); } }
+                Err(e) => { for t in &transforms { t.commit_failed(base) } let m = format!("{e}"); for c in batch { let _ = c.done.send(Err(anyhow::anyhow!(m.clone()))); } }
             }
         }
     }
@@ -209,6 +223,9 @@ impl Hub {
     // ---- the published interface (see api.rs, docs/gpui/HUB-API.md) ----
     /// Later registrations win over earlier ones for the same method.
     pub fn register_rpc(&self, h: Arc<dyn RpcHandler>) { let mut v = self.rpc.write().unwrap(); for m in h.methods() { v.retain(|(n, _)| n != m); v.push((m, h.clone())) } }
+    /// Runs before every batch is written (api.rs `Transform`), after the secret mask, in registration order. Once this returns, no batch
+    /// is written without passing it: read `store.len()` AFTER registering to know where your replay ends.
+    pub fn register_transform(&self, t: Arc<dyn Transform>) { self.transforms.write().unwrap().push(t) }
     /// Sees every committed batch (api.rs `Observer`).
     pub fn register_observer(&self, o: Arc<dyn Observer>) { self.observers.write().unwrap().push(o) }
     /// Runs `t` every `every_s` seconds from now; what it returns is committed (api.rs `Ticker`). Call inside the runtime.
@@ -511,6 +528,29 @@ mod tests {
         let l = "{\"$\":\"SettingSet\",\"key\":\"theme\",\"value\":\"dark\",\"at\":7}";
         assert_eq!(Hub::wire_item(l).unwrap().to_string(), l);
         assert_eq!(Hub::wire_item("not json"), None);
+    }
+
+    // Transform: policy events join the same write, in order, with the right first_seq; a panic leaves the batch; a failed write is told
+    #[tokio::test] async fn a_transform_adds_events_to_the_same_batch_and_is_told_of_a_failed_write() {
+        struct T(std::sync::Mutex<Vec<u64>>, std::sync::atomic::AtomicBool);
+        impl Transform for T {
+            fn before_commit(&self, first_seq: u64, events: Vec<Value>) -> Vec<Value> {
+                self.0.lock().unwrap().push(first_seq);
+                if events.iter().any(|e| e["$"] == "Boom") { panic!("a bad policy") }
+                let mut out = events.clone(); if events.iter().any(|e| e["$"] == "MessagePosted") { out.push(json!({"$":"SettingSet","key":"quiet.x","value":"1","at":1})); } out
+            }
+            fn commit_failed(&self, _s: u64) { self.1.store(true, Relaxed) }
+        }
+        let dir = home("transform"); let h = Hub::start(cfg(&dir), Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        let t = Arc::new(T(Default::default(), Default::default())); h.register_transform(t.clone());
+        let n0 = h.store.len() as u64;
+        let upto = h.commit_many(&[json!({"$":"MessagePosted","thread":"t1","msg":"m1","role":"user","text":"hi","at":2})]).await.unwrap();
+        assert_eq!(upto, n0 + 2, "the message and the policy's event were written together");
+        assert_eq!(h.store.get((n0 + 1) as usize).map(|l| l.contains("quiet.x")).unwrap_or(false), true, "in order, right after the message");
+        assert_eq!(t.0.lock().unwrap().as_slice(), &[n0 + 1], "first_seq is the 1-based line of the batch's first event");
+        let u2 = h.commit_many(&[json!({"$":"Boom"})]).await.unwrap();
+        assert_eq!(u2, n0 + 3, "a panicking transform leaves the batch as it came");
+        assert!(!t.1.load(Relaxed));
     }
 
     #[tokio::test] async fn open_assembles_identity_in_js_order() {

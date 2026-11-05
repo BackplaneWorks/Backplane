@@ -122,3 +122,15 @@ impl tokio::io::AsyncRead for Body<'_> {
         }
     }
 }
+
+/// Runs on the writer task for every batch about to be written, in commit order, AFTER the secret mask (so the policy never sees or
+/// copies a secret). `first_seq` is the 1-based log line the first returned event will get. Returns the events to write: normally
+/// `events` plus policy events appended (quiet marks, message metadata, wakes, housekeeping); it may drop or replace policy-owned
+/// events of the batch. SYNCHRONOUS and fast: no await, no IO, no commit_many; it may take a std Mutex it shares with a Ticker, never
+/// the writer's own locks. A panic leaves the batch as it came. Several are applied in registration order; the Observer still sees the
+/// batch as written. Each caller's `commit_many` answer counts the events actually written for its commit.
+pub trait Transform: Send + Sync {
+    fn before_commit(&self, first_seq: u64, events: Vec<Value>) -> Vec<Value>;
+    /// The batch returned above could not be written (disk full, closed log): the policy must resync / mark its copy stale.
+    fn commit_failed(&self, first_seq: u64);
+}
