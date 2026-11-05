@@ -18,7 +18,9 @@ function cc_dir(create) {
 function cc_name(crypto,cwd,pcbRev,schRev,offset) {
   // Older pages may contain the indivisible-row refusal for these same
   // saved files. A changed transport must not reuse that cursor chain.
-  return crypto.createHash('sha256').update(JSON.stringify(['field-fragments-v1',cwd,pcbRev,schRev,String(offset)])).digest('hex')+'.json';
+  // "offsets": a first page now names every page's offset (server/
+  // components.bend); one kept by an older hub does not, so it is not reused.
+  return crypto.createHash('sha256').update(JSON.stringify(['field-fragments-v1','offsets',cwd,pcbRev,schRev,String(offset)])).digest('hex')+'.json';
 }
 function cc_same(fs,file,rev) {
   if(!file)return rev==='';
