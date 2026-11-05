@@ -20,6 +20,7 @@ python3 - "$R" <<'PY'
 import json,sys,time
 R=sys.argv[1]; NOW=int(time.time())
 ev=[{"$":"ProjectCreated","id":"p1","title":"ecc","root":R+"/proj","at":NOW},{"$":"ThreadCreated","id":"t1","project":"p1","title":"ecc83 board","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":NOW}]
+if __import__("os").environ.get("GPUI_THREADS"): ev+=[{"$":"ThreadCreated","id":t,"project":"p1","title":n,"env":"local","branch":"","worktree":"","provider":"claude","model":"","at":NOW} for t,n in (("t2","beta"),("t3","gamma"))]
 open(R+"/home/events.jsonl","w").write("".join(json.dumps(e,separators=(",",":"))+"\n" for e in ev))   # compact, as the hub writes it: its agents world reads lines by pattern
 PY
 export LC_ALL=C
@@ -43,7 +44,10 @@ printf "font pango:monospace 8\nnew_window none\nfor_window [class=\".*\"] borde
 DISPLAY=$DISP i3 -c $R/i3.conf > $R/i3.log 2>&1 &
 echo $! > $R/i3.pid; sleep 1
 export DISPLAY=$DISP VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json LP_NUM_THREADS=2 BACKPLANE_GPUI_ASSETS=$ASSETS BACKPLANE_GPUI_RECTS=1
-if [ -n "${GPUI_DAILY:-}" ]; then cat > $R/script.json <<JSON
+if [ -n "${GPUI_THREADS:-}" ]; then cat > $R/script.json <<JSON
+[{"click":"thread:t1"},{"wait":1500},{"click":"thread-more"},{"wait":1200},{"click":"thread-more"},{"wait":500},{"click":"tool-0"},{"wait":1500},{"action":["row-rename","t1"]},{"wait":1500},{"field":["title","alpha renamed"]},{"wait":300},{"click":"rename-yes"},{"wait":2000},{"action":["row-rename","t2"]},{"wait":1500},{"click":"rename-no"},{"wait":1500},{"action":["row-delete","t3"]},{"wait":1500},{"click":"delete-no"},{"wait":1500},{"action":["row-delete","t3"]},{"wait":1500},{"click":"delete-yes"},{"wait":2500},{"action":["row-delete","t1"]},{"wait":1500},{"click":"delete-yes"},{"wait":2500}]
+JSON
+elif [ -n "${GPUI_DAILY:-}" ]; then cat > $R/script.json <<JSON
 [{"select":0},{"wait":1500},{"popup":"/"},{"wait":800},{"type":" "},{"type":"x"},{"wait":300},{"read":"composer"},{"wait":500},{"type":"approve:one"},{"wait":300},{"send":true},{"wait":5000},{"wait":100},{"click":"ask:0:0"},{"wait":4000},{"click":"ui:Settings"},{"wait":2500},{"click":"ui:Settings"},{"wait":1500},{"click":"project:p1"},{"wait":2500}]
 JSON
 elif [ -n "${GPUI_ATTACH:-}" ]; then cp "$GPUI_ATTACH" $R/attach.png; cat > $R/script.json <<JSON
@@ -56,11 +60,12 @@ JSON
 fi
 $CLIENT --url http://127.0.0.1:$PORT --token-file $R/home/token --script $R/script.json --exit-after 80 > $OUT/$N.client.log 2>&1 &
 echo $! > $R/client.pid
-if [ -n "${GPUI_DAILY:-}" ]; then sleep 9; import -window root $SH/$N-ask.png; sleep 5; import -window root $SH/$N-after.png; sleep 3; import -window root $SH/$N-settings.png; sleep 3; import -window root $SH/$N-home.png; elif [ -n "${GPUI_ATTACH:-}" ]; then sleep 5; import -window root $SH/$N-attach.png; sleep 2; import -window root $SH/$N-attach-sent.png; else sleep 7; import -window root $SH/$N-board.png
+if [ -n "${GPUI_THREADS:-}" ]; then sleep 4; import -window root $SH/$N-more.png; sleep 6; import -window root $SH/$N-rename.png; sleep 7; import -window root $SH/$N-delete.png; sleep 10; import -window root $SH/$N-end.png; elif [ -n "${GPUI_DAILY:-}" ]; then sleep 9; import -window root $SH/$N-ask.png; sleep 5; import -window root $SH/$N-after.png; sleep 3; import -window root $SH/$N-settings.png; sleep 3; import -window root $SH/$N-home.png; elif [ -n "${GPUI_ATTACH:-}" ]; then sleep 5; import -window root $SH/$N-attach.png; sleep 2; import -window root $SH/$N-attach-sent.png; else sleep 7; import -window root $SH/$N-board.png
 sleep 6; import -window root $SH/$N-schematic.png
 sleep 8; import -window root $SH/$N-3d.png
 sleep 9; import -window root $SH/$N-mech.png; fi
 wait $(cat $R/client.pid) || true
+if [ -n "${GPUI_THREADS:-}" ]; then echo "events:"; grep -E '"\$":"(Thread(Renamed|Deleted|Pinned|Archived)[A-Za-z]*|Thread[A-Za-z]*)"' $R/home/events.jsonl | cut -c1-200; grep -E 'rpc_sent|rpc_refused' $OUT/$N.client.log | tail -20; fi
 if [ -n "${GPUI_DAILY:-}" ]; then echo "events:"; grep -E '"\$":"(MessagePosted|Ask[A-Za-z]*|TurnChanged|ToolCalled|PermissionAsked)"' $R/home/events.jsonl | cut -c1-220 | tail -8; fi
 if [ -n "${GPUI_ATTACH:-}" ]; then echo "attachments on the hub:"; ls -la $R/home/attachments/*/ 2>/dev/null | tail -3; echo "messages:"; grep MessagePosted $R/home/events.jsonl | tail -2 | cut -c1-300; fi
 '

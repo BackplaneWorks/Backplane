@@ -2,6 +2,7 @@
 //! (`thread.menu`: Diff, Terminal, Find file, Snooze with its choices, Delete...), plus the two questions the hub asks back, a rename
 //! (`renaming`: a title box) and a delete (`deleting`: confirm). Every press is the action the item names; Delete is only asked
 //! for, the hub then raises its own confirmation. Nothing here decides what a thread can do.
+use crate::script::Ctl;
 use super::settings::{Field, FieldSlot};
 use crate::{hub::Command, string, theme, Backplane};
 use gpui::{prelude::*, *};
@@ -62,9 +63,9 @@ pub fn strip(cx: &mut Context<Backplane>, light: bool, thread: &Value, menu_open
 
 /// The menu dropdown under the header, while open.
 pub fn dropdown(cx: &mut Context<Backplane>, light: bool, thread: &Value, open: bool) -> Option<AnyElement> {
-    if !open { return None; }
+    if !menu_visible(open, thread) { return None; }
     let c = |n: &str| theme::color(light, n);
-    let mut col = div().id("thread-menu").absolute().top(px(32.)).right_0().w(px(260.)).max_h(px(420.)).overflow_y_scroll().occlude().flex().flex_col().bg(c("panel")).border_1().border_color(c("line")).py_1();
+    let mut col = div().id("thread-menu").on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()).absolute().top(px(32.)).right_0().w(px(260.)).max_h(px(420.)).overflow_y_scroll().occlude().flex().flex_col().bg(c("panel")).border_1().border_color(c("line")).py_1();
     for (i, m) in menu(thread).into_iter().enumerate() {
         if m.options.is_empty() {
             let cmd = press(&m); let (a, v) = match cmd { Command::Action(a, v) => (a, v), _ => unreachable!() };
@@ -79,7 +80,35 @@ pub fn dropdown(cx: &mut Context<Backplane>, light: bool, thread: &Value, open: 
             }
         }
     }
-    Some(col.into_any_element())
+    Some(div().id("thread-menu-away").absolute().inset_0().on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| { this.screens.menu_open = false; cx.notify(); })).child(col).into_any_element())
+}
+
+/// The More menu is drawn only while open, with a thread, and with items.
+pub fn menu_visible(open: bool, thread: &Value) -> bool { open && thread.is_object() && !menu(thread).is_empty() }
+/// Whether the menu stays open when the selected thread goes from `before` to `after`: only while it is the same one.
+pub fn menu_keeps(open: bool, before: &str, after: &str) -> bool { open && before == after }
+
+/// The controls this header and its questions draw, for the harness: (id, label, what a click does).
+pub fn controls(data: &Value, menu_open: bool) -> Vec<(String, String, Ctl)> {
+    let mut out = Vec::new();
+    let thread = &data["thread"];
+    for (i, t) in tools(thread).into_iter().enumerate() { out.push((format!("tool-{i}"), t.label.clone(), Ctl::Node(t.action.clone(), t.value.clone()))); }
+    if thread.is_object() && !menu(thread).is_empty() { out.push(("thread-more".into(), "More".into(), Ctl::More)); }
+    if menu_visible(menu_open, thread) {
+        for (i, m) in menu(thread).into_iter().enumerate() {
+            if m.options.is_empty() { out.push((format!("menu-{i}"), m.label.clone(), Ctl::Node(m.action.clone(), m.value.clone()))); }
+            else { for (j, (l, v)) in m.options.iter().enumerate() { out.push((format!("menu-{i}-{j}"), l.clone(), Ctl::Node(m.action.clone(), v.clone()))); } }
+        }
+    }
+    if data["renaming"].is_object() {
+        out.push(("rename-yes".into(), "Save".into(), Ctl::RenameSave(string(&data["renaming"], "id"))));
+        out.push(("rename-no".into(), "Cancel".into(), Ctl::Node("rename-no".into(), String::new())));
+    }
+    if data["deleting"].is_object() {
+        out.push(("delete-yes".into(), "Delete".into(), Ctl::Node("row-delete".into(), string(&data["deleting"], "id"))));
+        out.push(("delete-no".into(), "Cancel".into(), Ctl::Node("delete-no".into(), String::new())));
+    }
+    out
 }
 
 fn modal(light: bool, id: &'static str) -> Stateful<Div> {
@@ -112,7 +141,7 @@ pub fn questions(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<Stri
     if d.is_object() {
         let id = string(d, "id");
         return Some(modal(light, "delete-q").child(div().font_weight(FontWeight::BOLD).child(string(d, "title"))).child(div().text_color(c("dim")).child(string(d, "body")))
-            .child(div().flex().gap_2().child(btn(cx, "delete-no", string(d, "no"), false, false, "delete-no", String::new())).child(btn(cx, "delete-yes", string(d, "yes"), true, true, "delete", id))).into_any_element());
+            .child(div().flex().gap_2().child(btn(cx, "delete-no", string(d, "no"), false, false, "delete-no", String::new())).child(btn(cx, "delete-yes", string(d, "yes"), true, true, "row-delete", id))).into_any_element());
     }
     None
 }
@@ -130,6 +159,16 @@ mod tests {
         match choose(&m[1], "60") { Command::Action(a, v) => assert_eq!((a.as_str(), v.as_str()), ("snooze", "60")), c => panic!("{c:?}") }
         match press(&tools(&t)[0]) { Command::Action(a, v) => assert_eq!((a.as_str(), v.as_str()), ("pin", "")), c => panic!("{c:?}") }
         assert!(tools(&Value::Null).is_empty());
+    }
+    #[test] fn the_menu_closes_without_a_thread_or_items_and_on_a_selection_change() {
+        let t = j(r#"{"menu":[{"label":"Diff","action":"diff","value":"","options":[]}]}"#);
+        assert!(menu_visible(true, &t) && !menu_visible(false, &t) && !menu_visible(true, &Value::Null) && !menu_visible(true, &j(r#"{"menu":[]}"#)));
+        assert!(menu_keeps(true, "t1", "t1") && !menu_keeps(true, "t1", "t2") && !menu_keeps(false, "t1", "t1"));
+    }
+    #[test] fn delete_yes_sends_row_delete_with_the_asked_id() {
+        let d = j(r#"{"thread":{"id":"t1"},"deleting":{"id":"t2"}}"#);
+        let c = controls(&d, false);
+        assert!(c.iter().any(|(id, _, ctl)| id == "delete-yes" && matches!(ctl, Ctl::Node(a, v) if a == "row-delete" && v == "t2")));
     }
     #[test] fn rename_and_delete_questions() {
         let d = j(r#"{"renaming":{"id":"t1","title":"Rename","text":"Old title","yes":"Rename","no":"Cancel"}}"#);
