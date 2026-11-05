@@ -918,3 +918,36 @@ impl mcp::ToolSet for TestTools {
     let assistant_lines = include_str!("../../../../test/gpui/agents/fixtures/replay-lifecycle.ndjson").lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).filter(|o| o["type"] == "assistant" && o["parent_tool_use_id"].as_str().unwrap_or("").is_empty()).count();
     assert_eq!(kinds.iter().filter(|k| *k == "delta_end").count(), assistant_lines, "one delta_end per assistant line, none extra at the turn's end: {kinds:?}"); ag.shutdown();
 }
+
+// ---- a hub on a copy of a log runs no git that writes and resumes no turn (BACKPLANE_COPY=1; the flag is read once per process, so the probe runs in a child) ----
+fn tree(d: &Path) -> Vec<(String, u64)> {
+    fn walk(root: &Path, d: &Path, out: &mut Vec<(String, u64)>) { if let Ok(rd) = std::fs::read_dir(d) { for e in rd.flatten() { let p = e.path(); let m = e.metadata().unwrap(); out.push((p.strip_prefix(root).unwrap().to_string_lossy().into_owned(), if m.is_dir() { 0 } else { m.len() })); if m.is_dir() { walk(root, &p, out) } } } }
+    let mut v = vec![]; walk(d, d, &mut v); v.sort(); v
+}
+#[tokio::test(flavor = "multi_thread")] async fn copy_child_probe() {
+    if std::env::var("BP_COPY_PROBE").is_err() { return }
+    assert!(crate::copy::on(), "the probe runs with BACKPLANE_COPY=1");
+    let sd = dir("cp-bin"); perf_standin(&sd, 2);
+    let (hub, ag, _h, work) = start("cp", |w| {
+        assert!(std::process::Command::new("git").args(["init", "-q"]).current_dir(w).status().unwrap().success());
+        std::fs::write(w.join("b.kicad_pcb"), "(kicad_pcb (version 20240108))\n").unwrap();
+        running_log(w, "") // a turn the restart cut short: restart.continue would carry it on
+    }, |_| Cli::standin(&sd)).await;
+    let before = tree(&work); let n0 = len(&hub).await;
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+    assert_eq!(ag.stats.procs_spawned.load(Relaxed), 0, "a hub on a copy resumes no turn");
+    assert!(!log_from(&hub, 0).await.iter().skip(n0.saturating_sub(0)).any(|e| turn_is(e, "running")), "no turn is running again");
+    // a person's own turn (a stand-in) is allowed, but writes no design history
+    rpc(&hub, "turn.start", json!({"thread":T1,"text":"zqshort hi"})).await;
+    until(&hub, 0, 30, |ev| ev.iter().filter(|e| turn_is(e, "completed")).count() >= 1).await; tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert!(!log_from(&hub, 0).await.iter().any(|e| e["tone"] == "step"), "no step Act on a copy");
+    assert_eq!(tree(&work), before, "the project folder is unchanged: no .backplane/history.git, nothing in .git");
+    let refs = std::process::Command::new("git").args(["for-each-ref", "refs/backplane"]).current_dir(&work).output().unwrap(); assert!(refs.stdout.is_empty(), "no hidden refs: {}", String::from_utf8_lossy(&refs.stdout));
+    ag.shutdown();
+}
+#[test] fn a_hub_on_a_copy_writes_no_design_history_and_resumes_no_turn() {
+    let me = std::env::current_exe().unwrap();
+    let o = std::process::Command::new(me).args(["agents::tests::copy_child_probe", "--exact", "--nocapture", "--test-threads=1"]).env("BACKPLANE_COPY", "1").env("BP_COPY_PROBE", "1").env_remove("BACKPLANE_AGENTS").output().unwrap();
+    assert!(o.status.success(), "{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
+    assert!(String::from_utf8_lossy(&o.stdout).contains("copy_child_probe ... ok"), "the probe ran: {}", String::from_utf8_lossy(&o.stdout));
+}

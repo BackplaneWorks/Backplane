@@ -193,7 +193,7 @@ impl Agents {
                 ev.push(json!({"$":"TurnChanged","thread":th,"state":"interrupted","at":now})); cut_threads.push(th.clone());
                 if !t.last_user.is_empty() { ev.push(set(format!("stopped.{}", t.last_user), "1".into(), now)) }
                 let will = world::carry_will(t, w.setting("restart.continue"));
-                if will && carry.len() < BURST { carry.push(th.clone()) }
+                if will && carry.len() < BURST && !crate::copy::on() { carry.push(th.clone()) } // a hub on a copy of a log resumes no turn, whatever restart.continue says
             }
             (ev, carry, cut_threads)
         };
