@@ -11,6 +11,9 @@
 use serde_json::Value;
 use std::collections::HashMap;
 
+// the digest-skipped families (UberOp, wakes, locks, TurnUsage, deploys, todos by tools/person/agent, Reminded): the state lane's
+pub mod fam;
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Turn { Idle, Running, Completed, Interrupted, Failed }
 impl Turn {
@@ -89,8 +92,9 @@ fn link_from(id: &str) -> &str {
     match rest.split_once(':') { Some((from, _)) => from, None => "" }
 }
 
-fn s<'a>(e: &'a Value, k: &str) -> Option<&'a str> { e.get(k)?.as_str() }
-fn n(e: &Value, k: &str) -> Option<u64> { e.get(k)?.as_u64() }
+// as Bend's Change.decode: a missing or mistyped field reads "" / 0 (get_str / get_nat defaults), so an event still counts in seq
+fn s<'a>(e: &'a Value, k: &str) -> Option<&'a str> { Some(e.get(k).and_then(|v| v.as_str()).unwrap_or("")) }
+fn n(e: &Value, k: &str) -> Option<u64> { Some(e.get(k).and_then(|v| v.as_u64()).unwrap_or(0)) }
 
 /// Setting.blank_gone: an empty value removes these keys
 fn blank_gone(k: &str) -> bool {
@@ -237,7 +241,7 @@ impl State {
                     let g = |k: &str, d: &str| p.get(k).and_then(|v| v.as_str()).unwrap_or(d).to_string();
                     let (c, b, v) = (g("current", ""), g("base", ""), g("visible", "0"));
                     self.todos_put(th, &c, &b, &v);
-                } else { *self.unmodelled.entry(format!("TodosChanged/{who}")).or_default() += 1; }
+                } else { return fam::fold(self, kind, e); }
             }
             "UsageSet" => {
                 // State.usage: a new reading over the old one; 0 keeps the old part
@@ -249,9 +253,8 @@ impl State {
                 let keep = |new: u64, old: u64| if new == 0 { old } else { new };
                 self.set(&key, &format!("{}/{}", keep(used, ou), keep(window, ow)));
             }
-            "TurnUsage" => { *self.unmodelled.entry("TurnUsage (tok.*, turn.last.*)".into()).or_default() += 1; }
             "ProviderSet" => { self.switch(s(e, "id")?, s(e, "provider")?, s(e, "model")?); }
-            _ => {}
+            _ => return fam::fold(self, kind, e),
         }
         Some(())
     }
