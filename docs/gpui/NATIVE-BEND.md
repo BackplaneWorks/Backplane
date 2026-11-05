@@ -6,7 +6,7 @@ Everything below ran on **Boat**, the same sandbox type the earlier 5.7-14.7x be
 ## Summary
 
 * Three hub kernels (broadcast pacing, sidebar status, history page policy) were compiled **unchanged from the real hub Bend source** (`src/core/thin-pace.bend`, `client.bend`, `thin.bend`, `thinq.bend`) to C and then machine code. Native, Bend-JS and plain TS produced **identical digests** on identical generated input in every run.
-* Native Bend is **2.3-2.7x faster than the Bend JS emit** on these kernels, with 3-30x less memory, and **slower than plain TypeScript on all three: 3.6x (broadcast), 5.5x (history policy), 45-95x (status)**. It did not use extra cores (1 thread = default).
+* Native Bend is **1.4-2.7x faster than the Bend JS emit** on these kernels (broadcast 2.3x, history 2.7x, status 1.4x against the hub-style JS build and 2.7x against the raw emit), with 3-38x less memory, and **slower than plain TypeScript on all three: 3.6x (broadcast), 5.5x (history policy), 45-95x (status)**. It did not use extra cores (1 thread = default).
 * The native runtime did **not** show the bend#1007 slowdown: 2,000 iterations of two kernels and 1,000 iterations of a 20x bigger heap stay flat in time and RSS.
 * **The hub cannot be emitted to native today, for two independent reasons.** (1) The C backend refuses any effect def without a `.c` twin, and 212 defs in `src/` import only `.js` (one `.c`: `mem`). (2) The whole-hub C emit does not fit 8 GiB, with the stock compiler or with the build coordinator's low-memory compiler.
 * A **Rust host (2.7 MB, 10 MB RSS) with rusqlite and a WebSocket listener, calling the native Bend policy as a child process**, answered `/hello` **byte for byte identical to the real JS hub** and four `/history` pages and their WebSocket replies identical to a bun:sqlite+TS oracle. The boundary is cheap in bytes (24.6 KB in, 0.8 KB out) but the Bend compute behind it dominates, so the page path was **9x slower than Bun+TS** (3.70 vs 0.405 ms).
@@ -146,7 +146,7 @@ Boundary breakdown for `/history` (the host's own counters, averaged over all 2,
 
 Only what the numbers support:
 
-* Replacing the Bend **JS** build by native Bend would make these three kernels 2.3-2.7x faster and cut their memory 3-30x. It would not reach plain TS. Where the hub's hot work is "Bend on persistent tries", native Bend sits between Bend-JS and TS, closer to Bend-JS.
+* Replacing the Bend **JS** build by native Bend would make these three kernels 1.4-2.7x faster and cut their memory 3-38x. It would not reach plain TS. Where the hub's hot work is "Bend on persistent tries", native Bend sits between Bend-JS and TS, closer to Bend-JS.
 * The fraction of a real hub's CPU time spent in such kernels is **unmeasured** here (the earlier report also did not measure it), so no whole-hub speedup is predicted. Amdahl's bound from the earlier report applies unchanged: kernels at 10% of CPU cap any gain near 1.1x.
 * The part that is clearly large is process size: a Rust host with SQLite and a listener is 10 MB RSS and 2.7 MB on disk for the paths spiked, against 133 MB / 106 MB for the JS hub. That is the cost of the paths implemented (two routes and one WebSocket echo), not of a complete hub.
 
@@ -162,7 +162,7 @@ Only what the numbers support:
 
 ## 7. Recommendation
 
-Do not build a whole native-Bend hub. On the three real hub kernels native Bend beats Bend-JS by about 2.5x but loses to plain TS by 3.6-95x; the compiler cannot emit the hub under 8 GiB and refuses it outright until every effect has a C twin. Keep Bend for the small pure policies where laws pay (routing decisions, protocol, geometry), run them natively as a child or later through a C ABI **off the hot path**, and put the mutable indexes and IO in Rust (or keep them in TS) where the measured kernels are 4-100x cheaper. If a native hub is wanted for size and memory, the Rust host route is the one that has shown a working slice (byte-identical `/hello`, 10 MB RSS); budget it as a rewrite of the 37 effects, not as a recompile. Re-measure the unmeasured items first if the decision turns on them: the share of hub CPU in these kernels, TS at 20,000 threads, a persistent policy child, and a Bend representation (maps, strings) tuned for native.
+Do not build a whole native-Bend hub. On the three real hub kernels native Bend beats Bend-JS by 1.4-2.7x but loses to plain TS by 3.6-95x; the compiler cannot emit the hub under 8 GiB and refuses it outright until every effect has a C twin. Keep Bend for the small pure policies where laws pay (routing decisions, protocol, geometry), run them natively as a child or later through a C ABI **off the hot path**, and put the mutable indexes and IO in Rust (or keep them in TS) where the measured kernels are 4-100x cheaper. If a native hub is wanted for size and memory, the Rust host route is the one that has shown a working slice (byte-identical `/hello`, 10 MB RSS); budget it as a rewrite of the 37 effects, not as a recompile. Re-measure the unmeasured items first if the decision turns on them: the share of hub CPU in these kernels, TS at 20,000 threads, a persistent policy child, and a Bend representation (maps, strings) tuned for native.
 
 ## Reproduce
 
