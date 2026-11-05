@@ -104,3 +104,21 @@ test('Settings shut at the press puts back the thread from the picture the host 
  assert.deepEqual(kids(app).map(k=>k.tag),['header','aside','main']);assert.equal(at(kids(app)[2],'class'),'thread-view');
  assert.equal(at(kids(kids(app)[0])[0],'class'),'thread','the thread’s top bar');s(true);assert.equal(f.showing,false);
 });
+test('what presses opened is kept across a reload for the same hub and pairing, fields blank, others dropped',async()=>{
+ const {PressFeedback,T}=await load();
+ const mem=new Map(),storage={getItem:k=>mem.has(k)?mem.get(k):null,setItem:(k,v)=>mem.set(k,v),removeItem:k=>mem.delete(k),key:i=>[...mem.keys()][i],get length(){return mem.size;}};
+ const el=(tag,key,attrs,ks=[])=>({$:T.El,tag,key,attrs:L(Object.entries(attrs).map(([name,value])=>({$:T.At,name,value}))),kids:L(ks)});
+ const {page}=fixture(T);
+ const settings=el('main','settings',{class:'settings-view'},[el('input','q',{id:'q',value:'secret path'})]);
+ const withSettings=()=>{const p=page();const app=kids(p)[0];return {...p,kids:L([{...app,kids:L([kids(app)[0],settings])}])};};
+ let scope='hubA';mem.set('bp-press-v1:old','[]');
+ const f=new PressFeedback(()=>{},64,{storage,scope:()=>scope});
+ f.seen(page(),'thread:A');const s=f.choice('flag','settings','thread:A');s(true);f.seen(withSettings(),'thread:A');
+ await new Promise(r=>setTimeout(r,2100));
+ assert.ok(mem.has('bp-press-v1:hubA'));assert.ok(!mem.has('bp-press-v1:old'),'another pairing’s entries go');
+ assert.ok(!mem.get('bp-press-v1:hubA').includes('secret path'),'a field’s value is never stored');
+ const g=new PressFeedback(()=>{},64,{storage,scope:()=>scope});g.seen(page({n:1}),'thread:A');
+ g.choice('flag','settings','thread:A');assert.equal(g.active?.kind,'settings','after a reload: drawn at the first press');
+ scope='hubB';const h=new PressFeedback(()=>{},64,{storage,scope:()=>scope});h.seen(page({n:2}),'thread:A');h.choice('flag','settings','thread:A');assert.equal(h.showing,false,'another hub: nothing');
+ mem.set('bp-press-v1:hubC','{not json');scope='hubC';const k=new PressFeedback(()=>{},64,{storage,scope:()=>scope});k.seen(page({n:3}),'thread:A');assert.equal(k.learned.size,0,'a broken store is ignored');
+});

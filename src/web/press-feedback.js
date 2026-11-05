@@ -69,11 +69,55 @@ export function regions(page) {
 }
 const shape = found => REGIONS.map(([k]) => found.has(k) ? '1' : '0').join('');
 
+// What was learned is kept across reloads (an app start drew each menu's
+// first open from the hub again): in storage under the hub, the pairing
+// identity, the bundle and the language (scope()), at most STORE_BYTES,
+// fields' values left out (what the hub's view fills in), written a while
+// after a press taught something.
+const STORE = 'bp-press-v1:', STORE_BYTES = 1024 * 1024;
+const blank = n => {
+  if (!is(n, 'El')) return n;
+  const field = ['input', 'textarea', 'select', 'option'].includes(n.tag);
+  const attrs = field ? list(items(n.attrs).filter(a => !is(a, 'At') || !['value', 'checked', 'selected'].includes(a.name))) : n.attrs;
+  return { ...n, attrs, kids: n.tag === 'textarea' ? list([]) : list(items(n.kids).map(blank)) };
+};
+const shaped = n => n === null || is(n, 'El') && typeof n.tag === 'string' && n.attrs && n.kids;
 export class PressFeedback {
-  constructor(changed, limit = 64) { this.changed = changed;this.limit = limit;this.learned = new Map();this.clear(); }
+  // store: {storage (localStorage), scope: () => a key for this hub and page, or ''}
+  constructor(changed, limit = 64, store = null) { this.changed = changed;this.limit = limit;this.store = store;this.learned = new Map();this.clear(); }
+  restore() {
+    const scope = this.store?.scope?.() || '';
+    if (!scope || scope === this.storedFor) return;
+    this.storedFor = scope;
+    try {
+      const rows = JSON.parse(this.store.storage.getItem(STORE + scope) || '[]');
+      for (const [key, e] of Array.isArray(rows) ? rows : []) {
+        if (typeof key !== 'string' || this.learned.has(key) || !e || !REGIONS.some(([k]) => k === e.kind) || !shaped(e.node) || typeof e.parent !== 'string') continue;
+        if (!(e.along || []).every(x => x && shaped(x.node) && x.node && typeof x.parent === 'string')) continue;
+        this.learned.set(key, e);
+      }
+      while (this.learned.size > this.limit) this.learned.delete(this.learned.keys().next().value);
+    } catch {}
+  }
+  persist() {
+    if (!this.store || this.saving) return;
+    this.saving = setTimeout(() => {
+      this.saving = 0;
+      const scope = this.storedFor;
+      if (!scope) return;
+      try {
+        let rows = [...this.learned].map(([key, e]) => [key, { ...e, node: e.node && blank(e.node), along: (e.along || []).map(x => ({ ...x, node: blank(x.node) })) }]), text = JSON.stringify(rows);
+        while (text.length > STORE_BYTES && rows.length) { rows = rows.slice(1);text = JSON.stringify(rows); }
+        const st = this.store.storage;
+        for (let i = st.length - 1; i >= 0; i--) { const k = st.key(i);if (k && k.startsWith(STORE) && k !== STORE + scope) st.removeItem(k); }
+        st.setItem(STORE + scope, text);
+      } catch {}
+    }, 2000);
+  }
   // a page the hub drew for `target`
   seen(page, target) {
     if (page === this.seenNode) return;
+    this.restore();
     this.seenNode = page;this.now = regions(page);this.nowFor = target;
     // (a pane as the hub drew it, any destination: the shape of a first open)
     if (this.now.has('viewer')) this.shell = this.now.get('viewer');
@@ -92,6 +136,7 @@ export class PressFeedback {
     const along = (ALONG[kind] || []).map(([k]) => this.now.get('+' + k)).filter(Boolean);
     this.learned.set(p.key, { kind, node: after?.node || null, parent: parent.parent, parentClass, index: parent.index, prev: parent.prev, along });
     while (this.learned.size > this.limit) this.learned.delete(this.learned.keys().next().value);
+    this.persist();
   }
   parentClass(parentSig) {
     // a shut region's parent, as the hub draws it now
