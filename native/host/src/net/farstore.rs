@@ -244,4 +244,23 @@ mod tests {
         assert_eq!(r.iter().filter(|e| e["$"] == "MessagePosted").count(), 1); assert_eq!(r[1]["text"], "m59");
         let _ = std::fs::remove_dir_all(h);
     }
+    /// Start time and memory of a big mirror (ignored: run by test/gpui/net/boat-scale-job.sh; prints one number each).
+    #[test] #[ignore] fn scale_a_million_line_mirror() {
+        use std::io::Write;
+        fn rss_kb() -> u64 { std::fs::read_to_string("/proc/self/status").unwrap().lines().find(|l| l.starts_with("VmRSS:")).and_then(|l| l.split_whitespace().nth(1)?.parse().ok()).unwrap_or(0) }
+        let h = home("scale"); std::fs::create_dir_all(h.join("far")).unwrap();
+        let n: u64 = std::env::var("SCALE_LINES").ok().and_then(|v| v.parse().ok()).unwrap_or(1_000_000);
+        { let mut f = std::io::BufWriter::new(std::fs::File::create(h.join("far/L.jsonl")).unwrap());
+          writeln!(f, r#"{{"epoch":"e","tail":0}}"#).unwrap();
+          for t in 0..1000u64 { writeln!(f, "{}", thread(t + 1, &format!("t{t}")).json()).unwrap() }
+          for i in 1001..=n { writeln!(f, "{}", msg(i, &format!("t{}", i % 1000), if i % 2 == 0 { "user" } else { "assistant" }, "a message of about a hundred bytes, the kind a thread holds many thousands of, for a size check").json()).unwrap() }
+          writeln!(f, r#"{{"head":{n}}}"#).unwrap(); }
+        let before = rss_kb(); let t0 = std::time::Instant::now();
+        let fs = FarStore::open(&h).unwrap();
+        let open = t0.elapsed(); let after = rss_kb();
+        let t1 = std::time::Instant::now(); let p = { use crate::api::FarView; fs.page("L~t7", 0, 32).unwrap() }; let page = t1.elapsed();
+        let t2 = std::time::Instant::now(); let r = fs.replay_events("L"); let replay = t2.elapsed();
+        println!("SCALE lines={n} open={:.2}s rss_before={}MB rss_after={}MB (+{}MB) page(32)={:.2}ms rows={} replay={:.2}s replay_events={}", open.as_secs_f64(), before / 1024, after / 1024, (after - before) / 1024, page.as_secs_f64() * 1000.0, p.rows.len(), replay.as_secs_f64(), r.len());
+        let _ = std::fs::remove_dir_all(h);
+    }
 }
