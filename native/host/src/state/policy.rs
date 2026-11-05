@@ -16,7 +16,8 @@ use std::sync::{Mutex, MutexGuard};
 /// records) and nothing that grows with the log for its own sake (`stopped.<msg>`, `failed.<msg>`, token totals, uber op lines, session and
 /// seen counts...). A policy that starts reading another family adds its prefix here.
 const KEEP: &[&str] = &["settle.", "autosettle.", "launch.", "launched.", "thread.parent.", "bg.", "watch.", "order.wait.", "wake.", "wakes.", "lock.", "locks.",
-    "secret.ask.", "liveness.", "star.nudge.", "restart.retry", "provider.resume.", "thread.config.hold.", "watchdog.", "alert.", "summary.", "notify.", "push.webhook", "told.", "project.dormant."];
+    "secret.ask.", "liveness.", "star.nudge.", "restart.retry", "provider.resume.", "thread.config.hold.", "watchdog.", "alert.", "summary.", "notify.", "push.webhook", "told.", "project.dormant.",
+    "order.enabled", "order.estimates", "account.thread."]; // the action dispatcher's facts (Fab.at / Fab.want, Accounts.named): tiny values, one account key per thread
 // `told.` is a ledger that grows with the log until the minute tick prunes it (Told.prune: 30 days, 2000 records, run by `Core::tick`): only
 // its keys are kept (`lean_value`), the prune reads nothing else. A turn's input (launch.input.<t>, fallback.input.<t>: 10-20 KB each) is kept the
 // same way, key only, for Input.prune (the minute tick removes those of threads at rest); a thread's riding mail (ride.) is never kept.
@@ -202,7 +203,7 @@ mod tests {
     fn keys(evs: &[Value]) -> Vec<String> { evs.iter().filter_map(|e| e["key"].as_str().map(String::from)).collect() }
 
     #[test] fn lean_keeps_what_policies_read_and_drops_what_grows() {
-        for k in ["autosettle.quiet.t1", "liveness.t1", "wake.w1", "lock.merge", "launch.t2", "alert.t1", "told.k1-1", "settle.done", "launch.input.t1", "fallback.input.t1"] { assert!(lean_keeps(k), "{k}"); }
+        for k in ["autosettle.quiet.t1", "liveness.t1", "wake.w1", "lock.merge", "launch.t2", "alert.t1", "told.k1-1", "settle.done", "launch.input.t1", "fallback.input.t1", "order.enabled", "order.estimates", "account.thread.t1.claude"] { assert!(lean_keeps(k), "{k}"); }
         for k in ["stopped.m1", "failed.m1", "ride.t1", "tok.t.t1", "uber.op.u.m.1", "usage.t1", "todos.t1", "session.t1.claude"] { assert!(!lean_keeps(k), "{k}"); }
     }
     #[test] fn passive_mode_ticks_nothing_and_asks_for_no_summary() {
