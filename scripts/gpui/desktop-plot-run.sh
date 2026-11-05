@@ -20,7 +20,7 @@ python3 - "$R" <<'PY'
 import json,sys,time
 R=sys.argv[1]; NOW=int(time.time())
 ev=[{"$":"ProjectCreated","id":"p1","title":"ecc","root":R+"/proj","at":NOW},{"$":"ThreadCreated","id":"t1","project":"p1","title":"ecc83 board","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":NOW}]
-open(R+"/home/events.jsonl","w").write("".join(json.dumps(e)+"\n" for e in ev))
+open(R+"/home/events.jsonl","w").write("".join(json.dumps(e,separators=(",",":"))+"\n" for e in ev))   # compact, as the hub writes it: its agents world reads lines by pattern
 PY
 export LC_ALL=C
 # one scope for everything; the inner shell stops what it started (only its own pids) on any exit
