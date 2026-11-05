@@ -163,7 +163,7 @@ port waits for the person's decision.
 
 <!-- law-map: generated below by scripts/gpui/law-map.py -->
 
-Laws in LAWS.bend: 3253. bend 1085, rust 312, unported 1247, client 482, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
+Laws in LAWS.bend: 3253. bend 1079, rust 318, unported 1247, client 482, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
 
 | law | status | seed | file | note |
 |---|---|---|---|---|
@@ -2827,12 +2827,12 @@ Laws in LAWS.bend: 3253. bend 1085, rust 312, unported 1247, client 482, window 
 | `sec_handle_shape` | unported | seed R +-10% | `src/core/json.bend` |  |
 | `sec_changes_empty` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `tailnet_announce_off` | bend | seed K +-10% | `src/core/tailnet.bend` |  |
-| `auth_owner_pair_untrusted` | bend | seed K +-10% | `src/core/auth.bend` |  |
-| `auth_owner_pair_routes` | bend | seed K +-10% | `src/core/auth.bend` |  |
-| `auth_owner_pair_rebound` | bend | seed K +-10% | `src/core/auth.bend` |  |
-| `auth_pair_proof_needs_token` | bend | seed K +-10% | `src/core/auth.bend` |  |
-| `auth_pair_proof_not_empty` | bend | seed K +-10% | `src/core/auth.bend` |  |
-| `auth_pair_proof_stale` | bend | seed K +-10% | `src/core/auth.bend` |  |
+| `auth_owner_pair_untrusted` | rust `owner_pair_needs_everything` | map | `src/core/auth.bend` |  |
+| `auth_owner_pair_routes` | rust `owner_pair_needs_everything` | map | `src/core/auth.bend` |  |
+| `auth_owner_pair_rebound` | rust `owner_pair_needs_everything` | map | `src/core/auth.bend` |  |
+| `auth_pair_proof_needs_token` | rust `pair_proof_binds_asker_target_and_time` | map | `src/core/auth.bend` |  |
+| `auth_pair_proof_not_empty` | rust `pair_proof_binds_asker_target_and_time` | map | `src/core/auth.bend` |  |
+| `auth_pair_proof_stale` | rust `pair_proof_binds_asker_target_and_time` | map | `src/core/auth.bend` |  |
 | `fq_tools` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `fq_fields` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `fq_at` | unported | seed R +-10% | `src/core/hub.bend` |  |
