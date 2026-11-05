@@ -3,7 +3,7 @@
 //! theirs, the newest reply and its time, and when it last wrote to each thread. Bounded by threads and thread pairs.
 use super::json::nat_read;
 use crate::state::{link_from, State};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 #[derive(Default, Debug, Clone)]
 pub struct Sum {
@@ -24,6 +24,10 @@ pub struct Ext {
     /// TaskDelivered: tasks whose result was handed on
     pub delivered: HashSet<String>,
     pub sum: HashMap<String, Sum>,
+    /// task index, kept by the fold so the writer-path checks do not scan the task table (it only grows): a parent's unfinished tasks, and
+    /// the tasks whose child is a thread (smallest task id first: the one `parent_of` reads)
+    pub kids_open: HashMap<String, u32>,
+    pub child_tasks: HashMap<String, BTreeSet<String>>,
 }
 
 fn until(s: &str, end: char) -> String { s.chars().take_while(|c| *c != end).collect() }
@@ -73,6 +77,27 @@ pub fn on_post(st: &mut State, th: &str, id: &str, at: u64, msg: Option<(&str, &
         let e = s.sent.entry(th.to_string()).or_insert(0); *e = (*e).max(at);
     }
 }
+/// the task's (parent, child, finished) before a change, for `task_index`
+pub fn task_before(st: &State, task: &str) -> Option<(String, String, bool)> { st.tasks.get(task).map(|t| (t.0.clone(), t.1.clone(), t.2)) }
+/// keep the task indexes in step with a change of task `id`: take back what it was counted as, count what it is now
+pub fn task_index(st: &mut State, id: &str, before: Option<(String, String, bool)>) {
+    if let Some((p, c, term)) = before {
+        if !term && !p.is_empty() { if let Some(n) = st.ext.kids_open.get_mut(&p) { *n = n.saturating_sub(1); if *n == 0 { st.ext.kids_open.remove(&p); } } }
+        if !c.is_empty() { if let Some(s) = st.ext.child_tasks.get_mut(&c) { s.remove(id); if s.is_empty() { st.ext.child_tasks.remove(&c); } } }
+    }
+    if let Some((p, c, term)) = st.tasks.get(id).map(|t| (t.0.clone(), t.1.clone(), t.2)) {
+        if !term && !p.is_empty() { *st.ext.kids_open.entry(p).or_insert(0) += 1; }
+        if !c.is_empty() { st.ext.child_tasks.entry(c).or_default().insert(id.to_string()); }
+    }
+}
+/// Task.of_child through the index: the thread's task (smallest id when it has several), as (parent, finished)
+pub fn task_of_child<'a>(st: &'a State, child: &str) -> Option<(&'a str, bool)> {
+    let id = st.ext.child_tasks.get(child)?.iter().next()?;
+    st.tasks.get(id).map(|t| (t.0.as_str(), t.2))
+}
+/// Work.kids through the index: a thread's unfinished child tasks
+pub fn open_kids(st: &State, parent: &str) -> usize { st.ext.kids_open.get(parent).copied().unwrap_or(0) as usize }
+
 pub fn delivered(st: &mut State, task: &str) { st.ext.delivered.insert(task.to_string()); }
 #[allow(dead_code)] pub fn digits(s: &str) -> Option<u64> { nat_read(s) }
 
@@ -91,5 +116,36 @@ mod tests {
         assert_eq!(classify_kind("a", "t:a:lr-1", "x"), "launch");
         assert_eq!(classify_kind("a", "t:a:td-1", "x"), "task");
         assert_eq!(classify_kind("", "m1", "Backplane restarted while you were working"), "carry");
+    }
+
+    // the indexes against a plain scan of the task table, on a log with finished, cancelled, delivered, re-delegated and re-parented tasks
+    #[test] fn the_task_indexes_equal_the_scan() {
+        let mut st = State::new();
+        let lines = [
+            r#"{"$":"TaskDelegated","task":"k1","parent":"a","child":"b","depth":1,"provider":"x","model":"","at":1}"#,
+            r#"{"$":"TaskDelegated","task":"k2","parent":"a","child":"c","depth":1,"provider":"x","model":"","at":2}"#,
+            r#"{"$":"TaskDelegated","task":"k3","parent":"b","child":"d","depth":1,"provider":"x","model":"","at":3}"#,
+            r#"{"$":"TaskStateSet","task":"k2","state":"cancelled","summary":"","at":4}"#,
+            r#"{"$":"TaskStateSet","task":"k3","state":"running","summary":"","at":5}"#,
+            r#"{"$":"TaskDelivered","task":"k2","at":6}"#,
+            r#"{"$":"TaskDelegated","task":"k1","parent":"z","child":"b","depth":1,"provider":"x","model":"","at":7}"#, // k1 re-parented
+            r#"{"$":"TaskDelegated","task":"k4","parent":"z","child":"b","depth":1,"provider":"x","model":"","at":8}"#, // a second task for child b
+            r#"{"$":"TaskStateSet","task":"k4","state":"done","summary":"","at":9}"#,
+            r#"{"$":"TaskStateSet","task":"ghost","state":"queued","summary":"","at":10}"#, // a task never delegated
+            r#"{"$":"TaskDelegated","task":"k3","parent":"a","child":"e","depth":1,"provider":"x","model":"","at":11}"#, // k3 re-delegated to another child
+            r#"{"$":"TaskStateSet","task":"k3","state":"failed","summary":"","at":12}"#,
+            r#"{"$":"TaskDelegated","task":"k5","parent":"","child":"","depth":1,"provider":"x","model":"","at":13}"#,
+        ];
+        for (i, l) in lines.iter().enumerate() {
+            st.apply_line(l);
+            for th in ["a", "b", "c", "d", "e", "z", "ghost", "", "nobody"] {
+                let kids = st.tasks.values().filter(|t| t.0 == th && !th.is_empty() && !t.2).count();
+                assert_eq!(open_kids(&st, th), kids, "open kids of {th:?} after line {i}");
+                let scan = st.tasks.iter().filter(|(_, t)| t.1 == th && !th.is_empty()).min_by(|a, b| a.0.cmp(b.0)).map(|(_, t)| (t.0.as_str(), t.2));
+                assert_eq!(task_of_child(&st, th), scan, "task of child {th:?} after line {i}");
+            }
+        }
+        assert_eq!(open_kids(&st, "z"), 1, "k1 (re-parented, unfinished) counts under z; k4 is done");
+        assert_eq!(task_of_child(&st, "b"), Some(("z", false)), "child b: k1 sorts before k4");
     }
 }

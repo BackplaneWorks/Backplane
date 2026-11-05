@@ -46,7 +46,7 @@ fn live(st: &State, th: &str) -> liveness::Live { liveness::read(&st.get(&livene
 fn parent(st: &State, th: &str) -> String {
     let by: String = st.get(&format!("launch.{th}"), "").chars().skip(1).collect();
     if !by.is_empty() { return by }
-    st.tasks.values().find(|t| t.1 == th).map_or(String::new(), |t| if t.2 { String::new() } else { t.0.clone() })
+    super::ext::task_of_child(st, th).map_or(String::new(), |(p, finished)| if finished { String::new() } else { p.to_string() })
 }
 fn rows(st: &State, th: &str) -> usize {
     let n = |k: &str| st.get(&format!("{k}{th}"), "").split('\n').filter(|l| !l.is_empty()).count();
@@ -61,7 +61,7 @@ fn active(st: &State, th: &str) -> bool {
     if st.get(&format!("thread.config.hold.{th}"), "") == "on" || ephemeral || !st.get(&format!("provider.resume.{th}"), "").is_empty() { return false }
     let waiting = st.queue.get(th).map_or(false, |q| q.iter().any(|(m, _)| !m.starts_with("handoff:")));
     let starting = waiting && t.worktree_mode && t.worktree.is_empty();
-    let kids = st.tasks.values().filter(|k| k.0 == th && !k.2).count();
+    let kids = super::ext::open_kids(st, th);
     let executing = t.turn == Turn::Running || starting || kids + rows(st, th) > 0;
     executing && t.pending == 0 && !st.asks.values().any(|(a, open)| *open && a == th)
 }

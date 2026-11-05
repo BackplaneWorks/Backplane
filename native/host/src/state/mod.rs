@@ -209,7 +209,9 @@ impl State {
             "BotDeleted" => { let id = s(e, "id")?; self.bot_threads.remove(id); }
             "TaskDelegated" => {
                 let (task, parent, child) = (s(e, "task")?, s(e, "parent")?, s(e, "child")?); n(e, "depth")?;
+                let before = fam::ext::task_before(self, task);
                 self.tasks.insert(task.into(), (parent.into(), child.into(), false, TaskSt::Queued));
+                fam::ext::task_index(self, task, before);
                 // State.delegated -> State.task_parent: seed thread.parent.<child> once, unless a bot's thread delegated
                 let (parent, child) = (s(e, "parent")?, s(e, "child")?);
                 if !self.bot_threads.values().any(|t| t == parent) {
@@ -218,7 +220,9 @@ impl State {
                 }
             }
             "TaskStateSet" => { let (task, want) = (s(e, "task")?, TaskSt::parse(s(e, "state")?).unwrap_or(TaskSt::Cancelled)); s(e, "summary")?;
-                let t = self.tasks.entry(task.into()).or_insert((String::new(), String::new(), true, TaskSt::Cancelled)); t.3 = TaskSt::next(t.3, want); t.2 = t.3.terminal(); }
+                let before = fam::ext::task_before(self, task);
+                let t = self.tasks.entry(task.into()).or_insert((String::new(), String::new(), true, TaskSt::Cancelled)); t.3 = TaskSt::next(t.3, want); t.2 = t.3.terminal();
+                fam::ext::task_index(self, task, before); }
             "AskOpened" => { let (id, th) = (s(e, "id")?, s(e, "thread")?); self.asks.insert(id.into(), (th.into(), true)); }
             "AskClosed" => { let id = s(e, "id")?; if self.lean { self.asks.remove(id); } else if let Some(a) = self.asks.get_mut(id) { a.1 = false; } else { self.asks.insert(id.into(), (String::new(), false)); } }
             "TurnQueued" => { let (th, msg, text) = (s(e, "thread")?, s(e, "msg")?, s(e, "text")?); self.queue.entry(th.into()).or_default().push((msg.into(), text.into())); }
