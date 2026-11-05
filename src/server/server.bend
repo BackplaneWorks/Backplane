@@ -6214,11 +6214,11 @@ def Machines.loop(fuel: Nat, +inbox: Chan(Msg), +ack: Chan(Unit), +on: Bool, +po
         now : String <- Machines.run(TN.Pairing.plan(), inbox, ack, on, port, extra, last)
         Machines.loop(f, inbox, ack, on, port, extra, now)
 
-def Machines.start(+inbox: Chan(Msg), +cfg: Cfg) -> IO(Unit):
+def Machines.start(+inbox: Chan(Msg), +on: Bool, +port: U32) -> IO(Unit):
   do IO<Unit>:
     extra : String <- Env.get("BACKPLANE_PEERS", "")
     +ack : Chan(Unit) <- Chan.new(Unit, 1)
-    IO.spawn(Unit, Machines.loop(Fuel.forever(), inbox, ack, Cfg.tailnet(cfg), Cfg.port(cfg), extra, ""))
+    IO.spawn(Unit, Machines.loop(Fuel.forever(), inbox, ack, on, port, extra, ""))
 
 def Main.version() -> String:
   VR.Version.current()
@@ -19357,7 +19357,7 @@ def Listen.up(l: Listener, +web: String, +inbox: Chan(Msg), +cfg: Cfg, +addr: St
     Log.info("web server on: " ++ addr)
     IO.spawn(Unit, Accept.loop(Fuel.forever(), l, 1, web, inbox, True{}, Net.token(Cfg.net(cfg)), "", Nil{}))
     Tailnet.start(Cfg.net(cfg), Cfg.host(cfg), Cfg.port(cfg), web, inbox)
-    Machines.start(inbox, cfg)
+    Machines.start(inbox, Cfg.tailnet(cfg), Cfg.port(cfg))
 
 def Listen.got(r: Result<&1, &1, U32 & String, Listener>, +web: String, +inbox: Chan(Msg), +cfg: Cfg, +addr: String, k: Unit -> IO(Unit)) -> IO(Unit):
   match r:
@@ -20232,7 +20232,7 @@ def Main.serve(l: Listener, h: Hub, +web: String, +inbox: Chan(Msg), +cfg: Cfg, 
     IO.spawn(Unit, AccountsJob.loop(Fuel.forever(), inbox, Cfg.home(cfg), ""))
     IO.spawn(Unit, Od.resume(inbox, Cfg.home(cfg)))
     Self.post(inbox, KProbe{True{}})
-    Machines.start(inbox, cfg)
+    Machines.start(inbox, Cfg.tailnet(cfg), Cfg.port(cfg))
     IO.spawn(Unit, Hub.loop(Fuel.forever(), h, inbox, tok))
     Upgrade.start(cfg, inbox)
     front(inbox)
