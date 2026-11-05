@@ -6,7 +6,6 @@ const [root,port]=[process.argv[2],Number(process.argv[3])];
 const token=readFileSync(root+'/home/token','utf8').trim();
 const c=await client({host:'127.0.0.1',port,token});
 const show=(m,r)=>console.log(`probe ${m}:`,r?JSON.stringify(r.o).slice(0,500):'NO REPLY in 8 s');
-const state=JSON.parse(readFileSync(root+'/fixture.json','utf8'));
 let thread=null;await new Promise(r=>setTimeout(r,1500));
 for(const it of c.logItems){if(it.$==='ThreadCreated'||it.t==='ThreadCreated'){thread=it.id;break}}
 console.log('probe thread:',thread);
