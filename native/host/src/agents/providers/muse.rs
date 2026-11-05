@@ -157,13 +157,19 @@ mod tests {
         raw.lines().filter_map(|l| project(&serde_json::from_str(l).unwrap())).collect()
     }
     /// One turn, as the actor runs it. Returns the projected events and every line written to the process.
-    pub async fn run(prog: &Path, d: &mut dyn Driver, a: &TurnIn, provider: &str, answer: &str, extra_env: &[(String, String)]) -> (Vec<String>, Vec<String>) {
+    async fn run_once(prog: &Path, d: &mut dyn Driver, a: &TurnIn, provider: &str, answer: &str, extra_env: &[(String, String)]) -> (Vec<String>, Vec<String>, bool) {
         let mut env = d.env(a); env.extend(extra_env.iter().cloned());
-        let mut p = proc::spawn(prog, &d.argv(a), Path::new(&a.cwd), None, &env).unwrap();
+        let mut p = match proc::spawn(prog, &d.argv(a), Path::new(&a.cwd), None, &env) { Ok(p) => p, Err(e) => return (vec![format!("SPAWN {e}")], vec![], e.raw_os_error() == Some(26)) };
         let mut wrote = vec![]; let mut out = vec![]; let mut cx = Cx::new(&a.thread); cx.running = true;
         for l in d.start(a) { wrote.push(l.clone()); p.input.send(l).await.unwrap(); }
         'turn: loop {
-            let Ok(Some(l)) = tokio::time::timeout(Duration::from_secs(20), p.lines.recv()).await else { out.push("TIMEOUT".into()); break };
+            let l = match tokio::time::timeout(Duration::from_secs(20), p.lines.recv()).await {
+                Ok(Some(l)) => l,
+                // stdout closed: the process ended before the turn did. Say how, with the tail of its stderr (a closed pipe is not a slow one).
+                Ok(None) => { let e = tokio::time::timeout(Duration::from_secs(5), p.exit).await; let (txt, busy) = match e { Ok(Ok(x)) => (format!("EXITED code={:?} signal={:?} stderr={}", x.code, x.signal, x.stderr.trim()), x.stderr.contains("Text file busy")), _ => ("EXITED (no status)".to_string(), false) };
+                    out.push(txt); return (out, wrote, busy) }
+                Err(_) => { out.push("TIMEOUT".into()); break }
+            };
             let line = serde_json::from_str::<Value>(&l).unwrap_or_else(|_| Value::String(l.clone()));
             let r = d.on_line(&line);
             for s in r.send { wrote.push(s.clone()); p.input.send(s).await.unwrap(); }
@@ -179,7 +185,17 @@ mod tests {
             }
         }
         proc::terminate(p.pid, Duration::from_millis(200));
-        (out, wrote)
+        (out, wrote, false)
+    }
+    /// A script written a moment ago can fail to exec with ETXTBSY when another test thread forks while its file is still open for writing (the child holds the
+    /// descriptor until its own exec). That is the harness's race, not the driver's: run the whole turn again, with a fresh driver state (start() resets it).
+    pub async fn run(prog: &Path, d: &mut dyn Driver, a: &TurnIn, provider: &str, answer: &str, extra_env: &[(String, String)]) -> (Vec<String>, Vec<String>) {
+        for _ in 0..8 {
+            let (out, wrote, busy) = run_once(prog, d, a, provider, answer, extra_env).await;
+            if !busy { return (out, wrote) }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        (vec!["TEXT FILE BUSY after 8 tries".into()], vec![])
     }
 }
 
