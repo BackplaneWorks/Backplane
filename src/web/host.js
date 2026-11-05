@@ -2468,6 +2468,8 @@ const PRESS_PICKS = ['aside.sidebar [data-on-click="select"]', 'aside.sidebar [d
   '.workspace-bar button[data-on-click="mech"]', '.workspace-bar button[data-on-click="rv-page"]',
   'button.model-chip[data-on-click="flag"]', 'button.tok-chip[data-on-click="flag"]', 'button.account-chip[data-on-click="acct-open"]',
   'button.gear[data-on-click="flag"]', 'button[data-on-click="ws-palette-open"]', 'button.find-open[data-on-click="thin-search-open"]',
+  // (the Files tab's folders, its path and Up: a folder seen before is drawn at the press)
+  'aside#viewer .fm-list button[data-on-click="fm-cd"]', 'aside#viewer .fm-bar button[data-on-click="fm-cd"]', 'aside#viewer .fm-bar button[data-on-click="fm-up"]',
   // (a run of tool calls' head, the sidebar's shelves and Settings'
   // categories, as disclosures do)
   '#timeline button.fold[data-on-click="fold"]', 'aside.sidebar button.shelf[data-on-click="toggle-settled"]', 'aside.sidebar button.shelf[data-on-click="side-settled"]',

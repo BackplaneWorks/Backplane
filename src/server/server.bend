@@ -30,6 +30,7 @@ import ./review-history.bend as REVHIST
 import ./message-context.bend as MSGHIST
 import ../core/fm.bend as FMP
 import ./restart-hold.bend as RHOLD
+import ./viewer-kept.bend as VKEPT
 import ../core/watchdog.bend as WD
 import ../core/tickplan.bend as TICK
 import ../core/stream-step.bend as SSTEP
@@ -2760,8 +2761,21 @@ def GitJob.text.k(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String,
     GitJob.reply(inbox, client, id, Bool.not(GT.Git.failed(r)), J.Json.obj([J.KV{"text", J.Str{r}}, J.KV{"thread", J.Str{thread}}]))
     GitJob.note(inbox, thread, Bool.pick(String, GT.Git.failed(r), "error", "info"), what ++ Bool.pick(String, String.is_empty(r), "", ": " ++ String.trim(r)))
 
-def GitJob.diff.k(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +r: String) -> IO(Unit):
-  GitJob.reply(inbox, client, id, Bool.not(GT.Git.failed(r)), J.Json.obj([J.KV{"diff", J.Str{r}}, J.KV{"thread", J.Str{thread}}]))
+# A thread's whole diff (Diff's own ask: from 0 to -1, client.bend's Dv.ask)
+# is kept hub-wide too, "diff.kept:<t>" (viewer-kept.bend), before the view
+# is answered: client.bend's Dv.kept draws it at the press while git runs
+# again; one git cannot make is not kept
+def GitJob.diff.kept(whole: Bool, +thread: String, +cwd: String, +r: String) -> IO(String):
+  match whole:
+    case True{}:
+      Bool.pick(IO(String), GT.Git.failed(r), VKEPT.ViewerKept.drop(thread, "diff.kept:" ++ thread),
+        VKEPT.ViewerKept.put(thread, cwd, "diff.kept:" ++ thread, J.Json.show(J.Json.obj([J.KV{"diff", J.Str{r}}]))))
+    case False{}: IO.pure(String, "")
+
+def GitJob.diff.k(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +whole: Bool, +r: String) -> IO(Unit):
+  do IO<Unit>:
+    +k : String <- GitJob.diff.kept(whole, thread, cwd, r)
+    GitJob.reply(inbox, client, id, Bool.not(GT.Git.failed(r)), J.Json.obj([J.KV{"diff", J.Str{r}}, J.KV{"thread", J.Str{thread}}]))
 
 # Before a thread's first turn there is no checkpoint yet (the turn takes
 # checkpoint 0 as it starts): nothing has changed since the thread began,
@@ -2955,7 +2969,7 @@ def GitJob.go(i: Nat, +tx: TextScope, +inbox: Chan(Msg), +client: U32, +id: Stri
     case 2n:
       IO.bind(Nat, Unit, GitJob.count(cwd, thread), n => IO.bind(String, Unit, GT.Git.checkpoint.capture(cwd, thread, n), r => IO.pure(Unit, Unit{})))
     case 3n:
-      IO.bind(String, Unit, GitJob.diff(cwd, thread, a, b), r => GitJob.diff.k(inbox, client, id, thread, r))
+      IO.bind(String, Unit, GitJob.diff(cwd, thread, a, b), r => GitJob.diff.k(inbox, client, id, thread, cwd, Bool.and(String.eq(a, "0"), String.eq(b, "-1")), r))
     case 4n:
       IO.bind(String, Unit, GT.Git.checkpoint.revert(cwd, thread, Maybe.default(&2, Nat, Nat.read(a), 0n)), r => GitJob.text.k(inbox, client, id, thread, "reverted to turn " ++ a, r))
     case 5n:
@@ -2974,7 +2988,9 @@ def GitJob.go(i: Nat, +tx: TextScope, +inbox: Chan(Msg), +client: U32, +id: Stri
 def GitJob.none(diff: Bool, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String) -> IO(Unit):
   match diff:
     case True{}:
-      GitJob.reply(inbox, client, id, True{}, J.Json.obj([J.KV{"diff", J.Str{""}}, J.KV{"thread", J.Str{thread}}, J.KV{"nogit", J.Str{cwd}}]))
+      do IO<Unit>:
+        +k : String <- VKEPT.ViewerKept.put(thread, cwd, "diff.kept:" ++ thread, J.Json.show(J.Json.obj([J.KV{"diff", J.Str{""}}, J.KV{"nogit", J.Str{cwd}}])))
+        GitJob.reply(inbox, client, id, True{}, J.Json.obj([J.KV{"diff", J.Str{""}}, J.KV{"thread", J.Str{thread}}, J.KV{"nogit", J.Str{cwd}}]))
     case False{}:
       GitJob.reply(inbox, client, id, False{}, J.Json.obj([J.KV{"text", J.Str{"not a git repository: " ++ cwd}}]))
 
@@ -3272,15 +3288,31 @@ def RefsJob.files(f: K.Files) -> List<&2, J.KV>:
 
 # what the thread's files may be compared with (Git.refs), and its
 # canonical board and schematic
-def RefsJob.reply(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +ls: List<&2, String>, f: K.Files) -> IO(Unit):
-  GitJob.reply(inbox, client, id, True{}, J.Json.obj(List.append(&2, J.KV, [J.KV{"thread", J.Str{thread}}, J.KV{"git", J.Str{HI.Hist.at(ls, 0n)}},
-    J.KV{"top", J.Str{HI.Hist.at(ls, 1n)}}, J.KV{"refs", J.Str{String.join(List.drop(&2, String, ls, 2n), "\n")}}], RefsJob.files(f))))
+# (kept hub-wide too, "refs.kept:<t>", before the view is answered:
+# viewer-kept.bend; client.bend's Rc.own draws the thread's own board's and
+# schematic's history from it at the press)
+def RefsJob.kept(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +r: J.Json) -> IO(Unit):
+  do IO<Unit>:
+    +k : String <- VKEPT.ViewerKept.put(thread, cwd, "refs.kept:" ++ thread, J.Json.show(r))
+    GitJob.reply(inbox, client, id, True{}, r)
+
+def RefsJob.result(+thread: String, +ls: List<&2, String>, f: K.Files) -> J.Json:
+  J.Json.obj(List.append(&2, J.KV, [J.KV{"thread", J.Str{thread}}, J.KV{"git", J.Str{HI.Hist.at(ls, 0n)}},
+    J.KV{"top", J.Str{HI.Hist.at(ls, 1n)}}, J.KV{"refs", J.Str{String.join(List.drop(&2, String, ls, 2n), "\n")}}], RefsJob.files(f)))
 
 def RefsJob.run(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String) -> IO(Unit):
   do IO<Unit>:
     out : String <- GT.Git.refs(cwd, thread)
     f : K.Files <- K.Files.read(cwd)
-    RefsJob.reply(inbox, client, id, thread, String.split(out, '\n'), f)
+    RefsJob.kept(inbox, client, id, thread, cwd, RefsJob.result(thread, String.split(out, '\n'), f))
+
+# A shown thread's answer read ahead (Kept.ahead): kept only
+def RefsJob.ahead(+thread: String, +cwd: String) -> IO(Unit):
+  do IO<Unit>:
+    out : String <- GT.Git.refs(cwd, thread)
+    f : K.Files <- K.Files.read(cwd)
+    +k : String <- VKEPT.ViewerKept.put(thread, cwd, "refs.kept:" ++ thread, J.Json.show(RefsJob.result(thread, String.split(out, '\n'), f)))
+    return Unit{}
 
 def FileJob.done(r: P.Ran, +inbox: Chan(Msg), +client: U32, +id: String) -> IO(Unit):
   match r:
@@ -3300,6 +3332,13 @@ def FileJob.run(+inbox: Chan(Msg), +client: U32, +id: String, +path: String, +ho
 def DirJob.sh() -> String:
   "cd \"$1\" 2>/dev/null || { echo 'no such folder'; exit 1; }; rr=$(pwd -P); [ -z \"$2\" ] || cd \"./$2\" 2>/dev/null || { echo 'no such folder'; exit 1; }; case \"$(pwd -P)/\" in \"$rr\"/*) ;; *) echo 'no such folder'; exit 1;; esac; for f in *; do [ -d \"$f\" ] && [ ! -L \"$f\" ] && printf 'd\\t0\\t%s\\n' \"$f\"; done | head -n 2000; for f in *; do [ -f \"$f\" ] && printf 'f\\t%s\\t%s\\n' \"$(wc -c < \"$f\" | tr -d ' ')\" \"$f\"; done | head -n 2000; true"
 
+# (each listing is also kept hub-wide for its thread and folder, before the
+# view is answered: viewer-kept.bend; a folder that cannot be listed is not)
+def DirJob.kept(r: P.Ran, +thread: String, +cwd: String, +rel: String) -> IO(String):
+  match r:
+    case P.Ran{0, out}: VKEPT.ViewerKept.put(thread, cwd, "fm.kept:" ++ thread ++ "\n" ++ rel, out)
+    case P.Ran{_, _}: VKEPT.ViewerKept.drop(thread, "fm.kept:" ++ thread ++ "\n" ++ rel)
+
 def DirJob.sent(r: P.Ran, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +rel: String) -> IO(Unit):
   match r:
     case P.Ran{0, out}:
@@ -3307,8 +3346,54 @@ def DirJob.sent(r: P.Ran, +inbox: Chan(Msg), +client: U32, +id: String, +thread:
     case P.Ran{_, +out}:
       GitJob.reply(inbox, client, id, False{}, J.Json.obj([J.KV{"text", J.Str{String.trim(out)}}, J.KV{"fmEntries", J.Str{""}}, J.KV{"fmError", J.Str{String.trim(out)}}, J.KV{"fmDir", J.Str{rel}}, J.KV{"thread", J.Str{thread}}]))
 
+# A folder listed ahead: kept only, no view is answered (DirJob.ahead)
+def DirJob.ahead.at(+thread: String, +cwd: String, +rel: String) -> IO(Unit):
+  do IO<Unit>:
+    +r : P.Ran <- P.Proc.run("sh", ["-c", DirJob.sh(), "sh", cwd, rel], "/")
+    +k : String <- DirJob.kept(r, thread, cwd, rel)
+    return Unit{}
+
+def DirJob.ahead.one(go: Bool, +thread: String, +cwd: String, +rel: String) -> IO(Unit):
+  match go:
+    case True{}: IO.spawn(Unit, DirJob.ahead.at(thread, cwd, rel))
+    case False{}: IO.pure(Unit, Unit{})
+
+def DirJob.claim(dir: Bool, +thread: String, +cwd: String, +rel: String) -> IO(String):
+  match dir:
+    case True{}: VKEPT.ViewerKept.claim(thread, cwd, "fm.kept:" ++ thread ++ "\n" ++ rel, "30000")
+    case False{}: IO.pure(String, "")
+
+def DirJob.ahead.each(es: List<&2, FMP.FEnt>, +thread: String, +cwd: String, +rel: String) -> IO(Unit):
+  match es:
+    case Nil{}: IO.pure(Unit, Unit{})
+    case FMP.FEnt{dir, _, +name} <> tail:
+      do IO<Unit>:
+        +go : String <- DirJob.claim(dir, thread, cwd, FMP.Fm.join(rel, name))
+        +sent : Unit <- DirJob.ahead.one(String.eq(go, "1"), thread, cwd, FMP.Fm.join(rel, name))
+        DirJob.ahead.each(tail, thread, cwd, rel)
+
+# A folder listed for a view has its first folders (8 at most) listed
+# ahead, each once in 30 s, so going into one draws its rows with the press's
+# answer
+def DirJob.children(r: P.Ran, +thread: String, +cwd: String, +rel: String) -> IO(Unit):
+  match r:
+    case P.Ran{0, +out}: DirJob.ahead.each(List.take(&2, FMP.FEnt, FMP.Fm.parse(out), 8n), thread, cwd, rel)
+    case P.Ran{_, _}: IO.pure(Unit, Unit{})
+
 def DirJob.run(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +rel: String) -> IO(Unit):
-  IO.bind(P.Ran, Unit, P.Proc.run("sh", ["-c", DirJob.sh(), "sh", cwd, rel], "/"), r => DirJob.sent(r, inbox, client, id, thread, cwd, rel))
+  do IO<Unit>:
+    +r : P.Ran <- P.Proc.run("sh", ["-c", DirJob.sh(), "sh", cwd, rel], "/")
+    +k : String <- DirJob.kept(r, thread, cwd, rel)
+    DirJob.sent(r, inbox, client, id, thread, cwd, rel)
+    DirJob.children(r, thread, cwd, rel)
+
+# A shown thread's Files root, listed ahead (Kept.ahead), with its first
+# folders
+def DirJob.ahead(+thread: String, +cwd: String) -> IO(Unit):
+  do IO<Unit>:
+    +r : P.Ran <- P.Proc.run("sh", ["-c", DirJob.sh(), "sh", cwd, ""], "/")
+    +k : String <- DirJob.kept(r, thread, cwd, "")
+    DirJob.children(r, thread, cwd, "")
 
 # a PDF's page drawn to a PNG for the window (which cannot draw a PDF), by
 # poppler's pdftoppm when this machine has it, kept in <home>/pdf per file
@@ -13597,6 +13682,57 @@ def Hub.thin.page.memo(on: Bool, +st: M.State, +context: ThinContext, +base: Str
     case True{}: TA.Memo.page.if(TA.Memo.page.on(st), TA.Actor.memos(ThinContext.actors(context)), base, ms, now)
     case False{}: None{}
 
+# A thin view's shown thread's viewer reads kept hub-wide (viewer-kept.bend),
+# given to its actor with the hub's info (client.bend's Fm.kept: a Files
+# folder seen before is drawn at the press), and that thread's Files root
+# listed ahead when none was listed in the last 30 s (DirJob.ahead: one
+# listing on its way at a time per thread), and what it may compare its
+# board with (history.refs, RefsJob.ahead) when not read in the last 5 min.
+# (Not its diff: git.diff stages the work tree through the thread's own
+# index, and one ahead could take that index's lock from the Diff pressed)
+def Kept.fields(+es: J.Json, +fs: J.Json) -> J.Json:
+  match es:
+    case J.Field{+k, +v, +t}: J.Field{k, v, Kept.fields(t, fs)}
+    case _: fs
+
+def Kept.with.obj(+info: J.Json, +es: J.Json) -> J.Json:
+  match info:
+    case J.Obj{+fs}: J.Obj{Kept.fields(es, fs)}
+    case _: info
+
+def Kept.with.k(+info: J.Json, +extra: J.Json) -> J.Json:
+  match extra:
+    case J.Obj{+es}: Kept.with.obj(info, es)
+    case _: info
+
+def Kept.with(+info: J.Json, +text: String) -> J.Json:
+  Kept.with.k(info, Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}))
+
+def Kept.ahead(go: Bool, +thread: String, +cwd: String) -> IO(Unit):
+  match go:
+    case True{}: IO.spawn(Unit, DirJob.ahead(thread, cwd))
+    case False{}: IO.pure(Unit, Unit{})
+
+def Kept.ahead.refs(go: Bool, +thread: String, +cwd: String) -> IO(Unit):
+  match go:
+    case True{}: IO.spawn(Unit, RefsJob.ahead(thread, cwd))
+    case False{}: IO.pure(Unit, Unit{})
+
+def Kept.info.k(on: Bool, +thread: String, +cwd: String) -> IO(String):
+  match on:
+    case False{}: IO.pure(String, "{}")
+    case True{}:
+      do IO<String>:
+        +go : String <- VKEPT.ViewerKept.claim(thread, cwd, "fm.kept:" ++ thread ++ "\n", "30000")
+        +sent : Unit <- Kept.ahead(String.eq(go, "1"), thread, cwd)
+        +refs : String <- VKEPT.ViewerKept.claim(thread, cwd, "refs.kept:" ++ thread, "300000")
+        +asked : Unit <- Kept.ahead.refs(String.eq(refs, "1"), thread, cwd)
+        VKEPT.ViewerKept.info(thread, cwd)
+
+def Kept.info(+st: M.State, +thread: String) -> IO(String):
+  +cwd = B.Hub.cwd(st, B.Hub.thread(st, thread))
+  Kept.info.k(Bool.and(Bool.not(String.is_empty(thread)), Bool.and(Bool.not(FR.Fr.is(thread)), Bool.not(String.is_empty(cwd)))), thread, cwd)
+
 def Hub.thin.render.page.shown(+v: SEC.Vault, +pg: TSTO.Page, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +p: J.Json, +key: String, +ms: Nat, +shown: M.State) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
@@ -13605,9 +13741,10 @@ def Hub.thin.render.page.shown(+v: SEC.Vault, +pg: TSTO.Page, h: Hub, +client: U
       +epoch = Hub.thin.view_epoch(st, cfg, thread)
       +rows = TBODY.Body.window.bounded(TSTO.Page.ids(pg), TSTO.Page.index(pg), p)
       +stream = TLIVE.Stream.get(Cfg.thin.streams(cfg), TV.Target.thread(st, J.Json.get_obj(p, "target")))
-      +actor = TA.Actor.mail_cache(TA.Actor.refresh(ThinContext.actors(context), web, shown, Hub.thin.pair(cfg, SEC.Sec.json(v, Hub.info(cfg))),
-        J.Json.obj([J.KV{"t", J.Str{"live"}}, J.KV{"items", J.Json.arr(Nil{})}]), now, p, ThinContext.view(context)), ThinContext.actors(context), Cfg.thin.mail(cfg))
       do IO<Hub>:
+        +kept : String <- Kept.info(st, thread)
+        +actor : TA.Actor = TA.Actor.mail_cache(TA.Actor.refresh(ThinContext.actors(context), web, shown, Kept.with(Hub.thin.pair(cfg, SEC.Sec.json(v, Hub.info(cfg))), kept),
+          J.Json.obj([J.KV{"t", J.Str{"live"}}, J.KV{"items", J.Json.arr(Nil{})}]), now, p, ThinContext.view(context)), ThinContext.actors(context), Cfg.thin.mail(cfg))
         +secret : String <- Hub.thin.native_key(NATIVE_SIDE.Ns.offered(web, p), actor, p, epoch, ThinContext.view(context))
         +prepared : TA.Actor = TA.Actor.native.prepare(actor, web, p, epoch, ThinContext.view(context), Cfg.thin.signal_seq(cfg), secret)
         Hub.thin.native_fit.choose(NATIVE_SIDE.Ns.offered(web, p), prepared, web, Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context, p,
