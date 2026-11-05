@@ -4,7 +4,7 @@
 // hub URL, work paths) are substituted from what the target hub actually said. Waits are by reply id, not time.
 import {readFileSync,readdirSync,writeFileSync,mkdirSync} from 'node:fs';
 import {Rec,connect,httpProbe,attempt,sleep,PROFILES} from './lib.mjs';
-import {startFixtureHub} from './hubs.mjs';
+import {startFixtureHub,R} from './hubs.mjs';
 import {normalise,diff} from './compare.mjs';
 import {encode} from '../wire.mjs';
 const arg=(k,d)=>{const i=process.argv.indexOf('--'+k);return i>0?process.argv[i+1]:d};
@@ -79,7 +79,7 @@ if(import.meta.main){
   for(const f of readdirSync(dir).filter(x=>x.endsWith('.json')).sort()){
     const name=f.replace('.json','');if(only.length&&!only.includes(name))continue;
     const recd=JSON.parse(readFileSync(dir+'/'+f));
-    const r=await replayOne(recd,{bin,port,work:`/home/h/Documents/i2cjak/backplane-gpui/build/gpui/parity/work-R`});
+    const r=await replayOne(recd,{bin,port,work:`${R}/build/gpui/parity/work-R`});
     writeFileSync(`${out}/${f}`,JSON.stringify(r));
     const a=normalise(recd.frames),b=normalise(r.frames);const d=[];
     for(const c of new Set([...Object.keys(a),...Object.keys(b)]))for(const s of ['out','events','deltas','replies','views','other'])diff(a[c]?.[s],b[c]?.[s],`${c}.${s}`,d);

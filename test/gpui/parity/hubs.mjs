@@ -10,7 +10,8 @@ async function quiesce(h){
   ws.onmessage=e=>{last=Date.now();n++};await new Promise(r=>ws.onopen=r);
   const end=Date.now()+30000;while(Date.now()-last<3000&&Date.now()<end)await sleep(100);ws.close();await sleep(200);
 }
-export const R='/home/h/Documents/i2cjak/backplane-gpui';
+import {fileURLToPath} from 'node:url';
+export const R=process.env.BACKPLANE_PARITY_ROOT||fileURLToPath(new URL('../../..',import.meta.url)).replace(/\/$/,'');
 export async function startFixtureHub({bin,port,work,extraArgs}){
   const home=work+'/home';makeFixture(home);makeStandins(work+'/bin');
   const h=await startHub({bin,home,port,cap:'3700M',standins:work+'/bin',extraEnv:{FAKE_SECS:'2',FAKE_PER:'2',FAKE_CYCLE:'5'}});
