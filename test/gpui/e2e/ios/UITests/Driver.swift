@@ -69,6 +69,11 @@ final class Driver {
         }
         return ok
     }
+    // a tap that cannot crash the test: a missing element leaves the step to fail with its screenshot and tree
+    func tap(_ e: XCUIElement) { if e.waitForExistence(timeout: 4) { e.tap() } }
+
+    func type(_ e: XCUIElement, _ text: String) { if e.waitForExistence(timeout: 4) { e.typeText(text) } }
+
     func note(_ s: String) { notes.append(s) }
     func block(_ why: String) { blocked.append(why) }
 

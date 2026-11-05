@@ -17,13 +17,13 @@ final class Journeys: XCTestCase {
             var tries = 0
             while !row.exists && tries < 6 { d.app.swipeUp(); tries += 1 }
             if !row.isHittable { d.app.swipeDown() }
-            row.tap()
+            d.tap(row)
         }, expect: { d.el("thread.composer").exists })
     }
     private func back() { let b = d.app.navigationBars.buttons.element(boundBy: 0); if b.exists { b.tap() } }
     private func tab(_ name: String) {
         let t = d.app.tabBars.buttons[name]
-        if t.exists { t.tap() } else { d.label(name).tap() }
+        if t.exists { t.tap() } else { d.tap(d.label(name)) }
     }
 
     func test_pair() {
@@ -31,8 +31,8 @@ final class Journeys: XCTestCase {
         d.launch(paired: false)
         let addr = d.el("pair.address")
         guard d.step("pairing screen", act: {}, expect: { addr.exists }) else { return }
-        d.step("type the pairing link", act: { addr.tap(); addr.typeText(d.link) }, expect: { d.el("pair.connect").isEnabled })
-        d.step("connect", timeout: 30, act: { d.el("pair.connect").tap() }, expect: { d.app.tabBars.buttons.firstMatch.exists })
+        d.step("type the pairing link", act: { d.tap(addr); d.type(addr, d.link) }, expect: { d.el("pair.connect").isEnabled })
+        d.step("connect", timeout: 30, act: { d.tap(d.el("pair.connect")) }, expect: { d.app.tabBars.buttons.firstMatch.exists })
         d.skipTour(); d.shot("paired")
     }
 
@@ -53,12 +53,12 @@ final class Journeys: XCTestCase {
         d.launch(); tab("Threads")
         guard openThread(1) else { return }
         let comp = d.el("thread.composer")
-        d.step("type a message", act: { comp.tap(); comp.typeText("here is a picture zqshort") }, expect: { d.el("thread.send").isEnabled })
+        d.step("type a message", act: { d.tap(comp); d.type(comp, "here is a picture zqshort") }, expect: { d.el("thread.send").isEnabled })
         // a real pasteboard image, pasted through the paperclip menu
         let img = UIGraphicsImageRenderer(size: CGSize(width: 120, height: 80)).image { c in UIColor.systemTeal.setFill(); c.fill(CGRect(x: 0, y: 0, width: 120, height: 80)) }
         UIPasteboard.general.image = img
         let clip = d.app.buttons.matching(NSPredicate(format: "label CONTAINS[c] 'attach'")).firstMatch
-        d.step("open the attach menu", act: { clip.tap() }, expect: { d.app.buttons.matching(NSPredicate(format: "label CONTAINS[c] 'paste'")).firstMatch.exists || d.app.menuItems.matching(NSPredicate(format: "label CONTAINS[c] 'paste'")).firstMatch.exists })
+        d.step("open the attach menu", act: { d.tap(clip) }, expect: { d.app.buttons.matching(NSPredicate(format: "label CONTAINS[c] 'paste'")).firstMatch.exists || d.app.menuItems.matching(NSPredicate(format: "label CONTAINS[c] 'paste'")).firstMatch.exists })
         d.shot("attach-menu")
         d.step("paste the image", act: {
             let item = d.app.buttons.matching(NSPredicate(format: "label CONTAINS[c] 'paste'")).firstMatch
@@ -68,7 +68,7 @@ final class Journeys: XCTestCase {
             let allow = sb.buttons["Allow Paste"]
             if allow.waitForExistence(timeout: 3) { allow.tap() }
         }, expect: { d.app.images.count > 0 || d.label("noise").exists || d.label("pasted").exists })
-        d.step("send", act: { d.el("thread.send").tap() }, expect: { d.label("here is a picture").exists })
+        d.step("send", act: { d.tap(d.el("thread.send")) }, expect: { d.label("here is a picture").exists })
         d.step("reply arrives", timeout: 30, act: {}, expect: { d.label("REPLY").exists || d.label("Finished").exists })
         d.shot("sent")
     }
@@ -78,8 +78,8 @@ final class Journeys: XCTestCase {
         d.launch(); tab("Threads")
         guard openThread(2) else { return }
         let comp = d.el("thread.composer")
-        d.step("type", act: { comp.tap(); comp.typeText("stream me a long answer") }, expect: { d.el("thread.send").isEnabled })
-        d.step("send", act: { d.el("thread.send").tap() }, expect: { d.label("stream me").exists })
+        d.step("type", act: { d.tap(comp); d.type(comp, "stream me a long answer") }, expect: { d.el("thread.send").isEnabled })
+        d.step("send", act: { d.tap(d.el("thread.send")) }, expect: { d.label("stream me").exists })
         // the long stand-in turn (600 s): the thread stays working and the text grows; sample the visible text length for 20 s
         var lens: [Int] = []; let t0 = CFAbsoluteTimeGetCurrent()
         while CFAbsoluteTimeGetCurrent() - t0 < 20 { lens.append(d.app.staticTexts.allElementsBoundByIndex.prefix(40).map { $0.label.count }.reduce(0, +)); Thread.sleep(forTimeInterval: 0.5) }
@@ -105,10 +105,10 @@ final class Journeys: XCTestCase {
         d = Driver("popups"); defer { d.finish() }
         d.launch(); tab("Threads")
         guard openThread(0) else { return }
-        let comp = d.el("thread.composer"); comp.tap()
+        let comp = d.el("thread.composer"); d.tap(comp)
         for (sigil, want) in [("@", "@Bub"), (">", ">e2e"), ("%", "%proj"), ("#", "#e2e"), ("$", "$"), ("/", "/btw")] {
-            d.step("type \(sigil) -> popup", act: { comp.typeText(sigil) }, expect: { want == "$" ? d.app.buttons.count > 12 : d.label(want).exists })
-            comp.typeText(XCUIKeyboardKey.delete.rawValue)
+            d.step("type \(sigil) -> popup", act: { d.type(comp, sigil) }, expect: { want == "$" ? d.app.buttons.count > 12 : d.label(want).exists })
+            d.type(comp, XCUIKeyboardKey.delete.rawValue)
         }
         d.shot("popup")
     }
@@ -117,12 +117,12 @@ final class Journeys: XCTestCase {
         d = Driver("bots-rooms"); defer { d.finish() }
         d.launch(); tab("Bots")
         d.step("bots list", act: {}, expect: { d.label("Bub").exists })
-        d.step("open Bub", act: { d.label("Bub").tap() }, expect: { d.el("thread.composer").exists || d.label("ready").exists })
+        d.step("open Bub", act: { d.tap(d.label("Bub")) }, expect: { d.el("thread.composer").exists || d.label("ready").exists })
         d.shot("bot"); back()
         d.step("rooms", act: { d.app.buttons["Rooms"].tap() }, expect: { d.label("e2e-room").exists })
-        d.step("open the room", act: { d.label("e2e-room").tap() }, expect: { d.app.textFields.firstMatch.exists })
+        d.step("open the room", act: { d.tap(d.label("e2e-room")) }, expect: { d.app.textFields.firstMatch.exists })
         let post = d.app.textFields.firstMatch
-        d.step("post to the room", act: { post.tap(); post.typeText("hello room zqshort\n") }, expect: { d.label("hello room").exists })
+        d.step("post to the room", act: { d.tap(post); d.type(post, "hello room zqshort\n") }, expect: { d.label("hello room").exists })
         d.shot("room")
     }
 
@@ -134,10 +134,10 @@ final class Journeys: XCTestCase {
         let open = d.el("viewer.open").exists ? d.el("viewer.open") : d.app.buttons.matching(NSPredicate(format: "label CONTAINS[c] 'viewer' OR label CONTAINS[c] 'board'")).firstMatch
         for kind in ["Board", "Schematic", "3D"] {
             if !open.exists { d.block("viewer button not found"); break }
-            d.step("open \(kind)", timeout: 25, act: { if d.label(kind).exists { d.label(kind).tap() } else { open.tap(); d.label(kind).tap() } }, expect: { d.el("viewer.close").exists })
+            d.step("open \(kind)", timeout: 25, act: { if d.label(kind).exists { d.tap(d.label(kind)) } else { open.tap(); d.tap(d.label(kind)) } }, expect: { d.el("viewer.close").exists })
             d.app.swipeLeft(); d.app.pinch(withScale: 1.5, velocity: 1)
             d.shot("viewer-\(kind)")
-            if d.el("viewer.close").exists { d.el("viewer.close").tap() }
+            if d.el("viewer.close").exists { d.tap(d.el("viewer.close")) }
         }
     }
 
@@ -148,7 +148,7 @@ final class Journeys: XCTestCase {
         let files = d.app.buttons.matching(NSPredicate(format: "label CONTAINS[c] 'files'")).firstMatch
         guard files.exists || d.label("Files").exists else { d.block("files tab not found"); return }
         d.step("open Files", act: { (files.exists ? files : d.label("Files")).tap() }, expect: { d.label("readme.txt").exists })
-        d.step("open readme.txt", act: { d.label("readme.txt").tap() }, expect: { d.app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] 'readme' OR label CONTAINS[c] 'hello'")).count > 0 })
+        d.step("open readme.txt", act: { d.tap(d.label("readme.txt")) }, expect: { d.app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] 'readme' OR label CONTAINS[c] 'hello'")).count > 0 })
         d.shot("file")
     }
 
@@ -186,7 +186,7 @@ final class Journeys: XCTestCase {
         guard ProcessInfo.processInfo.environment["HUB_CTL"] != nil else { d = Driver("reconnect"); d.block("HUB_CTL (the fixture's control endpoint) is not set"); return }
         d.launch(); tab("Threads")
         guard openThread(0) else { return }
-        let comp = d.el("thread.composer"); comp.tap(); comp.typeText("draft over a sleep")
+        let comp = d.el("thread.composer"); d.tap(comp); d.type(comp, "draft over a sleep")
         d.step("the hub drops every connection for 30 s", act: { _ = d.ctl("/ctl/cut?secs=30") }, expect: { d.label("Offline").exists || d.label("reconnecting").exists || d.label("Cannot reach").exists })
         d.shot("offline")
         d.step("the app reconnects", timeout: 90, act: {}, expect: { !d.label("Offline").exists && !d.label("Cannot reach").exists })
@@ -203,7 +203,7 @@ final class Journeys: XCTestCase {
         let t0 = CFAbsoluteTimeGetCurrent(); var n = 0
         while CFAbsoluteTimeGetCurrent() - t0 < secs {
             guard openThread(n % 20) else { break }
-            d.app.swipeUp(); let comp = d.el("thread.composer"); comp.tap(); comp.typeText("@"); comp.typeText(XCUIKeyboardKey.delete.rawValue)
+            d.app.swipeUp(); let comp = d.el("thread.composer"); d.tap(comp); d.type(comp, "@"); d.type(comp, XCUIKeyboardKey.delete.rawValue)
             back(); n += 1
         }
         d.metrics["cycles"] = n
