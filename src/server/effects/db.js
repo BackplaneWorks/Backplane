@@ -70,7 +70,34 @@ function bp_db_text(v) {
   if (v instanceof Uint8Array) return Buffer.from(v).toString("utf8");
   return String(v);
 }
+// Read results, remembered until this process next writes or opens/closes
+// a database. A view renders its thread's subagent and context history from
+// windowed queries on every request (subagent-history.bend: 20-60 ms on a
+// thread with many subagents, every open, action and update; 2026-11-05),
+// while nothing was written in between. Every write here (exec, run, batch,
+// script, and their typed forms) and every open/close drops all of them, and
+// store.db has no other writer (one hub per home; the other readers open it
+// read-only), so an answer is always what the database holds now. Only plain
+// reads are kept: SELECT/WITH with no write and no clock or random
+// function, at most 128 answers; failures are never kept.
+const bp_db_reads = new Map();
+const BP_DB_READS = 128;
+function bp_db_wrote() {
+  if (bp_db_reads.size) bp_db_reads.clear();
+}
+function bp_db_pure(sql) {
+  return /^\s*(SELECT|WITH)\b/i.test(sql) && !/\b(INSERT|UPDATE|DELETE|REPLACE|UPSERT|CREATE|DROP|ALTER|PRAGMA|ATTACH|DETACH|VACUUM|RANDOM|RANDOMBLOB|CHANGES|TOTAL_CHANGES|LAST_INSERT_ROWID|CURRENT_TIME|CURRENT_DATE|CURRENT_TIMESTAMP)\b|'now'/i.test(sql);
+}
+function bp_db_read_key(h, sql, params, limit, typed) {
+  const ps = [];
+  for (let xs = params; xs.$ === CID(Con); xs = xs.tail) {
+    const v = xs.head;
+    ps.push(typed ? (v.$ === CID(DbText) ? "t" + v.text : v.$ === CID(DbNull) ? "n" : "i" + v.digits) : "t" + v);
+  }
+  return JSON.stringify([h, typed, Number(limit), sql, ps]);
+}
 function db_open(path) {
+  bp_db_wrote();
   try {
     if (path.includes("\0")) return "fail a NUL in the path";
     const { Database } = bp_db_sqlite();
@@ -99,6 +126,7 @@ function db_exec(h, sql) {
   const db = bp_db_get(h);
   if (!db) return "fail no handle " + h;
   if (sql.includes("\0")) return "fail a NUL in the SQL";
+  bp_db_wrote();
   try {
     db.exec(sql);
     return "ok";
@@ -133,6 +161,7 @@ function bp_db_one(db, sql, params, typed) {
   return Number(db.query("SELECT changes()").values()[0][0]);
 }
 function bp_db_run(h, sql, params, typed) {
+  bp_db_wrote();
   const db = bp_db_get(h);
   if (!db) return "fail no handle " + h;
   try {
@@ -145,6 +174,7 @@ function bp_db_run(h, sql, params, typed) {
 // caller's own BEGIN), all or none; when sql is null (a script) each row is
 // [sql, ...params], or a DbStmt when typed
 function bp_db_rows(h, sql, rows, typed) {
+  bp_db_wrote();
   const db = bp_db_get(h);
   if (!db) return "fail no handle " + h;
   try {
@@ -227,11 +257,25 @@ function bp_db_query(h, sql, params, limit, typed) {
     if (st) st.finalize();
   }
 }
+function bp_db_read(h, sql, params, limit, typed) {
+  if (!bp_db_pure(sql)) return bp_db_query(h, sql, params, limit, typed);
+  const key = bp_db_read_key(h, sql, params, limit, typed);
+  const kept = bp_db_reads.get(key);
+  if (kept !== undefined) return kept;
+  const rows = bp_db_query(h, sql, params, limit, typed);
+  // a failure is one row whose first column is NUL + "fail"
+  const failed = rows.$ === CID(Con) && rows.head.$ === CID(Con) && rows.head.head === "\0fail";
+  if (!failed) {
+    if (bp_db_reads.size >= BP_DB_READS) bp_db_reads.clear();
+    bp_db_reads.set(key, rows);
+  }
+  return rows;
+}
 function db_query(h, sql, params, limit) {
-  return bp_db_query(h, sql, params, limit, false);
+  return bp_db_read(h, sql, params, limit, false);
 }
 function db_query_t(h, sql, params, limit) {
-  return bp_db_query(h, sql, params, limit, true);
+  return bp_db_read(h, sql, params, limit, true);
 }
 
 // The fixed review-history boundary: no caller SQL, statement cache, retained
@@ -278,6 +322,7 @@ function db_review_page(h, thread, after, through, budget) {
   return result;
 }
 function db_close(h) {
+  bp_db_wrote();
   const db = bp_db_get(h);
   if (!db) return "fail no handle " + h;
   try {
