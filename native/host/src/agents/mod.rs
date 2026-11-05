@@ -47,8 +47,8 @@ pub enum Cmd {
 static HANDLE: std::sync::OnceLock<Arc<Agents>> = std::sync::OnceLock::new();
 pub use textgen::{summarizer, Summarizer};
 /// Mark the turn ends Bend runs Ended.out for with `"_end": true` for state's policy (which writes alert/told/summary.at and removes the field before the write).
-/// Off until that step is on the tree: without it the field would reach the log. Set to true in the commit that lands with it.
-const MARK_ENDS: bool = false;
+/// On: state's policy (statehost, `_end` handling) is on the tree and strips the field before the write.
+const MARK_ENDS: bool = true;
 /// A design-history job in flight (checkpoint, step): counted so a test, or a shutdown, can wait for what a turn's end left running.
 struct JobGuard(Arc<Agents>);
 impl JobGuard { fn new(a: &Arc<Agents>) -> JobGuard { a.stats.jobs.fetch_add(1, Relaxed); JobGuard(a.clone()) } }
@@ -430,6 +430,7 @@ impl Actor {
             if l.trim().is_empty() { continue }
             let raw = crate::store::clean(&l);
             let line = serde_json::from_str::<Value>(&raw).unwrap_or_else(|_| { self.ag.stats.bad_lines.fetch_add(1, Relaxed); Value::String(raw.to_string()) });
+            if let Some(p) = crate::statehost::policies() { events.extend(p.line(&self.th, at, &line)) } // Watchdog.line
             let re = match self.driver.as_mut() { Some(d) => d.on_line(&line), None => continue };
             if let Some(p) = &self.live_proc { for s in re.send { let _ = p.input.try_send(s); } }
             if !self.cx.running { continue } // stopped_turn_quiet: what a stopped turn's process still says is old news
@@ -511,7 +512,7 @@ impl Actor {
     async fn fail_k(&mut self, text: String, kind: &str, act: &str, ended: bool) {
         let (now, th) = (now_s(), self.th.clone());
         let mut ev = vec![json!({"$":"ActivityLogged","thread":th,"act":act,"tone":"error","kind":kind,"summary":text,"at":now}), json!({"$":"TurnChanged","thread":th,"state":"failed","at":now})]; if ended && MARK_ENDS { ev[1]["_end"] = json!(true) };
-        if !self.last_user.is_empty() { ev.push(set(format!("failed.{}", self.last_user), "1".into(), now)) }
+        if ended && !self.last_user.is_empty() { ev.push(set(format!("failed.{}", self.last_user), "1".into(), now)) } // Bend writes failed.<msg> for an agent-gone end, not for a spawn failure
         self.live_end().await; self.commit(ev).await; self.cx.running = false; self.jobs_end();
     }
 
@@ -553,6 +554,7 @@ impl Actor {
         for l in ls {
             if l.trim().is_empty() { continue }
             let Ok(v) = serde_json::from_str::<Value>(&crate::store::clean(&l)) else { self.ag.stats.bad_lines.fetch_add(1, Relaxed); continue };
+            if let Some(p) = crate::statehost::policies() { events.extend(p.line(&self.th, at, &v)) } // Watchdog.line: a long streamed turn is not silent to the liveness record
             // Prog: a main-agent task_progress line is written at most once every few seconds (the newest of each task always lands)
             if v["type"] == "system" && v["subtype"] == "task_progress" && v["parent_tool_use_id"].as_str().unwrap_or("").is_empty() {
                 let s = self.prog.line(at, v); self.prog = bg::Prog { at: s.at, pend: s.pend }; if !s.flush.is_empty() { events.extend(self.cx.progress(&s.flush, at)) } continue
