@@ -166,7 +166,7 @@ impl Mcp {
             "kicad_ipc_status" => match crate::files::kicad::ipc::kicad_ipc_status_in(&ag.hub, Some(thread), sv(&a, "path")).await { Ok(v) => (true, v), Err(e) => fail(&e) },
             "kicad_export10" => crate::files::export10::mcp(&ag.hub, sv(&a, "path"), a.get("force").and_then(Value::as_bool).unwrap_or(false)).await,
             "settings_inspect" => crate::settings::proposal::tool_inspect(&ag.hub, &ag.host.models).await,
-            "settings_propose" => { let now = now_s(); let id = hub_id("settings", now, ag.seq_n()); crate::settings::proposal::tool_propose(&ag.hub, thread, &ag.host.models, &a, now, &id).await }
+            "settings_propose" => { let now = now_s(); let id = hub_id("settings", now, ag.seq_n()); crate::settings::proposal::tool_propose(ag, thread, &ag.host.models, &a, now, &id).await }
             "secret_request" => crate::settings::secret::tool_request(&ag.hub, thread, &a).await,
             "secret_list" => crate::settings::secret::tool_list(),
             "secret_run" => { let cwd = ag.world().await.cwd(thread); crate::settings::secret::tool_run(thread, &cwd, &a).await }

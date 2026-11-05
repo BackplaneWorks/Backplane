@@ -44,14 +44,30 @@ pub async fn tool_inspect(hub: &Arc<Hub>, models: &Value) -> (bool, Value) {
     (true, json!({"scope":"this hub","on":on,"chain":chain,"models":models}))
 }
 
-/// settings_propose {on, chain}: opens the ask (never applies). `ask_id` is the hub's id for it.
-pub async fn tool_propose(hub: &Arc<Hub>, thread: &str, models: &Value, a: &Value, now: u64, ask_id: &str) -> (bool, Value) {
+/// Pend.fix: PendingChanged for every thread whose asks the batch closes, counting the asks that stay open (so the thread is not
+/// counted as blocked once its proposal is answered or made stale).
+pub fn pending_after(open_asks: &[(String, String)], batch: &[Value], at: u64) -> Vec<Value> {
+    let closed: Vec<&str> = batch.iter().filter(|e| e["$"] == "AskClosed").filter_map(|e| e["id"].as_str()).collect();
+    let mut threads: Vec<&str> = vec![];
+    for (id, th) in open_asks { if closed.contains(&id.as_str()) && !threads.contains(&th.as_str()) { threads.push(th) } }
+    threads.into_iter().map(|th| json!({"$":"PendingChanged","thread":th,"count":open_asks.iter().filter(|(id, t)| t == th && !closed.contains(&id.as_str())).count(),"at":at})).collect()
+}
+/// The batch with its PendingChanged events (from the agents' world).
+pub async fn with_pending(ag: &Arc<crate::agents::Agents>, mut batch: Vec<Value>, at: u64) -> Vec<Value> {
+    let open: Vec<(String, String)> = ag.world().await.asks.iter().map(|(i, k)| (i.clone(), k.thread.clone())).collect();
+    let p = pending_after(&open, &batch, at); batch.extend(p); batch
+}
+
+/// settings_propose {on, chain}: opens the ask (never applies) and counts it as pending on the thread. `ask_id` is the hub's id for it.
+pub async fn tool_propose(ag: &Arc<crate::agents::Agents>, thread: &str, models: &Value, a: &Value, now: u64, ask_id: &str) -> (bool, Value) {
+    let hub = &ag.hub;
     let (on, chain) = effective(hub).await;
     let g = |k: &str| a.get(k).and_then(Value::as_str).unwrap_or("").to_string();
     let p = Proposal { old_on: on, old_chain: chain, new_on: g("on"), new_chain: g("chain"), expires: now + TTL };
     if !(p.changed() && p.valid(models)) { return (false, json!({"error":"Invalid fallback proposal or model catalog unavailable; no proposal was stored."})) }
     let ev = json!({"$":"AskOpened","id":ask_id,"thread":thread,"kind":"approval","tool":TOOL,"detail":p.detail(),"options":p.json().to_string(),"at":now});
-    if hub.commit(&ev).await.is_err() { return (false, json!({"error":"could not store the proposal"})) }
+    let pend = ag.pending_ev(thread, 1, "", now).await;
+    if hub.commit_many(&[ev, pend]).await.is_err() { return (false, json!({"error":"could not store the proposal"})) }
     (true, json!({"id":ask_id,"status":"awaiting person","proposal":p.json()}))
 }
 
@@ -76,10 +92,12 @@ pub fn answer_events(accept: bool, ask: &str, thread: &str, options: &str, now: 
 /// `open` is every open settings proposal (the ask being answered included): an accepted proposal writes fallback.*, which closes the
 /// others "stale" in the same batch, as Bend's per-step Proposal.invalidate does. Rust has no per-step hook, so EVERY writer of
 /// `fallback.on` / `fallback.chain` must call `invalidate` on its batch (setting.set and this are the only two today).
-pub async fn answer_ask(hub: &Arc<Hub>, ask: &str, thread: &str, options: &str, answer: &str, now: u64, open: &[String]) -> Result<(), String> {
+pub async fn answer_ask(ag: &Arc<crate::agents::Agents>, ask: &str, thread: &str, options: &str, answer: &str, now: u64, open: &[String]) -> Result<(), String> {
+    let hub = &ag.hub;
     let (on, chain) = effective(hub).await;
     let (mut ev, err) = answer_events(answer == "accept", ask, thread, options, now, (&on, &chain));
     let extra = invalidate(&ev, open, now); ev.extend(extra);
+    let ev = with_pending(ag, ev, now).await;
     hub.commit_many(&ev).await.map_err(|e| format!("{e:#}"))?;
     match err { Some(e) => Err(e.to_string()), None => Ok(()) }
 }
@@ -143,5 +161,12 @@ mod tests {
         let extra = invalidate(&ev, &["s1".to_string(), "s2".to_string()], 100); ev.extend(extra);
         let closed: Vec<(&str, &str)> = ev.iter().filter(|e| e["$"] == "AskClosed").map(|e| (e["id"].as_str().unwrap(), e["answer"].as_str().unwrap())).collect();
         assert_eq!(closed, [("s1", "accept"), ("s2", "stale")], "the accepted ask keeps its decision");
+    }
+
+    #[test] fn closing_asks_counts_what_stays_open_per_thread() {
+        let open = vec![("a".to_string(), "t1".to_string()), ("b".to_string(), "t1".to_string()), ("c".to_string(), "t2".to_string()), ("d".to_string(), "t3".to_string())];
+        let batch = vec![json!({"$":"AskClosed","id":"a","answer":"accept","at":1}), json!({"$":"AskClosed","id":"c","answer":"stale","at":1})];
+        let p = pending_after(&open, &batch, 9);
+        assert_eq!(p, vec![json!({"$":"PendingChanged","thread":"t1","count":1,"at":9}), json!({"$":"PendingChanged","thread":"t2","count":0,"at":9})], "t3 is untouched");
     }
 }
