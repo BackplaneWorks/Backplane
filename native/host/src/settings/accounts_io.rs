@@ -572,8 +572,9 @@ impl Accounts {
         self.begin(profile, "launch").map_err(|_| NO.to_string())?;
         let r = async {
             let np = self.verify(&p, false).await.map_err(|_| NO.to_string())?;
-            if np.epoch.to_string() != epoch || np.state != "connected" { return Err("Account identity changed; select this account again".to_string()) }
+            // the verified identity is kept even when the turn is refused: the epoch it moved to is what the person must select again
             self.with_profile(profile, |slot, g| { *slot = np.clone(); g.revision += 1; }); self.save_now();
+            if np.epoch.to_string() != epoch || np.state != "connected" { return Err("Account identity changed; select this account again".to_string()) }
             let program = (self.resolve)(cmd)?;
             let args: Vec<String> = if np.provider == "codex" { vec!["-c".into(), "cli_auth_credentials_store=\"file\"".into(), "-c".into(), "model_provider=\"openai\"".into()] }
                 else { vec!["--setting-sources".into(), "user".into(), "--settings".into(), "{\"forceLoginMethod\":\"claudeai\"}".into()] };
