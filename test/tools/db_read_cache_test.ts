@@ -129,6 +129,7 @@ try {
   keeps(S1, "a", () => eff["Db.batch"](h2, ins, L([row("b", 8)])), true, "and after all that, another thread's row again");
   // a read's tables are where tables go; a column that shares a table's name is not one
   eff["Db.exec"](h2, "CREATE TABLE thread(id TEXT, x INTEGER); CREATE TABLE ta(n INTEGER); CREATE TABLE tb(n INTEGER); CREATE TABLE tc(n INTEGER); CREATE TABLE \"td q\"(n INTEGER)");
+  eff["Db.exec"](h2, "CREATE INDEX en_th ON en(thread)");
   keeps(S1, "a", () => eff["Db.run"](h2, "INSERT OR REPLACE INTO thread(id, x) VALUES (?, ?)", L(["a", "1"])), true, "a write to the table named like its column");
   const tw = (t: string) => () => eff["Db.run"](h2, "INSERT INTO " + t + " VALUES (1)", L([]));
   for (const [sql, t] of [
@@ -139,6 +140,8 @@ try {
     ["SELECT count(*) FROM (SELECT n FROM ta) s, tb WHERE ?1 <> ''", "tb"],
     ["SELECT count(*) FROM (SELECT n FROM ta) s, tb WHERE ?1 <> ''", "ta"],
     ["SELECT count(*) FROM main.tc WHERE ?1 <> ''", "tc"],
+    ["SELECT count(*) FROM en INDEXED BY en_th, tb WHERE ?1 <> ''", "tb"],
+    ["SELECT count(*) FROM en AS e NOT INDEXED, tc WHERE ?1 <> ''", "tc"],
     ["SELECT count(*) FROM \"td q\" WHERE ?1 <> ''", "\"td q\""],
     ["SELECT (SELECT count(*) FROM tb WHERE n > 0) + (SELECT count(*) FROM tc) WHERE ?1 <> ''", "tc"],
   ]) keeps(sql, "a", tw(t), false, "a write to " + t);
