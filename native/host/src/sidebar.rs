@@ -151,10 +151,17 @@ fn agents_note(st: &State, id: &str) -> String {
     match n { 0 => String::new(), 1 => "1 subthread".into(), n => format!("{n} subthreads") }
 }
 
+/// Kids.set: delegated child threads live under their parent, not in the sidebar's roots, except a bot's (a bot's delegated work is a
+/// thread of its own); a child with no visible parent stays reachable
+fn kids_hidden<'a>(st: &'a State) -> HashSet<&'a str> {
+    let bot_thread = |p: &str| st.bot_threads_has(p);
+    st.tasks.values().filter(|(parent, child, _, _)| !bot_thread(parent) && st.threads.contains_key(child.as_str()) && !display_parent(st, child).is_empty()).map(|(_, c, _, _)| c.as_str()).collect()
+}
+
 struct Shelves<'a> { pinned: Vec<&'a str>, active: Vec<&'a str>, settled: Vec<&'a str>, hidden: Vec<&'a str>, snoozed: Vec<&'a str> }
 
-fn shelves_of<'a>(st: &'a State, project: &str, now: u64) -> Shelves<'a> {
-    let mut ids: Vec<&str> = st.threads.iter().filter(|(_, t)| t.project == project).map(|(i, _)| i.as_str()).collect();
+fn shelves_of<'a>(st: &'a State, project: &str, now: u64, kids: &HashSet<&str>) -> Shelves<'a> {
+    let mut ids: Vec<&str> = st.threads.iter().filter(|(i, t)| t.project == project && !kids.contains(i.as_str())).map(|(i, _)| i.as_str()).collect();
     ids.sort();
     let mut s = Shelves { pinned: vec![], active: vec![], settled: vec![], hidden: vec![], snoozed: vec![] };
     for id in ids {
@@ -213,14 +220,15 @@ pub fn projects(st: &State, o: &Opts) -> Vec<Value> {
         all.sort_by(|a, b| tree_before(*a, *b));
         for (id, _) in all { let p = display_parent(st, id); if !p.is_empty() { kids_by.entry(p).or_default().push(id); } }
     }
+    let kids = kids_hidden(st);
     struct P<'a> { id: &'a str, latest: u64, key: Vec<bool>, sh: Shelves<'a> }
     let mut ps: Vec<P> = vec![];
     for (id, p) in &st.projects {
         if p.removed { continue }
-        let raw = shelves_of(st, id, o.now);
+        let raw = shelves_of(st, id, o.now, &kids);
         // Side.latest: a thread's last move for its project's place; settling by hand counts
         let mut latest = p.created;
-        for tid in st.threads.iter().filter(|(_, t)| t.project == *id).map(|(i, _)| i) { let t = &st.threads[tid]; let touched = if t.override_ == Override::ForcedSettled { t.activity.max(t.settled_at) } else { t.activity }; latest = latest.max(touched); }
+        for tid in st.threads.iter().filter(|(i, t)| t.project == *id && !kids.contains(i.as_str())).map(|(i, _)| i) { let t = &st.threads[tid]; let touched = if t.override_ == Override::ForcedSettled { t.activity.max(t.settled_at) } else { t.activity }; latest = latest.max(touched); }
         ps.push(P { id: id.as_str(), latest, key: order_key(st, &format!("project:{id}"), "active"), sh: tree_shelves(st, &raw) });
     }
     // PSlot.before: keyed projects first, by key; then latest first, then id (SRow.before); equal keys fall back to SRow.before
