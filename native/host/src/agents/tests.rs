@@ -742,3 +742,31 @@ const TESTCLI: &str = "#!/bin/sh\nread hello\necho '{\"q\":1}'\nread ans\necho \
     let ev = until(&hub, from, 30, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await;
     assert!(ev.iter().any(|e| turn_is(e, "running")), "TurnChanged running is logged"); assert_eq!(ag.stats.procs_spawned.load(Relaxed), 1, "a process was started for it"); ag.shutdown();
 }
+
+// ---- delegated tasks ----
+#[tokio::test(flavor = "multi_thread")] async fn a_delegated_task_runs_a_child_and_its_result_reaches_the_parent_once() {
+    let (hub, ag, _sd) = codex_start("dg1").await; let from = len(&hub).await;
+    let (ok, r) = ag.tool_delegate(T1, &json!({"prompt":"do the child work","title":"Child"})).await; assert!(ok, "{r}");
+    let (task, child) = (r["taskId"].as_str().unwrap().to_string(), r["childThreadId"].as_str().unwrap().to_string()); assert_eq!(r["depth"], 1);
+    let ev = until(&hub, from, 30, |ev| ev.iter().any(|e| is(e, "TaskDelivered"))).await;
+    assert!(ev.iter().any(|e| is(e, "ThreadCreated") && e["id"] == child.as_str() && e["title"] == "Child"));
+    assert!(ev.iter().any(|e| is(e, "TaskStateSet") && e["state"] == "done"), "{ev:?}");
+    let m = ev.iter().find(|e| is(e, "MessagePosted") && e["thread"] == T1 && e["role"] == "system").expect("the result message");
+    assert_eq!(m["msg"], format!("t:{child}:td-{task}")); assert!(m["text"].as_str().unwrap().starts_with(&format!("[Backplane] Delegated task {task} (codex) finished:\n\nre: do the child work")), "{}", m["text"]);
+    tokio::time::sleep(Duration::from_millis(2500)).await; let all = log_from(&hub, from).await;
+    assert_eq!(all.iter().filter(|e| is(e, "TaskDelivered")).count(), 1, "delivered once"); assert_eq!(all.iter().filter(|e| is(e, "MessagePosted") && e["msg"] == format!("t:{child}:td-{task}")).count(), 1);
+    let (ok, st) = ag.tool_task_status(T1, &json!({"taskId":task})).await; assert!(ok && st["state"] == "done" && st["childThreadId"] == child.as_str());
+    assert!(!ag.tool_task_status("someone-else", &json!({"taskId":task})).await.0, "another thread's task is not its business");
+    ag.shutdown();
+}
+#[tokio::test(flavor = "multi_thread")] async fn delegation_depth_is_limited_and_a_running_task_can_be_cancelled() {
+    let (hub, ag, _sd) = codex_start("dg2").await;
+    let (ok, r) = ag.tool_delegate(T1, &json!({"prompt":"hang for a long time"})).await; assert!(ok); let (task, child) = (r["taskId"].as_str().unwrap().to_string(), r["childThreadId"].as_str().unwrap().to_string());
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    let (ok, c) = ag.tool_task_cancel(T1, &json!({"taskId":task})).await; assert!(ok && c["state"] == "cancelled", "{c}");
+    let ev = until(&hub, 0, 15, |ev| ev.iter().any(|e| turn_is(e, "interrupted") && e["thread"] == child.as_str())).await; assert!(ev.iter().any(|e| turn_is(e, "interrupted") && e["thread"] == child.as_str()));
+    // a chain of three tasks is the limit
+    let mut th = child.clone(); let mut last_ok = true;
+    for _ in 0..3 { let (ok, r) = ag.tool_delegate(&th, &json!({"prompt":"deeper hang"})).await; last_ok = ok; if ok { th = r["childThreadId"].as_str().unwrap().to_string() } else { assert!(r["error"].as_str().unwrap().contains("depth limit")) } }
+    assert!(!last_ok || th != child, "the chain is bounded"); ag.shutdown();
+}

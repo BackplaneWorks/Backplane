@@ -12,13 +12,19 @@ pub struct T {
     pub project: String, pub provider: String, pub model: String, pub session: String, pub worktree: String,
     pub runtime: String, pub interaction: String, pub turn: String, pub archived: bool, pub deleted: bool,
     pub title: String, pub last_user: String, pub newest: String, pub carry_text_last: bool,
+    pub env: String, pub branch: String, pub last_assistant: String,
 }
+
+/// A delegated task (model.bend Task): its state is one of queued, running, done, failed, cancelled; a terminal state sticks (TaskState.next).
+#[derive(Clone, Debug, Default)]
+pub struct Tk { pub parent: String, pub child: String, pub depth: u64, pub state: String, pub summary: String, pub delivered: bool, pub provider: String, pub model: String }
+impl Tk { pub fn terminal(&self) -> bool { matches!(self.state.as_str(), "done" | "failed" | "cancelled") } }
 
 #[derive(Clone, Debug, Default)]
 pub struct Ask { pub thread: String, pub kind: String, pub tool: String, pub detail: String, pub options: String }
 
 #[derive(Default)]
-pub struct World { pub deadlines: std::collections::HashSet<String>, pub asks: HashMap<String, Ask>, pub sessions: std::collections::HashSet<(String, String)>, pub threads: HashMap<String, T>, pub roots: HashMap<String, String>, pub st: HashMap<String, String>, seen: usize }
+pub struct World { pub tasks: HashMap<String, Tk>, pub deadlines: std::collections::HashSet<String>, pub asks: HashMap<String, Ask>, pub sessions: std::collections::HashSet<(String, String)>, pub threads: HashMap<String, T>, pub roots: HashMap<String, String>, pub st: HashMap<String, String>, seen: usize }
 
 const KEYS: &[&str] = &["watch.", "thread.parent.", "bg.", "wait.", "work.timeout.seconds", "allowance.claude", "effort.", "buy.", "kicad.ipc", "order.enabled", "agent.lang", "tz.machine", "agent.thinking", "restart.continue", "tok.epoch", "tok.recount", "tok.basis.", "turn.speed.", "turn.models.", "limit.claude.", "ride.", "agy.", "session."];
 fn tracked(k: &str) -> bool { KEYS.iter().any(|p| k == *p || (p.ends_with('.') && k.starts_with(p))) || k.starts_with("usage.") || k.starts_with("tok.key.") }
@@ -48,13 +54,16 @@ impl World {
 
     pub fn apply(&mut self, line: &str) {
         let Some(t) = line.strip_prefix("{\"$\":\"").and_then(|r| r.split('"').next()) else { return };
-        const READ: [&str; 22] = ["WorkSet", "AskOpened", "AskClosed", "ThreadRenamed", "ProjectCreated", "ThreadCreated", "WorktreeSet", "ProviderSet", "ModesSet", "SessionSet", "TurnChanged", "MessagePosted", "ActivityLogged", "UsageSet", "SettingSet", "TurnUsage", "ThreadArchived", "ThreadDeleted", "ThreadForked", "QueueTaken", "TurnQueued", "ThreadWoke"];
+        const READ: [&str; 25] = ["TaskDelegated", "TaskStateSet", "TaskDelivered", "WorkSet", "AskOpened", "AskClosed", "ThreadRenamed", "ProjectCreated", "ThreadCreated", "WorktreeSet", "ProviderSet", "ModesSet", "SessionSet", "TurnChanged", "MessagePosted", "ActivityLogged", "UsageSet", "SettingSet", "TurnUsage", "ThreadArchived", "ThreadDeleted", "ThreadForked", "QueueTaken", "TurnQueued", "ThreadWoke"];
         if !READ.contains(&t) { return }
         let Ok(v) = serde_json::from_str::<Value>(line) else { return };
         let g = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").to_string();
         match t {
             "ProjectCreated" => { self.roots.insert(g("id"), g("root")); }
-            "ThreadCreated" => { self.threads.insert(g("id"), T { project: g("project"), title: g("title"), provider: g("provider"), model: g("model"), worktree: g("worktree"), runtime: "full-access".into(), interaction: "default".into(), turn: "idle".into(), ..Default::default() }); }
+            "TaskDelegated" => { self.tasks.insert(g("task"), Tk { parent: g("parent"), child: g("child"), depth: v.get("depth").and_then(Value::as_u64).unwrap_or(0), state: "queued".into(), provider: g("provider"), model: g("model"), ..Default::default() }); }
+            "TaskStateSet" => if let Some(k) = self.tasks.get_mut(&g("task")) { if !k.terminal() { k.state = g("state") } k.summary = g("summary") }, // Task.step: a terminal state sticks; the summary is replaced
+            "TaskDelivered" => if let Some(k) = self.tasks.get_mut(&g("task")) { k.delivered = true },
+            "ThreadCreated" => { self.threads.insert(g("id"), T { project: g("project"), title: g("title"), provider: g("provider"), model: g("model"), worktree: g("worktree"), env: g("env"), branch: g("branch"), runtime: "full-access".into(), interaction: "default".into(), turn: "idle".into(), ..Default::default() }); }
             "WorktreeSet" => if let Some(x) = self.threads.get_mut(&g("id")) { x.worktree = g("worktree") },
             "ProviderSet" => { // State.switch.n: the old provider's session is kept as `session.<th>.<old>` and the new provider's is taken
                 let th = g("id");
@@ -74,6 +83,7 @@ impl World {
             "TurnChanged" => if let Some(x) = self.threads.get_mut(&g("thread")) { x.turn = g("state") },
             "MessagePosted" => if let Some(x) = self.threads.get_mut(&g("thread")) {
                 x.newest = g("msg");
+                if v.get("role").and_then(Value::as_str) == Some("assistant") { x.last_assistant = g("text") } // Task.last
                 x.carry_text_last = v.get("role").and_then(Value::as_str) == Some("user") && g("text").starts_with(CARRY_TEXT);
                 if v.get("role").and_then(Value::as_str) == Some("user") { x.last_user = g("msg") }
             },
@@ -89,6 +99,8 @@ impl World {
     }
 
     /// Where a thread's agent works: its worktree, else its project's folder (Hub.cwd).
+    /// Task.depth: how deep a thread's delegation chain is (0 for a thread nobody delegated).
+    pub fn depth(&self, th: &str) -> u64 { self.tasks.values().find(|k| k.child == th).map_or(0, |k| k.depth) }
     pub fn cwd(&self, th: &str) -> String {
         let Some(t) = self.threads.get(th) else { return String::new() };
         if !t.worktree.is_empty() { t.worktree.clone() } else { self.roots.get(&t.project).cloned().unwrap_or_default() }
