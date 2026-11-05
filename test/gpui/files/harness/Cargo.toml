@@ -12,5 +12,5 @@ opt-level = 3
 [dependencies]
 libc = "0.2"
 serde_json = { version = "1", features = ["preserve_order"] }
-tokio = { version = "1", features = ["rt-multi-thread", "process", "macros", "fs", "io-util"] }
+tokio = { version = "1", features = ["rt-multi-thread", "process", "macros", "fs", "io-util", "time"] }
 sha2 = "0.10"
