@@ -2501,6 +2501,15 @@ final class AppModel {
                         // "!step": at once, not two seconds after the one before
                         if step.hasPrefix("!") { step.removeFirst() } else { try? await Task.sleep(for: .seconds(2)) }
                         let kv = step.split(separator: "=", maxSplits: 1).map(String.init)
+                        // "@pagenext"/"@pageprev": the sidebar pager's control, as its button does; "@pager": log it
+                        if kv[0] == "@pagenext" || kv[0] == "@pageprev" || kv[0] == "@pager" {
+                            let pg = self.screen?.projects.first?.threadsPage ?? (self.screen?.view == "active" ? self.screen?.sidebarPages?.first?.active : self.screen?.sidebarPages?.first?.projects)
+                            if kv[0] == "@pager" {
+                                NSLog("Backplane pager offset=%d total=%d limit=%d next=%@ prev=%@ projects=%d view=%@", pg?.offset ?? -1, pg?.total ?? -1, pg?.limit ?? -1,
+                                      String(pg?.next != nil), String(pg?.previous != nil), (self.screen?.projects.reduce(0) { $0 + $1.threads.count } ?? 0) + (self.screen?.active?.count ?? 0), self.screen?.view ?? "-")
+                            } else if let c = kv[0] == "@pagenext" ? pg?.next : pg?.previous { self.act(c.action, c.value) }
+                            continue
+                        }
                         if kv[0] == "@times" { NSLog("Backplane taps %@", tapTimes.joined(separator: "; ")); continue }
                         // "@type=<text>": the composer's text, as typing it does (editComposer: one key's path)
                         if kv[0] == "@type" { draft(kv.count > 1 ? kv[1] : ""); continue }
