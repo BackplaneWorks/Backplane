@@ -50,6 +50,6 @@ set -- $($U find "Send" exact ); T1=$(date +%s.%N); $E adb shell input tap $1 $2
 RT=""; for i in $(seq 1 40); do if $U has "${L}11"; then RT=$(echo "$(date +%s.%N) - $T1" | bc); break; fi; done
 say "send -> stand-in reply visible: ${RT:-never} s"
 $E adb exec-out screencap -p > $S/$L-reply.png
-say "TurnUsage in the hub log (models): $(grep TurnUsage $HD/events.jsonl | grep -o '"model":"[^"]*"' | sort | uniq -c | tr '\n' ' ')"
+say "turns: TurnUsage events=$(grep -c TurnUsage $HD/events.jsonl) (a real model would log one with cost); SessionSet: $(grep -h SessionSet $HD/events.jsonl | cut -c1-110 | head -1); assistant msg ids: $(grep -h '"role":"assistant"' $HD/events.jsonl | grep -o '"msg":"[^"]*"' | head -1)"
 say "webview nodes: $($U count android.webkit.WebView) ; user message shown: $($U has "hello from $L" && echo yes || echo no)"
 $E adb logcat -d | grep -E "view failed" | cut -c1-120 | tee -a $OUT
