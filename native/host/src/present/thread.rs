@@ -359,6 +359,7 @@ pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value
     if let Some(reason)=es.iter().find_map(row_refusal) { return Err(reason) }
     // Mob.think.hide: a thought (tone "thinking") shows only while the setting `think` is on
     let think_on = st.settings.get("agent.thinking").map_or(false, |v| v == "on");
+    let newest_id = es.last().map(|e| e.id.clone()); // U.Hold.newest over the whole page (a hidden thought included)
     let es: Vec<Ent> = es.into_iter().filter(|e| think_on || !(!e.msg && e.role == "thinking")).collect();
     let zone = person_zone(st);
     let running = st.threads.get(thread).map_or(false, |t| t.turn == Turn::Running);
@@ -377,7 +378,7 @@ pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value
     o.insert("id".into(), json!(format!("{hub}|{thread}")));
     o.insert("title".into(), json!(t.title));
     o.insert("branch".into(), json!(t.branch));
-    o.insert("readingSeen".into(), json!(es.last().map(|e| e.id.as_str()).unwrap_or("-")));
+    o.insert("readingSeen".into(), json!(newest_id.as_deref().unwrap_or("-")));
     o.insert("entries".into(), Value::Array(entries));
     // Render.native_screen: thread.earlier = window.remaining when the host sent a window, else the page's own hidden count (0 on the newest page)
     let earlier = if params["window"].is_object() { params["window"]["remaining"].as_u64().unwrap_or(0) } else { 0 };
