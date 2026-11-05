@@ -72,6 +72,51 @@ try {
   };
   await one("repo", true);
   await one("plain", false);
+  // a hardware project: its threads stay in the folder, and the clone is set
+  // up for that (core/projkind.bend); .backplane.json and a worktree asked
+  // for by name overrule it; the page names what is outside the folder
+  const repo = (name: string, files: Record<string, string>) => {
+    const pp = join(root, name); mkdirSync(pp);
+    for (const [f, text] of Object.entries(files)) writeFileSync(join(pp, f), text);
+    Bun.spawnSync(["sh", "-c", `cd ${pp} && git init -q && git add . && git -c user.email=a@b -c user.name=a commit -q -m init`]);
+    return pp;
+  };
+  const made = async (pp: string, title: string, extra: object = {}) => {
+    await rpc("project.add", { path: pp });
+    for (let i = 0; i < 100 && !seen.find((c) => c.$ === "ProjectCreated" && c.root === pp); i++) await sleep(50);
+    const pc = seen.find((c) => c.$ === "ProjectCreated" && c.root === pp);
+    await rpc("thread.create", { project: pc?.id, title, ...extra });
+    for (let i = 0; i < 100 && !seen.find((c) => c.$ === "ThreadCreated" && c.title === title); i++) await sleep(50);
+    const th = seen.find((c) => c.$ === "ThreadCreated" && c.title === title)?.id;
+    await rpc("turn.start", { thread: th, text: "hello", msg: `${title}-m1`, mode: "queue" });
+    let got: any;
+    for (let i = 0; i < 300 && !got; i++) { got = seen.find((c) => (c.$ === "WorktreeSet" || c.$ === "WorktreeSkipped") && c.id === th); if (!got) await sleep(50); }
+    return { pc, th, got };
+  };
+  const board = { "b.kicad_pro": "{}\n", "b.kicad_pcb": "(kicad_pcb)\n" };
+  const hw = repo("hw", board);
+  const a = await made(hw, "HW A");
+  check("hardware: a thread stays in the folder", a.got?.$ === "WorktreeSkipped", a.got);
+  let pong: any;
+  for (let i = 0; i < 600 && !pong; i++) { pong = seen.find((c) => c.$ === "MessagePosted" && c.thread === a.th && c.text === "pong"); if (!pong) await sleep(50); }
+  check("hardware: its turn answers", !!pong);
+  const cwds = readFileSync(join(root, "claude.log"), "utf8").trim().split("\n");
+  check("hardware: its agent runs in the folder", cwds.includes(hw), cwds);
+  check("hardware: KiCad's droppings are excluded", readFileSync(join(hw, ".git/info/exclude"), "utf8").includes("fp-info-cache"));
+  check("hardware: boards take no line merge", readFileSync(join(hw, ".git/info/attributes"), "utf8").includes("*.kicad_pcb -merge"));
+  const b = await made(hw, "HW B", { env: "worktree" });
+  check("hardware: a worktree by name is made", b.got?.$ === "WorktreeSet" && String(b.got.worktree).includes("/.backplane/worktrees/"), b.got);
+  const said = await made(repo("hw-soft", { ...board, ".backplane.json": '{"kind":"software"}\n' }), "HW soft");
+  check("kind software: a worktree", said.got?.$ === "WorktreeSet", said.got);
+  const fw = await made(repo("hw-fw", { ...board, "Cargo.toml": "\n" }), "HW firmware");
+  check("a software build: a worktree", fw.got?.$ === "WorktreeSet", fw.got);
+  const de = await made(repo("hw-said", { "Cargo.toml": "\n", ".backplane.json": '{"kind":"hardware"}\n' }), "HW said");
+  check("kind hardware: the folder", de.got?.$ === "WorktreeSkipped", de.got);
+  // the worktree's own board is outside the folder, and the page says so
+  writeFileSync(join(b.got.worktree, "b.kicad_pcb"), "(kicad_pcb (changed))\n");
+  const page = await rpc("project.home", { project: a.pc?.id });
+  const text = JSON.stringify(page?.result ?? page);
+  check("the page names the worktree's board", String(page?.result?.outside ?? "").includes("1 file not committed") && String(page?.result?.outside ?? "").includes("b.kicad_pcb"), text.slice(0, 300));
 } finally { proc.kill(); await proc.exited; }
 console.log(failed ? "worktree e2e: FAIL" : "worktree e2e: ok");
 process.exit(failed ? 1 : 0);

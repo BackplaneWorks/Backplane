@@ -4,6 +4,7 @@ import ./proc.bend as P
 import ../core/json.bend as J
 import ../core/utf8.bend as U
 import ../core/kihealth.bend as KH
+import ../core/projkind.bend as PK
 import ../core/port.bend as PORT
 import ../core/kicad_install.bend as KI
 import ./kicad_library.bend as KL
@@ -20,7 +21,7 @@ type Rt is Data:
 
 # a project's canonical design files ("" when it has none)
 type Files is Data:
-  Files{pro: String, pcb: String, sch: String, all: String}
+  Files{pro: String, pcb: String, sch: String, all: String, hw: Bool}
 
 # why a KiCad export cannot run: no kicad-cli anywhere (Rt.first)
 def KiCad.missing() -> String:
@@ -582,12 +583,12 @@ def Files.pro(+named: String, +top: String, +found: String) -> String:
 # .backplane.json may name "project" (a .kicad_pro), "pcb" and "schematic"
 # (all project-relative); the board and schematic are otherwise found
 # beside the .kicad_pro (ns: the names in its folder)
-def Files.of(+root: String, +pro: String, +ns: List<&2, String>, +cfg: J.Json, +all: String) -> Files:
+def Files.of(+root: String, +pro: String, +ns: List<&2, String>, +cfg: J.Json, +all: String, hw: Bool) -> Files:
   +stem = Files.stem(Files.last(pro), ".kicad_pro")
   Files{Files.abs(root, pro),
     Files.abs(root, Bool.pick(String, String.is_empty(J.Json.get_str(cfg, "pcb", "")), Files.in.dir(Files.dir(pro), Files.named(ns, stem, ".kicad_pcb")), J.Json.get_str(cfg, "pcb", ""))),
     Files.abs(root, Bool.pick(String, String.is_empty(J.Json.get_str(cfg, "schematic", "")), Files.in.dir(Files.dir(pro), Files.named(ns, stem, ".kicad_sch")), J.Json.get_str(cfg, "schematic", ""))),
-    all}
+    all, hw}
 
 # every .kicad_pro under the root, four folders deep, as paths from it,
 # shallowest first, folders of copies (archive, build, old, out...: the
@@ -609,14 +610,22 @@ def Files.found.out(r: P.Ran) -> String:
 def Files.found(+root: String) -> IO(String):
   IO.bind(P.Ran, String, P.Proc.run("sh", ["-c", Files.found.sh(), "sh", root], "/"), r => IO.pure(String, Files.found.out(r)))
 
-def Files.read.at(+root: String, +pro: String, +cfg: J.Json, +all: String) -> IO(Files):
-  IO.bind(List<&2, String>, Files, Io.names(Bool.pick(String, String.is_empty(Files.dir(pro)), root, Files.abs(root, Files.dir(pro)))), ns => IO.pure(Files, Files.of(root, pro, ns, cfg, all)))
+def Files.read.at(+root: String, +pro: String, +cfg: J.Json, +all: String, hw: Bool) -> IO(Files):
+  IO.bind(List<&2, String>, Files, Io.names(Bool.pick(String, String.is_empty(Files.dir(pro)), root, Files.abs(root, Files.dir(pro)))), ns => IO.pure(Files, Files.of(root, pro, ns, cfg, all, hw)))
 
 def Files.read.cfg(+root: String, +cfg: J.Json) -> IO(Files):
   do IO<Files>:
     +ns : List<&2, String> <- Io.names(root)
     +all : String <- Files.found(root)
-    Files.read.at(root, Files.pro(J.Json.get_str(cfg, "project", ""), Files.pick(ns, ".kicad_pro"), all), cfg, all)
+    Files.read.at(root, Files.pro(J.Json.get_str(cfg, "project", ""), Files.pick(ns, ".kicad_pro"), all), cfg, all, PK.Pk.hardware(J.Json.get_str(cfg, "kind", ""), ns, all))
+
+# whether the folder is a hardware project (core/projkind.bend). Ask of
+# Files.read.local: Files.read's configuration is Project.config's, which
+# carries only the design paths, so it never sees "kind".
+def Files.hardware(fs: Files) -> Bool:
+  match fs:
+    case Files{_, _, _, _, hw}:
+      hw
 
 def Files.read.local(+root: String) -> IO(Files):
   IO.bind(String, Files, Io.text(root ++ "/.backplane.json"), text => Files.read.cfg(root, Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{})))
@@ -648,7 +657,7 @@ def Files.config.main(+cwd: String, +root: String) -> IO(J.Json):
     return KP.Project.config(main, thread)
 
 def Files.read.root(+root: String, cfg: J.Json) -> IO(Files):
-  Bool.pick(IO(Files), String.is_empty(root), IO.pure(Files, Files{"", "", "", ""}), Files.read.cfg(root, cfg))
+  Bool.pick(IO(Files), String.is_empty(root), IO.pure(Files, Files{"", "", "", "", False{}}), Files.read.cfg(root, cfg))
 
 def Files.read(+cwd: String) -> IO(Files):
   do IO<Files>:
@@ -675,7 +684,7 @@ def Files.path(+cwd: String, +path: String, copy: Bool) -> IO(String):
 
 def Files.target(+main: Files, local: Files, +path: String, +kind: String) -> String:
   match main local:
-    case Files{+mp, +mb, +ms, _} Files{+lp, +lb, +ls, _}:
+    case Files{+mp, +mb, +ms, _, _} Files{+lp, +lb, +ls, _, _}:
       Bool.pick(String, String.is_empty(path), Bool.pick(String, String.eq(kind, "project"), mp, Bool.pick(String, String.eq(kind, "schematic"), ms, mb)),
         Bool.pick(String, Bool.and(Bool.not(String.is_empty(lp)), String.eq(path, lp)), mp,
           Bool.pick(String, Bool.and(Bool.not(String.is_empty(lb)), String.eq(path, lb)), mb,
@@ -712,12 +721,12 @@ def Files.changed.sh() -> String:
 
 def Files.changed(a: Files, b: Files) -> IO(Bool):
   match a b:
-    case Files{ap, ab, as, _} Files{bp, bb, bs, _}:
+    case Files{ap, ab, as, _, _} Files{bp, bb, bs, _, _}:
       IO.bind(P.Ran, Bool, P.Proc.run("sh", ["-c", Files.changed.sh(), "sh", ap, bp, ab, bb, as, bs], "/"), r => IO.pure(Bool, Bool.not(String.is_empty(Files.found.out(r)))))
 
 def Files.owns(fs: Files, +path: String) -> Bool:
   match fs:
-    case Files{p, b, s, _}:
+    case Files{p, b, s, _, _}:
       Bool.and(Bool.not(String.is_empty(path)), Bool.or(String.eq(p, path), Bool.or(String.eq(b, path), String.eq(s, path))))
 
 def Files.thread_path(+cwd: String, +root: String, +local: Files, +path: String) -> String:
@@ -732,7 +741,7 @@ def Files.write_guard.changed(+cwd: String, +root: String, +args: J.Json, +ty: S
     +mp : String = Files.path.at(cwd, root, Files.target(main, local, path, "project"), False{}, cfg)
     +tp : String = Files.thread_path(cwd, root, local, Files.target(local, main, path, "project"))
     +changed : Bool <- Files.changed(main, local)
-    selected : Bool <- Files.changed(Files{"", mp, "", ""}, Files{"", tp, "", ""})
+    selected : Bool <- Files.changed(Files{"", mp, "", "", False{}}, Files{"", tp, "", "", False{}})
     return Bool.pick(String, KP.Project.refuse_write(Bool.not(String.eq(cwd, root)), Bool.or(changed, selected), KP.Project.readonly(ty),
       Bool.or(J.Json.get_bool(args, "thread_copy", False{}), J.Json.get_bool(args, "main", False{}))), KP.Project.write_error(mp, tp), "")
 
@@ -938,7 +947,7 @@ def KiCad.open.script() -> String:
 
 def KiCad.open.ready(fork: Bool, +cli: String, +fs: Files) -> IO(String):
   match fork fs:
-    case True{} Files{+pro, +pcb, +sch, _}:
+    case True{} Files{+pro, +pcb, +sch, _, _}:
       do IO<String>:
         native : List<&2, String> <- KiCad.native_args([Rt.root(cli), pro, pcb, sch])
         r : P.Ran <- P.Proc.run("sh", List.append(&2, String, ["-c", KiCad.open.script(), "sh"], native), "/")

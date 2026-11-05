@@ -1,4 +1,5 @@
 import ./src/core/kicad-project.bend as KPROJECT
+
 import ./src/core/cad-install.bend as CADINSTALL
 
 import ./src/core/msgs-lookup.bend as MLOOK
@@ -22,6 +23,8 @@ import ./src/server/desktop-info.bend as DESKINFO
 import ./src/server/pairing-info.bend as PAIRINFO
 
 import ./src/server/watch-plan.bend as WATCHPLAN
+
+import ./src/core/projkind.bend as PKIND
 
 import ./src/core/message-context.bend as MSGCONTEXT
 
@@ -16368,3 +16371,49 @@ law kicad_absolute_project_override:
 law kicad_divergent_write_requires_choice:
   for explicit: Bool
   {KPROJECT.Project.refuse_write(True{}, True{}, False{}, explicit) == Bool.not(explicit) : Bool}
+
+law pk_kind_hardware_said:
+  for ns: List<&2, String>
+  for found: String
+  {PKIND.Pk.hardware("hardware", ns, found) == True{} : Bool}
+
+law pk_kind_software_said:
+  for ns: List<&2, String>
+  for found: String
+  {PKIND.Pk.hardware("software", ns, found) == False{} : Bool}
+
+law pk_software_build_wins:
+  for t: List<&2, String>
+  for found: String
+  {PKIND.Pk.hardware("", "Cargo.toml" <> t, found) == False{} : Bool}
+
+law pk_board_at_root:
+  {PKIND.Pk.hardware("", ["README.md", "board.kicad_pro"], "") == True{} : Bool}
+
+law pk_board_below_root:
+  {PKIND.Pk.hardware("", ["README.md", "boards"], "boards/a/a.kicad_pro") == True{} : Bool}
+
+law pk_mech_folder:
+  {PKIND.Pk.hardware("", ["README.md", "mech"], "") == True{} : Bool}
+
+law pk_plain_folder_software:
+  {PKIND.Pk.hardware("", ["README.md", "notes"], "") == False{} : Bool}
+
+law pk_software_keeps_worktrees:
+  for mode: String
+  {PKIND.Pk.stay(False{}, mode) == False{} : Bool}
+
+law pk_hardware_stays:
+  {PKIND.Pk.stay(True{}, "auto") == True{} : Bool}
+
+law pk_named_worktree_kept:
+  {PKIND.Pk.stay(True{}, "worktree") == False{} : Bool}
+
+law pk_no_copies_no_words:
+  {PKIND.Pk.panel(Nil{}) == "" : String}
+
+law pk_short_line_no_row:
+  {PKIND.Pk.rows("wt\tb") == Nil{} : List<&2, PKIND.PkRow>}
+
+law home_no_outside_no_panel:
+  {PHOME.Home.outside("") == Nil{} : List<&2, PHOME.Panel>}

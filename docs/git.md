@@ -76,17 +76,35 @@ Git.exclude(cwd) -> IO(String)                              /.backplane/ in <com
 Git.skipped(s) -> Bool
 ```
 
-- Every new thread gets a worktree of its project's repository on a fresh `backplane/<8 hex>` branch from upstream: origin's default branch (`origin/main`), fetched first (30 s at most; offline, the last fetched one), with no tracking so a push never goes to main. Without an origin it starts from HEAD (the thread setting `thread.env`: `auto`, the default, or `worktree`; `local` works in the folder). The first message names the branch.
+- Every new thread of a software project (see Hardware projects below) gets a worktree of its project's repository on a fresh `backplane/<8 hex>` branch from upstream: origin's default branch (`origin/main`), fetched first (30 s at most; offline, the last fetched one), with no tracking so a push never goes to main. Without an origin it starts from HEAD (the thread setting `thread.env`: `auto`, the default, or `worktree`; `local` works in the folder). The first message names the branch.
 - The worktree lives in the repository, under `.backplane/worktrees/`, listed in `info/exclude` (not `.gitignore`), so the folder's status, file list and checkpoints never see it. A project that is a folder inside a bigger repository works at the same place in its worktree.
 - No repository, or no commit yet: the thread works in the project folder (`WorktreeSkipped`). Until the worktree exists (at most two minutes), the thread's messages wait in its queue.
-- A hardware project (KiCad files in the project folder) brings its uncommitted work into the new worktree: changed and untracked files (not ignored ones, KiCad backups, locks, autosaves or the footprint cache), and deletions. Such a worktree starts from HEAD instead of upstream, since the carried files were made against it. A software project starts clean from upstream.
-- The viewer shows the selected thread's worktree, so it shows the board that thread edits.
+- A worktree asked for by name in a folder with KiCad files brings its uncommitted work into the new worktree: changed and untracked files (not ignored ones, KiCad backups, locks, autosaves or the footprint cache), and deletions. Such a worktree starts from HEAD instead of upstream, since the carried files were made against it. A software project starts clean from upstream.
+- KiCad viewers and `viewer_show` default to the main checkout's design, in a worktree too; `thread_copy:true` shows the thread's copy, and Open in KiCad asks when the two differ. Other files and STEP paths stay relative to the thread (`docs/kicad-ipc.md`).
 
 Removal (`M.Worktree.drop`, laws `worktree_kept_*`, `worktree_dropped_*`):
 - A worktree goes once its thread is idle and settled for `worktree.days` (default 3, since it settled), hidden (archived or deleted) that long since its last activity, or settled by a merge (at once, on the next tick).
 - Never while a turn runs or something waits on the user, never while the thread is active, pinned or snoozed, and never a directory outside `.backplane/worktrees/`.
 - First a checkpoint of the worktree is taken, then `git worktree remove --force`; the branch stays (`WorktreeRemoved`).
 - A message to such a thread makes the worktree again from its branch, restores that last checkpoint, and then runs (law `worktree_revives`).
+
+## Hardware projects
+
+A board, a schematic or a CAD part cannot be merged, so a hardware project keeps one copy of its design: every thread works in the project's folder, where the project's page and viewers look. A software project keeps a worktree per thread. `src/core/projkind.bend` is the rule (laws `pk_*`):
+
+```
+Pk.hardware(said, names, found) -> Bool     .backplane.json's kind, the root's names, the .kicad_pro files below it
+Pk.stay(hw, mode) -> Bool                   whether a new thread stays in the folder
+Git.hardware(cwd) -> IO(String)             the clone's info/exclude and info/attributes
+Git.outside(root) -> IO(String)             the copies of the design outside the folder, as Pk.rows reads them
+```
+
+- What counts, first match wins: `"kind": "hardware"` or `"software"` in `.backplane.json`; a software build at the root (`Pk.marker`: `package.json`, `Cargo.toml`, `pyproject.toml`, `CMakeLists.txt`, `west.yml`, `src`...) is software; KiCad at the root or up to four folders down, or a `mech` folder, is hardware; anything else is software. So a firmware repository that also holds a board keeps its worktrees unless it says otherwise.
+- `K.Files.read` works it out with the rest of a folder's KiCad files (`Files.hardware`). `WtJob.fresh` uses it: a new thread in `auto` mode takes the existing way to the folder (`WorktreeSkipped`), so no new event exists. A worktree asked for by name (`env: "worktree"`, the `thread.env` setting) is still made, with the folder's uncommitted work carried over; a fork of a worktree thread and a removed worktree made again stay as they were.
+- The clone is set up as the thread starts, in files nothing tracks and its worktrees share: `info/exclude` keeps KiCad's droppings out of status (`Pk.exclude`), `info/attributes` turns line merges off for design files (`Pk.attributes`): a conflict keeps one whole side, never conflict markers in a board. There is no filter normalising `.kicad_pro`: rewriting KiCad's files on checkout risks more than the noise costs, and with one copy nothing waits on a fast-forward. Agents are told to leave a re-saved `.kicad_pro` out of their commits, and `Git.outside` does not count one.
+- Every turn in a hardware project gets the block `<backplane_hardware_project>` (`Pk.prompt`, server.bend's `Hub.turn.prompt`): save in place, the named lock `doc:<path>` for one writer per document (the agents' rule; `kicad_ipc` does not enforce it), commits of their own paths on the checked-out branch, no git that changes the shared folder. It is decided from the thread's own folder or the project's (`K.Files.read.local` of each: `K.Files.read` answers for main and keeps only the design paths of `.backplane.json`, so it never sees `kind`), so a thread that made the first board inside a worktree hears it at its agent's next start: the next turn, or for Claude, which keeps its process, when that next starts.
+- A thread in a worktree of a hardware project is told its files are not what the person sees, and how to bring the design home: whole files, asking which side is current when both changed. KiCad reads default to main (`docs/kicad-ipc.md`), so to work on its own copy it passes `thread_copy:true` on every `kicad_ipc` and `viewer_show` call, reads included. While the two differ a write is refused unless the call says `thread_copy:true` or `main:true`; the agent is told a refusal is a question for the person, never a reason to pass `main:true`.
+- Nothing is moved for an existing project: a worktree may hold the only copy of a design. Each turn in the folder lists the copies that differ (`Git.outside`) and tells the agent to ask which is current before editing, and the project's page shows them first (`Home.outside`, "Design outside this folder"): the folder's uncommitted board, schematic and mech files, then each worktree with uncommitted ones or commits the folder lacks.
 
 ## GitHub accounts (`src/core/gh.bend`, `src/server/gh.bend`)
 

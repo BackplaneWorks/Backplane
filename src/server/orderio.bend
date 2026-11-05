@@ -142,7 +142,7 @@ def Od.card(+thread: String, +intent: String, +ps: List<&2, J.Json>, +boards: St
 # the board the viewer opens by default (kicad.bend's Files.read), from the folder
 def Od.pcb(+cwd: String, f: K.Files) -> String:
   match f:
-    case K.Files{_, +pcb, _, _}:
+    case K.Files{_, +pcb, _, _, _}:
       Bool.pick(String, String.starts_with(pcb, cwd ++ "/"), String.drop(pcb, 1n+String.length(cwd)), "")
 
 # KiCad boards and project files in the project (paths from its folder, in

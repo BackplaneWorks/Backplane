@@ -106,8 +106,8 @@
     "src/core/pathrecords.bend": "3513a61b677944d344d99f1669bd1cf63c5484b2a0ab43c45153f9f3b10bcc04",
     "src/core/plane.bend": "3baf611ec774f024241959fbfec5f20474b3287c54d82ac548635d12b9e0f9ef",
     "src/core/presentation.bend": "cbdc38a38c52cd94fe9af1222e1ce0461b780d3d5d4f32679313d648e702f76a",
-    "src/core/project-home.bend": "62479bc48690761dc22fac858868c77b8f385411af586db80d2c3c0fb94f9823",
-    "src/core/prompt.bend": "f29adcadc30e3cb23afa11672fd00c0decc26ce3581f6fa84a48e3e54b47590d",
+    "src/core/project-home.bend": "727dfba9ae27510cacc2ce4c57b2c584ce9a69250b271e87ba879bcb9db2cc77",
+    "src/core/prompt.bend": "ba76b7d9564e0c2681502df8b2017b64f602396928d9ede2f38f1112ce8763d0",
     "src/core/provider-setup.bend": "39cca69dafda3f04c72bbaa37711e3ab5732b66650e302d91423f536d0212a26",
     "src/core/qr.bend": "42aae4f454bbf55b201e8913e517b6dec531424b6cace582a4726e189636fbcc",
     "src/core/range.bend": "20d4828965b915881158fa8cfff023a64d2da670143e8fe17f4a49f7bccd9a0f",
@@ -194,7 +194,7 @@
     "src/web/mail-actions.bend": "da52f4d849410a7dbfe2484db0d1d07b010ff99e126668fdd05b30b12f495c8f",
     "src/web/mailroom.bend": "2b3fee92a16cc6f11df0fdcddecd19c2ec5f7e2212fefe72c300e198870c9270",
     "src/web/phone.bend": "394396cfd58379f627559e3acaee29a9d2ecf75aa1d68c3e97909d0c8bcc230f",
-    "src/web/project-home.bend": "ded8828e862a410816b6d4c7792c0dc826a7f25b7b2d1358732a81fdd7042329",
+    "src/web/project-home.bend": "05a5b7d6ae0cbd18c7d37889187e6d3e830c90cb2a63c48d1aea12e2a6ddcccf",
     "src/web/settings-menu.bend": "231b31eae65cf8598d9ea78265e19a6e56169cb6a2361cacac6251e9573dd4cb",
     "src/web/sidebar-slot.bend": "1104967b7a84470cb9afcf6e1efdd911469de1cbef52c7ad34a16cad73754950",
     "src/web/space.bend": "b86a265e41a900498bc33c37c0404c4d6678554efe3d9054f329beb2cf35ee63",
@@ -1189,5 +1189,22 @@
     },
     "limits": "Full PROOF.bend attempted on this source under the 3.7e9 cap; OOM-killed. The three new laws and 13 copy-choice UI assertions passed separately. No native-device acceptance claimed.",
     "inheritedMainReview": "Also reviewed main changes since 3d17db4ec7: accounts overlay catalog fast path reads committed bindings; CEF changes only the new-tab URL constant; bot header/tab identity keys add no state reads; model picker parses existing info catalog and the same retained scratch query. No new ordinary draft-body reader or sidebar filtering/authority change. The added model-catalog import is pure catalog/JSON preparation with no Ui or draft access; its current source is pinned too."
+  },
+  "hardwareProjectsReview": {
+    "changedClosureFiles": [
+      "src/core/project-home.bend",
+      "src/core/prompt.bend",
+      "src/web/project-home.bend"
+    ],
+    "scope": "Hardware projects: src/core/prompt.bend gains one sentence of agent text about .backplane.json's kind; src/core/project-home.bend and src/web/project-home.bend gain the project page's 'Design outside this folder' panel (Home.outside, read from the hub's project.home reply). The closure's file set is unchanged. No sidebar draft readers, unknown @ retention, private image keys or transport change. Reviewed by reading the diffs.",
+    "qualification": {
+      "assertions": 24,
+      "job": "j20261104234506-1152570",
+      "work": "w-t1793812122-1616973-1691194",
+      "compiler": "composite 41262875, direct, no --check-only, 3.7e9 cap, swap 0",
+      "qualifiedHead": "572918de79c2c1367f11a01adb5266c335008c43",
+      "fullOutputLogSHA256": "cd83cd83cb66e6c0ea17d490d0baf8502c2b965f711f5e731bbd391a9cd5612c",
+      "oomKill": 0
+    }
   }
 }

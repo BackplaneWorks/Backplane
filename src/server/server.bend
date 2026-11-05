@@ -118,6 +118,7 @@ import ../web/session.bend as WEBFRONT
 import ./push.bend as PU
 import ./park.bend as PK
 import ./git.bend as GT
+import ../core/projkind.bend as PJK
 import ./gh.bend as GH
 import ./wake.bend as WJ
 import ../core/wake.bend as WK
@@ -2634,11 +2635,21 @@ def WtJob.fork(+inbox: Chan(Msg), +thread: String, +root: String, +src: String, 
   IO.bind(String, Unit, GT.Git.thread_wt(root, False{}, GT.Git.branch.temp(B.Wt.seed(thread))),
     r => WtJob.fork.k(r, inbox, thread, src, GT.Git.branch.sanitize(GT.Git.branch.temp(B.Wt.seed(thread))), provider, binding))
 
+# a new thread: a hardware project's stays in the project's folder
+# (core/projkind.bend), and the clone is set up for that; any other gets its
+# worktree
+def WtJob.fresh(stay: Bool, +inbox: Chan(Msg), +thread: String, +root: String, +mode: String, +provider: String, +binding: String) -> IO(Unit):
+  match stay:
+    case True{}:
+      IO.bind(String, Unit, GT.Git.hardware(root), _ => WtJob.skip(inbox, thread, "info", PJK.Pk.why(), provider, binding))
+    case False{}:
+      IO.bind(List<&2, String>, Unit, K.Io.names(root), ns => WtJob.go(B.Wt.hardware(ns), inbox, thread, root, mode, provider, binding))
+
 def WtJob.run(+inbox: Chan(Msg), +thread: String, +root: String, +mode: String, +branch: String, +provider: String, +binding: String) -> IO(Unit):
   Bool.pick(IO(Unit), String.eq(mode, "again"),
     IO.bind(String, Unit, GT.Git.thread_wt.again(root, branch), r => WtJob.again.k(r, inbox, thread, branch, provider, binding)),
     Bool.pick(IO(Unit), String.eq(mode, "fork"), WtJob.fork(inbox, thread, root, branch, provider, binding),
-      IO.bind(List<&2, String>, Unit, K.Io.names(root), ns => WtJob.go(B.Wt.hardware(ns), inbox, thread, root, mode, provider, binding))))
+      IO.bind(K.Files, Unit, K.Files.read.local(root), fs => WtJob.fresh(PJK.Pk.stay(K.Files.hardware(fs), mode), inbox, thread, root, mode, provider, binding))))
 
 # Removing a thread's worktree (M.Worktree.drop): its state is kept first as
 # a checkpoint (a hidden ref, so nothing is lost; the branch stays too),
@@ -3140,7 +3151,7 @@ def Ticker.loop(fuel: Nat, +inbox: Chan(Msg)) -> IO(Unit):
 
 def KiCadJob.project(fs: K.Files) -> String:
   match fs:
-    case K.Files{pro, _, _, _}: pro
+    case K.Files{pro, _, _, _, _}: pro
 
 def KiCadJob.open(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +rt: K.Rt, fs: K.Files) -> IO(Unit):
   do IO<Unit>:
@@ -3190,7 +3201,7 @@ def KExportJob.activity(done: Bool, +inbox: Chan(Msg), +thread: String, request:
 
 def KExportJob.pro(fs: K.Files) -> String:
   match fs:
-    case K.Files{pro, _, _, _}: pro
+    case K.Files{pro, _, _, _, _}: pro
 
 def KExportJob.run(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, cwd: String, +home: String, rt: K.Rt, +a: String) -> IO(Unit):
   do IO<Unit>:
@@ -3244,7 +3255,7 @@ def StepJob.run(+inbox: Chan(Msg), +thread: String, +cwd: String, +entry: String
 
 def RefsJob.files(f: K.Files) -> List<&2, J.KV>:
   match f:
-    case K.Files{_, pcb, sch, _}:
+    case K.Files{_, pcb, sch, _, _}:
       [J.KV{"pcb", J.Str{pcb}}, J.KV{"sch", J.Str{sch}}]
 
 # what the thread's files may be compared with (Git.refs), and its
@@ -3322,6 +3333,23 @@ def ProjectHomeJob.with_price(r: J.Json, price: J.Json) -> J.Json:
     case J.Obj{fields}: J.Obj{J.Field{"price", price, fields}}
     case _: r
 
+# the project's page names the copies of a hardware project's design it
+# does not show: core/project-home.bend's Home.outside draws them
+def ProjectHomeJob.with_outside(r: J.Json, +text: String) -> J.Json:
+  match r:
+    case J.Obj{+fields}: Bool.pick(J.Json, String.is_empty(text), J.Obj{fields}, J.Obj{J.Field{"outside", J.Str{text}, fields}})
+    case _: r
+
+def ProjectHomeJob.outside.k(hw: Bool, +r: J.Json, +cwd: String) -> IO(J.Json):
+  match hw:
+    case False{}: IO.pure(J.Json, r)
+    case True{}: IO.bind(String, J.Json, GT.Git.outside(cwd), out => IO.pure(J.Json, ProjectHomeJob.with_outside(r, PJK.Pk.panel(PJK.Pk.rows(out)))))
+
+# a page's snapshot only: a document read has no panels
+def ProjectHomeJob.outside(+op: String, +r: J.Json, +cwd: String) -> IO(J.Json):
+  Bool.pick(IO(J.Json), String.eq(op, "document"), IO.pure(J.Json, r),
+    IO.bind(K.Files, J.Json, K.Files.read.local(cwd), fs => ProjectHomeJob.outside.k(K.Files.hardware(fs), r, cwd)))
+
 def ProjectHomeJob.finish(price: Bool, +r: J.Json, +inbox: Chan(Msg), +client: U32, +id: String, +home: String, +cwd: String, +opts: String) -> IO(Unit):
   match price:
     case False{}: GitJob.reply(inbox, client, id, True{}, r)
@@ -3371,7 +3399,8 @@ def GitJob.run.k(i: Nat, +tx: TextScope, +job: String, +inbox: Chan(Msg), +clien
     case 18n:
       BoardsJob.run(String.is_empty(cwd), inbox, client, id, thread, cwd)
     case 19n:
-      IO.bind(String, Unit, PHOME.ProjectHome.read(cwd, a), raw => ProjectHomeJob.finish(String.eq(J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(a), J.Null{}), "op", ""), "price"), Maybe.default(&2, J.Json, J.Json.parse(raw), J.Null{}), inbox, client, id, home, cwd, b))
+      IO.bind(String, Unit, PHOME.ProjectHome.read(cwd, a), raw => IO.bind(J.Json, Unit, ProjectHomeJob.outside(J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(a), J.Null{}), "op", ""), Maybe.default(&2, J.Json, J.Json.parse(raw), J.Null{}), cwd),
+        r => ProjectHomeJob.finish(String.eq(J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(a), J.Null{}), "op", ""), "price"), r, inbox, client, id, home, cwd, b)))
     case _:
       GitJob.run.git(tx, job, inbox, client, id, thread, cwd, a, b, home)
 
@@ -3876,7 +3905,7 @@ def Hub.prompt.kicad(rt: K.Rt, ipc: Bool) -> String:
 
 def Hub.prompt.files(+cwd: String, fs: K.Files) -> String:
   match fs:
-    case K.Files{+pro, +pcb, +sch, +all}:
+    case K.Files{+pro, +pcb, +sch, +all, _}:
       Q.Prompt.project(cwd, pro, pcb, sch, all)
 
 # one thread's instructions: the shared runtime and skills, then this
@@ -3885,6 +3914,36 @@ def Hub.prompt.files(+cwd: String, fs: K.Files) -> String:
 # then the secret box's, vault.bend's Vx.prompt: names only)
 def Hub.keys.prompt(+home: String) -> IO(String):
   IO.bind(String, String, AKS.Ak.prompt(home), k => IO.bind(String, String, VX.Vx.prompt(), sp => IO.pure(String, k ++ sp)))
+
+# a thread's project folder, "" for a thread that has none of its own to
+# share: a bot's, a scratch thread's
+def Hub.hardware.root(+st: M.State, +project: String) -> String:
+  Bool.pick(String, M.Scratch.is(project), "", B.Hub.project.root(B.Hub.project(st, project)))
+
+def Hub.hardware.rows(hw: Bool, +root: String, +cwd: String) -> IO(String):
+  match hw:
+    case False{}:
+      IO.pure(String, "")
+    case True{}:
+      IO.bind(String, String, GT.Git.outside(root), out => IO.pure(String, PJK.Pk.prompt(String.eq(root, cwd), root, cwd, PJK.Pk.rows(out))))
+
+# a hardware project's rules for an agent start (Pk.prompt): the thread's own
+# folder or the project's says so, each read as itself (Files.read.local), so
+# a thread that made the first board in a worktree is seen.
+# A provider with a process per turn hears it next turn; Claude keeps its
+# process, so hears it when that next starts.
+def Hub.hardware.prompt(+root: String, +cwd: String) -> IO(String):
+  Bool.pick(IO(String), String.is_empty(root), IO.pure(String, ""),
+    IO.bind(K.Files, String, K.Files.read.local(cwd), l => IO.bind(K.Files, String, K.Files.read.local(root), m => Hub.hardware.rows(Bool.or(K.Files.hardware(l), K.Files.hardware(m)), root, cwd))))
+
+def Hub.turn.blocks(+a: String, +b: String) -> String:
+  Bool.pick(String, Bool.or(String.is_empty(a), String.is_empty(b)), a ++ b, a ++ "\n\n" ++ b)
+
+# what follows a turn's instructions: the keys' blocks (Hub.keys.prompt)
+# and a hardware project's rules
+def Hub.turn.prompt(+cfg: Cfg, +st: M.State, +thread: String, +cwd: String) -> IO(String):
+  IO.bind(String, String, Hub.keys.prompt(Cfg.home(cfg)),
+    k => IO.bind(String, String, Hub.hardware.prompt(Hub.hardware.root(st, B.Hub.thread_project(B.Hub.thread(st, thread))), cwd), h => IO.pure(String, Hub.turn.blocks(k, h))))
 
 def Cfg.bn(c: Cfg) -> BN.Bn:
   match c:
@@ -3977,7 +4036,7 @@ def Hub.auto.k(empty: Bool, +cl: List<&2, Client>, +text: String) -> IO(List<&2,
 
 def Hub.auto(+cl: List<&2, Client>, +thread: String, fs: K.Files) -> IO(List<&2, Client>):
   match fs:
-    case K.Files{_, +pcb, +sch, _}:
+    case K.Files{_, +pcb, +sch, _, _}:
       Hub.auto.k(String.is_empty(B.Auto.view(thread, pcb, sch)), cl, B.Auto.view(thread, pcb, sch))
 
 # the process a thread's agent replaces: its background work is told lost
@@ -5100,14 +5159,14 @@ def Codex.go(+cfg: Cfg, +st: M.State, +thread: String, +cwd: String, +model: Str
   do IO<Unit>:
     +fs : K.Files <- Files.prepared(st, thread, cwd, inbox, K.Rt.cli(Cfg.rt(cfg)))
     +ss : List<&2, AG.USkill> <- Skills.scan(cwd)
-    +keys : String <- Hub.keys.prompt(Cfg.home(cfg))
+    +keys : String <- Hub.turn.prompt(cfg, st, thread, cwd)
     Codex.account(String.is_empty(ACCT.Accounts.id(st, thread, "codex")), Cfg.home(cfg), st, List.append(&2, String, PM.Private.codex(PM.Private.live(st, thread)), Codex.args(cfg, thread, model, session, r, AG.Mention.expand("codex", text, ss), Hub.prompt(cfg, st, thread, cwd, fs, keys) ++ AG.USkill.prompt(ss), Hub.effort_of(st, thread), gen, MD.Disposition.launch(st, thread), MD.Disposition.triage.launch(st, thread), M.Think.on(st))), cwd, thread, gen, inbox)
 
 def Grok.go(+cfg: Cfg, +st: M.State, +thread: String, +cwd: String, +model: String, +session: String, +r: M.RuntimeMode, +text: String, +gen: String, +inbox: Chan(Msg)) -> IO(Unit):
   do IO<Unit>:
     +fs : K.Files <- Files.prepared(st, thread, cwd, inbox, K.Rt.cli(Cfg.rt(cfg)))
     +ss : List<&2, AG.USkill> <- Skills.scan(cwd)
-    +keys : String <- Hub.keys.prompt(Cfg.home(cfg))
+    +keys : String <- Hub.turn.prompt(cfg, st, thread, cwd)
     Grok.run(Grok.args(r, model, Hub.effort_of(st, thread)),
       MS.PAcp{AC.AcpTurn{cwd, Hub.mcp_url.g(cfg, thread, gen), Hub.prompt(cfg, st, thread, cwd, fs, keys) ++ AG.USkill.prompt(ss), AG.Mention.expand("grok", text, ss), session, Grok.asks(r)}}, cwd, thread, gen, inbox)
 
@@ -5118,7 +5177,7 @@ def Oc.go(+cfg: Cfg, +st: M.State, +thread: String, +cwd: String, +model: String
   do IO<Unit>:
     +fs : K.Files <- Files.prepared(st, thread, cwd, inbox, K.Rt.cli(Cfg.rt(cfg)))
     +ss : List<&2, AG.USkill> <- Skills.scan(cwd)
-    +keys : String <- Hub.keys.prompt(Cfg.home(cfg))
+    +keys : String <- Hub.turn.prompt(cfg, st, thread, cwd)
     Grok.run(Oc.args(r, model),
       MS.POc{OCM.OcpTurn{AC.AcpTurn{cwd, Hub.mcp_url.g(cfg, thread, gen), Hub.prompt(cfg, st, thread, cwd, fs, keys) ++ AG.USkill.prompt(ss), AG.Mention.expand("opencode", text, ss), session, Grok.asks(r)}, model}}, cwd, thread, gen, inbox)
 
@@ -5162,7 +5221,7 @@ def PiRun.go(+cfg: Cfg, +st: M.State, +thread: String, +cwd: String, +model: Str
   do IO<Unit>:
     +fs : K.Files <- Files.prepared(st, thread, cwd, inbox, K.Rt.cli(Cfg.rt(cfg)))
     +ss : List<&2, AG.USkill> <- Skills.scan(cwd)
-    +keys : String <- Hub.keys.prompt(Cfg.home(cfg))
+    +keys : String <- Hub.turn.prompt(cfg, st, thread, cwd)
     w : P.Ran <- PiRun.write(Cfg.home(cfg))
     Grok.run(PiRun.args(Hub.mcp_url.g(cfg, thread, gen), PiRun.mode(r), PI.Pi.session(session, thread, gen), PiRun.ext(Cfg.home(cfg)),
         Hub.prompt(cfg, st, thread, cwd, fs, keys) ++ AG.USkill.prompt(ss), model, Hub.effort_of(st, thread)),
@@ -5199,7 +5258,7 @@ def OmpRun.go(+cfg: Cfg, +st: M.State, +thread: String, +cwd: String, +model: St
   do IO<Unit>:
     +fs : K.Files <- Files.prepared(st, thread, cwd, inbox, K.Rt.cli(Cfg.rt(cfg)))
     +ss : List<&2, AG.USkill> <- Skills.scan(cwd)
-    +keys : String <- Hub.keys.prompt(Cfg.home(cfg))
+    +keys : String <- Hub.turn.prompt(cfg, st, thread, cwd)
     prompt : String <- VX.Vx.mask(Hub.prompt(cfg, st, thread, cwd, fs, keys) ++ AG.USkill.prompt(ss))
     files : Result<&1, &1, U32 & String, String> <- OMPLAUNCH.OmpLaunch.prepare(Cfg.home(cfg), prompt, OP.Omp.ext())
     OmpRun.prepared(files, Hub.mcp_url.g(cfg, thread, gen), OmpRun.mode(r), OP.Omp.dir(Cfg.home(cfg), thread), PiRun.model(model), AG.Effort.of("omp", Hub.effort_of(st, thread)),
@@ -5211,7 +5270,7 @@ def Muse.go(+cfg: Cfg, +st: M.State, +thread: String, +cwd: String, +model: Stri
   do IO<Unit>:
     +fs : K.Files <- Files.prepared(st, thread, cwd, inbox, K.Rt.cli(Cfg.rt(cfg)))
     +ss : List<&2, AG.USkill> <- Skills.scan(cwd)
-    +keys : String <- Hub.keys.prompt(Cfg.home(cfg))
+    +keys : String <- Hub.turn.prompt(cfg, st, thread, cwd)
     Grok.run(Muse.args(r, model),
       MS.PMsp{MS.MspTurn{cwd, Hub.mcp_url.g(cfg, thread, gen), Hub.prompt(cfg, st, thread, cwd, fs, keys) ++ AG.USkill.prompt(ss), AG.Mention.expand("muse", text, ss), session,
         Muse.mode(r), AG.Effort.of("muse", Hub.effort_of(st, thread)), gen}}, cwd, thread, gen, inbox)
@@ -5238,7 +5297,7 @@ def Agt.go(+cfg: Cfg, +st: M.State, +thread: String, +cwd: String, +model: Strin
   do IO<Unit>:
     +fs : K.Files <- Files.prepared(st, thread, cwd, inbox, K.Rt.cli(Cfg.rt(cfg)))
     +ss : List<&2, AG.USkill> <- Skills.scan(cwd)
-    +keys : String <- Hub.keys.prompt(Cfg.home(cfg))
+    +keys : String <- Hub.turn.prompt(cfg, st, thread, cwd)
     w : Bool <- AGX.Agx.write(AGX.Agx.root(Cfg.home(cfg)))
     Grok.run(Agt.args(Cfg.home(cfg), st),
       MS.PAgy{AGY.AgyTurn{AC.AcpTurn{cwd, Hub.mcp_url.g(cfg, thread, gen), Hub.prompt(cfg, st, thread, cwd, fs, keys) ++ AG.USkill.prompt(ss), AG.Mention.expand("antigravity", text, ss), session, Grok.asks(r)},
@@ -5597,7 +5656,7 @@ def KIpc.fallback(+inbox: Chan(Msg), +thread: String, +reply: Chan(String), +id:
 
 def KIpc.pro.of(fs: K.Files) -> String:
   match fs:
-    case K.Files{pro, _, _, _}:
+    case K.Files{pro, _, _, _, _}:
       pro
 
 def KIpc.pro.dir(+dir: String) -> IO(String):
@@ -10278,7 +10337,7 @@ def Claude.started(r: Result<&1, &1, U32 & String, U32 & Socket>, +thread: Strin
 def Claude.job(+cfg: Cfg, +st: M.State, +thread: String, +cwd: String, +model: String, +session: String, +r: M.RuntimeMode, +i: M.InteractionMode, +effort: String, +gen: String, +input: Chan(String), +inbox: Chan(Msg)) -> IO(Unit):
   do IO<Unit>:
     +fs : K.Files <- Files.prepared(st, thread, cwd, inbox, K.Rt.cli(Cfg.rt(cfg)))
-    +keys : String <- Hub.keys.prompt(Cfg.home(cfg))
+    +keys : String <- Hub.turn.prompt(cfg, st, thread, cwd)
     Keyring.gate("claude", IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, Unit, AccountSpawn.run(Cfg.home(cfg), st, thread, "claude", Hub.agent_args(cfg, thread, model, session, r, i, Hub.prompt(cfg, st, thread, cwd, fs, keys), effort, gen, M.Think.on(st)), cwd, 3),
       res => Claude.started(res, thread, gen, cwd, input, inbox)), Claude.fail(thread, gen, KR.Keyring.refusal("claude"), inbox))
 
