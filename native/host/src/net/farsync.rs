@@ -26,11 +26,21 @@ impl FarSync {
     /// Take a batch (blocking fsyncs off the workers) and hand the events to the presenter. Ok(gap).
     async fn take(&self, hub: &Arc<Hub>, link: &str, epoch: &str, since: u64, to: u64, items: Vec<Item>) -> anyhow::Result<bool> {
         let (store, l, e) = (self.store.clone(), link.to_string(), epoch.to_string());
+        // store and fold under the hub's mirror gate: a replay (after a presenter rebuild) snapshots either before this batch is stored
+        // (and this batch is folded after it) or after it is folded, never in between
+        let gate = hub.mirror_gate().await;
         let t = tokio::task::spawn_blocking(move || store.take(&l, &e, since, to, &items)).await??;
         // another history starts the mirror over, and Bend forgets the link's old rows first (Fr.forget): the presenter is rebuilt (the
         // log folded again) and given every mirror, this link's new one included, by the feed (`Hub::forget_mirror`)
-        if t.reset { eprintln!("far: the mirror of {link} started over (another history)"); hub.forget_mirror().await }
-        else if !t.events.is_empty() { fold_in_chunks(hub, &t.events).await }
+        if t.reset {
+            eprintln!("far: the mirror of {link} started over (another history)");
+            drop(gate); // (the rebuild takes the gate itself; its replay gives the new history)
+            if !hub.forget_mirror().await {
+                // the presenter would not restart: its old rows stay, the new ones are folded anyway, and it is said
+                eprintln!("far: the presenter did not restart; the old rows of {link} stay beside the new history");
+                fold_in_chunks(hub, &t.events).await;
+            }
+        } else if !t.events.is_empty() { for c in t.events.chunks(500) { hub.fold_mirror_held(c).await } }
         Ok(t.got.gap)
     }
 
@@ -94,6 +104,8 @@ impl FarSync {
 
 /// Events to the presenter a chunk at a time, so one frame is never a whole history.
 pub async fn fold_in_chunks(hub: &Arc<Hub>, events: &[Value]) { for c in events.chunks(500) { hub.fold_mirror(c).await } }
+/// (the caller holds the mirror gate: the replay after a rebuild)
+pub async fn fold_held(hub: &Arc<Hub>, events: &[Value]) { for c in events.chunks(500) { hub.fold_mirror_held(c).await } }
 
 /// Re-feeds every mirror (state and the last message of each thread) to the presenter after it lost them.
 pub struct Refeed(pub Arc<FarStore>);
@@ -103,7 +115,7 @@ impl crate::api::MirrorFeed for Refeed {
             for l in self.0.links() {
                 let (s, link) = (self.0.clone(), l.clone());
                 let ev = tokio::task::spawn_blocking(move || s.replay_events(&link)).await.unwrap_or_default();
-                fold_in_chunks(hub, &ev).await;
+                fold_held(hub, &ev).await; // (called by the hub with the gate held)
             }
         })
     }
