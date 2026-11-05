@@ -12,19 +12,19 @@ export const NORMALISATIONS=[
  'N5 changes frames: expanded to one item per event; batch boundaries are not compared. Reason: batching follows timing.',
   'N18 http probe auth flag: an http-get probe with auth:false is compared as {path} only. Reason: recordings made before the harness wrote the flag omit it; false is its default.',
  'N19 origin in a query string (the since/origin of a reconnect): the value is replaced by its FORM only: <origin:decimal> (Bend: the decimal `at` of the log\'s first change), <origin:hex>, <origin:empty> or <origin:other>. Reason: the value differs per log, but a hub that answers in another form is a real difference (a client resuming across hubs reads it), so the form is compared.',
- 'N20 sets: the housekeeping events (hk) and the greeting\'s info keys (logInfoKeys) are compared as multisets, one difference per element found on one side only. Reason: the hub appends them in varying order; positional comparison turned one missing key into a difference at every later position.',
+ 'N20 multisets: the housekeeping events (hk) and the greeting\'s info keys (logInfoKeys) are compared as multisets with their REAL counts: one difference per element (or per extra copy) found on one side only. Reason: the hub appends them in varying order; positional comparison turned one missing key into a difference at every later position. A hub that writes an event twice is a difference.',
  'N21 arrays of different length are aligned by key (an object\'s id or key, else its JSON) with a longest common subsequence; an inserted or removed element is one difference. Reason: positional comparison made one insertion a difference at every later position. Equal-length arrays are still compared position by position.',
- 'N22 liveness.<thread> housekeeping events are left out of the hk set. Reason: the hub\'s periodic tick writes them once agent output was seen, and whether a tick fell inside the recording differs between two runs of the JS hub itself (self-diff 1). The state lane\'s liveness policy has its own tests.',
+ 'N22 liveness.<thread> housekeeping events are compared by PRESENCE: which liveness keys (with their values) appear, not how many times. Reason: the hub\'s periodic tick writes them again and again once agent output was seen, and how many ticks fell inside the recording differs between two runs of the JS hub itself. A hub that never writes one is still a difference.',
  'N23 a bot\'s `look` (a random number the hub draws) -> <N>; WorktreeSet events join the housekeeping set (N10). Reason: the hub draws the look at creation, and a bot\'s folder is made by a job that lands before or after the bot\'s thread.',
  'N24 a thread\'s text deltas are joined until its delta_end (or the end of the recording), whatever other frames arrive in between. Reason: the split points of a stream depend on timing; their joined text does not.',
  'N25 `<T>.<digits>` (a time and a sub-second count, as in the alert record) -> `<T>.<n>`. Reason: the count differs between two runs of the JS hub.',
- 'N26 object keys are normalised like values (ids inside keys such as drafts @sch:<thread> -> ID n), then ordered. Reason: a thread a scenario creates has a different id in every run, and so does its key.',
+ 'N26 object keys are normalised like values (ids inside keys such as drafts @sch:<thread> -> ID n), then ordered. Reason: a thread a scenario creates has a different id in every run, and so does its key. Two keys that normalise to the same string are NOT merged silently: the key then holds {"@@collision":[the values, ordered]}, so one side with two and the other with one is a difference.',
  'N12 late volatile replies: volatile means a poll request and its reply, matched by client and request id, whenever the reply arrives; every other inbound frame is kept even if it arrived during a poll window (the recorder flags by arrival time, which is not a property of the frame).',
  'N6 dropped: hb frames, view.changed frames (their number and position follow timing; each reply carries the revision it saw), volatile frames (polls made while waiting for a turn). Reason: timing-driven counts.',
  'N11 harness steps: `settle` and `end` pseudo-frames (the client program waiting or closing) are control, not wire traffic, and are not compared. Reason: a replay waits by reply id, not by the recorded quiet times.',
  'N7 streams: per client the sequence of events, deltas, replies and view replies are compared as separate ordered streams; relative order between streams is not compared. Reason: network timing.',
  'N9 info frames: all info frames of a client are merged into one item (keys unioned, later values win; environment keys dropped); position and repeat count are not compared. The `other` stream (http, upgrade, close, info) is compared as a sorted set. Reason: the hub repeats info on its own timer.',
- 'N10 housekeeping events: a contiguous run of events that concurrent hub jobs append (SettingSet keys machine.id, accounts.*, allowance.*, projects.missing, tz.*, autosettle.*, liveness.*, turn.from/speed.*, restart.*, provider.*, fallback.*, tok.*, summary.*, told.*, alert.*, account.*, star.*; ActivityLogged of kind git or spawn; WorktreeSkipped) is taken out of the event stream and compared as a set (distinct events, canonical order; no order, no repeat count, and not their position among the other events); every other event stays in order. Reason: start-up, git probes and settle/liveness bookkeeping finish in varying order and repeat with elapsed time.',
+ 'N10 housekeeping events: a contiguous run of events that concurrent hub jobs append (SettingSet keys machine.id, accounts.*, allowance.*, projects.missing, tz.*, autosettle.*, liveness.*, turn.from/speed.*, restart.*, provider.*, fallback.*, tok.*, summary.*, told.*, alert.*, account.*, star.*; ActivityLogged of kind git or spawn; WorktreeSkipped) is taken out of the event stream and compared as a multiset (canonical order, real counts, except liveness.* by presence: N20, N22; no order, and not their position among the other events); every other event stays in order. Reason: start-up, git probes and settle/liveness bookkeeping finish in varying order.',
  'N15 counters: numeric seq and changes (the hub change count at the instant a view was drawn) -> <N>. Reason: housekeeping events land between draws.',
  'N8 info frames: home paths, ports, machine ids, tokens, pids -> placeholders. Reason: environment.',
 ];
@@ -48,7 +48,11 @@ function mkNorm(){
     if(typeof v==='string'){if(v!==''&&(key==='epoch'||key==='generation'||key==='origin'||key==='hub'||key==='viewId'||key==='token'||key==='base'))return ord(v);if(key==='viewRevision')return '<R>';return str(v,key)}
     if(Array.isArray(v))return v.map(x=>go(x,key));
     // keys can carry ids too (drafts "@sch:<thread>"): normalised like values, then ordered
-    const o={};for(const k of Object.keys(v).sort()){const nk=str(k,'');o[nk]=go(v[k],k)}return Object.fromEntries(Object.entries(o).sort((a,b)=>a[0]<b[0]?-1:a[0]>b[0]?1:0));};
+    const o={};for(const k of Object.keys(v).sort()){const nk=str(k,'');const nv=go(v[k],k);
+      // two keys that normalise alike are reported, not overwritten (N26)
+      if(!(nk in o))o[nk]=nv;else if(o[nk]&&typeof o[nk]==='object'&&!Array.isArray(o[nk])&&'@@collision' in o[nk])o[nk]['@@collision'].push(nv);else o[nk]={'@@collision':[o[nk],nv]}}
+    for(const x of Object.values(o))if(x&&typeof x==='object'&&!Array.isArray(x)&&'@@collision' in x)x['@@collision'].sort((p,q)=>JSON.stringify(p)<JSON.stringify(q)?-1:1);
+    return Object.fromEntries(Object.entries(o).sort((a,b)=>a[0]<b[0]?-1:a[0]>b[0]?1:0));};
   go.readonly=f=>{ro=true;try{return f()}finally{ro=false}};
   return go;
 }
@@ -91,7 +95,9 @@ export function normalise(frames){
   for(const s of Object.values(per)){
     if(s.infoSeen){s.other.push({info:gof(Object.keys(per).find(k=>per[k]===s))(Object.fromEntries(Object.entries(s.infoSeen).filter(([k])=>!/^(home|listen|machines|models|update|accounts\.live|kicad\.|freecad|browser\.|telemetry\.|tailnet|tailscale|bots\.remote|machine\.id|os|arch)/.test(k))))});delete s.infoSeen}
     s.other.sort((a,b)=>JSON.stringify(a)<JSON.stringify(b)?-1:1);
-    s.hk=[...new Set(s.hkEv.map(e=>JSON.stringify(e)))].sort().map(x=>JSON.parse(x));delete s.hkEv}
+    // real counts (N20); liveness ticks by presence only (N22)
+    const all=s.hkEv.map(e=>JSON.stringify(e)),live=a=>/"key":"liveness\./.test(a);
+    s.hk=[...all.filter(a=>!live(a)),...new Set(all.filter(live))].sort().map(x=>JSON.parse(x));delete s.hkEv}
   // deltas still open when the recording ends (no delta_end seen): one run each, in the order they began
   for(const k of Object.keys(open)){const [c,th]=[k.slice(0,k.indexOf('|')),k.slice(k.indexOf('|')+1)];flush(c,th)}
   return per;
@@ -115,8 +121,7 @@ function keyed(a,b,path,out){
 // extra element must not shift (and so count) every later position. Compared as multisets: each element on one side only is one difference.
 const SETS=/\.(hk|logInfoKeys)$/;
 function multiset(a0,b0,path,out){
-  // liveness.<thread> is written by the hub's periodic tick once agent output was seen: whether a tick fell inside the recording varies run to run on the JS hub itself
-  const drop=x=>!(path.endsWith('.hk')&&x&&typeof x.key==='string'&&x.key.startsWith('liveness.'));const a=a0.filter(drop),b=b0.filter(drop);
+  const a=a0,b=b0;
   const cnt=new Map();for(const x of a){const k=JSON.stringify(x);cnt.set(k,(cnt.get(k)||0)+1)}
   for(const x of b){const k=JSON.stringify(x);cnt.set(k,(cnt.get(k)||0)-1)}
   for(const [k,n] of cnt)if(n!==0)out.push(`${path}: ${n>0?'only in A':'only in B'}${Math.abs(n)>1?' x'+Math.abs(n):''}: ${k.slice(0,160)}`);
