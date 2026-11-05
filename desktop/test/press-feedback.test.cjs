@@ -65,3 +65,17 @@ test('with a pane open, another tab empties it at the press; the tab that opened
  const pane=regions(f.project(page({view:'board',n:1}))).get('viewer').node;assert.equal(at(pane,'class'),'viewer pending');
  s(true);
 });
+test('Settings takes the thread’s place at the press; its closing is the hub’s',async()=>{
+ const {PressFeedback,regions,T}=await load();const f=new PressFeedback(()=>{}),{page}=fixture(T);
+ const el=(tag,key,attrs,ks=[])=>({$:T.El,tag,key,attrs:L(Object.entries(attrs).map(([name,value])=>({$:T.At,name,value}))),kids:L(ks)});
+ const settings=el('main','settings',{class:'settings-view'},[el('div','sc',{id:'settings-content'})]);
+ const top=t=>el('header','',{class:'topbar'},[el('span','',{class:t})]);
+ const withTop=(p,t)=>{const app=kids(p)[0];return {...p,kids:L([{...app,kids:L([top(t),...kids(app)])}])};};
+ const withSettings=()=>{const p=page();const app=kids(p)[0];return withTop({...p,kids:L([{...app,kids:L([kids(app)[0],settings])}])},'settings');};
+ f.seen(withTop(page(),'thread'),'thread:A');let s=f.choice('flag','settings','thread:A');s(true);f.seen(withSettings(),'thread:A');
+ s=f.choice('flag','settings','thread:A');s(true);f.seen(withTop(page({n:1}),'thread'),'thread:A');
+ assert.equal(f.learned.size,1,'the open is learned, the close is not');
+ s=f.choice('flag','settings','thread:A');assert.equal(f.active?.kind,'settings');
+ const app=kids(f.project(page({n:2})))[0];assert.deepEqual(kids(app).map(k=>k.key),['sidebar','settings'],'the thread’s main is put away');
+ s(true);
+});
