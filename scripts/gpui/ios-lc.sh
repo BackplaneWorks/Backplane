@@ -3,7 +3,7 @@
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 U=$1; DEV=$2; S=$3
 O=~/bp-gpui-ios/lc; mkdir -p $O
-export HUBURL=http://desktop.tail9e0cf2.ts.net:3811/ TOKFILE=~/bp-gpui-ios/seed7-token GEOM=1
+export HUBURL=http://${HUBHOST:-backplane.tail9e0cf2.ts.net}:${HUBPORT:-3811}/ TOKFILE=~/bp-gpui-ios/seed7-token GEOM=1
 xcrun simctl boot $U 2>/dev/null; xcrun simctl bootstatus $U -b >/dev/null 2>&1
 shot() { # page acts nolink
   p=$1; acts=$2; sel=$4

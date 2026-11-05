@@ -1,11 +1,12 @@
 // Reference shots of the web client for the iOS logo/cats comparison, with the rectangles of the logo and
 // every cat (CSS px x DPR = shot px). usage: bun web-phone-shots.mjs HUB_URL TOKEN OUTDIR SCHEME [phone|tablet]
 // (set ui.theme on the hub first: test/gpui/set-setting.mjs). Writes web-<profile>-<scheme>-{list,bots,bot}.png and .json
-import {chromium} from '/home/h/.bun/install/cache/playwright-core@1.64.1@@@1/index.mjs';
+// env PW (path of playwright-core's index.mjs) and CHROME (a chromium binary) default to the desktop's
+const {chromium}=await import(process.env.PW||'/home/h/.bun/install/cache/playwright-core@1.64.1@@@1/index.mjs');
 import {writeFileSync} from 'node:fs';
 const [hub,token,out,scheme='dark',profile='phone']=process.argv.slice(2);
 const vp=profile==='tablet'?{width:1024,height:1366,deviceScaleFactor:2}:{width:393,height:852,deviceScaleFactor:3};
-const browser=await chromium.launch({executablePath:'/usr/bin/google-chrome',args:['--no-sandbox','--disable-gpu']});
+const browser=await chromium.launch({executablePath:process.env.CHROME||'/usr/bin/google-chrome',args:['--no-sandbox','--disable-gpu']});
 const ctx=await browser.newContext({viewport:{width:vp.width,height:vp.height},deviceScaleFactor:vp.deviceScaleFactor,isMobile:profile==='phone',hasTouch:true,colorScheme:scheme});
 let page=await ctx.newPage();
 await page.goto(`${hub}/#token=${token}`);await page.waitForTimeout(6000);
