@@ -169,7 +169,7 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                             ensure!(command["hub"].is_null()||command["hub"]==v.hub,"cross-hub command refused");
                             let request:Value=serde_json::from_str(command["text"].as_str().context("missing command text")?)?;
                             let rpc_id=request["id"].as_u64().context("missing RPC id")?;
-                            let m=request["m"].as_str().unwrap_or("");ensure!(!m.starts_with("view.")&&rpc_id<(1<<47),"invalid product RPC");eprintln!("GPUI_LOG {{\"rpc_sent\":\"{m}\"}}");
+                            let m=request["m"].as_str().unwrap_or("");ensure!(!m.starts_with("view.")&&rpc_id<(1<<47),"invalid product RPC");eprintln!("GPUI_LOG {{\"rpc_sent\":\"{m}\",\"thread\":{}}}",request["p"]["thread"]);
                             v.outgoing.insert(rpc_id,method=="view.action"&&["message.send","thread.send","send"].contains(&m));
                             // The send action's canonical command is named by the hub; ACK all sends from this action.
                             if method=="view.action" && m=="chat.send" {v.outgoing.insert(rpc_id,true);}
