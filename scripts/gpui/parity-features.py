@@ -382,7 +382,7 @@ R(A, "Agents page (providers, models, CLI install, API keys)", m=["setting.set",
 R(A, "Writing page (text model)", m=["setting.set"], c="mpp", lane=L["sett"], ev="no handler")
 R(A, "CAD page (KiCad install, version, fork)", m=["kicad.install", "cad.install", "kicad.retry"], hub="partial", c="mpp", lane=L["files"], ev="info kicad.* seeded as empty; install not ported")
 R(A, "Ordering page and price estimates", m=["setting.set"], c="mpp", lane=L["orders"], ev="no handler")
-R(A, "Devices page, paired devices, revoke", m=["device.register", "device.drop"], r=["/auth/devices", "/auth/revoke", "/auth/known", "/auth/cache"], hub="partial", c="mpp", lane=L["net"], ev="net/pairing.rs + net/routes.rs: registry, /auth/invitations|devices|revoke|known|enroll tested on Boat (32 tests); not yet registered: needs the hub seam for POST/own-auth routes; device.register/drop not")
+R(A, "Devices page, paired devices, revoke", m=["device.register", "device.drop"], r=["/auth/devices", "/auth/revoke", "/auth/known", "/auth/cache"], hub="partial", c="mpp", lane=L["net"], ev="LIVE: registry decides every credential, /auth/invitations|devices|revoke|known|enroll (net/, 40 Boat tests); device.register/drop (push) not yet")
 R(A, "Network page (Tailscale, listen, pairing link)", r=["/auth/pair", "/auth/enroll", "/auth/invitations"], hub="missing", c="mpp", lane=L["net"], ev="info 'tailnet' seeded as off; no tailscale")
 R(A, "Voice page (engine, model, device, dictionary)", m=["bots.voice"], r=["/voice/in"], c="mpp", lane=L["voice"], ev="no Rust handler/route")
 R(A, "API keys (add/drop, api.env)", m=["bots.voice"], c="mpp", lane=L["sett"], ev="goes through bots.voice op api-add: no handler")
