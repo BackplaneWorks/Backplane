@@ -296,6 +296,8 @@ pub fn authority(a: &str) -> Option<(String, Option<u16>)> {
 }
 /// (scheme, host, port with the scheme's default dropped) of an http(s) URL with no userinfo.
 fn parse_origin(x: &str) -> Option<(&'static str, String, Option<u16>)> {
+    let lower = x.get(..8).unwrap_or(x).to_lowercase(); // (a URL's scheme is case-insensitive)
+    let x = &format!("{}{}", lower, x.get(8..).unwrap_or(""));
     let (s, def, rest) = if let Some(r) = x.strip_prefix("http://") { ("http:", 80, r) } else if let Some(r) = x.strip_prefix("https://") { ("https:", 443, r) } else { return None };
     let a = rest.split(|c| c == '/' || c == '?' || c == '#').next().unwrap_or("");
     let (h, p) = authority(a)?;
