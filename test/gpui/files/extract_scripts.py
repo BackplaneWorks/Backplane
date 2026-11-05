@@ -1,0 +1,69 @@
+#!/usr/bin/env python3
+"""Extracts the shell scripts of src/server/git.bend (zero-argument defs built from string literals, `++`, `String.join`
+and other such defs) into native/host/src/files/scripts/*.sh, so the Rust hub runs the same text as the Bend hub.
+  extract_scripts.py          write the files
+  extract_scripts.py --check  fail when a file differs from what git.bend says now (run in CI / before committing git.bend)
+"""
+import re, sys, os
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+SRC = open(os.path.join(ROOT, "src/server/git.bend")).read()
+OUT = os.path.join(ROOT, "native/host/src/files/scripts")
+WANT = {"Git.safe.sh": "safe.sh", "Git.index.seed.sh": "index_seed.sh", "Git.step.script": "step.sh", "Git.step.migrate.sh": "step_migrate.sh",
+        "Git.refs.script": "refs.sh", "Git.diff.cap.sh": "diff_cap.sh"}
+defs = {}
+for m in re.finditer(r"^def (Git\.[A-Za-z_.]+)\(\) -> String:\n((?:  .*\n|\n)+?)(?=\S|\Z)", SRC, re.M):
+    defs[m.group(1)] = m.group(2).strip("\n")
+
+def lit(s, i):
+    assert s[i] == '"'
+    i += 1; out = []
+    while s[i] != '"':
+        if s[i] == "\\":
+            c = s[i + 1]; out.append({"n": "\n", "t": "\t", "\\": "\\", '"': '"', "r": "\r"}[c]); i += 2
+        else: out.append(s[i]); i += 1
+    return "".join(out), i + 1
+
+def ev(s):
+    s = s.strip(); i = 0; vals = []
+    def ws():
+        nonlocal i
+        while i < len(s) and s[i] in " \n\t": i += 1
+    def term():
+        nonlocal i
+        ws()
+        if s[i] == '"': v, i = lit(s, i); return v
+        m = re.match(r"String\.join\(\[", s[i:])
+        if m:
+            i += m.end(); items = []
+            while True:
+                ws()
+                if s[i] == "]": i += 1; break
+                items.append(expr()); ws()
+                if s[i] == ",": i += 1
+            ws(); assert s[i] == ","; i += 1; sep = term(); ws(); assert s[i] == ")"; i += 1
+            return sep.join(items)
+        m = re.match(r"(Git\.[A-Za-z_.]+)\(\)", s[i:])
+        if m:
+            i += m.end(); return call(m.group(1))
+        raise SystemExit("cannot evaluate at: " + s[i:i + 60])
+    def expr():
+        nonlocal i
+        v = term(); ws()
+        while s[i:i + 2] == "++": i += 2; v += term(); ws()
+        return v
+    return expr()
+
+def call(name):
+    return ev(defs[name])
+
+if __name__ == "__main__":
+    check = "--check" in sys.argv; bad = 0
+    os.makedirs(OUT, exist_ok=True)
+    for name, f in WANT.items():
+        text = call(name)
+        p = os.path.join(OUT, f)
+        if check:
+            if not os.path.exists(p) or open(p).read() != text: print("DIFFERS:", f); bad = 1
+        else: open(p, "w").write(text)
+    if check and not bad: print("scripts match git.bend")
+    sys.exit(bad)

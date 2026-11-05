@@ -2,6 +2,7 @@
 //! Registers its handlers with the hub through api.rs; the one line in main.rs is `files::start`.
 pub mod dir;
 pub mod fm;
+pub mod git;
 pub mod serve;
 #[path = "../kicad/mod.rs"]
 pub mod kicad;
@@ -13,6 +14,7 @@ use std::{path::PathBuf, sync::Arc};
 pub fn start(hub: Arc<Hub>) {
     hub.register_http(Arc::new(Img));
     hub.register_rpc(Arc::new(Files));
+    hub.register_rpc(Arc::new(GitRpc));
     kicad::start(&hub);
 }
 
@@ -75,4 +77,45 @@ async fn files_dir(hub: &Arc<Hub>, id: &Value, p: &Value) -> Value {
         Ok(text) => json!({"t":"reply","id":id,"ok":true,"result":{"fmEntries":text,"fmDir":rel,"fmRoot":root.to_string_lossy(),"thread":thread}}),
         Err(e) => json!({"t":"reply","id":id,"ok":false,"result":{"text":e,"fmEntries":"","fmError":e,"fmDir":rel,"thread":thread}}),
     }
+}
+
+/// git.status, git.diff, git.revert, history.refs (server.bend's GitJob / RefsJob, hub.bend's Hub.more).
+struct GitRpc;
+impl RpcHandler for GitRpc {
+    fn methods(&self) -> &'static [&'static str] { &["git.status", "git.diff", "git.revert", "history.refs"] }
+    fn call<'a>(&'a self, hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
+        Box::pin(async move {
+            let s = |k: &str| p.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+            let raw = |k: &str, d: &str| match p.get(k) { Some(Value::String(x)) => x.clone(), Some(Value::Number(n)) => n.to_string(), _ => d.to_string() };
+            let thread = s("thread");
+            let reply = |ok: bool, r: Value| json!({"t":"reply","id":id,"ok":ok,"result":r});
+            let cwd_p = root_of(hub, &thread).await; let cwd = cwd_p.to_string_lossy().into_owned();
+            if method == "history.refs" {
+                let out = git::refs(&cwd, &thread).await;
+                let ls: Vec<&str> = out.split('\n').collect(); let at = |i: usize| ls.get(i).copied().unwrap_or("");
+                let f = kicad::project::read(&cwd);
+                return vec![reply(true, json!({"thread":thread,"git":at(0),"top":at(1),"refs":ls.iter().skip(2).copied().collect::<Vec<_>>().join("\n"),"pcb":f.pcb,"sch":f.sch}))];
+            }
+            if cwd.is_empty() || !git::is_repo(&cwd).await {
+                return vec![if method == "git.diff" { reply(true, json!({"diff":"","thread":thread,"nogit":cwd})) } else { reply(false, json!({"text":format!("not a git repository: {cwd}")})) }];
+            }
+            match method {
+                "git.status" => vec![reply(true, json!({"status":git::status(&cwd).await,"thread":thread}))],
+                "git.diff" => { let r = git::diff(&cwd, &thread, &raw("from", "0"), &raw("to", "-1")).await; vec![reply(!git::failed(&r), json!({"diff":r,"thread":thread}))] }
+                _ => { // git.revert
+                    let n: u64 = raw("turn", "0").parse().unwrap_or(0);
+                    let r = git::checkpoint_revert(&cwd, &thread, n).await;
+                    let what = format!("reverted to turn {n}");
+                    note(hub, &thread, if git::failed(&r) { "error" } else { "info" }, &format!("{what}{}", if r.is_empty() { String::new() } else { format!(": {}", r.trim()) })).await;
+                    vec![reply(!git::failed(&r), json!({"text":r,"thread":thread}))]
+                }
+            }
+        })
+    }
+}
+/// GitJob.note: a line in the thread (hub.bend's thread.note: an ActivityLogged of kind "git").
+pub async fn note(hub: &Arc<Hub>, thread: &str, tone: &str, summary: &str) {
+    let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let seq = hub.store.len();
+    let _ = hub.commit(&json!({"$":"ActivityLogged","thread":thread,"act":format!("g{at}-{seq}"),"tone":tone,"kind":"git","summary":summary,"at":at})).await;
 }
