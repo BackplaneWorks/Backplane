@@ -79,7 +79,7 @@ impl Hub {
         let (window, page) = match self.window_for(&p, before).await { Some((w, pg)) => (Some(w), Some(pg)), None => (None, None) };
         if let (Some(w), Some(o)) = (&window, params.as_object_mut()) { o.insert("window".into(), w.clone()); }
         if let (Some(pg), Some(o)) = (&page, params.as_object_mut()) { o.insert("page".into(), page_json(p["target"]["id"].as_str().unwrap_or(""), before, pg)); }
-        if let (Some(l), Some(o)) = (actor::local_in(c.client, &view_id, m, &p["target"]), params.as_object_mut()) { o.insert("local".into(), l); }
+        actor::set_local(&mut params, actor::local_in(c.client, &view_id, m, &p["target"]));
         let mut pol = match self.presenter.view(&params).await { Ok(v) => v, Err(_) => return vec![error(&id, "PRESENTER_UNAVAILABLE")] };
         actor::local_out(c.client, &view_id, &p["target"], &mut pol);
         let pol = actor::apply(c.client, &view_id, &p, &pol);
