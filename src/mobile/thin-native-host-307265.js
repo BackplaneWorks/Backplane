@@ -389,7 +389,7 @@ export class NativeThinHost307265 {
     // list's view, Backplane.local("view"): left out, Active never applied)
     for (const key of ['@lang', '@lang.os', '@lang.tag', '@lang.preview', '@local.view'])
       if (typeof session.drafts?.[key] === 'string' && utf8Bytes(session.drafts[key]) <= 128) drafts[key] = session.drafts[key];
-    if (method === 'view.action' && session.sel && Object.hasOwn(session.drafts || {}, session.sel) && typeof session.drafts[session.sel] === 'string')
+    if ((method === 'view.action' || method === 'view.update') && session.sel && Object.hasOwn(session.drafts || {}, session.sel) && typeof session.drafts[session.sel] === 'string')
       Object.defineProperty(drafts, session.sel, { value: session.drafts[session.sel], enumerable: true });
     const choices = (value, accept) => {
       const out = {}; let count = 0;
