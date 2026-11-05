@@ -16,6 +16,8 @@ case "$cmd" in
     cat <<TXT
 $WORDS
 Also: an agent has a shell and your real logins, so nothing here stops it pushing, or reaching today's Backplane.
+Don't work the same folder in both apps: nothing here can tell if today's Backplane starts a turn there after you do.
+A copied thread starts a fresh agent session: the agent does not know the thread's earlier conversation (the messages stay on screen).
 Port ${SWITCH_PORT:-3790}; your live Backplane is read once, to copy its log, and keeps running. Back out any time:  $0 rollback
 TXT
     printf 'Type yes to start: '; read -r a; [ "$a" = yes ] || { echo "not started"; exit 1; }
