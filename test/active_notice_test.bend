@@ -33,8 +33,27 @@ def mixed(n: Nat, +at: Nat, pace: P.Pace, sent: Nat) -> Nat:
       +p = P.Pace.step(pace, at, P.Touch.level(touch, "visible"))
       mixed(next, Nat.add(at, 10n), P.Paced.pace(p), Nat.add(sent, Bool.pick(Nat, P.Paced.send(p), 1n, 0n)))
 
+# a state with thread "bot" (and "owner"), its liveness as given
+def live(stalled: Bool, +reason: String) -> M.State:
+  M.State.apply(M.State.apply(M.State.apply(M.State.empty(), M.ThreadCreated{"bot", "p", "Bot", M.Local{}, "", "", "codex", "", 1n}),
+      M.ThreadCreated{"owner", "p", "Owner", M.Local{}, "", "", "codex", "", 1n}),
+    M.SettingSet{"liveness.bot", "{\"last\":5,\"nudged\":0,\"stalled\":" ++ Bool.pick(String, stalled, "true", "false") ++ ",\"reported\":false,\"reason\":\"" ++ reason ++ "\"}", 2n})
+
+# a stamp from old to new (as one step) for a view of th
+def stamp(+old: M.State, +new: M.State, +th: String) -> String:
+  Nat.show(P.Touch.level(P.Touch.changes.at(old, new, [M.SettingSet{"liveness.bot", "{}", 3n}], P.Touch.none()), th))
+
 def main() -> IO(Unit):
   do IO<Unit>:
+    C.Check.str("a progress stamp that changes no dot: its own view hears it", stamp(live(False{}, "w"), live(False{}, "w"), "bot"), "2")
+    C.Check.str("a progress stamp that changes no dot: other views do not", stamp(live(False{}, "w"), live(False{}, "w"), "owner"), "0")
+    C.Check.str("a reason change while not stalled shows nowhere", stamp(live(False{}, "w"), live(False{}, "x"), "owner"), "0")
+    C.Check.str("a stall reaches other views' sidebars", stamp(live(False{}, "w"), live(True{}, "w"), "owner"), "1")
+    C.Check.str("a recovery reaches other views' sidebars", stamp(live(True{}, "w"), live(False{}, "w"), "owner"), "1")
+    C.Check.str("a shown reason change reaches other views", stamp(live(True{}, "w"), live(True{}, "x"), "owner"), "1")
+    C.Check.str("a still stall: other views do not hear it", stamp(live(True{}, "w"), live(True{}, "w"), "owner"), "0")
+    C.Check.str("other settings keep their touch", Nat.show(P.Touch.level(P.Touch.changes.at(live(False{}, "w"), live(False{}, "w"), [M.SettingSet{"new.setting", "x", 3n}], P.Touch.none()), "owner")), "2")
+    C.Check.str("an empty liveness owner stays conservative", Nat.show(P.Touch.level(P.Touch.changes.at(live(False{}, "w"), live(False{}, "w"), [M.SettingSet{"liveness.", "x", 3n}], P.Touch.none()), "owner")), "2")
     C.Check.str("progress reaches its own view urgently", Nat.show(P.Touch.level(touched("liveness.owner"), "owner")), "2")
     C.Check.str("progress elsewhere uses sidebar cadence", Nat.show(P.Touch.level(touched("liveness.owner"), "visible")), "1")
     C.Check.str("unknown settings remain global", Nat.show(P.Touch.level(touched("new.setting"), "visible")), "2")
