@@ -118,7 +118,7 @@ fn cursor(epoch: &str, target: &Value, query: &str, before: u64) -> String {
 }
 
 /// The `fold:<id>` choices of the request (lazy-tools.bend `Tools.info`): the session's info, then a `fold` action's own
-fn fold_choice(p: &Value, id: &str) -> bool {
+pub(super) fn fold_choice(p: &Value, id: &str) -> bool {
     let key = format!("fold:{id}");
     if p["action"] == "fold" { let v = p["value"].as_str().unwrap_or(""); if v.len() > 1 && v[1..] == *id { return &v[..1] == "1" } }
     p["session"]["info"][&key].as_str() == Some("1")

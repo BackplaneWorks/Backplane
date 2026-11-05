@@ -29,8 +29,8 @@ const pairs=[];async function run(evs,tag){
   await ask('F '+JSON.stringify({t:'log',since:0,origin:'1',version:'x',info:{},items:evs.slice(0,200)}));
   for(let i=200;i<evs.length;i+=200)await ask('F '+JSON.stringify({t:'changes',items:evs.slice(i,i+200)}));
   const base={hub:'h',cid:'c',now:(t0+100000)*1000,action:'',value:''};
-  const V=async(sel,target,extra={})=>{const params={...base,session:{sel,rid:1,drafts:{},open:{},adding:false,panel:false,info:{}},target,...extra};const o=JSON.parse(await ask('V '+JSON.stringify(params)));pairs.push({params,out:o,tag});return o};
-  const out={recent:await V('',{kind:'recent',id:''}),thread:await V(TH[3],{kind:'thread',id:TH[3]}),threadPage:await V(TH[3],{kind:'thread',id:TH[3]},{page:pageOf(L,TH[3])})};
+  const V=async(sel,target,extra={})=>{const params={...base,session:{sel,rid:1,drafts:{},open:{},adding:false,panel:false,info:globalThis.INFO||{}},target,...extra};const o=JSON.parse(await ask('V '+JSON.stringify(params)));pairs.push({params,out:o,tag});return o};
+  const out={recent:await V('',{kind:'recent',id:''}),thread:await V(TH[3],{kind:'thread',id:TH[3]}),threadPage:await V(TH[3],{kind:'thread',id:TH[3]},{page:pageOf(evs,TH[3])})};
   p.kill();await new Promise(r=>setTimeout(r,300));return out;
 }
 const diff=(a,b,path,out)=>{if(JSON.stringify(a)===JSON.stringify(b))return;if(a&&b&&typeof a==='object'&&typeof b==='object'&&!Array.isArray(a)&&!Array.isArray(b)){for(const k of new Set([...Object.keys(a),...Object.keys(b)]))diff(a[k],b[k],path+'.'+k,out);return}
@@ -53,14 +53,18 @@ const variants={
   askinput:[{$:'AskOpened',id:'k2',thread:T,kind:'input',tool:'',detail:'Which board?',options:'A\nB',at:A}],
   askplan:[{$:'AskOpened',id:'k3',thread:T,kind:'plan',tool:'',detail:'# Plan\n\n- step one\n- step two',options:'',at:A}],
   asksend:[{$:'AskOpened',id:'k4',thread:T,kind:'approval',tool:'gmail_send',detail:'Draft: hi',options:'',at:A}],
+  stepchange:[{$:'ActivityLogged',thread:T,act:'step:c2',tone:'step',kind:'kicad',summary:JSON.stringify({e:'g1700003339-3639',c:'c2',p:'c1',g:'/x/.backplane/history.git',t:'/x',f:['M\tpower/board.kicad_pcb','A\tnew.kicad_sch'],w:''}),at:A}],
+  stepbase:[{$:'ActivityLogged',thread:T,act:'step:c1',tone:'step',kind:'kicad',summary:JSON.stringify({e:'m1700003338-3348',c:'c1',p:'',g:'/x/.backplane/history.git',t:'/x',f:['A\tboard.kicad_pcb'],w:'start'}),at:A}],
+  stepfirst:[{$:'ActivityLogged',thread:T,act:'step:c3',tone:'step',kind:'kicad',summary:JSON.stringify({e:'g1700003339-3639',c:'c3',p:'',g:'/x/.backplane/history.git',t:'/x',f:['A\tboard.kicad_pcb','D\told.kicad_sch'],w:''}),at:A}],
+  stepopen:{info:{'fold:g1700003339-3639':'1'},extra:[{$:'ActivityLogged',thread:T,act:'step:c2',tone:'step',kind:'kicad',summary:JSON.stringify({e:'g1700003339-3639',c:'c2',p:'c1',g:'/x/.backplane/history.git',t:'/x',f:['M\tboard.kicad_pcb'],w:''}),at:A},{$:'ActivityLogged',thread:T,act:'err1',tone:'error',kind:'result',summary:'',at:A+1}]},
   queued:[{$:'TurnQueued',thread:T,msg:'q1',text:'later please',at:A}],
 };
 const out={};
-for(const [name,extra] of Object.entries(variants)){pairs.length=0;await run([...L,...extra],name);const p=pairs[2];out[name]={extra,thread:p.out.shown?.thread??null,refused:p.out.refused??null,keys:Object.keys(p.out)}}
+for(const [name,spec] of Object.entries(variants)){const extra=Array.isArray(spec)?spec:spec.extra;globalThis.INFO=Array.isArray(spec)?{}:spec.info;pairs.length=0;await run([...L,...extra],name);const p=pairs[2];out[name]={extra,info:globalThis.INFO,page:extra.some(e=>e.$==='ActivityLogged'||e.$==='MessagePosted')?p.params.page:undefined,thread:p.out.shown?.thread??null,refused:p.out.refused??null,keys:Object.keys(p.out)}}
 import {writeFileSync} from 'node:fs';
 const base=out.base.thread;const slim={};
-for(const [n,v] of Object.entries(out)){if(!v.thread){slim[n]={extra:v.extra,thread:null};continue}const d={};for(const k of Object.keys(v.thread))if(k!=='entries'&&JSON.stringify(v.thread[k])!==JSON.stringify(base[k]))d[k]=v.thread[k];
-  slim[n]={extra:v.extra,diff:d,tail:v.thread.entries.slice(-2),entries:v.thread.entries.length}}
+for(const [n,v] of Object.entries(out)){if(!v.thread){slim[n]={extra:v.extra,page:v.page,thread:null};continue}const d={};for(const k of Object.keys(v.thread))if(k!=='entries'&&JSON.stringify(v.thread[k])!==JSON.stringify(base[k]))d[k]=v.thread[k];
+  slim[n]={extra:v.extra,page:v.page,info:v.info||{},all:Object.keys(v.info||{}).length?v.thread.entries:undefined,diff:d,tail:v.thread.entries.slice(-2),entries:v.thread.entries.length}}
 writeFileSync(process.env.OUT||'variants.json',JSON.stringify(slim));
 for(const [n,v] of Object.entries(out))console.log(n,v.thread?Object.keys(v.thread).length:'none',v.keys.join(','));
 process.exit(0);

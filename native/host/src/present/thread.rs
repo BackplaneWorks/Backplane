@@ -33,20 +33,38 @@ fn short(k: &str) -> String {
 fn shown_name(k: &str) -> String { if todo(k) { "To-do".into() } else { short(k) } }
 fn calls(n: usize) -> String { format!("{} tool {}", n, if n == 1 { "call" } else { "calls" }) }
 
-/// Fold.label / Fold.label.live (no design steps: those make this port return None)
+fn steps_label(d: usize) -> String { format!("{} design {}", d, if d == 1 { "change" } else { "changes" }) }
+fn is_step(e: &Ent) -> bool { !e.msg && e.role == "step" }
+/// Fold.label / Fold.label.live: the tool calls of a run (its design steps are counted apart)
 fn label(run: &[Ent], live: bool) -> String {
-    let n = run.len();
+    let calls_: Vec<&Ent> = run.iter().filter(|e| !is_step(e)).collect();
+    let (n, d) = (calls_.len(), run.len() - calls_.len());
+    if n == 0 { return steps_label(d) }
     if live {
-        let last = &run[n - 1];
+        let last = calls_[n - 1];
         let first = last.text.split('\n').next().unwrap_or("").chars().take(160).collect::<String>();
         let what = if todo(&last.akind) { shown_name(&last.akind) } else { let t = first.trim(); if t.is_empty() { shown_name(&last.akind) } else { t.to_string() } };
-        return format!("{} · running: {}", calls(n), what);
+        return format!("{}{} · running: {}", calls(n), if d == 0 { String::new() } else { format!(" · {}", steps_label(d)) }, what);
     }
     let mut ks: Vec<String> = Vec::new();
-    for e in run { if todo(&e.akind) { continue } let s = short(&e.akind); if !ks.contains(&s) { ks.push(s) } }
+    for e in &calls_ { if todo(&e.akind) { continue } let s = short(&e.akind); if !ks.contains(&s) { ks.push(s) } }
     let mut out = calls(n);
     if !ks.is_empty() { out += " · "; out += &ks.iter().take(3).cloned().collect::<Vec<_>>().join(", "); if ks.len() > 3 { out += ", …" } }
+    if d > 0 { out += " · "; out += &steps_label(d) }
     out
+}
+
+/// Step.base: the design as it was before the edits (a thread's first step taken at a turn's start, or an older record that says only that it is first) is no change
+fn step_base(e: &Ent) -> bool {
+    is_step(e) && e.text.contains("\"p\":\"\"") && (e.text.contains("\"w\":\"start\"") || !e.text.contains("\"w\":"))
+}
+/// Hist.row: "Design change · board.kicad_pcb (new), power.kicad_sch (removed)"; a thread's first step reads "Design before the edits · "
+fn step_row(e: &Ent) -> String {
+    let Ok(v) = serde_json::from_str::<Value>(&e.text) else { return "Design change".into() };
+    let files: Vec<String> = v["f"].as_array().map(|a| a.iter().filter_map(|l| l.as_str()).filter_map(|l| {
+        let mut p = l.splitn(2, '\t'); let (st, rel) = (p.next()?, p.next()?); if st.is_empty() || rel.is_empty() { return None }
+        Some(format!("{}{}", rel.rsplit('/').next().unwrap_or(rel), match st { "D" => " (removed)", "A" => " (new)", _ => "" })) }).collect()).unwrap_or_default();
+    format!("{}{}", if v["p"].as_str().unwrap_or("").is_empty() { "Design before the edits · " } else { "Design change · " }, files.join(", "))
 }
 
 // ---- time (UTC only: a person's zone makes the caller fall to the helper) ----
@@ -87,14 +105,17 @@ fn plain(e: &Ent) -> bool {
         false
     } else {
         // a tool call folds; any other tone draws as a plain row (Mob.act.k) except the ones with their own rows: design steps, terminals, reviews, reminders, thoughts, and the restart row (Fold.dup)
-        !matches!(e.role.as_str(), "step" | "emb" | "review" | "remind" | "think") && e.akind != "restart"
+        !matches!(e.role.as_str(), "emb" | "review" | "remind" | "think") && e.akind != "restart"
     }
 }
 
 /// `entries` of shown.thread for a plain page; `running`: the thread's turn runs; `open`: runs the person opened (the "fold:<id>" choices = "1");
 /// `now_ms`: the request's clock. None when any row needs what this cut does not do.
 pub fn entries(es: &[Ent], running: bool, open: &dyn Fn(&str) -> bool, now_ms: u64, zone: Option<&Rule>, marks: &dyn Fn(&str) -> u8, end: u8) -> Option<Vec<Value>> {
-    if !es.iter().all(|e| tool(e) && e.role == "tool" && plain(e) || !tool(e) && plain(e)) { return None }
+    if !es.iter().all(plain) { return None }
+    // Hist.seen: the design as it was before is no row
+    let seen: Vec<Ent> = es.iter().filter(|e| !step_base(e)).cloned().collect();
+    let es = seen.as_slice();
     let now = now_ms / 1000;
     // Stamp.ends over the page, oldest first in, walked newest first
     let sx: Vec<stamp::E> = es.iter().map(|e| if e.msg && e.role == "user" { stamp::E::User { id: e.id.clone(), at: e.at } } else if e.msg { stamp::E::Assistant { id: e.id.clone(), at: e.at } } else { stamp::E::Other }).collect();
@@ -152,8 +173,9 @@ fn plain_act(e: &Ent) -> Value {
     json!({"id": e.id, "kind": "act", "tone": tone, "label": shown_name(&e.akind), "text": text})
 }
 
-/// Mob.act.k for a plain tool call (open run)
+/// Mob.act for a row in an open run: a design step shows as a step (its value opens it in the viewer), a tool call as an activity
 fn act(e: &Ent, run: &str) -> Value {
+    if is_step(e) { return json!({"id": e.id, "kind": "step", "text": step_row(e), "value": e.id, "run": run}) }
     let text = if e.text == e.akind { String::new() } else { e.text.clone() };
     json!({"id": e.id, "kind": "act", "tone": e.role, "label": shown_name(&e.akind), "text": text, "run": run})
 }
@@ -189,7 +211,7 @@ pub fn metadata_refusal(st: &State, id: &str) -> Option<&'static str> {
     None
 }
 fn row_refusal(e: &Ent) -> Option<&'static str> {
-    if plain(e) && (!tool(e) || e.role=="tool") { return None }
+    if plain(e) { return None }
     Some(if e.msg {
         if e.id.starts_with("@live:") { "row.live" }
         else if e.text.starts_with("API Error") { "row.api-error" }
@@ -197,7 +219,7 @@ fn row_refusal(e: &Ent) -> Option<&'static str> {
         else if e.role=="user" { "row.attachment" }
         else if e.role=="assistant" { "row.image-or-blank" }
         else { "row.message-role" }
-    } else if e.akind=="restart" { "row.restart" }else if e.role=="step" { "row.design-step" }else{ "row.activity-kind" })
+    } else if e.akind=="restart" { "row.restart" }else{ "row.activity-kind" })
 }
 
 fn state_keys_refusal(st: &State,id: &str) -> &'static str {
@@ -272,7 +294,7 @@ pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value
     let mark = |msg: &str| -> u8 { if st.settings.get(&format!("stopped.{msg}")).map_or(false, |v| v == "1") { 1 } else if st.settings.get(&format!("failed.{msg}")).map_or(false, |v| v == "1") { 3 } else { 0 } };
     let turn = st.threads.get(thread).map(|t| t.turn);
     let end = match turn { Some(Turn::Interrupted) => 1, Some(Turn::Failed) => 3, _ => 0 };
-    let mut entries = entries(&es, running, &|_| false, now_ms, zone.as_ref(), &mark, end).ok_or("rows.unsupported")?;
+    let mut entries = entries(&es, running, &|id| super::window::fold_choice(params, id), now_ms, zone.as_ref(), &mark, end).ok_or("rows.unsupported")?;
     // Mob.pending: a thread that works shows the agent's "Working" row after its last entry
     if running { entries.push(json!({"id": format!("@working:{thread}"), "kind": "assistant", "text": "Working", "blocks": md_blocks("Working"), "images": [], "stamp": ""})) }
     // Signal.why: the first error of the thread's last turn (newest first, stopping at the person's message), at most 400 characters
@@ -358,15 +380,20 @@ mod tests {
         let mut checked = Vec::new();
         for (name, x) in v.as_object().unwrap() {
             let mut st = State::new(); for l in log.lines() { st.apply_line(l); } for e in x["extra"].as_array().unwrap() { st.apply(e); }
-            let Some(got) = thread_object(&st, "h", th, &p["params"], "") else { panic!("{name} should be drawn"); };
+            // a variant whose events add rows brings its own page; one with open runs brings the session's info
+            let mut params = p["params"].clone();
+            if x.get("page").map_or(false, |g| !g.is_null()) { params["page"] = x["page"].clone(); }
+            if let Some(info) = x.get("info").filter(|i| i.is_object()) { params["session"]["info"] = info.clone(); }
+            let got = thread_object(&st, "h", th, &params, "").unwrap_or_else(|| panic!("{name} should be drawn"));
             let (diff, tail) = (x["diff"].as_object().unwrap(), x["tail"].as_array().unwrap());
             for (k, w) in diff { assert_eq!(got.get(k), Some(w), "{name}: {k}"); }
             let es = got["entries"].as_array().unwrap();
             assert_eq!(es.len() as u64, x["entries"].as_u64().unwrap(), "{name}: entries");
             assert_eq!(&es[es.len() - 2..], tail.as_slice(), "{name}: tail");
+            if let Some(all) = x.get("all").and_then(Value::as_array) { assert_eq!(es, all.as_slice(), "{name}: every entry"); }
             checked.push(name.clone());
         }
-        for n in ["base", "running", "completed", "failed", "interrupted", "pinned", "archived", "snoozed", "settledhand", "codex", "opus", "queued", "askapproval", "askinput", "askplan", "asksend"] { assert!(checked.iter().any(|c| c == n), "{n} not checked: {checked:?}"); }
+        for n in ["base", "running", "completed", "failed", "interrupted", "pinned", "archived", "snoozed", "settledhand", "codex", "opus", "queued", "askapproval", "askinput", "askplan", "asksend", "stepchange", "stepbase", "stepfirst", "stepopen"] { assert!(checked.iter().any(|c| c == n), "{n} not checked: {checked:?}"); }
     }
     #[test] fn civil_dates() { assert_eq!(civil(0), (1970, 1, 1)); assert_eq!(civil(19675), (2023, 11, 14)); assert_eq!(clock(1700002806, 0, &Rule::utc()), "Tue 14 Nov 23:00"); }
     #[test] fn labels_name_three_kinds_and_the_live_one_says_what_runs() {
