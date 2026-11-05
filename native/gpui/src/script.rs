@@ -15,7 +15,7 @@ pub fn metric(started: Instant, event: &str, mut fields: Value) {
 pub enum Step { Home(usize), Select(usize), Popup(String), Type(String), Send, Wait(u64), Record(Option<String>), Click(String), Read(String), Scroll(f32), NetSleep(f64), Unsupported(String) }
 /// What a click on a registered control does; the e2e harness's controls inventory and `click` step use these.
 #[derive(Clone, Debug)]
-pub enum Ctl { None, PickFiles, ToggleSidebar, Select(String), Home(String), Fold(String), Send, Skill(String), Page(String), Node(String, String) }
+pub enum Ctl { None, Rail(String), PickFiles, ToggleSidebar, Select(String), Home(String), Fold(String), Send, Skill(String), Page(String), Node(String, String) }
 #[derive(Clone, Debug)]
 pub struct CtlEntry { pub id: String, pub label: String, pub ctl: Ctl }
 #[derive(Clone, Debug)]
@@ -246,6 +246,7 @@ impl Backplane {
         use crate::hub::Command;
         match ctl {
             Ctl::None => "none".into(),
+            Ctl::Rail(kind) => { if !crate::screens::viewer::is_open(&self.data["thread"]) { let _ = self.tx.try_send(Command::Action("panel".into(), String::new())); } let _ = self.tx.try_send(Command::Action("view-kind".into(), kind.clone())); self.ui_epoch += 1; "view.action view-kind".into() }
             Ctl::PickFiles => { self.pick_files(cx); self.ui_epoch += 1; "attach picker".into() }
             Ctl::ToggleSidebar => { self.sidebar_open = !self.sidebar_open; self.ui_epoch += 1; cx.notify(); "toggle sidebar".into() }
             Ctl::Select(id) => { self.select_id(id.clone(), cx); "view.open thread".into() }
