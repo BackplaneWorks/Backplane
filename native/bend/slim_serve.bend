@@ -184,12 +184,40 @@ def Pol.local.put.k(+v: String, +u: U.Ui, +k: String) -> U.Ui:
 def Pol.local.put.one(+u: U.Ui, +loc: J.Json, +k: String) -> U.Ui:
   Pol.local.put.k(J.Json.get_str(loc, k, ""), u, k)
 
+# The viewer's tabs keep their state in info keys the session does not carry (fm.req:<id>, fm.id:<t>, fm.want:<t>, fm.list:<t>... for the Files
+# tab; pdf.* the PDF pages; mech.* the parts): a hub reply is only applied by the handler that made the request, so these cross in `local` too,
+# the keys whose names start with one of these prefixes (empty values included: a key's presence is its state).
+def Pol.local.extra(+k: String) -> Bool:
+  Bool.or(Bool.or(String.starts_with(k, "fm."), String.starts_with(k, "pdf.")), String.starts_with(k, "mech."))
+
+def Pol.local.more.k(ok: Bool, +u: U.Ui, +k: String, +v: String) -> U.Ui:
+  match ok:
+    case True{}: U.Ui.info_set(u, k, v)
+    case False{}: u
+
+def Pol.local.more(+fs: J.Json, +u: U.Ui) -> U.Ui:
+  match fs:
+    case J.Obj{f}: Pol.local.more(f, u)
+    case J.Field{+k, J.Str{+v}, rest}: Pol.local.more(rest, Pol.local.more.k(Pol.local.extra(k), u, k, v))
+    case J.Field{_, _, rest}: Pol.local.more(rest, u)
+    case _: u
+
 def Pol.local.put(+u: U.Ui, +loc: J.Json) -> U.Ui:
-  Pol.local.put.one(Pol.local.put.one(Pol.local.put.one(Pol.local.put.one(u, loc, Pol.local.k1()), loc, Pol.local.k2()), loc, Pol.local.k3()), loc, Pol.local.k4())
+  Pol.local.more(loc, Pol.local.put.one(Pol.local.put.one(Pol.local.put.one(Pol.local.put.one(u, loc, Pol.local.k1()), loc, Pol.local.k2()), loc, Pol.local.k3()), loc, Pol.local.k4()))
+
+def Pol.local.scan.k(ok: Bool, +k: String, +v: String, acc: List<&2, J.KV>) -> List<&2, J.KV>:
+  match ok:
+    case True{}: J.KV{k, J.Json.str(v)} <> acc
+    case False{}: acc
+
+def Pol.local.scan(xs: List<&2, Sigma<&2, &2, String, _ => String>>, acc: List<&2, J.KV>) -> List<&2, J.KV>:
+  match xs:
+    case Nil{}: acc
+    case (k, v) <> t: Pol.local.scan(t, Pol.local.scan.k(Pol.local.extra(k), k, v, acc))
 
 def Pol.local.get(+u: U.Ui) -> J.Json:
-  J.Json.obj([J.KV{Pol.local.k1(), J.Json.str(U.Ui.info(u, Pol.local.k1()))}, J.KV{Pol.local.k2(), J.Json.str(U.Ui.info(u, Pol.local.k2()))},
-    J.KV{Pol.local.k3(), J.Json.str(U.Ui.info(u, Pol.local.k3()))}, J.KV{Pol.local.k4(), J.Json.str(U.Ui.info(u, Pol.local.k4()))}])
+  J.Json.obj(Pol.local.scan(Map.to_list(&2, String, U.Ui.infos(u)), [J.KV{Pol.local.k1(), J.Json.str(U.Ui.info(u, Pol.local.k1()))}, J.KV{Pol.local.k2(), J.Json.str(U.Ui.info(u, Pol.local.k2()))},
+    J.KV{Pol.local.k3(), J.Json.str(U.Ui.info(u, Pol.local.k3()))}, J.KV{Pol.local.k4(), J.Json.str(U.Ui.info(u, Pol.local.k4()))}]))
 
 def Pol.local.of(+a: H.HAct, +key: String) -> J.Json:
   match a:
