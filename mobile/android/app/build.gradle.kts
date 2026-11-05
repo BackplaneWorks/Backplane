@@ -33,6 +33,8 @@ gradle.taskGraph.whenReady {
 // production behaviour (the WebView shell, a Classic screens switch).
 // Default true: native Compose screens, no toggle. Debug builds only.
 val bpNative = providers.gradleProperty("bpNative").map { it != "false" }.getOrElse(true)
+// -PbpNativeSidebar=false: do not ask the hub for bounded sidebar pages (to test segmented replies); default true
+val bpNativeSidebar = providers.gradleProperty("bpNativeSidebar").map { it != "false" }.getOrElse(true)
 val bpAppId = "dev.backplane.mobile.gpui"
 val bpScheme = "bpgpui"
 
@@ -46,6 +48,7 @@ android {
         resValue("string", "app_name", "Backplane GPUI")
         resValue("string", "app_id", bpAppId)
         buildConfigField("boolean", "NATIVE_ONLY", bpNative.toString())
+        buildConfigField("boolean", "NATIVE_SIDEBAR", bpNativeSidebar.toString())
         buildConfigField("String", "URL_SCHEME", "\"$bpScheme\"")
         minSdk = 26
         targetSdk = 35

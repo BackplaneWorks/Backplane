@@ -560,6 +560,21 @@ private fun swipeColor(s: Swipe?): Color = when (s?.tone) {
     else -> MaterialTheme.colorScheme.secondaryContainer
 }
 
+// Previous / Next of a bounded sidebar list, one row each (iOS Views.swift pageControls)
+internal fun androidx.compose.foundation.lazy.LazyListScope.pageControls(m: AppModel, page: Pager?, scope: String, context: String) {
+    if (page == null || !page.any) return
+    for ((dir, c) in listOf("previous" to page.previous, "next" to page.next)) {
+        if (c == null) continue
+        item(key = "page:$scope:$dir") {
+            ListItem(
+                headlineContent = { Text(c.label) },
+                trailingContent = { Text(context, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                modifier = Modifier.combinedClickableCompat { m.act(c.action, c.value) },
+            )
+        }
+    }
+}
+
 // Swiping from the start sends the row's lead action; from the end it
 // opens the trail's (delete, snooze and its choices). The row always
 // springs back: what happens to the thread comes with the next screen.
@@ -778,6 +793,7 @@ internal fun Projects(m: AppModel, s: Screen, onPair: () -> Unit, state: LazyLis
                     }
                     items(s.active.filter { it.faded }, key = { "t:" + it.id }) { ThreadRow(m, it) }
                 }
+                for (hp in s.sidebarPages) pageControls(m, hp.active, hp.hub + ".active", s.hubs.firstOrNull { it.key == hp.hub }?.name ?: hp.hub)
             } else {
                 for (p in s.projects) {
                     item(key = "p:" + p.id) {
@@ -808,11 +824,13 @@ internal fun Projects(m: AppModel, s: Screen, onPair: () -> Unit, state: LazyLis
                         )
                     }
                     items(p.threads, key = { "t:" + it.id }) { ThreadRow(m, it) }
+                    pageControls(m, p.threadsPage, p.id + ".threads", p.title)
                     if (p.snoozed.isNotEmpty()) {
                         item(key = "z:" + p.id) {
                             ListItem(headlineContent = { Text(p.snoozedShelf, style = MaterialTheme.typography.labelLarge) })
                         }
                         items(p.snoozed, key = { "t:" + it.id }) { ThreadRow(m, it) }
+                        pageControls(m, p.snoozedPage, p.id + ".snoozed", p.title + ", " + p.snoozedShelf)
                     }
                     if (p.settled.isNotEmpty()) {
                         item(key = "s:" + p.id) {
@@ -824,7 +842,7 @@ internal fun Projects(m: AppModel, s: Screen, onPair: () -> Unit, state: LazyLis
                                 modifier = Modifier.combinedClickableCompat { m.act("toggle-settled", p.id) },
                             )
                         }
-                        if (p.open) items(p.settled, key = { "t:" + it.id }) { ThreadRow(m, it) }
+                        if (p.open) { items(p.settled, key = { "t:" + it.id }) { ThreadRow(m, it) }; pageControls(m, p.settledPage, p.id + ".settled", p.title + ", " + p.shelf) }
                     }
                     if (p.archived.isNotEmpty() && p.value.isNotEmpty()) {
                         item(key = "a:" + p.id) {
@@ -836,10 +854,11 @@ internal fun Projects(m: AppModel, s: Screen, onPair: () -> Unit, state: LazyLis
                                 modifier = Modifier.combinedClickableCompat { m.act("toggle-settled", p.value) },
                             )
                         }
-                        if (p.archOpen) items(p.archived, key = { "t:" + it.id }) { ThreadRow(m, it) }
+                        if (p.archOpen) { items(p.archived, key = { "t:" + it.id }) { ThreadRow(m, it) }; pageControls(m, p.archivedPage, p.id + ".archived", p.title) }
                     }
                     item(key = "d:" + p.id) { HorizontalDivider() }
                 }
+                for (hp in s.sidebarPages) pageControls(m, hp.projects, hp.hub + ".projects", s.hubs.firstOrNull { it.key == hp.hub }?.name ?: hp.hub)
                 // the folded shelf of older projects, at the end
                 s.older?.let { o ->
                     item(key = "older") {
@@ -857,6 +876,7 @@ internal fun Projects(m: AppModel, s: Screen, onPair: () -> Unit, state: LazyLis
                     ListItem(headlineContent = { Text("Conversation history", style = MaterialTheme.typography.labelLarge) })
                 }
                 items(s.legacy, key = { "legacy:" + it.id }) { ThreadRow(m, it, hierarchy = false) }
+                for (hp in s.sidebarPages) pageControls(m, hp.legacy, hp.hub + ".legacy", s.hubs.firstOrNull { it.key == hp.hub }?.name ?: hp.hub)
             }
         }
     }
