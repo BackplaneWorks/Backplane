@@ -184,7 +184,7 @@ impl Render for Backplane {
                         Some(blocks) if !blocks.is_empty() => { for el in crate::screens::timeline::blocks(cx, &reg, light, blocks, &id) { col = col.child(el); } }
                         _ => { col = col.child(crate::screens::timeline::user_text(&reg, light, &text)); }
                     }
-                    if let Some(im) = crate::screens::timeline::images(cx, light, &e["images"], &id) { col = col.child(im); }
+                    if let Some(im) = crate::screens::timeline::images(light, &e["images"], &id, self.screens.attacher.target.as_ref(), &self.screens.images) { col = col.child(im); }
                     entries.push(col.child(div().text_size(px(11.)).text_color(c("faint")).child(stamp)).into_any_element());
                 }
                 _ => if !text.is_empty() {
@@ -234,7 +234,7 @@ impl Render for Backplane {
         ctl.push(CtlEntry { id: "ui:Attach".into(), label: "Attach".into(), ctl: Ctl::PickFiles });
         if !self.sidebar_open { ctl.push(CtlEntry { id: "ui:Unfold sidebar".into(), label: "Unfold sidebar".into(), ctl: Ctl::ToggleSidebar }); }
         let connected = self.status == "Connected";
-        self.poll_images(cx);
+        if !self.screens.img_poll && self.screens.images.loading() { self.screens.img_poll = true; crate::screens::timeline::poll(cx); }
 
         let el = div().size_full().flex().flex_col().bg(c("bg")).text_color(c("text")).text_size(px(13.)).font_family("Noto Sans Mono CJK JP").line_height(px(20.))
             .on_action(cx.listener(Self::send)).on_action(cx.listener(Self::close_popup))
