@@ -14,6 +14,9 @@ pub struct Registry {
     pub entry_id: String, idx: usize, last_id: String,
     /// The selection as the person made it, by identity; `sel` is that resolved to this frame's ordinals.
     keyed: Option<(KPos, KPos)>, pub sel: Selection,
+    /// Where each code block's Copy button was painted this frame (for the check harness), by index.
+    pub copies: Vec<(usize, Bounds<Pixels>)>,
+    pub copy_seen: usize,
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct KPos { pub entry: String, pub idx: usize, pub off: usize }
@@ -21,12 +24,12 @@ pub struct Info { pub text: String, pub entry: usize, pub id: String, pub idx: u
 pub type Reg = Rc<RefCell<Registry>>;
 
 impl Default for Registry {
-    fn default() -> Self { Self { blocks: Vec::new(), dragging: false, entry: 0, entry_id: String::new(), idx: 0, last_id: String::new(), keyed: None, sel: Selection::default() } }
+    fn default() -> Self { Self { blocks: Vec::new(), dragging: false, entry: 0, entry_id: String::new(), idx: 0, last_id: String::new(), keyed: None, sel: Selection::default(), copies: Vec::new(), copy_seen: 0 } }
 }
 
 impl Registry {
     /// A new frame: forget the blocks, keep the selection (by identity).
-    pub fn begin(&mut self) { self.blocks.clear(); self.idx = 0; self.last_id.clear(); }
+    pub fn begin(&mut self) { self.blocks.clear(); self.copies.clear(); self.copy_seen = 0; self.idx = 0; self.last_id.clear(); }
     fn next_idx(&mut self) -> usize { if self.last_id != self.entry_id { self.last_id = self.entry_id.clone(); self.idx = 0; } let i = self.idx; self.idx += 1; i }
     fn key(&self, p: Pos) -> Option<KPos> { let b = self.blocks.get(p.block)?; Some(KPos { entry: b.id.clone(), idx: b.idx, off: p.off.min(b.text.len()) }) }
     fn ord(&self, k: &KPos) -> Option<Pos> { self.blocks.iter().position(|b| b.id == k.entry && b.idx == k.idx).map(|block| Pos { block, off: k.off }) }
@@ -164,6 +167,12 @@ fn plain_spans(s: &str) -> Vec<Span> { vec![Span { text: s.to_string(), style: D
 /// A user's message text.
 pub fn user_text(reg: &Reg, light: bool, s: &str) -> AnyElement { text(reg, light, plain_spans(s), Kind::Body) }
 
+/// An invisible overlay that records where its parent was painted, for the check harness's control rectangles.
+fn copy_probe(reg: &Reg, ix: usize) -> impl IntoElement {
+    let reg = reg.clone();
+    canvas(|b, _, _| b, move |_, b, _, _| { reg.borrow_mut().copies.push((ix, b)); }).absolute().size_full()
+}
+
 fn block_el(cx: &mut Context<Backplane>, reg: &Reg, light: bool, b: &Block, key: &str) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     match b {
@@ -177,9 +186,10 @@ fn block_el(cx: &mut Context<Backplane>, reg: &Reg, light: bool, b: &Block, key:
         }).collect::<Vec<_>>()).into_any_element(),
         Block::Code(t, tokens) => {
             let copy = t.clone();
+            let copy_ix = { let mut r = reg.borrow_mut(); let n = r.copy_seen; r.copy_seen += 1; n };
             div().w_full().bg(c("raise")).border_1().border_color(c("line")).flex().flex_col()
-                .child(div().flex().justify_end().px_2().pt_1().child(div().id(SharedString::from(format!("copy-{key}"))).px_2().text_size(px(11.)).text_color(c("dim")).cursor_pointer().hover(|s| s.text_color(c("text")))
-                    .child("Copy").on_click(cx.listener(move |_, _, _, cx| { cx.write_to_clipboard(ClipboardItem::new_string(copy.clone())); }))))
+                .child(div().flex().justify_end().px_2().pt_1().child(div().id(SharedString::from(format!("copy-{key}"))).relative().px_2().text_size(px(11.)).text_color(c("dim")).cursor_pointer().hover(|s| s.text_color(c("text")))
+                    .child("Copy").child(copy_probe(reg, copy_ix)).on_click(cx.listener(move |_, _, _, cx| { cx.write_to_clipboard(ClipboardItem::new_string(copy.clone())); }))))
                 .child(div().id(SharedString::from(format!("code-{key}"))).overflow_x_scroll().px_2().pb_2().text_size(px(12.)).whitespace_nowrap().child({ let mut s = SelText::new(reg, plain_spans(t), Kind::Code, light); s.tokens = tokens.clone(); s.into_any_element() }))
                 .into_any_element()
         }
@@ -253,6 +263,24 @@ pub fn poll(cx: &mut Context<Backplane>) {
 }
 
 impl Backplane {
+    /// Every link and every code block's Copy button as painted in the last frame: ("link:<n>", url, bounds) and
+    /// ("copy:<n>", "", bounds), logical pixels, for the check harness (G6).
+    pub(crate) fn link_and_copy_rects(&self) -> Vec<(String, String, Bounds<Pixels>)> {
+        let r = self.screens.reg.borrow();
+        let mut out = Vec::new(); let mut n = 0usize;
+        for b in &r.blocks {
+            let Some(l) = &b.layout else { continue };
+            let lh = l.line_height();
+            for (range, link) in &b.links {
+                let (Some(a), Some(z)) = (l.position_for_index(range.start), l.position_for_index(range.end)) else { continue };
+                // a link that wraps is reported by its first line, to the edge of the text
+                let right = if a.y == z.y { z.x } else { l.bounds().right() };
+                out.push((format!("link:{n}"), link.href.clone(), Bounds::from_corners(a, point(right, a.y + lh)))); n += 1;
+            }
+        }
+        for (i, bounds) in &r.copies { out.push((format!("copy:{i}"), String::new(), *bounds)); }
+        out
+    }
     fn timeline_pos(&self, p: Point<Pixels>) -> Option<Pos> { self.screens.reg.borrow().hit(p) }
     pub(crate) fn timeline_down(&mut self, e: &MouseDownEvent, cx: &mut Context<Self>) {
         let Some(pos) = self.timeline_pos(e.position) else { return };
