@@ -197,6 +197,10 @@ impl Hub {
     pub fn push(&self, client: u64, frame: Value) -> bool { let n = frame_bytes(&frame); self.enqueue(client, Out::Value(frame), n, false) }
     /// A frame that may be skipped: false (and nothing queued) when the client's outbox is more than half full or it has gone. `bytes` is its size.
     pub fn push_budgeted(&self, client: u64, frame: Value, bytes: usize) -> bool { self.enqueue(client, Out::Value(frame), bytes, true) }
+    /// A droppable frame to every connection that has room (terminal output...): skipped, never dropping a client. Returns how many took it.
+    pub fn push_all_budgeted(&self, frame: &Value, bytes: usize) -> usize { let ids = self.clients(); ids.into_iter().filter(|id| self.enqueue(*id, Out::Value(frame.clone()), bytes, true)).count() }
+    /// The ids of the connections with an outbox now.
+    pub fn clients(&self) -> Vec<u64> { self.outboxes.lock().unwrap().keys().copied().collect() }
     /// Bytes queued for the client and not yet read by its connection (0 when it has gone).
     pub fn outbox_pending(&self, client: u64) -> usize { self.outboxes.lock().unwrap().get(&client).map_or(0, |s| s.pending.load(Relaxed)) }
     /// Tests: the byte bound.
@@ -205,7 +209,9 @@ impl Hub {
         let max = self.outbox_max.load(Relaxed); let cap = if droppable { max / 2 } else { max };
         let mut m = self.outboxes.lock().unwrap();
         let Some(s) = m.get(&client) else { return false };
-        if s.pending.load(Relaxed) + bytes > cap {
+        // one frame larger than the cap still goes to an empty outbox (a whole model on open): memory stays at the cap plus one frame
+        let held = s.pending.load(Relaxed);
+        if held > 0 && held + bytes > cap {
             // a frame that must arrive cannot: the client is too slow. Drop it; it reconnects and resumes from its cursor.
             if !droppable { m.remove(&client); }
             return false
@@ -444,5 +450,24 @@ mod write_tests {
         // reading frees the budget
         let mut o = hub.attach(4); assert!(hub.push(4, frame.clone())); let before = hub.outbox_pending(4); assert!(before > 0);
         o.recv().await.unwrap(); assert_eq!(hub.outbox_pending(4), 0);
+    }
+
+    // one frame over the cap goes through an empty outbox (a whole model on open), and still bounds memory at cap + one frame
+    #[tokio::test] async fn a_frame_larger_than_the_cap_goes_to_an_empty_outbox_and_only_then() {
+        let dir = std::env::temp_dir().join(format!("bp-outbox-big-{}", std::process::id())); let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();
+        let hub = Hub::start(Cfg { home: dir.clone(), version: "0.14.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        hub.set_outbox_max(10_000);
+        let mut o = hub.attach(1);
+        assert!(hub.push_raw(1, vec![0u8; 50_000]), "a frame bigger than the cap reaches an empty outbox");
+        assert!(hub.is_attached(1) && hub.outbox_pending(1) == 50_000);
+        assert!(!hub.push_raw(1, vec![0u8; 10]) && !hub.is_attached(1), "with the big one still unread, any further frame drops the client: memory is cap + one frame");
+        assert!(matches!(o.recv().await, Some(Out::Raw(b)) if b.len() == 50_000), "the frame that was queued is still delivered");
+        // droppable frames: skipped for the slow one, taken by the healthy one
+        let _slow = hub.attach(2); let mut ok = hub.attach(3);
+        let f = json!({"t":"term"}); assert!(hub.push_budgeted(2, f.clone(), 4000));
+        assert!(!hub.push_budgeted(2, f.clone(), 4000), "over half: skipped");
+        assert_eq!(hub.push_all_budgeted(&f, 4000), 1, "client 3 takes it, client 2 is skipped, nobody is dropped");
+        assert!(hub.is_attached(2) && hub.clients().len() == 2);
+        ok.recv().await.unwrap();
     }
 }
