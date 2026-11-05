@@ -272,7 +272,7 @@ impl Backplane {
             }
             Step::Field(name, text) => {
                 // the e2e hook for typing into a named form field (the rename box): its text set as typing would
-                if let Some(slot) = self.screens.fields.get(name) { let input = slot.input.clone(); input.update(cx, |i, cx| i.set(text.clone(), cx)); }
+                if let Some(slot) = self.screens.fields.get(&name) { let input = slot.input.clone(); input.update(cx, |i, cx| i.set(text.clone(), cx)); }
                 self.seq += 1; let seq = self.seq;
                 self.pending = Some(Pending { label: "field".into(), started: Instant::now(), goal: Goal::Sleep, armed: true, seq });
                 cx.spawn(async move |this, cx| { cx.background_executor().timer(Duration::from_millis(100)).await; let _ = this.update(cx, |t, cx| { if t.pending.as_ref().map_or(false, |p| p.seq == seq) { t.pending = None; t.pump(cx); } }); }).detach();
