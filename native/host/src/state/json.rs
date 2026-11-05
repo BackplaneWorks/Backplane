@@ -14,7 +14,7 @@ fn raw(v: Option<&Value>) -> Option<String> {
     match v { Some(Value::Number(n)) => Some(n.to_string()), Some(Value::String(s)) => Some(s.clone()), _ => None }
 }
 /// Nat.read of a decimal text: all digits, else None (a sign, a point or an exponent is no Nat)
-fn nat_read(s: &str) -> Option<u64> { if !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()) { s.parse().ok() } else { None } }
+pub fn nat_read(s: &str) -> Option<u64> { if !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()) { s.parse().ok() } else { None } }
 /// Json.get_nat: a number or a numeric string, else `d`
 pub fn gnat(o: &Value, k: &str, d: u64) -> u64 { raw(o.get(k)).and_then(|r| nat_read(&r)).unwrap_or(d) }
 pub fn gbool(o: &Value, k: &str, d: bool) -> bool { o.get(k).and_then(|v| v.as_bool()).unwrap_or(d) }

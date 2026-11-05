@@ -7,6 +7,9 @@
 #[path = "todo.rs"] mod todo;
 #[path = "liveness.rs"] pub mod liveness;
 #[path = "star.rs"] pub mod star;
+#[path = "ext.rs"] pub mod ext;
+#[path = "autosettle.rs"] pub mod autosettle;
+pub use ext::{on_post, Ext};
 use json::*;
 use super::State;
 use serde_json::{json, Value};
@@ -17,7 +20,8 @@ fn n(e: &Value, k: &str) -> u64 { gnat(e, k, 0) }
 /// Kinds this module folds; `None` never (the decoder is lenient: every field defaults). Other kinds are not ours: `Some(())`.
 pub fn fold(st: &mut State, kind: &str, e: &Value) -> Option<()> {
     match kind {
-        "Reminded" => { let (id, th, at) = (s(e, "id"), s(e, "thread"), n(e, "at")); st.post(th, &format!("remind:{id}:{at}")); }
+        "TaskDelivered" => ext::delivered(st, s(e, "task")),
+        "Reminded" => { let (id, th, at) = (s(e, "id"), s(e, "thread"), n(e, "at")); let rid = format!("remind:{id}:{at}"); st.post(th, &rid); on_post(st, th, &rid, at, None); }
         "UberOp" => st.uberop(s(e, "uid"), s(e, "origin"), n(e, "n"), s(e, "stamp"), s(e, "op"), n(e, "at")),
         "TodosChanged" => st.todos_changed(s(e, "thread"), s(e, "who"), s(e, "data")),
         "WakeSet" => st.wake_set(e),

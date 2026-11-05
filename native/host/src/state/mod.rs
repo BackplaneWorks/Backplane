@@ -74,6 +74,10 @@ pub struct State {
     own: HashMap<String, u64>,
     /// events the fold counts but does not (fully) model, by kind: reported by rust-digest so a gap is never silent
     pub unmodelled: HashMap<String, u64>,
+    /// what the hub-side policies read that the digest does not show (fam.rs): bounded by tasks, threads and thread pairs
+    pub ext: fam::Ext,
+    /// the hub-side policy copy keeps no entry ids (the digest does): set by state::host, entries stay empty
+    pub lean: bool,
 }
 
 /// every event name the Bend decoder (core/codec.bend Change.decode) knows
@@ -152,9 +156,9 @@ impl State {
             }
             "ThreadRenamed" => { let id = s(e, "id")?; let t = s(e, "title")?.to_string(); self.thread_mut(id).title = t; }
             "MessagePosted" => {
-                let th = s(e, "thread")?; let id = s(e, "msg")?; let role = s(e, "role")?; let at = n(e, "at")?; s(e, "text")?;
+                let th = s(e, "thread")?; let id = s(e, "msg")?; let role = s(e, "role")?; let at = n(e, "at")?; let text = s(e, "text")?;
                 if role == "user" { let t = self.thread_mut(th); t.activity = at; t.unsettled_at = at; }
-                self.post(th, id);
+                self.post(th, id); fam::on_post(self, th, id, at, Some((role, text)));
             }
             "TurnChanged" => {
                 let th = s(e, "thread")?; let st = Turn::parse(s(e, "state")?).unwrap_or(Turn::Idle); let at = n(e, "at")?;
@@ -162,7 +166,7 @@ impl State {
                 let t = self.thread_mut(th); t.activity = t.activity.max(at); t.turn = st;
             }
             "PendingChanged" => { let th = s(e, "thread")?; let c = n(e, "count")?; self.thread_mut(th).pending = c; }
-            "ActivityLogged" => { let th = s(e, "thread")?; let id = s(e, "act")?; s(e, "tone")?; s(e, "kind")?; s(e, "summary")?; n(e, "at")?; self.post(th, id); }
+            "ActivityLogged" => { let th = s(e, "thread")?; let id = s(e, "act")?; s(e, "tone")?; s(e, "kind")?; s(e, "summary")?; let at = n(e, "at")?; self.post(th, id); fam::on_post(self, th, id, at, None); }
             "ThreadSettled" => {
                 let id = s(e, "id")?; let manual = fam::json::gbool(e, "manual", false); let at = n(e, "at")?;
                 let t = self.thread_mut(id); if manual { t.override_ = Override::ForcedSettled } t.settled_at = at; t.pinned = false;
@@ -261,12 +265,12 @@ impl State {
 
     /// State.post -> Idx.post: an entry is filed under its thread, and a message another thread sent ("t:<from>:<n>") under the sender too.
     fn post(&mut self, th: &str, id: &str) {
-        self.entries.entry(th.into()).or_default().push(id.into());
+        if !self.lean { self.entries.entry(th.into()).or_default().push(id.into()); }
         *self.own.entry(th.into()).or_default() += 1;
         let from = link_from(id);
         if !from.is_empty() && from != th && !from.is_empty() { self.sent_link(from, id, th); }
     }
-    fn sent_link(&mut self, from: &str, id: &str, _th: &str) { self.entries.entry(from.into()).or_default().push(id.into()); }
+    fn sent_link(&mut self, from: &str, id: &str, _th: &str) { if !self.lean { self.entries.entry(from.into()).or_default().push(id.into()); } }
 
     fn todos_put(&mut self, th: &str, current: &str, base: &str, visible: &str) {
         self.set(&format!("todos.{th}"), current); self.set(&format!("todos.base.{th}"), base); self.set(&format!("todos.visible.{th}"), visible);
