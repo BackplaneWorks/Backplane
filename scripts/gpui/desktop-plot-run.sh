@@ -23,7 +23,7 @@ ev=[{"$":"ProjectCreated","id":"p1","title":"ecc","root":R+"/proj","at":NOW},{"$
 if __import__("os").environ.get("GPUI_LONG"):
     long=" ".join("word%d" % i for i in range(220))+"\n\nsecond paragraph with a path /home/h/Documents/x.rs and https://example.com/a?b=1 here."
     ev+=[{"$":"MessagePosted","thread":"t1","msg":"m1","role":"user","text":long,"at":NOW},{"$":"MessagePosted","thread":"t1","msg":"m2","role":"assistant","text":"The reply right below the long message.","at":NOW+1},{"$":"MessagePosted","thread":"t1","msg":"m3","role":"user","text":"short follow up","at":NOW+2},{"$":"MessagePosted","thread":"t1","msg":"m4","role":"assistant","text":"Final reply.","at":NOW+3}]
-if __import__("os").environ.get("GPUI_THREADS"): ev+=[{"$":"ThreadCreated","id":t,"project":"p1","title":n,"env":"local","branch":"","worktree":"","provider":"claude","model":"","at":NOW} for t,n in (("t2","beta"),("t3","gamma"))]
+if __import__("os").environ.get("GPUI_THREADS") or __import__("os").environ.get("GPUI_PROJECTS"): ev+=[{"$":"ThreadCreated","id":t,"project":"p1","title":n,"env":"local","branch":"","worktree":"","provider":"claude","model":"","at":NOW} for t,n in (("t2","beta"),("t3","gamma"))]
 open(R+"/home/events.jsonl","w").write("".join(json.dumps(e,separators=(",",":"))+"\n" for e in ev))   # compact, as the hub writes it: its agents world reads lines by pattern
 PY
 export LC_ALL=C
@@ -47,7 +47,10 @@ printf "font pango:monospace 8\nnew_window none\nfor_window [class=\".*\"] borde
 DISPLAY=$DISP i3 -c $R/i3.conf > $R/i3.log 2>&1 &
 echo $! > $R/i3.pid; sleep 1
 export DISPLAY=$DISP VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json LP_NUM_THREADS=2 BACKPLANE_GPUI_ASSETS=$ASSETS BACKPLANE_GPUI_RECTS=1
-if [ -n "${GPUI_LONG:-}" ]; then cat > $R/script.json <<JSON
+if [ -n "${GPUI_PROJECTS:-}" ]; then cat > $R/script.json <<JSON
+[{"wait":1500},{"click":"ui:Search"},{"wait":800},{"field":["pq","gam"]},{"wait":2000},{"click":"ui:Add project"},{"wait":2500},{"field":["picker","~/"]},{"wait":3000},{"click":"folders-cancel"},{"wait":2500},{"field":["pq",""]},{"wait":2500}]
+JSON
+elif [ -n "${GPUI_LONG:-}" ]; then cat > $R/script.json <<JSON
 [{"click":"thread:t1"},{"wait":14000}]
 JSON
 elif [ -n "${GPUI_THREADS:-}" ]; then cat > $R/script.json <<JSON
@@ -66,7 +69,7 @@ JSON
 fi
 $CLIENT --url http://127.0.0.1:$PORT --token-file $R/home/token --script $R/script.json --exit-after 80 > $OUT/$N.client.log 2>&1 &
 echo $! > $R/client.pid
-if [ -n "${GPUI_LONG:-}" ]; then sleep 9; import -window root $SH/$N-long.png; elif [ -n "${GPUI_THREADS:-}" ]; then sleep 4; import -window root $SH/$N-more.png; sleep 6; import -window root $SH/$N-rename.png; sleep 7; import -window root $SH/$N-delete.png; sleep 10; import -window root $SH/$N-end.png; elif [ -n "${GPUI_DAILY:-}" ]; then sleep 9; import -window root $SH/$N-ask.png; sleep 5; import -window root $SH/$N-after.png; sleep 3; import -window root $SH/$N-settings.png; sleep 3; import -window root $SH/$N-home.png; elif [ -n "${GPUI_ATTACH:-}" ]; then sleep 5; import -window root $SH/$N-attach.png; sleep 2; import -window root $SH/$N-attach-sent.png; else sleep 7; import -window root $SH/$N-board.png
+if [ -n "${GPUI_PROJECTS:-}" ]; then sleep 5; import -window root $SH/$N-search.png; sleep 3; import -window root $SH/$N-add.png; sleep 5; import -window root $SH/$N-picked.png; sleep 4; import -window root $SH/$N-cleared.png; elif [ -n "${GPUI_LONG:-}" ]; then sleep 9; import -window root $SH/$N-long.png; elif [ -n "${GPUI_THREADS:-}" ]; then sleep 4; import -window root $SH/$N-more.png; sleep 6; import -window root $SH/$N-rename.png; sleep 7; import -window root $SH/$N-delete.png; sleep 10; import -window root $SH/$N-end.png; elif [ -n "${GPUI_DAILY:-}" ]; then sleep 9; import -window root $SH/$N-ask.png; sleep 5; import -window root $SH/$N-after.png; sleep 3; import -window root $SH/$N-settings.png; sleep 3; import -window root $SH/$N-home.png; elif [ -n "${GPUI_ATTACH:-}" ]; then sleep 5; import -window root $SH/$N-attach.png; sleep 2; import -window root $SH/$N-attach-sent.png; else sleep 7; import -window root $SH/$N-board.png
 sleep 6; import -window root $SH/$N-schematic.png
 sleep 8; import -window root $SH/$N-3d.png
 sleep 9; import -window root $SH/$N-mech.png; fi
