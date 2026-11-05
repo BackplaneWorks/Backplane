@@ -178,16 +178,15 @@ private fun BotsPage(m: AppModel, s: Screen, state: LazyListState) {
             if (part == "bots") {
                 if (s.bots.isEmpty()) item(key = "none") { Empty(NativeMessages.native_bot_empty(lang)) }
                 items(s.bots, key = { "b:" + it.id }) { b ->
+                    // style.css .bot-row: a 28 px cat, the name, the mood in its colour; .cat-mood-away dims the cat only
                     ListItem(
                         headlineContent = { Text(b.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                         supportingContent = {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                MoodDot(b.mood)
-                                Text(listOf(b.note, b.peer, b.machine).filter { it.isNotEmpty() }.joinToString(" · "), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            }
+                            Text(listOf(b.note, b.peer, b.machine).filter { it.isNotEmpty() }.joinToString(" · "), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.labelMedium, color = moodTextColor(b.mood))
                         },
-                        leadingContent = { BotCat(m, b.cat, 40.dp) },
-                        modifier = Modifier.alpha(if (b.mood == "away") 0.5f else 1f)
+                        leadingContent = { Box(Modifier.alpha(if (b.mood == "away") 0.5f else 1f)) { BotCat(m, b.cat, 28.dp) } },
+                        modifier = Modifier
                             .clickable { m.open(b.nav, b.act, b.id, b.name, b.cat, if (b.remote) "remote" else "bot") },
                     )
                 }

@@ -80,6 +80,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.net.HttpURLConnection
@@ -103,6 +104,13 @@ internal fun moodTint(mood: String): Color = when (mood) {
     "error" -> MaterialTheme.colorScheme.error
     "idle" -> Color(0xFF63E6BE)
     else -> MaterialTheme.colorScheme.outline
+}
+
+@Composable
+internal fun moodTextColor(mood: String): Color = when (mood) {
+    "wait", "error" -> PhaseColor.bad
+    "work", "talk" -> PhaseColor.accent
+    else -> MaterialTheme.colorScheme.onSurfaceVariant
 }
 
 @Composable
@@ -186,19 +194,17 @@ fun BotDestination(m: AppModel, s: Screen, b: BotView) {
     }
 }
 
-// a cat, its name and how it is
+// a cat, its name and how it is (style.css .bot-head: the phone's cat is 40 px, the title 15 px semibold, the mood 12 px
+// in its mood's colour; .cat-mood-away dims the cat only)
 @Composable
 private fun BotHeader(m: AppModel, b: BotView, size: Dp) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        horizontalArrangement = Arrangement.spacedBy(14.dp)) {
         Box(Modifier.alpha(if (b.mood == "away") 0.5f else 1f)) { BotCat(m, b.cat, size) }
         Column {
-            Text(b.title, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                MoodDot(b.mood)
-                Text(listOf(b.note, if (b.title == b.name) b.peer else "").filter { it.isNotEmpty() }.joinToString(" · "),
-                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.outline)
-            }
+            Text(b.title, style = MaterialTheme.typography.titleMedium.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(listOf(b.note, if (b.title == b.name) b.peer else "").filter { it.isNotEmpty() }.joinToString(" · "),
+                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp), color = moodTextColor(b.mood))
         }
     }
 }
@@ -206,7 +212,7 @@ private fun BotHeader(m: AppModel, b: BotView, size: Dp) {
 @Composable
 private fun BotTabs(m: AppModel, b: BotView) {
     Column {
-        BotHeader(m, b, 64.dp)
+        BotHeader(m, b, 40.dp)
         val i = b.tabs.indexOfFirst { it.id == b.navTab.ifEmpty { b.tab } }.coerceAtLeast(0)
         ScrollableTabRow(selectedTabIndex = i, edgePadding = 8.dp) {
             b.tabs.forEachIndexed { j, t ->

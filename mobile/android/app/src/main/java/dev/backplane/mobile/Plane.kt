@@ -121,12 +121,10 @@ fun UberCardRow(m: AppModel, c: UberCard) {
     ListItem(
         headlineContent = { Text(c.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         supportingContent = {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                MoodDot(c.mood)
-                Text(c.counts.ifEmpty { NativeMessages.native_plane_waiting(lang) }, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
+            Text(c.counts.ifEmpty { NativeMessages.native_plane_waiting(lang) }, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.labelMedium, color = moodTextColor(c.mood))
         },
-        leadingContent = { BotCat(m, c.cat, 48.dp) },
+        leadingContent = { Box(Modifier.alpha(if (c.mood == "away") 0.5f else 1f)) { BotCat(m, c.cat, 28.dp) } },
         colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = if (c.sel) 0.22f else 0.10f)),
         modifier = Modifier.clickable { m.open(c.nav, "uber", c.id, c.name, c.cat, "bot") },
     )
