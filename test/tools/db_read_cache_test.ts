@@ -143,5 +143,16 @@ try {
     ["SELECT (SELECT count(*) FROM tb WHERE n > 0) + (SELECT count(*) FROM tc) WHERE ?1 <> ''", "tc"],
   ]) keeps(sql, "a", tw(t), false, "a write to " + t);
   keeps("SELECT count(*) FROM ta, tb WHERE ta.n = tb.n AND ?1 <> ''", "a", tw("tc"), true, "a write to a table it does not read");
+  // the review history's pages: kept per thread like a scoped read
+  eff["Db.exec"](h2, "CREATE TABLE entry(seq INTEGER PRIMARY KEY, ord INTEGER UNIQUE, id TEXT, thread TEXT, src TEXT, kind TEXT, role TEXT, akind TEXT, text TEXT, at INTEGER); CREATE INDEX entry_thread ON entry(thread, seq)");
+  const eins = "INSERT INTO entry(seq, ord, id, thread, src, kind, role, akind, text, at) VALUES (substr(?, 2), substr(?, 2), substr(?, 2), substr(?, 2), substr(?, 2), substr(?, 2), substr(?, 2), substr(?, 2), substr(?, 2), substr(?, 2)) ON CONFLICT DO NOTHING";
+  let es = 1; const erow = (th: string) => { const n = es++; return L(["v" + n, "v" + n, "vi" + n, "v" + th, "v", "vact", "vreview", "v", "v{}", "v1"]); };
+  eff["Db.batch"](h2, eins, L([erow("ra"), erow("rb")]));
+  const budget = { rows: 128, bytes: 1048576 };
+  const page = (th: string) => eff["Db.review_page"](h2, th, 0n, 1000n, budget);
+  const pa = page("ra"); ok(page("ra") === pa && A(pa.rows).length === 1, "a review page is kept");
+  eff["Db.batch"](h2, eins, L([erow("rb")])); ok(page("ra") === pa, "another thread's entry keeps it");
+  eff["Db.batch"](h2, eins, L([erow("ra")])); const pa2 = page("ra"); ok(pa2 !== pa && A(pa2.rows).length === 2, "its thread's entry drops it; the new page has the row");
+  eff["Db.run"](h2, "UPDATE entry SET text = '{\"x\":1}' WHERE thread = 'rb'", L([])); ok(page("ra") !== pa2, "an UPDATE of entry drops it");
 } finally { rmSync(dir, { recursive: true, force: true }); }
 console.log(fail ? fail + " failed" : "db_read_cache: ok"); process.exit(fail ? 1 : 0);
