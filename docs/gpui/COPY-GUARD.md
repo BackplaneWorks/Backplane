@@ -12,8 +12,14 @@ A hub on a copy of a real log acts on nothing outside its home. One switch (`cop
 4. **Listeners**: a copy never starts the tailnet listener (`main.rs`: `tailscale: !no_tailscale && !copy::on()`); the only listener is the one
    named by `--host/--port`.
 
-There is no native outbound network client in the crate (no reqwest/ureq/hyper client; the only `connect` calls are loopback to our own
-policy child and the KiCad socket): everything that reaches another machine is a child process, so gate 2 covers it.
+Raw sockets are not child processes, so gate 2 does not see them. There is no HTTP client crate; the non-test `connect` calls are
+`presenter.rs` (loopback to our own policy child), `kicad/nng.rs` (the KiCad unix socket) and `net/tailnet.rs` `hello_with` (a raw
+`TcpStream::connect` to other machines, which returns at once on a copy: `if copy { return }`). The test
+`every_outbound_socket_is_on_the_allowlist` (proc.rs) fails the build on any other non-test `TcpStream::connect`, `UdpSocket`,
+`TcpSocket`, `connect_async` or `UnixStream::connect`; a new one is added to its list by a reviewer, with its own copy check.
+
+`kicad/stepglb.rs` `run_merged` is `Kind::Local "sh"` running `exec "$@"`: the by-name check cannot see the real program. Its callers are
+fixed local tools today; a new caller that passed a network tool would get through, so keep it to fixed local programs.
 
 ## Review of the lanes (2026-11-05)
 
@@ -24,6 +30,7 @@ policy child and the KiCad socket): everything that reaches another machine is a
 | settings | `curl` webhook (`webhook.rs`), `secret_run` shell (`vault.rs`), vault tools | Net / Shell: not started; vault tools Local |
 | kicad | kicad-cli, plot/step helpers, git show (read) | Local: read-only on the project; no install path exists in the Rust hub |
 | files | git (reads, writes, push), gh | writes and `file.open` told; push/fetch/gh refused; reads allowed |
+| commands | git writes through `files::git::proc` (worktree on create/fork), folder picker scripts (Local), the worktree job runs on "/" on a copy | writes and network refused by the same gates; `copy::on()` checked before any git write |
 | agents | the agent CLIs, the CLI version probe | stand-ins only (`BACKPLANE_AGENTS`); probe of `kicad-cli --version` is Local |
 
 Not covered (no code yet): deploy/restart/update, watched work (`work_run`), webhooks other than settings', push notifications to phones. When
