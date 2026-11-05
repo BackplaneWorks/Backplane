@@ -31,6 +31,15 @@ const listed = await until(() => rows().length > 0, 25000);
 pass("pair (token auth, view-v1 socket opens, greeting accepted)", opened && frames > 0, `frames ${frames}`);
 const n = rows().length; const pages = screen?.sidebarPages;
 pass(`list (>= ${Math.min(+expect, 48)} rows; bounded sidebar at ${expect})`, listed && n >= Math.min(+expect, 48), `rows ${n}${pages ? " pager " + JSON.stringify(pages).slice(0, 120) : ""}${failure ? " failure: " + failure : ""}`);
+// pager: advance the thread list page by page with the pager controls the screen offers (Pager.next/previous: action native-sidebar-page)
+const nextCtl = () => { const pp = (screen?.projects || []).map((p: any) => p.threadsPage?.next).find(Boolean); return pp || (screen?.sidebarPages || []).flatMap((h: any) => [h.projects?.next, h.active?.next]).find(Boolean); };
+const prevCtl = () => { const pp = (screen?.projects || []).map((p: any) => p.threadsPage?.previous).find(Boolean); return pp || (screen?.sidebarPages || []).flatMap((h: any) => [h.projects?.previous, h.active?.previous]).find(Boolean); };
+{ const firsts = [rows()[0]?.id]; let moved = 0;
+  for (let k = 0; k < 8 && nextCtl(); k++) { const c = nextCtl(); const f = rows()[0]?.id; run(j(B.act(c.action, c.value))); if (!(await until(() => rows()[0]?.id !== f, 8000))) break; firsts.push(rows()[0]?.id); moved++; }
+  let back = 0; const start = firsts[0];
+  for (let k = 0; k < moved && prevCtl(); k++) { const c = prevCtl(); const f = rows()[0]?.id; run(j(B.act(c.action, c.value))); if (!(await until(() => rows()[0]?.id !== f, 8000))) break; back++; }
+  const want = Math.min(Math.floor((+expect - 1) / 48), 8);
+  pass(`pager (advance ${want} page(s), then back)`, moved >= want && back === moved && rows()[0]?.id === start && new Set(firsts).size === firsts.length, `forward ${moved}/${want}, back ${back}, first rows ${firsts.length}${failure ? " failure: " + failure : ""}`); }
 let id = rows()[0]?.id;
 if (id) { run(j(B.act("select", id))); }
 const opened2 = await until(() => screen?.thread?.id === id, 15000);
