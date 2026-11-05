@@ -2,11 +2,13 @@
 //! (src/core/bothub.bend, bot.bend, uber*.bend, mail*.bend). The Bend decider is a pure function from state and request to
 //! changes and outs; here a request commits the same events through `Hub::commit_many`, then performs the outs.
 //! A message into a bot's thread goes through `Inbox` (the agents module's `deliver`).
+pub mod api;
 pub mod clock;
 pub mod reply;
 pub mod routines;
 pub mod rpc;
 pub mod world;
+pub use api::{chat_thread, default_tab};
 pub use rpc::{Bots, Inbox};
 #[cfg(test)]
 mod tests;

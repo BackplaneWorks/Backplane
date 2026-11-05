@@ -361,3 +361,16 @@ const JS_ROUTINE_STEPS: &str = include_str!("../../../../test/gpui/bots/fixtures
     assert_eq!(plan(&z, 1, "Mars/Base", "", "tomorrow 9am", None), Pick::Bad("I don't have that time zone's rules yet; try again in a minute (or give the time with its offset, or as in 20m)".into()));
     assert_eq!(plan(&z, 1, "Mars/Base", "", "in 5m", None), Pick::Plan { cron: String::new(), once: 301, tz: "Mars/Base".into() });
 }
+
+#[tokio::test] async fn session_asks_the_chat_thread_and_the_default_tab() {
+    // U.Bots.chat.of and BU.tab.default for a view whose target is a bot
+    let (hub, bots, _r) = start("api", "").await;
+    let (a, u) = (bot(&hub, "aa").await, bot(&hub, "uu").await);
+    let th = bots.world().await.bot(&a).unwrap().thread.clone();
+    assert_eq!(chat_thread(&hub, &a).await, Some(th)); assert_eq!(chat_thread(&hub, "nope").await, None);
+    assert_eq!(default_tab(&hub, &a, false).await, "chat"); assert_eq!(default_tab(&hub, &u, false).await, "chat");
+    hub.commit(&json!({"$":"UberSet","bot":u,"uid":"u1-x","at":5})).await.unwrap();
+    assert_eq!(default_tab(&hub, &u, false).await, "status", "a client without the Mailroom opens the uberbot on its Status");
+    assert_eq!(default_tab(&hub, &u, true).await, "chat"); assert_eq!(default_tab(&hub, &a, false).await, "chat");
+    let uth = bots.world().await.bot(&u).unwrap().thread.clone(); assert_eq!(chat_thread(&hub, &u).await, Some(uth));
+}

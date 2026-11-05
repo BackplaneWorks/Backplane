@@ -70,6 +70,7 @@ impl Bots {
         let w = tokio::task::spawn_blocking(move || { let mut w = World::default(); if let Err(e) = w.sync(&store) { eprintln!("bots: reading the log: {e:#}") } w }).await.unwrap_or_default();
         let b = Arc::new(Bots { hub: hub.clone(), world: Mutex::new(w), inbox });
         hub.register_rpc(Arc::new(Rpc(b.clone())));
+        super::api::register(&hub, &b);
         b
     }
     /// The world caught up with the log; the guard is the lock a request holds from decision to commit.
