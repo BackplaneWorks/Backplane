@@ -55,8 +55,8 @@ pub fn start(hub: &Arc<Hub>, host: &str, port: u16) -> Arc<AuthRoutes> { start_w
 pub fn start_with(hub: &Arc<Hub>, host: &str, port: u16, tailnet: bool) -> Arc<AuthRoutes> {
     match open(&hub.cfg.home, host, port) {
         Ok((reg, routes)) => {
-            // HELD: device.register stays unregistered until the wire layer blanks DeviceRegistered's token for clients
-            // (laws device_token_never_sent, device_drop_never_sent): `hub.register_rpc(Arc::new(super::devices::Devices))`.
+            // (the wire blanks DeviceRegistered/DeviceDropped for clients: Hub::wire_item, laws device_token_never_sent/device_drop_never_sent)
+            hub.register_rpc(Arc::new(super::devices::Devices));
             let table = super::peers::PeerTable::new();
             let peering = Arc::new(super::peering::Peering::new(hub.cfg.home.clone(), reg.clone(), table.clone(), routes.clone(), tailnet, host, port));
             hub.register_http(Arc::new(super::peerhttp::PeerRoutes(peering.clone())));
