@@ -3,6 +3,8 @@
 pub mod dir;
 pub mod fm;
 pub mod serve;
+#[path = "../kicad/mod.rs"]
+pub mod kicad;
 
 use crate::{api::{Caller, Fut, HttpHandler, HttpReply, RpcHandler}, auth::Req, hub::Hub};
 use serde_json::{json, Value};
@@ -11,6 +13,7 @@ use std::{path::PathBuf, sync::Arc};
 pub fn start(hub: Arc<Hub>) {
     hub.register_http(Arc::new(Img));
     hub.register_rpc(Arc::new(Files));
+    kicad::start(&hub);
 }
 
 /// Hub.files.of: the folder a thread's Files tab reads (its worktree, else its project's root); a project

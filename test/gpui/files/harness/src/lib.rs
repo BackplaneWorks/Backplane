@@ -6,3 +6,7 @@ pub mod files {
   #[path = "../../../../../../native/host/src/files/dir.rs"] pub mod dir;
   #[path = "../../../../../../native/host/src/files/serve.rs"] pub mod serve;
 }
+pub mod kicad {
+  #[path = "../../../../../../native/host/src/kicad/plot.rs"] pub mod plot;
+  #[path = "../../../../../../native/host/src/kicad/project.rs"] pub mod project;
+}
