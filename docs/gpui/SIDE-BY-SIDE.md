@@ -6,14 +6,12 @@ coordinator confirms. `BACKPLANE_COPY=1` stays as it is (tests, rehearsals, stan
 
 ## Blockers before any design is OK
 
-1. **The hub must open a real-size log, and today it cannot.** Measured (synthetic log of the real event count, 1,691,621 events, 1.09 GB; the real
-   copy is 1.48 GB; hub = `hub/prov`, helper = `bp-policy-bp`, scope `MemoryMax=3700M`, swap 0): the policy helper's RSS grows linearly, about
-   100 MB/s (0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5 GB at 5 s steps) from the first second, while the hub stays at 66 MB; the kernel OOM-killer ended the scope at
-   37 s (journal: `oom-kill`, 3.6 GB peak), and the hub exited with no error line in `hub.log`. The helper had not finished folding when it hit the cap, so
-   its full need is above 3.7 GB (an earlier uncapped run reached 7.5 GB). The first run on the real copy ended at 28 s with a 1.6 GB scope peak and **no** OOM
-   line in the journal, so its end was something else, still unexplained; it is not reproduced by the synthetic log. Two things for core/slim before any
-   design passes: the helper's whole-log fold has to fit (page it, trim it, or fold only a window), and the hub must say why when its helper dies
-   (today it exits silently). Raw: `build/gpui/results/switchover/` (`diag28.log`, `logs/*/rss.tsv`).
+1. **No helper: the hub must open a real-size log without it.** The Bend policy helper is going (bend's lane); `--policy-bin` is still in `main.rs` on `gpui`
+   `5bbdb7b3e9`, so the fit is unmeasured for the new hub. What was measured with the helper (synthetic log of the real event count, 1,691,621 events, 1.09 GB; hub
+   `hub/prov`, helper `bp-policy-bp`, `MemoryMax=3700M`, swap 0): the helper's RSS grew about 100 MB/s while the hub stayed at 66 MB, and the kernel OOM-killed the scope at
+   37 s (`oom-kill`, 3.6 GB peak). That problem goes away with the helper. What replaces it is the memory bar on hub RSS alone: startup under 1 GB, at rest under 500 MB,
+   measured on a log of the real shape (`test/gpui/switch/gen_big.py`, 12,446 threads, 186.5k setting keys) by `switch.sh selftest side` once a helper-free hub exists.
+   Also open for core: the hub must say why when a child it depends on dies (it exited with no error line). Raw: `build/gpui/results/switchover/`.
 2. **The unexplained 28 s stop on the real log.** The first run on the real copy ended after 28 s with a 1.6 GB scope peak and no out-of-memory line in the
    journal; the synthetic log does not reproduce it (it reproduces an OOM kill at 37 s instead). The real log has something the synthetic one lacks, or the
    hub/helper fails on it: not understood, so a real run cannot be promised to open.
@@ -129,7 +127,7 @@ No pending, unverified or not-held row may exist at the first real run. Rows tha
 ## What the person sees (client lane)
 
 - A strip under the title with the text above ("a copy of your data; agents you start run in your real folders; their file changes are real and
-  not undone by going back; nothing else runs by itself"), from `sideBySide` in `/hello` and the view info.
+  not undone by going back; nothing else runs by itself"), from `sideBySide` in `/hello` and the view info. **Not built yet:** the hub does not send `sideBySide` and GPUI has no strip (asked of parity-edge and screens, 2026-11-05); until both land the person has only the words the launcher prints at start. Required before the first real run.
 - A refused action shows the hub's one-line reason in the usual error row, never a silent no-op.
 - An approval for each tool an agent wants, in GPUI's asks.
 
@@ -150,7 +148,7 @@ No pending, unverified or not-held row may exist at the first real run. Rows tha
 ## Owners
 
 core: `Kind::PersonTurn`, `copy::person_turn_allowed()`, the flag refusal without `BACKPLANE_COPY=1`, the named-ticker list and its test,
-`sideBySide` in `/hello`. agents: the `turn.start` checks 1-6 and the delivery rule, `--strict-mcp-config`, project-only settings, no real start from any other path, forced approvals, fresh session, strict MCP/settings,
+`sideBySide` in `/hello` (not built yet; parity-edge). agents: the `turn.start` checks 1-6 and the delivery rule, `--strict-mcp-config`, project-only settings, no real start from any other path, forced approvals, fresh session, strict MCP/settings,
 `work_*` refusals. bots: the three gates. state: verify and test the policy outs. files: git, non-git writes, history. settings: `ResumeTicker`,
 accounts refresh. switchover: the scripts (fake HOME for the hub, `BACKPLANE_PERSON_HOME`, `BACKPLANE_LIVE_LOG`, the copy cut, idle-growth check,
 logs kept), the diagnosis of the 28 s exit. reviewer: OK this document and each range.
