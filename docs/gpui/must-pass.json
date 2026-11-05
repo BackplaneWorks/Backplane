@@ -1,5 +1,5 @@
 {
- "note": "Each item needs a test and an interaction or visual check against the web, run by mechanics, reviewed by the reviewer thread, before it counts as pass. Status per client: open, fail or pass.",
+ "note": "Each item needs a test and an interaction or visual check against the web, run by mechanics, reviewed by the reviewer thread, before it counts as pass. Status per client: open, fail or pass. iOS composer simulator results count only once scripts/gpui/ios-composer-check.py asserts them; a pass that was only logged stays open.",
  "items": [
   {
    "item": "Paste a clipboard image into the composer",
