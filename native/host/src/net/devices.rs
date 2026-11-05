@@ -1,7 +1,7 @@
 //! `device.register` / `device.drop` (core/hub.bend `Device.*`): a phone registers the push token it holds for
 //! alerts, Live Activities and activity starts; the events carry the token, and no client ever gets one (the wire
-//! form blanks it: laws `device_token_never_sent`, `device_drop_never_sent`). NOT REGISTERED YET: `Hub::wire_item` still
-//! sends DeviceRegistered with its token to every client; register this handler (start.rs) once the wire blanks it. Pure
+//! form blanks it, `Hub::wire_item`: laws `device_token_never_sent`, `device_drop_never_sent`; any line a net route gives a
+//! client goes through it too). Pure
 //! rules here; the handler commits the event the Bend hub commits.
 use crate::{api::{Caller, Fut, RpcHandler}, hub::Hub};
 use serde_json::{json, Value};
