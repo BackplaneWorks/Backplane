@@ -96,3 +96,11 @@ fn text(body: &Value) -> String { body["$content"][0]["text"].as_str().unwrap().
     for i in 0..MAX_OWNERS { assert!(b.set_drive(&format!("o{i}"), "teach").await) }
     assert!(!b.set_drive("one-more", "teach").await); assert!(b.set_drive("o0", "takeover").await); assert!(b.set_drive("o1", "").await); assert!(b.set_drive("one-more", "teach").await);
 }
+
+#[tokio::test] async fn open_and_navigate_bring_the_browser_tab_forward_and_other_calls_do_not() {
+    let (hub, _d) = hub_with_helper("view").await; let mut rx = hub.attach(1);
+    let views = |rx: &mut tokio::sync::mpsc::UnboundedReceiver<Out>| { let mut n = vec![]; while let Ok(Out::Value(v)) = rx.try_recv() { if v["t"] == "view" { n.push(v) } } n };
+    preview(&hub, "t1", "preview_open", &json!({"url":"example.com"})).await; preview(&hub, "t1", "preview_navigate", &json!({"url":"example.org"})).await;
+    let v = views(&mut rx); assert_eq!(v.len(), 2); assert_eq!(v[0], json!({"t":"view","thread":"t1","kind":"browser","path":""}));
+    preview(&hub, "t1", "preview_snapshot", &json!({})).await; preview(&hub, "t1", "preview_click", &json!({"x":1,"y":1})).await; assert!(views(&mut rx).is_empty());
+}
