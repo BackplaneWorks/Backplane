@@ -4,6 +4,7 @@
 //! Pure of the hub, so it is tested here.
 use super::autosettle;
 use super::json::gnat;
+use super::summary;
 use super::turnend;
 use super::watchdog;
 use crate::state::State;
@@ -30,7 +31,7 @@ pub fn lean_value(k: &str, v: &str) -> String {
 }
 
 /// What `Core::derive` makes of a batch, in log order (see there)
-pub struct Derived { pub core: Vec<Value>, pub end: Vec<Value>, pub marks: Vec<Value>, pub after: Vec<Value> }
+pub struct Derived { pub core: Vec<Value>, pub end: Vec<Value>, pub marks: Vec<Value>, pub after: Vec<Value>, pub asks: Vec<(String, String)> }
 pub struct Core { pub st: State }
 impl Core {
     pub fn new() -> Core { let mut st = State::new(); st.lean = true; Core { st } }
@@ -67,7 +68,9 @@ impl Core {
         let told = turnend::told_marks(&ctx, &all);
         for x in asks.iter().chain(&told).chain(&quiet).chain(&reopen) { self.st.apply(x); }
         let after = live.into_iter().chain(asks).chain(told).chain(quiet).chain(meta).chain(reopen).collect();
-        Derived { core, end, marks, after }
+        // Sum.out: a thread whose end stamped its summary clock is asked for, over the state after the whole step
+        let asks = summary::asked(&end).into_iter().map(|id| { let input = summary::thread_input_of(&self.st, &id); (id, input) }).collect();
+        Derived { core, end, marks, after, asks }
     }
     pub fn tick(&self, now_s: u64) -> Vec<Value> { let mut v = autosettle::changes(&self.st, now_s); v.extend(autosettle::tick_post(&self.st, now_s)); v.extend(turnend::told_prune(&self.st, now_s)); v.extend(turnend::input_prune(&self.st, now_s)); v }
 }
@@ -112,14 +115,25 @@ impl Policy {
     pub fn take_poisoned(&self) -> bool { self.poisoned.swap(false, Ordering::SeqCst) }
     /// The batch about to be written: the batch plus what the policies derive from it. While the log is being folded the batch is
     /// remembered (and returned as it came); `finish_boot` derives for it afterwards.
-    pub fn before_commit(&self, first_seq: u64, mut events: Vec<Value>) -> Vec<Value> {
+    pub fn before_commit(&self, first_seq: u64, events: Vec<Value>) -> Vec<Value> { self.before_commit_asks(first_seq, events).0 }
+    /// `before_commit`, and the summaries to ask the text model for once the batch is written: (thread, the writer's input)
+    pub fn before_commit_asks(&self, first_seq: u64, mut events: Vec<Value>) -> (Vec<Value>, Vec<(String, String)>) {
         let mut g = self.lock();
-        if let Some(buf) = g.booting.as_mut() { buf.push((first_seq, events.clone())); turnend::strip_marks(&mut events); return events }
+        if let Some(buf) = g.booting.as_mut() { buf.push((first_seq, events.clone())); turnend::strip_marks(&mut events); return (events, vec![]) }
         let d = g.core.derive(&events);
         let mut out: Vec<Value> = d.core;
         out.extend(d.end); out.extend(d.marks); out.extend(d.after);
         turnend::strip_marks(&mut out);
-        out
+        (out, d.asks)
+    }
+    /// Sum.got: the writer's answer for a thread (`kind` "thread") or project: the events to commit and, for a thread whose project is due, the
+    /// project's summary to ask for next (project, input). Judged against the state now.
+    pub fn summary_done(&self, kind: &str, id: &str, text: &str, now_s: u64) -> (Vec<Value>, Option<(String, String)>) {
+        let mut g = self.lock();
+        if g.booting.is_some() { return (vec![], None) }
+        let (ev, next) = if kind == "project" { (summary::project_done(now_s, id, text), None) } else { summary::thread_done(&g.core.st, now_s, id, text) };
+        for e in &ev { g.core.st.apply(e); }
+        (ev, next.map(|n| (n.project, n.input)))
     }
     /// A batch returned by `before_commit` could not be written. The copy now holds marks the log lacks: fold the log again. True when the
     /// caller must start that fold (`begin_resync` was needed).
