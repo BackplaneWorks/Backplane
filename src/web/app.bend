@@ -24,6 +24,7 @@ import ./workspace.bend as WS
 import ./phone.bend as PHN
 import ../core/reflow.bend as RF
 import ../core/bub-move.bend as HOP
+import ../core/slash.bend as SL
 
 # The same pure illustrative thermal planner can be called by every client.
 def reflow_defaults() -> String:
@@ -381,6 +382,18 @@ def composer(u: U.Ui) -> D.Node:
 
 def asks(+u: U.Ui) -> D.Node:
   V.View.asks.u(U.Lang.loc(u), u)
+
+def Popup.slash.go(cs: List<&2, SL.Cmd>) -> List<&2, J.Json>:
+  match cs:
+    case Nil{}:
+      Nil{}
+    case SL.Cmd{n, a} <> t:
+      J.Json.obj([J.KV{"value", J.Str{n}}, J.KV{"desc", J.Str{a}}]) <> Popup.slash.go(t)
+
+# the slash commands for what follows a `/`, as JSON text, for the composer's
+# own popup (composer-popup.js's slashRows): the table stays in slash.bend
+def slash_rows(+claude: String, +q: String) -> String:
+  J.Json.show(J.Json.arr(Popup.slash.go(SL.Slash.cmds(String.eq(claude, "1"), q))))
 
 # the secret box's Save (host.js's secretSave): "<name>\u001f<purpose>\u001f
 # <thread>\u001f<value>" to {"rpc": the secret.set request} or {"error"}
