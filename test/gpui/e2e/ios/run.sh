@@ -21,7 +21,7 @@ xcodebuild build-for-testing -quiet -project "$HERE/E2E.xcodeproj" -scheme Backp
   -destination "platform=iOS Simulator,id=$SIM_UDID" -derivedDataPath "$DD" CODE_SIGNING_ALLOWED=NO > "$OUT/build.log" 2>&1 \
   || { tail -30 "$OUT/build.log"; echo "build-for-testing failed"; exit 1; }
 IDS="pair projects-threads send-image stream switch-fast popups bots-rooms viewers downloads settings reconnect long-session"
-[ "$J" = all ] || IDS=$J
+[ "$J" = all ] || IDS=$*
 for id in $IDS; do
   fn=$(echo "$id" | tr - _)
   rm -rf "$OUT/$id.json" "$OUT/$id.mp4" "$OUT/$id.xcresult"

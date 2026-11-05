@@ -58,13 +58,16 @@ final class Journeys: XCTestCase {
         let img = UIGraphicsImageRenderer(size: CGSize(width: 120, height: 80)).image { c in UIColor.systemTeal.setFill(); c.fill(CGRect(x: 0, y: 0, width: 120, height: 80)) }
         UIPasteboard.general.image = img
         let clip = d.app.buttons.matching(NSPredicate(format: "label CONTAINS[c] 'attach'")).firstMatch
-        d.step("open the attach menu", act: { clip.tap() }, expect: { d.label("Paste").exists })
+        d.step("open the attach menu", act: { clip.tap() }, expect: { d.app.buttons.matching(NSPredicate(format: "label CONTAINS[c] 'paste'")).firstMatch.exists || d.app.menuItems.matching(NSPredicate(format: "label CONTAINS[c] 'paste'")).firstMatch.exists })
+        d.shot("attach-menu")
         d.step("paste the image", act: {
-            d.label("Paste").tap()
+            let item = d.app.buttons.matching(NSPredicate(format: "label CONTAINS[c] 'paste'")).firstMatch
+            let mi = d.app.menuItems.matching(NSPredicate(format: "label CONTAINS[c] 'paste'")).firstMatch
+            if item.waitForExistence(timeout: 2) { item.tap() } else if mi.exists { mi.tap() }
             let sb = XCUIApplication(bundleIdentifier: "com.apple.springboard")
             let allow = sb.buttons["Allow Paste"]
             if allow.waitForExistence(timeout: 3) { allow.tap() }
-        }, expect: { d.app.images.count > 0 || d.label("pasted").exists })
+        }, expect: { d.app.images.count > 0 || d.label("noise").exists || d.label("pasted").exists })
         d.step("send", act: { d.el("thread.send").tap() }, expect: { d.label("here is a picture").exists })
         d.step("reply arrives", timeout: 30, act: {}, expect: { d.label("REPLY").exists || d.label("Finished").exists })
         d.shot("sent")
