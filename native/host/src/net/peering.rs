@@ -54,6 +54,8 @@ impl Peering {
     pub fn with_clock(mut self, now: Box<dyn Fn() -> u64 + Send + Sync>) -> Peering { self.now = now; self }
     /// The listener's own authorities (Auth.owner.hosts): from its tailnet address and Self.DNSName only.
     pub fn set_own_hosts(&self, ip: &str, dns: &str) { *self.own_hosts.lock().unwrap() = owner::owner_hosts(ip, dns, &self.port.to_string()) }
+    #[cfg(test)]
+    pub fn own_hosts_for_test(&self) -> Vec<String> { self.own_hosts.lock().unwrap().clone() }
     fn token(&self) -> String { std::fs::read_to_string(self.home.join("token")).unwrap_or_default().trim().to_string() }
     fn credential(&self, r: &PReq) -> bool {
         let secret = bearer_or_cookie_or_query(r);
