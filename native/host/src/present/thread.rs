@@ -149,9 +149,11 @@ fn plain_thread(st: &State, id: &str) -> bool {
     if !t.worktree.is_empty() || t.worktree_mode || st.snooze_until.get(id).copied().unwrap_or(0) != 0 { return false }
     if st.tasks.values().any(|(p, c, _, _)| p == id || c == id) || st.asks.values().any(|(th, open)| th == id && *open) { return false }
     if st.queue.get(id).map_or(false, |q| !q.is_empty()) { return false }
-    let own = [format!("effort:{id}"), format!("wait.{id}"), format!("stop.{id}"), format!("fail.{id}")];
-    if own.iter().any(|k| st.settings.contains_key(k)) { return false }
-    !["files.max.mb", "person.tz", "tz.machine", "think", "permissions.default"].iter().any(|k| st.settings.contains_key(*k))
+    let gate = [format!("effort:{id}"), format!("wait.{id}"), format!("stop.{id}"), format!("fail.{id}"), "files.max.mb".into(), "person.tz".into(), "tz.machine".into(), "think".into(), "permissions.default".into()];
+    // A lean State drops the settings it does not keep: there, "the key is absent" proves nothing, so a gate key it may have dropped means refuse
+    // (the state lane keeps these keys bounded; until it does this answers None on a lean State rather than a false supported case).
+    if st.lean && gate.iter().any(|k| !crate::state::fam::policy::lean_keeps(k)) { return false }
+    !gate.iter().any(|k| st.settings.contains_key(k))
 }
 
 /// shown.thread for a plain idle thread, from the page rows. `hub` is the request's hub key (the id is `<hub>|<thread>`), `draft` the composer's text.
