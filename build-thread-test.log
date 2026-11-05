@@ -1,7 +1,7 @@
 cannot delete non-empty directory: .target/debug
 cannot delete non-empty directory: .target/debug
 cannot delete non-empty directory: .target
-provisional: commit 27fcc30846, dirty tree possible, host backplane
+provisional: commit 4a54d59d09, dirty tree possible, host backplane
 test present::thread::tests::civil_dates ... FAILED
 test present::thread::tests::labels_name_three_kinds_and_the_live_one_says_what_runs ... ok
 test present::thread::tests::the_entries_of_a_plain_page_are_the_helpers ... ok
@@ -9,10 +9,10 @@ test present::thread::tests::the_entries_of_a_plain_page_are_the_helpers ... ok
 failures:
 
 --
-thread 'present::thread::tests::civil_dates' (739054) panicked at src/present/thread.rs:141:68:
+thread 'present::thread::tests::civil_dates' (769283) panicked at src/present/thread.rs:141:110:
 assertion `left == right` failed
-  left: (2023, 11, 15)
- right: (2023, 11, 14)
+  left: "Tue 14 Nov 23:00"
+ right: "Tue 14 Nov 22:51"
 note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
 
 

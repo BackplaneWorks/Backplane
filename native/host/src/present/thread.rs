@@ -138,7 +138,7 @@ mod tests {
         assert_eq!(got.len(), want.len());
         for (g, w) in got.iter().zip(want) { assert_eq!(g, w); }
     }
-    #[test] fn civil_dates() { assert_eq!(civil(0), (1970, 1, 1)); assert_eq!(civil(19675), (2023, 11, 14)); assert_eq!(clock(1700002806, 0), "Tue 14 Nov 22:51"); }
+    #[test] fn civil_dates() { assert_eq!(civil(0), (1970, 1, 1)); assert_eq!(civil(19675), (2023, 11, 14)); assert_eq!(clock(1700002806, 0), "Tue 14 Nov 23:00"); }
     #[test] fn labels_name_three_kinds_and_the_live_one_says_what_runs() {
         let t = |k: &str, x: &str| Ent { id: "a".into(), msg: false, role: "tool".into(), akind: k.into(), text: x.into(), at: 1 };
         let run = [t("Bash", "ls"), t("Read", "f"), t("Edit", "g"), t("Grep", "h"), t("Bash", "i")];
