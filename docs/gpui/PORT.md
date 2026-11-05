@@ -123,7 +123,7 @@ port waits for the person's decision.
 
 <!-- law-map: generated below by scripts/gpui/law-map.py -->
 
-Laws in LAWS.bend: 3248. bend 1287, rust 0, unported 1350, client 483, window 128. Data file: `scripts/gpui/law-map.tsv`; ported sources: none yet. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
+Laws in LAWS.bend: 3248. bend 1287, rust 0, unported 1350, client 483, window 128, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: none yet. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
 
 | law | status | seed | file | note |
 |---|---|---|---|---|
@@ -3375,3 +3375,14 @@ Laws in LAWS.bend: 3248. bend 1287, rust 0, unported 1350, client 483, window 12
 | `fm_zip_skips_credentials` | bend | seed K +-10% | `src/core/fm.bend` |  |
 | `fm_zip_skips_vault` | bend | seed K +-10% | `src/core/fm.bend` |  |
 | `fm_zip_credentials_ignore_case` | bend | seed K +-10% | `src/core/fm.bend` |  |
+
+### Retired laws (web client only)
+
+Decision: native apps only, no web page. A law is retired only when every file it names is web-only (a src/web/*.bend file outside the phone bundle's imports); a law that also names a native-shared file is never retired, and when unsure it stays `client`.
+
+None seeded.
+
+Laws that name a web-only file but also native-shared code, so kept (review by hand):
+
+- `stop_command_only_while_running` names `src/web/workspace.bend`
+- `terminal_empty_input_keeps_view` names `src/web/workspace.bend`
