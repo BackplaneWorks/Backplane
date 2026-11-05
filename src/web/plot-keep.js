@@ -4,7 +4,8 @@
 // its way; plot2d.js then puts the hub's in its place (identical chunks are
 // kept as they are, so nothing fades or moves). Derived data only: the wire
 // chunks as the hub sent them, bounded (8 plots, 6 MB each, 24 MB in all, the
-// least recently drawn out), and a store that cannot open is simply none.
+// least recently drawn out: plot2d.js keeps the index and says which go), and
+// a store that cannot open is simply none.
 const DB = "bp-plots-v1", STORE = "plots", MAX = 8, ONE = 6 << 20, ALL = 24 << 20;
 let opened = null;
 function db() {
@@ -35,20 +36,29 @@ export async function loadAll() {
   return out;
 }
 
-// keep one (too big: not kept, and an older one of that key goes); then
-// the least recently drawn past 8 plots or 24 MB go
+// keep one (too big: not kept, and an older one of that key goes)
 export async function save(key, entry) {
   const d = typeof indexedDB === "undefined" ? null : await db();
   if (!d) return;
   try {
-    const big = !(entry.bytes <= ONE);
-    await done(big ? d.transaction(STORE, "readwrite").objectStore(STORE).delete(key) : d.transaction(STORE, "readwrite").objectStore(STORE).put(entry, key));
-    if (big) return;
-    const all = await loadAll();
-    const rows = [...all].map(([k, v]) => [k, v.at || 0, v.bytes || 0]).sort((a, b) => b[1] - a[1]);
-    let n = 0, bytes = 0;
-    const gone = [];
-    for (const [k, , b] of rows) { n += 1;bytes += b;if (n > MAX || bytes > ALL) gone.push(k); }
-    if (gone.length) { const st = d.transaction(STORE, "readwrite").objectStore(STORE);for (const k of gone) st.delete(k); }
+    const st = d.transaction(STORE, "readwrite").objectStore(STORE);
+    await done(entry.bytes <= ONE ? st.put(entry, key) : st.delete(key));
   } catch {}
+}
+
+// these go (plot2d.js's choice: past MAX plots or ALL bytes, the least
+// recently drawn first)
+export async function drop(keys) {
+  const d = typeof indexedDB === "undefined" || !keys.length ? null : await db();
+  if (!d) return;
+  try { const st = d.transaction(STORE, "readwrite").objectStore(STORE);for (const k of keys) st.delete(k); } catch {}
+}
+
+// which of these entries (key -> {at, bytes}) go, newest kept first
+export function over(entries) {
+  const rows = [...entries].map(([k, v]) => [k, v.at || 0, v.bytes || 0]).sort((a, b) => b[1] - a[1]);
+  let n = 0, bytes = 0;
+  const gone = [];
+  for (const [k, , b] of rows) { n += 1;bytes += b;if (n > MAX || bytes > ALL) gone.push(k); }
+  return gone;
 }

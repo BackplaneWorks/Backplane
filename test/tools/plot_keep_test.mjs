@@ -2,7 +2,7 @@
 // in-memory IndexedDB: a plot comes back by its exact key; one too big is not
 // kept and drops the older one of its key; a source gone (bytes Infinity, as
 // plot2d.js saves on the hub's "none") is dropped; past 8 plots or 24 MB the
-// least recently drawn go; no IndexedDB at all is simply nothing kept.
+// least recently drawn go (Keep.over, plot2d.js drops them); no IndexedDB at all is simply nothing kept.
 import assert from 'node:assert/strict';
 
 function fakeIDB() {
@@ -34,13 +34,14 @@ assert.equal(all.has('0|/p/a.kicad_pcb'), false, 'one too big is not kept, and t
 await Keep.save('0|/p/b.kicad_pcb', entry(3));
 await Keep.save('0|/p/b.kicad_pcb', { bytes: Infinity });
 assert.equal((await Keep.loadAll()).has('0|/p/b.kicad_pcb'), false, 'a source the hub says is gone is dropped');
-for (let i = 0; i < 10; i++) await Keep.save('0|/p/n' + i, entry(10 + i));
-all = await Keep.loadAll();
-assert.equal(all.size, 8, '8 plots at most');
-assert.ok(!all.has('0|/p/n0') && !all.has('0|/p/n1') && all.has('0|/p/n9'), 'the least recently drawn go first');
-for (let i = 0; i < 6; i++) await Keep.save('0|/p/big' + i, entry(100 + i, 5 << 20));
-all = await Keep.loadAll();
-assert.ok([...all.values()].reduce((n, v) => n + v.bytes, 0) <= 24 << 20, '24 MB in all at most');
-assert.ok(all.has('0|/p/big5'), 'the newest stays');
+const index = new Map();
+for (let i = 0; i < 10; i++) index.set('0|/p/n' + i, { at: 10 + i, bytes: 100 });
+assert.deepEqual(Keep.over(index).sort(), ['0|/p/n0', '0|/p/n1'], '8 plots at most, the least recently drawn go first');
+const bigs = new Map();
+for (let i = 0; i < 6; i++) bigs.set('0|/p/big' + i, { at: 100 + i, bytes: 5 << 20 });
+assert.deepEqual(Keep.over(bigs).sort(), ['0|/p/big0', '0|/p/big1'], '24 MB in all at most, the newest stay');
+await Keep.save('0|/p/c.kicad_pcb', entry(4));
+await Keep.drop(['0|/p/c.kicad_pcb']);
+assert.equal((await Keep.loadAll()).has('0|/p/c.kicad_pcb'), false, 'what plot2d.js lets go is gone');
 delete globalThis.indexedDB;
 console.log('plot_keep_test: ok');
