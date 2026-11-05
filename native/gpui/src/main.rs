@@ -15,7 +15,7 @@ pub struct Backplane {
     drafts:HashMap<String,String>, popup:bool, started:Instant, usable:bool,
     first_frame:bool, script_done:bool, steps:VecDeque<Step>, pending:Option<Pending>, seq:u64, want_focus:bool, script_total:usize,
 }
-fn pager_row(cx:&mut Context<Backplane>,id:String,pager:&Value,c:&dyn Fn(&str)->Rgba)->Option<AnyElement> {
+fn pager_row(cx:&mut Context<Backplane>,id:String,pager:&Value,light:bool)->Option<AnyElement> {let c=|name:&str|theme::color(light,name);
     let mut row=div().flex().gap_2().px_3().py_1().text_size(px(11.));let mut any=false;
     for (name,key) in [("Newer","previous"),("Older","next")] {
         let control=&pager[key];
@@ -100,7 +100,7 @@ impl Render for Backplane {
             }
         }
         for page in self.data["sidebarPages"].as_array().cloned().unwrap_or_default() {
-            for key in ["projects","active","legacy"] {if let Some(row)=pager_row(cx,format!("pg-{key}"),&page[key],&c){rows.push(row);}}
+            for key in ["projects","active","legacy"] {if let Some(row)=pager_row(cx,format!("pg-{key}"),&page[key],light){rows.push(row);}}
         }
         let thread=&self.data["thread"];let mut messages=Vec::new();
         for entry in thread["entries"].as_array().into_iter().flatten() {
