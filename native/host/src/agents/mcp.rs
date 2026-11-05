@@ -11,6 +11,15 @@ use sha2::{Digest, Sha256};
 use std::{sync::{Arc, Weak}, time::Duration};
 use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::{TcpListener, TcpStream}, sync::{oneshot, Semaphore}};
 
+/// A set of MCP tools another module serves (the bots' tools): listed per thread, called by name. Register it with `Agents::add_tools` (agents::handle()).
+/// `list(thread)` is what that thread's agent is shown in addition to Backplane's own tools (Bots.list); `owns(name)` claims a name before the "unknown tool" arm
+/// (after Backplane's own and the term tools); `call` answers with (ok, body): a String body is raw text, {"$content":[..]} a content array, anything else JSON text.
+/// The stale-process gate, the secret masks (shaped()) and the ride block stay the agents module's.
+pub trait ToolSet: Send + Sync {
+    fn list(&self, thread: &str) -> Vec<Value>;
+    fn owns(&self, name: &str) -> bool;
+    fn call<'a>(&'a self, thread: &'a str, name: &'a str, a: &'a Value) -> crate::api::Fut<'a, (bool, Value)>;
+}
 pub const TOOLS_JSON: &str = include_str!("../../../../test/gpui/agents/fixtures/mcp-tools.json");
 pub const IMPLEMENTED: &[&str] = &["orchestrator_capabilities", "review_comment", "review_comments", "thread_launch", "delegate_task", "task_status", "task_cancel", "thread_list", "thread_read", "thread_send", "thread_update", "thread_wait", "thread_interrupt", "viewer_show", "permission_prompt", "kicad_ipc", "kicad_ipc_status", "terminal_open", "terminal_read", "terminal_send", "terminal_close", "preview_open", "preview_navigate", "preview_snapshot", "preview_click", "preview_type", "preview_press", "preview_scroll", "preview_evaluate", "preview_wait_for", "preview_resize", "preview_status", "secret_request", "secret_list", "secret_run", "settings_inspect", "settings_propose"];
 const MAX_BODY: usize = 4 << 20;
@@ -141,7 +150,7 @@ impl Mcp {
         let ag = self.ag.upgrade()?;
         match sv(&o, "method") {
             "initialize" => { let pv = if sv(&p, "protocolVersion").is_empty() { "2025-06-18" } else { sv(&p, "protocolVersion") }; Some(result(&id, json!({"protocolVersion":pv,"capabilities":{"tools":{}},"serverInfo":{"name":"backplane","version":ag.hub.cfg.version}}))) }
-            "tools/list" => Some(result(&id, json!({"tools":self.tools}))),
+            "tools/list" => { let mut tools = self.tools.clone(); for s in ag.tool_sets() { tools.extend(s.list(thread)) } Some(result(&id, json!({"tools":tools}))) }
             "tools/call" => self.call(&ag, thread, gen, &id, &p, sock).await,
             "ping" => Some(result(&id, json!({}))),
             _ => None, // notifications and anything unknown: no reply (Mcp.method.pos)
@@ -178,6 +187,7 @@ impl Mcp {
             "secret_run" => { let cwd = ag.world().await.cwd(thread); crate::settings::secret::tool_run(thread, &cwd, &a).await }
             n if crate::term::tools::NAMES.contains(&n) => crate::term::tools::call(&ag.hub, thread, n, &a).await.unwrap_or_else(|| fail("unknown tool")),
             "viewer_show" => { ag.hub.push_all(&json!({"t":"view","thread":thread,"path":sv(&a, "path"),"kind":sv(&a, "kind")})); (true, json!({"shown":sv(&a, "path")})) }
+            n if ag.tool_sets().iter().any(|s| s.owns(n)) => { let s = ag.tool_sets().into_iter().find(|s| s.owns(n)).unwrap(); s.call(thread, n, &a).await }
             _ => fail("unknown tool"),
         };
         let mut res = result(id, shaped(ok, &body));
