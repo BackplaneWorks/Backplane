@@ -26,7 +26,7 @@ async fn command(home: &str, pro: &str, cli: &str, mode: &str, flags: &[&str]) -
     let marker = std::path::Path::new(&format!("{base}/.backplane-export")).is_file();
     let mode = if mode == "export" && !kx::may_clear_in(home, &base, marker) { "refuse" } else { mode };
     let mut a = vec!["-c", GUARD, "sh", home, &base, pro, mode, cli]; a.extend_from_slice(flags);
-    within(proc("sh", &a, "/", &[])).await
+    within(super::git::proc_ro("sh", &a, "/", &[])).await
 }
 fn report_at(home: &str, pro: &str) -> Option<J> { std::fs::read(kx::paths(home, pro).report).ok().and_then(|b| bj::parse(&super::kicad::sexpr::decode(&b))) }
 /// KExport.project

@@ -21,7 +21,9 @@ pub const GIT_ENV: [(&str, &str); 12] = [("GIT_CONFIG_COUNT", "5"), ("GIT_CONFIG
 pub struct Ran { pub code: i32, pub out: String }
 
 /// P.Proc.run: `cmd args` in `cwd`, stdin closed, stdout then stderr, code 127 when it cannot start.
-async fn spawn(cmd: &str, args: &[&str], cwd: &str, env: &[(&str, &str)], kill: bool) -> Ran {
+async fn spawn(cmd: &str, args: &[&str], cwd: &str, env: &[(&str, &str)], kill: bool, write: bool) -> Ran {
+    // default-deny on a copy (BACKPLANE_COPY=1): only a call that says it is a read (`read`, `proc_ro`, `run_ro`, `sh_ro`) runs; `proc`, `run`, `run_idx`, `sh` are writes or unknown
+    if let Some(why) = write_refused(crate::copy::on(), write, cmd) { return Ran { code: 126, out: why } }
     // Proc.run.folder: an empty working folder is refused, never the hub's own directory
     if cwd.is_empty() { return Ran { code: 2, out: "No working folder: refusing to use the hub working directory".into() } }
     // a copy of a log runs no network command (copy.rs: curl, gh, ssh, git push/fetch..., also through sh -c)
@@ -35,16 +37,29 @@ async fn spawn(cmd: &str, args: &[&str], cwd: &str, env: &[(&str, &str)], kill: 
 }
 /// A command, left running if the future waiting for it is dropped: a write (commit, push, worktree, checkpoint, export, release) must finish once it has
 /// started, or it can die mid-way and leave `index.lock` or a half-made worktree. For a read a caller wants to time out, use `read`.
-pub async fn proc(cmd: &str, args: &[&str], cwd: &str, env: &[(&str, &str)]) -> Ran { spawn(cmd, args, cwd, env, false).await }
+pub async fn proc(cmd: &str, args: &[&str], cwd: &str, env: &[(&str, &str)]) -> Ran { spawn(cmd, args, cwd, env, false, true).await }
+/// A listed READ (it changes nothing outside the hub's home; it may fill a cache inside it): the only kind of `proc` a copy runs. Not killed on drop.
+pub async fn proc_ro(cmd: &str, args: &[&str], cwd: &str, env: &[(&str, &str)]) -> Ran { spawn(cmd, args, cwd, env, false, false).await }
+/// Copy.write: why a copy refuses `cmd`, None when it may run. A copy writes nothing outside its home, so a command is allowed only when its caller listed it as a read.
+pub fn write_refused(copy: bool, write: bool, cmd: &str) -> Option<String> {
+    if copy && write { Some(format!("backplane: a hub on a copied log (BACKPLANE_COPY=1) writes nothing outside its home and does not run {cmd} here")) } else { None }
+}
 /// A READ, killed when the future waiting for it is dropped: a caller's `tokio::time::timeout` (commands/home.rs wraps `git log` and `gh pr list` in
 /// 1.5 s, as the JS effect's execFile timeout does) must not leave the child running. Only for commands that change nothing.
-pub async fn read(cmd: &str, args: &[&str], cwd: &str, env: &[(&str, &str)]) -> Ran { spawn(cmd, args, cwd, env, true).await }
+pub async fn read(cmd: &str, args: &[&str], cwd: &str, env: &[(&str, &str)]) -> Ran { spawn(cmd, args, cwd, env, true, false).await }
 async fn sh(script: &str, args: &[&str], cwd: &str, env: &[(&str, &str)]) -> Ran {
     let mut a = vec!["-c", script, "sh"]; a.extend(args);
     proc("sh", &a, cwd, env).await
 }
-/// Git.run
+/// A listed read through `sh -c script`.
+pub async fn sh_ro(script: &str, args: &[&str], cwd: &str, env: &[(&str, &str)]) -> Ran {
+    let mut a = vec!["-c", script, "sh"]; a.extend(args);
+    proc_ro("sh", &a, cwd, env).await
+}
+/// Git.run: a write, or unknown (refused on a copy); `run_ro` is the read.
 pub async fn run(cwd: &str, args: &[&str]) -> Ran { sh(&format!("{SAFE}bp_safe; exec git \"$@\""), args, cwd, &[]).await }
+/// Git.run for git that only reads (rev-parse, status, for-each-ref, cat-file, ls-files, a diff between two refs).
+pub async fn run_ro(cwd: &str, args: &[&str]) -> Ran { sh_ro(&format!("{SAFE}bp_safe; exec git \"$@\""), args, cwd, &[]).await }
 /// Git.run.idx: git with a private index file
 pub async fn run_idx(cwd: &str, idx: &str, args: &[&str]) -> Ran {
     // the index file is $0 (Git.run.idx): `-c script idx args..`
@@ -72,9 +87,9 @@ pub fn b64url(s: &str) -> String {
 pub fn checkpoint_ref(thread: &str, n: u64) -> String { format!("refs/backplane/checkpoints/{}/turn/{n}", b64url(thread)) }
 fn checkpoint_prev(thread: &str, n: u64) -> String { if n == 0 { "refs/backplane/none".into() } else { checkpoint_ref(thread, n - 1) } }
 
-pub async fn is_repo(cwd: &str) -> bool { let r = run(cwd, &["rev-parse", "--is-inside-work-tree"]).await; r.code == 0 && r.out.trim() == "true" }
+pub async fn is_repo(cwd: &str) -> bool { let r = run_ro(cwd, &["rev-parse", "--is-inside-work-tree"]).await; r.code == 0 && r.out.trim() == "true" }
 /// Git.status: `git status --porcelain=v1 --branch -uall` text, or "error: ...".
-pub async fn status(cwd: &str) -> String { flat(seq(run(cwd, &["-c", "core.quotepath=false", "status", "--porcelain=v1", "--branch", "-uall"]).await, true)) }
+pub async fn status(cwd: &str) -> String { flat(seq(run_ro(cwd, &["-c", "core.quotepath=false", "status", "--porcelain=v1", "--branch", "-uall"]).await, true)) }
 
 async fn index_seed(cwd: &str, idx: &str) -> Ran { sh(INDEX_SEED, &[idx], cwd, &[]).await }
 /// Git.snapshot: the work tree (tracked, ignored tracked, untracked non-ignored) as a tree id, through the thread's private index.
@@ -99,12 +114,12 @@ pub async fn checkpoint_capture(cwd: &str, thread: &str, n: u64) -> Result<Strin
 }
 /// How many checkpoints a thread has (its next turn number): GitJob.count.
 pub async fn checkpoint_count(cwd: &str, thread: &str) -> u64 {
-    let r = proc("git", &["for-each-ref", "--format=%(refname)", &format!("refs/backplane/checkpoints/{}/turn/", b64url(thread))], cwd, &[]).await;
+    let r = proc_ro("git", &["for-each-ref", "--format=%(refname)", &format!("refs/backplane/checkpoints/{}/turn/", b64url(thread))], cwd, &[]).await;
     if r.code == 0 { r.out.lines().filter(|l| !l.trim().is_empty()).count() as u64 } else { 0 }
 }
 fn diff_args<'a>(a: &'a str, b: &'a str) -> Vec<&'a str> { vec!["-c", "core.quotepath=false", "diff", "--no-color", "--no-ext-diff", "--no-textconv", "--src-prefix=a/", "--dst-prefix=b/", "-M", a, b, "--"] }
 /// Git.run.capped: git through the cap (a file past 64 KB of changes, a diff past 128 KB, more than 150 files, are summarised).
-async fn run_capped(cwd: &str, args: &[&str]) -> Ran { sh(&format!("{SAFE}{DIFF_CAP}"), args, cwd, &[]).await }
+async fn run_capped(cwd: &str, args: &[&str]) -> Ran { sh_ro(&format!("{SAFE}{DIFF_CAP}"), args, cwd, &[]).await }
 /// Git.checkpoint.diff: unified diff from checkpoint a to b ("" when equal).
 pub async fn checkpoint_diff(cwd: &str, thread: &str, a: u64, b: u64) -> String {
     let (ra, rb) = (checkpoint_ref(thread, a), checkpoint_ref(thread, b));
@@ -118,7 +133,7 @@ pub async fn checkpoint_diff_worktree(cwd: &str, thread: &str, n: u64) -> String
 pub async fn diff(cwd: &str, thread: &str, a: &str, b: &str) -> String {
     let an: u64 = a.parse().unwrap_or(0);
     if b == "-1" {
-        let r = run(cwd, &["rev-parse", "--verify", "-q", &checkpoint_ref(thread, an)]).await;
+        let r = run_ro(cwd, &["rev-parse", "--verify", "-q", &checkpoint_ref(thread, an)]).await;
         if r.code == 1 { String::new() } else { checkpoint_diff_worktree(cwd, thread, an).await }
     } else { checkpoint_diff(cwd, thread, an, b.parse().unwrap_or(0)).await }
 }
@@ -140,7 +155,7 @@ pub async fn step_capture(cwd: &str, thread: &str, reg: &str) -> String {
     if !super::threadpath::absolute(cwd) { return String::new() } let r = sh(STEP, &[cwd, &b64url(thread), reg], "/", &[]).await; if r.code == 0 { r.out } else { String::new() } }
 /// Git.refs: what a file may be compared with (git dir, top, then `kind\tlabel\tcommit` lines).
 pub async fn refs(cwd: &str, thread: &str) -> String {
-    if !super::threadpath::absolute(cwd) { return String::new() } let r = sh(REFS, &[cwd, &b64url(thread)], "/", &[]).await; if r.code == 0 { r.out } else { String::new() } }
+    if !super::threadpath::absolute(cwd) { return String::new() } let r = sh_ro(REFS, &[cwd, &b64url(thread)], "/", &[]).await; if r.code == 0 { r.out } else { String::new() } }
 /// Git.show: a file as a commit has it (`git --git-dir G show OBJ`), None when it is not there.
 pub async fn show(gitdir: &str, obj: &str) -> Option<Vec<u8>> {
     let o = crate::proc::tokio_cmd(crate::proc::Kind::Local, "sh").args(["-c", "exec 2>/dev/null; git --git-dir=\"$1\" show \"$2\"", "sh", gitdir, obj]).current_dir("/").stdin(std::process::Stdio::null()).envs(GIT_ENV.iter().copied()).kill_on_drop(true).output().await.ok()?; // a pure read: killed with its future
@@ -294,5 +309,32 @@ mod tests {
         // an untrusted history.git (one a zip could ship) is moved aside, not used
         let z = tmp("zip"); std::fs::write(format!("{z}/s.kicad_sch"), "(s)").unwrap(); std::fs::create_dir_all(format!("{z}/.backplane/history.git")).unwrap();
         let s4 = step_capture(&z, "th", &reg).await; assert!(s4.contains(".backplane/history.git") && std::fs::read_dir(format!("{z}/.backplane")).unwrap().any(|e| e.unwrap().file_name().to_string_lossy().contains("untrusted")), "{s4:?}");
+    }
+    // Copy.write: a copy runs only what a caller listed as a read; everything else is refused, whatever it is
+    #[test] fn a_copy_refuses_every_command_not_listed_as_a_read() {
+        assert!(write_refused(true, true, "touch").is_some()); assert!(write_refused(true, true, "git").unwrap().contains("BACKPLANE_COPY=1"));
+        assert_eq!(write_refused(true, false, "git"), None); assert_eq!(write_refused(false, true, "touch"), None); assert_eq!(write_refused(false, false, "git"), None);
+    }
+    #[test] fn copy_child_probe() {
+        if std::env::var("BP_COPY_PROBE").ok().as_deref() != Some("1") { return }
+        assert!(crate::copy::on());
+        let d = std::env::temp_dir().join(format!("bp-copyprobe-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap(); let cwd = d.to_string_lossy().into_owned();
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        rt.block_on(async {
+            // writes and unknowns: refused with code 126, nothing created
+            for r in [proc("touch", &["w1"], &cwd, &[]).await, proc("sh", &["-c", "touch w2"], &cwd, &[]).await, run(&cwd, &["init", "-q"]).await, run_idx(&cwd, "i", &["add", "-A"]).await,
+                      sh("touch w3", &[], &cwd, &[]).await, checkpoint_capture(&cwd, "t", 0).await.map_or_else(|e| Ran { code: 126, out: e }, |s| Ran { code: 0, out: s }),
+                      step_init(&cwd).await.map_or_else(|e| Ran { code: 126, out: e }, |s| Ran { code: 0, out: s })] { assert_eq!(r.code, 126, "{}", r.out); }
+            assert!(!d.join("w1").exists() && !d.join("w2").exists() && !d.join("w3").exists() && !d.join(".git").exists(), "something was written");
+            // listed reads still run
+            assert_eq!(proc_ro("sh", &["-c", "echo ok"], &cwd, &[]).await.out.trim(), "ok");
+            assert_eq!(read("sh", &["-c", "echo ok"], &cwd, &[]).await.out.trim(), "ok");
+            assert_eq!(run_ro(&cwd, &["--version"]).await.code, 0);
+        });
+    }
+    #[test] fn a_copy_run_writes_nothing_outside_its_home() {
+        let o = std::process::Command::new(std::env::current_exe().unwrap()).args(["files::git::tests::copy_child_probe", "--exact", "--nocapture", "--test-threads=1"])
+            .env("BACKPLANE_COPY", "1").env("BP_COPY_PROBE", "1").env_remove("BACKPLANE_AGENTS").output().unwrap();
+        assert!(o.status.success(), "{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
     }
 }

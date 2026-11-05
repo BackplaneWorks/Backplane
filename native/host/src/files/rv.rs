@@ -8,7 +8,7 @@
 //!   * review.comment needs a thread with a folder (the JS hub logs a comment on any id)
 //!   * a hub on a copied log ticks nothing, releases nothing and runs no project's own checks (core/copy.bend's rule: it acts outside its home nowhere)
 //!   * Not ported: the bundled library overlay (effects/kicad_library.js), which only a build with a baked library payload has.
-use super::git::{self, proc, Ran};
+use super::git::{self, proc, proc_ro, Ran};
 use super::kicad::bj::{self, J};
 use super::kicad::{bom, cad, checks, ipc, plotread, project, release, review};
 use super::{fm, threadpath};
@@ -37,11 +37,17 @@ fn cut(s: &str, n: usize) -> String { bj::trim(&bj::take(s, n)).to_string() }
 fn text_of(path: &str) -> String { std::fs::read(path).map(|b| super::kicad::sexpr::decode(&b)).unwrap_or_default() }
 fn err(why: impl Into<String>) -> J { J::obj(&[("err", J::Str(why.into()))]) }
 async fn sh(script: &str, args: &[&str], cwd: &str) -> Ran { let mut a = vec!["-c", script, "sh"]; a.extend(args); proc("sh", &a, cwd, &[]).await }
+/// A listed read (or a write only into a scratch folder of its own): the only kind of script a copy runs here. `sh` is a write or unknown, refused on a copy.
+async fn sh_ro(script: &str, args: &[&str], cwd: &str) -> Ran { let mut a = vec!["-c", script, "sh"]; a.extend(args); proc_ro("sh", &a, cwd, &[]).await }
 /// KiCad.run
-async fn kicad(argv: &[String]) -> Ran {
+/// kicad-cli for a CHECK: its report goes to the check's own scratch folder. A write (release exports) uses `kicad`, refused on a copy.
+async fn kicad_check(argv: &[String]) -> Ran { kicad_with(argv, true).await }
+async fn kicad(argv: &[String]) -> Ran { kicad_with(argv, false).await }
+async fn kicad_with(argv: &[String], ro: bool) -> Ran {
     let Some((c, rest)) = argv.split_first() else { return Ran { code: 127, out: MISSING.into() } };
     if c.is_empty() { return Ran { code: 127, out: MISSING.into() } }
-    proc(c, &rest.iter().map(String::as_str).collect::<Vec<_>>(), "/", &[]).await
+    let a = rest.iter().map(String::as_str).collect::<Vec<_>>();
+    if ro { proc_ro(c, &a, "/", &[]).await } else { proc(c, &a, "/", &[]).await }
 }
 
 // Versions: core/hist.bend
@@ -57,7 +63,7 @@ async fn version_ok(hub: &Arc<Hub>, cwd: &str, p: &str) -> bool {
     if !commit_word(field(p, 2)) { return false }
     let gd = field(p, 1);
     if gd == format!("{cwd}/.backplane/history.git") || super::kicad::known_root(hub, cwd, p).await { return true }
-    let own = sh("exec 2>/dev/null\ncd \"$1\" || exit 1\ncd \"$(git rev-parse --git-common-dir)\" && pwd", &[cwd], "/").await;
+    let own = sh_ro("exec 2>/dev/null\ncd \"$1\" || exit 1\ncd \"$(git rev-parse --git-common-dir)\" && pwd", &[cwd], "/").await;
     own.code == 0 && own.out.trim() == gd
 }
 
@@ -104,7 +110,7 @@ async fn bound_load(root: &str, sch: &str) -> String {
     for _ in 0..64 {
         if todo.is_empty() { return String::new() }
         let p = todo.remove(0);
-        let r = sh(BOUND, &[root, &p], "/").await;
+        let r = sh_ro(BOUND, &[root, &p], "/").await;
         if r.code != 0 { return bj::trim(&r.out).to_string() }
         let q = p.clone();
         let kd = tokio::task::spawn_blocking(move || plotread::kids(&q, &plotread::version_env(&q, &git::GIT_ENV))).await;
@@ -116,14 +122,14 @@ async fn bound_load(root: &str, sch: &str) -> String {
 /// Rvc.bound: the configured files of a snapshot do not leave it
 async fn bound(root: &str, f: &project::Files) -> String {
     if root.is_empty() { return String::new() }
-    let r = sh(BOUND, &[root, &f.pro, &f.pcb, &f.sch], "/").await;
+    let r = sh_ro(BOUND, &[root, &f.pro, &f.pcb, &f.sch], "/").await;
     if r.code != 0 { return bj::trim(&r.out).to_string() }
     if f.sch.is_empty() { String::new() } else { bound_load(root, &f.sch).await }
 }
 /// Rvc.chk: one KiCad check: its findings, or an explicit execution failure
 async fn one_check(c: &cad::Chk, cli: &str, out: &str, pcb: &str, sch: &str) -> Vec<checks::Finding> {
     if (if c.id == "erc" { sch } else { pcb }).is_empty() { return vec![] }
-    let r = kicad(&cad::fill(c.argv, &[("cli", cli), ("pcb", pcb), ("sch", sch), ("out", out)])).await;
+    let r = kicad_check(&cad::fill(c.argv, &[("cli", cli), ("pcb", pcb), ("sch", sch), ("out", out)])).await;
     let text = text_of(&format!("{out}/{}", c.report));
     if r.code != 0 { return vec![checks::finding("execution", "error", c.id, &format!("check command failed (exit {}): {}", r.code, cut(&r.out, 300)), "")] }
     if !checks::report_valid(c.id, &text) { return vec![checks::finding("execution", "error", c.id, "missing or malformed check report", "")] }
@@ -154,14 +160,14 @@ async fn checks_inputs(cli: &str, out: &str, dir: &str, home: &str, trigger: &st
 }
 /// Rvc.check.run: the project in DIR (COMMIT "" its files as they are; else that commit, taken out with git archive into a folder of its own and removed after)
 async fn check_run(cli: &str, dir: &str, commit: &str, home: &str, trigger: &str) -> J {
-    let r = sh(PREP, &[dir, commit], "/").await;
+    let r = sh_ro(PREP, &[dir, commit], "/").await;
     if r.code != 0 { return err(or(bj::trim(&r.out), "could not take out that commit")) }
     let ls = lines(&r.out);
     let (tmp, d, root) = (at(&ls, 0), at(&ls, 1), at(&ls, 2));
     let f = project::read(d);
     let why = bound(root, &f).await;
     let o = if why.is_empty() { checks_inputs(cli, tmp, d, home, trigger, &f).await } else { err(why) };
-    proc("rm", &["-rf", tmp], "/", &[]).await;
+    proc_ro("rm", &["-rf", tmp], "/", &[]).await;
     o
 }
 /// How far back the log is read for a question still open. The read model keeps no asks; a question older than this (a restart closes them) is only asked twice.

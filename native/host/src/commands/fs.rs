@@ -1,6 +1,6 @@
 //! The project picker's folder requests (server.bend `FsJob.*`, core/folder.bend): `fs.list`, `fs.mkdir`, `fs.find`, and the folder
 //! half of `project.add` / `project.new`. Paths are arguments to the scripts, never shell text.
-use crate::files::git::{proc, Ran};
+use crate::files::git::{proc, proc_ro, Ran};
 use serde_json::{json, Value};
 
 /// FP.Folder.path.sh: "" and ~ are home, ~/x and relative paths are under home.
@@ -14,7 +14,9 @@ fn mkdir_sh() -> String { format!("exec 2>&1; set -e; {PATH}if [ -e \"$d\" ] || 
 fn resolve_sh() -> String { format!("exec 2>&1; set -e; {PATH}{DIR}{NATIVE}echo \"$d\"") }
 fn find_sh() -> String { format!("exec 2>/dev/null; {TMO}echo \"$HOME\"; tmo 5 find \"$HOME\" -xdev -mindepth 1 -maxdepth 5 \\( -type d \\( -name node_modules -o \\( -name '.*' ! -name .backplane \\) \\) -prune \\) -o \\( -type d -name .backplane -print -prune \\) -o \\( -name .backplane.json -print \\) | sed 's|/[^/]*$||' | grep -vxF \"$HOME\" | LC_ALL=C sort -u | head -n 500; true") }
 
+/// A write (mkdir) is refused on a copy; `sh_ro` is the listed read.
 async fn sh(script: &str, path: &str) -> Ran { proc("sh", &["-c", script, "sh", path], "/", &[]).await }
+async fn sh_ro(script: &str, path: &str) -> Ran { proc_ro("sh", &["-c", script, "sh", path], "/", &[]).await }
 fn lines(out: &str) -> Vec<String> { out.trim().lines().map(str::to_string).collect() }
 fn error(out: &str) -> Value { json!({"error": out.trim()}) }
 
@@ -25,15 +27,15 @@ fn listed(r: &Ran) -> Value {
     if ls.is_empty() { return json!({"error":"not a folder"}) }
     let d = ls.remove(0); json!({"dir": d, "entries": ls})
 }
-pub async fn list(path: &str) -> Value { listed(&sh(&list_sh(), path).await) }
+pub async fn list(path: &str) -> Value { listed(&sh_ro(&list_sh(), path).await) }
 /// FsJob.made: a new folder, then its listing.
 pub async fn mkdir(path: &str) -> Value { let r = sh(&mkdir_sh(), path).await; if r.code == 0 { list(lines(&r.out).last().map(String::as_str).unwrap_or("")).await } else { error(&r.out) } }
 pub async fn find() -> Value {
-    let r = sh(&find_sh(), "").await; let mut ls = lines(&r.out);
+    let r = sh_ro(&find_sh(), "").await; let mut ls = lines(&r.out);
     if ls.is_empty() { json!({"found": []}) } else { let h = ls.remove(0); json!({"home": h, "found": ls}) }
 }
 /// The folder a project would have: the resolved path or `{error}`.
-pub async fn resolve(path: &str) -> Result<String, Value> { let r = sh(&resolve_sh(), path).await; if r.code == 0 { Ok(lines(&r.out).last().cloned().unwrap_or_default()) } else { Err(error(&r.out)) } }
+pub async fn resolve(path: &str) -> Result<String, Value> { let r = sh_ro(&resolve_sh(), path).await; if r.code == 0 { Ok(lines(&r.out).last().cloned().unwrap_or_default()) } else { Err(error(&r.out)) } }
 /// FsJob.create's folder half for project.new: make it, then answer its path.
 pub async fn make(path: &str) -> Result<String, Value> { let r = sh(&mkdir_sh(), path).await; if r.code == 0 { Ok(lines(&r.out).last().cloned().unwrap_or_default()) } else { Err(error(&r.out)) } }
 /// FsJob.register: a resolved path must be a folder.
