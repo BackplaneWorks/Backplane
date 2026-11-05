@@ -114,5 +114,24 @@ wait_for 20 log_has '"event":"usable"' client.log; check "a gone thread still op
 grep -E 'place|Refused|refused|not_usable' "$SW/client.log" | cut -c1-200 | head -6
 DISPLAY=$D import -window root "$T/gone.png" 2>/dev/null
 
+# 7. a window that opens while the hub is still reading a big log: it is told "not yet", and it waits. No second window, and the place is not taken for gone
+env HUB_BIN="$(cat "$SW/hub.bin")" CLIENT_BIN="$B/backplane-gpui" "$HERE/scripts/gpui/switch.sh" reload client > /dev/null
+wait_for 20 log_has '"event":"usable"' client.log
+python3 -I -c 'import json,sys; p=sys.argv[1]; v=json.load(open(p)); v["target"]={"kind":"thread","id":sys.argv[2]}; v["session"]["sel"]=sys.argv[2]; json.dump(v,open(p,"w"))' "$SW/home/gpui-place.json" "$T1"
+"$HERE/scripts/gpui/switch.sh" stop > /dev/null 2>&1
+python3 -I -c '
+import json,sys
+p=sys.argv[1]
+with open(p,"a") as f:
+    for i in range(1500000): f.write(json.dumps({"$":"SettingSet","key":"e2e.boot.%d"%(i%5000),"value":"x"*40,"at":1})+"\n")' "$SW/home/events.jsonl"
+python3 -I -c 'import json,sys; p=sys.argv[1]; v=json.load(open(p)); v["target"]={"kind":"thread","id":sys.argv[2]}; v["session"]["sel"]=sys.argv[2]; json.dump(v,open(p,"w"))' "$SW/home/gpui-place.json" "$T1"
+SWITCH_WAIT=120 env HUB_BIN="$(cat "$SW/hub.bin")" CLIENT_BIN="$B/backplane-gpui" "$HERE/scripts/gpui/switch.sh" reload both > /dev/null
+C7=$(pid client)
+wait_for 90 log_has '"event":"usable"' client.log
+check "the hub really was still booting when the window asked" log_has 'state.booting' hub.log
+check "the window drew by itself once the hub was ready" log_has '"event":"usable"' client.log
+check "with no second window" test "$(pid client)" = "$C7"
+check "and the saved thread was not taken for gone" log_has "\"thread\":\"$T1\".*\"event\":\"place\"" client.log
+
 echo; [ "$fails" = 0 ] && echo "all checks passed" || echo "$fails checks FAILED"
 [ "$fails" = 0 ]
