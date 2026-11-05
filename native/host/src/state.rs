@@ -97,6 +97,8 @@ fn blank_gone(k: &str) -> bool {
 
 impl State {
     pub fn new() -> State { State::default() }
+    /// BotSet's thread: a task delegated by a bot's thread is not hidden under it
+    pub fn bot_threads_has(&self, thread: &str) -> bool { self.bot_threads.values().any(|t| t == thread) }
 
     fn thread_mut(&mut self, id: &str) -> &mut Thread { self.threads.entry(id.to_string()).or_insert_with(Thread::blank) }
     fn set(&mut self, k: &str, v: &str) {
