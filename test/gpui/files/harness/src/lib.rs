@@ -40,10 +40,6 @@ pub mod kicad {
   #[path = "../../../../../../native/host/src/kicad/kexport.rs"] pub mod kexport;
 }
 
-/// The hub's process gate (native/host/src/proc.rs) as the files modules call it; the harness only runs fixtures, so it makes the process directly.
-pub mod proc {
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub enum Kind { Local, Net, Terminal, Browser, Shell, Agent }
-    pub fn tokio_cmd<S: AsRef<std::ffi::OsStr>>(_kind: Kind, program: S) -> tokio::process::Command { tokio::process::Command::new(program) }
-    pub fn std_cmd<S: AsRef<std::ffi::OsStr>>(_kind: Kind, program: S) -> std::process::Command { std::process::Command::new(program) }
-}
+// The hub's process gate itself (native/host/src/proc.rs, copy.rs): the files modules call crate::proc.
+#[path = "../../../../../native/host/src/copy.rs"] pub mod copy;
+#[path = "../../../../../native/host/src/proc.rs"] pub mod proc;
