@@ -68,4 +68,9 @@ impl Backplane {
         self.screens.images.retry();
         if let Some(y) = self.screens.offsets.get(raw).copied() { self.scroll.set_offset(point(px(0.), px(y))); }
     }
+    /// A picture was applied: the drafts, the asks' boxes and the settings fields follow what the hub just drew.
+    pub(crate) fn picture_applied(&mut self, cx: &mut Context<Self>) {
+        self.draft_from_hub(cx);
+        super::settings::sync(self, cx);
+    }
 }

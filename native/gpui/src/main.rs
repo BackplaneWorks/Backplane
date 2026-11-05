@@ -59,7 +59,7 @@ impl Backplane {
             Event::Picture(r,timing)=>{
                 let t_apply=Instant::now();self.ui_epoch+=1;
                 if let Some(w)=self.wake_at.take(){self.reconnected=true;self.m("net",serde_json::json!({"event":"reconnected","ms":(w.elapsed().as_secs_f64()*1e6).round()/1e3}));}
-                let mut r=r;self.data=r["shown"].take();self.draft_from_hub(cx);
+                let mut r=r;self.data=r["shown"].take();self.picture_applied(cx);
                 let entries=self.data["thread"]["entries"].as_array().map_or(0,|e|e.len());
                 if entries!=self.last_entries {self.last_entries=entries;self.scroll.set_offset(point(px(0.),px(-1_000_000.)));}
                 let selected=string(&self.data["thread"],"id");
