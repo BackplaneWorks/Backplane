@@ -10982,9 +10982,10 @@ def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
       do IO<Hub>:
         Plot.put(Cfg.pv(cfg), PV.PInfo{client, id, key, at, idx})
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
-    case Hub{st, f, ls, cl, as, inbox, +cfg, note} B.Watch{+client, +kind, +root, +path, +tree, +sheet, +stamps}:
+    case Hub{+st, f, ls, cl, as, inbox, +cfg, note} B.Watch{+client, +kind, +root, +path, +tree, +sheet, +stamps}:
       do IO<Hub>:
-        Plot.puts(Plot.watch.any(String.starts_with(kind, "warm:"), client, kind, root, path, tree, sheet, String.eq(stamps, "1")), Cfg.pv(cfg))
+        Plot.puts(Bool.pick(List<&2, PV.PMsg>, B.Watch.ok(st, Cfg.home(cfg), kind, root, path, tree, sheet),
+          Plot.watch.any(String.starts_with(kind, "warm:"), client, kind, root, path, tree, sheet, String.eq(stamps, "1")), [PV.PStop{client}]), Cfg.pv(cfg))
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
     case Hub{+st, f, ls, cl, as, +inbox, +cfg, note} B.CodexTurn{+thread, +cwd, +model, +session, r, text}:
       do IO<Hub>:

@@ -883,9 +883,10 @@ def Git.show.ran(r: P.Ran) -> IO(Maybe<&2, String>):
       IO.pure(Maybe<&2, String>, None{})
 
 # a file as a commit has it (a version path, core/hist.bend); None when
-# the commit or the file is not there
+# the commit or the file is not there, or a word names an option for git
+# (a directory or object starting with "-")
 def Git.show(+g: String, +obj: String) -> IO(Maybe<&2, String>):
-  IO.bind(P.Ran, Maybe<&2, String>, P.Proc.run("sh", ["-c", "exec 2>/dev/null; git --git-dir=\"$1\" show \"$2\"", "sh", g, obj], "/"), Git.show.ran)
+  IO.bind(P.Ran, Maybe<&2, String>, P.Proc.run("sh", ["-c", "exec 2>/dev/null; case \"$1\" in ''|-*) exit 1;; esac; case \"$2\" in ''|-*) exit 1;; esac; git --git-dir=\"$1\" show \"$2\"", "sh", g, obj], "/"), Git.show.ran)
 
 def Git.version.got(m: Maybe<&2, String>) -> IO(List<&2, U32>):
   match m:

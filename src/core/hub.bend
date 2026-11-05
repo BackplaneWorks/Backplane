@@ -10495,6 +10495,44 @@ def Hub.project.move(cs: List<&2, M.Change>, +client: U32, +id: String) -> Step:
     case Nil{}: Step.outs([Reply.err(client, id, "Type the folder's full path, starting with /")])
     case +c <> t: Step.reply(client, id, c <> t)
 
+# kicad.watch (server.bend's Hub on a Watch out) names a folder and files of it
+# for the viewers; no thread comes with it. The folder must be one this hub keeps: a live project's, or the
+# folder of a live thread, or inside the project's. A file is one of that
+# folder, or a model or design file a viewer was shown elsewhere (viewer_show
+# takes any path; a vendor STEP lives outside the project), never anything
+# else. No part of a path climbs.
+def Watch.kind.ok(+p: String) -> Bool:
+  Bool.or(String.ends_with(p, ".kicad_pcb"), Bool.or(String.ends_with(p, ".kicad_sch"), Bool.or(String.ends_with(p, ".step"),
+    Bool.or(String.ends_with(p, ".stp"), Bool.or(String.ends_with(p, ".glb"), String.ends_with(p, ".gltf"))))))
+
+def Watch.file.ok(+root: String, +p: String) -> Bool:
+  Bool.or(String.is_empty(p), Bool.and(FP.Folder.absolute(p), Bool.and(FM.Fm.safe(String.drop(p, 1n)),
+    Bool.or(Bool.and(String.starts_with(p, root ++ "/"), FM.Fm.safe(FM.Fm.rel(root, p))), Watch.kind.ok(String.to_lower(p))))))
+
+def Watch.root.in(+root: String, +r: String) -> Bool:
+  Bool.and(Bool.not(String.is_empty(r)), Bool.and(FM.Fm.safe(String.drop(root, 1n)),
+    Bool.or(String.eq(root, r), Bool.and(String.starts_with(root, r ++ "/"), FM.Fm.safe(FM.Fm.rel(r, root))))))
+
+def Watch.root.projects(ps: List<&2, M.Project>, +root: String) -> Bool:
+  match ps:
+    case Nil{}: False{}
+    case M.Project{_, _, +r, _, False{}} <> t: Bool.or(Watch.root.in(root, r), Watch.root.projects(t, root))
+    case _ <> t: Watch.root.projects(t, root)
+
+def Watch.root.threads(ts: List<&2, M.Thread>, +s: M.State, +root: String) -> Bool:
+  match ts:
+    case Nil{}: False{}
+    case +th <> t: Bool.or(Watch.root.in(root, Hub.cwd(s, th)), Watch.root.threads(t, s, root))
+
+# (a thread of another machine shows the cache this hub keeps of its files,
+# <home>/farfs, core/fview.bend)
+def Watch.root.ok(+s: M.State, +home: String, +root: String) -> Bool:
+  Bool.and(FP.Folder.absolute(root), Bool.or(Watch.root.projects(Hub.projects(s), root), Bool.or(Watch.root.threads(Map.values(&2, M.Thread, FR.Fr.st.threads(s)), s, root),
+    Bool.and(Bool.not(String.is_empty(home)), Watch.root.in(root, home ++ "/farfs")))))
+
+def Watch.ok(+s: M.State, +home: String, +kind: String, +root: String, +path: String, +tree: String, +sheet: String) -> Bool:
+  Bool.or(String.is_empty(kind), Bool.and(Watch.root.ok(s, home, root), Bool.and(Watch.file.ok(root, path), Bool.and(Watch.file.ok(root, tree), Watch.file.ok(root, sheet)))))
+
 # kicad.warm's paths ("" none) as the plot actor's warm requests: a Watch of
 # kind "warm:board" or "warm:schematic" (server.bend's Plot.watch.all), no
 # client's view
