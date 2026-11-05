@@ -6,7 +6,7 @@ which bun >/dev/null 2>&1 || export PATH="$HOME/.bun/bin:$PATH"
 which bun >/dev/null 2>&1 || { curl -fsSL https://bun.sh/install | BUN_INSTALL=$HOME/.bun bash >/dev/null 2>&1; export PATH="$HOME/.bun/bin:$PATH"; }
 bun --version || exit 77
 O=out/parity; mkdir -p $O
-R=$PWD; export BACKPLANE_PARITY_ROOT=$R
+R=$PWD; export BACKPLANE_PARITY_ROOT=$R PARITY_WORK=/tmp/parity-work
 chmod +x stage/backplane-serve test/gpui/slim/check_agents.sh 2>/dev/null
 mode=${1:-all}
 rc=0
