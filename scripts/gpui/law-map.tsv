@@ -474,3 +474,24 @@ law invite_roundtrip rust invite_roundtrip
 law sign_stale_rejected rust sign_stale_rejected
 law sign_window_300 rust sign_window_300
 law seen_add_has rust seen_add_has
+# settings: webhook alerts (settings/webhook.rs)
+law hook_off_unset rust hook_off_unset
+law hook_on_set rust hook_on_set
+law hook_url_https rust hook_url_https
+law hook_url_file rust hook_url_file
+law hook_url_space rust hook_url_space
+law hook_live_blank rust hook_live_blank
+law hook_mode_unsigned rust hook_mode_unsigned
+law hook_mode_default_file rust hook_mode_default_file
+law hook_mode_missing rust hook_mode_missing
+law hook_mode_configured rust hook_mode_configured
+law hook_stopped_word rust hook_stopped_word
+law hook_failed_word rust hook_failed_word
+law hook_completed_word rust hook_completed_word
+law hook_body_state rust hook_body_state
+law hook_body_event rust hook_body_event
+law hook_body_kind rust hook_body_kind
+law hook_body_ask_event rust hook_body_ask_event
+law hook_unsigned_header rust hook_unsigned_header
+law hook_signed_header rust hook_signed_header
+law hook_secret_default rust hook_secret_default
