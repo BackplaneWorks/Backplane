@@ -43,6 +43,8 @@ lane cannot break another lane's build.
 
 Ready means: GPUI desktop opens a copy of the person's real data on the Rust hub, a real Claude turn works, and Claude launches and drives a thread from inside. Improvements works end to end in GPUI on the Rust hub, handing off to a real Claude thread that can work on the `gpui` branch. Bend leaves the runtime path. Each lane works in its own worktree under `~/Documents/i2cjak/bp-gpui-lanes/` and lands only through `scripts/gpui/land.sh` after the reviewer's recorded OK.
 
+Memory gate, as the person accepted it: on a copy of the real log with about 10 agents and 5 views open, the whole startup stays under 1 GB, including building the store, `/hello` answers, nothing runs out of memory, and steady hub RAM stays at or under 500 MB. The slope bar in `PRESENTER-PORT.md` is a proposal, not this gate.
+
 | Lane | Thread | Owns | Worktree |
 |---|---|---|---|
 | 1. Thread view and pages | slim `t1793834628-1688992` | new `native/host/src/present/` thread view and pages, Files and Mech replies | `slim` |
