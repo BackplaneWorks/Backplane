@@ -29,6 +29,7 @@ import * as P from "./probe.js";
 let family = "";
 const font = (el, px) => `${px}px ${family ||= getComputedStyle(el).fontFamily || "monospace"}`;
 import { hitComponent, padOutline } from "./components.js";
+import * as Keep from "./plot-keep.js";
 
 // varints (7 bits a byte, low first) and zigzag, as the hub writes them
 function reader(bytes) {
@@ -85,7 +86,8 @@ function chunk(o) {
   const d = o.d ?? new Uint8Array(0);
   const c = o.c ?? 0;
   const color = `rgba(${(c >> 16) & 255},${(c >> 8) & 255},${c & 255},${(o.a ?? 255) / 255})`;
-  return { ...paths(decode(d, mode), mode, r), r, mode, d, sig: typeof o.s === "number" ? o.s >>> 0 : null, color, layer: o.l ?? 0, born: performance.now() };
+  return { ...paths(decode(d, mode), mode, r), r, mode, d, sig: typeof o.s === "number" ? o.s >>> 0 : null, color, layer: o.l ?? 0, born: performance.now(),
+    raw: { m: o.m, w: o.w, d, c: o.c, a: o.a, s: o.s, l: o.l } };
 }
 
 function pieces(k) {
@@ -105,6 +107,32 @@ function pieces(k) {
 
 // the newest plot of each source (or why there is none), by its key
 const plots = new Map();
+// the last plot of each source drawn before (plot-keep.js: across reloads
+// and windows), drawn at once when a view comes up on a source this
+// connection has no plot of yet (kept: true, born 0: no fade), until the
+// hub's plot takes its place; never a delta's base (a new connection's
+// plots are sent whole)
+const keptPlots = new Map();
+if (typeof indexedDB !== "undefined") Keep.loadAll().then((m) => { for (const [k, v] of m) if (!keptPlots.has(k)) keptPlots.set(k, v); });
+function revive(key) {
+  const v = keptPlots.get(key);
+  if (!v || plots.has(key)) return;
+  try { plots.set(key, { chunks: v.raw.map((r) => ({ ...chunk(r), born: 0, kept: true })), box: v.box, fam: v.fam, n: 0, thick: v.thick, kept: true }); } catch {}
+}
+const keeping = new Map();
+function keep(key) {
+  const p = plots.get(key);
+  if (!p?.chunks || p.kept || !p.chunks.every((c) => c.raw)) return;
+  clearTimeout(keeping.get(key));
+  keeping.set(key, setTimeout(() => {
+    keeping.delete(key);
+    const q = plots.get(key);
+    if (q !== p) return;
+    const entry = { raw: p.chunks.map((c) => c.raw), box: p.box, fam: p.fam, thick: p.thick, at: Date.now(), bytes: p.chunks.reduce((n, c) => n + (c.raw.d?.length || 0) + 64, 0) };
+    keptPlots.set(key, entry);
+    void Keep.save(key, entry);
+  }, 1500));
+}
 // the source a plot without a "base" (an older hub's) is a delta against
 let lastKey = "";
 
@@ -126,6 +154,7 @@ export function got(o, at = { bytes: 0, t: performance.now() }) {
   for (const v of views.values()) if (v.key === key && v.asked && !stats.has(key)) stats.set(key, { bytes: at.bytes, waited: (at.t - v.asked) / 1000 });
   if (typeof o.none === "string") {
     plots.set(key, { none: o.none });
+    if (keptPlots.delete(key)) void Keep.save(key, { bytes: Infinity });
   } else {
     const base = typeof o.base === "string" ? o.base : lastKey;
     const held = plots.get(base)?.chunks ?? [];
@@ -137,11 +166,13 @@ export function got(o, at = { bytes: 0, t: performance.now() }) {
       const old = previous[all.length];
       // A fresh subscription may send an already drawn chunk whole again.
       // Reuse it only when its style, signature and geometry all agree.
-      if (key.startsWith("1|") && c && old && c.sig !== null && c.sig === old.sig && c.layer === old.layer && c.color === old.color && c.mode === old.mode && c.r === old.r && c.d.length === old.d.length && c.d.every((b, i) => b === old.d[i])) all.push(old);
+      // (and a chunk drawn from the kept plot: plot-keep.js)
+      if ((key.startsWith("1|") && c?.sig !== null || old?.kept) && c && old && c.sig === old.sig && c.layer === old.layer && c.color === old.color && c.mode === old.mode && c.r === old.r && c.d.length === old.d.length && c.d.every((b, i) => b === old.d[i])) all.push(old);
       else if (c) all.push(c);
     }
     const box = Array.isArray(o.box) && o.box.length === 4 ? o.box : [0, 0, 1, 1];
     plots.set(key, { chunks: all, box, fam: typeof o.fam === "string" ? o.fam : key, n: (plots.get(key)?.n ?? 0) + 1, thick: typeof o.thick === "number" ? o.thick : 1600 });
+    keep(key);
   }
   lastKey = key;
   for (const v of views.values()) if (v.key === key) { v.show(plots.get(key)); present(v); prefetch(v); }
@@ -1448,6 +1479,7 @@ function mountOne(canvas) {
     view.asked = performance.now();
     view.hl = null;
     if (!same) { view.plot = null; view.fitted = false; view.back = left.get(stateKey) || null; }
+    revive(key);
     if (plots.has(key)) { view.show(plots.get(key)); prefetch(view); } else view.later();
   }
 }
