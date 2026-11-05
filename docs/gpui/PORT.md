@@ -163,7 +163,7 @@ port waits for the person's decision.
 
 <!-- law-map: generated below by scripts/gpui/law-map.py -->
 
-Laws in LAWS.bend: 3253. bend 939, rust 513, unported 1204, client 470, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`, `src/core/msp.bend`, `src/core/agy.bend`, `src/core/opencode.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
+Laws in LAWS.bend: 3253. bend 935, rust 517, unported 1204, client 470, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`, `src/core/msp.bend`, `src/core/agy.bend`, `src/core/opencode.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
 
 | law | status | seed | file | note |
 |---|---|---|---|---|
@@ -2854,10 +2854,10 @@ Laws in LAWS.bend: 3253. bend 939, rust 513, unported 1204, client 470, window 1
 | `retired_scratch_launch_refused` | bend | seed K +-10% | `src/core/mcp.bend` |  |
 | `retired_scratch_id` | bend | seed K +-10% | `src/core/mcp.bend` |  |
 | `legacy_active_visible` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `ref_origin_no_link` | bend | seed K +-10% | `src/core/ref-origin.bend` |  |
-| `ref_origin_return_local` | bend | seed K +-10% | `src/core/ref-origin.bend` |  |
-| `ref_origin_owner_remote` | bend | seed K +-10% | `src/core/ref-origin.bend` |  |
-| `ref_origin_foreign_untouched` | bend | seed K +-10% | `src/core/ref-origin.bend` |  |
+| `ref_origin_no_link` | rust `ref_origin_no_link` | map | `src/core/ref-origin.bend` |  |
+| `ref_origin_return_local` | rust `ref_origin_return_local` | map | `src/core/ref-origin.bend` |  |
+| `ref_origin_owner_remote` | rust `ref_origin_owner_remote` | map | `src/core/ref-origin.bend` |  |
+| `ref_origin_foreign_untouched` | rust `ref_origin_foreign_untouched` | map | `src/core/ref-origin.bend` |  |
 | `startup_warm_accepted` | unported | seed R +-10% | `src/server/hotboot.bend` |  |
 | `startup_warm_fallback` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `mail_empty_success_quiet` | unported | seed R +-10% | `src/core/hub.bend` |  |

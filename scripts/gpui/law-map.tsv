@@ -550,3 +550,7 @@ law far_gap_takes_nothing rust far_gap_takes_nothing
 law far_old_takes_nothing rust far_old_takes_nothing
 law far_overlap_takes_new rust far_overlap_takes_new
 law far_batch_again rust far_batch_again
+law ref_origin_no_link rust ref_origin_no_link
+law ref_origin_return_local rust ref_origin_return_local
+law ref_origin_owner_remote rust ref_origin_owner_remote
+law ref_origin_foreign_untouched rust ref_origin_foreign_untouched
