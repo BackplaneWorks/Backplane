@@ -20,8 +20,9 @@ export class Input{
     return {ok:true,evidence:{changedPixels:diffPixels(before,after),targetsOffered:this.cb.targets()}}}
   dropFile(g,file,at){let out='',code=0;try{out=execFileSync('python3',[resolve(here,'dnd.py'),this.display,g.id,String(g.x+at[0]),String(g.y+at[1]),file],{encoding:'utf8'})}catch(e){code=e.status;out=String(e.stdout||e.message)}
     return {ok:code===0,evidence:{dnd:out.trim(),exit:code}}}
-  async ime(display,composerAt,g){const ime=await startIme(display);this.xi.click(g.x+composerAt[0],g.y+composerAt[1]);await sleep(300);const before=this.s('before-ime');
-    for(const k of HANGUL_HAN){this.xi.key(k);await sleep(150)}await sleep(500);const after=this.s('after-ime');ime.stop();
-    return {ok:ime.status==='started',evidence:{imeStatus:ime.status,engine:ime.engine,changedPixels:diffPixels(before,after),expected:'한'},env:ime.env}}
+  // `ime` is a running startIme() instance whose env the client was launched with (XIM: the client must start after the daemon and with XMODIFIERS=@im=ibus)
+  async imeCompose(ime,composerAt,g,engine='hangul'){this.xi.click(g.x+composerAt[0],g.y+composerAt[1]);await sleep(300);let now='';try{now=ime.setEngine(engine)}catch(e){return {ok:false,evidence:{error:'engine switch failed: '+String(e.stderr||e.message).slice(0,160)}}}
+    const before=this.s('before-ime');for(const k of HANGUL_HAN){this.xi.key(k);await sleep(150)}await sleep(500);const after=this.s('after-ime');try{ime.setEngine('xkb:us::eng')}catch{}
+    return {ok:true,evidence:{imeStatus:ime.status,engine:now,changedPixels:diffPixels(before,after)}}}
   clickAt(g,at,button=1){this.xi.click(g.x+at[0],g.y+at[1],button)}
 }

@@ -1,14 +1,15 @@
 // The must-pass GPUI input actions with real OS input on Xvfb (Boat): drag-select, Ctrl-C, paste an image, drop a file, IME, paperclip, link click.
 // bun test/gpui/e2e/input-run.mjs --hub-bin PATH --gpui-bin PATH [--out DIR]   (Boat only; see boat-run.sh input-run)
 import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';import {spawn,execFileSync} from 'node:child_process';import {resolve} from 'node:path';
-import {startDisplay,installMissing} from './lib/capture.mjs';import {startFixtureHub} from './lib/hubfx.mjs';import {Input} from './input/driver.mjs';
+import {startDisplay,installMissing} from './lib/capture.mjs';import {startFixtureHub} from './lib/hubfx.mjs';import {Input} from './input/driver.mjs';import {startIme} from './input/ime.mjs';
 const arg=(k,d)=>{const i=process.argv.indexOf('--'+k);return i>=0?process.argv[i+1]:d};const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const hubBin=resolve(arg('hub-bin')),gpuBin=resolve(arg('gpui-bin')),out=resolve(arg('out','out/e2e/input'));mkdirSync(out,{recursive:true});
 const summary={when:new Date().toISOString(),actions:{},blocked:{},env:installMissing()};
-const dsp=await startDisplay(64);const fx=await startFixtureHub({bin:hubBin,root:resolve('out/e2e-run/input'),port:3813,threads:6});
+const dsp=await startDisplay(64);const ime=await startIme(dsp.display); // before the client, so it can connect to it through XIM
+summary.ime={status:ime.status,engine:ime.engine};const fx=await startFixtureHub({bin:hubBin,root:resolve('out/e2e-run/input'),port:3813,threads:6});
 try{
   const sf=out+'/hold.script.json';writeFileSync(sf,JSON.stringify([{select:0},{wait:120000}]));
-  const metrics=[];let buf='';const g=spawn(gpuBin,['--url',fx.state.url,'--token-file',fx.state.root+'/home/token','--script',sf],{env:{...dsp.env,HOME:fx.state.root+'/fakehome',BACKPLANE_GPUI_RECTS:'1'},stdio:['ignore','ignore','pipe']});
+  const metrics=[];let buf='';const g=spawn(gpuBin,['--url',fx.state.url,'--token-file',fx.state.root+'/home/token','--script',sf],{env:{...dsp.env,...ime.env,HOME:fx.state.root+'/fakehome',BACKPLANE_GPUI_RECTS:'1'},stdio:['ignore','ignore','pipe']});
   g.stderr.on('data',d=>{buf+=d;let i;while((i=buf.indexOf('\n'))>=0){const l=buf.slice(0,i);buf=buf.slice(i+1);const k=l.indexOf('GPUI_METRIC ');if(k>=0)try{metrics.push(JSON.parse(l.slice(k+12)))}catch{}}});
   await sleep(6000);const inp=new Input(dsp.display,out);const win=inp.win('backplane');inp.xi.focus(win.id);await sleep(500);
   summary.window=win;summary.gpu=metrics.find(m=>m.event==='gpu')||null;
@@ -33,7 +34,7 @@ try{
       return {ok:!!m&&/png|image|pasted/i.test(blob)&&/see pic/.test(m.text||''),evidence:{...r.evidence,attachmentsOnHub:attachments(),newEvents:newEvents(t0),hubMessage:m?{keys:Object.keys(m),text:m.text}:null,mentionsImage:/png|image|pasted/i.test(blob)}}});
     await run('drop-file',async()=>{await clearComposer();const t0=Math.floor(Date.now()/1000);inp.xi.type('see drop');const r=inp.dropFile(win,resolve(out+'/paste.png'),comp);await sleep(6000);inp.s('before-send-drop');const m=await sendAndRead(t0);const blob=JSON.stringify(m||{});
       return {ok:r.ok&&!!m&&/paste\.png|png|image/i.test(blob),evidence:{...r.evidence,attachmentsOnHub:attachments(),newEvents:newEvents(t0),hubMessage:m?{keys:Object.keys(m),text:m.text}:null,mentionsFile:/paste\.png/i.test(blob)}}});
-    await run('ime-hangul',async()=>{await clearComposer();const t0=Math.floor(Date.now()/1000);const r=await inp.ime(dsp.display,comp,win);const m=await sendAndRead(t0);
+    await run('ime-hangul',async()=>{await clearComposer();const t0=Math.floor(Date.now()/1000);const r=await inp.imeCompose(ime,comp,win);const m=await sendAndRead(t0);
       return {ok:!!m&&/한/.test(m.text||''),evidence:{...r.evidence,hubMessageText:m?.text??null,expected:'한 (composed); raw keys would arrive as "gks"'}}});
   } else summary.blocked['paste/drop/ime']='no composer region in the layout event';
   // the paperclip and links need their rectangles: the controls event has none yet (request G6)
@@ -42,7 +43,7 @@ try{
   summary.blocked['link-click']='no link rectangles or link events (G6)';
   if(attach?.rect){const r=attach.rect;await run('paperclip',async()=>{inp.s('before-paperclip');inp.clickAt(win,[r.x+r.w/2,r.y+r.h/2]);await sleep(800);return {ok:true,evidence:{shot:inp.s('after-paperclip')}}});delete summary.blocked.paperclip}
   try{g.kill('SIGTERM')}catch{}
-}finally{await fx.stop();dsp.stop()}
+}finally{try{ime.stop()}catch{}await fx.stop();dsp.stop()}
 // an action only counts when evidence says so; pass also needs the Rust hub on real hardware (CONTRACT.md), which this Boat run is not
 for(const a of Object.values(summary.actions))a.status=a.ok?'partial':'fail';
 writeFileSync(out+'/input-summary.json',JSON.stringify(summary,null,1));console.log(JSON.stringify({actions:Object.fromEntries(Object.entries(summary.actions).map(([k,v])=>[k,v.ok])),blocked:summary.blocked},null,1));
