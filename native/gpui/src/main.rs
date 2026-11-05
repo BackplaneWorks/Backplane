@@ -17,7 +17,7 @@ pub struct Backplane {
     pub input:Entity<input::TextInput>, data:Value, status:String, error:String,
     tx:tokio::sync::mpsc::Sender<Command>, selected:String,
     drafts:HashMap<String,String>, popup:bool, started:Instant, usable:bool,
-    first_frame:bool, script_done:bool, scroll:ScrollHandle, last_entries:usize, pub cats:art::Cats, pub timing:Option<hub::Timing>, pub applied_at:Option<Instant>, pub apply_ms:f64, pub render_us:u64, swatches:bool, gallery:bool, fonts:bool, theme_override:Option<bool>, steps:VecDeque<Step>, pending:Option<Pending>, seq:u64, want_focus:bool, script_total:usize,
+    first_frame:bool, script_done:bool, scroll:ScrollHandle, last_entries:usize, pub cats:art::Cats, pub ack_pending:Option<(String,Instant)>, pub recording:Option<(String,Vec<f64>)>, pub ui_epoch:u64, pub controls:Vec<script::CtlEntry>, pub ctl_last:String, pub last_layout:String, pub wake_at:Option<Instant>, pub reconnected:bool, pub click_info:Option<(String,String)>, pub timing:Option<hub::Timing>, pub applied_at:Option<Instant>, pub apply_ms:f64, pub render_us:u64, swatches:bool, gallery:bool, fonts:bool, theme_override:Option<bool>, steps:VecDeque<Step>, pending:Option<Pending>, seq:u64, want_focus:bool, script_total:usize,
 }
 fn pager_row(cx:&mut Context<Backplane>,id:String,pager:&Value,light:bool)->Option<AnyElement> {let c=|name:&str|theme::color(light,name);
     let mut row=div().flex().gap_2().px_3().py_1().text_size(px(11.));let mut any=false;
@@ -45,12 +45,14 @@ impl Backplane {
             if this.popup {let _=this.tx.try_send(Command::Draft(text));}
             cx.notify();
         }).detach();
-        Self{input,data:Value::Null,status:"Connecting…".into(),error:art::assets_missing().unwrap_or_default(),tx,selected:String::new(),drafts:HashMap::new(),popup:false,started,usable:false,first_frame:false,script_done:false,scroll:ScrollHandle::new(),last_entries:0,cats:art::Cats::new(),timing:None,applied_at:None,apply_ms:0.0,render_us:0,swatches,gallery,fonts,theme_override:theme.as_deref().map(|t|t=="light"),steps,pending:None,seq:0,want_focus:false,script_total}
+        Self{input,data:Value::Null,status:"Connecting…".into(),error:art::assets_missing().unwrap_or_default(),tx,selected:String::new(),drafts:HashMap::new(),popup:false,started,usable:false,first_frame:false,script_done:false,scroll:ScrollHandle::new(),last_entries:0,cats:art::Cats::new(),ack_pending:None,recording:None,ui_epoch:0,controls:Vec::new(),ctl_last:String::new(),last_layout:String::new(),wake_at:None,reconnected:false,click_info:None,timing:None,applied_at:None,apply_ms:0.0,render_us:0,swatches,gallery,fonts,theme_override:theme.as_deref().map(|t|t=="light"),steps,pending:None,seq:0,want_focus:false,script_total}
     }
     fn receive(&mut self,event:Event,cx:&mut Context<Self>) {
         match event {
+            Event::NetWake=>{self.wake_at=Some(Instant::now());self.m("net",serde_json::json!({"event":"hub_reachable_again"}));},
             Event::Picture(r,timing)=>{
-                let t_apply=Instant::now();
+                let t_apply=Instant::now();self.ui_epoch+=1;
+                if let Some(w)=self.wake_at.take(){self.reconnected=true;self.m("net",serde_json::json!({"event":"reconnected","ms":(w.elapsed().as_secs_f64()*1e6).round()/1e3}));}
                 let mut r=r;self.data=r["shown"].take();
                 let entries=self.data["thread"]["entries"].as_array().map_or(0,|e|e.len());
                 if entries!=self.last_entries {self.last_entries=entries;self.scroll.set_offset(point(px(0.),px(-1_000_000.)));}
@@ -65,7 +67,7 @@ impl Backplane {
         cx.notify();
     }
     fn select(&mut self,id:String,window:&mut Window,cx:&mut Context<Self>) {self.select_id(id,cx);self.input.focus_handle(cx).focus(window);}
-    fn select_id(&mut self,id:String,cx:&mut Context<Self>) {
+    fn select_id(&mut self,id:String,cx:&mut Context<Self>) {self.ui_epoch+=1;
         let raw=id.rsplit_once('|').map_or(id.as_str(),|(_,id)|id).to_string();
         self.drafts.insert(self.selected.clone(),self.input.read(cx).content.to_string());
         self.selected=raw.clone();let text=self.drafts.get(&raw).cloned().unwrap_or_default();
@@ -73,7 +75,7 @@ impl Backplane {
         let _=self.tx.try_send(Command::Select(id));self.want_focus=true;cx.notify();
     }
     fn send(&mut self,_:&Send,_:&mut Window,cx:&mut Context<Self>) {self.do_send(cx);}
-    fn do_send(&mut self,cx:&mut Context<Self>) {
+    fn do_send(&mut self,cx:&mut Context<Self>) {self.ui_epoch+=1;
         let text=self.input.read(cx).content.to_string();
         if !text.trim().is_empty()&&self.status=="Connected" {let _=self.tx.try_send(Command::Send(text));self.error.clear();}cx.notify();
     }

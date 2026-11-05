@@ -1,9 +1,10 @@
 //! The window: layout and colours follow the web client (src/web/style.css tokens).
+use crate::script::{Ctl, CtlEntry};
 use crate::{art, hub::Command, string, theme, Backplane, Send};
 use gpui::{prelude::*, *};
 use serde_json::Value;
 
-fn pager_row(cx: &mut Context<Backplane>, id: String, pager: &Value, light: bool) -> Option<AnyElement> {
+fn pager_row(cx: &mut Context<Backplane>, id: String, pager: &Value, light: bool, ctl: &mut Vec<CtlEntry>) -> Option<AnyElement> {
     let c = |name: &str| theme::color(light, name);
     let mut row = div().flex().gap_2().px_3().py_1().text_size(px(11.));
     let mut any = false;
@@ -11,6 +12,7 @@ fn pager_row(cx: &mut Context<Backplane>, id: String, pager: &Value, light: bool
         if let Some(value) = pager[key]["value"].as_str() {
             any = true;
             let value = value.to_string();
+            ctl.push(CtlEntry { id: format!("{id}-{key}"), label: name.to_string(), ctl: Ctl::Page(value.clone()) });
             row = row.child(div().id(SharedString::from(format!("{id}-{key}"))).cursor_pointer().text_color(c("accent")).hover(|s| s.bg(c("raise"))).px_1()
                 .child(format!("{} ({})", name, pager["total"]))
                 .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Page(value.clone())); cx.notify(); })));
@@ -54,14 +56,14 @@ fn node_text(n: &Value, out: &mut String) {
     if let Some(t) = n["text"].as_str() { out.push_str(t); }
     for k in n["kids"].as_array().into_iter().flatten() { node_text(k, out); }
 }
-fn node_el(cx: &mut Context<Backplane>, n: &Value, light: bool, depth: usize, path: &str) -> AnyElement {
+fn node_el(cx: &mut Context<Backplane>, n: &Value, light: bool, depth: usize, path: &str, ctl: &mut Vec<CtlEntry>) -> AnyElement {
     let c = |name: &str| theme::color(light, name);
     if let Some(t) = n["text"].as_str() { return div().child(t.to_string()).into_any_element(); }
     if depth > 14 { return div().into_any_element(); }
     let tag = n["tag"].as_str().unwrap_or("div");
     let class = n["className"].as_str().unwrap_or("");
-    let kids = |cx: &mut Context<Backplane>| -> Vec<AnyElement> {
-        n["kids"].as_array().into_iter().flatten().take(200).enumerate().map(|(i, k)| node_el(cx, k, light, depth + 1, &format!("{path}.{i}"))).collect()
+    let kids = |cx: &mut Context<Backplane>, ctl: &mut Vec<CtlEntry>| -> Vec<AnyElement> {
+        n["kids"].as_array().into_iter().flatten().take(200).enumerate().map(|(i, k)| node_el(cx, k, light, depth + 1, &format!("{path}.{i}"), ctl)).collect()
     };
     match tag {
         "svg" | "path" | "img" => div().into_any_element(),
@@ -69,7 +71,8 @@ fn node_el(cx: &mut Context<Backplane>, n: &Value, light: bool, depth: usize, pa
             let (action, payload) = (string(n, "action"), string(n, "payload"));
             let mut label = String::new(); node_text(n, &mut label);
             if label.is_empty() { label = string(n, "label"); }
-            if action.is_empty() || label.is_empty() { return div().flex().gap_1().children(kids(cx)).into_any_element(); }
+            if !action.is_empty() && !label.is_empty() { ctl.push(CtlEntry { id: format!("node:{path}"), label: label.clone(), ctl: Ctl::Node(action.clone(), payload.clone()) }); }
+            if action.is_empty() || label.is_empty() { return div().flex().gap_1().children(kids(cx, ctl)).into_any_element(); }
             div().id(SharedString::from(format!("n{path}"))).px_2().py_1().border_1().border_color(c("line")).bg(c("raise")).text_size(px(12.)).cursor_pointer().hover(|s| s.bg(c("panel")))
                 .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action(action.clone(), payload.clone())); cx.notify(); })).child(label).into_any_element()
         }
@@ -82,11 +85,11 @@ fn node_el(cx: &mut Context<Backplane>, n: &Value, light: bool, depth: usize, pa
             if class.contains("error") { d = d.text_color(c("bad")); }
             d.into_any_element()
         }
-        "section" if class.contains("card") => div().flex().flex_col().gap_2().p_3().border_1().border_color(c("line")).bg(c("panel")).children(kids(cx)).into_any_element(),
+        "section" if class.contains("card") => div().flex().flex_col().gap_2().p_3().border_1().border_color(c("line")).bg(c("panel")).children(kids(cx, ctl)).into_any_element(),
         _ => {
             let row = class.contains("name") || class.contains("row") || class.contains("head") || class.contains("meta");
             let d = div().flex().gap_2();
-            (if row { d.items_center() } else { d.flex_col() }).children(kids(cx)).into_any_element()
+            (if row { d.items_center() } else { d.flex_col() }).children(kids(cx, ctl)).into_any_element()
         }
     }
 }
@@ -116,8 +119,10 @@ impl Render for Backplane {
         let has_thread = thread.is_object();
         // sidebar rows
         let mut rows: Vec<AnyElement> = Vec::new();
+        let mut ctl: Vec<CtlEntry> = Vec::new(); // the controls drawn this frame (the e2e harness's inventory)
         for project in self.data["projects"].as_array().into_iter().flatten() {
             let pid = string(project, "id"); let pid = pid.rsplit_once('|').map_or(pid.as_str(), |(_, r)| r).to_string();
+            ctl.push(CtlEntry { id: format!("project:{pid}"), label: string(project, "title"), ctl: Ctl::Home(pid.clone()) });
             rows.push(div().id(SharedString::from(format!("proj-{pid}"))).flex().items_center().gap_2().px_3().pt_3().pb_1().text_size(px(11.)).text_color(c("dim")).cursor_pointer().hover(|s| s.text_color(c("text")))
                 .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("select".into(), format!("project-home-{pid}"))); cx.notify(); }))
                 .child(ic(light, "chevron-down", 14., "dim")).child(ic(light, "folder", 14., "ok")).child(div().flex_1().child(string(project, "title").to_uppercase())).child(ic(light, "plus", 16., "dim")).into_any_element());
@@ -126,6 +131,7 @@ impl Render for Backplane {
                 let raw = id.rsplit_once('|').map_or(id.as_str(), |(_, i)| i);
                 let selected = raw == self.selected;
                 let dot = match t["state"].as_str().unwrap_or("") { "running" => c("accent"), "failed" => c("bad"), _ => c("ok") };
+                ctl.push(CtlEntry { id: format!("thread:{raw}"), label: string(t, "title"), ctl: Ctl::Select(id.clone()) });
                 rows.push(div().id(SharedString::from(format!("thread-{id}"))).flex().items_center().gap_2().pl(px(22.)).pr_3().h(px(32.))
                     .border_l_2().border_color(if selected { c("ok") } else { c("panel") })
                     .bg(if selected { c("raise") } else { c("panel") }).hover(|s| s.bg(c("raise"))).cursor_pointer()
@@ -135,7 +141,7 @@ impl Render for Backplane {
             }
         }
         for page in self.data["sidebarPages"].as_array().into_iter().flatten() {
-            for key in ["projects", "active", "legacy"] { if let Some(row) = pager_row(cx, format!("pg-{key}"), &page[key], light) { rows.push(row); } }
+            for key in ["projects", "active", "legacy"] { if let Some(row) = pager_row(cx, format!("pg-{key}"), &page[key], light, &mut ctl) { rows.push(row); } }
         }
         for name in ["BOTS", "ROOMS"] {
             rows.push(div().flex().justify_between().px_3().pt_4().text_size(px(11.)).text_color(c("dim")).child(name).child(ic(light, "plus", 16., "dim")).into_any_element());
@@ -161,6 +167,7 @@ impl Render for Backplane {
                         .child(text).child(div().flex().justify_end().text_size(px(11.)).text_color(c("faint")).child(stamp))).into_any_element()),
                 "fold" => {
                     let value = string(e, "value");
+                    ctl.push(CtlEntry { id: format!("fold:{id}"), label: text.clone(), ctl: Ctl::Fold(value.clone()) });
                     entries.push(div().id(SharedString::from(format!("e-{id}"))).py_2().child(
                         div().id(SharedString::from(format!("f-{id}"))).flex().gap_2().px_2().py_1().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("dim")).cursor_pointer()
                             .hover(|s| s.bg(c("raise")))
@@ -185,7 +192,7 @@ impl Render for Backplane {
         let home = &self.data["projectHome"];
         let has_home = home.is_object();
         let home_els: Vec<AnyElement> = if has_home {
-            home["cards"].as_array().into_iter().flatten().take(60).enumerate().map(|(i, k)| node_el(cx, k, light, 0, &format!("h{i}"))).collect()
+            home["cards"].as_array().into_iter().flatten().take(60).enumerate().map(|(i, k)| node_el(cx, k, light, 0, &format!("h{i}"), &mut ctl)).collect()
         } else { Vec::new() };
         // popup
         let skills = thread["skills"].as_array();
@@ -194,6 +201,7 @@ impl Render for Backplane {
             let word = skill.get("word").or_else(|| skill.get("name")).and_then(Value::as_str).unwrap_or("").to_string();
             let label = skill.get("label").and_then(Value::as_str).unwrap_or(&word).to_string();
             let desc = ["text", "hint", "desc", "detail", "about"].iter().find_map(|k| skill.get(*k).and_then(Value::as_str)).unwrap_or("").to_string();
+            if self.popup { ctl.push(CtlEntry { id: format!("skill:{word}"), label: label.clone(), ctl: Ctl::Skill(word.clone()) }); }
             popup = popup.child(div().id(("skill", index)).flex().gap_3().px_3().py_1().cursor_pointer().hover(|s| s.bg(c("raise")))
                 .child(div().font_weight(FontWeight::BOLD).flex_shrink_0().child(label)).child(div().flex_1().overflow_hidden().whitespace_nowrap().text_color(c("dim")).child(desc))
                 .on_click(cx.listener(move |this, _, window, cx| {
@@ -213,12 +221,16 @@ impl Render for Backplane {
         let rail: Vec<AnyElement> = [("Terminal", "terminal"), ("Commands", "search"), ("", ""), ("Board", "circuit-board"), ("Schematic", "cpu"), ("3D", "box"), ("Split", "layout-panel-left"), ("Mech", "layers"), ("", ""), ("Files", "folder"), ("Diff", "diff"), ("Review", "circle-check"), ("Browser", "globe")].iter().map(|(l, i)| {
             if l.is_empty() { div().h(px(12.)).into_any_element() } else { div().flex().flex_col().items_center().h(px(48.)).justify_center().gap_1().text_size(px(10.)).text_color(c("dim")).child(ic(light, i, 18., "dim")).child(*l).into_any_element() }
         }).collect();
+        // controls with no handler yet are registered too, so the harness finds them dead instead of missing
+        ctl.push(CtlEntry { id: "send".into(), label: "Send".into(), ctl: Ctl::Send });
+        for l in ["Terminal", "Commands", "Board", "Schematic", "3D", "Split", "Mech", "Files", "Diff", "Review", "Browser"] { ctl.push(CtlEntry { id: format!("rail:{l}"), label: l.into(), ctl: Ctl::None }); }
+        for l in ["Improvements", "Search", "Settings", "Fold sidebar", "Add project", "Account", "Edit", "Context", "Attach", "Dictate"] { ctl.push(CtlEntry { id: format!("ui:{l}"), label: l.into(), ctl: Ctl::None }); }
         let connected = self.status == "Connected";
 
         let el = div().size_full().flex().flex_col().bg(c("bg")).text_color(c("text")).text_size(px(13.)).font_family("Noto Sans Mono CJK JP").line_height(px(20.))
             .on_action(cx.listener(Self::send)).on_action(cx.listener(Self::close_popup))
             // top bar
-            .child(div().h(px(36.)).flex_shrink_0().flex().items_center().justify_between().px_3().border_b_1().border_color(c("line")).bg(c("bg"))
+            .child(div().h(px(36.)).flex_shrink_0().relative().child(art::probe("topbar")).flex().items_center().justify_between().px_3().border_b_1().border_color(c("line")).bg(c("bg"))
                 .child(div().flex().items_center().gap_2()
                     .child(div().relative().size(px(18.)).child(art::logo(light, 18., "logo"))
                         .child(div().absolute().right(px(-2.)).bottom(px(-1.)).size(px(6.)).bg(if connected { c("ok") } else { c("bad") })))
@@ -231,12 +243,12 @@ impl Render for Backplane {
                     .child(ic(light, "search", 15., "dim")).child(ic(light, "settings", 15., "dim"))))
             .child(div().flex_1().min_h_0().flex()
                 // sidebar
-                .child(div().w(px(264.)).h_full().flex_shrink_0().bg(c("bg")).border_r_1().border_color(c("line")).flex().flex_col()
+                .child(div().w(px(264.)).h_full().flex_shrink_0().relative().child(art::probe("sidebar")).bg(c("bg")).border_r_1().border_color(c("line")).flex().flex_col()
                     .child(div().flex().items_center().gap_2().p_2().child(ic(light, "chevron-left", 16., "dim")).child(div().flex_1().px_2().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).text_color(c("faint")).child("Search projects")).child(ic(light, "plus", 16., "dim")))
                     .child(div().id("sidebar").overflow_y_scroll().flex_1().children(rows))
                     .child(div().px_3().py_1().border_t_1().border_color(c("line")).text_size(px(11.)).text_color(c("dim")).child(self.status.clone())))
                 // main
-                .child(div().flex_1().min_w_0().h_full().flex().flex_col()
+                .child(div().flex_1().min_w_0().h_full().relative().child(art::probe("main")).flex().flex_col()
                     .when(has_thread, |d| d.child(div().h(px(32.)).flex_shrink_0().flex().items_center().border_b_1().border_color(c("line"))
                         .child(div().px_3().flex().gap_2().text_size(px(11.)).child(div().text_color(c("faint")).child("STATE")).child(div().size(px(6.)).mt(px(7.)).bg(c("ok"))).child(string(thread, "phase").split(':').next().unwrap_or("").to_lowercase()))
                         .when(!todo.is_empty(), |d| d.child(div().px_3().h_full().flex().items_center().gap_2().border_l_1().border_color(c("line")).text_size(px(11.)).child(div().text_color(c("faint")).child("TO-DO")).child(todo.clone()).child(ic(light, "chevron-down", 12., "faint"))))))
@@ -246,7 +258,7 @@ impl Render for Backplane {
                         entries
                     }))))
                     .when(!self.error.is_empty(), |d| d.child(div().px_5().py_2().text_color(c("bad")).child(self.error.clone())))
-                    .child(div().flex_shrink_0().border_t_1().border_color(c("line")).flex().justify_center().child(div().w_full().max_w(px(930.)).px_4().py_3().flex().flex_col().gap_2()
+                    .child(div().flex_shrink_0().relative().child(art::probe("composer")).border_t_1().border_color(c("line")).flex().justify_center().child(div().w_full().max_w(px(930.)).px_4().py_3().flex().flex_col().gap_2()
                         .when(show_popup, |d| d.child(popup))
                         .child(div().border_1().border_color(c("accent")).bg(c("view")).px_3().py_2().min_h(px(60.)).child(self.input.clone()))
                         .child(div().flex().gap_2().items_center()
@@ -259,8 +271,9 @@ impl Render for Backplane {
                             .child(div().id("send").px_4().py_1().bg(c("accent")).text_color(c("on-accent")).cursor_pointer().child("Send").on_click(cx.listener(|this, _, window, cx| this.send(&Send, window, cx)))))))
                 )
                 // right rail
-                .child(div().w(px(72.)).h_full().flex_shrink_0().border_l_1().border_color(c("line")).flex().flex_col().py_2().children(rail)))
+                .child(div().w(px(72.)).h_full().flex_shrink_0().relative().child(art::probe("rail")).border_l_1().border_color(c("line")).flex().flex_col().py_2().children(rail)))
             .into_any_element();
+        self.controls = ctl;
         self.render_us = t_render.elapsed().as_micros() as u64;
         el
     }
