@@ -118,18 +118,22 @@ impl Previews {
     pub fn get(&self, name: &str) -> Option<Arc<Image>> { self.by_name.lock().ok()?.get(name).cloned() }
 }
 
+/// A thread's own id: what follows the last `|` of a qualified one (no id contains `|`).
+pub fn raw_id(id: &str) -> &str { id.rsplit('|').next().unwrap_or(id) }
+
 pub fn ext_of_name(name: &str) -> String { name.rsplit_once('.').map(|(_, e)| e.to_lowercase()).unwrap_or_default() }
 
 /// Everything attaching needs; one call from main.rs per composer event.
 pub struct Attacher { pub target: Option<Target>, pub previews: Previews, pub current: Current }
 impl Attacher {
     pub fn new(target: Option<Target>) -> Self { Self { target, previews: Previews::default(), current: Arc::default() } }
-    pub fn show(&self, thread: &str) { if let Ok(mut c) = self.current.lock() { *c = thread.to_string(); } }
+    pub fn show(&self, thread: &str) { if let Ok(mut c) = self.current.lock() { *c = raw_id(thread).to_string(); } }
     /// Start the upload(s) for a composer event. Err is a sentence for the error line; the UI thread reads no file.
     pub fn event(&self, tx: &Sender<Command>, thread: &str, cap: u64, ev: &ComposerEvent) -> Result<(), String> {
         let Some(t) = self.target.clone() else { return Err("Attachments need a hub on plain http://; this one is not.".into()) };
         if thread.is_empty() { return Err("Open a thread to attach a file.".into()); }
-        let (tx, thread, previews, current) = (tx.clone(), thread.to_string(), self.previews.clone(), self.current.clone());
+        // the hub's own id: a screen over several hubs names a thread "<hub>|<id>", and the hub (and `show`) know only the id
+        let (tx, thread, previews, current) = (tx.clone(), raw_id(thread).to_string(), self.previews.clone(), self.current.clone());
         match ev {
             ComposerEvent::Image { bytes, ext } => {
                 let (bytes, ext) = (bytes.clone(), *ext);
@@ -185,6 +189,14 @@ pub fn chips(cx: &mut Context<Backplane>, light: bool, previews: &Previews, thre
 mod tests {
     use super::*;
     use core::prelude::v1::test; // gpui::* also exports a `test` macro
+    /// The failure found in the capped attach run: the screen's thread id was qualified, `show` stored the other form, the upload's end was
+    /// held back as "another thread" and the POST named a thread the hub does not know.
+    #[test] fn a_qualified_thread_id_is_the_same_thread() {
+        assert_eq!(raw_id("127.0.0.1:3834|t1"), "t1"); assert_eq!(raw_id("t1"), "t1"); assert_eq!(raw_id(""), "");
+        let a = Attacher::new(None); a.show("127.0.0.1:3834|t1");
+        assert_eq!(*a.current.lock().unwrap(), "t1");
+        let b = Attacher::new(None); b.show("t1"); assert_eq!(*b.current.lock().unwrap(), *a.current.lock().unwrap());
+    }
     #[test] fn the_request_head_is_a_post_with_length_and_an_encoded_name() {
         let t = Target { addr: "127.0.0.1:3799".into(), token: "tok".into() };
         let h = head(&t, "t1", "0a0b0c0d", "my pic (1).png", 42);
