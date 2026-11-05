@@ -20,6 +20,11 @@ pub struct DiffFile { pub name: String, pub status: String, pub lines: Vec<DiffL
 
 pub const MAX_ROWS: usize = 1000;
 
+/// Open a viewer kind, or close the viewer with "": the phones' idempotent `view` action. The client never toggles the panel and never
+/// guesses its state: pressing twice before the reply asks for the same thing twice.
+pub fn view_kind(kind: &str) -> Command { Command::Action("view".into(), kind.to_string()) }
+pub fn close() -> Command { view_kind("") }
+
 fn arr<'a>(v: &'a Value, k: &str) -> impl Iterator<Item = &'a Value> { v[k].as_array().into_iter().flatten() }
 pub fn tabs(viewer: &Value) -> Vec<Tab> { arr(viewer, "choices").map(|c| Tab { label: string(c, "label"), value: string(c, "value"), on: c["on"].as_bool().unwrap_or(false) }).collect() }
 pub fn crumbs(files: &Value) -> Vec<Crumb> { arr(files, "trail").map(|c| Crumb { label: string(c, "label"), action: string(c, "action"), value: string(c, "value") }).collect() }
@@ -123,9 +128,9 @@ pub fn view(cx: &mut Context<Backplane>, reg: &Reg, light: bool, thread: &Value,
     let open = viewer["open"].as_str().unwrap_or("");
     let diff_on = thread["diff"].is_object();
     let mut bar = div().h(px(34.)).flex_shrink_0().flex().items_center().gap_1().px_2().border_b_1().border_color(c("line"));
-    for (i, t) in tabs(viewer).into_iter().enumerate() { bar = bar.child(btn(cx, light, format!("vtab-{i}"), t.label, t.on && !diff_on, Command::Action("view-kind".into(), t.value))); }
+    for (i, t) in tabs(viewer).into_iter().enumerate() { bar = bar.child(btn(cx, light, format!("vtab-{i}"), t.label, t.on && !diff_on, view_kind(&t.value))); }
     bar = bar.child(div().flex_1()).child(div().id("viewer-close").px_2().cursor_pointer().text_color(c("dim")).hover(|s| s.text_color(c("text"))).child("Close")
-        .on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(Command::Action("panel".into(), String::new())); cx.notify(); })));
+        .on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(close()); cx.notify(); })));
     let body: AnyElement = if diff_on { diff_page(cx, light, &thread["diff"]) }
         else if open == "files" && viewer["files"].is_object() { files_page(cx, light, &viewer["files"]) }
         else if open == "review" && viewer["review"].is_object() { review_page(cx, reg, light, &viewer["review"]) }
@@ -148,6 +153,10 @@ mod tests {
         let r = file_rows(&v["files"]); assert_eq!((r[0].kind.as_str(), r[1].detail.as_str()), ("folder", "1 KB"));
         let d = diff_files(&j(r#"{"summary":"1 file","files":[{"name":"a.rs","status":"M","lines":[{"k":4,"t":"@@ -1 +1 @@","o":"","n":""},{"k":2,"t":"old","o":"1","n":""},{"k":1,"t":"new","o":"","n":"1"}]}]}"#));
         assert_eq!(d[0].lines.len(), 3); assert_eq!((diff_sign(d[0].lines[1].k), diff_sign(d[0].lines[2].k), diff_sign(4)), ("-", "+", " "));
+    }
+    #[test] fn opening_and_closing_are_the_idempotent_view_action_never_a_toggle() {
+        for c in [view_kind("board"), view_kind("board"), view_kind("schematic")] { match c { Command::Action(a, v) => { assert_eq!(a, "view"); assert!(v == "board" || v == "schematic"); } c => panic!("{c:?}") } }
+        match close() { Command::Action(a, v) => assert_eq!((a.as_str(), v.as_str()), ("view", "")), c => panic!("{c:?}") }
     }
     #[test] fn the_panel_is_open_for_a_page_or_a_diff_only() {
         assert!(is_open(&j(r#"{"viewer":{"open":"board"}}"#))); assert!(is_open(&j(r#"{"diff":{"summary":"","files":[]}}"#)));
