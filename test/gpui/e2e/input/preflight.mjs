@@ -39,9 +39,9 @@ export async function preflight({display,env,ime,out,portalLog=null}){
     const xev=spawn('xev',['-geometry','300x300+380+40','-name','pf-xim','-event','keyboard'],{env:{...env,...ime.env},stdio:['ignore','pipe','ignore']});let log='';xev.stdout.on('data',d=>log+=d);await sleep(1800);
     const g=xi.geometry('pf-xim');xi.focus(g.id);await sleep(500);xi.click(g.x+50,g.y+50);await sleep(400);
     // ibus keeps an engine per input context: switch AFTER the client's context has focus (a new context starts on the default engine)
-    try{ime.setEngine('hangul')}catch{}await sleep(500);for(const k of['g','k','s','space']){xi.key(k);await sleep(250)}await sleep(800);xev.kill();
+    try{ime.setEngine('hangul')}catch{}await sleep(500);for(const k of['g','k','s','space']){xi.key(k);await sleep(250)}await sleep(800);xev.kill();writeFileSync(out+'/xim-xev.log',log);
     const filtered=(log.match(/XFilterEvent returns: True/g)||[]).length;const han=/ed 95 9c|한/.test(log);
-    ok('ime-composes-in-plain-xim-client',han,{filteredKeys:filtered,sawHan:han,tail:log.split('\n').filter(l=>/Lookup|keysym|XFilter/.test(l)).slice(-6).join(' | ').slice(0,300)});
+    ok('ime-composes-in-plain-xim-client',han,{locale:ime.locale,locales:ime.locales,filteredKeys:filtered,sawHan:han,tail:log.split('\n').filter(l=>/Lookup|keysym|XFilter/.test(l)).slice(-14).join(' | ').slice(0,700)});
     try{ime.setEngine('xkb:us::eng')}catch{}});
   // 5. the file-chooser portal stand-in is up (paperclip)
   if(portalLog)await guard('portal',async()=>{ok('portal-standin',existsSync(portalLog+'.ready'),{log:portalLog})});
