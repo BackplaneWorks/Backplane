@@ -223,3 +223,11 @@ Harness for the 12 gate journeys and the frame measurements; design and the requ
 - Real GPUI defect found: popups for `@`, `>` and `%` never appear (`/` and `$` do): 3 of 6 popup steps failed, and 13 of 50 steps in a 3-minute random walk (reported to the screens lane).
 - Evidence limits stated in the output: click ack derived from the recording is coarser than the 16.7 ms budget at x11grab 30 fps (alignment about +-60 ms; the median ack came out later than the median result), so `pass` is reported unknown, not true; only GPUI's own ack event (G1) can settle it. Boat renders in software, so frame figures from it are harness validation, not GPU evidence.
 - iOS and Android drivers are written by their streams under `test/gpui/e2e/{ios,android}/` and plug in through `adapters/`; the fixture hub for devices is `serve-fixture.mjs` (run on h@backplane; cut/restart control endpoint). Nothing ran on the desktop.
+
+### e2e, first run with the G1-G5 GPUI build (Boat, llvmpipe, JS hub; 2026-11-05 10:02)
+`gpui` build of 05:01 (G1-G5, `frames_ms` fix a2d73ca74) against the seeded JS hub, software-rendered, so none of this is GPU or Rust-hub evidence and nothing is a pass (rule in `test/gpui/e2e/CONTRACT.md`). Raw: Boat job j20261105100229-1877456, artifacts/gpui/summary.json (+ mp4/png per journey).
+- Click ack (G1, GPUI's own event): p50 48-64 ms, p95 72-83 ms; the software renderer's frame interval is about 48 ms (19-23 fps; 89 of 91 frames janky in projects-threads, 343 of 490 while streaming), so the one-frame budget (16.7 ms) is not judgeable here. Result times p50 60-144 ms.
+- Layout shift (G3): score 0.006-0.063 (<= 0.1, passes); the composer and the rail are what moved without an input.
+- Controls (G4): 44 visible controls on a thread screen, 23 wired, 0 dead among the wired; 21 visible controls are unwired (`wired:false`), which the sweep now fails. Defect to GPUI: `net_sleep` over 15 s always fails (15 s timer).
+- Popups `@`, `>`, `%`: still fail (15 of 65 steps in the 3-minute walk). Memory over 3 minutes: +24 +-11 MB/h (too short to read).
+- 6 journeys blocked on G5 steps not implemented (pair, paste image, bots/rooms, viewers, downloads, settings). The dead-controls rerun that saves the control list did not start: Boat refused ("start limit per day: 837 of 840"); reruns wait for the quota to reset.
