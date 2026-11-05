@@ -14,3 +14,4 @@ pub mod pairing;
 pub mod qr;
 pub mod routes;
 pub mod start;
+pub use start::routes;
