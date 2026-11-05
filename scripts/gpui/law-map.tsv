@@ -636,3 +636,7 @@ law launch_said_quiet rust launch_said_quiet
 law launch_own_stop_quiet rust launch_own_stop_quiet
 law launch_stop_told rust launch_own_stop_quiet
 law launch_loop_bounded rust launch_loop_bounded
+law fallback_empty_exhausted rust fallback_empty_exhausted
+law fallback_auth_is_not_quota rust fallback_auth_is_not_quota
+law fallback_unknown_reset_held rust fallback_unknown_reset_held
+law fallback_reset_boundary rust fallback_reset_boundary
