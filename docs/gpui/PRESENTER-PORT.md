@@ -52,6 +52,24 @@ session, action, now, ids; `Out` holds `shown, session, cmds, next_target, overl
 per-connection state (drafts, markers, held info, `local`, reads, page position); the presenter keeps none. `wants` (reads the host
 runs: `files.dir`, `mail.*`, ...) go through `session::run_wants(hub, conn, target, wants)`, the host half of parity-session's `wants` stack, once it is re-based on this.
 
+## The seam: a drop-in for `Presenter::view`
+
+The contract is the one that exists, so nothing outside `present/` changes. `RustPresenter::view(&params) -> Option<Value>` takes the **same params the
+hub builds for the helper** (`session/mod.rs view_request`): `version, generation, epoch, hub, requestRevision, target, session` (the actor's input), `action`/`value`,
+`revision` (= `signal_seq`), `viewId`, `nativeKey`, `now`, `window`, `page {thread, before, below, above, rows}` (32 rows in the cells `seq ord id thread src kind
+role akind text at`), `reads`, `local`, `seq`. It returns the **same object the helper's `V` returns**: `shown`, `session`, `cmds`, `wants`, `nextTarget`,
+`overlay`, `local`, `refused`, `stale`, `window`. `None` means not ported: the router asks the helper (stage 1) or answers "not ported". The actor, `assemble`,
+deltas, segmentation and `local` stay as they are.
+
+This makes the oracle exact and cheap: with `BACKPLANE_PRESENTER_DUMP=<dir>` a hub (copy mode, synthetic log) writes each `(params, helper output)` pair; the
+differential test feeds the dumped params to `RustPresenter` and compares outputs (after the harness' normalisations: clocks, ids). Each module lands at 0 differences over
+the dumps of the `session:gpui` scenarios (the JS recordings' trace through the same requests), then the network replay (`test/gpui/parity`) confirms end to end.
+
+Actions are a table in `actions.rs`: `fn act(cx: &Ctx, req: &Req) -> Option<ActOut>` where `ActOut { session_patch, cmds, next_target }` and `req.action`/`req.value` are the
+`view.action` pair (`pin`, `row-pin`, `row-settle`, `row-archive`, `new-thread`, `rename-save` ...). The names and the `cmds` they produce are read from the dumps and
+client.bend's `Ui.act` (the cases for `Menu.*`, `Ren.*`, `Made.*`); the RPCs under them (`thread.create/pin/settle/rename/archive`) are done and parity-tested (commands).
+Nothing is guessed from the Bend source alone: an action's contract is its dumped `(action, value) -> (session, cmds, nextTarget)`.
+
 ## The indexed read model
 
 - Log: offset index (28 B/event), unchanged. Entries are read by `seq` from the store through a bounded page cache (decoded pages, LRU, a few MB), never folded.
