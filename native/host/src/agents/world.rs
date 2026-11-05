@@ -18,9 +18,9 @@ pub struct T {
 pub struct Ask { pub thread: String, pub kind: String, pub tool: String, pub detail: String, pub options: String }
 
 #[derive(Default)]
-pub struct World { pub asks: HashMap<String, Ask>, pub sessions: std::collections::HashSet<(String, String)>, pub threads: HashMap<String, T>, pub roots: HashMap<String, String>, pub st: HashMap<String, String>, seen: usize }
+pub struct World { pub deadlines: std::collections::HashSet<String>, pub asks: HashMap<String, Ask>, pub sessions: std::collections::HashSet<(String, String)>, pub threads: HashMap<String, T>, pub roots: HashMap<String, String>, pub st: HashMap<String, String>, seen: usize }
 
-const KEYS: &[&str] = &["effort.", "buy.", "kicad.ipc", "order.enabled", "agent.lang", "tz.machine", "agent.thinking", "restart.continue", "tok.epoch", "tok.recount", "tok.basis.", "turn.speed.", "turn.models.", "limit.claude."];
+const KEYS: &[&str] = &["thread.parent.", "bg.", "wait.", "work.timeout.seconds", "allowance.claude", "effort.", "buy.", "kicad.ipc", "order.enabled", "agent.lang", "tz.machine", "agent.thinking", "restart.continue", "tok.epoch", "tok.recount", "tok.basis.", "turn.speed.", "turn.models.", "limit.claude."];
 fn tracked(k: &str) -> bool { KEYS.iter().any(|p| k == *p || (p.ends_with('.') && k.starts_with(p))) || k.starts_with("usage.") || k.starts_with("tok.key.") }
 
 pub const CARRY_TEXT: &str = "Backplane restarted while you were working. Continue where you left off.";
@@ -48,7 +48,7 @@ impl World {
 
     pub fn apply(&mut self, line: &str) {
         let Some(t) = line.strip_prefix("{\"$\":\"").and_then(|r| r.split('"').next()) else { return };
-        const READ: [&str; 21] = ["AskOpened", "AskClosed", "ThreadRenamed", "ProjectCreated", "ThreadCreated", "WorktreeSet", "ProviderSet", "ModesSet", "SessionSet", "TurnChanged", "MessagePosted", "ActivityLogged", "UsageSet", "SettingSet", "TurnUsage", "ThreadArchived", "ThreadDeleted", "ThreadForked", "QueueTaken", "TurnQueued", "ThreadWoke"];
+        const READ: [&str; 22] = ["WorkSet", "AskOpened", "AskClosed", "ThreadRenamed", "ProjectCreated", "ThreadCreated", "WorktreeSet", "ProviderSet", "ModesSet", "SessionSet", "TurnChanged", "MessagePosted", "ActivityLogged", "UsageSet", "SettingSet", "TurnUsage", "ThreadArchived", "ThreadDeleted", "ThreadForked", "QueueTaken", "TurnQueued", "ThreadWoke"];
         if !READ.contains(&t) { return }
         let Ok(v) = serde_json::from_str::<Value>(line) else { return };
         let g = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").to_string();
@@ -75,7 +75,8 @@ impl World {
                 let keep = |new: u64, old: u64| if new == 0 { old } else { new };
                 let ps: Vec<u64> = old.split('/').map(num).collect(); self.st.insert(k, format!("{}/{}", keep(u, *ps.first().unwrap_or(&0)), keep(w, *ps.get(1).unwrap_or(&0)))); }
             "TurnUsage" => { self.st.insert(format!("tok.key.{}", g("thread")), g("key")); self.st.insert(format!("tok.basis.{}", g("thread")), g("basis")); }
-            "SettingSet" => { let k = g("key"); if tracked(&k) { self.st.insert(k, g("value")); } }
+            "WorkSet" => if g("kind") == "bg" { self.st.insert(format!("bg.{}", g("thread")), g("rows")); },
+            "SettingSet" => { let k = g("key"); if tracked(&k) { self.st.insert(k.clone(), g("value")); } if k.starts_with("work.deadline.") { if g("value").is_empty() { self.deadlines.remove(&k); } else { self.deadlines.insert(k); } } }
             _ => {}
         }
     }
@@ -95,6 +96,8 @@ impl World {
             used: *ps.first().unwrap_or(&0), window: *ps.get(1).unwrap_or(&0),
             tok_basis: self.setting(&format!("tok.basis.{th}")).into(), tok_key: self.setting(&format!("tok.key.{th}")).into(), speed: self.setting(&format!("turn.speed.{th}")).into(),
             models: self.setting(&format!("turn.models.{th}")).into(), tok_epoch_set: !self.setting("tok.epoch").is_empty(), tok_recount_set: !self.setting("tok.recount").is_empty(),
+            bg: super::bg::lines(self.setting(&format!("bg.{th}"))), bg_text: self.setting(&format!("bg.{th}")).to_string(),
+            deadlines: self.deadlines.iter().filter(|k| k.starts_with(&format!("work.deadline.{th}."))).cloned().collect(), timeout_setting: self.setting("work.timeout.seconds").to_string(), allowance: self.setting("allowance.claude").to_string(), default_account: true,
             limits: self.st.iter().filter(|(k, _)| k.starts_with("limit.claude.")).map(|(k, v)| (k.clone(), v.clone())).collect(), seq: 0 }
     }
 }

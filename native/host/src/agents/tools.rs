@@ -24,11 +24,13 @@ impl Agents {
     async fn thread_json(&self, id: &str) -> Option<Value> {
         let m = self.hub.model().await; let t = m.threads.get(id)?.clone(); drop(m);
         let phase = self.phase(id, &t.turn, t.pending).await;
-        Some(json!({"id":id,"project":t.project,"title":t.title,"provider":t.provider,"model":t.model,"turn":t.turn,"activity":t.activity,"phase":phase,"waiting":0,"work":[]}))
+        let parent = { let w = self.world().await; let p = w.setting(&format!("thread.parent.{id}")).to_string(); // Tree.raw: a link to a live thread of the same project, never to itself
+            if !p.is_empty() && p != id && w.threads.get(&p).map_or(false, |x| !x.deleted && x.project == t.project) && w.threads.get(id).map_or(false, |x| !x.deleted) { p } else { String::new() } };
+        Some(json!({"id":id,"project":t.project,"title":t.title,"provider":t.provider,"model":t.model,"turn":t.turn,"activity":t.activity,"parent":parent,"phase":phase,"waiting":0,"work":[]}))
     }
 
     pub async fn tool_caps(&self, thread: &str) -> (bool, Value) {
-        let me = self.thread_json(thread).await.map(|mut v| { v.as_object_mut().map(|o| { o.remove("phase"); o.remove("waiting"); o.remove("work"); }); v }).unwrap_or(Value::Null);
+        let me = self.thread_json(thread).await.map(|mut v| { v.as_object_mut().map(|o| { o.remove("parent"); o.remove("phase"); o.remove("waiting"); o.remove("work"); }); v }).unwrap_or(Value::Null);
         (true, json!({"providers":self.host.models,"maxDepth":3,"thread":me,"depth":0}))
     }
     pub async fn tool_list(&self, thread: &str) -> (bool, Value) {

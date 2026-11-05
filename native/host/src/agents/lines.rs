@@ -3,6 +3,7 @@
 //! thread's slice of the read model these rules look at) and a line in, events and live text out.
 //! Not ported (said, not silent): subagent lines (`parent_tool_use_id`), background tasks (`Bg`), todo tools,
 //! tool-call tracking for deploys, the allowance stream, thinking blocks while `Think` is on is ported.
+use super::bg;
 use serde_json::{json, Value};
 
 pub fn s<'a>(v: &'a Value, k: &str) -> &'a str { v.get(k).and_then(Value::as_str).unwrap_or("") }
@@ -31,7 +32,18 @@ pub struct Cx {
     pub tok_epoch_set: bool, pub tok_recount_set: bool,
     pub limits: std::collections::HashMap<String, String>,
     pub seq: u64,
+    /// the thread's background work rows (a WorkSet "bg"), as text and parsed
+    pub bg: Vec<String>, pub bg_text: String,
+    /// work.deadline.<thread>.<task> keys already set, and the work.timeout.seconds setting
+    pub deadlines: std::collections::HashSet<String>, pub timeout_setting: String,
+    /// the allowance.claude setting, and whether the thread uses the default account (named accounts keep their own collector)
+    pub allowance: String, pub default_account: bool,
 }
+
+/// How a line is judged by the command ledger (cmds.rs): the legacy rule (the result ends the turn), or the ledger's:
+/// quiet (a stopped or foreign turn's line) and stream (current work) change no turn from a result.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Flow { Legacy, Quiet, Stream }
 
 #[derive(Debug, Default, PartialEq)]
 pub struct Fx { pub events: Vec<Value>, pub deltas: Vec<String>, pub delta_end: bool }
@@ -76,7 +88,9 @@ impl Cx {
                 "tool_use" => {
                     let id = { let x = s(b, "id"); if x.is_empty() { hub_id("a", at, self.seq) } else { x.to_string() } };
                     let name = { let x = s(b, "name"); if x.is_empty() { "tool" } else { x } };
-                    out.push(json!({"$":"ActivityLogged","thread":self.thread,"act":id,"tone":"tool","kind":name,"summary":tool_summary(name, b.get("input").unwrap_or(&Value::Null)),"at":at}));
+                    let input = b.get("input").unwrap_or(&Value::Null); let summary = if name == "TodoWrite" { todo_summary(input) } else { tool_summary(name, input) };
+                    out.push(json!({"$":"ActivityLogged","thread":self.thread,"act":id,"tone":"tool","kind":name,"summary":summary,"at":at}));
+                    self.sub_about(b, at, out);
                 }
                 "thinking" if self.think && !s(b, "thinking").trim().is_empty() =>
                     out.push(json!({"$":"ActivityLogged","thread":self.thread,"act":format!("think:{msg}:{i}{}", uid(uuid)),"tone":"thinking","kind":"thinking","summary":s(b, "thinking"),"at":at})),
@@ -152,23 +166,143 @@ impl Cx {
         }
     }
 
-    /// One main-agent line. `at` is the clock in seconds; `ms` is only for live-buffer ids (not here).
-    pub fn line(&mut self, o: &Value, at: u64) -> Fx {
+    // ---- background work, subagents, todos, allowance ----
+    fn bg_put(&mut self, rows: Vec<String>, at: u64, out: &mut Vec<Value>) {
+        let after = bg::show(&rows);
+        if after != self.bg_text { out.push(json!({"$":"WorkSet","thread":self.thread,"kind":"bg","rows":after,"at":at})); self.bg_text = after }
+        self.bg = rows;
+    }
+    /// Bg.mark: a mark in a task's log (it started, or ended with a status); none for one no tool call started
+    fn bg_mark(&self, call: &str, kind: &str, text: &str, at: u64, out: &mut Vec<Value>) {
+        if !call.is_empty() { out.push(json!({"$":"ActivityLogged","thread":bg::log(&self.thread),"act":format!("{call}/{kind}"),"tone":call,"kind":kind,"summary":text,"at":at})) }
+    }
+    /// WorkTimeout.start: a deadline for the task, reported only (never signalled): "work.deadline.<thread>.<id>" once.
+    fn bg_deadline(&mut self, id: &str, o: &Value, at: u64, out: &mut Vec<Value>) {
+        let key = format!("work.deadline.{}.{id}", self.thread); if self.deadlines.contains(&key) { return }
+        let parse = |raw: &str, fb: u64| if !raw.is_empty() && raw.len() <= 10 && raw.chars().all(|c| c.is_ascii_digit()) { num(raw) } else { fb };
+        let secs = parse(&raw(o, "timeoutSec"), parse(&self.timeout_setting, 1200));
+        out.push(setting(key.clone(), if secs == 0 { "0".into() } else { (at + secs).to_string() }, at)); out.push(setting(format!("{key}.noted"), String::new(), at)); self.deadlines.insert(key);
+    }
+    /// Bg.outcome: what a task reported as it ended, noted in its log beside its end
+    fn bg_outcome(&self, o: &Value, at: u64, out: &mut Vec<Value>) {
+        let call = s(o, "tool_use_id"); let sum = s(o, "summary"); let usage = o.get("usage").cloned().unwrap_or(Value::Null);
+        if call.is_empty() || (sum.is_empty() && usage.is_null()) { return }
+        let summary = if sum.chars().count() > 600 { format!("{}…", sum.chars().take(600).collect::<String>()) } else { sum.to_string() };
+        out.push(json!({"$":"ActivityLogged","thread":bg::log(&self.thread),"act":format!("{call}/outcome"),"tone":call,"kind":"outcome","summary":json!({"summary":summary,"usage":usage}).to_string(),"at":at}));
+    }
+    /// Bg.system
+    fn bg_system(&mut self, o: &Value, at: u64, out: &mut Vec<Value>) {
+        match s(o, "subtype") {
+            "task_started" if bg::listed(o) => {
+                let call = s(o, "tool_use_id"); let what = o.get("description").and_then(Value::as_str).unwrap_or("Subagent"); let kind = bg::kind(s(o, "task_type")); let id = s(o, "task_id");
+                let rows = bg::start(&self.bg, id, what, call, what, kind); self.bg_put(rows, at, out);
+                self.bg_mark(call, &format!("start:{kind}"), what, at, out); self.bg_deadline(id, o, at, out);
+            }
+            "task_progress" => { let rows = bg::progress_line(&self.bg, o); self.bg_put(rows, at, out) }
+            "task_notification" => {
+                let rows = bg::drop(&self.bg, s(o, "task_id")); self.bg_put(rows, at, out);
+                let status = o.get("status").and_then(Value::as_str).unwrap_or("completed"); self.bg_mark(s(o, "tool_use_id"), "end", status, at, out); self.bg_outcome(o, at, out);
+            }
+            "task_updated" => {
+                let patch = o.get("patch").unwrap_or(&Value::Null); let status = s(patch, "status"); let id = s(o, "task_id");
+                if ["completed", "failed", "killed", "stopped", "cancelled"].contains(&status) { let rows = bg::end(&self.bg, id, status); self.bg_put(rows, at, out) }
+                else if patch.get("is_backgrounded").and_then(Value::as_bool).unwrap_or(false) { let rows = bg::start(&self.bg, id, "Background shell", "", "Background shell", "shell"); self.bg_put(rows, at, out); self.bg_deadline(id, &Value::Null, at, out) }
+            }
+            "background_tasks_changed" => { let ids: Vec<String> = o.get("tasks").and_then(Value::as_array).map(|a| a.iter().map(|t| s(t, "task_id").to_string()).collect()).unwrap_or_default(); let rows = bg::sync(&self.bg, &ids); self.bg_put(rows, at, out) }
+            _ => {}
+        }
+    }
+    /// A burst of held progress lines, written once (Prog.flush).
+    pub fn progress(&mut self, lines: &[Value], at: u64) -> Vec<Value> { let mut rows = self.bg.clone(); for l in lines { rows = bg::progress_line(&rows, l) } let mut out = vec![]; self.bg_put(rows, at, &mut out); out }
+    pub fn bg_clear(&mut self, at: u64) -> Vec<Value> { let mut out = vec![]; self.bg_put(vec![], at, &mut out); out }
+    pub fn bg_replace(&mut self, rows: Vec<String>, at: u64) -> Vec<Value> { let mut out = vec![]; self.bg_put(rows, at, &mut out); out }
+    /// Claude.result.why of a line
+    pub fn why_of(o: &Value) -> String { Cx::why(o) }
+    /// Bg.settle: a turn ended: the outcomes of the rows that ended are the agent's now
+    pub fn bg_settle(&mut self, at: u64) -> Vec<Value> { let rows = bg::unended(&self.bg); let mut out = vec![]; self.bg_put(rows, at, &mut out); out }
+    /// Bg.stop.outs: the control requests that stop each task still at work
+    pub fn bg_stop_lines(&self, rid: &str) -> Vec<String> {
+        self.bg.iter().filter(|l| !bg::ended(l)).map(|l| { let id = bg::field(l, 0); json!({"type":"control_request","request_id":format!("{rid}-{id}"),"request":{"subtype":"stop_task","task_id":id}}).to_string() }).collect()
+    }
+    /// Sub.blocks: a subagent's own text and tool calls go to its task's log, not the thread's timeline
+    fn sub_blocks(&self, o: &Value, call: &str, at: u64) -> Vec<Value> {
+        let m = o.get("message").unwrap_or(&Value::Null); let msg = { let i = s(m, "id"); if i.is_empty() { "msg" } else { i } }; let log = bg::log(&self.thread); let mut out = vec![];
+        for (n, b) in m.get("content").and_then(Value::as_array).into_iter().flatten().enumerate() {
+            match s(b, "type") {
+                "text" => out.push(json!({"$":"ActivityLogged","thread":log,"act":format!("{call}/{msg}:{n}"),"tone":call,"kind":"say","summary":s(b, "text"),"at":at})),
+                "tool_use" => { let name = { let x = s(b, "name"); if x.is_empty() { "tool" } else { x } }; let id = { let x = s(b, "id"); if x.is_empty() { format!("{msg}:{n}") } else { x.to_string() } };
+                    out.push(json!({"$":"ActivityLogged","thread":log,"act":format!("{call}/{id}"),"tone":call,"kind":name,"summary":tool_summary(name, b.get("input").unwrap_or(&Value::Null)),"at":at})) }
+                _ => {}
+            }
+        }
+        out
+    }
+    /// Sub.about: what an Agent call's subagent was asked, its type and model, noted in its log
+    fn sub_about(&self, b: &Value, at: u64, out: &mut Vec<Value>) {
+        let name = s(b, "name"); let id = s(b, "id"); if !(name == "Agent" || name == "Task") || id.is_empty() { return }
+        let i = b.get("input").unwrap_or(&Value::Null); let p = s(i, "prompt"); let p = if p.chars().count() > 1500 { format!("{}…", p.chars().take(1500).collect::<String>()) } else { p.to_string() };
+        out.push(json!({"$":"ActivityLogged","thread":bg::log(&self.thread),"act":format!("{id}/about"),"tone":id,"kind":"about","summary":json!({"type":s(i, "subagent_type"),"model":s(i, "model"),"prompt":p}).to_string(),"at":at}));
+    }
+    /// Claude.todos: an assistant message's todo tools, for the model to fold into the thread's list
+    fn todos_of(&self, m: &Value, at: u64, out: &mut Vec<Value>) {
+        let bs: Vec<&Value> = m.get("content").and_then(Value::as_array).into_iter().flatten().filter(|b| s(b, "type") == "tool_use" && ["TodoWrite", "TaskCreate", "TaskUpdate"].contains(&s(b, "name"))).collect();
+        if !bs.is_empty() { out.push(json!({"$":"TodosChanged","thread":self.thread,"who":"tools","data":Value::Array(bs.into_iter().cloned().collect()).to_string(),"at":at})) }
+    }
+    /// Claude.named: a "user" line carries tool results; a TaskCreate's names its step
+    fn named(&self, o: &Value, at: u64, out: &mut Vec<Value>) {
+        let mut v: Vec<Value> = vec![];
+        for b in o.get("message").and_then(|m| m.get("content")).and_then(Value::as_array).into_iter().flatten() {
+            let n = todo_result(&result_text(b.get("content").unwrap_or(&Value::Null)));
+            if !n.is_empty() { v.push(json!({"name":"TaskNamed","use":s(b, "tool_use_id"),"number":n})) }
+        }
+        if !v.is_empty() { out.push(json!({"$":"TodosChanged","thread":self.thread,"who":"tools","data":Value::Array(v).to_string(),"at":at})) }
+    }
+    /// AllowanceStream.changes: passive readings of the plan windows, never zero when missing
+    fn allowance(&mut self, o: &Value, at: u64, out: &mut Vec<Value>) {
+        if !self.default_account { return }
+        let w = o.get("rate_limit_info").and_then(|r| r.get("unifiedWindows")).cloned().unwrap_or(Value::Null); let mut ws: Vec<Value> = vec![];
+        for (key, name, scope, minutes) in [("five_hour", "5 h", "shared", 300u64), ("seven_day", "7 d", "shared", 10080), ("seven_day_opus", "7 d · Opus", "opus", 10080), ("seven_day_sonnet", "7 d · Sonnet", "sonnet", 10080)] {
+            let Some(win) = w.get(key) else { continue };
+            let used: f32 = match win.get("utilization") { Some(Value::Number(x)) => x.to_string().parse().unwrap_or(-1.0), _ => -1.0 };
+            let resets = win.get("resetsAt").cloned().unwrap_or(Value::Null);
+            ws.push(if (0.0..=1.0).contains(&used) { json!({"name":name,"scope":scope,"shared":true,"duration_minutes":minutes,"used_permille":(used * 1000.0).ceil() as u64,"reported_utilization":win["utilization"],"resets_at":resets}) }
+                    else { json!({"name":name,"scope":scope,"shared":true,"duration_minutes":minutes,"used_permille":Value::Null,"resets_at":resets}) });
+        }
+        let old: Value = serde_json::from_str(&self.allowance).unwrap_or(Value::Null); let old_at = n(&old, "at");
+        let different = Value::Array(ws.clone()).to_string() != old.get("windows").cloned().unwrap_or(Value::Null).to_string();
+        if !ws.is_empty() && (different || old_at == 0 || at < old_at || at - old_at >= 60) {
+            let snap = json!({"provider":"claude","source":"Claude stream","auth":"unknown","state":"ok","at":at,"windows":ws}).to_string();
+            self.allowance = snap.clone(); out.push(setting("allowance.claude".into(), snap, at));
+        }
+    }
+
+    /// One main-agent line judged by the legacy rule. `at` is the clock in seconds.
+    pub fn line(&mut self, o: &Value, at: u64) -> Fx { self.line_flow(o, at, Flow::Legacy) }
+
+    /// Claude.line.k / Claude.line.r: one line; `flow` says whether the command ledger lets its text stream and whether a result may end the turn.
+    pub fn line_flow(&mut self, o: &Value, at: u64, flow: Flow) -> Fx {
         let mut fx = Fx::default();
-        if !s(o, "parent_tool_use_id").is_empty() { return fx } // a subagent's line: not ported
+        let call = s(o, "parent_tool_use_id");
+        if !call.is_empty() { if s(o, "type") == "assistant" { fx.events = self.sub_blocks(o, call, at) } return fx } // Sub.line
         self.seq += 1;
         match s(o, "type") {
             "system" => {
-                if s(o, "subtype") == "init" { let mut ev = vec![]; self.init(o, at, &mut ev); fx.events = ev }
-                else if s(o, "subtype") == "compact_boundary" { let post = o.get("compact_metadata").map_or(0, |m| n(m, "post_tokens")); let mut ev = vec![]; self.used_event(post, at, &mut ev); fx.events = ev }
+                let mut ev = vec![];
+                match s(o, "subtype") {
+                    "init" => self.init(o, at, &mut ev),
+                    "compact_boundary" => { let post = o.get("compact_metadata").map_or(0, |m| n(m, "post_tokens")); self.used_event(post, at, &mut ev) }
+                    _ => {}
+                }
+                self.bg_system(o, at, &mut ev); fx.events = ev;
             }
-            "stream_event" => if self.running {
-                let ev = o.get("event").unwrap_or(&Value::Null); let d = ev.get("delta").unwrap_or(&Value::Null);
-                if s(ev, "type") == "content_block_delta" && s(d, "type") == "text_delta" { fx.deltas.push(s(d, "text").to_string()) }
-            },
+            "stream_event" => {
+                let run = match flow { Flow::Legacy => self.running, Flow::Quiet => false, Flow::Stream => true };
+                if run { let ev = o.get("event").unwrap_or(&Value::Null); let d = ev.get("delta").unwrap_or(&Value::Null);
+                    if s(ev, "type") == "content_block_delta" && s(d, "type") == "text_delta" { fx.deltas.push(s(d, "text").to_string()) } }
+            }
             "assistant" => {
                 let m = o.get("message").unwrap_or(&Value::Null); let mut ev = vec![];
-                self.blocks(m, s(o, "uuid"), at, &mut ev);
+                self.blocks(m, s(o, "uuid"), at, &mut ev); self.todos_of(m, at, &mut ev);
                 let u = m.get("usage").unwrap_or(&Value::Null);
                 let used = n(u, "input_tokens") + n(u, "cache_creation_input_tokens") + n(u, "cache_read_input_tokens") + n(u, "output_tokens");
                 self.used_event(used, at, &mut ev);
@@ -181,7 +315,7 @@ impl Cx {
             }
             "result" => {
                 let mut ev = vec![];
-                if self.running {
+                if flow == Flow::Legacy && self.running {
                     if o.get("is_error").and_then(Value::as_bool).unwrap_or(false) {
                         ev.push(json!({"$":"ActivityLogged","thread":self.thread,"act":hub_id("e", at, 0),"tone":"error","kind":"result","summary":Cx::why(o),"at":at}));
                         ev.push(json!({"$":"TurnChanged","thread":self.thread,"state":"failed","at":at}));
@@ -191,11 +325,35 @@ impl Cx {
                 self.window(o, at, &mut ev); self.turn_usage(o, at, &mut ev);
                 fx.events = ev;
             }
-            "rate_limit_event" => { let mut ev = vec![]; self.limits(o, at, &mut ev); fx.events = ev }
+            "user" => { let mut ev = vec![]; self.named(o, at, &mut ev); fx.events = ev }
+            "rate_limit_event" => { let mut ev = vec![]; self.limits(o, at, &mut ev); self.allowance(o, at, &mut ev); fx.events = ev }
             _ => {}
         }
         fx
     }
+
+    /// The ledger ended the turn (verdicts 3 ok, 4 failed, 5 stopped): the turn's own events, then the rows settled.
+    pub fn end(&mut self, verdict: u8, text: &str, at: u64) -> Vec<Value> {
+        let mut ev = vec![];
+        match verdict {
+            3 => ev.push(json!({"$":"TurnChanged","thread":self.thread,"state":"completed","at":at})),
+            4 => { ev.push(json!({"$":"ActivityLogged","thread":self.thread,"act":hub_id("e", at, 0),"tone":"error","kind":"result","summary":text,"at":at})); ev.push(json!({"$":"TurnChanged","thread":self.thread,"state":"failed","at":at})) }
+            5 => ev.push(json!({"$":"TurnChanged","thread":self.thread,"state":"interrupted","at":at})),
+            _ => return ev,
+        }
+        self.running = false; ev.extend(self.bg_settle(at)); ev
+    }
+}
+
+fn result_text(c: &Value) -> String { match c { Value::Array(a) => a.first().map(|x| s(x, "text").to_string()).unwrap_or_default(), Value::String(x) => x.clone(), _ => String::new() } }
+/// Todo.result: the number in a TaskCreate result ("Task #3 created successfully: ..."), or "" for anything else
+pub fn todo_result(text: &str) -> String { if !text.starts_with("Task #") { return String::new() } text.split('#').nth(1).map(|r| r.chars().take_while(|c| c.is_ascii_digit()).collect()).unwrap_or_default() }
+/// Todo.summary of a TodoWrite call: "2 of 6 done · now: <the step in progress>"
+pub fn todo_summary(input: &Value) -> String {
+    let st = |x: &Value| match s(x, "status") { "completed" => "completed", "in_progress" => "in_progress", _ => "pending" };
+    let ts: Vec<&Value> = input.get("todos").and_then(Value::as_array).into_iter().flatten().collect();
+    let done = ts.iter().filter(|x| st(x) == "completed").count(); let now = ts.iter().find(|x| st(x) == "in_progress").map(|x| s(x, "content")).unwrap_or("");
+    format!("{done} of {} done{}", ts.len(), if now.is_empty() { String::new() } else { format!(" · now: {now}") })
 }
 
 /// Delta.merge: within one read's lines a run of the main agent's text deltas to one block becomes one line,
@@ -271,9 +429,12 @@ mod tests {
         assert!(run(&mut c, l).deltas.is_empty()); // claude_delta_after_stop_quiet
         c.running = true; assert_eq!(run(&mut c, l).deltas, ["ab"]);
     }
-    #[test] fn subagent_lines_log_nothing_here() {
+    #[test] fn a_subagents_lines_go_to_its_tasks_log_and_not_the_timeline() {
         let mut c = Cx::new("t1"); c.running = true;
-        assert_eq!(run(&mut c, r#"{"type":"assistant","parent_tool_use_id":"x","message":{"id":"m","content":[{"type":"text","text":"sub"}]}}"#), Fx::default());
+        let a = run(&mut c, r#"{"type":"assistant","parent_tool_use_id":"call1","message":{"id":"ms1","content":[{"type":"text","text":"Checked it."},{"type":"tool_use","id":"st1","name":"Read","input":{"file_path":"/tmp/f.kicad_mod"}}],"usage":{"output_tokens":9}}}"#);
+        assert_eq!(a.events, vec![json!({"$":"ActivityLogged","thread":"@sub:t1","act":"call1/ms1:0","tone":"call1","kind":"say","summary":"Checked it.","at":100}), json!({"$":"ActivityLogged","thread":"@sub:t1","act":"call1/st1","tone":"call1","kind":"Read","summary":"/tmp/f.kicad_mod","at":100})]);
+        assert!(a.deltas.is_empty() && !a.delta_end && c.used == 0, "its text, partial text and usage are not the agent's");
+        assert_eq!(run(&mut c, r#"{"type":"stream_event","parent_tool_use_id":"call1","event":{}}"#), Fx::default());
     }
     #[test] fn the_result_records_window_turn_usage_speed_and_models_once() {
         let mut c = Cx::new("t1"); c.running = true; c.tok_basis = "c:0".into();
