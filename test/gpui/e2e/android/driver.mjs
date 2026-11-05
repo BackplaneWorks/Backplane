@@ -68,7 +68,7 @@ async function step(s,ctx,st){
     case 'sleep_network':{ // the fixture hub's control endpoint (serve-fixture.mjs: port+1) drops all connections and refuses new ones for N s
       const u=new URL(ctx.hub?.state.url||process.env.E2E_HUB_URL||'http://invalid');const ctl=process.env.E2E_CTL_URL||`http://${u.hostname}:${Number(u.port)+1}`;
       const r=await fetch(`${ctl}/ctl/cut?secs=${s.secs}`,{method:'POST'}).catch(()=>null);if(!r||!r.ok)block('hub control endpoint /ctl/cut not reachable at '+ctl);
-      st.netDown=Date.now();await sleep(s.secs*1000);return}
+      st.netDown=Date.now();st.notes.push('network step is a HUB CUT (the fixture proxy drops and refuses connections), not the phone losing connectivity: it still needs a real device network off/on run');st.hubCut=true;await sleep(s.secs*1000);return}
     case 'wake_network':{st.netUp=Date.now();return} // the cut ends by itself
     case 'agents':return; // started by the harness (startAgents)
     case 'session':{ // random walk over the sidebar/threads, sampling the app's PSS every 30 s
@@ -103,6 +103,7 @@ export async function run(j,ctx){
   if(st.dead)r.metrics.dead=st.dead;if(st.mem)r.metrics.memory={samples:st.mem,kbPerMin:st.rssKbPerMin};
   if(st.noClipboard){r.status='blocked';r.blocked.push('paste_image: adb cannot set an image on the clipboard (the picker attach worked)')}
   if(r.status==='pass'&&st.fail.length){r.status='fail';r.notes.push(...st.fail)}
+  if(st.hubCut)r.label='hub cut';
   if(r.status==='pass'&&!j.steps.some(s=>s.do==='expect'))r.notes.push('no expect step: pass means the steps ran');
   if(r.status==='pass'&&r.metrics.click&&!r.metrics.click.pass)r.notes.push('click ack over one frame: see metrics.click (reported, journey status unchanged)');
   return r}
