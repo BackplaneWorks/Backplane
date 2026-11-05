@@ -39,7 +39,7 @@ Example: `test/gpui/shot-popup.json`.
 
 ## e2e hooks G1-G5 (test/gpui/e2e/CONTRACT.md)
 
-Script steps (JSON, one per list item): `{"record":"start","name":"scroll"}` / `{"record":"stop"}`, `{"click":"<control id>"}`, `{"scroll":PX}`,
+Script steps (JSON, one per list item): `{"record":"start","name":"scroll"}` / `{"record":"stop"}`, `{"click":"<control id>"}`, `{"scroll":PX}`, `{"scroll_state":"<name>"}` (event `scroll {name, y, max, entries, dups, first, last, top, more}`),
 `{"net_sleep":SECS}`; `{"paste_image"|"open_viewer"|"open_settings"|"files_download": ...}` answer `input {ok:false,error:"not_implemented"}` (viewers, settings
 and downloads do not exist in GPUI yet), so the harness marks those journeys blocked. Events (stderr, `GPUI_METRIC`):
 - **G1 `ack {step, ack_ms}`**: for every scripted step, the first frame presented after the event was injected: its local effect (pressed/selected row, typed text),
@@ -76,4 +76,4 @@ GPU choice by env: `VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/{lvp,radeon,nvidia}
 ## Known gaps
 
 3D/STEP view, board/schematic viewer panels, project home, settings screens, Markdown inline styles, icons (text glyphs stand in),
-multi-line composer. The timeline and sidebar are bounded by the protocol (<= 32 entries, <= 48 rows per page), not virtualized.
+multi-line composer. The sidebar is bounded by the protocol (<= 48 rows per page), not virtualized. The timeline is a list that draws only the rows on screen; it reads older pages as the reader nears the top (screens/history.rs) and holds at most 8192 rows.

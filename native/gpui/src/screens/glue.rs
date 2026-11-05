@@ -1,8 +1,9 @@
 //! The few places where the window hands control to the screens: all of Backplane's screen-specific
 //! methods live here so main.rs keeps one call at each seam.
-use super::{asks, attach::{self, DEFAULT_CAP}, composer::ComposerEvent, timeline};
-use crate::Backplane;
+use super::{asks, attach::{self, DEFAULT_CAP}, composer::ComposerEvent, history, place, timeline};
+use crate::{hub::Command, Backplane};
 use gpui::*;
+use serde_json::Value;
 
 impl Backplane {
     /// A composer event (paste, drop, picked files): start the uploads off the UI thread; say why when nothing starts.
@@ -60,30 +61,96 @@ impl Backplane {
         self.place_restore(selected);
         asks::sync(self, cx);
     }
-    /// Leaving `self.selected` for `raw`: flush its draft, remember its scroll, show the target's remembered scroll.
-    /// (The picture itself is the window's `thread_cache`.)
+    /// Leaving `self.selected` for `raw`: flush its draft and remember its place. (The picture itself is the window's `thread_cache`.)
     pub(crate) fn thread_switch(&mut self, raw: &str) {
         self.screens.drafts.kick();
-        let (y, max) = (f32::from(self.scroll.offset().y), f32::from(self.scroll.max_offset().height));
-        if !self.selected.is_empty() {
-            if timeline::at_end(y, max) { self.screens.offsets.remove(&self.selected); } else { self.screens.offsets.insert(self.selected.clone(), y); }
+        self.screens.paging = None; // a page on its way was the last thread's: this one asks for its own
+        if !self.selected.is_empty() && self.screens.seeking.is_none() {
+            match self.timeline_place() { Some(p) => { self.screens.offsets.insert(self.selected.clone(), p); } None => { self.screens.offsets.remove(&self.selected); } }
         }
+        self.screens.seeking = None;
         self.screens.attacher.show(raw);
         self.screens.images.retry();
-        match self.screens.offsets.get(raw).copied() {
-            Some(y) => { self.scroll.set_offset(point(px(0.), px(y))); self.screens.restoring = true; }
-            None => { self.timeline_to_end(); self.screens.restoring = false; }
+    }
+    /// Where the reader is in the thread on screen; none at its end.
+    pub(crate) fn timeline_place(&self) -> Option<place::RowPlace> {
+        let top = self.timeline.logical_scroll_top();
+        place::kept_place(self.data["thread"]["entries"].as_array().map_or(&[], |r| r.as_slice()), top.item_ix, f32::from(top.offset_in_item))
+    }
+    /// The rows on screen are another thread's: the list starts over, at the end or at the place this thread was left.
+    pub(crate) fn timeline_show(&mut self, raw: &str) {
+        self.timeline.reset(self.data["thread"]["entries"].as_array().map_or(0, |r| r.len()));
+        self.screens.seeking = self.screens.offsets.get(raw).cloned();
+        self.timeline_seek();
+    }
+    /// A place being looked for: taken as soon as its row is held, unless the reader has moved off the end in the meantime.
+    fn timeline_seek(&mut self) {
+        let Some((id, off)) = self.screens.seeking.clone() else { return };
+        if self.timeline.logical_scroll_top().item_ix < self.timeline.item_count() { self.screens.seeking = None; return; }
+        if let Some(ix) = self.data["thread"]["entries"].as_array().and_then(|r| r.iter().position(|e| e["id"].as_str() == Some(&id))) {
+            self.timeline.scroll_to(ListOffset { item_ix: ix, offset_in_item: px(off) });
+            self.screens.seeking = None;
         }
     }
-    pub(crate) fn timeline_to_end(&self) { self.scroll.set_offset(point(px(0.), px(-1_000_000.))); }
-    /// A picture was applied: the timeline goes to its end only as `timeline::follows` says, so a reader who scrolled up stays where they are.
-    pub(crate) fn timeline_follow(&mut self) {
+    /// The end of the thread, and following it again. (Past the last row: the list takes it for its end.)
+    pub(crate) fn timeline_to_end(&self) { self.timeline.scroll_to(ListOffset { item_ix: self.timeline.item_count(), offset_in_item: px(0.) }); }
+    /// A picture was applied. `prev` is the thread that was on screen: this picture of the same thread is laid over the rows it held, so what was
+    /// read of its history stays, and the list keeps the reader where they are (or at the end, if that is where they are).
+    pub(crate) fn timeline_picture(&mut self, mut prev: Value, window: &Value) {
         let id = crate::string(&self.data["thread"], "id"); let raw = attach::raw_id(&id).to_string();
-        if raw.is_empty() { return; }
-        let same = raw == self.selected;
-        let (y, max) = (f32::from(self.scroll.offset().y), f32::from(self.scroll.max_offset().height));
-        if timeline::follows(same, self.screens.offsets.contains_key(&raw), self.screens.restoring, y, max) { self.timeline_to_end(); }
-        if same { self.screens.restoring = false; }
+        if raw.is_empty() { self.timeline.reset(0); return; }
+        let older = history::next_older("", window["older"].as_str().unwrap_or(""), window["hasMore"] == true, 0);
+        let fresh = match self.data["thread"]["entries"].take() { Value::Array(a) => a, _ => vec![] };
+        let prev_id = crate::string(&prev, "id");
+        let held = if attach::raw_id(&prev_id) == raw && prev["loading"] != true { match prev["entries"].take() { Value::Array(a) => a, _ => vec![] } } else { vec![] };
+        let at = history::merge_point(&held, &fresh);
+        let (rows, top) = match at {
+            Some(i) if !held.is_empty() => {
+                let before = held[i..].to_vec();
+                let rows = history::merge(held, fresh);
+                let (a, b) = history::changed(&before, &rows[i..], 0);
+                self.timeline.splice(a.start + i..a.end + i, b.len());
+                let top = if i > 0 { crate::string(&prev, "historyOlder") } else { older };
+                (rows, top)
+            }
+            _ => { self.data["thread"]["entries"] = Value::Array(fresh); self.data["thread"]["historyOlder"] = Value::String(older); self.timeline_show(&raw); return; }
+        };
+        self.data["thread"]["entries"] = Value::Array(rows); self.data["thread"]["historyOlder"] = Value::String(top);
+        self.timeline_seek();
+    }
+    /// A history page landed: laid into the rows held, the reader staying where they are.
+    pub(crate) fn older_landed(&mut self, cursor: String, page: Option<Value>, cx: &mut Context<Self>) {
+        self.screens.paging = None;
+        let Some(mut r) = page else { cx.notify(); return };
+        let (a, b) = (crate::string(&r["shown"]["thread"], "id"), crate::string(&self.data["thread"], "id"));
+        if attach::raw_id(&a) != attach::raw_id(&b) { return; }
+        let mut rows = match r["shown"]["thread"]["entries"].take() { Value::Array(a) => a, _ => vec![] };
+        for row in &mut rows { row[history::PAGE_KEY] = Value::String(cursor.clone()); }
+        let old = match self.data["thread"]["entries"].take() { Value::Array(a) => a, _ => vec![] };
+        let merged = history::splice(old.clone(), rows);
+        let (x, y) = history::changed(&old, &merged, 0);
+        self.timeline.splice(x, y.len());
+        if self.data["thread"]["historyOlder"] == cursor.as_str() {
+            let next = history::next_older(&cursor, r["window"]["older"].as_str().unwrap_or(""), r["window"]["hasMore"] == true, merged.len());
+            self.data["thread"]["historyOlder"] = Value::String(next);
+        }
+        self.data["thread"]["entries"] = Value::Array(merged);
+        self.timeline_seek();
+        cx.notify();
+    }
+    /// After each frame: the reader is within reach of the top of the rows held and more are there, so ask for them before they get there.
+    pub(crate) fn history_want(&mut self) {
+        let older = crate::string(&self.data["thread"], "historyOlder");
+        if older.is_empty() { if self.data["thread"]["loading"] != true { self.screens.seeking = None; } return; } // the start of the thread: the place is not there
+        if self.data["projectHome"].is_object() || self.screens.paging.is_some_and(|t| t.elapsed().as_secs() < 10) { return; }
+        let (max, y) = (f32::from(self.timeline.max_offset_for_scrollbar().height), -f32::from(self.timeline.scroll_px_offset_for_scrollbar().y));
+        if (self.screens.seeking.is_some() || timeline::near_top(y, max)) && self.tx.try_send(Command::History(older)).is_ok() { self.screens.paging = Some(std::time::Instant::now()); }
+    }
+    /// A run of tool calls opened or shut. A row read for history is outside the hub's newest page, so its page is read again to show it.
+    pub(crate) fn fold_click(&self, value: String) {
+        let page = self.data["thread"]["entries"].as_array().into_iter().flatten().find(|e| e["value"].as_str() == Some(&value)).map(|e| crate::string(e, history::PAGE_KEY)).unwrap_or_default();
+        let _ = self.tx.try_send(Command::Action("fold".into(), value));
+        if !page.is_empty() { let _ = self.tx.try_send(Command::History(page)); }
     }
     /// A picture was applied: the drafts, the asks' boxes and the settings fields follow what the hub just drew.
     pub(crate) fn picture_applied(&mut self, cx: &mut Context<Self>) {

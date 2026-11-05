@@ -221,13 +221,20 @@ impl Backplane {
             }
             // where the timeline stands: e2e reads this, a picture cannot say whether a scroll held
             Step::ScrollState(name) => {
-                let (y, max) = (f32::from(self.scroll.offset().y), f32::from(self.scroll.max_offset().height));
-                self.m("scroll", json!({"name": name, "y": y, "max": max, "entries": self.data["thread"]["entries"].as_array().map_or(0, |e| e.len())}));
+                let max = f32::from(self.timeline.max_offset_for_scrollbar().height);
+                let y = -(-f32::from(self.timeline.scroll_px_offset_for_scrollbar().y)).min(max);
+                let rows = self.data["thread"]["entries"].as_array().map_or(&[][..], |e| e.as_slice());
+                let ids: std::collections::HashSet<&str> = rows.iter().filter_map(|e| e["id"].as_str()).collect();
+                let top = self.timeline.logical_scroll_top();
+                self.m("scroll", json!({"name": name, "y": y, "max": max, "entries": rows.len(), "dups": rows.len() - ids.len(), "first": rows.first().map_or("", |e| e["id"].as_str().unwrap_or("")),
+                    "last": rows.last().map_or("", |e| e["id"].as_str().unwrap_or("")), "top": rows.get(top.item_ix).map_or("(end)", |e| e["id"].as_str().unwrap_or("")), "px": f32::from(top.offset_in_item), "more": self.data["thread"]["historyOlder"].as_str().is_some_and(|c| !c.is_empty())}));
                 self.pump(cx);
             }
             Step::Scroll(n) => {
                 self.begin(format!("scroll:{n}"), Goal::Frame, cx);
-                let o = self.scroll.offset(); self.scroll.set_offset(point(o.x, o.y - px(n))); self.ui_epoch += 1; cx.notify();
+                // at the end the list's own top is past its last row, a screen below where the wheel starts from
+                let at_end = self.timeline.logical_scroll_top().item_ix >= self.timeline.item_count();
+                self.timeline.scroll_by(px(n) - if at_end { self.timeline.viewport_bounds().size.height } else { px(0.) }); self.ui_epoch += 1; cx.notify();
             }
             Step::NetSleep(secs) => {
                 self.reconnected = false; self.begin_for(format!("net_sleep:{secs}"), Goal::Reconnected, secs.max(0.0) as u64 + 15, cx);
@@ -341,7 +348,7 @@ impl Backplane {
             Ctl::ToggleSidebar => { self.sidebar_open = !self.sidebar_open; self.ui_epoch += 1; cx.notify(); "toggle sidebar".into() }
             Ctl::Select(id) => { self.select_id(id.clone(), cx); "view.open thread".into() }
             Ctl::Home(pid) => { let _ = self.tx.try_send(Command::Action("select".into(), format!("project-home-{pid}"))); "view.action select project-home".into() }
-            Ctl::Fold(v) => { let _ = self.tx.try_send(Command::Action("fold".into(), v.clone())); "view.action fold".into() }
+            Ctl::Fold(v) => { self.fold_click(v.clone()); "view.action fold".into() }
             Ctl::Send => { self.do_send(cx); self.ui_epoch += 1; "send".into() }
             Ctl::Skill(w) => { let _ = self.tx.try_send(Command::Action("skill".into(), w.clone())); self.await_completion(cx); self.ui_epoch += 1; "view.action skill".into() }
             Ctl::Page(v) => { let _ = self.tx.try_send(Command::Page(v.clone())); "view.action native-sidebar-page".into() }

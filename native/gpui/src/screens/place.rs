@@ -3,9 +3,9 @@
 //! Written a moment after each change, and on quit; SIGTERM quits cleanly, so a new build taking over loses nothing (scripts/gpui/dev-reload.sh).
 //! A scripted run starts clean and saves nothing, unless BACKPLANE_GPUI_PLACE=1 asks for it (the reload test).
 use crate::{hub::Config, Backplane};
-use gpui::{point, px, Context};
+use gpui::Context;
 use serde_json::{json, Map, Value};
-use std::{collections::HashMap, path::{Path, PathBuf}, sync::{atomic::{AtomicBool, Ordering}, mpsc, Mutex, OnceLock}, time::{Duration, Instant}};
+use std::{collections::HashMap, path::{Path, PathBuf}, sync::{atomic::{AtomicBool, Ordering}, mpsc, Mutex, OnceLock}, time::Duration};
 
 const MAX_FILE: u64 = 1 << 20;
 const MAX_SESSION: usize = 256 * 1024;
@@ -13,13 +13,11 @@ const MAX_OFFSETS: usize = 256;
 const DEBOUNCE: Duration = Duration::from_millis(300);
 /// How often the window's own part (scroll, sidebar) is looked at. No frame is asked for: nothing is drawn unless something else changed.
 const LOOK: Duration = Duration::from_millis(500);
-/// How near its end (px) the timeline counts as there: a thread left at its end opens at its end, new rows and all.
-const END_SLACK: f32 = 4.;
-/// How long a restored place is held against the first pictures, whatever they do to the scroll, before the list has been measured.
-const HOLD: Duration = Duration::from_secs(3);
+/// A thread's place: the row at the top of the list and the px scrolled into it. A row stays itself however many rows land above it or are measured.
+pub type RowPlace = (String, f32);
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Place { pub target: Value, pub session: Value, pub offsets: HashMap<String, f32>, pub sidebar: bool }
+pub struct Place { pub target: Value, pub session: Value, pub offsets: HashMap<String, RowPlace>, pub sidebar: bool }
 impl Default for Place { fn default() -> Self { Self { target: Value::Null, session: Value::Null, offsets: HashMap::new(), sidebar: true } } }
 
 /// The session as kept: drafts live in gpui-drafts.json, the request id is the hub's to count afresh, and a session too big to keep loses its scratch.
@@ -41,16 +39,16 @@ pub fn opened_session(kept: &Value, rid: u64) -> Value {
 pub fn load(path: &Path) -> Option<Place> {
     if std::fs::metadata(path).ok()?.len() > MAX_FILE { return None; }
     let v: Value = serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()?;
-    if v["version"] != 1 || !v["target"].is_object() || !v["session"].is_object() { return None; }
-    let offsets = v["offsets"].as_object().into_iter().flatten().filter_map(|(k, y)| Some((k.clone(), y.as_f64().filter(|y| y.is_finite())? as f32))).collect();
+    if v["version"] != 2 || !v["target"].is_object() || !v["session"].is_object() { return None; }
+    let offsets = v["offsets"].as_object().into_iter().flatten().filter_map(|(k, o)| Some((k.clone(), (o["row"].as_str()?.to_string(), o["px"].as_f64().filter(|y| y.is_finite())? as f32)))).collect();
     Some(Place { target: v["target"].clone(), session: v["session"].clone(), offsets, sidebar: v["sidebar"].as_bool().unwrap_or(true) })
 }
 
 /// Through a temp file (0600: a session can name what the person was looking at), so a crash never leaves half a file.
 pub fn save(path: &Path, p: &Place) {
     if p.target.is_null() { return; }
-    let offsets: Map<String, Value> = if p.offsets.len() > MAX_OFFSETS { Map::new() } else { p.offsets.iter().map(|(k, y)| (k.clone(), json!(y))).collect() };
-    let Ok(text) = serde_json::to_string(&json!({"version": 1, "target": p.target, "session": p.session, "offsets": offsets, "sidebar": p.sidebar})) else { return };
+    let offsets: Map<String, Value> = if p.offsets.len() > MAX_OFFSETS { Map::new() } else { p.offsets.iter().map(|(k, (row, y))| (k.clone(), json!({"row": row, "px": y}))).collect() };
+    let Ok(text) = serde_json::to_string(&json!({"version": 2, "target": p.target, "session": p.session, "offsets": offsets, "sidebar": p.sidebar})) else { return };
     if text.len() as u64 > MAX_FILE { return; }
     let tmp = path.with_extension("tmp");
     let ok = {
@@ -62,7 +60,7 @@ pub fn save(path: &Path, p: &Place) {
     if ok { let _ = std::fs::rename(tmp, path); }
 }
 
-enum Msg { View(Value, Value), Window(HashMap<String, f32>, bool), Flush(mpsc::Sender<()>) }
+enum Msg { View(Value, Value), Window(HashMap<String, RowPlace>, bool), Flush(mpsc::Sender<()>) }
 
 /// The background writer: a note is cheap, the file is written after DEBOUNCE of quiet.
 struct Writer { tx: Mutex<mpsc::Sender<Msg>> }
@@ -90,9 +88,7 @@ impl Writer {
 static WRITER: OnceLock<Writer> = OnceLock::new();
 /// What was saved, until each part has been handed over: the view to the hub worker, the rest to the window.
 static SAVED_VIEW: Mutex<Option<(Value, Value)>> = Mutex::new(None);
-static SAVED_WINDOW: Mutex<Option<(HashMap<String, f32>, bool)>> = Mutex::new(None);
-/// A scroll place put back and not yet painted: the thread, the offset, until when.
-static HELD: Mutex<Option<(String, f32, Instant)>> = Mutex::new(None);
+static SAVED_WINDOW: Mutex<Option<(HashMap<String, RowPlace>, bool)>> = Mutex::new(None);
 static TERM: AtomicBool = AtomicBool::new(false);
 
 /// Called once, before the hub worker starts.
@@ -132,31 +128,23 @@ pub fn watch(cx: &mut Context<Backplane>) {
     }).detach();
 }
 
-/// What a held place does with this picture: keep the offset, or let go because the person moved, the list has a range now, or time is up.
-pub fn hold_on(held: &str, raw: &str, range: f32, expired: bool) -> bool { held == raw && range <= 0. && !expired }
-/// The offset to keep for a thread: none at its end, so it opens at its end.
-pub fn kept_offset(y: f32, range: f32) -> Option<f32> { if -y >= range - END_SLACK { None } else { Some(y) } }
+/// The place to keep for a thread, from the row at the top of its list: none past the last row, its end, so it opens at its end.
+pub fn kept_place(rows: &[Value], top: usize, px: f32) -> Option<RowPlace> { rows.get(top).map(|r| (r["id"].as_str().unwrap_or("").to_string(), px)) }
 
 impl Backplane {
-    /// A thread's picture landed. The first after a start brings the scroll places and the sidebar back; until the list is measured the place is put
-    /// back after each picture, since a picture may send the timeline to its end first.
+    /// A thread's picture landed. The first after a start brings the scroll places and the sidebar back.
     pub(crate) fn place_restore(&mut self, raw: &str) {
-        if let Some((offsets, sidebar)) = SAVED_WINDOW.lock().ok().and_then(|mut w| w.take()) {
-            self.screens.offsets.extend(offsets); self.sidebar_open = sidebar; self.ui_epoch += 1;
-            let y = self.screens.offsets.get(raw).copied();
-            if let (Some(y), Ok(mut h)) = (y, HELD.lock()) { *h = Some((raw.to_string(), y, Instant::now() + HOLD)); }
-            self.m("place", json!({"thread": raw, "y": y, "sidebar": sidebar}));
-        }
-        let Ok(mut h) = HELD.lock() else { return };
-        let Some((thread, y, until)) = h.clone() else { return };
-        if hold_on(&thread, raw, f32::from(self.scroll.max_offset().height), Instant::now() >= until) { self.scroll.set_offset(point(px(0.), px(y))); } else { *h = None; }
+        let Some((offsets, sidebar)) = SAVED_WINDOW.lock().ok().and_then(|mut w| w.take()) else { return };
+        self.screens.offsets.extend(offsets); self.sidebar_open = sidebar; self.ui_epoch += 1;
+        self.timeline_show(raw);
+        self.m("place", json!({"thread": raw, "row": self.screens.offsets.get(raw).map(|(r, _)| r.clone()), "sidebar": sidebar}));
     }
     fn place_note(&mut self) {
         let Some(w) = WRITER.get() else { return };
-        if HELD.lock().map_or(true, |h| h.is_some()) { return; } // the place was just put back; nothing has measured it yet
+        if self.screens.seeking.is_some() { return; } // the place is on its way back; the list is not at it yet
         let mut offsets = self.screens.offsets.clone();
         if !self.selected.is_empty() {
-            match kept_offset(f32::from(self.scroll.offset().y), f32::from(self.scroll.max_offset().height)) { Some(y) => { offsets.insert(self.selected.clone(), y); } None => { offsets.remove(&self.selected); } }
+            match self.timeline_place() { Some(p) => { offsets.insert(self.selected.clone(), p); } None => { offsets.remove(&self.selected); } }
         }
         w.send(Msg::Window(offsets, self.sidebar_open));
     }
@@ -167,7 +155,7 @@ mod tests {
     use super::*;
     fn file(n: &str) -> PathBuf { let d = std::env::temp_dir().join(format!("gpui-place-{n}-{}", std::process::id())); std::fs::create_dir_all(&d).unwrap(); d.join("gpui-place.json") }
     fn place() -> Place {
-        let mut offsets = HashMap::new(); offsets.insert("t1".to_string(), -640.5);
+        let mut offsets = HashMap::new(); offsets.insert("t1".to_string(), ("m7".to_string(), 12.5));
         Place { target: json!({"kind": "thread", "id": "t1"}), session: json!({"sel": "t1", "panel": true, "open": {"fold:a": "1"}, "info": {"view.kind:t1": "board"}}), offsets, sidebar: false }
     }
     #[test] fn a_place_comes_back_as_it_went() {
@@ -189,19 +177,14 @@ mod tests {
     }
     #[test] fn a_bad_file_is_no_place() {
         let f = file("bad");
-        for text in ["", "not json", "{}", r#"{"version":2,"target":{},"session":{}}"#, r#"{"version":1,"target":null,"session":{}}"#] { std::fs::write(&f, text).unwrap(); assert_eq!(load(&f), None, "{text}"); }
+        for text in ["", "not json", "{}", r#"{"version":3,"target":{},"session":{}}"#, r#"{"version":2,"target":null,"session":{}}"#, r#"{"version":1,"target":{"kind":"thread"},"session":{},"offsets":{"t1":-640.5}}"#] { std::fs::write(&f, text).unwrap(); assert_eq!(load(&f), None, "{text}"); }
         std::fs::write(&f, vec![b' '; MAX_FILE as usize + 1]).unwrap(); assert_eq!(load(&f), None);
         assert_eq!(load(&file("none").with_file_name("absent.json")), None);
     }
-    #[test] fn a_place_is_held_until_the_list_is_measured_the_person_moves_or_time_is_up() {
-        assert!(hold_on("t1", "t1", 0., false));
-        assert!(!hold_on("t1", "t1", 900., false), "the list has a range: the scroll is its own again");
-        assert!(!hold_on("t1", "t2", 0., false), "the person went to another thread");
-        assert!(!hold_on("t1", "t1", 0., true), "a list that never gets a range does not hold the place forever");
-    }
-    #[test] fn a_thread_at_its_end_keeps_no_offset_and_opens_at_its_end() {
-        assert_eq!(kept_offset(-1000., 1000.), None); assert_eq!(kept_offset(-997., 1000.), None); assert_eq!(kept_offset(0., 0.), None);
-        assert_eq!(kept_offset(-700., 1000.), Some(-700.)); assert_eq!(kept_offset(0., 1000.), Some(0.));
+    #[test] fn a_thread_at_its_end_keeps_no_place_and_opens_at_its_end() {
+        let rows = vec![json!({"id": "m1"}), json!({"id": "m2"})];
+        assert_eq!(kept_place(&rows, 2, 0.), None, "the list's top is past the last row at its end"); assert_eq!(kept_place(&[], 0, 0.), None);
+        assert_eq!(kept_place(&rows, 1, 30.), Some(("m2".to_string(), 30.)));
     }
     #[test] fn nothing_is_written_before_the_hub_has_drawn_a_view() {
         let f = file("none2"); save(&f, &Place::default()); assert!(!f.exists());
@@ -211,6 +194,6 @@ mod tests {
         for i in 0..20 { w.send(Msg::View(json!({"kind": "thread", "id": format!("t{i}")}), json!({"sel": format!("t{i}"), "rid": i}))); }
         assert!(!f.exists(), "written before the debounce");
         w.flush(); let p = load(&f).unwrap(); assert_eq!(p.target["id"], "t19"); assert_eq!(p.session, json!({"sel": "t19"}));
-        w.send(Msg::Window(place().offsets, false)); w.flush(); let p = load(&f).unwrap(); assert_eq!(p.offsets["t1"], -640.5); assert!(!p.sidebar);
+        w.send(Msg::Window(place().offsets, false)); w.flush(); let p = load(&f).unwrap(); assert_eq!(p.offsets["t1"], ("m7".to_string(), 12.5)); assert!(!p.sidebar);
     }
 }
