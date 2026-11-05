@@ -21,7 +21,7 @@ fn same(a: &str, b: &str) -> bool {
 }
 fn digest(x: &str) -> String { hex::encode(Sha256::digest(x.as_bytes())) }
 
-pub struct Auth { root: String, devices: Vec<(String, bool)> }
+pub struct Auth { root: String, devices: Vec<(String, bool)>, pairing: std::sync::OnceLock<std::sync::Arc<dyn crate::api::Pairing>> }
 impl Auth {
     pub fn load(home: &Path) -> Auth {
         let root = std::fs::read_to_string(home.join("token")).unwrap_or_default().trim().to_string();
@@ -33,9 +33,16 @@ impl Auth {
                 }
             }
         }
-        Auth { root, devices }
+        Auth { root, devices, pairing: Default::default() }
     }
-    pub fn with_root(root: &str) -> Auth { Auth { root: root.to_string(), devices: vec![] } }
+    /// From now on the pairing registry decides which device credentials hold (devices-v1.json is no longer read).
+    pub fn set_pairing(&self, p: std::sync::Arc<dyn crate::api::Pairing>) { let _ = self.pairing.set(p); }
+    /// The credential a request presents: bearer, else cookie, else ?token=.
+    pub fn credential(r: &Req) -> String {
+        if let Some(b) = r.header("authorization").strip_prefix("Bearer ") { return b.to_string() }
+        let c = Self::cookie(r); if c.is_empty() { r.param("token") } else { c }
+    }
+    pub fn with_root(root: &str) -> Auth { Auth { root: root.to_string(), devices: vec![], pairing: Default::default() } }
     /// Origin is absent (a native client) or the host's own; a cross-site fetch is refused.
     pub fn browser(r: &Req) -> bool {
         let (o, h) = (r.header("origin").to_lowercase(), r.header("host").to_lowercase());
@@ -53,6 +60,7 @@ impl Auth {
             let c = Self::cookie(r); if c.is_empty() { r.param("token") } else { c } };
         if secret.is_empty() || same(&self.root, &secret) { return self.root.clone() }
         if secret.len() != 32 || !secret.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) { return String::new() }
+        if let Some(p) = self.pairing.get() { return if p.holds(&secret) { secret } else { String::new() } }
         let d = digest(&secret);
         if self.devices.iter().any(|(h, revoked)| !*revoked && same(h, &d)) { secret } else { String::new() }
     }
@@ -107,5 +115,25 @@ mod tests {
         let dev = "0123456789abcdef0123456789abcdef";
         let mut a = Auth::with_root("root"); a.devices.push((digest(dev), false));
         assert!(a.allowed(&req(&format!("/ws?token={dev}"), &[]))); a.devices[0].1 = true; assert!(!a.allowed(&req(&format!("/ws?token={dev}"), &[])));
+    }
+
+    // the registry, once installed, decides every device credential; the root token keeps working; nothing else does
+    struct Held(&'static str);
+    impl crate::api::Pairing for Held {
+        fn holds(&self, token: &str) -> bool { token == self.0 }
+        fn resolve(&self, token: &str, _c: u64, _r: &str) -> String { if token == self.0 { token.into() } else { String::new() } }
+        fn active(&self, _c: u64) -> bool { true }
+        fn forget(&self, _c: u64) {}
+    }
+    #[test] fn the_pairing_registry_decides_device_credentials_and_nothing_else_passes() {
+        let dev = "0123456789abcdef0123456789abcdef"; let other = "fedcba9876543210fedcba9876543210";
+        let a = Auth::with_root("roottoken"); a.set_pairing(std::sync::Arc::new(Held(dev)));
+        let get = |tok: &str| req("/x", &[("authorization", &format!("Bearer {tok}"))]);
+        assert!(a.allowed(&get("roottoken")), "the hub token holds");
+        assert!(a.allowed(&get(dev)), "a held device credential holds");
+        assert!(!a.allowed(&get(other)), "a well-formed credential nobody holds is denied");
+        assert!(!a.allowed(&get("not-hex")), "a malformed credential is denied");
+        assert!(!a.allowed(&req("/x", &[])), "no credential is denied");
+        assert!(!a.allowed(&req("/x", &[("authorization", &format!("Bearer {dev}")), ("origin", "http://evil.example"), ("host", "h:1")])), "a foreign origin is denied");
     }
 }

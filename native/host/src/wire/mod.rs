@@ -3,7 +3,7 @@
 //! the listener and calls `serve`. Behaviour that is the Bend hub's at the edge lives here: junk frames get
 //! `{id 0, "malformed request"}`, a view method on the plain stream gets STALE_CONNECTION, the changes a request committed go
 //! out before its reply, `/hello`, pairing and header rules.
-use crate::{auth::Req, cbor, hub::{self, Conn, Hub}};
+use crate::{auth::{Auth, Req}, cbor, hub::{self, Conn, Hub}};
 use anyhow::Result;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
@@ -57,6 +57,15 @@ pub fn response(status: &str, ctype: &str, extra: &str, body: &[u8]) -> Vec<u8> 
 }
 
 pub async fn http(hub: &Hub, mut s: TcpStream, req: Req) -> Result<()> {
+    // the /auth routes decide for themselves (enrollment proves itself with its invitation); nothing else does
+    if let Some(ar) = hub.auth_route() {
+        let client = hub.fresh_client();
+        if let Some(o) = ar.handle(&req, client) {
+            hub.close_clients(&o.close);
+            let r = o.reply; let out = response_for(r.status, &r.ctype, &r.extra, &r.body);
+            s.write_all(&out).await?; s.shutdown().await.ok(); return Ok(());
+        }
+    }
     let out = match req.route() {
         "/hello" => {
             let body = cbor::encode(&json!({"backplane":hub.cfg.version,"busy":0,"commit":hub.cfg.commit}));
@@ -66,7 +75,8 @@ pub async fn http(hub: &Hub, mut s: TcpStream, req: Req) -> Result<()> {
             response("200 OK", "application/json", "Cache-Control: no-store\r\n", serde_json::to_string(&hub::capabilities())?.as_bytes())
         } else { response("401 Unauthorized", "text/plain", "Cache-Control: no-store\r\n", b"paired authentication required") },
         other => match hub.http_for(other) {
-            Some(h) if hub.auth.allowed(&req) => { let r = h.call(&hub.arc(), &req).await; response_for(r.status, &r.ctype, &r.extra, &r.body) }
+            // DEFAULT-DENY: the credential is checked here for every route unless its handler says `own_auth`
+            Some(h) if h.own_auth() || hub.auth.allowed(&req) => { let r = h.call_with(&hub.arc(), &req, hub.fresh_client()).await; response_for(r.status, &r.ctype, &r.extra, &r.body) }
             Some(_) => response("401 Unauthorized", "text/plain; charset=utf-8", "", b"this Backplane needs its pairing token"),
             None => response("404 Not Found", "text/plain; charset=utf-8", "", b"not found"),
         },
@@ -75,6 +85,9 @@ pub async fn http(hub: &Hub, mut s: TcpStream, req: Req) -> Result<()> {
 }
 
 /// hub_frames_cbor: every frame the hub sends is binary (opcode 2, final): CBOR, never text.
+tokio::task_local! { /// the credential the /ws upgrade presented (set by `serve`, read once by the stream)
+    pub static WS_TOKEN: String; }
+
 pub fn pack(_c: &Conn, v: &Value) -> Message { Message::Binary(cbor::encode(v).into()) }
 
 pub async fn socket(hub: Arc<Hub>, s: TcpStream, cbor_wanted: bool) -> Result<()> {
@@ -84,6 +97,10 @@ pub async fn socket_inner(hub: Arc<Hub>, s: TcpStream, cbor_wanted: bool) -> Res
     let mut cfg = WebSocketConfig::default(); cfg.max_message_size = Some(524288); cfg.max_frame_size = Some(524288);
     let (mut tx, mut rx) = tokio_tungstenite::accept_async_with_config(s, Some(cfg)).await?.split();
     let (mut conn, greeting) = hub.connect(cbor_wanted);
+    { // a revoked or unknown credential never gets a stream: resolve it for this connection, check it is still active
+        let tok = WS_TOKEN.try_with(|t| t.clone()).unwrap_or_default();
+        if !hub.admit(conn.client, &tok) { hub.detach(conn.client); return Ok(()) }
+    }
     tx.send(pack(&conn, &greeting)).await?;
     let mut changes = hub.changed.subscribe();
     let mut outbox = hub.attach(conn.client);
@@ -105,7 +122,7 @@ pub async fn socket_inner(hub: Arc<Hub>, s: TcpStream, cbor_wanted: bool) -> Res
                 due = None; let rev = hub.revision().await;
                 if rev != conn.lastrev { tx.send(pack(&conn, &hub.notice(&conn, rev))).await?; }
             }
-            f = outbox.recv() => { let Some(f) = f else { return Ok(()) }; tx.send(match f { hub::Out::Value(v) => pack(&conn, &v), hub::Out::Raw(b) => Message::Binary(b.into()) }).await?; }
+            f = outbox.recv() => { let Some(f) = f else { return Ok(()) }; tx.send(match f { hub::Out::Value(v) => pack(&conn, &v), hub::Out::Raw(b) => Message::Binary(b.into()), hub::Out::Close => return Ok(()) }).await?; }
             _ = beat.tick() => { tx.send(pack(&conn, &json!({"t":"hb"}))).await?; }
         }
     }
@@ -118,6 +135,10 @@ pub async fn wire(hub: Arc<Hub>, s: TcpStream, since: usize, origin_asked: Strin
     let mut cfg = WebSocketConfig::default(); cfg.max_message_size = Some(524288); cfg.max_frame_size = Some(524288);
     let (mut tx, mut rx) = tokio_tungstenite::accept_async_with_config(s, Some(cfg)).await?.split();
     let (mut conn, _) = hub.connect(true);
+    { // a revoked or unknown credential never gets a stream: resolve it for this connection, check it is still active
+        let tok = WS_TOKEN.try_with(|t| t.clone()).unwrap_or_default();
+        if !hub.admit(conn.client, &tok) { hub.detach(conn.client); return Ok(()) }
+    }
     let mut outbox = hub.attach(conn.client);
     struct Detach(Arc<Hub>, u64); impl Drop for Detach { fn drop(&mut self) { self.0.detach(self.1) } }
     let _detach = Detach(hub.clone(), conn.client);
@@ -170,7 +191,7 @@ pub async fn wire(hub: Arc<Hub>, s: TcpStream, since: usize, origin_asked: Strin
                 }
             }
             d = deltas.recv() => { if let Ok(f) = d { tx.send(pack(&conn, &f)).await?; } }
-            f = outbox.recv() => { let Some(f) = f else { return Ok(()) }; tx.send(match f { hub::Out::Value(v) => pack(&conn, &v), hub::Out::Raw(b) => Message::Binary(b.into()) }).await?; }
+            f = outbox.recv() => { let Some(f) = f else { return Ok(()) }; tx.send(match f { hub::Out::Value(v) => pack(&conn, &v), hub::Out::Raw(b) => Message::Binary(b.into()), hub::Out::Close => return Ok(()) }).await?; }
             _ = beat.tick() => { tx.send(pack(&conn, &json!({"t":"hb"}))).await?; }
         }
     }
@@ -198,13 +219,13 @@ pub async fn serve(hub: Arc<Hub>, s: TcpStream) -> Result<()> {
         }
         let (view, mobile) = (req.param("view") == "1", req.param("mobile") == "1");
         if !view { // the plain wire stream: log, live, changes, deltas
-            return wire(hub, s, req.param("since").parse().unwrap_or(0), req.param("origin")).await;
+            return WS_TOKEN.scope(Auth::credential(&req), wire(hub, s, req.param("since").parse().unwrap_or(0), req.param("origin"))).await;
         }
         if !mobile { // renderer web is dropped
             let mut sink = vec![0u8; head_len]; s.read_exact(&mut sink).await?;
             s.write_all(&response("400 Bad Request", "text/plain; charset=utf-8", "", b"this hub serves renderer mobile only")).await?; s.shutdown().await.ok(); return Ok(());
         }
-        return socket(hub, s, req.param("enc") == "cbor").await;
+        return WS_TOKEN.scope(Auth::credential(&req), socket(hub, s, req.param("enc") == "cbor")).await;
     }
     let mut sink = vec![0u8; head_len]; s.read_exact(&mut sink).await?;
     http(&hub, s, req).await

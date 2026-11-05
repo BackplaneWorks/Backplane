@@ -1,7 +1,7 @@
 //! The hub core for native clients: connection identity, view requests, reply assembly,
 //! segmentation, change notices. State is what the event log folds to; the picture comes from
 //! the presenter. (window/overlay for phones arrive with M2's windowed history.)
-use crate::{api::{Caller, HttpHandler, RpcHandler}, auth::Auth, model::Model, presenter::Presenter, session::ViewMethod, store::Store};
+use crate::{api::{AuthRoute, Caller, HttpHandler, Observer, Pairing, RpcHandler, Ticker}, auth::Auth, model::Model, presenter::Presenter, session::ViewMethod, store::Store};
 use anyhow::Result;
 use serde_json::{json, Map, Value};
 use std::path::PathBuf;
@@ -16,7 +16,7 @@ pub struct Hub {
     pub store: Store, pub model: Mutex<Model>, gen: AtomicU64, pub changed: broadcast::Sender<u64>, pub frames: broadcast::Sender<Value>, pub native_key: String,
     commits: tokio::sync::mpsc::UnboundedSender<Commit>,
     rpc: std::sync::RwLock<Vec<(&'static str, Arc<dyn RpcHandler>)>>, http: std::sync::RwLock<Vec<(&'static str, Arc<dyn HttpHandler>)>>,
-    views: std::sync::RwLock<Vec<(&'static str, Arc<dyn ViewMethod>)>>,
+    views: std::sync::RwLock<Vec<(&'static str, Arc<dyn ViewMethod>)>>, observers: std::sync::RwLock<Vec<Arc<dyn Observer>>>, pairing: std::sync::OnceLock<Arc<dyn Pairing>>, auth_route: std::sync::OnceLock<Arc<dyn AuthRoute>>,
     live: std::sync::Mutex<std::collections::HashMap<String, String>>,
     pub window_bin: std::sync::OnceLock<PathBuf>,
     me: std::sync::OnceLock<std::sync::Weak<Hub>>, next_client: AtomicU64,
@@ -25,7 +25,8 @@ pub struct Hub {
 
 /// One item of a connection's outbox: a value the hub encodes (CBOR with the dictionaries), or bytes that go out as
 /// one binary frame exactly as given (plot frames carry byte strings and plain text the dictionaries would change).
-pub enum Out { Value(Value), Raw(Vec<u8>) }
+pub enum Out { Value(Value), Raw(Vec<u8>), /// end the connection (its device was revoked)
+    Close }
 
 struct Commit { events: Vec<Value>, done: tokio::sync::oneshot::Sender<Result<u64>> }
 
@@ -56,7 +57,7 @@ impl Hub {
         let (ftx, _) = broadcast::channel(1024);
         let model = Model::build(&store)?;
         let hub = Arc::new(Hub { cfg, auth, epoch, presenter, store: store.clone(), commits: ctx, model: Mutex::new(model), gen: AtomicU64::new(1), changed: tx, frames: ftx, native_key: { let mut b = [0u8; 16]; if let Ok(mut f) = std::fs::File::open("/dev/urandom") { let _ = std::io::Read::read_exact(&mut f, &mut b); } hex::encode(b) },
-            rpc: Default::default(), http: Default::default(), views: Default::default(), live: Default::default(), window_bin: Default::default(), me: Default::default(), next_client: AtomicU64::new(1), outboxes: Default::default() });
+            rpc: Default::default(), http: Default::default(), views: Default::default(), observers: Default::default(), pairing: Default::default(), auth_route: Default::default(), live: Default::default(), window_bin: Default::default(), me: Default::default(), next_client: AtomicU64::new(1), outboxes: Default::default() });
         let _ = hub.me.set(Arc::downgrade(&hub));
         hub.bootstrap()?;
         hub.fold_log().await?;
@@ -138,6 +139,7 @@ impl Hub {
                 Ok(Ok(first_idx)) => {
                     { let mut m = hub.model.lock().await; for (i, l) in lines.iter().enumerate() { m.apply_line((first_idx + i + 1) as u32, l); } }
                     let all: Vec<Value> = batch.iter().flat_map(|c| c.events.iter().cloned()).collect();
+                    { let obs: Vec<Arc<dyn Observer>> = hub.observers.read().unwrap().clone(); for o in obs { o.committed(&hub, &all, (first_idx + 1) as u32); } }
                     let _ = hub.presenter.fold(&json!({"t":"changes","items":all,"now":now_ms()})).await;
                     let n = hub.store.len() as u64; let _ = hub.changed.send(n);
                     let mut upto = first_idx;
@@ -152,6 +154,21 @@ impl Hub {
     // ---- the published interface (see api.rs, docs/gpui/HUB-API.md) ----
     /// Later registrations win over earlier ones for the same method.
     pub fn register_rpc(&self, h: Arc<dyn RpcHandler>) { let mut v = self.rpc.write().unwrap(); for m in h.methods() { v.retain(|(n, _)| n != m); v.push((m, h.clone())) } }
+    /// Sees every committed batch (api.rs `Observer`).
+    pub fn register_observer(&self, o: Arc<dyn Observer>) { self.observers.write().unwrap().push(o) }
+    /// Runs `t` every `every_s` seconds from now; what it returns is committed (api.rs `Ticker`). Call inside the runtime.
+    pub fn register_ticker(&self, t: Arc<dyn Ticker>) {
+        let hub = self.arc();
+        tokio::spawn(async move {
+            let mut iv = tokio::time::interval(std::time::Duration::from_secs(t.every_s().max(1)));
+            iv.tick().await;
+            loop {
+                iv.tick().await;
+                let evs = t.tick(&hub, now_ms() / 1000).await;
+                if !evs.is_empty() { let _ = hub.commit_many(&evs).await; }
+            }
+        });
+    }
     pub fn register_view(&self, h: Arc<dyn ViewMethod>) { let mut v = self.views.write().unwrap(); for m in h.methods() { v.push((m, h.clone())) } }
     pub fn view_for(&self, method: &str) -> Option<Arc<dyn ViewMethod>> { self.views.read().unwrap().iter().find(|(n, _)| *n == method).map(|(_, h)| h.clone()) }
     pub fn register_http(&self, h: Arc<dyn HttpHandler>) { let mut v = self.http.write().unwrap(); for r in h.routes() { v.retain(|(n, _)| n != r); v.push((r, h.clone())) } }
@@ -167,7 +184,16 @@ impl Hub {
     pub fn attach(&self, client: u64) -> tokio::sync::mpsc::UnboundedReceiver<Out> { let (t, r) = tokio::sync::mpsc::unbounded_channel(); self.outboxes.lock().unwrap().insert(client, t); r }
     /// True while the connection's outbox exists (it has not gone away).
     pub fn is_attached(&self, client: u64) -> bool { self.outboxes.lock().unwrap().contains_key(&client) }
-    pub fn detach(&self, client: u64) { self.outboxes.lock().unwrap().remove(&client); }
+    pub fn detach(&self, client: u64) { self.outboxes.lock().unwrap().remove(&client); if let Some(p) = self.pairing.get() { p.forget(client) } }
+    /// Installs the pairing registry and the /auth routes (net lane). Before this, devices-v1.json read once at start decides.
+    pub fn set_pairing(&self, p: Arc<dyn Pairing>, r: Arc<dyn AuthRoute>) { self.auth.set_pairing(p.clone()); let _ = self.pairing.set(p); let _ = self.auth_route.set(r); }
+    pub fn auth_route(&self) -> Option<Arc<dyn AuthRoute>> { self.auth_route.get().cloned() }
+    /// A connection id for an HTTP request (the /auth routes remember it).
+    pub fn fresh_client(&self) -> u64 { self.next_client.fetch_add(1, Relaxed) }
+    /// A /ws connection presenting `token` may proceed: its credential resolves and its device is not revoked.
+    pub fn admit(&self, client: u64, token: &str) -> bool { match self.pairing.get() { None => true, Some(p) => !p.resolve(token, client, "/ws").is_empty() && p.active(client) } }
+    /// Ends the connections a revoke named.
+    pub fn close_clients(&self, ids: &[u64]) { let o = self.outboxes.lock().unwrap(); for id in ids { if let Some(t) = o.get(id) { let _ = t.send(Out::Close); } } }
     /// Read access to the model: threads, projects, entry indexes, pages.
     pub async fn model(&self) -> tokio::sync::MutexGuard<'_, Model> { self.model.lock().await }
     /// A setting's current value (None when it has none or was removed); read from the log line the model points at.
