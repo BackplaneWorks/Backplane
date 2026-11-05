@@ -6,9 +6,14 @@ coordinator confirms. `BACKPLANE_COPY=1` stays as it is (tests, rehearsals, stan
 
 ## Blockers before any design is OK
 
-1. **The hub must open a real-size log.** On the real copy (1,691,619 events, 1.48 GB) the hub exited after 28 s with no error line while
-   its policy helper was at 1.5 GB and climbing; cause unknown. A synthetic log of the same event count (1.14 GB) is being run to find it
-   (results: `build/gpui/results/switchover/`, logs kept). Until the hub opens and the helper fits 3700M, nothing below matters.
+1. **The hub must open a real-size log, and today it cannot.** Measured (synthetic log of the real event count, 1,691,621 events, 1.09 GB; the real
+   copy is 1.48 GB; hub = `hub/prov`, helper = `bp-policy-bp`, scope `MemoryMax=3700M`, swap 0): the policy helper's RSS grows linearly, about
+   100 MB/s (0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5 GB at 5 s steps) from the first second, while the hub stays at 66 MB; the kernel OOM-killer ended the scope at
+   37 s (journal: `oom-kill`, 3.6 GB peak), and the hub exited with no error line in `hub.log`. The helper had not finished folding when it hit the cap, so
+   its full need is above 3.7 GB (an earlier uncapped run reached 7.5 GB). The first run on the real copy ended at 28 s with a 1.6 GB scope peak and **no** OOM
+   line in the journal, so its end was something else, still unexplained; it is not reproduced by the synthetic log. Two things for core/slim before any
+   design passes: the helper's whole-log fold has to fit (page it, trim it, or fold only a window), and the hub must say why when its helper dies
+   (today it exits silently). Raw: `build/gpui/results/switchover/` (`diag28.log`, `logs/*/rss.tsv`).
 2. Every row marked **pending** or **unverified** in the actor table below is held, by code, and verified by a test.
 
 ## What this is, honestly

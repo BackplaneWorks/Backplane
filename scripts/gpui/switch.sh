@@ -138,8 +138,9 @@ PY
   local n; for n in codex grok muse; do printf '#!/bin/sh\nexit 1\n' > "$SW/bin/$n"; chmod +x "$SW/bin/$n"; done
   # the hub in its own capped scope, a fake HOME (no real credentials), copy guard on, loopback only
   local envx; if [ "$MODE" = side ]; then
-    # real HOME and PATH (the providers' logins), a real agent only on a person's turn (the hub decides); no BACKPLANE_AGENTS
-    envx=(HOME="$HOME" BACKPLANE_COPY=1 BACKPLANE_SIDE_BY_SIDE=1 BACKPLANE_NO_UPDATE=1)
+    # the hub itself has the FAKE home; the real one goes only to a person's-turn child (BACKPLANE_PERSON_HOME, which the hub strips from
+    # that child with every other BACKPLANE_*); BACKPLANE_LIVE_LOG is read-only, for the same-folder check; no BACKPLANE_AGENTS
+    envx=(HOME="$SW/fakehome" XDG_CACHE_HOME="$SW/fakehome/.cache" BACKPLANE_PERSON_HOME="$HOME" BACKPLANE_LIVE_LOG="$HOME/.backplane-bend/events.jsonl" BACKPLANE_COPY=1 BACKPLANE_SIDE_BY_SIDE=1 BACKPLANE_NO_UPDATE=1)
   else envx=(HOME="$SW/fakehome" XDG_CACHE_HOME="$SW/fakehome/.cache" BACKPLANE_COPY=1 BACKPLANE_AGENTS="$SW/bin" BACKPLANE_NO_UPDATE=1 BP_STANDIN_MODE=stream); fi
   ( cd "$SW/proj" && exec env -i PATH="$PATH" LC_ALL=C XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}" DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}" "${envx[@]}" \
       systemd-run --user --scope -q -p "MemoryMax=$MEM" -p MemorySwapMax=0 -- \
@@ -153,7 +154,7 @@ PY
   local ev; ev=$(tr '\0' '\n' < "/proc/$hp/environ")
   local okenv=1; printf '%s\n' "$ev" | grep -qx "BACKPLANE_COPY=1" || okenv=0
   printf '%s\n' "$ev" | grep -q '^DBUS_SESSION_BUS_ADDRESS=\|^XDG_RUNTIME_DIR=' && okenv=0
-  if [ "$MODE" = side ]; then printf '%s\n' "$ev" | grep -qx "BACKPLANE_SIDE_BY_SIDE=1" || okenv=0; printf '%s\n' "$ev" | grep -q '^BACKPLANE_AGENTS=' && okenv=0
+  if [ "$MODE" = side ]; then printf '%s\n' "$ev" | grep -qx "BACKPLANE_SIDE_BY_SIDE=1" || okenv=0; printf '%s\n' "$ev" | grep -qx "HOME=$SW/fakehome" || okenv=0; printf '%s\n' "$ev" | grep -q '^BACKPLANE_AGENTS=' && okenv=0
   else printf '%s\n' "$ev" | grep -qx "BACKPLANE_AGENTS=$SW/bin" || okenv=0; fi
   [ $okenv = 1 ] || { kill "$hp" 2>/dev/null; rm -f "$SW/hub.pid"; die "hub $hp's environment is not the one required for mode $MODE (copy guard, stand-ins or side-by-side flag, no session bus): stopped"; }
   rm -f "$SW/sample.stop"; "$HERE/test/gpui/switch/sample.sh" "$SW" "$SW/rss.tsv" 5 < /dev/null > /dev/null 2>&1 &
