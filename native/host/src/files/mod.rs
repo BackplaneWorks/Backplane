@@ -84,7 +84,7 @@ async fn files_dir(hub: &Arc<Hub>, id: &Value, p: &Value) -> Value {
 /// git.status, git.diff, git.revert, history.refs (server.bend's GitJob / RefsJob, hub.bend's Hub.more).
 struct GitRpc;
 impl RpcHandler for GitRpc {
-    fn methods(&self) -> &'static [&'static str] { &["git.status", "git.diff", "git.revert", "history.refs"] }
+    fn methods(&self) -> &'static [&'static str] { &["git.status", "git.diff", "git.revert", "history.refs", "git.act"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let s = |k: &str| p.get(k).and_then(Value::as_str).unwrap_or("").to_string();
@@ -98,12 +98,21 @@ impl RpcHandler for GitRpc {
                 let f = kicad::project::read(&cwd);
                 return vec![reply(true, json!({"thread":thread,"git":at(0),"top":at(1),"refs":ls.iter().skip(2).copied().collect::<Vec<_>>().join("\n"),"pcb":f.pcb,"sch":f.sch}))];
             }
-            if cwd.is_empty() || !git::is_repo(&cwd).await {
+            let init = method == "git.act" && s("action") == "init";
+            if cwd.is_empty() || (!init && !git::is_repo(&cwd).await) {
                 return vec![if method == "git.diff" { reply(true, json!({"diff":"","thread":thread,"nogit":cwd})) } else { reply(false, json!({"text":format!("not a git repository: {cwd}")})) }];
             }
             match method {
                 "git.status" => vec![reply(true, json!({"status":git::status(&cwd).await,"thread":thread}))],
                 "git.diff" => { let r = git::diff(&cwd, &thread, &raw("from", "0"), &raw("to", "-1")).await; vec![reply(!git::failed(&r), json!({"diff":r,"thread":thread}))] }
+                "git.act" => { // GitJob 5n / AgentJob: no message means the thread's title (the model-written message is the agents stream's)
+                    let action = if p.get("action").is_some() { s("action") } else { "commit".into() };
+                    let title = { let m = hub.model().await; m.threads.get(&thread).map(|t| t.title.clone()).unwrap_or_default() };
+                    let message = match p.get("message").and_then(Value::as_str) { Some(m) if !m.is_empty() => m.to_string(), _ => if action == "init" { "start".into() } else if title.is_empty() { "Backplane: changes from this thread".into() } else { title } };
+                    let r = git::act(&cwd, &action, &message, "", "").await;
+                    note(hub, &thread, if git::failed(&r) { "error" } else { "info" }, &format!("{action}{}", if r.is_empty() { String::new() } else { format!(": {}", r.trim()) })).await;
+                    vec![reply(!git::failed(&r), json!({"text":r,"thread":thread}))]
+                }
                 _ => { // git.revert
                     let n: u64 = raw("turn", "0").parse().unwrap_or(0);
                     let r = git::checkpoint_revert(&cwd, &thread, n).await;

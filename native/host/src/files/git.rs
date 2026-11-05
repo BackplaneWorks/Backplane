@@ -10,6 +10,7 @@ pub const SAFE: &str = include_str!("scripts/safe.sh");
 const INDEX_SEED: &str = include_str!("scripts/index_seed.sh");
 const STEP: &str = include_str!("scripts/step.sh");
 const REFS: &str = include_str!("scripts/refs.sh");
+const INIT: &str = include_str!("scripts/init.sh");
 const DIFF_CAP: &str = include_str!("scripts/diff_cap.sh");
 pub const STEP_MIGRATE: &str = include_str!("scripts/step_migrate.sh");
 
@@ -133,6 +134,60 @@ pub async fn show(gitdir: &str, obj: &str) -> Option<Vec<u8>> {
     let o = Command::new("sh").args(["-c", "exec 2>/dev/null; git --git-dir=\"$1\" show \"$2\"", "sh", gitdir, obj]).current_dir("/").stdin(std::process::Stdio::null()).envs(GIT_ENV.iter().copied()).output().await.ok()?;
     if o.status.success() { Some(o.stdout) } else { None }
 }
+
+// --- stacked actions (Git.act): commit | push | create_pr | commit_push | commit_push_pr | init
+fn last_line(s: &str) -> String { s.lines().map(str::trim).filter(|l| !l.is_empty()).last().unwrap_or("").to_string() }
+fn label(name: &str, r: Result<String, String>) -> Result<String, String> { r.map_err(|e| format!("error: {name}: {}", e.strip_prefix("error: ").unwrap_or(&e))) }
+/// Network commands (push, gh) are refused on a hub running on a copied log (core/copy.bend), as P.Proc.run does.
+fn copy_refused() -> bool { std::env::var("BACKPLANE_COPY").as_deref() == Ok("1") }
+const QUIET: [(&str, &str); 3] = [("GH_PROMPT_DISABLED", "1"), ("GH_NO_UPDATE_NOTIFIER", "1"), ("GIT_TERMINAL_PROMPT", "0")];
+/// GhRun.plain: the command as it is, without prompts. (The several-accounts choice of core/gh.bend, GhRun.try, is not ported: it
+/// only acts when `gh auth status` lists two or more accounts for the remote's host.)
+async fn plain(cwd: &str, cmd: &str, args: &[&str]) -> Ran { if copy_refused() { return Ran { code: 126, out: format!("refused: {cmd} on a copy of a log") } } proc(cmd, args, cwd, &QUIET).await }
+
+async fn step_commit(cwd: &str, msg: &str) -> Result<String, String> {
+    let msg = if msg.trim().is_empty() { "Update from Backplane" } else { msg };
+    label("commit", async {
+        seq(run(cwd, &["add", "-A"]).await, false)?;
+        let q = run(cwd, &["diff", "--no-ext-diff", "--no-textconv", "--cached", "--quiet"]).await;
+        if q.code == 0 { return Ok("commit: nothing to commit".into()) }
+        seq(run(cwd, &["commit", "-m", msg]).await, false)?;
+        Ok(format!("commit: {}", seq(run(cwd, &["log", "-1", "--format=%h %s"]).await, false)?))
+    }.await)
+}
+async fn branch(cwd: &str) -> Result<String, String> { let b = seq(run(cwd, &["symbolic-ref", "--short", "-q", "HEAD"]).await, false).unwrap_or_default(); if b.is_empty() { Err("error: detached HEAD".into()) } else { Ok(b) } }
+async fn step_push(cwd: &str) -> Result<String, String> {
+    label("push", async {
+        let b = branch(cwd).await?;
+        let up = run(cwd, &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]).await;
+        if up.code == 0 { seq(plain(cwd, "git", &["push"]).await, false)?; Ok(format!("push: {b}")) }
+        else { seq(plain(cwd, "git", &["push", "-u", "origin", &b]).await, false)?; Ok(format!("push: {b} -> origin/{b}")) }
+    }.await)
+}
+async fn step_pr(cwd: &str, title: &str, body: &str) -> Result<String, String> {
+    label("pr", async {
+        let b = branch(cwd).await?;
+        let args: Vec<&str> = if title.trim().is_empty() { vec!["pr", "create", "--fill", "--head", &b] } else { vec!["pr", "create", "--title", title, "--body", body, "--head", &b] };
+        let out = seq(plain(cwd, "gh", &args).await, false)?;
+        Ok(format!("pr: {}", last_line(&out)))
+    }.await)
+}
+async fn step_init(cwd: &str) -> Result<String, String> {
+    let out = seq(proc("sh", &["-c", INIT], cwd, &[]).await, false)?;
+    Ok(format!("{cwd} is a git repository now (commit {out}); new threads get their own worktree"))
+}
+/// Git.act: one line per step ("commit: <sha> <subject>", "push: <branch>", "pr: <url>"); the first failing step ends it with "error: <step>: ...".
+pub async fn act(cwd: &str, action: &str, message: &str, title: &str, body: &str) -> String {
+    let steps: &[&str] = match action { "commit" => &["c"], "push" => &["p"], "create_pr" => &["r"], "commit_push" => &["c", "p"], "commit_push_pr" => &["c", "p", "r"], "init" => &["i"], _ => return format!("error: unknown action {action}") };
+    let mut log = String::new();
+    for s in steps {
+        let line = match *s { "c" => step_commit(cwd, message).await, "p" => step_push(cwd).await, "r" => step_pr(cwd, title, body).await, _ => step_init(cwd).await };
+        let (l, bad) = match line { Ok(l) => (l, false), Err(e) => (e, true) };
+        log = if log.is_empty() { l } else { format!("{log}\n{l}") };
+        if bad { return log }
+    }
+    log
+}
 pub fn exists(p: &str) -> bool { Path::new(p).exists() }
 
 #[cfg(test)]
@@ -166,6 +221,32 @@ mod tests {
         checkpoint_capture(&d, "th", 0).await.unwrap();
         std::fs::write(format!("{d}/big.txt"), "y\n".repeat(200_000)).unwrap();
         let df = diff(&d, "th", "0", "-1").await; assert!(df.contains("Too big to show here"), "{}", &df[..df.len().min(300)]); assert!(df.len() < 1000);
+    }
+    #[tokio::test] async fn stacked_actions_against_a_local_bare_remote() {
+        for (k, v) in [("GIT_AUTHOR_NAME", "t"), ("GIT_AUTHOR_EMAIL", "t@t"), ("GIT_COMMITTER_NAME", "t"), ("GIT_COMMITTER_EMAIL", "t@t")] { std::env::set_var(k, v) }
+        let d = tmp("act"); let bare = tmp("bare"); g(&bare, &["init", "-q", "--bare"]).await; g(&d, &["init", "-q", "-b", "work"]).await;
+        g(&d, &["remote", "add", "origin", &bare]).await; std::fs::write(format!("{d}/a.txt"), "1\n").unwrap();
+        let r = act(&d, "commit_push", "first", "", "").await; let l: Vec<&str> = r.lines().collect();
+        assert!(l[0].starts_with("commit: ") && l[0].ends_with(" first"), "{r}"); assert_eq!(l[1], "push: work -> origin/work", "{r}");
+        assert!(g(&bare, &["rev-parse", "work"]).await.out.trim().len() == 40);
+        assert_eq!(act(&d, "commit", "", "", "").await, "commit: nothing to commit");
+        std::fs::write(format!("{d}/a.txt"), "2\n").unwrap(); let r = act(&d, "commit_push", "second", "", "").await; assert!(r.lines().nth(1).unwrap() == "push: work", "{r}"); // upstream now set
+        assert_eq!(g(&bare, &["log", "-1", "--format=%s", "work"]).await.out.trim(), "second");
+        assert!(act(&d, "nope", "", "", "").await.starts_with("error: unknown action"));
+        // a failing push ends the stack with the step named; a detached HEAD is refused
+        g(&d, &["remote", "set-url", "origin", "/nonexistent/remote.git"]).await; std::fs::write(format!("{d}/a.txt"), "3\n").unwrap();
+        let r = act(&d, "commit_push", "third", "", "").await; assert!(r.lines().nth(1).unwrap().starts_with("error: push: "), "{r}");
+        g(&d, &["checkout", "-q", "--detach"]).await; assert_eq!(act(&d, "push", "", "", "").await, "error: push: detached HEAD");
+        // the pull request goes through gh: a stand-in on PATH answers
+        let fake = tmp("fakegh"); std::fs::write(format!("{fake}/gh"), "#!/bin/sh\necho creating\necho https://example.invalid/pr/7\n").unwrap();
+        use std::os::unix::fs::PermissionsExt; std::fs::set_permissions(format!("{fake}/gh"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        g(&d, &["checkout", "-q", "work"]).await; std::env::set_var("PATH", format!("{fake}:{}", std::env::var("PATH").unwrap()));
+        assert_eq!(act(&d, "create_pr", "", "", "").await, "pr: https://example.invalid/pr/7");
+    }
+    #[tokio::test] async fn init_makes_a_repository_only_where_there_is_none() {
+        let d = tmp("init"); std::fs::write(format!("{d}/f"), "x").unwrap(); let env = [("GIT_AUTHOR_NAME", "t"), ("GIT_AUTHOR_EMAIL", "t@t"), ("GIT_COMMITTER_NAME", "t"), ("GIT_COMMITTER_EMAIL", "t@t")];
+        let r = proc("sh", &["-c", INIT], &d, &env).await; assert_eq!(r.code, 0, "{}", r.out); assert!(is_repo(&d).await);
+        let again = proc("sh", &["-c", INIT], &d, &env).await; assert_eq!(again.code, 1); assert!(again.out.contains("already a git repository"));
     }
     #[tokio::test] async fn steps_refs_and_show() {
         let d = tmp("step"); let home = tmp("stephome"); let reg = format!("{home}/history.trusted");
