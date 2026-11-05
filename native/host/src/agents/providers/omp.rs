@@ -144,6 +144,7 @@ pub fn line(a: &mut Acp, t: &pi::Turn, o: &Value) -> Out {
 static LAUNCHES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// OmpLaunch.prepare: one private folder a turn under `<home>/omp` (0700) holding the instructions and the extension (0600, created exclusively),
 /// so the prompt never enters argv. Removed by `remove` after the process exits.
+/// NOTE: Bend masks the prompt (Vx.Vx.mask, the secret vault) before it is written; the Rust hub has no vault yet, so the actor must pass `TurnIn.prompt` masked once it does.
 pub fn prepare(home: &str, prompt: &str, extension: &str) -> std::io::Result<std::path::PathBuf> {
     use std::io::Write; use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
     let root = std::path::Path::new(home).join("omp"); std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&root)?;
@@ -162,10 +163,31 @@ pub struct OmpDriver { acp: Acp, turn: pi::Turn, launch: std::cell::RefCell<Opti
 impl OmpDriver { pub fn new() -> OmpDriver { OmpDriver { acp: Acp::default(), turn: pi::Turn::default(), launch: std::cell::RefCell::new(None) } } }
 impl Default for OmpDriver { fn default() -> Self { Self::new() } }
 
+impl OmpDriver {
+    /// OmpLaunch.prepare + Grok.failed: the turn's private launch folder, or the words of a turn that could not start (the actor says "could not start omp: " first).
+    pub fn prepare_turn(&self, a: &TurnIn) -> Result<(), String> {
+        match prepare(&a.home, &a.prompt, EXT) { Ok(d) => { *self.launch.borrow_mut() = Some(d); Ok(()) } Err(e) => Err(format!("{}. {}", launch_why(&e), INSTALL)) }
+    }
+}
+/// Proto.install
+pub const INSTALL: &str = "Install Oh My Pi (https://github.com/can1357/oh-my-pi), then sign in: run `omp` and use /login.";
+/// OmpLaunch.why: ENOENT and EIO have words of their own.
+pub fn launch_why(e: &std::io::Error) -> String {
+    match e.raw_os_error() {
+        Some(2) => "Oh My Pi CLI or a required launch path was not found (ENOENT); check omp on the hub's PATH and its working directory".into(),
+        Some(5) => "Oh My Pi launch failed (EIO); check its executable and permissions on the working directory and private launch files".into(),
+        _ => e.to_string(),
+    }
+}
+
 impl Driver for OmpDriver {
-    /// The launch folder is made here, once a turn (the prompt in a private file); a failure leaves omp to fail on the missing path, as a turn it cannot start.
+    /// Proto.gone
+    fn exit_why(&self, _code: i32) -> Option<String> { Some("omp exited before the turn ended (is it signed in? run `omp` and use /login)".into()) }
+    /// The launch folder is made by `prepare_turn` (OmpRun.prepared: omp is never started without it). The agents lane calls that first (see the
+    /// request for a `Driver::prepare` hook); until it does, the first `argv` makes it, and only a failure there is left to omp.
     fn argv(&self, a: &TurnIn) -> Vec<String> {
-        let files = match prepare(&a.home, &a.prompt, EXT) { Ok(d) => { *self.launch.borrow_mut() = Some(d.clone()); d.to_string_lossy().into_owned() } Err(_) => String::new() };
+        if self.launch.borrow().is_none() { let _ = self.prepare_turn(a); }
+        let files = self.launch.borrow().as_ref().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default();
         args(mode(&a.runtime), &dir(&a.home, &a.thread), &files, pi::model(&a.model), effort(&a.effort))
     }
     fn env(&self, a: &TurnIn) -> Vec<(String, String)> { vec![("BACKPLANE_OMP_MCP".into(), a.mcp_url.clone())] }
@@ -198,7 +220,28 @@ mod tests {
     #[test] fn omp_mode_accept_edits() { assert_eq!(mode("auto-accept-edits"), "write") }
     #[test] fn omp_mode_full_allows() { assert_eq!(mode("full-access"), "yolo"); assert_eq!(mode("auto"), "yolo") }
     // laws omp_run_turn / omp_acp_like
-    #[test] fn omp_run_turn() { let m = driver("omp").unwrap(); assert_eq!(m.cli, "omp"); assert!(driver("pi").is_none() && driver("claude").is_none()) }
+    // law omp_run_turn: a thread's turn is one run of `omp`, carrying its model, session, runtime and text. (cwd goes through the actor, which spawns in it.)
+    #[test] fn omp_run_turn() {
+        let m = driver("omp").unwrap(); assert_eq!(m.cli, "omp"); assert!(driver("pi").is_none() && driver("claude").is_none());
+        let mut d = m.driver; let dir_ = std::env::temp_dir().join(format!("bp-omp-run-{}", std::process::id()));
+        let a = TurnIn { thread: "th".into(), home: dir_.to_string_lossy().into(), model: "openai/gpt".into(), session: "S9".into(), runtime: "approval-required".into(), text: "say this".into(), prompt: "P".into(), mcp_url: "http://mcp".into(), ..TurnIn::default() };
+        let argv = d.argv(&a);
+        assert!(argv.windows(2).any(|w| w == ["--model", "openai/gpt"]) && argv.windows(2).any(|w| w == ["--approval-mode", "always-ask"]), "model and runtime reach argv");
+        assert_eq!(d.env(&a), vec![("BACKPLANE_OMP_MCP".to_string(), "http://mcp".to_string())]);
+        d.start(&a);
+        let r = d.on_line(&json!({"type":"response","id":"1","success":true,"data":{"sessionId":"S9","messageCount":4}}));
+        assert_eq!(r.send, vec![r#"{"id":"2","type":"prompt","message":"say this"}"#], "the text reaches the prompt; the session is the one resumed");
+        assert_eq!(r.shapes, vec![json!({"type":"thread.started","thread_id":"S9"})]);
+        d.on_exit(Some(0)); let _ = std::fs::remove_dir_all(dir_);
+    }
+    #[test] fn omp_exits_with_its_own_words() { assert_eq!(OmpDriver::new().exit_why(1).unwrap(), "omp exited before the turn ended (is it signed in? run `omp` and use /login)") }
+    #[test] fn a_launch_folder_that_cannot_be_made_fails_the_turn_with_the_install_hint() {
+        let blocker = std::env::temp_dir().join(format!("bp-omp-block-{}", std::process::id())); std::fs::write(&blocker, "x").unwrap();
+        let d = OmpDriver::new(); let a = TurnIn { home: blocker.to_string_lossy().into(), ..TurnIn::default() };
+        let e = d.prepare_turn(&a).unwrap_err(); assert!(e.ends_with(". Install Oh My Pi (https://github.com/can1357/oh-my-pi), then sign in: run `omp` and use /login."), "{e}");
+        assert_eq!(launch_why(&std::io::Error::from_raw_os_error(2)), "Oh My Pi CLI or a required launch path was not found (ENOENT); check omp on the hub's PATH and its working directory");
+        let _ = std::fs::remove_file(blocker);
+    }
     #[test] fn omp_acp_like() {
         let mut d = OmpDriver::new(); d.start(&ti("full-access"));
         let r = feed(&mut d, &[r#"{"type":"tool_execution_start","toolCallId":"c1","toolName":"write","args":{"path":"xd://mcp__backplane__thread_list"}}"#, r#"{"type":"tool_execution_start","toolCallId":"c2","toolName":"bash","args":{"command":"ls"}}"#, r#"{"type":"tool_execution_end","toolCallId":"c1"}"#]);
@@ -288,5 +331,6 @@ mod tests {
         let r = feed(&mut d, &[r#"{"type":"response","id":"1","success":true,"data":{"sessionId":"new","messageCount":0}}"#]);
         assert_eq!(r[0].plain()[1], json!({"type":"notice","message":"Oh My Pi had no saved conversation for this thread, so this turn starts without the earlier context. This thread's history in Backplane is kept."}));
     }
-    #[test] fn the_extension_is_omp_bends_byte_for_byte() { assert!(EXT.starts_with("// Written by Backplane for its Oh My Pi threads") && EXT.contains("split('\\n')") && EXT.ends_with("}\n")); }
+    // the file is generated from omp.bend by test/gpui/agents/prov-pi/gen_ext.py; its bytes are pinned
+    #[test] fn the_extension_is_omp_bends_byte_for_byte() { use sha2::{Digest, Sha256}; assert_eq!(hex::encode(Sha256::digest(EXT.as_bytes())), "a5ebd02e761b170ef6daca3d07c6bc168f978cf6062a9237740d79d723c3e442") }
 }

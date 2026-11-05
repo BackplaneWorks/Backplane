@@ -220,6 +220,8 @@ pub fn args(sid: &str, ext: &str, prompt: &str, model_: &str, effort: &str) -> V
 }
 
 impl Driver for PiDriver {
+    /// Proto.gone
+    fn exit_why(&self, _code: i32) -> Option<String> { Some("pi exited before the turn ended (is it signed in? run `pi` and use /login)".into()) }
     /// The extension is written before each turn (`<home>/pi/backplane.js`), as PiRun.go does.
     fn argv(&self, a: &TurnIn) -> Vec<String> {
         let dir = std::path::Path::new(&a.home).join("pi");
@@ -263,7 +265,20 @@ mod tests {
     #[test] fn pi_effort_flag() { assert_eq!(effort_args("high"), vec!["--thinking", "high"]) }
     #[test] fn pi_effort_unknown_default() { assert!(effort_args("turbo").is_empty() && effort_args("").is_empty()) }
     // laws pi_run_turn / pi_acp_like: a Pi thread's turn is one run of `pi --mode rpc`, its tool calls logged before they run, design steps at "tool.done"
-    #[test] fn pi_run_turn() { let m = driver("pi").unwrap(); assert_eq!(m.cli, "pi"); assert!(driver("omp").is_none() && driver("claude").is_none()) }
+    // law pi_run_turn: a thread's turn is one run of `pi`, carrying its model, session, runtime and text. (cwd goes through the actor, which spawns in it.)
+    #[test] fn pi_run_turn() {
+        let m = driver("pi").unwrap(); assert_eq!(m.cli, "pi"); assert!(driver("omp").is_none() && driver("claude").is_none());
+        let mut d = m.driver; let dir = std::env::temp_dir().join(format!("bp-pi-run-{}", std::process::id()));
+        let a = TurnIn { thread: "th".into(), home: dir.to_string_lossy().into(), model: "openai/gpt".into(), session: "S9".into(), runtime: "approval-required".into(), text: "say this".into(), prompt: "P".into(), mcp_url: "http://mcp".into(), ..TurnIn::default() };
+        let argv = d.argv(&a);
+        assert!(argv.windows(2).any(|w| w == ["--model", "openai/gpt"]) && argv.windows(2).any(|w| w == ["--session-id", "S9"]), "model and session reach argv");
+        assert_eq!(d.env(&a), vec![("BACKPLANE_PI_MCP".to_string(), "http://mcp".to_string()), ("BACKPLANE_PI_MODE".into(), "ask".into())]);
+        d.start(&a);
+        let r = d.on_line(&json!({"type":"response","id":"1","success":true,"data":{"sessionId":"S9","messageCount":4}}));
+        assert_eq!(r.send, vec![r#"{"id":"2","type":"prompt","message":"say this"}"#], "the text reaches the prompt");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+    #[test] fn pi_exits_with_its_own_words() { assert_eq!(PiDriver::new().exit_why(1).unwrap(), "pi exited before the turn ended (is it signed in? run `pi` and use /login)") }
     #[test] fn pi_acp_like() {
         let mut d = PiDriver::new(); d.start(&ti("full-access"));
         let r = feed(&mut d, &[r#"{"type":"tool_execution_start","toolCallId":"c1","toolName":"bash","args":{"command":"ls -la"}}"#, r#"{"type":"tool_execution_end","toolCallId":"c1","toolName":"bash"}"#]);
@@ -282,7 +297,8 @@ mod tests {
         assert_eq!(d.argv(&a)[3], "sess-1"); assert_eq!(d.argv(&a).len(), 8);
         let _ = std::fs::remove_dir_all(dir);
     }
-    #[test] fn the_extension_is_pi_bends_byte_for_byte() { assert!(EXT.contains("'backplane:approval'") && EXT.ends_with("}\n") && EXT.starts_with("// Written by Backplane for its Pi threads")); }
+    // the file is generated from pi.bend by test/gpui/agents/prov-pi/gen_ext.py; its bytes are pinned
+    #[test] fn the_extension_is_pi_bends_byte_for_byte() { use sha2::{Digest, Sha256}; assert_eq!(hex::encode(Sha256::digest(EXT.as_bytes())), "97e272d8ae5d6a2bbb06895fa13c4b03053ef17772fe5d7bb813cc858fa6af5f") }
 
     #[test] fn a_turn_streams_a_reply_and_ends() {
         let mut d = PiDriver::new(); assert_eq!(d.start(&ti("full-access")), vec![r#"{"id":"1","type":"get_state"}"#]);
