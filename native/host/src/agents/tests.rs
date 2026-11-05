@@ -890,3 +890,22 @@ impl mcp::ToolSet for TestTools {
     let (_, r) = rpc_mcp(&ag, T1, "", "tools/call", json!({"name":"bot_echo","arguments":{"x":5}})).await; assert_eq!(r["result"]["isError"], false); assert_eq!(r["result"]["content"][0]["text"], format!("echo {T1} 5"), "a string body is the raw text");
     let (_, u) = rpc_mcp(&ag, T1, "", "tools/call", json!({"name":"nope_tool","arguments":{}})).await; assert_eq!(u["result"]["isError"], true); ag.shutdown();
 }
+
+// ---- the design-history worker: order, bounds, a hung capture ----
+#[tokio::test(flavor = "multi_thread")] async fn an_end_capture_is_not_overtaken_by_the_next_start() {
+    let (tx, rx) = mpsc::channel::<(Option<JobGuard>, HistJob)>(8); let done = Arc::new(StdMutex::new(Vec::<String>::new())); let d2 = done.clone();
+    let w = tokio::spawn(hist_worker(rx, Duration::from_secs(5), Duration::from_secs(5), move |j| { let d = d2.clone(); async move {
+        if matches!(j, HistJob::End(_)) { tokio::time::sleep(Duration::from_millis(300)).await } // the end capture is slow, the start that follows is quick
+        d.lock().unwrap().push(format!("{j:?}")); } }));
+    tx.send((None, HistJob::Step("/w".into(), "t1".into()))).await.unwrap(); tx.send((None, HistJob::End("/w".into()))).await.unwrap(); tx.send((None, HistJob::Start("/w".into(), "m2".into()))).await.unwrap();
+    drop(tx); w.await.unwrap();
+    assert_eq!(*done.lock().unwrap(), vec![r#"Step("/w", "t1")"#, r#"End("/w")"#, r#"Start("/w", "m2")"#], "captures finish in the order asked");
+}
+#[tokio::test(flavor = "multi_thread")] async fn a_capture_that_hangs_does_not_block_the_later_ones_and_an_idle_worker_ends() {
+    let (tx, rx) = mpsc::channel::<(Option<JobGuard>, HistJob)>(8); let done = Arc::new(StdMutex::new(Vec::<String>::new())); let d2 = done.clone();
+    let w = tokio::spawn(hist_worker(rx, Duration::from_millis(400), Duration::from_millis(100), move |j| { let d = d2.clone(); async move {
+        if matches!(j, HistJob::Start(..)) { tokio::time::sleep(Duration::from_secs(60)).await } d.lock().unwrap().push(format!("{j:?}")); } }));
+    tx.send((None, HistJob::Start("/w".into(), "m1".into()))).await.unwrap(); tx.send((None, HistJob::End("/w".into()))).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(250)).await; assert_eq!(*done.lock().unwrap(), vec![r#"End("/w")"#], "the hung start was given up; the end ran");
+    assert!(tokio::time::timeout(Duration::from_secs(3), w).await.is_ok(), "an idle worker ends by itself (a deleted thread's sends nothing more)"); let _ = tx;
+}
