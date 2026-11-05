@@ -27,7 +27,7 @@ pub const BURST: usize = 4;           // Rec.burst: turns a restart carries on a
 pub const RECENT: usize = 256;        // message ids remembered per thread against a resend
 
 #[derive(Default)]
-pub struct Stats { pub jobs: AtomicU64, pub turns: AtomicU64, pub procs_spawned: AtomicU64, pub procs_exited: AtomicU64, pub spawn_failures: AtomicU64, pub lines: AtomicU64, pub deltas: AtomicU64,
+pub struct Stats { pub hist_dropped: AtomicU64, pub jobs: AtomicU64, pub turns: AtomicU64, pub procs_spawned: AtomicU64, pub procs_exited: AtomicU64, pub spawn_failures: AtomicU64, pub lines: AtomicU64, pub deltas: AtomicU64,
     pub events: AtomicU64, pub commit_errors: AtomicU64, pub interrupts: AtomicU64, pub refused_full: AtomicU64, pub bad_lines: AtomicU64, pub max_batch_lines: AtomicU64 }
 
 pub enum Cmd {
@@ -50,7 +50,7 @@ pub use textgen::{summarizer, Summarizer};
 /// On: state's policy (statehost, `_end` handling) is on the tree and strips the field before the write.
 const MARK_ENDS: bool = true;
 /// A design-history job in flight (checkpoint, step): counted so a test, or a shutdown, can wait for what a turn's end left running.
-struct JobGuard(Arc<Agents>);
+pub(crate) struct JobGuard(Arc<Agents>);
 impl JobGuard { fn new(a: &Arc<Agents>) -> JobGuard { a.stats.jobs.fetch_add(1, Relaxed); JobGuard(a.clone()) } }
 impl Drop for JobGuard { fn drop(&mut self) { self.0.stats.jobs.fetch_sub(1, Relaxed); } }
 pub fn handle() -> Option<Arc<Agents>> { HANDLE.get().cloned() }
@@ -230,9 +230,22 @@ impl RpcHandler for Rpc {
 
 struct Live { input: mpsc::Sender<String>, pid: u32, key: String }
 
-enum HistJob { Start(String, String), Step(String, String), End(String) }
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum HistJob { Start(String, String), Step(String, String), End(String) }
+impl HistJob { fn clone_job(&self) -> HistJob { self.clone() } }
+const HIST_CAP: usize = 256; const HIST_STEPS_MAX: usize = 128;
+const HIST_IDLE: Duration = Duration::from_secs(300); const HIST_JOB: Duration = Duration::from_secs(120);
+/// The worker behind `hist`: jobs one at a time in arrival order; ends when idle for `idle` or when every sender is gone; gives a job up after `per_job`.
+pub(crate) async fn hist_worker<F, Fut>(mut rx: mpsc::Receiver<(Option<JobGuard>, HistJob)>, idle: Duration, per_job: Duration, mut run: F) where F: FnMut(HistJob) -> Fut, Fut: std::future::Future<Output = ()> {
+    loop {
+        match tokio::time::timeout(idle, rx.recv()).await {
+            Ok(Some((_g, j))) => { if tokio::time::timeout(per_job, run(j.clone())).await.is_err() { eprintln!("agents: a design-history capture ({j:?}) took more than {per_job:?}: given up, the later ones go on") } }
+            _ => break,
+        }
+    }
+}
 struct Actor {
-    hist_tx: Option<mpsc::UnboundedSender<(JobGuard, HistJob)>>,
+    hist_tx: Option<mpsc::Sender<(Option<JobGuard>, HistJob)>>,
     ag: Arc<Agents>, th: String, cx: Cx, live_proc: Option<Live>,
     lines: Option<mpsc::Receiver<String>>, exit: Option<oneshot::Receiver<Exit>>,
     live: String, live_gen: u64, ahead: String, last_user: String, recent: VecDeque<String>, pacing: Option<Instant>, rid: u64,
@@ -486,23 +499,30 @@ impl Actor {
     fn jobs_step(&mut self, entry: &str) { let cwd = self.cwd.clone(); self.hist(HistJob::Step(cwd, entry.to_string())) }
     fn jobs_end(&mut self) { let cwd = self.cwd.clone(); self.hist(HistJob::End(cwd)) }
     /// A thread's design-history captures run one after another, in the order they were asked for: two captures overlapping on one thread's index could see each other's
-    /// changes (the step would be logged against the wrong entry, or an index lock fail one), and Bend's step for a turn's end comes before the next turn's start.
+    /// changes (a step logged against the wrong entry, or an index lock clash), and a turn's end capture must not be overtaken by the next turn's start.
+    /// Bounded: a burst of tool-end steps past HIST_STEPS_MAX waiting is dropped (counted), starts and ends always fit. The worker ends after HIST_IDLE with nothing to do
+    /// (a deleted or retired thread's actor sends nothing more), and one capture that hangs is given up after HIST_JOB so the later ones still run.
     fn hist(&mut self, j: HistJob) {
-        let g = JobGuard::new(&self.ag);
-        if self.hist_tx.is_none() {
-            let (tx, mut rx) = mpsc::unbounded_channel::<(JobGuard, HistJob)>(); self.hist_tx = Some(tx);
-            let (hub, th, home) = (self.ag.hub.clone(), self.th.clone(), self.ag.host.home.to_string_lossy().into_owned());
-            tokio::spawn(async move {
-                while let Some((_g, j)) = rx.recv().await {
+        let is_step = matches!(j, HistJob::Step(..));
+        for attempt in 0..2 {
+            if self.hist_tx.is_none() {
+                let (tx, rx) = mpsc::channel::<(Option<JobGuard>, HistJob)>(HIST_CAP); self.hist_tx = Some(tx);
+                let (hub, th, home) = (self.ag.hub.clone(), self.th.clone(), self.ag.host.home.to_string_lossy().into_owned());
+                tokio::spawn(hist_worker(rx, HIST_IDLE, HIST_JOB, move |j| { let (hub, th, home) = (hub.clone(), th.clone(), home.clone()); async move {
                     match j {
-                        HistJob::Start(cwd, entry) => { hist::checkpoint0(cwd.clone(), th.clone()).await; hist::step(hub.clone(), th.clone(), cwd, entry, home.clone(), "start").await }
-                        HistJob::Step(cwd, entry) => hist::step(hub.clone(), th.clone(), cwd, entry, home.clone(), "").await,
-                        HistJob::End(cwd) => { hist::step(hub.clone(), th.clone(), cwd.clone(), String::new(), home.clone(), "").await; hist::checkpoint(cwd, th.clone()).await }
-                    }
-                }
-            });
+                        HistJob::Start(cwd, entry) => { hist::checkpoint0(cwd.clone(), th.clone()).await; hist::step(hub, th, cwd, entry, home, "start").await }
+                        HistJob::Step(cwd, entry) => hist::step(hub, th, cwd, entry, home, "").await,
+                        HistJob::End(cwd) => { hist::step(hub.clone(), th.clone(), cwd.clone(), String::new(), home, "").await; hist::checkpoint(cwd, th).await }
+                    } } }));
+            }
+            let tx = self.hist_tx.as_ref().unwrap();
+            if is_step && tx.capacity() < HIST_CAP - HIST_STEPS_MAX { self.ag.stats.hist_dropped.fetch_add(1, Relaxed); return } // a burst of tool ends: the newest state is captured by the next step or the end
+            match tx.try_send((Some(JobGuard::new(&self.ag)), j.clone_job())) {
+                Ok(()) => return,
+                Err(mpsc::error::TrySendError::Closed(_)) if attempt == 0 => { self.hist_tx = None } // the worker ended while idle: start another
+                Err(_) => { self.ag.stats.hist_dropped.fetch_add(1, Relaxed); return }
+            }
         }
-        let _ = self.hist_tx.as_ref().unwrap().send((g, j));
     }
 
     async fn spawn(&mut self, t: &world::T, cwd: &str, key: String) -> Result<(), String> {
