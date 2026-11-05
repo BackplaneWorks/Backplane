@@ -111,3 +111,5 @@ impl HttpHandler for FarRoutes {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod jstests;
