@@ -46,3 +46,8 @@ Polls the recording made while waiting for a turn are repeated until the same ob
 Self-diff (two recordings of the JS hub): 0 differences in 6 scenarios. Replay of recording A against the JS hub: 0 differences in 6 scenarios.
 Raw: build/gpui/results/parity/ (self-diff.txt, replay-diff.txt, recA/, recB/, replayA/). Harness wall time on Boat: 173 s.
 Not covered: web renderer (out of scope), phone-app traffic as such (the mobile renderer is exercised by two profiles), segmented replies beyond `view.page`.
+
+## Gate against the current JS hub (2026-11-05)
+Hub: build/gpui/backplane-serve-current (src/ at the base commit 7c9b3c223c, built on Boat with the composite compiler; see its README).
+Self-diff (two recordings): 0 differences in 6 scenarios. Replay of recording A against a fresh instance: 0 differences in 6 scenarios. 179 s on Boat.
+Raw: build/gpui/results/parity-current/. This recording (recA there) is the baseline for the Rust hub; the earlier one (results/parity) came from an older JS build.
