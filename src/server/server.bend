@@ -3048,13 +3048,26 @@ def Mech.rendered(+err: String, l: P.Ran, +inbox: Chan(Msg), +client: U32, +id: 
       GitJob.reply(inbox, client, id, True{}, J.Json.obj([J.KV{"mech", J.Str{out}}, J.KV{"root", J.Str{cwd}}, J.KV{"thread", J.Str{thread}},
         J.KV{"rendered", J.Str{path}}, J.KV{"error", J.Str{err}}, J.KV{"primary", J.Str{primary}}]))
 
-def Mech.render(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +path: String) -> IO(Unit):
+def Mech.render.file(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +path: String) -> IO(Unit):
   do IO<Unit>:
     exe : String <- H.Sys.exe_path()
     r : P.Ran <- P.Proc.run(EX.Exe.child(exe), ["--render", path], cwd)
     l : P.Ran <- P.Proc.run("sh", ["-c", Mech.cmd()], cwd)
     text : String <- K.Io.text(cwd ++ "/.backplane.json")
     Mech.rendered(Mech.said(r), l, inbox, client, id, thread, cwd, path, MCH.Mech.config(text))
+
+def Mech.render.at(at: List<&2, String>, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String) -> IO(Unit):
+  match at:
+    case root <> rel <> "f" <> Nil{}:
+      Mech.render.file(inbox, client, id, thread, cwd, root ++ "/" ++ rel)
+    case _:
+      GitJob.reply(inbox, client, id, False{}, J.Json.obj([J.KV{"text", J.Str{"that model is unavailable or outside this project"}}]))
+
+def Mech.render(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +path: String) -> IO(Unit):
+  do IO<Unit>:
+    home : String <- Env.get("BACKPLANE_HOME", "")
+    at : List<&2, String> <- ZIP.Zip.inside(cwd, Bool.pick(String, FP.Folder.absolute(path), FMP.Fm.rel(cwd, path), path), home)
+    Mech.render.at(at, inbox, client, id, thread, cwd)
 
 # the board picker opened (boards.list, hub.bend's Hub.nav): the
 # project's boards read again, as the card finds them (orderio.bend's
@@ -3274,18 +3287,18 @@ def FileJob.run(+inbox: Chan(Msg), +client: U32, +id: String, +path: String, +ho
 # The viewer's Files tab (core/fm.bend): one folder of a thread's project,
 # its folders then its files ("d|f <tab> size <tab> name"), hidden ones and
 # symlinked folders left out, 2000 of each at most
-def DirJob.sh() -> String:
-  "cd \"$1\" 2>/dev/null || { echo 'no such folder'; exit 1; }; rr=$(pwd -P); [ -z \"$2\" ] || cd \"./$2\" 2>/dev/null || { echo 'no such folder'; exit 1; }; case \"$(pwd -P)/\" in \"$rr\"/*) ;; *) echo 'no such folder'; exit 1;; esac; for f in *; do [ -d \"$f\" ] && [ ! -L \"$f\" ] && printf 'd\\t0\\t%s\\n' \"$f\"; done | head -n 2000; for f in *; do [ -f \"$f\" ] && printf 'f\\t%s\\t%s\\n' \"$(wc -c < \"$f\" | tr -d ' ')\" \"$f\"; done | head -n 2000; true"
-
-def DirJob.sent(r: P.Ran, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +rel: String) -> IO(Unit):
-  match r:
-    case P.Ran{0, out}:
+def DirJob.sent(entries: List<&2, String>, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +rel: String) -> IO(Unit):
+  match entries:
+    case out <> _:
       GitJob.reply(inbox, client, id, True{}, J.Json.obj([J.KV{"fmEntries", J.Str{out}}, J.KV{"fmDir", J.Str{rel}}, J.KV{"fmRoot", J.Str{cwd}}, J.KV{"thread", J.Str{thread}}]))
-    case P.Ran{_, +out}:
-      GitJob.reply(inbox, client, id, False{}, J.Json.obj([J.KV{"text", J.Str{String.trim(out)}}, J.KV{"fmEntries", J.Str{""}}, J.KV{"fmError", J.Str{String.trim(out)}}, J.KV{"fmDir", J.Str{rel}}, J.KV{"thread", J.Str{thread}}]))
+    case Nil{}:
+      GitJob.reply(inbox, client, id, False{}, J.Json.obj([J.KV{"text", J.Str{"that folder is unavailable or outside this project"}}, J.KV{"fmEntries", J.Str{""}}, J.KV{"fmError", J.Str{"that folder is unavailable or outside this project"}}, J.KV{"fmDir", J.Str{rel}}, J.KV{"thread", J.Str{thread}}]))
 
 def DirJob.run(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +rel: String) -> IO(Unit):
-  IO.bind(P.Ran, Unit, P.Proc.run("sh", ["-c", DirJob.sh(), "sh", cwd, rel], "/"), r => DirJob.sent(r, inbox, client, id, thread, cwd, rel))
+  do IO<Unit>:
+    home : String <- Env.get("BACKPLANE_HOME", "")
+    entries : List<&2, String> <- ZIP.Zip.list(cwd, rel, home)
+    DirJob.sent(entries, inbox, client, id, thread, cwd, rel)
 
 # a PDF's page drawn to a PNG for the window (which cannot draw a PDF), by
 # poppler's pdftoppm when this machine has it, kept in <home>/pdf per file
@@ -6271,7 +6284,7 @@ def Img.serve.k(image: Bool, s: Socket, +path: String, range: String) -> IO(Unit
 def Img.serve(allowed: Bool, s: Socket, +path: String, range: String) -> IO(Unit):
   match allowed:
     case True{}:
-      Img.serve.k(IM.Img.viewable(path), s, path, range)
+      Img.serve.k(Bool.and(IM.Img.viewable(path), Bool.or(FP.Folder.absolute(path), String.starts_with(path, "~/"))), s, path, range)
     case False{}:
       Conn.finish(s, W.Http.text("401 Unauthorized", "this Backplane needs its pairing token"))
 
