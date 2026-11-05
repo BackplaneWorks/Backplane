@@ -165,19 +165,22 @@ impl Hub {
     /// The window object for a thread target (newest page); None for other targets or without the Bend program.
     /// `thread` is the conversation the target shows (V.Target.thread): a thread's own id, a bot's chat thread; none for the other targets.
     async fn window_for(&self, p: &Value, before: u64, thread: Option<&str>) -> Option<(Value, crate::model::Page)> {
-        // the window helper is a Bend child process the policy helper's V needs: a hub without the helper (no policy, or the Rust presenter alone) starts nothing for any target,
-        // whatever BACKPLANE_WINDOW_BIN says (wants_log is false while the helper is not running)
-        if !self.presenter.wants_log() { return None }
-        let bin = self.window_bin.get()?;
         let t = p.get("target")?;
         let thread = thread?;
         if !self.model.lock().await.threads.contains_key(thread) { return None }
         let page = { let m = self.model.lock().await; m.page(&self.store, thread, before, 32).ok()? };
         let mut req = Map::new(); req.insert("target".into(), t.clone());
         if let Some(a) = p.get("anchor") { req.insert("anchor".into(), a.clone()); }
+        let req = Value::Object(req);
         // an older page still names the thread's latest human prompt and assistant text (message-context.bend)
         let ctx = if before == 0 { vec![] } else { let m = self.model.lock().await; m.latest_context(&self.store, thread).unwrap_or_default() };
-        let w = crate::window::compute(bin, &std::env::temp_dir(), thread, &self.epoch, before, &page, &ctx, &Value::Object(req)).await?;
+        // the Rust window first (present::window), computed here because the model lock is async and a presenter Screen cannot take it
+        if let Some(w) = crate::present::window::window(&page, &ctx, &self.epoch, before, &req) { return Some((w, page)) }
+        // what Rust does not answer (None) is the helper's, and only while the policy helper runs: the window helper is a Bend child process the policy's V needs. A hub without the helper
+        // starts nothing for any target, whatever BACKPLANE_WINDOW_BIN says (wants_log is false while the helper is not running): the native refusal stands
+        if !self.presenter.wants_log() { return None }
+        let bin = self.window_bin.get()?;
+        let w = crate::window::compute(bin, &std::env::temp_dir(), thread, &self.epoch, before, &page, &ctx, &req).await?;
         Some((w, page))
     }
 
