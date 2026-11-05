@@ -23,11 +23,11 @@ ev=[{"$":"ProjectCreated","id":"p1","title":"ecc","root":R+"/proj","at":1},{"$":
 open(R+"/home/events.jsonl","w").write("".join(json.dumps(e)+"\n" for e in ev))
 PY
 export LC_ALL=C
-cleanup() { for f in client hub i3 xvfb; do [ -f $R/$f.pid ] && kill $(cat $R/$f.pid) 2>/dev/null || true; done; }
-trap cleanup EXIT
-# one scope for everything
-exec systemd-run --user --scope -q -p MemoryMax=3700M -p MemorySwapMax=0 -- nice -n 19 sh -c '
+# one scope for everything; the inner shell stops what it started (only its own pids) on any exit
+systemd-run --user --scope -q -p MemoryMax=3700M -p MemorySwapMax=0 -- nice -n 19 sh -c '
 set -eu
+cleanup() { for f in client i3 xvfb hub; do [ -f '$R'/$f.pid ] && kill $(cat '$R'/$f.pid) 2>/dev/null || true; done; sleep 1; }
+trap cleanup EXIT INT TERM
 R='$R'; ROOT='$ROOT'; X='$X'; HUB='$HUB'; CLIENT='$CLIENT'; ASSETS='$ASSETS'; N='$N'; PORT='$PORT'; DISP='$DISP'; OUT='$OUT'; SH='$SH'
 export BACKPLANE_AGENTS=$R/bin BACKPLANE_NO_UPDATE=1 BP_STANDIN_MODE=stream
 cd $R/proj
