@@ -89,6 +89,7 @@ impl Backplane {
     pub(crate) fn plot_received(&mut self, bytes: Vec<u8>, cx: &mut Context<Self>) {
         if self.screens.solid.is_none() { self.screens.solid = Some(cx.new(crate::viewers::solid::SolidPage::new)); }
         let solid = self.screens.solid.clone().unwrap();
+        if let Some(k) = crate::viewers::solid::peek_key(&bytes) { eprintln!("GPUI_LOG {{\"plot_frame\":{{\"key\":{},\"bytes\":{}}}}}", serde_json::Value::String(k), bytes.len()); }
         let Some(bytes) = solid.update(cx, |p, _| p.accept(bytes)) else { cx.notify(); return };
         if let Err(e) = self.screens.plot.receive(&bytes) { eprintln!("GPUI_LOG {{\"plot\":\"{e}\"}}"); }
     }
