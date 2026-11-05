@@ -301,7 +301,7 @@ impl Render for Backplane {
                             .child(with_rect(chip(light, String::new()).opacity(0.45), || "ui:Dictate".to_string()).child(ic(light, "mic", 16., "dim")))
                             .child(with_rect(div().id("send"), || "send".to_string()).px_4().py_1().bg(c("accent")).text_color(c("on-accent")).cursor_pointer().child("Send").on_click(cx.listener(|this, _, window, cx| this.send(&Send, window, cx)))))))
                 )
-                .children(crate::screens::viewer::view(cx, &reg, light, thread))
+                .children(crate::screens::viewer::view(cx, &reg, light, thread, &self.screens.plot, &mut self.screens.plotview))
                 // right rail
                 .child(div().w(px(72.)).h_full().flex_shrink_0().relative().child(art::probe("rail")).border_l_1().border_color(c("line")).flex().flex_col().py_2().children(rail)))
             .into_any_element();

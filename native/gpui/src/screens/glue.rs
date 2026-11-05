@@ -73,4 +73,8 @@ impl Backplane {
         self.draft_from_hub(cx);
         super::settings::sync(self, cx);
     }
+    /// A plot frame arrived on the socket: apply it to what this client holds.
+    pub(crate) fn plot_received(&mut self, bytes: &[u8]) {
+        if let Err(e) = self.screens.plot.receive(bytes) { eprintln!("GPUI_LOG {{\"plot\":\"{e}\"}}"); }
+    }
 }
