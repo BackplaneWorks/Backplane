@@ -76,15 +76,16 @@ impl Store {
     }
     pub fn all(&self) -> Vec<String> { self.range(0, self.len()).unwrap_or_default() }
     /// Durable before it returns: the caller acknowledges only after this.
-    pub fn append(&mut self, line: &str) -> Result<()> {
-        debug_assert!(!line.contains('\n'));
-        let mut buf = Vec::with_capacity(line.len() + 2);
-        if self.torn { buf.push(b'\n'); self.size += 1; }
-        let off = self.size + 0;
-        buf.extend(line.as_bytes()); buf.push(b'\n');
+    pub fn append(&mut self, line: &str) -> Result<()> { self.append_many(&[line]) }
+    /// Several events, one write and one fsync (group commit): the ack waits once, not per event.
+    pub fn append_many(&mut self, lines: &[&str]) -> Result<()> {
+        let mut buf = Vec::with_capacity(lines.iter().map(|l| l.len() + 1).sum::<usize>() + 1);
+        if self.torn { buf.push(b'\n'); }
+        let mut at = self.size + buf.len() as u64;
+        let mut spans = Vec::with_capacity(lines.len());
+        for l in lines { debug_assert!(!l.contains('\n')); spans.push((at, l.len() as u32)); buf.extend(l.as_bytes()); buf.push(b'\n'); at += l.len() as u64 + 1; }
         self.file.write_all(&buf)?; self.file.sync_data()?;
-        self.idx.push((off, line.len() as u32)); self.size += buf.len() as u64 - if self.torn { 1 } else { 0 };
-        self.torn = false;
+        self.idx.extend(spans); self.size += buf.len() as u64; self.torn = false;
         Ok(())
     }
 }

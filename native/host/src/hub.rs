@@ -74,10 +74,20 @@ impl Hub {
     }
 
     /// Commit one event: durable, then folded, then announced. Callers acknowledge after this returns.
-    pub async fn commit(&self, event: &Value) -> Result<u64> {
-        let line = serde_json::to_string(event)?;
-        let n = { let mut s = self.store.lock().await; s.append(&line)?; let n = s.len(); self.model.lock().await.apply_line(n as u32, &line); n as u64 };
-        self.presenter.fold(&json!({"t":"changes","items":[event],"now":now_ms()})).await?;
+    pub async fn commit(&self, event: &Value) -> Result<u64> { self.commit_many(std::slice::from_ref(event)).await }
+
+    /// Events of one request: one durable write, then folded and announced together.
+    pub async fn commit_many(&self, events: &[Value]) -> Result<u64> {
+        let lines: Vec<String> = events.iter().map(serde_json::to_string).collect::<std::result::Result<_, _>>()?;
+        let n = {
+            let mut s = self.store.lock().await;
+            let first = s.len();
+            s.append_many(&lines.iter().map(String::as_str).collect::<Vec<_>>())?;
+            let mut m = self.model.lock().await;
+            for (i, l) in lines.iter().enumerate() { m.apply_line((first + i + 1) as u32, l); }
+            s.len() as u64
+        };
+        self.presenter.fold(&json!({"t":"changes","items":events,"now":now_ms()})).await?;
         let _ = self.changed.send(n);
         Ok(n)
     }
@@ -153,9 +163,8 @@ impl Hub {
         if thread.is_empty() || !self.model.lock().await.threads.contains_key(thread) { return vec![json!({"t":"reply","id":id,"ok":false,"error":"unknown thread"})] }
         let at = now_ms() / 1000;
         let msg = p.get("msg").and_then(Value::as_str).filter(|m| !m.is_empty()).map(str::to_string).unwrap_or_else(|| format!("m{at}-{}", id.as_u64().unwrap_or(0)));
-        for ev in [json!({"$":"MessagePosted","thread":thread,"msg":msg,"role":"user","text":text,"at":at}), json!({"$":"TurnQueued","thread":thread,"msg":msg,"text":text,"at":at})] {
-            if self.commit(&ev).await.is_err() { return vec![json!({"t":"reply","id":id,"ok":false,"error":"store write failed"})] }
-        }
+        let events = [json!({"$":"MessagePosted","thread":thread,"msg":msg,"role":"user","text":text,"at":at}), json!({"$":"TurnQueued","thread":thread,"msg":msg,"text":text,"at":at})];
+        if self.commit_many(&events).await.is_err() { return vec![json!({"t":"reply","id":id,"ok":false,"error":"store write failed"})] }
         vec![json!({"t":"reply","id":id,"ok":true})]
     }
 
