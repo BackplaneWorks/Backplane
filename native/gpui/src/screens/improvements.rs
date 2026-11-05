@@ -19,7 +19,7 @@ pub fn bind(cx: &mut App) {
 
 /// What a reply is for. A step names the one that follows it.
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum Next { Ctx, Diag(Then), Preview, Template, Prompt, WCreate, WCtx, WTurn, Load, ICreate, ICtx, ITurn }
+enum Next { Ctx, Diag(Then), Preview, Template, Prompt, WCreate, WCtx, WTurn, Load, ICreate, ICtx, IModes, ITurn }
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Then { Review, Write }
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -56,13 +56,16 @@ pub struct Imp {
     evidence_ok: bool,
     previewed: bool,
     focus_pending: bool,
+    /// A test hook only (script op `runtime`): the permission mode to give the hand-off thread before its turn. Unset, the thread has the normal configuration.
+    runtime: Option<String>,
+    modes_sent: bool,
 }
 
 impl Imp {
     pub fn new(drafts_path: &Path, target: Option<super::attach::Target>) -> Self {
         let scope = target.as_ref().map_or("offline".to_string(), |t| t.addr.clone());
         Self { open: false, draft: Draft::default(), loaded: false, inputs: None, ctx: Value::Null, projects: vec![], note: String::new(), busy: false, hidden: false, xid: None, rec: None, rec_text: String::new(),
-            next: HashMap::new(), seq: 0, dir: drafts_path.with_file_name("gpui-improvements"), scope, target, diag: String::new(), url: String::new(), review_open: false, flushing: false, syncing: false, shot: None, origin: (String::new(), String::new()), evidence_ok: false, previewed: false, focus_pending: false }
+            next: HashMap::new(), seq: 0, dir: drafts_path.with_file_name("gpui-improvements"), scope, target, diag: String::new(), url: String::new(), review_open: false, flushing: false, syncing: false, shot: None, origin: (String::new(), String::new()), evidence_ok: false, previewed: false, focus_pending: false, runtime: None, modes_sent: false }
     }
     fn file(&self, name: &str) -> PathBuf { self.dir.join(name) }
     /// The panel's own folder, private to this user.
@@ -265,6 +268,7 @@ pub fn answered(this: &mut Backplane, id: u64, reply: Value, cx: &mut Context<Ba
             Some(b) => { this.screens.imp.draft.binding = Some(b.to_string()); let _ = save_now(this); advance_internal(this, cx); }
             None => return fail(this, "The hub did not confirm this conversation’s account. Retry Send.".into(), cx),
         },
+        Next::IModes => { advance_internal(this, cx); }
         Next::ITurn => {
             let thread = this.screens.imp.draft.thread.clone();
             this.screens.imp.draft.accepted = true; let _ = save_now(this);
@@ -347,6 +351,7 @@ fn advance_internal(this: &mut Backplane, cx: &mut Context<Backplane>) {
     let d = this.screens.imp.draft.clone();
     if d.thread.is_empty() { this.screens.imp.note = "Creating the Backplane thread…".into(); return ask(this, "thread.create", json!({"project": d.project, "title": "New thread", "creationKey": d.key, "base": "gpui", "branch": work_branch(&d.key)}), Next::ICreate, cx) }
     if d.binding.is_none() { return ask(this, "improvements.context", json!({"sourceThread": d.thread}), Next::ICtx, cx) }
+    if let Some(rt) = this.screens.imp.runtime.clone() { if !this.screens.imp.modes_sent { this.screens.imp.modes_sent = true; return ask(this, "thread.modes", json!({"thread": d.thread, "runtime": rt}), Next::IModes, cx) } }
     if !d.image.is_empty() && d.path.is_empty() { this.screens.imp.note = "Uploading the screenshot…".into(); return upload(this, Up::IImage, d.thread.clone(), d.key.clone(), d.image.clone(), cx) }
     let with_video = d.inc_rec && d.rec_reviewed && !d.recording.is_empty();
     if with_video && d.video_path.is_empty() {
@@ -609,7 +614,15 @@ pub fn script_op(this: &mut Backplane, op: &str, cx: &mut Context<Backplane>) {
             if !name.is_empty() { std::thread::spawn(move || { let _ = capture::shot(xid, &dir.join(format!("{name}.png"))); }); }
         }
         "image" => { let p = PathBuf::from(rest); use_image_file(this, &p, cx) }
-        "state" => { let d = &this.screens.imp.draft; this.m("improvements", json!({"internal": d.internal, "evidence": d.has_evidence(), "report": d.issue_body.len(), "opened": d.opened, "note": this.screens.imp.note, "busy": this.screens.imp.busy,
+        // test hooks for the readiness run: a permission mode for the hand-off thread, and answering the first open ask with its primary button
+        "runtime" => { this.screens.imp.runtime = Some(rest.to_string()); this.screens.imp.modes_sent = false; }
+        "approve" => {
+            let asks = super::asks::parse(&this.data["thread"]["asks"]);
+            if let Some(a) = asks.first() { if let Some(b) = a.buttons.iter().find(|b| b.primary).or(a.buttons.first()) {
+                let _ = this.tx.try_send(Command::Action("answer".into(), b.value.clone())); this.m("improvements", json!({"approved": a.head, "button": b.label}));
+            } }
+        }
+        "state" => { let d = &this.screens.imp.draft; this.m("improvements", json!({"internal": d.internal, "evidence": d.has_evidence(), "report": d.issue_body.len(), "loaded": d.report.len(), "opened": d.opened, "note": this.screens.imp.note, "busy": this.screens.imp.busy,
             "writer": d.writer.as_ref().map(|w| json!({"created": w.created, "started": w.started, "path": w.path, "video": w.video_path})), "thread": d.thread, "image": !d.image.is_empty(), "recording": !d.recording.is_empty(), "url": this.screens.imp.url.len(), "project": d.project})); }
         _ => {}
     }
