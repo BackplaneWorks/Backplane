@@ -18,4 +18,4 @@ export function readFrames(){ // framestats: rows of 14 timestamps in ns; column
 export async function sweep(){const before0=dump();const inv=nodes(before0).filter(n=>n.clickable);const results={};
   for(const n of inv){const b=dump();tap(n.rect.x+n.rect.w/2,n.rect.y+n.rect.h/2);await sleep(400);const a=dump();results[n.id]={changed:a!==b,action:false};if(a!==b){adb('shell input keyevent KEYCODE_BACK');await sleep(300)}}
   return deadControls(inv,results)}
-export async function run(j,ctx){return {journey:j.id,client:'android',status:devices().length?'blocked':'blocked',blocked:[devices().length?'android journey steps (adapter has the primitives: dump, tap, gfxinfo, sweep; step driver not written yet)':'no adb device (none on Boat; needs the Pixel on the desktop or h@backplane)'],metrics:{},notes:[]}}
+export async function run(j,ctx){const d=await import('../android/driver.mjs');return d.run(j,ctx)} // step driver: ../android/driver.mjs (real taps, typing, screenrecord)
