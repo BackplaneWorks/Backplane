@@ -1,3 +1,4 @@
+mod delta;
 mod hub;
 mod input;
 mod script;
