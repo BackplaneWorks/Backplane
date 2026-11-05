@@ -264,7 +264,7 @@ impl Drop for Worker { fn drop(&mut self) { let (m, cv) = &*self.slot; m.lock().
 
 pub struct SolidPage {
     mesh: Option<Arc<Mesh>>, key: String, cam: Option<Camera>, image: Option<Arc<RenderImage>>, retired: Vec<Arc<RenderImage>>, drag: Option<(Drag, Point<Pixels>)>,
-    pub note: String, worker: Worker, size: Arc<Mutex<[f32; 5]>>, // panel width, height, scale factor, origin x, y (logical px) asked: (usize, usize), want_gen: u64, pub stats: Stats,
+    pub note: String, worker: Worker, size: Arc<Mutex<[f32; 5]>> /* panel width, height, scale factor, origin x, y (logical px) */, asked: (usize, usize), want_gen: u64, pub stats: Stats,
 }
 impl SolidPage {
     pub fn new(cx: &mut Context<Self>) -> Self {
