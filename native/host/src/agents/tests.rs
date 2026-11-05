@@ -838,3 +838,11 @@ const TESTCLI: &str = "#!/bin/sh\nread hello\necho '{\"q\":1}'\nread ans\necho \
     assert!(echoed.contains("move the connector"), "the agent was given the open comment after the message: {echoed}"); assert!(echoed.contains("hello there"));
     let posted = ev.iter().find(|e| is(e, "MessagePosted") && e["role"] == "user").unwrap(); assert_eq!(posted["text"], "hello there", "the log keeps the person's words only"); let _ = sd; ag.shutdown();
 }
+
+#[tokio::test(flavor = "multi_thread")] async fn the_summarizer_runs_the_stand_in_text_model_and_cleans_its_answer() { // never a real model: only the stand-in folder's claude runs
+    let sd = dir("sum-bin"); script(&sd, "claude", "#!/bin/sh\nIN=$(cat)\nprintf '{\"type\":\"result\",\"is_error\":false,\"result\":\"  Summary of: %s \\n second line\"}\\n' \"$(echo \"$IN\" | head -c 20)\"\n");
+    let (_hub, ag, _h, _w) = start("sum", |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await;
+    let s = Summarizer::summarize(&*ag, "thread", T1, "Thread title: Board work").await; assert_eq!(s.as_deref(), Some("Summary of: Thread title: Board"), "{s:?}");
+    let none = dir("sum-none"); let (_h2, ag2, _h, _w) = start("sum2", |w| base_log(w, 1, ""), |_| Cli::standin(&none)).await;
+    assert_eq!(Summarizer::summarize(&*ag2, "project", "p1", "x").await, None, "no runnable text model: no summary, no real model"); ag.shutdown(); ag2.shutdown();
+}
