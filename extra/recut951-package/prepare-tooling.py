@@ -78,7 +78,7 @@ def main():
     # preserve original receipts and every hash/type/size/member constraint.
     edit('desktop/prepare-components.cjs',
          "check(p.canonical(p.inventory(path.join(dest, 'payload'), target)) === p.canonical(old.members), 'Vendor Electron payload differs from its receipt: ' + target);",
-         "p.membership(path.join(dest, 'payload'), old.members, target);")
+         "check(p.canonical(p.inventory(path.join(dest, 'payload'), target)) === p.canonical(p.membershipExpectation(old.members, target)), 'Vendor Electron payload differs from its receipt: ' + target);")
     edit('desktop/produce-release.cjs', '/^VERIFIED_GENUINE/.test(build.status)',
          "(build.status==='AUTHORIZED_COMPOSITE_SERVICE_BUILD'&&build.testOnly===true&&build.releaseQualified===false)")
     edit('desktop/produce-release.cjs', "status:'STAGED_UNQUALIFIED',target,release:",
