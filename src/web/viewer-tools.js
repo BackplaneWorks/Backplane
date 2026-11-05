@@ -240,6 +240,7 @@ export function kept(key, scope, boardKey) {
   const root = parked?.root;
   return root && !root.isConnected && parked.key === key && parked.scope === scope && parked.boardKey === (boardKey || "") ? root : null;
 }
+export const isKept = (root) => !!root && parked?.root === root;
 // (the hub's patch of a kept workbench sets its class back to the hub's:
 // what the workbench adds, the PCB beside it and the original model shown,
 // is put back in that same frame)
