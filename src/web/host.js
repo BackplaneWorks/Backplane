@@ -793,7 +793,7 @@ function pictureNode(shown) {
   const kept = pictureNodes.get(shown);
   if (kept?.theme === themeNow) return kept.node;
   const node = App.presentation_node(presentationJson(themed(shown)));
-  pictureNodes.set(shown, { theme: themeNow, node });
+  if (shown && typeof shown === "object") pictureNodes.set(shown, { theme: themeNow, node });
   return node;
 }
 const idleSoon = fn => typeof requestIdleCallback === "function" ? requestIdleCallback(fn, { timeout: 300 }) : setTimeout(fn, 50);

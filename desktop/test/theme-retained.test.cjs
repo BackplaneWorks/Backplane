@@ -82,7 +82,7 @@ test('the first paint has the last authoritative theme, and a frame order moves 
 });
 test('host.js shows every retained or waiting picture through the theme, and learns it only from authoritative frames',()=>{
  const source=fs.readFileSync(path.resolve(__dirname,'../../src/web/host.js'),'utf8');
- assert.match(source,/transitionNode = shown \? App\.presentation_node\(presentationJson\(themed\(shown\)\)\)/);
+ assert.match(source,/transitionNode = shown \? pictureNode\(shown\)/);assert.match(source,/const node = App\.presentation_node\(presentationJson\(themed\(shown\)\)\);/);assert.match(source,/if \(kept\?\.theme === themeNow\) return kept\.node;/);
  assert.match(source,/presentationJson\(themed\(mergeFocused\(shell, record\)\)\)/);
  assert.match(source,/presentationJson\(themed\(Wire\.plain\(App\.presentation_view\(App\.presentation_wait\(ui\)\)\)\)\)/);
  assert.match(source,/if \(frontendNode \|\| canonicalBoot && App\.synced\(ui\)\) themeSeen\(root\.querySelector\("\.app"\)\);/);

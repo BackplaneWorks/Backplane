@@ -29,7 +29,7 @@ function host(retained={}){
  const a=source.indexOf('const targetKey = '),b=source.indexOf('const focusedView = new FocusedView(',a);assert(a>0&&b>a);
  const timers=[];
  const ctx={frontendNode:null,transitionNode:null,transitionFor:'',transitionPosition:null,shownFor:'',heldAt:0,QUIET_MS:1200,epoch:'e1',
-  performance:{now:()=>5000},setTimeout:(f,ms)=>timers.push(ms),later(){},themed:x=>x,presentationJson:x=>x,App:{presentation_node:n=>({node:n})},
+  performance:{now:()=>5000},setTimeout:(f,ms)=>timers.push(ms),later(){},themed:x=>x,themeNow:'',presentationJson:x=>x,App:{presentation_node:n=>({node:n})},
   transitionScope:t=>({target:t,epoch:ctx.epoch}),
   transitionViews:{get:s=>retained[s.epoch+':'+s.target.id]||null,position:()=>null}};
  vm.createContext(ctx);vm.runInContext(source.slice(a,b).replace(/^let /gm,'var ').replace(/^const /gm,'var '),ctx);
