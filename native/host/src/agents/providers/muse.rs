@@ -20,6 +20,8 @@ pub fn args(runtime: &str, model: &str) -> Vec<String> {
 fn mode_of(runtime: &str) -> u8 { match runtime { "approval-required" => 0, "auto-accept-edits" => 1, "auto" => 2, _ => 3 } }
 
 /// The ask shape the actor puts to the person (shared with the ACP lane: one actor path).
+/// Muse refuses a command id it has seen, in any session: an empty gen (never from the actor, which always sets it) must not make ids repeat.
+fn nonce(gen: &str) -> String { if gen.is_empty() { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos().to_string()).unwrap_or_default() } else { gen.to_string() } }
 pub fn ask_shape(request_line: &str) -> Value { json!({"type":"bp.ask","request":request_line}) }
 
 pub struct MuseDriver { turn: msp::MspTurn, st: msp::Msp, runtime: String }
@@ -28,7 +30,7 @@ impl Driver for MuseDriver {
     fn argv(&self, a: &TurnIn) -> Vec<String> { args(&a.runtime, &a.model) }
     fn start(&mut self, a: &TurnIn) -> Vec<String> {
         self.runtime = a.runtime.clone();
-        self.turn = msp::MspTurn { cwd: a.cwd.clone(), mcp: a.mcp_url.clone(), prompt: a.prompt.clone(), text: a.text.clone(), session: a.session.clone(), mode: msp::mode(&a.runtime).into(), effort: effort(&a.effort).into(), nonce: a.gen.clone() };
+        self.turn = msp::MspTurn { cwd: a.cwd.clone(), mcp: a.mcp_url.clone(), prompt: a.prompt.clone(), text: a.text.clone(), session: a.session.clone(), mode: msp::mode(&a.runtime).into(), effort: effort(&a.effort).into(), nonce: nonce(&a.gen) };
         self.st = msp::Msp::new();
         vec![msp::init()]
     }
@@ -101,6 +103,12 @@ mod tests {
         assert!(d.on_stop().is_empty(), "interrupt_muse_stops: Stop ends the process, nothing is written first");
         assert!(super::super::driver("muse").is_some());
     }
+    #[test] fn command_ids_differ_per_turn_even_without_a_gen() {
+        let id = |g: &str| { let mut d = MuseDriver::new(); let mut a = ti("full-access", ""); a.gen = g.into(); d.start(&a); msp::uuid(&d.turn.nonce, "3") };
+        assert_ne!(id("1-1"), id("1-2")); let (x, y) = (id(""), { std::thread::sleep(std::time::Duration::from_millis(2)); id("") }); assert_ne!(x, y);
+    }
+    #[test] fn exit_words_are_the_default_for_the_actor() { let d = MuseDriver::new(); assert!(d.exit_why(137).unwrap().starts_with("muse exited before the turn ended")) }
+    #[test] fn the_probe_has_a_perl_fallback() { let s = probe_sh(); assert!(s.contains("gtimeout") && s.contains("perl -e 'use POSIX qw(setpgid)") && s.contains("tmo 15 muse serve")); }
     #[test] fn effort_is_one_muse_takes() { assert_eq!(effort("max"), "max"); assert_eq!(effort("off"), ""); assert_eq!(effort(""), ""); }
     #[test] fn model_list_reads_request_two() {
         let out = "{\"id\":1,\"result\":{}}\n{\"id\":2,\"result\":{\"models\":[{\"modelId\":\"a\",\"displayLabel\":\"A\",\"isDefault\":true},{\"modelId\":\"b\"}]}}\n";
