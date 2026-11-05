@@ -10,9 +10,16 @@ impl Req {
     }
     pub fn route(&self) -> &str { self.target.split('?').next().unwrap_or("") }
     pub fn param(&self, name: &str) -> String {
-        self.target.split_once('?').map(|(_, q)| q).unwrap_or("").split('&')
+        // H.Http.param: the segment after the first '?' up to the next '?' (a second '?' ends the query)
+        self.target.split('?').nth(1).unwrap_or("").split('&')
             .find_map(|kv| kv.split_once('=').filter(|(k, _)| *k == name).map(|(_, v)| v.to_string())).unwrap_or_default()
     }
+}
+
+/// JS `!!d.revoked`: anything but false, null, 0, "" and a missing field is revoked ("yes", 1, [] ...). Never narrower than the JS rule.
+fn truthy(v: &serde_json::Value) -> bool {
+    use serde_json::Value::*;
+    match v { Null => false, Bool(b) => *b, Number(n) => n.as_f64().map_or(true, |f| f != 0.0 && !f.is_nan()), String(s) => !s.is_empty(), _ => true }
 }
 
 fn same(a: &str, b: &str) -> bool {
@@ -29,7 +36,7 @@ impl Auth {
         if let Ok(text) = std::fs::read_to_string(home.join("devices-v1.json")) {
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
                 for d in v["devices"].as_array().into_iter().flatten() {
-                    if let Some(h) = d["hash"].as_str() { devices.push((h.to_string(), d["revoked"].as_bool().unwrap_or(false))) }
+                    if let Some(h) = d["hash"].as_str() { devices.push((h.to_string(), truthy(&d["revoked"]))) }
                 }
             }
         }
@@ -135,5 +142,28 @@ mod tests {
         assert!(!a.allowed(&get("not-hex")), "a malformed credential is denied");
         assert!(!a.allowed(&req("/x", &[])), "no credential is denied");
         assert!(!a.allowed(&req("/x", &[("authorization", &format!("Bearer {dev}")), ("origin", "http://evil.example"), ("host", "h:1")])), "a foreign origin is denied");
+    }
+
+    #[test] fn revoked_is_read_as_javascript_truthiness_not_only_true() {
+        use serde_json::json;
+        for v in [json!(true), json!(1), json!("yes"), json!("false"), json!([]), json!({}), json!(-1), json!(0.5)] { assert!(truthy(&v), "{v}") }
+        for v in [json!(false), json!(null), json!(0), json!(""), json!(0.0)] { assert!(!truthy(&v), "{v}") }
+        // end to end through load(): a device whose revoked field is 1 or "yes" is not admitted
+        let dir = std::env::temp_dir().join(format!("bp-auth-rev-{}", std::process::id())); let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();
+        let tok = "0123456789abcdef0123456789abcdef"; let hash = hex::encode(Sha256::digest(tok.as_bytes()));
+        std::fs::write(dir.join("token"), "roottoken").unwrap();
+        for (revoked, admitted) in [("false", true), ("null", true), ("0", true), ("1", false), ("\"yes\"", false), ("true", false)] {
+            std::fs::write(dir.join("devices-v1.json"), format!("{{\"devices\":[{{\"hash\":\"{hash}\",\"revoked\":{revoked}}}]}}")).unwrap();
+            let a = Auth::load(&dir);
+            assert_eq!(a.allowed(&req("/x", &[("authorization", &format!("Bearer {tok}"))])), admitted, "revoked = {revoked}");
+        }
+    }
+    #[test] fn param_takes_the_second_segment_like_the_bend_param() {
+        let r = req("/ws?token=abc?x=1&y=2", &[]);
+        assert_eq!(r.param("token"), "abc", "a second '?' ends the query");
+        assert_eq!(r.param("x"), "", "nothing after the second '?' is read");
+        assert_eq!(req("/ws?a=1&token=t", &[]).param("token"), "t");
+        assert_eq!(req("/ws", &[]).param("token"), "");
+        assert_eq!(req("?token=z", &[]).param("token"), "z");
     }
 }
