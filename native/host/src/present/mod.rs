@@ -55,6 +55,7 @@ impl Presenter for Routed {
     fn wants_log(&self) -> bool { self.helper.wants_log() }
     fn is_down(&self) -> bool { self.helper.is_down() }
     fn restart(&self) -> Fut<'_, ()> { self.helper.restart() }
+    fn why_down(&self) -> Option<String> { self.helper.why_down() }
 }
 
 #[allow(dead_code)]
@@ -78,6 +79,19 @@ mod tests {
     #[tokio::test] async fn no_screens_is_the_helper_unchanged() {
         let r = Routed { helper: helper(), screens: vec![], dump: None };
         assert_eq!(r.view(&json!({})).await.unwrap(), json!({"shown":{"by":"helper"}}));
+    }
+    // the hub's explanation of a dead helper must pass through the router (the supervisor prints it before each restart)
+    #[tokio::test] async fn why_down_is_forwarded_to_the_helper() {
+        struct H; impl Presenter for H {
+            fn name(&self) -> &'static str { "h" }
+            fn fold<'a>(&'a self, _f: &'a Value) -> Fut<'a, ()> { Box::pin(async { Ok(()) }) }
+            fn view<'a>(&'a self, _p: &'a Value) -> Fut<'a, Value> { Box::pin(async { Ok(json!({})) }) }
+            fn ping(&self) -> Fut<'_, ()> { Box::pin(async { Ok(()) }) }
+            fn why_down(&self) -> Option<String> { Some("the policy helper died: killed by SIGKILL".into()) }
+        }
+        let r = Routed { helper: Arc::new(H), screens: vec![], dump: None };
+        assert_eq!(r.why_down().as_deref(), Some("the policy helper died: killed by SIGKILL"));
+        assert!(Routed { helper: helper(), screens: vec![], dump: None }.why_down().is_none(), "a helper with nothing to say says nothing");
     }
     #[tokio::test] async fn the_dump_records_the_helper_pairs_and_only_on_a_copy_run() {
         let d = tmp("on");
