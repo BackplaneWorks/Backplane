@@ -22,6 +22,7 @@ pub struct Screens {
     /// Timeline scroll offset per thread, so a thread left scrolled up keeps its place.
     pub offsets: HashMap<String, f32>,
     pub reg: timeline::Reg,
+    pub parsed: timeline::ParseCache,
     pub images: images::Images,
     pub img_poll: bool,
     /// A popup row was pressed: the hub's reply carries the new draft; take it once.
@@ -33,6 +34,6 @@ pub struct Screens {
 
 impl Screens {
     pub fn new<T: 'static>(_cx: &mut Context<T>, target: Option<attach::Target>, drafts_path: std::path::PathBuf, saved: HashMap<String, String>) -> Self {
-        Self { ask_inputs: HashMap::new(), attacher: attach::Attacher::new(target), drafts: drafts::Writer::start(drafts_path, saved), offsets: HashMap::new(), reg: Default::default(), images: Default::default(), img_poll: false, await_draft: None, pending_draft: None, draft_timer: false }
+        Self { ask_inputs: HashMap::new(), attacher: attach::Attacher::new(target), drafts: drafts::Writer::start(drafts_path, saved), offsets: HashMap::new(), reg: Default::default(), parsed: Default::default(), images: Default::default(), img_poll: false, await_draft: None, pending_draft: None, draft_timer: false }
     }
 }

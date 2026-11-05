@@ -65,6 +65,7 @@ impl Backplane {
         self.screens.drafts.kick();
         if !self.selected.is_empty() { self.screens.offsets.insert(self.selected.clone(), f32::from(self.scroll.offset().y)); }
         self.screens.attacher.show(raw);
+        self.screens.images.retry();
         if let Some(y) = self.screens.offsets.get(raw).copied() { self.scroll.set_offset(point(px(0.), px(y))); }
     }
 }

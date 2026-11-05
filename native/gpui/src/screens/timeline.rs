@@ -9,22 +9,59 @@ use std::{cell::RefCell, ops::Range, rc::Rc};
 
 /// Everything the pointer needs about the blocks drawn this frame; rebuilt on every render, the selection survives.
 #[derive(Default)]
-pub struct Registry { pub blocks: Vec<Info>, pub sel: Selection, pub dragging: bool, pub entry: usize }
-pub struct Info { pub text: String, pub entry: usize, pub links: Vec<(Range<usize>, Link)>, pub layout: Option<TextLayout> }
+pub struct Registry {
+    pub blocks: Vec<Info>, pub dragging: bool, pub entry: usize,
+    /// The entry being drawn and how many blocks it has had so far: a block's identity is (entry id, index in entry).
+    pub entry_id: String, idx: usize, last_id: String,
+    /// The selection as the person made it, by identity; `sel` is that resolved to this frame's ordinals.
+    keyed: Option<(KPos, KPos)>, pub sel: Selection,
+}
+#[derive(Clone, Debug, PartialEq)]
+pub struct KPos { pub entry: String, pub idx: usize, pub off: usize }
+pub struct Info { pub text: String, pub entry: usize, pub id: String, pub idx: usize, pub links: Vec<(Range<usize>, Link)>, pub layout: Option<TextLayout> }
 pub type Reg = Rc<RefCell<Registry>>;
 
+impl Default for Registry {
+    fn default() -> Self { Self { blocks: Vec::new(), dragging: false, entry: 0, entry_id: String::new(), idx: 0, last_id: String::new(), keyed: None, sel: Selection::default() } }
+}
+
 impl Registry {
+    /// A new frame: forget the blocks, keep the selection (by identity).
+    pub fn begin(&mut self) { self.blocks.clear(); self.idx = 0; self.last_id.clear(); }
+    fn next_idx(&mut self) -> usize { if self.last_id != self.entry_id { self.last_id = self.entry_id.clone(); self.idx = 0; } let i = self.idx; self.idx += 1; i }
+    fn key(&self, p: Pos) -> Option<KPos> { let b = self.blocks.get(p.block)?; Some(KPos { entry: b.id.clone(), idx: b.idx, off: p.off.min(b.text.len()) }) }
+    fn ord(&self, k: &KPos) -> Option<Pos> { self.blocks.iter().position(|b| b.id == k.entry && b.idx == k.idx).map(|block| Pos { block, off: k.off }) }
+    /// Make `s` (ordinals of this frame) the selection.
+    pub fn select(&mut self, s: Selection) {
+        self.keyed = self.key(s.anchor).zip(self.key(s.head));
+        self.sel = s;
+    }
+    /// After the frame's blocks are known: the selection by identity as ordinals. One whose message is gone clears.
+    pub fn resolve(&mut self) {
+        let Some((a, h)) = self.keyed.clone() else { self.sel = Selection::default(); return };
+        match self.ord(&a).zip(self.ord(&h)) { Some((anchor, head)) => self.sel = Selection { anchor, head }, None => { self.keyed = None; self.sel = Selection::default(); } }
+    }
+    pub fn anchor(&self) -> Selection { self.sel }
     pub fn texts(&self) -> Vec<Text> { self.blocks.iter().map(|b| Text { text: b.text.clone(), entry: b.entry }).collect() }
     /// The position under a window point: inside a block its character; elsewhere the nearest block, above it its start, below its end.
     pub fn hit(&self, p: Point<Pixels>) -> Option<Pos> {
-        let mut best: Option<(Pixels, usize, &TextLayout)> = None;
-        for (i, b) in self.blocks.iter().enumerate() {
-            let Some(l) = &b.layout else { continue };
-            let r = l.bounds();
-            let dy = if p.y < r.top() { r.top() - p.y } else if p.y > r.bottom() { p.y - r.bottom() } else { px(0.) };
-            if best.map_or(true, |(d, _, _)| dy < d) { best = Some((dy, i, l)); }
-        }
-        let (_, i, l) = best?;
+        // the block under the point first (a table's cells share a row, so distance alone would pick the first), else the nearest
+        let inside = self.blocks.iter().position(|b| b.layout.as_ref().map_or(false, |l| l.bounds().contains(&p)));
+        let i = match inside {
+            Some(i) => i,
+            None => {
+                let mut best: Option<(Pixels, Pixels, usize)> = None;
+                for (i, b) in self.blocks.iter().enumerate() {
+                    let Some(l) = &b.layout else { continue };
+                    let r = l.bounds();
+                    let dy = if p.y < r.top() { r.top() - p.y } else if p.y > r.bottom() { p.y - r.bottom() } else { px(0.) };
+                    let dx = if p.x < r.left() { r.left() - p.x } else if p.x > r.right() { p.x - r.right() } else { px(0.) };
+                    if best.map_or(true, |(by, bx, _)| (dy, dx) < (by, bx)) { best = Some((dy, dx, i)); }
+                }
+                best?.2
+            }
+        };
+        let l = self.blocks[i].layout.as_ref()?;
         let r = l.bounds(); let len = self.blocks[i].text.len();
         let off = if p.y < r.top() { 0 } else if p.y > r.bottom() { len } else { match l.index_for_position(p) { Ok(o) | Err(o) => o.min(len) } };
         Some(Pos { block: i, off })
@@ -36,30 +73,30 @@ impl Registry {
 pub enum Kind { Body, Quote, Code, Head }
 
 /// A block of text that paints its own selection and reports its layout to the registry.
-pub struct SelText { spans: Vec<Span>, kind: Kind, light: bool, reg: Reg, ord: usize, styled: Option<StyledText> }
+pub struct SelText { spans: Vec<Span>, kind: Kind, light: bool, reg: Reg, ord: usize, styled: Option<StyledText>, tokens: Vec<(Range<usize>, Tok)> }
 
 impl SelText {
     pub fn new(reg: &Reg, spans: Vec<Span>, kind: Kind, light: bool) -> Self {
         let mut r = reg.borrow_mut();
         let mut at = 0usize; let mut links = Vec::new();
         for s in &spans { if let Some(l) = &s.style.link { links.push((at..at + s.text.len(), l.clone())); } at += s.text.len(); }
-        let entry = r.entry;
-        r.blocks.push(Info { text: md::plain(&spans), entry, links, layout: None });
+        let entry = r.entry; let (id, idx) = (r.entry_id.clone(), r.next_idx());
+        r.blocks.push(Info { text: md::plain(&spans), entry, id, idx, links, layout: None });
         let ord = r.blocks.len() - 1;
         drop(r);
-        Self { spans, kind, light, reg: reg.clone(), ord, styled: None }
+        Self { spans, kind, light, reg: reg.clone(), ord, styled: None, tokens: Vec::new() }
     }
     fn runs(&self, base: &TextStyle) -> Vec<TextRun> {
         let c = |n: &str| theme::color(self.light, n);
         let mono = art::mono_font();
         let mut runs = Vec::new();
         if self.kind == Kind::Code {
-            // light highlighting over the whole block (the chat carries no language)
-            let text = md::plain(&self.spans);
-            for (r, tok) in md::highlight(&text) {
-                let color = match tok { Tok::Keyword => c("accent"), Tok::Str => c("ok"), Tok::Comment => c("faint"), Tok::Number => c("dim"), Tok::Plain => c("text") };
+            // light highlighting over the whole block (the chat carries no language), tokens computed when it was parsed
+            for (r, tok) in &self.tokens {
+                let color = match *tok { Tok::Keyword => c("accent"), Tok::Str => c("ok"), Tok::Comment => c("faint"), Tok::Number => c("dim"), Tok::Plain => c("text") };
                 runs.push(TextRun { len: r.len(), font: mono.clone(), color: color.into(), background_color: None, underline: None, strikethrough: None });
             }
+            if runs.is_empty() { runs.push(TextRun { len: 0, font: mono, color: c("text").into(), background_color: None, underline: None, strikethrough: None }); }
             return runs;
         }
         for s in &self.spans {
@@ -102,7 +139,7 @@ impl Element for SelText {
         let Some(styled) = self.styled.as_mut() else { return };
         let layout = styled.layout().clone();
         // the selection first, under the glyphs
-        let range = { let r = self.reg.borrow(); r.sel.within(self.ord, r.blocks[self.ord].text.len()) };
+        let range = { let r = self.reg.borrow(); r.blocks.get(self.ord).and_then(|b| r.sel.within(self.ord, b.text.len())) };
         if let Some(range) = range {
             let lh = layout.line_height();
             let tint = { let mut a = theme::color(self.light, "accent"); a.a = 0.28; a };
@@ -139,12 +176,12 @@ fn block_el(cx: &mut Context<Backplane>, reg: &Reg, light: bool, b: &Block, key:
             let mark = if *ordered { format!("{}.", start + i as u64) } else { "•".to_string() };
             div().flex().gap_2().child(div().min_w(px(18.)).flex_shrink_0().text_color(c("dim")).child(mark)).child(div().flex_1().min_w_0().child(text(reg, light, it.clone(), Kind::Body))).into_any_element()
         }).collect::<Vec<_>>()).into_any_element(),
-        Block::Code(t) => {
+        Block::Code(t, tokens) => {
             let copy = t.clone();
             div().w_full().bg(c("raise")).border_1().border_color(c("line")).flex().flex_col()
                 .child(div().flex().justify_end().px_2().pt_1().child(div().id(SharedString::from(format!("copy-{key}"))).px_2().text_size(px(11.)).text_color(c("dim")).cursor_pointer().hover(|s| s.text_color(c("text")))
                     .child("Copy").on_click(cx.listener(move |_, _, _, cx| { cx.write_to_clipboard(ClipboardItem::new_string(copy.clone())); }))))
-                .child(div().id(SharedString::from(format!("code-{key}"))).overflow_x_scroll().px_2().pb_2().text_size(px(12.)).whitespace_nowrap().child(text(reg, light, plain_spans(t), Kind::Code)))
+                .child(div().id(SharedString::from(format!("code-{key}"))).overflow_x_scroll().px_2().pb_2().text_size(px(12.)).whitespace_nowrap().child({ let mut s = SelText::new(reg, plain_spans(t), Kind::Code, light); s.tokens = tokens.clone(); s.into_any_element() }))
                 .into_any_element()
         }
         Block::Table { head, rows } => {
@@ -157,22 +194,43 @@ fn block_el(cx: &mut Context<Backplane>, reg: &Reg, light: bool, b: &Block, key:
             let mut t = div().id(SharedString::from(format!("tbl-{key}"))).overflow_x_scroll().border_1().border_color(c("line")).flex().flex_col().text_size(px(12.5));
             if !head.is_empty() { t = t.child(row(head, true).bg(c("raise"))); }
             for r in rows.iter().take(500) { t = t.child(row(r, false)); }
+            if rows.len() > 500 { t = t.child(div().px_2().py_1().text_color(c("dim")).child(format!("… {} more rows", rows.len() - 500))); }
             t.into_any_element()
         }
     }
 }
 
-/// An assistant message's blocks, or its plain text when the hub sent none.
-pub fn blocks(cx: &mut Context<Backplane>, reg: &Reg, light: bool, nodes: &[Value], key: &str) -> Vec<AnyElement> {
-    md::parse(nodes).iter().enumerate().map(|(i, b)| block_el(cx, reg, light, b, &format!("{key}-{i}"))).collect()
+/// Parsed blocks by entry id, valid while the entry's text and node count are the same: a streaming reply is parsed once per change, not once per frame.
+#[derive(Default)]
+pub struct ParseCache { items: std::collections::HashMap<String, (u64, Rc<Vec<Block>>)> }
+const PARSE_KEEP: usize = 400;
+fn fingerprint(text: &str, nodes: &[Value]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new(); text.hash(&mut h); nodes.len().hash(&mut h); h.finish()
+}
+impl ParseCache {
+    pub fn get(&mut self, id: &str, text: &str, nodes: &[Value]) -> Rc<Vec<Block>> {
+        let f = fingerprint(text, nodes);
+        if let Some((g, b)) = self.items.get(id) { if *g == f { return b.clone(); } }
+        if self.items.len() >= PARSE_KEEP { self.items.clear(); }
+        let b = Rc::new(md::parse(nodes));
+        self.items.insert(id.to_string(), (f, b.clone()));
+        b
+    }
 }
 
+/// An assistant message's blocks.
+pub fn blocks(cx: &mut Context<Backplane>, reg: &Reg, light: bool, parsed: &[Block], key: &str) -> Vec<AnyElement> {
+    parsed.iter().enumerate().map(|(i, b)| block_el(cx, reg, light, b, &format!("{key}-{i}"))).collect()
+}
+
+const MAX_IMAGES: usize = 12;
 /// Images a message names: each as its picture when it has arrived, a placeholder while it loads or when it cannot.
 pub fn images(light: bool, list: &Value, key: &str, target: Option<&super::attach::Target>, imgs: &super::images::Images) -> Option<AnyElement> {
     let c = |n: &str| theme::color(light, n);
     let items = list.as_array().filter(|a| !a.is_empty())?;
     let mut row = div().flex().flex_wrap().gap_2();
-    for (i, it) in items.iter().take(12).enumerate() {
+    for (i, it) in items.iter().take(MAX_IMAGES).enumerate() {
         let url = it["url"].as_str().unwrap_or("");
         let name = it["path"].as_str().unwrap_or("").rsplit('/').next().unwrap_or("").to_string();
         let el = match imgs.get(target, url) {
@@ -182,6 +240,7 @@ pub fn images(light: bool, list: &Value, key: &str, target: Option<&super::attac
         };
         row = row.child(div().id(SharedString::from(format!("img-{key}-{i}"))).child(el));
     }
+    if items.len() > MAX_IMAGES { row = row.child(div().px_2().py_1().text_size(px(12.)).text_color(c("dim")).child(format!("+{} more images", items.len() - MAX_IMAGES))); }
     Some(row.into_any_element())
 }
 
@@ -206,15 +265,15 @@ impl Backplane {
         let mut r = self.screens.reg.borrow_mut();
         let texts = r.texts();
         match e.click_count {
-            2 => { let w = select::word_at(&texts[pos.block].text, pos.off); r.sel = Selection { anchor: Pos { block: pos.block, off: w.start }, head: Pos { block: pos.block, off: w.end } }; }
-            n if n >= 3 => { if let Some(s) = select::block_range(&texts, pos.block) { r.sel = s; } }
-            _ => { r.sel = if e.modifiers.shift { Selection { anchor: r.sel.anchor, head: pos } } else { Selection { anchor: pos, head: pos } }; r.dragging = true; }
+            2 => { let w = select::word_at(&texts[pos.block].text, pos.off); r.select(Selection { anchor: Pos { block: pos.block, off: w.start }, head: Pos { block: pos.block, off: w.end } }); }
+            n if n >= 3 => { if let Some(s) = select::block_range(&texts, pos.block) { r.select(s); } }
+            _ => { let s = if e.modifiers.shift { Selection { anchor: r.sel.anchor, head: pos } } else { Selection { anchor: pos, head: pos } }; r.select(s); r.dragging = true; }
         }
         drop(r); cx.notify();
     }
     pub(crate) fn timeline_move(&mut self, e: &MouseMoveEvent, cx: &mut Context<Self>) {
         if !self.screens.reg.borrow().dragging { return; }
-        if let Some(pos) = self.timeline_pos(e.position) { self.screens.reg.borrow_mut().sel.head = pos; cx.notify(); }
+        if let Some(pos) = self.timeline_pos(e.position) { let mut r = self.screens.reg.borrow_mut(); let mut s = r.sel; s.head = pos; r.select(s); drop(r); cx.notify(); }
     }
     pub(crate) fn timeline_up(&mut self, e: &MouseUpEvent, cx: &mut Context<Self>) {
         let was = std::mem::replace(&mut self.screens.reg.borrow_mut().dragging, false);
@@ -232,5 +291,43 @@ impl Backplane {
     pub(crate) fn timeline_copy(&mut self, cx: &mut Context<Self>) {
         let s = { let r = self.screens.reg.borrow(); select::extract(&r.texts(), &r.sel) };
         if !s.is_empty() { cx.write_to_clipboard(ClipboardItem::new_string(s)); }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use core::prelude::v1::test;
+    fn info(id: &str, idx: usize, text: &str) -> Info { Info { text: text.into(), entry: 0, id: id.into(), idx, links: vec![], layout: None } }
+    fn frame(r: &mut Registry, blocks: &[(&str, usize, &str)]) { r.begin(); for (id, idx, t) in blocks { r.blocks.push(info(id, *idx, t)); } r.resolve(); }
+    #[test] fn a_selection_follows_its_text_when_blocks_are_added_above() {
+        let mut r = Registry::default();
+        frame(&mut r, &[("e2", 0, "second"), ("e3", 0, "third message")]);
+        r.select(Selection { anchor: Pos { block: 0, off: 2 }, head: Pos { block: 1, off: 5 } }); r.resolve();
+        assert_eq!(select::extract(&r.texts(), &r.sel), "cond\n\nthird");
+        // older history loads above: every ordinal shifts by two
+        frame(&mut r, &[("e0", 0, "old one"), ("e1", 0, "old two"), ("e2", 0, "second"), ("e3", 0, "third message")]);
+        assert_eq!(select::extract(&r.texts(), &r.sel), "cond\n\nthird", "same text after the shift");
+        assert_eq!((r.sel.anchor.block, r.sel.head.block), (2, 3));
+    }
+    #[test] fn a_selection_whose_message_is_gone_clears() {
+        let mut r = Registry::default();
+        frame(&mut r, &[("e2", 0, "second"), ("e3", 0, "third")]);
+        r.select(Selection { anchor: Pos { block: 0, off: 0 }, head: Pos { block: 1, off: 3 } }); r.resolve();
+        frame(&mut r, &[("e3", 0, "third")]);
+        assert!(r.sel.collapsed()); assert_eq!(select::extract(&r.texts(), &r.sel), ""); frame(&mut r, &[("e2", 0, "second"), ("e3", 0, "third")]);
+        assert!(r.sel.collapsed(), "it does not come back");
+    }
+    #[test] fn blocks_in_one_message_are_numbered_from_zero() {
+        let mut r = Registry::default(); r.begin();
+        for id in ["a", "a", "b", "b", "b"] { r.entry_id = id.into(); let i = r.next_idx(); r.blocks.push(info(id, i, "x")); }
+        assert_eq!(r.blocks.iter().map(|b| b.idx).collect::<Vec<_>>(), [0, 1, 0, 1, 2]);
+    }
+    #[test] fn the_parse_cache_reparses_only_when_the_text_changes() {
+        let mut c = ParseCache::default();
+        let n: Vec<Value> = serde_json::from_str(r#"[{"tag":"p","kids":[{"text":"hi"}]}]"#).unwrap();
+        let a = c.get("e1", "hi", &n); let b = c.get("e1", "hi", &n);
+        assert!(Rc::ptr_eq(&a, &b), "unchanged text is not parsed again");
+        let d = c.get("e1", "hi there", &n); assert!(!Rc::ptr_eq(&a, &d));
     }
 }

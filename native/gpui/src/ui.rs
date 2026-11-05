@@ -110,7 +110,7 @@ impl Render for Backplane {
         if self.gallery { return crate::swatch::gallery(light).into_any_element(); }
         if self.fonts { return crate::swatch::fonts(light).into_any_element(); }
         let c = |name: &str| theme::color(light, name);
-        self.screens.reg.borrow_mut().blocks.clear();
+        self.screens.reg.borrow_mut().begin(); self.screens.images.frame();
         let reg = self.screens.reg.clone();
         if self.input.read(cx).light != light { self.input.update(cx, |i, _| i.light = light); for i in self.screens.ask_inputs.values() { i.update(cx, |i, _| i.light = light); } }
         // bots: (name, mood, note, look seed) copied out so the cat cache can be filled
@@ -160,7 +160,7 @@ impl Render for Backplane {
         // timeline
         let mut entries: Vec<AnyElement> = Vec::new();
         for (ei, e) in thread["entries"].as_array().into_iter().flatten().enumerate() {
-            reg.borrow_mut().entry = ei;
+            { let mut r = reg.borrow_mut(); r.entry = ei; r.entry_id = string(e, "id"); }
             let kind = e["kind"].as_str().unwrap_or("");
             let id = string(e, "id");
             let text = string(e, "text");
@@ -181,7 +181,7 @@ impl Render for Backplane {
                 "assistant" => {
                     let mut col = div().id(SharedString::from(format!("e-{id}"))).w_full().py_2().flex().flex_col().gap_2();
                     match e["blocks"].as_array() {
-                        Some(blocks) if !blocks.is_empty() => { for el in crate::screens::timeline::blocks(cx, &reg, light, blocks, &id) { col = col.child(el); } }
+                        Some(blocks) if !blocks.is_empty() => { let parsed = self.screens.parsed.get(&id, &text, blocks); for el in crate::screens::timeline::blocks(cx, &reg, light, &parsed, &id) { col = col.child(el); } }
                         _ => { col = col.child(crate::screens::timeline::user_text(&reg, light, &text)); }
                     }
                     if let Some(im) = crate::screens::timeline::images(light, &e["images"], &id, self.screens.attacher.target.as_ref(), &self.screens.images) { col = col.child(im); }
@@ -192,6 +192,7 @@ impl Render for Backplane {
                 }
             }
         }
+        reg.borrow_mut().resolve();
         for live in thread["live"].as_array().into_iter().flatten() { entries.push(div().py_2().child(string(live, "text")).into_any_element()); }
         // project home replaces the thread when the hub selected it
         let home = &self.data["projectHome"];
