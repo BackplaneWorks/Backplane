@@ -55,3 +55,5 @@ Self-diff (two recordings): 0 differences in 6 scenarios. Replay of recording A 
 Raw: build/gpui/results/parity-current/. This recording (recA there) is the baseline for the Rust hub; the earlier one (results/parity) came from an older JS build.
 
 Rust hubs: pass the presenter as flags in `PARITY_HUB_ARGS` (space separated), e.g. `--policy-bin build/gpui/slim/bp-policy-page --window-bin build/gpui/hub/new/window --commit <sha>`; without them the hub answers with its canned presenter and a replay differs in shown/window/overlay and view ids. Check `/proc/<pid>/cmdline` before trusting a run. The JS hub takes no such flags (leave it unset).
+
+Counts before commit `parity: remove the 40-difference cap` were capped at about 42 per scenario, so totals such as 156, 177, 151 and 127 were floors, not true counts. A result of 0 was always exact.
