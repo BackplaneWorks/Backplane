@@ -4,6 +4,8 @@ import ../../src/core/model.bend as M
 import ../../src/core/client.bend as U
 import ../../src/core/autosettle.bend as A
 import ../../src/core/codec.bend as C
+import ../../src/core/watchdog.bend as W
+import ../../src/core/hub.bend as B
 
 # The autosettle probe (state lane): the same fold as digest.bend, then Auto.changes at a time, printed as a JSON array of events.
 #   autosettle_probe NOW CHUNK1 [CHUNK2 ...]
@@ -80,10 +82,22 @@ def Ap.batch.k(none: Bool, +path: String) -> IO(List<&2, M.Change>):
 def Ap.batch(+path: String) -> IO(List<&2, M.Change>):
   Ap.batch.k(String.eq(path, "none"), path)
 
+# Watchdog.after: the batch followed by the liveness progress it adds; only the added part is printed
+def Ap.live.k(+out: List<&2, M.Change>, +n: Nat) -> J.Json:
+  J.Json.arr(Ap.enc(List.drop(&2, M.Change, out, n)))
+
+def Ap.live.step(r: B.Step, +n: Nat) -> J.Json:
+  match r:
+    case B.Step{out, _}: Ap.live.k(out, n)
+
+def Ap.live(+st: M.State, +now: Nat, +cs: List<&2, M.Change>) -> J.Json:
+  Ap.live.step(W.Watchdog.after(st, now, B.Step{cs, Nil{}}), List.length(&2, M.Change, cs))
+
 def Ap.out(+st: M.State, +now: Nat, +cs: List<&2, M.Change>) -> J.Json:
   J.Json.obj([J.KV{"tick", J.Json.arr(Ap.enc(A.Auto.changes(st, now)))},
     J.KV{"meta", J.Json.arr(Ap.enc(A.Auto.messages.metadata(cs, st)))},
-    J.KV{"quiet", J.Json.arr(Ap.enc(A.Auto.quiet.changes(Map.to_list(&2, Nat, A.Auto.quiet.collect(cs, st, Map.new(&2, Nat))), st)))}])
+    J.KV{"quiet", J.Json.arr(Ap.enc(A.Auto.quiet.changes(Map.to_list(&2, Nat, A.Auto.quiet.collect(cs, st, Map.new(&2, Nat))), st)))},
+    J.KV{"live", Ap.live(st, now, cs)}])
 
 def main() -> IO(Unit):
   do IO<Unit>:

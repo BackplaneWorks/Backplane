@@ -23,6 +23,6 @@ fn main() {
     // metadata sees the state before each change, advanced by the earlier ones and their own metadata (Auto.messages.metadata)
     let mut meta = vec![]; let mut st2 = fold(&args[2..]);
     for c in &batch { let one = state::fam::autosettle::metadata(&st2, c); meta.extend(one.iter().cloned()); st2.apply(c); for e in &one { st2.apply(e); } }
-    let out = serde_json::json!({"tick": state::fam::autosettle::changes(&st, now), "meta": meta, "quiet": state::fam::autosettle::quiet(&st, &batch)});
+    let out = serde_json::json!({"tick": state::fam::autosettle::changes(&st, now), "meta": meta, "quiet": state::fam::autosettle::quiet(&st, &batch), "live": state::fam::watchdog::after(&st, now, &batch)});
     println!("{}", serde_json::to_string(&out).unwrap());
 }

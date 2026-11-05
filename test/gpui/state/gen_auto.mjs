@@ -45,6 +45,8 @@ ls.push(E({$:'WakeSet',id:'w1',by:'wk-owner',kind:'thread',target:'wk-target',ev
 ls.push(E({$:'WakeSet',id:'w2',by:'setd',kind:'work',target:'nowork',events:['x'],once:true,note:''},T0));
 ls.push(E({$:'WakeSet',id:'w3',by:'setd',kind:'file',target:'/f',events:[],once:true,note:''}),E({$:'WakeSet',id:'w4',by:'setd',kind:'weird',target:'z',events:[],once:true,note:''}));
 ls.push(E({$:'WakeSet',id:'w5',by:'pinned',kind:'pr',target:'7',events:[],once:true,note:''}),E({$:'WakeSet',id:'w6',by:'bg',kind:'work',target:'job1',events:[],once:true,note:''}));
+// liveness records and restart-retry counts the progress writes read
+ls.push(set('liveness.tc',JSON.stringify({last:T0+10,nudged:T0+500,stalled:true,reported:true,reason:'stuck'})),set('liveness.tp',JSON.stringify({last:T0+60000,nudged:0,stalled:false,reported:false,reason:'x'})),set('restart.retry.tc','2'),set('restart.retry.n.w-launched','3'),set('provider.resume.w-parent','1'),set('thread.config.hold.w-rep2','on'));
 // legacy and defaults
 ls.push(set('autosettle.version','1'));
 writeFileSync(`${out}/auto-base.jsonl`,ls.join('\n')+'\n');

@@ -16,19 +16,21 @@ tail -4 $O/test.txt; grep -E 'test-exit|build-exit' $O/test.txt $O/build.txt
 norm() { python3 -c "
 import sys,json
 d=json.load(sys.stdin)
-for k in ('tick','meta','quiet'):
+for k in ('tick','meta','quiet','live'):
     for x in sorted(json.dumps(e,sort_keys=True) for e in d[k]): print(k,x)"; }
 fail=0; total=0; nonempty=0
 for f in test/gpui/state/auto-logs/auto-*.jsonl; do n=$(basename $f .jsonl)
   for now in $(cat test/gpui/state/auto-logs/auto.now); do
-    B=test/gpui/state/auto-logs/auto.batch
-    ( ulimit -s 1048576; $O/probe $now $B $f ) | norm > $O/$n.$now.bend
-    [ -s $O/$n.$now.bend ] && nonempty=$((nonempty+1))
+   for B in test/gpui/state/auto-logs/auto.batch test/gpui/state/auto-logs/auto.batch2 test/gpui/state/auto-logs/auto.batch3; do
+    b=$(basename $B)
+    ( ulimit -s 1048576; $O/probe $now $B $f ) | norm > $O/$n.$now.$b.bend
+    [ -s $O/$n.$now.$b.bend ] && nonempty=$((nonempty+1))
     for lean in 0 1; do
-      LEAN=$lean target-state/release/state-probe $now $B $f | norm > $O/$n.$now.rust$lean
+      LEAN=$lean target-state/release/state-probe $now $B $f | norm > $O/$n.$now.$b.rust$lean
       total=$((total+1))
-      if cmp -s $O/$n.$now.bend $O/$n.$now.rust$lean; then :; else fail=$((fail+1)); echo "DIFF lean=$lean $n $now: bend $(wc -l < $O/$n.$now.bend) rust $(wc -l < $O/$n.$now.rust$lean)" | tee -a $O/result.txt; diff $O/$n.$now.bend $O/$n.$now.rust$lean | head -6 | tee -a $O/result.txt; fi
+      if cmp -s $O/$n.$now.$b.bend $O/$n.$now.$b.rust$lean; then :; else fail=$((fail+1)); echo "DIFF lean=$lean $n $now $b: bend $(wc -l < $O/$n.$now.$b.bend) rust $(wc -l < $O/$n.$now.$b.rust$lean)" | tee -a $O/result.txt; diff $O/$n.$now.$b.bend $O/$n.$now.$b.rust$lean | head -8 | tee -a $O/result.txt; fi
     done
+   done
   done
 done
 echo "autosettle probe: $total runs (full and lean state each), $nonempty with changes, $fail differ" | tee -a $O/result.txt
