@@ -1,11 +1,12 @@
 //! backplane-hub: the Backplane hub for native clients (GPUI, SwiftUI, Compose).
 //! HTTP + authenticated WebSocket; renderer `mobile`; the picture comes from the presenter.
-mod agents; mod api; mod auth; mod cbor; mod delta; mod files; mod hub; mod model; mod presenter; mod store; mod window;
+mod agents; mod api; mod auth; mod cbor; mod copy; mod delta; mod files; mod hub; mod model; mod presenter; mod session; mod store; mod wire; mod window;
 
 use anyhow::{Context, Result};
 use auth::Req;
 use futures_util::{SinkExt, StreamExt};
 use hub::{Conn, Hub};
+use wire::*;
 use serde_json::{json, Value};
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -72,168 +73,6 @@ fn ensure_token(home: &std::path::Path) -> Result<()> {
 trait ReadExactSync { fn read_exact_sync(&mut self, b: &mut [u8]) -> std::io::Result<()>; }
 impl ReadExactSync for std::fs::File { fn read_exact_sync(&mut self, b: &mut [u8]) -> std::io::Result<()> { std::io::Read::read_exact(self, b) } }
 
-/// A handler's reply: a header it names in `extra` (Cache-Control, Content-Type...) replaces the default of
-/// the same name; Content-Length is always the body's.
-fn response_for(status: &str, ctype: &str, extra: &str, body: &[u8]) -> Vec<u8> {
-    let names: Vec<String> = extra.lines().filter_map(|l| l.split_once(':').map(|(k, _)| k.trim().to_ascii_lowercase())).collect();
-    let mut head = format!("HTTP/1.1 {status}\r\n");
-    if !names.contains(&"content-type".to_string()) { head.push_str(&format!("Content-Type: {ctype}\r\n")); }
-    head.push_str(&format!("Content-Length: {}\r\n", body.len()));
-    if !names.contains(&"cache-control".to_string()) { head.push_str("Cache-Control: no-cache\r\n"); }
-    head.push_str("Connection: close\r\n");
-    for l in extra.split("\r\n").filter(|l| !l.is_empty() && !l.to_ascii_lowercase().starts_with("content-length")) { head.push_str(l); head.push_str("\r\n"); }
-    head.push_str("\r\n");
-    let mut v = head.into_bytes(); v.extend_from_slice(body); v
-}
-
-fn response(status: &str, ctype: &str, extra: &str, body: &[u8]) -> Vec<u8> {
-    // core/http.bend Http.response: the same header lines in the same order
-    let mut v = format!("HTTP/1.1 {status}\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nCache-Control: no-cache\r\nConnection: close\r\n{extra}\r\n", body.len()).into_bytes();
-    v.extend_from_slice(body); v
-}
-
-async fn http(hub: &Hub, mut s: TcpStream, req: Req) -> Result<()> {
-    let out = match req.route() {
-        "/hello" => {
-            let body = cbor::encode(&json!({"backplane":hub.cfg.version,"busy":0,"commit":hub.cfg.commit}));
-            response("200 OK", "application/cbor", "", &body)
-        }
-        "/client/capabilities" => if hub.auth.paired_request(&req) {
-            response("200 OK", "application/json", "Cache-Control: no-store\r\n", serde_json::to_string(&hub::capabilities())?.as_bytes())
-        } else { response("401 Unauthorized", "text/plain", "Cache-Control: no-store\r\n", b"paired authentication required") },
-        other => match hub.http_for(other) {
-            Some(h) if hub.auth.allowed(&req) => { let r = h.call(&hub.arc(), &req).await; response_for(r.status, &r.ctype, &r.extra, &r.body) }
-            Some(_) => response("401 Unauthorized", "text/plain; charset=utf-8", "", b"this Backplane needs its pairing token"),
-            None => response("404 Not Found", "text/plain; charset=utf-8", "", b"not found"),
-        },
-    };
-    s.write_all(&out).await?; s.shutdown().await.ok(); Ok(())
-}
-
-/// hub_frames_cbor: every frame the hub sends is binary (opcode 2, final): CBOR, never text.
-fn pack(_c: &Conn, v: &Value) -> Message { Message::Binary(cbor::encode(v).into()) }
-
-async fn socket(hub: Arc<Hub>, s: TcpStream, cbor_wanted: bool) -> Result<()> {
-    socket_inner(hub, s, cbor_wanted).await
-}
-async fn socket_inner(hub: Arc<Hub>, s: TcpStream, cbor_wanted: bool) -> Result<()> {
-    let mut cfg = WebSocketConfig::default(); cfg.max_message_size = Some(524288); cfg.max_frame_size = Some(524288);
-    let (mut tx, mut rx) = tokio_tungstenite::accept_async_with_config(s, Some(cfg)).await?.split();
-    let (mut conn, greeting) = hub.connect(cbor_wanted);
-    tx.send(pack(&conn, &greeting)).await?;
-    let mut changes = hub.changed.subscribe();
-    let mut outbox = hub.attach(conn.client);
-    struct Detach(Arc<Hub>, u64); impl Drop for Detach { fn drop(&mut self) { self.0.detach(self.1) } }
-    let _detach = Detach(hub.clone(), conn.client);
-    let mut beat = tokio::time::interval(Duration::from_millis(15000)); beat.tick().await;
-    let mut due: Option<tokio::time::Instant> = None;
-    loop {
-        tokio::select! {
-            m = rx.next() => {
-                let Some(m) = m else { return Ok(()) };
-                let v: Value = match m? { Message::Binary(b) => match cbor::decode(&b) { Ok(v) => v, Err(_) => continue }, Message::Text(t) => match serde_json::from_str(t.as_str()) { Ok(v) => v, Err(_) => continue }, Message::Close(_) => return Ok(()), _ => continue };
-                for f in hub.request(&mut conn, &v).await { tx.send(pack(&conn, &f)).await?; }
-            }
-            n = changes.recv() => { match n { Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => if due.is_none() && !conn.view_id.is_empty() { due = Some(tokio::time::Instant::now() + Duration::from_millis(50)) }, Err(_) => return Ok(()) } }
-            _ = async { match due { Some(t) => tokio::time::sleep_until(t).await, None => std::future::pending().await } } => {
-                due = None; let rev = hub.revision().await;
-                if rev != conn.lastrev { tx.send(pack(&conn, &hub.notice(&conn, rev))).await?; }
-            }
-            f = outbox.recv() => { let Some(f) = f else { return Ok(()) }; tx.send(match f { hub::Out::Value(v) => pack(&conn, &v), hub::Out::Raw(b) => Message::Binary(b.into()) }).await?; }
-            _ = beat.tick() => { tx.send(pack(&conn, &json!({"t":"hb"}))).await?; }
-        }
-    }
-}
-
-/// The plain wire stream (what the Bend hub gives a client that did not ask for views): `log` from `since`
-/// (honoured only for this log's `origin`), `live`, `info`, then every commit as `changes`, streamed text as
-/// `delta`/`delta_end`. One cursor (`sent`) over the log: no commit is skipped or repeated, whatever the timing.
-async fn wire(hub: Arc<Hub>, s: TcpStream, since: usize, origin: String) -> Result<()> {
-    let mut cfg = WebSocketConfig::default(); cfg.max_message_size = Some(524288); cfg.max_frame_size = Some(524288);
-    let (mut tx, mut rx) = tokio_tungstenite::accept_async_with_config(s, Some(cfg)).await?.split();
-    let (mut conn, _) = hub.connect(true);
-    let mut outbox = hub.attach(conn.client);
-    struct Detach(Arc<Hub>, u64); impl Drop for Detach { fn drop(&mut self) { self.0.detach(self.1) } }
-    let _detach = Detach(hub.clone(), conn.client);
-    // atomic join point: the length now, and a subscription taken under the same lock as commits
-    let (mut changes, mut deltas) = (hub.changed.subscribe(), hub.frames.subscribe());
-    let n0 = hub.store.len(); // subscribed first: a commit after this point is announced, and the cursor below reads from `sent`
-    let from = if origin == hub.origin && since <= n0 { since } else { 0 };
-    let mut sent = from;
-    let mut first = true;
-    while sent < n0 || first {
-        let to = (sent + 2000).min(n0);
-        let lines = hub.store.range(sent, to)?;
-        let items: Vec<Value> = lines.iter().filter_map(|l| Hub::wire_item(l, false)).collect();
-        let frame = if first { json!({"t":"log","since":from,"origin":hub.origin,"version":hub.cfg.version,"info":hub.log_info(),"items":items}) } else { json!({"t":"changes","items":items}) };
-        tx.send(pack(&conn, &frame)).await?; sent = to; first = false;
-    }
-    tx.send(pack(&conn, &hub.live_frame())).await?;
-    tx.send(pack(&conn, &hub.info_frame())).await?;
-    let mut beat = tokio::time::interval(Duration::from_millis(15000)); beat.tick().await;
-    loop {
-        tokio::select! {
-            m = rx.next() => {
-                let Some(m) = m else { return Ok(()) };
-                let v: Value = match m? { Message::Binary(b) => match cbor::decode(&b) { Ok(v) => v, Err(_) => continue }, Message::Text(t) => match serde_json::from_str(t.as_str()) { Ok(v) => v, Err(_) => continue }, Message::Close(_) => return Ok(()), _ => continue };
-                // a plain stream has no views: the Bend hub answers a view method there STALE_CONNECTION
-                if v.get("m").and_then(Value::as_str).map_or(false, |m| m.starts_with("view.")) { tx.send(pack(&conn, &hub::error(v.get("id").unwrap_or(&Value::Null), "STALE_CONNECTION"))).await?; continue }
-                for f in hub.request(&mut conn, &v).await { tx.send(pack(&conn, &f)).await?; }
-            }
-            n = changes.recv() => {
-                if let Err(tokio::sync::broadcast::error::RecvError::Closed) = n { return Ok(()) }
-                // everything committed since the cursor, in order, in frames of bounded size
-                loop {
-                    let upto = hub.store.len(); if sent >= upto { break }
-                    let to = (sent + 500).min(upto);
-                    let lines = hub.store.range(sent, to)?;
-                    let items: Vec<Value> = lines.iter().filter_map(|l| Hub::wire_item(l, true)).collect();
-                    sent = to; tx.send(pack(&conn, &json!({"t":"changes","items":items}))).await?;
-                }
-            }
-            d = deltas.recv() => { if let Ok(f) = d { tx.send(pack(&conn, &f)).await?; } }
-            f = outbox.recv() => { let Some(f) = f else { return Ok(()) }; tx.send(match f { hub::Out::Value(v) => pack(&conn, &v), hub::Out::Raw(b) => Message::Binary(b.into()) }).await?; }
-            _ = beat.tick() => { tx.send(pack(&conn, &json!({"t":"hb"}))).await?; }
-        }
-    }
-}
-
-async fn serve(hub: Arc<Hub>, s: TcpStream) -> Result<()> {
-    let mut buf = vec![0u8; 16384];
-    let mut tries = 0;
-    let (head_len, req) = loop {
-        let n = s.peek(&mut buf).await?; if n == 0 { return Ok(()) }
-        let mut hs = [httparse::EMPTY_HEADER; 64];
-        let mut r = httparse::Request::new(&mut hs);
-        match r.parse(&buf[..n]) {
-            Ok(httparse::Status::Complete(len)) => break (len, Req { method: r.method.unwrap_or("").to_string(), target: r.path.unwrap_or("/").to_string(),
-                headers: r.headers.iter().map(|h| (h.name.to_string(), String::from_utf8_lossy(h.value).into_owned())).collect() }),
-            Ok(httparse::Status::Partial) if n < buf.len() && tries < 200 => { tries += 1; tokio::time::sleep(Duration::from_millis(10)).await }
-            _ => { let mut s = s; s.write_all(&response("400 Bad Request", "text/plain; charset=utf-8", "", b"bad request")).await.ok(); return Ok(()) }
-        }
-    };
-    let mut s = s;
-    if req.route() == "/ws" && req.header("upgrade").eq_ignore_ascii_case("websocket") {
-        if !hub.auth.allowed(&req) {
-            let mut sink = vec![0u8; head_len]; s.read_exact(&mut sink).await?;
-            s.write_all(&response("401 Unauthorized", "text/plain; charset=utf-8", "", b"this Backplane needs its pairing token")).await?; s.shutdown().await.ok(); return Ok(());
-        }
-        let (view, mobile) = (req.param("view") == "1", req.param("mobile") == "1");
-        if !view { // the plain wire stream: log, live, changes, deltas
-            return wire(hub, s, req.param("since").parse().unwrap_or(0), req.param("origin")).await;
-        }
-        if !mobile { // renderer web is dropped
-            let mut sink = vec![0u8; head_len]; s.read_exact(&mut sink).await?;
-            s.write_all(&response("400 Bad Request", "text/plain; charset=utf-8", "", b"this hub serves renderer mobile only")).await?; s.shutdown().await.ok(); return Ok(());
-        }
-        return socket(hub, s, req.param("enc") == "cbor").await;
-    }
-    let mut sink = vec![0u8; head_len]; s.read_exact(&mut sink).await?;
-    http(&hub, s, req).await
-}
-
-fn rejected(e: &str) -> ErrorResponse { let mut r = ErrorResponse::new(Some(e.to_string())); *r.status_mut() = 401.try_into().unwrap(); r }
-
 #[tokio::main]
 async fn main() {
     let args = match parse() { Ok(a) => a, Err(code) => std::process::exit(code) };
@@ -242,8 +81,12 @@ async fn main() {
 
 async fn run(a: Args) -> Result<()> {
     let _ = rejected; // reserved for the handshake callback once the query rules grow
+    // the safety gate, before the home is touched: a home that looks like a copy of a real hub's data needs BACKPLANE_COPY=1
+    if let Err(why) = copy::gate(&a.home, copy::on()) { eprintln!("{why}"); std::process::exit(1); }
+    if copy::on() { eprintln!("{}", copy::NOTE); }
     std::fs::create_dir_all(&a.home)?;
     let _lock = take_lock(&a.home, a.port)?;
+    copy::mark(&a.home);
     ensure_token(&a.home)?;
     let presenter: Arc<dyn presenter::Presenter> = match &a.policy {
         Some(p) => Arc::new(presenter::BpPolicy::spawn(p).await?),
@@ -251,6 +94,7 @@ async fn run(a: Args) -> Result<()> {
     };
     let listen = format!("{}:{}", a.host, a.port);
     let hub = Hub::start(hub::Cfg { home: a.home.clone(), version: a.version, commit: a.commit, listen: listen.clone(), os: "linux".into(), arch: "x64".into() }, presenter).await?;
+    session::start(&hub);
     files::start(hub.clone());
     agents::Agents::start(hub.clone()).await?;
     if let Some(w) = &a.window { let _ = hub.window_bin.set(w.clone()); }

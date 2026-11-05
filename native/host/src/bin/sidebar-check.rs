@@ -1,6 +1,6 @@
 //! sidebar-check [--statuses|--shelves] LOG...: fold the logs with the Rust State and print what the sidebar computes from it.
 //! Default: counts per status word (safe for the store copy). --statuses: {thread id: status word} (hub-generated logs only).
-#[path = "../state.rs"]
+#[path = "../state/mod.rs"]
 mod state;
 #[path = "../shelf.rs"]
 #[allow(dead_code)]
