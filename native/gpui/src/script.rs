@@ -82,9 +82,13 @@ impl Backplane {
             let text = serde_json::to_string(&ctl).unwrap_or_default();
             if text != self.ctl_last {
                 self.ctl_last = text; metric(started, "controls", json!({"controls": ctl}));
-                // links in messages: GPUI draws message text without link detection, so there are none to aim at yet
-                if !self.links_sent { self.links_sent = true; metric(started, "links", json!({"links": [], "supported": false})); }
             }
+        }
+        if crate::art::rects_on() {
+            // links in messages as painted last frame (the check harness aims at these; a code block's Copy is not one)
+            let links: Vec<Value> = self.link_and_copy_rects().into_iter().filter(|(id, _, _)| id.starts_with("link:")).map(|(id, href, b)| json!({"id": id, "href": href, "rect": {"x": f32::from(b.origin.x), "y": f32::from(b.origin.y), "w": f32::from(b.size.width), "h": f32::from(b.size.height)}})).collect();
+            let text = serde_json::to_string(&links).unwrap_or_default();
+            if !self.links_sent || text != self.links_last { self.links_sent = true; self.links_last = text; metric(started, "links", json!({"links": links, "supported": true})); }
         }
         let draws = self.data["projects"].as_array().map_or(false, |p| !p.is_empty());
         if !self.usable && draws {
