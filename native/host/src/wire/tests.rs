@@ -128,13 +128,16 @@ async fn origin_is_read_at_each_join_and_a_zero_resumes_from_nothing() {
     let Ok(mode) = std::env::var("BP_SBS_WIRE_PROBE") else { return };
     let on = crate::copy::person_turn_allowed();
     assert_eq!(on, mode == "on");
+    let (yes, one) = (json!(true), json!("1"));
+    let want_bool = if mode == "on" { Some(&yes) } else { None };
+    let want_text = if mode == "on" { Some(&one) } else { None };
     let h = hello_body("0.14.0", "c", on);
-    assert_eq!(h.get("sideBySide"), if mode == "on" { Some(&json!(true)) } else { None }, "{h}");
+    assert_eq!(h.get("sideBySide"), want_bool, "{h}");
     assert_eq!(h["backplane"], "0.14.0"); assert_eq!(h["busy"], 0);
     let mut info = serde_json::Map::new(); side_by_side_info(&mut info);
-    assert_eq!(info.get("sideBySide"), if mode == "on" { Some(&json!("1")) } else { None });
+    assert_eq!(info.get("sideBySide"), want_text);
     let shown = shown_with_side_by_side(json!({"projects":[]}));
-    assert_eq!(shown.get("sideBySide"), if mode == "on" { Some(&json!(true)) } else { None }, "{shown}");
+    assert_eq!(shown.get("sideBySide"), want_bool, "{shown}");
     println!("wire_sbs_ok {mode}");
 }
 fn sbs_wire_child(mode: &str, copy: Option<&str>, flag: Option<&str>) -> String {
