@@ -35,6 +35,12 @@ pub struct Registry {
     inner: Mutex<Inner>,
 }
 
+/// JS truthiness of a stored field (`!d.revoked`): a device's `revoked` is never validated at load, so
+/// 1, "yes", {} and [] all count as revoked, as they do in effects/pairing.js.
+pub fn truthy(v: &Value) -> bool {
+    match v { Value::Null => false, Value::Bool(b) => *b, Value::Number(n) => n.as_f64().map_or(true, |f| f != 0.0 && !f.is_nan()), Value::String(s) => !s.is_empty(), _ => true }
+}
+fn live(d: &Value) -> bool { !truthy(&d["revoked"]) }
 fn is_machine(x: &Value) -> bool { x["kind"] == "machine" }
 fn open(x: &Value, at: u64) -> bool { x["used"] != true && x["revoked"] != true && x["expiresAt"].as_f64().unwrap_or(0.0) > at as f64 }
 fn valid_invite(x: &Value) -> bool {
@@ -61,7 +67,8 @@ impl Registry {
             if data["version"] != 1 || data["owner"] != digest(root).as_str() || !ds.iter().all(valid_device) { return Err(bad()) }
             if let Some(is) = data.get("invitations") { if !is.as_array().map_or(false, |a| a.iter().all(valid_invite)) { return Err(bad()) } }
             devices = ds.clone(); invites = data["invitations"].as_array().cloned().unwrap_or_default();
-            use std::os::unix::fs::PermissionsExt; let _ = std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600));
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).map_err(|_| "Cannot read or initialize device registry; existing pairings were preserved".to_string())?;
         }
         Ok(Registry { home: home.into(), root: root.into(), file, now, random, inner: Mutex::new(Inner { devices, invites, attempts: vec![], clients: HashMap::new(), retired: HashSet::new(), swept: HashSet::new() }) })
     }
@@ -98,11 +105,11 @@ impl Registry {
         if token.len() != 32 || !token.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) { return String::new() }
         let mut g = self.inner.lock().unwrap();
         let h = digest(token);
-        let Some(d) = g.devices.iter().find(|d| d["revoked"] != true && same(d["hash"].as_str().unwrap_or(""), &h)).cloned() else { return String::new() };
+        let Some(d) = g.devices.iter().find(|d| live(d) && same(d["hash"].as_str().unwrap_or(""), &h)).cloned() else { return String::new() };
         let at = (self.now)();
         if at as f64 - d["lastSeen"].as_f64().unwrap_or(0.0) >= 60000.0 {
             let next = g.devices.iter().map(|x| if x["id"] == d["id"] { let mut y = x.clone(); y["lastSeen"] = json!(at); y } else { x.clone() }).collect();
-            let inv = g.invites.clone(); let _ = self.persist(&mut g, next, inv); // (a failed stamp does not refuse the device)
+            let inv = g.invites.clone(); if self.persist(&mut g, next, inv).is_err() { return String::new() } // pairing_resolve's catch: a stamp that cannot be written refuses the device
         }
         if route == "/ws" { g.clients.insert(client, d["id"].as_str().unwrap_or("").to_string()); }
         token.to_string()
@@ -112,7 +119,7 @@ impl Registry {
     fn resolve_quiet(&self, token: &str) -> String {
         if token.len() != 32 { return String::new() }
         let g = self.inner.lock().unwrap(); let h = digest(token);
-        if g.devices.iter().any(|d| d["revoked"] != true && same(d["hash"].as_str().unwrap_or(""), &h)) { token.into() } else { String::new() }
+        if g.devices.iter().any(|d| live(d) && same(d["hash"].as_str().unwrap_or(""), &h)) { token.into() } else { String::new() }
     }
 
     /// POST /auth/invitations: a private invitation, recorded before it is handed out, good ten minutes.
@@ -149,7 +156,7 @@ impl Registry {
         if inv["revoked"] == true { return Self::err("revoked_code") }
         if inv["used"] == true { return Self::err("used_code") }
         if inv["expiresAt"].as_f64().unwrap_or(0.0) <= at as f64 { return Self::err("expired_code") }
-        if g.devices.iter().filter(|d| d["revoked"] != true).count() >= DEVICE_LIMIT { return Self::err("device_limit") }
+        if g.devices.iter().filter(|d| live(d)).count() >= DEVICE_LIMIT { return Self::err("device_limit") }
         let token = self.rand_hex(16);
         let name = if name.is_empty() { "New device" } else { name };
         let entry = json!({"id": self.rand_hex(16), "hash": digest(&token), "name": clean(name, 80), "createdAt": at, "lastSeen": at, "revoked": false});
@@ -224,7 +231,7 @@ impl Registry {
             } else if let Some(d) = x["device"].as_str().filter(|d| !d.is_empty()) {
                 let dev = names.get(d);
                 m.insert("device".into(), json!(d)); m.insert("deviceName".into(), json!(dev.and_then(|v| v["name"].as_str()).unwrap_or("")));
-                m.insert("deviceRevoked".into(), json!(dev.map_or(false, |v| v["revoked"] == true)));
+                m.insert("deviceRevoked".into(), json!(dev.map_or(false, |v| truthy(&v["revoked"]))));
             }
             Value::Object(m)
         }).collect();
@@ -272,11 +279,31 @@ impl Registry {
     pub fn forget(&self, client: u64) { self.inner.lock().unwrap().clients.remove(&client); }
 }
 
-/// http(s) only, no userinfo, no fragment, no query.
+/// `new URL`'s authority, strictly: a host of letters, digits, `.` and `-` or a bracketed IPv6, then an
+/// optional port of digits not above 65535. Anything else throws in JS, so it is None here.
+pub fn authority(a: &str) -> Option<(String, Option<u16>)> {
+    let (host, port) = if let Some(r) = a.strip_prefix('[') {
+        let (h, rest) = r.split_once(']')?;
+        if h.is_empty() || !h.bytes().all(|b| b.is_ascii_hexdigit() || b == b':' || b == b'.') || !h.contains(':') { return None }
+        (format!("[{}]", h.to_lowercase()), if rest.is_empty() { None } else { Some(rest.strip_prefix(':')?) })
+    } else {
+        let (h, p) = match a.split_once(':') { Some((h, p)) => (h, Some(p)), None => (a, None) };
+        if h.is_empty() || !h.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-') { return None }
+        (h.to_lowercase(), p)
+    };
+    let port = match port { None => None, Some("") => None, Some(p) => { if !p.bytes().all(|b| b.is_ascii_digit()) || p.len() > 5 { return None } Some(p.parse::<u32>().ok().filter(|n| *n <= 65535)? as u16) } };
+    Some((host, port))
+}
+/// (scheme, host, port with the scheme's default dropped) of an http(s) URL with no userinfo.
+fn parse_origin(x: &str) -> Option<(&'static str, String, Option<u16>)> {
+    let (s, def, rest) = if let Some(r) = x.strip_prefix("http://") { ("http:", 80, r) } else if let Some(r) = x.strip_prefix("https://") { ("https:", 443, r) } else { return None };
+    let a = rest.split(|c| c == '/' || c == '?' || c == '#').next().unwrap_or("");
+    let (h, p) = authority(a)?;
+    Some((s, h, p.filter(|p| *p != def)))
+}
+/// http(s) only, no userinfo, no fragment, no query, a well-formed authority.
 fn good_route(x: &str) -> bool {
-    let Some(rest) = x.strip_prefix("http://").or_else(|| x.strip_prefix("https://")) else { return false };
-    let auth = rest.split('/').next().unwrap_or("");
-    !auth.is_empty() && !auth.contains('@') && !x.contains('#') && !x.contains('?') && !x.chars().any(|c| c.is_whitespace() || c.is_control())
+    !x.contains('#') && !x.contains('?') && !x.chars().any(|c| c.is_whitespace() || c.is_control()) && parse_origin(x).is_some()
 }
 fn local_origin(x: &str) -> bool {
     let r = x.strip_prefix("http://").or_else(|| x.strip_prefix("https://")).unwrap_or("");
@@ -291,23 +318,18 @@ fn pct(s: &str) -> String {
 /// routes, the owner's machines it found, and the linked hubs it verified as the owner's. A desktop app
 /// asks before following a pairing link to any other origin.
 pub fn known(origin: &str, routes: &[String], machines: &Value, peers: &[String]) -> bool {
-    let Some((scheme, hostport)) = split_origin(origin) else { return false };
-    let at = |x: &str| split_origin(x).map(|(s, h)| format!("{s}//{h}"));
+    let Some((scheme, host, port)) = parse_origin(origin) else { return false };
+    let key = |s: &str, h: &str, p: Option<u16>| format!("{s}//{h}{}", p.map_or(String::new(), |p| format!(":{p}")));
     let selfm = &machines["self"];
     let mut urls: Vec<String> = routes.iter().cloned().chain(selfm["url"].as_str().map(str::to_string)).collect();
     for m in machines["peers"].as_array().into_iter().flatten() { if let Some(u) = m["url"].as_str() { urls.push(u.into()) } }
     urls.extend(peers.iter().cloned());
-    if urls.iter().filter(|u| !u.is_empty()).filter_map(|u| at(u)).any(|u| u == format!("{scheme}//{hostport}")) { return true }
+    let want = key(scheme, &host, port);
+    if urls.iter().filter(|u| !u.is_empty()).filter_map(|u| parse_origin(u)).any(|(s, h, p)| key(s, &h, p) == want) { return true }
     let domain = selfm["domain"].as_str().unwrap_or("").to_lowercase(); let domain = domain.trim_end_matches('.');
-    let host = hostport.rsplit_once(':').filter(|(_, p)| p.bytes().all(|b| b.is_ascii_digit())).map_or(hostport, |(h, _)| h).to_lowercase();
     let mut names: Vec<String> = selfm["name"].as_str().into_iter().map(str::to_lowercase).collect();
     for m in machines["peers"].as_array().into_iter().flatten() { if let Some(n) = m["name"].as_str() { names.push(n.to_lowercase()) } }
     !domain.is_empty() && host.ends_with(&format!(".{domain}")) && host.split('.').next().map_or(false, |first| names.iter().any(|n| !n.is_empty() && n == first))
-}
-fn split_origin(x: &str) -> Option<(&'static str, &str)> {
-    let (s, rest) = if let Some(r) = x.strip_prefix("http://") { ("http:", r) } else if let Some(r) = x.strip_prefix("https://") { ("https:", r) } else { return None };
-    let auth = rest.split(|c| c == '/' || c == '?' || c == '#').next().unwrap_or("");
-    if auth.is_empty() || auth.contains('@') { None } else { Some((s, auth)) }
 }
 
 #[cfg(test)]

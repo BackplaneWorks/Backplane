@@ -1,5 +1,5 @@
-//! core/auth.bend's owner-trust and pairing-proof rules, state for state. Laws: `auth_*`, `owner_*`,
-//! `pair_*`, `mcp_key_*`, `cache_key_*` of LAWS.bend; the tests below carry the law names.
+//! core/auth.bend's owner-trust and pairing-proof rules, state for state. Each test is named for the rule it
+//! checks; the laws it states are mapped to the test in scripts/gpui/law-map.tsv (`auth_*`, `cache_identity_*`).
 use sha2::{Digest, Sha256};
 
 pub type Headers<'a> = &'a [(String, String)];
@@ -37,8 +37,9 @@ pub fn browser(hs: Headers) -> bool {
 fn cookie_has(hs: Headers, token: &str) -> bool {
     header(hs, "cookie").split(';').any(|c| same(c.trim(), &format!("bp_token={token}")))
 }
-fn param(path: &str, name: &str) -> String {
-    path.split_once('?').map(|(_, q)| q).unwrap_or("").split('&')
+/// H.Http.param: only the second `?` segment is the query (`/x?a?&token=T` has no token).
+pub fn param(path: &str, name: &str) -> String {
+    path.split('?').nth(1).unwrap_or("").split('&')
         .find_map(|kv| kv.split_once('=').filter(|(k, _)| *k == name).map(|(_, v)| v.to_string())).unwrap_or_default()
 }
 /// Auth.credential: the bearer, the ?token= or a bp_token cookie equals `token`; an empty token admits nobody.
@@ -98,12 +99,14 @@ pub fn mcp_key(token: &str, seg: &str) -> String { hmac_hex(token, &format!("mcp
 pub fn mcp_keyed(path: &str, token: &str, seg: &str) -> bool { !token.is_empty() && same(&param(path, "k"), &mcp_key(token, seg)) }
 /// Auth.cache_key: readable cache identity, a separate HMAC domain; "" for an empty token.
 pub fn cache_key(token: &str) -> String { if token.is_empty() { String::new() } else { hmac_hex(token, "ui-cache\nv1") } }
-/// Auth.cookie / Auth.cache_cookie / Auth.pair.cookies
+/// Auth.cache_cookie: "" for an empty token (law cache_identity_empty_cookie).
+pub fn cache_cookie(token: &str, https: bool) -> String {
+    if token.is_empty() { return String::new() }
+    format!("Set-Cookie: bp_cache_v1={}; Path=/; SameSite=Strict; Max-Age=31536000{}\r\n", cache_key(token), if https { "; Secure" } else { "" })
+}
+/// Auth.cookie ++ Auth.cache_cookie (Auth.pair.cookies)
 pub fn pair_cookies(token: &str, https: bool) -> String {
-    let secure = if https { "; Secure" } else { "" };
-    let mut s = format!("Set-Cookie: bp_token={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000{secure}\r\n");
-    if !token.is_empty() { s += &format!("Set-Cookie: bp_cache_v1={}; Path=/; SameSite=Strict; Max-Age=31536000{secure}\r\n", cache_key(token)) }
-    s
+    format!("Set-Cookie: bp_token={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000{}\r\n", if https { "; Secure" } else { "" }) + &cache_cookie(token, https)
 }
 
 #[cfg(test)]
@@ -179,7 +182,7 @@ mod tests {
         assert!(!mcp_keyed("/mcp/t1.3", "tok", "t1.3"));
     }
     #[test] fn cache_key_is_not_the_token() {
-        assert_eq!(cache_key(""), "");
+        assert_eq!(cache_key(""), ""); assert_eq!(cache_cookie("", true), "", "cache_identity_empty_cookie");
         assert_ne!(cache_key("tok"), "tok");
         assert_eq!(cache_key("tok"), hmac_hex("tok", "ui-cache\nv1"));
         assert!(pair_cookies("", false).contains("bp_token=;") && !pair_cookies("", false).contains("bp_cache_v1"));
@@ -189,6 +192,13 @@ mod tests {
         assert!(!cache_request("GET", &hs(&[]), "t"));
         assert!(cache_request("GET", &hs(&[("Cookie", "a=b; bp_token=t")]), "t"));
         assert!(!cache_request("GET", &hs(&[("Cookie", "bp_token=t-more")]), "t"));
+        assert!(!cache_request("POST", &hs(&[("Authorization", "Bearer t")]), "t"), "cache_identity_post_refused");
+        assert!(!cache_request("GET", &hs(&[("Authorization", "Bearer t")]), ""), "an empty token admits nobody");
+    }
+    #[test] fn param_is_the_second_question_mark_segment() {
+        assert_eq!(param("/x?a=1&token=T", "token"), "T");
+        assert_eq!(param("/x?a?&token=T", "token"), "", "Bend splits on every ?, so a third segment is not read");
+        assert_eq!(param("/x", "token"), "");
     }
     #[test] fn origin_rules() {
         assert!(origin_ok("", "h")); assert!(origin_ok("HTTP://H:1", "h:1")); assert!(!origin_ok("http://h:1/x", "h:1")); assert!(!origin_ok("http://h", ""));

@@ -163,7 +163,7 @@ port waits for the person's decision.
 
 <!-- law-map: generated below by scripts/gpui/law-map.py -->
 
-Laws in LAWS.bend: 3253. bend 1079, rust 318, unported 1247, client 482, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
+Laws in LAWS.bend: 3253. bend 1077, rust 320, unported 1247, client 482, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
 
 | law | status | seed | file | note |
 |---|---|---|---|---|
@@ -2649,8 +2649,8 @@ Laws in LAWS.bend: 3253. bend 1079, rust 318, unported 1247, client 482, window 
 | `presentation_history_generation_kept` | unported | seed R +-10% | `src/core/outbox.bend` |  |
 | `presentation_history_room_kept` | unported | seed R +-10% | `src/core/outbox.bend` |  |
 | `presentation_history_over_kept` | unported | seed R +-10% | `src/core/outbox.bend` |  |
-| `cache_identity_post_refused` | bend | seed K +-10% | `src/core/auth.bend` |  |
-| `cache_identity_empty_cookie` | bend | seed K +-10% | `src/core/auth.bend` |  |
+| `cache_identity_post_refused` | rust `cache_request_takes_no_query_token` | map | `src/core/auth.bend` |  |
+| `cache_identity_empty_cookie` | rust `cache_key_is_not_the_token` | map | `src/core/auth.bend` |  |
 | `oprep_task_not_in_chat` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `oprep_task_delivered_with_filing` | unported | seed R +-10% | `src/core/hub.bend` |  |
 | `oprep_other_thread_unchanged` | unported | seed R +-10% | `src/core/hub.bend` |  |
