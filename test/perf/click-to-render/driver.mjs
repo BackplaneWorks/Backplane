@@ -31,7 +31,7 @@ export async function open(o) {
     await page.reload();
   } else {
     const dev = o.device === 'iphone15' ? { ...pw.devices['iPhone 15'] } : { viewport: { width: o.width || 1400, height: o.height || 900 }, deviceScaleFactor: 1 };
-    browser = await pw.chromium.launch({ executablePath: CHROMIUM, headless: true, args: ['--disable-gpu-vsync-off', '--enable-features=LongAnimationFrameTiming'] });
+    browser = await pw.chromium.launch({ executablePath: CHROMIUM, headless: true, args: ['--disable-gpu-vsync-off', '--enable-features=LongAnimationFrameTiming', ...(process.env.C2R_GL === 'rtx' ? ['--use-gl=angle', '--use-angle=gl-egl', '--ignore-gpu-blocklist', '--enable-gpu'] : [])] });
     context = await browser.newContext(dev);
     await context.addInitScript(REC);
     page = await context.newPage();
@@ -72,8 +72,8 @@ export async function open(o) {
     async type(text, delay = 0) { await page.keyboard.type(text, { delay }); },
     async idle(ms = 400) { await sleep(ms); await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)))); },
     // one measurement: arm the recorder with the predicate, run go(), wait for the predicate's frame, settle
-    async measure(label, { pred, sample, content, confirm, go, timeout = 15000, quiet = 300, cap = 6000 }) {
-      const armed = await page.evaluate(([p, s, c, f]) => window.__c2r.arm(p, s, c, f), [pred, sample || null, content || null, confirm || null]);
+    async measure(label, { pred, sample, content, confirm, cpred, csig, go, timeout = 15000, quiet = 300, cap = 6000 }) {
+      const armed = await page.evaluate(([p, s, c, f, cp, cs]) => window.__c2r.arm(p, s, c, f, cp, cs), [pred, sample || null, content || null, confirm || null, cpred || null, csig || null]);
       if (!armed) { const e = await page.evaluate(() => window.__c2r.error); return { label, error: e }; }
       const wall0 = Date.now();
       await go();
@@ -85,6 +85,8 @@ export async function open(o) {
         return { label, error: st.t0 == null ? 'input never arrived' : 'predicate never true', wall: Date.now() - wall0 };
       }
       if (confirm) await page.waitForFunction(() => window.__c2r.tDom2 != null, null, { timeout: cap, polling: 50 }).catch(() => {});
+      // content: wait until it is on screen (then finish's quiet period makes sure it stayed final)
+      if (cpred) await page.waitForFunction(() => window.__c2r.cOk, null, { timeout: cap, polling: 50 }).catch(() => {});
       const r = await page.evaluate(([q, c]) => window.__c2r.finish(q, c), [quiet, cap]);
       return { label, ...r };
     },
