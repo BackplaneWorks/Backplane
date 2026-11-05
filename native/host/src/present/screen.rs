@@ -1,4 +1,4 @@
-//! The GPUI recent root. Borrows the state policies' lean fold; never replays or clones a log.
+//! The GPUI recent and plain-thread root. Borrows the state policies' lean fold; never replays or clones a log.
 //! Approved differences for this slice: unread shown keys `bubHomes`, `online`, `version`, `error`,
 //! `note`, `sel`, `making`, `lang`, `empty`, `older`, `settled`, `view`, `active`, `legacy`, `rowMenu`,
 //! `removing`, `search`, `folders`, `tour`, `starNudge`, `find`, `island`, `islands`, `uber`, `hub`,
@@ -17,14 +17,17 @@ impl Recent {
     pub fn bind(&self, hub: &Arc<Hub>) { let _ = self.hub.set(Arc::downgrade(hub)); }
 }
 impl super::Screen for Recent {
-    fn name(&self) -> &'static str { "recent (native sidebar)" }
+    fn name(&self) -> &'static str { "recent/thread (native sidebar)" }
     fn view(&self, params: &Value) -> Option<Value> {
         if !mine(params) { return None }
         let _hub = self.hub.get()?.upgrade()?;
         crate::statehost::policies()?.with_state(|st| recent(st, params)).flatten()
     }
 }
-fn mine(p: &Value) -> bool { p["target"]["kind"] == "recent" && text(&p["target"],"id").is_empty() && p["nativeSidebar"] == json!(1) }
+fn mine(p: &Value) -> bool {
+    let id=text(&p["target"],"id");
+    p["nativeSidebar"]==json!(1) && match text(&p["target"],"kind") { "recent"=>id.is_empty(), "thread"=>!id.is_empty() && !id.contains('~'), _=>false }
+}
 fn setting<'a>(st: &'a State,k: &str) -> &'a str { st.settings.get(k).map(String::as_str).unwrap_or("") }
 fn flag(s: &Value,k: &str) -> bool { s["open"][k].as_bool().unwrap_or(false) }
 
@@ -61,7 +64,8 @@ pub fn recent(st: &State,p: &Value) -> Option<Value> {
         ("wantNew",json!(false)),("error",json!("")),("note",json!("")),("info",json!({})),("open",json!({})),("drafts",json!({})),("outbox",json!({}))] {
         session.as_object_mut()?.entry(k.to_string()).or_insert(v);
     }
-    session["sel"]=json!("");
+    let thread=if p["target"]["kind"]=="thread" { text(&p["target"],"id") }else{""};
+    session["sel"]=json!(thread);
     if !session["drafts"].is_object() { session["drafts"]=json!({}); }
     for k in ["@boot","@bot","@bot.want","@btab","@del","@desk","@draft.bound","@mech.at","@presentation","@remote","@room","@solid.at","@telemetry.dismiss","@thread.want"] {
         session["drafts"].as_object_mut()?.entry(k.to_string()).or_insert(json!(""));
@@ -90,6 +94,14 @@ pub fn recent(st: &State,p: &Value) -> Option<Value> {
         },
         _ => return None,
     } }
+    // A thread is drawn only when the async session seam supplied a native window and indexed page.
+    // The first thread cut supports an empty draft. Refusing after dispatch also refuses a draft action
+    // that would otherwise acknowledge text while drawing a blank composer.
+    let shown_thread=if thread.is_empty() { Value::Null }else{
+        if !p["window"].is_object() || !text(&session["drafts"],thread).is_empty() { return None }
+        let mut params=p.clone(); params["session"]=session.clone();
+        super::thread::thread_object(st,hub,thread,&params,"")?
+    };
     let local_mode=text(&session["drafts"],"@local.view");
     let mode=if ["projects","active"].contains(&local_mode) { local_mode } else if setting(st,"sidebar.view")=="active" { "active" } else { "projects" };
     // Active list and search are separate port slices; claiming them would hide projects silently.
@@ -98,14 +110,23 @@ pub fn recent(st: &State,p: &Value) -> Option<Value> {
     if action=="native-sidebar-page" && !ns.accept(value) { return Some(json!({"refused":true,"local":p.get("local").cloned().unwrap_or(json!({}))})) }
     if action=="native-sidebar-page" { session["drafts"]["@menu"]=json!(""); session["drafts"]["@del"]=json!(""); }
     let open: HashSet<String>=session["open"].as_object().into_iter().flatten().filter(|(_,v)|v.as_bool()==Some(true)).map(|(k,_)|k.clone()).collect();
-    let opts=sidebar::Opts { hub,now:p["now"].as_u64().unwrap_or(0)/1000,selected:"",open:&open,older_open:flag(&session,"old-projects") };
+    let opts=sidebar::Opts { hub,now:p["now"].as_u64().unwrap_or(0)/1000,selected:thread,open:&open,older_open:flag(&session,"old-projects") };
     let plan=sidebar::plan(st,&opts);
     let ids=plan.ids(); let project_limit=ns.project_limit();
-    let (indices,projects_page)=ns.slice_ids(&ids,"projects","",project_limit,"");
+    let selected_project=st.threads.get(thread).map(|t|t.project.as_str()).unwrap_or("");
+    // For now an explicitly opened thread in a folded Older project is unported. The recent list
+    // already offers only visible projects; forcing an excluded project needs the filter exception port.
+    if !selected_project.is_empty() && !ids.contains(&selected_project) { return None }
+    let (mut indices,projects_page)=ns.slice_ids(&ids,"projects","",project_limit,selected_project);
+    indices.sort_unstable(); // Mob.native.keep_projects keeps source order, including the selected exception.
     let selected: Vec<&str>=indices.into_iter().map(|i|ids[i]).collect();
     let row_limit=(ns.row_budget()/plan.list_count(&selected).max(1)).max(1);
     let projects: Vec<Value>=selected.into_iter().filter_map(|owner| {
-        let mut project=plan.project(owner,&mut |kind,ids|ns.slice_ids(ids,kind,owner,row_limit,""))?;
+        let mut project=plan.project(owner,&mut |kind,ids| {
+            let (mut indices,pager)=ns.slice_ids(ids,kind,owner,row_limit,thread);
+            indices.sort_unstable(); // Mob.native.tree_rows filters in tree order.
+            (indices,pager)
+        })?;
         let icon=setting(st,&format!("project.icon.{owner}"));
         if ["folder","circuit-board","cpu","zap","radio","box","layers","code","terminal","globe","wrench","flask-conical","book","star"].contains(&icon) { project["icon"]=json!(icon); }
         Some(project)
@@ -115,11 +136,12 @@ pub fn recent(st: &State,p: &Value) -> Option<Value> {
     let del=text(&session["drafts"],"@del");
     let deleting=if del.is_empty() { Value::Null }else{json!({"id":if del.contains('|'){del.to_string()}else{format!("{hub}|{del}")},"title":"Delete thread","body":st.threads.get(del.strip_prefix(&format!("{hub}|" )).unwrap_or(del)).map(|t|t.title.as_str()).unwrap_or(""),"yes":"Delete","no":"Cancel"})};
     let pages=json!([{"version":1,"hub":hub,"projects":projects_page,"active":null,"legacy":null}]);
-    let shown=json!({"projects":projects,"sidebarPages":pages,"nativeSidebar":1,"thread":null,"rooms":rooms(st,hub),"bots":bots(st,hub,opts.now),"theme":setting(st,"ui.theme"),
+    let shown=json!({"projects":projects,"sidebarPages":pages,"nativeSidebar":1,"thread":shown_thread,"rooms":rooms(st,hub),"bots":bots(st,hub,opts.now),"theme":setting(st,"ui.theme"),
         "renaming":renaming,"deleting":deleting,"bot":null,"settings":null,"newRoom":null,"newBot":null,"projectHome":null});
     let mut overlay=shown.clone();
     for project in overlay["projects"].as_array_mut().unwrap() { project.as_object_mut().unwrap().remove("machine"); }
     let window=json!({"contextMessages":[],"messageIds":[],"historyUnits":[],"partial":[],"ids":[],"anchor":{"id":"","offset":0},"older":"","olderNext":"","hasMore":false,"remaining":0,"newer":0,"total":0});
+    let window=if thread.is_empty() { window }else{p["window"].clone()};
     Some(json!({"remoteReady":true,"shown":shown,"session":session,"cmds":cmds,"overlay":{"j":overlay,"key":hub,"name":hub.split(':').next().unwrap_or("")},"window":window,"local":ns.local()}))
 }
 
@@ -229,5 +251,38 @@ mod dispatcher_tests {
         assert_eq!(o["remoteReady"],false); assert_eq!(o["nextTarget"],json!({"kind":"thread","id":"t"}));
         assert_eq!(o["session"]["sel"],"t"); assert!(o.get("shown").is_none()); assert!(o["local"].is_object());
         assert!(o["cmds"].as_array().unwrap().iter().all(|c|!text(c,"text").contains("turn.start")));
+    }
+}
+
+#[cfg(test)]
+mod thread_binding_tests {
+    use super::*;
+    fn fixture(lean: bool) -> (State,Value,Value) {
+        let pair:Value=serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/gpui/slim/fixtures/thread-pair.json"))).unwrap();
+        let mut st=State::new(); st.lean=lean;
+        for line in include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/gpui/slim/fixtures/thread-log.jsonl")).lines() { st.apply_line(line); }
+        let mut p=pair["params"].clone(); p["nativeSidebar"]=json!(1); p["nativeKey"]=json!("00112233445566778899aabbccddeeff");
+        p["generation"]=json!("g"); p["epoch"]=json!("e"); p["viewId"]=json!("v"); p["revision"]=json!(st.seq);
+        // The fixture predates the host window seam. Its raw helper reply has earlier=0.
+        // The seam itself is checked against the indexed JS-window fixtures by present::window.
+        p["window"]=json!({"remaining":0});
+        (st,p,pair["out"]["shown"]["thread"].clone())
+    }
+    #[test] fn thread_root_binds_the_complete_recorded_thread_and_window() {
+        for lean in [false,true] {
+            let (st,p,expected)=fixture(lean);
+            let out=recent(&st,&p).expect("plain thread root is supported");
+            assert_eq!(out["shown"]["thread"],expected); assert_eq!(out["overlay"]["j"]["thread"],expected);
+            assert_eq!(out["session"]["sel"],p["target"]["id"]); assert_eq!(out["window"],p["window"]);
+            assert_eq!(out["shown"]["nativeSidebar"],1); assert_eq!(out["cmds"],json!([]));
+        }
+    }
+    #[test] fn thread_root_refuses_missing_indexed_inputs_nonempty_drafts_and_unported_config() {
+        let (mut st,p,_)=fixture(true); let id=text(&p["target"],"id").to_string();
+        for key in ["page","window"] { let mut q=p.clone(); q.as_object_mut().unwrap().remove(key); assert!(recent(&st,&q).is_none(),"{key}"); }
+        let mut q=p.clone(); q["session"]["drafts"][&id]=json!("typing"); assert!(recent(&st,&q).is_none());
+        let mut q=p.clone(); q["action"]=json!("draft"); q["value"]=json!("typing"); assert!(recent(&st,&q).is_none(),"a draft cannot be acknowledged with an empty picture");
+        st.apply(&json!({"$":"SettingSet","key":"person.tz.device","value":"America/New_York","at":1}));
+        assert!(recent(&st,&p).is_none(),"unsupported zone survives the lean fold and refuses the static thread");
     }
 }
