@@ -30,6 +30,32 @@ pub fn key_norm(s: &str) -> String {
 }
 fn fr_local(thread: &str) -> &str { thread.split_once('~').map_or(thread, |(_, t)| t) }
 
+/// Told.stamp.id: the time in a record's id "k<time>-<sequence>" (None when the id is not one of ours)
+pub fn told_stamp(id: &str) -> Option<u64> {
+    let rest = id.strip_prefix('k')?;
+    let (mut acc, mut any) = (0u64, false);
+    for c in rest.chars() {
+        if c.is_ascii_digit() { acc = acc.wrapping_mul(10).wrapping_add(c as u64 - 48); any = true; }
+        else if c == '-' && any { return Some(acc) }
+        else { return None }
+    }
+    None // never reached a dash: Told.stamp.of wants the state "done"
+}
+pub const TOLD_KEEP_S: u64 = 2_592_000; // 30 days
+pub const TOLD_MAX: usize = 2000;
+/// Told.prune: a record older than 30 days, and the oldest ones beyond the newest 2000, are blanked. Reads only the keys (a record's time is in
+/// its id; a record written by hand with another id is read from its value's "at"), newest first.
+pub fn told_prune(st: &State, now: u64) -> Vec<Value> {
+    let mut ks: Vec<(String, u64)> = st.settings.iter().filter_map(|(k, v)| {
+        let id = k.strip_prefix("told.")?;
+        let at = told_stamp(id).unwrap_or_else(|| gnat(&parse_or_null(v), "at", 0));
+        Some((k.clone(), at))
+    }).collect();
+    ks.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    ks.into_iter().enumerate().filter(|(i, (_, at))| *i >= TOLD_MAX || at.saturating_add(TOLD_KEEP_S) < now)
+        .map(|(_, (k, _))| json!({"$": "SettingSet", "key": k, "value": "", "at": now})).collect()
+}
+
 /// Sum.due: never made, or made 600 seconds ago or more
 pub fn sum_due(st: &State, id: &str, now: u64) -> bool {
     let at = st.get(&format!("summary.at.{id}"), "");
@@ -212,5 +238,24 @@ mod tests {
         assert_eq!((core.len(), marks.len()), (2, 1));
         let ok = vec![b[1].clone(), b[2].clone()]; let mut ok2 = ok.clone(); ok2[0]["state"] = json!("completed");
         assert_eq!(split_fail_marks(&ok2).1.len(), 0, "a completed end keeps whatever else is in its batch");
+    }
+    #[test] fn told_ids_carry_their_time() {
+        assert_eq!(told_stamp("k1793846698-190-3"), Some(1793846698)); assert_eq!(told_stamp("k5-1"), Some(5));
+        assert_eq!(told_stamp("kabc"), None); assert_eq!(told_stamp("x5-1"), None); assert_eq!(told_stamp("k55"), None, "no dash: not one of ours"); assert_eq!(told_stamp("k-1"), None);
+    }
+    #[test] fn told_prune_drops_the_old_and_all_but_the_newest_2000() {
+        let mut st = State::new();
+        let now = 10_000_000u64;
+        st.apply_line(&format!(r#"{{"$":"SettingSet","key":"told.k{}-1","value":"x","at":1}}"#, now - TOLD_KEEP_S - 1)); // 30 days and a second old
+        st.apply_line(&format!(r#"{{"$":"SettingSet","key":"told.k{}-1","value":"x","at":1}}"#, now - TOLD_KEEP_S)); // exactly 30 days: kept
+        st.apply_line(&format!(r#"{{"$":"SettingSet","key":"told.hand","value":"{{\"at\":{}}}","at":1}}"#, now - TOLD_KEEP_S - 5)); // by hand: its value's time
+        for i in 0..2001u64 { st.apply_line(&format!(r#"{{"$":"SettingSet","key":"told.k{}-{i}","value":"x","at":1}}"#, now - 100 - i)); }
+        let gone: Vec<String> = told_prune(&st, now).iter().map(|e| e["key"].as_str().unwrap().to_string()).collect();
+        assert!(gone.contains(&format!("told.k{}-1", now - TOLD_KEEP_S - 1))); assert!(gone.contains(&"told.hand".to_string()));
+        // indexes (newest first): 0..=1999 the recent ones keep; 2000 (the 2001st recent), the exactly-30-days record (2001), the 30-days-and-a-second record
+        // and the by-hand one go: the first by the cap, the others by the cap and by age
+        assert!(gone.contains(&format!("told.k{}-1", now - TOLD_KEEP_S)), "past the newest 2000 the oldest go even when they are young enough");
+        assert_eq!(gone.len(), 4, "{gone:?}");
+        assert_eq!(told_prune(&st, now)[0]["value"], "");
     }
 }
