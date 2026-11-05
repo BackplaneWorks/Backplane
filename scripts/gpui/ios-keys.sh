@@ -29,16 +29,18 @@ $SB "sh $V/run.sh stop; rm -rf $V; ls -d $V 2>&1 | tail -1"
 python3 - <<'PY'
 import re,glob,statistics as st,os
 B='build/gpui/results/ios/keys'
-print("kind     KB  key cost ms (median/max)  stalls>30ms (n/max ms)  screen-update display ms (n/median/p95/max)")
+print("kind          KB | key cost ms median/p90/max | hop-to-main ms median | sizeThatFits ms median | stalls>30ms in typing (n/max)")
+def med(v): return round(st.median(v),1) if v else '-'
 for f in sorted(glob.glob(B+'/keys-*.log')):
-    k,n=os.path.basename(f)[5:-4].rsplit('-',1)
-    keys=[float(x) for x in re.findall(r'key cost ([\d.]+) ms',open(f).read())]
-    stalls=[int(x) for x in re.findall(r'stall (\d+) ms',open(f).read())]
-    disp=[]
-    for l in open(f):
-        m=re.match(r'BPPerf (\d+) (\d+) (\d+) (\d+) (\d+) (\d+)',l)
-        if m and int(m.group(1))==8: disp.append((int(m.group(4))-int(m.group(3)))/1e6)
-    disp.sort()
-    p=lambda q: round(disp[min(len(disp)-1,int(len(disp)*q))]) if disp else None
-    print(f"{k:9s}{n:>3s}  {round(st.median(keys),1) if keys else '-'}/{max(keys) if keys else '-'}   {len(stalls)}/{max(stalls) if stalls else 0}   {len(disp)}/{p(.5)}/{p(.95)}/{round(disp[-1]) if disp else None}")
+    k,n=os.path.basename(f)[5:-4].rsplit('-',1) if not os.path.basename(f)[5:-4].endswith('-slow') else (os.path.basename(f)[5:-4].rsplit('-',1))
+    base=os.path.basename(f)[5:-4]; n=base.rsplit('-',1)[1]; k=base.rsplit('-',1)[0]
+    if not n.isdigit(): continue
+    n=int(n); lo,hi=n*1000,n*1000+10; T=open(f).read()
+    ok=lambda d: lo<=int(d)<=hi and (n>0 or int(d)<=10)
+    keys=sorted(float(c) for c,d in re.findall(r'key cost ([\d.]+) ms draft=(\d+)',T) if ok(d))
+    hop=[float(h) for h,d in re.findall(r'hop to main ([\d.]+) ms, apply [\d.]+ ms draft=(\d+)',T) if ok(d)]
+    sz=[float(c) for c,d in re.findall(r'sizeThatFits ([\d.]+) ms bytes=(\d+)',T) if ok(d)]
+    stalls=[int(s) for s,d in re.findall(r'stall (\d+) ms draft=(\d+)',T) if ok(d)]
+    p9=keys[min(len(keys)-1,int(len(keys)*.9))] if keys else '-'
+    print(f"{k:12s}{n:>3} | {med(keys)}/{p9}/{keys[-1] if keys else '-'} | {med(hop)} | {med(sz)} | {len(stalls)}/{max(stalls) if stalls else 0}")
 PY
