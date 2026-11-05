@@ -7,6 +7,7 @@
 //! from bp-policy by test/gpui/commands/actions-fixture.mjs.
 use serde_json::{json, Map, Value};
 
+#[derive(Clone, Copy)]
 pub struct Req<'a> {
     /// the hub the client names in a `send` command
     pub hub: &'a str,
@@ -30,9 +31,9 @@ pub struct ActOut {
 
 fn draft<'a>(s: &'a Value, k: &str) -> &'a str { s["drafts"][k].as_str().unwrap_or("") }
 
-struct Acc<'a> { r: &'a Req<'a>, d: Map<String, Value>, rid: u64, cmds: Vec<Value> }
+struct Acc<'a> { r: &'a Req<'a>, d: Map<String, Value>, rid: u64, cmds: Vec<Value>, unselect: bool }
 impl<'a> Acc<'a> {
-    fn new(r: &'a Req<'a>) -> Acc<'a> { Acc { r, d: Map::new(), rid: r.session["rid"].as_u64().unwrap_or(1), cmds: vec![] } }
+    fn new(r: &'a Req<'a>) -> Acc<'a> { Acc { r, d: Map::new(), rid: r.session["rid"].as_u64().unwrap_or(1), cmds: vec![], unselect: false } }
     fn set(&mut self, k: &str, v: &str) { self.d.insert(k.into(), json!(v)) ; }
     /// Ui.rpc: the request goes out numbered, the counter moves on
     fn rpc(&mut self, m: &str, p: Value) {
@@ -43,7 +44,9 @@ impl<'a> Acc<'a> {
         let mut patch = Map::new();
         if self.rid != self.r.session["rid"].as_u64().unwrap_or(1) { patch.insert("rid".into(), json!(self.rid)); }
         patch.insert("drafts".into(), Value::Object(self.d));
-        ActOut { session_patch: Value::Object(patch), cmds: self.cmds, next_target: None }
+        // Ui.unselect: the thread on show was deleted; back to the start (the dispatcher keeps a room or bot context it knows of)
+        if self.unselect { patch.insert("sel".into(), json!("")); }
+        ActOut { session_patch: Value::Object(patch), cmds: self.cmds, next_target: self.unselect.then(|| json!({"kind": "recent", "id": ""})) }
     }
     /// Ren.clear
     fn ren_clear(&mut self) { for k in ["@ren", "@ren.kind", "@ren.owner", "@ren.inline", "@f.title"] { self.set(k, "") } }
@@ -55,8 +58,15 @@ fn menu_set(a: &mut Acc, m: &str) {
     a.set("@del", ""); a.set("@rm", ""); a.set("@menu", now);
 }
 
-pub fn act(r: &Req) -> Option<ActOut> {
-    let (v, mut a) = (r.value, Acc::new(r));
+/// A value qualified by its hub ("http://127.0.0.1:3834|t3", what the sidebar of a client with several hubs sends): the hub and the rest.
+fn qualified(v: &str) -> Option<(&str, &str)> { if v.starts_with("http://") || v.starts_with("https://") { v.split_once('|') } else { None } }
+
+pub fn act(req: &Req) -> Option<ActOut> {
+    // a qualified id names its hub: the request goes there and the thread is the id (the routing of Rpc.text strips the prefix)
+    let raw = req.value;
+    let (hub, v) = qualified(raw).unwrap_or((req.hub, raw));
+    let r = &Req { hub, value: v, ..*req };
+    let mut a = Acc::new(r);
     match r.action {
         "row-menu" => menu_set(&mut a, &format!("t:{v}")),
         "proj-menu" => menu_set(&mut a, &format!("p:{v}")),
@@ -97,6 +107,15 @@ pub fn act(r: &Req) -> Option<ActOut> {
                 }
             }
         }
+        // Deleting asks first (Ui.row_delete / Ui.delete): the first press arms @del with what it was given, the same again deletes and goes back to the start when the thread was the selected one
+        "row-delete" | "delete" => {
+            let (id, armed_with) = if r.action == "delete" { (r.sel, r.sel) } else { (v, raw) };
+            if !id.is_empty() && draft(r.session, "@del") == armed_with {
+                a.set("@del", ""); a.rpc("thread.delete", json!({"thread": id})); a.set("@menu", "");
+                a.unselect = id == r.sel;
+            } else { a.set("@del", armed_with) } // the menu stays open while an armed Delete waits for its second press (Menu.keep)
+        }
+        "delete-no" => { a.set("@del", ""); a.set("@menu", "") }
         "rename-no" => { a.set("@del", ""); a.ren_clear() }
         // Made.want + Ui.new_thread.project: the next request makes a thread; its reply selects it (the session module's)
         "new-thread" => {
@@ -115,6 +134,7 @@ pub fn act(r: &Req) -> Option<ActOut> {
 pub fn merge(session: &Value, patch: &Value) -> Value {
     let mut s = session.clone();
     if let Some(r) = patch.get("rid") { s["rid"] = r.clone() }
+    if let Some(x) = patch.get("sel") { s["sel"] = x.clone() }
     if let (Some(d), Some(p)) = (s.get_mut("drafts").and_then(Value::as_object_mut), patch["drafts"].as_object()) { for (k, x) in p { d.insert(k.clone(), x.clone()); } }
     s
 }
@@ -148,6 +168,29 @@ mod tests {
             passed += 1;
         }
         assert!(mine >= 33, "{mine} actions of the recorded ones are served here"); assert_eq!(passed, fx["steps"].as_array().unwrap().len());
+    }
+    // Ui.row_delete / Ui.delete (hand cases from the Bend source: the recorded helper never answers the second press)
+    #[test] fn delete_asks_first_and_the_same_press_again_deletes_with_a_hubs_qualified_id_too() {
+        let t = |_: &str| String::new();
+        let step = |sess: &Value, sel: &str, action: &str, value: &str| { let o = act(&Req { hub: "h", session: sess, sel, action, value, title_of: &t }).unwrap(); (merge(sess, &o.session_patch), o) };
+        let s0 = json!({"sel":"","rid":3,"drafts":{"@menu":"","@del":""},"info":{}});
+        let q = "http://127.0.0.1:3834|t3";
+        let (s1, o1) = step(&s0, "", "row-delete", q); assert_eq!(s1["drafts"]["@del"], q); assert!(o1.cmds.is_empty() && o1.next_target.is_none());
+        let (s2, o2) = step(&s1, "", "row-delete", q);
+        assert_eq!(o2.cmds, vec![json!({"type":"send","hub":"http://127.0.0.1:3834","text":"{\"id\":3,\"m\":\"thread.delete\",\"p\":{\"thread\":\"t3\"}}"})]); assert_eq!(s2["drafts"]["@del"], ""); assert_eq!(s2["rid"], 4); assert!(o2.next_target.is_none(), "not the selected thread: the selection stays");
+        // another thread's press in between disarms nothing here but re-arms: only the identical value deletes
+        let (s3, o3) = step(&s1, "", "row-delete", "http://127.0.0.1:3834|t4"); assert!(o3.cmds.is_empty()); assert_eq!(s3["drafts"]["@del"], "http://127.0.0.1:3834|t4");
+        // the selected thread: deleting goes back to the start
+        let (s4, _) = step(&s0, "t3", "row-delete", "t3"); let (s5, o5) = step(&s4, "t3", "row-delete", "t3");
+        assert_eq!(o5.session_patch["sel"], ""); assert_eq!(o5.next_target, Some(json!({"kind":"recent","id":""}))); assert_eq!(s5["sel"], ""); assert_eq!(o5.cmds.len(), 1);
+        // the header's delete arms with the selected thread and deletes on the second press; delete-no disarms
+        let (h1, ho1) = step(&s0, "t3", "delete", ""); assert_eq!(h1["drafts"]["@del"], "t3"); assert!(ho1.cmds.is_empty());
+        let (_, ho2) = step(&h1, "t3", "delete", ""); assert!(ho2.cmds[0]["text"].as_str().unwrap().contains("thread.delete")); assert_eq!(ho2.next_target, Some(json!({"kind":"recent","id":""})));
+        let (n1, _) = step(&h1, "t3", "delete-no", ""); assert_eq!(n1["drafts"]["@del"], "");
+        // nothing selected: the header's delete arms nothing and never deletes
+        let (_, none) = step(&s0, "", "delete", ""); assert!(none.cmds.is_empty());
+        // a row's other buttons take a qualified id too
+        let (_, p) = step(&s0, "", "row-pin", q); assert_eq!(p.cmds[0]["hub"], "http://127.0.0.1:3834"); assert!(p.cmds[0]["text"].as_str().unwrap().contains("\"thread\":\"t3\""));
     }
     #[test] fn a_rename_without_a_title_or_a_thread_sends_nothing_and_an_artifact_is_not_mine() {
         let s = json!({"sel":"","rid":4,"drafts":{"@ren":"t1","@f.title":"  ","@ren.kind":"thread"},"info":{}}); let t = |_: &str| String::new();
