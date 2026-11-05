@@ -5,6 +5,9 @@ mod state;
 #[path = "../shelf.rs"]
 #[allow(dead_code)]
 mod shelf;
+#[path = "../stamp.rs"]
+#[allow(dead_code)]
+mod stamp;
 #[path = "../signal.rs"]
 #[allow(dead_code)]
 mod signal;

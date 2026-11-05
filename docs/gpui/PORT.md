@@ -163,7 +163,7 @@ port waits for the person's decision.
 
 <!-- law-map: generated below by scripts/gpui/law-map.py -->
 
-Laws in LAWS.bend: 3253. bend 1093, rust 307, unported 1244, client 482, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
+Laws in LAWS.bend: 3253. bend 1093, rust 311, unported 1240, client 482, window 127, retired 0. Data file: `scripts/gpui/law-map.tsv`; ported sources: `src/core/glb.bend`, `src/core/png.bend`. `seed` is the Bend stream's file-level classification (`docs/gpui/PORT-CLASSIFICATION.md`), accurate to about 10% until each law is checked; `file` is the source file the law names most.
 
 | law | status | seed | file | note |
 |---|---|---|---|---|
@@ -3196,10 +3196,10 @@ Laws in LAWS.bend: 3253. bend 1093, rust 307, unported 1244, client 482, window 
 | `fold_label_leaves_todo_out` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `fold_live_names_call` | unported | seed R +-10% | `src/core/model.bend` |  |
 | `tool_summary_todo` | rust `tool_summary_todo` | map | `src/core/json.bend` |  |
-| `stamp_mid_never_user` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `stamp_mid_inside_turn` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `stamp_mid_turn_end_shows` | unported | seed R +-10% | `src/core/model.bend` |  |
-| `stamp_mid_running_newest_shows` | unported | seed R +-10% | `src/core/model.bend` |  |
+| `stamp_mid_never_user` | rust `stamp_mid_never_user` | map | `src/core/model.bend` |  |
+| `stamp_mid_inside_turn` | rust `stamp_mid_inside_turn` | map | `src/core/model.bend` |  |
+| `stamp_mid_turn_end_shows` | rust `stamp_mid_turn_end_shows` | map | `src/core/model.bend` |  |
+| `stamp_mid_running_newest_shows` | rust `stamp_mid_running_newest_shows` | map | `src/core/model.bend` |  |
 | `subs_step_label_mcp` | client | seed C +-10% | `src/core/subs.bend` |  |
 | `subs_step_label_say` | client | seed C +-10% | `src/core/subs.bend` |  |
 | `star_nudge_rejected_accept` | unported | seed R +-10% | `src/core/model.bend` |  |
