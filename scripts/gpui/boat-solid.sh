@@ -15,7 +15,7 @@ sleep 2; DISPLAY=:61 i3 -c $V/i3.conf > $V/i3.log 2>&1 & IP=$!
 printf 'Xft.dpi: 96\n' | DISPLAY=:61 xrdb -merge; sleep 1
 run() { # name spec [env]
   n=$1; spec=$2; shift 2
-  env DISPLAY=:61 "$@" timeout 170 $BIN --solid-demo $spec --exit-after 150 > $V/$n.log 2>&1
+  env DISPLAY=:61 "$@" timeout 170 $BIN --url http://127.0.0.1:1 --token-file /dev/null --solid-demo $spec --exit-after 150 > $V/$n.log 2>&1
   say "$n ($spec $*): $(grep -m1 '"event":"solid_demo"' $V/$n.log | cut -c12-700)"
 }
 grep -m1 '"event":"gpu"' /dev/null
