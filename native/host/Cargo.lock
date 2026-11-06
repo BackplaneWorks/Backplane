@@ -50,6 +50,7 @@ dependencies = [
  "aes-gcm",
  "anyhow",
  "base64",
+ "ed25519-compact",
  "futures-util",
  "hex",
  "httparse",
@@ -150,6 +151,10 @@ dependencies = [
  "block-buffer",
  "crypto-common",
 ]
+
+[[package]]
+name = "ed25519-compact"
+version = "2.6.0"
 
 [[package]]
 name = "either"
