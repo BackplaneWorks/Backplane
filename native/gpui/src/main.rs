@@ -134,7 +134,9 @@ impl Backplane {
     fn send(&mut self,_:&Send,_:&mut Window,cx:&mut Context<Self>) {self.do_send(cx);}
     fn do_send(&mut self,cx:&mut Context<Self>) {if self.popup_pick(cx){return;}self.ui_epoch+=1;
         let text=self.input.read(cx).content.to_string();
-        if !text.trim().is_empty()&&self.status=="Connected" {self.echo_sent(&text);let _=self.tx.try_send(Command::Send(text));self.error.clear();}cx.notify();
+        // a picture or file alone is a message too: the hub sends the attachments with whatever text there is (none: just them)
+        let has_att=self.data["thread"]["attaching"].as_array().map_or(false,|a|!a.is_empty());
+        if (!text.trim().is_empty()||has_att)&&self.status=="Connected" {if !text.trim().is_empty(){self.echo_sent(&text);}let _=self.tx.try_send(Command::Send(text));self.error.clear();}cx.notify();
     }
     /// The message is drawn at the end of the open thread the moment it is sent; the hub's picture, which has the real entry, replaces it (history::merge
     /// keeps the rows up to the first one the hub also has, so an echo past it is dropped, not doubled).
