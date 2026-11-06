@@ -82,6 +82,37 @@ Each lane updates its own rows in the commit that lands the work.
 | `view.search` (0.14's Find: "Type a word said in any thread", text of messages across threads) | missing | audit | Audit, build a8dff03746 (real mouse and keys on Xvfb): on a valid open view the hub answers `view.search`, `view.message` and `view.cancel` with UNSUPPORTED: no handler is ever passed to `register_view`. A word said in a thread ("pinecone", sent with `message.send`) is not found by the sidebar search, the palette ("Nothing matches") or the phones' `search {q}` (empty; it matches titles and folders only). Proposed owner: hub-rest. `view.message` (0.14: continue a long message) and `view.cancel` are the same missing handlers; whether a long message is cut with no way to read the rest is not driven. |
 | Every other row of the old checklist | unchecked | audit |
 
+## Old checklist, audited
+
+Rows of the old checklist (`gpui` branch, `docs/gpui/PARITY.md`, 198 rows, section Checklist), numbered as there. Each result is from driving the GPUI client with real mouse and keys on a private hub (build a8dff03746, Xvfb, stand-ins); the evidence is the hub's own events. Phones were not driven: a `done` here means GPUI only. Rows not listed are still `unchecked` (the last row of Gaps).
+
+### Sidebar (1 to 22)
+
+| # | Row | Status | What was driven |
+|---|---|---|---|
+| 1 | Projects and threads list, selection | done | Project and thread rows load, a click opens the thread. |
+| 2 | Bounded pages (Newer / Older, 48 rows) | unchecked | Needs more than 48 rows. |
+| 3 | Search / filter | partial | The box filters projects by title (typing a project's name works). A thread title typed with nothing open lists nothing; with a thread open its whole project stays. No message text (see `view.search` above). |
+| 4 | Older / quiet projects fold, faded rows | unchecked | Needs old projects. |
+| 5 | Active view and Settled fold | done | A settled thread went under "Settled (1)", which opens and closes. |
+| 6 | Row menu | done | Right click: Pin, Settle (Unsettle), Snooze 1 hour / tomorrow / 1 week, New subthread, Rename, Regenerate title, Archive, Delete. Regenerate title not run. |
+| 7 | Pins | done | `ThreadPinned`; the thread moved to the top. |
+| 8 | Settle / unsettle | done | `ThreadSettled` manual, then `ThreadUnsettled` from the Settled fold. Autosettle is another lane's. |
+| 9 | Snooze | done | `ThreadSnoozed` with `until` an hour on; the row left the list. The wake at the end was not waited for. |
+| 10 | Archive / unarchive | partial | `ThreadArchived`. Unarchive not driven. |
+| 11 | Delete thread (asks first) | done | The first press showed Cancel and Delete; Cancel left no `ThreadDeleted`. A confirmed delete was not driven. |
+| 12 | Rename thread / project | partial | Thread: inline edit, `ThreadRenamed` (the box starts with the old name). Project: the project's menu is New thread and Remove project only, so no project rename from the GPUI client (the hub has `project.rename`). |
+| 13 | Fork thread, bring back | done | Fork thread made "Fork: New thread" (`ThreadForked`, handoff turn queued) with a "Back to the original" button. |
+| 14 | Reorder threads and projects | unchecked | Drag not driven. |
+| 15 | New thread | done | The + made a thread, in a git folder with a real worktree (see Worktree controls). |
+| 16 | Add project | partial | Picker lists the folder and `..`; Add made `ProjectCreated` and a thread. mkdir and find not driven. |
+| 17 | Remove project, restore on re-add | partial | Two-press "Click again to remove project", `ProjectRemoved`; the row stays while one of its threads is open. Restore on re-add not driven. |
+| 18 | Scratch project and threads | missing | See Old Scratch chats above. |
+| 19 | Thread tree: parent, detach, reparent | partial | New subthread made `ThreadParentSet` and a child row with a fold. The row menu has no Move to top level, so detach and reparent are missing from the client. |
+| 20 | Project badge colour/icon editor | missing | No entry in the project menu, no control in the controls list. |
+| 21 | Status colours, urgency order, counts | unchecked | |
+| 22 | Machine switch / one list over machines | unchecked | See Your machines above. |
+
 ## Not gaps
 
 | Feature | Status | Why |
