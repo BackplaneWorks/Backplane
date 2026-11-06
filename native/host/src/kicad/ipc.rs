@@ -20,8 +20,8 @@
 use super::{kipc, kserve::{self as ks, Srv}, project};
 use crate::{api::{Caller, Fut, RpcHandler}, hub::Hub};
 use serde_json::{json, Map, Value};
-use std::{collections::HashMap, path::{Path, PathBuf}, process::Stdio, sync::{Arc, OnceLock}, time::Duration};
-use tokio::{io::{AsyncBufReadExt, AsyncWriteExt, BufReader}, process::Command, sync::{mpsc, oneshot}};
+use std::{collections::HashMap, path::{Path, PathBuf}, sync::{Arc, OnceLock}, time::Duration};
+use tokio::sync::{mpsc, oneshot};
 
 /// What the runtime is: the kicad-cli, its root, the capabilities its manifest names, its version and API level (KEnv).
 #[derive(Clone, Debug, Default)]
