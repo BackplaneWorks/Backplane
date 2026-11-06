@@ -101,7 +101,7 @@ jobs:
         working-directory: native/gpui
         run: |
           # macOS: the keymap tests assume Linux's ctrl chords (secondary is cmd there)
-          if [ "$RUNNER_OS" = macOS ]; then cargo nextest run --locked -E 'not test(/^keys::tests::/)'; else cargo nextest run --locked; fi
+          if [ "$RUNNER_OS" = macOS ]; then cargo nextest run --locked -E 'not (test(/^keys::tests::/) | test(/drawing_pads_keys/))'; else cargo nextest run --locked; fi
 
   android:
     needs: changes
