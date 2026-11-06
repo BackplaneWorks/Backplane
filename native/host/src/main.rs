@@ -14,7 +14,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::tungstenite::{handshake::server::ErrorResponse, protocol::WebSocketConfig, Message};
 
-const USAGE: &str = "usage: backplane-hub --home DIR --port N [--host ADDR] [--policy-bin PATH] [--no-tailscale | --tailscale | --tailscale-https] [--foreground] [--headless]\n       backplane-hub --render MODEL...\n       backplane-hub --help | --version\n";
+const USAGE: &str = "usage: backplane-hub --home DIR --port N [--host ADDR] [--policy-bin PATH] [--no-tailscale | --tailscale | --tailscale-https | --tailnet-only] [--foreground] [--headless]\n       backplane-hub --render MODEL...\n       backplane-hub --help | --version\n";
 
 struct Args { window: Option<PathBuf>, home: PathBuf, port: u16, host: String, policy: Option<PathBuf>, version: String, commit: String, tailscale: bool, https: bool }
 
@@ -22,10 +22,19 @@ struct Args { window: Option<PathBuf>, home: PathBuf, port: u16, host: String, p
 /// `--no-tailscale` turns https off with it.
 fn tailnet_flags(no_tailscale: bool, https: bool, copy: bool) -> (bool, bool) { let on = !no_tailscale && !copy; (on, on && https) }
 
+/// `--tailnet-only` (daily use from a phone): the hub listens on loopback and on this machine's Tailscale address, never on a public one, and gives phones
+/// an HTTPS address from `tailscale serve`. It refuses a non-loopback `--host`, a copy of a log, and a missing `BACKPLANE_HTTPS_PORT` (the serve port must be chosen:
+/// the default 443 may be another hub's). Err is the one line said before exit 2.
+fn tailnet_only(host: &str, https_port: Option<&str>, copy: bool) -> std::result::Result<(), &'static str> {
+    if copy { return Err("--tailnet-only is for a hub of your own, not a copy of a log") }
+    if !matches!(host, "127.0.0.1" | "localhost" | "::1" | "[::1]") { return Err("--tailnet-only: --host must be loopback; the tailnet address is bound separately, and nothing public is ever bound") }
+    match https_port { Some(v) if net::listener::https_port_of(Some(v)).is_some() => Ok(()), _ => Err("--tailnet-only needs BACKPLANE_HTTPS_PORT, the port tailscale serve takes for HTTPS (a free one: 443 may be another hub's)") }
+}
+
 fn parse() -> std::result::Result<Args, i32> {
     let a: Vec<String> = std::env::args().skip(1).collect();
     let (mut home, mut port, mut host, mut policy, mut window) = (None, None, "127.0.0.1".to_string(), None, None::<PathBuf>);
-    let (mut no_tailscale, mut https) = (false, false);
+    let (mut no_tailscale, mut https, mut only) = (false, false, false);
     let (mut version, mut commit) = ("0.14.0".to_string(), std::env::var("BACKPLANE_COMMIT").unwrap_or_else(|_| "unknown".into()));
     let mut i = 0;
     while i < a.len() {
@@ -43,11 +52,13 @@ fn parse() -> std::result::Result<Args, i32> {
             "--no-tailscale" => { no_tailscale = true; https = false }
             "--tailscale" => no_tailscale = false,
             "--tailscale-https" => { no_tailscale = false; https = true }
+            "--tailnet-only" => { no_tailscale = false; https = true; only = true }
             "--foreground" | "--headless" => {}
             _ => { eprint!("{USAGE}"); return Err(2) }
         }
         i += 1;
     }
+    if only { if let Err(why) = tailnet_only(&host, std::env::var("BACKPLANE_HTTPS_PORT").ok().as_deref(), copy::on()) { eprintln!("{why}"); return Err(2) } }
     if window.is_none() { window = std::env::var("BACKPLANE_WINDOW_BIN").ok().filter(|p| !p.is_empty()).map(PathBuf::from); }
     if policy.is_none() { policy = std::env::var("BACKPLANE_POLICY_BIN").ok().filter(|p| !p.is_empty()).map(PathBuf::from); }
     // no default home or port: this binary must never land on a live hub's by accident
@@ -174,6 +185,14 @@ async fn run(a: Args) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test] fn tailnet_only_binds_nothing_public_and_picks_its_serve_port() {
+        use super::tailnet_only as t;
+        assert_eq!(t("127.0.0.1", Some("8451"), false), Ok(()));
+        assert_eq!(t("localhost", Some("8451"), false), Ok(()));
+        for h in ["0.0.0.0", "::", "192.168.1.5", "100.64.84.41", ""] { assert!(t(h, Some("8451"), false).unwrap_err().contains("loopback"), "{h:?}") }
+        for p in [None, Some(""), Some("0"), Some("x")] { assert!(t("127.0.0.1", p, false).unwrap_err().contains("BACKPLANE_HTTPS_PORT"), "{p:?}") }
+        assert!(t("127.0.0.1", Some("8451"), true).unwrap_err().contains("copy"));
+    }
     #[test] fn tailnet_flags_follow_the_flags_and_a_copy_runs_neither() {
         use super::tailnet_flags as f;
         assert_eq!(f(false, false, false), (true, false), "default: tailscale on, no https");
