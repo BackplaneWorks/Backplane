@@ -11,7 +11,8 @@
 let n=0; const out=document.getElementById('out');
 btn.onclick=()=>{n++; document.title='clicked:'+n; out.textContent='clicked '+n};
 inp.oninput=()=>{document.title='typed:'+inp.value; out.textContent='typed '+inp.value};
-pop.onclick=()=>{window.open('/popup.html','_blank')};
+dl.addEventListener('click',()=>{document.title='dl-clicked'});
+pop.onclick=()=>{document.title='pop-clicked';window.open('/popup.html','_blank')};
 file.onchange=()=>{document.title='file:'+file.files[0].name};
 window.addEventListener('message',e=>{document.title='msg:'+e.data});
 </script>

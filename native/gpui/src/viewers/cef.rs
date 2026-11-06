@@ -60,7 +60,7 @@ wrap_display_handler! {
     struct DisplayH { tab: Arc<Tab> }
     impl DisplayHandler {
         fn on_address_change(&self, _b: Option<&mut Browser>, frame: Option<&mut Frame_>, url: Option<&CefString>) {
-            if frame.map_or(false, |f| f.is_main() == 1) { self.tab.st.lock().unwrap().url = s(url); let _ = self.tab.wake.try_send(()); }
+            if frame.map_or(false, |f| f.is_main() == 1) { eprintln!("GPUI_LOG {{\"cef_address\":{}}}", serde_json::Value::String(s(url))); self.tab.st.lock().unwrap().url = s(url); let _ = self.tab.wake.try_send(()); }
         }
         fn on_title_change(&self, _b: Option<&mut Browser>, title: Option<&CefString>) { self.tab.st.lock().unwrap().title = s(title); let _ = self.tab.wake.try_send(()); }
         fn on_cursor_change(&self, _b: Option<&mut Browser>, _c: ::std::os::raw::c_ulong, ty: CursorType, _i: Option<&CursorInfo>) -> ::std::os::raw::c_int {
@@ -87,7 +87,8 @@ wrap_life_span_handler! {
     impl LifeSpanHandler {
         fn on_before_popup(&self, _b: Option<&mut Browser>, _f: Option<&mut Frame_>, _id: ::std::os::raw::c_int, _url: Option<&CefString>, _name: Option<&CefString>,
             _disp: WindowOpenDisposition, _gesture: ::std::os::raw::c_int, _features: Option<&PopupFeatures>, wi: Option<&mut WindowInfo>, client: Option<&mut Option<Client>>,
-            _settings: Option<&mut BrowserSettings>, _extra: Option<&mut Option<DictionaryValue>>, _nojs: Option<&mut ::std::os::raw::c_int>) -> ::std::os::raw::c_int {
+            settings: Option<&mut BrowserSettings>, _extra: Option<&mut Option<DictionaryValue>>, _nojs: Option<&mut ::std::os::raw::c_int>) -> ::std::os::raw::c_int {
+            if let Some(st) = settings { st.windowless_frame_rate = 30; }
             // a new window keeps its opener (window.opener, postMessage, window.close): CEF makes it, windowless, with our own handlers; the page shows it as a new tab
             // a link that saves to disk is a download of this page, not a window
             if _disp == WindowOpenDisposition::SAVE_TO_DISK { if let (Some(b), Some(u)) = (_b, _url) { if let Some(h) = b.host() { h.start_download(Some(u)); } } return true as _ }
@@ -98,7 +99,7 @@ wrap_life_span_handler! {
             self.tab.st.lock().unwrap().popup_tabs.push(tab); let _ = self.tab.wake.try_send(());
             false as _
         }
-        fn on_after_created(&self, b: Option<&mut Browser>) { if let Some(b) = b { self.tab.id.store(b.identifier(), Ordering::Relaxed); *self.tab.browser.lock().unwrap() = Some(B(b.clone())); let _ = self.tab.wake.try_send(()); } }
+        fn on_after_created(&self, b: Option<&mut Browser>) { if let Some(b) = b { eprintln!("GPUI_LOG {{\"cef_created\":{}}}", b.identifier()); if let Some(h) = b.host() { h.was_hidden(false as _); h.was_resized(); h.invalidate(PaintElementType::default()); } self.tab.id.store(b.identifier(), Ordering::Relaxed); *self.tab.browser.lock().unwrap() = Some(B(b.clone())); let _ = self.tab.wake.try_send(()); } }
         fn do_close(&self, _b: Option<&mut Browser>) -> ::std::os::raw::c_int { false as _ }
         fn on_before_close(&self, _b: Option<&mut Browser>) { *self.tab.browser.lock().unwrap() = None; self.tab.st.lock().unwrap().closed = true; let _ = self.tab.wake.try_send(()); }
     }
