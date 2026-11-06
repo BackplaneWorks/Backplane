@@ -70,6 +70,7 @@ Each lane updates its own rows in the commit that lands the work.
 | `/btw`, `/give` from every client (`thread.btw`, `bots.give`) | unchecked | hub-rest | Audit, build e9a7d6c9ba on a private hub (Xvfb, stand-ins): in the GPUI composer both echo the message, then the screen says `View request refused: "PRESENTER_UNAVAILABLE"`; nothing is posted and the text stays. `thread.btw` and `bots.give` are unknown methods. `session/composer.rs:80` returns no handler for `/btw`, `/give`, `/secret`, `/intent`. To confirm on a current build; `/secret` and `/intent` not driven; phones not driven. |
 | Summaries and notes (`summary.set`, `thread.note`) | unchecked | hub-rest | Audit: both unknown methods, and in 0.14 only the server's own job replies sent them (`server.bend:2897`, `12468`), never a client, so the requests are dropped on purpose. Whether a thread summary or note still shows to a person on `main` was not driven. |
 | Worktree controls (`thread.branch`, `thread.local`, `thread.worktree`; also `thread.merged`, `thread.unrooted`, `thread.titled`) | partial | hub-rest | Audit, build a8dff03746 (real mouse and keys on Xvfb): in a git project the + beside the project made a thread with env `worktree` and the hub logged `WorktreeSet` (branch `backplane/8b05553b`, a real `git worktree`); in a non-git folder `WorktreeSkipped`. The five request names are 0.14's agent-metadata list (`hub.bend:1134`), not client requests, and are unknown methods. Gaps seen: the phones' `thread.create` (data/1) made a `local` thread in the same git project, so a phone thread gets no worktree; no setting or control chooses local or worktree (no `thread.env` row in Settings) or moves a thread between them. |
+| Webhook secret and token never shown in the GPUI client (`bots.hook`, `bots.hook_token`) | missing | hub-rest | Audit, build a8dff03746: New webhook, Token and New token on a bot's Webhooks tab show nothing. The hub replies `{t:reply, ok:true, tokenHook, token, tokenUrl}` with the fields at the top of the reply (seen on the wire; `bots/hooks.rs:52`), while the client reads `x["result"]` (`gpui/src/hub.rs:153`), gets null and draws no reveal. The hook itself works: a POST to `/hook/<id>` gave 401, with the Bearer token 200, `HookHit`, `BotWoke` and a message in the bot's thread. Phones not driven. |
 | Google sign-in for bots (`bots.google`, `/oauth/google`) | missing | google |
 | `gmail_read`, `gmail_search`, `gmail_draft`, `calendar_events`, `google_accounts` | missing | google |
 | `deploy_status`, `deploy_cancel` | unchecked | hub-rest |
@@ -145,6 +146,22 @@ Driven in one thread with the stand-in's `stream` mode (`tools:`, `todos:`, `age
 | 48 | Token, context stats, usage | unchecked | A `ctx 0%` chip and a `limit` chip show; nothing opened. |
 | 49 to 50 | Reconnect keeps drafts; terminal rows | unchecked | E2E F21 and F14. |
 | 51 to 55 | Summaries; Wt.name; Keyring.say; standing rules; omp masking | unchecked | Internal turn behaviour; no stand-in drives it. |
+
+### Bots (85 to 97)
+
+| # | Row | Status | What was driven |
+|---|---|---|---|
+| 85 | Bots list, create, edit, delete | partial | New bot form (name, persona, provider chips claude to omp): `BotSet` and a thread, a cat avatar and "ready" in the sidebar. The Settings tab shows name and persona with Save. Edit and delete not driven. |
+| 86 | Bot tabs | partial | Tabs are Chat, Mailroom, Space, Browser, Tasks, Memory, Routines, Webhooks, Settings, each with an empty state (0.14 had Status, Chat, Space, Routines, Memory, Hooks; no Status tab here). Browser says "embedded browser unavailable: no CEF runtime" (the embedded-browser lane's). |
+| 87 | Bot space | unchecked | "No space yet. The bot writes it with space_set"; no stand-in writes one. |
+| 88 | Rooms | partial | New room with a member: `RoomSet`, "Lab" in the sidebar. Post, mention, delete not driven. |
+| 89 | Status plane | unchecked | |
+| 90 | Uberbot, promotion, sync | unchecked | |
+| 91 | Routines | partial | The tab shows New routine and "No routines". Not driven. |
+| 92 | Reminders and notifications to the person | unchecked | See the `notify.*` row. |
+| 93 | Webhooks | partial | Create works (`HookSet`, `/hook/<id>` listed) and the hub serves the call; the client shows no secret or token. See the new gap row above. |
+| 94 | Browser teach and task skills | unchecked | Tasks tab shows "No tasks yet"; no CEF runtime on the rig. |
+| 95 to 97 | Peers; Google sign-in; Mail | unchecked | Mailroom tab shows "No mail". Google is its own lane. |
 
 ## Not gaps
 
