@@ -204,7 +204,9 @@ pub fn answered(this: &mut Backplane, id: u64, reply: Value, cx: &mut Context<Ba
             if imp.draft.writer_project.is_empty() {
                 let work: Vec<&Project> = imp.projects.iter().filter(|p| p.id != "scratch" && !p.root.is_empty()).collect();
                 let src = s(&r, "project");
-                imp.draft.writer_project = work.iter().find(|p| p.id == src).map(|p| p.id.clone()).or_else(|| (work.len() == 1).then(|| work[0].id.clone())).unwrap_or_default();
+                // the Backplane source project first (backplane-gpui), then the project the person is in, then the only one there is
+                imp.draft.writer_project = backplane_project(&imp.projects).filter(|b| work.iter().any(|p| p.id == b.id)).map(|p| p.id.clone())
+                    .or_else(|| work.iter().find(|p| p.id == src).map(|p| p.id.clone())).or_else(|| (work.len() == 1).then(|| work[0].id.clone())).unwrap_or_default();
             }
         }
         Next::Diag(then) => {

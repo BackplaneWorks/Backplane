@@ -142,6 +142,7 @@ async fn run(a: Args) -> Result<()> {
     let presenter: Arc<dyn presenter::Presenter> = Arc::new(present::Routed::new(presenter, vec![Box::new(recent.clone())], &a.home, a.policy.is_some()));
     let listen = format!("{}:{}", a.host, a.port);
     startup::mark("home ready");
+    session::composer::mention::set_models(settings::models::all);
     let hub = Hub::start(hub::Cfg { home: a.home.clone(), version: a.version, commit: a.commit, listen: listen.clone(), os: "linux".into(), arch: "x64".into() }, presenter).await?;
     startup::mark("hub started");
     ckptrun::start(hub.clone());

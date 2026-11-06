@@ -132,7 +132,7 @@ impl Backplane {
         String::new()
     }
     fn send(&mut self,_:&Send,_:&mut Window,cx:&mut Context<Self>) {self.do_send(cx);}
-    fn do_send(&mut self,cx:&mut Context<Self>) {self.ui_epoch+=1;
+    fn do_send(&mut self,cx:&mut Context<Self>) {if self.popup_pick(cx){return;}self.ui_epoch+=1;
         let text=self.input.read(cx).content.to_string();
         if !text.trim().is_empty()&&self.status=="Connected" {self.echo_sent(&text);let _=self.tx.try_send(Command::Send(text));self.error.clear();}cx.notify();
     }
