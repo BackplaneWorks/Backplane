@@ -220,6 +220,12 @@ pub fn recent(st: &State,p: &Value) -> Option<Value> {
             crate::session::patch::merge(&mut session,&o.patch);
             cmds=o.before;
         },
+        // another board of a project with several (present/viewer.rs `board_action`)
+        "view-board" => {
+            let Some(o)=super::viewer::board_action(st,hub,&session,value) else { return refused("action.board-unported") };
+            crate::session::patch::merge(&mut session,&o.patch);
+            cmds=o.before;
+        },
         // the Layers menu: hide/show a layer, the active layer, All/Dim/Only (present/viewer.rs `layer_action`)
         "view-layer" | "view-layer-pick" | "view-layer-mode" => {
             let Some(patch)=super::viewer::layer_action(st,&session,action,value) else { return refused("action.layer-unported") };

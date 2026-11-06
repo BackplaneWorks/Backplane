@@ -271,6 +271,7 @@ pub fn apply_reads(f: &dyn select::Facts, hub: &str, session: &mut Value, reads:
         let (res, ok, id) = (&r["result"], r["ok"].as_bool().unwrap_or(true), r["id"].as_u64().unwrap_or(0));
         let method = match r["method"].as_str() { Some(m) => m, None if res.get("report").is_some() => "review.bom", None if res.get("ticked").is_some() => "review.tick", None if res.get("diff").is_some() => "git.diff", None => "" };
         let mut p = json!({});
+        if ok && res.get("board_list").is_some() { if let Some(k) = crate::present::ready::keep_boards(res) { patch::merge(session, &k); } continue }
         if r["kind"] == "fab.look" && ok { if let Some(k) = crate::present::ready::keep(res) { patch::merge(session, &k); } continue }
         match method {
             "git.diff" if res.get("diff").is_some() => {
