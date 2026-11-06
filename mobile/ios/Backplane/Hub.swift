@@ -11,6 +11,10 @@ enum Pairing {
         return c.url
     }
 
+    static func token(_ link: String) -> String? {
+        socket(link).flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) }?.queryItems?.first { $0.name == "token" }?.value
+    }
+
     // the hub's key: host:port, the same for every link to it
     static func key(_ link: String) -> String? {
         guard let u = socket(link), let host = u.host() else { return nil }

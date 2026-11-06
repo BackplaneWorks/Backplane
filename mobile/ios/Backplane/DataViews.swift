@@ -16,7 +16,13 @@ struct DataRoot: View {
     var body: some View {
         Group {
             if client.links.isEmpty || client.needsRepair {
-                NavigationStack { PairView(tag: "en", link: "", status: client.pairingError, repair: client.needsRepair) { client.pair($0) } }
+                NavigationStack {
+                    PairView(tag: "en", link: "", status: client.pairingError, repair: client.needsRepair) { client.pair($0) }
+                        .safeAreaInset(edge: .bottom) {
+                            // refused or not, a paired phone can still look at the hub
+                            if !client.links.isEmpty { NavigationLink { DataHubView(client: client) } label: { Text("Hub") }.buttonStyle(DButton()).padding(12).accessibilityIdentifier("repair.hub") }
+                        }
+                }
             } else {
                 NavigationStack(path: $path) { DataThreadsView(client: client, path: $path) }
             }
@@ -65,6 +71,7 @@ struct DataThreadsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            DataHubBanner(client: client)
             if client.conn != .online { DataConnectionBanner(client: client) }
             HStack(spacing: 8) {
                 if client.has("search") {
@@ -94,7 +101,7 @@ struct DataThreadsView: View {
         .navigationDestination(for: String.self) { DataThreadView(client: client, id: $0) }
         .navigationDestination(for: DRoom.self) { DataRoomView(client: client, room: $0) }
         .navigationDestination(for: DViewerRoute.self) { r in if let t = client.threads.first(where: { $0.id == r.id }) { DataViewerView(client: client, thread: t) } }
-        .navigationDestination(for: DPage.self) { p in if p.name == "settings" { DataSettingsView(client: client) } else { DataImprovementsView(client: client) } }
+        .navigationDestination(for: DPage.self) { p in if p.name == "settings" { DataSettingsView(client: client) } else if p.name == "hub" { DataHubView(client: client) } else { DataImprovementsView(client: client) } }
         .modifier(DataThreadDialogs(client: client, renaming: $renaming, deleting: $deleting))
         .alert("Rename project", isPresented: Binding(get: { renamingProject != nil }, set: { if !$0 { renamingProject = nil } })) {
             TextField("Title", text: $projectTitle)
@@ -207,6 +214,7 @@ struct DataConnectionBanner: View {
                     if client.conn == .offline, !client.failure.isEmpty { Text(client.failure).dmono(11).foregroundStyle(BackplaneDesign.dim).lineLimit(2) }
                 }
                 Spacer()
+                NavigationLink(value: DPage(name: "hub")) { Text("Hub") }.dmono(12, bold: true).foregroundStyle(BackplaneDesign.accent).accessibilityIdentifier("conn.hub")
                 if client.conn == .offline { Button("Retry") { client.connect() }.dmono(12, bold: true).foregroundStyle(BackplaneDesign.accent) }
             }.padding(.horizontal, 12).padding(.vertical, 8).background(BackplaneDesign.raised)
             DLine()
@@ -369,6 +377,7 @@ struct DataThreadView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            DataHubBanner(client: client)
             if client.conn != .online { DataConnectionBanner(client: client) }
             stateStrip
             ScrollViewReader { proxy in
@@ -749,6 +758,7 @@ struct DataSettingsView: View {
                     Button("Reconnect") { client.connect() }.buttonStyle(DButton())
                     Button("Forget this hub") { confirmUnpair = true }.buttonStyle(DButton(danger: true))
                 }
+                NavigationLink(value: DPage(name: "hub")) { Text("Hub") }.buttonStyle(DButton()).accessibilityIdentifier("settings.hub")
                 DLine()
                 DataUpdateSection(client: client)
                 DLine()

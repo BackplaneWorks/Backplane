@@ -64,7 +64,7 @@ internal fun dAgo(ms: Long): String {
 @Composable internal fun DDot(c: Color, size: Int = 6) = Box(Modifier.size(size.dp).background(c))
 @Composable internal fun DLine() = Box(Modifier.fillMaxWidth().height(1.dp).background(dcs.outlineVariant))
 
-private sealed interface Page { object Improve : Page; data class Room(val room: DataClient.Room) : Page; data class Viewer(val id: String) : Page; object Home : Page; data class Thread(val id: String) : Page; object Settings : Page; object Folders : Page; data class New(val project: String) : Page }
+private sealed interface Page { object Improve : Page; data class Room(val room: DataClient.Room) : Page; data class Viewer(val id: String) : Page; object Home : Page; data class Hub(val from: Page) : Page; data class Thread(val id: String) : Page; object Settings : Page; object Folders : Page; data class New(val project: String) : Page }
 
 @Composable
 fun DataRoot() {
@@ -73,11 +73,12 @@ fun DataRoot() {
     Box(Modifier.fillMaxSize().background(dcs.background).windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.ime))) {
         if (DataClient.link == null || DataClient.needsRepair) PairScreen()
         else when (val p = page) {
-            Page.Home -> HomeScreen({ page = Page.Thread(it) }, { page = Page.Settings }, { page = Page.Folders }, { page = Page.New(it) }) { page = Page.Room(it) }
+            Page.Home -> HomeScreen({ page = Page.Thread(it) }, { page = Page.Settings }, { page = Page.Hub(Page.Home) }, { page = Page.Folders }, { page = Page.New(it) }) { page = Page.Room(it) }
             is Page.Viewer -> { BackHandler { page = Page.Thread(p.id) }; DataClient.threads.firstOrNull { it.id == p.id }?.let { ViewerScreen(it) { page = Page.Thread(p.id) } } }
             is Page.Room -> { BackHandler { page = Page.Home }; RoomScreen(p.room) { page = Page.Home } }
-            is Page.Thread -> { BackHandler { page = Page.Home }; ThreadScreen(p.id, { page = Page.Viewer(p.id) }) { page = Page.Home } }
-            Page.Settings -> { BackHandler { page = Page.Home }; SettingsScreen({ page = Page.Home }) { page = Page.Improve } }
+            is Page.Thread -> { BackHandler { page = Page.Home }; ThreadScreen(p.id, { page = Page.Viewer(p.id) }, { page = Page.Hub(p) }) { page = Page.Home } }
+            Page.Settings -> { BackHandler { page = Page.Home }; SettingsScreen({ page = Page.Home }, { page = Page.Hub(Page.Settings) }) { page = Page.Improve } }
+            is Page.Hub -> { BackHandler { page = p.from }; HubScreen { page = p.from } }
             Page.Improve -> { BackHandler { page = Page.Settings }; ImproveScreen { page = Page.Settings } }
             Page.Folders -> { BackHandler { page = Page.Home }; FolderScreen({ page = Page.Home }) { page = Page.New(it) } }
             is Page.New -> { BackHandler { page = Page.Home }; NewThreadScreen(p.project, { page = Page.Home }) { page = Page.Thread(it) } }
@@ -99,11 +100,14 @@ internal fun DBar(title: String, back: (() -> Unit)?, trailing: @Composable RowS
 }
 
 @Composable
-private fun ConnBanner() {
+private fun ConnBanner(hub: () -> Unit) {
+    HubBanner(hub)
     if (DataClient.conn == DataClient.Conn.ONLINE) return
     Row(Modifier.fillMaxWidth().background(dcs.surfaceContainerHigh).padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         DDot(if (DataClient.conn == DataClient.Conn.CONNECTING) dwarn else dcs.error, 8); Spacer(Modifier.width(8.dp))
-        DMono(if (DataClient.conn == DataClient.Conn.CONNECTING) "connecting to ${DataClient.hubName}…" else "offline · showing what this phone has saved", dcs.onSurface, 12)
+        DMono(if (DataClient.conn == DataClient.Conn.CONNECTING) "connecting to ${DataClient.hubName}…" else "offline · showing what this phone has saved", dcs.onSurface, 12, Modifier.weight(1f))
+        Spacer(Modifier.width(8.dp))
+        DMono("Hub", dcs.primary, 12, Modifier.testTag("conn.hub").clickable(onClick = hub).padding(horizontal = 4.dp, vertical = 4.dp), bold = true)
     }
 }
 
@@ -188,7 +192,7 @@ internal fun ModelChip(text: String, tag: String, modifier: Modifier = Modifier,
 // ---- home: the sidebar, projects with their threads
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, addProject: () -> Unit, newThread: (String) -> Unit, openRoom: (DataClient.Room) -> Unit) {
+private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> Unit, addProject: () -> Unit, newThread: (String) -> Unit, openRoom: (DataClient.Room) -> Unit) {
     var q by remember { mutableStateOf("") }
     var projMenu by remember { mutableStateOf<DProject?>(null) }
     val ctx = androidx.compose.ui.platform.LocalContext.current
@@ -200,7 +204,7 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, addProject:
         DBar("Backplane", null) {
             IconButton(onClick = settings, modifier = Modifier.testTag("home.settings")) { Icon(Icons.Default.Settings, "Settings", tint = dcs.onSurfaceVariant) }
         }
-        ConnBanner()
+        ConnBanner(hub)
         Row(Modifier.fillMaxWidth().padding(start = 10.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             if (DataClient.has("search")) Box(Modifier.weight(1f)) { DField(q, { q = it }, "Search projects", Modifier.testTag("home.searchfield")) } else Spacer(Modifier.weight(1f))
             IconButton(onClick = addProject, modifier = Modifier.testTag("home.add")) { Icon(Icons.Default.Add, "Add project", tint = dcs.onSurfaceVariant) }
@@ -304,7 +308,7 @@ private fun StateStrip(t: DThread) {
 }
 
 @Composable
-private fun ThreadScreen(id: String, viewer: () -> Unit, back: () -> Unit) {
+private fun ThreadScreen(id: String, viewer: () -> Unit, hub: () -> Unit, back: () -> Unit) {
     val scope = rememberCoroutineScope()
     DisposableEffect(id) { DataClient.openThread(id); onDispose { DataClient.closeThread(id) } }
     val thread = DataClient.threads.firstOrNull { it.id == id }
@@ -335,7 +339,7 @@ private fun ThreadScreen(id: String, viewer: () -> Unit, back: () -> Unit) {
             if (thread != null && DataClient.has("viewers")) IconButton(onClick = viewer, modifier = Modifier.testTag("thread.viewer")) { Icon(Icons.Default.Dashboard, "Viewer", tint = dcs.onSurfaceVariant) }
             if (thread != null && DataClient.has("actions")) IconButton(onClick = { menu = true }, modifier = Modifier.testTag("thread.more")) { Icon(Icons.Default.MoreVert, "More", tint = dcs.onSurfaceVariant) }
         }
-        ConnBanner()
+        ConnBanner(hub)
         thread?.let { StateStrip(it) }
         LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("thread.list"), state = state, contentPadding = PaddingValues(vertical = 8.dp)) {
             if (DataClient.older[id] != null) item("older") { Box(Modifier.fillMaxWidth().clickable { DataClient.loadOlder(id) }.padding(10.dp), contentAlignment = Alignment.Center) { DMono("load earlier", dfaint) } }
@@ -449,12 +453,13 @@ private fun AskCard(tid: String, e: DEntry) {
 
 // ---- settings, folders, new thread
 @Composable
-private fun SettingsScreen(back: () -> Unit, improve: () -> Unit) {
+private fun SettingsScreen(back: () -> Unit, hub: () -> Unit, improve: () -> Unit) {
     Column(Modifier.fillMaxSize()) {
         DBar("Settings", back)
         Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             DMono("HUB", dfaint); Text(DataClient.hubName, color = dcs.onSurface, fontFamily = BpMono, fontSize = 14.sp)
             DMono(if (DataClient.conn == DataClient.Conn.ONLINE) "online" else "offline ${DataClient.failure}", dcs.onSurfaceVariant, 12)
+            DBtn("Hub", false, modifier = Modifier.testTag("settings.hub"), onClick = hub)
             DLine()
             UpdateSection()
             DLine()
