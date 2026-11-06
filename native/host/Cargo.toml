@@ -36,3 +36,9 @@ lto = "off"
 codegen-units = 16
 incremental = true
 strip = "none"
+
+# Test builds (cargo test uses dev): line tables for panic backtraces, none for dependencies; less to compile and link on every edit.
+[profile.dev]
+debug = "line-tables-only"
+[profile.dev.package."*"]
+debug = false

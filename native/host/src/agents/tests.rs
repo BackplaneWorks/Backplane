@@ -621,7 +621,8 @@ async fn deliveries() -> Vec<Value> {
     rpc(&hub, "turn.start", json!({"thread":T1,"text":"two"})).await;                                                                                  // into the running turn
     until(&hub, from, 30, |ev| posted_then_running(ev, "two")).await;
     let (_, r) = rpc_mcp(&ag, other, "", "tools/call", json!({"name":"thread_send","arguments":{"threadId":T1,"text":"three"}})).await; assert_eq!(r["result"]["isError"], false); // another thread's message into it
-    let ev = until(&hub, from, 30, |ev| posted_then_running(ev, "three")).await; ag.shutdown(); ev
+    // "three" arrives via another thread, so it is followed by MessageFrom, the running turn and the turn.from mark (not directly by running): wait for those four
+    let ev = until(&hub, from, 30, |ev| ev.iter().position(|e| is(e, "MessagePosted") && e["text"] == "three").map_or(false, |i| ev.len() > i + 3)).await; ag.shutdown(); ev
 }
 /// Wait until a file exists (a stand-in writes its pid when it starts): a loaded runner makes it slower, not wrong.
 async fn wait_file(p: &Path) { let end = Instant::now() + Duration::from_secs(30); while !p.exists() && Instant::now() < end { tokio::time::sleep(Duration::from_millis(20)).await } }
@@ -1033,7 +1034,8 @@ fn tree(d: &Path) -> Vec<(String, u64)> {
     assert!(!log_from(&hub, 0).await.iter().skip(n0.saturating_sub(0)).any(|e| turn_is(e, "running")), "no turn is running again");
     // a person's own turn (a stand-in) is allowed, but writes no design history
     rpc(&hub, "turn.start", json!({"thread":T1,"text":"zqshort hi"})).await;
-    until(&hub, 0, 30, |ev| ev.iter().filter(|e| turn_is(e, "completed")).count() >= 1).await; tokio::time::sleep(Duration::from_millis(1500)).await;
+    // the turn may end completed or failed (a copy runs agents only as stand-in blocks): either way it is over and its steps would be logged by now; waiting only for "completed" sat out the whole 30 s
+    until(&hub, 0, 30, |ev| ev.iter().any(|e| turn_is(e, "completed") || turn_is(e, "failed") || turn_is(e, "interrupted"))).await; tokio::time::sleep(Duration::from_millis(1500)).await;
     assert!(!log_from(&hub, 0).await.iter().any(|e| e["tone"] == "step"), "no step Act on a copy");
     assert_eq!(tree(&work), before, "the project folder is unchanged: no .backplane/history.git, nothing in .git");
     let refs = std::process::Command::new("git").args(["for-each-ref", "refs/backplane"]).current_dir(&work).output().unwrap(); assert!(refs.stdout.is_empty(), "no hidden refs: {}", String::from_utf8_lossy(&refs.stdout));
