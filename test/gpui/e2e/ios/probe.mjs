@@ -18,4 +18,23 @@ show('view-lane files.dir',await v.rpc('files.dir',{thread,path:''},8000));
 await new Promise(r=>setTimeout(r,1500));
 console.log('probe view-lane frames after files.dir:',seen.slice(0,12).join(' '));
 for(const m of ['bots.list','rooms.list','thread.read']){const r=await v.rpc(m,{thread},4000);show('view-lane '+m,r)}
+// pairing as the phone does it: an invitation, then /auth/enroll with the invite as the bearer (status and keys only: no secret is printed)
+{
+  const base=`http://127.0.0.1:${port}`;
+  const inv=await fetch(base+'/auth/invitations',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:'{}'});
+  const ij=await inv.json().catch(()=>({}));
+  console.log('probe invitations:',inv.status,Object.keys(ij).join(','),'routes',JSON.stringify(ij.routes),'error',ij.error??'');
+  const secret=(ij.link??'').match(/invite=([a-f0-9]{32})/)?.[1];
+  if(secret){
+    const en=await fetch(base+'/auth/enroll',{method:'POST',headers:{Authorization:'Bearer '+secret,'X-Backplane-Client':'native','X-Backplane-Name':'probe'}});
+    const ej=await en.json().catch(()=>({}));
+    console.log('probe enroll:',en.status,Object.keys(ej).join(','),'tokenShape',/^[a-f0-9]{32}$/.test(ej.token??''),'error',ej.error??'');
+    // the device credential works on the view lane
+    if(ej.token){const d=await client({host:'127.0.0.1',port,token:ej.token},{view:true});await new Promise(r=>setTimeout(r,1500));console.log('probe device credential: view lane connected, frames',d.msgs);
+      show('device credential files.dir',await d.rpc('files.dir',{thread,path:''},6000));
+      show('device credential boards.list',await d.rpc('boards.list',{thread},6000));
+      const seen2=[];const d2=await client({host:'127.0.0.1',port,token:ej.token},{view:false,onMsg:(o)=>seen2.push(o.t)});await new Promise(r=>setTimeout(r,2500));
+      console.log('probe device credential, plain lane: frames',seen2.slice(0,8).join(' '));}
+  } else console.log('probe: no invite secret in the link');
+}
 process.exit(0);

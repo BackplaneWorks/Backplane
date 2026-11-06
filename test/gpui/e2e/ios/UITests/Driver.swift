@@ -25,6 +25,13 @@ final class Driver {
     var continueAfterFailure: Bool { get { false } set {} }
 
     var env: [String: String] { ProcessInfo.processInfo.environment }
+    // a one-time pairing invitation from the hub (HUB_INVITE_FILE: drive.sh asks the hub for it through its tailnet address), the real
+    // way a phone pairs; else the hub's token link
+    var inviteLink: String? {
+        guard let f = env["HUB_INVITE_FILE"], let t = try? String(contentsOfFile: f, encoding: .utf8) else { return nil }
+        let l = t.trimmingCharacters(in: .whitespacesAndNewlines)
+        return l.isEmpty ? nil : l
+    }
     var link: String {
         let host = env["HUB_HOST"] ?? "127.0.0.1", port = env["HUB_PORT"] ?? "3811"
         let tok = (try? String(contentsOfFile: env["HUB_TOKEN_FILE"] ?? "", encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
