@@ -30,12 +30,12 @@ Each lane updates its own rows in the commit that lands the work.
 | Feature | Status | Owner | Audit |
 |---|---|---|---|
 | **Voice** | | |
-| Dictation from the mic, desktop (`Dictate` chip is a dead placeholder in `native/gpui/src/ui.rs`) | missing | voice |
-| Dictation from the phones (`VoiceRecorder` posts to `/voice/in`, which the hub does not serve) | missing | voice |
-| Whole recordings and Pebble ring notes | missing | voice |
-| Voice ops of `bots.voice` (only the API key ops answer; the rest say "unknown voice request") | missing | voice |
-| Settings: Voice page (engine, model, mic, dictionary; not in `PAGES`) | missing | voice |
-| Personal dictionary, learned words, `voice_dictionary_add` | missing | voice |
+| Dictation from the mic, desktop: the GPUI `Dictate` chip starts a hub session (`bots.voice` start/stop/view/act), draws the strip, level and fix chips, applies the hub's edits (`screens/voice.rs`, `voice_mic.rs`); until the Rust `backplane-voice` helper lands, a session says the helper did not start | partial | voice |
+| Dictation from the phones: the hub serves `/voice/in` and pipes the phone's audio to the helper; until the Rust `backplane-voice` helper lands, a session says the helper did not start; not yet driven on an emulator or simulator | partial | voice |
+| Whole recordings and Pebble ring notes: the ring's webhook form with `audio` is answered 202 and transcribed with the dictionary (`voice/ring.rs`, `bots/hooks.rs`), the ring's own words go when there is no key or no words; until the Rust `backplane-voice` helper lands, a session says the helper did not start | partial | voice |
+| Voice ops of `bots.voice`: status, key, unkey, add, start, stop, view, act, page, page-act, install, remove, api-add, api-del (`voice/session.rs`) | done | voice |
+| Settings: Voice page (engine, model, mic, key, dictionary, learned fixes; `voice/page.rs`, in `PAGES`) | done | voice |
+| Personal dictionary, learned words, `voice_dictionary_add`: `voice.e.`/`voice.l.` settings, the correction pass and settle as pure Rust with 0.14's test vectors (`voice/vdict.rs`, `words.rs`), the bot tool writes a `voice.e.` entry | done | voice |
 | Local engine (Parakeet, sherpa-onnx through a Node addon today) | missing | voice |
 | `tools/voice` helper still Bun, README still says "stays in" Bend | partial | voice |
 | **Commerce** | | |
@@ -55,7 +55,7 @@ Each lane updates its own rows in the commit that lands the work.
 | Diff and Files toggle closed | done | threads-small |
 | **Bend-era cleanup** | | |
 | Phone launcher code (`WebShell`, Classic screens, `mobile/shell`) | done | cleanup |
-| READMEs and docs that still describe `bridge.js`, `src/core`, the web page (`mobile/README.md`, `docs/ios-build.md`, `docs/order.md`, `docs/git.md` fixed; about 20 more docs under `docs/` now carry a note that `src/` is the removed Bend tree, with the Rust replacement unverified; `docs/voice.md` is the voice thread's) | partial | cleanup |
+| READMEs and docs that still describe `bridge.js`, `src/core`, the web page (`mobile/README.md`, `docs/ios-build.md`, `docs/order.md`, `docs/git.md` fixed; about 20 more docs under `docs/` now carry a note that `src/` is the removed Bend tree, with the Rust replacement unverified; `docs/voice.md` and `docs/voice-dictation-design.md` are rewritten for the Rust hub, the `backplane-voice` helper, the GPUI client and the phones) | partial | cleanup |
 | `mobile/tests/improvements/bridge.mjs` and other tests of the old bridge | done | cleanup |
 | **Helpers** (goal: only `tools/browser` stays Bun) | | |
 | `tools/kipc`: removed, with `BACKPLANE_KIPC_BIN` and `scripts/build-kipc.sh`; the hub does the IPC in process | done | cleanup |

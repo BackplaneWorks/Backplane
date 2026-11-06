@@ -93,8 +93,8 @@ pub fn start(hub: Arc<Hub>, agents: Option<Arc<crate::agents::Agents>>) {
     if hub.rpc_for("bots.voice").is_none() { hub.register_rpc(Arc::new(keys_rpc::VoiceKeys)); }
 }
 
-/// `bots.voice` carries Settings' API keys (ops `api-add`, `api-del`) beside the voice ops. Until the voice owner registers the whole
-/// handler, this one answers the key ops and the status's `apiKeys`; the other ops answer "unknown voice request".
+/// `bots.voice` carries Settings' API keys (ops `api-add`, `api-del`) beside the voice ops. voice/session.rs registers the whole handler and calls
+/// `answer` for the key ops; this one stands in on a hub started without it (tests), where the other ops answer "unknown voice request".
 pub mod keys_rpc {
     use super::keys;
     use crate::{api::{Caller, Fut, RpcHandler}, hub::Hub};

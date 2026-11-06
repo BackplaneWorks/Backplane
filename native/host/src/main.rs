@@ -169,6 +169,7 @@ async fn run(a: Args) -> Result<()> {
     startup::mark("agents started");
     let _bots = bots::start(hub.clone(), agents.clone()).await;
     startup::mark("bots started");
+    let _voice = voice::session::start(&hub); // bots.voice and /voice/in, before settings::start (which then leaves bots.voice alone)
     settings::start(hub.clone(), Some(agents));
     startup::mark("settings start started");
     commands::start(hub.clone());

@@ -27,6 +27,7 @@ impl Backplane {
     /// which decides the popup rows (`thread.skills`) from it. True when the text really changed.
     pub(crate) fn draft_changed(&mut self, text: &str) -> bool {
         if self.drafts.get(&self.selected).map_or(text.is_empty(), |d| d == text) { return false; }
+        let old = self.drafts.get(&self.selected).cloned().unwrap_or_default(); self.voice_typed(&old, text);
         if self.selected.is_empty() { return true; }
         if text.is_empty() { self.drafts.remove(&self.selected); } else { self.drafts.insert(self.selected.clone(), text.to_string()); }
         self.screens.drafts.set(&self.selected, text);

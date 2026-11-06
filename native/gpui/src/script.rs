@@ -15,7 +15,7 @@ pub fn metric(started: Instant, event: &str, mut fields: Value) {
 pub enum Step { /** keystrokes typed as the person would ("ctrl-j e c h o enter"), through the window's bindings */ Keys(String), Cef(Value), Files(String), ScrollState(String), Home(usize), Select(usize), Tap(f32, f32, usize), Sheets(bool), Compare(Option<usize>), Hist(Option<i64>), HistMode(u8), HistPlay, ViewShow(String, String), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), Imp(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Mark(String), Fit, Unsupported(String) }
 /// What a click on a registered control does; the e2e harness's controls inventory and `click` step use these.
 #[derive(Clone, Debug)]
-pub enum Ctl { None, Pad, OpenPalette, Rail(String), PickFiles, ToggleSidebar, ToggleContext, Select(String), Home(String), Fold(String), Send, Skill(String), Page(String), Node(String, String), RenameSave(String), Imp(String), FocusSearch }
+pub enum Ctl { None, Pad, Dictate, OpenPalette, Rail(String), PickFiles, ToggleSidebar, ToggleContext, Select(String), Home(String), Fold(String), Send, Skill(String), Page(String), Node(String, String), RenameSave(String), Imp(String), FocusSearch }
 #[derive(Clone, Debug)]
 pub struct CtlEntry { pub id: String, pub label: String, pub ctl: Ctl }
 #[derive(Clone, Debug)]
@@ -390,6 +390,7 @@ impl Backplane {
             Ctl::None => "none".into(),
             Ctl::Pad => "pad (mouse only)".into(),
             Ctl::Rail(kind) => { self.screens.rail_pending = Some(kind.clone()); self.screens.rail_at = Some(Instant::now()); self.screens.plot_click = matches!(kind.as_str(), "board" | "schematic").then(Instant::now); let _ = self.tx.try_send(crate::screens::viewer::view_kind(kind)); self.ui_epoch += 1; "view.action view".into() }
+            Ctl::Dictate => { self.voice_press(cx); "dictate".into() }
             Ctl::PickFiles => { self.pick_files(cx); self.ui_epoch += 1; "attach picker".into() }
             Ctl::ToggleSidebar => { self.sidebar_toggle(cx); "toggle sidebar".into() }
             Ctl::ToggleContext => { self.screens.ctx_open = !self.screens.ctx_open; self.ui_epoch += 1; cx.notify(); "context panel".into() }

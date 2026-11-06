@@ -22,7 +22,7 @@ dictation must read as one calm stream (section 1b). What was built is in
    both phones dictate, with the same dictionary and the same corrections,
    whichever machine runs the hub.
 
-## What Backplane has today
+## What Backplane had before this design (0.13)
 
 - One engine: OpenAI `gpt-live-transcribe` through `backplane-voice` (Bun),
   with an energy VAD; needs an `sk-` key.
@@ -231,7 +231,7 @@ used, then spoken forms. The hub writes the ranked list for each session.
 
 ### 5. The correction pass
 
-Pure, in `src/core/voice`, with laws. Each final segment goes through
+Pure, in `native/host/src/voice/vdict.rs`, with laws (its tests). Each final segment goes through
 it in order, and each change keeps its span and rule so it can be shown and
 undone:
 

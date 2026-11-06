@@ -2,7 +2,7 @@
 //! routines, and remind the person. Only a bot's thread, and a run or back office working for a bot, has them (`Bots.route`, `Run.bot`). Every tool decides under the world
 //! lock, logs through `World::also` (the uberbot's ops go beside its changes) and answers (ok, body) as `Mcp.content` shapes it.
 //! Ported: bot_whoami, bot_list, bot_send, bot_create, room_list, room_create, room_post, room_read, memory_*, space_set/get/page, routine_list/set/delete, project_list,
-//! project_create, notify_person, remind_person, person_timezone; ledger.rs has every thread's told_* and task_board_*. Not yet (PARITY): voice_dictionary_add;
+//! project_create, notify_person, remind_person, person_timezone, voice_dictionary_add; ledger.rs has every thread's told_* and task_board_*;
 //! plane.rs has plane_read's text; task_* are the term lane's; decide, escalate, charter_set and tell_person go with the mailroom's runs (bots/mail).
 use super::clock::{Zones, TzRule};
 use super::post::{Pending, RoomRef};
@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 pub const TOOLS_JSON: &str = include_str!("tools.json");
 pub const NAMES: &[&str] = &["bot_whoami", "bot_list", "bot_send", "room_list", "room_create", "room_post", "room_read", "memory_save", "memory_recall", "memory_forget", "memory_list",
-    "space_set", "space_get", "space_page", "routine_list", "routine_set", "routine_delete", "project_list", "bot_create", "plane_read", "notify_person", "remind_person", "person_timezone", "project_create"];
+    "space_set", "space_get", "space_page", "routine_list", "routine_set", "routine_delete", "project_list", "bot_create", "voice_dictionary_add", "plane_read", "notify_person", "remind_person", "person_timezone", "project_create"];
 const HOP_MAX: u64 = 6;
 const MAX_PAGE: usize = 262_144;
 
@@ -193,6 +193,12 @@ impl Bots {
                 }
             }
             "person_timezone" => self.t_zone(w, now, gs(a, "zone").trim()).await,
+            "voice_dictionary_add" => {
+                let term = trim(gs(a, "term")); let n = term.chars().count();
+                if n == 0 || n > 80 { return fail("a term is 1 to 80 characters") }
+                let (k, v) = crate::voice::dictation::entry_kv(&term);
+                match self.t_commit(w, now, vec![json!({"$":"SettingSet","key":k,"value":v,"at":now})]).await { Ok(()) => said(&format!("added {term} to the voice dictionary")), Err(e) => fail(&e) }
+            }
             _ => fail("unknown tool"),
         }
     }

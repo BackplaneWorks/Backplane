@@ -16,15 +16,15 @@ The design and why: `docs/voice-dictation-design.md`.
 ## The local engine
 
 `backplane-voice live --engine local --local-dir <home>/voice/local`. The
-runtime (sherpa-onnx's Node addon and ONNX Runtime, from npm, sha512
-pinned) and the models (from sherpa-onnx's releases, sha256 pinned) are
-fetched by `local-install` into `<home>/voice/local`, each checked and moved
-into place, then `ready-<model>` is written (what the hub reads). Nothing is
-bundled in the package; nothing loads in the hub. The hub streams the helper's
-progress to the requesting client as `local-progress` voice events, then one
-`local-result` carrying status and any error. Status probes do not clear a
-running download, and a status line after an error does not erase it. Setup
-continues if the person leaves Settings (on the same connection). The helper loads the model
+runtime (sherpa-onnx's C library and ONNX Runtime, from npm, sha512 pinned)
+and the models (from sherpa-onnx's releases, sha256 pinned) are fetched by
+`local-install` into `<home>/voice/local`, each checked and moved into place,
+then `ready-<model>` is written (what the hub reads). Nothing is bundled in
+the package; nothing loads in the hub: the helper is its own process and opens
+the C library at run time, so a crash there ends one session. The hub
+publishes the download as info (`voice.job`, `voice.local`), so Settings
+follows it wherever it is open, and a failure stays on the page until the next
+try. The helper loads the model
 when a session starts (about 0.9 s, off the event loop; audio heard
 meanwhile is kept) and exits with the session. One model does both the live
 words and the final ones: while the VAD has a segment open, its audio so far
@@ -34,16 +34,14 @@ probability (percent); the segment's last decode is its `done`.
 
 ## Live words, calmly
 
-The hub settles each hypothesis with
-core/vdict's `Vs.*`: words two hypotheses in a row agree on, ending
-0.4 s or more before the audio so far, are committed; unsure ones (under
-85 %) at the end wait for the next sure one. Committed words go through the
-correction pass (`Vd.fix`) and out as `{"ev":"words", "first", "commit",
-"tail", "firm", "fixes", "final", "unsure"}`. The client (client's
-`Voice.words`) takes the old tail out of the draft, puts the committed words
-where the committed ones end (`@voice.pos`), and the tail after them
-(`@voice.tl` its length): committed words never move or change; only the
-tail, at the end, is rewritten. The cloud engine's deltas settle the same
+The hub settles each hypothesis with `vdict::Settle`: words two hypotheses in
+a row agree on, ending 0.4 s or more before the audio so far, are committed;
+unsure ones (under 85 %) at the end wait for the next sure one. Committed
+words go through the correction pass (`VDict::fix`). The hub keeps a shadow of
+the draft (`place::Place`) and sends each step as one edit, `{"ev":"edit",
+"del", "ins", "adv", "to"}`, relative to a mark the client keeps: committed
+words never move or change; only the tail, at the end, is rewritten. All the
+rules are the hub's; a client's whole part is `place::apply`. The cloud engine's deltas settle the same
 way (untimed: never the last two words). The strip shows one word for the
 state (Starting, Loading the model, Listening, Writing, Finishing) and the
 level, never the words; after a segment its fixes are chips that undo.
@@ -61,50 +59,42 @@ Settings (all clients see them; they live in the hub's log):
   chip undoes one. It applies by itself once confirmed twice and never
   undone; until then it is offered as a guess.
 
-An empty value removes either. The correction pass (core/vdict's
-`Vd.fix`, laws `vd_*`): drop words, replacements and how terms sound
+An empty value removes either. The correction pass (`VDict::fix`): drop words, replacements and how terms sound
 (exact phrases, longest first), terms written another way (`kicad`,
 `stm 32`), then sound-alikes of terms (a rough sound key and edit
 distance: "Kai CAD", "SBI" for SPI), applied by themselves only where the
 engine was itself unsure (local engine), else offered as the guess. Words
 to ask about: the guesses, words the engine heard at under 50 %, then near
 misses and technical-looking words (`Voice.unsure`), at most five.
-`dictionary.txt` (older hubs, bots' `voice_dictionary_add`) still adds
-terms. Every `bots.voice` request carries the entries and settings; the hub keeps the last as
-`<home>/voice/prefs.json` for a ring's recordings.
+`dictionary.txt` (older hubs) is still read as more terms; a bot's
+`voice_dictionary_add` writes a `voice.e.` entry. The hub reads the settings
+itself, so a ring's recording needs no client.
 
 ## Another machine, a phone
 
 The microphone is the one in front of the person; the engine is the hub's.
-A page whose hub is on its own machine (127.0.0.1) lets the hub record its
-microphone, as before. A page on another machine (the tailnet, a phone's
-browser) records itself (`src/web/voice-mic.js`: getUserMedia, an
-AudioWorklet, 16 kHz s16le) and starts with `src: "client"`; the reply names
-`/voice/in?s=<key>`, where it POSTs ~200 ms pieces in order (`&end=1` last).
-The hub copies each body straight into the helper's stdin (host.js's
-`Sock.feed`, never a list) and the helper converts it to the engine's
-rate. The dictionary and learned fixes are the hub's settings, so every
+A window whose hub is on its own machine (127.0.0.1) lets the hub record its
+microphone. A window on another machine records itself (`backplane-voice
+record`) and a phone natively, 16 kHz s16le, and starts with `src: "client"`;
+the hub names `/voice/in?s=<key>`, where it POSTs ~200 ms pieces in order
+(`&end=1` last). The hub copies each body straight into the helper's stdin
+and the helper converts it to the engine's rate. The dictionary and learned fixes are the hub's settings, so every
 client of that hub shares them.
 
 ## Pieces
 
-- `tools/voice/` builds `backplane-voice` (Bun), the one part that is not
-  : it records the microphone (`pw-record`, `parecord` or `arecord`,
-  24 kHz mono PCM), streams it to `wss://…/v1/realtime?intent=transcription`
-  and prints NDJSON events. It also transcribes a finished recording
-  (`file`: ffmpeg to PCM, then the same socket; `gpt-transcribe` over REST
-  when ffmpeg is missing). Its README has the protocol.
-- `src/server/voice`: the key, the dictionary, live sessions, a ring's
-  recording. `server`'s `VoiceJob` answers `bots.voice` requests
-  (`op`: status, key, unkey, dict, add, start, stop, devices).
-- `src/core/voice` (pure, laws `voice_*`): the dictionary, and which
-  words of a transcript to ask about (`Voice.unsure`): a near miss of a
-  dictionary term (one word, or two heard for one term: "key cad" for
-  KiCad), or a technical-looking word nobody taught it (letters and digits
-  mixed, all caps, inner capitals). At most five.
-- `src/core/client`'s `Voice`: the session as the client shows it,
-  and the clarify actions. The window draws it in `layout` (`Vx.*`,
-  `Set.voice`), the web in `view` (`View.voice`, `View.voice.set`).
+- `native/voice/` builds `backplane-voice` (Rust): it records the microphone
+  (`pw-record`, `parecord` or `arecord`), runs the local engine, streams to
+  `wss://…/v1/realtime?intent=transcription` and prints NDJSON events. It also
+  transcribes a finished recording (`file`). Its README has the protocol.
+- `native/host/src/voice/`: `words` (the plain dictionary, `unsure`, `put`),
+  `vdict` (entries, the correction pass, settle), `place` (the draft's shadow),
+  `dictation` (a thread's state, chips, the helper's lines), `page` (Settings'
+  rows) and `ring`, all pure; `session` is the IO: `bots.voice` (`op`: status,
+  key, unkey, add, start, stop, view, act, page, page-act, install, remove, and
+  the API keys' api-add, api-del) and `/voice/in`.
+- `native/gpui/src/screens/voice.rs`, `voice_mic.rs`: the window. The phones:
+  `docs/PHONE-DATA.md`, "Dictation".
 
 ## Storage
 
@@ -114,39 +104,32 @@ client of that hub shares them.
 - The dictionary: `<home>/voice/dictionary.txt`, a term a line; it is the
   helper's `keywords`.
 - The microphone: the setting `voice.device` ("" for the default source).
-- A live session's pid: `<home>/voice/live.pid`. A stop signals it only
-  while `ps` says it is still `backplane-voice`.
+- A live session is the hub's child: a stop closes its stdin.
 
 ## Dictating
 
-The mic button beside the paperclip asks the hub to record its own
-machine's microphone into the selected thread. The hub sends
-`{"t":"voice","thread","ev",…}` to that client only: `live` (recorder,
-device, label), `part` (words so far), `text` (a finished segment and its
-`unsure` words), `level` (0..100, four times a second), `hint`
-(`no-audio` 3 s without bytes, `silent` 4 s without speech, `ok` once
-speech comes), `stopping`, `error`, and `idle` last. Nothing is sent until
-the person sends it.
+The mic chip beside the paperclip starts a session in the thread on screen. The
+hub sends `{"t":"voice","thread","ev",…}` to that client only: `view` (what to
+draw: the strip's one word, the note, the fixes, the word to clarify), `level`
+(0..100, four times a second), `edit` and `draft`. Nothing is sent to the agent
+until the person sends it. The session ends with its client.
 
-Each segment goes into the thread's draft where the caret is (the end, in
-the web client or for a thread not on screen) and reads on from what is
-there (`Voice.put`): a space before it unless the draft ends in a space, a
-new line or a bracket, one after it when a word follows. Mid-sentence, its
-first word loses the capital the transcriber gives every segment, unless it
-is "I", not a plain word (USB, KiCad), or opens with a dictionary term (the
-hub marks those `firm`); before a lower-case word its closing period goes.
-The caret moves past it, ctrl+z takes it back out, and the window writes
-the draft down as typing does.
+Each segment goes into the draft where the caret was and reads on from what is
+there (`words::put`): a space before it unless the draft ends in a space, a new
+line or a bracket, one after it when a word follows. Mid-sentence, its first
+word loses the capital the transcriber gives every segment, unless it is "I",
+not a plain word (USB, KiCad), or opens with a dictionary term; before a
+lower-case word its closing period goes. The caret moves past it and ctrl+z
+takes it back out.
 
-The helper opens the recorder and the OpenAI session at once: `live` goes
-out as soon as the microphone gives audio (waiting at most 150 ms more for
-its name, and sent again with the name if that comes later), and what is
-heard before the session opens is kept and sent the moment it does.
+The helper opens the recorder and the OpenAI session at once: `ready` goes out
+as soon as the microphone gives audio, and what is heard before the session
+opens is kept and sent the moment it does.
 
 The words to clarify show one at a time above the composer: use the guess,
-Fix… (type the right spelling: it replaces the word and joins the
-dictionary), add the word as heard to the dictionary, or skip it (not asked
-again this session).
+Fix… (type the right spelling: it replaces the word and joins the dictionary),
+add the word as heard to the dictionary, or skip it (not asked again). Sending
+the message clears them.
 
 ## A Pebble ring
 
@@ -161,36 +144,6 @@ person confirms with `voice_dictionary_add`.
 
 ## Platforms
 
-Recording uses PipeWire, PulseAudio or ALSA tools, so dictation works on
-Linux. The ring's recordings work wherever the hub runs.
-
-## Qualification (2026-11-01)
-
-On six synthetic 16 kHz clips on Linux x64, with other builds running:
-model load 1958 ms; first hypothesis median 573 ms (including the cold
-first clip); final after the clip ends median 589 ms, p95 738 ms, including
-VAD silence; word commit lag median 664 ms, p95 1833 ms. This small fixture
-set is a latency sample, not an accuracy benchmark. It does not meet the
-proposal's 250 ms first-word / 600 ms p95 final targets under this load.
-
-Real browser demos using the hub capture path and Chromium's fake
-microphone upload path retained the whole dictated draft through redraws.
-They produced 49 and 37 text changes respectively, with zero replacements
-starting more than three words before the old end. The upload demo used a
-non-loopback hub address on this same machine; it is not physical
-second-device acceptance. `test/tools/voice_browser_e2e.ts` makes this
-fixture reproducible, including an undo/persistence assertion; its added
-assertions still need a run on the final combined build.
-
-Cloud live dictation and the ring webhook pass against a mock API; this
-does not establish current live-service compatibility. iOS and Android
-recorders compiled in their earlier qualification, but physical microphone
-and separate-hub testing remains outstanding. The dictionary is shared by
-clients of the same hub. Cross-hub dictionary replication, project-scoped
-entries, project vocabulary extraction, edit-diff teaching, an optional
-global hotkey and on-device phone inference remain design proposals.
-
-The final full proof pass must be rerun on the combined integration source.
-The controlled-heap attempt completed in 299 seconds with an incomplete
-new `vd_learn_trusted` proof; the corrected five voice laws subsequently
-passed in isolation. No existing law was weakened or removed.
+Recording on a desktop uses PipeWire, PulseAudio or ALSA tools, so it works on
+Linux; the phones record natively. The ring's recordings work wherever the hub
+runs.
