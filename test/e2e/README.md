@@ -18,3 +18,10 @@ mechanics thread by path (`summary.captures`).
 Status: harness written; GPUI runs the journeys its script contract supports (select, popup, type, send, wait) and reports the others
 `blocked: G1-G5`; Android has the adb primitives (dump, tap, gfxinfo, dead-control sweep) but no step driver and no device on Boat; iOS is
 `blocked: ios_driver`.
+
+## Hub-level rows (any platform with bun and a built hub)
+- `settings-walk.mjs HUB OUT [port]` — the Settings walk (S01-S14): every chip and form on every page the hub lists, applied, persisted over a hub restart. Writes `OUT/settings-walk.json`. The macOS and Windows lanes rerun it as is.
+- `f-rows.mjs HUB OUT [port]` — F01-F04 through the data/1 socket.
+- `cad-rows.mjs HUB OUT [port]` — C02: `kicad.path`, the CAD page, ERC/DRC and exports run by the hub (needs KiCad 10; set `KICAD_CLI`).
+- `rig-hub.mjs HUB ROOT PORT` — a seeded fixture hub that stays up. The GPUI client needs a window manager (i3) on a bare Xvfb to present a frame.
+All run with `NO_SCOPE=1 PERF_REPO=<repo root>` and bun.

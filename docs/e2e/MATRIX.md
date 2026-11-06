@@ -102,6 +102,45 @@ Each lane's rows: `| ID | result | commit | rig | evidence |`.
 
 | ID | Result | Commit | Rig | Evidence |
 |---|---|---|---|---|
+| F01 | pass | edc59a6956 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL) | `test/e2e/f-rows.mjs`: temp home, `/hello` 200, data/1 hello frame, BACKPLANE_AGENTS read from `/proc/<pid>/environ` |
+| F02 | pass | edc59a6956 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL) | real client on Xvfb+i3: sidebar, 3 threads, bots, rooms, "Connected" (`rigsh/f02.sh`, shot kept by the lane). Without a window manager the window maps 1400x900 but never presents a frame (no `first_frame`); needs a WM, `XDG_RUNTIME_DIR` is not the cause |
+| F03 | pass | edc59a6956 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL) | hub only, through data/1 (`f-rows.mjs`): rename, pin, settle, archive, unpin, unarchive, delete; state survives a restart. Client UI not driven; order and snooze not run |
+| F04 | pass | edc59a6956 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL) | hub only (`f-rows.mjs`): stand-in turn streams an assistant entry; restart with `restart.continue` on resumes it ("Continuing after the restart"), off ends it (state idle, "Backplane restarted ... during this"). Client journeys `stream`, `reconnect` ran the real client: inputs ok, frame/click budgets fail on llvmpipe, so no client pass |
+| F05 | not run | edc59a6956 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL) | no driver for provider stand-ins other than claude (the stand-ins for the rest exit 1) |
+| F06 | not run | edc59a6956 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL) | no driver |
+| F07 | not run | edc59a6956 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL) | no driver |
+| F08 | not run | edc59a6956 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL) | no driver |
+| F09 | not run | edc59a6956 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL) | no driver |
+| F10 | not run | edc59a6956 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL) | no driver |
+| F11 | not run | edc59a6956 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL) | no driver |
+| F12 | not run | edc59a6956 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL) | no driver |
+| F13 | not run | edc59a6956 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL) | no driver |
+| F14 | not run | edc59a6956 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL) | no driver |
+| F15 | not run | edc59a6956 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL) | journey `send-image` blocked: client script step `paste_image` not implemented (G5) |
+| F16 | not run | edc59a6956 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL) | no driver |
+| F17 | not run | edc59a6956 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL) | journey `viewers` blocked: client script steps `open_viewer`, `pan_zoom` not implemented (G5) |
+| F18 | not run | edc59a6956 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL) | CEF build not made in this rig |
+| F19 | not run | edc59a6956 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL) | journey `bots-rooms` blocked (G5) |
+| F20 | not run | edc59a6956 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL) | journey `downloads` blocked (G5) |
+| F21 | not run | edc59a6956 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL) | journey `reconnect` ran the client (net_sleep step ok) but its budgets fail on llvmpipe; no resume/outbox check |
+| F22 | not run | edc59a6956 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL) | no driver |
+| C01 | not run | edc59a6956 | - | no package or clean-user install made |
+| C02 | pass | edc59a6956 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL), KiCad 10.0.8 from ppa:kicad/kicad-10.0-releases | `test/e2e/cad-rows.mjs`: `kicad.path` set, CAD page reads "version 10.0.8 · /usr/bin/kicad-cli", hub ran ERC+DRC (`review.checks`: ERC 43, DRC 23 warnings) and exports (`review.release`: gerbers, bom, cpl, pdf, step). Needed fix: the page never showed the CLI (7feb3f2b37). KiCad 7 from apt has no `sch erc`/`pcb drc`: checks fail there |
+| C03 | fail | edc59a6956 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL), FreeCAD 1.1.4 AppImage | hub meshes a STEP with FreeCAD only (`BACKPLANE_STEP2GLB=off`, wrapper logged the call; renders written; FreeCAD hidden: "could not mesh"; script run + STEP export via freecadcmd ok, `rigsh/c03.sh`, `c03b.sh`). Fails the row as written: Settings > CAD has no FreeCAD path control, only `BACKPLANE_FREECAD` or PATH |
+| S01 | pass | edc59a6956 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL) | appearance: 2 chips applied + persisted (`test/e2e/settings-walk.mjs`); theme effect in the client not checked |
+| S02 | pass | edc59a6956 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL) | threads: 29 chips and the webhook address applied + persisted; effect proven for `restart.continue` (F04 both ways), not for the others |
+| S03 | pass | edc59a6956 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL) | agents: provider, model, thinking, fallback chips stored and persisted; effect on a turn not proven |
+| S04 | pass | edc59a6956 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL) | writing: text provider and model stored and persisted; effect not proven |
+| S05 | pass | edc59a6956 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL) | cad: `kicad.path` Set stored, persisted, run by the hub (C02); `kicad.ipc` chip stored. The page showed "checking"/"not found" whatever was installed until 7feb3f2b37. No FreeCAD control (see C03) |
+| S06 | pass | edc59a6956 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL) | ordering: `order.enabled`, `order.estimates` applied + persisted (the estimates chips vanish while ordering is off, by design); effect on Buy it not driven |
+| S07 | pass | edc59a6956 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL) | devices: Add a device makes an invitation row; pairing itself is the pairing lane |
+| S08 | pass | edc59a6956 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL) | network: update channel chips stored + persisted; no update run (R lanes) |
+| S09 | fail | edc59a6956 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL) | voice: not in the hub menu (hub lists 12 of the client's 14 pages; `present/settings.rs` PAGES has no voice) |
+| S10 | not run | edc59a6956 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL) | keys: page opens; Save of a key not walked |
+| S11 | pass | edc59a6956 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL) | timezone: Set Europe/Helsinki shown on the page, stored, persisted |
+| S12 | fail | edc59a6956 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL) | usage: not in the hub menu (same as voice) |
+| S13 | pass | edc59a6956 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL) | about: one read-only row with the version; no controls |
+| S14 | pass | edc59a6956 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL) | privacy: Off applied; On did NOT re-enable (the chip sent `setting.set`, which the hub refuses for `telemetry.share=on`; no client sent `telemetry.choice`). Fixed in efa3eb26df and the presenter whitelist; Reset id applied + persisted |
 
 ### macOS
 
