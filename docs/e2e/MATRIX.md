@@ -127,6 +127,19 @@ Windows blockers, from reading the source at `ed50df6d35`, not from compile erro
 | ID | Result | Commit | Rig | Evidence |
 |---|---|---|---|---|
 
+### Wine
+
+Label `wine`. Wine is not Windows; nothing here fills a Windows cell.
+
+Rig: Boat sandbox (4 vCPU, 8 GB, Ubuntu 24.04), source `26ba50a0ba49496a9baf89cba905e359f586ca5d` (origin/main when shipped), `cargo check --target x86_64-pc-windows-gnu`. Installed: the rust-std component for that target only. No Wine, mingw or xwin: `cargo check` needs none, and nothing built far enough to run.
+
+| Check | Result | Evidence |
+|---|---|---|
+| Hub `cargo check`, Windows target | fail, 248 errors | `backplane-hub` bin 229, `bp-plot` 13, `screen-audit` 6. By area (all bins): files 55, settings 50, term 40, agents 36, bin 19, net 14, main.rs 13, bots 6, store.rs 5, commands 4, present 3, data 3. By kind: 98 E0599 no method (the Unix extension traits), 49 E0433 unresolved path, 78 E0425 missing value or function, 12 E0599 no associated item, 3 E0432 unresolved import. Needs the cfg(windows) work in "Windows blockers"; not small shims. |
+| Client `cargo check`, Windows target | fail, 77 errors | `Cargo.toml` declares `gpui` only for Linux and macOS, so on Windows the `actions` macro and gpui types do not exist and every error is a cascade from that. Not a count of Windows porting work. |
+| Hub starts, paths, API under Wine | not run | The hub does not compile. |
+| GUI launches under Wine | not run | The client does not compile. |
+
 ### Pairing and remote operation
 
 | ID | Result | Commit | Rig | Evidence |
