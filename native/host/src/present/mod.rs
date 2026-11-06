@@ -11,6 +11,7 @@ pub mod thread;
 pub mod viewer;
 pub mod settings;
 pub mod botforms;
+pub mod ready;
 mod refusal;
 pub mod tz;
 pub mod window;
