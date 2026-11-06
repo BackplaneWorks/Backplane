@@ -1,4 +1,4 @@
-//! Running the router (hub.bend `Hub.mail.routed`, `Hub.mail.next`, `Hub.run.ready`, `Run.after`, `Run.fallback`, `Run.recover`; server.bend `RunJob`, `Hub.out` RunStart/RunNext): a freshly
+//! Running the router: a freshly
 //! filed header is routed on the world as it is then, the changes are committed together, and the outs are performed. What a step of the log asks of the mailroom (a turn's end,
 //! an ask) is noted as the world folds it and answered by `after_steps`. No message text or address is logged here.
 use super::{file::Router, route::{Ctx, Facts, RouteOut, Step, Th}, store, Body};
@@ -52,7 +52,7 @@ impl Bots {
     pub(crate) async fn decide(self: &Arc<Self>, report: &[String], f: impl FnOnce(&mut Ctx) -> Step) -> Vec<RouteOut> { self.decide_with(report, |c| ((), f(c))).await.1 }
     /// the same, for a decision that also answers its caller (a tool)
     pub(crate) async fn decide_with<T>(self: &Arc<Self>, report: &[String], f: impl FnOnce(&mut Ctx) -> (T, Step)) -> (T, Vec<RouteOut>) { self.decide_acc(report, true, f).await }
-    /// `accounts`: Accounts.created binds what the step creates; a step's own after-work (Run.after) comes past it in Bend, and a back office it makes has only its explicit binding
+    /// `accounts`: Accounts.created binds what the step creates; a step's own after-work (Run.after) comes past it in , and a back office it makes has only its explicit binding
     async fn decide_acc<T>(self: &Arc<Self>, report: &[String], accounts: bool, f: impl FnOnce(&mut Ctx) -> (T, Step)) -> (T, Vec<RouteOut>) {
         let w = self.world().await; let facts = self.facts(&w, report).await;
         let (now, seq) = (now_s(), self.hub.store.len() as u64);

@@ -4,7 +4,7 @@ import UIKit
 
 // Entry identity and its distance from the top are retained together. UIKit
 // performs the correction in layout, including intrinsic-height changes that
-// don't produce a new Bend screen (images, expanded cards and the keyboard).
+// don't produce a new screen (images, expanded cards and the keyboard).
 @MainActor @Observable
 final class TimelinePosition {
     private(set) var following = true

@@ -1,6 +1,6 @@
-//! server/git.bend in Rust: the hub's own git (status, per-thread checkpoints and their diffs, revert, the design-history steps
-//! and refs, `git show` of a version). The shell scripts are the Bend hub's text, extracted from git.bend into scripts/*.sh
-//! (test/gpui/files/extract_scripts.py --check keeps them equal), so the history.git trust registry, the filter blanking
+//! server/git in Rust: the hub's own git (status, per-thread checkpoints and their diffs, revert, the design-history steps
+//! and refs, `git show` of a version). The shell scripts are hub's text, extracted from git into scripts/*.sh
+//! (test/files/extract_scripts.py --check keeps them equal), so the history.git trust registry, the filter blanking
 //! (`bp_safe`) and the capped diff behave exactly as there. Every command runs with Proc.git.env: no fsmonitor, no hooks,
 //! no pager. stdout and stderr come back together, as P.Proc.run gives them. Answers are text: the result, or "error: <git's output>".
 use std::path::Path;
@@ -167,10 +167,10 @@ pub async fn show(gitdir: &str, obj: &str) -> Option<Vec<u8>> {
 // --- stacked actions (Git.act): commit | push | create_pr | commit_push | commit_push_pr | init
 pub fn last_line(s: &str) -> String { s.lines().map(str::trim).filter(|l| !l.is_empty()).last().unwrap_or("").to_string() }
 fn label(name: &str, r: Result<String, String>) -> Result<String, String> { r.map_err(|e| format!("error: {name}: {}", e.strip_prefix("error: ").unwrap_or(&e))) }
-/// Network commands (push, gh) are refused on a hub running on a copied log (core/copy.bend), as P.Proc.run does.
+/// Network commands (push, gh) are refused on a hub running on a copied log, as P.Proc.run does.
 fn copy_refused() -> bool { std::env::var("BACKPLANE_COPY").as_deref() == Ok("1") }
 const QUIET: [(&str, &str); 3] = [("GH_PROMPT_DISABLED", "1"), ("GH_NO_UPDATE_NOTIFIER", "1"), ("GIT_TERMINAL_PROMPT", "0")];
-/// GhRun.plain: the command as it is, without prompts. (The several-accounts choice of core/gh.bend, GhRun.try, is not ported: it
+/// GhRun.plain: the command as it is, without prompts. (The several-accounts choice of core/gh, GhRun.try, is not ported: it
 /// only acts when `gh auth status` lists two or more accounts for the remote's host.)
 pub async fn plain(cwd: &str, cmd: &str, args: &[&str]) -> Ran { if copy_refused() { return Ran { code: 126, out: format!("refused: {cmd} on a copy of a log") } } proc(cmd, args, cwd, &QUIET).await }
 

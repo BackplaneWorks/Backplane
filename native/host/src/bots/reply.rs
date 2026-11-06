@@ -1,4 +1,4 @@
-//! Reply blocks in a person's message (src/core/reply.bend `Rto.*`): `<in_reply_to msg=ID chars=N>\nQUOTE\n</in_reply_to>\n\nBODY`.
+//! Reply blocks in a person's message: `<in_reply_to msg=ID chars=N>\nQUOTE\n</in_reply_to>\n\nBODY`.
 const OPEN: &str = "<in_reply_to msg=";
 const CLOSE: &str = "\n</in_reply_to>";
 /// the most of a message a quote keeps

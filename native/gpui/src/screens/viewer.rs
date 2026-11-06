@@ -87,7 +87,7 @@ fn mech_chrome(cx: &mut Context<Backplane>, light: bool, viewer: &Value, key_emp
     col.child(row).into_any_element()
 }
 
-/// A row's icon by what it opens as (client.bend's `Fm.icon`).
+/// A row's icon by what it opens as.
 pub fn file_icon(kind: &str) -> &'static str {
     match kind { "folder" => "folder", "board" => "circuit-board", "schematic" => "cpu", "3d" => "box", "image" => "image", "pdf" => "file-text", _ => "file" }
 }
@@ -272,7 +272,7 @@ pub fn view(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
         else { div().p_3().text_color(c("dim")).child("Opening…").into_any_element() };
     // a Split holds three pages at once, so it takes the room of a desktop: its pane is at least that wide, whatever this device chose for the others
     let width = if open == "split" { (pane_width() as f32).max(960.) } else { pane_width() as f32 };
-    // The pane gives way to the thread: it shrinks (down to its least) before the composer row is squeezed, so Attach and Send stay reachable (the web's panes: src/core/panes.bend)
+    // The pane gives way to the thread: it shrinks (down to its least) before the composer row is squeezed, so Attach and Send stay reachable
     Some(div().w(px(width)).max_w(relative(0.62)).min_w(px(crate::local::VIEWER_PX.0 as f32)).h_full().flex_shrink().relative().border_l_1().border_color(c("line")).flex().flex_col()
         .child(resize_handle(cx))
         .child(bar).child(if matches!(open, "files" | "image" | "pdf" | "text") && !diff_on { div().id("viewer-body").flex_1().min_h_0().child(body) } else { div().id("viewer-body").flex_1().min_h_0().overflow_y_scroll().child(body) }).into_any_element())

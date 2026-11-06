@@ -1,6 +1,6 @@
 //! The edge of the hub: HTTP, the authenticated WebSocket, and the two streams over it (the view stream a native client
 //! asks for with `?view=1`, the plain log stream otherwise). Lane parity-edge owns this directory; `main.rs` only starts
-//! the listener and calls `serve`. Behaviour that is the Bend hub's at the edge lives here: junk frames get
+//! the listener and calls `serve`. Behaviour that is hub's at the edge lives here: junk frames get
 //! `{id 0, "malformed request"}`, a view method on the plain stream gets STALE_CONNECTION, the changes a request committed go
 //! out before its reply, `/hello`, pairing and header rules.
 use crate::{auth::{Auth, Req}, cbor, hub::{self, Conn, Hub}};
@@ -13,7 +13,7 @@ use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::{handshake::server::ErrorResponse, protocol::WebSocketConfig, Message};
 
 /// `/hello`: the version, the busy count and the commit; `"sideBySide": true` only on a copy that lets the person start a real agent
-/// (`copy::person_turn_allowed()`, docs/gpui/SIDE-BY-SIDE.md), absent otherwise.
+/// (`copy::person_turn_allowed()`, docs/SIDE-BY-SIDE.md), absent otherwise.
 pub fn hello_body(version: &str, commit: &str, side_by_side: bool) -> Value {
     let mut v = json!({"backplane":version,"busy":0,"commit":commit});
     if side_by_side { v["sideBySide"] = json!(true); }
@@ -27,15 +27,15 @@ pub fn shown_with_side_by_side(shown: Value) -> Value { shown_marked(shown, crat
 pub fn shown_marked(mut shown: Value, on: bool) -> Value { if on { if let Some(o) = shown.as_object_mut() { o.insert("sideBySide".into(), json!(true)); } } shown }
 pub fn side_by_side_info(o: &mut serde_json::Map<String, Value>) { side_by_side_info_with(o, crate::copy::person_turn_allowed()) }
 
-/// Bend `Hub.origin`: the decimal `at` of the log's first change ("0" for an empty log or a first line without `at`).
+/// `Hub.origin`: the decimal `at` of the log's first change ("0" for an empty log or a first line without `at`).
 /// A client resumes (`since`) only into the log it came from.
-/// Read from the log at every join (Bend reads the first line per message): a home that starts empty has "0" until its first commit.
+/// Read from the log at every join: a home that starts empty has "0" until its first commit.
 pub fn origin(hub: &Hub) -> String { origin_of(hub.store.get(0).ok().as_deref()) }
 pub fn origin_of(first_line: Option<&str>) -> String {
     first_line.and_then(|l| serde_json::from_str::<Value>(l).ok()).and_then(|v| v.get("at").and_then(Value::as_u64)).unwrap_or(0).to_string()
 }
 
-/// One inbound frame as a request, or the reply the hub gives for it (Bend `Hub.request_text`): text is JSON, binary is CBOR;
+/// One inbound frame as a request, or the reply the hub gives for it: text is JSON, binary is CBOR;
 /// a frame that does not parse is `malformed request` to id 0; a parsed value answers to its `id`, or 0 when it has none or is not an object.
 /// None for frames that are not requests (ping, pong).
 pub fn decode(m: &Message) -> Option<std::result::Result<Value, Value>> {
@@ -66,7 +66,7 @@ pub fn response_for(status: &str, ctype: &str, extra: &str, body: &[u8]) -> Vec<
 }
 
 pub fn response(status: &str, ctype: &str, extra: &str, body: &[u8]) -> Vec<u8> {
-    // core/http.bend Http.response: the same header lines in the same order
+    // core/http Http.response: the same header lines in the same order
     let mut v = format!("HTTP/1.1 {status}\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nCache-Control: no-cache\r\nConnection: close\r\n{extra}\r\n", body.len()).into_bytes();
     v.extend_from_slice(body); v
 }
@@ -87,7 +87,7 @@ pub async fn http(hub: &Hub, mut s: TcpStream, mut req: Req) -> Result<()> {
         s.write_all(&out).await?; s.shutdown().await.ok(); return Ok(());
     }
     if req.method == "POST" && (req.route().starts_with("/auth/") || hub.http_for(req.route()).map_or(false, |h| h.own_auth())) {
-        // no Content-Length and no Transfer-Encoding is an empty body (Bend's Conn.bot.len defaults to 0); chunked is refused
+        // no Content-Length and no Transfer-Encoding is an empty body; chunked is refused
         let len = if req.header("content-length").trim().is_empty() && req.header("transfer-encoding").is_empty() { Some(0) } else { req.header("content-length").trim().parse::<usize>().ok() };
         let status = if !req.header("transfer-encoding").is_empty() || len.is_none() { Some("411 Length Required") } else if len.unwrap() > hub.http_for(req.route()).map_or(crate::auth::BODY_MAX, |h| h.body_max()) { Some("413 Payload Too Large") } else { None };
         if let Some(st) = status { s.write_all(&response(st, "text/plain; charset=utf-8", "", st.as_bytes())).await.ok(); return Ok(()) }
@@ -169,7 +169,7 @@ pub async fn socket_inner(hub: Arc<Hub>, s: TcpStream, cbor_wanted: bool, token:
     }
 }
 
-/// The plain wire stream (what the Bend hub gives a client that did not ask for views): `log` from `since`
+/// The plain wire stream: `log` from `since`
 /// (honoured only for this log's `origin`), `live`, `info`, then every commit as `changes`, streamed text as
 /// `delta`/`delta_end`. One cursor (`sent`) over the log: no commit is skipped or repeated, whatever the timing.
 pub async fn wire(hub: Arc<Hub>, s: TcpStream, since: usize, origin_asked: String, token: String) -> Result<()> {
@@ -204,7 +204,7 @@ pub async fn wire(hub: Arc<Hub>, s: TcpStream, since: usize, origin_asked: Strin
                 let m = m?;
                 if matches!(m, Message::Close(_)) { return Ok(()) }
                 let v = match decode(&m) { None => continue, Some(Err(reply)) => { tx.send(pack(&conn, &reply)).await?; continue } Some(Ok(v)) => v };
-                // a plain stream has no views: the Bend hub answers a view method there STALE_CONNECTION
+                // a plain stream has no views: hub answers a view method there STALE_CONNECTION
                 if v.get("m").and_then(Value::as_str).map_or(false, |m| m.starts_with("view.")) { tx.send(pack(&conn, &hub::error(&v["id"], "STALE_CONNECTION"))).await?; continue }
                 let frames = hub.request(&mut conn, &v).await;
                 // events the request committed (project.add, turn.start...) reach this client before the reply that names them
@@ -259,7 +259,7 @@ pub async fn serve_with(hub: Arc<Hub>, s: TcpStream, trusted: bool) -> Result<()
             let mut sink = vec![0u8; head_len]; s.read_exact(&mut sink).await?;
             s.write_all(&response("401 Unauthorized", "text/plain; charset=utf-8", "", b"this Backplane needs its pairing token")).await?; s.shutdown().await.ok(); return Ok(());
         }
-        if req.param("data") == "1" { return crate::data::socket(hub, s, req.param("enc") == "json", Auth::credential(&req), req.header("host").to_string()).await } // the phone data API (docs/gpui/PHONE-DATA.md)
+        if req.param("data") == "1" { return crate::data::socket(hub, s, req.param("enc") == "json", Auth::credential(&req), req.header("host").to_string()).await } // the phone data API (docs/PHONE-DATA.md)
         let (view, mobile) = (req.param("view") == "1", req.param("mobile") == "1");
         // BACKPLANE_WS_DEBUG=1: what the client offers on the upgrade (does it ask for permessage-deflate?), once per connection, to stderr
         if std::env::var("BACKPLANE_WS_DEBUG").map_or(false, |v| v == "1") { eprintln!("ws upgrade: extensions={:?} user-agent={:?}", req.header("sec-websocket-extensions"), req.header("user-agent")) }

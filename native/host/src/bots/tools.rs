@@ -1,4 +1,4 @@
-//! The bots' own MCP tools (src/core/bothub.bend `Bots.call.k`, `Bots.names`): what a bot's agent calls to talk to other bots, keep memory, set its space and
+//! The bots' own MCP tools: what a bot's agent calls to talk to other bots, keep memory, set its space and
 //! routines, and remind the person. Only a bot's thread, and a run or back office working for a bot, has them (`Bots.route`, `Run.bot`). Every tool decides under the world
 //! lock, logs through `World::also` (the uberbot's ops go beside its changes) and answers (ok, body) as `Mcp.content` shapes it.
 //! Ported: bot_whoami, bot_list, bot_send, bot_create, room_list, room_create, room_post, room_read, memory_*, space_set/get/page, routine_list/set/delete, project_list,
@@ -10,7 +10,7 @@ use super::rpc::{now_s, Bots};
 use super::routines::{plan, Pick};
 use super::sched_text::{person_rule, rel, routine_json, saved, zone_source};
 use super::world::{Bot, Routine, World};
-use crate::state::fam::turnend::{bend_trim as trim, policy_direct};
+use crate::state::fam::turnend::{trim_ws as trim, policy_direct};
 use serde_json::{json, Value};
 use std::sync::Arc;
 

@@ -1,5 +1,5 @@
-//! core/auth.bend's owner-trust and pairing-proof rules, state for state. Each test is named for the rule it
-//! checks; the laws it states are mapped to the test in scripts/gpui/law-map.tsv (`auth_*`, `cache_identity_*`).
+//! core/auth's owner-trust and pairing-proof rules, state for state. Each test is named for the rule it
+//! checks; the laws it states are mapped to the test in scripts/law-map.tsv (`auth_*`, `cache_identity_*`).
 use sha2::{Digest, Sha256};
 
 pub type Headers<'a> = &'a [(String, String)];
@@ -197,7 +197,7 @@ mod tests {
     }
     #[test] fn param_is_the_second_question_mark_segment() {
         assert_eq!(param("/x?a=1&token=T", "token"), "T");
-        assert_eq!(param("/x?a?&token=T", "token"), "", "Bend splits on every ?, so a third segment is not read");
+        assert_eq!(param("/x?a?&token=T", "token"), "", "splits on every ?, so a third segment is not read");
         assert_eq!(param("/x", "token"), "");
     }
     #[test] fn origin_rules() {

@@ -1,11 +1,11 @@
 import PDFKit
 import SwiftUI
 
-// The viewer's Files tab (client.bend's Fm, mobile/view.bend's Files.json):
+// The viewer's Files tab:
 // the project's folders and files; a board, schematic or model opens in the
 // viewer, an image or a PDF here (a PDF in PDFKit's own view).
 
-// a row's icon, by the name core/icons.bend gives it
+// a row's icon, by the name core/icons gives it
 private func fileSymbol(_ name: String) -> String {
     switch name {
     case "folder": return "folder.fill"
@@ -45,7 +45,7 @@ struct ViewerChoices: View {
     }
 }
 
-// A download from the Files tab (mobile/view.bend's Files.json: a row's
+// A download from the Files tab (mobile/view's Files.json: a row's
 // down, the folder's zip): fetched with the hub's token into this app's
 // temporary folder under the name the hub gives it, then handed to the
 // share sheet (Save to Files, AirDrop...). Never opened in a browser: the

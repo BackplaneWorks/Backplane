@@ -1,4 +1,4 @@
-//! Local diagnostics (server/diagnostics.bend, effects/diagnostics.js, docs/diagnostics-backend.md): a bounded recorder of closed, numeric
+//! Local diagnostics: a bounded recorder of closed, numeric
 //! measurements in `<home>/diagnostics/` (a control byte and eight 64 KiB segments, 1 MiB in all, 7 days). No network sender, no identifiers,
 //! no free text. Requests `diagnostics.status` and `diagnostics.control` {action: on|off|clear}; `export()` is the sanitized document.
 //! Not ported: the hub-exit record (#590, needs a process exit hook) and the minute memory samples; `note` is the entry point for the perf

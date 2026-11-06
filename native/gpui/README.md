@@ -3,12 +3,12 @@
 A native GPUI (Zed's Rust GPU UI, `gpui =0.2.2`) client speaking the same bounded view protocol as the phones:
 WebSocket `/ws?view=1&mobile=1`, CBOR frames, `renderer: mobile`. It opts in to the bounded native sidebar
 (`nativeSidebar: 1`, at most 48 rows, Newer/Older pager rows), reassembles `view.control` segmented replies, and
-keeps every queue bounded. Linux (x11) is the target; macOS builds too (`scripts/gpui/mac-build.sh`, Metal via
+keeps every queue bounded. Linux (x11) is the target; macOS builds too (`scripts/mac-build.sh`, Metal via
 `runtime_shaders`) but is not tested.
 
 ## Run on your own screen
 
-    scripts/gpui/run-here.sh            # shared hub over the tailnet, your display and GPU
+    scripts/run-here.sh            # shared hub over the tailnet, your display and GPU
 
 or directly: `build/gpui/linux/backplane-gpui --url http://HOST:PORT --token-file FILE`.
 
@@ -35,9 +35,9 @@ Every line has `event`, `t_ms` (since process start) and `epoch_ms`.
 Script file: a JSON list of steps, run after `usable`, one at a time:
 `{"select":N}` (Nth thread row, sidebar order), `{"popup":"/"}` (type that text and wait for popup rows),
 `{"type":"text"}` (append to the composer), `{"send":true}`, `{"wait":MS}`.
-Example: `test/gpui/shot-popup.json`.
+Example: `test/shot-popup.json`.
 
-## e2e hooks G1-G5 (test/gpui/e2e/CONTRACT.md)
+## e2e hooks G1-G5 (test/e2e/CONTRACT.md)
 
 Script steps (JSON, one per list item): `{"record":"start","name":"scroll"}` / `{"record":"stop"}`, `{"click":"<control id>"}`, `{"scroll":PX}`, `{"scroll_state":"<name>"}` (event `scroll {name, y, max, entries, dups, first, last, top, more}`),
 `{"net_sleep":SECS}`; `{"open_viewer":"files"}`, `{"files":"select:N|open:N|key:down|filter:text|new:name|rename:N:name|delete:N|confirm_delete|menu:N|upload:PATH|download:N|zip|copy:N|up|back|cancel|shot:PATH"}` and `{"files_download":N|"name"}` are implemented (Files tab); `{"paste_image"|"open_settings": ...}` answer `input {ok:false,error:"not_implemented"}` (viewers, settings
@@ -57,8 +57,8 @@ The input metric also carries the latency phases: `hub_rtt_ms, decode_ms, proces
 
 ## Build (never on the desktop)
 
-    scripts/boat-job.sh --size large --artifact build/gpui-artifacts -- sh scripts/gpui/boat-build.sh        # full build + tests
-    scripts/boat-job.sh --size large -- sh scripts/gpui/boat-build.sh check                                   # cargo check only
+    scripts/boat-job.sh --size large --artifact build/gpui-artifacts -- sh scripts/boat-build.sh        # full build + tests
+    scripts/boat-job.sh --size large -- sh scripts/boat-build.sh check                                   # cargo check only
 
 Release profile: `opt-level=s`, fat LTO, `panic=abort`, one codegen unit, stripped. `native/gpui/vendor/xattr` is
 xattr 0.2.3 with `ENOATTR` -> `ENODATA` on Linux (libc 0.2.191 dropped it).
@@ -68,8 +68,8 @@ Needs at run time: libxcb, libxkbcommon, libxkbcommon-x11, libgcc_s, libm, libc;
 
 Xvfb is extracted from the .deb without root (`build/gpui/xvfb`); run it on `:61` with a throwaway i3 (an empty
 config): without a window manager the window stays black. Then
-`scripts/gpui/desktop-shot.sh NAME SCRIPT.json SECONDS [ICD]` runs the app against the seeded stand-in hub on
-127.0.0.1:3821 (`scripts/gpui/desktop-hub.sh`) and saves a PNG under `build/gpui/shots/desktop/`.
+`scripts/desktop-shot.sh NAME SCRIPT.json SECONDS [ICD]` runs the app against the seeded stand-in hub on
+127.0.0.1:3821 (`scripts/desktop-hub.sh`) and saves a PNG under `build/gpui/shots/desktop/`.
 GPU choice by env: `VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/{lvp,radeon,nvidia}_icd.json`
 (llvmpipe, radv on the AMD iGPU, NVIDIA). See `build/gpui/results/desktop-gpu.md`.
 

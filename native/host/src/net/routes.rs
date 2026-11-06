@@ -1,4 +1,4 @@
-//! /auth/enroll, /auth/invitations, /auth/devices, /auth/revoke, /auth/known: server.bend's `Conn.devices.*`
+//! /auth/enroll, /auth/invitations, /auth/devices, /auth/revoke, /auth/known: server's `Conn.devices.*`
 //! over `Registry`. `handle` is pure of the socket: the hub gives it the request and the connection id,
 //! and acts on the `Outcome` (answer, connections to close, a link to remove).
 use super::{owner, pairing::{self, Registry}};

@@ -1,4 +1,4 @@
-//! The Settings dialog's rows (Bend's `Mob.settings.*` in src/mobile/screen.bend, with the desktop menu `Settings.menu.pages` of client.bend) and the actions that drive it
+//! The Settings dialog's rows and the actions that drive it
 //! (`flag settings`, `settings-page`, `setting k=v`, `hook-url`, `hook-secret`). A page is a pure function of the state's settings and the session's drafts, listed in `PAGES`
 //! only once ported: the menu offers exactly those, so no row is a promise the hub cannot keep. Buttons are the same `{label, action, value, on}` the window draws
 //! (screens/settings.rs): a chip is a `setting` action with `key=value`, which sends `setting.set` (settings/set.rs).

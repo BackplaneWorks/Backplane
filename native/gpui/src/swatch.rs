@@ -1,5 +1,5 @@
 //! `--swatches [--theme light|dark]`: every theme token as a flat square, and alpha blends over the page background,
-//! for the colour check (test/gpui/visual/check_colors.py). Each square reports a GPUI_RECT line.
+//! for the colour check (test/visual/check_colors.py). Each square reports a GPUI_RECT line.
 use crate::theme;
 use gpui::{prelude::*, *};
 

@@ -1,5 +1,5 @@
 //! What this hub knows of its linked machines, folded from the log: `PeerSet` events (the peer table,
-//! model.bend/bot.bend `World.peer_set`) and the two setting families the pairing rules read: `sync.<name>`
+//! model/bot `World.peer_set`) and the two setting families the pairing rules read: `sync.<name>`
 //! (`Mate.off`) and `peer.own.<link>` (`Far.own.how`, only the hub writes it). The table is replayed from the
 //! log at start and kept by an observer; it holds peers and a few settings, nothing that grows with the log.
 use crate::{api::Observer, hub::Hub};

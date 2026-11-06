@@ -99,7 +99,7 @@ import kotlin.math.roundToInt
 // (mobile/shell/backplane-app.js, injected into the hub's origin only), the
 // camera and file pickers, downloads, links out, Back, the text size, and
 // the screens around the page (can't reach the hub, the hub list, the
-// app's settings). Notifications stay Core's (its own sockets and Bend).
+// app's settings). Notifications stay Core's.
 // One per activity; the activity keeps it through rotation (configChanges).
 class WebShell(private val activity: ComponentActivity, private val model: AppModel) {
     sealed interface Load {

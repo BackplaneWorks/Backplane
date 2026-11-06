@@ -1,4 +1,4 @@
-//! Accounts (core/accounts.bend, server.bend `AccountsRpc.default.step`): a thread may be bound to a named login ("profile") of a provider
+//! Accounts: a thread may be bound to a named login ("profile") of a provider
 //! (claude, codex); an empty binding is the CLI's own login and keeps every legacy session key and launch behavior. Accounts are settings
 //! (`accounts.inventory`, `account.default.<provider>`, `account.thread.<thread>.<provider>`), not part of the thread's state.
 //!
@@ -61,7 +61,7 @@ pub fn created(change: &Value, get: &dyn Fn(&str) -> String) -> Vec<Value> {
 }
 
 /// `accounts.default`. In the JS hub every `accounts*` request from a client that has not declared the accounts capability is refused with the named-account
-/// message (server.bend `Hub.rpc.account.client`, `Accounts.client.allowed`); only the web renderer's view requests declare it (`accountProfiles`), and phones and
+/// message; only the web renderer's view requests declare it (`accountProfiles`), and phones and
 /// the GPUI client never do. Here a connection is granted when a request in its view session names `accountProfiles: 1` (accounts_hub.rs `note_request`, revoked at detach):
 /// granted, `make_default` answers; any other client gets the refusal below.
 pub struct AccountsDefault;

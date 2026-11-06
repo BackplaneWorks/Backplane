@@ -1,7 +1,7 @@
 import UIKit
 import UserNotifications
 
-// Turn-end alerts. While the app is in front it posts the alerts Bend
+// Turn-end alerts. While the app is in front it posts the alerts
 // raises (and, on the web screen, those the page is sent); while it sleeps
 // the hub's APNs pushes carry them. A remote one arriving in front is
 // dropped, since the local one already showed; on the web screen it shows

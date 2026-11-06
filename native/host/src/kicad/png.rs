@@ -1,4 +1,4 @@
-//! core/png.bend in Rust: a PNG file from 8-bit RGB rows, byte for byte: each row filtered with Sub, deflated in one fixed-Huffman
+//! core/png in Rust: a PNG file from 8-bit RGB rows, byte for byte: each row filtered with Sub, deflated in one fixed-Huffman
 //! block whose only matches are runs of the byte before (distance 1), so equal pixels give equal files.
 
 /// Png.crc: CRC-32 as PNG chunks use it

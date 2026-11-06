@@ -1,4 +1,4 @@
-//! wake_on / wake_list / wake_cancel (src/core/wake.bend, mcp.bend `Mcp.wake.*`, hub.bend `Wake.thread.*`).
+//! wake_on / wake_list / wake_cancel.
 //! A subscription is the log's `WakeSet`/`WakeDropped` (the state stream folds them as `wake.<id>`); what a firing has already
 //! told is `wake.seen.<id>.<event>`. This module keeps its own fold of those three, tails the log, and on a thread's turn end or
 //! opened ask tells the subscriber through `Agents::deliver_as`, like a launcher's report. Kinds served: `thread`. `work`, `pr` and `file`
@@ -23,7 +23,7 @@ pub fn defaults(kind: &str) -> Vec<String> { match kind { "pr" => vec!["merged".
 /// Wake.allowed
 pub fn allowed(kind: &str) -> &'static [&'static str] { match kind { "thread" => &["end", "done", "fail", "ask", "idle"], "work" => &["end"], "pr" => &["merged", "closed", "ci", "ci_fail"], "file" => &["exists", "changed"], _ => &[] } }
 
-/// Wake.error (the generic checks, in Bend's order); "" when the request is fine.
+/// Wake.error; "" when the request is fine.
 pub fn error(by: &str, kind: &str, target: &str, events: &[String]) -> String {
     if !KINDS.contains(&kind) { return "kind must be thread, work, pr or file".into() }
     if target.is_empty() || events.is_empty() || !events.iter().all(|e| allowed(kind).contains(&e.as_str())) { return "target and valid nonempty events are required".into() }
@@ -48,7 +48,7 @@ pub fn note(w: &Wake, text: &str, events: &[String]) -> String {
     raw.chars().map(|c| if matches!(c, '\n' | '\r' | '\t') { ' ' } else { c }).collect()
 }
 
-/// What a turn end or an opened ask means for a subscription: (event, key) pairs, in Bend's order (end, done, fail, ask, idle).
+/// What a turn end or an opened ask means for a subscription: (event, key) pairs, in order (end, done, fail, ask, idle).
 /// `end`: 1 completed, 2 failed, 3 interrupted (0 none). `ask`: the ask's id and time when one opened.
 pub fn signals(end: u8, at: u64, thread: &str, ask: Option<(&str, u64)>, idle: bool) -> Vec<(&'static str, String)> {
     let ek = format!("{thread}:{at}:{end}"); let mut v = vec![];
@@ -207,7 +207,7 @@ impl Wakes {
 mod tests {
     use super::*;
     fn ev(s: &str) -> Vec<String> { s.split(',').map(String::from).collect() }
-    #[test] fn wake_error_follows_bends_order() {
+    #[test] fn wake_error_follows_order() {
         assert_eq!(error("a", "x", "t", &ev("end")), "kind must be thread, work, pr or file");
         assert_eq!(error("a", "thread", "t", &ev("merged")), "target and valid nonempty events are required");
         assert_eq!(error("a", "thread", "l~t", &ev("end")), "wake on a thread elsewhere is not supported yet");

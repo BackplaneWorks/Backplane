@@ -1,4 +1,4 @@
-//! core/bom.bend in Rust: a schematic's placed symbols as parts (one per instance reference), natural order (C2 before C10), BOM lines,
+//! core/bom in Rust: a schematic's placed symbols as parts (one per instance reference), natural order (C2 before C10), BOM lines,
 //! a diff by reference, the rules, CSV and GFM tables. Pure: `Sheet` holds a file's bytes. Laws `bom_*`.
 use super::sexpr::{forms, parse, Sx};
 use std::cmp::Ordering;
@@ -58,7 +58,7 @@ fn first(names: &[&str], fs: &[Fld]) -> String { let mut acc = String::new(); fo
 const MPN: [&str; 5] = ["mpn", "manufacturer_part_number", "manufacturer part number", "mfr pn", "pn"];
 const MFR: [&str; 2] = ["manufacturer", "mfr"];
 fn supplier(k: &str) -> bool { matches!(k.to_ascii_lowercase().as_str(), "lcsc" | "mouser" | "digikey") }
-/// Bom.num: a number written in digits (each character as its code less 48, as Bend reads it), d when blank
+/// Bom.num: a number written in digits, d when blank
 fn num(s: &str, d: u128) -> u128 { if s.is_empty() { d } else { s.chars().fold(0u128, |a, c| a.wrapping_mul(10).wrapping_add((c as u32).wrapping_sub(48) as u128)) } }
 /// Bom.insts: every instance of a symbol; those of `project` when it has any, else all
 fn insts(x: &Sx, project: &str) -> Vec<(String, u128)> {
@@ -268,7 +268,7 @@ mod tests {
     #[test] fn bom_diff_md_none() { assert_eq!(diff_md(&sample(), &sample()), "No changes") }
     #[test] fn bom_md_pipe() { assert_eq!(c("a|b"), "a/b") }
 
-    // the fixtures and the expected text are test/bom_test.bend's
+    // the fixtures and the expected text are test/bom_test's
     fn symu(lib: &str, r: &str, v: &str, fp: &str, extra: &str, flags: &str, inst: &str, unit: &str) -> String {
         format!("(symbol (lib_id \"{lib}\") (at 10 10 0) (unit {unit}) {flags} (uuid \"u-{r}\") (property \"Reference\" \"{r}\" (at 0 0 0) (effects (font (size 1 1)))) (property \"Value\" \"{v}\" (at 0 0 0)) (property \"Footprint\" \"{fp}\" (at 0 0 0) (effects (hide yes))) (property \"Datasheet\" \"~\" (at 0 0 0)) {extra}{inst})\n")
     }

@@ -78,7 +78,7 @@ fn nums_last(v: &[(u32, String)]) -> Option<u32> { v.last().map(|x| x.0) }
 pub const PAGE_CHARS: usize = 400_000;
 
 impl Feed {
-    /// `Fr.allowed` (core/far.bend): whether this hub takes the request `m` with params `p` from one of the owner's machines: only the methods of
+    /// `Fr.allowed`: whether this hub takes the request `m` with params `p` from one of the owner's machines: only the methods of
     /// `Fr.methods`, and only about something this hub shares (a thread of its own, an ask in one, a project of its own, a bot); browsing and adding
     /// folders on this machine claims nothing.
     pub fn allowed(&self, m: &str, p: &Value) -> bool {

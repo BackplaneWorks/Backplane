@@ -4,7 +4,7 @@ use tokio::net::TcpListener;
 use tokio_tungstenite::connect_async;
 
 // ---- pure rules ------------------------------------------------------------------------------------------------
-// law (Bend Hub.origin): the origin is the decimal `at` of the first change
+// law: the origin is the decimal `at` of the first change
 #[test] fn origin_is_the_time_of_the_first_change() {
     assert_eq!(origin_of(Some(r#"{"$":"ProjectCreated","id":"p","at":1700000000}"#)), "1700000000");
     assert_eq!(origin_of(Some(r#"{"$":"SettingSet","key":"k","value":"v"}"#)), "0");
@@ -65,7 +65,7 @@ async fn test_hub(name: &str, log: &str) -> (Arc<Hub>, u16) {
 const FIXTURE: &str = "{\"$\":\"ProjectCreated\",\"id\":\"p1\",\"title\":\"p\",\"root\":\"/x\",\"at\":1700000000}\n";
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn junk_and_unknown_requests_get_the_replies_bend_gives() {
+async fn junk_and_unknown_requests_get_the_replies_gives() {
     let (_hub, port) = test_hub("wire-junk", FIXTURE).await;
     let mut c = join(port, None).await; tokio::time::sleep(Duration::from_millis(300)).await;
     c.send_raw(vec![0xff, 0xfe, 0x00]).await; tokio::time::sleep(Duration::from_millis(150)).await;
@@ -101,7 +101,7 @@ async fn a_requests_changes_come_before_its_reply() {
 }
 
 
-// Bend's origin follows the log (read at each join), and a client holding another origin, "0" included, is sent the whole log.
+// origin follows the log (read at each join), and a client holding another origin, "0" included, is sent the whole log.
 // (Hub::start's bootstrap writes housekeeping events, so a started hub's log is never empty; the origin is still read per join.)
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn origin_is_read_at_each_join_and_a_zero_resumes_from_nothing() {
@@ -122,7 +122,7 @@ async fn origin_is_read_at_each_join_and_a_zero_resumes_from_nothing() {
     a.task.abort(); b.task.abort(); r.task.abort(); ok.task.abort();
 }
 
-// side-by-side (docs/gpui/SIDE-BY-SIDE.md): /hello and the info carry `sideBySide` only on a copy with the flag. The switch is read once per process,
+// side-by-side (docs/SIDE-BY-SIDE.md): /hello and the info carry `sideBySide` only on a copy with the flag. The switch is read once per process,
 // so each case is a child process of this test binary with the environment as given.
 #[test] fn side_by_side_probe_child() {
     let Ok(mode) = std::env::var("BP_SBS_WIRE_PROBE") else { return };

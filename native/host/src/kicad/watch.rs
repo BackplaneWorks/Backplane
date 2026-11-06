@@ -1,7 +1,7 @@
-//! server/plot.bend's actor in Rust: the board, schematic and 3D sources the clients watch (`kicad.watch`), polled every
+//! server/plot's actor in Rust: the board, schematic and 3D sources the clients watch (`kicad.watch`), polled every
 //! 150 ms while any is watched, each changed file read, the plot sent to each client as the delta against what that client
-//! holds (core/plot.bend, kicad/plot.rs). Every source (boards, schematics, sheet trees, info lookups: kicad/plotread.rs; 3D models:
-//! kicad/solidread.rs) is read in this process, the same bytes as the Bend child, on blocking threads, at most `READERS` at once and one
+//! holds. Every source (boards, schematics, sheet trees, info lookups: kicad/plotread.rs; 3D models:
+//! kicad/solidread.rs) is read in this process, the same bytes as child, on blocking threads, at most `READERS` at once and one
 //! 3D model at a time. `BACKPLANE_PLOT_NATIVE=0` sends them all to the child again (`backplane --plot KIND FILE INFOS`, `BACKPLANE_PLOT_BIN`,
 //! default `backplane-serve` beside the hub).
 //! Not ported yet: web stamps. A split view (`kicad.watch` kind "split") watches the schematic, board and 3D model at once (`watch_split`).
@@ -22,7 +22,7 @@ pub fn stamp(path: &str) -> Stamp {
     // FS.revision: "dev:ino:size:mtime s:ns:ctime s:ns" (a same-size save within a second still changes it)
     match std::fs::metadata(path) { Ok(m) => Stamp { rev: format!("{}:{}:{}:{}:{}:{}:{}", m.dev(), m.ino(), m.len(), m.mtime(), m.mtime_nsec(), m.ctime(), m.ctime_nsec()), ok: true }, Err(_) => Stamp::default() }
 }
-/// A saved version or a comparison (core/hist.bend): immutable, read once.
+/// A saved version or a comparison: immutable, read once.
 pub fn is_version(path: &str) -> bool { path.starts_with("git\t") || path.starts_with("diff\n") }
 pub fn solid_kind(k: u32) -> bool { matches!(k, 2..=4) }
 pub fn key(kind: u32, root: &str, path: &str) -> String { format!("{kind}|{root}|{path}") }
@@ -78,7 +78,7 @@ impl Plots {
         for ky in todo { self.fan_one(hub, &ky, Some(client)) }
         if kind == 1 { self.sheets(hub, client, root, path, tree) }
     }
-    /// kicad.watch kind "split" (client.bend's Split): the schematic (`path` is its sheet, "" the root), the board and the board's 3D model at once, each its own
+    /// kicad.watch kind "split": the schematic (`path` is its sheet, "" the root), the board and the board's 3D model at once, each its own
     /// plot (full chunks, no carry: the panes are separate sources) and the 3D model's board plot shared with the board pane.
     pub fn watch_split(self: &Arc<Self>, hub: &Arc<Hub>, client: u64, root: &str, path: &str, tree: &str) {
         let f = project::read(root);
@@ -296,7 +296,7 @@ impl Plots {
         match o { Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim_end().to_string(), _ => String::new() }
     }
 }
-/// Every source is read in this process unless BACKPLANE_PLOT_NATIVE=0 sends it to the Bend child.
+/// Every source is read in this process unless BACKPLANE_PLOT_NATIVE=0 sends it to child.
 pub fn native() -> bool { std::env::var("BACKPLANE_PLOT_NATIVE").map_or(true, |v| v != "0") }
 /// Hist.kind: 0 a live file, 1 a file in a commit, 2 a comparison.
 pub fn hist_kind(p: &str) -> u8 { if p.starts_with("git\t") { 1 } else if p.starts_with("diff\n") { 2 } else { 0 } }
@@ -341,7 +341,7 @@ impl RpcHandler for KicadRpc {
                     else { self.0.watch(hub, who.client, kind_of(&kind), &root, &path, &s("tree")); }
                     vec![json!({"t":"reply","id":id,"ok":true})]
                 }
-                "kicad.warm" => { // the saved versions before and after a step, plotted ahead (hub.bend's Warm.outs)
+                "kicad.warm" => { // the saved versions before and after a step, plotted ahead
                     let (kind, root) = (s("kind"), s("root"));
                     for path in [s("before"), s("after")] {
                         if path.is_empty() || !super::known_root(hub, &root, &path).await { continue }

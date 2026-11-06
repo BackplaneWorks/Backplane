@@ -1,8 +1,8 @@
 //! The Rust read model. Entries stay in events.jsonl; the model holds only indexes of them:
 //! per thread (and per sender thread, for messages that came from another) the (seq, ord) of each
-//! entry. `seq` is the 1-based line of the event, `ord` the entry ordinal (core/thin.bend Index.post
-//! numbers every message, activity and reminder in log order), exactly the store.db the Bend hub
-//! keeps; a page is thinq.bend's Q.sql.page over those indexes (law: same log, same pages).
+//! entry. `seq` is the 1-based line of the event, `ord` the entry ordinal (core/thin Index.post
+//! numbers every message, activity and reminder in log order), exactly the store.db hub
+//! keeps; a page is thinq's Q.sql.page over those indexes (law: same log, same pages).
 use crate::store::Store;
 use anyhow::Result;
 use serde::Deserialize;
@@ -37,7 +37,7 @@ struct Ev<'a> {
     #[serde(borrow)] key: Option<Cow<'a, str>>, #[serde(borrow)] value: Option<Cow<'a, str>>, #[serde(borrow)] role: Option<Cow<'a, str>>,
 }
 
-/// core/model.bend Link.from: "t:<thread>:<rest>" names the thread a message came from.
+/// core/model Link.from: "t:<thread>:<rest>" names the thread a message came from.
 pub fn link_from(id: &str) -> &str {
     match id.strip_prefix("t:") { Some(r) if r.contains(':') => r.split(':').next().unwrap_or(""), _ => "" }
 }
@@ -233,13 +233,13 @@ impl Model {
 mod tests {
     use super::*;
     use std::path::PathBuf;
-    fn fixtures() -> PathBuf { PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../test/gpui/hub/fixtures") }
+    fn fixtures() -> PathBuf { PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../test/hub/fixtures") }
     fn store() -> Store {
         static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let t = std::env::temp_dir().join(format!("bp-model-{}-{}.jsonl", std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
         std::fs::copy(fixtures().join("pages.jsonl"), &t).unwrap(); Store::open(&t).unwrap()
     }
-    #[test] fn link_from_matches_bend() {
+    #[test] fn link_from_matches() {
         assert_eq!(link_from("t:t3:c0"), "t3"); assert_eq!(link_from("t:t3"), ""); assert_eq!(link_from("m1"), ""); assert_eq!(link_from("tu1:2"), ""); assert_eq!(link_from("t:"), "");
     }
     // same log, same entries: every row of the JS hub's store.db (seq, ord, id, thread, src, kind, role, akind, text, at)

@@ -92,7 +92,7 @@ pub struct AuthOutcome { pub reply: HttpReply, pub close: Vec<u64>, pub unpeer: 
 /// /auth route is final, so it must deny by default.
 pub trait AuthRoute: Send + Sync {
     fn handle(&self, req: &Req, client: u64) -> Option<AuthOutcome>;
-    /// A used machine invitation was revoked: remove the link it made (Bend's uninvite). Called by the hub with `AuthOutcome.unpeer`.
+    /// A used machine invitation was revoked: remove the link it made. Called by the hub with `AuthOutcome.unpeer`.
     fn unpeer(&self, _link: &str) {}
 }
 
@@ -104,7 +104,7 @@ impl<'a> Body<'a> {
     /// No byte for this long ends a read with TimedOut (a stalled upload does not hold its connection and half-written file).
     pub const IDLE: std::time::Duration = std::time::Duration::from_secs(60);
     pub fn new(s: &'a mut tokio::net::TcpStream, len: u64, expect: bool) -> Body<'a> { Body { len, io: tokio::io::AsyncReadExt::take(s, len), expect, idle: Box::pin(tokio::time::sleep(Self::IDLE)) } }
-    /// Writes `HTTP/1.1 100 Continue` once, if the client sent `Expect: 100-continue` (the Bend hub does so after checking the size).
+    /// Writes `HTTP/1.1 100 Continue` once, if the client sent `Expect: 100-continue`.
     pub async fn proceed(&mut self) -> std::io::Result<()> {
         if !std::mem::take(&mut self.expect) { return Ok(()) }
         tokio::io::AsyncWriteExt::write_all(&mut **self.io.get_mut(), b"HTTP/1.1 100 Continue\r\n\r\n").await
@@ -135,7 +135,7 @@ pub trait Transform: Send + Sync {
     fn commit_failed(&self, first_seq: u64);
 }
 
-/// Threads mirrored from the owner's other machines: NOT in this hub's log or `Model` (the Bend hub reads and writes the same
+/// Threads mirrored from the owner's other machines: NOT in this hub's log or `Model` (hub reads and writes the same
 /// events.jsonl; a mirror there would fold as local ids). Their events live in the net lane's per-link store and reach the
 /// presenter through `Hub::fold_mirror` (renamed to `<link>~<id>`); pages of a mirrored thread come from here.
 /// Gives the presenter the mirrors again after it lost them (a restart, or `Hub::forget_mirror`): the net lane folds every mirror's

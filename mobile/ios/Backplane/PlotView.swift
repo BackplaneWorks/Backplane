@@ -141,7 +141,7 @@ final class PlotRenderer: NSObject, MTKViewDelegate {
     // the layers the user turned off, a bit each
     var hiddenLayers: UInt32 = 0
     func shown(_ layer: Int) -> Bool { layer < 0 || layer > 31 || (hiddenLayers >> UInt32(layer)) & 1 == 0 }
-    // the layer focus (core/layers.bend): layers drawn at a quarter, a bit
+    // the layer focus: layers drawn at a quarter, a bit
     // each, and the active one, drawn after the rest (255 none)
     var dimLayers: UInt32 = 0
     var liftLayer = 255
@@ -869,7 +869,7 @@ final class PlotCanvas: MTKView {
         tap(at: g.location(in: self))
     }
 
-    // what lies under a point, for Bend to pick from (View.pick)
+    // what lies under a point, for to pick from (View.pick)
     func tap(at p: CGPoint) {
         guard let (q, face) = board(p) else { onPick("[]"); return }
         // a sheet symbol opens that sheet (the smallest when they nest)
@@ -1108,7 +1108,7 @@ struct ViewerControls: View {
                 // Over a board's rows, how the layers other than the active one
                 // show (All, Dim, Only); each row shows or hides its layer, and
                 // its "stand out" button makes it the active layer (again: all
-                // back) (core/layers.bend)
+                // back)
                 Menu {
                     if viewer.layerModes ?? false {
                         Picker(NativeMessages.native_viewer_others(lang), selection: Binding(get: { viewer.layerMode ?? 0 }, set: { model.act("view-layer-mode", String($0)) })) {
@@ -1419,7 +1419,7 @@ struct PlotScreen: View {
     }
 }
 
-// The design history under a board or schematic (src/mobile/view.bend's
+// The design history under a board or schematic (src/mobile/view's
 // Hist.json): the steps and the file now, a scrubber with a tick each,
 // what the agent said before the step shown (a tap goes back to it in the
 // thread), or a comparison of two versions and its legend

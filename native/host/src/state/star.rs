@@ -1,4 +1,4 @@
-//! The optional GitHub star suggestion (src/core/star-nudge.bend): one offer per hub home, after the fifth new human prompt.
+//! The optional GitHub star suggestion: one offer per hub home, after the fifth new human prompt.
 //! The ledger is the setting `star.nudge.v1`: at most five accepted message ids (bounded, however long the log), then `sent`;
 //! a decision (opened/dismissed) is terminal and only the offered token can make it. Pure: each function reads the setting's text
 //! and returns the SettingSet events to commit (empty when nothing may be written).

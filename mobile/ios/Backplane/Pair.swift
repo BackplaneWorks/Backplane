@@ -1,7 +1,7 @@
 import AVFoundation
 import SwiftUI
 
-// A QR code as the hub drew it (core/qr.bend: rows, "1" dark), on white
+// A QR code as the hub drew it, on white
 // with four modules of quiet zone
 struct QRCodeView: View {
     let rows: [String]

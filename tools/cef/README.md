@@ -141,7 +141,7 @@ IME acceptance must be reported separately from the default setting.
 Focused gates: `bun tools/browser/test/default.ts`, `session-cef.ts`,
 `native-routing.ts`, and `native-drag.ts` (the latter three require
 BACKPLANE_CEF and private Xvfb; drag additionally needs system GTK4 Python GI
-and CEF_NATIVE_PARENT pointing to built `test/native/cef_parent.bend`).
+and CEF_NATIVE_PARENT pointing to built `test/native/cef_parent`).
 `CEF_PRIVATE_IME_BUS=1 dbus-run-session -- bun tools/browser/test/native-ime.ts`
 checks installed Mozc on an independent bus/display and saves candidate
 screenshots when CEF_IME_SHOTS names a retained artifact directory.

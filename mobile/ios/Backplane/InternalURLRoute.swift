@@ -1,6 +1,6 @@
 import Foundation
 
-// URL entry and message taps share classification; Ref.parse in Bend owns
+// URL entry and message taps share classification; Ref.parse in owns
 // reference syntax, existence and destinations. A pairing flow is explicit.
 enum InternalURLRoute: Equatable {
     case reference(String, origin: String?)
@@ -29,7 +29,7 @@ enum InternalURLRoute: Equatable {
     }
 
     // Explicit web origin wins over the containing message's hub. An unknown
-    // origin stays explicit and is rejected by Bend, never retried on focus.
+    // origin stays explicit and is rejected by , never retried on focus.
     static func request(_ uri: String, origin: String?, sourceHub: String?) -> String {
         let object = ["uri": uri, "hub": origin ?? sourceHub ?? ""]
         let data = try! JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])

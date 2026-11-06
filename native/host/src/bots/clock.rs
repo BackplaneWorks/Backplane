@@ -1,6 +1,6 @@
-//! Time for routines: src/core/cron.bend (`Cron.*`), tz.bend (`Tz.*`), when.bend (`When.*`) and sched.bend (`Sched.*`, `Zone.*`).
-//! Pure. Every number is a non-negative count of seconds and subtraction stops at 0, as Bend's `Nat.sub` does. The Bend test corpora
-//! (test/tz_test.bend, test/when_test.bend, test/cron_test.bend, test/sched_test.bend) are repeated as the Rust tests below.
+//! Time for routines: src/core/cron (`Cron.*`), tz (`Tz.*`), when (`When.*`) and sched (`Sched.*`, `Zone.*`).
+//! Pure. Every number is a non-negative count of seconds and subtraction stops at 0, as `Nat.sub` does. test corpora
+//! are repeated as the Rust tests below.
 use std::collections::HashMap;
 
 // ---- calendar (Cron.days, Cron.civil) ----
@@ -314,7 +314,7 @@ pub fn when_parse(text: &str, now: u64, rule: &TzRule) -> Option<u64> {
 /// When.independent: a phrase that needs no zone to read
 pub fn when_independent(text: &str) -> bool { let s = take(text, 256).trim().to_lowercase(); let clock = drop(&s, 10); s.starts_with("in ") || clock.ends_with('z') || clock.contains('+') || clock.contains('-') }
 
-// ---- zones and schedules (sched.bend) ----
+// ---- zones and schedules ----
 /// Zone.*: the person's zone and the rules the hub resolved (settings `tz.rule.<name>`)
 pub struct Zones<'a> { pub settings: &'a HashMap<String, String> }
 impl Zones<'_> {
@@ -371,7 +371,7 @@ mod tests {
     fn at(r: &str, y: u64, m: u64, d: u64, h: u64, mi: u64) -> String { TzRule::parse(r).map_or("none".into(), |r| TzRule::utc0().iso(r.at(wall(y, m, d, h, mi)))) }
     fn ok(r: &str) -> &'static str { if TzRule::parse(r).is_some() { "some" } else { "none" } }
     fn off(r: &str, t: u64) -> String { TzRule::parse(r).map_or("none".into(), |r| { let o = r.off(t); format!("{} {}", TzRule::offset_text(&o), if o.dst { "True" } else { "False" }) }) }
-    #[test] fn tz_corpus_test_tz_test_bend() {
+    #[test] fn tz_corpus_test_tz_test() {
         // Europe/Helsinki 1774745999
         assert_eq!(sh("EET-2EEST,M3.5.0/3,M10.5.0/4", 1774745999), "Sun 29 Mar 02:59 EET");
         // Europe/Helsinki 1774746000
@@ -472,7 +472,7 @@ mod tests {
         assert_eq!(TzRule::utc0().show(1791957600), "Wed 14 Oct 06:00 UTC");
         let h = TzRule::parse(HEL).unwrap(); assert_eq!(sh(HEL, h.at(wall(2026, 7, 1, 12, 0))), "Wed 1 Jul 12:00 EEST");
     }
-    #[test] fn when_corpus_test_when_test_bend() {
+    #[test] fn when_corpus_test_when_test() {
         let r = TzRule::parse(HEL).unwrap();
         assert_eq!(when_parse("2026-10-14T12:00:00+03:00", 1791957600, &r), Some(1791968400), "parse 2026-10-14T12:00:00+03:00 @1791957600");
         assert_eq!(when_parse("2026-10-14T09:00Z", 1791957600, &r), Some(1791968400), "parse 2026-10-14T09:00Z @1791957600");
@@ -527,7 +527,7 @@ mod tests {
     fn show_cron(s: &str) -> String { Cron::parse(s).map_or("none".into(), |c| format!("{} | {} | {} | {} | {} | {} {}", show_ns(&c.mins), show_ns(&c.hours), show_ns(&c.doms), show_ns(&c.months), show_ns(&c.dows), if c.dom_any { "True" } else { "False" }, if c.dow_any { "True" } else { "False" })) }
     fn nx(s: &str, after: u64, off: u64, east: bool) -> String { Cron::parse(s).map_or("invalid".into(), |c| c.next(after, off, east).to_string()) }
     fn due_str(s: &str, last: u64, now: u64) -> &'static str { match Cron::parse(s) { None => "invalid", Some(c) => if c.due(last, now, 0, true) { "True" } else { "False" } } }
-    #[test] fn cron_corpus_test_cron_test_bend() {
+    #[test] fn cron_corpus_test_cron_test() {
         assert_eq!(show_cron("* * * * *"), "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59 | 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23 | 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31 | 1,2,3,4,5,6,7,8,9,10,11,12 | 0,1,2,3,4,5,6 | True True", "parse star");
         assert_eq!(show_cron("*/15 9-17/4 1,15 */3 1-5"), "0,15,30,45 | 9,13,17 | 1,15 | 1,4,7,10 | 1,2,3,4,5 | False False", "parse lists ranges steps");
         assert_eq!(show_cron("30,5,5,10-12 0 * * *"), "5,10,11,12,30 | 0 | 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31 | 1,2,3,4,5,6,7,8,9,10,11,12 | 0,1,2,3,4,5,6 | True True", "parse sorted once");
@@ -600,7 +600,7 @@ mod tests {
         assert_eq!(due_str("0 0 31 2 *", 1790244420, 1835395200), "False", "due never when impossible");
     }
 
-    // ---- sched (test/sched_test.bend) ----
+    // ---- sched ----
     use super::super::world::World;
     use serde_json::json;
     fn set(k: &str, v: &str) -> String { json!({"$":"SettingSet","key":k,"value":v,"at":1}).to_string() }

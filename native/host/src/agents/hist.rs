@@ -1,4 +1,4 @@
-//! Design history steps (core/hist.bend's Hist.record, server.bend's StepJob): after a tool call, at a turn's start and at its end the
+//! Design history steps: after a tool call, at a turn's start and at its end the
 //! thread's KiCad files are snapshotted (files::git::step_capture, the files stream's port of Git.step.capture); a change is logged in the
 //! thread as an Act of tone "step" whose summary is the step's record. Turn checkpoints (Git checkpoint0 / checkpoint) go through
 //! files::git too. Everything here runs off the actor, in the background; nothing is waited for.

@@ -1,4 +1,4 @@
-//! The thread's top panels as the native client draws them (client.bend `Todos.*`, subs.bend `Subs.*`; the Bend build's phones take the same rows through `Mob.todos`
+//! The thread's top panels as the native client draws them (client `Todos.*`, subs `Subs.*`; build's phones take the same rows through `Mob.todos`
 //! and `Mob.subs`): the agent's to-do list ("To-do 3/7") and its background work and subagents ("2 at work"). Pure over the model's settings: `todos.<t>` (the list),
 //! `todos.visible.<t>` and `bg.<t>` (rows "id TAB doing TAB call TAB title TAB kind TAB tokens"; `doing` starting with the ended mark is a finished one).
 //! Whether a panel is open is the client's own (kept per thread on the device); the rows are always sent.

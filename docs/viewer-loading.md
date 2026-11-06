@@ -25,7 +25,7 @@ keys and copied on read/write. The renderer qualifies state keys by thread scope
 geometry remains shared by source. `reuse(key)` records warm reuse explicitly.
 This is a page-memory cache, not persistent browser storage.
 
-`src/server/plot.bend` now uses the existing `FS.revision` effect for every live
+`src/server/plot` now uses the existing `FS.revision` effect for every live
 source, including boards, STEP and GLB. This includes device, inode, size, and
 nanosecond mtime/ctime. Disk export filenames include that exact revision and the
 bare/with-parts mode; their revision is no longer reduced to a 32-bit hash.
@@ -42,13 +42,13 @@ event-loop yields, the reviewed board wire fixture, malformed/oversized payloads
 exact revision reuse, delayed stale successes/failures, reset, eviction, pinning,
 retry, and independent cloned camera/selection snapshots.
 
-`test/native/solid_revision_probe.bend` calls the real server source-stamp,
+`test/native/solid_revision_probe` calls the real server source-stamp,
 export-path and staging-promotion functions without a hub or CAD conversion.
 `bun test/tools/solid_revision_test.mjs BUILD/solid_revision_probe` writes only
 temporary files and verifies same-size saves within the same second for
 `.kicad_pcb`, `.step`, and `.glb`, atomic file replacement, stable unchanged cache
 identities, distinct bare/full paths, failed export preservation, and rename
-errors. It passed against the compiled probe on 2026-10-27. Focused Bend checks
+errors. It passed against the compiled probe on 2026-10-27. Focused checks
 reported only the repository's expected foreign-effect proof exclusions.
 
 The generic `scripts/build-js.sh` emitted the tiny probe in 1.856 s with 851 MiB
@@ -74,7 +74,7 @@ established for these fixture measurements. These captures do not prove that
 this cached asset represents the current canonical SMU board.
 The rendering child's test-only `solid_glb_fixture.mjs` adapter takes 105 ms for
 the full board and 5.3 ms for C5. Those times are fixture preparation, not a
-measurement of the hub's Bend GLB parser or CAD export.
+measurement of the hub's GLB parser or CAD export.
 
 | Model/mode | First submitted frame after bytes | First GPU-visible pixels after bytes | Full progressive decode | Warm reopen to next frame |
 |---|---:|---:|---:|---:|

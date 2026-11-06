@@ -1,4 +1,4 @@
-//! The seam to the bots lane's mailroom (hub.bend `Mail.funnel`, `Operational.*`, `Lr.dest`, `Lr.may`, `Run.queue.hold`, `Perm.run`, server.bend's `Hub.mcp.charter`): a message that is
+//! The seam to the bots lane's mailroom: a message that is
 //! not a person's goes through `Agents::inbound`, which may file it for the uberbot instead of delivering it. With no mailroom installed (a test hub) everything is delivered.
 use super::Agents;
 use crate::api::Fut;

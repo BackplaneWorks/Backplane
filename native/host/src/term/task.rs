@@ -1,4 +1,4 @@
-//! Browser task skills, pure (src/core/task.bend, docs/teach.md): a task is steps aimed at elements by meaning (role, name, label...), never by
+//! Browser task skills, pure: a task is steps aimed at elements by meaning (role, name, label...), never by
 //! coordinates. The task and its JSON, the recorder's events as steps, parameters, the selectors to try, risk, the pixel scaling of the person's
 //! clicks, who drives, and the run's state machine (a pause alerts once). A secret's value is never part of a task: the recorder sends only
 //! {secret: true, label}, and `step_of_record` drops any "value" beside it. Laws task_*, run_*, drive_*, teach_scale_* map to the tests below.

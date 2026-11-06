@@ -42,9 +42,6 @@ The previous images are in git history (before this capture).
 
 The terminal calls use today's `POST /mcp/demo-main?k=<thread key>`, a JSON-RPC
 `tools/call`. The key is the token's HMAC-SHA256 of `mcp\ndemo-main` as defined in
-`src/core/auth.bend:Auth.mcp.key`; it is computed in memory and never saved in the
-capture sources. `src/server/server.bend` (`Conn.is_mcp`, `Mcp.gate`,
-`Hub.mcp_url.seg`, `Hub.term_read`), `src/server/term.bend`, and `docs/terminal.md`
 describe the route and terminal actor. Calling these tools does not require an
 agent process. Both seed messages remained unchanged and the persisted log had
 zero agent turn events, as checked in `agent-audit.json`.

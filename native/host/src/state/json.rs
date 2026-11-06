@@ -1,9 +1,9 @@
-//! Bend's JSON, as the fold uses it (src/core/json.bend): lenient readers with defaults, and a compact printer that escapes
+//! JSON, as the fold uses it: lenient readers with defaults, and a compact printer that escapes
 //! exactly what `Json.show` does (`"` `\` and controls below 32: \n \r \t, the rest \u00xx in lower-case hex; everything else raw,
 //! so \b and \f are \u0008 and \u000c, unlike serde_json's own printer). Numbers keep their source text (arbitrary_precision).
 use serde_json::Value;
 
-/// Json.parse: None for text that is not JSON (Bend's callers read that as Null or as "no value")
+/// Json.parse: None for text that is not JSON
 pub fn parse(text: &str) -> Option<Value> { serde_json::from_str(text).ok() }
 pub fn parse_or_null(text: &str) -> Value { parse(text).unwrap_or(Value::Null) }
 
@@ -22,7 +22,7 @@ pub fn gbool(o: &Value, k: &str, d: bool) -> bool { o.get(k).and_then(|v| v.as_b
 pub fn gobj<'a>(o: &'a Value, k: &str) -> &'a Value { static NULL: Value = Value::Null; o.get(k).unwrap_or(&NULL) }
 /// Json.elems: the elements of an array, else none
 pub fn elems(v: &Value) -> &[Value] { match v { Value::Array(a) => a, _ => &[] } }
-/// Ub.nat / Switch.num: decimal digits read one character at a time (a non-digit wraps as `c - 48` in U32, as in Bend)
+/// Ub.nat / Switch.num: decimal digits read one character at a time
 pub fn num(s: &str) -> u64 { s.chars().fold(0u64, |acc, c| acc.wrapping_mul(10).wrapping_add((c as u32).wrapping_sub(48) as u64)) }
 /// Ub.nat: the number at `key` read through its raw text with `num`
 pub fn unat(o: &Value, k: &str) -> u64 { num(&raw(o.get(k)).unwrap_or_default()) }
@@ -53,11 +53,11 @@ pub fn show(v: &Value) -> String { let mut s = String::new(); emit(v, &mut s); s
 mod tests {
     use super::*;
     use serde_json::json;
-    #[test] fn json_show_escapes_what_bend_escapes() {
-        // rust json_show_escapes_what_bend_escapes: \b and \f are \u0008 and \u000c in Bend; non-ASCII stays raw
+    #[test] fn json_show_escapes_what_escapes() {
+        // rust json_show_escapes_what_escapes: \b and \f are \u0008 and \u000c in ; non-ASCII stays raw
         assert_eq!(show(&json!("a\u{8}b\u{c}c\nd\te\u{1}\"\\é")), "\"a\\u0008b\\u000cc\\nd\\te\\u0001\\\"\\\\é\"");
     }
-    #[test] fn readers_default_like_bend() {
+    #[test] fn readers_default_like() {
         let o = parse_or_null(r#"{"s":"x","n":12,"m":"7","f":1.5,"b":true,"a":[1]}"#);
         assert_eq!((gstr(&o, "s", "d"), gstr(&o, "n", "d"), gstr(&o, "zz", "d")), ("x", "d", "d"));
         assert_eq!((gnat(&o, "n", 0), gnat(&o, "m", 0), gnat(&o, "f", 9), gnat(&o, "s", 9), gnat(&o, "zz", 5)), (12, 7, 9, 9, 5));

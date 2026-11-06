@@ -1,6 +1,6 @@
-//! core/plot.bend's hub side in Rust: the child's output parsed (Scan.plot), a phone's delta against what it holds
+//! core/plot's hub side in Rust: the child's output parsed (Scan.plot), a phone's delta against what it holds
 //! (Plot.delta, Plot.quiet) and the frames it receives (Plot.msg.fam, Plot.msg.solid), byte for byte.
-//! Decision (M6): the parser stays the existing Bend child, `backplane --plot KIND FILE`; Rust only reads its lines.
+//! Decision (M6): the parser stays the existing child, `backplane --plot KIND FILE`; Rust only reads its lines.
 //! Laws plot_delta_exact, plot_unchanged_sends_nothing are stated as Rust tests below.
 
 #[derive(Clone, Debug, PartialEq)]
@@ -15,7 +15,7 @@ pub struct Plot { pub cs: Vec<Chunk>, pub b: Rect, pub thick: u32, pub solid: Op
 pub enum Ref { Keep(usize), Fresh(usize) } // Fresh: index into the plot's chunks
 
 /// Scan.plot: the lines `Line.plot` prints. Chars, not bytes: a chunk's bytes are chars 0..255 (UTF-8 on the wire),
-/// counted in chars. A plot with a malformed tail yields what was read, as the Bend scan does.
+/// counted in chars. A plot with a malformed tail yields what was read, as scan does.
 pub fn parse_child(out: &str) -> Plot {
     let cs: Vec<char> = out.chars().collect();
     let (mut p, mut at) = (Plot { cs: vec![], b: Rect::default(), thick: 1600, solid: None, edge: Rect::default() }, 0usize);
@@ -71,7 +71,7 @@ pub fn apply(rs: &[Ref], ns: &[Chunk], held: &[Chunk]) -> Vec<Chunk> {
     rs.iter().map(|r| match r { Ref::Keep(k) => held[*k].clone(), Ref::Fresh(i) => ns[*i].clone() }).collect()
 }
 
-// --- CBOR, in the hub's dialect (core/cbor.bend heads), written straight onto the frame
+// --- CBOR, in the hub's dialect, written straight onto the frame
 fn head(o: &mut Vec<u8>, major: u8, n: u32) {
     let mb = major << 5;
     if n < 24 { o.push(mb | n as u8) } else if n < 256 { o.extend([mb | 24, n as u8]) } else if n < 65536 { o.push(mb | 25); o.extend((n as u16).to_be_bytes()) } else { o.push(mb | 26); o.extend(n.to_be_bytes()) }

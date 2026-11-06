@@ -1,6 +1,6 @@
 # Order server
 
-What Backplane's Buy it talks to (`src/core/order.bend`, `src/server/orderio.bend`).
+What Backplane's Buy it talks to.
 A small Python service behind nginx on a Debian host.
 
 ## What it does
@@ -14,7 +14,7 @@ A small Python service behind nginx on a Debian host.
   - pads from the paste layers, and BOM lines and placements;
   - volume, area and the tightest box from a STEP;
   - a flat pattern from a DXF.
-  
+
   Then it prices what it measured (`pricing.py`). The client never sends a price.
 - `GET /v1/quotes/{id}` with `Authorization: Bearer <token>`: the quote, and the order's progress.
 - `/q/{id}?t=<token>`: the quote's Buy now link from Backplane. It redirects straight to a Stripe

@@ -115,7 +115,7 @@ impl Registry {
         token.to_string()
     }
     /// Whether a credential holds right now: the hub token or a live device's. A device is stamped as
-    /// `resolve` stamps it (Bend resolves per request, so HTTP-only devices do not look stale).
+    /// `resolve` stamps it.
     pub fn holds(&self, token: &str) -> bool { !token.is_empty() && self.resolve(token, 0, "") == token }
 
     /// POST /auth/invitations: a private invitation, recorded before it is handed out, good ten minutes.

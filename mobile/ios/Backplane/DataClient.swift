@@ -3,7 +3,7 @@ import SwiftUI
 import UIKit
 import UserNotifications
 
-// The phone's whole link to a hub, docs/gpui/PHONE-DATA.md (data/1): one WebSocket of plain JSON data, typed values in, typed values out, a disk cache
+// The phone's whole link to a hub, docs/PHONE-DATA.md (data/1): one WebSocket of plain JSON data, typed values in, typed values out, a disk cache
 // that paints at launch, deltas for the lists and the open thread only. No server-drawn views, no bridge, no engine.
 @MainActor
 @Observable

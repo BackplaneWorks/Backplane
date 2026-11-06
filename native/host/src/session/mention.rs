@@ -1,4 +1,4 @@
-//! The composer's reference popup, natively (src/core/refs.bend `Refs.offer`): a word typed with a sigil names something, `@bot` a bot, `>thread` a thread,
+//! The composer's reference popup, natively: a word typed with a sigil names something, `@bot` a bot, `>thread` a thread,
 //! `%project` a project, `#room` a group chat. The rows are computed from the hub's own state (no helper), ranked by how well the query matches, then the
 //! same project, then recent work; at most 6. Choosing a row (action `skill`) replaces the word being typed with the row's word and a space.
 use crate::state::State;

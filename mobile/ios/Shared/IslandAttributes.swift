@@ -2,7 +2,7 @@ import ActivityKit
 import Foundation
 
 // The Dynamic Island's content: exactly the "island" object
-// src/mobile/notify.bend emits, and the content-state the hub pushes.
+// src/mobile/notify emits, and the content-state the hub pushes.
 struct IslandAttributes: ActivityAttributes {
     // the hub this activity belongs to (Pairing.key): each paired hub keeps
     // its own, and only that hub pushes to it. "" on an activity started

@@ -1,5 +1,5 @@
-//! core/review.bend in Rust: comments pinned to a place in a design, as Acts of tone "review": the op's name in the Act's kind, the op as
-//! JSON in its summary. The summary is stored in the log, so its text is Bend's to the byte: keys in that order, F32.show for x and y
+//! core/review in Rust: comments pinned to a place in a design, as Acts of tone "review": the op's name in the Act's kind, the op as
+//! JSON in its summary. The summary is stored in the log, so its text is to the byte: keys in that order, F32.show for x and y
 //! (fl::show), Json.esc for strings. Folding the ops oldest first gives the comments. Pure. Laws `review_*`.
 use super::bj::{self, J};
 use super::fl;
@@ -171,7 +171,7 @@ mod tests {
     #[test] fn review_moved() { assert!(moved(&mk("a", ""), &["i"])) }
     #[test] fn review_not_moved() { assert!(!moved(&mk("a", ""), &["j"])) }
 
-    /// test/review_test.bend's log: replies, an edit, an unknown id, an orphan, a duplicate id, a bad summary, another tone, a drop
+    /// test/review_test's log: replies, an edit, an unknown id, an orphan, a duplicate id, a bad summary, another tone, a drop
     fn log() -> Vec<Op> {
         let pcb = |x, y, l, i| an("hw/main.kicad_pcb", l, x, y, i);
         let sch = Anchor { file: "hw/power.kicad_sch".into(), commit: "abc123".into(), kind: "schematic".into(), layer: String::new(), x: 50.0, y: 25.5, item: String::new() };
@@ -183,7 +183,7 @@ mod tests {
             ("review", "add", op_add("c1", &sch, "duplicate id", "claude", "")), ("review", "add", "{not json".into()), ("tool", "add", op_add("cx", &sch, "wrong tone", "claude", "")), ("review", "drop", op_drop("c3"))];
         acts.iter().enumerate().filter_map(|(i, (t, k, s))| of(t, k, s, i as u64 + 1)).collect()
     }
-    // the expected text is test/review_test.bend's
+    // the expected text is test/review_test's
     #[test] fn comments_fold_as_review_test_says() {
         let cs = fold(&log());
         let show: Vec<String> = cs.iter().map(|c| format!("{}:{}:{}", c.id, c.text, if c.resolved { "r" } else { "o" })).collect();
@@ -191,7 +191,7 @@ mod tests {
         assert_eq!(prompt(&cs), "<review_comments>\nOpen comments on the design (id, file, place, text). Answer or fix them, then reply or resolve with review_comment.\n- c1 hw/main.kicad_pcb (10.5, 20.25 mm, F.Cu): Trace too thin for 2A _(person)_\n    reply: Widened to 0.4 _(claude)_\n</review_comments>");
         assert_eq!(md(&cs), "- **hw/main.kicad_pcb** (10.5, 20.25 mm, F.Cu) — Trace too thin for 2A _(person)_\n  - Widened to 0.4 _(claude)_\n\nResolved\n\n- **hw/power.kicad_sch** (50, 25.5 mm) — Add a pull-up _(claude)_\n");
     }
-    #[test] fn summaries_are_bends_text_to_the_byte() {
+    #[test] fn summaries_are_text_to_the_byte() {
         assert_eq!(op_add("c1", &Anchor { file: "a\"b".into(), commit: "c".into(), kind: "board".into(), layer: "F.Cu".into(), x: 10.5, y: 0.1, item: "é\n".into() }, "t", "person", ""),
             "{\"id\":\"c1\",\"a\":{\"file\":\"a\\\"b\",\"commit\":\"c\",\"kind\":\"board\",\"layer\":\"F.Cu\",\"x\":10.5,\"y\":0.1,\"item\":\"é\\n\"},\"text\":\"t\",\"by\":\"person\",\"parent\":\"\"}");
         assert_eq!(op_resolve("c", "p"), r#"{"id":"c","by":"p"}"#); assert_eq!(op_edit("c", "t"), r#"{"id":"c","text":"t"}"#); assert_eq!(op_drop("c"), r#"{"id":"c"}"#);
@@ -205,7 +205,7 @@ mod tests {
     }
     #[test] fn a_number_that_does_not_read_is_zero_and_nan_stays_text() {
         let p = bj::parse(r#"{"text":"t","x":"abc","y":"nan"}"#).unwrap(); let s = op_summary("add", "i", &p, "b");
-        assert!(s.contains("\"x\":0,\"y\":nan,"), "{s}"); // Bend writes nan bare; reading it back, the word is null and 0
+        assert!(s.contains("\"x\":0,\"y\":nan,"), "{s}"); // writes nan bare; reading it back, the word is null and 0
         match op_of("add", &s, 1).unwrap() { Op::Add(c) => assert_eq!((c.anchor.x, c.anchor.y), (0.0, 0.0)), o => panic!("{o:?}") }
     }
     #[test] fn labels_and_lines_in_the_thread() {

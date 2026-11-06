@@ -1,4 +1,4 @@
-//! Routines and reminders (src/core/bothub.bend `Bots.routine*`, `Bots.fire*`, `Bots.remind`, `Bots.tick*`; sched.bend). A routine is a prompt a bot
+//! Routines and reminders. A routine is a prompt a bot
 //! receives on a schedule or once; a reminder (kind "remind") is delivered to the person with no agent turn. The rules of time are clock.rs.
 use super::clock::{when_independent, when_parse, Cron, Plan, TzRule, Zones, WHEN_TEXT};
 use super::rpc::{now_s, Bots};

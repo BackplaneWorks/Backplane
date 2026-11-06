@@ -1,5 +1,5 @@
-//! Watched work (hub.bend Watch.*, mcp.bend work_*): `work_run` starts a shell command Backplane owns, `work_watch` watches a pid or a file, `work_list`, `work_cancel`, `work_unwatch`.
-//! The rows are the thread's `watch` WorkSet (the same row format as Bend's Watch.line), the end is told to the thread as a system message (Watch.text) and wakes it, a command's output goes to
+//! Watched work: `work_run` starts a shell command Backplane owns, `work_watch` watches a pid or a file, `work_list`, `work_cancel`, `work_unwatch`.
+//! The rows are the thread's `watch` WorkSet, the end is told to the thread as a system message (Watch.text) and wakes it, a command's output goes to
 //! `<home>/work/<id>/out`. Not here yet: the named `lock` of work_run (refused with a message) and wake subscriptions on work (`wake_on` kind work). A command is its own process group and
 //! survives a restart of the hub: its row keeps `pid:starttime` in the ident field, and at start it is watched again (cancel still reaches its group); when it is gone, or the pid is another
 //! process now, it ends with the outcome unknown. On a copy of a log all of this is off: the tools are refused and nothing is re-armed.

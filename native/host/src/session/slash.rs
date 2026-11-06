@@ -1,4 +1,4 @@
-//! Slash commands in the composer (src/core/slash.bend, pure; laws `slash_*`): a draft that is one word starting with `/` is a command being typed;
+//! Slash commands in the composer: a draft that is one word starting with `/` is a command being typed;
 //! the composer offers the commands whose name starts with it. Backplane's own come first (any provider), then Claude's (only in a Claude thread).
 
 /// `(name, about)`: the commands every thread has.
@@ -29,7 +29,7 @@ pub fn names(cs: &[(&str, &str)]) -> Vec<String> { cs.iter().map(|(n, _)| n.to_s
 #[cfg(test)]
 mod tests {
     use super::*;
-    // laws slash_* (LAWS.bend): the same statements
+    // laws slash_*: the same statements
     #[test] fn slash_typing_word() { assert!(typing("/gi")) }
     #[test] fn slash_typing_alone() { assert!(typing("/")) }
     #[test] fn slash_not_after_space() { assert!(!typing("/give >a")) }

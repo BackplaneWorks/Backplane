@@ -68,13 +68,13 @@ in them.
 
 The `ui.raster` / `ui.present` split rests on the pure tiles being
 evaluated before the `lap` that follows them, as `test/native/type_bench`
-assumes. If Bend defers any of it into `W.Win.present`, that time shows as
+assumes. If defers any of it into `W.Win.present`, that time shows as
 `ui.present`. `ui.frame` is right either way.
 
 ## Measuring something new
 
 ```python
-import ../server/perf.bend as PS
+import ../server/perf as PS
 
 do IO<X>:
   t0 : U32 <- PS.Perf.us()
@@ -103,9 +103,9 @@ and `PF.Hud.lines` format them.
 - `src/server/effects/perf.c` (+ `perf.js`): the table (1024 names, a
   33-bucket log2 histogram each), marks, the trace writer and the log
   ring. Effects run on the event loop only, so it needs no lock.
-- `src/server/perf.bend`: the effects, `Perf.lap`, `Log.*`.
-- `src/core/perf.bend`: pure. Parsing, windows, percentiles, the report,
+- `src/server/perf`: the effects, `Perf.lap`, `Log.*`.
+- `src/core/perf`: pure. Parsing, windows, percentiles, the report,
   the overlay text, log levels and lines. Laws `perf_*`.
-- `src/app/nui.bend` `Hud.*`: the overlay's two readings, kept in the Ui
-  scratch. `src/app/layout.bend` `Lay.perf.*`: drawing it.
-- `test/perf_test.bend`, `test/native/hud_bench.bend`.
+- `src/app/nui` `Hud.*`: the overlay's two readings, kept in the Ui
+  scratch. `src/app/layout` `Lay.perf.*`: drawing it.
+- `test/perf_test`, `test/native/hud_bench`.

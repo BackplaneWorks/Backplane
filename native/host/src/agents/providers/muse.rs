@@ -1,5 +1,5 @@
 //! Muse Code (`muse serve`, MSP: msp.rs). One process per turn, resumed by session id, reported in Codex shapes.
-//! Ported from server.bend's Muse.* (command line, modes, model/list) and Hub.run.k (laws muse_run_turn, interrupt_muse_stops).
+//! Ported from server's Muse.* (command line, modes, model/list) and Hub.run.k (laws muse_run_turn, interrupt_muse_stops).
 //! Approvals: `approval/request` is received at once (a receipt) and goes to the person as a `{"type":"bp.ask","request":<raw line>}` shape;
 //! the answer is `msp::decide(request, answer)`, written back to Muse by whoever holds the ask (the agents lane's permit path).
 use super::{msp, AskInfo, Driver, Made, Reaction, TurnIn};
@@ -127,7 +127,7 @@ mod tests {
 }
 
 /// Test harness shared with agy.rs: run a driver against a stand-in process (never a real CLI), turn its shapes into log events through `Cx::codex_line`
-/// as the actor does, answer asks, and project the events the driver decides (what test/gpui/agents/prov/js-*.jsonl records from the JS hub).
+/// as the actor does, answer asks, and project the events the driver decides (what test/agents/prov/js-*.jsonl records from the JS hub).
 #[cfg(test)] pub(crate) mod e2e {
     use super::super::{Driver, TurnIn};
     use crate::agents::{lines::Cx, proc};
@@ -152,8 +152,8 @@ mod tests {
         Some(m.to_string())
     }
     pub fn js(name: &str) -> Vec<String> {
-        let raw = match name { "muse-turn" => include_str!("../../../../../test/gpui/agents/prov/js-muse-turn.jsonl"), "muse-perm" => include_str!("../../../../../test/gpui/agents/prov/js-muse-perm.jsonl"),
-            "agy-turn" => include_str!("../../../../../test/gpui/agents/prov/js-agy-turn.jsonl"), _ => include_str!("../../../../../test/gpui/agents/prov/js-agy-perm.jsonl") };
+        let raw = match name { "muse-turn" => include_str!("../../../../../test/agents/prov/js-muse-turn.jsonl"), "muse-perm" => include_str!("../../../../../test/agents/prov/js-muse-perm.jsonl"),
+            "agy-turn" => include_str!("../../../../../test/agents/prov/js-agy-turn.jsonl"), _ => include_str!("../../../../../test/agents/prov/js-agy-perm.jsonl") };
         raw.lines().filter_map(|l| project(&serde_json::from_str(l).unwrap())).collect()
     }
     /// One turn, as the actor runs it. Returns the projected events and every line written to the process.
@@ -208,9 +208,9 @@ mod standin_tests {
             prompt: "RULES lls>".into(), mcp_url: "http://127.0.0.1:1/mcp/x".into(), gen: nonce.into(), ..Default::default() }
     }
     fn tail(v: Vec<String>) -> Vec<String> { v }
-    // Stand-in Muse (test/gpui/agents/prov/standin-muse.py) through the driver: the events equal what the JS hub logged for the same exchange.
+    // Stand-in Muse (test/agents/prov/standin-muse.py) through the driver: the events equal what the JS hub logged for the same exchange.
     #[tokio::test] async fn muse_turn_matches_the_js_hub() {
-        let d = dir("muse-turn"); script(&d.join("muse"), include_str!("../../../../../test/gpui/agents/prov/standin-muse.py"));
+        let d = dir("muse-turn"); script(&d.join("muse"), include_str!("../../../../../test/agents/prov/standin-muse.py"));
         let mut dr = MuseDriver::new(); let a = ti(&d, "full-access", "zq hello", "", "1793864133-24");
         let (got, wrote) = run(&d.join("muse"), &mut dr, &a, "muse", "accept", &[("MUSE_LOG".into(), d.join("log").to_string_lossy().into())]).await;
         assert_eq!(tail(got), js("muse-turn"));
@@ -218,7 +218,7 @@ mod standin_tests {
         assert!(std::fs::read_to_string(d.join("log")).unwrap().starts_with("ARGV serve --trust-workspace --disable-sandbox"));
     }
     #[tokio::test] async fn muse_approval_matches_the_js_hub_and_is_decided() {
-        let d = dir("muse-perm"); script(&d.join("muse"), include_str!("../../../../../test/gpui/agents/prov/standin-muse.py"));
+        let d = dir("muse-perm"); script(&d.join("muse"), include_str!("../../../../../test/agents/prov/standin-muse.py"));
         let mut dr = MuseDriver::new(); let a = ti(&d, "approval-required", "zq perm please", "", "1793864143-25");
         let (got, wrote) = run(&d.join("muse"), &mut dr, &a, "muse", "accept", &[("MUSE_LOG".into(), d.join("log").to_string_lossy().into())]).await;
         assert_eq!(got, js("muse-perm"));
@@ -227,7 +227,7 @@ mod standin_tests {
         assert!(wrote.iter().any(|w| w.contains("\"approvalMode\":\"promptUnmatched\"")));
     }
     #[tokio::test] async fn a_resumed_muse_session_sets_its_mode_first_and_repeats_no_command_id() {
-        let d = dir("muse-resume"); script(&d.join("muse"), include_str!("../../../../../test/gpui/agents/prov/standin-muse.py"));
+        let d = dir("muse-resume"); script(&d.join("muse"), include_str!("../../../../../test/agents/prov/standin-muse.py"));
         let mut dr = MuseDriver::new(); let a = ti(&d, "auto", "zq hi", "OLDSESSION", "1793864150-26");
         let (got, wrote) = run(&d.join("muse"), &mut dr, &a, "muse", "accept", &[]).await;
         assert_eq!(got.last().unwrap(), r#"["TurnChanged","completed"]"#); assert!(got.contains(&r#"["SessionSet","OLDSESSION"]"#.to_string()));
@@ -236,7 +236,7 @@ mod standin_tests {
     }
 }
 
-/// The laws of src/core (LAWS.bend), one test each, named as the law: scripts/gpui/law-map.tsv maps them.
+/// The laws of src/core, one test each, named as the law: scripts/law-map.tsv maps them.
 #[cfg(test)]
 mod laws {
     use super::*;

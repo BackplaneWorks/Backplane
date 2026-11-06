@@ -1,5 +1,5 @@
-//! A thread page's `window` object, in Rust (src/server/thin-window.bend `Render.window.context`, src/core/fold.bend `Fold.roles.all`,
-//! src/core/message-context.bend, src/core/lazy-tools.bend), from the rows `Model::page` reads out of the index: no helper, no fold of the log.
+//! A thread page's `window` object, in Rust (src/server/thin-window `Render.window.context`, src/core/fold `Fold.roles.all`,
+//! src/core/message-context, src/core/lazy-tools), from the rows `Model::page` reads out of the index: no helper, no fold of the log.
 //! Pure: the page (32 ids + 17 lookahead rows + the counts below/above), the newest entries for an older page, the request. The answer is the
 //! object the helper's V returns as `window`. `None`: not ported (body pages, `bodyPages` = 1).
 use crate::model::{Page, Row};
@@ -25,7 +25,7 @@ fn entry(r: &Row) -> E {
     E { id: r.id.clone(), msg, role: r.role.clone(), kind: r.akind.clone(), text: if msg { r.text.clone() } else { blocks(&r.text).0 } }
 }
 
-// ---- fold.bend ----
+// ---- fold ----
 fn white(s: &str) -> bool { s.chars().all(|c| matches!(c, ' ' | '\n' | '\r' | '\t')) }
 const NOTES: [&str; 4] = ["The quote is posted in this thread. ", "The quote could not be worked out: ", "The files were not taken: ", "The person chose not to send the files (Not now)."];
 fn note(x: &str) -> bool { NOTES.iter().any(|h| x.starts_with(&format!("[Backplane] {h}"))) }
@@ -117,7 +117,7 @@ fn cursor(epoch: &str, target: &Value, query: &str, before: u64) -> String {
     format!("{{\"version\":1,\"epoch\":{},\"target\":{},\"query\":{},\"before\":\"{}\"}}", json!(epoch), target, json!(query), before)
 }
 
-/// The `fold:<id>` choices of the request (lazy-tools.bend `Tools.info`): the session's info, then a `fold` action's own
+/// The `fold:<id>` choices of the request: the session's info, then a `fold` action's own
 pub(super) fn fold_choice(p: &Value, id: &str) -> bool {
     let key = format!("fold:{id}");
     if p["action"] == "fold" { let v = p["value"].as_str().unwrap_or(""); if v.len() > 1 && v[1..] == *id { return &v[..1] == "1" } }
@@ -161,7 +161,7 @@ pub fn window(page: &Page, ctx: &[Row], epoch: &str, before: u64, p: &Value) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn fx(f: &str) -> Value { serde_json::from_str(&std::fs::read_to_string(format!("{}/../../test/gpui/hub/fixtures/{f}", env!("CARGO_MANIFEST_DIR"))).unwrap()).unwrap() }
+    fn fx(f: &str) -> Value { serde_json::from_str(&std::fs::read_to_string(format!("{}/../../test/hub/fixtures/{f}", env!("CARGO_MANIFEST_DIR"))).unwrap()).unwrap() }
     fn row(c: &Value) -> Row {
         let s = |i: usize| c[i].as_str().unwrap_or("").to_string();
         Row { seq: c[0].as_u64().unwrap(), ord: c[1].as_u64().unwrap(), id: s(2), thread: s(3), src: s(4), kind: if c[5] == "msg" { "msg" } else { "act" }, role: s(6), akind: s(7), text: s(8), at: c[9].as_u64().unwrap() }
@@ -171,7 +171,7 @@ mod tests {
         let s = "x".repeat(600); let (f, n) = blocks(&s); assert_eq!((f.len(), n), (512, 2));
         let u = "é".repeat(300); let (f, n) = blocks(&u); assert_eq!((f.len(), n), (512, 2));
     }
-    /// the six reference threads of the JS hub (test/gpui/hub/fixtures/windows.json) from the newest page of their entries
+    /// the six reference threads of the JS hub (test/hub/fixtures/windows.json) from the newest page of their entries
     #[test] fn the_window_of_the_newest_page_is_the_js_hubs() {
         let wins = fx("windows.json"); let pages = fx("pages.json");
         let mut seen = 0;

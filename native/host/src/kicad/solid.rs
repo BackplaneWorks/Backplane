@@ -1,9 +1,9 @@
-//! core/plot.bend's solids in Rust: a 3D model's triangles for the phones' 3D view, in board axes (x, y as on the board, z up) and 10
+//! core/plot's solids in Rust: a 3D model's triangles for the phones' 3D view, in board axes (x, y as on the board, z up) and 10
 //! micrometre units: each triangle is the XOR of its colour with the one before, then its 9 coordinates as zigzag deltas, varints.
 //! Grid.thin is the vertex clustering the phones and the web get a model through. The same bytes as `Line.solid`'s `m` line.
 use super::{fl, glb::Tri3, plot::{Plot, Rect, Solid}, plotgen::um};
 
-/// Solid.most: the biggest GLB the hub reads into a solid. Bend's reader took about 300 bytes of memory per byte; this reader does
+/// Solid.most: the biggest GLB the hub reads into a solid. reader took about 300 bytes of memory per byte; this reader does
 /// not, but the limit is the product's rule and its words, so the same models show.
 pub const MOST: u64 = 12582912;
 pub fn fits(size: u64) -> bool { size <= MOST }

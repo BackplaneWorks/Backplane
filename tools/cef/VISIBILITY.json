@@ -1,5 +1,5 @@
 {
-  "scope": "five owner pages, helper+owned browser tree; no Bend window, private Xvfb/software GPU",
+  "scope": "five owner pages, helper+owned browser tree; private Xvfb/software GPU",
   "cpuUnit": "100% is one logical CPU; means of three alternating rounds, 8 seconds each after 2.5 seconds settling",
   "versions": {
     "cef": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
@@ -233,7 +233,7 @@
     "externalX11Process": true
   },
   "limitations": [
-    "private Xvfb/software GPU; no Bend window or Xvfb CPU in process-tree readings",
+    "private Xvfb/software GPU; no window or Xvfb CPU in process-tree readings",
     "CEF154 vs installed Chrome155; versions unchanged across baseline/fix, not version-matched engines",
     "real desktop IME/GPU/drag-and-drop unverified; Chrome remains default"
   ]

@@ -1,4 +1,4 @@
-//! server/botnet.bend's peer side: names and ids, secrets kept as files under <home>/secrets/peers, signed
+//! server/botnet's peer side: names and ids, secrets kept as files under <home>/secrets/peers, signed
 //! requests out (curl with the signed headers on stdin and the body from a 0600 file, so a secret never reaches
 //! argv or a log), and verifying signed requests in. Nothing here talks to the hub.
 use super::sign;

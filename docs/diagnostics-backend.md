@@ -1,7 +1,7 @@
 # Local diagnostics backend
 
-`src/server/diagnostics.bend` is the hub's bounded local recorder. The effects
-in `effects/diagnostics.js` run synchronously on Bend's existing IO loop.
+`src/server/diagnostics` is the hub's bounded local recorder. The effects
+in `effects/diagnostics.js` run synchronously on existing IO loop.
 `effects/perf.js` feeds measured numeric values directly; log text, Chrome
 traces and legacy log files are never inputs. There is no network sender,
 installation identifier, project/thread/connection identifier, IP, source
@@ -9,10 +9,10 @@ path, prompt, message, exception text or environment dump in its schema.
 
 ## Integrated server API
 
-The parent integrated the backend in `server.bend` under the `DIAG` alias:
+The parent integrated the backend in `server` under the `DIAG` alias:
 
 ```python
-import ./diagnostics.bend as DIAG
+import ./diagnostics as DIAG
 ```
 
 `Main.boot` starts it immediately after the existing home lock and environment
@@ -184,7 +184,6 @@ owner's privileges.
 ```sh
 node --test test/tools/diagnostics_backend_test.cjs
 bun test ./test/tools/diagnostics_backend_test.cjs
-bend test/diagnostics_backend_test.bend
 ```
 
 Both use disposable homes. The JS suite runs the production effects and
@@ -192,7 +191,7 @@ real perf functions with a deterministic clock, real rotation/restart files,
 fault-injected IO and Linux `/dev/full` for actual kernel ENOSPC. It covers
 total measured storage, block accounting, retention, torn tails, publication
 sanitization, controls, full-disk failure/backoff, absence of measurement-path
-IO and symlink/legacy-file exclusion. The Bend program checks the actual
+IO and symlink/legacy-file exclusion. program checks the actual
 effect registration/marshalling, severity-only logging and clear/off behavior.
 
 ## Local hub exit record (#590)

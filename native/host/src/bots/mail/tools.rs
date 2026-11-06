@@ -1,4 +1,4 @@
-//! The mailroom's MCP tools (mcp.bend `Mcp.mail.*`, `Mcp.run.*`, `Mcp.dispose*`, `Mcp.tell_person`, `Mcp.charter.*`, `Mcp.tools.*`; server/mailcontext.bend): what a mail run, a coordinator's
+//! The mailroom's MCP tools: what a mail run, a coordinator's
 //! back office and (with the mailroom on) any thread may call. What a thread lists follows what it is (`lists`); every call checks again on the state it runs on. Bodies stay in the journal.
 //! Not served: `mail` to a room (it is `Bots.mail.room`: the net lane's rooms are not all here), `Bots.call.private`'s relay of notify_person is `notify_relay` below.
 use super::{escalate::{disposition_key, disposition_pending}, requests, route::{Ctx, RouteOut, Step}, Origin};
@@ -15,7 +15,7 @@ const OWN: [&str; 13] = ["mail", "mail_list", "mail_read", "mail_search", "mail_
 
 fn def(name: &str, about: &str, props: Value, req: &[&str]) -> Value { json!({"name":name,"description":about,"inputSchema":{"type":"object","properties":props,"required":req}}) }
 fn p(ty: &str, about: &str) -> Value { json!({"type":ty,"description":about}) }
-/// Tool.def of a mailroom tool, in Bend's words
+/// Tool.def of a mailroom tool, in words
 pub fn tool(name: &str) -> Value {
     match name {
         "mail" => def(name, "Send mail to an address, delivered at once and filed in its conversation.", json!({"to":p("string","thread:<id>, bot:<id> or room:<id>."),"text":p("string","The message."),"conv":p("string","Continue this conversation."),"subject":p("string","Subject for a new conversation."),"want":p("string","fyi or act.")}), &["text"]),

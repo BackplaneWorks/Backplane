@@ -1,4 +1,4 @@
-//! The browser helper driver (src/server/browser.bend; tools/browser stays a helper): one `backplane-browser` process, started on the first
+//! The browser helper driver: one `backplane-browser` process, started on the first
 //! request, spoken to in JSON lines, one persistent Chrome profile at <home>/browser-profile and every page's JPEG frames in <home>/shots.
 //! Pages are keyed by an owner (the thread's id here; a bot's id once the bots lane has bots), so each thread's preview_* tools drive a page of their
 //! own. The `preview_*` MCP tools (op = the name after `preview_`), `browser.close` (thread.delete closes the thread's page), the helper's frame
@@ -165,7 +165,7 @@ pub fn content(line: &str) -> (bool, Vec<Value>) {
 pub async fn preview(hub: &Arc<Hub>, thread: &str, name: &str, args: &Value) -> (bool, Value) {
     let blocks = |ok: bool, b: Vec<Value>| (ok, json!({ "$content": b }));
     let Some(b) = get(hub) else { return blocks(false, vec![json!({"type":"text","text":"no browser in this Backplane"})]) };
-    // preview_open / preview_navigate bring the Browser tab forward in the thread's viewer, as the call starts (Hub.auto.k + Preview.view; Bend sends it for every thread that is not a bot's)
+    // preview_open / preview_navigate bring the Browser tab forward in the thread's viewer, as the call starts
     if matches!(name, "preview_open" | "preview_navigate") { hub.push_all(&json!({"t":"view","thread":thread,"kind":"browser","path":""})); }
     let line = b.ask_as(thread, &name[8..], args, true).await;
     let (ok, bl) = content(&line); blocks(ok, bl)

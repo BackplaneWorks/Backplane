@@ -1,6 +1,6 @@
-//! The fallback chain (core/fallback.bend): one ordered, opt-in list of `provider/model` per hub. Never wraps: an exhausted suffix blocks until a
+//! The fallback chain: one ordered, opt-in list of `provider/model` per hub. Never wraps: an exhausted suffix blocks until a
 //! person intervenes. Ported here: parsing, validity against the installed models, editing and picking; the outage classifier (`classify`: only a provider's own
-//! error envelope, never arbitrary text); holds on a provider or model; and the planner over named accounts (core/account-fallback.bend: which account is
+//! error envelope, never arbitrary text); holds on a provider or model; and the planner over named accounts (core/account-fallback: which account is
 //! eligible, the one with the most allowance left, when a hold ends, the thread's preference). What is NOT here is the driver: reading a failed turn,
 //! writing the hold, switching the thread to the next account or provider and starting it again belongs to the agents' turn handling, which calls these.
 use serde_json::Value;
@@ -34,7 +34,7 @@ pub fn up(xs: &[Target], key: &str) -> Vec<Target> { let mut v = xs.to_vec(); if
 pub fn suffix(xs: &[Target], key: &str) -> Vec<Target> { match xs.iter().position(|t| t.key() == key) { Some(i) => xs[i + 1..].to_vec(), None => xs.to_vec() } }
 
 
-// ---- outages: what counts as a quota signal, and a held scope (core/fallback.bend `Error.*`, `Limit.*`, `Target.held`, `Chain.pick`) ----
+// ---- outages: what counts as a quota signal, and a held scope ----
 use serde_json::json;
 
 /// Limit: a hold on a provider login (scope = the provider) or on a model (scope = `provider/model`). Unknown reset (0) stays held until cleared;
@@ -91,7 +91,7 @@ pub fn classify(p: &str, m: &str, o: &Value) -> Option<Limit> {
     if signal && !not_quota(&low) && (rejected(o) || assistant(o) || quota_code(code) || quota_words(&low)) { Some(Limit { scope: scope_of(p, m, o), reason: reason(o), reset: reset_of(o) }) } else { None }
 }
 
-// ---- the planner over named accounts (core/account-fallback.bend): holds, eligibility, the best account, the thread's preference ----
+// ---- the planner over named accounts: holds, eligibility, the best account, the thread's preference ----
 
 /// Hold.key: the hold on one profile at one epoch (`""` profile is the CLI's own login); the per-model hold adds `model:<model>`. Parts are length-prefixed.
 pub fn part(s: &str) -> String { format!("{}:{s}", s.chars().count()) }

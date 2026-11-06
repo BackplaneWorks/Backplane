@@ -1,7 +1,7 @@
 //! Diff and Review without the policy helper: the reads they wait for (git.diff, review.bom/checks/tick, git.act/git.revert) applied to the session, their actions (`rv-*`, `revert`,
-//! the opening of the Review tab), the Dv.sync post-hook, and the two JSON objects the thread carries (`diff`, `viewer.review`). Bend's src/core/client.bend is the reference:
-//! `Ui.diff`/`Dv.*` (Diff), `Rp.*` (Review), `Ui.revert*`; the diff text is read as src/core/diff.bend reads it. Pure functions over the request's session; the session keeps the same
-//! keys Bend's `Ui` keeps (`diff:<t>`, `diff.none:<t>`, `diff.at:<t>`, `diff.auto:<t>`, `view.kind:<t>`, `view.path:<t>`, `rp.md:<t>:<page>` ..., the scratch `@rp.busy:<t>`, `@rp.req:<id>`,
+//! the opening of the Review tab), the Dv.sync post-hook, and the two JSON objects the thread carries (`diff`, `viewer.review`). src/core/client is the reference:
+//! `Ui.diff`/`Dv.*` (Diff), `Rp.*` (Review), `Ui.revert*`; the diff text is read as src/core/diff reads it. Pure functions over the request's session; the session keeps the same
+//! keys `Ui` keeps (`diff:<t>`, `diff.none:<t>`, `diff.at:<t>`, `diff.auto:<t>`, `view.kind:<t>`, `view.path:<t>`, `rp.md:<t>:<page>` ..., the scratch `@rp.busy:<t>`, `@rp.req:<id>`,
 //! `@revert`), so the helper, where there is one, reads the same state.
 use super::{patch, select};
 use crate::md;
@@ -14,7 +14,7 @@ fn s<'a>(v: &'a Value, k: &str) -> &'a str { v[k].as_str().unwrap_or("") }
 fn info<'a>(session: &'a Value, k: &str) -> &'a str { s(&session["info"], k) }
 fn draft<'a>(session: &'a Value, k: &str) -> &'a str { s(&session["drafts"], k) }
 
-// ---- the unified diff (src/core/diff.bend) ----
+// ---- the unified diff ----
 
 pub struct DLine { pub k: u32, pub t: String, pub o: usize, pub n: usize }
 pub struct DHunk { pub header: String, pub lines: Vec<DLine> }

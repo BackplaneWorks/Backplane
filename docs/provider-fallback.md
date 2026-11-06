@@ -40,7 +40,7 @@ Existing persisted event variants remain unchanged; fallback state and alerts
 use append-compatible settings and timeline activity records.
 
 Validation uses fake Claude/Codex CLIs and fictional catalog entries. No real
-provider tokens are consumed to manufacture limits. `test/fallback_test.bend`
+provider tokens are consumed to manufacture limits. `test/fallback_test`
 covers classification, scope/reset, order, replay, handoff, notifications and
-auth recovery; `test/fallback_settings_test.bend` exercises all Settings row
+auth recovery; `test/fallback_settings_test` exercises all Settings row
 renderers; `test/tools/fallback_e2e.ts` runs the real hub and provider adapters.

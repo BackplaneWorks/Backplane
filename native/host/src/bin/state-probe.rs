@@ -1,5 +1,5 @@
 //! state-probe NOW BATCH|none CHUNK...: fold the logs with the Rust State and print {tick, meta, quiet}: Auto.changes at NOW and the
-//! commit-path events (LEAN=1: with the lean state the policy host runs on) for the BATCH file (the Rust side of native/bend/autosettle_probe.bend; synthetic logs only).
+//! commit-path events (LEAN=1: with the lean state the policy host runs on) for the BATCH file.
 #[path = "../state/mod.rs"]
 mod state;
 #[path = "../shelf.rs"]
@@ -24,7 +24,7 @@ fn main() {
     let mut meta = vec![]; let mut st2 = fold(&args[2..]);
     for c in &batch { let one = state::fam::autosettle::metadata(&st2, c); meta.extend(one.iter().cloned()); st2.apply(c); for e in &one { st2.apply(e); } }
     // a turn's end (Ended.out, then Alerts.changes' told marks over the batch and what the end added). The agents' batch has a failed end's mark
-    // inside it; Bend writes that mark after the alert, stamped with the step's now.
+    // inside it; writes that mark after the alert, stamped with the step's now.
     let end = {
         let pre = fold(&args[2..]);
         let (core, mut marks) = state::fam::turnend::split_fail_marks(&batch);

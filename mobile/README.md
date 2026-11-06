@@ -1,8 +1,8 @@
 # Phone apps
 
 Native iOS (SwiftUI) and Android (Jetpack Compose) clients for a Backplane
-hub. The client logic is the same Bend the web page runs: `src/mobile/`
-turns `core/client.bend`'s `Ui` into a screen model (JSON), and
+hub. The client logic is the same the web page runs: `src/mobile/`
+turns `core/client`'s `Ui` into a screen model (JSON), and
 `bridge.js` carries strings between it and the app. The apps own the socket
 and draw the screen with native lists, toolbars and text fields; they make
 no product decisions. iOS runs the bridge in JavaScriptCore, Android in
@@ -26,7 +26,7 @@ mobile/ios/build.sh sim|device|archive   # the same, on the Mac in a checkout
 ```
 
 `build-ios.sh` bundles bridge.js and the web shell's bridge
-(`mobile/shell/backplane-app.js`) here (bend), rsyncs `mobile/ios` to
+(`mobile/shell/backplane-app.js`) here, rsyncs `mobile/ios` to
 `~/backplane-ios` on the Mac (`BACKPLANE_MAC`, default `hs-mac-mini`) and
 runs `mobile/ios/build.sh` (xcodebuild) there. Debug builds read `BACKPLANE_LINK` and
 `BACKPLANE_SELECT` from the environment (`SIMCTL_CHILD_…`) to pair and open
@@ -39,19 +39,19 @@ Play services' code scanner), paste the hub's tailnet link
 `backplane://pair?url=<that link, URL-encoded>`, which is what the code
 holds, so the phone's own camera app opens Backplane with it too.
 
-Kept state: each app writes the Bend client's whole state down (a file
+Kept state: each app writes client's whole state down (a file
 named `state-<key>.json`) and loads it at launch, then asks each hub only
-for what came since. The key is a hash of the Bend type definitions
+for what came since. The key is a hash of type definitions
 (`scripts/state-key.py`, stamped at the end of bridge.js by
 `build-mobile.sh`), so a new build keeps the state unless a type changed.
 
 Several hubs: the phone stays connected to every hub it pairs with, one
-socket and one Bend client each (`src/mobile/hubs.bend`, keyed by
+socket and one client each (`src/mobile/hubs`, keyed by
 host:port). The screen is all of them in one: each hub's projects, named
 by machine when there are several; alerts and the island from all; the
 thread of the hub in focus (the one whose thread was opened last). Ids on
-the screen carry their hub (`host:port|id`), and Bend routes each action
-by that prefix (laws `hubs_*`, test `test/hubs_test.bend`). The link
+the screen carry their hub (`host:port|id`), and routes each action
+by that prefix. The link
 button lists the paired hubs (unpair there), the owner's other machines
 they know of (one tap pairs), and takes a new link. Only the hub in focus
 draws plots. Debug builds take several links in `BACKPLANE_LINK`,
@@ -60,7 +60,7 @@ separated by spaces.
 ## A thread on the phone
 
 The screen carries what the web client's thread view has, decided in
-`src/mobile/screen.bend`: asks (approve, answer, implement a plan), runs
+`src/mobile/screen`: asks (approve, answer, implement a plan), runs
 of tool calls folded (`fold`), subagents and links between threads,
 attachments (the app reads a photo or file and sends it through `attach`
 in the pieces the screen names), the images a reply names (served by the
@@ -75,8 +75,8 @@ the archived shelf. Debug builds read `BACKPLANE_ACTS`
 ## Board viewer
 
 A thread's toolbar opens its project's board, schematic or 3D model (the
-chip icon). The hub sends a plot (`src/core/plot.bend`) as CBOR written
-straight by Bend: chunks of geometry in paint order, then, on each save,
+chip icon). The hub sends a plot as CBOR written
+straight by : chunks of geometry in paint order, then, on each save,
 only the chunks that changed (laws `plot_delta_exact`,
 `plot_unchanged_sends_nothing`). Plot frames go straight from the socket
 to the renderer, never through bridge.js.
@@ -90,7 +90,7 @@ moves, a fling coasts or new chunks fade in. iOS: Metal (shaders compiled
 on the device, so the build needs no Metal toolchain), up to 120 Hz.
 Android: OpenGL ES 3.
 
-A tap is inspected on the phone: it hit-tests its own geometry, Bend picks
+A tap is inspected on the phone: it hit-tests its own geometry, picks
 the smallest piece under the finger (laws `pick_*`), and the hub answers
 with that piece's info from the chunks this phone holds; the card offers
 "Mention in chat". 3D draws the board's body and parts (kicad-cli, exported
@@ -125,17 +125,17 @@ ASC_KEY_PATH=/Users/h/.appstoreconnect/AuthKey_XXXXXXXXXX.p8
 
 When a turn ends (Completed or Failed; a stop the user asked for is not
 news), the phone alerts, and while turns run it shows a live status. What
-counts is decided in `src/mobile/notify.bend` (laws `alert_*`).
+counts is decided in `src/mobile/notify` (laws `alert_*`).
 
 - iOS in front: the app posts the alert itself and runs one Live Activity
   (lock screen + Dynamic Island) from the screen's `island`.
-- iOS asleep: the hub pushes through APNs (`src/server/push.bend`): an
+- iOS asleep: the hub pushes through APNs: an
   alert, and Live Activity updates to the activity's push token. The app
   registers its tokens with the `device.register` rpc; tokens never leave
   the hub (laws `device_*`).
 - Android: a foreground service keeps the socket open while turns run and
   shows an ongoing notification (promoted to a status-bar chip on Android
-  16); alerts come from the same Bend `notify` commands.
+  16); alerts come from the same `notify` commands.
 
 APNs needs a key from developer.apple.com (Keys, with Apple Push
 Notifications service enabled). Put the .p8 on the hub machine and set:

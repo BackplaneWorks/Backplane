@@ -1,5 +1,5 @@
 //! The bots lane: bots, rooms, memory and spaces, routines and reminders, mail, uber ops and the bot tools
-//! (src/core/bothub.bend, bot.bend, uber*.bend, mail*.bend). The Bend decider is a pure function from state and request to
+//!. decider is a pure function from state and request to
 //! changes and outs; here a request commits the same events through `Hub::commit_many`, then performs the outs.
 //! A message into a bot's thread goes through `Inbox` (the agents module's `deliver`).
 pub mod api;

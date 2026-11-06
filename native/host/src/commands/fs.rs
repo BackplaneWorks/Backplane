@@ -1,4 +1,4 @@
-//! The project picker's folder requests (server.bend `FsJob.*`, core/folder.bend): `fs.list`, `fs.mkdir`, `fs.find`, and the folder
+//! The project picker's folder requests: `fs.list`, `fs.mkdir`, `fs.find`, and the folder
 //! half of `project.add` / `project.new`. Paths are arguments to the scripts, never shell text.
 use crate::files::git::{proc, proc_ro, Ran};
 use serde_json::{json, Value};

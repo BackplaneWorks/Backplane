@@ -1,7 +1,7 @@
-//! core/json.bend in Rust, for the review rules: text kept exactly (a number stays its raw text, keys stay in order, the first of two
+//! core/json in Rust, for the review rules: text kept exactly (a number stays its raw text, keys stay in order, the first of two
 //! equal keys wins) and the same lenient reader (commas and colons are only separators, a bare word is null, a lone surrogate is
 //! U+FFFD), which serde_json is not. One difference: a value nested deeper than DEEPEST is not read (it would overflow the stack of
-//! whatever walks or drops it; the Bend child was its own process).
+//! whatever walks or drops it; child was its own process).
 use serde_json::Value;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -148,7 +148,7 @@ impl J {
             Value::Array(a) => J::Arr(a.iter().map(J::of).collect()), Value::Object(m) => J::Obj(m.iter().map(|(k, v)| (k.clone(), J::of(v))).collect()),
         }
     }
-    /// The Value a reply carries; what is not JSON to serde_json (a word Bend kept as a number) reads as null there.
+    /// The Value a reply carries; what is not JSON to serde_json reads as null there.
     pub fn value(&self) -> Value { serde_json::from_str(&self.show()).unwrap_or(Value::Null) }
 }
 
@@ -172,7 +172,7 @@ pub fn nat(s: &str) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test] fn reads_as_json_bend_does() {
+    #[test] fn reads_as_json_does() {
         assert_eq!(parse(r#"{"a":1.50,"a":2,"b":[true,false,null,nope]}"#).unwrap().show(), r#"{"a":1.50,"a":2,"b":[true,false,null,null]}"#);
         assert_eq!(parse(r#"{"a":1,"a":2}"#).unwrap().raw("a", ""), "1"); // first match wins
         assert_eq!(parse(r#"{"a" 1 "b" 2}"#).unwrap().show(), r#"{"a":1,"b":2}"#); // separators are only separators
@@ -187,7 +187,7 @@ mod tests {
         assert_eq!(parse(r#""\ud83dx""#).unwrap(), J::str("\u{fffd}x")); assert_eq!(parse(r#""\ud83d\n""#).unwrap(), J::str("\u{fffd}\n"));
         assert_eq!(parse(r#""\ud83d\u0041""#).unwrap(), J::str("\u{fffd}A")); assert_eq!(parse(r#""\ud83d\ud83d\ude00""#).unwrap(), J::str("\u{fffd}😀"));
     }
-    #[test] fn shows_as_json_bend_does() {
+    #[test] fn shows_as_json_does() {
         assert_eq!(J::str("a\"\\\n\r\t\u{1}\u{1f}é/\u{7f}").show(), "\"a\\\"\\\\\\n\\r\\t\\u0001\\u001fé/\u{7f}\"");
         assert_eq!(J::obj(&[("k", J::Num("nan".into())), ("a", J::Arr(vec![J::Null, J::Flag(false)]))]).show(), r#"{"k":nan,"a":[null,false]}"#);
     }

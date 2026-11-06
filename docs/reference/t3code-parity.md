@@ -1,7 +1,7 @@
 # T3Code / Backplane (TS) parity reference
 
 What the TypeScript Backplane (`i2cjak/Backplane`, a `pingdotgg/t3code` fork)
-does, distilled so the Bend rewrite can match it. Paths refer to that repo.
+does, distilled so rewrite can match it. Paths refer to that repo.
 Parity status lives in `docs/parity.md`.
 
 ## Architecture

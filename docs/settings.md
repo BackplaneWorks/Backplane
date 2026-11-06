@@ -21,7 +21,7 @@ privacy filtering, selection changes and other action behavior are unchanged.
 Focused evidence: `desktop/test/thin-host.test.cjs` includes failing-before,
 passing-after cases for both Settings open and submenu navigation raced by a
 background refresh. `test/tools/settings_review.mjs` runs the emitted production
-`settings_fixture.bend` in an isolated browser: thirteen categories, icons,
+`settings_fixture` in an isolated browser: thirteen categories, icons,
 search/Enter, Japanese labels and a 390 px layout. It does not write live
 settings or claim live hub/device validation.
 
@@ -65,7 +65,7 @@ Unknown model metadata offers Check availability instead of a zero-size
 download. The same state and text drive the web, desktop and both phones.
 The web/desktop page also has an accessible progress bar and live status.
 
-Regression checks: `test/settings_status_test.bend`, the Voice states in
+Regression checks: `test/settings_status_test`, the Voice states in
 `test/tools/settings_review.mjs`, and `test/tools/voice_download_e2e.ts` (an
 isolated hub with a deterministic helper, including fragmented progress lines,
 status racing a download, errors followed by status, retries and helper exit).

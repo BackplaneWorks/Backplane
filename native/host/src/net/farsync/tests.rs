@@ -39,7 +39,7 @@ async fn push(a: &Node, b: &Node, link: &str, body: Value) -> botnet::Resp {
 #[tokio::test] async fn far_push_from_the_owner_lands_in_the_mirror_not_the_log() {
     let a = node("fa1", false).await; let (b, fs) = mirror("fb1").await;
     let link = linked(&a, &b).await;
-    fs.store.take(&link, "e1", 0, 0, &[]).unwrap(); // (a mirror with no epoch yet pulls on its first push, as Bend: Fr.epoch.changed)
+    fs.store.take(&link, "e1", 0, 0, &[]).unwrap(); //
     let n0 = b.hub.store.len();
     let r = push(&a, &b, &link, json!({"epoch":"e1","since":0,"head":2,"items":[thread(1, "t9"), msg(2, "t9", "hello from A")]})).await;
     assert_eq!((r.code, r.body.as_str()), (200, r#"{"ok":true}"#));

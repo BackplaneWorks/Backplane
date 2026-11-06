@@ -44,7 +44,7 @@ if (bpE2eHosts.isNotEmpty()) {
     f.writeText("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<network-security-config>\n    <base-config cleartextTrafficPermitted=\"false\" />\n    <domain-config cleartextTrafficPermitted=\"true\">\n        <domain includeSubdomains=\"false\">desktop.tail9e0cf2.ts.net</domain>\n$extra    </domain-config>\n</network-security-config>\n")
 }
 val bpNativeSidebar = providers.gradleProperty("bpNativeSidebar").map { it != "false" }.getOrElse(true)
-// -PbpData=false: the old Bend-bridge launcher; default true: the data/1 app (DataActivity)
+// -PbpData=false: the old -bridge launcher; default true: the data/1 app (DataActivity)
 val bpData = providers.gradleProperty("bpData").map { it != "false" }.getOrElse(true)
 val bpAppId = "dev.backplane.mobile.gpui"
 val bpScheme = "bpgpui"

@@ -10,7 +10,7 @@ private struct ReflowPlan: Decodable {
     let samples: [[Double]]?
 }
 
-// The shared Bend planner computes the profile once per edit. Playback only
+// The shared planner computes the profile once per edit. Playback only
 // interpolates its samples; it never duplicates the thermal model in Swift.
 struct ReflowView: View {
     let model: AppModel

@@ -1,6 +1,6 @@
-//! MSP, the Muse Session Protocol (JSON-RPC over stdio, `muse serve`): a port of src/core/msp.bend. One process per turn:
+//! MSP, the Muse Session Protocol (JSON-RPC over stdio, `muse serve`): a port of src/core/msp. One process per turn:
 //! initialize, the initialized note, session/start (or session/resume, then session/setApprovalMode), turn/start.
-//! What Muse says becomes Codex shapes (`{"type":"item.delta",...}`), as in acp.bend. Pure: no IO here.
+//! What Muse says becomes Codex shapes (`{"type":"item.delta",...}`), as in acp. Pure: no IO here.
 use serde_json::{json, Value};
 
 /// MspTurn: what a turn needs. `nonce` is the turn's gen: Muse refuses a command id it has seen, in any session.
@@ -171,7 +171,7 @@ mod tests {
     const INIT_OK: &str = r#"{"id":1,"jsonrpc":"2.0","result":{"experimentalApi":false,"grantedCapabilities":["sessionMcp"],"serverInfo":{"name":"muse","version":"1.4.6"}}}"#;
     fn opened(sid: &str, t: &MspTurn) -> (Msp, Out) { let mut a = Msp::new(); a.line(t, &j(INIT_OK)); let o = a.line(t, &j(&format!(r#"{{"id":2,"jsonrpc":"2.0","result":{{"session":{{"sessionId":"{sid}","status":"idle"}},"viewCursor":"v:{sid}:0"}}}}"#))); (a, o) }
 
-    // The scripted exchange of test/msp_test.bend, line by line (frames as `muse serve` 1.4.6 sends them, trimmed).
+    // The scripted exchange of test/msp_test, line by line (frames as `muse serve` 1.4.6 sends them, trimmed).
     #[test] fn msp_request_lines() {
         assert_eq!(m(&init()), "initialize"); assert!(init().contains("\"sessionMcp\""));
         let t = turn(""); let mut a = Msp::new(); let o1 = a.line(&t, &j(INIT_OK));

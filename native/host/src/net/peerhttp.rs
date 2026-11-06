@@ -25,7 +25,7 @@ async fn find_once(hub: &Arc<Hub>, peering: &Peering, table: &PeerTable) { find_
 /// (`status`: `tailscale status --json`, "" when there is none; a test passes its own so it never depends on the host)
 async fn find_with(hub: &Arc<Hub>, peering: &Peering, table: &PeerTable, status: String, extra: String) {
     // (this machine first, at once, but only while nothing has been published: a later pass would take every peer off the list for the
-    // seconds the probes take and bring them back, a flicker in the switcher; Bend publishes only after a probe)
+    // seconds the probes take and bring them back, a flicker in the switcher; publishes only after a probe)
     if peering.routes.machines_value().get("self").is_none() { hub.set_info("machines", &tailnet::machines_json(&status, peering.port, &[]).to_string()).await; }
     let j = tailnet::find(&status, peering.port, &extra).await;
     let verified: Vec<String> = table.with(|p| p.live().into_iter().filter(|x| p.verified(&x.id)).map(|x| x.url).collect());
@@ -67,7 +67,7 @@ mod tests {
         let (reg, routes) = super::super::start::open(&h, "127.0.0.1", 1).unwrap();
         Peering::new(h, reg, PeerTable::new(), routes, false, "127.0.0.1", 1)
     }
-    /// info "machines" is the switcher's JSON, as the Bend hub publishes it: self.name "" with no tailnet, its own url, peers named in BACKPLANE_PEERS.
+    /// info "machines" is the switcher's JSON, as hub publishes it: self.name "" with no tailnet, its own url, peers named in BACKPLANE_PEERS.
     #[tokio::test] async fn machines_info_is_published_in_the_switchers_shape() {
         let a = super::super::peering::tests::node("minfo", false).await;
         find_with(&a.hub, &a.p, &a.p.table, String::new(), String::new()).await;
@@ -75,7 +75,7 @@ mod tests {
         let j: serde_json::Value = serde_json::from_str(&info).unwrap();
         assert_eq!(j["self"], serde_json::json!({"name": "", "url": format!("http://127.0.0.1:{}", a.port), "domain": ""}), "{info}");
         assert_eq!(j["peers"], serde_json::json!([]));
-        assert!(info.starts_with(r#"{"self":{"name":"","url":"http://127.0.0.1:"#), "key order as Bend's: {info}");
+        assert!(info.starts_with(r#"{"self":{"name":"","url":"http://127.0.0.1:"#), "key order as : {info}");
     }
     /// A later pass never shows a list without the peers the first found.
     #[tokio::test] async fn machines_info_never_drops_the_peers_between_passes() {

@@ -124,7 +124,7 @@ final class Hub {
     private var discoveryStarted = Date()
     private var generation = 0
     // When a frame (a heartbeat included) last arrived. The hub sends one
-    // every 15 s (core/desk.bend's Alive.every); a link silent for more
+    // every 15 s; a link silent for more
     // than Alive.limit (40 s) is dead, whatever TCP says, and is dropped
     // and reconnected from the client's sequence.
     private static let aliveLimit: TimeInterval = 40

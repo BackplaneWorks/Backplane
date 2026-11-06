@@ -1,5 +1,5 @@
-//! Small pure rules the turn machine uses, each named after the Bend def it follows (src/core/hub.bend,
-//! steer.bend, prompt.bend). Property tests sit beside them.
+//! Small pure rules the turn machine uses, each named after def it follows (src/core/hub,
+//! steer, prompt). Property tests sit beside them.
 use serde_json::{json, Value};
 
 /// Steer.head / Steer.tail: a message sent into a streaming reply posts the text up to its last line break first
@@ -38,7 +38,7 @@ pub fn permission(runtime: &str, interaction: &str) -> &'static str {
     match runtime { "approval-required" => "default", "auto-accept-edits" => "acceptEdits", "auto" => "auto", _ => "bypassPermissions" }
 }
 
-/// Claude.args (prompt.bend) then Hub.agent_args: effort, thinking, plugins and the MCP config follow.
+/// Claude.args then Hub.agent_args: effort, thinking, plugins and the MCP config follow.
 pub struct ArgsIn<'a> { pub model: &'a str, pub session: &'a str, pub runtime: &'a str, pub interaction: &'a str, pub prompt: &'a str, pub dirs: &'a [String], pub effort: &'a str, pub think: bool, pub plugins: &'a [String], pub mcp_url: &'a str }
 pub fn claude_args(a: &ArgsIn) -> Vec<String> {
     let s = |x: &str| x.to_string();
@@ -85,7 +85,7 @@ pub fn unanswered(kind: &str, tool: &str, detail: &str) -> String {
 /// Exit.why: a SIGKILL (137) is most likely the kernel taking the process for memory.
 pub fn exit_why(code: i32) -> String { if code == 137 { "agent was killed (signal 9, likely out of memory)".into() } else { format!("agent exited with code {code}") } }
 
-/// Err.scrub (errtail.bend): the text with its secrets dropped (token=/key=/secret=/password= values, Bearer tokens, key-shaped words).
+/// Err.scrub: the text with its secrets dropped (token=/key=/secret=/password= values, Bearer tokens, key-shaped words).
 pub fn err_scrub(s: &str) -> String {
     const KEYS: [&str; 5] = ["token=", "key=", "secret=", "password=", "Bearer "];
     const STARTS: [&str; 10] = ["sk-", "ghp_", "gho_", "ghs_", "ghu_", "github_pat_", "xoxb-", "xoxp-", "AKIA", "AIza"];
@@ -108,7 +108,7 @@ pub fn exit_say(dflt: &str, code: i32, tail: &str) -> String {
 }
 
 
-/// Rules.block (core/rules.bend): the standing rules ("rule.<id>" settings, oldest first then by id) that apply to a thread: on, for every bot or this thread's bot, for every project or
+/// Rules.block: the standing rules ("rule.<id>" settings, oldest first then by id) that apply to a thread: on, for every bot or this thread's bot, for every project or
 /// this thread's project. "" when none.
 pub fn rules_for(st: &std::collections::HashMap<String, String>, bot: &str, project: &str) -> Vec<Value> {
     let mut rs: Vec<(u64, String, Value)> = st.iter().filter(|(k, _)| k.starts_with("rule.")).filter_map(|(k, v)| {
@@ -132,7 +132,7 @@ pub fn rules_block(st: &std::collections::HashMap<String, String>, bot: &str, pr
     }
     if lines.is_empty() { String::new() } else { format!("<rules>\nStanding rules from the person. Follow them; the enforced ones are checked by Backplane.\n{lines}</rules>") }
 }
-/// Rules.strip: a tool name without its `mcp__<server>__` prefix: the characters since the last pair of underscores (core/rules.bend's state machine, char for char).
+/// Rules.strip: a tool name without its `mcp__<server>__` prefix: the characters since the last pair of underscores.
 pub fn strip_mcp(s: &str) -> String {
     let (mut cur, mut under) = (String::new(), false);
     for c in s.chars() { if under { if c == '_' { cur.clear(); under = false } else { cur.push(c); under = false } } else { cur.push(c); under = c == '_' } }
@@ -176,7 +176,7 @@ mod tests {
         assert_eq!(exit_say("x", 2, " boom token=abc123 and sk-LIVEKEY99 Bearer zzz \n"), "x (exit 2): boom token=… and sk-… Bearer …");
     }
     use super::*;
-    // law steer_head_tail (steer.bend Steer.head/Steer.tail): head ++ tail is the text, head ends at a line break
+    // law steer_head_tail: head ++ tail is the text, head ends at a line break
     #[test] fn steer_head_and_tail_split_the_text_at_its_last_line_break() {
         for t in ["", "abc", "abc\n", "a\nb", "a\nb\nc", "\n\n", "x\ny\n"] {
             assert_eq!(format!("{}{}", steer_head(t), steer_tail(t)), t);
@@ -208,7 +208,7 @@ mod tests {
     }
     #[test] fn unanswered_asks_are_named() { assert_eq!(unanswered("approval", "Bash", "ls -la\nx"), " Its request to use Bash was not answered: \u{201C}ls -la\u{201D}"); assert_eq!(unanswered("plan", "", ""), " Its plan was not answered."); assert_eq!(unanswered("input", "", " "), " Its question was not answered"); assert_eq!(unanswered("x", "", ""), " Its request was not answered."); }
     #[test] fn a_sigkill_is_named() { assert!(exit_why(137).contains("signal 9")); assert_eq!(exit_why(3), "agent exited with code 3"); }
-    #[test] fn the_rules_block_is_bends_text_for_the_rules_that_apply() {
+    #[test] fn the_rules_block_is_text_for_the_rules_that_apply() {
         let mut st = std::collections::HashMap::new();
         st.insert("rule.r1".to_string(), r#"{"id":"r1","text":"Never push to main","at":5}"#.to_string());
         st.insert("rule.r2".to_string(), r#"{"text":"Ask before deleting","tool":"Bash","at":3}"#.to_string());

@@ -3,7 +3,7 @@ import Network
 import Observation
 import UIKit
 
-// Feeds every paired hub's socket and the user's actions to the Bend
+// Feeds every paired hub's socket and the user's actions to
 // client, and shows whatever screen it answers. Runs its commands (send,
 // copy, scroll, notify) and keeps the Live Activity in step with the
 // screen's island. Each hub is keyed by its host:port (Pairing.key).
@@ -158,11 +158,11 @@ final class AppModel {
     func plane(_ s: Screen) -> PlaneModel? { s.plane ?? (s.uber == nil ? nil : lastPlane) }
     // the board viewer's plots, which come straight from the socket
     let plots = PlotStore()
-    // the composer's text, owned here so typing never waits on Bend
+    // the composer's text, owned here so typing never waits on
     private(set) var composer = ""
     // what the composer offers for the text typed now (popup rows, the send
     // button), from a key's own answer; only the composer reads it, so a key
-    // never redraws the timeline. A new screen carries the same (Bend's
+    // never redraws the timeline. A new screen carries the same (
     // law composer_screen_agrees) and clears it.
     private(set) var composerPatch: ComposerPatch? = nil
     private var composerDrafts = ComposerDrafts()
@@ -212,7 +212,7 @@ final class AppModel {
     // and by the screen only when its selection changes, so a screen that
     // answers an older action never pulls a thread back open
     // Each tab has its own stack, kept across tab switches; `path` is the
-    // one of the tab on screen (the pages of a tab are Bend's nav keys, or
+    // one of the tab on screen (the pages of a tab are nav keys, or
     // "@hub:<key>" for a hub's settings page, which is the app's alone)
     private(set) var stacks: [AppTab: [String]] = [:]
     private(set) var tab: AppTab = .threads
@@ -374,7 +374,7 @@ final class AppModel {
     @ObservationIgnored private let paths = NWPathMonitor()
     @ObservationIgnored private var lastPath: NWPath.Status?
     @ObservationIgnored private var lastInterfaces: [String] = []
-    // drafts sent to Bend and not yet answered: until then a screen may
+    // drafts sent to and not yet answered: until then a screen may
     // carry an older draft than the one on screen
     #if DEBUG
     // headless checks: SIMCTL_CHILD_BACKPLANE_SELECT=<thread id> opens it
@@ -932,7 +932,7 @@ final class AppModel {
                 // where the person is: every hub keeps the phone's zone (routines follow it)
                 self?.act("tz-report", TimeZone.current.identifier)
             },
-            // plots go straight to the viewer, never through the Bend client,
+            // plots go straight to the viewer, never through client,
             // and only the hub in focus draws
             onMessage: { [weak self] d in
                 if PlotStore.isPlot(d) {
@@ -1801,7 +1801,7 @@ final class AppModel {
         #endif
     }
 
-    // Every row opens through this point; Bend's nav is the destination key.
+    // Every row opens through this point; nav is the destination key.
     func open(nav: String, action: String, value: String, title: String, cat: String = "", kind: String = "thread") {
         // a row from an older bridge has no nav: its page opens when its screen comes
         guard !nav.isEmpty else { act(action, value); return }
@@ -1840,7 +1840,7 @@ final class AppModel {
     // Tabs
     // ----
 
-    // a page that is the app's alone (a hub's settings), not a Bend selection
+    // a page that is the app's alone (a hub's settings), not a selection
     static func local(_ nav: String) -> Bool { nav.hasPrefix("@hub") || nav == making }
 
     // where a tap on a row opens its page. From Home a thread goes to
@@ -1859,7 +1859,7 @@ final class AppModel {
     // where a page selected from elsewhere (a notification, a link, the
     // island, a link in a thread) opens: a bot's thread, a room or a
     // remote bot in Bots, the uberbot's on Home, any other thread in Threads
-    // (Bend says which: the screen's bot, and the uber card's sel)
+    //
     private func destination(_ s: Screen, _ nav: String) -> AppTab {
         if let o = opened, o.nav == nav { return o.tab }
         if nav == Self.making { return tab }
@@ -1867,7 +1867,7 @@ final class AppModel {
         return .threads
     }
 
-    // the tab on screen changes: it shows its own stack at once, and Bend
+    // the tab on screen changes: it shows its own stack at once, and
     // selects what that stack ends with (the page is cached, so it draws
     // now and goes live when its screen comes); an empty stack selects nothing
     func chooseTab(_ t: AppTab) {
@@ -1937,7 +1937,7 @@ final class AppModel {
         cats[key] = catRig(Data(await engine.cat(key).utf8))
     }
 
-    // a bot form's field ("bfield"), typed: Bend keeps it without a new
+    // a bot form's field ("bfield"), typed: keeps it without a new
     // screen, the field on screen already shows it
     func field(_ name: String, _ text: String) {
         guard contentReady else { return }
@@ -2129,11 +2129,11 @@ final class AppModel {
     // this phone's microphone for dictation (VoiceRecorder.swift)
     @ObservationIgnored let recorder = VoiceRecorder()
 
-    // The composer's mic and the strip's Stop (screen.bend's Mob.voice): the
-    // first press starts this phone's recorder at once and tells Bend
+    // The composer's mic and the strip's Stop: the
+    // first press starts this phone's recorder at once and tells
     // ("voice" with "client": the phone records itself, the hub's reply says
     // where the audio goes); the next sends what is left with the end mark
-    // and Bend asks the hub to stop.
+    // and asks the hub to stop.
     func voicePress(for thread: String, on: Bool) {
         guard canSendComposer(for: thread), let hub = screen?.hub, let l = links.first(where: { Pairing.key($0) == hub }) else { return }
         if recorder.active || on {
@@ -2173,7 +2173,7 @@ final class AppModel {
         editComposer(text, for: thread)
     }
 
-    // Both external URL entry and links tapped in a message use shared Bend
+    // Both external URL entry and links tapped in a message use shared
     // reference resolution, with the message's hub kept outside the URI.
     @discardableResult
     func open(_ url: URL, sourceHub: String? = nil) -> Bool {
@@ -2275,7 +2275,7 @@ final class AppModel {
         hubSettings = [:]
     }
 
-    // the thread list's view, for Bend to draw (the device's own choice)
+    // the thread list's view, for to draw (the device's own choice)
     private func languageLocal(_ e: Engine) async {
         let generation = pairingGeneration
         for (key, value) in [("mailroom-renderer", "ios-v1"), ("lang-preview", settings.langPreview ? "1" : ""), ("lang", settings.lang), ("lang-os", Locale.preferredLanguages.first ?? "")] {
@@ -2515,7 +2515,7 @@ final class AppModel {
                 if nav != shownSel || tappedPage {
                     shownSel = nav
                     if nav.isEmpty {
-                        // nothing selected: the pages of Bend's selection go, the app's own stay
+                        // nothing selected: the pages of selection go, the app's own stay
                         let own = path.filter(Self.local)
                         if own != path { show(own) }
                     } else {

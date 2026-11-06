@@ -1,4 +1,4 @@
-//! The funnel (hub.bend `Mail.funnel`, `Operational.*`, `Perm.run`; server.bend `Hub.mcp.charter`): what the agents lane asks before a message that is no person's reaches a thread.
+//! The funnel: what the agents lane asks before a message that is no person's reaches a thread.
 //! Everything for the uberbot's own thread is filed for its triage and never posted in its Chat, which is the person's; with the mailroom on, mail to a bot is filed instead and a thread's
 //! is delivered and filed. The rest (Lr.dest, Lr.may, a back office's reach, a stop's hold) are the same decisions' small questions. No text or address is logged here.
 use super::{addr_of, classify, Origin};

@@ -1,14 +1,14 @@
-//! core/glb.bend in Rust: a binary glTF file to world-space triangles, for the phones' 3D view and for renders. A GLB is a 12-byte
+//! core/glb in Rust: a binary glTF file to world-space triangles, for the phones' 3D view and for renders. A GLB is a 12-byte
 //! header, a JSON chunk and a BIN chunk; scenes lead to nodes (matrix or TRS, children), nodes to meshes, meshes to primitives (mode 4
-//! only), primitives to POSITION and indices, a primitive's colour to its material's baseColorFactor. Every F32 step is the Bend one
+//! only), primitives to POSITION and indices, a primitive's colour to its material's baseColorFactor. Every F32 step is one
 //! in the same order, so the triangles are the same bits.
 //!
-//! The Bend reader's edges are kept, because a malformed file must read the same: JSON is the lenient json.bend (commas and colons are
+//! reader's edges are kept, because a malformed file must read the same: JSON is the lenient json (commas and colons are
 //! not checked, the first of a duplicate key wins), a table index wraps at the table's power of two (Tab.go reads only d bits), an
 //! aligned accessor stops at the end of the data and an unaligned one reads zeros past it.
 //!
-//! Deliberate differences, both limits where the Bend reader runs out of memory instead: `MOST_TRIS` triangles and `MOST_DEPTH` levels
-//! of JSON. Past either the file answers `TooBig` (Bend's child takes about 300 bytes of memory per byte of a GLB, so a file this
+//! Deliberate differences, both limits where reader runs out of memory instead: `MOST_TRIS` triangles and `MOST_DEPTH` levels
+//! of JSON. Past either the file answers `TooBig` (child takes about 300 bytes of memory per byte of a GLB, so a file this
 //! size never finished there).
 use super::fl;
 
@@ -16,7 +16,7 @@ use super::fl;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Tri3 { pub a: [f32; 3], pub b: [f32; 3], pub c: [f32; 3], pub color: u32 }
 
-/// More triangles than any model the Bend reader could hold: 40 bytes each, 320 MB at most.
+/// More triangles than any model reader could hold: 40 bytes each, 320 MB at most.
 pub const MOST_TRIS: usize = 8 << 20;
 const MOST_DEPTH: usize = 4096;
 const MOST_WALK: usize = 4 << 20;
@@ -24,7 +24,7 @@ const MOST_WALK: usize = 4 << 20;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TooBig;
 
-// JSON (core/json.bend) ----------------------------------------------------------------------------------------------------------
+// JSON ----------------------------------------------------------------------------------------------------------
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum J { Null, Flag(bool), Num(String), Str(String), Arr(Vec<J>), Obj(Vec<(String, J)>) }
@@ -339,7 +339,7 @@ pub mod tests {
         let u = Acc { start: 2, count: 3, stride: 12, ct: 5126, len: 36 };
         assert_eq!(positions(&u, &bin, &ID).unwrap().len(), 3);
     }
-    #[test] fn json_is_as_lenient_as_jsonbend() {
+    #[test] fn json_is_lenient() {
         let v = |s: &str| parse(s).unwrap();
         assert_eq!(v(r#"{"a" 1 "a":2}"#), Some(J::Obj(vec![("a".into(), J::Num("1".into())), ("a".into(), J::Num("2".into()))]))); // commas and colons unchecked, the first key wins on read
         assert_eq!(v(r#"{"a":1}"#).unwrap().get("a"), Some(&J::Num("1".into())));

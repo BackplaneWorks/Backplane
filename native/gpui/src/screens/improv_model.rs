@@ -27,26 +27,25 @@ pub fn projects(ctx: &Value) -> Vec<Project> {
 }
 fn s(v: &Value, k: &str) -> String { v[k].as_str().unwrap_or("").to_string() }
 
-/// The one checkout of Backplane's own source among the projects: the GPUI line's folder `backplane-gpui`, else the Bend line's `backplane-bend`.
+/// The one checkout of Backplane's own source among the projects: the folder `backplane-gpui`, else `backplane`.
 /// More than one match is the person's choice.
 pub fn backplane_project(ps: &[Project]) -> Option<&Project> {
     let named = |want: &str| -> Vec<&Project> { ps.iter().filter(|p| p.root.replace('\\', "/").trim_end_matches('/').rsplit('/').next().map_or(false, |b| b.eq_ignore_ascii_case(want))).collect() };
-    for want in ["backplane-gpui", "backplane-bend"] { let hits = named(want); if hits.len() == 1 { return Some(hits[0]) } if hits.len() > 1 { return None } }
+    for want in ["backplane-gpui", "backplane"] { let hits = named(want); if hits.len() == 1 { return Some(hits[0]) } if hits.len() > 1 { return None } }
     None
 }
 
 /// The text of the request to the implementing agent: the person's words first and verbatim, then the context as data, then the attachments.
 pub fn improvement_message(text: &str, context: &Value, path: &str, video: &str) -> String { improvement_message_with(text, context, "", path, video) }
 /// The branch a GPUI request's thread works on: its own, named by the creation key, never `main` itself.
-pub fn work_branch(key: &str) -> String { format!("gpui-imp-{}", &key[..key.len().min(8)]) }
-/// What the thread is told about where and how it works. It works in its own worktree on its own branch, and its commits reach `main` only through
-/// scripts/gpui/land.sh, which refuses a commit the reviewer has not recorded an OK for: this thread cannot move `main` by itself.
+pub fn work_branch(key: &str) -> String { format!("imp-{}", &key[..key.len().min(8)]) }
+/// What the thread is told about where and how it works. It works in its own worktree on its own branch and, once its tests pass, rebases on `main` and
+/// fast-forwards `main` itself; the main builder then rebuilds and relaunches the app.
 pub fn handoff(branch: &str) -> String {
-    format!("<backplane_gpui_handoff>\nThis request came from inside the Backplane GPUI app. Work on the main line.\n\
-You work in your own worktree on the branch {branch}, started from the local main branch. `main` itself is guarded, so this thread cannot move `main` by itself. \
-Your commits reach `main` only through scripts/gpui/land.sh <tip>, which needs the reviewer's recorded OK for every commit in main..<tip> (send the reviewer thread your range and wait for its OK). \
-Do not push, do not touch ~/.backplane-bend or port 3787. Read AGENTS.md and build/gpui/COMMON.md before editing. Builds and tests run on Boat or h@backplane through scripts/gpui/bp-build.sh, never on this desktop. \
-Use stand-in agents in tests, never real model calls.\n</backplane_gpui_handoff>")
+    format!("<backplane_handoff>\nThis request came from inside the Backplane app. Work on the main line.\n\
+You work in your own worktree on the branch {branch}, started from the local main branch. When your change is done and its tests pass, rebase on main and fast-forward main yourself \
+(git merge --ff-only from the main checkout); the main builder then rebuilds and relaunches the app. Do not push unless the person says so. Read AGENTS.md before editing. \
+Use stand-in agents in tests, never real model calls.\n</backplane_handoff>")
 }
 /// The same message with an extra block (the hand-off) after the context and before the attachments.
 pub fn improvement_message_with(text: &str, context: &Value, extra: &str, path: &str, video: &str) -> String {
@@ -175,11 +174,11 @@ mod tests {
         assert!(is_key(&key_from(&[0xab; 16]))); assert!(!is_key("AB".repeat(16).as_str()) && !is_key("abc"));
         let (a, b) = (new_key(), new_key()); assert!(is_key(&a) && is_key(&b) && a != b); assert_eq!(thread_for(&a), format!("improvement-{a}"));
     }
-    #[test] fn the_backplane_source_is_the_one_checkout_named_backplane_bend() {
-        let one = vec![p("a", "/home/h/x/backplane-bend"), p("b", "/work/board")]; assert_eq!(backplane_project(&one).map(|p| p.id.as_str()), Some("a"));
-        assert!(backplane_project(&[p("a", "/a/backplane-bend/"), p("b", "C:\\w\\Backplane-Bend")]).is_none(), "two matches: the person chooses");
+    #[test] fn the_backplane_source_is_the_one_checkout_named_backplane() {
+        let one = vec![p("a", "/home/h/x/backplane-gpui"), p("b", "/work/board")]; assert_eq!(backplane_project(&one).map(|p| p.id.as_str()), Some("a"));
+        assert!(backplane_project(&[p("a", "/a/backplane-gpui/"), p("b", "C:\\w\\Backplane-GPUI")]).is_none(), "two matches: the person chooses");
         assert!(backplane_project(&[p("b", "/work/board")]).is_none());
-        let both = vec![p("a", "/x/backplane-bend"), p("g", "/x/backplane-gpui")]; assert_eq!(backplane_project(&both).map(|p| p.id.as_str()), Some("g"), "the GPUI line wins");
+        let both = vec![p("a", "/x/backplane"), p("g", "/x/backplane-gpui")]; assert_eq!(backplane_project(&both).map(|p| p.id.as_str()), Some("g"), "backplane-gpui wins");
     }
     #[test] fn the_request_message_keeps_the_text_first_and_names_attachments_once() {
         let text = " odd\r\n text é ";
@@ -189,17 +188,17 @@ mod tests {
         assert!(improvement_message("x", &json!({}), "/a/b.png", "").ends_with("\n\n[attachment: /a/b.png]")); assert!(improvement_message("x", &json!({}), "", "").ends_with("</backplane_improvements_context>\n\n"));
         assert_eq!(writer_message("P", "/i.png", "/v.webm"), "P\n\n[attachment: /i.png]\n\n[attachment: /v.webm]"); assert_eq!(writer_message("P", "", ""), "P");
     }
-    #[test] fn the_gpui_handoff_names_the_branch_and_says_landing_needs_the_reviewer() {
-        assert_eq!(work_branch(&"ab".repeat(16)), "gpui-imp-abababab");
-        let h = handoff("gpui-imp-abababab");
-        for want in ["own worktree on the branch gpui-imp-abababab", "`main` itself is guarded", "scripts/gpui/land.sh", "reviewer's recorded OK", "cannot move `main` by itself", "build/gpui/COMMON.md"] { assert!(h.contains(want), "{want}"); }
+    #[test] fn the_handoff_names_the_branch_and_says_to_fast_forward_main() {
+        assert_eq!(work_branch(&"ab".repeat(16)), "imp-abababab");
+        let h = handoff("imp-abababab");
+        for want in ["own worktree on the branch imp-abababab", "fast-forward main yourself", "main builder then rebuilds"] { assert!(h.contains(want), "{want}"); }
         let m = improvement_message_with("req", &json!({}), &h, "/a.png", "");
-        assert!(m.starts_with("req\n\n<backplane_improvements_context>") && m.contains("</backplane_improvements_context>\n\n<backplane_gpui_handoff>") && m.ends_with("</backplane_gpui_handoff>\n\n[attachment: /a.png]"), "{m}");
+        assert!(m.starts_with("req\n\n<backplane_improvements_context>") && m.contains("</backplane_improvements_context>\n\n<backplane_handoff>") && m.ends_with("</backplane_handoff>\n\n[attachment: /a.png]"), "{m}");
         assert_eq!(improvement_message("x", &json!({}), "", ""), improvement_message_with("x", &json!({}), "", "", ""));
     }
     #[test] fn context_names_the_origin_as_reference_data_with_backplane_links() {
         let ctx = json!({"appVersion": "1.2.3", "thread": "t1", "project": "p1", "projects": [{"id": "p1", "title": "Board", "root": "/w/board"}]});
-        let c = context("t 1", "My thread", "Board", &ctx, Some(&p("a", "/x/backplane-bend")));
+        let c = context("t 1", "My thread", "Board", &ctx, Some(&p("a", "/x/backplane-gpui")));
         assert_eq!((c["appVersion"].clone(), c["sourceThread"]["url"].clone(), c["sourceProject"]["root"].clone(), c["implementationProject"]["id"].clone()), (json!("1.2.3"), json!("backplane://thread/t%201"), json!("/w/board"), json!("a")));
         assert_eq!(context("", "", "Thread", &json!({}), None)["sourceThread"], Value::Null);
     }

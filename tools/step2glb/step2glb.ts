@@ -3,7 +3,7 @@
 //   step2glb IN.step OUT.glb [--linear 0.1] [--angular 0.5]
 //   step2glb --tree IN.step
 //
-// A thin host adapter, like curl or git: it tessellates and packs; the Bend
+// A thin host adapter, like curl or git: it tessellates and packs;
 // viewer owns everything after that. Coordinates stay in STEP millimetres
 // (Z up, as authored); asset.extras records { unit: "mm", up: "Z" }.
 

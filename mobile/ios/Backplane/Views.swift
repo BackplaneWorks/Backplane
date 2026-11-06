@@ -12,7 +12,7 @@ struct RootView: View {
     @State private var renamed = ""
     @State private var newTitle = ""
     // the first-run tour waits until nothing else is presented over the root
-    // (see tourWait): its screen model already lacks a step while Bend
+    // (see tourWait): its screen model already lacks a step while
     // knows of another overlay, and this covers the rest (the hubs sheet, a
     // picture opened large, menus and sheets still going away)
     @State private var tourReady = false
@@ -140,8 +140,8 @@ struct RootView: View {
         return nudge
     }
 
-    // the first-run tour (core/onboard.bend): up while the screen carries a
-    // step (Bend leaves it out while it knows of another overlay) and
+    // the first-run tour: up while the screen carries a
+    // step and
     // tourWait has seen the root clear; the same as Android: dismissing it
     // (swipe down) is Skip
     private var tourShown: Binding<Bool> {
@@ -1559,7 +1559,7 @@ struct ThreadScreen: View {
         return c == .online || c == .syncing ? NativeMessages.native_thread_sending(lang) : NativeMessages.native_thread_waiting(lang, s.hubs.first { $0.key == s.hub }?.name ?? NativeMessages.native_thread_hub(lang))
     }
 
-    // a tool's icon (core/icons.bend's name) as an SF Symbol
+    // a tool's icon as an SF Symbol
     static func icon(_ name: String?) -> String {
         switch name ?? "" {
         case "pin": "pin"
@@ -1582,7 +1582,7 @@ struct ThreadScreen: View {
     }
 }
 
-// the first-run tour: one step (its text comes from core/onboard.bend),
+// the first-run tour: one step,
 // Skip, Back and Next; Skip and the last step's Done end it for every
 // client of the hub
 struct TourSheet: View {
@@ -1666,7 +1666,7 @@ private func projectHomeSymbol(_ icon: String) -> String {
     }
 }
 
-// Panels and their actions come from the same bounded Bend plan as the web.
+// Panels and their actions come from the same bounded plan as the web.
 struct ProjectHomeScreen: View {
     let model: AppModel
     let home: ProjectHome

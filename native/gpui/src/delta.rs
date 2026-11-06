@@ -1,4 +1,4 @@
-//! The hub's keyed view delta (src/server/thin-delta.bend; the web's src/web/view-delta.js is the reference).
+//! The hub's keyed view delta.
 //! A request offers `viewDelta {version:1, token}` naming the newest body held; the reply is whole
 //! (`viewDelta {base:"", token}` plus the fields) or ops from that body. Bodies are `{shown, session, window, overlay}`.
 use anyhow::{bail, ensure, Context, Result};
@@ -127,7 +127,7 @@ mod tests {
     use super::*;
     use serde_json::json;
     #[test] fn recorded_frames_equal_whole_bodies() {
-        let text = include_str!("../../../test/gpui/fixtures/delta_frames.json");
+        let text = include_str!("../../../test/fixtures/delta_frames.json");
         let rec: Value = serde_json::from_str(text).unwrap();
         let mut bases = Bases::default();
         let mut deltas = 0;
@@ -150,7 +150,7 @@ mod tests {
         assert!(deltas >= 2, "fixture holds delta replies");
     }
     #[test] fn delta_body_equals_whole_body() {
-        let text = include_str!("../../../test/gpui/fixtures/delta_frames.json");
+        let text = include_str!("../../../test/fixtures/delta_frames.json");
         let rec: Value = serde_json::from_str(text).unwrap();
         let mut bases = Bases::default();
         for f in rec["frames"].as_array().unwrap() {

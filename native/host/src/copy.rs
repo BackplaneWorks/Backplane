@@ -1,5 +1,5 @@
-//! A hub on a copy of a real log (`BACKPLANE_COPY=1`): the safety gate. Ported from src/core/copy.bend and
-//! src/core/copynet.bend (laws `copy_*`, `watch_copy_*`, `adopt_copy_none`). A copied log names real work, real
+//! A hub on a copy of a real log (`BACKPLANE_COPY=1`): the safety gate. Ported from src/core/copy and
+//! src/core/copynet (laws `copy_*`, `watch_copy_*`, `adopt_copy_none`). A copied log names real work, real
 //! folders and real machines, so a copy acts on nothing outside its home: no watched work is launched, re-launched
 //! or signalled (every watch reads as gone), no deploy, update or restart, no pushes, no far pushes or launch
 //! reports to the owner's other machines, no git that writes, no webhook or bot replies, no network command at all,
@@ -17,7 +17,7 @@ pub fn is_on(v: &str) -> bool { v == "1" }
 /// The switch, read once at start.
 pub fn on() -> bool { static ON: OnceLock<bool> = OnceLock::new(); *ON.get_or_init(|| is_on(&std::env::var("BACKPLANE_COPY").unwrap_or_default())) }
 
-/// Side-by-side mode (docs/gpui/SIDE-BY-SIDE.md): a copy on which the person's own `turn.start` may start a REAL agent (`proc::Kind::PersonTurn`). Needs `BACKPLANE_COPY=1`
+/// Side-by-side mode (docs/SIDE-BY-SIDE.md): a copy on which the person's own `turn.start` may start a REAL agent (`proc::Kind::PersonTurn`). Needs `BACKPLANE_COPY=1`
 /// as well; the flag alone allows nothing. Read once.
 pub fn person_turn_allowed() -> bool { static ON: OnceLock<bool> = OnceLock::new(); *ON.get_or_init(|| on() && side_by_side_requested()) }
 /// `BACKPLANE_SIDE_BY_SIDE=1` as given (exactly "1"), whatever else is set; `side_by_side_gate` refuses it without the copy switch.
@@ -36,7 +36,7 @@ pub const GIT_TOLD: &str = "a hub on a copied log (BACKPLANE_COPY=1) runs no git
 
 fn has(xs: &[&str], s: &str) -> bool { xs.contains(&s) }
 
-// ---- copynet.bend ------------------------------------------------------------------------------------------
+// ---- copynet ------------------------------------------------------------------------------------------
 
 /// Copy.net.git: the git subcommands that reach another machine.
 fn net_git(args: &[&str]) -> bool { ["push", "fetch", "pull", "clone", "ls-remote"].iter().any(|s| has(args, s)) }
@@ -49,7 +49,7 @@ pub fn net(cmd: &str, args: &[&str]) -> bool { if cmd == "git" { net_git(args) }
 const WRAPPERS: [&str; 9] = ["sh", "bash", "dash", "env", "nice", "timeout", "nohup", "xargs", "setsid"];
 fn words(s: &str) -> impl Iterator<Item = &str> { s.split(|c: char| c.is_whitespace() || ";|&()<>\"'`$={}".contains(c)).filter(|w| !w.is_empty()) }
 
-/// Copy.refused: whether a copy hub refuses to run `cmd args`. Beyond Bend's check (which sees the program a Bend
+/// Copy.refused: whether a copy hub refuses to run `cmd args`. Beyond check (which sees the program a
 /// job names) this also reads through shell wrappers, since the Rust runners reach git through `sh -c`.
 pub fn refused(cmd: &str, args: &[&str]) -> bool {
     if !on() { return false }
@@ -66,7 +66,7 @@ pub fn refused_with(copy: bool, cmd: &str, args: &[&str]) -> bool {
 /// Copy.refusal
 pub fn refusal(cmd: &str) -> String { format!("backplane: a hub on a copied log (BACKPLANE_COPY=1) does not run {cmd}") }
 
-// ---- copy.bend ---------------------------------------------------------------------------------------------
+// ---- copy ---------------------------------------------------------------------------------------------
 
 /// Copy.git.reads: git jobs that only read the project. Viewer metadata and exports may populate the copy's own cache.
 pub fn git_reads(job: &str) -> bool { has(&["diff", "status", "name", "files", "kicad", "refs", "dir", "mech", "pdf", "boards", "rv.components", "rv.renderAsset"], job) }

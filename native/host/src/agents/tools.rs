@@ -1,4 +1,4 @@
-//! The MCP tools that act on threads (mcp.bend: Mcp.list/read/send/wait/interrupt/update/caps), and answering an ask.
+//! The MCP tools that act on threads, and answering an ask.
 use super::{lines::hub_id, mcp, now_s, Agents};
 use serde_json::{json, Value};
 use std::{sync::Arc, time::Duration};

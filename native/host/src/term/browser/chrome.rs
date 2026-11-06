@@ -1,5 +1,5 @@
 //! The driver against the real helper (tools/browser, Bun + playwright-core) and real headless Chrome, on a page this test serves from loopback: no accounts,
-//! no real sites. `#[ignore]`d: it needs BP_REAL_BROWSER (a script that runs the helper) and BACKPLANE_CHROME. Run by test/gpui/term/boat-chrome-job.sh.
+//! no real sites. `#[ignore]`d: it needs BP_REAL_BROWSER (a script that runs the helper) and BACKPLANE_CHROME. Run by test/term/boat-chrome-job.sh.
 use super::super::{driver, task, tests::Tap};
 use super::*;
 use crate::{api::Caller, hub::{Cfg, Hub}, presenter::Canned};

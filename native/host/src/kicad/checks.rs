@@ -1,4 +1,4 @@
-//! core/checks.bend in Rust: kicad-cli's ERC and DRC JSON read into findings, the checklist (".backplane/checklist.md") ticked in place,
+//! core/checks in Rust: kicad-cli's ERC and DRC JSON read into findings, the checklist (".backplane/checklist.md") ticked in place,
 //! the custom checks and gate of ".backplane/checks.json", the report and the gate. Pure: the jobs (files/rv.rs) run the commands and
 //! hand the texts in. Laws `checks_*`, `checklist_*`. A finding's position is left out: nothing here reads it.
 use super::bj::{self, J};

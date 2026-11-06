@@ -28,7 +28,7 @@ import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.max
 
-// A bot's cat, drawn from its rig (Cat.rig.json in src/core/cat.bend). The
+// A bot's cat, drawn from its rig. The
 // rig decides everything: parts back to front in a 64 x 64 box, path data
 // (absolute M L C Q Z), even-odd fill and/or a round outline, opacity, and
 // animations applied outer first. The math is the rig's, as the window and

@@ -6,11 +6,11 @@ C build for Windows and no Cygwin compiler step: the hub is cross-built from
 Linux or a Mac in seconds once its JS is emitted.
 
 ```sh
-BACKPLANE_JS_TARGET=windows-x64 scripts/build-js.sh src/server/main.bend dist/backplane-serve
+BACKPLANE_JS_TARGET=windows-x64 scripts/build-js.sh src/server/main dist/backplane-serve
 # writes dist/backplane-serve.exe
 ```
 
-The hub's files, sockets, processes and terminals go through Bend's JS
+The hub's files, sockets, processes and terminals go through JS
 runtime, which has no Win32 syscalls yet (fast-hub J4, io_sys): the binary
 builds but cannot serve until that lands. CI's `js-native` job runs
 `scripts/js-smoke.sh` on `windows-2025` (`--version`, an unknown flag's exit

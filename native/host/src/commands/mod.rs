@@ -1,7 +1,7 @@
-//! Thread, project and queue requests: `thread.*`, `project.*` and `queue.*` from src/core/hub.bend's `Hub.request.k`
-//! (and `Hub.nav`), as pure planners over the log fold (fold.rs) that return the events the Bend hub logs and the reply it
+//! Thread, project and queue requests: `thread.*`, `project.*` and `queue.*` from src/core/hub's `Hub.request.k`
+//! (and `Hub.nav`), as pure planners over the log fold (fold.rs) that return the events hub logs and the reply it
 //! sends; the handler commits them with `Hub::commit_many` and acknowledges after that returns. Field order is the codec's
-//! (core/codec.bend `Change.encode`), so a log either hub wrote reads in the other.
+//!, so a log either hub wrote reads in the other.
 pub mod fold;
 pub mod key;
 pub mod plan;
@@ -115,7 +115,7 @@ impl RpcHandler for Commands {
 /// The conversation of a thread, newest first, for a handoff to another account (settings/driver.rs).
 pub async fn entries(hub: &Arc<Hub>, th: &str) -> Option<Ctx> { Some(entries_of(hub, th).await) }
 pub use plan::hand_text;
-/// A thread's own entries, newest first (core/handoff.bend `Hand.mine`): the rows filed under it that it wrote, not the messages it sent elsewhere.
+/// A thread's own entries, newest first: the rows filed under it that it wrote, not the messages it sent elsewhere.
 async fn entries_of(hub: &Arc<Hub>, th: &str) -> Ctx { entries_upto(hub, th, usize::MAX).await }
 /// The newest `max` or so entries (whole pages of 32), newest first.
 async fn entries_upto(hub: &Arc<Hub>, th: &str, max: usize) -> Ctx {

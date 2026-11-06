@@ -51,7 +51,7 @@ import org.json.JSONObject
 // The status plane (docs/uber.md): the uberbot's card, and what waits on
 // the person, what runs, the bots, rooms and routines under it, on the home
 // list and as the uberbot's Status tab. All of it is the screen's
-// (src/mobile/plane.bend, merged over hubs by hubs.bend); these composables
+//; these composables
 // only draw it and send each row's act and value back.
 
 // the uberbot's card: a bot's row with the plane's counts
@@ -67,7 +67,7 @@ data class PlaneRow(
 
 data class PlaneMachine(val name: String, val state: String)
 
-// where the uberbot's conversation is held; Bend says whether to offer
+// where the uberbot's conversation is held; says whether to offer
 // "Make this the home" (button) and what a tap sends (act, value)
 data class PlaneHome(val name: String, val line: String, val label: String, val act: String, val value: String, val here: Boolean, val button: Boolean)
 

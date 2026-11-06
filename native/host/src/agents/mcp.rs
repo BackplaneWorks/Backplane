@@ -1,5 +1,5 @@
 //! The Backplane MCP server an agent is started with (`--mcp-config`): JSON-RPC over HTTP POST on a loopback port,
-//! one URL per thread and process generation (`/mcp/<thread>.<gen>?k=<HMAC>`), as src/core/mcp.bend and server.bend's
+//! one URL per thread and process generation (`/mcp/<thread>.<gen>?k=<HMAC>`), as src/core/mcp and server's
 //! Mcp.* do. Ported tools: permission_prompt (with its parked answer), thread_list, thread_read, thread_send,
 //! thread_interrupt, thread_wait, thread_update (title), viewer_show, orchestrator_capabilities, kicad_ipc and kicad_ipc_status (the files stream's crate::files::kicad::ipc). Every other tool the JS hub
 //! lists (delegation and tasks, work/wake/lock, secrets, terminals, browser, kicad_ipc, deploy, order, review, told, task board,
@@ -20,7 +20,7 @@ pub trait ToolSet: Send + Sync {
     fn owns(&self, name: &str) -> bool;
     fn call<'a>(&'a self, thread: &'a str, name: &'a str, a: &'a Value) -> crate::api::Fut<'a, (bool, Value)>;
 }
-pub const TOOLS_JSON: &str = include_str!("../../../../test/gpui/agents/fixtures/mcp-tools.json");
+pub const TOOLS_JSON: &str = include_str!("../../../../test/agents/fixtures/mcp-tools.json");
 pub const IMPLEMENTED: &[&str] = &["orchestrator_capabilities", "review_comment", "review_comments", "work_run", "work_watch", "work_list", "work_cancel", "work_unwatch", "thread_launch", "delegate_task", "task_status", "task_cancel", "thread_list", "thread_read", "thread_send", "thread_update", "thread_wait", "thread_interrupt", "thread_settle", "viewer_show", "permission_prompt", "kicad_ipc", "kicad_ipc_status", "terminal_open", "terminal_read", "terminal_send", "terminal_close", "preview_open", "preview_navigate", "preview_snapshot", "preview_click", "preview_type", "preview_press", "preview_scroll", "preview_evaluate", "preview_wait_for", "preview_resize", "preview_status", "secret_request", "secret_list", "secret_run", "settings_inspect", "settings_propose"];
 const MAX_BODY: usize = 4 << 20;
 const MAX_CONNS: usize = 256;
@@ -58,7 +58,7 @@ pub fn shaped(ok: bool, body: &Value) -> Value {
 }
 fn fail(msg: &str) -> (bool, Value) { (false, json!({"error":msg})) }
 
-/// Perm.* (mcp.bend): the verdicts and the ask cards.
+/// Perm.*: the verdicts and the ask cards.
 pub fn perm_text(v: &Value) -> Value { json!({"content":[{"type":"text","text":v.to_string()}]}) }
 pub fn perm_allow(input: &Value) -> Value { json!({"behavior":"allow","updatedInput":input}) }
 pub fn perm_deny(msg: &str) -> Value { json!({"behavior":"deny","message":msg}) }

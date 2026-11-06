@@ -21,7 +21,7 @@ with the old `Ctrl+K` entry also available outside editors. It searches
 commands, threads and projects and uses the existing action handlers,
 including their Delete/Remove confirmations. `Ctrl+Shift+U` opens the
 uberbot's Chat tab. The restored project/thread bindings come from
-`src/app/nui.bend` (`9059c8681`) and the original palette/parity keymap
+`src/app/nui` (`9059c8681`) and the original palette/parity keymap
 (`b276a5afb`): `Alt+1…9` projects, `Ctrl+1…9` threads in the current
 project, `Ctrl+Shift+[` / `]` previous/next visible thread, without wrapping.
 They follow the sidebar's actual order and expansion state. Hold Alt to show
@@ -43,7 +43,7 @@ The integrated terminal (T3Code's per-thread panel on mod+j) is two pieces:
 a pty effect that runs a shell, and a pure emulator that turns its output
 into styled rows. The app and hub wire them together.
 
-## Pty (`src/server/pty.bend`, `effects/pty.c`)
+## Pty
 
 ```
 Pty.spawn(cmd: String, args: List<&2, String>, cwd: String, cols: U32, rows: U32)
@@ -72,12 +72,11 @@ Pty.resize(s: Socket, cols: U32, rows: U32) -> IO(Socket)
   Linux needs glibc 2.29+ (`addchdir_np`); 2.34+ closes our other fds with
   `addclosefrom_np`. `host.js`'s `Proc.wait` parks on a pidfd (Linux) or a
   20 ms timer, so the loop never blocks. Windows waits for J4's Win32
-  runtime. Test: `bend test/js_pty_test.bend`.
 
 `host.js`'s `Sock.recv_bytes`/`send_bytes` fall back from `recv`/`send` to
 `read`/`write` on ENOTSOCK, and read EIO (a pty's hang-up) as end of stream.
 
-## Emulator (`src/core/vt.bend`)
+## Emulator
 
 ```
 Vt.new(cols: U32, rows: U32) -> Vt
@@ -150,13 +149,13 @@ reflow on resize, OSC 8 links and OSC 52.
 
 ## Terminals in the chat
 
-An agent can put a terminal in its thread (core/emb.bend): a command run
+An agent can put a terminal in its thread: a command run
 through the user's shell (`$SHELL -lc`) on a pty of its own, in the
 thread's folder, shown in the timeline where the person clicks into it
 and types. It is how an agent hands the person a small tool: a TUI, a
 picker, an interactive script, a monitor.
 
-- Tools (src/core/mcp.bend): `terminal_open {command, title, cols, rows}`
+- Tools: `terminal_open {command, title, cols, rows}`
   logs an Act of tone `term` (kind `terminal`, id the terminal's id,
   summary `title\nCOLSxROWS\ncommand`) and runs it; `terminal_read {id,
   waitMs}` answers its state (`running`, `stopped`, `exited N`) and the
@@ -165,11 +164,11 @@ picker, an interactive script, a monitor.
   `terminal_close {id}` hangs it up.
 - Keys: a terminal's bytes travel as `{"t":"term","thread":"x:<thread>:<id>"}`
   like a thread's own shell's, input as `term.input` with that key. The
-  hub's terminal actor (src/server/term.bend) keeps each one's screen
+  hub's terminal actor keeps each one's screen
   (`ETerm`, a `Vt` fed with everything it prints) and answers the
   program's own queries (cursor reports) itself, so clients don't.
 - Snapshots: a client that shows a live terminal it holds no screen for
-  asks `term.snap {key}` once (client.bend's `Emb.sync`); the reply is a
+  asks `term.snap {key}` once; the reply is a
   `term` message with `"reset":[cols,rows]`, bytes that draw the screen on
   a blank terminal (`Emb.snap`: alternate screen, rows, modes, cursor,
   title). A restart sends a reset to every client.
@@ -188,28 +187,27 @@ picker, an interactive script, a monitor.
 - When a program exits its last screen is written to `<home>/terms/<key>`
   (`COLSxROWS<tab>state`, then the snapshot), so reads and snapshots work
   after the hub starts again.
-- Clients: the window (layout.bend's `TL.emb`, kinds 23-26, `Ew.over`
-  draws each screen over its rows; `Lay.pins`; nui.bend routes keys while
+- Clients: the window (layout's `TL.emb`, kinds 23-26, `Ew.over`
+  draws each screen over its rows; `Lay.pins`; nui routes keys while
   the focus is `emb:<key>`), the web (`View.emb`, `View.pins`; host.js
-  puts a field's `data-for` first in what it sends), phones (screen.bend's
+  puts a field's `data-for` first in what it sends), phones (screen's
   `embs`, entry rows of kind `emb`). Actions: `emb-key`, `emb-paste`,
   `emb-restart`, `emb-pin`.
-- Test: `test/emb_test.bend`; end to end `bun test/tools/emb_e2e.ts`.
+- Test: `test/emb_test`; end to end `bun test/tools/emb_e2e.ts`.
 
 ## Cost
 
 Printing a character rewrites one path in the row tree and one in the screen
-tree; a full-screen scroll replaces one row. `test/native/vt_bench.bend`
+tree; a full-screen scroll replaces one row. `test/native/vt_bench`
 feeds about 1 MB: native, ~0.32 s for colored test-runner output and
 ~0.38 s for plain text (120x40); the JS target (bun) ~1.3-1.8 s.
 `Vt.lines` for 120x40 takes a few ms.
 
 ## Tests
 
-- `test/vt_test.bend` (in `scripts/test.sh`): the emulator.
-- `test/native/pty_test.bend`: real programs on a pty (printf with color,
+- `test/vt_test` (in `scripts/test.sh`): the emulator.
+- `test/native/pty_test`: real programs on a pty (printf with color,
   `stty size`, `tput cols`, `cat` echo and ^D, resize, env and cwd, a
-  missing command). `bend test/native/pty_test.bend -o build/pty_test &&
   build/pty_test`.
-- `test/native/vt_dump.bend`: run a program for 1.5 s and print its screen
+- `test/native/vt_dump`: run a program for 1.5 s and print its screen
   (`build/vt_dump -- vi -u NONE file`).

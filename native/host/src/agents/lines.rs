@@ -1,4 +1,4 @@
-//! Claude's stream-json lines -> the events the JS hub writes (src/core/hub.bend: Claude.line.k,
+//! Claude's stream-json lines -> the events the JS hub writes (src/core/hub: Claude.line.k,
 //! Claude.assistant, Claude.result, Usage.*, Turn.claude, Speed.*, Mu.*, Lim.claude). Pure: a `Cx` (the
 //! thread's slice of the read model these rules look at) and a line in, events and live text out.
 //! Not ported (said, not silent): subagent lines (`parent_tool_use_id`), background tasks (`Bg`), todo tools,
@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 
 pub fn s<'a>(v: &'a Value, k: &str) -> &'a str { v.get(k).and_then(Value::as_str).unwrap_or("") }
 pub fn n(v: &Value, k: &str) -> u64 { v.get(k).and_then(Value::as_u64).unwrap_or(0) }
-/// J.Json.as_raw: the text of a JSON number ("" when absent), as the Bend hub reads it.
+/// J.Json.as_raw: the text of a JSON number ("" when absent), as hub reads it.
 pub fn raw(v: &Value, k: &str) -> String { match v.get(k) { Some(Value::Number(x)) => x.to_string(), Some(Value::String(x)) => x.clone(), _ => String::new() } }
 
 /// Digits only, as M.Switch.num reads a setting (anything else ends the number).
@@ -358,7 +358,7 @@ pub fn todo_summary(input: &Value) -> String {
     format!("{done} of {} done{}", ts.len(), if now.is_empty() { String::new() } else { format!(" · now: {now}") })
 }
 
-/// Speed.value (hub.bend): "<api ms>/<out>/<turn api ms>/<turn out>/<turn wall ms>/<timed api ms>/<timed out>/<steps>": the running totals, the last turn's share and its
+/// Speed.value: "<api ms>/<out>/<turn api ms>/<turn out>/<turn wall ms>/<timed api ms>/<timed out>/<steps>": the running totals, the last turn's share and its
 /// wall time, the thread's turns whose share was told, and the turn's model calls. A turn's share is the rise since the last result; a session unseen before is not told.
 pub fn speed_value(old: &str, api: u64, out: u64, wall: u64, steps: u64) -> String {
     let known = !old.is_empty(); let rise = |nowv: u64, before: u64| if nowv >= before { nowv - before } else { nowv };
@@ -490,7 +490,7 @@ mod tests {
         let texts: Vec<String> = [0usize, 2, 3].iter().map(|&i| ev(&out[i])["event"]["delta"]["text"].as_str().unwrap().to_string()).collect();
         assert_eq!(texts, ["ab", "c", "de"]);
     }
-    // law delta_merge_exact (hub.bend Delta.merge): the text of the merged lines is the text of the lines, in order
+    // law delta_merge_exact: the text of the merged lines is the text of the lines, in order
     #[test] fn delta_merge_keeps_all_text_in_order() {
         let mut seed = 12345u64; let mut next = || { seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407); (seed >> 33) as u32 };
         for _ in 0..200 {

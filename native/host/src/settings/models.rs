@@ -1,10 +1,10 @@
-//! The `models` info key (server.bend `Info.models`, core/models*.bend): the picker's models per agent, what is installed, and the labels.
+//! The `models` info key: the picker's models per agent, what is installed, and the labels.
 //! Claude's list is built in and does not depend on an installed CLI; the other agents list what their CLI reports, so with no CLI
 //! installed (a stand-in test hub, a fresh machine) they are empty. CLI probing (`codex`, `grok`, `muse`, `opencode` listings) is not
 //! ported: every agent but Claude shows its configured default until that lands.
 use serde_json::{json, Value};
 
-/// Agy.version: the pinned Antigravity agent (src/core/agy.bend `Agy.version`).
+/// Agy.version: the pinned Antigravity agent.
 pub const AGY_PIN: &str = "1.3.0";
 
 pub fn about() -> Value {

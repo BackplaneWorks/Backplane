@@ -138,7 +138,7 @@ private object LiveSockets : SocketFactory() {
         LiveSocket().apply { bind(InetSocketAddress(local, localPort)); connect(InetSocketAddress(host, port)) }
 }
 
-// Alive.limit in core/desk.bend, in ms
+// Alive.limit in core/desk, in ms
 private const val ALIVE_LIMIT_MS = 40_000L
 
 // What to do on each (re)connect: open this address, try again after the
@@ -171,7 +171,7 @@ class Hub(
     private var spoke = false
 
     // When a frame (a heartbeat included) last arrived. The hub sends one
-    // every 15 s (core/desk.bend's Alive.every); a link silent for more
+    // every 15 s; a link silent for more
     // than Alive.limit (40 s) is dead, whatever TCP says, and is dropped
     // and reconnected from the client's sequence.
     private var heard = SystemClock.elapsedRealtime()

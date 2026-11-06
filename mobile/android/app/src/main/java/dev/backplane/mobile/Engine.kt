@@ -9,7 +9,7 @@ import org.json.JSONObject
 
 import java.util.concurrent.atomic.AtomicInteger
 
-// A JavaScript runtime the Bend client runs in: evaluate an expression,
+// A JavaScript runtime client runs in: evaluate an expression,
 // answer its value as a string.
 interface Js {
     fun evaluate(expr: String): String
@@ -101,7 +101,7 @@ private const val KEEP = 1_000_000
 
 // A single engine thread, with FIFO order in each lane. Person work can
 // overtake queued hub frames; a running JavaScript call finishes first.
-private class Worker : Thread(null, null, "bend", 64L shl 20) {
+private class Worker : Thread(null, null, "engine", 64L shl 20) {
     private val monitor = java.lang.Object()
     private val people = java.util.ArrayDeque<() -> Unit>()
     private val background = java.util.ArrayDeque<() -> Unit>()
@@ -122,7 +122,7 @@ private class Worker : Thread(null, null, "bend", 64L shl 20) {
     }
 }
 
-// The Bend client (bridge.js) on one thread of its own: in V8 where the
+// client (bridge.js) on one thread of its own: in V8 where the
 // WebView offers it, else in QuickJS.
 // Every call answers {"screen": ..., "cmds": [...]} as a string, except
 // resume(), which answers {"since": "<n>", "origin": "<o>"}. The client is
@@ -207,7 +207,7 @@ class Engine(private val app: android.content.Context, source: () -> String, pri
     // a screen was dropped that way: the next recv builds one even for a
     // frame that changes nothing on screen (bridge.js's owed)
     private val owe = java.util.concurrent.atomic.AtomicBoolean(false)
-    // Only the bend thread owns these. Timers enqueue background work;
+    // Only the engine thread owns these. Timers enqueue background work;
     // they never evaluate JavaScript themselves or delay a person call.
     private val timer = android.os.Handler(android.os.Looper.getMainLooper())
     private val window = 250L
@@ -282,7 +282,7 @@ class Engine(private val app: android.content.Context, source: () -> String, pri
 
     // the paired hubs' keys, in order
     suspend fun hubs(keys: List<String>) = out("Backplane.hubs(${org.json.JSONArray(keys)})")
-    // a choice of this device that Bend draws by ("view": "projects" or "active")
+    // a choice of this device that draws by ("view": "projects" or "active")
     suspend fun local(key: String, value: String) = out("Backplane.local(${q(key)}, ${q(value)})", person = true)
     suspend fun screen() = out("Backplane.screen()", person = true)
     internal suspend fun viewport(thread: String, value: TimelineReading) = out("Backplane.viewport(${q(thread)}, ${q(value.id)}, ${value.offset}, ${q(value.first)}, ${q(value.last)})", screen = false, person = true)
@@ -340,7 +340,7 @@ class Engine(private val app: android.content.Context, source: () -> String, pri
     }
     suspend fun act(action: String, value: String) = out("Backplane.act(${q(action)}, ${q(value)})", person = true)
     suspend fun quiet(action: String, value: String) = out("Backplane.quiet(${q(action)}, ${q(value)})", screen = false, person = true)
-    // the secret box's Save: the value goes in one request built by Bend
+    // the secret box's Save: the value goes in one request built by
     // (bridge.js's Backplane.secret), never as an action or a form field
     suspend fun secret(packed: String) = out("Backplane.secret(${q(packed)})", person = true)
     suspend fun online(key: String, b: Boolean, epoch: String = "") = out("Backplane.online(${q(key)}, $b, ${q(epoch)})")

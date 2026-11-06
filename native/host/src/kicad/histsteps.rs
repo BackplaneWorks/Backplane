@@ -1,5 +1,5 @@
 //! `history.steps {thread}`: the design-history steps of a thread (agents/hist.rs captures them onto `refs/backplane/checkpoints/<b64 thread>/steps`), oldest first, with where the
-//! repository is, so a client can name each step's file as a version (`git\t<gitdir>\t<commit>\t<len top>\t<top>/<rel>`, core/hist.bend) and watch it or compare two steps.
+//! repository is, so a client can name each step's file as a version and watch it or compare two steps.
 use crate::{files::git as fgit, hub::Hub};
 use serde_json::{json, Value};
 use std::sync::Arc;

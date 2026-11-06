@@ -1,4 +1,4 @@
-//! Filing (hub.bend `Mail.file`, `Mail.body`, `Mail.room.file`, `Mail.funnel`; mailowner.bend `Owner.track`): a mail's body is appended to its conversation's
+//! Filing: a mail's body is appended to its conversation's
 //! journal, then its header events (and the owner ticket, for mail to the uberbot) are committed. Routing (waking triage and private threads) is slice 3:
 //! `Router` is its seam. No text or address is logged here.
 use super::{conv_event, header_event, store, Body, Conv, Hdr, Origin};
@@ -88,7 +88,7 @@ impl Bots {
     async fn file_new(&self, w: &World, body: Body, extra: Option<Vec<Value>>, after: Vec<Value>) -> Result<bool, String> {
         let home = self.hub.cfg.home.clone(); let b2 = body.clone();
         if let Err(e) = tokio::task::spawn_blocking(move || store::append(&home, &b2)).await.map_err(|e| e.to_string())? {
-            // MailJob.failed: counted and logged (the kind only); the changes that led here stay committed, as in Bend; mail to the uberbot's triage is told by the router
+            // MailJob.failed: counted and logged (the kind only); the changes that led here stay committed, as in ; mail to the uberbot's triage is told by the router
             eprintln!("mail: append failed: {e}"); if let Some(r) = self.router.get() { r.failed(&body, e) } return Err(e.to_string())
         }
         let mut ev: Vec<Value> = vec![];
@@ -119,7 +119,7 @@ impl Bots {
 
 impl Bots {
     /// MailStore.recover + Hub.mail.recovered: a body that reached the journal but whose header never reached the log (a crash between the two) gets its
-    /// ConvSet (if the conversation is unknown), MailPosted and, for the uberbot's, an owner ticket now (the outbox walk routes it). 
+    /// ConvSet (if the conversation is unknown), MailPosted and, for the uberbot's, an owner ticket now (the outbox walk routes it).
     pub async fn mail_recover(&self) -> usize {
         if crate::copy::on() { return 0 } // it commits headers: not on a copy of a log
         let w = self.world().await; let dir = self.hub.cfg.home.join("mail");

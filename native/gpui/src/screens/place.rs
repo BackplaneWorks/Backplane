@@ -1,6 +1,6 @@
 //! Where the person is, kept across a relaunch: the view the hub last drew (its target and session: thread, panel, viewer, folds), the scroll
 //! place per thread, and the sidebar. One small file (0600) beside the token, like the drafts, which stay in their own file and out of this one.
-//! Written a moment after each change, and on quit; SIGTERM quits cleanly, so a new build taking over loses nothing (scripts/gpui/dev-reload.sh).
+//! Written a moment after each change, and on quit; SIGTERM quits cleanly, so a new build taking over loses nothing (scripts/dev-reload.sh).
 //! A scripted run starts clean and saves nothing, unless BACKPLANE_GPUI_PLACE=1 asks for it (the reload test).
 use crate::{hub::Config, Backplane};
 use gpui::Context;

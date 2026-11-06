@@ -4,7 +4,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 // This decodes the bounded MMail projection. Ordering, recipients, body windows,
-// send correlation and automation policy remain in Bend.
+// send correlation and automation policy remain in .
 data class MailroomRow(val id: String, val subject: String, val who: String, val head: String,
     val unread: Boolean, val live: Boolean)
 data class MailroomMessage(val id: String, val who: String, val text: String, val sourceURI: String)

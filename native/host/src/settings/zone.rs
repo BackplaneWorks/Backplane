@@ -1,7 +1,7 @@
-//! The person's time zone (core/sched.bend `Zone.*`, hub.bend `Zone.report` / `Zone.set`, server.bend `ZoneJob.*`): `zone.report {zone}` (a phone says
+//! The person's time zone: `zone.report {zone}` (a phone says
 //! where it is: kept as `person.tz.device`) and `zone.set {zone}` (Settings; "" or "auto" follows the phone). The hub keeps each zone's POSIX
 //! rule as the setting `tz.rule.<name>`, read from the footer line of the system's TZif file, so routines follow daylight saving.
-//! Not ported: parsing and evaluating a POSIX rule (`core/tz.bend`'s `Tz.*`: offset at an instant, wall clock, gaps and overlaps) belongs with
+//! Not ported: parsing and evaluating a POSIX rule belongs with
 //! the routines, which are the bots lane's; a rule here is only checked to be a plausible footer.
 use crate::{api::{Caller, Fut, RpcHandler}, hub::{now_ms, Hub}};
 use serde_json::{json, Value};
@@ -88,7 +88,7 @@ mod tests {
         zi();
         assert_eq!(rule("Europe/Helsinki"), "EET-2EEST,M3.5.0/3,M10.5.0/4"); assert_eq!(rule("Europe/Nowhere"), ""); assert_eq!(rule("../../etc/passwd"), "");
     }
-    #[tokio::test(flavor = "multi_thread")] async fn report_and_set_write_the_settings_the_bend_hub_writes() {
+    #[tokio::test(flavor = "multi_thread")] async fn report_and_set_write_the_settings_the_hub_writes() {
         zi();
         let home = std::env::temp_dir().join(format!("bp-zh-{}", std::process::id())); let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap();
         let hub = Hub::start(Cfg { home: home.clone(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();

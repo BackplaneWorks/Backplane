@@ -1,4 +1,4 @@
-//! The mail requests a client makes (src/core/hub.bend `Mail.request.ui`, `Mail.list/find/read/mark/tag/send`; MailJob.page in server.bend): mail.list, mail.read,
+//! The mail requests a client makes: mail.list, mail.read,
 //! mail.find, mail.mark, mail.tag, mail.send. They are the person's: always on, whatever `mail.on` says. Bodies are read from the journal (store.rs) only here.
 //! Not ported (PARITY): mail.read of a room's conversation (RoomHistory), owner.mail (the owner's exchange with other machines).
 use super::{file::subject, store, Body, Conv, Hdr, Origin};
@@ -72,7 +72,7 @@ impl Bots {
 
     /// Mail.ui.request: the target must be a thread of this hub (a bot's address is its thread). A bot's thread: the mailbox only. Any other: the message is
     /// delivered to the thread as the person's first, then filed (Mail.send.worker's order), and the reply comes last, so a failed delivery or filing is told.
-    /// (Bend replies before it files; replying after the durable step is stricter on purpose.)
+    ///
     async fn mail_send(&self, id: &Value, p: &Value) -> Vec<Value> {
         let to = gs(p, "to");
         let w = self.world().await;

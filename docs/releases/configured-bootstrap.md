@@ -1,7 +1,7 @@
 # Configured producer bootstrap
 
 This workflow starts the first real protected producer run. It does not require a
-previous successful producer run, emit Bend on a small runner, install anything,
+previous successful producer run, emit on a small runner, install anything,
 create a tag or publish a release. Unix native jobs use the owner's split03
 `service-release.py native`; Windows and Android use their existing producers.
 iOS continues on the coordinated local Mac with the accepted signing identity.
@@ -74,7 +74,7 @@ introduced. It requires HTTPS and an independently supplied SHA, rejects unsafe
 archive entries and verifies the full source envelope. The only commands run
 are producers in the checked-out source. Generated native requests bind the
 actual installed compiler path/hash/version. Unix native uses one C lane, and
-never requires Bend on that runner. Linux selects an installed Clang19+ or extracts the official LLVM21.1.8
+never requires on that runner. Linux selects an installed Clang19+ or extracts the official LLVM21.1.8
 compiler into a fresh user prefix, using the SHA256 subject from the official
 release's per-asset JSONL. No sudo/admin command or LLVM build occurs. Only the
 compiler, its required LLVM libraries and compiler resource headers are retained;

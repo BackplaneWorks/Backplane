@@ -140,7 +140,6 @@ lane accepts an existing package and its expected SHA256:
 scripts/ahead-validation/memory.sh /absolute/backplane-serve EXPECTED_SHA256
 ```
 
-It requires the actual bend lock and normal host admission. Set
 `AHEAD_MEMORY_SOAK_BIN` and `AHEAD_MEMORY_SOAK_SHA256` when invoking
 `scripts/ahead-validation/ci.sh` to include it there. Without those inputs the
 script explicitly reports the memory gate as not run. UI/source proof receipts

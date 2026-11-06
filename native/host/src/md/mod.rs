@@ -1,7 +1,7 @@
-//! Markdown for the thread screen: src/web/dom.bend's `Md.render` (blocks and inline) with the links of src/core/links.bend and
-//! the refs of src/core/ref.bend, and `Mob.nodes` (src/mobile/screen.bend), which turns the nodes into the JSON the apps draw.
-//! One parser for all clients in Bend; this is its Rust twin, checked against it on a corpus (test/gpui/screen/md_oracle.sh).
-//! Strings count code points like Bend's; `trim`, `is_space`, `is_alpha`, `is_digit` are Base's (ASCII only).
+//! Markdown for the thread screen: src/web/dom's `Md.render` (blocks and inline) with the links of src/core/links and
+//! the refs of src/core/ref, and `Mob.nodes`, which turns the nodes into the JSON the apps draw.
+//! One parser for all clients in ; this is its Rust twin, checked against it on a corpus (test/screen/md_oracle.sh).
+//! Strings count code points like ; `trim`, `is_space`, `is_alpha`, `is_digit` are Base's (ASCII only).
 pub mod links;
 pub mod refs;
 mod inline;
@@ -9,7 +9,7 @@ mod block;
 
 use serde_json::{json, Map, Value};
 
-/// A node of Dom (src/web/dom.bend): an element with its attributes (the click handlers are not kept: the JSON never shows them) or text
+/// A node of Dom: an element with its attributes (the click handlers are not kept: the JSON never shows them) or text
 #[derive(Clone, Debug, PartialEq)]
 pub enum Node { El { tag: &'static str, attrs: Vec<(&'static str, String)>, kids: Vec<Node> }, Txt(String) }
 

@@ -355,7 +355,7 @@ private fun Choice(options: List<Pair<String, String>>, current: String, pick: (
     }
 }
 
-// The hub's settings (the rows Bend sends for Settings), on a page of their
+// The hub's settings, on a page of their
 // own: it shows at once with the rows last seen (kept on disk), asks the hub
 // in the background and takes the fresh rows in place; with none yet, the
 // page's shape as placeholders. Leaving it closes the hub's Settings.

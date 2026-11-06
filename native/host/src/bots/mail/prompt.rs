@@ -1,5 +1,5 @@
-//! What a bot's agent is told (bothub.bend `Bots.prompt.*`, `Bots.turn`): who it is, how it works, the uberbot's part, a triage run's and a back office's role, and the memory a turn starts
-//! with. The words are generated from the Bend source (prompt_text.rs).
+//! What a bot's agent is told: who it is, how it works, the uberbot's part, a triage run's and a back office's role, and the memory a turn starts
+//! with. The words are generated from source (prompt_text.rs).
 use super::{escalate::PRIVATE_BRIEF, prompt_text as T, route::{mem_block, ref_uri, Ctx}};
 use crate::bots::{clock::Zones, rpc::{now_s, Bots, HOP_MAX}, sched_text::zone_source, world::{Bot, World}};
 use std::sync::Arc;

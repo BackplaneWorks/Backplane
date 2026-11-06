@@ -138,7 +138,7 @@ final ones agree; there is no "draft model" to be overruled.
 What the person sees:
 
 - **Words appear once, in place, in the draft.** Each hypothesis carries
-  every word's timing and confidence. Bend (`Vs.*`, Settle) commits a word
+  every word's timing and confidence. (`Vs.*`, Settle) commits a word
   once two hypotheses in a row agree on it and it ends at least 0.4 s
   before the audio so far; committed words are written into the draft and
   never move or change again. Unsure words (under 85 %) at the end wait for
@@ -179,7 +179,7 @@ runs where the engine is.**
 - *A phone (phase 2, `device`)*: Apple's on-device SpeechAnalyzer or
   Android's on-device recognizer hears it on the phone, biased with the top
   dictionary terms as contextual strings; nothing leaves the phone. The
-  text then goes through the same correction pass (Bend, in the phone's
+  text then goes through the same correction pass (, in the phone's
   bridge), so results match the other clients.
 - *The hub has no engine*: a paired machine of the owner's that has the
   local model can take the session over `/far/rpc` (later); otherwise cloud
@@ -206,7 +206,7 @@ or one project), counts (used, confirmed, undone) and when it was last used.
 
 **Storage and sync.** Changes are ops (`add`, `edit`, `remove`, `count`)
 logged as a new event `VoiceOp`, stamped with the hybrid stamps of
-`ubop.bend` and folded into state: last writer wins per entry and field,
+`ubop` and folded into state: last writer wins per entry and field,
 and counts are per-machine counters merged by maximum, so two machines that
 both learn the same fix add up. Paired machines exchange ops the way the
 uberbot's ops travel (`/far/rpc`, pulled from the last stamp seen). Phones
@@ -229,9 +229,9 @@ used, then spoken forms. The hub writes the ranked list for each session.
   last ~200 characters of the draft, so the model continues the sentence it
   is in.
 
-### 5. The correction pass (Bend, every engine)
+### 5. The correction pass
 
-Pure, in `src/core/voice.bend`, with laws. Each final segment goes through
+Pure, in `src/core/voice`, with laws. Each final segment goes through
 it in order, and each change keeps its span and rule so it can be shown and
 undone:
 
@@ -241,7 +241,7 @@ undone:
    first, word-bounded, any case, keeping the case of the sentence start.
 3. **Term matching**: windows of 1-3 heard words against each term and its
    spoken forms, scored by edit distance on a phonetic key (a Metaphone-like
-   code written in Bend: "key cad" and "kicad" share `KKT`) and on letters.
+   code written in : "key cad" and "kicad" share `KKT`) and on letters.
    A high score with a joined form ("ki cad" → KiCad) is a rewrite; a
    middling one becomes an unsure word with that guess.
 4. **Canonical form**: any match of a term ignoring case and spaces is

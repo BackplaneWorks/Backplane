@@ -1,6 +1,6 @@
 //! The Settings > Machines requests: `bots.invite` (make an invite to paste on another machine), `bots.join` (use one),
 //! `bots.unpeer` (remove a link), `bots.peer_own` (the owner says whether a link is one of their machines). The same
-//! machinery as the automatic pairing (`peering.rs`); the replies are the Bend hub's (`BotJob.reply`).
+//! machinery as the automatic pairing (`peering.rs`); the replies are hub's (`BotJob.reply`).
 use super::peering::Peering;
 use crate::{api::{Caller, Fut, RpcHandler}, hub::Hub};
 use serde_json::{json, Value};

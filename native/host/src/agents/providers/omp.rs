@@ -1,4 +1,4 @@
-//! Oh My Pi (`omp --mode rpc-ui`, can1357/oh-my-pi 18.12): src/core/omp.bend. A fork of Pi with its own RPC dialect: JSON commands on stdin, a
+//! Oh My Pi (`omp --mode rpc-ui`, can1357/oh-my-pi 18.12): src/core/omp. A fork of Pi with its own RPC dialect: JSON commands on stdin, a
 //! `ready` frame, then responses and session events on stdout, one a line, the events and the extension dialogs Pi's (pi.rs), so most lines are
 //! read the way Pi's are. One process per turn:
 //!   0 set_event_filter: message updates as deltas only;
@@ -124,7 +124,7 @@ fn ui(t: &pi::Turn, o: &Value) -> Out {
 }
 
 /// Omp.line: one line from omp. Lines this turn reads nothing from (the whole conversation, the system prompt and the command list come in some
-/// of them) fall to the default arm; Bend skips them by their first bytes before parsing, which changes nothing observable.
+/// of them) fall to the default arm; skips them by their first bytes before parsing, which changes nothing observable.
 pub fn line(a: &mut Acp, t: &pi::Turn, o: &Value) -> Out {
     match gs(o, "type", "") {
         "response" => reply(a, t, o),
@@ -144,7 +144,7 @@ pub fn line(a: &mut Acp, t: &pi::Turn, o: &Value) -> Out {
 static LAUNCHES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// OmpLaunch.prepare: one private folder a turn under `<home>/omp` (0700) holding the instructions and the extension (0600, created exclusively),
 /// so the prompt never enters argv. Removed by `remove` after the process exits.
-/// NOTE: Bend masks the prompt (Vx.Vx.mask, the secret vault) before it is written; the Rust hub has no vault yet, so the actor must pass `TurnIn.prompt` masked once it does.
+/// NOTE: masks the prompt (Vx.Vx.mask, the secret vault) before it is written; the Rust hub has no vault yet, so the actor must pass `TurnIn.prompt` masked once it does.
 pub fn prepare(home: &str, prompt: &str, extension: &str) -> std::io::Result<std::path::PathBuf> {
     use std::io::Write; use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
     let root = std::path::Path::new(home).join("omp"); std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&root)?;
@@ -254,7 +254,7 @@ mod tests {
     #[test] fn the_first_lines_filter_events_then_open_the_session() {
         let mut d = OmpDriver::new(); assert_eq!(d.start(&ti("full-access")), vec![r#"{"id":"0","type":"set_event_filter","events":null,"messageUpdates":"delta"}"#, r#"{"id":"1","type":"get_state"}"#]);
     }
-    #[test] fn the_command_line_is_the_bend_hubs() {
+    #[test] fn the_command_line_is_the_hubs() {
         let d = OmpDriver::new(); let mut a = ti("auto-accept-edits"); a.model = "default".into(); a.effort = "auto".into();
         let dir_ = std::env::temp_dir().join(format!("bp-omp-argv-{}", std::process::id())); a.home = dir_.to_string_lossy().into(); a.prompt = "THE PROMPT".into();
         let v = d.argv(&a); let launch = d.launch.borrow().clone().unwrap();
@@ -333,6 +333,6 @@ mod tests {
         let r = feed(&mut d, &[r#"{"type":"response","id":"1","success":true,"data":{"sessionId":"new","messageCount":0}}"#]);
         assert_eq!(r[0].plain()[1], json!({"type":"notice","message":"Oh My Pi had no saved conversation for this thread, so this turn starts without the earlier context. This thread's history in Backplane is kept."}));
     }
-    // the file is generated from omp.bend by test/gpui/agents/prov-pi/gen_ext.py; its bytes are pinned
-    #[test] fn the_extension_is_omp_bends_byte_for_byte() { use sha2::{Digest, Sha256}; assert_eq!(hex::encode(Sha256::digest(EXT.as_bytes())), "a5ebd02e761b170ef6daca3d07c6bc168f978cf6062a9237740d79d723c3e442") }
+    // the file is generated from omp by test/agents/prov-pi/gen_ext.py; its bytes are pinned
+    #[test] fn the_extension_is_omp_byte_for_byte() { use sha2::{Digest, Sha256}; assert_eq!(hex::encode(Sha256::digest(EXT.as_bytes())), "a5ebd02e761b170ef6daca3d07c6bc168f978cf6062a9237740d79d723c3e442") }
 }

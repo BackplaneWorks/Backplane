@@ -1,4 +1,4 @@
-//! server/kicad.bend's `Files.read`: a project's canonical design files. `.backplane.json` ("project", "pcb",
+//! server/kicad's `Files.read`: a project's canonical design files. `.backplane.json` ("project", "pcb",
 //! "schematic") wins; else the `.kicad_pro` in the root, else the shallowest found up to four folders down
 //! (copies folders last, hidden folders, `*-backups` and node_modules skipped; a worktree under `.backplane` is not the project's).
 use std::path::Path;

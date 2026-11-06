@@ -1,4 +1,4 @@
-//! The Context panel's sections (core/usage.bend `Ts.sections`, laws in usage tests): what the thread holds in its context now, its last turn and the thread's totals,
+//! The Context panel's sections: what the thread holds in its context now, its last turn and the thread's totals,
 //! read from the thread's settings the agents lane writes (`usage.<t>`, `turn.last.<t>`, `tok.<epoch>.t.<t>`), with Claude's speed rows (`turn.speed.<t>`),
 //! "This session by model" (`turn.models.<t>`) and the speed note.
 use serde_json::{json, Value};
@@ -75,7 +75,7 @@ pub fn sections(provider: &str, usage: &str, last: &str, tv: &str, speed: &str, 
 
 #[cfg(test)] mod tests { use super::*;
     fn flat(v: &[Value]) -> Vec<String> { v.iter().flat_map(|s| s["rows"].as_array().unwrap().iter().map(|r| format!("{}={}", r["label"].as_str().unwrap(), r["value"].as_str().unwrap()))).collect() }
-    #[test] fn formats_as_bends_panel_does() {
+    #[test] fn formats_as_panel_does() {
         assert_eq!((num(7), num(1234), num(1234567), usd(421_000_000), usd(1_200_000_000)), ("7".into(), "1,234".into(), "1,234,567".into(), "$0.4210".into(), "$1.20".into()));
         let s = flat(&sections("claude", "45000/200000", "1/2/3/4/5/6/1793900000/co/claude|default", "2/2/4/6/8/10/12/2/2", "", ""));
         let want = ["Held now=45,000 of 200,000 (22%)", "Room left=155,000", "Model=claude · default", "Input=—", "Cache read=—", "Cache write=—", "Output=4", "Cost=$0.0000",

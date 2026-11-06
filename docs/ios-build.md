@@ -37,7 +37,6 @@ package, capability, entitlement or Info.plist key.
 ## Build it (on the Mac)
 
 Needs Xcode 16 or newer (iOS 17 deployment target) and, to make
-`bridge.js`, bend and Bun in the checkout's PATH (`hs-mac-mini` has both).
 
 1. `git pull` in a checkout of the repository.
 2. Simulator: `mobile/ios/build.sh sim`. It makes `bridge.js`
@@ -45,7 +44,6 @@ Needs Xcode 16 or newer (iOS 17 deployment target) and, to make
    `mobile/ios/Backplane/`, builds Debug for the Simulator, installs it on the
    booted iPhone (or boots one) and launches it. With a `bridge.js` already
    there (e.g. copied from a Linux build's `mobile/build/assets/bridge.js`),
-   `BACKPLANE_SKIP_JS=1 mobile/ios/build.sh sim` skips bend.
 3. A real iPhone over USB or Wi-Fi: put `mobile/ios/signing.env` beside the
    script (never committed) with at least `TEAM_ID=` (and `BUNDLE_ID=` if
    not `dev.backplane.mobile`), trust the Mac on the phone, then

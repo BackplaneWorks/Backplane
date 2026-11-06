@@ -49,7 +49,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 
-// The composer's mic (screen.bend's Mob.voice): the phone records itself.
+// The composer's mic: the phone records itself.
 // The first press asks for the microphone if it must, starts recording and
 // sends "voice" with "client"; the next (or the strip's Stop) ends it.
 @Composable

@@ -41,7 +41,7 @@ impl Cli {
     }
 }
 
-// ---- where the provider CLIs are (clipath.bend): a hub started from a launcher or a service has a PATH without the login shell's additions (nvm, volta, ~/.local/bin...) ----
+// ---- where the provider CLIs are: a hub started from a launcher or a service has a PATH without the login shell's additions (nvm, volta, ~/.local/bin...) ----
 /// CliPath.merge: each directory once, the first of each, in order, none empty.
 pub fn merge_dirs(parts: &[Vec<PathBuf>]) -> Vec<PathBuf> { let mut out: Vec<PathBuf> = vec![]; for d in parts.iter().flatten() { if !d.as_os_str().is_empty() && !out.contains(d) { out.push(d.clone()) } } out }
 fn semver_key(s: &str) -> (u64, u64, u64) { let mut p = s.trim_start_matches('v').split('.').map(|x| x.parse::<u64>().unwrap_or(0)); (p.next().unwrap_or(0), p.next().unwrap_or(0), p.next().unwrap_or(0)) }

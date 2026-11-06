@@ -7,7 +7,7 @@ not read, converted or overwritten by the native app.
 
 The public form keeps the original description, an editable complete report,
 evidence review, screenshot consent and opening receipt on the device. Filling
-from the description calls the shared Bend formatter with only the typed text,
+from the description calls the shared formatter with only the typed text,
 OS family, the app's short version and typed behavior details. It does not supply
 the native screen, origin context, thread, project, filesystem path or account.
 The complete edited report goes through the shared body-only preview, so OS and
@@ -81,7 +81,6 @@ destination restrictions and duplicate-opening receipts.
 On this Linux host, Kotlin model and adapter checks pass. Swift compiler/Xcode
 are unavailable, so the iOS model executable and SwiftUI build were not run.
 Android `:app:compileDebugKotlin` passed offline using Java 17, two workers and
-a 1536 MB Gradle heap under the shared `bend` build lock. This is compilation,
 not an APK or device qualification. No simulator/device UI, system picker,
 Safari/Android chooser, browser fragment round trip, GitHub prefill/sign-in or
 actual submission has been exercised. No app was installed and no release,

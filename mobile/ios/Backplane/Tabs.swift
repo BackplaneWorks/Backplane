@@ -3,7 +3,7 @@ import UserNotifications
 
 // The tab bar (ios-snappy): Home, Threads, Bots, Routines, Settings. Each tab
 // has its own stack, kept by AppModel, and its own scroll position (the
-// tabs stay alive); Bend has one selection, which AppModel re-selects when a
+// tabs stay alive); has one selection, which AppModel re-selects when a
 // tab comes up. Every view here is an existing one moved, or a list over
 // what the screen already carries.
 struct AppTabs: View {
@@ -534,7 +534,7 @@ struct AppSettingsTab: View {
     }
 }
 
-// The hub's settings (the rows Bend sends for Settings), on a page of their
+// The hub's settings, on a page of their
 // own: it shows at once with the rows last seen (kept on disk), asks the hub
 // in the background and takes the fresh rows in place; with none yet, the
 // page's shape as placeholders. Leaving it closes the hub's Settings.

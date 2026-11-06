@@ -1,4 +1,4 @@
-//! One-shot writing (agent.bend OneShot.*, server.bend OneShot.run): a light model with no tools, no MCP and no session, from the text-generation settings
+//! One-shot writing: a light model with no tools, no MCP and no session, from the text-generation settings
 //! (`text.provider` claude | codex, `text.model`; empty or another provider's model means the provider's light one). In a test hub the CLI is the stand-in folder's
 //! (`Cli::resolve`), never a real model. Grok and Muse one-shots are not wired (their CLIs are not run by this seam yet): they answer None.
 use super::{proc, Agents};

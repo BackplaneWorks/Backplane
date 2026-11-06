@@ -1,4 +1,4 @@
-//! A thread's background work as Claude reports it (model.bend's Bg.*, hub.bend's Bg.system / Sub.* / Prog.*):
+//! A thread's background work as Claude reports it:
 //! rows "id<TAB>doing<TAB>call<TAB>title<TAB>kind<TAB>tokens" kept as a WorkSet "bg"; each task's own steps go to the log
 //! "@sub:<thread>". Pure; `Cx::line` calls it.
 pub const ENDED: &str = "\u{1}ended:";
@@ -45,7 +45,7 @@ pub fn listed(o: &serde_json::Value) -> bool {
         && !o.get("owned_by_subagent").and_then(|v| v.as_bool()).unwrap_or(false) && o.get("is_backgrounded").and_then(|v| v.as_bool()).unwrap_or(true)
 }
 
-/// Lost.why / Lost.row / Lost.text / Lost.new / Lost.unknown (hub.bend): the work lost when the process that owned it goes.
+/// Lost.why / Lost.row / Lost.text / Lost.new / Lost.unknown: the work lost when the process that owned it goes.
 pub fn lost_why(why: &str) -> String { match why { "restart" => "A restart of Backplane".into(), "exit" => "The agent process exiting".into(), "replaced" => "Restarting the agent for a new model or mode".into(), w => w.to_string() } }
 /// Work.row.title: a row's title, else what it does
 pub fn work_title(l: &str) -> String { let t = field(l, 3); if t.is_empty() { doing(l) } else { t } }

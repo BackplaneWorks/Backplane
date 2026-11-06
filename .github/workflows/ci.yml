@@ -2,7 +2,7 @@ name: ci
 on:
   pull_request:
   push:
-    branches: [main, gpui-next]
+    branches: [main]
 jobs:
   rust:
     runs-on: ubuntu-latest

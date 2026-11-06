@@ -174,7 +174,7 @@ fn origin(f: &str, k: &str, r: &str) -> (String, String, String) { (f.into(), k.
 fn uber_bodies_lease(m: &str, t: u64) -> String { crate::bots::uber::b_lease(m, t) }
 
 #[tokio::test] async fn a_memory_saved_before_the_first_ops_does_not_lose_who_lease_and_bind() {
-    // the Bend hub's bug: an op before the minute's init made vv 1, and init never ran. Here init runs whenever this machine has no bind op, and once
+    // hub's bug: an op before the minute's init made vv 1, and init never ran. Here init runs whenever this machine has no bind op, and once
     let (hub, bots, _r) = start("parity-init", "").await;
     let r = rpc(&hub, "bots.create", json!({"name":"bub","uber":true})).await; let bub = r["bot"].as_str().unwrap().to_string();
     until(&hub, |l| l.iter().any(|e| e["$"] == "UberSet")).await;
@@ -224,9 +224,9 @@ fn uber_bodies_lease(m: &str, t: u64) -> String { crate::bots::uber::b_lease(m, 
     let w = bots.world().await; assert_eq!(w.run_bot(&lane).unwrap().id, bub); assert!(w.managed(&at) && w.managed(&lane)); let l = lists(&w); assert!(l[&chat].contains(&"mail_list"));
 }
 
-// ---- the JS hub's own run of the scenario (test/gpui/bots/record_triage.mjs), compared line by line ----
-const JS_TRIAGE: &str = include_str!("../../../../../test/gpui/bots/fixtures/js-triage.jsonl");
-const JS_TRIAGE_CALLS: &str = include_str!("../../../../../test/gpui/bots/fixtures/js-triage-calls.json");
+// ---- the JS hub's own run of the scenario (test/bots/record_triage.mjs), compared line by line ----
+const JS_TRIAGE: &str = include_str!("../../../../../test/bots/fixtures/js-triage.jsonl");
+const JS_TRIAGE_CALLS: &str = include_str!("../../../../../test/bots/fixtures/js-triage-calls.json");
 
 /// the events routing and escalation are about: a hub's run ids become ordinals, its clock, machine and uid go
 /// a pair's two addresses in one order: `pair` sorts them as text, and a hub id's own digits (`-15` before `-7`) differ from run to run

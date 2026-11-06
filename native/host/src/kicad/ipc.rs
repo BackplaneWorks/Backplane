@@ -1,4 +1,4 @@
-//! KiCad IPC on the hub (src/server/kserve.bend's actor + server.bend's `KIpc.*`), in Rust.
+//! KiCad IPC on the hub, in Rust.
 //!
 //! The transport ([`Transport`]) is in the hub: pure-Rust nng and protobuf (kipc.rs over nng.rs and proto.rs), so no Bun or JS
 //! process runs under it. With env `BACKPLANE_KIPC_BIN` set it is the old Bun helper `backplane-kipc` (tools/kipc, NDJSON on
@@ -6,7 +6,7 @@
 //! Rust owns the actor: one record per project, at most two servers, requests wait for a server
 //! that is starting, the 1/5/30 s restart schedule, the `-bp.N` version check after Ping + GetVersion, the server a third
 //! project retires (asked to `kiapi.backplane.Shutdown`, never killed), the 18 commands a headless KiCad refuses, the bp.3
-//! guards and the words shown. The pure rules are in kserve.rs (a Rust twin of core/kserve.bend until the rules process is
+//! guards and the words shown. The pure rules are in kserve.rs (a Rust twin of core/kserve until the rules process is
 //! wired). NOTHING HERE SENDS A SIGNAL TO ANY PROCESS: KiCad's servers end themselves (`--parent-pid`, `--idle-exit`,
 //! `Shutdown`); the Bun helper, when used, ends when its stdin closes (the hub is gone); a child is only ever `wait`ed for.
 //!

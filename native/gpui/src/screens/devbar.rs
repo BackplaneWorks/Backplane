@@ -1,5 +1,5 @@
 //! Test builds: a thin strip at the top of the window while a build is being made or waits to relaunch the app.
-//! The writers (scripts/gpui/dev-build.sh, fresh-watch.sh) keep one JSON line in `$BACKPLANE_DEV_STATUS` (default `~/.backplane-gpui-dev/STATUS`):
+//! The writers (scripts/dev-build.sh, fresh-watch.sh) keep one JSON line in `$BACKPLANE_DEV_STATUS` (default `~/.backplane-gpui-dev/STATUS`):
 //! `{"phase":"building|ready|waiting|relaunching","text":"...","done":n,"total":m}`. They rewrite it at least every few seconds while they work and remove it when done, so
 //! a file nobody has touched for `STALE` seconds is a dead writer's and shows nothing.
 use crate::{theme, Backplane};

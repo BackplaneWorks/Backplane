@@ -1,7 +1,7 @@
-//! The settings families the first fold left out (src/core/model.bend State.apply): uber ops, wake subscriptions, named locks,
+//! The settings families the first fold left out: uber ops, wake subscriptions, named locks,
 //! token totals and the last turn, deploy_main's line, a reminder's Act, and the task tools' todo edits. Each is a pure fold over
-//! `State` with no state of its own: bounded by the settings it writes, which the Bend fold keeps too. Equal to State.replay for
-//! these events by the differential oracle (test/gpui/parity/oracle, `--skip none`).
+//! `State` with no state of its own: bounded by the settings it writes, which fold keeps too. Equal to State.replay for
+//! these events by the differential oracle (test/parity/oracle, `--skip none`).
 #[path = "json.rs"] pub mod json;
 #[path = "uber.rs"] mod uber;
 #[path = "todo.rs"] mod todo;
@@ -113,7 +113,7 @@ impl State {
         self.set(&format!("turn.last.{th}"), &format!("{}/{}/{}/{}/{}/{}/{at}/{known}/{pm}", p[0], p[1], p[2], p[3], p[4], p[5]));
     }
 
-    // ---- deploy_main's line (core/ship.bend) ----
+    // ---- deploy_main's line ----
     fn ship(&self) -> Ship {
         match parse(&self.get("deploy.ship", "")) {
             None => Ship::idle(),
@@ -185,8 +185,8 @@ mod tests {
     use super::*;
     fn fold_all(lines: &[String]) -> State { let mut st = State::new(); for l in lines { st.apply_line(l); } st }
     fn ev(v: Value) -> String { serde_json::to_string(&v).unwrap() }
-    #[test] fn tok_day_matches_bend_civil_dates() {
-        // rust tok_day_matches_bend_civil_dates
+    #[test] fn tok_day_matches_civil_dates() {
+        // rust tok_day_matches_civil_dates
         assert_eq!(day_of(0), "1970-01-01"); assert_eq!(day_of(1_793_900_000), "2026-11-05"); assert_eq!(day_of(951_782_400), "2000-02-29"); assert_eq!(day_of(86399), "1970-01-01");
     }
     #[test] fn tok_totals_add_per_dimension_and_the_last_turn_is_kept() {
@@ -204,8 +204,8 @@ mod tests {
         assert_eq!(st.settings["wakes.by.t"], "w2"); assert_eq!(st.settings["wakes.poll"], "w2"); assert_eq!(st.settings["wake.w1"], ""); assert_eq!(st.settings["wakes.on.pr:5"], "");
         assert!(st.settings["wake.w2"].contains("\"once\":true"));
     }
-    #[test] fn lock_record_is_reprinted_in_bends_shape() {
-        // rust lock_record_is_reprinted_in_bends_shape
+    #[test] fn lock_record_is_reprinted_in_shape() {
+        // rust lock_record_is_reprinted_in_shape
         let st = fold_all(&[ev(json!({"$":"LockChanged","name":"merge","lock":{"holder":{"id":"a"},"waiters":[],"ready":true},"at":1}))]);
         assert_eq!(st.settings["lock.merge"], r#"{"holder":{"id":"a","kind":"thread","thread":"","note":"","since":0,"lease":0},"waiters":[],"ready":true}"#);
         assert_eq!(st.settings["locks.names"], "merge");

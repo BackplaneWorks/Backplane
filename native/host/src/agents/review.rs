@@ -1,4 +1,4 @@
-//! review_comment / review_comments (mcp.bend Mcp.review.*): review comments as Acts of tone `review` filed under the thread; the pure rules are the files lane's (kicad/review.rs).
+//! review_comment / review_comments: review comments as Acts of tone `review` filed under the thread; the pure rules are the files lane's (kicad/review.rs).
 use super::{hub_id, lines::s, now_s, Agents};
 use crate::files::kicad::{bj::J, review as rv};
 use serde_json::{json, Value};

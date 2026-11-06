@@ -32,7 +32,7 @@
             android:launchMode="singleTop"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|fontScale|density"
             android:windowSoftInputMode="adjustResize">
-            <!-- classic (Bend bridge) screens: not the launcher in the data build -->
+            <!-- classic screens: not the launcher in the data build -->
             <!-- text, photos and files shared into the app go to the page's composer -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
@@ -48,7 +48,7 @@
             </intent-filter>
             <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
         </activity>
-        <!-- the data/1 app (docs/gpui/PHONE-DATA.md): native screens over plain data; the launcher -->
+        <!-- the data/1 app (docs/PHONE-DATA.md): native screens over plain data; the launcher -->
         <activity
             android:name=".DataActivity"
             android:exported="true"

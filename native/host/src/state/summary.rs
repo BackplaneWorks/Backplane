@@ -1,8 +1,8 @@
-//! Thread and project summaries (src/core/refs.bend `Sum.*`, hub.bend `Sum.out`/`Sum.got`/`Sum.next`): at a turn's end a due thread is summarized by the
+//! Thread and project summaries: at a turn's end a due thread is summarized by the
 //! text model; its answer is cleaned to one line and kept as `summary.<id>`, and the thread's project is summarized next when it is due. Pure: the
 //! input texts, the cleaning and what a finished summary commits. The model call is the `agents` lane's `Summarizer`; when and what to ask is here.
 use super::json::*;
-use super::turnend::{bend_trim, sum_due};
+use super::turnend::{trim_ws, sum_due};
 use crate::state::State;
 use serde_json::{json, Value};
 
@@ -33,15 +33,15 @@ pub fn project_input(st: &State, pid: &str) -> String {
 }
 /// Sum.clean: the writer's answer as a summary: its first line, spaces collapsed, at most 200 characters ("" for none)
 pub fn clean(answer: &str) -> String {
-    let first = bend_trim(answer).split('\n').next().unwrap_or("");
-    let l = bend_trim(first).replace('\t', " ").split(' ').filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" ");
+    let first = trim_ws(answer).split('\n').next().unwrap_or("");
+    let l = trim_ws(first).replace('\t', " ").split(' ').filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" ");
     if l.chars().count() > 200 { format!("{}...", take(&l, 197)) } else { l }
 }
 
 /// A project summary to ask for next (Sum.next): its id and the writer's input
 pub struct Next { pub project: String, pub input: String }
 /// Sum.got for a finished thread summary: keep it (when not empty), and when the thread has a project that is due, stamp its clock and ask for
-/// the project's summary. `st` is the state before (as Bend's `s`); events are committed together.
+/// the project's summary. `st` is the state before; events are committed together.
 pub fn thread_done(st: &State, now: u64, id: &str, text: &str) -> (Vec<Value>, Option<Next>) {
     let mut ev = keep(id, text, now);
     let pid = st.threads.get(id).map_or("", |t| t.project.as_str()).to_string();
@@ -78,11 +78,11 @@ mod tests {
         r#"{"$":"SettingSet","key":"summary.a","value":"does alpha","at":11}"#,
         r#"{"$":"ThreadArchived","id":"b","archived":false,"at":21}"#];
     #[test] fn summary_clean_is_one_cleaned_line_of_at_most_200() {
-        assert_eq!(clean("  Fixes the \t login   flow.\nSecond line"), "Fixes the login flow."); assert_eq!(clean(""), ""); assert_eq!(clean(" \n x"), "x", "Bend trims the whole answer first, then takes its first line"); assert_eq!(clean(" \n \n"), "");
+        assert_eq!(clean("  Fixes the \t login   flow.\nSecond line"), "Fixes the login flow."); assert_eq!(clean(""), ""); assert_eq!(clean(" \n x"), "x", "trims the whole answer first, then takes its first line"); assert_eq!(clean(" \n \n"), "");
         let long = "w ".repeat(150); let c = clean(&long); assert_eq!(c.chars().count(), 200); assert!(c.ends_with("..."));
         assert_eq!(clean(&"a".repeat(200)).chars().count(), 200, "exactly 200 is not cut");
     }
-    #[test] fn summary_inputs_have_bends_shape() {
+    #[test] fn summary_inputs_have_shape() {
         assert_eq!(thread_input("T", "P", "old", "hi", "yo"), "Thread title: T\nProject: P\nEarlier summary: old\n\nThe user's latest message:\nhi\n\nThe agent's latest reply:\nyo");
         let st = fold(&W);
         assert_eq!(project_input(&st, "p"), "Project: Proj\nFolder: /r\n\nIts newest threads:\n- Beta\n- Alpha: does alpha", "newest activity first; a summary after its title");

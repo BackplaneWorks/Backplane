@@ -10,7 +10,7 @@
 //!   - out: only fields present, in field-number order, 64-bit integers as strings, enums by name (a number when unknown),
 //!     bytes as base64, non-finite floats as strings;
 //!   - a `google.protobuf.Any` is `{"@type": "<url>", ...fields}` when its type is known, `@type` last, else `{type_url, value}`.
-//! Checked against protobufjs itself: test/gpui/files/fixtures/kipc_golden*.json are its output (test/gpui/files/kipc_golden.ts).
+//! Checked against protobufjs itself: test/files/fixtures/kipc_golden*.json are its output (test/files/kipc_golden.ts).
 //! Known differences, all on garbage input: a 64-bit integer given a string that is not a decimal integer is refused here (Long
 //! reads it as a wrong number and sends it); a type is found by its full name only (protobufjs also finds a short one, which
 //! KiCad would then refuse); map fields come out sorted by key, not in wire order.
@@ -364,7 +364,7 @@ pub fn unbase64(s: &str) -> Result<Vec<u8>, String> {
 mod tests {
     use super::*;
 
-    /// `name` under the repository's test/, from whichever crate compiled this (the hub, or test/gpui/files/kipc-probe).
+    /// `name` under the repository's test/, from whichever crate compiled this (the hub, or test/files/kipc-probe).
     fn fixture(name: &str) -> String {
         let at = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().find(|d| d.join("test/fixtures/kipc").is_dir()).expect("the repository's test folder");
         at.join("test").join(name).to_string_lossy().into()
@@ -403,14 +403,14 @@ mod tests {
     }
     #[test] fn golden_fixture_schema() {
         let s = from_bytes(&std::fs::read(fixture("fixtures/kipc/api.desc")).unwrap()).unwrap();
-        assert!(golden(&s, "gpui/files/fixtures/kipc_golden_fixture.json") >= 10);
+        assert!(golden(&s, "files/fixtures/kipc_golden_fixture.json") >= 10);
     }
     /// The runtime's descriptor set is KiCad's and stays out of this repository: on a machine without the runtime this says so and passes.
     #[test] fn golden_runtime_schema() {
         let p = std::env::var("BACKPLANE_TEST_API_DESC").unwrap_or_else(|_| format!("{}/.backplane-bend/kicad/10.99.0-bp.4/share/backplane/api.desc", std::env::var("HOME").unwrap_or_default()));
         let Ok(b) = std::fs::read(&p) else { eprintln!("SKIPPED golden_runtime_schema: no {p}"); return };
         let s = from_bytes(&b).unwrap();
-        assert!(golden(&s, "gpui/files/fixtures/kipc_golden_runtime.json") >= 20);
+        assert!(golden(&s, "files/fixtures/kipc_golden_runtime.json") >= 20);
     }
     fn reply_of(status: i32, words: &str, any: Option<(&str, Vec<u8>)>) -> Vec<u8> {
         ApiResponse { header: Some(ResHeader { kicad_token: "tok".into() }), status: Some(ResStatus { status, error_message: words.into() }), message: any.map(|(u, value)| Any { type_url: u.into(), value }) }.encode_to_vec()

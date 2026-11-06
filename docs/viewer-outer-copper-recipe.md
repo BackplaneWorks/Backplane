@@ -18,7 +18,6 @@ Existing success-only staging promotion is unchanged: nonzero export status neve
 The focused probe imports the actual server functions:
 
 ```sh
-bend test/native/viewer_copper_probe.bend -o /tmp/viewer-copper-probe.js
 bun test/tools/viewer_copper_recipe_test.mjs /tmp/viewer-copper-probe.js
 ```
 

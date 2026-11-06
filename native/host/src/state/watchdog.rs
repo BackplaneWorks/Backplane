@@ -1,6 +1,6 @@
-//! Liveness progress writes (src/core/watchdog.bend `Watchdog.after`): a change that shows an agent is alive (its output, a tool act, a request,
+//! Liveness progress writes: a change that shows an agent is alive (its output, a tool act, a request,
 //! a wait it set up) moves that thread's `liveness.<t>` record to now, ends an episode, clears a restart-retry count, and does the same for the
-//! up-to-four owners above it that are themselves at work. Pure: `st` is the state BEFORE the batch (as Bend's `s`), `now` the batch's time.
+//! up-to-four owners above it that are themselves at work. Pure: `st` is the state BEFORE the batch, `now` the batch's time.
 //! Not here (PARITY.md, open): the stalled-thread tick and its deliveries.
 use super::json::*;
 use super::liveness;

@@ -1,11 +1,11 @@
 # Mobile vs the GPUI desktop client (2026-11-06, second pass)
 
-Audited against `native/gpui` (desktop), the Rust hub's phone API (`docs/gpui/PHONE-DATA.md`, proto `data/1`, `native/host/src/data/`), the iOS data app
+Audited against `native/gpui` (desktop), the Rust hub's phone API (`docs/PHONE-DATA.md`, proto `data/1`, `native/host/src/data/`), the iOS data app
 (`mobile/ios/Backplane/Data*.swift`, branch gpui-ios, in `gpui`) and the new Android data app (`mobile/android/.../Data*.kt`).
 Status: **done** (built and driven), **code** (written, not run: no Mac here), **gap** (not there), **hub** (the Rust hub gives phones no request for it yet).
 
 ## What changed
-- The old phone apps spoke the Bend hub's view protocol through `bridge.js` (QuickJS / JavaScriptCore). The Rust hub speaks `data/1` to phones: plain JSON over
+- The old phone apps spoke hub's view protocol through `bridge.js` (QuickJS / JavaScriptCore). The Rust hub speaks `data/1` to phones: plain JSON over
   `/ws?data=1&enc=json`, no presenter. iOS had a client for it; **Android now has one too** (`DataClient.kt`, `DataModels.kt`, `DataViews.kt`,
   `DataMarkdown.kt`, launcher `DataActivity`). Gradle `-PbpData=false` brings back the old launcher; the classic screens stay in the APK.
 - The Android screens use the desktop's tokens (`BackplaneTheme.kt` = `src/web/style.css`, light and dark), JetBrains Mono for all text, square corners,

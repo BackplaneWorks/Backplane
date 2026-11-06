@@ -1,4 +1,4 @@
-//! API keys (core/apikeys.bend, server/apikeys.bend): one `<home>/secrets/api.env`, 0600 in a 0700 folder, a
+//! API keys: one `<home>/secrets/api.env`, 0600 in a 0700 folder, a
 //! `NAME='value'` line each. Only names ever leave this file: a client gets the names, an agent the names and the path.
 use std::{io::Write, path::{Path, PathBuf}};
 

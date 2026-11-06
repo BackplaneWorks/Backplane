@@ -1,4 +1,4 @@
-//! files.dir: server.bend's DirJob.sh in Rust. One folder of a thread's project: folders then files,
+//! files.dir: server's DirJob.sh in Rust. One folder of a thread's project: folders then files,
 //! "d|f <tab> size <tab> name" lines, hidden names (glob `*`) left out, symlinked folders left out,
 //! files by what they point at, 2000 of each, byte order (the shell's glob in the C locale).
 use super::fm;

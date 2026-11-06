@@ -9,7 +9,7 @@ not OpenCode's and not each other's.
 | Project | earendil-works/pi (`@earendil-works/pi-coding-agent`), MIT | can1357/oh-my-pi (`@oh-my-pi/pi-coding-agent`), MIT |
 | Verified against | 1.4.0 | 18.12.6 |
 | Run as | `pi --mode rpc`, Pi's JSONL RPC | `omp --mode rpc-ui`, its own RPC (a Pi dialect) |
-| Code | `src/core/pi.bend` | `src/core/omp.bend` |
+| Code | `src/core/pi` | `src/core/omp` |
 
 ## Install and sign in
 

@@ -1,7 +1,7 @@
-//! QR codes (core/qr.bend, ISO/IEC 18004): byte mode, level M, the smallest of versions 1-40 that holds the
-//! text, the mask with the least penalty (Bend's own scoring, ties to the lowest mask). A code is its rows,
+//! QR codes: byte mode, level M, the smallest of versions 1-40 that holds the
+//! text, the mask with the least penalty. A code is its rows,
 //! '1' dark and '0' light, joined by newlines, with no quiet zone. Laws `qr_*`; the tests carry the
-//! reference matrices from test/qr_test.bend (python-qrcode, decoded with zxing).
+//! reference matrices from test/qr_test (python-qrcode, decoded with zxing).
 
 /// Per version at level M: error correction codewords per block, blocks of d data codewords, blocks of d + 1.
 const TABLE: [(usize, usize, usize, usize); 40] = [
@@ -139,7 +139,7 @@ fn masked(m: u32, x: usize, y: usize) -> bool {
     match m { 0 => a == 0, 1 => r % 2 == 0, 2 => c % 3 == 0, 3 => (r + c) % 3 == 0, 4 => (r / 2 + c / 3) % 2 == 0, 5 => p % 2 + p % 3 == 0, 6 => (p % 2 + p % 3) % 2 == 0, _ => (a + p % 3) % 2 == 0 }
 }
 
-/// Core/qr.bend's penalty: runs of five or more (3, and 1 beyond), 1011101 with four light either side (40),
+/// Core/qr's penalty: runs of five or more (3, and 1 beyond), 1011101 with four light either side (40),
 /// 2x2 blocks (3), and the dark share's distance from half in steps of five (10 each).
 fn penalty(g: &Grid) -> usize {
     let s = g.s;

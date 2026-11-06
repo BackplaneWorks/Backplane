@@ -1,4 +1,4 @@
-// backplane-browser: a headless Chromium the Bend side drives over
+// backplane-browser: a headless Chromium side drives over
 // newline-delimited JSON on stdin/stdout. Pages are keyed by an owner
 // string (a bot id; "" is the shared page every agent drives). Raw RGB
 // frames of the shared page go to a file, JPEG frames of every page to a

@@ -158,7 +158,7 @@ fn drain(rx: &Tap, key: &str, acc: &mut Vec<u8>, resets: &mut Vec<Value>) {
     t.run_with(true, "x:t1:xcopy-1", "T", "/tmp", "touch /tmp/bp-term-copy-must-not-exist", 40, 5, false).await;
     t.run_with(true, "x:t1:xcopy-1", "T", "/tmp", "touch /tmp/bp-term-copy-must-not-exist", 40, 5, true).await;
     assert_eq!(t.shell_count().await, 0); assert!(!t.read_known("x:t1:xcopy-1").await); assert!(!std::path::Path::new("/tmp/bp-term-copy-must-not-exist").exists());
-    // the person's own panel shell still opens, as in Bend (TermOp is allowed on a copy)
+    // the person's own panel shell still opens, as in (TermOp is allowed on a copy)
     t.open_shell("t1", 80, 24).await; assert_eq!(t.shell_count().await, 1); t.kill("t1").await;
 }
 #[tokio::test] async fn only_the_newest_finished_screens_stay_in_memory() {

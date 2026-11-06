@@ -92,7 +92,7 @@ trait ReadExactSync { fn read_exact_sync(&mut self, b: &mut [u8]) -> std::io::Re
 impl ReadExactSync for std::fs::File { fn read_exact_sync(&mut self, b: &mut [u8]) -> std::io::Result<()> { std::io::Read::read_exact(self, b) } }
 
 /// `backplane-hub --render MODEL...` (what the agent prompt tells agents to run): each model's standard views as PNGs beside it
-/// (app/render.bend's `backplane --render`; kicad/render.rs). Returns the exit code.
+///. Returns the exit code.
 fn render_cli() -> i32 {
     let a: Vec<String> = std::env::args().skip(2).collect();
     let ms: Vec<&str> = a.iter().map(String::as_str).collect();
@@ -174,7 +174,7 @@ async fn run(a: Args) -> Result<()> {
     loop {
         let (s, _) = l.accept().await?; s.set_nodelay(true).ok();
         let h = hub.clone();
-        // loopback peers are trusted (Bend's Accept.local); a tailnet listener (net lane) passes its whois verdict with serve_with
+        // loopback peers are trusted; a tailnet listener (net lane) passes its whois verdict with serve_with
         let trusted = s.peer_addr().map_or(false, |p| p.ip().is_loopback());
         tokio::spawn(async move { let _ = serve_with(h, s, trusted).await; });
     }

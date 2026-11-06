@@ -1,5 +1,5 @@
 //! data/1 additions for the phones (features "actions", "search", "models", "mentions", "bots", "notify"): each is a thin map onto the hub's own RPCs and
-//! folds, so a phone does what the desktop does and the hub stays the one place that decides. Added requests (docs/gpui/PHONE-DATA.md):
+//! folds, so a phone does what the desktop does and the hub stays the one place that decides. Added requests (docs/PHONE-DATA.md):
 //! `thread.act {thread, action: pin|unpin|settle|unsettle|archive|unarchive|delete|rename, title?}` → `{thread}` (delete: `{}`) · `project.act {project, action: rename|remove, title?}` → `{}` ·
 //! `search {q, archived?=false, limit?=30}` → `{threads, projects}` · `models.list` → `{models:{provider:[{value,label,ok,why}]}}` ·
 //! `thread.model {thread, provider, model?, effort?}` → `{thread}` · `mentions.list {q?, kind?, limit?}` → `{items:[{sigil,id,label,detail}]}` (`@` bots, `>` threads, `%` projects, `#` rooms, `&` models) ·
@@ -130,7 +130,7 @@ async fn root_of(hub: &Arc<Hub>, thread: &str) -> Result<String, Value> {
 /// A reply's `result`, or its error.
 fn result(r: Value) -> Value { r.get("result").cloned().unwrap_or(json!({})) }
 fn entries_of(text: &str) -> Vec<Value> {
-    // the hub's listing: one line per entry, `d` or `f`, a tab, the size, a tab, the name (core/fm.bend, Fm.entries)
+    // the hub's listing: one line per entry, `d` or `f`, a tab, the size, a tab, the name
     text.lines().filter_map(|l| { let mut it = l.splitn(3, '\t'); let (k, size, name) = (it.next()?, it.next()?, it.next()?);
         Some(json!({"dir":k.starts_with('d'),"size":size.parse::<u64>().unwrap_or(0),"name":name})) }).collect()
 }

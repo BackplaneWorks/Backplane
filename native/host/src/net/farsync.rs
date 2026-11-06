@@ -30,7 +30,7 @@ impl FarSync {
         // (and this batch is folded after it) or after it is folded, never in between
         let gate = hub.mirror_gate().await;
         let t = tokio::task::spawn_blocking(move || store.take(&l, &e, since, to, &items)).await??;
-        // another history starts the mirror over, and Bend forgets the link's old rows first (Fr.forget): the presenter is rebuilt (the
+        // another history starts the mirror over, and forgets the link's old rows first (Fr.forget): the presenter is rebuilt (the
         // log folded again) and given every mirror, this link's new one included, by the feed (`Hub::forget_mirror`)
         if t.reset {
             eprintln!("far: the mirror of {link} started over (another history)");
@@ -44,7 +44,7 @@ impl FarSync {
         Ok(t.got.gap)
     }
 
-    /// POST /far/log: a page of what this hub shares after `since` (the Bend peer's pull, no codec: a plain body passes).
+    /// POST /far/log: a page of what this hub shares after `since`.
     pub async fn log(self: &Arc<Self>, hub: &Arc<Hub>, r: &PReq) -> HttpReply {
         let link = match self.peering.signed_in("far-log", r) { Ok(p) => p, Err(e) => return e };
         if !self.own(&link) { return forbidden() }

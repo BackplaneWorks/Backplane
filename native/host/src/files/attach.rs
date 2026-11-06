@@ -1,8 +1,8 @@
-//! POST /attach?thread=<id>&key=<key>&name=<name> (server.bend's Upload.*, core/attach.bend): the phones' way to attach a file.
+//! POST /attach?thread=<id>&key=<key>&name=<name>: the phones' way to attach a file.
 //! The body goes straight from the socket to `<home>/attachments/<thread>/<key>-<name>`; the hub holds a buffer, never the file.
 //! Answer: `{"attached": path, "thread"}`, or on failure `{"text", "thread", "upload": true, "uiError", "uiDetail"}` (Notice.upload.reply).
 //! Bounds: the file may not pass the `files.max.mb` setting (Att.max: 512 MB default, 1..4000) nor the transport's own limit
-//! (api::STREAM_MAX, 256 MiB: lower than the Bend hub's 4000 MB; larger bodies get 413 with the same words).
+//!.
 //! Thread-folder rule (PR #960 spirit): an unknown, empty or deleted thread gets no attachment folder.
 use serde_json::{json, Value};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};

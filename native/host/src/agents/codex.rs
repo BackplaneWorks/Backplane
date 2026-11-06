@@ -1,4 +1,4 @@
-//! Codex (`codex exec --json`): one process per turn, its lines in "Codex shapes" (hub.bend Codex.line.k, Codex.item.k, Turn.codex).
+//! Codex (`codex exec --json`): one process per turn, its lines in "Codex shapes".
 //! Grok, Muse, OpenCode, Antigravity, Pi and Oh My Pi report in the same shapes through their own adapters.
 use serde_json::{json, Value};
 use super::lines::{hub_id, n, s, Cx, Fx};
@@ -113,7 +113,7 @@ pub fn step_for(o: &Value) -> Option<String> {
     match s(o, "type") { "tool.done" => Some(s(o, "id").to_string()).filter(|x| !x.is_empty()), _ => None }
 }
 
-// ---- Riding mail (ride.bend): a message for a running Codex turn waits as the setting `ride.<thread>` ----
+// ---- Riding mail: a message for a running Codex turn waits as the setting `ride.<thread>` ----
 pub fn ride_read(v: &str) -> Vec<(String, String)> {
     serde_json::from_str::<Value>(v).ok().and_then(|j| j.as_array().map(|a| a.iter().map(|x| (s(x, "id").to_string(), s(x, "text").to_string())).collect())).unwrap_or_default()
 }

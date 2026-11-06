@@ -1,7 +1,0 @@
-{
- "main": "65507d47a160d65cda9174f0ee0ccb20d1feba63",
- "frozen": "2026-11-05",
- "order": "wide-scenario rerun (INTERIM), then one merge into gpui, then the JS baseline from the merged tip",
- "baseline": "JS hub built from the merged tip, no sandbox edits",
- "second_pass": "one more main to gpui merge before switchover, on the coordinator's say only"
-}

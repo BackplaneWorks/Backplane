@@ -1,4 +1,4 @@
-//! Teaching a bot's browser, the hub's side, pure (src/core/teach.bend, docs/teach.md). Per bot: who drives its page ("" the bot, "teach", "takeover")
+//! Teaching a bot's browser, the hub's side, pure. Per bot: who drives its page ("" the bot, "teach", "takeover")
 //! and the teach state ("" nothing, "rec" recording, "review" after stop) with the draft steps. None of it is in the event log: a restart ends a
 //! teach. It reaches clients as the info keys drive.<bot>, teach.<bot> and teach.draft.<bot>. Bounded: at most MAX_BOTS bots with a state,
 //! MAX_STEPS draft steps, a recording lasts at most LIMIT seconds, the newest 64 pause alerts are remembered.

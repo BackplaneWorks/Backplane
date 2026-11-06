@@ -3,7 +3,7 @@
 //!
 //! Masking is the one thing other lanes must do: `mask::events(&mut events)` before a step's events are written (Hub.step.go,
 //! Secret.changes), `mask::json(&mut answer)` on every MCP answer (Mcp.masked), `mask::mask(line)` on every agent output line and every
-//! line to an agent, and `secret::prompt()` / `keys::prompt(..)` in the prompt. See docs/gpui/HUB-API.md.
+//! line to an agent, and `secret::prompt()` / `keys::prompt(..)` in the prompt. See docs/HUB-API.md.
 pub mod accounts;
 pub mod alerts;
 pub mod accounts_hub;

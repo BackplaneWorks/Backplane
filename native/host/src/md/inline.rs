@@ -1,4 +1,4 @@
-//! Md.inline of src/web/dom.bend: emphasis, code, labels and the links of `links::pieces`, as nodes.
+//! Md.inline of src/web/dom: emphasis, code, labels and the links of `links::pieces`, as nodes.
 use super::{el, links, refs, Node};
 
 type S = Vec<char>;

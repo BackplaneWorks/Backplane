@@ -23,7 +23,7 @@ Default builds do not have it; the Browser tab then shows the hub's JPEG frames 
   (`op:"takeover"`: the agent's calls are refused with "The person has the browser…"); the toolbar's "Hand back" sends `handback`.
   The attach path assumes the client and hub share a machine (loopback).
 - **Hub presenter**: the Rust hub's viewer panel now accepts kind `browser` (`present/viewer.rs`), which was missing, so the tab could not be opened.
-- **Test**: `test/gpui/cef/cef_e2e.sh CLIENT HUB` (private Xvfb + i3, local hub, stand-in agent, local page; real XTest mouse/keys via `xinput.py`; CDP; the agent through
+- **Test**: `test/cef/cef_e2e.sh CLIENT HUB` (private Xvfb + i3, local hub, stand-in agent, local page; real XTest mouse/keys via `xinput.py`; CDP; the agent through
   the hub's MCP `preview_evaluate`). Script steps: `{"cef":{"goto":url|"click":[x,y]|"type":text|"handback":true|"report":true}}`.
 
 Not done / known limits: remote JPEG frames for attached pages (`--jpeg-dir` screencast skips them, so web/phone viewers do not mirror the embedded page);

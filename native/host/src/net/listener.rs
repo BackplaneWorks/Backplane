@@ -1,10 +1,10 @@
-//! The tailnet listener (server.bend `Tailnet.listen*`, `Accept.whois`): this hub also listens on its own tailnet
+//! The tailnet listener: this hub also listens on its own tailnet
 //! address, and every connection there is tagged `trusted` only when `tailscale whois` says its peer is a device of
 //! the same person (`Tailnet.trusts`: an owner on both sides, never tagged devices). The tag reaches handlers as
 //! `Req.trusted` through `wire::serve_with`; it is never a credential. The listener's own authorities (tailnet IP and
 //! MagicDNS name, with the port) are what `Auth.owner.pair` accepts as `Host` (`Peering::set_own_hosts`).
 //! A main listener that already covers the tailnet address (--host 0.0.0.0 or the address itself) adds none, and
-//! its connections get no owner trust: the pairing then needs a proof, as in the Bend hub.
+//! its connections get no owner trust: the pairing then needs a proof, as in hub.
 use super::{peering::Peering, routes::AuthRoutes, tailnet};
 use crate::{hub::Hub, wire};
 use std::{future::Future, pin::Pin, sync::Arc, time::Duration};
@@ -50,11 +50,11 @@ impl Tailscale for Cli {
     fn serve_status(&self) -> Fut<String> { Box::pin(async { run(vec!["serve".into(), "status".into(), "--json".into()]).await }) }
 }
 
-/// `--tailscale-https` (server.bend `Tailnet.https`): put the hub behind `tailscale serve` on HTTPS and give a phone that address, which
+/// `--tailscale-https`: put the hub behind `tailscale serve` on HTTPS and give a phone that address, which
 /// works off the tailnet's IP names and is encrypted. The MagicDNS name comes from `tailscale status`; the address goes first among the
 /// invitation routes (`AuthRoutes::address`), and the pairing link is `https://<name>/#token=<token>`. None when serve did not take
 /// or the node reports no DNS name (said, not guessed).
-/// The HTTPS port `tailscale serve` takes, from `BACKPLANE_HTTPS_PORT`: unset is 443 (Bend's); a value that is not a port 1-65535 is None, and
+/// The HTTPS port `tailscale serve` takes, from `BACKPLANE_HTTPS_PORT`: unset is 443; a value that is not a port 1-65535 is None, and
 /// `https` then serves nothing, because falling back to 443 would take over the mapping of a hub already serving there, which is the thing the variable is for.
 pub fn https_port_of(v: Option<&str>) -> Option<u16> { match v { None => Some(443), Some(v) => v.trim().parse::<u16>().ok().filter(|p| *p != 0) } }
 pub async fn https(ts: &dyn Tailscale, routes: &AuthRoutes, port: u16, token: &str) -> Option<String> {

@@ -1,6 +1,6 @@
-//! The view actor's session bookkeeping (src/server/thin-actor.bend). The JS hub keeps one `Actor` per
+//! The view actor's session bookkeeping. The JS hub keeps one `Actor` per
 //! connection: its own drafts and info persist between requests, and the reply's session is packed from that
-//! actor, not from the picture's render copy. The native policy (native/bend/slim_serve.bend) is stateless: it
+//! actor, not from the picture's render copy. The native policy is stateless: it
 //! adopts the client's session onto a fresh Ui for each request, binds the target (`U.Bots.views`, which resets
 //! `@bot.want`, `@thread.want`; `Ui.reselect` resets `@mech.at`, `@cmp.*`) and draws the page with
 //! `@more`/`@away`/`@pill` set on the same Ui, so its reply session carries keys the actor never holds.
@@ -8,7 +8,7 @@
 use serde_json::{json, Map, Value};
 use std::{collections::{BTreeMap, BTreeSet, HashMap}, sync::{LazyLock, Mutex}};
 
-/// Actor.scope.keep (thin-actor.bend): false for the keys a move to another target forgets.
+/// Actor.scope.keep: false for the keys a move to another target forgets.
 fn scope_kept(key: &str) -> bool {
     if key == "@f.pq" { return true }
     !(key.starts_with("@f.") || key.starts_with("@mr.") || key.starts_with("@cmp.resolve:") || SCOPED.contains(&key))
@@ -20,7 +20,7 @@ const SCOPED: [&str; 10] = ["@want.new", "@want.new.at", "@thread.want", "@bot.w
 /// thread's draft), so an empty one the actor did not hold stays out.
 fn rebuilt(key: &str) -> bool { key == "@mech.at" || key == "@cmp.menu" || key.starts_with("@cmp.resolve:") || key == "@bot.want" || key == "@thread.want" }
 
-/// Render.ui (thin-view.bend) sets these on the copy it draws; the actor's own Ui never has them.
+/// Render.ui sets these on the copy it draws; the actor's own Ui never has them.
 fn render_scratch(key: &str) -> bool { key.starts_with("@more.") || key == "@pill" }
 
 /// The info keys Actor.seed.view gives a thread the actor has shown no viewer for (Actor.seed.key).
@@ -33,7 +33,7 @@ pub struct ViewActor { view: String, target: Option<Value>, sel: Option<String>,
 
 /// The thread a target's draft and viewer belong to (V.Target.owner): a thread's own id, a project's home owner
 /// (`PH.Home.owner`: "project-home-<project>"). Limit: a bot's chat thread (Target.thread: `U.Bots.chat.of`) needs the bots
-/// lane's state, so a bot target gets no "@away.<t>", no seeds, and `@btab` stays "" (thin-view.bend Route.choose: the tab
+/// lane's state, so a bot target gets no "@away.<t>", no seeds, and `@btab` stays "" (thin-view Route.choose: the tab
 /// the route names, else the bot's default); a room has no owner.
 fn owner(target: &Value, bot: Option<&(String, String)>) -> String {
     let id = target["id"].as_str().unwrap_or("");
@@ -46,7 +46,7 @@ fn owner(target: &Value, bot: Option<&(String, String)>) -> String {
     }
 }
 
-/// Route.valid (thin-view.bend): the request's session.route names this bot target's tab: exactly kind/bot/tab strings, kind
+/// Route.valid: the request's session.route names this bot target's tab: exactly kind/bot/tab strings, kind
 /// "bot-tab", the same bot, a tab of Route.tab's list. Limit: Route.restore also asks BU.nav.accept(BU.tabs.for(u, bot), tab),
 /// the tabs this bot offers, which the bots lane does not expose; an unoffered tab would fall back to BU.tab.default there.
 const BOT_TABS: [&str; 10] = ["chat", "mail", "status", "space", "browser", "tasks", "memory", "routines", "hooks", "settings"];
@@ -170,7 +170,7 @@ impl ViewActor {
         if n > MAX_READS { self.reads.drain(..n - MAX_READS); }
     }
     /// The reads for this view request of `view` and `target`: those bound to them by an earlier request are taken (and
-    /// cleared); reads bound to another view or target are dropped (Bend's actor drops its reads on a move, `Bool.pick(same,
+    /// cleared); reads bound to another view or target are dropped (actor drops its reads on a move, `Bool.pick(same,
     /// reads, Nil)`); the unbound ones bind to this request's view and target and are delivered with the next one.
     pub fn take_reads(&mut self, view: &str, target: &Value) -> Vec<Value> {
         let same = |t: &Value| t["kind"] == target["kind"] && t["id"] == target["id"];
@@ -222,7 +222,7 @@ impl ViewActor {
         let bound = req["session"]["drafts"]["@draft.bound"].as_str().filter(|b| b.len() <= 128).unwrap_or("");
         drafts.insert("@draft.bound".into(), json!(bound));
         for k in ["@btab", "@presentation"] { drafts.entry(k).or_insert_with(|| json!("")); }
-        // Rp.reply and Telemetry.reply (client.bend) run on the reply of every request the actor's own commands sent, and each leaves the request's
+        // Rp.reply and Telemetry.reply run on the reply of every request the actor's own commands sent, and each leaves the request's
         // id behind, emptied ("@rp.req:<id>" is the page a review request asked for, cleared when its reply ends it: Rp.failed always sets it "").
         for id in &self.replied { drafts.insert(format!("@rp.req:{id}"), json!("")); drafts.insert(format!("@telemetry.req:{id}"), json!("")); }
         // an answer from a hub job (fab.look, files.dir, git.* ...) reaches the JS actor after the view request that was already being served, so it
@@ -283,7 +283,7 @@ fn sent_ids(pol: &Value) -> Vec<u64> {
 pub fn replied_late(client: u64, id: u64) {
     if let Some(a) = ACTORS.lock().unwrap().get_mut(&client) { if a.sent.remove(&id) { a.late.insert(id); } }
 }
-/// The methods the Bend hub answers from a job (Git/Media/Jobs outs: the reply arrives after the synchronous requests queued behind it).
+/// The methods hub answers from a job (Git/Media/Jobs outs: the reply arrives after the synchronous requests queued behind it).
 pub fn is_job(method: &str) -> bool {
     matches!(method, "fab.look" | "fab.intent" | "order.buy" | "boards.list" | "pdf.page" | "file.open" | "project.new" | "project.create" | "fs.list" | "fs.mkdir" | "fs.find")
         || ["files.", "git.", "history.", "kicad.", "mech.", "review."].iter().any(|p| method.starts_with(p))

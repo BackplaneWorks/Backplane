@@ -1,4 +1,4 @@
-//! Keyed deltas of a view's body (src/server/thin-delta.bend, thin-view-delta.bend). The hub keeps the last three
+//! Keyed deltas of a view's body. The hub keeps the last three
 //! bodies it sent a view; a client that holds one (by its token) is sent only the ops that turn it into the new body:
 //!   ["s", path, value]   set the value at path ([] is the whole body)
 //!   ["a", path, specs]   rebuild the array at path; a spec is [0, i] (the base array's i-th element) or [1, value]
@@ -32,7 +32,7 @@ fn same_keys(a: &serde_json::Map<String, Value>, b: &serde_json::Map<String, Val
 pub fn diff(old: &Value, new: &Value) -> Option<Vec<Op>> {
     if old == new { return Some(vec![]) }
     let mut ops: Vec<Op> = Vec::new();
-    // a stack of pairs still to compare, the next one on top (the Bend list: new tasks go before the rest)
+    // a stack of pairs still to compare, the next one on top
     let mut work: Vec<(&Value, &Value, Vec<Step>)> = vec![(old, new, vec![])];
     let mut fuel = FUEL;
     while let Some((o, n, at)) = work.pop() {
@@ -154,7 +154,7 @@ mod tests {
             _ => if r.n(2) == 0 { tree(r, 2) } else { v.clone() },
         }
     }
-    // laws view_delta_same / view_delta_empty_same / the oracle round trip (test/view_delta_test.bend against the client applier)
+    // laws view_delta_same / view_delta_empty_same / the oracle round trip
     #[test] fn view_delta_round_trip_on_random_bodies() {
         let mut r = Rng(7); let mut some = 0;
         for _ in 0..3000 {
@@ -173,7 +173,7 @@ mod tests {
         assert!(serde_json::to_string(&ops_json(&ops, "")).unwrap().len() < serde_json::to_string(&new).unwrap().len() + 40);
     }
     #[test] fn unkeyed_arrays_keep_prefix_and_suffix() {
-        // same length and no identities: the identity lists are equal, so the Bend walk diffs pairwise
+        // same length and no identities: the identity lists are equal, so walk diffs pairwise
         assert_eq!(diff(&json!([1, 2, 3]), &json!([1, 9, 3])).unwrap(), vec![Op::Set(vec![Step::At(1)], json!(9))]);
         // a different length: common prefix and suffix kept, the middle new
         let old = json!([1, 2, 3, 4, 5]); let new = json!([1, 2, 9, 9, 9, 5]);

@@ -1,5 +1,5 @@
 //! Screens the hub's screen model describes beyond generic nodes. Each one reads a plain JSON shape the
-//! hub already sends the phones (src/mobile/screen.bend) and answers with a view action; no decision lives here.
+//! hub already sends the phones and answers with a view action; no decision lives here.
 pub mod asks;
 pub mod ready;
 pub mod attach;
@@ -91,7 +91,7 @@ pub struct Screens {
     /// Esc shut the suggestion popup on this draft: it stays shut until the text changes.
     pub popup_off: Option<String>,
     pub popup_shut: bool,
-    /// the Context chip's panel (Bend's token-stats chip: a click opens what the provider told about the thread's context)
+    /// the Context chip's panel
     pub ctx_open: bool,
     pub fields: HashMap<String, settings::FieldSlot>,
     pub settings_focus: FocusHandle,

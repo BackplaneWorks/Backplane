@@ -1,4 +1,4 @@
-//! Webhook alerts (core/wnote.bend, server/push.bend `Push.hook.*`, laws `hook_*`): an alert that Notify me for would raise is also POSTed as a
+//! Webhook alerts: an alert that Notify me for would raise is also POSTed as a
 //! JSON notice to `push.webhook.url` (http or https only; off when unset). With a signing secret (the setting `push.webhook.secret` names a
 //! file, else `<home>/secrets/push.webhook`) the request carries `X-Backplane-Timestamp` and `X-Backplane-Signature: sha256=<hex HMAC-SHA256(secret,
 //! ts + "." + body)>`. A secret that is named or present but unreadable or empty is mode 0: nothing is posted, so an unsigned notice is never

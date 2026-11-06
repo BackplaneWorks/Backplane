@@ -1,5 +1,5 @@
-//! The thread-folder boundary (docs/thread-folder-boundary.md on main, PR #960; core/threadpath.bend, core/folder.bend and
-//! hub.bend's `Hub.folder.job`). One resolver for every thread- or project-scoped route: it answers a folder or None, and a route
+//! The thread-folder boundary (docs/thread-folder-boundary.md on main, PR #960; core/threadpath, core/folder and
+//! hub's `Hub.folder.job`). One resolver for every thread- or project-scoped route: it answers a folder or None, and a route
 //! with None schedules no IO at all (law thread_folder_refuses_job). There is no fallback to the hub's startup folder.
 //!   * empty or unknown id, a deleted thread, a removed project, a root or worktree that is not an absolute folder: None
 //!   * an archived thread keeps its folder; `project-home-<project>` names a project's own folder
@@ -55,7 +55,7 @@ mod tests {
         threads: vec![("t1", "p1", "", false), ("wt", "p1", "/p/.backplane/worktrees/w", false), ("gone", "p1", "", true), ("rm", "p2", "", false), ("badwt", "p1", "relative/wt", false),
             ("priv", "", "/priv", false), ("privrel", "", "rel", false), ("privempty", "", "", false), ("badroot", "p3", "", false), ("nul", "p4", "", false)],
         projects: vec![("p1", "/p", false), ("p2", "/q", true), ("p3", "", false), ("p4", "/a\0b", false), ("p5", "/five", false)] } }
-    // law thread_folder_refuses_job (core/hub.bend Hub.folder.job): when the folder does not resolve, no job is scheduled whatever the job, thread or arguments
+    // law thread_folder_refuses_job: when the folder does not resolve, no job is scheduled whatever the job, thread or arguments
     #[test] fn thread_folder_refuses_job() {
         let w = world();
         let unresolved = ["", "unknown", "t1x", " ", "T1", "nope/../t1", "p1", "p5", "project-home-", "project-home-nope", "project-home-p2", "project-home-p3", "project-home-p4", "project-home-p1/../..", "gone", "rm", "badwt", "privrel", "privempty", "badroot", "nul", "/", "..", "\0", "t1\0", "\u{1F600}"];

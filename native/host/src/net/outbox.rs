@@ -1,4 +1,4 @@
-//! Pushing this hub's shared changes to the owner's other machines (core/far.bend "Pushing to a linked machine").
+//! Pushing this hub's shared changes to the owner's other machines.
 //! One push at a time per link. A batch says it follows the last push that got through (`acked`) only while every push
 //! since did (`clean`); after a failure (or a restart: nothing is known) it says it follows only its own start, so the
 //! other end, missing what failed, finds the gap and pulls. Batches that come while one is out wait, merged. A failure

@@ -1,4 +1,4 @@
-//! core/sexpr.bend in Rust: KiCad S-expressions over bytes. A file is cut into its top-level forms by one flat pass (which
+//! core/sexpr in Rust: KiCad S-expressions over bytes. A file is cut into its top-level forms by one flat pass (which
 //! also tells a finished file from one still being written); each form parses on its own, as slices of the file's bytes:
 //! nothing is copied but a text with an escape or a bad byte.
 use super::fl;
@@ -7,7 +7,7 @@ use std::borrow::Cow;
 #[derive(Clone, Debug, PartialEq)]
 pub enum Sx<'a> { Atom(Cow<'a, str>), Str(Cow<'a, str>), List(Vec<Sx<'a>>), End }
 static END: Sx<'static> = Sx::End;
-/// Deeper than any KiCad file: past it a form is not read (it would overflow the stack of whatever walks or drops it; the Bend child
+/// Deeper than any KiCad file: past it a form is not read (it would overflow the stack of whatever walks or drops it; child
 /// was its own process and could die of that alone).
 pub const DEEPEST: usize = 4096;
 

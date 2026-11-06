@@ -1,5 +1,5 @@
-//! `bots.*` requests (src/core/bothub.bend `Bots.request.k`): create, edit, delete, say, room, room_delete, post, remember,
-//! forget, space, uber. Bend decides one request at a time; here one async lock (the world's) is held from the decision to the commit
+//! `bots.*` requests: create, edit, delete, say, room, room_delete, post, remember,
+//! forget, space, uber. decides one request at a time; here one async lock (the world's) is held from the decision to the commit
 //! of its events, so two requests never decide on the same state. The slow part (delivering to an agent) runs after, outside it.
 use super::{reply, world::World};
 use crate::{agents::{lines::hub_id, Agents}, api::{Caller, Fut, RpcHandler}, hub::Hub};
@@ -146,7 +146,7 @@ impl Bots {
     pub(super) async fn inbox_note(&self, th: &str, id: &str, text: &str) -> Result<(), String> { self.inbox.note(th, id, text).await }
     pub(super) async fn inbox_ride(&self, th: &str, id: &str, text: &str) -> Result<(), String> { self.inbox.ride(th, id, text).await }
     pub(super) async fn inbox_deliver(&self, k: &super::routines::Wake) -> Result<(), String> { self.inbox.deliver(&k.thread, &k.msg, &k.text, k.origin.clone()).await }
-    /// B.Hub.id(prefix, now, seq) with seq the log's length. A Bend Step is atomic, so two ids of one second never share a length; here a request decides
+    /// B.Hub.id(prefix, now, seq) with seq the log's length. A Step is atomic, so two ids of one second never share a length; here a request decides
     /// before it commits, so a second id asked for in the same second while the log has not grown gets the next number (an id stays what it was otherwise).
     fn id(&self, prefix: &str, now: u64) -> String {
         let len = self.hub.store.len() as u64; let mut l = self.last_id.lock().unwrap();

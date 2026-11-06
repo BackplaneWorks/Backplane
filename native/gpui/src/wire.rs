@@ -1,4 +1,4 @@
-//! Backplane's bounded CBOR subset; dictionaries generated from Bend at build time.
+//! Backplane's bounded CBOR subset; dictionaries generated from at build time.
 use anyhow::{bail, ensure, Result};
 use serde_json::{Map, Value, Number};
 include!("wire_dict.rs");

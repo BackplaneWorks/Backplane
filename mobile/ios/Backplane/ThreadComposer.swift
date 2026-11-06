@@ -234,7 +234,7 @@ struct ThreadComposer: View {
     }
 }
 
-// Dictation over the composer (screen.bend's Mob.voice), as calm as the
+// Dictation over the composer, as calm as the
 // web's strip: a dot, one word for the state, the level and Stop, never the
 // words (they appear only in the draft); a note when something is wrong;
 // after a segment its fixes, each a chip that undoes it; the word to

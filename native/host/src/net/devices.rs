@@ -1,8 +1,8 @@
-//! `device.register` / `device.drop` (core/hub.bend `Device.*`): a phone registers the push token it holds for
+//! `device.register` / `device.drop`: a phone registers the push token it holds for
 //! alerts, Live Activities and activity starts; the events carry the token, and no client ever gets one (the wire
 //! form blanks it, `Hub::wire_item`: laws `device_token_never_sent`, `device_drop_never_sent`; any line a net route gives a
 //! client goes through it too). Pure
-//! rules here; the handler commits the event the Bend hub commits.
+//! rules here; the handler commits the event hub commits.
 use crate::{api::{Caller, Fut, RpcHandler}, hub::Hub};
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -24,7 +24,7 @@ pub fn registered(p: &Value, now: u64) -> Option<Value> {
     ok(p).then(|| json!({"$":"DeviceRegistered","token":get(p,"token",""),"platform":get(p,"platform",""),"kind":get(p,"kind",""),
         "thread":get(p,"thread",""),"env":get(p,"env","production"),"bundle":get(p,"bundle",""),"at":now}))
 }
-/// device.drop's event (any token, as Bend commits it; an unknown token drops nothing).
+/// device.drop's event.
 pub fn dropped(p: &Value, now: u64) -> Value { json!({"$":"DeviceDropped","token":get(p,"token",""),"at":now}) }
 
 pub struct Devices;
@@ -53,7 +53,7 @@ mod tests {
         let mut p = good(); p.as_object_mut().unwrap().remove("env"); assert!(ok(&p), "production is the default");
         p["kind"] = json!("start"); assert!(ok(&p)); p["kind"] = json!("activity"); assert!(ok(&p));
     }
-    #[test] fn device_register_event_matches_bends() {
+    #[test] fn device_register_event_matches() {
         assert_eq!(registered(&good(), 7).unwrap(), json!({"$":"DeviceRegistered","token":"ab12:CD-3_4.5","platform":"ios","kind":"alert","thread":"t1","env":"sandbox","bundle":"dev.backplane.works","at":7}));
         let mut p = good(); p.as_object_mut().unwrap().remove("env"); p.as_object_mut().unwrap().remove("thread");
         let e = registered(&p, 8).unwrap(); assert_eq!((e["env"].as_str(), e["thread"].as_str()), (Some("production"), Some("")));

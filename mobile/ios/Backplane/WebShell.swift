@@ -24,7 +24,7 @@ import WebKit
 // The app's screen: the paired hub's phone web client (docs/phone-web.md)
 // in a WKWebView, the page a phone's browser gets, with what a page cannot
 // do kept native (docs/phone-app-shell.md: window.backplaneApp, bridge 1).
-// AppModel still runs every hub's socket and Bend client behind it, so
+// AppModel still runs every hub's socket and client behind it, so
 // alerts, the Live Activity, push registration and pairing are what they
 // were; the native screens come back with "Classic screens"
 // (AppSettings.classic).
@@ -248,7 +248,7 @@ final class WebShell: NSObject {
         send("open-thread", ["thread": id])
     }
 
-    // "host:port|id" (the phones' Bend client qualifies ids by hub) is the
+    // "host:port|id" is the
     // page's id; a bare id (the hub's own push) is already
     static func local(_ thread: String) -> String {
         guard let bar = thread.firstIndex(of: "|") else { return thread }

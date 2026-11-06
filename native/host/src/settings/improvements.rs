@@ -1,4 +1,4 @@
-//! Improvements (core/hub.bend `Improvements.*`, core/improvements.bend): `improvements.context {sourceThread}` and `improvements.report {thread}`.
+//! Improvements: `improvements.context {sourceThread}` and `improvements.report {thread}`.
 //! Settings > Improvements lets the person start a thread that writes a problem report about the app; these two requests give the form what it
 //! needs and read the finished report back as a draft. Nothing is published here: the client shows the draft and the person decides.
 //! The thread itself is made by `thread.create` with a `creationKey` (the commands lane; `Improvements.key`/`thread` below are its rules).
@@ -21,7 +21,7 @@ impl RpcHandler for ImprovementsRpc {
             let data = |v: Value| vec![json!({"t":"reply","id":id,"ok":true,"result":v})];
             let t = |k: &str| p.get(k).and_then(Value::as_str).unwrap_or("").to_string();
             match method {
-                // the pure report policy (issue_report.rs), for clients without the Bend bridge: a `body` previews it as it is, else the parts build one
+                // the pure report policy (issue_report.rs), for clients without bridge: a `body` previews it as it is, else the parts build one
                 "improvements.preview" => return data(if p.get("body").is_some() { super::issue_report::preview_body(&t("body")) } else { super::issue_report::preview(&t("text"), &t("os"), &t("version"), &t("details"), &t("diagnostics")) }),
                 "improvements.template" => return data(json!({"template": super::issue_report::TEMPLATE})),
                 "improvements.prompt" => return data(json!({"prompt": super::issue_report::prompt(&t("description"), &t("os"), &t("version"), &t("evidence"), &t("diagnostics"))})),

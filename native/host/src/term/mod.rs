@@ -1,5 +1,5 @@
 //! The term lane: ptys and the terminals clients show (`term.open/input/resize/snap/restart`), terminals in the chat (`terminal_*` tools,
-//! emb.rs), the VT emulator (vt.rs). One actor owns every shell and screen (src/server/term.bend's `Term.*`/`Et.*`): what a program prints
+//! emb.rs), the VT emulator (vt.rs). One actor owns every shell and screen: what a program prints
 //! goes to every client as `{"t":"term","thread":<key>,"pid":N,"b":[bytes]}`, input comes in as `term.input`.
 //! Bounded: at most MAX_SHELLS ptys in all (MAX_PER_THREAD chat terminals a thread), output reads in 64 KB chunks through a 64-chunk
 //! queue (the program waits when we are slow), at most KEEP_FINISHED finished screens in memory (the rest are read back from <home>/terms),
@@ -184,8 +184,8 @@ impl Terms {
     }
     /// A chat terminal's command on a pty of its own (TRun); `again` hangs up the one running first.
     pub async fn run(self: &Arc<Self>, key: &str, title: &str, cwd: &str, cmd: &str, cols: u32, rows: u32, again: bool) { self.run_with(crate::copy::on(), key, title, cwd, cmd, cols, rows, again).await }
-    /// On a copied log (BACKPLANE_COPY=1) no chat terminal runs: the command in the log is the real one, in the real folder (copy.bend: TermRun -> Nil).
-    /// The entry is still logged and the person's own panel shell (`open_shell`) still opens, as in Bend.
+    /// On a copied log (BACKPLANE_COPY=1) no chat terminal runs: the command in the log is the real one, in the real folder.
+    /// The entry is still logged and the person's own panel shell (`open_shell`) still opens, as in .
     pub async fn run_with(self: &Arc<Self>, copy: bool, key: &str, title: &str, cwd: &str, cmd: &str, cols: u32, rows: u32, again: bool) {
         if copy { return }
         let (c, r) = (emb::cols(cols), emb::rows(rows));

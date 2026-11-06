@@ -1,7 +1,7 @@
 //! The smaller Files-tab and Mechanical-tab requests: `file.open` (a file link opened or shown on the hub's own machine),
-//! `pdf.page` (a PDF page drawn by poppler for the window), `mech.list` and `mech.render` (server.bend's FileJob, PdfJob,
-//! Mech.list, Mech.render). The shell text is the Bend hub's (scripts/*.sh, extracted by test/gpui/files/extract_scripts.py);
-//! `mech.render` draws in this process (kicad/render.rs), one render at a time; `BACKPLANE_PLOT_NATIVE=0` runs the Bend renderer
+//! `pdf.page` (a PDF page drawn by poppler for the window), `mech.list` and `mech.render` (server's FileJob, PdfJob,
+//! Mech.list, Mech.render). The shell text is hub's (scripts/*.sh, extracted by test/files/extract_scripts.py);
+//! `mech.render` draws in this process (kicad/render.rs), one render at a time; `BACKPLANE_PLOT_NATIVE=0` runs renderer
 //! child again (`backplane --render`, BACKPLANE_PLOT_BIN is the same binary).
 use super::{fm, git::{proc, proc_ro}};
 use crate::{api::{Caller, Fut, RpcHandler}, hub::Hub};
@@ -50,7 +50,7 @@ impl RpcHandler for Misc {
             let reply = |ok: bool, r: Value| vec![json!({"t":"reply","id":id,"ok":ok,"result":r})];
             match method {
                 "file.open" => {
-                    // a hub on a copied log acts outside its home nowhere (core/copy.bend)
+                    // a hub on a copied log acts outside its home nowhere
                     if std::env::var("BACKPLANE_COPY").as_deref() == Ok("1") { return reply(false, json!({"text":"refused: this hub runs on a copy of a log"})) }
                     let path = s("path"); if path.contains('\0') { return reply(false, json!({"text":"bad path"})) }
                     let script = if s("how") == "reveal" { FILE_REVEAL } else { FILE_OPEN };

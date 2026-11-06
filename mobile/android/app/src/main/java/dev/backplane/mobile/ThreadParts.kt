@@ -186,13 +186,13 @@ import java.net.URL
 
 // The pieces of a thread and the sheets over it, as iOS's ThreadParts.
 // Every label, value and choice comes from the screen
-// (src/mobile/screen.bend); these only draw them and send back the action
+//; these only draw them and send back the action
 // each names.
 
 private val corner = RoundedCornerShape(4.dp)
 private val mono = BpMono
 
-// the hub's palette for a thread's phase (src/web/style.css, src/app/theme.bend);
+// the hub's palette for a thread's phase;
 // a thread's activity: working accent (blue), waiting on work it started
 // waiting (violet), finished ok (green), wanting you bad (red), stopped,
 // idle or settled faint (grey) (style.css's --st-*, --waiting)
@@ -435,7 +435,7 @@ private fun MessageMenu(m: AppModel, text: String, open: Boolean, close: () -> U
     val lang = LocalBackplaneLanguage.current
     var selecting by remember { mutableStateOf(false) }
     DropdownMenu(expanded = open, onDismissRequest = close) {
-        // a bot chat's message: Reply (core/reply.bend)
+        // a bot chat's message: Reply
         if (reply.isNotEmpty()) DropdownMenuItem(text = { Text(NativeMessages.reply_action(lang)) }, onClick = { close(); m.act("reply-to", reply) })
         DropdownMenuItem(text = { Text(NativeMessages.common_copy(lang)) }, onClick = { close(); m.act("copy", text) })
         DropdownMenuItem(text = { Text(NativeMessages.native_text_select_action(lang)) }, onClick = { close(); selecting = true })
@@ -455,7 +455,7 @@ private fun MessageMenu(m: AppModel, text: String, open: Boolean, close: () -> U
     }
 }
 
-// when a message was sent, or a turn finished (core/stamp.bend)
+// when a message was sent, or a turn finished
 @Composable
 private fun Stamp(s: String) {
     if (s.isNotEmpty()) Text(s, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
@@ -654,7 +654,7 @@ fun OrderMark() {
     }
 }
 
-// a buy thread's Order card under the top bar (screen.bend's Mob.order):
+// a buy thread's Order card under the top bar:
 // "Order · <project>", the steps (done ✓, the one at work lit: violet while
 // the quote is on its way), what happens now, and once quoted the total,
 // the customs line and Buy now (opened in the browser)
@@ -798,7 +798,7 @@ fun ComposerExtras(m: AppModel, t: ThreadView) {
     }
     val skills = m.composerSkills(t)
     if (skills.isNotEmpty()) Surface(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surfaceContainer) {
-        // Bend marks the highlighted row; the first one is it only when none is marked
+        // marks the highlighted row; the first one is it only when none is marked
         val hot = skills.indexOfFirst { it.on }.coerceAtLeast(0)
         val list = rememberLazyListState()
         LaunchedEffect(hot) { list.animateScrollToItem(hot) }
@@ -1338,7 +1338,7 @@ fun LazyListScope.hubSettingsRows(m: AppModel, rows: List<SetRow>, notify: Boole
 }
 
 // the thread menu's icon for an action
-// a tool's icon (core/icons.bend's name) as a Material icon
+// a tool's icon as a Material icon
 fun toolIcon(name: String) = when (name) {
     "pin" -> Icons.Filled.PushPin
     "circle-check" -> Icons.Filled.CheckCircleOutline

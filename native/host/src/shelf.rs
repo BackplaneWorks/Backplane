@@ -1,5 +1,5 @@
-//! Settle, snooze and the shelf a thread sits on: src/core/model.bend "Settle rule", "Snooze" and `Shelf.of`/`Shelf.at`
-//! in Rust. The Bend code stays as the differential oracle; each law it guards has a test here with the law's name.
+//! Settle, snooze and the shelf a thread sits on: src/core/model "Settle rule", "Snooze" and `Shelf.of`/`Shelf.at`
+//! in Rust. code stays as the differential oracle; each law it guards has a test here with the law's name.
 use crate::state::{Override, State, Thread, Turn};
 
 /// Settle.window: three days
@@ -48,7 +48,7 @@ pub fn hidden(t: &Thread) -> bool { t.archived || t.deleted }
 pub fn shelf_at(t: &Thread, until: u64, now: u64) -> Shelf { let sh = shelf_of(t); if !hidden(t) && snooze_on(now, until) { Shelf::Snoozed } else { sh } }
 
 /// Sidebar.split.at: every thread lands on exactly one shelf, snoozed ones included. Threads keep their input order within a shelf
-/// reversed, as the Bend cons-list build leaves them (Shelves.put prepends while recursing from the tail, so each shelf keeps input order).
+/// reversed, as cons-list build leaves them (Shelves.put prepends while recursing from the tail, so each shelf keeps input order).
 pub struct Shelves<'a> { pub pinned: Vec<&'a Thread>, pub active: Vec<&'a Thread>, pub settled: Vec<&'a Thread>, pub hidden: Vec<&'a Thread>, pub snoozed: Vec<&'a Thread> }
 impl<'a> Shelves<'a> {
     pub fn count(&self) -> usize { self.pinned.len() + self.active.len() + self.settled.len() + self.hidden.len() + self.snoozed.len() }

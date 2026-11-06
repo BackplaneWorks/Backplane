@@ -1,0 +1,12 @@
+#!/bin/sh
+# reference-transaction hook, installed by scripts/install-hooks.sh into <common .git>/hooks/, which serves every worktree.
+# When refs/heads/main moves, make sure the main builder is running: it builds the new tip (tests, hub, window) and publishes it for the app to relaunch on.
+# It blocks nothing and always exits 0; any ref other than main is ignored.
+[ "$1" = committed ] || { cat > /dev/null; exit 0; }
+hit=
+while read -r old new ref; do [ "$ref" = refs/heads/main ] && hit=1; done
+[ -n "$hit" ] || exit 0
+root=$(git worktree list --porcelain 2>/dev/null | awk 'NR==1{print substr($0,10)}')
+# the builder reads main from the refs, so it does not matter which checkout it is started from
+[ -x "$root/scripts/main-build.sh" ] && "$root/scripts/main-build.sh" ensure > /dev/null 2>&1
+exit 0

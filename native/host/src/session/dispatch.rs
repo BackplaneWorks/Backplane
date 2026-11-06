@@ -1,6 +1,6 @@
 //! The action dispatcher the Rust presenter calls for a `view.action`: composer (draft, send), then the commands lane's thread/project actions, then `select`, each a pure function
 //! that is None for what it does not own or has not ported; the first answer wins, its patch is merged into a copy of the request's session (`patch::merge`), its commands are
-//! returned in order, and the shared post-hook of Bend's `Ui.act` that is mine, `Fab.sync` (a `send fab.look` after any action with a thread selected whose place changed), is
+//! returned in order, and the shared post-hook of `Ui.act` that is mine, `Fab.sync` (a `send fab.look` after any action with a thread selected whose place changed), is
 //! appended for the answers that did not already include it (select does). None from here means the helper, or "not ported" on a hub without one.
 use super::{composer, pages, patch, select, thread_actions};
 use crate::commands::actions as cmdact;

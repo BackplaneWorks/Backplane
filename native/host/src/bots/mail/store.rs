@@ -1,6 +1,6 @@
-//! The mail journal (mailstore.bend `MailStore.append`, mailstore.js `mi_open`): one file per conversation, `<home>/mail/<pct(conversation)>.jsonl`, a body per line.
+//! The mail journal: one file per conversation, `<home>/mail/<pct(conversation)>.jsonl`, a body per line.
 //! An append first looks at the end of the file: an incomplete last line (a crash mid-write) is cut off, a complete last line must be a valid body, and only then
-//! the new body is added. Process-crash consistency only: no fsync, as in Bend. Files are opened without following links: the directory must be a real
+//! the new body is added. Process-crash consistency only: no fsync, as in . Files are opened without following links: the directory must be a real
 //! directory, the file a regular file, and a file written to has exactly one link (a link at `<home>/mail/x.jsonl` would send mail text somewhere else).
 //! A failed commit after an append leaves a body whose retry appends it again; recovery and the box (by id) make that harmless.
 //! Errors say what kind of failure it was, never which conversation: a conversation id is an address.
@@ -85,7 +85,7 @@ pub fn headers(path: &Path) -> Vec<(Conv, Hdr)> {
 }
 
 /// MailStore.read for a page: the bodies strictly before `before` (all when empty), newest first, at most `n`, and whether older ones remain.
-/// One streaming pass over the journal that stops at the cursor, holding n+1 bodies (Scan in mailstore.bend); Err(None) when the cursor is not in the file.
+/// One streaming pass over the journal that stops at the cursor, holding n+1 bodies; Err(None) when the cursor is not in the file.
 pub fn page(path: &Path, before: &str, n: usize) -> Result<Option<(Vec<Body>, bool)>, PageError> {
     if n == 0 { return Ok(Some((vec![], false))) }
     let f = match open(path, false) { Ok(f) => f, Err(StoreError::Io) if !path.exists() => return Ok(None), Err(e) => return Err(PageError::Store(e)) };

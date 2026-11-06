@@ -3,7 +3,7 @@ Native viewer handoff, 2026-10-27
 
 The native viewer patch is independent of the web renderer. Android GLES3 and
 iOS Metal receive the same compact Solid triangle wire as before. Geometry,
-board-axis transforms, native per-piece picking and Bend selection decisions
+board-axis transforms, native per-piece picking and selection decisions
 are preserved.
 
 Both PlotStore implementations now demultiplex solids onto a separate serial
@@ -44,7 +44,7 @@ Native engine calls run on the existing engine worker:
   `duration`, `samples` ([second, furnace °C, board-mean °C, liquid fraction]),
   or an `error` string.
 
-These functions require the integration parent's new `core/reflow.bend`, mobile
+These functions require the integration parent's new `core/reflow`, mobile
 app exports and `bridge.js` wrappers. They are not supplied by this native-only
 patch. The Swift Engine/AppModel adapters are a separate small commit so the
 iOS transport/integration owners can apply the equivalent wrappers safely.
@@ -53,7 +53,7 @@ The Android Core/AppModel adapters follow the same worker contract.
 `ReflowView.swift` and `ReflowView.kt` provide alloy/composition/source, native
 temperature and fraction graphs, a validated JSON profile-point editor,
 play/pause/restart/speed/scrub controls and an optional heat overlay. They call
-the shared Bend planner once per profile/alloy change; playback interpolates
+the shared planner once per profile/alloy change; playback interpolates
 returned samples and never reimplements the thermal model. Closing/backgrounding
 pauses playback. The preview and its assumptions are labelled illustrative.
 Native import/export file controls are not included.
@@ -81,4 +81,4 @@ Validation
   the actual Xcode/simulator build. iOS source is explicitly not build-validated.
 
 No global proof ran in this child. The integration owner runs the single final
-proof gate for combined Bend changes.
+proof gate for combined changes.

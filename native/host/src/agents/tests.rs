@@ -1,14 +1,14 @@
 //! End-to-end tests of the agent module against a real Hub on a temp home with stand-in `claude` scripts.
 //! Parity: the events a stand-in turn produces here are compared with the events the JS hub wrote for the same
-//! stand-in (test/gpui/agents/fixtures/js-*.jsonl, recorded by test/gpui/agents/record_js.mjs), ids and clocks normalised.
+//! stand-in (test/agents/fixtures/js-*.jsonl, recorded by test/agents/record_js.mjs), ids and clocks normalised.
 use super::*;
 use crate::{api::Caller, hub::{Cfg, Hub}, presenter::Canned, store::Store};
 use std::path::{Path, PathBuf};
 
-const STANDIN: &str = include_str!("../../../../test/gpui/agents/fixtures/standin-claude.sh");
-const JS_TURN: &str = include_str!("../../../../test/gpui/agents/fixtures/js-turn.jsonl");
-const JS_QUEUE: &str = include_str!("../../../../test/gpui/agents/fixtures/js-queue.jsonl");
-const JS_INTERRUPT: &str = include_str!("../../../../test/gpui/agents/fixtures/js-interrupt.jsonl");
+const STANDIN: &str = include_str!("../../../../test/agents/fixtures/standin-claude.sh");
+const JS_TURN: &str = include_str!("../../../../test/agents/fixtures/js-turn.jsonl");
+const JS_QUEUE: &str = include_str!("../../../../test/agents/fixtures/js-queue.jsonl");
+const JS_INTERRUPT: &str = include_str!("../../../../test/agents/fixtures/js-interrupt.jsonl");
 const T1: &str = "t1700000001-2";
 
 /// a folder per call: helpers shared by several tests (`deliveries`) ask by the same name, and tests run side by side
@@ -340,10 +340,10 @@ fn waiting(ev: &[Value]) -> Vec<String> { let mut m = std::collections::BTreeMap
 }
 
 // ---- the MCP server, prompt and inputs ----
-const MCP_INIT: &str = include_str!("../../../../test/gpui/agents/fixtures/mcp-initialize.json");
-const MCP_PING: &str = include_str!("../../../../test/gpui/agents/fixtures/mcp-ping.json");
-const MCP_BADTOOL: &str = include_str!("../../../../test/gpui/agents/fixtures/mcp-badtool.json");
-const MCP_THREADLIST: &str = include_str!("../../../../test/gpui/agents/fixtures/mcp-threadlist.json");
+const MCP_INIT: &str = include_str!("../../../../test/agents/fixtures/mcp-initialize.json");
+const MCP_PING: &str = include_str!("../../../../test/agents/fixtures/mcp-ping.json");
+const MCP_BADTOOL: &str = include_str!("../../../../test/agents/fixtures/mcp-badtool.json");
+const MCP_THREADLIST: &str = include_str!("../../../../test/agents/fixtures/mcp-threadlist.json");
 
 async fn post(port: u16, path: &str, body: &str) -> (u16, String) {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -473,7 +473,7 @@ fn tool_text(r: &Value) -> Value { serde_json::from_str(r["result"]["content"][0
     rpc(&hub, "turn.start", json!({"thread":T1,"text":"hello"})).await;
     for _ in 0..100 { if argfile.exists() { break } tokio::time::sleep(Duration::from_millis(50)).await }
     let got: Vec<String> = { let raw = std::fs::read_to_string(&argfile).unwrap(); let mut v: Vec<String> = raw.split('\0').map(str::to_string).collect(); v.pop(); v };
-    let want: Vec<String> = serde_json::from_str(include_str!("../../../../test/gpui/agents/fixtures/argv-default.json")).unwrap();
+    let want: Vec<String> = serde_json::from_str(include_str!("../../../../test/agents/fixtures/argv-default.json")).unwrap();
     assert_eq!(got.len(), want.len());
     let norm = |v: &[String]| v.iter().map(|x| { let x = x.replace(&home.join("attachments").to_string_lossy().to_string(), "<home>/attachments").replace("/home/h/Documents/i2cjak/backplane-gpui/build/gpui/results/agents/argv2/work/home/attachments", "<home>/attachments");
         let x = x.replace(&work.to_string_lossy().to_string(), "<root>").replace("/home/h/Documents/i2cjak/backplane-gpui/build/gpui/results/agents/argv2/work/fixroot", "<root>");
@@ -510,13 +510,13 @@ fn norm_digits(s: &str) -> String {
 }
 async fn replay(name: &str, messages: &[&str], gap_ms: u64) -> (Vec<String>, Vec<String>) {
     let sd = dir(&format!("rp-{name}-bin")); script(&sd, "claude", PLAYER);
-    std::fs::write(sd.join("replay.ndjson"), match name { "lifecycle" => include_str!("../../../../test/gpui/agents/fixtures/replay-lifecycle.ndjson"), "todos" => include_str!("../../../../test/gpui/agents/fixtures/replay-todos.ndjson"),
-        "agents" => include_str!("../../../../test/gpui/agents/fixtures/replay-agents.ndjson"), _ => include_str!("../../../../test/gpui/agents/fixtures/replay-pair.ndjson") }).unwrap();
+    std::fs::write(sd.join("replay.ndjson"), match name { "lifecycle" => include_str!("../../../../test/agents/fixtures/replay-lifecycle.ndjson"), "todos" => include_str!("../../../../test/agents/fixtures/replay-todos.ndjson"),
+        "agents" => include_str!("../../../../test/agents/fixtures/replay-agents.ndjson"), _ => include_str!("../../../../test/agents/fixtures/replay-pair.ndjson") }).unwrap();
     let (hub, ag, _h, _w) = start(&format!("rp-{name}"), |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await; let from = len(&hub).await;
     for m in messages { assert_eq!(rpc(&hub, "turn.start", json!({"thread":T1,"text":m})).await["ok"], true); tokio::time::sleep(Duration::from_millis(gap_ms)).await }
     let ev = until(&hub, from, 30, |ev| ev.iter().any(|e| turn_is(e, "completed") || turn_is(e, "failed"))).await; tokio::time::sleep(Duration::from_millis(1500)).await;
     let mut ev = log_from(&hub, from).await; if ev.len() < 2 { ev = ev.clone() } ag.shutdown();
-    let want_raw = match name { "lifecycle" => include_str!("../../../../test/gpui/agents/fixtures/js-lifecycle.jsonl"), "todos" => include_str!("../../../../test/gpui/agents/fixtures/js-todos.jsonl"), "agents" => include_str!("../../../../test/gpui/agents/fixtures/js-agents.jsonl"), _ => include_str!("../../../../test/gpui/agents/fixtures/js-pair.jsonl") };
+    let want_raw = match name { "lifecycle" => include_str!("../../../../test/agents/fixtures/js-lifecycle.jsonl"), "todos" => include_str!("../../../../test/agents/fixtures/js-todos.jsonl"), "agents" => include_str!("../../../../test/agents/fixtures/js-agents.jsonl"), _ => include_str!("../../../../test/agents/fixtures/js-pair.jsonl") };
     let f = |v: &[Value]| core(v, T1).iter().map(|e| norm_digits(&norm(e))).collect::<Vec<_>>();
     (f(&ev), f(&lines_of(want_raw)))
 }
@@ -539,7 +539,7 @@ fn norm_steps(s: &str, roots: &[&str]) -> String {
 #[tokio::test(flavor = "multi_thread")] async fn design_history_steps_are_logged_as_the_js_hub_logs_them() {
     for (k, v) in [("GIT_CONFIG_GLOBAL", "/dev/null"), ("GIT_CONFIG_NOSYSTEM", "1"), ("GIT_AUTHOR_NAME", "t"), ("GIT_AUTHOR_EMAIL", "t@t"), ("GIT_COMMITTER_NAME", "t"), ("GIT_COMMITTER_EMAIL", "t@t")] { std::env::set_var(k, v) } // hermetic: no host git identity, config or hooks
     let sd = dir("st-bin"); script(&sd, "claude", PLAYER);
-    std::fs::write(sd.join("replay.ndjson"), include_str!("../../../../test/gpui/agents/fixtures/replay-steps.ndjson")).unwrap();
+    std::fs::write(sd.join("replay.ndjson"), include_str!("../../../../test/agents/fixtures/replay-steps.ndjson")).unwrap();
     let home = dir("st-home"); let work = dir("st-work"); std::fs::write(home.join("events.jsonl"), base_log(&work, 1, "")).unwrap();
     std::fs::write(work.join("b.kicad_pcb"), "(kicad_pcb (version 20240108))\n").unwrap();
     let hub = Hub::start(Cfg { home: home.clone(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
@@ -559,7 +559,7 @@ fn norm_steps(s: &str, roots: &[&str]) -> String {
     let rec = |i: usize| -> Value { let sm = steps[i]["summary"].as_str().unwrap_or(""); serde_json::from_str(sm).unwrap_or_else(|e| panic!("step {i}: the capture did not record a JSON step ({e}); its summary was: {sm:?}")) };
     assert_eq!(rec(0)["w"], "start"); assert_eq!(rec(0)["f"], json!(["A\tb.kicad_pcb"])); assert_eq!(rec(0)["p"], ""); assert_eq!(rec(1)["p"], rec(0)["c"]); assert_eq!(rec(1)["f"], json!(["M\tb.kicad_pcb"]));
     assert_eq!(rec(0)["g"], format!("{me}/.backplane/history.git")); assert_eq!(rec(0)["t"], me);
-    let (g, w) = (f(&ev, &me), f(&lines_of(include_str!("../../../../test/gpui/agents/fixtures/js-steps.jsonl")), js_root));
+    let (g, w) = (f(&ev, &me), f(&lines_of(include_str!("../../../../test/agents/fixtures/js-steps.jsonl")), js_root));
     // the Acts land when the background capture ends, so their place among the turn's events varies: compare the rest in order, and the Acts as a set
     let (gs, ws): (Vec<_>, Vec<_>) = (g.iter().filter(|x| !x.contains("\"tone\":\"step\"")).collect::<Vec<_>>(), w.iter().filter(|x| !x.contains("\"tone\":\"step\"")).collect::<Vec<_>>());
     assert_eq!(gs, ws); let (mut a, mut b): (Vec<_>, Vec<_>) = (g.iter().filter(|x| x.contains("\"tone\":\"step\"")).collect(), w.iter().filter(|x| x.contains("\"tone\":\"step\"")).collect()); a.sort(); b.sort(); assert_eq!(a, b);
@@ -961,13 +961,13 @@ impl mcp::ToolSet for TestTools {
     tokio::time::sleep(Duration::from_millis(250)).await; assert_eq!(*done.lock().unwrap(), vec![r#"End("/w")"#], "the hung start was given up; the end ran");
     assert!(tokio::time::timeout(Duration::from_secs(3), w).await.is_ok(), "an idle worker ends by itself (a deleted thread's sends nothing more)"); let _ = tx;
 }
-#[tokio::test(flavor = "multi_thread")] async fn delta_end_is_sent_where_bend_sends_it_one_per_assistant_line_and_none_at_a_turns_end() { // Claude.assistant's Broadcast is Bend's only delta_end
-    let sd = dir("de-bin"); script(&sd, "claude", PLAYER); std::fs::write(sd.join("replay.ndjson"), include_str!("../../../../test/gpui/agents/fixtures/replay-lifecycle.ndjson")).unwrap();
+#[tokio::test(flavor = "multi_thread")] async fn delta_end_is_sent_where_sends_it_one_per_assistant_line_and_none_at_a_turns_end() { // Claude.assistant's Broadcast is only delta_end
+    let sd = dir("de-bin"); script(&sd, "claude", PLAYER); std::fs::write(sd.join("replay.ndjson"), include_str!("../../../../test/agents/fixtures/replay-lifecycle.ndjson")).unwrap();
     let (hub, ag, _h, _w) = start("de", |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await; let mut rx = hub.frames.subscribe(); let from = len(&hub).await;
     rpc(&hub, "turn.start", json!({"thread":T1,"text":"hello"})).await;
     until(&hub, from, 30, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await; tokio::time::sleep(Duration::from_millis(700)).await;
     let mut kinds = vec![]; while let Ok(f) = rx.try_recv() { if f["thread"] == T1 && (f["t"] == "delta" || f["t"] == "delta_end") { kinds.push(f["t"].as_str().unwrap().to_string()) } }
-    let assistant_lines = include_str!("../../../../test/gpui/agents/fixtures/replay-lifecycle.ndjson").lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).filter(|o| o["type"] == "assistant" && o["parent_tool_use_id"].as_str().unwrap_or("").is_empty()).count();
+    let assistant_lines = include_str!("../../../../test/agents/fixtures/replay-lifecycle.ndjson").lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).filter(|o| o["type"] == "assistant" && o["parent_tool_use_id"].as_str().unwrap_or("").is_empty()).count();
     assert_eq!(kinds.iter().filter(|k| *k == "delta_end").count(), assistant_lines, "one delta_end per assistant line, none extra at the turn's end: {kinds:?}"); ag.shutdown();
 }
 
@@ -1060,7 +1060,7 @@ fn tree(d: &Path) -> Vec<(String, u64)> {
     let ev = until(&hub, from, 20, |ev| ev.iter().any(|e| e["text"].as_str().map_or(false, |t| t.contains("\"the sleeper\" ended: it ended, outcome unknown")))).await; assert!(ev.iter().any(|e| e["text"].as_str().map_or(false, |t| t.contains("the sleeper"))));
     assert!(!ag.tool_work_watch(T1, &json!({"kind":"unit","target":"x"})).await.0); ag.shutdown();
 }
-#[test] fn the_watch_row_is_bends_line_and_the_command_survives_the_tab_and_newline_encoding() {
+#[test] fn the_watch_row_is_line_and_the_command_survives_the_tab_and_newline_encoding() {
     let cmd = "echo a\tb\nc \\ d"; let r = work::row("w-1", "launching", "n\tote", "run", cmd, "-", 99);
     assert_eq!(r.split('\t').count(), 9, "{r:?}"); assert_eq!(work::kind(&r), "run"); assert_eq!(work::target(&r), cmd); assert_eq!(work::deadline(&r), 99); assert_eq!(bg::work_title(&r), "n ote");
     assert_eq!(work::text("n", &work::word("gone", true), ""), "[Backplane] Watched work \"n\" ended: cancelled"); assert_eq!(work::word("gone", false), "it ended, outcome unknown (not known to have succeeded)");
@@ -1129,7 +1129,7 @@ fn watch_log(work: &Path, rows: &[String], extra: &str) -> String { base_log(wor
     let ev = log_from(&hub, 0).await; assert!(ev.iter().any(|e| is(e, "SettingSet") && e["key"] == format!("ride.{T1}") && e["value"].as_str().map_or(false, |v| v.contains("a note"))), "the ride holds the note");
     assert!(!ev.iter().any(|e| e["kind"] == "ride" && e["summary"].as_str().map_or(false, |s| s.starts_with("Delivered into the running turn"))), "nothing was said to be delivered"); ag.shutdown();
 }
-// ---- side-by-side mode (docs/gpui/SIDE-BY-SIDE.md): BACKPLANE_COPY=1 and BACKPLANE_SIDE_BY_SIDE=1 are read once per process, so the probe runs in a child ----
+// ---- side-by-side mode (docs/SIDE-BY-SIDE.md): BACKPLANE_COPY=1 and BACKPLANE_SIDE_BY_SIDE=1 are read once per process, so the probe runs in a child ----
 #[tokio::test(flavor = "multi_thread")] async fn sbs_child_probe() {
     if std::env::var("BP_SBS_PROBE").is_err() { return }
     assert!(crate::copy::on() && crate::copy::person_turn_allowed());
@@ -1188,7 +1188,7 @@ fn watch_log(work: &Path, rows: &[String], extra: &str) -> String { base_log(wor
 }
 #[tokio::test(flavor = "multi_thread")] async fn a_thread_made_for_a_worktree_never_starts_in_the_project_folder() {
     let sd = dir("wtw-bin"); perf_standin(&sd, 1);
-    let (hub, ag, _h, _w) = start("wtw", |w| base_log(w, 1, "").replace("\"branch\":\"\"", "\"branch\":\"gpui-imp-1\"").replace("\"env\":\"local\"", "\"env\":\"worktree\""), |_| Cli::standin(&sd)).await;
+    let (hub, ag, _h, _w) = start("wtw", |w| base_log(w, 1, "").replace("\"branch\":\"\"", "\"branch\":\"imp-1\"").replace("\"env\":\"local\"", "\"env\":\"worktree\""), |_| Cli::standin(&sd)).await;
     let _ = ag; // a short wait would pass the 60 s: the thread gets its worktree first
     let from = len(&hub).await; let work2 = dir("wtw-wt");
     let h2 = hub.clone(); let t = tokio::spawn(async move { rpc(&h2, "turn.start", json!({"thread":T1,"text":"zqshort hi"})).await });
@@ -1260,7 +1260,7 @@ fn watch_log(work: &Path, rows: &[String], extra: &str) -> String { base_log(wor
     let (_, r) = rpc_mcp(&ag, T1, "", "tools/call", json!({"name":"thread_list","arguments":{}})).await; assert_ne!(r["result"]["isError"], true, "the person's word unlocks it: {r}");
     ag.shutdown();
 }
-#[test] fn slugs_and_reference_words_are_bends() {
+#[test] fn slugs_and_reference_words_are() {
     use refs::{slug_of, slug_take};
     assert_eq!(slug_of("Fix the perf lag!"), "fix-the-perf-lag"); assert_eq!(slug_of("  --Ünï cödé 2--"), "n-c-d-2"); assert_eq!(slug_of(&"ab ".repeat(30)), "ab-ab-ab-ab-ab-ab-ab-ab-ab-ab-ab-ab-ab-ab"[..40].trim_end_matches('-'));
     assert_eq!(slug_take("fix-it, now"), "fix-it"); assert_eq!(slug_take("a_b:c"), "a_b"); assert_eq!(slug_take(".x"), "");

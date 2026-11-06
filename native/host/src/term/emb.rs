@@ -1,4 +1,4 @@
-//! Terminals in the chat (src/core/emb.bend, pure): keys, sizes, the entry's summary, the screen as text and as bytes, the command script,
+//! Terminals in the chat: keys, sizes, the entry's summary, the screen as text and as bytes, the command script,
 //! the done mark, what the agent reads, and live or inactive. Laws emb_* map to the tests below.
 use super::vt::{Vt, DEFAULT_BG, DEFAULT_FG};
 

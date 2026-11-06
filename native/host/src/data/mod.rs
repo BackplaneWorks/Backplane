@@ -1,4 +1,4 @@
-//! The phone data API (docs/gpui/PHONE-DATA.md, proto "data/1"): plain data over one WebSocket, no presenter and no view schema.
+//! The phone data API (docs/PHONE-DATA.md, proto "data/1"): plain data over one WebSocket, no presenter and no view schema.
 //! `/ws?data=1[&enc=json]&token=…` (the same auth and pairing as every socket; `enc=json` is text frames, otherwise binary CBOR with plain string keys).
 //! Reads come from the model (`Model::page`, thread and project metadata) and the policy state; writes are the hub's own RPCs (`project.add`, `thread.create`,
 //! `turn.start`, `ask.answer`, `turn.interrupt`) run as this connection; subscriptions turn each new log line, and the streamed text of a running turn, into

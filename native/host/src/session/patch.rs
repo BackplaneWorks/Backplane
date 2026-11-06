@@ -1,4 +1,4 @@
-//! Merging an action's `session_patch` into the request's session (what Bend's `Ui` update does when an action changes scratch/info/flags): one helper for every lane that answers an action
+//! Merging an action's `session_patch` into the request's session: one helper for every lane that answers an action
 //! (composer::act, select::select, commands::actions::act). A patch is `{sel?, rid?, panel?, adding?, wantNew?, error?, note?, drafts?, info?, open?, outbox?}`: scalars are set, the four maps are
 //! merged key by key (a key set to a value replaces it; the maps keep every key the patch does not name).
 use serde_json::{Map, Value};

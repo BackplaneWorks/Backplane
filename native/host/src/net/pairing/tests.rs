@@ -1,4 +1,4 @@
-//! Law-named tests for the pairing registry (effects/pairing.js, core/auth.bend). The Bend hub's file is
+//! Law-named tests for the pairing registry. hub's file is
 //! read and written by both hubs, so the first test reads a registry the JS store wrote.
 use super::*;
 use std::sync::{atomic::{AtomicU64, Ordering}, Arc};

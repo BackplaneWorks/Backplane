@@ -5,10 +5,10 @@ import ImageIO
 import UniformTypeIdentifiers
 
 // The pieces of a thread and the sheets over it. Every label, value and
-// choice comes from the screen (src/mobile/screen.bend); these only draw
+// choice comes from the screen; these only draw
 // them and send back the action each names.
 
-// the hub's palette for a thread's phase (src/web/style.css, src/app/theme.bend);
+// the hub's palette for a thread's phase;
 // a thread's activity: working accent (blue), finished ok (green), wanting
 // you bad (red), stopped, idle or settled faint (grey) (style.css's --st-*)
 enum PhaseColor {
@@ -676,7 +676,7 @@ struct NeedsCard: View {
     }
 }
 
-// a buy thread's Order card under the top bar (screen.bend's Mob.order):
+// a buy thread's Order card under the top bar:
 // "Order · <project>", the steps (done ✓, the one at work lit: violet while
 // the quote is on its way), what happens now, and once quoted the total,
 // the customs line and Buy now (opened in the browser)
@@ -795,7 +795,7 @@ struct ComposerExtras: View {
             .padding(.horizontal).padding(.top, 8)
         }
         if !skills.isEmpty {
-            // Bend marks the highlighted row; the first one is it only when none is marked
+            // marks the highlighted row; the first one is it only when none is marked
             let hot = skills.firstIndex(where: { $0.on == true }) ?? 0
             VStack(spacing: 0) {
                 Divider()
@@ -1352,7 +1352,7 @@ private struct SetFieldView: View {
     }
 }
 
-// The hub's settings rows (src/mobile/screen.bend's Mob.settings.of), as
+// The hub's settings rows, as
 // the Hub settings page draws them. Rows about this device (`local`) are
 // App settings' business and are left out.
 private struct UsageDayChart: View {

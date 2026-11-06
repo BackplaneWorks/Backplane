@@ -124,7 +124,7 @@ async fn files_dir(hub: &Arc<Hub>, id: &Value, p: &Value) -> Value {
     }
 }
 
-/// git.status, git.diff, git.revert, history.refs (server.bend's GitJob / RefsJob, hub.bend's Hub.more).
+/// git.status, git.diff, git.revert, history.refs.
 struct GitRpc;
 impl RpcHandler for GitRpc {
     fn methods(&self) -> &'static [&'static str] { &["git.status", "git.diff", "git.revert", "history.refs", "git.act"] }
@@ -174,7 +174,7 @@ impl RpcHandler for GitRpc {
         })
     }
 }
-/// GitJob.note: a line in the thread (hub.bend's thread.note: an ActivityLogged of kind "git").
+/// GitJob.note: a line in the thread.
 pub async fn note(hub: &Arc<Hub>, thread: &str, tone: &str, summary: &str) {
     let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     let seq = hub.store.len();

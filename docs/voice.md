@@ -34,12 +34,12 @@ probability (percent); the segment's last decode is its `done`.
 
 ## Live words, calmly
 
-The hub (server/voice.bend's `Vo.step`) settles each hypothesis with
-core/vdict.bend's `Vs.*`: words two hypotheses in a row agree on, ending
+The hub settles each hypothesis with
+core/vdict's `Vs.*`: words two hypotheses in a row agree on, ending
 0.4 s or more before the audio so far, are committed; unsure ones (under
 85 %) at the end wait for the next sure one. Committed words go through the
 correction pass (`Vd.fix`) and out as `{"ev":"words", "first", "commit",
-"tail", "firm", "fixes", "final", "unsure"}`. The client (client.bend's
+"tail", "firm", "fixes", "final", "unsure"}`. The client (client's
 `Voice.words`) takes the old tail out of the draft, puts the committed words
 where the committed ones end (`@voice.pos`), and the tail after them
 (`@voice.tl` its length): committed words never move or change; only the
@@ -61,7 +61,7 @@ Settings (all clients see them; they live in the hub's log):
   chip undoes one. It applies by itself once confirmed twice and never
   undone; until then it is offered as a guess.
 
-An empty value removes either. The correction pass (core/vdict.bend's
+An empty value removes either. The correction pass (core/vdict's
 `Vd.fix`, laws `vd_*`): drop words, replacements and how terms sound
 (exact phrases, longest first), terms written another way (`kicad`,
 `stm 32`), then sound-alikes of terms (a rough sound key and edit
@@ -70,8 +70,7 @@ engine was itself unsure (local engine), else offered as the guess. Words
 to ask about: the guesses, words the engine heard at under 50 %, then near
 misses and technical-looking words (`Voice.unsure`), at most five.
 `dictionary.txt` (older hubs, bots' `voice_dictionary_add`) still adds
-terms. Every `bots.voice` request carries the entries and settings
-(bothub.bend's `Vreq.with`); the hub keeps the last as
+terms. Every `bots.voice` request carries the entries and settings; the hub keeps the last as
 `<home>/voice/prefs.json` for a ring's recordings.
 
 ## Another machine, a phone
@@ -83,29 +82,29 @@ browser) records itself (`src/web/voice-mic.js`: getUserMedia, an
 AudioWorklet, 16 kHz s16le) and starts with `src: "client"`; the reply names
 `/voice/in?s=<key>`, where it POSTs ~200 ms pieces in order (`&end=1` last).
 The hub copies each body straight into the helper's stdin (host.js's
-`Sock.feed`, never a Bend list) and the helper converts it to the engine's
+`Sock.feed`, never a list) and the helper converts it to the engine's
 rate. The dictionary and learned fixes are the hub's settings, so every
 client of that hub shares them.
 
 ## Pieces
 
 - `tools/voice/` builds `backplane-voice` (Bun), the one part that is not
-  Bend: it records the microphone (`pw-record`, `parecord` or `arecord`,
+  : it records the microphone (`pw-record`, `parecord` or `arecord`,
   24 kHz mono PCM), streams it to `wss://…/v1/realtime?intent=transcription`
   and prints NDJSON events. It also transcribes a finished recording
   (`file`: ffmpeg to PCM, then the same socket; `gpt-transcribe` over REST
   when ffmpeg is missing). Its README has the protocol.
-- `src/server/voice.bend`: the key, the dictionary, live sessions, a ring's
-  recording. `server.bend`'s `VoiceJob` answers `bots.voice` requests
+- `src/server/voice`: the key, the dictionary, live sessions, a ring's
+  recording. `server`'s `VoiceJob` answers `bots.voice` requests
   (`op`: status, key, unkey, dict, add, start, stop, devices).
-- `src/core/voice.bend` (pure, laws `voice_*`): the dictionary, and which
+- `src/core/voice` (pure, laws `voice_*`): the dictionary, and which
   words of a transcript to ask about (`Voice.unsure`): a near miss of a
   dictionary term (one word, or two heard for one term: "key cad" for
   KiCad), or a technical-looking word nobody taught it (letters and digits
   mixed, all caps, inner capitals). At most five.
-- `src/core/client.bend`'s `Voice`: the session as the client shows it,
-  and the clarify actions. The window draws it in `layout.bend` (`Vx.*`,
-  `Set.voice`), the web in `view.bend` (`View.voice`, `View.voice.set`).
+- `src/core/client`'s `Voice`: the session as the client shows it,
+  and the clarify actions. The window draws it in `layout` (`Vx.*`,
+  `Set.voice`), the web in `view` (`View.voice`, `View.voice.set`).
 
 ## Storage
 

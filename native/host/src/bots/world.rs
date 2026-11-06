@@ -1,4 +1,4 @@
-//! The bots world folded from the log: src/core/bot.bend `World` and `M.State.world` (model.bend), for the events a
+//! The bots world folded from the log: src/core/bot `World` and `M.State.world`, for the events a
 //! bots request reads. Only this lane reads it; the presenter folds the same events for the screens.
 use crate::store::Store;
 use serde_json::Value;
@@ -54,7 +54,7 @@ pub struct World {
     #[serde(skip)] pub steps: Vec<StepEnd>,
     seen: usize, line: usize,
 }
-/// A line the mailroom answers once it is in the log (hub.bend `Run.after.go`, `Run.fallback.go`). A Bend step answers inside the step, on the state before it;
+/// A line the mailroom answers once it is in the log. A step answers inside the step, on the state before it;
 /// here the line is noted as it folds, with what that state knew (the run live when its turn ended), and answered right after.
 #[derive(Clone, Debug, PartialEq)]
 pub enum StepEnd {
@@ -98,7 +98,7 @@ impl World {
     /// Triage.owner: the uberbot, with a thread
     pub fn triage_owner(&self, bot: &str) -> bool { self.uber_is(bot) && self.bots.get(bot).map_or(false, |b| !b.thread.is_empty()) }
     pub fn lines_seen(&self) -> usize { self.seen }
-    // ---- the uberbot's registers (ubersync.bend) ----
+    // ---- the uberbot's registers ----
     fn ubs(&self, k: &str) -> String { self.ub.settings.get(k).cloned().unwrap_or_default() }
     /// Ub.uid, Ub.me
     pub fn uid(&self) -> String { self.ubs("uber.uid") }

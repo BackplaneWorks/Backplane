@@ -1,4 +1,4 @@
-//! History and comparison on the Board and Schematic pages (the web's history bar and compare menu, client.bend's Hs.*/Rv.*): the file against a version (HEAD, a branch, a tag, a
+//! History and comparison on the Board and Schematic pages: the file against a version (HEAD, a branch, a tag, a
 //! commit) or one design-history step against the one before it, each shown as Old (that version), New (the other) or Diff (removed, changed and added on layers 26-28), and step
 //! playback through the thread's steps. Everything is the hub's: `history.refs` / `history.steps` name the versions, `kicad.watch` on a version path (`git\t...`, `diff\n...`) draws them.
 //! This module only builds the version paths, keeps what is on show (`Cmp`, in the canvas's PlotView) and draws the bar.
@@ -18,7 +18,7 @@ pub fn steps_of(v: &Value) -> Option<Steps> {
     Some(Steps { git: g("git"), top: g("top"), pcb: g("pcb"), sch: g("sch"), steps })
 }
 
-/// core/hist.bend's version path of `file` in `commit`: "git\t<gitdir>\t<commit>\t<len top>\t<top>/<rel>" ("" when the file is not under the top folder).
+/// core/hist's version path of `file` in `commit`: "git\t<gitdir>\t<commit>\t<len top>\t<top>/<rel>" ("" when the file is not under the top folder).
 pub fn version(git: &str, top: &str, commit: &str, file: &str) -> String {
     match file.strip_prefix(&format!("{top}/")) { Some(rel) if !commit.is_empty() && !git.is_empty() => format!("git\t{git}\t{commit}\t{}\t{top}/{rel}", top.chars().count()), _ => String::new() }
 }

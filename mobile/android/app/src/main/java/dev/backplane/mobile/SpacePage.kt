@@ -23,10 +23,10 @@ import kotlinx.coroutines.withContext
 import java.net.HttpURLConnection
 import java.net.URL
 
-// A bot's space as a web page (mobile/bots.bend's "page"): the hub serves
+// A bot's space as a web page: the hub serves
 // it at url behind a policy that runs no script and loads nothing from the
 // network, and the web view runs no script and blocks the network too. n
-// is new when the page is. A tapped link or submitted form goes to Bend as
+// is new when the page is. A tapped link or submitted form goes to as
 // ("space-link", bot + "\u001f" + url), which decides what a "space:" one
 // sends; web links open in the browser.
 data class SpacePageModel(val bot: String, val url: String, val n: String)

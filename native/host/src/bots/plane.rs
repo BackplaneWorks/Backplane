@@ -1,4 +1,4 @@
-//! plane_read (src/core/plane.bend `Plane.read`, `Plane.text`): the status plane as text, with the ids the thread tools take: what waits on the person, what runs, the bots,
+//! plane_read: the status plane as text, with the ids the thread tools take: what waits on the person, what runs, the bots,
 //! the rooms with unread posts, the locks, the routines and the day's idle threads. The hub reads it with no client, so nothing here is far: every thread and bot is this
 //! machine's. A pure function of the state lane's fold and the bots' world (`rooms` are read from the log by the caller).
 use super::clock::Zones;
@@ -104,7 +104,7 @@ impl<'a> Ctx<'a> {
     }
     fn row(&self, kind: &'static str, id: &str, th: &str, title: &str, sub: &str, state: String) -> Row { Row { kind, id: id.into(), title: title.into(), sub: self.observed(&self.note(th, sub), th), state, at: self.thread(th).activity } }
     /// Mood.moving, Mood.note over Mood.bot: what a bot at work is doing, "" for one at rest. World.talked is keyed by a post's `from`, the bot's name, and talked_at asks by id,
-    /// so Bend's cat never reads "talking" from it; this keeps that.
+    /// so cat never reads "talking" from it; this keeps that.
     fn mood(&self, th: &str) -> &'static str {
         let t = self.thread(th);
         if t.pending > 0 || self.asked(th, "approval") || self.asked(th, "input") || self.asked(th, "plan") || self.asked(th, "browser") { return "needs you" }

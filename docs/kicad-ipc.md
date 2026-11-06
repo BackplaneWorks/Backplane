@@ -42,12 +42,12 @@ unknown/new commands require the write choice too, including unknown commands
 whose names merely start with Get or List.
 
 The exact read-only allowlist is `Project.reads` in
-`src/core/kicad-project.bend`. It matches full protobuf type names, including
+`src/core/kicad-project`. It matches full protobuf type names, including
 legacy board/schematic GetItems spellings; an unknown namespace is not allowed
 merely because its command has a familiar leaf name.
 
-Regression coverage: `test/kicad_project_test.bend`,
-`test/kicad_copy_ui_test.bend`, `test/tools/kicad_project_test.py` and
+Regression coverage: `test/kicad_project_test`,
+`test/kicad_copy_ui_test`, `test/tools/kicad_project_test.py` and
 `test/tools/kicad_project_e2e.ts`. The filesystem tests use actual linked Git
 worktrees, including nested project folders and separate Git metadata; the
 integration test records launch and IPC-helper requests without a real GUI.
@@ -59,13 +59,13 @@ fallback says so in the tool result.
 
 ## Pieces
 
-- `src/core/kserve.bend` (pure, laws `kserve_*`): `KS.dir` (`$XDG_RUNTIME_DIR/backplane/kicad/<digest>`,
+- `src/core/kserve` (pure, laws `kserve_*`): `KS.dir` (`$XDG_RUNTIME_DIR/backplane/kicad/<digest>`,
   else `<home>/run/kicad/<digest>`, one directory per project), `KS.argv` (`--socket <dir>/api.sock`,
   `--parent-pid <hub>`, `--idle-exit 600` when the runtime has `idle-exit`), `KS.ready` (the
   `KiCad API server listening at <path>` line), `KS.version_ok` (full version ends in the manifest's
   `-bp.N`), `KS.retry` (1, 5, 30 s within 300 s, then give up), `KS.plan` / `KS.evict` (two servers at
   most), `KS.headless_refused` (selection, view state, `RunAction`, ... answered by the hub at once).
-- `src/server/kserve.bend`: the actor. A request for a project waits while its server starts (spawn,
+- `src/server/kserve`: the actor. A request for a project waits while its server starts (spawn,
   ready line within 30 s, `Ping`, `GetVersion`) and goes out when it is ready. A third project asks the
   least recently used server to `kiapi.backplane.Shutdown` first (only when the runtime lists `shutdown`).
   The servers' state is the info key `kicad.ipc.servers` (`project|state|why`, one line each); Settings
@@ -75,7 +75,7 @@ fallback says so in the tool result.
   `{"event":"exit"}`; `{"id","op":"close","sock"}` drops a connection. libnng comes from the runtime's
   `lib/`, then the system; the schema from the runtime's descriptor set (`--desc`, per request `desc`);
   without one only `Ping` and `GetVersion` work.
-- MCP: `kicad_ipc {path, type, message}` and `kicad_ipc_status {path}` (`KIpc.*` in server.bend).
+- MCP: `kicad_ipc {path, type, message}` and `kicad_ipc_status {path}`.
 
 ## Rules
 

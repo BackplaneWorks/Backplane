@@ -1,5 +1,5 @@
-//! The thread's to-do list and subagents: two cells in the header bar ("To-do 1/4", "Subagents · 2 at work") that open their rows in a dock under it (client.bend
-//! `Todos.*`, subs.bend `Subs.*`). The rows come from the hub (`thread.todos`, `thread.subs`); whether a panel is open is this device's: to-do stays shut until opened,
+//! The thread's to-do list and subagents: two cells in the header bar ("To-do 1/4", "Subagents · 2 at work") that open their rows in a dock under it (client
+//! `Todos.*`, subs `Subs.*`). The rows come from the hub (`thread.todos`, `thread.subs`); whether a panel is open is this device's: to-do stays shut until opened,
 //! subagents are open while any is at work and fold to their head once all are done (a click on the head holds the choice).
 use crate::{hub::Command, string, theme, Backplane};
 use gpui::{prelude::*, *};

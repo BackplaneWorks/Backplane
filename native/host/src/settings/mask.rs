@@ -1,4 +1,4 @@
-//! Sec.mask / Sec.json / Sec.clean (core/secret.bend, laws sec_*): every character inside an occurrence of a stored
+//! Sec.mask / Sec.json / Sec.clean: every character inside an occurrence of a stored
 //! value becomes U+2022, the length kept. The values live in one process-wide set the vault and `api.env` feed; only
 //! the masks below read it, and nothing here returns a value.
 use serde_json::{Map, Value};
@@ -209,7 +209,7 @@ mod tests {
             assert!(serde_json::from_str::<Value>(&m).is_ok(), "still JSON: {m}");
         });
     }
-    /// KNOWN LIMIT (Bend's per-line Hub.tagged has it too): live text is masked chunk by chunk, so a value split across two chunks is not
+    /// KNOWN LIMIT: live text is masked chunk by chunk, so a value split across two chunks is not
     /// covered in the live frames; the committed message that replaces the live text is masked whole.
     #[test] fn a_secret_split_across_two_live_chunks_is_a_known_limit_the_committed_text_is_masked_whole() {
         with_values(&["abcdefgh-1234"], || {

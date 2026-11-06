@@ -41,7 +41,7 @@ while IFS= read -r line; do
           printf '%s\\n' '{"type":"stream_event","event":{"type":"content_block_stop","index":0},"session_id":"'"$sid"'"}'
           printf '%s\\n' '{"type":"assistant","message":{"id":"m'"$$-$n-$t"'","role":"assistant","content":[{"type":"text","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why."}],"usage":{"input_tokens":1000,"cache_read_input_tokens":'"$((20000 + t))"',"output_tokens":'"$t"'}},"session_id":"'"$sid"'"}'
           printf '%s\\n' '{"type":"assistant","message":{"id":"m'"$$-$n-$t"'b","role":"assistant","content":[{"type":"tool_use","id":"tu'"$$-$n-$t"'","name":"Bash","input":{"command":"ls -la src/core | head -'"$t"'","description":"List files"}}],"usage":{"input_tokens":1000,"cache_read_input_tokens":'"$((20000 + t))"',"output_tokens":'"$((t + 1))"'}},"session_id":"'"$sid"'"}'
-          printf '%s\\n' '{"type":"user","message":{"role":"user","content":[{"tool_use_id":"tu'"$$-$n-$t"'","type":"tool_result","content":"total 42\\\\ndrwxr-xr-x  2 h h 4096 model.bend\\\\n-rw-r--r--  1 h h 1234 hub.bend","is_error":false}]},"session_id":"'"$sid"'"}'
+          printf '%s\\n' '{"type":"user","message":{"role":"user","content":[{"tool_use_id":"tu'"$$-$n-$t"'","type":"tool_result","content":"total 42\\\\ndrwxr-xr-x  2 h h 4096 model\\\\n-rw-r--r--  1 h h 1234 hub","is_error":false}]},"session_id":"'"$sid"'"}'
         fi
         sleep 0.1
       done

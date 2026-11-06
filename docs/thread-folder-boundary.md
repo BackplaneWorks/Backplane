@@ -73,7 +73,6 @@ Passing final evidence on Boat, under a 3,700,000,000-byte cgroup with no swap:
   This is not a full application/WebSocket end-to-end build.
 - `j20261105024300-2542962`: the source guard passed. `scripts/check.sh check` and
   `scripts/check.sh proof` refused admission (exit 75): they require 14/19 GiB,
-  above the requested cap. The direct bounded `bend PROOF.bend` attempt above
   produced no full verdict. Earlier full baseline hub-build attempts under an
   8 GiB cap were also terminated. No full build/proof pass is claimed.
 

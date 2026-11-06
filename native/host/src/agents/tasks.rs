@@ -1,4 +1,4 @@
-//! Delegated tasks (mcp.bend Mcp.delegate / Mcp.status / Mcp.cancel; hub.bend Task.finish, Task.note, Task.msg): `delegate_task` makes a child thread of the caller
+//! Delegated tasks: `delegate_task` makes a child thread of the caller
 //! on any provider, `task_status` reads one, `task_cancel` stops it; when the child's turn ends the result goes to the parent as a message, once (TaskDelivered last).
 //! The end is noticed by a once-a-second look at the log (`watch`), which is also Task.repair after a restart: a finished task not yet delivered is delivered then.
 use super::{hub_id, lines::s, now_s, rules, Agents};
@@ -100,7 +100,7 @@ pub struct Finish { pub id: String, pub parent: String, pub child: String, pub w
 pub fn finish_plan(w: &super::world::World, child: &str, ended: &str) -> Option<Finish> {
     let (id, k) = w.tasks.iter().find(|(_, k)| k.child == child)?;
     if k.state == "cancelled" { return None } // the parent's own cancel is not an end to report (Mcp.cancel runs no Task.finish)
-    // Bend decides inside the step; here the child must still be at the end it was read at, with no ride that starts its next turn
+    // decides inside the step; here the child must still be at the end it was read at, with no ride that starts its next turn
     if w.threads.get(child).map_or(true, |c| c.turn != ended) || !w.setting(&format!("ride.{child}")).is_empty() { return None }
     if ended == "completed" && !w.ready(child) { return None } // task_waits_for_child_work
     let (want, word) = if ended == "completed" { ("done", "finished") } else { ("failed", "failed") }; // task_failed_ends_even_busy

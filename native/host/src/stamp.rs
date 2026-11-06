@@ -1,5 +1,5 @@
-//! The turn boundaries of the time stamps under messages: src/core/stamp.bend's `Stamp.ends` and `Stamp.mid` (the part of
-//! `Stamps` that needs no time zone) in Rust. The clock text (`Stamp.clock`, `Stamp.text`) needs tz.bend and stays unported.
+//! The turn boundaries of the time stamps under messages: src/core/stamp's `Stamp.ends` and `Stamp.mid` (the part of
+//! `Stamps` that needs no time zone) in Rust. The clock text (`Stamp.clock`, `Stamp.text`) needs tz and stays unported.
 //! Each law it guards has a test here with the law's name.
 use std::collections::HashMap;
 

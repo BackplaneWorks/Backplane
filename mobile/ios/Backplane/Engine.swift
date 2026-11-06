@@ -2,7 +2,7 @@ import Foundation
 import JavaScriptCore
 
 // One thread with a deep stack: the hub's log arrives as one message and
-// Bend walks it recursively. A dispatch queue's 512 KB overflows on a real
+// walks it recursively. A dispatch queue's 512 KB overflows on a real
 // log, the call throws, and the app keeps its empty first screen.
 private final class Worker: Thread, @unchecked Sendable {
     private let cond = NSCondition()
@@ -13,7 +13,7 @@ private final class Worker: Thread, @unchecked Sendable {
 
     override init() {
         super.init()
-        name = "bend"
+        name = "engine"
         stackSize = 64 << 20
         qualityOfService = .userInitiated
         start()
@@ -40,7 +40,7 @@ private final class Worker: Thread, @unchecked Sendable {
     }
 }
 
-// The Bend client (bridge.js) in JavaScriptCore, on one thread of its own.
+// client (bridge.js) in JavaScriptCore, on one thread of its own.
 // Every call answers {"screen": ..., "cmds": [...]} as a string.
 final class Engine: @unchecked Sendable {
     private let queue = Worker()
@@ -281,7 +281,7 @@ final class Engine: @unchecked Sendable {
     }
 
     func start(_ cid: String, _ drafts: String) async -> Out? { await out("start", [cid, drafts]) }
-    // a choice of this device that Bend draws by ("view": "projects" or "active")
+    // a choice of this device that draws by ("view": "projects" or "active")
     func local(_ key: String, _ value: String) async -> Out? { await out("local", [key, value], person: true) }
     func reading(_ thread: String, seen: String, count: Int, away: Bool) async -> Out? {
         await out("reading", [thread, seen, count, away], screen: false, person: true)
@@ -328,7 +328,7 @@ final class Engine: @unchecked Sendable {
     func projectSearchGo(scope: Int, edit: Int, text: String, project: String) async -> Out? {
         await out("projectSearchGo", [scope, edit, text, project], person: true)
     }
-    // the secret box's Save: the value goes in one request built by Bend
+    // the secret box's Save: the value goes in one request built by
     // (bridge.js's Backplane.secret), never as an action or a form field
     func secret(_ packed: String) async -> Out? { await out("secret", [packed], person: true) }
     func online(_ key: String, _ b: Bool, epoch: String = "") async -> Out? { await out("online", [key, b, false, epoch], person: true) }

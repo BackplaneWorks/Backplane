@@ -50,7 +50,7 @@ async fn bot(hub: &Arc<Hub>, name: &str) -> String {
 }
 
 #[tokio::test] async fn bots_create_logs_thread_and_bot_and_refuses_bad_or_taken_names() {
-    // bothub.bend Bots.create.k: a name is 1 to 24 of letters, digits, - and _, and free (any case); the reply comes before the home job
+    // bothub Bots.create.k: a name is 1 to 24 of letters, digits, - and _, and free (any case); the reply comes before the home job
     let (hub, _b, _r) = start("create", "").await;
     let r = rpc(&hub, "bots.create", json!({"name":" Ada ","persona":"dry"})).await;
     assert_eq!(r["ok"], true); let b = r["bot"].as_str().unwrap().to_string();
@@ -202,7 +202,7 @@ async fn bot(hub: &Arc<Hub>, name: &str) -> String {
     assert_eq!(log(&hub).iter().find(|e| e["$"] == "ThreadCreated").unwrap()["provider"], "");
 }
 
-#[test] fn world_fold_matches_bot_bend() {
+#[test] fn world_fold_matches_bot() {
     use super::world::World;
     let mut w = World::default();
     for l in [r#"{"$":"BotSet","id":"b","name":"A","thread":"t1","look":1,"persona":"","at":5}"#, r#"{"$":"BotSet","id":"b","name":"A","thread":"","look":2,"persona":"x","at":6}"#] { w.apply_line(l) }
@@ -225,11 +225,11 @@ async fn bot(hub: &Arc<Hub>, name: &str) -> String {
     assert_eq!(note_origin("hello"), None);
 }
 
-// ---- the same scenario as the JS hub's (test/gpui/bots/record_js.mjs), compared event by event ----
-const JS_EVENTS: &str = include_str!("../../../../test/gpui/bots/fixtures/js-bots.jsonl");
-const JS_STEPS: &str = include_str!("../../../../test/gpui/bots/fixtures/js-steps.json");
+// ---- the same scenario as the JS hub's (test/bots/record_js.mjs), compared event by event ----
+const JS_EVENTS: &str = include_str!("../../../../test/bots/fixtures/js-bots.jsonl");
+const JS_STEPS: &str = include_str!("../../../../test/bots/fixtures/js-steps.json");
 
-/// test/gpui/bots/filter.py: the events a bots scenario is about, without clocks
+/// test/bots/filter.py: the events a bots scenario is about, without clocks
 fn filter(ev: &[Value]) -> Vec<Value> {
     let threads: std::collections::HashSet<String> = ev.iter().filter(|e| e["$"] == "BotSet" && !e["thread"].as_str().unwrap_or("").is_empty()).map(|e| e["thread"].as_str().unwrap().to_string()).collect();
     const KEEP: [&str; 22] = ["BotSet", "BotDeleted", "RoomSet", "RoomDeleted", "RoomPosted", "BotWoke", "MemorySaved", "MemoryForgot", "SpaceSet", "WorktreeSet", "UberSet",
@@ -302,8 +302,8 @@ fn norm(ev: &[Value]) -> Vec<String> {
     assert_eq!(a.len(), b.len(), "same number of events\nJS: {a:#?}\nRust: {b:#?}");
 }
 
-const JS_ROUTINE_EVENTS: &str = include_str!("../../../../test/gpui/bots/fixtures/js-routines.jsonl");
-const JS_ROUTINE_STEPS: &str = include_str!("../../../../test/gpui/bots/fixtures/js-routines-steps.json");
+const JS_ROUTINE_EVENTS: &str = include_str!("../../../../test/bots/fixtures/js-routines.jsonl");
+const JS_ROUTINE_STEPS: &str = include_str!("../../../../test/bots/fixtures/js-routines-steps.json");
 
 #[tokio::test] async fn js_parity_routines() {
     std::env::set_var("TZ", "Etc/UTC"); // the recording's hub ran in UTC
@@ -420,7 +420,7 @@ async fn th_a(bots: &Arc<Bots>, b: &str) -> String { bots.world().await.bot(b).u
     let uth = bots.world().await.bot(&u).unwrap().thread.clone(); assert_eq!(chat_thread(&hub, &u).await, Some(uth));
 }
 
-/// the run's own machine id, uberbot id, stamp seconds and one-time instants inside op bodies, as test/gpui/bots/filter.py makes them
+/// the run's own machine id, uberbot id, stamp seconds and one-time instants inside op bodies, as test/bots/filter.py makes them
 fn canon(raw: &[Value]) -> Vec<String> {
     let me = raw.iter().rev().find(|e| e["$"] == "SettingSet" && e["key"] == "machine.id").and_then(|e| e["value"].as_str()).unwrap_or("").to_string();
     let uid = raw.iter().find(|e| e["$"] == "UberSet" && !e["uid"].as_str().unwrap_or("").is_empty()).and_then(|e| e["uid"].as_str()).unwrap_or("").to_string();
@@ -437,8 +437,8 @@ fn canon(raw: &[Value]) -> Vec<String> {
     }).collect()
 }
 
-const JS_UBER_EVENTS: &str = include_str!("../../../../test/gpui/bots/fixtures/js-uber.jsonl");
-const JS_UBER_STEPS: &str = include_str!("../../../../test/gpui/bots/fixtures/js-uber-steps.json");
+const JS_UBER_EVENTS: &str = include_str!("../../../../test/bots/fixtures/js-uber.jsonl");
+const JS_UBER_STEPS: &str = include_str!("../../../../test/bots/fixtures/js-uber-steps.json");
 
 #[tokio::test] async fn js_parity_uber() {
     std::env::set_var("TZ", "Etc/UTC");
@@ -485,7 +485,7 @@ const JS_UBER_STEPS: &str = include_str!("../../../../test/gpui/bots/fixtures/js
     assert_eq!(stamp_next("0000000100.000007.m", 101, "m"), "0000000101.000000.m");
 }
 
-const JS_UBER2_EVENTS: &str = include_str!("../../../../test/gpui/bots/fixtures/js-uber2.jsonl");
+const JS_UBER2_EVENTS: &str = include_str!("../../../../test/bots/fixtures/js-uber2.jsonl");
 
 #[tokio::test] async fn js_parity_uber_first_ops_of_a_bot_with_memories_and_routines() {
     // a bot that has memories (newest first) and routines (by id) before it is promoted: Ub.init.bodies
@@ -513,7 +513,7 @@ const JS_UBER2_EVENTS: &str = include_str!("../../../../test/gpui/bots/fixtures/
 }
 
 #[tokio::test] async fn uber_first_ops_carry_space_and_page_between_memories_and_routines() {
-    // Ub.init.bot: who, memories, space, page, routines, lease (term 1), bind; the expected text is the Bend text (ubop.bend Ub.b.*)
+    // Ub.init.bot: who, memories, space, page, routines, lease (term 1), bind; the expected text is text
     let (hub, bots, _r) = start("uber-sp", "").await;
     let bub = bot(&hub, "bub").await; let th = bots.world().await.bot(&bub).unwrap().thread.clone();
     rpc(&hub, "bots.remember", json!({"bot":bub,"key":"k","kind":"fact","text":"t","tags":""})).await;
@@ -582,8 +582,8 @@ const JS_UBER2_EVENTS: &str = include_str!("../../../../test/gpui/bots/fixtures/
     assert_eq!(rpc(&hub, "bots.uber_home", json!({})).await["ok"], true); assert_eq!(log(&hub).len(), n + 1, "already the holder: nothing");
 }
 
-const JS_MAIL1_EVENTS: &str = include_str!("../../../../test/gpui/bots/fixtures/js-mail1.jsonl");
-const JS_MAIL1_STEPS: &str = include_str!("../../../../test/gpui/bots/fixtures/js-mail1-steps.json");
+const JS_MAIL1_EVENTS: &str = include_str!("../../../../test/bots/fixtures/js-mail1.jsonl");
+const JS_MAIL1_STEPS: &str = include_str!("../../../../test/bots/fixtures/js-mail1-steps.json");
 
 #[tokio::test] async fn js_parity_mail_filing() {
     // the mailroom on: a room post is filed, a routine's firing is filed instead of delivered; the uberbot's routine is filed with an owner ticket. Compared with a JS-hub recording
@@ -680,7 +680,7 @@ mod mail_tests {
         assert_eq!(want("room", "act", &f("room", "t")), "act"); assert_eq!(want("routine", "fyi", &f("routine", "t")), "fyi");
         assert_eq!(head("a\tb\r\nrest"), "a b "); assert_eq!(head(&"x".repeat(200)).len(), 160); assert_eq!(bytes("é€"), 5);
     }
-    #[test] fn mail_body_line_is_what_bend_writes_and_reads_back() {
+    #[test] fn mail_body_line_is_what_writes_and_reads_back() {
         let b = Body { conv: Conv { id: "room:r1".into(), subject: "lab".into(), kind: "room".into(), parts: vec!["bot:b".into(), "person".into()], project: String::new(), tags: vec![], made: 5, last: 5, n: 0 },
             mail: Hdr { id: "p1".into(), conv: "room:r1".into(), from: "person".into(), to: "room:r1".into(), kind: "room".into(), r#ref: "r1".into(), want: "fyi".into(), head: "h".into(), size: 3, at: 5 }, text: "a\"b\\c\nd\u{1}é".into() };
         let line = body_line(&b);
@@ -749,7 +749,7 @@ mod store_tests {
     }
 }
 
-// ---- the bots' MCP tools against the recorded JS hub (test/gpui/bots/record_tools.mjs) ----
+// ---- the bots' MCP tools against the recorded JS hub (test/bots/record_tools.mjs) ----
 fn tool_norm(v: &Value) -> Value {
     fn id_like(s: &str) -> bool { let b = s.as_bytes(); b.len() > 12 && "brotp".contains(b[0] as char) && b[1..11].iter().all(u8::is_ascii_digit) && b[11] == b'-' }
     fn go(k: &str, v: &Value) -> Value {
@@ -775,7 +775,7 @@ fn tool_norm(v: &Value) -> Value {
 }
 #[tokio::test] async fn js_bot_tools() {
     // every call the JS hub answered in the recording, replayed on a hub with the same bots: the same answers (ids, times and dates aside)
-    let calls: Vec<Value> = serde_json::from_str(include_str!("../../../../test/gpui/bots/fixtures/js-bot-calls.json")).unwrap();
+    let calls: Vec<Value> = serde_json::from_str(include_str!("../../../../test/bots/fixtures/js-bot-calls.json")).unwrap();
     let (hub, bots, rec) = start("tools", "{\"$\":\"SettingSet\",\"key\":\"tz.machine\",\"value\":\"Etc/UTC\",\"at\":1}\n{\"$\":\"ProjectCreated\",\"id\":\"p1700000000-1\",\"title\":\"fixture\",\"root\":\"/home/h/Documents/i2cjak/backplane-gpui/build/gpui/results/bots/rec6/work/fixroot\",\"at\":1700000000}\n").await;
     let (ada, _bob) = (bot(&hub, "ada").await, bot(&hub, "bob").await);
     let th = log(&hub).iter().find(|e| e["$"] == "BotSet" && e["id"] == ada.as_str()).unwrap()["thread"].as_str().unwrap().to_string();
@@ -1173,7 +1173,7 @@ fn unprompted_probe() {
     }
 }
 
-// ---- the ledger tools, notify_person and project_create against the recorded JS hub (test/gpui/bots/record_ledger.mjs) ----
+// ---- the ledger tools, notify_person and project_create against the recorded JS hub (test/bots/record_ledger.mjs) ----
 /// ids and times inside a stored value or a sentence: `b1793945350-204`, `k...-1-0`, `1793945367.219`
 fn scrub(s: &str) -> String {
     let c: Vec<char> = s.chars().collect(); let (mut o, mut i) = (String::new(), 0);
@@ -1200,8 +1200,8 @@ fn stored(e: &Value) -> Value {
     v["key"] = json!(scrub(e["key"].as_str().unwrap_or(""))); if e["id"].is_string() { v["id"] = json!(scrub(e["id"].as_str().unwrap())) } v
 }
 #[tokio::test] async fn js_ledger_tools() {
-    let rec: Value = serde_json::from_str(include_str!("../../../../test/gpui/bots/fixtures/js-ledger-calls.json")).unwrap();
-    let js: Vec<Value> = include_str!("../../../../test/gpui/bots/fixtures/js-ledger.jsonl").lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+    let rec: Value = serde_json::from_str(include_str!("../../../../test/bots/fixtures/js-ledger-calls.json")).unwrap();
+    let js: Vec<Value> = include_str!("../../../../test/bots/fixtures/js-ledger.jsonl").lines().map(|l| serde_json::from_str(l).unwrap()).collect();
     let (hub, bots, inbox) = start("ledger", "").await;
     let work = std::env::temp_dir().join(format!("bp-ledger-{}", std::process::id())); let _ = std::fs::remove_dir_all(&work); std::fs::create_dir_all(&work).unwrap();
     std::fs::write(work.join("afile"), "x").unwrap(); let w = work.to_str().unwrap().to_string();
@@ -1240,7 +1240,7 @@ fn stored(e: &Value) -> Value {
     assert_eq!(list("t1700000001-2"), names("listPlain"), "a plain thread's");
     let _ = std::fs::remove_dir_all(&work);
 }
-#[test] fn told_keys_words_and_overlap_follow_told_bend() {
+#[test] fn told_keys_words_and_overlap_follow_told() {
     assert_eq!(ledger::key_pick("  Lunch: Dana!!  ", "x"), "lunch:-dana-");
     assert_eq!(ledger::key_pick("", "The new board revision shipped to the fab today"), "the-new-board-revision-shipped-the-fab-today");
     assert_eq!(ledger::key_pick("", "ok"), "ok", "a text with no word of three is its own key");
@@ -1256,7 +1256,7 @@ fn stored(e: &Value) -> Value {
     assert_eq!(ledger::check(&all, 1000 * 86400, "k", "", 0).len(), 10);
     assert_eq!(ledger::check(&all[10..], 1000 * 86400, "k", "", 99).len(), 2, "at most 30 days back, the old one left out");
 }
-#[test] fn board_dates_and_items_follow_tboard_bend() {
+#[test] fn board_dates_and_items_follow_tboard() {
     for (d, ok) in [("2026-12-01", true), ("2026-13-01", false), ("2026-12-32", false), ("2026-12-00", false), ("12/1", false), ("2026/12/01", false), ("20a6-12-01", false)] { assert_eq!(ledger::date(d), ok, "{d}") }
     let i = ledger::item_of("- [x] two (due 2026-11-30)").unwrap(); assert_eq!((i.title.as_str(), i.status.as_str(), i.due.as_str()), ("two", "done", "2026-11-30"));
     let i = ledger::item_of("12. [~] three due:2026-12-24").unwrap(); assert_eq!((i.title.as_str(), i.status.as_str(), i.due.as_str()), ("three", "doing", "2026-12-24"));

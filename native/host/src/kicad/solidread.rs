@@ -1,4 +1,4 @@
-//! server/plot.bend's `Pv.child.solid` in Rust: a 3D source read to a plot. A .glb is its own model; a board's is exported by the
+//! server/plot's `Pv.child.solid` in Rust: a 3D source read to a plot. A .glb is its own model; a board's is exported by the
 //! runtime's kicad-cli and a STEP's meshed by a host tool (kicad/stepglb.rs), each cached by the exact revision of the source and moved
 //! into the cache only when it worked. Kinds: 2 a board with its parts, 3 bare, 4 with its outer copper too.
 //! Not kept from the child: `<glb>.<build>.plot`, the plot cached beside a GLB (a read here takes milliseconds, not seconds).

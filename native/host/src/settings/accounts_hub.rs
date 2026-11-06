@@ -1,4 +1,4 @@
-//! The hub side of accounts (hub.bend `Hub.accounts.*`, server.bend `AccountsJob`, core/accounts.bend `Accounts.public/changes/created`): the `accounts` request, the
+//! The hub side of accounts: the `accounts` request, the
 //! live snapshot every client is told (info `accounts.live`), the inventory kept in the log (setting `accounts.inventory`, so a restart still knows the profiles' ids and
 //! epochs), a default that follows its profile away, and the threads whose account's identity changed or disconnected: their running turn is stopped, with the reason.
 //! The JS hub offers `accounts*` only to a client the hub knows to be an account-capable web view (thin mode `view-web` and a current `accountProfiles` version, kept per

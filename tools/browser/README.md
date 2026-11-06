@@ -4,7 +4,7 @@ A headless Chromium that Backplane drives, both for the agents' `preview_*`
 MCP tools and for the native preview panel, and one page per bot. It is a
 thin Bun host adapter over `playwright-core`: it runs requests and
 publishes frames. Product logic (which tab, when to show it, how to map
-panel clicks) stays in Bend.
+panel clicks) stays in .
 
 ```sh
 scripts/build-browser.sh              # -> dist/backplane-browser (bun --compile)
@@ -78,7 +78,7 @@ written to stdout; diagnostics go to stderr.
 - `error` is one line. An unparseable line answers `{"id": null, "ok": false,
   "error": "bad JSON"}`; an unknown op answers `unknown op: X`.
 - EOF on stdin, SIGTERM, or `close` without `page` shuts the browser down
-  and exits. (Backplane's Bend side always sends `page`, so an agent's
+  and exits. (Backplane's side always sends `page`, so an agent's
   `close` closes only its page.)
 - `timeoutMs` (where accepted) defaults to 15000 and is capped at 60000.
 - URLs: absolute URLs (`https:`, `http:`, `file:`, `data:`, `about:`) pass
@@ -211,7 +211,7 @@ with no `value` key; its value is also kept out of every target's `text` and
 
 ## Frames
 
-Frames are raw pixels, because the Bend side cannot decode PNG or JPEG
+Frames are raw pixels, because side cannot decode PNG or JPEG
 cheaply. The helper takes Chromium's screencast (`Page.startScreencast`,
 PNG, pushed by the compositor only when something repaints), decodes the
 PNG itself (`src/png.ts`: zlib inflate plus filter reconstruction), and
@@ -242,7 +242,7 @@ when the hash differs from the last published frame. A still page costs
 nothing and emits nothing. `frame`, `resize` and turning frames on publish
 at once, even if unchanged.
 
-In Bend (`src/gfx/bitmap.bend`):
+In :
 
 ```python
 f : File <- IO.try(File, File.open(path, "r"))
@@ -282,7 +282,7 @@ phone clients (two screencasts on one page, one per CDP session).
 
 ## Choices
 
-- Why a file and not fd 3 or stdout: a Bend program reads files with the
+- Why a file and not fd 3 or stdout: a program reads files with the
   stock `File` effects; a pipe would need a custom effect and framing, and a
   slow reader would block the helper. With rename, the reader never blocks
   the writer and always sees the newest whole frame.

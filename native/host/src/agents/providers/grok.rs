@@ -1,4 +1,4 @@
-//! Grok (`grok agent stdio`, ACP): server.bend's Grok.args/Grok.perm/Grok.asks/Grok.go and MS.Proto's PAcp (see acp.rs for the protocol).
+//! Grok (`grok agent stdio`, ACP): server's Grok.args/Grok.perm/Grok.asks/Grok.go and MS.Proto's PAcp (see acp.rs for the protocol).
 //! One process per turn: initialize, session/new or session/load, session/prompt; the turn's end ends the process (the actor does).
 //! Stop is `AgentStop` alone (law interrupt_grok_stops): no session/cancel is written.
 use super::acp::{self, Acp, AcpTurn};

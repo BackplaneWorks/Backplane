@@ -37,7 +37,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE = "deploy/kistack"
 LOCK = "deploy/kistack.lock"
 REPO = "BackplaneWorks/kistack"
-# Backplane's own plugin manifest (src/server/kicad.bend's KiStack.manifest):
+# Backplane's own plugin manifest:
 # never the repository's, whose hooks or .mcp.json would run in every Claude
 MANIFEST = '{"name":"kistack","description":"KiStack KiCad skills by American Embedded"}\n'
 # what a shipped copy holds, and nothing else

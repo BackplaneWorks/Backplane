@@ -3,7 +3,7 @@ package dev.backplane.mobile
 import org.json.JSONArray
 import org.json.JSONObject
 
-// The screen src/mobile/screen.bend emits. Plain data; no decisions.
+// The screen src/mobile/screen emits. Plain data; no decisions.
 
 // a swipe button: the action it sends with its value, or (a snooze)
 // choices whose values it sends instead
@@ -65,7 +65,7 @@ data class Deleting(val id: String, val title: String, val body: String, val yes
 // a thread being renamed: its id, the dialog's title, the title so far, the
 // buttons ("rename-save" with "id\u001ftitle", or "rename-no")
 data class Renaming(val id: String, val title: String, val text: String, val yes: String, val no: String)
-// the first-run tour's step on screen (core/onboard.bend): the counter
+// the first-run tour's step on screen: the counter
 // ("3 of 8"), title and text, the buttons' labels; actions "ob-skip",
 // "ob-back" (not on the first step) and "ob-next"
 data class Tour(val counter: String, val title: String, val body: String, val next: String, val back: String, val skip: String, val first: Boolean,
@@ -91,7 +91,7 @@ data class Folders(val text: String, val hint: String, val error: String, val it
 data class Tool(
     val label: String, val action: String, val on: Boolean,
     val value: String = "", val danger: Boolean = false, val options: List<SwipeChoice> = emptyList(),
-    // core/icons.bend's name for it (toolIcon turns it into a Material icon)
+    // core/icons's name for it (toolIcon turns it into a Material icon)
     val icon: String = "",
 )
 
@@ -121,7 +121,7 @@ data class Entry(
     val open: Boolean = false, val value: String = "", val key: String = "", val at: String = "",
     val stamp: String = "",
     val partial: MessagePartial? = null,
-    // a bot chat (core/reply.bend): Reply offered; a person's reply names
+    // a bot chat: Reply offered; a person's reply names
     // the message it answers; a bot's message heads with what it links most
     val reply: Boolean = false,
     val replyTo: ReplyRef? = null,
@@ -139,7 +139,7 @@ data class MsgCtx(val uri: String, val title: String, val more: Int)
 // action: what the button sends ("" is "answer"; a browser card's Take over is "tk-takeover")
 data class AskButton(val label: String, val value: String, val primary: Boolean, val action: String = "")
 // image: the hub path of a browser task's screenshot at the pause ("" for none)
-// needs: a buy thread's "Backplane needs" card (screen.bend's Mob.needs):
+// needs: a buy thread's "Backplane needs" card:
 // an order question has a box whose text is sent as "answer" with pre and
 // the text (typed: the box leads, where it ships), its choices as buttons,
 // go (Continue) and skip; the files' approval only the needs look
@@ -150,7 +150,7 @@ data class Ask(
     val go: String = "", val skip: AskButton? = null,
 )
 
-// a buy thread's Order card (screen.bend's Mob.order): the project, the
+// a buy thread's Order card: the project, the
 // steps (mark "done", "on" or ""), what happens now (waiting: the quote on
 // its way), and once quoted the total, the customs line and Buy now (its
 // label and link, opened in the browser); the title is marked Order
@@ -160,7 +160,7 @@ data class OrderCard(
     val total: String, val customs: String, val pay: String, val label: String,
 )
 
-// the subagent panel (src/core/subs.bend): what the thread delegated and
+// the subagent panel: what the thread delegated and
 // the agent's own; a row sends act with value (a task opens its thread, a
 // subagent opens or shuts its steps)
 data class SubStep(val kind: String, val text: String)
@@ -191,7 +191,7 @@ data class TermRun(val t: String, val fg: Int, val bg: Int, val b: Boolean, val 
 data class TermCursor(val x: Int, val y: Int, val on: Boolean)
 data class Term(val title: String, val fg: Int, val bg: Int, val lines: List<List<TermRun>>, val cursor: TermCursor)
 
-// a terminal in the chat (core/emb.bend): its key, size, whether it is live
+// a terminal in the chat: its key, size, whether it is live
 // or pinned, the value "emb-restart" sends, and its screen while live
 data class Emb(
     val key: String, val id: String, val title: String, val cols: Int, val rows: Int,
@@ -202,7 +202,7 @@ data class Emb(
 data class SetButton(val label: String, val action: String, val value: String, val on: Boolean)
 // a field to type in: each change goes out as "bfield" (name, text); a
 // secret one shows dots
-// vault: the secret box's value field (screen.bend's Mob.sbox), kept by the
+// vault: the secret box's value field, kept by the
 // app and handed over only at Save (Core.vaultText), never sent as typed
 data class SetField(val name: String, val hint: String, val secret: Boolean, val value: String, val vault: Boolean = false)
 // qr: the pairing code's rows ('1' dark) while it is shown
@@ -216,7 +216,7 @@ data class SetRow(val label: String, val note: String, val buttons: List<SetButt
                   val notify: Boolean = false, val chart: List<UsageDay> = emptyList(), val installProgress: InstallProgress? = null)
 data class Settings(val rows: List<SetRow>)
 
-// the tab bar's badges and every bot's routines (src/mobile/tabs.bend)
+// the tab bar's badges and every bot's routines
 data class RoutineRow(
     val nav: String, val id: String, val act: String, val value: String, val title: String, val sub: String,
     val state: String, val ago: String, val bot: String, val machine: String, val away: Boolean,
@@ -228,7 +228,7 @@ data class Tabs(val home: Int = 0, val bots: Int = 0, val routines: Int = 0, val
 // thread search ("search") or the file picker ("files"): its query and rows
 data class Find(val mode: String, val query: String, val rows: List<FolderRow>)
 
-// the board viewer (src/mobile/view.bend): the source open ("" closed),
+// the board viewer: the source open ("" closed),
 // the Review tab: page chips ("rv-page" page), the title, the report's
 // Markdown nodes (empty: say note), whether it is being made
 data class ReviewTab(val page: String, val label: String, val on: Boolean)
@@ -241,7 +241,7 @@ data class ReleaseForm(val tag: String, val next: String, val publish: Boolean, 
 data class ReviewTask(val index: Int, val text: String, val group: String, val done: Boolean)
 data class ReviewChecks(val gate: String, val line: String, val tasks: List<ReviewTask>)
 
-// Review comments (client.bend's Rc): the pins, at places in mm of the
+// Review comments: the pins, at places in mm of the
 // file's coordinates ("rv-pin" id opens one), the one open, and the place
 // waiting for its note ("x\ty\tlayer\titem", "" none)
 data class ReviewPin(val id: String, val x: Float, val y: Float, val resolved: Boolean, val count: Int)
@@ -281,7 +281,7 @@ data class Viewer(
     // the Review tab (open "review")
     val review: ReviewPage? = null,
     val comments: ReviewComments? = null,
-    // the layer focus (core/layers.bend): the layers drawn dimmed (a bit
+    // the layer focus: the layers drawn dimmed (a bit
     // each), the one drawn last (255 none), the list's All/Dim/Only (0-2)
     // and whether it has one (a board), and the Layers button's words
     val dim: Int = 0, val lift: Int = 255, val layerMode: Int = 0, val layerModes: Boolean = false, val layerHead: String = "Layers",
@@ -291,7 +291,7 @@ data class Viewer(
 // the Files tab: where the folder is, its rows (a tap sends action with
 // value; "" when the file is only listed), whether the hub has listed it
 data class FileCrumb(val label: String, val action: String, val value: String)
-// down: where the row downloads from ("" none; client.bend's Fm.down), downName: the name it saves under
+// down: where the row downloads from, downName: the name it saves under
 data class FileRow(val label: String, val action: String, val value: String, val detail: String, val kind: String, val icon: String, val down: String = "", val downName: String = "")
 // zip, zipName: the folder on show as a zip, and its name
 data class FilesPage(val trail: List<FileCrumb>, val rows: List<FileRow>, val ready: Boolean, val zip: String = "", val zipName: String = "")
@@ -299,7 +299,7 @@ data class FilesPage(val trail: List<FileCrumb>, val rows: List<FileRow>, val re
 // the hub serves it (a path the app makes a URL of, Core.web)
 data class FileView(val name: String, val kind: String, val url: String)
 
-// The design history (src/mobile/view.bend's Hist.json): the steps in the
+// The design history: the steps in the
 // track and the one shown (0 the live file), what to call it, what the
 // agent said before it, playing, changes marked, a comparison on show and
 // its sides' labels, the side whose version menu is open ("" shut), a tick
@@ -318,7 +318,7 @@ data class HistTick(val id: String, val on: Boolean)
 // a version the menu offers ("cmp-pick" value)
 data class HistRow(val label: String, val sub: String, val value: String)
 
-// The Mechanical page (src/mobile/view.bend's Mech.json): what to say
+// The Mechanical page: what to say
 // while there are no parts, the parts ("mech-part" value), the part on
 // show (its path for "mech-3d"), its renders and what to say without any,
 // and where to get FreeCAD when the hub has none
@@ -333,7 +333,7 @@ data class MechPage(
 data class MechShot(val view: String, val url: String)
 
 // box: its sheet symbol on the sheet on show ("x0 y0 x1 y1" mm) when it is
-// directly under it; a tap there opens it (mobile/view.bend)
+// directly under it; a tap there opens it
 data class Sheet(val label: String, val value: String, val on: Boolean, val loop: Boolean, val box: String = "")
 
 data class LayerRow(val layer: Int, val name: String, val on: Boolean, val active: Boolean = false)
@@ -397,13 +397,13 @@ data class ThreadView(
     val boat: String = "",
     val canChild: Boolean = false,
     val order: OrderCard? = null,
-    // dictation in this thread (screen.bend's Mob.voice)
+    // dictation in this thread
     val voice: VoiceView? = null,
 )
 
 data class Btw(val q: String, val a: String)
 
-// Dictation (screen.bend's Mob.voice): "on" while its strip shows, one quiet
+// Dictation: "on" while its strip shows, one quiet
 // word for its state and the level (the words are only in the draft), a
 // note (an error when bad, closed by voice-err), the last segment's fixes
 // (each a chip that undoes it) and the first word to clarify
@@ -424,7 +424,7 @@ data class HubRow(val key: String, val name: String, val online: Boolean)
 
 data class Found(val name: String, val url: String)
 
-// Bots (src/mobile/bots.bend). A cat in the list: act ("bot", or
+// Bots. A cat in the list: act ("bot", or
 // "remote" for a bot only reported by a linked machine) sends its id;
 // mood and note say how it is; cat names its rig ("look:mood"), which the
 // bridge gives once (Core.cats).
@@ -467,7 +467,7 @@ data class BotSettings(
     // the look picker (web's WB.looks): the current look's index, how many looks there are, its label
     val look: Int = 0, val looks: Int = 0, val lookLabel: String = "Look",
 )
-// Browser tasks (src/core/client.bend's Teach.*). The strip: mode 0 idle,
+// Browser tasks. The strip: mode 0 idle,
 // 1 recording, 2 review (the save sheet), 3 the person has the browser; its
 // buttons send their own action. While `input` the frame takes the
 // person's taps ("bb-click" "x y" in thousandths), drags ("bb-scroll" dy),
@@ -578,7 +578,7 @@ data class SyncUpdate(val hub: String, val phase: String, val detail: String = "
     val thinPresented get() = phase == "presented" && detail == "view-v1" && mode == "view-v1" && remoteReady == true &&
         viewId.isNotEmpty() && viewRevision.isNotEmpty() && requestRevision in 1..4294967295L
 }
-// A key in a composer (bridge.js's composerPatch, session.bend's Composer.of):
+// A key in a composer:
 // only the composer's fields for the thread the hub drew, never a screen
 data class ComposerPatch(val thread: String, val draft: String, val skills: List<Skill>, val send: String, val sendAct: String)
 

@@ -1,9 +1,9 @@
 import Foundation
 
-// The Bend client's whole state (Backplane.save()), kept between launches:
+// client's whole state (Backplane.save()), kept between launches:
 // loading it shows every hub's log at once instead of folding it again,
 // and each hub then sends only what came since. The file is named for the
-// Bend types the state is made of (bridge.js ends with their hash,
+// types the state is made of (bridge.js ends with their hash,
 // scripts/state-key.py): a new build with the same types keeps it, one
 // with other types starts afresh rather than load a state it may not read.
 // A bridge.js without the key names it by its whole text.
