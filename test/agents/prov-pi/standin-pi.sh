@@ -29,7 +29,7 @@ while IFS= read -r line; do
         *zqquest*)
           say '{"type":"extension_ui_request","id":"x1","method":"select","title":"Which branch?","options":["main","dev"]}'
           IFS= read -r resp; [ -n "$FAKE_LOG" ] && echo "IN $resp" >> "$FAKE_LOG"
-          upd text_start ''; upd text_delta ',"delta":"You said: '"$(printf '%s' "$resp" | sed -n 's/.*"\(value\|cancelled\)":\("\?[^",}]*\)"\?.*/\1=\2/p')"'"'
+          upd text_start ''; upd text_delta ',"delta":"You said: '"$(printf '%s' "$resp" | sed -n -E 's/.*"(value|cancelled)":("?[^",}]*)"?.*/\1=\2/p')"'"'
           ;;
         *zqask*)
           say '{"type":"extension_ui_request","id":"x2","method":"confirm","title":"backplane:approval","message":"{\"tool\":\"bash\",\"input\":{\"command\":\"rm -rf build\"}}"}'
