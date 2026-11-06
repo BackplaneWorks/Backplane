@@ -4163,8 +4163,8 @@ def Tailnet.https(on: Bool, +port: U32, +token: String, +inbox: Chan(Msg)) -> IO
   match on:
     case True{}:
       do IO<Unit>:
-        s : P.Ran <- P.Proc.run("tailscale", ["serve", "--bg", "--https=443", "http://127.0.0.1:" ++ U32.show(port)], "")
-        st : P.Ran <- P.Proc.run("tailscale", ["status", "--json"], "")
+        s : P.Ran <- P.Proc.run("tailscale", ["serve", "--bg", "--https=443", "http://127.0.0.1:" ++ U32.show(port)], "/")
+        st : P.Ran <- P.Proc.run("tailscale", ["status", "--json"], "/")
         +name : String = Tailnet.dns(st)
         Tailnet.https.k(String.is_empty(name), name, token, inbox)
     case False{}:
@@ -17333,7 +17333,7 @@ def Tailnet.start(n: Net, +host: String, +port: U32, +web: String, +inbox: Chan(
   match n:
     case Net{True{}, https, +token, _, _, _, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}:
       do IO<Unit>:
-        r : P.Ran <- P.Proc.run("tailscale", ["ip", "-4"], "")
+        r : P.Ran <- P.Proc.run("tailscale", ["ip", "-4"], "/")
         +ip : String = Tailnet.first(r)
         Tailnet.listen.k(String.is_empty(ip), host, ip, port, web, inbox, token)
         Tailnet.https(https, port, token, inbox)
