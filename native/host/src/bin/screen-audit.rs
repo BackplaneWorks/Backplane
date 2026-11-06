@@ -23,6 +23,9 @@ mod session { pub use crate::{composer, patch, select, pages}; }
 #[path="../present/window.rs"] mod window;
 #[path="../present/audit_files.rs"] mod files;
 #[path="../present/viewer.rs"] mod viewer;
+#[path="../present/panels.rs"] mod panels;
+#[path="../agents/bg.rs"] pub mod bg_;
+mod agents { pub use crate::bg_ as bg; }
 use serde_json::json;
 use std::{collections::{BTreeMap,HashSet},path::Path};
 fn main() -> anyhow::Result<()> {
