@@ -176,6 +176,8 @@ async fn a_thread_bound_to_a_named_account_runs_under_that_profiles_own_folder_a
     let home = dir("acct-home"); let work = dir("acct-work"); let sd = dir("acct-bin"); let log = sd.join("turns.jsonl");
     let p = sd.join("claude"); std::fs::write(&p, ACCOUNT_CLAUDE).unwrap(); std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
     std::env::set_var("STANDIN_LOG", &log);
+    // the hub runs from a shell whose own Claude ran under a profile (as an agent's Bash does after failover): the default-login thread must not inherit it
+    std::env::set_var("CLAUDE_CONFIG_DIR", "/nonexistent/providers/accounts-v1/inherited/store");
     let (t2, ev) = ("t1700000002-3", |t: &str| format!("{{\"$\":\"ThreadCreated\",\"id\":\"{t}\",\"project\":\"p1\",\"title\":\"x\",\"env\":\"local\",\"branch\":\"\",\"worktree\":\"\",\"provider\":\"claude\",\"model\":\"\",\"at\":1700000001}}\n"));
     std::fs::write(home.join("events.jsonl"), format!("{{\"$\":\"ProjectCreated\",\"id\":\"p1\",\"title\":\"fixture\",\"root\":{},\"at\":1700000000}}\n{}{}", serde_json::to_string(&work.to_string_lossy()).unwrap(), ev(T1), ev(t2))).unwrap();
     let hub = Hub::start(Cfg { home: home.clone(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
@@ -209,7 +211,7 @@ async fn a_thread_bound_to_a_named_account_runs_under_that_profiles_own_folder_a
     assert!(args.windows(2).any(|w| w == ["--setting-sources", "user"]) && args.iter().any(|a| a.contains("forceLoginMethod")), "claude.ai login is forced for the profile: {args:?}");
     let out = turn(t2).await; assert!(out.contains("\"completed\""), "{out}");
     let ran: Vec<Value> = std::fs::read_to_string(&log).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
-    assert!(!ran[1]["dir"].as_str().unwrap_or("").contains("accounts-v1"), "a thread on the default login is not put under a profile: {}", ran[1]["dir"]);
+    assert_eq!(ran[1]["dir"], "", "a thread on the default login runs with no CLAUDE_CONFIG_DIR, not under a profile or the one the hub inherited: {}", ran[1]["dir"]);
     // a profile whose sign-in moved on is never silently swapped for the default
     let s = mgr.request(&json!({"op":"disconnect","profile":id})).await; assert_ne!(s["error"], "", "an account a running thread uses cannot be signed out under it");
     assert_eq!(s["profiles"][0]["state"], "connected");
