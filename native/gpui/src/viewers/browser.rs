@@ -22,14 +22,13 @@ impl BrowserPage {
     /// for a thread's page: the host passes `BT.World.page`'s value), `token` the hub token (a Bearer header, never logged). The poller fetches only while
     /// `set_visible(true)`; mount the page with the tab and call `set_visible(false)` when another tab is shown.
     pub fn new(cx: &mut Context<Self>, base: String, owner: String, token: String, hub: tokio::sync::mpsc::Sender<crate::hub::Command>) -> Self {
+        let hub_tx = hub.clone();
         // with the `cef` feature and a usable runtime the page is embedded Chromium (cef_page.rs); otherwise the hub's JPEG frames below
         #[cfg(feature = "cef")]
         let (cef, cef_note) = match super::cef_page::engine_port() {
             Ok(port) => { let o = owner.clone(); (Some(cx.new(move |cx| super::cef_page::CefPage::new(cx, o, hub, port))), String::new()) }
             Err(e) => { eprintln!("GPUI_LOG {{\"cef\":{}}}", serde_json::Value::String(e.clone())); (None, format!("Embedded browser unavailable ({e}); showing the hub's frames.")) }
         };
-        #[cfg(not(feature = "cef"))]
-        let _ = hub;
         #[cfg(feature = "cef")]
         let use_poller = cef.is_none();
         #[cfg(not(feature = "cef"))]
@@ -40,7 +39,7 @@ impl BrowserPage {
         let flag = stop.clone();
         if !https && use_poller { std::thread::Builder::new().name("browser-frames".into()).spawn(move || {
             let url = format!("{}/bots/{}/screen.jpg", base.trim_end_matches('/'), owner);
-            let (mut last, mut failing) = (0u64, false);
+            let (mut last, mut failing) = (0u64, false); let mut opened: Option<std::time::Instant> = None;
             while !flag.load(Ordering::Relaxed) {
                 if !vis.load(Ordering::Relaxed) { std::thread::sleep(Duration::from_millis(POLL_MS)); continue } // another tab is shown: no requests
                 let out = match ureq::get(&url).set("Authorization", &format!("Bearer {token}")).timeout(Duration::from_secs(3)).call() {
@@ -52,7 +51,12 @@ impl BrowserPage {
                             Err(e) => Some(Err(format!("read: {e}"))),
                         }
                     }
-                    Err(ureq::Error::Status(404, _)) => Some(Err("no browser frame yet".into())),
+                    Err(ureq::Error::Status(404, _)) => {
+                        // no page exists for this owner yet: ask the hub to open one (at most every 5 s), its first frame follows
+                        if opened.map_or(true, |t| t.elapsed() > Duration::from_secs(5)) { opened = Some(std::time::Instant::now());
+                            let _ = hub_tx.try_send(crate::hub::Command::Rpc("bots.browser".into(), crate::screens::settings::Secret(serde_json::json!({"bot": owner, "op": "open"})), "browser")); }
+                        Some(Err("Opening the browser…".into()))
+                    }
                     Err(ureq::Error::Status(c, _)) => Some(Err(format!("hub answered {c}"))),
                     Err(ureq::Error::Transport(t)) => Some(Err(format!("hub unreachable: {}", t.kind()))),
                 };

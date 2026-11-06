@@ -124,7 +124,7 @@ impl Driver {
         }
         match op {
             // the native client's embedded Chromium: the helper attaches over CDP to its loopback endpoint and drives the tabs the person sees (docs/browser-gpui-cef.md)
-            "attach" | "detach" => {
+            "attach" | "detach" | "open" => { // open: the Browser tab asks for the owner's page when it has none yet (an empty tab otherwise says "no browser frame yet" forever)
                 let ep = s(p, "endpoint"); if op == "attach" && !(ep.starts_with("http://127.0.0.1:") || ep.starts_with("http://localhost:")) { return Some(Err("attach needs a loopback endpoint".into())) }
                 drop(g);
                 let (me, bot, id, p, op) = (self.clone(), bot.to_string(), id.clone(), p.clone(), op.to_string());
