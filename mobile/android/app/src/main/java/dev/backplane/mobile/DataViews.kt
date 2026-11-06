@@ -269,6 +269,8 @@ private fun EntryRow(tid: String, e: DEntry) {
             DMono(e.tool?.summary ?: e.text, modifier = Modifier.weight(1f))
         }
         "ask" -> AskCard(tid, e)
+        // a design checkpoint (the hub's git snapshot of the project): a short line, not the record
+        "step" -> DMono("◆ checkpoint" + (runCatching { org.json.JSONObject(e.text).optString("w") }.getOrDefault("").let { if (it.isEmpty()) "" else " · $it" }), dcs.onSurfaceVariant, 11, Modifier.padding(horizontal = 12.dp, vertical = 3.dp))
         else -> Text(e.text, Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), color = dcs.onSurfaceVariant, fontSize = 12.sp, fontFamily = BpMono)
     }
 }

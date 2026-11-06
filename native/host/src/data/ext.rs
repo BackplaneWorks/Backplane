@@ -10,10 +10,13 @@
 //! `viewer.probe {key,name,value}` → `{matches}`, `viewer.info {key,at,idx}` → `{info}` · `files.entries {thread, path?}` → `{dir, entries:[{dir,size,name}]}` ·
 //! `mech.list {thread}` → the hub's listing · bytes of a file: GET /files/get?thread=&path=&token= · `browser {thread, op, ...}` → `{}` (bots.browser for the thread's page: takeover, handback, click {x,y 0..1000},
 //! type, press, scroll, navigate, toolbar) · the page's newest frame: GET /bots/<thread>/screen.jpg, a new one announced by `{"t":"shot","bot":<thread>,"n":N}` (JSON, to every client that connected for viewers).
+//! Diff and Review (features "diff", "review"): `viewer.diff {thread, from?, to?}` → `{diff, nogit?}` (the hub's git.diff: unified text) · `review.page {thread, page: bom|checks, a?, b?, commit?}` → `{report:{md, err, gate, line, tasks:[…]}}`
+//! (review.bom / review.checks: Markdown the hub writes) · `review.tick {thread, index}` → `{ticked:{tasks}}` · `review.comment {thread, op: add|edit|resolve|reopen|drop, text?, id?, parent?, file?, layer?, x?, y?, item?}` → `{}` ·
+//! `review.list {thread}` → `{comments:[{id, text, by, at, parent, resolved, file, layer, x, y, item}]}` (the thread's review acts folded, oldest first).
 //! Pushes on a `lists` subscription: `{"k":"notify","kind":"done"|"fail"|"ask","thread","title","body"}` when a turn ends or an ask opens.
 use super::*;
 
-pub const FEATURES: &[&str] = &["actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser"];
+pub const FEATURES: &[&str] = &["actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review"];
 
 const THREAD_ACTS: &[&str] = &["pin", "unpin", "settle", "unsettle", "archive", "unarchive", "delete"];
 
@@ -52,6 +55,7 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Re
         }
         "mentions.list" => mentions(hub, p).await,
         "viewer.files" | "viewer.watch" | "viewer.probe" | "viewer.info" | "files.entries" | "mech.list" | "browser" => viewers(hub, c, m, p).await?,
+        "viewer.diff" | "review.page" | "review.tick" | "review.comment" | "review.list" => review(hub, c, m, p).await?,
         "bots.list" => Ok(crate::bots::api::directory(hub).await),
         "bot.say" => {
             let (bot, text) = (s(p, "bot"), s(p, "text")); if text.trim().is_empty() { return Some(Err(err("empty message"))) }
@@ -171,3 +175,40 @@ async fn viewers(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Res
 /// Frames the hub pushes to this connection that a phone's viewer reads: a plot (binary CBOR, or JSON for "none") and a browser frame's announcement.
 pub fn wants_raw(b: &[u8]) -> bool { b.len() > 7 && (0xA0..=0xB7).contains(&b[0]) && b[1] == 1 && b[2..7] == [0x64, b'p', b'l', b'o', b't'] }
 pub fn wants_value(v: &Value) -> bool { matches!(s(v, "t"), "plot" | "shot") }
+
+// ---- diff and review (the hub's git.diff and review.* requests, and the thread's review acts) ----
+async fn review(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Result<Value, Value>> {
+    let th = s(p, "thread");
+    Some(async {
+        if !known_thread(&*hub.model().await, th) { return Err(err("unknown thread")) }
+        match m {
+            "viewer.diff" => {
+                let mut q = json!({"thread":th}); for k in ["from", "to"] { if p.get(k).is_some() { q[k] = p[k].clone() } }
+                rpc(hub, c, "git.diff", q).await.map(result)
+            }
+            "review.page" => {
+                let (page, mut q) = (s(p, "page"), json!({"thread":th}));
+                match page {
+                    "bom" => { for k in ["a", "b"] { if !s(p, k).is_empty() { q[k] = p[k].clone() } } rpc(hub, c, "review.bom", q).await.map(result) }
+                    "checks" => { if !s(p, "commit").is_empty() { q["commit"] = p["commit"].clone() } q["trigger"] = json!("manual"); rpc(hub, c, "review.checks", q).await.map(result) }
+                    _ => Err(err("page: bom or checks")),
+                }
+            }
+            "review.tick" => rpc(hub, c, "review.tick", json!({"thread":th,"index":p["index"]})).await.map(result),
+            "review.comment" => {
+                let mut q = p.clone(); if let Some(o) = q.as_object_mut() { o.insert("thread".into(), json!(th)); }
+                rpc(hub, c, "review.comment", q).await.map(|_| json!({}))
+            }
+            _ => { // review.list: this thread's review acts, in the log's tail, folded
+                use crate::files::kicad::review as rv;
+                let n = hub.store.len(); let from = n.saturating_sub(300_000);
+                let lines = hub.store.range(from, n).map_err(err)?;
+                let mark = format!("\"thread\":\"{th}\"");
+                let ops: Vec<rv::Op> = lines.iter().filter(|l| l.contains("\"tone\":\"review\"") && l.contains(&mark)).filter_map(|l| serde_json::from_str::<Value>(l).ok())
+                    .filter(|e| s(e, "$") == "ActivityLogged" && s(e, "thread") == th).filter_map(|e| rv::of(s(&e, "tone"), s(&e, "kind"), s(&e, "summary"), ms(e["at"].as_u64().unwrap_or(0)) / 1000)).collect();
+                let cs = rv::fold(&ops);
+                Ok(json!({"comments":cs.iter().map(|c| json!({"id":c.id,"text":c.text,"by":c.by,"at":ms(c.at),"parent":c.parent,"resolved":c.resolved,"file":c.anchor.file,"layer":c.anchor.layer,"x":c.anchor.x,"y":c.anchor.y,"item":c.anchor.item})).collect::<Vec<_>>()}))
+            }
+        }
+    }.await)
+}
