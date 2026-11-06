@@ -1,0 +1,47 @@
+[package]
+name = "backplane-voice"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "backplane_voice"
+path = "src/lib.rs"
+
+[[bin]]
+name = "backplane-voice"
+path = "src/main.rs"
+
+[dependencies]
+base64 = "0.22"
+bzip2 = "0.6"
+flate2 = "1"
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+libc = "0.2"
+libloading = "0.8"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+sha2 = "0.10"
+tar = "0.4"
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync", "time", "process", "macros", "signal"] }
+# __rustls-tls, not rustls-tls-webpki-roots: net.rs brings its own roots, and that feature wants webpki-roots 0.26, not in the offline registry
+tokio-tungstenite = { version = "0.28", default-features = false, features = ["connect", "handshake", "__rustls-tls"] }
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+webpki-roots = "1"
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 4
+strip = true
+
+# what dev-build.sh builds: quick to link, still optimised
+[profile.fast]
+inherits = "release"
+lto = "off"
+codegen-units = 16
+incremental = true
+strip = "none"

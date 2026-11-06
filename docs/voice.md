@@ -84,9 +84,11 @@ client of that hub shares them.
 ## Pieces
 
 - `native/voice/` builds `backplane-voice` (Rust): it records the microphone
-  (`pw-record`, `parecord` or `arecord`), runs the local engine, streams to
+  (`pw-record`, `parecord` or `arecord`, 24 kHz mono PCM), runs the local engine, streams to
   `wss://…/v1/realtime?intent=transcription` and prints NDJSON events. It also
-  transcribes a finished recording (`file`). Its README has the protocol.
+  transcribes a finished recording (`file`: ffmpeg to PCM, then the same
+  socket; `gpt-transcribe` over REST when ffmpeg is missing). Its README has
+  the protocol.
 - `native/host/src/voice/`: `words` (the plain dictionary, `unsure`, `put`),
   `vdict` (entries, the correction pass, settle), `place` (the draft's shadow),
   `dictation` (a thread's state, chips, the helper's lines), `page` (Settings'

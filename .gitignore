@@ -10,3 +10,4 @@ __pycache__/
 # Rust build output
 native/host/target/
 native/gpui/target/
+native/voice/target/
