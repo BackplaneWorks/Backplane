@@ -62,7 +62,7 @@ pub fn event_type(line: &str) -> Option<&str> {
 
 /// The fields of the presenter's params only the hub makes: the thread's `window` and `page` (rows read from the index), `reads` and `local`. A client's own copy would
 /// be taken for the hub's (an unported native page for indexed rows), so every one is removed from the request's clone before the hub's go in.
-fn strip_hub_owned(params: &mut Value) { if let Some(o) = params.as_object_mut() { for k in ["window", "page", "reads", "local", "wants", "botPage"] { o.remove(k); } } }
+fn strip_hub_owned(params: &mut Value) { if let Some(o) = params.as_object_mut() { for k in ["window", "page", "reads", "local", "wants", "botPage", "roomPage"] { o.remove(k); } } }
 
 /// PRESENTER_UNAVAILABLE is retryable on the wire: a target the Rust presenter has not ported (the helper is not running) or a helper that is restarting answers "not yet", never "no"
 /// (Hub::error has retryable:false for every code).
@@ -122,6 +122,9 @@ impl Hub {
             let from = if p["action"] == "bot-memory" { p["value"].as_str() } else if p["action"] == "bot-tab" { None } else { p["session"]["memoryFrom"].as_str() }.and_then(|s| s.parse::<usize>().ok()).unwrap_or(0);
             let tab = if p["action"] == "bot-memory" { "memory".to_string() } else { tab };
             let me = self.arc(); if let Some(pg) = crate::bots::bot_page_from(&me, id, &tab, now_ms() / 1000, from).await { o.insert("botPage".into(), pg); }
+        }
+        if let (("room", id), Some(o)) = ((p["target"]["kind"].as_str().unwrap_or(""), p["target"]["id"].as_str().unwrap_or("")), params.as_object_mut()) {
+            let me = self.arc(); if let Some(pg) = crate::bots::room_page(&me, id, now_ms() / 1000).await { o.insert("roomPage".into(), pg); }
         }
         let before = actor::page(c.client, &view_id, m, p["action"].as_str().unwrap_or(""), &p["target"], if m == "view.page" { page_before(&p) } else { 0 });
         // the conversation the target shows: a thread's own, a bot's chat thread (a bot view without its window stays on "Updating conversation...")

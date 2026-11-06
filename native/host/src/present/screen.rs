@@ -21,6 +21,7 @@ impl super::Screen for Recent {
     fn name(&self) -> &'static str { "recent/thread (native sidebar)" }
     fn view(&self, params: &Value) -> Option<Value> {
         if params["target"]["kind"]=="bot" && params["nativeSidebar"]==json!(1) && !params["botPage"].is_object() && !text(&params["target"],"id").contains('~') { return Some(json!({"stale":true})) } // an unknown bot: STALE_VIEW
+        if params["target"]["kind"]=="room" && params["nativeSidebar"]==json!(1) && !params["roomPage"].is_object() { return Some(json!({"stale":true})) } // an unknown room: STALE_VIEW
         if !mine(params) { return refused("target.or-native-sidebar") }
         let Some(_hub)=self.hub.get().and_then(Weak::upgrade) else { return refused("screen.hub-not-bound") };
         let Some(policies)=crate::statehost::policies() else { return refused("state.not-started") };
@@ -30,7 +31,7 @@ impl super::Screen for Recent {
 }
 fn mine(p: &Value) -> bool {
     let id=text(&p["target"],"id");
-    p["nativeSidebar"]==json!(1) && match text(&p["target"],"kind") { "recent"=>id.is_empty(), "thread"=>!id.is_empty() && !id.contains('~'), "bot"=>p["botPage"].is_object(), _=>false }
+    p["nativeSidebar"]==json!(1) && match text(&p["target"],"kind") { "recent"=>id.is_empty(), "thread"=>!id.is_empty() && !id.contains('~'), "bot"=>p["botPage"].is_object(), "room"=>p["roomPage"].is_object(), _=>false }
 }
 fn setting<'a>(st: &'a State,k: &str) -> &'a str { st.settings.get(k).map(String::as_str).unwrap_or("") }
 /// Fuzzy.score > 0: every character of the query is in the title, in order, whatever the case (an empty query matches all)
@@ -88,6 +89,7 @@ pub fn recent(st: &State,p: &Value) -> Option<Value> {
         ("wantNew",json!(false)),("error",json!("")),("note",json!("")),("info",json!({})),("open",json!({})),("drafts",json!({})),("outbox",json!({}))] {
         session.as_object_mut()?.entry(k.to_string()).or_insert(v);
     }
+    let room_page=&p["roomPage"];
     let bot_page=&p["botPage"]; // a bot's target shows its chat thread, under its tabs (session seam: bots::bot_page)
     let thread=if p["target"]["kind"]=="thread" { text(&p["target"],"id") }else if bot_page.is_object() { text(bot_page,"chat") }else{""};
     session["sel"]=json!(thread);
@@ -143,6 +145,25 @@ pub fn recent(st: &State,p: &Value) -> Option<Value> {
             if !st.bots_nav.contains_key(id) { return refused("action.bot-unknown") }
             if let Some(o)=session.as_object_mut() { o.remove("route"); }
             return Some(json!({"remoteReady":false,"nextTarget":{"kind":"bot","id":id},"session":session,"cmds":cmds,"local":p.get("local").cloned().unwrap_or(json!({"local.native.sidebar.pages":"","local.native.sidebar.context":"","local.native.sidebar.key":"","local.native.sidebar.budget":""}))}));
+        },
+        // a room's page: its row opens it (Bend's `room`), the post box (`bfield` rpost) is sent as a post by the person (`bots.post`)
+        "room" => {
+            let id=value.strip_prefix(&format!("{hub}|" )).unwrap_or(value);
+            if !st.rooms_nav.contains_key(id) || id.starts_with("dm:") { return refused("action.room-unknown") }
+            if let Some(o)=session.as_object_mut() { o.remove("route"); }
+            return Some(json!({"remoteReady":false,"nextTarget":{"kind":"room","id":id},"session":session,"cmds":cmds,"local":p.get("local").cloned().unwrap_or(json!({"local.native.sidebar.pages":"","local.native.sidebar.context":"","local.native.sidebar.key":"","local.native.sidebar.budget":""}))}));
+        },
+        "room-post" if room_page.is_object() => {
+            let body=text(&session["drafts"],"@f.rpost").trim().to_string();
+            if !body.is_empty() {
+                let rid=session["rid"].as_u64().unwrap_or(0);
+                cmds.push(json!({"type":"send","hub":hub,"text":json!({"id":rid,"m":"bots.post","p":{"room":text(&p["target"],"id"),"text":body}}).to_string()}));
+                session["rid"]=json!(rid+1); session["drafts"]["@f.rpost"]=json!("");
+            }
+        },
+        "routine-edit"|"routine-save" if bot_page.is_object() => {
+            let Some(o)=super::botforms::routine_act(bot_page,text(&p["target"],"id"),hub,&session,action,value) else { return refused("action.routine-unknown") };
+            crate::session::patch::merge(&mut session,&o.patch); cmds=[read_cmds.clone(),o.cmds].concat();
         },
         "bot-tab" if bot_page.is_object() => { session["route"]=json!({"kind":"bot-tab","bot":text(&p["target"],"id"),"tab":text(bot_page,"tab")}); if let Some(o)=session.as_object_mut() { o.remove("memoryFrom"); } },
         "bot-memory" if bot_page.is_object() => { session["route"]=json!({"kind":"bot-tab","bot":text(&p["target"],"id"),"tab":"memory"}); session["memoryFrom"]=json!(bot_page["memoryFrom"].as_u64().unwrap_or(0).to_string()); },
@@ -273,11 +294,13 @@ pub fn recent(st: &State,p: &Value) -> Option<Value> {
     if bot_page.is_object() {
         let id=text(&p["target"],"id"); let key=format!("{hub}|{id}");
         let mut b=bot_page.clone();
+        if text(&b,"tab")=="routines" { b["routine"]=super::botforms::routine_form(&session); }
         if let Some(rows)=shown["bots"].as_array_mut() { if let Some(row)=rows.iter_mut().find(|r|r["id"]==json!(key)) {
             row["sel"]=json!(true); b["mood"]=row["mood"].clone(); b["note"]=row["note"].clone(); b["cat"]=row["cat"].clone();
         } }
         shown["bot"]=b;
     }
+    if room_page.is_object() { shown["bot"]=room_page.clone(); }
     let mut overlay=shown.clone();
     for project in overlay["projects"].as_array_mut().unwrap() { project.as_object_mut().unwrap().remove("machine"); }
     let window=json!({"contextMessages":[],"messageIds":[],"historyUnits":[],"partial":[],"ids":[],"anchor":{"id":"","offset":0},"older":"","olderNext":"","hasMore":false,"remaining":0,"newer":0,"total":0});
