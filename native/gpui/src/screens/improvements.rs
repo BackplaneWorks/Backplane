@@ -52,6 +52,7 @@ pub struct Imp {
     flushing: bool,
     syncing: bool,
     shot: Option<Arc<Image>>,
+    auto_shot: bool,
     origin: (String, String),
     evidence_ok: bool,
     previewed: bool,
@@ -65,7 +66,7 @@ impl Imp {
     pub fn new(drafts_path: &Path, target: Option<super::attach::Target>) -> Self {
         let scope = target.as_ref().map_or("offline".to_string(), |t| t.addr.clone());
         Self { open: false, draft: Draft::default(), loaded: false, inputs: None, ctx: Value::Null, projects: vec![], note: String::new(), busy: false, hidden: false, xid: None, rec: None, rec_text: String::new(),
-            next: HashMap::new(), seq: 0, dir: drafts_path.with_file_name("gpui-improvements"), scope, target, diag: String::new(), url: String::new(), review_open: false, flushing: false, syncing: false, shot: None, origin: (String::new(), String::new()), evidence_ok: false, previewed: false, focus_pending: false, runtime: None, modes_sent: false }
+            next: HashMap::new(), seq: 0, dir: drafts_path.with_file_name("gpui-improvements"), scope, target, diag: String::new(), url: String::new(), review_open: false, flushing: false, syncing: false, shot: None, auto_shot: false, origin: (String::new(), String::new()), evidence_ok: false, previewed: false, focus_pending: false, runtime: None, modes_sent: false }
     }
     fn file(&self, name: &str) -> PathBuf { self.dir.join(name) }
     /// The panel's own folder, private to this user.
@@ -174,6 +175,11 @@ fn open(this: &mut Backplane, cx: &mut Context<Backplane>) {
     fill_boxes(this, cx);
     this.screens.imp.focus_pending = true;
     ask(this, "improvements.context", json!({"sourceThread": origin_thread}), Next::Ctx, cx);
+    // a fresh draft starts with a picture of the app as it was; the panel hides for the grab, then returns
+    if this.screens.imp.draft.image.is_empty() && !this.screens.imp.locked() && this.screens.imp.rec.is_none() && capture::unavailable().is_none() {
+        this.screens.imp.auto_shot = true;
+        take_shot(this, cx);
+    }
     cx.notify();
 }
 fn format_of(path: &str) -> ImageFormat { match path.rsplit('.').next().unwrap_or("") { "jpg" | "jpeg" => ImageFormat::Jpeg, "webp" => ImageFormat::Webp, _ => ImageFormat::Png } }
@@ -437,8 +443,13 @@ fn take_shot(this: &mut Backplane, cx: &mut Context<Backplane>) {
         let _ = weak.update(cx, |this, cx| {
             let imp = &mut this.screens.imp; imp.hidden = false;
             match result {
-                Ok((bytes, path)) => { set_image(this, path.to_string_lossy().into_owned(), bytes, cx); this.screens.imp.note = "Screenshot refreshed.".into(); }
-                Err(e) => this.screens.imp.note = format!("{e} Your draft and previous image are kept."),
+                Ok((bytes, path)) => {
+                    let auto = std::mem::take(&mut this.screens.imp.auto_shot);
+                    set_image(this, path.to_string_lossy().into_owned(), bytes, cx);
+                    if auto { if this.screens.imp.draft.internal { this.screens.imp.draft.inc_shot = true; } let _ = save_now(this); }
+                    this.screens.imp.note = if auto { "Screenshot captured on open.".into() } else { "Screenshot refreshed.".into() };
+                }
+                Err(e) => { this.screens.imp.auto_shot = false; this.screens.imp.note = format!("{e} Your draft and previous image are kept."); }
             }
             cx.notify();
         });
