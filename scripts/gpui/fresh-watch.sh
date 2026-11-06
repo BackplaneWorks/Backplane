@@ -20,6 +20,8 @@ tell() { say "$*"; notify-send -a Backplane 'Backplane GPUI (fresh)' "$*" 2>/dev
 alive() { [ -n "${1:-}" ] && kill -0 "$1" 2>/dev/null; }
 pid() { cat "$D/$1.pid" 2>/dev/null || true; }
 cur() { head -1 "$DEV/CURRENT" 2>/dev/null || true; }
+SHOWN=$DEV/.fresh-shown   # the build the app was last relaunched on (the hub can stay on an older one when only the window changed)
+shown() { cat "$SHOWN" 2>/dev/null || true; }
 running_dir() { local p; p=$(pid hub); alive "$p" && dirname "$(readlink "/proc/$p/exe" 2>/dev/null)" || true; }
 hello() { printf 'Authorization: Bearer %s\n' "$(cat "$H/token" 2>/dev/null)" | curl -sf -m3 -H @- "http://127.0.0.1:$PORT/hello" >/dev/null 2>&1; }
 # a number, or ? when the hub cannot say
@@ -38,10 +40,10 @@ go() {  # go BUILD_DIR WHAT(client|both): relaunch on that build
 }
 trap 'echo; say "stopped following; the app keeps running"; exit 0' INT TERM
 [ -d "$H" ] || { echo "fresh-watch: no fresh home in $H: run fresh.sh start first" >&2; exit 1; }
-say "following $DEV/CURRENT (running: $(basename "$(running_dir)"))"
+say "following $DEV/CURRENT (shown: $(shown), hub: $(basename "$(running_dir)"))"
 rm -f "$REQ"; waiting=
 while :; do
-  c=$(cur); now=$(basename "$(running_dir)"); bad=$(cat "$DEV/.fresh-bad" 2>/dev/null || true)
+  c=$(cur); now=$(shown); [ -n "$now" ] || { now=$(basename "$(running_dir)"); printf '%s\n' "$now" > "$SHOWN"; }; bad=$(cat "$DEV/.fresh-bad" 2>/dev/null || true)
   if [ -z "$c" ] || [ "$c" = "$now" ] || [ "$c" = "$bad" ] || [ ! -d "$DEV/builds/$c" ]; then waiting=; sleep "$POLL"; continue; fi
   what=both; cmp -s "$(running_dir)/backplane-hub" "$DEV/builds/$c/backplane-hub" 2>/dev/null && what=client
   if [ "$what" = both ] && alive "$(pid hub)"; then
@@ -55,9 +57,9 @@ while :; do
     fi
   fi
   waiting=; prev=$(running_dir); say "relaunching on $c ($what)"; status relaunching "Relaunching on build ${c##*-}"
-  if go "$DEV/builds/$c" "$what"; then clear_status; tell "Now running $c"
+  if go "$DEV/builds/$c" "$what"; then printf '%s\n' "$c" > "$SHOWN"; clear_status; tell "Now running $c"
   else
     clear_status; printf '%s\n' "$c" > "$DEV/.fresh-bad"; tell "Build $c did not come up; going back. See $D/hub.log"
-    [ -n "$prev" ] && [ -x "$prev/backplane-hub" ] && go "$prev" both && say "back on $(basename "$prev")" || tell "Going back failed: the app is down. Logs are in $D"
+    [ -n "$prev" ] && [ -x "$prev/backplane-hub" ] && go "$prev" both && { printf '%s\n' "$(basename "$prev")" > "$SHOWN"; say "back on $(basename "$prev")"; } || tell "Going back failed: the app is down. Logs are in $D"
   fi
 done
