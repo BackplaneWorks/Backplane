@@ -94,7 +94,7 @@ impl Backplane {
             let text = serde_json::to_string(&links).unwrap_or_default();
             if !self.links_sent || text != self.links_last { self.links_sent = true; self.links_last = text; metric(started, "links", json!({"links": links, "supported": true})); }
         }
-        let draws = self.data["projects"].as_array().map_or(false, |p| !p.is_empty());
+        let draws = self.data["projects"].is_array(); // (a fresh home has none, and is as usable as one that has)
         if !self.usable && draws {
             self.usable = true;
             let entries = self.data["thread"]["entries"].as_array().map_or(0, |e| e.len());
@@ -356,7 +356,7 @@ impl Backplane {
             Ctl::More => { self.screens.menu_open = !self.screens.menu_open; self.ui_epoch += 1; cx.notify(); "thread menu".into() }
             Ctl::RenameSave(id) => { let text = self.screens.fields.get("title").map(|s| s.input.read(cx).content.to_string()).unwrap_or_default(); if let Some(c) = crate::screens::tools::rename_save(id, &text) { let _ = self.tx.try_send(c); } "view.action rename-save".into() }
             Ctl::Imp(id) => { crate::screens::improvements::act(self, id, cx); self.ui_epoch += 1; format!("improvements {id}") }
-            Ctl::Node(a, p) => { if a == "flag" && p == "settings" { self.open_settings(cx); return format!("view.action {a}"); } let _ = self.tx.try_send(Command::Action(a.clone(), p.clone())); format!("view.action {a}") }
+            Ctl::Node(a, p) => { if a == "flag" && p == "settings" { self.open_settings(cx); return format!("view.action {a}"); } if a == "proj-add" || a == "proj-new" || a == "new-thread" { self.arm_new(); } let _ = self.tx.try_send(Command::Action(a.clone(), p.clone())); format!("view.action {a}") }
         }
     }
     /// The popup is always the hub's rows now (no client-side rows), so a popup step is never local.

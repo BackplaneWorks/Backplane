@@ -6,6 +6,7 @@
 //! Overlay is the same reduced root (without the aggregate's `machine` field on projects),
 //! with its hub key/name. Unsupported targets/actions return None, so Routed supplies a retryable error.
 use super::native_sidebar::{text, NativeSidebar};
+use super::picker;
 use crate::{hub::Hub, sidebar, state::State};
 use serde_json::{json, Value};
 use std::{collections::HashSet, sync::{Arc, OnceLock, Weak}};
@@ -154,6 +155,8 @@ pub fn recent(st: &State,p: &Value) -> Option<Value> {
     let pages=json!([{"version":1,"hub":hub,"projects":projects_page,"active":null,"legacy":null}]);
     let shown=json!({"projects":projects,"sidebarPages":pages,"nativeSidebar":1,"thread":shown_thread,"rooms":rooms(st,hub),"bots":bots(st,hub,opts.now),"theme":setting(st,"ui.theme"),
         "renaming":renaming,"deleting":deleting,"bot":null,"settings":null,"newRoom":null,"newBot":null,"projectHome":null});
+    let mut shown=shown;
+    { let f=picker::folders(&session["drafts"],&std::env::var("HOME").unwrap_or_default(),&st.projects.values().filter(|p|!p.removed).map(|p|p.root.as_str()).collect::<Vec<_>>()); if !f.is_null() { shown["folders"]=f; } } // (present only while the picker is open)
     let mut overlay=shown.clone();
     for project in overlay["projects"].as_array_mut().unwrap() { project.as_object_mut().unwrap().remove("machine"); }
     let window=json!({"contextMessages":[],"messageIds":[],"historyUnits":[],"partial":[],"ids":[],"anchor":{"id":"","offset":0},"older":"","olderNext":"","hasMore":false,"remaining":0,"newer":0,"total":0});
