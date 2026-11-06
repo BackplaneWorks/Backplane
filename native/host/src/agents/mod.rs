@@ -661,7 +661,8 @@ impl Actor {
         if crate::copy::person_turn_allowed() && !self.person { return } // side-by-side: nothing but a person's turn writes to a real agent
         let th = self.th.clone(); let (cwd, msg, text, agent_text) = (cwd.to_string(), msg.to_string(), text.to_string(), agent_text.to_string());
         let key = rules::agent_key(&t.model, &t.runtime, &t.interaction, self.cx.think);
-        if self.live_proc.as_ref().map_or(true, |p| p.key != key || p.person != self.person) {
+        // a live process with a command still open (a turn in flight) is never replaced for a changed model/mode key: the message goes on its input (the CLI queues it) and the new key applies from the next process
+        if self.live_proc.as_ref().map_or(true, |p| p.person != self.person || (p.key != key && !self.cmds.open(""))) {
             self.stop().await; self.lines = None; self.exit = None;
             if let Err(e) = self.spawn(t, &cwd, key).await { self.fail(format!("could not start claude: {e}"), "spawn", &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); return }
             self.spawn_in = Some((msg.to_string(), text.to_string(), agent_text.to_string()));
