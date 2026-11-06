@@ -14,9 +14,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::tungstenite::{handshake::server::ErrorResponse, protocol::WebSocketConfig, Message};
 
-const USAGE: &str = "usage: backplane-hub --home DIR --port N [--host ADDR] [--policy-bin PATH] [--no-tailscale | --tailscale | --tailscale-https | --tailnet-only] [--foreground] [--headless]\n       backplane-hub --render MODEL...\n       backplane-hub --help | --version\n";
+const USAGE: &str = "usage: backplane-hub --home DIR --port N [--host ADDR] [--no-tailscale | --tailscale | --tailscale-https | --tailnet-only] [--foreground] [--headless]\n       backplane-hub --render MODEL...\n       backplane-hub --help | --version\n";
 
-struct Args { window: Option<PathBuf>, home: PathBuf, port: u16, host: String, policy: Option<PathBuf>, version: String, commit: String, tailscale: bool, https: bool }
+struct Args { window: Option<PathBuf>, home: PathBuf, port: u16, host: String, version: String, commit: String, tailscale: bool, https: bool }
 
 /// (tailscale, https) from the flags: a hub on a copied log (BACKPLANE_COPY=1) runs neither (no `tailscale serve` on a copy), and
 /// `--no-tailscale` turns https off with it.
@@ -33,7 +33,7 @@ fn tailnet_only(host: &str, https_port: Option<&str>, copy: bool) -> std::result
 
 fn parse() -> std::result::Result<Args, i32> {
     let a: Vec<String> = std::env::args().skip(1).collect();
-    let (mut home, mut port, mut host, mut policy, mut window) = (None, None, "127.0.0.1".to_string(), None, None::<PathBuf>);
+    let (mut home, mut port, mut host, mut window) = (None, None, "127.0.0.1".to_string(), None::<PathBuf>);
     let (mut no_tailscale, mut https, mut only) = (false, false, false);
     let (mut version, mut commit) = (env!("CARGO_PKG_VERSION").to_string(), std::env::var("BACKPLANE_COMMIT").unwrap_or_else(|_| "unknown".into()));
     let mut i = 0;
@@ -45,7 +45,6 @@ fn parse() -> std::result::Result<Args, i32> {
             "--home" => { home = Some(PathBuf::from(value(i)?)); i += 1 }
             "--port" => { port = Some(value(i)?.parse::<u16>().map_err(|_| { eprint!("{USAGE}"); 2 })?); i += 1 }
             "--host" => { host = value(i)?; i += 1 }
-            "--policy-bin" => { policy = Some(PathBuf::from(value(i)?)); i += 1 }
             "--window-bin" => { window = Some(PathBuf::from(value(i)?)); i += 1 }
             "--version-string" => { version = value(i)?; i += 1 }
             "--commit" => { commit = value(i)?; i += 1 }
@@ -60,9 +59,8 @@ fn parse() -> std::result::Result<Args, i32> {
     }
     if only { if let Err(why) = tailnet_only(&host, std::env::var("BACKPLANE_HTTPS_PORT").ok().as_deref(), copy::on()) { eprintln!("{why}"); return Err(2) } }
     if window.is_none() { window = std::env::var("BACKPLANE_WINDOW_BIN").ok().filter(|p| !p.is_empty()).map(PathBuf::from); }
-    if policy.is_none() { policy = std::env::var("BACKPLANE_POLICY_BIN").ok().filter(|p| !p.is_empty()).map(PathBuf::from); }
     // no default home or port: this binary must never land on a live hub's by accident
-    match (home, port) { (Some(home), Some(port)) => Ok(Args { window, home, port, host, policy, version, commit, tailscale: tailnet_flags(no_tailscale, https, copy::on()).0, https: tailnet_flags(no_tailscale, https, copy::on()).1 }), _ => { eprint!("{USAGE}"); Err(2) } }
+    match (home, port) { (Some(home), Some(port)) => Ok(Args { window, home, port, host, version, commit, tailscale: tailnet_flags(no_tailscale, https, copy::on()).0, https: tailnet_flags(no_tailscale, https, copy::on()).1 }), _ => { eprint!("{USAGE}"); Err(2) } }
 }
 
 /// One hub per home: an exclusive flock on <home>/hub.lock, which says "<pid> <port> flock".
@@ -134,12 +132,9 @@ async fn run(a: Args) -> Result<()> {
     let _lock = take_lock(&a.home, a.port)?;
     copy::mark(&a.home);
     ensure_token(&a.home)?;
-    let presenter: Arc<dyn presenter::Presenter> = match &a.policy {
-        Some(p) => Arc::new(presenter::BpPolicy::spawn(p).await?),
-        None => Arc::new(present::NotPorted),
-    };
+    let presenter: Arc<dyn presenter::Presenter> = Arc::new(present::NotPorted);
     let recent = present::screen::Recent::new();
-    let presenter: Arc<dyn presenter::Presenter> = Arc::new(present::Routed::new(presenter, vec![Box::new(recent.clone())], &a.home, a.policy.is_some()));
+    let presenter: Arc<dyn presenter::Presenter> = Arc::new(present::Routed::new(presenter, vec![Box::new(recent.clone())], &a.home, false));
     let listen = format!("{}:{}", a.host, a.port);
     startup::mark("home ready");
     session::composer::mention::set_models(settings::models::all);

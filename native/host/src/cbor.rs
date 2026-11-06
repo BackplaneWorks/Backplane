@@ -6,7 +6,7 @@ use serde_json::{Map, Number, Value};
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-include!(concat!(env!("OUT_DIR"), "/wire_dict.rs"));
+include!("wire_dict.rs");
 
 fn index(list: &'static [&'static str], cell: &'static OnceLock<HashMap<&'static str, u32>>) -> &'static HashMap<&'static str, u32> {
     cell.get_or_init(|| list.iter().enumerate().map(|(i, s)| (*s, i as u32)).collect())

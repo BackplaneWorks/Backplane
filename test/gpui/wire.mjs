@@ -1,7 +1,7 @@
 import {readFileSync} from 'node:fs';
-import {cbor, plain} from '../../src/web/wire.js';
-const source=readFileSync(new URL('../../src/core/cbor.bend',import.meta.url),'utf8');
-const dictionary=name=>JSON.parse(source.match(new RegExp(`def Cbor\\.${name}\\(\\)[^\\n]*\\n\\s*(\\[[\\s\\S]*?\\])`))[1]);
+import {cbor, plain} from './wire-codec.js';
+const source=readFileSync(new URL('../../native/host/src/wire_dict.rs',import.meta.url),'utf8');
+const dictionary=name=>JSON.parse(source.match(new RegExp(`pub const ${name.toUpperCase()}: &\\[&str\\] = &(\\[[\\s\\S]*?\\]);`))[1]);
 export const decode=bytes=>plain(cbor(new Uint8Array(bytes),dictionary('keys'),dictionary('words')));
 export function encode(value){
  const bytes=[]; const argument=(major,n)=>{if(n<24)bytes.push(major*32+n);else if(n<256)bytes.push(major*32+24,n);else if(n<65536)bytes.push(major*32+25,n>>>8,n&255);else bytes.push(major*32+26,(n>>>24)&255,(n>>>16)&255,(n>>>8)&255,n&255);};

@@ -237,16 +237,6 @@ mod tests {
         let c = change("L", &json!({"$":"ThreadForked","id":"t2","source":"t1","at":1}), &same).unwrap();
         assert_eq!((c["id"].as_str().unwrap(), c["source"].as_str().unwrap()), ("L~t2", "L~t1"), "a mirror's fork points at the mirrored source");
     }
-    /// The table's field names are the wire names (codec.bend), not Bend's binder names.
-    #[test] fn far_change_fields_are_codec_wire_names() {
-        let codec = include_str!("../../../../src/core/codec.bend");
-        for v in VARIANTS {
-            let key = format!("Change.obj(\"{v}\", [");
-            let line = codec.lines().find(|l| l.contains(&key)).unwrap_or_else(|| panic!("codec.bend has no encoder for {v}"));
-            let wire: Vec<&str> = line.split("J.KV{\"").skip(1).filter_map(|p| p.split('"').next()).collect();
-            for (f, _) in table(v).unwrap() { assert!(wire.contains(f), "{v}.{f} is not a wire field: {wire:?}"); }
-        }
-        assert!(table("SettingSet").is_none());
-    }
+    #[test] fn far_settingset_has_no_table() { assert!(table("SettingSet").is_none()); }
     #[test] fn far_item_roundtrip() { let i = it(7); assert_eq!(Item::of(&i.json()), i); let _ = id_("a", "b"); }
 }

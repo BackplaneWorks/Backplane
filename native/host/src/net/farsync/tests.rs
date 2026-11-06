@@ -185,34 +185,6 @@ async fn spy_hub(tag: &str, fail_restart: bool) -> (Arc<Hub>, Arc<Spy>, Arc<Mute
     let _ = std::fs::remove_dir_all(h);
 }
 
-/// What a peer's epoch change costs this hub's clients: the whole presenter restarts and folds the log again. Ignored; run with
-/// BACKPLANE_POLICY_BIN set (the real bp-policy child), on a synthetic log (REFOLD_EVENTS lines, default 200000).
-#[tokio::test] #[ignore] async fn scale_the_refold_after_a_reset_on_a_big_log() {
-    use std::io::Write;
-    let Ok(bin) = std::env::var("BACKPLANE_POLICY_BIN") else { eprintln!("BACKPLANE_POLICY_BIN not set: skipped"); return };
-    let n: u64 = std::env::var("REFOLD_EVENTS").ok().and_then(|v| v.parse().ok()).unwrap_or(200_000);
-    let h = std::env::temp_dir().join(format!("bp-refold-{}", std::process::id())); let _ = std::fs::remove_dir_all(&h); std::fs::create_dir_all(&h).unwrap();
-    { let mut f = std::io::BufWriter::new(std::fs::File::create(h.join("events.jsonl")).unwrap());
-      writeln!(f, r#"{{"$":"ProjectCreated","id":"p1","title":"P","root":"/tmp","at":1}}"#).unwrap();
-      for t in 0..2000u64 { writeln!(f, r#"{{"$":"ThreadCreated","id":"t{t}","project":"p1","title":"T{t}","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2}}"#).unwrap() }
-      for i in 0..n { writeln!(f, r#"{{"$":"MessagePosted","thread":"t{}","msg":"m{i}","role":"{}","text":"a synthetic message of about a hundred and fifty bytes, which is the size of the ordinary ones in a long thread, for timing","at":{}}}"#, i % 2000, if i % 2 == 0 { "user" } else { "assistant" }, 10 + i).unwrap() } }
-    let t0 = std::time::Instant::now();
-    let presenter = Arc::new(crate::presenter::BpPolicy::spawn(std::path::Path::new(&bin)).await.unwrap());
-    let hub = Hub::start(crate::hub::Cfg { home: h.clone(), version: "0.14.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() }, presenter).await.unwrap();
-    let start = t0.elapsed();
-    let store = FarStore::open(&h).unwrap(); hub.set_mirror_feed(Arc::new(Refeed(store.clone())));
-    // a view request during the rebuild: how long until one is answered again
-    let (conn_hub, ) = (hub.clone(), );
-    let t1 = std::time::Instant::now();
-    let rebuild = tokio::spawn({ let hub = hub.clone(); async move { hub.forget_mirror().await } });
-    let mut first_ok = None;
-    for _ in 0..4000 { if rebuild.is_finished() { break } tokio::time::sleep(std::time::Duration::from_millis(5)).await; }
-    let ok = rebuild.await.unwrap(); let rebuild_t = t1.elapsed();
-    let _ = conn_hub; first_ok.get_or_insert(rebuild_t);
-    println!("SCALE events={} hub_start(spawn+first fold)={:.2}s forget_mirror={:.2}s ok={}", n + 2001, start.as_secs_f64(), rebuild_t.as_secs_f64(), ok);
-    let _ = std::fs::remove_dir_all(h);
-}
-
 /// Many requests at once leave none unserved: when the last returns, nothing is pending (the gap between the runner's last `swap` and the
 /// release of its lock is a few instructions wide, so this is a stress, not a staging of that instant).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn far_many_rebuild_requests_leave_none_unserved() {
