@@ -93,6 +93,13 @@ pub fn act<F: Facts>(f: &F, hub: &str, session: &Value, sel: &str, action: &str,
             let ps: Vec<String> = super::composer::att_paths(draft(session, &format!("@att:{sel}"))).into_iter().filter(|x| x != value).collect();
             b.drafts.insert(format!("@att:{sel}"), json!(ps.join("\n")));
         }
+        // ThreadTree.dispatch "thread-tree": a row's children opened or shut, kept as the setting `thread.tree.<id>` ("1"/"0"); value `<id>|1` opens, `<id>|0` shuts
+        "thread-tree" => {
+            let (id, open) = value.rsplit_once('|').unwrap_or((value, "1"));
+            let id = id.rsplit('|').next().unwrap_or(id);
+            if id.is_empty() || id.starts_with('@') || !matches!(open, "0" | "1") { return None }
+            b.rpc("setting.set", json!({"key": format!("thread.tree.{id}"), "value": open}));
+        }
         "interrupt" => { if sel.is_empty() { return None } b.rpc("turn.interrupt", json!({"thread": sel})) }
         "copy" => {}
         // Ui.toggle_panel: opened or shut by hand (the hub's own view leaves it alone now); shut forgets the Mech parts asked for
@@ -169,6 +176,14 @@ mod tests {
         fn order_enabled(&self) -> bool { true } fn estimates_on(&self) -> bool { true }
     }
     impl Facts for F { fn title_of(&self, _: &str) -> String { String::new() } fn root_of(&self, _: &str) -> String { "/w/r".into() } }
+    #[test] fn a_row_chevron_opens_and_shuts_its_children() {
+        let s = json!({"sel": "t9", "rid": 4, "drafts": {}, "info": {}});
+        let o = act(&F, "h", &s, "t9", "thread-tree", "h|t1|1").unwrap();
+        assert_eq!(o.cmds[0]["text"], json!(r#"{"id":4,"m":"setting.set","p":{"key":"thread.tree.t1","value":"1"}}"#));
+        let o = act(&F, "h", &s, "", "thread-tree", "t1|0").unwrap();
+        assert!(o.cmds[0]["text"].as_str().unwrap().contains(r#""thread.tree.t1","value":"0""#));
+        assert!(act(&F, "h", &s, "t9", "thread-tree", "t1|2").is_none());
+    }
 
     fn merged(s: &Value, o: Out) -> Value { let mut s = s.clone(); crate::session::patch::merge(&mut s, &o.session_patch); s }
     #[test] fn a_pasted_picture_uploads_attaches_sends_and_detaches() {
