@@ -28,6 +28,7 @@ id=$(date +%Y%m%d-%H%M%S)-$(printf '%s' "$name" | tr -c 'A-Za-z0-9._+-' '_')
 mkdir -p "$DEV/builds"; chmod 700 "$DEV"
 tmp=$DEV/builds/.cut-$$; trap 'rm -rf "${tmp:?}"' EXIT
 mkdir "$tmp"; cp "$src/backplane-hub" "$src/backplane-gpui" "$tmp/"
+[ ! -x "$src/backplane-browser" ] || cp "$src/backplane-browser" "$tmp/"
 [ ! -f "$src/COMMIT" ] || cp "$src/COMMIT" "$tmp/"
 [ ! -d "$src/assets" ] || cp -r "$src/assets" "$tmp/"
 mv "$tmp" "$DEV/builds/$id"; trap - EXIT

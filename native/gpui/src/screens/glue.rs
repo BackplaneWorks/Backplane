@@ -228,7 +228,8 @@ impl Backplane {
             let page = cx.new(move |cx| crate::viewers::browser::BrowserPage::new(cx, base, o, tok, hubtx));
             self.screens.browser = Some((owner, page));
         }
-        if let Some((_, page)) = &self.screens.browser { page.update(cx, |p, cx| p.set_visible(true, cx)); }
+        let light = self.light();
+        if let Some((_, page)) = &self.screens.browser { page.update(cx, |p, cx| { if p.light != light { p.light = light; cx.notify(); } p.set_visible(true, cx) }); }
     }
 
 }

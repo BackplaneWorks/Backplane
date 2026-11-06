@@ -242,6 +242,7 @@ pub fn reply_error(x: &Value) -> String {
 
 /// The hub answered a direct request: a secret's outcome is shown by the client (`secret-sent` shuts the box, `secret-err` says why).
 pub fn rpc_done(this: &mut Backplane, tag: &str, ok: bool, why: &str, cx: &mut Context<Backplane>) {
+    if tag == "browser" { if !ok { if let Some((_, page)) = &this.screens.browser { let page = page.clone(); page.update(cx, |p, cx| p.open_failed(why, cx)); } } return; }
     if tag.starts_with("hook") { return super::bots::hook_done(this, tag, ok, why, cx); }
     let (name, sent, err) = match tag { "key" => ("kval", "key-sent", "key-err"), "secret" => ("sval", "secret-sent", "secret-err"), _ => return };
     let (a, v) = if ok { (sent, String::new()) } else { (err, if why.is_empty() { format!("The hub refused the {}", if tag == "key" { "key" } else { "secret" }) } else { why.to_string() }) };
