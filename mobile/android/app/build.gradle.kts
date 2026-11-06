@@ -29,11 +29,6 @@ gradle.taskGraph.whenReady {
     }
 }
 
-// The GPUI experiment's one build setting: -PbpNative=false gives the
-// production behaviour (the WebView shell, a Classic screens switch).
-// Default true: native Compose screens, no toggle. Debug builds only.
-val bpNative = providers.gradleProperty("bpNative").map { it != "false" }.getOrElse(true)
-// -PbpNativeSidebar=false: do not ask the hub for bounded sidebar pages (to test segmented replies); default true
 // -PbpE2eHost=host[,host]: the debug build also allows plain http to these fixture hosts (the e2e hub on h@backplane); the release config keeps the shared hub only
 val bpE2eHosts = providers.gradleProperty("bpE2eHost").map { v -> v.split(",").map { it.trim() }.filter { it.matches(Regex("[A-Za-z0-9.-]+")) } }.getOrElse(emptyList())
 // written while the build is configured (no task, so nothing has to be ordered before the resource merge)
@@ -43,9 +38,6 @@ if (bpE2eHosts.isNotEmpty()) {
     val extra = bpE2eHosts.joinToString("") { "        <domain includeSubdomains=\"false\">$it</domain>\n" }
     f.writeText("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<network-security-config>\n    <base-config cleartextTrafficPermitted=\"false\" />\n    <domain-config cleartextTrafficPermitted=\"true\">\n        <domain includeSubdomains=\"false\">desktop.tail9e0cf2.ts.net</domain>\n$extra    </domain-config>\n</network-security-config>\n")
 }
-val bpNativeSidebar = providers.gradleProperty("bpNativeSidebar").map { it != "false" }.getOrElse(true)
-// -PbpData=false: the old -bridge launcher; default true: the data/1 app (DataActivity)
-val bpData = providers.gradleProperty("bpData").map { it != "false" }.getOrElse(true)
 val bpAppId = "dev.backplane.mobile.gpui"
 val bpScheme = "bpgpui"
 
@@ -58,9 +50,6 @@ android {
         manifestPlaceholders["urlScheme"] = bpScheme
         resValue("string", "app_name", "Backplane GPUI")
         resValue("string", "app_id", bpAppId)
-        buildConfigField("boolean", "DATA_APP", bpData.toString())
-        buildConfigField("boolean", "NATIVE_ONLY", bpNative.toString())
-        buildConfigField("boolean", "NATIVE_SIDEBAR", bpNativeSidebar.toString())
         buildConfigField("String", "URL_SCHEME", "\"$bpScheme\"")
         minSdk = 26
         targetSdk = 35
@@ -92,13 +81,9 @@ android {
         buildConfig = true
         compose = true
     }
-    // bridge.js is copied in by scripts/build-mobile.sh
     if (bpE2eHosts.isNotEmpty()) {
         sourceSets["debug"].res.srcDir(layout.buildDirectory.dir("generated/e2e-net/res"))
     }
-    sourceSets["main"].assets.srcDir("../../build/assets")
-    // window.backplaneApp, the same script the iOS app injects
-    sourceSets["main"].assets.srcDir("../../shell")
 }
 
 dependencies {
@@ -110,10 +95,6 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.9.3")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("wang.harlon.quickjs:wrapper-android:3.2.3")
-    implementation("androidx.javascriptengine:javascriptengine:1.0.0")
-    // the WebView shell's bridge (message listener, document-start script)
-    implementation("androidx.webkit:webkit:1.12.1")
     // a photo of a pairing code, read on the phone (Pair.kt's pairingFromImage)
     implementation("com.google.zxing:core:3.5.3")
     // the pairing code scanner (Google Play services, no camera permission)

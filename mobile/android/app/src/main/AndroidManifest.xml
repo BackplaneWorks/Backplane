@@ -11,7 +11,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <!-- Android 16: its notification may become a status-bar chip -->
     <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
-    <!-- the page's QR scanner and photos (WebShell.kt grants the hub's page only) -->
+    <!-- the pairing scanner and photos -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <!-- a hub file saved to Downloads (Android 9 and older ask for this) -->
@@ -26,28 +26,6 @@
         android:roundIcon="@mipmap/ic_launcher"
         android:networkSecurityConfig="@xml/network"
         android:theme="@android:style/Theme.Material.NoActionBar">
-        <activity
-            android:name=".MainActivity"
-            android:exported="true"
-            android:launchMode="singleTop"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|fontScale|density"
-            android:windowSoftInputMode="adjustResize">
-            <!-- classic screens: not the launcher in the data build -->
-            <!-- text, photos and files shared into the app go to the page's composer -->
-            <intent-filter>
-                <action android:name="android.intent.action.SEND" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="text/plain" />
-                <data android:mimeType="image/*" />
-                <data android:mimeType="application/pdf" />
-            </intent-filter>
-            <intent-filter>
-                <action android:name="android.intent.action.SEND_MULTIPLE" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="image/*" />
-            </intent-filter>
-            <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
-        </activity>
         <!-- the data/1 app (docs/PHONE-DATA.md): native screens over plain data; the launcher -->
         <activity
             android:name=".DataActivity"
@@ -75,9 +53,5 @@
             android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/files" />
         </provider>
-        <service
-            android:name=".LiveService"
-            android:exported="false"
-            android:foregroundServiceType="dataSync" />
     </application>
 </manifest>
