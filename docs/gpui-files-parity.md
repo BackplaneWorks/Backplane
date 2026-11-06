@@ -1,6 +1,6 @@
 # GPUI Files tab: parity with the main-branch web / Electron client
 
-Reference: `src/core/client` (`Fm.*`, `Pdf.*`), `src/web/view` (`View.fm.*`), `src/core/fm`, `src/mobile/view` (`Files.json`, `File.json`),
+Reference (the Bend sources, removed from this tree; tag `main-bend-final`): `src/core/client` (`Fm.*`, `Pdf.*`), `src/web/view` (`View.fm.*`), `src/core/fm`, `src/mobile/view` (`Files.json`, `File.json`),
 main commits since `7c9b3c223c` (#960 thread-folder boundary, Files listings kept hub-wide, `String.drop`). GPUI: `native/gpui/src/screens/viewer.rs`
 (+ `filesui.rs`), hub side `native/host/src/files/*`.
 
