@@ -167,7 +167,8 @@ impl Driver {
             "scroll" => { let mut o = serde_json::Map::new(); if let Some(v) = num("dx") { o.insert("dx".into(), v); } if let Some(v) = num("dy") { o.insert("dy".into(), v); } Value::Object(o) }
             _ => json!({}),
         };
-        self.br.ask(bot, op, &args).await;
+        let line = self.br.ask(bot, op, &args).await;
+        if line.contains("\"ok\":false") { eprintln!("term: person input {op} on {bot} failed: {}", line.chars().take(300).collect::<String>()); }
     }
     /// The page's size from a status reply (the viewport a click lands in).
     async fn viewport(&self, bot: &str) -> (u64, u64) {

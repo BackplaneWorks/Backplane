@@ -3,9 +3,15 @@
 #btn{position:absolute;left:100px;top:80px;width:160px;height:48px;background:#2a7;color:#fff;border:0;font-size:18px}
 #inp{position:absolute;left:100px;top:160px;width:320px;height:32px;font-size:18px}
 #out{position:absolute;left:100px;top:220px}</style>
-<button id=btn>Click me</button><input id=inp placeholder=type><div id=out>idle</div>
+<button id=btn>Click me</button>
+<a id=dl href=/file.txt download=file.txt style="position:absolute;left:100px;top:260px">download</a>
+<button id=pop style="position:absolute;left:100px;top:310px;width:160px;height:36px">popup</button>
+<input id=file type=file style="position:absolute;left:100px;top:370px;width:300px"><input id=inp placeholder=type><div id=out>idle</div>
 <script>
 let n=0; const out=document.getElementById('out');
 btn.onclick=()=>{n++; document.title='clicked:'+n; out.textContent='clicked '+n};
 inp.oninput=()=>{document.title='typed:'+inp.value; out.textContent='typed '+inp.value};
+pop.onclick=()=>{window.open('/popup.html','_blank')};
+file.onchange=()=>{document.title='file:'+file.files[0].name};
+window.addEventListener('message',e=>{document.title='msg:'+e.data});
 </script>
