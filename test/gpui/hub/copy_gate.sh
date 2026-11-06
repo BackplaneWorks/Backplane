@@ -27,6 +27,13 @@ $BIN --home $D/syn --port 3897 --no-tailscale --foreground > $D/syn2.out 2>&1 & 
 for i in $(seq 1 50); do curl -s -m 1 http://127.0.0.1:3897/hello > /dev/null && break; sleep 0.1; done
 curl -s -m 1 http://127.0.0.1:3897/hello > /dev/null && ok "a marked home restarts without the switch" || fail "marked home refused: $(cat $D/syn2.out)"
 kill $P; wait $P 2>/dev/null
+# 3b. a plain truncated copy of a real log (no markers in it, over a megabyte) is refused too; a marked home of the same size is not
+mkdir -p $D/trunc; python3 -c "
+import json
+l=json.dumps({'\$':'ActivityLogged','thread':'t1','act':'a','summary':'x'*80,'at':1})+'\n'
+open('$D/trunc/events.jsonl','w').write(l*14000)"
+$BIN --home $D/trunc --port 3897 --no-tailscale --foreground > $D/trunc.out 2>&1; rc=$?
+[ $rc = 1 ] && grep -q "did not make the home" $D/trunc.out && ok "a plain truncated copy refused" || fail "truncated copy not refused (exit $rc): $(head -c 200 $D/trunc.out)"
 # 4. with the switch the real-looking log runs, and says so
 BACKPLANE_COPY=1 $BIN --home $D/real --port 3897 --no-tailscale --foreground > $D/real2.out 2>&1 & P=$!
 for i in $(seq 1 50); do curl -s -m 1 http://127.0.0.1:3897/hello > /dev/null && break; sleep 0.1; done

@@ -119,6 +119,8 @@ pub fn adopt_entries<T>(copy: bool, xs: Vec<T>) -> Vec<T> { if copy { vec![] } e
 
 /// A log this large was not made by a test.
 pub const BIG_LOG: u64 = 256 << 20;
+/// A log this hub did not make (no marker) past this size is someone's data, whatever it holds: a plain truncated copy of a real log has no `machine.id` in it.
+pub const UNMARKED_MAX: u64 = 1 << 20;
 const SCAN: u64 = 4 << 20;
 /// The file beside the log that says this hub made the home (so a restart on its own log is no copy).
 pub const MARKER: &str = "hub.owner";
@@ -127,7 +129,7 @@ fn contains(hay: &[u8], needle: &[u8]) -> bool { hay.windows(needle.len()).any(|
 
 /// Whether the home's log looks like a real hub's (a copy of someone's data) and says why. A symlinked log is always
 /// suspect (it points at data that is not in this home). Otherwise a home this hub made (the marker) is its own; any other
-/// holding a log with a real hub's own settings (`machine.id` near its start, the daily `tz.checked` near its end), a JS
+/// holding a log of more than `UNMARKED_MAX`, or one with a real hub's own settings (`machine.id` near its start, the daily `tz.checked` near its end), a JS
 /// hub's `store.db` or live checkpoints, or a log past `BIG_LOG` is a copy and needs `BACKPLANE_COPY=1`.
 pub fn looks_real(home: &std::path::Path) -> Option<String> {
     use std::io::{Read, Seek, SeekFrom};
@@ -137,6 +139,7 @@ pub fn looks_real(home: &std::path::Path) -> Option<String> {
     if home.join(MARKER).exists() { return None }
     if home.join("store.db").exists() || home.join("live-checkpoints").exists() { return Some("the home holds another hub's store.db or live checkpoints".into()) }
     if meta.len() > BIG_LOG { return Some(format!("events.jsonl is {} MiB", meta.len() >> 20)) }
+    if meta.len() > UNMARKED_MAX { return Some(format!("events.jsonl is {} KiB and this hub did not make the home", meta.len() >> 10)) }
     let mut f = std::fs::File::open(&log).ok()?;
     let mut head = vec![0u8; SCAN.min(meta.len()) as usize];
     f.read_exact(&mut head).ok()?;
@@ -230,6 +233,15 @@ mod tests {
         let e = gate(&h, false).unwrap_err(); assert!(e.contains("BACKPLANE_COPY=1") && e.contains("machine.id"), "{e}");
         assert!(gate(&h, true).is_ok());
         let t = home("real-tail"); log(&t, &format!("{SYNTH}{{\"$\":\"SettingSet\",\"key\":\"tz.checked\",\"value\":\"1\",\"at\":3}}\n")); assert!(gate(&t, false).is_err());
+    }
+    // a plain truncated copy of a real log (no machine.id in it) is still someone's data; the hub's own marked home, and a tiny synthetic log, are not
+    #[test] fn an_unmarked_log_past_a_megabyte_is_a_copy_whatever_it_holds() {
+        let h = home("trunc"); let line = "{\"$\":\"ActivityLogged\",\"thread\":\"t1\",\"act\":\"a\",\"summary\":\"x\",\"at\":1}\n";
+        std::fs::write(h.join("events.jsonl"), line.repeat((UNMARKED_MAX as usize / line.len()) + 10)).unwrap();
+        let why = gate(&h, false).unwrap_err(); assert!(why.contains("did not make the home"), "{why}");
+        assert!(gate(&h, true).is_ok(), "the copy switch still runs it");
+        mark(&h); assert!(gate(&h, false).is_ok(), "a home this hub made is its own, however big");
+        let s = home("tiny"); log(&s, SYNTH); assert!(gate(&s, false).is_ok());
     }
     #[test] fn a_js_hubs_store_or_a_huge_log_marks_a_copy() {
         let h = home("store"); log(&h, SYNTH); std::fs::write(h.join("store.db"), b"x").unwrap(); assert!(gate(&h, false).is_err());
