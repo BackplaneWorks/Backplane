@@ -48,10 +48,10 @@ pub fn typed_answer(ask: &Ask, text: &str) -> Option<Command> {
     if t.is_empty() { None } else { Some(answer(&format!("{}{}", ask.pre, t))) }
 }
 
-fn pill(cx: &mut Context<Backplane>, light: bool, key: String, b: &Button) -> Stateful<Div> {
+fn pill(cx: &mut Context<Backplane>, light: bool, key: String, rect: String, b: &Button) -> Stateful<Div> {
     let c = |n: &str| theme::color(light, n);
     let value = b.value.clone();
-    let d = div().id(SharedString::from(key)).px_3().py_1().text_size(px(12.)).cursor_pointer().border_1();
+    let d = crate::ui::with_rect(div().id(SharedString::from(key)), || rect).px_3().py_1().text_size(px(12.)).cursor_pointer().border_1();
     let d = if b.primary { d.bg(c("accent")).text_color(c("on-accent")).border_color(c("accent")) } else { d.bg(c("raise")).border_color(c("line")).hover(|s| s.bg(c("panel"))) };
     d.child(b.label.clone()).on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(answer(&value)); cx.notify(); }))
 }
@@ -71,7 +71,7 @@ fn card(cx: &mut Context<Backplane>, light: bool, input: Option<Entity<Composer>
     } else if !ask.detail.is_empty() {
         col = col.child(div().id(SharedString::from(format!("ask-{i}-detail"))).max_h(px(300.)).overflow_y_scroll().text_size(px(12.)).text_color(c("dim")).child(ask.detail.clone()));
     }
-    let chips = div().flex().flex_wrap().gap_2().children(ask.buttons.iter().enumerate().map(|(j, b)| pill(cx, light, format!("ask-{i}-b{j}"), b).into_any_element()).collect::<Vec<_>>());
+    let chips = div().flex().flex_wrap().gap_2().children(ask.buttons.iter().enumerate().map(|(j, b)| pill(cx, light, format!("ask-{i}-b{j}"), format!("ask:{i}:{j}"), b).into_any_element()).collect::<Vec<_>>());
     if let (true, Some(input)) = (ask.needs && !ask.pre.is_empty(), input) {
         let id = ask.id.clone();
         let boxed = div().flex().gap_2().items_center()
