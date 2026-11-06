@@ -19,7 +19,7 @@ pub struct Ctx { pub entries: Vec<Line>, pub buy: Buy }
 pub struct Buy { pub on: bool, pub buying: bool, pub last: String }
 
 /// The requests that read the thread's whole conversation.
-pub fn needs_entries(m: &str) -> bool { matches!(m, "thread.fork" | "thread.back" | "thread.provider" | "accounts.select") }
+pub fn needs_entries(m: &str) -> bool { matches!(m, "thread.fork" | "thread.back" | "thread.provider" | "accounts.select" | "accounts.choose" | "fallback.switch") }
 
 fn ok(id: &Value) -> Value { json!({"t":"reply","id":id,"ok":true}) }
 fn made(id: &Value, th: &str) -> Value { json!({"t":"reply","id":id,"ok":true,"thread":th}) }
@@ -221,8 +221,10 @@ fn plan_inner(f: &Fold, at: u64, id: &Value, method: &str, p: &Value, cx: &Ctx) 
             let provider = f.threads.get(&th).map(|t| t.provider.as_str()).unwrap_or("");
             done(vec![json!({"$":"SettingSet","key":format!("effort.{th}"),"value":effort_of(provider, &s(p, "effort", "")),"at":at})], id)
         }
-        "thread.provider" => switch(f, at, id, p, cx),
-        "accounts.select" => account_select(f, at, id, p, cx),
+        "thread.provider" => switch(f, at, id, p, cx, false),
+        "fallback.switch" => switch(f, at, id, p, cx, true),
+        "accounts.select" => account_select(f, at, id, p, cx, "person"),
+        "accounts.choose" => { let by = s(p, "by", ""); account_select(f, at, id, p, cx, &by) }
         "thread.fork" => fork(f, at, id, &th, cx),
         "thread.back" => back(f, at, id, &th, cx),
         "order.buy" => buy(f, at, id, &th, &cx.buy),
@@ -389,7 +391,8 @@ fn back(f: &Fold, at: u64, id: &Value, fork: &str, cx: &Ctx) -> Option<Plan> {
 }
 
 /// Hub.switch.as: the thread goes on with provider `to` from its next turn, on `model` and, when named, that effort: all of it between turns or none of it.
-fn switch(f: &Fold, at: u64, id: &Value, p: &Value, cx: &Ctx) -> Option<Plan> {
+/// `auto`: the fallback chain moved it (`fallback.switch`): the turn starts again at once, so nothing is held, and `say` is the timeline's line.
+fn switch(f: &Fold, at: u64, id: &Value, p: &Value, cx: &Ctx, auto: bool) -> Option<Plan> {
     let th = s(p, "thread", ""); let to = s(p, "provider", ""); let model = s(p, "model", "");
     let from = f.threads.get(&th).map(|t| t.provider.clone()).unwrap_or_default();
     if running(f, &th) { return Some(Plan { events: vec![], reply: err(id, "a provider changes between turns: stop this one first"), stop: None, wt: None, scratch: None, act: None }) }
@@ -406,16 +409,19 @@ fn switch(f: &Fold, at: u64, id: &Value, p: &Value, cx: &Ctx) -> Option<Plan> {
             else { format!("This thread went on with {from} since you ({to}) last took part. What happened meanwhile, oldest first:") };
         ev.push(json!({"$":"TurnQueued","thread":th,"msg":format!("handoff:switch:{n}"),"text":hand_text(&why, &cx.entries[..missed.min(cx.entries.len())], &th),"at":at}))
     }
-    let waiting = waits(f, &th); // Switch.go: AgentStop unless Config.waits, on the state before the hold
-    ev.extend(hold(f, &th, at));
-    if count > 0 { ev.push(json!({"$":"ActivityLogged","thread":th,"act":hub_id("p", at, n),"tone":"info","kind":"provider","summary":format!("Now on {to}{}", if missed == 0 { "" } else { "; it gets what it missed with the next message" }),"at":at})) }
+    let waiting = !auto && waits(f, &th); // Switch.go: AgentStop unless Config.waits, on the state before the hold
+    if !auto { ev.extend(hold(f, &th, at)) }
+    if auto { ev.push(json!({"$":"ActivityLogged","thread":th,"act":hub_id("p", at, n),"tone":"info","kind":"fallback","summary":s(p, "say", ""),"at":at})) }
+    else if count > 0 { ev.push(json!({"$":"ActivityLogged","thread":th,"act":hub_id("p", at, n),"tone":"info","kind":"provider","summary":format!("Now on {to}{}", if missed == 0 { "" } else { "; it gets what it missed with the next message" }),"at":at})) }
     Some(Plan { events: ev, reply: ok(id), stop: if waiting { None } else { Some(th.clone()) }, wt: None, scratch: None, act: None })
 }
 
 /// Hub.accounts.select: the thread goes on under another account of its provider from its next message, between turns. The old account's native session and how much
 /// of the conversation it has seen are kept under its own key, the new account's are restored, and what the new account has not seen is handed over with the next message.
 /// A stale menu (binding, epoch, state) is refused; another provider's account is picked after the agent is switched (thread.provider).
-fn account_select(f: &Fold, at: u64, id: &Value, p: &Value, cx: &Ctx) -> Option<Plan> {
+/// `by` says who chose: "person" (`accounts.select`: their pick is the thread's pin), or, through `accounts.choose` (hub-side only), "agent" and "bot" (a choice a pin refuses unless the person
+/// asked, which the tool checks and says with `asked`), "failover" (the driver, past a pin: the pin is where the thread returns) and "return" (the driver, back to where it came from).
+fn account_select(f: &Fold, at: u64, id: &Value, p: &Value, cx: &Ctx, by: &str) -> Option<Plan> {
     use crate::settings::accounts as ac;
     let refuse = |m: &str| Some(Plan { events: vec![], reply: err(id, m), stop: None, wt: None, scratch: None, act: None });
     let th = s(p, "thread", ""); let th = th.rsplit('|').next().unwrap_or("").to_string(); let profile = s(p, "profile", ""); let epoch = p.get("epoch").and_then(Value::as_u64).unwrap_or(0);
@@ -428,15 +434,23 @@ fn account_select(f: &Fold, at: u64, id: &Value, p: &Value, cx: &Ctx) -> Option<
     if provider != t.provider { return refuse("Switch this thread to that agent first, then pick the account.") }
     let key = ac::binding_key(&th, &provider);
     let raw = f.setting(&key).to_string();
-    if s(p, "expected", "") != raw { return refuse("The thread or account selection changed. Reopen the account menu and try again.") }
+    if by == "person" && s(p, "expected", "") != raw { return refuse("The thread or account selection changed. Reopen the account menu and try again.") }
     if !profile.is_empty() && !ac::ready(&prof, &provider, epoch) { return refuse(ac::unavailable(&prof, epoch)) }
+    let chooser = matches!(by, "agent" | "bot");
+    let chosen_key = ac::chosen_key(&th, &provider);
+    if chooser && !p.get("asked").and_then(Value::as_bool).unwrap_or(false) { if let Some(name) = ac::pinned_to(f.setting(&chosen_key), &inventory, &profile, epoch) { return refuse(&ac::pin_refusal(&name)) } }
     let cur: Value = serde_json::from_str(&raw).unwrap_or(Value::Null);
     let (cur_id, cur_epoch) = (cur["id"].as_str().unwrap_or("").to_string(), cur["epoch"].as_u64().unwrap_or(0));
-    if cur_id == profile && cur_epoch == epoch { return done(vec![], id) }
+    let set = |k: String, v: String| json!({"$":"SettingSet","key":k,"value":v,"at":at});
+    // who chose, and what their choice ends: the person's pick is the end of any failover and of a hold they have overruled
+    let mut after: Vec<Value> = vec![];
+    if matches!(by, "person" | "agent" | "bot") { after.push(set(chosen_key, ac::chosen_show(&profile, epoch, by, &s(p, "who", ""), at))) }
+    if matches!(by, "person" | "return") { after.push(set(crate::settings::fallback::preference_key(&th), String::new())) }
+    if by == "person" { for k in f.holds_of(&provider, &profile, epoch) { after.push(set(k, String::new())) } after.push(set(crate::settings::driver::tried_key(&th), String::new())) }
+    if cur_id == profile && cur_epoch == epoch { return done(after, id) }
     let count = f.count.get(&th).copied().unwrap_or(0);
     let seen: usize = f.setting(&ac::seen_key(&th, &provider, &profile, epoch)).parse().unwrap_or(0);
     let n = f.n();
-    let set = |k: String, v: String| json!({"$":"SettingSet","key":k,"value":v,"at":at});
     let mut ev: Vec<Value> = vec![];
     for (m, _) in f.queue(&th) { if m.starts_with("handoff:switch:") { ev.push(json!({"$":"QueueRemoved","thread":th,"msg":m,"at":at})) } }
     let session_new = f.setting(&ac::session_key(&th, &provider, &profile, epoch)).to_string();
@@ -451,7 +465,10 @@ fn account_select(f: &Fold, at: u64, id: &Value, p: &Value, cx: &Ctx) -> Option<
         ev.push(json!({"$":"TurnQueued","thread":th,"msg":format!("handoff:switch:account{at}-{n}"),"text":hand_text(&why, &cx.entries[..missed.min(cx.entries.len())], &th),"at":at}));
     }
     let name = if profile.is_empty() { "Default account".to_string() } else { prof["label"].as_str().unwrap_or("account").to_string() };
-    ev.push(json!({"$":"ActivityLogged","thread":th,"act":hub_id("account", at, n + 1),"tone":"info","kind":"account","summary":format!("Selected {name}; conversation context is handed to this account with the next message."),"at":at}));
+    let said = s(p, "say", "");
+    let summary = match by { "person" => format!("Selected {name}; conversation context is handed to this account with the next message."), "agent" | "bot" => format!("{} selected {name}; conversation context is handed to this account with the next message.", s(p, "who", "An agent")), _ => said.clone() };
+    if !summary.is_empty() { ev.push(json!({"$":"ActivityLogged","thread":th,"act":hub_id("account", at, n + 1),"tone":"info","kind":"account","summary":summary,"at":at})) }
+    ev.extend(after);
     Some(Plan { events: ev, reply: ok(id), stop: Some(th), wt: None, scratch: None, act: None })
 }
 

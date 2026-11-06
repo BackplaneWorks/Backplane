@@ -26,27 +26,30 @@ impl Agents {
         let (t, depth) = { let w = self.world().await; let Some(t) = w.threads.get(thread).cloned() else { return fail("unknown thread") }; (t, w.depth(thread)) };
         if depth >= MAX_DEPTH { return fail("delegation depth limit reached: finish this task yourself") }
         if prompt.trim().is_empty() { return fail("prompt is required") }
-        let provider = if s(a, "provider").is_empty() { t.provider.clone() } else { s(a, "provider").to_string() };
+        let asked = if s(a, "provider").is_empty() { if a.get("account").is_some() && !s(a, "account").eq_ignore_ascii_case("default") { String::new() } else { t.provider.clone() } } else { s(a, "provider").to_string() };
+        let chosen = match self.account_arg(a, &asked).await { Ok(c) => c, Err(e) => return fail(&e) };
+        let provider = chosen.as_ref().map(|c| c.provider.clone()).unwrap_or(if asked.is_empty() { t.provider.clone() } else { asked });
         let model = if !s(a, "model").is_empty() { s(a, "model").to_string() } else if provider == t.provider { t.model.clone() } else { String::new() };
         if provider != "claude" && super::providers::driver(&provider).is_none() { return fail(&format!("{provider} threads are not run by the Rust hub yet")) }
         let (now, seq) = (now_s(), self.seq_n());
         let (task, child, depth1) = (hub_id("k", now, seq), hub_id("t", now, seq + 1), depth + 1);
         let title = if s(a, "title").is_empty() { rules::title_of(&prompt) } else { s(a, "title").to_string() };
+        let acct = self.thread_account(thread, &child, &provider, chosen.as_ref(), now).await;
         let ev = vec![
-            json!({"$":"ThreadCreated","id":child,"project":t.project,"title":title,"env":t.env,"branch":t.branch,"worktree":t.worktree,"provider":provider,"model":model,"at":now}),
+            json!({"$":"ThreadCreated","id":child,"project":t.project,"title":title,"env":t.env,"branch":t.branch,"worktree":t.worktree,"provider":provider,"model":model,"at":now})].into_iter().chain(acct).chain([
             json!({"$":"ModesSet","id":child,"runtime":t.runtime,"interaction":t.interaction,"model":model,"at":now}), // the parent's modes
             json!({"$":"TaskDelegated","task":task,"parent":thread,"child":child,"depth":depth1,"provider":provider,"model":model,"at":now}),
             json!({"$":"TaskStateSet","task":task,"state":"running","summary":"","at":now}),
             // the child sits under its parent in the sidebar, the parent's children open (as thread_launch does)
             json!({"$":"ThreadParentSet","id":child,"parent":thread,"at":now}),
             json!({"$":"SettingSet","key":format!("thread.tree.{thread}"),"value":"1","at":now}),
-        ];
+        ]).collect::<Vec<Value>>();
         self.commit_events(ev).await;
         if let Err(e) = self.deliver_as("user", &child, &hub_id("m", now, seq + 2), &prompt, None, vec![]).await {
             self.commit_events(vec![json!({"$":"TaskStateSet","task":task,"state":"failed","summary":format!("could not start the child: {e}"),"at":now_s()})]).await; // never left running with no turn
             return fail(&format!("could not start the child: {e}"))
         }
-        (true, json!({"taskId":task,"childThreadId":child,"state":"running","provider":provider,"model":model,"depth":depth1,
+        (true, json!({"taskId":task,"childThreadId":child,"state":"running","provider":provider,"model":model,"account":chosen.map(|c| c.label),"depth":depth1,
             "note":"The result will arrive in this thread as a message when the child finishes. End your turn instead of polling."}))
     }
     /// The tool task_status {taskId}: only a task this thread delegated.
@@ -110,7 +113,9 @@ pub fn finish_plan(w: &super::world::World, child: &str, ended: &str) -> Option<
 }
 /// The last TurnChanged of `thread` in a step's events ended it, unless a later change runs it again (task_ended_last_change).
 pub fn ended_last(events: &[Value], thread: &str) -> Option<&'static str> {
-    let st = events.iter().rev().find(|e| e["$"] == "TurnChanged" && e["thread"] == thread)?["state"].as_str()?;
+    let last = events.iter().rev().find(|e| e["$"] == "TurnChanged" && e["thread"] == thread)?;
+    if last["failover"] == true { return None } // it stopped to change accounts and goes on: it has not ended
+    let st = last["state"].as_str()?;
     match st { "completed" => Some("completed"), "failed" => Some("failed"), "interrupted" => Some("interrupted"), _ => None }
 }
 

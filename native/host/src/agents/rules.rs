@@ -63,8 +63,8 @@ pub fn mcp_config(url: &str) -> String { format!("{{\"mcpServers\":{{\"backplane
 pub fn agent_key(model: &str, runtime: &str, interaction: &str, think: bool) -> String { format!("{model}|{runtime}|{interaction}{}", if think { "|think" } else { "" }) }
 
 extern "C" { fn tzset(); }
-/// Rec.cut: "Backplane restarted at 06:04 during this turn." in the person's zone.
-pub fn clock(zone: &str, at: u64) -> String {
+/// `at` in the person's zone, broken down (UTC when no zone is known).
+fn local_tm(zone: &str, at: u64) -> libc::tm {
     let t = at as libc::time_t; let mut tm: libc::tm = unsafe { std::mem::zeroed() };
     static TZ: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _g = TZ.lock().unwrap_or_else(|e| e.into_inner());
@@ -72,7 +72,15 @@ pub fn clock(zone: &str, at: u64) -> String {
         if zone.is_empty() { libc::gmtime_r(&t, &mut tm); }
         else { let old = std::env::var_os("TZ"); std::env::set_var("TZ", zone); tzset(); libc::localtime_r(&t, &mut tm); match old { Some(o) => std::env::set_var("TZ", o), None => std::env::remove_var("TZ") } tzset(); }
     }
-    format!("{:02}:{:02}", tm.tm_hour, tm.tm_min)
+    tm
+}
+/// Rec.cut: "Backplane restarted at 06:04 during this turn." in the person's zone.
+pub fn clock(zone: &str, at: u64) -> String { let tm = local_tm(zone, at); format!("{:02}:{:02}", tm.tm_hour, tm.tm_min) }
+/// A coming time for the timeline: "15:40" today, "Nov 8 15:40" on another day.
+pub fn when(zone: &str, at: u64, now: u64) -> String {
+    let (a, n) = (local_tm(zone, at), local_tm(zone, now));
+    if (a.tm_year, a.tm_yday) == (n.tm_year, n.tm_yday) { return format!("{:02}:{:02}", a.tm_hour, a.tm_min) }
+    format!("{} {} {:02}:{:02}", ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][a.tm_mon.clamp(0, 11) as usize], a.tm_mday, a.tm_hour, a.tm_min)
 }
 pub fn restart_cut(zone: &str, at: u64) -> String { format!("Backplane restarted at {} during this turn.", clock(zone, at)) }
 /// Carry.cut

@@ -79,7 +79,7 @@ mod tests {
     #[test] fn settings_reaches_the_network_only_through_the_process_gate() {
         let mut bad = vec![]; let mut net_users = vec![];
         for e in std::fs::read_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/settings")).unwrap().flatten() {
-            let p = e.path(); if p.extension().map_or(true, |x| x != "rs") || matches!(p.file_name().and_then(|n| n.to_str()), Some("e2e.rs" | "copy_gate.rs")) { continue } // test-only files; every process made in code goes through crate::proc (proc.rs scans for Command::new)
+            let p = e.path(); if p.extension().map_or(true, |x| x != "rs") || matches!(p.file_name().and_then(|n| n.to_str()), Some("e2e.rs" | "failover_e2e.rs" | "copy_gate.rs")) { continue } // test-only files; every process made in code goes through crate::proc (proc.rs scans for Command::new)
             let name = p.file_name().unwrap().to_string_lossy().to_string(); let text = std::fs::read_to_string(&p).unwrap();
             let code = text.split("\n#[cfg(test)]").next().unwrap_or(&text);
             for sym in ["TcpStream", "reqwest", "ureq", "hyper::", "UdpSocket"] { if code.contains(sym) { bad.push(format!("{name}: {sym}")) } }

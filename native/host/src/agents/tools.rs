@@ -74,6 +74,7 @@ impl Agents {
         let target = if sv(a, "threadId").is_empty() { thread } else { sv(a, "threadId") };
         if !self.same_project(thread, target).await { return fail(NOT_HERE) }
         if a.get("provider").is_some() || a.get("model").is_some() { return fail("changing a thread's provider or model is not available in the Rust hub yet") }
+        if a.get("account").is_some() { if a.get("title").is_some() || a.get("report").is_some() || a.get("parent").is_some() { return fail("account cannot be combined with title, report or parent") } return self.tool_update_account(thread, target, a).await }
         let title = sv(a, "title").trim().to_string();
         let flag = match a.get("report") { Some(Value::Bool(b)) => Some(*b), Some(Value::String(v)) if v == "true" => Some(true), Some(Value::String(v)) if v == "false" => Some(false), _ => None };
         if let (Some(on), true) = (flag, title.is_empty()) { // Mcp.report.k: a launched thread's reports turned off or on (its launcher stays)
