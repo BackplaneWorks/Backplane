@@ -27,8 +27,8 @@ Each lane updates its own rows in the commit that lands the work.
 
 ## Gaps
 
-| Feature | Status | Owner |
-|---|---|---|
+| Feature | Status | Owner | Audit |
+|---|---|---|---|
 | **Voice** | | |
 | Dictation from the mic, desktop (`Dictate` chip is a dead placeholder in `native/gpui/src/ui.rs`) | missing | voice |
 | Dictation from the phones (`VoiceRecorder` posts to `/voice/in`, which the hub does not serve) | missing | voice |
@@ -63,13 +63,13 @@ Each lane updates its own rows in the commit that lands the work.
 | `tools/voice` | partial | voice |
 | `tools/platform/windows-path.ts` | unchecked | helpers |
 | **Requests and tools with no handler on `main`** | | |
-| Rules and task board from a client (`rules.set/drop`, `board.set/drop`; the agents' side is there) | missing | hub-rest |
-| Locks panel (`lock.release`, `lock.cancel`) | unchecked | hub-rest |
-| Open in KiCad (`kicad.open`) and KiCad install (`kicad.install`) | unchecked | hub-rest |
-| Update now (`update.now`) | unchecked | hub-rest |
-| `/btw`, `/give` from every client (`thread.btw`, `bots.give`) | unchecked | hub-rest |
-| Summaries and notes (`summary.set`, `thread.note`) | unchecked | hub-rest |
-| Worktree controls (`thread.branch`, `thread.local`, `thread.worktree`) | unchecked | hub-rest |
+| Rules and task board from a client (`rules.set/drop`, `board.set/drop`; the agents' side is there) | missing | hub-rest | Audit, e9a7d6c9ba: `rules.set/drop`, `board.set/drop` are unknown methods; client controls not checked. |
+| Locks panel (`lock.release`, `lock.cancel`; 0.14 showed them as Release/Cancel buttons under Background work in the Subthreads panel) | unchecked | hub-rest | Audit, build e9a7d6c9ba on a private hub (Xvfb, stand-ins): the hub answers "unknown method" to both. Not shown: whether a differently named request or the phones' `locks` section replaced them; GPUI Subthreads panel not driven. |
+| Open in KiCad (`kicad.open`) and KiCad install (`kicad.install`) | unchecked | hub-rest | Audit, build e9a7d6c9ba on a private hub (Xvfb, stand-ins): unknown method for both, and the client's controls list has no Open in KiCad. Not shown: another path (Settings, a viewer menu). |
+| Update now (`update.now`) | unchecked | hub-rest | Audit, build e9a7d6c9ba on a private hub (Xvfb, stand-ins): unknown method, while `update.check` and `app.update` answer. Settings → About not yet read for a button. |
+| `/btw`, `/give` from every client (`thread.btw`, `bots.give`) | unchecked | hub-rest | Audit, build e9a7d6c9ba on a private hub (Xvfb, stand-ins): in the GPUI composer both echo the message, then the screen says `View request refused: "PRESENTER_UNAVAILABLE"`; nothing is posted and the text stays. `thread.btw` and `bots.give` are unknown methods. `session/composer.rs:80` returns no handler for `/btw`, `/give`, `/secret`, `/intent`. To confirm on a current build; `/secret` and `/intent` not driven; phones not driven. |
+| Summaries and notes (`summary.set`, `thread.note`) | unchecked | hub-rest | Audit, build e9a7d6c9ba on a private hub (Xvfb, stand-ins): both unknown methods; no replacement looked for. |
+| Worktree controls (`thread.branch`, `thread.local`, `thread.worktree`) | unchecked | hub-rest | Audit, build e9a7d6c9ba on a private hub (Xvfb, stand-ins): all unknown methods. Not shown: a replacement in the thread header menu or `commands/worktree.rs`. |
 | Google sign-in for bots (`bots.google`, `/oauth/google`) | missing | google |
 | `gmail_read`, `gmail_search`, `gmail_draft`, `calendar_events`, `google_accounts` | missing | google |
 | `deploy_status`, `deploy_cancel` | unchecked | hub-rest |
@@ -77,9 +77,9 @@ Each lane updates its own rows in the commit that lands the work.
 | **Client coverage** | | |
 | Japanese in the GPUI client (`i18n/ja.msg` exists; the client loads no catalog) | missing | i18n |
 | Notification settings of 0.14 (`notify.*`) | unchecked | audit |
-| Old Scratch chats: retired for new threads in 0.14 (38d3b10954) with their chats kept, but `main`'s sidebar does not list the Scratch project. Can a person still reach them? | unchecked | audit |
-| `browser.seen` (0.14's client called it; nothing on `main` does) | unchecked | audit |
-| `view.search`, `view.cancel`, `view.message` (referenced, not driven) | unchecked | audit |
+| Old Scratch chats: retired for new threads in 0.14 (38d3b10954) with their chats kept; 0.14's docs say they open "from Conversation history in the sidebar or search" | missing | audit | Audit, build e9a7d6c9ba on a private hub (Xvfb, stand-ins): a Scratch project with a chat "zebra scratch chat" beside a normal "zebra thread": the sidebar does not list it, searching "zebra" finds only the normal thread, and the palette lists the sidebar's rows so it cannot reach it. `sidebar.rs:237` skips Scratch. Phones not driven. |
+| `browser.seen` (0.14's client called it; nothing on `main` does) | unchecked | audit | Audit, build e9a7d6c9ba on a private hub (Xvfb, stand-ins): unknown method. Not shown what it did in 0.14 or whether anything replaced it. |
+| `view.search`, `view.cancel`, `view.message` | unchecked | audit | Only routed to handlers added with `register_view` (`session/mod.rs:99`); none found yet; not driven. |
 | Every other row of the old checklist | unchecked | audit |
 
 ## Not gaps
