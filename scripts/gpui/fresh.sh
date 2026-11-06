@@ -26,9 +26,16 @@ case "$cmd" in
           [ -f "$H/token" ] && { printf 'Authorization: Bearer %s\n' "$(cat "$H/token")" | curl -s -m2 -H @- "http://127.0.0.1:$PORT/hello" | head -c 200; echo; }
           [ -f "$D/tailnet.port" ] && { grep -a "on your tailnet:" "$D/hub.log" | tail -1 || echo "tailnet: not up (see $D/hub.log)"; }; exit 0;;
   pair) alive "$(pid hub)" || die "the hub is not running"
-        printf 'Authorization: Bearer %s\n' "$(cat "$H/token")" | curl -sf -m5 -X POST -H @- "http://127.0.0.1:$PORT/auth/invitations" | python3 -c "import json,sys;d=json.load(sys.stdin);print('routes:',', '.join(d['routes']));print('code:',d['code']);print('link:',d['link'])" || die "the hub gave no invitation"; exit 0;;
+        inv=$(printf 'Authorization: Bearer %s\n' "$(cat "$H/token")" | curl -sf -m5 -X POST -H @- "http://127.0.0.1:$PORT/auth/invitations") || die "the hub gave no invitation"
+        link=$(printf %s "$inv" | python3 -c "import json,sys;d=json.load(sys.stdin);print('routes:',', '.join(d['routes']),file=sys.stderr);print('code:',d['code'],file=sys.stderr);print(d['link'])") || die "the hub gave no invitation"
+        echo "link: $link"
+        if command -v qrencode >/dev/null; then
+          echo; qrencode -t ansiutf8 -m 1 "$link"
+          ( umask 077; qrencode -t PNG -s 8 -m 2 -o "$D/pair-qr.png" "$link" ) && echo "QR as a picture: $D/pair-qr.png (it holds a live invitation: it is removed by stop)"
+        else echo "(no qrencode here: install it for a QR; the link above works as it is)"; fi
+        exit 0;;
   log) echo "$D/hub.log  $D/client.log"; exit 0;;
-  stop) for w in client hub; do p=$(pid $w); alive "$p" && kill "$p"; rm -f "$D/$w.pid"; done
+  stop) for w in client hub; do p=$(pid $w); alive "$p" && kill "$p"; rm -f "$D/$w.pid"; done; rm -f "$D/pair-qr.png"
         [ -f "$D/tailnet.port" ] && { tp=$(cat "$D/tailnet.port")
           # only our own entry: it must still proxy to this hub's port; if another process took the port over, it is theirs and stays
           if tailscale serve status 2>/dev/null | awk -v p=":$tp " -v t="http://127.0.0.1:$PORT" 'index($0,"ts.net"p){on=1;next} /^https:/{on=0} on&&$NF==t{f=1} END{exit f?0:1}'; then tailscale serve --https="$tp" off >/dev/null 2>&1 || true; echo "removed the tailscale serve entry on $tp"; else echo "left the tailscale serve entry on $tp alone (it does not proxy to this hub)"; fi
