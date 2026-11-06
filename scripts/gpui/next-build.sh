@@ -15,7 +15,7 @@ status() { printf '{"phase":"%s","text":"%s","done":0,"total":0}\n' "$1" "$2" > 
 tip() { git -C "$REPO" rev-parse --verify -q "refs/heads/$BR" 2>/dev/null; }
 built() { cat "$DEV/.next-built" 2>/dev/null; }
 mkdir -p "$DEV" "$TG"
-[ -n "$(tip)" ] || { echo "next-build: no $BR branch (git branch $BR gpui)" >&2; exit 1; }
+[ -n "$(tip)" ] || { echo "next-build: no $BR branch (git branch $BR main)" >&2; exit 1; }
 [ -d "$WT/.git" ] || [ -f "$WT/.git" ] || git -C "$REPO" worktree add --detach "$WT" "$(tip)" > /dev/null 2>&1 || { echo "next-build: cannot make the checkout $WT" >&2; exit 1; }
 PID=
 stop_build() { [ -n "$PID" ] && kill -TERM -- "-$PID" 2>/dev/null; [ -n "$PID" ] && wait "$PID" 2>/dev/null; PID=; }

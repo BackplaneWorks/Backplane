@@ -1,6 +1,6 @@
 #!/bin/sh
 # ONE real Claude turn through the Improvements hand-off (the person's go, 2026-11-05): the GPUI client on the Rust hub, a throwaway Backplane home and
-# a scratch git repository named backplane-gpui (with a local gpui branch) under build/gpui/imp-real/, loopback, the isolated display :61, one scope capped at
+# a scratch git repository named backplane-gpui (with a local main branch) under build/gpui/imp-real/, loopback, the isolated display :61, one scope capped at
 # 3700M with swap 0. NO stand-in folder and NO copy mode: the hub starts the real `claude` (the person's own sign-in, HOME as it is). The request is
 # harmless (reply with one sentence; no edits, no tools). Nothing is pushed; nothing outside the scratch folder is written by the agent's task.
 # usage: improvements-real-turn.sh CLIENT_BIN HUB_BIN ASSETS_DIR
@@ -15,7 +15,7 @@ mkdir -p $OUT $SH
 command -v claude >/dev/null || { echo "claude not on PATH"; exit 2; }
 rm -rf $R; mkdir -p $R/home $R/saved; rm -f $SH/improvements-real-*.png
 mkdir -p $R/proj/backplane-gpui
-( cd $R/proj/backplane-gpui && git init -q && git config user.email t@t && git config user.name t && echo "scratch" > README.md && git add . && git commit -qm init && git branch gpui )
+( cd $R/proj/backplane-gpui && git init -q && git config user.email t@t && git config user.name t && echo "scratch" > README.md && git add . && git commit -qm init && git branch -M main )
 python3 - "$R" <<'PY'
 import json,sys,time
 R=sys.argv[1]; NOW=int(time.time())

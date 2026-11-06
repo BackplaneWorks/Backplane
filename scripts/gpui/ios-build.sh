@@ -11,7 +11,7 @@ RSYNC_RSH=$PWD/$M rsync -a mobile/shell/backplane-app.js hs-mac-mini:bp-gpui-ios
 $M hs-mac-mini '
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 cd ~/bp-gpui-ios/ios || exit 1
-cp ~/bp-gpui-ios/bridge.js Backplane/bridge.js
+[ -f ~/bp-gpui-ios/bridge.js ] && cp ~/bp-gpui-ios/bridge.js Backplane/bridge.js  # the legacy Bend bridge no longer exists; the data app needs none
 SIGNARGS="CODE_SIGNING_ALLOWED=NO"; [ "'"$ADHOC"'" = 1 ] && SIGNARGS="CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=-"
 CONDS=""; [ "'"$DATA"'" = 1 ] && CONDS="OTHER_SWIFT_FLAGS=-DDATA_APP"
 [ "'"$1"'" = clean ] && rm -rf build/dd

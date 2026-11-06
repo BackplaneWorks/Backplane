@@ -69,7 +69,7 @@ check(len(internal) == 1, "the internal request was posted once", str(len(intern
 if internal:
     t = internal[0]["text"]
     check(t.startswith("The sidebar rows jump when I fold and unfold it.\nSecond line of my words."), "the request text leads the message verbatim")
-    for w in ["<backplane_gpui_handoff>", "own worktree on the branch gpui-imp-", "scripts/gpui/land.sh", "reviewer's recorded OK", "cannot move `gpui` by itself"]:
+    for w in ["<backplane_gpui_handoff>", "own worktree on the branch gpui-imp-", "scripts/gpui/land.sh", "reviewer's recorded OK", "cannot move `main` by itself"]:
         check(w in t, f"the hand-off says: {w}")
     check(t.count("[attachment: ") == 2 and ".png]" in t and ".webm]" in t, "the screenshot and the recording are attached once each")
 atts = open(f"{out}/attachments.txt").read() if os.path.exists(f"{out}/attachments.txt") else ""

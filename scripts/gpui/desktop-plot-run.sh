@@ -62,7 +62,7 @@ trap cleanup EXIT INT TERM
 R='$R'; ROOT='$ROOT'; X='$X'; HUB='$HUB'; CLIENT='$CLIENT'; ASSETS='$ASSETS'; N='$N'; PORT='$PORT'; DISP='$DISP'; OUT='$OUT'; SH='$SH'
 export BACKPLANE_AGENTS=$R/bin BACKPLANE_NO_UPDATE=1 BP_STANDIN_MODE=stream HOME=$R/fakehome XDG_CACHE_HOME=$R/fakehome/.cache XDG_CONFIG_HOME=$R/fakehome/.config XDG_DATA_HOME=$R/fakehome/.local
 cd $R/proj
-$HUB/backplane-hub --home $R/home --port $PORT --host 127.0.0.1 --no-tailscale --foreground ${GPUI_POLICY:+--policy-bin $GPUI_POLICY} > $R/hub.log 2>&1 &
+$HUB/backplane-hub --home $R/home --port $PORT --host 127.0.0.1 --no-tailscale --foreground > $R/hub.log 2>&1 &
 echo $! > $R/hub.pid; sleep 5
 HP=$(cat $R/hub.pid)
 # the hub must run with the stand-in agents before any turn

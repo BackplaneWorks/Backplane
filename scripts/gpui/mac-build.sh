@@ -7,10 +7,9 @@ ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 SSH="$ROOT/build/gpui/mac-ssh"; HOST=hs-mac-mini; DEST=bp-gpui-desktop
 COLD=0; CHECK=0; [ "${1:-}" = cold ] && { COLD=1; shift; }; [ "${1:-}" = check ] && { CHECK=1; shift; }
 export RSYNC_RSH="$SSH"
-$SSH $HOST "mkdir -p ~/$DEST/src/native ~/$DEST/src/src/core ~/$DEST/src/src/web ~/$DEST/dist ~/$DEST/logs"
+$SSH $HOST "mkdir -p ~/$DEST/src/native ~/$DEST/src/assets/web ~/$DEST/dist ~/$DEST/logs"
 rsync -a --delete --exclude target --exclude '*.rs.bk' "$ROOT/native/gpui/" $HOST:$DEST/src/native/gpui/
-rsync -a "$ROOT/src/core/cbor.bend" $HOST:$DEST/src/src/core/
-rsync -a "$ROOT/src/web/style.css" $HOST:$DEST/src/src/web/
+rsync -a "$ROOT/assets/web/" $HOST:$DEST/src/assets/web/
 $SSH $HOST "sh -s" -- "$COLD" "$CHECK" "$@" <<'REMOTE'
 set -eu
 COLD=$1; CHECK=$2; shift 2

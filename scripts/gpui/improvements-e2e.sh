@@ -20,9 +20,9 @@ printf '#!/bin/sh\nexec %s %s "$@"\n' "$(command -v bun)" "$REPO/test/tools/clau
 for n in codex grok muse; do printf '#!/bin/sh\nexit 1\n' > $R/bin/$n; chmod +x $R/bin/$n; done
 # the opener stands in for the browser and the player: it records what it was asked to open
 printf '#!/bin/sh\necho "$1" >> %s/opened.txt\n' "$R" > $R/bin/open; chmod +x $R/bin/open
-# the Backplane source project: a throwaway repository named backplane-gpui with a local gpui branch; and a second project
+# the Backplane source project: a throwaway repository named backplane-gpui with a local main branch; and a second project
 mkdir -p $R/proj/backplane-gpui $R/proj/board
-( cd $R/proj/backplane-gpui && git init -q && git config user.email t@t && git config user.name t && echo x > README.md && git add . && git commit -qm init && git branch gpui )
+( cd $R/proj/backplane-gpui && git init -q && git config user.email t@t && git config user.name t && echo x > README.md && git add . && git commit -qm init && git branch -M main )
 python3 - "$R" <<'PY'
 import json,sys,time
 R=sys.argv[1]; NOW=int(time.time())
@@ -38,7 +38,7 @@ trap cleanup EXIT INT TERM
 R='$R'; ROOT='$ROOT'; REPO='$REPO'; X='$X'; HUBBIN='$HUBBIN'; CLIENT='$CLIENT'; ASSETS='$ASSETS'; PORT='$PORT'; DISP='$DISP'; OUT='$OUT'; SH='$SH'
 export BACKPLANE_AGENTS=$R/bin BACKPLANE_NO_UPDATE=1 BP_STANDIN_MODE=plain HOME=$R/fakehome XDG_CACHE_HOME=$R/fakehome/.cache XDG_CONFIG_HOME=$R/fakehome/.config XDG_DATA_HOME=$R/fakehome/.local
 cd $R/proj/backplane-gpui
-$HUBBIN --home $R/home --port $PORT --host 127.0.0.1 --no-tailscale --foreground --policy-bin $ROOT/build/gpui/slim/bp-policy-page --window-bin $ROOT/build/gpui/hub/new/window > $R/hub.log 2>&1 &
+$HUBBIN --home $R/home --port $PORT --host 127.0.0.1 --no-tailscale --foreground --window-bin $ROOT/build/gpui/hub/new/window > $R/hub.log 2>&1 &
 echo $! > $R/hub.pid; sleep 5
 HP=$(cat $R/hub.pid)
 # the hub must run with the stand-in agents before any turn

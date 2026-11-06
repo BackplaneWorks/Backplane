@@ -27,7 +27,7 @@ if [ "$MODE" = edit ]; then
   printf 'Scratch repository for a Backplane hand-off test. Edit freely; nothing here is real.\n' > $P/AGENTS.md; cp $P/AGENTS.md $P/build/gpui/COMMON.md
 fi
 echo scratch > $P/README.md
-( cd $P && git init -q && git config user.email t@t && git config user.name t && git add -A && git commit -qm init && git branch gpui && git checkout -q gpui )
+( cd $P && git init -q && git config user.email t@t && git config user.name t && git add -A && git commit -qm init && git branch -M main )
 [ "$MODE" = edit ] && ( cd $P && sh scripts/gpui/install-guard.sh )
 python3 - "$R" <<'PY'
 import json,sys,time

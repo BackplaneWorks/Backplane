@@ -34,7 +34,7 @@ R='$R'; ROOT='$ROOT'; X='$X'; HUB='$HUB'; CLIENT='$CLIENT'; ASSETS='$ASSETS'; N=
 export BACKPLANE_AGENTS=$R/bin BACKPLANE_NO_UPDATE=1 BP_STANDIN_MODE=stream HOME=$R/fakehome XDG_CACHE_HOME=$R/fakehome/.cache XDG_CONFIG_HOME=$R/fakehome/.config XDG_DATA_HOME=$R/fakehome/.local
 cd $R/proj
 if [ "${HUBKIND:-rust}" = js ]; then $ROOT/build/gpui/backplane-serve-current --home $R/home --port $PORT --host 127.0.0.1 --no-tailscale --foreground --headless > $R/hub.log 2>&1 &
-else $HUB/backplane-hub --home $R/home --port $PORT --host 127.0.0.1 --no-tailscale --foreground --policy-bin $ROOT/build/gpui/slim/bp-policy-page --window-bin $HUB/window > $R/hub.log 2>&1 &
+else $HUB/backplane-hub --home $R/home --port $PORT --host 127.0.0.1 --no-tailscale --foreground --window-bin $HUB/window > $R/hub.log 2>&1 &
 fi
 echo $! > $R/hub.pid; sleep 5
 HP=$(cat $R/hub.pid)
