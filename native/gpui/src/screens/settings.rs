@@ -40,6 +40,8 @@ pub fn change(f: &Field, text: &str) -> Option<Command> { if f.vault { None } el
 pub fn field_command(name: &str, text: &str) -> Command { Command::Action("bfield".into(), format!("{name}\u{1f}{text}")) }
 /// What a button press sends: its action and value, except the vault Saves, which are `save_request`.
 pub fn press(b: &Btn) -> Command { Command::Action(b.action.clone(), b.value.clone()) }
+/// `open-url` is the client's own (it never goes to the hub): only web addresses open, in the system browser.
+pub fn openable(url: &str) -> bool { (url.starts_with("https://") || url.starts_with("http://")) && url.len() <= 8000 && !url.chars().any(|c| c.is_whitespace() || c.is_control()) }
 pub fn is_vault_save(b: &Btn) -> bool { b.action == "secret-save" }
 
 /// The request a vault Save sends, straight to the hub (never a view action): an API key (`@apikey` + name) is `bots.voice`
@@ -278,7 +280,7 @@ fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, Fie
                 let j = line * CHIPS_PER_LINE + k; let b2 = b.clone();
                 let d = div().id(SharedString::from(format!("set-{i}-{j}"))).px_3().py_1().text_size(px(12.)).cursor_pointer();
                 let d = if b.on { d.bg(c("accent")).text_color(c("on-accent")) } else { d.bg(c("raise")).hover(|s| s.bg(c("line"))) };
-                d.child(b.label.clone()).on_click(cx.listener(move |this, _, _, cx| { if let Some(name) = b2.action.strip_prefix("local:") { this.local_press(name, &b2.value, cx); return; } flush_fields(this); if is_vault_save(&b2) { save_vault(this, &b2, cx); } else { let _ = this.tx.try_send(press(&b2)); } cx.notify(); })).into_any_element()
+                d.child(b.label.clone()).on_click(cx.listener(move |this, _, _, cx| { if let Some(name) = b2.action.strip_prefix("local:") { this.local_press(name, &b2.value, cx); return; } if b2.action == "open-url" { if openable(&b2.value) { cx.open_url(&b2.value); } return; } flush_fields(this); if is_vault_save(&b2) { save_vault(this, &b2, cx); } else { let _ = this.tx.try_send(press(&b2)); } cx.notify(); })).into_any_element()
             }).collect::<Vec<_>>()));
         }
     }
@@ -401,6 +403,7 @@ mod tests {
         match field_command("kname", "OPENAI_API_KEY") { Command::Action(a, v) => { assert_eq!(a, "bfield"); assert_eq!(v, "kname\u{1f}OPENAI_API_KEY"); } c => panic!("{c:?}") }
     }
     /// The secret never rides a view action: typing in a vault field sends nothing, and the Save is a direct request.
+    #[test] fn only_web_addresses_open() { assert!(openable("https://backplane.works/privacy") && openable("http://127.0.0.1:1/x")); for u in ["file:///etc/passwd", "javascript:alert(1)", "https://a b", "", "ftp://x"] { assert!(!openable(u), "{u}"); } }
     #[test] fn a_vault_value_never_travels_as_a_command_action() {
         let vault = Field { name: "kval".into(), hint: "".into(), secret: true, value: String::new(), vault: true };
         let plain = Field { name: "kname".into(), hint: "".into(), secret: false, value: String::new(), vault: false };
