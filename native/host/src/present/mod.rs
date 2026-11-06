@@ -10,6 +10,7 @@ pub mod picker;
 pub mod thread;
 pub mod viewer;
 pub mod settings;
+pub mod botforms;
 mod refusal;
 pub mod tz;
 pub mod window;

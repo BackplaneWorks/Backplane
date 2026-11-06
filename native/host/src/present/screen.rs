@@ -109,6 +109,8 @@ pub fn recent(st: &State,p: &Value) -> Option<Value> {
             return Some(json!({"remoteReady":false,"nextTarget":target,"session":session,"cmds":cmds,
                 "local":p.get("local").cloned().unwrap_or(json!({"local.native.sidebar.pages":"","local.native.sidebar.context":"","local.native.sidebar.key":"","local.native.sidebar.budget":""}))}));
         }
+    } else if let Some(o)=super::botforms::act(st,hub,&session,action,value) {
+        crate::session::patch::merge(&mut session,&o.patch); cmds=[read_cmds.clone(),o.cmds].concat();
     } else if let Some(o)=super::settings::act(hub,&session,action,value) {
         crate::session::patch::merge(&mut session,&o.patch); cmds=[read_cmds.clone(),o.cmds].concat();
     } else { match action {
@@ -253,7 +255,7 @@ pub fn recent(st: &State,p: &Value) -> Option<Value> {
     let deleting=if del.is_empty() { Value::Null }else{json!({"id":if del.contains('|'){del.to_string()}else{format!("{hub}|{del}")},"title":"Delete thread","body":st.threads.get(del.strip_prefix(&format!("{hub}|" )).unwrap_or(del)).map(|t|t.title.as_str()).unwrap_or(""),"yes":"Delete","no":"Cancel"})};
     let pages=json!([{"version":1,"hub":hub,"projects":projects_page,"active":null,"legacy":null}]);
     let shown=json!({"projects":projects,"sidebarPages":pages,"nativeSidebar":1,"active":[],"legacy":[],"thread":shown_thread,"rooms":rooms(st,hub),"bots":bots(st,hub,opts.now),"theme":setting(st,"ui.theme"),
-        "renaming":renaming,"deleting":deleting,"bot":null,"settings":if super::settings::is_open(&session) { super::settings::view(st,&session,p.get("hubInfo").unwrap_or(&Value::Null)) }else{Value::Null},"newRoom":null,"newBot":null,"projectHome":null});
+        "renaming":renaming,"deleting":deleting,"bot":null,"settings":if super::settings::is_open(&session) { super::settings::view(st,&session,p.get("hubInfo").unwrap_or(&Value::Null)) }else{Value::Null},"newRoom":super::botforms::new_room(st,hub,&session).unwrap_or(Value::Null),"newBot":super::botforms::new_bot(&session).unwrap_or(Value::Null),"projectHome":null});
     let mut shown=shown;
     // the Active view: what needs the person first, then the recently settled folded under "Settled N" (a search shows them)
     if mode=="active" {

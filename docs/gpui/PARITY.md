@@ -136,7 +136,7 @@ Rust hub: 1 missing, 3 partial. GPUI desktop: 0 missing, 0 partial.
 Rust hub: 1 missing, 8 partial. GPUI desktop: 0 missing, 0 partial.
 
 - Threads and timeline / Images in messages (/message-image, lightbox): hub partial
-- Threads and timeline / Attachments (upload, file, paste image): hub missing
+- Threads and timeline / Attachments (upload, file, paste image): driven in a real window 2026-11-06 (paste, pick, send); see PASS5.md
 - Viewers / Schematic viewer, sheets, hierarchy navigation: hub partial
 - Viewers / Split view and cross-probing: hub partial
 - Viewers / Design history bar, playback, steps: hub partial
@@ -603,7 +603,7 @@ Columns: Rust hub, GPUI desktop, iOS, Android. `[hub-blocked]` as defined above.
 | /btw side question **[hub-blocked]** | missing | missing | partial | partial | no Rust handler, deliberately: the answer comes from the one-shot text model (OneShot.run with text.provider / text.model and its account scope), which is not ported; nothing is stubbed (hub: no handler: thread.btw) |
 | /give hand-off, references, summaries **[hub-blocked]** | missing | missing | partial | partial | no Rust handler (hub: no handler: bots.give, summary.set) |
 | Images in messages (/message-image, lightbox) **[hub-blocked]** | partial | missing | partial | partial | route not registered in Rust; GPUI draws no image node (img => empty div) / pass 5: gpui draws the image and a click opens a lightbox (images.rs lightbox, Esc or click closes), seen in a real window with an image in the thread folder (hub: registered, no proof) |
-| Attachments (upload, file, paste image) **[hub-blocked]** | missing | partial | partial | partial | no Rust handler / gpui: paste/drop/picker upload via POST /attach (screens/attach.rs, attach::tests) but the Rust hub has no /attach route: hub-blocked, asked the files lane (hub: no handler: attach.put, attach.file) |
+| Attachments (upload, file, paste image) | driven | partial | partial | partial | the hub has the route (files/attach_http.rs, registered in files/imgroutes.rs); paste and pick upload and send on a hub with no helper (PASS5.md, carry)  |
 | File and web links, open in folder, copy path | done | missing | partial | partial | files/misc.rs file.open (5 tests); client link menus unproven Proof: results/files/parity-2.json (175/178 identical), bench-1.json. |
 | Reading position, 'N new' pill, history jump **[hub-blocked]** | partial | missing | partial | partial | presenter + window fields; no shot (hub: registered, no proof) |
 | In-thread search (view.search) and cancel **[hub-blocked]** | partial | missing | partial | partial | session/mod.rs routes the names; behaviour unrecorded by the parity scenarios / pass 5: gpui has the Jump or run a command palette (palette.rs: threads and actions, bar, Commands rail item, Ctrl+Shift+P), client side; view.search itself is not used by it (hub: registered, no proof) |
