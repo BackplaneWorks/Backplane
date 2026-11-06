@@ -526,6 +526,12 @@ async function adopt(o: Owner, p: Page): Promise<void> {
   p.on("popup", (q) => {
     void adopt(o, q).then(() => activate(o, q)).catch((e) => log(`popup: ${e}`));
   });
+  // a page changes its title without navigating (a script, a single-page app): poll it once a second and tell the clients only when it changed
+  const poll = setInterval(() => {
+    if (p.isClosed()) { clearInterval(poll); return; }
+    void p.title().then((title) => { if (!p.isClosed() && (tabTitles.get(p) ?? "") !== title && ownerOf.get(p) === o) { tabTitles.set(p, title); tellTabs(o); } }).catch(() => {});
+  }, 1000);
+  poll.unref();
   p.on("close", () => {
     o.tabs = o.tabs.filter((t) => t !== p);
     if (o.active !== p) { tellTabs(o); return; }
@@ -1038,6 +1044,12 @@ async function attachExternal(a: Json, name: string): Promise<Json> {
     p.on("console", (m) => pushLog(o, { level: m.type(), text: m.text() }));
     p.on("pageerror", (e) => pushLog(o, { level: "error", text: String(e) }));
     p.on("framenavigated", (f) => { if (f === p.mainFrame()) { tellTabs(o); if (p === o.active) send({ event: "navigated", page: o.name, url: f.url() }); } });
+    // playwright has no title event: poll the attached page's title (and address) once a second, telling the clients only when one changed
+    const poll = setInterval(() => {
+      if (p.isClosed()) { clearInterval(poll); return; }
+      void p.title().then((title) => { if (!p.isClosed() && (tabTitles.get(p) ?? "") !== title && ownerOf.get(p) === o) { tabTitles.set(p, title); tellTabs(o); } }).catch(() => {});
+    }, 1000);
+    poll.unref();
     p.on("close", () => { o.tabs = o.tabs.filter((t) => t !== p); if (o.active === p) o.active = o.tabs[o.tabs.length - 1] ?? null; tellTabs(o); });
   }
   // teach mode records the person's native clicks on this page: the recorder's binding and script go into the external browser's own context
