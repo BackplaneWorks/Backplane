@@ -18,7 +18,7 @@ There is no JavaScript hub and no web client in this tree.
 - `mobile/ios`, `mobile/android`: the phone apps. They speak the hub's data/1 protocol (`docs/PHONE-DATA.md`).
 - `tools/`: helper programs that are not Rust: `browser` (headless Chromium over NDJSON), `cef`, `kipc`, `step2glb`, `voice`, `platform`. Built by `scripts/build-*.sh`.
 - `order/`: the order server (`fabsrv`, Python) and deploy. `skills/`: agent skills. `deploy/kistack`: KiStack's skills, pinned by `deploy/kistack.lock` (`python3 scripts/kistack.py bump <commit>`). `i18n/`: message catalogs. `assets/`: fonts, icons, web colours.
-- `scripts/`: dev, build, fresh/watch, side-by-side, switch and device scripts. `test/`: fixtures, oracles and e2e drivers; `test/tools/claude_standin.ts` and `perf_standin.ts`: the stand-in agents.
+- `scripts/`: dev, build, fresh/watch, side-by-side, switch and device scripts; `migrate-from-bend.sh` copies an old `~/.backplane-bend` home into a Backplane home (the old one is only read). `test/`: fixtures, oracles and e2e drivers; `test/tools/claude_standin.ts` and `perf_standin.ts`: the stand-in agents.
 - `docs/`: how this tree works (`BUILD.md`, `DEV-RELOAD.md`, `MAIN-BUILD.md`, `SIDE-BY-SIDE.md`, `COPY-GUARD.md`, `HUB-API.md`, `PHONE-DATA.md`). Other `docs/*.md` describe features the hub keeps.
 
 ## Commands

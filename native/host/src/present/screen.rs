@@ -370,12 +370,12 @@ mod tests {
         assert_eq!(actual["overlay"],overlay,"retained overlay fields differ");
         for k in ["remoteReady","session","cmds","window"] { assert_eq!(actual[k],expected[k],"{k}"); }
     }
-    #[test] fn recorded_js_recent_gpui() { oracle(include_str!("fixtures/session-gpui-recent.json")); }
-    #[test] fn recorded_js_recent_gpuid() { oracle(include_str!("fixtures/session-gpuid-recent.json")); }
+    #[test] fn recorded_js_recent_gpui() { oracle(include_str!("fixtures/session-recent.json")); }
+    #[test] fn recorded_js_recent_gpuid() { oracle(include_str!("fixtures/session-recent-d.json")); }
     /// A fresh home (no projects, no threads): the sidebar descriptor has null pages, and the phone's bridge then requires `projects`, `active` and `legacy` to be
     /// arrays (empty) in BOTH `shown` and `overlay.j` (src/mobile/thin-native-host-307265.js sidebarRange); a missing key is its 'invalid view presentation'.
     #[test] fn a_fresh_home_sends_projects_active_and_legacy_as_empty_lists_in_shown_and_overlay() {
-        let recording:Value=serde_json::from_str(include_str!("fixtures/session-gpui-recent.json")).unwrap(); let frames=recording["frames"].as_array().unwrap();
+        let recording:Value=serde_json::from_str(include_str!("fixtures/session-recent.json")).unwrap(); let frames=recording["frames"].as_array().unwrap();
         let mut st=State::new(); st.lean=true;
         let mut p=frames[3]["json"]["p"].clone(); p["viewId"]=frames[7]["json"]["result"]["viewId"].clone(); p["revision"]=json!(1); p["now"]=json!(1000); p["nativeKey"]=json!("00112233445566778899aabbccddeeff");
         let out=recent(&st,&p).expect("a fresh home is claimed");

@@ -1,5 +1,5 @@
 #!/bin/sh
-# gpui_flow.sh : capped desktop test (3.5 GiB hub, 2 GiB GPUI, display :61, synthetic log, stand-in agents only).
+# desktop_flow.sh : capped desktop test (3.5 GiB hub, 2 GiB GPUI, display :61, synthetic log, stand-in agents only).
 # Opens a thread in the GPUI binary against backplane-hub, types and sends; prints the GPUI_METRIC lines.
 # Needs build/gpui/hub/backplane-hub-full, build/gpui/hub/window, build/gpui/slim/bp-policy-serve-O2-v3, build/gpui/linux/backplane-gpui.
 R=/home/h/Documents/i2cjak/backplane-gpui; D=$R/build/gpui/hub-run/gpui-flow; mkdir -p /tmp/p0

@@ -1,4 +1,4 @@
-//! Embedded Chromium (CEF, windowless/OSR) for the Browser tab, behind the `cef` cargo feature (docs/browser-gpui-cef.md).
+//! Embedded Chromium (CEF, windowless/OSR) for the Browser tab, behind the `cef` cargo feature (docs/browser-cef.md).
 //!
 //! One process-wide engine (`Engine::get`) is started on the first Browser tab shown: `cef::initialize` with the multi-threaded message loop (CEF
 //! runs its own UI thread; the callbacks below arrive there and only touch `Tab`'s mutexes) and `remote_debugging_port` on a loopback port the agent
