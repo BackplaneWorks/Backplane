@@ -1,5 +1,5 @@
 //! The settings families the first fold left out: uber ops, wake subscriptions, named locks,
-//! token totals and the last turn, deploy_main's line, a reminder's Act, and the task tools' todo edits. Each is a pure fold over
+//! token totals and the last turn, a reminder's Act, and the task tools' todo edits. Each is a pure fold over
 //! `State` with no state of its own: bounded by the settings it writes, which fold keeps too. Equal to State.replay for
 //! these events by the differential oracle (test/parity/oracle, `--skip none`).
 #[path = "json.rs"] pub mod json;
@@ -33,8 +33,8 @@ pub fn fold(st: &mut State, kind: &str, e: &Value) -> Option<()> {
         "WakeDropped" => st.wake_drop(s(e, "id")),
         "LockChanged" => st.lock_changed(s(e, "name"), gobj(e, "lock")),
         "TurnUsage" => st.turn_usage(e),
-        "DeployAsked" => st.deploy_asked(s(e, "by"), s(e, "cover")),
-        "DeployBuilt" => st.deploy_built(s(e, "commit"), s(e, "state"), s(e, "detail")),
+        // DeployAsked and DeployBuilt: the Bend hub's deploy_main, which nothing writes now. Old logs still hold them; they count in seq and set nothing.
+        // A hub moves to a new build only through its updater and the guard (update/, docs/deploy.md).
         _ => {}
     }
     Some(())
@@ -112,25 +112,6 @@ impl State {
         self.set(&format!("tok.key.{th}"), key); self.set(&format!("tok.basis.{th}"), basis);
         self.set(&format!("turn.last.{th}"), &format!("{}/{}/{}/{}/{}/{}/{at}/{known}/{pm}", p[0], p[1], p[2], p[3], p[4], p[5]));
     }
-
-    // ---- deploy_main's line ----
-    fn ship(&self) -> Ship {
-        match parse(&self.get("deploy.ship", "")) {
-            None => Ship::idle(),
-            Some(o) => {
-                let ids = |k: &str| { let v = gstr(&o, k, ""); if v.is_empty() { vec![] } else { v.split(',').map(String::from).collect() } };
-                Ship { phase: gstr(&o, "phase", "idle").into(), commit: s(&o, "commit").into(), staged: s(&o, "staged").into(), live: s(&o, "live").into(), job: s(&o, "job").into(),
-                       askers: ids("askers"), next: ids("next"), more: gbool(&o, "more", false) }
-            }
-        }
-    }
-    fn ship_put(&mut self, sh: &Ship) {
-        let v = show(&json!({"phase": sh.phase, "commit": sh.commit, "staged": sh.staged, "live": sh.live, "job": sh.job,
-                             "askers": sh.askers.join(","), "next": sh.next.join(","), "more": sh.more}));
-        self.set("deploy.ship", &v);
-    }
-    fn deploy_asked(&mut self, by: &str, cover: &str) { let sh = self.ship().asked(by, cover); self.ship_put(&sh); }
-    fn deploy_built(&mut self, commit: &str, state: &str, detail: &str) { let sh = self.ship().built(commit, state, detail); self.ship_put(&sh); }
 }
 
 /// Tok.day: the UTC day of a moment, "2026-10-15" (H. Hinnant's civil_from_days)
@@ -144,40 +125,6 @@ fn day_of(at: u64) -> String {
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = yoe + era * 400 + if m <= 2 { 1 } else { 0 };
     format!("{y}-{m:02}-{d:02}")
-}
-
-struct Ship { phase: String, commit: String, staged: String, live: String, job: String, askers: Vec<String>, next: Vec<String>, more: bool }
-fn add_once(v: &mut Vec<String>, x: &str) { if !v.iter().any(|y| y == x) { v.push(x.into()); } }
-impl Ship {
-    fn idle() -> Ship { Ship { phase: "idle".into(), commit: String::new(), staged: String::new(), live: String::new(), job: String::new(), askers: vec![], next: vec![], more: false } }
-    fn busy(&self) -> bool { self.phase == "asked" || self.phase == "building" }
-    /// Ship.asked: covered by a build, a request joins those told at its end; uncovered during a build it waits for the one follow-up
-    fn asked(mut self, by: &str, cover: &str) -> Ship {
-        match cover {
-            "building" => add_once(&mut self.askers, by),
-            "staged" | "live" => {}
-            _ => if self.busy() { add_once(&mut self.next, by); self.more = true; } else { add_once(&mut self.askers, by); },
-        }
-        self
-    }
-    fn built(mut self, commit: &str, state: &str, detail: &str) -> Ship {
-        match state {
-            "building" => { self.phase = "building".into(); self.commit = commit.into(); self.job.clear(); self }
-            "pid" => { self.job = detail.into(); self }
-            "live" => {
-                let busy = self.busy();
-                if self.staged == commit { self.staged.clear(); }
-                self.live = commit.into();
-                if !busy { self.phase = "live".into(); self.commit = commit.into(); self.job.clear(); }
-                self
-            }
-            _ => {
-                let staged = if state == "staged" { commit.to_string() } else { self.staged.clone() };
-                if self.more { Ship { phase: "asked".into(), commit: commit.into(), staged, live: self.live, job: String::new(), askers: self.next, next: vec![], more: false } }
-                else { Ship { phase: if state == "skipped" { "idle".into() } else { state.into() }, commit: commit.into(), staged, live: self.live, job: String::new(), askers: vec![], next: vec![], more: false } }
-            }
-        }
-    }
 }
 
 #[cfg(test)]
@@ -210,11 +157,9 @@ mod tests {
         assert_eq!(st.settings["lock.merge"], r#"{"holder":{"id":"a","kind":"thread","thread":"","note":"","since":0,"lease":0},"waiters":[],"ready":true}"#);
         assert_eq!(st.settings["locks.names"], "merge");
     }
-    #[test] fn ship_follow_up_and_staging() {
-        // rust ship_follow_up_and_staging
-        let st = fold_all(&[ev(json!({"$":"DeployAsked","by":"a","note":"","commit":"","cover":"","at":1})), ev(json!({"$":"DeployBuilt","commit":"c1","state":"building","version":"","detail":"","at":2})),
-                            ev(json!({"$":"DeployAsked","by":"b","note":"","commit":"","cover":"","at":3})), ev(json!({"$":"DeployBuilt","commit":"c1","state":"staged","version":"","detail":"","at":4}))]);
-        assert_eq!(st.settings["deploy.ship"], r#"{"phase":"asked","commit":"c1","staged":"c1","live":"","job":"","askers":"b","next":"","more":false}"#);
+    #[test] fn old_deploy_events_count_and_set_nothing() {
+        let st = fold_all(&[ev(json!({"$":"DeployAsked","by":"a","note":"","commit":"","cover":"","at":1})), ev(json!({"$":"DeployBuilt","commit":"c1","state":"staged","version":"","detail":"","at":2}))]);
+        assert_eq!(st.seq, 2); assert!(!st.settings.contains_key("deploy.ship"), "the updater and the guard move builds now");
     }
     #[test] fn reminded_files_an_act_under_its_thread() {
         // rust reminded_files_an_act_under_its_thread

@@ -1,168 +1,66 @@
-# Safe deploy and restart
+# Updating and restarting a hub
 
-> Paths under `src/` below (`src/core`, `src/server`, `src/web`, `src/mobile`, `src/app`) name the Bend JS tree, removed from this checkout (tag `main-bend-final`). Where the current Rust code for each is, is unverified; look under `native/host/src/` and `native/gpui/`.
+A hub moves to a new build in one way only: its updater (`native/host/src/update/`) finds and stages a signed release, and the guard (`native/guard`, the `backplane` program) swaps to it, checks it, and goes back when it fails. The Bend hub's `deploy_main` / `deploy_restart` path (build origin/main in place, the `deploy.ship` and `deploy.wait` settings) is gone: old logs' `DeployAsked` and `DeployBuilt` events still fold, and set nothing (`state/fam.rs`).
 
-> **What the Rust hub has today (read from `native/host/src`):** only the bookkeeping. `state/fam.rs` folds the `DeployAsked` and `DeployBuilt` events into the setting `deploy.ship` (phase, commit, staged, live, askers); the `deploy_restart` and `deploy_main` tool names are known to the mail charter's risk list (`bots/mail/charter.rs`) and to the copy gate (`settings/copy_gate.rs`, which blocks `deploy.restart`, `deploy.cancel`, `deploy.status`, `deploy.main` and `deploy_restart` in a copy). I found **no code** that runs the build job, stages a package, swaps `install_into`-style, restarts in place, or updates itself, and no CEF host code in the hub. So the build/stage/swap/restart steps below describe the removed Bend hub and are not current behaviour. The commit stamp is real: `--commit` or `BACKPLANE_COMMIT` (`main.rs`, default `unknown`); `scripts/dev-reload.sh` passes it and `scripts/fresh.sh` can. Auto-update is off with `BACKPLANE_NO_UPDATE=1` (set by `scripts/fresh.sh` and the farsync tests); I did not find the code that reads it.
+Dev machines do not use this: `scripts/dev-build.sh` builds `native/host` and `native/gpui` and `scripts/dev-cut.sh` publishes them; `scripts/fresh.sh` sets `BACKPLANE_NO_UPDATE=1`.
 
-A restart must not interrupt a running turn. Batch delivery once per qualified
-milestone, then wait for all live turns, tool calls and build locks to clear.
-The actual server handoff adds this stronger idle-turn guard to the existing
-tool/build-lock contract. Agent adoption remains a recovery mechanism, not
-permission to cut a turn.
+## Who updates itself
 
-## Asking
+Only a hub the guard runs from a builds folder (`BACKPLANE_BUILDS`: `builds/<tag>/`, `CURRENT`, `BAD`, `.pins/`). Otherwise the updater says so and does nothing:
 
-- An agent: the `deploy_restart {stage?, note?}` MCP tool. It answers at once
-  ("scheduled") and the agent ends its turn; after the restart it is woken by
-  one message, "Backplane restarted for a deploy ...: <from> → <to>."
-  `deploy_status` and `deploy_cancel` read and cancel it.
-- A client (the person): the requests `deploy.restart {stage?, note?}`,
-  `deploy.cancel` and `deploy.status`.
-- `scripts/dev.sh install [h@host]` (script removed with the Bend tree; nothing in the Rust hub replaces it. The builds now are `scripts/dev-build.sh`, which builds `native/host` and `native/gpui` and publishes them with `scripts/dev-cut.sh`): built, staged the package and posted
-  `deploy_restart` to the running hub's loopback MCP route
-  (`POST /mcp/deploy`; "deploy" is no thread, so the person is the requester).
-  It prints "deploy queued" and ends. With no hub answering, or with
-  `--force`, it installs and restarts now, as before.
+| state | when |
+|---|---|
+| `package` | no `BACKPLANE_BUILDS`: a package install or a plain folder; its package manager updates it |
+| `off` | `BACKPLANE_NO_UPDATE=1`, or a copy of a real log (`copy::on`) |
+| `idle` / `checking` / `downloading` / `waiting` / `installing` / `failed` | a managed hub |
 
-`stage` is an absolute folder holding the package (`backplane`,
-`backplane-serve`, `web/`, ...). Empty means the files are already in place.
+The feed is GitHub Releases (`run::FEED`); only the environment (`BACKPLANE_UPDATE_FEED`) can change it, never a setting, because any paired client can write settings. The channel is the setting `update.channel`: `stable` or `beta` (0.14's stored `nightly` reads as `beta`).
 
-## How it waits
+## What triggers an update
 
-The request is the private setting `deploy.wait`, one JSON line (`by`, `note`,
-`stage`, `from`, `since`, `noted`, `locked`, `open`). Each tick, while it waits:
+- The hourly check (`Hourly`, `svc::due`), on every managed hub.
+- `update.check` from any client: desktop Settings > Network's Check now, either phone's Settings > Updates (`update.check` over data/1), or a linked machine over the link. It looks now and installs what it finds.
+- `app.update`: the same, as an explicit wish to install.
 
-1. The hub's open tool calls, in memory only (core/deploy `Open.*`; the
-   server's `Bn.tools`). A call opens where its Act is posted (`ToolOpen`:
-   Claude's `tool_use` block, Codex's `item.started`, Grok's/Muse's logged
-   call) and shuts at its result (`ToolShut`: the `tool_result` block, Codex's
-   `item.completed`, ACP's `tool.done`); a turn's end, an archive, a delete or a
-   stopped agent shuts every call of the thread (`ToolsGone`). None of it is in
-   the log, and after a restart the list is empty (the old processes are
-   gone). A thread between two calls may have none open but is still running, so
-   its turn continues to hold the actual server handoff. The requester's own `deploy_*` call is never opened;
-   a subagent's Agent/Task call stays open until its result. The wait line
-   records what was open at the last look (`open`) for the plane row,
-   `deploy_status` and the 30-minute note.
-2. With none, the server asks the locks (`flock -n` on each path of
-   `BACKPLANE_DEPLOY_LOCKS`, colon-separated, default the two build locks;
-   without flock(1) they count as free) and answers `Deploy.check.idle`, using the authoritative current turn state.
-3. Clear: `deploy.done` is written (the same line plus the threads cut) and
-   `deploy.wait` cleared in one step, then the server moves the staged package
-   into the running install's folder as the removed `scripts/dev.sh`'s `install_into` did (the Rust hub has no such code)
-   (renames; the old `web/` is kept as `web.old`) and restarts the hub in
-   place (the updater's `Upgrade.restart`, same PID). A failed swap clears
-   `deploy.done` and tells the requester; nothing restarts.
-4. A turn or call that starts during the asynchronous swap is checked again
-   at the final `Reexec` boundary. One bounded private request is held until
-   normal turn-completion or tick processing observes all idle. No agent is
-   stopped, resumed or signalled by this hold.
-5. After 30 minutes the requester is told once what still blocks.
+Every client gets the same answer, `update.status` → `{current, version, channel, state, note, checked, line, canCheck}`, where `line` is the sentence to show (`present::settings::update_line`). The clients draw it and decide nothing. Phones set the channel with `update.channel {channel}` (docs/PHONE-DATA.md).
 
-The Status plane shows a "Restart pending" row in Running while one waits
-("waiting for 2 tool calls and the build lock · Cancel"; a click cancels:
-action `deploy-cancel`), and Settings' update line says the same.
+**A running turn always holds an install.** When something newer is found while any thread's turn is `running`, the state is `waiting` ("installs when running turns finish") and the install goes ahead at the next pass with no turn running. Whoever asked, from wherever, nothing cuts a turn.
 
-## After
+## Finding and staging (`update/run.rs`, `update/rel.rs`)
 
-At start `Deploy.after` reads `deploy.done`: it clears it and tells the
-requester once. A thread the restart cut gets the words appended to its
-continue message instead (`Deploy.suffix` in `Carry.k`), so no thread gets two.
+In this order, and each step must pass before the next one starts:
 
-Laws `deploy_*`, `tool_*`; tests `test/deploy_test`, `bun test/tools/deploy_e2e.ts`.
+1. Fetch the release list. A release counts only when it carries all three signed files (`manifest.json`, `.sig`, `.keyid`), which the release workflow uploads last. Drafts and tags in the guard's `BAD` are skipped, so a build that failed here is never offered again; the next higher tag is.
+2. `rel::offer`: the newest tag on the channel that is newer than this hub's version. Tags have exactly the shape `vX.Y.Z`, `vX.Y.Z-beta.N` or `vX.Y.Z-nightly.YYYYMMDD.N`, because a tag becomes a folder name.
+3. **Signature.** `manifest.json`'s bytes are checked against `manifest.json.sig` (ed25519), under the key `manifest.json.keyid` names, before they are parsed. The trusted keys are compiled in (`BACKPLANE_UPDATE_KEYS` at build time, `id:hex,...`). A hub built without keys trusts nothing and never updates.
+4. The manifest names this machine's asset (`linux-x64`, `linux-arm64`, `darwin-arm64`, `windows-x64`) with its size and sha256 (2 GiB at most).
+5. Fetch the archive into scratch beside `builds/`, check its size and sha256, unpack it, and refuse it when there is no runnable `backplane-hub` or when anything in it is a link.
+6. Write `EXPECT` = `{"version","commit"}` from the verified manifest. This is written by the updater after the tree check, so the archive cannot choose what its build is held to.
+7. One rename makes `builds/<tag>`, whole or not at all. Scratch is removed however the steps end.
+8. Write `update/pending` (`<tag>`) and the guard request `guard/request` = `{action:"update", build:<tag>, from:"local"}` (beside it, then renamed). A request already waiting, perhaps a restart the person asked for, is refused, never replaced.
 
-## Deploying origin/main
+The request is `from:"local"` because it is the hub's own. A phone or another machine asks the hub (`app.update`, `update.check`), never the guard's `hub.control update` directly: the guard refuses a remote switch to a build that has not yet run here with the control route, since going there could lock the asker out.
 
-Restarting into a new build is the hub's job, not any one agent's. The
-`deploy_main {note?}` MCP tool (and `POST /mcp/deploy` from loopback, which is
-the person) asks this hub to build origin/main and restart into it through
-the safe path above. Pure logic: `src/core/ship`; steps: hub's
-`Ship.*`; IO: server's `ShipJob.*`.
+## Probation and the health check (guard)
 
-Settings (all off or empty by default):
+The guard runs the new build on probation, with the build it left kept as the way back.
 
-- `deploy.repo`: the source checkout to build from. Unset, the tool answers
-  "not configured" and nothing runs.
-- `deploy.wrap`: a command prefix the build runs under, e.g.
-  `~/Documents/i2cjak/bp-coord/bin/bp-admit.sh --mem 14 --cores 4 -- systemd-run --user --scope -q -p MemoryMax=16G --`.
-  Resource policy lives there, never in the hub. Empty means
-  `systemd-run --user --scope -q --` when the user's systemd answers, else
-  nothing.
-- `deploy.follow`: `on` makes the hub read origin/main on every minute's
-  tick (when nothing is under way) and deploy when it moved: for a
-  development install that tracks main. Merges coalesce only while a build
-  runs: the first tick after it takes the newest main (law
-  `ship_follow_every_minute`). Each deploy restarts the hub (about two
-  minutes of it not answering while it replays its log). Off, it does no
-  work at all.
+- It probes `GET /healthz`. A hub that is `starting` or still `folding` history is not yet proven; one that stops answering for `misses` probes in a row, or stalls during its start, is killed and counts as failed.
+- **Identity.** On the first well probe the guard compares the hub's `version` and `commit` with `builds/<tag>/EXPECT`. They are the same values `/hello` reports (`{"backplane": version, "commit": ...}` in CBOR); `/healthz` carries them in JSON for loopback callers. A mismatch is a failure: "answered as v/c, expected v/c". It usually means the old hub still holds the port, or the archive held the wrong binary. With no `EXPECT` there is no comparison. The commit is compiled into the hub (`option_env!("BACKPLANE_COMMIT")`); the runtime environment is only a dev fallback and the guard does not set it, so the comparison proves something.
+- **Proven**: the identity matches, then the hub stays well for `stable` seconds after its folds are over. Then the guard adds the build to `guard/good`, publishes it as `CURRENT` and pins it with its predecessor (`.pins/`), so pruning keeps both.
 
-A main-track install whose desktop app requires an exact release version
-(the 0.12 Electron app checks the service reports exactly `0.12.0`) builds
-the service alone, stamped with that release, by putting the environment in
-`deploy.wrap`, e.g.
-`env BACKPLANE_DEV_SERVICE_ONLY=1 BACKPLANE_VERSION_STAMP=0.12.0 ~/Documents/i2cjak/bp-coord/bin/bp-admit.sh --mem 14 --cores 4 --`.
-Every build stamps the commit it was made from beside the version
-(`BACKPLANE_COMMIT_STAMP`, the removed `scripts/dev.sh` set it; now `--commit` or the `BACKPLANE_COMMIT` environment variable), and `GET /hello`
-answers it as `"commit"`, so builds with the same version are told apart.
+The identity check and the compiled-in commit are being added on the hub-resilience branch; until they land, probation proves only that the new build answers and stays well.
 
-What happens:
+## When and how it rolls back
 
-1. The server fetches origin/main in `deploy.repo` (off the hub loop) and asks
-   git which of the commits being built, staged (while its deploy still
-   waits) and live contain it (`merge-base --is-ancestor`).
-2. The tool answers at once: **skipped** when one of them covers it (the answer
-   names the commit and whether it is building, staged or live), **queued**
-   otherwise. One build runs at a time. Requests that a running build does
-   not cover make one follow-up build, of the newest origin/main then, however
-   many came.
-3. The build is a job of its own under `<home>/deploy/<commit>/`: a temporary
-   detached worktree of the repo (`wt`, removed after), `scripts/dev.sh stage
-   <dir>/pkg` (script removed; the build now is `scripts/dev-build.sh`; the Rust hub has no deploy job that runs it), the log `out`, the exit status `code`. It is
-   started with `setsid`, inside `deploy.wrap` (or the default scope), so a hub
-   OOM or the restart it leads to never cuts it. Its pid and start time are
-   recorded (`DeployBuilt` state `pid`). Stale worktrees of ended builds are
-   removed at the next launch.
-4. The hub looks at the job every 5 s. Exit 0 with a package: staged, and the
-   hub asks for the safe restart itself (`deploy.wait`, note
-   `deploy_main <commit>`, by the person). A deploy does not wait for a
-   deploy_main build: the build runs in its own scope with `BP_BUILD_LOCKED=1`
-   (it holds no build lock), so a restart never cuts it, and the next hub
-   re-adopts it (step 6). Anything else: failed, with the log's last lines.
-5. Everyone who asked since the last report is told once, with the commit,
-   the version and the result: a thread the way watched work reaches it (it
-   wakes, or the note waits behind its turn); the person with an alert
-   (record `alert.deploy`). Skipped requests covered by the build under way
-   are told at its end.
-6. At start, a build that was under way is watched again: its job outlived the
-   hub, and its exit status is read when it ends. It is "lost" (failed) only
-   when its process is gone and it left no exit status. A follow-up still
-   wanted is asked for again. The restart a staged build asked for makes it
-   live.
+- **During probation, automatically.** The first failure goes straight back to the previous build, with no retries (`plan::next_on`, `probation`). A failure is a crash or panic, a stalled start, missed health checks, or an identity mismatch. The guard writes the tag to `BAD` with the reason, sets checkpoints aside (never deletes them), starts the previous build, and records an incident.
+- After the restart, the hub works out how its update ended (`run::outcome`): `Updated to <tag>.` (it then prunes old builds), or `failed` with "<tag> failed its health check, so this build stayed: <why>". Every client shows that line.
+- **After probation**, a crash follows the normal ladder: the same build again 3 times within 10 minutes, then the newest good build, then safe mode, then rescue. Exit 75 (port or home lock held, disk full) and exit 78 (refused: a copy gate, a bad flag) are the machine's fault and never mark a build bad.
+- **By hand**: `backplane hub rollback [--now]` at the machine, or `POST /hub/control {action:"rollback"}` from a phone or a linked machine with the hub's credential. Either marks the running build bad and goes to the newest good build that is not bad. From a remote client the target must have the control route, so the asker can still reach the hub afterwards. Remote requests are limited to 3 in 5 minutes, and a remote client can never stop the hub. `backplane hub use BUILD` takes a bad mark off and runs that build.
+- **Rescue**: when nothing starts, the guard itself answers on the hub's port. `/healthz` returns 503 `down`, and `/hub/status` and `/hub/control` take the same credentials as the hub, so a phone can still restart or roll back.
 
-State: the events `DeployAsked{by, note, commit, cover}` and
-`DeployBuilt{commit, state, version, detail}` (states building, pid, staged,
-failed, skipped, live), folded into the setting `deploy.ship`.
-`deploy_status` (and the `deploy.status` request) answer it under `main`.
+## Checking an update from far away
 
-Laws `ship_*`; tests `test/ship_test`, `bun test/tools/deploy_main_e2e.ts BINARY`.
+The client that asked keeps polling `/hello`. The update is done when it answers with the new version and commit. When it still answers with the old pair after the guard's boot and stable time, and `update.status` says `failed` with the tag, the update was rolled back. `/hub/status` (paired) shows the guard's view: build, commit, good, bad, last request and recent incidents.
 
-Optional CEF runtimes use the same staged deployment. `scripts/dev.sh stage` (removed; no CEF staging code in the Rust hub)
-only builds/stages a CEF host if this machine already has the optional runtime;
-Chrome-only installations do not fetch or install CEF. The pinned CEF libraries
-are reused and checked against the distribution used to build the small host.
-A staged `browser-runtime/manifest.json` covers the host, helper and all runtime
-files by SHA256, with a content-derived identity. The normal swap validates the
-payload before moving the app/web files, copies it into an immutable
-`browser-runtimes/<identity>/`, and promotes one `browser-current` symlink for
-the matched helper and sibling `cef` runtime. Previous bundles remain available
-under `browser-previous`, including a snapshot of a pre-manifest installation;
-the original runtime cache is untouched. The isolated lifecycle tests are
-`uv run --no-project python test/tools/cef_runtime_test.py`. An incompatible
-existing directory at an alias path is rejected before activation.
-
-This support must itself be live before a later deployment can activate a new
-CEF host through it. An older hub's fixed-file swap cannot install optional
-payloads. Bootstrap uses two separate normal hub deployments: install support,
-verify that commit live, then deploy the matched helper/host change. Do not
-claim the host fix live just because the helper or staging build is newer.
-Explicit `BACKPLANE_CEF` overrides still select the user's supplied runtime.
+Tests: `update::` (`cargo test`, no network), the guard's `plan` and `run` tests, and `test/guard/faults.sh` on a private home and port (the guard and its tests come with the hub-resilience branch).

@@ -33,7 +33,8 @@ pub fn listing(body: &[u8]) -> Result<Vec<Listed>, String> {
 /// What this hub is and what it trusts. `bad`: builds the guard has marked bad here. They stay the newest release, so without this a failed update would be offered again at the next check, for ever.
 pub struct Ask<'a> { pub current: &'a str, pub channel: &'a str, pub target: &'a str, pub keys: &'a [(String, [u8; 32])], pub bad: &'a [String] }
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Found { pub tag: String, pub asset: Asset, pub url: String }
+/// `version` and `commit`: what the signed manifest says this build is. The guard holds a build on probation to them (`EXPECT`): a hub that answers as anything else has failed.
+pub struct Found { pub tag: String, pub asset: Asset, pub url: String, pub version: String, pub commit: String }
 
 /// The release to install, verified, or None when there is nothing newer. `dir` is scratch for the signed files.
 pub fn find(ask: &Ask, list: &[Listed], dir: &Path, get: Get) -> Result<Option<Found>, String> {
@@ -49,7 +50,7 @@ pub fn find(ask: &Ask, list: &[Listed], dir: &Path, get: Get) -> Result<Option<F
     let m = rel::parse(&body)?;
     let a = rel::pick(&m, &r.tag, ask.channel, ask.target)?.clone();
     let url = l.urls.get(&a.name).ok_or("the release does not carry the file its manifest names")?.clone();
-    Ok(Some(Found { tag: r.tag.clone(), asset: a, url }))
+    Ok(Some(Found { tag: r.tag.clone(), asset: a, url, version: m.version.clone(), commit: m.commit.clone() }))
 }
 
 fn sha256(p: &Path) -> Result<String, String> {
@@ -85,6 +86,8 @@ pub fn stage(f: &Found, builds: &Path, get: Get, unpack: Unpack) -> Result<PathB
         if sha256(&a)? != f.asset.sha256 { return Err("the download's checksum does not match".to_string()) }
         let x = work.join("build"); fs::create_dir(&x).map_err(|e| e.to_string())?;
         unpack(&a, &x)?; check_tree(&x)?;
+        // written after the tree check, by us, from the verified manifest: an archive cannot choose what its build is held to
+        fs::write(x.join("EXPECT"), json!({"version":f.version,"commit":f.commit}).to_string()).map_err(|e| e.to_string())?;
         fs::rename(&x, &dest).map_err(|e| e.to_string())
     })();
     let _ = fs::remove_dir_all(&work);
@@ -201,6 +204,8 @@ mod tests {
         let r = Rig::new("stage"); let mut f = Feed::new(); let x = found(&mut f, &r, b"archive");
         let d = stage(&x, &r.d.join("b"), &|u, o, m| f.get(u, o, m), &good_tree).unwrap();
         assert!(d.join("backplane-hub").is_file()); assert_eq!(left(&r), vec!["v0.16.0"], "no scratch left");
+        let e: Value = serde_json::from_str(&fs::read_to_string(d.join("EXPECT")).unwrap()).unwrap();
+        assert_eq!((e["version"].as_str(), e["commit"].as_str()), (Some("0.16.0"), Some("c")), "the guard's probation check, from the signed manifest");
     }
     #[test] fn a_corrupt_archive_is_never_unpacked_and_leaves_nothing() {
         let r = Rig::new("corrupt"); let mut f = Feed::new(); let x = found(&mut f, &r, b"archive"); f.files.insert(x.url.clone(), b"ARCHIVE".to_vec());
