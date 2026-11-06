@@ -81,7 +81,7 @@ elif [ -n "${GPUI_LONG:-}" ]; then cat > $R/script.json <<JSON
 [{"click":"thread:t1"},{"wait":14000}]
 JSON
 elif [ -n "${GPUI_THREADS:-}" ]; then cat > $R/script.json <<JSON
-[{"click":"thread:t1"},{"wait":1500},{"click":"thread-more"},{"wait":1200},{"click":"thread-more"},{"wait":500},{"click":"tool-0"},{"wait":1500},{"action":["row-rename","t1"]},{"wait":1500},{"field":["title","alpha renamed"]},{"wait":300},{"click":"rename-yes"},{"wait":2000},{"action":["row-rename","t2"]},{"wait":1500},{"click":"rename-no"},{"wait":1500},{"action":["row-delete","t3"]},{"wait":1500},{"click":"delete-no"},{"wait":1500},{"action":["row-delete","t3"]},{"wait":1500},{"click":"delete-yes"},{"wait":2500},{"action":["row-delete","t1"]},{"wait":1500},{"click":"delete-yes"},{"wait":2500}]
+[{"click":"thread:t1"},{"wait":1500},{"click":"tool-0"},{"wait":1500},{"action":["row-rename","t1"]},{"wait":1500},{"field":["title","alpha renamed"]},{"wait":300},{"click":"rename-yes"},{"wait":2000},{"action":["row-rename","t2"]},{"wait":1500},{"click":"rename-no"},{"wait":1500},{"action":["row-delete","t3"]},{"wait":1500},{"click":"delete-no"},{"wait":1500},{"action":["row-delete","t3"]},{"wait":1500},{"click":"delete-yes"},{"wait":2500},{"action":["row-delete","t1"]},{"wait":1500},{"click":"delete-yes"},{"wait":2500}]
 JSON
 elif [ -n "${GPUI_DAILY:-}" ]; then cat > $R/script.json <<JSON
 [{"select":0},{"wait":1500},{"popup":"/"},{"wait":800},{"type":" "},{"type":"x"},{"wait":300},{"read":"composer"},{"wait":500},{"type":"approve:one"},{"wait":300},{"send":true},{"wait":5000},{"wait":100},{"click":"ask:0:0"},{"wait":4000},{"click":"ui:Settings"},{"wait":2500},{"click":"ui:Settings"},{"wait":1500},{"click":"project:p1"},{"wait":2500}]
