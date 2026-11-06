@@ -1,5 +1,7 @@
 # Automatic settling
 
+> Paths under `src/` below (`src/core`, `src/server`, `src/web`, `src/mobile`, `src/app`) name the Bend JS tree, removed from this checkout (tag `main-bend-final`). Where the current Rust code for each is, is unverified; look under `native/host/src/` and `native/gpui/`.
+
 The hub settles clean, completed, quiet threads automatically. Settlement
 keeps history and removes the finished green status; new messages or a new
 turn reopen the thread. Failed and interrupted turns stay visible until a

@@ -1,5 +1,7 @@
 # Windows
 
+> Paths under `src/` below (`src/core`, `src/server`, `src/web`, `src/mobile`, `src/app`) name the Bend JS tree, removed from this checkout (tag `main-bend-final`). Where the current Rust code for each is, is unverified; look under `native/host/src/` and `native/gpui/`.
+
 On Windows, Backplane is the Electron desktop app over `backplane-serve.exe`,
 the hub as a JS service on Bun ([the JS service](js-service.md)). There is no
 C build for Windows and no Cygwin compiler step: the hub is cross-built from

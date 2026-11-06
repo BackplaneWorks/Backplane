@@ -1,5 +1,7 @@
 # GPUI viewers vs the web/viewers
 
+> Paths under `src/` below (`src/core`, `src/server`, `src/web`, `src/mobile`, `src/app`) name the Bend JS tree, removed from this checkout (tag `main-bend-final`). Where the current Rust code for each is, is unverified; look under `native/host/src/` and `native/gpui/`.
+
 Audit of `native/gpui` (client) and `native/host/src/kicad` (hub) against the main-branch web viewers.
 The hub already ships the web's viewer model to a native client as `thread.viewer` (`src/mobile/view`
 `View.json`: `open`, `key`, `choices`, `sheets`, `layerList`, `off/dim/lift`, `card`, `picked`, `hist`, `mech`,

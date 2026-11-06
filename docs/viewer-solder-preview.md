@@ -1,5 +1,7 @@
 # Illustrative solder preview
 
+> Paths under `src/` below (`src/core`, `src/server`, `src/web`, `src/mobile`, `src/app`) name the Bend JS tree, removed from this checkout (tag `main-bend-final`). Where the current Rust code for each is, is unverified; look under `native/host/src/` and `native/gpui/`.
+
 `src/web/solid-solder.js` is an optional, reversible toe-fillet illustration. It does not recover manufacturing joints from CAD. It leaves saved files, original GLB objects, authored materials and normals unchanged. The group starts hidden; the UI must say **Illustrative solder** and must retain the explicit estimated-shape limitation.
 
 ## Renderer contract

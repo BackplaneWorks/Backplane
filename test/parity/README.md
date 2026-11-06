@@ -1,5 +1,7 @@
 # Parity harness (M0)
 
+> Paths under `src/` below (`src/core`, `src/server`, `src/web`, `src/mobile`, `src/app`) name the Bend JS tree, removed from this checkout (tag `main-bend-final`). Where the current Rust code for each is, is unverified; look under `native/host/src/` and `native/gpui/`.
+
 Records real client sessions against a hub and replays them against any hub on a port, comparing frames. Renderer `mobile` only (phones and GPUI); the web page is not a target.
 Fixtures and stand-in agents only; every hub is checked from `/proc/<pid>/environ` before its first turn (`test/slim/check_agents.sh`).
 

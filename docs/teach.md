@@ -1,5 +1,7 @@
 # Teaching bots browser tasks
 
+> Paths under `src/` below (`src/core`, `src/server`, `src/web`, `src/mobile`, `src/app`) name the Bend JS tree, removed from this checkout (tag `main-bend-final`). Where the current Rust code for each is, is unverified; look under `native/host/src/` and `native/gpui/`.
+
 A bot's browser (the `preview_*` tools, `tools/browser/`, one page per bot)
 can learn tasks: the person shows one in the bot's Browser tab, or tells it
 in chat, and the bot keeps it as a **task skill** it can run again, on

@@ -1,5 +1,7 @@
 # The uberbot
 
+> Paths under `src/` below (`src/core`, `src/server`, `src/web`, `src/mobile`, `src/app`) name the Bend JS tree, removed from this checkout (tag `main-bend-final`). Where the current Rust code for each is, is unverified; look under `native/host/src/` and `native/gpui/`.
+
 One bot the person makes their main interface across all projects, machines and bots. Nothing promotes a bot by itself.
 
 Built now (increment 1a, core only; the clients' screens come next):

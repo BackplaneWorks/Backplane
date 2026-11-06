@@ -1,5 +1,7 @@
 # Project home
 
+> Paths under `src/` below (`src/core`, `src/server`, `src/web`, `src/mobile`, `src/app`) name the Bend JS tree, removed from this checkout (tag `main-bend-final`). Where the current Rust code for each is, is unverified; look under `native/host/src/` and `native/gpui/`.
+
 Click a project name to open its home. The adjacent chevron expands its
 threads, the badge edits its appearance, and + creates an empty thread.
 Typing in the home composer starts a conversation in that project with that
