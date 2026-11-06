@@ -290,10 +290,14 @@ mod tests {
         let _ = std::fs::remove_dir_all(h);
     }
     #[tokio::test] async fn tailnet_a_covering_main_listener_adds_no_second_one() {
-        let (hub, p, routes, h) = node("cover").await; let port = free();
+        // The test holds the port throughout: a second listener could not bind it (start would answer Unavailable, not the covered state),
+        // and no other test can take it in between. (It was freed and probed with a connect, which a busy machine's next test could answer.)
+        let (hub, p, routes, h) = node("cover").await;
+        let held = std::net::TcpListener::bind("127.0.0.1:0").unwrap(); let port = held.local_addr().unwrap().port();
         let ts = Arc::new(Fake { ip: "127.0.0.1".into(), whois: [("127.0.0.1".to_string(), who("me@x.com"))].into(), status: String::new() });
-        assert_eq!(start(hub, ts, p, routes, "0.0.0.0", port, "tok").await, State::Reachable { link: String::new() });
-        assert!(TcpStream::connect(("127.0.0.1", port)).await.is_err(), "nothing listens: the main listener covers the address");
+        assert_eq!(start(hub, ts, p.clone(), routes, "0.0.0.0", port, "tok").await, State::Reachable { link: String::new() }, "the main listener covers the address: no bind, no link");
+        assert!(p.own_hosts_for_test().is_empty(), "no owner authorities: they are set only once a tailnet listener is bound");
+        drop(held);
         let _ = std::fs::remove_dir_all(h);
     }
     #[tokio::test] async fn tailnet_own_authorities_follow_the_listener() {
