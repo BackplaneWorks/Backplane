@@ -76,6 +76,7 @@ impl Agents {
         let no_dir = cli.dir().is_none();
         let ag = Arc::new(Agents { carry_gone: Default::default(), hub: hub.clone(), cli, host, world: Mutex::new(crate::ckpt::take("agents", &hub.store, || World::load(&hub.store)).unwrap_or_default()), actors: StdMutex::new(HashMap::new()), stats: Stats::default(), n: AtomicU64::new(0),
             mailroom: Default::default(), accounts: std::sync::OnceLock::new(), cut: StdMutex::new(vec![]), driver_asks: StdMutex::new(HashMap::new()), stopped_by: StdMutex::new(HashMap::new()), tool_sets: StdMutex::new(vec![]), works: StdMutex::new(HashMap::new()), copy_point: StdMutex::new((vec![], vec![])), work_lock: tokio::sync::Mutex::new(()), mcp: std::sync::OnceLock::new(), gens: StdMutex::new(HashMap::new()), parked: StdMutex::new(HashMap::new()) });
+        ag.world.lock().await.home = hub.cfg.home.to_string_lossy().into_owned();
         // reap BEFORE the owner mark is set: marked children of this process (another test's, in a shared test binary) must not be taken for a dead hub's
         if no_dir && !crate::copy::on() { tokio::task::spawn_blocking(|| { let _ = proc::search_dirs(); }); } // the login shell's PATH is read now, off the workers, not inside the person's first send
         crate::startup::mark("agents: world loaded");

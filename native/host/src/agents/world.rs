@@ -26,7 +26,7 @@ impl Tk { pub fn terminal(&self) -> bool { matches!(self.state.as_str(), "done" 
 pub struct Ask { pub thread: String, pub kind: String, pub tool: String, pub detail: String, pub options: String }
 
 #[derive(Default, serde::Serialize, serde::Deserialize)]
-pub struct World { pub bots: HashMap<String, (String, String, bool)>, pub rooms: HashMap<String, (String, bool)>, pub bot_of: HashMap<String, String>, pub said_to: HashMap<String, std::collections::HashSet<String>>, pub reviews: HashMap<String, Vec<(String, String, u64)>>, pub queued: HashMap<String, Vec<String>>, pub parents: HashMap<String, String>, pub td_msgs: std::collections::HashSet<String>, pub launched: HashMap<String, (String, bool)>, pub projects: HashMap<String, (String, bool)>, pub tasks: HashMap<String, Tk>, pub deadlines: std::collections::HashSet<String>, pub asks: HashMap<String, Ask>, pub sessions: std::collections::HashSet<(String, String)>, pub threads: HashMap<String, T>, pub roots: HashMap<String, String>, pub st: HashMap<String, String>, seen: usize }
+pub struct World { pub home: String, pub bots: HashMap<String, (String, String, bool)>, pub rooms: HashMap<String, (String, bool)>, pub bot_of: HashMap<String, String>, pub said_to: HashMap<String, std::collections::HashSet<String>>, pub reviews: HashMap<String, Vec<(String, String, u64)>>, pub queued: HashMap<String, Vec<String>>, pub parents: HashMap<String, String>, pub td_msgs: std::collections::HashSet<String>, pub launched: HashMap<String, (String, bool)>, pub projects: HashMap<String, (String, bool)>, pub tasks: HashMap<String, Tk>, pub deadlines: std::collections::HashSet<String>, pub asks: HashMap<String, Ask>, pub sessions: std::collections::HashSet<(String, String)>, pub threads: HashMap<String, T>, pub roots: HashMap<String, String>, pub st: HashMap<String, String>, seen: usize }
 
 const KEYS: &[&str] = &["carry.wait.", "summary.", "rule.", "watch.", "thread.parent.", "bg.", "wait.", "work.timeout.seconds", "allowance.claude", "effort.", "buy.", "kicad.ipc", "order.enabled", "agent.lang", "tz.machine", "agent.thinking", "restart.continue", "tok.epoch", "tok.recount", "tok.basis.", "turn.speed.", "turn.models.", "limit.claude.", "ride.", "agy.", "session.", "launch.n."];
 fn tracked(k: &str) -> bool { KEYS.iter().any(|p| k == *p || (p.ends_with('.') && k.starts_with(p))) || k.starts_with("usage.") || k.starts_with("tok.key.") }
@@ -153,6 +153,8 @@ impl World {
     pub fn ready(&self, th: &str) -> bool { self.work(th).0 == 0 && !self.queue_waiting(th) && !self.tasks.values().any(|k| k.parent == th && !k.terminal()) }
     pub fn cwd(&self, th: &str) -> String {
         let Some(t) = self.threads.get(th) else { return String::new() };
+        // a bot's own thread works in `<home>/bots/<bot>`, whatever a WorktreeSet once said (never a folder made elsewhere)
+        if let Some(b) = self.bot_of.get(th) { if !self.home.is_empty() && crate::bots::rpc::safe_id(b) && self.bots.get(b).map_or(false, |x| x.1 == th) { let d = std::path::Path::new(&self.home).join("bots").join(b); let _ = std::fs::create_dir_all(&d); return d.to_string_lossy().into_owned() } }
         if !t.worktree.is_empty() { t.worktree.clone() } else { self.roots.get(&t.project).cloned().unwrap_or_default() }
     }
     /// Work.busy (without delegated tasks, which this module does not run): the thread's background and watched rows, ended ones included
@@ -223,4 +225,13 @@ mod tests {
         assert_eq!(w.cwd("t"), "/r"); assert!(w.running("t")); let c = w.cx("t"); assert_eq!((c.session.as_str(), c.used, c.window), ("S", 5, 9));
     }
     #[test] fn unread_event_kinds_are_skipped_without_parsing() { let mut w = World::default(); w.apply(r#"{"$":"RoomPosted","x":1}"#); w.apply("not json"); assert!(w.threads.is_empty()); }
+    #[test] fn a_bots_thread_always_works_in_the_homes_bots_folder() {
+        let home = std::env::temp_dir().join(format!("bp-botcwd-{}", std::process::id())); let _ = std::fs::remove_dir_all(&home);
+        let mut w = World::default(); w.home = home.to_string_lossy().into_owned();
+        w.apply(r#"{"$":"ThreadCreated","id":"t","project":"","title":"Bub","provider":"claude","model":"","worktree":"","at":1}"#);
+        w.apply(r#"{"$":"BotSet","id":"bub","name":"Bub","thread":"t","look":1,"persona":"","at":2}"#);
+        w.apply(r#"{"$":"WorktreeSet","id":"t","branch":"","worktree":"/elsewhere/lanes/bub","at":3}"#);
+        assert_eq!(w.cwd("t"), home.join("bots").join("bub").to_string_lossy()); assert!(home.join("bots/bub").is_dir());
+        let _ = std::fs::remove_dir_all(&home);
+    }
 }
