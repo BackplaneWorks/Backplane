@@ -23,6 +23,7 @@ pub fn thread_items(t: &Value, project: &str) -> Vec<Item> {
     for o in t["trail"].as_array().into_iter().flatten().flat_map(|x| x["options"].as_array().into_iter().flatten()) { v.push(item(&format!("Snooze {}", s(o, "label").to_lowercase()), "row-snooze", &s(o, "value"), false)); }
     if t["canChild"].as_bool().unwrap_or(true) { v.push(item("New subthread", "thread-child", &format!("{}|{}", raw(&qid), project), false)); }
     v.push(item("Rename", "row-rename", raw(&qid), false));
+    v.push(item("Regenerate title", "row-retitle", raw(&qid), false));
     v.push(item("Archive", "row-archive", &qid, false));
     v.push(item("Delete", "row-delete", &qid, true));
     v
@@ -75,7 +76,7 @@ mod tests {
         let t = j(r#"{"id":"http://h:1|t7","pinned":false,"canChild":true,"lead":[{"label":"Settle","action":"row-settle","value":"http://h:1|t7"}],"trail":[{"label":"Delete"},{"label":"Snooze","options":[{"label":"1 hour","value":"http://h:1|t7|1h"}]}]}"#);
         let it = thread_items(&t, "p1");
         let names: Vec<&str> = it.iter().map(|i| i.label.as_str()).collect();
-        assert_eq!(names, ["Pin", "Settle", "Snooze 1 hour", "New subthread", "Rename", "Archive", "Delete"]);
+        assert_eq!(names, ["Pin", "Settle", "Snooze 1 hour", "New subthread", "Rename", "Regenerate title", "Archive", "Delete"]);
         assert_eq!(it[3].value, "t7|p1"); assert_eq!(it[4].value, "t7"); assert!(it.last().unwrap().confirm && !it[0].confirm);
         let pinned = j(r#"{"id":"t1","pinned":true}"#); assert_eq!(thread_items(&pinned, "p")[0].action, "row-unpin");
     }

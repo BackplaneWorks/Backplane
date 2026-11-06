@@ -93,6 +93,8 @@ pub fn act(req: &Req) -> Option<ActOut> {
             a.set("@ren.owner", r.session["sel"].as_str().unwrap_or("")); a.set("@f.title", &(r.title_of)(v));
             a.cmds.push(json!({"type": "focus", "id": "thread-title"}));
         }
+        // Regenerate title: the hub's title model writes a new one (thread.retitle)
+        "row-retitle" => { a.rpc("thread.retitle", json!({"thread": v})); a.set("@del", ""); a.set("@menu", ""); }
         // the phones send "id\u{1f}title"; a blank id or title is never sent
         "rename-save" => {
             let (id, title) = if v.contains('\u{1f}') { let mut p = v.split('\u{1f}'); (p.next().unwrap_or("").to_string(), p.collect::<Vec<_>>().join(" ")) } else { (draft(r.session, "@ren").to_string(), draft(r.session, "@f.title").to_string()) };
