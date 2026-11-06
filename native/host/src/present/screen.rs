@@ -90,7 +90,6 @@ pub fn recent(st: &State,p: &Value) -> Option<Value> {
         session.as_object_mut()?.entry(k.to_string()).or_insert(v);
     }
     let room_page=&p["roomPage"];
-    if std::env::var("BP_DBG").is_ok() && text(p,"action").starts_with("room") { eprintln!("DBG action={} page={} drafts={}",text(p,"action"),room_page.is_object(),session["drafts"]); }
     let bot_page=&p["botPage"]; // a bot's target shows its chat thread, under its tabs (session seam: bots::bot_page)
     let thread=if p["target"]["kind"]=="thread" { text(&p["target"],"id") }else if bot_page.is_object() { text(bot_page,"chat") }else{""};
     session["sel"]=json!(thread);
@@ -302,7 +301,6 @@ pub fn recent(st: &State,p: &Value) -> Option<Value> {
         shown["bot"]=b;
     }
     if room_page.is_object() { shown["bot"]=room_page.clone(); }
-    if std::env::var("BP_DBG").is_ok() && text(p,"action").starts_with("room") { eprintln!("DBG out cmds={}",cmds.len()); }
     let mut overlay=shown.clone();
     for project in overlay["projects"].as_array_mut().unwrap() { project.as_object_mut().unwrap().remove("machine"); }
     let window=json!({"contextMessages":[],"messageIds":[],"historyUnits":[],"partial":[],"ids":[],"anchor":{"id":"","offset":0},"older":"","olderNext":"","hasMore":false,"remaining":0,"newer":0,"total":0});
