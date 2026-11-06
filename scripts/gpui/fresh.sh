@@ -5,6 +5,7 @@
 #   scripts/gpui/fresh.sh [start]     start (or reopen the window on) the fresh hub, on your screen ($DISPLAY)
 #   scripts/gpui/fresh.sh stop        stop the window and the hub (the home stays: your projects and threads)
 #   scripts/gpui/fresh.sh status
+#   scripts/gpui/fresh.sh pair        a pairing link for your phone (with FRESH_TAILNET_PORT: the https tailnet address first, the tailnet IP second); single use, short lived
 #   scripts/gpui/fresh.sh reset       stop and delete the fresh home (asks first)
 #   scripts/gpui/fresh.sh log         where the logs are
 # Env: FRESH_DIR (~/.backplane-gpui-fresh), FRESH_PORT (3797), FRESH_MEM (6G, the hub's cap), FRESH_AGENT ("claude:claude-sonnet-5-5": provider:model for new threads;
@@ -22,7 +23,10 @@ case "$(realpath -m "$D")" in "$HOME/.backplane-bend"*|"$HOME/.backplane-gpui"|"
 cmd=${1:-start}
 case "$cmd" in
   status) for w in hub client; do p=$(pid $w); if alive "$p"; then echo "$w: running, pid $p"; else echo "$w: not running"; fi; done
-          [ -f "$H/token" ] && { printf 'Authorization: Bearer %s\n' "$(cat "$H/token")" | curl -s -m2 -H @- "http://127.0.0.1:$PORT/hello" | head -c 200; echo; }; exit 0;;
+          [ -f "$H/token" ] && { printf 'Authorization: Bearer %s\n' "$(cat "$H/token")" | curl -s -m2 -H @- "http://127.0.0.1:$PORT/hello" | head -c 200; echo; }
+          [ -f "$D/tailnet.port" ] && { grep -a "on your tailnet:" "$D/hub.log" | tail -1 || echo "tailnet: not up (see $D/hub.log)"; }; exit 0;;
+  pair) alive "$(pid hub)" || die "the hub is not running"
+        printf 'Authorization: Bearer %s\n' "$(cat "$H/token")" | curl -sf -m5 -X POST -H @- "http://127.0.0.1:$PORT/auth/invitations" | python3 -c "import json,sys;d=json.load(sys.stdin);print('routes:',', '.join(d['routes']));print('code:',d['code']);print('link:',d['link'])" || die "the hub gave no invitation"; exit 0;;
   log) echo "$D/hub.log  $D/client.log"; exit 0;;
   stop) for w in client hub; do p=$(pid $w); alive "$p" && kill "$p"; rm -f "$D/$w.pid"; done
         [ -f "$D/tailnet.port" ] && { tp=$(cat "$D/tailnet.port"); tailscale serve --https="$tp" off >/dev/null 2>&1 || true; rm -f "$D/tailnet.port"; echo "removed the tailscale serve entry on $tp"; }
@@ -50,6 +54,10 @@ if ! alive "$(pid hub)"; then
   echo $! > "$D/hub.pid"
   for i in $(seq 1 100); do curl -sf -m1 "http://127.0.0.1:$PORT/hello" > /dev/null 2>&1 && break; alive "$(pid hub)" || { tail -5 "$D/hub.log"; die "the hub exited"; }; sleep 0.1; done
   echo "hub on 127.0.0.1:$PORT, home $H"
+  if [ -n "$TN" ]; then   # the tailnet listener and `tailscale serve` come up just after the hub starts answering: say when they have, or that they have not
+    for i in $(seq 1 100); do grep -aq "on your tailnet:" "$D/hub.log" 2>/dev/null && break; alive "$(pid hub)" || break; sleep 0.2; done
+    if grep -a "on your tailnet:" "$D/hub.log" 2>/dev/null | tail -1; then echo "pair your phone: $0 pair"; else echo "fresh: the tailnet address did not come up in 20 s: tailscale up? see $D/hub.log" >&2; fi
+  fi
 fi
 alive "$(pid client)" && { echo "window already open (pid $(pid client))"; exit 0; }
 ( exec setsid env DISPLAY="$DISPLAY" ${BACKPLANE_GPUI_ASSETS:+BACKPLANE_GPUI_ASSETS="$BACKPLANE_GPUI_ASSETS"} BACKPLANE_GPUI_ASSETS="${BACKPLANE_GPUI_ASSETS:-$BIN/assets}" \
