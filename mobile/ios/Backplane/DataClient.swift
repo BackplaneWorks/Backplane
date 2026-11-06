@@ -15,7 +15,7 @@ final class DataClient {
 
     // what is shown
     private(set) var conn: Conn = .offline
-    private(set) var needsRepair = false
+    private(set) var needsRepair = false { didSet { if needsRepair { logPair("screen", "re-pair") } } }
     private(set) var failure = ""
     private(set) var projects: [DProject] = []
     private(set) var threads: [DThread] = []
@@ -34,7 +34,7 @@ final class DataClient {
     // hello `notice`, newer from /hub/status: the banner
     private(set) var notice = HubNotice()
     var canSendImages: Bool { features.contains("images") }
-    var pairingError = ""
+    var pairingError = "" { didSet { logPair("status", pairingError) } }
     var pairingBusy = false
     private(set) var links: [String] = PairingStore.load()
     var drafts: [String: String] = (UserDefaults.standard.dictionary(forKey: "data.drafts") as? [String: String]) ?? [:]
@@ -71,8 +71,14 @@ final class DataClient {
     }
 
     // MARK: pairing
+    /// What a simulator check reads of pairing: statuses and hub addresses, never a link's secret. Debug builds only.
+    private func logPair(_ what: String, _ text: String) {
+        #if DEBUG
+        NSLog("BPPAIR %@ %@", what, text)
+        #endif
+    }
     /// A pairing link that came from outside the app: nothing happens until the person says so.
-    var askLink: String?
+    var askLink: String? { didSet { if let l = askLink { logPair("ask", Pairing.invitation(l)?.origin.absoluteString ?? Pairing.key(l) ?? "") } } }
     func opened(_ url: URL) {
         let s = url.absoluteString
         guard s.hasPrefix("backplane://") || s.hasPrefix(AppIdentity.scheme + "://"), Pairing.key(s) != nil || Pairing.invitation(s) != nil else { return }
