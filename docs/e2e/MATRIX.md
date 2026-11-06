@@ -1,0 +1,102 @@
+# End-to-end matrix
+
+Rust-only Backplane on `main`: hub `native/host`, client `native/gpui`. Results are `pass`, `fail` or `not run`. A result needs evidence: a commit, the rig, and a log path or test name. `not run` says why. A Linux result never stands in for another platform.
+
+The grids are kept by the lead. Each lane writes only its own section at the end of this file, so parallel rebases do not collide.
+
+Other lanes own these, and their rows here are filled from their reports: onboarding, CI, `$` skills, voice and other parity additions, hub resilience.
+
+## Features
+
+| ID | Feature | Linux | macOS | Windows |
+|---|---|---|---|---|
+| | **Core** | | | |
+| F01 | Hub boots on a temp home, `/hello` answers | not run | not run | not run |
+| F02 | Client connects; sidebar and projects load | not run | not run | not run |
+| F03 | Threads: create, rename, pin, archive, delete, settle, snooze, order | not run | not run | not run |
+| F04 | Stand-in turn streams; restart ends running turns as interrupted | not run | not run | not run |
+| F05 | Providers via stand-ins: Claude, Codex, Grok, OpenCode, Muse, Antigravity, Pi, Oh My Pi | not run | not run | not run |
+| F06 | Runtime modes, approvals, questions, plans | not run | not run | not run |
+| F07 | Queue, steer, stop, held queue resume | not run | not run | not run |
+| F08 | Fork, bring back, provider switch | not run | not run | not run |
+| F09 | Todos, context meter, drafts survive a crash | not run | not run | not run |
+| F10 | Inboxes, orchestration tools, subthreads panel | not run | not run | not run |
+| F11 | Model picker, effort, project picker, project badges | not run | not run | not run |
+| F12 | Git: worktree threads, checkpoints, diff, revert, commit and push, PR | not run | not run | not run |
+| F13 | Titles and the text generation model | not run | not run | not run |
+| F14 | Terminal | not run | not run | not run |
+| F15 | Attachments and image paste | not run | not run | not run |
+| F16 | Keybindings | not run | not run | not run |
+| F17 | Viewers: board, schematic, 3D, STEP | not run | not run | not run |
+| F18 | Browser tab (CEF) | not run | not run | not run |
+| F19 | Bots and rooms | not run | not run | not run |
+| F20 | File browser and downloads | not run | not run | not run |
+| F21 | Reconnect, resume from sequence, outbox, long session | not run | not run | not run |
+| F22 | Ordering flow up to the quote; no order placed | not run | not run | not run |
+| | **Install and CAD** | | | |
+| C01 | Package installs and starts on a clean user | not run | not run | not run |
+| C02 | KiCad: install, Settings → CAD path, kicad-cli export and DRC run from the hub | not run | not run | not run |
+| C03 | FreeCAD: install, Settings → CAD path, script run and STEP export from the hub | not run | not run | not run |
+| | **Remote operation** | | | |
+| R01 | Restart the hub from another machine | not run | not run | not run |
+| R02 | Update: channel, Check now, download, checksum, swap, restart | not run | not run | not run |
+| R03 | Rollback after a bad update | not run | not run | not run |
+| | **Settings: each control persists across restart and takes effect** | | | |
+| S01 | Appearance | not run | not run | not run |
+| S02 | Threads | not run | not run | not run |
+| S03 | Agents | not run | not run | not run |
+| S04 | Writing | not run | not run | not run |
+| S05 | CAD | not run | not run | not run |
+| S06 | Ordering | not run | not run | not run |
+| S07 | Devices | not run | not run | not run |
+| S08 | Network | not run | not run | not run |
+| S09 | Voice | not run | not run | not run |
+| S10 | Keys | not run | not run | not run |
+| S11 | Timezone | not run | not run | not run |
+| S12 | Usage | not run | not run | not run |
+| S13 | About | not run | not run | not run |
+| S14 | Privacy | not run | not run | not run |
+
+## Pairing
+
+Rows are the hub, columns the client. Each cell is LAN / tailnet. Same-platform cells count too.
+
+| Hub ↓ Client → | Linux | macOS | Windows | iOS | Android |
+|---|---|---|---|---|---|
+| Linux | not run / not run | not run / not run | not run / not run | not run / not run | not run / not run |
+| macOS | not run / not run | not run / not run | not run / not run | not run / not run | not run / not run |
+| Windows | not run / not run | not run / not run | not run / not run | not run / not run | not run / not run |
+
+## Builders
+
+| Platform | Builder | State on 2026-11-06 |
+|---|---|---|
+| Linux | desktop, `backplane`, Boat sandboxes | Builds are allowed on all three. UI rigs run on `backplane` or Boat, which have Xvfb. |
+| macOS | `hs-mac-mini` (arm64) | Rust and Xcode present. KiCad and FreeCAD not installed. |
+| Windows | GitHub-hosted runners only | No Windows box, VM or self-hosted runner found. Neither crate has any `cfg(windows)` code, and `docs/windows.md` still describes the removed Electron and Bun stack. |
+| iOS | simulators on `hs-mac-mini` | Real phones only with the person present. |
+| Android | emulator; Pixel 9 on the desktop | Real phones only with the person present. |
+
+## Lane results
+
+Each lane's rows: `| ID | result | commit | rig | evidence |`.
+
+### Linux
+
+| ID | Result | Commit | Rig | Evidence |
+|---|---|---|---|---|
+
+### macOS
+
+| ID | Result | Commit | Rig | Evidence |
+|---|---|---|---|---|
+
+### Windows
+
+| ID | Result | Commit | Rig | Evidence |
+|---|---|---|---|---|
+
+### Pairing and remote operation
+
+| ID | Result | Commit | Rig | Evidence |
+|---|---|---|---|---|
