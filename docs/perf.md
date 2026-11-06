@@ -1,5 +1,7 @@
 # Performance
 
+> Paths under `src/` below (`src/core`, `src/server`, `src/web`, `src/mobile`, `src/app`) name the Bend JS tree, removed from this checkout (tag `main-bend-final`). Where the current Rust code for each is, is unverified; look under `native/host/src/` and `native/gpui/`.
+
 Every Backplane process measures itself all the time: a row per name in a
 table held by `src/server/effects/perf.c`. A recorded value costs a hash
 lookup and a few adds. Nothing is ever reset. A window of time is the

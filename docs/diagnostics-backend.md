@@ -1,5 +1,7 @@
 # Local diagnostics backend
 
+> Paths under `src/` below (`src/core`, `src/server`, `src/web`, `src/mobile`, `src/app`) name the Bend JS tree, removed from this checkout (tag `main-bend-final`). Where the current Rust code for each is, is unverified; look under `native/host/src/` and `native/gpui/`.
+
 `src/server/diagnostics` is the hub's bounded local recorder. The effects
 in `effects/diagnostics.js` run synchronously on existing IO loop.
 `effects/perf.js` feeds measured numeric values directly; log text, Chrome

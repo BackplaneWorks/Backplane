@@ -1,5 +1,7 @@
 # iOS simulator qualification
 
+> The steps below say "the bridge" (`bridge.js`), which the phone app no longer has (removed with the Bend launcher). The current iOS build is in docs/ios-build.md; which steps here still apply is unverified.
+
 Use an isolated checkout and a new simulator for each run. This workflow builds the normal Debug app and leaves existing simulators and their data alone. It does not archive, upload, install on a physical device, restart a hub, or generate demonstration data.
 
 1. Record the exact integrated commit and obtain the bridge built from that source by its owner; verify its SHA-256. Copy `mobile/ios` to a unique Mac directory such as `~/backplane-ios-vc-655983`, and put the verified bridge at `Backplane/bridge.js`. Do not overwrite a shared source copy or copy signing material. Record how the source copy was verified against the commit; the script records the supplied commit but cannot prove the copy matches it.

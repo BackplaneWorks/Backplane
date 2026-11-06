@@ -1,5 +1,7 @@
 # Canvas surface and camera presentation
 
+> Paths under `src/` below (`src/core`, `src/server`, `src/web`, `src/mobile`, `src/app`) name the Bend JS tree, removed from this checkout (tag `main-bend-final`). Where the current Rust code for each is, is unverified; look under `native/host/src/` and `native/gpui/`.
+
 `src/web/solid.js` draws the actual Solid triangles; `solid-materials.js` supplies
 studio shading; `solid-dof.js` supplies optional depth-dependent lens filtering.
 The web and Electron use this canvas. This does not change native phone shaders,

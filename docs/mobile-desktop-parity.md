@@ -1,5 +1,7 @@
 # Mobile vs the GPUI desktop client (2026-11-06, second pass)
 
+> Paths under `src/` below (`src/core`, `src/server`, `src/web`, `src/mobile`, `src/app`) name the Bend JS tree, removed from this checkout (tag `main-bend-final`). Where the current Rust code for each is, is unverified; look under `native/host/src/` and `native/gpui/`.
+
 Audited against `native/gpui` (desktop), the Rust hub's phone API (`docs/PHONE-DATA.md`, proto `data/1`, `native/host/src/data/`), the iOS data app
 (`mobile/ios/Backplane/Data*.swift`, branch gpui-ios, in `gpui`) and the new Android data app (`mobile/android/.../Data*.kt`).
 Status: **done** (built and driven), **code** (written, not run: no Mac here), **gap** (not there), **hub** (the Rust hub gives phones no request for it yet).

@@ -1,5 +1,7 @@
 # iOS loading performance
 
+> Paths under `src/` below (`src/core`, `src/server`, `src/web`, `src/mobile`, `src/app`) name the Bend JS tree, removed from this checkout (tag `main-bend-final`). Where the current Rust code for each is, is unverified; look under `native/host/src/` and `native/gpui/`.
+
 The verified 34de artifact is preserved. Product work continues with a measured native loading path, hidden-body materialization changes and current-source accessibility checks. This document does not replace the source-specific 34de qualification receipt.
 
 ## Release rendering defect and corrective qualification

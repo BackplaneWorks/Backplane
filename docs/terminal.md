@@ -1,5 +1,7 @@
 # Terminal
 
+> Paths under `src/` below (`src/core`, `src/server`, `src/web`, `src/mobile`, `src/app`) name the Bend JS tree, removed from this checkout (tag `main-bend-final`). Where the current Rust code for each is, is unverified; look under `native/host/src/` and `native/gpui/`.
+
 The Electron desktop opens a floating interactive PTY with the Terminal
 button, the unmodified backtick key, `Ctrl+J`, or `Super+grave` / `Super+~` while
 Backplane has focus. Plain backtick toggles from the workspace or composer

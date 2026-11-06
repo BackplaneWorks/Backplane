@@ -1,5 +1,7 @@
 # Bots
 
+> Paths under `src/` below (`src/core`, `src/server`, `src/web`, `src/mobile`, `src/app`) name the Bend JS tree, removed from this checkout (tag `main-bend-final`). Where the current Rust code for each is, is unverified; look under `native/host/src/` and `native/gpui/`.
+
 Persistent agents with a name, a face (an animated kitty cat), memory,
 routines, webhooks, a browser page of their own, and a space: a UI they
 write for themselves. Bots talk to each other directly or in rooms, on one

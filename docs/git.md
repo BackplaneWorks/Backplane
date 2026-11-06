@@ -1,8 +1,8 @@
 # Git
 
-Two modules:
-- `src/core/diff` (pure): parses unified diffs.
-- `src/server/git` (IO): runs git as a subprocess. Arguments are always an argv list, never a shell line.
+The module:
+- `native/host/src/files/git.rs`: the hub's own git, run as a subprocess (the older `src/core/diff` diff parser is gone with the Bend tree; its Rust replacement is unverified).
+Earlier text names it `src/server/git`. Arguments are always an argv list, never a shell line.
 
 Every IO action returns text:
 - the result, or

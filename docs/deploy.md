@@ -1,5 +1,7 @@
 # Safe deploy and restart
 
+> Paths under `src/` below (`src/core`, `src/server`, `src/web`, `src/mobile`, `src/app`) name the Bend JS tree, removed from this checkout (tag `main-bend-final`). Where the current Rust code for each is, is unverified; look under `native/host/src/` and `native/gpui/`.
+
 A restart must not interrupt a running turn. Batch delivery once per qualified
 milestone, then wait for all live turns, tool calls and build locks to clear.
 The actual server handoff adds this stronger idle-turn guard to the existing

@@ -55,7 +55,7 @@ Each lane updates its own rows in the commit that lands the work.
 | Diff and Files toggle closed | missing | threads-small |
 | **Bend-era cleanup** | | |
 | Phone launcher code (`WebShell`, Classic screens, `mobile/shell`) | done | cleanup |
-| READMEs and docs that still describe `bridge.js`, `src/core`, the web page (`mobile/README.md`, `docs/ios-build.md` and `docs/order.md` fixed; `docs/voice.md` and others still name `src/core`/`src/server`) | partial | cleanup |
+| READMEs and docs that still describe `bridge.js`, `src/core`, the web page (`mobile/README.md`, `docs/ios-build.md`, `docs/order.md`, `docs/git.md` fixed; about 20 more docs under `docs/` now carry a note that `src/` is the removed Bend tree, with the Rust replacement unverified; `docs/voice.md` is the voice thread's) | partial | cleanup |
 | `mobile/tests/improvements/bridge.mjs` and other tests of the old bridge | done | cleanup |
 | **Helpers** (goal: only `tools/browser` stays Bun) | | |
 | `tools/kipc`: removed, with `BACKPLANE_KIPC_BIN` and `scripts/build-kipc.sh`; the hub does the IPC in process | done | cleanup |

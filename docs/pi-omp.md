@@ -1,5 +1,7 @@
 # Pi and Oh My Pi
 
+> Paths under `src/` below (`src/core`, `src/server`, `src/web`, `src/mobile`, `src/app`) name the Bend JS tree, removed from this checkout (tag `main-bend-final`). Where the current Rust code for each is, is unverified; look under `native/host/src/` and `native/gpui/`.
+
 Backplane can run two more agents, `pi` and `omp`. They are separate
 programs with different protocols. Backplane uses each one's own protocol,
 not OpenCode's and not each other's.
