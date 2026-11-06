@@ -67,6 +67,22 @@ Rows are the hub, columns the client. Each cell is LAN / tailnet. Same-platform 
 | macOS | not run / not run | not run / not run | not run / not run | not run / not run | not run / not run |
 | Windows | not run / not run | not run / not run | not run / not run | not run / not run | not run / not run |
 
+## Push notifications
+
+Owned end to end by the push lane (branch `respectful-push`, thread t1793985890-103). No E2E lane takes these rows. Evidence goes in that lane's own section under `docs/e2e/`.
+
+| ID | Feature | Owner | Result |
+|---|---|---|---|
+| P01 | APNs sender | `respectful-push` | not run |
+| P02 | Uberbot-only gate | `respectful-push` | not run |
+| P03 | Dedupe | `respectful-push` | not run |
+| P04 | Quiet hours | `respectful-push` | not run |
+| P05 | Deep link | `respectful-push` | not run |
+| P06 | Badge | `respectful-push` | not run |
+| P07 | Clear on any device | `respectful-push` | not run |
+| P08 | Simulator evidence | `respectful-push` | not run |
+| P09 | TestFlight | `respectful-push` | not run |
+
 ## Builders
 
 | Platform | Builder | State on 2026-11-06 |
