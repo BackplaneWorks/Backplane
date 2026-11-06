@@ -45,6 +45,9 @@ pub const TABLE: &[Entry] = &[
     e("diff", "Diff", "Viewer", "secondary-d", Rebind),
     e("files", "Files", "Viewer", "secondary-p", Rebind),
     e("layers", "Layer focus: the other layers as they are, dimmed, hidden", "Viewer", "ctrl-h", Rebind),
+    e("pad-undo", "Undo the last stroke or change", "Drawing pad", "secondary-z", Fixed),
+    e("pad-delete", "Delete the selection, or clear the pad", "Drawing pad", "delete", Fixed),
+    e("pad-delete-alt", "Delete (also)", "Drawing pad", "backspace", Fixed),
     e("rail", "Rail views: B board, S schematic, 3 3D, V split, M mech, F files, D diff, R review, W browser", "Viewer", "b s 3 v m f d r w", Fixed),
 ];
 /// Keys the old client had that this one cannot do yet (no equivalent): listed, not faked.
@@ -52,7 +55,6 @@ pub const MISSING: &[(&str, &str)] = &[
     ("Ctrl+J, Backtick, Shift+Esc", "Floating terminal: the client has no terminal"),
     ("Ctrl+Shift+C / V", "Terminal copy and paste: no terminal"),
     ("Ctrl+Shift+H", "Performance overlay: the client has none"),
-    ("Ctrl+Z, Delete in the drawing pad", "Drawing pad: the client has none"),
     ("Arrows, Tab in the model picker", "Picker cursor keys: the picker takes search and Enter only"),
 ];
 
@@ -76,7 +78,7 @@ pub fn show(key: &str, mac: bool) -> String {
         out.push(match (*p, mac) {
             ("secondary", true) => "⌘".into(), ("secondary" | "ctrl", false) => "Ctrl".into(), ("ctrl", true) => "⌃".into(),
             ("alt", true) => "⌥".into(), ("alt", false) => "Alt".into(), ("shift", true) => "⇧".into(), ("shift", false) => "Shift".into(),
-            ("escape", _) => "Esc".into(), ("enter", _) => "Enter".into(),
+            ("escape", _) => "Esc".into(), ("enter", _) => "Enter".into(), ("delete", _) => "Delete".into(), ("backspace", _) => "Backspace".into(),
             (k, _) if last && k.chars().count() == 1 => k.to_uppercase(), (k, _) => k.to_string(),
         });
     }
@@ -116,6 +118,20 @@ pub fn bindings(l: &Local) -> Vec<KeyBinding> {
     v.extend([KeyBinding::new("b", RailBoard, Some(FREE)), KeyBinding::new("s", RailSchematic, Some(FREE)), KeyBinding::new("3", Rail3d, Some(FREE)), KeyBinding::new("v", RailSplit, Some(FREE)),
         KeyBinding::new("m", RailMech, Some(FREE)), KeyBinding::new("f", RailFiles, Some(FREE)), KeyBinding::new("d", RailDiff, Some(FREE)), KeyBinding::new("r", RailReview, Some(FREE)),
         KeyBinding::new("w", RailBrowser, Some(FREE))]);
+    v.extend(pad_bindings(&v, &k("close")));
+    v
+}
+/// The drawing pad's keys, and every other shortcut muted while it is open, as the old pad took all the keys: nothing behind it moves under the person.
+/// A binding without a context is as deep as the innermost context, so the mute names the length box's context too, and comes last to win the tie.
+fn pad_bindings(all: &[KeyBinding], close: &str) -> Vec<KeyBinding> {
+    use crate::screens::padview::{Delete, Undo};
+    let mut v = vec![KeyBinding::new("secondary-z", Undo, Some("DrawPad")), KeyBinding::new("delete", Delete, Some("DrawPad")), KeyBinding::new("backspace", Delete, Some("DrawPad"))];
+    let close = Keystroke::parse(close).map(|k| k.unparse()).unwrap_or_default();
+    let own = ["composer::", "text_input::", "backplane::Send", "backplane::CopySelection"]; // the length box's editing keys, and keys only a text field or the page has
+    let shortcuts = all.iter().filter(|b| !own.iter().any(|o| b.action().name().starts_with(o)));
+    for key in shortcuts.filter_map(|b| b.keystrokes().first().map(|k| k.unparse())).filter(|k| *k != close) {
+        v.extend(["DrawPad", "PadLength"].map(|ctx| KeyBinding::new(&key, NoAction, Some(ctx))));
+    }
     v
 }
 pub fn bind_all(cx: &mut App, l: &Local) { cx.clear_key_bindings(); cx.bind_keys(bindings(l)); }
@@ -247,6 +263,28 @@ mod tests {
         assert_eq!(d("/", &[]), "keys::FocusComposer"); assert_eq!(d("b", &[]), "keys::RailBoard"); assert_eq!(d("3", &[]), "keys::Rail3d"); assert_eq!(d("d", &[]), "keys::RailDiff");
         for c in ["Composer", "TextInput", "PickInput", "AskInput", "ImpInput", "Viewer", "BrowserBar", "FilesPage"] { for k in ["/", "b", "s", "3", "v", "m", "f", "d", "r", "w"] { assert_eq!(d(k, &[c]), "", "{k} in {c}"); } }
         assert_eq!(d("ctrl-shift-s", &[]), "keys::SettleThread");
+    }
+    #[test] fn the_pad_has_its_keys_and_they_never_reach_the_composer() {
+        assert_eq!(d("ctrl-z", &["DrawPad"]), "pad::Undo"); assert_eq!(d("delete", &["DrawPad"]), "pad::Delete"); assert_eq!(d("backspace", &["DrawPad"]), "pad::Delete");
+        assert_eq!(d("ctrl-z", &["Composer"]), "composer::Undo", "the message box keeps its own undo");
+        assert_eq!(d("ctrl-z", &["DrawPad", "PadLength"]), "composer::Undo", "in the length box it undoes the typing");
+        assert_eq!(d("delete", &["DrawPad", "PadLength"]), "composer::Delete"); assert_eq!(d("enter", &["DrawPad", "PadLength"]), "composer::Go");
+        assert_eq!(d("escape", &["DrawPad"]), "backplane::ClosePopup"); assert_eq!(d("escape", &["DrawPad", "PadLength"]), "backplane::ClosePopup");
+    }
+    #[test] fn nothing_behind_the_pad_moves_while_it_is_open() {
+        for ctx in [&["DrawPad"][..], &["DrawPad", "PadLength"][..]] {
+            for k in ["ctrl-k", "ctrl-shift-p", "ctrl-n", "ctrl-b", "ctrl-.", "ctrl-m", "ctrl-d", "ctrl-p", "ctrl-shift-f", "ctrl-shift-s", "ctrl-shift-u", "alt-1", "ctrl-1", "ctrl-alt-i", "/", "b", "s", "3", "w"] { assert_eq!(d(k, ctx), "", "{k} in {ctx:?}"); }
+        }
+    }
+    #[test] fn a_rebound_close_key_still_shuts_the_pad_and_rebound_shortcuts_stay_muted() {
+        let mut l = Local::default(); assert!(l.set("shortcut", "new\u{1f}ctrl-alt-n"));
+        assert_eq!(does(&l, "ctrl-alt-n", &["DrawPad"]), "");
+        assert_eq!(does(&l, "ctrl-n", &[]), ""); assert_eq!(does(&l, "ctrl-alt-n", &[]), "keys::NewThread", "only inside the pad");
+    }
+    #[test] fn the_pads_keys_are_in_the_table_and_no_longer_missing() {
+        assert_eq!((find("pad-undo").unwrap().kind, find("pad-delete").unwrap().kind), (Fixed, Fixed));
+        assert_eq!(hint(&Local::default(), "pad-undo"), "Ctrl+Z"); assert_eq!(hint(&Local::default(), "pad-delete"), "Delete"); assert_eq!(hint(&Local::default(), "pad-delete-alt"), "Backspace");
+        assert!(MISSING.iter().all(|(k, why)| !k.contains("drawing pad") && !why.contains("Drawing pad")));
     }
     #[test] fn viewer_scope_keeps_its_keys_but_the_chords_work() {
         assert_eq!(d("ctrl-d", &["Viewer"]), "keys::OpenDiff"); assert_eq!(d("ctrl-p", &["Viewer"]), "keys::OpenFiles"); assert_eq!(d("m", &["Viewer"]), "");

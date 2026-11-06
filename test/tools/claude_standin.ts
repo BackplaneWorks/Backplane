@@ -60,6 +60,8 @@
 //                never completes (the line lost); the process stays, silent
 //   deploy       the first command calls the hub's deploy_restart (the MCP
 //                URL, BP_DEPLOY_ARGS, JSON, as its arguments), then ends
+// BP_STANDIN_IMAGES=<dir>: each image block received is written there (0, 1, ...), and
+// logged as "IMAGE <path> <media type> <source type>" and "TEXT <the message's text>".
 // BP_STANDIN_USAGE=1: results carry token usage and a cost (a counted turn).
 // Every line read is appended to $FAKE_LOG ("IN <line>"), and "START pid".
 // BP_EOF_FINISH=1: at the end of stdin the turn in flight is finished
@@ -72,7 +74,7 @@
 //   test/tools/claude_standin.ts is run through a `claude` wrapper:
 //   #!/bin/sh
 //   exec bun /path/to/claude_standin.ts "$@"
-import { appendFileSync, readFileSync } from "node:fs";
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 
@@ -534,6 +536,7 @@ async function pump() {
   if (queue.length) pump();
 }
 
+let imagesSeen = 0;
 const rl = createInterface({ input: process.stdin });
 rl.on("line", (line) => {
   log(`IN ${line.slice(0, 400)}`);
@@ -553,6 +556,12 @@ rl.on("line", (line) => {
   }
   if (o.type !== "user") return;
   const text = (o.message?.content ?? []).map((b: any) => (typeof b === "string" ? b : b.text ?? "")).join(" ");
+  if (process.env.BP_STANDIN_IMAGES) for (const b of o.message?.content ?? []) if (b?.type === "image") {
+    const at = `${process.env.BP_STANDIN_IMAGES}/${imagesSeen++}`;
+    writeFileSync(at, Buffer.from(b.source?.data ?? "", "base64"));
+    log(`IMAGE ${at} ${b.source?.media_type} ${b.source?.type}`);
+    log(`TEXT ${JSON.stringify(text)}`);
+  }
   if (!mode) mode = /mode:([\w-]+)/.exec(text)?.[1] ?? "plain";
   const uuid = o.uuid ?? rnd();
   log(`USER ${uuid} ${text.slice(0, 80)}`);

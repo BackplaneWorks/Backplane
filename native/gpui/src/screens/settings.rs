@@ -398,6 +398,14 @@ mod tests {
     use super::*;
     use core::prelude::v1::test;
     fn j(s: &str) -> Value { serde_json::from_str(s).unwrap() }
+    #[test] fn the_device_page_lists_the_drawing_pads_keys_and_no_longer_says_they_are_missing() {
+        let rows = device_rows(&crate::local::Local::default());
+        let note = |label: &str| rows.iter().find(|r| r.label == label).map(|r| r.note.clone());
+        assert_eq!(note("Undo the last stroke or change · Drawing pad").as_deref(), Some("Ctrl+Z. Fixed."));
+        assert_eq!(note("Delete the selection, or clear the pad · Drawing pad").as_deref(), Some("Delete. Fixed."));
+        assert_eq!(note("Delete (also) · Drawing pad").as_deref(), Some("Backspace. Fixed."));
+        assert!(!rows.iter().any(|r| r.note.contains("Not yet") && r.label.to_lowercase().contains("drawing pad")));
+    }
     #[test] fn rows_parse_with_buttons_fields_and_qr_and_a_vault_field_keeps_no_hub_value() {
         let r = parse(&j(r#"{"rows":[{"label":"Theme","note":"light or dark","buttons":[{"label":"Dark","action":"theme","value":"dark","on":true},{"label":"Light","action":"theme","value":"light","on":false}]},
             {"label":"Key","note":"","buttons":[],"fields":[{"name":"kname","hint":"name","secret":false,"value":"OPENAI"},{"name":"kval","hint":"value","secret":true,"vault":true,"value":"leaked-from-hub"}]},

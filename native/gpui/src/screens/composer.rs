@@ -24,6 +24,8 @@ pub fn mask(s: &str) -> String { let mut o = String::with_capacity(s.len()); for
 pub enum ComposerEvent {
     /// A clipboard image (encoded bytes and extension).
     Image { bytes: Vec<u8>, ext: &'static str },
+    /// The drawing pad's picture (RGBA, encoded off the UI thread).
+    Drawing(Vec<u8>),
     /// Files dropped on the composer or chosen in the picker.
     Files(Vec<PathBuf>),
     /// Enter in an ask's box (key context AskInput).
@@ -113,6 +115,7 @@ impl Composer {
     pub fn set_placeholder(&mut self, text: &str) { self.placeholder = text.to_string().into(); }
     pub fn reset(&mut self) { self.ed.set(""); self.content = "".into(); self.rows.clear(); self.scroll_y = px(0.); }
     pub fn editor(&self) -> &Editor { &self.ed }
+    pub fn select_everything(&mut self, cx: &mut Context<Self>) { self.edit(cx, |e| e.select_all()); }
     fn sync(&mut self, cx: &mut Context<Self>) { self.content = self.ed.text().to_string().into(); cx.notify(); }
     fn edit(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut Editor)) { f(&mut self.ed); self.sync(cx); }
 
@@ -383,7 +386,7 @@ impl Focusable for Composer { fn focus_handle(&self, _: &App) -> FocusHandle { s
 pub fn bind(cx: &mut App) { cx.bind_keys(bindings()); }
 pub fn bindings() -> Vec<KeyBinding> {
     let mut v: Vec<KeyBinding> = Vec::new();
-    for ctx in ["Composer", "AskInput", "ImpInput", "PickInput"] {
+    for ctx in ["Composer", "AskInput", "ImpInput", "PickInput", "PadLength"] {
     let c = Some(ctx);
     v.extend([
         KeyBinding::new("backspace", Backspace, c), KeyBinding::new("delete", Delete, c),
@@ -401,7 +404,7 @@ pub fn bindings() -> Vec<KeyBinding> {
         KeyBinding::new("shift-enter", Newline, c),
     ]);
     }
-    v.extend([KeyBinding::new("enter", Go, Some("AskInput")), KeyBinding::new("enter", Go, Some("PickInput"))]);
+    v.extend([KeyBinding::new("enter", Go, Some("AskInput")), KeyBinding::new("enter", Go, Some("PickInput")), KeyBinding::new("enter", Go, Some("PadLength"))]);
     v
 }
 
