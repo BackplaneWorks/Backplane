@@ -85,6 +85,13 @@ impl Agents {
         self.stopped_by.lock().unwrap().insert(target.to_string(), thread.to_string()); // Launch.tell: a launcher that stops its own thread is not told
         let r = self.interrupt(target).await; match r { Ok(()) => (true, json!({"threadId":target,"state":"interrupted"})), Err(e) => { self.stopped_by.lock().unwrap().remove(target); fail(&e) } } // an interrupt that failed leaves no mark: the thread's next real end is reported
     }
+    /// The Settle button for an agent: this thread (or another of the project) is settled, as `thread.settle` does.
+    pub async fn tool_settle(&self, thread: &str, a: &Value) -> (bool, Value) {
+        let target = if sv(a, "threadId").is_empty() { thread } else { sv(a, "threadId") };
+        if !self.same_project(thread, target).await { return fail(NOT_HERE) }
+        self.commit_events(vec![json!({"$":"ThreadSettled","id":target,"manual":true,"at":now_s()})]).await;
+        (true, json!({"threadId":target,"settled":true}))
+    }
     pub async fn tool_wait(&self, thread: &str, a: &Value) -> (bool, Value) {
         let target = sv(a, "threadId"); if !self.same_project(thread, target).await { return fail(NOT_HERE) }
         let end = tokio::time::Instant::now() + Duration::from_secs(wait_clamp(a.get("timeoutMs").and_then(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse().ok()))).unwrap_or(30000)));
