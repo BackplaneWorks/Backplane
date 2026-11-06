@@ -9,7 +9,7 @@ COMMIT=$(git -C "$REPO" rev-parse --short HEAD)
 # The tree is the worktree you're standing in, not the script's: a lane's run from the main checkout tests the wrong code.
 case "$REPO" in */backplane-gpui) [ "$LANE" = hubfull ] || [ "${BP_BUILD_MAIN:-}" = 1 ] || { echo "bp-build: cd into your lane's worktree first (this is the main checkout)" >&2; exit 64; } ;; esac
 ssh -o BatchMode=yes h@backplane "mkdir -p ~/$D"
-rsync -a --delete --exclude .git --exclude build --exclude target --exclude 'native/*/target' --exclude mobile --exclude desktop \
+rsync -a --delete --exclude .git --exclude build --exclude target --exclude 'native/*/target' --exclude /mobile --exclude desktop \
   --exclude stage --exclude 'stage-*' --exclude .lowmem --exclude .target "$REPO/" "h@backplane:$D/"
 echo "provisional: commit $COMMIT, tree $REPO, dirty tree possible, host backplane"
 ssh -o BatchMode=yes h@backplane "sh ~/$D/scripts/bp-slot.sh $LANE $(printf %s "$*" | base64 -w0)"
