@@ -314,6 +314,21 @@ impl RpcHandler for Rpc {
 }
 
 /// A thread whose creation asked for a worktree (a branch) or that is an improvement thread must not fall back to its project folder.
+/// A thread's folder that vanished (a removed worktree) never stops a turn: it is made again as a fresh git worktree of the project (detached at HEAD),
+/// else as a plain folder, so threads, bots and restarts always have somewhere to run.
+async fn remake_folder(cwd: &str, root: &str) -> Result<(), String> {
+    let p = std::path::Path::new(cwd);
+    if cwd.is_empty() { return Err("the thread has no folder".into()) }
+    if p.is_dir() { return Ok(()) }
+    if !root.is_empty() && std::path::Path::new(root).join(".git").exists() {
+        if let Some(parent) = p.parent() { let _ = std::fs::create_dir_all(parent); }
+        let run = |args: Vec<&str>| { let mut c = tokio::process::Command::new("git"); c.arg("-C").arg(root).args(args).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()); c.status() };
+        let _ = run(vec!["worktree", "prune"]).await;
+        let _ = run(vec!["worktree", "add", "--detach", cwd, "HEAD"]).await;
+    }
+    if !p.is_dir() { std::fs::create_dir_all(p).map_err(|e| format!("its folder {cwd} is gone and could not be made again: {e}"))? }
+    Ok(())
+}
 fn wants_worktree(id: &str, branch: &str, env: &str) -> bool { id.starts_with("improvement-") || (!branch.is_empty() && env != "local") }
 /// What the Claude CLI says when `--resume` names a session it does not have.
 const SESSION_GONE: &str = "No conversation found with session ID";
@@ -522,7 +537,8 @@ impl Actor {
         let (now, th) = (now_s(), self.th.clone());
         if crate::copy::person_turn_allowed() && !self.person { return } // side-by-side: only a person's turn starts a real agent
         self.cx.running = true; self.ag.stats.turns.fetch_add(1, Relaxed);
-        if !std::path::Path::new(cwd).is_dir() { self.fail(format!("could not start codex: its folder {cwd} is gone"), "spawn", &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); return }
+        let root = self.ag.world().await.roots.get(&t.project).cloned().unwrap_or_default();
+        if let Err(e) = remake_folder(cwd, &root).await { self.fail(format!("could not start codex: {e}"), "spawn", &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); return }
         let Some(made) = providers::driver(&t.provider) else { self.fail(format!("{} threads are not run by the Rust hub yet", t.provider), "spawn", &format!("spawn-{now}")).await; return };
         let prog = match (if self.person { self.person_prog(made.cli) } else { self.ag.cli.resolve(made.cli) }) { Ok(p) => p, Err(e) => { let hint = made.driver.install_hint().map(|h| format!(". {h}")).unwrap_or_default(); self.fail(format!("could not start {}: {e}{hint}", made.cli), "spawn", &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); return } };
         self.stop().await; self.lines = None; self.exit = None;
@@ -711,7 +727,7 @@ impl Actor {
     }
 
     async fn spawn(&mut self, t: &world::T, cwd: &str, key: String) -> Result<(), String> {
-        if !std::path::Path::new(cwd).is_dir() { return Err(format!("its folder {cwd} is gone")) }
+        remake_folder(cwd, &self.ag.world().await.roots.get(&t.project).cloned().unwrap_or_default()).await?;
         let mut prog = if self.person { self.person_prog("claude")? } else { self.ag.cli.resolve("claude")? };
         let (now, th) = (now_s(), self.th.clone());
         // a thread bound to a named account runs under that profile's own CLAUDE_CONFIG_DIR, after its identity is rechecked (no model turn); a stale or disconnected one never falls back to the default login
@@ -925,5 +941,19 @@ impl Actor {
             let unknown = bg::unknown(&rows); let mut ev = vec![json!({"$":"ActivityLogged","thread":th,"act":hub_id("l", now, self.ag.seq()),"tone":"info","kind":"lost","summary":text,"at":now})];
             ev.extend(self.cx.bg_replace(unknown, now)); self.commit(ev).await;
         }
+    }
+}
+
+#[cfg(test)]
+mod remake_tests {
+    #[tokio::test] async fn a_vanished_folder_is_made_again_never_stopping_the_turn() {
+        let d = std::env::temp_dir().join(format!("remake-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d);
+        let root = d.join("proj"); std::fs::create_dir_all(&root).unwrap();
+        for a in [vec!["init", "-q"], vec!["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x"]] { std::process::Command::new("git").arg("-C").arg(&root).args(a).status().unwrap(); }
+        let gone = d.join("lanes/imp-1");
+        super::remake_folder(gone.to_str().unwrap(), root.to_str().unwrap()).await.unwrap();
+        assert!(gone.is_dir() && gone.join(".git").exists(), "a fresh worktree");
+        let plain = d.join("plain/x"); super::remake_folder(plain.to_str().unwrap(), "").await.unwrap(); assert!(plain.is_dir());
+        let _ = std::fs::remove_dir_all(&d);
     }
 }
