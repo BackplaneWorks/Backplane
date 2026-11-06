@@ -32,4 +32,4 @@ A checkpoint is used only when its version matches, it covers no more lines than
 
 ## Numbers (1.69M-event copy of the real log, 3.7 GiB cap)
 
-See the report that came with this change; `/tmp`-free: run `scripts/gpui/startup-bench.sh HUB_BIN HOME` for your own.
+See the report that came with this change; run `scripts/gpui/startup-bench.sh HUB_BIN HOME` for your own.
