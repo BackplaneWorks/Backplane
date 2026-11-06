@@ -21,4 +21,6 @@ From your own worktree, once your tests pass: `git rebase main`, then fast-forwa
 
 ## The bar
 
+While a build runs, `scripts/build-haiku.sh` has Haiku write a haiku on the commits since the tip built before (`MAIN_PREV`). It ships beside the build as `HAIKU` and the green bar shows it after the text. No `claude`, no commits or a slow answer: no haiku, the build is not held up.
+
 `$GPUI_DEV_DIR/BUILD` is the builder's status (testing, building, failed); `STATUS` is the watcher's (a build waits for turns to end: green, with Restart now and a confirming click). The app shows the watcher's first. See `docs/DEV-RELOAD.md`.

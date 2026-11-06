@@ -20,7 +20,10 @@ status() { printf '{"phase":"%s","text":"%s","done":%s,"total":%s}\n' "$1" "$2" 
 ticker() { while :; do e=$(( $(date +%s) - start )); d=$e; [ "$d" -gt $((est*95/100)) ] && d=$((est*95/100)); left=$((est-e)); [ "$left" -lt 0 ] && left=0
   status building "Building $(cat "$PH" 2>/dev/null): ${e}s, about ${left}s to go" "$d" "$est"; sleep 2; done; }
 ticker & TK=$!
-cleanup() { kill $TK 2>/dev/null; rm -f "$ST" "$ST.$$" "$PH"; [ -n "${D:-}" ] && rm -rf "$D"; rm -f "$LOG"; }
+# a haiku on what this build adds (commits since MAIN_PREV, the tip built before), made by Haiku while the build runs; a miss costs nothing
+HK=$(mktemp "$DEV/.haiku.XXXX"); HKP=
+if [ -n "${MAIN_PREV:-}" ]; then "$HERE/build-haiku.sh" "$ROOT" "$MAIN_PREV" "$(git -C "$ROOT" rev-parse HEAD)" > "$HK" 2>/dev/null & HKP=$!; fi
+cleanup() { kill $TK $HKP 2>/dev/null; rm -f "$ST" "$ST.$$" "$PH" "$HK"; [ -n "${D:-}" ] && rm -rf "$D"; rm -f "$LOG"; }
 trap cleanup EXIT
 fail() { kill $TK 2>/dev/null; why=$(grep -m1 -E '^(error|test .* FAILED)' "$LOG" | cut -c1-110); printf '%s\n' "$1: ${why:-see the log}" > "$DEV/.last-failure"; cp "$LOG" "$DEV/.last-failure.log" 2>/dev/null
   status failed "Build failed in $1: ${why:-see $DEV/.last-failure.log}" 0 0; tail -20 "$LOG" >&2; sleep 8; exit 1; }
@@ -39,6 +42,7 @@ if command -v bun >/dev/null 2>&1 && ( cd "$ROOT/tools/browser" && bun install -
 else prev=$DEV/builds/$(head -1 "$DEV/CURRENT" 2>/dev/null)/backplane-browser; [ -x "$prev" ] && cp "$prev" "$D/" || echo "warning: no browser helper built (bun missing or the build failed) and none to reuse" >&2; fi
 A=${ASSETS:-$DEV/builds/$(head -1 "$DEV/CURRENT" 2>/dev/null)/assets}; [ -d "$A" ] && cp -r "$A" "$D/assets"
 git -C "$ROOT" rev-parse --short HEAD > "$D/COMMIT"
+[ -z "$HKP" ] || wait "$HKP" 2>/dev/null; [ -s "$HK" ] && cp "$HK" "$D/HAIKU"
 [ "$CUT" = 0 ] && { echo "built in $D"; D=; exit 0; }
 status ready "Build $(cat "$D/COMMIT") ready: publishing" "$est" "$est"
 "$HERE/dev-cut.sh" "$D"
