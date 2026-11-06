@@ -125,6 +125,19 @@ pub fn act(req: &Req) -> Option<ActOut> {
             a.set("@del", ""); a.set("@menu", ""); a.set("@want.viewer", ""); a.set("@want.new", &rid); a.set("@want.new.at", &at);
             a.rpc("thread.create", json!({"project": v, "title": "New thread"}));
         }
+        // Add project: the folder picker (present/picker.rs draws it from `@proj.open`, `@proj.text`). Typing and going into a folder set the text;
+        // Add and Create send the request that makes the project (and its first thread, which the reply selects: Made.want).
+        "picker-open" => { a.set("@proj.open", "1"); a.set("@proj.text", "~/"); a.set("@proj.err", ""); a.set("@menu", "") }
+        "picker-type" => { a.set("@proj.text", v); a.set("@proj.err", "") }
+        "proj-cd" => { let t = if v.ends_with('/') { v.to_string() } else { format!("{v}/") }; a.set("@proj.text", &t); a.set("@proj.err", "") }
+        "proj-close" => { a.set("@proj.open", ""); a.set("@proj.text", ""); a.set("@proj.err", "") }
+        "proj-add" | "proj-new" if !v.trim().is_empty() => {
+            let rid = a.rid.to_string();
+            let at = format!("{}|{}", r.session["info"]["local.machine"].as_str().unwrap_or(""), r.session["info"]["local.generation"].as_str().unwrap_or(""));
+            a.set("@want.new", &rid); a.set("@want.new.at", &at);
+            a.rpc(if r.action == "proj-add" { "project.add" } else { "project.new" }, json!({"path": v.trim()}));
+            a.set("@proj.open", ""); a.set("@proj.text", ""); a.set("@proj.err", "");
+        }
         _ => return None,
     }
     Some(a.out())
@@ -143,6 +156,20 @@ pub fn merge(session: &Value, patch: &Value) -> Value {
 mod tests {
     use super::*;
     const FIX: &str = include_str!("../../../../test/gpui/commands/fixtures/actions.json");
+    // Add project: open, type, go in, add; the add sends project.add with the path and arms the want for the first thread; close clears
+    #[test] fn the_folder_picker_actions_set_the_text_and_add_sends_the_request() {
+        let sess = json!({"rid": 3, "drafts": {}, "info": {"local.machine": "m", "local.generation": "g"}});
+        let run = |action: &str, value: &str, session: &Value| act(&Req { hub: "h", session, sel: "", action, value, title_of: &|_| String::new() }).unwrap();
+        let o = run("picker-open", "", &sess); assert_eq!((o.session_patch["drafts"]["@proj.open"].as_str(), o.session_patch["drafts"]["@proj.text"].as_str()), (Some("1"), Some("~/")));
+        assert_eq!(run("picker-type", "~/pro", &sess).session_patch["drafts"]["@proj.text"], "~/pro");
+        assert_eq!(run("proj-cd", "/home/x/proj", &sess).session_patch["drafts"]["@proj.text"], "/home/x/proj/");
+        let o = run("proj-add", "/home/x/proj", &sess); assert_eq!(o.cmds.len(), 1);
+        let sent: Value = serde_json::from_str(o.cmds[0]["text"].as_str().unwrap()).unwrap(); assert_eq!((sent["m"].as_str(), sent["p"]["path"].as_str()), (Some("project.add"), Some("/home/x/proj")));
+        assert_eq!((o.session_patch["drafts"]["@proj.open"].as_str(), o.session_patch["drafts"]["@want.new"].as_str()), (Some(""), Some("3")));
+        assert_eq!(serde_json::from_str::<Value>(run("proj-new", "/home/x/n", &sess).cmds[0]["text"].as_str().unwrap()).unwrap()["m"], "project.new");
+        assert!(act(&Req { hub: "h", session: &sess, sel: "", action: "proj-add", value: "  ", title_of: &|_| String::new() }).is_none(), "no path, no request");
+        assert_eq!(run("proj-close", "", &sess).session_patch["drafts"]["@proj.open"], "");
+    }
     // Bend's presenter answers each recorded action with this session change and these commands: same keys, same values, same requests
     #[test] fn every_recorded_row_action_is_answered_as_the_bend_presenter_answers_it() {
         let fx: Value = serde_json::from_str(FIX).unwrap();

@@ -97,7 +97,7 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, p: &Projects, data: &Value
         let icon = match it.kind.as_str() { "up" => "↰", "dir" => "▸", "add" => "+", _ => " " };
         list = list.child(div().id(SharedString::from(format!("folder-{i}"))).flex().gap_2().px_2().py_1().text_size(px(12.)).text_color(c(if live { "text" } else { "faint" })).when(live, |d| d.cursor_pointer().hover(|s| s.bg(c("raise"))))
             .child(div().w(px(14.)).text_color(c("dim")).child(icon)).child(div().flex_1().overflow_hidden().whitespace_nowrap().child(it.label.clone()))
-            .on_click(cx.listener(move |this, _, _, cx| { if !a.is_empty() { let _ = this.tx.try_send(Command::Action(a.clone(), v.clone())); } cx.notify(); })));
+            .on_click(cx.listener(move |this, _, _, cx| { if !a.is_empty() { if a == "proj-add" || a == "proj-new" { this.arm_new(); } let _ = this.tx.try_send(Command::Action(a.clone(), v.clone())); } cx.notify(); })));
     }
     Some(div().id("folders-q").absolute().inset_0().occlude().bg(c("bg")).flex().flex_col().items_start().p_4().gap_3()
         .child(div().font_weight(FontWeight::BOLD).child("Add project"))
