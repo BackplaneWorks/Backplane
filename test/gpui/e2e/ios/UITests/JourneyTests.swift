@@ -167,40 +167,58 @@ final class Journeys: XCTestCase {
         let path = env("HUB_PROJECT_PATH") ?? "~/bp-stub-projects/e2e1"
         let title = path.split(separator: "/").last.map(String.init) ?? "e2e1"
         let first = env("HUB_FIRST_PROMPT") ?? "hello from the phone", firstSees = env("HUB_FIRST_EXPECT") ?? "You said: hello from the phone"
-        let second = env("HUB_ASK_PROMPT") ?? "please ask me first", secondSees = env("HUB_ASK_EXPECT") ?? "You said: please ask me first"
+        let second = env("HUB_ASK_PROMPT") ?? "please ask me first"; let secondSees: String? = env("HUB_ASK_EXPECT") ?? (env("HUB_PAIR_LINK") == nil ? "You said: please ask me first" : nil)
         let reply = Double(env("HUB_REPLY_WAIT") ?? "20") ?? 20
         // paired by an invitation link the way a phone is (HUB_PAIR_LINK), or by the token link the fixture hubs allow
         d.app.terminate()
         if let pair = env("HUB_PAIR_LINK") {
             d.app.launchEnvironment = ["BACKPLANE_PERFORMANCE": "1"]; d.app.launch()
+            // a phone that was paired before (the keychain outlives an install): forget that hub first, as a person re-pairing would
+            if !d.el("pair.address").waitForExistence(timeout: 6), d.app.tabBars.buttons["Settings"].waitForExistence(timeout: 6) {
+                d.app.tabBars.buttons["Settings"].tap()
+                d.app.buttons["Forget this hub"].tap()
+                if d.app.buttons["Forget"].waitForExistence(timeout: 4) { d.app.buttons["Forget"].tap() }
+            }
             let addr = d.el("pair.address")
             guard d.step("pairing screen", act: {}, expect: { addr.waitForExistence(timeout: 20) }) else { return }
             d.step("type the pairing link", act: { d.tap(addr); d.type(addr, pair) }, expect: { d.el("pair.connect").isEnabled })
-            d.step("connect", timeout: 30, act: { d.tap(d.el("pair.connect")) }, expect: { d.el("data.project.add").waitForExistence(timeout: 30) || d.el("data.project.add.empty").waitForExistence(timeout: 1) })
+            d.step("connect", timeout: 30, act: { d.tap(d.el("pair.connect")) }, expect: { d.app.tabBars.buttons["Threads"].waitForExistence(timeout: 30) })
+            if d.app.tabBars.buttons["Threads"].exists { d.app.tabBars.buttons["Threads"].tap() }
+        } else if env("HUB_ALREADY_PAIRED") != nil {
+            // the phone (simulator keychain) holds the device credential from an earlier pairing: no link, no invitation
+            d.app.launchEnvironment = ["BACKPLANE_PERFORMANCE": "1"]; d.app.launch()
+            if d.app.tabBars.buttons["Threads"].waitForExistence(timeout: 20) { d.app.tabBars.buttons["Threads"].tap() }
         } else {
             d.app.launchEnvironment = ["BACKPLANE_LINK": d.link, "BACKPLANE_PERFORMANCE": "1"]; d.app.launch()
         }
+        func hittable(_ e: XCUIElement) { for _ in 0..<40 where !e.isHittable { usleep(250_000) } }
         let rows = d.app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'data.thread.row.'"))
         guard d.step("threads tab", act: {}, expect: { d.el("data.project.add").waitForExistence(timeout: 20) }) else { return }
-        guard d.step("add project", act: { d.tap(d.el("data.project.add")) }, expect: { d.el("data.project.path").waitForExistence(timeout: 10) }) else { return }
-        d.step("choose the folder", act: { let f = d.el("data.project.path"); d.tap(f); f.press(forDuration: 1.0); if d.app.menuItems["Select All"].waitForExistence(timeout: 2) { d.app.menuItems["Select All"].tap() }; f.typeText(path) },
-               expect: { d.el("data.project.add.confirm").isEnabled })
-        guard d.step("project appears", act: { d.tap(d.el("data.project.add.confirm")) }, expect: { d.app.buttons["New thread in \(title)"].waitForExistence(timeout: 15) }) else { d.shot("no-project"); return }
+        // a project added in an earlier run is already listed: no second add (a hub refuses a folder it already has)
+        _ = d.app.buttons["New thread in \(title)"].waitForExistence(timeout: 6)
+        if !d.app.buttons["New thread in \(title)"].exists {
+            guard d.step("add project", act: { d.tap(d.el("data.project.add")) }, expect: { d.el("data.project.path").waitForExistence(timeout: 10) }) else { return }
+            d.step("choose the folder", act: { let f = d.el("data.project.path"); d.tap(f); f.press(forDuration: 1.0); if d.app.menuItems["Select All"].waitForExistence(timeout: 2) { d.app.menuItems["Select All"].tap() }; f.typeText(path) },
+                   expect: { d.el("data.project.add.confirm").isEnabled })
+            guard d.step("project appears", act: { d.tap(d.el("data.project.add.confirm")) }, expect: { let ok = d.app.buttons["New thread in \(title)"].waitForExistence(timeout: 15); sleep(1); return ok && !d.el("data.project.path").exists }) else { d.shot("no-project"); return }
+        }
         // a project the hub makes with a first empty thread: the thread to use is the one the next step starts
         let before = rows.count
-        guard d.step("new thread sheet", act: { d.tap(d.app.buttons["New thread in \(title)"]) }, expect: { d.el("data.thread.new.text").waitForExistence(timeout: 10) }) else { return }
+        guard d.step("new thread sheet", act: { let b = d.app.buttons["New thread in \(title)"]; _ = b.waitForExistence(timeout: 10); hittable(b); b.tap() }, expect: { d.el("data.thread.new.text").waitForExistence(timeout: 10) }) else { return }
         d.step("start the thread", act: { let t = d.el("data.thread.new.text"); d.tap(t); t.typeText(first); d.tap(d.el("data.thread.new.start")) },
                expect: { rows.count > before || rows.firstMatch.waitForExistence(timeout: 15) })
         // the thread whose preview or title is the prompt; else the first row
         let mine = rows.containing(NSPredicate(format: "label CONTAINS[c] %@", String(first.prefix(20)))).firstMatch
         guard d.step("open the thread", act: { d.tap(mine.exists ? mine : rows.firstMatch) }, expect: { d.el("thread.composer").waitForExistence(timeout: 10) }) else { return }
-        d.step("the answer shows", timeout: reply, act: {}, expect: { d.label(firstSees).exists })
+        let answered = d.step("the answer shows", timeout: reply, act: {}, expect: { d.label(firstSees).exists })
         d.shot("thread-answered")
+        d.notes.append("first answer seen: \(answered)")
         let comp = d.el("thread.composer")
         d.step("send a message that needs approval", act: { d.tap(comp); d.type(comp, second); d.tap(d.el("thread.send")) }, expect: { d.el("data.entry.ask").waitForExistence(timeout: reply) || d.app.buttons["Allow"].waitForExistence(timeout: 1) })
         d.shot("approval")
         let allow = d.app.buttons["Allow"]
-        d.step("allow", timeout: reply, act: { if allow.exists { allow.tap() } else { d.app.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] 'Allow'")).firstMatch.tap() } }, expect: { d.label(secondSees).waitForExistence(timeout: reply) })
+        guard d.el("data.entry.ask").exists || allow.exists else { d.note("no approval was raised for: \(second)"); d.block("no approval entry appeared within \(Int(reply)) s"); return }
+        d.step("allow", timeout: reply, act: { if allow.exists { allow.tap() } else if d.app.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] 'Allow'")).firstMatch.exists { d.app.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] 'Allow'")).firstMatch.tap() } else { d.el("data.entry.ask").buttons.firstMatch.tap() } }, expect: { if let s = secondSees { return d.label(s).waitForExistence(timeout: reply) }; let end = Date().addingTimeInterval(reply); while Date() < end { if !d.app.buttons["Allow"].exists && !d.el("data.thinking").exists { return true }; Thread.sleep(forTimeInterval: 0.5) }; return false })
         // back to the list, then the app again from nothing: the saved copy paints before the hub answers
         let back = d.app.navigationBars.buttons.element(boundBy: 0); if back.exists { back.tap() }
         sleep(2)

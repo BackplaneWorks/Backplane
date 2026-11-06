@@ -10,7 +10,7 @@ J=${*:-data-flow}
 # nothing is started or stopped here, and nothing is printed that carries the invitation
 if [ "${REAL:-}" = 1 ]; then
   RSYNC_RSH=$M rsync -a --delete test/gpui/e2e/ios/ hs-mac-mini:bp-gpui-ios/e2e/
-  $M hs-mac-mini "cd ~/bp-gpui-ios/e2e && rm -rf ~/bp-gpui-ios/e2e-out && SIM_UDID=$U OUT=\$HOME/bp-gpui-ios/e2e-out HUB_PAIR_LINK='$HUB_PAIR_LINK' HUB_PROJECT_PATH='$HUB_PROJECT_PATH' HUB_FIRST_PROMPT='${HUB_FIRST_PROMPT:-}' HUB_FIRST_EXPECT='${HUB_FIRST_EXPECT:-}' HUB_ASK_PROMPT='${HUB_ASK_PROMPT:-}' HUB_ASK_EXPECT='${HUB_ASK_EXPECT:-}' HUB_REPLY_WAIT='${HUB_REPLY_WAIT:-}' sh ./run.sh $J; xcrun simctl shutdown $U" > /dev/null 2>&1
+  $M hs-mac-mini "cd ~/bp-gpui-ios/e2e && rm -rf ~/bp-gpui-ios/e2e-out && SIM_UDID=$U OUT=\$HOME/bp-gpui-ios/e2e-out HUB_HOST=${HUB_HOST:-100.64.84.41} HUB_PORT=${HUB_PORT:-3917} HUB_TOKEN_FILE=/dev/null HUB_PAIR_LINK='${HUB_PAIR_LINK:-}' HUB_ALREADY_PAIRED='${HUB_ALREADY_PAIRED:-}' HUB_PROJECT_PATH='$HUB_PROJECT_PATH' HUB_FIRST_PROMPT='${HUB_FIRST_PROMPT:-}' HUB_FIRST_EXPECT='${HUB_FIRST_EXPECT:-}' HUB_ASK_PROMPT='${HUB_ASK_PROMPT:-}' HUB_ASK_EXPECT='${HUB_ASK_EXPECT:-}' HUB_REPLY_WAIT='${HUB_REPLY_WAIT:-}' sh ./run.sh $J; xcrun simctl shutdown $U" > /dev/null 2>&1
   RSYNC_RSH=$M rsync -a hs-mac-mini:bp-gpui-ios/e2e-out/ $OUT/
   python3 - <<PY
 import json,glob

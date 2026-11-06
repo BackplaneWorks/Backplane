@@ -337,7 +337,13 @@ final class DataClient {
         }
     }
     func answer(_ tid: String, ask: String, option: String) async {
-        _ = try? await call("ask.answer", ["thread": tid, "ask": ask, "answer": option], as: DEmpty.self)
+        do {
+            _ = try await call("ask.answer", ["thread": tid, "ask": ask, "answer": option], as: DEmpty.self)
+            // the card shows the answer at once; the hub's own push (same entry id, state answered) confirms it
+            if var l = entries[tid], let i = l.firstIndex(where: { $0.ask?.id == ask }) {
+                l[i].ask?.state = "answered"; l[i].ask?.answered = option; entries[tid] = l
+            }
+        } catch { failure = error.localizedDescription }
     }
     func interrupt(_ tid: String) async { _ = try? await call("turn.interrupt", ["thread": tid], as: DEmpty.self) }
     func addProject(path: String, title: String = "") async throws -> DProject {
@@ -347,7 +353,7 @@ final class DataClient {
         return r.project
     }
     func createThread(project: String, text: String) async throws -> DThread {
-        var p: [String: Any] = ["project": project, "clientId": UUID().uuidString]
+        var p: [String: Any] = ["project": project, "clientId": UUID().uuidString, "permission": "ask"]
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines); if !t.isEmpty { p["text"] = t }
         let r: DThreadReply = try await call("thread.create", p)
         upsert(r.thread)
