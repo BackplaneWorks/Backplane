@@ -108,8 +108,19 @@ fn signal_ignored(sig: i32) -> bool {
     unsafe { let mut old: libc::sigaction = std::mem::zeroed(); libc::sigaction(sig, std::ptr::null(), &mut old) == 0 && old.sa_sigaction == libc::SIG_IGN }
 }
 
+/// Every agent, terminal and socket is a few descriptors; macOS starts a process with a soft limit of 256. Raise it to the hard limit (macOS refuses more than 10240).
+fn raise_nofile() {
+    unsafe {
+        let mut l = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+        if libc::getrlimit(libc::RLIMIT_NOFILE, &mut l) != 0 { return }
+        let want = if cfg!(target_os = "macos") { l.rlim_max.min(10240) } else { l.rlim_max };
+        if l.rlim_cur < want { l.rlim_cur = want; libc::setrlimit(libc::RLIMIT_NOFILE, &l); }
+    }
+}
+
 #[tokio::main]
 async fn main() {
+    raise_nofile();
     if std::env::args().nth(1).as_deref() == Some("--render") { std::process::exit(render_cli()) }
     let args = match parse() { Ok(a) => a, Err(code) => std::process::exit(code) };
     // a signal that ends the hub says so in hub.log and exits nonzero (128 + the signal); SIGKILL cannot be caught.
