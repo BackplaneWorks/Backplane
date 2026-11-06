@@ -6,14 +6,14 @@ const here=dirname(fileURLToPath(import.meta.url));
 const arg=(k,d)=>{const i=process.argv.indexOf('--'+k);return i>=0?process.argv[i+1]:d};const flag=k=>process.argv.includes('--'+k);
 const hubKind=arg('hub-kind','js'),realHw=flag('real-hardware');const client=arg('client','gpui'),which=arg('journey','all'),out=resolve(arg('out','out/e2e')+'/'+client),hubBin=arg('hub-bin',process.env.HUB_BIN),gpuiBin=arg('gpui-bin',process.env.GPUI_BIN);
 const J=JSON.parse(readFileSync(here+'/journeys.json','utf8'));const hz=Number(arg('hz',J.refresh_hz_budget[client]));
-const adapter=await import(`./adapters/${client}.mjs`);mkdirSync(out,{recursive:true});
+const adapter=await import(`./adapters/${client==='gpui'?'desktop':client}.mjs`);mkdirSync(out,{recursive:true});
 const todo=J.journeys.filter(j=>which==='all'||which===j.id);
 const summary={client,when:new Date().toISOString(),hz,hub:hubBin||null,results:[],captures:[],env:{}};
 let display=null,fx=null;
 try{
   if(client==='gpui'){
     const cap=await import('./lib/capture.mjs');summary.env=cap.installMissing();
-    if(!summary.env.tools.Xvfb||!summary.env.tools.i3)throw Error('no Xvfb/i3 on this machine (run on Boat): '+JSON.stringify(summary.env));
+    if(!summary.env.tools.Xvfb)throw Error('no Xvfb on this machine (run on h@backplane or Boat): '+JSON.stringify(summary.env));
     if(!gpuiBin)throw Error('--gpui-bin (the Linux GPUI binary) is required');
     display=await cap.startDisplay(62);
   }
