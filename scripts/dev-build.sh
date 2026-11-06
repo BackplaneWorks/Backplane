@@ -9,11 +9,12 @@
 set -u
 ROOT=${BUILD_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}; HERE=$(cd "$(dirname "$0")" && pwd)
 DEV=${GPUI_DEV_DIR:-$HOME/.backplane-gpui-dev}; ST=${BACKPLANE_DEV_STATUS:-$DEV/BUILD}; J=${JOBS:-}  # cargo -j: JOBS, else sized from free memory once the build lock is held (below)
+case " $* " in *" --no-cut "*) [ -n "${BACKPLANE_DEV_STATUS:-}" ] || ST=$DEV/BUILD.nocut.$$;; esac   # a build that publishes nothing must not write the person's progress strip
 # A few heavy builds at a time on this machine (scripts/lib-buildslot.sh: slots from cores and free memory, two here): lanes cutting at once queue on a slot instead of all
 # compiling together and filling RAM. This script runs again inside the slot (BQ_HELD); nothing it leaves behind can keep the slot.
 if [ -z "${BQ_HELD:-}" ]; then . "$HERE/lib-buildslot.sh"; export BQ_HELD=1
   queued() { mkdir -p "$DEV"; printf '{"phase":"building","text":"Queued behind other builds","done":0,"total":0}\n' > "$ST"; }
-  bq_run queued "$0" "$@"; rc=$?; exit $rc; fi
+  bq_run queued "$0" "$@"; rc=$?; rm -f "$ST"; exit $rc; fi
 . "$HERE/lib-buildslot.sh"
 PROFILE=${PROFILE:-fast}  # cargo profile: fast (no LTO, incremental; Cargo.toml) by default, PROFILE=release for the fat-LTO build
 GATE=0; CUT=1; for a in "$@"; do case "$a" in --gate) GATE=1;; --no-cut) CUT=0;; esac; done
