@@ -13,6 +13,8 @@ use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::{protocol::WebSocketConfig, Message};
 
 pub const PROTO: &str = "data/1";
+/// What this hub does beyond the base of data/1; a hub from before an addition does not list it (the app can warn instead of sending what would be dropped).
+pub const FEATURES: &[&str] = &["images"];
 const PREVIEW: usize = 140;
 const ASK_SCAN: usize = 4000;
 
@@ -365,7 +367,7 @@ pub async fn socket(hub: Arc<Hub>, s: TcpStream, json_mode: bool, token: String,
     struct Detach(Arc<Hub>, u64); impl Drop for Detach { fn drop(&mut self) { self.0.detach(self.1) } }
     let _detach = Detach(hub.clone(), conn.client);
     if !hub.admit_blocking(conn.client, token).await { return Ok(()) }
-    tx.send(pack(&json!({"t":"hello","proto":PROTO,"hub":host,"version":hub.cfg.version,"epoch":hub.epoch,"now":now_ms()}), json_mode)).await?;
+    tx.send(pack(&json!({"t":"hello","proto":PROTO,"hub":host,"version":hub.cfg.version,"epoch":hub.epoch,"now":now_ms(),"features":FEATURES}), json_mode)).await?;
     let (mut changes, mut frames) = (hub.changed.subscribe(), hub.frames.subscribe());
     let mut seen = hub.store.len(); let mut subs = Subs::default();
     let mut beat = tokio::time::interval(Duration::from_millis(15000)); beat.tick().await;
