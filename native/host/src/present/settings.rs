@@ -364,8 +364,8 @@ pub fn act(hub: &str, session: &Value, action: &str, value: &str) -> Option<Out>
             let Some(routes) = crate::net::start::routes() else { return Some(Out { patch: json!({"drafts": {"@invite": json!({"error": "no_registry"}).to_string()}}), cmds }) };
             match action {
                 "device-invite" => json!({"drafts": {"@invite": routes.invite().to_string()}}),
-                "device-revoke" => { let _ = routes.reg.revoke(value); json!({}) }
-                _ => { let _ = routes.reg.uninvite(value); json!({}) }
+                "device-revoke" => { crate::net::start::revoke("revoke", value); json!({}) }
+                _ => { crate::net::start::revoke("uninvite", value); json!({}) }
             }
         }
         "kicad-path" => {

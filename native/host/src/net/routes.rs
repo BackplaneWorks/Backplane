@@ -105,8 +105,7 @@ impl AuthRoutes {
             _ => { let g = self.state.lock().unwrap(); let mut rs = g.routes.clone(); rs.push(format!("http://{}:{}", self.host, self.port));
                 json!({"known": pairing::known(&secret, &rs, &g.machines, &g.peers)}) }
         };
-        let close: Vec<u64> = j["clients"].as_array().into_iter().flatten().filter_map(Value::as_u64).collect();
-        let unpeer = (op == "uninvite").then(|| j["peer"].as_str().filter(|p| !p.is_empty()).map(str::to_string)).flatten();
+        let (close, unpeer) = revoked(op, &j);
         let native = req.header("origin").is_empty() && req.header("x-backplane-client") == "native";
         let error = j["error"].as_str().unwrap_or("");
         let credential = j["token"].as_str().unwrap_or("");
@@ -118,6 +117,13 @@ impl AuthRoutes {
         let cookies = if credential.is_empty() { String::new() } else { owner::pair_cookies(credential, https) };
         Some(Outcome { reply: json_reply(status, &body, &cookies), close, unpeer })
     }
+}
+
+/// What the hub must do once the registry has answered `op`: the connections to close and the machine link to remove. Every door to a revoke acts on this
+/// (POST /auth/revoke here, Settings → Devices through `start::revoke`): a revoked credential that leaves its socket open still reads the hub.
+pub fn revoked(op: &str, j: &Value) -> (Vec<u64>, Option<String>) {
+    let close = j["clients"].as_array().into_iter().flatten().filter_map(Value::as_u64).collect();
+    (close, (op == "uninvite").then(|| j["peer"].as_str().filter(|p| !p.is_empty()).map(str::to_string)).flatten())
 }
 
 fn is_loopback(x: &str) -> bool {

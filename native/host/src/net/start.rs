@@ -48,6 +48,19 @@ static ROUTES: std::sync::OnceLock<Arc<AuthRoutes>> = std::sync::OnceLock::new()
 /// The installed routes, for the listener (`address(link)` once Serve/the tailnet bind is confirmed) and the
 /// machine finder (`machines(json, peers)`). None before `start`.
 pub fn routes() -> Option<Arc<AuthRoutes>> { ROUTES.get().cloned() }
+static HUB: std::sync::OnceLock<std::sync::Weak<Hub>> = std::sync::OnceLock::new();
+/// A revoke's consequences on the hub: its connections close and the link it made goes (`routes::revoked` says which).
+pub fn settle_revoke(hub: &Hub, ar: &dyn AuthRoute, op: &str, j: &serde_json::Value) {
+    let (close, unpeer) = super::routes::revoked(op, j);
+    hub.close_clients(&close);
+    if let Some(link) = unpeer { ar.unpeer(&link) }
+}
+/// Settings → Devices: `op` is "revoke" (a device id) or "uninvite" (an invitation id), acted on as POST /auth/revoke acts on it.
+pub fn revoke(op: &str, id: &str) {
+    let Some(routes) = routes() else { return };
+    let j = if op == "uninvite" { routes.reg.uninvite(id) } else { routes.reg.revoke(id) };
+    if let Some((hub, ar)) = HUB.get().and_then(std::sync::Weak::upgrade).and_then(|h| h.auth_route().map(|a| (h, a))) { settle_revoke(&hub, ar.as_ref(), op, &j) }
+}
 
 pub fn start(hub: &Arc<Hub>, host: &str, port: u16) -> Arc<AuthRoutes> { start_with(hub, host, port, false) }
 /// `tailnet`: this hub uses Tailscale (started without --no-tailscale): it names itself by its MagicDNS name and pairs with
@@ -65,6 +78,7 @@ pub fn start_full(hub: &Arc<Hub>, host: &str, port: u16, tailnet: bool, https: b
             hub.register_rpc(Arc::new(super::peerrpc::PeerRpc(peering.clone())));
             hub.set_pairing(reg, Arc::new(Wired { routes: routes.clone(), hub: Arc::downgrade(hub) }));
             let _ = ROUTES.set(routes.clone());
+            let _ = HUB.set(Arc::downgrade(hub));
             let _ = PEERING.set(peering.clone());
             if tokio::runtime::Handle::try_current().is_ok() {
                 super::peerhttp::spawn_loops(hub.clone(), table.clone(), peering.clone());
@@ -100,6 +114,39 @@ mod tests {
     use crate::api::Pairing;
     #[test] fn pair_unpeer_event_is_a_revoked_peerset() {
         assert_eq!(unpeer_event("p0123456789abcdef", 7).to_string(), r#"{"$":"PeerSet","id":"p0123456789abcdef","name":"","url":"","revoked":true,"at":7}"#);
+    }
+    /// The Settings door and the HTTP door share `settle_revoke`: a device's live connection is told to close, on either kind of revoke, and a used machine invite's link goes.
+    #[tokio::test] async fn pair_settings_revoke_closes_the_devices_connection_and_removes_the_link() {
+        use crate::{hub::{Cfg, Out}, presenter::Canned};
+        struct Links(std::sync::Mutex<Vec<String>>);
+        impl AuthRoute for Links {
+            fn handle(&self, _r: &Req, _c: u64) -> Option<AuthOutcome> { None }
+            fn unpeer(&self, link: &str) { self.0.lock().unwrap().push(link.to_string()) }
+        }
+        let dir = std::env::temp_dir().join(format!("bp-net-settle-{}", std::process::id())); let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("token"), "roottoken").unwrap();
+        let hub = Hub::start(Cfg { home: dir.clone(), version: "0.14.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: serde_json::json!({}) })).await.unwrap();
+        let (reg, _) = open(&dir, "127.0.0.1", 3787).unwrap();
+        let links = Links(Default::default());
+        let routes = vec!["https://m.ts.net".to_string()];
+        for (n, op) in ["revoke", "uninvite"].iter().enumerate() {
+            let inv = reg.create(&routes);
+            let dev = reg.enroll(inv["code"].as_str().unwrap(), "Phone");
+            let client = 9000 + n as u64;
+            let mut outbox = hub.attach(client);
+            assert_eq!(reg.resolve(dev["token"].as_str().unwrap(), client, "/ws"), dev["token"].as_str().unwrap(), "the socket is known as this device's");
+            let j = if *op == "revoke" { reg.revoke(dev["id"].as_str().unwrap()) } else { reg.uninvite(inv["id"].as_str().unwrap()) };
+            assert!(outbox.try_recv().is_err(), "{op}: the registry alone closes nothing");
+            settle_revoke(&hub, &links, op, &j);
+            assert!(matches!(outbox.try_recv(), Ok(Out::Close)), "{op}: the device's open connection is told to close");
+            assert!(!reg.holds(dev["token"].as_str().unwrap()), "{op}: and its credential no longer holds");
+        }
+        assert!(links.0.lock().unwrap().is_empty(), "a device has no link to remove");
+        let peer = "p0123456789abcdef";
+        let m = reg.machine(peer); assert_eq!(reg.link(peer, "box")["ok"], true);
+        settle_revoke(&hub, &links, "uninvite", &reg.uninvite(m["id"].as_str().unwrap()));
+        assert_eq!(*links.0.lock().unwrap(), vec![peer.to_string()], "a used machine invite's link goes with it");
+        let _ = std::fs::remove_dir_all(dir);
     }
     #[test] fn pair_start_needs_the_token() {
         let dir = std::env::temp_dir().join(format!("bp-net-notoken-{}", std::process::id())); std::fs::create_dir_all(&dir).unwrap();
