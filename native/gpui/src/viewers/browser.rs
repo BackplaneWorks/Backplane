@@ -2,6 +2,7 @@
 //! page does (dropped with it); it fetches every 700 ms, decodes only when the bytes changed, and the page redraws only then, so an idle page
 //! (an unchanged frame) costs no repaint. Input to the page (bots.browser clicks/keys, teach mode) is not wired yet.
 use gpui::{prelude::*, *};
+use super::chrome;
 use crate::{art, theme};
 use std::{sync::{atomic::{AtomicBool, Ordering}, Arc}, time::{Duration, Instant}};
 
@@ -17,7 +18,7 @@ pub fn decode_jpeg(bytes: &[u8]) -> Option<Arc<RenderImage>> {
 }
 fn fnv(bytes: &[u8]) -> u64 { bytes.iter().fold(0xcbf29ce484222325u64, |h, b| (h ^ *b as u64).wrapping_mul(0x100000001b3)) }
 
-pub struct BrowserPage { #[cfg(feature = "cef")] pub cef: Option<Entity<super::cef_page::CefPage>>, bar: Bar, pub light: bool, open_error: Option<String>, opening_since: Instant, image: Option<Arc<RenderImage>>, retired: Vec<Arc<RenderImage>>, pub status: String, stop: Arc<AtomicBool>, visible: Arc<AtomicBool> }
+pub struct BrowserPage { #[cfg(feature = "cef")] pub cef: Option<Entity<super::cef_page::CefPage>>, bar: Bar, banner: String, pub light: bool, open_error: Option<String>, opening_since: Instant, image: Option<Arc<RenderImage>>, retired: Vec<Arc<RenderImage>>, pub status: String, stop: Arc<AtomicBool>, visible: Arc<AtomicBool> }
 impl BrowserPage {
     /// `base` like http://127.0.0.1:3821 (http only for now: this client has no TLS, so an https base never starts the poller), `owner` the page's owner as the hub names it (a bot's id, or the thread's id
     /// for a thread's page: the host passes `BT.World.page`'s value), `token` the hub token (a Bearer header, never logged). The poller fetches only while
@@ -26,9 +27,11 @@ impl BrowserPage {
         let hub_tx = hub.clone(); let owner_bar = owner.clone();
         // with the `cef` feature and a usable runtime the page is embedded Chromium (cef_page.rs); otherwise the hub's JPEG frames below
         #[cfg(feature = "cef")]
+        let mut cef_why = String::new();
+        #[cfg(feature = "cef")]
         let (cef, cef_note) = match super::cef_page::engine_port() {
             Ok(port) => { let o = owner.clone(); (Some(cx.new(move |cx| super::cef_page::CefPage::new(cx, o, hub, port))), String::new()) }
-            Err(e) => { eprintln!("GPUI_LOG {{\"cef\":{}}}", serde_json::Value::String(e.clone())); (None, format!("Embedded browser unavailable ({e}); showing the hub's frames.")) }
+            Err(e) => { eprintln!("GPUI_LOG {{\"cef\":{}}}", serde_json::Value::String(e.clone())); cef_why = format!("embedded browser unavailable: {e}"); (None, format!("Embedded browser unavailable ({e}); showing the hub's frames.")) }
         };
         #[cfg(feature = "cef")]
         let use_poller = cef.is_none();
@@ -75,10 +78,21 @@ impl BrowserPage {
         let cef_note2 = cef_note;
         #[cfg(not(feature = "cef"))]
         let cef_note2 = String::new();
+        // why this is the hub-frame fallback, said in the tab for as long as it is (never silently a slower browser)
+        #[cfg(feature = "cef")]
+        let banner = cef_why.clone();
+        #[cfg(not(feature = "cef"))]
+        let banner = "embedded browser unavailable: this build has no CEF support (built without the cef feature)".to_string();
         let status = if !cef_note2.is_empty() { cef_note2 } else if https { "https hubs are not supported by this page yet (the client has no TLS)".to_string() } else { "Waiting for the first frame".to_string() };
-        BrowserPage { #[cfg(feature = "cef")] cef, bar: Bar::new(cx, hub_tx.clone(), owner_bar), light: false, open_error: None, opening_since: Instant::now(), image: None, retired: Vec::new(), status, stop, visible }
+        BrowserPage { #[cfg(feature = "cef")] cef, bar: Bar::new(cx, hub_tx.clone(), owner_bar), banner, light: false, open_error: None, opening_since: Instant::now(), image: None, retired: Vec::new(), status, stop, visible }
     }
     /// The helper's `tabs` event for this page (info `browser.tabs.<owner>`): the tab strip and the address of the active tab.
+    /// The theme of the window: light or dark (both pages draw from its tokens).
+    pub fn set_light(&mut self, light: bool, cx: &mut Context<Self>) {
+        if self.light != light { self.light = light; cx.notify(); }
+        #[cfg(feature = "cef")]
+        if let Some(c) = &self.cef { c.update(cx, |p, cx| { if p.light != light { p.light = light; cx.notify(); } }); }
+    }
     /// The hub refused to open or drive the page (a toolbar or open request answered an error): said in the tab with what to do, until a frame arrives.
     pub fn open_failed(&mut self, why: &str, cx: &mut Context<Self>) { if self.image.is_none() { self.open_error = Some(why.to_string()); cx.notify(); } }
     fn retry(&mut self, cx: &mut Context<Self>) { self.open_error = None; self.opening_since = Instant::now(); self.bar.rpc(serde_json::json!({"bot": self.bar.owner, "op": "open"})); cx.notify(); }
@@ -127,7 +141,8 @@ impl Render for BrowserPage {
         };
         let light = self.light;
         let bar = self.bar.render(light, size, content, window, cx);
-        div().id("browser-page").size_full().child(bar).into_any_element()
+        let banner = (!self.banner.is_empty()).then(|| div().px_3().py_1().text_size(px(12.)).bg(c("panel")).border_b_1().border_color(c("line")).text_color(c("warn")).child(self.banner.clone()));
+        div().id("browser-page").size_full().flex().flex_col().children(banner).child(div().flex_1().min_h_0().child(bar)).into_any_element()
     }
 }
 
@@ -159,6 +174,16 @@ impl Bar {
         let (x, y) = (f32::from(p.x - b.origin.x) - ox, f32::from(p.y - b.origin.y) - oy);
         (x >= 0.0 && y >= 0.0 && x <= w && y <= h).then(|| ((x / w * 1000.0) as u32, (y / h * 1000.0) as u32))
     }
+    fn act(&mut self, a: chrome::Act, window: &mut Window) {
+        use chrome::Act::*;
+        match a {
+            Back => self.toolbar("back", serde_json::json!({})), Forward => self.toolbar("forward", serde_json::json!({})), Reload => self.toolbar("reload", serde_json::json!({})),
+            NewTab => { self.toolbar("tabs", serde_json::json!({"new": true})); self.text.clear(); self.edit = true; self.fresh = false; window.focus(&self.bar_focus); }
+            Select(id) => self.toolbar("tabs", serde_json::json!({"selectId": id})), Close(id) => self.toolbar("tabs", serde_json::json!({"closeId": id})),
+            FocusBar => { window.focus(&self.bar_focus); self.text = self.url.clone(); self.edit = true; self.fresh = true; }
+            HandBack => { self.taken = false; self.rpc(serde_json::json!({"bot": self.owner, "op": "handback"})); }
+        }
+    }
     fn go(&mut self) {
         let t = self.text.trim().to_string(); if t.is_empty() { return }
         let t = if t.contains(' ') || (!t.contains('.') && !t.contains(':') && !t.starts_with("localhost")) { format!("https://www.google.com/search?q={}", t.replace(' ', "+")) } else { t };
@@ -183,47 +208,14 @@ impl Bar {
         match &k.key_char { Some(c) if !c.is_empty() && k.key != "enter" => self.input(serde_json::json!({"op": "type", "text": c})), _ => { let key = match k.key.as_str() { "enter" => "Enter", "backspace" => "Backspace", "tab" => "Tab", "escape" => "Escape", "left" => "ArrowLeft", "right" => "ArrowRight", "up" => "ArrowUp", "down" => "ArrowDown", "delete" => "Delete", "home" => "Home", "end" => "End", "pageup" => "PageUp", "pagedown" => "PageDown", _ => "" }; if !key.is_empty() { self.input(serde_json::json!({"op": "press", "key": key})); } } }
         cx.stop_propagation();
     }
-    /// A square icon button of the toolbar: hover raises it, disabled dims it and takes no click.
-    fn icon_button(light: bool, id: &'static str, name: &'static str, on: bool) -> Stateful<Div> {
-        let c = |n: &str| theme::color(light, n);
-        div().id(id).w(px(28.)).h(px(28.)).flex().items_center().justify_center().flex_shrink_0().border_1().border_color(c("panel"))
-            .child(art::icon(name, 16., c(if on { "text" } else { "faint" })))
-            .when(on, |d| d.cursor_pointer().hover(|s| s.bg(c("raise")).border_color(c("line")))).when(!on, |d| d.opacity(0.6))
-    }
     fn render(&mut self, light: bool, size: Option<(f32, f32)>, content: AnyElement, window: &mut Window, cx: &mut Context<BrowserPage>) -> AnyElement {
         if let Some(s) = size { self.image = s; }
         let c = |n: &str| theme::color(light, n);
         let focused = self.bar_focus.is_focused(window); let bounds = self.bounds.clone();
-        let have = !self.tabs.is_empty();
-        // the tab strip is always there, even with one tab: title, close, and a + at its end
-        let mut strip = div().h(px(32.)).flex().flex_row().items_end().bg(c("panel")).border_b_1().border_color(c("line")).text_size(px(12.)).px_1().gap_px().overflow_hidden();
-        for (i, (id, title, url, on)) in self.tabs.iter().cloned().enumerate() {
-            let label: String = (if title.is_empty() { url.trim_start_matches("https://").trim_start_matches("http://").to_string() } else { title }).chars().take(24).collect();
-            let (sel, close) = (id.clone(), id);
-            strip = strip.child(div().h(px(28.)).min_w(px(96.)).max_w(px(200.)).flex().flex_row().items_center().gap_1().pl_3().pr_1()
-                .border_1().border_b_0().border_color(c(if on { "line" } else { "panel" })).bg(c(if on { "bg" } else { "panel" })).text_color(c(if on { "text" } else { "dim" }))
-                .child(div().id(("btab", i)).flex_1().h_full().flex().items_center().cursor_pointer().overflow_hidden().child(if label.is_empty() { "New tab".to_string() } else { label })
-                    .on_click(cx.listener(move |this, _, _, cx| { this.bar.toolbar("tabs", serde_json::json!({"selectId": sel})); cx.notify(); })))
-                .child(div().id(("btabx", i)).w(px(20.)).h(px(20.)).flex().items_center().justify_center().cursor_pointer().hover(|s| s.bg(c("raise"))).child(art::icon("x", 12., c("dim")))
-                    .on_click(cx.listener(move |this, _, _, cx| { this.bar.toolbar("tabs", serde_json::json!({"closeId": close})); cx.notify(); }))));
-        }
-        strip = strip.child(div().id("br-new").w(px(28.)).h(px(28.)).flex().items_center().justify_center().cursor_pointer().hover(|s| s.bg(c("raise"))).child(art::icon("plus", 14., c("text")))
-            .on_click(cx.listener(|this, _, w, cx| { this.bar.toolbar("tabs", serde_json::json!({"new": true})); this.bar.text.clear(); this.bar.edit = true; this.bar.fresh = false; w.focus(&this.bar.bar_focus); cx.notify(); })));
-        let taken = self.taken;
-        let field_border = if focused { c("accent") } else { c("line") };
-        let chrome = div().h(px(40.)).flex().flex_row().items_center().gap_1().px_2().bg(c("bg")).border_b_1().border_color(c("line"))
-            .child(Self::icon_button(light, "br-back", "chevron-left", have).on_click(cx.listener(|this, _, _, _| this.bar.toolbar("back", serde_json::json!({})))))
-            .child(Self::icon_button(light, "br-fwd", "chevron-right", have).on_click(cx.listener(|this, _, _, _| this.bar.toolbar("forward", serde_json::json!({})))))
-            .child(Self::icon_button(light, "br-reload", "undo", have).on_click(cx.listener(|this, _, _, _| this.bar.toolbar("reload", serde_json::json!({})))))
-            .child(div().id("br-url").flex_1().h(px(28.)).px_2().flex().flex_row().items_center().gap_2().text_size(px(13.)).bg(c("panel")).border_1().border_color(field_border)
-                .track_focus(&self.bar_focus).key_context("BrowserBar").cursor_text()
-                .on_key_down(cx.listener(|this, e, w, cx| { this.bar.key(e, w, cx); cx.notify(); }))
-                .on_click(cx.listener(|this, _, w, cx| { w.focus(&this.bar.bar_focus); this.bar.edit = true; this.bar.fresh = true; cx.notify(); }))
-                .child(art::icon("globe", 14., c("dim")))
-                .child(div().flex_1().overflow_hidden().text_color(c(if self.text.is_empty() { "dim" } else { "text" }))
-                    .child(format!("{}{}", if self.text.is_empty() { "Search or enter address".to_string() } else { self.text.clone() }, if focused { "▏" } else { "" }))))
-            .when(taken, |d| d.child(div().id("br-hand").h(px(28.)).px_3().flex().items_center().cursor_pointer().bg(c("accent")).text_color(c("on-accent")).text_size(px(12.)).child("Hand back")
-                .on_click(cx.listener(|this, _, _, cx| { this.bar.taken = false; this.bar.rpc(serde_json::json!({"bot": this.bar.owner, "op": "handback"})); cx.notify(); }))));
+        let tabs: Vec<chrome::TabView> = self.tabs.iter().map(|(id, title, url, on)| chrome::TabView { id: id.clone(), title: title.clone(), url: url.clone(), active: *on }).collect();
+        let value = if focused && self.edit { self.text.clone() } else { self.url.clone() };
+        let (strip, chrome) = chrome::render(chrome::In { light, tabs: &tabs, value, focused, taken: self.taken, have: !self.tabs.is_empty(), loading: false, can_back: true, can_forward: true, bar_focus: &self.bar_focus }, cx,
+            |this: &mut BrowserPage, a, w, cx| { this.bar.act(a, w); cx.notify(); }, |this, e, w, cx| { this.bar.key(e, w, cx); cx.notify(); });
         let view = div().id("browser-frame").flex_1().relative().overflow_hidden().track_focus(&self.focus).key_context("BrowserView")
             .child(canvas(move |b, _, _| { *bounds.lock().unwrap() = Some(b); b }, |_, _, _, _| {}).absolute().size_full())
             .child(content)

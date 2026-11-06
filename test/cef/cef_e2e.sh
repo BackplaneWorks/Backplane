@@ -39,11 +39,12 @@ cat > "$OUT/script.json" <<JSON
  {"mark":"human"},{"wait":18000},{"cef":{"report":true}},
  {"type":"$(printf '%s' "$EV" | sed 's/"/\\"/g')"},{"send":true},{"wait":9000},
  {"cef":{"handback":true}},{"wait":1500},{"type":"$(printf '%s' "$EV" | sed 's/"/\\"/g')"},{"send":true},{"wait":9000},{"cef":{"report":true}},
- {"mark":"remote"},{"wait":45000},{"cef":{"report":true}},{"wait":500}]
+ {"mark":"remote"},{"wait":50000},{"cef":{"report":true}},
+ {"cef":{"goto":"http://127.0.0.1:$PPORT/bench.html"}},{"wait":4000},{"cef":{"report":true}},{"wait":3000},{"cef":{"report":true}},{"cef":{"latency":true}},{"wait":1500},{"cef":{"report":true}},{"wait":500}]
 JSON
 DISPLAY=$DISP LD_LIBRARY_PATH=$RT BACKPLANE_CEF=$RT BACKPLANE_CEF_CDP_PORT=$CDP BACKPLANE_CEF_NO_GPU=1 BACKPLANE_CEF_TEST_FILE=$HERE/page/test-upload.txt BACKPLANE_CEF_PROFILE=$OUT/profile VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json LP_NUM_THREADS=2 \
   BACKPLANE_GPUI_ASSETS=$MAIN/build/gpui/linux/assets HOME=$OUT/fakehome \
-  "$CLIENT" --url http://127.0.0.1:$HPORT --token-file "$OUT/home/token" --script "$OUT/script.json" --exit-after 200 > "$OUT/client.log" 2>&1 & CP=$!; PIDS="$PIDS $CP"
+  "$CLIENT" --url http://127.0.0.1:$HPORT --token-file "$OUT/home/token" --script "$OUT/script.json" --exit-after 260 > "$OUT/client.log" 2>&1 & CP=$!; PIDS="$PIDS $CP"
 export DISPLAY=$DISP
 ok=0; fail=0; check() { if [ "$2" = "1" ]; then echo "PASS $1"; ok=$((ok+1)); else echo "FAIL $1 ($3)"; fail=$((fail+1)); fi; }
 titles() { curl -s -m2 http://127.0.0.1:$CDP/json/list | python3 -c "import json,sys;[print(t.get('type'),t.get('title'),t.get('url')) for t in json.load(sys.stdin)]" 2>/dev/null; }
@@ -83,9 +84,16 @@ import -window root "$OUT/screen-after-input.png" 2>/dev/null || true
 waitfor '"name":"remote"' 400 || { echo "FAIL no remote mark"; }
 sleep 1
 HTOK="$OUT/home/token"; PORTH=$HPORT
-curl -s -m5 -H "Authorization: Bearer $(cat $HTOK)" http://127.0.0.1:$HPORT/bots/t1/screen.jpg -o "$OUT/screen.jpg" || true
+# no watcher, no frames: with only the desktop client attached (it draws the CEF page itself) the helper has cast nothing and written no JPEG
+check "no frames are made while only the desktop client watches (no shots/t1.jpg, no screencast)" "$([ ! -e "$OUT/home/shots/t1.jpg" ] && ! grep -q 'screencast on' "$OUT/helper.err" && echo 1 || echo 0)" "$(ls "$OUT/home/shots" 2>&1 | head -2)"
+# a phone/web client: its screen.jpg request is the lease; the screencast turns on and the JPEG is the live page
+curl -s -m6 -H "Authorization: Bearer $(cat $HTOK)" http://127.0.0.1:$HPORT/bots/t1/screen.jpg -o "$OUT/screen.jpg" || true
 SZ=$(wc -c < "$OUT/screen.jpg" 2>/dev/null || echo 0); MAGIC=$(head -c 3 "$OUT/screen.jpg" | od -An -tx1 | tr -d ' ')
-check "hub serves the live CEF page as /bots/t1/screen.jpg (JPEG, $SZ bytes)" "$([ "$MAGIC" = ffd8ff ] && [ "$SZ" -gt 3000 ] && echo 1 || echo 0)" "$MAGIC $SZ"
+check "a lease (screen.jpg request) makes the hub serve the live CEF page as a JPEG ($SZ bytes)" "$([ "$MAGIC" = ffd8ff ] && [ "$SZ" -gt 3000 ] && echo 1 || echo 0)" "$MAGIC $SZ"
+for i in 1 2 3 4 5 6; do curl -s -m3 -H "Authorization: Bearer $(cat $HTOK)" http://127.0.0.1:$HPORT/bots/t1/screen.jpg -o /dev/null; sleep 0.5; done
+check "the screencast is on while it is leased" "$(grep -q 'screencast on t1' "$OUT/helper.err" && echo 1 || echo 0)" ""
+sleep 5; M1=$(stat -c %Y "$OUT/home/shots/t1.jpg" 2>/dev/null || echo 0); N1=$(stat -c %s "$OUT/home/shots/t1.jpg" 2>/dev/null); sleep 3; M2=$(stat -c %Y "$OUT/home/shots/t1.jpg" 2>/dev/null || echo 0)
+check "released: the screencast is off again and nothing is written" "$(grep -q 'screencast off t1' "$OUT/helper.err" && [ "$M1" = "$M2" ] && echo 1 || echo 0)" "$M1 $M2"
 python3 "$HERE/xinput.py" move $((WX+VX+50)) $((WY+VY+50)); sleep 0.3
 # a phone: take over, tap the button in thousandths of the viewport (347/1000, 130/1000 of 519x802 => 180,104)
 RPC1=$(bun "$HERE/hub_rpc.mjs" $HPORT "$HTOK" '[{"m":"bots.browser","p":{"bot":"t1","op":"takeover"}},{"m":"bots.browser","p":{"bot":"t1","op":"click","x":347,"y":130},"wait":1500}]' 2>&1 | head -3)
@@ -100,6 +108,10 @@ check "a download lands in ~/Downloads ($DLF)" "$([ "$DLF" = file.txt ] && grep 
 # file dialog: real click on the file input (test hook answers with test-upload.txt)
 python3 "$HERE/xinput.py" click $((WX+VX+150)) $((WY+VY+380)); sleep 2.5
 T4=$(title); check "file dialog answered and the page got the file (title '$T4')" "$([ "$T4" = file:test-upload.txt ] && echo 1 || echo 0)" "$T4"
+# F12: Chromium's DevTools in a window of its own (a separate target in the engine's list)
+python3 "$HERE/xinput.py" click $((WX+VX+300)) $((WY+VY+500)); sleep 0.5; python3 "$HERE/xinput.py" key F12; sleep 3
+titles > "$OUT/targets-devtools.txt"; check "F12 opened DevTools in its own window ($(grep -ci devtools "$OUT/targets-devtools.txt") target)" "$(grep -qi devtools "$OUT/targets-devtools.txt" && echo 1 || echo 0)" "$(head -3 "$OUT/targets-devtools.txt")"
+python3 "$HERE/xinput.py" key F12; sleep 1
 # teach: start recording, a real native click, then the draft holds a click step
 bun "$HERE/hub_rpc.mjs" $HPORT "$HTOK" '[{"m":"bots.teach","p":{"bot":"t1","op":"start"},"wait":1500}]' > "$OUT/teach-start.txt" 2>&1 || true
 python3 "$HERE/xinput.py" click $((WX+VX+180)) $((WY+VY+104)); sleep 1.5
@@ -110,7 +122,26 @@ check "teach mode recorded the native click in the hub's draft" "$(echo "$TD" | 
 # popup keeps its opener
 python3 "$HERE/xinput.py" click $((WX+VX+180)) $((WY+VY+328)); sleep 3
 titles > "$OUT/targets-after-popup.txt"; T5=$(title); check "window.open popup kept its opener (opener title '$T5')" "$([ "$T5" = msg:hi-from-popup ] && echo 1 || echo 0)" "$T5"
+# a real layout change resizes the page: fold the sidebar (the chevron at the window's top left), measured from the change to the first painted frame of the new size
+python3 "$HERE/xinput.py" click 16 59; sleep 1
 wait $CP || true
+python3 - "$OUT/client.log" <<'PY' > "$OUT/bench.txt"
+import json,sys,re
+reps=[]
+for l in open(sys.argv[1],errors='ignore'):
+    if '"non_white_samples"' in l:
+        try: reps.append(json.loads(l[l.index('{'):]))
+        except Exception: pass
+resize=[r['resize_to_frame_ms'] for r in reps if r.get('resize_to_frame_ms',-1)>=0]
+a,b,c=reps[-3],reps[-2],reps[-1]
+fps=(b['paints']-a['paints'])/max(0.001,(b['epoch_ms']-a['epoch_ms'])/1000)
+print(round(fps,1), round(c.get('click_to_pixel_ms',-1),1), round(resize[-1],1) if resize else -1)
+PY
+read FPS LAT RSZ < "$OUT/bench.txt"
+echo "measured: ${FPS} fps painted into the gpui image (animated page, software rendering), click to changed pixel ${LAT} ms, resize to painted frame ${RSZ} ms"
+check "the page animates at a usable frame rate (${FPS} fps, software GL)" "$(python3 -c "print(1 if float('${FPS:-0}')>=15 else 0)")" "$FPS"
+check "input to visible change is fast (click to changed pixel ${LAT} ms)" "$(python3 -c "print(1 if 0<=float('${LAT:--1}')<400 else 0)")" "$LAT"
+check "a resize reaches a painted frame quickly (${RSZ} ms)" "$(python3 -c "print(1 if 0<=float('${RSZ:--1}')<600 else 0)")" "$RSZ"
 A2=$(grep 'MCPCALL' "$OUT/standin.log" | sed -n 2p | cut -c1-300 || true)
 A3=$(grep 'MCPCALL' "$OUT/standin.log" | sed -n 3p | cut -c1-300 || true)
 check "agent refused while the person drives" "$(echo "$A2" | grep -qi 'person has the browser' && echo 1 || echo 0)" "$A2"

@@ -646,7 +646,7 @@ async function status(name: string): Promise<Json> {
     height: o.viewport.height,
     tabs: o.tabs.length,
     frames: { on: frames.on, maxFps: frames.maxFps, seq: frames.seq, path: FRAMES_PATH },
-    shot: JPEG_DIR ? { path: shotPath(name), n: o.shot.seq, maxFps: JPEG_FPS } : null,
+    shot: JPEG_DIR ? { path: shotPath(name), n: o.shot.seq, maxFps: JPEG_FPS, casting: o.shot.casting, watched: watched(o) } : null,
   };
 }
 
@@ -793,13 +793,14 @@ function castCheck(o: Owner): Promise<void> {
         if (o.shot.cdp !== s || !watched(o)) { if (release) await release(); return; }
         o.shot.capture = release;
         await s.send("Page.startScreencast", { format: "jpeg", quality: 70, maxWidth: 1280, maxHeight: 2048, everyNthFrame: 1 });
-        if (o.shot.cdp === s) o.shot.casting = true;
+        if (o.shot.cdp === s) { o.shot.casting = true; if (process.env.BACKPLANE_BROWSER_DEBUG) log(`screencast on ${o.name}`); }
       } catch (e) {
         if (o.shot.capture === release) o.shot.capture = null;
         if (release) await release();
         throw e;
       }
     } else {
+      if (o.shot.casting && process.env.BACKPLANE_BROWSER_DEBUG) log(`screencast off ${o.name}`);
       o.shot.casting = false;
       const release = o.shot.capture; o.shot.capture = null;
       await s.send("Page.stopScreencast").catch(() => {});
@@ -817,14 +818,9 @@ function castQuiet(o: Owner): void {
 // once a second: leases that ran out stop their screencast; an unwatched
 // page gets a still every IDLE_STILL_MS (written only when it changed)
 setInterval(() => {
-  const now = performance.now();
-  for (const o of owners.values()) {
-    castQuiet(o);
-    if (!watched(o) && o.shot.cdp && now - o.shot.still >= IDLE_STILL_MS) {
-      o.shot.still = now;
-      void shotNow(o.name);
-    }
-  }
+  // no frames without a watcher: a page nobody holds a lease on is neither cast nor given stills (the native window shows its own page itself;
+  // a phone's screen.jpg request is the lease, see the hub's `watch`)
+  for (const o of owners.values()) castQuiet(o);
 }, 1000).unref();
 
 async function stopShots(o: Owner): Promise<void> {
@@ -1065,7 +1061,6 @@ async function attachExternal(a: Json, name: string): Promise<Json> {
   o.active = p; tellTabs(o);
   log(`attached ${name}: ${p.url()} (${o.tabs.length} tabs)`);
   await startShots(o).catch((e) => log(`attach shots: ${e}`));
-  void shotNow(o.name);
   return { attached: true, url: p.url() };
 }
 

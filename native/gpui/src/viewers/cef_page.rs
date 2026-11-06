@@ -11,7 +11,7 @@ pub struct CefPage {
     tabs: Vec<Arc<Tab>>, active: usize, focus: FocusHandle, bar_focus: FocusHandle, bar_text: String, bar_edit: bool,
     bounds: Arc<Mutex<Option<Bounds<Pixels>>>>, image: Option<Arc<RenderImage>>, retired: Vec<Arc<RenderImage>>,
     wake: async_channel::Sender<()>, hub: tokio::sync::mpsc::Sender<Command>, owner: String, port: u16,
-    pub taken: bool, stats: (u32, u32, usize), buttons: u32, visible: bool, composing: bool, attached: Vec<String>, pub status: String, last_mouse: (i32, i32),
+    pub taken: bool, pub light: bool, fresh: bool, sample: [u8; 3], lat_probe: Option<(std::time::Instant, [u8; 3])>, lat_ms: f64, stats: (u32, u32, usize), buttons: u32, visible: bool, composing: bool, attached: Vec<String>, pub status: String, last_mouse: (i32, i32),
 }
 
 impl CefPage {
@@ -23,7 +23,7 @@ impl CefPage {
                 cx.background_executor().timer(std::time::Duration::from_millis(16)).await; // at most ~60 repaints a second
             }
         }).detach();
-        let mut me = CefPage { tabs: Vec::new(), active: 0, focus: cx.focus_handle(), bar_focus: cx.focus_handle(), bar_text: String::new(), bar_edit: false, bounds: Arc::default(), image: None, retired: Vec::new(), wake, hub, owner, port, taken: false, buttons: 0, visible: false, composing: false, attached: Vec::new(), status: String::new(), stats: (0, 0, 0), last_mouse: (0, 0) };
+        let mut me = CefPage { tabs: Vec::new(), active: 0, focus: cx.focus_handle(), bar_focus: cx.focus_handle(), bar_text: String::new(), bar_edit: false, bounds: Arc::default(), image: None, retired: Vec::new(), wake, hub, owner, port, taken: false, light: false, fresh: false, sample: [0; 3], lat_probe: None, lat_ms: -1.0, buttons: 0, visible: false, composing: false, attached: Vec::new(), status: String::new(), stats: (0, 0, 0), last_mouse: (0, 0) };
         me.new_tab("about:blank", cx);
         me
     }
@@ -73,7 +73,12 @@ impl CefPage {
         if self.tabs.len() != before { self.active = act.and_then(|a| self.tabs.iter().position(|t| Arc::ptr_eq(t, &a))).unwrap_or(self.tabs.len().saturating_sub(1)); self.image = None; }
         if self.tabs.is_empty() { self.new_tab("about:blank", cx); }
         if let Some(t) = self.tab().cloned() {
-            if let Some(f) = t.take_frame() { self.stats = (f.w, f.h, f.bgra.chunks(4).step_by(97).filter(|p| p[0] < 240 || p[1] < 240 || p[2] < 240).count()); if let Some(buf) = image::RgbaImage::from_raw(f.w, f.h, f.bgra) { // CEF paints BGRA, which is what gpui's RenderImage holds
+            if let Some(f) = t.take_frame() {
+                // the probe pixel (page x,y 350,350, a square the bench page flips on click) and a resize probe: how long from the input to a painted frame that shows it
+                let px = |x: u32, y: u32| -> [u8; 3] { let i = ((y.min(f.h.saturating_sub(1)) * f.w + x.min(f.w.saturating_sub(1))) * 4) as usize; f.bgra.get(i..i + 3).map_or([0; 3], |p| [p[0], p[1], p[2]]) };
+                self.sample = px(350, 350);
+                if let Some((t0, old)) = self.lat_probe { if self.sample != old { self.lat_ms = t0.elapsed().as_secs_f64() * 1e3; self.lat_probe = None; } }
+                self.stats = (f.w, f.h, f.bgra.chunks(4).step_by(97).filter(|p| p[0] < 240 || p[1] < 240 || p[2] < 240).count()); if let Some(buf) = image::RgbaImage::from_raw(f.w, f.h, f.bgra) { // CEF paints BGRA, which is what gpui's RenderImage holds
                 if let Some(old) = self.image.replace(Arc::new(RenderImage::new(vec![image::Frame::new(buf)]))) { self.retired.push(old); } } }
             if !self.bar_edit { let u = t.st.lock().unwrap().url.clone(); if u != self.bar_text { self.bar_text = u; } }
             if t.ready() { self.attach(); }
@@ -100,6 +105,8 @@ impl CefPage {
     fn key_down(&mut self, e: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let k = &e.keystroke; let m = &k.modifiers;
         if self.bar_focus.is_focused(window) {
+            // the address is selected when the field is entered: the first thing typed replaces it
+            if self.fresh && !matches!(k.key.as_str(), "enter" | "escape" | "left" | "right" | "tab") && !(m.control && k.key != "v" && k.key != "a") { self.bar_text.clear(); self.fresh = false; }
             match k.key.as_str() {
                 "enter" => self.go(cx),
                 "escape" => { self.bar_edit = false; window.focus(&self.focus); }
@@ -111,6 +118,7 @@ impl CefPage {
             cx.stop_propagation(); cx.notify(); return;
         }
         let Some(t) = self.tab().cloned() else { return };
+        if k.key == "f12" || ((m.control || m.platform) && m.shift && k.key == "i") { t.devtools(); cx.stop_propagation(); return }
         self.take_over();
         let mods = Self::mods(m, 0);
         if (m.control || m.platform) && !m.alt {
@@ -128,8 +136,17 @@ impl CefPage {
         if self.bar_focus.is_focused(window) { return }
         if let (Some(t), Some(vk)) = (self.tab(), cef::vk(&e.keystroke.key)) { t.key(1, Self::mods(&e.keystroke.modifiers, 0), vk, vk, vk as u16); }
     }
-    fn bar_button(id: &'static str, label: &'static str, on: bool) -> Stateful<Div> {
-        div().id(id).px_2().py_1().text_size(px(13.)).text_color(rgb(if on { 0xd7dbe3 } else { 0x596070 })).when(on, |d| d.cursor_pointer().hover(|s| s.bg(rgb(0x2a303b)))).child(label)
+    fn act(&mut self, a: super::chrome::Act, window: &mut Window, cx: &mut Context<Self>) {
+        use super::chrome::Act::*;
+        match a {
+            Back => { if let Some(t) = self.tab() { t.back(); } } Forward => { if let Some(t) = self.tab() { t.forward(); } }
+            Reload => { if let Some(t) = self.tab() { if t.st.lock().unwrap().loading { t.stop() } else { t.reload() } } }
+            NewTab => { self.new_tab("about:blank", cx); window.focus(&self.bar_focus); self.bar_edit = true; self.bar_text.clear(); }
+            Select(i) => { if let Ok(i) = i.parse::<usize>() { if i < self.tabs.len() { self.active = i; self.image = None; if let Some(t) = self.tab() { t.hidden(false); t.resize(1, 1, 1.0); } } } cx.notify(); }
+            Close(i) => { if let Some(t) = i.parse::<usize>().ok().and_then(|i| self.tabs.get(i)) { t.close(); } }
+            FocusBar => { window.focus(&self.bar_focus); self.bar_edit = true; self.bar_text = self.tab().map(|t| t.st.lock().unwrap().url.clone()).unwrap_or_default(); self.fresh = true; cx.notify(); }
+            HandBack => self.hand_back(cx),
+        }
     }
 }
 
@@ -147,27 +164,13 @@ impl Render for CefPage {
         let bar_focused = self.bar_focus.is_focused(window); let status = self.status.clone();
         let bounds = self.bounds.clone(); let tab_for_size = self.tab().cloned();
         let focus = self.focus.clone();
-        let tabs_row = (self.tabs.len() > 1).then(|| {
-            let mut row = div().flex().flex_row().bg(rgb(0x14171c)).text_size(px(12.));
-            for (i, t) in self.tabs.iter().enumerate() {
-                let st = t.st.lock().unwrap(); let label: String = (if st.title.is_empty() { st.url.clone() } else { st.title.clone() }).chars().take(24).collect();
-                row = row.child(div().id(("cef-tab", i)).px_2().py_1().cursor_pointer().text_color(rgb(if i == self.active { 0xe6e9ef } else { 0x8a93a3 })).when(i == self.active, |d| d.bg(rgb(0x232831)))
-                    .child(label).on_click(cx.listener(move |this, _, _, cx| { this.active = i; this.image = None; if let Some(t) = this.tab() { t.hidden(false); t.resize(1, 1, 1.0); } cx.notify(); })));
-            }
-            row
-        });
-        div().id("cef-page").size_full().flex().flex_col().bg(rgb(0x0f1115))
-            .child(div().flex().flex_row().items_center().gap_1().px_1().bg(rgb(0x1a1e25))
-                .child(Self::bar_button("cef-back", "‹", back).on_click(cx.listener(|this, _, _, _| { if let Some(t) = this.tab() { t.back(); } })))
-                .child(Self::bar_button("cef-fwd", "›", fwd).on_click(cx.listener(|this, _, _, _| { if let Some(t) = this.tab() { t.forward(); } })))
-                .child(Self::bar_button("cef-reload", if loading { "✕" } else { "⟳" }, true).on_click(cx.listener(|this, _, _, _| { if let Some(t) = this.tab() { if t.st.lock().unwrap().loading { t.stop() } else { t.reload() } } })))
-                .child(div().id("cef-url").flex_1().px_2().py_1().text_size(px(13.)).bg(rgb(0x0f1115)).text_color(rgb(0xd7dbe3)).track_focus(&self.bar_focus).key_context("CefBar")
-                    .key_context("Viewer").on_key_down(cx.listener(|this, e, w, cx| this.key_down(e, w, cx)))
-                    .on_click(cx.listener(|this, _, w, cx| { w.focus(&this.bar_focus); this.bar_edit = true; cx.notify(); }))
-                    .child(format!("{}{}", if self.bar_text.is_empty() { "Search or enter address".to_string() } else { self.bar_text.clone() }, if bar_focused { "▏" } else { "" })))
-                .child(Self::bar_button("cef-new", "+", true).on_click(cx.listener(|this, _, w, cx| { this.new_tab("about:blank", cx); w.focus(&this.bar_focus); this.bar_edit = true; this.bar_text.clear(); })))
-                .when(self.taken, |d| d.child(Self::bar_button("cef-back-to-agent", "Hand back", true).on_click(cx.listener(|this, _, _, cx| this.hand_back(cx))))))
-            .children(tabs_row)
+        let tabs: Vec<super::chrome::TabView> = self.tabs.iter().enumerate().map(|(i, t)| { let st = t.st.lock().unwrap(); super::chrome::TabView { id: i.to_string(), title: st.title.clone(), url: st.url.clone(), active: i == self.active } }).collect();
+        let cur_url = self.tab().map(|t| t.st.lock().unwrap().url.clone()).unwrap_or_default();
+        let value = if bar_focused && self.bar_edit { self.bar_text.clone() } else if cur_url == "about:blank" { String::new() } else { cur_url };
+        let (strip, chrome) = super::chrome::render(super::chrome::In { light: self.light, tabs: &tabs, value, focused: bar_focused, taken: self.taken, have: !self.tabs.is_empty(), loading, can_back: back, can_forward: fwd, bar_focus: &self.bar_focus }, cx,
+            |this: &mut CefPage, a, w, cx| this.act(a, w, cx), |this, e, w, cx| this.key_down(e, w, cx));
+        let c = |n: &str| crate::theme::color(self.light, n);
+        div().id("cef-page").size_full().flex().flex_col().bg(c("bg")).child(strip).child(chrome)
             .child(div().id("cef-view").flex_1().relative().overflow_hidden().cursor(cursor_of(cursor)).track_focus(&focus).key_context("CefPage")
                 .child(canvas(move |b, window, _| {
                     *bounds.lock().unwrap() = Some(b);
@@ -206,10 +209,11 @@ impl CefPage {
             self.take_over(); t.focus(true); t.mouse_move(x, y, 0, false); t.mouse_click(x, y, 16, 0, false, 1); t.mouse_click(x, y, 0, 0, true, 1); return json!({"ok": true, "click": [x, y]})
         }
         if let Some(text) = v["type"].as_str() { self.take_over(); for c in text.chars() { if let Some(vk) = cef::vk(&c.to_string()) { t.key(0, 0, vk, vk, vk as u16); } let mut b = [0u16; 2]; for u in c.encode_utf16(&mut b) { t.key(2, 0, 0, 0, *u); } } return json!({"ok": true, "typed": text}) }
+        if v["latency"].as_bool() == Some(true) { self.lat_ms = -1.0; self.lat_probe = Some((std::time::Instant::now(), self.sample)); t.mouse_move(350, 350, 0, false); t.mouse_click(350, 350, 16, 0, false, 1); t.mouse_click(350, 350, 0, 0, true, 1); return json!({"ok": true, "latency": "probing"}) }
         if v["handback"].as_bool() == Some(true) { self.hand_back(cx); return json!({"ok": true}) }
         let (w, h, lit) = self.stats;
         let s = t.st.lock().unwrap();
-        json!({"ok": true, "url": s.url, "title": s.title, "loading": s.loading, "frame": [w, h], "non_white_samples": lit, "taken": self.taken, "view_x": self.bounds.lock().unwrap().map_or(0., |b| f32::from(b.origin.x)), "view_y": self.bounds.lock().unwrap().map_or(0., |b| f32::from(b.origin.y)), "tabs": self.tabs.len(), "cdp_port": self.port})
+        json!({"ok": true, "url": s.url, "title": s.title, "loading": s.loading, "frame": [w, h], "non_white_samples": lit, "taken": self.taken, "paints": t.paints.load(std::sync::atomic::Ordering::Relaxed), "click_to_pixel_ms": self.lat_ms, "resize_to_frame_ms": t.resize_ms(), "view_x": self.bounds.lock().unwrap().map_or(0., |b| f32::from(b.origin.x)), "view_y": self.bounds.lock().unwrap().map_or(0., |b| f32::from(b.origin.y)), "tabs": self.tabs.len(), "cdp_port": self.port})
     }
     fn mouse(&mut self, e: &MouseDownEvent, b: u8, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus); self.bar_edit = false; self.take_over();

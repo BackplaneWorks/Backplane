@@ -393,6 +393,9 @@ async fn screen(hub: &Arc<Hub>, owner: &str) -> HttpReply {
     if !teach::part_ok(owner, false) { return HttpReply::text("404 Not Found", "no such bot") }
     let file: String = owner.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect();
     let path = hub.cfg.home.join("shots").join(format!("{file}.jpg"));
+    // this request is the viewer's lease (no request, no frames); the first one waits briefly for the frame the lease makes
+    if let Some(b) = super::browser::get(hub) { b.watch(owner).await; }
+    for _ in 0..20 { if path.exists() { break } tokio::time::sleep(std::time::Duration::from_millis(100)).await; }
     match tokio::task::spawn_blocking(move || { let m = std::fs::metadata(&path).ok()?; if m.len() > 8 << 20 { return None } std::fs::read(&path).ok() }).await.ok().flatten() {
         Some(b) => HttpReply { status: "200 OK", ctype: "image/jpeg".into(), extra: "Cache-Control: no-store\r\n".into(), body: b },
         None => HttpReply::text("404 Not Found", "no screen yet"),
