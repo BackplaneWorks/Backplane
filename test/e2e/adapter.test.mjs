@@ -17,7 +17,19 @@ assert.equal(r.status,'fail');assert.deepEqual(r.metrics.failedSteps,['popup:@ (
 r=await run(J('t4',[{do:'select_thread',index:0},{do:'click_every_control',scope:'screen'}],['click','dead']),ctx());
 assert.equal(r.metrics.dead.deadCount,1);assert.equal(r.metrics.dead.dead[0].id,'dead-btn');assert.equal(r.status,'fail');
 // steps the client does not have stay blocked
-r=await run(J('t5',[{do:'open_viewer',kind:'board'}],['click']),ctx());assert.equal(r.status,'blocked');
+r=await run(J('t5',[{do:'orbit',frames:60}],['click']),ctx());assert.equal(r.status,'blocked');assert.deepEqual(r.blocked,['orbit']);
+// a viewer opens with the rail's control, timed like any press
+r=await run(J('t5b',[{do:'select_thread',index:0},{do:'open_viewer',kind:'board'}],['click']),ctx());assert.equal(r.status,'pass',JSON.stringify(r.notes)); // (run.mjs demotes it to partial off Rust hub + real hardware)
+assert.deepEqual(r.steps.map(s=>[s.step,s.kind,s.verdict]),[['select:0','navigation','ok'],['click:rail:Board','press','ok']]);
+// a control the client does not have is a failed step, not a silent one
+r=await run(J('t5c',[{do:'select_thread',index:0},{do:'click',control:'ui:Nope'}],['click']),ctx());assert.equal(r.status,'fail');assert.ok(r.metrics.failedSteps.includes('click:ui:Nope (no such control)'));
+// per-press budgets: a 2.5 s thread switch is slow (navigation ok <= 1 s, fail > 3 s), a 4 s one fails the journey
+r=await run(J('t5d',[{do:'select_thread',index:0}],['click']),ctx({FAKE_SLOW_SELECT:'2500'}));assert.equal(r.steps[0].verdict,'slow');assert.equal(r.stepSummary.slow,1);
+r=await run(J('t5e',[{do:'select_thread',index:0}],['click']),ctx({FAKE_SLOW_SELECT:'4000'}));assert.equal(r.steps[0].verdict,'fail');assert.equal(r.status,'fail');
+// the client's own read proves what the composer holds; a harness op (here a hub restart) runs when the client reaches its mark
+{const c=ctx({FAKE_SLOW_SELECT:'0'});let restarted=0;c.hub.restart=async()=>{restarted++;return 4242};
+ r=await run(J('t5f',[{do:'select_thread',index:0},{do:'type',text:'draft'},{do:'hub',op:'restart',wait:50},{do:'expect',composer:'draft'}],['click']),c);
+ assert.equal(restarted,1);assert.ok(r.notes.includes('hub restarted (pid 4242)'),JSON.stringify(r.notes));assert.deepEqual(r.expects.map(x=>x.ok),[true])}
 // software rendering is noted
 r=await run(J('t6',[{do:'select_thread',index:0}],['click']),ctx({FAKE_SOFTWARE:'1'}));assert.ok(r.notes.some(n=>n.includes('software-rendered')));
 console.log('adapter.test.mjs: all assertions passed');
