@@ -26,7 +26,16 @@ pub struct Ctl { pub stop: watch::Sender<bool> }
 /// What a copy of a log says to every work tool (SIDE-BY-SIDE.md): nothing is launched, watched or re-armed there.
 pub const COPY_LINE: &str = "watched work is off on a copy of a log (BACKPLANE_COPY=1): nothing is started or watched here";
 /// A process's start time (clock ticks since boot, /proc/<pid>/stat field 22): with the pid it names one process, so a reused pid is not mistaken for it (Watch.ident).
+#[cfg(target_os = "linux")]
 pub fn start_time(pid: u32) -> Option<u64> { let s = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?; let rest = s.rsplit_once(')')?.1; rest.split_whitespace().nth(19)?.parse().ok() }
+/// No /proc: `ps -o lstart=` names the start second (the text is hashed); a pid that is not there prints nothing.
+#[cfg(not(target_os = "linux"))]
+pub fn start_time(pid: u32) -> Option<u64> {
+    let o = crate::proc::std_cmd(crate::proc::Kind::Local, "ps").args(["-o", "lstart=", "-p", &pid.to_string()]).env("LC_ALL", "C").stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null()).output().ok()?;
+    let t = String::from_utf8_lossy(&o.stdout).trim().to_string();
+    if !o.status.success() || t.is_empty() { return None }
+    Some(t.bytes().fold(0xcbf29ce484222325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100000001b3)))
+}
 pub fn ident_of(pid: u32) -> String { start_time(pid).map_or_else(|| "-".into(), |st| format!("{pid}:{st}")) }
 /// Whether the process an ident names is still that process.
 pub fn ident_alive(ident: &str) -> bool { let Some((p, st)) = ident.split_once(':') else { return false }; match (p.parse::<u32>(), st.parse::<u64>()) { (Ok(p), Ok(st)) => start_time(p) == Some(st), _ => false } }
