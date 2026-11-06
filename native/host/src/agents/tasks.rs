@@ -37,6 +37,9 @@ impl Agents {
             json!({"$":"ModesSet","id":child,"runtime":t.runtime,"interaction":t.interaction,"model":model,"at":now}), // the parent's modes
             json!({"$":"TaskDelegated","task":task,"parent":thread,"child":child,"depth":depth1,"provider":provider,"model":model,"at":now}),
             json!({"$":"TaskStateSet","task":task,"state":"running","summary":"","at":now}),
+            // the child sits under its parent in the sidebar, the parent's children open (as thread_launch does)
+            json!({"$":"ThreadParentSet","id":child,"parent":thread,"at":now}),
+            json!({"$":"SettingSet","key":format!("thread.tree.{thread}"),"value":"1","at":now}),
         ];
         self.commit_events(ev).await;
         if let Err(e) = self.deliver_as("user", &child, &hub_id("m", now, seq + 2), &prompt, None, vec![]).await {

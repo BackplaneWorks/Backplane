@@ -194,12 +194,19 @@ impl Render for Backplane {
                 let selected = raw == self.selected;
                 let dot = match t["state"].as_str().unwrap_or("") { "running" => c("accent"), "failed" => c("bad"), _ => c("ok") };
                 ctl.push(CtlEntry { id: format!("thread:{raw}"), label: string(t, "title"), ctl: Ctl::Select(id.clone()) });
-                rows.push(with_rect(div().id(SharedString::from(format!("thread-{id}"))), || format!("thread:{raw}")).flex().items_center().gap_2().pl(px(22.)).pr_3().h(px(32.))
+                let (depth, kids, open) = (t["depth"].as_u64().unwrap_or(0).min(6) as f32, t["children"].as_u64().unwrap_or(0), t["expanded"].as_bool().unwrap_or(false));
+                let toggle = (kids > 0).then(|| {
+                    let tid = id.clone();
+                    div().id(SharedString::from(format!("tree-{id}"))).flex_shrink_0().w(px(16.)).cursor_pointer().child(ic(light, if open { "chevron-down" } else { "chevron-right" }, 14., "dim"))
+                        .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("thread-tree".into(), format!("{tid}|{}", if open { 0 } else { 1 }))); cx.stop_propagation(); cx.notify(); }))
+                });
+                if kids > 0 { ctl.push(CtlEntry { id: format!("tree:{raw}"), label: format!("{} subthreads", kids), ctl: Ctl::Node("thread-tree".into(), format!("{id}|{}", if open { 0 } else { 1 })) }); }
+                rows.push(with_rect(div().id(SharedString::from(format!("thread-{id}"))), || format!("thread:{raw}")).flex().items_center().gap_2().pl(px(22. + depth * 14.)).pr_3().h(px(32.))
                     .border_l_2().border_color(if selected { c("ok") } else { c("panel") })
                     .bg(if selected { c("raise") } else { c("panel") }).hover(|s| s.bg(c("raise"))).cursor_pointer()
                     .on_click(cx.listener(move |this, _, window, cx| this.select(id.clone(), window, cx)))
-                    .child(div().size(px(5.)).bg(dot)).child(div().flex_1().overflow_hidden().whitespace_nowrap().child(string(t, "title")))
-                    .child(div().text_size(px(11.)).text_color(c("faint")).child(string(t, "ago"))).into_any_element());
+                    .children(toggle).child(div().size(px(5.)).bg(dot)).child(div().flex_1().overflow_hidden().whitespace_nowrap().child(string(t, "title")))
+                    .child(div().text_size(px(11.)).text_color(c("faint")).child(if kids > 0 && string(t, "agents").is_empty() { format!("{kids}") } else { string(t, "ago") })).into_any_element());
             }
         }
         for page in self.data["sidebarPages"].as_array().into_iter().flatten() {
