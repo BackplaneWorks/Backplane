@@ -3,10 +3,9 @@
 //! for the thread's folder, and `fab.intent {thread, text}` writes `.backplane/intent.md` and answers the same card. The clients draw the goal,
 //! and the header's Buy it from it (the session's `fab.*` info keys are kept from this reply by the policy).
 //!
-//! No ordering, upload or payment happens here. The only network call is the optional "from $X" estimate (and a health check for a card with a board
-//! and no fab file yet) to the order server, `curl` in a 0600 config as the JS hub does; it is skipped when Ordering or `order.estimates` is off, on a
-//! copy of a log, and on a test hub (stand-in agents, no BACKPLANE_ORDER_SERVER), where the address is a dead local one. Not ported: `order.buy`,
-//! `order_quote`/`order_status` (uploads, quotes, payment).
+//! No ordering, upload or payment happens here (those are settings/order.rs). The only network call is the optional "from $X" estimate (and a health check for a card with a KiCad
+//! project's board and no fab file yet) to the order server, `curl` in a 0600 config as the JS hub does; it is skipped when Ordering or `order.estimates` is off, on a
+//! copy of a log, and on a test hub (stand-in agents, no BACKPLANE_ORDER_SERVER), where the address is a dead local one.
 use crate::{api::{Caller, Fut, RpcHandler}, files::kicad, hub::Hub};
 use serde_json::{json, Map, Value};
 use std::{io::Write, os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt}, path::{Path, PathBuf}, sync::Arc};
@@ -119,14 +118,14 @@ pub fn order_status(orders: &Path, ids: &[String]) -> String {
 
 // ---- the order server (estimates only) ----
 
-fn server_of(setting: &str) -> String {
+pub(crate) fn server_of(setting: &str) -> String {
     let s = setting.trim(); let s = if s.is_empty() { DEFAULT_SERVER } else { s };
     let env = std::env::var("BACKPLANE_ORDER_SERVER").unwrap_or_default();
     if s == DEFAULT_SERVER && !env.is_empty() { env }
     // a test hub (stand-in agents) with no address of its own never reaches the real server
     else if s == DEFAULT_SERVER && std::env::var_os("BACKPLANE_AGENTS").is_some() { "http://127.0.0.1:9".into() } else { s.to_string() }
 }
-fn install_id(home: &Path) -> String {
+pub(crate) fn install_id(home: &Path) -> String {
     let dir = home.join("secrets"); let f = dir.join("install-id");
     if let Ok(t) = std::fs::read_to_string(&f) { if t.trim().len() >= 16 { return t.trim().to_string() } }
     let mut b = [0u8; 12]; if let Ok(mut r) = std::fs::File::open("/dev/urandom") { let _ = std::io::Read::read_exact(&mut r, &mut b); }
@@ -136,13 +135,13 @@ fn install_id(home: &Path) -> String {
     let _ = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&f).and_then(|mut h| h.write_all(id.as_bytes())); id
 }
 /// Od.est.got: the server's answer as the card's fields, or why there is none.
-fn est_got(code: &str, body: &str) -> Value {
+pub(crate) fn est_got(code: &str, body: &str) -> Value {
     if code.starts_with('2') { return serde_json::from_str(body).unwrap_or(Value::Null) }
     let said = serde_json::from_str::<Value>(body).ok().and_then(|v| v["error"].as_str().map(str::to_string));
     json!({"error": if code == "000" { UNREACHABLE.to_string() } else { said.unwrap_or_else(|| format!("the order server said {code}")) }})
 }
 /// One request through a curl config in the secrets folder (the URL, headers and body never on a command line). (status code, body)
-fn curl(home: &Path, url: &str, headers: &[String], body: Option<&str>) -> (String, String) {
+pub(crate) fn curl(home: &Path, url: &str, headers: &[String], body: Option<&str>) -> (String, String) {
     let dir = home.join("secrets");
     if std::fs::DirBuilder::new().mode(0o700).recursive(true).create(&dir).is_err() { return ("000".into(), String::new()) }
     let nonce = format!("{:x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos()));

@@ -152,6 +152,7 @@ impl Agents {
         self.commit_events(ev).await;
         if let Some(p) = self.parked.lock().unwrap().remove(ask) { let _ = p.tx.send(answer.to_string()); }
         let th_of = self.driver_asks.lock().unwrap().remove(ask); if let Some(t) = th_of { let _ = self.actor(&t).try_send(super::Cmd::Answer { ask: ask.to_string(), answer: answer.to_string() }); }
+        if a.tool == "order_quote" { crate::settings::order::answered(self, ask, answer) } // the only thing that sends the files: the person's own Send
         if implement { return self.deliver(&th, &hub_id("m", now, self.seq()), "Implement the proposed plan.", None, vec![]).await }
         Ok(())
     }

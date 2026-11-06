@@ -32,7 +32,7 @@ pub fn lean_keeps(k: &str) -> bool {
     if k.starts_with("todos.") && !k.starts_with("todos.base.") { return true }
     // The GPUI recent root and existing sidebar read only bounded navigation settings.
     if ["ui.theme", "sidebar.view", "mail.on", "uber.bot", "order.enabled", "order.estimates"].contains(&k)
-        || ["thread.tree.", "project.icon.", "project.color.", "buy.", "mail.private.owner.", "account.thread."].iter().any(|p| k.starts_with(p)) { return true }
+        || ["thread.tree.", "project.icon.", "project.color.", "buy.", "order.quote.", "mail.private.owner.", "account.thread."].iter().any(|p| k.starts_with(p)) { return true }
     // the Context panel's readings (present/tokstats.rs): one short string a thread, and the epoch that names the thread totals' key
     if ["tok.epoch", "tok.recount"].contains(&k) || ["turn.last.", "turn.speed.", "turn.models."].iter().any(|p| k.starts_with(p)) || (k.starts_with("tok.") && (k.starts_with("tok.t.") || k.contains(".t."))) { return true }
     // the Settings pages' values (present/settings.rs): short strings, one per control

@@ -165,6 +165,7 @@ async fn run(a: Args) -> Result<()> {
     term::start(hub.clone());
     startup::mark("term started");
     let agents = agents::Agents::start(hub.clone()).await?;
+    settings::order::resume(agents.clone()); // Od.resume: follow every order not yet delivered (a copy follows none)
     files::tools::register(&hub, &agents);
     startup::mark("agents started");
     let _bots = bots::start(hub.clone(), agents.clone()).await;

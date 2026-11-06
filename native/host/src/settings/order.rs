@@ -2,16 +2,25 @@
 //! the rest are a buy thread's own (the setting `buy.<thread>`). Ordering off refuses all of them, even for an agent that remembers them from before.
 //!
 //! The design's fingerprint keeps a review current only while the files are as they were: `.backplane/review.json` keeps it with the verdict.
+//!
+//! `order_quote` sends nothing itself: it opens the approval card, and only the person's Send (`answered`, from `Agents::answer`) uploads, and only the files they were shown.
+//! A quote's token is kept in `<home>/orders/<quote>.json` (0600) and nowhere else: the log holds the link as `order:<quote>` and the hub writes the real one only into what it
+//! draws for a client (`pay_shown`), so no agent can read it back with thread_read and no log or far thread carries it. On a copy nothing here sends or follows anything.
 use crate::agents::{lines::hub_id, now_s, Agents};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::{io::Read, os::unix::{ffi::OsStrExt, fs::PermissionsExt}, path::Path, sync::Arc};
+use std::{collections::HashMap, io::{Read, Write}, os::unix::{ffi::OsStrExt, fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt}}, path::{Path, PathBuf}, sync::{Arc, LazyLock, RwLock}, time::Duration};
 
 fn sv<'a>(v: &'a Value, k: &str) -> &'a str { v.get(k).and_then(Value::as_str).unwrap_or("") }
 fn fail(m: &str) -> (bool, Value) { (false, json!({"error":m})) }
 
 pub const OFF: &str = "Ordering is off; the person can turn it on in Settings";
 pub const NOT_BUY: &str = "only a buy thread has this tool";
+const QUOTE_ASKED: &str = "The person is asked on their screen whether to send these files (Send or Not now). End your turn now. Once they send, the files go to the order server and the quote is made (usually 1-2 minutes); the thread shows the person it is on its way, Backplane posts the quote here and you get a message with its total. There is nothing more for them to press: never ask them to send or approve again.";
+const STATUS_SENT: &str = "The files are sent; the quote is being made (usually 1-2 minutes). Backplane posts it in this thread and tells you. Nothing is wrong and there is nothing for the person to press: say it is on its way and end your turn.";
+const STATUS_UNSENT: &str = "The files are not sent yet: Backplane's question whether to send them (Send or Not now) is open on the person's screen. Say so in a line and end your turn; you get a message once they answer.";
+const DECLINED: &str = "The person chose not to send the files (Not now). Ask whether anything should change first.";
+const COPY_SENDS_NOTHING: &str = "a hub on a copied log (BACKPLANE_COPY=1) sends nothing to the order server";
 const ASKED: &str = "Asked on the person's screen. End your turn now: their answer comes as their next message, however long they take.";
 /// Order.skipped: a dismissed question, said as the person's message so its agent hears it (silence left the thread waiting).
 const SKIPPED: &str = "I skipped this question.";
@@ -28,6 +37,11 @@ fn review_tool() -> Value {
         json!({"action":prop("gate, check or record"),"verdict":prop("record: ok or issues"),"summary":prop("record: one line"),
             "issues":{"type":"array","items":{"type":"string"},"description":"record: what must change, one short line each (\"Shade: walls 0.6 mm, need 0.8\"), at most 8; none when ok."}}), json!(["action"]))
 }
+fn quote_tool() -> Value {
+    def("order_quote", "Get a quote for an exported order: the folder (from this thread's folder, e.g. mfg/20261017-0930) holding manifest.json and the files it lists. Backplane shows the person every file it would send and asks them first, and answers at once: end your turn. Once they send, it uploads the files, waits for the quote (a minute or two), posts it in this thread with a Buy now link and sends you a message with its total and any problems (or that they chose not to send).",
+        json!({"dir":prop("The order's folder, from this thread's folder.")}), json!(["dir"]))
+}
+fn status_tool() -> Value { def("order_status", "Where this thread's last quote or order stands: waiting, quoted (with its total), paid, placed, shipped (with tracking) or delivered.", json!({}), json!([])) }
 fn ask_tool() -> Value {
     def("order_ask", "Ask the person one question, shown in its own card above the message box on every device: choices they can tap, or with typed a box to type the answer in (where it ships); they may always type their own answer. Answers at once: end your turn, and their answer comes as their next message, however long they take.",
         json!({"question":prop("The question, short and plain."),"options":{"type":"array","items":{"type":"string"},"description":"Two to four short choices, the likely one first; none with typed."},
@@ -36,7 +50,7 @@ fn ask_tool() -> Value {
 /// Bots.order.tools: what a thread's agent is shown: none with Ordering off, a buy thread's own only in a buy thread.
 pub fn defs(on: bool, buy: bool) -> Vec<Value> {
     if !on { return vec![] }
-    let mut v = if buy { vec![ask_tool()] } else { vec![] }; v.push(review_tool()); v
+    let mut v = if buy { vec![quote_tool(), status_tool(), ask_tool()] } else { vec![] }; v.push(review_tool()); v
 }
 pub async fn listed(ag: &Arc<Agents>, thread: &str) -> Vec<Value> { let w = ag.world().await; defs(w.setting("order.enabled") != "off", !w.setting(&format!("buy.{thread}")).is_empty()) }
 
@@ -47,6 +61,8 @@ pub async fn call(ag: &Arc<Agents>, thread: &str, name: &str, a: &Value) -> (boo
     if !buy && name != "order_review" { return fail(NOT_BUY) }
     match name {
         "order_ask" => question(ag, thread, a).await,
+        "order_quote" => quote(ag, thread, &cwd, a).await,
+        "order_status" => status(ag, thread).await,
         "order_review" => match sv(a, "action") {
             "gate" => gate(ag, thread, &cwd).await,
             "record" if crate::copy::on() => fail(crate::copy::HOME_ONLY),
@@ -173,6 +189,306 @@ async fn gate(ag: &Arc<Agents>, thread: &str, cwd: &str) -> (bool, Value) {
     (true, json!(gate_said(kind)))
 }
 
+// ---- what a quote says ----
+
+/// Order.payable: worked out and nothing to fix.
+pub fn payable(q: &Value) -> bool { sv(q, "status") == "ready" && q["quote"]["problems"].as_array().map_or(true, Vec::is_empty) }
+/// Order.pending: the order server is still working it out.
+pub fn pending(q: &Value) -> bool { matches!(sv(q, "status"), "received" | "analysing") }
+/// Order.ddp
+fn ddp(q: &Value) -> bool { q["quote"]["shipping"]["ddp"].as_bool().unwrap_or(false) }
+/// Order.customs: what the price covers about customs, said where the total is.
+pub fn customs(ddp: bool) -> &'static str { if ddp { "Includes import VAT and duties: nothing to pay on delivery." } else { "Excludes customs: the courier will contact you to pay any duties and taxes before delivery." } }
+/// Order.state: the order's state once there is one (a checkout that expired unpaid is no order); on a pilot server paid is "pilot": nothing was charged or ordered.
+pub fn state(q: &Value) -> String {
+    let order = sv(&q["order"], "status"); let st = if order.is_empty() || order == "cancelled" { sv(q, "status") } else { order };
+    if q["pilot"].as_bool().unwrap_or(false) && st == "paid" { "pilot".into() } else { st.to_string() }
+}
+/// Order.done: nothing more will happen to it.
+pub fn done(st: &str) -> bool { matches!(st, "delivered" | "refunded" | "pilot" | "expired" | "failed" | "gone") }
+/// Order.every: while unpaid it is checked each minute, after that every ten.
+pub fn every(st: &str) -> Duration { Duration::from_secs(if matches!(st, "ready" | "quoted" | "") { 60 } else { 600 }) }
+/// Order.status.text: an order's progress, said once each in the buy thread.
+pub fn status_text(st: &str, tracking: &str) -> String {
+    match st {
+        "paid" => "**Paid.** Thank you. We're placing the order now; this thread will say when it ships.".into(),
+        "placed" => "**Ordered.** It's in production.".into(),
+        "shipped" => if tracking.is_empty() { "**Shipped.**".into() } else { format!("**Shipped.** Tracking: {tracking}") },
+        "delivered" => "**Delivered.**".into(),
+        "refunded" => "**Refunded.** The money is on its way back to you.".into(),
+        "expired" => "This quote has expired. Ask here for a new one when you're ready.".into(),
+        "pilot" => "**Test payment received.** Ordering through Backplane is a pilot: your card was not charged and nothing is ordered. To get the parts made now, order them from any fabricator with the files exported to `mfg/` here.".into(),
+        _ => String::new(),
+    }
+}
+/// Order.status.note: the alert it raises on the person's devices, "" for none (not Expired, not a pilot's: it alerts no one).
+pub fn status_note(st: &str, tracking: &str) -> String {
+    match st {
+        "paid" => "Paid: your order is being placed.".into(), "placed" => "Ordered: your order is in production.".into(),
+        "shipped" => if tracking.is_empty() { "Shipped.".into() } else { format!("Shipped. Tracking: {tracking}") },
+        "delivered" => "Delivered.".into(), "refunded" => "Refunded: the money is on its way back to you.".into(), _ => String::new(),
+    }
+}
+/// Order.said: what the agent hears back: never the token or the Buy now link.
+pub fn said(q: &Value) -> Value {
+    let note = if pending(q) { STATUS_SENT } else if payable(q) { "Backplane posted the quote with its Buy now link in this thread; do not repeat its table." }
+        else { "Backplane posted the quote in this thread with NO Buy now link: it cannot be paid until its problems are fixed. Do not say a link is there. Tell the person each problem in plain words and what fixes it (for a destination that cannot be priced, ask for another country), then make a new quote." };
+    let or = |v: &Value, d: Value| if v.is_null() { d } else { v.clone() };
+    json!({"status":sv(q, "status"),"total":q["quote"]["total"],"lead_days":q["quote"]["lead_days"],"problems":or(&q["quote"]["problems"], json!([])),"warnings":or(&q["quote"]["warnings"], json!([])),"order":q["order"],"note":note})
+}
+/// Order.quote.md after Order.quote.customs: the order server's text, what the price covers, and Buy now only when it can be paid. The link names the quote, never its token.
+pub fn quote_md(q: &Value) -> String {
+    let md = sv(&q["quote"], "markdown");
+    let md = if md.trim().is_empty() { md.to_string() } else { format!("{md}\n\n{}", customs(ddp(q))) };
+    if payable(q) { let l = sv(&q["quote"], "pay_label"); format!("{md}\n\n[{}]({LINK}{})", if l.is_empty() { "Buy now" } else { l }, sv(q, "id")) } else { md }
+}
+fn total_of(label: &str, raw: &Value) -> String {
+    if let Some(t) = label.strip_prefix("Buy now · ") { return t.to_string() }
+    match raw { Value::Null => String::new(), Value::String(s) if s.is_empty() => String::new(), Value::String(s) => format!("${s}"), v => format!("${v}") }
+}
+/// Order.sum: what the hub keeps of a quote for the card (the setting `order.quote.<thread>`), without its link: `pay_link` finds that by the id.
+pub fn sum(q: &Value) -> String {
+    let label = sv(&q["quote"], "pay_label");
+    json!({"id":sv(q, "id"),"state":state(q),"total":total_of(label, &q["quote"]["total"]),"ddp":ddp(q),"payable":payable(q),"label":if label.is_empty() { "Buy now" } else { label },"tracking":sv(&q["order"], "tracking")}).to_string()
+}
+/// Order.sum.keeps: a newer quote always takes the card; a quote's own progress only while it is the card's.
+pub fn sum_keeps(fresh: bool, cur: &str, id: &str) -> bool { fresh || cur.is_empty() || serde_json::from_str::<Value>(cur).map_or(false, |v| sv(&v, "id") == id) }
+
+// ---- the order card ----
+
+const STEPS: [&str; 6] = ["Details", "Files", "Quote", "Pay", "Made", "Shipped"];
+fn card_at(st: &str) -> usize { match st { "delivered" => 6, "shipped" => 5, "paid" | "placed" => 4, _ => 3 } }
+fn card_said(st: &str, pay: bool, tracking: &str) -> String {
+    match st {
+        "expired" => "This quote expired. Ask here for a new one.".into(), "failed" => "The quote could not be worked out. Ask here to try again.".into(),
+        "pilot" => "Test payment: nothing was charged or ordered.".into(), "refunded" => "Refunded: the money is on its way back to you.".into(),
+        _ if card_at(st) >= 4 => status_note(st, tracking),
+        _ => if pay { "Quoted. Buy now to place the order.".into() } else { "The quote has something to fix first: see it below.".into() },
+    }
+}
+/// Order.card with Mob.order.card: a buy thread's card from its open asks, the quote on its way and the quote the hub keeps. The hub decides it all; every client draws it.
+pub fn card(name: &str, asked: bool, files: bool, waiting: bool, running: bool, sum: &str) -> Value {
+    let q: Value = serde_json::from_str(sum).unwrap_or(Value::Null);
+    let (st, pay, tracking) = (sv(&q, "state"), q["payable"].as_bool().unwrap_or(false), sv(&q, "tracking"));
+    let i = if files { 1 } else if waiting { 2 } else if !sum.is_empty() { card_at(st) } else { 0 };
+    let line = if asked { "Backplane needs your answer below.".to_string() } else { match i {
+        0 => if running { "Getting the order ready…".into() } else { "Reply below to go on.".into() }, 1 => "Check the files below and send them for a quote.".into(), 2 => "Getting your quote… usually 1-2 min".into(), _ => card_said(st, pay, tracking) } };
+    let buys = i == 3 && pay && matches!(st, "ready" | "quoted"); let (shown, total) = (i >= 3, sv(&q, "total"));
+    json!({"name":name,"steps":STEPS.iter().enumerate().map(|(k, l)| json!({"label":l,"mark":if k < i { "done" } else if k == i { "on" } else { "" }})).collect::<Vec<_>>(),
+        "line":line,"waiting":i == 2,"total":if shown { total } else { "" },"customs":if shown && !total.is_empty() { customs(q["ddp"].as_bool().unwrap_or(false)) } else { "" },
+        "pay":if buys { pay_link(sv(&q, "id")).unwrap_or_default() } else { String::new() },"label":if buys { let l = sv(&q, "label"); if l.is_empty() { "Buy now" } else { l } } else { "" }})
+}
+
+// ---- the link and the record ----
+
+/// How the log writes a Buy now link: it names the quote, and the hub alone can turn that into the link with its token.
+const LINK: &str = "order:";
+static PAY: LazyLock<RwLock<HashMap<String, String>>> = LazyLock::new(Default::default);
+pub fn pay_link(qid: &str) -> Option<String> { PAY.read().unwrap().get(qid).cloned() }
+/// What a client is shown of a message: its Buy now link, real. Only the hub's drawing calls this; thread_read and the log keep `order:<quote>`.
+pub fn pay_shown(text: &str) -> String {
+    let needle = format!("]({LINK}");
+    if !text.contains(&needle) { return text.to_string() }
+    let (mut out, mut rest) = (String::new(), text);
+    while let Some(i) = rest.find(&needle) {
+        let from = i + needle.len(); let Some(end) = rest[from..].find(')') else { break }; let id = &rest[from..from + end];
+        out.push_str(&rest[..i + 2]); match pay_link(id) { Some(l) => out.push_str(&l), None => { out.push_str(LINK); out.push_str(id) } } out.push(')'); rest = &rest[from + end + 1..];
+    }
+    out.push_str(rest); out
+}
+/// A quote id as a file name: the server's word is not trusted to stay inside `<home>/orders`.
+pub fn id_ok(id: &str) -> bool { id.starts_with("q_") && id.len() <= 80 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') }
+/// Od.pay
+fn pay_of(server: &str, qid: &str, token: &str) -> String { format!("{server}/q/{qid}?t={token}") }
+#[derive(Clone)]
+struct Rec { id: String, token: String, thread: String, server: String }
+/// Od.keep: the record a quote leaves, the token's one home: 0600 in a 0700 folder.
+fn keep(home: &Path, r: &Rec, status: &str) -> std::io::Result<()> {
+    let d = home.join("orders"); std::fs::DirBuilder::new().mode(0o700).recursive(true).create(&d)?; std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o700))?;
+    let (f, tmp) = (d.join(format!("{}.json", r.id)), d.join(format!(".{}.tmp", r.id)));
+    let _ = std::fs::remove_file(&tmp);
+    std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp)?.write_all(json!({"id":r.id,"token":r.token,"thread":r.thread,"server":r.server,"status":status}).to_string().as_bytes())?;
+    std::fs::rename(&tmp, &f)?; PAY.write().unwrap().insert(r.id.clone(), pay_of(&r.server, &r.id, &r.token)); Ok(())
+}
+fn rec_of(j: &Value) -> Option<(Rec, String)> { let (id, token) = (sv(j, "id"), sv(j, "token")); if !id_ok(id) || token.is_empty() { return None } Some((Rec { id: id.into(), token: token.into(), thread: sv(j, "thread").into(), server: sv(j, "server").into() }, sv(j, "status").to_string())) }
+/// Every record, newest first (200 at most, as `Od.resume` read).
+fn records(home: &Path) -> Vec<(Rec, String)> {
+    let mut fs: Vec<(std::time::SystemTime, PathBuf)> = std::fs::read_dir(home.join("orders")).map(|r| r.flatten().filter(|e| { let n = e.file_name().to_string_lossy().to_string(); n.starts_with("q_") && n.ends_with(".json") })
+        .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path()))).collect()).unwrap_or_default();
+    fs.sort_by(|a, b| b.0.cmp(&a.0)); fs.truncate(200);
+    fs.into_iter().filter_map(|(_, p)| rec_of(&serde_json::from_str(&std::fs::read_to_string(p).ok()?).ok()?)).collect()
+}
+
+// ---- asking to send ----
+
+/// Od.safe: a path from the order's folder that stays inside it, plain characters only (no `"`, `\`, `;`: they end up in curl's config).
+pub fn safe(p: &str) -> bool { !p.is_empty() && !p.starts_with('/') && !p.contains("..") && p.chars().all(|c| c as u32 >= 32 && !matches!(c, '"' | '\\' | ';' | '\u{7f}')) }
+/// A link anywhere on the way: a link named like a design file could carry any file of the person's out, under a name they would approve.
+fn linked(cwd: &Path, dir: &str) -> bool {
+    fn below(d: &Path) -> bool { std::fs::read_dir(d).map_or(false, |r| r.flatten().any(|e| e.file_type().map_or(true, |t| t.is_symlink() || (t.is_dir() && below(&e.path()))))) }
+    let mut p = cwd.to_path_buf();
+    for c in dir.split('/').filter(|c| !c.is_empty() && *c != ".") { p.push(c); if std::fs::symlink_metadata(&p).map_or(true, |m| m.file_type().is_symlink()) { return true } }
+    below(&p)
+}
+fn sha(b: &[u8]) -> String { hex::encode(Sha256::digest(b)) }
+/// Order.ask.detail: what the person approves before anything is sent: how many files, from where, to where they ship, and each file (the first 40).
+pub fn ask_detail(dir: &str, m: &Value, ps: &[String]) -> String {
+    let parts: Vec<String> = m["parts"].as_array().into_iter().flatten().map(|p| {
+        let qty = match &p["qty"] { Value::Null => "1".to_string(), Value::String(s) => s.clone(), v => v.to_string() };
+        let name = p["name"].as_str().unwrap_or("?"); let asm = match &p["assemble"] { Value::Null => String::new(), Value::String(s) => s.clone(), v => v.to_string() };
+        if asm.is_empty() || asm == "0" { format!("{name} ×{qty}") } else { format!("{name} ×{qty} ({asm} assembled)") } }).collect();
+    let n = ps.len(); let mut list: String = ps.iter().take(40).map(|p| format!("\n{p}")).collect(); if n > 40 { list.push_str("\n…") }
+    format!("Send {n} {} from {dir} to Backplane's quote service? They are kept only to make what you order.\nShips to {} · {}\n{list}", if n == 1 { "file" } else { "files" }, m["ship_to"].as_str().unwrap_or("?"), parts.join(", "))
+}
+/// The manifest's files (`"files": {path: sha256}`), when the folder may be sent.
+fn sendable(cwd: &Path, dir: &str) -> Option<(Value, Vec<String>, String)> {
+    let abs = cwd.join(dir); let bytes = std::fs::read(abs.join("manifest.json")).ok()?; let m: Value = serde_json::from_slice(&bytes).ok()?;
+    let ps: Vec<String> = m["files"].as_object()?.keys().cloned().collect();
+    (safe(dir) && !ps.is_empty() && ps.iter().all(|p| safe(p) && abs.join(p).is_file()) && !linked(cwd, dir)).then(|| (m, ps, sha(&bytes)))
+}
+/// What the person is deciding on: the folder, the files as listed, the manifest they saw.
+pub struct Asked { thread: String, cwd: PathBuf, dir: String, files: Vec<String>, manifest: String, server: String }
+/// Od.quote: reads the manifest, refuses what must not go, and asks. It never waits on the person (an MCP call held open dies), and nothing leaves here.
+async fn quote(ag: &Arc<Agents>, thread: &str, cwd: &str, a: &Value) -> (bool, Value) {
+    if crate::copy::on() { return fail(COPY_SENDS_NOTHING) }
+    let dir = sv(a, "dir").trim().to_string(); let root = PathBuf::from(cwd);
+    let (d2, r2) = (dir.clone(), root.clone());
+    let got = tokio::task::spawn_blocking(move || sendable(&r2, &d2)).await.ok().flatten();
+    let Some((m, files, manifest)) = got else { return fail(&format!("no manifest.json with files to send in {dir} (paths must stay inside the folder, plain characters only, and the folder must hold plain files, no links)")) };
+    let server = crate::settings::fab::server_of(&ag.hub.setting("order.server").await.unwrap_or_default());
+    let now = now_s(); let ask = hub_id("q", now, ag.seq_n()); let detail = ask_detail(&dir, &m, &files);
+    let open: Vec<String> = ag.world().await.asks.keys().cloned().collect();
+    { let mut q = ag.order_asks.lock().unwrap(); q.retain(|k, _| open.contains(k)); q.insert(ask.clone(), Asked { thread: thread.into(), cwd: root, dir, files, manifest, server }); }
+    let pend = ag.pending_ev(thread, 1, "", now).await;
+    ag.commit_events(vec![json!({"$":"AskOpened","id":ask,"thread":thread,"kind":"approval","tool":"order_quote","detail":detail,"options":"","at":now}), pend]).await;
+    (true, json!(QUOTE_ASKED))
+}
+/// Od.wait: the person answered the files' approval. Send uploads; Not now tells the agent; a retired ask has no answer, and tells no one.
+pub fn answered(ag: &Arc<Agents>, ask: &str, answer: &str) {
+    let Some(q) = ag.order_asks.lock().unwrap().remove(ask) else { return };
+    let ag = ag.clone(); let answer = answer.to_string();
+    tokio::spawn(async move { match answer.as_str() { "accept" | "session" => go(&ag, q).await, "decline" | "deny" => wake(&ag, &q.thread, DECLINED).await, _ => {} } });
+}
+
+// ---- sending and following ----
+
+fn heads(install: &str) -> Vec<String> { vec![format!("X-Backplane-Install: {install}"), "Accept: application/json".into()] }
+/// Od.upload: one multipart request from the order's folder, by the checked relative paths; its URL and headers in a 0600 config, never on the command line.
+fn upload(home: &Path, server: &str, install: &str, dir: &Path, ps: &[String]) -> Value {
+    let q = crate::settings::webhook::q; let sec = home.join("secrets");
+    if std::fs::DirBuilder::new().mode(0o700).recursive(true).create(&sec).is_err() { return json!({"error":"the upload could not be prepared"}) }
+    let nonce = format!("{:x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos())); let (cfg, out) = (sec.join(format!("o-{nonce}.curl")), sec.join(format!("o-{nonce}.out")));
+    let mut c = format!("url = {}\n", q(&format!("{server}/v1/quotes"))); for h in heads(install) { c.push_str(&format!("header = {}\n", q(&h))) }
+    c.push_str(&format!("form = {}\n", q("manifest=<manifest.json"))); for p in ps { c.push_str(&format!("form = {}\n", q(&format!("file=@\"{p}\";filename=\"{p}\"")))) }
+    c.push_str(&format!("output = {}\nwrite-out = \"%{{http_code}}\"\n", q(&out.to_string_lossy())));
+    let wrote = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&cfg).and_then(|mut f| f.write_all(c.as_bytes()));
+    let code = if wrote.is_ok() { crate::proc::std_cmd(crate::proc::Kind::Net, "curl").args(["-sS", "--max-time", "300", "-K"]).arg(&cfg).current_dir(dir).output().ok()
+        .map(|o| { let s = String::from_utf8_lossy(&o.stdout).trim().to_string(); let c: String = s.chars().rev().take(3).collect::<Vec<_>>().into_iter().rev().collect(); if c.len() == 3 { c } else { "000".into() } }).unwrap_or_else(|| "000".into()) } else { "000".into() };
+    let body = std::fs::read_to_string(&out).unwrap_or_default(); let _ = std::fs::remove_file(&cfg); let _ = std::fs::remove_file(&out);
+    crate::settings::fab::est_got(&code, &body)
+}
+async fn get(home: &Path, r: &Rec) -> Value {
+    let (home, r) = (home.to_path_buf(), r.clone());
+    tokio::task::spawn_blocking(move || { let hs = [format!("Authorization: Bearer {}", r.token), format!("X-Backplane-Install: {}", crate::settings::fab::install_id(&home))];
+        let (c, b) = crate::settings::fab::curl(&home, &format!("{}/v1/quotes/{}", r.server, r.id), &hs, None); crate::settings::fab::est_got(&c, &b) }).await.unwrap_or(Value::Null)
+}
+/// Hub.order.wake: the agent hears what came of it as a system note (the conversation hides it), and a quote on its way no longer is.
+async fn wake(ag: &Arc<Agents>, thread: &str, text: &str) {
+    let now = now_s(); let key = format!("order.wait.{thread}"); let waiting = !ag.hub.setting(&key).await.unwrap_or_default().is_empty();
+    let unwait: Vec<Value> = if waiting { vec![json!({"$":"SettingSet","key":key,"value":"","at":now})] } else { vec![] };
+    if ag.deliver_as("system", thread, &hub_id("m", now, ag.seq_n()), &format!("[Backplane] {text}"), None, unwait.clone()).await.is_err() && !unwait.is_empty() { ag.commit_events(unwait).await }
+}
+/// Hub.order.quoted: the quote for the card, by Order.sum.keeps; the same again writes nothing.
+async fn card_set(ag: &Arc<Agents>, thread: &str, s: &str, id: &str, fresh: bool) {
+    let key = format!("order.quote.{thread}"); let cur = ag.hub.setting(&key).await.unwrap_or_default();
+    if sum_keeps(fresh, &cur, id) && cur != s { ag.commit_events(vec![json!({"$":"SettingSet","key":key,"value":s,"at":now_s()})]).await }
+}
+/// Hub.order.note: an order's progress in its thread, with its note alert.
+async fn progress(ag: &Arc<Agents>, r: &Rec, st: &str, tracking: &str) {
+    let text = status_text(st, tracking); if text.is_empty() { return }
+    let (now, key) = (now_s(), format!("o:{}:{st}", r.id)); let ping = status_note(st, tracking);
+    let mut ev = vec![json!({"$":"MessagePosted","thread":r.thread,"msg":key,"role":"assistant","text":text,"at":now})];
+    if !ping.is_empty() { let (n, prev) = (ag.hub.setting("notify.settled").await.unwrap_or_default(), ag.hub.setting(&format!("alert.{}", r.thread)).await.unwrap_or_default());
+        ev.extend(crate::state::fam::turnend::order_note(&n, &prev, ag.seq_n(), now, &r.thread, &key, &ping)); }
+    ag.commit_events(ev).await;
+}
+#[cfg(test)] const TICK: Duration = Duration::from_millis(40);
+#[cfg(not(test))] const TICK: Duration = Duration::from_secs(3);
+#[cfg(test)] fn pace(_: Duration) -> Duration { TICK }
+#[cfg(not(test))] fn pace(d: Duration) -> Duration { d }
+/// Od.watch: one look every minute while unpaid, every ten after; a change is said once in the buy thread and kept in the record.
+async fn watch(ag: Arc<Agents>, r: Rec, mut last: String) {
+    let home = ag.hub.cfg.home.clone();
+    for _ in 0..9000 {
+        tokio::time::sleep(pace(every(&last))).await;
+        let q = get(&home, &r).await; let st = state(&q);
+        if st.is_empty() { continue } // no answer: the server may be away; ask again
+        if st != last { progress(&ag, &r, &st, sv(&q["order"], "tracking")).await; card_set(&ag, &r.thread, &sum(&q), &r.id, false).await; let _ = keep(&home, &r, &st); last = st.clone(); }
+        if done(&st) { return }
+    }
+}
+/// Od.quoted: post it, keep it for the card, tell the agent, and follow it.
+async fn quoted(ag: &Arc<Agents>, r: Rec, q: Value) {
+    if sv(&q, "status").is_empty() { return wake(ag, &r.thread, &format!("The quote could not be worked out: {}.", q["error"].as_str().unwrap_or("no answer from the order server"))).await }
+    let md = quote_md(&q);
+    if !md.trim().is_empty() { ag.commit_events(vec![json!({"$":"MessagePosted","thread":r.thread,"msg":format!("q:{}", r.id),"role":"assistant","text":md,"at":now_s()})]).await }
+    let mut s = q.clone(); s["id"] = json!(r.id); card_set(ag, &r.thread, &sum(&s), &r.id, true).await;
+    let _ = keep(&ag.hub.cfg.home, &r, "quoted");
+    wake(ag, &r.thread, &format!("The quote is posted in this thread. {}", said(&q))).await;
+    tokio::spawn(watch(ag.clone(), r, "quoted".into()));
+}
+/// Od.poll then Od.quoted: until it is worked out. A moment the server cannot be reached does not end it; only the time does, and a quote that slow is still posted when it comes.
+async fn poll(ag: Arc<Agents>, r: Rec) {
+    let home = ag.hub.cfg.home.clone();
+    for i in 0..600 {
+        tokio::time::sleep(if i < 60 { TICK } else { TICK * 10 }).await;
+        let q = get(&home, &r).await;
+        if pending(&q) || q["error"] == crate::settings::fab::UNREACHABLE { continue }
+        return quoted(&ag, r, q).await
+    }
+    wake(&ag, &r.thread, "The quote could not be worked out: the order server did not finish it in time; ask order_status in a few minutes.").await
+}
+/// Od.go: the person said yes. The thread waits on the quote from here until the agent is told what came of it.
+async fn go(ag: &Arc<Agents>, q: Asked) {
+    let home = ag.hub.cfg.home.clone(); let now = now_s(); let th = q.thread.clone();
+    ag.commit_events(vec![json!({"$":"SettingSet","key":format!("order.wait.{th}"),"value":now.to_string(),"at":now})]).await;
+    let (h2, s2, cwd, dir, files, seen) = (home.clone(), q.server.clone(), q.cwd.clone(), q.dir.clone(), q.files.clone(), q.manifest.clone());
+    let up = tokio::task::spawn_blocking(move || {
+        // the approval covers what the person saw: anything moved since is not sent (the server holds each file to the manifest's hash)
+        match sendable(&cwd, &dir) { Some((_, ps, m)) if ps == files && m == seen => {} _ => return json!({"error":"the folder changed after the person approved it, so nothing was sent: export it again and ask once more"}) }
+        upload(&h2, &s2, &crate::settings::fab::install_id(&h2), &cwd.join(&dir), &files)
+    }).await.unwrap_or(Value::Null);
+    let (id, token) = (sv(&up, "id"), sv(&up, "token"));
+    if token.is_empty() || !id_ok(id) { return wake(ag, &th, &format!("The files were not taken: {}.", up["error"].as_str().unwrap_or("no answer"))).await }
+    let r = Rec { id: id.into(), token: token.into(), thread: th, server: q.server.clone() };
+    let _ = keep(&home, &r, "quoting"); poll(ag.clone(), r).await;
+}
+/// Od.status.now: from the thread first: a quote being made is never called unpayable.
+async fn status(ag: &Arc<Agents>, thread: &str) -> (bool, Value) {
+    let files = ag.world().await.asks.values().any(|a| a.thread == thread && a.tool == "order_quote");
+    if files { return (true, json!(STATUS_UNSENT)) }
+    if !ag.hub.setting(&format!("order.wait.{thread}")).await.unwrap_or_default().is_empty() { return (true, json!(STATUS_SENT)) }
+    let home = ag.hub.cfg.home.clone();
+    let Some((r, _)) = records(&home).into_iter().find(|(r, _)| r.thread == thread) else { return (true, json!("no quote yet in this thread")) };
+    if crate::copy::on() { return fail(COPY_SENDS_NOTHING) }
+    (true, json!(said(&get(&home, &r).await).to_string()))
+}
+/// Od.resume: at start, every order not done is followed again, and a quote the hub was getting is waited on and posted. On a copy: nothing, not even the links.
+pub fn resume(ag: Arc<Agents>) {
+    if crate::copy::on() { return }
+    let home = ag.hub.cfg.home.clone();
+    tokio::spawn(async move {
+        for (r, st) in records(&home) {
+            PAY.write().unwrap().insert(r.id.clone(), pay_of(&r.server, &r.id, &r.token));
+            if done(&st) { continue }
+            if st == "quoting" { let now = now_s(); ag.commit_events(vec![json!({"$":"SettingSet","key":format!("order.wait.{}", r.thread),"value":now.to_string(),"at":now})]).await; tokio::spawn(poll(ag.clone(), r)); continue }
+            // its card is filled from a first look whatever its state (one missed stays on Details while its reply has Buy now)
+            let q = get(&home, &r).await; if !state(&q).is_empty() { card_set(&ag, &r.thread, &sum(&q), &r.id, false).await }
+            tokio::spawn(watch(ag.clone(), r, st));
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -212,9 +528,65 @@ mod tests {
         assert_eq!(ask_choices("Germany", &["France".into(), " Germany ".into(), "".into()]), "Germany · last time\nFrance"); assert_eq!(ask_choices("  ", &["a".into(), " b ".into()]), "a\nb"); assert_eq!(ask_choices("", &[]), "");
         assert_eq!((ask_tool_name(true), ask_tool_name(false)), ("order_ask.typed", "order_ask"));
     }
+    fn ready(pilot: bool) -> Value { json!({"id":"q_1","status":"ready","pilot":pilot,"quote":{"total":112.4,"lead_days":9,"pay_label":"Buy now · $112.40","markdown":"| a | b |","problems":[],"warnings":["w"],"shipping":{"ddp":true}}}) }
+    #[test] fn a_quote_says_what_it_covers_and_its_link_never_holds_the_token() {
+        let q = ready(false); assert!(payable(&q) && !pending(&q)); assert_eq!(state(&q), "ready");
+        assert_eq!(quote_md(&q), "| a | b |\n\nIncludes import VAT and duties: nothing to pay on delivery.\n\n[Buy now · $112.40](order:q_1)");
+        let mut bad = ready(false); bad["quote"]["problems"] = json!(["No price for Germany"]); bad["quote"]["shipping"]["ddp"] = json!(false); assert!(!payable(&bad));
+        assert_eq!(quote_md(&bad), "| a | b |\n\nExcludes customs: the courier will contact you to pay any duties and taxes before delivery.", "no link for a quote that cannot be paid");
+        assert!(said(&bad)["note"].as_str().unwrap().contains("NO Buy now link")); assert!(said(&json!({"status":"analysing"}))["note"].as_str().unwrap().contains("being made"), "a quote still being made is never called unpayable");
+        let t = said(&q).to_string(); assert!(!t.contains("order:") && !t.contains("?t="));
+        assert_eq!(total_of("Buy now · $5.00", &json!(9)), "$5.00"); assert_eq!(total_of("", &json!(9)), "$9"); assert_eq!(total_of("", &Value::Null), "");
+    }
+    #[test] fn a_pilots_payment_is_no_order_and_alerts_no_one() {
+        let mut q = ready(true); q["order"] = json!({"status":"paid"}); assert_eq!(state(&q), "pilot"); assert!(done("pilot")); assert_eq!(status_note("pilot", ""), ""); assert!(status_text("pilot", "").contains("your card was not charged"));
+        let mut q = ready(false); q["order"] = json!({"status":"cancelled"}); assert_eq!(state(&q), "ready", "a checkout that expired unpaid is no order");
+        q["order"] = json!({"status":"shipped"}); assert_eq!(state(&q), "shipped"); assert_eq!(status_note("shipped", "T1"), "Shipped. Tracking: T1"); assert_eq!(status_text("shipped", ""), "**Shipped.**");
+        assert_eq!(status_note("expired", ""), "", "Expired alerts no one"); assert!(!status_text("expired", "").is_empty());
+        assert_eq!(every("ready"), Duration::from_secs(60)); assert_eq!(every("placed"), Duration::from_secs(600));
+    }
+    #[test] fn the_card_follows_the_order() {
+        let marks = |c: &Value| c["steps"].as_array().unwrap().iter().map(|s| s["mark"].as_str().unwrap().to_string()).collect::<Vec<_>>().join(",");
+        let c = card("Lamp", false, false, false, true, ""); assert_eq!(c["line"], "Getting the order ready…"); assert_eq!(marks(&c), "on,,,,,"); assert_eq!(c["name"], "Lamp");
+        assert_eq!(card("L", false, false, false, false, "")["line"], "Reply below to go on."); assert_eq!(card("L", true, false, false, false, "")["line"], "Backplane needs your answer below.");
+        let c = card("L", false, true, false, false, ""); assert_eq!(marks(&c), "done,on,,,,"); assert_eq!(c["line"], "Check the files below and send them for a quote.");
+        let c = card("L", false, false, true, false, ""); assert_eq!(c["line"], "Getting your quote… usually 1-2 min"); assert_eq!(c["waiting"], true);
+        let r = Rec { id: "q_card".into(), token: "tok".into(), thread: "t".into(), server: "http://s".into() }; PAY.write().unwrap().insert(r.id.clone(), pay_of(&r.server, &r.id, &r.token));
+        let mut q = ready(false); q["id"] = json!("q_card"); let s = sum(&q); assert!(!s.contains("tok"), "the setting holds no token");
+        let c = card("L", false, false, false, false, &s); assert_eq!(marks(&c), "done,done,done,on,,"); assert_eq!((c["total"].as_str(), c["pay"].as_str(), c["label"].as_str()), (Some("$112.40"), Some("http://s/q/q_card?t=tok"), Some("Buy now · $112.40")));
+        assert_eq!(c["customs"], "Includes import VAT and duties: nothing to pay on delivery.");
+        q["order"] = json!({"status":"placed"}); let c = card("L", false, false, false, false, &sum(&q)); assert_eq!(marks(&c), "done,done,done,done,on,"); assert_eq!(c["pay"], "", "paid: no Buy now"); assert_eq!(c["line"], "Ordered: your order is in production.");
+        q["order"] = json!({"status":"delivered"}); assert_eq!(marks(&card("L", false, false, false, false, &sum(&q))), "done,done,done,done,done,done");
+    }
+    #[test] fn a_newer_quote_takes_the_card_and_an_older_ones_watcher_does_not() {
+        assert!(sum_keeps(true, r#"{"id":"q_2"}"#, "q_1")); assert!(sum_keeps(false, "", "q_1")); assert!(sum_keeps(false, r#"{"id":"q_1"}"#, "q_1")); assert!(!sum_keeps(false, r#"{"id":"q_2"}"#, "q_1"));
+    }
+    #[test] fn the_real_link_is_only_in_what_is_drawn() {
+        PAY.write().unwrap().insert("q_shown".into(), "http://s/q/q_shown?t=tok".into());
+        assert_eq!(pay_shown("a\n\n[Buy now · $1](order:q_shown) b"), "a\n\n[Buy now · $1](http://s/q/q_shown?t=tok) b"); assert_eq!(pay_shown("[x](order:q_none)"), "[x](order:q_none)", "unknown stays inert"); assert_eq!(pay_shown("plain (order:q_shown)"), "plain (order:q_shown)");
+    }
+    #[test] fn only_plain_paths_and_plain_files_are_sent() {
+        for p in ["a.zip", "main/gerbers.zip", "with space.csv"] { assert!(safe(p), "{p}") }
+        for p in ["", "/etc/passwd", "../x", "a/../../b", "a\"b", "a\\b", "a;b", "a\nb", "a\u{7f}"] { assert!(!safe(p), "{p:?}") }
+        let r = tmp("send"); let f = "mfg/1/a.zip"; put(r.join(f), "z"); let m = json!({"ship_to":"Germany","parts":[{"name":"Main","qty":5,"assemble":2}],"files":{"a.zip":"h"}}); put(r.join("mfg/1/manifest.json"), &m.to_string());
+        let (_, ps, h) = sendable(&r, "mfg/1").unwrap(); assert_eq!(ps, ["a.zip"]); assert_eq!(h.len(), 64);
+        assert_eq!(ask_detail("mfg/1", &m, &ps), "Send 1 file from mfg/1 to Backplane's quote service? They are kept only to make what you order.\nShips to Germany · Main ×5 (2 assembled)\n\na.zip");
+        assert!(sendable(&r, "mfg/../mfg/1").is_none()); assert!(sendable(&r, "mfg/2").is_none(), "no manifest");
+        std::os::unix::fs::symlink("/etc/passwd", r.join("mfg/1/b.zip")).unwrap(); assert!(sendable(&r, "mfg/1").is_none(), "a folder holding a link is refused, listed or not"); std::fs::remove_file(r.join("mfg/1/b.zip")).unwrap();
+        let o = tmp("elsewhere"); put(o.join("3/manifest.json"), &m.to_string()); put(o.join("3/a.zip"), "z"); std::os::unix::fs::symlink(&o, r.join("linked")).unwrap(); assert!(sendable(&r, "linked/3").is_none(), "nor a link on the way there");
+        put(r.join("mfg/4/manifest.json"), r#"{"files":{"gone.zip":"h"}}"#); assert!(sendable(&r, "mfg/4").is_none(), "a listed file that is not there"); put(r.join("mfg/5/manifest.json"), r#"{"files":{}}"#); assert!(sendable(&r, "mfg/5").is_none());
+    }
+    #[test] fn a_record_is_private_and_a_server_id_cannot_leave_the_folder() {
+        for id in ["../x", "q_../x", "q_a/b", "x", "", "q_a.b"] { assert!(!id_ok(id), "{id}") } assert!(id_ok("q_Ab-1_c"));
+        let h = tmp("rec"); let r = Rec { id: "q_rec".into(), token: "tok".into(), thread: "t1".into(), server: "http://s".into() }; keep(&h, &r, "quoting").unwrap();
+        let f = h.join("orders/q_rec.json"); assert_eq!(std::fs::metadata(&f).unwrap().permissions().mode() & 0o777, 0o600); assert_eq!(std::fs::metadata(h.join("orders")).unwrap().permissions().mode() & 0o777, 0o700);
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), r#"{"id":"q_rec","token":"tok","thread":"t1","server":"http://s","status":"quoting"}"#, "the shape fab.look's search and 0.14's records have");
+        keep(&h, &r, "quoted").unwrap(); let v = records(&h); assert_eq!((v.len(), v[0].1.as_str()), (1, "quoted")); assert_eq!(pay_link("q_rec").unwrap(), "http://s/q/q_rec?t=tok");
+        std::fs::write(h.join("orders/q_bad.json"), r#"{"id":"../../x","token":"t"}"#).unwrap(); assert_eq!(records(&h).len(), 1, "a record with a bad id is not followed");
+    }
     #[test] fn order_tools_follow_ordering_and_the_buy_thread() {
         let names = |on, buy| defs(on, buy).iter().map(|t| sv(t, "name").to_string()).collect::<Vec<_>>();
-        assert!(names(false, true).is_empty(), "Ordering off lists none"); assert_eq!(names(true, false), ["order_review"], "every thread reviews"); assert!(names(true, true).contains(&"order_ask".to_string()));
+        assert!(names(false, true).is_empty(), "Ordering off lists none"); assert_eq!(names(true, false), ["order_review"], "every thread reviews"); for n in ["order_quote", "order_status", "order_ask", "order_review"] { assert!(names(true, true).contains(&n.to_string()), "{n}") }
         for t in defs(true, true) { assert_eq!(t["inputSchema"]["type"], "object"); assert!(!sv(&t, "description").is_empty()); }
     }
 }

@@ -144,6 +144,11 @@ fn ready(st: &State, th: &str) -> bool {
 fn alert_set(seq: u64, now: u64, thread: &str, kind: &str, key: &str, settled: &str, text: &str) -> Value {
     json!({"$": "SettingSet", "key": format!("alert.{thread}"), "value": format!("{kind}\t{key}\t{settled}\t{now}.{seq}\t{text}"), "at": now})
 }
+/// Hub.order.ping: the note alert an order's progress raises (push, desktop, phones), keyed by the progress so each says it once; none when the person turned off alerts for settled work.
+pub fn order_note(notify_settled: &str, prev: &str, seq: u64, now: u64, thread: &str, key: &str, text: &str) -> Option<Value> {
+    if notify_settled == "off" { return None }
+    Some(alert_set(seq, now, thread, "note", key, parse(prev).settled, &alert_text(text, 300)))
+}
 /// Policy.end: what a turn's end records, over the state after the batch: zero or one setting
 pub fn policy_end(post: &State, seq: u64, now: u64, thread: &str, state: &str) -> Vec<Value> {
     // Triage.managed reads false until mail lands (open work)
