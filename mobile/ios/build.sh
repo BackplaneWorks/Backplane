@@ -3,7 +3,8 @@
 #   mobile/ios/build.sh sim       Debug, installed and launched on a booted iPhone Simulator
 #   mobile/ios/build.sh device    Debug, signed for development, installed on a connected iPhone
 #                                 (DEVICE=<id from `xcrun devicectl list devices`>, else the first)
-#   mobile/ios/build.sh archive   a signed App Store archive, uploaded to TestFlight
+#   mobile/ios/build.sh archive   a signed App Store archive, uploaded to TestFlight (NATIVE=1: the native SwiftUI screens, GPUI_NATIVE;
+#                                 BUILD_NUMBER=<n> sets the build number, default the date and minute)
 # device and archive read signing.env beside this script (never committed;
 # mobile/README.md): TEAM_ID and BUNDLE_ID, and for archive the App Store
 # Connect key (ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_PATH).
@@ -89,6 +90,7 @@ archive)
   xcodebuild -quiet -project Backplane.xcodeproj -scheme Backplane -configuration Release \
     -destination 'generic/platform=iOS' -archivePath build/Backplane.xcarchive -derivedDataPath build/dd \
     DEVELOPMENT_TEAM="$TEAM_ID" BASE_BUNDLE_ID="$BUNDLE_ID" CURRENT_PROJECT_VERSION="$n" \
+    ${NATIVE:+SWIFT_ACTIVE_COMPILATION_CONDITIONS="GPUI_NATIVE"} \
     "$@" $auth archive
   cat > build/export.plist <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
