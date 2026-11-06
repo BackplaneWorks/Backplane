@@ -25,7 +25,7 @@ pub fn start(hub: Arc<Hub>) { start_with(hub, None) }
 /// `seam`: the agents module to call instead of the process-wide one (tests that run a real one).
 pub fn start_with(hub: Arc<Hub>, seam: Option<Arc<dyn seam::Seam>>) {
     let fold = { let f = Arc::new(tokio::sync::Mutex::new(fold::Fold::load(&hub.store))); let f2 = f.clone(); crate::ckpt::register(move |store| f2.blocking_lock().save(store)); f };
-    hub.register_ticker(Arc::new(merge::MergeTicker { fold: fold.clone() }));
+    hub.register_ticker(Arc::new(merge::MergeTicker { fold: fold.clone(), seen: Default::default() }));
     // catch the fold up now, off the request path: the first command (a new thread) must not fold the whole log while the person waits
     { let (fold, hub) = (fold.clone(), hub.clone()); tokio::task::spawn_blocking(move || { let _ = fold.blocking_lock().sync(&hub.store); }); }
     hub.register_rpc(Arc::new(Commands { fold, seam }));
@@ -124,7 +124,7 @@ impl RpcHandler for Commands {
 pub async fn entries(hub: &Arc<Hub>, th: &str) -> Option<Ctx> { Some(entries_of(hub, th).await) }
 pub use plan::hand_text;
 /// A thread's own entries, newest first: the rows filed under it that it wrote, not the messages it sent elsewhere.
-async fn entries_of(hub: &Arc<Hub>, th: &str) -> Ctx { entries_upto(hub, th, usize::MAX).await }
+pub(crate) async fn entries_of(hub: &Arc<Hub>, th: &str) -> Ctx { entries_upto(hub, th, usize::MAX).await }
 /// The newest `max` or so entries (whole pages of 32), newest first.
 async fn entries_upto(hub: &Arc<Hub>, th: &str, max: usize) -> Ctx {
     let mut out = vec![]; let mut before = 0u64;
