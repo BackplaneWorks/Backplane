@@ -9,7 +9,7 @@
   "app": "data/1 native app (DataApp, SWIFT_ACTIVE_COMPILATION_CONDITIONS=\"GPUI_NATIVE DATA_APP\"); no Bend bridge.js, no engine",
   "ipaSha256": null,
   "ipaNote": "xcodebuild -exportArchive with destination upload wrote no local IPA.",
-  "archiveMode": "Manual frozen Release archive and upload (mobile/ios/build.sh archive via scripts/gpui/ios-archive.sh upload) with the existing Apple Distribution identity and profiles in the backplane-signing keychain; no provisioning updates; run under the mac-heavy lock.",
+  "archiveMode": "Manual frozen Release archive and upload (mobile/ios/build.sh archive via scripts/ios-archive.sh upload) with the existing Apple Distribution identity and profiles in the backplane-signing keychain; no provisioning updates; run under the mac-heavy lock.",
   "uploadAuthorizedByUser": true,
   "uploadCommandExitCode": 0,
   "appleUploadResult": "xcodebuild: 'Upload succeeded.' / 'Uploaded Backplane' / EXPORT SUCCEEDED; no upload errors.",
