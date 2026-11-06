@@ -34,22 +34,25 @@ fn onoff(on: bool) -> &'static str { if on { "on" } else { "off" } }
 
 /// The channel a stored value means: 0.14's "nightly" is beta now, and the unknown is stable (`update::rel::channel`, the rule the updater itself follows).
 fn update_channel(raw: &str) -> &'static str { match raw.trim() { "beta" | "nightly" => "beta", _ => "stable" } }
-/// Settings → Network's update line, from info `update.status` (what the hub's updater is doing, `update/svc.rs`).
-fn update_row(version: &str, status: &str) -> Value {
+/// What to say about updates, and whether Check now is offered, from info `update.status` (`update/svc.rs`). One sentence for every client: the phones get it in `update.status`.
+pub fn update_line(status: &str) -> (String, bool) {
     let v: Value = serde_json::from_str(status).unwrap_or_default();
     let g = |k: &str| v[k].as_str().unwrap_or("").to_string();
-    let (avail, note) = (g("available"), g("note")); let check = || vec![btn("Check now", "update-check", "", false)];
-    let (line, buttons) = match g("state").as_str() {
-        "" | "package" => ("Updated by its package.".to_string(), vec![]),
-        "off" => ("Updates are off on this machine.".to_string(), vec![]),
-        "checking" => ("Checking for updates.".to_string(), vec![]),
-        "downloading" => (format!("Downloading {avail}."), vec![]),
-        "waiting" => (format!("{avail} installs when running turns finish."), vec![]),
-        "installing" => (format!("Installing {avail}. Backplane restarts once it is ready."), vec![]),
-        "failed" => (if note.is_empty() { "The last update failed.".to_string() } else { note }, check()),
-        _ => (if note.is_empty() { "Up to date, checked hourly.".to_string() } else { note }, check()),
-    };
-    row(&format!("Backplane {version}"), &line, buttons)
+    let (avail, note) = (g("available"), g("note"));
+    match g("state").as_str() {
+        "" | "package" => ("Updated by its package.".to_string(), false),
+        "off" => ("Updates are off on this machine.".to_string(), false),
+        "checking" => ("Checking for updates.".to_string(), false),
+        "downloading" => (format!("Downloading {avail}."), false),
+        "waiting" => (format!("{avail} installs when running turns finish."), false),
+        "installing" => (format!("Installing {avail}. Backplane restarts once it is ready."), false),
+        "failed" => (if note.is_empty() { "The last update failed.".to_string() } else { note }, true),
+        _ => (if note.is_empty() { "Up to date, checked hourly.".to_string() } else { note }, true),
+    }
+}
+fn update_row(version: &str, status: &str) -> Value {
+    let (line, check) = update_line(status);
+    row(&format!("Backplane {version}"), &line, if check { vec![btn("Check now", "update-check", "", false)] } else { vec![] })
 }
 
 fn appearance(st: &State) -> Vec<Value> {

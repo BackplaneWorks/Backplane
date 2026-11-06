@@ -720,6 +720,8 @@ struct DataSettingsView: View {
                     Button("Forget this hub") { confirmUnpair = true }.buttonStyle(DButton(danger: true))
                 }
                 DLine()
+                DataUpdateSection(client: client)
+                DLine()
                 NavigationLink(value: DPage(name: "improvements")) { Text("Improvements") }.buttonStyle(DButton()).accessibilityIdentifier("settings.improve")
                 DLine()
                 let i = Bundle.main.infoDictionary
@@ -731,6 +733,28 @@ struct DataSettingsView: View {
         .confirmationDialog("Forget this hub?", isPresented: $confirmUnpair, titleVisibility: .visible) {
             Button("Forget", role: .destructive) { client.unpair() }
         } message: { Text("This phone's saved copy of its threads is removed. Pair again to come back.") }
+    }
+}
+
+// the hub's updates: the hub says what to show (update.status); this draws it
+struct DataUpdateSection: View {
+    @Bindable var client: DataClient
+    @State private var status: DUpdate?
+    private func load(_ m: String, _ p: [String: Any] = [:]) async { if let r: DUpdate = try? await client.call(m, p) { status = r } }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            DHeading(text: "Updates")
+            if let u = status {
+                Text("Backplane \(u.current)").dmono(13)
+                Text(u.line).dmono(11).foregroundStyle(BackplaneDesign.dim).accessibilityIdentifier("settings.update.line")
+                DChoices(options: [(label: "stable", value: "stable"), (label: "beta", value: "beta")],
+                         value: Binding(get: { u.channel }, set: { c in Task { await load("update.channel", ["channel": c]) } })).accessibilityIdentifier("settings.update.channel")
+                if u.canCheck {
+                    Button("Check now") { Task { await load("update.check"); try? await Task.sleep(for: .seconds(3)); await load("update.status") } }.buttonStyle(DButton()).accessibilityIdentifier("settings.update.check")
+                }
+            } else { Text("Not connected").dmono(11).foregroundStyle(BackplaneDesign.dim) }
+        }
+        .task(id: client.conn) { await load("update.status") }
     }
 }
 

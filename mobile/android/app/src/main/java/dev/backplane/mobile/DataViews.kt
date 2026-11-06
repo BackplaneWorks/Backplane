@@ -420,6 +420,8 @@ private fun SettingsScreen(back: () -> Unit, improve: () -> Unit) {
             DMono("HUB", dfaint); Text(DataClient.hubName, color = dcs.onSurface, fontFamily = BpMono, fontSize = 14.sp)
             DMono(if (DataClient.conn == DataClient.Conn.ONLINE) "online" else "offline ${DataClient.failure}", dcs.onSurfaceVariant, 12)
             DLine()
+            UpdateSection()
+            DLine()
             DBtn("Improvements", false, modifier = Modifier.testTag("settings.improve"), onClick = improve)
             DLine()
             DMono("ALERTS", dfaint)
@@ -434,6 +436,25 @@ private fun SettingsScreen(back: () -> Unit, improve: () -> Unit) {
             DLine()
             DBtn("Unpair this phone", false, modifier = Modifier.testTag("settings.unpair")) { DataClient.unpair(); back() }
         }
+    }
+}
+
+// the hub's updates: the hub says what to show (update.status); this draws it
+@Composable
+private fun UpdateSection() {
+    val scope = rememberCoroutineScope()
+    var u by remember { mutableStateOf<org.json.JSONObject?>(null) }
+    suspend fun load(m: String, p: org.json.JSONObject = org.json.JSONObject()) { runCatching { DataClient.call(m, p) }.onSuccess { u = it } }
+    LaunchedEffect(DataClient.conn) { load("update.status") }
+    DMono("UPDATES", dfaint)
+    val s = u
+    if (s == null) DMono("not connected", dcs.onSurfaceVariant, 11) else {
+        Text("Backplane ${s.optString("current")}", color = dcs.onSurface, fontFamily = BpMono, fontSize = 14.sp)
+        DMono(s.optString("line"), dcs.onSurfaceVariant, 11, Modifier.testTag("settings.update.line"))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf("stable", "beta").forEach { c -> DBtn(c, s.optString("channel") == c, modifier = Modifier.testTag("settings.update.$c")) { scope.launch { load("update.channel", org.json.JSONObject().put("channel", c)) } } }
+        }
+        if (s.optBoolean("canCheck")) DBtn("Check now", false, modifier = Modifier.testTag("settings.update.check")) { scope.launch { load("update.check"); kotlinx.coroutines.delay(3000); load("update.status") } }
     }
 }
 
