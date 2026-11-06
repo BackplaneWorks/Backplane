@@ -242,8 +242,11 @@ pub fn empty(path: &str) -> Read {
 }
 /// a file's bytes as its plot; `fixed` (a version in a commit): what does not parse is unread rather than half written
 pub fn of_bytes(kind: u32, b: &[u8], fixed: bool) -> Read {
+    let t0 = std::time::Instant::now();
     let Some(fs) = sexpr::forms(b) else { return if fixed { Read::Fail(UNREAD.into()) } else { Read::Half } };
+    let t1 = std::time::Instant::now();
     let (mut p, t) = if kind == 0 { board_plot(&fs) } else { items_plot(sch_items(&fs), kind) };
+    super::plot::times(|| format!("{{\"stage\":\"of_bytes\",\"kind\":{kind},\"bytes\":{},\"forms_ms\":{:.1},\"plot_ms\":{:.1},\"chunks\":{},\"chunk_bytes\":{},\"info_bytes\":{}}}", b.len(), (t1 - t0).as_secs_f64() * 1e3, t1.elapsed().as_secs_f64() * 1e3, p.cs.len(), p.cs.iter().map(|c| c.d.len()).sum::<usize>(), t.len()));
     p.thick = if kind == 0 { thick(b) } else { 0 };
     Read::Plot(Box::new(p), t)
 }

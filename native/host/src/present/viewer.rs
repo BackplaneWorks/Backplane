@@ -5,6 +5,8 @@ use crate::{session::{pages, patch}, state::State};
 use serde_json::{json, Value};
 
 fn s<'a>(v: &'a Value, k: &str) -> &'a str { v[k].as_str().unwrap_or("") }
+/// What the GPUI window's plot store keeps (kicad/watch.rs): sent with each watch so the hub's frames are deltas against it.
+const HELD: u64 = crate::files::kicad::watch::CLIENT_SOURCES;
 fn jstr(x: &str) -> String { serde_json::to_string(x).unwrap_or_else(|_| "\"\"".into()) }
 fn drawing(kind: &str) -> bool { matches!(kind, "board" | "schematic" | "3d" | "split" | "mech") }
 
@@ -100,7 +102,7 @@ pub fn view_action(st: &State, hub: &str, session: &Value, kind: &str) -> Option
     for k in ["@pick", "@card", "@pick.rid"] { drafts.insert(k.into(), json!("")); }
     if want != at {
         // View.ask: the kind, the root, the path ("" for the project's own file) and the board tree ("")
-        let p = format!("{{\"kind\":{},\"root\":{},\"path\":{},\"tree\":\"\"}}", jstr(if want.is_empty() { "" } else { &wkind }), jstr(&root), jstr(&wpath));
+        let p = format!("{{\"kind\":{},\"root\":{},\"path\":{},\"tree\":\"\",\"held\":{HELD}}}", jstr(if want.is_empty() { "" } else { &wkind }), jstr(&root), jstr(&wpath));
         before.push(json!({"type": "send", "hub": hub, "text": format!("{{\"id\":{rid},\"m\":\"kicad.watch\",\"p\":{p}}}")}));
         rid += 1; drafts.insert("@view.at".into(), json!(want));
     }
@@ -134,7 +136,7 @@ pub fn board_action(st: &State, hub: &str, session: &Value, rel: &str) -> Option
     drafts.insert(format!("@view.file:{sel}"), json!(file)); drafts.insert(format!("@view.sheet:{sel}"), json!(""));
     for k in ["@pick", "@card", "@pick.rid"] { drafts.insert(k.into(), json!("")); }
     if want != s(d, "@view.at") {
-        let p = format!("{{\"kind\":{},\"root\":{},\"path\":{},\"tree\":\"\"}}", jstr(kind), jstr(&root), jstr(&file));
+        let p = format!("{{\"kind\":{},\"root\":{},\"path\":{},\"tree\":\"\",\"held\":{HELD}}}", jstr(kind), jstr(&root), jstr(&file));
         before.push(json!({"type": "send", "hub": hub, "text": format!("{{\"id\":{rid},\"m\":\"kicad.watch\",\"p\":{p}}}")}));
         rid += 1; drafts.insert("@view.at".into(), json!(want));
     }
@@ -152,7 +154,7 @@ pub fn mech_action(st: &State, hub: &str, session: &Value, rel: &str, refresh: b
     let mut rid = session["rid"].as_u64().unwrap_or(0); let mut before = vec![]; let mut drafts = serde_json::Map::new();
     if !refresh { drafts.insert(format!("@mech.part:{sel}"), json!(rel)); }
     if want != s(&session["drafts"], "@view.at") {
-        let p = format!("{{\"kind\":{},\"root\":{},\"path\":{},\"tree\":\"\"}}", jstr(if want.is_empty() { "" } else { "3d" }), jstr(&root), jstr(&abs));
+        let p = format!("{{\"kind\":{},\"root\":{},\"path\":{},\"tree\":\"\",\"held\":{HELD}}}", jstr(if want.is_empty() { "" } else { "3d" }), jstr(&root), jstr(&abs));
         before.push(json!({"type": "send", "hub": hub, "text": format!("{{\"id\":{rid},\"m\":\"kicad.watch\",\"p\":{p}}}")}));
         rid += 1; drafts.insert("@view.at".into(), json!(want));
     }
@@ -221,7 +223,7 @@ pub fn sheet_action(st: &State, hub: &str, session: &Value, file: &str) -> Optio
     drafts.insert(format!("@view.sheet:{sel}"), json!(file));
     for k in ["@pick", "@card", "@pick.rid"] { drafts.insert(k.into(), json!("")); }
     if want != s(d, "@view.at") {
-        let p = format!("{{\"kind\":\"schematic\",\"root\":{},\"path\":{},\"tree\":\"\"}}", jstr(&root), jstr(file));
+        let p = format!("{{\"kind\":\"schematic\",\"root\":{},\"path\":{},\"tree\":\"\",\"held\":{HELD}}}", jstr(&root), jstr(file));
         before.push(json!({"type": "send", "hub": hub, "text": format!("{{\"id\":{rid},\"m\":\"kicad.watch\",\"p\":{p}}}")}));
         rid += 1; drafts.insert("@view.at".into(), json!(want));
     }
@@ -380,7 +382,7 @@ pub fn files_action(st: &State, hub: &str, session: &Value, action: &str, value:
     drafts.insert(format!("@view.sheet:{sel}"), json!("")); drafts.insert(format!("@mech.part:{sel}"), json!(""));
     for k in ["@pick", "@card", "@pick.rid"] { drafts.insert(k.into(), json!("")); }
     if want != at {
-        let p = format!("{{\"kind\":{},\"root\":{},\"path\":{},\"tree\":\"\"}}", jstr(wkind), jstr(&root), jstr(&file));
+        let p = format!("{{\"kind\":{},\"root\":{},\"path\":{},\"tree\":\"\",\"held\":{HELD}}}", jstr(wkind), jstr(&root), jstr(&file));
         before.push(json!({"type": "send", "hub": hub, "text": format!("{{\"id\":{rid},\"m\":\"kicad.watch\",\"p\":{p}}}")}));
         rid += 1; drafts.insert("@view.at".into(), json!(want));
     }
@@ -490,7 +492,9 @@ mod tests {
             let want = &f[kind];
             let session = json!({"sel": th, "rid": 1, "drafts": {}, "open": {}, "adding": false, "panel": false, "info": {}});
             let o = view_action(&st, "h", &session, kind).unwrap();
-            assert_eq!(o.before, want["cmds"].as_array().unwrap()[..1].to_vec(), "{kind}: kicad.watch");
+            // the helper's command, with what the GPUI window's store holds (`held`, kicad/watch.rs) beside it
+            let mut cmd = want["cmds"][0].clone(); cmd["text"] = json!(cmd["text"].as_str().unwrap().replace("\"tree\":\"\"}", &format!("\"tree\":\"\",\"held\":{HELD}}}")));
+            assert_eq!(o.before, vec![cmd], "{kind}: kicad.watch");
             assert!(o.boards_look, "{kind}");
             for (k, v) in want["drafts"].as_object().unwrap() { if k != "@fab.at" { assert_eq!(&o.patch["drafts"][k], v, "{kind}: {k}"); } }
             // the viewer on the session the action answered

@@ -38,6 +38,7 @@ use std::sync::Arc;
 
 pub fn start(hub: &Arc<Hub>) {
     let plots = watch::Plots::new(&hub.cfg.home);
+    let _ = watch::PLOTS.set(plots.clone());
     hub.register_rpc(Arc::new(watch::KicadRpc(plots)));
     ipc::start(hub);
 }

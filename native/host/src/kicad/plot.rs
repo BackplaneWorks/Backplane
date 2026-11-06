@@ -3,6 +3,24 @@
 //! Decision (M6): the parser stays the existing child, `backplane --plot KIND FILE`; Rust only reads its lines.
 //! Laws plot_delta_exact, plot_unchanged_sends_nothing are stated as Rust tests below.
 
+/// `BACKPLANE_PLOT_TIMES=1`: each stage of a viewer's plot (read, parse, chunks, delta, frame) as a `PLOT_TIMES {json}` line on stderr.
+pub fn times(line: impl FnOnce() -> String) {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if *ON.get_or_init(|| std::env::var("BACKPLANE_PLOT_TIMES").map_or(false, |v| v == "1")) { eprintln!("PLOT_TIMES {}", line()) }
+}
+/// A file's bytes as a 128-bit name (two multiply-mix lanes over 8-byte words, the length folded in): plots are kept by what they are of,
+/// so the same board in another worktree, or saved again unchanged, is not plotted again.
+pub fn digest(b: &[u8]) -> (u64, u64) {
+    const K1: u64 = 0x9E37_79B9_7F4A_7C15; const K2: u64 = 0xC2B2_AE3D_27D4_EB4F;
+    let mix = |h: u64, w: u64, k: u64| (h ^ w).wrapping_mul(k).rotate_left(29);
+    let (mut a, mut c) = (K2 ^ b.len() as u64, K1.wrapping_add(b.len() as u64));
+    let mut it = b.chunks_exact(8);
+    for w in &mut it { let w = u64::from_le_bytes(w.try_into().unwrap()); a = mix(a, w, K1); c = mix(c, w.rotate_left(17) ^ K2, K2) }
+    let mut t = [0u8; 8]; let r = it.remainder(); t[..r.len()].copy_from_slice(r); let w = u64::from_le_bytes(t) ^ ((r.len() as u64) << 56);
+    a = mix(a, w, K1); c = mix(c, w ^ K1, K2);
+    let fin = |mut h: u64| { h ^= h >> 33; h = h.wrapping_mul(0xFF51_AFD7_ED55_8CCD); h ^= h >> 33; h = h.wrapping_mul(0xC4CE_B9FE_1A85_EC53); h ^ (h >> 33) };
+    (fin(a ^ c.rotate_left(7)), fin(c ^ a.rotate_left(41)))
+}
 #[derive(Clone, Debug, PartialEq)]
 pub struct Chunk { pub sig: u32, pub layer: u32, pub color: u32, pub alpha: u32, pub mode: u32, pub width: u32, pub d: Vec<u8>, pub info: String }
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
@@ -60,9 +78,13 @@ pub fn parse_child(out: &str) -> Plot {
 
 fn same(a: &Chunk, b: &Chunk) -> bool { a.sig == b.sig && a.layer == b.layer && a.color == b.color && a.alpha == b.alpha && a.mode == b.mode && a.width == b.width && a.d == b.d && a.info == b.info }
 
-/// Plot.delta: each new chunk as the index of the first equal chunk the phone holds, else itself.
+/// Plot.delta: each new chunk as the index of the first equal chunk the phone holds, else itself. The held chunks are looked up by
+/// their signature (a hash of the chunk), so a big board against a big board is linear, not every pair compared.
 pub fn delta(ns: &[Chunk], held: &[Chunk]) -> Vec<Ref> {
-    ns.iter().enumerate().map(|(i, n)| match held.iter().position(|o| same(n, o)) { Some(k) => Ref::Keep(k), None => Ref::Fresh(i) }).collect()
+    if held.len() <= 8 { return ns.iter().enumerate().map(|(i, n)| match held.iter().position(|o| same(n, o)) { Some(k) => Ref::Keep(k), None => Ref::Fresh(i) }).collect() }
+    let mut by: std::collections::HashMap<u32, Vec<usize>> = std::collections::HashMap::with_capacity(held.len());
+    for (k, o) in held.iter().enumerate() { by.entry(o.sig).or_default().push(k) }
+    ns.iter().enumerate().map(|(i, n)| match by.get(&n.sig).and_then(|ks| ks.iter().copied().find(|k| same(n, &held[*k]))) { Some(k) => Ref::Keep(k), None => Ref::Fresh(i) }).collect()
 }
 /// Plot.quiet: the delta changes nothing for a phone holding `held` chunks (each kept where it was).
 pub fn quiet(rs: &[Ref], held: usize) -> bool { rs.len() == held && rs.iter().enumerate().all(|(i, r)| *r == Ref::Keep(i)) }
@@ -134,6 +156,20 @@ mod tests {
             let (o, n): (Vec<Chunk>, Vec<Chunk>) = (old.iter().map(|i| all[*i].clone()).collect(), new.iter().map(|i| all[*i].clone()).collect());
             assert_eq!(apply(&delta(&n, &o), &n, &o), n);
         } }
+    }
+    // the signature index answers what the scan over every held chunk answers, collisions and repeats included
+    #[test] fn plot_delta_by_signature_is_the_scan() {
+        let all: Vec<Chunk> = (0..40).map(|i| ch(i % 7, &[i as u8 % 5; 2], if i % 3 == 0 { "a" } else { "" })).collect();
+        let held: Vec<Chunk> = all.iter().rev().cloned().chain(all[..10].iter().cloned()).collect();
+        let scan = |ns: &[Chunk], h: &[Chunk]| -> Vec<Ref> { ns.iter().enumerate().map(|(i, n)| match h.iter().position(|o| same(n, o)) { Some(k) => Ref::Keep(k), None => Ref::Fresh(i) }).collect() };
+        let fresh: Vec<Chunk> = (0..12).map(|i| ch(i, &[99, i as u8], "z")).collect();
+        for ns in [all.clone(), fresh.clone(), [fresh.clone(), all.clone()].concat()] { assert_eq!(delta(&ns, &held), scan(&ns, &held)); assert_eq!(apply(&delta(&ns, &held), &ns, &held), ns) }
+    }
+    #[test] fn digest_tells_bytes_apart() {
+        let mut bs = std::collections::BTreeSet::new();
+        for n in 0..64usize { for v in [0u8, 1, 255] { let mut b = vec![7u8; n]; if n > 0 { b[n / 2] = v } bs.insert(b); } }
+        let ds: std::collections::HashSet<(u64, u64)> = bs.iter().map(|b| digest(b)).collect();
+        assert_eq!(ds.len(), bs.len()); assert_eq!(digest(b"abc"), digest(b"abc")); assert_ne!(digest(b"abc"), digest(b"abc\0")); assert_ne!(digest(&[0; 8]), digest(&[0; 9]));
     }
     // law plot_unchanged_sends_nothing
     #[test] fn plot_unchanged_sends_nothing() {
