@@ -28,8 +28,7 @@ const events=()=>readFileSync(HOME+'/events.jsonl','utf8').split('\n').filter(Bo
 const has=(f)=>events().some(f);
 async function until(f,ms=15000){const end=Date.now()+ms;for(;;){if(f())return true;if(Date.now()>end)return false;await sleep(100)}}
 async function connect(q=''){
-  const token=readFileSync(HOME+'/token','utf8').trim();
-  const ws=new WebSocket(`ws://127.0.0.1:${PORT}/ws?${q}token=${token}`);ws.binaryType='arraybuffer';
+    const ws=new WebSocket(`ws://127.0.0.1:${PORT}/ws?${q}token=${token}`);ws.binaryType='arraybuffer';
   const c={ws,replies:new Map(),frames:[],id:100};
   ws.onmessage=e=>{let o;try{o=typeof e.data==='string'?JSON.parse(e.data):decode(e.data)}catch{return}c.frames.push(o);if(o.t==='reply')c.replies.set(o.id,o)};
   await new Promise((r,j)=>{ws.onopen=r;ws.onerror=j});
@@ -40,6 +39,7 @@ const kinds=()=>events().map(e=>e.$);
 const token=readFileSync(HOME+'/token','utf8').trim();
 const out_rows=[]; const row=(id,ok,ev)=>{out_rows.push({id,ok,ev});console.log(`${ok?'ok  ':'FAIL'} ${id} ${ev}`)};
 const pid=await start(600);
+const token=readFileSync(HOME+'/token','utf8').trim();
 let c=await connect(); await sleep(1500);
 await c.rpc('project.add',{path:OUT+'/proj'}); await until(()=>has(e=>e.$==='ProjectCreated'));
 const P=events().find(e=>e.$==='ProjectCreated').id;
