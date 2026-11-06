@@ -113,6 +113,39 @@ Rows of the old checklist (`gpui` branch, `docs/gpui/PARITY.md`, 198 rows, secti
 | 21 | Status colours, urgency order, counts | unchecked | |
 | 22 | Machine switch / one list over machines | unchecked | See Your machines above. |
 
+### Threads and timeline (25 to 55)
+
+Driven in one thread with the stand-in's `stream` mode (`tools:`, `todos:`, `agents:`, `ask:`, `approve:` keywords).
+
+| # | Row | Status | What was driven |
+|---|---|---|---|
+| 25 | Open a thread, windowed history | partial | Opening works; older pages and anchors not driven (short threads). |
+| 26 | Messages, Markdown | unchecked | The stand-in sends plain text only. |
+| 27 | Streaming reply | done | 40 deltas streamed into a live row, then posted whole. |
+| 28 | Tool-call folds, running label | done | A collapsed "6 tool calls · Bash, viewer_show, Agent" row that opens into one line per call; "1 tool call · running: AskUserQuestion" while one ran. |
+| 29 | Message stamps | unchecked | |
+| 30 | Agent to-do list | partial | The "TO-DO 2/5" chip opens a list with up, down and remove per item. Remove sent `TodosChanged` (`who: person`, op delete). Add and reorder not confirmed. |
+| 31 | Subagents panel, badge | unchecked | Two stand-in subagents finished before a panel showed; they appear only as "Agent Subagent 1 for hello" rows in the tool fold. Needs `hold:`. |
+| 32 | Asks and approvals | done | A question card with its options and Dismiss: answering USB-C gave `AskClosed` with the answer. A Bash approval card with Allow, Allow for session, Deny: Deny gave `AskClosed` "decline" and a "Denied" line. Plans not driven. |
+| 33 | Stop a turn | done | A Stop button while running; it gave `TurnChanged` interrupted with the text so far kept. |
+| 34 | Send a message, draft kept | partial | Sending works. A draft left in a thread came back when it was reopened (a `/secret` text typed earlier); a crash or restart was not driven. |
+| 35 | Long draft over 64 KB | unchecked | |
+| 36 | Multi-line composer, paste, IME | unchecked | |
+| 37 | Queue while busy, steer, edit, remove | partial | A second message sent while a turn ran was delivered and answered after it, in order. No queue strip with edit or remove was seen; steer, edit and remove not driven. |
+| 38 | Model, effort and provider picker | unchecked | The picker keys are another lane's. |
+| 39 | Slash commands and popups | partial | `/btw`, `/give`, `/secret` each: `View request refused: "PRESENTER_UNAVAILABLE"` and the text stays (build a8dff03746). `/intent` not driven. The `$`, `@`, `>`, `%` popups not driven. |
+| 40 | `/btw` | missing | See the `/btw`, `/give` row above. |
+| 41 | `/give`, references, summaries | missing | `/give` as above; summaries are in row 51. |
+| 42 | Images in messages | unchecked | |
+| 43 | Attachments | unchecked | The E2E lane has F15. |
+| 44 | File and web links | unchecked | |
+| 45 | Reading position, "N new" pill | unchecked | |
+| 46 | In-thread search and cancel | missing | See `view.search` above. |
+| 47 | Thread header tools | partial | Pinned, Settle, Archive, Fork thread, Back to the original, Stop (while running), Terminal and viewer tabs on the right rail all show. Terminal belongs to another lane. |
+| 48 | Token, context stats, usage | unchecked | A `ctx 0%` chip and a `limit` chip show; nothing opened. |
+| 49 to 50 | Reconnect keeps drafts; terminal rows | unchecked | E2E F21 and F14. |
+| 51 to 55 | Summaries; Wt.name; Keyring.say; standing rules; omp masking | unchecked | Internal turn behaviour; no stand-in drives it. |
+
 ## Not gaps
 
 | Feature | Status | Why |
