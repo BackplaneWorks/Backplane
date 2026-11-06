@@ -566,6 +566,7 @@ function recordNavigate(o: Owner, url: string): void {
 // step is rebuilt here from known keys, and a secret's value is dropped
 // whatever the page sent.
 function onRecord(source: { page: Page; frame: any }, ev: Json): any {
+  if (process.env.BACKPLANE_BROWSER_DEBUG) log(`record ${JSON.stringify(ev).slice(0, 200)}`);
   const o = ownerOf.get(source.page);
   if (ev?.q === "on?") return Boolean(o?.recording);
   if (!o || !o.recording) return;
@@ -1049,6 +1050,7 @@ async function attachExternal(a: Json, name: string): Promise<Json> {
   if (o.recording) await recorderSet(o, true);
   o.tabs = o.tabs.filter((t) => externalPages.has(t) && !t.isClosed()); if (!o.tabs.includes(p)) o.tabs.push(p);
   o.active = p; tellTabs(o);
+  log(`attached ${name}: ${p.url()} (${o.tabs.length} tabs)`);
   await startShots(o).catch((e) => log(`attach shots: ${e}`));
   void shotNow(o.name);
   return { attached: true, url: p.url() };
