@@ -120,8 +120,8 @@ fn status_value(s: Option<&S>, ok: Option<bool>) -> Value {
 }
 
 /// Diagnostics.start: binds the home once (idempotent). A failed start disables collection; the hub still starts.
-pub fn start(home: &Path) -> Value {
-    let mut g = ST.lock().unwrap_or_else(|e| e.into_inner());
+pub fn start(home: &Path) -> Value { let mut g = ST.lock().unwrap_or_else(|e| e.into_inner()); start_in(&mut g, home) }
+fn start_in(g: &mut Option<S>, home: &Path) -> Value {
     if let Some(s) = g.as_ref() { return status_value(Some(s), None) }
     let mut s = S { dir: home.join("diagnostics"), ready: false, enabled: false, error: "", pending: BTreeMap::new(), bytes: 0, allocated: 0, seq: 0, dropped: 0, retry: None, flushed: Instant::now() };
     let r = (|| -> std::io::Result<()> {
@@ -212,56 +212,62 @@ impl RpcHandler for DiagnosticsRpc {
 mod tests {
     use super::*;
     static LOCK: Mutex<()> = Mutex::new(());
-    fn fresh(tag: &str) -> PathBuf { let h = std::env::temp_dir().join(format!("bp-diag-{tag}-{}", std::process::id())); let _ = std::fs::remove_dir_all(&h); std::fs::create_dir_all(&h).unwrap(); *ST.lock().unwrap_or_else(|e| e.into_inner()) = None; h }
+    fn fresh(tag: &str) -> PathBuf { let h = std::env::temp_dir().join(format!("bp-diag-{tag}-{}", std::process::id())); let _ = std::fs::remove_dir_all(&h); std::fs::create_dir_all(&h).unwrap(); h }
+    /// Drops the recorder and starts it on `h` under one hold of its lock. Other tests' hubs call `start` on their own homes (settings::open) in
+    /// parallel and outside LOCK; cleared and started apart, one of them could bind between the two and this test would record into its home.
+    fn bind(h: &Path) -> Value { let mut g = ST.lock().unwrap_or_else(|e| e.into_inner()); *g = None; start_in(&mut g, h) }
+    fn bound(h: &Path) -> bool { ST.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map_or(false, |s| s.dir == h.join("diagnostics")) }
     #[test] fn a_new_home_starts_on_with_private_storage_and_a_closed_status() {
-        let _l = LOCK.lock().unwrap_or_else(|e| e.into_inner()); let h = fresh("start"); let s = start(&h);
+        let _l = LOCK.lock().unwrap_or_else(|e| e.into_inner()); let h = fresh("start"); let s = bind(&h);
         assert_eq!((s["ok"].clone(), s["started"].clone(), s["enabled"].clone(), s["error"].clone()), (json!(true), json!(true), json!(true), json!("")));
         assert_eq!(std::fs::metadata(h.join("diagnostics")).unwrap().permissions().mode() & 0o777, 0o700); assert_eq!(std::fs::metadata(h.join("diagnostics/control")).unwrap().permissions().mode() & 0o777, 0o600);
         let keys: Vec<&str> = s.as_object().unwrap().keys().map(String::as_str).collect(); assert_eq!(keys, ["version", "ok", "started", "enabled", "error", "stored_bytes", "allocated_bytes", "cap_bytes", "retention_seconds", "pending", "dropped"]);
         assert_eq!(start(&h), status(), "a second start changes nothing");
     }
     #[test] fn closed_measurements_are_recorded_flushed_and_exported_with_a_mean() {
-        let _l = LOCK.lock().unwrap_or_else(|e| e.into_inner()); let h = fresh("rec"); start(&h);
+        let _l = LOCK.lock().unwrap_or_else(|e| e.into_inner()); let h = fresh("rec"); bind(&h);
         note("latency", "hub.rpc", 2000); note("latency", "hub.rpc", 4000); note("error", "io", 3); note("connection", "reconnect", 1); note("sample", "hub.clients", 7);
         note("latency", "hub.rpc.user text", 1); note("error", "free text", 1); note("sample", "other", 1);
-        assert_eq!(status()["pending"], 4, "only the closed names");
+        assert!(bound(&h), "recording into this test's home"); assert_eq!(status()["pending"], 4, "only the closed names");
+        let f = flush(); assert_eq!((f["ok"].clone(), f["pending"].clone()), (json!(true), json!(0)), "flushed: {f}");
+        assert!(std::fs::read_to_string(h.join("diagnostics/segment-0.jsonl")).unwrap().lines().count() >= 4, "on disk before the export reads it");
         let doc: Value = serde_json::from_str(&export()).unwrap(); let ev = doc["events"].as_array().unwrap(); assert_eq!(ev.len(), 4, "{doc}");
         let lat = ev.iter().find(|e| e["event"] == "latency").unwrap(); assert_eq!((lat["count"].clone(), lat["us"].clone(), lat["maxMs"].clone(), lat["meanMs"].clone()), (json!(2), json!(6000), json!(4.0), json!(3.0)));
         assert!(ev.iter().all(|e| e.get("seq").is_none()), "internal sequence numbers are removed");
         assert!(std::fs::read_to_string(h.join("diagnostics/segment-0.jsonl")).unwrap().lines().count() >= 4);
     }
     #[test] fn off_drops_pending_and_stops_collecting_and_is_remembered_across_a_restart() {
-        let _l = LOCK.lock().unwrap_or_else(|e| e.into_inner()); let h = fresh("off"); start(&h); note("error", "io", 1); assert_eq!(status()["pending"], 1);
+        let _l = LOCK.lock().unwrap_or_else(|e| e.into_inner()); let h = fresh("off"); bind(&h); note("error", "io", 1); assert_eq!(status()["pending"], 1);
         let r = control("off"); assert_eq!((r["ok"].clone(), r["enabled"].clone(), r["pending"].clone()), (json!(true), json!(false), json!(0)));
         note("error", "io", 1); assert_eq!(status()["pending"], 0);
-        *ST.lock().unwrap_or_else(|e| e.into_inner()) = None; let again = start(&h); assert_eq!(again["enabled"], false, "still off after a restart");
+        let again = bind(&h); assert_eq!(again["enabled"], false, "still off after a restart");
         assert_eq!(control("on")["enabled"], true); assert_eq!(std::fs::read_to_string(h.join("diagnostics/control")).unwrap(), "1");
     }
     #[test] fn clear_deletes_the_segments_and_keeps_the_choice() {
-        let _l = LOCK.lock().unwrap_or_else(|e| e.into_inner()); let h = fresh("clear"); start(&h); note("error", "io", 1); flush(); assert!(h.join("diagnostics/segment-0.jsonl").exists());
+        let _l = LOCK.lock().unwrap_or_else(|e| e.into_inner()); let h = fresh("clear"); bind(&h); note("error", "io", 1); flush(); assert!(h.join("diagnostics/segment-0.jsonl").exists());
         let r = control("clear"); assert_eq!(r["ok"], true); assert_eq!(r["enabled"], true); assert!(!h.join("diagnostics/segment-0.jsonl").exists());
     }
-    #[test] fn anything_but_on_off_clear_fails_closed() { let _l = LOCK.lock().unwrap_or_else(|e| e.into_inner()); let h = fresh("bad"); start(&h); let r = control("../etc"); assert_eq!((r["ok"].clone(), r["error"].clone()), (json!(false), json!("invalid_action"))); }
+    #[test] fn anything_but_on_off_clear_fails_closed() { let _l = LOCK.lock().unwrap_or_else(|e| e.into_inner()); let h = fresh("bad"); bind(&h); let r = control("../etc"); assert_eq!((r["ok"].clone(), r["error"].clone()), (json!(false), json!("invalid_action"))); }
     #[test] fn a_stray_file_a_symlink_or_a_hardlink_fails_closed_and_is_never_followed() {
         let _l = LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let h = fresh("stray"); std::fs::create_dir_all(h.join("diagnostics")).unwrap(); std::fs::write(h.join("diagnostics/notes.txt"), "x").unwrap();
-        let s = start(&h); assert_eq!((s["ok"].clone(), s["error"].clone()), (json!(false), json!("unsafe_storage"))); assert!(h.join("diagnostics/notes.txt").exists(), "not deleted");
+        let s = bind(&h); assert_eq!((s["ok"].clone(), s["error"].clone()), (json!(false), json!("unsafe_storage"))); assert!(h.join("diagnostics/notes.txt").exists(), "not deleted");
         let h = fresh("link"); std::fs::create_dir_all(h.join("diagnostics")).unwrap(); std::fs::write(h.join("outside"), "x").unwrap(); std::os::unix::fs::symlink(h.join("outside"), h.join("diagnostics/control")).unwrap();
-        assert_eq!(start(&h)["error"], "unsafe_storage");
+        assert_eq!(bind(&h)["error"], "unsafe_storage");
     }
     #[test] fn a_torn_tail_is_cut_back_and_an_invalid_row_discards_the_segment() {
-        let _l = LOCK.lock().unwrap_or_else(|e| e.into_inner()); let h = fresh("torn"); start(&h); note("error", "io", 2); flush(); *ST.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        let _l = LOCK.lock().unwrap_or_else(|e| e.into_inner()); let h = fresh("torn"); bind(&h); note("error", "io", 2); flush();
         let seg = h.join("diagnostics/segment-0.jsonl"); let good = std::fs::read_to_string(&seg).unwrap(); std::fs::write(&seg, format!("{good}{{\"v\":1,\"seq\":")).unwrap();
-        start(&h); assert_eq!(std::fs::read_to_string(&seg).unwrap(), good, "cut to the last newline");
-        *ST.lock().unwrap_or_else(|e| e.into_inner()) = None; std::fs::write(&seg, format!("{good}{{\"v\":1,\"event\":\"nope\"}}\n")).unwrap(); start(&h); assert!(!seg.exists(), "an invalid complete row discards the segment");
+        bind(&h); assert_eq!(std::fs::read_to_string(&seg).unwrap(), good, "cut to the last newline");
+        std::fs::write(&seg, format!("{good}{{\"v\":1,\"event\":\"nope\"}}\n")).unwrap(); bind(&h); assert!(!seg.exists(), "an invalid complete row discards the segment");
     }
     #[test] fn an_expired_row_removes_its_whole_segment() {
-        let _l = LOCK.lock().unwrap_or_else(|e| e.into_inner()); let h = fresh("old"); start(&h); *ST.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        let _l = LOCK.lock().unwrap_or_else(|e| e.into_inner()); let h = fresh("old"); bind(&h);
         let old = now_s() - RETAIN - 10; std::fs::write(h.join("diagnostics/segment-3.jsonl"), format!("{{\"v\":1,\"seq\":1,\"at\":{old},\"event\":\"error\",\"code\":\"io\",\"count\":1}}\n")).unwrap();
-        start(&h); assert!(!h.join("diagnostics/segment-3.jsonl").exists());
+        bind(&h); assert!(!h.join("diagnostics/segment-3.jsonl").exists());
     }
     #[test] fn storage_never_exceeds_the_cap_whatever_is_recorded() {
-        let _l = LOCK.lock().unwrap_or_else(|e| e.into_inner()); let h = fresh("cap"); start(&h);
+        let _l = LOCK.lock().unwrap_or_else(|e| e.into_inner()); let h = fresh("cap"); bind(&h);
         for round in 0..40 { for op in OPS { note("latency", op, 100 + round); } for g in GAUGES { note("sample", g, round); } for e in ERRORS { note("error", e, 1); } flush(); }
         let st = status(); assert!(st["stored_bytes"].as_u64().unwrap() <= DISK && st["allocated_bytes"].as_u64().unwrap() <= DISK + 8 * 4096, "{st}");
         assert!(std::fs::read_dir(h.join("diagnostics")).unwrap().count() <= 9);
