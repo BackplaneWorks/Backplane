@@ -26,6 +26,8 @@ pub fn start(hub: Arc<Hub>) { start_with(hub, None) }
 pub fn start_with(hub: Arc<Hub>, seam: Option<Arc<dyn seam::Seam>>) {
     let fold = { let f = Arc::new(tokio::sync::Mutex::new(fold::Fold::load(&hub.store))); let f2 = f.clone(); crate::ckpt::register(move |store| f2.blocking_lock().save(store)); f };
     hub.register_ticker(Arc::new(merge::MergeTicker { fold: fold.clone() }));
+    // catch the fold up now, off the request path: the first command (a new thread) must not fold the whole log while the person waits
+    { let (fold, hub) = (fold.clone(), hub.clone()); tokio::task::spawn_blocking(move || { let _ = fold.blocking_lock().sync(&hub.store); }); }
     hub.register_rpc(Arc::new(Commands { fold, seam }));
 }
 
