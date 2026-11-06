@@ -12,6 +12,8 @@ pub trait Facts: composer::Facts + select::Facts {
     fn title_of(&self, id: &str) -> String;
     /// the folder a thread works in (Ui.root.thread: its worktree, else its project's root)
     fn root_of(&self, id: &str) -> String;
+    /// AT.Att.max: the attachment limit in bytes (setting files.max.mb, default 512 MB, between 1 and 4000)
+    fn attach_cap(&self) -> u64 { 512 << 20 }
 }
 
 pub struct Dispatched { pub session: Value, pub cmds: Vec<Value>, pub next_target: Option<Value> }
@@ -90,6 +92,7 @@ impl select::Facts for StateFacts<'_> {
 }
 impl Facts for StateFacts<'_> {
     fn title_of(&self, id: &str) -> String { self.0.threads.get(id).map_or(String::new(), |t| t.title.clone()) }
+    fn attach_cap(&self) -> u64 { self.0.settings.get("files.max.mb").and_then(|v| v.trim().parse::<u64>().ok()).map_or(512, |n| n.clamp(1, 4000)) << 20 }
     fn root_of(&self, id: &str) -> String {
         let Some(t) = self.0.threads.get(id) else { return String::new() };
         if !t.worktree.is_empty() { t.worktree.clone() } else { self.0.projects.get(&t.project).map_or(String::new(), |p| p.root.clone()) }

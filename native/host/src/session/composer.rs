@@ -6,6 +6,9 @@ use serde_json::{json, Map, Value};
 
 pub struct ActOut { pub session_patch: Value, pub cmds: Vec<Value> }
 
+/// Att.nonblank: a thread's attachments, one path per line, blank lines gone.
+pub fn att_paths(text: &str) -> Vec<String> { text.lines().map(str::trim).filter(|l| !l.is_empty()).map(str::to_string).collect() }
+
 /// Draft.safe: the thread ids a draft may be kept for (not a scratch key).
 fn safe(id: &str) -> bool { !id.is_empty() && !id.starts_with('@') }
 fn s<'a>(v: &'a Value, k: &str) -> &'a str { v[k].as_str().unwrap_or("") }
@@ -43,11 +46,16 @@ pub fn msg_id(cid: &str, now_s: u64, rid: u64) -> String { format!("c{cid}{now_s
 /// Ui.act "send": the plain draft of the selected thread sent as `turn.start` (mode "steer": Follow.mode), the draft and its companions emptied, the request kept in the outbox.
 pub fn send(cx: &SendCtx, session: &Value) -> Option<ActOut> {
     let sel = s(session, "sel");
-    let text = draft_of(session, sel).trim();
-    if sel.is_empty() || !safe(sel) || text.is_empty() { return None }
-    if text.starts_with('/') || cx.bot_thread { return None }
+    let body = draft_of(session, sel).trim();
     let d = &session["drafts"];
-    if !s(d, &format!("@att:{sel}")).is_empty() || !s(d, &format!("@reply:{sel}")).is_empty() || !s(d, &format!("@intent.edit:{sel}")).is_empty() || !s(d, "@draft.bound").is_empty() { return None }
+    // Att.join: what was written, then one `[attachment: path]` line per attachment
+    let atts: Vec<String> = att_paths(s(d, &format!("@att:{sel}")));
+    let lines = atts.iter().map(|p| format!("[attachment: {p}]")).collect::<Vec<_>>().join("\n");
+    let text = if atts.is_empty() { body.to_string() } else if body.is_empty() { lines } else { format!("{body}\n\n{lines}") };
+    let text = text.as_str();
+    if sel.is_empty() || !safe(sel) || text.is_empty() { return None }
+    if body.starts_with('/') || cx.bot_thread { return None }
+    if !s(d, &format!("@reply:{sel}")).is_empty() || !s(d, &format!("@intent.edit:{sel}")).is_empty() || !s(d, "@draft.bound").is_empty() { return None }
     let rid = session["rid"].as_u64().unwrap_or(0);
     // Rpc.text: {"id":rid,"m":"turn.start","p":{thread,text,msg,mode}} in this key order
     let p = bind(json!({"thread": sel, "text": text, "msg": msg_id(cx.cid, cx.now_s, rid), "mode": "steer"}), cx.binding.as_deref());
@@ -174,7 +182,7 @@ mod tests {
         let with = |k: &str, v: &str| { let mut s = session(); s["drafts"][k] = json!(v); s };
         assert!(send(&cx, &with("t1700000002-3", "   ")).is_none(), "blank");
         assert!(send(&cx, &with("t1700000002-3", "/btw why")).is_none(), "slash commands");
-        assert!(send(&cx, &with("@att:t1700000002-3", "a")).is_none(), "attachments");
+        assert!(send(&cx, &with("@att:t1700000002-3", "a")).is_some(), "attachments");
         assert!(send(&cx, &with("@reply:t1700000002-3", "m1")).is_none(), "replies");
         assert!(send(&cx, &with("@draft.bound", "5 abc")).is_none(), "a bounded draft");
         assert!(send(&SendCtx { bot_thread: true, ..SendCtx { hub: "h", cid: "c", now_s: 1, bot_thread: false, binding: None } }, &session()).is_none(), "a bot's thread");
