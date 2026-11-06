@@ -1,0 +1,68 @@
+[
+ {
+  "name": "create bub",
+  "m": "bots.create",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "remember k1",
+  "m": "bots.remember",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "remember k2",
+  "m": "bots.remember",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "remember k3",
+  "m": "bots.remember",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "remember k1 again",
+  "m": "bots.remember",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "routine rz",
+  "m": "bots.routine",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "routine ra",
+  "m": "bots.routine",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "routine rm",
+  "m": "bots.routine",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "routine rb",
+  "m": "bots.routine",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "promote bub",
+  "m": "bots.uber",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "uber_home as holder",
+  "m": "bots.uber_home",
+  "ok": true,
+  "error": null
+ }
+]

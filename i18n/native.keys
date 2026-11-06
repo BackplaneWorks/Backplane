@@ -61,7 +61,6 @@ native.pair.scanner.title
 native.pair.scanner.denied
 native.pair.scanner.instructions
 native.pair.scanner.invalid
-native.pair.scanner.light
 native.pair.scanner.unavailable
 native.hub.state
 native.hub.catchup

@@ -1,5 +1,0 @@
-[boat-job] 4 cpu, 7 GiB, stack 1048576
-DISK_SYNC_GATE_PASS boundary19 checkpoint25 ab32+32
-[boat-job] job j20261104103713-1761208 exit 0
-[boat-job] peak RSS 205184 KiB, wall 10.29 s, exit 0
-[boat-job] command exit 0 in 11s

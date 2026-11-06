@@ -246,7 +246,7 @@ struct FileScreen: View {
             Divider()
             if file.kind == "text" {
                 if let text {
-                    ScrollView { Text(text).font(.system(.body, design: .monospaced)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding() }
+                    ScrollView { Text(text).font(.mono(.body)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding() }
                 } else if !failed.isEmpty {
                     Text(NativeMessages.native_file_text_error(lang, failed)).foregroundStyle(.secondary).padding(); Spacer()
                 } else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }

@@ -1,0 +1,4 @@
+{"$":"ActivityLogged","thread":"endA","act":"g-endA","tone":"error","kind":"agent","summary":"boom","at":1794060000}
+{"$":"TurnChanged","thread":"endA","state":"failed","_end":true,"at":1794060000}
+{"$":"UsageSet","thread":"endA","used":5,"window":100,"at":1794060000}
+{"$":"SettingSet","key":"failed.mendA","value":"1","at":1794060000}

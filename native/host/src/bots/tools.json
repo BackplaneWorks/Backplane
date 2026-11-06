@@ -1,0 +1,443 @@
+[
+ {
+  "name": "bot_whoami",
+  "description": "Who you are as a Backplane bot: your name, id, home folder, rooms, routines, webhooks, and how deep the current conversation is.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {},
+   "required": []
+  }
+ },
+ {
+  "name": "bot_list",
+  "description": "List the bots you can talk to: the bots on this machine (with what they are doing) and bots on linked machines (name@machine).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {},
+   "required": []
+  }
+ },
+ {
+  "name": "bot_send",
+  "description": "Ask another bot for something, here (its name) or on a linked machine (name@machine). It goes in a room of the two of you named for `topic`, which the person can read: the same room each time for the same bots and topic, so every later message about a request stays together. It reaches the bot's inbox and waits while that bot works. Messages between bots carry a depth: each answer is one deeper than the message it answers, and after a few replies back and forth the next one is held (the person sees it, no bot hears it) until a person, a routine or a webhook starts a new exchange.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "to": {
+     "type": "string",
+     "description": "The bot's name, or name@machine."
+    },
+    "text": {
+     "type": "string",
+     "description": "The message."
+    },
+    "topic": {
+     "type": "string",
+     "description": "What the request is about, in a few words; the room is named for it (default: the two bots' names)."
+    },
+    "direct": {
+     "type": "boolean",
+     "description": "Send a private message instead of posting in a room. Only when the person asked for one."
+    }
+   },
+   "required": [
+    "to",
+    "text"
+   ]
+  }
+ },
+ {
+  "name": "room_list",
+  "description": "List rooms (group conversations) and their members.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {},
+   "required": []
+  }
+ },
+ {
+  "name": "room_create",
+  "description": "Make a room for a group of bots (you are added). Members are bot names here, or name@machine.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string",
+     "description": "The room's name."
+    },
+    "members": {
+     "type": "string",
+     "description": "Members, separated by commas or spaces."
+    }
+   },
+   "required": [
+    "name",
+    "members"
+   ]
+  }
+ },
+ {
+  "name": "room_post",
+  "description": "Post a message in a room: every other member hears it. Answer a post once, only when you have something to add; past the depth limit a post is held (the person sees it, no bot hears it).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "room": {
+     "type": "string",
+     "description": "The room's name or id."
+    },
+    "text": {
+     "type": "string",
+     "description": "The message."
+    }
+   },
+   "required": [
+    "room",
+    "text"
+   ]
+  }
+ },
+ {
+  "name": "room_read",
+  "description": "Read a room's (or a direct conversation's) recent messages, oldest first.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "room": {
+     "type": "string",
+     "description": "The room's name or id, or a bot's name for your direct messages with it."
+    },
+    "limit": {
+     "type": "number",
+     "description": "How many (default 30)."
+    }
+   },
+   "required": [
+    "room"
+   ]
+  }
+ },
+ {
+  "name": "memory_save",
+  "description": "Remember something, under a short key. Saving a key again replaces it: keep one current version of each thing, never a pile. Kinds: user (about the people you work for), pref (how they want things done), fact (the world, projects, contacts), howto (a procedure you learned), note (what happened; fades after a month). Save what will matter again; skip what won't.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "key": {
+     "type": "string",
+     "description": "A short key, e.g. user.timezone or howto.expense-report."
+    },
+    "kind": {
+     "type": "string",
+     "description": "user, pref, fact, howto or note."
+    },
+    "text": {
+     "type": "string",
+     "description": "What to remember, one or two sentences."
+    },
+    "tags": {
+     "type": "string",
+     "description": "Words that help find it later (optional)."
+    }
+   },
+   "required": [
+    "key",
+    "kind",
+    "text"
+   ]
+  }
+ },
+ {
+  "name": "memory_recall",
+  "description": "Find what you remember about something: the best matches by key, tags and text.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "query": {
+     "type": "string",
+     "description": "Words to look for."
+    },
+    "limit": {
+     "type": "number",
+     "description": "How many (default 8)."
+    }
+   },
+   "required": [
+    "query"
+   ]
+  }
+ },
+ {
+  "name": "memory_forget",
+  "description": "Forget a memory that is wrong or no longer true.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "key": {
+     "type": "string",
+     "description": "Its key."
+    }
+   },
+   "required": [
+    "key"
+   ]
+  }
+ },
+ {
+  "name": "memory_list",
+  "description": "List everything you remember, newest first, optionally of one kind.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "kind": {
+     "type": "string",
+     "description": "user, pref, fact, howto or note (optional)."
+    }
+   },
+   "required": []
+  }
+ },
+ {
+  "name": "space_set",
+  "description": "Set your space: your own UI, shown in your Space tab to people in Backplane (desktop, web and phone). A JSON document {title, blocks:[...]} with blocks of type heading, text, stat {label, value, hint}, progress {label, value 0..1}, list {items}, kv {rows [[k, v]]}, table {head, rows}, button {label, action}, input {label, action, placeholder}, divider, row {blocks}. A button or input sends you \"[space] <action>: <value>\". Keep it current: it is how people see what you are doing.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "spec": {
+     "type": "string",
+     "description": "The space as JSON text."
+    }
+   },
+   "required": [
+    "spec"
+   ]
+  }
+ },
+ {
+  "name": "space_get",
+  "description": "Read your current space (its JSON) and page (its HTML).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {},
+   "required": []
+  }
+ },
+ {
+  "name": "space_page",
+  "description": "Set your space as a web page: HTML and CSS (inline <style> and style attributes), shown full screen in your Space tab on the phone apps in place of your blocks (desktop and web keep showing the blocks from space_set). No scripts run and nothing loads from the network: put images and fonts inline as data: URLs. A link to space:<action> works as a button; a form with action=\"space:<action>\" and a field named value works as an input: both send you \"[space] <action>: <value>\". Other links open in the person's browser. At most 256 KB; an empty html removes the page.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "html": {
+     "type": "string",
+     "description": "The page's HTML."
+    }
+   },
+   "required": [
+    "html"
+   ]
+  }
+ },
+ {
+  "name": "routine_list",
+  "description": "List your routines and reminders (scheduled prompts): kind (routine, once or reminder), when, the next time in the person's zone, and whether a one-time one is done.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {},
+   "required": []
+  }
+ },
+ {
+  "name": "routine_set",
+  "description": "Make or change a routine: a prompt you receive on a schedule, or once. Give exactly one of `schedule` (every 15m, every 2h, daily 09:30, weekdays 08:00, @hourly, @daily, or a cron line: minute hour day month weekday) and `at` (one time: 2026-10-14T09:00, in 20m, in 2h, tomorrow 9am, monday 09:30, 17:30). Times are the wall clock of the person's time zone by default (daylight saving included), so 09:30 stays 09:30 wherever they are; `tz` picks another (a name like Europe/Helsinki, or person; machine = this machine's own offset). A one-time routine runs once, then stays in the list as done.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "The routine to change (omit to make one)."
+    },
+    "name": {
+     "type": "string",
+     "description": "A short name."
+    },
+    "schedule": {
+     "type": "string",
+     "description": "When it repeats."
+    },
+    "at": {
+     "type": "string",
+     "description": "When it runs once."
+    },
+    "tz": {
+     "type": "string",
+     "description": "person (default for a new routine), a zone name, or machine."
+    },
+    "prompt": {
+     "type": "string",
+     "description": "What you will be asked each time."
+    },
+    "on": {
+     "type": "boolean",
+     "description": "Whether it runs (default true)."
+    }
+   },
+   "required": [
+    "name",
+    "prompt"
+   ]
+  }
+ },
+ {
+  "name": "routine_delete",
+  "description": "Delete one of your routines or reminders.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "The routine."
+    }
+   },
+   "required": [
+    "id"
+   ]
+  }
+ },
+ {
+  "name": "project_list",
+  "description": "List the person's projects (id, name, folder). Start work in one with thread_launch and its `project`; thread_list, thread_read, thread_send and thread_wait reach threads in any of them.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {},
+   "required": []
+  }
+ },
+ {
+  "name": "bot_create",
+  "description": "Make a sub-bot: a new persistent bot (its own cat, memory and thread) for a lasting role you want to hand off, like watching a queue or owning an area. You are its maker. Bots made by bots go at most two levels deep, and each bot keeps at most eight. For one-off work start a thread with thread_launch and its `project` instead.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string",
+     "description": "Its name: 1 to 24 letters, digits, - or _."
+    },
+    "persona": {
+     "type": "string",
+     "description": "Who it is and what it does, in a few sentences."
+    },
+    "provider": {
+     "type": "string",
+     "description": "claude, codex, grok, muse, antigravity, opencode, pi or omp (default: yours)."
+    },
+    "model": {
+     "type": "string",
+     "description": "Its model (default: the provider's)."
+    }
+   },
+   "required": [
+    "name",
+    "persona"
+   ]
+  }
+ },
+ {
+  "name": "plane_read",
+  "description": "Read the status plane as text: what waits on the person (approvals, questions, failures, most urgent first), what runs, the bots, the rooms with unread posts and the routines, here, with the ids thread_read and thread_send take. With `machine` (machine_list shows them), that other machine of the person's own plane instead, its ids made <link>~<id>. idle lists the day's idle threads too.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "machine": {
+     "type": "string",
+     "description": "Another machine's name (or link id): read its plane."
+    },
+    "idle": {
+     "type": "boolean",
+     "description": "Also list the threads idle in the last day (default: only their count)."
+    }
+   },
+   "required": []
+  }
+ },
+ {
+  "name": "notify_person",
+  "description": "Alert the person on their phone and desktop. Allowed only for: needs_you (you are blocked until they decide, approve, log in, enter a code or answer; prefer asking in your turn's question or an approval when that fits), done (work the person gave you in your own thread is finished; at most once per thing they asked), reminder or digest (only in a turn that a routine they scheduled started). Anything else is refused: post it in a room, put it in your Space or on the task board, where it shows in the app without an alert.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "text": {
+     "type": "string",
+     "description": "What they should know, short: the first line is what the alert shows."
+    },
+    "reason": {
+     "type": "string",
+     "description": "needs_you, done, reminder or digest."
+    }
+   },
+   "required": [
+    "text",
+    "reason"
+   ]
+  }
+ },
+ {
+  "name": "remind_person",
+  "description": "Alert the person at a time, with no agent turn: a notification on their desktop and phone, and a reminder line in your thread. Use it for 'remind me...', not routine_set. Times as in routine_set's `at`, in the person's time zone unless `tz` says otherwise.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "at": {
+     "type": "string",
+     "description": "When: 2026-10-14T09:00, in 20m, in 2h, tomorrow 9am, monday 09:30, 17:30."
+    },
+    "text": {
+     "type": "string",
+     "description": "What to remind them of."
+    },
+    "tz": {
+     "type": "string",
+     "description": "person (default) or a zone name."
+    }
+   },
+   "required": [
+    "at",
+    "text"
+   ]
+  }
+ },
+ {
+  "name": "person_timezone",
+  "description": "The person's time zone: with no `zone`, the zone, where it comes from (set, phone, machine), its offset and abbreviation now, and their local time now. With `zone` (a name like Europe/Helsinki; auto goes back to following their phone) it changes it.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "zone": {
+     "type": "string",
+     "description": "A zone name, or auto."
+    }
+   },
+   "required": []
+  }
+ },
+ {
+  "name": "project_create",
+  "description": "Make a new project for the person: a folder (made when missing) added to their projects. The person is asked to approve it first. Answers the project's id; start work there with thread_launch and that `project`.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "path": {
+     "type": "string",
+     "description": "The folder: an absolute path, ~/x, or a name (under the home folder)."
+    },
+    "name": {
+     "type": "string",
+     "description": "Its name in the sidebar (default: the folder's)."
+    }
+   },
+   "required": [
+    "path"
+   ]
+  }
+ }
+]

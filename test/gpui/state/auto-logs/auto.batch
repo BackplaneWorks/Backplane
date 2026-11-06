@@ -1,0 +1,17 @@
+{"$":"MessagePosted","thread":"old","msg":"m-new-1","role":"user","text":"again","at":1794050000}
+{"$":"MessagePosted","thread":"old","msg":"a-new-1","role":"assistant","text":"ok","at":1794050001}
+{"$":"MessagePosted","thread":"w-launched","msg":"m-w-2","role":"user","text":"[message from person@box] hi","at":1794050002}
+{"$":"MessagePosted","thread":"w-launched","msg":"m-w-3","role":"user","text":"plain","at":1794050003}
+{"$":"MessagePosted","thread":"tc","msg":"t:tc:5","role":"user","text":"x","at":1794050004}
+{"$":"PendingChanged","thread":"pend","count":0,"at":1794050005}
+{"$":"WorkSet","thread":"bg","kind":"bg","rows":"job1\tsleep\tx","at":1794050006}
+{"$":"WorkSet","thread":"bg","kind":"bg","rows":"","at":1794050007}
+{"$":"TaskStateSet","task":"k1","state":"done","summary":"s","at":1794050008}
+{"$":"TaskDelivered","task":"k3","at":1794050009}
+{"$":"AskClosed","id":"q1","answer":"a","at":1794050010}
+{"$":"WakeDropped","id":"w1","at":1794050011}
+{"$":"LockChanged","name":"merge","lock":{"holder":null,"waiters":[{"id":"z","thread":"lkw"}],"ready":false},"at":1794050012}
+{"$":"TaskDelegated","task":"k9","parent":"boss","child":"t1794050000-7","depth":1,"provider":"claude","model":"","at":1794050013}
+{"$":"TaskDelegated","task":"k10","parent":"boss","child":"improvement-0123456789abcdef0123456789abcdef","depth":1,"provider":"claude","model":"","at":1794050014}
+{"$":"MessagePosted","thread":"improvement-0123456789abcdef0123456789abcdef","msg":"improvement-request-0123456789abcdef0123456789abcdef","role":"user","text":"seed","at":1794050015}
+{"$":"MessagePosted","thread":"fresh","msg":"m-f-9","role":"system","text":"sys","at":1794050016}

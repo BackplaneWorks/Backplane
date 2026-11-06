@@ -1,0 +1,14 @@
+[
+ {"wait": 3000},
+ {"click": "ui:Improvements"}, {"wait": 1200},
+ {"imp": "text The sidebar rows jump by a few pixels when I fold and unfold the sidebar."},
+ {"imp": "evidence I fold the sidebar twice with the button at its top left. The project rows move down and up by a few pixels each time."},
+ {"click": "imp:wproj:p1"}, {"wait": 500},
+ {"imp": "snap improvements-real-writer-01-ready"},
+ {"click": "imp:write"}, {"wait": 8000},
+ {"imp": "state"},
+ {"wait": 80000},
+ {"click": "imp:load"}, {"wait": 4000},
+ {"imp": "state"}, {"imp": "snap improvements-real-writer-02-loaded"},
+ {"wait": 1500}
+]

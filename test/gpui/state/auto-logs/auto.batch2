@@ -1,0 +1,19 @@
+{"$":"MessagePosted","thread":"tc","msg":"a-tc-1","role":"assistant","text":"x","at":1794060000}
+{"$":"ActivityLogged","thread":"tc","act":"g-tc-1","tone":"tool","kind":"Bash","summary":"ls -la","at":1794060001}
+{"$":"ActivityLogged","thread":"tc","act":"g-tc-2","tone":"info","kind":"git","summary":"status","at":1794060002}
+{"$":"ActivityLogged","thread":"lk","act":"g-lk-1","tone":"say","kind":"watchdog","summary":"nudge","at":1794060003}
+{"$":"ActivityLogged","thread":"w-launched","act":"g-w-1","tone":"error","kind":"provider-wait","summary":"rate limit xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx","at":1794060004}
+{"$":"AskOpened","id":"q9","thread":"w-parent","kind":"approval","tool":"Bash","detail":"rm -rf x","options":"","at":1794060005}
+{"$":"AskClosed","id":"q1","answer":"y","at":1794060006}
+{"$":"AskClosed","id":"unknown-ask","answer":"y","at":1794060007}
+{"$":"WakeSet","id":"wn","by":"tp3","kind":"pr","target":"9","events":[],"once":true,"note":"","at":1794060008}
+{"$":"MessagePosted","thread":"@sub:tp","msg":"a-sub","role":"assistant","text":"x","at":1794060009}
+{"$":"MessagePosted","thread":"old","msg":"m-lr","role":"user","text":"x","at":1794060010}
+{"$":"MessagePosted","thread":"old","msg":"t:boss:lr-5","role":"user","text":"report","at":1794060011}
+{"$":"MessagePosted","thread":"old","msg":"m-bp","role":"user","text":"[Backplane] Launched thread","at":1794060012}
+{"$":"MessagePosted","thread":"old","msg":"m-carry","role":"user","text":"Backplane restarted while you were working. Continue where you left off.","at":1794060013}
+{"$":"MessagePosted","thread":"fresh","msg":"m-sys","role":"system","text":"x","at":1794060014}
+{"$":"MessagePosted","thread":"w-rep2","msg":"a-w-rep2","role":"assistant","text":"x","at":1794060015}
+{"$":"MessagePosted","thread":"ghost","msg":"a-ghost","role":"assistant","text":"x","at":1794060016}
+{"$":"MessagePosted","thread":"lk","msg":"a-lk-2","role":"assistant","text":"x","at":1794060030}
+{"$":"MessagePosted","thread":"lkw","msg":"a-lkw-2","role":"assistant","text":"x","at":1794060031}

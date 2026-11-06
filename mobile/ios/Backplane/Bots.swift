@@ -32,9 +32,12 @@ struct BotCat: View {
     let model: AppModel
     let key: String
     let size: CGFloat
+    // names where it is drawn in the BACKPLANE_GEOM log: "cat" (lists, headers), "catpost", "catlook"
+    var place: String = "cat"
 
     var body: some View {
         CatView(rig: model.cats[key] ?? [], size: size)
+            .geomLog(place + ":" + key + ":" + String(Int(size)))
             .task(id: key) { await model.cat(key) }
     }
 }
@@ -139,11 +142,15 @@ private struct BotHeader: View {
     let model: AppModel
     let bot: BotView
     let size: CGFloat
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    // the web's bot header cat (style.css .bot-head .cat) measures 42 px on a phone and on a tablet
+    private var catSize: CGFloat { 42 }
 
     var body: some View {
         HStack(spacing: 12) {
-            BotCat(model: model, key: bot.cat ?? "", size: size)
-                .saturation(bot.mood == "away" ? 0 : 1)
+            // style.css .cat-mood-away: opacity .5
+            BotCat(model: model, key: bot.cat ?? "", size: catSize)
+                .opacity(bot.mood == "away" ? 0.5 : 1)
             VStack(alignment: .leading, spacing: 2) {
                 Text(bot.title ?? bot.name).font(.title3.weight(.semibold)).lineLimit(1)
                 HStack(spacing: 5) {
@@ -284,7 +291,7 @@ private struct MemoryTab: View {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
                         Text(m.key).font(.subheadline.weight(.semibold)).lineLimit(1)
-                        Text(m.kind).font(.caption2.monospaced())
+                        Text(m.kind).font(.mono(.caption2))
                             .padding(.horizontal, 5).padding(.vertical, 1)
                             .background(.quaternary, in: .rect(cornerRadius: 2))
                         Spacer()
@@ -333,7 +340,7 @@ private struct RoutinesTab: View {
                             Label(r.label ?? NativeMessages.sched_kind_repeat(lang), systemImage: routineIcon(r.kind))
                                 .font(.caption2).padding(.horizontal, 5).padding(.vertical, 1)
                                 .background(Color.secondary.opacity(0.15))
-                            Text(r.when).font(.caption.monospaced()).foregroundStyle(.secondary)
+                            Text(r.when).font(.mono(.caption)).foregroundStyle(.secondary)
                         }
                         if r.done == true {
                             Text(r.doneText ?? NativeMessages.tour_done(lang)).font(.caption).foregroundStyle(.secondary)
@@ -377,7 +384,7 @@ private struct RoutineSheet: View {
                 TextField(NativeMessages.bots_name(lang), text: $name).onChange(of: name) { _, t in model.field("oname", t) }
                 Section {
                     TextField(NativeMessages.native_routine_examples(lang), text: $cron)
-                        .font(.body.monospaced())
+                        .font(.mono(.body))
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .onChange(of: cron) { _, t in model.field("ocron", t) }
@@ -421,7 +428,7 @@ private struct HooksTab: View {
             }
             if let s = bot.secret, !s.isEmpty {
                 Section {
-                    Text(s).font(.caption.monospaced()).textSelection(.enabled)
+                    Text(s).font(.mono(.caption)).textSelection(.enabled)
                     Button(NativeMessages.common_copy(lang), systemImage: "doc.on.doc") { model.act("copy", s) }
                 } header: {
                     Text(NativeMessages.native_hook_secret(lang))
@@ -434,7 +441,7 @@ private struct HooksTab: View {
                     let url = model.hubURL(h.path, token: false)?.absoluteString ?? h.path
                     VStack(alignment: .leading, spacing: 3) {
                         Text(h.name).font(.subheadline.weight(.semibold))
-                        Text(url).font(.caption.monospaced()).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+                        Text(url).font(.mono(.caption)).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
                         Text(h.last.isEmpty ? "\(h.count)" : "\(h.count) · " + h.last).font(.caption2).foregroundStyle(.secondary)
                     }
                     .contextMenu { Button(NativeMessages.native_hook_copyurl(lang), systemImage: "doc.on.doc") { model.act("copy", url) } }
@@ -461,9 +468,26 @@ private struct SettingsTab: View {
 
     var body: some View {
         Form {
+            if let n = settings.looks, n > 0 {
+                Section(settings.lookLabel ?? "Look") {
+                    // the web's look picker: every look as its idle cat, 40 px; a tap picks it
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 48), spacing: 8)], spacing: 8) {
+                        ForEach(0..<n, id: \.self) { i in
+                            Button { model.act("bot-look", String(i)) } label: {
+                                BotCat(model: model, key: "\(i):idle", size: 40, place: "catlook")
+                                    .padding(4)
+                                    .overlay(Rectangle().stroke(i == settings.look ? BackplaneDesign.accent : Color.clear, lineWidth: 2))
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("bot.look.\(i)")
+                        }
+                    }
+                }
+            }
             Section(NativeMessages.bots_persona(lang)) {
                 TextField(NativeMessages.bots_persona(lang), text: $persona, axis: .vertical)
                     .lineLimit(4...14)
+                    .onAppear { NSLog("Backplane bot settings looks=%@ look=%@", String(describing: settings.looks), String(describing: settings.look)) }
                     .onChange(of: persona) { _, t in model.field("persona", t) }
                 Button(NativeMessages.common_save(lang)) { model.act("bot-edit") }.disabled(persona == settings.persona)
             }
@@ -525,7 +549,7 @@ private struct SettingsTab: View {
                     Button(NativeMessages.machines_invite(lang)) { model.act("peer-invite") }
                 }
                 if !settings.invite.isEmpty {
-                    Text(settings.invite).font(.caption.monospaced()).textSelection(.enabled)
+                    Text(settings.invite).font(.mono(.caption)).textSelection(.enabled)
                     Button(NativeMessages.native_machine_invite_copy(lang), systemImage: "doc.on.doc") { model.act("copy", settings.invite) }
                 }
                 HStack {
@@ -572,6 +596,11 @@ struct TalkScreen: View {
                     ForEach(bot.posts ?? []) { p in
                         VStack(alignment: p.mine ? .trailing : .leading, spacing: 2) {
                             HStack(spacing: 6) {
+                                // the post carries its author's cat, 28 px as on the web ("" for the person's own)
+                                if let cat = p.cat, !cat.isEmpty {
+                                    // style.css .cat-mood-away: opacity .5 (an unknown author is "0:away")
+                                    BotCat(model: model, key: cat, size: 28, place: "catpost").opacity(cat.hasSuffix(":away") ? 0.5 : 1)
+                                }
                                 Text(p.from).font(.caption.weight(.semibold))
                                 Text(p.ago).font(.caption2).foregroundStyle(.secondary)
                             }

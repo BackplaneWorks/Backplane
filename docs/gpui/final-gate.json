@@ -1,0 +1,140 @@
+{
+ "note": "The last gate. Each client runs every journey end to end against the Rust hub, scripted, with a short screen capture in the gallery. Status: open, fail or pass. Fun items need measured frame data where they can have it, and the reviewer's judgement.",
+ "journeys": [
+  {
+   "item": "Pair",
+   "gpui": "open",
+   "ios": "open",
+   "android": "open",
+   "capture": ""
+  },
+  {
+   "item": "Open projects and threads",
+   "gpui": "open",
+   "ios": "open",
+   "android": "open",
+   "capture": ""
+  },
+  {
+   "item": "Send, reply and paste an image",
+   "gpui": "open",
+   "ios": "open",
+   "android": "open",
+   "capture": ""
+  },
+  {
+   "item": "Watch a running turn stream",
+   "gpui": "open",
+   "ios": "open",
+   "android": "open",
+   "capture": ""
+  },
+  {
+   "item": "Switch threads fast",
+   "gpui": "open",
+   "ios": "open",
+   "android": "open",
+   "capture": ""
+  },
+  {
+   "item": "Mention and command popups",
+   "gpui": "open",
+   "ios": "open",
+   "android": "open",
+   "capture": ""
+  },
+  {
+   "item": "Bots and rooms",
+   "gpui": "open",
+   "ios": "open",
+   "android": "open",
+   "capture": ""
+  },
+  {
+   "item": "Open Board, Schematic and 3D viewers",
+   "gpui": "open",
+   "ios": "open",
+   "android": "open",
+   "capture": ""
+  },
+  {
+   "item": "Download files",
+   "gpui": "open",
+   "ios": "open",
+   "android": "open",
+   "capture": ""
+  },
+  {
+   "item": "Settings",
+   "gpui": "open",
+   "ios": "open",
+   "android": "open",
+   "capture": ""
+  },
+  {
+   "item": "Reconnect after sleep",
+   "gpui": "open",
+   "ios": "open",
+   "android": "open",
+   "capture": ""
+  },
+  {
+   "item": "Long session with 20 simulated agents",
+   "gpui": "open",
+   "ios": "open",
+   "android": "open",
+   "capture": ""
+  },
+  {
+   "item": "Account management: a client reaches accounts on the Rust hub (grant wired, not refused)",
+   "gpui": "open",
+   "ios": "open",
+   "android": "open",
+   "capture": ""
+  }
+ ],
+ "fun": [
+  {
+   "item": "Every click answers within one frame",
+   "gpui": "open",
+   "ios": "open",
+   "android": "open",
+   "evidence": ""
+  },
+  {
+   "item": "Scrolling at 60-120 fps with no jank",
+   "gpui": "open",
+   "ios": "open",
+   "android": "open",
+   "evidence": ""
+  },
+  {
+   "item": "Polished transitions",
+   "gpui": "open",
+   "ios": "open",
+   "android": "open",
+   "evidence": ""
+  },
+  {
+   "item": "No dead buttons",
+   "gpui": "open",
+   "ios": "open",
+   "android": "open",
+   "evidence": ""
+  },
+  {
+   "item": "No layout jumps",
+   "gpui": "open",
+   "ios": "open",
+   "android": "open",
+   "evidence": ""
+  },
+  {
+   "item": "Looks good, by the reviewer's honest judgement",
+   "gpui": "open",
+   "ios": "open",
+   "android": "open",
+   "evidence": ""
+  }
+ ]
+}

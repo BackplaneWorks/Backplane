@@ -37,6 +37,30 @@ struct AppTabs: View {
         }
     }
 
+    // Regular width (iPad): the project list as a sidebar beside the open
+    // thread, as the web client has it. A row opens its thread in the detail
+    // pane through the same model path the compact stack pushes onto.
+    private var threadsSplit: some View {
+        let open = model.stacks[.threads]?.last
+        return HStack(spacing: 0) {
+            NavigationStack {
+                ProjectsView(model: model, screen: screen, pairing: $pairing)
+            }
+            .frame(width: 360)
+            Rectangle().fill(BackplaneDesign.line).frame(width: 1)
+            NavigationStack {
+                if let id = open, !id.hasPrefix("@") {
+                    ThreadDestination(model: model, id: id).id(id)
+                } else {
+                    Text(screen.locale == "ja" ? "スレッドを選択" : "Select a thread")
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(BackplaneDesign.background)
+                }
+            }
+        }
+    }
+
     @ViewBuilder private func root(_ t: AppTab) -> some View {
         switch t {
         case .home: HomeTab(model: model, screen: screen)
@@ -52,7 +76,9 @@ struct AppTabs: View {
             if next != model.tab { model.chooseTab(next) }
         })) {
             ForEach(AppTab.allCases) { t in
-                stack(t)
+                Group {
+                    if t == .threads && horizontalSizeClass == .regular { threadsSplit } else { stack(t) }
+                }
                     .toolbar(horizontalSizeClass == .compact ? .hidden : .automatic, for: .tabBar)
                     .tabItem { Label(t.title(screen.locale ?? "en"), systemImage: t.icon) }
                     .badge(badge(t))
@@ -166,7 +192,7 @@ struct BotsTab: View {
                     ForEach(screen.bots) { b in
                         Button { model.open(nav: b.nav ?? "", action: b.act ?? (b.remote ? "remote" : "bot"), value: b.id, title: b.name, cat: b.cat, kind: b.remote ? "remote" : "bot") } label: {
                             HStack(spacing: 12) {
-                                BotCat(model: model, key: b.cat, size: 36)
+                                BotCat(model: model, key: b.cat, size: 28)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(b.name).foregroundStyle(.primary)
                                     HStack(spacing: 5) {
@@ -337,7 +363,7 @@ struct AppSettingsTab: View {
 
     var body: some View {
         Form {
-            Section(NativeMessages.settings_appearance(tag)) {
+            Section {
                 Picker(NativeMessages.settings_appearance(tag), selection: $settings.appearance) {
                     Text(NativeMessages.native_settings_system(tag)).tag("system")
                     Text(NativeMessages.settings_theme_light(tag)).tag("light")
@@ -353,6 +379,15 @@ struct AppSettingsTab: View {
                 if let row = screen.lang?.rows.dropFirst().first, let button = row.buttons.first {
                     Toggle(row.label, isOn: Binding(get: { button.on }, set: { _ in model.act(button.action, button.value) }))
                 }
+                Picker(tag == "ja" ? "文字サイズ" : "Text size", selection: $settings.textSize) {
+                    Text(NativeMessages.native_settings_system(tag)).tag("system")
+                    ForEach(AppSettings.textSteps, id: \.tag) { Text($0.tag.uppercased()).tag($0.tag) }
+                }
+                .accessibilityIdentifier("settings.textsize")
+            } header: {
+                Text(tag == "ja" ? "この端末" : "On this phone")
+            } footer: {
+                Text(tag == "ja" ? "この電話にだけ保存され、ハブや他の端末には送られません。" : "Stored on this phone only. Never sent to a hub or your other devices.")
             }
             Section {
                 Picker(NativeMessages.settings_sidebar(tag), selection: listBinding) {
@@ -365,10 +400,15 @@ struct AppSettingsTab: View {
                     ForEach(AppTab.allCases.filter { $0 != .settings }) { Text($0.title(tag)).tag($0.rawValue) }
                 }
                 Toggle(NativeMessages.native_settings_haptics(tag), isOn: $settings.haptics)
+                Toggle(tag == "ja" ? "この電話で通知" : "Alerts on this phone", isOn: $settings.alerts)
+                    .accessibilityIdentifier("settings.alerts")
+                Toggle(tag == "ja" ? "通知音" : "Alert sound", isOn: $settings.alertSound).disabled(!settings.alerts)
+                #if !GPUI_NATIVE
                 // off: the hub's phone web client is the app's screen again
                 Toggle(tag == "ja" ? "クラシック画面" : "Classic screens", isOn: $settings.classic)
+                #endif
             } header: {
-                Text(NativeMessages.native_settings_behaviour(tag))
+                Text(tag == "ja" ? "この端末の動作" : "On this phone: behaviour")
             } footer: {
                 Text(NativeMessages.native_settings_behaviour_ios(tag))
             }
@@ -397,9 +437,12 @@ struct AppSettingsTab: View {
                 // what the hub alerts for: its settings, from the last screen that carried them
                 if let r = notifyRows { HubSettingsRows(model: model, rows: r, notify: true) }
             } header: {
-                Text(NativeMessages.native_settings_notifications(tag))
+                Text(NativeMessages.native_settings_notifications(tag) + (tag == "ja" ? "(iOS とハブ全体)" : " (iOS permission, and hub-wide policy)"))
             } footer: {
-                if screen.hubs.count > 1, let h = notifyHub { Text(NativeMessages.native_settings_notify_hub(tag, h.name)) }
+                VStack(alignment: .leading) {
+                    Text(tag == "ja" ? "下の項目はハブ全体の設定で、すべての端末に適用されます。" : "The rows below the iOS permission are hub-wide: they apply to every device on that hub.")
+                    if screen.hubs.count > 1, let h = notifyHub { Text(NativeMessages.native_settings_notify_hub(tag, h.name)) }
+                }
             }
             Section(NativeMessages.native_usage_machines(tag)) {
                 ForEach(screen.usageMachines ?? []) { machine in
@@ -453,6 +496,10 @@ struct AppSettingsTab: View {
             }
             Section(NativeMessages.settings_tour(tag)) {
                 Button(NativeMessages.settings_tour_show(tag)) { model.act("ob-open") }
+            }
+            Section {
+                NavigationLink { LicencesView() } label: { Text(tag == "ja" ? "ライセンス" : "Licences") }
+                    .accessibilityIdentifier("settings.licences")
             }
             Section {
                 Button("Improvements") { improvements = true }

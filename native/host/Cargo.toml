@@ -1,0 +1,38 @@
+[package]
+name = "backplane-hub"
+version = "0.15.0"
+edition = "2021"
+description = "Backplane hub in Rust. Native clients only (GPUI desktop, iOS, Android); renderer mobile; no helper process, no JS, no Bend."
+
+[[bin]]
+name = "backplane-hub"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+libc = "0.2"
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+httparse = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order", "arbitrary_precision"] }
+sha2 = "0.10"
+aes-gcm = "0.10"
+base64 = "0.22"
+hex = "0.4"
+tokio = { version = "1", features = ["rt-multi-thread", "signal", "net", "io-util", "sync", "time", "process", "macros", "fs"] }
+tokio-tungstenite = "0.24"
+prost = "0.14"
+prost-reflect = "0.16"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 4
+strip = true
+
+[profile.fast]
+inherits = "release"
+lto = "off"
+codegen-units = 16
+incremental = true
+strip = "none"

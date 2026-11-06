@@ -1,6 +1,0 @@
-{
-  "cgroup": "user.slice/user-1000.slice/user@1000.service/app.slice/bp-memory-refview-5971.scope",
-  "memory_max_bytes": 3699998720,
-  "swap_max": 0,
-  "pid": 6273
-}

@@ -3,6 +3,7 @@ package dev.backplane.mobile
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -80,6 +81,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.net.HttpURLConnection
@@ -103,6 +105,13 @@ internal fun moodTint(mood: String): Color = when (mood) {
     "error" -> MaterialTheme.colorScheme.error
     "idle" -> Color(0xFF63E6BE)
     else -> MaterialTheme.colorScheme.outline
+}
+
+@Composable
+internal fun moodTextColor(mood: String): Color = when (mood) {
+    "wait", "error" -> PhaseColor.bad
+    "work", "talk" -> PhaseColor.accent
+    else -> MaterialTheme.colorScheme.onSurfaceVariant
 }
 
 @Composable
@@ -186,19 +195,17 @@ fun BotDestination(m: AppModel, s: Screen, b: BotView) {
     }
 }
 
-// a cat, its name and how it is
+// a cat, its name and how it is (style.css .bot-head: the cat is 42 px, the title 15 px semibold, the mood 12 px
+// in its mood's colour; .cat-mood-away dims the cat only)
 @Composable
 private fun BotHeader(m: AppModel, b: BotView, size: Dp) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        horizontalArrangement = Arrangement.spacedBy(14.dp)) {
         Box(Modifier.alpha(if (b.mood == "away") 0.5f else 1f)) { BotCat(m, b.cat, size) }
         Column {
-            Text(b.title, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                MoodDot(b.mood)
-                Text(listOf(b.note, if (b.title == b.name) b.peer else "").filter { it.isNotEmpty() }.joinToString(" · "),
-                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.outline)
-            }
+            Text(b.title, style = MaterialTheme.typography.titleMedium.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(listOf(b.note, if (b.title == b.name) b.peer else "").filter { it.isNotEmpty() }.joinToString(" · "),
+                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp), color = moodTextColor(b.mood))
         }
     }
 }
@@ -206,7 +213,7 @@ private fun BotHeader(m: AppModel, b: BotView, size: Dp) {
 @Composable
 private fun BotTabs(m: AppModel, b: BotView) {
     Column {
-        BotHeader(m, b, 64.dp)
+        BotHeader(m, b, 42.dp)
         val i = b.tabs.indexOfFirst { it.id == b.navTab.ifEmpty { b.tab } }.coerceAtLeast(0)
         ScrollableTabRow(selectedTabIndex = i, edgePadding = 8.dp) {
             b.tabs.forEachIndexed { j, t ->
@@ -267,7 +274,7 @@ private fun Empty(text: String) {
 @Composable
 private fun Tag(text: String) {
     Text(text, Modifier.background(MaterialTheme.colorScheme.surfaceVariant, square).padding(horizontal = 5.dp, vertical = 1.dp),
-        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace))
+        style = MaterialTheme.typography.labelSmall.copy(fontFamily = BpMono, fontFeatureSettings = NO_LIGATURES))
 }
 
 @Composable
@@ -311,7 +318,7 @@ private fun RoutinesTab(m: AppModel, b: BotView) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             if (r.kind == "reminder") Icon(Icons.Filled.Notifications, null, Modifier.size(14.dp))
                             Tag(r.label)
-                            Text(r.schedule, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelMedium)
+                            Text(r.schedule, style = MaterialTheme.typography.labelMedium.copy(fontFamily = BpMono, fontFeatureSettings = NO_LIGATURES))
                         }
                         if (r.done) Text(r.doneText, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
                         else if (r.next.isNotEmpty()) Text(
@@ -359,7 +366,7 @@ private fun RoutineDialog(m: AppModel, f: RoutineForm) {
                 OutlinedTextField(cron, { cron = it; m.field("ocron", it) }, Modifier.fillMaxWidth(), singleLine = true,
                     label = { Text(NativeMessages.native_routine_timefield(lang)) }, placeholder = { Text(NativeMessages.native_routine_examples(lang)) },
                     supportingText = { Text(f.hint.ifEmpty { NativeMessages.native_routine_hint(lang) }) },
-                    textStyle = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace),
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(fontFamily = BpMono, fontFeatureSettings = NO_LIGATURES),
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false))
                 OutlinedTextField(prompt, { prompt = it; m.field("oprompt", it) }, Modifier.fillMaxWidth(), minLines = 3, maxLines = 10,
                     label = { Text(NativeMessages.native_routine_prompt(lang)) })
@@ -387,7 +394,7 @@ private fun HooksTab(m: AppModel, b: BotView) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(NativeMessages.web_hooks_secret(lang), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.outline)
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(b.secret, Modifier.weight(1f), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+                    Text(b.secret, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall.copy(fontFamily = BpMono, fontFeatureSettings = NO_LIGATURES))
                     IconButton(onClick = { m.act("copy", b.secret) }) { Icon(Icons.Filled.ContentCopy, NativeMessages.common_copy(lang)) }
                 }
                 HorizontalDivider()
@@ -399,7 +406,7 @@ private fun HooksTab(m: AppModel, b: BotView) {
                 headlineContent = { Text(h.name, fontWeight = FontWeight.SemiBold) },
                 supportingContent = {
                     Column {
-                        Text(url, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall,
+                        Text(url, style = MaterialTheme.typography.bodySmall.copy(fontFamily = BpMono, fontFeatureSettings = NO_LIGATURES),
                             maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(if (h.last.isEmpty()) "${h.count}" else "${h.count} · ${h.last}", style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.outline)
@@ -430,6 +437,7 @@ private fun Field(value: String, label: String, onChange: (String) -> Unit, modi
         keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false))
 }
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun SettingsTab(m: AppModel, b: BotView, st: BotSettings) {
     val lang = LocalBackplaneLanguage.current
@@ -447,6 +455,19 @@ private fun SettingsTab(m: AppModel, b: BotView, st: BotSettings) {
         SectionLabel(NativeMessages.bots_persona(lang))
         OutlinedTextField(persona, { persona = it; m.field("persona", it) }, Modifier.fillMaxWidth(), minLines = 4, maxLines = 14)
         OutlinedButton(onClick = { m.act("bot-edit") }, enabled = persona != st.persona, shape = square) { Text(NativeMessages.common_save(lang)) }
+
+        // style.css .look-pick: each of the looks as an idle cat (40 px) in a 3 px frame, the current one outlined in the accent
+        if (st.looks > 0) {
+            SectionLabel(st.lookLabel)
+            androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                for (i in 0 until st.looks) {
+                    val on = i == st.look
+                    Box(Modifier.size(48.dp).then(if (on) Modifier.background(MaterialTheme.colorScheme.surfaceVariant) else Modifier)
+                        .border(1.dp, if (on) MaterialTheme.colorScheme.primary else Color.Transparent)
+                        .clickable { m.act("bot-look", i.toString()) }.padding(3.dp)) { BotCat(m, "$i:idle", 40.dp) }
+                }
+            }
+        }
 
         SectionLabel("Google")
         val ctx = androidx.compose.ui.platform.LocalContext.current
@@ -499,7 +520,7 @@ private fun SettingsTab(m: AppModel, b: BotView, st: BotSettings) {
             TextButton(onClick = { m.act("peer-invite") }) { Text(NativeMessages.machines_invite(lang)) }
         }
         if (st.invite.isNotEmpty()) Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(st.invite, Modifier.weight(1f), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+            Text(st.invite, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall.copy(fontFamily = BpMono, fontFeatureSettings = NO_LIGATURES))
             IconButton(onClick = { m.act("copy", st.invite) }) { Icon(Icons.Filled.ContentCopy, NativeMessages.native_machine_invite_copy(lang)) }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -575,7 +596,10 @@ private fun TalkScreen(m: AppModel, b: BotView, field: String, send: String) {
             start = 16.dp, end = 16.dp, top = pad.calculateTopPadding() + 8.dp, bottom = pad.calculateBottomPadding() + 8.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             items(b.posts, key = { it.id }) { p ->
-                Column(Modifier.fillMaxWidth(), horizontalAlignment = if (p.mine) Alignment.End else Alignment.Start,
+              Row(Modifier.fillMaxWidth(), horizontalArrangement = if (p.mine) Arrangement.End else Arrangement.spacedBy(8.dp)) {
+                // style.css .post > .cat: a bot's post has its author's cat (28 px) beside it; a person's none
+                if (p.cat.isNotEmpty()) BotCat(m, p.cat, 28.dp)
+                Column(Modifier.weight(1f, fill = !p.mine), horizontalAlignment = if (p.mine) Alignment.End else Alignment.Start,
                     verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(p.from, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
@@ -586,6 +610,7 @@ private fun TalkScreen(m: AppModel, b: BotView, field: String, send: String) {
                         Text(p.text, Modifier.padding(horizontal = 12.dp, vertical = 8.dp), style = MaterialTheme.typography.bodyLarge)
                     }
                 }
+              }
             }
         }
     }

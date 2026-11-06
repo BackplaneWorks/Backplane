@@ -1,0 +1,23 @@
+{"$":"ProjectCreated","id":"p1","title":"proj","root":"/r","at":1793900000}
+{"$":"ThreadCreated","id":"t1","project":"p1","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1793900001}
+{"$":"ThreadCreated","id":"t2","project":"p1","title":"U","env":"local","branch":"","worktree":"","provider":"codex","model":"m","at":1793900002}
+{"$":"DeployAsked","by":"-","note":"","commit":"","cover":"","at":1793900049}
+{"$":"DeployAsked","by":"t1","note":"","commit":"","cover":"","at":1793900050}
+{"$":"DeployBuilt","commit":"c1","state":"building","version":"","detail":"","at":1793900051}
+{"$":"DeployBuilt","commit":"c1","state":"pid","version":"","detail":"123 x","at":1793900052}
+{"$":"DeployAsked","by":"t2","note":"","commit":"","cover":"","at":1793900053}
+{"$":"DeployAsked","by":"t3","note":"","commit":"","cover":"building","at":1793900054}
+{"$":"DeployAsked","by":"t4","note":"","commit":"","cover":"staged","at":1793900055}
+{"$":"DeployAsked","by":"t1","note":"","commit":"","cover":"","at":1793900056}
+{"$":"DeployBuilt","commit":"c1","state":"staged","version":"","detail":"","at":1793900057}
+{"$":"DeployBuilt","commit":"c2","state":"building","version":"","detail":"","at":1793900058}
+{"$":"DeployBuilt","commit":"c2","state":"live","version":"","detail":"","at":1793900059}
+{"$":"DeployBuilt","commit":"c2","state":"failed","version":"","detail":"","at":1793900060}
+{"$":"DeployAsked","by":"t5","note":"","commit":"","cover":"","at":1793900061}
+{"$":"DeployBuilt","commit":"c3","state":"building","version":"","detail":"","at":1793900062}
+{"$":"DeployBuilt","commit":"c3","state":"live","version":"","detail":"","at":1793900063}
+{"$":"DeployBuilt","commit":"c3","state":"skipped","version":"","detail":"","at":1793900064}
+{"$":"DeployBuilt","commit":"c4","state":"staged","version":"","detail":"","at":1793900065}
+{"$":"DeployBuilt","commit":"c4","state":"live","version":"","detail":"","at":1793900066}
+{"$":"DeployBuilt","commit":"c9","state":"weird","version":"","detail":"","at":1793900067}
+{"$":"DeployAsked","by":"x","note":"","commit":"","cover":"live","at":1793900068}

@@ -9,7 +9,7 @@
         android:shortcutLongLabel="@string/shortcut_settings">
         <intent
             android:action="android.intent.action.VIEW"
-            android:targetPackage="dev.backplane.mobile"
+            android:targetPackage="@string/app_id"
             android:targetClass="dev.backplane.mobile.MainActivity">
             <extra android:name="app-settings" android:value="true" />
         </intent>

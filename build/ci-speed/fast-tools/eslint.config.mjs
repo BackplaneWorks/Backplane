@@ -1,1 +1,0 @@
-export default [{"files": ["**/*.{js,mjs,cjs}"], "languageOptions": {"ecmaVersion": "latest"}, "rules": {"no-constant-binary-expression": "error", "no-debugger": "error", "no-dupe-args": "error", "no-dupe-keys": "error", "no-duplicate-case": "error", "no-self-assign": "error", "no-sparse-arrays": "error", "use-isnan": "error"}}];

@@ -1,0 +1,425 @@
+{
+ "platform": "ios-phone",
+ "scheme": "dark",
+ "scale": 3,
+ "items": [
+  {
+   "name": "logo-header",
+   "kind": "logo",
+   "web": {
+    "png": "../../../../shots/web-phone-dark-list.png",
+    "rect": [
+     30,
+     50,
+     54,
+     54
+    ]
+   },
+   "native": {
+    "png": "../../../../lc/ios-phone-dark-list.png",
+    "rect": [
+     117,
+     225,
+     54,
+     54
+    ]
+   }
+  },
+  {
+   "name": "logo-pair-screen",
+   "kind": "logo",
+   "web": {
+    "png": "../../../../shots/web-phone-dark-logo48.png",
+    "rect": [
+     120,
+     120,
+     144,
+     144
+    ]
+   },
+   "native": {
+    "png": "../../../../lc/ios-phone-dark-pair.png",
+    "rect": [
+     72,
+     258,
+     144,
+     144
+    ]
+   }
+  },
+  {
+   "name": "cat-list-0-306440",
+   "kind": "cat",
+   "web": {
+    "png": "../../../../shots/web-phone-dark-bots.png",
+    "rect": [
+     36,
+     933,
+     84,
+     84
+    ]
+   },
+   "native": {
+    "png": "../../../../lc/ios-phone-dark-bots.png",
+    "rect": [
+     48,
+     745,
+     84,
+     84
+    ]
+   }
+  },
+  {
+   "name": "cat-list-1-304473115",
+   "kind": "cat",
+   "web": {
+    "png": "../../../../shots/web-phone-dark-bots.png",
+    "rect": [
+     36,
+     1063,
+     84,
+     84
+    ]
+   },
+   "native": {
+    "png": "../../../../lc/ios-phone-dark-bots.png",
+    "rect": [
+     48,
+     945,
+     84,
+     84
+    ]
+   }
+  },
+  {
+   "name": "cat-list-2-307085023",
+   "kind": "cat",
+   "web": {
+    "png": "../../../../shots/web-phone-dark-bots.png",
+    "rect": [
+     36,
+     1192,
+     84,
+     84
+    ]
+   },
+   "native": {
+    "png": "../../../../lc/ios-phone-dark-bots.png",
+    "rect": [
+     48,
+     1145,
+     84,
+     84
+    ]
+   }
+  },
+  {
+   "name": "cat-list-3-297024320",
+   "kind": "cat",
+   "web": {
+    "png": "../../../../shots/web-phone-dark-bots.png",
+    "rect": [
+     36,
+     1322,
+     84,
+     84
+    ]
+   },
+   "native": {
+    "png": "../../../../lc/ios-phone-dark-bots.png",
+    "rect": [
+     48,
+     1345,
+     84,
+     84
+    ]
+   }
+  },
+  {
+   "name": "cat-list-4-9851967",
+   "kind": "cat",
+   "web": {
+    "png": "../../../../shots/web-phone-dark-bots.png",
+    "rect": [
+     36,
+     1452,
+     84,
+     84
+    ]
+   },
+   "native": {
+    "png": "../../../../lc/ios-phone-dark-bots.png",
+    "rect": [
+     48,
+     1545,
+     84,
+     84
+    ]
+   }
+  },
+  {
+   "name": "cat-list-5-329010",
+   "kind": "cat",
+   "web": {
+    "png": "../../../../shots/web-phone-dark-bots.png",
+    "rect": [
+     36,
+     1581,
+     84,
+     84
+    ]
+   },
+   "native": {
+    "png": "../../../../lc/ios-phone-dark-bots.png",
+    "rect": [
+     48,
+     1745,
+     84,
+     84
+    ]
+   }
+  },
+  {
+   "name": "cat-header-Bub",
+   "kind": "cat",
+   "web": {
+    "png": "../../../../shots/web-phone-dark-bot.png",
+    "rect": [
+     156,
+     15,
+     126,
+     126
+    ]
+   },
+   "native": {
+    "png": "../../../../lc/ios-phone-dark-bot.png",
+    "rect": [
+     48,
+     375,
+     126,
+     126
+    ]
+   }
+  },
+  {
+   "name": "cat-look-0",
+   "kind": "cat",
+   "web": {
+    "png": "../../../../shots/web-phone-dark-look.png",
+    "rect": [
+     81,
+     753,
+     120,
+     120
+    ]
+   },
+   "native": {
+    "png": "../../../../lc/ios-phone-dark-look.png",
+    "rect": [
+     110,
+     821,
+     120,
+     120
+    ]
+   }
+  },
+  {
+   "name": "cat-look-1",
+   "kind": "cat",
+   "web": {
+    "png": "../../../../shots/web-phone-dark-look.png",
+    "rect": [
+     243,
+     753,
+     120,
+     120
+    ]
+   },
+   "native": {
+    "png": "../../../../lc/ios-phone-dark-look.png",
+    "rect": [
+     284,
+     821,
+     120,
+     120
+    ]
+   }
+  },
+  {
+   "name": "cat-look-2",
+   "kind": "cat",
+   "web": {
+    "png": "../../../../shots/web-phone-dark-look.png",
+    "rect": [
+     405,
+     753,
+     120,
+     120
+    ]
+   },
+   "native": {
+    "png": "../../../../lc/ios-phone-dark-look.png",
+    "rect": [
+     457,
+     821,
+     120,
+     120
+    ]
+   }
+  },
+  {
+   "name": "cat-look-3",
+   "kind": "cat",
+   "web": {
+    "png": "../../../../shots/web-phone-dark-look.png",
+    "rect": [
+     567,
+     753,
+     120,
+     120
+    ]
+   },
+   "native": {
+    "png": "../../../../lc/ios-phone-dark-look.png",
+    "rect": [
+     629,
+     821,
+     120,
+     120
+    ]
+   }
+  },
+  {
+   "name": "cat-look-4",
+   "kind": "cat",
+   "web": {
+    "png": "../../../../shots/web-phone-dark-look.png",
+    "rect": [
+     729,
+     753,
+     120,
+     120
+    ]
+   },
+   "native": {
+    "png": "../../../../lc/ios-phone-dark-look.png",
+    "rect": [
+     802,
+     821,
+     120,
+     120
+    ]
+   }
+  },
+  {
+   "name": "cat-look-5",
+   "kind": "cat",
+   "web": {
+    "png": "../../../../shots/web-phone-dark-look.png",
+    "rect": [
+     891,
+     753,
+     120,
+     120
+    ]
+   },
+   "native": {
+    "png": "../../../../lc/ios-phone-dark-look.png",
+    "rect": [
+     976,
+     821,
+     120,
+     120
+    ]
+   }
+  },
+  {
+   "name": "cat-room-post-0",
+   "kind": "cat",
+   "web": {
+    "png": "../../../../shots/web-phone-dark-room.png",
+    "rect": [
+     30,
+     1689,
+     84,
+     84
+    ]
+   },
+   "native": {
+    "png": "../../../../lc/ios-phone-dark-room.png",
+    "rect": [
+     48,
+     1168,
+     84,
+     84
+    ]
+   }
+  },
+  {
+   "name": "cat-room-post-1",
+   "kind": "cat",
+   "web": {
+    "png": "../../../../shots/web-phone-dark-room.png",
+    "rect": [
+     30,
+     1832,
+     84,
+     84
+    ]
+   },
+   "native": {
+    "png": "../../../../lc/ios-phone-dark-room.png",
+    "rect": [
+     48,
+     1403,
+     84,
+     84
+    ]
+   }
+  },
+  {
+   "name": "cat-room-post-2",
+   "kind": "cat",
+   "web": {
+    "png": "../../../../shots/web-phone-dark-room.png",
+    "rect": [
+     30,
+     1974,
+     84,
+     84
+    ]
+   },
+   "native": {
+    "png": "../../../../lc/ios-phone-dark-room.png",
+    "rect": [
+     48,
+     1638,
+     84,
+     84
+    ]
+   }
+  },
+  {
+   "name": "cat-room-post-3",
+   "kind": "cat",
+   "web": {
+    "png": "../../../../shots/web-phone-dark-room.png",
+    "rect": [
+     30,
+     2116,
+     84,
+     84
+    ]
+   },
+   "native": {
+    "png": "../../../../lc/ios-phone-dark-room.png",
+    "rect": [
+     48,
+     1873,
+     84,
+     84
+    ]
+   }
+  }
+ ]
+}

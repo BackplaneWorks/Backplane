@@ -1,8 +1,0 @@
-ok duplicate completion negative control delayed=false
-ok duplicate completion negative control delayed=true
-AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
-
-0 !== 1
-
-    at <anonymous> (/home/user/backplane-5fc0d35e/test/tools/disk_sync_test.cjs:36:46)
-    at processTicksAndRejections (native:7:39)

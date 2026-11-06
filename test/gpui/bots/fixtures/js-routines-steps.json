@@ -1,0 +1,98 @@
+[
+ {
+  "name": "create ada",
+  "m": "bots.create",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "routine daily",
+  "m": "bots.routine",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "routine bad schedule",
+  "m": "bots.routine",
+  "ok": false,
+  "error": "I can't read that schedule (try: every 15m, daily 09:30, weekdays 08:00, @hourly, or a cron line), or give a one-time time with at"
+ },
+ {
+  "name": "routine neither",
+  "m": "bots.routine",
+  "ok": false,
+  "error": "give a schedule (every 15m, daily 09:30...) or a one-time time (at)"
+ },
+ {
+  "name": "routine both",
+  "m": "bots.routine",
+  "ok": false,
+  "error": "give a schedule or a time (at), not both"
+ },
+ {
+  "name": "routine bad zone",
+  "m": "bots.routine",
+  "ok": false,
+  "error": "that is not a time zone name (like Europe/Helsinki; or person, or machine)"
+ },
+ {
+  "name": "routine bad time",
+  "m": "bots.routine",
+  "ok": false,
+  "error": "I can't read that time. I can read: 2026-10-14T09:00+03:00, 2026-10-14 09:00, in 20m, in 1h30m, in 3d, today 17:30, tomorrow 9am, monday 09:00, or just 9am."
+ },
+ {
+  "name": "routine no bot",
+  "m": "bots.routine",
+  "ok": false,
+  "error": "no such bot"
+ },
+ {
+  "name": "routine once soon",
+  "m": "bots.routine",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "routine hourly utc",
+  "m": "bots.routine",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "routine toggle off",
+  "m": "bots.routine",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "run now",
+  "m": "bots.routine_run",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "run the done one",
+  "m": "bots.routine_run",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "delete ro1",
+  "m": "bots.routine_delete",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "run a deleted one",
+  "m": "bots.routine_run",
+  "ok": false,
+  "error": "That routine is done or removed; edit its time to schedule it again."
+ },
+ {
+  "name": "run an unknown one",
+  "m": "bots.routine_run",
+  "ok": false,
+  "error": "That routine is done or removed; edit its time to schedule it again."
+ }
+]

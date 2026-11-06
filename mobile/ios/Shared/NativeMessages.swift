@@ -799,11 +799,6 @@ enum NativeMessages {
     tag == "ja" ? ("Backplaneのペアリング用コードではありません") : ("Not a Backplane pairing code")
   }
 
-  // native.pair.scanner.light
-  static func native_pair_scanner_light(_ tag: String) -> String {
-    tag == "ja" ? ("ライト") : ("Light")
-  }
-
   // native.pair.scanner.title
   static func native_pair_scanner_title(_ tag: String) -> String {
     tag == "ja" ? ("コードを読み取る") : ("Scan code")
@@ -811,7 +806,7 @@ enum NativeMessages {
 
   // native.pair.scanner.unavailable
   static func native_pair_scanner_unavailable(_ tag: String) -> String {
-    tag == "ja" ? ("カメラを起動できませんでした。コードの写真を選ぶか、リンクを貼り付けてください") : ("The camera did not start: choose a photo of the code or paste the link instead")
+    tag == "ja" ? ("読み取りにはGoogle Play開発者サービスが必要です。リンクを貼り付けてください") : ("The scanner needs Google Play services: paste the link instead")
   }
 
   // native.pair.tailnet

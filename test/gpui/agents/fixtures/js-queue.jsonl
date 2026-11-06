@@ -1,0 +1,783 @@
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m17000001106-116","role":"user","text":"Question 106: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000116}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m17000001107-117","role":"assistant","text":"Answer 107: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000117}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m17000001108-118","role":"user","text":"Question 108: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000118}
+{"$":"ActivityLogged","thread":"t1700000002-3","act":"g17000001108-408","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -108","at":1700000118}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m17000001109-119","role":"assistant","text":"Answer 109: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000119}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m17000001110-120","role":"user","text":"Question 110: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000120}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m17000001111-121","role":"assistant","text":"Answer 111: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000121}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m17000001112-122","role":"user","text":"Question 112: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000122}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m17000001113-123","role":"assistant","text":"Answer 113: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000123}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m17000001114-124","role":"user","text":"Question 114: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000124}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m17000001115-125","role":"assistant","text":"Answer 115: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000125}
+{"$":"ActivityLogged","thread":"t1700000002-3","act":"g17000001115-415","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -115","at":1700000125}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m17000001116-126","role":"user","text":"Question 116: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000126}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m17000001117-127","role":"assistant","text":"Answer 117: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000127}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m17000001118-128","role":"user","text":"Question 118: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000128}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m17000001119-129","role":"assistant","text":"Answer 119: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000129}
+{"$":"SettingSet","key":"autosettle.version","value":"1","at":1793842198}
+{"$":"SettingSet","key":"machine.id","value":"m1572481a8ca036cb6ff3e2d277102de598f775e4ba63e81d","at":1793842199}
+{"$":"SettingSet","key":"accounts.inventory","value":"{\"version\":1,\"revision\":0,\"profiles\":[],\"error\":\"\"}","at":1793842199}
+{"$":"SettingSet","key":"allowance.codex","value":"{\"provider\":\"codex\",\"at\":0,\"attempted_at\":1793842198,\"state\":\"error\",\"auth\":\"unknown\",\"windows\":[],\"source\":\"codex-app-server\",\"phase\":\"complete\"}","at":1793842199}
+{"$":"SettingSet","key":"tz.machine","value":"America/New_York","at":1793842199}
+{"$":"SettingSet","key":"tz.rule.America/New_York","value":"EST5EDT,M3.2.0,M11.1.0","at":1793842199}
+{"$":"SettingSet","key":"tz.checked","value":"1793842199","at":1793842199}
+{"$":"SettingSet","key":"star.nudge.v1","value":"{\"status\":\"counting\",\"ids\":[\"m1793842202-147\"],\"token\":\"m1793842202-147\",\"eligibleAt\":0,\"sentAt\":0}","at":1793842202}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m1793842202-147","role":"user","text":"first","at":1793842202}
+{"$":"TurnChanged","thread":"t1700000001-2","state":"running","at":1793842202}
+{"$":"SettingSet","key":"turn.from.t1700000001-2","value":"@m1793842202-147","at":1793842202}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842202,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842202}
+{"$":"SettingSet","key":"restart.retry.t1700000001-2","value":"","at":1793842202}
+{"$":"SettingSet","key":"provider.resume.t1700000001-2","value":"","at":1793842202}
+{"$":"SettingSet","key":"fallback.input.t1700000001-2","value":"first","at":1793842202}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842202","at":1793842202}
+{"$":"SettingSet","key":"autosettle.audience.t1700000001-2","value":"person","at":1793842202}
+{"$":"SessionSet","id":"t1700000001-2","session":"fake-544692","at":1793842203}
+{"$":"SettingSet","key":"tok.basis.t1700000001-2","value":"c:0","at":1793842203}
+{"$":"SettingSet","key":"turn.speed.t1700000001-2","value":"0/0/0/0/0/0/0/0","at":1793842203}
+{"$":"SettingSet","key":"star.nudge.v1","value":"{\"status\":\"counting\",\"ids\":[\"m1793842202-147\",\"m1793842203-160\"],\"token\":\"m1793842203-160\",\"eligibleAt\":0,\"sentAt\":0}","at":1793842203}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m1793842203-160","role":"user","text":"second","at":1793842203}
+{"$":"TurnChanged","thread":"t1700000001-2","state":"running","at":1793842203}
+{"$":"SettingSet","key":"turn.from.t1700000001-2","value":"@m1793842203-160","at":1793842203}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842203,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842203}
+{"$":"SettingSet","key":"restart.retry.t1700000001-2","value":"","at":1793842203}
+{"$":"SettingSet","key":"provider.resume.t1700000001-2","value":"","at":1793842203}
+{"$":"SettingSet","key":"fallback.input.t1700000001-2","value":"second","at":1793842203}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842203","at":1793842203}
+{"$":"SettingSet","key":"autosettle.audience.t1700000001-2","value":"person","at":1793842203}
+{"$":"SettingSet","key":"star.nudge.v1","value":"{\"status\":\"counting\",\"ids\":[\"m1793842202-147\",\"m1793842203-160\",\"m1793842203-170\"],\"token\":\"m1793842203-170\",\"eligibleAt\":0,\"sentAt\":0}","at":1793842203}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m1793842203-170","role":"user","text":"third","at":1793842203}
+{"$":"TurnChanged","thread":"t1700000001-2","state":"running","at":1793842203}
+{"$":"SettingSet","key":"turn.from.t1700000001-2","value":"@m1793842203-170","at":1793842203}
+{"$":"SettingSet","key":"restart.retry.t1700000001-2","value":"","at":1793842203}
+{"$":"SettingSet","key":"provider.resume.t1700000001-2","value":"","at":1793842203}
+{"$":"SettingSet","key":"fallback.input.t1700000001-2","value":"third","at":1793842203}
+{"$":"SettingSet","key":"autosettle.audience.t1700000001-2","value":"person","at":1793842203}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-1-5:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842203}
+{"$":"UsageSet","thread":"t1700000001-2","used":21010,"window":0,"at":1793842203}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-1-5:0","at":1793842203}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-1-5","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -5","at":1793842203}
+{"$":"UsageSet","thread":"t1700000001-2","used":21011,"window":0,"at":1793842203}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-1-10:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842204}
+{"$":"UsageSet","thread":"t1700000001-2","used":21020,"window":0,"at":1793842204}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842204,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842204}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842204","at":1793842204}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-1-10:0","at":1793842204}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-1-10","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -10","at":1793842204}
+{"$":"UsageSet","thread":"t1700000001-2","used":21021,"window":0,"at":1793842204}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-1-15:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842204}
+{"$":"UsageSet","thread":"t1700000001-2","used":21030,"window":0,"at":1793842204}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-1-15:0","at":1793842204}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-1-15","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -15","at":1793842204}
+{"$":"UsageSet","thread":"t1700000001-2","used":21031,"window":0,"at":1793842204}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-1-20:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842205}
+{"$":"UsageSet","thread":"t1700000001-2","used":21040,"window":0,"at":1793842205}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842205,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842205}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842205","at":1793842205}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-1-20:0","at":1793842205}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-1-20","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -20","at":1793842205}
+{"$":"UsageSet","thread":"t1700000001-2","used":21041,"window":0,"at":1793842205}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-1-25:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842205}
+{"$":"UsageSet","thread":"t1700000001-2","used":21050,"window":0,"at":1793842205}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-1-25:0","at":1793842205}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-1-25","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -25","at":1793842205}
+{"$":"UsageSet","thread":"t1700000001-2","used":21051,"window":0,"at":1793842205}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-1-30:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842206}
+{"$":"UsageSet","thread":"t1700000001-2","used":21060,"window":0,"at":1793842206}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842206,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842206}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842206","at":1793842206}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-1-30:0","at":1793842206}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-1-30","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -30","at":1793842206}
+{"$":"UsageSet","thread":"t1700000001-2","used":21061,"window":0,"at":1793842206}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-1-35:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842206}
+{"$":"UsageSet","thread":"t1700000001-2","used":21070,"window":0,"at":1793842206}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-1-35:0","at":1793842206}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-1-35","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -35","at":1793842206}
+{"$":"UsageSet","thread":"t1700000001-2","used":21071,"window":0,"at":1793842206}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-1-40:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842207}
+{"$":"UsageSet","thread":"t1700000001-2","used":21080,"window":0,"at":1793842207}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842207,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842207}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842207","at":1793842207}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-1-40:0","at":1793842207}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-1-40","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -40","at":1793842207}
+{"$":"UsageSet","thread":"t1700000001-2","used":21081,"window":0,"at":1793842207}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-1-45:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842207}
+{"$":"UsageSet","thread":"t1700000001-2","used":21090,"window":0,"at":1793842207}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-1-45:0","at":1793842207}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-1-45","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -45","at":1793842207}
+{"$":"UsageSet","thread":"t1700000001-2","used":21091,"window":0,"at":1793842207}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-1-50:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842208}
+{"$":"UsageSet","thread":"t1700000001-2","used":21100,"window":0,"at":1793842208}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842208,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842208}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842208","at":1793842208}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-1-50:0","at":1793842208}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-1-50","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -50","at":1793842208}
+{"$":"UsageSet","thread":"t1700000001-2","used":21101,"window":0,"at":1793842208}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-1-55:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842208}
+{"$":"UsageSet","thread":"t1700000001-2","used":21110,"window":0,"at":1793842208}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-1-55:0","at":1793842208}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-1-55","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -55","at":1793842208}
+{"$":"UsageSet","thread":"t1700000001-2","used":21111,"window":0,"at":1793842208}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-1-60:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842209}
+{"$":"UsageSet","thread":"t1700000001-2","used":21120,"window":0,"at":1793842209}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842209,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842209}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842209","at":1793842209}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-1-60:0","at":1793842209}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-1-60","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -60","at":1793842209}
+{"$":"UsageSet","thread":"t1700000001-2","used":21121,"window":0,"at":1793842209}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-1-65:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842209}
+{"$":"UsageSet","thread":"t1700000001-2","used":21130,"window":0,"at":1793842209}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-1-65:0","at":1793842209}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-1-65","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -65","at":1793842209}
+{"$":"UsageSet","thread":"t1700000001-2","used":21131,"window":0,"at":1793842209}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-1-70:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842210}
+{"$":"UsageSet","thread":"t1700000001-2","used":21140,"window":0,"at":1793842210}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842210,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842210}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842210","at":1793842210}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-1-70:0","at":1793842210}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-1-70","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -70","at":1793842210}
+{"$":"UsageSet","thread":"t1700000001-2","used":21141,"window":0,"at":1793842210}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-1-75:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842210}
+{"$":"UsageSet","thread":"t1700000001-2","used":21150,"window":0,"at":1793842210}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-1-75:0","at":1793842210}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-1-75","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -75","at":1793842210}
+{"$":"UsageSet","thread":"t1700000001-2","used":21151,"window":0,"at":1793842210}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-1-80:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842211}
+{"$":"UsageSet","thread":"t1700000001-2","used":21160,"window":0,"at":1793842211}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842211,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842211}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842211","at":1793842211}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-1-80:0","at":1793842211}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-1-80","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -80","at":1793842211}
+{"$":"UsageSet","thread":"t1700000001-2","used":21161,"window":0,"at":1793842211}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-1-85:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842211}
+{"$":"UsageSet","thread":"t1700000001-2","used":21170,"window":0,"at":1793842211}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-1-85:0","at":1793842211}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-1-85","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -85","at":1793842211}
+{"$":"UsageSet","thread":"t1700000001-2","used":21171,"window":0,"at":1793842211}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-1-90:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842212}
+{"$":"UsageSet","thread":"t1700000001-2","used":21180,"window":0,"at":1793842212}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842212,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842212}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842212","at":1793842212}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-1-90:0","at":1793842212}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-1-90","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -90","at":1793842212}
+{"$":"UsageSet","thread":"t1700000001-2","used":21181,"window":0,"at":1793842212}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-1-95:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842212}
+{"$":"UsageSet","thread":"t1700000001-2","used":21190,"window":0,"at":1793842212}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-1-95:0","at":1793842212}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-1-95","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -95","at":1793842212}
+{"$":"UsageSet","thread":"t1700000001-2","used":21191,"window":0,"at":1793842212}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-1-100:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842213}
+{"$":"UsageSet","thread":"t1700000001-2","used":21200,"window":0,"at":1793842213}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842213,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842213}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842213","at":1793842213}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-1-100:0","at":1793842213}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-1-100","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -100","at":1793842213}
+{"$":"UsageSet","thread":"t1700000001-2","used":21201,"window":0,"at":1793842213}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-1-105:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842213}
+{"$":"UsageSet","thread":"t1700000001-2","used":21210,"window":0,"at":1793842213}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-1-105:0","at":1793842213}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-1-105","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -105","at":1793842213}
+{"$":"UsageSet","thread":"t1700000001-2","used":21211,"window":0,"at":1793842213}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-1-110:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842214}
+{"$":"UsageSet","thread":"t1700000001-2","used":21220,"window":0,"at":1793842214}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842214,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842214}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842214","at":1793842214}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-1-110:0","at":1793842214}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-1-110","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -110","at":1793842214}
+{"$":"UsageSet","thread":"t1700000001-2","used":21221,"window":0,"at":1793842214}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-1-115:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842214}
+{"$":"UsageSet","thread":"t1700000001-2","used":21230,"window":0,"at":1793842214}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-1-115:0","at":1793842214}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-1-115","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -115","at":1793842214}
+{"$":"UsageSet","thread":"t1700000001-2","used":21231,"window":0,"at":1793842214}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-1-120:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842215}
+{"$":"UsageSet","thread":"t1700000001-2","used":21240,"window":0,"at":1793842215}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842215,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842215}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842215","at":1793842215}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-1-120:0","at":1793842215}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-1-120","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -120","at":1793842215}
+{"$":"UsageSet","thread":"t1700000001-2","used":21241,"window":0,"at":1793842215}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-1-125:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842215}
+{"$":"UsageSet","thread":"t1700000001-2","used":21250,"window":0,"at":1793842215}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-1-125:0","at":1793842215}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-1-125","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -125","at":1793842215}
+{"$":"UsageSet","thread":"t1700000001-2","used":21251,"window":0,"at":1793842215}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-1-130:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842216}
+{"$":"UsageSet","thread":"t1700000001-2","used":21260,"window":0,"at":1793842216}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842216,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842216}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842216","at":1793842216}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-1-130:0","at":1793842216}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-1-130","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -130","at":1793842216}
+{"$":"UsageSet","thread":"t1700000001-2","used":21261,"window":0,"at":1793842216}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-1-135:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842216}
+{"$":"UsageSet","thread":"t1700000001-2","used":21270,"window":0,"at":1793842216}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-1-135:0","at":1793842216}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-1-135","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -135","at":1793842216}
+{"$":"UsageSet","thread":"t1700000001-2","used":21271,"window":0,"at":1793842216}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-1-140:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842217}
+{"$":"UsageSet","thread":"t1700000001-2","used":21280,"window":0,"at":1793842217}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842217,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842217}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842217","at":1793842217}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-1-140:0","at":1793842217}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-1-140","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -140","at":1793842217}
+{"$":"UsageSet","thread":"t1700000001-2","used":21281,"window":0,"at":1793842217}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-1-145:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842217}
+{"$":"UsageSet","thread":"t1700000001-2","used":21290,"window":0,"at":1793842217}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-1-145:0","at":1793842217}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-1-145","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -145","at":1793842217}
+{"$":"UsageSet","thread":"t1700000001-2","used":21291,"window":0,"at":1793842217}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-1-150:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842218}
+{"$":"UsageSet","thread":"t1700000001-2","used":21300,"window":0,"at":1793842218}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842218,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842218}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842218","at":1793842218}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-1-150:0","at":1793842218}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-1-150","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -150","at":1793842218}
+{"$":"UsageSet","thread":"t1700000001-2","used":21301,"window":0,"at":1793842218}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-1-155:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842218}
+{"$":"UsageSet","thread":"t1700000001-2","used":21310,"window":0,"at":1793842218}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-1-155:0","at":1793842218}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-1-155","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -155","at":1793842218}
+{"$":"UsageSet","thread":"t1700000001-2","used":21311,"window":0,"at":1793842218}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-1-160:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842219}
+{"$":"UsageSet","thread":"t1700000001-2","used":21320,"window":0,"at":1793842219}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842219,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842219}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842219","at":1793842219}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-1-160:0","at":1793842219}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-1-160","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -160","at":1793842219}
+{"$":"UsageSet","thread":"t1700000001-2","used":21321,"window":0,"at":1793842219}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-1-165:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842220}
+{"$":"UsageSet","thread":"t1700000001-2","used":21330,"window":0,"at":1793842220}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842220,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842220}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842220","at":1793842220}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-1-165:0","at":1793842220}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-1-165","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -165","at":1793842220}
+{"$":"UsageSet","thread":"t1700000001-2","used":21331,"window":0,"at":1793842220}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-1-170:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842220}
+{"$":"UsageSet","thread":"t1700000001-2","used":21340,"window":0,"at":1793842220}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-1-170:0","at":1793842220}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-1-170","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -170","at":1793842220}
+{"$":"UsageSet","thread":"t1700000001-2","used":21341,"window":0,"at":1793842220}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-1-175:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842221}
+{"$":"UsageSet","thread":"t1700000001-2","used":21350,"window":0,"at":1793842221}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842221,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842221}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842221","at":1793842221}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-1-175:0","at":1793842221}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-1-175","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -175","at":1793842221}
+{"$":"UsageSet","thread":"t1700000001-2","used":21351,"window":0,"at":1793842221}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-1-180:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842221}
+{"$":"UsageSet","thread":"t1700000001-2","used":21360,"window":0,"at":1793842221}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-1-180:0","at":1793842221}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-1-180","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -180","at":1793842221}
+{"$":"UsageSet","thread":"t1700000001-2","used":21361,"window":0,"at":1793842221}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-1-185:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842222}
+{"$":"UsageSet","thread":"t1700000001-2","used":21370,"window":0,"at":1793842222}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842222,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842222}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842222","at":1793842222}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-1-185:0","at":1793842222}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-1-185","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -185","at":1793842222}
+{"$":"UsageSet","thread":"t1700000001-2","used":21371,"window":0,"at":1793842222}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-1-190:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842222}
+{"$":"UsageSet","thread":"t1700000001-2","used":21380,"window":0,"at":1793842222}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-1-190:0","at":1793842222}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-1-190","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -190","at":1793842222}
+{"$":"UsageSet","thread":"t1700000001-2","used":21381,"window":0,"at":1793842222}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-1-195:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842223}
+{"$":"UsageSet","thread":"t1700000001-2","used":21390,"window":0,"at":1793842223}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842223,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842223}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842223","at":1793842223}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-1-195:0","at":1793842223}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-1-195","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -195","at":1793842223}
+{"$":"UsageSet","thread":"t1700000001-2","used":21391,"window":0,"at":1793842223}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-1-200:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842223}
+{"$":"UsageSet","thread":"t1700000001-2","used":21400,"window":0,"at":1793842223}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-1-200:0","at":1793842223}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-1-200","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -200","at":1793842223}
+{"$":"UsageSet","thread":"t1700000001-2","used":21401,"window":0,"at":1793842223}
+{"$":"TurnChanged","thread":"t1700000001-2","state":"completed","at":1793842223}
+{"$":"UsageSet","thread":"t1700000001-2","used":0,"window":200000,"at":1793842223}
+{"$":"SettingSet","key":"summary.at.t1700000001-2","value":"1793842223","at":1793842223}
+{"$":"SettingSet","key":"alert.t1700000001-2","value":"done\tturn-t1700000001-2\tm1793842203-170\t1793842223.420\t","at":1793842223}
+{"$":"SettingSet","key":"told.k1793842223-418-3","value":"{\"key\":\"turn-t1700000001-2\",\"text\":\"Fixture short: Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.\",\"channel\":\"alert\",\"bot\":\"\",\"at\":1793842223}","at":1793842223}
+{"$":"SettingSet","key":"summary.at.p1700000000-1","value":"1793842223","at":1793842223}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-2-5:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842224}
+{"$":"UsageSet","thread":"t1700000001-2","used":21010,"window":0,"at":1793842224}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842224,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842224}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842224","at":1793842224}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-2-5:0","at":1793842224}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-2-5","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -5","at":1793842224}
+{"$":"UsageSet","thread":"t1700000001-2","used":21011,"window":0,"at":1793842224}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-2-10:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842224}
+{"$":"UsageSet","thread":"t1700000001-2","used":21020,"window":0,"at":1793842224}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-2-10:0","at":1793842224}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-2-10","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -10","at":1793842224}
+{"$":"UsageSet","thread":"t1700000001-2","used":21021,"window":0,"at":1793842224}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-2-15:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842225}
+{"$":"UsageSet","thread":"t1700000001-2","used":21030,"window":0,"at":1793842225}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842225,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842225}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842225","at":1793842225}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-2-15:0","at":1793842225}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-2-15","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -15","at":1793842225}
+{"$":"UsageSet","thread":"t1700000001-2","used":21031,"window":0,"at":1793842225}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-2-20:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842225}
+{"$":"UsageSet","thread":"t1700000001-2","used":21040,"window":0,"at":1793842225}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-2-20:0","at":1793842225}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-2-20","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -20","at":1793842225}
+{"$":"UsageSet","thread":"t1700000001-2","used":21041,"window":0,"at":1793842225}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-2-25:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842226}
+{"$":"UsageSet","thread":"t1700000001-2","used":21050,"window":0,"at":1793842226}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842226,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842226}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842226","at":1793842226}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-2-25:0","at":1793842226}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-2-25","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -25","at":1793842226}
+{"$":"UsageSet","thread":"t1700000001-2","used":21051,"window":0,"at":1793842226}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-2-30:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842226}
+{"$":"UsageSet","thread":"t1700000001-2","used":21060,"window":0,"at":1793842226}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-2-30:0","at":1793842226}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-2-30","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -30","at":1793842226}
+{"$":"UsageSet","thread":"t1700000001-2","used":21061,"window":0,"at":1793842226}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-2-35:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842227}
+{"$":"UsageSet","thread":"t1700000001-2","used":21070,"window":0,"at":1793842227}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842227,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842227}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842227","at":1793842227}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-2-35:0","at":1793842227}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-2-35","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -35","at":1793842227}
+{"$":"UsageSet","thread":"t1700000001-2","used":21071,"window":0,"at":1793842227}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-2-40:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842227}
+{"$":"UsageSet","thread":"t1700000001-2","used":21080,"window":0,"at":1793842227}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-2-40:0","at":1793842227}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-2-40","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -40","at":1793842227}
+{"$":"UsageSet","thread":"t1700000001-2","used":21081,"window":0,"at":1793842227}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-2-45:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842228}
+{"$":"UsageSet","thread":"t1700000001-2","used":21090,"window":0,"at":1793842228}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842228,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842228}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842228","at":1793842228}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-2-45:0","at":1793842228}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-2-45","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -45","at":1793842228}
+{"$":"UsageSet","thread":"t1700000001-2","used":21091,"window":0,"at":1793842228}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-2-50:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842228}
+{"$":"UsageSet","thread":"t1700000001-2","used":21100,"window":0,"at":1793842228}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-2-50:0","at":1793842228}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-2-50","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -50","at":1793842228}
+{"$":"UsageSet","thread":"t1700000001-2","used":21101,"window":0,"at":1793842228}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-2-55:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842229}
+{"$":"UsageSet","thread":"t1700000001-2","used":21110,"window":0,"at":1793842229}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842229,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842229}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842229","at":1793842229}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-2-55:0","at":1793842229}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-2-55","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -55","at":1793842229}
+{"$":"UsageSet","thread":"t1700000001-2","used":21111,"window":0,"at":1793842229}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-2-60:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842229}
+{"$":"UsageSet","thread":"t1700000001-2","used":21120,"window":0,"at":1793842229}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-2-60:0","at":1793842229}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-2-60","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -60","at":1793842229}
+{"$":"UsageSet","thread":"t1700000001-2","used":21121,"window":0,"at":1793842229}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-2-65:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842230}
+{"$":"UsageSet","thread":"t1700000001-2","used":21130,"window":0,"at":1793842230}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842230,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842230}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842230","at":1793842230}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-2-65:0","at":1793842230}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-2-65","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -65","at":1793842230}
+{"$":"UsageSet","thread":"t1700000001-2","used":21131,"window":0,"at":1793842230}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-2-70:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842230}
+{"$":"UsageSet","thread":"t1700000001-2","used":21140,"window":0,"at":1793842230}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-2-70:0","at":1793842230}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-2-70","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -70","at":1793842230}
+{"$":"UsageSet","thread":"t1700000001-2","used":21141,"window":0,"at":1793842230}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-2-75:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842231}
+{"$":"UsageSet","thread":"t1700000001-2","used":21150,"window":0,"at":1793842231}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842231,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842231}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842231","at":1793842231}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-2-75:0","at":1793842231}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-2-75","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -75","at":1793842231}
+{"$":"UsageSet","thread":"t1700000001-2","used":21151,"window":0,"at":1793842231}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-2-80:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842231}
+{"$":"UsageSet","thread":"t1700000001-2","used":21160,"window":0,"at":1793842231}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-2-80:0","at":1793842231}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-2-80","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -80","at":1793842231}
+{"$":"UsageSet","thread":"t1700000001-2","used":21161,"window":0,"at":1793842231}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-2-85:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842232}
+{"$":"UsageSet","thread":"t1700000001-2","used":21170,"window":0,"at":1793842232}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842232,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842232}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842232","at":1793842232}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-2-85:0","at":1793842232}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-2-85","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -85","at":1793842232}
+{"$":"UsageSet","thread":"t1700000001-2","used":21171,"window":0,"at":1793842232}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-2-90:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842232}
+{"$":"UsageSet","thread":"t1700000001-2","used":21180,"window":0,"at":1793842232}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-2-90:0","at":1793842232}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-2-90","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -90","at":1793842232}
+{"$":"UsageSet","thread":"t1700000001-2","used":21181,"window":0,"at":1793842232}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-2-95:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842233}
+{"$":"UsageSet","thread":"t1700000001-2","used":21190,"window":0,"at":1793842233}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842233,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842233}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842233","at":1793842233}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-2-95:0","at":1793842233}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-2-95","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -95","at":1793842233}
+{"$":"UsageSet","thread":"t1700000001-2","used":21191,"window":0,"at":1793842233}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-2-100:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842233}
+{"$":"UsageSet","thread":"t1700000001-2","used":21200,"window":0,"at":1793842233}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-2-100:0","at":1793842233}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-2-100","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -100","at":1793842233}
+{"$":"UsageSet","thread":"t1700000001-2","used":21201,"window":0,"at":1793842233}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-2-105:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842234}
+{"$":"UsageSet","thread":"t1700000001-2","used":21210,"window":0,"at":1793842234}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842234,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842234}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842234","at":1793842234}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-2-105:0","at":1793842234}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-2-105","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -105","at":1793842234}
+{"$":"UsageSet","thread":"t1700000001-2","used":21211,"window":0,"at":1793842234}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-2-110:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842234}
+{"$":"UsageSet","thread":"t1700000001-2","used":21220,"window":0,"at":1793842234}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-2-110:0","at":1793842234}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-2-110","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -110","at":1793842234}
+{"$":"UsageSet","thread":"t1700000001-2","used":21221,"window":0,"at":1793842234}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-2-115:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842235}
+{"$":"UsageSet","thread":"t1700000001-2","used":21230,"window":0,"at":1793842235}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842235,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842235}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842235","at":1793842235}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-2-115:0","at":1793842235}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-2-115","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -115","at":1793842235}
+{"$":"UsageSet","thread":"t1700000001-2","used":21231,"window":0,"at":1793842235}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-2-120:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842235}
+{"$":"UsageSet","thread":"t1700000001-2","used":21240,"window":0,"at":1793842235}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-2-120:0","at":1793842235}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-2-120","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -120","at":1793842235}
+{"$":"UsageSet","thread":"t1700000001-2","used":21241,"window":0,"at":1793842235}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-2-125:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842236}
+{"$":"UsageSet","thread":"t1700000001-2","used":21250,"window":0,"at":1793842236}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842236,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842236}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842236","at":1793842236}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-2-125:0","at":1793842236}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-2-125","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -125","at":1793842236}
+{"$":"UsageSet","thread":"t1700000001-2","used":21251,"window":0,"at":1793842236}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-2-130:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842237}
+{"$":"UsageSet","thread":"t1700000001-2","used":21260,"window":0,"at":1793842237}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842237,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842237}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842237","at":1793842237}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-2-130:0","at":1793842237}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-2-130","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -130","at":1793842237}
+{"$":"UsageSet","thread":"t1700000001-2","used":21261,"window":0,"at":1793842237}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-2-135:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842237}
+{"$":"UsageSet","thread":"t1700000001-2","used":21270,"window":0,"at":1793842237}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-2-135:0","at":1793842237}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-2-135","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -135","at":1793842237}
+{"$":"UsageSet","thread":"t1700000001-2","used":21271,"window":0,"at":1793842237}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-2-140:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842238}
+{"$":"UsageSet","thread":"t1700000001-2","used":21280,"window":0,"at":1793842238}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842238,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842238}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842238","at":1793842238}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-2-140:0","at":1793842238}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-2-140","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -140","at":1793842238}
+{"$":"UsageSet","thread":"t1700000001-2","used":21281,"window":0,"at":1793842238}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-2-145:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842238}
+{"$":"UsageSet","thread":"t1700000001-2","used":21290,"window":0,"at":1793842238}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-2-145:0","at":1793842238}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-2-145","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -145","at":1793842238}
+{"$":"UsageSet","thread":"t1700000001-2","used":21291,"window":0,"at":1793842238}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-2-150:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842239}
+{"$":"UsageSet","thread":"t1700000001-2","used":21300,"window":0,"at":1793842239}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842239,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842239}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842239","at":1793842239}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-2-150:0","at":1793842239}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-2-150","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -150","at":1793842239}
+{"$":"UsageSet","thread":"t1700000001-2","used":21301,"window":0,"at":1793842239}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-2-155:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842239}
+{"$":"UsageSet","thread":"t1700000001-2","used":21310,"window":0,"at":1793842239}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-2-155:0","at":1793842239}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-2-155","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -155","at":1793842239}
+{"$":"UsageSet","thread":"t1700000001-2","used":21311,"window":0,"at":1793842239}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-2-160:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842239}
+{"$":"UsageSet","thread":"t1700000001-2","used":21320,"window":0,"at":1793842239}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-2-160:0","at":1793842239}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-2-160","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -160","at":1793842240}
+{"$":"UsageSet","thread":"t1700000001-2","used":21321,"window":0,"at":1793842240}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842240,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"Bash: ls -la src/core | head -160\"}","at":1793842240}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-2-165:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842240}
+{"$":"UsageSet","thread":"t1700000001-2","used":21330,"window":0,"at":1793842240}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842240","at":1793842240}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-2-165:0","at":1793842240}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-2-165","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -165","at":1793842240}
+{"$":"UsageSet","thread":"t1700000001-2","used":21331,"window":0,"at":1793842240}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-2-170:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842241}
+{"$":"UsageSet","thread":"t1700000001-2","used":21340,"window":0,"at":1793842241}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842241,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842241}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842241","at":1793842241}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-2-170:0","at":1793842241}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-2-170","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -170","at":1793842241}
+{"$":"UsageSet","thread":"t1700000001-2","used":21341,"window":0,"at":1793842241}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-2-175:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842241}
+{"$":"UsageSet","thread":"t1700000001-2","used":21350,"window":0,"at":1793842241}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-2-175:0","at":1793842241}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-2-175","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -175","at":1793842241}
+{"$":"UsageSet","thread":"t1700000001-2","used":21351,"window":0,"at":1793842241}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-2-180:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842242}
+{"$":"UsageSet","thread":"t1700000001-2","used":21360,"window":0,"at":1793842242}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842242,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842242}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842242","at":1793842242}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-2-180:0","at":1793842242}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-2-180","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -180","at":1793842242}
+{"$":"UsageSet","thread":"t1700000001-2","used":21361,"window":0,"at":1793842242}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-2-185:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842242}
+{"$":"UsageSet","thread":"t1700000001-2","used":21370,"window":0,"at":1793842242}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-2-185:0","at":1793842242}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-2-185","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -185","at":1793842242}
+{"$":"UsageSet","thread":"t1700000001-2","used":21371,"window":0,"at":1793842242}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-2-190:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842243}
+{"$":"UsageSet","thread":"t1700000001-2","used":21380,"window":0,"at":1793842243}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842243,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842243}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842243","at":1793842243}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-2-190:0","at":1793842243}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-2-190","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -190","at":1793842243}
+{"$":"UsageSet","thread":"t1700000001-2","used":21381,"window":0,"at":1793842243}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-2-195:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842243}
+{"$":"UsageSet","thread":"t1700000001-2","used":21390,"window":0,"at":1793842243}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-2-195:0","at":1793842243}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-2-195","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -195","at":1793842243}
+{"$":"UsageSet","thread":"t1700000001-2","used":21391,"window":0,"at":1793842243}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-2-200:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842244}
+{"$":"UsageSet","thread":"t1700000001-2","used":21400,"window":0,"at":1793842244}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842244,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842244}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842244","at":1793842244}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-2-200:0","at":1793842244}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-2-200","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -200","at":1793842244}
+{"$":"UsageSet","thread":"t1700000001-2","used":21401,"window":0,"at":1793842244}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-3-5:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842244}
+{"$":"UsageSet","thread":"t1700000001-2","used":21010,"window":0,"at":1793842244}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-3-5:0","at":1793842244}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-3-5","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -5","at":1793842244}
+{"$":"UsageSet","thread":"t1700000001-2","used":21011,"window":0,"at":1793842244}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-3-10:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842245}
+{"$":"UsageSet","thread":"t1700000001-2","used":21020,"window":0,"at":1793842245}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842245,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842245}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842245","at":1793842245}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-3-10:0","at":1793842245}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-3-10","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -10","at":1793842245}
+{"$":"UsageSet","thread":"t1700000001-2","used":21021,"window":0,"at":1793842245}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-3-15:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842245}
+{"$":"UsageSet","thread":"t1700000001-2","used":21030,"window":0,"at":1793842245}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-3-15:0","at":1793842245}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-3-15","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -15","at":1793842245}
+{"$":"UsageSet","thread":"t1700000001-2","used":21031,"window":0,"at":1793842245}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-3-20:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842246}
+{"$":"UsageSet","thread":"t1700000001-2","used":21040,"window":0,"at":1793842246}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842246,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842246}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842246","at":1793842246}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-3-20:0","at":1793842246}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-3-20","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -20","at":1793842246}
+{"$":"UsageSet","thread":"t1700000001-2","used":21041,"window":0,"at":1793842246}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-3-25:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842246}
+{"$":"UsageSet","thread":"t1700000001-2","used":21050,"window":0,"at":1793842246}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-3-25:0","at":1793842246}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-3-25","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -25","at":1793842246}
+{"$":"UsageSet","thread":"t1700000001-2","used":21051,"window":0,"at":1793842246}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-3-30:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842247}
+{"$":"UsageSet","thread":"t1700000001-2","used":21060,"window":0,"at":1793842247}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842247,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842247}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842247","at":1793842247}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-3-30:0","at":1793842247}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-3-30","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -30","at":1793842247}
+{"$":"UsageSet","thread":"t1700000001-2","used":21061,"window":0,"at":1793842247}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-3-35:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842247}
+{"$":"UsageSet","thread":"t1700000001-2","used":21070,"window":0,"at":1793842247}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-3-35:0","at":1793842247}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-3-35","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -35","at":1793842247}
+{"$":"UsageSet","thread":"t1700000001-2","used":21071,"window":0,"at":1793842247}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-3-40:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842248}
+{"$":"UsageSet","thread":"t1700000001-2","used":21080,"window":0,"at":1793842248}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842248,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842248}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842248","at":1793842248}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-3-40:0","at":1793842248}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-3-40","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -40","at":1793842248}
+{"$":"UsageSet","thread":"t1700000001-2","used":21081,"window":0,"at":1793842248}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-3-45:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842248}
+{"$":"UsageSet","thread":"t1700000001-2","used":21090,"window":0,"at":1793842248}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-3-45:0","at":1793842248}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-3-45","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -45","at":1793842248}
+{"$":"UsageSet","thread":"t1700000001-2","used":21091,"window":0,"at":1793842248}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-3-50:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842249}
+{"$":"UsageSet","thread":"t1700000001-2","used":21100,"window":0,"at":1793842249}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842249,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842249}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842249","at":1793842249}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-3-50:0","at":1793842249}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-3-50","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -50","at":1793842249}
+{"$":"UsageSet","thread":"t1700000001-2","used":21101,"window":0,"at":1793842249}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-3-55:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842249}
+{"$":"UsageSet","thread":"t1700000001-2","used":21110,"window":0,"at":1793842249}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-3-55:0","at":1793842249}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-3-55","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -55","at":1793842249}
+{"$":"UsageSet","thread":"t1700000001-2","used":21111,"window":0,"at":1793842249}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-3-60:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842250}
+{"$":"UsageSet","thread":"t1700000001-2","used":21120,"window":0,"at":1793842250}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842250,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842250}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842250","at":1793842250}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-3-60:0","at":1793842250}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-3-60","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -60","at":1793842250}
+{"$":"UsageSet","thread":"t1700000001-2","used":21121,"window":0,"at":1793842250}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-3-65:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842250}
+{"$":"UsageSet","thread":"t1700000001-2","used":21130,"window":0,"at":1793842250}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-3-65:0","at":1793842250}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-3-65","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -65","at":1793842250}
+{"$":"UsageSet","thread":"t1700000001-2","used":21131,"window":0,"at":1793842250}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-3-70:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842251}
+{"$":"UsageSet","thread":"t1700000001-2","used":21140,"window":0,"at":1793842251}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842251,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842251}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842251","at":1793842251}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-3-70:0","at":1793842251}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-3-70","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -70","at":1793842251}
+{"$":"UsageSet","thread":"t1700000001-2","used":21141,"window":0,"at":1793842251}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-3-75:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842252}
+{"$":"UsageSet","thread":"t1700000001-2","used":21150,"window":0,"at":1793842252}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842252,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842252}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842252","at":1793842252}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-3-75:0","at":1793842252}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-3-75","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -75","at":1793842252}
+{"$":"UsageSet","thread":"t1700000001-2","used":21151,"window":0,"at":1793842252}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-3-80:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842252}
+{"$":"UsageSet","thread":"t1700000001-2","used":21160,"window":0,"at":1793842252}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-3-80:0","at":1793842252}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-3-80","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -80","at":1793842252}
+{"$":"UsageSet","thread":"t1700000001-2","used":21161,"window":0,"at":1793842252}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-3-85:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842253}
+{"$":"UsageSet","thread":"t1700000001-2","used":21170,"window":0,"at":1793842253}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842253,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842253}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842253","at":1793842253}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-3-85:0","at":1793842253}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-3-85","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -85","at":1793842253}
+{"$":"UsageSet","thread":"t1700000001-2","used":21171,"window":0,"at":1793842253}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-3-90:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842253}
+{"$":"UsageSet","thread":"t1700000001-2","used":21180,"window":0,"at":1793842253}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-3-90:0","at":1793842253}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-3-90","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -90","at":1793842253}
+{"$":"UsageSet","thread":"t1700000001-2","used":21181,"window":0,"at":1793842253}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-3-95:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842254}
+{"$":"UsageSet","thread":"t1700000001-2","used":21190,"window":0,"at":1793842254}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842254,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842254}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842254","at":1793842254}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-3-95:0","at":1793842254}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-3-95","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -95","at":1793842254}
+{"$":"UsageSet","thread":"t1700000001-2","used":21191,"window":0,"at":1793842254}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-3-100:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842254}
+{"$":"UsageSet","thread":"t1700000001-2","used":21200,"window":0,"at":1793842254}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-3-100:0","at":1793842254}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-3-100","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -100","at":1793842254}
+{"$":"UsageSet","thread":"t1700000001-2","used":21201,"window":0,"at":1793842254}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-3-105:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842255}
+{"$":"UsageSet","thread":"t1700000001-2","used":21210,"window":0,"at":1793842255}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842255,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842255}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842255","at":1793842255}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-3-105:0","at":1793842255}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-3-105","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -105","at":1793842255}
+{"$":"UsageSet","thread":"t1700000001-2","used":21211,"window":0,"at":1793842255}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-3-110:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842255}
+{"$":"UsageSet","thread":"t1700000001-2","used":21220,"window":0,"at":1793842255}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-3-110:0","at":1793842255}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-3-110","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -110","at":1793842255}
+{"$":"UsageSet","thread":"t1700000001-2","used":21221,"window":0,"at":1793842255}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-3-115:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842256}
+{"$":"UsageSet","thread":"t1700000001-2","used":21230,"window":0,"at":1793842256}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842256,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842256}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842256","at":1793842256}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-3-115:0","at":1793842256}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-3-115","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -115","at":1793842256}
+{"$":"UsageSet","thread":"t1700000001-2","used":21231,"window":0,"at":1793842256}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-3-120:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842256}
+{"$":"UsageSet","thread":"t1700000001-2","used":21240,"window":0,"at":1793842256}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-3-120:0","at":1793842256}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-3-120","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -120","at":1793842256}
+{"$":"UsageSet","thread":"t1700000001-2","used":21241,"window":0,"at":1793842256}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-3-125:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842257}
+{"$":"UsageSet","thread":"t1700000001-2","used":21250,"window":0,"at":1793842257}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842257,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842257}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842257","at":1793842257}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-3-125:0","at":1793842257}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-3-125","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -125","at":1793842257}
+{"$":"UsageSet","thread":"t1700000001-2","used":21251,"window":0,"at":1793842257}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-3-130:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842257}
+{"$":"UsageSet","thread":"t1700000001-2","used":21260,"window":0,"at":1793842257}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-3-130:0","at":1793842257}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-3-130","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -130","at":1793842257}
+{"$":"UsageSet","thread":"t1700000001-2","used":21261,"window":0,"at":1793842257}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-3-135:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842258}
+{"$":"UsageSet","thread":"t1700000001-2","used":21270,"window":0,"at":1793842258}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842258,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842258}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842258","at":1793842258}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-3-135:0","at":1793842258}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-3-135","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -135","at":1793842258}
+{"$":"UsageSet","thread":"t1700000001-2","used":21271,"window":0,"at":1793842258}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-3-140:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842258}
+{"$":"UsageSet","thread":"t1700000001-2","used":21280,"window":0,"at":1793842258}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-3-140:0","at":1793842258}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-3-140","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -140","at":1793842258}
+{"$":"UsageSet","thread":"t1700000001-2","used":21281,"window":0,"at":1793842258}
+{"$":"SettingSet","key":"fallback.input.t1700000001-2","value":"","at":1793842258}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-3-145:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842259}
+{"$":"UsageSet","thread":"t1700000001-2","used":21290,"window":0,"at":1793842259}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842259,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842259}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842259","at":1793842259}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-3-145:0","at":1793842259}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-3-145","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -145","at":1793842259}
+{"$":"UsageSet","thread":"t1700000001-2","used":21291,"window":0,"at":1793842259}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-3-150:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842259}
+{"$":"UsageSet","thread":"t1700000001-2","used":21300,"window":0,"at":1793842259}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-3-150:0","at":1793842259}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-3-150","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -150","at":1793842259}
+{"$":"UsageSet","thread":"t1700000001-2","used":21301,"window":0,"at":1793842259}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-3-155:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842260}
+{"$":"UsageSet","thread":"t1700000001-2","used":21310,"window":0,"at":1793842260}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842260,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842260}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842260","at":1793842260}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-3-155:0","at":1793842260}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-3-155","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -155","at":1793842260}
+{"$":"UsageSet","thread":"t1700000001-2","used":21311,"window":0,"at":1793842260}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-3-160:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842260}
+{"$":"UsageSet","thread":"t1700000001-2","used":21320,"window":0,"at":1793842260}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-3-160:0","at":1793842260}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-3-160","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -160","at":1793842260}
+{"$":"UsageSet","thread":"t1700000001-2","used":21321,"window":0,"at":1793842260}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-3-165:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842261}
+{"$":"UsageSet","thread":"t1700000001-2","used":21330,"window":0,"at":1793842261}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842261,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842261}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842261","at":1793842261}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-3-165:0","at":1793842261}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-3-165","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -165","at":1793842261}
+{"$":"UsageSet","thread":"t1700000001-2","used":21331,"window":0,"at":1793842261}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-3-170:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842261}
+{"$":"UsageSet","thread":"t1700000001-2","used":21340,"window":0,"at":1793842261}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-3-170:0","at":1793842261}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-3-170","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -170","at":1793842261}
+{"$":"UsageSet","thread":"t1700000001-2","used":21341,"window":0,"at":1793842261}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-3-175:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842262}
+{"$":"UsageSet","thread":"t1700000001-2","used":21350,"window":0,"at":1793842262}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842262,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842262}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842262","at":1793842262}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-3-175:0","at":1793842262}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-3-175","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -175","at":1793842262}
+{"$":"UsageSet","thread":"t1700000001-2","used":21351,"window":0,"at":1793842262}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-3-180:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842262}
+{"$":"UsageSet","thread":"t1700000001-2","used":21360,"window":0,"at":1793842262}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-3-180:0","at":1793842262}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-3-180","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -180","at":1793842262}
+{"$":"UsageSet","thread":"t1700000001-2","used":21361,"window":0,"at":1793842262}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-3-185:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842263}
+{"$":"UsageSet","thread":"t1700000001-2","used":21370,"window":0,"at":1793842263}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842263,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842263}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842263","at":1793842263}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-3-185:0","at":1793842263}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-3-185","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -185","at":1793842263}
+{"$":"UsageSet","thread":"t1700000001-2","used":21371,"window":0,"at":1793842263}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-3-190:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842263}
+{"$":"UsageSet","thread":"t1700000001-2","used":21380,"window":0,"at":1793842263}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-3-190:0","at":1793842263}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-3-190","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -190","at":1793842263}
+{"$":"UsageSet","thread":"t1700000001-2","used":21381,"window":0,"at":1793842263}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-3-195:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842264}
+{"$":"UsageSet","thread":"t1700000001-2","used":21390,"window":0,"at":1793842264}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793842264,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793842264}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793842264","at":1793842264}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-3-195:0","at":1793842264}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-3-195","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -195","at":1793842264}
+{"$":"UsageSet","thread":"t1700000001-2","used":21391,"window":0,"at":1793842264}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m544692-3-200:0","role":"assistant","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why.","at":1793842264}
+{"$":"UsageSet","thread":"t1700000001-2","used":21400,"window":0,"at":1793842264}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"m544692-3-200:0","at":1793842264}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"tu544692-3-200","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -200","at":1793842264}
+{"$":"UsageSet","thread":"t1700000001-2","used":21401,"window":0,"at":1793842264}

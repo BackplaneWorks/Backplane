@@ -46,6 +46,8 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
     private var presentationGeneration = 0L
     private var pendingNav: String? = null
     val startup = mutableStateMapOf<String, StartupPolicy>()
+    // why a hub parked as VIEW_FAILED (the bridge's detail)
+    val viewFailure = mutableStateMapOf<String, String>()
     // whether each hub's socket is up, as the native side knows it (a thin
     // screen keeps the hub's last word on that through an outage)
     val linkUp = mutableStateMapOf<String, Boolean>()
@@ -458,7 +460,7 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
     }
 
     fun retryView(key: String) {
-        if (links.none { Pairing.key(it) == key } || startup[key] !in setOf(StartupPolicy.COMPATIBILITY_REQUIRED, StartupPolicy.PAIRING_REFUSED)) return
+        if (links.none { Pairing.key(it) == key } || startup[key] !in setOf(StartupPolicy.COMPATIBILITY_REQUIRED, StartupPolicy.PAIRING_REFUSED, StartupPolicy.VIEW_FAILED)) return
         hubs.remove(key)?.stop()
         thinReady.remove(key); settling.remove(key)
         presentationEpochs.remove(key)
@@ -850,6 +852,11 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
         for (update in out.sync) observeThinPresenting(update, epochs[update.hub] ?: 0L)
         // Expiry reaches apply through pulse, outside a received frame. It
         // can retire a marker but cannot establish a new connection's one.
+        for (update in out.sync) if (update.phase == "failed" && update.mode == "view-v1" && startup[update.hub] == StartupPolicy.THIN) {
+            android.util.Log.w("Backplane", "view failed: ${update.detail}")
+            viewFailure[update.hub] = update.detail
+            startup[update.hub] = StartupPolicy.VIEW_FAILED
+        }
         for (update in out.sync) if (update.phase == "recent" || update.phase == "failed") {
             presentationEpochs.remove(update.hub)
             requestedFrameAt.remove(update.hub)
@@ -1088,7 +1095,7 @@ class BackplaneApp : Application() {
     override fun onCreate() {
         super.onCreate()
         Notes.channels(this)
-        core
+        if (!BuildConfig.DATA_APP) core
     }
 }
 

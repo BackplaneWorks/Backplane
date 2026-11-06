@@ -1,0 +1,425 @@
+{
+ "platform": "ios-ipad",
+ "scheme": "dark",
+ "scale": 2,
+ "items": [
+  {
+   "name": "logo-header",
+   "kind": "logo",
+   "web": {
+    "png": "../../../../shots/web-tablet-dark-list.png",
+    "rect": [
+     20,
+     17,
+     36,
+     36
+    ]
+   },
+   "native": {
+    "png": "../../../../lc/ios-ipad-dark-list.png",
+    "rect": [
+     66,
+     218,
+     36,
+     36
+    ]
+   }
+  },
+  {
+   "name": "logo-pair-screen",
+   "kind": "logo",
+   "web": {
+    "png": "../../../../shots/web-tablet-dark-logo48.png",
+    "rect": [
+     80,
+     80,
+     96,
+     96
+    ]
+   },
+   "native": {
+    "png": "../../../../lc/ios-ipad-dark-pair.png",
+    "rect": [
+     511,
+     112,
+     96,
+     96
+    ]
+   }
+  },
+  {
+   "name": "cat-list-0-306440",
+   "kind": "cat",
+   "web": {
+    "png": "../../../../shots/web-tablet-dark-bots.png",
+    "rect": [
+     24,
+     536,
+     56,
+     56
+    ]
+   },
+   "native": {
+    "png": "../../../../lc/ios-ipad-dark-bots.png",
+    "rect": [
+     40,
+     437,
+     56,
+     56
+    ]
+   }
+  },
+  {
+   "name": "cat-list-1-304473115",
+   "kind": "cat",
+   "web": {
+    "png": "../../../../shots/web-tablet-dark-bots.png",
+    "rect": [
+     24,
+     611,
+     56,
+     56
+    ]
+   },
+   "native": {
+    "png": "../../../../lc/ios-ipad-dark-bots.png",
+    "rect": [
+     40,
+     571,
+     56,
+     56
+    ]
+   }
+  },
+  {
+   "name": "cat-list-2-307085023",
+   "kind": "cat",
+   "web": {
+    "png": "../../../../shots/web-tablet-dark-bots.png",
+    "rect": [
+     24,
+     685,
+     56,
+     56
+    ]
+   },
+   "native": {
+    "png": "../../../../lc/ios-ipad-dark-bots.png",
+    "rect": [
+     40,
+     705,
+     56,
+     56
+    ]
+   }
+  },
+  {
+   "name": "cat-list-3-297024320",
+   "kind": "cat",
+   "web": {
+    "png": "../../../../shots/web-tablet-dark-bots.png",
+    "rect": [
+     24,
+     759,
+     56,
+     56
+    ]
+   },
+   "native": {
+    "png": "../../../../lc/ios-ipad-dark-bots.png",
+    "rect": [
+     40,
+     839,
+     56,
+     56
+    ]
+   }
+  },
+  {
+   "name": "cat-list-4-9851967",
+   "kind": "cat",
+   "web": {
+    "png": "../../../../shots/web-tablet-dark-bots.png",
+    "rect": [
+     24,
+     834,
+     56,
+     56
+    ]
+   },
+   "native": {
+    "png": "../../../../lc/ios-ipad-dark-bots.png",
+    "rect": [
+     40,
+     973,
+     56,
+     56
+    ]
+   }
+  },
+  {
+   "name": "cat-list-5-329010",
+   "kind": "cat",
+   "web": {
+    "png": "../../../../shots/web-tablet-dark-bots.png",
+    "rect": [
+     24,
+     908,
+     56,
+     56
+    ]
+   },
+   "native": {
+    "png": "../../../../lc/ios-ipad-dark-bots.png",
+    "rect": [
+     40,
+     1107,
+     56,
+     56
+    ]
+   }
+  },
+  {
+   "name": "cat-header-Bub",
+   "kind": "cat",
+   "web": {
+    "png": "../../../../shots/web-tablet-dark-bot.png",
+    "rect": [
+     552,
+     84,
+     84,
+     84
+    ]
+   },
+   "native": {
+    "png": "../../../../lc/ios-ipad-dark-bot.png",
+    "rect": [
+     32,
+     298,
+     84,
+     84
+    ]
+   }
+  },
+  {
+   "name": "cat-look-0",
+   "kind": "cat",
+   "web": {
+    "png": "../../../../shots/web-tablet-dark-look.png",
+    "rect": [
+     594,
+     655,
+     80,
+     80
+    ]
+   },
+   "native": {
+    "png": "../../../../lc/ios-ipad-dark-look.png",
+    "rect": [
+     88,
+     596,
+     80,
+     80
+    ]
+   }
+  },
+  {
+   "name": "cat-look-1",
+   "kind": "cat",
+   "web": {
+    "png": "../../../../shots/web-tablet-dark-look.png",
+    "rect": [
+     702,
+     655,
+     80,
+     80
+    ]
+   },
+   "native": {
+    "png": "../../../../lc/ios-ipad-dark-look.png",
+    "rect": [
+     201,
+     596,
+     80,
+     80
+    ]
+   }
+  },
+  {
+   "name": "cat-look-2",
+   "kind": "cat",
+   "web": {
+    "png": "../../../../shots/web-tablet-dark-look.png",
+    "rect": [
+     810,
+     655,
+     80,
+     80
+    ]
+   },
+   "native": {
+    "png": "../../../../lc/ios-ipad-dark-look.png",
+    "rect": [
+     314,
+     596,
+     80,
+     80
+    ]
+   }
+  },
+  {
+   "name": "cat-look-3",
+   "kind": "cat",
+   "web": {
+    "png": "../../../../shots/web-tablet-dark-look.png",
+    "rect": [
+     918,
+     655,
+     80,
+     80
+    ]
+   },
+   "native": {
+    "png": "../../../../lc/ios-ipad-dark-look.png",
+    "rect": [
+     427,
+     596,
+     80,
+     80
+    ]
+   }
+  },
+  {
+   "name": "cat-look-4",
+   "kind": "cat",
+   "web": {
+    "png": "../../../../shots/web-tablet-dark-look.png",
+    "rect": [
+     1026,
+     655,
+     80,
+     80
+    ]
+   },
+   "native": {
+    "png": "../../../../lc/ios-ipad-dark-look.png",
+    "rect": [
+     540,
+     596,
+     80,
+     80
+    ]
+   }
+  },
+  {
+   "name": "cat-look-5",
+   "kind": "cat",
+   "web": {
+    "png": "../../../../shots/web-tablet-dark-look.png",
+    "rect": [
+     1134,
+     655,
+     80,
+     80
+    ]
+   },
+   "native": {
+    "png": "../../../../lc/ios-ipad-dark-look.png",
+    "rect": [
+     653,
+     596,
+     80,
+     80
+    ]
+   }
+  },
+  {
+   "name": "cat-room-post-0",
+   "kind": "cat",
+   "web": {
+    "png": "../../../../shots/web-tablet-dark-room.png",
+    "rect": [
+     560,
+     2119,
+     56,
+     56
+    ]
+   },
+   "native": {
+    "png": "../../../../lc/ios-ipad-dark-room.png",
+    "rect": [
+     32,
+     1926,
+     56,
+     56
+    ]
+   }
+  },
+  {
+   "name": "cat-room-post-1",
+   "kind": "cat",
+   "web": {
+    "png": "../../../../shots/web-tablet-dark-room.png",
+    "rect": [
+     560,
+     2214,
+     56,
+     56
+    ]
+   },
+   "native": {
+    "png": "../../../../lc/ios-ipad-dark-room.png",
+    "rect": [
+     32,
+     2083,
+     56,
+     56
+    ]
+   }
+  },
+  {
+   "name": "cat-room-post-2",
+   "kind": "cat",
+   "web": {
+    "png": "../../../../shots/web-tablet-dark-room.png",
+    "rect": [
+     560,
+     2309,
+     56,
+     56
+    ]
+   },
+   "native": {
+    "png": "../../../../lc/ios-ipad-dark-room.png",
+    "rect": [
+     32,
+     2240,
+     56,
+     56
+    ]
+   }
+  },
+  {
+   "name": "cat-room-post-3",
+   "kind": "cat",
+   "web": {
+    "png": "../../../../shots/web-tablet-dark-room.png",
+    "rect": [
+     560,
+     2404,
+     56,
+     56
+    ]
+   },
+   "native": {
+    "png": "../../../../lc/ios-ipad-dark-room.png",
+    "rect": [
+     32,
+     2397,
+     56,
+     56
+    ]
+   }
+  }
+ ]
+}

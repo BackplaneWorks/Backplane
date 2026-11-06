@@ -29,16 +29,43 @@ gradle.taskGraph.whenReady {
     }
 }
 
+// The GPUI experiment's one build setting: -PbpNative=false gives the
+// production behaviour (the WebView shell, a Classic screens switch).
+// Default true: native Compose screens, no toggle. Debug builds only.
+val bpNative = providers.gradleProperty("bpNative").map { it != "false" }.getOrElse(true)
+// -PbpNativeSidebar=false: do not ask the hub for bounded sidebar pages (to test segmented replies); default true
+// -PbpE2eHost=host[,host]: the debug build also allows plain http to these fixture hosts (the e2e hub on h@backplane); the release config keeps the shared hub only
+val bpE2eHosts = providers.gradleProperty("bpE2eHost").map { v -> v.split(",").map { it.trim() }.filter { it.matches(Regex("[A-Za-z0-9.-]+")) } }.getOrElse(emptyList())
+// written while the build is configured (no task, so nothing has to be ordered before the resource merge)
+if (bpE2eHosts.isNotEmpty()) {
+    val f = layout.buildDirectory.file("generated/e2e-net/res/xml/network.xml").get().asFile
+    f.parentFile.mkdirs()
+    val extra = bpE2eHosts.joinToString("") { "        <domain includeSubdomains=\"false\">$it</domain>\n" }
+    f.writeText("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<network-security-config>\n    <base-config cleartextTrafficPermitted=\"false\" />\n    <domain-config cleartextTrafficPermitted=\"true\">\n        <domain includeSubdomains=\"false\">desktop.tail9e0cf2.ts.net</domain>\n$extra    </domain-config>\n</network-security-config>\n")
+}
+val bpNativeSidebar = providers.gradleProperty("bpNativeSidebar").map { it != "false" }.getOrElse(true)
+// -PbpData=false: the old Bend-bridge launcher; default true: the data/1 app (DataActivity)
+val bpData = providers.gradleProperty("bpData").map { it != "false" }.getOrElse(true)
+val bpAppId = "dev.backplane.mobile.gpui"
+val bpScheme = "bpgpui"
+
 android {
     namespace = "dev.backplane.mobile"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "dev.backplane.mobile"
+        applicationId = bpAppId
+        manifestPlaceholders["urlScheme"] = bpScheme
+        resValue("string", "app_name", "Backplane GPUI")
+        resValue("string", "app_id", bpAppId)
+        buildConfigField("boolean", "DATA_APP", bpData.toString())
+        buildConfigField("boolean", "NATIVE_ONLY", bpNative.toString())
+        buildConfigField("boolean", "NATIVE_SIDEBAR", bpNativeSidebar.toString())
+        buildConfigField("String", "URL_SCHEME", "\"$bpScheme\"")
         minSdk = 26
         targetSdk = 35
         versionCode = releaseCode ?: 1
-        versionName = releaseVersion ?: "0.1.0"
+        versionName = releaseVersion ?: "0.15.0"
     }
 
     val configuredRelease = if (releaseConfigured) signingConfigs.create("configuredRelease") {
@@ -62,9 +89,13 @@ android {
         jvmTarget = "17"
     }
     buildFeatures {
+        buildConfig = true
         compose = true
     }
     // bridge.js is copied in by scripts/build-mobile.sh
+    if (bpE2eHosts.isNotEmpty()) {
+        sourceSets["debug"].res.srcDir(layout.buildDirectory.dir("generated/e2e-net/res"))
+    }
     sourceSets["main"].assets.srcDir("../../build/assets")
     // window.backplaneApp, the same script the iOS app injects
     sourceSets["main"].assets.srcDir("../../shell")
@@ -83,13 +114,10 @@ dependencies {
     implementation("androidx.javascriptengine:javascriptengine:1.0.0")
     // the WebView shell's bridge (message listener, document-start script)
     implementation("androidx.webkit:webkit:1.12.1")
-    // a pairing code read on the phone: a photo (Pair.kt's pairingFromImage)
-    // and the in-app scanner's camera frames (Scanner.kt)
+    // a photo of a pairing code, read on the phone (Pair.kt's pairingFromImage)
     implementation("com.google.zxing:core:3.5.3")
-    // the in-app scanner's camera (no Google Play services)
-    val camerax = "1.4.1"
-    implementation("androidx.camera:camera-camera2:$camerax")
-    implementation("androidx.camera:camera-lifecycle:$camerax")
-    implementation("androidx.camera:camera-view:$camerax")
-    testImplementation("junit:junit:4.13.2")
+    // the pairing code scanner (Google Play services, no camera permission)
+    implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
+    // it brings an old Fragment; the ActivityResult APIs need 1.3 or later
+    implementation("androidx.fragment:fragment-ktx:1.8.5")
 }

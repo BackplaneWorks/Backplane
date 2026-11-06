@@ -1,0 +1,8 @@
+{"$":"TurnChanged","thread":"t1700000010-2","state":"running","at":1793864143}
+{"$":"SessionSet","id":"t1700000010-2","session":"MS1","at":1793864143}
+{"$":"SettingSet","key":"tok.basis.t1700000010-2","value":"x:MS1:0/0/0/0/0","at":1793864143}
+{"$":"ActivityLogged","thread":"t1700000010-2","act":"T1-22","tone":"tool","kind":"shell","summary":"ls","at":1793864143}
+{"$":"AskOpened","id":"q1793864143-23","thread":"t1700000010-2","kind":"approval","tool":"bash","detail":"ls","options":"","at":1793864143}
+{"$":"TodosChanged","thread":"t1700000010-2","who":"agent","data":"[{\"id\":\"1\",\"text\":\"Read\",\"form\":\"\",\"status\":\"completed\"},{\"id\":\"2\",\"text\":\"Fix\",\"form\":\"\",\"status\":\"in_progress\"}]","at":1793864143}
+{"$":"MessagePosted","thread":"t1700000010-2","msg":"c1793864143-32-32","role":"assistant","text":"ECHO done","at":1793864143}
+{"$":"TurnChanged","thread":"t1700000010-2","state":"completed","at":1793864143}

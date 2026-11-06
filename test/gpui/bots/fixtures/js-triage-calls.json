@@ -1,0 +1,425 @@
+[
+ {
+  "tag": "run tools",
+  "name": "tools/list",
+  "names": [
+   "settings_inspect",
+   "settings_propose",
+   "orchestrator_capabilities",
+   "delegate_task",
+   "task_status",
+   "task_cancel",
+   "thread_list",
+   "machine_list",
+   "thread_read",
+   "thread_send",
+   "thread_launch",
+   "thread_update",
+   "thread_wait",
+   "thread_interrupt",
+   "deploy_restart",
+   "deploy_status",
+   "deploy_main",
+   "deploy_cancel",
+   "viewer_show",
+   "kicad_export10",
+   "terminal_open",
+   "terminal_read",
+   "terminal_send",
+   "terminal_close",
+   "secret_request",
+   "secret_list",
+   "secret_run",
+   "wake_on",
+   "wake_list",
+   "wake_cancel",
+   "work_run",
+   "work_watch",
+   "lock_acquire",
+   "lock_release",
+   "lock_cancel",
+   "lock_list",
+   "work_list",
+   "work_cancel",
+   "work_unwatch",
+   "review_comments",
+   "review_comment",
+   "preview_open",
+   "preview_navigate",
+   "preview_snapshot",
+   "preview_click",
+   "preview_type",
+   "preview_press",
+   "preview_scroll",
+   "preview_evaluate",
+   "preview_wait_for",
+   "preview_resize",
+   "preview_status",
+   "kicad_ipc",
+   "kicad_ipc_status",
+   "permission_prompt",
+   "mail_list",
+   "mail_read",
+   "decide",
+   "escalate",
+   "mail_dispose",
+   "mail_context",
+   "told_check",
+   "told_mark",
+   "task_board_list",
+   "task_board_add",
+   "task_board_update",
+   "task_board_remove",
+   "task_board_import",
+   "bot_whoami",
+   "bot_list",
+   "bot_send",
+   "room_list",
+   "room_create",
+   "room_post",
+   "room_read",
+   "memory_save",
+   "memory_recall",
+   "memory_forget",
+   "memory_list",
+   "space_set",
+   "space_get",
+   "space_page",
+   "routine_list",
+   "routine_set",
+   "routine_delete",
+   "project_list",
+   "bot_create",
+   "voice_dictionary_add",
+   "plane_read",
+   "notify_person",
+   "remind_person",
+   "person_timezone",
+   "task_list",
+   "task_get",
+   "task_save",
+   "task_delete",
+   "task_run",
+   "task_step",
+   "task_pause",
+   "task_end",
+   "project_create",
+   "gmail_search",
+   "gmail_read",
+   "gmail_send",
+   "gmail_draft",
+   "calendar_events",
+   "calendar_create",
+   "calendar_update",
+   "calendar_delete",
+   "google_accounts"
+  ]
+ },
+ {
+  "tag": "wrong input",
+  "name": "mail_dispose",
+  "args": {
+   "input": "nope",
+   "mode": "done",
+   "reason": "x"
+  },
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"error\":\"mail_dispose requires a live mailroom run, exact current input, done/defer/reply, and reason; no other fields are allowed. Nothing was handled. Use current_input only; newer arrivals belong to separate runs.\",\"current_input\":\"m1793946278-240.0\",\"bound_input\":\"m1793946278-240.0\"}"
+    }
+   ],
+   "isError": true
+  }
+ },
+ {
+  "tag": "done",
+  "name": "mail_dispose",
+  "args": {
+   "input": "m1793946278-240.0",
+   "mode": "done",
+   "reason": "routine status"
+  },
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"input\":\"m1793946278-240.0\",\"conv\":\"routine:rb\",\"state\":\"handled\",\"scope\":\"current notice only; no work completion or permission grant\",\"next_input\":\"\"}"
+    }
+   ],
+   "isError": false
+  }
+ },
+ {
+  "tag": "again",
+  "name": "mail_dispose",
+  "args": {
+   "input": "m1793946278-240.0",
+   "mode": "done",
+   "reason": "routine status"
+  },
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"input\":\"m1793946278-240.0\",\"conv\":\"routine:rb\",\"state\":\"already handled\",\"scope\":\"current notice only; no work completion or permission grant\"}"
+    }
+   ],
+   "isError": false
+  }
+ },
+ {
+  "tag": "decide",
+  "name": "decide",
+  "args": {
+   "text": "filed it",
+   "reason": "routine"
+  },
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"ok\":true}"
+    }
+   ],
+   "isError": false
+  }
+ },
+ {
+  "tag": "no input",
+  "name": "escalate",
+  "args": {
+   "to": "person",
+   "text": "x"
+  },
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"error\":\"to must be bot or person; coordinator triage must supply the exact current input ID\"}"
+    }
+   ],
+   "isError": true
+  }
+ },
+ {
+  "tag": "keyed",
+  "name": "escalate",
+  "args": {
+   "to": "person",
+   "text": "mode:stop it finished",
+   "input": "m1793946301-287.0",
+   "key": "ev-1"
+  },
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"ok\":true}"
+    }
+   ],
+   "isError": false
+  }
+ },
+ {
+  "tag": "private tools",
+  "name": "tools/list",
+  "names": [
+   "settings_inspect",
+   "settings_propose",
+   "orchestrator_capabilities",
+   "delegate_task",
+   "task_status",
+   "task_cancel",
+   "thread_list",
+   "machine_list",
+   "thread_read",
+   "thread_send",
+   "thread_launch",
+   "thread_update",
+   "thread_wait",
+   "thread_interrupt",
+   "deploy_restart",
+   "deploy_status",
+   "deploy_main",
+   "deploy_cancel",
+   "viewer_show",
+   "kicad_export10",
+   "terminal_open",
+   "terminal_read",
+   "terminal_send",
+   "terminal_close",
+   "secret_request",
+   "secret_list",
+   "secret_run",
+   "wake_on",
+   "wake_list",
+   "wake_cancel",
+   "work_run",
+   "work_watch",
+   "lock_acquire",
+   "lock_release",
+   "lock_cancel",
+   "lock_list",
+   "work_list",
+   "work_cancel",
+   "work_unwatch",
+   "review_comments",
+   "review_comment",
+   "preview_open",
+   "preview_navigate",
+   "preview_snapshot",
+   "preview_click",
+   "preview_type",
+   "preview_press",
+   "preview_scroll",
+   "preview_evaluate",
+   "preview_wait_for",
+   "preview_resize",
+   "preview_status",
+   "kicad_ipc",
+   "kicad_ipc_status",
+   "permission_prompt",
+   "mail_list",
+   "mail_read",
+   "mail_context",
+   "tell_person",
+   "told_check",
+   "told_mark",
+   "task_board_list",
+   "task_board_add",
+   "task_board_update",
+   "task_board_remove",
+   "task_board_import",
+   "bot_whoami",
+   "bot_list",
+   "bot_send",
+   "room_list",
+   "room_create",
+   "room_post",
+   "room_read",
+   "memory_save",
+   "memory_recall",
+   "memory_forget",
+   "memory_list",
+   "space_set",
+   "space_get",
+   "space_page",
+   "routine_list",
+   "routine_set",
+   "routine_delete",
+   "project_list",
+   "bot_create",
+   "voice_dictionary_add",
+   "plane_read",
+   "notify_person",
+   "remind_person",
+   "person_timezone",
+   "task_list",
+   "task_get",
+   "task_save",
+   "task_delete",
+   "task_run",
+   "task_step",
+   "task_pause",
+   "task_end",
+   "project_create",
+   "gmail_search",
+   "gmail_read",
+   "gmail_send",
+   "gmail_draft",
+   "calendar_events",
+   "calendar_create",
+   "calendar_update",
+   "calendar_delete",
+   "google_accounts"
+  ]
+ },
+ {
+  "tag": "tell",
+  "name": "tell_person",
+  "args": {
+   "text": "The report is in.",
+   "key": "ev-1"
+  },
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"ok\":true,\"scope\":\"Explicit publication to this private coordinator's original conversation only; no approval or source work changed\"}"
+    }
+   ],
+   "isError": false
+  }
+ },
+ {
+  "tag": "tell again",
+  "name": "tell_person",
+  "args": {
+   "text": "The report is in.",
+   "key": "ev-1"
+  },
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"ok\":true,\"scope\":\"Explicit publication to this private coordinator's original conversation only; no approval or source work changed\"}"
+    }
+   ],
+   "isError": false
+  }
+ },
+ {
+  "tag": "tell bad args",
+  "name": "tell_person",
+  "args": {
+   "text": "x",
+   "key": "k",
+   "extra": "no"
+  },
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"ok\":false,\"scope\":\"Explicit publication to this private coordinator's original conversation only; no approval or source work changed\"}"
+    }
+   ],
+   "isError": true
+  }
+ },
+ {
+  "tag": "notify from a back office",
+  "name": "notify_person",
+  "args": {
+   "reason": "r",
+   "text": "t"
+  },
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"error\":\"Private coordinator: use tell_person(text, key) to publish into the original user conversation. No message was sent and no approval or source input was handled.\"}"
+    }
+   ],
+   "isError": true
+  }
+ },
+ {
+  "tag": "funnel",
+  "name": "thread_send",
+  "args": {
+   "threadId": "t1793946269-151",
+   "text": "mode:plain a word for the uberbot"
+  },
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"threadId\":\"t1793946269-151\",\"state\":\"sent\"}"
+    }
+   ],
+   "isError": false
+  }
+ }
+]

@@ -179,14 +179,14 @@ private struct SaveSheet: View {
                 ForEach(browser.rows ?? []) { r in
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Text("\(r.n).").font(.callout.monospaced()).foregroundStyle(.secondary)
+                            Text("\(r.n).").font(.mono(.callout)).foregroundStyle(.secondary)
                             Text(r.text).font(.callout)
                             Spacer(minLength: 0)
                             if r.secret { Text(NativeMessages.native_task_private(lang)).font(.caption2).foregroundStyle(.secondary) }
                         }
                         if !r.chip.isEmpty {
                             Button { model.act("tk-mark", String(r.n)) } label: {
-                                Text(r.chip).lineLimit(1).font(.caption.monospaced())
+                                Text(r.chip).lineLimit(1).font(.mono(.caption))
                                     .padding(.horizontal, 8).padding(.vertical, 3)
                                     .background(r.marked ? Color.accentColor.opacity(0.25) : Color.secondary.opacity(0.15), in: .rect(cornerRadius: 2))
                             }.buttonStyle(.plain)

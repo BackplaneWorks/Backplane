@@ -46,6 +46,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -215,7 +216,7 @@ private fun SaveSheet(m: AppModel, b: BotBrowser) {
         for (r in b.rows) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("${r.n}.", color = MaterialTheme.colorScheme.outline, fontFamily = FontFamily.Monospace)
+                    Text("${r.n}.", color = MaterialTheme.colorScheme.outline, style = TextStyle(fontFamily = BpMono, fontFeatureSettings = NO_LIGATURES))
                     Text(r.text, Modifier.weight(1f))
                     if (r.secret) Text(NativeMessages.native_task_private(lang), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
                 }

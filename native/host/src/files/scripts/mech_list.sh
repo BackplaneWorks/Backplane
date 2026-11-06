@@ -1,0 +1,1 @@
+[ -d mech ] || exit 0; find mech -maxdepth 4 -type f \( -iname '*.step' -o -iname '*.stp' -o -iname '*.glb' -o -iname '*.png' \) -not -path '*/.*' 2>/dev/null | LC_ALL=C sort | head -n 400 | while IFS= read -r f; do cksum "$f"; done

@@ -31,7 +31,7 @@ private func inline(_ bs: [Block]) -> AttributedString {
         var part = inline(b.kids ?? [])
         switch b.tag {
         case "code":
-            part.font = .body.monospaced()
+            part.font = .mono(.body)
             part.backgroundColor = Color(.secondarySystemFill)
         case "strong":
             part.font = .body.weight(.semibold)
@@ -110,11 +110,8 @@ private struct BlockView: View {
                     TableView(rows: kids.filter { $0.tag == "tr" })
                 }
             case "pre":
-                ScrollView(.horizontal, showsIndicators: false) {
-                    Text(block.plain).font(.callout.monospaced()).padding(12)
-                }
-                .background(Color(.secondarySystemBackground))
-            // the web page's copy button: the message's context menu copies
+                CodeBlockView(text: block.plain)
+            // the code block's Copy button is CodeBlockView's own; the web's button node is not drawn twice
             case "button": EmptyView()
             default: MarkdownView(blocks: kids)
             }
@@ -181,6 +178,38 @@ private struct TableLayout: Layout {
                 x += w[i]
             }
             y += h[r]
+        }
+    }
+}
+
+
+// A fenced code block: every line in full, scrolling sideways, with the web's Copy button at its top right
+private struct CodeBlockView: View {
+    @Environment(\.backplaneLanguage) private var lang
+    let text: String
+    @State private var copied = false
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            Text(text)
+                .font(.mono(.callout))
+                .fixedSize(horizontal: true, vertical: true)
+                .padding(12)
+                .padding(.trailing, 56)
+        }
+        .background(Color(.secondarySystemBackground))
+        .overlay(alignment: .topTrailing) {
+            Button(copied ? "✓" : NativeMessages.common_copy(lang)) {
+                UIPasteboard.general.string = text
+                copied = true
+                Task { try? await Task.sleep(for: .seconds(1.5)); copied = false }
+            }
+            .font(.caption)
+            .padding(.horizontal, 8).padding(.vertical, 4)
+            .background(Color(.tertiarySystemBackground))
+            .overlay(Rectangle().stroke(Color(.separator), lineWidth: 1))
+            .padding(6)
+            .accessibilityIdentifier("code.copy")
         }
     }
 }

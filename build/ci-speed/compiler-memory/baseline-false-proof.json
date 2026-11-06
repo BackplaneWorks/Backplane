@@ -1,6 +1,0 @@
-{
-  "capture_sha256": "86bf408d5b121a7964cc3c2ee3fe39b4ec009c11d9fbd6bec2b04a36cc4c01f7",
-  "combined_captured_streams": "SOME PROOFS FAIL\nError:\n- expected : ':'\n- observed : '}'\nLocation:\n2 | \n3>| def false_theorem() -> {0n == 1n}:\n  |                                 ^\n4 |   {==}\n",
-  "control": "Parser rejection only: fixture omitted : Nat; not evidence of false-theorem checking",
-  "original_claim": "unchanged checker rejected false theorem; driver asserted nonzero and SOME PROOFS FAIL"
-}

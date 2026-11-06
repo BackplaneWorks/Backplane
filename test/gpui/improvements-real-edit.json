@@ -1,0 +1,14 @@
+[
+ {"wait": 3000},
+ {"click": "ui:Improvements"}, {"wait": 1200},
+ {"imp": "text Hand-off test with a small real edit. In README.md append one line containing exactly: hand-off edit. Then run git add README.md and git commit -m 'hand-off edit'. Do nothing else: do not push, and do not touch the gpui branch."},
+ {"click": "imp:dest-internal"},
+ {"imp": "runtime approval-required"}, {"wait": 500},
+ {"click": "imp:capture"}, {"wait": 3500},
+ {"click": "imp:primary"}, {"wait": 20000},
+ {"imp": "approve"}, {"wait": 15000}, {"imp": "approve"}, {"wait": 15000}, {"imp": "approve"}, {"wait": 15000}, {"imp": "approve"}, {"wait": 15000},
+ {"imp": "snap improvements-real-edit-01-approved"},
+ {"imp": "approve"}, {"wait": 15000}, {"imp": "approve"}, {"wait": 15000},
+ {"imp": "state"}, {"imp": "snap improvements-real-edit-02-done"},
+ {"wait": 1500}
+]

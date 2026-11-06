@@ -1,0 +1,5 @@
+JetBrains Mono 2.304
+Source: https://github.com/JetBrains/JetBrainsMono/releases/download/v2.304/JetBrainsMono-2.304.zip
+Licence: SIL Open Font License 1.1 (OFL.txt), (c) 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono)
+Fetched: 2026-11-05
+Files: Regular, Bold (no Italic: the UI uses none). Full fonts, not subset (each well under 1 MB). Ligatures are turned off in the app (font features), CJK falls back to the system font.

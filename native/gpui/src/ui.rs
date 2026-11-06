@@ -1,0 +1,506 @@
+//! The window: layout and colours follow the web client (src/web/style.css tokens).
+use crate::script::{Ctl, CtlEntry};
+use crate::{art, hub::Command, string, theme, Backplane, Send};
+use gpui::{prelude::*, *};
+use serde_json::Value;
+
+fn pager_row(cx: &mut Context<Backplane>, id: String, pager: &Value, light: bool, ctl: &mut Vec<CtlEntry>) -> Option<AnyElement> {
+    let c = |name: &str| theme::color(light, name);
+    let mut row = div().flex().gap_2().px_3().py_1().text_size(px(11.));
+    let mut any = false;
+    for (name, key) in [("Newer", "previous"), ("Older", "next")] {
+        if let Some(value) = pager[key]["value"].as_str() {
+            any = true;
+            let value = value.to_string();
+            ctl.push(CtlEntry { id: format!("{id}-{key}"), label: name.to_string(), ctl: Ctl::Page(value.clone()) });
+            row = row.child(with_rect(div().id(SharedString::from(format!("{id}-{key}"))), || format!("{id}-{key}")).cursor_pointer().text_color(c("accent")).hover(|s| s.bg(c("raise"))).px_1()
+                .child(format!("{} ({})", name, pager["total"]))
+                .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Page(value.clone())); cx.notify(); })));
+        }
+    }
+    if any { Some(row.into_any_element()) } else { None }
+}
+
+fn inline_text(node: &Value, out: &mut String) {
+    if let Some(t) = node["text"].as_str() { out.push_str(t); }
+    for k in node["kids"].as_array().into_iter().flatten() { inline_text(k, out); }
+}
+
+pub(crate) fn block(node: &Value, light: bool, depth: usize) -> AnyElement {
+    let c = |name: &str| theme::color(light, name);
+    let tag = node["tag"].as_str().unwrap_or("p");
+    let mut text = String::new();
+    match tag {
+        "ul" | "ol" => {
+            let mut list = div().flex().flex_col().gap_1().pl(px(16.));
+            for (i, item) in node["kids"].as_array().into_iter().flatten().enumerate() {
+                let mut t = String::new(); inline_text(item, &mut t);
+                let mark = if tag == "ol" { format!("{}.", i + 1) } else { "•".to_string() };
+                list = list.child(div().flex().gap_2().child(div().text_color(c("dim")).child(mark)).child(div().flex_1().child(t)));
+            }
+            list.into_any_element()
+        }
+        "pre" => { inline_text(node, &mut text); div().font(art::mono_font()).w_full().bg(c("raise")).border_1().border_color(c("line")).p_2().text_size(px(12.)).child(text).into_any_element() }
+        t if t.starts_with('h') && t.len() == 2 => { inline_text(node, &mut text); div().font_weight(FontWeight::BOLD).text_size(px(15.)).child(text).into_any_element() }
+        "blockquote" => {
+            let mut q = div().border_l_2().border_color(c("line")).pl_3().text_color(c("dim"));
+            if depth < 4 { for k in node["kids"].as_array().into_iter().flatten() { q = q.child(block(k, light, depth + 1)); } }
+            q.into_any_element()
+        }
+        _ => { inline_text(node, &mut text); div().child(text).into_any_element() }
+    }
+}
+
+/// The hub's project-home cards: generic nodes {tag, className, label, action, payload, kids|text}.
+fn node_text(n: &Value, out: &mut String) {
+    if let Some(t) = n["text"].as_str() { out.push_str(t); }
+    for k in n["kids"].as_array().into_iter().flatten() { node_text(k, out); }
+}
+fn node_el(cx: &mut Context<Backplane>, n: &Value, light: bool, depth: usize, path: &str, ctl: &mut Vec<CtlEntry>) -> AnyElement {
+    let c = |name: &str| theme::color(light, name);
+    if let Some(t) = n["text"].as_str() { return div().child(t.to_string()).into_any_element(); }
+    if depth > 14 { return div().into_any_element(); }
+    let tag = n["tag"].as_str().unwrap_or("div");
+    let class = n["className"].as_str().unwrap_or("");
+    let kids = |cx: &mut Context<Backplane>, ctl: &mut Vec<CtlEntry>| -> Vec<AnyElement> {
+        n["kids"].as_array().into_iter().flatten().take(200).enumerate().map(|(i, k)| node_el(cx, k, light, depth + 1, &format!("{path}.{i}"), ctl)).collect()
+    };
+    match tag {
+        "svg" | "path" | "img" => div().into_any_element(),
+        "button" => {
+            let (action, payload) = (string(n, "action"), string(n, "payload"));
+            let mut label = String::new(); node_text(n, &mut label);
+            if label.is_empty() { label = string(n, "label"); }
+            if !action.is_empty() && !label.is_empty() { ctl.push(CtlEntry { id: format!("node:{path}"), label: label.clone(), ctl: Ctl::Node(action.clone(), payload.clone()) }); }
+            if action.is_empty() || label.is_empty() { return div().flex().gap_1().children(kids(cx, ctl)).into_any_element(); }
+            with_rect(div().id(SharedString::from(format!("n{path}"))), || format!("node:{path}")).px_2().py_1().border_1().border_color(c("line")).bg(c("raise")).text_size(px(12.)).cursor_pointer().hover(|s| s.bg(c("panel")))
+                .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action(action.clone(), payload.clone())); cx.notify(); })).child(label).into_any_element()
+        }
+        "h1" => { let mut t = String::new(); node_text(n, &mut t); div().text_size(px(22.)).font_weight(FontWeight::BOLD).child(t).into_any_element() }
+        "h2" | "h3" => { let mut t = String::new(); node_text(n, &mut t); div().font_weight(FontWeight::BOLD).text_size(px(13.)).child(t).into_any_element() }
+        "span" | "p" | "a" | "label" | "code" => {
+            let mut t = String::new(); node_text(n, &mut t);
+            let mut d = div().child(t);
+            if class.contains("eyebrow") || class.contains("faint") || class.contains("dim") { d = d.text_size(px(11.)).text_color(c("faint")); }
+            if class.contains("error") { d = d.text_color(c("bad")); }
+            d.into_any_element()
+        }
+        "section" if class.contains("card") => div().flex().flex_col().gap_2().p_3().border_1().border_color(c("line")).bg(c("panel")).children(kids(cx, ctl)).into_any_element(),
+        _ => {
+            let row = class.contains("name") || class.contains("row") || class.contains("head") || class.contains("meta");
+            let d = div().flex().gap_2();
+            (if row { d.items_center() } else { d.flex_col() }).children(kids(cx, ctl)).into_any_element()
+        }
+    }
+}
+
+/// In check mode the control records its window rectangle under its id (the e2e driver aims clicks with it); otherwise nothing is added.
+pub(crate) fn with_rect<E: ParentElement + Styled>(e: E, id: impl FnOnce() -> String) -> E { if art::rects_on() { e.relative().child(art::probe_rect(id())) } else { e } }
+fn ic(light: bool, name: &'static str, size: f32, tok: &str) -> AnyElement { art::icon(name, size, theme::color(light, tok)) }
+fn chip(light: bool, label: String) -> Div {
+    let c = |name: &str| theme::color(light, name);
+    div().px_3().py_1().flex().items_center().justify_center().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).whitespace_nowrap().child(label)
+}
+
+/// A message's references as little cards under it: a bot, thread, project or room goes there on a click; a model is only named.
+fn ref_cards(cx: &mut Context<Backplane>, light: bool, mid: &str, refs: &Value) -> Option<Div> {
+    let list = refs.as_array().filter(|r| !r.is_empty())?;
+    let c = |n: &str| theme::color(light, n);
+    let mut row = div().flex().flex_wrap().gap_2();
+    for (i, r) in list.iter().enumerate() {
+        let (kind, id, label, word) = (string(r, "kind"), string(r, "id"), string(r, "label"), string(r, "word"));
+        let mark = word.chars().next().map(String::from).unwrap_or_default();
+        let go = !id.is_empty();
+        let mut card = div().id(SharedString::from(format!("ref-{mid}-{i}"))).flex().items_center().gap_2().px_2().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.))
+            .child(div().text_color(c(if kind == "bot" { "accent" } else { "ok" })).font_weight(FontWeight::BOLD).child(mark))
+            .child(div().max_w(px(220.)).overflow_hidden().whitespace_nowrap().text_ellipsis().child(label))
+            .child(div().text_size(px(10.)).text_color(c("faint")).child(kind.clone()));
+        if go {
+            card = card.cursor_pointer().hover(|s| s.bg(c("raise"))).on_click(cx.listener(move |this, _, window, cx| {
+                match kind.as_str() {
+                    "bot" => { let _ = this.tx.try_send(Command::Action("bot".into(), id.clone())); }
+                    "room" => { let _ = this.tx.try_send(Command::Action("room".into(), id.clone())); }
+                    "project" => { this.open_project(id.rsplit('|').next().unwrap_or(&id).to_string(), cx); }
+                    _ => { this.select(id.clone(), window, cx); }
+                }
+                cx.notify();
+            }));
+        }
+        row = row.child(card);
+    }
+    Some(row)
+}
+
+/// "Replying to ..." over the composer: its first line, a click goes to the message, × drops it.
+fn reply_chip(cx: &mut Context<Backplane>, light: bool, replying: &Value) -> Option<AnyElement> {
+    if !replying.is_object() { return None }
+    let c = |n: &str| theme::color(light, n);
+    let (target, line) = (string(replying, "id"), string(replying, "text"));
+    Some(div().flex().items_center().gap_2().px_2().py_1().mb_1().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.))
+        .child(div().id("reply-chip").flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_color(c("dim")).cursor_pointer().child(format!("\u{21a9} Replying to: {line}"))
+            .on_click(cx.listener(move |this, _, _, cx| { this.timeline_goto(&target); cx.notify(); })))
+        .child(div().id("reply-drop").px_1().cursor_pointer().text_color(c("dim")).hover(|s| s.text_color(c("bad"))).child("\u{00d7}")
+            .on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(Command::Action("reply-drop".into(), String::new())); cx.notify(); }))).into_any_element())
+}
+
+/// Copy and Reply under a message (a reply puts its first line over the composer and the whole text ahead of what is sent, for the agent).
+fn msg_tools(cx: &mut Context<Backplane>, light: bool, id: &str, text: &str) -> Div {
+    let c = |n: &str| theme::color(light, n);
+    let (copy, reply, rid) = (text.to_string(), format!("{id}\u{1f}{text}"), id.to_string());
+    let btn = |tag: &str, label: &'static str| div().id(SharedString::from(format!("{tag}-{rid}"))).px_1().cursor_pointer().text_size(px(11.)).text_color(c("faint")).hover(|s| s.text_color(c("text"))).child(label);
+    div().flex().gap_2().child(btn("copy", "Copy").on_click(cx.listener(move |_, _, _, cx| { cx.write_to_clipboard(ClipboardItem::new_string(copy.clone())); })))
+        .child(btn("reply", "Reply").on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("reply".into(), reply.clone())); cx.notify(); })))
+}
+
+impl Backplane {
+    /// One row of the timeline, as the list asks for it: only rows on screen are drawn.
+    pub(crate) fn timeline_row(&mut self, ei: usize, cx: &mut Context<Self>) -> AnyElement {
+        let light = self.light();
+        let c = |name: &str| theme::color(light, name);
+        let reg = self.screens.reg.clone();
+        let e = self.data["thread"]["entries"][ei].clone();
+        let id = string(&e, "id");
+        reg.borrow_mut().enter(ei, &id);
+        let kind = e["kind"].as_str().unwrap_or("");
+        let text = string(&e, "text");
+        let stamp = string(&e, "stamp");
+        let row: AnyElement = match kind {
+            "user" => {
+                let wide = crate::screens::timeline::bubble_full_width(&text);
+                let body = crate::screens::timeline::user_text(&reg, light, &text);
+                let atts = crate::screens::timeline::attachments(light, &e["attachments"], &id, self.screens.attacher.target.as_ref(), &self.screens.images);
+                let tools = msg_tools(cx, light, &id, &text);
+                let cards = ref_cards(cx, light, &id, &e["refs"]);
+                let stamp_row = div().flex().justify_end().items_center().gap_3().text_size(px(11.)).text_color(c("faint")).child(tools).child(stamp);
+                let reply_to = e["replyTo"].is_object().then(|| {
+                    let (target, quote) = (string(&e["replyTo"], "id"), string(&e["replyTo"], "quote"));
+                    div().id(SharedString::from(format!("rt-{id}"))).mb_1().max_w_full().overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(px(11.)).text_color(c("dim")).cursor_pointer().hover(|s| s.text_color(c("text")))
+                        .child(format!("\u{21a9} In reply to: {quote}")).on_click(cx.listener(move |this, _, _, cx| { this.timeline_goto(&target); cx.notify(); }))
+                });
+                let row = div().id(SharedString::from(format!("e-{id}"))).w_full().py_2();
+                // A text that may wrap sits in block layout like a reply's (a shrink-to-fit flex bubble measured it at one width and painted it at another);
+                // a message of short lines keeps the snug flex bubble.
+                if wide {
+                    row.child(div().w_full().max_w(px(640.)).ml_auto().px_3().py_2().bg(c("raise")).border_1().border_color(c("line")).children(reply_to).child(body).children(cards.map(|k| k.mt_1())).children(atts.into_iter().map(|a| div().mt_1().child(a))).child(div().mt_1().child(stamp_row))).into_any_element()
+                } else {
+                    row.flex().justify_end().child(div().max_w(px(640.)).px_3().py_2().bg(c("raise")).border_1().border_color(c("line")).flex().flex_col().gap_1().children(reply_to).child(body).children(cards).children(atts).child(stamp_row)).into_any_element()
+                }
+            }
+            "fold" => {
+                let value = string(&e, "value");
+                self.controls.push(CtlEntry { id: format!("fold:{id}"), label: text.clone(), ctl: Ctl::Fold(value.clone()) });
+                // the label is one clipped line beside the chevron, never wider than the row; the chevron is centred on it
+                div().id(SharedString::from(format!("e-{id}"))).w_full().py_2().child(
+                    with_rect(div().id(SharedString::from(format!("f-{id}"))), || format!("fold:{id}")).w_full().min_w_0().overflow_hidden().flex().items_center().gap_2().px_2().py_1().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("dim")).cursor_pointer()
+                        .hover(|s| s.bg(c("raise")))
+                        .on_click(cx.listener(move |this, _, _, cx| { this.fold_click(value.clone()); cx.notify(); }))
+                        .child(div().flex_shrink_0().flex().items_center().child(ic(light, if e["open"] == true { "chevron-down" } else { "chevron-right" }, 14., "dim")))
+                        .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(text))).into_any_element()
+            }
+            // the agent still working: a green square that breathes beside the word (the one animation on screen, only while this row is)
+            "assistant" if id.starts_with("@live:") || id.starts_with("@working:") => {
+                let square = div().size(px(12.)).flex_shrink_0().flex().items_center().justify_center().child(
+                    div().size(px(8.)).bg(c("ok")).with_animation(SharedString::from(format!("working-{id}")),
+                        Animation::new(std::time::Duration::from_millis(1100)).repeat().with_easing(bounce(ease_in_out)),
+                        |el, d| el.size(px(5. + 7. * d)).opacity(0.45 + 0.55 * d)));
+                div().id(SharedString::from(format!("e-{id}"))).w_full().py_2().flex().items_center().gap_2().text_color(c("dim")).child(square)
+                    // the dots count up and start over: "Working." "Working.." "Working..." (a fixed width so the line does not jitter)
+                    .child(div().min_w(px(86.)).with_animation(SharedString::from(format!("working-text-{id}")), Animation::new(std::time::Duration::from_millis(1800)).repeat(),
+                        |el, d| el.child(format!("Working{}", ".".repeat(1 + ((d * 3.0) as usize).min(2)))))).into_any_element()
+            }
+            "assistant" => {
+                let mut col = div().id(SharedString::from(format!("e-{id}"))).w_full().py_2().flex().flex_col().gap_2();
+                match e["blocks"].as_array() {
+                    Some(blocks) if !blocks.is_empty() => { let parsed = self.screens.parsed.get(&id, &text, blocks); for el in crate::screens::timeline::blocks(cx, &reg, light, &parsed, &id) { col = col.child(el); } }
+                    _ => { col = col.child(crate::screens::timeline::user_text(&reg, light, &text)); }
+                }
+                if let Some(im) = crate::screens::timeline::images(light, &e["images"], &id, self.screens.attacher.target.as_ref(), &self.screens.images) { col = col.child(im); }
+                let tools = msg_tools(cx, light, &id, &text);
+                col.child(div().flex().items_center().gap_3().text_size(px(11.)).text_color(c("faint")).child(stamp).child(tools)).into_any_element()
+            }
+            _ if !text.is_empty() => div().id(SharedString::from(format!("e-{id}"))).flex().gap_2().py_1().font(art::mono_font()).text_size(px(12.)).text_color(c("dim")).child(string(&e, "label")).child(text).into_any_element(),
+            _ => div().into_any_element(),
+        };
+        let inner = div().w_full().max_w(px(930.)).px_4().child(row);
+        // A row that arrives while the thread is on screen (a sent message, the reply starting) fades and slides in over 220 ms instead of popping in.
+        // Only the newest rows, only within a moment of their first draw, so scrolling back to a row or opening a thread never replays it.
+        let len = self.data["thread"]["entries"].as_array().map_or(0, |r| r.len());
+        let settled = self.screens.shown_at.elapsed().as_millis() > 800;
+        let first = *self.screens.born.entry(id.clone()).or_insert_with(std::time::Instant::now);
+        let fresh = settled && ei + 3 >= len && first.elapsed().as_millis() < 260;
+        let inner: AnyElement = if fresh {
+            inner.with_animation(SharedString::from(format!("arrive-{id}")), Animation::new(std::time::Duration::from_millis(220)).with_easing(ease_out_quint()),
+                |el, d| el.opacity(d).mt(px(10. * (1. - d)))).into_any_element()
+        } else { inner.into_any_element() };
+        div().w_full().flex().justify_center().child(inner).into_any_element()
+    }
+}
+
+impl Render for Backplane {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let t_render = std::time::Instant::now();
+        crate::screens::improvements::tick(self, window, cx);
+        crate::screens::desk::tick(self, window, cx);
+        if self.want_focus { self.want_focus = false; self.input.focus_handle(cx).focus(window); }
+        if let Some(w) = self.screens.projects.focus.take() { let e = if w == "folder" { self.screens.projects.folder.clone() } else { self.screens.projects.search.clone() }; if let Some(e) = e { window.focus(&e.focus_handle(cx)); } }
+        if let Some(n) = self.screens.focus_field.take() { if let Some(s) = self.screens.fields.get(&n) { window.focus(&s.input.focus_handle(cx)); } }
+        if self.screens.focus_settings { self.screens.focus_settings = false; window.focus(&self.screens.settings_focus); }
+        self.frame_marks(window, cx);
+        let light = self.light();
+        if self.swatches { return crate::swatch::view(light).into_any_element(); }
+        if self.gallery { return crate::swatch::gallery(light).into_any_element(); }
+        if self.fonts { return crate::swatch::fonts(light).into_any_element(); }
+        let c = |name: &str| theme::color(light, name);
+        self.screens.reg.borrow_mut().begin(); self.screens.images.frame();
+        let reg = self.screens.reg.clone();
+        if self.input.read(cx).light != light { self.input.update(cx, |i, _| i.light = light); for i in self.screens.ask_inputs.values() { i.update(cx, |i, _| i.light = light); } }
+        // bots: (name, mood, note, look seed) copied out so the cat cache can be filled
+        let bot_data: Vec<(String, String, String, u64, String, bool)> = self.data["bots"].as_array().into_iter().flatten()
+            .map(|b| (string(b, "name"), string(b, "mood"), string(b, "note"), b["look"].as_u64().unwrap_or(0), string(b, "id"), b["sel"].as_bool().unwrap_or(false))).collect();
+        let bot_rigs: Vec<_> = bot_data.iter().map(|(_, mood, _, look, _, _)| self.cats.rig(*look, mood)).collect();
+        let started = self.started;
+        let thread = &self.data["thread"];
+        let has_thread = thread.is_object();
+        // sidebar rows
+        let mut rows: Vec<AnyElement> = Vec::new();
+        let mut ctl: Vec<CtlEntry> = Vec::new(); // the controls drawn this frame (the e2e harness's inventory)
+        for project in self.data["projects"].as_array().into_iter().flatten() {
+            let pid = string(project, "id"); let pid = pid.rsplit_once('|').map_or(pid.as_str(), |(_, r)| r).to_string();
+            ctl.push(CtlEntry { id: format!("project:{pid}"), label: string(project, "title"), ctl: Ctl::Home(pid.clone()) });
+            let (pid_new, pid_new2, pid_thr) = (pid.clone(), pid.clone(), pid.clone());
+            rows.push(with_rect(div().id(SharedString::from(format!("proj-{pid}"))), || format!("project:{pid}")).flex().items_center().gap_2().px_3().pt_3().pb_1().text_size(px(11.)).text_color(if self.project_page.as_deref() == Some(pid_new.as_str()) { c("text") } else { c("dim") }).cursor_pointer().hover(|s| s.text_color(c("text")))
+                .on_click(cx.listener(move |this, _, _, cx| { this.open_project(pid.clone(), cx); }))
+                .on_mouse_down(MouseButton::Right, { let pidm = pid_new.clone(); cx.listener(move |this, e: &MouseDownEvent, _, cx| { let items = crate::screens::ctxmenu::project_items(&pidm); this.ctx_open(e.position, items, cx); }) })
+                .child(ic(light, "chevron-down", 14., "dim")).child(ic(light, "folder", 14., "ok")).child(div().flex_1().child(string(project, "title").to_uppercase())).child(with_rect(div().id(SharedString::from(format!("new-{pid_new}"))), || "ui:New thread".to_string()).cursor_pointer().on_click(cx.listener(move |this, _, _, cx| { cx.stop_propagation(); this.arm_new(); let _ = this.tx.try_send(Command::Action("new-thread".into(), pid_new2.clone())); cx.notify(); })).child(ic(light, "plus", 16., "dim"))).into_any_element());
+            for t in project["threads"].as_array().into_iter().flatten().chain(project["settled"].as_array().into_iter().flatten()) {
+                let id = string(t, "id");
+                let raw = id.rsplit_once('|').map_or(id.as_str(), |(_, i)| i);
+                let selected = raw == self.selected;
+                let dot = match t["state"].as_str().unwrap_or("") { "running" => c("accent"), "failed" => c("bad"), _ => c("ok") };
+                ctl.push(CtlEntry { id: format!("thread:{raw}"), label: string(t, "title"), ctl: Ctl::Select(id.clone()) });
+                let (depth, kids, open) = (t["depth"].as_u64().unwrap_or(0).min(6) as f32, t["children"].as_u64().unwrap_or(0), t["expanded"].as_bool().unwrap_or(false));
+                let toggle = (kids > 0).then(|| {
+                    let tid = id.clone();
+                    div().id(SharedString::from(format!("tree-{id}"))).flex_shrink_0().w(px(16.)).cursor_pointer().child(ic(light, if open { "chevron-down" } else { "chevron-right" }, 14., "dim"))
+                        .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("thread-tree".into(), format!("{tid}|{}", if open { 0 } else { 1 }))); cx.stop_propagation(); cx.notify(); }))
+                });
+                if kids > 0 { ctl.push(CtlEntry { id: format!("tree:{raw}"), label: format!("{} subthreads", kids), ctl: Ctl::Node("thread-tree".into(), format!("{id}|{}", if open { 0 } else { 1 })) }); }
+                rows.push(with_rect(div().id(SharedString::from(format!("thread-{id}"))), || format!("thread:{raw}")).flex().items_center().gap_2().pl(px(22. + depth * 14.)).pr_3().h(px(32.))
+                    .border_l_2().border_color(if selected { c("ok") } else { c("panel") })
+                    .bg(if selected { c("raise") } else { c("panel") }).hover(|s| s.bg(c("raise"))).cursor_pointer()
+                    .on_click(cx.listener(move |this, _, window, cx| this.select(id.clone(), window, cx)))
+                    .on_mouse_down(MouseButton::Right, { let (row, pid2) = (t.clone(), pid_thr.clone()); cx.listener(move |this, e: &MouseDownEvent, _, cx| { let items = crate::screens::ctxmenu::thread_items(&row, &pid2); this.ctx_open(e.position, items, cx); }) })
+                    .children(toggle).child(div().size(px(5.)).bg(dot)).child(div().flex_1().overflow_hidden().whitespace_nowrap().child(string(t, "title")))
+                    .child(div().text_size(px(11.)).text_color(c("faint")).child(if kids > 0 && string(t, "agents").is_empty() { format!("{kids}") } else { string(t, "ago") })).into_any_element());
+            }
+        }
+        for page in self.data["sidebarPages"].as_array().into_iter().flatten() {
+            for key in ["projects", "active", "legacy"] { if let Some(row) = pager_row(cx, format!("pg-{key}"), &page[key], light, &mut ctl) { rows.push(row); } }
+        }
+        // the Older group of projects (no live thread, quiet for a while): a row that opens and shuts it
+        if let Some(n) = self.data["olderProjects"]["count"].as_u64() {
+            let open = self.data["olderProjects"]["open"].as_bool().unwrap_or(false);
+            ctl.push(CtlEntry { id: "side-older".into(), label: "Older projects".into(), ctl: Ctl::Node("side-older".into(), String::new()) });
+            rows.push(with_rect(div().id("side-older"), || "side-older".to_string()).flex().items_center().gap_2().px_3().py_1().text_size(px(11.)).text_color(c("accent")).cursor_pointer().hover(|s| s.bg(c("raise")))
+                .child(ic(light, if open { "chevron-down" } else { "chevron-right" }, 14., "dim")).child(if open { format!("Older ({n}) · hide") } else { format!("Older ({n})") })
+                .on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(Command::Action("side-older".into(), String::new())); cx.notify(); })).into_any_element());
+        }
+        for name in ["BOTS", "ROOMS"] {
+            let (plus_id, plus_action) = if name == "BOTS" { ("ui:New bot", "bot-new") } else { ("ui:New room", "room-new") };
+            ctl.push(CtlEntry { id: plus_id.into(), label: plus_id.trim_start_matches("ui:").into(), ctl: Ctl::Node(plus_action.into(), String::new()) });
+            rows.push(div().flex().justify_between().px_3().pt_4().text_size(px(11.)).text_color(c("dim")).child(name)
+                .child(with_rect(div().id(plus_id), || plus_id.to_string()).cursor_pointer().on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action(plus_action.into(), String::new())); cx.notify(); })).child(ic(light, "plus", 16., "dim"))).into_any_element());
+            if name == "BOTS" {
+                for ((bname, mood, note, _, bid, bsel), rig) in bot_data.iter().zip(bot_rigs.iter()) {
+                    let note_color = match mood.as_str() { "wait" | "error" => c("bad"), "work" | "talk" => c("accent"), _ => c("faint") };
+                    ctl.push(CtlEntry { id: format!("bot:{bname}"), label: bname.clone(), ctl: Ctl::Node("bot".into(), bid.clone()) });
+                    let bid2 = bid.clone();
+                    rows.push(with_rect(div().id(SharedString::from(format!("bot-{bid}"))), || format!("bot:{bname}")).flex().items_center().gap_2().px_3().py(px(3.)).cursor_pointer().when(*bsel, |d| d.bg(c("raise"))).hover(|s| s.bg(c("raise")))
+                        .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("bot".into(), bid2.clone())); cx.notify(); }))
+                        .child(art::cat(rig.clone(), mood, 28., started, if art::rects_on() { format!("cat:{bname}") } else { String::new() }))
+                        .child(div().flex().flex_col().min_w_0().line_height(px(18.)).child(div().overflow_hidden().whitespace_nowrap().child(bname.clone()))
+                            .child(div().text_size(px(11.)).text_color(note_color).child(note.clone()))).into_any_element());
+                }
+            } else {
+                for r in self.data["rooms"].as_array().into_iter().flatten() {
+                    let (rid, rname, sel) = (string(r, "id"), string(r, "name"), r["sel"].as_bool().unwrap_or(false));
+                    ctl.push(CtlEntry { id: format!("room:{rname}"), label: rname.clone(), ctl: Ctl::Node("room".into(), rid.clone()) });
+                    let rid2 = rid.clone();
+                    rows.push(with_rect(div().id(SharedString::from(format!("room-{rid}"))), || format!("room:{rname}")).flex().items_center().gap_2().px_3().py_1().cursor_pointer().when(sel, |d| d.bg(c("raise"))).hover(|s| s.bg(c("raise")))
+                        .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("room".into(), rid2.clone())); cx.notify(); }))
+                        .child(div().text_color(c("faint")).child("#")).child(div().flex_1().overflow_hidden().whitespace_nowrap().child(rname.clone()))
+                        .child(div().text_size(px(11.)).text_color(c("faint")).child(format!("{}", r["members"]))).into_any_element());
+                }
+            }
+        }
+        let no_rows = thread["entries"].as_array().map_or(true, |e| e.is_empty());
+        // project home replaces the thread when the hub selected it
+        let home = &self.data["projectHome"];
+        let page = self.project_page.clone().filter(|p| crate::screens::projects::find(&self.data, p).is_some());
+        let has_home = home.is_object() || page.is_some();
+        let home_els: Vec<AnyElement> = if let (false, Some(p)) = (home.is_object(), page.as_ref()) { crate::screens::projects::page(cx, light, &self.data, p, &mut ctl) } else if has_home {
+            home["cards"].as_array().into_iter().flatten().take(60).enumerate().map(|(i, k)| node_el(cx, k, light, 0, &format!("h{i}"), &mut ctl)).collect()
+        } else { Vec::new() };
+        // popup
+        // the popup is the hub's: rows are shown when thread.skills is non-empty (no client-side rows)
+        let skills = thread["skills"].as_array();
+        // the highlighted row starts at the first for each new set of rows; the composer is told so Up/Down/Tab drive the popup while it shows
+        { let key = self.popup_rows().join("\u{1f}"); if key != self.screens.popup_key { self.screens.popup_key = key; self.screens.popup_ix = 0; } }
+        let popup_ix = self.screens.popup_ix.min(skills.map_or(0, |s| s.len().min(8)).saturating_sub(1));
+        let mut popup = div().flex().flex_col().border_1().border_color(c("line")).bg(c("panel")).py_1();
+        for (index, skill) in skills.into_iter().flatten().take(8).enumerate() {
+            let word = skill.get("word").or_else(|| skill.get("name")).and_then(Value::as_str).unwrap_or("").to_string();
+            let label = skill.get("label").and_then(Value::as_str).unwrap_or(&word).to_string();
+            let desc = ["text", "hint", "desc", "detail", "about"].iter().find_map(|k| skill.get(*k).and_then(Value::as_str)).unwrap_or("").to_string();
+            ctl.push(CtlEntry { id: format!("skill:{word}"), label: label.clone(), ctl: Ctl::Skill(word.clone()) });
+            popup = popup.child(with_rect(div().id(("skill", index)), || format!("skill:{word}")).flex().gap_3().px_3().py_1().cursor_pointer().when(index == popup_ix, |d| d.bg(c("raise"))).hover(|s| s.bg(c("raise")))
+                .child(div().font_weight(FontWeight::BOLD).flex_shrink_0().child(label)).child(div().flex_1().overflow_hidden().whitespace_nowrap().text_color(c("dim")).child(desc))
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    let _ = this.tx.try_send(Command::Action("skill".into(), word.clone())); this.await_completion(cx);
+                    this.input.focus_handle(cx).focus(window); cx.notify();
+                })));
+        }
+        let show_popup = skills.map_or(false, |s| !s.is_empty());
+        if self.input.read(cx).popup_open != show_popup { self.input.update(cx, |c, _| c.popup_open = show_popup); }
+        // chips
+        let model = thread["picker"]["models"].as_array().and_then(|m| m.iter().find(|x| x["on"] == true)).map(|m| string(m, "label")).unwrap_or_default();
+        let model_short = if model.starts_with("Claude Code") { "default".to_string() } else { model.split(" · ").next().unwrap_or("").to_lowercase() };
+        let effort = thread["picker"]["efforts"].as_array().and_then(|m| m.iter().find(|x| x["on"] == true)).map(|m| string(m, "label")).unwrap_or_default();
+        // Thread permissions are read-only here and are not drawn in the composer: the web's composer chip beside the model chip is the account chip.
+        let ctx = string(&thread["picker"], "label").split("ctx ").nth(1).map(|s| format!("ctx {}", s.split(' ').next().unwrap_or(""))).unwrap_or_default();
+        // Remaining provider allowance, as the hub words it ("72% left · shared"); "limit —" until the provider has reported one.
+        let allowance = { let a = string(thread, "allowance"); if a.is_empty() { "limit —".to_string() } else { a } };
+        let todo = thread["todos"]["count"].as_str().unwrap_or("").to_string();
+        let tools_strip = crate::screens::tools::strip(cx, light, thread, self.screens.menu_open);
+        let mut rail: Vec<AnyElement> = Vec::new();
+        crate::screens::viewer::follow(&self.tx, thread);
+        let active_kind = if thread["diff"].is_object() { String::new() } else { crate::screens::viewer::active_kind(&thread["viewer"], self.screens.rail_pending.as_deref()) };
+        for (l, i) in [("Terminal", "terminal"), ("Commands", "search"), ("", ""), ("Board", "circuit-board"), ("Schematic", "cpu"), ("3D", "box"), ("Split", "layout-panel-left"), ("Mech", "layers"), ("", ""), ("Files", "folder"), ("Diff", "diff"), ("Review", "circle-check"), ("Browser", "globe")].iter() {
+            if l.is_empty() { rail.push(div().h(px(12.)).into_any_element()); continue; }
+            // the viewer's kinds are the hub's view-kind values; Diff is its own action
+            let act: Option<(&'static str, &'static str)> = match *l { "Board" => Some(("view-kind", "board")), "Schematic" => Some(("view-kind", "schematic")), "3D" => Some(("view-kind", "3d")), "Split" => Some(("view-kind", "split")), "Mech" => Some(("view-kind", "mech")), "Files" => Some(("view-kind", "files")), "Review" => Some(("view-kind", "review")), "Browser" => Some(("view-kind", "browser")), "Diff" => Some(("diff", "")), _ => None };
+            match act {
+                Some((a, v)) => {
+                    let active = a == "view-kind" && v == active_kind;
+                    ctl.push(CtlEntry { id: format!("rail:{l}"), label: l.to_string(), ctl: if a == "view-kind" { Ctl::Rail(v.into()) } else { Ctl::Node(a.into(), v.into()) } });
+                    rail.push(with_rect(div().id(SharedString::from(format!("rail-{l}"))), || format!("rail:{l}")).cursor_pointer().on_click(cx.listener(move |this, _, _, cx| { let cmd = if a == "view-kind" { this.screens.rail_pending = Some(v.to_string()); this.screens.rail_at = Some(std::time::Instant::now()); this.screens.plot_click = matches!(v, "board" | "schematic").then(std::time::Instant::now); crate::screens::viewer::view_kind(v) } else { Command::Action(a.into(), v.into()) }; let _ = this.tx.try_send(cmd); cx.notify(); }))
+                        .flex().flex_col().items_center().h(px(48.)).justify_center().gap_1().text_size(px(10.)).when(active, |d| d.bg(c("raise")).border_l_2().border_color(c("accent"))).text_color(c(if active { "text" } else { "dim" })).hover(|s| s.text_color(c("text"))).child(ic(light, i, 18., if active { "accent" } else { "dim" })).child(*l).into_any_element());
+                }
+                None => rail.push(with_rect(div().opacity(0.45), || format!("rail:{l}")).flex().flex_col().items_center().h(px(48.)).justify_center().gap_1().text_size(px(10.)).text_color(c("dim")).child(ic(light, i, 18., "dim")).child(*l).into_any_element()),
+            }
+        }
+        // the open asks' buttons are controls too (the harness answers them by index: ask:<i>:<j>)
+        for (i, a) in crate::screens::asks::parse(&thread["asks"]).into_iter().enumerate() {
+            for (j, b) in a.buttons.iter().enumerate() { ctl.push(CtlEntry { id: format!("ask:{i}:{j}"), label: b.label.clone(), ctl: Ctl::Node("answer".into(), b.value.clone()) }); }
+            if let Some(s) = &a.skip { ctl.push(CtlEntry { id: format!("ask:{i}:skip"), label: s.label.clone(), ctl: Ctl::Node("answer".into(), s.value.clone()) }); }
+        }
+        // the Mechanical page's parts are controls too (the harness presses them by index)
+        for (i, p) in crate::screens::viewer::mech_parts(&thread["viewer"]).into_iter().enumerate() { ctl.push(CtlEntry { id: format!("mech-part-{i}"), label: p.label, ctl: Ctl::Node("mech-part".into(), p.value) }); }
+        // controls with no handler yet are registered too, so the harness finds them dead instead of missing
+        for (id, label, c) in crate::screens::tools::controls(&self.data, self.screens.menu_open) { ctl.push(CtlEntry { id, label, ctl: c }); }
+        ctl.push(CtlEntry { id: "ui:Settings".into(), label: "Settings".into(), ctl: Ctl::Node("flag".into(), "settings".into()) });
+        if let Some(p) = self.data["projects"].as_array().and_then(|p| p.first()) { let id = string(p, "id"); let id = id.rsplit_once('|').map_or(id.as_str(), |(_, r)| r).to_string(); ctl.push(CtlEntry { id: "ui:New thread".into(), label: "New thread".into(), ctl: Ctl::Node("new-thread".into(), id) }); }
+        ctl.push(CtlEntry { id: "send".into(), label: "Send".into(), ctl: Ctl::Send });
+        for l in ["Terminal", "Commands"] { ctl.push(CtlEntry { id: format!("rail:{l}"), label: l.into(), ctl: Ctl::None }); }
+        ctl.push(CtlEntry { id: "ui:Context".into(), label: "Context".into(), ctl: Ctl::ToggleContext });
+        for l in ["Jump or run a command", "Account", "Edit", "Dictate"] { ctl.push(CtlEntry { id: format!("ui:{l}"), label: l.into(), ctl: Ctl::None }); }
+        crate::screens::improvements::controls(self, &mut ctl);
+        for (id, label, c) in crate::screens::projects::controls(&self.data) { ctl.push(CtlEntry { id, label, ctl: c }); }
+        ctl.push(CtlEntry { id: "ui:Search".into(), label: "Search".into(), ctl: Ctl::FocusSearch });
+        ctl.push(CtlEntry { id: "ui:Fold sidebar".into(), label: "Fold sidebar".into(), ctl: Ctl::ToggleSidebar });
+        ctl.push(CtlEntry { id: "ui:Attach".into(), label: "Attach".into(), ctl: Ctl::PickFiles });
+        if !self.sidebar_open { ctl.push(CtlEntry { id: "ui:Unfold sidebar".into(), label: "Unfold sidebar".into(), ctl: Ctl::ToggleSidebar }); }
+        let connected = self.status == "Connected";
+        if !self.screens.img_poll && self.screens.images.loading() { self.screens.img_poll = true; crate::screens::timeline::poll(cx); }
+
+        let el = div().size_full().flex().flex_col().bg(c("bg"))
+            .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| this.attach_event(&crate::screens::composer::ComposerEvent::Files(paths.paths().to_vec()), cx))).text_color(c("text")).text_size(px(13. * self.local.text_pct as f32 / 100.)).font_family(self.local.font.clone()).line_height(px(20. * self.local.text_pct as f32 / 100.))
+            .relative().on_action(cx.listener(|this, _: &crate::screens::improvements::Toggle, _, cx| crate::screens::improvements::toggle(this, cx))).on_action(cx.listener(|this, _: &crate::ToggleSidebarKey, _, cx| this.sidebar_toggle(cx))).on_action(cx.listener(|this, _: &crate::FocusSearchKey, _, cx| this.focus_search(cx))).on_action(cx.listener(Self::send)).on_action(cx.listener(Self::close_popup)).on_action(cx.listener(Self::copy_selection))
+            // the dev build strip, only while a build is being made or waits to relaunch
+            .children(self.screens.devbar.clone().map(|b| crate::screens::devbar::strip(cx, &b, light, self.screens.devbar_confirm.is_some())))
+            // top bar
+            .child(div().h(px(36.)).flex_shrink_0().relative().child(art::probe("topbar")).flex().items_center().justify_between().px_3().border_b_1().border_color(c("line")).bg(c("bg"))
+                .child(div().flex().items_center().gap_2()
+                    .when(!self.sidebar_open, |d| d.child(with_rect(div().id("unfold-sidebar"), || "ui:Unfold sidebar".to_string()).cursor_pointer().child(ic(light, "chevron-right", 16., "dim")).on_click(cx.listener(|this, _, _, cx| { if !this.sidebar_open { this.sidebar_toggle(cx); } }))))
+                    .child(div().relative().size(px(18.)).child(art::logo(light, 18., "logo"))
+                        .child(div().absolute().right(px(-2.)).bottom(px(-1.)).size(px(6.)).bg(if connected { c("ok") } else { c("bad") })))
+                    .child(div().font_weight(FontWeight::BOLD).child("Backplane"))
+                    .child(div().text_color(c("faint")).child("/")).child(div().text_color(c("dim")).child(if has_thread { "Project".to_string() } else { "Projects".to_string() }))
+                    .when(has_thread, |d| d.child(div().text_color(c("faint")).child("/")).child(div().id("thread-title").cursor_pointer().on_click(cx.listener(|this, _, _, cx| { let id = string(&this.data["thread"], "id"); let id = crate::screens::attach::raw_id(&id).to_string(); let _ = this.tx.try_send(Command::Action("row-rename".into(), id)); cx.notify(); })).font_weight(FontWeight::BOLD).child(string(thread, "title"))).child(ic(light, "chevron-down", 14., "dim"))))
+                .child(div().flex().items_center().gap_3()
+                    .child(with_rect(div().opacity(0.45), || "ui:Jump or run a command".to_string()).w(px(260.)).px_2().flex().items_center().gap_2().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("faint")).child(ic(light, "chevron-right", 13., "faint")).child("Jump or run a command"))
+                    .child(with_rect(div().id("improvements-btn"), || "ui:Improvements".to_string()).cursor_pointer().on_click(cx.listener(|this, _, _, cx| crate::screens::improvements::toggle(this, cx))).px_2().flex().items_center().gap_2().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("dim")).child(ic(light, "message-square", 15., "dim")).child("Improvements"))
+                    .child(with_rect(div().id("search-btn"), || "ui:Search".to_string()).cursor_pointer().on_click(cx.listener(|this, _, _, cx| this.focus_search(cx))).child(ic(light, "search", 15., "dim"))).child(with_rect(div().id("gear"), || "ui:Settings".to_string()).cursor_pointer().on_click(cx.listener(|this, _, _, cx| { this.open_settings(cx); })).child(ic(light, "settings", 15., "dim")))))
+            .children(crate::screens::strip::view(light, &self.data))
+            .child(div().flex_1().min_h_0().flex()
+                // sidebar
+                .child(div().w(px(if self.sidebar_open { self.local.sidebar_px as f32 } else { 0. })).overflow_hidden().h_full().flex_shrink_0().relative().child(art::probe("sidebar")).bg(c("bg")).border_r_1().border_color(c("line")).flex().flex_col()
+                    .child(div().flex().items_center().gap_2().p_2().child(with_rect(div().id("fold-sidebar"), || "ui:Fold sidebar".to_string()).cursor_pointer().child(ic(light, "chevron-left", 16., "dim")).on_click(cx.listener(|this, _, _, cx| { if this.sidebar_open { this.sidebar_toggle(cx); } }))).child(crate::screens::projects::search_box(light, &self.screens.projects)).child(with_rect(div().id("add-project"), || "ui:Add project".to_string()).cursor_pointer().on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(crate::screens::projects::open_cmd()); cx.notify(); })).child(ic(light, "plus", 16., "dim"))))
+                    .child(div().id("sidebar").overflow_y_scroll().flex_1().children(rows))
+                    .child(div().px_3().py_1().border_t_1().border_color(c("line")).text_size(px(11.)).text_color(c("dim")).child(self.status.clone())))
+                // main
+                .child(div().flex_1().min_w(px(crate::screens::viewer::THREAD_MIN)).h_full().relative().child(art::probe("main")).flex().flex_col()
+                    .children(crate::screens::bots::bar(cx, light, &self.data["bot"]))
+                    .when(has_thread, |d| d.child(div().h(px(32.)).flex_shrink_0().flex().items_center().border_b_1().border_color(c("line"))
+                        .child(div().px_3().flex().gap_2().text_size(px(11.)).child(div().text_color(c("faint")).child("STATE")).child(div().size(px(6.)).mt(px(7.)).bg(c("ok"))).child(string(thread, "phase").split(':').next().unwrap_or("").to_lowercase()))
+                        .when(!todo.is_empty(), |d| d.child(div().px_3().h_full().flex().items_center().gap_2().border_l_1().border_color(c("line")).text_size(px(11.)).child(div().text_color(c("faint")).child("TO-DO")).child(todo.clone()).child(ic(light, "chevron-down", 12., "faint"))))
+                        .children(tools_strip)))
+                    .when(has_home, |d| d.child(div().id("home").overflow_y_scroll().flex_1().flex().justify_center().child(div().w_full().max_w(px(930.)).p_4().flex().flex_col().gap_3().children(home_els))))
+                    // a list: only the rows on screen are drawn, however much of the thread is held, and it keeps the reader's place as rows land above them
+                    .when(!has_home, |d| d.child(div().id("timeline").relative().flex_1().min_h_0().flex().flex_col()
+                        .on_mouse_down(MouseButton::Left, cx.listener(|this, e, _, cx| this.timeline_down(e, cx))).on_mouse_down(MouseButton::Right, cx.listener(|this, e, _, cx| this.timeline_down(e, cx)))
+                        .on_scroll_wheel(cx.listener(|this, e: &ScrollWheelEvent, _, _| this.scroll_note(e)))
+                        .on_mouse_move(cx.listener(|this, e, _, cx| this.timeline_move(e, cx))).on_mouse_up(MouseButton::Left, cx.listener(|this, e, _, cx| this.timeline_up(e, cx))).on_mouse_up_out(MouseButton::Left, cx.listener(|this, e, _, cx| this.timeline_up(e, cx)))
+                        .when(no_rows, |d| d.child(div().flex_1().flex().justify_center().items_end().child(div().w_full().max_w(px(930.)).px_4().py_6().text_color(c("dim")).child(if has_thread && thread["loading"] == true { "Loading…" } else if has_thread { "Start a conversation." } else { "Pick a thread, or start one with + next to a project." }))))
+                        .when(!no_rows, |d| d.child(list(self.timeline.clone(), cx.processor(|this, ix, _, cx| this.timeline_row(ix, cx))).flex_1().min_h_0()))
+                        .children(thread["live"].as_array().into_iter().flatten().map(|live| div().w_full().flex().justify_center().child(div().w_full().max_w(px(930.)).px_4().py_2().child(string(live, "text")))))
+                        // after the list has drawn its rows: put them in reading order, and see whether history is wanted
+                        .child(canvas({ let (me, reg) = (cx.entity().downgrade(), self.screens.reg.clone()); move |_, _, cx| {
+                            let Some(this) = me.upgrade() else { return };
+                            { let rows = &this.read(cx).data["thread"]["entries"]; reg.borrow_mut().resolve_by(|id| rows.as_array().and_then(|r| r.iter().position(|e| e["id"].as_str() == Some(id)))); }
+                            cx.defer(move |cx| this.update(cx, |this, _| this.history_want()));
+                        } }, |_, _, _, _| {}).absolute().size_0())))
+                    .when(!self.error.is_empty(), |d| d.child(div().px_5().py_2().text_color(c("bad")).child(self.error.clone())))
+                    .child(div().flex_shrink_0().relative().child(art::probe("composer")).border_t_1().border_color(c("line")).flex().justify_center().child(div().w_full().max_w(px(930.)).px_4().py_3().flex().flex_col().gap_2()
+                        .when(show_popup, |d| d.child(popup))
+                        .children(crate::screens::picker::view(cx, light, &thread["picker"], self.screens.picker_open))
+                        .children(self.screens.ctx_open.then(|| div().id("ctx-panel").max_h(px(340.)).overflow_y_scroll().px_3().py_2().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).flex().flex_col().gap_1()
+                            .child(div().font_weight(FontWeight::BOLD).child("Context"))
+                            .child(div().text_color(c("dim")).child(if ctx.is_empty() { "Nothing reported by the provider yet.".to_string() } else { format!("Held now: {}", ctx.trim_start_matches("ctx ")) }))
+                            .child(div().text_color(c("faint")).child(string(&thread["picker"], "label")))
+                            .children(self.data["stats"].as_array().into_iter().flatten().map(|sec| div().flex().flex_col().gap_1().mt_1()
+                                .child(div().font_weight(FontWeight::BOLD).text_color(c("dim")).child(string(sec, "title")))
+                                .children(sec["rows"].as_array().into_iter().flatten().map(|r| div().flex().gap_2().child(div().w(px(110.)).text_color(c("dim")).child(string(r, "label"))).child(div().flex_1().min_w_0().child(string(r, "value")))).collect::<Vec<_>>())).collect::<Vec<_>>())))
+                        .children(crate::screens::asks::view(cx, light, &self.screens.ask_inputs, &thread["asks"]))
+                        .children(reply_chip(cx, light, &thread["replying"]))
+                        .children(crate::screens::attach::chips(cx, light, &self.screens.attacher.previews, thread))
+                        .child(div().border_1().border_color(c("accent")).bg(c("view")).px_3().py_2().min_h(px(60.)).child(self.input.clone()))
+                        .child(div().flex().flex_wrap().gap_2().items_center().w_full().min_w_0()
+                            .child(crate::screens::bar::fit(with_rect(div().id("model-chip"), || "ui:Model".to_string())).cursor_pointer().on_click(cx.listener(|this, _, _, cx| { this.screens.picker_open = !this.screens.picker_open; cx.notify(); })).flex_1().min_w(px(180.)).overflow_hidden().whitespace_nowrap().px_3().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).font(art::mono_font()).child(format!("claude / {} / {}", if model_short.is_empty() { "default" } else { &model_short }, if effort.is_empty() { "auto" } else { &effort })))
+                            .child(crate::screens::bar::fit(with_rect(crate::screens::accounts::chip(cx, light, &self.screens.acct, &string(thread, "id")), || "ui:Account".to_string())))
+                            .child(crate::screens::bar::fit(with_rect(chip(light, String::new()).opacity(0.45), || "ui:Edit".to_string())).child(ic(light, "square-pen", 16., "dim")))
+                            .child(crate::screens::bar::fit(with_rect(chip(light, String::new()).id("ctx-chip"), || "ui:Context".to_string())).cursor_pointer().on_click(cx.listener(|this, _, _, cx| { this.screens.ctx_open = !this.screens.ctx_open; cx.notify(); })).flex().items_center().gap_2().child(ic(light, "gauge", 14., "dim")).child(ctx))
+                            .child(crate::screens::bar::fit(with_rect(chip(light, String::new()).opacity(0.45), || "ui:Allowance".to_string())).flex().items_center().gap_2().child(ic(light, "gauge", 14., "dim")).child(allowance))
+                            .child(crate::screens::bar::fit(with_rect(chip(light, String::new()).id("attach"), || "ui:Attach".to_string())).cursor_pointer().on_click(cx.listener(|this, _, _, cx| this.pick_files(cx))).child(ic(light, "paperclip", 16., "dim")))
+                            .child(crate::screens::bar::fit(with_rect(chip(light, String::new()).opacity(0.45), || "ui:Dictate".to_string())).child(ic(light, "mic", 16., "dim")))
+                            .child(crate::screens::bar::fit(with_rect(div().id("send"), || "send".to_string())).flex_shrink_0().px_4().py_1().bg(c("accent")).text_color(c("on-accent")).cursor_pointer().child("Send").on_click(cx.listener(|this, _, window, cx| this.send(&Send, window, cx)))))))
+                    .children(crate::screens::bots::page(cx, light, &self.screens.fields, &self.data["bot"], self.screens.browser.as_ref().map(|(_, b)| b)))
+                    .children(crate::screens::tools::dropdown(cx, light, thread, self.screens.menu_open))
+                    .children(crate::screens::tools::questions(cx, light, &self.screens.fields, &self.data))
+                    .children(crate::screens::projects::view(cx, light, &self.screens.projects, &self.data))
+                    .children(crate::screens::bots::forms(cx, light, &self.screens.fields, &self.data))
+                    .children(crate::screens::settings::view(cx, light, &self.screens.fields, &self.data["settings"], &self.screens.settings_focus, &self.screens.settings_ui, &self.local, &self.screens.acct))
+                    .children(crate::screens::improvements::view(cx, light, &self.screens.imp))
+                )
+                .children(crate::screens::viewer::view(cx, &reg, light, &self.screens.files, &self.screens.images, self.screens.attacher.target.as_ref(), thread, &self.screens.plot, &mut self.screens.plotview, &mut self.screens.split_pv, self.screens.solid.as_ref(), self.screens.browser.as_ref().map(|(_, b)| b)))
+                // right rail
+                .child(div().w(px(72.)).h_full().flex_shrink_0().relative().child(art::probe("rail")).border_l_1().border_color(c("line")).flex().flex_col().py_2().children(rail)))
+            .children(crate::screens::improvements::indicator(cx, light, &self.screens.imp))
+            // the right-click menu of a sidebar row, over everything
+            .children(self.screens.ctx.clone().map(|m| crate::screens::ctxmenu::render(cx, light, &m)))
+            .into_any_element();
+        self.controls = ctl;
+        self.render_us = t_render.elapsed().as_micros() as u64;
+        el
+    }
+}

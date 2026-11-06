@@ -13,6 +13,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
@@ -57,24 +60,15 @@ private val lightScheme = backplaneScheme(true)
 private val darkScheme = backplaneScheme(false)
 private val square = RoundedCornerShape(0.dp)
 private val shapes = Shapes(square, square, square, square, square)
+// JetBrains Mono (SIL OFL 1.1, res/font) for code and mono labels, ligatures off; body text stays the system face.
+val BpMono = FontFamily(Font(R.font.jetbrains_mono_regular, FontWeight.Normal), Font(R.font.jetbrains_mono_bold, FontWeight.Bold))
+const val NO_LIGATURES = "calt 0"
 private val typography = Typography().let { t ->
-    val mono = FontFamily.Monospace
+    fun mono(s: TextStyle) = s.copy(fontFamily = BpMono, fontFeatureSettings = NO_LIGATURES)
     t.copy(
-        displayLarge = t.displayLarge.copy(fontFamily = mono),
-        displayMedium = t.displayMedium.copy(fontFamily = mono),
-        displaySmall = t.displaySmall.copy(fontFamily = mono),
-        headlineLarge = t.headlineLarge.copy(fontFamily = mono),
-        headlineMedium = t.headlineMedium.copy(fontFamily = mono),
-        headlineSmall = t.headlineSmall.copy(fontFamily = mono),
-        titleLarge = t.titleLarge.copy(fontFamily = mono),
-        titleMedium = t.titleMedium.copy(fontFamily = mono),
-        titleSmall = t.titleSmall.copy(fontFamily = mono),
-        bodyLarge = t.bodyLarge.copy(fontFamily = mono),
-        bodyMedium = t.bodyMedium.copy(fontFamily = mono),
-        bodySmall = t.bodySmall.copy(fontFamily = mono),
-        labelLarge = t.labelLarge.copy(fontFamily = mono),
-        labelMedium = t.labelMedium.copy(fontFamily = mono),
-        labelSmall = t.labelSmall.copy(fontFamily = mono),
+        labelLarge = mono(t.labelLarge),
+        labelMedium = mono(t.labelMedium),
+        labelSmall = mono(t.labelSmall),
     )
 }
 
@@ -94,3 +88,4 @@ fun Theme(theme: String, content: @Composable () -> Unit) {
     }
     MaterialTheme(colorScheme = if (dark) darkScheme else lightScheme, typography = typography, shapes = shapes, content = content)
 }
+internal val flat = RoundedCornerShape(0.dp)

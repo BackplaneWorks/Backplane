@@ -1,0 +1,11 @@
+#!/bin/sh
+# desktop side: stage the JS hub binary and the presenter, launch the Boat job (work_run this). From the repo root (the settings worktree).
+set -eu
+ROOT=${MAIN:-/home/h/Documents/i2cjak/backplane-gpui}
+rm -rf stage; mkdir -p stage; cp $ROOT/build/gpui/backplane-serve-current stage/backplane-serve; cp $ROOT/build/gpui/slim/bp-policy-page $ROOT/build/gpui/hub/new/window stage/
+{ git ls-files -co --exclude-standard native/host | grep -v '^native/host/target'
+  ls test/gpui/parity/*.mjs test/gpui/parity/*.sh test/gpui/wire.mjs test/gpui/perf/lib.mjs test/gpui/slim/check_agents.sh test/gpui/settings/boat-parity.sh test/tools/perf_standin.ts src/web/wire.js src/web/view-delta.js src/core/cbor.bend
+  git ls-files -co --exclude-standard test/gpui/agents/fixtures test/gpui/files/hostile_paths.tsv
+  find stage -type f; } | sed 's/^/--include-file /' | tr '\n' ' ' > stage/.args
+# shellcheck disable=SC2046
+scripts/boat-job.sh --size large --timeout 2400 --idle 3600 $(cat stage/.args) --artifact out/settings-parity -- sh test/gpui/settings/boat-parity.sh

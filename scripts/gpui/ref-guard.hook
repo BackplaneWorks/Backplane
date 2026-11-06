@@ -1,0 +1,22 @@
+#!/bin/sh
+# reference-transaction hook. Installed as <common .git>/hooks/reference-transaction by
+# scripts/gpui/install-guard.sh. That hooks folder serves every worktree of this repository,
+# so this passes every ref but refs/heads/main and does nothing else.
+[ "$1" = prepared ] || { cat > /dev/null; exit 0; }
+# No move passes: packing writes the ref as it is and prunes the loose file, a checkout rewrites it.
+# git cannot tell `update-ref -d main <exact old>` from that prune, so that one form passes too.
+cur=$(git rev-parse -q --verify refs/heads/main 2>/dev/null) || cur=
+z=0000000000000000000000000000000000000000
+hit=
+while read -r old new ref; do
+  [ "$ref" = refs/heads/main ] || continue
+  [ "$new" = "$cur" ] && continue
+  [ "$new" = "$z" ] && [ "$old" = "$cur" ] && [ -n "$cur" ] && continue
+  hit=1
+done
+[ -n "$hit" ] || exit 0
+t=$(git rev-parse --git-common-dir)/gpui-land.token
+[ -n "${GPUI_LAND:-}" ] && [ -f "$t" ] && [ "$GPUI_LAND" = "$(cat "$t")" ] && exit 0
+echo "refused: main moves only through scripts/gpui/land.sh, for a range the reviewer OKed." >&2
+echo "Commit on your own branch (gpui-<lane>) in your own worktree: docs/gpui/LANES.md" >&2
+exit 1

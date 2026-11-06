@@ -1,0 +1,7 @@
+{"$":"TurnChanged","thread":"t1700000010-2","state":"running","at":1793864163}
+{"$":"SessionSet","id":"t1700000010-2","session":"AS1","at":1793864163}
+{"$":"SettingSet","key":"tok.basis.t1700000010-2","value":"x:AS1:0/0/0/0/0","at":1793864163}
+{"$":"AskOpened","id":"q1793864163-22","thread":"t1700000010-2","kind":"approval","tool":"execute","detail":"ls","options":"","at":1793864163}
+{"$":"ActivityLogged","thread":"t1700000010-2","act":"T1-30","tone":"tool","kind":"shell","summary":"Run ls","at":1793864163}
+{"$":"MessagePosted","thread":"t1700000010-2","msg":"c1793864163-31-31","role":"assistant","text":"askingECHO: /backplane_instructions>\n\nzq perm please","at":1793864163}
+{"$":"TurnChanged","thread":"t1700000010-2","state":"completed","at":1793864163}

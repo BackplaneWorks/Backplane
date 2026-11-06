@@ -1,0 +1,15 @@
+{"$":"ProjectCreated","id":"p1","title":"proj","root":"/r","at":1793900000}
+{"$":"ThreadCreated","id":"t1","project":"p1","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1793900001}
+{"$":"ThreadCreated","id":"t2","project":"p1","title":"U","env":"local","branch":"","worktree":"","provider":"codex","model":"m","at":1793900002}
+{"$":"TurnUsage","thread":"t1","provider":"claude","model":"opus","key":"k","input":10,"cread":20,"cwrite":30,"output":40,"reasoning":5,"cost":700,"known":"icwotc","basis":"b","at":1793900042}
+{"$":"TurnUsage","thread":"t1","provider":"claude","model":"opus","key":"k2","input":10,"cread":20,"cwrite":30,"output":40,"reasoning":5,"cost":700,"known":"icwotc","basis":"b","at":1793900100}
+{"$":"TurnUsage","thread":"t2","provider":"codex","model":"","key":"k","input":10,"cread":20,"cwrite":30,"output":40,"reasoning":5,"cost":700,"known":"icwotc","basis":"b","at":1793900043}
+{"$":"TurnUsage","thread":"t1","provider":"claude","model":"opus","key":"k","input":10,"cread":20,"cwrite":30,"output":40,"reasoning":5,"cost":700,"known":"i","basis":"b","at":1796000000}
+{"$":"TurnUsage","thread":"t1","provider":"claude","model":"opus","key":"k","input":10,"cread":20,"cwrite":30,"output":40,"reasoning":5,"cost":700,"known":"icwotc","basis":"b","at":951868800}
+{"$":"TurnUsage","thread":"ghost","provider":"claude","model":"opus","key":"k","input":10,"cread":20,"cwrite":30,"output":40,"reasoning":5,"cost":700,"known":"","basis":"b","at":1793900044}
+{"$":"SettingSet","key":"tok.epoch","value":"e1","at":1793900045}
+{"$":"TurnUsage","thread":"t1","provider":"claude","model":"opus","key":"k","input":10,"cread":20,"cwrite":30,"output":40,"reasoning":5,"cost":700,"known":"icwotc","basis":"b","at":1793900046}
+{"$":"TurnUsage","thread":"t1","provider":"grok","model":"a/b|c","key":"k","input":10,"cread":20,"cwrite":30,"output":40,"reasoning":5,"cost":700,"known":"icwotc","basis":"b","at":1793900047}
+{"$":"SettingSet","key":"tok.recount","value":"r","at":1793900048}
+{"$":"TurnUsage","thread":"t1","provider":"claude","model":"opus","key":"k","input":10,"cread":20,"cwrite":30,"output":40,"reasoning":5,"cost":700,"known":"icwotc","basis":"b","at":1735689600}
+{"$":"TurnUsage","thread":"t1","provider":"claude","model":"opus","key":"k","input":10,"cread":20,"cwrite":30,"output":40,"reasoning":5,"cost":700,"known":"icwotc","basis":"b","at":1767225599}

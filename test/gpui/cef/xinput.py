@@ -1,0 +1,39 @@
+#!/usr/bin/env python3
+"""Real X input through XTest (no xdotool here): xinput.py move X Y | click X Y [button] | type TEXT | key KEYSYM-NAME | pos
+Uses $DISPLAY. Events go through the X server, so they reach the GPUI window exactly like a person's mouse and keyboard."""
+import ctypes, ctypes.util, os, sys, time
+x11 = ctypes.CDLL(ctypes.util.find_library('X11')); xt = ctypes.CDLL(ctypes.util.find_library('Xtst'))
+x11.XOpenDisplay.restype = ctypes.c_void_p; x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+x11.XStringToKeysym.restype = ctypes.c_ulong; x11.XStringToKeysym.argtypes = [ctypes.c_char_p]
+x11.XKeysymToKeycode.restype = ctypes.c_ubyte; x11.XKeysymToKeycode.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+x11.XFlush.argtypes = [ctypes.c_void_p]; x11.XSync.argtypes = [ctypes.c_void_p, ctypes.c_int]
+xt.XTestFakeMotionEvent.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_ulong]
+xt.XTestFakeButtonEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int, ctypes.c_ulong]
+xt.XTestFakeKeyEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int, ctypes.c_ulong]
+d = x11.XOpenDisplay(os.environ.get('DISPLAY', ':0').encode())
+if not d: sys.exit('cannot open display')
+def move(x, y): xt.XTestFakeMotionEvent(d, -1, int(x), int(y), 0); x11.XSync(d, 0); time.sleep(0.05)
+def click(b=1): xt.XTestFakeButtonEvent(d, b, 1, 0); x11.XSync(d, 0); time.sleep(0.06); xt.XTestFakeButtonEvent(d, b, 0, 0); x11.XSync(d, 0); time.sleep(0.05)
+def key(name, shift=False):
+    ks = x11.XStringToKeysym(name.encode()); kc = x11.XKeysymToKeycode(d, ks)
+    if not kc: sys.exit('no keycode for ' + name)
+    sk = x11.XKeysymToKeycode(d, x11.XStringToKeysym(b'Shift_L'))
+    if shift: xt.XTestFakeKeyEvent(d, sk, 1, 0)
+    xt.XTestFakeKeyEvent(d, kc, 1, 0); x11.XSync(d, 0); time.sleep(0.03); xt.XTestFakeKeyEvent(d, kc, 0, 0)
+    if shift: xt.XTestFakeKeyEvent(d, sk, 0, 0)
+    x11.XSync(d, 0); time.sleep(0.04)
+NAMES = {' ': 'space', '.': 'period', ',': 'comma', '/': 'slash', ':': 'colon', '-': 'minus', '_': 'underscore', '@': 'at'}
+cmd, a = sys.argv[1], sys.argv[2:]
+if cmd == 'move': move(a[0], a[1])
+elif cmd == 'click': move(a[0], a[1]); click(int(a[2]) if len(a) > 2 else 1)
+elif cmd == 'type':
+    for ch in a[0]:
+        name = NAMES.get(ch, ch); key(name, shift=ch.isupper() or ch in ':_@')
+elif cmd == 'key': key(a[0])
+elif cmd == 'drag':  # drag X0 Y0 X1 Y1: the left button down at the first point, moved in steps, up at the second
+    x0, y0, x1, y1 = [float(v) for v in a[:4]]; move(x0, y0); xt.XTestFakeButtonEvent(d, 1, 1, 0); x11.XSync(d, 0); time.sleep(0.08)
+    for i in range(1, 11): move(x0 + (x1 - x0) * i / 10, y0 + (y1 - y0) * i / 10)
+    xt.XTestFakeButtonEvent(d, 1, 0, 0); x11.XSync(d, 0); time.sleep(0.05)
+elif cmd == 'dblclick': move(a[0], a[1]); click(1); click(1)
+elif cmd == 'wheel': move(a[0], a[1]); click(4 if int(a[2]) > 0 else 5)
+x11.XFlush(d)

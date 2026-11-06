@@ -21,7 +21,7 @@
     <application
         android:largeHeap="true"
         android:name=".BackplaneApp"
-        android:label="Backplane"
+        android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
         android:networkSecurityConfig="@xml/network"
@@ -32,17 +32,7 @@
             android:launchMode="singleTop"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|fontScale|density"
             android:windowSoftInputMode="adjustResize">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-            <!-- a pairing link: backplane://pair?url=http://host:3787/%23token=... -->
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="backplane" />
-            </intent-filter>
+            <!-- classic (Bend bridge) screens: not the launcher in the data build -->
             <!-- text, photos and files shared into the app go to the page's composer -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
@@ -58,12 +48,25 @@
             </intent-filter>
             <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
         </activity>
-        <!-- the pairing code scanner (Scanner.kt) -->
+        <!-- the data/1 app (docs/gpui/PHONE-DATA.md): native screens over plain data; the launcher -->
         <activity
-            android:name=".ScannerActivity"
-            android:exported="false"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize"
-            android:theme="@android:style/Theme.Material.NoActionBar" />
+            android:name=".DataActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|fontScale|density"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- a pairing link: backplane://pair?url=http://host:3787/%23token=... -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="${urlScheme}" />
+            </intent-filter>
+        </activity>
         <!-- the camera's photo for a page's file field -->
         <provider
             android:name="androidx.core.content.FileProvider"

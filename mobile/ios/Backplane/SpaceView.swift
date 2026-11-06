@@ -157,7 +157,7 @@ private struct SpaceLeaf: View {
                 .background(tint.opacity(0.15), in: .capsule)
         case "code":
             ScrollView(.horizontal) {
-                Text(block.text ?? "").font(.caption.monospaced()).textSelection(.enabled).padding(10)
+                Text(block.text ?? "").font(.mono(.caption)).textSelection(.enabled).padding(10)
             }
             .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 8))
         default:

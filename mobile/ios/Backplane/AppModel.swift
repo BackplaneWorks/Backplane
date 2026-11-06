@@ -66,6 +66,11 @@ final class AppModel {
     @ObservationIgnored private var restoredAt: [String: UInt64] = [:]
     @ObservationIgnored private var wantsUsage = false
     @ObservationIgnored private var readingPages: [String: (seen: String, count: Int, away: Bool)] = [:]
+    // Skip pressed while the hub view was not ready (see act)
+    var tourHeld = false
+    #if DEBUG
+    var showFonts = false
+    #endif
     var contentReady: Bool {
         guard ready, !cachedPresentation, let screen else { return false }
         if startup[screen.hub] == .compatibilityChosen { return conn[screen.hub]?.phase == .online && conn[screen.hub]?.stage == "live" }
@@ -115,6 +120,7 @@ final class AppModel {
               let screen, attempt.nav == nil || attempt.nav == Self.nav(screen) else { return }
         attempt.modelReady = true
         performanceAttempt = attempt
+        if attempt.operation == .startup { Boot.mark("model-ready") }
         PerformanceTrace.shared.end(.modelReady, operation: attempt.operation, started: attempt.started)
     }
 
@@ -127,6 +133,7 @@ final class AppModel {
         let isFresh = fresh && contentReady && screen?.thread?.id == thread && revision == performanceRevision
         if !attempt.usefulDisplay {
             attempt.usefulDisplay = true
+            if attempt.operation == .startup { Boot.mark(fresh ? "first-display-fresh" : "first-display") }
             attempt.freshDisplay = isFresh
             PerformanceTrace.shared.end(.display, operation: attempt.operation, started: attempt.started,
                                         outcome: isFresh ? .success : .stale)
@@ -229,8 +236,15 @@ final class AppModel {
     @ObservationIgnored private var sentView = false
     let settings = AppSettings.shared
     // the screen unless Classic screens: the hub's phone web client (WebShell.swift)
+    #if !GPUI_NATIVE
     let web = WebShell()
+    #endif
+    #if GPUI_NATIVE
+    // the GPUI experiment's build: the native screens, with no web shell and no toggle
+    var webShown: Bool { false }
+    #else
     var webShown: Bool { !links.isEmpty && !settings.classic && !Self.nativeAutomation }
+    #endif
     // Debug builds driven from the environment (BACKPLANE_LINK, _ACTS,
     // _SELECT, _QUALIFICATION...) drive the native screens, unless
     // BACKPLANE_WEB=1
@@ -276,6 +290,10 @@ final class AppModel {
 
     // IDs and typed state only. Never include links, drafts, message bodies,
     // Foundation errors or the presentation JSON in qualification output.
+    var qualificationDetailsForLog: String {
+        let key = screen?.hub ?? links.first.flatMap(Pairing.key) ?? ""
+        return "ready=\(ready) cached=\(cachedPresentation) screen=\(screen != nil) startup=\(String(describing: startup[key])) phase=\(String(describing: conn[key]?.phase)) stage=\(conn[key]?.stage ?? "-") mark=\(String(describing: thinReady[key])) nav=\(screen.map(Self.nav) ?? "-") awaited=\(awaitedNav ?? "-")"
+    }
     var qualificationDetails: String {
         let key = screen?.hub ?? links.first.flatMap(Pairing.key) ?? ""
         let status = conn[key]
@@ -328,7 +346,7 @@ final class AppModel {
     }
 
     private func qualification(_ url: URL) -> Bool {
-        guard url.scheme == "backplane", url.host == "qualification",
+        guard url.scheme == AppIdentity.scheme, url.host == "qualification",
               let op = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "op" })?.value,
               ["disconnect", "reconnect"].contains(op) else { return false }
         qualificationDisconnected = op == "disconnect"
@@ -397,18 +415,21 @@ final class AppModel {
     }
 
     init() {
+        Boot.mark("init-enter")
         performanceStart(.startup)
         engine.onFlush = { [weak self] out, generation in
             Task { @MainActor [weak self] in self?.apply(out, generation: generation) }
         }
-        #if DEBUG
+        #if DEBUG || BP_MEASURE
         if let l = ProcessInfo.processInfo.environment["BACKPLANE_LINK"] { links = l.split(separator: " ").map(String.init) }
         #endif
+        Boot.mark("before-cache")
         let cacheStarted = PerformanceTrace.shared.begin()
         let cachedData = recentScreen.load(links: links, profile: Self.cid)
         let cachedScreen = cachedData.flatMap { try? JSONDecoder().decode(Screen.self, from: $0) }
         PerformanceTrace.shared.end(.cache, operation: .startup, started: cacheStarted,
                                     bytes: UInt64(cachedData?.count ?? 0), outcome: cachedScreen == nil ? .skipped : .success)
+        Boot.mark("cache-decoded")
         if cachedData != nil, cachedScreen == nil { NSLog("Backplane screen-cache miss_native_decode") }
         if let cached = cachedScreen {
             screen = cached
@@ -433,6 +454,7 @@ final class AppModel {
             } else if let tab = AppTab(rawValue: settings.defaultTab), tab != .settings { self.tab = tab }
             else { tab = cached.uber == nil ? .threads : .home }
         }
+        Boot.mark("cached-applied")
         notifier.open = { [weak self] id in self?.alertOpened(id) }
         paths.pathUpdateHandler = { [weak self] path in
             let names = path.availableInterfaces.map(\.name)
@@ -450,27 +472,61 @@ final class AppModel {
         }
         notifier.viewing = { [weak self] id in
             guard let self, self.active else { return false }
+            #if !GPUI_NATIVE
             if self.webShown { return self.webShows(id) }
+            #endif
             return self.tab != .settings && self.screen?.sel == id
         }
         notifier.remoteInFront = { [weak self] in self?.webShown == true }
+        #if !GPUI_NATIVE
         webWire()
+        #endif
         if let d = try? Data(contentsOf: Self.settingsFile), let m = try? JSONDecoder().decode([String: Settings].self, from: d) { hubSettings = m }
+        Boot.mark("init-tasks")
         let e = engine
+        // The engine starts now, off the main thread, while SwiftUI draws the cached screen: a Task made here only begins when the
+        // main thread is free again (about 400 ms after init on a relaunch, which is the first cached paint), and the engine's own
+        // start (140 ms) and first view (up to 360 ms cold) then ran after it.
+        let cid = Self.cid, drafts = UserDefaults.standard.string(forKey: "drafts") ?? "{}", list = settings.threadList
+        // the four language/renderer settings the main task applied one engine call at a time after the first view (about 400 ms
+        // cold, each a whole screen) go to the engine in the same chain
+        let lang = [("mailroom-renderer", "ios-v1"), ("lang-preview", settings.langPreview ? "1" : ""), ("lang", settings.lang), ("lang-os", Locale.preferredLanguages.first ?? "")]
+        let langGeneration = pairingGeneration
+        let early = Task.detached(priority: .userInitiated) { () -> (Out?, Out?, [Out?]) in
+            let started = await e.start(cid, drafts)
+            Boot.mark("engine-started")
+            let view = await e.local("view", list)
+            Boot.mark("local-view")
+            var langs: [Out?] = []
+            for (k, v) in lang { langs.append(await e.local(k, v)) }
+            Boot.mark("language-engine")
+            return (started, view, langs)
+        }
         Task {
-            apply(await e.start(Self.cid, UserDefaults.standard.string(forKey: "drafts") ?? "{}"))
-            apply(await e.local("view", settings.threadList))
-            await languageLocal(e)
+            Boot.mark("task-begin")
+            let (started, view, langs) = await early.value
+            Boot.mark("early-awaited")
+            apply(started)
+            Boot.mark("applied-started")
+            apply(view)
+            Boot.mark("applied-view")
+            for o in langs {
+                guard langGeneration == pairingGeneration else { break }
+                apply(o, generation: langGeneration)
+            }
+            Boot.mark("language")
             // Bounded choices only; a miss never opens the canonical StateStore.
             let paired = links, profile = Self.cid, store = presentationStore
             if let text = await Task.detached(priority: .userInitiated, operation: { store.load(links: paired, profile: profile) }).value, paired == links {
                 let restored = await e.loadPresentation(text)
                 if paired == links { apply(restored) }
             }
+            Boot.mark("presentation")
             ready = true
             island = IslandController { [weak self] kind, token, hub in self?.register(kind, token, hub: hub) }
             connect()
-            #if DEBUG
+            Boot.mark("connect-called")
+            #if DEBUG || BP_MEASURE
             // headless checks pair from the environment: no permission prompt over the screen
             if ProcessInfo.processInfo.environment["BACKPLANE_LINK"] == nil, !links.isEmpty { notifier.setUp() }
             #else
@@ -635,24 +691,31 @@ final class AppModel {
     // hub's page: an id the phones' client qualified, "host:port|id",
     // names its hub), else the native screens select it
     private func alertOpened(_ id: String) {
+        #if GPUI_NATIVE
+        act("select", id)
+        #else
         guard webShown else { act("select", id); return }
         if let owner = WebShell.owner(id), owner != web.hub, links.contains(where: { Pairing.key($0) == owner }) {
             showWeb(owner)
         }
         web.open(id)
+        #endif
     }
 
+    #if !GPUI_NATIVE
     // whether the page shows this thread (its alert stays quiet then)
     private func webShows(_ id: String) -> Bool {
         let local = WebShell.local(id)
         return !local.isEmpty && local == web.thread && (WebShell.owner(id) ?? web.hub) == web.hub
     }
+    #endif
 
     // a hub's name as its machine calls itself, else its address
     func hubName(_ key: String) -> String {
         screen?.hubs.first(where: { $0.key == key })?.name ?? key
     }
 
+    #if !GPUI_NATIVE
     private func webWire() {
         web.pair = { [weak self] url in _ = self?.open(url) }
         web.switchTo = { [weak self] key, url in
@@ -676,10 +739,12 @@ final class AppModel {
             self.notifier.post(thread: thread, key: key, title: title, body: body)
         }
     }
+    #endif
 
     // the page of Pairing.key prefer (a hub just paired), else of the hub
     // on screen, else of the one shown last, else of the newest paired
     func syncWeb(prefer: String? = nil) {
+        #if !GPUI_NATIVE
         guard webShown else { return }
         let keys = links.compactMap(Pairing.key)
         let last = UserDefaults.standard.string(forKey: "web.hub")
@@ -688,12 +753,15 @@ final class AppModel {
             return
         }
         showWeb(key)
+        #endif
     }
 
     func showWeb(_ key: String, at url: URL? = nil) {
+        #if !GPUI_NATIVE
         guard let link = links.first(where: { Pairing.key($0) == key }) else { return }
         UserDefaults.standard.set(key, forKey: "web.hub")
         web.show(key, link: link, at: url)
+        #endif
     }
 
     // the hubs sheet over the page (backplaneApp.addHub)
@@ -1073,6 +1141,10 @@ final class AppModel {
     }
 
     private func act(_ action: String, _ value: String, continuingViewerLoad: Bool, openStarAfterApply: Bool = false) {
+        // Skip with a step on screen but the hub's view not ready (a stale or failing
+        // view cannot carry the action): the sheet goes down on this device at once;
+        // it may come back when the hub is ready and still holds the tour
+        if action == "ob-skip", !contentReady { tourHeld = true }
         if action == "view", value.isEmpty {
             if let token = viewerClose.current { closeViewer(token) }
             return
@@ -1123,10 +1195,16 @@ final class AppModel {
                     nav: Self.nav(s), epoch: status.epoch, pairing: pairingGeneration))
                 return
             }
-            guard ["select", "bot", "room", "remote", "uber", "uber-bot", "tz-report"].contains(action) else { return }
+            #if DEBUG
+            if !["select", "bot", "room", "remote", "uber", "uber-bot", "tz-report", "ob-next", "ob-back", "ob-skip", "ob-open"].contains(action) { NSLog("Backplane act dropped (content not ready) %@ details=%@", action, qualificationDetailsForLog) }
+            #endif
+            guard ["select", "bot", "room", "remote", "uber", "uber-bot", "tz-report", "ob-next", "ob-back", "ob-skip", "ob-open"].contains(action) else { return }
             earlyActions.removeAll { $0.0 == action }
             let targetHub = links.compactMap(Pairing.key).first { value.hasPrefix($0 + "|") } ?? screen?.hub
             let configured = targetHub.map { startup[$0] == .thin || startup[$0] == .compatibilityChosen } ?? false
+            #if DEBUG
+            if action.hasPrefix("ob-") { NSLog("Backplane tour act %@ early: ready=%@ configured=%@ hub=%@", action, String(ready), String(configured), targetHub ?? "-") }
+            #endif
             if ready, configured, action != "tz-report" {
                 let e = engine
                 let generation = pairingGeneration
@@ -1973,19 +2051,49 @@ final class AppModel {
 
     private func publishDraft(_ thread: String, text: String, edit: UInt64) {
         let generation = pairingGeneration
+        #if DEBUG
+        let t0 = CACurrentMediaTime(), bytes = text.utf8.count
+        #endif
         engine.draftAtNow(thread, text: text, edit: edit, generation: generation) { [weak self] out in
-            Task { @MainActor [weak self] in self?.apply(out, generation: generation) }
+            #if DEBUG
+            let t1 = CACurrentMediaTime()
+            #endif
+            Task { @MainActor [weak self] in
+                #if DEBUG
+                let t2 = CACurrentMediaTime()
+                self?.apply(out, generation: generation)
+                if Stall.on { NSLog("Backplane draft round trip: engine %.1f ms, hop to main %.1f ms, apply %.1f ms draft=%d", (t1 - t0) * 1000, (t2 - t1) * 1000, (CACurrentMediaTime() - t2) * 1000, bytes) }
+                #else
+                self?.apply(out, generation: generation)
+                #endif
+            }
         }
     }
     func editComposer(_ text: String, for thread: String) {
         guard canEditComposer(for: thread) else { return }
+        #if DEBUG
+        Stall.draftBytes = text.utf8.count
+        let m0 = CACurrentMediaTime()
+        #endif
         let edit = composerDrafts.change(thread, text)
         composerOwner = thread
+        #if DEBUG
+        let m1 = CACurrentMediaTime()
+        #endif
         composer = text
+        #if DEBUG
+        let m2 = CACurrentMediaTime()
+        #endif
         Self.keep(thread, text)
+        #if DEBUG
+        let m3 = CACurrentMediaTime()
+        #endif
         // This private write never sends a network request, even while offline.
         localDrafts[thread] = text
         publishDraft(thread, text: text, edit: edit)
+        #if DEBUG
+        if Stall.on { NSLog("Backplane edit sync: change %.1f, composer %.1f, keep(UserDefaults) %.1f, rest %.1f ms draft=%d", (m1 - m0) * 1000, (m2 - m1) * 1000, (m3 - m2) * 1000, (CACurrentMediaTime() - m3) * 1000, text.utf8.count) }
+        #endif
     }
     func sendComposer(_ action: String = "send", for thread: String) {
         guard canSendComposer(for: thread), ["send", "send-alt"].contains(action) else { return }
@@ -1998,6 +2106,9 @@ final class AppModel {
         engine.sendAtNow(thread, action: action, text: text, edit: edit, generation: generation) { [weak self] out in
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                #if DEBUG
+                if out == nil { NSLog("Backplane send refused: draft=%d chars action=%@ %@", text.count, action, self.qualificationDetailsForLog) }
+                #endif
                 if out == nil, generation == self.pairingGeneration { self.restoreComposer(thread, text: text, edit: edit) }
                 self.apply(out, generation: generation)
             }
@@ -2070,7 +2181,7 @@ final class AppModel {
         if qualification(url) { return true }
         #endif
         // the island's tap (backplane://open?thread=…) opens the thread in the page
-        if webShown, url.scheme == "backplane", url.host == "open",
+        if webShown, url.scheme == AppIdentity.scheme, url.host == "open",
            let thread = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "thread" })?.value,
            !thread.isEmpty {
             alertOpened(thread)
@@ -2217,7 +2328,9 @@ final class AppModel {
         }
         if yes, contentReady, let s = screen { island?.show(s.islands ?? [], foreground: true) }
         if yes { performanceReady() }
+        #if !GPUI_NATIVE
         if webShown { web.foreground(yes) }
+        #endif
     }
 
     private func observeThinPresenting(_ update: SyncUpdate, epoch: UInt64) {
@@ -2292,6 +2405,7 @@ final class AppModel {
             if conn[update.hub] != status { conn[update.hub] = status }
             if status.phase == .online { hubs[update.hub]?.ready() }
             if startup[update.hub] == .thin, update.phase == "failed" {
+                NSLog("Backplane view failed detail=%@", update.detail ?? "-")
                 hubs[update.hub]?.reconnect(.view)
             }
         }
@@ -2459,11 +2573,56 @@ final class AppModel {
                         // "!step": at once, not two seconds after the one before
                         if step.hasPrefix("!") { step.removeFirst() } else { try? await Task.sleep(for: .seconds(2)) }
                         let kv = step.split(separator: "=", maxSplits: 1).map(String.init)
+                        // "@pagenext"/"@pageprev": the sidebar pager's control, as its button does; "@pager": log it
+                        if kv[0] == "@pagenext" || kv[0] == "@pageprev" || kv[0] == "@pager" {
+                            let pg = self.screen?.projects.first?.threadsPage ?? (self.screen?.view == "active" ? self.screen?.sidebarPages?.first?.active : self.screen?.sidebarPages?.first?.projects)
+                            if kv[0] == "@pager" {
+                                NSLog("Backplane pager offset=%d total=%d limit=%d next=%@ prev=%@ projects=%d view=%@", pg?.offset ?? -1, pg?.total ?? -1, pg?.limit ?? -1,
+                                      String(pg?.next != nil), String(pg?.previous != nil), (self.screen?.projects.reduce(0) { $0 + $1.threads.count } ?? 0) + (self.screen?.active?.count ?? 0), self.screen?.view ?? "-")
+                            } else if let c = kv[0] == "@pagenext" ? pg?.next : pg?.previous { self.act(c.action, c.value) }
+                            continue
+                        }
+                        // "@keys=abc": characters typed one after another (150 ms apart), each timed by Stall.key (BACKPLANE_STALL=1)
+                        if kv[0] == "@keys", kv.count > 1 {
+                            for ch in kv[1] {
+                                Stall.key()
+                                self.draft(self.composer + String(ch))
+                                try? await Task.sleep(for: .milliseconds(150))
+                            }
+                            continue
+                        }
+                        if kv[0] == "@fonts" { self.showFonts = true; continue }
                         if kv[0] == "@times" { NSLog("Backplane taps %@", tapTimes.joined(separator: "; ")); continue }
                         // "@type=<text>": the composer's text, as typing it does (editComposer: one key's path)
                         if kv[0] == "@type" { draft(kv.count > 1 ? kv[1] : ""); continue }
                         // "@send": the composer's send button
                         if kv[0] == "@send" { send(); continue }
+                        // composer text-view drivers: "@ime=<text>" sets marked text as an IME does, "@imecommit=<text>" commits it,
+                        // "@undo"/"@redo", "@insert=<text>" (a paste of text), "@sel=<loc>,<len>", "@pasteimg" (the paste path with a picture),
+                        // "@cstate" logs the view's text, marked range and the model's draft
+                        if kv[0].hasPrefix("@ime") || ["@undo", "@redo", "@insert", "@sel", "@cstate", "@pasteimg", "@hwreturn"].contains(kv[0]) {
+                            if let v = ComposerHandle.view {
+                                switch kv[0] {
+                                case "@ime": v.becomeFirstResponder(); v.setMarkedText(kv.count > 1 ? kv[1] : "", selectedRange: NSRange(location: (kv.count > 1 ? kv[1] : "").utf16.count, length: 0))
+                                case "@imecommit": v.insertText(kv.count > 1 ? kv[1] : ""); v.unmarkText()
+                                case "@undo": v.undoManager?.undo()
+                                case "@redo": v.undoManager?.redo()
+                                case "@insert": v.insertText(kv.count > 1 ? kv[1] : "")
+                                case "@sel":
+                                    let p = (kv.count > 1 ? kv[1] : "0,0").split(separator: ",").compactMap { Int($0) }
+                                    if p.count == 2 { v.selectedRange = NSRange(location: p[0], length: p[1]) }
+                                case "@pasteimg":
+                                    UIPasteboard.general.image = UIGraphicsImageRenderer(size: CGSize(width: 40, height: 40)).image { c in UIColor.red.setFill(); c.fill(CGRect(x: 0, y: 0, width: 40, height: 40)) }
+                                    v.paste(nil)
+                                case "@hwreturn": (v as? ComposerUITextView)?.onSend?()
+                                default: break
+                                }
+                                if kv[0] == "@cstate" || kv[0].hasPrefix("@ime") {
+                                    NSLog("Backplane composer [%@] view=%@ marked=%@ sel=%d,%d model=%@ undo=%@", kv[0] == "@cstate" && kv.count > 1 ? kv[1] : kv[0], String(v.text.prefix(40)), String(v.markedTextRange != nil), v.selectedRange.location, v.selectedRange.length, String(self.composer.prefix(40)), String(v.undoManager?.canUndo ?? false))
+                                }
+                            } else { NSLog("Backplane composer none") }
+                            continue
+                        }
                         // "@renders": how often each counted view's body ran since the last (RenderCount)
                         if kv[0] == "@renders" { NSLog("Backplane renders %@", RenderCount.take()); continue }
                         if kv[0] == "@open", kv.count > 1 {
