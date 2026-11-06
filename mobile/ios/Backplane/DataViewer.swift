@@ -18,6 +18,14 @@ struct DProjectFiles: Decodable { var root: String; var pcb: String; var sch: St
 struct DMech: Decodable { var parts: [String]
     enum CodingKeys: String, CodingKey { case parts }
     init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); parts = (try? c.decode([String].self, forKey: .parts)) ?? [] } }
+/// `viewer.layers`: what a press does, and what to draw; the rules are the hub's (present/viewer.rs `layer_reply`).
+struct DLayerRow: Decodable, Hashable { var layer: Int; var name: String; var on: Bool; var active: Bool }
+struct DLayers: Decodable, Equatable {
+    var own: UInt32; var focus: String; var off: UInt32; var dim: UInt32; var lift: Int; var layerBits: UInt32
+    var layerHead: String; var layerMode: Int; var layerModes: Bool; var layerReset: Bool; var layerList: [DLayerRow]; var layerMarks: [DLayerRow]
+}
+struct DRef: Decodable, Hashable { var kind: String; var label: String; var commit: String }
+struct DRefs: Decodable { var refs: [DRef] }
 struct DInfo: Decodable { var info: String
     enum CodingKeys: String, CodingKey { case info }
     init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); info = c.str(.info) } }
@@ -27,6 +35,13 @@ extension DataClient {
     func watch(_ thread: String, kind: String, path: String = "") async throws {
         var p: [String: Any] = ["thread": thread, "kind": kind]; if !path.isEmpty { p["path"] = path }
         _ = try await call("viewer.watch", p, as: DEmpty.self)
+    }
+    func layers(_ kind: String, present: UInt32, own: UInt32, focus: String, action: String = "", value: String = "") async -> DLayers? {
+        try? await call("viewer.layers", ["kind": kind, "present": present, "off": own, "focus": focus, "action": action, "value": value])
+    }
+    func refs(_ thread: String) async -> [DRef] { ((try? await call("viewer.refs", ["thread": thread]) as DRefs)?.refs) ?? [] }
+    func compare(_ thread: String, kind: String, commit: String, bits: UInt32, path: String) async throws {
+        _ = try await call("viewer.compare", ["thread": thread, "kind": kind, "commit": commit, "bits": bits, "path": path], as: DEmpty.self)
     }
     func info(_ key: String, at: Int, idx: Int) async -> String { ((try? await call("viewer.info", ["key": key, "at": at, "idx": idx]) as DInfo)?.info) ?? "" }
     func entries(_ thread: String, path: String) async throws -> [DEntryRow] { (try await call("files.entries", ["thread": thread, "path": path]) as DEntries).entries }
@@ -44,9 +59,6 @@ extension DataClient {
 }
 
 private let tabs = ["Board", "Schematic", "3D", "Split", "Mech", "Files", "Diff", "Review", "Browser"]
-private let boardLayers = [12, 11, 10, 9, 8, 7, 6, 5, 13, 23, 24, 15, 2, 16, 3, 14, 4, 19, 20, 22, 21, 17, 1, 18, 0]
-private let boardNames = ["B.Fab", "B.Courtyard", "B.Paste", "B.Silkscreen", "B.Mask", "B.Cu", "In6.Cu", "In5.Cu", "In4.Cu", "In3.Cu", "In2.Cu", "In1.Cu", "F.Cu", "Pads", "F.Mask", "F.Paste", "F.Silkscreen", "F.Courtyard", "F.Fab", "User.Drawings", "User.Comments", "Margin", "Edge.Cuts", "Vias", "Holes"]
-private let schNames = ["page", "sheet fill", "body fill", "sheet", "graphic", "note", "body", "pin", "pin name", "pin number", "field", "field other", "bus", "bus entry", "wire", "no connect", "junction", "label", "global label", "hier label", "sheet name", "sheet file", "sheet pin", "dnp"]
 
 /// The Viewer the Metal view wants, with the defaults the hub's own view would send; only what the data app decides (layers, the picked piece) varies.
 private func plainViewer(open: String, source: String, picked: String, off: UInt32, dim: UInt32, lift: Int) -> Viewer? {
@@ -103,9 +115,9 @@ struct DataPlotTab: View {
     let path: String
     let has: Bool
     let none: String
-    @State private var off: UInt32 = 0
-    @State private var dim: UInt32 = 0
-    @State private var lift = 255
+    @State private var layers: DLayers?
+    @State private var refs: [DRef]?
+    @State private var comparing = ""
     @State private var picked = ""
     @State private var info = ""
     @State private var menu = false
@@ -116,8 +128,9 @@ struct DataPlotTab: View {
         let frame = client.plots.frame.flatMap { $0.key.hasPrefix(head) ? $0 : nil }
         let mesh = three ? client.plots.mesh.flatMap { $0.key.hasPrefix("2|") ? $0 : nil } : nil
         let present = Set(frame?.chunks.map { $0.layer } ?? [])
+        let bits = present.filter { $0 >= 0 && $0 < 32 }.reduce(UInt32(0)) { $0 | (1 << UInt32($1)) }
         ZStack(alignment: .topLeading) {
-            if let v = plainViewer(open: three ? "3d" : kind, source: kind + "|" + path, picked: picked, off: off, dim: dim, lift: lift) {
+            if let v = plainViewer(open: three ? "3d" : kind, source: kind + "|" + path, picked: picked, off: layers?.off ?? 0, dim: layers?.dim ?? 0, lift: layers?.lift ?? 255) {
                 PlotCanvasView(frame: (frame?.none.isEmpty ?? true) ? frame : nil, mesh: mesh, scope: thread.id, viewer: v, pick: { p in
                     picked = p
                     let ps = p.split(separator: ",").compactMap { Int($0) }
@@ -128,10 +141,17 @@ struct DataPlotTab: View {
             let say = !has ? none : !error.isEmpty ? error : (frame?.none ?? "").isEmpty ? (mesh?.none ?? "") : frame!.none
             if !say.isEmpty { Text(say).font(.system(.footnote, design: .monospaced)).foregroundStyle(.secondary).padding(24).frame(maxWidth: .infinity, maxHeight: .infinity) }
             else if frame == nil && (!three || mesh == nil) { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
-            if !three && !present.isEmpty {
-                Button { menu.toggle() } label: { Text("Layers").font(.system(.footnote, design: .monospaced)).padding(.horizontal, 10).padding(.vertical, 6).background(BackplaneDesign.raised).overlay(Rectangle().stroke(.secondary.opacity(0.4))) }
-                    .padding(8).accessibilityIdentifier("data.viewer.layers")
-                if menu { DataLayerMenu(sch: kind == "schematic", present: present, off: $off, dim: $dim, lift: $lift).padding(.top, 44).padding(.leading, 8) }
+            if !three && !present.isEmpty && client.features.contains("layers"), let l = layers {
+                HStack(spacing: 6) {
+                    chip(l.layerHead, id: "data.viewer.layers", on: l.layerMode > 0) { refs = nil; menu.toggle() }
+                    if comparing.isEmpty {
+                        chip("Compare", id: "data.viewer.compare", on: refs != nil) { menu = false; if refs != nil { refs = nil } else { Task { refs = await client.refs(thread.id) } } }
+                    } else {
+                        chip("Close compare", id: "data.viewer.compare.close", on: true) { close() }
+                    }
+                }.padding(8)
+                if menu { DataLayerMenu(layers: l, present: present) { a, v in act(a, v, bits) }.padding(.top, 44).padding(.leading, 8) }
+                if let rows = refs { DataRefMenu(rows: rows) { c in refs = nil; open(c) }.padding(.top, 44).padding(.leading, 8) }
             }
             if !info.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
@@ -143,35 +163,83 @@ struct DataPlotTab: View {
         .background(BackplaneDesign.panel.opacity(0.0))
         .task(id: kind + "|" + path + "|\(has)") {
             guard has else { return }
-            error = ""; off = 0; dim = 0; lift = 255; info = ""; picked = ""
+            error = ""; layers = nil; refs = nil; comparing = ""; info = ""; picked = ""
             do { try await client.watch(thread.id, kind: kind, path: path) } catch { self.error = error.localizedDescription }
         }
+        .task(id: "\(kind)|\(path)|\(bits)") { if !three && bits != 0 { act("", "", bits) } }
+    }
+    private func chip(_ label: String, id: String, on: Bool, _ tap: @escaping () -> Void) -> some View {
+        Button(action: tap) { Text(label).font(.system(.footnote, design: .monospaced)).foregroundStyle(on ? BackplaneDesign.accent : .primary).padding(.horizontal, 10).padding(.vertical, 6).background(BackplaneDesign.raised).overlay(Rectangle().stroke(on ? BackplaneDesign.accent : .secondary.opacity(0.4))) }
+            .accessibilityIdentifier(id)
+    }
+    /// A press: the hub answers what it does; a comparison on show keeps its marks to the active layer.
+    private func act(_ action: String, _ value: String, _ present: UInt32) {
+        Task {
+            guard let r = await client.layers(kind, present: present, own: layers?.own ?? 0, focus: layers?.focus ?? "", action: action, value: value) else { return }
+            let moved = (layers?.layerBits ?? 0) != r.layerBits
+            layers = r
+            if moved && !comparing.isEmpty { try? await client.compare(thread.id, kind: kind, commit: comparing, bits: r.layerBits, path: path) }
+        }
+    }
+    private func open(_ commit: String) {
+        Task { do { try await client.compare(thread.id, kind: kind, commit: commit, bits: layers?.layerBits ?? 0, path: path); comparing = commit } catch { self.error = error.localizedDescription } }
+    }
+    private func close() {
+        comparing = ""
+        Task { do { try await client.watch(thread.id, kind: kind, path: path) } catch { self.error = error.localizedDescription } }
     }
 }
 
-/// KiCad's high contrast: a box shows or hides a layer, a name makes it the active one (the rest dimmed), again brings all back.
+/// KiCad's high contrast, as the hub lists it: how the others show (a board), a box per layer (show or hide it), its name (make it the active one, again: all back), a comparison's marks last, Reset layers.
 struct DataLayerMenu: View {
-    let sch: Bool
+    let layers: DLayers
     let present: Set<Int>
-    @Binding var off: UInt32
-    @Binding var dim: UInt32
-    @Binding var lift: Int
+    let act: (String, String) -> Void
     var body: some View {
-        let order = sch ? present.sorted() : boardLayers.filter { present.contains($0) }
         ScrollView {
             VStack(alignment: .leading, spacing: 8) {
-                ForEach(order, id: \.self) { l in
-                    HStack(spacing: 10) {
-                        let on = l < 0 || l > 31 || (off >> UInt32(l)) & 1 == 0
-                        Button { if l >= 0 && l < 32 { off ^= (1 << UInt32(l)) } } label: { Rectangle().fill(on ? BackplaneDesign.accent : Color.clear).frame(width: 14, height: 14).overlay(Rectangle().stroke(.secondary.opacity(0.5))) }
-                        Button {
-                            if lift == l { dim = 0; lift = 255 } else { dim = order.filter { $0 != l && $0 >= 0 && $0 < 32 }.reduce(UInt32(0)) { $0 | (1 << UInt32($1)) }; lift = l }
-                        } label: { Text((sch ? schNames : boardNames).indices.contains(l) ? (sch ? schNames : boardNames)[l] : "layer \(l)").font(.system(.footnote, design: .monospaced)).foregroundStyle(lift == l ? BackplaneDesign.accent : .primary) }
+                if layers.layerModes {
+                    HStack(spacing: 4) {
+                        ForEach(Array(["All", "Dim", "Only"].enumerated()), id: \.offset) { i, label in
+                            Button { act("mode", String(i)) } label: { Text(label).font(.system(.footnote, design: .monospaced)).foregroundStyle(layers.layerMode == i ? BackplaneDesign.accent : .primary).padding(.horizontal, 8).padding(.vertical, 3).overlay(Rectangle().stroke(layers.layerMode == i ? BackplaneDesign.accent : .secondary.opacity(0.4))) }
+                                .accessibilityIdentifier("data.layer.mode.\(i)")
+                        }
                     }
+                }
+                ForEach((layers.layerList + layers.layerMarks).filter { present.contains($0.layer) }, id: \.layer) { l in
+                    HStack(spacing: 10) {
+                        Button { act("toggle", String(l.layer)) } label: { Rectangle().fill(l.on ? BackplaneDesign.accent : Color.clear).frame(width: 14, height: 14).overlay(Rectangle().stroke(.secondary.opacity(0.5))) }
+                            .accessibilityIdentifier("data.layer.box.\(l.layer)")
+                        Button { act("pick", String(l.layer)) } label: { Text(l.name).font(.system(.footnote, design: .monospaced)).foregroundStyle(l.active ? BackplaneDesign.accent : .primary) }
+                            .accessibilityIdentifier("data.layer.name.\(l.layer)")
+                    }
+                }
+                if layers.layerReset {
+                    Button { act("reset", "") } label: { Text("Reset layers").font(.system(.footnote, design: .monospaced)).foregroundStyle(BackplaneDesign.accent) }
+                        .accessibilityIdentifier("data.layer.reset")
                 }
             }.padding(8)
         }
         .frame(maxHeight: 420).fixedSize(horizontal: true, vertical: false).background(BackplaneDesign.panel).overlay(Rectangle().stroke(.secondary.opacity(0.4))).accessibilityIdentifier("data.layer.menu")
+    }
+}
+
+/// The versions a comparison may take, as the hub lists them; a press shows the Diff against that one.
+struct DataRefMenu: View {
+    let rows: [DRef]
+    let pick: (String) -> Void
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 8) {
+                if rows.isEmpty { Text("No versions to compare with").font(.system(.footnote, design: .monospaced)).foregroundStyle(.secondary) }
+                ForEach(rows, id: \.self) { r in
+                    Button { pick(r.commit) } label: {
+                        HStack(spacing: 8) { Text(r.kind).foregroundStyle(.secondary); Text(r.label) }.font(.system(.footnote, design: .monospaced))
+                    }.accessibilityIdentifier("data.compare.\(r.commit)")
+                }
+            }.padding(8)
+        }
+        .frame(maxHeight: 420).fixedSize(horizontal: true, vertical: false).background(BackplaneDesign.panel).overlay(Rectangle().stroke(.secondary.opacity(0.4))).accessibilityIdentifier("data.compare.menu")
     }
 }
 

@@ -14,6 +14,8 @@ pub struct PlotView {
     pub bounds: Option<Bounds<Pixels>>,
     /// The Layers menu is open; the focus key as the person reads it, for its tooltip.
     pub layers_open: bool, pub layers_key: String,
+    /// The layers the plot on show has, a bit each, for the hub (viewers::layers::present_bits).
+    pub present: u32,
     /// CPU ms of the last canvas paints (bounded), for the e2e `plot_paint` metric.
     pub paint_ms: Vec<f32>,
     /// Where those paints go (ms per paint): the segment/polygon loop (culling + path building), lyon's tessellation (`PathBuilder::build`), and `paint_path` (submission).

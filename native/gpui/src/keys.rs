@@ -14,10 +14,11 @@ actions!(keys, [NewThread, OpenDiff, OpenFiles, StopTurn, ModelPicker, PrevThrea
 pub const FREE: &str = "!Composer && !TextInput && !PickInput && !AskInput && !ImpInput && !Viewer && !BrowserBar && !FilesPage";
 /// No text field has the keyboard (so a chord that edits text there is the field's: Option+digit types a character on a Mac, Ctrl+C copies).
 const NOT_MAC_COMPOSER: &str = "!Composer && !TextInput && !PickInput && !AskInput && !ImpInput";
-/// Not in any field or web page: Ctrl+H deletes a character in many text fields (a Mac's among them) and opens a web page's history, so there it stays theirs. It works from the plot, and with nothing focused.
 /// Where a bare backtick shows the terminal: the message box, or nowhere that types (a shell, another field and a viewer keep their backticks).
 const TERM_BARE: &str = "Composer || (!TextInput && !PickInput && !AskInput && !ImpInput && !Viewer && !BrowserBar && !FilesPage && !Terminal)";
-const NOT_TEXT: &str = "!Composer && !TextInput && !PickInput && !AskInput && !ImpInput && !BrowserBar && !BrowserView && !CefBar && !CefPage";
+/// Where Ctrl+H is the viewer's: everywhere but the small fields, the terminal and web pages, whose own it stays (it deletes a character in many fields and in a shell, and opens a web page's history).
+/// The composer is included, as in the old client: the board beside it answers without a click on the canvas. With no plot on show the key goes on to the composer (`key_layers`).
+const NOT_FIELD: &str = "!TextInput && !PickInput && !AskInput && !ImpInput && !Terminal && !BrowserBar && !BrowserView && !CefBar && !CefPage";
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Kind { Legacy, Rebind, Fixed }
@@ -115,7 +116,7 @@ pub fn bindings(l: &Local) -> Vec<KeyBinding> {
         KeyBinding::new(&k("new"), NewThread, None), KeyBinding::new(&k("diff"), OpenDiff, None), KeyBinding::new(&k("files"), OpenFiles, None),
         KeyBinding::new(&k("stop"), StopTurn, None), KeyBinding::new(&k("models"), ModelPicker, None),
         KeyBinding::new(&k("prev"), PrevThread, None), KeyBinding::new(&k("next"), NextThread, None),
-        KeyBinding::new(&k("uber"), UberChat, None), KeyBinding::new(&k("settle"), SettleThread, None), KeyBinding::new(&k("layers"), CycleLayers, Some(NOT_TEXT)), KeyBinding::new(&k("perf"), PerfOverlay, None),
+        KeyBinding::new(&k("uber"), UberChat, None), KeyBinding::new(&k("settle"), SettleThread, None), KeyBinding::new(&k("layers"), CycleLayers, Some(NOT_FIELD)), KeyBinding::new(&k("perf"), PerfOverlay, None),
         KeyBinding::new("/", FocusComposer, Some(FREE)),
         KeyBinding::new(&k("term"), ToggleTerminal, None), KeyBinding::new("`", ToggleTerminal, Some(TERM_BARE)), KeyBinding::new("shift-escape", DismissTerminal, None)]);
     let alt = if mac() { Some(NOT_MAC_COMPOSER) } else { None };
@@ -209,11 +210,14 @@ impl Backplane {
     /// A bare key does nothing while something covers the page.
     fn covered(&self) -> bool { self.screens.palette.open || self.screens.lightbox.is_some() || self.screens.picker_open || self.screens.acct.menu || crate::screens::settings::is_open(self) }
     fn key_rail(&mut self, a: &str, v: &str, cx: &mut Context<Self>) { if !self.covered() && self.data["thread"].is_object() { self.rail_press(a, v, cx); } }
-    /// Ctrl+H: the plot on show cycles its focus; on Split, the pane with the keyboard (the board when neither has it).
+    /// Ctrl+H: the plot on show cycles its focus; on Split, the pane with the keyboard (the board when neither has it, as from the composer). The hub is told which layers that plot has.
+    /// With no plot to act on the key is not spent: it goes on to whatever has the keyboard.
     fn key_layers(&mut self, window: &Window, cx: &mut Context<Self>) {
-        if self.covered() || !crate::viewers::layers::cycles(&self.data["thread"]) { return }
-        let schematic = self.screens.pv(1).focus.as_ref().map_or(false, |f| f.is_focused(window));
-        let _ = self.tx.try_send(Command::Action("view-layer-cycle".into(), if schematic { "schematic" } else { "" }.into())); cx.notify();
+        if self.covered() || !crate::viewers::layers::cycles(&self.data["thread"]) { cx.propagate(); return }
+        let split = self.data["thread"]["viewer"]["open"] == "split";
+        let schematic = split && self.screens.pv(1).focus.as_ref().map_or(false, |f| f.is_focused(window));
+        let present = self.screens.pv(if schematic { 1 } else if split { 2 } else { 0 }).present;
+        let _ = self.tx.try_send(Command::Action("view-layer-cycle".into(), crate::viewers::layers::cycle_value(schematic, present))); cx.notify();
     }
     fn key_go(&mut self, id: Option<String>, cx: &mut Context<Self>) { if let Some(id) = id { self.select_id(id, cx); self.want_focus = true; } }
     /// The overlay up or down. Going up it asks for one more frame, so a quiet window shows the numbers of the frame that opened it instead of "measuring"; that is the only frame it ever asks for.
@@ -353,10 +357,11 @@ mod tests {
     #[test] fn viewer_scope_keeps_its_keys_but_the_chords_work() {
         assert_eq!(d("ctrl-d", &["Viewer"]), "keys::OpenDiff"); assert_eq!(d("ctrl-p", &["Viewer"]), "keys::OpenFiles"); assert_eq!(d("m", &["Viewer"]), "");
     }
-    #[test] fn ctrl_h_cycles_layers_from_the_plot_and_stays_out_of_every_text_field() {
+    #[test] fn ctrl_h_cycles_layers_from_the_plot_and_the_composer_and_stays_out_of_the_small_fields() {
         assert_eq!(d("ctrl-h", &["Viewer"]), "keys::CycleLayers"); assert_eq!(d("ctrl-h", &[]), "keys::CycleLayers", "nothing focused");
         assert_eq!(d("ctrl-h", &["FilesPage"]), "keys::CycleLayers");
-        for c in ["Composer", "TextInput", "PickInput", "AskInput", "ImpInput", "BrowserBar", "BrowserView", "CefBar", "CefPage"] {
+        assert_eq!(d("ctrl-h", &["Composer"]), "keys::CycleLayers", "the old client's: no click on the canvas first");
+        for c in ["TextInput", "PickInput", "AskInput", "ImpInput", "Terminal", "BrowserBar", "BrowserView", "CefBar", "CefPage"] {
             assert_eq!(d("ctrl-h", &[c]), "", "{c} keeps Ctrl+H"); assert_eq!(d("ctrl-h", &["Viewer", c]), "", "{c} inside a viewer");
         }
         assert_eq!(d("ctrl-shift-h", &["Viewer"]), "keys::PerfOverlay", "Ctrl+Shift+H is the performance overlay, not layers");
@@ -365,7 +370,7 @@ mod tests {
     #[test] fn layer_focus_is_in_the_table_and_rebinds() {
         let x = find("layers").unwrap(); assert_eq!((x.key, x.kind), ("ctrl-h", Rebind)); assert_eq!(hint(&Local::default(), "layers"), "Ctrl+H");
         let mut l = Local::default();
-        assert!(l.set("shortcut", "layers\u{1f}ctrl-alt-h")); assert_eq!(does(&l, "ctrl-alt-h", &["Viewer"]), "keys::CycleLayers"); assert_eq!(does(&l, "ctrl-h", &["Viewer"]), ""); assert_eq!(does(&l, "ctrl-alt-h", &["Composer"]), "");
+        assert!(l.set("shortcut", "layers\u{1f}ctrl-alt-h")); assert_eq!(does(&l, "ctrl-alt-h", &["Viewer"]), "keys::CycleLayers"); assert_eq!(does(&l, "ctrl-h", &["Viewer"]), ""); assert_eq!(does(&l, "ctrl-alt-h", &["Composer"]), "keys::CycleLayers"); assert_eq!(does(&l, "ctrl-alt-h", &["AskInput"]), "");
     }
     #[test] fn sidebar_scope_numbers_and_neighbours() {
         assert_eq!(d("alt-1", &[]), "keys::Project1"); assert_eq!(d("alt-9", &[]), "keys::Project9"); assert_eq!(d("ctrl-1", &["Composer"]), "keys::Thread1"); assert_eq!(d("ctrl-9", &[]), "keys::Thread9");
