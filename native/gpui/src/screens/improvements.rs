@@ -748,8 +748,10 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, imp: &Imp) -> Option<AnyEl
     col = col.child(div().text_size(px(12.)).text_color(c("dim")).child(if public { "OS family and app release are included. Images and recordings stay local until you send them to the agent or attach them yourself on GitHub. Ctrl+Enter reviews the issue." } else if d.image.is_empty() && !(d.inc_rec && !d.recording.is_empty()) { "Choose an image or preview and select a recording before sending." } else if d.project.is_empty() { "Choose the Backplane source project before sending." } else { "Changes will be made in Backplane. Ctrl+Enter sends this request." }));
     col = col.child(div().id("imp-note").text_size(px(12.)).child(imp.note.clone()));
     col = col.child(div().flex().justify_end().child(button(cx, light, "primary", d.send_label(imp.busy), !imp.busy, true, false)));
-    Some(div().id("improvements").absolute().inset_0().occlude().bg(c("bg")).flex().flex_col()
+    // a floating window above the app: centred, bordered, shadowed, with the page dimmed behind it (a click on the dim leaves the panel as it is)
+    Some(div().id("improvements-float").absolute().inset_0().occlude().bg(gpui::hsla(0., 0., 0., 0.35)).flex().items_center().justify_center().p_6()
+      .child(div().id("improvements").w(px(760.)).max_w_full().max_h_full().h(px(760.)).overflow_hidden().bg(c("bg")).border_1().border_color(c("line")).shadow_lg().flex().flex_col()
         .child(div().h(px(36.)).flex_shrink_0().px_3().flex().items_center().gap_3().border_b_1().border_color(c("line")).child(div().flex_1().font_weight(FontWeight::BOLD).child("Improvements")).child(div().text_color(c("faint")).text_size(px(11.)).child("Ctrl+Alt+I"))
             .child(button(cx, light, "close", "Close", true, false, false)))
-        .child(div().id("improvements-body").flex_1().overflow_y_scroll().flex().justify_center().child(col)).into_any_element())
+        .child(div().id("improvements-body").flex_1().overflow_y_scroll().flex().justify_center().child(col))).into_any_element())
 }
