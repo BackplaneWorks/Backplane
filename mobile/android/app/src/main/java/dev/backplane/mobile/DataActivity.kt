@@ -26,10 +26,10 @@ class DataActivity : ComponentActivity() {
         intent.getStringExtra("thread")?.let { DataClient.openFromIntent = it }
         intent.data?.let { route(it) }
     }
-    // backplane://thread/<id> opens that thread; any other link of this app's scheme pairs
+    // backplane://thread/<id> opens that thread; any other link of this app's scheme asks before it pairs
     private fun route(u: android.net.Uri) {
         if (u.scheme != BuildConfig.URL_SCHEME || u.host == "google") return
-        if (u.host == "thread") u.pathSegments.firstOrNull()?.let { DataClient.openFromIntent = it } else DataClient.pair(u.toString())
+        if (u.host == "thread") u.pathSegments.firstOrNull()?.let { DataClient.openFromIntent = it } else DataClient.askLink = u.toString()
     }
     override fun onResume() { super.onResume(); DataClient.foreground = true; DataClient.foreground() }
     override fun onPause() { super.onPause(); DataClient.foreground = false }

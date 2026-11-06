@@ -44,6 +44,8 @@ object Pairing {
         val fields = Uri.parse("https://pair/?" + (Uri.parse(raw).encodedFragment ?: ""))
         return fields.queryParameterNames.any { it == "invite" || it == "code" }
     }
+    /** A short code on its own: it names no hub, and must not be taken for an address. */
+    fun bareCode(text: String): Boolean = Regex("[A-Z2-9]{4}[- ]?[A-Z2-9]{4}").matches(text.trim())
     fun codeLink(address: String, code: String): String? {
         val compact = code.replace(" ", "").replace("-", "").uppercase()
         if (!Regex("[A-Z2-9]{8}").matches(compact)) return null
