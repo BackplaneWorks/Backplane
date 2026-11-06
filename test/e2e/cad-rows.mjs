@@ -3,7 +3,7 @@
 import {writeFileSync,existsSync,readdirSync,readFileSync} from 'node:fs';
 import {startFixtureHub} from './lib/hubfx.mjs';
 import {client,sleep} from '../perf/lib.mjs';
-const [bin,out,port0]=process.argv.slice(2);process.env.NO_SCOPE='1';
+const [bin,out,port0]=process.argv.slice(2);process.env.NO_SCOPE='1';Object.assign(process.env,{GIT_AUTHOR_NAME:'e2e',GIT_AUTHOR_EMAIL:'e2e@x',GIT_COMMITTER_NAME:'e2e',GIT_COMMITTER_EMAIL:'e2e@x'}); // a release tags: git wants an identity
 const cli=process.env.KICAD_CLI||'/usr/bin/kicad-cli';const res=[];const rec=(id,check,ok,evidence)=>{const o={id,check,ok,evidence};res.push(o);console.log(JSON.stringify(o))};
 const fx=await startFixtureHub({bin,root:out,port:Number(port0||3860),threads:1,seedTurns:false});
 import('node:child_process').then(()=>{});
@@ -18,6 +18,7 @@ rec('S05','CAD page: FreeCAD row',!!rows.find(r=>r.label==='FreeCAD'),`FreeCAD r
 v.close();
 const r=await c.rpc('review.checks',{thread:th,trigger:'manual'},180000);const rep=r?.o?.result?.report||r?.o?.result||{};
 const txt=JSON.stringify(rep);rec('C02','hub runs kicad-cli ERC+DRC (review.checks)',r?.o?.ok===true&&!rep.err&&/Design checks/.test(txt),`ok=${r?.o?.ok} report ${txt.slice(0,360)}`);
+execSync(`git add -A && git -c user.name=e2e -c user.email=e2e@x commit -qm checks --allow-empty`,{cwd:fx.state.root+'/proj'}); // the checks wrote into .backplane; a release needs a clean tree
 const rel=await c.rpc('review.release',{thread:th,tag:'e2e-r1',publish:false,force:true},300000);const rt=JSON.stringify(rel?.o?.result||rel?.o).slice(0,500);
 const relDir=fx.state.root+'/proj/.backplane/releases/e2e-r1';let files=[];try{files=readdirSync(relDir,{recursive:true})}catch{}
 rec('C02','hub runs kicad-cli exports (review.release: gerbers, bom, ...)',files.length>0&&!JSON.parse(JSON.stringify(rel?.o?.result?.report?.err||'')),`files under ${relDir}: ${files.slice(0,12).join(', ')}; reply ${rt.slice(0,250)}`);
