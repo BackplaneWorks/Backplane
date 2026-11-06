@@ -95,7 +95,7 @@ wrap_life_span_handler! {
             let (Some(wi), Some(client)) = (wi, client) else { return true as _ };
             let (w, h) = self.tab.size(); let scale = self.tab.scale_milli.load(Ordering::Relaxed) as f32 / 1000.0;
             let tab = Tab::detached("", w, h, scale, self.tab.wake.clone());
-            *client = Some(client_for(&tab)); wi.windowless_rendering_enabled = true as _;
+            *client = Some(client_for(&tab)); wi.windowless_rendering_enabled = true as _; wi.runtime_style = RuntimeStyle::ALLOY;
             self.tab.st.lock().unwrap().popup_tabs.push(tab); let _ = self.tab.wake.try_send(());
             false as _
         }
@@ -239,7 +239,7 @@ impl Tab {
     pub fn open(url: &str, w: u32, h: u32, scale: f32, wake: async_channel::Sender<()>) -> Arc<Tab> {
         let tab = Tab::detached(url, w, h, scale, wake);
         let mut client = client_for(&tab);
-        let wi = WindowInfo { windowless_rendering_enabled: true as _, ..Default::default() };
+        let wi = WindowInfo { windowless_rendering_enabled: true as _, runtime_style: RuntimeStyle::ALLOY, ..Default::default() };
         let bs = BrowserSettings { windowless_frame_rate: 30, ..Default::default() };
         let r = browser_host_create_browser(Some(&wi), Some(&mut client), Some(&CefString::from(url)), Some(&bs), None, None);
         if r != 1 { tab.st.lock().unwrap().load_error = "CEF refused to create the browser".into(); }
