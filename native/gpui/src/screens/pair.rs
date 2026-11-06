@@ -12,12 +12,15 @@ impl Ui {
         Ui { link: field("http://host:port/pair#invite=…", cx), addr: field("host:port", cx), code: field("ABCD-2345", cx), repair, status: String::new(), busy: false, ask: None, focus: true }
     }
 }
+/// What a rig reads of this screen (never a credential: a link's secret stays out of it).
+fn note(what: &str, text: &str) { eprintln!("GPUI_LOG {}", serde_json::json!({"pair": what, "text": text})); }
 /// A link from outside this window: the question that names its hub, or why it is no link.
 fn asked(ui: &mut Ui, link: &str) {
-    match pairing::invitation(link) { Some(i) => { ui.ask = Some(i); ui.status.clear() } None => { ui.ask = None; ui.status = "That is not a pairing link. Copy it again from Settings → Devices.".into() } }
+    match pairing::invitation(link) { Some(i) => { note("ask", &i.origin); ui.ask = Some(i); ui.status.clear() } None => { ui.ask = None; ui.status = "That is not a pairing link. Copy it again from Settings → Devices.".into(); note("refused", &ui.status) } }
 }
 pub fn start(unpaired: bool, link: Option<&str>, cx: &mut Context<Backplane>) -> Option<Ui> {
     if !unpaired && link.is_none() { return None }
+    note("screen", "connect");
     let mut ui = Ui::new(false, cx);
     if let Some(l) = link { asked(&mut ui, l) }
     Some(ui)
@@ -29,7 +32,7 @@ pub fn incoming(this: &mut Backplane, link: &str, cx: &mut Context<Backplane>) {
     cx.notify();
 }
 /// The hub refused this device's credential: it was revoked.
-pub fn revoked(this: &mut Backplane, cx: &mut Context<Backplane>) { this.pair = Some(Ui::new(true, cx)); cx.notify(); }
+pub fn revoked(this: &mut Backplane, cx: &mut Context<Backplane>) { note("screen", "re-pair"); this.pair = Some(Ui::new(true, cx)); cx.notify(); }
 pub fn fill(this: &mut Backplane, link: &str, addr: &str, code: &str, cx: &mut Context<Backplane>) {
     let Some(ui) = &this.pair else { return };
     let (l, a, c) = (ui.link.clone(), ui.addr.clone(), ui.code.clone());
@@ -40,7 +43,7 @@ pub fn go(this: &mut Backplane, cx: &mut Context<Backplane>) {
     let Some(ui) = &this.pair else { return };
     if ui.busy { return }
     let (l, a, c) = (ui.link.read(cx).content.to_string(), ui.addr.read(cx).content.to_string(), ui.code.read(cx).content.to_string());
-    match pairing::submit(&l, &a, &c) { Ok(i) => pair(this, i, cx), Err(e) => { if let Some(ui) = &mut this.pair { ui.status = e.into() } cx.notify() } }
+    match pairing::submit(&l, &a, &c) { Ok(i) => pair(this, i, cx), Err(e) => { note("refused", e); if let Some(ui) = &mut this.pair { ui.status = e.into() } cx.notify() } }
 }
 /// The question's Pair.
 pub fn confirm(this: &mut Backplane, cx: &mut Context<Backplane>) {
@@ -48,6 +51,7 @@ pub fn confirm(this: &mut Backplane, cx: &mut Context<Backplane>) {
 }
 /// The question's Cancel: the form again, or, on a client that has a hub, back to it.
 pub fn cancel(this: &mut Backplane, cx: &mut Context<Backplane>) {
+    note("cancelled", "");
     if this.paired { this.pair = None } else if let Some(ui) = &mut this.pair { ui.ask = None }
     cx.notify();
 }
@@ -60,6 +64,7 @@ fn pair(this: &mut Backplane, i: Invitation, cx: &mut Context<Backplane>) {
         // a failed exchange leaves any existing pairing as it was
         let _ = weak.update(cx, |this, cx| {
             let why = match r { Ok(()) => { eprintln!("GPUI_LOG {}", serde_json::json!({"paired": o})); format!("Could not restart: {}", pairing::relaunch()) } Err(e) => e };
+            note("refused", &why);
             if let Some(ui) = &mut this.pair { ui.busy = false; ui.status = why }
             cx.notify();
         });
@@ -78,7 +83,8 @@ pub fn view(this: &mut Backplane, light: bool, window: &mut Window, cx: &mut Con
     let c = |n: &str| theme::color(light, n);
     let ctl = |id: &str, label: &str, ctl: Ctl| CtlEntry { id: id.into(), label: label.into(), ctl };
     let ui = this.pair.as_mut().expect("the pair screen has its state");
-    if ui.focus { ui.focus = false; window.focus(&ui.link.focus_handle(cx)); }
+    // (a script's steps start at a hub's first view; with no hub this screen starts them)
+    if ui.focus { ui.focus = false; window.focus(&ui.link.focus_handle(cx)); cx.spawn(async move |weak, cx| { let _ = weak.update(cx, |this, cx| this.pump(cx)); }).detach(); }
     let (repair, status, busy, ask) = (ui.repair, ui.status.clone(), ui.busy, ui.ask.clone());
     let (link, addr, code) = (ui.link.clone(), ui.addr.clone(), ui.code.clone());
     let mut col = div().w(px(460.)).flex().flex_col().gap_3();
