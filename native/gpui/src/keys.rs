@@ -8,13 +8,15 @@ use serde_json::Value;
 actions!(keys, [NewThread, OpenDiff, OpenFiles, StopTurn, ModelPicker, PrevThread, NextThread, UberChat, SettleThread, FocusComposer, CycleLayers, PerfOverlay,
     Project1, Project2, Project3, Project4, Project5, Project6, Project7, Project8, Project9,
     Thread1, Thread2, Thread3, Thread4, Thread5, Thread6, Thread7, Thread8, Thread9,
-    RailBoard, RailSchematic, Rail3d, RailSplit, RailMech, RailFiles, RailDiff, RailReview, RailBrowser]);
+    RailBoard, RailSchematic, Rail3d, RailSplit, RailMech, RailFiles, RailDiff, RailReview, RailBrowser, ToggleTerminal, DismissTerminal]);
 
 /// Where no text field, file list or viewer has the keyboard: a bare key may act.
 pub const FREE: &str = "!Composer && !TextInput && !PickInput && !AskInput && !ImpInput && !Viewer && !BrowserBar && !FilesPage";
 /// No text field has the keyboard (so a chord that edits text there is the field's: Option+digit types a character on a Mac, Ctrl+C copies).
 const NOT_MAC_COMPOSER: &str = "!Composer && !TextInput && !PickInput && !AskInput && !ImpInput";
 /// Not in any field or web page: Ctrl+H deletes a character in many text fields (a Mac's among them) and opens a web page's history, so there it stays theirs. It works from the plot, and with nothing focused.
+/// Where a bare backtick shows the terminal: the message box, or nowhere that types (a shell, another field and a viewer keep their backticks).
+const TERM_BARE: &str = "Composer || (!TextInput && !PickInput && !AskInput && !ImpInput && !Viewer && !BrowserBar && !FilesPage && !Terminal)";
 const NOT_TEXT: &str = "!Composer && !TextInput && !PickInput && !AskInput && !ImpInput && !BrowserBar && !BrowserView && !CefBar && !CefPage";
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -48,13 +50,16 @@ pub const TABLE: &[Entry] = &[
     e("pad-undo", "Undo the last stroke or change", "Drawing pad", "secondary-z", Fixed),
     e("pad-delete", "Delete the selection, or clear the pad", "Drawing pad", "delete", Fixed),
     e("pad-delete-alt", "Delete (also)", "Drawing pad", "backspace", Fixed),
+    e("term", "Show or hide the floating terminal", "Terminal", "secondary-j", Rebind),
+    e("term-alt", "Show the floating terminal (also)", "Terminal", "`", Fixed),
+    e("term-leave", "Leave the terminal: put it away, or take the keyboard back to it", "Terminal", "shift-escape", Fixed),
+    e("term-copy", "Copy the terminal's selection", "Terminal", "secondary-shift-c", Fixed),
+    e("term-paste", "Paste into the terminal", "Terminal", "secondary-shift-v", Fixed),
     e("rail", "Rail views: B board, S schematic, 3 3D, V split, M mech, F files, D diff, R review, W browser", "Viewer", "b s 3 v m f d r w", Fixed),
     e("perf", "Performance overlay: the last few seconds of the window's work", "Window", "ctrl-shift-h", Rebind),
 ];
 /// Keys the old client had that this one cannot do yet (no equivalent): listed, not faked.
 pub const MISSING: &[(&str, &str)] = &[
-    ("Ctrl+J, Backtick, Shift+Esc", "Floating terminal: the client has no terminal"),
-    ("Ctrl+Shift+C / V", "Terminal copy and paste: no terminal"),
     ("Arrows, Tab in the model picker", "Picker cursor keys: the picker takes search and Enter only"),
 ];
 
@@ -111,7 +116,8 @@ pub fn bindings(l: &Local) -> Vec<KeyBinding> {
         KeyBinding::new(&k("stop"), StopTurn, None), KeyBinding::new(&k("models"), ModelPicker, None),
         KeyBinding::new(&k("prev"), PrevThread, None), KeyBinding::new(&k("next"), NextThread, None),
         KeyBinding::new(&k("uber"), UberChat, None), KeyBinding::new(&k("settle"), SettleThread, None), KeyBinding::new(&k("layers"), CycleLayers, Some(NOT_TEXT)), KeyBinding::new(&k("perf"), PerfOverlay, None),
-        KeyBinding::new("/", FocusComposer, Some(FREE))]);
+        KeyBinding::new("/", FocusComposer, Some(FREE)),
+        KeyBinding::new(&k("term"), ToggleTerminal, None), KeyBinding::new("`", ToggleTerminal, Some(TERM_BARE)), KeyBinding::new("shift-escape", DismissTerminal, None)]);
     let alt = if mac() { Some(NOT_MAC_COMPOSER) } else { None };
     macro_rules! digits { ($($n:literal $p:ident $t:ident),*) => { v.extend([$(KeyBinding::new(concat!("alt-", $n), $p, alt), KeyBinding::new(concat!("secondary-", $n), $t, None)),*]); } }
     digits!("1" Project1 Thread1, "2" Project2 Thread2, "3" Project3 Thread3, "4" Project4 Thread4, "5" Project5 Thread5, "6" Project6 Thread6, "7" Project7 Thread7, "8" Project8 Thread8, "9" Project9 Thread9);
@@ -119,6 +125,22 @@ pub fn bindings(l: &Local) -> Vec<KeyBinding> {
         KeyBinding::new("m", RailMech, Some(FREE)), KeyBinding::new("f", RailFiles, Some(FREE)), KeyBinding::new("d", RailDiff, Some(FREE)), KeyBinding::new("r", RailReview, Some(FREE)),
         KeyBinding::new("w", RailBrowser, Some(FREE))]);
     v.extend(pad_bindings(&v, &k("close")));
+    let term = term_bindings(&v, &k("term"));
+    v.extend(term);
+    v
+}
+/// The floating terminal's own keys, and every other shortcut muted in it: Ctrl+C, Ctrl+K, Esc, a backtick and the rest are the shell's.
+/// Its toggle and Shift+Esc stay (they are bound everywhere). Last, so the mutes win the tie with the bindings that have no context.
+fn term_bindings(all: &[KeyBinding], toggle: &str) -> Vec<KeyBinding> {
+    use crate::screens::term::{Copy, Paste};
+    let mut v = vec![KeyBinding::new("secondary-shift-c", Copy, Some("Terminal")), KeyBinding::new("secondary-shift-v", Paste, Some("Terminal"))];
+    if mac() { v.extend([KeyBinding::new("cmd-c", Copy, Some("Terminal")), KeyBinding::new("cmd-v", Paste, Some("Terminal"))]); }
+    let own: Vec<String> = [toggle, "shift-escape", "secondary-shift-c", "secondary-shift-v"].iter().chain(if mac() { &["cmd-c", "cmd-v"][..] } else { &[][..] })
+        .filter_map(|k| Keystroke::parse(k).ok()).map(|k| k.unparse()).collect();
+    let mut seen = std::collections::HashSet::new();
+    for key in all.iter().filter_map(|b| b.keystrokes().first().map(|k| k.unparse())) {
+        if !own.contains(&key) && seen.insert(key.clone()) { v.push(KeyBinding::new(&key, NoAction, Some("Terminal"))); }
+    }
     v
 }
 /// The drawing pad's keys, and every other shortcut muted while it is open, as the old pad took all the keys: nothing behind it moves under the person.
@@ -221,6 +243,8 @@ pub fn attach(el: Div, cx: &mut Context<Backplane>) -> Div {
         if let Some(id) = id { let _ = this.tx.try_send(Command::Action("bot".into(), id)); cx.notify(); }
     });
     let el = on!(el, FocusComposer, |this: &mut Backplane, _, cx: &mut Context<Backplane>| { this.want_focus = true; cx.notify(); });
+    let el = on!(el, ToggleTerminal, |this: &mut Backplane, w: &mut Window, cx: &mut Context<Backplane>| if this.screens.pad.is_none() { this.term_toggle(w, cx) });
+    let el = on!(el, DismissTerminal, |this: &mut Backplane, w: &mut Window, cx: &mut Context<Backplane>| this.term_dismiss(w, cx));
     let el = on!(el, CycleLayers, |this: &mut Backplane, w: &mut Window, cx: &mut Context<Backplane>| this.key_layers(w, cx));
     let el = on!(el, PerfOverlay, |this: &mut Backplane, _, cx: &mut Context<Backplane>| this.perf_toggle(cx));
     macro_rules! rail { ($el:expr, $($a:ty => ($k:literal, $v:literal)),*) => {{ let mut e = $el; $( e = on!(e, $a, |this: &mut Backplane, _, cx: &mut Context<Backplane>| this.key_rail($k, $v, cx)); )* e }} }
@@ -291,6 +315,40 @@ mod tests {
         assert_eq!((find("pad-undo").unwrap().kind, find("pad-delete").unwrap().kind), (Fixed, Fixed));
         assert_eq!(hint(&Local::default(), "pad-undo"), "Ctrl+Z"); assert_eq!(hint(&Local::default(), "pad-delete"), "Delete"); assert_eq!(hint(&Local::default(), "pad-delete-alt"), "Backspace");
         assert!(MISSING.iter().all(|(k, why)| !k.contains("drawing pad") && !why.contains("Drawing pad")));
+    }
+    #[test] fn ctrl_j_toggles_the_terminal_from_everywhere_including_inside_it() {
+        for ctx in [&[][..], &["Composer"][..], &["TextInput"][..], &["PickInput"][..], &["Viewer"][..], &["Terminal"][..]] { assert_eq!(d("ctrl-j", ctx), "keys::ToggleTerminal", "{ctx:?}"); }
+        assert_eq!(d("ctrl-j", &["DrawPad"]), "", "nothing behind the pad moves");
+    }
+    #[test] fn a_bare_backtick_shows_the_terminal_but_stays_typed_in_fields_and_the_shell() {
+        assert_eq!(d("`", &[]), "keys::ToggleTerminal"); assert_eq!(d("`", &["Composer"]), "keys::ToggleTerminal", "from the message box, as the old client");
+        for c in ["Terminal", "TextInput", "PickInput", "AskInput", "ImpInput", "Viewer", "BrowserBar", "FilesPage", "DrawPad"] { assert_eq!(d("`", &[c]), "", "{c} keeps its backtick"); }
+        assert_eq!(d("`", &["DrawPad", "PadLength"]), "");
+    }
+    #[test] fn shift_escape_leaves_the_terminal_and_plain_escape_is_the_shells() {
+        for ctx in [&[][..], &["Composer"][..], &["Terminal"][..]] { assert_eq!(d("shift-escape", ctx), "keys::DismissTerminal", "{ctx:?}"); }
+        assert_eq!(d("escape", &["Terminal"]), "", "Esc goes to the program (vim, less)"); assert_eq!(d("escape", &[]), "backplane::ClosePopup");
+    }
+    #[test] fn the_terminal_copies_and_pastes_with_shift_and_keeps_ctrl_c_for_the_shell() {
+        assert_eq!(d("ctrl-shift-c", &["Terminal"]), "term::Copy"); assert_eq!(d("ctrl-shift-v", &["Terminal"]), "term::Paste");
+        assert_eq!(d("ctrl-shift-c", &[]), "", "outside it the chord is not the terminal's"); assert_eq!(d("ctrl-shift-v", &["Composer"]), "");
+        if mac() { assert_eq!(d("cmd-c", &["Terminal"]), "term::Copy"); assert_eq!(d("cmd-v", &["Terminal"]), "term::Paste"); }
+    }
+    #[test] fn every_other_shortcut_is_the_shells_inside_the_terminal() {
+        for k in ["ctrl-c", "ctrl-k", "ctrl-n", "ctrl-b", "ctrl-d", "ctrl-p", "ctrl-.", "ctrl-m", "ctrl-h", "ctrl-shift-p", "ctrl-shift-f", "ctrl-shift-s", "ctrl-shift-u", "ctrl-shift-[", "alt-1", "ctrl-1", "ctrl-z", "ctrl-a", "enter", "tab", "backspace", "delete", "/", "b", "s", "3", "w", "`"] {
+            assert_eq!(d(k, &["Terminal"]), "", "{k} must reach the shell");
+        }
+    }
+    #[test] fn a_rebound_terminal_key_moves_and_the_old_one_reaches_the_shell() {
+        let mut l = Local::default(); assert!(l.set("shortcut", "term\u{1f}ctrl-alt-j"));
+        assert_eq!(does(&l, "ctrl-alt-j", &[]), "keys::ToggleTerminal"); assert_eq!(does(&l, "ctrl-alt-j", &["Terminal"]), "keys::ToggleTerminal");
+        assert_eq!(does(&l, "ctrl-j", &[]), ""); assert_eq!(does(&l, "ctrl-j", &["Terminal"]), "", "Ctrl+J is a line feed for the shell again");
+    }
+    #[test] fn the_terminals_keys_are_in_the_table_and_no_longer_missing() {
+        assert_eq!(find("term").map(|x| (x.key, x.kind)), Some(("secondary-j", Rebind))); assert_eq!(hint(&Local::default(), "term"), if mac() { "⌘J" } else { "Ctrl+J" });
+        assert_eq!(hint(&Local::default(), "term-leave"), if mac() { "⇧Esc" } else { "Shift+Esc" }); assert_eq!(hint(&Local::default(), "term-alt"), "`");
+        assert!(["term-alt", "term-leave", "term-copy", "term-paste"].iter().all(|id| find(id).unwrap().kind == Fixed));
+        assert!(MISSING.iter().all(|(k, why)| !k.contains("Ctrl+J") && !why.contains("terminal")), "listed as done, not missing");
     }
     #[test] fn viewer_scope_keeps_its_keys_but_the_chords_work() {
         assert_eq!(d("ctrl-d", &["Viewer"]), "keys::OpenDiff"); assert_eq!(d("ctrl-p", &["Viewer"]), "keys::OpenFiles"); assert_eq!(d("m", &["Viewer"]), "");

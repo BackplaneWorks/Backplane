@@ -13,6 +13,10 @@ mod ui;
 mod viewers;
 mod theme;
 mod wire;
+/// The hub's terminal emulator, shared by path: the floating terminal draws the shell with it (screens/term.rs).
+#[allow(dead_code)]
+#[path = "../../host/src/term/vt.rs"]
+mod vt;
 use gpui::{prelude::*, *, actions};
 use serde_json::Value;
 use std::{collections::{HashMap,VecDeque},time::{Duration,Instant}};
@@ -84,7 +88,9 @@ impl Backplane {
             Event::Plot(b)=>self.plot_received(b,cx),
             Event::Answer(id,reply)=>screens::improvements::answered(self,id,reply,cx),
             Event::Data(_,v)=>screens::accounts::got(self,v,cx),
-            Event::Rpc(tag,ok,why)=>if tag.starts_with("acct"){screens::accounts::done(self,tag,ok,&why,cx)}else if tag.starts_with("files") {screens::filesui::rpc_done(self,tag,ok,&why,cx)} else {screens::settings::rpc_done(self,tag,ok,&why,cx)},
+            Event::Term(key,pid,b,reset)=>self.term_frame(&key,pid,&b,reset,cx),
+            Event::Hello=>self.term_rejoin(),
+            Event::Rpc(tag,ok,why)=>if tag=="term"{if !ok{self.error=format!("Terminal: {why}");}}else if tag.starts_with("acct"){screens::accounts::done(self,tag,ok,&why,cx)}else if tag.starts_with("files") {screens::filesui::rpc_done(self,tag,ok,&why,cx)} else {screens::settings::rpc_done(self,tag,ok,&why,cx)},
             Event::PlotTooBig(n)=>self.screens.plot.too_big(n),
             Event::Refs(r)=>{ self.screens.plotview.hist.refs=screens::plot::refs_of(&r); cx.notify(); }
             Event::Steps(r)=>{ self.screens.plotview.hist.steps=screens::histbar::steps_of(&r); cx.notify(); }
@@ -184,7 +190,7 @@ impl Backplane {
     fn user_entries(&self)->usize {self.data["thread"]["entries"].as_array().map_or(0,|e|e.iter().filter(|e|e["kind"]=="user").count())}
     /// Ctrl/Cmd-C with no text field focused (a click in the timeline leaves none): copy what is selected there.
     fn copy_selection(&mut self,_:&CopySelection,_:&mut Window,cx:&mut Context<Self>){self.timeline_copy(cx);}
-    fn close_popup(&mut self,_:&ClosePopup,window:&mut Window,cx:&mut Context<Self>){if self.pad_escape(window,cx){return;}if self.ctx_close(cx){return;}if screens::filesui::escape(self,window,cx){return;}if self.palette_close(cx){return;}if self.screens.lightbox.take().is_some(){cx.notify();return;}if self.screens.picker_open{self.screens.picker_open=false;cx.notify();return;}if self.screens.acct.menu{self.screens.acct.menu=false;cx.notify();return;}if screens::settings::is_open(self){screens::settings::close(self,cx);return;}if screens::improvements::escape(self,cx){return;}if let Some(a)=screens::projects::close_on_escape(&self.data){let _=self.tx.try_send(a);cx.notify();return;}if let Some(a)=screens::tools::close_question(&self.data) {let _=self.tx.try_send(a);}else if self.data["settings"].is_object() {let _=self.tx.try_send(Command::Action("flag".into(),"settings".into()));}else if let Some(a)=screens::bots::close_form(&self.data) {let _=self.tx.try_send(a);}else if self.input.read(cx).popup_open {let draft=self.input.read(cx).content.to_string();self.screens.popup_off=Some(draft);}cx.notify();}
+    fn close_popup(&mut self,_:&ClosePopup,window:&mut Window,cx:&mut Context<Self>){if self.pad_escape(window,cx){return;}if self.ctx_close(cx){return;}if screens::filesui::escape(self,window,cx){return;}if self.palette_close(cx){return;}if self.screens.lightbox.take().is_some(){cx.notify();return;}if self.screens.picker_open{self.screens.picker_open=false;cx.notify();return;}if self.screens.acct.menu{self.screens.acct.menu=false;cx.notify();return;}if screens::settings::is_open(self){screens::settings::close(self,cx);return;}if screens::improvements::escape(self,cx){return;}if self.term_hide(cx){return;}if let Some(a)=screens::projects::close_on_escape(&self.data){let _=self.tx.try_send(a);cx.notify();return;}if let Some(a)=screens::tools::close_question(&self.data) {let _=self.tx.try_send(a);}else if self.data["settings"].is_object() {let _=self.tx.try_send(Command::Action("flag".into(),"settings".into()));}else if let Some(a)=screens::bots::close_form(&self.data) {let _=self.tx.try_send(a);}else if self.input.read(cx).popup_open {let draft=self.input.read(cx).content.to_string();self.screens.popup_off=Some(draft);}cx.notify();}
 }
 /// Every key binding, from the defaults and this device's shortcut choices (called again when one changes).
 pub fn bind_all(cx:&mut App,l:&local::Local){keys::bind_all(cx,l);}

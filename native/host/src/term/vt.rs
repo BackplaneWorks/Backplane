@@ -400,5 +400,7 @@ fn line_of(row: &[Cell]) -> VLine {
     VLine { runs }
 }
 
+// named by path so the GPUI client, which includes this file by path, finds the same tests
 #[cfg(test)]
+#[path = "vt/tests.rs"]
 mod tests;
