@@ -209,6 +209,7 @@ impl Engine {
     /// Starts CEF once for the process; Err (said in the page, which then falls back to the hub's frames) when the runtime is missing or CEF refuses.
     pub fn get() -> &'static Result<Engine, String> { ENGINE.get_or_init(Engine::start) }
     fn start() -> Result<Engine, String> {
+        if std::env::var_os("BACKPLANE_CEF_OFF").is_some() { return Err("BACKPLANE_CEF_OFF is set".into()) }
         let dir = runtime_dir().ok_or_else(|| "no CEF runtime (set BACKPLANE_CEF to the runtime directory, or put it in ~/.cache/backplane/cef-runtime/".to_string() + VERSION + ")")?;
         let port = std::env::var("BACKPLANE_CEF_CDP_PORT").ok().and_then(|p| p.parse().ok()).unwrap_or_else(free_port);
         let profile = std::env::var_os("BACKPLANE_CEF_PROFILE").map(PathBuf::from).unwrap_or_else(|| {

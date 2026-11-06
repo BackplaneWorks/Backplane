@@ -16,13 +16,13 @@ pub fn decode_jpeg(bytes: &[u8]) -> Option<Arc<RenderImage>> {
 }
 fn fnv(bytes: &[u8]) -> u64 { bytes.iter().fold(0xcbf29ce484222325u64, |h, b| (h ^ *b as u64).wrapping_mul(0x100000001b3)) }
 
-pub struct BrowserPage { #[cfg(feature = "cef")] pub cef: Option<Entity<super::cef_page::CefPage>>, image: Option<Arc<RenderImage>>, retired: Vec<Arc<RenderImage>>, pub status: String, stop: Arc<AtomicBool>, visible: Arc<AtomicBool> }
+pub struct BrowserPage { #[cfg(feature = "cef")] pub cef: Option<Entity<super::cef_page::CefPage>>, bar: Bar, image: Option<Arc<RenderImage>>, retired: Vec<Arc<RenderImage>>, pub status: String, stop: Arc<AtomicBool>, visible: Arc<AtomicBool> }
 impl BrowserPage {
     /// `base` like http://127.0.0.1:3821 (http only for now: this client has no TLS, so an https base never starts the poller), `owner` the page's owner as the hub names it (a bot's id, or the thread's id
     /// for a thread's page: the host passes `BT.World.page`'s value), `token` the hub token (a Bearer header, never logged). The poller fetches only while
     /// `set_visible(true)`; mount the page with the tab and call `set_visible(false)` when another tab is shown.
     pub fn new(cx: &mut Context<Self>, base: String, owner: String, token: String, hub: tokio::sync::mpsc::Sender<crate::hub::Command>) -> Self {
-        let hub_tx = hub.clone();
+        let hub_tx = hub.clone(); let owner_bar = owner.clone();
         // with the `cef` feature and a usable runtime the page is embedded Chromium (cef_page.rs); otherwise the hub's JPEG frames below
         #[cfg(feature = "cef")]
         let (cef, cef_note) = match super::cef_page::engine_port() {
@@ -36,7 +36,7 @@ impl BrowserPage {
         let https = base.starts_with("https://");
         let stop = Arc::new(AtomicBool::new(false)); let visible = Arc::new(AtomicBool::new(false)); let vis = visible.clone(); // fetches only after set_visible(true)
         let (tx, rx) = async_channel::bounded::<Result<Option<Arc<RenderImage>>, String>>(2); // Ok(None): a good fetch of the frame already shown
-        let flag = stop.clone();
+        let flag = stop.clone(); let hub_open = hub_tx.clone();
         if !https && use_poller { std::thread::Builder::new().name("browser-frames".into()).spawn(move || {
             let url = format!("{}/bots/{}/screen.jpg", base.trim_end_matches('/'), owner);
             let (mut last, mut failing) = (0u64, false); let mut opened: Option<std::time::Instant> = None;
@@ -54,7 +54,7 @@ impl BrowserPage {
                     Err(ureq::Error::Status(404, _)) => {
                         // no page exists for this owner yet: ask the hub to open one (at most every 5 s), its first frame follows
                         if opened.map_or(true, |t| t.elapsed() > Duration::from_secs(5)) { opened = Some(std::time::Instant::now());
-                            let _ = hub_tx.try_send(crate::hub::Command::Rpc("bots.browser".into(), crate::screens::settings::Secret(serde_json::json!({"bot": owner, "op": "open"})), "browser")); }
+                            let _ = hub_open.try_send(crate::hub::Command::Rpc("bots.browser".into(), crate::screens::settings::Secret(serde_json::json!({"bot": owner, "op": "open"})), "browser")); }
                         Some(Err("Opening the browser…".into()))
                     }
                     Err(ureq::Error::Status(c, _)) => Some(Err(format!("hub answered {c}"))),
@@ -75,8 +75,10 @@ impl BrowserPage {
         #[cfg(not(feature = "cef"))]
         let cef_note2 = String::new();
         let status = if !cef_note2.is_empty() { cef_note2 } else if https { "https hubs are not supported by this page yet (the client has no TLS)".to_string() } else { "Waiting for the first frame".to_string() };
-        BrowserPage { #[cfg(feature = "cef")] cef, image: None, retired: Vec::new(), status, stop, visible }
+        BrowserPage { #[cfg(feature = "cef")] cef, bar: Bar::new(cx, hub_tx.clone(), owner_bar), image: None, retired: Vec::new(), status, stop, visible }
     }
+    /// The helper's `tabs` event for this page (info `browser.tabs.<owner>`): the tab strip and the address of the active tab.
+    pub fn set_tabs(&mut self, text: &str, cx: &mut Context<Self>) { self.bar.set_tabs(text); cx.notify(); }
     pub fn set_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
         #[cfg(feature = "cef")]
         if let Some(c) = &self.cef { let v = visible; c.update(cx, |p, _| p.set_visible(v)); } self.visible.store(visible, Ordering::Relaxed); }
@@ -85,17 +87,107 @@ impl BrowserPage {
 }
 impl Drop for BrowserPage { fn drop(&mut self) { self.stop.store(true, Ordering::Relaxed); } }
 impl Render for BrowserPage {
-    fn render(&mut self, window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         for old in self.retired.drain(..) { let _ = window.drop_image(old); } // a painted RenderImage stays in the atlas until it is dropped
         #[cfg(feature = "cef")]
         if let Some(c) = &self.cef { return div().id("browser-page").size_full().child(c.clone()).into_any_element(); }
         let status = self.status.clone();
-        match &self.image {
+        let size = self.image.as_ref().and_then(|i| { let s = i.size(0); Some((s.width.0 as f32, s.height.0 as f32)) });
+        let content = match &self.image {
             // a dead hub must not look like a live, frozen page: the status shows over the last frame
-            Some(i) => div().id("browser-page").size_full().relative().child(img(i.clone()).size_full().object_fit(ObjectFit::Contain))
+            Some(i) => div().id("browser-view").size_full().relative().child(img(i.clone()).size_full().object_fit(ObjectFit::Contain))
                 .when(!status.is_empty(), |d| d.child(div().absolute().bottom_2().left_2().px_2().text_size(px(12.)).bg(rgb(0x1a1e25)).text_color(rgb(0xf06a6a)).child(status))).into_any_element(),
-            None => div().id("browser-page").size_full().flex().items_center().justify_center().text_color(rgb(0x8a93a3)).child(status).into_any_element(),
+            None => div().id("browser-view").size_full().flex().items_center().justify_center().text_color(rgb(0x8a93a3)).child(status).into_any_element(),
+        };
+        let bar = self.bar.render(size, content, window, cx);
+        div().id("browser-page").size_full().child(bar).into_any_element()
+    }
+}
+
+/// The normal browser chrome over the hub's frames: back, forward, reload, an address field, tabs (select, close, new) and the person's mouse, wheel and keys on the page.
+/// Everything goes to the hub as `bots.browser` (the toolbar commands and the person's input; the first one takes the page over from the agent, and "Hand back"
+/// returns it), the tabs come back as the helper's `tabs` event (info `browser.tabs.<owner>`).
+pub struct Bar { hub: tokio::sync::mpsc::Sender<crate::hub::Command>, owner: String, tabs: Vec<(String, String, String, bool)>, url: String, text: String, edit: bool, taken: bool, fresh: bool,
+    focus: FocusHandle, bar_focus: FocusHandle, bounds: Arc<std::sync::Mutex<Option<Bounds<Pixels>>>>, image: (f32, f32) }
+impl Bar {
+    fn new(cx: &mut Context<BrowserPage>, hub: tokio::sync::mpsc::Sender<crate::hub::Command>, owner: String) -> Self {
+        Bar { hub, owner, tabs: Vec::new(), url: String::new(), text: String::new(), edit: false, taken: false, fresh: false, focus: cx.focus_handle(), bar_focus: cx.focus_handle(), bounds: Arc::default(), image: (1.0, 1.0) }
+    }
+    fn rpc(&self, p: serde_json::Value) { let _ = self.hub.try_send(crate::hub::Command::Rpc("bots.browser".into(), crate::screens::settings::Secret(p), "browser")); }
+    fn toolbar(&mut self, command: &str, extra: serde_json::Value) {
+        let mut p = serde_json::json!({"bot": self.owner, "op": "toolbar", "command": command}); if let (Some(o), Some(e)) = (p.as_object_mut(), extra.as_object()) { for (k, v) in e { o.insert(k.clone(), v.clone()); } }
+        self.taken = true; self.rpc(p);
+    }
+    fn input(&mut self, p: serde_json::Value) { if !self.taken { self.taken = true; self.rpc(serde_json::json!({"bot": self.owner, "op": "takeover"})); } let mut p = p; p["bot"] = self.owner.clone().into(); self.rpc(p); }
+    pub fn set_tabs(&mut self, text: &str) {
+        eprintln!("GPUI_LOG {{\"browser_tabs\":{}}}", serde_json::Value::String(text.chars().take(600).collect()));
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(text) else { self.tabs.clear(); return };
+        self.tabs = v["tabs"].as_array().into_iter().flatten().map(|t| (t["id"].as_str().unwrap_or("").to_string(), t["title"].as_str().unwrap_or("").to_string(), t["url"].as_str().unwrap_or("").to_string(), t["active"].as_bool().unwrap_or(false))).collect();
+        self.url = v["url"].as_str().unwrap_or("").to_string(); if !self.edit { self.text = self.url.clone(); }
+    }
+    /// 0..1000 over the shown frame, which the view letterboxes (Contain); None outside the frame.
+    fn thousandths(&self, p: Point<Pixels>) -> Option<(u32, u32)> {
+        let b = (*self.bounds.lock().unwrap())?; let (iw, ih) = self.image; let (bw, bh) = (f32::from(b.size.width), f32::from(b.size.height));
+        let k = (bw / iw).min(bh / ih); let (w, h) = (iw * k, ih * k); let (ox, oy) = ((bw - w) / 2.0, (bh - h) / 2.0);
+        let (x, y) = (f32::from(p.x - b.origin.x) - ox, f32::from(p.y - b.origin.y) - oy);
+        (x >= 0.0 && y >= 0.0 && x <= w && y <= h).then(|| ((x / w * 1000.0) as u32, (y / h * 1000.0) as u32))
+    }
+    fn go(&mut self) {
+        let t = self.text.trim().to_string(); if t.is_empty() { return }
+        let t = if t.contains(' ') || (!t.contains('.') && !t.contains(':') && !t.starts_with("localhost")) { format!("https://www.google.com/search?q={}", t.replace(' ', "+")) } else { t };
+        self.toolbar("navigate", serde_json::json!({"url": t})); self.edit = false;
+    }
+    fn key(&mut self, e: &KeyDownEvent, window: &mut Window, cx: &mut Context<BrowserPage>) {
+        let k = &e.keystroke; let m = &k.modifiers;
+        if self.bar_focus.is_focused(window) {
+            // the address is selected when the field is entered: the first thing typed replaces it
+            if self.fresh && !matches!(k.key.as_str(), "enter" | "escape" | "left" | "right" | "tab") && !(m.control && k.key != "v" && k.key != "a") { self.text.clear(); self.fresh = false; }
+            match k.key.as_str() {
+                "enter" => self.go(), "escape" => { self.edit = false; self.text = self.url.clone(); window.focus(&self.focus); }
+                "backspace" => { self.text.pop(); self.edit = true; }
+                "v" if m.control || m.platform => { if let Some(t) = cx.read_from_clipboard().and_then(|c| c.text()) { self.text.push_str(t.lines().next().unwrap_or("")); self.edit = true; } }
+                "a" if m.control || m.platform => { self.text.clear(); self.edit = true; }
+                _ => if let Some(c) = &k.key_char { if !m.control && !m.platform { self.text.push_str(c); self.edit = true; } },
+            }
+            cx.stop_propagation(); return;
         }
+        if (m.control || m.platform) && k.key == "l" { window.focus(&self.bar_focus); self.edit = true; cx.stop_propagation(); return }
+        if (m.control || m.platform) && !m.alt { return }
+        match &k.key_char { Some(c) if !c.is_empty() && k.key != "enter" => self.input(serde_json::json!({"op": "type", "text": c})), _ => { let key = match k.key.as_str() { "enter" => "Enter", "backspace" => "Backspace", "tab" => "Tab", "escape" => "Escape", "left" => "ArrowLeft", "right" => "ArrowRight", "up" => "ArrowUp", "down" => "ArrowDown", "delete" => "Delete", "home" => "Home", "end" => "End", "pageup" => "PageUp", "pagedown" => "PageDown", _ => "" }; if !key.is_empty() { self.input(serde_json::json!({"op": "press", "key": key})); } } }
+        cx.stop_propagation();
+    }
+    fn button(id: &'static str, label: &'static str) -> Stateful<Div> { div().id(id).px_2().py_1().text_size(px(13.)).text_color(rgb(0xd7dbe3)).cursor_pointer().hover(|s| s.bg(rgb(0x2a303b))).child(label) }
+    fn render(&mut self, size: Option<(f32, f32)>, content: AnyElement, window: &mut Window, cx: &mut Context<BrowserPage>) -> AnyElement {
+        if let Some(s) = size { self.image = s; }
+        let focused = self.bar_focus.is_focused(window); let bounds = self.bounds.clone();
+        let strip = (self.tabs.len() > 1).then(|| {
+            let mut row = div().flex().flex_row().bg(rgb(0x14171c)).text_size(px(12.));
+            for (i, (id, title, url, on)) in self.tabs.iter().cloned().enumerate() {
+                let label: String = (if title.is_empty() { url } else { title }).chars().take(22).collect(); let (sel, close) = (id.clone(), id);
+                row = row.child(div().flex().flex_row().items_center().bg(rgb(if on { 0x232831 } else { 0x14171c })).text_color(rgb(if on { 0xe6e9ef } else { 0x8a93a3 }))
+                    .child(div().id(("btab", i)).px_2().py_1().cursor_pointer().child(if label.is_empty() { "New tab".to_string() } else { label }).on_click(cx.listener(move |this, _, _, cx| { this.bar.toolbar("tabs", serde_json::json!({"selectId": sel})); cx.notify(); })))
+                    .child(div().id(("btabx", i)).px_1().cursor_pointer().child("×").on_click(cx.listener(move |this, _, _, cx| { this.bar.toolbar("tabs", serde_json::json!({"closeId": close})); cx.notify(); }))));
+            }
+            row
+        });
+        let taken = self.taken;
+        let chrome = div().flex().flex_row().items_center().gap_1().px_1().bg(rgb(0x1a1e25))
+            .child(Self::button("br-back", "‹").on_click(cx.listener(|this, _, _, _| this.bar.toolbar("back", serde_json::json!({})))))
+            .child(Self::button("br-fwd", "›").on_click(cx.listener(|this, _, _, _| this.bar.toolbar("forward", serde_json::json!({})))))
+            .child(Self::button("br-reload", "⟳").on_click(cx.listener(|this, _, _, _| this.bar.toolbar("reload", serde_json::json!({})))))
+            .child(div().id("br-url").flex_1().px_2().py_1().text_size(px(13.)).bg(rgb(0x0f1115)).text_color(rgb(0xd7dbe3)).track_focus(&self.bar_focus).key_context("BrowserBar")
+                .on_key_down(cx.listener(|this, e, w, cx| { this.bar.key(e, w, cx); cx.notify(); }))
+                .on_click(cx.listener(|this, _, w, cx| { w.focus(&this.bar.bar_focus); this.bar.edit = true; this.bar.fresh = true; cx.notify(); }))
+                .child(format!("{}{}", if self.text.is_empty() { "Search or enter address".to_string() } else { self.text.clone() }, if focused { "▏" } else { "" })))
+            .child(Self::button("br-new", "+").on_click(cx.listener(|this, _, w, cx| { this.bar.toolbar("tabs", serde_json::json!({"new": true})); this.bar.text.clear(); this.bar.edit = true; this.bar.fresh = false; w.focus(&this.bar.bar_focus); cx.notify(); })))
+            .when(taken, |d| d.child(Self::button("br-hand", "Hand back").on_click(cx.listener(|this, _, _, cx| { this.bar.taken = false; this.bar.rpc(serde_json::json!({"bot": this.bar.owner, "op": "handback"})); cx.notify(); }))));
+        let view = div().id("browser-frame").flex_1().relative().overflow_hidden().track_focus(&self.focus).key_context("BrowserView")
+            .child(canvas(move |b, _, _| { *bounds.lock().unwrap() = Some(b); b }, |_, _, _, _| {}).absolute().size_full())
+            .child(content)
+            .on_mouse_down(MouseButton::Left, cx.listener(|this, e: &MouseDownEvent, w, cx| { w.focus(&this.bar.focus); this.bar.edit = false; if let Some((x, y)) = this.bar.thousandths(e.position) { this.bar.input(serde_json::json!({"op": "click", "x": x, "y": y})); } cx.notify(); }))
+            .on_scroll_wheel(cx.listener(|this, e: &ScrollWheelEvent, _, _| { let dy = match e.delta { ScrollDelta::Pixels(p) => -f32::from(p.y), ScrollDelta::Lines(l) => -l.y * 40.0 }; let dx = match e.delta { ScrollDelta::Pixels(p) => -f32::from(p.x), ScrollDelta::Lines(l) => -l.x * 40.0 }; this.bar.input(serde_json::json!({"op": "scroll", "dx": dx, "dy": dy})); }))
+            .on_key_down(cx.listener(|this, e, w, cx| this.bar.key(e, w, cx)));
+        div().size_full().flex().flex_col().child(chrome).children(strip).child(view).into_any_element()
     }
 }
 
