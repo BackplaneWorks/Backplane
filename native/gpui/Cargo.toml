@@ -35,3 +35,11 @@ debug = 0
 lto = "fat"
 panic = "abort"
 codegen-units = 1
+
+# Quick builds for test and dev cuts: cargo build --profile fast. Releases keep fat LTO.
+[profile.fast]
+inherits = "release"
+lto = "off"
+codegen-units = 16
+incremental = true
+strip = "none"
