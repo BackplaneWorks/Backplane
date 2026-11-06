@@ -31,11 +31,11 @@ $SB "cat $V/root/home/token" > /tmp/e2e-token
 $SB "cd $V/repo/test/gpui/e2e && timeout 40 \$HOME/.bun/bin/bun ios/probe.mjs $V/root $((PORT+1000))" > $OUT/probe.txt 2>&1
 # a pairing invitation through the hub's tailnet address, as a phone gets it: its routes must be reachable (not loopback); the link is
 # one-time and goes to the Mac in a file (never printed); only the routes are kept in the results
-$SB "printf 'Authorization: Bearer %s\n' \"\$(cat $V/root/home/token)\" | curl -s -m10 -X POST -H @- -H 'Content-Type: application/json' -d '{}' http://$HOSTIP:$PORT/auth/invitations" > /tmp/e2e-invite.json
+$SB "printf 'Authorization: Bearer %s\n' \"\$(cat $V/root/home/token)\" | curl -s -m10 -X POST -H @- -H 'Content-Type: application/json' -H 'Host: $HOSTIP:$PORT' -d '{}' http://127.0.0.1:$((PORT+1000))/auth/invitations" > /tmp/e2e-invite.json
 python3 -c "import json;j=json.load(open('/tmp/e2e-invite.json'));open('/tmp/e2e-invite','w').write(j.get('link',''));print('invitation routes:',j.get('routes'),'localOnly:',j.get('localOnly'),'error:',j.get('error'))" | tee $OUT/invite-routes.txt
 RSYNC_RSH=$M rsync -a /tmp/e2e-invite hs-mac-mini:bp-gpui-ios/e2e-invite
 # a second invitation for a curl check from the Mac (a remote tailnet peer, as a phone is): enroll, then a WebSocket upgrade with the device credential
-$SB "printf 'Authorization: Bearer %s\n' \"\$(cat $V/root/home/token)\" | curl -s -m10 -X POST -H @- -H 'Content-Type: application/json' -d '{}' http://$HOSTIP:$PORT/auth/invitations" > /tmp/e2e-invite2.json
+$SB "printf 'Authorization: Bearer %s\n' \"\$(cat $V/root/home/token)\" | curl -s -m10 -X POST -H @- -H 'Content-Type: application/json' -H 'Host: $HOSTIP:$PORT' -d '{}' http://127.0.0.1:$((PORT+1000))/auth/invitations" > /tmp/e2e-invite2.json
 python3 -c "import json;open('/tmp/e2e-invite2','w').write(json.load(open('/tmp/e2e-invite2.json')).get('link',''))"
 RSYNC_RSH=$M rsync -a /tmp/e2e-invite2 hs-mac-mini:bp-gpui-ios/e2e-invite2
 RSYNC_RSH=$M rsync -a /tmp/e2e-token hs-mac-mini:bp-gpui-ios/e2e-token
