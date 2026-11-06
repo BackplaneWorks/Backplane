@@ -20,7 +20,7 @@ host=$(hostname | tr -cd 'A-Za-z0-9_.-')
 # Include a nonce: a reused PID must never inherit a killed helper's lease.
 # The native guard can find this directory from the opaque nonce after a
 # hub or helper disappears. It contains captured identities, never secrets.
-nonce=$(mktemp -d "/tmp/bp-lock-client.XXXXXX")
+nonce=$(mktemp -d "${TMPDIR:-${BP_TMP:-$HOME/.cache/bp-tmp}}/bp-lock-client.XXXXXX")
 pid_id() {
   q=$1
   if [ -r "/proc/$q/stat" ]; then

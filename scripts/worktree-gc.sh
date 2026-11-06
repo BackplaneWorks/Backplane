@@ -4,7 +4,7 @@
 #     and that no process works in is removed with its target/ dirs (the branch is deleted too: it is merged);
 #   - the target/ dirs of any other worktree that no build has written to for --hours (default 6) are deleted (a rebuild fills them again, with sccache mostly from the cache).
 # Dry run unless --apply. Never touches the checkout that has main out, a detached worktree, or one with unmerged commits or edits.
-set -u
+set -u; . "$(dirname "$0")/lib-bptmp.sh"
 APPLY=0; DAYS=1; HOURS=6; QUIET=0; while [ $# -gt 0 ]; do case "$1" in --apply) APPLY=1;; --days) DAYS=$2; shift;; --hours) HOURS=$2; shift;; --quiet) QUIET=1;; esac; shift; done
 REPO=$(git -C "$(dirname "$0")" worktree list --porcelain | awk 'NR==1{print substr($0,10)}'); BR=${MAIN_BRANCH:-main}
 say() { [ "$QUIET" = 1 ] || echo "$@"; }
@@ -28,15 +28,17 @@ done
 # for 30 minutes (--tmp-minutes N) and nothing uses them: bp-<area>-<pid>-<name> whose pid is dead (bp-chrome-<pid> is a real hub's, not a test's: left alone), and the per-run
 # bpt-XXXXXX dirs of scripts/lib-buildslot.sh (bpt_new) that no process has as its cwd or TMPDIR; a failed run's bpt dir (.bpt-failed) is evidence, bounded there, and left alone here.
 TMIN=30; set -- "$@"; while [ $# -gt 0 ]; do [ "$1" = --tmp-minutes ] && TMIN=$2; shift; done
-ENVS=$(mktemp); trap 'rm -f "$CWDS" "$ENVS"' EXIT; for e in /proc/[0-9]*/environ; do [ -r "$e" ] && tr '\0' '\n' < "$e" 2>/dev/null | grep -a '^TMPDIR=/tmp/bpt-'; done 2>/dev/null | sort -u > "$ENVS"
+ENVS=$(mktemp); trap 'rm -f "$CWDS" "$ENVS"' EXIT; for e in /proc/[0-9]*/environ; do [ -r "$e" ] && tr '\0' '\n' < "$e" 2>/dev/null | grep -aE '^TMPDIR=.*/bpt-'; done 2>/dev/null | sort -u > "$ENVS"
+# lane temp space is on disk ($BP_TMP, scripts/lib-bptmp.sh); /tmp is swept too for older leftovers
+for base in /tmp "$BP_TMP"; do [ -d "$base" ] || continue
 # one find lists what was written lately (its top-level names), one pass checks each candidate; a dry run over 50 000 leftovers takes seconds
 ACT=$(mktemp); trap 'rm -f "$CWDS" "$ENVS" "$ACT"' EXIT
-find /tmp -xdev -mindepth 1 ! -path '/tmp/bp*' -prune -o -mmin -"$TMIN" -printf '%P\n' 2>/dev/null | cut -d/ -f1 | sort -u > "$ACT"
-declare -A act; while IFS= read -r l; do act[$l]=1; done < "$ACT"
+find "$base" -xdev -mindepth 1 ! -path "$base/bp*" -prune -o -mmin -"$TMIN" -printf '%P\n' 2>/dev/null | cut -d/ -f1 | sort -u > "$ACT"
+declare -A act; act=(); while IFS= read -r l; do act[$l]=1; done < "$ACT"
 tn=0; re='^bp-[a-z0-9_]+-([0-9]+)(-.*)?$'
-for d in /tmp/bp-*-[0-9]* /tmp/bpt-??????; do
+for d in "$base"/bp-*-[0-9]* "$base"/bpt-??????; do
   [ -d "$d" ] && [ ! -L "$d" ] && [ -O "$d" ] || continue
-  b=${d#/tmp/}
+  b=${d#"$base"/}
   case "$b" in
     bpt-*) [ -e "$d/.bpt-failed" ] && continue; grep -qxF "TMPDIR=$d" "$ENVS" && continue;;
     bp-chrome-*) continue;;
@@ -46,4 +48,5 @@ for d in /tmp/bp-*-[0-9]* /tmp/bpt-??????; do
   busy "$d" && continue
   tn=$((tn + 1)); [ "$APPLY" = 1 ] && { chmod -R u+rwX "$d" 2>/dev/null; rm -rf --one-file-system "$d"; }
 done
-[ "$tn" -gt 0 ] && say "tmp     $tn test leftovers in /tmp (idle $TMIN min, owner dead)"
+[ "$tn" -gt 0 ] && say "tmp     $tn test leftovers in $base (idle $TMIN min, owner dead)"
+done
