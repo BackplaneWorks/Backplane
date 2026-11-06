@@ -21,6 +21,9 @@ final class DataClient {
     private(set) var older: [String: String] = [:]
     private(set) var loadedThreads: Set<String> = []
     private(set) var listsLoaded = false
+    // what the hub says it can do beyond the base of data/1 (hello.features); a hub that names none takes no pictures
+    private(set) var features: Set<String> = []
+    var canSendImages: Bool { features.contains("images") }
     var pairingError = ""
     var pairingBusy = false
     private(set) var links: [String] = PairingStore.load()
@@ -161,6 +164,7 @@ final class DataClient {
         switch t {
         case "hello":
             guard (o["proto"] as? String)?.hasPrefix("data/") == true else { failure = "This hub does not speak the phone data protocol (update it)."; lost(g, failure); return }
+            features = Set((o["features"] as? [String]) ?? [])
             conn = .online; failure = ""; backoff = 0.25
             Task { await self.synchronise(g) }
         case "reply":

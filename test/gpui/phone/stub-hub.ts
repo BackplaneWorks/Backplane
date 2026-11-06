@@ -59,11 +59,11 @@ Bun.serve({port, hostname: host, fetch(req, server) {
   const url = new URL(req.url);
   if (url.pathname === '/hello') return Response.json({name: 'backplane-stub', proto: 'data/1'});
   if (!authed(req, url)) return new Response('paired authentication required', {status: 401});
-  if (url.pathname === '/client/capabilities') return Response.json({version: 1, views: {version: 1, websocketQuery: 'view=1', renderers: ['mobile'], compatibility: 'explicit-only'}, data: {proto: 'data/1'}});
+  if (url.pathname === '/client/capabilities') return Response.json({version: 1, views: {version: 1, websocketQuery: 'view=1', renderers: ['mobile'], compatibility: 'explicit-only'}, data: {proto: 'data/1', features: ['images']}});
   if (url.pathname === '/ws' && server.upgrade(req)) return;
   return new Response('not found', {status: 404});
 }, websocket: {
-  open(ws) { subs.set(ws, {lists: null, thread: null, n: 0}); ws.send(JSON.stringify({t: 'hello', proto: 'data/1', hub: `${host}:${port}`, version: 'stub', epoch: String(Date.now()), now: Date.now()})); const hb = setInterval(() => { try { ws.send('{"t":"hb"}') } catch { clearInterval(hb) } }, 15000); (ws as any).hb = hb; },
+  open(ws) { subs.set(ws, {lists: null, thread: null, n: 0}); ws.send(JSON.stringify({t: 'hello', proto: 'data/1', features: ['images'], hub: `${host}:${port}`, version: 'stub', epoch: String(Date.now()), now: Date.now()})); const hb = setInterval(() => { try { ws.send('{"t":"hb"}') } catch { clearInterval(hb) } }, 15000); (ws as any).hb = hb; },
   close(ws) { clearInterval((ws as any).hb); subs.delete(ws); },
   message(ws, raw) { let m: any; try { m = JSON.parse(String(raw)) } catch { return } const f = methods[m.m]; if (!f) return ws.send(JSON.stringify({t: 'reply', id: m.id, ok: false, error: 'unknown method'}));
     try { ws.send(JSON.stringify({t: 'reply', id: m.id, ok: true, result: f(m.p || {}, ws)})) } catch (e) { ws.send(JSON.stringify({t: 'reply', id: m.id, ok: false, error: {code: typeof e === 'string' ? e : 'INTERNAL', message: String(e)}})) } },
