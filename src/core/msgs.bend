@@ -3433,6 +3433,13 @@ def T.native.pair.scanner.invalid(l: I.Loc) -> String:
     case I.Ja{}:
       "Backplaneのペアリング用コードではありません"
 
+def T.native.pair.scanner.light(l: I.Loc) -> String:
+  match l:
+    case I.En{}:
+      "Light"
+    case I.Ja{}:
+      "ライト"
+
 def T.native.pair.scanner.title(l: I.Loc) -> String:
   match l:
     case I.En{}:
@@ -3443,9 +3450,9 @@ def T.native.pair.scanner.title(l: I.Loc) -> String:
 def T.native.pair.scanner.unavailable(l: I.Loc) -> String:
   match l:
     case I.En{}:
-      "The scanner needs Google Play services: paste the link instead"
+      "The camera did not start: choose a photo of the code or paste the link instead"
     case I.Ja{}:
-      "読み取りにはGoogle Play開発者サービスが必要です。リンクを貼り付けてください"
+      "カメラを起動できませんでした。コードの写真を選ぶか、リンクを貼り付けてください"
 
 def T.native.pair.tailnet(l: I.Loc) -> String:
   match l:

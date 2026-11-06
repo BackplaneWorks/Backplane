@@ -58,6 +58,12 @@
             </intent-filter>
             <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
         </activity>
+        <!-- the pairing code scanner (Scanner.kt) -->
+        <activity
+            android:name=".ScannerActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize"
+            android:theme="@android:style/Theme.Material.NoActionBar" />
         <!-- the camera's photo for a page's file field -->
         <provider
             android:name="androidx.core.content.FileProvider"
