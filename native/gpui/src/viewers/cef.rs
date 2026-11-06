@@ -34,6 +34,10 @@ pub struct Tab {
     wake: async_channel::Sender<()>,
     hidden: AtomicBool,
     pub id: AtomicI32,
+    /// how many frames CEF has painted (the e2e's frame rate)
+    pub paints: std::sync::atomic::AtomicU64,
+    /// a resize in flight (when, the physical width asked for) and how long the last one took to reach a painted frame (ms, -1 none)
+    resize_at: Mutex<Option<(std::time::Instant, u32)>>, resize_done: Mutex<f64>,
 }
 
 fn s(x: Option<&CefString>) -> String { x.map(|c| c.to_string()).unwrap_or_default() }
@@ -50,6 +54,8 @@ wrap_render_handler! {
         }
         fn on_paint(&self, _b: Option<&mut Browser>, ty: PaintElementType, _dirty: Option<&[Rect]>, buffer: *const u8, width: ::std::os::raw::c_int, height: ::std::os::raw::c_int) {
             if ty != PaintElementType::default() || buffer.is_null() || width <= 0 || height <= 0 { return }
+            self.tab.paints.fetch_add(1, Ordering::Relaxed);
+            { let mut r = self.tab.resize_at.lock().unwrap(); if let Some((t0, w)) = *r { if width as u32 == w { *self.tab.resize_done.lock().unwrap() = t0.elapsed().as_secs_f64() * 1e3; *r = None; } } }
             let bytes = unsafe { std::slice::from_raw_parts(buffer, width as usize * height as usize * 4) }.to_vec();
             { let mut st = self.tab.st.lock().unwrap(); st.frame = Some(Frame { w: width as u32, h: height as u32, bgra: bytes }); st.fresh = true; }
             let _ = self.tab.wake.try_send(());
@@ -248,7 +254,7 @@ impl Tab {
     }
     /// A tab whose browser CEF makes itself (a popup): the state and handlers only.
     pub fn detached(url: &str, w: u32, h: u32, scale: f32, wake: async_channel::Sender<()>) -> Arc<Tab> {
-        Arc::new(Tab { st: Mutex::new(State { url: url.into(), ..Default::default() }), browser: Mutex::new(None), cursor: Mutex::new(Cur::Default), w: w.max(1).into(), h: h.max(1).into(), scale_milli: ((scale * 1000.0) as u32).into(), wake, hidden: AtomicBool::new(false), id: AtomicI32::new(0) })
+        Arc::new(Tab { st: Mutex::new(State { url: url.into(), ..Default::default() }), browser: Mutex::new(None), cursor: Mutex::new(Cur::Default), w: w.max(1).into(), h: h.max(1).into(), scale_milli: ((scale * 1000.0) as u32).into(), wake, hidden: AtomicBool::new(false), id: AtomicI32::new(0), paints: Default::default(), resize_at: Mutex::new(None), resize_done: Mutex::new(-1.0) })
     }
     fn with<R>(&self, f: impl FnOnce(&Browser) -> R) -> Option<R> { self.browser.lock().unwrap().as_ref().map(|b| f(&b.0)) }
     fn host<R>(&self, f: impl FnOnce(&BrowserHost) -> R) -> Option<R> { self.with(|b| b.host().map(|h| f(&h))).flatten() }
@@ -257,15 +263,23 @@ impl Tab {
     pub fn take_frame(&self) -> Option<Frame> { let mut st = self.st.lock().unwrap(); if st.fresh { st.fresh = false; st.frame.take() } else { None } }
     pub fn resize(&self, w: u32, h: u32, scale: f32) {
         let (w, h, sm) = (w.max(1), h.max(1), (scale * 1000.0) as u32);
-        let changed = self.w.swap(w, Ordering::Relaxed) != w | (self.h.swap(h, Ordering::Relaxed) != h) as u32 * 0 || self.scale_milli.swap(sm, Ordering::Relaxed) != sm;
-        let _ = changed; self.host(|h| { h.notify_screen_info_changed(); h.was_resized(); });
+        let changed = self.w.swap(w, Ordering::Relaxed) != w || self.h.swap(h, Ordering::Relaxed) != h || self.scale_milli.swap(sm, Ordering::Relaxed) != sm;
+        if changed { *self.resize_at.lock().unwrap() = Some((std::time::Instant::now(), (w as f32 * scale).round() as u32)); }
+        self.host(|h| { h.notify_screen_info_changed(); h.was_resized(); });
     }
+    pub fn resize_ms(&self) -> f64 { *self.resize_done.lock().unwrap() }
     pub fn size(&self) -> (u32, u32) { (self.w.load(Ordering::Relaxed), self.h.load(Ordering::Relaxed)) }
     pub fn navigate(&self, url: &str) { let u = CefString::from(url); self.with(|b| if let Some(f) = b.main_frame() { f.load_url(Some(&u)); }); }
     pub fn back(&self) { self.with(|b| b.go_back()); }
     pub fn forward(&self) { self.with(|b| b.go_forward()); }
     pub fn reload(&self) { self.with(|b| b.reload()); }
     pub fn stop(&self) { self.with(|b| b.stop_load()); }
+    /// F12: Chromium's DevTools for this page in a window of its own (a separate X window, not painted into ours).
+    pub fn devtools(&self) {
+        self.host(|h| { if h.has_dev_tools() == 1 { h.close_dev_tools(); return }
+            let wi = WindowInfo { bounds: Rect { x: 100, y: 100, width: 1100, height: 760 }, window_name: CefString::from("DevTools"), runtime_style: RuntimeStyle::ALLOY, ..Default::default() };
+            h.show_dev_tools(Some(&wi), None, Some(&BrowserSettings::default()), None); });
+    }
     pub fn close(&self) { self.host(|h| h.close_browser(true as _)); }
     pub fn focus(&self, on: bool) { self.host(|h| h.set_focus(on as _)); }
     pub fn hidden(&self, hide: bool) { if self.hidden.swap(hide, Ordering::Relaxed) != hide { self.host(|h| h.was_hidden(hide as _)); } }

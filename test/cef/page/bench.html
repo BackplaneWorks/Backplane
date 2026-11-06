@@ -1,0 +1,7 @@
+<!doctype html><meta charset=utf-8><title>cef-bench</title>
+<style>body{margin:0;background:#fff;overflow:hidden}#flip{position:absolute;left:300px;top:300px;width:200px;height:200px;background:#2a7}#spin{position:absolute;left:20px;top:20px;width:60px;height:60px;background:#c33}</style>
+<div id=flip></div><div id=spin></div>
+<script>
+let on=false; flip.onclick=()=>{on=!on; flip.style.background=on?'#d22':'#2a7'; document.title='flip:'+on};
+let a=0; (function f(){ a=(a+3)%360; spin.style.transform='rotate('+a+'deg)'; requestAnimationFrame(f) })();
+</script>

@@ -22,7 +22,7 @@ const NO_HELPER: &str = "the Backplane browser could not start: no backplane-bro
 pub const PREVIEW: &[&str] = &["preview_open", "preview_navigate", "preview_snapshot", "preview_click", "preview_type", "preview_press", "preview_scroll", "preview_evaluate", "preview_wait_for", "preview_resize", "preview_status"];
 
 #[derive(Default)]
-struct St { input: Option<mpsc::Sender<String>>, pending: HashMap<u64, oneshot::Sender<String>>, next: u64, gen: u64, drive: HashMap<String, String>, tabs: HashMap<String, String> }
+struct St { input: Option<mpsc::Sender<String>>, pending: HashMap<u64, oneshot::Sender<String>>, next: u64, gen: u64, drive: HashMap<String, String>, tabs: HashMap<String, String>, cast: HashMap<String, std::time::Instant> }
 pub struct Browser { hub: Arc<Hub>, st: Mutex<St>, exe: Option<PathBuf>, events: tokio::sync::broadcast::Sender<Value> }
 
 static BROWSERS: OnceLock<std::sync::Mutex<HashMap<PathBuf, Arc<Browser>>>> = OnceLock::new();
@@ -136,6 +136,15 @@ impl Browser {
         if let Some(id) = o.get("id").and_then(Value::as_u64) { if let Some(tx) = self.st.lock().await.pending.remove(&id) { let _ = tx.send(text.to_string()); } }
     }
 
+    /// A client that shows this page (a phone with its Browser tab open: `screen.jpg` is its poll) holds a lease: the helper screencasts for a few seconds from the
+    /// last request. Without a request nothing is cast and no JPEG is encoded (the native window draws its own page and never asks). At most one `cast` a second per page.
+    pub async fn watch(self: &Arc<Self>, owner: &str) {
+        { let mut st = self.st.lock().await; let now = std::time::Instant::now();
+          if st.cast.get(owner).map_or(false, |t| now.duration_since(*t) < Duration::from_secs(1)) { return }
+          if st.cast.len() >= MAX_OWNERS { st.cast.clear() } st.cast.insert(owner.to_string(), now); }
+        let (me, o) = (self.clone(), owner.to_string());
+        tokio::spawn(async move { let _ = me.ask(&o, "cast", &json!({"ms": 2500})).await; });
+    }
     /// Who drives an owner's page: "" (the agent), "teach" or "takeover" (docs/teach.md `drive.<bot>`).
     /// Past MAX_OWNERS owners a new mode is refused (false) and the caller must not hand the page over; an existing owner's can always change.
     pub async fn set_drive(&self, owner: &str, mode: &str) -> bool {

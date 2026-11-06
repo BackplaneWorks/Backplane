@@ -31,6 +31,16 @@ skips=(); while IFS= read -r l; do case "$l" in ''|'#'*) ;; *) skips+=(--skip "$
 # cargo runs the tests and the builds one after another; here the tests of both crates are compiled at once (--no-run), then every test program runs at the same time, then the two fast builds
 # (a running test program holds no cargo lock). Every test still runs and a red one still stops the build before anything is published.
 CG() { ( cd "$1" && CARGO_TARGET_DIR="$2" taskset -c 0-27 nice -n 10 cargo "${@:3}" ); }
+# The window is built WITH the embedded Chromium (feature cef; docs/browser-gpui-cef.md) unless GPUI_FEATURES is set to something else (empty: none). CEF's distribution is cached once in
+# CEF_PATH (the cef crate downloads it on the first build); if that build fails the window is built without it and says so in the Browser tab ("embedded browser unavailable").
+FEATURES=${GPUI_FEATURES-cef}; export CEF_PATH=${CEF_PATH:-$HOME/.cache/backplane/cef-rs}
+winstep() {
+  echo "window" > "$PH"
+  if [ -n "$FEATURES" ] && ! CG "$ROOT/native/gpui" "$GT" build --profile "$PROFILE" --offline -j "$J" --features "$FEATURES" > "$LOG" 2>&1; then
+    cp "$LOG" "$DEV/.cef-build.log" 2>/dev/null; echo "warning: the window did not build with $FEATURES (see $DEV/.cef-build.log): building it without" >&2; FEATURES=
+  fi
+  if [ -z "$FEATURES" ]; then CG "$ROOT/native/gpui" "$GT" build --profile "$PROFILE" --offline -j "$J" > "$LOG" 2>&1 || fail window; fi
+}
 if [ "$GATE" = 1 ]; then
   echo "compiling tests" > "$PH"; LH=$(mktemp "$DEV/.t.XXXX"); LW=$(mktemp "$DEV/.t.XXXX")
   CG "$ROOT/native/host" "$HT" test --offline -j "$J" --no-run > "$LH" 2>&1 & ph=$!
@@ -47,14 +57,24 @@ if [ "$GATE" = 1 ]; then
   rm -f "${logs[@]}"
   # the builds come after the tests, not beside them: a build at -j28 starves the timing-sensitive hub tests (reconnect_loses_nothing_under_streaming_load and others fail under that load)
   echo "hub" > "$PH"; CG "$ROOT/native/host" "$HT" build --profile "$PROFILE" --offline -j "$J" --bin backplane-hub > "$LOG" 2>&1 || fail hub
-  echo "window" > "$PH"; CG "$ROOT/native/gpui" "$GT" build --profile "$PROFILE" --offline -j "$J" > "$LOG" 2>&1 || fail window
+  winstep
 else
   echo "hub" > "$PH";    CG "$ROOT/native/host" "$HT" build --profile "$PROFILE" --offline -j "$J" --bin backplane-hub > "$LOG" 2>&1 || fail hub
-  echo "window" > "$PH"; CG "$ROOT/native/gpui" "$GT" build --profile "$PROFILE" --offline -j "$J" > "$LOG" 2>&1 || fail window
+  winstep
 fi
 kill $TK 2>/dev/null; echo $(( $(date +%s) - start )) > "$SECS"; rm -f "$DEV/.last-failure" "$DEV/.last-failure.log"
 D=$(mktemp -d "$DEV/.stage.XXXX")
 cp "$HT/$PROFILE/backplane-hub" "$GT/$PROFILE/backplane-gpui" "$D/"
+# the embedded Chromium: libcef.so beside the window (it is linked with RUNPATH $ORIGIN); the rest of CEF's runtime (paks, icudtl.dat, locales, snapshot) is found in
+# ~/.cache/backplane/cef-runtime/<version>, which is made once here from the build (libcef stripped: 1.4 GB with symbols, ~270 MB without), and builds link to that one libcef.
+if [ -n "$FEATURES" ] && [ -f "$GT/$PROFILE/libcef.so" ]; then
+  ver=$(sed -n 's/^pub const VERSION: &str = "\(.*\)";.*/\1/p' "$ROOT/native/gpui/src/viewers/cef.rs" | head -1); RT=${XDG_CACHE_HOME:-$HOME/.cache}/backplane/cef-runtime/$ver
+  if [ ! -f "$RT/libcef.so" ] || [ ! -f "$RT/icudtl.dat" ]; then
+    mkdir -p "$RT/locales"; for f in resources.pak chrome_100_percent.pak chrome_200_percent.pak icudtl.dat v8_context_snapshot.bin; do [ -f "$RT/$f" ] || cp "$GT/$PROFILE/$f" "$RT/"; done
+    cp -n "$GT/$PROFILE/locales/"*.pak "$RT/locales/" 2>/dev/null; cp "$GT/$PROFILE/libcef.so" "$RT/libcef.so.tmp" && strip --strip-unneeded "$RT/libcef.so.tmp" 2>/dev/null; mv "$RT/libcef.so.tmp" "$RT/libcef.so"
+  fi
+  ln -s "$RT/libcef.so" "$D/libcef.so"
+fi
 # the browser helper (tools/browser, bun): the hub looks for `backplane-browser` beside itself, and without one every Browser tab fails to open
 if command -v bun >/dev/null 2>&1 && ( cd "$ROOT/tools/browser" && bun install --frozen-lockfile >/dev/null 2>&1 && bun build.ts "$D/backplane-browser" >/dev/null 2>&1 ); then :
 else prev=$DEV/builds/$(head -1 "$DEV/CURRENT" 2>/dev/null)/backplane-browser; [ -x "$prev" ] && cp "$prev" "$D/" || echo "warning: no browser helper built (bun missing or the build failed) and none to reuse" >&2; fi

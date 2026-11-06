@@ -229,7 +229,7 @@ impl Backplane {
             self.screens.browser = Some((owner, page));
         }
         let light = self.light();
-        if let Some((_, page)) = &self.screens.browser { page.update(cx, |p, cx| { if p.light != light { p.light = light; cx.notify(); } p.set_visible(true, cx) }); }
+        if let Some((_, page)) = &self.screens.browser { page.update(cx, |p, cx| { p.set_light(light, cx); p.set_visible(true, cx) }); }
     }
 
 }
