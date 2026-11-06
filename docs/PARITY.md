@@ -51,8 +51,8 @@ Each lane updates its own rows in the commit that lands the work.
 | Your machines, one list over machines | partial | threads-deep |
 | Viewers for threads on another machine (`far.view`) | unchecked | threads-deep |
 | Real provider logos (the picker draws a coloured initial; no provider artwork found in 0.14's `src/web` either) | missing | threads-small |
-| Routine save errors on screen | missing | threads-small |
-| Diff and Files toggle closed | missing | threads-small |
+| Routine save errors on screen | done | threads-small |
+| Diff and Files toggle closed | done | threads-small |
 | **Bend-era cleanup** | | |
 | Phone launcher code (`WebShell`, Classic screens, `mobile/shell`) | done | cleanup |
 | READMEs and docs that still describe `bridge.js`, `src/core`, the web page (`mobile/README.md`, `docs/ios-build.md`, `docs/order.md`, `docs/git.md` fixed; about 20 more docs under `docs/` now carry a note that `src/` is the removed Bend tree, with the Rust replacement unverified; `docs/voice.md` is the voice thread's) | partial | cleanup |
@@ -226,5 +226,5 @@ Filled in by the lanes as they meet them. A row needs what was rough and what it
 |---|---|---|
 | Dictation depended on a Bun helper and a Node addon fetched at runtime | missing | voice |
 | A dead control looks live (the `Dictate` chip) | missing | voice |
-| A failed routine save said nothing | missing | threads-small |
+| A failed routine save said nothing | done | threads-small |
 | Provider marks were initials | missing | threads-small |

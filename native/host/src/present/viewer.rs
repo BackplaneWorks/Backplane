@@ -87,6 +87,8 @@ pub fn view_action(st: &State, hub: &str, session: &Value, kind: &str) -> Option
     if !simple(st, session, sel) { return None }
     let d = &session["drafts"]; let prev = s(d, &format!("@view:{sel}"));
     if !(prev.is_empty() || shows(prev)) { return None }
+    // Files pressed while the Files tab is on show closes it (every other press opens its kind, and "" closes): the hub decides, never the button
+    let kind = if kind == "files" && files_kind(prev) { "" } else { kind };
     let root = root_of(st, sel);
     // what the hub is asked to watch: the kind and path View.ask sends (Mech's part is a 3D model; a split watches three sources)
     let (want, wkind, wpath) = if kind == "mech" { let ps = mech_parts(&root); let part = part.strip_prefix(&format!("{root}/")).unwrap_or(part); let (w, a) = mech_want(&root, &ps, part); let k = if w.is_empty() { "" } else { "3d" }; (w, k.to_string(), a) } else { (key(kind, &root), kind.to_string(), String::new()) };
@@ -519,6 +521,19 @@ mod tests {
         let th = "t1700000003-8".to_string(); let proj = st.threads.get(&th).map(|t| t.project.clone()).unwrap();
         if let Some(p) = st.projects.get_mut(&proj) { p.root = d.to_string_lossy().into_owned(); p.title = "My: Board".into(); }
         (st, th, d)
+    }
+    #[test] fn pressing_files_while_files_is_on_show_closes_it() {
+        let (st, th, d) = files_world("toggle");
+        let mut s1 = sess(&th, json!({}));
+        let o = view_action(&st, "h", &s1, "files").unwrap(); crate::session::patch::merge(&mut s1, &o.patch);
+        assert_eq!(s1["drafts"][format!("@view:{th}")], json!("files"), "the first press opens");
+        let o = view_action(&st, "h", &s1, "files").unwrap(); crate::session::patch::merge(&mut s1, &o.patch);
+        assert_eq!(s1["drafts"][format!("@view:{th}")], json!(""), "the second press closes");
+        let o = view_action(&st, "h", &s1, "files").unwrap(); crate::session::patch::merge(&mut s1, &o.patch);
+        assert_eq!(s1["drafts"][format!("@view:{th}")], json!("files"), "and the next opens again");
+        let o = view_action(&st, "h", &s1, "board").unwrap(); crate::session::patch::merge(&mut s1, &o.patch);
+        assert_eq!(s1["drafts"][format!("@view:{th}")], json!("board"), "another tab is never a toggle");
+        let _ = std::fs::remove_dir_all(&d);
     }
     #[test] fn a_project_with_several_boards_lists_them_and_a_pick_watches_that_board() {
         let (st, th, d) = files_world("boards"); let root = d.to_string_lossy().into_owned();

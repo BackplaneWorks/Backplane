@@ -232,6 +232,8 @@ fn memory_page(cx: &mut Context<Backplane>, light: bool, bot: &Value) -> AnyElem
     }).into_any_element()
 }
 
+/// The hub's reason a routine did not save (`routine.error`), shown on the form; None when there is none.
+fn routine_error(form: &Value) -> Option<String> { Some(string(form, "error")).filter(|e| !e.is_empty()) }
 fn routines_page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, bot: &Value) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let items: Vec<&Value> = arr(bot, "routines").collect();
@@ -244,6 +246,7 @@ fn routines_page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<Stri
             .children(field_box(light, fields, "oname")).children(field_box(light, fields, "ocron"))
             .child(div().text_size(px(11.)).text_color(c("dim")).child(if hint.is_empty() { "When: every 15m, daily 09:30, weekdays 08:00, or a one-time time".to_string() } else { hint }))
             .children(field_box_h(light, fields, "oprompt", 60.))
+            .children(routine_error(form).map(|e| div().id("rt-error").text_size(px(12.)).text_color(c("bad")).child(e)))
             .child(div().flex().gap_2().child(btn(cx, light, "rt-cancel".into(), "Cancel".into(), false, close_routine_form, String::new())).child(if can { btn(cx, light, "rt-save".into(), "Save".into(), true, routine_save, String::new()) } else { div().px_2().py_1().text_size(px(12.)).text_color(c("faint")).child("Save").into_any_element() }))
     } else {
         div().flex().px_3().py_2().border_b_1().border_color(c("line")).child(btn(cx, light, "rt-new".into(), "New routine".into(), false, routine_edit, String::new()))
@@ -444,6 +447,10 @@ mod tests {
     use super::*;
     use core::prelude::v1::test;
     fn j(s: &str) -> Value { serde_json::from_str(s).unwrap() }
+    #[test] fn the_routine_form_shows_the_hubs_reason_when_there_is_one() {
+        assert_eq!(routine_error(&j(r#"{"open":true,"error":"I can't read that time."}"#)).as_deref(), Some("I can't read that time."));
+        assert_eq!(routine_error(&j(r#"{"open":true,"error":""}"#)), None); assert_eq!(routine_error(&j(r#"{"open":true}"#)), None);
+    }
     #[test] fn the_hooks_tab_asks_for_a_name_field() {
         let d = j(r#"{"bot":{"kind":"bot","id":"b","tab":"hooks","hooks":[]}}"#); assert_eq!(form_fields(&d).iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), ["hk.name"]);
     }

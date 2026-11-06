@@ -73,7 +73,7 @@ pub fn routine_act(page: &Value, bot: &str, hub: &str, session: &Value, action: 
             if !value.is_empty() && r.is_none() { return None }
             let g = |k: &str| r.map_or("", |r| s(r, k));
             let when = if g("cron").is_empty() { g("label") } else { g("cron") };
-            json!({"drafts": {"@onew": "1", "@f.oid": value, "@f.oname": g("name"), "@f.ocron": when, "@f.oprompt": g("prompt")}})
+            json!({"drafts": {"@onew": "1", "@f.oerr": "", "@f.oid": value, "@f.oname": g("name"), "@f.ocron": when, "@f.oprompt": g("prompt")}})
         }
         "routine-save" if on(session, "@onew") => {
             let when = draft(session, "@f.ocron").trim();
@@ -82,8 +82,10 @@ pub fn routine_act(page: &Value, bot: &str, hub: &str, session: &Value, action: 
             let key = if crate::bots::clock::Cron::parse(when).is_some() { "cron" } else { "at" };
             let mut p = json!({"bot": bot, "routine": draft(session, "@f.oid"), "name": if name.is_empty() { "routine" } else { name }, "prompt": draft(session, "@f.oprompt"), "on": true});
             p[key] = json!(when);
+            // the form stays open until the hub accepts it: a refusal comes back as `@f.oerr` (session/pages.rs `apply_reads`)
+            let req = rid;
             send(session, hub, "bots.routine", p, &mut cmds, &mut rid);
-            json!({"drafts": {"@onew": "", "@f.oid": "", "@f.oname": "", "@f.ocron": "", "@f.oprompt": ""}, "rid": rid})
+            json!({"drafts": {"@f.oerr": "", format!("@o.req:{req}"): "1"}, "rid": rid})
         }
         _ => return None,
     };
@@ -93,7 +95,7 @@ pub fn routine_act(page: &Value, bot: &str, hub: &str, session: &Value, action: 
 pub fn routine_form(session: &Value) -> Value {
     let when = draft(session, "@f.ocron").trim();
     let hint = if crate::bots::clock::Cron::parse(when).is_some() { crate::bots::sched_text::when_cron(when) } else { String::new() };
-    json!({"open": on(session, "@onew"), "id": draft(session, "@f.oid"), "name": draft(session, "@f.oname"), "cron": draft(session, "@f.ocron"), "prompt": draft(session, "@f.oprompt"), "hint": hint})
+    json!({"open": on(session, "@onew"), "id": draft(session, "@f.oid"), "name": draft(session, "@f.oname"), "cron": draft(session, "@f.ocron"), "prompt": draft(session, "@f.oprompt"), "hint": hint, "error": draft(session, "@f.oerr")})
 }
 
 /// The screen's `newBot` object: None while the form is shut.
@@ -145,12 +147,31 @@ mod tests {
         let o = routine_act(&page, "b1", "h", &s, "routine-save", "").unwrap();
         let req: Value = serde_json::from_str(o.cmds[0]["text"].as_str().unwrap()).unwrap();
         assert_eq!((req["m"].as_str(), req["p"]["routine"].as_str(), req["p"]["cron"].as_str(), req["p"]["at"].is_null()), (Some("bots.routine"), Some("o1"), Some("0 9 * * *"), true));
-        crate::session::patch::merge(&mut s, &o.patch); assert_eq!(routine_form(&s)["open"], false);
+        crate::session::patch::merge(&mut s, &o.patch); assert_eq!(routine_form(&s)["open"], true, "the form waits for the hub's answer");
         let mut s = sess(json!({"@onew": "1", "@f.ocron": "2030-01-01T09:00"}));
         let o = routine_act(&page, "b1", "h", &s, "routine-save", "").unwrap(); crate::session::patch::merge(&mut s, &o.patch);
         let req: Value = serde_json::from_str(o.cmds[0]["text"].as_str().unwrap()).unwrap();
         assert_eq!((req["p"]["at"].as_str(), req["p"]["cron"].is_null(), req["p"]["name"].as_str()), (Some("2030-01-01T09:00"), true, Some("routine")));
         assert!(routine_act(&page, "b1", "h", &sess(json!({"@onew": "1"})), "routine-save", "").unwrap().cmds.is_empty());
+    }
+    /// A routine saved with a time the hub cannot read: the hub's own reason lands on the form, which stays open; a good save closes it.
+    #[test] fn a_failed_routine_save_shows_the_hubs_reason_on_the_form() {
+        use crate::session::pages::apply_reads;
+        let st = State::default(); let facts = crate::session::dispatch::StateFacts(&st);
+        let page = json!({"routines": []});
+        let mut s = json!({"sel": "t1", "rid": 5, "drafts": {"@onew": "1", "@f.oname": "x", "@f.ocron": "banana", "@f.oprompt": "p"}, "info": {}});
+        let o = routine_act(&page, "b1", "h", &s, "routine-save", "").unwrap(); crate::session::patch::merge(&mut s, &o.patch);
+        let sent: Value = serde_json::from_str(o.cmds[0]["text"].as_str().unwrap()).unwrap();
+        let why = match crate::bots::routines::plan(&crate::bots::clock::Zones { settings: &Default::default() }, 1_000_000, "UTC", "", sent["p"]["at"].as_str().unwrap(), None) { crate::bots::routines::Pick::Bad(w) => w, p => panic!("{p:?}") };
+        let id = sent["id"].as_u64().unwrap();
+        apply_reads(&facts, "h", &mut s, &[json!({"kind": "history.refs", "method": "bots.routine", "id": id, "ok": false, "result": {}, "error": why})]);
+        let f = routine_form(&s); assert_eq!(f["open"], true); assert_eq!(f["error"], json!(why)); assert!(why.contains("can't read that time"));
+        s["drafts"]["@f.ocron"] = json!("daily 09:30");
+        let o = routine_act(&page, "b1", "h", &s, "routine-save", "").unwrap(); crate::session::patch::merge(&mut s, &o.patch);
+        assert_eq!(routine_form(&s)["error"], "", "a new save clears the old reason");
+        let id = serde_json::from_str::<Value>(o.cmds[0]["text"].as_str().unwrap()).unwrap()["id"].as_u64().unwrap();
+        apply_reads(&facts, "h", &mut s, &[json!({"kind": "history.refs", "method": "bots.routine", "id": id, "ok": true, "result": {}})]);
+        assert_eq!(routine_form(&s)["open"], false);
     }
     #[test] fn a_form_action_with_no_form_open_is_not_ours() {
         let st = State::default(); assert!(act(&st, "h", &sess(json!({})), "bot-create", "").is_none() && act(&st, "h", &sess(json!({})), "form-close", "x").is_none());
