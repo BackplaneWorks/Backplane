@@ -353,11 +353,6 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
 }
 
 /// The rows of the "This device" page: what only this computer decides. Every button is `local:<name>` with a value; none reaches the hub.
-/// Shut the dialog (the × and Esc): this device's page at once, and the hub's flag only when it is open there.
-pub fn close(this: &mut Backplane) {
-    let hub = this.data["settings"].is_object();
-    this.screens.settings_ui.open_local = false; this.screens.settings_ui.device = false;
-    if hub { let _ = this.tx.try_send(Command::Action("flag".into(), "settings".into())); }
 }
 
 pub fn device_rows(l: &crate::local::Local) -> Vec<Row> {

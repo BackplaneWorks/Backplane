@@ -97,6 +97,7 @@ impl Backplane {
     }
     /// The words of the popup rows the hub offers now (none while it offers none).
     pub(crate) fn popup_rows(&self) -> Vec<String> {
+        if self.screens.popup_shut { return vec![]; }
         self.data["thread"]["skills"].as_array().into_iter().flatten().map(|s| s.get("word").or_else(|| s.get("name")).and_then(Value::as_str).unwrap_or("").to_string()).filter(|w| !w.is_empty()).take(8).collect()
     }
     /// Choose the highlighted row: the hub puts its word where the one being typed is.

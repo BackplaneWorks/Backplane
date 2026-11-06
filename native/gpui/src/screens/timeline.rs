@@ -296,7 +296,7 @@ pub fn blocks(cx: &mut Context<Backplane>, reg: &Reg, light: bool, parsed: &[Blo
 
 const MAX_IMAGES: usize = 12;
 /// Images a message names: each as its picture when it has arrived, a placeholder while it loads or when it cannot.
-pub fn images(light: bool, list: &Value, key: &str, target: Option<&super::attach::Target>, imgs: &super::images::Images) -> Option<AnyElement> {
+pub fn images(cx: &mut Context<Backplane>, light: bool, list: &Value, key: &str, target: Option<&super::attach::Target>, imgs: &super::images::Images) -> Option<AnyElement> {
     let c = |n: &str| theme::color(light, n);
     let items = list.as_array().filter(|a| !a.is_empty())?;
     let mut row = div().flex().flex_wrap().gap_2();
@@ -304,11 +304,11 @@ pub fn images(light: bool, list: &Value, key: &str, target: Option<&super::attac
         let url = it["url"].as_str().unwrap_or("");
         let name = it["path"].as_str().unwrap_or("").rsplit('/').next().unwrap_or("").to_string();
         let el = match imgs.get(target, url) {
-            Slot::Ready(img) => match super::images::dims(&img.bytes) {
+            Slot::Ready(img) => { let shown = img.clone(); let n = name.clone();
+                let (bw, bh) = match super::images::dims(&img.bytes) { Some((w, h)) => super::images::fit(w, h, 480., 360.), None => (480., 120.) };
                 // an explicit box of the picture's own aspect: layout and paint agree, so the picture never spills over the rows below
-                Some((w, h)) => { let (w, h) = super::images::fit(w, h, 480., 360.); div().w(px(w)).h(px(h)).flex_none().overflow_hidden().child(gpui::img(ImageSource::Image(img)).size_full().object_fit(ObjectFit::Contain)).into_any_element() }
-                None => div().w(px(480.)).h(px(120.)).flex_none().overflow_hidden().child(gpui::img(ImageSource::Image(img)).size_full().object_fit(ObjectFit::Contain)).into_any_element(),
-            },
+                div().w(px(bw)).h(px(bh)).flex_none().overflow_hidden().cursor_pointer().on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| { this.screens.lightbox = Some((shown.clone(), n.clone())); cx.notify(); }))
+                    .child(gpui::img(ImageSource::Image(img)).size_full().object_fit(ObjectFit::Contain)).into_any_element() }
             Slot::Loading => div().px_2().py_1().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("dim")).child(format!("Loading {name}…")).into_any_element(),
             Slot::Failed => div().px_2().py_1().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("bad")).child(format!("Could not load {name}")).into_any_element(),
         };
@@ -327,11 +327,11 @@ pub fn split_attachments(list: &Value) -> (Vec<Value>, Vec<String>) {
     }
     (pics, files)
 }
-pub fn attachments(light: bool, list: &Value, key: &str, target: Option<&super::attach::Target>, imgs: &super::images::Images) -> Vec<AnyElement> {
+pub fn attachments(cx: &mut Context<Backplane>, light: bool, list: &Value, key: &str, target: Option<&super::attach::Target>, imgs: &super::images::Images) -> Vec<AnyElement> {
     let c = |n: &str| theme::color(light, n);
     let (pics, files) = split_attachments(list);
     let mut out = Vec::new();
-    if let Some(p) = images(light, &Value::Array(pics), key, target, imgs) { out.push(p); }
+    if let Some(p) = images(cx, light, &Value::Array(pics), key, target, imgs) { out.push(p); }
     if !files.is_empty() { out.push(div().flex().flex_wrap().gap_1().children(files.into_iter().map(|f| div().px_2().py_1().border_1().border_color(c("line")).text_size(px(11.)).text_color(c("dim")).child(f))).into_any_element()); }
     out
 }
