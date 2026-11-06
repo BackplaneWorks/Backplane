@@ -58,7 +58,7 @@ Each lane updates its own rows in the commit that lands the work.
 | READMEs and docs that still describe `bridge.js`, `src/core`, the web page (`mobile/README.md`, `docs/order.md`, `docs/voice.md`, others) | partial | cleanup |
 | `mobile/tests/improvements/bridge.mjs` and other tests of the old bridge | partial | cleanup |
 | **Helpers** (goal: only `tools/browser` stays Bun) | | |
-| `tools/kipc`: the hub has this in process; `BACKPLANE_KIPC_BIN` is the only way left to the Bun one | partial | helpers |
+| `tools/kipc`: removed, with `BACKPLANE_KIPC_BIN` and `scripts/build-kipc.sh`; the hub does the IPC in process | done | cleanup |
 | `tools/step2glb`: FreeCAD comes first, Bun and OpenCascade WASM are the fallback for machines without FreeCAD | partial | helpers |
 | `tools/voice` | partial | voice |
 | `tools/platform/windows-path.ts` | unchecked | helpers |

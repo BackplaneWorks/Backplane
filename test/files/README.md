@@ -31,9 +31,8 @@ Deliberate differences, all refusals, listed at the top of `rv.rs`: a version mu
 
 - `sh test/files/boat-kipc-job.sh` (Boat): the transport's tests through `kipc-probe`, the binary, then the hub's `cargo test kicad::`. It exits 0 on the probe alone; read `HUB_TESTS=` for the hub.
 - `golden_runtime_schema` skips where the runtime is absent, Boat included, because KiCad's descriptor set is not in this repository. Run `kipc-probe --golden test/files/fixtures/kipc_golden_runtime.json --desc <runtime>/share/backplane/api.desc` on the desktop.
-- `bun test/files/kipc_real.ts WORK RUNTIME PROBE BUN_MAIN [ROUNDS]`: Rust and the Bun helper against real KiCad, JSON compared, latency timed. `WORK` holds a copy of the `ecc83-pp` demo in `proj/`.
 - `bun test/files/kipc_hub_e2e.mjs HUB RUNTIME PORT WORK`: the hub, a stand-in agent and real KiCad through the MCP tools.
-- Goldens come from protobufjs: `kipc_golden.ts`, run from a copy with tools/kipc's `node_modules`.
+- The goldens in `fixtures/kipc_golden*.json` were written by protobufjs (the Bun helper, removed; `git show v0.14.1:test/files/kipc_golden.ts` has the generator). They are checked in and `kipc-probe --golden` compares proto.rs against them.
 
 ## Message images and attachments (gaps, for PARITY.md)
 - `/message-image` serves only a snapshot a ref names. A message older than any ref answers 404 here; hub re-reads the text from store.db and snapshots on request.

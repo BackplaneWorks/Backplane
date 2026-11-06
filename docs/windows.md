@@ -32,8 +32,8 @@ and removed after; they never enter the emitted JS or an artifact.
 `BACKPLANE_GOOGLE_BAKE=0` bakes none.
 
 The helpers are separate Windows programs, built from Linux with Bun
-(`scripts/build-windows-helpers.sh`: `backplane-kipc.exe`,
-`backplane-step2glb.exe`, their licenses). CAD on Windows is in
+(`scripts/build-windows-helpers.sh`: `backplane-step2glb.exe`,
+its license; the hub does the KiCad IPC in process). CAD on Windows is in
 [windows-cad.md](windows-cad.md). `scripts/install-windows-providers.ps1`
 installs the Claude and Codex CLIs; `scripts/setup-windows.ps1` installs the
 Cygwin shell tools (bash, git, coreutils) that shell commands the hub runs

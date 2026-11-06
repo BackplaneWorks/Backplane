@@ -1,14 +1,13 @@
 //! KiCad IPC on the hub, in Rust.
 //!
 //! The transport ([`Transport`]) is in the hub: pure-Rust nng and protobuf (kipc.rs over nng.rs and proto.rs), so no Bun or JS
-//! process runs under it. With env `BACKPLANE_KIPC_BIN` set it is the old Bun helper `backplane-kipc` (tools/kipc, NDJSON on
-//! stdio) as a child process instead, a fallback that speaks the same objects.
+//! process runs under it.
 //! Rust owns the actor: one record per project, at most two servers, requests wait for a server
 //! that is starting, the 1/5/30 s restart schedule, the `-bp.N` version check after Ping + GetVersion, the server a third
 //! project retires (asked to `kiapi.backplane.Shutdown`, never killed), the 18 commands a headless KiCad refuses, the bp.3
 //! guards and the words shown. The pure rules are in kserve.rs (a Rust twin of core/kserve until the rules process is
 //! wired). NOTHING HERE SENDS A SIGNAL TO ANY PROCESS: KiCad's servers end themselves (`--parent-pid`, `--idle-exit`,
-//! `Shutdown`); the Bun helper, when used, ends when its stdin closes (the hub is gone); a child is only ever `wait`ed for.
+//! `Shutdown`); a child is only ever `wait`ed for.
 //!
 //! Entry points for the `agents` stream's MCP layer: [`kicad_ipc`] and [`kicad_ipc_status`] (the MCP tools of the same
 //! names), plus [`kicad_ipc_in`] / [`kicad_ipc_status_in`] which also take the calling thread so a fallback logs
@@ -37,7 +36,6 @@ enum Msg {
     Argv { project: String, env: Env, reply: oneshot::Sender<String> },
     Clear,
     Line(u64, Value),
-    Dead(u64),
     Up { project: String, version: String },
     Bad { project: String, why: String },
     Late { project: String, born: u64 },
@@ -46,27 +44,20 @@ enum Msg {
 }
 
 struct Wt { project: String, ty: String, msg: Value, env: Env, reply: oneshot::Sender<Value> }
-/// What carries the actor's requests. It takes the helper's request objects and answers, through the actor's mailbox, with
-/// the objects the helper writes (`Msg::Line`): replies by id, and `{"event":"line"|"exit"}` for a server.
+/// What carries the actor's requests. It takes request objects and answers, through the actor's mailbox, with
+/// the objects it writes (`Msg::Line`): replies by id, and `{"event":"line"|"exit"}` for a server.
 trait Transport: Send { fn send(&mut self, fields: Value) -> bool; } // false: it is gone, and nothing will answer
 /// The hub's own: the default.
 impl Transport for kipc::Native { fn send(&mut self, fields: Value) -> bool { self.handle(fields); true } }
-/// The Bun helper's stdin: BACKPLANE_KIPC_BIN only.
-struct Bun(mpsc::UnboundedSender<String>);
-impl Transport for Bun { fn send(&mut self, fields: Value) -> bool { self.0.send(fields.to_string()).is_ok() } }
 struct Helper { link: Box<dyn Transport>, gen: u64 }
 
 struct Actor {
-    me: mpsc::UnboundedSender<Msg>, home: String, rt: String, bun: Option<String>, hub_pid: u32,
+    me: mpsc::UnboundedSender<Msg>, home: String, rt: String, hub_pid: u32,
     helper: Option<Helper>, gen: u64, pend: HashMap<String, oneshot::Sender<Value>>, next: u64,
     srvs: Vec<Srv>, wait: Vec<Wt>, shown: String, env: Env, lines: Arc<std::sync::Mutex<String>>,
 }
 
 pub fn now_s() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) }
-
-/// The Bun helper's path, when it is asked for: BACKPLANE_KIPC_BIN.
-pub fn helper_path() -> Option<String> { std::env::var_os("BACKPLANE_KIPC_BIN").filter(|p| !p.is_empty()).map(|p| p.to_string_lossy().into()) }
-fn on_path(exe: &str) -> bool { if exe.contains('/') { return Path::new(exe).is_file() } std::env::var("PATH").unwrap_or_default().split(':').any(|d| Path::new(d).join(exe).is_file()) }
 
 impl Actor {
     fn srv(&self, project: &str) -> Srv { self.srvs.iter().find(|s| s.project == project).cloned().unwrap_or_else(|| Srv::none(project)) } // KServe.get
@@ -77,7 +68,7 @@ impl Actor {
     /// A request line registered for its reply (KServe.call). The helper is started on first use.
     fn call(&mut self, mut fields: Value, reply: oneshot::Sender<Value>) {
         if self.helper.is_none() { self.start_helper() }
-        let Some(h) = &mut self.helper else { let _ = reply.send(failed("the KiCad IPC helper could not start (is backplane-kipc installed next to Backplane?)")); return };
+        let Some(h) = &mut self.helper else { let _ = reply.send(failed("the KiCad IPC transport could not start")); return };
         self.next += 1; let id = self.next.to_string();
         fields["id"] = json!(self.next);
         if !h.link.send(fields) { let _ = reply.send(failed("the KiCad IPC helper exited")); return }
@@ -85,23 +76,8 @@ impl Actor {
     }
     fn start_helper(&mut self) {
         self.gen += 1; let gen = self.gen;
-        let Some(exe) = self.bun.clone() else {
-            let me = self.me.clone();
-            self.helper = Some(Helper { link: Box::new(kipc::Native::new("", Arc::new(move |o| { let _ = me.send(Msg::Line(gen, o)); }))), gen });
-            return
-        };
-        let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Local, &exe); c.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).current_dir("/").kill_on_drop(false);
-        let Ok(mut child) = c.spawn() else { return };
-        let (Some(mut stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else { return };
-        let (tx, mut rx) = mpsc::unbounded_channel::<String>();
-        tokio::spawn(async move { while let Some(l) = rx.recv().await { if stdin.write_all(l.as_bytes()).await.is_err() || stdin.write_all(b"\n").await.is_err() { break } } }); // dropping stdin = "the hub is gone" to the helper
         let me = self.me.clone();
-        tokio::spawn(async move {
-            let mut rd = BufReader::new(stdout).lines();
-            while let Ok(Some(l)) = rd.next_line().await { if let Ok(o) = serde_json::from_str::<Value>(&l) { let _ = me.send(Msg::Line(gen, o)); } }
-            let _ = child.wait().await; let _ = me.send(Msg::Dead(gen));
-        });
-        self.helper = Some(Helper { link: Box::new(Bun(tx)), gen });
+        self.helper = Some(Helper { link: Box::new(kipc::Native::new("", Arc::new(move |o| { let _ = me.send(Msg::Line(gen, o)); }))), gen });
     }
     fn sink(&mut self, fields: Value) { let (t, _r) = oneshot::channel(); self.call(fields, t) }
 
@@ -119,14 +95,13 @@ impl Actor {
     }
     fn launch(&mut self, project: &str) { // KServe.launch: helper present, then the server is started and gets 30 s to say it listens
         let now = now_s();
-        if let Some(exe) = self.bun.clone().filter(|e| !on_path(e)) { let _ = self.me.send(Msg::Bad { project: project.into(), why: format!("the KiCad IPC helper was not found or is not executable: {exe}") }); let s = self.srv(project).starting(now); self.put(s); return }
         let dir = ks::dir(&self.rt, &self.home, project);
         { use std::os::unix::fs::DirBuilderExt; let _ = std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir); }
         let argv = ks::argv(&self.env.cli, project, &dir, self.hub_pid, &self.env.caps);
         let envv: Map<String, Value> = ["BACKPLANE_KICAD_LIBRARY", "KICAD_CONFIG_HOME"].iter().map(|k| (k.to_string(), json!(std::env::var(k).unwrap_or_default()))).collect();
         self.sink(json!({"op":"spawn","key":project,"argv":argv,"memory":"1536M","env":envv}));
         let s = self.srv(project).starting(now); self.put(s);
-        if self.helper.is_some() { self.later(30.0, Msg::Late { project: project.into(), born: now }) } else { let _ = self.me.send(Msg::Bad { project: project.into(), why: format!("the KiCad IPC helper could not start: {}", self.bun.clone().unwrap_or_default()) }); }
+        if self.helper.is_some() { self.later(30.0, Msg::Late { project: project.into(), born: now }) }
         self.emit();
     }
     fn close(&mut self, sock: &str) { if !sock.is_empty() { self.sink(json!({"op":"close","sock":sock})) } } // KServe.close
@@ -215,14 +190,6 @@ impl Actor {
             self.fail_project(&project, &format!("{} ({} would not stop: {why})", ks::BUSY, ks::name(&victim))); self.emit();
         } else { self.evicting(&other, &project) }
     }
-    fn dead(&mut self, gen: u64) { // the helper went away: what waits for it fails, and the next request starts it again
-        if self.helper.as_ref().map(|h| h.gen) != Some(gen) { return }
-        self.helper = None;
-        for (_, r) in self.pend.drain() { let _ = r.send(failed("the KiCad IPC helper exited")); }
-        for w in std::mem::take(&mut self.wait) { let _ = w.reply.send(failed(&ks::unavailable("the KiCad IPC helper exited", &w.env.cli))); }
-        for s in self.srvs.iter_mut().filter(|s| ks::active(&s.state)) { s.state = "stopped".into(); s.why.clear() }
-        self.emit();
-    }
     fn handle(&mut self, m: Msg) {
         match m {
             Msg::Ask { project, env, ty, msg, reply } => { self.env = env.clone(); self.ask(Wt { project, ty, msg, env, reply }) }
@@ -231,7 +198,6 @@ impl Actor {
             Msg::Argv { project, env, reply } => { let d = ks::dir(&self.rt, &self.home, &project); let _ = reply.send(ks::argv(&env.cli, &project, &d, self.hub_pid, &env.caps).join(" ")); }
             Msg::Clear => { for s in self.srvs.iter_mut().filter(|s| s.state == "failed") { *s = s.clone().cleared() } self.emit() }
             Msg::Line(gen, t) => if self.helper.as_ref().map(|h| h.gen) == Some(gen) { self.line(t) },
-            Msg::Dead(g) => self.dead(g),
             Msg::Up { project, version } => self.up(project, version),
             Msg::Bad { project, why } => self.bad(project, why),
             Msg::Late { project, born } => { let s = self.srv(&project); if s.state == "starting" && s.started == born && s.sock.is_empty() { self.bad(project, "did not say it was listening within 30 s".into()) } }
@@ -249,7 +215,7 @@ pub fn start(hub: &Arc<Hub>) {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let lines = Arc::new(std::sync::Mutex::new(String::new()));
     let home = hub.cfg.home.to_string_lossy().to_string();
-    let mut a = Actor { me: tx.clone(), home, rt: std::env::var("XDG_RUNTIME_DIR").unwrap_or_default(), bun: helper_path(), hub_pid: std::process::id(), helper: None, gen: 0, pend: HashMap::new(), next: 0,
+    let mut a = Actor { me: tx.clone(), home, rt: std::env::var("XDG_RUNTIME_DIR").unwrap_or_default(), hub_pid: std::process::id(), helper: None, gen: 0, pend: HashMap::new(), next: 0,
         srvs: vec![], wait: vec![], shown: String::new(), env: Env::default(), lines: lines.clone() };
     tokio::spawn(async move { while let Some(m) = rx.recv().await { a.handle(m) } });
     if IPC.set(Ipc { tx, lines }).is_ok() { hub.register_rpc(Arc::new(IpcRpc)) }
@@ -434,7 +400,7 @@ mod tests {
             asked
         });
         let (tx, mut rx) = mpsc::unbounded_channel(); let lines = Arc::new(std::sync::Mutex::new(String::new()));
-        let mut a = Actor { me: tx.clone(), home: String::new(), rt, bun: None, hub_pid: std::process::id(), helper: None, gen: 0, pend: HashMap::new(), next: 0, srvs: vec![], wait: vec![], shown: String::new(), env: Env::default(), lines: lines.clone() };
+        let mut a = Actor { me: tx.clone(), home: String::new(), rt, hub_pid: std::process::id(), helper: None, gen: 0, pend: HashMap::new(), next: 0, srvs: vec![], wait: vec![], shown: String::new(), env: Env::default(), lines: lines.clone() };
         tokio::spawn(async move { while let Some(m) = rx.recv().await { a.handle(m) } });
         let env = Env { cli, version: "10.99.0-bp.4".into(), ..Default::default() };
         let (t, r) = oneshot::channel();
