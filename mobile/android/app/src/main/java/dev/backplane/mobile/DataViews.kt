@@ -293,6 +293,8 @@ private fun ThreadScreen(id: String, viewer: () -> Unit, back: () -> Unit) {
     var menu by remember { mutableStateOf(false) }; var models by remember { mutableStateOf(false) }
     var order by remember(id) { mutableStateOf<DataClient.Order?>(null) }
     LaunchedEffect(id, list.size, thread?.state, DataClient.conn) { if (DataClient.has("order")) runCatching { DataClient.order(id) }.onSuccess { order = it } }
+    var drawing by remember(id) { mutableStateOf(false) }
+    if (drawing) DrawPadSheet({ drawing = false }) { pending.add(it); notice = "" }
     var openRuns by remember(id) { mutableStateOf(emptySet<String>()) }
     thread?.let { t -> ThreadMenus(t, menu, { menu = false }) { back() }; if (models) PickerSheet(t.id, DNewThreadChoice(), {}) { models = false } }
     Column(Modifier.fillMaxSize()) {
@@ -325,6 +327,7 @@ private fun ThreadScreen(id: String, viewer: () -> Unit, back: () -> Unit) {
             Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (thread != null && (DataClient.has("picker") || thread.chip.isNotEmpty())) ModelChip(thread.chip.ifEmpty { "${thread.provider} / ${thread.model.ifEmpty { "default" }}" }, "thread.model", Modifier.weight(1f)) { models = true } else Spacer(Modifier.weight(1f))
                 Box(Modifier.size(40.dp).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant)).clickable { if (DataClient.canSendImages) pick.launch("image/*") else notice = "This hub does not take pictures yet (update it)." }.testTag("thread.attach"), contentAlignment = Alignment.Center) { Icon(Icons.Default.AttachFile, "Attach", tint = dcs.onSurfaceVariant, modifier = Modifier.size(18.dp)) }
+                Box(Modifier.size(40.dp).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant)).clickable { if (DataClient.canSendImages) drawing = true else notice = "This hub does not take pictures yet (update it)." }.testTag("thread.draw"), contentAlignment = Alignment.Center) { Icon(Icons.Default.Draw, "Draw", tint = dcs.onSurfaceVariant, modifier = Modifier.size(18.dp)) }
                 val blank = draft.isBlank() && pending.isEmpty()
                 if (running && blank) DBtn("Stop", false, modifier = Modifier.testTag("thread.stop"), danger = true) { DataClient.interrupt(id) }
                 else DBtn("Send", true, !blank, Modifier.testTag("thread.send")) { DataClient.send(id, draft, pending.toList()); pending.clear(); draft = ""; notice = ""; stick = true }

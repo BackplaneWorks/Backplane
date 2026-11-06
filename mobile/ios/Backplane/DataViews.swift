@@ -348,6 +348,7 @@ struct DataThreadView: View {
     @State private var text = ""
     @State private var pending: [Data] = []
     @State private var picked: [PhotosPickerItem] = []
+    @State private var drawing = false
     @State private var notice = ""
     @State private var renaming: DThread?
     @State private var deleting: DThread?
@@ -414,6 +415,8 @@ struct DataThreadView: View {
         }
         .modifier(DataThreadDialogs(client: client, renaming: $renaming, deleting: $deleting, deleted: { dismiss() }))
         .sheet(isPresented: $modelSheet) { DataPickerSheet(client: client, thread: id, choice: $noChoice) }
+        // full screen, not a sheet: a pen stroke downward must not swipe it away
+        .fullScreenCover(isPresented: $drawing) { DataPadView { add([$0]) } }
         .onChange(of: picked) { _, items in
             guard !items.isEmpty else { return }
             Task {
@@ -491,6 +494,11 @@ struct DataThreadView: View {
                     }
                     .disabled(!client.canSendImages)
                     .accessibilityLabel(client.canSendImages ? "Attach pictures" : "Attach pictures (this hub does not take pictures yet)").accessibilityIdentifier("data.attach")
+                    Button { if client.canSendImages { drawing = true } else { notice = "This hub does not take pictures yet: update it, then draw again." } } label: {
+                        Image(systemName: "pencil.tip").font(.system(size: 15)).foregroundStyle(client.canSendImages ? BackplaneDesign.dim : BackplaneDesign.faint).frame(width: 40, height: 40).dbox(fill: BackplaneDesign.panel)
+                    }
+                    .disabled(pending.count >= 4)
+                    .accessibilityLabel("Draw").accessibilityIdentifier("data.draw")
                     let blank = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && pending.isEmpty
                     if working && blank {
                         Button("Stop") { Task { await client.interrupt(id) } }.buttonStyle(DButton(danger: true)).accessibilityLabel("Stop").accessibilityIdentifier("thread.send")
