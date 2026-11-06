@@ -1289,7 +1289,7 @@ fn watch_log(work: &Path, rows: &[String], extra: &str) -> String { base_log(wor
     assert!(text.contains("\n\n<references>\nmodel claude/nonesuch: ") && text.ends_with("</references>"), "{text}");
     ag.shutdown();
 }
-#[tokio::test(flavor = "multi_thread")] async fn a_dollar_skill_of_the_persons_own_reaches_the_agent_as_a_slash_command_or_a_file_note() {
+async fn a_dollar_skill_of_the_persons_own_reaches_the_agent_as_a_slash_command_or_a_file_note() {
     let sd = dir("sk-bin"); let rec = sd.join("in.jsonl"); let inner = sd.join("standin.sh"); std::fs::write(&inner, STANDIN.replacen("\n", "\nexport FAKE_PER=2 FAKE_CYCLE=5 FAKE_SECS=1 FAKE_LOG=/dev/null\n", 1)).unwrap();
     script(&sd, "claude", &format!("#!/bin/sh\ntee -a {} | sh {}\n", rec.display(), inner.display()));
     let uh = dir("sk-userhome"); // a fake user: a Claude skill, a Codex-only skill
@@ -1305,7 +1305,9 @@ fn watch_log(work: &Path, rows: &[String], extra: &str) -> String { base_log(wor
     assert!(text.contains(&format!("read \"{}/.agents/skills/codexonly-zq/SKILL.md\"", uh.display())) && !text.contains("unslop-zq/SKILL.md"), "{text}");
     ag.shutdown();
 }
+// one test, not two: two hubs of the host kind at once disturb the process-wide account grants other tests hold
 #[tokio::test(flavor = "multi_thread")] async fn the_reply_depends_on_what_the_picked_skill_says_for_claude_and_codex() {
+    a_dollar_skill_of_the_persons_own_reaches_the_agent_as_a_slash_command_or_a_file_note().await;
     // stand-ins that do what the real agents do with the note: open the SKILL.md named in it and answer with its secret word
     let find = r#"p=$(printf '%s' "$X" | sed -n 's/.*read \\\?"\([^"\\]*SKILL.md\)\\\?".*/\1/p' | head -1); w=$(sed -n 's/^SECRET=//p' "$p" 2>/dev/null | head -1)"#;
     let uh = dir("sc-userhome"); // the skill sits where the other provider's agent does not load it itself, so the turn text must hand over the file
