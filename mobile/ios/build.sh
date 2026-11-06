@@ -3,33 +3,19 @@
 #   mobile/ios/build.sh sim       Debug, installed and launched on a booted iPhone Simulator
 #   mobile/ios/build.sh device    Debug, signed for development, installed on a connected iPhone
 #                                 (DEVICE=<id from `xcrun devicectl list devices`>, else the first)
-#   mobile/ios/build.sh archive   a signed App Store archive, uploaded to TestFlight (NATIVE=1: the native SwiftUI screens, GPUI_NATIVE;
-#                                 BUILD_NUMBER=<n> sets the build number, default the date and minute)
+#   mobile/ios/build.sh archive   a signed App Store archive, uploaded to TestFlight (BUILD_NUMBER=<n>
+#                                 sets the build number, default the date and minute)
 # device and archive read signing.env beside this script (never committed;
 # mobile/README.md): TEAM_ID and BUNDLE_ID, and for archive the App Store
 # Connect key (ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_PATH).
 #
-# The app bundles two scripts made outside Xcode: Backplane/bridge.js (the
-# client: scripts/build-mobile.sh --js) and
-# Backplane/backplane-app.js (the web shell's bridge,
-# mobile/shell/backplane-app.js). In a whole checkout this script makes and
-# copies both (BACKPLANE_SKIP_JS=1 keeps the bridge.js already there);
-# scripts/build-ios.sh copies them before it sends mobile/ios to the Mac.
+# The shipped app is the data/1 native app (DataApp, -DDATA_APP, GPUI_NATIVE):
+# no Bend bridge.js, no engine. Every mode builds it.
 set -eu
 cd "$(dirname "$0")"
 MODE=${1:-sim}
 export DEVELOPER_DIR=${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}
-if [ -f ../../scripts/build-mobile.sh ]; then
-  cp ../shell/backplane-app.js Backplane/backplane-app.js
-  if [ -z "${BACKPLANE_SKIP_JS:-}" ] || [ ! -f Backplane/bridge.js ]; then
-    (cd ../.. && scripts/build-mobile.sh --js)
-    cp ../build/assets/bridge.js Backplane/bridge.js
-  fi
-fi
-for f in Backplane/bridge.js Backplane/backplane-app.js; do
-  [ -s "$f" ] || { echo "missing $f (see the top of this script)"; exit 1; }
-done
-grep -q '/\*@info\*/null' Backplane/backplane-app.js || { echo "Backplane/backplane-app.js has no /*@info*/null"; exit 1; }
+CONDS="GPUI_NATIVE DATA_APP"
 
 signing() {
   [ -f signing.env ] || { echo "no signing.env beside $0 (see mobile/README.md)"; exit 1; }
@@ -40,7 +26,7 @@ signing() {
 case $MODE in
 sim)
   xcodebuild -quiet -project Backplane.xcodeproj -scheme Backplane -configuration Debug \
-    -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath build/dd build
+    -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath build/dd SWIFT_ACTIVE_COMPILATION_CONDITIONS="DEBUG $CONDS" build
   app=build/dd/Build/Products/Debug-iphonesimulator/Backplane.app
   dev=$(xcrun simctl list devices booted | grep -o '[0-9A-F-]\{36\}' | head -1)
   if [ -z "$dev" ]; then
@@ -90,7 +76,7 @@ archive)
   xcodebuild -quiet -project Backplane.xcodeproj -scheme Backplane -configuration Release \
     -destination 'generic/platform=iOS' -archivePath build/Backplane.xcarchive -derivedDataPath build/dd \
     DEVELOPMENT_TEAM="$TEAM_ID" BASE_BUNDLE_ID="$BUNDLE_ID" CURRENT_PROJECT_VERSION="$n" \
-    ${NATIVE:+SWIFT_ACTIVE_COMPILATION_CONDITIONS="GPUI_NATIVE"} ${DATA:+OTHER_SWIFT_FLAGS=-DDATA_APP} \
+    SWIFT_ACTIVE_COMPILATION_CONDITIONS="$CONDS" \
     "$@" $auth archive
   cat > build/export.plist <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
