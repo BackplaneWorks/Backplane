@@ -396,8 +396,8 @@ pub fn upload_file(t: &super::attach::Target, thread: &str, key: &str, name: &st
     use std::io::{Read, Write};
     let size = std::fs::metadata(file).map_err(|_| "The file is gone. Choose it again.".to_string())?.len();
     if size == 0 || size > 64 * 1024 * 1024 { return Err("This file cannot be sent.".into()) }
-    let mut s = std::net::TcpStream::connect(&t.addr).map_err(|_| "The image did not arrive. Reconnect, then retry Send.".to_string())?;
-    let _ = s.set_read_timeout(Some(Duration::from_secs(60))); let _ = s.set_write_timeout(Some(Duration::from_secs(60)));
+    let mut s = t.stream().map_err(|_| "The image did not arrive. Reconnect, then retry Send.".to_string())?;
+    let _ = s.set_timeouts(Duration::from_secs(60));
     s.write_all(super::attach::head(t, thread, key, name, size).as_bytes()).map_err(|e| e.to_string())?;
     let n = std::io::copy(&mut std::fs::File::open(file).map_err(|e| e.to_string())?.take(size), &mut s).map_err(|e| e.to_string())?;
     if n != size { return Err("The file changed while sending. Retry.".into()) }

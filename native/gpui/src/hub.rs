@@ -7,10 +7,10 @@ use tokio::sync::mpsc::{self, Sender};
 use tokio_tungstenite::tungstenite::{Message, protocol::WebSocketConfig};
 
 #[derive(Debug)] pub enum Command { Rpc(String,crate::screens::settings::Secret,&'static str), Sleep(f64), Select(String), Send(String), Draft(String), Action(String,String), Page(String), Ask(String,Value,u64), /** read this history page of the thread, then stand on the newest again */ History(String) }
-#[derive(Debug)] pub enum Event { /** a terminal's output: key, pid (None in a snapshot), bytes, and a snapshot's cols x rows */ Term(String,Option<i32>,Vec<u8>,Option<(usize,usize)>), /** a new connection's greeting: what a terminal printed meanwhile is lost */ Hello, /** the browser helper's tabs of an owner's page (info `browser.tabs.<owner>`, JSON text) */ BrowserTabs(String,String), PlotTooBig(usize), /** a direct request's result (the accounts snapshot) */ Data(&'static str,Value), /** a `{"t":"voice"}` frame (screens/voice.rs) */ Voice(Value), /** history.steps' answer */ Steps(Value), /** history.refs' answer: git dir, top, refs lines, board, schematic */ Refs(Value), /** a cross-probe's pieces on canvas slot: (chunk, piece) */ Probe(usize,Vec<(usize,usize)>), /** a schematic's sheets: rows `depth<TAB>leaf<TAB>name<TAB>file` per line */ Sheets(String), /** an agent's viewer_show: thread, kind, path */ ViewShow(String,String,String), /** what a tapped piece is (kicad.info's answer) */ Pick(String), Rpc(&'static str,bool,String), Answer(u64,Value), Plot(Vec<u8>), NetWake, Picture(Value,Timing), Status(String), Accepted, /** a history page read for this cursor (None: its answer went stale) */ Older(String,Option<Value>), Error(String), /** the hub answered, and said no: shown, but the connection is fine */ Refused(String) }
+#[derive(Debug)] pub enum Event { /** the hub refused this device's credential: it was revoked */ Unpaired, /** a terminal's output: key, pid (None in a snapshot), bytes, and a snapshot's cols x rows */ Term(String,Option<i32>,Vec<u8>,Option<(usize,usize)>), /** a new connection's greeting: what a terminal printed meanwhile is lost */ Hello, /** the browser helper's tabs of an owner's page (info `browser.tabs.<owner>`, JSON text) */ BrowserTabs(String,String), PlotTooBig(usize), /** a direct request's result (the accounts snapshot) */ Data(&'static str,Value), /** a `{"t":"voice"}` frame (screens/voice.rs) */ Voice(Value), /** history.steps' answer */ Steps(Value), /** history.refs' answer: git dir, top, refs lines, board, schematic */ Refs(Value), /** a cross-probe's pieces on canvas slot: (chunk, piece) */ Probe(usize,Vec<(usize,usize)>), /** a schematic's sheets: rows `depth<TAB>leaf<TAB>name<TAB>file` per line */ Sheets(String), /** an agent's viewer_show: thread, kind, path */ ViewShow(String,String,String), /** what a tapped piece is (kicad.info's answer) */ Pick(String), Rpc(&'static str,bool,String), Answer(u64,Value), Plot(Vec<u8>), NetWake, Picture(Value,Timing), Status(String), Accepted, /** a history page read for this cursor (None: its answer went stale) */ Older(String,Option<Value>), Error(String), /** the hub answered, and said no: shown, but the connection is fine */ Refused(String) }
 impl Event {
     /// What the performance overlay calls it.
-    pub fn name(&self)->&'static str {match self {Event::Term(..)=>"term",Event::Hello=>"hello",Event::BrowserTabs(..)=>"browser tabs",Event::PlotTooBig(_)=>"plot too big",Event::Data(..)=>"data",Event::Voice(_)=>"voice",Event::Steps(_)=>"steps",Event::Refs(_)=>"refs",Event::Probe(..)=>"probe",Event::Sheets(_)=>"sheets",Event::ViewShow(..)=>"view show",Event::Pick(_)=>"pick",Event::Rpc(..)=>"rpc",Event::Answer(..)=>"answer",Event::Plot(_)=>"plot",Event::NetWake=>"net wake",Event::Picture(..)=>"picture",Event::Status(_)=>"status",Event::Accepted=>"accepted",Event::Older(..)=>"older",Event::Error(_)=>"error",Event::Refused(_)=>"refused"}}
+    pub fn name(&self)->&'static str {match self {Event::Term(..)=>"term",Event::Hello=>"hello",Event::BrowserTabs(..)=>"browser tabs",Event::PlotTooBig(_)=>"plot too big",Event::Data(..)=>"data",Event::Voice(_)=>"voice",Event::Steps(_)=>"steps",Event::Refs(_)=>"refs",Event::Probe(..)=>"probe",Event::Sheets(_)=>"sheets",Event::ViewShow(..)=>"view show",Event::Pick(_)=>"pick",Event::Rpc(..)=>"rpc",Event::Answer(..)=>"answer",Event::Plot(_)=>"plot",Event::NetWake=>"net wake",Event::Picture(..)=>"picture",Event::Status(_)=>"status",Event::Accepted=>"accepted",Event::Older(..)=>"older",Event::Error(_)=>"error",Event::Refused(_)=>"refused",Event::Unpaired=>"unpaired"}}
 }
 /// The connection label an event sets (None: it leaves the label alone). A refusal is a live connection, so it is not "Disconnected".
 pub fn status_for(ev:&Event)->Option<&'static str>{match ev{Event::Error(_)=>Some("Disconnected"),_=>None}}
@@ -18,14 +18,16 @@ pub fn status_for(ev:&Event)->Option<&'static str>{match ev{Event::Error(_)=>Som
     #[test] fn a_refused_view_or_command_leaves_the_connection_label_alone(){assert_eq!(status_for(&Event::Refused("View request refused: \"PRESENTER_UNAVAILABLE\"".into())),None);assert_eq!(status_for(&Event::Error("Hub disconnected".into())),Some("Disconnected"));assert_eq!(status_for(&Event::Accepted),None);}}
 /// Where a reply's time went before the UI saw it: send to frame received, decode, delta/merge, the body's size, and when its frame arrived.
 #[derive(Debug,Clone,Default)] pub struct Timing { pub rtt_ms:f64, pub decode_ms:f64, pub process_ms:f64, pub bytes:usize, pub delta:bool, pub at:Option<std::time::Instant> }
-#[derive(Clone)] pub struct Config { pub hub:String, pub token_file:PathBuf, pub exit_after:Option<f64>, pub script:Option<PathBuf>, pub swatches:bool, pub gallery:bool, pub fonts:bool, pub solid_demo:Option<String>, pub theme:Option<String> }
+#[derive(Clone)] pub struct Config { pub hub:String, pub token_file:PathBuf, pub exit_after:Option<f64>, pub script:Option<PathBuf>, pub swatches:bool, pub gallery:bool, pub fonts:bool, pub solid_demo:Option<String>, pub theme:Option<String>, /** a pairing credential is what connects: a 401 means this device was revoked */ pub paired:bool, /** no hub to connect to: the client starts at pairing */ pub unpaired:bool, /** a link from outside, to ask about */ pub pair_link:Option<String> }
 impl Config {
     pub fn parse() -> Result<Self> {
         let home=std::env::var("HOME")?;
-        let mut config=Self{hub:"ws://100.64.84.41:3799".into(),token_file:PathBuf::from(&home).join(".backplane-gpui/token"),exit_after:None,swatches:false,gallery:false,fonts:false,solid_demo:None,theme:None,script:std::env::var_os("BACKPLANE_GPUI_SCRIPT").map(PathBuf::from)};
-        let mut args=std::env::args().skip(1);
+        let mut config=Self{hub:"ws://100.64.84.41:3799".into(),token_file:PathBuf::from(&home).join(".backplane-gpui/token"),exit_after:None,swatches:false,gallery:false,fonts:false,solid_demo:None,theme:None,paired:false,unpaired:false,pair_link:None,script:std::env::var_os("BACKPLANE_GPUI_SCRIPT").map(PathBuf::from)};
+        let (mut args,mut named,mut keyed)=(std::env::args().skip(1),false,false);
         while let Some(arg)=args.next() { match arg.as_str() {
-            "--hub"|"--url"=>config.hub=args.next().context("--url needs a URL")?,
+            "--hub"|"--url"=>{config.hub=args.next().context("--url needs a URL")?;named=true;},
+            "--pair"=>config.pair_link=Some(args.next().context("--pair needs a link")?),
+            link if crate::pairing::is_link(link)=>config.pair_link=Some(link.to_string()),
             "--exit-after"=>config.exit_after=Some(args.next().context("--exit-after needs seconds")?.parse()?),
             "--swatches"=>config.swatches=true,
             "--gallery"=>config.gallery=true,
@@ -33,16 +35,47 @@ impl Config {
             "--solid-demo"=>config.solid_demo=Some(args.next().context("--solid-demo needs TRIS[,STEPS]")?),
             "--theme"=>config.theme=Some(args.next().context("--theme needs light|dark")?),
             "--script"=>config.script=Some(PathBuf::from(args.next().context("--script needs a file")?)),
-            "--token-file"=>config.token_file=PathBuf::from(args.next().context("--token-file needs a path")?),
-            _=>anyhow::bail!("usage: backplane-gpui [--url http://HOST:PORT] [--token-file FILE] [--exit-after SECONDS] [--script FILE] [--swatches] [--gallery] [--fonts] [--solid-demo TRIS[,STEPS]] [--theme light|dark]")
+            "--token-file"=>{config.token_file=PathBuf::from(args.next().context("--token-file needs a path")?);keyed=true;},
+            _=>anyhow::bail!("usage: backplane-gpui [LINK] [--pair LINK] [--url http://HOST:PORT] [--token-file FILE] [--exit-after SECONDS] [--script FILE] [--swatches] [--gallery] [--fonts] [--solid-demo TRIS[,STEPS]] [--theme light|dark]")
         }}
+        // no hub named: the one this client paired with, or (no hub's token here either) pairing
+        match unnamed(named,keyed,crate::pairing::load(),config.token_file.exists()) {
+            Start::Paired(hub)=>{config.hub=hub;config.token_file=crate::pairing::token_path().context("no config folder")?;config.paired=true;return Ok(config);}
+            Start::Unpaired=>{config.hub.clear();config.token_file=crate::pairing::token_path().context("no config folder")?;config.unpaired=true;return Ok(config);}
+            Start::Named=>{}
+        }
         config.hub=config.hub.trim_end_matches('/').to_string();
-        if let Some(rest)=config.hub.strip_prefix("http://") {config.hub=format!("ws://{rest}");}
-        ensure!(config.hub.starts_with("ws://") && !config.hub.contains(['?','#','@']) && !config.hub.trim_end_matches('/').ends_with(":3787"),"experiment needs an explicit ws:// hub on a separate port");
+        config.hub=crate::pairing::ws_of(&config.hub);
+        ensure!((config.hub.starts_with("ws://")||config.hub.starts_with("wss://")) && !config.hub.contains(['?','#','@']) && !config.hub.trim_end_matches('/').ends_with(":3787"),"experiment needs an explicit ws:// or wss:// hub on a separate port");
         let token_path=std::fs::canonicalize(&config.token_file).context("experiment token file missing; start its hub first")?;
         ensure!(!token_path.starts_with(PathBuf::from(home).join(".backplane-bend")),"live home refused");
         Ok(config)
     }
+}
+#[derive(Debug,PartialEq)] enum Start {Named,Paired(String),Unpaired}
+/// Which hub a start with no --url means. A named hub or token file is that; then the saved pairing; then a hub's own token on this machine; else there is none.
+fn unnamed(named:bool,keyed:bool,saved:Option<String>,token_here:bool)->Start {
+    if named||keyed {return Start::Named;}
+    match saved {Some(hub)=>Start::Paired(hub),None if token_here=>Start::Named,None=>Start::Unpaired}
+}
+#[cfg(test)] mod start_tests { use super::*;
+    #[test] fn a_start_names_its_hub_else_the_pairing_else_pairing_begins(){
+        let s=||Some("wss://b.ts.net".to_string());
+        assert_eq!(unnamed(true,true,s(),true),Start::Named,"--url wins over a saved pairing");
+        assert_eq!(unnamed(false,true,None,false),Start::Named,"so does --token-file");
+        assert_eq!(unnamed(false,false,s(),true),Start::Paired("wss://b.ts.net".into()),"a pairing wins over a local hub's token");
+        assert_eq!(unnamed(false,false,None,true),Start::Named,"a machine with a hub's token keeps working");
+        assert_eq!(unnamed(false,false,None,false),Start::Unpaired);
+    }
+    #[test] fn only_a_paired_clients_401_means_revoked(){
+        let e=|c:u16|anyhow::Error::from(tokio_tungstenite::tungstenite::Error::Http(tokio_tungstenite::tungstenite::http::Response::builder().status(c).body(None).unwrap().into()));
+        assert!(refused(true,&e(401)));assert!(!refused(false,&e(401)),"a hub token that fails is a wrong file, not a revoked device");
+        assert!(!refused(true,&e(500)));assert!(!refused(true,&anyhow::anyhow!("connection refused")));
+    }
+}
+/// The hub said no to this device's credential at the door, as it does once it is revoked (a restart or a lost route is only a reconnect).
+fn refused(paired:bool,e:&anyhow::Error)->bool {
+    paired&&matches!(e.downcast_ref::<tokio_tungstenite::tungstenite::Error>(),Some(tokio_tungstenite::tungstenite::Error::Http(r)) if r.status()==401)
 }
 fn unqualify(id:&str)->String {id.rsplit_once('|').map_or(id,|(_,id)|id).into()}
 fn millis()->u64 {SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64}
@@ -58,7 +91,7 @@ struct View {
 const MAX_CONTROLS:usize=4;const MAX_CONTROL_BYTES:usize=16*1024*1024;const MAX_CONTROL_PARTS:u64=4096;
 impl View {
     fn new(config:&Config)->Self {let mut v=Self::fresh(config);let reopen=crate::local::Local::load().default_view!="list"; let saved_view=crate::screens::place::take_view(); if let (true,Some((target,session)))=(reopen,saved_view){v.target=target;v.session=crate::screens::place::opened_session(&session,millis());v.restored=Restore::First;}v}
-    fn fresh(config:&Config)->Self {Self {restored:Restore::None,saved:None,drawn:false,rpcs:HashMap::new(),asks:HashMap::new(),hub:config.hub.replacen("ws://","http://",1),cid:format!("gpui-{}-{}",std::process::id(),millis()),
+    fn fresh(config:&Config)->Self {Self {restored:Restore::None,saved:None,drawn:false,rpcs:HashMap::new(),asks:HashMap::new(),hub:crate::pairing::http_of(&config.hub),cid:format!("gpui-{}-{}",std::process::id(),millis()),
         greeting:Value::Null,target:json!({"kind":"recent","id":""}),session:json!({"sel":"","rid":millis(),"drafts":{},"open":{},"adding":false,"panel":false,"info":{}}),
         view_id:String::new(),revision:0,next:(1_u64<<47)+millis(),pending:HashMap::new(),outgoing:HashMap::new(),rpc_names:HashMap::new(),dirty:false,controls:HashMap::new(),sent:HashMap::new(),paging:None,want_page:None,req_draft:HashMap::new(),offered:HashMap::new(),bases:delta::Bases::default()}}
     /// the session key the composer's text goes under: the thread on show (a bot's target shows its chat thread), else the target
@@ -98,11 +131,13 @@ pub fn connect(config:Config)->(Sender<Command>,async_channel::Receiver<Event>) 
     std::thread::Builder::new().name("hub".into()).spawn(move || {
         let runtime=tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
         runtime.block_on(async move {
+            if config.unpaired {while commands.recv().await.is_some() {} return;} // nothing to connect to: pairing starts this client again
             let mut view=View::new(&config);let mut delay=1;
             loop {
                 let _=events.send(Event::Status("Connecting…".into())).await;
                 match session(&config,&mut commands,&events,&mut view).await {
                     Ok(())=>break,
+                    Err(error) if refused(config.paired,&error)=>{let _=events.send(Event::Unpaired).await;break;}
                     Err(error)=>{ // Never log the handshake URL or its credential.
                         if let Some(secs)=format!("{error:#}").strip_prefix("net_sleep:").and_then(|s|s.parse::<f64>().ok()) {
                             // the e2e harness's net_sleep: the socket is gone for `secs`, then the normal reconnect runs

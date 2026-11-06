@@ -225,7 +225,7 @@ impl Backplane {
         if !open || owner.is_empty() { return; }
         if self.screens.browser.is_none() {
             let Some(t) = self.screens.attacher.target.clone() else { return };
-            let (base, tok) = (format!("http://{}", t.addr), t.token.clone());
+            let (base, tok) = (t.base(), t.token.clone());
             let o = owner.clone(); let hubtx = self.tx.clone();
             let page = cx.new(move |cx| crate::viewers::browser::BrowserPage::new(cx, base, o, tok, hubtx));
             self.screens.browser = Some((owner, page));

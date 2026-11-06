@@ -12,10 +12,10 @@ pub fn metric(started: Instant, event: &str, mut fields: Value) {
 }
 
 #[derive(Clone, Debug)]
-pub enum Step { /** keystrokes typed as the person would ("ctrl-j e c h o enter"), through the window's bindings */ Keys(String), Cef(Value), Files(String), ScrollState(String), Home(usize), Select(usize), Tap(f32, f32, usize), Sheets(bool), Compare(Option<usize>), Hist(Option<i64>), HistMode(u8), HistPlay, ViewShow(String, String), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), Imp(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Mark(String), Fit, Unsupported(String) }
+pub enum Step { PairFill(String, String, String), /** keystrokes typed as the person would ("ctrl-j e c h o enter"), through the window's bindings */ Keys(String), Cef(Value), Files(String), ScrollState(String), Home(usize), Select(usize), Tap(f32, f32, usize), Sheets(bool), Compare(Option<usize>), Hist(Option<i64>), HistMode(u8), HistPlay, ViewShow(String, String), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), Imp(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Mark(String), Fit, Unsupported(String) }
 /// What a click on a registered control does; the e2e harness's controls inventory and `click` step use these.
 #[derive(Clone, Debug)]
-pub enum Ctl { None, Pad, Dictate, OpenPalette, Rail(String), PickFiles, ToggleSidebar, ToggleContext, Select(String), Home(String), Fold(String), Send, Skill(String), Page(String), Node(String, String), RenameSave(String), Imp(String), FocusSearch }
+pub enum Ctl { PairGo, PairYes, PairCancel, None, Pad, Dictate, OpenPalette, Rail(String), PickFiles, ToggleSidebar, ToggleContext, Select(String), Home(String), Fold(String), Send, Skill(String), Page(String), Node(String, String), RenameSave(String), Imp(String), FocusSearch }
 #[derive(Clone, Debug)]
 pub struct CtlEntry { pub id: String, pub label: String, pub ctl: Ctl }
 #[derive(Clone, Debug)]
@@ -27,7 +27,8 @@ pub struct Pending { pub label: String, pub started: Instant, pub goal: Goal, pu
 pub fn load(path: &Path) -> VecDeque<Step> {
     let list: Vec<Value> = std::fs::read_to_string(path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
     list.iter().filter_map(|v| {
-        if let Some(n) = v["home"].as_u64() { Some(Step::Home(n as usize)) }
+        if let Some(a) = v["pair_fill"].as_array() { let s = |i: usize| a.get(i).and_then(Value::as_str).unwrap_or("").to_string(); Some(Step::PairFill(s(0), s(1), s(2))) }
+        else if let Some(n) = v["home"].as_u64() { Some(Step::Home(n as usize)) }
         else if let Some(n) = v["select"].as_u64() { Some(Step::Select(n as usize)) }
         else if let Some(a) = v["viewshow"].as_array() { Some(Step::ViewShow(a.first().and_then(|x| x.as_str()).unwrap_or("").into(), a.get(1).and_then(|x| x.as_str()).unwrap_or("").into())) }
         else if v.get("hist").is_some() { Some(Step::Hist(v["hist"].as_i64())) }
@@ -319,6 +320,7 @@ impl Backplane {
                 self.m("read", json!({"what": what, "text": text, "supported": supported}));
                 self.pump(cx);
             }
+            Step::PairFill(link, addr, code) => { crate::screens::pair::fill(self, &link, &addr, &code, cx); self.pump(cx); }
             Step::Click(id) => {
                 let epoch = self.ui_epoch;
                 match self.controls.iter().find(|c| c.id == id).cloned() {
@@ -387,6 +389,9 @@ impl Backplane {
     pub fn do_click(&mut self, ctl: &Ctl, cx: &mut Context<Self>) -> String {
         use crate::hub::Command;
         match ctl {
+            Ctl::PairGo => { crate::screens::pair::go(self, cx); self.ui_epoch += 1; "pair".into() }
+            Ctl::PairYes => { crate::screens::pair::confirm(self, cx); self.ui_epoch += 1; "pair confirmed".into() }
+            Ctl::PairCancel => { crate::screens::pair::cancel(self, cx); self.ui_epoch += 1; "pair cancelled".into() }
             Ctl::None => "none".into(),
             Ctl::Pad => "pad (mouse only)".into(),
             Ctl::Rail(kind) => { self.screens.rail_pending = Some(kind.clone()); self.screens.rail_at = Some(Instant::now()); self.screens.plot_click = matches!(kind.as_str(), "board" | "schematic").then(Instant::now); let _ = self.tx.try_send(crate::screens::viewer::view_kind(kind)); self.ui_epoch += 1; "view.action view".into() }

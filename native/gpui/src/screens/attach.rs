@@ -10,15 +10,20 @@ use std::{collections::HashMap, io::{Read, Write}, net::TcpStream, path::{Path, 
 use tokio::sync::mpsc::Sender;
 
 #[derive(Clone)]
-pub struct Target { pub addr: String, pub token: String }
+pub struct Target { pub addr: String, pub token: String, pub tls: bool }
 
 impl Target {
-    /// `ws://host:port` and the token file's contents.
+    /// `ws://host:port` (or wss://, a hub behind `tailscale serve`) and the token file's contents.
     pub fn from(hub: &str, token_file: &Path) -> Option<Self> {
-        let addr = hub.strip_prefix("ws://").or_else(|| hub.strip_prefix("http://"))?.trim_end_matches('/').to_string();
+        if !["ws://", "wss://", "http://", "https://"].iter().any(|p| hub.starts_with(p)) { return None }
+        let (addr, tls) = crate::pairing::host_port(hub);
         let token = std::fs::read_to_string(token_file).ok()?.trim().to_string();
-        (token.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') && !token.is_empty()).then_some(Self { addr, token })
+        (token.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') && !token.is_empty()).then_some(Self { addr, token, tls })
     }
+    /// A connection for one direct request.
+    pub fn stream(&self) -> std::io::Result<crate::pairing::Stream> { crate::pairing::open(&self.addr, self.tls) }
+    /// The hub's address as a URL.
+    pub fn base(&self) -> String { format!("{}://{}", if self.tls { "https" } else { "http" }, self.addr) }
 }
 
 /// Percent-encode a query value.
@@ -82,8 +87,7 @@ pub fn upload_blocking(tx: &Sender<Command>, t: &Target, thread: &str, name: &st
     if size > cap { return; }
     let key = format!("{:08x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos() as u32));
     let run = || -> std::io::Result<String> {
-        let mut s = TcpStream::connect(&t.addr)?;
-        s.set_read_timeout(Some(Duration::from_secs(120)))?; s.set_write_timeout(Some(Duration::from_secs(120)))?;
+        let mut s = t.stream()?; s.set_timeouts(Duration::from_secs(120))?;
         s.write_all(head(t, thread, &key, name, size).as_bytes())?;
         match body {
             Body::Bytes(b) => s.write_all(&b)?,
@@ -222,7 +226,7 @@ mod tests {
         assert!(done("t-miso") && !done("t-kit"));
     }
     #[test] fn the_request_head_is_a_post_with_length_and_an_encoded_name() {
-        let t = Target { addr: "127.0.0.1:3799".into(), token: "tok".into() };
+        let t = Target { addr: "127.0.0.1:3799".into(), token: "tok".into(), tls: false };
         let h = head(&t, "t1", "0a0b0c0d", "my pic (1).png", 42);
         assert!(h.starts_with("POST /attach?thread=t1&key=0a0b0c0d&name=my%20pic%20%281%29.png&token=tok HTTP/1.1\r\n"), "{h}");
         assert!(h.contains("Content-Length: 42\r\n") && h.ends_with("\r\n\r\n") && h.contains("Host: 127.0.0.1:3799"));
@@ -269,7 +273,7 @@ mod tests {
         });
         let (tx, mut rx) = tokio::sync::mpsc::channel(8);
         let current: Current = Arc::new(Mutex::new("t1".into()));
-        upload(tx, Target { addr, token: "t".into() }, "t1".into(), "b.png".into(), Body::Bytes(b"hello".to_vec()), DEFAULT_CAP, current);
+        upload(tx, Target { addr, token: "t".into(), tls: false }, "t1".into(), "b.png".into(), Body::Bytes(b"hello".to_vec()), DEFAULT_CAP, current);
         let wait = |rx: &mut tokio::sync::mpsc::Receiver<Command>| { for _ in 0..200 { if let Ok(c) = rx.try_recv() { return c; } std::thread::sleep(Duration::from_millis(25)); } panic!("no command") };
         match wait(&mut rx) { Command::Action(a, v) => { assert_eq!(a, "attach-up"); assert!(v.contains("\"size\":5")); } c => panic!("{c:?}") }
         match wait(&mut rx) { Command::Action(a, v) => { assert_eq!(a, "attach-end"); assert!(v.contains("/a/b.png")); } c => panic!("{c:?}") }
@@ -277,7 +281,7 @@ mod tests {
     }
     #[test] fn over_the_cap_announces_but_never_uploads_and_a_switch_drops_the_end() {
         let (tx, mut rx) = tokio::sync::mpsc::channel(8);
-        let t = Target { addr: "127.0.0.1:1".into(), token: "t".into() }; let cur: Current = Arc::new(Mutex::new("t1".into()));
+        let t = Target { addr: "127.0.0.1:1".into(), token: "t".into(), tls: false }; let cur: Current = Arc::new(Mutex::new("t1".into()));
         upload_blocking(&tx, &t, "t1", "big.bin", Body::Bytes(vec![1; 10]), 5, &cur);
         assert!(matches!(rx.try_recv(), Ok(Command::Action(a, _)) if a == "attach-up")); assert!(rx.try_recv().is_err(), "uploaded past the cap");
         *cur.lock().unwrap() = "t2".into();   // the person switched threads; the connection refuses, so it is the network error, but it is not delivered to t2
@@ -287,7 +291,7 @@ mod tests {
     #[test] fn a_missing_target_or_thread_says_why_and_extra_files_are_counted() {
         let a = Attacher::new(None); let (tx, _rx) = tokio::sync::mpsc::channel(1);
         assert!(a.event(&tx, "t1", DEFAULT_CAP, &ComposerEvent::Files(vec![])).unwrap_err().contains("plain http"));
-        let a = Attacher::new(Some(Target { addr: "127.0.0.1:1".into(), token: "t".into() }));
+        let a = Attacher::new(Some(Target { addr: "127.0.0.1:1".into(), token: "t".into(), tls: false }));
         assert!(a.event(&tx, "", DEFAULT_CAP, &ComposerEvent::Files(vec![])).unwrap_err().contains("thread"));
         let many: Vec<PathBuf> = (0..11).map(|i| PathBuf::from(format!("/nonexistent/{i}"))).collect();
         assert!(a.event(&tx, "t1", DEFAULT_CAP, &ComposerEvent::Files(many)).unwrap_err().contains("3 more"));

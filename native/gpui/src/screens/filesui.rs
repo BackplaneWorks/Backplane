@@ -152,11 +152,13 @@ fn fetch_text(this: &mut Backplane, url: String, cx: &mut Context<Backplane>) {
 /// GET `url` on the hub with the token, at most `max` bytes.
 pub fn http_get(t: &Target, url: &str, max: usize) -> Result<Vec<u8>, String> {
     if !super::images::safe_url(url) { return Err("not a hub path".into()) }
-    let sep = if url.contains('?') { '&' } else { '?' };
-    let r = ureq::get(&format!("http://{}{url}{sep}token={}", t.addr, t.token)).timeout(std::time::Duration::from_secs(60)).call().map_err(|e| match e { ureq::Error::Status(c, _) => format!("the hub answered {c}"), e => format!("{e}") })?;
-    let mut b = Vec::new(); use std::io::Read; r.into_reader().take(max as u64 + 1).read_to_end(&mut b).map_err(|e| e.to_string())?;
-    if b.len() > max { b.truncate(max) }
-    Ok(b)
+    use std::io::{Read, Write};
+    let mut s = t.stream().map_err(|e| e.to_string())?; s.set_timeouts(std::time::Duration::from_secs(60)).map_err(|e| e.to_string())?;
+    s.write_all(super::images::request(t, url).as_bytes()).map_err(|e| e.to_string())?;
+    let mut b = Vec::new(); s.take(max as u64 + 65536).read_to_end(&mut b).map_err(|e| e.to_string())?;
+    let (status, body) = super::images::split(&b).ok_or("the hub gave no answer")?;
+    if status != 200 { return Err(format!("the hub answered {status}")) }
+    Ok(body[..body.len().min(max)].to_vec())
 }
 
 fn say(this: &mut Backplane, s: impl Into<String>, cx: &mut Context<Backplane>) { this.screens.files.status = s.into(); cx.notify(); }

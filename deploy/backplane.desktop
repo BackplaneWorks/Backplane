@@ -2,8 +2,9 @@
 Type=Application
 Name=Backplane
 Comment=Agentic hardware development
-Exec=backplane
+Exec=backplane %u
 Icon=backplane-desktop
 Terminal=false
 Categories=Development;Electronics;
 StartupWMClass=backplane
+MimeType=x-scheme-handler/backplane;

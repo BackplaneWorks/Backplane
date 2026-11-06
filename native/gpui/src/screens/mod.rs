@@ -18,6 +18,7 @@ pub mod histbar;
 pub mod filesui;
 pub mod history;
 pub mod images;
+pub mod pair;
 pub mod improv_model;
 pub mod improvements;
 pub mod capture;

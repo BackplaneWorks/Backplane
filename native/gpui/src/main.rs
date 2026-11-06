@@ -5,6 +5,7 @@ mod hub;
 mod input;
 mod keys;
 mod local;
+mod pairing;
 mod perf;
 mod screens;
 mod script;
@@ -23,7 +24,7 @@ use std::{collections::{HashMap,VecDeque},time::{Duration,Instant}};
 use script::{Pending,Step};
 use hub::{Command,Event};
 actions!(backplane,[Send,ClosePopup,CopySelection,ToggleSidebarKey,FocusSearchKey,OpenPaletteKey]);
-pub struct Backplane {
+pub struct Backplane { pub pair:Option<screens::pair::Ui>, pub paired:bool,
     pub input:Entity<screens::composer::Composer>, data:Value, status:String, error:String,
     tx:tokio::sync::mpsc::Sender<Command>, selected:String,
     drafts:HashMap<String,String>, started:Instant, usable:bool,
@@ -56,6 +57,8 @@ impl Backplane {
         let input=cx.new(screens::composer::Composer::new);input.focus_handle(cx).focus(window);
         let local=local::Local::load();
         let target=screens::attach::Target::from(&config.hub,&config.token_file);let drafts_path=config.token_file.with_file_name("gpui-drafts.json");let saved=screens::drafts::load(&drafts_path);
+        let pair=screens::pair::start(config.unpaired,config.pair_link.as_deref(),cx);let paired=config.paired;
+        cx.spawn(async move |weak,cx|{while let Ok(link)=OPENED.1.recv().await {if weak.update(cx,|this,cx|screens::pair::incoming(this,&link,cx)).is_err(){break;}}}).detach();
         let(tx,events)=hub::connect(config);
         screens::place::watch(cx);screens::devbar::watch(cx);
         cx.spawn(async move |weak,cx|{while let Ok(event)=events.recv().await {if weak.update(cx,|this,cx|this.receive(event,cx)).is_err(){break;}}}).detach();
@@ -67,7 +70,7 @@ impl Backplane {
         }).detach();
         cx.subscribe(&input,|this,_,event:&screens::composer::ComposerEvent,cx|this.attach_event(event,cx)).detach();
         cx.on_app_quit(|this,_|{this.screens.drafts.flush();async{}}).detach();
-        Self{input,data:Value::Null,status:"Connecting…".into(),error:art::assets_missing().unwrap_or_default(),tx,selected:String::new(),drafts:saved.clone(),started,usable:false,first_frame:false,script_done:false,timeline:ListState::new(0,ListAlignment::Bottom,px(screens::timeline::RUNWAY)),cats:art::Cats::new(),links_sent:false,links_last:String::new(),sidebar_open:local.sidebar_open,models_pending:false,local,project_page:None,arm_new:None,echo_seq:0,thread_cache:Vec::new(),thread_source:"hub",confirm:None,ack_pending:None,recording:None,ui_epoch:0,controls:Vec::new(),ctl_last:String::new(),last_layout:String::new(),wake_at:None,reconnected:false,click_info:None,timing:None,applied_at:None,apply_ms:0.0,render_us:0,swatches,gallery,fonts,theme_override:theme.as_deref().map(|t|t=="light"),steps,pending:None,seq:0,want_focus:false,script_total,screens:screens::Screens::new(cx,target,drafts_path,saved)}
+        Self{pair,paired,input,data:Value::Null,status:"Connecting…".into(),error:art::assets_missing().unwrap_or_default(),tx,selected:String::new(),drafts:saved.clone(),started,usable:false,first_frame:false,script_done:false,timeline:ListState::new(0,ListAlignment::Bottom,px(screens::timeline::RUNWAY)),cats:art::Cats::new(),links_sent:false,links_last:String::new(),sidebar_open:local.sidebar_open,models_pending:false,local,project_page:None,arm_new:None,echo_seq:0,thread_cache:Vec::new(),thread_source:"hub",confirm:None,ack_pending:None,recording:None,ui_epoch:0,controls:Vec::new(),ctl_last:String::new(),last_layout:String::new(),wake_at:None,reconnected:false,click_info:None,timing:None,applied_at:None,apply_ms:0.0,render_us:0,swatches,gallery,fonts,theme_override:theme.as_deref().map(|t|t=="light"),steps,pending:None,seq:0,want_focus:false,script_total,screens:screens::Screens::new(cx,target,drafts_path,saved)}
     }
     fn receive(&mut self,event:Event,cx:&mut Context<Self>) {
         let timed=perf::on().then(||(event.name(),Instant::now()));
@@ -105,6 +108,7 @@ impl Backplane {
             Event::Accepted=>{self.input.update(cx,|input,cx|input.set(String::new(),cx));self.drafts.remove(&self.selected);self.screens.drafts.set(&self.selected,"");self.voice_sent(cx);self.timeline_to_end();}, // (the file too: the box's own change comes after the map entry is gone, and would not clear it)
             Event::Older(cursor,page)=>self.older_landed(cursor,page,cx),
             Event::Error(e)=>{self.error=e;},
+            Event::Unpaired=>screens::pair::revoked(self,cx),
             Event::Refused(e)=>{self.error=e;},
         }
         if let Some((name,t0))=timed {if name=="picture" {if let Some(t)=&self.timing {perf::picture(t,self.apply_ms);}}perf::event(name,t0);}
@@ -196,6 +200,7 @@ impl Backplane {
 }
 /// Every key binding, from the defaults and this device's shortcut choices (called again when one changes).
 pub fn bind_all(cx:&mut App,l:&local::Local){keys::bind_all(cx,l);}
+static OPENED:std::sync::LazyLock<(async_channel::Sender<String>,async_channel::Receiver<String>)>=std::sync::LazyLock::new(||async_channel::bounded(8));
 fn main()->anyhow::Result<()> {
     #[cfg(feature="cef")]
     if let Some(code)=viewers::cef::subprocess(){std::process::exit(code);} // a CEF helper process (renderer, gpu...) is this executable run again
@@ -203,7 +208,10 @@ fn main()->anyhow::Result<()> {
     let started=Instant::now();let config=hub::Config::parse()?;let exit_after=config.exit_after;
     if config.swatches||config.gallery||config.fonts||std::env::var_os("BACKPLANE_GPUI_RECTS").is_some(){art::enable_rects();}
     script::metric(started,"process_start",serde_json::json!({}));
-    Application::new().run(move|cx:&mut App|{
+    let app=Application::new();
+    // macOS hands a backplane:// link to the app itself, at launch and while it runs
+    app.on_open_urls(|urls|for u in urls {if pairing::is_link(&u) {let _=OPENED.0.try_send(u);}});
+    app.run(move|cx:&mut App|{
         art::load_fonts(cx);bind_all(cx,&local::Local::load());
         cx.on_window_closed(|cx|if cx.windows().is_empty(){cx.quit();}).detach();
         let bounds=Bounds::centered(None,size(px(1400.),px(900.)),cx);
