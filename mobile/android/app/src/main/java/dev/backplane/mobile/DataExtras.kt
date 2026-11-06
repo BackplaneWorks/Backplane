@@ -11,10 +11,15 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -91,27 +96,45 @@ fun SearchResults(q: String, open: (String) -> Unit) {
     }
 }
 
-/** The model picker: provider, then its models, from the hub's `models.list`; the choice is `thread.model`. */
+/** The picker the composer's chip opens: the hub's sections, the one in force marked. On a thread a press is the desktop's own request; before a thread exists it is
+ *  remembered and sent with `thread.create`. It stays open, so a model and an effort are one visit. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ModelPicker(t: DThread, close: () -> Unit) {
+fun PickerSheet(thread: String?, choice: DNewThreadChoice, choose: (DNewThreadChoice) -> Unit, close: () -> Unit) {
     val scope = rememberCoroutineScope()
-    var models by remember { mutableStateOf<Map<String, List<Triple<String, String, Boolean>>>>(emptyMap()) }
+    var picker by remember { mutableStateOf<DPicker?>(null) }
     var err by remember { mutableStateOf("") }
-    LaunchedEffect(Unit) { models = runCatching { DataClient.models() }.getOrDefault(emptyMap()) }
-    Dialog(onDismissRequest = close) {
-        Column(Modifier.fillMaxWidth().heightIn(max = 520.dp).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant)).verticalScroll(rememberScrollState()).testTag("models")) {
-            DMono("MODEL · now ${t.provider} / ${t.model.ifEmpty { "default" }}", dcs.onSurfaceVariant, 11, Modifier.padding(12.dp))
-            if (err.isNotEmpty()) DMono(err, dcs.error, 12, Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
-            models.forEach { (prov, rows) ->
-                DLine(); DMono(prov, dcs.onSurface, 12, Modifier.padding(start = 12.dp, top = 8.dp, bottom = 4.dp), bold = true)
-                val list = if (rows.isEmpty()) listOf(Triple("", "default", true)) else rows
-                list.forEach { (value, label, ok) ->
-                    val on = t.provider == prov && t.model == value
-                    Text((if (on) "● " else "○ ") + label, Modifier.fillMaxWidth().clickable(enabled = ok) { scope.launch { try { DataClient.setModel(t.id, prov, value); close() } catch (e: Exception) { err = e.message ?: "" } } }.padding(horizontal = 12.dp, vertical = 8.dp).testTag("model.$prov.$value"),
-                        color = if (ok) dcs.onSurface else dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 13.sp)
+    suspend fun load(c: DNewThreadChoice) { try { picker = DataClient.picker(thread, c); err = "" } catch (e: Exception) { err = e.message ?: "" } }
+    LaunchedEffect(Unit) { load(choice) }
+    ModalBottomSheet(onDismissRequest = close, shape = RectangleShape, containerColor = dcs.surfaceVariant, dragHandle = null, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+      // one height from the first frame: a sheet that opens empty and grows when the list arrives stays where it opened; short of the whole screen, it clears the status bar
+      Column(Modifier.fillMaxWidth().fillMaxHeight(.85f)) {
+        Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            DMono(picker?.chip ?: " ", dcs.onSurface, 12, Modifier.weight(1f).testTag("picker.chip"))
+            DMono("Done", dcs.primary, 13, Modifier.clickable(onClick = close).padding(8.dp).testTag("picker.done"), bold = true)
+        }
+        DLine()
+        if (err.isNotEmpty()) Text(err, Modifier.padding(horizontal = 14.dp, vertical = 8.dp).testTag("picker.error"), color = dcs.error, fontFamily = BpMono, fontSize = 12.sp)
+        Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(bottom = 16.dp).testTag("models")) {
+            picker?.sections?.forEach { s ->
+                DMono(s.title.uppercase(), dfaint, 11, Modifier.padding(start = 14.dp, top = 14.dp, bottom = 4.dp))
+                s.choices.forEach { c ->
+                    Row(Modifier.fillMaxWidth().background(if (c.on) dcs.surfaceContainerHigh else Color.Transparent).clickable(enabled = c.ok) {
+                        scope.launch {
+                            if (thread != null) { try { DataClient.pick(thread, s.action, c.value); load(choice) } catch (e: Exception) { err = e.message ?: "" } }
+                            else { val n = choice.set(s.action, c.value); choose(n); load(n) }
+                        }
+                    }.heightIn(min = 44.dp).padding(horizontal = 14.dp, vertical = 6.dp).testTag("pick.${s.action}.${c.value}"), verticalAlignment = Alignment.CenterVertically) {
+                        DMono(if (c.on) "✓" else "", dcs.primary, 13, Modifier.width(24.dp))
+                        Column {
+                            Text(c.label, color = if (c.ok) dcs.onSurface else dfaint, fontFamily = BpMono, fontSize = 13.sp)
+                            if (!c.ok && c.why.isNotEmpty()) DMono(c.why, dfaint, 11)
+                        }
+                    }
                 }
             }
         }
+      }
     }
 }
 
@@ -139,9 +162,8 @@ fun MentionPopup(draft: String, pick: (String) -> Unit) {
 fun SidebarRow(sigil: String, name: String, detail: String, onClick: () -> Unit) {
     Column(Modifier.fillMaxWidth().clickable(onClick = onClick).testTag("side.$sigil$name")) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-            DMono(sigil, dcs.primary, 13, bold = true); Spacer(Modifier.width(10.dp)); Text(name, Modifier.weight(1f), color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp); DMono(detail)
+            DMono(sigil, dcs.primary, 13, bold = true); Spacer(Modifier.width(10.dp)); Text(name, Modifier.weight(1f), color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp); DMono(detail, dfaint)
         }
-        DLine()
     }
 }
 
@@ -158,8 +180,8 @@ fun RoomScreen(room: DataClient.Room, back: () -> Unit) {
             items(posts.size) { i -> val p = posts[i]; Column(Modifier.padding(horizontal = 12.dp, vertical = 5.dp)) { DMono(p.from.ifEmpty { "you" }, dcs.primary, 11, bold = true); Text(p.text, color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp) } }
         }
         DLine()
-        Row(Modifier.fillMaxWidth().background(dcs.surfaceVariant).padding(8.dp), verticalAlignment = Alignment.Bottom) {
-            Box(Modifier.weight(1f)) { DField(draft, { draft = it }, "Post to #${room.name}", Modifier.testTag("room.composer"), 4) }
+        Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.Bottom) {
+            Box(Modifier.weight(1f)) { DField(draft, { draft = it }, "Post to #${room.name}", Modifier.testTag("room.composer"), 4, dcs.primary) }
             Spacer(Modifier.width(8.dp))
             DBtn("Post", true, draft.isNotBlank(), Modifier.testTag("room.post")) { val t = draft; draft = ""; scope.launch { runCatching { DataClient.roomPost(room.id, t) }; load() } }
         }

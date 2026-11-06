@@ -2,7 +2,7 @@
 # usage: android-ui.py dump|find TEXT|has TEXT|count TEXT  (reads the emulator's UI via uiautomator)
 import subprocess, sys, re, os
 import xml.etree.ElementTree as ET
-ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 emu = ROOT + "/scripts/android-emu.sh"
 def dump():
     subprocess.run([emu, "adb", "shell", "uiautomator", "dump", "/sdcard/ui.xml"], capture_output=True)

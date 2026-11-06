@@ -137,13 +137,14 @@ struct UIKitField: UIViewRepresentable {
     let onChange: (String) -> Void
     let onSend: () -> Void
     let onPasteImages: ([UIImage]) -> Void
+    var font: UIFont? = nil   // the data app's mono; else the system's body
 
     func makeUIView(context: Context) -> UITextView {
         let v = ComposerUITextView()
         v.onSend = onSend
         v.onPasteImages = onPasteImages
         v.delegate = context.coordinator
-        v.font = UIFont.preferredFont(forTextStyle: .body)
+        v.font = font ?? UIFont.preferredFont(forTextStyle: .body)
         v.adjustsFontForContentSizeCategory = true
         v.backgroundColor = .clear
         v.textContainerInset = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
@@ -155,7 +156,7 @@ struct UIKitField: UIViewRepresentable {
         v.accessibilityIdentifier = "thread.composer"
         let label = UILabel()
         label.text = placeholder
-        label.font = UIFont.preferredFont(forTextStyle: .body)
+        label.font = font ?? UIFont.preferredFont(forTextStyle: .body)
         label.adjustsFontForContentSizeCategory = true
         label.numberOfLines = 1
         label.lineBreakMode = .byTruncatingTail

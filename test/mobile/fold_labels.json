@@ -1,0 +1,15 @@
+[
+  {"live": false, "rows": [{"akind": "Bash", "name": "Bash", "text": "ls -la"}], "label": "1 tool call · Bash"},
+  {"live": false, "rows": [{"akind": "Bash", "name": "Bash", "text": "ls"}, {"akind": "Read", "name": "Read", "text": "a.rs"}, {"akind": "Bash", "name": "Bash", "text": "pwd"}], "label": "3 tool calls · Bash, Read"},
+  {"live": false, "rows": [{"akind": "A", "name": "A", "text": "1"}, {"akind": "B", "name": "B", "text": "2"}, {"akind": "C", "name": "C", "text": "3"}, {"akind": "D", "name": "D", "text": "4"}], "label": "4 tool calls · A, B, C, …"},
+  {"live": false, "rows": [{"akind": "mcp__backplane__viewer_show", "name": "viewer_show", "text": "board"}, {"akind": "TodoWrite", "name": "To-do", "text": "TodoWrite"}], "label": "2 tool calls · viewer_show"},
+  {"live": false, "rows": [{"akind": "TaskUpdate", "name": "To-do", "text": "x"}], "label": "1 tool call"},
+  {"live": false, "rows": [{"step": true, "akind": "step", "name": "", "text": "{}"}], "label": "1 design change"},
+  {"live": false, "rows": [{"step": true, "akind": "step", "name": "", "text": "{}"}, {"step": true, "akind": "step", "name": "", "text": "{}"}], "label": "2 design changes"},
+  {"live": false, "rows": [{"akind": "Bash", "name": "Bash", "text": "make"}, {"step": true, "akind": "step", "name": "", "text": "{}"}], "label": "1 tool call · Bash · 1 design change"},
+  {"live": true, "rows": [{"akind": "Bash", "name": "Bash", "text": "ls"}, {"akind": "Read", "name": "Read", "text": "main.rs\nsecond line"}], "label": "2 tool calls · running: main.rs"},
+  {"live": true, "rows": [{"akind": "Bash", "name": "Bash", "text": "   "}], "label": "1 tool call · running: Bash"},
+  {"live": true, "rows": [{"akind": "TodoWrite", "name": "To-do", "text": "plan"}], "label": "1 tool call · running: To-do"},
+  {"live": true, "rows": [{"akind": "Bash", "name": "Bash", "text": "make"}, {"step": true, "akind": "step", "name": "", "text": "{}"}], "label": "1 tool call · 1 design change · running: make"},
+  {"live": true, "rows": [{"step": true, "akind": "step", "name": "", "text": "{}"}], "label": "1 design change"}
+]

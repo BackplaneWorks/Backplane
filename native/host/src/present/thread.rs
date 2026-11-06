@@ -30,13 +30,13 @@ fn todo(k: &str) -> bool { matches!(k, "TodoWrite" | "TaskCreate" | "TaskUpdate"
 fn short(k: &str) -> String {
     match k.strip_prefix("mcp__") { Some(r) => match r.find("__") { Some(i) if !r[i + 2..].is_empty() => r[i + 2..].to_string(), _ => k.to_string() }, None => k.to_string() }
 }
-fn shown_name(k: &str) -> String { if todo(k) { "To-do".into() } else { short(k) } }
+pub(crate) fn shown_name(k: &str) -> String { if todo(k) { "To-do".into() } else { short(k) } }
 fn calls(n: usize) -> String { format!("{} tool {}", n, if n == 1 { "call" } else { "calls" }) }
 
 fn steps_label(d: usize) -> String { format!("{} design {}", d, if d == 1 { "change" } else { "changes" }) }
 fn is_step(e: &Ent) -> bool { !e.msg && e.role == "step" }
 /// Fold.label / Fold.label.live: the tool calls of a run (its design steps are counted apart)
-fn label(run: &[Ent], live: bool) -> String {
+pub(crate) fn label(run: &[Ent], live: bool) -> String {
     let calls_: Vec<&Ent> = run.iter().filter(|e| !is_step(e)).collect();
     let (n, d) = (calls_.len(), run.len() - calls_.len());
     if n == 0 { return steps_label(d) }
@@ -55,11 +55,11 @@ fn label(run: &[Ent], live: bool) -> String {
 }
 
 /// Step.base: the design as it was before the edits (a thread's first step taken at a turn's start, or an older record that says only that it is first) is no change
-fn step_base(e: &Ent) -> bool {
+pub(crate) fn step_base(e: &Ent) -> bool {
     is_step(e) && e.text.contains("\"p\":\"\"") && (e.text.contains("\"w\":\"start\"") || !e.text.contains("\"w\":"))
 }
 /// Hist.row: "Design change · board.kicad_pcb (new), power.kicad_sch (removed)"; a thread's first step reads "Design before the edits · "
-fn step_row(e: &Ent) -> String {
+pub(crate) fn step_row(e: &Ent) -> String {
     let Ok(v) = serde_json::from_str::<Value>(&e.text) else { return "Design change".into() };
     let files: Vec<String> = v["f"].as_array().map(|a| a.iter().filter_map(|l| l.as_str()).filter_map(|l| {
         let mut p = l.splitn(2, '\t'); let (st, rel) = (p.next()?, p.next()?); if st.is_empty() || rel.is_empty() { return None }
@@ -238,7 +238,7 @@ fn stops(es: &[Ent], running: bool, end: u8, marks: &dyn Fn(&str) -> u8) -> Hash
 }
 
 /// Mob.act.k for an activity that does not fold: its tone, its name and what it says
-fn plain_act(e: &Ent) -> Value {
+pub(crate) fn plain_act(e: &Ent) -> Value {
     let text = if e.akind == "result" && e.text.trim().is_empty() { "The turn ended with an error; the agent gave no reason.".to_string() } else if e.text == e.akind { String::new() } else { e.text.clone() };
     let tone = if e.akind == "restart" { "info restart".to_string() } else { e.role.clone() };
     json!({"id": e.id, "kind": "act", "tone": tone, "label": shown_name(&e.akind), "text": text})
@@ -421,6 +421,16 @@ pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value
 
 #[cfg(test)]
 mod tests {
+    /// The phones fold a run themselves from what the data API sends (mobile DataFold.swift / DataFold.kt): the same table holds all three to these words.
+    #[test] fn the_fold_label_table_the_phones_share() {
+        let v: Value = serde_json::from_str(include_str!("../../../../test/mobile/fold_labels.json")).unwrap();
+        for c in v.as_array().unwrap() {
+            let run: Vec<Ent> = c["rows"].as_array().unwrap().iter().map(|r| Ent { id: "a".into(), msg: false, role: if r["step"] == true { "step".into() } else { "tool".into() }, akind: r["akind"].as_str().unwrap().into(), text: r["text"].as_str().unwrap().into(), at: 1 }).collect();
+            for (e, r) in run.iter().zip(c["rows"].as_array().unwrap()) { if !is_step(e) { assert_eq!(shown_name(&e.akind), r["name"].as_str().unwrap()); } }
+            assert_eq!(label(&run, c["live"] == true), c["label"].as_str().unwrap());
+        }
+    }
+
     use super::*;
     fn fixture() -> Value { serde_json::from_str(&std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/slim/fixtures/thread-pair.json")).unwrap()).unwrap() }
     #[test] fn the_entries_of_a_plain_page_are_the_helpers() {

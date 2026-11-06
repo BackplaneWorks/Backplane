@@ -424,8 +424,9 @@ final class DataClient {
         if let i = projects.firstIndex(where: { $0.id == r.project.id }) { projects[i] = r.project } else { projects.insert(r.project, at: 0) }
         return r.project
     }
-    func createThread(project: String, text: String) async throws -> DThread {
+    func createThread(project: String, text: String, choice: DNewThreadChoice = DNewThreadChoice()) async throws -> DThread {
         var p: [String: Any] = ["project": project, "clientId": UUID().uuidString, "permission": "ask"]
+        for (k, v) in choice.params where (v as? String)?.isEmpty == false { p[k] = v }
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines); if !t.isEmpty { p["text"] = t }
         let r: DThreadReply = try await call("thread.create", p)
         upsert(r.thread)
@@ -455,13 +456,12 @@ final class DataClient {
         } catch { failure = error.localizedDescription }
     }
     func search(_ q: String) async -> DSearch? { try? await call("search", ["q": q]) }
-    func models() async -> [DModelGroup] {
-        guard let r: DModels = try? await call("models.list") else { return [] }
-        // claude first, then the rest by name (a JSON object has no order)
-        return r.models.keys.sorted { a, b in a == "claude" ? b != "claude" : (b == "claude" ? false : a < b) }.map { DModelGroup(provider: $0, rows: r.models[$0] ?? []) }
+    func picker(thread: String?, _ choice: DNewThreadChoice = DNewThreadChoice()) async throws -> DPicker {
+        var p = choice.params; if let thread { p["thread"] = thread }
+        return (try await call("thread.picker", p) as DPickerReply).picker
     }
-    func setModel(_ id: String, provider: String, model: String) async throws {
-        let r: DThreadOpt = try await call("thread.model", ["thread": id, "provider": provider, "model": model])
+    func pick(_ id: String, action: String, value: String) async throws {
+        let r: DThreadOpt = try await call("thread.pick", ["thread": id, "action": action, "value": value])
         if let t = r.thread { upsert(t) }
     }
     func mentions(_ q: String, kind: String) async -> [DMention] {

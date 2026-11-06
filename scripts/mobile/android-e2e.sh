@@ -2,7 +2,7 @@
 # End to end for the Android data app on the local emulator against scripts/mobile/data-hub.sh's hub (stand-in agent). Screenshots: build/mobile/shots/e2e-*.png.
 # Needs the app installed (mobile/android debug APK) and the emulator and hub running. Each step asserts by reading the UI tree (uiautomator); exit 1 at the first miss.
 set -u
-ROOT=$(cd "$(dirname "$0")/../.." && pwd); E=$ROOT/scripts/gpui/android-emu.sh; UI="python3 $ROOT/scripts/gpui/android-ui.py"; S=$ROOT/build/mobile/shots; mkdir -p $S
+ROOT=$(cd "$(dirname "$0")/../.." && pwd); E=$ROOT/scripts/android-emu.sh; UI="python3 $ROOT/scripts/android-ui.py"; S=$ROOT/build/mobile/shots; mkdir -p $S
 A="$E adb shell"; PKG=dev.backplane.mobile.gpui
 shot() { $E adb exec-out screencap -p > $S/e2e-$1.png; }
 xy() { $UI find "$@" 2>/dev/null; }
@@ -22,20 +22,23 @@ $A "am start -n $PKG/dev.backplane.mobile.DataActivity -d 'bpgpui://pair?url=$EN
 want "Fix the ecc83 board"; want "ada"; want "lab"; shot 01-home
 if [ "${ONLY:-}" != viewer ]; then   # ONLY=viewer runs just the viewer steps (after pairing)
 # search
-tapt "Search" exact; tapf; typ bom; want "BOM review"; gone "Fix the ecc83 board"; shot 02-search; tapt "Search" exact
+tapf; typ bom; want "BOM review"; gone "Fix the ecc83 board"; shot 02-search; for i in 1 2 3; do $A input keyevent KEYCODE_DEL; done; want "Fix the ecc83 board"
 # thread menu: pin, rename
 longt "BOM review"; want "Pin"; shot 03-rowmenu; tapt "Pin" exact
 longt "BOM review"; tapt "Rename" exact; $A input keyevent KEYCODE_MOVE_END; for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14; do $A input keyevent KEYCODE_DEL; done; typ "Parts%sreview"; shot 04-rename; tapt "Rename" exact
 want "Parts review"
 # open a thread: model picker, settle from the header menu
-tapt "Fix the ecc83 board"; want "claude / default"; tapt "claude / default"; want "fable"; shot 05-models; tapt "opus"; want "claude / opus"
-tapt "More" exact; want "Settle"; shot 06-threadmenu; tapt "Settle" exact
+tapt "Fix the ecc83 board"; want "4 tool calls"; gone "--output drc.rpt"; tapt "4 tool calls"; want "--output drc.rpt"; want "Design change"; shot 04b-fold-open; tapt "4 tool calls"; gone "--output drc.rpt"
+want "claude / default / auto"; tapt "claude / default / auto"; want "Fable"; want "EFFORT"; shot 05-models; tapt "Opus 5.5"; tapt "high" exact; want "claude / opus / high"; tapt "Done" exact; want "claude / opus / high"
+tapt "More" exact; want "Archive"; shot 06-threadmenu; back
+# settle from the strip: the row goes under Settled, then back
+tapt "Settle" exact; want "Unsettle"; gohome; want "Settled 1"; gone "Fix the ecc83 board"; tapt "Settled 1"; want "Fix the ecc83 board"; shot 06b-settled; tapt "Fix the ecc83 board"; tapt "Unsettle" exact; want "Settle"
 # mention popup
 tapf; typ "@a"; want "@ada"; shot 07-mention; tapt "@ada"
 # ask card: approve
 $A input keyevent KEYCODE_CTRL_LEFT >/dev/null 2>&1
 for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do $A input keyevent KEYCODE_DEL; done
-typ "approve:%sgo"; tapt "Send" exact; want "Allow" ; shot 08-ask; tapt "Allow" exact; want "answered"; shot 09-answered
+typ "approve:%sgo"; tapt "Send" exact; want "Allow" exact; shot 08-ask; tapt "Allow" exact; want "answered"; shot 09-answered
 gohome
 # bots and rooms: a bot's thread, a room post
 tapt "ada"; want "STATE"; gohome
