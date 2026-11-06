@@ -276,6 +276,7 @@ impl Render for Backplane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.screens.plotview.layers_key = crate::keys::hint(&self.local, "layers");
         let t_render = std::time::Instant::now();
+        if crate::perf::on() { crate::perf::frame_start(); cx.defer(|_| crate::perf::frame_end()); }
         crate::screens::improvements::tick(self, window, cx);
         crate::screens::desk::tick(self, window, cx);
         if self.want_focus && self.screens.pad.is_none() { self.want_focus = false; self.input.focus_handle(cx).focus(window); }
@@ -493,7 +494,7 @@ impl Render for Backplane {
             // the dev build strip, only while a build is being made or waits to relaunch
             .children(self.screens.devbar.clone().map(|b| crate::screens::devbar::strip(cx, &b, light, self.screens.devbar_confirm.is_some())))
             // top bar
-            .child(div().h(px(36.)).flex_shrink_0().relative().child(art::probe("topbar")).flex().items_center().justify_between().px_3().border_b_1().border_color(c("line")).bg(c("bg"))
+            .child(div().h(px(36.)).flex_shrink_0().relative().child(art::probe("topbar")).children(crate::perf::mark("topbar")).flex().items_center().justify_between().px_3().border_b_1().border_color(c("line")).bg(c("bg"))
                 .child(div().flex().items_center().gap_2()
                     .when(!self.sidebar_open, |d| d.child(with_rect(div().id("unfold-sidebar"), || "ui:Unfold sidebar".to_string()).cursor_pointer().child(ic(light, "chevron-right", 16., "dim")).on_click(cx.listener(|this, _, _, cx| { if !this.sidebar_open { this.sidebar_toggle(cx); } }))))
                     .child(div().relative().size(px(18.)).child(art::logo(light, 18., "logo"))
@@ -508,12 +509,12 @@ impl Render for Backplane {
             .children(crate::screens::strip::view(light, &self.data))
             .child(div().flex_1().min_h_0().flex()
                 // sidebar
-                .child(div().w(px(if self.sidebar_open { self.local.sidebar_px as f32 } else { 0. })).overflow_hidden().h_full().flex_shrink_0().relative().child(art::probe("sidebar")).bg(c("bg")).border_r_1().border_color(c("line")).flex().flex_col()
+                .child(div().w(px(if self.sidebar_open { self.local.sidebar_px as f32 } else { 0. })).overflow_hidden().h_full().flex_shrink_0().relative().child(art::probe("sidebar")).children(crate::perf::mark("sidebar")).bg(c("bg")).border_r_1().border_color(c("line")).flex().flex_col()
                     .child(div().flex().items_center().gap_2().p_2().child(with_rect(div().id("fold-sidebar"), || "ui:Fold sidebar".to_string()).cursor_pointer().child(ic(light, "chevron-left", 16., "dim")).on_click(cx.listener(|this, _, _, cx| { if this.sidebar_open { this.sidebar_toggle(cx); } }))).child(crate::screens::projects::search_box(light, &self.screens.projects)).child(with_rect(div().id("add-project"), || "ui:Add project".to_string()).cursor_pointer().on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(crate::screens::projects::open_cmd()); cx.notify(); })).child(ic(light, "plus", 16., "dim"))))
                     .child(div().id("sidebar").overflow_y_scroll().flex_1().children(rows))
                     .child(div().px_3().py_1().border_t_1().border_color(c("line")).text_size(px(11.)).text_color(c("dim")).child(self.status.clone())))
                 // main
-                .child(div().flex_1().min_w(px(crate::screens::viewer::THREAD_MIN)).h_full().relative().child(art::probe("main")).flex().flex_col()
+                .child(div().flex_1().min_w(px(crate::screens::viewer::THREAD_MIN)).h_full().relative().child(art::probe("main")).children(crate::perf::mark("main")).flex().flex_col()
                     .children(crate::screens::bots::bar(cx, light, &self.data["bot"]))
                     .when(has_thread, |d| d.child(div().id("thread-head").h(px(32.)).flex_shrink_0().flex().items_center().border_b_1().border_color(c("line"))
                         .on_mouse_down(MouseButton::Right, { let items = crate::screens::tools::context_items(thread); cx.listener(move |this, e: &MouseDownEvent, _, cx| { if !items.is_empty() { this.ctx_open(e.position, items.clone(), cx); } }) })
@@ -537,7 +538,7 @@ impl Render for Backplane {
                             cx.defer(move |cx| this.update(cx, |this, _| this.history_want()));
                         } }, |_, _, _, _| {}).absolute().size_0())))
                     .when(!self.error.is_empty(), |d| d.child(div().px_5().py_2().text_color(c("bad")).child(self.error.clone())))
-                    .child(div().flex_shrink_0().relative().child(art::probe("composer")).border_t_1().border_color(c("line")).flex().justify_center().child(div().w_full().max_w(px(930.)).px_4().py_3().flex().flex_col().gap_2()
+                    .child(div().flex_shrink_0().relative().child(art::probe("composer")).children(crate::perf::mark("composer")).border_t_1().border_color(c("line")).flex().justify_center().child(div().w_full().max_w(px(930.)).px_4().py_3().flex().flex_col().gap_2()
                         .when(show_popup, |d| d.child(popup))
                         .children(crate::screens::picker::view(cx, light, &thread["picker"], self.screens.picker_open, &self.screens.pick, &self.local.favs))
                         .children(self.screens.ctx_open.then(|| div().id("ctx-panel").max_h(px(340.)).overflow_y_scroll().px_3().py_2().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).flex().flex_col().gap_1()
@@ -569,16 +570,20 @@ impl Render for Backplane {
                     .children(crate::screens::palette::view(cx, light, &self.data, &self.screens.palette, &self.local, &self.selected))
                     .children(crate::screens::images::lightbox(cx, self.screens.lightbox.as_ref()))
                 )
+                .children(crate::perf::mark("viewer"))
                 .children(crate::screens::viewer::view(cx, &reg, light, &self.screens.files, &self.screens.images, self.screens.attacher.target.as_ref(), thread, &self.screens.plot, &mut self.screens.plotview, &mut self.screens.split_pv, self.screens.solid.as_ref(), self.screens.browser.as_ref().map(|(_, b)| b)))
                 // right rail
-                .child(div().w(px(72.)).h_full().flex_shrink_0().relative().child(art::probe("rail")).border_l_1().border_color(c("line")).flex().flex_col().py_2().children(rail)))
+                .child(div().w(px(72.)).h_full().flex_shrink_0().relative().child(art::probe("rail")).children(crate::perf::mark("rail")).border_l_1().border_color(c("line")).flex().flex_col().py_2().children(rail)))
+            .children(crate::perf::mark("over"))
             .children(crate::screens::improvements::view(cx, light, &self.screens.imp))
             .children(crate::screens::improvements::indicator(cx, light, &self.screens.imp))
             .children(crate::screens::padview::view(cx, window, light, &self.local, &mut self.screens.pad, &mut ctl))
             // the right-click menu of a sidebar row, over everything
             .children(self.screens.ctx.clone().map(|m| crate::screens::ctxmenu::render(cx, light, &m)))
+            .children(crate::perf::on().then(|| crate::perf::overlay(light, &crate::keys::hint(&self.local, "perf"))))
             .into_any_element();
         self.controls = ctl;
+        if crate::perf::on() { crate::perf::built(); }
         self.render_us = t_render.elapsed().as_micros() as u64;
         el
     }

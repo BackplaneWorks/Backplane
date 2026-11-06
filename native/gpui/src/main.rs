@@ -5,6 +5,7 @@ mod hub;
 mod input;
 mod keys;
 mod local;
+mod perf;
 mod screens;
 mod script;
 mod swatch;
@@ -65,6 +66,7 @@ impl Backplane {
         Self{input,data:Value::Null,status:"Connecting…".into(),error:art::assets_missing().unwrap_or_default(),tx,selected:String::new(),drafts:saved.clone(),started,usable:false,first_frame:false,script_done:false,timeline:ListState::new(0,ListAlignment::Bottom,px(screens::timeline::RUNWAY)),cats:art::Cats::new(),links_sent:false,links_last:String::new(),sidebar_open:local.sidebar_open,models_pending:false,local,project_page:None,arm_new:None,echo_seq:0,thread_cache:Vec::new(),thread_source:"hub",confirm:None,ack_pending:None,recording:None,ui_epoch:0,controls:Vec::new(),ctl_last:String::new(),last_layout:String::new(),wake_at:None,reconnected:false,click_info:None,timing:None,applied_at:None,apply_ms:0.0,render_us:0,swatches,gallery,fonts,theme_override:theme.as_deref().map(|t|t=="light"),steps,pending:None,seq:0,want_focus:false,script_total,screens:screens::Screens::new(cx,target,drafts_path,saved)}
     }
     fn receive(&mut self,event:Event,cx:&mut Context<Self>) {
+        let timed=perf::on().then(||(event.name(),Instant::now()));
         if let Some(s)=hub::status_for(&event){self.status=s.into();}
         match event {
             Event::NetWake=>{self.wake_at=Some(Instant::now());self.m("net",serde_json::json!({"event":"hub_reachable_again"}));},
@@ -97,6 +99,7 @@ impl Backplane {
             Event::Error(e)=>{self.error=e;},
             Event::Refused(e)=>{self.error=e;},
         }
+        if let Some((name,t0))=timed {if name=="picture" {if let Some(t)=&self.timing {perf::picture(t,self.apply_ms);}}perf::event(name,t0);}
         cx.notify();
     }
     /// The header's search: show the sidebar and give its search box the keys.
