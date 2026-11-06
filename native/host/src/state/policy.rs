@@ -36,7 +36,7 @@ pub fn lean_keeps(k: &str) -> bool {
     // the Context panel's readings (present/tokstats.rs): one short string a thread, and the epoch that names the thread totals' key
     if ["tok.epoch", "tok.recount"].contains(&k) || ["turn.last.", "turn.speed.", "turn.models."].iter().any(|p| k.starts_with(p)) || (k.starts_with("tok.") && (k.starts_with("tok.t.") || k.contains(".t."))) { return true }
     // the Settings pages' values (present/settings.rs): short strings, one per control
-    if ["settle.idle.minutes", "settle.personal.minutes", "settle.done", "restart.continue", "agent.provider", "agent.model", "telemetry.share", "telemetry.usage.asked", "telemetry.reset", "update.channel", "text.provider", "text.model", "kicad.path", "kicad.ipc", "fallback.chain", "fallback.on", "fallback.add.provider", "fallback.add.model"].contains(&k) || ["push.webhook.", "notify."].iter().any(|p| k.starts_with(p)) { return true }
+    if ["settle.idle.minutes", "settle.personal.minutes", "settle.done", "restart.continue", "agent.provider", "agent.model", "telemetry.share", "telemetry.usage.asked", "telemetry.asked", "telemetry.usage.generation", "telemetry.choice.revision", "telemetry.reset", "update.channel", "text.provider", "text.model", "kicad.path", "kicad.ipc", "fallback.chain", "fallback.on", "fallback.add.provider", "fallback.add.model"].contains(&k) || ["push.webhook.", "notify."].iter().any(|p| k.starts_with(p)) { return true }
     k.starts_with("launch.input.") || k.starts_with("fallback.input.") || (!k.starts_with("ride.") && KEEP.iter().any(|p| k.starts_with(p)))
 }
 /// the value the lean copy keeps for a setting: a told record keeps a placeholder (its key carries the time), unless it is not one of ours

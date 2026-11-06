@@ -32,20 +32,35 @@ for(const p of pages){const rows=await openPage(p);for(const row of rows)for(con
   else if(b.action!=='settings-page'&&!['hook-url','hook-secret'].includes(b.action))todo.push({page:p,label:row.label,other:b.action,val:b.value,name:b.label})}
 const first=[];const lastOn=[];
 for(const t of todo.filter(x=>x.key&&x.was))lastOn.push(t);
-todo.splice(0,todo.length,...todo.filter(x=>!x.was||!x.key),...lastOn);
+const gate=x=>x.key==='order.enabled'; // turning Ordering off hides the chips after it
+todo.splice(0,todo.length,...todo.filter(x=>(!x.was||!x.key)&&!gate(x)),...todo.filter(x=>(!x.was||!x.key)&&gate(x)),...lastOn);
 for(const t of todo){if(t.other){rec({page:t.page,label:t.label,control:'button:'+t.other,name:t.name,note:'not a chip: walked by the form pass'});continue}
   const pre=await openPage(t.page);const target=t.key+'='+t.val;
   if(t.via){let tv='';for(const row of pre)for(const b of row.buttons||[])if(b.action===t.via)tv=b.value;await act(t.via,tv)}else await act('setting',target);await sleep(300);
   const rows=await openPage(t.page);let lit=false;for(const row of rows)for(const b of row.buttons||[])if(((b.action==='setting'&&b.value===target)||(t.via&&b.action===t.via))&&b.on)lit=true;
-  const logged=hubSettings();const applied=lit&&(logged[t.key]===t.val||(t.val===''&&!(t.key in logged))||(t.was&&!(t.key in logged))); // a value that was already the default is not logged
+  const logged=hubSettings();const actionChip=['telemetry.reset','fallback.chain'].includes(t.key)||t.key.startsWith('fallback.add.'); // an action, not a toggle: never lit; it must be stored
+  const applied=(actionChip&&logged[t.key]===t.val)||lit&&(logged[t.key]===t.val||(t.val===''&&!(t.key in logged))||(t.was&&!(t.key in logged))); // a value that was already the default is not logged
   rec({page:t.page,label:t.label,control:'chip',key:t.key,value:t.val,applied,lit,logged:logged[t.key]??null});t.applied=applied;t.lit=lit}
+
+// form controls: type into the draft the client keeps, press the button, read the page and the hub back; verified again after the restart
+const forms=[
+ {page:'timezone',field:'tzname',text:'Europe/Helsinki',button:'tz-set',key:'person.tz',want:'Europe/Helsinki',shows:'Europe/Helsinki',label:'Time zone'},
+ {page:'cad',field:'kpath',text:'/usr/bin/kicad-cli',button:'kicad-path',key:'kicad.path',want:'/usr/bin/kicad-cli',shows:'',label:'KiCad path'},
+ {page:'threads',field:'whurl',text:'https://example.com/hook',button:'hook-url',key:'push.webhook.url',want:'https://example.com/hook',shows:'https://example.com/hook',label:'Webhook address'}];
+for(const f of forms){await openPage(f.page);await act('bfield',f.field+'\u001f'+f.text); // what the client sends as the field changes
+  await act(f.button,'');await sleep(400);
+  const st=hubSettings();const rows=await openPage(f.page);const shown=JSON.stringify(rows);
+  rec({page:f.page,label:f.label,control:'form',key:f.key,value:f.want,applied:st[f.key]===f.want&&(!f.shows||shown.includes(f.shows)),stored:st[f.key]??null})}
+{const rows=await openPage('devices');const b=rows.flatMap(r=>r.buttons||[]).find(b=>b.action==='device-invite');if(b){await act('device-invite','');await sleep(800);const after=JSON.stringify(await openPage('devices'));rec({page:'devices',label:'Add a device',control:'form',applied:/Pairing link|pair/i.test(after)&&after!==JSON.stringify(rows),note:'an invitation row appears'})}}
 // restart and confirm persistence
 const before=hubSettings();await down();await up();
 const after=hubSettings();const walked=todo.filter(t=>t.key);
 for(const t of walked){const target=t.key+'='+t.val;const rows=await openPage(t.page);let lit=false;for(const row of rows)for(const b of row.buttons||[])if(((b.action==='setting'&&b.value===target)||(t.via&&b.action===t.via))&&b.on)lit=true;
   // the last chip clicked for a key is the one that must be lit after the restart
   const last=[...walked].reverse().find(x=>x.key===t.key);if(last!==t)continue;
+  const act2=['telemetry.reset','fallback.chain'].includes(t.key)||t.key.startsWith('fallback.add.');if(act2)lit=after[t.key]===t.val;
   rec({persist:true,page:t.page,key:t.key,value:t.val,lit_after_restart:lit,stored:after[t.key]??null})}
+for(const f of forms){await openPage(f.page);const st=hubSettings();const shown=JSON.stringify(await openPage(f.page));rec({persist:true,page:f.page,key:f.key,value:f.want,lit_after_restart:st[f.key]===f.want&&(!f.shows||shown.includes(f.shows)),stored:st[f.key]??null})}
 await down();
 writeFileSync(out+'/settings-walk.json',JSON.stringify(log,null,1));
-const bad=log.filter(x=>x.control==='chip'&&!x.applied);console.log(`chips walked: ${log.filter(x=>x.control==='chip').length}, not applied: ${bad.length}, persist failures: ${log.filter(x=>x.persist&&!x.lit_after_restart).length}`);process.exit(0);
+const bad=log.filter(x=>(x.control==='chip'||x.control==='form')&&!x.applied);console.log(`controls walked: ${log.filter(x=>x.control==='chip'||x.control==='form').length}, not applied: ${bad.length}, persist failures: ${log.filter(x=>x.persist&&!x.lit_after_restart).length}`);process.exit(0);
