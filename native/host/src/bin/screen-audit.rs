@@ -19,6 +19,8 @@ mod session { pub use crate::{composer, patch, select, pages}; }
 #[path="../present/tokstats.rs"] mod tokstats;
 #[path="../present/tz.rs"] mod tz;
 #[path="../present/keys.rs"] mod keys;
+#[path="../settings/order_view.rs"] mod order_view;
+mod settings { pub mod order { pub use crate::order_view::*; } }
 #[path="../present/thread.rs"] mod thread;
 #[path="../present/window.rs"] mod window;
 #[path="../present/audit_files.rs"] mod files;

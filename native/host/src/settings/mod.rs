@@ -16,6 +16,7 @@ pub mod diagnostics;
 pub mod driver;
 pub mod fab; pub mod skill_install;
 pub mod order;
+pub mod order_view;
 pub mod fallback;
 pub mod improvements;
 pub mod issue_report;
