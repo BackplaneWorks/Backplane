@@ -161,6 +161,7 @@ fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, 
     let mut present = std::collections::BTreeMap::new();
     for ch in &frame.chunks { present.entry(ch.layer).or_insert(ch.color); }
     let strip = crate::viewers::layers::strip(viewer, &present);
+    pv.present = strip.present;
     // Sheets: a schematic of several sheets lists them as a tree (indented by depth); a press shows that sheet, the root first
     if sheets.len() > 1 && open == "schematic" && layers {
         let on_key = frame.key.clone();

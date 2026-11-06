@@ -7,6 +7,7 @@
 //! Viewers (feature "viewers", "files", "browser"; the hub's own kicad.watch, files, mech and bots.browser requests, run for the thread's folder):
 //! `viewer.files {thread}` → `{root, pro, pcb, sch}` (the project's canonical KiCad files) · `viewer.watch {thread, kind: board|schematic|3d|3d-bare|3d-full|split|"" (stop), path?, tree?}` → `{root}`:
 //! the plot frames then arrive on this socket as binary CBOR (`{t:"plot", key, fam, cs, box, edge, thick}`, a 3D model `{key, box3, n, mesh}`: kicad/plot.rs), `{t:"plot", key, none}` as JSON ·
+//! `viewer.layers {kind, present, off, focus, action?, value?}` → the menu and masks (present/viewer.rs `layer_reply`) · `viewer.refs {thread}` → `{refs:[{kind,label,commit}]}` · `viewer.compare {thread, kind, commit, bits?, path?}` → `{root}` ·
 //! `viewer.probe {key,name,value}` → `{matches}`, `viewer.info {key,at,idx}` → `{info}` · `files.entries {thread, path?}` → `{dir, entries:[{dir,size,name}]}` ·
 //! `mech.list {thread}` → the hub's listing · bytes of a file: GET /files/get?thread=&path=&token= · `browser {thread, op, ...}` → `{}` (bots.browser for the thread's page: takeover, handback, click {x,y 0..1000},
 //! type, press, scroll, navigate, toolbar) · the page's newest frame: GET /bots/<thread>/screen.jpg, a new one announced by `{"t":"shot","bot":<thread>,"n":N}` (JSON, to every client that connected for viewers).
@@ -18,7 +19,7 @@
 //! Pushes on a `lists` subscription: `{"k":"notify","kind":"done"|"fail"|"ask","thread","title","body"}` when a turn ends or an ask opens.
 use super::*;
 
-pub const FEATURES: &[&str] = &["actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice"];
+pub const FEATURES: &[&str] = &["actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "layers"];
 
 const THREAD_ACTS: &[&str] = &["pin", "unpin", "settle", "unsettle", "archive", "unarchive", "delete", "detach"];
 
@@ -105,7 +106,7 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Re
             match r { Ok(_) => thread_now(hub, th).await.map(|t| json!({"thread":t})), Err(e) => Err(e) }
         }
         "mentions.list" => mentions(hub, p).await,
-        "viewer.files" | "viewer.watch" | "viewer.probe" | "viewer.info" | "files.entries" | "mech.list" | "browser" => viewers(hub, c, m, p).await?,
+        "viewer.files" | "viewer.watch" | "viewer.probe" | "viewer.info" | "viewer.layers" | "viewer.refs" | "viewer.compare" | "files.entries" | "mech.list" | "browser" => viewers(hub, c, m, p).await?,
         "voice.start" | "voice.stop" | "voice.act" | "voice.view" | "voice.key" | "voice.page" | "voice.page.act" => voice(hub, c, m, p).await,
         "viewer.diff" | "review.page" | "review.tick" | "review.comment" | "review.list" => review(hub, c, m, p).await?,
         "bots.list" => Ok(crate::bots::api::directory(hub).await),
@@ -202,6 +203,26 @@ async fn viewers(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Res
                 let mut q = json!({"kind":kind,"root":root,"path":path});
                 if !s(p, "tree").is_empty() { q["tree"] = p["tree"].clone() }
                 rpc(hub, c, "kicad.watch", q).await?; Ok(json!({"root":root}))
+            }
+            // the Layers menu and Compare (feature "layers"): the hub's own focus rules and comparison paths, so the phones decide nothing
+            "viewer.layers" => {
+                let n = |k: &str| p[k].as_u64().unwrap_or(0) as u32;
+                crate::present::viewer::layer_reply(s(p, "kind"), n("present"), n("off"), s(p, "focus"), s(p, "action"), s(p, "value")).ok_or_else(|| err("no such layer action"))
+            }
+            "viewer.refs" => {
+                let r = result(rpc(hub, c, "history.refs", json!({"thread":th})).await?);
+                Ok(json!({"refs":crate::present::viewer::ref_rows(s(&r, "refs")).into_iter().map(|(kind, label, commit)| json!({"kind":kind,"label":label,"commit":commit})).collect::<Vec<_>>()}))
+            }
+            "viewer.compare" => {
+                let root = root_of(hub, th).await?; let (kind, commit, file) = (s(p, "kind"), s(p, "commit"), s(p, "path"));
+                if !matches!(kind, "board" | "schematic") { return Err(err("only a board or a schematic compares")) }
+                if file.split('/').any(|x| x == "..") || file.contains(['\0', '\n', '\t']) { return Err(err("that path is not in this project")) }
+                let r = result(rpc(hub, c, "history.refs", json!({"thread":th})).await?);
+                if !crate::present::viewer::ref_rows(s(&r, "refs")).iter().any(|x| x.2 == commit) { return Err(err("that version is not in this project")) }
+                let file = if file.is_empty() { s(&r, if kind == "board" { "pcb" } else { "sch" }).to_string() } else if file.starts_with('/') { file.to_string() } else { format!("{root}/{file}") };
+                let bits = p["bits"].as_u64().unwrap_or(0) as u32;
+                let Some(path) = crate::present::viewer::compare_path(s(&r, "git"), s(&r, "top"), commit, &file, bits) else { return Err(err("that file is not in this repository")) };
+                rpc(hub, c, "kicad.watch", json!({"kind":kind,"root":root,"path":path})).await?; Ok(json!({"root":root}))
             }
             "viewer.probe" => rpc(hub, c, "kicad.probe", json!({"key":s(p, "key"),"name":s(p, "name"),"value":s(p, "value")})).await.map(result),
             "viewer.info" => rpc(hub, c, "kicad.info", json!({"key":s(p, "key"),"at":p["at"],"idx":p["idx"]})).await.map(result),

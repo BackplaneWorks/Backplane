@@ -364,6 +364,17 @@ object DataClient {
     suspend fun viewerFiles(tid: String): ProjectFiles { val r = call("viewer.files", JSONObject().put("thread", tid)); return ProjectFiles(r.optString("root"), r.optString("pcb"), r.optString("sch")) }
     fun stopWatch(tid: String) { scope.launch { runCatching { call("viewer.watch", JSONObject().put("thread", tid).put("kind", "")) } } }
     suspend fun watch(tid: String, kind: String, path: String = "") { call("viewer.watch", JSONObject().put("thread", tid).put("kind", kind).apply { if (path.isNotEmpty()) put("path", path) }) }
+    /** `viewer.layers`: what a press does, and what to draw; the rules are the hub's (present/viewer.rs `layer_reply`). `rows`: the layers, then a comparison's marks. */
+    data class LayerRow(val layer: Int, val name: String, val on: Boolean, val active: Boolean)
+    data class Layers(val own: Int, val focus: String, val off: Int, val dim: Int, val lift: Int, val bits: Int, val head: String, val mode: Int, val modes: Boolean, val reset: Boolean, val rows: List<LayerRow>)
+    suspend fun layers(kind: String, present: Int, own: Int, focus: String, action: String = "", value: String = ""): Layers {
+        val r = call("viewer.layers", JSONObject().put("kind", kind).put("present", present).put("off", own).put("focus", focus).put("action", action).put("value", value))
+        fun rows(k: String) = r.optJSONArray(k)?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { LayerRow(it.optInt("layer"), it.optString("name"), it.optBoolean("on"), it.optBoolean("active")) } }.orEmpty()
+        return Layers(r.optInt("own"), r.optString("focus"), r.optInt("off"), r.optInt("dim"), r.optInt("lift", 255), r.optInt("layerBits"), r.optString("layerHead", "Layers"), r.optInt("layerMode"), r.optBoolean("layerModes"), r.optBoolean("layerReset"), rows("layerList") + rows("layerMarks"))
+    }
+    data class Ref(val kind: String, val label: String, val commit: String)
+    suspend fun refs(tid: String): List<Ref> = call("viewer.refs", JSONObject().put("thread", tid)).optJSONArray("refs")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Ref(it.optString("kind"), it.optString("label"), it.optString("commit")) } }.orEmpty()
+    suspend fun compare(tid: String, kind: String, commit: String, bits: Int, path: String) { call("viewer.compare", JSONObject().put("thread", tid).put("kind", kind).put("commit", commit).put("bits", bits).put("path", path)) }
     suspend fun info(key: String, at: Int, idx: Int): String = call("viewer.info", JSONObject().put("key", key).put("at", at).put("idx", idx)).optString("info")
     data class Entry(val dir: Boolean, val size: Long, val name: String)
     suspend fun entries(tid: String, path: String): List<Entry> = call("files.entries", JSONObject().put("thread", tid).put("path", path)).optJSONArray("entries")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Entry(it.optBoolean("dir"), it.optLong("size"), it.optString("name")) } } ?: emptyList()

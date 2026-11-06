@@ -21,6 +21,10 @@ pub fn masks(viewer: &Value) -> Masks {
 pub fn bits(viewer: &Value) -> u32 { viewer["layerBits"].as_u64().unwrap_or(0) as u32 }
 /// Whether Ctrl+H has a plot to act on: Board, Schematic or Split on show (a 3D mesh has no layers, and an open Diff covers the page).
 pub fn cycles(thread: &Value) -> bool { !thread["diff"].is_object() && matches!(thread["viewer"]["open"].as_str(), Some("board" | "schematic" | "split")) }
+/// The layers a plot has, a bit each (a layer outside 0..31 has none): the hub starts the focus on the first of them with art.
+pub fn present_bits(layers: impl IntoIterator<Item = u32>) -> u32 { layers.into_iter().filter(|l| *l < 32).fold(0, |a, l| a | 1 << l) }
+/// Ctrl+H's value: the pane it is for ("schematic" on Split; empty otherwise), then the plot's layers.
+pub fn cycle_value(schematic: bool, present: u32) -> String { format!("{} {present}", if schematic { "schematic" } else { "" }) }
 fn bit(mask: u32, layer: u32) -> bool { layer < 32 && (mask >> layer) & 1 == 1 }
 
 /// What to draw and in which order, for chunks whose layers are `layers` (paint order): (index, opacity factor). Hidden layers are left out
@@ -38,7 +42,7 @@ pub fn plan(layers: &[u32], m: &Masks) -> Vec<(usize, f32)> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Row { pub layer: u32, pub name: String, pub on: bool, pub active: bool, pub color: u32 }
 #[derive(Clone, Debug, PartialEq)]
-pub struct Strip { pub head: String, pub mode: u32, pub modes: bool, pub reset: bool, pub rows: Vec<Row> }
+pub struct Strip { pub head: String, pub mode: u32, pub modes: bool, pub reset: bool, pub present: u32, pub rows: Vec<Row> }
 /// The Layers menu: only the layers this plot has (as the phones list them), in the hub's (KiCad's) order, a comparison's marks after, each in the colour the plot draws it (`present`: layer to colour).
 pub fn strip(viewer: &Value, present: &BTreeMap<u32, u32>) -> Strip {
     let rows = viewer["layerList"].as_array().into_iter().flatten().chain(viewer["layerMarks"].as_array().into_iter().flatten()).filter_map(|r| {
@@ -46,7 +50,7 @@ pub fn strip(viewer: &Value, present: &BTreeMap<u32, u32>) -> Strip {
         present.get(&layer).map(|color| Row { layer, name: r["name"].as_str().unwrap_or("").to_string(), on: r["on"].as_bool().unwrap_or(true), active: r["active"].as_bool().unwrap_or(false), color: *color })
     }).collect();
     let head = viewer["layerHead"].as_str().filter(|h| !h.is_empty()).unwrap_or("Layers").to_string();
-    Strip { head, mode: viewer["layerMode"].as_u64().unwrap_or(0) as u32, modes: viewer["layerModes"].as_bool().unwrap_or(false), reset: viewer["layerReset"].as_bool().unwrap_or(false), rows }
+    Strip { head, mode: viewer["layerMode"].as_u64().unwrap_or(0) as u32, modes: viewer["layerModes"].as_bool().unwrap_or(false), reset: viewer["layerReset"].as_bool().unwrap_or(false), present: present_bits(present.keys().copied()), rows }
 }
 
 /// The Layers button and, while open, its menu: All/Dim/Only (a board), a swatch per layer in its colour (show or hide it), its name (make it the active layer,
@@ -66,10 +70,11 @@ pub fn panel_el(cx: &mut Context<Backplane>, light: bool, s: &Strip, open: bool,
     if !open || s.rows.is_empty() { return None; }
     let mut panel = div().id("layers-panel").absolute().top(px(4.)).left(px(12.)).max_h(px(cap)).overflow_y_scroll().track_scroll(scroll).flex().flex_col().gap_1().p_2().border_1().border_color(c("line")).bg(c("panel")).occlude();
     if s.modes {
+        let present = s.present;
         panel = panel.child(div().flex().gap_1().children(["All", "Dim", "Only"].iter().enumerate().map(|(i, label)| {
             let on = s.mode == i as u32; let d = div().id(SharedString::from(format!("layer-mode-{i}"))).px_2().text_size(px(12.)).cursor_pointer().border_1();
             (if on { d.bg(c("accent")).text_color(c("on-accent")).border_color(c("accent")) } else { d.border_color(c("line")).hover(|s| s.bg(c("raise"))) }).child(*label)
-                .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("view-layer-mode".into(), i.to_string())); cx.notify(); }))
+                .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("view-layer-mode".into(), format!("{i} {present}"))); cx.notify(); }))
         })));
     }
     for r in &s.rows {
@@ -92,7 +97,7 @@ fn swatch(color: u32, on: bool) -> Rgba { rgba((color & 0xffffff) << 8 | if on {
 
 #[cfg(test)]
 mod tests {
-    use super::{bits, cycles, masks, plan, strip, swatch, Masks, Row, DIM};
+    use super::{bits, cycle_value, cycles, masks, plan, present_bits, strip, swatch, Masks, Row, DIM};
     use serde_json::json;
     use std::collections::BTreeMap;
     #[test] fn hidden_layers_are_left_out_and_outside_32_is_always_shown() {
@@ -124,6 +129,11 @@ mod tests {
         for open in ["board", "schematic", "split"] { assert!(cycles(&json!({"viewer": {"open": open}})), "{open}"); }
         for open in ["3d", "mech", "files", "browser", "review"] { assert!(!cycles(&json!({"viewer": {"open": open}})), "{open}"); }
         assert!(!cycles(&json!({"viewer": {"open": "board"}, "diff": {}})), "an open Diff covers the board"); assert!(!cycles(&json!(null)));
+    }
+    #[test] fn the_hub_is_told_the_layers_the_plot_has() {
+        assert_eq!(present_bits([0, 5, 5, 40]), 0b100001, "a layer outside 0..31 has no bit");
+        assert_eq!(strip(&json!({}), &BTreeMap::from([(5, 1), (13, 2)])).present, 1 << 5 | 1 << 13);
+        assert_eq!(cycle_value(false, 32), " 32"); assert_eq!(cycle_value(true, 32), "schematic 32");
     }
     #[test] fn a_comparison_keeps_to_the_hubs_bits() { assert_eq!(bits(&json!({"layerBits": 4096})), 4096); assert_eq!(bits(&json!({})), 0); }
 }

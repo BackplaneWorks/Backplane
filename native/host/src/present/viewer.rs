@@ -184,17 +184,30 @@ pub fn masks(sch: bool, off: u32, f: Focus) -> (u32, u32) {
 }
 /// Lyr.pick: a layer's name makes it the active one and the others dim; again puts every layer back.
 pub fn pick(f: Focus, l: u32) -> Focus { if f.on() && f.active == l { Focus { active: l, mode: 0 } } else { Focus { active: l, mode: if f.mode == 0 { 1 } else { f.mode } } } }
-/// Lyr.set: All / Dim / Only (the first layer is active when none is).
-pub fn set_mode(sch: bool, f: Focus, mode: u32) -> Focus { Focus { active: if f.active == NONE { if sch { 0 } else { 12 } } else { f.active }, mode: mode.min(2) } }
+/// Lyr.first by what the plot draws: the first layer in the list's order with art on it (`present`, a bit each, 0 when the plot is not known), else front copper or the schematic's first layer.
+fn first_art(sch: bool, present: u32) -> u32 {
+    let has = |l: &u32| present & bit(*l) != 0;
+    let first = if sch { (0..SCH_LAYERS.len() as u32).find(has) } else { BOARD_LAYERS.iter().map(|x| x.0).find(has) };
+    first.unwrap_or(if sch { 0 } else { 12 })
+}
+/// Lyr.set: All / Dim / Only (the first layer with art is active when none is, or when the one kept has no art on this plot).
+pub fn set_mode(sch: bool, f: Focus, mode: u32, present: u32) -> Focus {
+    let bare = f.active == NONE || (present != 0 && present & bit(f.active) == 0);
+    Focus { active: if bare { first_art(sch, present) } else { f.active }, mode: mode.min(2) }
+}
 /// Lyr.cycle: Ctrl+H, as in KiCad: the layers other than the active one as they are, dimmed, hidden, and around again.
-pub fn cycle(sch: bool, f: Focus) -> Focus { set_mode(sch, f, if f.mode == 2 { 0 } else { f.mode + 1 }) }
+pub fn cycle(sch: bool, f: Focus, present: u32) -> Focus { set_mode(sch, f, if f.mode == 2 { 0 } else { f.mode + 1 }, present) }
+/// A layer action's value and, after a space, the layers the plot on show has (`view-layer-mode`, `view-layer-cycle`): ("2", bits); a value without them is the value and 0.
+fn with_art(value: &str) -> (&str, u32) {
+    match value.rsplit_once(' ').map(|(a, b)| (a, b.parse::<u32>())) { Some((a, Ok(bits))) => (a.trim(), bits), _ => (value.trim(), 0) }
+}
 /// Rv.bits: the layers a comparison's marks keep to, the active one and those kept with it (0 when no layer stands out, and always on a schematic).
 pub fn compare_bits(sch: bool, f: Focus) -> u32 { if f.on() && !sch { kept(sch, f) } else { 0 } }
 
 /// view-layer (hide or show a layer), view-layer-pick (the active layer), view-layer-mode (All/Dim/Only), view-layer-cycle (Ctrl+H), view-layers-reset (every layer as it is by default, no focus)
 /// on the Board or Schematic page: the session patch, None elsewhere. On Split, whose panes show each kind as its tab does, Ctrl+H acts on the pane `value` names ("schematic", else the board).
 pub fn layer_action(st: &State, session: &Value, action: &str, value: &str) -> Option<Value> {
-    let sel = s(session, "sel"); let d = &session["drafts"];
+    let sel = s(session, "sel"); let d = &session["drafts"]; let (value, present) = with_art(value);
     let kind = match s(d, &format!("@view:{sel}")) { "split" if action == "view-layer-cycle" => if value == "schematic" { "schematic" } else { "board" }, k => k };
     if !simple(st, session, sel) || !matches!(kind, "board" | "schematic") { return None }
     let sch = kind == "schematic"; let v: u32 = value.trim().parse().unwrap_or(if action == "view-layer" { 31 } else { NONE });
@@ -203,8 +216,8 @@ pub fn layer_action(st: &State, session: &Value, action: &str, value: &str) -> O
     match action {
         "view-layer" => { let off: u32 = s(d, &offk).parse().unwrap_or(0); dr.insert(offk, json!((off ^ bit(v)).to_string())); }
         "view-layer-pick" => { dr.insert(fk.clone(), json!(pick(Focus::read(s(d, &fk)), v).show())); }
-        "view-layer-mode" => { dr.insert(fk.clone(), json!(set_mode(sch, Focus::read(s(d, &fk)), if value.trim().parse::<u32>().is_ok() { v } else { 0 }).show())); }
-        "view-layer-cycle" => { dr.insert(fk.clone(), json!(cycle(sch, Focus::read(s(d, &fk))).show())); }
+        "view-layer-mode" => { dr.insert(fk.clone(), json!(set_mode(sch, Focus::read(s(d, &fk)), if value.trim().parse::<u32>().is_ok() { v } else { 0 }, present).show())); }
+        "view-layer-cycle" => { dr.insert(fk.clone(), json!(cycle(sch, Focus::read(s(d, &fk)), present).show())); }
         "view-layers-reset" => { dr.insert(offk, json!("")); dr.insert(fk, json!("")); }
         _ => return None,
     }
@@ -249,11 +262,18 @@ fn page(template: &Value, kind: &str, root: &str, drafts: &Value, sel: &str) -> 
     o.insert("open".into(), json!(kind)); o.insert("key".into(), json!(k));
     // View.layers: a 3D view draws the board's layers on its faces
     o.insert("layers".into(), json!(if kind == "3d" { if file.is_empty() { key("board", root) } else { String::new() } } else { k }));
-    o.insert("layerModes".into(), json!(kind == "board"));
     // View.masks / View.lmode / View.lhead: what the person hid, the focus, and what the canvas draws from them
-    let sch = kind == "schematic"; let draws = matches!(kind, "board" | "schematic");
+    let draws = matches!(kind, "board" | "schematic");
     let off: u32 = if draws { s(drafts, &format!("@view.off.{kind}")).parse().unwrap_or(0) } else { 0 };
     let f = if draws { Focus::read(s(drafts, &format!("@view.focus.{kind}"))) } else { Focus { active: NONE, mode: 0 } };
+    layer_fields(o, kind, off, f);
+    v
+}
+
+/// What a page's Layers menu and canvas are drawn from, for the desktop's picture and the phones' `viewer.layers` alike.
+fn layer_fields(o: &mut serde_json::Map<String, Value>, kind: &str, off: u32, f: Focus) {
+    o.insert("layerModes".into(), json!(kind == "board"));
+    let sch = kind == "schematic"; let draws = matches!(kind, "board" | "schematic");
     let (moff, mdim) = masks(sch, off, f);
     let row = |n: u32, name: &str| json!({"layer": n, "name": name, "on": off & bit(n) == 0, "active": f.on() && f.active == n});
     let rows: Vec<Value> = match kind {
@@ -275,7 +295,36 @@ fn page(template: &Value, kind: &str, root: &str, drafts: &Value, sel: &str) -> 
         let nm = nm.or_else(|| MARK_LAYERS.iter().find(|(n, _)| *n == f.active).map(|(_, x)| x.to_string()));
         if let Some(nm) = nm { o.insert("layerHead".into(), json!(format!("Layer: {nm}"))); }
     }
-    v
+}
+
+/// `viewer.layers`: the phones keep `off` (what the person hid) and `focus` ("<active>|<mode>") and hold no rule: this answers what a press does to them and what to draw.
+/// `action`: "" (as they are), toggle, pick, mode, cycle or reset; `present`: the layers the plot on show has, a bit each. None for another kind or action.
+pub fn layer_reply(kind: &str, present: u32, off: u32, focus: &str, action: &str, value: &str) -> Option<Value> {
+    if !matches!(kind, "board" | "schematic") { return None }
+    let sch = kind == "schematic"; let (mut off, mut f) = (off, Focus::read(focus)); let v = value.trim().parse::<u32>();
+    match action {
+        "" => {}
+        "toggle" => off ^= bit(v.ok().filter(|l| *l < 31)?),
+        "pick" => f = pick(f, v.ok()?),
+        "mode" => f = set_mode(sch, f, v.ok()?, present),
+        "cycle" => f = cycle(sch, f, present),
+        "reset" => { off = 0; f = Focus { active: NONE, mode: 0 }; }
+        _ => return None,
+    }
+    let mut o = serde_json::Map::new(); o.insert("own".into(), json!(off)); o.insert("focus".into(), json!(f.show())); o.insert("layerHead".into(), json!("Layers"));
+    layer_fields(&mut o, kind, off, f);
+    Some(Value::Object(o))
+}
+
+/// The versions a comparison may take, from `history.refs`' lines (kind, label, commit), as the desktop lists them.
+pub fn ref_rows(refs: &str) -> Vec<(String, String, String)> {
+    refs.lines().filter_map(|l| { let f: Vec<&str> = l.split('\t').collect(); if f.len() < 3 || f[2].is_empty() || !matches!(f[0], "head" | "base" | "branch" | "tag" | "commit") { return None } Some((f[0].to_string(), f[1].to_string(), f[2].to_string())) }).take(60).collect()
+}
+/// core/hist's comparison of `file` with `commit`: "diff\n<the version>\n<the live file>", then `bits`, the layers its marks keep to (0 every layer). None for a file outside `top`.
+pub fn compare_path(git: &str, top: &str, commit: &str, file: &str, bits: u32) -> Option<String> {
+    let rel = file.strip_prefix(&format!("{top}/"))?;
+    let old = format!("git\t{git}\t{commit}\t{}\t{top}/{rel}", top.chars().count());
+    Some(if bits == 0 { format!("diff\n{old}\n{file}") } else { format!("diff\n{old}\n{file}\n{bits}") })
 }
 
 
@@ -634,20 +683,56 @@ mod tests {
         let only = Focus::read("12|2"); let (off, dim) = masks(false, 0, only); assert_eq!(dim, 0); assert_eq!(off & bit(12), 0, "the active layer is never hidden"); assert!(off & bit(5) != 0);
         assert_eq!(masks(false, 4, Focus::read("")), (4, 0), "no focus: only the person's own");
         assert_eq!(pick(Focus::read(""), 5), Focus { active: 5, mode: 1 }); assert_eq!(pick(Focus { active: 5, mode: 1 }, 5), Focus { active: 5, mode: 0 }, "again puts all back");
-        assert_eq!(set_mode(false, Focus::read(""), 2), Focus { active: 12, mode: 2 }); assert_eq!(set_mode(true, Focus::read(""), 1).active, 0);
+        assert_eq!(set_mode(false, Focus::read(""), 2, 0), Focus { active: 12, mode: 2 }); assert_eq!(set_mode(true, Focus::read(""), 1, 0).active, 0);
         assert_eq!(Focus::read("7|2").show(), "7|2"); assert!(!Focus::read("7|0").on());
     }
 
     #[test] fn ctrl_h_cycles_the_others_as_they_are_dimmed_hidden_and_around_again() {
-        let a = cycle(false, Focus::read("")); assert_eq!(a, Focus { active: 12, mode: 1 }, "no active layer: front copper, dimmed");
-        let b = cycle(false, a); assert_eq!(b, Focus { active: 12, mode: 2 });
-        let c = cycle(false, b); assert_eq!(c, Focus { active: 12, mode: 0 }); assert!(!c.on(), "every layer as it was");
-        assert_eq!(cycle(false, c), a, "and around again");
-        assert_eq!(cycle(true, Focus::read("")), Focus { active: 0, mode: 1 }, "a schematic starts at its first layer");
-        assert_eq!(cycle(false, pick(Focus::read(""), 5)), Focus { active: 5, mode: 2 }, "a picked layer stays the active one");
+        let a = cycle(false, Focus::read(""), 0); assert_eq!(a, Focus { active: 12, mode: 1 }, "no active layer: front copper, dimmed");
+        let b = cycle(false, a, 0); assert_eq!(b, Focus { active: 12, mode: 2 });
+        let c = cycle(false, b, 0); assert_eq!(c, Focus { active: 12, mode: 0 }); assert!(!c.on(), "every layer as it was");
+        assert_eq!(cycle(false, c, 0), a, "and around again");
+        assert_eq!(cycle(true, Focus::read(""), 0), Focus { active: 0, mode: 1 }, "a schematic starts at its first layer");
+        assert_eq!(cycle(false, pick(Focus::read(""), 5), 0), Focus { active: 5, mode: 2 }, "a picked layer stays the active one");
         let (off, _) = masks(false, bit(5), Focus { active: 5, mode: 2 }); assert_eq!(off & bit(5), 0, "the active layer shows though the person hid it");
     }
 
+    #[test] fn the_focus_starts_on_the_first_layer_with_art() {
+        let no_front = bit(5) | bit(13) | bit(16) | bit(22); let both = no_front | bit(12);
+        assert_eq!(cycle(false, Focus::read(""), no_front).active, 5, "no F.Cu art: B.Cu, the next in the list's order");
+        assert_eq!(cycle(false, Focus::read(""), both).active, 12, "F.Cu has art: it stays first");
+        assert_eq!(cycle(false, Focus::read(""), bit(16) | bit(22)).active, 16, "no copper at all: the first layer that has art");
+        assert_eq!(set_mode(false, Focus::read(""), 2, no_front), Focus { active: 5, mode: 2 }, "All/Dim/Only start there too");
+        assert_eq!(cycle(false, Focus::read("12|0"), no_front).active, 5, "a focus left on a layer this plot lacks starts over");
+        assert_eq!(cycle(false, Focus::read("16|1"), no_front), Focus { active: 16, mode: 2 }, "the active layer stays while it has art");
+        assert_eq!(pick(Focus::read(""), 12).active, 12, "a pick is the person's, as in core/layers");
+        assert_eq!(cycle(true, Focus::read(""), bit(6) | bit(14)).active, 6, "a schematic's first layer with art");
+        assert_eq!(first_art(false, bit(26)), 12, "marks alone name no layer of the list");
+    }
+    #[test] fn an_action_carries_the_plots_layers_after_a_space() {
+        assert_eq!(with_art("2 4128"), ("2", 4128)); assert_eq!(with_art(" 32"), ("", 32)); assert_eq!(with_art("schematic 32"), ("schematic", 32));
+        assert_eq!(with_art("2"), ("2", 0)); assert_eq!(with_art(""), ("", 0)); assert_eq!(with_art("schematic"), ("schematic", 0));
+    }
+    #[test] fn a_phone_asks_the_hub_what_a_press_does() {
+        let art = bit(5) | bit(13) | bit(22);
+        let r = layer_reply("board", art, 0, "", "cycle", "").unwrap();
+        assert_eq!((r["focus"].as_str(), r["layerMode"].as_u64(), r["layerHead"].as_str(), r["lift"].as_u64()), (Some("5|1"), Some(1), Some("Layer: B.Cu"), Some(5)));
+        assert_eq!(r["layerReset"], true); assert!(r["dim"].as_u64().unwrap() & bit(16) as u64 != 0 && r["dim"].as_u64().unwrap() & bit(13) as u64 == 0, "pads stay with copper, as on the desktop");
+        assert_eq!(r["layerBits"], kept(false, Focus::read("5|1")));
+        let h = layer_reply("board", art, 0, "5|1", "mode", "2").unwrap(); assert!(h["off"].as_u64().unwrap() & bit(16) as u64 != 0); assert_eq!(h["dim"], 0);
+        let t = layer_reply("board", art, 0, "", "toggle", "16").unwrap(); assert_eq!(t["own"], bit(16)); assert_eq!(t["off"], bit(16)); assert_eq!(t["layerHead"], "Layers");
+        let p = layer_reply("board", art, 0, "", "pick", "5").unwrap(); assert_eq!(p["focus"], "5|1");
+        let z = layer_reply("board", art, bit(16), "5|2", "reset", "").unwrap(); assert_eq!((z["own"].as_u64(), z["focus"].as_str(), z["layerReset"].as_bool(), z["off"].as_u64()), (Some(0), Some("255|0"), Some(false), Some(0)));
+        assert_eq!(layer_reply("board", art, 0, "5|1", "", "").unwrap()["focus"], "5|1", "no action: as they are");
+        assert_eq!(layer_reply("schematic", bit(6), 0, "", "cycle", "").unwrap()["layerModes"], false);
+        assert!(layer_reply("3d", 0, 0, "", "cycle", "").is_none()); assert!(layer_reply("board", 0, 0, "", "nope", "").is_none()); assert!(layer_reply("board", 0, 0, "", "toggle", "x").is_none());
+    }
+    #[test] fn a_phones_comparison_is_the_desktops_path_with_its_layers() {
+        assert_eq!(compare_path("/p/.git", "/p", "abc", "/p/b.kicad_pcb", 0).unwrap(), "diff\ngit\t/p/.git\tabc\t2\t/p/b.kicad_pcb\n/p/b.kicad_pcb");
+        assert_eq!(compare_path("/p/.git", "/p", "abc", "/p/b.kicad_pcb", 4096).unwrap(), "diff\ngit\t/p/.git\tabc\t2\t/p/b.kicad_pcb\n/p/b.kicad_pcb\n4096");
+        assert!(compare_path("/p/.git", "/p", "abc", "/x/b.kicad_pcb", 0).is_none(), "a file outside the top folder");
+        assert_eq!(ref_rows("head\tHEAD\tabc\nnope\tX\tdef\nbranch\tmain\t\ncommit\tfirst\tdef"), [("head".to_string(), "HEAD".to_string(), "abc".to_string()), ("commit".to_string(), "first".to_string(), "def".to_string())]);
+    }
     #[test] fn a_comparison_keeps_to_the_active_layer_on_a_board_only() {
         assert_eq!(compare_bits(false, Focus::read("")), 0); assert_eq!(compare_bits(false, Focus::read("12|0")), 0, "no layer stands out");
         let b = compare_bits(false, Focus::read("12|1")); assert_eq!(b, kept(false, Focus::read("12|1"))); assert!(b & bit(12) != 0 && b & bit(23) != 0 && b & bit(5) == 0);
@@ -675,11 +760,14 @@ mod tests {
     #[test] fn ctrl_h_acts_on_the_page_or_the_split_pane_and_nowhere_else() {
         let (st, session, _) = thread_on("board");
         assert_eq!(layer_action(&st, &session, "view-layer-cycle", "").unwrap()["drafts"]["@view.focus.board"], "12|1");
+        assert_eq!(layer_action(&st, &session, "view-layer-cycle", " 32").unwrap()["drafts"]["@view.focus.board"], "5|1", "the plot's layers ride after a space");
+        assert_eq!(layer_action(&st, &session, "view-layer-mode", "2 32").unwrap()["drafts"]["@view.focus.board"], "5|2");
         let (st, session, _) = thread_on("schematic");
         assert_eq!(layer_action(&st, &session, "view-layer-cycle", "").unwrap()["drafts"]["@view.focus.schematic"], "0|1");
         let (st, session, _) = thread_on("split");
         assert_eq!(layer_action(&st, &session, "view-layer-cycle", "").unwrap()["drafts"]["@view.focus.board"], "12|1");
         assert_eq!(layer_action(&st, &session, "view-layer-cycle", "schematic").unwrap()["drafts"]["@view.focus.schematic"], "0|1");
+        assert_eq!(layer_action(&st, &session, "view-layer-cycle", "schematic 64").unwrap()["drafts"]["@view.focus.schematic"], "6|1");
         assert!(layer_action(&st, &session, "view-layer", "5").is_none(), "Split has no Layers menu");
         let (st, session, _) = thread_on("3d"); assert!(layer_action(&st, &session, "view-layer-cycle", "").is_none());
     }

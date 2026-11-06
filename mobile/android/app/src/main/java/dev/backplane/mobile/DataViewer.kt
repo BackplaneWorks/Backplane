@@ -37,9 +37,6 @@ import org.json.JSONObject
 // The viewer over a thread (the desktop's right rail): Board, Schematic, 3D, Mech, Files and Browser, on the data/1 viewer requests (native/host/src/data/ext.rs).
 // Plots and models arrive as the hub's own binary frames and are drawn by the app's GPU view (PlotStore, PlotSurface: pinch, pan, orbit, tap to inspect).
 private val tabs = listOf("Board", "Schematic", "3D", "Split", "Mech", "Files", "Diff", "Review", "Browser")
-private val boardLayers = listOf(12, 11, 10, 9, 8, 7, 6, 5, 13, 23, 24, 15, 2, 16, 3, 14, 4, 19, 20, 22, 21, 17, 1, 18, 0)
-private val boardNames = listOf("B.Fab", "B.Courtyard", "B.Paste", "B.Silkscreen", "B.Mask", "B.Cu", "In6.Cu", "In5.Cu", "In4.Cu", "In3.Cu", "In2.Cu", "In1.Cu", "F.Cu", "Pads", "F.Mask", "F.Paste", "F.Silkscreen", "F.Courtyard", "F.Fab", "User.Drawings", "User.Comments", "Margin", "Edge.Cuts", "Vias", "Holes")
-private val schNames = listOf("page", "sheet fill", "body fill", "sheet", "graphic", "note", "body", "pin", "pin name", "pin number", "field", "field other", "bus", "bus entry", "wire", "no connect", "junction", "label", "global label", "hier label", "sheet name", "sheet file", "sheet pin", "dnp")
 
 /** A file asked to be opened from the Files tab: the viewer jumps to its tab with the path. */
 private data class Target(val tab: String, val path: String)
@@ -83,11 +80,13 @@ private fun PlotTab(thread: DThread, kind: String, path: String, has: Boolean, n
     val head = if (three) "2|" else if (kind == "schematic") "1|" else "0|"
     var error by remember { mutableStateOf("") }
     var info by remember { mutableStateOf("") }
-    var off by remember { mutableIntStateOf(0) }; var dim by remember { mutableIntStateOf(0) }; var lift by remember { mutableIntStateOf(255) }
+    var layers by remember { mutableStateOf<DataClient.Layers?>(null) }
+    var refs by remember { mutableStateOf<List<DataClient.Ref>?>(null) }
+    var comparing by remember { mutableStateOf("") }
     var menu by remember { mutableStateOf(false) }
     LaunchedEffect(thread.id, kind, path, has) {
         if (!has) return@LaunchedEffect
-        error = ""; off = 0; dim = 0; lift = 255; info = ""
+        error = ""; layers = null; refs = null; comparing = ""; info = ""
         runCatching { DataClient.watch(thread.id, kind, path) }.onFailure { error = it.message ?: "" }
     }
     val plots = DataClient.plots
@@ -95,6 +94,17 @@ private fun PlotTab(thread: DThread, kind: String, path: String, has: Boolean, n
     val mesh = if (three) plots.mesh?.takeIf { it.key.startsWith("2|") } else null
     val bg = dcs.background.toArgb() and 0xFFFFFF
     val layersPresent = remember(frame) { frame?.chunks?.map { it.layer }?.distinct().orEmpty() }
+    val bits = remember(layersPresent) { layersPresent.filter { it in 0..30 }.fold(0) { a, l -> a or (1 shl l) } }
+    // a press: the hub answers what it does; a comparison on show keeps its marks to the active layer
+    val act = { action: String, value: String -> scope.launch {
+        val r = runCatching { DataClient.layers(kind, bits, layers?.own ?: 0, layers?.focus.orEmpty(), action, value) }.getOrNull() ?: return@launch
+        val moved = (layers?.bits ?: 0) != r.bits
+        layers = r
+        if (moved && comparing.isNotEmpty()) runCatching { DataClient.compare(thread.id, kind, comparing, r.bits, path) }
+        Unit
+    }; Unit }
+    LaunchedEffect(kind, path, bits) { if (!three && bits != 0 && DataClient.has("layers")) act("", "") }
+    val off = layers?.off ?: 0; val dim = layers?.dim ?: 0; val lift = layers?.lift ?: 255
     Box(Modifier.fillMaxSize().background(dcs.background)) {
         AndroidView(factory = { PlotSurface(it) }, modifier = Modifier.fillMaxSize().testTag("viewer.surface"), update = { s ->
             s.bindSource(thread.id + "\u0000" + kind + "\u0000" + path)
@@ -120,10 +130,16 @@ private fun PlotTab(thread: DThread, kind: String, path: String, has: Boolean, n
         }
         if (say.isNotEmpty()) DMono(say, dcs.onSurfaceVariant, 12, Modifier.align(Alignment.Center).padding(24.dp))
         else if (frame == null && (!three || mesh == null)) CircularProgressIndicator(Modifier.align(Alignment.Center))
-        if (!three && layersPresent.isNotEmpty()) {
-            DMono("Layers", dcs.onSurface, 12, Modifier.align(Alignment.TopStart).padding(8.dp).background(dcs.surfaceContainerHigh).border(BorderStroke(1.dp, dcs.outlineVariant)).clickable { menu = !menu }.padding(horizontal = 10.dp, vertical = 6.dp).testTag("viewer.layers"))
+        val l = layers
+        if (!three && layersPresent.isNotEmpty() && l != null) {
+            Row(Modifier.align(Alignment.TopStart).padding(8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                ViewChip(l.head, l.mode > 0, "viewer.layers") { refs = null; menu = !menu }
+                if (comparing.isEmpty()) ViewChip("Compare", refs != null, "viewer.compare") { menu = false; if (refs != null) refs = null else scope.launch { refs = runCatching { DataClient.refs(thread.id) }.getOrDefault(emptyList()) } }
+                else ViewChip("Close compare", true, "viewer.compare.close") { comparing = ""; scope.launch { runCatching { DataClient.watch(thread.id, kind, path) }.onFailure { error = it.message ?: "" } } }
+            }
+            if (menu) LayerMenu(l, layersPresent, act, Modifier.align(Alignment.TopStart).padding(top = 44.dp, start = 8.dp))
+            refs?.let { rows -> RefMenu(rows, { c -> refs = null; scope.launch { runCatching { DataClient.compare(thread.id, kind, c, l.bits, path); comparing = c }.onFailure { error = it.message ?: "" } } }, Modifier.align(Alignment.TopStart).padding(top = 44.dp, start = 8.dp)) }
         }
-        if (menu && !three) LayerMenu(kind, layersPresent, off, dim, lift, { off = it }, { d, l -> dim = d; lift = l }, Modifier.align(Alignment.TopStart).padding(top = 44.dp, start = 8.dp))
         if (info.isNotEmpty()) Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(10.dp).testTag("viewer.info")) {
             Row { DMono("PICKED", dcs.primary, 11, Modifier.weight(1f), bold = true); DMono("close", dcs.onSurfaceVariant, 11, Modifier.clickable { info = "" }) }
             Text(info.replace("\u0000", "  ").replace(";", "\n").trim(), color = dcs.onSurface, fontFamily = BpMono, fontSize = 12.sp, maxLines = 8)
@@ -131,22 +147,38 @@ private fun PlotTab(thread: DThread, kind: String, path: String, has: Boolean, n
     }
 }
 
-/** KiCad's high contrast over the layer list: a box shows or hides a layer, a name makes it the active one (the rest dimmed), again brings all back. */
 @Composable
-private fun LayerMenu(kind: String, present: List<Int>, off: Int, dim: Int, lift: Int, setOff: (Int) -> Unit, setFocus: (Int, Int) -> Unit, modifier: Modifier) {
-    val sch = kind == "schematic"
-    val order = if (sch) present.sorted() else boardLayers.filter { it in present }
-    val name = { l: Int -> (if (sch) schNames else boardNames).getOrElse(l) { "layer $l" } }
+private fun ViewChip(label: String, on: Boolean, tag: String, onClick: () -> Unit) {
+    DMono(label, if (on) dcs.primary else dcs.onSurface, 12, Modifier.background(dcs.surfaceContainerHigh).border(BorderStroke(1.dp, if (on) dcs.primary else dcs.outlineVariant)).clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 6.dp).testTag(tag))
+}
+
+/** KiCad's high contrast, as the hub lists it: how the others show (a board), a box per layer (show or hide it), its name (make it the active one, again: all back), a comparison's marks last, Reset layers. */
+@Composable
+private fun LayerMenu(l: DataClient.Layers, present: List<Int>, act: (String, String) -> Unit, modifier: Modifier) {
     Column(modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(8.dp).testTag("layer.menu"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        order.forEach { l ->
-            val on = l !in 0..31 || (off shr l) and 1 == 0
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(14.dp).border(BorderStroke(1.dp, dcs.outlineVariant)).background(if (on) dcs.primary else dcs.surfaceVariant).clickable { if (l in 0..31) setOff(off xor (1 shl l)) }.testTag("layer.box.$l"))
-                Spacer(Modifier.width(10.dp))
-                DMono(name(l), if (lift == l) dcs.primary else dcs.onSurface, 12, Modifier.clickable {
-                    if (lift == l) setFocus(0, 255) else setFocus(order.filter { it != l && it in 0..31 }.fold(0) { a, o -> a or (1 shl o) }, l)
-                }.testTag("layer.name.$l"))
+        if (l.modes) Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            listOf("All", "Dim", "Only").forEachIndexed { i, label ->
+                DMono(label, if (l.mode == i) dcs.primary else dcs.onSurface, 12, Modifier.border(BorderStroke(1.dp, if (l.mode == i) dcs.primary else dcs.outlineVariant)).clickable { act("mode", i.toString()) }.padding(horizontal = 8.dp, vertical = 3.dp).testTag("layer.mode.$i"))
             }
+        }
+        l.rows.filter { it.layer in present }.forEach { r ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(14.dp).border(BorderStroke(1.dp, dcs.outlineVariant)).background(if (r.on) dcs.primary else dcs.surfaceVariant).clickable { act("toggle", r.layer.toString()) }.testTag("layer.box.${r.layer}"))
+                Spacer(Modifier.width(10.dp))
+                DMono(r.name, if (r.active) dcs.primary else dcs.onSurface, 12, Modifier.clickable { act("pick", r.layer.toString()) }.testTag("layer.name.${r.layer}"))
+            }
+        }
+        if (l.reset) DMono("Reset layers", dcs.primary, 12, Modifier.clickable { act("reset", "") }.testTag("layer.reset"))
+    }
+}
+
+/** The versions a comparison may take, as the hub lists them; a press shows the Diff against that one. */
+@Composable
+private fun RefMenu(rows: List<DataClient.Ref>, pick: (String) -> Unit, modifier: Modifier) {
+    Column(modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(8.dp).testTag("compare.menu"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (rows.isEmpty()) DMono("No versions to compare with", dcs.onSurfaceVariant, 12)
+        rows.forEachIndexed { i, r ->
+            Row(Modifier.clickable { pick(r.commit) }.testTag("compare.row.$i"), horizontalArrangement = Arrangement.spacedBy(8.dp)) { DMono(r.kind, dcs.onSurfaceVariant, 12); DMono(r.label, dcs.onSurface, 12) }
         }
     }
 }
