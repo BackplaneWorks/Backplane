@@ -16,7 +16,7 @@ pub fn ents(rows: &[Value], thread: &str) -> Option<Vec<Ent>> {
     let mut v: Vec<Ent> = Vec::new();
     for r in rows.iter().take(32) {
         let c: Vec<String> = (0..10).map(|i| match r.get(i) { Some(Value::String(s)) => s.clone(), Some(Value::Number(n)) => n.to_string(), _ => String::new() }).collect();
-        if c[3] != thread || !c[4].is_empty() { return None } // a row sent to another thread
+        if c[3] != thread || !c[4].is_empty() { continue } // a row this thread sent into another thread: not shown here (a gap in a key, not a refused screen)
         let msg = match c[5].as_str() { "msg" => true, "act" => false, _ => return None };
         v.push(Ent { id: c[2].clone(), msg, role: c[6].clone(), akind: c[7].clone(), text: c[8].clone(), at: c[9].parse().ok()? });
     }
@@ -417,6 +417,11 @@ mod tests {
         let want = &p["out"]["shown"]["thread"];
         for (k, w) in want.as_object().unwrap() { assert_eq!(got.get(k), Some(w), "key {k}"); }
         assert_eq!(got.as_object().unwrap().len(), want.as_object().unwrap().len());
+    }
+    // a thread that sent messages into other threads still opens: those rows are left out of its page
+    #[test] fn rows_this_thread_sent_elsewhere_are_left_out_not_refused() {
+        let rows = json!([["9", "9", "t:t:1", "u", "t", "msg", "user", "", "to u", "9"], ["8", "8", "m1", "t", "", "msg", "user", "", "hi", "8"]]);
+        let es = ents(rows.as_array().unwrap(), "t").unwrap(); assert_eq!(es.len(), 1); assert_eq!(es[0].id, "m1");
     }
     #[test] fn rows_may_carry_numbers_or_strings() {
         let a = json!([["5", "5", "m1", "t", "", "msg", "user", "", "hi", "9"]]); let b = json!([[5, 5, "m1", "t", "", "msg", "user", "", "hi", 9]]);

@@ -37,3 +37,24 @@ See the report that came with this change; run `scripts/gpui/startup-bench.sh HU
 ## Timing the window
 
 `CLIENT_BIN=.../backplane-gpui scripts/gpui/startup-bench.sh HUB HOME` also opens the window on a private Xvfb display and prints the client's own `first_frame` and `usable` metrics (ms from its process start) and checks a screenshot is not blank. The old "blank window" was a missing window manager: GPUI on X11 gets no frame callback without one (no `first_frame`, nothing painted). The harness starts an empty-config `i3`. Lavapipe (`llvmpipe`, `VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json`), scale factor 1 and the bundled JetBrains Mono load correctly (`GPUI_LOG font loaded`).
+
+## Actions (click to first paint) and this device's settings
+
+Measured on the throwaway copy with `BACKPLANE_GPUI_SCRIPT=test/gpui/perf/actions-switch.json` (20 threads opened, then again) and `python3 test/gpui/perf/actions-stats.py` over the client's log, software Vulkan (each frame on llvmpipe is 16-32 ms, so these are upper bounds):
+
+| action | before | after |
+|---|---|---|
+| open a thread, first time (hub round trip, reply 50-135 KB) | 18 of 20 threads refused ("not ported: row.malformed-or-foreign"); the 2 that opened: 86-128 ms | all 20 open; p50 96 ms, p95 128 ms |
+| back to a thread seen before | p50 96 ms, p95 112-128 ms (the cache held 12 threads, and a thread was cached only when left) | p50 32 ms, p95 32 ms (32 threads kept) |
+| send: message on screen | 212 ms (waits for the hub's picture) | 20 ms (drawn at once; the hub's picture replaces it, never doubles it) |
+| fold/unfold sidebar, Files/Board tab | 16-43 ms | same |
+| new thread, pin (hub actions) | 68-83 ms | same |
+| older page after scrolling to the top | first rows in about 60 ms, next pages every 50-100 ms | same |
+
+The 18 refusals were `ents()` returning "foreign" for a thread that had sent messages into other threads (most threads on a real log). Such rows are now left out of that thread's page instead of refusing the screen.
+
+Not done: prefetch on hover (the protocol has one open view per connection, so a prefetch would move the hub's shown view; it needs a second connection), and the hub's project page, bots, rooms, settings pages and the `/` popup, which the hub still answers "not ported" (they are the presenter lanes').
+
+### This device (`native/gpui/src/local.rs`)
+
+Per-device settings live in `$XDG_CONFIG_HOME/backplane-gpui/local-settings.json` (`BACKPLANE_GPUI_LOCAL` overrides): theme (follow the hub, dark, light), text size, font, sidebar width, sidebar folded or open, default view (where I left off, or the thread list), notifications (kept; the client draws no alerts yet), and keyboard shortcuts (send, close a popup, fold the sidebar, search). They are read at start, applied at once and written when they change; `local.rs` builds no hub command (a test reads its source for that), so they never round-trip. The gear opens the dialog with "THIS DEVICE" first, marked "Kept on this computer only", and the hub's pages under "ALL DEVICES (HUB)", marked "Stored in the hub: the same on all your devices". With no hub pages, the device page opens alone. The two-pane layout (nav with icons and search, rows on the right) is the existing one.
