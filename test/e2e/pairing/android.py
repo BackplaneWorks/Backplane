@@ -27,7 +27,9 @@ class Phone:
         x1, y1, x2, y2 = map(int, re.findall(r"\d+", n.get("bounds")))
         self.sh(f"input tap {(x1 + x2) // 2} {(y1 + y2) // 2}")
     def field(self): return next((n for n in self.nodes() if n.get("class") == "android.widget.EditText"), None)
-    def button(self, label): return next((n for n in self.nodes() if n.get("text") == label or n.get("content-desc") == label), None)
+    def button(self, label, last=False):
+        m = [n for n in self.nodes() if n.get("text") == label or n.get("content-desc") == label]
+        return (m[-1] if last else m[0]) if m else None
     def type_and_pair(self, text):
         f = self.field()
         if f is None: return False
@@ -110,7 +112,7 @@ def main():
     b = p.button("Cancel"); p.tap(b) if b is not None else None; time.sleep(1.5)
     check("Cancel pairs nothing", live(hub) == n0 and "Pair with this hub?" not in p.texts())
     p.open_link("bpgpui://pair?url=" + urllib.parse.quote(inv["link"], safe=""))
-    b = p.button("Pair"); p.tap(b) if b is not None else None; time.sleep(5)
+    b = p.button("Pair", last=True); p.tap(b) if b is not None else None; time.sleep(5)  # (the question is drawn over the pairing form, whose own Pair comes first in the tree)
     check("confirming the question pairs", live(hub) == n0 + 1, p.texts()[:90])
 
     # revoke while connected, re-pair
