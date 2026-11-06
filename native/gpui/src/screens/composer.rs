@@ -380,10 +380,12 @@ impl Render for Composer {
 
 impl Focusable for Composer { fn focus_handle(&self, _: &App) -> FocusHandle { self.focus.clone() } }
 
-pub fn bind(cx: &mut App) {
+pub fn bind(cx: &mut App) { cx.bind_keys(bindings()); }
+pub fn bindings() -> Vec<KeyBinding> {
+    let mut v: Vec<KeyBinding> = Vec::new();
     for ctx in ["Composer", "AskInput", "ImpInput", "PickInput"] {
     let c = Some(ctx);
-    cx.bind_keys([
+    v.extend([
         KeyBinding::new("backspace", Backspace, c), KeyBinding::new("delete", Delete, c),
         KeyBinding::new("secondary-backspace", WordBackspace, c), KeyBinding::new("secondary-delete", WordDelete, c),
         KeyBinding::new("left", Left, c), KeyBinding::new("right", Right, c),
@@ -399,7 +401,8 @@ pub fn bind(cx: &mut App) {
         KeyBinding::new("shift-enter", Newline, c),
     ]);
     }
-    cx.bind_keys([KeyBinding::new("enter", Go, Some("AskInput")), KeyBinding::new("enter", Go, Some("PickInput"))]);
+    v.extend([KeyBinding::new("enter", Go, Some("AskInput")), KeyBinding::new("enter", Go, Some("PickInput"))]);
+    v
 }
 
 #[cfg(test)]

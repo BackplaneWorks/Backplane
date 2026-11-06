@@ -162,7 +162,7 @@ impl Render for CefPage {
                 .child(Self::bar_button("cef-fwd", "›", fwd).on_click(cx.listener(|this, _, _, _| { if let Some(t) = this.tab() { t.forward(); } })))
                 .child(Self::bar_button("cef-reload", if loading { "✕" } else { "⟳" }, true).on_click(cx.listener(|this, _, _, _| { if let Some(t) = this.tab() { if t.st.lock().unwrap().loading { t.stop() } else { t.reload() } } })))
                 .child(div().id("cef-url").flex_1().px_2().py_1().text_size(px(13.)).bg(rgb(0x0f1115)).text_color(rgb(0xd7dbe3)).track_focus(&self.bar_focus).key_context("CefBar")
-                    .on_key_down(cx.listener(|this, e, w, cx| this.key_down(e, w, cx)))
+                    .key_context("Viewer").on_key_down(cx.listener(|this, e, w, cx| this.key_down(e, w, cx)))
                     .on_click(cx.listener(|this, _, w, cx| { w.focus(&this.bar_focus); this.bar_edit = true; cx.notify(); }))
                     .child(format!("{}{}", if self.bar_text.is_empty() { "Search or enter address".to_string() } else { self.bar_text.clone() }, if bar_focused { "▏" } else { "" })))
                 .child(Self::bar_button("cef-new", "+", true).on_click(cx.listener(|this, _, w, cx| { this.new_tab("about:blank", cx); w.focus(&this.bar_focus); this.bar_edit = true; this.bar_text.clear(); })))
@@ -191,7 +191,7 @@ impl Render for CefPage {
                     let (dx, dy) = match e.delta { ScrollDelta::Pixels(p) => (f32::from(p.x), f32::from(p.y)), ScrollDelta::Lines(l) => (l.x * 40.0, l.y * 40.0) };
                     if let Some(t) = this.tab() { t.wheel(x, y, Self::mods(&e.modifiers, 0), dx as i32, dy as i32); }
                 }))
-                .on_key_down(cx.listener(|this, e, w, cx| this.key_down(e, w, cx)))
+                .key_context("Viewer").on_key_down(cx.listener(|this, e, w, cx| this.key_down(e, w, cx)))
                 .on_key_up(cx.listener(|this, e, w, _| this.key_up(e, w))))
     }
 }

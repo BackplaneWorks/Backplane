@@ -163,7 +163,7 @@ pub fn canvas_el(cx: &mut Context<Backplane>, slot: usize, focus: Option<FocusHa
         this.update(cx, |app, _| { if let Some(t) = app.screens.plot_click.take() { app.m("plot_painted", serde_json::json!({"ms": (t.elapsed().as_secs_f64() * 1e6).round() / 1e3, "chunks": chunks.len()})); } });
     }).size_full();
     div().id(SharedString::from(format!("plot-{slot}"))).flex_1().min_h_0().bg(c("view")).child(el)
-        .when_some(focus, |d, f| d.track_focus(&f).on_key_down(cx.listener(move |this, e: &KeyDownEvent, _, cx| {
+        .when_some(focus, |d, f| d.track_focus(&f).key_context("Viewer").on_key_down(cx.listener(move |this, e: &KeyDownEvent, _, cx| {
             // keys on the plot: arrows move the view, + and - zoom at the centre, 0 or Home fits again, Escape puts the tapped piece away
             let pv = this.screens.pv(slot);
             let (Some(v), Some(b)) = (pv.view, pv.bounds) else { return };

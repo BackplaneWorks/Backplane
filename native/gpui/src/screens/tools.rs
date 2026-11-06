@@ -40,19 +40,19 @@ pub fn close_question(data: &Value) -> Option<Command> {
 }
 pub fn rename_save(id: &str, text: &str) -> Option<Command> { let t = text.trim(); if t.is_empty() { None } else { Some(Command::Action("rename-save".into(), format!("{id}{SEP}{t}"))) } }
 
-fn small(cx: &mut Context<Backplane>, light: bool, id: String, label: String, on: bool, danger: bool, cmd: Command) -> AnyElement {
+fn small(cx: &mut Context<Backplane>, light: bool, id: String, label: String, on: bool, danger: bool, cmd: Command, tip: (String, String)) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let (a, v) = match cmd { Command::Action(a, v) => (a, v), _ => (String::new(), String::new()) };
     let d = div().id(SharedString::from(id)).px_2().h_full().flex().items_center().text_size(px(11.)).cursor_pointer().border_l_1().border_color(c("line")).hover(|s| s.bg(c("raise")));
     let d = if danger { d.text_color(c("bad")) } else if on { d.text_color(c("accent")) } else { d.text_color(c("dim")) };
-    d.child(label).on_click(cx.listener(move |this, _, _, cx| { super::settings::flush_fields(this); if a == "fork" { this.arm_new(); } let _ = this.tx.try_send(Command::Action(a.clone(), v.clone())); cx.notify(); })).into_any_element()
+    d.child(label).tooltip(super::super::keys::tip(&tip.0, &tip.1, light)).on_click(cx.listener(move |this, _, _, cx| { super::settings::flush_fields(this); if a == "fork" { this.arm_new(); } let _ = this.tx.try_send(Command::Action(a.clone(), v.clone())); cx.notify(); })).into_any_element()
 }
 
 /// The header's strip: each tool. The rest of the thread's actions are in the header's right-click menu (`context_items`). Returned as elements for the header row's right side.
-pub fn strip(cx: &mut Context<Backplane>, light: bool, thread: &Value) -> Vec<AnyElement> {
+pub fn strip(cx: &mut Context<Backplane>, light: bool, thread: &Value, local: &crate::local::Local) -> Vec<AnyElement> {
     if !thread.is_object() { return Vec::new(); }
     let mut out: Vec<AnyElement> = vec![div().flex_1().into_any_element()];
-    for (i, t) in tools(thread).into_iter().enumerate() { out.push(small(cx, light, format!("tool-{i}"), t.label.clone(), t.on, t.danger, press(&t))); }
+    for (i, t) in tools(thread).into_iter().enumerate() { let k = if t.tip.contains("Ctrl+") { String::new() } else { super::super::keys::hint(local, super::super::keys::id_for(&t.action, &t.value, "")) }; out.push(small(cx, light, format!("tool-{i}"), t.label.clone(), t.on, t.danger, press(&t), (if t.tip.is_empty() { t.label.clone() } else { t.tip.clone() }, k))); }
     out
 }
 
