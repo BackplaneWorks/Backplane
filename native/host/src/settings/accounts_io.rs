@@ -147,10 +147,13 @@ impl Rpc {
     }
     async fn close(mut self) { let _ = self.child.start_kill(); let _ = self.child.wait().await; }
 }
+/// The variables that point a CLI at one profile's store (`environment` sets them). The default login never inherits them: a hub started from a shell that
+/// ran under a profile (an agent's own Bash, after failover moved it) would otherwise run every default-login thread, and read its usage, under that profile.
+pub const STORE_ENV: &[&str] = &["CLAUDE_CONFIG_DIR", "CODEX_HOME"];
 /// The host's environment, minus every provider credential variable when the child is a NAMED profile's (its own store is then put in). The CLI's own login
-/// (`named` false) keeps the host's environment as it is, as the JS hub's `environment(null)` does.
+/// (`named` false) keeps the host's environment, as the JS hub's `environment(null)` does, except a profile's store ([`STORE_ENV`]).
 fn apply_env(c: &mut tokio::process::Command, env: &[(String, String)], named: bool) {
-    if named { for (k, _) in std::env::vars_os() { if let Some(k) = k.to_str() { if unset_env(k) { c.env_remove(k); } } } }
+    if named { for (k, _) in std::env::vars_os() { if let Some(k) = k.to_str() { if unset_env(k) { c.env_remove(k); } } } } else { for k in STORE_ENV { c.env_remove(k); } }
     for (k, v) in env { c.env(k, v); }
 }
 
@@ -634,17 +637,32 @@ impl Accounts {
 fn g_job_is(inner: &Mutex<Inner>, profile: &str, aid: &str) -> bool { inner.lock().unwrap().jobs.get(profile).map(String::as_str) == Some(format!("attempt:{aid}").as_str()) }
 
 // ---- launching a turn under an account, and the background refresh ----
+/// How long a launch waits for a routine check of its profile to end: longer than a check can take (its CLI calls time out at 12 and 30 s).
+const CHECK_WAIT: Duration = Duration::from_secs(90);
 impl Accounts {
     /// Rechecks the selected identity before a new process (accounts.js `launchOne`): no model turn. The environment and the arguments to put before the
     /// provider's own, or why the turn must not start under this account.
     pub async fn launch_plan(self: &Arc<Self>, profile: &str, epoch: &str, cmd: &str) -> Result<LaunchPlan, String> {
         const NO: &str = "Reconnect and select this account before starting a turn";
         // launches on one profile queue one behind another; any other request on it is refused while one is queued or running
-        let (lock, _queued) = {
-            let mut g = self.inner.lock().unwrap();
-            if g.jobs.contains_key(profile) || !g.profiles.iter().any(|p| p.id == profile) { return Err(NO.to_string()) }
-            *g.launching.entry(profile.to_string()).or_insert(0) += 1;
-            (g.launch_locks.entry(profile.to_string()).or_default().clone(), Queued { me: self.clone(), id: profile.to_string() })
+        // a routine check on it (the 5-minute refresh, the status the picker asks for) is waited out, not a refusal: it ends in seconds, and the queued launch
+        // below then keeps the next one off until this turn has its plan. A sign-in in progress is refused at once (it waits on the person), as is a missing profile.
+        let started = std::time::Instant::now();
+        let (lock, _queued) = loop {
+            {
+                let mut g = self.inner.lock().unwrap();
+                if !g.profiles.iter().any(|p| p.id == profile) { return Err(NO.to_string()) }
+                match g.jobs.get(profile) {
+                    None => {
+                        *g.launching.entry(profile.to_string()).or_insert(0) += 1;
+                        break (g.launch_locks.entry(profile.to_string()).or_default().clone(), Queued { me: self.clone(), id: profile.to_string() });
+                    }
+                    Some(j) if j.starts_with("attempt:") => return Err(NO.to_string()),
+                    Some(_) if started.elapsed() >= CHECK_WAIT => return Err("This account's status check did not finish; start the turn again".to_string()),
+                    Some(_) => {}
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
         };
         let _turn = lock.lock().await;
         // the profile as it is now, after the launches ahead of this one: what they changed (identity, epoch, state) counts
@@ -905,6 +923,28 @@ for l in sys.stdin:
         dropped.abort(); let _ = dropped.await; assert_eq!(queued(&a, &id), 0, "a dropped launch does not strand the profile"); drop(hold);
         assert_eq!(a.request(&json!({"op":"status","profile":id})).await["error"], "");
         let _ = std::fs::remove_dir_all(&h);
+    }
+    #[tokio::test(flavor = "multi_thread")] async fn a_launch_during_a_routine_check_waits_for_it_and_starts_but_not_during_a_sign_in() {
+        let (h, sd) = dirs("lw"); let a = mgr(&h, &sd); let id = add(&a, "claude", "Work").await; connect(&a, &id).await;
+        for job in ["refresh", "status"] {
+            a.begin(&id, job, false).unwrap(); // the 5-minute recheck (or the picker's status) is running on the profile
+            let (a1, i1) = (a.clone(), id.clone()); let t0 = std::time::Instant::now(); let launch = tokio::spawn(async move { a1.launch_plan(&i1, "2", "claude").await });
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            assert!(!launch.is_finished(), "{job}: the launch waits for the check, it is not refused");
+            a.end(&id, job);
+            let r = launch.await.unwrap(); assert!(r.is_ok(), "{job}: then it starts: {:?}", r.err()); assert!(t0.elapsed() >= Duration::from_millis(500));
+            assert_eq!(queued(&a, &id), 0, "{job}: and leaves no queued launch");
+        }
+        // a check that found the account gone: the waiting launch is refused on the profile as the check left it, never run on another login
+        a.begin(&id, "status", false).unwrap();
+        let (a1, i1) = (a.clone(), id.clone()); let launch = tokio::spawn(async move { a1.launch_plan(&i1, "2", "claude").await });
+        tokio::time::sleep(Duration::from_millis(300)).await; a.update(&id, |p| p.state = "disconnected".into()).unwrap(); a.end(&id, "status");
+        assert!(launch.await.unwrap().unwrap_err().contains("Reconnect"), "refused once the check says it is disconnected");
+        a.update(&id, |p| p.state = "connected".into()).unwrap();
+        // a sign-in in progress waits on the person: refused at once
+        a.begin(&id, "attempt:x", false).unwrap(); let t0 = std::time::Instant::now();
+        assert!(a.launch_plan(&id, "2", "claude").await.is_err()); assert!(t0.elapsed() < Duration::from_secs(1), "not held for the sign-in");
+        a.end(&id, "attempt:x"); let _ = std::fs::remove_dir_all(&h);
     }
     #[tokio::test(flavor = "multi_thread")] async fn a_launch_and_a_status_go_on_while_a_turn_runs_but_not_a_sign_in() {
         let (h, sd) = dirs("lc"); let a = mgr(&h, &sd); let id = add(&a, "claude", "Work").await; connect(&a, &id).await;

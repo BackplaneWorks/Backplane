@@ -23,7 +23,7 @@ pub struct Hub {
     views: std::sync::RwLock<Vec<(&'static str, Arc<dyn ViewMethod>)>>, observers: std::sync::RwLock<Vec<Arc<dyn Observer>>>, transforms: std::sync::RwLock<Vec<Arc<dyn Transform>>>, far: std::sync::OnceLock<Arc<dyn FarView>>, far_router: std::sync::OnceLock<Arc<dyn crate::api::FarRouter>>, mirror_feed: std::sync::OnceLock<Arc<dyn crate::api::MirrorFeed>>, mirror_gate: tokio::sync::Mutex<()>, rebuild_run: tokio::sync::Mutex<()>, rebuild_again: std::sync::atomic::AtomicBool, pairing: std::sync::OnceLock<Arc<dyn Pairing>>, auth_route: std::sync::OnceLock<Arc<dyn AuthRoute>>,
     live: std::sync::Mutex<std::collections::HashMap<String, String>>,
     pub window_bin: std::sync::OnceLock<PathBuf>,
-    me: std::sync::OnceLock<std::sync::Weak<Hub>>, next_client: AtomicU64,
+    me: std::sync::OnceLock<std::sync::Weak<Hub>>,
     outboxes: std::sync::Mutex<std::collections::HashMap<u64, Slot>>, outbox_max: std::sync::atomic::AtomicUsize, signal_seq: AtomicU64, id_alloc: AtomicU64, view_bump: AtomicU64, need_resync: std::sync::atomic::AtomicBool, extra_info: std::sync::Mutex<std::collections::BTreeMap<String, String>>,
 }
 
@@ -62,6 +62,10 @@ pub fn frame_bytes(v: &Value) -> usize {
 struct Commit { events: Vec<Value>, done: tokio::sync::oneshot::Sender<Result<u64>> }
 
 /// One WebSocket connection's identity and its single open view.
+/// Client numbers are unique in the process, not per hub: what is keyed by the number alone (the account grant, session::forget, a detach) must never reach
+/// another hub's client. One hub runs in a real process; the tests run many at once, and each counting from 1 let one test's disconnect revoke another's
+/// account grant. Tests start above the numbers they attach by hand (`hub.attach(2)`).
+static NEXT_CLIENT: AtomicU64 = AtomicU64::new(if cfg!(test) { 1 << 20 } else { 1 });
 pub struct Conn { pub sent: Vec<(String, Value)>, pub client: u64, pub gen: String, pub view_id: String, pub target: Value, pub cbor: bool, pub lastrev: u64 }
 
 pub fn now_ms() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0) }
@@ -93,7 +97,7 @@ impl Hub {
         let model = Model::open(&store)?;
         crate::startup::mark("model built");
         let hub = Arc::new(Hub { cfg, auth, epoch, presenter, store: store.clone(), commits: ctx, model: Mutex::new(model), gen: AtomicU64::new(1), changed: tx, frames: ftx, native_key: { let mut b = [0u8; 16]; if let Ok(mut f) = std::fs::File::open("/dev/urandom") { let _ = std::io::Read::read_exact(&mut f, &mut b); } hex::encode(b) },
-            rpc: Default::default(), http: Default::default(), views: Default::default(), observers: Default::default(), transforms: Default::default(), far: Default::default(), far_router: Default::default(), mirror_feed: Default::default(), mirror_gate: Default::default(), rebuild_run: Default::default(), rebuild_again: Default::default(), pairing: Default::default(), auth_route: Default::default(), outbox_max: std::sync::atomic::AtomicUsize::new(OUTBOX_MAX), signal_seq: AtomicU64::new(store.len() as u64), id_alloc: AtomicU64::new(0), view_bump: AtomicU64::new(0), need_resync: Default::default(), extra_info: Default::default(), live: Default::default(), window_bin: Default::default(), me: Default::default(), next_client: AtomicU64::new(1), outboxes: Default::default() });
+            rpc: Default::default(), http: Default::default(), views: Default::default(), observers: Default::default(), transforms: Default::default(), far: Default::default(), far_router: Default::default(), mirror_feed: Default::default(), mirror_gate: Default::default(), rebuild_run: Default::default(), rebuild_again: Default::default(), pairing: Default::default(), auth_route: Default::default(), outbox_max: std::sync::atomic::AtomicUsize::new(OUTBOX_MAX), signal_seq: AtomicU64::new(store.len() as u64), id_alloc: AtomicU64::new(0), view_bump: AtomicU64::new(0), need_resync: Default::default(), extra_info: Default::default(), live: Default::default(), window_bin: Default::default(), me: Default::default(), outboxes: Default::default() });
         let _ = hub.me.set(Arc::downgrade(&hub));
         hub.bootstrap()?;
         hub.signal_seq.store(hub.store.len() as u64, Relaxed); // start-up housekeeping counts: a restart is a new signal
@@ -374,7 +378,7 @@ impl Hub {
     pub fn set_pairing(&self, p: Arc<dyn Pairing>, r: Arc<dyn AuthRoute>) { self.auth.set_pairing(p.clone()); let _ = self.pairing.set(p); let _ = self.auth_route.set(r); }
     pub fn auth_route(&self) -> Option<Arc<dyn AuthRoute>> { self.auth_route.get().cloned() }
     /// A connection id for an HTTP request (the /auth routes remember it).
-    pub fn fresh_client(&self) -> u64 { self.next_client.fetch_add(1, Relaxed) }
+    pub fn fresh_client(&self) -> u64 { NEXT_CLIENT.fetch_add(1, Relaxed) }
     /// A /ws connection presenting `token` may proceed: its credential resolves and its device is not revoked.
     /// `admit` off the async threads (the registry fsyncs now and then).
     pub async fn admit_blocking(&self, client: u64, token: String) -> bool {
@@ -445,7 +449,7 @@ impl Hub {
     pub fn connect(&self, cbor: bool) -> (Conn, Value) {
         let gen = self.gen.fetch_add(1, Relaxed).to_string();
         let g = json!({"t":"view","version":1,"renderer":"mobile","generation":gen,"epoch":self.epoch,"limits":limits()});
-        (Conn { sent: vec![], client: self.next_client.fetch_add(1, Relaxed), gen, view_id: String::new(), target: Value::Null, cbor, lastrev: 0 }, g)
+        (Conn { sent: vec![], client: NEXT_CLIENT.fetch_add(1, Relaxed), gen, view_id: String::new(), target: Value::Null, cbor, lastrev: 0 }, g)
     }
 
     pub fn notice(&self, c: &Conn, rev: u64) -> Value {

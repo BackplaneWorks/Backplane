@@ -146,6 +146,7 @@ fn spawn_with(kind: crate::proc::Kind, person: Option<&PersonChild>, program: &P
     c.args(&args).current_dir(cwd).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
     if person.is_none() && extra_path.is_none() { if let Ok(j) = std::env::join_paths(search_dirs()) { c.env("PATH", j); } } // production: the agent runs with the merged PATH (its own children find node, git...)
     if let Some(d) = extra_path { let old = std::env::var_os("PATH").unwrap_or_default(); let mut v = vec![d.to_path_buf()]; v.extend(std::env::split_paths(&old)); if let Ok(j) = std::env::join_paths(v) { c.env("PATH", j); } }
+    if person.is_none() { for k in crate::settings::accounts_io::STORE_ENV { c.env_remove(k); } } // the default login is ~/.claude, never a profile store the hub itself inherited; a named account puts its own back below
     for (k, v) in env { c.env(k, v); }
     match person {
         None => { if let Some(o) = OWNER.get() { c.env("BACKPLANE_AGENT_OWNER", o); } }
