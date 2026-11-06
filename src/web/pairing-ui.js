@@ -161,35 +161,112 @@ export function installPairingUI({document, location, fetch, onPaired, navigator
       const value = await r.json();if (!r.ok || value.error) throw Error(value.error || 'pairing_required');return value;
     }
     const invitation = element('section', '', card, {class: 'pairing-invitation'});
+    // the local network addresses the hub was let answer on (POST /auth/lan;
+    // /auth/devices lists them): each can be turned off here
+    let lanSaved = [], lanShown = '', shown = null, lanList;
+    async function setLan(ip, on) {
+      status.classList.remove('bad');status.textContent = on ? 'Letting the hub answer on ' + ip + '…' : 'Stopping…';
+      try {
+        const r = await request('/auth/lan', 'POST', {'X-Backplane-Lan': ip, 'X-Backplane-Lan-State': on ? 'on' : 'off'});
+        lanSaved = on ? [...lanSaved.filter(x => x.ip !== ip), {ip, url: '', listening: true}] : lanSaved.filter(x => x.ip !== ip);
+        shown?.listening(ip, !!r.listening);
+        if (!on) status.textContent = r.listening ? 'The hub still answers on ' + ip + ': it listens on every interface (--host 0.0.0.0).' : 'The hub no longer answers on ' + ip + '.';
+        await refresh(true);
+      } catch (e) { error(status, e.message); }
+    }
+    function lanRows() {
+      if (JSON.stringify(lanSaved) === lanShown) return;
+      lanShown = JSON.stringify(lanSaved);lanList.replaceChildren();if (!lanSaved.length) return;
+      element('h2', 'Local network', lanList);
+      for (const x of lanSaved) {
+        const row = element('div', '', lanList, {class: 'pairing-device'});
+        element('strong', x.url || x.ip, row);
+        element('p', (x.listening ? 'The hub also answers here' : 'Kept, but this computer does not have this address now') + ': plain HTTP on that network; every device still pairs.', row);
+        button(row, 'Stop answering here', () => setLan(x.ip, false));
+      }
+    }
+    const words = {tailnet: 'Tailscale', lan: 'Local network', local: 'This computer'};
     const add = button(card, 'Add a device', async () => {
-      status.classList.remove('bad');status.textContent = 'Creating invitation…';invitation.replaceChildren();clearInterval(expiryTimer);
+      status.classList.remove('bad');status.textContent = 'Creating invitation…';invitation.replaceChildren();clearInterval(expiryTimer);shown = null;
       try {
         const invite = await request('/auth/invitations', 'POST');if (!panel?.contains(card)) return;
+        // where the device reaches this hub (the tailnet, each local network
+        // address, this computer); a hub too old to say has its one link
+        const addresses = Array.isArray(invite.addresses) && invite.addresses.length ? invite.addresses
+          : [{kind: invite.localOnly ? 'local' : '', url: invite.routes[0], link: invite.link, qr: invite.qr, listening: true}];
+        const kinds = ['tailnet', 'lan', 'local'].filter(k => addresses.some(a => a.kind === k));
+        const lans = addresses.filter(a => a.kind === 'lan');
+        let kind = kinds[0] || '', lan = Math.max(0, lans.findIndex(a => a.listening));
+        const chosen = () => kind === 'lan' ? lans[lan] : addresses.find(a => a.kind === kind) || addresses[0];
         const until = element('p', '', invitation, {role: 'status'});
         // (while it can still be used, the list below looks again every 3 s,
         // so the device it brings in shows up without leaving this page)
         let ticks = 0;
-        const update = () => { const seconds = Math.max(0, Math.ceil((invite.expiresAt - Date.now()) / 1000));if (seconds && ++ticks % 3 === 0) void refresh(true);until.textContent = seconds ? 'Works once · expires in ' + Math.ceil(seconds / 60) + ' minutes' : 'Expired — create a new invitation';if (!seconds) { clearInterval(expiryTimer);for (const b of invitation.querySelectorAll('button')) b.disabled = true; } };
+        const update = () => { const seconds = Math.max(0, Math.ceil((invite.expiresAt - Date.now()) / 1000));if (seconds && ++ticks % 3 === 0) void refresh(true);until.textContent = seconds ? 'Works once · expires in ' + Math.ceil(seconds / 60) + ' minutes' : 'Expired — create a new invitation';if (!seconds) { clearInterval(expiryTimer);for (const b of invitation.querySelectorAll('button, select')) b.disabled = true; } };
         expiryTimer = setInterval(update, 1000);update();
+        // the choice swaps the address, link, QR and notes in place: every
+        // address came with this one invitation
+        const where = element('div', '', kinds.length > 1 ? invitation : null, {class: 'pairing-where', role: 'radiogroup', 'aria-label': 'How the device reaches this hub'});
+        const picks = kinds.map(k => {
+          const b = button(where, words[k], () => { kind = k;render(); });b.setAttribute('role', 'radio');b.dataset.kind = k;
+          b.addEventListener('keydown', e => {
+            const i = kinds.indexOf(kind), next = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? (i + 1) % kinds.length : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? (i + kinds.length - 1) % kinds.length : -1;
+            if (next < 0) return;e.preventDefault();kind = kinds[next];render();picks[next].focus();
+          });
+          return b;
+        });
+        const lanLabel = element('label', 'Local network address', lans.length > 1 ? invitation : null, {class: 'pairing-lanpick'});
+        const lanPick = element('select', '', lanLabel, {class: 'field'});
+        lans.forEach((a, i) => { const o = element('option', a.url, lanPick, {value: String(i)});o.selected = i === lan; });
+        lanPick.addEventListener('change', () => { lan = Number(lanPick.value);render(); });
         element('p', invite.code, invitation, {class: 'pairing-code'});
-        element('p', 'Hub address: ' + invite.routes[0], invitation);
-        const link = input(invitation, 'One-time pairing link', '');link.value = invite.link;link.readOnly = true;
-        const copy = button(invitation, 'Copy link', async () => { try { await navigator.clipboard.writeText(invite.link);copy.textContent = 'Copied'; } catch { link.select();status.textContent = 'Select and copy the link.'; } });
-        button(invitation, 'Copy code', async () => { try { await navigator.clipboard.writeText(invite.code);status.textContent = 'Code copied. Share the hub address with it.'; } catch { status.textContent = 'Select and copy the code shown above.'; } });
-        button(invitation, 'Share', async () => { try { if (navigator.share) await navigator.share({title: 'Connect to Backplane', url: invite.link});else await navigator.clipboard.writeText(invite.link); } catch (e) { if (e.name !== 'AbortError') status.textContent = 'Share unavailable. Use Copy link.'; } });
-        const rows = String(invite.qr).split('\n').filter(Boolean), size = rows.length + 8;
-        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');svg.setAttribute('viewBox', `0 0 ${size} ${size}`);svg.setAttribute('role', 'img');svg.setAttribute('aria-label', 'Scan to pair this device');svg.setAttribute('class', 'pairing-qr');
-        const path = document.createElementNS(svg.namespaceURI, 'path');let d = '';
-        rows.forEach((row,y) => [...row].forEach((v,x) => { if (v === '1') d += `M${x+4} ${y+4}h1v1h-1z`; }));path.setAttribute('d', d);svg.append(path);invitation.append(svg);
-        status.textContent = invite.localOnly ? 'This address works only on this computer. Enable tailnet access in Settings → Network to connect a remote device.' : 'Invitation ready. Share only with the device you want to authorize.';
+        const hub = element('p', '', invitation, {class: 'pairing-hub'});
+        const note = element('p', '', invitation, {class: 'pairing-help pairing-note'});
+        const offer = element('div', '', invitation, {class: 'pairing-offer'});
+        const open = button(offer, 'Let the hub answer on the local network', () => setLan(new URL(chosen().url).hostname, true));open.classList.add('primary');
+        const stop = button(offer, 'Stop answering on the local network', () => setLan(new URL(chosen().url).hostname, false));
+        const shares = element('div', '', invitation, {class: 'pairing-shares'});
+        const link = input(shares, 'One-time pairing link', '');link.readOnly = true;
+        const copy = button(shares, 'Copy link', async () => { try { await navigator.clipboard.writeText(chosen().link);copy.textContent = 'Copied'; } catch { link.select();status.textContent = 'Select and copy the link.'; } });
+        button(shares, 'Copy code', async () => { try { await navigator.clipboard.writeText(invite.code);status.textContent = 'Code copied. Share the hub address with it: ' + chosen().url; } catch { status.textContent = 'Select and copy the code shown above.'; } });
+        button(shares, 'Share', async () => { try { if (navigator.share) await navigator.share({title: 'Connect to Backplane', url: chosen().link});else await navigator.clipboard.writeText(chosen().link); } catch (e) { if (e.name !== 'AbortError') status.textContent = 'Share unavailable. Use Copy link.'; } });
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');svg.setAttribute('role', 'img');svg.setAttribute('aria-label', 'Scan to pair this device');svg.setAttribute('class', 'pairing-qr');
+        const path = document.createElementNS(svg.namespaceURI, 'path');svg.append(path);shares.append(svg);
+        const extra = ip => lanSaved.some(x => x.ip === ip && x.listening);
+        function render() {
+          const a = chosen(), ip = a.kind === 'lan' ? new URL(a.url).hostname : '';
+          picks.forEach(b => { const on = b.dataset.kind === kind;b.classList.toggle('on', on);b.setAttribute('aria-checked', String(on));b.tabIndex = on ? 0 : -1; });
+          lanLabel.hidden = kind !== 'lan';
+          hub.textContent = 'Hub address: ' + a.url;
+          link.value = a.link;copy.textContent = 'Copy link';
+          const rows = String(a.qr || '').split('\n').filter(Boolean), size = rows.length + 8;let d = '';
+          rows.forEach((row, y) => [...row].forEach((v, x) => { if (v === '1') d += `M${x+4} ${y+4}h1v1h-1z`; }));
+          svg.setAttribute('viewBox', `0 0 ${size} ${size}`);path.setAttribute('d', d);
+          // a local network address the hub does not answer on yet: no link
+          // to hand out until the person lets it answer there
+          shares.hidden = !a.listening;offer.hidden = a.kind !== 'lan' || (a.listening && !extra(ip));
+          open.hidden = a.listening;stop.hidden = !a.listening;
+          note.textContent = a.kind === 'tailnet' ? 'Over your tailnet: the other device needs Tailscale, signed in to the same tailnet.'
+            : a.kind === 'lan' ? (a.listening ? 'Plain HTTP on this network: the traffic is not encrypted, though every device still has to pair. Prefer Tailscale on a network you do not trust.'
+              : 'The hub does not answer at ' + a.url + ' yet: it listens only on this computer. Letting it answer there opens plain HTTP on this network (not encrypted); every device still has to pair, and you can turn it off here or under Devices.')
+            : '';
+          note.hidden = !note.textContent;
+          status.classList.remove('bad');
+          status.textContent = a.kind === 'local' || invite.localOnly && !a.kind ? 'This address works only on this computer.' + (kinds.length > 1 ? ' Choose ' + kinds.filter(k => k !== 'local').map(k => words[k]).join(' or ') + ' to connect another device.' : ' Enable tailnet access in Settings → Network to connect a remote device.')
+            : a.listening ? 'Invitation ready. Share only with the device you want to authorize.' : 'Not reachable from other devices yet.';
+        }
+        shown = {listening(ip, on) { for (const a of lans) if (new URL(a.url).hostname === ip) a.listening = on;render(); }};
+        render();
       } catch(e) { error(status, e.message); }
     });
     add.classList.add('primary');
+    lanList = element('section', '', card, {class: 'pairing-lan'});
     const list = element('section', '', card);element('h2', 'Paired devices', list);
     const links = element('section', '', card);
     async function refresh(quiet = false) {
       try {
         const result = await request('/auth/devices');if (!panel?.contains(card)) return;
+        lanSaved = Array.isArray(result.lan) ? result.lan : [];lanRows();
         list.replaceChildren();element('h2', 'Paired devices', list);
         // (a phone marks itself, first: every phone is "iPhone / Safari")
         let mine = '';try { mine = document.documentElement.classList.contains('phone') ? globalThis.localStorage?.getItem('backplane-device') || '' : ''; } catch {}

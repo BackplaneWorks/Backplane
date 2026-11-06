@@ -33,3 +33,8 @@ def Pairing.address(link: String) -> IO(Unit):
 # pairing link's origin with (effects/pairing.js's pairingKnown).
 def Pairing.known(machines: String, peers: String) -> IO(Unit):
   import "./effects/pairing.js"
+
+# Whether the local network listener opened as `base` is still wanted
+# (server.bend's Lan.loop ends once it is not: turned off, or opened again).
+def Pairing.lan(ip: String, base: U32) -> IO(Bool):
+  import "./effects/pairing.js"

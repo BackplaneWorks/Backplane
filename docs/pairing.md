@@ -56,11 +56,41 @@ desktop packages register it too. This explicit web fallback works with
 user-owned hub domains; universal/app links on arbitrary hub domains are not
 claimed. A hosted HTTPS page does not bypass browser mixed-content rules.
 
-The hub puts listener-confirmed tailnet origins ahead of a desktop's loopback
-address. A listener bound to every interface also advertises its IPv4 routes.
-When only loopback is available, web device management explains that tailnet
-access is needed to connect another computer. Alternative addresses in the link
-are hints, not a new tunneling service.
+Add a device asks how the other device reaches the hub: **Tailscale**, **Local
+network** or **This computer** (only those that exist; Tailscale first, then the
+local network, then this computer). Switching swaps the hub address, link, QR
+code, Copy and Share in place: one invitation answers on every address, so its
+short code works with whichever address is shown beside it. `POST
+/auth/invitations` returns them as `addresses` (`{kind, url, link, qr,
+listening}`, in that order: the tailnet, each local network IPv4, this computer;
+`effects/pairing.js`'s `pairingPlan`); each link lists its own address first in
+its routes, then the other remote addresses the hub answers on (never loopback,
+which on another device would reach that device's own hub). The older fields
+(`link`, `qr`, `routes`, `localOnly`) are the first remote address that answers,
+else this computer, as before. A tailnet address is one a listener confirmed
+(the hub's tailnet listener or Serve) or one a listener on every interface
+covers. Local network addresses are the machine's IPv4 ones, without loopback,
+link-local, the tailnet's 100.64/10 or a container's or VM's bridge (docker0,
+br-*, veth*, virbr*, ...). This computer still says it works only on this
+computer. Alternative addresses in the link are hints, not a new tunneling
+service.
+
+A hub listening on loopback only (the default) does not answer on the local
+network. Choosing Local network then offers **Let the hub answer on the local
+network**: the hub opens one more listener on that address and port (`POST
+/auth/lan`, `X-Backplane-Lan: <address>`, `X-Backplane-Lan-State: on|off`,
+authorized like `POST /auth/invitations`; server.bend's `Lan.*`). It is
+untrusted exactly as the tailnet listener is for a device its owner does not
+own: no loopback trust and no owner, so as there only the web page, `/hello`
+and pairing itself answer without a paired credential, and the desktop Browser
+channel stays loopback-only. It is
+plain HTTP on that network: the traffic is not encrypted (the screen says so),
+so prefer Tailscale on a network you do not trust. The choice is kept in
+`<home>/lan-v1.json` and listened on again after a restart (an address the
+machine no longer has is kept and tried at the next start). **Stop answering on
+the local network**, beside the choice and under Devices → Local network,
+closes that listener and its connections and forgets it. A hub started with
+`--host 0.0.0.0` (or that address) already answers there and needs none.
 
 ## Access and preservation
 
@@ -91,8 +121,11 @@ linking and its existing owner-authentication rules are unchanged.
 `node --test desktop/test/pair-browser.test.cjs desktop/test/pairing-links.test.cjs test/tools/pairing_devices_test.cjs`
 checks the existing exchange, strict link parsing, persistence, single-use
 link/code state, expiry, rate limiting, write failures, listener route hints,
-the invitation records and their revocation, and which origins count as the
-owner's hubs.
+the invitation records and their revocation, which origins count as the
+owner's hubs, an invitation's addresses and their links, and local network
+listening (kept, bound, reopened, turned off). `bun
+test/tools/pairing_devices_refresh.ts` drives Add a device's address choice in
+a browser with fixture responses.
 
 `bun test/tools/pairing_ux_e2e.ts EMITTED_HUB_JS WEB_DIRECTORY` uses a private hub,
 stand-in providers and a fixture-only clock preload. It covers the HTTP flow,

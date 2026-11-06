@@ -49,7 +49,8 @@ object Pairing {
         if (!Regex("[A-Z2-9]{8}").matches(compact)) return null
         val u = Uri.parse(if (address.contains("://")) address else "http://$address")
         if (u.scheme !in setOf("http", "https") || u.host.isNullOrEmpty() || u.userInfo != null) return null
-        return u.buildUpon().path("/pair").clearQuery().fragment("code=$compact").build().toString()
+        // encodedFragment: fragment() writes '=' as %3D, and invitation() then finds no code
+        return u.buildUpon().path("/pair").clearQuery().encodedFragment("code=$compact").build().toString()
     }
     fun message(error: String): String = when(error) {
         "wrong_code" -> "That code is not correct. Check it and try again."

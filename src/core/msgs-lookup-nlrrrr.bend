@@ -10,12 +10,12 @@ def T.plain.nlrrrrlllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, S
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.palette.commit(l)}
+      Some{CAT_0.T.palette.command.placeholder(l)}
     case GT{}:
       None{}
 
 def T.plain.nlrrrrlllll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrrrrlllll.cmp(String.cmp(key, "palette.commit"), l)
+  T.plain.nlrrrrlllll.cmp(String.cmp(key, "palette.command.placeholder"), l)
 
 def T.plain.nlrrrrllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -23,12 +23,12 @@ def T.plain.nlrrrrllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       T.plain.nlrrrrlllll(l, key)
     case EQ{}:
-      Some{CAT_0.T.palette.delete(l)}
+      Some{CAT_0.T.palette.commit(l)}
     case GT{}:
       None{}
 
 def T.plain.nlrrrrllll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrrrrllll.cmp(String.cmp(key, "palette.delete"), l)
+  T.plain.nlrrrrllll.cmp(String.cmp(key, "palette.commit"), l)
 
 def T.plain.nlrrrrlllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -36,12 +36,12 @@ def T.plain.nlrrrrlllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.palette.file.placeholder(l)}
+      Some{CAT_0.T.palette.diff(l)}
     case GT{}:
       None{}
 
 def T.plain.nlrrrrlllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrrrrlllr.cmp(String.cmp(key, "palette.file.placeholder"), l)
+  T.plain.nlrrrrlllr.cmp(String.cmp(key, "palette.diff"), l)
 
 def T.plain.nlrrrrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -49,12 +49,12 @@ def T.plain.nlrrrrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nlrrrrllll(l, key)
     case EQ{}:
-      Some{CAT_0.T.palette.diff(l)}
+      Some{CAT_0.T.palette.delete(l)}
     case GT{}:
       T.plain.nlrrrrlllr(l, key)
 
 def T.plain.nlrrrrlll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrrrrlll.cmp(String.cmp(key, "palette.diff"), l)
+  T.plain.nlrrrrlll.cmp(String.cmp(key, "palette.delete"), l)
 
 def T.plain.nlrrrrllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -62,12 +62,12 @@ def T.plain.nlrrrrllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.palette.kicad(l)}
+      Some{CAT_0.T.palette.findfile(l)}
     case GT{}:
       None{}
 
 def T.plain.nlrrrrllrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrrrrllrl.cmp(String.cmp(key, "palette.kicad"), l)
+  T.plain.nlrrrrllrl.cmp(String.cmp(key, "palette.findfile"), l)
 
 def T.plain.nlrrrrllrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -75,12 +75,12 @@ def T.plain.nlrrrrllrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.palette.newthread(l)}
+      Some{CAT_0.T.palette.kicad10(l)}
     case GT{}:
       None{}
 
 def T.plain.nlrrrrllrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrrrrllrr.cmp(String.cmp(key, "palette.newthread"), l)
+  T.plain.nlrrrrllrr.cmp(String.cmp(key, "palette.kicad10"), l)
 
 def T.plain.nlrrrrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -88,12 +88,12 @@ def T.plain.nlrrrrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nlrrrrllrl(l, key)
     case EQ{}:
-      Some{CAT_0.T.palette.kicad10(l)}
+      Some{CAT_0.T.palette.kicad(l)}
     case GT{}:
       T.plain.nlrrrrllrr(l, key)
 
 def T.plain.nlrrrrllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrrrrllr.cmp(String.cmp(key, "palette.kicad10"), l)
+  T.plain.nlrrrrllr.cmp(String.cmp(key, "palette.kicad"), l)
 
 def T.plain.nlrrrrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -101,12 +101,12 @@ def T.plain.nlrrrrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Stri
     case LT{}:
       T.plain.nlrrrrlll(l, key)
     case EQ{}:
-      Some{CAT_0.T.palette.findfile(l)}
+      Some{CAT_0.T.palette.file.placeholder(l)}
     case GT{}:
       T.plain.nlrrrrllr(l, key)
 
 def T.plain.nlrrrrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrrrrll.cmp(String.cmp(key, "palette.findfile"), l)
+  T.plain.nlrrrrll.cmp(String.cmp(key, "palette.file.placeholder"), l)
 
 def T.plain.nlrrrrlrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -114,12 +114,12 @@ def T.plain.nlrrrrlrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.palette.pr(l)}
+      Some{CAT_0.T.palette.pin(l)}
     case GT{}:
       None{}
 
 def T.plain.nlrrrrlrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrrrrlrll.cmp(String.cmp(key, "palette.pr"), l)
+  T.plain.nlrrrrlrll.cmp(String.cmp(key, "palette.pin"), l)
 
 def T.plain.nlrrrrlrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -127,12 +127,12 @@ def T.plain.nlrrrrlrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.palette.search(l)}
+      Some{CAT_0.T.palette.revert(l)}
     case GT{}:
       None{}
 
 def T.plain.nlrrrrlrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrrrrlrlr.cmp(String.cmp(key, "palette.search"), l)
+  T.plain.nlrrrrlrlr.cmp(String.cmp(key, "palette.revert"), l)
 
 def T.plain.nlrrrrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -140,12 +140,12 @@ def T.plain.nlrrrrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nlrrrrlrll(l, key)
     case EQ{}:
-      Some{CAT_0.T.palette.revert(l)}
+      Some{CAT_0.T.palette.pr(l)}
     case GT{}:
       T.plain.nlrrrrlrlr(l, key)
 
 def T.plain.nlrrrrlrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrrrrlrl.cmp(String.cmp(key, "palette.revert"), l)
+  T.plain.nlrrrrlrl.cmp(String.cmp(key, "palette.pr"), l)
 
 def T.plain.nlrrrrlrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -153,12 +153,12 @@ def T.plain.nlrrrrlrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.palette.settings(l)}
+      Some{CAT_0.T.palette.search.full(l)}
     case GT{}:
       None{}
 
 def T.plain.nlrrrrlrrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrrrrlrrl.cmp(String.cmp(key, "palette.settings"), l)
+  T.plain.nlrrrrlrrl.cmp(String.cmp(key, "palette.search.full"), l)
 
 def T.plain.nlrrrrlrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -166,12 +166,12 @@ def T.plain.nlrrrrlrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.palette.snooze.hour(l)}
+      Some{CAT_0.T.palette.settle(l)}
     case GT{}:
       None{}
 
 def T.plain.nlrrrrlrrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrrrrlrrr.cmp(String.cmp(key, "palette.snooze.hour"), l)
+  T.plain.nlrrrrlrrr.cmp(String.cmp(key, "palette.settle"), l)
 
 def T.plain.nlrrrrlrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -179,12 +179,12 @@ def T.plain.nlrrrrlrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nlrrrrlrrl(l, key)
     case EQ{}:
-      Some{CAT_0.T.palette.settle(l)}
+      Some{CAT_0.T.palette.settings(l)}
     case GT{}:
       T.plain.nlrrrrlrrr(l, key)
 
 def T.plain.nlrrrrlrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrrrrlrr.cmp(String.cmp(key, "palette.settle"), l)
+  T.plain.nlrrrrlrr.cmp(String.cmp(key, "palette.settings"), l)
 
 def T.plain.nlrrrrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -192,12 +192,12 @@ def T.plain.nlrrrrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Stri
     case LT{}:
       T.plain.nlrrrrlrl(l, key)
     case EQ{}:
-      Some{CAT_0.T.palette.search.full(l)}
+      Some{CAT_0.T.palette.search(l)}
     case GT{}:
       T.plain.nlrrrrlrr(l, key)
 
 def T.plain.nlrrrrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrrrrlr.cmp(String.cmp(key, "palette.search.full"), l)
+  T.plain.nlrrrrlr.cmp(String.cmp(key, "palette.search"), l)
 
 def T.plain.nlrrrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -205,12 +205,12 @@ def T.plain.nlrrrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Strin
     case LT{}:
       T.plain.nlrrrrll(l, key)
     case EQ{}:
-      Some{CAT_0.T.palette.pin(l)}
+      Some{CAT_0.T.palette.newthread(l)}
     case GT{}:
       T.plain.nlrrrrlr(l, key)
 
 def T.plain.nlrrrrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrrrrl.cmp(String.cmp(key, "palette.pin"), l)
+  T.plain.nlrrrrl.cmp(String.cmp(key, "palette.newthread"), l)
 
 def T.plain.nlrrrrrllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -218,12 +218,12 @@ def T.plain.nlrrrrrllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, S
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.palette.snooze.week(l)}
+      Some{CAT_0.T.palette.snooze.tomorrow(l)}
     case GT{}:
       None{}
 
 def T.plain.nlrrrrrllll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrrrrrllll.cmp(String.cmp(key, "palette.snooze.week"), l)
+  T.plain.nlrrrrrllll.cmp(String.cmp(key, "palette.snooze.tomorrow"), l)
 
 def T.plain.nlrrrrrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -231,12 +231,12 @@ def T.plain.nlrrrrrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       T.plain.nlrrrrrllll(l, key)
     case EQ{}:
-      Some{CAT_0.T.palette.terminal(l)}
+      Some{CAT_0.T.palette.snooze.week(l)}
     case GT{}:
       None{}
 
 def T.plain.nlrrrrrlll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrrrrrlll.cmp(String.cmp(key, "palette.terminal"), l)
+  T.plain.nlrrrrrlll.cmp(String.cmp(key, "palette.snooze.week"), l)
 
 def T.plain.nlrrrrrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -244,12 +244,12 @@ def T.plain.nlrrrrrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.palette.unsnooze(l)}
+      Some{CAT_0.T.palette.unarchive(l)}
     case GT{}:
       None{}
 
 def T.plain.nlrrrrrllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrrrrrllr.cmp(String.cmp(key, "palette.unsnooze"), l)
+  T.plain.nlrrrrrllr.cmp(String.cmp(key, "palette.unarchive"), l)
 
 def T.plain.nlrrrrrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -257,12 +257,12 @@ def T.plain.nlrrrrrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nlrrrrrlll(l, key)
     case EQ{}:
-      Some{CAT_0.T.palette.unarchive(l)}
+      Some{CAT_0.T.palette.terminal(l)}
     case GT{}:
       T.plain.nlrrrrrllr(l, key)
 
 def T.plain.nlrrrrrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrrrrrll.cmp(String.cmp(key, "palette.unarchive"), l)
+  T.plain.nlrrrrrll.cmp(String.cmp(key, "palette.terminal"), l)
 
 def T.plain.nlrrrrrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -270,12 +270,12 @@ def T.plain.nlrrrrrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.palette.viewer(l)}
+      Some{CAT_0.T.palette.update(l)}
     case GT{}:
       None{}
 
 def T.plain.nlrrrrrlrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrrrrrlrl.cmp(String.cmp(key, "palette.viewer"), l)
+  T.plain.nlrrrrrlrl.cmp(String.cmp(key, "palette.update"), l)
 
 def T.plain.nlrrrrrlrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -283,12 +283,12 @@ def T.plain.nlrrrrrlrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.phase.complete(l)}
+      Some{CAT_0.T.phase.approval(l)}
     case GT{}:
       None{}
 
 def T.plain.nlrrrrrlrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrrrrrlrr.cmp(String.cmp(key, "phase.complete"), l)
+  T.plain.nlrrrrrlrr.cmp(String.cmp(key, "phase.approval"), l)
 
 def T.plain.nlrrrrrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -296,12 +296,12 @@ def T.plain.nlrrrrrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nlrrrrrlrl(l, key)
     case EQ{}:
-      Some{CAT_0.T.phase.approval(l)}
+      Some{CAT_0.T.palette.viewer(l)}
     case GT{}:
       T.plain.nlrrrrrlrr(l, key)
 
 def T.plain.nlrrrrrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrrrrrlr.cmp(String.cmp(key, "phase.approval"), l)
+  T.plain.nlrrrrrlr.cmp(String.cmp(key, "palette.viewer"), l)
 
 def T.plain.nlrrrrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -309,12 +309,12 @@ def T.plain.nlrrrrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Stri
     case LT{}:
       T.plain.nlrrrrrll(l, key)
     case EQ{}:
-      Some{CAT_0.T.palette.update(l)}
+      Some{CAT_0.T.palette.unsnooze(l)}
     case GT{}:
       T.plain.nlrrrrrlr(l, key)
 
 def T.plain.nlrrrrrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrrrrrl.cmp(String.cmp(key, "palette.update"), l)
+  T.plain.nlrrrrrl.cmp(String.cmp(key, "palette.unsnooze"), l)
 
 def T.plain.nlrrrrrrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -322,12 +322,12 @@ def T.plain.nlrrrrrrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.phase.stopped(l)}
+      Some{CAT_0.T.phase.input(l)}
     case GT{}:
       None{}
 
 def T.plain.nlrrrrrrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrrrrrrll.cmp(String.cmp(key, "phase.stopped"), l)
+  T.plain.nlrrrrrrll.cmp(String.cmp(key, "phase.input"), l)
 
 def T.plain.nlrrrrrrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -335,12 +335,12 @@ def T.plain.nlrrrrrrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.phone.unsettle(l)}
+      Some{CAT_0.T.phase.working(l)}
     case GT{}:
       None{}
 
 def T.plain.nlrrrrrrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrrrrrrlr.cmp(String.cmp(key, "phone.unsettle"), l)
+  T.plain.nlrrrrrrlr.cmp(String.cmp(key, "phase.working"), l)
 
 def T.plain.nlrrrrrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -348,12 +348,12 @@ def T.plain.nlrrrrrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nlrrrrrrll(l, key)
     case EQ{}:
-      Some{CAT_0.T.phase.working(l)}
+      Some{CAT_0.T.phase.stopped(l)}
     case GT{}:
       T.plain.nlrrrrrrlr(l, key)
 
 def T.plain.nlrrrrrrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrrrrrrl.cmp(String.cmp(key, "phase.working"), l)
+  T.plain.nlrrrrrrl.cmp(String.cmp(key, "phase.stopped"), l)
 
 def T.plain.nlrrrrrrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -361,12 +361,12 @@ def T.plain.nlrrrrrrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.picker.back(l)}
+      Some{CAT_0.T.phone.working(l)}
     case GT{}:
       None{}
 
 def T.plain.nlrrrrrrrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrrrrrrrl.cmp(String.cmp(key, "picker.back"), l)
+  T.plain.nlrrrrrrrl.cmp(String.cmp(key, "phone.working"), l)
 
 def T.plain.nlrrrrrrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -374,12 +374,12 @@ def T.plain.nlrrrrrrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.picker.hint.find(l)}
+      Some{CAT_0.T.picker.folder.placeholder(l)}
     case GT{}:
       None{}
 
 def T.plain.nlrrrrrrrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrrrrrrrr.cmp(String.cmp(key, "picker.hint.find"), l)
+  T.plain.nlrrrrrrrr.cmp(String.cmp(key, "picker.folder.placeholder"), l)
 
 def T.plain.nlrrrrrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -387,12 +387,12 @@ def T.plain.nlrrrrrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nlrrrrrrrl(l, key)
     case EQ{}:
-      Some{CAT_0.T.picker.folder.placeholder(l)}
+      Some{CAT_0.T.picker.back(l)}
     case GT{}:
       T.plain.nlrrrrrrrr(l, key)
 
 def T.plain.nlrrrrrrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrrrrrrr.cmp(String.cmp(key, "picker.folder.placeholder"), l)
+  T.plain.nlrrrrrrr.cmp(String.cmp(key, "picker.back"), l)
 
 def T.plain.nlrrrrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -400,12 +400,12 @@ def T.plain.nlrrrrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Stri
     case LT{}:
       T.plain.nlrrrrrrl(l, key)
     case EQ{}:
-      Some{CAT_0.T.phone.working(l)}
+      Some{CAT_0.T.phone.unsettle(l)}
     case GT{}:
       T.plain.nlrrrrrrr(l, key)
 
 def T.plain.nlrrrrrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrrrrrr.cmp(String.cmp(key, "phone.working"), l)
+  T.plain.nlrrrrrr.cmp(String.cmp(key, "phone.unsettle"), l)
 
 def T.plain.nlrrrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -413,12 +413,12 @@ def T.plain.nlrrrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Strin
     case LT{}:
       T.plain.nlrrrrrl(l, key)
     case EQ{}:
-      Some{CAT_0.T.phase.input(l)}
+      Some{CAT_0.T.phase.complete(l)}
     case GT{}:
       T.plain.nlrrrrrr(l, key)
 
 def T.plain.nlrrrrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrrrrr.cmp(String.cmp(key, "phase.input"), l)
+  T.plain.nlrrrrr.cmp(String.cmp(key, "phase.complete"), l)
 
 def T.plain.nlrrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -426,9 +426,9 @@ def T.plain.nlrrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String
     case LT{}:
       T.plain.nlrrrrl(l, key)
     case EQ{}:
-      Some{CAT_0.T.palette.snooze.tomorrow(l)}
+      Some{CAT_0.T.palette.snooze.hour(l)}
     case GT{}:
       T.plain.nlrrrrr(l, key)
 
 def T.plain.nlrrrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrrrr.cmp(String.cmp(key, "palette.snooze.tomorrow"), l)
+  T.plain.nlrrrr.cmp(String.cmp(key, "palette.snooze.hour"), l)

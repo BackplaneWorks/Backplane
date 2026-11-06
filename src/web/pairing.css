@@ -30,6 +30,14 @@ body.pairing-pending #root { visibility: hidden; }
 .pairing-device { padding: 12px 0; border-bottom: 1px solid var(--line); }
 .pairing-camera { display: block; width: 100%; max-height: 320px; object-fit: contain; }
 .pairing-invitation:not(:empty) { padding: 0 16px 16px; margin: 16px 0; border: 1px solid var(--line); background: var(--panel); }
+/* Add a device: where the other device reaches this hub (Tailscale, Local
+   network, This computer), the same row of equal choices as the methods */
+.pairing-where { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 8px; margin: 4px 0 8px; }
+.pairing-where button { width: 100%; margin: 0; padding: 10px 6px; }
+.pairing-card .pairing-lanpick { margin: 12px 0 0; }
+.pairing-card .pairing-lanpick select.field { display: block; width: 100%; min-height: 44px; padding: 8px 10px; margin-top: 8px; font: inherit; background: var(--raise); color: var(--text); border: 1px solid var(--line); }
+.pairing-offer { margin: 8px 0 4px; }
+.pairing-lanpick[hidden], .pairing-note[hidden], .pairing-offer[hidden], .pairing-shares[hidden], .pairing-offer button[hidden] { display: none; }
 /* the QR scanner (pairing-scanner.js): the rear camera full screen, a
    square to aim with, Close and Torch at the top in reach of a thumb's
    stretch and clear of the notch, what to do at the bottom over the home bar */

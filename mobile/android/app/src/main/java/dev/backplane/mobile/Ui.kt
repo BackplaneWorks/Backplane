@@ -442,10 +442,12 @@ private fun Pair(tag: String, link: String, cancel: (() -> Unit)?, status: Strin
     }) { pad ->
         Column(Modifier.padding(pad).padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             val ctx = LocalContext.current
-            Button(onClick = { scanPairing(ctx, tag, done) }) {
+            val scan = pairScanner(tag, done)
+            Button(onClick = scan.start) {
                 Icon(Icons.Filled.QrCodeScanner, null)
                 Text(NativeMessages.native_pair_scan(tag), Modifier.padding(start = 8.dp))
             }
+            if (scan.blocked) ScanBlocked(tag)
             val photo = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetContent()) { uri ->
                 if (uri != null) pairingFromImage(ctx, uri)?.let(done)
                     ?: android.widget.Toast.makeText(ctx, NativeMessages.native_pair_scanner_invalid(tag), android.widget.Toast.LENGTH_SHORT).show()
@@ -513,14 +515,15 @@ private fun Hubs(m: AppModel, s: Screen, back: () -> Unit) {
                         style = MaterialTheme.typography.bodyMedium)
                     OutlinedTextField(text, { text = it }, Modifier.fillMaxWidth(), singleLine = true,
                         label = { Text(NativeMessages.settings_pair(tag)) }, placeholder = { Text("http://host:3787/#token=…") })
-                    val ctx = LocalContext.current
+                    val scan = pairScanner(tag) { m.pair(it) }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = { m.pair(text); text = "" }, enabled = text.isNotBlank()) { Text(NativeMessages.native_pair_add(tag)) }
-                        OutlinedButton(onClick = { scanPairing(ctx, tag) { m.pair(it) } }) {
+                        OutlinedButton(onClick = scan.start) {
                             Icon(Icons.Filled.QrCodeScanner, null)
                             Text(NativeMessages.native_pair_scan(tag), Modifier.padding(start = 8.dp))
                         }
                     }
+                    if (scan.blocked) ScanBlocked(tag)
                 }
             }
         }
