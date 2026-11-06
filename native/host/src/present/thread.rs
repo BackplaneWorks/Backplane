@@ -417,6 +417,8 @@ pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value
     let c = crate::session::composer::fields(draft, running, !atts.is_empty(), t.provider == "claude", &refs, lang).ok_or("composer.language")?;
     for (k, v) in state_keys { o.insert(k, v); }
     o.insert("asks".into(), Value::Array(asks_json(st, thread, draft)?));
+    // Buy it heads the thread's tools: in the window's header, and the first of the phones' overflow menu, which lists them
+    if let Some(b) = super::ready::header(st, thread, &params["session"]) { if let Some(t) = o.get_mut("tools").and_then(Value::as_array_mut) { t.insert(0, b) } }
     for k in ["draft", "skills", "send", "sendAct"] { o.insert(k.into(), c[k].clone()); }
     Ok(Value::Object(o))
 }

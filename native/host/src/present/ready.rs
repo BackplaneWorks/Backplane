@@ -1,6 +1,4 @@
-//! The project card's Ready to order bar: the hub's `fab.look` answer is kept in the session's `fab.*` info
-//! (`keep`), and `bar` says what the thread draws above its composer from it. No order is made here: `order.buy` is not ported, so the bar names what there is to order and
-//! its price estimate, and puts away (`fab-min`, the setting `fab.min.<project>`) or comes back (`fab-show`).
+//! The project card: the hub's `fab.look` answer is kept in the session's `fab.*` info (`keep`), and `header` says what the thread's header offers from it.
 use crate::state::{State, Turn};
 use serde_json::{json, Value};
 
@@ -48,20 +46,16 @@ pub fn keep(res: &Value) -> Option<Value> {
         format!("fab.ready:{th}"): ready_line(res), format!("fab.again:{th}"): if ordered(s(res, "order")) { "1" } else { "" }}}))
 }
 
-/// The bar above the composer (Fab.ready): None while ordering is off, the thread is a buy thread, the agent works, nothing was said yet, or there is nothing to order.
-/// `min`: the bar is put away (its header button, "Buy it", brings it back).
-pub fn bar(st: &State, thread: &str, session: &Value) -> Option<Value> {
+/// Buy it in the thread's header (Fab.mini.tools): what the card can buy, with Ordering on, outside a buy thread. There is no bar above the composer: the person asked for it gone
+/// (it showed on projects that were no KiCad project and not ready to order), and this button is there only for fab files or a KiCad project's own board (`fab.look`).
+pub fn header(st: &State, thread: &str, session: &Value) -> Option<Value> {
     if st.settings.get("order.enabled").map_or(false, |v| v == "off") { return None }
     let t = st.threads.get(thread)?; if t.project.is_empty() { return None }
     let info = |k: &str| s(&session["info"], &format!("{k}:{thread}")).to_string();
     let (buy, line) = (info("fab.buy"), info("fab.ready"));
     if buy.is_empty() || st.settings.get(&format!("buy.{thread}")).map_or(false, |v| !v.is_empty()) { return None }
-    let fresh = t.turn == Turn::Idle && t.activity <= t.created;
-    if t.turn == Turn::Running || fresh { return None }
-    let line = if line.is_empty() { "Ready to order".to_string() } else { line };
-    let min = st.settings.get(&format!("fab.min.{}", t.project)).map_or(false, |v| v == "1");
-    let again = info("fab.again") == "1";
-    Some(json!({"line": line, "buy": if again { "Buy again".to_string() } else { buy }, "min": min, "again": again, "thread": format!("{thread}")}))
+    let label = if info("fab.again") == "1" { "Buy again".to_string() } else { buy };
+    Some(json!({"icon": "box", "label": label, "tip": if line.is_empty() { "Ready to order".to_string() } else { line }, "action": "fab-buy", "value": "", "on": false, "danger": false}))
 }
 
 #[cfg(test)]
@@ -82,12 +76,20 @@ mod tests {
         let mut c = card(&["A"], "from $5", ""); c["order"] = json!("placed");
         assert_eq!(ready_line(&c), "Ordered · in production"); assert_eq!(keep(&c).unwrap()["info"]["fab.again:t1"], "1");
     }
-    #[test] fn the_bar_waits_while_the_agent_works_or_nothing_was_said() {
-        let mut st = State::default();
-        st.apply(&json!({"$":"ProjectCreated","id":"p1","title":"p","root":"/p","at":1})); st.apply(&json!({"$":"ThreadCreated","id":"t1","project":"p1","title":"x","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1}));
-        let mut sess = json!({"info": {}}); crate::session::patch::merge(&mut sess, &keep(&card(&["A"], "from $5", "")).unwrap());
-        assert!(bar(&st, "t1", &sess).is_none(), "a thread nothing was said in");
-        st.apply(&json!({"$":"TurnChanged","thread":"t1","state":"completed","at":9}));
-        let b = bar(&st, "t1", &sess); assert!(b.is_some_and(|b| b["line"] == "Ready to order · A" && b["buy"] == "Buy it · from $5"), "{:?}", st.threads.get("t1").map(|t| (t.turn.word(), t.activity, t.created)));
+    fn project(st: &mut State) { st.apply(&json!({"$":"ProjectCreated","id":"p1","title":"p","root":"/p","at":1})); st.apply(&json!({"$":"ThreadCreated","id":"t1","project":"p1","title":"x","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2})); }
+    #[test] fn buy_it_is_in_the_header_only_when_there_is_something_to_order() {
+        let mut st = State::default(); project(&mut st);
+        let mut sess = json!({"info": {}}); assert!(header(&st, "t1", &sess).is_none(), "the card has not answered");
+        crate::session::patch::merge(&mut sess, &keep(&card(&[], "", "")).unwrap()); assert!(header(&st, "t1", &sess).is_none(), "nothing to order");
+        crate::session::patch::merge(&mut sess, &keep(&card(&["A"], "from $5", "")).unwrap());
+        let b = header(&st, "t1", &sess).unwrap(); assert_eq!((b["label"].as_str(), b["action"].as_str(), b["tip"].as_str()), (Some("Buy it · from $5"), Some("fab-buy"), Some("Ready to order · A")));
+        st.apply(&json!({"$":"TurnChanged","thread":"t1","state":"running","at":9})); assert!(header(&st, "t1", &sess).is_some(), "it does not come and go with the turn");
+        st.apply(&json!({"$":"SettingSet","key":"order.enabled","value":"off","at":10})); assert!(header(&st, "t1", &sess).is_none(), "Ordering off");
+        st.apply(&json!({"$":"SettingSet","key":"order.enabled","value":"on","at":11})); st.apply(&json!({"$":"SettingSet","key":"buy.t1","value":"t0","at":12})); assert!(header(&st, "t1", &sess).is_none(), "a buy thread has none of its own");
+    }
+    #[test] fn an_ordered_project_says_buy_again_and_how_it_stands() {
+        let mut st = State::default(); project(&mut st); let mut sess = json!({"info": {}});
+        let mut c = card(&["A"], "from $5", ""); c["order"] = json!("shipped"); crate::session::patch::merge(&mut sess, &keep(&c).unwrap());
+        let b = header(&st, "t1", &sess).unwrap(); assert_eq!((b["label"].as_str(), b["tip"].as_str()), (Some("Buy again"), Some("Ordered · shipped")));
     }
 }

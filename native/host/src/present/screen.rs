@@ -179,13 +179,6 @@ pub fn recent(st: &State,p: &Value) -> Option<Value> {
                 session["rid"]=json!(rid+1);
             }
         },
-        // the Ready to order bar put away (its ×) or brought back (the small Buy it): the setting fab.min.<project>
-        "fab-min"|"fab-show" => {
-            let Some(pr)=st.threads.get(thread).map(|t|t.project.clone()).filter(|p|!p.is_empty()) else { return refused("action.fab-no-project") };
-            let rid=session["rid"].as_u64().unwrap_or(0);
-            cmds.push(json!({"type":"send","hub":hub,"text":json!({"id":rid,"m":"setting.set","p":{"key":format!("fab.min.{pr}"),"value":if action=="fab-min" {"1"} else {""}}}).to_string()}));
-            session["rid"]=json!(rid+1);
-        },
         "routine-edit"|"routine-save" if bot_page.is_object() => {
             let Some(o)=super::botforms::routine_act(bot_page,text(&p["target"],"id"),hub,&session,action,value) else { return refused("action.routine-unknown") };
             crate::session::patch::merge(&mut session,&o.patch); cmds=[read_cmds.clone(),o.cmds].concat();
@@ -324,7 +317,6 @@ pub fn recent(st: &State,p: &Value) -> Option<Value> {
     // the query in force, said back once the box has been used (the client takes it when it is not what it sent: Enter clears it)
     if session["drafts"].as_object().map_or(false,|d|d.contains_key("@f.pq")) { shown["search"]=json!({"query":query,"hint":"Search projects"}); }
     { let f=picker::folders(&session["drafts"],&std::env::var("HOME").unwrap_or_default(),&st.projects.values().filter(|p|!p.removed).map(|p|p.root.as_str()).collect::<Vec<_>>()); if !f.is_null() { shown["folders"]=f; } } // (present only while the picker is open)
-    // no Ready to order bar above the composer: it showed at the wrong times and the person does not want it (present/ready.rs keeps the fab.look answer)
     if !thread.is_empty() { shown["stats"]=super::keys::stats(st,thread); } // the Context panel's rows (beside the thread: its object is the helper's, key for key)
     if bot_page.is_object() {
         let id=text(&p["target"],"id"); let key=format!("{hub}|{id}");

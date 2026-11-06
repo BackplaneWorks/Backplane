@@ -11,9 +11,13 @@ fn pcb(p: &str) -> bool { p.ends_with(".kicad_pcb") }
 /// Boards.pro: the project file a board would have beside it
 fn pro(p: &str) -> String { format!("{}.kicad_pro", &p[..p.len() - 10.min(p.len())]) }
 
+/// Boards.real: a KiCad project's own boards (a project file beside them), outside folders of copies. Only these count as something to order: a repository holding
+/// board files as test fixtures is no KiCad project, and offering it Buy it is what the person asked to be rid of (the picker below still shows them).
+pub fn own(all: &[String]) -> Vec<String> { all.iter().filter(|p| pcb(p) && !copy(p) && all.contains(&pro(p))).cloned().collect() }
+
 /// Boards.pick: all = the hub's list (boards and project files, from the folder); bd = the default board.
 pub fn pick(all: &[String], bd: &str) -> Vec<String> {
-    let real: Vec<String> = all.iter().filter(|p| pcb(p) && !copy(p) && all.contains(&pro(p))).cloned().collect();
+    let real = own(all);
     let outside: Vec<String> = all.iter().filter(|p| pcb(p) && !copy(p)).cloned().collect();
     let pcbs: Vec<String> = all.iter().filter(|p| pcb(p)).cloned().collect();
     let chosen = if !real.is_empty() { real } else if !outside.is_empty() { outside } else { pcbs };
@@ -48,6 +52,7 @@ mod tests {
         assert_eq!(pick(&all, ""), s(&["a/x.kicad_pcb", "b/y.kicad_pcb"])); assert_eq!(pick(&all, "b/y.kicad_pcb"), s(&["b/y.kicad_pcb", "a/x.kicad_pcb"]));
         assert_eq!(pick(&s(&["stray.kicad_pcb", "build/q.kicad_pcb"]), ""), s(&["stray.kicad_pcb"])); // none a project's own: every board outside copies
         assert_eq!(pick(&s(&["build/q.kicad_pcb", "old/z.kicad_pcb"]), ""), s(&["build/q.kicad_pcb", "old/z.kicad_pcb"])); // only copies: all of them
+        assert_eq!(own(&all), s(&["a/x.kicad_pcb", "b/y.kicad_pcb"])); assert!(own(&s(&["test/files/fixtures/a.kicad_pcb"])).is_empty(), "a fixture is no project");
         assert_eq!(pick(&[], ""), Vec::<String>::new()); assert_eq!(pick(&[], "d.kicad_pcb"), s(&["d.kicad_pcb"]));
         let many: Vec<String> = (0..40).flat_map(|i| [format!("p{i:02}/b.kicad_pcb"), format!("p{i:02}/b.kicad_pro")]).collect(); assert_eq!(pick(&many, "").len(), MOST);
         assert!(copy("Archive_2/x.kicad_pcb") && copy("a/my-backups/x.kicad_pcb") && !copy("old.kicad_pcb") && !copy("a/exporter/x") == false);

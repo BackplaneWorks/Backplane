@@ -105,7 +105,7 @@ pub fn out_fate(copy: bool, kind: &str, job: &str, server: bool) -> Fate {
 /// The RPC methods that run git that writes or act on the machine (file.open is git job "open"; a release tags and
 /// publishes): refused on a copy and told, before any handler runs.
 pub fn rpc_refused(method: &str) -> bool { on() && rpc_refused_with(true, method) }
-pub fn rpc_refused_with(copy: bool, method: &str) -> bool { copy && has(&["git.act", "git.revert", "file.open", "review.release"], method) }
+pub fn rpc_refused_with(copy: bool, method: &str) -> bool { copy && has(&["git.act", "git.revert", "file.open", "review.release", "order.buy"], method) }
 
 // ---- watch gate ---------------------------------------------------------------------------------------------
 
@@ -194,6 +194,7 @@ mod tests {
         assert_eq!(out_fate(true, "Git", "act", false), Fate::Told);
         assert_eq!(out_fate(true, "Git", "open", false), Fate::Told);
         assert_eq!(out_fate(true, "Git", "worktree", true), Fate::Nowhere);
+        assert!(rpc_refused_with(true, "order.buy") && !rpc_refused_with(false, "order.buy"), "a copy starts no order");
         assert!(rpc_refused_with(true, "git.act") && rpc_refused_with(true, "file.open") && rpc_refused_with(true, "review.release") && !rpc_refused_with(true, "files.dir") && !rpc_refused_with(false, "git.act"));
     }
     // copy_refuses_net, copy_off_refuses_none

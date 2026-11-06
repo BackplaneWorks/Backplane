@@ -7,7 +7,8 @@ async fn call(ag: &Arc<Agents>, name: &str, a: Value) -> (bool, String) {
     let (_, r) = rpc_mcp(ag, T1, "", "tools/call", json!({"name":name,"arguments":a})).await;
     (r["result"]["isError"] == false, r["result"]["content"][0]["text"].as_str().unwrap_or("").to_string())
 }
-async fn names(ag: &Arc<Agents>) -> Vec<String> { let (_, l) = rpc_mcp(ag, T1, "", "tools/list", json!({})).await; l["result"]["tools"].as_array().unwrap().iter().filter_map(|t| t["name"].as_str().map(str::to_string)).collect() }
+async fn names_of(ag: &Arc<Agents>, th: &str) -> Vec<String> { let (_, l) = rpc_mcp(ag, th, "", "tools/list", json!({})).await; l["result"]["tools"].as_array().unwrap().iter().filter_map(|t| t["name"].as_str().map(str::to_string)).collect() }
+async fn names(ag: &Arc<Agents>) -> Vec<String> { names_of(ag, T1).await }
 async fn set(hub: &Arc<Hub>, k: &str, v: &str) { hub.commit(&json!({"$":"SettingSet","key":k,"value":v,"at":1700000070})).await.unwrap(); }
 async fn cwd(ag: &Arc<Agents>) -> std::path::PathBuf { std::path::PathBuf::from(ag.world().await.cwd(T1)) }
 
@@ -63,5 +64,30 @@ async fn cwd(ag: &Arc<Agents>) -> std::path::PathBuf { std::path::PathBuf::from(
     call(&r.ag, "order_review", json!({"action":"record","verdict":"ok","summary":"fine"})).await;
     let from = len(&r.hub).await; let (_, t) = call(&r.ag, "order_review", json!({"action":"gate"})).await; assert!(t.contains("go on with the order"), "{t}");
     tokio::time::sleep(Duration::from_millis(200)).await; assert!(!log_from(&r.hub, from).await.iter().any(|e| is(e, "AskOpened")));
+    r.ag.shutdown();
+}
+
+// ---- Buy it ----
+#[tokio::test(flavor = "multi_thread")] async fn buy_it_starts_a_buy_thread_once_and_its_agent_gets_the_buy_block() {
+    let r = rig("or-buy", "result", SESSION_OK).await; crate::commands::start(r.hub.clone()); let from = len(&r.hub).await;
+    let a = rpc(&r.hub, "order.buy", json!({"thread":T1})).await; assert_eq!(a["ok"], true, "{a}"); let th = a["thread"].as_str().unwrap().to_string(); assert_ne!(th, T1);
+    let ev = until(&r.hub, from, 20, |ev| ev.iter().any(|e| turn_is(e, "completed") || turn_is(e, "failed"))).await;
+    let made = ev.iter().find(|e| is(e, "ThreadCreated")).unwrap(); assert!(made["title"].as_str().unwrap().starts_with("Buy: "), "{made}");
+    let w = r.ag.world().await; assert_eq!(w.setting(&format!("buy.{th}")), T1, "marked with its source"); assert_eq!(w.cwd(&th), w.cwd(T1), "the same folder"); drop(w);
+    assert!(ev.iter().any(|e| is(e, "MessagePosted") && e["thread"] == th.as_str() && e["role"] == "user" && e["text"] == "Buy it"), "the person's Buy it starts it: {ev:?}");
+    let dir = r.ag.world().await.cwd(&th);
+    assert!(r.ag.prompt_for(&th, &dir).await.contains("<backplane_buy>"), "its agent gets the buy instructions"); assert!(!r.ag.prompt_for(T1, &dir).await.contains("<backplane_buy>"), "its source's does not");
+    assert!(names_of(&r.ag, &th).await.contains(&"order_ask".to_string()), "and the buy thread's tools"); assert!(!names(&r.ag).await.contains(&"order_ask".to_string()));
+    // a double press and a stale press in the buy thread make nothing new
+    let n = len(&r.hub).await;
+    assert_eq!(rpc(&r.hub, "order.buy", json!({"thread":th})).await["thread"], th.as_str(), "a buy thread has no Buy of its own");
+    assert_eq!(len(&r.hub).await, n);
+    r.ag.shutdown();
+}
+#[tokio::test(flavor = "multi_thread")] async fn buy_it_is_refused_with_ordering_off_and_for_no_thread() {
+    let r = rig("or-buyoff", "result", SESSION_OK).await; crate::commands::start(r.hub.clone());
+    assert_eq!(rpc(&r.hub, "order.buy", json!({"thread":"ghost"})).await["error"], "no such thread");
+    set(&r.hub, "order.enabled", "off").await; let n = len(&r.hub).await;
+    assert_eq!(rpc(&r.hub, "order.buy", json!({"thread":T1})).await["error"], "Ordering is off: turn it on in Settings to buy"); assert_eq!(len(&r.hub).await, n, "nothing is made");
     r.ag.shutdown();
 }

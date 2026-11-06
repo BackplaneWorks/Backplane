@@ -40,12 +40,12 @@ Each lane updates its own rows in the commit that lands the work.
 | Voice helper in Rust (`native/voice`, `scripts/build-voice.sh`, built and tested by dev-build); `tools/voice` (Bun) removed | done | voice |
 | **Commerce** | | |
 | Card and Ready to order data (`fab.look`, `fab.intent`) | partial | commerce |
-| Buy it: `order.buy` is not ported (`settings/fab.rs`), so no buy thread starts | missing | commerce |
+| Buy it: `order.buy` starts a buy thread in the source's folder, "Buy: <project> · 2" naming, the person's Buy it as its first message; only for fab files or a KiCad project's own board. Tested on the hub with stand-ins; not yet driven in the window or on a phone | partial | commerce |
 | Buy threads: `order_ask` works (its answer is the person's message); `order_quote`, `order_status` have no tool yet | partial | commerce |
 | `order_review` check and record work for every agent (`settings/order.rs`; the design hash matches 0.14's, so a review it recorded stays current). The gate is in, tested through the agent's MCP path with stand-ins, but needs a buy thread to be reached: not driven on a client | partial | commerce |
 | Order card and steps, on every client | missing | commerce |
 | Order watcher, customs line, pilot notice (no hub code; the phones can still draw the last two) | missing | commerce |
-| Ready to order bar: stays gone, as the person asked (thread improvement-aa3339b53c4456dd35d6ced196e44d4c). Buy it lives in the thread's header, and the agents and Settings now say so; the header button itself comes with `order.buy` | partial | commerce |
+| Ready to order bar: dropped, as the person asked (thread improvement-aa3339b53c4456dd35d6ced196e44d4c): it showed on projects that were no KiCad project and not ready to order. Buy it is the first of the thread's tools instead, and the agents, Settings and `docs/order.md` say so | dropped | commerce |
 | **Thread views** | | |
 | Subagent drill-down | missing | threads-deep |
 | Your machines, one list over machines | partial | threads-deep |
@@ -227,4 +227,5 @@ Filled in by the lanes as they meet them. A row needs what was rough and what it
 | Dictation depended on a Bun helper and a Node addon fetched at runtime: now one Rust helper that opens sherpa-onnx's C library at run time | done | voice |
 | A dead control looks live (the `Dictate` chip): it starts a session now | done | voice |
 | A failed routine save said nothing | done | threads-small |
+| Buy it showed on any repository holding a board file, test fixtures included, and the card asked the order server for it. Only fab files or a KiCad project's own board count now | done | commerce |
 | Provider marks were initials | missing | threads-small |
