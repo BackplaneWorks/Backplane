@@ -33,8 +33,8 @@ runs `mobile/ios/build.sh` (xcodebuild) there. Debug builds read `BACKPLANE_LINK
 a thread without taps.
 
 Pairing: scan the code Settings shows (Devices, Add a device) from the
-pairing screen or Hubs (iOS reads it with the camera, Android with Google
-Play services' code scanner), paste the hub's tailnet link
+pairing screen or Hubs (iOS reads it with the camera, Android with its own
+in-app scanner: CameraX frames read by ZXing, `Scanner.kt`), paste the hub's tailnet link
 (`http://host:3787/#token=…`), or open
 `backplane://pair?url=<that link, URL-encoded>`, which is what the code
 holds, so the phone's own camera app opens Backplane with it too.

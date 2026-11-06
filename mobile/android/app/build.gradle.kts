@@ -83,10 +83,13 @@ dependencies {
     implementation("androidx.javascriptengine:javascriptengine:1.0.0")
     // the WebView shell's bridge (message listener, document-start script)
     implementation("androidx.webkit:webkit:1.12.1")
-    // a photo of a pairing code, read on the phone (Pair.kt's pairingFromImage)
+    // a pairing code read on the phone: a photo (Pair.kt's pairingFromImage)
+    // and the in-app scanner's camera frames (Scanner.kt)
     implementation("com.google.zxing:core:3.5.3")
-    // the pairing code scanner (Google Play services, no camera permission)
-    implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
-    // it brings an old Fragment; the ActivityResult APIs need 1.3 or later
-    implementation("androidx.fragment:fragment-ktx:1.8.5")
+    // the in-app scanner's camera (no Google Play services)
+    val camerax = "1.4.1"
+    implementation("androidx.camera:camera-camera2:$camerax")
+    implementation("androidx.camera:camera-lifecycle:$camerax")
+    implementation("androidx.camera:camera-view:$camerax")
+    testImplementation("junit:junit:4.13.2")
 }
