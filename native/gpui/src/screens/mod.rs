@@ -3,7 +3,6 @@
 pub mod asks;
 pub mod voice;
 pub mod voice_mic;
-pub mod ready;
 pub mod attach;
 pub mod desk;
 pub mod devbar;

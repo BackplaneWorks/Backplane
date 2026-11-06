@@ -62,7 +62,7 @@ impl Presenter for Routed {
         Box::pin(async move {
             // a request carrying the hub's own answers (reads: git.diff, mech.list, review pages...) is the helper's: only its Ui applies them, and a Rust screen would draw the
             // thread as it was and drop them
-            // (a `fab.look` answer is the Ready to order bar's: no Rust screen draws it, and the thread must not stop answering because the hub looked: every action that moves a thread sends one)
+            // (a `fab.look` answer only feeds the header's Buy it, and the thread must not stop answering because the hub looked: every action that moves a thread sends one)
             // (with no helper there is nothing to send the others to: the Rust screens apply them themselves (session/pages.rs), and a view that carries one is answered like any other)
             let reads = params.get("reads").and_then(Value::as_array).map_or(false, |r| r.iter().any(|x| x["kind"] != "fab.look")) && !self.helper.absent();
             if !reads { for s in &self.screens { if let Some(v) = s.view(params) { return Ok(v) } } }

@@ -168,6 +168,15 @@ pub fn act<F: Facts>(f: &F, hub: &str, session: &Value, sel: &str, action: &str,
             b.drafts.insert("@want.new.at".into(), json!(format!("{}|{}", info(session, "local.machine"), info(session, "local.generation"))));
             b.rpc("thread.fork", json!({"thread": th}));
         }
+        // Fab.buy.start: Buy it: the hub makes the buy thread and this client goes to it (nothing while a new thread is already on its way)
+        "fab-buy" => {
+            if sel.is_empty() || sel.contains('~') || sel.starts_with("project-home-") || !crate::session::select::Facts::thread_exists(f, sel) { return None }
+            if draft(session, "@want.new").is_empty() {
+                b.drafts.insert("@want.new".into(), json!(b.rid.to_string()));
+                b.drafts.insert("@want.new.at".into(), json!(format!("{}|{}", info(session, "local.machine"), info(session, "local.generation"))));
+                b.rpc("order.buy", json!({"thread": sel}));
+            }
+        }
         // the phones' thread search / file picker: the palette opens (files also asks for the thread's files, through the table)
         "find-open" => {
             if value != "search" && value != "files" { return None }
@@ -233,6 +242,13 @@ mod tests {
         let mut s = sess(); s["panel"] = json!(true);
         let o = run("panel", "", s).unwrap();
         assert_eq!(o.session_patch["panel"], json!(false)); assert_eq!(o.session_patch["drafts"]["@mech.at"], json!(""));
+    }
+    #[test] fn buy_it_asks_the_hub_once_and_this_client_goes_to_the_new_thread() {
+        let mut s = sess(); s["info"]["local.machine"] = json!("m"); s["info"]["local.generation"] = json!("g1");
+        let o = run("fab-buy", "", s).unwrap();
+        assert_eq!(text(&o, 0), "{\"id\":5,\"m\":\"order.buy\",\"p\":{\"thread\":\"t1700000002-3\"}}");
+        assert_eq!(o.session_patch["drafts"]["@want.new"], json!("5")); assert_eq!(o.session_patch["drafts"]["@want.new.at"], json!("m|g1"));
+        let mut s = sess(); s["drafts"]["@want.new"] = json!("4"); assert!(run("fab-buy", "", s).unwrap().cmds.is_empty(), "a new thread is already on its way");
     }
     #[test] fn an_open_menu_shuts_after_the_action() {
         let mut s = sess(); s["drafts"]["@menu"] = json!("t:x");

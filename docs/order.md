@@ -1,6 +1,6 @@
 # Ordering: intent, Buy it, buy threads
 
-**On unless turned off.** Settings → Ordering. Off, there is no Buy it or Ready bar on any client, the hub never contacts the order server (no estimates; it only keeps following quotes and orders made while it was on), `order.buy` and the order tools are refused (an agent that remembers them gets "Ordering is off"), and agents get no fab-file or review instructions and no order tools (laws `fab_buy_off_hidden`, `order_off_*`). The intent and the project layout stay on. With Ordering on, Settings → Price estimates turns the "from $X" off on its own.
+**On unless turned off.** Settings → Ordering. Off, there is no Buy it on any client, the hub never contacts the order server (no estimates; it only keeps following quotes and orders made while it was on), `order.buy` and the order tools are refused (an agent that remembers them gets "Ordering is off"), and agents get no fab-file or review instructions and no order tools (laws `fab_buy_off_hidden`, `order_off_*`). The intent and the project layout stay on. With Ordering on, Settings → Price estimates turns the "from $X" off on its own.
 
 A project says what it is for and what can be made of it. Backplane shows a price for it
 and orders it through a buy thread.
@@ -27,15 +27,11 @@ The agents' instructions are built in `native/host/src/agents/prompt.rs` (`order
   2. with Ordering and Price estimates on, asks the order server's `POST /v1/estimate` for the bare parts' price. Only kinds, options and features are sent; never files.
 - **The answer** is kept as info keys `fab.line:`, `fab.intent:`, `fab.buy:`, `fab.ready:`, `fab.shown:` and `fab.open:` (plus the thread).
 - **Boards:** the answer lists every KiCad board in the project (`board_files`, outside `extra/` and `mfg/`). With more than one, the viewer's Board, Schematic and 3D tabs offer each by its folder's name: chips on the web (`View.boards`) and in the window (`Side.boards`), the Sheet menu on phones (`View.board.list`, values `b:<path>`, so no new app). A pick shows that board, or the schematic beside it, and the other tabs stay on it (`Bd.keep`). Before any pick, the chip of the board the viewer opens by default is lit.
+- **What counts as something to order:** a `*.fab.json`, or a KiCad project's own board (a `.kicad_pro` beside it, outside folders of copies: `boards::own`). A repository that only holds board files, as test fixtures say, has nothing to order: no Buy it, and the order server is not asked. The viewer's picker still offers those boards.
 - **Two places:**
   - **The card** at the top of the thread: the goal (click for the whole intent) and Edit.
-  - **Ready to order**, right above the message box: the parts by name and Buy it (`Fab.ready`, laws `order_ready_*`, `fab_ready_*`). It shows once the agent's turn is over, never while it works or in a buy thread; on the web it glows once as it comes. Once something of the project is paid for, it says so ("Ordered · paid, being placed", then in production, shipped, delivered: the newest order of the project's buy threads, `Od.order`) and the button reads Buy again (laws `order_ordered_*`, `fab_buy_again*`). Its × puts it away for the project (the setting `fab.min.<project>`, kept like any setting, so every device follows): the thread's header then has a Buy it (the box icon; Ordered once something is paid for) that brings it back. On phones the × is on the Ready row and Buy it heads the ⋮ menu.
-
-  | Client | Card | Ready to order |
-  |---|---|---|
-  | Window | `Lay.fab` | `Lay.ready` |
-  | Web | `View.fab` (sticky) | `View.ready` |
-  | Phones | a queue row, Goal (`Mob.fab`) | a queue row, Ready (`Mob.fab.ready`) |
+  - **Buy it**, in the thread's header (`present/ready.rs` `header`): the first of the thread's tools, so on phones it heads the ⋮ menu. It is there whenever there is something to order, whatever the turn is doing, never in a buy thread. Its tooltip names the parts, or how the project's newest order stands ("Ordered · paid, being placed", then in production, shipped, delivered). Once something of the project is paid for, it reads Buy again.
+  - There is no bar above the message box: the person asked for it gone, after it showed on projects that were no KiCad project and not ready to order (`d1df376576`).
 
 - **The Buy button's words** (`Card.buy`, laws `order_buy_*`):
   - "Buy it · from $X" with a price;

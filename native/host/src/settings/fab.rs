@@ -1,7 +1,7 @@
 //! The project card:
 //! `fab.look {thread}` answers `{thread, intent, goal, parts, boards, label, estimate_problems, error, estimates, board_files, board_default, order}`
 //! for the thread's folder, and `fab.intent {thread, text}` writes `.backplane/intent.md` and answers the same card. The clients draw the goal,
-//! the Buy it button and the Ready bar from it (the session's `fab.*` info keys are kept from this reply by the policy).
+//! and the header's Buy it from it (the session's `fab.*` info keys are kept from this reply by the policy).
 //!
 //! No ordering, upload or payment happens here. The only network call is the optional "from $X" estimate (and a health check for a card with a board
 //! and no fab file yet) to the order server, `curl` in a 0600 config as the JS hub does; it is skipped when Ordering or `order.estimates` is off, on a
@@ -197,13 +197,14 @@ pub fn look_in(home: &Path, cwd: Option<&Path>, thread: &str, est_on: bool, serv
     let boards = kicad::boards::pick(&all, &bd);
     let order = order_status(&home.join("orders"), buy);
     let net = est_on && !crate::copy::on();
+    let own = kicad::boards::own(&all); // only these are something to order; `boards` is what the viewer's picker offers
     let est = if ps.is_empty() {
-        if net && !boards.is_empty() { let (c, b) = curl(home, &format!("{server}/v1/health"), &["Accept: application/json".into()], None); est_got(&c, &b) } else { Value::Null }
+        if net && !own.is_empty() { let (c, b) = curl(home, &format!("{server}/v1/health"), &["Accept: application/json".into()], None); est_got(&c, &b) } else { Value::Null }
     } else if net {
         let body = json!({"parts": ps.iter().map(|p| { let mut m = Map::new(); for k in ["name", "kind", "qty", "options", "features"] { m.insert(k.into(), p[k].clone()); } Value::Object(m) }).collect::<Vec<_>>()}).to_string();
         let (c, b) = curl(home, &format!("{server}/v1/estimate"), &["Content-Type: application/json".into(), format!("X-Backplane-Install: {}", install_id(home))], Some(&body)); est_got(&c, &b)
     } else { Value::Null };
-    card(thread, intent.trim(), &ps, if ps.is_empty() { boards.len() } else { 0 }, &est, est_on, &boards, &bd, &order)
+    card(thread, intent.trim(), &ps, if ps.is_empty() { own.len() } else { 0 }, &est, est_on, &boards, &bd, &order)
 }
 
 /// The answer to `fab.look` / `fab.intent` (the hub calls this for `fab.look` itself, to keep the read for the view's policy, and the handler below for `fab.intent`).
@@ -266,6 +267,14 @@ mod tests {
         let o = tmp("orders"); put(o.join("q_1.json"), r#"{"id":"q_1","thread":"b1","status":"shipped"}"#);
         std::thread::sleep(std::time::Duration::from_millis(20)); put(o.join("q_2.json"), r#"{"id":"q_2","thread":"b1","status":"quoted"}"#); put(o.join("q_3.json"), r#"{"id":"q_3","thread":"other","status":"paid"}"#);
         assert_eq!(order_status(&o, &["b1".into()]), "shipped", "a newer unpaid quote does not hide it"); assert_eq!(order_status(&o, &["nope".into()]), ""); assert_eq!(order_status(&o, &["b1/../x".into()]), ""); assert_eq!(order_status(&o, &[]), "");
+    }
+    #[test] fn a_repository_with_board_fixtures_has_nothing_to_order() {
+        let (home, work) = (tmp("fixhome"), tmp("fixwork")); put(work.join("test/files/fixtures/a.kicad_pcb"), "(kicad_pcb)");
+        let c = look_in(&home, Some(&work), "t1", true, "http://127.0.0.1:9", &[]);
+        assert_eq!((c["boards"].clone(), c["error"].clone()), (json!(0), json!("")), "no Buy it, and the order server is not asked");
+        assert_eq!(c["board_files"], json!(["test/files/fixtures/a.kicad_pcb"]), "the viewer's picker still offers it");
+        put(work.join("boards/b/b.kicad_pcb"), "(kicad_pcb)"); put(work.join("boards/b/b.kicad_pro"), "{}");
+        assert_eq!(look_in(&home, Some(&work), "t1", false, "http://127.0.0.1:9", &[])["boards"], json!(1), "a KiCad project's own board does count");
     }
     static ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
     #[test] fn the_order_server_of_a_test_hub_is_never_the_real_one() {

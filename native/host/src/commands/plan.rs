@@ -13,7 +13,10 @@ pub struct Plan { pub events: Vec<Value>, pub reply: Value, /// a running turn t
 pub struct Line { pub msg: bool, pub role: String, pub kind: String, pub text: String }
 /// The entries of the thread a request names (`thread`), newest first, for the requests that hand its conversation over.
 #[derive(Default)]
-pub struct Ctx { pub entries: Vec<Line> }
+pub struct Ctx { pub entries: Vec<Line>, pub buy: Buy }
+/// What `order.buy` asks of the settings (read from the hub's model: the fold keeps only a few, and a saved fold would not know older ones).
+#[derive(Default)]
+pub struct Buy { pub on: bool, pub buying: bool, pub last: String }
 
 /// The requests that read the thread's whole conversation.
 pub fn needs_entries(m: &str) -> bool { matches!(m, "thread.fork" | "thread.back" | "thread.provider" | "accounts.select") }
@@ -222,6 +225,7 @@ fn plan_inner(f: &Fold, at: u64, id: &Value, method: &str, p: &Value, cx: &Ctx) 
         "accounts.select" => account_select(f, at, id, p, cx),
         "thread.fork" => fork(f, at, id, &th, cx),
         "thread.back" => back(f, at, id, &th, cx),
+        "order.buy" => buy(f, at, id, &th, &cx.buy),
         _ => None,
     }
 }
@@ -321,6 +325,32 @@ pub fn hand_text(why: &str, es: &[Line], th: &str) -> String {
     if omitted > 0 { body.push(cut(&first, 2000)); body.push(format!("[{omitted} earlier items left out; thread_read with threadId {th} has them all]")) }
     body.extend(lines);
     format!("[Backplane] {why}\n\n{}\n\n[End of the handed-over context. The user's message follows.]", body.join("\n\n"))
+}
+
+/// Buy.title.of: a project's next buy thread is "Buy: <project> · 2".
+fn buy_title(f: &Fold, project: &str) -> String {
+    let base = format!("Buy: {}", f.projects.get(project).map_or("", |p| p.title.as_str()));
+    let n = f.threads.values().filter(|t| t.project == project && t.title.starts_with(&base)).count();
+    if n == 0 { base } else { format!("{base} · {}", n + 1) }
+}
+/// Buy.recent: a thread id says when it was made (`t<at>-<n>`). A rapid repeat of the same purchase opens the thread just made, also when two clients press before either hears back.
+fn buy_recent(th: &str, now: u64) -> bool { th.strip_prefix('t').and_then(|r| r.split('-').next()).and_then(|a| a.parse::<u64>().ok()).map_or(false, |made| now >= made && now - made <= 2) }
+/// Buy.start: a thread of its own in the source's folder, marked buy.<thread>, started by the person's "Buy it"; the client that asked goes to it.
+fn buy(f: &Fold, at: u64, id: &Value, src: &str, b: &Buy) -> Option<Plan> {
+    let no = |m: &str| Some(Plan { events: vec![], reply: err(id, m), stop: None, wt: None, scratch: None, act: None });
+    let there = |th: &str| Some(Plan { events: vec![], reply: made(id, th), stop: None, wt: None, scratch: None, act: None });
+    let Some(t) = f.threads.get(src).filter(|t| !t.deleted) else { return no("no such thread") };
+    if !b.on { return no("Ordering is off: turn it on in Settings to buy") }
+    if b.buying { return there(src) } // a queued click after the client went to its buy thread: it has no Buy of its own
+    if buy_recent(&b.last, at) && f.threads.get(&b.last).map_or(false, |l| !l.deleted) { return there(&b.last) }
+    let th = hub_id("t", at, f.n());
+    // the same folder, as a delegated task has; a source with no worktree of its own runs in the project folder, and a thread marked worktree with none would wait for one forever
+    let env = if t.worktree.is_empty() { "local" } else { t.env.as_str() };
+    let mut ev = vec![json!({"$":"ThreadCreated","id":th,"project":t.project,"title":buy_title(f, &t.project),"env":env,"branch":t.branch,"worktree":t.worktree,"provider":t.provider,"model":t.model,"at":at})];
+    ev.extend(account_created(f, &th, &t.provider, at)); ev.extend(account_forked(f, &th, src, at));
+    ev.extend([json!({"$":"ModesSet","id":th,"runtime":if t.runtime.is_empty() { "full-access" } else { &t.runtime },"interaction":if t.interaction.is_empty() { "default" } else { &t.interaction },"model":t.model,"at":at}),
+        json!({"$":"SettingSet","key":format!("buy.{th}"),"value":src,"at":at}), json!({"$":"SettingSet","key":format!("buy.last.{src}"),"value":th,"at":at})]);
+    Some(Plan { events: ev, reply: made(id, &th), stop: None, wt: None, scratch: None, act: Some(("post", th, "Buy it".to_string())) })
 }
 
 fn fork(f: &Fold, at: u64, id: &Value, src: &str, cx: &Ctx) -> Option<Plan> {
@@ -497,4 +527,39 @@ fn start(f: &Fold, at: u64, id: &Value, p: &Value) -> Option<Plan> {
     let mut pl = create(f, at, id, &json!({"project": project, "title": title}), None, Some(&th))?;
     // the first message is the agents' turn.start (queued while the worktree is made)
     pl.act = Some(("post", th.clone(), text)); Some(pl)
+}
+
+#[cfg(test)] mod buy_tests {
+    use super::*; use super::super::fold::{P, T};
+    fn fold() -> Fold { let mut f = Fold::default(); f.projects.insert("p".into(), P { title: "Lamp".into(), root: "/r".into(), ..Default::default() });
+        f.threads.insert("t1".into(), T { project: "p".into(), title: "Work".into(), provider: "claude".into(), model: "m".into(), env: "worktree".into(), branch: "b".into(), worktree: "/r/wt".into(), ..Default::default() }); f }
+    fn on() -> Buy { Buy { on: true, ..Default::default() } }
+    fn go(f: &Fold, at: u64, b: &Buy) -> Plan { buy(f, at, &json!(1), "t1", b).unwrap() }
+    #[test] fn a_buy_thread_works_in_its_sources_folder_and_says_the_persons_buy_it() {
+        let p = go(&fold(), 100, &on()); let th = p.reply["thread"].as_str().unwrap().to_string();
+        let c = &p.events[0]; assert_eq!((c["title"].as_str(), c["env"].as_str(), c["branch"].as_str(), c["worktree"].as_str()), (Some("Buy: Lamp"), Some("worktree"), Some("b"), Some("/r/wt")));
+        assert!(p.events.iter().any(|e| e["key"] == format!("buy.{th}") && e["value"] == "t1")); assert!(p.events.iter().any(|e| e["key"] == "buy.last.t1" && e["value"] == th.as_str()));
+        assert_eq!(p.act, Some(("post", th, "Buy it".to_string()))); assert!(p.wt.is_none(), "no worktree of its own");
+    }
+    #[test] fn a_source_with_no_worktree_of_its_own_runs_in_the_project_folder() {
+        let mut f = fold(); let t = f.threads.get_mut("t1").unwrap(); t.worktree.clear(); assert_eq!(go(&f, 100, &on()).events[0]["env"], "local", "marked worktree with none it would wait forever");
+    }
+    #[test] fn a_projects_next_buy_thread_is_numbered() {
+        let mut f = fold(); assert_eq!(buy_title(&f, "p"), "Buy: Lamp");
+        f.threads.insert("b1".into(), T { project: "p".into(), title: "Buy: Lamp".into(), ..Default::default() }); assert_eq!(buy_title(&f, "p"), "Buy: Lamp · 2");
+        f.threads.insert("b2".into(), T { project: "p".into(), title: "Buy: Lamp · 2".into(), ..Default::default() }); assert_eq!(buy_title(&f, "p"), "Buy: Lamp · 3");
+        f.threads.insert("o".into(), T { project: "q".into(), title: "Buy: Lamp".into(), ..Default::default() }); assert_eq!(buy_title(&f, "p"), "Buy: Lamp · 3", "another project's do not count");
+    }
+    #[test] fn a_rapid_repeat_opens_the_thread_just_made_and_a_later_one_is_a_new_order() {
+        let mut f = fold(); f.threads.insert("t100-1".into(), T { project: "p".into(), title: "Buy: Lamp".into(), ..Default::default() });
+        let b = Buy { on: true, last: "t100-1".into(), ..Default::default() };
+        let p = go(&f, 102, &b); assert!(p.events.is_empty()); assert_eq!(p.reply["thread"], "t100-1");
+        assert!(!go(&f, 103, &b).events.is_empty(), "three seconds on is a new order"); assert!(!buy_recent("", 100)); assert!(!buy_recent("improvement-x", 100));
+        f.threads.get_mut("t100-1").unwrap().deleted = true; assert!(!go(&f, 101, &b).events.is_empty(), "a deleted one is not opened");
+    }
+    #[test] fn nothing_is_made_with_ordering_off_for_a_deleted_thread_or_from_a_buy_thread() {
+        let mut f = fold(); let off = go(&f, 100, &Buy::default()); assert!(off.events.is_empty()); assert_eq!(off.reply["error"], "Ordering is off: turn it on in Settings to buy");
+        let again = go(&f, 100, &Buy { on: true, buying: true, ..Default::default() }); assert!(again.events.is_empty() && again.act.is_none()); assert_eq!(again.reply["thread"], "t1");
+        f.threads.get_mut("t1").unwrap().deleted = true; assert_eq!(go(&f, 100, &on()).reply["error"], "no such thread");
+    }
 }

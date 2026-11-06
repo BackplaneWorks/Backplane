@@ -40,7 +40,7 @@ impl Commands { fn agents(&self) -> Option<Arc<dyn seam::Seam>> { self.seam.clon
 impl RpcHandler for Commands {
     fn methods(&self) -> &'static [&'static str] { &["thread.pin", "thread.unpin", "thread.settle", "thread.unsettle", "thread.archive", "thread.unarchive", "thread.rename", "thread.delete", "thread.snooze",
         "thread.reorder", "thread.detach", "thread.reparent", "thread.create", "thread.modes", "thread.effort", "thread.provider", "accounts.select", "thread.fork", "thread.back", "project.remove", "project.rename",
-        "project.reorder", "project.move", "project.add", "project.new", "project.create", "project.start", "project.home", "todos.edit", "queue.edit", "queue.remove", "queue.move", "queue.steer", "queue.resume", "fs.list", "fs.mkdir", "fs.find"] }
+        "project.reorder", "project.move", "project.add", "project.new", "project.create", "project.start", "project.home", "todos.edit", "queue.edit", "queue.remove", "queue.move", "queue.steer", "queue.resume", "order.buy", "fs.list", "fs.mkdir", "fs.find"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             // one request at a time: the plan reads the fold the commit then moves on
@@ -67,7 +67,10 @@ impl RpcHandler for Commands {
                 _ => None,
             };
             // the conversation is read before the fold is taken: a long thread must not hold up every command
-            let cx = if plan::needs_entries(method) { entries_of(hub, &p["thread"].as_str().unwrap_or("").to_string()).await } else { Ctx::default() };
+            let cx = if plan::needs_entries(method) { entries_of(hub, &p["thread"].as_str().unwrap_or("").to_string()).await }
+                else if method == "order.buy" { let th = p["thread"].as_str().unwrap_or(""); let get = |k: String| async move { hub.setting(&k).await.unwrap_or_default() };
+                    Ctx { buy: plan::Buy { on: get("order.enabled".into()).await != "off", buying: !get(format!("buy.{th}")).await.is_empty(), last: get(format!("buy.last.{th}")).await }, ..Default::default() } }
+                else { Ctx::default() };
             let mut f = self.fold.lock().await;
             // thread.create with a creation key and a base (an Improvements send): the base must be a local branch of the project's repository, else the request is refused and no thread is made
             if method == "thread.create" && p["creationKey"].as_str().map_or(false, |k| !k.is_empty()) { if let Some(base) = p["base"].as_str().filter(|b| !b.is_empty()) {
@@ -137,7 +140,7 @@ async fn entries_upto(hub: &Arc<Hub>, th: &str, max: usize) -> Ctx {
         match page.ids.last().and_then(|l| l.parse::<u64>().ok()) { Some(l) if page.ids.len() == 32 && l > 1 => before = l, _ => break }
     }
     out.truncate(max);
-    Ctx { entries: out }
+    Ctx { entries: out, ..Default::default() }
 }
 
 /// The recent conversation of a thread whose agent session is gone, as the text that goes ahead of the message being run again (at most 128 items, the message itself left out):
