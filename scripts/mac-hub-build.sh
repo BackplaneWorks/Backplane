@@ -19,7 +19,7 @@ export CARGO_TARGET_DIR=$HOME/bp-e2e/target CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS:
 df -h /System/Volumes/Data | tail -1; rustc --version
 build() { # crate dir, binary
   cd ~/bp-e2e/src/native/$1
-  case "$TEST" in test:*) F=${TEST#test:}; cargo test --release --lib "$F" -- --nocapture --test-threads=1 2>&1 | grep -v "^warning\|^ *|\|^ *=\|^ *-->\|^$" | tail -60; return 0;; esac
+  case "$TEST" in test:*) F=${TEST#test:}; cargo test --release --bin backplane-hub "$F" -- --nocapture --test-threads=1 2>&1 | grep -v "^warning\|^ *|\|^ *=\|^ *-->\|^$" | tail -60; return 0;; esac
   if [ -n "$TEST" ]; then cargo test --release --no-fail-fast > ~/bp-e2e/logs/test-$1.log 2>&1 || echo "tests failed: $1 (logs/test-$1.log)"; grep -E "^test result|FAILED|failed" ~/bp-e2e/logs/test-$1.log | tail -15; fi
   cargo build --release > ~/bp-e2e/logs/build-$1.log 2>&1 || { tail -60 ~/bp-e2e/logs/build-$1.log; exit 1; }
   cp "$CARGO_TARGET_DIR/release/$2" ~/bp-e2e/dist/; ls -l ~/bp-e2e/dist/$2
