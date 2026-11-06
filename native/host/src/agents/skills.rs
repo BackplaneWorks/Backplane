@@ -170,6 +170,8 @@ pub fn rows(ss: &[Found], word: &str, provider: &str, isolated: bool) -> Vec<Val
     let Some(q) = word.strip_prefix('$') else { return vec![] };
     if let Some(url) = q.strip_prefix("install?") {
         let name = install_name(url); let dir = if provider == "codex" { "~/.agents/skills" } else { "~/.claude/skills" };
+        let have = ENV.get().map_or(false, |e| install_dir(&e.home, provider).join(&name).join("SKILL.md").exists()); // the skill is there already: the confirm says it replaces it
+        if have { return vec![json!({"word": format!("$replace!{url}"), "label": format!("confirm: replace {name}"), "desc": format!("{dir}/{name} is installed already; this overwrites its SKILL.md with {url}"), "group": "Install from a link", "note": "replaces"})] }
         return vec![json!({"word": format!("$install!{url}"), "label": format!("confirm: install {name}"), "desc": format!("writes {dir}/{name}/SKILL.md from {url}"), "group": "Install from a link", "note": ""})];
     }
     if q.starts_with("http://") || q.starts_with("https://") {

@@ -1305,6 +1305,28 @@ fn watch_log(work: &Path, rows: &[String], extra: &str) -> String { base_log(wor
     assert!(text.contains(&format!("read \"{}/.agents/skills/codexonly-zq/SKILL.md\"", uh.display())) && !text.contains("unslop-zq/SKILL.md"), "{text}");
     ag.shutdown();
 }
+#[tokio::test(flavor = "multi_thread")] async fn the_reply_depends_on_what_the_picked_skill_says_for_claude_and_codex() {
+    // stand-ins that do what the real agents do with the note: open the SKILL.md named in it and answer with its secret word
+    let find = r#"p=$(printf '%s' "$X" | sed -n 's/.*read \\\?"\([^"\\]*SKILL.md\)\\\?".*/\1/p' | head -1); w=$(sed -n 's/^SECRET=//p' "$p" 2>/dev/null | head -1)"#;
+    let uh = dir("sc-userhome"); // the skill sits where the other provider's agent does not load it itself, so the turn text must hand over the file
+    for rel in [".agents/skills/zqwhale", ".claude/skills/zqwhale"] { let d = uh.join(rel); std::fs::create_dir_all(&d).unwrap(); std::fs::write(d.join("SKILL.md"), "---\nname: zqwhale\ndescription: d\n---\nSECRET=PURPLE-OTTER-77\n").unwrap(); }
+    std::fs::remove_dir_all(uh.join(".claude/skills/zqwhale")).unwrap(); // placeholder: each provider below gets only the foreign copy
+    for provider in ["claude", "codex"] {
+        let (keep, drop) = if provider == "claude" { (".agents/skills/zqwhale", ".claude/skills/zqwhale") } else { (".claude/skills/zqwhale", ".agents/skills/zqwhale") };
+        let _ = std::fs::remove_dir_all(uh.join(drop)); std::fs::create_dir_all(uh.join(keep)).unwrap(); std::fs::write(uh.join(keep).join("SKILL.md"), "---\nname: zqwhale\ndescription: d\n---\nSECRET=PURPLE-OTTER-77\n").unwrap();
+        let sd = dir(&format!("sc-bin-{provider}"));
+        if provider == "claude" { script(&sd, "claude", &format!("#!/bin/sh\nwhile IFS= read -r X; do case \"$X\" in *'\"type\":\"user\"'*) {find}; printf '%s\\n' '{{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"s1\",\"cwd\":\"/tmp\",\"tools\":[],\"model\":\"fake\",\"permissionMode\":\"default\"}}'; printf '%s\\n' '{{\"type\":\"assistant\",\"message\":{{\"id\":\"m1\",\"role\":\"assistant\",\"content\":[{{\"type\":\"text\",\"text\":\"The skill says '\"$w\"'\"}}],\"usage\":{{\"input_tokens\":1}}}},\"session_id\":\"s1\"}}'; printf '%s\\n' '{{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"done\",\"session_id\":\"s1\"}}';; esac; done\n")) }
+        else { script(&sd, "codex", &format!("#!/bin/sh\ncase \"$1\" in --version) echo codex-cli 0.0.0; exit 0;; esac\nfor a in \"$@\"; do X=\"$a\"; done\n{find}\necho '{{\"type\":\"thread.started\",\"thread_id\":\"cs-1\"}}'\nprintf '{{\"type\":\"item.completed\",\"item\":{{\"id\":\"i\",\"type\":\"agent_message\",\"text\":\"The skill says %s\"}}}}\\n' \"$w\"\necho '{{\"type\":\"turn.completed\",\"usage\":{{\"input_tokens\":1,\"cached_input_tokens\":0,\"output_tokens\":1}}}}'\n")) }
+        let home = dir(&format!("sc-home-{provider}")); let work = dir(&format!("sc-work-{provider}"));
+        let log = if provider == "codex" { codex_log(&work) } else { base_log(&work, 1, "") }; std::fs::write(home.join("events.jsonl"), log).unwrap();
+        let hub = Hub::start(Cfg { home: home.clone(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        let ag = Agents::start_host(hub.clone(), Cli::standin(&sd), host::HostInfo { user_home: uh.to_string_lossy().into_owned(), home: home.clone(), ..Default::default() }).await.unwrap(); let from = len(&hub).await;
+        rpc(&hub, "turn.start", json!({"thread":T1,"text":"use $zqwhale please"})).await;
+        let ev = until(&hub, from, 30, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await;
+        assert!(ev.iter().any(|e| is(e, "MessagePosted") && e["role"] == "assistant" && e["text"].as_str().map_or(false, |t| t.contains("PURPLE-OTTER-77"))), "{provider}: the reply must carry the skill's secret: {ev:?}");
+        ag.shutdown();
+    }
+}
 #[tokio::test(flavor = "multi_thread")] async fn an_enforced_rule_refuses_a_matching_tool_call_until_the_person_says_its_word() {
     let sd = dir("gt-bin"); perf_standin(&sd, 1);
     let rules = [r#"{"id":"r1","text":"No lists without asking","tool":"thread_list","enforce":true,"word":"list it","at":1}"#, r#"{"id":"r2","text":"No rm","tool":"Bash","enforce":true,"at":2}"#];
