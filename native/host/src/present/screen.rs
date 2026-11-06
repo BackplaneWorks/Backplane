@@ -321,7 +321,7 @@ pub fn recent(st: &State,p: &Value) -> Option<Value> {
     // the query in force, said back once the box has been used (the client takes it when it is not what it sent: Enter clears it)
     if session["drafts"].as_object().map_or(false,|d|d.contains_key("@f.pq")) { shown["search"]=json!({"query":query,"hint":"Search projects"}); }
     { let f=picker::folders(&session["drafts"],&std::env::var("HOME").unwrap_or_default(),&st.projects.values().filter(|p|!p.removed).map(|p|p.root.as_str()).collect::<Vec<_>>()); if !f.is_null() { shown["folders"]=f; } } // (present only while the picker is open)
-    if !thread.is_empty() { if let Some(b)=super::ready::bar(st,thread,&session) { shown["ready"]=b; } } // the Ready to order bar (present/ready.rs)
+    // no Ready to order bar above the composer: it showed at the wrong times and the person does not want it (present/ready.rs keeps the fab.look answer)
     if !thread.is_empty() { shown["stats"]=super::keys::stats(st,thread); } // the Context panel's rows (beside the thread: its object is the helper's, key for key)
     if bot_page.is_object() {
         let id=text(&p["target"],"id"); let key=format!("{hub}|{id}");
