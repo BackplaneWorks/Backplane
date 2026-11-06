@@ -110,6 +110,18 @@ impl Backplane {
             self.timeline.scroll_to(ListOffset { item_ix: ix, offset_in_item: px(0.) });
         }
     }
+    /// A line in the client's log for a wheel turn over the thread (at most one in 400 ms): how far, where the list is, how long it is, and whether a history read or a place
+    /// being looked for is going on. For finding why the list stops following the wheel.
+    pub(crate) fn scroll_note(&mut self, e: &ScrollWheelEvent) {
+        let now = std::time::Instant::now();
+        if self.screens.scroll_logged.map_or(false, |t| now.duration_since(t).as_millis() < 400) { return; }
+        self.screens.scroll_logged = Some(now);
+        let top = self.timeline.logical_scroll_top();
+        let dy = f32::from(e.delta.pixel_delta(px(20.)).y);
+        self.m("wheel", serde_json::json!({"dy": dy, "item": top.item_ix, "in_item": f32::from(top.offset_in_item), "count": self.timeline.item_count(),
+            "y": -f32::from(self.timeline.scroll_px_offset_for_scrollbar().y), "max": f32::from(self.timeline.max_offset_for_scrollbar().height),
+            "seeking": self.screens.seeking.is_some(), "paging": self.screens.paging.is_some(), "older": !crate::string(&self.data["thread"], "historyOlder").is_empty()}));
+    }
     /// The end of the thread, and following it again. (Past the last row: the list takes it for its end.)
     pub(crate) fn timeline_to_end(&self) { self.timeline.scroll_to(ListOffset { item_ix: self.timeline.item_count(), offset_in_item: px(0.) }); }
     /// A picture was applied. `prev` is the thread that was on screen: this picture of the same thread is laid over the rows it held, so what was

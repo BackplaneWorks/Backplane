@@ -198,7 +198,7 @@ impl Backplane {
                         .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(text))).into_any_element()
             }
             // the agent still working: a green square that breathes beside the word (the one animation on screen, only while this row is)
-            "assistant" if id.starts_with("@live:") => {
+            "assistant" if id.starts_with("@live:") || id.starts_with("@working:") => {
                 let square = div().size(px(12.)).flex_shrink_0().flex().items_center().justify_center().child(
                     div().size(px(8.)).bg(c("ok")).with_animation(SharedString::from(format!("working-{id}")),
                         Animation::new(std::time::Duration::from_millis(1100)).repeat().with_easing(bounce(ease_in_out)),
@@ -425,6 +425,7 @@ impl Render for Backplane {
                     // a list: only the rows on screen are drawn, however much of the thread is held, and it keeps the reader's place as rows land above them
                     .when(!has_home, |d| d.child(div().id("timeline").relative().flex_1().min_h_0().flex().flex_col()
                         .on_mouse_down(MouseButton::Left, cx.listener(|this, e, _, cx| this.timeline_down(e, cx))).on_mouse_down(MouseButton::Right, cx.listener(|this, e, _, cx| this.timeline_down(e, cx)))
+                        .on_scroll_wheel(cx.listener(|this, e: &ScrollWheelEvent, _, _| this.scroll_note(e)))
                         .on_mouse_move(cx.listener(|this, e, _, cx| this.timeline_move(e, cx))).on_mouse_up(MouseButton::Left, cx.listener(|this, e, _, cx| this.timeline_up(e, cx))).on_mouse_up_out(MouseButton::Left, cx.listener(|this, e, _, cx| this.timeline_up(e, cx)))
                         .when(no_rows, |d| d.child(div().flex_1().flex().justify_center().items_end().child(div().w_full().max_w(px(930.)).px_4().py_6().text_color(c("dim")).child(if has_thread && thread["loading"] == true { "Loading…" } else if has_thread { "Start a conversation." } else { "Pick a thread, or start one with + next to a project." }))))
                         .when(!no_rows, |d| d.child(list(self.timeline.clone(), cx.processor(|this, ix, _, cx| this.timeline_row(ix, cx))).flex_1().min_h_0()))
