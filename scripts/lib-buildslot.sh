@@ -17,9 +17,9 @@ bq_run() { local cb=$1 d=${BUILD_LOCK_DIR:-$HOME/.cache/backplane-build.locks} i
     if [ -n "${BQ_MAIN:-}" ]; then flock -n -E 200 -o "$d/slot.main" "$@"; rc=$?; [ "$rc" -ne 200 ] && return "$rc"; fi
     for ((i = 0; i < n; i++)); do flock -n -E 200 -o "$d/slot.$i" "$@"; rc=$?; [ "$rc" -ne 200 ] && return "$rc"; done
     if [ "$waited" = 0 ]; then waited=1; [ -n "$cb" ] && "$cb"; fi; sleep 1; done; }
-# sccache shares compiled dependencies between worktrees (a new lane no longer compiles tokio, naga, zbus... from cold)
+# sccache shares compiled dependencies between worktrees (a new lane no longer compiles tokio, naga, zbus... from cold); through sccache-tmp, so the shared server never lives in a test run's TMPDIR
 bq_cc() { [ -z "${NO_SCCACHE:-}" ] && [ -z "${RUSTC_WRAPPER:-}" ] && command -v sccache > /dev/null 2>&1 || return 0
-  export RUSTC_WRAPPER=sccache SCCACHE_DIR=${SCCACHE_DIR:-$HOME/.cache/sccache} SCCACHE_CACHE_SIZE=${SCCACHE_CACHE_SIZE:-20G}; }
+  export RUSTC_WRAPPER=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/sccache-tmp SCCACHE_DIR=${SCCACHE_DIR:-$HOME/.cache/sccache} SCCACHE_CACHE_SIZE=${SCCACHE_CACHE_SIZE:-20G}; }
 
 # A private temp dir for a test run. The tests make dirs under std::env::temp_dir() (bp-<area>-<pid>-<name>) and never remove them; temp_dir() honours TMPDIR, so every run gets its own
 # TMPDIR and drops it when it ends. /tmp here is a RAM tmpfs with an inode quota, and leftovers once stopped every agent shell.
