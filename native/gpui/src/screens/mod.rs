@@ -1,6 +1,7 @@
 //! Screens the hub's screen model describes beyond generic nodes. Each one reads a plain JSON shape the
 //! hub already sends the phones (src/mobile/screen.bend) and answers with a view action; no decision lives here.
 pub mod asks;
+pub mod ready;
 pub mod attach;
 pub mod desk;
 pub mod devbar;
