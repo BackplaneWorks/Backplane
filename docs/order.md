@@ -70,5 +70,5 @@ The agents' instructions are in `src/core/order` (`Order.prompt.project`, `Order
 ## The server
 
 `order/` (Python): see `order/README.md` for the API, pricing, security and deployment.
-- The app's default server is `Order.server()`; the `order.server` setting replaces it. `BACKPLANE_ORDER_SERVER` in the hub's environment replaces only the default: every test hub (skills/backplane-e2e/hub.sh, test/tools and desktop/test harnesses, scripts/test.sh, the smoke scripts) sets it to a dead local address, so with Ordering on by default no test reaches the real server; hub.sh also starts with Ordering off, and a story that orders sets `order.server` to its own stand-in.
+- The app's default server is `Order.server()`; the `order.server` setting replaces it. `BACKPLANE_ORDER_SERVER` in the hub's environment replaces only the default: every test hub (test/perf/lib.mjs, which test/e2e/lib/hubfx.mjs uses, and the other test harnesses) sets it to a dead local address, so with Ordering on by default no test reaches the real server; the e2e story hubs also start with Ordering off, and a story that orders sets `order.server` to its own stand-in.
 - The fab's price models are a private pack (`FAB_VENDOR`), not in this repository.
