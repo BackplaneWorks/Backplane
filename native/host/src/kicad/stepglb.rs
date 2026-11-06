@@ -83,8 +83,9 @@ pub fn kicad_mac_clis() -> Vec<String> { ["KiCad/KiCad.app/Contents/MacOS/kicad-
 pub fn freecad_cmd(home: &Path) -> String {
     let managed = std::fs::read_to_string(home.join("freecad/command")).ok().and_then(|t| t.lines().next().map(str::to_string)).unwrap_or_default();
     let env = std::env::var("BACKPLANE_FREECAD").unwrap_or_default();
-    let apps = mac_apps("FreeCAD.app/Contents/Resources/bin/freecadcmd");
-    [env.as_str(), managed.as_str(), "freecadcmd", "FreeCADCmd", "freecad.cmd"].into_iter().chain(apps.iter().map(String::as_str)).filter(|c| !c.is_empty()).find_map(|c| on_path(c)).unwrap_or_default()
+    let mut cands: Vec<String> = vec![env, managed, "freecadcmd".into(), "FreeCADCmd".into(), "freecad.cmd".into()];
+    cands.extend(mac_apps("FreeCAD.app/Contents/Resources/bin/freecadcmd"));
+    cands.iter().filter(|c| !c.is_empty()).find_map(|c| on_path(c)).unwrap_or_default()
 }
 /// freecadGui: the GUI program beside its console one, else on PATH
 pub fn freecad_gui(cmd: &str) -> String {
