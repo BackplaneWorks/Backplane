@@ -1,0 +1,131 @@
+name: release
+# Slow packaging, kept apart from ci.yml. A tag vX.Y.Z (stable) or vX.Y.Z-beta.N (prerelease) builds, signs and publishes a GitHub release.
+# Run by hand (workflow_dispatch) it is a dry run: the archives and manifest.json are uploaded as workflow artifacts and nothing is published.
+# Signing needs the repo secret BACKPLANE_RELEASE_KEY (an ed25519 private key, PEM) and BACKPLANE_RELEASE_KEY_ID; without them nothing is published.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to stamp on the dry run
+        default: v0.0.0-dryrun.1
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_TERM_COLOR: always
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # the oldest runner images, so the archives run on older glibc (22.04: glibc 2.35)
+          - { target: linux-x64, os: ubuntu-22.04 }
+          - { target: linux-arm64, os: ubuntu-22.04-arm }
+          - { target: darwin-arm64, os: macos-latest }
+    name: build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: rui314/setup-mold@v1
+        if: runner.os == 'Linux'
+      - name: system libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends libxkbcommon-x11-dev libxcb1-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libasound2-dev libwayland-dev libvulkan-dev
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            native/host
+            native/gpui
+          shared-key: release-${{ matrix.target }}
+      - name: stamp the version
+        run: |
+          v="${TAG#v}"
+          sed -i.bak -E '0,/^version = ".*"/s//version = "'"$v"'"/' native/host/Cargo.toml native/gpui/Cargo.toml
+          rm -f native/host/Cargo.toml.bak native/gpui/Cargo.toml.bak
+      - name: build
+        run: |
+          (cd native/host && cargo build --release --bin backplane-hub) &
+          (cd native/gpui && cargo build --release) &
+          wait -n; wait -n
+      - uses: oven-sh/setup-bun@v2
+      - name: package
+        run: |
+          set -e
+          d=pkg; mkdir -p $d
+          cp native/host/target/release/backplane-hub native/gpui/target/release/backplane-gpui $d/
+          [ ! -x native/guard/target/release/backplane ] || cp native/guard/target/release/backplane $d/
+          (cd tools/browser && bun install --frozen-lockfile && bun build.ts "$PWD/../../$d/backplane-browser") || echo "no browser helper built"
+          cp -r assets $d/assets
+          git rev-parse HEAD > $d/COMMIT
+          name=backplane-$TAG-${{ matrix.target }}.tar.gz
+          tar -C $d -czf $name .
+          echo "ARCHIVE=$name" >> $GITHUB_ENV
+      - uses: actions/upload-artifact@v4
+        with:
+          name: archive-${{ matrix.target }}
+          path: ${{ env.ARCHIVE }}
+          retention-days: 7
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: archive-*
+          merge-multiple: true
+      - name: manifest
+        run: |
+          set -e
+          v="${TAG#v}"; ch=stable; case "$v" in *-*) ch=beta;; esac
+          python3 - "$TAG" "$v" "$ch" "${{ github.sha }}" <<'PY'
+          import hashlib, json, glob, os, sys
+          tag, v, ch, sha = sys.argv[1:5]
+          assets = {}
+          for f in sorted(glob.glob(f"backplane-{tag}-*.tar.gz")):
+              t = f[len(f"backplane-{tag}-"):-len(".tar.gz")]
+              assets[t] = {"name": f, "sha256": hashlib.sha256(open(f, "rb").read()).hexdigest(), "size": os.path.getsize(f)}
+          open("manifest.json", "w").write(json.dumps({"schema": 1, "tag": tag, "version": v, "channel": ch, "commit": sha, "assets": assets}, indent=1))
+          PY
+      - name: sign
+        id: sign
+        env:
+          KEY: ${{ secrets.BACKPLANE_RELEASE_KEY }}
+          KEY_ID: ${{ secrets.BACKPLANE_RELEASE_KEY_ID }}
+        run: |
+          if [ -z "$KEY" ]; then echo "signed=false" >> $GITHUB_OUTPUT; echo "::warning::no BACKPLANE_RELEASE_KEY: nothing is published"; exit 0; fi
+          umask 077; printf '%s\n' "$KEY" > k.pem
+          openssl pkeyutl -sign -inkey k.pem -rawin -in manifest.json -out manifest.json.sig
+          rm -f k.pem; printf '%s' "$KEY_ID" > manifest.json.keyid
+          echo "signed=true" >> $GITHUB_OUTPUT
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-dry-run
+          path: |
+            backplane-*.tar.gz
+            manifest.json
+            manifest.json.sig
+            manifest.json.keyid
+          retention-days: 7
+      - name: publish (tags only, signed only; manifest and signature go last)
+        if: github.event_name == 'push' && steps.sign.outputs.signed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          pre=; case "$TAG" in *-*) pre=--prerelease;; esac
+          gh release create "$TAG" $pre --draft --title "$TAG" --notes "" backplane-*.tar.gz
+          gh release upload "$TAG" manifest.json manifest.json.sig
+          gh release edit "$TAG" --draft=false
