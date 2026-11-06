@@ -13,8 +13,8 @@ natively with typed Codable structs, cache-first. Fresh-home screens only: proje
 
 ## Types
 ```
-Project = {id, title, root, threadCount, updatedAt, waiting}
-Thread  = {id, project, title, state, updatedAt, pinned, settled, archived, provider, model, preview, waiting}
+Project = {id, title, root, threadCount, updatedAt, waiting, icon, color, css}
+Thread  = {id, project, title, state, updatedAt, pinned, settled, archived, provider, model, preview, waiting, parent}
           state ∈ "idle" | "working" | "asking" | "failed"; preview ≤ 140 chars; waiting = open asks
 Entry   = {id, kind, text, at, clientId?, live?, tool?, ask?}
           kind ∈ "user" | "assistant" | "tool" | "ask" | "note" | "step"
@@ -37,7 +37,7 @@ On reconnect the app resubscribes and re-reads lists and the open thread (no res
 
 ## Additions (2026-11-06, gpui-mobile; `native/host/src/data/ext.rs`)
 `hello.features` lists what a hub does beyond the base: `images` (above), `actions`, `search`, `models`, `mentions`, `bots`, `notify`. An app checks the feature before offering the control.
-- `thread.act {thread, action: pin|unpin|settle|unsettle|archive|unarchive|delete|rename, title?}` → `{thread}` (delete: `{}`); each is the hub's own `thread.<action>` request, so the desktop and the phone agree. `project.act {project, action: rename|remove, title?}` → `{}`.
+- `thread.act {thread, action: pin|unpin|settle|unsettle|archive|unarchive|delete|rename, title?}` → `{thread}` (delete: `{}`); each is the hub's own `thread.<action>` request, so the desktop and the phone agree. `badge.list` → `{colors:[{name,css}], icons:[name]}` · `project.act {project, action: rename|color|icon|remove, title?, value?}` → `{}` (color: a tint name, icon: an icon name; `detach` on a thread makes it top level).
 - `search {q, archived?=false, limit?=30}` → `{threads, projects}` (title, project title, project folder; case-insensitive).
 - `models.list` → `{models:{provider:[{value,label,ok,why}]}}` (the hub's `models.all`); `thread.model {thread, provider, model, effort?}` → `{thread}` (the same provider: `thread.modes`; another provider: `thread.provider`, between turns only). A thread's `model` is the one chosen (ModesSet) else the provider's.
 - `mentions.list {q?, kind?: @|>|%|#|&, limit?=12}` → `{items:[{sigil,id,label,detail}]}`: bots, threads, projects, rooms, models.

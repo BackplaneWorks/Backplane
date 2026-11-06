@@ -304,9 +304,10 @@ object DataClient {
             else r.optJSONObject("thread")?.let { upsert(parseThread(it)) }
         } catch (e: Exception) { failure = e.message ?: "" }
     }
-    fun projectAct(id: String, action: String, title: String = "") = scope.launch {
+    suspend fun badgeList(): JSONObject = call("badge.list", JSONObject())
+    fun projectAct(id: String, action: String, title: String = "", value: String = "") = scope.launch {
         try {
-            call("project.act", JSONObject().put("project", id).put("action", action).apply { if (title.isNotEmpty()) put("title", title) })
+            call("project.act", JSONObject().put("project", id).put("action", action).apply { if (title.isNotEmpty()) put("title", title); if (value.isNotEmpty()) put("value", value) })
             if (action == "remove") { projects = projects.filter { it.id != id }; threads = threads.filter { it.project != id } } else refresh()
         } catch (e: Exception) { failure = e.message ?: "" }
     }

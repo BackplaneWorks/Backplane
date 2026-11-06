@@ -113,7 +113,7 @@ impl select::Facts for StateFacts<'_> {
     fn estimates_on(&self) -> bool { self.0.settings.get("order.estimates").map_or(true, |v| v != "off") }
 }
 impl Facts for StateFacts<'_> {
-    fn title_of(&self, id: &str) -> String { self.0.threads.get(id).map_or(String::new(), |t| t.title.clone()) }
+    fn title_of(&self, id: &str) -> String { self.0.threads.get(id).map(|t| t.title.clone()).or_else(|| self.0.projects.get(id).map(|p| p.title.clone())).unwrap_or_default() }
     fn fork_source(&self, id: &str) -> String { self.0.settings.get(&format!("fork.{id}")).cloned().unwrap_or_default() }
     fn order_of(&self, kind: &str, id: &str) -> Option<(String, Vec<String>)> {
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());

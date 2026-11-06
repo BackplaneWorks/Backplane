@@ -1,6 +1,6 @@
 //! data/1 additions for the phones (features "actions", "search", "models", "mentions", "bots", "notify"): each is a thin map onto the hub's own RPCs and
 //! folds, so a phone does what the desktop does and the hub stays the one place that decides. Added requests (docs/PHONE-DATA.md):
-//! `thread.act {thread, action: pin|unpin|settle|unsettle|archive|unarchive|delete|rename, title?}` → `{thread}` (delete: `{}`) · `project.act {project, action: rename|remove, title?}` → `{}` ·
+//! `thread.act {thread, action: pin|unpin|settle|unsettle|archive|unarchive|delete|detach|rename, title?}` → `{thread}` (delete: `{}`) · `project.act {project, action: rename|color|icon|remove, title?, value?}` → `{}` ·
 //! `search {q, archived?=false, limit?=30}` → `{threads, projects}` · `models.list` → `{models:{provider:[{value,label,ok,why}]}}` ·
 //! `thread.model {thread, provider, model?, effort?}` → `{thread}` · `mentions.list {q?, kind?, limit?}` → `{items:[{sigil,id,label,detail}]}` (`@` bots, `>` threads, `%` projects, `#` rooms, `&` models) ·
 //! `bots.list` → `{bots:[{id,name,thread,uber}], rooms:[{id,name,members}]}` · `bot.say {bot, text, clientId?}` → `{}` · `room.posts {room, limit?}` → `{posts}` · `room.post {room, text, clientId?}` → `{}`.
@@ -20,7 +20,7 @@ use super::*;
 
 pub const FEATURES: &[&str] = &["actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker"];
 
-const THREAD_ACTS: &[&str] = &["pin", "unpin", "settle", "unsettle", "archive", "unarchive", "delete"];
+const THREAD_ACTS: &[&str] = &["pin", "unpin", "settle", "unsettle", "archive", "unarchive", "delete", "detach"];
 
 /// The composer's chip as the desktop draws it: "claude / opus / high".
 pub fn chip(provider: &str, model: &str, effort: &str) -> String { format!("{provider} / {} / {}", if model.is_empty() { "default" } else { model }, if effort.is_empty() { "auto" } else { effort }) }
@@ -71,9 +71,15 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Re
             match act {
                 "rename" => rpc(hub, c, "project.rename", json!({"project":id,"title":s(p, "title")})).await.map(|_| json!({})),
                 "remove" => rpc(hub, c, "project.remove", json!({"project":id})).await.map(|_| json!({})),
-                _ => Err(err("action: rename or remove")),
+                // the badge: `color` takes a tint name, `icon` an icon name (present/badge.rs lists both; "" takes the default back)
+                "color" | "icon" => match crate::present::badge::setting_of(&format!("project.{act}.{id}={}", s(p, "value"))) {
+                    Some((key, value)) => rpc(hub, c, "setting.set", json!({"key":key,"value":value})).await.map(|_| json!({})),
+                    None => Err(err("value: a tint or an icon of the list")),
+                },
+                _ => Err(err("action: rename, color, icon or remove")),
             }
         }
+        "badge.list" => Ok(crate::present::badge::list()),
         "search" => search(hub, p).await,
         "models.list" => Ok(json!({"models": serde_json::from_str::<Value>(&crate::settings::models::all()).unwrap_or(json!({}))})),
         "thread.model" => {
@@ -126,7 +132,7 @@ async fn thread_act(hub: &Arc<Hub>, c: &mut Conn, p: &Value) -> Result<Value, Va
     } else if THREAD_ACTS.contains(&act) {
         rpc(hub, c, &format!("thread.{act}"), json!({"thread":th})).await?;
         if act == "delete" { return Ok(json!({})) }
-    } else { return Err(err("action: pin, unpin, settle, unsettle, archive, unarchive, delete or rename")) }
+    } else { return Err(err("action: pin, unpin, settle, unsettle, archive, unarchive, delete, detach or rename")) }
     thread_now(hub, th).await.map(|t| json!({"thread":t}))
 }
 

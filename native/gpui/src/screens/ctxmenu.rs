@@ -22,6 +22,7 @@ pub fn thread_items(t: &Value, project: &str) -> Vec<Item> {
     if let Some(l) = t["lead"].as_array().and_then(|l| l.first()) { v.push(item(&s(l, "label"), &s(l, "action"), &s(l, "value"), false)); }
     for o in t["trail"].as_array().into_iter().flatten().flat_map(|x| x["options"].as_array().into_iter().flatten()) { v.push(item(&format!("Snooze {}", s(o, "label").to_lowercase()), "row-snooze", &s(o, "value"), false)); }
     if t["canChild"].as_bool().unwrap_or(true) { v.push(item("New subthread", "thread-child", &format!("{}|{}", raw(&qid), project), false)); }
+    if t["depth"].as_u64().unwrap_or(0) > 0 { v.push(item("Move to top level", "row-detach", raw(&qid), false)); }
     v.push(item("Rename", "row-rename", raw(&qid), false));
     v.push(item("Regenerate title", "row-retitle", raw(&qid), false));
     v.push(item("Archive", "row-archive", &qid, false));
@@ -29,7 +30,7 @@ pub fn thread_items(t: &Value, project: &str) -> Vec<Item> {
     v
 }
 /// The items for a project's header.
-pub fn project_items(pid_raw: &str) -> Vec<Item> { vec![item("New thread", "new-thread", pid_raw, false), item("Remove project", "proj-remove", pid_raw, true)] }
+pub fn project_items(pid_raw: &str) -> Vec<Item> { vec![item("New thread", "new-thread", pid_raw, false), item("Rename", "proj-rename", pid_raw, false), item("Badge", "look", pid_raw, false), item("Remove project", "proj-remove", pid_raw, true)] }
 
 impl Backplane {
     pub(crate) fn ctx_open(&mut self, at: Point<Pixels>, items: Vec<Item>, cx: &mut Context<Self>) { self.screens.ctx = Some(Menu { at, items, armed: None }); cx.notify(); }
@@ -80,5 +81,12 @@ mod tests {
         assert_eq!(it[3].value, "t7|p1"); assert_eq!(it[4].value, "t7"); assert!(it.last().unwrap().confirm && !it[0].confirm);
         let pinned = j(r#"{"id":"t1","pinned":true}"#); assert_eq!(thread_items(&pinned, "p")[0].action, "row-unpin");
     }
-    #[test] fn a_project_offers_new_thread_and_a_confirmed_remove() { let it = project_items("p1"); assert_eq!((it[0].action.as_str(), it[1].action.as_str(), it[1].confirm), ("new-thread", "proj-remove", true)); }
+    #[test] fn a_project_offers_new_thread_rename_badge_and_a_confirmed_remove() {
+        let it = project_items("p1"); assert_eq!(it.iter().map(|i| i.action.as_str()).collect::<Vec<_>>(), ["new-thread", "proj-rename", "look", "proj-remove"]); assert!(it[3].confirm && !it[1].confirm && it[1].value == "p1");
+    }
+    #[test] fn only_a_subthread_offers_to_move_to_the_top_level() {
+        let sub = j(r#"{"id":"http://h:1|t8","depth":1,"canChild":true}"#); let it = thread_items(&sub, "p1");
+        let m = it.iter().find(|i| i.label == "Move to top level").unwrap(); assert_eq!((m.action.as_str(), m.value.as_str()), ("row-detach", "t8"));
+        assert!(thread_items(&j(r#"{"id":"t1","depth":0}"#), "p1").iter().all(|i| i.action != "row-detach") && thread_items(&j(r#"{"id":"t1"}"#), "p1").iter().all(|i| i.action != "row-detach"));
+    }
 }

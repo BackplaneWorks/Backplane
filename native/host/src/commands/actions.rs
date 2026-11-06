@@ -93,6 +93,18 @@ pub fn act(req: &Req) -> Option<ActOut> {
             a.set("@ren.owner", r.session["sel"].as_str().unwrap_or("")); a.set("@f.title", &(r.title_of)(v));
             a.cmds.push(json!({"type": "focus", "id": "thread-title"}));
         }
+        // a subthread to the top level of its project (thread.detach)
+        "row-detach" => { if v.is_empty() { return None } a.rpc("thread.detach", json!({"thread": v})); a.set("@del", ""); a.set("@menu", ""); }
+        // the project's menu: Rename opens the same rename box a thread's does, on the project (rename-save sends project.rename)
+        "proj-rename" => {
+            if v.is_empty() { return None }
+            a.set("@del", ""); a.set("@rm", ""); a.set("@ren.inline", ""); a.set("@menu", ""); a.set("@look", ""); a.set("@ren", v); a.set("@ren.kind", "project");
+            a.set("@ren.owner", r.session["sel"].as_str().unwrap_or("")); a.set("@f.title", &(r.title_of)(v));
+            a.cmds.push(json!({"type": "focus", "id": "thread-title"}));
+        }
+        // the project's badge editor (@look is the project it is open for): the same press shuts it; look-set writes `project.color.<id>=<tint>` or `project.icon.<id>=<icon>` and leaves it open
+        "look" => { if v.is_empty() { return None } let now = if draft(r.session, "@look") == v { "" } else { v }; a.set("@look", now); a.set("@menu", ""); a.set("@del", ""); a.set("@rm", ""); }
+        "look-set" => { let (key, val) = crate::present::badge::setting_of(v)?; a.rpc("setting.set", json!({"key": key, "value": val})); }
         // Regenerate title: the hub's title model writes a new one (thread.retitle)
         "row-retitle" => { a.rpc("thread.retitle", json!({"thread": v})); a.set("@del", ""); a.set("@menu", ""); }
         // the phones send "id\u{1f}title"; a blank id or title is never sent
@@ -167,6 +179,21 @@ pub fn merge(session: &Value, patch: &Value) -> Value {
 mod tests {
     use super::*;
     const FIX: &str = include_str!("../../../../test/commands/fixtures/actions.json");
+    #[test] fn the_project_menu_renames_edits_the_badge_and_a_subthread_goes_to_the_top() {
+        let sess = json!({"rid": 3, "sel": "t1", "drafts": {}, "info": {}});
+        let run = |action: &str, value: &str, session: &Value| act(&Req { hub: "h", session, sel: "t1", action, value, title_of: &|id| if id == "p1" { "Board".into() } else { String::new() } });
+        let o = run("proj-rename", "p1", &sess).unwrap(); let d = &o.session_patch["drafts"];
+        assert_eq!((d["@ren"].as_str(), d["@ren.kind"].as_str(), d["@f.title"].as_str()), (Some("p1"), Some("project"), Some("Board")));
+        let mut s2 = sess.clone(); s2["drafts"] = json!({"@ren": "p1", "@ren.kind": "project", "@f.title": "Board 2"});
+        let o = run("rename-save", "", &s2).unwrap(); assert!(o.cmds[0]["text"].as_str().unwrap().contains("\"project.rename\""));
+        assert!(run("proj-rename", "", &sess).is_none());
+        let o = run("look", "p1", &sess).unwrap(); assert_eq!(o.session_patch["drafts"]["@look"], "p1");
+        let mut s3 = sess.clone(); s3["drafts"] = json!({"@look": "p1"}); assert_eq!(run("look", "p1", &s3).unwrap().session_patch["drafts"]["@look"], "", "the same press shuts it");
+        let o = run("look-set", "project.color.p1=pink", &sess).unwrap();
+        assert_eq!(o.cmds[0]["text"].as_str().unwrap(), "{\"id\":3,\"m\":\"setting.set\",\"p\":{\"key\":\"project.color.p1\",\"value\":\"pink\"}}");
+        assert!(run("look-set", "agent.provider=codex", &sess).is_none() && run("look-set", "project.icon.p1=skull", &sess).is_none(), "only the badge settings, only listed values");
+        let o = run("row-detach", "t2", &sess).unwrap(); assert_eq!(o.cmds[0]["text"].as_str().unwrap(), "{\"id\":3,\"m\":\"thread.detach\",\"p\":{\"thread\":\"t2\"}}");
+    }
     // Add project: open, type, go in, add; the add sends project.add with the path and arms the want for the first thread; close clears
     #[test] fn the_folder_picker_actions_set_the_text_and_add_sends_the_request() {
         let sess = json!({"rid": 3, "drafts": {}, "info": {"local.machine": "m", "local.generation": "g"}});

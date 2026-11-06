@@ -8,7 +8,7 @@ use tokio_tungstenite::connect_async;
 
 struct Fake(Arc<Hub>);
 impl RpcHandler for Fake {
-    fn methods(&self) -> &'static [&'static str] { &["project.add", "thread.create", "thread.modes", "thread.effort", "thread.provider", "ask.answer", "turn.interrupt", "thread.pin", "thread.rename"] }
+    fn methods(&self) -> &'static [&'static str] { &["project.add", "thread.create", "thread.modes", "thread.effort", "thread.provider", "ask.answer", "turn.interrupt", "thread.pin", "thread.rename", "thread.detach", "setting.set"] }
     fn call<'a>(&'a self, h: &'a Arc<Hub>, _w: &'a Caller, id: &'a Value, m: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let _ = &self.0; let at = now_ms() / 1000;
@@ -17,7 +17,7 @@ impl RpcHandler for Fake {
                 "project.add" => { let root = s(p, "path"); h.commit(&json!({"$":"ProjectCreated","id":format!("p{n}"),"title":root.rsplit('/').next().unwrap_or(""),"root":root,"at":at})).await.unwrap(); vec![json!({"t":"reply","id":id,"ok":true})] }
                 "thread.create" => { let t = format!("t{n}"); h.commit(&json!({"$":"ThreadCreated","id":t,"project":s(p,"project"),"title":if s(p,"title").is_empty(){"New thread"}else{s(p,"title")},"env":"local","branch":"","worktree":"","provider":"claude","model":"","at":at})).await.unwrap(); vec![json!({"t":"reply","id":id,"ok":true,"thread":t})] }
                 "ask.answer" => { h.commit(&json!({"$":"AskClosed","id":s(p,"id"),"answer":s(p,"answer"),"at":at})).await.unwrap(); vec![json!({"t":"reply","id":id,"ok":true})] }
-                "thread.modes" | "thread.effort" | "thread.provider" | "turn.interrupt" | "thread.pin" | "thread.rename" => vec![json!({"t":"reply","id":id,"ok":true})],
+                "thread.modes" | "thread.effort" | "thread.provider" | "turn.interrupt" | "thread.pin" | "thread.rename" | "thread.detach" | "setting.set" => vec![json!({"t":"reply","id":id,"ok":true})],
                 _ => vec![json!({"t":"reply","id":id,"ok":false,"error":"no"})],
             }
         })
@@ -211,6 +211,16 @@ async fn ask(ws: &mut Ws, id: u64, m: &str, p: Value) -> Value {
     let r = ask(&mut ws, 9, "thread.act", json!({"thread":"t1","action":"explode"})).await; assert_eq!(r["ok"], false);
     let r = ask(&mut ws, 10, "thread.act", json!({"thread":"nope","action":"pin"})).await; assert_eq!(r["ok"], false);
     let r = ask(&mut ws, 11, "thread.act", json!({"thread":"t1","action":"rename","title":"  "})).await; assert_eq!(r["ok"], false, "a blank title is refused before any request");
+    // the badge and Move to top level
+    let r = ask(&mut ws, 12, "badge.list", json!({})).await; assert_eq!((r["result"]["colors"][0]["name"].as_str(), r["result"]["icons"][0].as_str()), (Some("blue"), Some("folder")));
+    assert_eq!(ask(&mut ws, 13, "project.act", json!({"project":"p1","action":"color","value":"pink"})).await["ok"], true);
+    assert_eq!(ask(&mut ws, 14, "project.act", json!({"project":"p1","action":"icon","value":"cpu"})).await["ok"], true);
+    assert_eq!(ask(&mut ws, 15, "project.act", json!({"project":"p1","action":"color","value":"mauve"})).await["ok"], false, "only a tint of the list");
+    assert_eq!(ask(&mut ws, 16, "project.act", json!({"project":"p1","action":"icon","value":"skull"})).await["ok"], false);
+    assert_eq!(ask(&mut ws, 17, "thread.act", json!({"thread":"t2","action":"detach"})).await["ok"], true);
+    let r = ask(&mut ws, 18, "search", json!({"q":"alpha"})).await; let p = &r["result"]["projects"][0];
+    assert!(p["css"].as_str().unwrap().starts_with('#') && !p["color"].as_str().unwrap().is_empty() && p["icon"] == "folder", "a project carries its badge: {p}");
+    assert_eq!(r["result"]["threads"][0]["parent"], "", "a thread says what it is under");
 }
 #[test] fn notify_for_marks_asks_and_turn_ends_only() {
     let t = |k: &str| ext::notify_for(&json!({"$":"TurnChanged","state":k}), "t1", "T", "");

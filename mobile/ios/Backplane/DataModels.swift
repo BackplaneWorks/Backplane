@@ -95,10 +95,13 @@ struct DProject: Codable, Equatable, Identifiable {
     var threadCount: Int
     var updatedAt: Int
     var waiting: Int
-    enum CodingKeys: String, CodingKey { case id, title, root, threadCount, updatedAt, waiting }
+    var icon: String   // the badge the hub names: an icon and its colour as "#rrggbb"
+    var css: String
+    enum CodingKeys: String, CodingKey { case id, title, root, threadCount, updatedAt, waiting, icon, css }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = c.str(.id); title = c.str(.title); root = c.str(.root); threadCount = c.int(.threadCount); updatedAt = c.int(.updatedAt); waiting = c.int(.waiting)
+        icon = c.str(.icon); css = c.str(.css)
     }
 }
 
@@ -118,12 +121,13 @@ struct DThread: Codable, Equatable, Identifiable {
     var chip: String    // the composer's "claude / opus / high", in the hub's words
     var preview: String
     var waiting: Int
-    enum CodingKeys: String, CodingKey { case id, project, title, state, updatedAt, pinned, settled, archived, provider, model, effort, runtime, chip, preview, waiting }
+    var parent: String   // the thread it is a subthread of; "" at the top level
+    enum CodingKeys: String, CodingKey { case id, project, title, state, updatedAt, pinned, settled, archived, provider, model, effort, runtime, chip, preview, waiting, parent }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = c.str(.id); project = c.str(.project); title = c.str(.title); state = c.str(.state); updatedAt = c.int(.updatedAt)
         pinned = c.bool(.pinned); settled = c.bool(.settled); archived = c.bool(.archived)
-        provider = c.str(.provider); model = c.str(.model); effort = c.str(.effort); runtime = c.str(.runtime); chip = c.str(.chip); preview = c.str(.preview); waiting = c.int(.waiting)
+        provider = c.str(.provider); model = c.str(.model); effort = c.str(.effort); runtime = c.str(.runtime); chip = c.str(.chip); preview = c.str(.preview); waiting = c.int(.waiting); parent = c.str(.parent)
     }
 }
 
@@ -146,6 +150,11 @@ struct DDirs: Decodable { var path: String; var parent: String; var dirs: [Strin
 struct DSubReply: Decodable { var sub: Int
     enum CodingKeys: String, CodingKey { case sub }
     init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); sub = c.int(.sub) } }
+/// `badge.list`: the tints and icons a project may take.
+struct DBadgeList: Decodable {
+    struct Tint: Decodable { var name: String; var css: String }
+    var colors: [Tint]; var icons: [String]
+}
 struct DEmpty: Decodable { init(from d: Decoder) throws {} }
 struct DAttachmentData: Decodable { var mime: String; var data: String
     enum CodingKeys: String, CodingKey { case mime, data }

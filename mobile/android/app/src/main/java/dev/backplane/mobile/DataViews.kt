@@ -192,6 +192,8 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, addProject:
                     }, onLongClick = { projMenu = p }).padding(start = 10.dp, end = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(if (closed) Icons.Default.ChevronRight else Icons.Default.ExpandMore, null, tint = dcs.onSurfaceVariant, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(6.dp))
                         Icon(Icons.Default.FolderOpen, null, tint = dok, modifier = Modifier.size(15.dp)); Spacer(Modifier.width(8.dp))
+                        Box(Modifier.size(8.dp).background(runCatching { androidx.compose.ui.graphics.Color(android.graphics.Color.parseColor(p.css)) }.getOrDefault(dcs.onSurfaceVariant)).testTag("proj.badge.${p.id}"))
+                        Spacer(Modifier.width(6.dp))
                         DMono(p.title.uppercase(), dcs.onSurfaceVariant, 12, Modifier.weight(1f))
                         if (p.waiting > 0) { DMono("${p.waiting}", dcs.error, 11, bold = true); Spacer(Modifier.width(6.dp)) }
                         IconButton(onClick = { newThread(p.id) }, modifier = Modifier.size(40.dp)) { Icon(Icons.Default.Add, "New thread in ${p.title}", tint = dcs.onSurfaceVariant, modifier = Modifier.size(18.dp)) }
