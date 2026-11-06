@@ -3,6 +3,10 @@
 //! only), primitives to POSITION and indices, a primitive's colour to its material's baseColorFactor. Every F32 step is one
 //! in the same order, so the triangles are the same bits.
 //!
+//! A colour on the wire is linear light, as baseColorFactor is by glTF's rule, and every client lights it as that and applies sRGB once at the end. One exporter breaks the
+//! rule: KiCad writes its components' colours linear (OpenCascade reads STEP's sRGB) but its own board layers as the display numbers of its 3D view, so they are decoded here
+//! (`board_color`). A layer is known by its mesh's exact name, `<pcb_name>_<role>`, never by its colour.
+//!
 //! reader's edges are kept, because a malformed file must read the same: JSON is the lenient json (commas and colons are
 //! not checked, the first of a duplicate key wins), a table index wraps at the table's power of two (Tab.go reads only d bits), an
 //! aligned accessor stops at the end of the data and an unaligned one reads zeros past it.
@@ -242,14 +246,37 @@ fn color(m: &J) -> u32 {
     rgb | if m.get_str("alphaMode", "OPAQUE") == "BLEND" { 255u32.wrapping_sub(chan(nth(&f, 3, 1.0))) << 24 } else { 0 }
 }
 
+/// sRGB's transfer: a display value as linear light.
+fn linear(c: f32) -> f32 { if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) } }
+/// A mask this dark is drawn opaque: its authored alpha shows the olive laminate through it and turns a black mask olive (the person's call, 2026-10-31). In display numbers.
+const DARK_MASK: f32 = 0.12;
+/// Transparency a dark mask keeps so a client still knows it for a coat: 1 in 255 does not show.
+const COAT: u32 = 1;
+/// What a KiCad board layer's colour is: its display numbers made linear, the alpha as authored.
+fn board_color(m: &J, mask: bool) -> u32 {
+    let f = m.get_obj("pbrMetallicRoughness").nums("baseColorFactor");
+    let (r, g, b) = (nth(&f, 0, 1.0), nth(&f, 1, 1.0), nth(&f, 2, 1.0));
+    let rgb = chan(linear(clamp01(r))) << 16 | chan(linear(clamp01(g))) << 8 | chan(linear(clamp01(b)));
+    if mask && fl::max(r, fl::max(g, b)) < DARK_MASK { return rgb | COAT << 24 }
+    rgb | if m.get_str("alphaMode", "OPAQUE") == "BLEND" { 255u32.wrapping_sub(chan(nth(&f, 3, 1.0))) << 24 } else { 0 }
+}
+/// Which of KiCad's board layers a mesh is, from the file's own `pcb_name`: (a board layer, its soldermask).
+fn layer_of(name: &str, pcb: &str) -> (bool, bool) {
+    let role = if pcb.is_empty() { None } else { name.strip_prefix(pcb).and_then(|n| n.strip_prefix('_')) };
+    (matches!(role, Some("soldermask" | "silkscreen" | "pad" | "copper" | "via" | "PCB")), role == Some("soldermask"))
+}
+
 // Triangles ---------------------------------------------------------------------------------------------------------------------
 
-struct Gltf<'a> { accs: Tbl<'a>, views: Tbl<'a>, mats: Tbl<'a>, bin: Bin }
-/// Prim.tris: a primitive's triangles onto `out` (only mode 4 draws)
-fn prim(p: &J, g: &Gltf, m: &M4, out: &mut Vec<Tri3>) -> Result<(), TooBig> {
+struct Gltf<'a> { accs: Tbl<'a>, views: Tbl<'a>, mats: Tbl<'a>, bin: Bin, pcb: &'a str }
+/// Prim.tris: a primitive's triangles onto `out` (only mode 4 draws); `name` is its mesh's
+fn prim(p: &J, name: &str, g: &Gltf, m: &M4, out: &mut Vec<Tri3>) -> Result<(), TooBig> {
     if p.get_u32("mode", 4) != 4 { return Ok(()) }
     let vs = positions(&Acc::of(g.accs.at(p.get_obj("attributes").get_u32("POSITION", 0)), &g.views), &g.bin, m)?;
-    let col = if p.get("material").is_some() { color(g.mats.at(p.get_u32("material", 0))) } else { 13421772 };
+    let col = if p.get("material").is_some() {
+        let mat = g.mats.at(p.get_u32("material", 0));
+        match layer_of(name, g.pcb) { (true, mask) => board_color(mat, mask), _ => color(mat) }
+    } else { 13421772 };
     let mut push = |a: [f32; 3], b: [f32; 3], c: [f32; 3]| { if out.len() >= MOST_TRIS { return Err(TooBig) } out.push(Tri3 { a, b, c, color: col }); Ok(()) };
     if let Some(J::Num(r)) = p.get("indices") {
         let ix = indices(&Acc::of(g.accs.at(u32_read(r).unwrap_or(0)), &g.views), &g.bin)?;
@@ -272,7 +299,9 @@ pub fn tris(bs: &[u8]) -> Result<Vec<Tri3>, TooBig> {
     let body = usize::try_from(rest + 8).ok().and_then(|at| bs.get(at..)).unwrap_or(&[]);
     let bin = Bin { w: body.chunks_exact(4).take(n).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect() };
     let (nodes, meshes) = (Tbl { xs: j.get_obj("nodes").elems() }, Tbl { xs: j.get_obj("meshes").elems() });
-    let g = Gltf { accs: Tbl { xs: j.get_obj("accessors").elems() }, views: Tbl { xs: j.get_obj("bufferViews").elems() }, mats: Tbl { xs: j.get_obj("materials").elems() }, bin };
+    let extras = j.get_obj("asset").get_obj("extras");
+    let pcb = if extras.get_str("generator", "").starts_with("KiCad") { extras.get_str("pcb_name", "") } else { "" };
+    let g = Gltf { accs: Tbl { xs: j.get_obj("accessors").elems() }, views: Tbl { xs: j.get_obj("bufferViews").elems() }, mats: Tbl { xs: j.get_obj("materials").elems() }, bin, pcb };
     let scenes = Tbl { xs: j.get_obj("scenes").elems() };
     let roots = scenes.at(j.get_u32("scene", 0)).u32s("nodes");
     // Walk.go: depth first over the node forest, the first child next; fuel bounds the visits
@@ -284,7 +313,7 @@ pub fn tris(bs: &[u8]) -> Result<Vec<Tri3>, TooBig> {
         let n = nodes.at(idx); let w = m.mul(&M4::of_node(n));
         work.extend(n.u32s("children").iter().rev().map(|k| (*k, w)));
         if work.len() > MOST_WALK { return Err(TooBig) }
-        if n.get("mesh").is_some() { for p in meshes.at(n.get_u32("mesh", 0)).get_obj("primitives").elems() { prim(p, &g, &w, &mut out)? } }
+        if n.get("mesh").is_some() { let mesh = meshes.at(n.get_u32("mesh", 0)); for p in mesh.get_obj("primitives").elems() { prim(p, mesh.get_str("name", ""), &g, &w, &mut out)? } }
     }
     Ok(out)
 }
@@ -354,6 +383,23 @@ pub mod tests {
     #[test] fn too_many_triangles_are_refused_not_held() {
         let j = TRI.replace(r#""count":3"#, r#""count":4294967295"#).replace(r#""byteOffset":0"#, r#""byteOffset":2"#);
         assert_eq!(tris(&glb(&j, &floats(&[0.0; 9]))), Err(TooBig));
+    }
+    fn kicad(mesh: &str, generator: &str, mat: &str) -> u32 {
+        let j = TRI.replace(r#""scenes":"#, &format!(r#""asset":{{"extras":{{"generator":"{generator}","pcb_name":"tig"}}}},"scenes":"#))
+            .replace(r#""meshes":[{"primitives""#, &format!(r#""meshes":[{{"name":"{mesh}","primitives""#)).replace(r#""materials":[{"pbrMetallicRoughness":{"baseColorFactor":[1,0,0.5,1]}}]"#, &format!(r#""materials":[{mat}]"#));
+        tris(&glb(&j, &floats(&[0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0]))).unwrap()[0].color
+    }
+    const MASK: &str = r#"{"alphaMode":"BLEND","pbrMetallicRoughness":{"baseColorFactor":[0.08,0.2,0.14,0.83]}}"#;
+    #[test] fn a_kicad_board_layer_is_display_numbers_made_linear_and_a_component_stays_as_written() {
+        // KiCad's green mask, 0.08 0.2 0.14 on its 3D view: linear 0.007 0.033 0.018, alpha 0.83 is 43 of transparency
+        assert_eq!(kicad("tig_soldermask", "KiCad 10.0.7", MASK), 43 << 24 | 0x020804);
+        assert_eq!(kicad("tig_PCB", "KiCad 10.0.7", r#"{"pbrMetallicRoughness":{"baseColorFactor":[0.5,0.5,0.5,1]}}"#), 0x373737, "0.5 on the display is 0.214 of light");
+        assert_eq!(kicad("R_0402_tig_PCB", "KiCad 10.0.7", MASK), 43 << 24 | 0x143324, "a component's mesh is linear already, whatever it is called");
+        assert_eq!(kicad("tig_soldermask", "something else", MASK), 43 << 24 | 0x143324, "another exporter is taken at its word");
+    }
+    #[test] fn a_dark_mask_is_opaque_but_still_known_for_a_coat() {
+        let black = r#"{"alphaMode":"BLEND","pbrMetallicRoughness":{"baseColorFactor":[0.08,0.08,0.08,0.83]}}"#;
+        assert_eq!(kicad("tig_soldermask", "KiCad 10.0.7", black) >> 24, COAT, "only just transparent: the laminate does not show");
     }
     #[test] fn colours_blend_and_clamp() {
         let m = |s: &str| color(&parse(s).unwrap().unwrap());

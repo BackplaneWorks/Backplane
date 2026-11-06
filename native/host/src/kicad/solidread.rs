@@ -19,7 +19,7 @@ fn revision(path: &str) -> String {
 }
 /// Pv.step.out, Pv.board.out.recipe: a model's name in the cache, with the source's exact revision unhashed
 pub fn cached(dir: &str, path: &str, rev: &str, step: bool, bare: bool, full: bool) -> String {
-    if step { format!("{dir}/step3-{}.{rev}.normal.glb", stepglb::fnv(path)) }
+    if step { format!("{dir}/step4-{}.{rev}.normal.glb", stepglb::fnv(path)) }
     else if full { format!("{dir}/board-full-outer-v1-{}{}.{rev}.glb", if bare { "bare-" } else { "parts-" }, stepglb::fnv(path)) }
     else { format!("{dir}/board-{}.{rev}.glb", stepglb::fnv(&format!("{}{path}", if bare { "bare3|" } else { "parts3|" }))) }
 }
@@ -87,7 +87,7 @@ mod tests {
         assert_eq!(cached("/c", "/p/b.kicad_pcb", r, false, false, false), format!("/c/board-{}.{r}.glb", stepglb::fnv("parts3|/p/b.kicad_pcb")));
         assert_eq!(cached("/c", "/p/b.kicad_pcb", r, false, true, false), format!("/c/board-{}.{r}.glb", stepglb::fnv("bare3|/p/b.kicad_pcb")));
         assert_eq!(cached("/c", "/p/b.kicad_pcb", r, false, false, true), format!("/c/board-full-outer-v1-parts-{}.{r}.glb", stepglb::fnv("/p/b.kicad_pcb")));
-        assert_eq!(cached("/c", "/p/a.step", r, true, false, false), format!("/c/step3-{}.{r}.normal.glb", stepglb::fnv("/p/a.step")));
+        assert_eq!(cached("/c", "/p/a.step", r, true, false, false), format!("/c/step4-{}.{r}.normal.glb", stepglb::fnv("/p/a.step")));
         assert_eq!(glb_of(2, "/p/own.glb"), "/p/own.glb");
     }
     #[test] fn the_export_flags_are_the_childs() {

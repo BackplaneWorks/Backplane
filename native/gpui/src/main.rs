@@ -216,9 +216,9 @@ fn main()->anyhow::Result<()> {
         cx.on_window_closed(|cx|if cx.windows().is_empty(){cx.quit();}).detach();
         let bounds=Bounds::centered(None,size(px(1400.),px(900.)),cx);
         let opts=WindowOptions{window_bounds:Some(WindowBounds::Windowed(bounds)),titlebar:Some(TitlebarOptions{title:Some("Backplane GPUI · experimental".into()),..Default::default()}),..Default::default()};
-        if let Some(spec)=config.solid_demo.clone() { // --solid-demo TRIS[,STEPS]: the 3D page alone on a synthetic model (measurement, check mode)
-            let mut it=spec.split(',');let tris=it.next().and_then(|t|t.parse().ok()).unwrap_or(100_000);let steps=it.next().and_then(|t|t.parse().ok()).unwrap_or(200);
-            cx.open_window(opts,move|_,cx|cx.new(|cx|viewers::demo::Demo::new(cx,tris,steps,started))).expect("open GPUI window");
+        if let Some(spec)=config.solid_demo.clone() { // --solid-demo TRIS|FILE[,STEPS]: the 3D page alone on a synthetic model or a frame file (measurement, check mode)
+            let mut it=spec.split(',');let source=it.next().unwrap_or("100000").to_string();let steps=it.next().and_then(|t|t.parse().ok()).unwrap_or(200);
+            cx.open_window(opts,move|_,cx|cx.new(|cx|viewers::demo::Demo::new(cx,&source,steps,started))).expect("open GPUI window");
         } else {
             let measure=config.script.is_some();
             cx.open_window(opts,move|window,cx|cx.new(|cx|{let mut b=Backplane::new(window,cx,config,started);b.screens.plotview.measure=measure;b})).expect("open GPUI window");

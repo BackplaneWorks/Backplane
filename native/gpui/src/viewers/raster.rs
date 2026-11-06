@@ -1,14 +1,15 @@
-//! The 3D page's software renderer. Three things make it fast and clean:
+//! The 3D page's software renderer, for a machine without a usable GPU (solid_gpu.rs draws the same picture on one). Three things make it fast and clean:
 //!   * smooth vertex normals, welded by position and creased by angle (`smooth_normals`), so a curved part shades as a curve, not as facets;
 //!   * a tiled, deferred rasterizer: triangles are projected once on all cores, binned into 48 px tiles, each tile is drawn by one core into a
 //!     visibility buffer (depth + triangle id), and only the visible pixels are lit, once each (no overdraw shading);
 //!   * watertight edges: vertices are snapped to 1/16 pixel and tested with exact integer edge functions and the top-left rule, so no pixel is
 //!     lost or drawn twice along a shared edge (no pinholes, no cracks), and supersampling (`ss` x `ss` samples a pixel) smooths the outlines.
+//! A colour is 0xTTRRGGBB in linear light (TT transparency): the wire's meaning, what the phones light too. sRGB is applied once, on the way out (`to_srgb`).
 use super::solid::{Camera, Mesh, FOV};
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hasher};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
 pub const BG: [u8; 4] = [18, 15, 13, 255]; // BGRA of the page background (#0d0f12)
 const TILE: i32 = 48; // divisible by 1, 2 and 3: a tile is a whole number of output pixels at any supersampling
@@ -132,25 +133,70 @@ fn project(mesh: &Mesh, lo: usize, hi: usize, g: &Geo, out: &mut Vec<Setup>) {
 }
 
 // ---- lighting -----------------------------------------------------------------------------------------------------------
-struct Light { key: V3, fill: V3, up: V3, bg: [f32; 3] }
-fn lin(c: u32) -> f32 { let v = c as f32 / 255.0; v * v } // gamma 2 stands for sRGB: cheap, and averages of samples are done in linear light
-
-/// The colour (linear) of a surface point: `n` camera-space unit normal, `ray` the unit direction from the eye to the point.
+/// The material model of solid.wgsl, in camera space (x right, y up, z forward): the test `gpu_and_cpu_agree` holds the two together.
+struct Light { key: V3, fill: V3, sky_key: V3, sky_fill: V3, bg: [f32; 3] }
+/// An sRGB byte as linear light.
+pub fn to_linear(c: u8) -> f32 { let v = c as f32 / 255.0; if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) } }
+/// Linear light as an sRGB byte, through a table: this runs for every pixel.
+pub fn to_srgb(x: f32) -> u8 {
+    static TABLE: OnceLock<Vec<u8>> = OnceLock::new();
+    let t = TABLE.get_or_init(|| (0..4096).map(|i| { let l = i as f32 / 4095.0; let e = if l <= 0.0031308 { 12.92 * l } else { 1.055 * l.powf(1.0 / 2.4) - 0.055 }; (e * 255.0 + 0.5) as u8 }).collect());
+    t[(x.clamp(0.0, 1.0) * 4095.0 + 0.5) as usize]
+}
+/// A wire colour's red, green, blue: the bytes are light already, nothing to decode.
+fn albedo(c: u32) -> [f32; 3] { [((c >> 16) & 255) as f32 / 255.0, ((c >> 8) & 255) as f32 / 255.0, (c & 255) as f32 / 255.0] }
+/// Roughness, metalness, coat, guessed from a colour: the wire carries no more.
+fn estimate(c: [f32; 3]) -> [f32; 3] {
+    let (hi, lo) = (c[0].max(c[1]).max(c[2]), c[0].min(c[1]).min(c[2]));
+    if hi < 0.12 && hi - lo < (hi * 0.45).max(0.015) { return [0.63, 0.0, 0.12] }
+    if lo > 0.9 { return [0.82, 0.0, 0.0] }
+    if c[0] > 0.18 && c[1] > c[0] * 0.55 && c[1] < c[0] * 1.02 && c[2] < c[1] * 0.45 { return [0.3, 0.86, 0.0] }
+    if hi - lo < hi * 0.16 && lo > 0.18 && hi < 0.9 { return [0.28, 0.82, 0.0] }
+    if c[0] > c[2] * 1.25 && c[1] > c[2] * 1.12 && c[0] > 0.06 { return [0.72, 0.0, 0.0] }
+    if hi - lo > (hi * 0.28).max(0.015) { return [0.36, 0.0, 0.35] }
+    [0.55, 0.0, 0.0]
+}
+fn mix(a: f32, b: f32, t: f32) -> f32 { a + (b - a) * t }
+fn smoothstep(a: f32, b: f32, x: f32) -> f32 { let t = ((x - a) / (b - a)).clamp(0.0, 1.0); t * t * (3.0 - 2.0 * t) }
+fn fresnel(f0: [f32; 3], h: f32) -> [f32; 3] { let k = (1.0 - h).powi(5); [f0[0] + (1.0 - f0[0]) * k, f0[1] + (1.0 - f0[1]) * k, f0[2] + (1.0 - f0[2]) * k] }
+fn lit(n: V3, v: V3, l: V3, base: [f32; 3], f0: [f32; 3], rough: f32, metal: f32) -> [f32; 3] {
+    let h = norm([v[0] + l[0], v[1] + l[1], v[2] + l[2]]);
+    let (nl, nv, nh) = (dot(n, l).max(0.0), dot(n, v).max(0.001), dot(n, h).max(0.0));
+    let (a2, k) = { let a = rough * rough; (a * a, (rough + 1.0) * (rough + 1.0) / 8.0) };
+    let d = nh * nh * (a2 - 1.0) + 1.0;
+    let dd = a2 / (std::f32::consts::PI * d * d).max(0.0001);
+    let gg = (nl / (nl * (1.0 - k) + k)) * (nv / (nv * (1.0 - k) + k));
+    let f = fresnel(f0, dot(v, h).max(0.0));
+    let spec = dd * gg / (4.0 * nl * nv).max(0.001);
+    std::array::from_fn(|i| (base[i] * (1.0 - metal) * (1.0 - f[i]) / std::f32::consts::PI + f[i] * spec) * nl)
+}
+fn studio(l: &Light, r: V3, rough: f32, metal: f32) -> [f32; 3] {
+    let q = [r[0], r[1], -r[2]];
+    let power = mix(110.0, 3.0, rough * rough);
+    let (key, fill) = (dot(q, l.sky_key).max(0.0).powf(power), dot(q, l.sky_fill).max(0.0).powf(power * 0.65));
+    let sky = (0.08 + 0.2 * smoothstep(-0.4, 0.25, q[1]) + 0.7 * smoothstep(0.45, 0.85, q[1])) * mix(0.15, 1.0, metal);
+    [sky + 1.5 * key + 0.65 * fill, sky + 1.48 * key + 0.72 * fill, sky + 1.42 * key + 0.85 * fill]
+}
+/// The colour (linear) of a surface point: `n` camera-space unit normal, `ray` the unit direction from the eye to the point, `c` its wire colour.
 #[inline]
-fn light(l: &Light, n: V3, ray: V3, albedo: [f32; 3]) -> [f32; 3] {
+fn light(l: &Light, n: V3, ray: V3, c: u32) -> [f32; 3] {
+    let base = albedo(c);
+    let mut m = estimate(base);
+    if c >> 24 != 0 && m[0] < 0.8 { m = [0.24, 0.0, 1.0]; } // a translucent coat that is not silk is the soldermask: glossy, the person's choice (2026-10-31)
+    let [rough, metal, coat] = m;
     let v = [-ray[0], -ray[1], -ray[2]];
     let n = if dot(n, v) < 0.0 { [-n[0], -n[1], -n[2]] } else { n }; // two-sided: boards are thin, and a back face shows the same as a front
     let nv = dot(n, v).max(0.0);
-    let wrap = |d: f32| ((d + 0.25) / 1.25).clamp(0.0, 1.0);
-    let (d1, d2) = (wrap(dot(n, l.key)), wrap(dot(n, l.fill)));
-    let sky = 0.5 + 0.5 * dot(n, l.up);
-    let amb = 0.16 + 0.22 * sky;
-    let hv = norm([l.key[0] + v[0], l.key[1] + v[1], l.key[2] + v[2]]);
-    let mut s = dot(n, hv).max(0.0); s *= s; s *= s; s *= s; s *= s; s *= s; // ^32
-    let spec = 0.20 * s * d1;
-    let rim = { let f = 1.0 - nv; f * f * f * 0.10 * sky };
-    let k = amb + 0.78 * d1 + 0.22 * d2;
-    [(albedo[0] * k + spec + rim).min(1.0), (albedo[1] * k + spec + rim).min(1.0), (albedo[2] * k + spec + rim).min(1.0)]
+    let f0: [f32; 3] = std::array::from_fn(|i| mix(0.04, base[i], metal));
+    let amb = (1.0 - metal) * (if rough >= 0.8 { 0.74 } else { 0.27 } + 0.08 * n[1].max(0.0));
+    let (k, f) = (lit(n, v, l.key, base, f0, rough, metal), lit(n, v, l.fill, base, f0, rough, metal));
+    let d = 2.0 * dot(n, v); let r = [n[0] * d - v[0], n[1] * d - v[1], n[2] * d - v[2]];
+    let (env, fe) = (studio(l, r, rough, metal), fresnel(f0, nv));
+    let (gloss, fc) = if coat > 0.0 { (studio(l, r, 0.3, 0.0), fresnel([0.04; 3], nv)) } else { ([0.0; 3], [0.0; 3]) };
+    std::array::from_fn(|i| {
+        let rgb = base[i] * amb + k[i] * 1.5 + f[i] * 0.65 + env[i] * fe[i] * (1.0 - rough * 0.35) + gloss[i] * fc[i] * coat;
+        rgb / (1.0 + (rgb - 0.8).max(0.0) * 0.28) // a soft shoulder for highlights
+    })
 }
 
 // ---- tiles ------------------------------------------------------------------------------------------------------------------
@@ -158,8 +204,10 @@ fn draw_tile(tx: i32, ty: i32, ids: &[u32], set: &[Setup], g: &Geo, ss: i32, l: 
     let (x0t, y0t) = (tx * TILE, ty * TILE);
     let (tw, th) = (TILE.min(g.w - x0t), TILE.min(g.h - y0t));
     let mut zb = [0f32; (TILE * TILE) as usize]; let mut idb = [u32::MAX; (TILE * TILE) as usize];
+    // the nearest translucent layer of each sample, as the hub's renderer keeps it: only that one shows, over what is opaque
+    let mut tz = [0f32; (TILE * TILE) as usize]; let mut tid = [u32::MAX; (TILE * TILE) as usize];
     for &id in ids {
-        let s = &set[id as usize];
+        let s = &set[id as usize]; let clear = s.color >> 24 != 0;
         let (bx0, bx1, by0, by1) = (s.bx0.max(x0t), s.bx1.min(x0t + tw - 1), s.by0.max(y0t), s.by1.min(y0t + th - 1));
         if bx0 > bx1 || by0 > by1 { continue }
         let mut e = [0i64; 3]; let mut sx = [0i64; 3]; let mut sy = [0i64; 3];
@@ -185,7 +233,7 @@ fn draw_tile(tx: i32, ty: i32, ids: &[u32], set: &[Setup], g: &Geo, ss: i32, l: 
             for x in bx0..=bx1 {
                 if (e0 | e1 | e2) >= 0 {
                     let z = z00 + gx * (x - bx0) as f32 + gy * dyf; let i = row + (x - x0t) as usize;
-                    if z > zb[i] { zb[i] = z; idb[i] = id; }
+                    if clear { if z > tz[i] { tz[i] = z; tid[i] = id; } } else if z > zb[i] { zb[i] = z; idb[i] = id; }
                 }
                 e0 += sx[0]; e1 += sx[1]; e2 += sx[2];
             }
@@ -196,8 +244,8 @@ fn draw_tile(tx: i32, ty: i32, ids: &[u32], set: &[Setup], g: &Geo, ss: i32, l: 
     let mut acc = vec![[0f32; 3]; ow * oh];
     for y in 0..th { for x in 0..tw {
         let i = (y * TILE + x) as usize; let o = (y / ss) as usize * ow + (x / ss) as usize;
-        let c = if idb[i] == u32::MAX { l.bg } else {
-            let s = &set[idb[i] as usize];
+        let surface = |id: u32| {
+            let s = &set[id as usize];
             let (sxp, syp) = ((x0t + x) as f32 + 0.5, (y0t + y) as f32 + 0.5);
             let (pxs, pys) = (((x0t + x) as i64) * 16 + 8, ((y0t + y) as i64) * 16 + 8);
             let mut w = [0f32; 3];
@@ -210,14 +258,18 @@ fn draw_tile(tx: i32, ty: i32, ids: &[u32], set: &[Setup], g: &Geo, ss: i32, l: 
             let mut n = [0f32; 3];
             for k in 0..3 { let f = w[k] / sum / 32767.0; for a in 0..3 { n[a] += s.n[k][a] as f32 * f; } }
             let ray = norm([(sxp - g.cx) / g.scale, -(syp - g.cy) / g.scale, 1.0]);
-            let albedo = [lin(s.color & 255), lin((s.color >> 8) & 255), lin((s.color >> 16) & 255)];
-            light(l, norm(n), ray, albedo)
+            light(l, norm(n), ray, s.color)
         };
+        let mut c = if idb[i] == u32::MAX { l.bg } else { surface(idb[i]) };
+        if tid[i] != u32::MAX && tz[i] > zb[i] {
+            let (t, a) = (surface(tid[i]), 1.0 - (set[tid[i] as usize].color >> 24) as f32 / 255.0);
+            for k in 0..3 { c[k] += (t[k] - c[k]) * a; }
+        }
         for a in 0..3 { acc[o][a] += c[a]; }
     } }
     let inv = 1.0 / (ss * ss) as f32;
     let mut px = Vec::with_capacity(ow * oh * 4);
-    for c in acc { px.extend_from_slice(&[(c[2] * inv).sqrt().mul_add(255.0, 0.5) as u8, (c[1] * inv).sqrt().mul_add(255.0, 0.5) as u8, (c[0] * inv).sqrt().mul_add(255.0, 0.5) as u8, 255]); }
+    for c in acc { px.extend_from_slice(&[to_srgb(c[2] * inv), to_srgb(c[1] * inv), to_srgb(c[0] * inv), 255]); }
     px
 }
 
@@ -228,9 +280,8 @@ pub fn render(mesh: &Mesh, cam: &Camera, w: usize, h: usize, ss: usize, alive: &
     let (iw, ih) = (w as i32 * ss, h as i32 * ss);
     let f = 1.0 / (FOV / 2.0).tan();
     let g = Geo { eye: cam.eye(), right: cam.right, up: cam.up, fwd: cam.fwd, near: (cam.dist * 0.02).max(1e-3), cx: iw as f32 / 2.0, cy: ih as f32 / 2.0, scale: ih as f32 / 2.0 * f, w: iw, h: ih };
-    let z = [0.0, 0.0, 1.0];
-    let l = Light { key: norm([-0.45, 0.70, -0.55]), fill: norm([0.75, -0.15, -0.45]), up: norm([dot(z, cam.right), dot(z, cam.up), dot(z, cam.fwd)]),
-        bg: [lin(BG[2] as u32), lin(BG[1] as u32), lin(BG[0] as u32)] };
+    let l = Light { key: norm([-0.55, 0.75, -0.65]), fill: norm([0.85, 0.25, -0.35]), sky_key: norm([-0.55, 0.75, 0.65]), sky_fill: norm([0.85, 0.25, 0.35]),
+        bg: [to_linear(BG[2]), to_linear(BG[1]), to_linear(BG[0])] };
     let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).min(8);
     // 1: project, in chunks over the cores
     const CHUNK: usize = 16384;
