@@ -75,15 +75,26 @@ fun DeviceManager(link: String, close: () -> Unit) {
             } }) { Text("Add a device") }
             invitation?.let { invite ->
                 if (now < invite.optLong("expiresAt")) {
+                    val addresses = remember(invite) { inviteAddresses(invite) }
+                    var pick by remember(invite) { mutableIntStateOf(0) }
+                    val at = addresses[pick.coerceIn(0, addresses.size - 1)]
                     Text(invite.optString("code"), style = MaterialTheme.typography.headlineLarge)
-                    Text("Hub address: " + (invite.optJSONArray("routes")?.optString(0) ?: ""))
+                    // which of the hub's addresses the code and link name
+                    // (the reply's addresses; a hub without them sends one)
+                    if (addresses.size > 1) FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        addresses.forEachIndexed { i, a ->
+                            FilterChip(selected = i == pick, onClick = { pick = i }, label = { Text(addressLabel(a, addresses)) })
+                        }
+                    }
+                    Text("Hub address: " + at.url)
+                    if (!at.listening) Text("Not reachable yet: the hub does not answer at this address.", color = MaterialTheme.colorScheme.error)
                     Text("Expires in " + ((invite.optLong("expiresAt") - now + 59999) / 60000) + " minutes")
-                    QrCode(invite.optString("qr").split('\n').filter { it.isNotEmpty() })
+                    QrCode(at.qr.split('\n').filter { it.isNotEmpty() })
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { copy(invite.optString("link")) }) { Text("Copy link") }
+                        Button(onClick = { copy(at.link) }) { Text("Copy link") }
                         Button(onClick = { copy(invite.optString("code")) }) { Text("Copy code") }
                         Button(onClick = {
-                            val share = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, invite.optString("link"))
+                            val share = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, at.link)
                             ctx.startActivity(Intent.createChooser(share, "Connect to Backplane"))
                         }) { Text("Share") }
                     }
@@ -119,6 +130,29 @@ fun DeviceManager(link: String, close: () -> Unit) {
         confirmButton = { TextButton(onClick = { val id = revoke?.optString("id");revoke = null;scope.launch {
             try { request("/auth/revoke", "POST", id);refresh() } catch (_: Exception) { status = "Could not revoke this device." }
         } }) { Text("Revoke") } }, dismissButton = { TextButton(onClick = { revoke = null }) { Text("Cancel") } })
+}
+
+// One of the hub's addresses an invitation can name (/auth/invitations'
+// addresses: tailnet, each local network address, this computer, in that
+// order), with its own link and code; listening false: the hub does not
+// answer there yet (the computer's Settings turns it on)
+data class InviteAddress(val kind: String, val url: String, val link: String, val qr: String, val listening: Boolean)
+
+// the invitation's addresses; an older hub's reply has only the first one's
+// link, code and route
+fun inviteAddresses(invite: JSONObject): List<InviteAddress> {
+    val a = invite.optJSONArray("addresses")
+    val got = if (a == null) emptyList() else (0 until a.length()).mapNotNull { a.optJSONObject(it) }
+        .filter { it.optString("link").isNotEmpty() && it.optString("qr").isNotEmpty() }
+        .map { InviteAddress(it.optString("kind"), it.optString("url"), it.optString("link"), it.optString("qr"), it.optBoolean("listening", true)) }
+    return got.ifEmpty { listOf(InviteAddress("", invite.optJSONArray("routes")?.optString(0) ?: "", invite.optString("link"), invite.optString("qr"), true)) }
+}
+
+// a chip's name: the kind, and the host where one kind has several (two
+// local networks)
+fun addressLabel(a: InviteAddress, all: List<InviteAddress>): String {
+    val name = when (a.kind) { "tailnet" -> "Tailscale"; "lan" -> "Local network"; "local" -> "This computer"; else -> Uri.parse(a.url).host ?: a.url }
+    return if (all.count { it.kind == a.kind } > 1) name + " " + (Uri.parse(a.url).host ?: a.url) else name
 }
 
 // what became of a pairing link (the hub's /auth/devices "invitations")
