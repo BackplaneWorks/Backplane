@@ -89,10 +89,12 @@ impl Auth {
         let t = self.resolve(r);
         Self::browser(r) && !t.is_empty() && (same(r.header("authorization"), &format!("Bearer {t}")) || same(&r.param("token"), &t) || same(&Self::cookie(r), &t))
     }
-    /// Auth.cache_request: GET, browser rules, and the bearer or the cookie (never ?token=).
+    /// Auth.cache_request: GET, browser rules, and the bearer or the cookie (never ?token=) equal to the RESOLVED credential: the hub token, or a paired
+    /// device's own (a phone's first step after pairing is `GET /client/capabilities` with its device token as the bearer).
     pub fn paired_request(&self, r: &Req) -> bool {
-        r.method == "GET" && Self::browser(r) && !self.root.is_empty()
-            && (same(r.header("authorization"), &format!("Bearer {}", self.root)) || same(&Self::cookie(r), &self.root))
+        if r.method != "GET" || !Self::browser(r) || self.root.is_empty() { return false }
+        let t = self.resolve(r);
+        !t.is_empty() && (same(r.header("authorization"), &format!("Bearer {t}")) || same(&Self::cookie(r), &t))
     }
 }
 
@@ -157,6 +159,19 @@ mod tests {
         assert!(!a.allowed(&req("/x", &[("authorization", &format!("Bearer {dev}")), ("origin", "http://evil.example"), ("host", "h:1")])), "a foreign origin is denied");
     }
 
+    #[test] fn a_paired_device_passes_the_paired_request_check_with_its_bearer_or_cookie_never_its_query_token() {
+        let dev = "0123456789abcdef0123456789abcdef"; let other = "fedcba9876543210fedcba9876543210";
+        let a = Auth::with_root("roottoken"); a.set_pairing(std::sync::Arc::new(Held(dev)));
+        let bearer = |t: &str| req("/client/capabilities", &[("Authorization", &format!("Bearer {t}"))]);
+        assert!(a.paired_request(&bearer(dev)), "a held device's bearer");
+        assert!(a.paired_request(&req("/client/capabilities", &[("Cookie", &format!("bp_token={dev}"))])), "a held device's cookie");
+        assert!(a.paired_request(&bearer("roottoken")), "the hub token still holds");
+        assert!(!a.paired_request(&req(&format!("/client/capabilities?token={dev}"), &[])), "never ?token=");
+        assert!(!a.paired_request(&bearer(other)), "a credential nobody holds (revoked or unknown)");
+        assert!(!a.paired_request(&bearer("not-hex")) && !a.paired_request(&req("/client/capabilities", &[])), "malformed or none");
+        assert!(!a.paired_request(&req("/client/capabilities", &[("Authorization", &format!("Bearer {dev}")), ("Origin", "http://evil.example"), ("Host", "h:1")])), "a foreign origin");
+        let mut post = bearer(dev); post.method = "POST".into(); assert!(!a.paired_request(&post), "GET only");
+    }
     #[test] fn revoked_is_read_as_javascript_truthiness_not_only_true() {
         use serde_json::json;
         for v in [json!(true), json!(1), json!("yes"), json!("false"), json!([]), json!({}), json!(-1), json!(0.5)] { assert!(truthy(&v), "{v}") }
