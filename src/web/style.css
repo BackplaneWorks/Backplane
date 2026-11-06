@@ -261,9 +261,6 @@ html[data-backplane-wait="true"] :is(.topbar .back, .topbar .crumbs, .topbar .kv
 @media (prefers-reduced-motion: reduce) { .msg.assistant.pending .body::after { animation: none; } }
 .msg .stamp { display: block; color: var(--faint); font-size: calc(11px * var(--text-scale, 100) / 100); margin-top: 4px; font-variant-numeric: tabular-nums; }
 .msg .stamp:empty { display: none; }
-/* A reply inside a turn (core/stamp.bend's Stamp.mid) shows its time only
-   on hover or focus; the turn's last reply and the person's keep theirs. */
-.msg.assistant:not(:hover):not(:focus-within) .stamp.mid { display: none; }
 .msg.user .stamp { text-align: right; }
 /* A message the agent has not read yet (core/stamp.bend's Stamp.unread):
    its text a step dimmer, its "not read yet" time in the queued colour. */

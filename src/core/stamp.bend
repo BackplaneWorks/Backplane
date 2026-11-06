@@ -439,10 +439,9 @@ def Stamp.unread.text(unread: Bool, +l: I.Loc, +stamp: String) -> String:
 # ---------------------
 # A turn of several short replies would read as a column of the same
 # time. A reply that does not end its turn (and is not the newest of a
-# running one) is "mid": the web shows its time only on hover
-# (view.bend's View.entry.own, style.css's .stamp.mid), the phones and
-# the native window leave it out (Stamp.shown). The person's message and
-# the turn's Finished/Stopped/Waiting stamp always show (laws stamp_mid_*).
+# running one) is "mid"; every client shows every message's time
+# (Stamp.shown). The person's message and the turn's Finished/Stopped/Waiting stamp
+# always show (laws stamp_mid_*).
 
 def Stamp.mid.k(r: Map<&2, Nat> & Bool) -> Bool:
   (_, yes) = r
@@ -455,14 +454,7 @@ def Stamp.mid(+s: Stamps, e: M.Entry) -> Bool:
     case _ _:
       False{}
 
-def Stamp.shown.k(mid: Bool, +l: I.Loc, +s: Stamps, e: M.Entry) -> String:
-  match mid:
-    case True{}:
-      ""
-    case False{}:
-      Stamp.text.loc(l, s, e)
-
-# what a client with no hover shows under an entry: Stamp.text.loc, but
-# nothing under a reply inside a turn
+# what a client with no hover shows under an entry: Stamp.text.loc, for
+# every message, replies inside a turn included
 def Stamp.shown(+l: I.Loc, +s: Stamps, +e: M.Entry) -> String:
-  Stamp.shown.k(Stamp.mid(s, e), l, s, e)
+  Stamp.text.loc(l, s, e)
