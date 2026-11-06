@@ -353,7 +353,6 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
 }
 
 /// The rows of the "This device" page: what only this computer decides. Every button is `local:<name>` with a value; none reaches the hub.
-}
 
 pub fn device_rows(l: &crate::local::Local) -> Vec<Row> {
     use crate::local as lo;
