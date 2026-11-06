@@ -29,15 +29,6 @@ gradle.taskGraph.whenReady {
     }
 }
 
-// -PbpE2eHost=host[,host]: the debug build also allows plain http to these fixture hosts (the e2e hub on h@backplane); the release config keeps the shared hub only
-val bpE2eHosts = providers.gradleProperty("bpE2eHost").map { v -> v.split(",").map { it.trim() }.filter { it.matches(Regex("[A-Za-z0-9.-]+")) } }.getOrElse(emptyList())
-// written while the build is configured (no task, so nothing has to be ordered before the resource merge)
-if (bpE2eHosts.isNotEmpty()) {
-    val f = layout.buildDirectory.file("generated/e2e-net/res/xml/network.xml").get().asFile
-    f.parentFile.mkdirs()
-    val extra = bpE2eHosts.joinToString("") { "        <domain includeSubdomains=\"false\">$it</domain>\n" }
-    f.writeText("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<network-security-config>\n    <base-config cleartextTrafficPermitted=\"false\" />\n    <domain-config cleartextTrafficPermitted=\"true\">\n        <domain includeSubdomains=\"false\">desktop.tail9e0cf2.ts.net</domain>\n$extra    </domain-config>\n</network-security-config>\n")
-}
 val bpAppId = "dev.backplane.mobile.gpui"
 val bpScheme = "bpgpui"
 
@@ -80,9 +71,6 @@ android {
     buildFeatures {
         buildConfig = true
         compose = true
-    }
-    if (bpE2eHosts.isNotEmpty()) {
-        sourceSets["debug"].res.srcDir(layout.buildDirectory.dir("generated/e2e-net/res"))
     }
 }
 

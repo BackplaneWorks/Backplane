@@ -47,7 +47,7 @@ class Phone:
         if b is None: self.sh("input keyevent 4"); time.sleep(1.2); b = self.button("Pair with code")
         if b is None: return False
         self.tap(b); time.sleep(4); return True
-    def open_link(self, url): self.sh("am start -W -a android.intent.action.VIEW -d " + shlex.quote(shlex.quote(url)) + f" {PKG}"); time.sleep(5)
+    def open_link(self, url): self.sh("am start -W -a android.intent.action.VIEW -d " + shlex.quote(url) + f" {PKG}")  # (adb shell parses once: quoted twice, the data began with a quote and no app took it); time.sleep(5)
 
 
 def live(hub): return sum(1 for d in hub.devices()[1]["devices"] if not d.get("revoked"))
