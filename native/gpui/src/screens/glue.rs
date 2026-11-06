@@ -9,6 +9,8 @@ impl Backplane {
     /// A composer event (paste, drop, picked files): start the uploads off the UI thread; say why when nothing starts.
     pub(crate) fn attach_event(&mut self, event: &ComposerEvent, cx: &mut Context<Self>) {
         if matches!(event, ComposerEvent::CopyTimeline) { return self.timeline_copy(cx); }
+        if let ComposerEvent::PopupMove(d) = event { let n = self.popup_rows().len(); if n > 0 { self.screens.popup_ix = (self.screens.popup_ix as i32 + d).rem_euclid(n as i32) as usize; cx.notify(); } return; }
+        if matches!(event, ComposerEvent::PopupPick) { self.popup_pick(cx); return; }
         let cap = self.data["thread"]["cap"].as_u64().unwrap_or(DEFAULT_CAP);
         if let Err(e) = self.screens.attacher.event(&self.tx, &self.selected, cap, event) { self.error = e; }
         cx.notify();
@@ -91,6 +93,16 @@ impl Backplane {
             self.timeline.scroll_to(ListOffset { item_ix: ix, offset_in_item: px(off) });
             self.screens.seeking = None;
         }
+    }
+    /// The words of the popup rows the hub offers now (none while it offers none).
+    pub(crate) fn popup_rows(&self) -> Vec<String> {
+        self.data["thread"]["skills"].as_array().into_iter().flatten().map(|s| s.get("word").or_else(|| s.get("name")).and_then(Value::as_str).unwrap_or("").to_string()).filter(|w| !w.is_empty()).take(8).collect()
+    }
+    /// Choose the highlighted row: the hub puts its word where the one being typed is.
+    pub(crate) fn popup_pick(&mut self, cx: &mut Context<Self>) -> bool {
+        let rows = self.popup_rows();
+        let Some(word) = rows.get(self.screens.popup_ix.min(rows.len().saturating_sub(1))).cloned() else { return false };
+        let _ = self.tx.try_send(Command::Action("skill".into(), word)); self.await_completion(cx); cx.notify(); true
     }
     /// Go to a message by its entry id (a reply's link); nothing when the rows held do not have it.
     pub(crate) fn timeline_goto(&mut self, id: &str) {

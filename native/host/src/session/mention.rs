@@ -17,15 +17,21 @@ pub fn slug(s: &str) -> String {
     out
 }
 
+/// The hub's `models.all` rows as a JSON text (`{provider: [{value, label, ok, why}]}`), set once at start: the screen-audit bin has no settings, so it offers none.
+static MODELS: std::sync::OnceLock<fn() -> String> = std::sync::OnceLock::new();
+pub fn set_models(f: fn() -> String) { let _ = MODELS.set(f); }
+
 /// The word being typed (the draft's last: after its last space, line feed, tab or carriage return).
 pub fn token(draft: &str) -> &str { super::super::slash::token(draft) }
 
 /// Refs.typing: a sigil and then only slug characters.
 fn typing(w: &str) -> Option<(char, String)> {
     let mut cs = w.chars(); let sig = cs.next()?;
-    if !matches!(sig, '@' | '>' | '%' | '#') { return None }
+    if !matches!(sig, '@' | '>' | '%' | '#' | '&') { return None }
     let q: String = cs.collect();
-    q.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_').then(|| (sig, q.to_ascii_lowercase()))
+    // a model id (`provider/model`) holds more than a slug does (settings/mentions.rs)
+    let ok = |c: char| c.is_ascii_alphanumeric() || c == '-' || c == '_' || (sig == '&' && matches!(c, '/' | '.' | ':' | '+'));
+    q.chars().all(ok).then(|| (sig, q.to_ascii_lowercase()))
 }
 
 /// 0: no match; a prefix beats a word start beats a substring beats letters in order. An empty query matches everything a little.
@@ -62,6 +68,17 @@ pub fn rows(st: &State, here: &str, draft: &str) -> Vec<Value> {
                 if sc > 0 { c.push(Cand { word: format!(">{s}"), about: if proj.is_empty() { "thread".into() } else { format!("thread · {proj}") }, score: sc, same: t.project == here_project, at: t.activity }) }
             }
         }
+        '&' => {
+            let all: Value = MODELS.get().map(|f| f()).and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(Value::Null);
+            for (provider, rows) in all.as_object().into_iter().flatten() {
+                for r in rows.as_array().into_iter().flatten() {
+                    let Some(v) = r["value"].as_str() else { continue };
+                    let id = format!("{provider}/{v}"); let label = r["label"].as_str().unwrap_or(v);
+                    let sc = score(&id.to_ascii_lowercase().replace('/', "-"), &format!("{id} {label}"), &q.replace('/', "-"));
+                    if sc > 0 { c.push(Cand { word: format!("&{id}"), about: if r["ok"].as_bool().unwrap_or(false) { label.to_string() } else { format!("{label} (not usable now)") }, score: sc + if r["ok"].as_bool().unwrap_or(false) { 5 } else { 0 }, same: false, at: 0 }) }
+                }
+            }
+        }
         '%' => for (_, p) in st.projects.iter().filter(|(_, p)| !p.removed) {
             let s = slug(&p.title); let sc = score(&s, &p.title, &q);
             if sc > 0 && !s.is_empty() { c.push(Cand { word: format!("%{s}"), about: "project".into(), score: sc, same: false, at: p.created }) }
@@ -74,6 +91,36 @@ pub fn rows(st: &State, here: &str, draft: &str) -> Vec<Value> {
     c.sort_by(|a, b| b.score.cmp(&a.score).then(b.same.cmp(&a.same)).then(b.at.cmp(&a.at)).then(a.word.cmp(&b.word)));
     c.truncate(MAX);
     c.into_iter().map(|x| json!({"word": x.word, "label": x.word, "desc": x.about})).collect()
+}
+
+/// What a sent message's reference words point at, for the cards drawn under it: `{word, kind, id, label}` with `kind` bot, thread, project, room or model and `id` the hub-qualified id
+/// (`<hub>|<id>`; a model has none). A word that names nothing here is left out (it stays plain text); each word once, in order.
+pub fn refs_in(st: &State, hub: &str, text: &str) -> Vec<Value> {
+    let words: Vec<String> = { let mut out: Vec<String> = vec![];
+        for w in text.split(|c: char| c.is_whitespace()) {
+            let w = w.trim_start_matches(|c| matches!(c, '(' | '[' | '"' | '\'' | '`')).trim_end_matches(|c| matches!(c, '.' | ',' | ':' | ';' | '!' | '?' | ')' | ']' | '"' | '\'' | '`'));
+            if w.len() > 1 && matches!(w.chars().next(), Some('@' | '>' | '%' | '#' | '&')) && !out.iter().any(|x| x == w) { out.push(w.to_string()) }
+        }
+        out };
+    if words.is_empty() { return vec![] }
+    let all: Value = MODELS.get().map(|f| f()).and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(Value::Null);
+    let mut slugs: std::collections::HashMap<String, usize> = Default::default();
+    for t in st.threads.values().filter(|t| !t.deleted) { *slugs.entry(slug(&t.title)).or_default() += 1 }
+    let q = |id: &str| format!("{hub}|{id}");
+    let mut out = vec![];
+    for w in words {
+        let (sig, rest) = (w.chars().next().unwrap(), &w[1..]);
+        let hit: Option<(&str, String, String)> = match sig {
+            '@' => st.bots_nav.iter().find(|(_, b)| slug(&b.name) == rest.to_ascii_lowercase()).map(|(id, b)| ("bot", q(id), b.name.clone())),
+            '>' => st.threads.iter().filter(|(_, t)| !t.deleted).find(|(id, t)| { let s = slug(&t.title); let n = slugs.get(&s).copied().unwrap_or(0);
+                    !s.is_empty() && (rest == s || (n > 1 && rest == format!("{s}-{}", id.rsplit('-').next().unwrap_or("")))) }).map(|(id, t)| ("thread", q(id), t.title.clone())),
+            '%' => st.projects.iter().filter(|(_, p)| !p.removed).find(|(_, p)| slug(&p.title) == rest.to_ascii_lowercase()).map(|(id, p)| ("project", q(id), p.title.clone())),
+            '#' => st.rooms_nav.iter().find(|(_, r)| slug(&r.name) == rest.to_ascii_lowercase()).map(|(id, r)| ("room", q(id), r.name.clone())),
+            _ => rest.split_once('/').and_then(|(pr, m)| all[pr].as_array().and_then(|rows| rows.iter().find(|r| r["value"].as_str() == Some(m))).map(|r| ("model", String::new(), r["label"].as_str().unwrap_or(m).to_string()))),
+        };
+        if let Some((kind, id, label)) = hit { out.push(json!({"word": w, "kind": kind, "id": id, "label": label})) }
+    }
+    out
 }
 
 /// The draft with its last word replaced by `word` and a space (the popup row chosen; also a `/command` or `$skill`).
@@ -91,6 +138,24 @@ mod tests {
         assert_eq!(complete("see @bo", "@bob"), "see @bob "); assert_eq!(complete("@b", "@bob"), "@bob "); assert_eq!(complete("hi\n>th", ">thread-a"), "hi\n>thread-a ");
     }
     #[test] fn a_prefix_outranks_a_substring() { assert!(score("bob", "Bob", "bo") > score("sbob", "sbob", "bo")); assert_eq!(score("bob", "Bob", "zz"), 0); }
+    #[test] fn references_in_a_message_point_at_what_they_name() {
+        let mut st = State::new();
+        for l in [r#"{"$":"ProjectCreated","id":"p1","title":"Rocket Lab","root":"/r","at":10}"#,
+                  r#"{"$":"ThreadCreated","id":"t1-1","project":"p1","title":"Fix perf lag","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":11}"#] { st.apply_line(l); }
+        let r = refs_in(&st, "h", "see >fix-perf-lag, and %rocket-lab. also >nothing @ghost");
+        let got: Vec<(String, String, String)> = r.iter().map(|x| (x["word"].as_str().unwrap().into(), x["kind"].as_str().unwrap().into(), x["id"].as_str().unwrap().into())).collect();
+        assert_eq!(got, [(">fix-perf-lag".into(), "thread".into(), "h|t1-1".into()), ("%rocket-lab".into(), "project".into(), "h|p1".into())]);
+        assert!(refs_in(&st, "h", "no references here").is_empty());
+    }
+    #[test] fn models_are_offered_from_the_hubs_rows() {
+        fn rows_json() -> String { r#"{"claude":[{"value":"opus","label":"Opus 5.5","ok":true,"why":""},{"value":"sonnet","label":"Sonnet 5","ok":true,"why":""}],"codex":[{"value":"gpt","label":"GPT","ok":false,"why":"x"}]}"#.into() }
+        set_models(rows_json);
+        let st = State::new();
+        let w: Vec<String> = rows(&st, "t", "use &claude/op").iter().map(|x| x["word"].as_str().unwrap().to_string()).collect();
+        assert_eq!(w, ["&claude/opus"]);
+        assert_eq!(rows(&st, "t", "&").len(), 3, "a bare & lists every model, usable ones first");
+        assert!(rows(&st, "t", "&").last().unwrap()["desc"].as_str().unwrap().contains("not usable"));
+    }
     #[test] fn threads_and_projects_are_offered_best_match_first() {
         let mut st = State::new();
         for l in [r#"{"$":"ProjectCreated","id":"p1","title":"Rocket Lab","root":"/r","at":10}"#,

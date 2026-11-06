@@ -14,7 +14,7 @@ use std::ops::Range;
 use std::path::PathBuf;
 
 actions!(composer, [Backspace, Delete, WordBackspace, WordDelete, Left, Right, WordLeft, WordRight, SelLeft, SelRight, SelWordLeft, SelWordRight,
-    Up, Down, SelUp, SelDown, Home, End, DocStart, DocEnd, SelHome, SelEnd, SelDocStart, SelDocEnd, SelectAll, Copy, Cut, Paste, Undo, Redo, Newline, CharPalette, Go]);
+    Up, Down, SelUp, SelDown, Home, End, DocStart, DocEnd, SelHome, SelEnd, SelDocStart, SelDocEnd, SelectAll, Copy, Cut, Paste, Undo, Redo, Newline, CharPalette, Go, Tab]);
 
 pub const MAX_LINES: f32 = 12.0;
 
@@ -30,6 +30,10 @@ pub enum ComposerEvent {
     Submit,
     /// Ctrl-C with nothing selected in the box: the window copies the timeline's selection.
     CopyTimeline,
+    /// The suggestion popup is open and Up (-1) or Down (1) was pressed: the highlighted row moves instead of the caret.
+    PopupMove(i32),
+    /// The popup is open and Tab was pressed: the highlighted row is chosen.
+    PopupPick,
 }
 
 /// One logical line, shaped on its own so an empty line (and a trailing newline) is a row too.
@@ -61,6 +65,8 @@ pub struct Composer {
     focus: FocusHandle,
     ed: Editor,
     pub content: SharedString,
+    /// Set by the window each frame: the suggestion popup is showing, so Up/Down/Tab drive it.
+    pub popup_open: bool,
     placeholder: SharedString,
     rows: Vec<Row>,
     bounds: Option<Bounds<Pixels>>,
@@ -84,7 +90,7 @@ impl Composer {
     pub fn new(cx: &mut Context<Self>) -> Self { Self::with_context(cx, "Composer") }
     /// A composer with its own key context: "Composer" sends on Enter (main.rs), "AskInput" emits Submit.
     pub fn with_context(cx: &mut Context<Self>, ctx: &'static str) -> Self {
-        Self { blink: Default::default(), light: false, masked: false, ctx, focus: cx.focus_handle(), ed: Editor::default(), content: "".into(), placeholder: "Ask anything: @bot, >thread, %project, #room, $skill, /btw".into(),
+        Self { blink: Default::default(), light: false, masked: false, ctx, focus: cx.focus_handle(), ed: Editor::default(), content: "".into(), popup_open: false, placeholder: "Ask anything: @bot, >thread, %project, #room, &model, $skill, /btw".into(),
             rows: vec![], bounds: None, line_height: px(20.), scroll_y: px(0.), selecting: false }
     }
     pub fn set(&mut self, text: String, cx: &mut Context<Self>) { self.ed.set(&text); self.sync(cx); }
@@ -121,8 +127,9 @@ impl Composer {
     fn go(&mut self, _: &Go, _: &mut Window, cx: &mut Context<Self>) { cx.emit(ComposerEvent::Submit); }
     fn newline(&mut self, _: &Newline, _: &mut Window, cx: &mut Context<Self>) { self.edit(cx, |e| e.newline()); }
     fn palette(&mut self, _: &CharPalette, window: &mut Window, _: &mut Context<Self>) { window.show_character_palette(); }
-    fn up(&mut self, _: &Up, _: &mut Window, cx: &mut Context<Self>) { self.vertical(-1, false, cx); }
-    fn down(&mut self, _: &Down, _: &mut Window, cx: &mut Context<Self>) { self.vertical(1, false, cx); }
+    fn up(&mut self, _: &Up, _: &mut Window, cx: &mut Context<Self>) { if self.popup_open { cx.emit(ComposerEvent::PopupMove(-1)); } else { self.vertical(-1, false, cx); } }
+    fn down(&mut self, _: &Down, _: &mut Window, cx: &mut Context<Self>) { if self.popup_open { cx.emit(ComposerEvent::PopupMove(1)); } else { self.vertical(1, false, cx); } }
+    fn tab(&mut self, _: &Tab, _: &mut Window, cx: &mut Context<Self>) { if self.popup_open { cx.emit(ComposerEvent::PopupPick); } }
     fn sel_up(&mut self, _: &SelUp, _: &mut Window, cx: &mut Context<Self>) { self.vertical(-1, true, cx); }
     fn sel_down(&mut self, _: &SelDown, _: &mut Window, cx: &mut Context<Self>) { self.vertical(1, true, cx); }
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
@@ -342,7 +349,7 @@ impl Render for Composer {
             .on_action(cx.listener(Self::backspace)).on_action(cx.listener(Self::delete)).on_action(cx.listener(Self::word_backspace)).on_action(cx.listener(Self::word_delete))
             .on_action(cx.listener(Self::left)).on_action(cx.listener(Self::right)).on_action(cx.listener(Self::word_left)).on_action(cx.listener(Self::word_right))
             .on_action(cx.listener(Self::sel_left)).on_action(cx.listener(Self::sel_right)).on_action(cx.listener(Self::sel_word_left)).on_action(cx.listener(Self::sel_word_right))
-            .on_action(cx.listener(Self::up)).on_action(cx.listener(Self::down)).on_action(cx.listener(Self::sel_up)).on_action(cx.listener(Self::sel_down))
+            .on_action(cx.listener(Self::tab)).on_action(cx.listener(Self::up)).on_action(cx.listener(Self::down)).on_action(cx.listener(Self::sel_up)).on_action(cx.listener(Self::sel_down))
             .on_action(cx.listener(Self::home)).on_action(cx.listener(Self::end)).on_action(cx.listener(Self::sel_home)).on_action(cx.listener(Self::sel_end))
             .on_action(cx.listener(Self::doc_start)).on_action(cx.listener(Self::doc_end)).on_action(cx.listener(Self::sel_doc_start)).on_action(cx.listener(Self::sel_doc_end))
             .on_action(cx.listener(Self::select_all)).on_action(cx.listener(Self::copy)).on_action(cx.listener(Self::cut)).on_action(cx.listener(Self::paste))
@@ -366,7 +373,7 @@ pub fn bind(cx: &mut App) {
         KeyBinding::new("secondary-left", WordLeft, c), KeyBinding::new("secondary-right", WordRight, c),
         KeyBinding::new("shift-left", SelLeft, c), KeyBinding::new("shift-right", SelRight, c),
         KeyBinding::new("secondary-shift-left", SelWordLeft, c), KeyBinding::new("secondary-shift-right", SelWordRight, c),
-        KeyBinding::new("up", Up, c), KeyBinding::new("down", Down, c), KeyBinding::new("shift-up", SelUp, c), KeyBinding::new("shift-down", SelDown, c),
+        KeyBinding::new("tab", Tab, c), KeyBinding::new("up", Up, c), KeyBinding::new("down", Down, c), KeyBinding::new("shift-up", SelUp, c), KeyBinding::new("shift-down", SelDown, c),
         KeyBinding::new("home", Home, c), KeyBinding::new("end", End, c), KeyBinding::new("shift-home", SelHome, c), KeyBinding::new("shift-end", SelEnd, c),
         KeyBinding::new("secondary-home", DocStart, c), KeyBinding::new("secondary-end", DocEnd, c),
         KeyBinding::new("secondary-shift-home", SelDocStart, c), KeyBinding::new("secondary-shift-end", SelDocEnd, c),

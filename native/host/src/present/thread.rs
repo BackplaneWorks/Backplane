@@ -384,6 +384,11 @@ pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value
     o.insert("title".into(), json!(t.title));
     o.insert("branch".into(), json!(t.branch));
     o.insert("readingSeen".into(), json!(newest_id.as_deref().unwrap_or("-")));
+    // a sent message's references (@bot >thread %project #room &model) as cards the client draws under it
+    let mut entries = entries;
+    for e in entries.iter_mut() {
+        if e["kind"] == "user" { let refs = crate::session::composer::mention::refs_in(st, hub, e["text"].as_str().unwrap_or("")); if !refs.is_empty() { e["refs"] = Value::Array(refs); } }
+    }
     o.insert("entries".into(), Value::Array(entries));
     // Render.native_screen: thread.earlier = window.remaining when the host sent a window, else the page's own hidden count (0 on the newest page)
     let earlier = if params["window"].is_object() { params["window"]["remaining"].as_u64().unwrap_or(0) } else { 0 };

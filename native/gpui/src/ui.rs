@@ -102,6 +102,35 @@ fn chip(light: bool, label: String) -> Div {
     div().px_3().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).whitespace_nowrap().child(label)
 }
 
+/// A message's references as little cards under it: a bot, thread, project or room goes there on a click; a model is only named.
+fn ref_cards(cx: &mut Context<Backplane>, light: bool, mid: &str, refs: &Value) -> Option<Div> {
+    let list = refs.as_array().filter(|r| !r.is_empty())?;
+    let c = |n: &str| theme::color(light, n);
+    let mut row = div().flex().flex_wrap().gap_2();
+    for (i, r) in list.iter().enumerate() {
+        let (kind, id, label, word) = (string(r, "kind"), string(r, "id"), string(r, "label"), string(r, "word"));
+        let mark = word.chars().next().map(String::from).unwrap_or_default();
+        let go = !id.is_empty();
+        let mut card = div().id(SharedString::from(format!("ref-{mid}-{i}"))).flex().items_center().gap_2().px_2().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.))
+            .child(div().text_color(c(if kind == "bot" { "accent" } else { "ok" })).font_weight(FontWeight::BOLD).child(mark))
+            .child(div().max_w(px(220.)).overflow_hidden().whitespace_nowrap().text_ellipsis().child(label))
+            .child(div().text_size(px(10.)).text_color(c("faint")).child(kind.clone()));
+        if go {
+            card = card.cursor_pointer().hover(|s| s.bg(c("raise"))).on_click(cx.listener(move |this, _, window, cx| {
+                match kind.as_str() {
+                    "bot" => { let _ = this.tx.try_send(Command::Action("bot".into(), id.clone())); }
+                    "room" => { let _ = this.tx.try_send(Command::Action("room".into(), id.clone())); }
+                    "project" => { this.open_project(id.rsplit('|').next().unwrap_or(&id).to_string(), cx); }
+                    _ => { this.select(id.clone(), window, cx); }
+                }
+                cx.notify();
+            }));
+        }
+        row = row.child(card);
+    }
+    Some(row)
+}
+
 /// "Replying to ..." over the composer: its first line, a click goes to the message, × drops it.
 fn reply_chip(cx: &mut Context<Backplane>, light: bool, replying: &Value) -> Option<AnyElement> {
     if !replying.is_object() { return None }
@@ -141,6 +170,7 @@ impl Backplane {
                 let body = crate::screens::timeline::user_text(&reg, light, &text);
                 let atts = crate::screens::timeline::attachments(light, &e["attachments"], &id, self.screens.attacher.target.as_ref(), &self.screens.images);
                 let tools = msg_tools(cx, light, &id, &text);
+                let cards = ref_cards(cx, light, &id, &e["refs"]);
                 let stamp_row = div().flex().justify_end().items_center().gap_3().text_size(px(11.)).text_color(c("faint")).child(tools).child(stamp);
                 let reply_to = e["replyTo"].is_object().then(|| {
                     let (target, quote) = (string(&e["replyTo"], "id"), string(&e["replyTo"], "quote"));
@@ -151,9 +181,9 @@ impl Backplane {
                 // A text that may wrap sits in block layout like a reply's (a shrink-to-fit flex bubble measured it at one width and painted it at another);
                 // a message of short lines keeps the snug flex bubble.
                 if wide {
-                    row.child(div().w_full().max_w(px(640.)).ml_auto().px_3().py_2().bg(c("raise")).border_1().border_color(c("line")).children(reply_to).child(body).children(atts.into_iter().map(|a| div().mt_1().child(a))).child(div().mt_1().child(stamp_row))).into_any_element()
+                    row.child(div().w_full().max_w(px(640.)).ml_auto().px_3().py_2().bg(c("raise")).border_1().border_color(c("line")).children(reply_to).child(body).children(cards.map(|k| k.mt_1())).children(atts.into_iter().map(|a| div().mt_1().child(a))).child(div().mt_1().child(stamp_row))).into_any_element()
                 } else {
-                    row.flex().justify_end().child(div().max_w(px(640.)).px_3().py_2().bg(c("raise")).border_1().border_color(c("line")).flex().flex_col().gap_1().children(reply_to).child(body).children(atts).child(stamp_row)).into_any_element()
+                    row.flex().justify_end().child(div().max_w(px(640.)).px_3().py_2().bg(c("raise")).border_1().border_color(c("line")).flex().flex_col().gap_1().children(reply_to).child(body).children(cards).children(atts).child(stamp_row)).into_any_element()
                 }
             }
             "fold" => {
@@ -166,6 +196,17 @@ impl Backplane {
                         .on_click(cx.listener(move |this, _, _, cx| { this.fold_click(value.clone()); cx.notify(); }))
                         .child(div().flex_shrink_0().flex().items_center().child(ic(light, if e["open"] == true { "chevron-down" } else { "chevron-right" }, 14., "dim")))
                         .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(text))).into_any_element()
+            }
+            // the agent still working: a green square that breathes beside the word (the one animation on screen, only while this row is)
+            "assistant" if id.starts_with("@live:") => {
+                let square = div().size(px(12.)).flex_shrink_0().flex().items_center().justify_center().child(
+                    div().size(px(8.)).bg(c("ok")).with_animation(SharedString::from(format!("working-{id}")),
+                        Animation::new(std::time::Duration::from_millis(1100)).repeat().with_easing(bounce(ease_in_out)),
+                        |el, d| el.size(px(5. + 7. * d)).opacity(0.45 + 0.55 * d)));
+                div().id(SharedString::from(format!("e-{id}"))).w_full().py_2().flex().items_center().gap_2().text_color(c("dim")).child(square)
+                    // the dots count up and start over: "Working." "Working.." "Working..." (a fixed width so the line does not jitter)
+                    .child(div().min_w(px(86.)).with_animation(SharedString::from(format!("working-text-{id}")), Animation::new(std::time::Duration::from_millis(1800)).repeat(),
+                        |el, d| el.child(format!("Working{}", ".".repeat(1 + ((d * 3.0) as usize).min(2)))))).into_any_element()
             }
             "assistant" => {
                 let mut col = div().id(SharedString::from(format!("e-{id}"))).w_full().py_2().flex().flex_col().gap_2();
@@ -281,13 +322,16 @@ impl Render for Backplane {
         // popup
         // the popup is the hub's: rows are shown when thread.skills is non-empty (no client-side rows)
         let skills = thread["skills"].as_array();
+        // the highlighted row starts at the first for each new set of rows; the composer is told so Up/Down/Tab drive the popup while it shows
+        { let key = self.popup_rows().join("\u{1f}"); if key != self.screens.popup_key { self.screens.popup_key = key; self.screens.popup_ix = 0; } }
+        let popup_ix = self.screens.popup_ix.min(skills.map_or(0, |s| s.len().min(8)).saturating_sub(1));
         let mut popup = div().flex().flex_col().border_1().border_color(c("line")).bg(c("panel")).py_1();
         for (index, skill) in skills.into_iter().flatten().take(8).enumerate() {
             let word = skill.get("word").or_else(|| skill.get("name")).and_then(Value::as_str).unwrap_or("").to_string();
             let label = skill.get("label").and_then(Value::as_str).unwrap_or(&word).to_string();
             let desc = ["text", "hint", "desc", "detail", "about"].iter().find_map(|k| skill.get(*k).and_then(Value::as_str)).unwrap_or("").to_string();
             ctl.push(CtlEntry { id: format!("skill:{word}"), label: label.clone(), ctl: Ctl::Skill(word.clone()) });
-            popup = popup.child(with_rect(div().id(("skill", index)), || format!("skill:{word}")).flex().gap_3().px_3().py_1().cursor_pointer().hover(|s| s.bg(c("raise")))
+            popup = popup.child(with_rect(div().id(("skill", index)), || format!("skill:{word}")).flex().gap_3().px_3().py_1().cursor_pointer().when(index == popup_ix, |d| d.bg(c("raise"))).hover(|s| s.bg(c("raise")))
                 .child(div().font_weight(FontWeight::BOLD).flex_shrink_0().child(label)).child(div().flex_1().overflow_hidden().whitespace_nowrap().text_color(c("dim")).child(desc))
                 .on_click(cx.listener(move |this, _, window, cx| {
                     let _ = this.tx.try_send(Command::Action("skill".into(), word.clone())); this.await_completion(cx);
@@ -295,6 +339,7 @@ impl Render for Backplane {
                 })));
         }
         let show_popup = skills.map_or(false, |s| !s.is_empty());
+        if self.input.read(cx).popup_open != show_popup { self.input.update(cx, |c, _| c.popup_open = show_popup); }
         // chips
         let model = thread["picker"]["models"].as_array().and_then(|m| m.iter().find(|x| x["on"] == true)).map(|m| string(m, "label")).unwrap_or_default();
         let model_short = if model.starts_with("Claude Code") { "default".to_string() } else { model.split(" · ").next().unwrap_or("").to_lowercase() };
