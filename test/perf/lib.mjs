@@ -1,5 +1,6 @@
 // Shared helpers for the perf stream: hub launch in a capped scope, ws client, /proc sampling.
 import {spawn,execFileSync} from 'node:child_process';
+import * as fsm from 'node:fs';
 import {mkdirSync,readFileSync,readdirSync,writeFileSync,chmodSync,existsSync,statSync} from 'node:fs';
 import {decode,encode} from '../wire.mjs';
 import {standinScript} from '../tools/perf_standin.ts';
@@ -12,7 +13,7 @@ export const hwmKb=pid=>Number(/VmHWM:\s+(\d+)/.exec(rd(`/proc/${pid}/status`))?
 export const threads=pid=>Number(/Threads:\s+(\d+)/.exec(rd(`/proc/${pid}/status`))?.[1]??NaN);
 export const cpuTicks=pid=>{const s=rd(`/proc/${pid}/stat`);if(!s)return NaN;const f=s.split(') ')[1].split(' ');return Number(f[11])+Number(f[12])};
 export const fds=pid=>{try{return readdirSync(`/proc/${pid}/fd`).length}catch{return NaN}};
-export const sockets=pid=>{try{let n=0;for(const f of readdirSync(`/proc/${pid}/fd`)){try{if(require('node:fs').readlinkSync(`/proc/${pid}/fd/${f}`).startsWith('socket:'))n++}catch{}}return n}catch{return NaN}};
+export const sockets=pid=>{try{let n=0;for(const f of readdirSync(`/proc/${pid}/fd`)){try{if(fsm.readlinkSync(`/proc/${pid}/fd/${f}`).startsWith('socket:'))n++}catch{}}return n}catch{return NaN}};
 // descendants of pid (children, recursively)
 export function tree(pid){const kids=new Map();for(const d of readdirSync('/proc')){if(!/^\d+$/.test(d))continue;const s=rd(`/proc/${d}/stat`);if(!s)continue;const pp=Number(s.split(') ')[1].split(' ')[1]);(kids.get(pp)??kids.set(pp,[]).get(pp)).push(Number(d))}
  const out=[];const go=p=>{for(const k of kids.get(p)??[]){out.push(k);go(k)}};go(pid);return out}
@@ -31,7 +32,7 @@ export async function startHub({bin,home,port,standins,host,extraEnv={},extraArg
  const env={...process.env,DISPLAY:'',WAYLAND_DISPLAY:'',BACKPLANE_NO_UPDATE:'1',BACKPLANE_ORDER_SERVER:'http://127.0.0.1:9',BACKPLANE_KEYRING_LOCKED:'0',BACKPLANE_PEERS:'',BACKPLANE_AGENTS:standins,PATH:`${standins}:${process.env.PATH}`,FAKE_LOG:`${home}/fake.log`,...extraEnv};
  for(const k of unsetEnv)if(direct)delete env[k];delete env.BUN_BE_BUN; // the script runner may be the hub binary itself in bun mode; the hub it starts must not be
  const proc=direct?spawn(bin,args,{env,stdio:['ignore',log?'pipe':'ignore',log?'pipe':'ignore']}):spawn('systemd-run',args,{env,stdio:['ignore',log?'pipe':'ignore',log?'pipe':'ignore']});
- if(log){const fs=require('node:fs');const o=fs.openSync(log,'a');proc.stdout.on('data',d=>fs.writeSync(o,d));proc.stderr.on('data',d=>fs.writeSync(o,d))}
+ if(log){const fs=fsm;const o=fs.openSync(log,'a');proc.stdout.on('data',d=>fs.writeSync(o,d));proc.stderr.on('data',d=>fs.writeSync(o,d))}
  const h=host||'127.0.0.1';
  let seenPid=NaN;const tStart=Date.now();
  for(let i=0;i<9000;i++){try{if((await fetch(`http://${h}:${port}/hello`)).status===200)break}catch{}
