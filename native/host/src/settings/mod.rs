@@ -14,7 +14,7 @@ mod copy_gate;
 pub mod accounts_io;
 pub mod diagnostics;
 pub mod driver;
-pub mod fab;
+pub mod fab; pub mod skill_install;
 pub mod fallback;
 pub mod improvements;
 pub mod issue_report;
@@ -79,6 +79,7 @@ pub fn start(hub: Arc<Hub>, agents: Option<Arc<crate::agents::Agents>>) {
     hub.register_rpc(Arc::new(zone::ZoneRpc));
     let _desks = alerts::start(&hub);
     hub.register_rpc(Arc::new(fab::FabRpc));
+    hub.register_rpc(Arc::new(skill_install::SkillRpc));
     hub.register_rpc(Arc::new(accounts::AccountsDefault));
     let _accounts = accounts_hub::start(&hub, agents.clone());
     // Accounts.created for every writer: a new or forked thread freezes its account binding (settings/binding.rs)

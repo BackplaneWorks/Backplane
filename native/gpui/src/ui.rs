@@ -417,12 +417,18 @@ impl Render for Backplane {
         let skills = thread["skills"].as_array();
         // the highlighted row starts at the first for each new set of rows; the composer is told so Up/Down/Tab drive the popup while it shows
         { let key = self.popup_rows().join("\u{1f}"); if key != self.screens.popup_key { self.screens.popup_key = key; self.screens.popup_ix = 0; } }
-        let popup_ix = self.screens.popup_ix.min(skills.map_or(0, |s| s.len().min(8)).saturating_sub(1));
+        let popup_ix = self.screens.popup_ix.min(skills.map_or(0, |s| s.len().min(12)).saturating_sub(1));
         let mut popup = div().flex().flex_col().border_1().border_color(c("line")).bg(c("panel")).py_1();
-        for (index, skill) in skills.into_iter().flatten().take(8).enumerate() {
+        let mut group = String::new();
+        for (index, skill) in skills.into_iter().flatten().take(12).enumerate() {
+            // a source's rows sit under its name (the hub groups them; rows without one draw as before)
+            let g = skill.get("group").and_then(Value::as_str).unwrap_or("").to_string();
+            if !g.is_empty() && g != group { popup = popup.child(div().px_3().pt_1().text_xs().text_color(c("dim")).child(g.clone())); }
+            group = g;
             let word = skill.get("word").or_else(|| skill.get("name")).and_then(Value::as_str).unwrap_or("").to_string();
             let label = skill.get("label").and_then(Value::as_str).unwrap_or(&word).to_string();
             let desc = ["text", "hint", "desc", "detail", "about"].iter().find_map(|k| skill.get(*k).and_then(Value::as_str)).unwrap_or("").to_string();
+            let desc = match skill.get("note").and_then(Value::as_str) { Some(n) if !n.is_empty() => format!("[{n}] {desc}"), _ => desc };
             ctl.push(CtlEntry { id: format!("skill:{word}"), label: label.clone(), ctl: Ctl::Skill(word.clone()) });
             popup = popup.child(with_rect(div().id(("skill", index)), || format!("skill:{word}")).flex().gap_3().px_3().py_1().cursor_pointer().when(index == popup_ix, |d| d.bg(c("raise"))).hover(|s| s.bg(c("raise")))
                 .child(div().font_weight(FontWeight::BOLD).flex_shrink_0().child(label)).child(div().flex_1().overflow_hidden().whitespace_nowrap().text_color(c("dim")).child(desc))
@@ -432,7 +438,7 @@ impl Render for Backplane {
                 })));
         }
         // the reference words the hub has offered become chips in the draft (it knows them as models, bots, threads...)
-        { let fresh: Vec<String> = skills.into_iter().flatten().filter_map(|s| s.get("word").and_then(Value::as_str)).filter(|w| w.len() > 1 && w.starts_with(|c| matches!(c, '@' | '>' | '%' | '#' | '&'))).map(String::from).collect();
+        { let fresh: Vec<String> = skills.into_iter().flatten().filter_map(|s| s.get("word").and_then(Value::as_str)).filter(|w| w.len() > 1 && w.starts_with(|c| matches!(c, '@' | '>' | '%' | '#' | '&' | '$')) && !w.starts_with("$install")).map(String::from).collect();
           let mut changed = false;
           for w in fresh { if !self.screens.known_refs.contains(&w) { self.screens.known_refs.push(w); changed = true; } }
           if changed { self.screens.known_refs.sort_by_key(|w| std::cmp::Reverse(w.len())); self.screens.known_refs.truncate(300); let k = self.screens.known_refs.clone(); self.input.update(cx, |i, cx| { i.chips = k; cx.notify(); }); } }

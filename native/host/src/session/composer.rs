@@ -123,7 +123,9 @@ pub fn fields(draft: &str, running: bool, attaching: bool, claude: bool, own_ski
 /// What the model knows about the selected thread that a send needs: the presenter implements it over its metadata projection.
 pub trait Facts { fn bot_thread(&self, thread: &str) -> bool; /// the bot whose thread this is
     fn bot_of(&self, _thread: &str) -> Option<String> { None } fn account_params(&self, thread: &str) -> bool; /// the thread's named account binding, as its setting text (Accounts.owner); None when it has none (Accounts.named)
-    fn account_binding(&self, _thread: &str) -> Option<String> { None } }
+    fn account_binding(&self, _thread: &str) -> Option<String> { None }
+    /// the thread's provider ("claude" when unknown)
+    fn provider_of(&self, _thread: &str) -> String { "claude".into() } }
 
 /// The composer's actions as the presenter's action table calls them: `params` is the object the hub builds for a view request (`session`, `action`, `value`, `cid`, `hub`,
 /// `now` in milliseconds). `draft`, `send` and `send-alt` (the other follow-up mode: Follow.mode answers "steer" for both); everything else, and every case not ported, is None.
@@ -136,6 +138,16 @@ pub fn act(params: &Value, facts: &dyn Facts) -> Option<ActOut> {
             let sel = s(session, "sel"); let word = s(params, "value");
             if !safe(sel) { return None }
             if word.is_empty() { return Some(ActOut { session_patch: json!({}), cmds: vec![] }) } // Skills.pick found no row: nothing to complete (Ui.skill.k), and not an error
+            // the install row: choosing it asks (the draft's word becomes `$install?<url>`, whose row confirms); the confirm sends the install and drops the word
+            if let Some(url) = word.strip_prefix("$install:") {
+                let text = mention::complete(draft_of(session, sel), &format!("$install?{url}")).trim_end().to_string();
+                return Some(ActOut { session_patch: json!({"drafts": { sel: text }}), cmds: vec![json!({"type": "keep", "thread": format!("{hub}|{sel}"), "text": text})] });
+            }
+            if let Some(url) = word.strip_prefix("$install!") {
+                let d = draft_of(session, sel); let t = mention::token(d); let text = d[..d.len() - t.len()].trim_end().to_string();
+                let req = json!({"id": session["rid"].as_u64().unwrap_or(0), "m": "skill.install", "p": {"url": url, "provider": facts.provider_of(sel)}});
+                return Some(ActOut { session_patch: json!({"rid": session["rid"].as_u64().unwrap_or(0) + 1, "drafts": { sel: text }}), cmds: vec![json!({"type": "keep", "thread": format!("{hub}|{sel}"), "text": text}), json!({"type": "send", "hub": hub, "text": req.to_string()})] });
+            }
             let text = mention::complete(draft_of(session, sel), word);
             Some(ActOut { session_patch: json!({"drafts": { sel: text }}), cmds: vec![json!({"type": "keep", "thread": format!("{hub}|{sel}"), "text": text})] })
         }
@@ -241,6 +253,15 @@ mod tests {
     impl Facts for Plain { fn bot_thread(&self, _: &str) -> bool { false } fn account_params(&self, _: &str) -> bool { false } }
     struct Bot;
     impl Facts for Bot { fn bot_thread(&self, _: &str) -> bool { true } fn account_params(&self, _: &str) -> bool { false } }
+    #[test] fn an_install_link_is_asked_about_before_it_is_sent() {
+        let sess = |d: &str| json!({"sel": "t1", "rid": 4, "drafts": {"t1": d}});
+        let p = |d: &str, w: &str| json!({"hub": "h", "action": "skill", "value": w, "session": sess(d)});
+        let a = act(&p("see $https://x.org/a/unslop/SKILL.md", "$install:https://x.org/a/unslop/SKILL.md"), &Plain).unwrap();
+        assert_eq!(a.session_patch["drafts"]["t1"], "see $install?https://x.org/a/unslop/SKILL.md"); assert!(a.cmds.iter().all(|c| c["type"] != "send"), "nothing is fetched before the confirm");
+        let b = act(&p("see $install?https://x.org/a/unslop/SKILL.md", "$install!https://x.org/a/unslop/SKILL.md"), &Plain).unwrap();
+        assert_eq!(b.session_patch["drafts"]["t1"], "see"); let send = b.cmds.iter().find(|c| c["type"] == "send").expect("the install request");
+        let req: Value = serde_json::from_str(send["text"].as_str().unwrap()).unwrap(); assert_eq!((req["m"].as_str(), req["p"]["url"].as_str(), req["p"]["provider"].as_str()), (Some("skill.install"), Some("https://x.org/a/unslop/SKILL.md"), Some("claude")));
+    }
     #[test] fn the_action_table_routes_draft_send_and_send_alt_only() {
         let p = |a: &str, v: &str| json!({"session": session(), "action": a, "value": v, "cid": "parity-gpui", "hub": "http://127.0.0.1:3820", "now": 1793864523123u64});
         assert_eq!(act(&p("draft", "hello parity"), &Plain).unwrap().cmds.len(), 1);

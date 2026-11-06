@@ -46,8 +46,20 @@ fn score(slug: &str, name: &str, q: &str) -> u32 {
 
 struct Cand { word: String, about: String, score: u32, same: bool, at: u64 }
 
+/// What the `$` popup and the chips need of a thread: the folder it works in, its provider, and whether its Claude runs under an account profile.
+pub fn thread_skill_facts(st: &State, thread: &str) -> (String, String, bool) {
+    let Some(t) = st.threads.get(thread) else { return (String::new(), String::new(), false) };
+    let cwd = if !t.worktree.is_empty() { t.worktree.clone() } else { st.projects.get(&t.project).map(|p| p.root.clone()).unwrap_or_default() };
+    let bound = st.settings.get(&format!("account.thread.{thread}.{}", t.provider)).map_or(false, |r| serde_json::from_str::<Value>(r).ok().map_or(true, |j| !j["id"].as_str().unwrap_or("").is_empty()));
+    (cwd, t.provider.clone(), bound)
+}
+
 /// The popup rows for the draft in thread `here`: `{word, label, desc}` each; empty unless the last word is a sigil word with something to offer.
 pub fn rows(st: &State, here: &str, draft: &str) -> Vec<Value> {
+    if token(draft).starts_with('$') {
+        let (cwd, provider, isolated) = thread_skill_facts(st, here);
+        return crate::agents::skills::rows(&crate::agents::skills::popup_index(&cwd), token(draft), &provider, isolated);
+    }
     let Some((sig, q)) = typing(token(draft)) else { return vec![] };
     let here_project = st.threads.get(here).map(|t| t.project.clone()).unwrap_or_default();
     let mut c: Vec<Cand> = vec![];
