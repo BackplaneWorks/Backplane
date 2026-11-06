@@ -216,6 +216,48 @@ const DEAF: &str = "#!/bin/sh\nsleep 600\n";
     let ev = log_from(&hub, from).await; assert_eq!(ev[0], json!({"$":"ThreadRenamed","id":T1,"title":"zqshort Route the 3V3 rail","at":ev[0]["at"]}));
     ag.shutdown();
 }
+/// A claude that answers a title one-shot (`--no-session-persistence`) with a quoted sentence and otherwise is the perf stand-in; never a real model.
+fn title_standin(d: &Path, answer: &str) {
+    perf_standin(d, 1); std::fs::rename(d.join("claude"), d.join("claude.real")).unwrap();
+    script(d, "claude", &format!("#!/bin/sh\ncase \"$*\" in *--no-session-persistence*) cat >/dev/null; printf '%s\\n' '{{\"type\":\"result\",\"is_error\":false,\"result\":{}}}';; *) exec \"$(dirname \"$0\")/claude.real\" \"$@\";; esac\n", serde_json::to_string(answer).unwrap().replace('\'', "'\\''")));
+}
+fn renames(ev: &[Value]) -> Vec<String> { ev.iter().filter(|e| is(e, "ThreadRenamed")).map(|e| e["title"].as_str().unwrap().to_string()).collect() }
+#[tokio::test(flavor = "multi_thread")] async fn the_title_model_retitles_a_new_thread_after_its_first_message() {
+    let sd = dir("tt-bin"); title_standin(&sd, "\"Route the 3V3 power rail.\"");
+    let (hub, ag, _h, _w) = start("tt", |w| base_log(w, 1, "").replace("Fixture 0", "New thread"), |_| Cli::standin(&sd)).await; let from = len(&hub).await;
+    rpc(&hub, "turn.start", json!({"thread":T1,"text":"zqshort Route the 3V3 rail and more"})).await;
+    let ev = until(&hub, from, 20, |ev| renames(ev).len() >= 2).await;
+    assert_eq!(renames(&ev), vec!["zqshort Route the 3V3 rail and more".to_string(), "Route the 3V3 power rail".to_string()], "the first line at once, then the model's title");
+    ag.shutdown();
+}
+/// Real Haiku through the person's Claude login on a temp home: `cargo test --offline --bin backplane-hub real_haiku -- --ignored --nocapture`.
+#[tokio::test(flavor = "multi_thread")] #[ignore] async fn real_haiku_titles_a_thread() {
+    let home = dir("real-home"); let work = dir("real-work");
+    std::fs::write(home.join("events.jsonl"), base_log(&work, 1, &format!("{{\"$\":\"MessagePosted\",\"thread\":\"{T1}\",\"msg\":\"m1\",\"role\":\"user\",\"text\":\"the \\\"buy boards\\\" thing shows up at inopportune times on the thread header, make it only appear once a board file has changed\",\"at\":1700000005}}\n")).replace("Fixture 0", "New thread")).unwrap();
+    let hub = Hub::start(Cfg { home, version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+    let ag = Agents::start(hub.clone()).await.unwrap(); let from = len(&hub).await;
+    let r = ag.retitle(T1, Some("New thread"), false).await; println!("REAL TITLE: {r:?}");
+    assert!(r.is_ok(), "{r:?}"); assert!(renames(&log_from(&hub, from).await).len() == 1); ag.shutdown();
+}
+#[tokio::test(flavor = "multi_thread")] async fn a_failed_title_model_leaves_the_first_line() {
+    let sd = dir("tf-bin"); perf_standin(&sd, 1); // its one-shot answers nothing usable (the stand-in's reply is no result line)
+    let (hub, ag, _h, _w) = start("tf", |w| base_log(w, 1, "").replace("Fixture 0", "New thread"), |_| Cli::standin(&sd)).await; let from = len(&hub).await;
+    rpc(&hub, "turn.start", json!({"thread":T1,"text":"zqshort Keep me"})).await;
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert_eq!(renames(&log_from(&hub, from).await), vec!["zqshort Keep me".to_string()]);
+    assert!(ag.retitle(T1, None, false).await.is_err());
+    ag.shutdown();
+}
+#[tokio::test(flavor = "multi_thread")] async fn regenerating_keeps_a_typed_title_unless_forced_and_leaves_bots_alone() {
+    let sd = dir("tr-bin"); title_standin(&sd, "Fresh title from the model");
+    let (hub, ag, _h, _w) = start("tr", |w| base_log(w, 2, &format!("{{\"$\":\"MessagePosted\",\"thread\":\"{T1}\",\"msg\":\"m1\",\"role\":\"user\",\"text\":\"fix the sidebar dots\",\"at\":1700000005}}\n{{\"$\":\"SettingSet\",\"key\":\"title.person.{T1}\",\"value\":\"1\",\"at\":1700000006}}\n{{\"$\":\"BotSet\",\"id\":\"b1\",\"name\":\"Bot\",\"thread\":\"t1700000010-1\",\"at\":1700000007}}\n")), |_| Cli::standin(&sd)).await; let from = len(&hub).await;
+    let (ok, m) = ag.tool_update(T1, &json!({"threadId":T1,"title":""})).await; assert!(!ok, "a typed title is kept: {m}");
+    assert!(renames(&log_from(&hub, from).await).is_empty());
+    let (ok, m) = ag.tool_update(T1, &json!({"threadId":T1,"title":"","force":true})).await; assert!(ok && m["title"] == "Fresh title from the model", "{m}");
+    assert_eq!(rpc(&hub, "thread.retitle", json!({"thread":T1})).await["ok"], true, "the menu's request");
+    assert!(ag.retitle("t1700000010-1", None, true).await.is_err(), "a bot's chat keeps its title");
+    ag.shutdown();
+}
 #[tokio::test(flavor = "multi_thread")] async fn a_flood_to_one_thread_is_bounded_and_answered() {
     let sd = dir("f-bin"); script(&sd, "claude", DEAF);
     let (_hub, ag, _h, _w) = start("f", |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await;

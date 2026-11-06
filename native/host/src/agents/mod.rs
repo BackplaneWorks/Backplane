@@ -278,12 +278,16 @@ impl Agents {
 
 struct Rpc(Arc<Agents>);
 impl RpcHandler for Rpc {
-    fn methods(&self) -> &'static [&'static str] { &["turn.start", "turn.interrupt", "ask.answer"] }
+    fn methods(&self) -> &'static [&'static str] { &["turn.start", "turn.interrupt", "ask.answer", "thread.retitle"] }
     fn call<'a>(&'a self, _hub: &'a Arc<Hub>, who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             if method == "ask.answer" { return match self.0.answer(p.get("id").and_then(Value::as_str).unwrap_or(""), p.get("answer").and_then(Value::as_str).unwrap_or("")).await { Ok(()) => vec![ok(id)], Err(e) => vec![err(id, &e)] } }
             let th = p.get("thread").and_then(Value::as_str).unwrap_or("");
             if th.is_empty() || !self.0.world().await.threads.contains_key(th) { eprintln!("agents: {method} refused: unknown thread {th:?}"); return vec![err(id, "unknown thread")] } // refused, and said so on the hub's log
+            if method == "thread.retitle" { // the thread menu's Regenerate title: the person asked, so it replaces even a title they typed
+                let ag = self.0.clone(); let th = th.to_string(); let r = ag.retitle(&th, None, true).await;
+                return vec![match r { Ok(t) => json!({"t":"reply","id":id,"ok":true,"result":{"title":t}}), Err(e) => err(id, &e) }]
+            }
             let r = match method {
                 "turn.start" => {
                     let shown = p.get("text").and_then(Value::as_str).unwrap_or("");
@@ -432,6 +436,7 @@ impl Actor {
         let mut ev: Vec<Value> = vec![];
         let takes_ride = !ride.is_empty() && (codex || sbs || !was_running);
         if takes_ride { ev.extend(codex::ride_done(&th, &ride, "with a new turn", now)) } // Ride.post: an idle thread starts with the mail still waiting
+        let first_title = if t.title == "New thread" && person && role == "user" && origin.is_none() { Some(rules::title_of(&text)).filter(|x| !x.is_empty()) } else { None }; // Title.out: the first line now, a model's title after
         if t.title == "New thread" { ev.push(json!({"$":"ThreadRenamed","id":th,"title":rules::title_of(&text),"at":now})) }
         // Steer.change: a message into a streaming reply posts what streamed, up to its last line break, ahead of it
         let head = rules::steer_head(&self.live);
@@ -452,6 +457,7 @@ impl Actor {
         ev.extend(extra);
         ev.push(set(format!("fallback.input.{th}"), text.clone(), now));             // Fallback.attempt
         self.commit(ev).await;
+        if let Some(ph) = first_title { let (ag, th2) = (self.ag.clone(), th.clone()); tokio::spawn(async move { if let Err(e) = ag.retitle(&th2, Some(&ph), false).await { eprintln!("titles: {th2}: kept the first line: {e}") } }); }
         self.recent.push_back(msg.clone()); if self.recent.len() > RECENT { self.recent.pop_front(); }
         self.cx.running = true; self.ag.stats.turns.fetch_add(1, Relaxed);
         self.jobs_start(&cwd, &msg);

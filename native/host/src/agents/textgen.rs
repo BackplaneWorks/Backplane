@@ -3,7 +3,7 @@
 //! (`Cli::resolve`), never a real model. Grok and Muse one-shots are not wired (their CLIs are not run by this seam yet): they answer None.
 use super::{proc, Agents};
 use crate::api::Fut;
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::{sync::Arc, time::Duration};
 
 const TIMEOUT: Duration = Duration::from_secs(60);
@@ -54,20 +54,100 @@ pub fn sum_clean(answer: &str) -> String {
     if l.chars().count() > 200 { format!("{}...", l.chars().take(197).collect::<String>()) } else { l }
 }
 
+/// Title.system
+pub const TITLE_SYSTEM: &str = "You title threads in a coding agent's sidebar. The user's first message to the agent follows. Do not answer it, do not do the work and do not use tools. Reply with only a title of 3 to 7 words (under 50 characters) naming the change or question the user wants, in sentence case, without quotes, markdown or a trailing period.";
+/// The model that titles threads (the person's Claude login runs it); Codex's light model is the fallback.
+pub const TITLE_MODEL: &str = "claude-haiku-5-5";
+
+/// Title.clean: the answer's first line without markdown marks, quotes, a "Title:" label or a trailing period, spaces collapsed, 60 characters at most ("" for none).
+pub fn title_clean(answer: &str) -> String {
+    let first = answer.trim().lines().next().unwrap_or("").trim();
+    let bare: String = first.chars().filter(|c| !matches!(c, '`' | '"' | '*')).collect();
+    let mut l = bare.trim_start_matches(|c| c == '#' || c == ' ').to_string();
+    if l.to_lowercase().starts_with("title:") { l = l[6..].trim().to_string() }
+    if l.chars().count() >= 2 && l.starts_with('\'') && l.ends_with('\'') { l = l[1..l.len() - 1].trim().to_string() }
+    let mut l = l.split_whitespace().collect::<Vec<_>>().join(" ");
+    if l.ends_with('.') && !l.ends_with("..") { l.pop(); l = l.trim().to_string() }
+    if l.chars().count() > 60 { format!("{}...", l.chars().take(57).collect::<String>()) } else { l }
+}
+
+/// How a one-shot is run: the program and arguments to put ahead, and the environment (a named account's profile).
+#[derive(Default, Clone)]
+pub struct Launch { pub program: Option<std::path::PathBuf>, pub args: Vec<String>, pub env: Vec<(String, String)> }
+
 impl Agents {
     /// Write one piece of text with the settings' light model; None when it cannot be run or says nothing. Bounded: 60 s, 1 MB.
     pub async fn one_shot(&self, system: &str, input: &str) -> Option<String> {
         let (tp, tm) = { let w = self.world().await; (w.setting("text.provider").to_string(), w.setting("text.model").to_string()) };
         let (provider, model) = pick(&tp, &tm);
+        self.shot(provider, &model, system, input, &Launch::default()).await
+    }
+    /// One run of `provider`'s CLI with `model`, the text on stdin, tools off.
+    pub async fn shot(&self, provider: &str, model: &str, system: &str, input: &str, via: &Launch) -> Option<String> {
         if provider != "claude" && provider != "codex" { return None }
-        let prog = self.cli.resolve(provider).ok()?;
-        let p = proc::spawn(&prog, &args(provider, &model, system), &self.hub.cfg.home, self.cli.dir(), &[]).ok()?;
+        let prog = match &via.program { Some(p) => p.clone(), None => self.cli.resolve(provider).ok()? };
+        let mut a = via.args.clone(); a.extend(args(provider, model, system));
+        let p = proc::spawn(&prog, &a, &self.hub.cfg.home, self.cli.dir(), &via.env).ok()?;
         let (pid, mut lines, input_tx, exit) = (p.pid, p.lines, p.input, p.exit);
         let _ = input_tx.try_send(input.to_string()); drop(input_tx); // the text on stdin, then it closes
         let read = async { let mut out = String::new(); while let Some(l) = lines.recv().await { if out.len() + l.len() > OUT_CAP { break } out.push_str(&l); out.push('\n') } out };
         let out = match tokio::time::timeout(TIMEOUT, read).await { Ok(o) => o, Err(_) => { proc::terminate(pid, Duration::from_secs(1)); return None } };
         let _ = tokio::time::timeout(Duration::from_secs(5), exit).await; proc::terminate(pid, Duration::from_millis(100));
         let a = answer(provider, &out); if a.is_empty() { None } else { Some(a) }
+    }
+    /// A thread's title from `text`: Haiku under the thread's own account (else the default login), then Haiku on the default login, then Codex's light model.
+    /// The cleaned title, or None (each failed attempt is logged).
+    pub async fn write_title(&self, thread: &str, text: &str) -> Option<String> {
+        let input: String = text.chars().take(4000).collect();
+        if input.trim().is_empty() { return None }
+        let mut tries: Vec<(&str, String, Launch, &str)> = vec![];
+        let raw = self.hub.setting(&crate::settings::accounts::binding_key(thread, "claude")).await.unwrap_or_default();
+        let b: Value = serde_json::from_str(&raw).unwrap_or(Value::Null);
+        let id = b["id"].as_str().unwrap_or("").to_string();
+        if !id.is_empty() {
+            if let Some(mgr) = self.accounts.get().cloned() {
+                match mgr.launch_plan(&id, &b["epoch"].as_u64().unwrap_or(0).to_string(), "claude").await {
+                    Ok(pl) => tries.push(("claude", TITLE_MODEL.into(), Launch { program: Some(pl.program), args: pl.args, env: pl.env }, "the thread's account")),
+                    Err(e) => eprintln!("titles: {thread}: the thread's account cannot run a title ({e}); using the default login") }
+            }
+        }
+        tries.push(("claude", TITLE_MODEL.into(), Launch::default(), "the default login"));
+        tries.push(("codex", pick("codex", "").1, Launch::default(), "codex"));
+        for (prov, model, via, what) in tries {
+            match self.shot(prov, &model, TITLE_SYSTEM, &input, &via).await {
+                Some(a) => { let t = title_clean(&a); if !t.is_empty() { return Some(t) } eprintln!("titles: {thread}: {what} answered nothing usable") }
+                None => eprintln!("titles: {thread}: {what} ({prov} {model}) gave no title"),
+            }
+        }
+        None
+    }
+    /// The text a title is written from: the first message; for a regeneration also the newest few, so a thread that moved on is titled for where it is.
+    async fn title_source(&self, thread: &str, regenerate: bool) -> String {
+        let Some(c) = crate::commands::entries(&self.hub, thread).await else { return String::new() };
+        let mine: Vec<&crate::commands::Line> = c.entries.iter().filter(|l| l.msg && l.role == "user").collect(); // newest first
+        let Some(first) = mine.last() else { return String::new() };
+        let clip = |t: &str, n: usize| t.chars().take(n).collect::<String>();
+        if !regenerate || mine.len() == 1 { return clip(&first.text, 4000) }
+        let recent: Vec<String> = mine.iter().take(3).rev().map(|l| clip(&l.text, 600)).collect();
+        format!("{}\n\nLater messages:\n{}", clip(&first.text, 1800), recent.join("\n---\n"))
+    }
+    /// Retitle a thread with the written title. `auto` (after a thread's first message): only while the thread still has the title it was given then
+    /// (`placeholder`) and the person has not typed one. A regeneration replaces any title unless the person typed it and `force` is not set.
+    /// Bots and the uberbot are left alone. Ok(title) once the event is logged; Err says why not (and is logged).
+    pub async fn retitle(&self, thread: &str, auto: Option<&str>, force: bool) -> Result<String, String> {
+        let (title, bot) = { let w = self.world().await; (w.threads.get(thread).map(|t| t.title.clone()), !w.bot(thread).is_empty()) };
+        let Some(title) = title else { return Err("unknown thread".into()) };
+        if bot { return Err("a bot's chat keeps its title".into()) }
+        let typed = |ag: &Agents| { let (h, k) = (ag.hub.clone(), format!("title.person.{thread}")); async move { !h.setting(&k).await.unwrap_or_default().is_empty() } };
+        if auto.is_none() && !force && typed(self).await { return Err("the person titled this thread; give force or rename it yourself".into()) }
+        let text = match auto { Some(_) => self.title_source(thread, false).await, None => self.title_source(thread, true).await };
+        let _ = title;
+        let r = match self.write_title(thread, &text).await { Some(t) => t, None => { let e = "no title could be written (the model gave none)".to_string(); eprintln!("titles: {thread}: {e}"); return Err(e) } };
+        let (now, cur) = (super::now_s(), { let w = self.world().await; w.threads.get(thread).map(|t| t.title.clone()).unwrap_or_default() });
+        if let Some(ph) = auto { if cur != ph || typed(self).await { return Err("the title changed meanwhile; kept".into()) } }
+        let mut ev = vec![json!({"$":"ThreadRenamed","id":thread,"title":r,"at":now})];
+        if auto.is_none() { ev.push(json!({"$":"SettingSet","key":format!("title.person.{thread}"),"value":"","at":now})) }
+        self.commit_events(ev).await; Ok(r)
     }
 }
 
@@ -93,6 +173,11 @@ mod tests {
     #[test] fn the_arguments_keep_the_model_tool_free_and_sessionless() {
         let c = args("claude", "haiku", "SYS"); assert_eq!(c[0], "-p"); assert!(c.windows(2).any(|w| w == ["--tools", ""]) && c.contains(&"--no-session-persistence".to_string()) && c.windows(2).any(|w| w == ["--system-prompt", "SYS"]));
         let x = args("codex", "", "SYS"); assert_eq!(x.last().unwrap(), "SYS"); assert!(x.contains(&"--ephemeral".to_string()) && !x.contains(&"-m".to_string()));
+    }
+    #[test] fn a_written_title_is_one_plain_line() {
+        assert_eq!(title_clean("  \"Fix the Haiku titler.\"\nmore"), "Fix the Haiku titler"); assert_eq!(title_clean("## Title: **Auto-settle merged threads**"), "Auto-settle merged threads");
+        assert_eq!(title_clean("'quoted'"), "quoted"); assert_eq!(title_clean("Wait..."), "Wait..."); assert_eq!(title_clean("   "), "");
+        let long = title_clean(&"word ".repeat(30)); assert_eq!(long.chars().count(), 60); assert!(long.ends_with("..."));
     }
     #[test] fn answers_are_read_and_cleaned() {
         assert_eq!(answer("claude", "{\"type\":\"result\",\"is_error\":false,\"result\":\"  hello \"}\n"), "hello"); assert_eq!(answer("claude", "{\"type\":\"result\",\"is_error\":true,\"result\":\"boom\"}"), "");

@@ -45,7 +45,7 @@ fn ok() -> Value { json!({"t":"reply","id":7,"ok":true}) }
 // Rename.changes: trimmed, a blank title changes nothing
 #[tokio::test] async fn rename_trims_and_a_blank_title_changes_nothing() {
     let h = hub("rename").await;
-    let (e, r) = ask(&h, "thread.rename", json!({"thread":"t1","title":"  New name  "})).await; assert_eq!(e, vec![json!({"$":"ThreadRenamed","id":"t1","title":"New name","at":0})]); assert_eq!(r, ok());
+    let (e, r) = ask(&h, "thread.rename", json!({"thread":"t1","title":"  New name  "})).await; assert_eq!(e, vec![json!({"$":"ThreadRenamed","id":"t1","title":"New name","at":0}), json!({"$":"SettingSet","key":"title.person.t1","value":"1","at":0})]); assert_eq!(r, ok());
     let (e, r) = ask(&h, "thread.rename", json!({"thread":"t1","title":"   "})).await; assert!(e.is_empty()); assert_eq!(r, ok());
 }
 // Retire.archive + Archive.changes + Watch.retire: the asks that wait on the process close (a plan stays), the bg rows clear, a snooze wakes

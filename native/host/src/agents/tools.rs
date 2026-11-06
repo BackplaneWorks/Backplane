@@ -81,7 +81,9 @@ impl Agents {
             if by.is_empty() { return fail("nobody launched that thread, so it has no reports to change") }
             self.commit_events(vec![json!({"$":"ThreadLaunched","id":target,"by":by,"report":on,"at":now_s()})]).await;
             return (true, json!({"threadId":target,"report":on}))
-        } if title.is_empty() { return fail("writing a title is not available in the Rust hub yet; give the new title") }
+        } if title.is_empty() { // regenerate: the title model writes a new one from the conversation; a title the person typed is kept unless `force` is true
+            let force = matches!(a.get("force"), Some(Value::Bool(true)));
+            return match self.retitle(target, None, force).await { Ok(t) => (true, json!({"threadId":target,"title":t})), Err(e) => fail(&e) } }
         self.commit_events(vec![json!({"$":"ThreadRenamed","id":target,"title":title,"at":now_s()})]).await;
         (true, json!({"threadId":target,"title":title}))
     }

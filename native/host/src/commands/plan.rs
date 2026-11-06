@@ -119,7 +119,7 @@ fn plan_inner(f: &Fold, at: u64, id: &Value, method: &str, p: &Value, cx: &Ctx) 
         "thread.unpin" => done(vec![json!({"$":"ThreadPinned","id":th,"pinned":false,"at":at})], id),
         "thread.unarchive" => done(vec![json!({"$":"ThreadArchived","id":th,"archived":false,"at":at})], id),
         // a rename: the title trimmed; a blank one changes nothing (Rename.changes)
-        "thread.rename" => { let t = s(p, "title", ""); let t = t.trim(); done(if t.is_empty() || th.is_empty() { vec![] } else { vec![json!({"$":"ThreadRenamed","id":th,"title":t,"at":at})] }, id) }
+        "thread.rename" => { let t = s(p, "title", ""); let t = t.trim(); done(if t.is_empty() || th.is_empty() { vec![] } else { vec![json!({"$":"ThreadRenamed","id":th,"title":t,"at":at}), json!({"$":"SettingSet","key":format!("title.person.{th}"),"value":"1","at":at})] }, id) } // the person's own title: no titler replaces it
         "thread.archive" | "thread.delete" => {
             let stop = Some(th.clone()); // Retire.archive: AgentStop every time, a running turn is interrupted first (see mod.rs)
             let first = if method == "thread.archive" { json!({"$":"ThreadArchived","id":th,"archived":true,"at":at}) } else { json!({"$":"ThreadDeleted","id":th,"at":at}) };
