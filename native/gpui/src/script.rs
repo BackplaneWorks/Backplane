@@ -345,7 +345,7 @@ impl Backplane {
             Ctl::None => "none".into(),
             Ctl::Rail(kind) => { self.screens.rail_pending = Some(kind.clone()); self.screens.rail_at = Some(Instant::now()); self.screens.plot_click = matches!(kind.as_str(), "board" | "schematic").then(Instant::now); let _ = self.tx.try_send(crate::screens::viewer::view_kind(kind)); self.ui_epoch += 1; "view.action view".into() }
             Ctl::PickFiles => { self.pick_files(cx); self.ui_epoch += 1; "attach picker".into() }
-            Ctl::ToggleSidebar => { self.sidebar_open = !self.sidebar_open; self.ui_epoch += 1; cx.notify(); "toggle sidebar".into() }
+            Ctl::ToggleSidebar => { self.sidebar_toggle(cx); "toggle sidebar".into() }
             Ctl::Select(id) => { self.select_id(id.clone(), cx); "view.open thread".into() }
             Ctl::Home(pid) => { let _ = self.tx.try_send(Command::Action("select".into(), format!("project-home-{pid}"))); "view.action select project-home".into() }
             Ctl::Fold(v) => { self.fold_click(v.clone()); "view.action fold".into() }
@@ -356,7 +356,7 @@ impl Backplane {
             Ctl::More => { self.screens.menu_open = !self.screens.menu_open; self.ui_epoch += 1; cx.notify(); "thread menu".into() }
             Ctl::RenameSave(id) => { let text = self.screens.fields.get("title").map(|s| s.input.read(cx).content.to_string()).unwrap_or_default(); if let Some(c) = crate::screens::tools::rename_save(id, &text) { let _ = self.tx.try_send(c); } "view.action rename-save".into() }
             Ctl::Imp(id) => { crate::screens::improvements::act(self, id, cx); self.ui_epoch += 1; format!("improvements {id}") }
-            Ctl::Node(a, p) => { let _ = self.tx.try_send(Command::Action(a.clone(), p.clone())); format!("view.action {a}") }
+            Ctl::Node(a, p) => { if a == "flag" && p == "settings" { self.open_settings(cx); return format!("view.action {a}"); } let _ = self.tx.try_send(Command::Action(a.clone(), p.clone())); format!("view.action {a}") }
         }
     }
     /// The popup is always the hub's rows now (no client-side rows), so a popup step is never local.

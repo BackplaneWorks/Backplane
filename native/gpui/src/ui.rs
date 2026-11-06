@@ -105,7 +105,7 @@ fn chip(light: bool, label: String) -> Div {
 impl Backplane {
     /// One row of the timeline, as the list asks for it: only rows on screen are drawn.
     pub(crate) fn timeline_row(&mut self, ei: usize, cx: &mut Context<Self>) -> AnyElement {
-        let light = self.theme_override.unwrap_or(self.data["theme"] == "light");
+        let light = self.light();
         let c = |name: &str| theme::color(light, name);
         let reg = self.screens.reg.clone();
         let e = self.data["thread"]["entries"][ei].clone();
@@ -163,7 +163,7 @@ impl Render for Backplane {
         if let Some(n) = self.screens.focus_field.take() { if let Some(s) = self.screens.fields.get(&n) { window.focus(&s.input.focus_handle(cx)); } }
         if self.screens.focus_settings { self.screens.focus_settings = false; window.focus(&self.screens.settings_focus); }
         self.frame_marks(window, cx);
-        let light = self.theme_override.unwrap_or(self.data["theme"] == "light");
+        let light = self.light();
         if self.swatches { return crate::swatch::view(light).into_any_element(); }
         if self.gallery { return crate::swatch::gallery(light).into_any_element(); }
         if self.fonts { return crate::swatch::fonts(light).into_any_element(); }
@@ -305,12 +305,12 @@ impl Render for Backplane {
         if !self.screens.img_poll && self.screens.images.loading() { self.screens.img_poll = true; crate::screens::timeline::poll(cx); }
 
         let el = div().size_full().flex().flex_col().bg(c("bg"))
-            .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| this.attach_event(&crate::screens::composer::ComposerEvent::Files(paths.paths().to_vec()), cx))).text_color(c("text")).text_size(px(13.)).font_family("Noto Sans Mono CJK JP").line_height(px(20.))
-            .relative().on_action(cx.listener(|this, _: &crate::screens::improvements::Toggle, _, cx| crate::screens::improvements::toggle(this, cx))).on_action(cx.listener(Self::send)).on_action(cx.listener(Self::close_popup)).on_action(cx.listener(Self::copy_selection))
+            .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| this.attach_event(&crate::screens::composer::ComposerEvent::Files(paths.paths().to_vec()), cx))).text_color(c("text")).text_size(px(13. * self.local.text_pct as f32 / 100.)).font_family(self.local.font.clone()).line_height(px(20. * self.local.text_pct as f32 / 100.))
+            .relative().on_action(cx.listener(|this, _: &crate::screens::improvements::Toggle, _, cx| crate::screens::improvements::toggle(this, cx))).on_action(cx.listener(|this, _: &crate::ToggleSidebarKey, _, cx| this.sidebar_toggle(cx))).on_action(cx.listener(|this, _: &crate::FocusSearchKey, _, cx| this.focus_search(cx))).on_action(cx.listener(Self::send)).on_action(cx.listener(Self::close_popup)).on_action(cx.listener(Self::copy_selection))
             // top bar
             .child(div().h(px(36.)).flex_shrink_0().relative().child(art::probe("topbar")).flex().items_center().justify_between().px_3().border_b_1().border_color(c("line")).bg(c("bg"))
                 .child(div().flex().items_center().gap_2()
-                    .when(!self.sidebar_open, |d| d.child(with_rect(div().id("unfold-sidebar"), || "ui:Unfold sidebar".to_string()).cursor_pointer().child(ic(light, "chevron-right", 16., "dim")).on_click(cx.listener(|this, _, _, cx| { this.sidebar_open = true; this.ui_epoch += 1; cx.notify(); }))))
+                    .when(!self.sidebar_open, |d| d.child(with_rect(div().id("unfold-sidebar"), || "ui:Unfold sidebar".to_string()).cursor_pointer().child(ic(light, "chevron-right", 16., "dim")).on_click(cx.listener(|this, _, _, cx| { if !this.sidebar_open { this.sidebar_toggle(cx); } }))))
                     .child(div().relative().size(px(18.)).child(art::logo(light, 18., "logo"))
                         .child(div().absolute().right(px(-2.)).bottom(px(-1.)).size(px(6.)).bg(if connected { c("ok") } else { c("bad") })))
                     .child(div().font_weight(FontWeight::BOLD).child("Backplane"))
@@ -319,12 +319,12 @@ impl Render for Backplane {
                 .child(div().flex().items_center().gap_3()
                     .child(with_rect(div().opacity(0.45), || "ui:Jump or run a command".to_string()).w(px(260.)).px_2().flex().items_center().gap_2().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("faint")).child(ic(light, "chevron-right", 13., "faint")).child("Jump or run a command"))
                     .child(with_rect(div().id("improvements-btn"), || "ui:Improvements".to_string()).cursor_pointer().on_click(cx.listener(|this, _, _, cx| crate::screens::improvements::toggle(this, cx))).px_2().flex().items_center().gap_2().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("dim")).child(ic(light, "message-square", 15., "dim")).child("Improvements"))
-                    .child(with_rect(div().id("search-btn"), || "ui:Search".to_string()).cursor_pointer().on_click(cx.listener(|this, _, _, cx| this.focus_search(cx))).child(ic(light, "search", 15., "dim"))).child(with_rect(div().id("gear"), || "ui:Settings".to_string()).cursor_pointer().on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(Command::Action("flag".into(), "settings".into())); cx.notify(); })).child(ic(light, "settings", 15., "dim")))))
+                    .child(with_rect(div().id("search-btn"), || "ui:Search".to_string()).cursor_pointer().on_click(cx.listener(|this, _, _, cx| this.focus_search(cx))).child(ic(light, "search", 15., "dim"))).child(with_rect(div().id("gear"), || "ui:Settings".to_string()).cursor_pointer().on_click(cx.listener(|this, _, _, cx| { this.open_settings(cx); })).child(ic(light, "settings", 15., "dim")))))
             .children(crate::screens::strip::view(light, &self.data))
             .child(div().flex_1().min_h_0().flex()
                 // sidebar
-                .child(div().w(px(if self.sidebar_open { 264. } else { 0. })).overflow_hidden().h_full().flex_shrink_0().relative().child(art::probe("sidebar")).bg(c("bg")).border_r_1().border_color(c("line")).flex().flex_col()
-                    .child(div().flex().items_center().gap_2().p_2().child(with_rect(div().id("fold-sidebar"), || "ui:Fold sidebar".to_string()).cursor_pointer().child(ic(light, "chevron-left", 16., "dim")).on_click(cx.listener(|this, _, _, cx| { this.sidebar_open = false; this.ui_epoch += 1; cx.notify(); }))).child(crate::screens::projects::search_box(light, &self.screens.projects)).child(with_rect(div().id("add-project"), || "ui:Add project".to_string()).cursor_pointer().on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(crate::screens::projects::open_cmd()); cx.notify(); })).child(ic(light, "plus", 16., "dim"))))
+                .child(div().w(px(if self.sidebar_open { self.local.sidebar_px as f32 } else { 0. })).overflow_hidden().h_full().flex_shrink_0().relative().child(art::probe("sidebar")).bg(c("bg")).border_r_1().border_color(c("line")).flex().flex_col()
+                    .child(div().flex().items_center().gap_2().p_2().child(with_rect(div().id("fold-sidebar"), || "ui:Fold sidebar".to_string()).cursor_pointer().child(ic(light, "chevron-left", 16., "dim")).on_click(cx.listener(|this, _, _, cx| { if this.sidebar_open { this.sidebar_toggle(cx); } }))).child(crate::screens::projects::search_box(light, &self.screens.projects)).child(with_rect(div().id("add-project"), || "ui:Add project".to_string()).cursor_pointer().on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(crate::screens::projects::open_cmd()); cx.notify(); })).child(ic(light, "plus", 16., "dim"))))
                     .child(div().id("sidebar").overflow_y_scroll().flex_1().children(rows))
                     .child(div().px_3().py_1().border_t_1().border_color(c("line")).text_size(px(11.)).text_color(c("dim")).child(self.status.clone())))
                 // main
@@ -368,7 +368,7 @@ impl Render for Backplane {
                     .children(crate::screens::tools::questions(cx, light, &self.screens.fields, &self.data))
                     .children(crate::screens::projects::view(cx, light, &self.screens.projects, &self.data))
                     .children(crate::screens::bots::forms(cx, light, &self.screens.fields, &self.data))
-                    .children(crate::screens::settings::view(cx, light, &self.screens.fields, &self.data["settings"], &self.screens.settings_focus, &self.screens.settings_ui))
+                    .children(crate::screens::settings::view(cx, light, &self.screens.fields, &self.data["settings"], &self.screens.settings_focus, &self.screens.settings_ui, &self.local))
                     .children(crate::screens::improvements::view(cx, light, &self.screens.imp))
                 )
                 .children(crate::screens::viewer::view(cx, &reg, light, thread, &self.screens.plot, &mut self.screens.plotview, self.screens.solid.as_ref(), self.screens.browser.as_ref().map(|(_, b)| b)))

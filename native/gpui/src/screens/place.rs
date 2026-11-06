@@ -135,7 +135,7 @@ impl Backplane {
     /// A thread's picture landed. The first after a start brings the scroll places and the sidebar back.
     pub(crate) fn place_restore(&mut self, raw: &str) {
         let Some((offsets, sidebar)) = SAVED_WINDOW.lock().ok().and_then(|mut w| w.take()) else { return };
-        self.screens.offsets.extend(offsets); self.sidebar_open = sidebar; self.ui_epoch += 1;
+        let _ = sidebar; self.screens.offsets.extend(offsets); self.ui_epoch += 1; // (the sidebar is this device's setting now, local.rs)
         self.timeline_show(raw);
         self.m("place", json!({"thread": raw, "row": self.screens.offsets.get(raw).map(|(r, _)| r.clone()), "sidebar": sidebar}));
     }

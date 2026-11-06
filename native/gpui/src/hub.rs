@@ -53,7 +53,7 @@ struct View {
 #[derive(Default)] struct Control { next:u64, bytes:usize, parts:Vec<String>, done:bool }
 const MAX_CONTROLS:usize=4;const MAX_CONTROL_BYTES:usize=16*1024*1024;const MAX_CONTROL_PARTS:u64=4096;
 impl View {
-    fn new(config:&Config)->Self {let mut v=Self::fresh(config);if let Some((target,session))=crate::screens::place::take_view(){v.target=target;v.session=crate::screens::place::opened_session(&session,millis());v.restored=Restore::First;}v}
+    fn new(config:&Config)->Self {let mut v=Self::fresh(config);let reopen=crate::local::Local::load().default_view!="list"; let saved_view=crate::screens::place::take_view(); if let (true,Some((target,session)))=(reopen,saved_view){v.target=target;v.session=crate::screens::place::opened_session(&session,millis());v.restored=Restore::First;}v}
     fn fresh(config:&Config)->Self {Self {restored:Restore::None,saved:None,drawn:false,rpcs:HashMap::new(),asks:HashMap::new(),hub:config.hub.replacen("ws://","http://",1),cid:format!("gpui-{}-{}",std::process::id(),millis()),
         greeting:Value::Null,target:json!({"kind":"recent","id":""}),session:json!({"sel":"","rid":millis(),"drafts":{},"open":{},"adding":false,"panel":false,"info":{}}),
         view_id:String::new(),revision:0,next:(1_u64<<47)+millis(),pending:HashMap::new(),outgoing:HashMap::new(),rpc_names:HashMap::new(),dirty:false,controls:HashMap::new(),sent:HashMap::new(),paging:None,want_page:None,req_draft:HashMap::new(),offered:HashMap::new(),bases:delta::Bases::default()}}
