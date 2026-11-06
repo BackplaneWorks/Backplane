@@ -7,7 +7,7 @@ set -eu
 ME=$(cd "$(dirname "$0")/.." && pwd); MAIN=${GPUI_MAIN:-/home/h/Documents/i2cjak/backplane-gpui}
 CLIENT=$1; HUBBIN=$2; ASSETS=$3; N=${4:-files}
 R=$ME/build/gpui/files-run-$N; OUT=$ME/build/gpui/results/files; SH=$ME/build/gpui/shots/files
-X=$MAIN/build/gpui/xvfb; WINDOW=$MAIN/build/gpui/hub/new/window
+X=$MAIN/build/gpui/xvfb
 PORT=${GPUI_PORT:-3841}; DISP=${GPUI_DISP:-:63}
 mkdir -p $OUT $SH
 [ -x "$CLIENT" ] && [ -x "$HUBBIN" ] || { echo "need CLIENT_BIN and HUB_BIN"; exit 2; }
