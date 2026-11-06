@@ -259,7 +259,7 @@ pub async fn serve_with(hub: Arc<Hub>, s: TcpStream, trusted: bool) -> Result<()
             let mut sink = vec![0u8; head_len]; s.read_exact(&mut sink).await?;
             s.write_all(&response("401 Unauthorized", "text/plain; charset=utf-8", "", b"this Backplane needs its pairing token")).await?; s.shutdown().await.ok(); return Ok(());
         }
-        if req.param("data") == "1" { return crate::data::socket(hub, s, req.param("enc") == "json", Auth::credential(&req)).await } // the phone data API (docs/gpui/PHONE-DATA.md)
+        if req.param("data") == "1" { return crate::data::socket(hub, s, req.param("enc") == "json", Auth::credential(&req), req.header("host").to_string()).await } // the phone data API (docs/gpui/PHONE-DATA.md)
         let (view, mobile) = (req.param("view") == "1", req.param("mobile") == "1");
         // BACKPLANE_WS_DEBUG=1: what the client offers on the upgrade (does it ask for permessage-deflate?), once per connection, to stderr
         if std::env::var("BACKPLANE_WS_DEBUG").map_or(false, |v| v == "1") { eprintln!("ws upgrade: extensions={:?} user-agent={:?}", req.header("sec-websocket-extensions"), req.header("user-agent")) }
