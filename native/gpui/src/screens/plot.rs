@@ -79,9 +79,10 @@ impl Varints<'_> {
     fn signed(&mut self) -> i32 { let z = self.next(); ((z >> 1) as i32) ^ -((z & 1) as i32) }
 }
 
-/// One chunk, decoded once: strokes as capsules (ax ay bx by r) and fills as fan triangles (6 floats each), micrometres.
+/// One chunk, decoded once: strokes as capsules (ax ay bx by r) and fills as polygons (x y pairs), micrometres. `sig` is a hash of the
+/// chunk as the hub sent it: the same chunk sent again is the one already held (its decoding and the canvas's triangles are kept).
 #[derive(Debug, Default, PartialEq)]
-pub struct Chunk { pub layer: u32, pub color: u32, pub alpha: f32, pub own: bool, pub caps: Vec<f32>, pub tris: Vec<f32>, pub polys: Vec<Vec<f32>>,
+pub struct Chunk { pub layer: u32, pub color: u32, pub alpha: f32, pub own: bool, pub caps: Vec<f32>, pub polys: Vec<Vec<f32>>, pub sig: u64,
     /// What a tap can pick: each piece's info index (its line in the hub's info file), its box and its points (`pts[at..at+n]`, x y pairs) as a dot, a stroke or a fill.
     pub pieces: Vec<Piece>, pub pts: Vec<f32>, pub r: f32 }
 /// kind: 0 a fill (polygon), 1 a stroke (polyline of radius `Chunk::r`), 2 a dot.
@@ -89,10 +90,18 @@ pub struct Chunk { pub layer: u32, pub color: u32, pub alpha: f32, pub own: bool
 pub struct Piece { pub info: u32, pub bbox: [f32; 4], pub at: u32, pub n: u32, pub kind: u8 }
 
 impl Chunk {
+    /// The chunk's signature: its header and data bytes hashed.
+    pub fn sig_of(o: &C) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        for k in ["l", "c", "a", "m", "w"] { o.get(k).and_then(C::int).hash(&mut h); }
+        if let Some(C::Bytes(b)) = o.get("d") { b.hash(&mut h); }
+        h.finish()
+    }
     pub fn decode(o: &C) -> Chunk {
         let g = |k: &str, d: i64| o.get(k).and_then(C::int).unwrap_or(d);
         let mode = g("m", 1);
-        let mut c = Chunk { layer: g("l", 0) as u32, color: g("c", 0) as u32, alpha: g("a", 255) as f32 / 255., own: mode == 0 && g("w", 0) != 0, ..Default::default() };
+        let mut c = Chunk { layer: g("l", 0) as u32, color: g("c", 0) as u32, alpha: g("a", 255) as f32 / 255., own: mode == 0 && g("w", 0) != 0, sig: Chunk::sig_of(o), ..Default::default() };
         let r = g("w", 0) as f32 / 2.; c.r = r;
         let empty = Vec::new();
         let data = match o.get("d") { Some(C::Bytes(b)) => b, _ => &empty };
@@ -106,7 +115,7 @@ impl Chunk {
             else {
                 let n = v.next() as usize;
                 for _ in 0..n.min(1 << 20) { if !v.more() { break; } let (x, y) = point(&mut v); pts.extend([x, y]); }
-                if mode == 0 { fan(&pts, &mut c.tris); if pts.len() >= 6 { c.polys.push(pts.clone()); } } else { path(&pts, r, &mut c.caps); }
+                if mode == 0 { if pts.len() >= 6 { c.polys.push(pts.clone()); } } else { path(&pts, r, &mut c.caps); }
             }
             if !pts.is_empty() {
                 let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
@@ -125,21 +134,19 @@ fn path(p: &[f32], r: f32, caps: &mut Vec<f32>) {
     let mut k = 2;
     while k + 1 < p.len() { caps.extend([p[k - 2], p[k - 1], p[k], p[k + 1], r]); k += 2; }
 }
-/// A polygon as a triangle fan, turned counter-clockwise.
-fn fan(p: &[f32], tris: &mut Vec<f32>) {
-    let n = p.len() / 2;
-    if n < 3 { return; }
-    let mut area = 0f32;
-    for k in 0..n { let j = (k + 1) % n; area += p[2 * k] * p[2 * j + 1] - p[2 * j] * p[2 * k + 1]; }
-    for k in 1..n - 1 {
-        let (a, b) = if area >= 0. { (k, k + 1) } else { (k + 1, k) };
-        tris.extend([p[0], p[1], p[2 * a], p[2 * a + 1], p[2 * b], p[2 * b + 1]]);
-    }
-}
-
 /// What the viewer draws: chunks in paint order, the plot's box, or why there is nothing.
 #[derive(Clone, Debug, Default)]
 pub struct Frame { pub key: String, pub fam: String, pub bbox: [f32; 4], pub edge: [f32; 4], pub thick: f32, pub chunks: Vec<Arc<Chunk>>, pub none: String }
+
+/// A plot frame read off the UI thread: the frame and, for each chunk it sends in full, that chunk decoded (`Store::apply` does the rest).
+#[derive(Debug)]
+pub struct Prepared { o: C, new: Vec<Option<Arc<Chunk>>> }
+/// Read a plot frame and decode its new chunks (pure: any thread). None when the bytes are not one.
+pub fn prepare(bytes: &[u8]) -> Option<Prepared> {
+    let o = decode(bytes)?;
+    let new = match o.get("cs") { Some(C::Arr(a)) => a.iter().map(|r| matches!(r, C::Map(_)).then(|| Arc::new(Chunk::decode(r)))).collect(), _ => Vec::new() };
+    Some(Prepared { o, new })
+}
 
 /// The chunks this client holds per source (a delta names its `base` source; a Split watches a schematic and a board at once), the newest frame
 /// (`frame`, the one Board and Schematic draw) and each source's own (`frames`, what a Split's panes draw).
@@ -161,13 +168,17 @@ impl Store {
     /// The newest frame of the source named `key`.
     pub fn frame_for(&self, key: &str) -> Option<&Frame> { self.frames.get(key) }
     /// Apply one plot frame. Err names a frame that cannot be used; the store is then empty, as on the phones.
-    pub fn receive(&mut self, bytes: &[u8]) -> Result<(), &'static str> {
-        let Some(o) = decode(bytes) else { self.fail(String::new(), String::new(), "The plot from the hub could not be read. Reopen the view to load it again."); return Err("undecodable plot frame") };
+    pub fn receive(&mut self, bytes: &[u8]) -> Result<(), &'static str> { self.apply(prepare(bytes)) }
+    /// Apply a frame read by `prepare` (off the UI thread): held chunks are resolved here, in arrival order.
+    pub fn apply(&mut self, p: Option<Prepared>) -> Result<(), &'static str> {
+        let Some(Prepared { o, mut new }) = p else { self.fail(String::new(), String::new(), "The plot from the hub could not be read. Reopen the view to load it again."); return Err("undecodable plot frame") };
         let key = o.get("key").and_then(C::text).unwrap_or("").to_string();
         let fam = o.get("fam").and_then(C::text).filter(|s| !s.is_empty()).unwrap_or(&key).to_string();
         // a 3D model rides the same socket; the mesh viewer is separate
         if key.starts_with("2|") || key.starts_with("3|") || key.starts_with("4|") { return Ok(()); }
         if let Some(why) = o.get("none").and_then(C::text) {
+            // {key:"", none:""}: the hub empties what an earlier connection left here; nothing is shown instead of what the page has
+            if key.is_empty() && why.is_empty() { self.reset(); return Ok(()) }
             self.fail(key, fam, why);
             return Ok(());
         }
@@ -179,10 +190,12 @@ impl Store {
         let held: Vec<Arc<Chunk>> = self.held.get(&from).cloned().unwrap_or_default();
         let stale_base = !base.is_empty() && !self.held.contains_key(base);
         let mut cs: Vec<Arc<Chunk>> = Vec::with_capacity(refs.len());
-        for r in refs {
+        // a chunk sent again in full that this client holds (any source) is the held one
+        let by_sig: std::collections::HashMap<u64, &Arc<Chunk>> = if new.iter().any(Option::is_some) { self.held.values().flatten().map(|c| (c.sig, c)).collect() } else { Default::default() };
+        for (i, r) in refs.iter().enumerate() {
             match r {
                 C::U(k) if !stale_base && *k >= 0 && (*k as usize) < held.len() => cs.push(held[*k as usize].clone()),
-                C::Map(_) => cs.push(Arc::new(Chunk::decode(r))),
+                C::Map(_) => { let c = new.get_mut(i).and_then(Option::take).unwrap_or_else(|| Arc::new(Chunk::decode(r))); cs.push(by_sig.get(&c.sig).map_or(c, |h| (*h).clone())); }
                 _ => { self.fail(key, fam, "Invalid geometry reference. Retry to reload this view."); return Err("invalid geometry reference"); }
             }
         }
@@ -327,7 +340,7 @@ mod tests {
         assert_eq!(fr.key, "0|/p|"); assert_eq!(fr.bbox, [0., 0., 2000., 1000.]); assert_eq!(fr.chunks.len(), 2);
         assert_eq!(fr.chunks[0].caps, vec![0., 0., 1000., 0., 100., 1000., 0., 1000., 500., 100.]);   // two capsules, r = w/2
         assert_eq!((fr.chunks[0].layer, fr.chunks[0].color), (3, 0xFF0000));
-        assert_eq!(fr.chunks[1].tris.len(), 12); assert_eq!(fr.chunks[1].polys.len(), 1);          // a square: two triangles
+        assert_eq!(fr.chunks[1].polys.len(), 1); assert_eq!(fr.chunks[1].polys[0].len(), 8);          // a square
     }
     #[test] fn a_second_frame_may_keep_held_chunks_by_index() {
         let a = frame("0|/p|", &[chunk(1, 1, 1, 10, &[(0, 0), (5, 5)]), chunk(2, 2, 1, 10, &[(0, 0), (9, 9)])], &[None, None], [0, 0, 10, 10]);
@@ -335,6 +348,16 @@ mod tests {
         let mut s = Store::default(); s.receive(&a).unwrap(); s.receive(&b).unwrap();
         let ls: Vec<u32> = s.frame.as_ref().unwrap().chunks.iter().map(|c| c.layer).collect();
         assert_eq!(ls, [2, 3, 1]);
+    }
+    #[test] fn a_chunk_sent_again_in_full_is_the_one_held_and_the_hubs_reset_empties_the_store() {
+        let a = frame("0|/p|", &[chunk(1, 1, 1, 10, &[(0, 0), (5, 5)])], &[None], [0, 0, 10, 10]);
+        let b = frame("1|/p|", &[chunk(9, 9, 1, 10, &[(0, 0), (7, 7)])], &[None], [0, 0, 10, 10]);
+        let mut s = Store::default(); s.receive(&a).unwrap(); let first = s.frame.as_ref().unwrap().chunks[0].clone();
+        s.receive(&b).unwrap(); s.receive(&a).unwrap();
+        assert!(Arc::ptr_eq(&first, &s.frame.as_ref().unwrap().chunks[0]), "the board's chunk, sent whole after the schematic, is the same Arc");
+        assert!(s.frame_for("1|/p|").is_some());
+        let mut r = Vec::new(); head(&mut r, 5, 3); r.extend([1]); text(&mut r, "plot"); r.extend([0x18, 31]); text(&mut r, ""); text(&mut r, "none"); text(&mut r, "");
+        s.receive(&r).unwrap(); assert!(s.frame.is_none() && s.frame_for("0|/p|").is_none(), "the reset leaves nothing to draw, not an empty plot");
     }
     #[test] fn a_bad_reference_empties_the_store_and_says_so() {
         let mut s = Store::default();

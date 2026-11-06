@@ -569,7 +569,7 @@ impl Render for Backplane {
                     .children(crate::screens::palette::view(cx, light, &self.data, &self.screens.palette, &self.local, &self.selected))
                     .children(crate::screens::images::lightbox(cx, self.screens.lightbox.as_ref()))
                 )
-                .children(crate::screens::viewer::view(cx, &reg, light, &self.screens.files, &self.screens.images, self.screens.attacher.target.as_ref(), thread, &self.screens.plot, &mut self.screens.plotview, &mut self.screens.split_pv, self.screens.solid.as_ref(), self.screens.browser.as_ref().map(|(_, b)| b)))
+                .children(crate::screens::viewer::view(cx, &reg, light, &self.screens.files, &self.screens.images, self.screens.attacher.target.as_ref(), thread, &self.screens.plot, &mut self.screens.plotview, &mut self.screens.split_pv, self.screens.solid.as_ref(), self.screens.browser.as_ref().map(|(_, b)| b), (self.screens.rail_pending.as_deref(), &self.screens.seen_viewers, crate::screens::viewer::thread_of(&self.data))))
                 // right rail
                 .child(div().w(px(72.)).h_full().flex_shrink_0().relative().child(art::probe("rail")).border_l_1().border_color(c("line")).flex().flex_col().py_2().children(rail)))
             .children(crate::screens::improvements::view(cx, light, &self.screens.imp))
@@ -577,6 +577,8 @@ impl Render for Backplane {
             .children(crate::screens::padview::view(cx, window, light, &self.local, &mut self.screens.pad, &mut ctl))
             // the right-click menu of a sidebar row, over everything
             .children(self.screens.ctx.clone().map(|m| crate::screens::ctxmenu::render(cx, light, &m)))
+            // (a record open) painted last: the window's CPU for this frame, from the start of this render to the end of the paint
+            .when(self.recording.is_some(), |d| { let this = cx.entity(); d.child(canvas(|_, _, _| (), move |_, _, _, cx| { let ms = t_render.elapsed().as_secs_f32() * 1000.0; this.update(cx, |app, _| { if app.screens.frame_cpu.len() < 8192 { app.screens.frame_cpu.push(ms); } }); }).absolute().size_0()) })
             .into_any_element();
         self.controls = ctl;
         self.render_us = t_render.elapsed().as_micros() as u64;

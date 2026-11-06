@@ -80,6 +80,7 @@ impl Backplane {
                 self.apply_ms=t_apply.elapsed().as_secs_f64()*1000.0;self.timing=Some(timing);self.applied_at=Some(Instant::now());self.adopt_new(cx);
             },
             Event::Plot(b)=>self.plot_received(b,cx),
+            Event::PlotReady(p,n,ms)=>self.plot_ready(p,n,ms),
             Event::Answer(id,reply)=>screens::improvements::answered(self,id,reply,cx),
             Event::Data(_,v)=>screens::accounts::got(self,v,cx),
             Event::Rpc(tag,ok,why)=>if tag.starts_with("acct"){screens::accounts::done(self,tag,ok,&why,cx)}else if tag.starts_with("files") {screens::filesui::rpc_done(self,tag,ok,&why,cx)} else {screens::settings::rpc_done(self,tag,ok,&why,cx)},
@@ -202,7 +203,7 @@ fn main()->anyhow::Result<()> {
             cx.open_window(opts,move|_,cx|cx.new(|cx|viewers::demo::Demo::new(cx,tris,steps,started))).expect("open GPUI window");
         } else {
             let measure=config.script.is_some();
-            cx.open_window(opts,move|window,cx|cx.new(|cx|{let mut b=Backplane::new(window,cx,config,started);b.screens.plotview.measure=measure;b})).expect("open GPUI window");
+            cx.open_window(opts,move|window,cx|cx.new(|cx|{let mut b=Backplane::new(window,cx,config,started);b.screens.plotview.measure=measure;for pv in b.screens.split_pv.iter_mut(){pv.measure=measure;}b})).expect("open GPUI window");
         }
         cx.activate(true);
         if let Some(secs)=exit_after {cx.spawn(async move|cx|{cx.background_executor().timer(Duration::from_secs_f64(secs)).await;let _=cx.update(|cx|cx.quit());}).detach();}
