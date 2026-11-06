@@ -16,6 +16,8 @@ impl Backplane {
         cx.notify();
     }
     pub(crate) fn pick_files(&mut self, cx: &mut Context<Self>) {
+        // test hook: BACKPLANE_GPUI_PICK_FILES=<path>:<path> stands in for the system file dialog (a private display has no portal)
+        if let Some(v) = std::env::var_os("BACKPLANE_GPUI_PICK_FILES") { let paths: Vec<std::path::PathBuf> = std::env::split_paths(&v).filter(|p| !p.as_os_str().is_empty()).collect(); self.attach_event(&ComposerEvent::Files(paths), cx); return; }
         let rx = cx.prompt_for_paths(PathPromptOptions { files: true, directories: false, multiple: true, prompt: None });
         cx.spawn(async move |weak, cx| {
             if let Ok(Ok(Some(paths))) = rx.await { let _ = weak.update(cx, |this, cx| this.attach_event(&ComposerEvent::Files(paths), cx)); }
