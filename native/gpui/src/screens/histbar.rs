@@ -23,13 +23,13 @@ pub fn version(git: &str, top: &str, commit: &str, file: &str) -> String {
     match file.strip_prefix(&format!("{top}/")) { Some(rel) if !commit.is_empty() && !git.is_empty() => format!("git\t{git}\t{commit}\t{}\t{top}/{rel}", top.chars().count()), _ => String::new() }
 }
 
-/// What a comparison shows: `old` and `new` are sources (a version path, or the live file's), `mode` 0 Old, 1 Diff, 2 New.
+/// What a comparison shows: `old` and `new` are sources (a version path, or the live file's), `mode` 0 Old, 1 Diff, 2 New, `bits` the layers its marks keep to (0 every layer).
 #[derive(Clone, Debug, PartialEq)]
-pub struct Cmp { pub base: String, pub label: String, pub old: String, pub new: String, pub mode: u8 }
+pub struct Cmp { pub base: String, pub label: String, pub old: String, pub new: String, pub mode: u8, pub bits: u32 }
 /// The source watched for the comparison on show. Where there is no old version (a first step), what there is shows as it is.
 pub fn shown(c: &Cmp) -> String {
     if c.old.is_empty() { return c.new.clone() }
-    match c.mode { 0 => c.old.clone(), 2 => c.new.clone(), _ => format!("diff\n{}\n{}", c.old, c.new) }
+    match c.mode { 0 => c.old.clone(), 2 => c.new.clone(), _ if c.bits != 0 => format!("diff\n{}\n{}\n{}", c.old, c.new, c.bits), _ => format!("diff\n{}\n{}", c.old, c.new) }
 }
 
 #[derive(Default, Clone)]
@@ -54,10 +54,20 @@ fn watch(app: &mut Backplane, path: &str) {
 /// Show the comparison (None: put it away and watch the file itself again).
 pub fn set(app: &mut Backplane, c: Option<Cmp>) {
     let Some((kind, _, _, own)) = open_file(app) else { return };
+    let bits = crate::viewers::layers::bits(&app.data["thread"]["viewer"]);
+    let c = c.map(|c| Cmp { bits, ..c });
     let path = match &c { Some(c) => shown(c), None => if kind == "board" { String::new() } else { own } };
     app.screens.plotview.compare = c; app.screens.plotview.menu = 0; app.screens.plotview.view = None;
     if app.screens.plotview.compare.is_none() { app.screens.plotview.hist.at = None; app.screens.plotview.hist.playing = false; }
     watch(app, &path);
+}
+/// The layer focus moved: a comparison on show keeps its marks to the new active layer (the web's rv-bits). The camera stays where it is.
+pub fn follow_focus(app: &mut Backplane) {
+    let Some((_, key, _, _)) = open_file(app) else { return };
+    let bits = crate::viewers::layers::bits(&app.data["thread"]["viewer"]);
+    let Some(c) = app.screens.plotview.compare.as_mut().filter(|c| c.base == key && c.bits != bits) else { return };
+    let before = shown(c); c.bits = bits; let path = shown(c);
+    if path != before { watch(app, &path); }
 }
 /// Compare the open file with `commit`: Diff first (old = the commit's file, new = the live one).
 pub fn compare(app: &mut Backplane, commit: Option<(&str, &str)>) {
@@ -67,7 +77,7 @@ pub fn compare(app: &mut Backplane, commit: Option<(&str, &str)>) {
     let file = file_of(app, &kind, &own, &r.pcb, &r.sch);
     let old = version(&r.git, &r.top, commit, &file); if old.is_empty() { return }
     app.screens.plotview.hist.at = None;
-    set(app, Some(Cmp { base: key, label: label.to_string(), old, new: file, mode: 1 }));
+    set(app, Some(Cmp { base: key, label: label.to_string(), old, new: file, mode: 1, bits: 0 }));
 }
 /// The step `i` of the thread's history on show (None: the live file): Diff of it against the step before, the way the bar's ticks go.
 pub fn select(app: &mut Backplane, i: Option<usize>) {
@@ -78,7 +88,7 @@ pub fn select(app: &mut Backplane, i: Option<usize>) {
     let (s, mode) = (&h.steps[i], app.screens.plotview.compare.as_ref().map_or(1, |c| c.mode));
     let (old, new) = (version(&h.git, &h.top, &s.p, &file), version(&h.git, &h.top, &s.c, &file)); if new.is_empty() { return }
     app.screens.plotview.hist.at = Some(i);
-    set(app, Some(Cmp { base: key, label: format!("step {}", i + 1), old, new, mode }));
+    set(app, Some(Cmp { base: key, label: format!("step {}", i + 1), old, new, mode, bits: 0 }));
 }
 /// Old / Diff / New of the comparison on show.
 pub fn mode(app: &mut Backplane, m: u8) { if let Some(mut c) = app.screens.plotview.compare.clone() { c.mode = m; set(app, Some(c)); } }
@@ -161,8 +171,8 @@ mod tests {
     #[test] fn a_version_is_the_hubs_git_path_and_a_comparison_shows_old_diff_or_new() {
         assert_eq!(version("/p/.git", "/p", "abc", "/p/b.kicad_pcb"), "git\t/p/.git\tabc\t2\t/p/b.kicad_pcb");
         assert_eq!(version("/p/.git", "/p", "abc", "/x/b.kicad_pcb"), ""); assert_eq!(version("/p/.git", "/p", "", "/p/b.kicad_pcb"), "");
-        let mut c = Cmp { base: "0|/p|".into(), label: "step 2".into(), old: "OLD".into(), new: "NEW".into(), mode: 1 };
-        assert_eq!(shown(&c), "diff\nOLD\nNEW"); c.mode = 0; assert_eq!(shown(&c), "OLD"); c.mode = 2; assert_eq!(shown(&c), "NEW");
+        let mut c = Cmp { base: "0|/p|".into(), label: "step 2".into(), old: "OLD".into(), new: "NEW".into(), mode: 1, bits: 0 };
+        assert_eq!(shown(&c), "diff\nOLD\nNEW"); c.bits = 4096; assert_eq!(shown(&c), "diff\nOLD\nNEW\n4096", "marks keep to the focus"); c.mode = 0; assert_eq!(shown(&c), "OLD", "only a Diff has marks"); c.bits = 0; assert_eq!(shown(&c), "OLD"); c.mode = 2; assert_eq!(shown(&c), "NEW");
         c.old.clear(); c.mode = 0; assert_eq!(shown(&c), "NEW", "a first step has no old version: what there is shows");
     }
     #[test] fn steps_parse_from_the_hubs_answer() {

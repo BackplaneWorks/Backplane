@@ -274,6 +274,7 @@ impl Backplane {
 
 impl Render for Backplane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.screens.plotview.layers_key = crate::keys::hint(&self.local, "layers");
         let t_render = std::time::Instant::now();
         crate::screens::improvements::tick(self, window, cx);
         crate::screens::desk::tick(self, window, cx);

@@ -244,8 +244,8 @@ pub fn recent(st: &State,p: &Value) -> Option<Value> {
             crate::session::patch::merge(&mut session,&o.patch);
             cmds=o.before;
         },
-        // the Layers menu: hide/show a layer, the active layer, All/Dim/Only (present/viewer.rs `layer_action`)
-        "view-layer" | "view-layer-pick" | "view-layer-mode" => {
+        // the Layers menu: hide/show a layer, the active layer, All/Dim/Only, Ctrl+H, Reset layers (present/viewer.rs `layer_action`)
+        "view-layer" | "view-layer-pick" | "view-layer-mode" | "view-layer-cycle" | "view-layers-reset" => {
             let Some(patch)=super::viewer::layer_action(st,&session,action,value) else { return refused("action.layer-unported") };
             crate::session::patch::merge(&mut session,&patch);
         },
