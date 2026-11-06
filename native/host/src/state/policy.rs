@@ -17,7 +17,7 @@ use std::sync::{Mutex, MutexGuard};
 /// seen counts...). A policy that starts reading another family adds its prefix here.
 const KEEP: &[&str] = &["settle.", "autosettle.", "launch.", "launched.", "thread.parent.", "bg.", "watch.", "order.wait.", "wake.", "wakes.", "lock.", "locks.",
     "secret.ask.", "liveness.", "star.nudge.", "restart.retry", "provider.resume.", "thread.config.hold.", "watchdog.", "alert.", "summary.", "notify.", "push.webhook", "told.", "project.dormant.",
-    "order.enabled", "order.estimates", "account.thread.", "fork.", "usage.", "effort.", "buy."]; // fork.<id>: the source thread id, a thread screen's "back" button; the action dispatcher's facts (Fab.at / Fab.want, Accounts.named): tiny values, one account key per thread
+    "order.enabled", "order.estimates", "account.thread.", "allowance.", "accounts.inventory", "fork.", "usage.", "effort.", "buy."]; // fork.<id>: the source thread id, a thread screen's "back" button; the action dispatcher's facts (Fab.at / Fab.want, Accounts.named): tiny values, one account key per thread
 // A thread screen must see its refusal gate's configuration even in the lean copy. Exact global keys keep their values;
 // per-thread keys keep only presence, never the possibly large body. stopped./failed. remain outside this allowlist.
 const GATE_EXACT: &[&str] = &["files.max.mb", "person.tz", "person.tz.device", "tz.machine", "think", "agent.thinking", "permissions.default"];
@@ -216,6 +216,7 @@ mod tests {
 
     #[test] fn lean_keeps_what_policies_read_and_drops_what_grows() {
         for k in ["todos.t1", "todos.visible.t1", "text.provider", "text.model", "kicad.path", "kicad.ipc", "fallback.chain", "fallback.on", "fallback.add.provider", "fallback.add.model", "autosettle.quiet.t1", "liveness.t1", "wake.w1", "lock.merge", "launch.t2", "alert.t1", "told.k1-1", "settle.done", "launch.input.t1", "fallback.input.t1", "order.enabled", "order.estimates", "account.thread.t1.claude", "files.max.mb", "person.tz", "tz.machine", "think", "permissions.default", "effort:t1", "wait.t1", "stop.t1", "fail.t1"] { assert!(lean_keeps(k), "{k}"); }
+        for k in ["allowance.claude", "allowance.codex", "accounts.inventory"] { assert!(lean_keeps(k), "{k}: the composer's limits chip reads it"); }
         for k in ["tok.t.t1", "tok.1b.t.t1", "turn.last.t1", "turn.speed.t1", "turn.models.t1", "tok.epoch", "tok.recount"] { assert!(lean_keeps(k), "{k}"); }
         for k in ["ride.t1", "tok.basis.t1", "uber.op.u.m.1", "todos.base.t1", "session.t1.claude"] { assert!(!lean_keeps(k), "{k}"); }
     }
