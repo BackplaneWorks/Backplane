@@ -2,7 +2,7 @@
 //! gpui image repainted from CEF's OSR frames, with the person's mouse, wheel, keys, IME text and focus going to the page. The agent drives the same page
 //! over CDP: the engine's loopback port is handed to the hub (`bots.browser` op `attach`), and the person's first click takes the page over
 //! (`takeover`; "Hand back" gives it back), the semantics of docs/browser-native.md.
-use super::cef::{self, Cur, Engine, Tab};
+use super::cef::{self, Cur, Engine, ImplFileDialogCallback as _, Tab};
 use crate::{hub::Command, screens::settings::Secret};
 use gpui::{prelude::*, *};
 use std::{ops::Range, sync::{Arc, Mutex}};
@@ -44,11 +44,27 @@ impl CefPage {
         let targets = self.tabs.iter().map(|t| t.st.lock().unwrap().url.clone()).collect::<Vec<_>>();
         self.rpc(serde_json::json!({"bot": self.owner, "op": "attach", "endpoint": format!("http://127.0.0.1:{}", self.port), "active": self.active, "urls": targets}));
     }
+    /// OSR has no native dialog: gpui's path picker answers CEF's file dialog.
+    fn file_dialog(&mut self, d: cef::Dialog, cx: &mut Context<Self>) {
+        let rx: std::pin::Pin<Box<dyn std::future::Future<Output = Option<Vec<std::path::PathBuf>>>>> = if d.save {
+            let r = cx.prompt_for_new_path(&std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default(), None);
+            Box::pin(async move { r.await.ok().and_then(|r| r.ok()).flatten().map(|p| vec![p]) })
+        } else {
+            let r = cx.prompt_for_paths(PathPromptOptions { files: !d.folder, directories: d.folder, multiple: d.multiple, prompt: None });
+            Box::pin(async move { r.await.ok().and_then(|r| r.ok()).flatten() })
+        };
+        let cb = d.cb;
+        cx.spawn(async move |_, _| {
+            let paths = rx.await;
+            match paths { Some(p) if !p.is_empty() => { let mut l = cef::CefStringList::new(); for x in p { l.append(&x.to_string_lossy()); } cb.cont(Some(&mut l)); } _ => cb.cancel() }
+        }).detach();
+    }
     /// Frames, popups, closed tabs, address changes: everything CEF's callbacks left for the main thread.
     fn pump(&mut self, cx: &mut Context<Self>) {
-        let mut popups = Vec::new();
-        for t in &self.tabs { popups.append(&mut t.st.lock().unwrap().popups); }
-        for u in popups { self.new_tab(&u, cx); }
+        let (mut popups, mut dialogs) = (Vec::new(), Vec::new());
+        for t in &self.tabs { let mut st = t.st.lock().unwrap(); popups.append(&mut st.popup_tabs); dialogs.append(&mut st.dialogs); if !st.download.is_empty() { self.status = st.download.clone(); } }
+        for t in popups { self.tabs.push(t); self.active = self.tabs.len() - 1; self.image = None; self.bar_edit = false; }
+        for d in dialogs { self.file_dialog(d, cx); }
         let before = self.tabs.len();
         let act = self.tabs.get(self.active).cloned();
         self.tabs.retain(|t| !t.st.lock().unwrap().closed);
@@ -126,7 +142,7 @@ impl Render for CefPage {
         let me = cx.entity();
         let (back, fwd, loading, title, err) = self.tab().map(|t| { let s = t.st.lock().unwrap(); (s.back, s.forward, s.loading, s.title.clone(), s.load_error.clone()) }).unwrap_or_default();
         let cursor = self.tab().map(|t| t.cursor()).unwrap_or(Cur::Default);
-        let bar_focused = self.bar_focus.is_focused(window);
+        let bar_focused = self.bar_focus.is_focused(window); let status = self.status.clone();
         let bounds = self.bounds.clone(); let tab_for_size = self.tab().cloned();
         let focus = self.focus.clone();
         let tabs_row = (self.tabs.len() > 1).then(|| {
@@ -158,6 +174,7 @@ impl Render for CefPage {
                 }, move |b, _, window, cx| { window.handle_input(&focus, ElementInputHandler::new(b, me), cx); }).absolute().size_full())
                 .children(self.image.clone().map(|i| img(i).absolute().size_full().object_fit(ObjectFit::Fill)))
                 .when(!err.is_empty(), |d| d.child(div().absolute().top_2().left_2().px_2().py_1().text_size(px(12.)).bg(rgb(0x1a1e25)).text_color(rgb(0xf06a6a)).child(err)))
+                .when(!status.is_empty(), |d| d.child(div().absolute().bottom_2().left_2().px_2().py_1().text_size(px(12.)).bg(rgb(0x1a1e25)).text_color(rgb(0xd7dbe3)).child(status.clone())))
                 .when(self.image.is_none() && !title.is_empty(), |d| d.child(div().absolute().top_2().left_2().text_color(rgb(0x8a93a3)).child(title)))
                 .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, _, _| { let (x, y) = this.local(e.position); this.last_mouse = (x, y); if let Some(t) = this.tab() { t.mouse_move(x, y, Self::mods(&e.modifiers, this.buttons), false); } }))
                 .on_mouse_down(MouseButton::Left, cx.listener(|this, e: &MouseDownEvent, w, cx| this.mouse(e, 0, w, cx)))

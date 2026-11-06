@@ -745,11 +745,13 @@ async function captureNow(force: boolean): Promise<Json | null> {
 // ---------------------------------------
 
 async function startShots(o: Owner): Promise<void> {
-  if (!JPEG_DIR || !context) return;
-  await stopShots(o);
   const p = o.active;
+  // an attached external page (the native client's embedded Chromium) has its own browser: its frames go to the same JPEG file as any page's
+  const ext = !!p && externalPages.has(p);
+  if (!JPEG_DIR || (!context && !ext)) return;
+  await stopShots(o);
   if (!p || p.isClosed()) return;
-  const s = await context.newCDPSession(p);
+  const s = await (ext ? p.context() : context!).newCDPSession(p);
   o.shot.cdp = s;
   s.on("Page.screencastFrame", (e: any) => {
     s.send("Page.screencastFrameAck", { sessionId: e.sessionId }).catch(() => {});
@@ -779,7 +781,7 @@ function castCheck(o: Owner): Promise<void> {
     if (want) {
       let release: (() => Promise<void>) | null = null;
       try {
-        if (engine === "cef" && o.active) release = await cef!.capture(o.active);
+        if (engine === "cef" && o.active && !externalPages.has(o.active)) release = await cef!.capture(o.active);
         if (o.shot.cdp !== s || !watched(o)) { if (release) await release(); return; }
         o.shot.capture = release;
         await s.send("Page.startScreencast", { format: "jpeg", quality: 70, maxWidth: 1280, maxHeight: 2048, everyNthFrame: 1 });
@@ -1011,6 +1013,7 @@ function quick(name: string): void {
 // (the active tab's url) the owner's active page, so preview_* acts on what the person sees. "detach" drops it.
 const external = new Map<string, Awaited<ReturnType<typeof pwChromium.connectOverCDP>>>();
 const externalPages = new WeakSet<Page>();
+const externalCtx = new WeakSet<object>();
 async function attachExternal(a: Json, name: string): Promise<Json> {
   const ep = String(a.endpoint ?? "");
   if (!/^http:\/\/(127\.0\.0\.1|localhost):\d+\/?$/.test(ep)) throw new Error("attach needs a loopback http endpoint");
@@ -1035,8 +1038,19 @@ async function attachExternal(a: Json, name: string): Promise<Json> {
     p.on("framenavigated", (f) => { if (f === p.mainFrame()) { tellTabs(o); if (p === o.active) send({ event: "navigated", page: o.name, url: f.url() }); } });
     p.on("close", () => { o.tabs = o.tabs.filter((t) => t !== p); if (o.active === p) o.active = o.tabs[o.tabs.length - 1] ?? null; tellTabs(o); });
   }
+  // teach mode records the person's native clicks on this page: the recorder's binding and script go into the external browser's own context
+  const ctx = p.context();
+  if (!externalCtx.has(ctx)) {
+    externalCtx.add(ctx);
+    await ctx.exposeBinding("__bpRec", (source, ev) => onRecord(source, ev)).catch((e) => log(`attach recorder binding: ${e}`));
+    await ctx.addInitScript(RECORDER_SCRIPT).catch(() => {});
+  }
+  await p.evaluate(RECORDER_SCRIPT).catch(() => {}); // the page already loaded: install the recorder in it now too
+  if (o.recording) await recorderSet(o, true);
   o.tabs = o.tabs.filter((t) => externalPages.has(t) && !t.isClosed()); if (!o.tabs.includes(p)) o.tabs.push(p);
   o.active = p; tellTabs(o);
+  await startShots(o).catch((e) => log(`attach shots: ${e}`));
+  void shotNow(o.name);
   return { attached: true, url: p.url() };
 }
 
