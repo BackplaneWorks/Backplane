@@ -128,6 +128,10 @@ fn diff_page(cx: &mut Context<Backplane>, light: bool, diff: &Value) -> AnyEleme
 }
 
 /// One plot canvas: the frame it is given (or what the hub says instead) and, when `layers` is on, the hub's layer list beside it.
+/// The viewer's boards (`viewer.boards`: label, path from the project's folder, on show).
+pub fn boards(viewer: &Value) -> Vec<(String, String, bool)> {
+    viewer["boards"].as_array().into_iter().flatten().map(|b| (string(b, "label"), string(b, "value"), b["on"].as_bool().unwrap_or(false))).collect()
+}
 fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, viewer: &Value, frame: Option<&super::plot::Frame>, pv: &mut super::plotview::PlotView, layers: bool, sheets: &[super::plot::Sheet]) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let loading = || div().p_3().text_color(c("dim")).child(if open == "board" { "Loading the board…" } else { "Loading the schematic…" }).into_any_element();
@@ -144,6 +148,15 @@ fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, 
     let mut col = div().size_full().flex().flex_col();
     let note = string(viewer, "note");
     if !note.is_empty() { col = col.child(div().px_3().py_1().text_size(px(11.)).text_color(c("dim")).child(note)); }
+    // Boards: a project with several lists them as chips, the one on show marked; a press shows that board (and its schematic)
+    let boards = boards(viewer);
+    if boards.len() > 1 && matches!(open, "board" | "schematic" | "3d") {
+        col = col.child(div().id("boards-row").flex().flex_wrap().gap_1().px_3().py_1().children(boards.into_iter().enumerate().map(|(i, (label, value, on))| {
+            let d = div().id(SharedString::from(format!("board-{i}"))).px_2().py_1().text_size(px(12.)).cursor_pointer().border_1();
+            let d = if on { d.bg(c("accent")).text_color(c("on-accent")).border_color(c("accent")) } else { d.bg(c("raise")).border_color(c("line")).hover(|s| s.bg(c("panel"))) };
+            d.child(label).on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("view-board".into(), value.clone())); cx.notify(); })).into_any_element()
+        }).collect::<Vec<_>>()));
+    }
     // Layers: the menu lists the layers this plot has; the hub's masks decide what the canvas draws
     let present: std::collections::BTreeSet<u32> = frame.chunks.iter().map(|c| c.layer).collect();
     let strip = crate::viewers::layers::strip(viewer, &present);

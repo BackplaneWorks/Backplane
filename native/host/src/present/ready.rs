@@ -29,6 +29,13 @@ fn buy_label(r: &Value) -> String {
     if label.is_empty() { if on { String::new() } else { "Buy it".into() } } else { format!("Buy it · {label}") }
 }
 
+/// Card.boards.j: the boards the viewer's picker offers, one path a line (from the project's folder).
+fn boards_text(v: &Value) -> String { v.as_array().into_iter().flatten().filter_map(Value::as_str).filter(|p| !p.contains('\n')).collect::<Vec<_>>().join("\n") }
+/// The session patch a `boards.list` answer makes (`{thread, board_list, board_default}`): the same two keys the card sets.
+pub fn keep_boards(res: &Value) -> Option<Value> {
+    let th = s(res, "thread"); if th.is_empty() || !res["board_list"].is_array() { return None }
+    Some(json!({"info": {format!("fab.boards:{th}"): boards_text(&res["board_list"]), format!("fab.board:{th}"): s(res, "board_default")}}))
+}
 /// The session patch a `fab.look` answer makes: the card's fields as `fab.*` info of its thread.
 pub fn keep(res: &Value) -> Option<Value> {
     let th = s(res, "thread"); if th.is_empty() || res.get("goal").is_none() { return None }
@@ -37,6 +44,7 @@ pub fn keep(res: &Value) -> Option<Value> {
     Some(json!({"info": {
         format!("fab.line:{th}"): if goal.is_empty() { "No goal yet. Edit to say what this project is for." } else { goal },
         format!("fab.intent:{th}"): s(res, "intent"), format!("fab.buy:{th}"): buy_label(res), format!("fab.shown:{th}"): if shown { "1" } else { "" },
+        format!("fab.boards:{th}"): boards_text(&res["board_files"]), format!("fab.board:{th}"): s(res, "board_default"),
         format!("fab.ready:{th}"): ready_line(res), format!("fab.again:{th}"): if ordered(s(res, "order")) { "1" } else { "" }}}))
 }
 

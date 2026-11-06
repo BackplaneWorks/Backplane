@@ -61,7 +61,6 @@ fn simple(st: &State, session: &Value, sel: &str) -> bool {
         && (own || !session["panel"].as_bool().unwrap_or(false))
         && s(d, "@view.bare").is_empty()
         && (own || (s(info, &format!("view.path:{sel}")).is_empty() && s(info, &format!("view.kind:{sel}")).is_empty()))
-        && s(info, &format!("fab.boards:{sel}")).lines().filter(|l| !l.trim().is_empty()).count() <= 1
 }
 
 pub struct ViewOut {
@@ -108,6 +107,38 @@ pub fn view_action(st: &State, hub: &str, session: &Value, kind: &str) -> Option
     let mut out = json!({"rid": rid, "drafts": drafts});
     patch::merge(&mut out, &pages::leave(session, sel));
     Some(ViewOut { patch: out, before, boards_look: drawing(kind) && kind != "mech" && !drawing(prev) })
+}
+
+/// The project's boards as the Boards menu lists them (View.board.list): two or more, the one on show marked. None for one board or none.
+fn boards_menu(session: &Value, sel: &str, root: &str) -> Option<Value> {
+    let list: Vec<&str> = s(&session["info"], &format!("fab.boards:{sel}")).lines().filter(|l| !l.trim().is_empty()).collect();
+    if list.len() < 2 { return None }
+    let on_abs = s(&session["drafts"], &format!("@view.file:{sel}"));
+    let on = if on_abs.is_empty() { s(&session["info"], &format!("fab.board:{sel}")).to_string() } else { on_abs.strip_prefix(&format!("{root}/")).unwrap_or(on_abs).to_string() };
+    let on = if on.is_empty() { list[0].to_string() } else { on };
+    Some(Value::Array(list.iter().map(|p| json!({"label": p.strip_suffix(".kicad_pcb").unwrap_or(p), "value": p, "on": **p == *on})).collect()))
+}
+/// `view-board <path from the root>`: another of the project's boards on the Board, Schematic or 3D page (its schematic is the one beside it): watched as the Files tab watches a file.
+pub fn board_action(st: &State, hub: &str, session: &Value, rel: &str) -> Option<ViewOut> {
+    let sel = s(session, "sel"); let d = &session["drafts"];
+    if !simple(st, session, sel) { return None }
+    let kind = s(d, &format!("@view:{sel}"));
+    if !matches!(kind, "board" | "schematic" | "3d") { return None }
+    if !s(&session["info"], &format!("fab.boards:{sel}")).lines().any(|l| l == rel) { return None }
+    let root = root_of(st, sel); if root.is_empty() { return None }
+    let abs = format!("{root}/{rel}");
+    let file = if kind == "schematic" { format!("{}.kicad_sch", abs.strip_suffix(".kicad_pcb")?) } else { abs };
+    let n = match kind { "board" => "0", "schematic" => "1", _ => "2" };
+    let want = format!("{n}|{root}|{file}");
+    let mut rid = session["rid"].as_u64().unwrap_or(0); let mut before = vec![]; let mut drafts = serde_json::Map::new();
+    drafts.insert(format!("@view.file:{sel}"), json!(file)); drafts.insert(format!("@view.sheet:{sel}"), json!(""));
+    for k in ["@pick", "@card", "@pick.rid"] { drafts.insert(k.into(), json!("")); }
+    if want != s(d, "@view.at") {
+        let p = format!("{{\"kind\":{},\"root\":{},\"path\":{},\"tree\":\"\"}}", jstr(kind), jstr(&root), jstr(&file));
+        before.push(json!({"type": "send", "hub": hub, "text": format!("{{\"id\":{rid},\"m\":\"kicad.watch\",\"p\":{p}}}")}));
+        rid += 1; drafts.insert("@view.at".into(), json!(want));
+    }
+    Some(ViewOut { patch: json!({"rid": rid, "drafts": drafts}), before, boards_look: false })
 }
 
 /// `mech-part <path from the root>`: another part on the Mech page, watched as a 3D model (Mpage.part.k). None off the Mech page; `refresh` ("mech-refresh") lists again and follows the listing.
@@ -379,7 +410,7 @@ pub fn viewer_json(st: &State, template: &Value, session: &Value) -> Option<Valu
             o.insert("file".into(), file_page(kind, s(&session["drafts"], &format!("@view.file:{sel}"))));
             v
         }
-        _ => page(template, kind, &root, &session["drafts"], sel),
+        _ => { let mut v = page(template, kind, &root, &session["drafts"], sel); if matches!(kind, "board" | "schematic" | "3d") { if let Some(b) = boards_menu(session, sel, &root) { v["boards"] = b; } } v }
     };
     let tab = if matches!(kind, "image" | "pdf" | "text") { "files" } else { kind };
     let chips: Vec<Value> = [("Board", "board"), ("Schematic", "schematic"), ("3D", "3d"), ("Mech", "mech"), ("Files", "files"), ("Review", "review")].iter().map(|(l, val)| json!({"label": l, "value": val, "on": *val == tab})).collect();
@@ -456,6 +487,20 @@ mod tests {
         let th = "t1700000003-8".to_string(); let proj = st.threads.get(&th).map(|t| t.project.clone()).unwrap();
         if let Some(p) = st.projects.get_mut(&proj) { p.root = d.to_string_lossy().into_owned(); p.title = "My: Board".into(); }
         (st, th, d)
+    }
+    #[test] fn a_project_with_several_boards_lists_them_and_a_pick_watches_that_board() {
+        let (st, th, d) = files_world("boards"); let root = d.to_string_lossy().into_owned();
+        let template: Value = serde_json::from_str::<Value>(include_str!("thread_static.json")).unwrap()["viewer"].clone();
+        let mut s1 = sess(&th, json!({})); let o = view_action(&st, "h", &s1, "board").unwrap(); crate::session::patch::merge(&mut s1, &o.patch);
+        assert!(viewer_json(&st, &template, &s1).unwrap().get("boards").is_none(), "one board: no menu");
+        crate::session::patch::merge(&mut s1, &json!({"info": {format!("fab.boards:{th}"): "a/a.kicad_pcb\nb/b.kicad_pcb", format!("fab.board:{th}"): "b/b.kicad_pcb"}}));
+        let b = viewer_json(&st, &template, &s1).unwrap()["boards"].clone();
+        assert_eq!((b[0]["on"].as_bool(), b[1]["on"].as_bool(), b[1]["label"].as_str()), (Some(false), Some(true), Some("b/b")));
+        assert!(board_action(&st, "h", &s1, "c/c.kicad_pcb").is_none(), "only a listed board");
+        let o = board_action(&st, "h", &s1, "a/a.kicad_pcb").unwrap(); crate::session::patch::merge(&mut s1, &o.patch);
+        assert!(o.before[0]["text"].as_str().unwrap().contains(&format!("{root}/a/a.kicad_pcb")), "{:?}", o.before);
+        assert_eq!(viewer_json(&st, &template, &s1).unwrap()["boards"][0]["on"], true);
+        let _ = std::fs::remove_dir_all(&d);
     }
     fn sess(th: &str, drafts: Value) -> Value { json!({"sel": th, "rid": 1, "drafts": drafts, "open": {}, "adding": false, "panel": false, "info": {}}) }
     #[test] fn the_files_page_lists_rows_trail_and_downloads_as_core_fm_does() {
