@@ -33,3 +33,7 @@ A checkpoint is used only when its version matches, it covers no more lines than
 ## Numbers (1.69M-event copy of the real log, 3.7 GiB cap)
 
 See the report that came with this change; run `scripts/gpui/startup-bench.sh HUB_BIN HOME` for your own.
+
+## Timing the window
+
+`CLIENT_BIN=.../backplane-gpui scripts/gpui/startup-bench.sh HUB HOME` also opens the window on a private Xvfb display and prints the client's own `first_frame` and `usable` metrics (ms from its process start) and checks a screenshot is not blank. The old "blank window" was a missing window manager: GPUI on X11 gets no frame callback without one (no `first_frame`, nothing painted). The harness starts an empty-config `i3`. Lavapipe (`llvmpipe`, `VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json`), scale factor 1 and the bundled JetBrains Mono load correctly (`GPUI_LOG font loaded`).
