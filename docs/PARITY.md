@@ -14,6 +14,17 @@ Status at 8d15bbb8ab, from the source: requests, tools, routes, settings pages a
 
 Each lane updates its own rows in the commit that lands the work.
 
+## Lanes
+
+| Owner | Thread |
+|---|---|
+| voice | t1793986053-98 |
+| commerce | t1793986071-105 |
+| threads-small | t1793986085-109 |
+| cleanup | t1793986102-114 |
+| audit | t1793986118-117 |
+| threads-deep, helpers, hub-rest, google, i18n | not started |
+
 ## Gaps
 
 | Feature | Status | Owner |
