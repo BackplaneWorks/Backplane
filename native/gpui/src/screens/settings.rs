@@ -190,6 +190,16 @@ pub fn flush_fields(this: &mut Backplane) {
     }
 }
 
+/// Add (or Enter) on the to-do list's new-step box: sent once, and the box is empty again.
+pub fn send_todo(this: &mut Backplane, cx: &mut Context<Backplane>) {
+    let Some(input) = this.screens.fields.get("todonew").map(|s| s.input.clone()) else { return };
+    if input.read(cx).content.trim().is_empty() { return; }
+    flush_fields(this);
+    let _ = this.tx.try_send(Command::Action("todo-add".into(), String::new()));
+    input.update(cx, |i, cx| i.set(String::new(), cx));
+    cx.notify();
+}
+
 /// Enter in a typed field: a room's or a remote bot's post box sends, as on the window.
 pub fn submit(this: &mut Backplane, name: &str, cx: &mut Context<Backplane>) {
     match name { "rpost" => super::bots::send_post(this, "rpost", "room-post", cx), "rtext" => super::bots::send_post(this, "rtext", "remote-send", cx), "title" => { // Enter in the rename box saves, as its Rename button does (nothing for a blank title)
@@ -199,7 +209,7 @@ pub fn submit(this: &mut Backplane, name: &str, cx: &mut Context<Backplane>) {
         }
         // Enter in a settings field is its row's Save
         "whurl" | "whsec" | "tzname" => { flush_fields(this); let a = match name { "whurl" => "hook-url", "whsec" => "hook-secret", _ => "tz-set" }; let _ = this.tx.try_send(Command::Action(a.into(), String::new())); cx.notify(); }
-        "todonew" => { flush_fields(this); let _ = this.tx.try_send(Command::Action("todo-add".into(), String::new())); cx.notify(); }
+        "todonew" => send_todo(this, cx),
         n if n.starts_with("todo.") => { flush_fields(this); let _ = this.tx.try_send(Command::Action("todo-text".into(), n[5..].to_string())); cx.notify(); }
         n => if let Some(a) = n.strip_prefix("sp.") { super::bots::send_space(this, a, cx) } }
 }

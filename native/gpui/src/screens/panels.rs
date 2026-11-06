@@ -73,7 +73,7 @@ pub fn dock(cx: &mut Context<Backplane>, light: bool, fields: &std::collections:
                 .child(btn(cx, format!("todo-del-{id}"), "\u{d7}", "todo-del", row_id)));
         }
         col = col.child(div().flex().gap_2().items_center().py(px(2.)).child(div().flex_1().min_w_0().children(fields.get("todonew").map(|s| s.input.clone())))
-            .child(div().id("todo-add").px_2().cursor_pointer().text_color(c("accent")).child("Add").on_click(cx.listener(|this, _, _, cx| { crate::screens::settings::flush_fields(this); let _ = this.tx.try_send(Command::Action("todo-add".into(), String::new())); cx.notify(); }))));
+            .child(div().id("todo-add").px_2().cursor_pointer().text_color(c("accent")).child("Add").on_click(cx.listener(|this, _, _, cx| crate::screens::settings::send_todo(this, cx)))));
     }
     if su {
         col = col.child(div().mt_1().text_size(px(11.)).text_color(c("faint")).child(format!("SUBAGENTS · {}", string(&thread["subs"], "word").to_uppercase())));
