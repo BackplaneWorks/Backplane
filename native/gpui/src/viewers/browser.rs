@@ -150,10 +150,10 @@ impl Render for BrowserPage {
 /// Everything goes to the hub as `bots.browser` (the toolbar commands and the person's input; the first one takes the page over from the agent, and "Hand back"
 /// returns it), the tabs come back as the helper's `tabs` event (info `browser.tabs.<owner>`).
 pub struct Bar { hub: tokio::sync::mpsc::Sender<crate::hub::Command>, owner: String, tabs: Vec<(String, String, String, bool)>, url: String, text: String, edit: bool, taken: bool, fresh: bool,
-    focus: FocusHandle, bar_focus: FocusHandle, bounds: Arc<std::sync::Mutex<Option<Bounds<Pixels>>>>, image: (f32, f32) }
+    focus: FocusHandle, bar_focus: FocusHandle, bounds: Arc<std::sync::Mutex<Option<Bounds<Pixels>>>>, image: (f32, f32), sent_view: (u32, u32), sent_at: Option<Instant> }
 impl Bar {
     fn new(cx: &mut Context<BrowserPage>, hub: tokio::sync::mpsc::Sender<crate::hub::Command>, owner: String) -> Self {
-        Bar { hub, owner, tabs: Vec::new(), url: String::new(), text: String::new(), edit: false, taken: false, fresh: false, focus: cx.focus_handle(), bar_focus: cx.focus_handle(), bounds: Arc::default(), image: (1.0, 1.0) }
+        Bar { hub, owner, tabs: Vec::new(), url: String::new(), text: String::new(), edit: false, taken: false, fresh: false, focus: cx.focus_handle(), bar_focus: cx.focus_handle(), bounds: Arc::default(), image: (1.0, 1.0), sent_view: (0, 0), sent_at: None }
     }
     fn rpc(&self, p: serde_json::Value) { let _ = self.hub.try_send(crate::hub::Command::Rpc("bots.browser".into(), crate::screens::settings::Secret(p), "browser")); }
     fn toolbar(&mut self, command: &str, extra: serde_json::Value) {
@@ -210,6 +210,14 @@ impl Bar {
     }
     fn render(&mut self, light: bool, size: Option<(f32, f32)>, content: AnyElement, window: &mut Window, cx: &mut Context<BrowserPage>) -> AnyElement {
         if let Some(s) = size { self.image = s; }
+        // the page fills its pane: when the pane's size changed (and not more than ~3 times a second) the helper's page is given that size
+        if let Some(b) = *self.bounds.lock().unwrap() {
+            let (w, h) = (f32::from(b.size.width) as u32, f32::from(b.size.height) as u32);
+            let moved = (w as i64 - self.sent_view.0 as i64).abs() > 8 || (h as i64 - self.sent_view.1 as i64).abs() > 8;
+            if moved && w >= 64 && h >= 64 && self.sent_at.map_or(true, |t| t.elapsed() > Duration::from_millis(300)) {
+                self.sent_view = (w, h); self.sent_at = Some(Instant::now()); self.rpc(serde_json::json!({"bot": self.owner, "op": "viewport", "width": w, "height": h}));
+            }
+        }
         let c = |n: &str| theme::color(light, n);
         let focused = self.bar_focus.is_focused(window); let bounds = self.bounds.clone();
         let tabs: Vec<chrome::TabView> = self.tabs.iter().map(|(id, title, url, on)| chrome::TabView { id: id.clone(), title: title.clone(), url: url.clone(), active: *on }).collect();

@@ -51,22 +51,22 @@ waittabs 'tab-' 80 || { echo "FAIL the Browser tab never got a page (no tabs inf
 check "an empty Browser tab opened a page by itself (tabs info arrived)" 1 ""
 sleep 1; import -window root "$OUT/s0.png" 2>/dev/null || true
 # address bar: click it, type an address, Enter
-X click 1100 122; sleep 0.4; X type "127.0.0.1:$PPORT/index.html"; X key Return; sleep 0.5
+X click 1100 151; sleep 0.4; X type "127.0.0.1:$PPORT/index.html"; X key Return; sleep 0.5
 waittabs "index.html" 40 || true; check "typing an address in the bar loaded the page ($(lasttabs | grep -o 'index.html' | head -1))" "$(lasttabs | grep -q index.html && echo 1 || echo 0)" "$(lasttabs | cut -c1-200)"
 sleep 2; import -window root "$OUT/s1.png" 2>/dev/null || true
 # the page: its button at page (180,104) in a 1280x800 frame shown Contain in the 543x758 view at (825,142)
-BX=$((825 + 180 * 543 / 1280)); BY=$((142 + (758 - 543 * 800 / 1280) / 2 + 104 * 543 / 1280))
+BX=$((825 + 180)); BY=$((171 + 104))   # the page fills the pane (its viewport is the pane's size), so page coordinates are pane coordinates
 X click $BX $BY; sleep 2
 waittabs "clicked:1" 20 || true; check "a click on the page in the tab reached the page (title clicked:1)" "$(lasttabs | grep -q 'clicked:1' && echo 1 || echo 0)" "$(lasttabs | cut -c1-200)"
-IY=$((142 + (758 - 543 * 800 / 1280) / 2 + 176 * 543 / 1280))
-X click $((825 + 200 * 543 / 1280)) $IY; sleep 0.5; X type hi; sleep 2
+IY=$((171 + 176))
+X click $((825 + 200)) $IY; sleep 0.5; X type hi; sleep 2
 waittabs "typed:hi" 20 || true; check "typing in the page reached its input (title typed:hi)" "$(lasttabs | grep -q 'typed:hi' && echo 1 || echo 0)" "$(lasttabs | cut -c1-200)"
 import -window root "$OUT/s2.png" 2>/dev/null || true
 # tabs: "+" opens a second tab, the strip appears; selecting the first tab makes it the active one again
-X click 952 87; sleep 3
+X click 940 116; sleep 3
 waittabs '"index\\":1' 20 || true; check "+ opened a second tab (tabs info lists two)" "$(lasttabs | grep -q 'index\\":1' && echo 1 || echo 0)" "$(lasttabs | cut -c1-300)"
 import -window root "$OUT/s3.png" 2>/dev/null || true
-X click 875 88; sleep 2
+X click 875 117; sleep 2
 check "clicking the first tab in the strip made it the active one" "$(lasttabs | grep -q 'index.html.*active\\":true' && echo 1 || echo 0)" "$(lasttabs | cut -c1-400)"
 import -window root "$OUT/s4.png" 2>/dev/null || true
 echo "screens: $OUT/s0.png s1.png s2.png"

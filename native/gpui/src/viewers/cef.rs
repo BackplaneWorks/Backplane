@@ -94,6 +94,7 @@ wrap_life_span_handler! {
         fn on_before_popup(&self, _b: Option<&mut Browser>, _f: Option<&mut Frame_>, _id: ::std::os::raw::c_int, _url: Option<&CefString>, _name: Option<&CefString>,
             _disp: WindowOpenDisposition, _gesture: ::std::os::raw::c_int, _features: Option<&PopupFeatures>, wi: Option<&mut WindowInfo>, client: Option<&mut Option<Client>>,
             settings: Option<&mut BrowserSettings>, _extra: Option<&mut Option<DictionaryValue>>, _nojs: Option<&mut ::std::os::raw::c_int>) -> ::std::os::raw::c_int {
+            eprintln!("GPUI_LOG {{\"cef_popup\":{}}}", serde_json::Value::String(format!("{:?} {}", _disp, s(_url))));
             if let Some(st) = settings { st.windowless_frame_rate = 30; }
             // a new window keeps its opener (window.opener, postMessage, window.close): CEF makes it, windowless, with our own handlers; the page shows it as a new tab
             // a link that saves to disk is a download of this page, not a window
@@ -123,6 +124,8 @@ wrap_dialog_handler! {
 wrap_download_handler! {
     struct DownloadH { tab: Arc<Tab> }
     impl DownloadHandler {
+        // the trait's default answers no, which silently blocks every download
+        fn can_download(&self, _b: Option<&mut Browser>, _url: Option<&CefString>, _method: Option<&CefString>) -> ::std::os::raw::c_int { eprintln!("GPUI_LOG {{\"cef_can_download\":{}}}", serde_json::Value::String(s(_url))); true as _ }
         fn on_before_download(&self, _b: Option<&mut Browser>, _item: Option<&mut DownloadItem>, name: Option<&CefString>, cb: Option<&mut BeforeDownloadCallback>) -> ::std::os::raw::c_int {
             // no dialog: the file goes to the person's Downloads folder (never over a file), the page says so when it is done
             let dir = std::env::var_os("XDG_DOWNLOAD_DIR").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Downloads"))).unwrap_or_else(std::env::temp_dir);

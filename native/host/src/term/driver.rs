@@ -134,6 +134,15 @@ impl Driver {
                 });
                 None
             }
+            // the hub-frame fallback fills its pane: the window says how big the pane is and the helper's page takes that size
+            "viewport" => {
+                let (w, h) = (p.get("width").and_then(Value::as_u64).unwrap_or(0), p.get("height").and_then(Value::as_u64).unwrap_or(0));
+                if !(64..=4096).contains(&w) || !(64..=4096).contains(&h) { return Some(Err("viewport needs width and height in 64..4096".into())) }
+                drop(g);
+                let (me, bot) = (self.clone(), bot.to_string());
+                tokio::spawn(async move { let _ = me.br.ask(&bot, "resize", &json!({"width": w, "height": h})).await; });
+                Some(Ok(()))
+            }
             "takeover" => { let nb = b.takeover(); if !self.set_teach(&mut g, nb).await { return Some(Err("too many pages are taken over".into())) } Some(Ok(())) }
             "handback" => { let nb = b.handback(); self.set_teach(&mut g, nb).await; Some(Ok(())) }
             _ => {
