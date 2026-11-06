@@ -3,7 +3,7 @@
 //! `settings.json` turns off is left out; a directory marketplace of a missing install is read in place). Codex: ~/.codex/skills (or $CODEX_HOME/skills),
 //! ~/.agents/skills, <project>/.agents/skills. Backplane's own: KiStack's skills and <hub home>/skills.
 //! A skill the thread's provider loads itself is "native": Claude gets `/name`, Codex its own `$name`. Any other is "read": the turn's text names the SKILL.md to read first.
-use super::inputs::{mention_name, mention_others, parse_skill, USkill};
+use crate::agents::inputs::{mention_name, mention_others, parse_skill, USkill};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -130,7 +130,7 @@ pub fn prepare(text: &str, ss: &[Found], provider: &str, isolated: bool) -> Stri
     let (nat, rd): (Vec<&Found>, Vec<&Found>) = ss.iter().partition(|f| native(f, provider, isolated));
     let reads: Vec<USkill> = rd.into_iter().map(as_u).collect();
     let noted = if provider == "claude" { mention_others(&text, &reads) } else { mention_others(&text, &ss.iter().map(as_u).collect::<Vec<_>>()) }; // Codex and the rest are told the file as well: it is the same instruction
-    if provider == "claude" { let n: Vec<USkill> = nat.into_iter().map(as_u).collect(); super::inputs::expand_claude(&noted, &n) } else { noted }
+    if provider == "claude" { let n: Vec<USkill> = nat.into_iter().map(as_u).collect(); crate::agents::inputs::expand_claude(&noted, &n) } else { noted }
 }
 
 /// How a mentioned skill stands for the thread's provider: "" loaded by the provider, "read from file" named to the agent, and None for a word that is no skill.
