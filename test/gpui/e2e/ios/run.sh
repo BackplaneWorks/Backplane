@@ -37,7 +37,7 @@ for id in $IDS; do
     MEM=$!
   else MEM=; fi
   TEST_RUNNER_HUB_HOST=$HUB_HOST TEST_RUNNER_HUB_PORT=$HUB_PORT TEST_RUNNER_HUB_TOKEN_FILE=$HUB_TOKEN_FILE TEST_RUNNER_OUT=$OUT \
-  TEST_RUNNER_HUB_CTL=${HUB_CTL:-} TEST_RUNNER_LONG_SECS=${LONG_SECS:-300} TEST_RUNNER_VIDEO_START_EPOCH_MS=$VS \
+  TEST_RUNNER_HUB_INVITE_FILE=${HUB_INVITE_FILE:-} TEST_RUNNER_HUB_CTL=${HUB_CTL:-} TEST_RUNNER_LONG_SECS=${LONG_SECS:-300} TEST_RUNNER_VIDEO_START_EPOCH_MS=$VS \
   xcodebuild test-without-building -resultBundlePath "$OUT/$id.xcresult" -project "$HERE/E2E.xcodeproj" -scheme BackplaneE2E -sdk iphonesimulator \
     -destination "platform=iOS Simulator,id=$SIM_UDID" -derivedDataPath "$DD" CODE_SIGNING_ALLOWED=NO \
     -only-testing:"BackplaneE2E/Journeys/test_$fn" > "$OUT/$id.xcodebuild.log" 2>&1

@@ -32,7 +32,7 @@ final class Journeys: XCTestCase {
         d.launch(paired: false)
         let addr = d.el("pair.address")
         guard d.step("pairing screen", act: {}, expect: { addr.exists }) else { return }
-        d.step("type the pairing link", act: { d.tap(addr); d.type(addr, d.link) }, expect: { d.el("pair.connect").isEnabled })
+        d.step("type the pairing link", act: { d.tap(addr); d.type(addr, d.inviteLink ?? d.link) }, expect: { d.el("pair.connect").isEnabled })
         d.step("connect", timeout: 30, act: { d.tap(d.el("pair.connect")) }, expect: { d.app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'thread.row.' OR identifier BEGINSWITH 'project.header.'")).firstMatch.exists || d.app.buttons["Skip"].exists })
         for _ in 0..<4 { d.skipTour() }
         d.shot("paired")

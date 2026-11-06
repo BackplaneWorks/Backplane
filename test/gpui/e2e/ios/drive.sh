@@ -28,9 +28,14 @@ tail -2 $B/results/ios/e2e-fixture.log | cut -c1-200
 $SB "cat $V/root/home/token" > /tmp/e2e-token
 # what the hub replies to files.dir / boards.list (the journeys that wait on them), before the journeys run
 $SB "cd $V/repo/test/gpui/e2e && timeout 40 \$HOME/.bun/bin/bun ios/probe.mjs $V/root $((PORT+1000))" > $OUT/probe.txt 2>&1
+# a pairing invitation through the hub's tailnet address, as a phone gets it: its routes must be reachable (not loopback); the link is
+# one-time and goes to the Mac in a file (never printed); only the routes are kept in the results
+$SB "printf 'Authorization: Bearer %s\n' \"\$(cat $V/root/home/token)\" | curl -s -m10 -X POST -H @- -H 'Content-Type: application/json' -d '{}' http://$HOSTIP:$PORT/auth/invitations" > /tmp/e2e-invite.json
+python3 -c "import json;j=json.load(open('/tmp/e2e-invite.json'));open('/tmp/e2e-invite','w').write(j.get('link',''));print('invitation routes:',j.get('routes'),'localOnly:',j.get('localOnly'),'error:',j.get('error'))" | tee $OUT/invite-routes.txt
+RSYNC_RSH=$M rsync -a /tmp/e2e-invite hs-mac-mini:bp-gpui-ios/e2e-invite
 RSYNC_RSH=$M rsync -a /tmp/e2e-token hs-mac-mini:bp-gpui-ios/e2e-token
 RSYNC_RSH=$M rsync -a --delete test/gpui/e2e/ios/ hs-mac-mini:bp-gpui-ios/e2e/
-$M hs-mac-mini "cd ~/bp-gpui-ios/e2e && rm -rf ~/bp-gpui-ios/e2e-out && SIM_UDID=$U OUT=\$HOME/bp-gpui-ios/e2e-out HUB_HOST=$HOSTDNS HUB_PORT=$PORT HUB_TOKEN_FILE=\$HOME/bp-gpui-ios/e2e-token HUB_CTL=http://$HOSTDNS:$((PORT+1)) LONG_SECS=${LONG_SECS:-300} sh ./run.sh $J; xcrun simctl shutdown $U"
+$M hs-mac-mini "cd ~/bp-gpui-ios/e2e && rm -rf ~/bp-gpui-ios/e2e-out && SIM_UDID=$U OUT=\$HOME/bp-gpui-ios/e2e-out HUB_HOST=$HOSTDNS HUB_PORT=$PORT HUB_TOKEN_FILE=\$HOME/bp-gpui-ios/e2e-token HUB_INVITE_FILE=\$HOME/bp-gpui-ios/e2e-invite HUB_CTL=http://$HOSTDNS:$((PORT+1)) LONG_SECS=${LONG_SECS:-300} sh ./run.sh $J; xcrun simctl shutdown $U"
 RSYNC_RSH=$M rsync -a hs-mac-mini:bp-gpui-ios/e2e-out/ $OUT/
 kill $FIXSSH 2>/dev/null
 $SB "tail -c 20000 $V/root/hub.log 2>/dev/null; ls $V/root" > $OUT/hub-log-tail.txt 2>&1
