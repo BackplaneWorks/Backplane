@@ -323,7 +323,7 @@ pub fn thread_object(st: &State, hub: &str, thread: &str, params: &Value, draft:
 }
 
 /// Mob.order: a buy thread's Order card, from its open asks, the quote on its way and the quote the hub keeps; null for any other thread.
-fn order_json(st: &State, thread: &str, running: bool) -> Value {
+pub(crate) fn order_json(st: &State, thread: &str, running: bool) -> Value {
     if st.settings.get(&format!("buy.{thread}")).map_or(true, |v| v.is_empty()) { return Value::Null }
     let mine = || st.ask_data.iter().filter(|a| a.1 == thread);
     let (asked, files) = (mine().any(|a| a.3.starts_with("order_ask")), mine().any(|a| a.3 == "order_quote"));

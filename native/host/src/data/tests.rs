@@ -59,10 +59,10 @@ async fn ask(ws: &mut Ws, id: u64, m: &str, p: Value) -> Value {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_hello_capabilities_and_both_encodings() {
-    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice"]));
+    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order"]));
     let (_h, port) = up("hello").await;
     let mut ws = open(port, "&enc=json").await; let v = next(&mut ws).await;
-    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
+    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
     // the default is binary CBOR with plain string keys
     let mut c = open(port, "").await; let m = tokio::time::timeout(Duration::from_secs(5), c.next()).await.unwrap().unwrap().unwrap();
     let Message::Binary(b) = m else { panic!("binary") }; assert!(b.windows(5).any(|w| w == b"proto"), "plain keys, not the hub's dictionary");
@@ -286,4 +286,17 @@ async fn ask(ws: &mut Ws, id: u64, m: &str, p: Value) -> Value {
     let p = super::ext::picker_sections(&models, "codex", "gpt", "", "");
     assert_eq!(p["sections"][0]["choices"][1]["ok"], false); assert_eq!(p["sections"][0]["choices"][1]["why"], "its CLI is not installed on this machine");
     assert!(p["sections"][3]["choices"].as_array().unwrap().iter().any(|c| c["value"] == "full-access" && c["on"] == true), "a thread with no mode set runs with full access");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_a_quote_shows_its_real_buy_now_link_and_a_plain_thread_has_no_order() {
+    let (hub, port) = up("order").await;
+    crate::settings::order::test_link("q_data", "http://127.0.0.1:3871/q/q_data?t=tok");
+    hub.commit(&json!({"$":"MessagePosted","thread":"t2","msg":"q:q_data","role":"assistant","text":"**Your quote: $27.20**\n\n[Buy now · $27.20](order:q_data)","at":1700000040})).await.unwrap();
+    let mut ws = open(port, "&enc=json").await; let hello = next(&mut ws).await;
+    assert!(hello["features"].as_array().unwrap().iter().any(|x| x == "order"));
+    let r = ask(&mut ws, 1, "thread.entries", json!({"thread":"t2"})).await;
+    let q = r["result"]["entries"].as_array().unwrap().iter().find(|e| e["id"] == "q:q_data").cloned().unwrap_or_else(|| panic!("{r}"));
+    assert!(q["text"].as_str().unwrap().contains("](http://127.0.0.1:3871/q/q_data?t=tok)"), "the phone gets the link it can open: {q}");
+    let r = ask(&mut ws, 2, "thread.order", json!({"thread":"t1"})).await; assert_eq!(r["result"]["order"], Value::Null, "{r}");
+    let r = ask(&mut ws, 3, "thread.order", json!({})).await; assert!(r["error"].is_string() || r["result"].is_null(), "a thread is needed: {r}");
 }

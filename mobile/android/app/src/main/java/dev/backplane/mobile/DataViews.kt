@@ -291,6 +291,8 @@ private fun ThreadScreen(id: String, viewer: () -> Unit, back: () -> Unit) {
         if (uri != null) scope.launch { val b = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { DataClient.prepared(ctx, uri) }; if (b != null) pending.add(b) else notice = "That picture could not be read." }
     }
     var menu by remember { mutableStateOf(false) }; var models by remember { mutableStateOf(false) }
+    var order by remember(id) { mutableStateOf<DataClient.Order?>(null) }
+    LaunchedEffect(id, list.size, thread?.state, DataClient.conn) { if (DataClient.has("order")) runCatching { DataClient.order(id) }.onSuccess { order = it } }
     var openRuns by remember(id) { mutableStateOf(emptySet<String>()) }
     thread?.let { t -> ThreadMenus(t, menu, { menu = false }) { back() }; if (models) PickerSheet(t.id, DNewThreadChoice(), {}) { models = false } }
     Column(Modifier.fillMaxSize()) {
@@ -312,6 +314,7 @@ private fun ThreadScreen(id: String, viewer: () -> Unit, back: () -> Unit) {
             if (thread?.state == "working") item("working") { WorkingRow() }
         }
         DLine()
+        order?.let { OrderCard(it) }
         MentionPopup(draft) { draft = it; DataClient.setDraft(id, it) }
         Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (notice.isNotEmpty()) DMono(notice, dwarn, 12)
@@ -525,6 +528,27 @@ private fun ImproveScreen(back: () -> Unit) {
                     scope.launch { runCatching { DataClient.createThread(project, "Improvement idea for this app:\n\n$text") }.onSuccess { sent = "Thread started in Threads."; text = "" }.onFailure { sent = it.message ?: "" } }
                 }
             }
+        }
+    }
+}
+
+/** A buy thread's Order card: the steps, the hub's line, the total and what it covers about customs, and Buy now (the hub's link, opened in the browser). */
+@Composable
+private fun OrderCard(o: DataClient.Order) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp).border(BorderStroke(1.dp, dcs.outlineVariant)).background(dcs.surfaceVariant).padding(10.dp).testTag("thread.order"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        DMono(if (o.name.isEmpty()) "ORDER" else "ORDER · ${o.name}", dcs.onSurface, 12, bold = true)
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            o.steps.forEachIndexed { i, s ->
+                if (i > 0) DMono("›", dcs.outlineVariant, 11)
+                when (s.mark) { "done" -> DMono("✓ ${s.label}", dcs.onSurfaceVariant, 11); "on" -> DMono(s.label, dcs.primary, 11, bold = true); else -> DMono(s.label, dcs.outlineVariant, 11) }
+            }
+        }
+        DMono(o.line, if (o.waiting) dcs.onSurfaceVariant else dcs.onSurface, 12)
+        if (o.total.isNotEmpty()) DMono(o.total, dcs.onSurface, 14, bold = true)
+        if (o.customs.isNotEmpty()) DMono(o.customs, dcs.onSurfaceVariant, 11)
+        if (o.pay.startsWith("https://") || o.pay.startsWith("http://")) DBtn(o.label.ifEmpty { "Buy now" }, true, modifier = Modifier.testTag("thread.order.pay")) {
+            runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(o.pay))) }
         }
     }
 }

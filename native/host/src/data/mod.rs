@@ -15,7 +15,7 @@ use tokio_tungstenite::tungstenite::{protocol::WebSocketConfig, Message};
 
 pub const PROTO: &str = "data/1";
 /// What this hub does beyond the base of data/1; a hub from before an addition does not list it (the app can warn instead of sending what would be dropped).
-pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice"];
+pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order"];
 const PREVIEW: usize = 140;
 const ASK_SCAN: usize = 4000;
 
@@ -128,7 +128,7 @@ fn row_entry(r: &crate::model::Row) -> Option<Value> {
     if r.kind == "msg" {
         let kind = match r.role.as_str() { "user" => "user", "assistant" => "assistant", _ => "note" };
         if kind == "assistant" && r.text.trim().is_empty() { return None }
-        return Some(json!({"id":r.id,"kind":kind,"text":if kind == "user" { shown_text(&r.text) } else { r.text.clone() },"at":at}));
+        return Some(json!({"id":r.id,"kind":kind,"text":if kind == "user" { shown_text(&r.text) } else { crate::settings::order::pay_shown(&r.text) },"at":at}));
     }
     act_entry(&r.id, &r.role, &r.akind, &r.text, at)
 }
@@ -275,6 +275,10 @@ async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Result<Value,
             let next = if more { keyed.last().map(|x| json!(format!("{}:{}", x.0, x.1))).unwrap_or(Value::Null) } else { Value::Null };
             Ok(json!({"threads":items.into_iter().map(|x| x.2).collect::<Vec<_>>(),"next":next})) }
         "thread.entries" => entries(hub, p).await,
+        // a buy thread's Order card (present/thread.rs `order_json`, what the desktop draws), null for any other thread; the app asks again on each push for the thread
+        "thread.order" => { let th = s(p, "thread"); if th.is_empty() { return Err(err("thread")) }
+            let o = crate::statehost::policies().and_then(|q| q.with_state(|st| crate::present::thread::order_json(st, th, st.threads.get(th).map_or(false, |t| t.turn == crate::state::Turn::Running)))).unwrap_or(Value::Null);
+            Ok(json!({"order":o})) }
         "dirs.list" => dirs(p),
         "project.add" => {
             let path = s(p, "path"); if path.is_empty() { return Err(err("path")) }

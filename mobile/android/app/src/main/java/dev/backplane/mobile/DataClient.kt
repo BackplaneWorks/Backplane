@@ -315,6 +315,14 @@ object DataClient {
         val r = call("search", JSONObject().put("q", q))
         return parseThreads(r.optJSONArray("threads")) to parseProjects(r.optJSONArray("projects"))
     }
+    // a buy thread's Order card (feature order): the hub's, drawn as it says; null for any other thread
+    data class OrderStep(val label: String, val mark: String)
+    data class Order(val name: String, val steps: List<OrderStep>, val line: String, val waiting: Boolean, val total: String, val customs: String, val pay: String, val label: String)
+    suspend fun order(tid: String): Order? {
+        val o = call("thread.order", JSONObject().put("thread", tid)).optJSONObject("order") ?: return null
+        val st = o.optJSONArray("steps")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { OrderStep(it.optString("label"), it.optString("mark")) } } ?: emptyList()
+        return Order(o.optString("name"), st, o.optString("line"), o.optBoolean("waiting"), o.optString("total"), o.optString("customs"), o.optString("pay"), o.optString("label"))
+    }
     suspend fun picker(thread: String?, choice: DNewThreadChoice = DNewThreadChoice()): DPicker {
         val p = choice.into(JSONObject()); if (thread != null) p.put("thread", thread)
         return parsePicker(call("thread.picker", p).getJSONObject("picker"))

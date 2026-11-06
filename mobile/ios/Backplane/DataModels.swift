@@ -209,6 +209,22 @@ struct DPicker: Decodable { var chip: String; var sections: [DPickerSection]
     enum CodingKeys: String, CodingKey { case chip, sections }
     init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); chip = c.str(.chip); sections = (try? c.decode([DPickerSection].self, forKey: .sections)) ?? [] } }
 struct DPickerReply: Decodable { var picker: DPicker }
+/// A buy thread's Order card (feature order, `thread.order`): the hub's, drawn as it says.
+struct DOrderStep: Decodable, Equatable { var label = ""; var mark = ""
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: K.self); label = (try? c.decode(String.self, forKey: .label)) ?? ""; mark = (try? c.decode(String.self, forKey: .mark)) ?? "" }
+    enum K: String, CodingKey { case label, mark } }
+struct DOrder: Decodable, Equatable {
+    var name = "", line = "", total = "", customs = "", pay = "", label = ""; var waiting = false; var steps: [DOrderStep] = []
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: K.self); func s(_ k: K) -> String { (try? c.decode(String.self, forKey: k)) ?? "" }
+        name = s(.name); line = s(.line); total = s(.total); customs = s(.customs); pay = s(.pay); label = s(.label)
+        waiting = (try? c.decode(Bool.self, forKey: .waiting)) ?? false; steps = (try? c.decode([DOrderStep].self, forKey: .steps)) ?? []
+    }
+    enum K: String, CodingKey { case name, line, total, customs, pay, label, waiting, steps }
+    /// Only an http(s) link opens.
+    var payURL: URL? { (pay.hasPrefix("https://") || pay.hasPrefix("http://")) ? URL(string: pay) : nil }
+}
+struct DOrderReply: Decodable { var order: DOrder? }
 /// What a new thread will run with, chosen before it exists.
 struct DNewThreadChoice: Equatable {
     var provider: String?; var model: String?; var effort: String?; var runtime: String?

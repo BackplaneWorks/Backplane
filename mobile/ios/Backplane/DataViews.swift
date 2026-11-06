@@ -355,6 +355,7 @@ struct DataThreadView: View {
     @State private var noChoice = DNewThreadChoice()
     @State private var openRuns: Set<String> = []
     @State private var atEnd = true
+    @State private var order: DOrder?
     @Environment(\.dismiss) private var dismiss
 
     init(client: DataClient, id: String) { self.client = client; self.id = id; client.touch(id) }
@@ -391,9 +392,11 @@ struct DataThreadView: View {
                 .onChange(of: list.count) { _, _ in if atEnd { proxy.scrollTo("end", anchor: .bottom) } }
                 .onChange(of: list.last?.text.count) { _, _ in if atEnd { proxy.scrollTo("end", anchor: .bottom) } }
             }
+            if let order { DataOrderCard(order: order) }
             DataMentionBar(client: client, text: text) { text = $0; client.setDraft(id, $0) }
             composer
         }
+        .task(id: "\(list.count)|\(thread?.state ?? "")|\(client.conn == .online)") { if client.has("order"), let o = try? await client.order(id) { order = o } else if !client.has("order") { order = nil } }
         .background(BackplaneDesign.background)
         .dataBar(thread?.title.isEmpty == false ? thread!.title : "Thread")
         .toolbar {
@@ -755,5 +758,34 @@ struct DataAttachmentImage: View {
             }
         }
         .accessibilityIdentifier("data.entry.image")
+    }
+}
+
+/// A buy thread's Order card: the steps, the hub's line, the total and what it covers about customs, and Buy now (the hub's link, opened in the browser). As the Android app's OrderCard.
+struct DataOrderCard: View {
+    let order: DOrder
+    @Environment(\.openURL) private var openURL
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(order.name.isEmpty ? "ORDER" : "ORDER · \(order.name)").dmono(12, bold: true).foregroundStyle(BackplaneDesign.text)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(Array(order.steps.enumerated()), id: \.offset) { i, s in
+                        if i > 0 { Text("›").dmono(11).foregroundStyle(BackplaneDesign.faint) }
+                        switch s.mark {
+                        case "done": Text("✓ \(s.label)").dmono(11).foregroundStyle(BackplaneDesign.dim)
+                        case "on": Text(s.label).dmono(11, bold: true).foregroundStyle(BackplaneDesign.accentText)
+                        default: Text(s.label).dmono(11).foregroundStyle(BackplaneDesign.faint)
+                        }
+                    }
+                }
+            }
+            Text(order.line).dmono(12).foregroundStyle(order.waiting ? BackplaneDesign.dim : BackplaneDesign.text)
+            if !order.total.isEmpty { Text(order.total).dmono(14, bold: true).foregroundStyle(BackplaneDesign.text) }
+            if !order.customs.isEmpty { Text(order.customs).dmono(11).foregroundStyle(BackplaneDesign.dim) }
+            if let u = order.payURL { Button(order.label.isEmpty ? "Buy now" : order.label) { openURL(u) }.buttonStyle(DButton(primary: true)).accessibilityIdentifier("thread.order.pay") }
+        }
+        .padding(10).frame(maxWidth: .infinity, alignment: .leading).background(BackplaneDesign.panel).overlay(Rectangle().strokeBorder(BackplaneDesign.line, lineWidth: 1))
+        .padding(.horizontal, 12).padding(.vertical, 6).accessibilityIdentifier("thread.order")
     }
 }
