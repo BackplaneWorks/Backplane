@@ -280,7 +280,8 @@ pub fn rpc_error(x:&Value)->String {
     e.as_str().map(String::from).or_else(||e["message"].as_str().map(String::from)).or_else(||e["code"].as_str().map(String::from)).unwrap_or_else(||if e.is_null(){"no reason given".into()}else{e.to_string()})
 }
 /// The product RPCs that post a message: their acceptance is the client's "sent" (chat.send comes through `view.action` by name too).
-pub fn is_post(m:&str)->bool { ["message.send","thread.send","send","turn.start"].contains(&m) }
+/// The product RPCs whose ok answer is a message the hub took (the window then empties its box). A bot's chat sends `bots.say`, not `turn.start`.
+pub fn is_post(m:&str)->bool { ["message.send","thread.send","send","turn.start","bots.say"].contains(&m) }
 
 #[cfg(test)]
 mod rpc_tests {
@@ -305,5 +306,5 @@ mod rpc_tests {
         assert_eq!(f(&hard, "view.open", false, Restore::None), Show);
         assert_eq!(f(&json!({"ok":true}), "view.open", false, Restore::First), Show);
     }
-    #[test] fn turn_start_is_a_post() { for m in ["turn.start","message.send","thread.send","send"] { assert!(is_post(m), "{m}"); } assert!(!is_post("fab.look") && !is_post("mech.list")); }
+    #[test] fn turn_start_is_a_post() { for m in ["turn.start","message.send","thread.send","send","bots.say"] { assert!(is_post(m), "{m}"); } assert!(!is_post("fab.look") && !is_post("mech.list")); }
 }
