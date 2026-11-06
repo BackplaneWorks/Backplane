@@ -131,10 +131,13 @@ pub fn read_images(text: &str) -> Vec<(String, String)> {
     att_paths(text).into_iter().filter(|p| !mime(p).is_empty()).filter_map(|p| { let n = std::fs::metadata(&p).ok()?.len(); if n == 0 || n > INLINE_MAX { return None } Some((mime(&p).to_string(), b64(&std::fs::read(&p).ok()?))) }).collect()
 }
 /// Att.claude + Claude.tag: the stream-json user line, images first, then the text; the command's uuid first.
-pub fn claude_line(text: &str, imgs: &[(String, String)], uuid: &str) -> String {
+pub fn claude_line(text: &str, imgs: &[(String, String)], uuid: &str) -> String { claude_line_p(text, imgs, uuid, false) }
+/// `now`: the CLI's `priority: "now"`: a person's message into a running turn interrupts it and is taken at once (a steer), instead of waiting for the turn's end.
+pub fn claude_line_p(text: &str, imgs: &[(String, String)], uuid: &str, now: bool) -> String {
     let mut content: Vec<Value> = imgs.iter().map(|(m, d)| json!({"type":"image","source":{"type":"base64","media_type":m,"data":d}})).collect();
     content.push(json!({"type":"text","text":text}));
     let mut o = serde_json::Map::new(); if !uuid.is_empty() { o.insert("uuid".into(), json!(uuid)); }
+    if now { o.insert("priority".into(), json!("now")); }
     o.insert("type".into(), json!("user")); o.insert("message".into(), json!({"role":"user","content":content})); Value::Object(o).to_string()
 }
 
@@ -143,6 +146,10 @@ mod tests {
     use super::*;
     fn tmp(n: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-in-{}-{n}", std::process::id())); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
     fn touch(p: &Path) { std::fs::create_dir_all(p.parent().unwrap()).unwrap(); std::fs::write(p, "x").unwrap() }
+    #[test] fn a_steering_line_carries_priority_now_and_a_plain_one_does_not() {
+        let l: Value = serde_json::from_str(&claude_line_p("x", &[], "U", true)).unwrap(); assert_eq!(l["priority"], "now");
+        let l: Value = serde_json::from_str(&claude_line("x", &[], "U")).unwrap(); assert!(l.get("priority").is_none());
+    }
     #[test] fn kicad_files_prefer_the_root_then_the_shallowest() {
         let r = tmp("k1"); touch(&r.join("hw/a/a.kicad_pro")); touch(&r.join("hw/a/a.kicad_pcb")); touch(&r.join("hw/a/a.kicad_sch")); touch(&r.join("archive/old/z.kicad_pro")); touch(&r.join(".hidden/h.kicad_pro")); touch(&r.join("node_modules/n.kicad_pro"));
         let f = read(r.to_str().unwrap()); let rs = r.to_str().unwrap();

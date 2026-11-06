@@ -337,7 +337,7 @@ struct Actor {
     /// Codex-shaped threads: one process per turn; the thread's provider and model; a ride waiting when the turn ended
     codex: bool, prov: String, model: String, next_ride: bool, driver: Option<Box<dyn providers::Driver>>, asked: HashMap<String, Value>,
     /// Claude: the session id the process was started with (`--resume`, "" for a new one; cleared once it says init), the message that started it (msg, text, what the agent gets), and a count of starts
-    resumed: String, spawn_in: Option<(String, String, String)>, spawn_n: u64,
+    steer_now: bool, resumed: String, spawn_in: Option<(String, String, String)>, spawn_n: u64,
 }
 
 async fn next_batch(rx: &mut mpsc::Receiver<String>) -> Option<Vec<String>> {
@@ -350,7 +350,7 @@ async fn recv_opt(r: &mut Option<mpsc::Receiver<String>>) -> Option<Vec<String>>
 async fn exit_opt(r: &mut Option<oneshot::Receiver<Exit>>) -> Result<Exit, oneshot::error::RecvError> { match r { Some(rx) => rx.await, None => std::future::pending().await } }
 
 impl Actor {
-    fn new(ag: Arc<Agents>, th: String) -> Actor { Actor { hist_tx: None, person: false, cx: Cx::new(&th), ag, th, live_proc: None, lines: None, exit: None, live: String::new(), live_gen: 0, ahead: String::new(), last_user: String::new(), recent: VecDeque::new(), pacing: None, rid: 0, cwd: String::new(), cmds: cmds::Cmds::new(), sent: VecDeque::new(), wait: String::new(), prog: bg::Prog::default(), heard: Instant::now(), codex: false, prov: String::new(), model: String::new(), next_ride: false, driver: None, asked: HashMap::new(), resumed: String::new(), spawn_in: None, spawn_n: 0 } }
+    fn new(ag: Arc<Agents>, th: String) -> Actor { Actor { hist_tx: None, person: false, cx: Cx::new(&th), ag, th, live_proc: None, lines: None, exit: None, live: String::new(), live_gen: 0, ahead: String::new(), last_user: String::new(), recent: VecDeque::new(), pacing: None, rid: 0, cwd: String::new(), cmds: cmds::Cmds::new(), sent: VecDeque::new(), wait: String::new(), prog: bg::Prog::default(), heard: Instant::now(), codex: false, prov: String::new(), model: String::new(), next_ride: false, driver: None, asked: HashMap::new(), steer_now: false, resumed: String::new(), spawn_in: None, spawn_n: 0 } }
 
     async fn run(mut self, mut rx: mpsc::Receiver<Cmd>) {
         let mut tick = tokio::time::interval(Duration::from_secs(1)); tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -417,8 +417,14 @@ impl Actor {
             t.runtime = person::runtime_for(&t.runtime).to_string(); t.session.clear();
         }
         self.person = sbs;
+        self.steer_now = person && role == "user" && origin.is_none() && (self.cx.running || t.turn == "running"); // a person's message into a running Claude turn: priority now
         let codex = t.provider != "claude";
-        if codex && (self.cx.running || t.turn == "running") { return self.codex_ride(&msg, &text, &role, origin).await } // Hub.deliver.ride: a running turn takes it on its next Backplane tool result
+        if codex && (self.cx.running || t.turn == "running") {
+            if person && !sbs && role == "user" && origin.is_none() { // a person's message always steers: it is posted, and the running turn starts again with it (Steer.go)
+                let now = now_s(); let mut ev = vec![json!({"$":"MessagePosted","thread":self.th,"msg":msg,"role":role,"text":text,"at":now})]; ev.extend(extra);
+                self.commit(ev).await; self.recent.push_back(msg.clone()); if self.recent.len() > RECENT { self.recent.pop_front(); }
+                return self.steer(text).await }
+            return self.codex_ride(&msg, &text, &role, origin).await } // Hub.deliver.ride: a running turn takes it on its next Backplane tool result
         self.codex = codex; self.prov = t.provider.clone(); self.model = t.model.clone();
         let was_running = self.cx.running || t.turn == "running"; // Ride.post: a turn that starts on an idle thread takes the mail waiting for it
         self.cx = cx; self.last_user = msg.clone(); self.cwd = cwd.clone();
@@ -483,7 +489,7 @@ impl Actor {
         let (now, th) = (now_s(), self.th.clone());
         if t.provider == "claude" { // Steer.go: TurnChanged running always (Steer.note is empty for Claude), and the run starts even with no live process
             self.cwd = cwd.clone(); self.commit(vec![json!({"$":"TurnChanged","thread":th,"state":"running","at":now})]).await; self.cx.running = true;
-            let msg = hub_id("s", now, self.ag.seq()); self.claude_send(&t, &cwd, &msg, &text, &text, now).await; return Ok(()) }
+            let msg = hub_id("s", now, self.ag.seq()); self.steer_now = true; self.claude_send(&t, &cwd, &msg, &text, &text, now).await; return Ok(()) }
         if providers::driver(&t.provider).is_none() { return Err(format!("{} threads are not run by the Rust hub yet", t.provider)) }
         self.stop().await; self.lines = None; self.exit = None; self.next_ride = false; self.live_proc = None; self.asked.clear();
         let mut ev = vec![json!({"$":"ActivityLogged","thread":th,"act":hub_id("s", now, self.ag.seq()),"tone":"info","kind":"steer","summary":"Steered: the turn starts again with this message","at":now})];
@@ -639,8 +645,9 @@ impl Actor {
         }
         let uuid = rules::hub_uuid(now, &format!("{th}/{msg}"));
         self.cmds = self.cmds.accept(&uuid); self.sent.push_back((uuid.clone(), msg.clone(), text.clone())); if self.sent.len() > RECENT { self.sent.pop_front(); }
+        let steer = std::mem::take(&mut self.steer_now);
         let line = { let (text2, cwd2, host, uuid2) = (agent_text.clone(), cwd.clone(), self.ag.host.clone(), uuid.clone()); // Media.claude: images read, `$skill` mentions made real
-            tokio::task::spawn_blocking(move || { let ss = if text2.contains('$') { inputs::scan(&host.user_home, &cwd2, host.kistack.as_deref()) } else { vec![] }; let body = inputs::expand_claude(&text2, &ss); let imgs = inputs::read_images(&text2); inputs::claude_line(&body, &imgs, &uuid2) }).await.unwrap_or_default() };
+            tokio::task::spawn_blocking(move || { let ss = if text2.contains('$') { inputs::scan(&host.user_home, &cwd2, host.kistack.as_deref()) } else { vec![] }; let body = inputs::expand_claude(&text2, &ss); let imgs = inputs::read_images(&text2); inputs::claude_line_p(&body, &imgs, &uuid2, steer) }).await.unwrap_or_default() };
         let sent = self.live_proc.as_ref().map(|p| p.input.try_send(line));
         if matches!(sent, Some(Ok(()))) { self.cmds = self.cmds.sent(&uuid) } else { self.fail("the agent is not taking input".into(), "input", &hub_id("in", now, 0)).await }
     }
