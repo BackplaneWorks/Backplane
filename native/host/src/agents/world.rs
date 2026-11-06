@@ -7,7 +7,7 @@ use anyhow::Result;
 use serde_json::Value;
 use std::collections::HashMap;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct T {
     pub act: u64, pub project: String, pub provider: String, pub model: String, pub session: String, pub worktree: String,
     pub runtime: String, pub interaction: String, pub turn: String, pub archived: bool, pub deleted: bool,
@@ -16,14 +16,14 @@ pub struct T {
 }
 
 /// A delegated task (model.bend Task): its state is one of queued, running, done, failed, cancelled; a terminal state sticks (TaskState.next).
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct Tk { pub parent: String, pub child: String, pub depth: u64, pub state: String, pub summary: String, pub delivered: bool, pub provider: String, pub model: String }
 impl Tk { pub fn terminal(&self) -> bool { matches!(self.state.as_str(), "done" | "failed" | "cancelled") } }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct Ask { pub thread: String, pub kind: String, pub tool: String, pub detail: String, pub options: String }
 
-#[derive(Default)]
+#[derive(Default, serde::Serialize, serde::Deserialize)]
 pub struct World { pub bots: HashMap<String, (String, String, bool)>, pub rooms: HashMap<String, (String, bool)>, pub bot_of: HashMap<String, String>, pub said_to: HashMap<String, std::collections::HashSet<String>>, pub reviews: HashMap<String, Vec<(String, String, u64)>>, pub queued: HashMap<String, Vec<String>>, pub parents: HashMap<String, String>, pub td_msgs: std::collections::HashSet<String>, pub launched: HashMap<String, (String, bool)>, pub projects: HashMap<String, (String, bool)>, pub tasks: HashMap<String, Tk>, pub deadlines: std::collections::HashSet<String>, pub asks: HashMap<String, Ask>, pub sessions: std::collections::HashSet<(String, String)>, pub threads: HashMap<String, T>, pub roots: HashMap<String, String>, pub st: HashMap<String, String>, seen: usize }
 
 const KEYS: &[&str] = &["summary.", "rule.", "watch.", "thread.parent.", "bg.", "wait.", "work.timeout.seconds", "allowance.claude", "effort.", "buy.", "kicad.ipc", "order.enabled", "agent.lang", "tz.machine", "agent.thinking", "restart.continue", "tok.epoch", "tok.recount", "tok.basis.", "turn.speed.", "turn.models.", "limit.claude.", "ride.", "agy.", "session.", "launch.n."];
@@ -44,8 +44,14 @@ impl World {
     pub fn setting(&self, k: &str) -> &str { self.st.get(k).map(String::as_str).unwrap_or("") }
 
     /// Catch up with the store (whole lines past what was seen). A cheap substring test skips lines no rule reads.
-    pub fn sync(&mut self, store: &Store) -> Result<()> {
-        let total = store.len();
+    fn ckpt_path(store: &Store) -> std::path::PathBuf { crate::ckpt::dir(store.path()).join("agents.json") }
+    /// The saved world (ckpt/agents.json) when it is of this log; `sync` folds what is past it.
+    pub fn load(store: &Store) -> Option<World> { let w = crate::ckpt::load_json(&Self::ckpt_path(store), store, |w: &World| w.seen); if let Some(w) = &w { crate::ckpt::saved("agents", w.seen);
+        if crate::ckpt::check_on() { let (s, n, a) = (store.clone(), w.seen, serde_json::to_value(w).unwrap_or_default()); std::thread::spawn(move || { let mut f = World::default(); let _ = f.sync_to(&s, n); crate::ckpt::check("agents world", a, serde_json::to_value(&f).unwrap_or_default()) }); } } w }
+    /// Save what is folded (the log lines `seen` covers, which the caller's `sync` has just brought up to date).
+    pub fn save(&self, store: &Store) { if crate::ckpt::due("agents", self.seen) { crate::ckpt::save_json(&Self::ckpt_path(store), store, self.seen, self); crate::ckpt::saved("agents", self.seen) } }
+    pub fn sync(&mut self, store: &Store) -> Result<()> { self.sync_to(store, store.len()) }
+    pub fn sync_to(&mut self, store: &Store, total: usize) -> Result<()> {
         while self.seen < total {
             let b = (self.seen + 4096).min(total);
             for l in store.range(self.seen, b)? { self.apply(&l) }

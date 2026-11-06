@@ -4,24 +4,24 @@ use crate::store::Store;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Bot { pub id: String, pub name: String, pub thread: String, pub look: u64, pub persona: String, pub created: u64, pub deleted: bool }
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Room { pub id: String, pub name: String, pub members: Vec<String>, pub created: u64, pub deleted: bool }
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Mem { pub bot: String, pub key: String, pub kind: String, pub text: String, pub tags: String, pub created: u64, pub updated: u64 }
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Routine { pub id: String, pub bot: String, pub name: String, pub cron: String, pub prompt: String, pub on: bool, pub last: u64, pub created: u64, pub deleted: bool,
     pub once: u64, pub tz: String, pub kind: String, pub done: bool, pub slot: u64 }
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Hook { pub id: String, pub bot: String, pub name: String, pub created: u64, pub revoked: bool, pub last: u64, pub count: u64 }
 /// BT.Hops
-#[derive(Clone, Debug, PartialEq, Default)]
+#[derive(Clone, Debug, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct Hops { pub now: u64, pub wait: u64, pub held: bool }
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Peer { pub id: String, pub name: String, pub url: String, pub created: u64, pub revoked: bool }
 
-#[derive(Default)]
+#[derive(Default, serde::Serialize, serde::Deserialize)]
 pub struct World {
     pub bots: HashMap<String, Bot>, pub rooms: HashMap<String, Room>, post_ids: HashSet<String>,
     pub mems: HashMap<String, Mem>, pub spaces: HashMap<String, String>, pub pages: HashMap<String, (String, u64)>,
@@ -29,9 +29,9 @@ pub struct World {
     /// only the settings a bots request reads (SETTINGS): a log of a million lines holds hundreds of thousands of keys
     pub settings: HashMap<String, String>,
     /// message id filed in a bot's thread -> its 1-based log line (Hub.has_msg; Rto.resolve reads the text from the log)
-    msgs: HashMap<(String, String), usize>, bot_threads: HashSet<String>,
+    #[serde(with = "crate::ckpt::pairs")] msgs: HashMap<(String, String), usize>, bot_threads: HashSet<String>,
     /// messages being delivered (decided, not yet filed by the agent): a request sent again meanwhile is the same request
-    pub inflight: HashSet<(String, String)>,
+    #[serde(skip)] pub inflight: HashSet<(String, String)>,
     /// the uberbot's ops and registers, folded by the state lane's fold (UberOp, UberSet, machine.id, uber.offer, uber.link.*): only those lines reach it
     pub ub: crate::state::State,
     /// the mailroom (ML.Box)
@@ -99,8 +99,14 @@ impl World {
     /// Ub.pin: where a routine (global id) is pinned
     pub fn pin(&self, gid: &str) -> String { let v: Value = serde_json::from_str(&self.reg(&self.uid(), &format!("routine:{gid}"))).unwrap_or(Value::Null); v["pin"].as_str().unwrap_or("").to_string() }
 
-    pub fn sync(&mut self, store: &Store) -> anyhow::Result<()> {
-        let total = store.len();
+    fn ckpt_path(store: &Store) -> std::path::PathBuf { crate::ckpt::dir(store.path()).join("bots.json") }
+    /// The saved world (ckpt/bots.json) when it is of this log; `sync` folds what is past it.
+    pub fn load(store: &Store) -> Option<World> { let w = crate::ckpt::load_json(&Self::ckpt_path(store), store, |w: &World| w.seen); if let Some(w) = &w { crate::ckpt::saved("bots", w.seen);
+        if crate::ckpt::check_on() { let (s, n, a) = (store.clone(), w.seen, serde_json::to_value(w).unwrap_or_default()); std::thread::spawn(move || { let mut f = World::default(); let _ = f.sync_to(&s, n); crate::ckpt::check("bots world", a, serde_json::to_value(&f).unwrap_or_default()) }); } } w }
+    /// Save what is folded (the log lines `seen` covers, which the caller's `sync` has just brought up to date).
+    pub fn save(&self, store: &Store) { if crate::ckpt::due("bots", self.seen) { crate::ckpt::save_json(&Self::ckpt_path(store), store, self.seen, self); crate::ckpt::saved("bots", self.seen) } }
+    pub fn sync(&mut self, store: &Store) -> anyhow::Result<()> { self.sync_to(store, store.len()) }
+    pub fn sync_to(&mut self, store: &Store, total: usize) -> anyhow::Result<()> {
         while self.seen < total {
             let end = (self.seen + 4096).min(total);
             for (i, l) in store.range(self.seen, end)?.iter().enumerate() { self.line = self.seen + i + 1; self.apply_line(l) }

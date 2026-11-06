@@ -12,7 +12,7 @@ pub const COPY_LINE: &str = "wake subscriptions are off on a copy of a log (BACK
 const KINDS: [&str; 4] = ["thread", "work", "pr", "file"];
 const SERVED: [&str; 1] = ["thread"];
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Wake { pub id: String, pub by: String, pub kind: String, pub target: String, pub events: Vec<String>, pub once: bool, pub note: String, pub created: u64 }
 impl Wake {
     fn json(&self) -> Value { json!({"id":self.id,"by":self.by,"kind":self.kind,"target":self.target,"events":self.events,"once":self.once,"note":self.note,"created":self.created}) }
@@ -60,9 +60,13 @@ pub fn signals(end: u8, at: u64, thread: &str, ask: Option<(&str, u64)>, idle: b
     v
 }
 
-#[derive(Default)]
+#[derive(Default, serde::Serialize, serde::Deserialize)]
 pub struct Book { wakes: HashMap<String, Wake>, seen: HashMap<String, String>, at: usize }
 impl Book {
+    fn path(store: &crate::store::Store) -> std::path::PathBuf { crate::ckpt::dir(store.path()).join("wakes.json") }
+    fn load(store: &crate::store::Store) -> Option<Book> { let b = crate::ckpt::load_json(&Self::path(store), store, |b: &Book| b.at); if let Some(b) = &b { crate::ckpt::saved("wakes", b.at);
+        if crate::ckpt::check_on() { let (s, n, a) = (store.clone(), b.at, serde_json::to_value(b).unwrap_or_default()); std::thread::spawn(move || { let mut f = Book::default(); while f.at < n { let e = (f.at + 4096).min(n); if let Ok(ls) = s.range(f.at, e) { for l in ls { f.apply(&l) } } f.at = e; } crate::ckpt::check("wakes book", a, serde_json::to_value(&f).unwrap_or_default()) }); } } b }
+    fn save(&self, store: &crate::store::Store) { if crate::ckpt::due("wakes", self.at) { crate::ckpt::save_json(&Self::path(store), store, self.at, self); crate::ckpt::saved("wakes", self.at) } }
     fn apply(&mut self, line: &str) {
         let Some(t) = crate::session::event_type(line) else { return };
         if !matches!(t, "WakeSet" | "WakeDropped" | "SettingSet" | "ThreadDeleted") { return }
@@ -90,8 +94,9 @@ pub fn defs(names: &[&str]) -> Vec<Value> {
 impl Wakes {
     /// Catch up with the log (no firing for what is already in it), register the tools and follow the log.
     pub async fn start(ag: Arc<Agents>) -> Arc<Wakes> {
-        let w = Arc::new(Wakes { ag: ag.clone(), book: Mutex::new(Book::default()), tailing: tokio::sync::Mutex::new(()) });
+        let w = Arc::new(Wakes { ag: ag.clone(), book: Mutex::new(Book::load(&ag.hub.store).unwrap_or_default()), tailing: tokio::sync::Mutex::new(()) });
         w.catch_up();
+        { let me = w.clone(); crate::ckpt::register(move |store| me.book.lock().unwrap().save(store)); }
         ag.add_tools(Arc::new(WakeTools(w.clone())));
         if crate::copy::on() { return w } // the book is read for wake_list; nothing follows the log, nothing fires
         let me = w.clone(); let mut rx = ag.hub.subscribe();

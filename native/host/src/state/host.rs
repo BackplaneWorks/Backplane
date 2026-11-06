@@ -38,16 +38,53 @@ impl Ticker for Host {
     }
 }
 
-/// the lean fold of the whole log, on a blocking thread; the length is read first and the fold stops there
-fn read_log(hub: &Hub) -> (Core, u64) {
-    let mut core = Core::new();
-    let len = hub.store.len();
-    let mut at = 0usize;
+fn state_path(store: &crate::store::Store) -> std::path::PathBuf { crate::ckpt::dir(store.path()).join("state.json") }
+/// The saved fold (ckpt/state.json) and the number of log lines it covers, when it is of this log.
+fn load_state(store: &crate::store::Store) -> Option<(crate::state::State, usize)> {
+    #[derive(serde::Deserialize)] struct Snap { v: u64, lines: usize, fp: u64, st: crate::state::State }
+    let snap: Snap = serde_json::from_slice(&std::fs::read(state_path(store)).ok()?).ok()?;
+    if snap.v != crate::ckpt::VERSION || snap.lines > store.len() || snap.fp != crate::ckpt::fingerprint(store, snap.lines) { return None }
+    Some((snap.st, snap.lines))
+}
+fn save_state(store: &crate::store::Store, st: &crate::state::State, lines: usize) {
+    #[derive(serde::Serialize)] struct Snap<'a> { v: u64, lines: usize, fp: u64, st: &'a crate::state::State }
+    let r = serde_json::to_vec(&Snap { v: crate::ckpt::VERSION, lines, fp: crate::ckpt::fingerprint(store, lines), st }).map_err(std::io::Error::from).and_then(|b| crate::ckpt::write_atomic(&state_path(store), &[&b]));
+    if let Err(e) = r { eprintln!("checkpoint: state not saved: {e}") }
+}
+/// Fold the log lines [from, len) into `core`, `len` read first.
+fn fold_tail(store: &crate::store::Store, core: &mut Core, from: usize, len: usize) {
+    let mut at = from;
     while at < len {
         let to = (at + 2000).min(len);
-        match hub.store.range(at, to) { Ok(ls) => for l in ls { core.fold_line(&l); }, Err(e) => eprintln!("state policies: reading log lines {at}..{to} failed: {e}") }
+        match store.range(at, to) { Ok(ls) => for l in ls { core.fold_line(&l); }, Err(e) => eprintln!("state policies: reading log lines {at}..{to} failed: {e}") }
         at = to;
     }
+}
+/// A saved fold that is far behind the log is brought forward and saved again (a lean fold, line by line, so it is exactly what a fold of the whole log gives).
+/// Called by the checkpoint task; nothing when the saved fold is within `slack` lines of the log's end or there is none yet (the start saves that).
+pub fn refresh_state(store: &crate::store::Store, slack: usize) {
+    let len = store.len();
+    let Some((st, lines)) = load_state(store) else { return };
+    if len < lines + slack { return }
+    let mut core = Core { st };
+    fold_tail(store, &mut core, lines, len);
+    save_state(store, &core.st, len);
+}
+
+/// Begin reading the saved fold now (the start joins it when the policies boot).
+pub fn preload(store: &crate::store::Store) { let s = store.clone(); crate::ckpt::preload("state", store, move || load_state(&s)); }
+
+/// the lean fold of the log, on a blocking thread, from the saved fold when there is one; the length is read first and the fold stops there
+fn read_log(hub: &Hub) -> (Core, u64) {
+    let len = hub.store.len();
+    let (mut core, from) = match crate::ckpt::take("state", &hub.store, || load_state(&hub.store)) { Some((st, lines)) => { crate::startup::mark(&format!("policy checkpoint loaded ({lines} lines)")); (Core { st }, lines) } None => (Core::new(), 0) };
+    fold_tail(&hub.store, &mut core, from, len);
+    if from > 0 && crate::ckpt::check_on() {
+        let (store, a) = (hub.store.clone(), serde_json::to_value(&core.st).unwrap_or_default());
+        std::thread::spawn(move || { let mut c = Core::new(); fold_tail(&store, &mut c, 0, len); crate::ckpt::check("policy state", a, serde_json::to_value(&c.st).unwrap_or_default()) });
+    }
+    // a long fold is not repeated at the next start
+    if len - from > 20_000 { save_state(&hub.store, &core.st, len); }
     (core, len as u64)
 }
 
@@ -88,7 +125,9 @@ async fn boot_task(policy: Arc<Policy>, hub: Arc<Hub>) {
     let h = hub.clone();
     let (core, len) = match tokio::task::spawn_blocking(move || read_log(&h)).await { Ok(x) => x, Err(e) => { eprintln!("state policies: the log fold failed, the policies stay off: {e}"); return } };
     let now_s = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    crate::startup::mark("policy state folded");
     let derived = policy.finish_boot(core, len, now_s);
+    crate::startup::mark("policy state booted");
     if !derived.is_empty() && !policy.passive() { let _ = hub.commit_many(&derived).await; }
 }
 

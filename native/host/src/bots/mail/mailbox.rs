@@ -4,10 +4,10 @@ use super::{head, Conv, Hdr};
 use std::collections::{HashMap, HashSet};
 
 /// ML.Mark: one bot's state on a conversation
-#[derive(Clone, Debug, PartialEq, Default)]
+#[derive(Clone, Debug, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct Mark { pub bot: String, pub conv: String, pub status: String, pub seen: u64, pub until: u64, pub tags: Vec<String> }
 
-#[derive(Default)]
+#[derive(Default, serde::Serialize, serde::Deserialize)]
 pub struct Box {
     pub convs: HashMap<String, Conv>,
     /// a conversation's headers, newest first (Headers.add)
