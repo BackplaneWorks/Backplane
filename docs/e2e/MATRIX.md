@@ -1,6 +1,6 @@
 # End-to-end matrix
 
-Rust-only Backplane on `main`: hub `native/host`, client `native/gpui`. Results are `pass`, `fail` or `not run`. `deferred, no VM` marks Windows: the person dropped it for now on 2026-11-06, and it is neither a pass nor a fail. `pass, hub only` means the hub did it with no client involved, and `pass, part` names what ran: neither counts as a full pass. `wine` results sit in their own section: Wine on Boat is not Windows, and they never fill a Windows cell. A result needs evidence: a commit, the rig, and a log path or test name. `not run` says why. A Linux result never stands in for another platform.
+Rust-only Backplane on `main`: hub `native/host`, client `native/gpui`. Results are `pass`, `fail` or `not run`. `deferred, no VM` marks Windows: the person dropped it for now on 2026-11-06, and it is neither a pass nor a fail. `pass, hub only` means the hub did it with no client involved, and `pass, part` names what ran: neither counts as a full pass. `persists, effect not proven` means the control saved and survived a restart, but nothing showed it doing anything, and that is not a pass. `wine` results sit in their own section: Wine on Boat is not Windows, and they never fill a Windows cell. A result needs evidence: a commit, the rig, and a log path or test name. `not run` says why. A Linux result never stands in for another platform.
 
 The grids are kept by the lead. Each lane writes only its own section at the end of this file, so parallel rebases do not collide.
 
@@ -11,10 +11,10 @@ Other lanes own these, and their rows here are filled from their reports: onboar
 | ID | Feature | Linux | macOS | Windows |
 |---|---|---|---|---|
 | | **Core** | | | |
-| F01 | Hub boots on a temp home, `/hello` answers | not run | pass | deferred, no VM |
-| F02 | Client connects; sidebar and projects load | not run | not run | deferred, no VM |
-| F03 | Threads: create, rename, pin, archive, delete, settle, snooze, order | not run | pass, hub only | deferred, no VM |
-| F04 | Stand-in turn streams; restart ends running turns as interrupted | not run | pass, hub only | deferred, no VM |
+| F01 | Hub boots on a temp home, `/hello` answers | pass | pass | deferred, no VM |
+| F02 | Client connects; sidebar and projects load | pass | not run | deferred, no VM |
+| F03 | Threads: create, rename, pin, archive, delete, settle, snooze, order | pass, hub only | pass, hub only | deferred, no VM |
+| F04 | Stand-in turn streams; restart ends running turns as interrupted | pass, hub only | pass, hub only | deferred, no VM |
 | F05 | Providers via stand-ins: Claude, Codex, Grok, OpenCode, Muse, Antigravity, Pi, Oh My Pi | not run | not run | deferred, no VM |
 | F06 | Runtime modes, approvals, questions, plans | not run | not run | deferred, no VM |
 | F07 | Queue, steer, stop, held queue resume | not run | not run | deferred, no VM |
@@ -36,27 +36,27 @@ Other lanes own these, and their rows here are filled from their reports: onboar
 | F23 | A killed hub leaves no agent behind | not run | fail | deferred, no VM |
 | | **Install and CAD** | | | |
 | C01 | Package installs and starts on a clean user | not run | not run | deferred, no VM |
-| C02 | KiCad: install, Settings → CAD path, kicad-cli export and DRC run from the hub | not run | pass, part: ERC and DRC, no export | deferred, no VM |
-| C03 | FreeCAD: install, Settings → CAD path, script run and STEP export from the hub | not run | pass, part: render; script by hand | deferred, no VM |
+| C02 | KiCad: install, Settings → CAD path, kicad-cli export and DRC run from the hub | pass | pass, part: ERC and DRC, no export | deferred, no VM |
+| C03 | FreeCAD: install, Settings → CAD path, script run and STEP export from the hub | fail | pass, part: render; script by hand | deferred, no VM |
 | | **Remote operation** | | | |
 | R01 | Restart the hub from another machine | not run | not run | deferred, no VM |
 | R02 | Update: channel, Check now, download, checksum, swap, restart | not run | not run | deferred, no VM |
 | R03 | Rollback after a bad update | not run | not run | deferred, no VM |
 | | **Settings: each control persists across restart and takes effect** | | | |
-| S01 | Appearance | not run | not run | deferred, no VM |
-| S02 | Threads | not run | not run | deferred, no VM |
-| S03 | Agents | not run | not run | deferred, no VM |
-| S04 | Writing | not run | not run | deferred, no VM |
-| S05 | CAD | not run | not run | deferred, no VM |
-| S06 | Ordering | not run | not run | deferred, no VM |
-| S07 | Devices | not run | not run | deferred, no VM |
-| S08 | Network | not run | not run | deferred, no VM |
-| S09 | Voice | not run | not run | deferred, no VM |
+| S01 | Appearance | persists, effect not proven | not run | deferred, no VM |
+| S02 | Threads | persists, effect not proven | not run | deferred, no VM |
+| S03 | Agents | persists, effect not proven | not run | deferred, no VM |
+| S04 | Writing | persists, effect not proven | not run | deferred, no VM |
+| S05 | CAD | pass, part: KiCad only | not run | deferred, no VM |
+| S06 | Ordering | persists, effect not proven | not run | deferred, no VM |
+| S07 | Devices | pass | not run | deferred, no VM |
+| S08 | Network | persists, effect not proven | not run | deferred, no VM |
+| S09 | Voice | fail | not run | deferred, no VM |
 | S10 | Keys | not run | not run | deferred, no VM |
-| S11 | Timezone | not run | not run | deferred, no VM |
-| S12 | Usage | not run | not run | deferred, no VM |
-| S13 | About | not run | not run | deferred, no VM |
-| S14 | Privacy | not run | not run | deferred, no VM |
+| S11 | Timezone | persists, effect not proven | not run | deferred, no VM |
+| S12 | Usage | fail | not run | deferred, no VM |
+| S13 | About | pass | not run | deferred, no VM |
+| S14 | Privacy | pass | not run | deferred, no VM |
 
 ## Pairing
 
