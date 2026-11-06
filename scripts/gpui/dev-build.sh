@@ -5,10 +5,11 @@
 # The strip's bar is time against the last build's time ($DEV/.build-secs, one per mode; a first build guesses 150 s): an incremental build compiles one crate, a full one
 # hundreds, so counting crates says nothing. The bar stops at 95% until the build is done.
 # Env: GPUI_DEV_DIR (default ~/.backplane-gpui-dev), BACKPLANE_DEV_STATUS (the status file; default $DEV/BUILD), BUILD_ROOT (the checkout to build; default this one),
-#      HOST_TARGET / GPUI_TARGET (a CARGO_TARGET_DIR for each crate), ASSETS (an assets/ folder to ship; default the one in the build now current), JOBS (default 28).
+#      PROFILE (cargo profile, default fast; release for fat LTO), HOST_TARGET / GPUI_TARGET (a CARGO_TARGET_DIR for each crate), ASSETS (an assets/ folder to ship; default the one in the build now current), JOBS (default 28).
 set -u
 ROOT=${BUILD_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}; HERE=$(cd "$(dirname "$0")" && pwd)
 DEV=${GPUI_DEV_DIR:-$HOME/.backplane-gpui-dev}; ST=${BACKPLANE_DEV_STATUS:-$DEV/BUILD}; J=${JOBS:-28}
+PROFILE=${PROFILE:-fast}  # cargo profile: fast (no LTO, incremental; Cargo.toml) by default, PROFILE=release for the fat-LTO build
 GATE=0; CUT=1; for a in "$@"; do case "$a" in --gate) GATE=1;; --no-cut) CUT=0;; esac; done
 SECS=$DEV/.build-secs$([ "$GATE" = 1 ] && echo -gate)
 HT=${HOST_TARGET:-$ROOT/native/host/target}; GT=${GPUI_TARGET:-$ROOT/native/gpui/target}
@@ -28,11 +29,11 @@ if [ "$GATE" = 1 ]; then
   echo "testing hub" > "$PH";    ( cd "$ROOT/native/host" && CARGO_TARGET_DIR="$HT" taskset -c 0-27 nice -n 10 cargo test --offline -j "$J" -- "${skips[@]}" ) > "$LOG" 2>&1 || fail "hub tests"
   echo "testing window" > "$PH"; ( cd "$ROOT/native/gpui" && CARGO_TARGET_DIR="$GT" taskset -c 0-27 nice -n 10 cargo test --offline -j "$J" ) > "$LOG" 2>&1 || fail "window tests"
 fi
-echo "hub" > "$PH";    ( cd "$ROOT/native/host" && CARGO_TARGET_DIR="$HT" taskset -c 0-27 nice -n 10 cargo build --release --offline -j "$J" --bin backplane-hub ) > "$LOG" 2>&1 || fail hub
-echo "window" > "$PH"; ( cd "$ROOT/native/gpui" && CARGO_TARGET_DIR="$GT" taskset -c 0-27 nice -n 10 cargo build --release --offline -j "$J" ) > "$LOG" 2>&1 || fail window
+echo "hub" > "$PH";    ( cd "$ROOT/native/host" && CARGO_TARGET_DIR="$HT" taskset -c 0-27 nice -n 10 cargo build --profile "$PROFILE" --offline -j "$J" --bin backplane-hub ) > "$LOG" 2>&1 || fail hub
+echo "window" > "$PH"; ( cd "$ROOT/native/gpui" && CARGO_TARGET_DIR="$GT" taskset -c 0-27 nice -n 10 cargo build --profile "$PROFILE" --offline -j "$J" ) > "$LOG" 2>&1 || fail window
 kill $TK 2>/dev/null; echo $(( $(date +%s) - start )) > "$SECS"; rm -f "$DEV/.last-failure" "$DEV/.last-failure.log"
 D=$(mktemp -d "$DEV/.stage.XXXX")
-cp "$HT/release/backplane-hub" "$GT/release/backplane-gpui" "$D/"
+cp "$HT/$PROFILE/backplane-hub" "$GT/$PROFILE/backplane-gpui" "$D/"
 A=${ASSETS:-$DEV/builds/$(head -1 "$DEV/CURRENT" 2>/dev/null)/assets}; [ -d "$A" ] && cp -r "$A" "$D/assets"
 git -C "$ROOT" rev-parse --short HEAD > "$D/COMMIT"
 [ "$CUT" = 0 ] && { echo "built in $D"; D=; exit 0; }
