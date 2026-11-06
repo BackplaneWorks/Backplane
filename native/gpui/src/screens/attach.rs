@@ -128,10 +128,16 @@ pub struct Attacher { pub target: Option<Target>, pub previews: Previews, pub cu
 impl Attacher {
     pub fn new(target: Option<Target>) -> Self { Self { target, previews: Previews::default(), current: Arc::default() } }
     pub fn show(&self, thread: &str) { if let Ok(mut c) = self.current.lock() { *c = raw_id(thread).to_string(); } }
+    /// Whether something can be attached to `thread` now; Err is a sentence for the error line.
+    pub fn ready(&self, thread: &str) -> Result<(), String> {
+        if self.target.is_none() { return Err("Attachments need a hub on plain http://; this one is not.".into()); }
+        if thread.is_empty() { return Err("Open a thread to attach a file.".into()); }
+        Ok(())
+    }
     /// Start the upload(s) for a composer event. Err is a sentence for the error line; the UI thread reads no file.
     pub fn event(&self, tx: &Sender<Command>, thread: &str, cap: u64, ev: &ComposerEvent) -> Result<(), String> {
-        let Some(t) = self.target.clone() else { return Err("Attachments need a hub on plain http://; this one is not.".into()) };
-        if thread.is_empty() { return Err("Open a thread to attach a file.".into()); }
+        self.ready(thread)?;
+        let Some(t) = self.target.clone() else { return Ok(()) };
         // the hub's own id: a screen over several hubs names a thread "<hub>|<id>", and the hub (and `show`) know only the id
         let (tx, thread, previews, current) = (tx.clone(), raw_id(thread).to_string(), self.previews.clone(), self.current.clone());
         match ev {
@@ -140,6 +146,16 @@ impl Attacher {
                 std::thread::spawn(move || {
                     let name = format!("pasted-{}.{ext}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()));
                     previews.add(&name, ext, &bytes);
+                    upload_blocking(&tx, &t, &thread, &name, Body::Bytes(bytes), cap, &current);
+                });
+                Ok(())
+            }
+            ComposerEvent::Drawing(rgba) => {
+                let rgba = rgba.clone();
+                std::thread::spawn(move || {
+                    let Some(bytes) = super::pad::png(&rgba) else { return };
+                    let name = format!("drawing-{}.png", super::pad::stamp());
+                    previews.add(&name, "png", &bytes);
                     upload_blocking(&tx, &t, &thread, &name, Body::Bytes(bytes), cap, &current);
                 });
                 Ok(())

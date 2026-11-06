@@ -278,7 +278,7 @@ impl Render for Backplane {
         let t_render = std::time::Instant::now();
         crate::screens::improvements::tick(self, window, cx);
         crate::screens::desk::tick(self, window, cx);
-        if self.want_focus { self.want_focus = false; self.input.focus_handle(cx).focus(window); }
+        if self.want_focus && self.screens.pad.is_none() { self.want_focus = false; self.input.focus_handle(cx).focus(window); }
         if self.models_pending { self.models_pending = false; self.picker_toggle(window, cx); }
         if let Some(w) = self.screens.projects.focus.take() { let e = if w == "folder" { self.screens.projects.folder.clone() } else { self.screens.projects.search.clone() }; if let Some(e) = e { window.focus(&e.focus_handle(cx)); } }
         if let Some(n) = self.screens.focus_field.take() { if let Some(s) = self.screens.fields.get(&n) { window.focus(&s.input.focus_handle(cx)); } }
@@ -476,12 +476,13 @@ impl Render for Backplane {
         ctl.push(CtlEntry { id: "rail:Commands".into(), label: "Commands".into(), ctl: Ctl::OpenPalette });
         ctl.push(CtlEntry { id: "ui:Context".into(), label: "Context".into(), ctl: Ctl::ToggleContext });
         ctl.push(CtlEntry { id: "ui:Jump or run a command".into(), label: "Jump or run a command".into(), ctl: Ctl::OpenPalette });
-        for l in ["Account", "Edit", "Dictate"] { ctl.push(CtlEntry { id: format!("ui:{l}"), label: l.into(), ctl: Ctl::None }); }
+        for l in ["Account", "Dictate"] { ctl.push(CtlEntry { id: format!("ui:{l}"), label: l.into(), ctl: Ctl::None }); }
         crate::screens::improvements::controls(self, &mut ctl);
         for (id, label, c) in crate::screens::projects::controls(&self.data) { ctl.push(CtlEntry { id, label, ctl: c }); }
         ctl.push(CtlEntry { id: "ui:Search".into(), label: "Search".into(), ctl: Ctl::FocusSearch });
         ctl.push(CtlEntry { id: "ui:Fold sidebar".into(), label: "Fold sidebar".into(), ctl: Ctl::ToggleSidebar });
         ctl.push(CtlEntry { id: "ui:Attach".into(), label: "Attach".into(), ctl: Ctl::PickFiles });
+        ctl.push(CtlEntry { id: "ui:Draw".into(), label: "Draw".into(), ctl: Ctl::Pad });
         if !self.sidebar_open { ctl.push(CtlEntry { id: "ui:Unfold sidebar".into(), label: "Unfold sidebar".into(), ctl: Ctl::ToggleSidebar }); }
         let connected = self.status == "Connected";
         if !self.screens.img_poll && self.screens.images.loading() { self.screens.img_poll = true; crate::screens::timeline::poll(cx); }
@@ -554,7 +555,7 @@ impl Render for Backplane {
                         .child(div().flex().flex_wrap().gap_2().items_center().w_full().min_w_0()
                             .child(crate::screens::bar::fit(with_rect(div().id("model-chip"), || "ui:Model".to_string())).cursor_pointer().on_click(cx.listener(|this, _, window, cx| this.picker_toggle(window, cx))).flex_1().min_w(px(180.)).overflow_hidden().whitespace_nowrap().px_3().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).font(art::mono_font()).flex().items_center().gap_2().child(crate::screens::picker::logo("claude")).child(format!("claude / {} / {}", if model_short.is_empty() { "default" } else { &model_short }, if effort.is_empty() { "auto" } else { &effort })))
                             .child(crate::screens::bar::fit(with_rect(crate::screens::accounts::chip(cx, light, &self.screens.acct, &string(thread, "id")), || "ui:Account".to_string())))
-                            .child(crate::screens::bar::fit(with_rect(chip(light, String::new()).opacity(0.45), || "ui:Edit".to_string())).child(ic(light, "square-pen", 16., "dim")))
+                            .child(crate::screens::bar::fit(with_rect(chip(light, String::new()).id("draw"), || "ui:Draw".to_string())).cursor_pointer().tooltip(crate::keys::tip("Draw a sketch and attach it as an image", "", light)).on_click(cx.listener(|this, _, window, cx| this.pad_open(window, cx))).child(ic(light, "square-pen", 16., "dim")))
                             .child(crate::screens::bar::fit(with_rect(chip(light, String::new()).id("ctx-chip"), || "ui:Context".to_string())).cursor_pointer().on_click(cx.listener(|this, _, _, cx| { this.screens.ctx_open = !this.screens.ctx_open; cx.notify(); })).flex().items_center().gap_2().child(ic(light, "gauge", 14., "dim")).child(ctx))
                             .child(crate::screens::bar::fit(with_rect(crate::screens::accounts::limits_chip(cx, light, &self.screens.acct, allowance), || "ui:Allowance".to_string())))
                             .child(crate::screens::bar::fit(with_rect(chip(light, String::new()).id("attach"), || "ui:Attach".to_string())).cursor_pointer().on_click(cx.listener(|this, _, _, cx| this.pick_files(cx))).child(ic(light, "paperclip", 16., "dim")))
@@ -573,6 +574,7 @@ impl Render for Backplane {
                 .child(div().w(px(72.)).h_full().flex_shrink_0().relative().child(art::probe("rail")).border_l_1().border_color(c("line")).flex().flex_col().py_2().children(rail)))
             .children(crate::screens::improvements::view(cx, light, &self.screens.imp))
             .children(crate::screens::improvements::indicator(cx, light, &self.screens.imp))
+            .children(crate::screens::padview::view(cx, window, light, &self.local, &mut self.screens.pad, &mut ctl))
             // the right-click menu of a sidebar row, over everything
             .children(self.screens.ctx.clone().map(|m| crate::screens::ctxmenu::render(cx, light, &m)))
             .into_any_element();

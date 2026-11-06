@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Real X input through XTest (no xdotool here): xinput.py move X Y | click X Y [button] | type TEXT | key KEYSYM-NAME | pos
+"""Real X input through XTest (no xdotool here): xinput.py move X Y | click X Y [button] | type TEXT | key KEYSYM-NAME | chord MOD... KEYSYM-NAME | pos
 Uses $DISPLAY. Events go through the X server, so they reach the GPUI window exactly like a person's mouse and keyboard."""
 import ctypes, ctypes.util, os, sys, time
 x11 = ctypes.CDLL(ctypes.util.find_library('X11')); xt = ctypes.CDLL(ctypes.util.find_library('Xtst'))
@@ -30,6 +30,12 @@ elif cmd == 'type':
     for ch in a[0]:
         name = NAMES.get(ch, ch); key(name, shift=ch.isupper() or ch in ':_@')
 elif cmd == 'key': key(a[0])
+elif cmd == 'chord':  # chord Control_L z: the modifiers held round the last key
+    mods = [x11.XKeysymToKeycode(d, x11.XStringToKeysym(m.encode())) for m in a[:-1]]
+    for m in mods: xt.XTestFakeKeyEvent(d, m, 1, 0)
+    x11.XSync(d, 0); time.sleep(0.03); key(a[-1])
+    for m in mods: xt.XTestFakeKeyEvent(d, m, 0, 0)
+    x11.XSync(d, 0); time.sleep(0.04)
 elif cmd == 'drag':  # drag X0 Y0 X1 Y1: the left button down at the first point, moved in steps, up at the second
     x0, y0, x1, y1 = [float(v) for v in a[:4]]; move(x0, y0); xt.XTestFakeButtonEvent(d, 1, 1, 0); x11.XSync(d, 0); time.sleep(0.08)
     for i in range(1, 11): move(x0 + (x1 - x0) * i / 10, y0 + (y1 - y0) * i / 10)
