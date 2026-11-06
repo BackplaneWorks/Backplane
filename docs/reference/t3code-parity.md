@@ -2,7 +2,7 @@
 
 What the TypeScript Backplane (`i2cjak/Backplane`, a `pingdotgg/t3code` fork)
 does, distilled so rewrite can match it. Paths refer to that repo.
-Parity status lives in `docs/parity.md`.
+Parity status lives in `docs/t3code-parity.md`.
 
 ## Architecture
 
