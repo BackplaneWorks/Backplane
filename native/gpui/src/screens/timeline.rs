@@ -226,7 +226,7 @@ fn plain_spans(s: &str) -> Vec<Span> { vec![Span { text: s.to_string(), style: D
 pub fn bubble_full_width(text: &str) -> bool { text.lines().any(|l| l.chars().count() > 60) }
 
 /// A user's message text.
-pub fn user_text(reg: &Reg, light: bool, s: &str) -> AnyElement { text(reg, light, md::linkify(s), Kind::Body) }
+pub fn user_text(reg: &Reg, light: bool, s: &str, refs: &[String]) -> AnyElement { text(reg, light, md::chips(md::linkify(s), refs), Kind::Body) }
 
 /// An invisible overlay that records where its parent was painted, for the check harness's control rectangles.
 fn copy_probe(reg: &Reg, ix: usize) -> impl IntoElement {

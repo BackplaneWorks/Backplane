@@ -36,6 +36,20 @@ pub enum ComposerEvent {
     PopupPick,
 }
 
+/// Reference words drawn as chips in the draft (the colours are the accent over its own tint).
+#[derive(Clone, Default)]
+pub struct Chips { pub words: Vec<String>, pub fg: gpui::Hsla, pub bg: gpui::Hsla }
+fn chip_runs(line: &str, base: &TextRun, chips: &Chips) -> Vec<TextRun> {
+    let (mut runs, mut at) = (vec![], 0);
+    for (i, e) in super::md::word_ranges(line, &chips.words) {
+        if i > at { runs.push(TextRun { len: i - at, ..base.clone() }); }
+        runs.push(TextRun { len: e - i, color: chips.fg, background_color: Some(chips.bg), ..base.clone() }); at = e;
+    }
+    if at < line.len() { runs.push(TextRun { len: line.len() - at, ..base.clone() }); }
+    if runs.is_empty() { runs.push(TextRun { len: line.len(), ..base.clone() }); }
+    runs
+}
+
 /// One logical line, shaped on its own so an empty line (and a trailing newline) is a row too.
 struct Row { start: usize, len: usize, top: Pixels, line: Option<WrappedLine> }
 impl Row {
@@ -47,12 +61,12 @@ impl Row {
 }
 
 /// Shape every logical line of `text` for `width`, with the input method's composition underlined.
-fn shape_rows(window: &mut Window, text: &str, base: &TextRun, marked: Option<&Range<usize>>, font_size: Pixels, width: Option<Pixels>, lh: Pixels) -> Vec<Row> {
+fn shape_rows(window: &mut Window, text: &str, base: &TextRun, marked: Option<&Range<usize>>, font_size: Pixels, width: Option<Pixels>, lh: Pixels, chips: &Chips) -> Vec<Row> {
     let (mut rows, mut start, mut top) = (Vec::new(), 0usize, px(0.));
     for l in text.split('\n') {
         let line = if l.is_empty() { None } else {
             let m = marked.and_then(|m| { let (a, b) = (m.start.max(start), m.end.min(start + l.len())); (a < b).then(|| a - start..b - start) });
-            let runs = runs_for(l.len(), base, m.as_ref());
+            let runs = if m.is_none() && !chips.words.is_empty() { chip_runs(l, base, chips) } else { runs_for(l.len(), base, m.as_ref()) };
             window.text_system().shape_text(SharedString::from(l.to_string()), font_size, &runs, width, None).ok().and_then(|v| v.into_iter().next())
         };
         let row = Row { start, len: l.len(), top, line };
@@ -67,6 +81,8 @@ pub struct Composer {
     pub content: SharedString,
     /// Set by the window each frame: the suggestion popup is showing, so Up/Down/Tab drive it.
     pub popup_open: bool,
+    /// Words the hub knows as references (`&claude/opus`...): painted as chips.
+    pub chips: Vec<String>,
     placeholder: SharedString,
     rows: Vec<Row>,
     bounds: Option<Bounds<Pixels>>,
@@ -90,7 +106,7 @@ impl Composer {
     pub fn new(cx: &mut Context<Self>) -> Self { Self::with_context(cx, "Composer") }
     /// A composer with its own key context: "Composer" sends on Enter (main.rs), "AskInput" emits Submit.
     pub fn with_context(cx: &mut Context<Self>, ctx: &'static str) -> Self {
-        Self { blink: Default::default(), light: false, masked: false, ctx, focus: cx.focus_handle(), ed: Editor::default(), content: "".into(), popup_open: false, placeholder: "Ask anything: @bot, >thread, %project, #room, &model, $skill, /btw".into(),
+        Self { blink: Default::default(), light: false, masked: false, ctx, focus: cx.focus_handle(), ed: Editor::default(), content: "".into(), popup_open: false, chips: vec![], placeholder: "Ask anything: @bot, >thread, %project, #room, &model, $skill, /btw".into(),
             rows: vec![], bounds: None, line_height: px(20.), scroll_y: px(0.), selecting: false }
     }
     pub fn set(&mut self, text: String, cx: &mut Context<Self>) { self.ed.set(&text); self.sync(cx); }
@@ -269,7 +285,7 @@ impl gpui::Element for Element_ {
         let base = TextRun { len: text.len(), font: style.font(), color: style.color, background_color: None, underline: None, strikethrough: None };
         let layout = window.request_measured_layout(Style { size: gpui::Size { width: relative(1.).into(), height: gpui::Length::Auto }, ..Default::default() }, move |known, avail, window, _| {
             let w = known.width.or(match avail.width { gpui::AvailableSpace::Definite(w) => Some(w), _ => None });
-            let rows = shape_rows(window, &text, &base, None, font_size, w, lh);
+            let rows = shape_rows(window, &text, &base, None, font_size, w, lh, &Chips::default());
             let h = rows.last().map_or(lh, |r| r.top + r.height(lh));
             size(w.unwrap_or(px(100.)), h.max(lh).min(lh * MAX_LINES))
         });
@@ -284,7 +300,8 @@ impl gpui::Element for Element_ {
         let (text, color) = if empty { (input.placeholder.clone(), theme::color(light, "faint").into()) } else if input.masked { (mask(&input.content).into(), style.color) } else { (input.content.clone(), style.color) };
         let base = TextRun { len: text.len(), font: style.font(), color, background_color: None, underline: None, strikethrough: None };
         let marked = if empty { None } else { input.ed.marked.clone() };
-        let rows = shape_rows(window, &text, &base, marked.as_ref(), font_size, Some(bounds.size.width), lh);
+        let chips = if empty || input.masked { Chips::default() } else { let a = theme::color(light, "accent"); let mut bg: gpui::Hsla = a.into(); bg.a = 0.18; Chips { words: input.chips.clone(), fg: a.into(), bg } };
+        let rows = shape_rows(window, &text, &base, marked.as_ref(), font_size, Some(bounds.size.width), lh, &chips);
         let total = rows.last().map_or(lh, |r| r.top + r.height(lh));
         // keep the caret in view
         let head = input.ed.head();
@@ -364,7 +381,7 @@ impl Render for Composer {
 impl Focusable for Composer { fn focus_handle(&self, _: &App) -> FocusHandle { self.focus.clone() } }
 
 pub fn bind(cx: &mut App) {
-    for ctx in ["Composer", "AskInput", "ImpInput"] {
+    for ctx in ["Composer", "AskInput", "ImpInput", "PickInput"] {
     let c = Some(ctx);
     cx.bind_keys([
         KeyBinding::new("backspace", Backspace, c), KeyBinding::new("delete", Delete, c),
@@ -382,7 +399,7 @@ pub fn bind(cx: &mut App) {
         KeyBinding::new("shift-enter", Newline, c),
     ]);
     }
-    cx.bind_keys([KeyBinding::new("enter", Go, Some("AskInput"))]);
+    cx.bind_keys([KeyBinding::new("enter", Go, Some("AskInput")), KeyBinding::new("enter", Go, Some("PickInput"))]);
 }
 
 #[cfg(test)]

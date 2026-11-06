@@ -167,7 +167,8 @@ impl Backplane {
         let row: AnyElement = match kind {
             "user" => {
                 let wide = crate::screens::timeline::bubble_full_width(&text);
-                let body = crate::screens::timeline::user_text(&reg, light, &text);
+                let ref_words: Vec<String> = e["refs"].as_array().into_iter().flatten().map(|r| string(r, "word")).collect();
+                let body = crate::screens::timeline::user_text(&reg, light, &text, &ref_words);
                 let atts = crate::screens::timeline::attachments(light, &e["attachments"], &id, self.screens.attacher.target.as_ref(), &self.screens.images);
                 let tools = msg_tools(cx, light, &id, &text);
                 let cards = ref_cards(cx, light, &id, &e["refs"]);
@@ -212,7 +213,7 @@ impl Backplane {
                 let mut col = div().id(SharedString::from(format!("e-{id}"))).w_full().py_2().flex().flex_col().gap_2();
                 match e["blocks"].as_array() {
                     Some(blocks) if !blocks.is_empty() => { let parsed = self.screens.parsed.get(&id, &text, blocks); for el in crate::screens::timeline::blocks(cx, &reg, light, &parsed, &id) { col = col.child(el); } }
-                    _ => { col = col.child(crate::screens::timeline::user_text(&reg, light, &text)); }
+                    _ => { col = col.child(crate::screens::timeline::user_text(&reg, light, &text, &[])); }
                 }
                 if let Some(im) = crate::screens::timeline::images(light, &e["images"], &id, self.screens.attacher.target.as_ref(), &self.screens.images) { col = col.child(im); }
                 let tools = msg_tools(cx, light, &id, &text);
@@ -360,6 +361,11 @@ impl Render for Backplane {
                     this.input.focus_handle(cx).focus(window); cx.notify();
                 })));
         }
+        // the reference words the hub has offered become chips in the draft (it knows them as models, bots, threads...)
+        { let fresh: Vec<String> = skills.into_iter().flatten().filter_map(|s| s.get("word").and_then(Value::as_str)).filter(|w| w.len() > 1 && w.starts_with(|c| matches!(c, '@' | '>' | '%' | '#' | '&'))).map(String::from).collect();
+          let mut changed = false;
+          for w in fresh { if !self.screens.known_refs.contains(&w) { self.screens.known_refs.push(w); changed = true; } }
+          if changed { self.screens.known_refs.sort_by_key(|w| std::cmp::Reverse(w.len())); self.screens.known_refs.truncate(300); let k = self.screens.known_refs.clone(); self.input.update(cx, |i, cx| { i.chips = k; cx.notify(); }); } }
         let show_popup = skills.map_or(false, |s| !s.is_empty());
         if self.input.read(cx).popup_open != show_popup { self.input.update(cx, |c, _| c.popup_open = show_popup); }
         // chips
@@ -463,7 +469,7 @@ impl Render for Backplane {
                     .when(!self.error.is_empty(), |d| d.child(div().px_5().py_2().text_color(c("bad")).child(self.error.clone())))
                     .child(div().flex_shrink_0().relative().child(art::probe("composer")).border_t_1().border_color(c("line")).flex().justify_center().child(div().w_full().max_w(px(930.)).px_4().py_3().flex().flex_col().gap_2()
                         .when(show_popup, |d| d.child(popup))
-                        .children(crate::screens::picker::view(cx, light, &thread["picker"], self.screens.picker_open))
+                        .children(crate::screens::picker::view(cx, light, &thread["picker"], self.screens.picker_open, &self.screens.pick, &self.local.favs))
                         .children(self.screens.ctx_open.then(|| div().id("ctx-panel").max_h(px(340.)).overflow_y_scroll().px_3().py_2().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).flex().flex_col().gap_1()
                             .child(div().font_weight(FontWeight::BOLD).child("Context"))
                             .child(div().text_color(c("dim")).child(if ctx.is_empty() { "Nothing reported by the provider yet.".to_string() } else { format!("Held now: {}", ctx.trim_start_matches("ctx ")) }))
@@ -476,7 +482,7 @@ impl Render for Backplane {
                         .children(crate::screens::attach::chips(cx, light, &self.screens.attacher.previews, thread))
                         .child(div().border_1().border_color(c("accent")).bg(c("view")).px_3().py_2().min_h(px(60.)).child(self.input.clone()))
                         .child(div().flex().flex_wrap().gap_2().items_center().w_full().min_w_0()
-                            .child(crate::screens::bar::fit(with_rect(div().id("model-chip"), || "ui:Model".to_string())).cursor_pointer().on_click(cx.listener(|this, _, _, cx| { this.screens.picker_open = !this.screens.picker_open; cx.notify(); })).flex_1().min_w(px(180.)).overflow_hidden().whitespace_nowrap().px_3().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).font(art::mono_font()).child(format!("claude / {} / {}", if model_short.is_empty() { "default" } else { &model_short }, if effort.is_empty() { "auto" } else { &effort })))
+                            .child(crate::screens::bar::fit(with_rect(div().id("model-chip"), || "ui:Model".to_string())).cursor_pointer().on_click(cx.listener(|this, _, window, cx| this.picker_toggle(window, cx))).flex_1().min_w(px(180.)).overflow_hidden().whitespace_nowrap().px_3().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).font(art::mono_font()).flex().items_center().gap_2().child(crate::screens::picker::logo("claude")).child(format!("claude / {} / {}", if model_short.is_empty() { "default" } else { &model_short }, if effort.is_empty() { "auto" } else { &effort })))
                             .child(crate::screens::bar::fit(with_rect(crate::screens::accounts::chip(cx, light, &self.screens.acct, &string(thread, "id")), || "ui:Account".to_string())))
                             .child(crate::screens::bar::fit(with_rect(chip(light, String::new()).opacity(0.45), || "ui:Edit".to_string())).child(ic(light, "square-pen", 16., "dim")))
                             .child(crate::screens::bar::fit(with_rect(chip(light, String::new()).id("ctx-chip"), || "ui:Context".to_string())).cursor_pointer().on_click(cx.listener(|this, _, _, cx| { this.screens.ctx_open = !this.screens.ctx_open; cx.notify(); })).flex().items_center().gap_2().child(ic(light, "gauge", 14., "dim")).child(ctx))

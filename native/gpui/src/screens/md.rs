@@ -50,6 +50,38 @@ pub fn linkify(text: &str) -> Vec<Span> {
     out
 }
 
+/// Where the whole words of `words` sit in `s`, as byte ranges in order: a word starts after a space or an opening bracket or quote, and ends at the end, a space or punctuation.
+pub fn word_ranges(s: &str, words: &[String]) -> Vec<(usize, usize)> {
+    let opens = |c: char| c.is_whitespace() || matches!(c, '(' | '[' | '"' | '\'');
+    let mut out: Vec<(usize, usize)> = vec![]; let mut at = 0;
+    while at < s.len() {
+        let hit = words.iter().filter(|w| !w.is_empty()).filter_map(|w| { let mut from = at;
+            while let Some(i) = s[from..].find(w.as_str()) { let i = from + i; let end = i + w.len();
+                let before = i == 0 || s[..i].ends_with(opens);
+                let after = s[end..].chars().next().map_or(true, |c| !(c.is_alphanumeric() || matches!(c, '-' | '_' | '/' | ':' | '+')) && !(c == '.' && s[end + 1..].chars().next().map_or(false, |d| d.is_alphanumeric())));
+                if before && after { return Some((i, end)) } from = i + 1; }
+            None }).min_by_key(|(i, e)| (*i, std::cmp::Reverse(*e)));
+        match hit { Some((i, e)) => { out.push((i, e)); at = e; } None => break }
+    }
+    out
+}
+
+/// The reference words of a message (`&claude/opus`, `@bot`...) set apart as chips: each whole word of `words` in a plain span becomes a code-styled span of its own.
+pub fn chips(spans: Vec<Span>, words: &[String]) -> Vec<Span> {
+    if words.is_empty() { return spans }
+    let mut out = Vec::new();
+    for s in spans {
+        if s.style != Style::default() { out.push(s); continue }
+        let mut at = 0;
+        for (i, e) in word_ranges(&s.text, words) {
+            if i > at { out.push(Span { text: s.text[at..i].to_string(), style: Style::default() }); }
+            out.push(Span { text: s.text[i..e].to_string(), style: Style { code: true, ..Style::default() } }); at = e;
+        }
+        if at < s.text.len() { out.push(Span { text: s.text[at..].to_string(), style: Style::default() }); }
+    }
+    out
+}
+
 fn inline(node: &Value, style: &Style, out: &mut Vec<Span>, depth: usize) {
     if depth > MAX_DEPTH { return; }
     if let Some(t) = node["text"].as_str() { push(out, t, style); return; }
