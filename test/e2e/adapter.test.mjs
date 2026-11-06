@@ -1,7 +1,7 @@
 // bun adapter.test.mjs  (Boat; no display needed: the GPUI binary is a fake speaking the metrics contract)
 import assert from 'node:assert/strict';import {mkdirSync,chmodSync} from 'node:fs';import {run} from './adapters/desktop.mjs';
 chmodSync(new URL('./lib/fake-desktop.mjs',import.meta.url).pathname,0o755);
-const fake=new URL('./lib/fake-desktop.mjs',import.meta.url).pathname;const out='/tmp/e2e-adapter-test';mkdirSync(out+'/h/home',{recursive:true});
+const fake=new URL('./lib/fake-desktop.mjs',import.meta.url).pathname;const out=(process.env.TMPDIR||'/tmp')+'/e2e-adapter-test';mkdirSync(out+'/h/home',{recursive:true});
 const ctx=(env={})=>{Object.assign(process.env,{FAKE_SOFTWARE:'0',FAKE_SHIFT:'0',FAKE_NOPOPUP:'0',...env});return {gpuBin:fake,display:{display:':99',env:process.env},hub:{state:{url:'http://x',root:out+'/h'}},outDir:out,hz:60,record:false}};
 const J=(id,steps,measure)=>({id,item:id,measure,steps,needs:[]});
 // clean run: acks at 9.5 ms < 16.7 -> click pass; frames 60 fps -> pass; layout steady -> pass

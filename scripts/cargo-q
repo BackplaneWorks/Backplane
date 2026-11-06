@@ -5,6 +5,7 @@
 HERE=$(cd "$(dirname "$0")" && pwd); . "$HERE/lib-buildslot.sh"
 if [ -z "${BQ_HELD:-}" ]; then export BQ_HELD=1; waiting() { echo "cargo-q: waiting for a build slot" >&2; }; bq_run waiting "$0" "$@"; exit $?; fi
 bq_cc
+bp_notmp_target "${CARGO_TARGET_DIR:-}" || exit 1
 j=(); case " $* " in *" -j"*|*" --jobs"*) ;; *) j=(-j "$(bq_jobs)");; esac
 # The slot lock is fd 9 of THIS shell, which stays and waits: cargo and everything it starts (a test's stand-in `sleep`) run with fd 9 closed, so no orphan keeps a slot after the build ends.
 # `test` also gets its own TMPDIR (the tests leak temp dirs made with std::env::temp_dir()), removed when it ends; kept, bounded, when it failed (lib-buildslot.sh bpt_new).

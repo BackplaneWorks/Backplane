@@ -34,7 +34,7 @@ assert.deepEqual(parse('x pts_time:1.5 y\n n:1 pts_time:2.25'),[1.5,2.25]);
 assert.deepEqual(acks([1000,1040,2000],[990,1500,2100]),[10,500,NaN]);
 // real ffmpeg round trip when available: a moving test pattern must give changed frames, a static one none
 import {execFileSync} from 'node:child_process';import {changedFrames} from './video-frames.mjs';
-try{execFileSync('ffmpeg',['-y','-loglevel','error','-f','lavfi','-i','testsrc=duration=2:rate=10:size=160x120','/tmp/e2e-moving.mp4']);execFileSync('ffmpeg',['-y','-loglevel','error','-f','lavfi','-i','color=c=blue:duration=2:rate=10:size=160x120','/tmp/e2e-static.mp4']);
- const mv=changedFrames('/tmp/e2e-moving.mp4',0.00005),st=changedFrames('/tmp/e2e-static.mp4',0.00005);assert.ok(mv.length>=15,'moving frames: '+mv.length);assert.equal(st.length,0,'static frames: '+st.length);console.log('ffmpeg changed-frame check ok:',mv.length,'moving,',st.length,'static')}
+try{execFileSync('ffmpeg',['-y','-loglevel','error','-f','lavfi','-i','testsrc=duration=2:rate=10:size=160x120',(process.env.TMPDIR||'/tmp')+'/e2e-moving.mp4']);execFileSync('ffmpeg',['-y','-loglevel','error','-f','lavfi','-i','color=c=blue:duration=2:rate=10:size=160x120',(process.env.TMPDIR||'/tmp')+'/e2e-static.mp4']);
+ const mv=changedFrames((process.env.TMPDIR||'/tmp')+'/e2e-moving.mp4',0.00005),st=changedFrames((process.env.TMPDIR||'/tmp')+'/e2e-static.mp4',0.00005);assert.ok(mv.length>=15,'moving frames: '+mv.length);assert.equal(st.length,0,'static frames: '+st.length);console.log('ffmpeg changed-frame check ok:',mv.length,'moving,',st.length,'static')}
 catch(e){if(e.code==='ENOENT')console.log('no ffmpeg: video check skipped');else throw e}
 console.log('frames.test.mjs: all assertions passed');

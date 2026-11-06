@@ -15,7 +15,7 @@ case " $* " in *" --no-cut "*) [ -n "${BACKPLANE_DEV_STATUS:-}" ] || ST=$DEV/BUI
 if [ -z "${BQ_HELD:-}" ]; then . "$HERE/lib-buildslot.sh"; export BQ_HELD=1
   queued() { mkdir -p "$DEV"; printf '{"phase":"building","text":"Queued behind other builds","done":0,"total":0}\n' > "$ST"; }
   bq_run queued "$0" "$@"; rc=$?; rm -f "$ST"; exit $rc; fi
-. "$HERE/lib-buildslot.sh"
+. "$HERE/lib-buildslot.sh"; bp_notmp_target "${HOST_TARGET:-}" && bp_notmp_target "${GPUI_TARGET:-}" || exit 1   # lane temp and target dirs are on disk (lib-bptmp.sh)
 PROFILE=${PROFILE:-fast}  # cargo profile: fast (no LTO, incremental; Cargo.toml) by default, PROFILE=release for the fat-LTO build
 GATE=0; CUT=1; for a in "$@"; do case "$a" in --gate) GATE=1;; --no-cut) CUT=0;; esac; done
 SECS=$DEV/.build-secs$([ "$GATE" = 1 ] && echo -gate)
