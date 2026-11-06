@@ -137,5 +137,15 @@ log('F04',states.at(-1)==='interrupted',`restart.continue=off; after hub restart
  let logline='';try{logline=execFileSync('git',['log','-1','--format=%s'],{cwd:wt?.worktree||G}).toString().trim()}catch{}
  const rf=await c.rpc('history.refs',{thread:t.thread});
  log('F12',!!wt?.worktree&&w.ok&&st.ok&&cm.ok&&logline==='e2e commit',`worktree thread branch ${wt?.branch||'none'} at ${wt?.worktree||'none'}; files.op write ok=${w.ok} git.status ok=${st.ok} (${JSON.stringify(st.result?.status||'').slice(0,60)}) git.diff ok=${df.ok} git.act commit ok=${cm.ok} last commit "${logline}" history.refs ok=${rf.ok}; checkpoint revert, push and PR: not run (no remote, no GitHub)`)}
+
+// F23 a killed hub leaves no agent behind: SIGKILL the hub while a stand-in runs, then look for the stand-in (and its sleeping child)
+{const T=await mk('f23');await c.rpc('turn.start',{thread:T,text:'f23 long'});await until(()=>has(e=>e.$==='TurnChanged'&&e.thread===T&&e.state==='running'),5000);await sleep(800);
+ const starts=readFileSync(OUT+'/fake.log','utf8').split('\n').filter(l=>l.startsWith('START '));const agent=Number(starts.at(-1).split(' ')[1]);
+ const alive=p=>{try{process.kill(p,0);return true}catch{return false}};const before=alive(agent);
+ c.ws.close();process.kill(pid1,'SIGKILL');
+ const gone=await until(()=>!alive(agent),8000);
+ log('F23',before&&gone,`agent pid ${agent} alive before=${before}; after SIGKILL of hub pid ${pid1} it is gone=${gone}`);
+ if(!gone){try{process.kill(agent,'SIGKILL')}catch{}}
+ writeFileSync(OUT+'/rows.json',JSON.stringify(rows,null,1));process.exit(0)}
 writeFileSync(OUT+'/rows.json',JSON.stringify(rows,null,1));
 c.ws.close(); try{process.kill(pid1,'SIGTERM')}catch{} await sleep(500); process.exit(0);
