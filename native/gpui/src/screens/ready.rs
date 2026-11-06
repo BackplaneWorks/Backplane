@@ -25,6 +25,11 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, ready: &Value) -> Option<A
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    #[test] fn the_price_is_what_follows_buy_it() { assert_eq!(price("Buy it · from $5"), "from $5"); assert_eq!(price("Buy it"), ""); assert_eq!(price("Buy again"), ""); }
+    use super::price;
+    #[test]
+    fn the_price_is_what_follows_buy_it() {
+        assert_eq!(price("Buy it \u{b7} from $5"), "from $5");
+        assert_eq!(price("Buy it"), "");
+        assert_eq!(price("Buy again"), "");
+    }
 }
