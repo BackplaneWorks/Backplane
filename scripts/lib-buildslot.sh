@@ -12,7 +12,10 @@ bq_jobs() { local n g c j; n=$(bq_slots); g=$(( $(bq_mem_gb) / 2 )); c=$(( $(npr
 # bq_run CALLBACK CMD...: run CMD holding a slot, waiting for a free one (CALLBACK, if any, is run once when it has to wait). `flock -o` closes the lock's descriptor in CMD,
 # so nothing CMD leaves running in the background (a sleep, a server) can keep the slot after CMD ends; the flock process itself holds it until CMD exits.
 bq_run() { local cb=$1 d=${BUILD_LOCK_DIR:-$HOME/.cache/backplane-build.locks} i n rc waited=0; shift; mkdir -p "$d"
-  while :; do n=$(bq_slots); for ((i = 0; i < n; i++)); do flock -n -E 200 -o "$d/slot.$i" "$@"; rc=$?; [ "$rc" -ne 200 ] && return "$rc"; done
+  while :; do n=$(bq_slots)
+    # the main builder has a slot of its own besides the shared ones: lanes starting builds all day cannot starve it (BQ_MAIN=1, set by main-build.sh; one builder, so one slot)
+    if [ -n "${BQ_MAIN:-}" ]; then flock -n -E 200 -o "$d/slot.main" "$@"; rc=$?; [ "$rc" -ne 200 ] && return "$rc"; fi
+    for ((i = 0; i < n; i++)); do flock -n -E 200 -o "$d/slot.$i" "$@"; rc=$?; [ "$rc" -ne 200 ] && return "$rc"; done
     if [ "$waited" = 0 ]; then waited=1; [ -n "$cb" ] && "$cb"; fi; sleep 1; done; }
 # sccache shares compiled dependencies between worktrees (a new lane no longer compiles tokio, naga, zbus... from cold)
 bq_cc() { [ -z "${NO_SCCACHE:-}" ] && [ -z "${RUSTC_WRAPPER:-}" ] && command -v sccache > /dev/null 2>&1 || return 0
