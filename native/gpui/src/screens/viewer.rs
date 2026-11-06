@@ -60,7 +60,9 @@ pub fn shown(kind: &str, path: &str) -> Option<(String, Option<String>)> {
 }
 
 /// Whether the panel is open: a viewer page is on, or the thread has a diff.
-pub fn is_open(thread: &Value) -> bool { thread["diff"].is_object() || thread["viewer"]["open"].as_str().map_or(false, |o| !o.is_empty()) }
+pub fn is_open(thread: &Value) -> bool { open_with(thread, &thread["viewer"]) }
+/// The same, with the viewer state drawn (`shown_viewer`).
+fn open_with(thread: &Value, viewer: &Value) -> bool { thread["diff"].is_object() || viewer["open"].as_str().map_or(false, |o| !o.is_empty()) }
 
 fn btn(cx: &mut Context<Backplane>, light: bool, id: String, label: String, on: bool, cmd: Command) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
@@ -130,7 +132,8 @@ fn diff_page(cx: &mut Context<Backplane>, light: bool, diff: &Value) -> AnyEleme
 /// (script mode) When the page for a pressed tab `kind` first showed its whole picture: the open page is that kind, and each of its canvases painted the
 /// source the viewer asks for (a Split: its schematic, its board and the model's image), at or after the press. None while it has not.
 pub fn shown_at(app: &mut Backplane, kind: &str, cx: &mut Context<Backplane>) -> Option<(std::time::Instant, Value)> {
-    let viewer = app.data["thread"]["viewer"].clone();
+    let models = app.screens.solid.as_ref().map(|s| s.read(cx).keys()).unwrap_or_default();
+    let viewer = shown_viewer(&app.data["thread"]["viewer"], app.screens.rail_pending.as_deref(), &app.screens.seen_viewers, thread_of(&app.data), &app.screens.plot, &models).clone();
     if viewer["open"].as_str() != Some(kind) { return None }
     let t0 = app.screens.shown_wait.as_ref()?.1;
     let now = std::time::Instant::now();
@@ -219,7 +222,7 @@ fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, 
             .on_click(cx.listener(move |this, _, _, cx| { let pv = this.screens.pv(slot); pv.touched = false; pv.fit_wh = (0., 0.); cx.notify(); }));
         col = col.child(div().flex().items_center().child(crate::viewers::layers::strip_el(cx, light, &strip, &pv.layers_key)).child(fit));
     }
-    let mut area = div().relative().flex().flex_col().flex_1().min_h_0().child(super::plotview::canvas_el(cx, slot, pv.focus.clone(), light, frame, view, crate::viewers::layers::masks(viewer)));
+    let mut area = div().relative().flex().flex_col().flex_1().min_h_0().child(super::plotview::canvas_el(cx, slot, pv.focus.clone(), pv.geom.clone(), light, frame, view, crate::viewers::layers::masks(viewer)));
     if layers { if let Some(p) = crate::viewers::layers::panel_el(cx, light, &strip, pv.layers_open, pv.layers_cap.unwrap_or(280.), &pv.layers_scroll) { area = area.child(p); } }
     // the card of the piece last tapped (Insp.card): what it is, then key = value rows; a tap on nothing, or Close, puts it away
     if let Some(card) = pv.card.clone() {
@@ -232,9 +235,25 @@ fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, 
     col.child(area).into_any_element()
 }
 
-/// Board or schematic: the plot the hub sent for this file.
+/// Board or schematic: the plot the hub sent for this file (the one held for the asked source, so a page shown again draws what this client keeps).
 fn plot_page(cx: &mut Context<Backplane>, light: bool, open: &str, viewer: &Value, plot: &super::plot::Store, pv: &mut super::plotview::PlotView) -> AnyElement {
-    plot_pane(cx, light, 0, open, viewer, plot.frame.as_ref(), pv, true, &plot.sheets)
+    let want = string(viewer, "key");
+    let frame = plot.frame_for(&want).filter(|_| pv.compare.is_none()).or(plot.frame.as_ref());
+    plot_pane(cx, light, 0, open, viewer, frame, pv, true, &plot.sheets)
+}
+
+/// The thread the picture shows (its raw id), the key `seen_viewers` keeps its pages under.
+pub fn thread_of(data: &Value) -> &str { super::attach::raw_id(data["thread"]["id"].as_str().unwrap_or("")) }
+/// The pages a pressed tab may show from what this client holds, before the hub answers.
+pub fn held_kind(kind: &str) -> bool { matches!(kind, "board" | "schematic" | "split" | "3d") }
+/// The viewer state to draw now: the hub's, or, while a pressed tab waits for the hub's answer, the state last seen for that tab's page in
+/// this thread when the plot it shows is still held (so the press draws at once). The hub's answer replaces it either way.
+pub fn shown_viewer<'a>(viewer: &'a Value, pending: Option<&str>, seen: &'a std::collections::HashMap<String, Value>, thread: &str, plot: &super::plot::Store, models: &[String]) -> &'a Value {
+    let Some(p) = pending.filter(|p| held_kind(p) && viewer["open"].as_str() != Some(*p)) else { return viewer };
+    let Some(v) = seen.get(&format!("{thread}\u{1}{p}")) else { return viewer };
+    let held = |k: &str| !k.is_empty() && plot.frame_for(k).is_some_and(|f| f.none.is_empty());
+    let ok = if p == "3d" { let k = string(v, "key"); !k.is_empty() && models.contains(&k) } else if p == "split" { v["panes"].as_array().is_some_and(|a| a.len() >= 3 && held(&string(&a[0], "key")) && held(&string(&a[1], "key"))) } else { held(&string(v, "key")) };
+    if ok { v } else { viewer }
 }
 
 /// Split: the schematic across the top, the board and its 3D model beneath it, each its own page of `viewer.panes` (key, camera), all watched at once.
@@ -279,10 +298,11 @@ fn review_page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, review: &Val
 }
 
 /// The panel (None while nothing is open). 520 px wide, between the thread and the rail.
-pub fn view(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &super::filesui::FilesUi, images: &super::images::Images, target: Option<&super::attach::Target>, thread: &Value, plot: &super::plot::Store, pv: &mut super::plotview::PlotView, split_pv: &mut [super::plotview::PlotView; 2], solid: Option<&Entity<crate::viewers::solid::SolidPage>>, browser: Option<&Entity<crate::viewers::browser::BrowserPage>>) -> Option<AnyElement> {
-    if !is_open(thread) { return None; }
+pub fn view(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &super::filesui::FilesUi, images: &super::images::Images, target: Option<&super::attach::Target>, thread: &Value, plot: &super::plot::Store, pv: &mut super::plotview::PlotView, split_pv: &mut [super::plotview::PlotView; 2], solid: Option<&Entity<crate::viewers::solid::SolidPage>>, browser: Option<&Entity<crate::viewers::browser::BrowserPage>>, held: (Option<&str>, &std::collections::HashMap<String, Value>, &str)) -> Option<AnyElement> {
+    let models = solid.map(|s| s.read(cx).keys()).unwrap_or_default();
+    let viewer = shown_viewer(&thread["viewer"], held.0, held.1, held.2, plot, &models);
+    if !open_with(thread, viewer) { return None; }
     let c = |n: &str| theme::color(light, n);
-    let viewer = &thread["viewer"];
     let open = viewer["open"].as_str().unwrap_or("");
     let diff_on = thread["diff"].is_object();
     let mut bar = div().h(px(34.)).flex_shrink_0().flex().items_center().gap_1().px_2().border_b_1().border_color(c("line"));
@@ -294,10 +314,15 @@ pub fn view(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
         else if matches!(open, "image" | "pdf" | "text") && viewer["file"].is_object() { super::filesui::preview_page(cx, reg, light, open, viewer, files_ui, images, target) }
         else if open == "review" && viewer["review"].is_object() { review_page(cx, reg, light, &viewer["review"]) }
         else if matches!(open, "board" | "schematic") { plot_page(cx, light, open, viewer, plot, pv) }
-        else if open == "split" { let have = solid.map(|s| s.read(cx).key().to_string()).unwrap_or_default(); split_page(cx, light, viewer, plot, split_pv, solid, &have) }
+        else if open == "split" {
+            let want3 = viewer["panes"].get(2).map(|p| string(p, "key")).unwrap_or_default();
+            if let Some(s) = solid { s.update(cx, |p, cx| if p.show_held(&want3) { cx.notify() }); }
+            let have = solid.map(|s| s.read(cx).key().to_string()).unwrap_or_default(); split_page(cx, light, viewer, plot, split_pv, solid, &have) }
         else if matches!(open, "3d" | "mech") {
             let key_empty = string(viewer, "key").is_empty();
             let want = string(viewer, "key");
+            // a model this page kept for that source shows at once (the hub's frame, when it comes, is the same model or replaces it)
+            if let Some(s) = solid { s.update(cx, |p, cx| if p.show_held(&want) { cx.notify() }); }
             // what the page HOLDS, not what was queued for it: a big model's decode, a frame that fails or is replaced in the worker's slot
             let have = solid.map(|s| s.read(cx).key().to_string()).unwrap_or_default();
             let model: AnyElement = if open == "mech" && key_empty { div().into_any_element() } else { match solid { Some(s) if solid_ready(&want, &have) => div().flex_1().min_h_0().child(s.clone()).into_any_element(), _ => div().p_3().text_color(c("dim")).child("Loading the model…").into_any_element() } };
@@ -371,6 +396,25 @@ mod tests {
     use super::*;
     use core::prelude::v1::test;
     fn j(s: &str) -> Value { serde_json::from_str(s).unwrap() }
+    #[test] fn a_pressed_tab_draws_the_page_last_seen_for_this_thread_only_while_its_plot_is_held() {
+        // a board frame held for key 0|/p|
+        let mut plot = super::super::plot::Store::default();
+        let mut f = vec![0xA3u8, 1, 0x64]; f.extend(b"plot"); f.extend([0x18, 31, 0x65]); f.extend(b"0|/p|"); f.extend([0x62]); f.extend(b"cs"); f.push(0x80);
+        plot.receive(&f).unwrap(); assert!(plot.frame_for("0|/p|").is_some());
+        let now = j(r#"{"open":"schematic","key":"1|/p|"}"#);
+        let board = j(r#"{"open":"board","key":"0|/p|"}"#);
+        let mut seen = std::collections::HashMap::new(); seen.insert("t1\u{1}board".to_string(), board.clone());
+        assert_eq!(shown_viewer(&now, Some("board"), &seen, "t1", &plot, &[]), &board, "the press draws the held board at once");
+        assert_eq!(shown_viewer(&now, Some("board"), &seen, "t2", &plot, &[]), &now, "another thread's page is not this one's");
+        assert_eq!(shown_viewer(&now, None, &seen, "t1", &plot, &[]), &now, "no press: the hub's state");
+        assert_eq!(shown_viewer(&board, Some("board"), &seen, "t1", &plot, &[]), &board, "the hub already shows it");
+        seen.insert("t1\u{1}board".to_string(), j(r#"{"open":"board","key":"0|/q|"}"#));
+        assert_eq!(shown_viewer(&now, Some("board"), &seen, "t1", &plot, &[]), &now, "a plot not held waits for the hub");
+        seen.insert("t1\u{1}3d".to_string(), j(r#"{"open":"3d","key":"2|/p|"}"#));
+        assert_eq!(shown_viewer(&now, Some("3d"), &seen, "t1", &plot, &["2|/p|".to_string()])["open"], "3d", "a model the 3D page keeps");
+        assert_eq!(shown_viewer(&now, Some("3d"), &seen, "t1", &plot, &[]), &now);
+        assert_eq!(thread_of(&j(r#"{"thread":{"id":"hub|t1"}}"#)), "t1");
+    }
     #[test] fn tabs_files_and_diff_parse_from_the_hubs_rows() {
         let v = j(r#"{"open":"files","choices":[{"label":"Board","value":"board","on":false},{"label":"Files","value":"files","on":true}],
             "files":{"trail":[{"label":"project","action":"fm-cd","value":""}],"rows":[{"label":"src","action":"fm-cd","value":"src","detail":"","kind":"folder","icon":"folder"},{"label":"a.rs","action":"fm-open","value":"a.rs","detail":"1 KB","kind":"text","icon":"file"}],"ready":true}}"#);

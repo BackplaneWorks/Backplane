@@ -80,6 +80,7 @@ impl Backplane {
                 self.apply_ms=t_apply.elapsed().as_secs_f64()*1000.0;self.timing=Some(timing);self.applied_at=Some(Instant::now());self.adopt_new(cx);
             },
             Event::Plot(b)=>self.plot_received(b,cx),
+            Event::PlotReady(p,n,ms)=>self.plot_ready(p,n,ms),
             Event::Answer(id,reply)=>screens::improvements::answered(self,id,reply,cx),
             Event::Data(_,v)=>screens::accounts::got(self,v,cx),
             Event::Rpc(tag,ok,why)=>if tag.starts_with("acct"){screens::accounts::done(self,tag,ok,&why,cx)}else if tag.starts_with("files") {screens::filesui::rpc_done(self,tag,ok,&why,cx)} else {screens::settings::rpc_done(self,tag,ok,&why,cx)},

@@ -16,7 +16,9 @@ pub fn samples(w: usize, h: usize, draft: bool) -> usize { if draft { 1 } else i
 pub(super) const FOV: f32 = 35.0 * std::f32::consts::PI / 180.0;
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Mesh { pub tris: Vec<[f32; 9]>, pub normals: Vec<[f32; 9]>, pub colors: Vec<u32>, pub center: [f32; 3], pub radius: f32 }
+pub struct Mesh { pub tris: Vec<[f32; 9]>, pub normals: Vec<[f32; 9]>, pub colors: Vec<u32>, pub center: [f32; 3], pub radius: f32,
+    /// A hash of the frame's mesh bytes: a model the hub sends again unchanged is not drawn again.
+    pub sig: u64 }
 
 struct Varints<'a> { b: &'a [u8], at: usize, valid: bool }
 impl<'a> Varints<'a> {
@@ -58,7 +60,8 @@ pub fn decode_mesh(n: usize, bytes: &[u8]) -> Result<Mesh, String> {
     let center = [(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0, (lo[2] + hi[2]) / 2.0];
     let radius = (0..3).map(|a| (hi[a] - lo[a]) * (hi[a] - lo[a])).sum::<f32>().sqrt() / 2.0;
     let normals = raster::smooth_normals(&tris, &keys);
-    Ok(Mesh { tris, normals, colors, center, radius: radius.max(1e-3) })
+    let sig = { use std::hash::{Hash, Hasher}; let mut h = std::collections::hash_map::DefaultHasher::new(); n.hash(&mut h); bytes.hash(&mut h); h.finish() };
+    Ok(Mesh { tris, normals, colors, center, radius: radius.max(1e-3), sig })
 }
 
 // ---- the frame: a minimal CBOR map reader (text keys, or the wire dictionary's integer keys; byte strings) ------
@@ -251,7 +254,14 @@ impl Drop for Worker { fn drop(&mut self) { let (m, cv) = &*self.slot; m.lock().
 pub fn aspect_changed(was: f32, now: f32) -> bool { was <= 0.0 || (now / was - 1.0).abs() > 0.03 }
 pub fn note_keeps_model(page_key: &str, note_key: &str) -> bool { page_key == note_key }
 
+/// A model the page held for another source, kept as it was (camera and picture), so going back to that source shows it at once.
+struct Held { key: String, mesh: Arc<Mesh>, cam: Option<Camera>, touched: bool, fit_aspect: f32, image: Option<Arc<RenderImage>> }
+/// At most this many models are kept aside, and together at most this many triangles (about 72 bytes each with their normals).
+const HELD: usize = 3;
+const HELD_TRIANGLES: usize = 1_000_000;
+
 pub struct SolidPage {
+    held: Vec<Held>,
     mesh: Option<Arc<Mesh>>, key: String, cam: Option<Camera>, touched: bool, fit_aspect: f32, image: Option<Arc<RenderImage>>, retired: Vec<Arc<RenderImage>>, drag: Option<(Drag, Point<Pixels>)>,
     /// The source of the image on show and when it arrived (the e2e `view_shown` metric).
     pub shown: Option<(String, std::time::Instant)>,
@@ -265,19 +275,51 @@ impl SolidPage {
                 if weak.update(cx, |this, cx| this.apply(msg, cx)).is_err() { break }
             }
         }).detach();
-        SolidPage { mesh: None, key: String::new(), cam: None, touched: false, fit_aspect: 0.0, image: None, retired: Vec::new(), drag: None, note: "No 3D model yet".into(), shown: None, worker: Worker::spawn(tx),
+        SolidPage { held: Vec::new(), mesh: None, key: String::new(), cam: None, touched: false, fit_aspect: 0.0, image: None, retired: Vec::new(), drag: None, note: "No 3D model yet".into(), shown: None, worker: Worker::spawn(tx),
             size: Arc::new(Mutex::new([0.0, 0.0, 1.0, 0.0, 0.0])), asked: (0, 0), want_gen: 0, stats: Stats::default() }
     }
     /// The key of the model the page holds now (set when a decoded frame is applied, not when one is queued): "" before any.
     pub fn key(&self) -> &str { &self.key }
+    /// Every source this page holds a model for: the one on show and the ones kept.
+    pub fn keys(&self) -> Vec<String> { self.mesh.iter().map(|_| self.key.clone()).chain(self.held.iter().map(|h| h.key.clone())).collect() }
     /// A plot-lane binary frame (keys 2|, 3|, 4| are solids).
     /// None: taken (a solid frame, decoded on the worker; the bytes are moved, not copied). Some(bytes): not a solid frame, handed back unread.
     pub fn accept(&mut self, bytes: Vec<u8>) -> Option<Vec<u8>> {
         if peek_key(&bytes).map_or(false, |k| is_solid_key(&k)) { self.worker.submit_frame(bytes); None } else { Some(bytes) }
     }
+    /// Put the model on show aside (the newest few are kept with their camera and picture); the page then holds none.
+    fn stash(&mut self) {
+        self.want_gen = u64::MAX; self.shown = None; // a render still in flight was for the model put aside
+        match self.mesh.take() {
+            Some(mesh) => {
+                self.held.push(Held { key: self.key.clone(), mesh, cam: self.cam.take(), touched: self.touched, fit_aspect: self.fit_aspect, image: self.image.take() });
+                while self.held.len() > HELD || (self.held.len() > 1 && self.held.iter().map(|h| h.mesh.tris.len()).sum::<usize>() > HELD_TRIANGLES) {
+                    if let Some(i) = self.held.remove(0).image { self.retired.push(i); }
+                }
+            }
+            None => { self.cam = None; if let Some(i) = self.image.take() { self.retired.push(i); } }
+        }
+    }
+    /// Show the model kept for `key` again, as it was left. False when none is kept.
+    pub fn show_held(&mut self, key: &str) -> bool {
+        if key.is_empty() || key == self.key { return false }
+        let Some(i) = self.held.iter().position(|h| h.key == key) else { return false };
+        let h = self.held.remove(i);
+        self.stash();
+        self.key = h.key; self.mesh = Some(h.mesh); self.cam = h.cam; self.touched = h.touched; self.fit_aspect = h.fit_aspect; self.note.clear();
+        match h.image { Some(img) => { self.image = Some(img); self.shown = Some((self.key.clone(), std::time::Instant::now())); } None => self.ask_render(false) }
+        true
+    }
     fn apply(&mut self, msg: Msg, cx: &mut Context<Self>) {
         match msg {
             Msg::Mesh(SolidFrame::Model(key, mesh)) => {
+                // the hub sent the model on show again unchanged: nothing to draw again
+                if key == self.key && self.mesh.as_ref().is_some_and(|m| m.sig == mesh.sig) { self.note.clear(); cx.notify(); return }
+                if key != self.key {
+                    if self.held.iter().any(|h| h.key == key && h.mesh.sig == mesh.sig) { self.show_held(&key); cx.notify(); return }
+                    for h in std::mem::take(&mut self.held) { if h.key == key { if let Some(i) = h.image { self.retired.push(i); } } else { self.held.push(h); } }
+                    self.stash();
+                }
                 let fresh = key != self.key || self.cam.is_none();
                 self.key = key; let mesh = Arc::new(mesh);
                 if fresh { let [pw, ph, _, _, _] = *self.size.lock().unwrap(); self.fit_aspect = pw / ph.max(1.0); self.touched = false; self.cam = Some(Camera::fitted_for(&mesh, self.fit_aspect)); }
@@ -285,9 +327,8 @@ impl SolidPage {
             }
             Msg::Mesh(SolidFrame::Note(key, why)) => { // why there is no model; the same source's previous model stays shown
                 if !note_keeps_model(&self.key, &key) {
-                    // another source's model could not be made: the old source's model must not show under this key
-                    self.mesh = None; self.cam = None; self.shown = None; if let Some(i) = self.image.take() { self.retired.push(i); }
-                    self.want_gen = u64::MAX; // a render of the old model still in flight is stale
+                    // another source's model could not be made: the old source's model must not show under this key (it is kept for its own)
+                    self.stash();
                 }
                 self.key = key; self.note = if self.mesh.is_some() { format!("{why} — previous saved revision shown") } else { why }; cx.notify();
             }
@@ -337,7 +378,7 @@ impl SolidPage {
     /// For the demo and tests: an orbit drag step as the mouse handler does it.
     pub fn drag_by(&mut self, dx: f32, dy: f32) { if let Some(c) = &mut self.cam { c.orbit(dx, dy); } self.ask_render(true); }
     /// Give the images back to the atlas (call before dropping the page, with the window).
-    pub fn release(&mut self, window: &mut Window) { for i in self.retired.drain(..).chain(self.image.take()) { let _ = window.drop_image(i); } }
+    pub fn release(&mut self, window: &mut Window) { let held: Vec<_> = self.held.drain(..).filter_map(|h| h.image).collect(); for i in self.retired.drain(..).chain(self.image.take()).chain(held) { let _ = window.drop_image(i); } }
 }
 impl Render for SolidPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
