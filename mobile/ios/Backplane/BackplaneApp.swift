@@ -13,7 +13,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     }
 }
 
+#if !DATA_APP
 @main
+#endif
 struct BackplaneApp: App {
     @UIApplicationDelegateAdaptor private var delegate: AppDelegate
     @Environment(\.scenePhase) private var phase
