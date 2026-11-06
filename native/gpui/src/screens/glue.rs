@@ -58,8 +58,9 @@ impl Backplane {
     }
     /// A picture arrived: the first selection restores its saved draft; open asks get their boxes.
     pub(crate) fn picture_arrived(&mut self, selected: &str, cx: &mut Context<Self>) {
+        // every picture names the thread on screen, so an upload that ends later is reported only if it is still the one shown (a bot's chat is opened by its row, which never goes through thread_switch)
+        if !selected.is_empty() { self.screens.attacher.show(selected); }
         if !selected.is_empty() && self.selected.is_empty() {
-            self.screens.attacher.show(selected);
             if let Some(d) = self.drafts.get(selected).cloned() { if self.input.read(cx).content.is_empty() { self.input.update(cx, |i, cx| i.set(d, cx)); } }
         }
         self.place_restore(selected);

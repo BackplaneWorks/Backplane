@@ -197,6 +197,14 @@ mod tests {
         assert_eq!(*a.current.lock().unwrap(), "t1");
         let b = Attacher::new(None); b.show("t1"); assert_eq!(*b.current.lock().unwrap(), *a.current.lock().unwrap());
     }
+    /// Opening a bot's chat after a thread never ran `thread_switch`: `current` kept the old thread and the upload's end was dropped (`thread_current:false`),
+    /// so a pasted picture was saved but never attached. Every picture now names the thread on screen (glue.rs's `picture_arrived`); `show` must follow it each time.
+    #[test] fn the_current_thread_follows_every_show() {
+        let a = Attacher::new(None); a.show("t-kit"); a.show("h:1|t-miso");
+        assert_eq!(*a.current.lock().unwrap(), "t-miso");
+        let done = |thread: &str| *a.current.lock().unwrap() == thread; // upload_blocking's test of whether its thread is still the one shown
+        assert!(done("t-miso") && !done("t-kit"));
+    }
     #[test] fn the_request_head_is_a_post_with_length_and_an_encoded_name() {
         let t = Target { addr: "127.0.0.1:3799".into(), token: "tok".into() };
         let h = head(&t, "t1", "0a0b0c0d", "my pic (1).png", 42);
