@@ -340,7 +340,8 @@ pub fn window_line(w: &Value, now: u64) -> Option<String> {
 fn block(name: String, bound: bool, al: &Value, missing: &str, now: u64) -> LimitBlock {
     let lines: Vec<String> = al["windows"].as_array().into_iter().flatten().filter_map(|w| window_line(w, now)).collect();
     let at = al["at"].as_u64().unwrap_or(0);
-    let note = if lines.is_empty() { missing.to_string() } else if at > 0 && now.saturating_sub(at) > 900 { format!("last read {}m ago", now.saturating_sub(at) / 60) } else { String::new() };
+    let reason = al["reason"].as_str().unwrap_or("");
+    let note = if lines.is_empty() { if reason.is_empty() { missing.to_string() } else { reason.to_string() } } else if at > 0 && now.saturating_sub(at) > 900 { format!("last read {}m ago", now.saturating_sub(at) / 60) } else { String::new() };
     LimitBlock { name, bound, lines, note }
 }
 /// Every Claude account's limits: the CLI's default login, then each saved account; the one the thread uses is marked.
@@ -430,6 +431,8 @@ mod tests {
         assert!(b[2].lines.is_empty() && b[2].note.contains("Not signed in"));
         s["default_allowance"] = json!({"state":"unavailable","windows":[]}); assert!(limit_blocks(&s, 10_000)[0].note.contains("not signed in"));
         assert!(limit_blocks(&Value::Null, 1)[0].note.contains("Not read yet"));
+        s["profiles"][1]["allowance"] = json!({"state":"unavailable","windows":[],"reason":"The Claude CLI did not answer within 30 seconds."}); s["profiles"][1]["state"] = json!("connected");
+        assert_eq!(limit_blocks(&s, 10_000)[2].note, "The Claude CLI did not answer within 30 seconds.");
         assert_eq!(resets_in(5, 10), "now"); assert_eq!(resets_in(10 + 720, 10), "in 12m");
     }
 }
