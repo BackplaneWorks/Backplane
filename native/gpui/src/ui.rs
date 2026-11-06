@@ -577,6 +577,8 @@ impl Render for Backplane {
             .children(crate::screens::padview::view(cx, window, light, &self.local, &mut self.screens.pad, &mut ctl))
             // the right-click menu of a sidebar row, over everything
             .children(self.screens.ctx.clone().map(|m| crate::screens::ctxmenu::render(cx, light, &m)))
+            // (a record open) painted last: the window's CPU for this frame, from the start of this render to the end of the paint
+            .when(self.recording.is_some(), |d| { let this = cx.entity(); d.child(canvas(|_, _, _| (), move |_, _, _, cx| { let ms = t_render.elapsed().as_secs_f32() * 1000.0; this.update(cx, |app, _| { if app.screens.frame_cpu.len() < 8192 { app.screens.frame_cpu.push(ms); } }); }).absolute().size_0()) })
             .into_any_element();
         self.controls = ctl;
         self.render_us = t_render.elapsed().as_micros() as u64;

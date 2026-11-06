@@ -30,6 +30,8 @@ pub struct PlotView {
     /// Pieces a cross-probe lights (chunk index, piece info index), and the canvas's focus for the keys.
     pub lit: Vec<(usize, usize)>, pub focus: Option<FocusHandle>,
     pub down: Option<(f32, f32)>, pub picked: Option<super::plot::Pick>, pub card: Option<super::plot::Card>,
+    /// (script mode) the source this canvas painted first since the last tab press and when, for the `view_shown` metric.
+    pub painted: Option<(String, std::time::Instant)>,
 }
 
 fn color(c: &Chunk, factor: f32) -> Hsla { let mut r = rgb(c.color); r.a = c.alpha * factor; r.into() }
@@ -142,7 +144,7 @@ pub fn canvas_el(cx: &mut Context<Backplane>, slot: usize, focus: Option<FocusHa
     // the hub's masks decide which chunks are drawn, dimmed, and which one is painted last
     let order = crate::viewers::layers::plan(&chunks.iter().map(|c| c.layer).collect::<Vec<_>>(), &masks);
     let this = cx.entity();
-    let (key, off) = (frame.key.clone(), masks.off);
+    let (key, off) = (frame.key.clone(), masks.off); let painted_key = key.clone();
     let el = canvas(|b, _, _| b, move |_, b, window, cx| {
         let (w, h) = (f32::from(b.size.width), f32::from(b.size.height));
         this.update(cx, |app, _| { app.screens.pv(slot).bounds = Some(b); });
@@ -157,6 +159,7 @@ pub fn canvas_el(cx: &mut Context<Backplane>, slot: usize, focus: Option<FocusHa
         });
         if let Some(t0) = t0 {
             let ms = t0.elapsed().as_secs_f32() * 1000.0;
+            this.update(cx, |app, _| { let pv = app.screens.pv(slot); if pv.painted.as_ref().is_none_or(|(k, _)| *k != painted_key) { pv.painted = Some((painted_key.clone(), std::time::Instant::now())); } });
             this.update(cx, |app, _| { let pv = &mut app.screens.pv(slot); if pv.paint_ms.len() >= 4096 { pv.paint_ms.remove(0); } pv.paint_ms.push(ms); if pv.split.len() >= 4096 { pv.split.remove(0); } pv.split.push(sp); });
         }
         // click to the first painted plot: what the person feels (the metric the gate asks for)

@@ -127,6 +127,40 @@ fn diff_page(cx: &mut Context<Backplane>, light: bool, diff: &Value) -> AnyEleme
     col.into_any_element()
 }
 
+/// (script mode) When the page for a pressed tab `kind` first showed its whole picture: the open page is that kind, and each of its canvases painted the
+/// source the viewer asks for (a Split: its schematic, its board and the model's image), at or after the press. None while it has not.
+pub fn shown_at(app: &mut Backplane, kind: &str, cx: &mut Context<Backplane>) -> Option<(std::time::Instant, Value)> {
+    let viewer = app.data["thread"]["viewer"].clone();
+    if viewer["open"].as_str() != Some(kind) { return None }
+    let t0 = app.screens.shown_wait.as_ref()?.1;
+    let now = std::time::Instant::now();
+    let plot = |app: &mut Backplane, slot: usize, want: &str| -> Option<std::time::Instant> {
+        let pv = app.screens.pv(slot);
+        match &pv.painted { Some((k, at)) if !want.is_empty() && k == want && *at >= t0 => Some(*at), _ => None }
+    };
+    let solid = |app: &Backplane, want: &str, cx: &Context<Backplane>| -> Option<std::time::Instant> {
+        let s = app.screens.solid.as_ref()?.read(cx);
+        let (k, at) = s.shown.clone()?;
+        (!want.is_empty() && k == want).then(|| if at >= t0 { at } else { now })
+    };
+    match kind {
+        "board" | "schematic" => { let want = string(&viewer, "key"); let at = plot(app, 0, &want)?; let n = app.screens.plot.frame_for(&want).map_or(0, |f| f.chunks.len()); Some((at, serde_json::json!({"chunks": n}))) }
+        "3d" | "mech" => { let at = solid(app, &string(&viewer, "key"), cx)?; Some((at, serde_json::json!({}))) }
+        "split" => {
+            let panes = viewer["panes"].as_array().cloned().unwrap_or_default();
+            if panes.len() < 3 { return None }
+            // the model pane counts when the hub has one for it (a board too big for the hub's 3D is a note, and the pane says so)
+            let a = plot(app, 1, &string(&panes[0], "key"))?; let b = plot(app, 2, &string(&panes[1], "key"))?;
+            let want3 = string(&panes[2], "key"); let c = solid(app, &want3, cx);
+            let noted = app.screens.solid.as_ref().map_or(false, |s| { let s = s.read(cx); s.key() == want3 && s.shown.is_none() && !s.note.is_empty() });
+            if c.is_none() && !noted { return None }
+            let ms = |t: std::time::Instant| t.saturating_duration_since(t0).as_secs_f64() * 1e3;
+            Some((c.map_or(a.max(b), |c| a.max(b).max(c)), serde_json::json!({"schematic_ms": ms(a), "board_ms": ms(b), "model_ms": c.map(ms)})))
+        }
+        _ => None,
+    }
+}
+
 /// One plot canvas: the frame it is given (or what the hub says instead) and, when `layers` is on, the hub's layer list beside it.
 /// The viewer's boards (`viewer.boards`: label, path from the project's folder, on show).
 pub fn boards(viewer: &Value) -> Vec<(String, String, bool)> {
