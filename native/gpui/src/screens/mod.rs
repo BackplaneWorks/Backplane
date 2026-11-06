@@ -3,6 +3,7 @@
 pub mod asks;
 pub mod attach;
 pub mod devbar;
+pub mod ctxmenu;
 pub mod bar;
 pub mod blink;
 pub mod bots;
@@ -36,8 +37,11 @@ pub struct Screens {
     pub ask_inputs: HashMap<String, Entity<composer::Composer>>,
     pub attacher: attach::Attacher,
     /// the dev build strip (devbar.rs), none when no build is being made
-    pub devbar: Option<devbar::Bar>,
+    pub devbar: Option<devbar::Bar>, /// when Restart now was first clicked (the second click confirms)
+    pub devbar_confirm: Option<std::time::Instant>,
     /// The suggestion popup's highlighted row, and the rows it was for (a new set starts at the first).
+    /// the right-click menu on a sidebar row, when open (ctxmenu.rs)
+    pub ctx: Option<ctxmenu::Menu>,
     pub popup_ix: usize, pub popup_key: String,
     pub drafts: drafts::Writer,
     /// The place a thread was left at, the row on top and the px scrolled into it, so a thread left scrolled up keeps it. One left at its end has none.
@@ -81,6 +85,6 @@ pub struct Screens {
 impl Screens {
     pub fn new<T: 'static>(_cx: &mut Context<T>, target: Option<attach::Target>, drafts_path: std::path::PathBuf, saved: HashMap<String, String>) -> Self {
         let imp = improvements::Imp::new(&drafts_path, target.clone());
-        Self { ask_inputs: HashMap::new(), attacher: attach::Attacher::new(target), drafts: drafts::Writer::start(drafts_path, saved), offsets: HashMap::new(), seeking: None, paging: None, reg: Default::default(), menu_open: false, projects: Default::default(), solid: None, browser: None, rail_pending: None, rail_at: None, focus_field: None, bots_open: String::new(), plot_click: None, plot: Default::default(), plotview: Default::default(), picker_open: false, fields: HashMap::new(), settings_focus: _cx.focus_handle(), focus_settings: false, settings_was_open: false, settings_ui: Default::default(), parsed: Default::default(), images: Default::default(), img_poll: false, await_draft: None, pending_draft: None, draft_timer: false, imp, devbar: None, popup_ix: 0, popup_key: String::new() }
+        Self { ask_inputs: HashMap::new(), attacher: attach::Attacher::new(target), drafts: drafts::Writer::start(drafts_path, saved), offsets: HashMap::new(), seeking: None, paging: None, reg: Default::default(), menu_open: false, projects: Default::default(), solid: None, browser: None, rail_pending: None, rail_at: None, focus_field: None, bots_open: String::new(), plot_click: None, plot: Default::default(), plotview: Default::default(), picker_open: false, fields: HashMap::new(), settings_focus: _cx.focus_handle(), focus_settings: false, settings_was_open: false, settings_ui: Default::default(), parsed: Default::default(), images: Default::default(), img_poll: false, await_draft: None, pending_draft: None, draft_timer: false, imp, devbar: None, devbar_confirm: None, ctx: None, popup_ix: 0, popup_key: String::new() }
     }
 }

@@ -115,6 +115,15 @@ pub fn act(req: &Req) -> Option<ActOut> {
                 a.unselect = id == r.sel;
             } else { a.set("@del", armed_with) } // the menu stays open while an armed Delete waits for its second press (Menu.keep)
         }
+        // the project menu's Remove (the client asks twice) and a thread's New subthread (`<parent>|<project>`: the new thread is selected as New thread's is)
+        "proj-remove" => { if v.is_empty() { return None } a.rpc("project.remove", json!({"project": v})); a.set("@menu", ""); a.set("@del", ""); }
+        "thread-child" => {
+            let (parent, project) = v.split_once('|')?;
+            let rid = a.rid.to_string();
+            let at = format!("{}|{}", r.session["info"]["local.machine"].as_str().unwrap_or(""), r.session["info"]["local.generation"].as_str().unwrap_or(""));
+            a.set("@del", ""); a.set("@menu", ""); a.set("@want.viewer", ""); a.set("@want.new", &rid); a.set("@want.new.at", &at);
+            a.rpc("thread.create", json!({"project": project, "title": "New thread", "parent": parent}));
+        }
         "delete-no" => { a.set("@del", ""); a.set("@menu", "") }
         "rename-no" => { a.set("@del", ""); a.ren_clear() }
         // Made.want + Ui.new_thread.project: the next request makes a thread; its reply selects it (the session module's)

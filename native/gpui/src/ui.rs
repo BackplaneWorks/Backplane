@@ -255,9 +255,10 @@ impl Render for Backplane {
         for project in self.data["projects"].as_array().into_iter().flatten() {
             let pid = string(project, "id"); let pid = pid.rsplit_once('|').map_or(pid.as_str(), |(_, r)| r).to_string();
             ctl.push(CtlEntry { id: format!("project:{pid}"), label: string(project, "title"), ctl: Ctl::Home(pid.clone()) });
-            let (pid_new, pid_new2) = (pid.clone(), pid.clone());
+            let (pid_new, pid_new2, pid_thr) = (pid.clone(), pid.clone(), pid.clone());
             rows.push(with_rect(div().id(SharedString::from(format!("proj-{pid}"))), || format!("project:{pid}")).flex().items_center().gap_2().px_3().pt_3().pb_1().text_size(px(11.)).text_color(if self.project_page.as_deref() == Some(pid_new.as_str()) { c("text") } else { c("dim") }).cursor_pointer().hover(|s| s.text_color(c("text")))
                 .on_click(cx.listener(move |this, _, _, cx| { this.open_project(pid.clone(), cx); }))
+                .on_mouse_down(MouseButton::Right, { let pidm = pid_new.clone(); cx.listener(move |this, e: &MouseDownEvent, _, cx| { let items = crate::screens::ctxmenu::project_items(&pidm); this.ctx_open(e.position, items, cx); }) })
                 .child(ic(light, "chevron-down", 14., "dim")).child(ic(light, "folder", 14., "ok")).child(div().flex_1().child(string(project, "title").to_uppercase())).child(with_rect(div().id(SharedString::from(format!("new-{pid_new}"))), || "ui:New thread".to_string()).cursor_pointer().on_click(cx.listener(move |this, _, _, cx| { cx.stop_propagation(); this.arm_new(); let _ = this.tx.try_send(Command::Action("new-thread".into(), pid_new2.clone())); cx.notify(); })).child(ic(light, "plus", 16., "dim"))).into_any_element());
             for t in project["threads"].as_array().into_iter().flatten().chain(project["settled"].as_array().into_iter().flatten()) {
                 let id = string(t, "id");
@@ -276,6 +277,7 @@ impl Render for Backplane {
                     .border_l_2().border_color(if selected { c("ok") } else { c("panel") })
                     .bg(if selected { c("raise") } else { c("panel") }).hover(|s| s.bg(c("raise"))).cursor_pointer()
                     .on_click(cx.listener(move |this, _, window, cx| this.select(id.clone(), window, cx)))
+                    .on_mouse_down(MouseButton::Right, { let (row, pid2) = (t.clone(), pid_thr.clone()); cx.listener(move |this, e: &MouseDownEvent, _, cx| { let items = crate::screens::ctxmenu::thread_items(&row, &pid2); this.ctx_open(e.position, items, cx); }) })
                     .children(toggle).child(div().size(px(5.)).bg(dot)).child(div().flex_1().overflow_hidden().whitespace_nowrap().child(string(t, "title")))
                     .child(div().text_size(px(11.)).text_color(c("faint")).child(if kids > 0 && string(t, "agents").is_empty() { format!("{kids}") } else { string(t, "ago") })).into_any_element());
             }
@@ -391,7 +393,7 @@ impl Render for Backplane {
             .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| this.attach_event(&crate::screens::composer::ComposerEvent::Files(paths.paths().to_vec()), cx))).text_color(c("text")).text_size(px(13. * self.local.text_pct as f32 / 100.)).font_family(self.local.font.clone()).line_height(px(20. * self.local.text_pct as f32 / 100.))
             .relative().on_action(cx.listener(|this, _: &crate::screens::improvements::Toggle, _, cx| crate::screens::improvements::toggle(this, cx))).on_action(cx.listener(|this, _: &crate::ToggleSidebarKey, _, cx| this.sidebar_toggle(cx))).on_action(cx.listener(|this, _: &crate::FocusSearchKey, _, cx| this.focus_search(cx))).on_action(cx.listener(Self::send)).on_action(cx.listener(Self::close_popup)).on_action(cx.listener(Self::copy_selection))
             // the dev build strip, only while a build is being made or waits to relaunch
-            .children(self.screens.devbar.as_ref().map(|b| crate::screens::devbar::strip(b, light)))
+            .children(self.screens.devbar.clone().map(|b| crate::screens::devbar::strip(cx, &b, light, self.screens.devbar_confirm.is_some())))
             // top bar
             .child(div().h(px(36.)).flex_shrink_0().relative().child(art::probe("topbar")).flex().items_center().justify_between().px_3().border_b_1().border_color(c("line")).bg(c("bg"))
                 .child(div().flex().items_center().gap_2()
@@ -461,6 +463,8 @@ impl Render for Backplane {
                 // right rail
                 .child(div().w(px(72.)).h_full().flex_shrink_0().relative().child(art::probe("rail")).border_l_1().border_color(c("line")).flex().flex_col().py_2().children(rail)))
             .children(crate::screens::improvements::indicator(cx, light, &self.screens.imp))
+            // the right-click menu of a sidebar row, over everything
+            .children(self.screens.ctx.clone().map(|m| crate::screens::ctxmenu::render(cx, light, &m)))
             .into_any_element();
         self.controls = ctl;
         self.render_us = t_render.elapsed().as_micros() as u64;
