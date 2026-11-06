@@ -13,8 +13,7 @@ git -C "$ROOT" archive --format=tar HEAD native assets docs test i18n | $SSH $HO
 COMMIT=${BP_COMMIT:-$(git -C "$ROOT" rev-parse --short=10 HEAD)}
 $SSH $HOST "lockf -k /tmp/bp-mac-heavy.lockf sh -s" -- "$WHAT" "${TEST:--}" "$COMMIT" <<'REMOTE'
 set -eu
-WHAT=${1:-both}; TEST=${2:-}
-while ! mkdir /tmp/bp-mac-heavy.lock 2>/dev/null; do sleep 20; done; trap 'rmdir /tmp/bp-mac-heavy.lock' EXIT
+WHAT=${1:-both}; TEST=${2:--}; [ "$TEST" = - ] && TEST=; export BACKPLANE_COMMIT=${3:-unknown}
 ulimit -n 10240 2>/dev/null || true
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer PATH="$HOME/.cargo/bin:/opt/homebrew/bin:$PATH"
 export CARGO_TARGET_DIR=$HOME/bp-e2e/target CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS:-6}
