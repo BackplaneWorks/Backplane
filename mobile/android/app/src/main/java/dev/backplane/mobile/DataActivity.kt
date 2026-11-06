@@ -12,15 +12,24 @@ class DataActivity : ComponentActivity() {
         enableEdgeToEdge()
         AppSettings.init(this)
         DataClient.init(this)
-        intent?.data?.let { if (it.scheme == BuildConfig.URL_SCHEME && it.host != "google") DataClient.pair(it.toString()) }
+        intent?.data?.let { route(it) }
         if (android.os.Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1)
         DataClient.openFromIntent = intent?.getStringExtra("thread")
+        // a check without a hub (debug builds): --es mdpreview /data/local/tmp/x.md [--ez stream true] draws that file as a message
+        val preview = if (BuildConfig.DEBUG) intent?.getStringExtra("mdpreview") else null
+        val stream = intent?.getBooleanExtra("stream", false) == true
+        if (preview != null) { setContent { Theme(AppSettings.appearance) { MdPreview(java.io.File(preview).readText(), stream) } }; return }
         setContent { Theme(AppSettings.appearance) { DataRoot() } }
     }
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         intent.getStringExtra("thread")?.let { DataClient.openFromIntent = it }
-        intent.data?.let { if (it.scheme == BuildConfig.URL_SCHEME && it.host != "google") DataClient.pair(it.toString()) }
+        intent.data?.let { route(it) }
+    }
+    // backplane://thread/<id> opens that thread; any other link of this app's scheme pairs
+    private fun route(u: android.net.Uri) {
+        if (u.scheme != BuildConfig.URL_SCHEME || u.host == "google") return
+        if (u.host == "thread") u.pathSegments.firstOrNull()?.let { DataClient.openFromIntent = it } else DataClient.pair(u.toString())
     }
     override fun onResume() { super.onResume(); DataClient.foreground = true; DataClient.foreground() }
     override fun onPause() { super.onPause(); DataClient.foreground = false }

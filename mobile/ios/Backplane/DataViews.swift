@@ -32,6 +32,8 @@ struct DataRoot: View {
             #endif
         }
         .onChange(of: phase) { _, p in if p == .active { client.foreground() } }
+        .onChange(of: client.pendingThread) { _, id in if let id { path.append(id); client.pendingThread = nil } }
+        .onOpenURL { url in if (url.scheme == "backplane" || url.scheme == AppIdentity.scheme), url.host == "thread", let id = url.pathComponents.dropFirst().first { path.append(id) } }
         // a newly paired (or forgotten) hub starts again on the list
         .onChange(of: client.links.isEmpty) { _, _ in path = NavigationPath() }
     }
