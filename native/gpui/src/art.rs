@@ -74,8 +74,8 @@ impl Logo {
 pub fn logo(light: bool, size: f32, name: &'static str) -> impl IntoElement {
     static DARK: std::sync::OnceLock<Logo> = std::sync::OnceLock::new();
     static LIGHT: std::sync::OnceLock<Logo> = std::sync::OnceLock::new();
-    let l: &'static Logo = if light { LIGHT.get_or_init(|| Logo::parse(include_str!("../../../src/web/favicon-light.svg"))) }
-        else { DARK.get_or_init(|| Logo::parse(include_str!("../../../src/web/favicon.svg"))) };
+    let l: &'static Logo = if light { LIGHT.get_or_init(|| Logo::parse(include_str!("../../../assets/web/favicon-light.svg"))) }
+        else { DARK.get_or_init(|| Logo::parse(include_str!("../../../assets/web/favicon.svg"))) };
     canvas(|_, _, _| (), move |b: Bounds<Pixels>, _, window: &mut Window, _| {
         report(name, b, window.scale_factor());
         let s = size / l.size;

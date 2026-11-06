@@ -24,7 +24,7 @@ pub fn tokens(light: bool) -> Vec<(&'static str, u32)> {
         }).collect()
     }
     #[test] fn tokens_equal_the_css() {
-        let css = include_str!("../../../src/web/style.css");
+        let css = include_str!("../../../assets/web/style.css");
         for (selector, palette, light) in [(":root {", DARK, false), ("html.light, .app.light, .bub-move.light {", LIGHT, true)] {
             let want = block(css, selector);
             assert!(want.len() >= 17, "{selector}: parsed {} tokens", want.len());

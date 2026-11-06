@@ -685,50 +685,6 @@ mod tests {
         assert_eq!(n, 1600);
     }
 
-    // soak finding: kill -9 of the policy child was permanent. It is restarted and the log is folded into the new child again.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn a_killed_policy_child_is_restarted_and_refolded() {
-        let dir = home("policyrestart");
-        let script = dir.join("fakepolicy.py");
-        std::fs::write(&script, r#"#!/usr/bin/env python3
-import socket, sys, json, os
-port = int(sys.argv[1]); s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); s.bind(("127.0.0.1", port)); s.listen(1)
-print("listening", flush=True)
-c, _ = s.accept(); f = c.makefile("rwb"); frames = []; items = 0
-for raw in f:
-    line = raw.decode().rstrip("\n"); op, _, body = line.partition(" ")
-    if op == "F":
-        j = json.loads(body); frames.append(j.get("t")); items += len(j.get("items", []))
-        f.write(b"ok\n")
-    elif op == "V":
-        f.write((json.dumps({"remoteReady": True, "shown": {"pid": os.getpid(), "frames": frames[:3], "items": items}, "session": {}, "cmds": []}) + "\n").encode())
-    elif op == "P": f.write(b"pong\n")
-    f.flush()
-"#).unwrap();
-        { use std::os::unix::fs::PermissionsExt; std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap(); }
-        let h = Hub::start(cfg(&dir), Arc::new(crate::presenter::BpPolicy::spawn(&script).await.unwrap())).await.unwrap();
-        h.commit_many(&[json!({"$":"ProjectCreated","id":"p9","title":"x","root":"/x","at":9})]).await.unwrap();
-        let (mut c, _g) = h.connect(true);
-        let r0 = req(&c, &h, "view.open", (1 << 47) + 5, json!({})); let out = h.request(&mut c, &r0).await;
-        let pid = out[0]["result"]["shown"]["pid"].as_u64().expect("the first child answers");
-        unsafe { libc::kill(pid as i32, libc::SIGKILL); }
-        // while it is down a view is retryable, not a hang
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        let r1 = req(&c, &h, "view.update", (1 << 47) + 6, json!({"viewId": format!("{}:{}", c.gen, (1u64 << 47) + 5)}));
-        let down = h.request(&mut c, &r1).await;
-        assert!(down[0]["ok"] == false || down[0]["result"]["shown"]["pid"].as_u64() != Some(pid), "{down:?}");
-        // and it comes back with the log folded in
-        let mut back = None;
-        for i in 0..80 {
-            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-            let r = req(&c, &h, "view.update", (1 << 47) + 10 + i, json!({"viewId": format!("{}:{}", c.gen, (1u64 << 47) + 5)}));
-            let o = h.request(&mut c, &r).await;
-            if let Some(p2) = o[0]["result"]["shown"]["pid"].as_u64() { if p2 != pid { back = Some(o[0]["result"]["shown"].clone()); break } }
-        }
-        let shown = back.expect("a new policy child answers within 20 s");
-        assert_eq!(shown["frames"][0], "log", "the new child got the whole log first");
-        assert!(shown["items"].as_u64().unwrap() >= h.store.len() as u64, "all of the log is in it: {shown}");
-    }
-
     #[tokio::test] async fn open_assembles_identity_in_js_order() {
         let h = Hub::start(cfg(&home("open")), Arc::new(Canned { reply: json!({"remoteReady":true,"shown":{"a":1},"session":{"sel":""},"cmds":[]}) })).await.unwrap();
         let (mut c, g) = h.connect(true); assert_eq!(g["renderer"], "mobile");

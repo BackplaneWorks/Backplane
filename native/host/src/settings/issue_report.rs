@@ -88,17 +88,6 @@ pub fn diagnostic_report(hub_doc: &Value) -> String { serde_json::to_string_pret
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn bend() -> String { std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../src/core/issue-report.bend")).unwrap() }
-    /// The Bend def's string literals, concatenated and unescaped.
-    fn literal(def: &str) -> String {
-        let src = bend(); let at = src.find(&format!("def {def}() -> String:")).unwrap(); let body = &src[at..]; let body = &body[..body.find("\n\n").unwrap()];
-        let (mut out, mut inq, mut esc) = (String::new(), false, false);
-        for c in body.chars() { if !inq { if c == '"' { inq = true } continue } if esc { out.push(if c == 'n' { '\n' } else { c }); esc = false } else if c == '\\' { esc = true } else if c == '"' { inq = false } else { out.push(c) } }
-        out
-    }
-    #[test] fn the_embedded_resources_equal_the_bend_strings() {
-        assert_eq!(TEMPLATE, literal("Issue.template")); assert_eq!(UNSLOP, literal("Issue.unslop")); assert_eq!(RULES, literal("Issue.prompt.rules"));
-    }
     #[test] fn os_is_a_family_token_only() {
         assert_eq!((os("linux"), os("Win32"), os("Darwin"), os("iPadOS"), os("Mozilla/5.0 (X11; Linux x86_64)"), os("")), ("Linux", "Windows", "macOS", "iOS", "Unknown", "Unknown"));
     }

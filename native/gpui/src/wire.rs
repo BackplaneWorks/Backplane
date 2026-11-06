@@ -1,7 +1,7 @@
 //! Backplane's bounded CBOR subset; dictionaries generated from Bend at build time.
 use anyhow::{bail, ensure, Result};
 use serde_json::{Map, Value, Number};
-include!(concat!(env!("OUT_DIR"), "/wire_dict.rs"));
+include!("wire_dict.rs");
 const MAX_FRAME: usize = 524288;
 fn arg(out: &mut Vec<u8>, major: u8, n: u32) {
     let h = major << 5;
