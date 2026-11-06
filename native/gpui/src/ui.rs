@@ -279,6 +279,8 @@ impl Render for Backplane {
         if crate::perf::on() { crate::perf::frame_start(); cx.defer(|_| crate::perf::frame_end()); }
         crate::screens::improvements::tick(self, window, cx);
         crate::screens::desk::tick(self, window, cx);
+        self.term_layout(window, cx);
+        self.term_script(window, cx);
         if self.want_focus && self.screens.pad.is_none() { self.want_focus = false; self.input.focus_handle(cx).focus(window); }
         if self.models_pending { self.models_pending = false; self.picker_toggle(window, cx); }
         if let Some(w) = self.screens.projects.focus.take() { let e = if w == "folder" { self.screens.projects.folder.clone() } else { self.screens.projects.search.clone() }; if let Some(e) = e { window.focus(&e.focus_handle(cx)); } }
@@ -461,6 +463,7 @@ impl Render for Backplane {
                     rail.push(with_rect(div().id(SharedString::from(format!("rail-{l}"))), || format!("rail:{l}")).cursor_pointer().on_click(cx.listener(move |this, _, _, cx| this.rail_press(a, v, cx))).tooltip({ let letter = crate::keys::rail_letter(if a == "diff" { "diff" } else { v }).to_uppercase(); let chord = match (a, v) { ("diff", _) => crate::keys::hint(&self.local, "diff"), (_, "files") => crate::keys::hint(&self.local, "files"), _ => String::new() }; let key = [letter, chord].into_iter().filter(|k| !k.is_empty()).collect::<Vec<_>>().join(" or "); crate::keys::tip(l, &key, light) })
                         .flex().flex_col().items_center().h(px(48.)).justify_center().gap_1().text_size(px(10.)).when(active, |d| d.bg(c("raise")).border_l_2().border_color(c("accent"))).text_color(c(if active { "text" } else { "dim" })).hover(|s| s.text_color(c("text"))).child(ic(light, i, 18., if active { "accent" } else { "dim" })).child(*l).into_any_element());
                 }
+                None if *l == "Terminal" => { let on = self.screens.term.open; rail.push(with_rect(div().id("rail-Terminal").cursor_pointer().on_click(cx.listener(|this, _, window, cx| this.term_toggle(window, cx))).tooltip(crate::keys::tip("Terminal", &crate::keys::hint(&self.local, "term"), light)), || "rail:Terminal".to_string()).flex().flex_col().items_center().h(px(48.)).justify_center().gap_1().text_size(px(10.)).when(on, |d| d.bg(c("raise")).border_l_2().border_color(c("accent"))).text_color(c(if on { "text" } else { "dim" })).hover(|s| s.bg(c("raise"))).child(ic(light, i, 18., if on { "accent" } else { "dim" })).child(*l).into_any_element()) }
                 None if *l == "Commands" => rail.push(with_rect(div().id("rail-Commands").cursor_pointer().on_click(cx.listener(|this, _, _, cx| this.palette_open(cx))).tooltip(crate::keys::tip("Commands", &crate::keys::hint(&self.local, "palette"), light)), || "rail:Commands".to_string()).flex().flex_col().items_center().h(px(48.)).justify_center().gap_1().text_size(px(10.)).text_color(c("dim")).hover(|s| s.bg(c("raise"))).child(ic(light, i, 18., "dim")).child(*l).into_any_element()),
                 None => rail.push(with_rect(div().opacity(0.45), || format!("rail:{l}")).flex().flex_col().items_center().h(px(48.)).justify_center().gap_1().text_size(px(10.)).text_color(c("dim")).child(ic(light, i, 18., "dim")).child(*l).into_any_element()),
             }
@@ -581,6 +584,7 @@ impl Render for Backplane {
             .children(crate::perf::mark("over"))
             .children(crate::screens::improvements::view(cx, light, &self.screens.imp))
             .children(crate::screens::improvements::indicator(cx, light, &self.screens.imp))
+            .children({ let title = string(&self.data["thread"], "title"); crate::screens::term::view(cx, window, light, &self.local, &title, &self.screens.term) })
             .children(crate::screens::padview::view(cx, window, light, &self.local, &mut self.screens.pad, &mut ctl))
             // the right-click menu of a sidebar row, over everything
             .children(self.screens.ctx.clone().map(|m| crate::screens::ctxmenu::render(cx, light, &m)))

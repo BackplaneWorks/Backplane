@@ -12,7 +12,7 @@ pub fn metric(started: Instant, event: &str, mut fields: Value) {
 }
 
 #[derive(Clone, Debug)]
-pub enum Step { Cef(Value), Files(String), ScrollState(String), Home(usize), Select(usize), Tap(f32, f32, usize), Sheets(bool), Compare(Option<usize>), Hist(Option<i64>), HistMode(u8), HistPlay, ViewShow(String, String), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), Imp(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Mark(String), Fit, Unsupported(String) }
+pub enum Step { /** keystrokes typed as the person would ("ctrl-j e c h o enter"), through the window's bindings */ Keys(String), Cef(Value), Files(String), ScrollState(String), Home(usize), Select(usize), Tap(f32, f32, usize), Sheets(bool), Compare(Option<usize>), Hist(Option<i64>), HistMode(u8), HistPlay, ViewShow(String, String), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), Imp(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Mark(String), Fit, Unsupported(String) }
 /// What a click on a registered control does; the e2e harness's controls inventory and `click` step use these.
 #[derive(Clone, Debug)]
 pub enum Ctl { None, Pad, OpenPalette, Rail(String), PickFiles, ToggleSidebar, ToggleContext, Select(String), Home(String), Fold(String), Send, Skill(String), Page(String), Node(String, String), RenameSave(String), Imp(String), FocusSearch }
@@ -38,6 +38,7 @@ pub fn load(path: &Path) -> VecDeque<Step> {
         else if let Some(a) = v["tap"].as_array() { Some(Step::Tap(a.first().and_then(Value::as_f64).unwrap_or(0.5) as f32, a.get(1).and_then(Value::as_f64).unwrap_or(0.5) as f32, a.get(2).and_then(Value::as_u64).unwrap_or(0) as usize)) }
         else if let Some(t) = v["popup"].as_str() { Some(Step::Popup(t.into())) }
         else if let Some(t) = v["type"].as_str() { Some(Step::Type(t.into())) }
+        else if let Some(t) = v["keys"].as_str() { Some(Step::Keys(t.into())) }
         else if v["send"].as_bool() == Some(true) { Some(Step::Send) }
         else if let Some(p) = v["attach"].as_str() { Some(Step::Attach(p.into())) }
         else if let Some(a) = v["field"].as_array() { Some(Step::Field(a.first().and_then(|x| x.as_str()).unwrap_or("").into(), a.get(1).and_then(|x| x.as_str()).unwrap_or("").into())) }
@@ -204,6 +205,7 @@ impl Backplane {
                 self.open_project(raw.clone(), cx);
             }
             Step::Popup(text) => { self.begin(format!("popup:{text}"), Goal::Popup, cx); self.set_text(text, cx); }
+            Step::Keys(keys) => { self.m("keys", json!({"keys": keys})); self.screens.term.script = Some(keys); self.begin("keys".into(), Goal::Frame, cx); cx.notify(); }
             Step::Type(text) => {
                 let full = format!("{}{}", self.input.read(cx).content, text);
                 self.begin(format!("type:{}", text.chars().count()), Goal::Typed(full.clone()), cx);
