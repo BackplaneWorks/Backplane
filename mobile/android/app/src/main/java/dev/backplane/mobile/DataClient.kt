@@ -369,6 +369,23 @@ object DataClient {
     suspend fun fileBytes(tid: String, path: String): ByteArray? = withContext(Dispatchers.IO) { httpGet("/files/get", "thread=" + android.net.Uri.encode(tid) + "&path=" + android.net.Uri.encode(path)) }
     suspend fun screenBytes(tid: String): ByteArray? = withContext(Dispatchers.IO) { httpGet("/bots/" + android.net.Uri.encode(tid) + "/screen.jpg", "") }
 
+    // ---- diff and review (features diff, review; the hub's git.diff and review.* requests)
+    suspend fun diff(tid: String): Pair<String, String> { val r = call("viewer.diff", JSONObject().put("thread", tid)); return r.optString("diff") to r.optString("nogit") }
+    data class Task(val text: String, val done: Boolean, val group: String)
+    data class Report(val md: String, val err: String, val gate: String, val line: String, val tasks: List<Task>)
+    suspend fun reviewPage(tid: String, page: String): Report {
+        val r = call("review.page", JSONObject().put("thread", tid).put("page", page)).optJSONObject("report") ?: JSONObject()
+        val ts = r.optJSONArray("tasks")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Task(it.optString("text"), it.optBoolean("done"), it.optString("group")) } } ?: emptyList()
+        return Report(r.optString("md"), r.optString("err"), r.optString("gate"), r.optString("line"), ts)
+    }
+    suspend fun tick(tid: String, index: Int): List<Task> {
+        val a = call("review.tick", JSONObject().put("thread", tid).put("index", index)).optJSONObject("ticked")?.optJSONArray("tasks") ?: return emptyList()
+        return (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Task(it.optString("text"), it.optBoolean("done"), it.optString("group")) }
+    }
+    data class Comment(val id: String, val text: String, val by: String, val parent: String, val resolved: Boolean, val file: String)
+    suspend fun comments(tid: String): List<Comment> = call("review.list", JSONObject().put("thread", tid)).optJSONArray("comments")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Comment(it.optString("id"), it.optString("text"), it.optString("by"), it.optString("parent"), it.optBoolean("resolved"), it.optString("file")) } } ?: emptyList()
+    suspend fun comment(tid: String, op: String, extra: JSONObject.() -> Unit) { call("review.comment", JSONObject().put("thread", tid).put("op", op).apply(extra)) }
+
     // ---- pictures
     private val pictures = object : android.util.LruCache<String, ByteArray>(16 shl 20) { override fun sizeOf(k: String, v: ByteArray) = v.size }
     suspend fun picture(id: String): ByteArray? {

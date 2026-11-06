@@ -1,6 +1,7 @@
 package dev.backplane.mobile
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -23,6 +24,7 @@ sealed interface MdBlock {
     data class Li(val marker: String, val text: String) : MdBlock
     data class Code(val text: String) : MdBlock
     data class Quote(val text: String) : MdBlock
+    data class Table(val rows: List<List<String>>) : MdBlock
     object Rule : MdBlock
 }
 
@@ -39,6 +41,9 @@ fun mdBlocks(src: String): List<MdBlock> {
             Regex("^[-*_]{3,}$").matches(t) -> { flush(); out += MdBlock.Rule }
             Regex("^[-*+] .*").matches(t) -> { flush(); out += MdBlock.Li("•", t.drop(2)) }
             Regex("^\\d+[.)] .*").matches(t) -> { flush(); val m = Regex("^(\\d+[.)]) (.*)").find(t)!!; out += MdBlock.Li(m.groupValues[1], m.groupValues[2]) }
+            t.startsWith("|") -> { flush(); val rows = ArrayList<List<String>>()
+                while (i < lines.size && lines[i].trim().startsWith("|")) { val r = lines[i].trim().trim('|').split('|').map { it.trim() }; if (!r.all { c -> c.isNotEmpty() && c.all { ch -> ch == '-' || ch == ':' } }) rows += r; i++ }
+                i--; out += MdBlock.Table(rows) }
             t.startsWith("> ") -> { flush(); out += MdBlock.Quote(t.drop(2)) }
             else -> { if (para.isNotEmpty()) para.append('\n'); para.append(l) }
         }
@@ -76,6 +81,12 @@ fun MdText(src: String, modifier: Modifier = Modifier) {
             is MdBlock.Li -> Row { Text(b.marker, Modifier.width(22.dp), color = dcs.onSurfaceVariant, fontSize = 13.sp, fontFamily = BpMono); Text(mdInline(b.text, dcs.onSurface, dcs.surfaceContainerHigh, dcs.primary), color = dcs.onSurface, fontSize = 13.sp, lineHeight = 19.sp, fontFamily = BpMono) }
             is MdBlock.Code -> Text(b.text, Modifier.fillMaxWidth().background(dcs.surfaceVariant).padding(8.dp), color = dcs.onSurface, fontFamily = BpMono, fontSize = 12.sp)
             is MdBlock.Quote -> Row(Modifier.height(IntrinsicSize.Min)) { Box(Modifier.width(2.dp).fillMaxHeight().background(dcs.outline)); Spacer(Modifier.width(8.dp)); Text(mdInline(b.text, dcs.onSurface, dcs.surfaceContainerHigh, dcs.primary), color = dcs.onSurfaceVariant, fontSize = 13.sp, fontFamily = BpMono) }
+            is MdBlock.Table -> {
+                val w = (0 until (b.rows.maxOfOrNull { it.size } ?: 0)).map { c -> b.rows.maxOf { r -> r.getOrNull(c)?.length ?: 0 } }
+                Column(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()).background(dcs.surfaceVariant).padding(8.dp)) {
+                    b.rows.forEachIndexed { ri, r -> Text(r.mapIndexed { c, x -> x.padEnd(w[c]) }.joinToString("  "), color = if (ri == 0) dcs.onSurface else dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 11.sp, softWrap = false, fontWeight = if (ri == 0) FontWeight.Bold else FontWeight.Normal) }
+                }
+            }
             MdBlock.Rule -> Box(Modifier.fillMaxWidth().height(1.dp).background(dcs.outlineVariant))
         }
     }

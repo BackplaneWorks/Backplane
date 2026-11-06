@@ -417,6 +417,10 @@ struct DataEntryRow: View {
             }.accessibilityIdentifier("data.entry.tool")
         case "ask":
             DataAskCard(client: client, thread: thread, entry: entry)
+        case "step":
+            // a design checkpoint (the hub's git snapshot of the project): a short line, not the record
+            let w = ((try? JSONSerialization.jsonObject(with: Data(entry.text.utf8))) as? [String: Any])?["w"] as? String ?? ""
+            Text("◆ checkpoint" + (w.isEmpty ? "" : " · " + w)).font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary)
         case "error":
             Label(entry.text, systemImage: "exclamationmark.triangle").font(.footnote).foregroundStyle(.red)
         default:

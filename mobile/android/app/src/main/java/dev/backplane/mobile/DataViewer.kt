@@ -28,6 +28,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.viewinterop.AndroidView
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -35,7 +36,7 @@ import org.json.JSONObject
 
 // The viewer over a thread (the desktop's right rail): Board, Schematic, 3D, Mech, Files and Browser, on the data/1 viewer requests (native/host/src/data/ext.rs).
 // Plots and models arrive as the hub's own binary frames and are drawn by the app's GPU view (PlotStore, PlotSurface: pinch, pan, orbit, tap to inspect).
-private val tabs = listOf("Board", "Schematic", "3D", "Mech", "Files", "Browser")
+private val tabs = listOf("Board", "Schematic", "3D", "Split", "Mech", "Files", "Diff", "Review", "Browser")
 private val boardLayers = listOf(12, 11, 10, 9, 8, 7, 6, 5, 13, 23, 24, 15, 2, 16, 3, 14, 4, 19, 20, 22, 21, 17, 1, 18, 0)
 private val boardNames = listOf("B.Fab", "B.Courtyard", "B.Paste", "B.Silkscreen", "B.Mask", "B.Cu", "In6.Cu", "In5.Cu", "In4.Cu", "In3.Cu", "In2.Cu", "In1.Cu", "F.Cu", "Pads", "F.Mask", "F.Paste", "F.Silkscreen", "F.Courtyard", "F.Fab", "User.Drawings", "User.Comments", "Margin", "Edge.Cuts", "Vias", "Holes")
 private val schNames = listOf("page", "sheet fill", "body fill", "sheet", "graphic", "note", "body", "pin", "pin name", "pin number", "field", "field other", "bus", "bus entry", "wire", "no connect", "junction", "label", "global label", "hier label", "sheet name", "sheet file", "sheet pin", "dnp")
@@ -63,6 +64,9 @@ fun ViewerScreen(thread: DThread, back: () -> Unit) {
                 "Board" -> PlotTab(thread, "board", target?.path?.takeIf { target?.tab == "Board" } ?: "", files?.pcb.orEmpty().isNotEmpty() || target != null, "No board in this project yet")
                 "Schematic" -> PlotTab(thread, "schematic", target?.path?.takeIf { target?.tab == "Schematic" } ?: "", files?.sch.orEmpty().isNotEmpty() || target != null, "No schematic in this project yet")
                 "3D" -> PlotTab(thread, "3d", "", files?.pcb.orEmpty().isNotEmpty(), "No board in this project yet")
+                "Split" -> SplitTab(thread, files)
+                "Diff" -> DiffTab(thread)
+                "Review" -> ReviewTab(thread)
                 "Mech" -> MechTab(thread, target?.path?.takeIf { target?.tab == "Mech" })
                 "Files" -> FilesTab(thread) { t -> target = t; tab = t.tab }
                 else -> BrowserTab(thread)
@@ -303,7 +307,7 @@ private fun BrowserTab(thread: DThread) {
             else {
                 DBtn("‹", false, modifier = Modifier.testTag("browser.back")) { run("toolbar") { put("command", "back") } }
                 Box(Modifier.weight(1f)) { DField(url, { url = it }, "Address", Modifier.testTag("browser.url")) }
-                DBtn("Go", true, url.isNotBlank(), Modifier.testTag("browser.go")) { run("navigate") { put("url", if ("://" in url) url else "https://$url") } }
+                DBtn("Go", true, url.isNotBlank(), Modifier.testTag("browser.go")) { run("navigate") { put("url", pageUrl(url)) } }
                 DBtn("Hand back", false, modifier = Modifier.testTag("browser.handback")) { driving = false; run("handback") }
             }
         }
@@ -321,4 +325,157 @@ private fun BrowserTab(thread: DThread) {
         }
         if (driving) DMono("You have the page: a tap clicks. Hand it back when you are done.", dcs.onSurfaceVariant, 11, Modifier.padding(8.dp))
     }
+}
+
+
+// ---- Split: the schematic, the board and its 3D model at once (stacked in portrait, side by side in landscape)
+@Composable
+private fun SplitTab(thread: DThread, files: DataClient.ProjectFiles?) {
+    val root = files?.root.orEmpty()
+    LaunchedEffect(thread.id, root) { if (root.isNotEmpty()) runCatching { DataClient.watch(thread.id, "split") } }
+    val plots = DataClient.plots
+    val seen = plots.frame to plots.mesh   // the store changes on each frame: read it so the panes follow
+    val sch = plots.cachedFrame("1|$root|"); val brd = plots.cachedFrame("0|$root|"); val mdl = plots.cachedMesh("2|$root|")
+    val bg = dcs.background.toArgb() and 0xFFFFFF
+    BoxWithConstraints(Modifier.fillMaxSize().testTag("split")) {
+        val panes: @Composable (Modifier) -> Unit = { m ->
+            SplitPane("Schematic", thread.id + "|split|sch", sch, null, false, bg, if (root.isEmpty() || files?.sch.isNullOrEmpty()) "No schematic in this project yet" else "", m)
+            SplitPane("Board", thread.id + "|split|brd", brd, null, false, bg, if (files?.pcb.isNullOrEmpty()) "No board in this project yet" else "", m)
+            SplitPane("3D", thread.id + "|split|3d", brd, mdl, true, bg, if (files?.pcb.isNullOrEmpty()) "No board in this project yet" else "", m)
+        }
+        if (maxWidth > maxHeight) Row(Modifier.fillMaxSize()) { panes(Modifier.weight(1f).fillMaxHeight()) }
+        else Column(Modifier.fillMaxSize()) { panes(Modifier.weight(1f).fillMaxWidth()) }
+    }
+}
+@Composable
+private fun SplitPane(label: String, source: String, frame: PlotFrame?, mesh: MeshFrame?, three: Boolean, bg: Int, none: String, modifier: Modifier) {
+    Box(modifier.border(BorderStroke(1.dp, dcs.outlineVariant)).background(dcs.background)) {
+        AndroidView(factory = { PlotSurface(it) }, modifier = Modifier.fillMaxSize().testTag("split.$label"), update = { s ->
+            s.bindSource(source); s.setThree(three)
+            if (frame != null && frame.none.isEmpty()) s.show(frame, bg, 0x1f6f43, IntArray(0))
+            if (three) s.mesh(mesh)
+        })
+        DMono(label.uppercase(), dcs.onSurfaceVariant, 10, Modifier.align(Alignment.TopStart).padding(6.dp))
+        val say = if (none.isNotEmpty()) none else frame?.none.orEmpty()
+        if (say.isNotEmpty()) DMono(say, dcs.onSurfaceVariant, 11, Modifier.align(Alignment.Center).padding(12.dp))
+        else if (frame == null && (!three || mesh == null)) CircularProgressIndicator(Modifier.align(Alignment.Center).size(24.dp))
+    }
+}
+
+// ---- Diff: the thread's working changes, unified, + green and - red
+@Composable
+private fun DiffTab(thread: DThread) {
+    var diff by remember { mutableStateOf<String?>(null) }
+    var nogit by remember { mutableStateOf("") }
+    var err by remember { mutableStateOf("") }
+    var n by remember { mutableIntStateOf(0) }
+    LaunchedEffect(thread.id, n) { diff = null; err = ""; runCatching { DataClient.diff(thread.id) }.onSuccess { diff = it.first; nogit = it.second }.onFailure { err = it.message ?: "" } }
+    Column(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth().background(dcs.surfaceVariant).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            DMono("CHANGES", dcs.onSurfaceVariant, 11, Modifier.weight(1f).padding(start = 4.dp)); DBtn("Refresh", false, modifier = Modifier.testTag("diff.refresh")) { n++ }
+        }
+        DLine()
+        val d = diff
+        when {
+            err.isNotEmpty() -> DMono(err, dcs.error, 12, Modifier.padding(16.dp))
+            d == null -> CircularProgressIndicator(Modifier.padding(24.dp))
+            nogit.isNotEmpty() -> DMono("This project is not a git repository, so there is nothing to compare.", dcs.onSurfaceVariant, 12, Modifier.padding(16.dp).testTag("diff.nogit"))
+            d.isBlank() -> DMono("No changes.", dcs.onSurfaceVariant, 12, Modifier.padding(16.dp).testTag("diff.none"))
+            else -> {
+                val green = androidx.compose.ui.graphics.Color(0xFF4CAF7A); val lines = remember(d) { d.lines().take(4000) }
+                LazyColumn(Modifier.fillMaxSize().horizontalScroll(rememberScrollState()).testTag("diff.list")) {
+                    items(lines.size) { i ->
+                        val l = lines[i]
+                        val (c, bgc) = when {
+                            l.startsWith("+++") || l.startsWith("---") || l.startsWith("diff ") || l.startsWith("index ") -> dcs.onSurface to dcs.surfaceVariant
+                            l.startsWith("+") -> green to green.copy(alpha = .12f)
+                            l.startsWith("-") -> dcs.error to dcs.error.copy(alpha = .12f)
+                            l.startsWith("@@") -> dcs.primary to androidx.compose.ui.graphics.Color.Transparent
+                            else -> dcs.onSurfaceVariant to androidx.compose.ui.graphics.Color.Transparent
+                        }
+                        Text(l.ifEmpty { " " }, Modifier.fillMaxWidth().background(bgc).padding(horizontal = 8.dp, vertical = 1.dp), color = c, fontFamily = BpMono, fontSize = 11.sp, softWrap = false, fontWeight = if (l.startsWith("diff ")) FontWeight.Bold else FontWeight.Normal)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ---- Review: the BOM, the design checks (with the checklist's boxes) and the thread's comments
+@Composable
+private fun ReviewTab(thread: DThread) {
+    var page by remember { mutableStateOf("Checks") }
+    Column(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth().background(dcs.surfaceVariant).padding(horizontal = 8.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf("Checks", "BOM", "Comments").forEach { p -> DBtn(p, page == p, modifier = Modifier.testTag("review.page.$p")) { page = p } }
+        }
+        DLine()
+        when (page) { "BOM" -> ReportPage(thread, "bom", false); "Comments" -> CommentsPage(thread); else -> ReportPage(thread, "checks", true) }
+    }
+}
+@Composable
+private fun ReportPage(thread: DThread, kind: String, ticks: Boolean) {
+    val scope = rememberCoroutineScope()
+    var rep by remember(kind) { mutableStateOf<DataClient.Report?>(null) }
+    var tasks by remember(kind) { mutableStateOf<List<DataClient.Task>>(emptyList()) }
+    var err by remember(kind) { mutableStateOf("") }
+    var run by remember(kind) { mutableIntStateOf(0) }
+    LaunchedEffect(thread.id, kind, run) { rep = null; err = ""; runCatching { DataClient.reviewPage(thread.id, kind) }.onSuccess { rep = it; tasks = it.tasks }.onFailure { err = it.message ?: "" } }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp).testTag("review.$kind"), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        DBtn(if (ticks) "Run checks" else "Refresh", false, modifier = Modifier.testTag("review.run")) { run++ }
+        val r = rep
+        if (err.isNotEmpty()) DMono(err, dcs.error, 12)
+        if (r == null && err.isEmpty()) CircularProgressIndicator()
+        r?.let {
+            if (it.line.isNotEmpty()) DMono(it.line, dcs.primary, 12, bold = true)
+            if (it.gate.isNotEmpty()) DMono(it.gate, dcs.onSurfaceVariant, 11)
+            if (it.err.isNotEmpty()) DMono(it.err, dcs.error, 12)
+            if (it.md.isNotEmpty()) MdText(it.md)
+            if (ticks) tasks.forEachIndexed { i, t ->
+                Row(Modifier.fillMaxWidth().clickable { scope.launch { runCatching { DataClient.tick(thread.id, i) }.onSuccess { n -> if (n.isNotEmpty()) tasks = n } } }.padding(vertical = 6.dp).testTag("review.task.$i"), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(16.dp).border(BorderStroke(1.dp, dcs.outlineVariant)).background(if (t.done) dcs.primary else dcs.surfaceVariant)); Spacer(Modifier.width(10.dp))
+                    Text(t.text, color = dcs.onSurface, fontFamily = BpMono, fontSize = 12.sp)
+                }
+            }
+            if (it.md.isEmpty() && it.line.isEmpty() && it.err.isEmpty() && tasks.isEmpty()) DMono("Nothing to show.", dcs.onSurfaceVariant, 12)
+        }
+    }
+}
+@Composable
+private fun CommentsPage(thread: DThread) {
+    val scope = rememberCoroutineScope()
+    var list by remember { mutableStateOf<List<DataClient.Comment>?>(null) }
+    var draft by remember { mutableStateOf("") }
+    var err by remember { mutableStateOf("") }
+    suspend fun load() { runCatching { DataClient.comments(thread.id) }.onSuccess { list = it }.onFailure { err = it.message ?: "" } }
+    LaunchedEffect(thread.id) { load() }
+    Column(Modifier.fillMaxSize()) {
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(12.dp).testTag("review.comments"), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (err.isNotEmpty()) DMono(err, dcs.error, 12)
+            val l = list
+            if (l == null) CircularProgressIndicator() else if (l.isEmpty()) DMono("No comments yet. Add one below; the agent reads the open ones with its next message.", dcs.onSurfaceVariant, 12)
+            l?.filter { it.parent.isEmpty() }?.forEach { c ->
+                Column(Modifier.fillMaxWidth().background(dcs.surfaceVariant).border(BorderStroke(1.dp, if (c.resolved) dcs.outlineVariant else dcs.primary.copy(alpha = .6f))).padding(10.dp)) {
+                    Row { DMono((c.by.ifEmpty { "you" }) + if (c.resolved) " · resolved" else "", dcs.onSurfaceVariant, 11, Modifier.weight(1f))
+                        DMono(if (c.resolved) "reopen" else "resolve", dcs.primary, 11, Modifier.clickable { scope.launch { runCatching { DataClient.comment(thread.id, if (c.resolved) "reopen" else "resolve") { put("id", c.id) } }; load() } }.testTag("review.resolve.${c.id}")) }
+                    Text(c.text, color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
+                    l.filter { it.parent == c.id }.forEach { r -> Text("↳ " + r.text, color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp)) }
+                }
+            }
+        }
+        DLine()
+        Row(Modifier.fillMaxWidth().background(dcs.surfaceVariant).padding(8.dp), verticalAlignment = Alignment.Bottom) {
+            Box(Modifier.weight(1f)) { DField(draft, { draft = it }, "A review comment", Modifier.testTag("review.composer"), 4) }
+            Spacer(Modifier.width(8.dp))
+            DBtn("Add", true, draft.isNotBlank(), Modifier.testTag("review.add")) { val t = draft; draft = ""; scope.launch { runCatching { DataClient.comment(thread.id, "add") { put("text", t) } }.onFailure { err = it.message ?: "" }; load() } }
+        }
+    }
+}
+
+/** An address as typed: with a scheme it is as it is; a local or numeric host (localhost, 127.x, 10.x, 192.168.x, host:port) is http, anything else https. */
+internal fun pageUrl(t: String): String {
+    val u = t.trim(); if ("://" in u) return u
+    val host = u.substringBefore('/')
+    val local = host.startsWith("localhost") || Regex("^(127|10)\\.[0-9.]+(:[0-9]+)?$|^192\\.168\\.[0-9.]+(:[0-9]+)?$").matches(host) || Regex(":[0-9]+$").containsMatchIn(host)
+    return (if (local) "http://" else "https://") + u
 }

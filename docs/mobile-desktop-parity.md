@@ -33,7 +33,12 @@ Status: **done** (built and driven on the emulator), **built** (iOS: compiled on
 | Viewer tab: Mech (STEP parts, orbit) | done | **done** (driven: bracket.step) | built | needs console FreeCAD on the hub (see below) |
 | Viewer tab: Files (browse, image, PDF, text, Markdown; board/schematic/STEP open in their tab) | done | **done** (driven) | built | `files.entries`, `/files/get` |
 | Viewer tab: Browser (frame, take over, tap = click, address, back, hand back) | done (frames; input partial) | **done** (driven against a planted frame; the click reaches the hub) | built | no browser helper ran here, so a live page was not driven |
-| Split, Diff, Review tabs; terminal | done / partial | gap | gap | not requested yet; `kicad.watch split` and `history`/`review` requests exist on the hub |
+| Viewer tab: Split (schematic, board, 3D; stacked, side by side in landscape) | done | **done** (driven: three panes drawn) | built | `viewer.watch split` |
+| Viewer tab: Diff (unified, + green, - red) | done | **done** (driven: a change made after the first turn shows) | built | `viewer.diff` |
+| Viewer tab: Review (Checks with the checklist, BOM, Comments: add, resolve) | done | **done** (driven: DRC findings and the checklist, a comment added and resolved) | built | `review.*`; Release page: gap |
+| Pinch zoom on the board | done | **done** (driven: a two-finger pinch by `sendevent`, `scripts/mobile/android-pinch.sh`) | built | the emulator image allows `adb root` |
+| Browser tab against a live page | done (CEF child window) | **done** (driven: the helper's Chrome page shown, a tap clicked its button, the page's server heard it) | built | frames route (Option A of docs/gpui/BROWSER-EMBED.md); the CEF lane's embedded window does not publish to `screen.jpg` |
+| Terminal | done | gap | gap | |
 | Thread tree, fork, snooze, reorder, badges | done | gap | gap | no `data/1` request |
 | Tool-call folds, to-do list, subagents panel, stamps | done | gap (tool rows only) | gap | |
 | Desktop's right rail, tabs, ctx meter | done | n/a on a phone | n/a | |
