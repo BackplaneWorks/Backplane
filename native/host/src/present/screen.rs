@@ -549,8 +549,8 @@ mod thread_binding_tests {
         for lean in [false,true] {
             let (st,p,expected)=fixture(lean);
             let out=recent(&st,&p).expect("plain thread root is supported");
-            // the Allowance chip's text (keys.rs `allowance`) is Backplane's own: the recorded helper reply has no such key
-            let bare=|mut t:Value|{ t.as_object_mut().unwrap().remove("allowance"); t };
+            // the Allowance chip's text (keys.rs `allowance`) and the picker's other agents (`pickerAgents`) are Backplane's own: the recorded helper reply has no such keys
+            let bare=|mut t:Value|{ for k in ["allowance","pickerAgents"] { t.as_object_mut().unwrap().remove(k); } t };
             assert_eq!(bare(out["shown"]["thread"].clone()),expected); assert_eq!(bare(out["overlay"]["j"]["thread"].clone()),expected);
             assert_eq!(out["session"]["sel"],p["target"]["id"]); assert_eq!(out["window"],p["window"]);
             assert_eq!(out["shown"]["nativeSidebar"],1); assert_eq!(out["cmds"],json!([]));

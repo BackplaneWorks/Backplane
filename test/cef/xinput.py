@@ -22,20 +22,21 @@ def key(name, shift=False):
     xt.XTestFakeKeyEvent(d, kc, 1, 0); x11.XSync(d, 0); time.sleep(0.03); xt.XTestFakeKeyEvent(d, kc, 0, 0)
     if shift: xt.XTestFakeKeyEvent(d, sk, 0, 0)
     x11.XSync(d, 0); time.sleep(0.04)
-NAMES = {' ': 'space', '.': 'period', ',': 'comma', '/': 'slash', ':': 'colon', '-': 'minus', '_': 'underscore', '@': 'at'}
+NAMES = {' ': 'space', '.': 'period', ',': 'comma', '/': 'slash', ':': 'colon', '-': 'minus', '_': 'underscore', '@': 'at', '&': 'ampersand'}
+def chord(names):
+    held = [x11.XKeysymToKeycode(d, x11.XStringToKeysym({'ctrl': b'Control_L', 'shift': b'Shift_L', 'alt': b'Alt_L'}[m])) for m in names[:-1]]
+    for k in held: xt.XTestFakeKeyEvent(d, k, 1, 0)
+    x11.XSync(d, 0); time.sleep(0.03); key(names[-1]); time.sleep(0.03)
+    for k in reversed(held): xt.XTestFakeKeyEvent(d, k, 0, 0)
+    x11.XSync(d, 0); time.sleep(0.04)
 cmd, a = sys.argv[1], sys.argv[2:]
 if cmd == 'move': move(a[0], a[1])
 elif cmd == 'click': move(a[0], a[1]); click(int(a[2]) if len(a) > 2 else 1)
 elif cmd == 'type':
     for ch in a[0]:
-        name = NAMES.get(ch, ch); key(name, shift=ch.isupper() or ch in ':_@')
+        name = NAMES.get(ch, ch); key(name, shift=ch.isupper() or ch in ':_@&')
 elif cmd == 'key': key(a[0])
-elif cmd == 'chord':  # chord Control_L z: the modifiers held round the last key
-    mods = [x11.XKeysymToKeycode(d, x11.XStringToKeysym(m.encode())) for m in a[:-1]]
-    for m in mods: xt.XTestFakeKeyEvent(d, m, 1, 0)
-    x11.XSync(d, 0); time.sleep(0.03); key(a[-1])
-    for m in mods: xt.XTestFakeKeyEvent(d, m, 0, 0)
-    x11.XSync(d, 0); time.sleep(0.04)
+elif cmd == 'chord': chord(a)
 elif cmd == 'drag':  # drag X0 Y0 X1 Y1: the left button down at the first point, moved in steps, up at the second
     x0, y0, x1, y1 = [float(v) for v in a[:4]]; move(x0, y0); xt.XTestFakeButtonEvent(d, 1, 1, 0); x11.XSync(d, 0); time.sleep(0.08)
     for i in range(1, 11): move(x0 + (x1 - x0) * i / 10, y0 + (y1 - y0) * i / 10)

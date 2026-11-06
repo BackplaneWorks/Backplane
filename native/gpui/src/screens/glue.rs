@@ -5,11 +5,14 @@ use crate::{hub::Command, Backplane};
 use gpui::*;
 use serde_json::Value;
 
+/// The popup's highlighted row after Up (-1) or Down (1): it goes round.
+pub fn popup_step(ix: usize, d: i32, n: usize) -> usize { (ix as i32 + d).rem_euclid(n.max(1) as i32) as usize }
+
 impl Backplane {
     /// A composer event (paste, drop, picked files): start the uploads off the UI thread; say why when nothing starts.
     pub(crate) fn attach_event(&mut self, event: &ComposerEvent, cx: &mut Context<Self>) {
         if matches!(event, ComposerEvent::CopyTimeline) { return self.timeline_copy(cx); }
-        if let ComposerEvent::PopupMove(d) = event { let n = self.popup_rows().len(); if n > 0 { self.screens.popup_ix = (self.screens.popup_ix as i32 + d).rem_euclid(n as i32) as usize; cx.notify(); } return; }
+        if let ComposerEvent::PopupMove(d) = event { let n = self.popup_rows().len(); if n > 0 { self.screens.popup_ix = popup_step(self.screens.popup_ix, *d, n); self.screens.popup_scroll.scroll_to_item(self.screens.popup_ix); self.m("popup", serde_json::json!({"ix": self.screens.popup_ix, "rows": n})); cx.notify(); } return; }
         if matches!(event, ComposerEvent::PopupPick) { self.popup_pick(cx); return; }
         let cap = self.data["thread"]["cap"].as_u64().unwrap_or(DEFAULT_CAP);
         if let Err(e) = self.screens.attacher.event(&self.tx, &self.selected, cap, event) { self.error = e; }
@@ -102,7 +105,7 @@ impl Backplane {
     /// The words of the popup rows the hub offers now (none while it offers none).
     pub(crate) fn popup_rows(&self) -> Vec<String> {
         if self.screens.popup_shut { return vec![]; }
-        self.data["thread"]["skills"].as_array().into_iter().flatten().map(|s| s.get("word").or_else(|| s.get("name")).and_then(Value::as_str).unwrap_or("").to_string()).filter(|w| !w.is_empty()).take(8).collect()
+        self.data["thread"]["skills"].as_array().into_iter().flatten().map(|s| s.get("word").or_else(|| s.get("name")).and_then(Value::as_str).unwrap_or("").to_string()).filter(|w| !w.is_empty()).collect()
     }
     /// Choose the highlighted row: the hub puts its word where the one being typed is.
     pub(crate) fn popup_pick(&mut self, cx: &mut Context<Self>) -> bool {
@@ -248,6 +251,9 @@ pub fn browser_owner(data: &serde_json::Value, selected: &str) -> String {
 mod tests {
     use super::*;
     use core::prelude::v1::test;
+    #[test] fn the_popup_cursor_goes_round() {
+        assert_eq!(popup_step(0, 1, 3), 1); assert_eq!(popup_step(2, 1, 3), 0, "past the last, the first"); assert_eq!(popup_step(0, -1, 3), 2, "over the top, the last"); assert_eq!(popup_step(0, 1, 0), 0);
+    }
     #[test] fn the_browser_pages_owner_is_the_bot_on_a_bots_screen_else_the_thread_without_its_hub() {
         let d = |s: &str| serde_json::from_str::<serde_json::Value>(s).unwrap();
         assert_eq!(browser_owner(&d(r#"{"bot":{"kind":"bot","id":"b7"}}"#), "t1"), "b7");

@@ -419,26 +419,28 @@ impl Render for Backplane {
         // the popup is the hub's: rows are shown when thread.skills is non-empty (no client-side rows)
         let skills = thread["skills"].as_array();
         // the highlighted row starts at the first for each new set of rows; the composer is told so Up/Down/Tab drive the popup while it shows
-        { let key = self.popup_rows().join("\u{1f}"); if key != self.screens.popup_key { self.screens.popup_key = key; self.screens.popup_ix = 0; } }
-        let popup_ix = self.screens.popup_ix.min(skills.map_or(0, |s| s.len().min(12)).saturating_sub(1));
-        let mut popup = div().flex().flex_col().border_1().border_color(c("line")).bg(c("panel")).py_1();
+        { let key = self.popup_rows().join("\u{1f}"); if key != self.screens.popup_key { self.screens.popup_key = key; self.screens.popup_ix = 0; self.screens.popup_scroll.scroll_to_item(0); } }
+        let popup_ix = self.screens.popup_ix.min(skills.map_or(0, |s| s.len()).saturating_sub(1));
+        // eight rows show; the rest scroll, and the highlighted row is kept in view (glue.rs)
+        let mut popup = div().id("popup-list").track_scroll(&self.screens.popup_scroll).max_h(px(8. * 28.)).overflow_y_scroll().flex().flex_col().py_1();
         let mut group = String::new();
-        for (index, skill) in skills.into_iter().flatten().take(12).enumerate() {
-            // a source's rows sit under its name (the hub groups them; rows without one draw as before)
+        for (index, skill) in skills.into_iter().flatten().enumerate() {
+            // a source's rows sit under its name (the hub groups them; rows without one draw as before); the name is drawn in its first row's box,
+            // so the list keeps one child per row and scroll_to_item(popup_ix) lands on the highlighted row
             let g = skill.get("group").and_then(Value::as_str).unwrap_or("").to_string();
-            if !g.is_empty() && g != group { popup = popup.child(div().px_3().pt_1().text_xs().text_color(c("dim")).child(g.clone())); }
+            let head = (!g.is_empty() && g != group).then(|| div().px_3().pt_1().text_xs().text_color(c("dim")).child(g.clone()));
             group = g;
             let word = skill.get("word").or_else(|| skill.get("name")).and_then(Value::as_str).unwrap_or("").to_string();
             let label = skill.get("label").and_then(Value::as_str).unwrap_or(&word).to_string();
             let desc = ["text", "hint", "desc", "detail", "about"].iter().find_map(|k| skill.get(*k).and_then(Value::as_str)).unwrap_or("").to_string();
             let desc = match skill.get("note").and_then(Value::as_str) { Some(n) if !n.is_empty() => format!("[{n}] {desc}"), _ => desc };
             ctl.push(CtlEntry { id: format!("skill:{word}"), label: label.clone(), ctl: Ctl::Skill(word.clone()) });
-            popup = popup.child(with_rect(div().id(("skill", index)), || format!("skill:{word}")).flex().gap_3().px_3().py_1().cursor_pointer().when(index == popup_ix, |d| d.bg(c("raise"))).hover(|s| s.bg(c("raise")))
+            popup = popup.child(div().flex().flex_col().children(head).child(with_rect(div().id(("skill", index)), || format!("skill:{word}")).flex().gap_3().px_3().py_1().cursor_pointer().when(index == popup_ix, |d| d.bg(c("raise"))).hover(|s| s.bg(c("raise")))
                 .child(div().font_weight(FontWeight::BOLD).flex_shrink_0().child(label)).child(div().flex_1().overflow_hidden().whitespace_nowrap().text_color(c("dim")).child(desc))
                 .on_click(cx.listener(move |this, _, window, cx| {
                     let _ = this.tx.try_send(Command::Action("skill".into(), word.clone())); this.await_completion(cx);
                     this.input.focus_handle(cx).focus(window); cx.notify();
-                })));
+                }))));
         }
         // the reference words the hub has offered become chips in the draft (it knows them as models, bots, threads...)
         { let fresh: Vec<String> = skills.into_iter().flatten().filter_map(|s| s.get("word").and_then(Value::as_str)).filter(|w| w.len() > 1 && w.starts_with(|c| matches!(c, '@' | '>' | '%' | '#' | '&' | '$')) && !w.starts_with("$install")).map(String::from).collect();
@@ -450,6 +452,8 @@ impl Render for Backplane {
         self.screens.popup_shut = shut;
         let show_popup = !shut && skills.map_or(false, |s| !s.is_empty());
         if self.input.read(cx).popup_open != show_popup { self.input.update(cx, |c, _| c.popup_open = show_popup); }
+        let (pv, pm, py) = (f32::from(self.screens.popup_scroll.bounds().size.height), f32::from(self.screens.popup_scroll.max_offset().height), -f32::from(self.screens.popup_scroll.offset().y));
+        let popup_bar = crate::screens::picker::thumb(pv, pv, pm, py).map(|(top, h)| div().absolute().top(px(top)).right(px(2.)).w(px(6.)).h(px(h)).bg(c("faint")).opacity(0.7));
         // chips
         let model = thread["picker"]["models"].as_array().and_then(|m| m.iter().find(|x| x["on"] == true)).map(|m| string(m, "label")).unwrap_or_default();
         let model_short = if model.starts_with("Claude Code") { "default".to_string() } else { model.split(" · ").next().unwrap_or("").to_lowercase() };
@@ -506,7 +510,7 @@ impl Render for Backplane {
         let connected = self.status == "Connected";
         if !self.screens.img_poll && self.screens.images.loading() { self.screens.img_poll = true; crate::screens::timeline::poll(cx); }
 
-        let el = crate::keys::attach(div().size_full().flex().flex_col().bg(c("bg")),cx)
+        let el = crate::keys::attach(div().size_full().flex().flex_col().bg(c("bg")),self.picker_keys(),cx)
             .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| this.attach_event(&crate::screens::composer::ComposerEvent::Files(paths.paths().to_vec()), cx))).text_color(c("text")).text_size(px(13. * self.local.text_pct as f32 / 100.)).font_family(self.local.font.clone()).line_height(px(20. * self.local.text_pct as f32 / 100.))
             .relative().on_action(cx.listener(|this, _: &crate::OpenPaletteKey, _, cx| if !this.palette_close(cx) { this.palette_open(cx) })).on_action(cx.listener(|this, _: &crate::screens::improvements::Toggle, _, cx| crate::screens::improvements::toggle(this, cx))).on_action(cx.listener(|this, _: &crate::ToggleSidebarKey, _, cx| this.sidebar_toggle(cx))).on_action(cx.listener(|this, _: &crate::FocusSearchKey, _, cx| this.focus_search(cx))).on_action(cx.listener(Self::send)).on_action(cx.listener(Self::close_popup)).on_action(cx.listener(Self::copy_selection))
             // the dev build strip, only while a build is being made or waits to relaunch
@@ -557,8 +561,8 @@ impl Render for Backplane {
                         } }, |_, _, _, _| {}).absolute().size_0())))
                     .when(!self.error.is_empty(), |d| d.child(div().px_5().py_2().text_color(c("bad")).child(self.error.clone())))
                     .child(div().flex_shrink_0().relative().child(art::probe("composer")).children(crate::perf::mark("composer")).border_t_1().border_color(c("line")).flex().justify_center().child(div().w_full().max_w(px(930.)).px_4().py_3().flex().flex_col().gap_2()
-                        .when(show_popup, |d| d.child(popup))
-                        .children(crate::screens::picker::view(cx, light, &thread["picker"], self.screens.picker_open, &self.screens.pick, &self.local.favs))
+                        .when(show_popup, |d| d.child(div().relative().border_1().border_color(c("line")).bg(c("panel")).child(popup).children(popup_bar)))
+                        .children(crate::screens::picker::view(cx, light, &thread, self.screens.picker_open, &self.screens.pick, &self.local.favs))
                         .children(self.screens.ctx_open.then(|| div().id("ctx-panel").max_h(px(340.)).overflow_y_scroll().px_3().py_2().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).flex().flex_col().gap_1()
                             .child(div().font_weight(FontWeight::BOLD).child("Context"))
                             .child(div().text_color(c("dim")).child(if ctx.is_empty() { "Nothing reported by the provider yet.".to_string() } else { format!("Held now: {}", ctx.trim_start_matches("ctx ")) }))
