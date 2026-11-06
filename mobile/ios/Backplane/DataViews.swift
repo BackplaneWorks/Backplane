@@ -219,6 +219,7 @@ struct DataThreadView: View {
     @State private var text = ""
     @State private var pending: [Data] = []
     @State private var picked: [PhotosPickerItem] = []
+    @State private var notice = ""
 
     init(client: DataClient, id: String) { self.client = client; self.id = id; client.touch(id) }
 
@@ -245,6 +246,10 @@ struct DataThreadView: View {
                 .onChange(of: list.last?.id) { _, _ in proxy.scrollTo("end", anchor: .bottom) }
                 .onChange(of: list.count) { _, _ in proxy.scrollTo("end", anchor: .bottom) }
             }
+            if !notice.isEmpty {
+                Text(notice).font(.footnote).foregroundStyle(.orange).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal).padding(.vertical, 6).background(BackplaneDesign.panel)
+                    .accessibilityIdentifier("data.images.notice")
+            }
             if !pending.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
@@ -261,7 +266,9 @@ struct DataThreadView: View {
             HStack(alignment: .bottom, spacing: 8) {
                 PhotosPicker(selection: $picked, maxSelectionCount: max(0, 4 - pending.count), matching: .images) {
                     Image(systemName: "paperclip").font(.system(size: 22)).frame(minWidth: 36, minHeight: 44)
-                }.accessibilityLabel("Attach pictures").accessibilityIdentifier("data.attach")
+                }
+                .disabled(!client.canSendImages)
+                .accessibilityLabel(client.canSendImages ? "Attach pictures" : "Attach pictures (this hub does not take pictures yet)").accessibilityIdentifier("data.attach")
                 UIKitField(text: text, placeholder: "Message", editable: true,
                            onChange: { text = $0; client.setDraft(id, $0) },
                            onSend: { send() }, onPasteImages: { imgs in add(imgs.compactMap { $0.jpegData(compressionQuality: 0.95) }) })
@@ -308,6 +315,8 @@ struct DataThreadView: View {
     }
     // pictures chosen or pasted: shrunk off the main thread, at most four to a message
     private func add(_ raw: [Data]) {
+        guard client.canSendImages else { notice = "This hub does not take pictures yet: update it, then attach again."; return }
+        notice = ""
         Task {
             let small = await Task.detached { raw.compactMap { DataClient.prepared($0) } }.value
             pending = Array((pending + small).prefix(4))
