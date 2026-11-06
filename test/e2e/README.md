@@ -2,13 +2,20 @@
 
 Scripted end-to-end journeys for GPUI, iOS and Android against the Rust hub, with frame measurements.
 
-- `journeys.json` — the 12 gate journeys, client-agnostic steps + the capabilities each needs.
+- `journeys.json` — the 12 gate journeys, client-agnostic steps + the capabilities each needs; `stories` holds the user-story journeys (from
+  `stories.md`, `story: S04`) and the day-in-the-life walk (`story: day`), and `step_budgets_ms` the per-press budgets.
+- `stories.md` — what a person does with Backplane, as short stories; each names the journey that drives it (or the gate journey that covers it).
 - `CONTRACT.md` — step vocabulary, how every measurement is defined, what each client has today, and the requests (G1-G5) the GPUI client must meet for the blocked journeys.
 - `lib/frames.mjs` (+ `frames.test.mjs`) — click -> next frame, frame times / jank, layout shift, dead controls, RSS slope. Pure; unit-tested.
 - `lib/hubfx.mjs` — a seeded fixture hub (Rust or JS) with stand-in agents only.
 - `lib/capture.mjs` — Xvfb + i3 + ffmpeg capture (Boat only).
 - `adapters/{desktop,android,ios}.mjs (`--client gpui` loads desktop.mjs)` — one per client; a missing capability makes the journey `blocked`, never pass.
-- `run.mjs` — the runner; writes `out/e2e/<client>/summary.json` with a gate mapping (pass / fail / open) and the capture paths.
+- `run.mjs` — the runner; writes `out/e2e/<client>/summary.json` with a gate mapping (pass / fail / open) and the capture paths, and
+  `report.md`: per-press timing, the frictions ranked by harm, what is blocked. `--journey all` (gate) | `stories` | `day` | `story:S04` | `<id>`;
+  `--copy-of HOME` runs them on a copy of a home (BACKPLANE_COPY=1; CONTRACT.md "Copy runs").
+- `lib/report.mjs` (+ `report.test.mjs`) — step verdicts against the budgets and the harm ranking. `lib/seed.mjs` — the lived-in workspace.
+  `lib/hubcheck.mjs` — the hub's own counts for `expect {hub}`. `rpc.mjs HOME METHOD [JSON]` — one call to a test hub by hand.
+- Agents: `skills/backplane-e2e/SKILL.md` is the entry point (rules, commands, how to read the results).
 - `bp-run.sh` — desktop-side launcher for h@backplane (Xvfb, own D-Bus; `scripts/boat-job.sh` no longer exists, so `boat-run.sh` is stale): `selftest`, or `run HUB GPUI [journey]`.
 
 Rules: nothing runs on the desktop (no Xvfb, hub or client) without the person's word; Boat renders in software, so its frame numbers

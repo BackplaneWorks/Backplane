@@ -9,6 +9,16 @@ missing evidence. Statuses map to `docs/final-gate.json` as: pass -> pass, fail 
 `open_bots/open_bot/open_rooms/open_room/post_room`, `open_viewer{board|schematic|3d}`, `pan_zoom`, `orbit`, `open_files`, `download`,
 `open_settings`, `click_every_control`, `sleep_network/wake_network`, `agents`, `session`, `expect`.
 
+Story steps (the user-story journeys in `journeys.json` `stories`, from `stories.md`; any journey may use them):
+`open_viewer{split|mech|files|diff|review}`, `close_viewer`, `fit`, `layers{open}`, `sheets{open}`, `probe{fx,fy,pane}`, `history{step|mode|play}`,
+`compare{index}`, `files{op}`, `close_settings`, `attach{file}`, `thread_action{action,value}` / `view_action` (the selected thread's own
+`pin|unpin|settle|unsettle|archive|unarchive|snooze|interrupt|fork|delete`, or any view action), `click{control}` (an id from the client's
+control inventory), `palette`, `field{name,text}`, `scroll{up}`, `scroll_by{px}`, `scroll_state{name}`, `key{combo}`, `type_keys{text,gap_ms}`
+(real keys: xdotool on the run's own Xvfb), `hub{op:restart|down,secs}` and `fs{op:copy|remove,from,to}` (harness acts between two steps:
+the client reports a `mark`, the adapter acts), `needs{what}` (a capability no client has yet: always `blocked: what`), and `expect` with
+`hub:{pinned:+1,...}` (counts the hub reports over data/1, before against after: lib/hubcheck.mjs), `composer:"text"` (the client's own read),
+`scroll_dups:0`, `scroll_same:[a,b]` (two `scroll_state` reads). Paths in a step may start with `$ROOT` (the fixture root).
+
 ## Measurements and how they are defined (lib/frames.mjs, unit-tested)
 - **Click -> next frame.** `ack` = first presented frame that differs from the one before the click (pressed, hover, focus or the new
   state); `result` = the frame that shows the expected state (that one includes any hub round trip). "Every click answers within one
@@ -21,6 +31,33 @@ missing evidence. Statuses map to `docs/final-gate.json` as: pass -> pass, fail 
 - **Dead controls:** inventory of visible, enabled controls on each screen; each is clicked once; a control whose click changes neither
   the shown state nor emits an action is dead. A control never clicked is not assumed alive.
 - **Memory over the long session:** RSS/PSS of the client tree sampled every 30 s, slope after 5 min.
+
+### Per-press timing and the friction report (lib/report.mjs, unit-tested in report.test.mjs)
+Every adapter returns `steps`: one row per step the client ran, in order, with its result time (`ms`), its `ack` (G1) and, from GPUI, where the
+time went (`hub_rtt_ms, decode_ms, process_ms, apply_ms, render_build_ms, applied_to_frame_ms`). Each row is judged against what a person waits
+for (`journeys.json` `step_budgets_ms`, ok / slow / fail): a press 300 ms / 2 s, a navigation (thread, project) 1 s / 3 s, a viewer drawing 5 s /
+15 s, a reply starting 3 s / 8 s, a reconnect after `net_sleep` 10 s / 20 s (the sleep itself not counted). A step past its fail budget, a step
+that never showed its result, a click on a control the client does not have, or a failed `expect` fails the journey. The one-frame claim stays
+on G1 against `refresh_hz_budget` (Measurements, above): the budgets are the person's patience, not the frame budget. `run.mjs` writes
+`report.md` next to `summary.json`: the journey table with each one's slowest step, then every friction ranked by harm (a press that never
+answers 90, over the fail budget 80, a failed expectation 75, a layout jump 60, a live-looking control that does nothing 50, slow 30+, jank 20,
+over one frame 10, a disabled-looking placeholder 5), then what is blocked and on which capability (a coverage gap, not ranked as harm),
+then the slowest presses. Software-rendered runs say so at the top.
+
+### Story steps still missing (requests, G7)
+A journey that needs one is `blocked: <name>`: `orbit` (3D drag), `rename` (the rename field by script), `keys` (no xdotool on the run's display),
+`model_picker`, `search` (search every thread), `window_size`, `tailnet` (a stand-in tailnet for the pairing link), `tour`, `board_picker`,
+`drag_divider`, `components_panel`, `reflow_panel`, `routines`, `pair_wrong_token`, `client_restart` (reload keeps your place), `project_menu`,
+`todo_edit`, `order_standin`, `second_client`. Wanted from GPUI as well: an event when a viewer has drawn its content (`viewer_drawn {kind, ms}`),
+so "the board draws within 5 s" is timed by the client and not by a screenshot; today a rail click is timed as a press (its next frame).
+
+### Copy runs (`run.mjs --copy-of HOME`, lib/hubfx.mjs `startCopyHub`)
+The journeys on a copy of a home: the source is only read (events.jsonl up to its last whole line, attachments), the copy's log gets
+`restart.continue` off, the hub runs with `BACKPLANE_COPY=1` (checked in `/proc/<pid>/environ`; docs/COPY-GUARD.md), the shell stand-in, and its
+own HOME, XDG folders and a file vault. A copy's projects are the person's real folders, so steps that need the fixture's seed or write to disk
+(`attach`, `paste_image`, bots, rooms, `download`, `fs`, `pair`) are `blocked: copy: ...` there. A source that looks like a real store (a live
+home path, a store.db, or any home whose root lacks the harness's `.e2e-root` mark) is refused unless `E2E_COPY_REAL=person` (the person's word for that
+run). `scripts/switch.sh` keeps its own hold (no hub on a copy of a real log, HOLD=1); lifting either is the person's decision.
 
 ## GPUI (native/gpui) — exists today
 Script file (`--script`, `BACKPLANE_GPUI_SCRIPT`) steps: `select N`, `popup TEXT`, `type TEXT`, `send`, `wait MS`.
@@ -36,7 +73,7 @@ Owner of every GPUI hook: the GPUI desktop-client stream (thread t1793832589-168
 | G3 | event `layout {rects:{id:{..}}}` on change (probes painted last frame) | GPUI desktop stream | `c373ceb37` | landed; emitted only when rect reporting is enabled (env `BACKPLANE_GPUI_RECTS=1`, or the check modes), which the adapter sets for the layout and dead-control journeys |
 | G4 | event `controls [{id,label,enabled,visible,wired,disabled_look}]` on change (`disabled_look:true` = no handler and drawn disabled, from `839a84025`); step `{"click":"<id>"}` -> event `click {id, found, changed, action}` (a click with no change is reported after 1.5 s: a dead control) | GPUI desktop stream | `c373ceb37` | landed; same rect-reporting caveat |
 | G5 | steps `scroll px` and `net_sleep secs` (drop the hub socket and wait for the reconnect) | GPUI desktop stream | `c373ceb37` | landed |
-| G5 | steps `paste_image`, `open_viewer`, `open_settings`, `files_download` | screens lane | not landed | answer `ok:false, error:"not_implemented"` today; pair, bots/rooms and the `@ > %` popup range are not in the script contract yet either |
+| G5 | steps `paste_image`, `open_viewer`, `open_settings`, `files_download` | screens lane | landed except `paste_image` (2026-11-06 check of `script.rs`) | viewers open with the rail's controls (`click rail:Board`, `rail:Schematic`, `rail:3D`, `rail:Split`, `rail:Mech`, `rail:Files`, `rail:Review`, `rail:Diff`), the Files tab answers `files`/`files_download`, Settings is `click ui:Settings`, bots and rooms are the sidebar's `bot:<name>`/`room:<name>`, a picked or dropped file is `attach PATH`, the plot canvas takes `pan`, `zoom`, `fit`, `layers`, `sheets`, `tap`, the history bar `hist`, `histmode`, `histplay`, `compare`. `paste_image` and `open_settings` as script keys still answer `not_implemented`; pairing from the client and the `@ > %` popup range are not in the script contract |
 The adapter maps the not-landed steps to `blocked` and reads the landed hooks (`ack`, `frames`, `layout`, `controls`, `click`); `adapter.test.mjs` drives it with a fake client speaking this contract. No real run has used them yet: the Linux binary in `build/gpui/linux/` (10:41 of 5 Nov 03:41) predates `c373ceb37` (03:58) and needs a rebuild on Boat.
 
 ### Pass rule (the person, 2026-11-05)
@@ -59,6 +96,10 @@ hook (`BACKPLANE_ACTS`); frame data from `xctrace` hitches. None of that is wire
 `BACKPLANE_AGENTS` is read back from `/proc/<pid>/environ` first) and seeds a project, threads with history, an image, a board, a
 schematic, a STEP, a text file, bots and rooms. Any seed RPC the hub refuses is written to `seedReport`; journeys that need it are
 `blocked: hub:<method>`.
+Its HOME, XDG folders and vault keyring are inside the run's root (a hub and the kicad-cli it runs must never write the person's `~/.cache`,
+`~/.config/kicad` or login keyring). The story journeys get `standin:'story'` (`test/tools/claude_standin.ts` in stream mode: `tools:N`,
+`todos:N/D`, `hold:MS`, `ask:` ... in the message) and, unless they say `seed: fixture`, the lived-in workspace (`lib/seed.mjs`: five projects,
+~19 threads, three long ones, some pinned, settled, snoozed, archived; `E2E_LIVED_SCALE=0.2` for a quick run).
 
 ### Dead buttons, how the sweep reads `disabled_look`
 A visible control with a handler that, when clicked, changes nothing and emits nothing is **dead**. A visible control with no handler is reported separately: `disabledNoHandler` when GPUI draws it disabled (`disabled_look:true`), `deadLooksEnabled` when it is drawn as live. The gate says every visible button must do something, so `dead.pass` is false while any visible control lacks a handler; `dead.passIfDisabledAccepted` is the reading in which disabled-looking placeholders are fine. That choice belongs to the reviewer; the harness reports both and never decides it.

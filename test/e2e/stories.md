@@ -1,28 +1,79 @@
 # Backplane user stories (end to end)
 
-What a person does with Backplane, as short stories to drive through the real
-UI. Platforms: **W** web page (headless Chromium), **D** desktop app
-(Electron, driven over CDP), **A** Android app (emulator), **I** iOS app (only
-on a Mac; skip otherwise). Each step is a press, a key or a gesture; time it
-(SKILL.md, "Timing"). The hub is `hub.sh`'s: projects `proj` (the fixture)
-and `multi` (boards `alpha`, `beta`, plus an archived copy and a build
-snapshot), stand-in agents only.
+What a person does with Backplane, as short stories to drive through the real client. Platforms: **G** the GPUI desktop client
+(`native/gpui`, on its own Xvfb), **A** the Android app (emulator), **I** the iOS app (Mac simulator). Remarks marked W or D below
+come from the retired web page and Electron app: on G check the same behaviour where G has the feature. Each step is a press, a key
+or a gesture, timed against the budgets in `journeys.json` (`step_budgets_ms`, CONTRACT.md "Per-press timing"). The hub is the
+harness's (`lib/hubfx.mjs`): the fixture project `proj` or the lived-in workspace (`lib/seed.mjs`: `proj`, `multi` with boards
+`alpha` and `beta` plus an archived copy and a build snapshot, `amp`, `sensor-node`, `psu`), stand-in agents only.
+
+Each story is a journey in `journeys.json` `stories` (`bun test/e2e/run.mjs --journey story:S04`), or is covered by a gate journey or
+a hub-level row. A journey whose story needs something no client script has is `blocked: <capability>` (CONTRACT.md, G7), never a
+pass. When a feature lands, change its story here and its journey's steps in the same commit.
+
+| story | journey | also |
+|---|---|---|
+| S01 | s01-first-run (blocked: tour) | |
+| S02 | s02-add-project | |
+| S03 | s03-find (blocked: search) | |
+| S04 | s04-send-watch | gate `stream` |
+| S05 | s05-stop | |
+| S06 | s06-steer | |
+| S07 | s07-long-history | gate `projects-threads` |
+| S08 | s08-read-while-streaming | |
+| S09 | s09-lifecycle (rename blocked) | `f-rows.mjs` F03 (hub only) |
+| S10 | s10-model (blocked: model_picker) | |
+| S11 | s11-attach | gate `send-image` (paste) |
+| S12 | s12-token-stats | |
+| S51 | s51-tool-drawer | |
+| S52 | s52-pairing-link (blocked: tailnet) | |
+| S13, S14, S15 | s13-board, s14-schematic, s15-3d (orbit blocked) | gate `viewers` |
+| S16, S47 | s16-pick-board, s47-picker-rescan (blocked: board_picker) | |
+| S17 | s17-history | |
+| S18 | s18-files-diff-review | gate `downloads` |
+| S19 | s19-viewer-layout (blocked: drag_divider) | |
+| S48 | s48-mech | |
+| S53 | s53-3d-workbench (dead-control sweep) | |
+| S54, S55 | s54-inspect-part, s55-reflow (blocked) | |
+| S20, S23, S24 | | gate `settings`, `settings-walk.mjs` (S01-S14 rows) |
+| S21 | s21-fold-sidebar | |
+| S22 | s22-palette (keys) | |
+| S25 | s25-bot | gate `bots-rooms` |
+| S26 | s26-routine (blocked: routines) | |
+| S27, S29, S30 | | gate `pair`, `projects-threads`, `stream`, `viewers` on A |
+| S28 | s28-wrong-pairing (blocked) | |
+| S31 | s31-hub-restart | gate `reconnect` |
+| S32 | s32-reload (blocked: client_restart) | |
+| S33 | s33-split | |
+| S34, S37 | not ported: the top bar's actions are s09's; the state colours need a client read of the State cell | `f-rows.mjs` F04 |
+| S35 | s35-toggles | |
+| S36 | s36-intent (blocked: project_menu) | |
+| S38, S49 | s38-buy (blocked: order_standin) | |
+| S39 | not ported: hub timing (`settle.idle.minutes`), a hub-level row | |
+| S40 | s40-typing (keys) | |
+| S41 | s41-switch-streaming | gate `switch-fast` |
+| S42, S43 | s42-window-sizes, s43-two-windows (blocked) | |
+| S44 | s44-lived-in | |
+| S45 | s45-keyboard (keys) | |
+| S46 | | gate `popups` (`$`) |
+| S50 | s50-todos (editing blocked: todo_edit) | |
+| day | day-hardware: the day in the life | runs on a copy too (`--copy-of`) |
 
 ## Getting started
 
-**S01 First run** (W D A)
+**S01 First run** (G A)
 Open the hub fresh. D: started from the desktop app with no hub running, its
 hub joins the tailnet (Settings → Network: "Tailscale: on"). The guided tour shows; Skip closes it. Settings → Tour →
 Show the tour opens it again; Done closes it and it stays closed after a
 reload. The KiCad notice waits until the tour is over (none under the card).
 
-**S02 Add a project** (W D)
+**S02 Add a project** (G)
 Sidebar `+` → enter a folder path (a copy of the fixture): the highlighted
 row is "Add … as a project", so Enter adds it. The project appears in the
 sidebar with a new thread selected; pressing Board draws its board, its
 corner reading "… KB · loaded in N s" in the page's monospace.
 
-**S03 Find a project or conversation** (W D A)
+**S03 Find a project or conversation** (G A)
 Type part of a project name in the sidebar search: only matching projects
 stay; clearing it brings all back. The search icon (Ctrl+Shift+F) finds a
 word from an earlier reply in any thread (the open one's results first);
@@ -36,7 +87,7 @@ subagent's steps is listed under its thread and opens that thread.
 
 ## Talking to an agent
 
-**S04 Send and watch the reply** (W D A)
+**S04 Send and watch the reply** (G A)
 In `proj`'s thread type a message and press Enter (A: the send button). The
 message shows at the end at once, the composer empties, the turn shows as
 working, the reply streams in and ends with a "Finished hh:mm · Ns" stamp.
@@ -45,7 +96,7 @@ until it has sat idle 30 minutes, or at once with "Settle when done" on: S39).
 No "design change" row or Changes cell when the agent changed no file.
 Click another thread's row and type at once: the text lands in its composer.
 
-**S05 Stop a turn** (W D A)
+**S05 Stop a turn** (G A)
 Send a message; while the reply streams press Stop. The streamed text never
 blanks; the turn ends as stopped within 2 s ("Stopped hh:mm · Ns", the top
 bar's State grey "stopped"), and the composer takes a new message that then
@@ -54,15 +105,15 @@ W/D: during another turn, Ctrl+K → Stop the running turn shows Ctrl+. and
 stops it. Start again and Ctrl+. stops it from the composer; idle threads
 offer no Stop command. Both Stop tooltips name the shortcut.
 
-**S06 Follow-ups while busy** (W D)
+**S06 Follow-ups while busy** (G)
 Send a message, and while it runs send a second (Send reads "Steer" while a
 turn runs; Send, Steer and Stop keep one width, so draw, attach and mic
 never move). The second is taken at once and shows under the reply streamed
 so far; the rest of the reply streams under it, nothing on screen jumps, and
 no line of the reply shows twice or goes missing.
 
-**S07 Long history** (W D A)
-`hub.sh long` makes an 80-exchange thread. Open it: it opens at the newest
+**S07 Long history** (G A)
+Open a long thread of the lived-in workspace ("Bring-up notes", 36 exchanges): it opens at the newest
 message. Scroll up to the first message ("Question 1") and back down to the
 newest: every step moves, nothing jumps, no stall (D: also fast bursts of
 notches near the top: 0 jumps). Scroll halfway up and send
@@ -70,7 +121,7 @@ a message: the view goes to the newest page with that message on screen.
 A: scroll into history and tap Latest: it returns directly to the newest
 page and follows the reply again; the button goes away at the end.
 
-**S08 Reading while it streams** (W D)
+**S08 Reading while it streams** (G)
 Send a message; while the reply streams, scroll up a few notches (D: mouse
 wheel with smooth scrolling). The view stays where you scrolled, the text
 under the pointer does not move, and a "New ↓" pill shows at the
@@ -78,7 +129,7 @@ timeline's foot. Click it (or scroll back to the bottom): it follows the
 stream again and the pill goes. Scrolled up while idle, a reply that
 finishes makes it "1 new ↓".
 
-**S09 Thread lifecycle** (W D A)
+**S09 Thread lifecycle** (G A)
 On a thread: Rename (title updates everywhere), Pin (moves to the top), Settle
 (moves under "Settled N"), Unsettle, Settle again and send a message in it
 (it comes back to the live list), Snooze 1 h, Fork (a new thread with its inherited
@@ -87,7 +138,7 @@ press) opens the same menu on a sidebar row, Fork included; Esc closes it.
 A pinned row shows a small pin. Snooze, then Archive: it wakes (▾ lights only
 Archived, no countdown).
 
-**S10 Pick the model** (W D A)
+**S10 Pick the model** (G A)
 Open the model picker under the composer (W D: its chip "claude / default /
 auto", or Ctrl+M): three columns AGENT | MODEL | EFFORT. W D: by keys alone,
 the headers' keycaps read AGENT ⇧Tab | MODEL ↑↓ | EFFORT ←→ and move with
@@ -96,21 +147,21 @@ Tab. Tab to MODEL, ↓ to fable, → to max, Enter: it closes and the chip reads
 row or an effort bar applies at once. The next turn runs with the choice (the
 stand-in's args show `--model fable --effort max`).
 
-**S11 Attach a file** (W D)
+**S11 Attach a file** (G)
 Attach an image with the paperclip (or drop it on the composer) and send. The
 message shows the image; clicking it opens the lightbox; "Copy image" puts it
 on the clipboard (D: and a button shows the file in its folder); Esc closes it.
 
-**S12 Token stats** (W D)
+**S12 Token stats** (G)
 Token stats are on by default (Settings → Usage shows On; Off hides the chip
 and On brings it back). The chip beside Send shows tokens,
 cost (when known) and context, rounded to the nearest (5,950 reads "6k");
 clicking it opens the panel with the last turn's and the thread's totals,
 each model a line with its cost and its tokens under it; Esc closes it.
 
-**S51 Tool calls in one drawer** (W D A)
+**S51 Tool calls in one drawer** (G A)
 Send "tools:5 drawer" (the stand-in runs five Bash calls, then streams its
-reply; `BP_E2E_STREAM="60 300"` slows it down). While it runs, the calls are
+reply; the stand-in's `BP_STREAM_MS=300` slows it down). While it runs, the calls are
 one shut row under the message, "› 5 tool calls · running: grep -n drawer
 board.kicad_pcb # 5" (what the latest call does) with a pulsing dot; no
 call's own row shows. Opened while it runs, that call's row has its name in
@@ -123,42 +174,42 @@ thread and back: the first run is still open, the new one shut.
 A: long-press a tool row for Copy or Select text; the reader shows its
 whole text. Error rows wrap in full, and their dot announces Failed.
 
-**S52 The pairing link in Settings** (W D)
-Start the hub with `BP_E2E_TAILNET=1` (hub.log: "Backplane on your tailnet:
+**S52 The pairing link in Settings** (G)
+Start the hub with a stand-in tailnet (not in the harness yet: `tailnet`) (hub.log: "Backplane on your tailnet:
 http://127.0.0.2:PORT/"). Open the page with its token and go to Settings ›
 Network and updates: "Pairing link" reads `http://127.0.0.2:PORT/#token=…`
 with QR code and Copy beside it, never "Shown once Backplane listens on your
 tailnet."; QR code shows the code. Reload, and open it from a second window:
-the same. Without `BP_E2E_TAILNET` the row says it is shown once Backplane
+the same. Without it the row says it is shown once Backplane
 listens on the tailnet, and a page opened without the token is refused
 ("Pairing is required to reconnect").
 
 ## Seeing the design
 
-**S13 Board** (W D A)
+**S13 Board** (G A)
 Open the Board view: the board draws within 5 s. Fit fits it; the wheel zooms
 at the pointer; drag pans. Layers lists KiCad's layers; turning one off hides
 it; clicking a layer's name dims the others (high contrast). The Layers menu
 stays inside the window and the viewer's bar stays on one line (the board
 does not move).
 
-**S14 Schematic and its sheets** (W D A)
+**S14 Schematic and its sheets** (G A)
 Open the Schematic: the root sheet draws. Click a sheet symbol: that sheet
 opens and the trail shows where you are; Up/Back return to the root.
 
-**S15 3D** (W D A)
+**S15 3D** (G A)
 Open 3D: the board's model draws, lit from above on a soft spot of light
 (the board stands out from the background); drag turns it, the wheel
 zooms, Fit recentres. Opened again after a reload it shows at once (kept
 on the hub). A model file over 12 MB says it is too big to show, and the
 hub's memory stays low.
 
-**S16 Pick a board** (W D A)
+**S16 Pick a board** (G A)
 In `multi`, open the board picker: it offers `alpha` and `beta` only (not the
 archive copy or the build snapshot), the default first. Pick `beta`: Board,
 Schematic and 3D all show `beta`.
 
-**S17 Design history** (W D)
+**S17 Design history** (G)
 Have the agent change the board (send `mode:toolhold` with a stand-in that
 edits, or edit the board file by hand while a turn runs). A step tick appears
 on the history bar; Play steps through; Compare shows the change marked.
@@ -170,14 +221,14 @@ keeps the same history; switching boards shows that board’s steps.
 Scrub during a background refresh: history stays usable without a conversation
 error. Returning to Live or reloading keeps the file or schematic sheet on screen.
 
-**S18 Files, Diff, Review** (W D A)
+**S18 Files, Diff, Review** (G A)
 Files lists the project folder; opening a board file shows it in the Board
 view. Open README.md or notes.txt: it is selectable read-only text (phones
 limit previews to 1 MB); Back returns to Files. Diff on a new thread before its first turn says there are no changes
 yet (no error toast); after a turn it shows the change. Review → BOM lists
 the parts.
 
-**S19 Viewer layout** (W D)
+**S19 Viewer layout** (G)
 Drag the viewer's left edge: it resizes and keeps that width after a reload;
 a double-click resets it; it stops where the thread would get under 360 px.
 Tab to the divider: Left/Right resize it (Shift takes larger steps), Home
@@ -185,7 +236,7 @@ resets it, End grows it to its clamped maximum, and the changed width remains
 after a reload.
 Close the viewer; open it again from the rail.
 
-**S47 The board picker reads the folder each time** (W D A)
+**S47 The board picker reads the folder each time** (G A)
 In `proj` (two boards), open the board picker on Board: it offers both. Shut
 it, copy a board and its project file into `proj/gamma/` on disk, open it
 again: `gamma` is listed within a second, the picker stays open and the
@@ -194,7 +245,7 @@ moves or flickers. Delete `gamma/`, open it again: it is gone. On a phone,
 shut the viewer and open it on Board: the Sheet menu lists the boards there
 are then.
 
-**S48 Mech re-checks its parts** (W D A)
+**S48 Mech re-checks its parts** (G A)
 Put a STEP in `proj/mech/`, open Mech: it is listed and shown. Add a second,
 open Mech again (from Board, or after shutting the viewer): both are
 listed. Delete the part on show, open Mech again: it is gone, and another
@@ -202,7 +253,7 @@ part shows in its place (never the deleted one); delete them all: Mech says
 there are none. With Mech open, choose another thread, add a part, come
 back: it is listed. The same on a phone's Mech.
 
-**S53 The 3D workbench** (W D)
+**S53 The 3D workbench** (G)
 Open 3D in `proj`: over the model a toolbar reads Fit Iso Top Bottom Front
 Right Back Left, PCB, Camera, Reflow, Components, a Rendering choice (Fast,
 Studio, Path trace) and Frame part. The quick model draws first; the corner
@@ -221,7 +272,7 @@ column, model and PCB 160 px tall, and only the inspector scrolls. At
 1920x1080 with the sidebar folded, drag the viewer's edge past 950 px: they
 sit side by side, the inspector on the right.
 
-**S54 Inspect a part** (W D)
+**S54 Inspect a part** (G)
 In 3D press Components: the inspector reads "Components · saved CAD",
 Refresh, "Saved revisions match…", a "Find reference, value or MPN" search
 and a Ref | Value | MPN table; typing filters it. Click U1: its page shows
@@ -233,7 +284,7 @@ turn PCB on and click a pad on the PCB: Components opens on that part,
 its pads lit and the probe chip naming the pad's net. Clear deselects. In
 `multi`, pick `beta`: the model's name and "Saved source" read beta's.
 
-**S55 Reflow preview** (W D)
+**S55 Reflow preview** (G)
 In 3D press Reflow: the inspector shows "Reflow preview" tagged
 Illustrative (Components shuts): Solder alloy SAC305 with its composition
 and solidus/liquidus, Furnace, Board mean and Liquid fraction, two graphs,
@@ -248,21 +299,21 @@ open 3D again, or switch threads and back: Reflow is still the open pane
 
 ## Settings and workspace
 
-**S20 Appearance** (W D A)
+**S20 Appearance** (G A)
 Settings → Appearance: switch the theme (applies at once), the text size
 (text grows; at 130% the top bar still reads "Jump or run a command" in
 full), the language to 日本語 where it is offered (labels change; on
 the web it is a preview, opened with `?lang=ja`) and back, and the sidebar
 to Active (one list of live threads).
 
-**S21 Folding the sidebars** (W D)
+**S21 Folding the sidebars** (G)
 Ctrl+B (Cmd+B), or the "‹" beside "Search projects" (the top bar has no fold
 button), folds the sidebar to a
 44 px strip of project icons (the open one outlined; a click opens that
 project; each project shows its icon or initials) and its "›" brings it back; the rail's chevron makes the rail icons only. Both stay after
 a reload.
 
-**S22 Command palette and shortcuts** (W D)
+**S22 Command palette and shortcuts** (G)
 With a thread open: Ctrl+K opens the palette; typing filters, best match
 first ("new thread" → "New thread · Ctrl+N" on top); Enter runs "New
 thread". It lists Pin or Unpin (Archive or Unarchive...) by the thread's
@@ -279,14 +330,14 @@ appear or go. The legend at the sidebar's foot (shown while Ctrl is held):
 Ctrl+click on its "all shortcuts" row opens the palette. Open the top bar's
 ▾, press Esc and type: the text goes into the composer.
 
-**S23 API keys** (W D A)
+**S23 API keys** (G A)
 Settings → API keys: add `E2E_KEY` with a value. Only the name is listed,
 never the value, and after Save the list shows the new name; Delete asks
 ("Click again to delete") and the second click deletes it. W D: record the page's websocket frames
 (CDP) while typing and saving: no frame from the hub contains the value. A:
 type the value fast: the whole value is kept.
 
-**S24 Settings stick** (W D)
+**S24 Settings stick** (G)
 At 1920x1080 Settings fills the width: its groups flow into up to four
 columns, the search spans them; a page (Appearance, API keys...) has the
 category list on its left and each row's controls beside its label; at 420
@@ -297,18 +348,18 @@ tooltip naming what it follows (this machine).
 
 ## Bots and routines
 
-**S25 A bot** (W D)
+**S25 A bot** (G)
 Bots `+` → make a bot; it appears with its cat. Open it and send a message:
 it answers (stand-in). Rooms `+` → make a room, post in it; the post shows.
 
-**S26 A routine** (W D)
+**S26 A routine** (G)
 Make a routine "in 1 minute: say hello" on a thread. It shows in Routines with
 its time in your zone, and fires: the thread gets the message.
 
 ## Phone
 
 **S27 Pair a phone** (A)
-Open the hub's pairing link (`PAIR` from `hub.sh`) on the phone: it pairs and
+Open the hub's pairing link (the fixture hub's invitation) on the phone: it pairs and
 lists the projects and threads ("Connected").
 
 **S28 Wrong pairing** (A)
@@ -326,14 +377,14 @@ picks a schematic sheet and, in `multi`, a board.
 
 ## Coming back
 
-**S31 Hub restart** (W D A)
-With a draft typed (not sent) and the cursor in its middle, `hub.sh
-restart`: the thread stays on screen whole (no "Loading…" page, rail and
+**S31 Hub restart** (G A)
+With a draft typed (not sent) and the cursor in its middle, a hub restart
+(the `hub restart` step): the thread stays on screen whole (no "Loading…" page, rail and
 composer never vanish) and comes back by itself within 10 s with the draft
 and the thread intact, and the next key lands at the cursor. A longer outage
 (the hub stopped ~4 s) says "Hub unreachable. Reconnecting…" within ~1.2 s.
 
-**S32 Reload keeps your place** (W D)
+**S32 Reload keeps your place** (G)
 Open a thread, type a draft, open the Schematic. Reload: only the page's
 frame shows (no half-filled list, no "/ default" chip, no "Connecting…"
 bar), the composer doesn't move, then the same thread, draft and viewer tab
@@ -341,7 +392,7 @@ are back.
 
 ## Newer features
 
-**S35 Click away, and buttons that toggle** (W D)
+**S35 Click away, and buttons that toggle** (G)
 With Settings open (the top bar's gear), click a thread: it opens and
 Settings is gone; open Settings again and press + by a project: the new
 thread opens, Settings gone. A press on the gear right after opening a
@@ -352,7 +403,7 @@ lit; press Board again: the viewer closes. Schematic, then Board: it switches.
 Ctrl+P twice opens then closes Files; Commands then Ctrl+Shift+P closes the
 palette.
 
-**S36 A project's intent** (W D A)
+**S36 A project's intent** (G A)
 No goal card sits above any thread. Right-click a project (A: long press) →
 Intent…: it shows the intent (or "No intent yet…"). Edit fills the composer
 with `/intent` and the text, Send reads Save; Enter makes a new line, Save
@@ -360,8 +411,8 @@ or Ctrl+Enter saves and "Intent saved" shows; then Intent… shows the new
 text, with no empty headings. Esc, × and a click beside it close it; from Settings it opens over
 the thread, Settings gone.
 
-**S37 Status colours** (W D A)
-In `hub.sh trial`: finished threads have green dots, new ones grey. Send a
+**S37 Status colours** (G A)
+In the lived-in workspace: finished threads have green dots, new ones grey. Send a
 message: the dot and the top bar's State turn blue "working", then green
 "finished". Stop a turn: grey "stopped". A thread whose agent fails (pick codex: no
 real codex here) turns red, State "failed" with the reason in its tooltip
@@ -374,7 +425,7 @@ on subagents or work it started"), never green "finished", until the last of
 it is done; then green "finished". A: the same colours (waiting: a violet
 spinner).
 
-**S33 Split and cross-probing** (W D)
+**S33 Split and cross-probing** (G)
 In `proj` press Split (rail, key V): schematic, board and 3D draw side by
 side. × on 3D hides it, the bar's 3D brings it back; a reload keeps the
 choice. Sheets → Power opens Power in the pane, and the Schematic tab shows
@@ -387,7 +438,7 @@ opens it with J1 lit; after a reload the chip is still there. In `multi`,
 Split, pick `beta`: every pane shows beta, Sheets lists beta's sheets (no
 "Not in this project's hierarchy"). Pan and zoom stay smooth with GND lit.
 
-**S34 The top bar** (W D)
+**S34 The top bar** (G)
 Open a thread: the bar reads "Backplane / PROJ / title ▾" with a State cell
 and no separate thread header. ▾ lists Pin, Settle, Snooze, Archive, Delete,
 Fork; a click on the title renames it. Send a message: State reads "working"
@@ -397,7 +448,7 @@ bar reads "Settings / page") and closes it. The "Jump or run a command" field
 (Ctrl+K) opens the palette. At 420 px wide: the list shows the mark and
 Projects; a thread shows "‹ title ▾" with State under it; ‹ goes back.
 
-**S50 Edit and retire the agent's to-do list** (W D A I)
+**S50 Edit and retire the agent's to-do list** (G A I)
 Start a stand-in turn with 7 steps, 3 done and a subagent: "TO-DO 3/7"
 starts shut beside Subagents (phones: beside the subagents' button), with
 no steps between the timeline and composer. Open it: all 7 editable rows
@@ -417,11 +468,11 @@ earlier human edits). Complete every
 item during a turn: the open list collapses to "done", then clears when the
 turn ends. At 420 px the cell sits in the second row; open rows and every
 editing control fit and work without horizontal overflow. Time each action
-and capture evidence on web and packaged Electron; run phones on their
-device/simulator (a narrow web viewport is not a phone-app result).
+and capture evidence on G; run phones on their device/simulator (a
+narrow desktop window is not a phone-app result).
 
-**S38 Buy in the rail** (W D)
-The test hub starts with Ordering off (hub.sh sets it, though a person's
+**S38 Buy in the rail** (G)
+The test hub starts with Ordering off (set it so: a person's
 default is on) and the order server a dead local address. Point
 order.server at a local stand-in (never the real one), then Settings →
 Ordering on, in a project with fab files: the rail's foot shows "Buy it" with
@@ -434,7 +485,7 @@ Malformed fab JSON also names the bad file rather than calling the board ready.
 Dismiss the Ready bar, then Show parts in the rail restores it, including after
 reload.
 
-**S49 Every board kind priced** (W D)
+**S49 Every board kind priced** (G)
 Like S38, against a local order server (never the real one) with Ordering
 on: give the project fab files of other board kinds beside a rigid one, e.g.
 `{"kind": "flex", "options": {"layers": 2, "stiffener": "polyimide_0.2"}}`
@@ -449,12 +500,12 @@ repeat after restoring the dimensions. A flex board asked to be
 assembled is refused (only rigid `pcb` boards are). A quote upload approval
 with one file says "Send 1 file"; several files use "files".
 
-**S39 Settle when done** (W D)
+**S39 Settle when done** (G)
 Default: a finished thread stays in its project's list until the general
 inactivity window settles it; one a bot launched or delegated settles by
 itself (under "Settled N") once idle 30 minutes. There is no Settings row
 to edit that time: General inactivity explains the separate shorter idle
-window for bot threads using its current value. Set it short with `rpc.mjs PORT TOKEN setting.set
+window for bot threads using its current value. Set it short with `bun test/e2e/rpc.mjs HOME setting.set
 '{"key":"settle.idle.minutes","value":"1"}'` and have a bot launch a thread
 (`thread_launch`): it settles within ~2 min of its "Finished" stamp (the
 hub's tick), while a thread the person started and sent to stays; a pinned
@@ -467,13 +518,13 @@ comes back and stays after it finishes. ▾ → Settle still settles at once.
 
 ## How it feels
 
-**S40 Typing keeps up** (W D)
-In `hub.sh trial`'s "Bring-up notes" (36 exchanges), with a reply streaming
+**S40 Typing keeps up** (G)
+In the lived-in workspace's "Bring-up notes" (36 exchanges), with a reply streaming
 in another thread, type 80 characters in the composer at 20 ms a key: every
 character shows, in order, none lost; time each key from keydown to the
 composer showing it (budget: 50 ms ok, 150 ms slow).
 
-**S41 Switching while one streams** (W D)
+**S41 Switching while one streams** (G)
 Start a reply in one thread, then switch quickly through five threads and
 back: each shows its own messages within 1 s, no text from another thread
 shows, and the streaming one is at its end again, still streaming. No frame
@@ -481,7 +532,7 @@ shows "Loading conversation…", an empty breadcrumb or a missing rail or
 composer; a thread seen before comes back at once, one never seen keeps the
 last view up (taking no clicks) until its own arrives.
 
-**S42 Window sizes** (W D)
+**S42 Window sizes** (G)
 At 1400x900, 1100x800 and 800x900, with a thread and then the viewer open:
 nothing overlaps or is cut off (top bar, rail, composer, model chip,
 viewer), and the viewer opens and closes. Where the window can't hold the
@@ -490,18 +541,18 @@ while the viewer is open (the sidebar button still brings it back) and the
 composer's foot rearranges: the context under the chip, then the chip on a
 line of its own; Send and the mic stay clear of the history bar.
 
-**S43 Two windows agree** (W)
+**S43 Two windows agree** (G)
 The same hub in two tabs: send in one, the other shows the message and the
 reply; settle, rename and pin in one, the other follows within 2 s.
 
-**S44 A lived-in workspace** (W D)
-`hub.sh trial`: pinned threads first, the snoozed one under "Snoozed",
+**S44 A lived-in workspace** (G)
+The lived-in workspace: pinned threads first, the snoozed one under "Snoozed",
 settled ones folded. Open each long thread ("Route the USB-C connector",
 "Alpha: power tree review", "Bring-up notes"): it opens at its newest
 message; scroll to its first message and back down: every notch moves,
 nothing jumps, no stall.
 
-**S45 The keyboard stays in the composer** (W D)
+**S45 The keyboard stays in the composer** (G)
 Open a thread from the sidebar and type at once: the text lands in its
 composer; reload: the keyboard is in the composer with the draft back. The
 same after Ctrl+1, Ctrl+N, closing the palette, Settings or a menu (the caret
@@ -513,18 +564,12 @@ hides it and the composer has the keyboard. Click in the timeline, press
 "/": the keyboard is at the end of the draft and no "/" was typed. A rename
 field or a Settings field keeps the keyboard while you type in it.
 
-**S46 Every thread has KiStack's skills** (W D)
+**S46 Every thread has KiStack's skills** (G)
 Type `$` in a thread's composer: KiStack's skills are offered (kicad-pcb,
 kicad-schematic, layout-placement, …) with their descriptions, a folded
-YAML one (`description: >`) as its text, never ">". On D the hub is the
-desktop app's own (`desktop/runtime/resources/backplane-service`, KiStack in
-the install's `kistack/` beside `desktop/`): the same list. A Claude thread's
-agent runs with `--plugin-dir <install>/kistack` (the stand-in's arguments);
-a release's desktop app has KiStack beside its own hub
-(`backplane-service/kistack`) and uses that one. hub.log names the commit in
-use ("kistack: <commit> in <dir>", the one deploy/kistack.lock pins), or warns
-"kistack: NONE at ..." for a build without it; nothing is fetched, and a
-`HOME_DIR/kistack` an older build synced is removed at start ("kistack:
-removed ...");
+YAML one (`description: >`) as its text, never ">". The hub's KiStack is
+`BACKPLANE_KISTACK`, else `kistack/` beside the hub binary (a release ships it
+there, pinned by deploy/kistack.lock); nothing is fetched. A Claude thread's
+agent runs with `--plugin-dir <that kistack>` (the stand-in's arguments);
 a delegated child and a launched thread offer the same `$` list as their
 parent.
