@@ -94,6 +94,7 @@ pub fn dispatch<F: Facts>(f: &F, params: &Value) -> Option<Dispatched> {
 /// `account.thread.<t>.<provider>` are not among them, so over a lean state they read as unset (Ordering on, estimates on, no account binding): state is asked to keep those prefixes.
 pub struct StateFacts<'a>(pub &'a crate::state::State);
 impl composer::Facts for StateFacts<'_> {
+    fn provider_of(&self, thread: &str) -> String { self.0.threads.get(thread).map_or("claude".into(), |t| t.provider.clone()) }
     fn bot_thread(&self, thread: &str) -> bool { self.0.bot_threads_has(thread) }
     fn bot_of(&self, thread: &str) -> Option<String> { self.0.bot_of_thread(thread) }
     fn account_params(&self, thread: &str) -> bool { self.account_binding(thread).is_some() }

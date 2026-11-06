@@ -7,7 +7,7 @@
 //! Out for Claude: images/`$skill` input, the Backplane MCP server and runtime prompt in the agent's arguments,
 //! subagents and background tasks, todo tools, the allowance stream, the legacy queue, mail provenance beyond carry,
 //! and the hub's time-driven policies (liveness, autosettle, alert/told/summary, star nudge), which belong to M4.
-pub mod mailroom; mod devturns; pub mod bg; pub mod refs; pub mod person; pub mod work; pub mod textgen; pub mod launch; pub mod review; pub mod tasks; pub mod codex; pub mod providers; pub mod cmds; pub mod hist; pub mod host; pub mod inputs; pub mod lines; pub mod mcp; pub mod proc; pub mod prompt; pub mod prompt_text; pub mod rules; pub mod tools; pub mod wake; pub mod world;
+pub mod mailroom; mod devturns; pub mod bg; pub mod refs; pub mod person; pub mod work; pub mod textgen; pub mod launch; pub mod review; pub mod tasks; pub mod codex; pub mod providers; pub mod cmds; pub mod hist; pub mod host; pub mod inputs; pub mod skills; pub mod lines; pub mod mcp; pub mod proc; pub mod prompt; pub mod prompt_text; pub mod rules; pub mod tools; pub mod wake; pub mod world;
 #[cfg(test)] mod tests;
 #[cfg(test)] mod laws;
 
@@ -552,8 +552,8 @@ impl Actor {
         let (effort, think, session) = { let w = self.ag.world().await; (w.setting(&format!("effort.{th}")).to_string(), self.cx.think, w.threads.get(&th).map(|x| x.session.clone()).unwrap_or_else(|| t.session.clone())) };
         let session = if self.person { String::new() } else { session }; // a copied session is never resumed in side-by-side mode
         let url = self.ag.mcp.get().map(|m| m.url(&th, &gen)).unwrap_or_default();
-        let (host, cwd2, text2) = (self.ag.host.clone(), cwd.to_string(), text.to_string());
-        let (body, imgs) = tokio::task::spawn_blocking(move || { let ss = if text2.contains('$') { inputs::scan(&host.user_home, &cwd2, host.kistack.as_deref()) } else { vec![] }; (inputs::mention_others(&text2, &ss), inputs::att_paths(&text2).into_iter().filter(|p| !inputs::mime(p).is_empty()).collect::<Vec<_>>()) }).await.unwrap_or_default();
+        let (host, cwd2, text2, prov2) = (self.ag.host.clone(), cwd.to_string(), text.to_string(), t.provider.clone());
+        let (body, imgs) = tokio::task::spawn_blocking(move || { let body = if text2.contains('$') { let ss = skills::scan_all(&skills::env_from(&host.user_home, &host.home, host.kistack.as_deref()), &cwd2); skills::prepare(&text2, &ss, &prov2, false) } else { text2.clone() }; (body, inputs::att_paths(&text2).into_iter().filter(|p| !inputs::mime(p).is_empty()).collect::<Vec<_>>()) }).await.unwrap_or_default();
         let a = providers::TurnIn { thread: th.clone(), cwd: cwd.into(), home: self.ag.host.home.to_string_lossy().into_owned(), model: t.model.clone(), session, runtime: t.runtime.clone(), interaction: t.interaction.clone(), effort, think, text: body, images: imgs, prompt, mcp_url: url, pcbparts_url: "https://pcbparts.dev/mcp".into(), gen: gen.clone(), settings: { let w = self.ag.world().await; providers::SETTINGS.iter().map(|k| (k.to_string(), w.setting(k).to_string())).collect() } };
         let mut driver = made.driver;
         if let Err(e) = driver.prepare(&a) { let hint = driver.install_hint().map(|h| format!(". {h}")).unwrap_or_default(); self.fail(format!("could not start {}: {e}{hint}", made.cli), "spawn", &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); return }
@@ -675,8 +675,10 @@ impl Actor {
         let uuid = rules::hub_uuid(now, &format!("{th}/{msg}"));
         self.cmds = self.cmds.accept(&uuid); self.sent.push_back((uuid.clone(), msg.clone(), text.clone())); if self.sent.len() > RECENT { self.sent.pop_front(); }
         let steer = std::mem::take(&mut self.steer_now);
+        let bound = { let raw = self.ag.hub.setting(&crate::settings::accounts::binding_key(&th, "claude")).await.unwrap_or_default(); !serde_json::from_str::<Value>(&raw).ok().map_or(String::new(), |b| b["id"].as_str().unwrap_or("").to_string()).is_empty() };
+        let isolated = self.person || bound; // an account profile or the person mode runs Claude without the person's own skills and plugins
         let line = { let (text2, cwd2, host, uuid2) = (agent_text.clone(), cwd.clone(), self.ag.host.clone(), uuid.clone()); // Media.claude: images read, `$skill` mentions made real
-            tokio::task::spawn_blocking(move || { let ss = if text2.contains('$') { inputs::scan(&host.user_home, &cwd2, host.kistack.as_deref()) } else { vec![] }; let body = inputs::expand_claude(&text2, &ss); let imgs = inputs::read_images(&text2); inputs::claude_line_p(&body, &imgs, &uuid2, steer) }).await.unwrap_or_default() };
+            tokio::task::spawn_blocking(move || { let body = if text2.contains('$') { let ss = skills::scan_all(&skills::env_from(&host.user_home, &host.home, host.kistack.as_deref()), &cwd2); skills::prepare(&text2, &ss, "claude", isolated) } else { text2.clone() }; let imgs = inputs::read_images(&text2); inputs::claude_line_p(&body, &imgs, &uuid2, steer) }).await.unwrap_or_default() };
         let sent = self.live_proc.as_ref().map(|p| p.input.try_send(line));
         if matches!(sent, Some(Ok(()))) { self.cmds = self.cmds.sent(&uuid) } else { self.fail("the agent is not taking input".into(), "input", &hub_id("in", now, 0)).await }
     }

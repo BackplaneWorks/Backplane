@@ -1289,6 +1289,22 @@ fn watch_log(work: &Path, rows: &[String], extra: &str) -> String { base_log(wor
     assert!(text.contains("\n\n<references>\nmodel claude/nonesuch: ") && text.ends_with("</references>"), "{text}");
     ag.shutdown();
 }
+#[tokio::test(flavor = "multi_thread")] async fn a_dollar_skill_of_the_persons_own_reaches_the_agent_as_a_slash_command_or_a_file_note() {
+    let sd = dir("sk-bin"); let rec = sd.join("in.jsonl"); let inner = sd.join("standin.sh"); std::fs::write(&inner, STANDIN.replacen("\n", "\nexport FAKE_PER=2 FAKE_CYCLE=5 FAKE_SECS=1 FAKE_LOG=/dev/null\n", 1)).unwrap();
+    script(&sd, "claude", &format!("#!/bin/sh\ntee -a {} | sh {}\n", rec.display(), inner.display()));
+    let uh = dir("sk-userhome"); // a fake user: a Claude skill, a Codex-only skill
+    for (rel, name) in [(".claude/skills/unslop-zq", "unslop-zq"), (".agents/skills/codexonly-zq", "codexonly-zq")] { std::fs::create_dir_all(uh.join(rel)).unwrap(); std::fs::write(uh.join(rel).join("SKILL.md"), format!("---\nname: {name}\ndescription: d\n---\nbody")).unwrap(); }
+    let home = dir("sk-home"); let work = dir("sk-work"); std::fs::write(home.join("events.jsonl"), base_log(&work, 1, "")).unwrap();
+    let hub = Hub::start(Cfg { home: home.clone(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+    let ag = Agents::start_host(hub.clone(), Cli::standin(&sd), host::HostInfo { user_home: uh.to_string_lossy().into_owned(), home: home.clone(), ..Default::default() }).await.unwrap(); let from = len(&hub).await;
+    rpc(&hub, "turn.start", json!({"thread":T1,"text":"zqskill run $unslop-zq and $codexonly-zq"})).await;
+    until(&hub, from, 30, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await;
+    let got = std::fs::read_to_string(&rec).unwrap(); let line = got.lines().find(|l| l.contains("zqskill")).expect("the user line"); let v: Value = serde_json::from_str(line).unwrap();
+    let text = v["message"]["content"].as_str().map(str::to_string).or_else(|| v["message"]["content"][0]["text"].as_str().map(str::to_string)).expect("text");
+    assert!(text.contains("zqskill run /unslop-zq and $codexonly-zq"), "{text}");
+    assert!(text.contains(&format!("read \"{}/.agents/skills/codexonly-zq/SKILL.md\"", uh.display())) && !text.contains("unslop-zq/SKILL.md"), "{text}");
+    ag.shutdown();
+}
 #[tokio::test(flavor = "multi_thread")] async fn an_enforced_rule_refuses_a_matching_tool_call_until_the_person_says_its_word() {
     let sd = dir("gt-bin"); perf_standin(&sd, 1);
     let rules = [r#"{"id":"r1","text":"No lists without asking","tool":"thread_list","enforce":true,"word":"list it","at":1}"#, r#"{"id":"r2","text":"No rm","tool":"Bash","enforce":true,"at":2}"#];
