@@ -1,7 +1,7 @@
 #!/bin/sh
 # Ship the committed tree (git archive of HEAD; the Mac has only openrsync) (native, assets, docs, test, i18n) to the Mac and build the hub and the client there. Never compiles locally.
 # usage: scripts/mac-hub-build.sh [hub|gpui|both] [test]   (default both)   -> ~/bp-e2e/dist/{backplane-hub,backplane-gpui}
-# Run under the `mac-heavy` lock (work_run lock:"mac-heavy"). Needs ~/.cargo or /opt/homebrew/bin cargo on the Mac.
+# Takes the Mac-side lock itself: lockf -k /tmp/bp-mac-heavy.lockf (the Mac has no flock; the hub has no named locks). Needs ~/.cargo or /opt/homebrew/bin cargo on the Mac.
 set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 WHAT=${1:-both}; TEST=${2:-}
@@ -9,10 +9,9 @@ HOST=${MAC_HOST:-hs-mac-mini}; DEST=bp-e2e
 SSH="ssh -o BatchMode=yes"; [ -f "$ROOT/build/gpui/mac-ssh" ] && SSH="$ROOT/build/gpui/mac-ssh"
 $SSH $HOST "mkdir -p ~/$DEST/src ~/$DEST/dist ~/$DEST/logs"
 git -C "$ROOT" archive --format=tar HEAD native assets docs test i18n | $SSH $HOST "rm -rf ~/$DEST/src && mkdir -p ~/$DEST/src && tar -x -C ~/$DEST/src"
-$SSH $HOST "sh -s" -- "$WHAT" "$TEST" <<'REMOTE'
+$SSH $HOST "lockf -k /tmp/bp-mac-heavy.lockf sh -s" -- "$WHAT" "$TEST" <<'REMOTE'
 set -eu
 WHAT=${1:-both}; TEST=${2:-}
-# the hub has no named locks yet: mkdir lock on the Mac itself, beside the hub-side "mac-heavy" lock
 while ! mkdir /tmp/bp-mac-heavy.lock 2>/dev/null; do sleep 20; done; trap 'rmdir /tmp/bp-mac-heavy.lock' EXIT
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer PATH="$HOME/.cargo/bin:/opt/homebrew/bin:$PATH"
 export CARGO_TARGET_DIR=$HOME/bp-e2e/target CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS:-6}

@@ -1,7 +1,7 @@
 #!/bin/sh
 # Sync native/gpui to the Mac and build there. Never compiles locally.
 # usage: scripts/mac-build.sh [cold|check] [extra cargo args...]
-# Run under the `mac-heavy` lock (work_run lock:"mac-heavy").
+# Takes the Mac-side lock itself: lockf -k /tmp/bp-mac-heavy.lockf (the Mac has no flock; the hub has no named locks).
 set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 SSH="$ROOT/build/gpui/mac-ssh"; HOST=hs-mac-mini; DEST=bp-gpui-desktop
@@ -10,7 +10,7 @@ export RSYNC_RSH="$SSH"
 $SSH $HOST "mkdir -p ~/$DEST/src/native ~/$DEST/src/assets/web ~/$DEST/dist ~/$DEST/logs"
 rsync -a --delete --exclude target --exclude '*.rs.bk' "$ROOT/native/gpui/" $HOST:$DEST/src/native/gpui/
 rsync -a "$ROOT/assets/web/" $HOST:$DEST/src/assets/web/
-$SSH $HOST "sh -s" -- "$COLD" "$CHECK" "$@" <<'REMOTE'
+$SSH $HOST "lockf -k /tmp/bp-mac-heavy.lockf sh -s" -- "$COLD" "$CHECK" "$@" <<'REMOTE'
 set -eu
 COLD=$1; CHECK=$2; shift 2
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer PATH="$HOME/.cargo/bin:$PATH"
