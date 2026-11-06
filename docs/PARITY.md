@@ -41,11 +41,11 @@ Each lane updates its own rows in the commit that lands the work.
 | **Commerce** | | |
 | Card and Ready to order data (`fab.look`, `fab.intent`) | partial | commerce |
 | Buy it: `order.buy` is not ported (`settings/fab.rs`), so no buy thread starts | missing | commerce |
-| Buy threads: tools `order_quote`, `order_status`, `order_ask` (no tool definitions; the hub only knows how to show their asks) | missing | commerce |
-| `order_review` and the review gate (no tool, though the agent prompt tells agents to call it) | missing | commerce |
+| Buy threads: `order_ask` works (its answer is the person's message); `order_quote`, `order_status` have no tool yet | partial | commerce |
+| `order_review` check and record work for every agent (`settings/order.rs`; the design hash matches 0.14's, so a review it recorded stays current). The gate is in, tested through the agent's MCP path with stand-ins, but needs a buy thread to be reached: not driven on a client | partial | commerce |
 | Order card and steps, on every client | missing | commerce |
 | Order watcher, customs line, pilot notice (no hub code; the phones can still draw the last two) | missing | commerce |
-| Ready to order bar (`d1df376576` stopped drawing it above the composer; where Buy it lives now is to be settled) | partial | commerce |
+| Ready to order bar: stays gone, as the person asked (thread improvement-aa3339b53c4456dd35d6ced196e44d4c). Buy it lives in the thread's header, and the agents and Settings now say so; the header button itself comes with `order.buy` | partial | commerce |
 | **Thread views** | | |
 | Subagent drill-down | missing | threads-deep |
 | Your machines, one list over machines | partial | threads-deep |
