@@ -66,9 +66,9 @@ jobs:
         working-directory: native/host
         run: |
           skip='test(agents::tests::side_by_side_runs_only_the_persons_turn_with_the_persons_agent_and_guards) | test(agents::tests::sbs_child_probe)'
-          # macOS: /var is /private/var, so two opencode path assertions differ (a test bug, not the hub)
-          if [ "$RUNNER_OS" = macOS ]; then skip="$skip | test(/opencode_(turn_matches_the_js_hub|resumes_without_replay)/)"; fi
-          cargo nextest run --locked --partition count:${{ matrix.partition }}/2 -E "not ($skip)"
+          # macOS: /var is /private/var, so the opencode e2e path assertions differ (a test bug, not the hub)
+          if [ "$RUNNER_OS" = macOS ]; then skip="$skip | test(/acp::e2e::opencode_/)"; fi
+          cargo nextest run --locked --no-fail-fast --partition count:${{ matrix.partition }}/2 -E "not ($skip)"
 
   window:
     needs: changes
