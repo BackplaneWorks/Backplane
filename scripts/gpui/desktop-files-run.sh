@@ -1,5 +1,5 @@
 #!/bin/sh
-# Real-hub check of the GPUI Files tab: the Rust hub (HUB_BIN) alone, no Bend helper (no --policy-bin), on a temp home with a project of mixed files, stand-in agents only, loopback,
+# Real-hub check of the GPUI Files tab: the Rust hub (HUB_BIN) alone, no Bend helper, on a temp home with a project of mixed files, stand-in agents only, loopback,
 # isolated Xvfb display, everything in one memory-capped scope. The client is driven by test/gpui/files/files-script.json (steps `open_viewer`,
 # `files`, `files_download`, `wait`), screenshots are taken by the client itself (`files: shot:PATH`).
 # usage: desktop-files-run.sh CLIENT_BIN HUB_BIN ASSETS_DIR OUTNAME   ->  build/gpui/shots/files/OUTNAME-*.png, build/gpui/results/files/OUTNAME.*
@@ -7,7 +7,7 @@ set -eu
 ME=$(cd "$(dirname "$0")/../.." && pwd); MAIN=${GPUI_MAIN:-/home/h/Documents/i2cjak/backplane-gpui}
 CLIENT=$1; HUBBIN=$2; ASSETS=$3; N=${4:-files}
 R=$ME/build/gpui/files-run-$N; OUT=$ME/build/gpui/results/files; SH=$ME/build/gpui/shots/files
-X=$MAIN/build/gpui/xvfb; POLICY=$MAIN/build/gpui/slim/bp-policy-bp; WINDOW=$MAIN/build/gpui/hub/new/window
+X=$MAIN/build/gpui/xvfb; WINDOW=$MAIN/build/gpui/hub/new/window
 PORT=${GPUI_PORT:-3841}; DISP=${GPUI_DISP:-:63}
 mkdir -p $OUT $SH
 [ -x "$CLIENT" ] && [ -x "$HUBBIN" ] || { echo "need CLIENT_BIN and HUB_BIN"; exit 2; }
@@ -40,7 +40,6 @@ cd '$R'/proj
 '$HUBBIN' --home '$R'/home --port '$PORT' --host 127.0.0.1 --no-tailscale --foreground > '$R'/hub.log 2>&1 &
 echo $! > '$R'/hub.pid; sleep 5
 HP=$(cat '$R'/hub.pid)
-tr "\0" " " < /proc/$HP/cmdline | grep -q -- "--policy-bin" && { echo "the hub must run with no Bend helper"; kill $HP; exit 4; }
 echo "hub cmdline: $(tr "\0" " " < /proc/$HP/cmdline)"
 tr "\0" "\n" < /proc/$HP/environ | grep -q "^BACKPLANE_AGENTS='$R'/bin\$" || { echo "NO BACKPLANE_AGENTS on the hub"; kill $HP; exit 3; }
 LD_LIBRARY_PATH='$X'/usr/lib/x86_64-linux-gnu '$X'/usr/bin/Xvfb '$DISP' -screen 0 1440x900x24 -nolisten tcp -xkbdir /usr/share/X11/xkb > '$R'/xvfb.log 2>&1 &

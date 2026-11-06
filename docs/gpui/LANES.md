@@ -1,4 +1,6 @@
-# Rust port lanes
+# Rust lanes
+
+`main` is the integration branch: the Rust hub (`native/host`) and the GPUI client (`native/gpui`), no Bend. Every lane branches from `main` and lands on `main` through `scripts/gpui/land.sh` with the reviewer's recorded OK. (Until 2026-11-06 this branch was called `gpui`; the last Bend `main` is the tag `main-bend-final`. The shared lock and state names `gpui-merge`, `gpui-reviewed`, `gpui-reviewer`, `gpui-land.token` keep their old names so existing enrolment and locks carry over.)
 
 One owner per file. New lanes work in their own git worktree, so an unfinished file in one
 lane cannot break another lane's build.
@@ -6,7 +8,7 @@ lane cannot break another lane's build.
 | Lane | Thread | Owns |
 |---|---|---|
 | core (lead) | `bend` | `native/host/src/{main,hub,model,store,auth,cbor,presenter,api}.rs`, copy guard, the module split |
-| sidebar | `slim` | `sidebar.rs`, `shelf.rs`, `signal.rs`, `state.rs`, `test/gpui/parity`, `scripts/gpui/law-map.*` |
+| sidebar | `slim` | `sidebar.rs`, `shelf.rs`, `signal.rs`, `state.rs`, `test/gpui/parity`,  |
 | files | `files` | `native/host/src/files/`, `native/host/src/kicad/` |
 | agents | `agents` | `native/host/src/agents/` except `providers/`, MCP tools |
 | parity-session | new | `native/host/src/session/` |
@@ -25,15 +27,15 @@ lane cannot break another lane's build.
 
 ## How a lane works
 
-- Worktree: `git worktree add ~/Documents/i2cjak/bp-gpui-lanes/<lane> -b gpui-<lane> gpui`.
+- Worktree: `git worktree add ~/Documents/i2cjak/bp-gpui-lanes/<lane> -b gpui-<lane> main`.
   Copy nothing real into it. Binaries in the main worktree's `build/gpui/` can be used by
   absolute path.
 - Build and test from that worktree with `scripts/boat-job.sh`. Boat or the Mac only.
-- Pick up others' work with `git rebase gpui` in your own worktree.
-- Before landing, rebase on gpui and compile the whole crate on Boat. A batch that breaks gpui's build is backed out.
-- Land small and often, from your own worktree: rebase on gpui, then `scripts/gpui/land.sh <tip>`.
-  It takes the `gpui-merge` lock, checks the reviewer's recorded OK for every commit in `gpui..<tip>`
-  and fast-forwards. `scripts/gpui/ref-guard.hook` refuses any other move of `gpui`, so commits,
+- Pick up others' work with `git rebase main` in your own worktree.
+- Before landing, rebase on main and compile the whole crate on Boat. A batch that breaks main's build is backed out.
+- Land small and often, from your own worktree: rebase on main, then `scripts/gpui/land.sh <tip>`.
+  It takes the `gpui-merge` lock, checks the reviewer's recorded OK for every commit in `main..<tip>`
+  and fast-forwards. `scripts/gpui/ref-guard.hook` refuses any other move of `main`, so commits,
   cherry-picks and ref updates onto it fail in every worktree. Never force anything.
 - To change a file you do not own, ask its owner by `thread_send`.
 - A shared seam (one line in `main.rs`, one `mod` line) goes through the lead.
@@ -50,7 +52,7 @@ Memory bar: `docs/gpui/perf-gates.json`: hub RSS only, startup peak under 1 GB, 
 | 1. Thread view and pages | slim `t1793834628-1688992` | new `native/host/src/present/` thread view and pages, Files and Mech replies | `slim` |
 | 2. Composer, send, turn state | parity-session `t1793852397-1739751` | `present/` composer, send, popups; the replay oracle | `parity-session` |
 | 2b. Thread actions | commands `t1793862825-1750573` | `native/host/src/commands/`: create, pin, settle, rename, archive as served by the Rust presenter | its own |
-| 3. Bend off the runtime | bend `t1793832639-1684539` | indexed read model, `hub.rs`, `main.rs`, `--policy-bin` removal, law map to Rust property tests, `PRESENTER-PORT.md` | `endstrip` |
+| 3. Bend off the runtime (done) | bend `t1793832639-1684539` | indexed read model, `hub.rs`, `main.rs`, `--policy-bin` removal (done 2026-11-06, with all Bend source) | `endstrip` |
 | 4. Real Claude turns | agents `t1793842041-1700235` | `native/host/src/agents/`: full prompt, skills, images, `Kind::PersonTurn` | `agents` |
 | 5. Core MCP tools | mcp-core | `agents/mcp*` tool handlers for threads, subthreads and reports, `work_*`, `wake_on`, files, memory | `mcp-core` |
 | 6. Side-by-side and switch script | switchover `t1793897533-1897003` | `scripts/gpui/switch.sh`, `side-by-side.sh`, `SIDE-BY-SIDE.md` | `switchover-dev` |

@@ -1,6 +1,6 @@
 #!/bin/sh
 # The data/1 app's journeys on the simulator: against the stub hub (test/gpui/phone/stub-hub.ts, default) or a Rust hub binary (HUB=path to it).
-#   scripts/gpui/ios-data.sh [JOURNEY...]   default: data-flow     env: HUB (a Rust hub binary), POLICY (its --policy-bin, rarely needed)
+#   scripts/gpui/ios-data.sh [JOURNEY...]   default: data-flow     env: HUB (a Rust hub binary)
 # Start with work_run {lock: "mac-heavy"}. The hub runs on h@backplane (tailnet address, 3700M cap) in a throwaway folder that is deleted at the end.
 cd "$(dirname "$0")/../.." || exit 1
 B=$PWD/build/gpui; M=$B/mac-ssh; SB='ssh -o BatchMode:yes h@backplane'; SB='ssh -o BatchMode=yes h@backplane'; U=${SIM_UDID:-E3BC1B9E-AE4D-498C-97AF-B22FE897B41F}

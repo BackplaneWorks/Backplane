@@ -11,7 +11,7 @@ need() { command -v "$1" >/dev/null 2>&1; }
 if ! need Xvfb || ! need i3; then (sudo -n apt-get update -qq && sudo -n apt-get install -y -qq xvfb i3 x11-xserver-utils mesa-vulkan-drivers) > $V/apt.log 2>&1 || say "apt install failed"; fi
 H=$PWD/$V/home; mkdir -p $H
 python3 test/gpui/perf/gen_log.py $H/events.jsonl ${EVENTS:-6000} 7
-"$HUB" --home $H --port 3830 --host 127.0.0.1 --no-tailscale --foreground --policy-bin $PWD/test/gpui/hubbin/bp-policy-page --window-bin $PWD/test/gpui/hubbin/window > $V/hub.log 2>&1 & HP=$!
+"$HUB" --home $H --port 3830 --host 127.0.0.1 --no-tailscale --foreground --window-bin $PWD/test/gpui/hubbin/window > $V/hub.log 2>&1 & HP=$!
 sleep 4; say "hub pid $HP up: $(curl -s -m3 -o /dev/null -w '%{http_code}' http://127.0.0.1:3830/hello)  events: $(wc -l < $H/events.jsonl)"
 python3 - <<'PY' > $V/script.json
 import json

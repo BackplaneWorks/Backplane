@@ -2,7 +2,7 @@
 # Run the Rust hub + GPUI desktop beside today's Backplane, on a private COPY of a store, on its own port and home.
 #
 #   scripts/gpui/switch.sh try [--no-client]     seeded synthetic home: a first thing to click on, nothing real in it
-#   scripts/gpui/switch.sh start [--no-client]   fresh copy, hub (+ policy helper), then the GPUI client
+#   scripts/gpui/switch.sh start [--no-client]   fresh copy, hub, then the GPUI client
 #   scripts/gpui/switch.sh stop                  stop what start made; the copy stays (to look at, or to start again on)
 #   scripts/gpui/switch.sh reload [hub|client|both]  the binaries in HUB_BIN/CLIENT_BIN on the SAME copy: nothing copied, nothing deleted (dev-reload.sh runs it)
 #   scripts/gpui/switch.sh status                what runs, memory of each process, counts only
@@ -20,8 +20,8 @@
 #   SWITCH_DIR      state: home, logs, pids. Default ~/.backplane-gpui-switch (mode 700; never under the repo)
 #   SWITCH_MEM      the scope's MemoryMax, default 3700M (swap is always 0). Never raise it to make a run fit; report instead.
 #   SWITCH_DISPLAY  where the client opens. Required (no default): your own screen's, or :61 (build/gpui/xvfb) for tests.
-#   HUB_BIN POLICY_BIN CLIENT_BIN  by absolute path; default the main checkout's build/gpui/{hub/prov/backplane-hub-full,
-#                   slim/bp-policy-bp,linux/backplane-gpui}
+#   HUB_BIN CLIENT_BIN  by absolute path; default the main checkout's build/gpui/{hub/prov/backplane-hub-full,
+#                   linux/backplane-gpui}
 #
 # SWITCHING BACK. Starting this changes nothing of today's app, so going back is `rollback` and nothing else. Lost: the threads,
 # messages and settings made on the copy (they live only in its own log). NOT undone: files an agent changed in a real folder (in the
@@ -36,7 +36,6 @@ MEM=${SWITCH_MEM:-3700M}
 # `start` needs an explicit source and it must be synthetic: no default store (the hold, below)
 SRC=${SWITCH_SOURCE:-}
 HUB_BIN=${HUB_BIN:-$ROOT/build/gpui/hub/prov/backplane-hub-full}
-POLICY_BIN=${POLICY_BIN:-$ROOT/build/gpui/slim/bp-policy-bp}
 # the "live" store: ~/.backplane-bend, or SWITCH_LIVE=<dir> (a synthetic one, for tests; the real one still needs SWITCH_ALLOW_LIVE=person)
 LIVE=${SWITCH_LIVE:-$HOME/.backplane-bend}
 # the newest commit-named client build (client-<10 hex>), with its assets beside it; CLIENT_BIN overrides
@@ -106,8 +105,7 @@ guards() {   # `guards source` (start only) adds the source/hold check; rollback
   case "$SW" in "$HOME/.backplane-bend"*|"$HOME/.local/share/backplane"*|"$ROOT"*|"$HERE"*) die "state dir $SW is not allowed there";; esac
   case "$SW" in ""|"/"|"$HOME"|"$HOME/") die "state dir $SW is not allowed";; esac
   [ -x "$HUB_BIN" ] || die "no hub binary $HUB_BIN"
-  # a hub without --policy-bin (Bend off the runtime) needs no helper; one with it does
-  if "$HUB_BIN" --help 2>&1 | grep -q -- --policy-bin; then USE_POLICY=1; [ -x "$POLICY_BIN" ] || die "no policy helper $POLICY_BIN"; else USE_POLICY=0; fi
+  USE_POLICY=0  # the hub has no helper
 }
 
 source_file() {
@@ -197,7 +195,7 @@ launch_hub() {
   printf '#!/bin/sh\nexec %s %s "$@"\n' "$(command -v bun)" "$HERE/test/tools/claude_standin.ts" > "$SW/bin/claude"; chmod +x "$SW/bin/claude"
   local n; for n in codex grok muse; do printf '#!/bin/sh\nexit 1\n' > "$SW/bin/$n"; chmod +x "$SW/bin/$n"; done
   # the hub in its own capped scope, a fake HOME (no real credentials), copy guard on, loopback only
-  local pol=(); [ "$USE_POLICY" = 0 ] || pol=(--policy-bin "$POLICY_BIN")
+  local pol=()
   local envx; if [ "$MODE" = side ]; then
     # the hub itself has the FAKE home; the real one goes only to a person's-turn child (BACKPLANE_PERSON_HOME, which the hub strips from
     # that child with every other BACKPLANE_*); BACKPLANE_LIVE_LOG is read-only, for the same-folder check; no BACKPLANE_AGENTS

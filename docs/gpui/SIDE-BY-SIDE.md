@@ -6,7 +6,7 @@ coordinator confirms. `BACKPLANE_COPY=1` stays as it is (tests, rehearsals, stan
 
 ## Blockers before any design is OK
 
-1. **No helper: the hub must open a real-size log without it.** The Bend policy helper is going (bend's lane); `--policy-bin` is still in `main.rs` on `gpui`
+1. **No helper: the hub must open a real-size log without it.** The Bend policy helper is gone; `--policy-bin` no longer exists
    `5bbdb7b3e9`, so the fit is unmeasured for the new hub. What was measured with the helper (synthetic log of the real event count, 1,691,621 events, 1.09 GB; hub
    `hub/prov`, helper `bp-policy-bp`, `MemoryMax=3700M`, swap 0): the helper's RSS grew about 100 MB/s while the hub stayed at 66 MB, and the kernel OOM-killed the scope at
    37 s (`oom-kill`, 3.6 GB peak). That problem goes away with the helper. What replaces it is the memory bar on hub RSS alone: startup under 1 GB, at rest under 500 MB,

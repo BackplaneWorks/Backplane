@@ -1,6 +1,6 @@
 # gpui-next: merge, build, relaunch
 
-Work lands on `gpui-next`; a builder follows it and the app relaunches on each build. `gpui` stays the guarded branch: promote a reviewed `gpui-next` to it with `land.sh`.
+Work lands on `gpui-next`; a builder follows it and the app relaunches on each build. `main` is the guarded branch: promote a reviewed `gpui-next` to it with `land.sh` (`gpui-next` branches from `main`).
 
     scripts/gpui/next-land.sh TIP        fast-forward gpui-next to TIP (rebase on gpui-next first), under the gpui-next-merge lock
     scripts/gpui/next-build.sh           the builder: stays running; --once builds the tip now if it is new

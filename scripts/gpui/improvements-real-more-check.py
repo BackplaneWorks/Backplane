@@ -55,27 +55,27 @@ else:
     approved = [m for m in metrics if m.get("event") == "improvements" and m.get("approved")]
     check(len(approved) >= 1, "at least one approval was answered in GPUI (primary button)", [(a.get("approved"), a.get("button")) for a in approved])
     print("approvals:", [(str(a.get("approved"))[:60], a.get("button")) for a in approved])
-    rc, log = sh(["git", "-C", P, "log", "--oneline", f"gpui..{branch}"], P) if branch else (1, "")
+    rc, log = sh(["git", "-C", P, "log", "--oneline", f"main..{branch}"], P) if branch else (1, "")
     check(rc == 0 and len(log.splitlines()) >= 1, "the agent committed on its own branch", log)
     rc, content = sh(["git", "-C", P, "show", f"{branch}:README.md"], P) if branch else (1, "")
     check("hand-off edit" in content, "the real edit is in the committed README.md", content)
-    rc, stat = sh(["git", "-C", P, "diff", "--stat", f"gpui..{branch}"], P) if branch else (1, "")
+    rc, stat = sh(["git", "-C", P, "diff", "--stat", f"main..{branch}"], P) if branch else (1, "")
     print("diff:", stat.replace("\n", " | "))
     check(stat.count("|") == 1 and "README.md" in stat, "the commit touches only README.md", stat)
     # the scratch copy of the land.sh flow, here only
-    gpui0 = sh(["git", "-C", P, "rev-parse", "gpui"], P)[1]
+    gpui0 = sh(["git", "-C", P, "rev-parse", "main"], P)[1]
     tip = sh(["git", "-C", path, "rev-parse", "HEAD"], path)[1] if path else ""
     env = {"GPUI_LAND_LOCK": f"{run}/scratch-lock.sh"}
-    rc, msg = sh(["git", "-C", path, "update-ref", "refs/heads/gpui", tip], path, env)
-    check(rc != 0 and "refused" in msg and sh(["git", "-C", P, "rev-parse", "gpui"], P)[1] == gpui0, "the guard refuses a direct move of the scratch gpui", msg)
+    rc, msg = sh(["git", "-C", path, "update-ref", "refs/heads/main", tip], path, env)
+    check(rc != 0 and "refused" in msg and sh(["git", "-C", P, "rev-parse", "main"], P)[1] == gpui0, "the guard refuses a direct move of the scratch main", msg)
     rc, msg = sh(["sh", "scripts/gpui/land.sh", tip], path, env)
-    check(rc != 0 and "not reviewed" in msg and sh(["git", "-C", P, "rev-parse", "gpui"], P)[1] == gpui0, "land.sh refuses a range with no recorded OK", msg)
+    check(rc != 0 and "not reviewed" in msg and sh(["git", "-C", P, "rev-parse", "main"], P)[1] == gpui0, "land.sh refuses a range with no recorded OK", msg)
     renv = dict(env, CLAUDE_CODE_SESSION_ID="scratch-reviewer")
     rc, msg = sh(["sh", "scripts/gpui/review-ok.sh", "--enrol"], path, renv); check(rc == 0, "a scratch reviewer enrols", msg)
-    rc, msg = sh(["sh", "scripts/gpui/review-ok.sh", f"gpui..{tip}"], path, renv); check(rc == 0 and "recorded" in msg, "the scratch reviewer records the OK", msg)
+    rc, msg = sh(["sh", "scripts/gpui/review-ok.sh", f"main..{tip}"], path, renv); check(rc == 0 and "recorded" in msg, "the scratch reviewer records the OK", msg)
     rc, msg = sh(["sh", "scripts/gpui/land.sh", tip], path, env)
-    check(rc == 0 and "landed" in msg and sh(["git", "-C", P, "rev-parse", "gpui"], P)[1] == tip, "land.sh moves the scratch gpui to the agent's commit", msg)
-    check("hand-off edit" in sh(["git", "-C", P, "show", "gpui:README.md"], P)[1], "the scratch gpui carries the edit")
+    check(rc == 0 and "landed" in msg and sh(["git", "-C", P, "rev-parse", "main"], P)[1] == tip, "land.sh moves the scratch main to the agent's commit", msg)
+    check("hand-off edit" in sh(["git", "-C", P, "show", "main:README.md"], P)[1], "the scratch main carries the edit")
     # the real gpui and the real repository were never in play
     check(P.startswith(root + "/build/gpui/imp-real-edit/"), "everything above ran in the scratch repository", P)
 
