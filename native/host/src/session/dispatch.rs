@@ -177,7 +177,7 @@ mod tests {
     }
     #[test] fn what_nobody_owns_is_none() {
         let f = M { exists: T, running: false };
-        for a in ["", "skill", "fm-open", "settings"] { assert!(dispatch(&f, &params(a, "x", session())).is_none(), "{a}") }
+        for a in ["", "fm-open", "settings"] { assert!(dispatch(&f, &params(a, "x", session())).is_none(), "{a}") }
         let mut open = session(); open["panel"] = json!(true); open["info"] = json!({format!("view.kind:{T}"): "diff"});
         assert!(dispatch(&f, &params("send", "", open)).is_none(), "a Diff on show: Dv.sync would ask again, not ported");
         assert!(dispatch(&f, &params("select", "h|unknown", session())).is_none());

@@ -8,6 +8,9 @@ set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
 D=${FRESH_DIR:-$HOME/.backplane-gpui-fresh}; PORT=${FRESH_PORT:-3797}; H=$D/home
 DEV=${GPUI_DEV_DIR:-$HOME/.backplane-gpui-dev}; POLL=${GPUI_RELOAD_POLL:-2}; BOOT=${GPUI_RELOAD_BOOT:-120}
+ST=${BACKPLANE_DEV_STATUS:-$DEV/STATUS}
+status() { printf '{"phase":"%s","text":"%s","done":0,"total":0}\n' "$1" "$2" > "$ST.w" && mv -f "$ST.w" "$ST"; }
+clear_status() { rm -f "$ST" "$ST.w"; }
 say() { printf '%s %s\n' "$(date +%H:%M:%S)" "$*"; }
 tell() { say "$*"; notify-send -a Backplane 'Backplane GPUI (fresh)' "$*" 2>/dev/null || true; }
 alive() { [ -n "${1:-}" ] && kill -0 "$1" 2>/dev/null; }
@@ -41,14 +44,14 @@ while :; do
     n=$(turns)
     if [ "$n" != 0 ]; then
       [ "$waiting" = "$c:$n" ] || tell "Build $c is ready; waiting for $n running turn(s) to finish (Enter relaunches now)."
-      waiting=$c:$n
+      waiting=$c:$n; status waiting "Build ${c##*-} ready: waiting for $n running turn(s) to finish, then the app relaunches"
       if [ -t 0 ]; then read -r -t "$POLL" _ || continue; else sleep "$POLL"; continue; fi
     fi
   fi
-  waiting=; prev=$(running_dir); say "relaunching on $c ($what)"
-  if go "$DEV/builds/$c" "$what"; then tell "Now running $c"
+  waiting=; prev=$(running_dir); say "relaunching on $c ($what)"; status relaunching "Relaunching on build ${c##*-}"
+  if go "$DEV/builds/$c" "$what"; then clear_status; tell "Now running $c"
   else
-    printf '%s\n' "$c" > "$DEV/.fresh-bad"; tell "Build $c did not come up; going back. See $D/hub.log"
+    clear_status; printf '%s\n' "$c" > "$DEV/.fresh-bad"; tell "Build $c did not come up; going back. See $D/hub.log"
     [ -n "$prev" ] && [ -x "$prev/backplane-hub" ] && go "$prev" both && say "back on $(basename "$prev")" || tell "Going back failed: the app is down. Logs are in $D"
   fi
 done

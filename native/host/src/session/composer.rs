@@ -4,10 +4,30 @@
 //! popup: Refs.want/Skills.want), `/btw` `/give` `/secret` `/intent`, attachments, replies, a bot's thread (Bots.say), a bounded draft, accounts params.
 use serde_json::{json, Map, Value};
 
+#[path = "mention.rs"] pub mod mention;
+
 pub struct ActOut { pub session_patch: Value, pub cmds: Vec<Value> }
 
 /// Att.nonblank: a thread's attachments, one path per line, blank lines gone.
 pub fn att_paths(text: &str) -> Vec<String> { text.lines().map(str::trim).filter(|l| !l.is_empty()).map(str::to_string).collect() }
+
+/// Rto.block: a reply is kept in the person's message itself, ahead of what they wrote (src/core/reply.bend): the quote is counted, never searched for.
+pub fn reply_block(id: &str, quote: &str) -> String {
+    let q: String = quote.chars().take(2000).collect();
+    format!("<in_reply_to msg={id} chars={}>\n{q}\n</in_reply_to>", q.chars().count())
+}
+/// Rto.of: a message text split into (the message replied to, its quote, the body); None when it has no such block.
+pub fn reply_split(text: &str) -> Option<(String, String, String)> {
+    let rest = text.strip_prefix("<in_reply_to msg=")?;
+    let (id, rest) = rest.split_once(" chars=")?;
+    let (n, rest) = rest.split_once(">\n")?;
+    let n: usize = n.parse().ok()?;
+    let quote: String = rest.chars().take(n).collect();
+    if quote.chars().count() != n { return None }
+    let after = rest[quote.len()..].strip_prefix("\n</in_reply_to>")?;
+    let body = after.strip_prefix("\n\n").unwrap_or_else(|| after.trim_start_matches('\n'));
+    Some((id.to_string(), quote, body.to_string()))
+}
 
 /// Draft.safe: the thread ids a draft may be kept for (not a scratch key).
 fn safe(id: &str) -> bool { !id.is_empty() && !id.starts_with('@') }
@@ -52,16 +72,19 @@ pub fn send(cx: &SendCtx, session: &Value) -> Option<ActOut> {
     let atts: Vec<String> = att_paths(s(d, &format!("@att:{sel}")));
     let lines = atts.iter().map(|p| format!("[attachment: {p}]")).collect::<Vec<_>>().join("\n");
     let text = if atts.is_empty() { body.to_string() } else if body.is_empty() { lines } else { format!("{body}\n\n{lines}") };
+    // Rpl: Reply on a message keeps its id (`@reply:<thread>`) and its text (`@reply.full:<thread>`); the send puts the quote ahead of the body, the clients show only the body
+    let (reply_id, reply_full) = (s(d, &format!("@reply:{sel}")), s(d, &format!("@reply.full:{sel}")));
+    let text = if !text.is_empty() && !reply_id.is_empty() && !reply_full.is_empty() { format!("{}\n\n{text}", reply_block(reply_id, reply_full)) } else { text };
     let text = text.as_str();
     if sel.is_empty() || !safe(sel) || text.is_empty() { return None }
     if ["/btw", "/give", "/secret", "/intent"].iter().any(|w| command_is(body, w)) || cx.bot_thread { return None }
-    if !s(d, &format!("@reply:{sel}")).is_empty() || !s(d, &format!("@intent.edit:{sel}")).is_empty() || !s(d, "@draft.bound").is_empty() { return None }
+    if !s(d, &format!("@intent.edit:{sel}")).is_empty() || !s(d, "@draft.bound").is_empty() { return None }
     let rid = session["rid"].as_u64().unwrap_or(0);
     // Rpc.text: {"id":rid,"m":"turn.start","p":{thread,text,msg,mode}} in this key order
     let p = bind(json!({"thread": sel, "text": text, "msg": msg_id(cx.cid, cx.now_s, rid), "mode": "steer"}), cx.binding.as_deref());
     let request = format!("{{\"id\":{rid},\"m\":\"turn.start\",\"p\":{}}}", serde_json::to_string(&p).ok()?);
     let mut drafts = Map::new();
-    for k in [sel.to_string(), format!("@att:{sel}"), format!("@reply:{sel}"), format!("@reply.q:{sel}")] { drafts.insert(k, json!("")); }
+    for k in [sel.to_string(), format!("@att:{sel}"), format!("@reply:{sel}"), format!("@reply.q:{sel}"), format!("@reply.full:{sel}")] { drafts.insert(k, json!("")); }
     let mut outbox = Map::new(); outbox.insert(rid.to_string(), json!(request));
     Some(ActOut {
         session_patch: json!({"rid": rid + 1, "drafts": drafts, "outbox": outbox}),
@@ -106,6 +129,25 @@ pub fn act(params: &Value, facts: &dyn Facts) -> Option<ActOut> {
     let (session, hub) = (&params["session"], s(params, "hub"));
     match s(params, "action") {
         "draft" => draft(hub, session, s(params, "value")),
+        // a popup row chosen (a reference, a `/command` or a `$skill`): the word being typed becomes the row's word
+        "skill" => {
+            let sel = s(session, "sel"); let word = s(params, "value");
+            if !safe(sel) || word.is_empty() { return None }
+            let text = mention::complete(draft_of(session, sel), word);
+            Some(ActOut { session_patch: json!({"drafts": { sel: text }}), cmds: vec![json!({"type": "keep", "thread": format!("{hub}|{sel}"), "text": text})] })
+        }
+        // Reply on a message: `<id>\u{1f}<its text>`; the composer shows the first line until reply-drop or the next send
+        "reply" => {
+            let sel = s(session, "sel");
+            let (id, full) = s(params, "value").split_once('\u{1f}')?;
+            if !safe(sel) || id.is_empty() || full.trim().is_empty() { return None }
+            let first = full.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+            Some(ActOut { session_patch: json!({"drafts": {format!("@reply:{sel}"): id, format!("@reply.q:{sel}"): first, format!("@reply.full:{sel}"): full}}), cmds: vec![json!({"type": "focus", "id": "composer"})] })
+        }
+        "reply-drop" => {
+            let sel = s(session, "sel"); if !safe(sel) { return None }
+            Some(ActOut { session_patch: json!({"drafts": {format!("@reply:{sel}"): "", format!("@reply.q:{sel}"): "", format!("@reply.full:{sel}"): ""}}), cmds: vec![] })
+        }
         "send" | "send-alt" => {
             let sel = s(session, "sel");
             send(&SendCtx { hub, cid: s(params, "cid"), now_s: params["now"].as_u64().unwrap_or(0) / 1000, bot_thread: facts.bot_thread(sel), binding: facts.account_binding(sel) }, session)
@@ -116,6 +158,23 @@ pub fn act(params: &Value, facts: &dyn Facts) -> Option<ActOut> {
 
 #[cfg(test)]
 mod tests {
+    #[test] fn a_reply_is_a_counted_block_the_clients_take_apart() {
+        let b = reply_block("m1", "line one\nline two");
+        let msg = format!("{b}\n\nmy answer");
+        assert_eq!(reply_split(&msg), Some(("m1".into(), "line one\nline two".into(), "my answer".into())));
+        assert_eq!(reply_split("plain"), None);
+        assert_eq!(reply_split("<in_reply_to msg=m1 chars=99>\nshort\n</in_reply_to>\n\nx"), None, "a quote shorter than it says is not a block");
+        let cx = SendCtx { hub: "h", cid: "c", now_s: 1, bot_thread: false, binding: None };
+        let s = json!({"sel": "t1", "rid": 2, "drafts": {"t1": "ok", "@reply:t1": "m7", "@reply.q:t1": "hi", "@reply.full:t1": "hi there"}, "info": {}});
+        let o = send(&cx, &s).unwrap();
+        assert!(o.cmds[1]["text"].as_str().unwrap().contains(r"<in_reply_to msg=m7 chars=8>\nhi there\n</in_reply_to>\n\nok"), "{:?}", o.cmds[1]);
+        assert_eq!(o.session_patch["drafts"]["@reply:t1"], "");
+        let p = |a: &str, v: &str| json!({"session": s, "action": a, "value": v, "hub": "h"});
+        struct Plain; impl Facts for Plain { fn bot_thread(&self, _: &str) -> bool { false } fn account_params(&self, _: &str) -> bool { false } }
+        let r = act(&p("reply", "m9\u{1f}first\nsecond"), &Plain).unwrap();
+        assert_eq!((r.session_patch["drafts"]["@reply:t1"].as_str(), r.session_patch["drafts"]["@reply.q:t1"].as_str()), (Some("m9"), Some("first")));
+        assert_eq!(act(&p("reply-drop", ""), &Plain).unwrap().session_patch["drafts"]["@reply.full:t1"], "");
+    }
     use super::*;
     // recorded by the JS hub (parity-960s/recA session-gpui): select, draft "hello parity", send
     fn session() -> Value { json!({"sel": "t1700000002-3", "rid": 2, "drafts": {"t1700000002-3": "hello parity", "@boot": ""}, "info": {}}) }
@@ -143,7 +202,7 @@ mod tests {
             json!({"type": "scroll"})]);
         let p = &o.session_patch;
         assert_eq!(p["rid"], json!(3));
-        assert_eq!(p["drafts"], json!({"t1700000002-3": "", "@att:t1700000002-3": "", "@reply:t1700000002-3": "", "@reply.q:t1700000002-3": ""}));
+        assert_eq!(p["drafts"], json!({"t1700000002-3": "", "@att:t1700000002-3": "", "@reply:t1700000002-3": "", "@reply.q:t1700000002-3": "", "@reply.full:t1700000002-3": ""}));
         assert_eq!(p["outbox"]["2"], o.cmds[1]["text"]);
     }
     #[test] fn command_words_are_the_drafts_first_word_alone() {
@@ -179,7 +238,7 @@ mod tests {
         assert_eq!(send_o.cmds[1]["text"].as_str().unwrap().contains("\"msg\":\"cparity-gpui1793864523-2\""), true, "now is milliseconds in the params, seconds in the msg id");
         assert_eq!(act(&p("send-alt", ""), &Plain).unwrap().cmds, send_o.cmds, "Follow.mode answers steer for both");
         assert!(act(&p("send", ""), &Bot).is_none(), "a bot's thread is Bots.say");
-        for a in ["select", "row-pin", "skill", "interrupt", ""] { assert!(act(&p(a, "x"), &Plain).is_none(), "{a}") }
+        for a in ["select", "row-pin", "interrupt", ""] { assert!(act(&p(a, "x"), &Plain).is_none(), "{a}") }
     }
     #[test] fn what_is_not_ported_is_none() {
         let cx = SendCtx { hub: "h", cid: "c", now_s: 1, bot_thread: false, binding: None };
@@ -187,7 +246,7 @@ mod tests {
         assert!(send(&cx, &with("t1700000002-3", "   ")).is_none(), "blank");
         assert!(send(&cx, &with("t1700000002-3", "/btw why")).is_none(), "slash commands");
         assert!(send(&cx, &with("@att:t1700000002-3", "a")).is_some(), "attachments");
-        assert!(send(&cx, &with("@reply:t1700000002-3", "m1")).is_none(), "replies");
+        assert!(send(&cx, &with("@reply:t1700000002-3", "m1")).is_some(), "a reply with no quote kept sends as plain text");
         assert!(send(&cx, &with("@draft.bound", "5 abc")).is_none(), "a bounded draft");
         assert!(send(&SendCtx { bot_thread: true, ..SendCtx { hub: "h", cid: "c", now_s: 1, bot_thread: false, binding: None } }, &session()).is_none(), "a bot's thread");
     }

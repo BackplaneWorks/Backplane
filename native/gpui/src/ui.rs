@@ -102,6 +102,27 @@ fn chip(light: bool, label: String) -> Div {
     div().px_3().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).whitespace_nowrap().child(label)
 }
 
+/// "Replying to ..." over the composer: its first line, a click goes to the message, × drops it.
+fn reply_chip(cx: &mut Context<Backplane>, light: bool, replying: &Value) -> Option<AnyElement> {
+    if !replying.is_object() { return None }
+    let c = |n: &str| theme::color(light, n);
+    let (target, line) = (string(replying, "id"), string(replying, "text"));
+    Some(div().flex().items_center().gap_2().px_2().py_1().mb_1().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.))
+        .child(div().id("reply-chip").flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_color(c("dim")).cursor_pointer().child(format!("\u{21a9} Replying to: {line}"))
+            .on_click(cx.listener(move |this, _, _, cx| { this.timeline_goto(&target); cx.notify(); })))
+        .child(div().id("reply-drop").px_1().cursor_pointer().text_color(c("dim")).hover(|s| s.text_color(c("bad"))).child("\u{00d7}")
+            .on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(Command::Action("reply-drop".into(), String::new())); cx.notify(); }))).into_any_element())
+}
+
+/// Copy and Reply under a message (a reply puts its first line over the composer and the whole text ahead of what is sent, for the agent).
+fn msg_tools(cx: &mut Context<Backplane>, light: bool, id: &str, text: &str) -> Div {
+    let c = |n: &str| theme::color(light, n);
+    let (copy, reply, rid) = (text.to_string(), format!("{id}\u{1f}{text}"), id.to_string());
+    let btn = |tag: &str, label: &'static str| div().id(SharedString::from(format!("{tag}-{rid}"))).px_1().cursor_pointer().text_size(px(11.)).text_color(c("faint")).hover(|s| s.text_color(c("text"))).child(label);
+    div().flex().gap_2().child(btn("copy", "Copy").on_click(cx.listener(move |_, _, _, cx| { cx.write_to_clipboard(ClipboardItem::new_string(copy.clone())); })))
+        .child(btn("reply", "Reply").on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("reply".into(), reply.clone())); cx.notify(); })))
+}
+
 impl Backplane {
     /// One row of the timeline, as the list asks for it: only rows on screen are drawn.
     pub(crate) fn timeline_row(&mut self, ei: usize, cx: &mut Context<Self>) -> AnyElement {
@@ -119,24 +140,32 @@ impl Backplane {
                 let wide = crate::screens::timeline::bubble_full_width(&text);
                 let body = crate::screens::timeline::user_text(&reg, light, &text);
                 let atts = crate::screens::timeline::attachments(light, &e["attachments"], &id, self.screens.attacher.target.as_ref(), &self.screens.images);
-                let stamp_row = div().flex().justify_end().text_size(px(11.)).text_color(c("faint")).child(stamp);
+                let tools = msg_tools(cx, light, &id, &text);
+                let stamp_row = div().flex().justify_end().items_center().gap_3().text_size(px(11.)).text_color(c("faint")).child(tools).child(stamp);
+                let reply_to = e["replyTo"].is_object().then(|| {
+                    let (target, quote) = (string(&e["replyTo"], "id"), string(&e["replyTo"], "quote"));
+                    div().id(SharedString::from(format!("rt-{id}"))).mb_1().max_w_full().overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(px(11.)).text_color(c("dim")).cursor_pointer().hover(|s| s.text_color(c("text")))
+                        .child(format!("\u{21a9} In reply to: {quote}")).on_click(cx.listener(move |this, _, _, cx| { this.timeline_goto(&target); cx.notify(); }))
+                });
                 let row = div().id(SharedString::from(format!("e-{id}"))).w_full().py_2();
                 // A text that may wrap sits in block layout like a reply's (a shrink-to-fit flex bubble measured it at one width and painted it at another);
                 // a message of short lines keeps the snug flex bubble.
                 if wide {
-                    row.child(div().w_full().max_w(px(640.)).ml_auto().px_3().py_2().bg(c("raise")).border_1().border_color(c("line")).child(body).children(atts.into_iter().map(|a| div().mt_1().child(a))).child(div().mt_1().child(stamp_row))).into_any_element()
+                    row.child(div().w_full().max_w(px(640.)).ml_auto().px_3().py_2().bg(c("raise")).border_1().border_color(c("line")).children(reply_to).child(body).children(atts.into_iter().map(|a| div().mt_1().child(a))).child(div().mt_1().child(stamp_row))).into_any_element()
                 } else {
-                    row.flex().justify_end().child(div().max_w(px(640.)).px_3().py_2().bg(c("raise")).border_1().border_color(c("line")).flex().flex_col().gap_1().child(body).children(atts).child(stamp_row)).into_any_element()
+                    row.flex().justify_end().child(div().max_w(px(640.)).px_3().py_2().bg(c("raise")).border_1().border_color(c("line")).flex().flex_col().gap_1().children(reply_to).child(body).children(atts).child(stamp_row)).into_any_element()
                 }
             }
             "fold" => {
                 let value = string(&e, "value");
                 self.controls.push(CtlEntry { id: format!("fold:{id}"), label: text.clone(), ctl: Ctl::Fold(value.clone()) });
-                div().id(SharedString::from(format!("e-{id}"))).py_2().child(
-                    with_rect(div().id(SharedString::from(format!("f-{id}"))), || format!("fold:{id}")).flex().gap_2().px_2().py_1().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("dim")).cursor_pointer()
+                // the label is one clipped line beside the chevron, never wider than the row; the chevron is centred on it
+                div().id(SharedString::from(format!("e-{id}"))).w_full().py_2().child(
+                    with_rect(div().id(SharedString::from(format!("f-{id}"))), || format!("fold:{id}")).w_full().min_w_0().overflow_hidden().flex().items_center().gap_2().px_2().py_1().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("dim")).cursor_pointer()
                         .hover(|s| s.bg(c("raise")))
                         .on_click(cx.listener(move |this, _, _, cx| { this.fold_click(value.clone()); cx.notify(); }))
-                        .child(ic(light, if e["open"] == true { "chevron-down" } else { "chevron-right" }, 14., "dim")).child(text)).into_any_element()
+                        .child(div().flex_shrink_0().flex().items_center().child(ic(light, if e["open"] == true { "chevron-down" } else { "chevron-right" }, 14., "dim")))
+                        .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(text))).into_any_element()
             }
             "assistant" => {
                 let mut col = div().id(SharedString::from(format!("e-{id}"))).w_full().py_2().flex().flex_col().gap_2();
@@ -145,7 +174,8 @@ impl Backplane {
                     _ => { col = col.child(crate::screens::timeline::user_text(&reg, light, &text)); }
                 }
                 if let Some(im) = crate::screens::timeline::images(light, &e["images"], &id, self.screens.attacher.target.as_ref(), &self.screens.images) { col = col.child(im); }
-                col.child(div().text_size(px(11.)).text_color(c("faint")).child(stamp)).into_any_element()
+                let tools = msg_tools(cx, light, &id, &text);
+                col.child(div().flex().items_center().gap_3().text_size(px(11.)).text_color(c("faint")).child(stamp).child(tools)).into_any_element()
             }
             _ if !text.is_empty() => div().id(SharedString::from(format!("e-{id}"))).flex().gap_2().py_1().font(art::mono_font()).text_size(px(12.)).text_color(c("dim")).child(string(&e, "label")).child(text).into_any_element(),
             _ => div().into_any_element(),
@@ -315,6 +345,8 @@ impl Render for Backplane {
         let el = div().size_full().flex().flex_col().bg(c("bg"))
             .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| this.attach_event(&crate::screens::composer::ComposerEvent::Files(paths.paths().to_vec()), cx))).text_color(c("text")).text_size(px(13. * self.local.text_pct as f32 / 100.)).font_family(self.local.font.clone()).line_height(px(20. * self.local.text_pct as f32 / 100.))
             .relative().on_action(cx.listener(|this, _: &crate::screens::improvements::Toggle, _, cx| crate::screens::improvements::toggle(this, cx))).on_action(cx.listener(|this, _: &crate::ToggleSidebarKey, _, cx| this.sidebar_toggle(cx))).on_action(cx.listener(|this, _: &crate::FocusSearchKey, _, cx| this.focus_search(cx))).on_action(cx.listener(Self::send)).on_action(cx.listener(Self::close_popup)).on_action(cx.listener(Self::copy_selection))
+            // the dev build strip, only while a build is being made or waits to relaunch
+            .children(self.screens.devbar.as_ref().map(|b| crate::screens::devbar::strip(b, light)))
             // top bar
             .child(div().h(px(36.)).flex_shrink_0().relative().child(art::probe("topbar")).flex().items_center().justify_between().px_3().border_b_1().border_color(c("line")).bg(c("bg"))
                 .child(div().flex().items_center().gap_2()
@@ -361,6 +393,7 @@ impl Render for Backplane {
                         .when(show_popup, |d| d.child(popup))
                         .children(crate::screens::picker::view(cx, light, &thread["picker"], self.screens.picker_open))
                         .children(crate::screens::asks::view(cx, light, &self.screens.ask_inputs, &thread["asks"]))
+                        .children(reply_chip(cx, light, &thread["replying"]))
                         .children(crate::screens::attach::chips(cx, light, &self.screens.attacher.previews, thread))
                         .child(div().border_1().border_color(c("accent")).bg(c("view")).px_3().py_2().min_h(px(60.)).child(self.input.clone()))
                         .child(div().flex().gap_2().items_center().w_full().min_w_0()
