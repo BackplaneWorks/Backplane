@@ -7,6 +7,7 @@ pub mod key;
 pub mod plan;
 pub mod actions;
 pub mod fs;
+pub mod reorder;
 pub mod home;
 pub mod seam;
 pub mod worktree;

@@ -171,7 +171,10 @@ impl Backplane {
                 with_rect(div().id(SharedString::from(format!("thread-{id}"))), || format!("thread:{raw}")).flex().items_center().gap_2().pl(px(22. + depth * 14.)).pr_3().h(px(32.)).when(faded, |d| d.opacity(0.55))
                     .border_l_2().border_color(if selected { c("ok") } else { c("panel") })
                     .bg(if selected { c("raise") } else { c("panel") }).hover(|s| s.bg(c("raise"))).cursor_pointer()
-                    .on_click(cx.listener(move |this, _, window, cx| this.select(id.clone(), window, cx)))
+                    .on_click(cx.listener({ let sid = id.clone(); move |this, _, window, cx| this.select(sid.clone(), window, cx) }))
+                    .on_drag(DragRow { id: raw.to_string(), label: string(t, "title") }, |d, _, _, cx| { let l = d.label.clone(); cx.new(|_| Ghost(l)) })
+                    .drag_over::<DragRow>({ let a = c("accent"); move |s, _, _, _| s.border_t_2().border_color(a) })
+                    .on_drop(cx.listener({ let target = raw.to_string(); move |this, d: &DragRow, _, cx| { let _ = this.tx.try_send(Command::Action("reorder".into(), format!("{}\u{1f}{}", d.id, target))); cx.notify(); } }))
                     .on_mouse_down(MouseButton::Right, { let (row, pid2) = (t.clone(), pid.to_string()); cx.listener(move |this, e: &MouseDownEvent, _, cx| { let items = crate::screens::ctxmenu::thread_items(&row, &pid2); this.ctx_open(e.position, items, cx); }) })
                     .children(toggle).child(div().size(px(5.)).bg(dot)).child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().flex().gap_2().child(div().overflow_hidden().text_ellipsis().child(string(t, "title"))).children((!sub.is_empty()).then(|| div().flex_shrink_0().max_w(px(80.)).overflow_hidden().text_ellipsis().text_size(px(11.)).text_color(c("faint")).child(sub.to_string()))))
                     .child(div().text_size(px(11.)).text_color(c("faint")).child(if kids > 0 && string(t, "agents").is_empty() { format!("{kids}") } else { string(t, "ago") })).into_any_element()
@@ -297,6 +300,9 @@ impl Render for Backplane {
             let (pid_new, pid_new2, pid_thr) = (pid.clone(), pid.clone(), pid.clone());
             rows.push(with_rect(div().id(SharedString::from(format!("proj-{pid}"))), || format!("project:{pid}")).flex().items_center().gap_2().px_3().pt_3().pb_1().text_size(px(11.)).text_color(if self.project_page.as_deref() == Some(pid_new.as_str()) { c("text") } else { c("dim") }).cursor_pointer().hover(|s| s.text_color(c("text")))
                 .on_click(cx.listener(move |this, _, _, cx| { this.open_project(pid.clone(), cx); }))
+                .on_drag(DragProj { id: pid_new.clone(), label: string(project, "title") }, |d, _, _, cx| { let l = d.label.clone(); cx.new(|_| Ghost(l)) })
+                .drag_over::<DragProj>({ let a = c("accent"); move |s, _, _, _| s.border_t_2().border_color(a) })
+                .on_drop(cx.listener({ let target = pid_new.clone(); move |this, d: &DragProj, _, cx| { let _ = this.tx.try_send(Command::Action("reorder-project".into(), format!("{}\u{1f}{}", d.id, target))); cx.notify(); } }))
                 .on_mouse_down(MouseButton::Right, { let pidm = pid_new.clone(); cx.listener(move |this, e: &MouseDownEvent, _, cx| { let items = crate::screens::ctxmenu::project_items(&pidm); this.ctx_open(e.position, items, cx); }) })
                 .child(ic(light, "chevron-down", 14., "dim")).child(ic(light, "folder", 14., "ok")).child(div().flex_1().child(string(project, "title").to_uppercase())).child(with_rect(div().id(SharedString::from(format!("new-{pid_new}"))), || "ui:New thread".to_string()).cursor_pointer().on_click(cx.listener(move |this, _, _, cx| { cx.stop_propagation(); this.arm_new(); let _ = this.tx.try_send(Command::Action("new-thread".into(), pid_new2.clone())); cx.notify(); })).child(ic(light, "plus", 16., "dim"))).into_any_element());
             for t in project["threads"].as_array().into_iter().flatten().chain(project["settled"].as_array().into_iter().flatten()) {
@@ -534,3 +540,10 @@ impl Render for Backplane {
         el
     }
 }
+
+/// A thread row being dragged (the sidebar's reorder: dropped on another row of its shelf), and a project header being dragged.
+#[derive(Clone)] pub struct DragRow { pub id: String, pub label: String }
+#[derive(Clone)] pub struct DragProj { pub id: String, pub label: String }
+/// What follows the pointer while dragging: the label in a small box.
+pub struct Ghost(pub String);
+impl Render for Ghost { fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement { div().px_3().py_1().bg(gpui::rgb(0x2a2f3a)).border_1().border_color(gpui::rgb(0x4a5060)).text_color(gpui::rgb(0xe6e8ee)).text_size(px(12.)).child(self.0.clone()) } }

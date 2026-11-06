@@ -230,8 +230,10 @@ pub fn plan<'a>(st: &'a State, o: &'a Opts<'a>) -> Plan<'a> {
     }
     let kids = kids_hidden(st);
     let mut ps: Vec<Planned> = vec![];
+    // a removed project keeps its row while its thread is the one open (the row goes when another is chosen)
+    let open_project = st.threads.get(o.selected).map(|t| t.project.as_str()).unwrap_or("");
     for (id, p) in &st.projects {
-        if p.removed { continue }
+        if p.removed && id != open_project { continue }
         // Side.projs.keep: the Scratch project (conversations that belong to no project) is not listed among projects
         if id.rsplit('~').next() == Some("scratch") && !id.contains('~') || id.split_once('~').map_or(false, |(_, l)| l == "scratch") { continue }
         let raw = shelves_of(st, id, o.now, &kids);
@@ -336,6 +338,24 @@ impl Plan<'_> {
         };
         (live.iter().map(|(_, _, id, pid)| row(id, pid, 0)).collect(), faded.iter().map(|(_, id, pid)| row(id, pid, 1)).collect())
     }
+}
+
+/// What a drag needs (`Ui.reorder`, `Ui.reorder_project`): for a thread, the shelf it stands on (`pinned` or `active`) and that shelf's threads in order;
+/// for a project, "" and every project of the sidebar in order. None for a thread on no reorderable shelf.
+pub fn order_of(st: &State, now: u64, kind: &str, id: &str) -> Option<(String, Vec<String>)> {
+    if kind == "project" {
+        let open: HashSet<String> = HashSet::new();
+        let o = Opts { hub: "", now, selected: "", open: &open, older_open: true };
+        let p = plan(st, &o);
+        return Some((String::new(), p.ids().into_iter().map(String::from).collect()));
+    }
+    let t = st.threads.get(id)?;
+    let kids = kids_hidden(st);
+    let sh = tree_shelves(st, &shelves_of(st, &t.project, now, &kids));
+    for (name, list) in [("pinned", &sh.pinned), ("active", &sh.active)] {
+        if list.iter().any(|x| *x == id) { return Some((name.to_string(), list.iter().map(|s| s.to_string()).collect())) }
+    }
+    None
 }
 
 /// The projects as the sidebar groups them: live, then quiet, then (when its shelf is open) the older ones.
