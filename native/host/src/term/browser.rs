@@ -18,7 +18,7 @@ pub const MAX_LINE: usize = 16 << 20;
 pub const MAX_OWNERS: usize = 1024;
 /// Teach.refusal
 pub const REFUSAL: &str = "The person has the browser (teaching or taking over); wait for them to hand it back.";
-const NO_HELPER: &str = "the Backplane browser could not start (is backplane-browser installed next to Backplane?)";
+const NO_HELPER: &str = "the Backplane browser could not start: no backplane-browser helper next to the hub, in ~/.local/share/backplane or on PATH (set BACKPLANE_BROWSER=/path, or build it with scripts/build-browser.sh)";
 pub const PREVIEW: &[&str] = &["preview_open", "preview_navigate", "preview_snapshot", "preview_click", "preview_type", "preview_press", "preview_scroll", "preview_evaluate", "preview_wait_for", "preview_resize", "preview_status"];
 
 #[derive(Default)]
@@ -31,7 +31,10 @@ pub fn get(hub: &Hub) -> Option<Arc<Browser>> { BROWSERS.get()?.lock().unwrap().
 /// BACKPLANE_BROWSER, else `backplane-browser` beside the hub's binary.
 fn helper_path() -> Option<PathBuf> {
     if let Ok(p) = std::env::var("BACKPLANE_BROWSER") { if !p.is_empty() { return Some(PathBuf::from(p)) } }
-    let me = std::env::current_exe().ok()?; let p = me.parent()?.join("backplane-browser"); p.exists().then_some(p)
+    // beside the hub; else the installed one (a dev build ships only the hub and the window); else on PATH
+    let me = std::env::current_exe().ok()?; let beside = me.parent()?.join("backplane-browser"); if beside.exists() { return Some(beside) }
+    if let Some(h) = std::env::var_os("HOME") { let p = PathBuf::from(h).join(".local/share/backplane/backplane-browser"); if p.exists() { return Some(p) } }
+    std::env::var_os("PATH").and_then(|path| std::env::split_paths(&path).map(|d| d.join("backplane-browser")).find(|p| p.is_file()))
 }
 pub fn fail(m: &str) -> String { json!({"ok":false,"error":m}).to_string() }
 
