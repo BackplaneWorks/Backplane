@@ -29,7 +29,10 @@ case "$cmd" in
         printf 'Authorization: Bearer %s\n' "$(cat "$H/token")" | curl -sf -m5 -X POST -H @- "http://127.0.0.1:$PORT/auth/invitations" | python3 -c "import json,sys;d=json.load(sys.stdin);print('routes:',', '.join(d['routes']));print('code:',d['code']);print('link:',d['link'])" || die "the hub gave no invitation"; exit 0;;
   log) echo "$D/hub.log  $D/client.log"; exit 0;;
   stop) for w in client hub; do p=$(pid $w); alive "$p" && kill "$p"; rm -f "$D/$w.pid"; done
-        [ -f "$D/tailnet.port" ] && { tp=$(cat "$D/tailnet.port"); tailscale serve --https="$tp" off >/dev/null 2>&1 || true; rm -f "$D/tailnet.port"; echo "removed the tailscale serve entry on $tp"; }
+        [ -f "$D/tailnet.port" ] && { tp=$(cat "$D/tailnet.port")
+          # only our own entry: it must still proxy to this hub's port; if another process took the port over, it is theirs and stays
+          if tailscale serve status 2>/dev/null | awk -v p=":$tp " -v t="http://127.0.0.1:$PORT" 'index($0,"ts.net"p){on=1;next} /^https:/{on=0} on&&$NF==t{f=1} END{exit f?0:1}'; then tailscale serve --https="$tp" off >/dev/null 2>&1 || true; echo "removed the tailscale serve entry on $tp"; else echo "left the tailscale serve entry on $tp alone (it does not proxy to this hub)"; fi
+          rm -f "$D/tailnet.port"; }
         echo stopped; exit 0;;
   reset) printf 'Delete %s (all fresh projects and threads)? [y/N] ' "$D"; read -r a; [ "$a" = y ] || exit 1
          for w in client hub; do p=$(pid $w); alive "$p" && kill "$p"; done; sleep 1; rm -rf "$D"; echo deleted; exit 0;;
@@ -47,7 +50,7 @@ if ! alive "$(pid hub)"; then
     t=$(date +%s); printf '{"$":"SettingSet","key":"agent.provider","value":"%s","at":%s}\n{"$":"SettingSet","key":"agent.model","value":"%s","at":%s}\n' "${AGENT%%:*}" "$t" "${AGENT#*:}" "$t" > "$H/events.jsonl"
   fi
   # the hub: your own HOME (the agents' sign-ins are yours), no copy switches, in its own memory-capped scope
-  TN=; if [ -n "${FRESH_TAILNET_PORT:-}" ]; then case "$FRESH_TAILNET_PORT" in 443|3787|3788|"$PORT") die "FRESH_TAILNET_PORT $FRESH_TAILNET_PORT is not free to use";; esac; TN="--tailnet-only"; echo "$FRESH_TAILNET_PORT" > "$D/tailnet.port"; fi
+  TN=; if [ -n "${FRESH_TAILNET_PORT:-}" ]; then case "$FRESH_TAILNET_PORT" in 443|3787|3788|"$PORT") die "FRESH_TAILNET_PORT $FRESH_TAILNET_PORT is not free to use";; esac; if tailscale serve status 2>/dev/null | grep -q "ts.net:$FRESH_TAILNET_PORT "; then die "tailscale serve port $FRESH_TAILNET_PORT is already used on this machine (tailscale serve status): pick another FRESH_TAILNET_PORT"; fi; TN="--tailnet-only"; echo "$FRESH_TAILNET_PORT" > "$D/tailnet.port"; fi
   ( exec setsid env BACKPLANE_NO_UPDATE=1 ${FRESH_TAILNET_PORT:+BACKPLANE_HTTPS_PORT=$FRESH_TAILNET_PORT} ${BACKPLANE_COMMIT:+BACKPLANE_COMMIT=$BACKPLANE_COMMIT} \
       systemd-run --user --scope -q -p "MemoryMax=$MEM" -p MemorySwapMax=0 -- "$BIN/backplane-hub" --home "$H" --port "$PORT" --host 127.0.0.1 ${TN:---no-tailscale} --foreground \
       > "$D/hub.log" 2>&1 < /dev/null ) &
