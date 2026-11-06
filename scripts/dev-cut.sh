@@ -30,6 +30,7 @@ tmp=$DEV/builds/.cut-$$; trap 'rm -rf "${tmp:?}"' EXIT
 mkdir "$tmp"; cp "$src/backplane-hub" "$src/backplane-gpui" "$tmp/"
 [ ! -x "$src/backplane-browser" ] || cp "$src/backplane-browser" "$tmp/"
 [ ! -f "$src/COMMIT" ] || cp "$src/COMMIT" "$tmp/"
+[ ! -f "$src/HAIKU" ] || cp "$src/HAIKU" "$tmp/"
 [ ! -d "$src/assets" ] || cp -r "$src/assets" "$tmp/"
 mv "$tmp" "$DEV/builds/$id"; trap - EXIT
 publish "$id"

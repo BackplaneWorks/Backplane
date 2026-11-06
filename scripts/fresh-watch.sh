@@ -50,7 +50,8 @@ while :; do
     n=$(turns)
     if [ "$n" != 0 ]; then
       [ "$waiting" = "$c:$n" ] || tell "Build $c is ready; waiting for $n running turn(s) to finish (Enter relaunches now)."
-      waiting=$c:$n; status waiting "Build ${c##*-} ready: waiting for $n running turn(s) to end" ",\"action\":\"restart\",\"turns\":$n"
+      hk=$(tr -d '"\\' < "$DEV/builds/$c/HAIKU" 2>/dev/null | paste -sd'|' | sed 's/|/ \/ /g')   # the build's haiku, on one line
+      waiting=$c:$n; status waiting "Build ${c##*-} ready: waiting for $n running turn(s) to end" ",\"action\":\"restart\",\"turns\":$n,\"haiku\":\"$hk\""
       if [ -e "$REQ" ]; then rm -f "$REQ"; say "relaunch asked for from the window"
       elif [ -t 0 ]; then read -r -t "$POLL" _ || continue
       else sleep "$POLL"; continue; fi

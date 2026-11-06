@@ -13,7 +13,8 @@ const POLL: Duration = Duration::from_millis(1000);
 #[derive(Clone, Debug, PartialEq)]
 pub struct Bar { pub phase: String, pub text: String, pub frac: Option<f32>, /// the watcher can relaunch on request (it is waiting for turns to end)
     pub restart: bool, /// turns that a relaunch would stop
-    pub turns: u64 }
+    pub turns: u64, /// a haiku on what the build adds (may be empty)
+    pub haiku: String }
 
 /// The watcher's status (STATUS: a build waits to relaunch the app, can be asked to) and the builder's (BUILD: a build is being made, failed): the watcher's is shown first.
 fn paths() -> Vec<PathBuf> {
@@ -30,7 +31,7 @@ pub fn parse(line: &str) -> Option<Bar> {
     let text = v["text"].as_str().unwrap_or("").to_string();
     if phase.is_empty() || text.is_empty() { return None }
     let (done, total) = (v["done"].as_f64().unwrap_or(0.0), v["total"].as_f64().unwrap_or(0.0));
-    Some(Bar { phase, text, frac: (total > 0.0).then(|| (done / total).clamp(0.0, 1.0) as f32), restart: v["action"].as_str() == Some("restart"), turns: v["turns"].as_u64().unwrap_or(0) })
+    Some(Bar { phase, text, frac: (total > 0.0).then(|| (done / total).clamp(0.0, 1.0) as f32), restart: v["action"].as_str() == Some("restart"), turns: v["turns"].as_u64().unwrap_or(0), haiku: v["haiku"].as_str().unwrap_or("").to_string() })
 }
 
 fn read_one(p: &PathBuf) -> Option<Bar> {
@@ -66,7 +67,7 @@ pub fn strip(cx: &mut Context<Backplane>, bar: &Bar, light: bool, confirming: bo
     let hue = match bar.phase.as_str() { "building" => c("accent"), "failed" => c("bad"), _ => c("ok") };
     let mut el = div().h(px(22.)).flex_shrink_0().relative().overflow_hidden().bg(c("raise")).border_b_1().border_color(c("line"))
         .child(div().absolute().top_0().left_0().bottom_0().w(relative(bar.frac.unwrap_or(1.0))).bg(hue).opacity(if ready || bar.phase == "failed" { 0.5 } else { 0.35 }))
-        .child(div().absolute().inset_0().flex().items_center().px_3().text_size(px(11.)).text_color(c("text")).child(bar.text.clone()));
+        .child(div().absolute().inset_0().flex().items_center().px_3().text_size(px(11.)).text_color(c("text")).child(bar.text.clone()).when(!bar.haiku.is_empty(), |d| d.child(div().ml_3().opacity(0.75).italic().child(bar.haiku.clone()))));
     if ready {
         let label = if confirming { format!("Click again: stops {} running turn{}", bar.turns, if bar.turns == 1 { "" } else { "s" }) } else { "Restart now".to_string() };
         el = el.child(div().absolute().top_0().right_0().bottom_0().flex().items_center().pr_2().child(
@@ -93,7 +94,8 @@ mod tests {
         assert_eq!((b.phase.as_str(), b.text.as_str(), b.frac), ("building", "Building 50/200", Some(0.25)));
         assert_eq!(parse(r#"{"phase":"waiting","text":"2 turns running"}"#).unwrap().frac, None);
         assert_eq!(parse(r#"{"phase":"building","text":"x","done":9,"total":3}"#).unwrap().frac, Some(1.0));
-        let w = parse(r#"{"phase":"waiting","text":"x","action":"restart","turns":3}"#).unwrap(); assert!(w.restart && w.turns == 3 && !b.restart);
+        let w = parse(r#"{"phase":"waiting","text":"x","action":"restart","turns":3}"#).unwrap(); assert!(w.restart && w.turns == 3 && !b.restart && w.haiku.is_empty());
+        assert_eq!(parse(r#"{"phase":"waiting","text":"x","haiku":"a / b / c"}"#).unwrap().haiku, "a / b / c");
         assert!(parse("").is_none() && parse("{}").is_none() && parse(r#"{"phase":"x","text":""}"#).is_none());
     }
 }
