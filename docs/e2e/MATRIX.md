@@ -1,6 +1,6 @@
 # End-to-end matrix
 
-Rust-only Backplane on `main`: hub `native/host`, client `native/gpui`. Results are `pass`, `fail` or `not run`. `deferred, no VM` marks Windows: the person dropped it for now on 2026-11-06, and it is neither a pass nor a fail. A result needs evidence: a commit, the rig, and a log path or test name. `not run` says why. A Linux result never stands in for another platform.
+Rust-only Backplane on `main`: hub `native/host`, client `native/gpui`. Results are `pass`, `fail` or `not run`. `deferred, no VM` marks Windows: the person dropped it for now on 2026-11-06, and it is neither a pass nor a fail. `wine` results sit in their own section: Wine on Boat is not Windows, and they never fill a Windows cell. A result needs evidence: a commit, the rig, and a log path or test name. `not run` says why. A Linux result never stands in for another platform.
 
 The grids are kept by the lead. Each lane writes only its own section at the end of this file, so parallel rebases do not collide.
 
@@ -108,6 +108,21 @@ Each lane's rows: `| ID | result | commit | rig | evidence |`.
 |---|---|---|---|---|
 
 ### Windows
+
+Deferred, no VM. The lane stopped with nothing landed and never compiled or ran Windows.
+
+Windows blockers, from reading the source at `ed50df6d35`, not from compile errors. The real error count is unknown.
+
+- Hub terminal: POSIX pty only, needs ConPTY (`term/pty.rs`, `term/mod.rs`).
+- Hub sockets: Unix sockets, and the KiCad IPC path needs a Windows transport (`kicad/nng.rs`, `kicad/kipc.rs`, `kicad/ipc.rs`, `proc.rs`).
+- Hub processes: `kill`, `setsid`, `pre_exec` and `tokio::signal::unix` need Job Objects or an equivalent (`agents/proc.rs`, `agents/work.rs`, `term/pty.rs`, `settings/vault.rs`, `main.rs`, `copy.rs`, `agents/providers/mod.rs`).
+- Hub file APIs: 24 `PermissionsExt`, 15 `symlink`, 5 `MetadataExt`, 4 `ExitStatusExt`, 4 `OpenOptionsExt`, 3 `DirBuilderExt`, 2 `FileExt`, plus `OsStrExt` and `AsRawFd`.
+- Hub libc: 79 direct uses, including `flock`, `getifaddrs`, `localtime_r`, `setrlimit`, `O_NOFOLLOW` and `getuid`.
+- Hub paths: Unix paths and tools hard-coded in at least 25 files, and 18 `HOME` or `XDG_` uses.
+- Hub vault: only macOS keychain and Linux keyring backends (`settings/vault.rs`).
+- Client: `Cargo.toml` declares `gpui` only for Linux and macOS. `gpui-0.2.2/build.rs` compiles Windows shaders only on a Windows build host. Linux or Unix-only paths in `screens/place.rs`, `screens/improvements.rs`, `screens/capture.rs` and `screens/timeline.rs`. CEF packaging is unproven.
+- Helpers and packaging: no Windows handling in `tools/cef/CMakeLists.txt`, `tools/*/build.ts` or `scripts/`, apart from `build-step2glb.sh`.
+- Docs: `docs/windows.md` and `docs/windows-cad.md` still describe the removed Electron and Bun stack.
 
 | ID | Result | Commit | Rig | Evidence |
 |---|---|---|---|---|
