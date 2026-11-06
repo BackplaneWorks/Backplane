@@ -12,9 +12,9 @@ export async function startDisplay(n=62,size='1440x900x24'){
   if(process.env.E2E_ALLOW_DESKTOP!=='1'&&process.env.DISPLAY&&!process.env.BOAT_SANDBOX&&!process.env.CI&&!existsSync('/home/user'))throw Error('refusing to start a display here: run on Boat (set E2E_ALLOW_DESKTOP=1 only with the person\'s word)');
   const xv=spawn('Xvfb',[`:${n}`,'-screen','0',size,'-nolisten','tcp'],{stdio:'ignore'});await sleep(1500);
   writeFileSync('/tmp/e2e-i3.conf','font pango:monospace 8\nnew_window none\nfor_window [class=".*"] border none\ndefault_border none\ndefault_floating_border none\nhide_edge_borders both\n');
-  const i3=spawn('i3',['-c','/tmp/e2e-i3.conf'],{stdio:'ignore',env:{...process.env,DISPLAY:`:${n}`}});await sleep(1500);
+  const i3=have('i3')?spawn('i3',['-c','/tmp/e2e-i3.conf'],{stdio:'ignore',env:{...process.env,DISPLAY:`:${n}`}}):null;await sleep(1500); // no i3 (h@backplane): a bare Xvfb maps the one window at the origin
   const env={...process.env,DISPLAY:`:${n}`,VK_ICD_FILENAMES:process.env.VK_ICD_FILENAMES||'/usr/share/vulkan/icd.d/lvp_icd.json'}; // llvmpipe on Boat: software rendering
-  return {display:`:${n}`,env,stop:()=>{for(const p of[i3,xv])try{p.kill('SIGTERM')}catch{}}}}
+  return {display:`:${n}`,env,stop:()=>{for(const p of[i3,xv].filter(Boolean))try{p.kill('SIGTERM')}catch{}}}}
 export function startRecording(display,file,fps=30){mkdirSync(file.replace(/\/[^/]+$/,''),{recursive:true});
   if(!have('ffmpeg'))return {stop:async()=>({file:null,reason:'no ffmpeg'}),offsetMs:()=>NaN};
   const offs=[];const p=spawn('ffmpeg',['-y','-loglevel','error','-progress','pipe:1','-stats_period','0.5','-f','x11grab','-framerate',String(fps),'-video_size','1440x900','-i',display,'-c:v','libx264','-preset','ultrafast','-pix_fmt','yuv420p',file],{stdio:['ignore','pipe','ignore']});

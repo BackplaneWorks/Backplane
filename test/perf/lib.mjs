@@ -2,7 +2,7 @@
 import {spawn} from 'node:child_process';
 import {mkdirSync,readFileSync,readdirSync,writeFileSync,chmodSync,existsSync,statSync} from 'node:fs';
 import {decode,encode} from '../wire.mjs';
-import {standinScript} from '../../tools/perf_standin.ts';
+import {standinScript} from '../tools/perf_standin.ts';
 export const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 export const pct=(xs,p)=>{if(!xs.length)return NaN;const s=[...xs].sort((a,b)=>a-b);return s[Math.min(s.length-1,Math.floor(p/100*s.length))]};
 export const f1=x=>Number.isFinite(x)?x.toFixed(1):'-';
