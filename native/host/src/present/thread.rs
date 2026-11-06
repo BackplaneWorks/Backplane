@@ -390,7 +390,11 @@ pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value
     // the composer's four keys: the draft, the send button and its action, the popup rows (parity-session's session::composer; ours are the `$ @ > % #` & rows, not ported:
     // a mention being typed shows no popup — see docs/gpui/slim-thread-known-missing.md). Another interface language is the helper's (None).
     let lang = st.settings.get("lang").map(String::as_str).unwrap_or("");
-    let c = crate::session::composer::fields(draft, running, false, t.provider == "claude", &json!([]), lang).ok_or("composer.language")?;
+    // Mob.chip: the attachments waiting in `@att:<thread>` and the file still uploading in `@att.up:<thread>`
+    let atts = crate::session::composer::att_paths(params["session"]["drafts"][format!("@att:{thread}")].as_str().unwrap_or(""));
+    o.insert("attaching".into(), Value::Array(atts.iter().map(|p| chip(p)).collect()));
+    o.insert("uploading".into(), json!(params["session"]["drafts"][format!("@att.up:{thread}")].as_str().unwrap_or("")));
+    let c = crate::session::composer::fields(draft, running, !atts.is_empty(), t.provider == "claude", &json!([]), lang).ok_or("composer.language")?;
     for (k, v) in state_keys { o.insert(k, v); }
     o.insert("asks".into(), Value::Array(asks_json(st, thread, draft)?));
     for k in ["draft", "skills", "send", "sendAct"] { o.insert(k.into(), c[k].clone()); }

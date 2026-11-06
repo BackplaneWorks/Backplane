@@ -62,6 +62,37 @@ pub fn act<F: Facts>(f: &F, hub: &str, session: &Value, sel: &str, action: &str,
             let p = if value.is_empty() { json!({}) } else { json!({"id": id, "answer": parts.collect::<Vec<_>>().join("|")}) };
             b.rpc("ask.answer", p);
         }
+        // Upload.start: a file about to upload is named in `@att.up:<thread>`; one over the cap shows the refusal instead
+        "attach-up" => {
+            if sel.is_empty() { return None }
+            let v: Value = serde_json::from_str(value).unwrap_or(Value::Null);
+            let (name, size) = (v["name"].as_str().filter(|n| !n.is_empty()).unwrap_or("file"), v["size"].as_u64().unwrap_or(0));
+            let cap = f.attach_cap();
+            if size > cap { b.patch.insert("error".into(), json!(crate::files::attach::failure(sel, "upload.cap", &(cap / 1048576).to_string())["text"])); }
+            else { b.drafts.insert(format!("@att.up:{sel}"), json!(name)); }
+        }
+        // Upload.end: the hub's answer to the POST /attach; the path joins the thread's attachments (once), or the failure shows
+        "attach-end" => {
+            let v: Value = serde_json::from_str(value).ok().filter(Value::is_object).unwrap_or_else(|| crate::files::attach::failure(sel, "upload.failed", ""));
+            let thread = v["thread"].as_str().unwrap_or("").rsplit('|').next().unwrap_or("").to_string();
+            if thread.is_empty() || thread.starts_with('@') { return None }
+            b.drafts.insert(format!("@att.up:{thread}"), json!(""));
+            match v["attached"].as_str().filter(|p| !p.is_empty()) {
+                Some(path) => {
+                    let mut ps: Vec<String> = super::composer::att_paths(draft(session, &format!("@att:{thread}"))).into_iter().filter(|x| x != path).collect();
+                    ps.push(path.to_string());
+                    b.drafts.insert(format!("@att:{thread}"), json!(ps.join("\n")));
+                }
+                None if v["upload"].as_bool().unwrap_or(false) => { b.patch.insert("error".into(), json!(v["text"].as_str().unwrap_or("the upload failed"))); }
+                None => {}
+            }
+        }
+        // Att.drop: Remove on a chip
+        "detach" => {
+            if sel.is_empty() { return None }
+            let ps: Vec<String> = super::composer::att_paths(draft(session, &format!("@att:{sel}"))).into_iter().filter(|x| x != value).collect();
+            b.drafts.insert(format!("@att:{sel}"), json!(ps.join("\n")));
+        }
         "interrupt" => { if sel.is_empty() { return None } b.rpc("turn.interrupt", json!({"thread": sel})) }
         "copy" => {}
         // Ui.toggle_panel: opened or shut by hand (the hub's own view leaves it alone now); shut forgets the Mech parts asked for
@@ -138,7 +169,24 @@ mod tests {
         fn order_enabled(&self) -> bool { true } fn estimates_on(&self) -> bool { true }
     }
     impl Facts for F { fn title_of(&self, _: &str) -> String { String::new() } fn root_of(&self, _: &str) -> String { "/w/r".into() } }
-    const T: &str = "t1700000002-3";
+
+    fn merged(s: &Value, o: Out) -> Value { let mut s = s.clone(); crate::session::patch::merge(&mut s, &o.session_patch); s }
+    #[test] fn a_pasted_picture_uploads_attaches_sends_and_detaches() {
+        let s0 = json!({"sel": "t1", "rid": 3, "drafts": {"t1": "look"}, "info": {}});
+        let s1 = merged(&s0, act(&F, "h", &s0, "t1", "attach-up", r#"{"name":"pasted-1.png","size":10}"#).unwrap());
+        assert_eq!(s1["drafts"]["@att.up:t1"], "pasted-1.png");
+        let s2 = merged(&s1, act(&F, "h", &s1, "t1", "attach-end", r#"{"attached":"/a/t1/k9-pasted-1.png","thread":"t1"}"#).unwrap());
+        assert_eq!((s2["drafts"]["@att.up:t1"].as_str(), s2["drafts"]["@att:t1"].as_str()), (Some(""), Some("/a/t1/k9-pasted-1.png")));
+        let cx = composer::SendCtx { hub: "h", cid: "c", now_s: 1, bot_thread: false, binding: None };
+        let sent = composer::send(&cx, &s2).unwrap();
+        assert!(sent.cmds[1]["text"].as_str().unwrap().contains(r"look\n\n[attachment: /a/t1/k9-pasted-1.png]"), "{:?}", sent.cmds[1]);
+        let s3 = merged(&s2, act(&F, "h", &s2, "t1", "detach", "/a/t1/k9-pasted-1.png").unwrap());
+        assert_eq!(s3["drafts"]["@att:t1"], "");
+        let s4 = merged(&s0, act(&F, "h", &s0, "t1", "attach-end", r#"{"thread":"t1","upload":true,"text":"the upload failed","uiError":"upload.failed"}"#).unwrap());
+        assert_eq!(s4["error"], "the upload failed");
+        let over = act(&F, "h", &s0, "t1", "attach-up", &format!(r#"{{"name":"b","size":{}}}"#, 600u64 << 20)).unwrap();
+        assert!(over.session_patch["error"].as_str().unwrap().contains("512 MB"));
+    }    const T: &str = "t1700000002-3";
     fn sess() -> Value { json!({"sel": T, "rid": 5, "panel": false, "drafts": {}, "info": {}, "open": {}}) }
     fn run(a: &str, v: &str, s: Value) -> Option<Out> { act(&F, "h", &s, T, a, v) }
     fn text(o: &Out, i: usize) -> String { o.cmds[i]["text"].as_str().unwrap().to_string() }
