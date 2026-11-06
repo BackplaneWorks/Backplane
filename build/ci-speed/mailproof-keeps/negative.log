@@ -1,9 +1,0 @@
-SOME PROOFS FAIL
-Error:
-- expected : 0n
-- observed : 1n
-Location: bad
-2 | def bad() -> {0n == 1n : Nat}:
-3>|   {==}
-  |   ^^^^
-4 | 

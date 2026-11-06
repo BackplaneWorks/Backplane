@@ -1,5 +1,0 @@
-ok single-file store still promotes
-ok reject unexpected-file before moving files
-ok reject sidecar-directory before moving files
-ok reject sidecar-symlink before moving files
-{"platform":"linux","arch":"x64","bun":"1.3.10","passed":4,"failed":7}

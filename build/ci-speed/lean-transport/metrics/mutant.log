@@ -1,9 +1,0 @@
-SOME PROOFS FAIL
-Error:
-- expected : ""
-- observed : "deliberately-wrong"
-Location: Laws.usage_rolling_empty_unknown
-4 | 
-5>| def Laws.usage_rolling_empty_unknown(): {==}
-  |                                         ^^^^
-6 | 

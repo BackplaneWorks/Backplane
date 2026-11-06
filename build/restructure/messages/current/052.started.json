@@ -1,9 +1,0 @@
-{
-  "cgroup": "user.slice/user-1000.slice/user@1000.service/app.slice/restructure-feature-052-6074.scope",
-  "manifest_sha256": "ed28d32b86bf1841a068efd6f2d26bcad481b5ce3efc70fd63e3a654d109378c",
-  "memory_max_bytes": 3699998720,
-  "pid": 6106,
-  "pid_start": "9356",
-  "shard": "052",
-  "started_unix": 1793774463.7552931
-}

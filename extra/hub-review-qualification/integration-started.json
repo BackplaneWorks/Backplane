@@ -1,9 +1,0 @@
-{
-  "cgroup": "user.slice/user-1000.slice/user@1000.service/app.slice/bp-review-integration-positive-9218.scope",
-  "manifest_sha256": "3e3bcafcab96984a0db49a3f3ff1d13a125fb7926831b9a1b231a957b6a5f95a",
-  "memory_max_bytes": 3699998720,
-  "pid": 9229,
-  "pid_start": "62528",
-  "shard": "000",
-  "started_unix": 1793762605.7473516
-}

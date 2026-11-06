@@ -1,4 +1,0 @@
-{
-  "capture_sha256": "177c147c6ac02bda624a76971174f5cf98c174e2004d0c4e4d062d45bddcf078",
-  "combined_captured_streams": "SOME PROOFS FAIL\nError:\n- expected : a defined name\n- observed : Deque.push_front\nLocation: main\n 9 | def main():\n10>|   Deque.push_front(1, Deque.new())\n   |   ^^^^^^^^^^^^^^^^\n11 | \n"
-}

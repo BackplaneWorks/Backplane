@@ -1,6 +1,0 @@
-.......bend-closure: cannot read src/unused.bend: [Errno 21] Is a directory: 'src/unused.bend'
-.......
-----------------------------------------------------------------------
-Ran 14 tests in 0.437s
-
-OK

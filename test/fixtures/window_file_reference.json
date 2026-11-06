@@ -1,6 +1,0 @@
-{
-  "source_head": "418050be708f058253f02ba4a01f05998bae9a44",
-  "source_path": "src/server/thin-view.bend",
-  "source_sha256": "49110d1eff65f1760aceeafdd446b48083227e5ddac4a18e13b4c5ab42f0a92f",
-  "definition": "def State.window.file(st: M.State, +key: String, es: List<&2, M.Entry>) -> M.State:\n  match st:\n    case M.State{ps, ts, entries, n, tk, settings, queued, asks, devices, nav, +bw}:\n      M.State{ps, ts, entries, n, tk, settings, queued, asks, devices, nav,\n        [M.Ext{M.Ext.world(M.Ext.of(bw)), Map.set(&2, List<&2, M.Entry>, M.Ext.by(M.Ext.of(bw)), key, es), M.Ext.mail(M.Ext.of(bw)), M.Ext.usage(M.Ext.of(bw))}]}\n"
-}

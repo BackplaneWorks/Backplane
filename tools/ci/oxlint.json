@@ -1,6 +1,0 @@
-{
-  "jsPlugins": [{ "name": "backplane", "specifier": "./duplicate-parameters.mjs" }],
-  "rules": {
-    "backplane/no-dupe-args": "error"
-  }
-}

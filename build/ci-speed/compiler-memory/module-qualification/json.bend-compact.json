@@ -1,4 +1,0 @@
-{
-  "capture_sha256": "c2267edc64a233c68dd746c9a6937dcd3bf819a56b428603633b94ecac900880",
-  "combined_captured_streams": "SOME PROOFS FAIL\nError:\n- expected : a defined name\n- observed : JSON.read\nLocation: main\n 8 | def main():\n 9>|   JSON.read(\"{\\\"a\\\": 1}\")\n   |   ^^^^^^^^^\n10 | \n"
-}
