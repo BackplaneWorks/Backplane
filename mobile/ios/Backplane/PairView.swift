@@ -1,6 +1,6 @@
 import SwiftUI
 
-private struct PairActionStyle: ButtonStyle {
+struct PairActionStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.body.weight(.semibold))

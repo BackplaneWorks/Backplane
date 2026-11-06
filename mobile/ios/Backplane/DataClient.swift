@@ -63,9 +63,21 @@ final class DataClient {
         #endif
         loadCache()
         voice.client = self
+        #if DEBUG
+        // a simulator has no taps: what the form's Pair and the question's buttons call, from the environment
+        let env = ProcessInfo.processInfo.environment
+        if let t = env["BACKPLANE_PAIR_TEXT"], !t.isEmpty { Task { @MainActor in try? await Task.sleep(for: .seconds(1)); self.pair(t) } }
+        #endif
     }
 
     // MARK: pairing
+    /// A pairing link that came from outside the app: nothing happens until the person says so.
+    var askLink: String?
+    func opened(_ url: URL) {
+        let s = url.absoluteString
+        guard s.hasPrefix("backplane://") || s.hasPrefix(AppIdentity.scheme + "://"), Pairing.key(s) != nil || Pairing.invitation(s) != nil else { return }
+        askLink = s
+    }
     func pair(_ text: String) {
         if let invite = Pairing.invitation(text) {
             guard !pairingBusy else { return }
@@ -77,6 +89,7 @@ final class DataClient {
             }
             return
         }
+        if Pairing.bareCode(text) { pairingError = "Enter the hub's address with the short code."; return }
         if Pairing.malformedInvitation(text) { pairingError = "Enter the complete invitation link or a valid eight-character code."; return }
         adopt(text.trimmingCharacters(in: .whitespacesAndNewlines))
     }

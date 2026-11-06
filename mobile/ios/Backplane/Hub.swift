@@ -328,6 +328,8 @@ extension Pairing {
         let fields = URLComponents(string: "?" + fragment)?.queryItems ?? []
         return fields.contains { $0.name == "invite" || $0.name == "code" }
     }
+    /// A short code on its own: it names no hub, and must not be taken for an address.
+    static func bareCode(_ text: String) -> Bool { text.trimmingCharacters(in: .whitespacesAndNewlines).range(of: "^[A-Z2-9]{4}[- ]?[A-Z2-9]{4}$", options: .regularExpression) != nil }
     static func codeLink(address: String, code: String) -> String? {
         let code = code.replacingOccurrences(of: " ", with: "").replacingOccurrences(of: "-", with: "").uppercased()
         guard code.range(of: "^[A-Z2-9]{8}$", options: .regularExpression) != nil,
