@@ -1,0 +1,20 @@
+{
+  "state": "UPLOADED_PROCESSING_UNCONFIRMED",
+  "bundleId": "dev.backplane.works",
+  "version": "0.15.0",
+  "build": "202611061124",
+  "sourceCommit": "03de2e3f1896f7428adca4e5cbfe6c43ea07e45f",
+  "baseCommit": "ff3154990ef2bb24bfc21312be84222df7919d61",
+  "sourceTree": "d47f63244005aba2f83cf2360c3a122c2ec1951d",
+  "app": "data/1 native app (DataApp, SWIFT_ACTIVE_COMPILATION_CONDITIONS=\"GPUI_NATIVE DATA_APP\"); no Bend bridge.js, no engine",
+  "ipaSha256": null,
+  "ipaNote": "xcodebuild -exportArchive with destination upload wrote no local IPA.",
+  "archiveMode": "Manual frozen Release archive and upload (mobile/ios/build.sh archive via scripts/gpui/ios-archive.sh upload) with the existing Apple Distribution identity and profiles in the backplane-signing keychain; no provisioning updates; run under the mac-heavy lock.",
+  "uploadAuthorizedByUser": true,
+  "uploadCommandExitCode": 0,
+  "appleUploadResult": "xcodebuild: 'Upload succeeded.' / 'Uploaded Backplane' / EXPORT SUCCEEDED; no upload errors.",
+  "appleProcessingState": "not queried; Apple processing/VALID and internal TestFlight availability not confirmed",
+  "runtimeScope": "iOS Simulator (iPhone, Debug, ad-hoc signed, DATA_APP) against a Rust hub built at ff3154990e with a stand-in agent: paired by link, added a project, started a thread, sent two messages and saw replies render. The data-flow journey's last two steps failed only on stand-in expectations (reply text, no approval request raised). The older pair and projects-threads journeys target the retired web shell and fail by design. The shipped Release archive itself was not run. Physical-device runtime unverified.",
+  "publicAppStoreSubmissionMade": false,
+  "externalBetaSubmissionMade": false
+}
