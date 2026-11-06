@@ -28,12 +28,29 @@ trap cleanup EXIT
 fail() { kill $TK 2>/dev/null; why=$(grep -m1 -E '^(error|test .* FAILED)' "$LOG" | cut -c1-110); printf '%s\n' "$1: ${why:-see the log}" > "$DEV/.last-failure"; cp "$LOG" "$DEV/.last-failure.log" 2>/dev/null
   status failed "Build failed in $1: ${why:-see $DEV/.last-failure.log}" 0 0; tail -20 "$LOG" >&2; sleep 8; exit 1; }
 skips=(); while IFS= read -r l; do case "$l" in ''|'#'*) ;; *) skips+=(--skip "$l");; esac; done < "$HERE/gate-skip.txt"
+# cargo runs the tests and the builds one after another; here the tests of both crates are compiled at once (--no-run), then every test program and both fast builds run at the same time
+# (a running test program holds no cargo lock). Every test still runs and a red one still stops the build before anything is published.
+CG() { ( cd "$1" && CARGO_TARGET_DIR="$2" taskset -c 0-27 nice -n 10 cargo "${@:3}" ); }
 if [ "$GATE" = 1 ]; then
-  echo "testing hub" > "$PH";    ( cd "$ROOT/native/host" && CARGO_TARGET_DIR="$HT" taskset -c 0-27 nice -n 10 cargo test --offline -j "$J" -- "${skips[@]}" ) > "$LOG" 2>&1 || fail "hub tests"
-  echo "testing window" > "$PH"; ( cd "$ROOT/native/gpui" && CARGO_TARGET_DIR="$GT" taskset -c 0-27 nice -n 10 cargo test --offline -j "$J" ) > "$LOG" 2>&1 || fail "window tests"
+  echo "compiling tests" > "$PH"; LH=$(mktemp "$DEV/.t.XXXX"); LW=$(mktemp "$DEV/.t.XXXX")
+  CG "$ROOT/native/host" "$HT" test --offline -j "$J" --no-run > "$LH" 2>&1 & ph=$!
+  CG "$ROOT/native/gpui" "$GT" test --offline -j "$J" --no-run > "$LW" 2>&1 & pw=$!
+  wait $ph || { cp "$LH" "$LOG"; rm -f "$LH" "$LW"; fail "hub tests"; }
+  wait $pw || { cp "$LW" "$LOG"; rm -f "$LH" "$LW"; fail "window tests"; }
+  echo "testing and building" > "$PH"; names=(); pids=(); logs=()
+  run() { n=$1; dir=$2; shift 2; l=$(mktemp "$DEV/.t.XXXX"); ( cd "$dir" && CARGO_MANIFEST_DIR="$dir" "$@" ) > "$l" 2>&1 & pids+=($!); names+=("$n"); logs+=("$l"); }
+  for x in $(sed -n 's/^ *Executable .*(\(.*\))$/\1/p' "$LH"); do run "hub tests" "$ROOT/native/host" "$x" "${skips[@]}"; done
+  for x in $(sed -n 's/^ *Executable .*(\(.*\))$/\1/p' "$LW"); do run "window tests" "$ROOT/native/gpui" "$x"; done
+  rm -f "$LH" "$LW"
+  run hub "$ROOT/native/host" env CARGO_TARGET_DIR="$HT" taskset -c 0-27 nice -n 10 cargo build --profile "$PROFILE" --offline -j "$J" --bin backplane-hub
+  run window "$ROOT/native/gpui" env CARGO_TARGET_DIR="$GT" taskset -c 0-27 nice -n 10 cargo build --profile "$PROFILE" --offline -j "$J"
+  bad=; for i in "${!pids[@]}"; do wait "${pids[$i]}" || { [ -n "$bad" ] || bad=$i; }; done
+  if [ -n "$bad" ]; then cp "${logs[$bad]}" "$LOG"; rm -f "${logs[@]}"; fail "${names[$bad]}"; fi
+  rm -f "${logs[@]}"
+else
+  echo "hub" > "$PH";    CG "$ROOT/native/host" "$HT" build --profile "$PROFILE" --offline -j "$J" --bin backplane-hub > "$LOG" 2>&1 || fail hub
+  echo "window" > "$PH"; CG "$ROOT/native/gpui" "$GT" build --profile "$PROFILE" --offline -j "$J" > "$LOG" 2>&1 || fail window
 fi
-echo "hub" > "$PH";    ( cd "$ROOT/native/host" && CARGO_TARGET_DIR="$HT" taskset -c 0-27 nice -n 10 cargo build --profile "$PROFILE" --offline -j "$J" --bin backplane-hub ) > "$LOG" 2>&1 || fail hub
-echo "window" > "$PH"; ( cd "$ROOT/native/gpui" && CARGO_TARGET_DIR="$GT" taskset -c 0-27 nice -n 10 cargo build --profile "$PROFILE" --offline -j "$J" ) > "$LOG" 2>&1 || fail window
 kill $TK 2>/dev/null; echo $(( $(date +%s) - start )) > "$SECS"; rm -f "$DEV/.last-failure" "$DEV/.last-failure.log"
 D=$(mktemp -d "$DEV/.stage.XXXX")
 cp "$HT/$PROFILE/backplane-hub" "$GT/$PROFILE/backplane-gpui" "$D/"
