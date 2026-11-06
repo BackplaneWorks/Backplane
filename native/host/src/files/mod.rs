@@ -8,6 +8,7 @@ pub mod fm;
 pub mod imgroutes;
 pub mod mimg;
 pub mod ops;
+pub mod watch_dir;
 pub mod tools;
 pub mod git;
 pub mod misc;
@@ -22,6 +23,7 @@ use serde_json::{json, Value};
 use std::{path::PathBuf, sync::Arc};
 
 pub fn start(hub: Arc<Hub>) {
+    watch_dir::start(hub.clone());
     hub.register_http(Arc::new(Img));
     hub.register_http(Arc::new(Downloads));
     hub.register_rpc(Arc::new(Files));

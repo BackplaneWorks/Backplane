@@ -29,8 +29,10 @@ R=sys.argv[1]; NOW=int(time.time())
 ev=[{"$":"ProjectCreated","id":"p1","title":"files","root":R+"/proj","at":NOW},{"$":"ThreadCreated","id":"t1","project":"p1","title":"files thread","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":NOW}]
 open(R+"/home/events.jsonl","w").write("".join(json.dumps(e,separators=(",",":"))+"\n" for e in ev))
 PY
-sed -e "s#@SHOTS@#$SH/$N#g" -e "s#@UP@#$R/up/dropped.txt#g" $ME/test/files/files-script.json > $R/script.json
+sed -e "s#@SHOTS@#$SH/$N#g" -e "s#@UP@#$R/up/dropped.txt#g" $ME/test/files/files-${FILES_XINPUT:+xinput-}script.json > $R/script.json
 export LC_ALL=C
+# FILES_XINPUT=1: the client only opens the Files tab; real X input (files-xinput.sh) does the rest
+XIN=; [ -n "${FILES_XINPUT:-}" ] && XIN="sleep 8; DISPLAY=$DISP R=$R SH=$SH N=$N sh $ME/test/files/files-xinput.sh; kill \$(cat $R/client.pid)"
 systemd-run --user --scope -q -p MemoryMax=3700M -p MemorySwapMax=0 -- nice -n 19 sh -c '
 set -eu
 cleanup() { for f in client i3 xvfb hub; do [ -f '$R'/$f.pid ] && kill $(cat '$R'/$f.pid) 2>/dev/null || true; done; sleep 1; }
@@ -51,6 +53,7 @@ echo $! > '$R'/i3.pid; sleep 1
 export DISPLAY='$DISP' VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json LP_NUM_THREADS=2 BACKPLANE_GPUI_ASSETS='$ASSETS' BACKPLANE_GPUI_RECTS=1 BACKPLANE_GPUI_DOWNLOADS='$R'/downloads
 '$CLIENT' --url http://127.0.0.1:'$PORT' --token-file '$R'/home/token --script '$R'/script.json --exit-after 120 > '$OUT'/'$N'.client.log 2>&1 &
 echo $! > '$R'/client.pid
+'"$XIN"'
 wait $(cat '$R'/client.pid) || true
 '
 echo "--- files metrics"; grep -E 'GPUI_METRIC .*"event":"(files|files_download|view)"' $OUT/$N.client.log | cut -c1-260

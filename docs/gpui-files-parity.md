@@ -16,7 +16,7 @@ The web Files tab has no upload, create, rename, delete or filter; those rows ar
 | 5 | Open board / schematic / STEP in the right viewer | `fm-open` | hub does it; row click sends `fm-open` | done (unchanged, verified in e2e) |
 | 6 | Preview image | `<img>` via `/img` | "Opening…" | done; `viewer.file` drawn through the images cache |
 | 7 | Preview PDF | iframe on `/img` | "Opening…" | done; page 1..n rendered by `pdf.page` (poppler), prev/next |
-| 8 | Preview text / Markdown / csv / json / log | `text-preview.js`, `Md.render` | "Opening…" | partial: text in mono (256 KB cap), Markdown headings bold/coloured but **not rendered** (lists, links, images stay as source) |
+| 8 | Preview text / Markdown / csv / json / log | `text-preview.js`, `Md.render` | "Opening…" | done: text in mono (256 KB cap); a `.md`/`.markdown` note is rendered by the hub (`md::render`, nodes in `viewer.file.blocks`) and drawn with the chat's Markdown (`screens::md`, headings, lists, code, links) |
 | 9 | Back from a preview to the folder | `fm` action (Back bar) | none | done (`fm` action, Esc) |
 | 10 | Download a file | per-row link `/files/get` | hub answered 501 | done; `/files/get` served, client saves to `~/Downloads` (`files_download` step) |
 | 11 | Download a folder (zip) | `/files/zip` | 501 | done; `/files/zip` writes a stored zip, same containment rules |
@@ -46,10 +46,14 @@ Real hub (this branch's `backplane-hub`, started with **no `--policy-bin`**: the
   the RPC, `/files/get`, `/files/zip`, refusals). One unrelated test, `kicad::kipc::tests::spawn_reports_lines_and_exit`, failed once under load and passed alone.
 
 ## Known gaps
-- Keys, drop and right-click are driven in the e2e by script steps that call the same handlers (`files: key:down`, `upload:`, `menu:N`); no real X key, DnD or
-  mouse-button events were injected, so the focus path (a click focusing the list before keys work) is untested.
-- The Rust presenter (`present/viewer.rs`) reads the folder in-process (`files::dir::list`) each time it draws the view, so the listing needs no hub job and no idle request (the 400 ms draft workaround is gone). The cost: a file an agent adds shows on the next view request (any action, or the thread's next change), not by push.
-- Remote-machine threads, Split view, and Markdown rendering are not done.
+- Real X input is covered by `FILES_XINPUT=1 scripts/desktop-files-run.sh …` (`test/files/files-xinput.sh`, XTest + an XDND source `xdnd_drop.py`): click-to-focus/select, Down/Up, Return, BackSpace, right-click menu and Rename, filter field, Escape, Delete key and its confirm button, a file dragged onto the list, and a file added on disk by another process. Ctrl+F (no modifier support in `xinput.py`) and Page keys are only covered by unit tests / script steps.
+- The Rust presenter (`present/viewer.rs`) reads the folder in-process (`files::dir::list`) each time it draws the view; `files/watch_dir.rs` polls the folders an open page shows every 400 ms and, on a change, bumps the hub's view revision (`Hub::bump_views`) so every view gets `view.changed` and redraws: a file added by an agent shows with no press (verified, `x12b`). Polling, not inotify; entries expire 5 minutes after the last draw.
+- Remote-machine threads and Split view are not done. Escape on a preview page (not the list) still falls through to the window's `skill-close` action, which the Rust hub refuses ("action.unported"): outside this tab's scope.
+
 
 ## Rust presenter
 `present/viewer.rs` draws the Files page (`files_page`, `file_rows`, `files_trail`, `files_action` for `fm`, `fm-cd`, `fm-up`, `fm-open`), previews (`image`/`pdf`/`text` kinds with `viewer.file`), and a board/schematic/3D opened from a row (watched by its own path). Board/Schematic/3D/Split/Mech/Browser behave as before; Review stays unported (refused, retryable). Tests: `present::viewer::tests::the_files_page_lists_rows_trail_and_downloads_as_core_fm_does`, `fm_actions_walk_folders_open_files_and_refuse_escapes`, and the old assertion now says Files opens (and stops the watch) while Review is still `None`.
+
+## Real input findings (fixed)
+- The window's `ClosePopup` action (Escape) ran before the page's key listener and sent `skill-close`, which the Rust hub refuses; `filesui::escape` now takes Escape first while the page has the keys (clears the filter, cancels rename/delete, goes up).
+- GPUI asks for dragged data at `XdndPosition`, not at the drop; the XDND test source answers the request throughout the drag.

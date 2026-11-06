@@ -286,10 +286,13 @@ fn down_url(thread: &str, rel: &str, folder: bool) -> String {
 }
 /// The listing of a folder as Files.rows: folders first, then files, each row the view action it takes. `Err` is the words the page shows instead.
 pub fn file_rows(root: &str, thread: &str, dir: &str) -> Result<Vec<Value>, String> {
-    use crate::files::fm;
     if root.is_empty() { return Err("This thread has no project folder.".into()) }
     let text = crate::files::dir::list(std::path::Path::new(root), dir).map_err(|e| e.to_string())?;
-    Ok(text.lines().filter_map(|l| {
+    Ok(rows_of(&text, thread, dir))
+}
+fn rows_of(text: &str, thread: &str, dir: &str) -> Vec<Value> {
+    use crate::files::fm;
+    text.lines().filter_map(|l| {
         let mut it = l.splitn(3, '\t'); let (k, size, n) = (it.next()?, it.next()?.parse::<u64>().unwrap_or(0), it.next()?);
         let value = fm::join(dir, n);
         Some(if k == "d" {
@@ -298,7 +301,7 @@ pub fn file_rows(root: &str, thread: &str, dir: &str) -> Result<Vec<Value>, Stri
             let kind = fm::preview(n);
             json!({"label": n, "action": if kind.is_empty() { "" } else { "fm-open" }, "value": value, "detail": size_text(size), "kind": kind, "icon": icon_of(kind), "down": down_url(thread, &value, false), "downName": n})
         })
-    }).collect())
+    }).collect()
 }
 /// Fm.trail: the project, then each folder down to the one on show.
 pub fn files_trail(dir: &str) -> Vec<Value> {
@@ -309,11 +312,24 @@ pub fn files_trail(dir: &str) -> Vec<Value> {
 fn project_title(st: &State, sel: &str) -> String { st.threads.get(sel).and_then(|t| st.projects.get(&t.project)).map(|p| p.title.clone()).unwrap_or_default() }
 /// The Files page: trail, rows, the folder's zip (Files.json).
 fn files_page(st: &State, root: &str, sel: &str, dir: &str) -> Value {
-    let (rows, err) = match file_rows(root, sel, dir) { Ok(r) => (r, String::new()), Err(e) => (vec![], e) };
+    // the folder is watched on disk while this page shows it (files/watch_dir.rs): a change there makes the hub tell the views to draw it again
+    let listed = if root.is_empty() { Err("This thread has no project folder.".to_string()) } else { crate::files::dir::list(std::path::Path::new(root), dir).map_err(|e| e.to_string()) };
+    if let Ok(t) = &listed { crate::files::watch_dir::touch(root, dir, crate::files::watch_dir::signature(t)); }
+    let (rows, err) = match listed { Ok(t) => (rows_of(&t, sel, dir), String::new()), Err(e) => (vec![], e) };
     json!({"trail": files_trail(dir), "rows": rows, "ready": true, "error": err, "zip": down_url(sel, dir, true), "zipName": zip_name(&project_title(st, sel), dir)})
 }
 /// File.json: an opened image, PDF or note: its name, its kind, where the hub serves it (`/img` takes an absolute path).
-fn file_page(kind: &str, abs: &str) -> Value { json!({"name": crate::files::fm::last(abs), "kind": kind, "url": format!("/img?path={}", pct(abs, true))}) }
+fn file_page(kind: &str, abs: &str) -> Value {
+    let mut v = json!({"name": crate::files::fm::last(abs), "kind": kind, "url": format!("/img?path={}", pct(abs, true))});
+    // a Markdown note is sent as the chat's nodes (`Md.render`), so the clients draw it rendered; plain text stays the client's to fetch
+    let l = abs.to_ascii_lowercase();
+    if kind == "text" && (l.ends_with(".md") || l.ends_with(".markdown")) {
+        use std::io::Read;
+        let mut b = Vec::new();
+        if std::fs::File::open(abs).map(|f| f.take(256 << 10).read_to_end(&mut b)).is_ok() { v["blocks"] = Value::Array(crate::md::nodes_json(&crate::md::render(&String::from_utf8_lossy(&b)))); }
+    }
+    v
+}
 
 /// `fm`, `fm-cd`, `fm-up`, `fm-open` (Fm.act): the Files page on a folder, or an opened file. None for a path outside the project or a case not ported; a file the tab does not preview changes nothing.
 pub fn files_action(st: &State, hub: &str, session: &Value, action: &str, value: &str) -> Option<ViewOut> {
@@ -549,6 +565,11 @@ mod tests {
             let o = run(&s3, "fm", "").unwrap(); let mut s4 = s3.clone(); crate::session::patch::merge(&mut s4, &o.patch); assert_eq!(viewer_json(&st, &template, &s4).unwrap()["open"], "files");
             let o = view_action(&st, "h", &s3, "board").unwrap(); let mut s5 = s3.clone(); crate::session::patch::merge(&mut s5, &o.patch); assert_eq!(viewer_json(&st, &template, &s5).unwrap()["key"], format!("0|{root}|"), "a tab press shows the project's own board again");
         }
+        // a Markdown note carries its rendered nodes; a plain note does not
+        std::fs::write(d.join("read.txt"), "plain").unwrap();
+        let o = run(&s2, "fm-open", "notes.md").unwrap(); let mut s3 = s2.clone(); crate::session::patch::merge(&mut s3, &o.patch);
+        let blocks = viewer_json(&st, &template, &s3).unwrap()["file"]["blocks"].clone(); assert!(blocks.as_array().map_or(false, |b| !b.is_empty()), "{blocks}"); assert!(blocks.to_string().contains("\"tag\":\"h"), "a heading node: {blocks}");
+        let o = run(&s2, "fm-open", "read.txt").unwrap(); let mut s3 = s2.clone(); crate::session::patch::merge(&mut s3, &o.patch); assert!(viewer_json(&st, &template, &s3).unwrap()["file"].get("blocks").is_none());
         // a file the tab cannot show changes nothing
         let o = run(&s1, "fm-open", "plain.bin").unwrap(); assert!(o.before.is_empty() && o.patch == json!({}));
         // Mech and Browser keep working beside it
