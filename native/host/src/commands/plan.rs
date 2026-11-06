@@ -166,6 +166,14 @@ fn plan_inner(f: &Fold, at: u64, id: &Value, method: &str, p: &Value, cx: &Ctx) 
             if !parent.is_empty() { ev.push(json!({"$":"SettingSet","key":format!("thread.tree.{parent}"),"value":"1","at":at})) }
             done(ev, id)
         }
+        // Todos.edit.rpc: the person's add, delete, move, set on the agent's list; the fold applies it (state/todo.rs `edit`). A new item has no id yet: it gets one the agent will not make.
+        "todos.edit" => {
+            if th.is_empty() || !f.threads.contains_key(&th) { return Some(Plan { events: vec![], reply: err(id, "No such thread."), stop: None, wt: None, scratch: None, act: None }) }
+            let op = s(p, "op", ""); if !["add", "delete", "move", "set"].contains(&op.as_str()) { return Some(Plan { events: vec![], reply: err(id, "Unknown to-do edit."), stop: None, wt: None, scratch: None, act: None }) }
+            let tid = if op == "add" && s(p, "id", "").is_empty() { format!("u{at}-{}", f.threads.len()) } else { s(p, "id", "") };
+            let data = json!({"op": op, "id": tid, "text": s(p, "text", ""), "status": s(p, "status", ""), "to": nat(p, "to")}).to_string();
+            done(vec![json!({"$":"TodosChanged","thread":th,"who":"person","data":data,"at":at})], id)
+        }
         "queue.edit" => done(vec![json!({"$":"QueueEdited","thread":th,"msg":s(p, "msg", ""),"text":s(p, "text", ""),"at":at})], id),
         "queue.remove" => done(vec![json!({"$":"QueueRemoved","thread":th,"msg":s(p, "msg", ""),"at":at})], id),
         "queue.move" => done(vec![json!({"$":"QueueMoved","thread":th,"msg":s(p, "msg", ""),"to":nat(p, "to"),"at":at})], id),

@@ -17,7 +17,7 @@ pub fn todos(st: &State, thread: &str) -> Value {
     let done = items.iter().filter(|x| status(x) == "completed").count();
     let now = items.iter().find(|x| status(x) == "in_progress").map(|x| { let f = x["form"].as_str().unwrap_or(""); if f.is_empty() { x["text"].as_str().unwrap_or("") } else { f } }).unwrap_or("");
     let count = format!("{}/{}", done, items.len());
-    json!({"count": count, "head": format!("To-do {count}"), "now": now, "rows": items.iter().map(|x| json!({"text": x["text"].as_str().unwrap_or(""), "status": status(x)})).collect::<Vec<_>>()})
+    json!({"count": count, "head": format!("To-do {count}"), "now": now, "rows": items.iter().map(|x| json!({"id": x["id"].as_str().unwrap_or(""), "text": x["text"].as_str().unwrap_or(""), "status": status(x)})).collect::<Vec<_>>()})
 }
 
 /// `{busy: "2 at work" | "", word: "2 at work" | "3 done", rows: [{title, kind, state, doing}]}`, or null with nothing to show. A row is a subagent, a background shell, a monitor or a workflow the agent left running.
