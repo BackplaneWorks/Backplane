@@ -343,6 +343,22 @@
   }
  },
  {
+  "name": "voice_dictionary_add",
+  "description": "Add a term (a name, part number, word) to the person's voice dictionary, which Backplane's transcription (their desktop microphone and Pebble ring) takes as hints. Use it when a voice note marks words as possibly misheard and the person tells you the right spelling.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "term": {
+     "type": "string",
+     "description": "The term, spelled as it should be written."
+    }
+   },
+   "required": [
+    "term"
+   ]
+  }
+ },
+ {
   "name": "plane_read",
   "description": "Read the status plane as text: what waits on the person (approvals, questions, failures, most urgent first), what runs, the bots, the rooms with unread posts and the routines, here, with the ids thread_read and thread_send take. With `machine` (machine_list shows them), that other machine of the person's own plane instead, its ids made <link>~<id>. idle lists the day's idle threads too.",
   "inputSchema": {

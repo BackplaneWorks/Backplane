@@ -112,6 +112,7 @@ impl Composer {
             rows: vec![], bounds: None, line_height: px(20.), scroll_y: px(0.), selecting: false }
     }
     pub fn set(&mut self, text: String, cx: &mut Context<Self>) { self.ed.set(&text); self.sync(cx); }
+    pub fn dictate(&mut self, range: std::ops::Range<usize>, with: &str, caret: usize, cx: &mut Context<Self>) { self.ed.dictate(range, with, caret); self.sync(cx); }
     pub fn set_placeholder(&mut self, text: &str) { self.placeholder = text.to_string().into(); }
     pub fn reset(&mut self) { self.ed.set(""); self.content = "".into(); self.rows.clear(); self.scroll_y = px(0.); }
     pub fn editor(&self) -> &Editor { &self.ed }

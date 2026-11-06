@@ -88,6 +88,8 @@ impl Backplane {
             Event::Plot(b)=>self.plot_received(b,cx),
             Event::Answer(id,reply)=>screens::improvements::answered(self,id,reply,cx),
             Event::Data(_,v)=>screens::accounts::got(self,v,cx),
+            Event::Voice(f)=>self.voice_frame(f,cx),
+            Event::Rpc("voice",ok,why)=>{if !ok{self.error=why;}},
             Event::Term(key,pid,b,reset)=>self.term_frame(&key,pid,&b,reset,cx),
             Event::Hello=>self.term_rejoin(),
             Event::Rpc(tag,ok,why)=>if tag=="term"{if !ok{self.error=format!("Terminal: {why}");}}else if tag.starts_with("acct"){screens::accounts::done(self,tag,ok,&why,cx)}else if tag.starts_with("files") {screens::filesui::rpc_done(self,tag,ok,&why,cx)} else {screens::settings::rpc_done(self,tag,ok,&why,cx)},
@@ -100,7 +102,7 @@ impl Backplane {
             Event::Pick(info)=>{ let slot=self.screens.pick_slot.unwrap_or(0); let card=screens::plot::card(&info); let pv=self.screens.pv(slot); if pv.picked.is_some() { pv.card=card.clone(); } if let Some(c)=card { screens::plotview::cross_probe(self,slot,&c); } screens::plotview::report_state(self); cx.notify(); }
             Event::Probe(slot,m)=>{ let pv=self.screens.pv(slot); if pv.lit.len()<20000 { pv.lit.extend(m); } cx.notify(); }
             Event::Status(s)=>{self.status=s;if self.status=="Connected"{self.error.clear();}},
-            Event::Accepted=>{self.input.update(cx,|input,cx|input.set(String::new(),cx));self.drafts.remove(&self.selected);self.screens.drafts.set(&self.selected,"");self.timeline_to_end();}, // (the file too: the box's own change comes after the map entry is gone, and would not clear it)
+            Event::Accepted=>{self.input.update(cx,|input,cx|input.set(String::new(),cx));self.drafts.remove(&self.selected);self.screens.drafts.set(&self.selected,"");self.voice_sent(cx);self.timeline_to_end();}, // (the file too: the box's own change comes after the map entry is gone, and would not clear it)
             Event::Older(cursor,page)=>self.older_landed(cursor,page,cx),
             Event::Error(e)=>{self.error=e;},
             Event::Refused(e)=>{self.error=e;},

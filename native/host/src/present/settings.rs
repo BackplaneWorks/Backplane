@@ -11,7 +11,7 @@ static VERSION: OnceLock<String> = OnceLock::new();
 pub fn set_version(v: &str) { let _ = VERSION.set(v.to_string()); }
 
 /// The ported pages in the order the desktop menu lists them (Settings.menu.pages): page id and title.
-pub const PAGES: &[(&str, &str)] = &[("appearance", "Appearance"), ("threads", "Threads"), ("agents", "Agents"), ("writing", "Writing"), ("cad", "CAD"), ("ordering", "Ordering"), ("network", "Network and updates"), ("devices", "Devices"), ("keys", "API keys"), ("timezone", "Time zone"), ("about", "About"), ("privacy", "Privacy")];
+pub const PAGES: &[(&str, &str)] = &[("appearance", "Appearance"), ("threads", "Threads"), ("agents", "Agents"), ("writing", "Writing"), ("cad", "CAD"), ("ordering", "Ordering"), ("network", "Network and updates"), ("devices", "Devices"), ("voice", "Voice"), ("keys", "API keys"), ("timezone", "Time zone"), ("about", "About"), ("privacy", "Privacy")];
 
 pub struct Out { pub patch: Value, pub cmds: Vec<Value> }
 
@@ -297,6 +297,12 @@ fn bug_url(info: &Value) -> String {
     format!("https://github.com/i2cjak/Backplane/issues/new?body={}", enc(&format!("Version: {v}\nOS: {} {}\n\nWhat happened:\n", known("os", &["linux", "darwin", "windows"]), known("arch", &["x64", "arm64"]))))
 }
 
+/// Settings > Voice: the same rows the phones get (voice/page.rs), with the Add a term field as typed here.
+fn voice(st: &State, session: &Value, info: &Value) -> Vec<Value> {
+    let p: crate::voice::page::Prefs = st.settings.iter().filter(|(k, _)| k.starts_with("voice.")).filter(|(_, v)| !v.is_empty()).map(|(k, v)| (k.clone(), v.clone())).collect();
+    crate::voice::page::rows(&p, info, draft(session, "@f.vterm"), draft(session, "@key.err"))
+}
+
 /// The rows shown while the dialog is open: the page menu (no page chosen) or one page, its first row the way back.
 pub fn view(st: &State, session: &Value, info: &Value) -> Value {
     let p = page(session);
@@ -305,7 +311,7 @@ pub fn view(st: &State, session: &Value, info: &Value) -> Value {
     } else {
         let title = PAGES.iter().find(|(id, _)| *id == p).map_or("", |(_, t)| *t);
         let mut r = vec![row(title, "", vec![btn("‹ Settings", "settings-page", "", false)])];
-        r.extend(match p { "appearance" => appearance(st), "threads" => threads(st, session), "about" => about(st), "agents" => { let mut a = agents(st, info); a.extend(fallback(st, info)); a }, "writing" => writing(st, info), "cad" => cad(st, session, info), "keys" => keys(st, session, info), "ordering" => ordering(st), "network" => network(st, info), "devices" => devices(session, info), "timezone" => timezone(st, session), "privacy" => privacy(st, info), _ => vec![] });
+        r.extend(match p { "appearance" => appearance(st), "threads" => threads(st, session), "about" => about(st), "agents" => { let mut a = agents(st, info); a.extend(fallback(st, info)); a }, "writing" => writing(st, info), "cad" => cad(st, session, info), "keys" => keys(st, session, info), "ordering" => ordering(st), "network" => network(st, info), "devices" => devices(session, info), "timezone" => timezone(st, session), "privacy" => privacy(st, info), "voice" => voice(st, session, info), _ => vec![] });
         r
     };
     json!({"rows": rows})
@@ -327,6 +333,7 @@ pub fn act(hub: &str, session: &Value, action: &str, value: &str) -> Option<Out>
         "settings-page" => {
             let p = if PAGES.iter().any(|(id, _)| *id == value) { value } else { "" };
             // opening Threads fills the webhook fields from the saved settings (Settings.seed): the drafts are dropped so the saved values show
+            if p == "voice" { send(session, hub, "bots.voice", json!({"op": "status"}), &mut cmds, &mut rid); } // what is downloaded, the key's mask and the microphones are read afresh
             json!({"drafts": {"@settings.page": p, "@f.whurl": Value::Null, "@f.whsec": Value::Null, "@hook.err": "", "@f.tzname": "", "@tz.err": "", "@f.kpath": Value::Null, "@f.kname": "", "@keys.rm": "", "@key.err": ""}})
         }
         // Devices: an invitation made here (the registry is the hub's own, the same one /auth/invitations uses), a device or a link revoked
@@ -351,11 +358,13 @@ pub fn act(hub: &str, session: &Value, action: &str, value: &str) -> Option<Out>
             else { json!({"drafts": {"@keys.rm": value}}) }
         }
         // the client's own answers to the key it saved straight to the hub
+        "voice-op" => { send(session, hub, "bots.voice", json!({"op": "page-act", "action": "voice-op", "value": value}), &mut cmds, &mut rid); json!({}) }
+        "voice-term" => { for (k, v) in crate::voice::page::term_settings(draft(session, "@f.vterm")) { send(session, hub, "setting.set", json!({"key": k, "value": v}), &mut cmds, &mut rid); } json!({"drafts": {"@f.vterm": ""}}) }
         "key-sent" => json!({"drafts": {"@f.kname": "", "@key.err": "", "@keys.rm": ""}}),
         "key-err" => json!({"drafts": {"@key.err": value}}),
         "bfield" => {
             let (name, text) = value.split_once('\u{1f}')?;
-            if !matches!(name, "whurl" | "whsec" | "tzname" | "kpath" | "kname") { return None }
+            if !matches!(name, "whurl" | "whsec" | "tzname" | "kpath" | "kname" | "vterm") { return None }
             json!({"drafts": {format!("@f.{name}"): text}})
         }
         "telemetry-on" => { send(session, hub, "telemetry.choice", json!({"value": "on", "expected": value, "decision": "", "popup": false}), &mut cmds, &mut rid); json!({}) }
@@ -399,7 +408,7 @@ mod tests {
 
     #[test] fn the_menu_lists_the_ported_pages_each_a_settings_page_button() {
         let v = view(&st(&[]), &json!({"open": {"settings": true}, "drafts": {}}), &json!({}));
-        assert_eq!(labels(&v), ["Appearance", "Threads", "Agents", "Writing", "CAD", "Ordering", "Network and updates", "Devices", "API keys", "Time zone", "About", "Privacy"]);
+        assert_eq!(labels(&v), ["Appearance", "Threads", "Agents", "Writing", "CAD", "Ordering", "Network and updates", "Devices", "Voice", "API keys", "Time zone", "About", "Privacy"]);
         assert_eq!(v["rows"][1]["buttons"][0]["action"], "settings-page"); assert_eq!(v["rows"][1]["buttons"][0]["value"], "threads");
     }
     #[test] fn devices_lists_what_the_registry_says_and_offers_revoke_on_the_live_ones() {
@@ -480,7 +489,7 @@ mod tests {
         assert_eq!(act("h", &json!({}), "flag", "settings").unwrap().patch["open"]["settings"], true);
         assert_eq!(act("h", &json!({"open": {"settings": true}}), "flag", "settings").unwrap().patch["open"]["settings"], false);
         assert_eq!(act("h", &json!({}), "settings-page", "nonsense").unwrap().patch["drafts"]["@settings.page"], "");
-        assert_eq!(page(&json!({"drafts": {"@settings.page": "voice"}})), "", "an unported page is the menu");
+        assert_eq!(page(&json!({"drafts": {"@settings.page": "usage"}})), "", "an unported page is the menu");
     }
     #[test] fn the_webhook_address_saves_only_when_http_or_empty() {
         let bad = act("h", &json!({"rid": 1, "drafts": {"@f.whurl": "ftp://x"}}), "hook-url", "").unwrap();

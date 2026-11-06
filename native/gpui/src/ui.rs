@@ -306,6 +306,7 @@ impl Render for Backplane {
         let bot_rigs: Vec<_> = bot_data.iter().map(|(_, mood, _, look, _, _)| self.cats.rig(*look, mood)).collect();
         let started = self.started;
         let thread = &self.data["thread"];
+        let dictating = self.screens.voice.views.get(&self.selected).map_or(false, |v| v["on"] == true);
         let has_thread = thread.is_object();
         // sidebar rows
         let mut rows: Vec<AnyElement> = Vec::new();
@@ -484,7 +485,8 @@ impl Render for Backplane {
         ctl.push(CtlEntry { id: "rail:Commands".into(), label: "Commands".into(), ctl: Ctl::OpenPalette });
         ctl.push(CtlEntry { id: "ui:Context".into(), label: "Context".into(), ctl: Ctl::ToggleContext });
         ctl.push(CtlEntry { id: "ui:Jump or run a command".into(), label: "Jump or run a command".into(), ctl: Ctl::OpenPalette });
-        for l in ["Account", "Dictate"] { ctl.push(CtlEntry { id: format!("ui:{l}"), label: l.into(), ctl: Ctl::None }); }
+        for l in ["Account"] { ctl.push(CtlEntry { id: format!("ui:{l}"), label: l.into(), ctl: Ctl::None }); }
+        ctl.push(CtlEntry { id: "ui:Dictate".into(), label: "Dictate".into(), ctl: Ctl::Dictate });
         crate::screens::improvements::controls(self, &mut ctl);
         for (id, label, c) in crate::screens::projects::controls(&self.data) { ctl.push(CtlEntry { id, label, ctl: c }); }
         ctl.push(CtlEntry { id: "ui:Search".into(), label: "Search".into(), ctl: Ctl::FocusSearch });
@@ -557,6 +559,7 @@ impl Render for Backplane {
                                 .children(sec["rows"].as_array().into_iter().flatten().map(|r| div().flex().gap_2().child(div().w(px(110.)).text_color(c("dim")).child(string(r, "label"))).child(div().flex_1().min_w_0().child(string(r, "value")))).collect::<Vec<_>>())).collect::<Vec<_>>())))
                         .children(crate::screens::ready::view(cx, light, &self.data["ready"]))
                         .children(crate::screens::asks::view(cx, light, &self.screens.ask_inputs, &thread["asks"]))
+                        .children(self.screens.voice.views.get(&self.selected).cloned().and_then(|v| crate::screens::voice::view(cx, light, &v, self.screens.voice.level, self.screens.voice.fix.clone().as_ref())))
                         .children(reply_chip(cx, light, &thread["replying"]))
                         .children(crate::screens::attach::chips(cx, light, &self.screens.attacher.previews, thread))
                         .child(div().id("composer-box").border_1().border_color(c("accent")).bg(c("view")).px_3().py_2().min_h(px(60.)).cursor(CursorStyle::IBeam).on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| { this.input.focus_handle(cx).focus(window); })).child(self.input.clone()))
@@ -567,7 +570,7 @@ impl Render for Backplane {
                             .child(crate::screens::bar::fit(with_rect(chip(light, String::new()).id("ctx-chip"), || "ui:Context".to_string())).cursor_pointer().on_click(cx.listener(|this, _, _, cx| { this.screens.ctx_open = !this.screens.ctx_open; cx.notify(); })).flex().items_center().gap_2().child(ic(light, "gauge", 14., "dim")).child(ctx))
                             .child(crate::screens::bar::fit(with_rect(crate::screens::accounts::limits_chip(cx, light, &self.screens.acct, allowance), || "ui:Allowance".to_string())))
                             .child(crate::screens::bar::fit(with_rect(chip(light, String::new()).id("attach"), || "ui:Attach".to_string())).cursor_pointer().on_click(cx.listener(|this, _, _, cx| this.pick_files(cx))).child(ic(light, "paperclip", 16., "dim")))
-                            .child(crate::screens::bar::fit(with_rect(chip(light, String::new()).opacity(0.45), || "ui:Dictate".to_string())).child(ic(light, "mic", 16., "dim")))
+                            .child(crate::screens::bar::fit(with_rect(chip(light, String::new()).id("dictate"), || "ui:Dictate".to_string())).cursor_pointer().on_click(cx.listener(|this, _, _, cx| this.voice_press(cx))).child(ic(light, "mic", 16., if dictating { "accent" } else { "dim" })))
                             .child(crate::screens::bar::fit(with_rect(div().id("send"), || "send".to_string())).flex_shrink_0().px_4().py_1().bg(c("accent")).text_color(c("on-accent")).cursor_pointer().child("Send").on_click(cx.listener(|this, _, window, cx| this.send(&Send, window, cx)))))))
                     .children(crate::screens::bots::page(cx, light, &self.screens.fields, &self.data["bot"], self.screens.browser.as_ref().map(|(_, b)| b)))
                     .children(crate::screens::tools::questions(cx, light, &self.screens.fields, &self.data))

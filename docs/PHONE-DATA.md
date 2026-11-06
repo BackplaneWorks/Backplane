@@ -67,3 +67,19 @@ The phones draw a thread as the desktop does; the words are the hub's.
 - `thread.picker {thread?, provider?, model?, effort?, runtime?}` → `{picker:{chip, sections:[{title, action, choices:[{label, value, on, ok, why}]}]}}`: what the desktop's picker offers, in order: Model, Effort (when the provider has levels), Provider, Permissions. With `thread` it is that thread's; without, a new thread's from what is given (the hub's default agent, approvals on). A choice with `ok:false` is drawn disabled with its `why`.
 - `thread.pick {thread, action: model|effort|provider|runtime, value}` → `{thread}`: the desktop's own request (`thread.modes`, `thread.effort`, `thread.provider`). A provider changes between turns only; the refusal comes back as the error, to show as it stands.
 - `thread.create` also takes `effort` and `runtime` (`runtime` wins over `permission`). `thread.model` stays for older apps.
+
+## Dictation (feature `voice`; `native/host/src/voice/`, docs/voice.md)
+The phone records itself; the engine is the hub's. The hub decides everything else, so the app keeps one number per thread (the mark) and draws what it is sent.
+- `voice.start {thread, draft, caret}` → `{path}`: `caret` is in characters. Start the recorder on the press, before the reply; what is heard before the path comes waits for it. An empty `path` means no session started: the `view` frame says why.
+- Audio: 16 kHz mono s16le, in order, in about 200 ms pieces, each `POST <path>` with `Authorization: Bearer <token>` and a Content-Length; the last with `&end=1`. A 404 means the session is over: stop.
+- `voice.stop {thread}` → `{}`: send what is left with `&end=1` first. The hub waits 3 s for it.
+- `voice.act {thread, action, value, draft}` → `{}`: a chip. `action` and `value` come from the view; `voice-fixed`'s value is the text typed; `draft` is the draft now. Also `voice-clear` when the message is sent and the view has fixes or an ask.
+- `voice.view {thread}` → `{view}`: read it again after a reconnect.
+- `voice.page` → `{rows}`, `voice.page.act {action, value}` → `{}`: Settings, Voice, as rows `{label, note, buttons:[{label, action, value, on}], fields?:[{name, hint, secret, vault?, value}], tone?}`. A press sends the button's `action` and `value`; `voice-term` sends the `vterm` field's text as `value`. A button `secret-save` is the hub's `bots.voice` `api-add`: leave it out of `voice.page.act` and send the `kval` field as `voice.key {key}` → `{}`.
+
+Frames, to the client that started the session (`{"t":"voice","thread","ev",…}`, not a subscription push):
+- `view {view}`: draw it. `view` is `{on, state, status, level, note, bad, mic, stop, fixes:[{label, tip, action, value, primary}], ask}`. `on` false ends the session: stop the recorder and forget the mark. `ask` is null or `{text, word, guess, count, fixing, field?:{name, hint, secret, value}, buttons:[{label, action, value, primary}]}`. The strip says `status` and shows `level`, never the words; `note` closes with `voice-err`.
+- `level {v}`: 0..100, four times a second.
+- `edit {del, ins, adv, to}`: the draft, in characters. With `m` the mark (starts at `caret`; past the end means the end): replace the `del` characters after `m` with `ins`, put the caret at `m + to`, then `m += adv`. Text typed before the mark moves the mark by what was typed.
+- `draft {text}`: a chip changed words already there; the draft is now `text`.
+- `page {rows}`: Settings, Voice changed (a download's progress).

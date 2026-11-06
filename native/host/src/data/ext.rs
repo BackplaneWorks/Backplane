@@ -18,7 +18,7 @@
 //! Pushes on a `lists` subscription: `{"k":"notify","kind":"done"|"fail"|"ask","thread","title","body"}` when a turn ends or an ask opens.
 use super::*;
 
-pub const FEATURES: &[&str] = &["actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker"];
+pub const FEATURES: &[&str] = &["actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice"];
 
 const THREAD_ACTS: &[&str] = &["pin", "unpin", "settle", "unsettle", "archive", "unarchive", "delete", "detach"];
 
@@ -106,6 +106,7 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Re
         }
         "mentions.list" => mentions(hub, p).await,
         "viewer.files" | "viewer.watch" | "viewer.probe" | "viewer.info" | "files.entries" | "mech.list" | "browser" => viewers(hub, c, m, p).await?,
+        "voice.start" | "voice.stop" | "voice.act" | "voice.view" | "voice.key" | "voice.page" | "voice.page.act" => voice(hub, c, m, p).await,
         "viewer.diff" | "review.page" | "review.tick" | "review.comment" | "review.list" => review(hub, c, m, p).await?,
         "bots.list" => Ok(crate::bots::api::directory(hub).await),
         "bot.say" => {
@@ -225,7 +226,17 @@ async fn viewers(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Res
 }
 /// Frames the hub pushes to this connection that a phone's viewer reads: a plot (binary CBOR, or JSON for "none") and a browser frame's announcement.
 pub fn wants_raw(b: &[u8]) -> bool { b.len() > 7 && (0xA0..=0xB7).contains(&b[0]) && b[1] == 1 && b[2..7] == [0x64, b'p', b'l', b'o', b't'] }
-pub fn wants_value(v: &Value) -> bool { matches!(s(v, "t"), "plot" | "shot") }
+pub fn wants_value(v: &Value) -> bool { matches!(s(v, "t"), "plot" | "shot" | "voice") }
+
+// ---- dictation: the hub's `bots.voice`, the same ops the desktop sends (voice/session.rs); its `{"t":"voice"}` frames reach this socket as they are ----
+async fn voice(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Result<Value, Value> {
+    let mut q = p.clone();
+    q["op"] = json!(match m { "voice.start" => "start", "voice.stop" => "stop", "voice.act" => "act", "voice.view" => "view", "voice.key" => "key", "voice.page" => "page", _ => "page-act" });
+    if m == "voice.start" { q["src"] = json!("client") } // a phone records itself
+    let mut r = rpc(hub, c, "bots.voice", q).await?;
+    if let Some(o) = r.as_object_mut() { for k in ["t", "id", "ok"] { o.remove(k); } }
+    Ok(r)
+}
 
 // ---- diff and review (the hub's git.diff and review.* requests, and the thread's review acts) ----
 async fn review(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Result<Value, Value>> {

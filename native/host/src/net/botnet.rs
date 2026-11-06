@@ -20,10 +20,11 @@ pub fn url_base(u: &str) -> &str { u.strip_suffix('/').unwrap_or(u) }
 pub fn peer_path(home: &Path, id: &str) -> PathBuf { home.join("secrets/peers").join(id) }
 pub fn mkdir(path: &Path) { use std::os::unix::fs::DirBuilderExt; let _ = std::fs::DirBuilder::new().recursive(true).mode(0o700).create(path); }
 /// A file only its owner reads (0600, set before anything is written).
-pub fn write_secret(path: &Path, text: &str) -> bool {
+pub fn write_secret(path: &Path, text: &str) -> bool { write_secret_bytes(path, text.as_bytes()) }
+pub fn write_secret_bytes(path: &Path, bytes: &[u8]) -> bool {
     use std::{io::Write, os::unix::fs::OpenOptionsExt};
     let tmp = path.with_extension(format!("tmp{}", std::process::id()));
-    let ok = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp).and_then(|mut f| f.write_all(text.as_bytes()).and_then(|_| f.sync_all())).is_ok();
+    let ok = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp).and_then(|mut f| f.write_all(bytes).and_then(|_| f.sync_all())).is_ok();
     ok && std::fs::rename(&tmp, path).is_ok()
 }
 /// 64 hex digits: 32 random bytes.

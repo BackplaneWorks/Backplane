@@ -1,6 +1,8 @@
 //! Screens the hub's screen model describes beyond generic nodes. Each one reads a plain JSON shape the
 //! hub already sends the phones and answers with a view action; no decision lives here.
 pub mod asks;
+pub mod voice;
+pub mod voice_mic;
 pub mod ready;
 pub mod attach;
 pub mod desk;
@@ -45,6 +47,7 @@ use std::collections::HashMap;
 
 /// State the screens keep between frames (input boxes, caches); the hub owns everything else.
 pub struct Screens {
+    pub voice: voice::Voice,
     pub acct: accounts::Accounts,
     pub ask_inputs: HashMap<String, Entity<composer::Composer>>,
     pub attacher: attach::Attacher,
@@ -125,6 +128,6 @@ impl Screens {
     pub fn pv(&mut self, slot: usize) -> &mut plotview::PlotView { match slot { 0 => &mut self.plotview, n => &mut self.split_pv[(n - 1).min(1)] } }
     pub fn new<T: 'static>(_cx: &mut Context<T>, target: Option<attach::Target>, drafts_path: std::path::PathBuf, saved: HashMap<String, String>) -> Self {
         let imp = improvements::Imp::new(&drafts_path, target.clone());
-        Self { term: term::Term::new(_cx.focus_handle()), pad: None, acct: Default::default(), ctx_open: false, split_pv: Default::default(), pick_slot: None, last_state: String::new(), ask_inputs: HashMap::new(), attacher: attach::Attacher::new(target), drafts: drafts::Writer::start(drafts_path, saved), offsets: HashMap::new(), seeking: None, paging: None, reg: Default::default(), projects: Default::default(), files: Default::default(), solid: None, browser: None, rail_pending: None, rail_at: None, focus_field: None, bots_open: String::new(), plot_click: None, plot: Default::default(), plotview: Default::default(), picker_open: false, pick: Default::default(), panels: Default::default(), palette: Default::default(), lightbox: None, known_refs: vec![], popup_off: None, popup_shut: false, fields: HashMap::new(), settings_focus: _cx.focus_handle(), focus_settings: false, settings_was_open: false, settings_ui: Default::default(), parsed: Default::default(), born: HashMap::new(), shown_at: std::time::Instant::now(), images: Default::default(), img_poll: false, await_draft: None, pending_draft: None, draft_timer: false, imp, devbar: None, devbar_confirm: None, ctx: None, scroll_logged: None, popup_ix: 0, popup_key: String::new() }
+        Self { term: term::Term::new(_cx.focus_handle()), pad: None, voice: Default::default(), acct: Default::default(), ctx_open: false, split_pv: Default::default(), pick_slot: None, last_state: String::new(), ask_inputs: HashMap::new(), attacher: attach::Attacher::new(target), drafts: drafts::Writer::start(drafts_path, saved), offsets: HashMap::new(), seeking: None, paging: None, reg: Default::default(), projects: Default::default(), files: Default::default(), solid: None, browser: None, rail_pending: None, rail_at: None, focus_field: None, bots_open: String::new(), plot_click: None, plot: Default::default(), plotview: Default::default(), picker_open: false, pick: Default::default(), panels: Default::default(), palette: Default::default(), lightbox: None, known_refs: vec![], popup_off: None, popup_shut: false, fields: HashMap::new(), settings_focus: _cx.focus_handle(), focus_settings: false, settings_was_open: false, settings_ui: Default::default(), parsed: Default::default(), born: HashMap::new(), shown_at: std::time::Instant::now(), images: Default::default(), img_poll: false, await_draft: None, pending_draft: None, draft_timer: false, imp, devbar: None, devbar_confirm: None, ctx: None, scroll_logged: None, popup_ix: 0, popup_key: String::new() }
     }
 }

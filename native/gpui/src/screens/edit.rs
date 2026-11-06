@@ -61,6 +61,8 @@ impl Editor {
         self.text.replace_range(range.clone(), with);
         self.head = range.start + with.len(); self.anchor = self.head;
     }
+    /// Words from dictation at a range: one undo step, the caret where the hub says.
+    pub fn dictate(&mut self, range: Range<usize>, with: &str, caret: usize) { let r = self.clamp(range.start)..self.clamp(range.end); self.replace(r, with, Kind::Other); let c = self.clamp(caret); self.anchor = c; self.head = c; }
     /// Typing and paste. Line endings are normalised to \n.
     pub fn insert(&mut self, s: &str) {
         let s = s.replace("\r\n", "\n").replace('\r', "\n");
