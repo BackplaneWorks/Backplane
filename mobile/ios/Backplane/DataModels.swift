@@ -246,3 +246,6 @@ struct DMention: Decodable, Identifiable {
 struct DMentions: Decodable { var items: [DMention]
     enum CodingKeys: String, CodingKey { case items }
     init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); items = (try? c.decode([DMention].self, forKey: .items)) ?? [] } }
+
+/// `update.status`: the hub decides the words; a phone only shows them.
+struct DUpdate: Decodable { let current: String; let channel: String; let line: String; let canCheck: Bool }

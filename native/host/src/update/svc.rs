@@ -126,7 +126,8 @@ impl RpcHandler for Rpc {
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, method: &'a str, _p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let channel = Updates::channel(hub).await; // as stored now: a change in Settings counts at once
-            let status = |u: &Updates| { let s = u.st.lock().unwrap().clone(); json!({"version":s.available,"channel":channel,"current":s.current,"state":s.state,"note":s.note,"checked":s.checked}) };
+            let status = |u: &Updates| { let s = u.st.lock().unwrap().clone(); let (line, check) = crate::present::settings::update_line(&serde_json::to_string(&s).unwrap_or_default());
+                json!({"version":s.available,"channel":channel,"current":s.current,"state":s.state,"note":s.note,"checked":s.checked,"line":line,"canCheck":check}) };
             if method != "update.status" && builds().is_some() && !off() {
                 if method == "app.update" { self.0.wanted.store(true, SeqCst); }
                 let (u, h, now) = (self.0.clone(), hub.clone(), Updates::now_s()); tokio::spawn(async move { u.pass(&h, now).await; });
@@ -161,6 +162,7 @@ mod tests {
         let u = Arc::new(Updates::default()); u.start(&hub).await; let r = Rpc(u);
         let call = |m: &'static str| { let (hub, r) = (hub.clone(), &r); async move { r.call(&hub, &Caller { gen: "1".into(), client: 1 }, &json!(4), m, &json!({})).await.remove(0) } };
         let v = call("update.check").await; assert_eq!((v["result"]["version"].as_str(), v["result"]["channel"].as_str(), v["result"]["state"].as_str()), (Some(""), Some("stable"), Some("package")));
+        assert_eq!((v["result"]["line"].as_str(), v["result"]["canCheck"].as_bool()), (Some("Updated by its package."), Some(false)), "the sentence every client shows");
         hub.commit(&json!({"$":"SettingSet","key":"update.channel","value":"nightly","at":1})).await.unwrap(); assert_eq!(call("update.check").await["result"]["channel"], "beta", "0.14's stored nightly");
         hub.commit(&json!({"$":"SettingSet","key":"update.channel","value":"beta","at":2})).await.unwrap(); assert_eq!(call("update.status").await["result"]["channel"], "beta");
         assert_eq!(call("app.update").await["ok"], true); assert!(!home.join("update").exists(), "a package install keeps no update files");
