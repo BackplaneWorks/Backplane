@@ -54,9 +54,9 @@ jobs:
           rm -f native/host/Cargo.toml.bak native/gpui/Cargo.toml.bak
       - name: build
         run: |
-          (cd native/host && cargo build --release --bin backplane-hub) &
-          (cd native/gpui && cargo build --release) &
-          wait -n; wait -n
+          (cd native/host && cargo build --release --bin backplane-hub) & a=$!
+          (cd native/gpui && cargo build --release) & b=$!
+          wait $a; wait $b
       - uses: oven-sh/setup-bun@v2
       - name: package
         run: |
