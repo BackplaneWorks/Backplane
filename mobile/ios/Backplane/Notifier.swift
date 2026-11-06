@@ -50,10 +50,12 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     // one notification per key ("turn-<thread>", or "room-<room>" for a room
     // exchange, the same on every paired hub): a newer alert replaces the last
     func post(thread: String, key: String, title: String, body: String) {
+        // this phone's own switch (Settings > On this phone); the hub's alert policy is separate
+        guard UserDefaults.standard.object(forKey: "app.alerts") as? Bool ?? true else { return }
         let n = UNMutableNotificationContent()
         n.title = title
         n.body = body
-        n.sound = .default
+        if UserDefaults.standard.object(forKey: "app.alertSound") as? Bool ?? true { n.sound = .default }
         let id = key.isEmpty ? "turn-" + thread : key
         if remoteInFront(), again(Self.key(thread: thread, key: key)) { return }
         n.threadIdentifier = id
@@ -65,10 +67,13 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         let thread = n.request.content.userInfo["thread"] as? String ?? ""
         let key = n.request.content.userInfo["key"] as? String ?? ""
         let remote = n.request.trigger is UNPushNotificationTrigger
+        let alerts = UserDefaults.standard.object(forKey: "app.alerts") as? Bool ?? true
+        let sound = UserDefaults.standard.object(forKey: "app.alertSound") as? Bool ?? true
+        let shown: UNNotificationPresentationOptions = sound ? [.banner, .sound, .list] : [.banner, .list]
         return await MainActor.run {
-            if viewing(thread) { return [] }
-            if remote { return remoteInFront() && !again(Self.key(thread: thread, key: key)) ? [.banner, .sound, .list] : [] }
-            return [.banner, .sound, .list]
+            if !alerts || viewing(thread) { return [] }
+            if remote { return remoteInFront() && !again(Self.key(thread: thread, key: key)) ? shown : [] }
+            return shown
         }
     }
 
