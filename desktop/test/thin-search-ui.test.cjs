@@ -43,12 +43,15 @@ test('actual query field submits exact Unicode on Enter only after composition c
  const f=panelFixture();f.ctx.showThinSearch({query:'',rows:[],hasMore:false});const {query}=f.parts();query.value='日本語 é';query.handlers.keydown({key:'Enter',isComposing:true});assert.equal(f.calls.length,0);
  f.key('Enter');assert.deepEqual(f.calls,[['日本語 é','']]);
 });
-test('typing searches after a pause, one search at a time, and a stale answer is not shown',async()=>{
+test('a burst\u2019s first key searches at once, later keys after a pause, one search at a time, and a stale answer is not shown',async()=>{
  const f=panelFixture();f.ctx.showThinSearch({query:'',rows:[],hasMore:false});const {query,rows}=f.parts();
- query.value='nar';query.handlers.input();assert.equal(f.calls.length,0);
- await new Promise(r=>setTimeout(r,250));assert.deepEqual(f.calls,[['nar','']]);
- query.value='narwhal';query.handlers.input();await new Promise(r=>setTimeout(r,250));assert.equal(f.calls.length,1);
- f.ctx.thinSearchAnswer({query:'nar',rows:narwhal.rows,hasMore:false});assert.deepEqual(f.calls[1],['narwhal','']);assert.equal(hits(rows).length,0);
+ query.value='n';query.handlers.input();assert.equal(f.calls.length,0,'one letter waits');
+ await new Promise(r=>setTimeout(r,200));assert.deepEqual(f.calls,[['n','']]);f.ctx.thinSearchAnswer({query:'n',rows:[],hasMore:false});
+ await new Promise(r=>setTimeout(r,200));
+ query.value='nar';query.handlers.input();assert.deepEqual(f.calls.at(-1),['nar',''],'a burst\u2019s first key asks at once');
+ query.value='narw';query.handlers.input();assert.equal(f.calls.length,2,'the next key waits');
+ query.value='narwhal';query.handlers.input();await new Promise(r=>setTimeout(r,250));assert.equal(f.calls.length,2,'one search on its way');
+ f.ctx.thinSearchAnswer({query:'nar',rows:narwhal.rows,hasMore:false});assert.deepEqual(f.calls[2],['narwhal','']);assert.equal(hits(rows).length,0);
  f.ctx.thinSearchAnswer(narwhal);assert.equal(hits(rows).length,2);
 });
 test('results come under their project and thread, the words lit, the first chosen; a click opens the message in its thread',()=>{

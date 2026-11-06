@@ -15,7 +15,7 @@ impl Agents {
     pub fn set_gen(&self, thread: &str, gen: &str) { self.gens.lock().unwrap().insert(thread.into(), gen.into()); }
     pub async fn commit_events(&self, ev: Vec<Value>) { if let Err(e) = self.hub.commit_many(&ev).await { self.stats.commit_errors.fetch_add(1, std::sync::atomic::Ordering::Relaxed); eprintln!("agents: could not write {} events: {e:#}", ev.len()) } }
 
-    async fn same_project(&self, a: &str, b: &str) -> bool { let w = self.world().await; match (w.threads.get(a), w.threads.get(b)) { (Some(x), Some(y)) => !y.deleted && x.project == y.project, _ => false } }
+    async fn same_project(&self, a: &str, b: &str) -> bool { if let Some(m) = self.mailroom() { if let Some(v) = m.reach(a, b).await { return v } } let w = self.world().await; match (w.threads.get(a), w.threads.get(b)) { (Some(x), Some(y)) => !y.deleted && x.project == y.project, _ => false } }
 
     /// Mcp.phase: approval > input > by the turn (tasks and owned work are not ported).
     async fn phase(&self, th: &str, turn: &str, pending: u64) -> &'static str {
@@ -39,8 +39,13 @@ impl Agents {
     }
     pub async fn tool_list(&self, thread: &str) -> (bool, Value) {
         let project = { let w = self.world().await; match w.threads.get(thread) { Some(t) => t.project.clone(), None => return fail(NOT_HERE) } };
-        let mut ids: Vec<String> = { let m = self.hub.model().await; m.threads.iter().filter(|(_, t)| t.project == project && !t.deleted).map(|(k, _)| k.clone()).collect() };
-        ids.sort(); let mut out = vec![]; for id in ids { if let Some(j) = self.thread_json(&id).await { out.push(j) } }
+        let room = self.mailroom(); let bot = match &room { Some(m) => m.reach(thread, thread).await == Some(true), None => false }; // Mcp.scope "*": a bot sees every project's threads
+        let mut ids: Vec<String> = { let m = self.hub.model().await; m.threads.iter().filter(|(_, t)| (if bot { !t.project.is_empty() } else { t.project == project }) && !t.deleted).map(|(k, _)| k.clone()).collect() };
+        ids.sort(); let mut out = vec![];
+        for id in ids {
+            if let Some(m) = &room { if m.hidden(thread, &id).await { continue } } // Mcp.run.threads
+            if let Some(j) = self.thread_json(&id).await { out.push(j) }
+        }
         (true, json!({"threads":out}))
     }
     pub async fn tool_read(&self, thread: &str, a: &Value) -> (bool, Value) {
@@ -60,9 +65,10 @@ impl Agents {
     pub async fn tool_send(self: &Arc<Self>, thread: &str, a: &Value) -> (bool, Value) {
         let target = sv(a, "threadId"); let text = if sv(a, "text").trim().is_empty() { sv(a, "message") } else { sv(a, "text") };
         if text.trim().is_empty() { return fail("thread_send needs a non-empty `text` (the message); nothing was sent") }
-        if !self.same_project(thread, target).await { return fail(NOT_HERE) }
+        let to_uber = match self.mailroom() { Some(m) => m.chat_is(target).await, None => false }; // Lr.may: any thread may write to the uberbot's own
+        if !to_uber && !self.same_project(thread, target).await { return fail(NOT_HERE) }
         let msg = format!("t:{thread}:{}", hub_id("m", now_s(), self.seq()));
-        match self.deliver(target, &msg, text, Some((format!("thread:{thread}"), "thread".into(), String::new())), vec![]).await { Ok(()) => (true, json!({"threadId":target,"state":"sent"})), Err(e) => fail(&e) }
+        match self.inbound("user", target, &msg, text, (format!("thread:{thread}"), "thread".into(), String::new()), vec![]).await { Ok(()) => (true, json!({"threadId":target,"state":"sent"})), Err(e) => fail(&e) }
     }
     pub async fn tool_update(&self, thread: &str, a: &Value) -> (bool, Value) {
         let target = if sv(a, "threadId").is_empty() { thread } else { sv(a, "threadId") };
@@ -83,7 +89,7 @@ impl Agents {
         let target = sv(a, "threadId"); if !self.same_project(thread, target).await { return fail(NOT_HERE) }
         if !self.world().await.running(target) { return (true, json!({"threadId":target,"state":"not running"})) }
         self.stopped_by.lock().unwrap().insert(target.to_string(), thread.to_string()); // Launch.tell: a launcher that stops its own thread is not told
-        let r = self.interrupt(target).await; match r { Ok(()) => (true, json!({"threadId":target,"state":"interrupted"})), Err(e) => { self.stopped_by.lock().unwrap().remove(target); fail(&e) } } // an interrupt that failed leaves no mark: the thread's next real end is reported
+        let r = self.interrupt(target).await; if let Some(m) = self.mailroom() { m.stopping(target).await } /* Run.queue.hold */ match r { Ok(()) => (true, json!({"threadId":target,"state":"interrupted"})), Err(e) => { self.stopped_by.lock().unwrap().remove(target); fail(&e) } } // an interrupt that failed leaves no mark: the thread's next real end is reported
     }
     /// The Settle button for an agent: this thread (or another of the project) is settled, as `thread.settle` does.
     pub async fn tool_settle(&self, thread: &str, a: &Value) -> (bool, Value) {

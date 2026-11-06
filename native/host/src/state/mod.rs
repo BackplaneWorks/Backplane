@@ -135,6 +135,7 @@ impl State {
     }
     /// BotSet's thread: a task delegated by a bot's thread is not hidden under it
     pub fn bot_threads_has(&self, thread: &str) -> bool { self.bot_threads.values().any(|t| t == thread) }
+    pub fn bot_of_thread(&self, thread: &str) -> Option<String> { self.bot_threads.iter().find(|(_, t)| t.as_str() == thread).map(|(b, _)| b.clone()) }
 
     fn thread_mut(&mut self, id: &str) -> &mut Thread { self.threads.entry(id.to_string()).or_insert_with(Thread::blank) }
     fn set(&mut self, k: &str, v: &str) {

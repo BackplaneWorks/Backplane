@@ -477,18 +477,77 @@ impl crate::api::RpcHandler for Arc<Starter> {
     // the job: branches from gpui, named gpui-imp-ab12cd34, under .backplane/worktrees
     let fold = Arc::new(tokio::sync::Mutex::new(super::fold::Fold::default()));
     let n0 = h.store.len();
-    super::worktree::spawn_with(false, h.clone(), fold.clone(), "t77".into(), repo.to_str().unwrap().into(), "auto".into(), String::new(), "claude".into(), String::new(), super::worktree::Opts { base: "gpui".into(), branch: "gpui-imp-ab12cd34".into() });
+    super::worktree::spawn_with(false, h.clone(), fold.clone(), "t77".into(), repo.to_str().unwrap().into(), "auto".into(), String::new(), "claude".into(), String::new(), super::worktree::Opts { base: "gpui".into(), branch: "gpui-imp-ab12cd34".into(), ..Default::default() });
     h.commit(&json!({"$":"ThreadCreated","id":"t77","project":"pb","title":"x","env":"worktree","branch":"","worktree":"","provider":"claude","model":"","at":9})).await.unwrap();
     let ev = settled(&h, n0 + 1, 2).await;
     let set = ev.iter().find(|v| v["$"] == "WorktreeSet").unwrap_or_else(|| panic!("{ev:?}"));
     assert_eq!(set["branch"], "gpui-imp-ab12cd34"); assert!(set["worktree"].as_str().unwrap().ends_with("/.backplane/worktrees/gpui-imp-ab12cd34"));
     // a base that vanished after the check: an error note, and NO WorktreeSkipped (the thread must not fall back to the project folder)
     let n1 = h.store.len();
-    super::worktree::spawn_with(false, h.clone(), fold, "t78".into(), repo.to_str().unwrap().into(), "auto".into(), String::new(), "claude".into(), String::new(), super::worktree::Opts { base: "gone".into(), branch: "b2".into() });
+    super::worktree::spawn_with(false, h.clone(), fold, "t78".into(), repo.to_str().unwrap().into(), "auto".into(), String::new(), "claude".into(), String::new(), super::worktree::Opts { base: "gone".into(), branch: "b2".into(), ..Default::default() });
     let ev = settled(&h, n1, 1).await; tokio::time::sleep(std::time::Duration::from_millis(300)).await;
     let ev2: Vec<Value> = h.store.range(n1, h.store.len()).unwrap().iter().map(|l| serde_json::from_str(l).unwrap()).collect();
     assert!(ev.iter().chain(ev2.iter()).any(|v| v["$"] == "ActivityLogged" && v["tone"] == "error" && v["summary"].as_str().unwrap().contains("could not make the worktree from gone")));
     assert!(!ev2.iter().any(|v| v["$"] == "WorktreeSkipped"));
     // no creation key: base and branch are ignored (today's thread.create), and nothing is checked
     let (e, r) = ask(&h, "thread.create", json!({"project":"pb","base":"nope","branch":"x"})).await; assert_eq!(r["ok"], true); assert_eq!(e[0]["$"], "ThreadCreated");
+}
+
+// a project's default base (worktree.base.<project>): a thread made with no base branches from that local branch, not from origin's default or HEAD; a missing one changes nothing
+#[tokio::test] async fn a_project_default_base_is_where_new_thread_worktrees_branch_from() {
+    let h = hub("prefer").await; let repo = git_repo("prefer-repo");
+    let g = |a: &[&str]| assert!(std::process::Command::new("git").args(a).current_dir(&repo).output().unwrap().status.success());
+    g(&["branch", "gpui"]); g(&["checkout", "-q", "-b", "elsewhere"]); // HEAD is on another branch than gpui
+    let tip = String::from_utf8(std::process::Command::new("git").args(["rev-parse", "gpui"]).current_dir(&repo).output().unwrap().stdout).unwrap().trim().to_string();
+    h.commit(&json!({"$":"ProjectCreated","id":"pp","title":"r","root":repo.to_str().unwrap(),"at":9})).await.unwrap();
+    h.commit(&json!({"$":"SettingSet","key":"worktree.base.pp","value":"gpui","at":9})).await.unwrap();
+    let fold = Arc::new(tokio::sync::Mutex::new(super::fold::Fold::default()));
+    let n0 = h.store.len();
+    super::worktree::spawn_with(false, h.clone(), fold.clone(), "t90".into(), repo.to_str().unwrap().into(), "auto".into(), String::new(), "claude".into(), String::new(), super::worktree::Opts { prefer: "gpui".into(), ..Default::default() });
+    h.commit(&json!({"$":"ThreadCreated","id":"t90","project":"pp","title":"x","env":"worktree","branch":"","worktree":"","provider":"claude","model":"","at":9})).await.unwrap();
+    let ev = settled(&h, n0 + 1, 2).await;
+    let set = ev.iter().find(|v| v["$"] == "WorktreeSet").unwrap_or_else(|| panic!("{ev:?}"));
+    let wt = set["worktree"].as_str().unwrap();
+    let head = String::from_utf8(std::process::Command::new("git").args(["merge-base", "HEAD", &tip]).current_dir(wt).output().unwrap().stdout).unwrap().trim().to_string();
+    assert_eq!(head, tip, "the worktree grew from gpui");
+    // a default that is not a local branch is ignored: the worktree is made as before
+    let n1 = h.store.len();
+    super::worktree::spawn_with(false, h.clone(), fold, "t91".into(), repo.to_str().unwrap().into(), "auto".into(), String::new(), "claude".into(), String::new(), super::worktree::Opts { prefer: "no-such".into(), ..Default::default() });
+    h.commit(&json!({"$":"ThreadCreated","id":"t91","project":"pp","title":"y","env":"worktree","branch":"","worktree":"","provider":"claude","model":"","at":9})).await.unwrap();
+    let ev = settled(&h, n1 + 1, 2).await;
+    assert!(ev.iter().any(|v| v["$"] == "WorktreeSet"), "{ev:?}");
+}
+async fn ask_on(h: &Arc<Hub>, c: &mut crate::hub::Conn, m: &str, p: Value) -> (Vec<Value>, Value) {
+    let n0 = h.store.len(); let out = h.request(c, &json!({"id":7,"m":m,"p":p})).await;
+    let ev = h.store.range(n0, h.store.len()).unwrap().iter().map(|l| { let mut v: Value = serde_json::from_str(l).unwrap(); if v.get("at").is_some() { v["at"] = json!(0) } v }).collect();
+    (ev, out[0].clone())
+}
+// Hub.accounts.select: between turns, on a fresh menu, a connected profile of the thread's provider; the sessions are kept per account and what the new one missed is handed over
+#[tokio::test] async fn selecting_an_account_keeps_each_accounts_session_and_hands_over_what_it_missed() {
+    use crate::settings::accounts as ac;
+    let h = hub("acct-select").await;
+    let inv = json!({"version":1,"revision":1,"profiles":[{"id":"w","provider":"claude","state":"connected","epoch":3,"label":"Work"},{"id":"d","provider":"claude","state":"disconnected","epoch":1,"label":"Old"}],"error":""}).to_string();
+    h.commit(&json!({"$":"SettingSet","key":"accounts.inventory","value":inv,"at":1})).await.unwrap();
+    h.commit(&json!({"$":"SettingSet","key":"account.thread.t1.claude","value":ac::binding_show("", 0),"at":1})).await.unwrap();
+    h.commit(&json!({"$":"SessionSet","id":"t1","session":"sess-default","at":2})).await.unwrap();
+    say(&h, "t1", "user", "make a board", 1).await; say(&h, "t1", "assistant", "done", 2).await;
+    let sel = |profile: &str, epoch: u64, expected: String| json!({"thread":"t1","profile":profile,"epoch":epoch,"expected":expected});
+    let (e, r) = ask(&h, "accounts.select", sel("w", 3, ac::binding_show("", 0))).await;
+    assert_eq!(r["error"], ac::GATE, "only a client granted account access (e {e:?})");
+    let (mut c, _) = h.connect(true); crate::settings::accounts_hub::grant_client(&c.gen, c.client);
+    let (e, r) = ask_on(&h, &mut c, "accounts.select", sel("w", 3, ac::binding_show("w", 3))).await; assert_eq!(r["ok"], false, "a menu from before another selection: {e:?}");
+    let (_, r) = ask_on(&h, &mut c, "accounts.select", sel("d", 1, ac::binding_show("", 0))).await; assert_eq!(r["error"], ac::unavailable(&ac::profile(&inv, "d"), 1), "a disconnected profile");
+    let (_, r) = ask_on(&h, &mut c, "accounts.select", sel("w", 2, ac::binding_show("", 0))).await; assert_eq!(r["error"], ac::unavailable(&ac::profile(&inv, "w"), 2), "the sign-in changed");
+    let (e, r) = ask_on(&h, &mut c, "accounts.select", sel("w", 3, ac::binding_show("", 0))).await; assert_eq!(r, ok());
+    let set = |k: &str| e.iter().find(|v| v["$"] == "SettingSet" && v["key"] == k).map(|v| v["value"].clone());
+    assert_eq!(set("account.thread.t1.claude"), Some(json!(ac::binding_show("w", 3))));
+    assert_eq!(set(&ac::session_key("t1", "claude", "", 0)), Some(json!("sess-default")), "the old account's session is kept under its own key");
+    assert_eq!(e.iter().find(|v| v["$"] == "SessionSet").unwrap()["session"], "", "the new account has no session yet: it starts fresh");
+    assert!(e.iter().any(|v| v["$"] == "TurnQueued" && v["text"].as_str().unwrap().contains("Selected another account") && v["text"].as_str().unwrap().contains("make a board")), "it is handed what it missed: {e:?}");
+    let back = json!({"thread":"hub|t1","profile":"","epoch":0,"expected":ac::binding_show("w", 3)});
+    let (_, r) = ask_on(&h, &mut c, "accounts.select", back).await; assert_eq!(r, ok(), "the picture names a thread hub|id: it is the same thread");
+    let (_, r) = ask_on(&h, &mut c, "accounts.select", sel("w", 3, ac::binding_show("", 0))).await; assert_eq!(r, ok());
+    h.commit(&json!({"$":"TurnChanged","thread":"t1","state":"running","at":9})).await.unwrap();
+    let (_, r) = ask_on(&h, &mut c, "accounts.select", sel("", 0, ac::binding_show("w", 3))).await; assert_eq!(r["error"], "Finish or stop the current turn before selecting another account.");
+    crate::settings::accounts_hub::revoke_client(c.client);
 }

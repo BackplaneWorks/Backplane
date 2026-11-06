@@ -40,7 +40,7 @@ Example: `test/gpui/shot-popup.json`.
 ## e2e hooks G1-G5 (test/gpui/e2e/CONTRACT.md)
 
 Script steps (JSON, one per list item): `{"record":"start","name":"scroll"}` / `{"record":"stop"}`, `{"click":"<control id>"}`, `{"scroll":PX}`, `{"scroll_state":"<name>"}` (event `scroll {name, y, max, entries, dups, first, last, top, more}`),
-`{"net_sleep":SECS}`; `{"paste_image"|"open_viewer"|"open_settings"|"files_download": ...}` answer `input {ok:false,error:"not_implemented"}` (viewers, settings
+`{"net_sleep":SECS}`; `{"open_viewer":"files"}`, `{"files":"select:N|open:N|key:down|filter:text|new:name|rename:N:name|delete:N|confirm_delete|menu:N|upload:PATH|download:N|zip|copy:N|up|back|cancel|shot:PATH"}` and `{"files_download":N|"name"}` are implemented (Files tab); `{"paste_image"|"open_settings": ...}` answer `input {ok:false,error:"not_implemented"}` (viewers, settings
 and downloads do not exist in GPUI yet), so the harness marks those journeys blocked. Events (stderr, `GPUI_METRIC`):
 - **G1 `ack {step, ack_ms}`**: for every scripted step, the first frame presented after the event was injected: its local effect (pressed/selected row, typed text),
   before any hub round trip. `input.latency_ms` stays the frame that shows the result. GPUI draws on demand, so "differs from the frame before" is

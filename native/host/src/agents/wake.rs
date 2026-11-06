@@ -149,8 +149,12 @@ impl Wakes {
             let text = format!("thread \"{title}\" ({th}) {}", if end > 0 { format!("ended its turn ({}). Its last reply: {reply}", super::launch::word(end, "")) } else { format!("opened an ask: {}", asked.clone().unwrap_or_default()) });
             let now = now_s(); let mut before: Vec<Value> = matches.iter().map(|(e, k)| json!({"$":"SettingSet","key":format!("wake.seen.{}.{e}", s.id),"value":k,"at":now})).collect();
             if s.once { before.push(json!({"$":"WakeDropped","id":s.id,"at":now})) }
+            let room = self.ag.mailroom(); let to_uber = match &room { Some(m) => m.chat_is(&s.by).await, None => false };
+            // Wake.thread.fire.covered: the uberbot already hears of a thread it launched through the report; the wake is only marked
+            if to_uber && self.ag.world().await.launched.get(th).map_or(false, |(by, on)| *on && *by == s.by) { self.ag.commit_events(before).await; continue }
+            let key = matches.iter().map(|(_, k)| k.as_str()).collect::<Vec<_>>().join("|");
             let msg = format!("t:{th}:lr-{}", hub_id("w", now, self.ag.seq_n()));
-            let _ = self.ag.deliver_as("user", &s.by, &msg, &note(&s, &text, &evs), Some((th.to_string(), "wake".into(), s.id.clone())), before).await;
+            let _ = self.ag.inbound_ref("user", &s.by, &msg, &note(&s, &text, &evs), (th.to_string(), "wake".into(), s.id.clone()), &format!("thread:{th}:{key}"), before).await;
         }
     }
 }

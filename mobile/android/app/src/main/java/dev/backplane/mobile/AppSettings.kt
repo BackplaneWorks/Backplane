@@ -62,6 +62,8 @@ object AppSettings {
 
     fun putLang(v: String) { lang = v; prefs.edit().putString("app.lang", v).apply() }
     fun forceLang(v: String) { if (v == "ja" || v == "en") { langPreview = true; lang = v } }
+    fun alertsOn() = prefs.getBoolean("data.alerts", true)
+    fun putAlerts(v: Boolean) { prefs.edit().putBoolean("data.alerts", v).apply() }
     fun putAppearance(v: String) { appearance = v; prefs.edit().putString("app.appearance", v).apply() }
     fun putThreadList(v: String) { threadList = v; prefs.edit().putString("app.threadList", v).apply() }
     fun putDefaultTab(v: String) { defaultTab = v; prefs.edit().putString("app.defaultTab", v).apply() }

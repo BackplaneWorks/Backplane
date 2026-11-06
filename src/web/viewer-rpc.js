@@ -1,6 +1,9 @@
 // Bounded read-only viewer requests on the existing authenticated socket.
 // IDs occupy a separate range below ThinViews' 2^47 base. A reply is consumed
 // only by its owner; reconnect/timeout cannot apply it to another source.
+// (separate reads in flight at once; a read's later component pages may be
+// asked for ahead of their turn beyond that, AHEAD at most)
+const READS = 4, AHEAD = 6;
 export class ViewerRpc {
   constructor(send, { timeoutMs = 15000 } = {}) { this.send = send; this.timeoutMs = timeoutMs; this.next = 2 ** 46; this.pending = new Map(); this.generation = 0; }
   async components(thread, { path = "", signal } = {}) {
@@ -19,6 +22,17 @@ export class ViewerRpc {
     const fragmented = data.componentEncoding === "field-fragments-v1", count = fragmented ? data.componentCount : total;
     if ((data.componentEncoding !== undefined && !fragmented) || !Number.isSafeInteger(count) || count < 0 || count > total) throw Error("Invalid saved component encoding or count.");
     let offset = 0, bytes = 0, partial = null;
+    // (a hub that names every page's offset in the first: the rest are asked
+    // for at once, a few at a time, and still taken in order below)
+    const ask = at => this.request("kicad.components", { ...source, offset: at, sourceRevision: first.sourceRevision, schematicRevision: first.schematicRevision }, "components", this.timeoutMs, signal, READS + AHEAD);
+    const listed = data.page.offsets, offsets = Array.isArray(listed) && listed[0] === 0 && listed.length <= 256 && listed.every((o, i) => Number.isSafeInteger(o) && o < Math.max(total, 1) && (!i || o > listed[i - 1])) ? listed.slice(1) : [];
+    const ahead = new Map(), more = after => {
+      for (const at of offsets) {
+        if (ahead.size >= AHEAD || this.pending.size >= READS + AHEAD - 1) break;
+        if (at > after && !ahead.has(at)) { const reply = ask(at);reply.catch(() => {});ahead.set(at, reply); }
+      }
+    };
+    more(0);
     const append = c => {
       if (!c || typeof c.id !== "string" || !c.id || ids.has(c.id)) throw Error("Ambiguous saved component identity across pages.");
       ids.add(c.id); rows.push(c);
@@ -60,7 +74,8 @@ export class ViewerRpc {
       }
       if (!part.length || p.complete !== false || p.next !== offset || offset >= total) throw Error("Invalid saved component page cursor.");
       if (performance.now() - started > 120000) throw Error("Saved component read exceeded its time limit. Retry after the save finishes.");
-      data = await this.request("kicad.components", { ...source, offset, sourceRevision: first.sourceRevision, schematicRevision: first.schematicRevision }, "components", this.timeoutMs, signal);
+      const asked = ahead.get(offset);ahead.delete(offset);more(offset);
+      data = await (asked || ask(offset));
     }
     throw Error("Saved component metadata exceeds the page limit.");
   }
@@ -68,21 +83,25 @@ export class ViewerRpc {
     if (!revision) return Promise.reject(new Error("Waiting for the saved model revision before preparing quality rendering."));
     return this.request("kicad.renderAsset", { thread, path, kind, revision }, "asset", 120000, signal);
   }
-  request(method, params, field, timeoutMs = this.timeoutMs, signal) {
+  request(method, params, field, timeoutMs = this.timeoutMs, signal, room = READS) {
     if (signal?.aborted) return Promise.reject(new DOMException("Viewer read canceled", "AbortError"));
     if (!params.thread) return Promise.reject(new Error("No selected thread for model inspection."));
-    if (this.pending.size >= 4) return Promise.reject(new Error("Viewer reads are busy; retry shortly."));
+    // (pages asked ahead have their own AHEAD: they never take a separate
+    // read's place, such as the original model's asset asked meanwhile)
+    const ahead = room > READS, taken = ahead ? this.pending.size : this.pending.size - this.aheadCount();
+    if (taken >= room) return Promise.reject(new Error("Viewer reads are busy; retry shortly."));
     const id = ++this.next;
     return new Promise((resolve, reject) => {
       const cleanup = () => { clearTimeout(timer); signal?.removeEventListener("abort", abort); this.pending.delete(id); };
       const abort = () => { cleanup(); reject(new DOMException("Viewer read canceled", "AbortError")); };
       const timer = setTimeout(() => { cleanup(); reject(new Error("Saved model read timed out. Retry after the save finishes.")); }, timeoutMs);
-      this.pending.set(id, { resolve, reject, timer, field, cleanup });
+      this.pending.set(id, { resolve, reject, timer, field, cleanup, ahead });
       signal?.addEventListener("abort", abort, { once: true });
       try { this.send({ id, m: method, p: params }); }
       catch (error) { cleanup(); reject(error); }
     });
   }
+  aheadCount() { let n = 0; for (const call of this.pending.values()) if (call.ahead) n++; return n; }
   receive(envelope) {
     if (envelope?.t !== "reply") return false;
     const call = this.pending.get(envelope.id); if (!call) return false;

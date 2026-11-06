@@ -2,7 +2,7 @@
 //! that is None for what it does not own or has not ported; the first answer wins, its patch is merged into a copy of the request's session (`patch::merge`), its commands are
 //! returned in order, and the shared post-hook of Bend's `Ui.act` that is mine, `Fab.sync` (a `send fab.look` after any action with a thread selected whose place changed), is
 //! appended for the answers that did not already include it (select does). None from here means the helper, or "not ported" on a hub without one.
-use super::{composer, patch, select, thread_actions};
+use super::{composer, pages, patch, select, thread_actions};
 use crate::commands::actions as cmdact;
 use serde_json::{json, Value};
 
@@ -14,6 +14,8 @@ pub trait Facts: composer::Facts + select::Facts {
     fn root_of(&self, id: &str) -> String;
     /// AT.Att.max: the attachment limit in bytes (setting files.max.mb, default 512 MB, between 1 and 4000)
     fn attach_cap(&self) -> u64 { 512 << 20 }
+    /// the thread a fork was made from (the setting fork.<id>): "" for a thread that is no fork
+    fn fork_source(&self, _id: &str) -> String { String::new() }
 }
 
 pub struct Dispatched { pub session: Value, pub cmds: Vec<Value>, pub next_target: Option<Value> }
@@ -50,19 +52,30 @@ pub fn dispatch<F: Facts>(f: &F, params: &Value) -> Option<Dispatched> {
     let (hub, action, value) = (s(params, "hub"), s(params, "action"), s(params, "value"));
     if action.is_empty() { return None }
     let mut session = params["session"].clone();
-    let sel = if params["target"]["kind"] == "thread" { s(&params["target"], "id") } else { "" };
+    let sel = match params["target"]["kind"].as_str() { Some("thread") => s(&params["target"], "id"), Some("bot") => s(&params["session"], "sel"), _ => "" }; // a bot's Chat is its thread
+    // "back" (Back to the original, on a fork): the thread it was forked from is selected, as a click on its row would
+    let back;
+    let (action, value) = if action == "back" {
+        let th = if value.is_empty() { sel } else { value.rsplit('|').next().unwrap_or("") };
+        back = f.fork_source(th);
+        if back.is_empty() || !select::Facts::thread_exists(f, &back) { return None }
+        ("select", back.as_str())
+    } else { (action, value) };
     let (cmds, next_target, has_fab) = if let Some(o) = composer::act(params, f) {
         patch::merge(&mut session, &o.session_patch); (o.cmds, None, false)
     } else if let Some(o) = cmdact::act(&cmdact::Req { hub, session: &params["session"], sel, action, value, title_of: &|t| f.title_of(t) }) {
         patch::merge(&mut session, &o.session_patch); (o.cmds, o.next_target, false)
     } else if let Some(o) = thread_actions::act(f, hub, &params["session"], sel, action, value) {
         patch::merge(&mut session, &o.session_patch); (o.cmds, None, !o.look)
+    } else if let Some(o) = pages::act(hub, &params["session"], sel, action, value) {
+        patch::merge(&mut session, &o.session_patch); (o.cmds, None, !o.look)
     } else if action == "select" {
         let o = select::select(f, hub, &params["session"], value)?;
         patch::merge(&mut session, &o.session_patch); (o.cmds, Some(o.next_target), true)
     } else { return None };
     // the post-hook's Dv.sync / Mpage.sync / Fv.sync would add commands for what is on show now: not ported (the helper's)
-    if thread_actions::syncs_pending(&session) { return None }
+    // (a Diff on show is followed by pages::dv_sync, which the presenter runs after every request)
+    if thread_actions::syncs_pending(&session) && !pages::diff_only(&session) { return None }
     let mut cmds = cmds;
     bind_all(f, &mut cmds);
     if !has_fab { fab_tail(f, hub, &mut session, &mut cmds) }
@@ -74,6 +87,7 @@ pub fn dispatch<F: Facts>(f: &F, params: &Value) -> Option<Dispatched> {
 pub struct StateFacts<'a>(pub &'a crate::state::State);
 impl composer::Facts for StateFacts<'_> {
     fn bot_thread(&self, thread: &str) -> bool { self.0.bot_threads_has(thread) }
+    fn bot_of(&self, thread: &str) -> Option<String> { self.0.bot_of_thread(thread) }
     fn account_params(&self, thread: &str) -> bool { self.account_binding(thread).is_some() }
     fn account_binding(&self, thread: &str) -> Option<String> {
         let t = self.0.threads.get(thread)?;
@@ -92,6 +106,7 @@ impl select::Facts for StateFacts<'_> {
 }
 impl Facts for StateFacts<'_> {
     fn title_of(&self, id: &str) -> String { self.0.threads.get(id).map_or(String::new(), |t| t.title.clone()) }
+    fn fork_source(&self, id: &str) -> String { self.0.settings.get(&format!("fork.{id}")).cloned().unwrap_or_default() }
     fn attach_cap(&self) -> u64 { self.0.settings.get("files.max.mb").and_then(|v| v.trim().parse::<u64>().ok()).map_or(512, |n| n.clamp(1, 4000)) << 20 }
     fn root_of(&self, id: &str) -> String {
         let Some(t) = self.0.threads.get(id) else { return String::new() };
@@ -178,8 +193,20 @@ mod tests {
     #[test] fn what_nobody_owns_is_none() {
         let f = M { exists: T, running: false };
         for a in ["", "fm-open", "settings"] { assert!(dispatch(&f, &params(a, "x", session())).is_none(), "{a}") }
-        let mut open = session(); open["panel"] = json!(true); open["info"] = json!({format!("view.kind:{T}"): "diff"});
-        assert!(dispatch(&f, &params("send", "", open)).is_none(), "a Diff on show: Dv.sync would ask again, not ported");
+        let mut open = session(); open["panel"] = json!(true); open["info"] = json!({format!("view.kind:{T}"): "mech"});
+        assert!(dispatch(&f, &params("send", "", open)).is_none(), "a Mech page not yet asked for: Mpage.sync would ask, not ported");
+        let mut diff = session(); diff["panel"] = json!(true); diff["info"] = json!({format!("view.kind:{T}"): "diff"});
+        assert!(dispatch(&f, &params("send", "", diff)).is_some(), "a Diff on show is followed by pages::dv_sync, after the request");
         assert!(dispatch(&f, &params("select", "h|unknown", session())).is_none());
+    }
+    #[test] fn back_on_a_fork_selects_the_thread_it_was_forked_from() {
+        let mut st = crate::state::State::new();
+        for e in [json!({"$":"ProjectCreated","id":"p","title":"P","root":"/p","at":1}), json!({"$":"ThreadCreated","id":"t1","project":"p","title":"One","at":2}),
+            json!({"$":"ThreadCreated","id":"t2","project":"p","title":"Two","at":3}), json!({"$":"SettingSet","key":"fork.t2","value":"t1","at":4})] { assert!(st.apply(&e)); }
+        let f = StateFacts(&st);
+        let p = json!({"hub":"h","action":"back","value":"","target":{"kind":"thread","id":"t2"},"session":{"sel":"t2","rid":3,"drafts":{},"info":{}}});
+        let o = dispatch(&f, &p).expect("back is ported"); assert_eq!(o.next_target.unwrap()["id"], "t1");
+        let mut p1 = p.clone(); p1["target"]["id"] = json!("t1"); p1["session"]["sel"] = json!("t1");
+        assert!(dispatch(&f, &p1).is_none(), "a thread that is no fork has nowhere to go back to");
     }
 }

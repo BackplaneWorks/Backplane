@@ -1,0 +1,469 @@
+{"$":"ProjectCreated","id":"p1700000000-1","title":"fixture","root":"/tmp/bp-rec-work/fixroot","at":1700000000}
+{"$":"ThreadCreated","id":"t1700000001-2","project":"p1700000000-1","title":"Fixture short","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1700000001}
+{"$":"ThreadCreated","id":"t1700000002-3","project":"p1700000000-1","title":"Fixture long","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1700000002}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000100-10","role":"user","text":"Question 0: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000010}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000101-11","role":"assistant","text":"Answer 1: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000011}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000102-12","role":"user","text":"Question 2: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000012}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000103-13","role":"assistant","text":"Answer 3: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000013}
+{"$":"ActivityLogged","thread":"t1700000002-3","act":"g1700000103-303","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -3","at":1700000013}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000104-14","role":"user","text":"Question 4: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000014}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000105-15","role":"assistant","text":"Answer 5: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000015}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000106-16","role":"user","text":"Question 6: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000016}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000107-17","role":"assistant","text":"Answer 7: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000017}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000108-18","role":"user","text":"Question 8: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000018}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000109-19","role":"assistant","text":"Answer 9: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000019}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000110-20","role":"user","text":"Question 10: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000020}
+{"$":"ActivityLogged","thread":"t1700000002-3","act":"g1700000110-310","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -10","at":1700000020}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000111-21","role":"assistant","text":"Answer 11: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000021}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000112-22","role":"user","text":"Question 12: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000022}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000113-23","role":"assistant","text":"Answer 13: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000023}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000114-24","role":"user","text":"Question 14: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000024}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000115-25","role":"assistant","text":"Answer 15: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000025}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000116-26","role":"user","text":"Question 16: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000026}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000117-27","role":"assistant","text":"Answer 17: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000027}
+{"$":"ActivityLogged","thread":"t1700000002-3","act":"g1700000117-317","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -17","at":1700000027}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000118-28","role":"user","text":"Question 18: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000028}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000119-29","role":"assistant","text":"Answer 19: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000029}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000120-30","role":"user","text":"Question 20: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000030}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000121-31","role":"assistant","text":"Answer 21: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000031}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000122-32","role":"user","text":"Question 22: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000032}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000123-33","role":"assistant","text":"Answer 23: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000033}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000124-34","role":"user","text":"Question 24: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000034}
+{"$":"ActivityLogged","thread":"t1700000002-3","act":"g1700000124-324","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -24","at":1700000034}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000125-35","role":"assistant","text":"Answer 25: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000035}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000126-36","role":"user","text":"Question 26: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000036}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000127-37","role":"assistant","text":"Answer 27: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000037}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000128-38","role":"user","text":"Question 28: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000038}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000129-39","role":"assistant","text":"Answer 29: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000039}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000130-40","role":"user","text":"Question 30: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000040}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000131-41","role":"assistant","text":"Answer 31: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000041}
+{"$":"ActivityLogged","thread":"t1700000002-3","act":"g1700000131-331","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -31","at":1700000041}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000132-42","role":"user","text":"Question 32: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000042}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000133-43","role":"assistant","text":"Answer 33: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000043}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000134-44","role":"user","text":"Question 34: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000044}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000135-45","role":"assistant","text":"Answer 35: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000045}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000136-46","role":"user","text":"Question 36: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000046}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000137-47","role":"assistant","text":"Answer 37: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000047}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000138-48","role":"user","text":"Question 38: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000048}
+{"$":"ActivityLogged","thread":"t1700000002-3","act":"g1700000138-338","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -38","at":1700000048}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000139-49","role":"assistant","text":"Answer 39: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000049}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000140-50","role":"user","text":"Question 40: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000050}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000141-51","role":"assistant","text":"Answer 41: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000051}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000142-52","role":"user","text":"Question 42: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000052}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000143-53","role":"assistant","text":"Answer 43: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000053}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000144-54","role":"user","text":"Question 44: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000054}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000145-55","role":"assistant","text":"Answer 45: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000055}
+{"$":"ActivityLogged","thread":"t1700000002-3","act":"g1700000145-345","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -45","at":1700000055}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000146-56","role":"user","text":"Question 46: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000056}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000147-57","role":"assistant","text":"Answer 47: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000057}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000148-58","role":"user","text":"Question 48: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000058}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000149-59","role":"assistant","text":"Answer 49: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000059}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000150-60","role":"user","text":"Question 50: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000060}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000151-61","role":"assistant","text":"Answer 51: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000061}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000152-62","role":"user","text":"Question 52: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000062}
+{"$":"ActivityLogged","thread":"t1700000002-3","act":"g1700000152-352","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -52","at":1700000062}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000153-63","role":"assistant","text":"Answer 53: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000063}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000154-64","role":"user","text":"Question 54: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000064}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000155-65","role":"assistant","text":"Answer 55: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000065}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000156-66","role":"user","text":"Question 56: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000066}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000157-67","role":"assistant","text":"Answer 57: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000067}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000158-68","role":"user","text":"Question 58: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000068}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000159-69","role":"assistant","text":"Answer 59: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000069}
+{"$":"ActivityLogged","thread":"t1700000002-3","act":"g1700000159-359","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -59","at":1700000069}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000160-70","role":"user","text":"Question 60: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000070}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000161-71","role":"assistant","text":"Answer 61: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000071}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000162-72","role":"user","text":"Question 62: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000072}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000163-73","role":"assistant","text":"Answer 63: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000073}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000164-74","role":"user","text":"Question 64: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000074}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000165-75","role":"assistant","text":"Answer 65: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000075}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000166-76","role":"user","text":"Question 66: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000076}
+{"$":"ActivityLogged","thread":"t1700000002-3","act":"g1700000166-366","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -66","at":1700000076}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000167-77","role":"assistant","text":"Answer 67: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000077}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000168-78","role":"user","text":"Question 68: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000078}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000169-79","role":"assistant","text":"Answer 69: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000079}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000170-80","role":"user","text":"Question 70: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000080}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000171-81","role":"assistant","text":"Answer 71: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000081}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000172-82","role":"user","text":"Question 72: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000082}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000173-83","role":"assistant","text":"Answer 73: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000083}
+{"$":"ActivityLogged","thread":"t1700000002-3","act":"g1700000173-373","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -73","at":1700000083}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000174-84","role":"user","text":"Question 74: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000084}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000175-85","role":"assistant","text":"Answer 75: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000085}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000176-86","role":"user","text":"Question 76: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000086}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000177-87","role":"assistant","text":"Answer 77: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000087}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000178-88","role":"user","text":"Question 78: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000088}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000179-89","role":"assistant","text":"Answer 79: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000089}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000180-90","role":"user","text":"Question 80: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000090}
+{"$":"ActivityLogged","thread":"t1700000002-3","act":"g1700000180-380","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -80","at":1700000090}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000181-91","role":"assistant","text":"Answer 81: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000091}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000182-92","role":"user","text":"Question 82: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000092}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000183-93","role":"assistant","text":"Answer 83: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000093}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000184-94","role":"user","text":"Question 84: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000094}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000185-95","role":"assistant","text":"Answer 85: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000095}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000186-96","role":"user","text":"Question 86: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000096}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000187-97","role":"assistant","text":"Answer 87: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000097}
+{"$":"ActivityLogged","thread":"t1700000002-3","act":"g1700000187-387","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -87","at":1700000097}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000188-98","role":"user","text":"Question 88: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000098}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000189-99","role":"assistant","text":"Answer 89: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000099}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000190-100","role":"user","text":"Question 90: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000100}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000191-101","role":"assistant","text":"Answer 91: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000101}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000192-102","role":"user","text":"Question 92: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000102}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000193-103","role":"assistant","text":"Answer 93: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000103}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000194-104","role":"user","text":"Question 94: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000104}
+{"$":"ActivityLogged","thread":"t1700000002-3","act":"g1700000194-394","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -94","at":1700000104}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000195-105","role":"assistant","text":"Answer 95: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000105}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000196-106","role":"user","text":"Question 96: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000106}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000197-107","role":"assistant","text":"Answer 97: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000107}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000198-108","role":"user","text":"Question 98: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000108}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1700000199-109","role":"assistant","text":"Answer 99: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000109}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m17000001100-110","role":"user","text":"Question 100: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000110}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m17000001101-111","role":"assistant","text":"Answer 101: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000111}
+{"$":"ActivityLogged","thread":"t1700000002-3","act":"g17000001101-401","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -101","at":1700000111}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m17000001102-112","role":"user","text":"Question 102: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000112}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m17000001103-113","role":"assistant","text":"Answer 103: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000113}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m17000001104-114","role":"user","text":"Question 104: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000114}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m17000001105-115","role":"assistant","text":"Answer 105: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000115}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m17000001106-116","role":"user","text":"Question 106: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000116}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m17000001107-117","role":"assistant","text":"Answer 107: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000117}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m17000001108-118","role":"user","text":"Question 108: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000118}
+{"$":"ActivityLogged","thread":"t1700000002-3","act":"g17000001108-408","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -108","at":1700000118}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m17000001109-119","role":"assistant","text":"Answer 109: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000119}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m17000001110-120","role":"user","text":"Question 110: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000120}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m17000001111-121","role":"assistant","text":"Answer 111: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000121}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m17000001112-122","role":"user","text":"Question 112: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000122}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m17000001113-123","role":"assistant","text":"Answer 113: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000123}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m17000001114-124","role":"user","text":"Question 114: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000124}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m17000001115-125","role":"assistant","text":"Answer 115: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000125}
+{"$":"ActivityLogged","thread":"t1700000002-3","act":"g17000001115-415","tone":"tool","kind":"Bash","summary":"ls -la src/core | head -115","at":1700000125}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m17000001116-126","role":"user","text":"Question 116: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000126}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m17000001117-127","role":"assistant","text":"Answer 117: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000127}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m17000001118-128","role":"user","text":"Question 118: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000128}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m17000001119-129","role":"assistant","text":"Answer 119: the board layout keeps U3 near the 3V3 rail, and decoupling sits within 2 mm of each supply pin.","at":1700000129}
+{"$":"SettingSet","key":"autosettle.version","value":"1","at":1793946312}
+{"$":"SettingSet","key":"machine.id","value":"m2b60b867b2d545dc3cfdfb9f6e5358ceff366db12486eb84","at":1793946312}
+{"$":"SettingSet","key":"accounts.inventory","value":"{\"version\":1,\"revision\":0,\"profiles\":[],\"error\":\"\"}","at":1793946312}
+{"$":"SettingSet","key":"tz.machine","value":"Etc/UTC","at":1793946312}
+{"$":"SettingSet","key":"tz.rule.Etc/UTC","value":"UTC0","at":1793946312}
+{"$":"SettingSet","key":"tz.checked","value":"1793946312","at":1793946312}
+{"$":"SettingSet","key":"allowance.codex","value":"{\"provider\":\"codex\",\"at\":0,\"attempted_at\":1793946312,\"state\":\"error\",\"auth\":\"unknown\",\"windows\":[],\"source\":\"codex-app-server\",\"phase\":\"complete\"}","at":1793946312}
+{"$":"ThreadCreated","id":"t1793946315-147","project":"","title":"ada","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1793946315}
+{"$":"SettingSet","key":"account.thread.t1793946315-147.claude","value":"{\"id\":\"\",\"epoch\":0}","at":1793946315}
+{"$":"BotSet","id":"b1793946315-147","name":"ada","thread":"t1793946315-147","look":304951,"persona":"dry","at":1793946315}
+{"$":"WorktreeSet","id":"t1793946315-147","branch":"","worktree":"/tmp/bp-rec-work/home/bots/b1793946315-147","at":1793946315}
+{"$":"ThreadCreated","id":"t1793946315-151","project":"","title":"bob","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1793946315}
+{"$":"SettingSet","key":"account.thread.t1793946315-151.claude","value":"{\"id\":\"\",\"epoch\":0}","at":1793946315}
+{"$":"BotSet","id":"b1793946315-151","name":"bob","thread":"t1793946315-151","look":306254,"persona":"","at":1793946315}
+{"$":"WorktreeSet","id":"t1793946315-151","branch":"","worktree":"/tmp/bp-rec-work/home/bots/b1793946315-151","at":1793946315}
+{"$":"SettingSet","key":"star.nudge.v1","value":"{\"status\":\"counting\",\"ids\":[\"m1793946315-155\"],\"token\":\"m1793946315-155\",\"eligibleAt\":0,\"sentAt\":0}","at":1793946315}
+{"$":"BotWoke","bot":"b1793946315-147","hop":0,"at":1793946315}
+{"$":"MessagePosted","thread":"t1793946315-147","msg":"m1793946315-155","role":"user","text":"mode:stream hello","at":1793946315}
+{"$":"TurnChanged","thread":"t1793946315-147","state":"running","at":1793946315}
+{"$":"SettingSet","key":"turn.from.t1793946315-147","value":"@m1793946315-155","at":1793946315}
+{"$":"SettingSet","key":"liveness.t1793946315-147","value":"{\"last\":1793946315,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793946315}
+{"$":"SettingSet","key":"restart.retry.t1793946315-147","value":"","at":1793946315}
+{"$":"SettingSet","key":"provider.resume.t1793946315-147","value":"","at":1793946315}
+{"$":"SettingSet","key":"fallback.input.t1793946315-147","value":"mode:stream hello","at":1793946315}
+{"$":"SettingSet","key":"autosettle.quiet.t1793946315-147","value":"1793946315","at":1793946315}
+{"$":"SettingSet","key":"autosettle.audience.t1793946315-147","value":"person","at":1793946315}
+{"$":"SessionSet","id":"t1793946315-147","session":"sess-3645254-1793946315888","at":1793946315}
+{"$":"SettingSet","key":"tok.basis.t1793946315-147","value":"c:0","at":1793946315}
+{"$":"SettingSet","key":"turn.speed.t1793946315-147","value":"0/0/0/0/0/0/0/0","at":1793946315}
+{"$":"UsageSet","thread":"t1793946315-147","used":11,"window":0,"at":1793946316}
+{"$":"MessagePosted","thread":"t1793946315-147","msg":"msg_3645254_1:0:7f93d64e","role":"assistant","text":"hello0 hello1 ","at":1793946316}
+{"$":"UsageSet","thread":"t1793946315-147","used":15,"window":0,"at":1793946316}
+{"$":"SettingSet","key":"liveness.t1793946315-147","value":"{\"last\":1793946316,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793946316}
+{"$":"SettingSet","key":"autosettle.quiet.t1793946315-147","value":"1793946316","at":1793946316}
+{"$":"SettingSet","key":"autosettle.output.t1793946315-147","value":"msg_3645254_1:0:7f93d64e","at":1793946316}
+{"$":"UsageSet","thread":"t1793946315-147","used":0,"window":200000,"at":1793946316}
+{"$":"TurnChanged","thread":"t1793946315-147","state":"completed","at":1793946316}
+{"$":"SettingSet","key":"summary.at.t1793946315-147","value":"1793946316","at":1793946316}
+{"$":"SettingSet","key":"alert.t1793946315-147","value":"done\tturn-t1793946315-147\tm1793946315-155\t1793946316.177\t","at":1793946316}
+{"$":"SettingSet","key":"told.k1793946316-176-2","value":"{\"key\":\"turn-t1793946315-147\",\"text\":\"ada: hello0 hello1\",\"channel\":\"alert\",\"bot\":\"b1793946315-147\",\"at\":1793946316}","at":1793946316}
+{"$":"SettingSet","key":"star.nudge.v1","value":"{\"status\":\"counting\",\"ids\":[\"m1793946315-155\",\"m1793946318-180\"],\"token\":\"m1793946318-180\",\"eligibleAt\":0,\"sentAt\":0}","at":1793946318}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m1793946318-180","role":"user","text":"mode:stream hello","at":1793946318}
+{"$":"TurnChanged","thread":"t1700000001-2","state":"running","at":1793946318}
+{"$":"SettingSet","key":"turn.from.t1700000001-2","value":"@m1793946318-180","at":1793946318}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793946318,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793946318}
+{"$":"SettingSet","key":"restart.retry.t1700000001-2","value":"","at":1793946318}
+{"$":"SettingSet","key":"provider.resume.t1700000001-2","value":"","at":1793946318}
+{"$":"SettingSet","key":"fallback.input.t1700000001-2","value":"mode:stream hello","at":1793946318}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793946318","at":1793946318}
+{"$":"SettingSet","key":"autosettle.audience.t1700000001-2","value":"person","at":1793946318}
+{"$":"SessionSet","id":"t1700000001-2","session":"sess-3645622-1793946318900","at":1793946318}
+{"$":"SettingSet","key":"tok.basis.t1700000001-2","value":"c:0","at":1793946318}
+{"$":"SettingSet","key":"turn.speed.t1700000001-2","value":"0/0/0/0/0/0/0/0","at":1793946318}
+{"$":"UsageSet","thread":"t1700000001-2","used":11,"window":0,"at":1793946319}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"msg_3645622_1:0:b620a1c6","role":"assistant","text":"hello0 hello1 ","at":1793946319}
+{"$":"UsageSet","thread":"t1700000001-2","used":15,"window":0,"at":1793946319}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793946319,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793946319}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793946319","at":1793946319}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"msg_3645622_1:0:b620a1c6","at":1793946319}
+{"$":"UsageSet","thread":"t1700000001-2","used":0,"window":200000,"at":1793946319}
+{"$":"TurnChanged","thread":"t1700000001-2","state":"completed","at":1793946319}
+{"$":"SettingSet","key":"summary.at.t1700000001-2","value":"1793946319","at":1793946319}
+{"$":"SettingSet","key":"alert.t1700000001-2","value":"done\tturn-t1700000001-2\tm1793946318-180\t1793946319.201\t","at":1793946319}
+{"$":"SettingSet","key":"told.k1793946319-200-2","value":"{\"key\":\"turn-t1700000001-2\",\"text\":\"Fixture short: hello0 hello1\",\"channel\":\"alert\",\"bot\":\"\",\"at\":1793946319}","at":1793946319}
+{"$":"SettingSet","key":"summary.at.p1700000000-1","value":"1793946319","at":1793946319}
+{"$":"SettingSet","key":"told.k1793946322-205","value":"{\"key\":\"lunch:-dana-\",\"text\":\"Dana lunch in NYC Wed 10/28\",\"channel\":\"digest\",\"bot\":\"b1793946315-147\",\"at\":1793946322}","at":1793946322}
+{"$":"SettingSet","key":"told.k1793946324-206","value":"{\"key\":\"the-new-board-revision-shipped-the-fab-today\",\"text\":\"The new board revision shipped to the fab today\",\"channel\":\"other\",\"bot\":\"b1793946315-147\",\"at\":1793946324}","at":1793946324}
+{"$":"SettingSet","key":"told.k1793946325-207","value":"{\"key\":\"ok\",\"text\":\"ok\",\"channel\":\"chat\",\"bot\":\"\",\"at\":1793946325}","at":1793946325}
+{"$":"SettingSet","key":"board.b1793946330-208","value":"{\"id\":\"b1793946330-208\",\"title\":\"Fix it\",\"status\":\"doing\",\"owner\":\"b1793946315-147\",\"project\":\"\",\"due\":\"2026-12-01\",\"group\":\"hw\",\"links\":[\"a\",\"b\",\"c\"],\"notes\":\"first\",\"at\":1793946330,\"updated\":1793946330,\"by\":\"b1793946315-147\"}","at":1793946330}
+{"$":"SettingSet","key":"board.b1793946331-209","value":"{\"id\":\"b1793946331-209\",\"title\":\"Order parts\",\"status\":\"todo\",\"owner\":\"b1793946315-151\",\"project\":\"p1700000000-1\",\"due\":\"\",\"group\":\"\",\"links\":[],\"notes\":\"\",\"at\":1793946331,\"updated\":1793946331,\"by\":\"b1793946315-147\"}","at":1793946331}
+{"$":"SettingSet","key":"board.b1793946333-210","value":"{\"id\":\"b1793946333-210\",\"title\":\"From a plain thread\",\"status\":\"todo\",\"owner\":\"\",\"project\":\"p1700000000-1\",\"due\":\"\",\"group\":\"\",\"links\":[\"u1\",\"u2\"],\"notes\":\"\",\"at\":1793946333,\"updated\":1793946333,\"by\":\"thread:t1700000001-2\"}","at":1793946333}
+{"$":"SettingSet","key":"board.b1793946330-208","value":"{\"id\":\"b1793946330-208\",\"title\":\"Fix it\",\"status\":\"blocked\",\"owner\":\"b1793946315-147\",\"project\":\"\",\"due\":\"2026-12-01\",\"group\":\"hw\",\"links\":[\"a\",\"b\",\"c\"],\"notes\":\"first\\nsecond\",\"at\":1793946330,\"updated\":1793946339,\"by\":\"b1793946315-147\"}","at":1793946339}
+{"$":"SettingSet","key":"board.b1793946330-208","value":"{\"id\":\"b1793946330-208\",\"title\":\"Fix it\",\"status\":\"blocked\",\"owner\":\"\",\"project\":\"\",\"due\":\"\",\"group\":\"sw\",\"links\":[\"a\",\"b\",\"c\"],\"notes\":\"first\\nsecond\",\"at\":1793946330,\"updated\":1793946340,\"by\":\"b1793946315-147\"}","at":1793946340}
+{"$":"SettingSet","key":"board.b1793946331-209","value":"{\"id\":\"b1793946331-209\",\"title\":\"Order more\",\"status\":\"todo\",\"owner\":\"b1793946315-151\",\"project\":\"\",\"due\":\"\",\"group\":\"\",\"links\":[\"[\\\"a\\\"\",\"\\\"b\\\"]\"],\"notes\":\"\",\"at\":1793946331,\"updated\":1793946340,\"by\":\"b1793946315-147\"}","at":1793946340}
+{"$":"SettingSet","key":"board.b1793946333-210","value":"","at":1793946342}
+{"$":"SettingSet","key":"board.b1793946343-215-0","value":"{\"id\":\"b1793946343-215-0\",\"title\":\"one\",\"status\":\"todo\",\"owner\":\"\",\"project\":\"\",\"due\":\"\",\"group\":\"hw\",\"links\":[],\"notes\":\"a note\",\"at\":1793946343,\"updated\":1793946343,\"by\":\"b1793946315-147\"}","at":1793946343}
+{"$":"SettingSet","key":"board.b1793946343-215-1","value":"{\"id\":\"b1793946343-215-1\",\"title\":\"two\",\"status\":\"done\",\"owner\":\"\",\"project\":\"\",\"due\":\"2026-11-30\",\"group\":\"hw\",\"links\":[],\"notes\":\"\",\"at\":1793946343,\"updated\":1793946343,\"by\":\"b1793946315-147\"}","at":1793946343}
+{"$":"SettingSet","key":"board.b1793946343-215-2","value":"{\"id\":\"b1793946343-215-2\",\"title\":\"three\",\"status\":\"doing\",\"owner\":\"\",\"project\":\"\",\"due\":\"2026-12-24\",\"group\":\"hw\",\"links\":[],\"notes\":\"\",\"at\":1793946343,\"updated\":1793946343,\"by\":\"b1793946315-147\"}","at":1793946343}
+{"$":"SettingSet","key":"board.b1793946343-215-3","value":"{\"id\":\"b1793946343-215-3\",\"title\":\"four\",\"status\":\"blocked\",\"owner\":\"\",\"project\":\"\",\"due\":\"\",\"group\":\"hw\",\"links\":[],\"notes\":\"\",\"at\":1793946343,\"updated\":1793946343,\"by\":\"b1793946315-147\"}","at":1793946343}
+{"$":"SettingSet","key":"board.b1793946343-215-4","value":"{\"id\":\"b1793946343-215-4\",\"title\":\"five\",\"status\":\"dropped\",\"owner\":\"\",\"project\":\"\",\"due\":\"\",\"group\":\"hw\",\"links\":[],\"notes\":\"\",\"at\":1793946343,\"updated\":1793946343,\"by\":\"b1793946315-147\"}","at":1793946343}
+{"$":"SettingSet","key":"board.b1793946343-215-5","value":"{\"id\":\"b1793946343-215-5\",\"title\":\"in the project\",\"status\":\"todo\",\"owner\":\"\",\"project\":\"p1700000000-1\",\"due\":\"\",\"group\":\"fixture\",\"links\":[],\"notes\":\"\",\"at\":1793946343,\"updated\":1793946343,\"by\":\"b1793946315-147\"}","at":1793946343}
+{"$":"SettingSet","key":"board.b1793946343-215-6","value":"{\"id\":\"b1793946343-215-6\",\"title\":\"one\",\"status\":\"todo\",\"owner\":\"\",\"project\":\"p1700000000-1\",\"due\":\"\",\"group\":\"fixture\",\"links\":[],\"notes\":\"\",\"at\":1793946343,\"updated\":1793946343,\"by\":\"b1793946315-147\"}","at":1793946343}
+{"$":"SettingSet","key":"board.b1793946344-222-0","value":"{\"id\":\"b1793946344-222-0\",\"title\":\"mine\",\"status\":\"todo\",\"owner\":\"b1793946315-147\",\"project\":\"p1700000000-1\",\"due\":\"\",\"group\":\"\",\"links\":[],\"notes\":\"\",\"at\":1793946344,\"updated\":1793946344,\"by\":\"b1793946315-147\"}","at":1793946344}
+{"$":"SettingSet","key":"alert.t1793946315-147","value":"note\tnote-n1793946346-223\tm1793946315-155\t1793946346.223\tneed you now second line","at":1793946346}
+{"$":"SettingSet","key":"told.k1793946346-223-0","value":"{\"key\":\"note-n1793946346-223\",\"text\":\"ada: need you now second line\",\"channel\":\"alert\",\"bot\":\"b1793946315-147\",\"at\":1793946346}","at":1793946346}
+{"$":"SettingSet","key":"star.nudge.v1","value":"{\"status\":\"counting\",\"ids\":[\"m1793946315-155\",\"m1793946318-180\",\"m1793946347-225\"],\"token\":\"m1793946347-225\",\"eligibleAt\":0,\"sentAt\":0}","at":1793946347}
+{"$":"BotWoke","bot":"b1793946315-147","hop":0,"at":1793946347}
+{"$":"MessagePosted","thread":"t1793946315-147","msg":"m1793946347-225","role":"user","text":"hold:7000 do the thing","at":1793946347}
+{"$":"TurnChanged","thread":"t1793946315-147","state":"running","at":1793946347}
+{"$":"SettingSet","key":"turn.from.t1793946315-147","value":"@m1793946347-225","at":1793946347}
+{"$":"SettingSet","key":"liveness.t1793946315-147","value":"{\"last\":1793946347,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793946347}
+{"$":"SettingSet","key":"restart.retry.t1793946315-147","value":"","at":1793946347}
+{"$":"SettingSet","key":"provider.resume.t1793946315-147","value":"","at":1793946347}
+{"$":"SettingSet","key":"fallback.input.t1793946315-147","value":"hold:7000 do the thing","at":1793946347}
+{"$":"SettingSet","key":"autosettle.quiet.t1793946315-147","value":"1793946347","at":1793946347}
+{"$":"SettingSet","key":"autosettle.audience.t1793946315-147","value":"person","at":1793946347}
+{"$":"ActivityLogged","thread":"t1793946315-147","act":"toolu_7e03630e-a2d3-4930-ae58-c0cd8e7aff19","tone":"tool","kind":"Bash","summary":"kicad-cli pcb drc board.kicad_pcb\n# thing","at":1793946347}
+{"$":"SettingSet","key":"alert.t1793946315-147","value":"note\tnote-n1793946349-237\tm1793946347-225\t1793946349.237\tthe thing is done","at":1793946349}
+{"$":"SettingSet","key":"told.k1793946349-237-0","value":"{\"key\":\"note-n1793946349-237\",\"text\":\"ada: the thing is done\",\"channel\":\"alert\",\"bot\":\"b1793946315-147\",\"at\":1793946349}","at":1793946349}
+{"$":"SettingSet","key":"liveness.t1793946315-147","value":"{\"last\":1793946354,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent tool or stream output\"}","at":1793946354}
+{"$":"UsageSet","thread":"t1793946315-147","used":11,"window":0,"at":1793946354}
+{"$":"MessagePosted","thread":"t1793946315-147","msg":"msg_3645254_2:0:6a76276f","role":"assistant","text":"thing0 thing1 ","at":1793946354}
+{"$":"UsageSet","thread":"t1793946315-147","used":15,"window":0,"at":1793946354}
+{"$":"SettingSet","key":"autosettle.quiet.t1793946315-147","value":"1793946354","at":1793946354}
+{"$":"SettingSet","key":"autosettle.output.t1793946315-147","value":"msg_3645254_2:0:6a76276f","at":1793946354}
+{"$":"TurnChanged","thread":"t1793946315-147","state":"completed","at":1793946354}
+{"$":"SettingSet","key":"notify.needs","value":"off","at":1793946357}
+{"$":"SettingSet","key":"star.nudge.v1","value":"{\"status\":\"counting\",\"ids\":[\"m1793946315-155\",\"m1793946318-180\",\"m1793946347-225\",\"m1793946357-247\"],\"token\":\"m1793946357-247\",\"eligibleAt\":0,\"sentAt\":0}","at":1793946357}
+{"$":"BotWoke","bot":"b1793946315-147","hop":0,"at":1793946357}
+{"$":"MessagePosted","thread":"t1793946315-147","msg":"m1793946357-247","role":"user","text":"hold:4000 quiet one","at":1793946357}
+{"$":"TurnChanged","thread":"t1793946315-147","state":"running","at":1793946357}
+{"$":"SettingSet","key":"turn.from.t1793946315-147","value":"@m1793946357-247","at":1793946357}
+{"$":"SettingSet","key":"liveness.t1793946315-147","value":"{\"last\":1793946357,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793946357}
+{"$":"SettingSet","key":"restart.retry.t1793946315-147","value":"","at":1793946357}
+{"$":"SettingSet","key":"provider.resume.t1793946315-147","value":"","at":1793946357}
+{"$":"SettingSet","key":"fallback.input.t1793946315-147","value":"hold:4000 quiet one","at":1793946357}
+{"$":"SettingSet","key":"autosettle.quiet.t1793946315-147","value":"1793946357","at":1793946357}
+{"$":"SettingSet","key":"autosettle.audience.t1793946315-147","value":"person","at":1793946357}
+{"$":"ActivityLogged","thread":"t1793946315-147","act":"toolu_606a5f75-721b-40c1-9849-011b6c820922","tone":"tool","kind":"Bash","summary":"kicad-cli pcb drc board.kicad_pcb\n# one","at":1793946357}
+{"$":"SettingSet","key":"alert.t1793946315-147","value":"\t\tm1793946347-225\t1793946358.259\t","at":1793946358}
+{"$":"UsageSet","thread":"t1793946315-147","used":11,"window":0,"at":1793946361}
+{"$":"MessagePosted","thread":"t1793946315-147","msg":"msg_3645254_3:0:0cc342d7","role":"assistant","text":"one0 one1 ","at":1793946361}
+{"$":"UsageSet","thread":"t1793946315-147","used":15,"window":0,"at":1793946361}
+{"$":"SettingSet","key":"liveness.t1793946315-147","value":"{\"last\":1793946361,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793946361}
+{"$":"SettingSet","key":"autosettle.quiet.t1793946315-147","value":"1793946361","at":1793946361}
+{"$":"SettingSet","key":"autosettle.output.t1793946315-147","value":"msg_3645254_3:0:0cc342d7","at":1793946361}
+{"$":"TurnChanged","thread":"t1793946315-147","state":"completed","at":1793946361}
+{"$":"SettingSet","key":"alert.t1793946315-147","value":"done\tturn-t1793946315-147\tm1793946357-247\t1793946361.267\t","at":1793946361}
+{"$":"SettingSet","key":"told.k1793946361-266-1","value":"{\"key\":\"turn-t1793946315-147\",\"text\":\"ada: one0 one1\",\"channel\":\"alert\",\"bot\":\"b1793946315-147\",\"at\":1793946361}","at":1793946361}
+{"$":"SettingSet","key":"notify.needs","value":"on","at":1793946363}
+{"$":"RoutineSet","id":"ro1","bot":"b1793946315-147","name":"digest","cron":"30 9 * * *","prompt":"hold:4000 make the digest","on":true,"at":1793946363}
+{"$":"RoutinePlan","id":"ro1","once":0,"tz":"person","kind":"","at":1793946363}
+{"$":"RoutineFired","id":"ro1","at":1793946363}
+{"$":"RoutineSlot","id":"ro1","slot":1793946363,"at":1793946363}
+{"$":"BotWoke","bot":"b1793946315-147","hop":0,"at":1793946363}
+{"$":"MessagePosted","thread":"t1793946315-147","msg":"m1793946363-272.0","role":"user","text":"[routine: digest]\nhold:4000 make the digest","at":1793946363}
+{"$":"MessageFrom","thread":"t1793946315-147","msg":"m1793946363-272.0","from":"routine:digest","kind":"routine","ref":"digest","at":1793946363}
+{"$":"TurnChanged","thread":"t1793946315-147","state":"running","at":1793946363}
+{"$":"SettingSet","key":"turn.from.t1793946315-147","value":"@m1793946363-272.0","at":1793946363}
+{"$":"SettingSet","key":"liveness.t1793946315-147","value":"{\"last\":1793946363,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793946363}
+{"$":"SettingSet","key":"restart.retry.t1793946315-147","value":"","at":1793946363}
+{"$":"SettingSet","key":"provider.resume.t1793946315-147","value":"","at":1793946363}
+{"$":"SettingSet","key":"fallback.input.t1793946315-147","value":"[routine: digest]\nhold:4000 make the digest","at":1793946363}
+{"$":"SettingSet","key":"autosettle.quiet.t1793946315-147","value":"1793946363","at":1793946363}
+{"$":"ActivityLogged","thread":"t1793946315-147","act":"toolu_52d22117-62e2-41e6-8659-bb05f025e677","tone":"tool","kind":"Bash","summary":"kicad-cli pcb drc board.kicad_pcb\n# digest","at":1793946363}
+{"$":"SettingSet","key":"alert.t1793946315-147","value":"note\tnote-n1793946365-285\tm1793946357-247\t1793946365.285\tthe digest","at":1793946365}
+{"$":"SettingSet","key":"told.k1793946365-285-0","value":"{\"key\":\"note-n1793946365-285\",\"text\":\"ada: the digest\",\"channel\":\"alert\",\"bot\":\"b1793946315-147\",\"at\":1793946365}","at":1793946365}
+{"$":"UsageSet","thread":"t1793946315-147","used":11,"window":0,"at":1793946367}
+{"$":"MessagePosted","thread":"t1793946315-147","msg":"msg_3645254_4:0:11c1a7d6","role":"assistant","text":"digest0 digest1 ","at":1793946367}
+{"$":"UsageSet","thread":"t1793946315-147","used":15,"window":0,"at":1793946367}
+{"$":"SettingSet","key":"liveness.t1793946315-147","value":"{\"last\":1793946367,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793946367}
+{"$":"SettingSet","key":"autosettle.quiet.t1793946315-147","value":"1793946367","at":1793946367}
+{"$":"SettingSet","key":"autosettle.output.t1793946315-147","value":"msg_3645254_4:0:11c1a7d6","at":1793946367}
+{"$":"TurnChanged","thread":"t1793946315-147","state":"completed","at":1793946367}
+{"$":"RoomSet","id":"r1","name":"lab","members":"b1793946315-147\nb1793946315-151","at":1793946371}
+{"$":"SettingSet","key":"star.nudge.v1","value":"{\"status\":\"sent\",\"ids\":[\"m1793946315-155\",\"m1793946318-180\",\"m1793946347-225\",\"m1793946357-247\",\"p1\"],\"token\":\"p1\",\"eligibleAt\":1793946371,\"sentAt\":1793946371}","at":1793946371}
+{"$":"RoomPosted","id":"p1","room":"r1","from":"you","text":"news","hop":0,"at":1793946371}
+{"$":"BotWoke","bot":"b1793946315-147","hop":0,"at":1793946371}
+{"$":"MessagePosted","thread":"t1793946315-147","msg":"m1793946371-295.0","role":"user","text":"[message from you in #lab]\nnews","at":1793946371}
+{"$":"MessageFrom","thread":"t1793946315-147","msg":"m1793946371-295.0","from":"person","kind":"room","ref":"lab","at":1793946371}
+{"$":"TurnChanged","thread":"t1793946315-147","state":"running","at":1793946371}
+{"$":"SettingSet","key":"turn.from.t1793946315-147","value":"@m1793946371-295.0","at":1793946371}
+{"$":"BotWoke","bot":"b1793946315-151","hop":0,"at":1793946371}
+{"$":"MessagePosted","thread":"t1793946315-151","msg":"m1793946371-295.1","role":"user","text":"[message from you in #lab]\nnews","at":1793946371}
+{"$":"MessageFrom","thread":"t1793946315-151","msg":"m1793946371-295.1","from":"person","kind":"room","ref":"lab","at":1793946371}
+{"$":"TurnChanged","thread":"t1793946315-151","state":"running","at":1793946371}
+{"$":"SettingSet","key":"turn.from.t1793946315-151","value":"@m1793946371-295.1","at":1793946371}
+{"$":"SettingSet","key":"liveness.t1793946315-147","value":"{\"last\":1793946371,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793946371}
+{"$":"SettingSet","key":"liveness.t1793946315-151","value":"{\"last\":1793946371,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793946371}
+{"$":"SettingSet","key":"restart.retry.t1793946315-147","value":"","at":1793946371}
+{"$":"SettingSet","key":"provider.resume.t1793946315-147","value":"","at":1793946371}
+{"$":"SettingSet","key":"restart.retry.t1793946315-151","value":"","at":1793946371}
+{"$":"SettingSet","key":"provider.resume.t1793946315-151","value":"","at":1793946371}
+{"$":"SettingSet","key":"fallback.input.t1793946315-147","value":"[message from you in #lab]\nnews","at":1793946371}
+{"$":"SettingSet","key":"fallback.input.t1793946315-151","value":"[message from you in #lab]\nnews","at":1793946371}
+{"$":"SettingSet","key":"autosettle.quiet.t1793946315-147","value":"1793946371","at":1793946371}
+{"$":"SettingSet","key":"autosettle.quiet.t1793946315-151","value":"1793946371","at":1793946371}
+{"$":"SettingSet","key":"autosettle.audience.t1793946315-151","value":"worker","at":1793946371}
+{"$":"SessionSet","id":"t1793946315-151","session":"sess-3652064-1793946371261","at":1793946371}
+{"$":"SettingSet","key":"tok.basis.t1793946315-151","value":"c:0","at":1793946371}
+{"$":"SettingSet","key":"turn.speed.t1793946315-151","value":"0/0/0/0/0/0/0/0","at":1793946371}
+{"$":"UsageSet","thread":"t1793946315-147","used":11,"window":0,"at":1793946371}
+{"$":"MessagePosted","thread":"t1793946315-147","msg":"msg_3645254_5:0:3b0688de","role":"assistant","text":"</references>0 </references>1 ","at":1793946371}
+{"$":"UsageSet","thread":"t1793946315-147","used":15,"window":0,"at":1793946371}
+{"$":"SettingSet","key":"autosettle.output.t1793946315-147","value":"msg_3645254_5:0:3b0688de","at":1793946371}
+{"$":"TurnChanged","thread":"t1793946315-147","state":"completed","at":1793946371}
+{"$":"UsageSet","thread":"t1793946315-151","used":11,"window":0,"at":1793946371}
+{"$":"MessagePosted","thread":"t1793946315-151","msg":"msg_3652064_1:0:463e2fc5","role":"assistant","text":"REPLY [message from you in #lab]\nnews\n\n<refere","at":1793946371}
+{"$":"UsageSet","thread":"t1793946315-151","used":15,"window":0,"at":1793946371}
+{"$":"SettingSet","key":"autosettle.output.t1793946315-151","value":"msg_3652064_1:0:463e2fc5","at":1793946371}
+{"$":"UsageSet","thread":"t1793946315-151","used":0,"window":200000,"at":1793946371}
+{"$":"TurnChanged","thread":"t1793946315-151","state":"completed","at":1793946371}
+{"$":"SettingSet","key":"summary.at.t1793946315-151","value":"1793946371","at":1793946371}
+{"$":"RoomPosted","id":"p1793946372-333","room":"r1","from":"ada","text":"from ada","hop":1,"at":1793946372}
+{"$":"BotWoke","bot":"b1793946315-151","hop":1,"at":1793946372}
+{"$":"MessagePosted","thread":"t1793946315-151","msg":"t:t1793946315-147:m1793946372-333.1","role":"user","text":"[message from ada in #lab]\nfrom ada","at":1793946372}
+{"$":"MessageFrom","thread":"t1793946315-151","msg":"t:t1793946315-147:m1793946372-333.1","from":"thread:t1793946315-147","kind":"room","ref":"lab","at":1793946372}
+{"$":"TurnChanged","thread":"t1793946315-151","state":"running","at":1793946372}
+{"$":"SettingSet","key":"turn.from.t1793946315-151","value":"@t:t1793946315-147:m1793946372-333.1","at":1793946372}
+{"$":"SettingSet","key":"liveness.t1793946315-151","value":"{\"last\":1793946372,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793946372}
+{"$":"SettingSet","key":"restart.retry.t1793946315-151","value":"","at":1793946372}
+{"$":"SettingSet","key":"provider.resume.t1793946315-151","value":"","at":1793946372}
+{"$":"SettingSet","key":"fallback.input.t1793946315-151","value":"[message from ada in #lab]\nfrom ada","at":1793946372}
+{"$":"SettingSet","key":"autosettle.quiet.t1793946315-151","value":"1793946372","at":1793946372}
+{"$":"SettingSet","key":"fallback.input.t1700000001-2","value":"","at":1793946372}
+{"$":"SettingSet","key":"fallback.input.t1793946315-147","value":"","at":1793946372}
+{"$":"UsageSet","thread":"t1793946315-151","used":11,"window":0,"at":1793946372}
+{"$":"MessagePosted","thread":"t1793946315-151","msg":"msg_3652064_2:0:e7fc7db3","role":"assistant","text":"REPLY [message from ada in #lab]\nfrom ada\n\n<re","at":1793946372}
+{"$":"UsageSet","thread":"t1793946315-151","used":15,"window":0,"at":1793946372}
+{"$":"SettingSet","key":"autosettle.output.t1793946315-151","value":"msg_3652064_2:0:e7fc7db3","at":1793946372}
+{"$":"TurnChanged","thread":"t1793946315-151","state":"completed","at":1793946372}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m1793946375-351","role":"user","text":"hold:6000 run on","at":1793946375}
+{"$":"TurnChanged","thread":"t1700000001-2","state":"running","at":1793946375}
+{"$":"SettingSet","key":"turn.from.t1700000001-2","value":"@m1793946375-351","at":1793946375}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793946375,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793946375}
+{"$":"SettingSet","key":"restart.retry.t1700000001-2","value":"","at":1793946375}
+{"$":"SettingSet","key":"provider.resume.t1700000001-2","value":"","at":1793946375}
+{"$":"SettingSet","key":"fallback.input.t1700000001-2","value":"hold:6000 run on","at":1793946375}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793946375","at":1793946375}
+{"$":"SettingSet","key":"autosettle.audience.t1700000001-2","value":"person","at":1793946375}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"toolu_904cb158-bec2-4b37-901a-9ecd50031b53","tone":"tool","kind":"Bash","summary":"kicad-cli pcb drc board.kicad_pcb\n# on","at":1793946375}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793946381,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent tool or stream output\"}","at":1793946381}
+{"$":"UsageSet","thread":"t1700000001-2","used":11,"window":0,"at":1793946382}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"msg_3645622_2:0:2e1e3975","role":"assistant","text":"on0 on1 ","at":1793946382}
+{"$":"UsageSet","thread":"t1700000001-2","used":15,"window":0,"at":1793946382}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793946382,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793946382}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793946382","at":1793946382}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"msg_3645622_2:0:2e1e3975","at":1793946382}
+{"$":"TurnChanged","thread":"t1700000001-2","state":"completed","at":1793946382}
+{"$":"SettingSet","key":"alert.t1700000001-2","value":"done\tturn-t1700000001-2\tm1793946375-351\t1793946382.369\t","at":1793946382}
+{"$":"SettingSet","key":"told.k1793946382-368-1","value":"{\"key\":\"turn-t1700000001-2\",\"text\":\"Fixture short: on0 on1\",\"channel\":\"alert\",\"bot\":\"\",\"at\":1793946382}","at":1793946382}
+{"$":"ThreadCreated","id":"t1793946383-371","project":"p1700000000-1","title":"Boom","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1793946383}
+{"$":"SettingSet","key":"account.thread.t1793946383-371.claude","value":"{\"id\":\"\",\"epoch\":0}","at":1793946383}
+{"$":"MessagePosted","thread":"t1793946383-371","msg":"m1793946384-373","role":"user","text":"mode:exit-now boom","at":1793946384}
+{"$":"TurnChanged","thread":"t1793946383-371","state":"running","at":1793946384}
+{"$":"SettingSet","key":"turn.from.t1793946383-371","value":"@m1793946384-373","at":1793946384}
+{"$":"SettingSet","key":"liveness.t1793946383-371","value":"{\"last\":1793946384,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793946384}
+{"$":"SettingSet","key":"restart.retry.t1793946383-371","value":"","at":1793946384}
+{"$":"SettingSet","key":"provider.resume.t1793946383-371","value":"","at":1793946384}
+{"$":"SettingSet","key":"fallback.input.t1793946383-371","value":"mode:exit-now boom","at":1793946384}
+{"$":"SettingSet","key":"autosettle.quiet.t1793946383-371","value":"1793946384","at":1793946384}
+{"$":"SettingSet","key":"autosettle.audience.t1793946383-371","value":"person","at":1793946384}
+{"$":"SessionSet","id":"t1793946383-371","session":"sess-3654152-1793946384410","at":1793946384}
+{"$":"SettingSet","key":"tok.basis.t1793946383-371","value":"c:0","at":1793946384}
+{"$":"SettingSet","key":"turn.speed.t1793946383-371","value":"0/0/0/0/0/0/0/0","at":1793946384}
+{"$":"ActivityLogged","thread":"t1793946383-371","act":"x1793946384-0","tone":"error","kind":"exit","summary":"agent exited (exit 3): exit-now: the stand-in quits here (api key=…)","at":1793946384}
+{"$":"TurnChanged","thread":"t1793946383-371","state":"failed","at":1793946384}
+{"$":"SettingSet","key":"summary.at.t1793946383-371","value":"1793946384","at":1793946384}
+{"$":"SettingSet","key":"alert.t1793946383-371","value":"fail\tturn-t1793946383-371\tm1793946384-373\t1793946384.387\t","at":1793946384}
+{"$":"SettingSet","key":"failed.m1793946384-373","value":"1","at":1793946384}
+{"$":"SettingSet","key":"told.k1793946384-385-3","value":"{\"key\":\"turn-t1793946383-371\",\"text\":\"Boom\",\"channel\":\"alert\",\"bot\":\"\",\"at\":1793946384}","at":1793946384}
+{"$":"WorkSet","thread":"t1700000001-2","kind":"watch","rows":"w-t1700000001-2-391\tlaunching\t\tslow\twatch\trun\t\\esleep 40\t-\t1793947587","at":1793946387}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793946387","at":1793946387}
+{"$":"WorkSet","thread":"t1700000001-2","kind":"watch","rows":"w-t1700000001-2-391\twatching\t\tslow\twatch\trun\t\\esleep 40\t-\t1793947587","at":1793946387}
+{"$":"WakeSet","id":"w1793946388-394","by":"t1700000001-2","kind":"thread","target":"t1700000002-3","events":["end"],"once":true,"note":"","at":1793946388}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793946388,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"waiting for thread t1700000002-3\"}","at":1793946388}
+{"$":"LockChanged","name":"merge","lock":{"holder":{"id":"t1700000001-2","kind":"thread","thread":"t1700000001-2","note":"landing","since":1793946388,"lease":0},"waiters":[],"ready":true},"at":1793946388}
+{"$":"LockChanged","name":"merge","lock":{"holder":{"id":"t1700000001-2","kind":"thread","thread":"t1700000001-2","note":"landing","since":1793946388,"lease":1793947588},"waiters":[],"ready":true},"at":1793946388}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793946388","at":1793946388}
+{"$":"MessagePosted","thread":"t1700000002-3","msg":"m1793946390-399","role":"user","text":"mode:stream ask: which one","at":1793946390}
+{"$":"TurnChanged","thread":"t1700000002-3","state":"running","at":1793946390}
+{"$":"SettingSet","key":"turn.from.t1700000002-3","value":"@m1793946390-399","at":1793946390}
+{"$":"SettingSet","key":"liveness.t1700000002-3","value":"{\"last\":1793946390,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793946390}
+{"$":"SettingSet","key":"restart.retry.t1700000002-3","value":"","at":1793946390}
+{"$":"SettingSet","key":"provider.resume.t1700000002-3","value":"","at":1793946390}
+{"$":"SettingSet","key":"fallback.input.t1700000002-3","value":"mode:stream ask: which one","at":1793946390}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000002-3","value":"1793946390","at":1793946390}
+{"$":"SettingSet","key":"autosettle.audience.t1700000002-3","value":"person","at":1793946390}
+{"$":"SessionSet","id":"t1700000002-3","session":"sess-3655656-1793946390742","at":1793946390}
+{"$":"SettingSet","key":"tok.basis.t1700000002-3","value":"c:0","at":1793946390}
+{"$":"SettingSet","key":"turn.speed.t1700000002-3","value":"0/0/0/0/0/0/0/0","at":1793946390}
+{"$":"ActivityLogged","thread":"t1700000002-3","act":"toolu_ba14e35c-0378-49c7-9f86-3de946f83e88","tone":"tool","kind":"AskUserQuestion","summary":"AskUserQuestion","at":1793946390}
+{"$":"UsageSet","thread":"t1700000002-3","used":15,"window":0,"at":1793946390}
+{"$":"AskOpened","id":"q1793946390-413","thread":"t1700000002-3","kind":"input","tool":"AskUserQuestion","detail":"Which connector for one?\nUSB-C: reversible\nMicro-B: cheaper","options":"USB-C\nMicro-B","at":1793946390}
+{"$":"SettingSet","key":"alert.t1700000002-3","value":"ask\task-t1700000002-3\t\t1793946390.414\tAskUserQuestion Which connector for one? USB-C: reversible Micro-B: cheaper","at":1793946390}
+{"$":"SettingSet","key":"told.k1793946390-413-1","value":"{\"key\":\"ask-t1700000002-3\",\"text\":\"Fixture long: AskUserQuestion Which connector for one? USB-C: reversible Micro-B: cheaper\",\"channel\":\"alert\",\"bot\":\"\",\"at\":1793946390}","at":1793946390}
+{"$":"PendingChanged","thread":"t1700000002-3","count":1,"at":1793946390}
+{"$":"AskOpened","id":"q1793946393-417","thread":"t1793946315-147","kind":"approval","tool":"project_create","detail":"New project One\nFolder: /tmp/bp-rec-work/made/one/deep (made when missing)","options":"","at":1793946393}
+{"$":"SettingSet","key":"liveness.t1793946315-147","value":"{\"last\":1793946393,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"waiting for user (approval): New project One\\nFolder: /tmp/bp-rec-work/made/one/deep (made when missing)\"}","at":1793946393}
+{"$":"SettingSet","key":"alert.t1793946315-147","value":"ask\task-t1793946315-147\tm1793946357-247\t1793946393.419\tproject_create New project One Folder: /tmp/bp-rec-work/made/one/deep (made when missing)","at":1793946393}
+{"$":"SettingSet","key":"told.k1793946393-417-2","value":"{\"key\":\"ask-t1793946315-147\",\"text\":\"ada: project_create New project One Folder: /tmp/bp-rec-work/made/one/deep (made when missing)\",\"channel\":\"alert\",\"bot\":\"b1793946315-147\",\"at\":1793946393}","at":1793946393}
+{"$":"PendingChanged","thread":"t1793946315-147","count":1,"at":1793946393}
+{"$":"SettingSet","key":"autosettle.quiet.t1793946315-147","value":"1793946393","at":1793946393}
+{"$":"AskClosed","id":"q1793946393-417","answer":"decline","at":1793946395}
+{"$":"ActivityLogged","thread":"t1793946315-147","act":"k1793946395-423","tone":"info","kind":"answer","summary":"Denied: project_create New project One\nFolder: /tmp/bp-rec-work/made/one/deep (made when missing)","at":1793946395}
+{"$":"SettingSet","key":"liveness.t1793946315-147","value":"{\"last\":1793946395,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"request resolved\"}","at":1793946395}
+{"$":"PendingChanged","thread":"t1793946315-147","count":0,"at":1793946395}
+{"$":"SettingSet","key":"autosettle.quiet.t1793946315-147","value":"1793946395","at":1793946395}
+{"$":"AskOpened","id":"q1793946395-428","thread":"t1793946315-147","kind":"approval","tool":"project_create","detail":"New project One\nFolder: /tmp/bp-rec-work/made/one/deep (made when missing)","options":"","at":1793946395}
+{"$":"SettingSet","key":"alert.t1793946315-147","value":"ask\task-t1793946315-147\tm1793946357-247\t1793946395.429\tproject_create New project One Folder: /tmp/bp-rec-work/made/one/deep (made when missing)","at":1793946395}
+{"$":"SettingSet","key":"told.k1793946395-428-1","value":"{\"key\":\"ask-t1793946315-147\",\"text\":\"ada: project_create New project One Folder: /tmp/bp-rec-work/made/one/deep (made when missing)\",\"channel\":\"alert\",\"bot\":\"b1793946315-147\",\"at\":1793946395}","at":1793946395}
+{"$":"PendingChanged","thread":"t1793946315-147","count":1,"at":1793946395}
+{"$":"AskClosed","id":"q1793946395-428","answer":"accept","at":1793946396}
+{"$":"ActivityLogged","thread":"t1793946315-147","act":"k1793946396-432","tone":"info","kind":"answer","summary":"Allowed: project_create New project One\nFolder: /tmp/bp-rec-work/made/one/deep (made when missing)","at":1793946396}
+{"$":"SettingSet","key":"liveness.t1793946315-147","value":"{\"last\":1793946396,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"request resolved\"}","at":1793946396}
+{"$":"PendingChanged","thread":"t1793946315-147","count":0,"at":1793946396}
+{"$":"SettingSet","key":"autosettle.quiet.t1793946315-147","value":"1793946396","at":1793946396}
+{"$":"ProjectCreated","id":"p1793946396-437","title":"One","root":"/tmp/bp-rec-work/made/one/deep","at":1793946396}
+{"$":"AskOpened","id":"q1793946397-438","thread":"t1793946315-147","kind":"approval","tool":"project_create","detail":"New project\nFolder: /tmp/bp-rec-work/made/one/deep (made when missing)","options":"","at":1793946397}
+{"$":"SettingSet","key":"liveness.t1793946315-147","value":"{\"last\":1793946397,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"waiting for user (approval): New project\\nFolder: /tmp/bp-rec-work/made/one/deep (made when missing)\"}","at":1793946397}
+{"$":"SettingSet","key":"alert.t1793946315-147","value":"ask\task-t1793946315-147\tm1793946357-247\t1793946397.440\tproject_create New project Folder: /tmp/bp-rec-work/made/one/deep (made when missing)","at":1793946397}
+{"$":"SettingSet","key":"told.k1793946397-438-2","value":"{\"key\":\"ask-t1793946315-147\",\"text\":\"ada: project_create New project Folder: /tmp/bp-rec-work/made/one/deep (made when missing)\",\"channel\":\"alert\",\"bot\":\"b1793946315-147\",\"at\":1793946397}","at":1793946397}
+{"$":"PendingChanged","thread":"t1793946315-147","count":1,"at":1793946397}
+{"$":"SettingSet","key":"autosettle.quiet.t1793946315-147","value":"1793946397","at":1793946397}
+{"$":"AskClosed","id":"q1793946397-438","answer":"accept","at":1793946398}
+{"$":"ActivityLogged","thread":"t1793946315-147","act":"k1793946398-444","tone":"info","kind":"answer","summary":"Allowed: project_create New project\nFolder: /tmp/bp-rec-work/made/one/deep (made when missing)","at":1793946398}
+{"$":"SettingSet","key":"liveness.t1793946315-147","value":"{\"last\":1793946398,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"request resolved\"}","at":1793946398}
+{"$":"PendingChanged","thread":"t1793946315-147","count":0,"at":1793946398}
+{"$":"SettingSet","key":"autosettle.quiet.t1793946315-147","value":"1793946398","at":1793946398}
+{"$":"AskOpened","id":"q1793946399-449","thread":"t1793946315-147","kind":"approval","tool":"project_create","detail":"New project\nFolder: /tmp/bp-rec-work/made/two (made when missing)","options":"","at":1793946399}
+{"$":"SettingSet","key":"liveness.t1793946315-147","value":"{\"last\":1793946399,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"waiting for user (approval): New project\\nFolder: /tmp/bp-rec-work/made/two (made when missing)\"}","at":1793946399}
+{"$":"SettingSet","key":"alert.t1793946315-147","value":"ask\task-t1793946315-147\tm1793946357-247\t1793946399.451\tproject_create New project Folder: /tmp/bp-rec-work/made/two (made when missing)","at":1793946399}
+{"$":"SettingSet","key":"told.k1793946399-449-2","value":"{\"key\":\"ask-t1793946315-147\",\"text\":\"ada: project_create New project Folder: /tmp/bp-rec-work/made/two (made when missing)\",\"channel\":\"alert\",\"bot\":\"b1793946315-147\",\"at\":1793946399}","at":1793946399}
+{"$":"PendingChanged","thread":"t1793946315-147","count":1,"at":1793946399}
+{"$":"SettingSet","key":"autosettle.quiet.t1793946315-147","value":"1793946399","at":1793946399}
+{"$":"AskClosed","id":"q1793946399-449","answer":"session","at":1793946400}
+{"$":"ActivityLogged","thread":"t1793946315-147","act":"k1793946400-455","tone":"info","kind":"answer","summary":"Allowed for this session: project_create New project\nFolder: /tmp/bp-rec-work/made/two (made when missing)","at":1793946400}
+{"$":"SettingSet","key":"liveness.t1793946315-147","value":"{\"last\":1793946400,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"request resolved\"}","at":1793946400}
+{"$":"PendingChanged","thread":"t1793946315-147","count":0,"at":1793946400}
+{"$":"SettingSet","key":"autosettle.quiet.t1793946315-147","value":"1793946400","at":1793946400}
+{"$":"ProjectCreated","id":"p1793946400-460","title":"two","root":"/tmp/bp-rec-work/made/two","at":1793946400}
+{"$":"ProjectCreated","id":"p1793946401-461","title":"Three","root":"/tmp/bp-rec-work/made/three","at":1793946401}
+{"$":"ProjectCreated","id":"p1793946402-462","title":"tilde","root":"/tmp/bp-rec-work/fakehome/tilde","at":1793946402}
+{"$":"ProjectCreated","id":"p1793946403-463","title":"bare","root":"/tmp/bp-rec-work/fakehome/bare","at":1793946403}
+{"$":"UberSet","bot":"b1793946315-147","uid":"u1793946408-49f1d21ef034ed23fa5d62eb2ddf80c9","at":1793946408}
+{"$":"UberOp","uid":"u1793946408-49f1d21ef034ed23fa5d62eb2ddf80c9","origin":"m2b60b867b2d545dc3cfdfb9f6e5358ceff366db12486eb84","n":1,"stamp":"1793946408.000000.m2b60b867b2d545dc3cfdfb9f6e5358ceff366db12486eb84","op":"{\"k\":\"who\",\"name\":\"ada\",\"look\":304951,\"persona\":\"dry\"}","at":1793946408}
+{"$":"UberOp","uid":"u1793946408-49f1d21ef034ed23fa5d62eb2ddf80c9","origin":"m2b60b867b2d545dc3cfdfb9f6e5358ceff366db12486eb84","n":2,"stamp":"1793946408.000001.m2b60b867b2d545dc3cfdfb9f6e5358ceff366db12486eb84","op":"{\"k\":\"routine\",\"id\":\"m2b60b867b2d545dc3cfdfb9f6e5358ceff366db12486eb84:ro1\",\"name\":\"digest\",\"cron\":\"30 9 * * *\",\"prompt\":\"hold:4000 make the digest\",\"on\":true,\"pin\":\"\",\"once\":0,\"tz\":\"person\",\"kind\":\"\"}","at":1793946408}
+{"$":"UberOp","uid":"u1793946408-49f1d21ef034ed23fa5d62eb2ddf80c9","origin":"m2b60b867b2d545dc3cfdfb9f6e5358ceff366db12486eb84","n":3,"stamp":"1793946408.000002.m2b60b867b2d545dc3cfdfb9f6e5358ceff366db12486eb84","op":"{\"k\":\"lease\",\"holder\":\"m2b60b867b2d545dc3cfdfb9f6e5358ceff366db12486eb84\",\"term\":1}","at":1793946408}
+{"$":"UberOp","uid":"u1793946408-49f1d21ef034ed23fa5d62eb2ddf80c9","origin":"m2b60b867b2d545dc3cfdfb9f6e5358ceff366db12486eb84","n":4,"stamp":"1793946408.000003.m2b60b867b2d545dc3cfdfb9f6e5358ceff366db12486eb84","op":"{\"k\":\"bind\",\"machine\":\"m2b60b867b2d545dc3cfdfb9f6e5358ceff366db12486eb84\",\"bot\":\"b1793946315-147\",\"thread\":\"t1793946315-147\",\"name\":\"ada\"}","at":1793946408}

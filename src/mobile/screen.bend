@@ -397,7 +397,7 @@ def Mob.rmenu.export(pending: Bool, +lc: I.Loc, +u: U.Ui) -> J.Json:
     case False{}: Mob.rmenu.k(lc, Bool.or(String.is_empty(U.Menu.open(u)), Bool.not(String.is_empty(U.Ui.scratch(u, "@del") ++ U.Ui.scratch(u, "@rm")))), u)
 
 def Mob.rmenu(+lc: I.Loc, +u: U.Ui) -> J.Json:
-  Mob.rmenu.export(U.KX.pending(U.Ui.infos(u), U.Ui.sel(u)), lc, u)
+  Bool.pick(J.Json, U.KO.pending(U.Ui.infos(u), U.Ui.sel(u)), Mob.kx.menu(U.KO.notice(True{}, U.Ui.infos(u), U.Ui.sel(u), None{})), Mob.rmenu.export(U.KX.pending(U.Ui.infos(u), U.Ui.sel(u)), lc, u))
 
 # markdown blocks from the same Md.render the web page uses; built onto a
 # reversed accumulator so a long reply's many blocks cost no stack (only
@@ -1353,8 +1353,21 @@ def Mob.diff.at.k(git: Bool, +lc: I.Loc, open: Bool, +text: String, +none: Strin
     case False{}:
       Mob.diff.none(open, J.Json.obj([J.KV{"summary", J.Json.str(MSG.T.viewer.diff.nogit.why(lc, none))}, J.KV{"files", J.Json.arr(Nil{})}]))
 
-def Mob.diff.at(+lc: I.Loc, open: Bool, +text: String, +none: String) -> J.Json:
-  Mob.diff.at.k(String.is_empty(none), lc, open, text, none)
+# (wait: a Diff asked for and not answered yet, client.bend's Dv.open: the
+# thread's diff kept from before, "diff.kept:t" {diff, nogit}, until git
+# answers, else "Loading…")
+def Mob.diff.kept(known: Bool, +lc: I.Loc, open: Bool, +kept: J.Json) -> J.Json:
+  match known:
+    case True{}: Mob.diff.at.k(String.is_empty(J.Json.get_str(kept, "nogit", "")), lc, open, J.Json.get_str(kept, "diff", ""), J.Json.get_str(kept, "nogit", ""))
+    case False{}: Mob.diff.none(open, J.Json.obj([J.KV{"summary", J.Json.str(MSG.T.viewer.loading(lc))}, J.KV{"files", J.Json.arr(Nil{})}]))
+
+def Mob.diff.at.w(wait: Bool, +lc: I.Loc, open: Bool, +text: String, +none: String, +kept: String) -> J.Json:
+  match wait:
+    case True{}: Mob.diff.kept(Bool.not(String.is_empty(kept)), lc, open, Maybe.default(&2, J.Json, J.Json.parse(kept), J.Null{}))
+    case False{}: Mob.diff.at.k(String.is_empty(none), lc, open, text, none)
+
+def Mob.diff.at(+lc: I.Loc, open: Bool, +text: String, +none: String, +wait: String, +kept: String) -> J.Json:
+  Mob.diff.at.w(Bool.not(String.is_empty(wait)), lc, open, text, none, kept)
 
 def Mob.runs(rs: List<&2, VT.VRun>) -> List<&2, J.Json>:
   match rs:
@@ -1672,7 +1685,7 @@ def Mob.thread(+lc: I.Loc, render: Bool, u: U.Ui, t: M.Thread, pend: List<&2, St
         J.KV{"attaching", J.Json.arr(Mob.chips(atts))}, J.KV{"uploading", J.Json.str(up)},
         J.KV{"chunk", J.Json.nat(AT.Att.chunk())},
         J.KV{"cap", J.Json.nat(AT.Att.max(M.Setting.get(st, AT.Att.key(), "")))},
-        J.KV{"diff", Mob.diff.at(lc, Bool.and(pa, String.eq(U.Str.get(nf, "view.kind:" ++ id), "diff")), U.Str.get(nf, "diff:" ++ id), U.Str.get(nf, "diff.none:" ++ id))},
+        J.KV{"diff", Mob.diff.at(lc, Bool.and(pa, String.eq(U.Str.get(nf, "view.kind:" ++ id), "diff")), U.Str.get(nf, "diff:" ++ id), U.Str.get(nf, "diff.none:" ++ id), U.Str.get(nf, "diff.wait:" ++ id), U.Str.get(nf, "diff.kept:" ++ id))},
         J.KV{"term", term},
         J.KV{"embs", embs},
         J.KV{"viewer", vw}, J.KV{"voice", voice}])

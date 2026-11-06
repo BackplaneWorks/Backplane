@@ -8,9 +8,18 @@ export function viewerChoice(action, value) {
 
 // An immediate acknowledgement of an accepted click, never a claim that a
 // model/file has finished loading. The production viewer owns actual readiness.
+// The viewer kind a choice shows (view.bend's View.aside: class "viewer <kind>").
+const KIND = { fm: 'files', diff: 'diff', mech: 'mech', 'rv-page': 'review' };
+// The press picture already shows the chosen viewer with its last content
+// (press-feedback.js): no "Loading…" veil over it, or the content would be
+// hidden until the hub answers and then shown again (a dark flash on every
+// open); the veil and the rail's markers are for an empty pane only.
+const shows = (viewer, choice) => !!viewer && !viewer.classList.contains('pending') && viewer.classList.contains(KIND[choice.action] || choice.value);
+
 export function installViewerFeedback(root = document) {
-  let pending = null;
+  let chosen = null;
   const sync = () => {
+    const pending = chosen && !shows(root.querySelector('#viewer'), chosen) ? chosen : null;
     for (const bar of root.querySelectorAll('.workspace-bar,.viewer-tabs,.top-views,.ph-views')) {
       for (const button of bar.querySelectorAll('button')) {
         const selected = pending && button.dataset.onClick === pending.action && button.dataset.value === pending.value;
@@ -54,5 +63,5 @@ export function installViewerFeedback(root = document) {
   };
   const Observer = root.defaultView?.MutationObserver || MutationObserver;
   const observer = new Observer(sync);observer.observe(root, { subtree: true, childList: true });
-  return { choice(value) { pending = value;sync(); }, dispose() { observer.disconnect(); } };
+  return { choice(value) { chosen = value;sync(); }, dispose() { observer.disconnect(); } };
 }

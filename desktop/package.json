@@ -1,6 +1,6 @@
 {
   "name": "backplane-desktop",
-  "version": "0.14.1",
+  "version": "0.15.0",
   "private": true,
   "description": "Electron desktop for the Bend Backplane service",
   "main": "main.cjs",

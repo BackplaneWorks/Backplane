@@ -12,7 +12,11 @@ export async function createPathTraceView({canvas,vendorUrl='/viewer/vendor/view
   const absolute=u=>new URL(u,location.href).href;
   const offscreen=canvas.transferControlToOffscreen();
   const initial=send('init',{canvas:offscreen,vendorUrl:absolute(vendorUrl),workerUrl:absolute(workerUrl),maxSamples,maxMs,maxPixels,materialPolicy,width:Math.max(1,canvas.clientWidth),height:Math.max(1,canvas.clientHeight),pixelRatio:devicePixelRatio||1},[offscreen]);
-  const resize=new ResizeObserver(()=>notify('resize',{width:Math.max(1,canvas.clientWidth),height:Math.max(1,canvas.clientHeight),pixelRatio:devicePixelRatio||1}));resize.observe(canvas);
+  // (a canvas off the page, kept to come back, keeps its size and picture;
+  // back at the same size it is not told again, which would start its
+  // refinement over)
+  let sized='';
+  const resize=new ResizeObserver(()=>{if(!canvas.isConnected)return;const size={width:Math.max(1,canvas.clientWidth),height:Math.max(1,canvas.clientHeight),pixelRatio:devicePixelRatio||1},key=JSON.stringify(size);if(key===sized)return;sized=key;notify('resize',size);});resize.observe(canvas);
   const visibility=()=>notify('visibility',{hidden:document.hidden});document.addEventListener('visibilitychange',visibility);
   let down=null;
   const pointerDown=e=>{down={x:e.clientX,y:e.clientY};};

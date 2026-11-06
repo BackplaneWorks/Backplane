@@ -7,8 +7,17 @@ use std::collections::{HashMap, HashSet};
 #[derive(Clone, Debug, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct Mark { pub bot: String, pub conv: String, pub status: String, pub seen: u64, pub until: u64, pub tags: Vec<String> }
 
+/// ML.Run: a mailroom run (a thread working one conversation for a bot)
+#[derive(Clone, Debug, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+pub struct Run { pub thread: String, pub bot: String, pub conv: String, pub mail: String, pub at: u64, pub live: bool }
+/// ML.Decision
+#[derive(Clone, Debug, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+pub struct Decision { pub id: String, pub bot: String, pub conv: String, pub run: String, pub text: String, pub reason: String, pub at: u64 }
+
 #[derive(Default, serde::Serialize, serde::Deserialize)]
 pub struct Box {
+    /// thread -> run; "<bot>/<conv>" -> the live run's thread; bot -> live runs; bot -> charter; bot -> decisions, newest first
+    pub runs: HashMap<String, Run>, active: HashMap<String, String>, live_counts: HashMap<String, u64>, charters: HashMap<String, String>, decisions: HashMap<String, Vec<Decision>>,
     pub convs: HashMap<String, Conv>,
     /// a conversation's headers, newest first (Headers.add)
     pub mails: HashMap<String, Vec<Hdr>>,
@@ -82,4 +91,35 @@ impl Box {
     }
     /// RoomSet: the room's conversation
     pub fn room_set(&mut self, id: &str, name: &str, members: &str, at: u64) { self.conv_set(&format!("room:{id}"), name, "room", room_parts(&lines_of(members)), "", vec![], at) }
+
+    /// Box.due: the marks snoozed until no later than `now`, oldest wake first
+    pub fn due(&self, now: u64) -> Vec<Mark> { let mut v: Vec<Mark> = self.marks.values().filter(|m| m.status == "snoozed" && m.until > 0 && m.until <= now).cloned().collect(); v.sort_by(|a, b| a.until.cmp(&b.until).then_with(|| a.conv.cmp(&b.conv)).then_with(|| a.bot.cmp(&b.bot))); v }
+    // ---- runs (Box.run_*, Box.charter, Box.decision) ----
+    pub fn run_of(&self, thread: &str) -> Option<&Run> { self.runs.get(thread) }
+    /// Box.live: the thread of the bot's live run on a conversation, "" when none
+    pub fn live(&self, bot: &str, conv: &str) -> String { self.active.get(&format!("{bot}/{conv}")).cloned().unwrap_or_default() }
+    pub fn live_n(&self, bot: &str) -> u64 { self.live_counts.get(bot).copied().unwrap_or(0) }
+    /// Box.run_end: a live run finishes; its conversation is free and the bot has one run fewer
+    pub fn run_end(&mut self, thread: &str) {
+        let Some(r) = self.runs.get(thread).cloned() else { return };
+        if !r.live { return }
+        self.runs.insert(thread.into(), Run { live: false, ..r.clone() });
+        self.active.remove(&format!("{}/{}", r.bot, r.conv));
+        let n = self.live_n(&r.bot); self.live_counts.insert(r.bot.clone(), n.saturating_sub(1));
+    }
+    /// Box.run_set (RunSet): the thread's old run and the bot's live run on that conversation end first
+    pub fn run_set(&mut self, thread: &str, bot: &str, conv: &str, mail: &str, at: u64) {
+        self.run_end(thread); let old = self.live(bot, conv); self.run_end(&old);
+        self.runs.insert(thread.into(), Run { thread: thread.into(), bot: bot.into(), conv: conv.into(), mail: mail.into(), at, live: true });
+        self.active.insert(format!("{bot}/{conv}"), thread.into());
+        let n = self.live_n(bot); self.live_counts.insert(bot.into(), n + 1);
+    }
+    /// Box.charter: the bot's, else the default
+    pub fn charter(&self, bot: &str) -> String { self.charters.get(bot).filter(|t| !t.is_empty()).cloned().unwrap_or_else(|| CHARTER_DEFAULT.into()) }
+    pub fn charter_set(&mut self, bot: &str, text: &str) { self.charters.insert(bot.into(), text.into()); }
+    /// Box.decisions: the newest n of a bot's
+    pub fn decisions(&self, bot: &str, n: usize) -> Vec<Decision> { self.decisions.get(bot).map(|d| d.iter().take(n).cloned().collect()).unwrap_or_default() }
+    pub fn decision(&mut self, d: Decision) { let v = self.decisions.entry(d.bot.clone()).or_default(); v.insert(0, d); v.truncate(200); }
 }
+/// Charter.default
+pub const CHARTER_DEFAULT: &str = "may: file, tag, snooze, answer status questions, relaunch a failed launched thread once\nescalate: everything else to the bot; money, external or irreversible actions to the person.";

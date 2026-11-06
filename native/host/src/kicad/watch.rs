@@ -4,7 +4,7 @@
 //! kicad/solidread.rs) is read in this process, the same bytes as the Bend child, on blocking threads, at most `READERS` at once and one
 //! 3D model at a time. `BACKPLANE_PLOT_NATIVE=0` sends them all to the child again (`backplane --plot KIND FILE INFOS`, `BACKPLANE_PLOT_BIN`,
 //! default `backplane-serve` beside the hub).
-//! Not ported yet: web stamps, split views.
+//! Not ported yet: web stamps. A split view (`kicad.watch` kind "split") watches the schematic, board and 3D model at once (`watch_split`).
 use super::{plot::{self, Plot}, plotgen, plotread, project, solid, solidread, stepglb};
 use crate::{api::{Caller, Fut, RpcHandler}, hub::Hub};
 use serde_json::{json, Value};
@@ -77,6 +77,29 @@ impl Plots {
           if !st.polling { st.polling = true; let me = self.clone(); let hub = hub.clone(); tokio::spawn(async move { me.poll(hub).await }); } }
         for ky in todo { self.fan_one(hub, &ky, Some(client)) }
         if kind == 1 { self.sheets(hub, client, root, path, tree) }
+    }
+    /// kicad.watch kind "split" (client.bend's Split): the schematic (`path` is its sheet, "" the root), the board and the board's 3D model at once, each its own
+    /// plot (full chunks, no carry: the panes are separate sources) and the 3D model's board plot shared with the board pane.
+    pub fn watch_split(self: &Arc<Self>, hub: &Arc<Hub>, client: u64, root: &str, path: &str, tree: &str) {
+        let f = project::read(root);
+        let sch = if path.is_empty() { f.sch.clone() } else { path.to_string() };
+        let mut views: Vec<(u32, String, String)> = vec![];
+        if !sch.is_empty() { views.push((1, key(1, root, path), sch.clone())) }
+        if !f.pcb.is_empty() { views.push((0, key(0, root, ""), f.pcb.clone())); views.push((2, key(2, root, ""), f.pcb.clone())) }
+        let mut todo = vec![];
+        { let mut st = self.st.lock().unwrap();
+          st.subs.remove(&client);
+          for (k, ky, file) in views {
+              st.subs.entry(client).or_default().push(Sub { key: ky.clone(), held: vec![], mesh: vec![], fresh: true, base: String::new() });
+              let s = st.srcs.entry(ky.clone()).or_insert_with(|| Src { kind: k, file: file.clone(), ..Default::default() });
+              s.file = file;
+              if !s.busy && !is_version(&s.file) && s.stamp.as_ref() != Some(&stamp(&s.file)) { s.plot = None }
+              todo.push(ky);
+          }
+          self.gc(&mut st);
+          if !st.polling { st.polling = true; let me = self.clone(); let hub = hub.clone(); tokio::spawn(async move { me.poll(hub).await }); } }
+        for ky in todo { self.fan_one(hub, &ky, Some(client)) }
+        if !sch.is_empty() { self.sheets(hub, client, root, path, tree) }
     }
     pub fn stop(&self, client: u64) { self.drop_subs(client) }
     fn drop_subs(&self, client: u64) {
@@ -250,6 +273,17 @@ impl Plots {
             hub.push(client, json!({"t":"sheets","root":root,"slot":slot,"gen":gen.to_string(),"rows":g("rows", text.trim_end()),"boxes":g("boxes",""),"ids":g("ids",""),"top":g("top",""),"refs":g("refs","")}));
         });
     }
+    /// kicad.probe: the pieces of the chunks this client holds for `key` whose info has `name=value` (a net, a part), as (chunk index, piece index): the cross-probe's light.
+    pub async fn probe(&self, client: u64, key_: &str, name: &str, value: &str) -> Vec<(usize, usize)> {
+        let sigs: Vec<u32> = { let st = self.st.lock().unwrap(); st.subs.get(&client).and_then(|v| v.iter().find(|s| s.key == key_)).map(|s| s.held.iter().map(|c| c.sig).collect()).unwrap_or_default() };
+        if sigs.is_empty() || name.is_empty() || value.is_empty() { return vec![] }
+        let (f, name, value) = (self.infos(key_), name.to_string(), value.to_string());
+        let hits = tokio::task::spawn_blocking(move || { let t = std::fs::read(f).unwrap_or_default(); plotgen::info_scan(&String::from_utf8_lossy(&t), &name, &value) }).await.unwrap_or_default();
+        let set: std::collections::HashMap<u32, Vec<usize>> = hits.into_iter().fold(Default::default(), |mut m, (s, i)| { m.entry(s).or_default().push(i); m });
+        let mut out = vec![];
+        for (at, sig) in sigs.iter().enumerate() { if let Some(ix) = set.get(sig) { for i in ix { out.push((at, *i)); if out.len() >= 20000 { return out } } } }
+        out
+    }
     /// kicad.info: what a tapped piece is, of the chunk the phone holds at `at` for `key`, by the child that reads the info file.
     pub async fn info(&self, client: u64, key_: &str, at: usize, idx: usize) -> String {
         let sig = { let st = self.st.lock().unwrap(); st.subs.get(&client).and_then(|v| v.iter().find(|s| s.key == key_)).and_then(|s| s.held.get(at)).map(|c| c.sig) };
@@ -284,9 +318,16 @@ pub fn family(ky: &str) -> String {
     format!("{k}|{r}|{fam}")
 }
 
+/// What each thread's viewer shows, as the client reports it (`viewer.state`): kind, source key, part, sheet, layer, selection; with a counter that moves at every report.
+static VIEWER_STATE: std::sync::OnceLock<Mutex<HashMap<String, (u64, Value)>>> = std::sync::OnceLock::new();
+fn vs() -> &'static Mutex<HashMap<String, (u64, Value)>> { VIEWER_STATE.get_or_init(Default::default) }
+pub fn viewer_report(thread: &str, state: Value) { let mut m = vs().lock().unwrap(); if m.len() > 512 && !m.contains_key(thread) { m.clear(); } let n = m.get(thread).map_or(0, |x| x.0) + 1; m.insert(thread.to_string(), (n, state)); }
+/// (report counter, state) of a thread's viewer; (0, null) before any report.
+pub fn viewer_state(thread: &str) -> (u64, Value) { vs().lock().unwrap().get(thread).cloned().unwrap_or((0, Value::Null)) }
+
 pub struct KicadRpc(pub Arc<Plots>);
 impl RpcHandler for KicadRpc {
-    fn methods(&self) -> &'static [&'static str] { &["kicad.watch", "kicad.info", "kicad.warm"] }
+    fn methods(&self) -> &'static [&'static str] { &["kicad.watch", "kicad.info", "kicad.warm", "kicad.probe", "viewer.state", "history.steps"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let s = |k: &str| p.get(k).and_then(Value::as_str).unwrap_or("").to_string();
@@ -296,7 +337,8 @@ impl RpcHandler for KicadRpc {
                     // PR #960: an active request with neither an absolute root nor an absolute source has no folder and is refused (Hub.folder.out Watch)
                     if !kind.is_empty() && !(crate::files::threadpath::absolute(&root) || crate::files::threadpath::absolute(&path)) { return vec![crate::files::threadpath::refusal(id)] }
                     if !kind.is_empty() && !super::known_root(hub, &root, &path).await { return vec![json!({"t":"reply","id":id,"ok":false,"error":"that folder is not in this project"})] }
-                    self.0.watch(hub, who.client, kind_of(&kind), &root, &path, &s("tree"));
+                    if kind == "split" { self.0.watch_split(hub, who.client, &root, &path, &s("tree")) }
+                    else { self.0.watch(hub, who.client, kind_of(&kind), &root, &path, &s("tree")); }
                     vec![json!({"t":"reply","id":id,"ok":true})]
                 }
                 "kicad.warm" => { // the saved versions before and after a step, plotted ahead (hub.bend's Warm.outs)
@@ -306,6 +348,15 @@ impl RpcHandler for KicadRpc {
                         self.0.warm(hub, if kind == "schematic" { 1 } else { 0 }, &root, &path);
                     }
                     vec![json!({"t":"reply","id":id,"ok":true})]
+                }
+                "history.steps" => vec![json!({"t":"reply","id":id,"ok":true,"result": super::histsteps::steps(hub, &s("thread")).await})],
+                "viewer.state" => { // the client says what its viewer shows (the thread is the raw id)
+                    viewer_report(&s("thread"), p.get("state").cloned().unwrap_or(Value::Null));
+                    vec![json!({"t":"reply","id":id,"ok":true})]
+                }
+                "kicad.probe" => {
+                    let m = self.0.probe(who.client, &s("key"), &s("name"), &s("value")).await;
+                    vec![json!({"t":"reply","id":id,"ok":true,"result":{"matches": m.iter().map(|(a, b)| json!([a, b])).collect::<Vec<_>>()}})]
                 }
                 _ => { // kicad.info
                     let num = |k: &str| p.get(k).map(|v| v.as_u64().or_else(|| v.as_str().and_then(|x| x.parse().ok())).unwrap_or(0)).unwrap_or(0) as usize;

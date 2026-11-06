@@ -123,6 +123,17 @@ impl Driver {
             return None
         }
         match op {
+            // the native client's embedded Chromium: the helper attaches over CDP to its loopback endpoint and drives the tabs the person sees (docs/browser-gpui-cef.md)
+            "attach" | "detach" => {
+                let ep = s(p, "endpoint"); if op == "attach" && !(ep.starts_with("http://127.0.0.1:") || ep.starts_with("http://localhost:")) { return Some(Err("attach needs a loopback endpoint".into())) }
+                drop(g);
+                let (me, bot, id, p, op) = (self.clone(), bot.to_string(), id.clone(), p.clone(), op.to_string());
+                tokio::spawn(async move {
+                    let line: Value = serde_json::from_str(&me.br.ask(&bot, &op, &p).await).unwrap_or(Value::Null);
+                    me.hub.push(client, json!({"t":"reply","id":id,"ok":line.get("ok").and_then(Value::as_bool).unwrap_or(false),"error":s(&line, "error")}));
+                });
+                None
+            }
             "takeover" => { let nb = b.takeover(); if !self.set_teach(&mut g, nb).await { return Some(Err("too many pages are taken over".into())) } Some(Ok(())) }
             "handback" => { let nb = b.handback(); self.set_teach(&mut g, nb).await; Some(Ok(())) }
             _ => {
@@ -219,6 +230,21 @@ impl Driver {
             }
             _ => Err("unknown task op".into()),
         }
+    }
+
+    /// The Tasks tab's data (MBots.tasks.tab): the bot's tasks by name with how the last run went, and its newest runs (at most 8).
+    pub async fn tasks_view(&self, bot: &str) -> Value {
+        self.sync().await; let g = self.st.lock().await;
+        let n = |r: &str| r.rsplit('-').next().and_then(|x| x.parse::<u64>().ok()).unwrap_or(0);
+        let mut runs: Vec<(&String, &RunRec)> = g.runs.iter().filter(|(_, r)| r.bot == bot).collect(); runs.sort_by(|a, b| n(b.0).cmp(&n(a.0)));
+        let word = |r: &RunRec| match &r.state { Run::Running(_) => "running".to_string(), Run::Waiting { .. } => "waiting".into(), Run::Person(_) => "you drive".into(), Run::Ended(s) => s.clone() };
+        let mut ts: Vec<task::Task> = g.tasks.iter().filter(|((b, _), _)| b == bot).filter_map(|(_, j)| task::read(j)).collect();
+        ts.sort_by(|a, b| task::first_name(a).to_lowercase().cmp(&task::first_name(b).to_lowercase()));
+        let items: Vec<Value> = ts.iter().map(|t| {
+            let last = runs.iter().find(|(_, r)| r.slug == t.slug).map(|(_, r)| word(r)).unwrap_or_default();
+            json!({"slug":t.slug,"name":task::first_name(t),"desc":t.description,"last":last,"params":t.params.iter().map(|p| json!({"name":p.name,"label":if p.label.is_empty() { &p.name } else { &p.label },"example":p.example})).collect::<Vec<_>>()})
+        }).collect();
+        json!({"items":items,"runs":runs.iter().take(8).map(|(id, r)| json!({"run":id,"slug":r.slug,"status":word(r)})).collect::<Vec<_>>()})
     }
 
     // ---- recorder events, expiry ----

@@ -13,11 +13,15 @@
 #[path="../session/slash.rs"] mod slash;
 #[path="../session/composer.rs"] pub mod composer;
 #[path="../session/patch.rs"] pub mod patch;
-mod session { pub use crate::{composer, patch}; }
+#[path="../session/select.rs"] pub mod select;
+#[path="../session/pages.rs"] pub mod pages;
+mod session { pub use crate::{composer, patch, select, pages}; }
+#[path="../present/tokstats.rs"] mod tokstats;
 #[path="../present/tz.rs"] mod tz;
 #[path="../present/keys.rs"] mod keys;
 #[path="../present/thread.rs"] mod thread;
 #[path="../present/window.rs"] mod window;
+#[path="../present/audit_files.rs"] mod files;
 #[path="../present/viewer.rs"] mod viewer;
 use serde_json::json;
 use std::{collections::{BTreeMap,HashSet},path::Path};

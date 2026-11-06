@@ -8,6 +8,9 @@ function node(tag, cls, text) {
   const n = document.createElement(tag); if (cls) n.className = cls;
   if (text != null) n.textContent = text; return n;
 }
+// (a sync after every render writes only what changed: the same words
+// written again replaced the text node, a change to the page each time)
+function text(el, value) { if (el.textContent !== value) el.textContent = value; }
 function button(label, fn, title = label) {
   const b = node("button", "", label); b.type = "button"; b.title = title; b.addEventListener("click", fn); return b;
 }
@@ -36,9 +39,9 @@ class Workbench {
     if (this.pcb && root.dataset.boardKey) {
       const split = button("PCB", () => {
         const on = !root.classList.contains("solid-split"); this.state.pcb = on; root.classList.toggle("solid-split", on); split.setAttribute("aria-pressed", String(on));
-      }, "Show the saved PCB beside the assembly"); split.setAttribute("aria-pressed", String(this.state.pcb)); this.toolbar.append(split);
+      }, "Show the saved PCB beside the assembly"); split.setAttribute("aria-pressed", String(this.state.pcb)); this.toolbar.append(split); this.split = split;
     }
-    const camera = node("details", "solid-camera"); camera.open = this.state.camera; camera.addEventListener("toggle", () => { this.state.camera = camera.open; });
+    const camera = node("details", "solid-camera"); camera.open = this.state.camera; this.camera = camera; camera.addEventListener("toggle", () => { this.state.camera = camera.open; });
     // (a phone shows the panel as a sheet over a backdrop, the details' own
     // ::before: a tap on it lands on the details, and shuts the panel)
     camera.addEventListener("click", (e) => { if (e.target === camera && document.documentElement.classList.contains("phone")) camera.open = false; }); camera.append(node("summary", "", "Camera")); const cameraBody = node("div", "solid-camera-body"); camera.append(cameraBody);
@@ -72,8 +75,10 @@ class Workbench {
       this.syncComponents();
       // A selection the person made opens the components pane; one restored by
       // a metadata refresh (readComponents) must not take the inspector from
-      // whatever pane is open, such as the reflow preview.
-      if (component && !this.state.components && !this.restoring) this.showComponents(true);
+      // whatever pane is open, such as the reflow preview. In Split the
+      // schematic and the board already show what was probed: the pane would
+      // take half of the 3D's (its Components button still opens it).
+      if (component && !this.state.components && !this.restoring && !this.root?.closest?.(".combo")) this.showComponents(true);
     });
     this.sync();
     if (this.state.components) this.showComponents(true); else this.showReflow(this.state.reflow);
@@ -91,6 +96,7 @@ class Workbench {
     this.solid.cameraAction?.(action, value); this.sync();
   }
   sync() {
+    if (!this.root.isConnected) return;
     this.root.classList.toggle("solid-split", this.state.pcb);
     this.syncComponents();
     this.quality?.sync();
@@ -100,14 +106,16 @@ class Workbench {
     this.focal.wrap.hidden = ortho;
     for (const [field, value] of [[this.focal, state.focal], [this.exposure, state.exposure]]) {
       if (value == null) continue;
-      field.input.value = value; field.value.value = `${Number(value).toFixed(field === this.exposure ? 1 : 0)} ${field.unit}`;
+      field.input.value = value; text(field.value, `${Number(value).toFixed(field === this.exposure ? 1 : 0)} ${field.unit}`);
     }
     // An unsupported depth control is absent, never a decorative slider.
     const dof = Object.hasOwn(state, "aperture"); this.apertureLabel.hidden = ortho || !dof; this.focusLock.hidden = ortho || !dof;
     this.focus.hidden = ortho || state.focusDistance == null;
-    if (state.focusDistance != null) this.focus.value = `Focus ${Number(state.focusDistance).toFixed(1)} mm${state.focusLocked ? " · locked" : ""}`;
+    if (state.focusDistance != null) text(this.focus, `Focus ${Number(state.focusDistance).toFixed(1)} mm${state.focusLocked ? " · locked" : ""}`);
     if (dof) this.aperture.value = state.aperture > 0 ? String(state.aperture) : "off";
-    this.focusLock.setAttribute("aria-pressed", state.focusLocked ? "true" : "false"); this.focusLock.textContent = state.focusLocked ? "Unlock focus" : "Lock focus";
+    const pressed = state.focusLocked ? "true" : "false";
+    if (this.focusLock.getAttribute("aria-pressed") !== pressed) this.focusLock.setAttribute("aria-pressed", pressed);
+    text(this.focusLock, state.focusLocked ? "Unlock focus" : "Lock focus");
   }
   showReflow(on) {
     if (on) { this.state.components = false; this.componentPanel?.(); this.componentPanel = null; this.componentsButton?.setAttribute("aria-expanded", "false"); }
@@ -199,7 +207,7 @@ class Workbench {
     const assemblyReady = pcbReady && data.sourceRevision === revisions.get(this.key) && status?.status === "ready" && !status.stale;
     const board = pcbReady ? data : null;
     if (this.boundBoard !== board) { this.boundBoard = board; this.services.plot?.setComponents?.(this.boardKey, board, id => this.components.select(id)); }
-    if (this.alignmentNote) this.alignmentNote.textContent = assemblyReady ? this.quality?.visible ? "Saved revisions match. Model bodies use exact component references; unmatched bodies are not selectable." : "Saved PCB and assembly revisions match. Canvas selection identifies footprint geometry." : pcbReady ? "PCB revision matches. Assembly selection waits for the same saved revision." : "Waiting for saved-source revision confirmation; canvas selection is unavailable.";
+    if (this.alignmentNote) text(this.alignmentNote, assemblyReady ? this.quality?.visible ? "Saved revisions match. Model bodies use exact component references; unmatched bodies are not selectable." : "Saved PCB and assembly revisions match. Canvas selection identifies footprint geometry." : pcbReady ? "PCB revision matches. Assembly selection waits for the same saved revision." : "Waiting for saved-source revision confirmation; canvas selection is unavailable.");
     const overlayData = assemblyReady && !this.quality?.visible ? data : null;
     if (overlayData !== this.overlayData) {
       this.overlay?.(); this.overlay = null; this.overlayData = overlayData;
@@ -207,16 +215,83 @@ class Workbench {
       if (overlayData && canvas) this.overlay = attachSolid(canvas, this.components, { projectPoint: this.solid.projectPoint, rayToBoard: this.solid.rayToBoard });
     }
   }
+  // the same model and board drawn for another thread (a thread switch
+  // with 3D open in both): kept, with its original model, components and
+  // toolbar, when that thread renders the same way (mode, samples,
+  // materials); its own panels and selection are taken up (its pose is
+  // solid.js's, per thread). Otherwise false: it is built anew.
+  rescope(scope) {
+    const stateKey = `${scope}|${this.key}`, next = panels.get(stateKey) || { pcb: false, reflow: false, camera: false }, q = this.state;
+    const mode = next.renderMode || (next.quality ? "pathtrace" : "studio");
+    if (mode !== q.renderMode || (next.samples || 64) !== (q.samples || 64) || (next.materialPolicy || "cad-studio") !== q.materialPolicy) return false;
+    if (!panels.has(stateKey)) { panels.set(stateKey, next); if (panels.size > 24) panels.delete(panels.keys().next().value); }
+    Object.assign(next, { renderMode: q.renderMode, quality: q.quality, samples: q.samples, materialPolicy: q.materialPolicy });
+    this.scope = scope; this.state = next; if (this.quality) this.quality.state = next;
+    this.root.classList.toggle("solid-split", next.pcb); this.split?.setAttribute("aria-pressed", String(next.pcb));
+    if (this.camera.open !== !!next.camera) this.camera.open = !!next.camera;
+    const saved = this.solid.cameraState?.()?.selection, data = this.components.data;
+    this.restoring = true;
+    try { this.components.select(saved?.sourceRevision && saved.sourceRevision === data?.sourceRevision ? saved.id : ""); } finally { this.restoring = false; }
+    if (next.components) this.showComponents(true); else this.showReflow(next.reflow);
+    this.sync();
+    return true;
+  }
+  // back on the page after being kept off it: it catches up with the
+  // revisions heard meanwhile (sourceRevision/sourceStamp reach only the
+  // workbench on the page). Off it, nothing draws: the preview waits for
+  // its canvas to be connected, the original model draws only when asked
+  // (a path trace still finishes its bounded refinement).
+  park(on) {
+    if (on) return;
+    this.revision(this.boardKey || this.key);
+    this.sync();
+  }
   dispose() {
     this.alive = false; this.metadataGeneration++; this.readAbort?.abort(); this.quality?.dispose(); this.panel?.dispose(); this.componentPanel?.(); this.overlay?.(); this.unselect?.();
     this.services.plot?.setComponents?.(this.boardKey, null, null); this.root.removeEventListener("solid-camera-change", this.change); this.root.removeEventListener("solid-quality-change", this.change);
   }
 }
 
+// The workbench that left the page last (the viewer shut, or Board or
+// Schematic shown instead) is kept, with its canvases, their graphics
+// contexts, the original model's worker and the components it read:
+// the hub drawing the very same workbench again (same model, thread and
+// board: host.js asks kept() as it creates the element) gets it back as it
+// was, so the model, its stats and the toolbar are there in the press's
+// frame. Only one is kept, for PARK_MS; any other workbench disposes it.
+let parked = null, parkTimer = 0;
+const PARK_MS = 10 * 60 * 1000;
+const sameModel = (bench, root) => bench.key === root.dataset.key && bench.boardKey === (root.dataset.boardKey || "");
+const sameBench = (bench, root) => bench.scope === root.dataset.scope && sameModel(bench, root);
+function unpark() { clearTimeout(parkTimer); const bench = parked; parked = null; return bench; }
+// a kept workbench let go, with the preview's kept graphics context
+function release(bench) { if (!bench) return; bench.solid.forget?.(bench.root.querySelector("#solid")); bench.dispose(); }
+// (the same model and board for another thread too: mount takes it up
+// for that thread, or builds the workbench anew in that very element)
+export function kept(key, scope, boardKey) {
+  const root = parked?.root;
+  return root && !root.isConnected && parked.key === key && parked.boardKey === (boardKey || "") ? root : null;
+}
+export const isKept = (root) => !!root && parked?.root === root;
+// (the hub's patch of a kept workbench sets its class back to the hub's:
+// what the workbench adds, the PCB beside it and the original model shown,
+// is put back in that same frame)
+export function restyle(root) {
+  if (parked?.root !== root) return;
+  const scope = root.dataset.scope, state = scope === parked.scope ? parked.state : panels.get(`${scope}|${parked.key}`);
+  root.classList.toggle("solid-split", !!state?.pcb);
+  root.classList.toggle("solid-original-visible", !!parked.quality?.visible);
+}
 export function mount(root, solid, services = {}) {
-  if (!root) { workbench?.dispose(); workbench = null; return; }
-  if (workbench?.root === root && workbench.scope === root.dataset.scope && workbench.key === root.dataset.key) { workbench.sync(); return; }
-  workbench?.dispose(); workbench = new Workbench(root, solid, services);
+  if (!root) {
+    if (workbench) { release(unpark()); parked = workbench; parked.park(true); parkTimer = setTimeout(() => release(unpark()), PARK_MS); }
+    workbench = null; return;
+  }
+  if (workbench?.root === root && sameBench(workbench, root)) { workbench.sync(); return; }
+  if (workbench?.root === root && sameModel(workbench, root) && workbench.rescope(root.dataset.scope)) return;
+  workbench?.dispose(); workbench = null;
+  if (parked?.root === root && sameModel(parked, root) && (parked.scope === root.dataset.scope || parked.rescope(root.dataset.scope))) { workbench = unpark(); workbench.park(false); return; }
+  release(unpark()); workbench = new Workbench(root, solid, services);
 }
 // a board's assembly (2|root|path) and its PCB (0|root|path) on one saved file
 export function sameBoardFile(key, boardKey) {
@@ -243,7 +318,7 @@ export function sourceStamp(key, revision) {
   stamps.set(key, revision); if (stamps.size > 64) stamps.delete(stamps.keys().next().value);
   if (workbench && key === workbench.boardKey) workbench.stamp();
 }
-export function reset() { workbench?.dispose(); workbench = null; revisions.clear(); stamps.clear(); }
+export function reset() { workbench?.dispose(); workbench = null; release(unpark()); revisions.clear(); stamps.clear(); }
 
 // A phone's row of view chips (view.bend's View.viewer.chips) scrolls
 // sideways: after a render the view on show is brought into the row, once

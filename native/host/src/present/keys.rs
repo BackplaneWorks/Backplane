@@ -97,6 +97,37 @@ fn usage_tail(provider: &str, reading: &str) -> String {
     if used > 0 { if window == 0 { format!(" · ctx {}", tokens(used)) } else { format!(" · ctx {}% of {}", used * 100 / window, tokens(window)) } }
     else if provider == "claude" { String::new() } else { " · ctx n/a".into() }
 }
+/// Allowance.chip, simplified: the least remaining percent across the provider's reported windows that apply to the model ("72% left"), or "" when no
+/// window has a current reading (the client says so, never a made-up percentage). A window whose reset has passed is not a current reading.
+/// `snapshot` is the thread's `allowance.<provider>` setting (permille used), or the bound profile's allowance (percent used) from `accounts.inventory`.
+pub fn allowance_text(snapshot: &Value, provider: &str, model: &str, now_s: u64) -> String {
+    if !matches!(provider, "claude" | "codex") || snapshot["provider"].as_str().is_some_and(|p| p != provider) { return String::new() }
+    let m = model.to_lowercase();
+    let mut left: Option<u64> = None; let mut shared = true;
+    for w in snapshot["windows"].as_array().map(Vec::as_slice).unwrap_or_default() {
+        let scope = w["scope"].as_str().unwrap_or("");
+        let applies = provider == "codex" || scope == "shared" || scope == "five_hour" || scope == "seven_day" || (scope == "opus" && m.contains("opus")) || (scope == "sonnet" && m.contains("sonnet"));
+        if !applies { continue }
+        let used = w["used_permille"].as_f64().or_else(|| w["used_percent"].as_f64().map(|p| p * 10.0));
+        let Some(used) = used.filter(|u| (0.0..=1000.0).contains(u)) else { return String::new() };
+        if w["resets_at"].as_f64().is_some_and(|r| r > 0.0 && (r as u64) <= now_s) { return String::new() }
+        let l = ((1000.0 - used) / 10.0).floor() as u64;
+        left = Some(left.map_or(l, |x| x.min(l)));
+        shared &= w["shared"].as_bool().unwrap_or(true);
+    }
+    left.map(|l| format!("{l}% left{}", if shared { " · shared" } else { "" })).unwrap_or_default()
+}
+/// The allowance snapshot a thread reads: its bound named profile's, else the default login's `allowance.<provider>` setting.
+fn allowance_of(st: &State, id: &str, provider: &str) -> Value {
+    let get = |k: &str| st.settings.get(k).map(String::as_str).unwrap_or("");
+    let bound = serde_json::from_str::<Value>(get(&format!("account.thread.{id}.{provider}"))).ok().and_then(|b| b["id"].as_str().map(str::to_string)).unwrap_or_default();
+    if bound.is_empty() { return serde_json::from_str(get(&format!("allowance.{provider}"))).unwrap_or(Value::Null) }
+    let p = serde_json::from_str::<Value>(get("accounts.inventory")).ok().and_then(|v| v["profiles"].as_array().cloned()).unwrap_or_default().into_iter().find(|p| p["id"].as_str() == Some(bound.as_str())).unwrap_or(Value::Null);
+    let mut a = p["allowance"].clone();
+    if a.is_object() { a["provider"] = json!(provider); let ws = a["windows"].as_array().cloned().unwrap_or_default().into_iter().map(|mut w| {
+        let sc = w["scope"].as_str().unwrap_or("").to_string(); w["scope"] = json!(match sc.as_str() { "five_hour" | "seven_day" => "shared", "seven_day_opus" => "opus", "seven_day_sonnet" => "sonnet", o => o }); w }).collect::<Vec<_>>(); a["windows"] = json!(ws) }
+    a
+}
 /// Mob.picker.ctx.loc with no models info: the model chip, the model menu (the thread's own model only: the hub's model list is not here), the efforts the
 /// provider takes and the providers. This is what the helper draws before it has heard the hub's models.
 pub fn picker(provider: &str, model: &str, effort: &str, reading: &str) -> Value {
@@ -108,8 +139,25 @@ pub fn picker(provider: &str, model: &str, effort: &str, reading: &str) -> Value
     json!({"label": label, "models": [choice("default".into(), "", model.is_empty())], "efforts": efforts, "providers": providers})
 }
 
+/// The model menu once the hub's `models` info is known (Models.menu): the provider's default first, its models, and the thread's own when the list lacks it.
+pub fn model_choices(models: &Value, provider: &str, model: &str) -> Value {
+    let choice = |l: &str, v: &str| json!({"label": if l.is_empty() { "default" } else { l }, "value": v, "on": v == model});
+    let mut v = vec![choice("", "")];
+    for id in models[provider].as_array().into_iter().flatten().filter_map(Value::as_str) { v.push(choice(id, id)); }
+    if !model.is_empty() && !v.iter().any(|c| c["value"] == model) { v.push(choice(model, model)); }
+    Value::Array(v)
+}
+
+/// The Context panel's sections for a thread (present/tokstats.rs), read from its settings.
+pub fn stats(st: &State, id: &str) -> Value {
+    let Some(t) = st.threads.get(id) else { return Value::Null };
+    let get = |k: String| st.settings.get(&k).map(String::as_str).unwrap_or("");
+    let tok = { let ep = format!("{}{}", get("tok.epoch".into()), get("tok.recount".into())); if ep.is_empty() { "tok.".to_string() } else { format!("tok.{ep}.") } };
+    Value::Array(super::tokstats::sections(&t.provider, get(format!("usage.{id}")), get(format!("turn.last.{id}")), get(format!("{tok}t.{id}")), get(format!("turn.speed.{id}")), get(format!("turn.models.{id}"))))
+}
+
 /// `state`, `tools`, `menu`, `working`, `phase` for a thread at clock `now_s`, or None for a case not computed here.
-pub fn keys(st: &State, id: &str, now_s: u64, why: &str) -> Option<Map<String, Value>> {
+pub fn keys(st: &State, id: &str, now_s: u64, why: &str, models: Option<&Value>) -> Option<Map<String, Value>> {
     let t = st.threads.get(id)?;
     // a lean State may have dropped the fork record: then "forked" cannot be told
     let fork_key = format!("fork.{id}");
@@ -134,14 +182,26 @@ pub fn keys(st: &State, id: &str, now_s: u64, why: &str) -> Option<Map<String, V
     m.insert("working".into(), json!(working)); m.insert("phase".into(), json!(phase));
     m.insert("permissions".into(), permissions(st.runtime.get(id).map(String::as_str).unwrap_or("")));
     let get = |k: String| st.settings.get(&k).map(String::as_str).unwrap_or("");
-    m.insert("picker".into(), picker(&t.provider, &t.model, get(format!("effort.{id}")), get(format!("usage.{id}"))));
+    let mut pk = picker(&t.provider, &t.model, get(format!("effort.{id}")), get(format!("usage.{id}")));
+    if let Some(ms) = models { pk["models"] = model_choices(ms, &t.provider, &t.model); }
+    m.insert("picker".into(), pk);
     m.insert("claude".into(), json!(t.provider == "claude"));
+    m.insert("allowance".into(), json!(allowance_text(&allowance_of(st, id, &t.provider), &t.provider, &t.model, now_s)));
     Some(m)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn allowance_is_the_least_remaining_window_and_never_invented() {
+        let snap = json!({"provider":"claude","windows":[{"scope":"shared","shared":true,"used_permille":280},{"scope":"shared","shared":true,"used_permille":420},{"scope":"opus","shared":true,"used_permille":900}]});
+        assert_eq!(allowance_text(&snap, "claude", "claude-sonnet-5-5", 100), "58% left · shared");
+        assert_eq!(allowance_text(&snap, "claude", "claude-opus-5-5", 100), "10% left · shared");
+        assert_eq!(allowance_text(&Value::Null, "claude", "", 100), "");
+        assert_eq!(allowance_text(&json!({"windows":[{"scope":"shared","used_permille":null}]}), "claude", "", 100), "");
+        assert_eq!(allowance_text(&json!({"windows":[{"scope":"shared","used_permille":100,"resets_at":50}]}), "claude", "", 100), "", "a passed reset is no current reading");
+        assert_eq!(allowance_text(&snap, "grok", "", 100), "");
+    }
     fn fx() -> Value { serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/gpui/slim/fixtures/thread-variants.json"))).unwrap() }
     const T: &str = "t1700000003-8";
     /// every variant the helper was dumped for: a key not in a variant's diff is the base thread's (the helper's own dump of it)
@@ -154,7 +214,7 @@ mod tests {
             if x["thread"].is_null() && x.get("diff").is_none() { continue }
             let mut st = State::new(); for l in log.lines() { st.apply_line(l); }
             for e in x["extra"].as_array().unwrap() { st.apply(e); }
-            let Some(got) = keys(&st, T, 1_700_100_000, "") else { panic!("{name} should be computed"); };
+            let Some(got) = keys(&st, T, 1_700_100_000, "", None) else { panic!("{name} should be computed"); };
             let diff = x["diff"].as_object().unwrap();
             for k in ["state", "tools", "menu", "working", "phase", "picker", "claude", "permissions"] { assert_eq!(Some(&got[k]), diff.get(k).or(base.get(k)), "{name}: {k}"); }
             checked += 1;
@@ -168,5 +228,12 @@ mod tests {
         assert_eq!(usage_tail("claude", "45000/200000"), " · ctx 22% of 200k"); assert_eq!(usage_tail("claude", "900/0"), " · ctx 900");
         let p = picker("claude", "claude-opus-4", "high", "");
         assert_eq!(p["label"], "claude · claude-opus-4 · high"); assert_eq!(p["efforts"][3]["on"], true); assert_eq!(p["models"][0]["on"], false);
+    }
+    #[test] fn the_model_menu_lists_the_providers_models_default_first_and_keeps_the_threads_own() {
+        let ms = json!({"claude": ["fable", "opus"], "codex": []});
+        let v = model_choices(&ms, "claude", "opus"); let l: Vec<(String, bool)> = v.as_array().unwrap().iter().map(|c| (c["value"].as_str().unwrap().to_string(), c["on"].as_bool().unwrap())).collect();
+        assert_eq!(l, [("".to_string(), false), ("fable".to_string(), false), ("opus".to_string(), true)]);
+        let v = model_choices(&ms, "codex", "gpt-x"); assert_eq!(v.as_array().unwrap().len(), 2); assert_eq!(v[1]["value"], "gpt-x");
+        assert_eq!(model_choices(&ms, "grok", "")[0]["on"], true);
     }
 }

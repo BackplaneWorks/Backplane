@@ -79,7 +79,6 @@ impl Bots {
     }
 
     /// The events a routine firing logs, and the message its bot hears. `Bots.fire`: a reminder is delivered to the person, a routine wakes its bot at hop 0.
-    /// None for the cases whose delivery is the mail or uber lane's (mail.on, the uberbot): nothing is logged then, so the routine stays due.
     fn fire(&self, w: &World, r: &Routine, now: u64, i: usize, alert_prev: &str, notify_reminders: &str) -> Option<(Vec<Value>, Option<Wake>, Option<Filing>)> {
         let z = Zones { settings: &w.settings };
         let more = if r.once > 0 { vec![json!({"$":"RoutineDone","id":r.id,"at":now})] } else { let wall = plan_of(r).wall(&z, now); if wall > 0 { vec![json!({"$":"RoutineSlot","id":r.id,"slot":wall,"at":now})] } else { vec![] } };
@@ -111,18 +110,20 @@ impl Bots {
         Some((ev, wake, None))
     }
 
-    async fn fire_commit(&self, r: &Routine, w: &World, now: u64, i: usize, gate: bool) -> Result<bool, String> {
+    /// The firing of one routine: `w` is the world it was decided on, let go before any delivery (an agent's actor must never wait on a lock held for it)
+    async fn fire_commit(&self, r: &Routine, w: tokio::sync::MutexGuard<'_, World>, now: u64, i: usize, gate: bool) -> Result<bool, String> {
         let alert_prev = if r.kind == "remind" { let th = w.bot(&r.bot).map(|b| b.thread.clone()).unwrap_or_default(); self.hub.setting(&format!("alert.{th}")).await.unwrap_or_default() } else { String::new() };
         let nr = self.hub.setting("notify.reminders").await.unwrap_or_default();
-        let Some((mut ev, wake, filing)) = self.fire(w, r, now, i, &alert_prev, &nr) else { return Ok(false) };
+        let Some((mut ev, wake, filing)) = self.fire(&w, r, now, i, &alert_prev, &nr) else { return Ok(false) };
         if gate { // the uberbot's routine: a "fired" op tells the other machines which slot ran (Bots.tick.uber)
-            let (z, uid) = (Zones { settings: &w.settings }, w.uid()); let (mo, me) = machine_off(&z, now);
+            let z = Zones { settings: &w.settings }; let (mo, me) = machine_off(&z, now);
             let slot = plan_of(r).slot_next(&z, mo, me);
-            let ops = w.ops(now, &[super::uber::b_fired(&super::uber::gid(&w.me(), &r.id), slot)]); let _ = uid; ev.extend(ops);
+            ev.extend(w.ops(now, &[super::uber::b_fired(&super::uber::gid(&w.me(), &r.id), slot)]));
         }
         self.hub.commit_many(&ev).await.map_err(|e| format!("{e:#}"))?;
+        if let Some(f) = filing { if let Err(e) = self.file_mail(&w, now, &f.origin, &f.to, &f.text, &f.msg).await { eprintln!("bots: could not file a mail: {e}") } }
+        drop(w);
         if let Some(k) = wake { let _ = self.inbox_deliver(&k).await; }
-        if let Some(f) = filing { if let Err(e) = self.file_mail(w, now, &f.origin, &f.to, &f.text, &f.msg).await { eprintln!("bots: could not file a mail: {e}") } }
         Ok(true)
     }
 
@@ -131,31 +132,33 @@ impl Bots {
         let w = self.world().await;
         let Some(r) = w.routines.get(routine).cloned().filter(|r| !r.deleted && !r.done) else { return vec![err(id, "That routine is done or removed; edit its time to schedule it again.")] };
         let now = now_s();
-        let res = self.fire_commit(&r, &w, now, 0, false).await;
-        drop(w);
-        match res { Ok(_) => vec![ok(id)], Err(e) => vec![err(id, &e)] }
+        match self.fire_commit(&r, w, now, 0, false).await { Ok(_) => vec![ok(id)], Err(e) => vec![err(id, &e)] }
     }
 
-    /// Bots.tick.routines: every routine due at `now` runs once
+    /// Bots.tick.routines: every routine due at `now` runs once. Each is decided on the world the one before it left (Bots.tick.state): an uberbot's op counter moves within a tick,
+    /// and a routine overdue by hours is one firing: its `last` moves to now, and for the uberbot the slot it answers is the next after the last run, so it never fires per missed minute.
     pub async fn tick_at(&self, now: u64) -> usize {
         if crate::copy::on() { return 0 } // a hub on a copy of a log fires no routine, reminder or wake
-        let w = self.world().await;
-        let z = Zones { settings: &w.settings }; let (mo, me) = machine_off(&z, now);
-        let mut due: Vec<&Routine> = w.routines.values().filter(|r| plan_of(r).due(&z, now, mo, me)).collect();
-        due.sort_by(|a, b| a.id.cmp(&b.id)); // Map.values: by id
+        let ids: Vec<String> = { let w = self.world().await; let mut v: Vec<String> = w.routines.keys().cloned().collect(); v.sort(); v }; // Map.values: by id
         let mut n = 0;
-        for (i, r) in due.into_iter().enumerate() {
+        for (i, id) in ids.iter().enumerate() {
+            let w = self.world().await;
+            let z = Zones { settings: &w.settings }; let (mo, me) = machine_off(&z, now);
+            let Some(r) = w.routines.get(id).filter(|r| plan_of(r).due(&z, now, mo, me)).cloned() else { continue };
             let uber = w.uber_is(&r.bot);
-            if uber { // Ub.fires: a pinned routine only on its machine, any other only on the conversation's holder, each slot once
-                let gid = super::uber::gid(&w.me(), &r.id); let slot = plan_of(r).slot_next(&z, mo, me); let pin = w.pin(&gid);
-                let fired: u64 = w.ub.settings.get(&format!("uber.fired.{}.{gid}", w.uid())).and_then(|v| v.parse().ok()).unwrap_or(0);
-                if !(slot > fired && if pin.is_empty() { w.holder_me() } else { pin == w.me() }) { continue }
-            }
-            if let Ok(true) = self.fire_commit(r, &w, now, i, uber).await { n += 1 }
+            if uber && !w.fires(&super::uber::gid(&w.me(), &r.id), plan_of(&r).slot_next(&z, mo, me)) { continue }
+            if let Ok(true) = self.fire_commit(&r, w, now, i, uber).await { n += 1 }
         }
         n
     }
 
+    /// Mail.due: with the mailroom on, a snooze that is over reopens its conversation unread
+    pub async fn mail_due(&self, now: u64) {
+        if crate::copy::on() { return }
+        let w = self.world().await; if w.setting("mail.on", "off") != "on" { return }
+        let evs: Vec<Value> = w.mail.due(now).into_iter().map(|m| json!({"$":"MailMarked","bot":m.bot,"conv":m.conv,"status":"unread","seen":m.seen,"until":0,"at":now})).collect();
+        if !evs.is_empty() { if let Err(e) = self.hub.commit_many(&evs).await { eprintln!("mail: {e:#}") } }
+    }
     /// The soonest instant after `now`, no later than `until`, a live routine is due (Sched.soon); 0: none
     pub async fn soon(&self, now: u64, until: u64) -> u64 {
         let w = self.world().await; let z = Zones { settings: &w.settings }; let (mo, me) = machine_off(&z, now);
@@ -175,6 +178,8 @@ impl Bots {
                 tokio::time::sleep(std::time::Duration::from_secs(at.saturating_sub(now_s()).max(1))).await;
                 let Some(b) = me.upgrade() else { return };
                 b.tick_at(now_s()).await;
+                b.mail_due(now_s()).await;
+                b.uber_heal(now_s()).await;
                 b.uber_init(now_s()).await;
             }
         });

@@ -309,6 +309,7 @@ jobs:
           bun test/tools/kicad_library_test.ts build/kicad-library-test.js
       - name: KiCad Windows path and installer fixtures
         run: |
+          node --test test/tools/sys_exec_guard_test.cjs
           bun test/tools/atomic_text_test.cjs
           python3 test/tools/kicad_cache_test.py
           python3 test/tools/kicad_install_test.py

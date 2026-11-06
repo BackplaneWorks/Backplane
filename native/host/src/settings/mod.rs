@@ -5,6 +5,7 @@
 //! Secret.changes), `mask::json(&mut answer)` on every MCP answer (Mcp.masked), `mask::mask(line)` on every agent output line and every
 //! line to an agent, and `secret::prompt()` / `keys::prompt(..)` in the prompt. See docs/gpui/HUB-API.md.
 pub mod accounts;
+pub mod alerts;
 pub mod accounts_hub;
 pub mod binding;
 pub mod mentions;
@@ -76,6 +77,7 @@ pub fn start(hub: Arc<Hub>, agents: Option<Arc<crate::agents::Agents>>) {
     hub.register_rpc(Arc::new(telemetry::TelemetryRpc));
     hub.register_rpc(Arc::new(diagnostics::DiagnosticsRpc));
     hub.register_rpc(Arc::new(zone::ZoneRpc));
+    let _desks = alerts::start(&hub);
     hub.register_rpc(Arc::new(fab::FabRpc));
     hub.register_rpc(Arc::new(accounts::AccountsDefault));
     let _accounts = accounts_hub::start(&hub, agents.clone());

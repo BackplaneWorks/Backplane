@@ -22,7 +22,8 @@ mod actor;
 #[allow(dead_code)] pub mod select;
 #[allow(dead_code)] pub mod slash;
 pub mod thread_actions;
-pub use actor::{forget, is_job, record_read, record_reply, replied, replied_late, take_reads};
+pub mod pages;
+pub use actor::{forget, is_job, record_read, record_reply, record_reply_bound, record_reply_bound_m, replied, replied_late, take_reads};
 pub fn start(_hub: &Arc<Hub>) {}
 
 pub const REPLY_BYTES: usize = 262144;
@@ -61,7 +62,7 @@ pub fn event_type(line: &str) -> Option<&str> {
 
 /// The fields of the presenter's params only the hub makes: the thread's `window` and `page` (rows read from the index), `reads` and `local`. A client's own copy would
 /// be taken for the hub's (an unported native page for indexed rows), so every one is removed from the request's clone before the hub's go in.
-fn strip_hub_owned(params: &mut Value) { if let Some(o) = params.as_object_mut() { for k in ["window", "page", "reads", "local", "wants"] { o.remove(k); } } }
+fn strip_hub_owned(params: &mut Value) { if let Some(o) = params.as_object_mut() { for k in ["window", "page", "reads", "local", "wants", "botPage"] { o.remove(k); } } }
 
 /// PRESENTER_UNAVAILABLE is retryable on the wire: a target the Rust presenter has not ported (the helper is not running) or a helper that is restarting answers "not yet", never "no"
 /// (Hub::error has retryable:false for every code).
@@ -115,6 +116,13 @@ impl Hub {
             _ => None,
         };
         actor::set_bot(c.client, bot.clone());
+        // the bot's page (the presenter holds neither memories nor routines): the tab the action picks, else the one the page's route names
+        if let (Some((id, _)), Some(o)) = (&bot, params.as_object_mut()) {
+            let tab = if p["action"] == "bot-tab" { p["value"].as_str().unwrap_or("").to_string() } else { actor::route_tab(&p).unwrap_or_default() };
+            let from = if p["action"] == "bot-memory" { p["value"].as_str() } else if p["action"] == "bot-tab" { None } else { p["session"]["memoryFrom"].as_str() }.and_then(|s| s.parse::<usize>().ok()).unwrap_or(0);
+            let tab = if p["action"] == "bot-memory" { "memory".to_string() } else { tab };
+            let me = self.arc(); if let Some(pg) = crate::bots::bot_page_from(&me, id, &tab, now_ms() / 1000, from).await { o.insert("botPage".into(), pg); }
+        }
         let before = actor::page(c.client, &view_id, m, p["action"].as_str().unwrap_or(""), &p["target"], if m == "view.page" { page_before(&p) } else { 0 });
         // the conversation the target shows: a thread's own, a bot's chat thread (a bot view without its window stays on "Updating conversation...")
         let shown: Option<String> = match p["target"]["kind"].as_str() { Some("thread") => p["target"]["id"].as_str().map(str::to_string), Some("bot") => bot.as_ref().map(|(_, t)| t.clone()), _ => None };
@@ -124,7 +132,7 @@ impl Hub {
         if let (Some(o), true) = (params.as_object_mut(), p.get("session").map_or(false, Value::is_object)) { o.insert("session".into(), actor::input(c.client, &view_id, &p)); }
         { let reads = actor::take_reads(c.client, &view_id, &p["target"]); if let Some(o) = params.as_object_mut() { o.remove("reads"); if !reads.is_empty() { o.insert("reads".into(), Value::Array(reads)); } } }   // only the hub says what it read
         actor::set_local(&mut params, actor::local_in(c.client, &view_id, m, &p["target"]));
-        let mut pol = match self.presenter.view(&params).await { Ok(v) => v, Err(_) => return vec![unavailable(&id)] };
+        let mut pol = match self.presenter.view(&params).await { Ok(v) => v, Err(e) => { eprintln!("view unavailable: target {} action {:?}: {e:#}", params["target"]["kind"].as_str().unwrap_or("?"), params["action"].as_str().unwrap_or("")); return vec![unavailable(&id)] } }; // (content-free: kind, action and the presenter's reason)
         // the policy's verdicts on the request: a refused native-sidebar-page action (Hub.thin.act.native) and a target that does not exist
         // (an unknown bot, room or project: STALE_VIEW), answered before anything is stored
         if let Some(code) = policy_error(&pol) { return vec![error(&id, code)] }

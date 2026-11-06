@@ -1,0 +1,80 @@
+[
+ {
+  "name": "create ada",
+  "m": "bots.create",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "create bub uber",
+  "m": "bots.create",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "routine a",
+  "m": "bots.routine",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "run a: no disposition",
+  "m": "bots.routine_run",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "routine b",
+  "m": "bots.routine",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "run b: disposed",
+  "m": "bots.routine_run",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "routine c",
+  "m": "bots.routine",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "run c: escalated",
+  "m": "bots.routine_run",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "routine d",
+  "m": "bots.routine",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "run d: stopped",
+  "m": "bots.routine_run",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "stop d",
+  "m": "turn.interrupt",
+  "ok": true,
+  "error": null
+ },
+ {
+  "name": "run d again: held",
+  "m": "bots.routine_run",
+  "ok": false,
+  "error": "That routine is done or removed; edit its time to schedule it again."
+ },
+ {
+  "name": "say ada",
+  "m": "bots.say",
+  "ok": true,
+  "error": null
+ }
+]

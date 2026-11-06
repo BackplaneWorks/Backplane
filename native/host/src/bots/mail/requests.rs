@@ -51,7 +51,7 @@ pub fn find(w: &World, p: &Value) -> Value {
 fn body_row(b: &Body) -> Value { let m = &b.mail; json!({"id":m.id,"from":m.from,"to":m.to,"kind":m.kind,"want":m.want,"at":m.at,"text":b.text}) }
 
 impl Bots {
-    async fn mail_read(&self, id: &Value, p: &Value) -> Vec<Value> {
+    pub(crate) async fn mail_read(&self, id: &Value, p: &Value) -> Vec<Value> {
         let (conv, bot, n) = (gs(p, "conv"), gs(p, "bot"), limit(gn(p, "n", 50))); let before = gs(p, "before").to_string();
         // under the world lock: the seen mark, and a copy of what the read needs (the conversation, the page's headers, the room's log lines).
         // The files are read in a blocking task over that copy (the closure is 'static, so the guard cannot go into it), and the lock is taken again only for the row.

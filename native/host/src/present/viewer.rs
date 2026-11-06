@@ -1,12 +1,44 @@
 //! The viewer panel beside a thread, for the pages the GPUI desktop reads from `thread.viewer`: Board, Schematic and 3D (src/mobile/view.bend `View.open`, `View.json.single`),
-//! with the plot itself riding its own channel (`kicad.watch`). Pure functions over the session and `State`. `None`: a case not ported (Files, Mech, Review, a project with several boards, a
-//! version or a file opened from the Files tab, a project home, a thread elsewhere), which the caller refuses retryably. Keys GPUI does not read (`hist`, `bg`, `look`...) keep the idle template.
-use crate::state::State;
+//! with the plot itself riding its own channel (`kicad.watch`). Pure functions over the session and `State`. `None`: a case not ported (a project with several boards, a
+//! version, a project home, a thread elsewhere). The Files tab is drawn here: the listing is read in-process (`files::dir`), not asked of the hub. Diff and Review are session/pages.rs's. Keys GPUI does not read (`hist`, `bg`, `look`...) keep the idle template.
+use crate::{session::{pages, patch}, state::State};
 use serde_json::{json, Value};
 
 fn s<'a>(v: &'a Value, k: &str) -> &'a str { v[k].as_str().unwrap_or("") }
 fn jstr(x: &str) -> String { serde_json::to_string(x).unwrap_or_else(|_| "\"\"".into()) }
-fn drawing(kind: &str) -> bool { matches!(kind, "board" | "schematic" | "3d") }
+fn drawing(kind: &str) -> bool { matches!(kind, "board" | "schematic" | "3d" | "split" | "mech") }
+
+/// Mech's listing (`mech.list`, files/scripts/mech_list.sh): every STEP/STP/GLB under `<root>/mech`, four folders deep, sorted bytewise, at most 400, as paths from the root.
+pub fn mech_parts(root: &str) -> Vec<String> {
+    fn walk(base: &std::path::Path, rel: &str, depth: usize, out: &mut Vec<String>) {
+        let Ok(rd) = std::fs::read_dir(base) else { return };
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') { continue }
+            let (r, ft) = (format!("{rel}/{name}"), e.file_type());
+            match ft { Ok(t) if t.is_dir() && depth < 3 => walk(&e.path(), &r, depth + 1, out), Ok(t) if t.is_file() => { let l = name.to_ascii_lowercase(); if [".step", ".stp", ".glb"].iter().any(|x| l.ends_with(x)) { out.push(r.trim_start_matches('/').to_string()) } }, _ => {} }
+        }
+    }
+    if root.is_empty() { return vec![] }
+    let mut out = vec![]; walk(&std::path::Path::new(root).join("mech"), "mech", 0, &mut out);
+    out.sort_by(|a, b| a.as_bytes().cmp(b.as_bytes())); out.truncate(400); out
+}
+fn stem(p: &str) -> String { let f = p.rsplit('/').next().unwrap_or(p); f.rsplit_once('.').map_or(f, |x| x.0).to_string() }
+/// Mech.is_asm / Mech.default: the part Mech opens on when none was asked for: an assembly (a name with "assembl" in it or ending "-asm"), else the first.
+fn default_part(ps: &[String]) -> Option<&String> {
+    ps.iter().find(|p| { let n = stem(p).to_ascii_lowercase(); n.contains("assembl") || n.ends_with("-asm") }).or_else(|| ps.first())
+}
+/// The part on show: the one chosen (`@mech.part:<thread>`) while the listing still has it, else the default.
+pub fn mech_current(ps: &[String], chosen: &str) -> Option<String> { ps.iter().find(|p| p.as_str() == chosen).or_else(|| default_part(ps)).cloned() }
+fn abs_of(root: &str, rel: &str) -> String { if rel.starts_with('/') { rel.to_string() } else { format!("{root}/{rel}") } }
+/// The source a Mech page asks the hub for: the part as a 3D model ("" with no part).
+fn mech_want(root: &str, ps: &[String], chosen: &str) -> (String, String) {
+    match mech_current(ps, chosen) { Some(p) if !root.is_empty() => { let a = abs_of(root, &p); (format!("2|{root}|{a}"), a) }, _ => (String::new(), String::new()) }
+}
+/// a kind this panel can show: a drawing, or the Browser (the page rides the browser helper, not `kicad.watch`)
+fn shows(kind: &str) -> bool { drawing(kind) || kind == "browser" || files_kind(kind) }
+/// The Files tab and what it opened: the folder, or an image, a PDF or a text note
+fn files_kind(kind: &str) -> bool { matches!(kind, "files" | "image" | "pdf" | "text") }
 
 /// Ui.root: the thread's worktree, else its project's folder
 fn root_of(st: &State, sel: &str) -> String {
@@ -17,16 +49,18 @@ fn root_of(st: &State, sel: &str) -> String {
 /// View.key: the source a plot carries ("" with no root or no drawing kind)
 fn key(kind: &str, root: &str) -> String {
     if root.is_empty() { return String::new() }
-    match kind { "board" => format!("0|{root}|"), "schematic" => format!("1|{root}|"), "3d" => format!("2|{root}|"), _ => String::new() }
+    match kind { "board" => format!("0|{root}|"), "schematic" => format!("1|{root}|"), "3d" => format!("2|{root}|"), "split" => format!("split|{root}|"), _ => String::new() }
 }
 
-/// A pure case this port draws: no hierarchy of boards, no history, no file opened from the Files tab, no Mech/Review page behind it
+/// A pure case this port draws: no hierarchy of boards, no history, no Review page behind it (a file opened from the Files tab is `@view.file`)
 fn simple(st: &State, session: &Value, sel: &str) -> bool {
     let (d, info) = (&session["drafts"], &session["info"]);
+    // (Diff and Review, which pages.rs draws, may be on show: a drawing or a close puts them away)
+    let own = !pages::kind_of(session, sel).is_empty();
     !sel.is_empty() && !sel.contains('~') && !sel.starts_with("project-home-") && !sel.starts_with('@') && st.threads.contains_key(sel)
-        && !session["panel"].as_bool().unwrap_or(false)
-        && s(d, &format!("@view.file:{sel}")).is_empty() && s(d, "@view.bare").is_empty()
-        && s(info, &format!("view.path:{sel}")).is_empty() && s(info, &format!("view.kind:{sel}")).is_empty()
+        && (own || !session["panel"].as_bool().unwrap_or(false))
+        && s(d, "@view.bare").is_empty()
+        && (own || (s(info, &format!("view.path:{sel}")).is_empty() && s(info, &format!("view.kind:{sel}")).is_empty()))
         && s(info, &format!("fab.boards:{sel}")).lines().filter(|l| !l.trim().is_empty()).count() <= 1
 }
 
@@ -41,24 +75,119 @@ pub struct ViewOut {
 
 /// The `view` action for a drawing kind, or "" to close (the phones' idempotent `view`).
 pub fn view_action(st: &State, hub: &str, session: &Value, kind: &str) -> Option<ViewOut> {
-    if !(drawing(kind) || kind.is_empty()) { return None }
+    // "mech\t<part>": an agent's viewer_show of a model opens Mech on that part (a path from the project's root, or absolute under it)
+    let (kind, part) = kind.split_once('\t').unwrap_or((kind, ""));
+    if !(shows(kind) || kind.is_empty() || kind == "review") { return None }
     let sel = s(session, "sel");
+    // the Review tab: its first page (pages.rs asks for it; no source to watch)
+    if kind == "review" {
+        if sel.is_empty() || sel.contains('~') || sel.starts_with("project-home-") || sel.starts_with('@') || !st.threads.contains_key(sel) || !s(&session["drafts"], &format!("@view.file:{sel}")).is_empty() { return None }
+        let (patch, before) = pages::open_review(session, hub, sel, "bom");
+        return Some(ViewOut { patch, before, boards_look: false });
+    }
     if !simple(st, session, sel) { return None }
     let d = &session["drafts"]; let prev = s(d, &format!("@view:{sel}"));
-    if !(prev.is_empty() || drawing(prev)) { return None }
-    let root = root_of(st, sel); let want = key(kind, &root); let at = s(d, "@view.at");
+    if !(prev.is_empty() || shows(prev)) { return None }
+    let root = root_of(st, sel);
+    // what the hub is asked to watch: the kind and path View.ask sends (Mech's part is a 3D model; a split watches three sources)
+    let (want, wkind, wpath) = if kind == "mech" { let ps = mech_parts(&root); let part = part.strip_prefix(&format!("{root}/")).unwrap_or(part); let (w, a) = mech_want(&root, &ps, part); let k = if w.is_empty() { "" } else { "3d" }; (w, k.to_string(), a) } else { (key(kind, &root), kind.to_string(), String::new()) };
+    let at = s(d, "@view.at");
     let mut rid = session["rid"].as_u64().unwrap_or(0);
     let mut before = Vec::new();
     let mut drafts = serde_json::Map::new();
     drafts.insert(format!("@view.file:{sel}"), json!("")); drafts.insert(format!("@view:{sel}"), json!(kind));
+    drafts.insert(format!("@view.sheet:{sel}"), json!(""));
+    drafts.insert(format!("@mech.part:{sel}"), json!(if kind == "mech" { part.strip_prefix(&format!("{root}/")).unwrap_or(part) } else { "" }));
     for k in ["@pick", "@card", "@pick.rid"] { drafts.insert(k.into(), json!("")); }
     if want != at {
         // View.ask: the kind, the root, the path ("" for the project's own file) and the board tree ("")
-        let p = format!("{{\"kind\":{},\"root\":{},\"path\":\"\",\"tree\":\"\"}}", jstr(if want.is_empty() { "" } else { kind }), jstr(&root));
+        let p = format!("{{\"kind\":{},\"root\":{},\"path\":{},\"tree\":\"\"}}", jstr(if want.is_empty() { "" } else { &wkind }), jstr(&root), jstr(&wpath));
         before.push(json!({"type": "send", "hub": hub, "text": format!("{{\"id\":{rid},\"m\":\"kicad.watch\",\"p\":{p}}}")}));
         rid += 1; drafts.insert("@view.at".into(), json!(want));
     }
-    Some(ViewOut { patch: json!({"rid": rid, "drafts": drafts}), before, boards_look: drawing(kind) && !drawing(prev) })
+    let mut out = json!({"rid": rid, "drafts": drafts});
+    patch::merge(&mut out, &pages::leave(session, sel));
+    Some(ViewOut { patch: out, before, boards_look: drawing(kind) && kind != "mech" && !drawing(prev) })
+}
+
+/// `mech-part <path from the root>`: another part on the Mech page, watched as a 3D model (Mpage.part.k). None off the Mech page; `refresh` ("mech-refresh") lists again and follows the listing.
+pub fn mech_action(st: &State, hub: &str, session: &Value, rel: &str, refresh: bool) -> Option<ViewOut> {
+    let sel = s(session, "sel");
+    if !simple(st, session, sel) || s(&session["drafts"], &format!("@view:{sel}")) != "mech" { return None }
+    let root = root_of(st, sel); let ps = mech_parts(&root);
+    let rel = rel.strip_prefix(&format!("{root}/")).unwrap_or(rel); // viewer_show names a part by its absolute path
+    let chosen = if refresh { s(&session["drafts"], &format!("@mech.part:{sel}")) } else { rel };
+    let (want, abs) = mech_want(&root, &ps, chosen);
+    let mut rid = session["rid"].as_u64().unwrap_or(0); let mut before = vec![]; let mut drafts = serde_json::Map::new();
+    if !refresh { drafts.insert(format!("@mech.part:{sel}"), json!(rel)); }
+    if want != s(&session["drafts"], "@view.at") {
+        let p = format!("{{\"kind\":{},\"root\":{},\"path\":{},\"tree\":\"\"}}", jstr(if want.is_empty() { "" } else { "3d" }), jstr(&root), jstr(&abs));
+        before.push(json!({"type": "send", "hub": hub, "text": format!("{{\"id\":{rid},\"m\":\"kicad.watch\",\"p\":{p}}}")}));
+        rid += 1; drafts.insert("@view.at".into(), json!(want));
+    }
+    Some(ViewOut { patch: json!({"rid": rid, "drafts": drafts}), before, boards_look: false })
+}
+
+
+/// core/layers.bend's focus (KiCad's high contrast): one active layer and how the others show (0 as they are, 1 dimmed, 2 hidden), kept per kind as "<active>|<mode>".
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Focus { pub active: u32, pub mode: u32 }
+const NONE: u32 = 255;
+impl Focus {
+    pub fn read(t: &str) -> Focus { let mut p = t.split('|'); let a = p.next().and_then(|x| x.parse().ok()).unwrap_or(NONE); let m = p.next().and_then(|x| x.parse::<u32>().ok()).unwrap_or(0).min(2); if t.contains('|') { Focus { active: a, mode: m } } else { Focus { active: NONE, mode: 0 } } }
+    pub fn show(&self) -> String { format!("{}|{}", self.active, self.mode) }
+    pub fn on(&self) -> bool { self.mode > 0 && self.active != NONE }
+}
+fn bit(l: u32) -> u32 { 1u32 << l.min(31) }
+fn kept(sch: bool, f: Focus) -> u32 {
+    let copper = !sch && (5..=12).contains(&f.active);
+    bit(f.active) | if copper { bit(13) | bit(23) | bit(24) } else { 0 } | if sch { 0 } else { bit(22) } | bit(26) | bit(27) | bit(28)
+}
+/// Lyr.masks: the layers not drawn and those drawn dimmed, from the person's own hidden layers and the focus.
+pub fn masks(sch: bool, off: u32, f: Focus) -> (u32, u32) {
+    if !f.on() { return (off, 0) }
+    let rest = 536870911u32 & !kept(sch, f); let act = !bit(f.active);
+    if f.mode == 1 { (off & act, rest & !off) } else { ((off | rest) & act, 0) }
+}
+/// Lyr.pick: a layer's name makes it the active one and the others dim; again puts every layer back.
+pub fn pick(f: Focus, l: u32) -> Focus { if f.on() && f.active == l { Focus { active: l, mode: 0 } } else { Focus { active: l, mode: if f.mode == 0 { 1 } else { f.mode } } } }
+/// Lyr.set: All / Dim / Only (the first layer is active when none is).
+pub fn set_mode(sch: bool, f: Focus, mode: u32) -> Focus { Focus { active: if f.active == NONE { if sch { 0 } else { 12 } } else { f.active }, mode: mode.min(2) } }
+
+/// view-layer (hide or show a layer), view-layer-pick (the active layer), view-layer-mode (All/Dim/Only) on the Board or Schematic page: the session patch, None elsewhere.
+pub fn layer_action(st: &State, session: &Value, action: &str, value: &str) -> Option<Value> {
+    let sel = s(session, "sel"); let d = &session["drafts"];
+    let kind = s(d, &format!("@view:{sel}"));
+    if !simple(st, session, sel) || !matches!(kind, "board" | "schematic") { return None }
+    let sch = kind == "schematic"; let v: u32 = value.trim().parse().unwrap_or(if action == "view-layer" { 31 } else { NONE });
+    let (offk, fk) = (format!("@view.off.{kind}"), format!("@view.focus.{kind}"));
+    let mut dr = serde_json::Map::new();
+    match action {
+        "view-layer" => { let off: u32 = s(d, &offk).parse().unwrap_or(0); dr.insert(offk, json!((off ^ bit(v)).to_string())); }
+        "view-layer-pick" => { dr.insert(fk.clone(), json!(pick(Focus::read(s(d, &fk)), v).show())); }
+        "view-layer-mode" => { dr.insert(fk.clone(), json!(set_mode(sch, Focus::read(s(d, &fk)), if value.trim().parse::<u32>().is_ok() { v } else { 0 }).show())); }
+        _ => return None,
+    }
+    for k in ["@pick", "@card", "@pick.rid"] { dr.insert(k.into(), json!("")); }
+    Some(json!({"drafts": dr}))
+}
+
+/// `view-sheet <file>`: the schematic page shows another sheet of the design (its file, absolute; "" the root sheet), watched like the root (`View.ask` with the sheet as the path).
+pub fn sheet_action(st: &State, hub: &str, session: &Value, file: &str) -> Option<ViewOut> {
+    let sel = s(session, "sel"); let d = &session["drafts"];
+    if !simple(st, session, sel) || s(d, &format!("@view:{sel}")) != "schematic" { return None }
+    let root = root_of(st, sel);
+    if !file.is_empty() && !(file.starts_with(&format!("{root}/")) && file.ends_with(".kicad_sch") && !file.contains("..")) { return None }
+    let want = format!("1|{root}|{file}");
+    let mut rid = session["rid"].as_u64().unwrap_or(0); let mut before = vec![]; let mut drafts = serde_json::Map::new();
+    drafts.insert(format!("@view.sheet:{sel}"), json!(file));
+    for k in ["@pick", "@card", "@pick.rid"] { drafts.insert(k.into(), json!("")); }
+    if want != s(d, "@view.at") {
+        let p = format!("{{\"kind\":\"schematic\",\"root\":{},\"path\":{},\"tree\":\"\"}}", jstr(&root), jstr(file));
+        before.push(json!({"type": "send", "hub": hub, "text": format!("{{\"id\":{rid},\"m\":\"kicad.watch\",\"p\":{p}}}")}));
+        rid += 1; drafts.insert("@view.at".into(), json!(want));
+    }
+    Some(ViewOut { patch: json!({"rid": rid, "drafts": drafts}), before, boards_look: false })
 }
 
 const BOARD_LAYERS: [(u32, &str); 17] = [(12, "F.Cu"), (11, "In1.Cu"), (10, "In2.Cu"), (9, "In3.Cu"), (8, "In4.Cu"), (7, "In5.Cu"), (6, "In6.Cu"), (5, "B.Cu"), (13, "Pads"), (23, "Vias"), (24, "Holes"),
@@ -66,26 +195,195 @@ const BOARD_LAYERS: [(u32, &str); 17] = [(12, "F.Cu"), (11, "In1.Cu"), (10, "In2
 const SCH_LAYERS: [&str; 24] = ["page", "sheet fill", "body fill", "sheet", "graphic", "note", "body", "pin", "pin name", "pin number", "field", "field other", "bus", "bus entry", "wire", "no connect",
     "junction", "label", "global label", "hier label", "sheet name", "sheet file", "sheet pin", "dnp"];
 
+/// One drawing page as `View.json.single` writes it: open, key, the layers it draws, the layer list.
+fn page(template: &Value, kind: &str, root: &str, drafts: &Value, sel: &str) -> Value {
+    // View.key.at: a schematic's sheet is part of its source key
+    let sheet = if kind == "schematic" && !sel.is_empty() { s(drafts, &format!("@view.sheet:{sel}")) } else { "" };
+    // a file opened from the Files tab is the source's path ("" for the project's own)
+    let file = if !sel.is_empty() && matches!(kind, "board" | "schematic" | "3d") { s(drafts, &format!("@view.file:{sel}")) } else { "" };
+    let k = format!("{}{}", key(kind, root), if file.is_empty() { sheet } else { file });
+    let mut v = template.clone();
+    let Some(o) = v.as_object_mut() else { return v };
+    o.insert("open".into(), json!(kind)); o.insert("key".into(), json!(k));
+    // View.layers: a 3D view draws the board's layers on its faces
+    o.insert("layers".into(), json!(if kind == "3d" { if file.is_empty() { key("board", root) } else { String::new() } } else { k }));
+    o.insert("layerModes".into(), json!(kind == "board"));
+    // View.masks / View.lmode / View.lhead: what the person hid, the focus, and what the canvas draws from them
+    let sch = kind == "schematic"; let draws = matches!(kind, "board" | "schematic");
+    let off: u32 = if draws { s(drafts, &format!("@view.off.{kind}")).parse().unwrap_or(0) } else { 0 };
+    let f = if draws { Focus::read(s(drafts, &format!("@view.focus.{kind}"))) } else { Focus { active: NONE, mode: 0 } };
+    let (moff, mdim) = masks(sch, off, f);
+    let row = |n: u32, name: &str| json!({"layer": n, "name": name, "on": off & bit(n) == 0, "active": f.on() && f.active == n});
+    let rows: Vec<Value> = match kind {
+        "board" => BOARD_LAYERS.iter().map(|(n, name)| row(*n, name)).collect(),
+        "schematic" => SCH_LAYERS.iter().enumerate().map(|(n, name)| row(n as u32, name)).collect(),
+        _ => vec![],
+    };
+    o.insert("layerList".into(), Value::Array(rows));
+    o.insert("off".into(), json!(moff)); o.insert("dim".into(), json!(mdim)); o.insert("lift".into(), json!(if f.on() { f.active } else { NONE }));
+    o.insert("layerMode".into(), json!(if f.on() { f.mode } else { 0 }));
+    if f.on() {
+        let nm = if sch { SCH_LAYERS.get(f.active as usize).map(|x| x.to_string()) } else { BOARD_LAYERS.iter().find(|(n, _)| *n == f.active).map(|(_, x)| x.to_string()) };
+        if let Some(nm) = nm { o.insert("layerHead".into(), json!(format!("Layer: {nm}"))); }
+    }
+    v
+}
+
+
+// ------------------------------------------------------------------ the Files tab (src/core/fm.bend, client.bend's Fm.*, mobile/view.bend's Files.json / File.json)
+
+fn pct(s: &str, slash: bool) -> String {
+    s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-._~".contains(&b) || (slash && b == b'/') { (b as char).to_string() } else { format!("%{b:02X}") }).collect()
+}
+/// Fm.size: a file's size as a person reads it.
+pub fn size_text(n: u64) -> String {
+    let tenths = |unit: u64, name: &str| format!("{}.{} {name}", n / unit, (n % unit) / (unit / 10));
+    if n < 1024 { format!("{n} B") } else if n < 1 << 20 { format!("{} KB", (n + 512) / 1024) } else if n < 1 << 30 { tenths(1 << 20, "MB") } else { tenths(1 << 30, "GB") }
+}
+fn icon_of(kind: &str) -> &'static str {
+    match kind { "folder" => "folder", "board" => "circuit-board", "schematic" => "cpu", "3d" => "box", "image" => "image", "pdf" => "file-text", _ => "file" }
+}
+/// Fm.zip.name: `<folder or project title>.zip`, nothing a file system refuses in the name.
+pub fn zip_name(title: &str, dir: &str) -> String {
+    let base = if dir.is_empty() { title } else { crate::files::fm::last(dir) };
+    let c: String = base.chars().map(|c| if (c as u32) < 32 || "/\\:?*<>|\"".contains(c) { '_' } else { c }).collect();
+    format!("{}.zip", if c.is_empty() || c == "." || c == ".." { "project" } else { &c })
+}
+fn down_url(thread: &str, rel: &str, folder: bool) -> String {
+    if thread.is_empty() || crate::files::ops::zip_within(rel) { return String::new() }
+    format!("/files/{}?thread={}&path={}", if folder { "zip" } else { "get" }, pct(thread, false), pct(rel, true))
+}
+/// The listing of a folder as Files.rows: folders first, then files, each row the view action it takes. `Err` is the words the page shows instead.
+pub fn file_rows(root: &str, thread: &str, dir: &str) -> Result<Vec<Value>, String> {
+    use crate::files::fm;
+    if root.is_empty() { return Err("This thread has no project folder.".into()) }
+    let text = crate::files::dir::list(std::path::Path::new(root), dir).map_err(|e| e.to_string())?;
+    Ok(text.lines().filter_map(|l| {
+        let mut it = l.splitn(3, '\t'); let (k, size, n) = (it.next()?, it.next()?.parse::<u64>().unwrap_or(0), it.next()?);
+        let value = fm::join(dir, n);
+        Some(if k == "d" {
+            json!({"label": n, "action": "fm-cd", "value": value, "detail": "", "kind": "folder", "icon": "folder", "down": down_url(thread, &value, true), "downName": zip_name("", &value)})
+        } else {
+            let kind = fm::preview(n);
+            json!({"label": n, "action": if kind.is_empty() { "" } else { "fm-open" }, "value": value, "detail": size_text(size), "kind": kind, "icon": icon_of(kind), "down": down_url(thread, &value, false), "downName": n})
+        })
+    }).collect())
+}
+/// Fm.trail: the project, then each folder down to the one on show.
+pub fn files_trail(dir: &str) -> Vec<Value> {
+    let mut v = vec![json!({"label": "Project", "action": "fm-cd", "value": ""})]; let mut at = String::new();
+    for p in dir.split('/').filter(|p| !p.is_empty()) { at = crate::files::fm::join(&at, p); v.push(json!({"label": p, "action": "fm-cd", "value": at})); }
+    v
+}
+fn project_title(st: &State, sel: &str) -> String { st.threads.get(sel).and_then(|t| st.projects.get(&t.project)).map(|p| p.title.clone()).unwrap_or_default() }
+/// The Files page: trail, rows, the folder's zip (Files.json).
+fn files_page(st: &State, root: &str, sel: &str, dir: &str) -> Value {
+    let (rows, err) = match file_rows(root, sel, dir) { Ok(r) => (r, String::new()), Err(e) => (vec![], e) };
+    json!({"trail": files_trail(dir), "rows": rows, "ready": true, "error": err, "zip": down_url(sel, dir, true), "zipName": zip_name(&project_title(st, sel), dir)})
+}
+/// File.json: an opened image, PDF or note: its name, its kind, where the hub serves it (`/img` takes an absolute path).
+fn file_page(kind: &str, abs: &str) -> Value { json!({"name": crate::files::fm::last(abs), "kind": kind, "url": format!("/img?path={}", pct(abs, true))}) }
+
+/// `fm`, `fm-cd`, `fm-up`, `fm-open` (Fm.act): the Files page on a folder, or an opened file. None for a path outside the project or a case not ported; a file the tab does not preview changes nothing.
+pub fn files_action(st: &State, hub: &str, session: &Value, action: &str, value: &str) -> Option<ViewOut> {
+    use crate::files::fm;
+    let sel = s(session, "sel");
+    if !simple(st, session, sel) { return None }
+    let d = &session["drafts"]; let prev = s(d, &format!("@view:{sel}"));
+    if !(prev.is_empty() || shows(prev)) { return None }
+    let root = root_of(st, sel); if root.is_empty() { return None }
+    let cur = s(d, &format!("@files.dir:{sel}")).to_string();
+    let (kind, dir, file): (String, String, String) = match action {
+        "fm" => ("files".into(), cur, String::new()),
+        "fm-up" => ("files".into(), fm::parent(&cur), String::new()),
+        "fm-cd" => { if !fm::files_safe(value) { return None } ("files".into(), value.to_string(), String::new()) }
+        _ => { // fm-open
+            if value.is_empty() || !fm::files_safe(value) { return None }
+            let k = fm::preview(fm::last(value));
+            if k.is_empty() { return Some(ViewOut { patch: json!({}), before: vec![], boards_look: false }) }
+            // the file must be a plain file inside the project, as the listing shows them
+            let parent = std::path::Path::new(&root).join(fm::parent(value));
+            let abs = fm::contained(std::path::Path::new(&root), &fm::parent(value))?.join(fm::last(value));
+            let _ = parent; if !std::fs::symlink_metadata(&abs).map_or(false, |m| m.is_file()) { return None }
+            (k.into(), fm::parent(value), abs.to_string_lossy().into_owned())
+        }
+    };
+    let n = match kind.as_str() { "board" => "0", "schematic" => "1", "3d" => "2", _ => "" };
+    let want = if n.is_empty() { String::new() } else { format!("{n}|{root}|{file}") };
+    let wkind = match kind.as_str() { "board" | "schematic" | "3d" => kind.as_str(), _ => "" };
+    let at = s(d, "@view.at");
+    let mut rid = session["rid"].as_u64().unwrap_or(0); let mut before = vec![]; let mut drafts = serde_json::Map::new();
+    drafts.insert(format!("@view:{sel}"), json!(kind)); drafts.insert(format!("@view.file:{sel}"), json!(file)); drafts.insert(format!("@files.dir:{sel}"), json!(dir));
+    drafts.insert(format!("@view.sheet:{sel}"), json!("")); drafts.insert(format!("@mech.part:{sel}"), json!(""));
+    for k in ["@pick", "@card", "@pick.rid"] { drafts.insert(k.into(), json!("")); }
+    if want != at {
+        let p = format!("{{\"kind\":{},\"root\":{},\"path\":{},\"tree\":\"\"}}", jstr(wkind), jstr(&root), jstr(&file));
+        before.push(json!({"type": "send", "hub": hub, "text": format!("{{\"id\":{rid},\"m\":\"kicad.watch\",\"p\":{p}}}")}));
+        rid += 1; drafts.insert("@view.at".into(), json!(want));
+    }
+    Some(ViewOut { patch: json!({"rid": rid, "drafts": drafts}), before, boards_look: false })
+}
+
 /// `thread.viewer`: the idle template with the page the thread's viewer has open. None for a page not ported.
 pub fn viewer_json(st: &State, template: &Value, session: &Value) -> Option<Value> {
     let sel = s(session, "sel");
     let kind = s(&session["drafts"], &format!("@view:{sel}"));
+    // a panel the helper opened (Diff, Files, Mech, Review: view.kind/view.path in the info, panel on) is the helper's page, not an idle viewer
+    let info = &session["info"];
+    // Diff and Review are pages.rs's: the thread carries their object beside the viewer
+    match pages::kind_of(session, sel) {
+        "diff" => return Some(template.clone()),
+        "review" => {
+            let mut v = template.clone(); let o = v.as_object_mut()?;
+            o.insert("open".into(), json!("review")); o.insert("review".into(), pages::review_json(session, sel));
+            let chips: Vec<Value> = [("Board", "board"), ("Schematic", "schematic"), ("3D", "3d"), ("Mech", "mech"), ("Files", "files"), ("Review", "review")].iter().map(|(l, val)| json!({"label": l, "value": val, "on": *val == "review"})).collect();
+            o.insert("choices".into(), Value::Array(chips));
+            return Some(v);
+        }
+        _ => {}
+    }
+    if session["panel"].as_bool().unwrap_or(false) || !s(info, &format!("view.kind:{sel}")).is_empty() || !s(info, &format!("view.path:{sel}")).is_empty() { return None }
     if kind.is_empty() { return Some(template.clone()) }
-    if !drawing(kind) || !simple(st, session, sel) { return None }
-    let root = root_of(st, sel); let k = key(kind, &root);
-    let mut v = template.clone(); let o = v.as_object_mut()?;
-    o.insert("open".into(), json!(kind)); o.insert("key".into(), json!(k));
-    // View.layers: a 3D view draws the board's layers on its faces
-    o.insert("layers".into(), json!(if kind == "3d" { key("board", &root) } else { k }));
-    o.insert("layerModes".into(), json!(kind == "board"));
-    let rows: Vec<Value> = match kind {
-        "board" => BOARD_LAYERS.iter().map(|(n, name)| json!({"layer": n, "name": name, "on": true, "active": false})).collect(),
-        "schematic" => SCH_LAYERS.iter().enumerate().map(|(n, name)| json!({"layer": n, "name": name, "on": true, "active": false})).collect(),
-        _ => vec![],
+    if !shows(kind) || !simple(st, session, sel) { return None }
+    let root = root_of(st, sel);
+    let mut v = match kind {
+        // Mech: the part on show as a 3D model (View.want: "2|<root>|<abs part>"), the parts as chips (Mech.json)
+        "mech" => {
+            let ps = mech_parts(&root); let cur = mech_current(&ps, s(&session["drafts"], &format!("@mech.part:{sel}")));
+            let (want, _) = mech_want(&root, &ps, s(&session["drafts"], &format!("@mech.part:{sel}")));
+            let mut v = template.clone(); let o = v.as_object_mut()?;
+            o.insert("open".into(), json!("mech")); o.insert("key".into(), json!(want));
+            let chips: Vec<Value> = ps.iter().map(|p| json!({"label": stem(p), "value": p, "on": cur.as_deref() == Some(p.as_str())})).collect();
+            o.insert("mech".into(), json!({"say": if root.is_empty() { "Loading…" } else if ps.is_empty() { "No parts yet. Ask an agent to model one: it designs it in FreeCAD, keeps it in mech/, and renders it here." } else { "" },
+                "note": "", "parts": chips, "rel": cur.clone().unwrap_or_default(), "busy": false, "render": "Create renders", "err": "",
+                "name": cur.as_deref().map(stem).unwrap_or_default(), "path": cur.as_deref().map(|p| abs_of(&root, p)).unwrap_or_default(), "shots": [], "empty": ""}));
+            v
+        }
+        // Split (Split.*): the schematic, the board and its 3D model, each a page of its own
+        "split" => {
+            let mut v = template.clone(); let o = v.as_object_mut()?;
+            o.insert("open".into(), json!("split")); o.insert("key".into(), json!(key("split", &root)));
+            o.insert("panes".into(), Value::Array(["schematic", "board", "3d"].iter().map(|k| page(template, k, &root, &session["drafts"], "")).collect()));
+            v
+        }
+        // Files: the folder on show, or an image, a PDF or a note opened from it (Fm.tab: they belong to Files)
+        "files" => {
+            let mut v = template.clone(); let o = v.as_object_mut()?;
+            o.insert("open".into(), json!("files")); o.insert("key".into(), json!(""));
+            o.insert("files".into(), files_page(st, &root, sel, s(&session["drafts"], &format!("@files.dir:{sel}"))));
+            v
+        }
+        "image" | "pdf" | "text" => {
+            let mut v = template.clone(); let o = v.as_object_mut()?;
+            o.insert("open".into(), json!(kind)); o.insert("key".into(), json!(""));
+            o.insert("file".into(), file_page(kind, s(&session["drafts"], &format!("@view.file:{sel}"))));
+            v
+        }
+        _ => page(template, kind, &root, &session["drafts"], sel),
     };
-    o.insert("layerList".into(), Value::Array(rows));
-    let chips: Vec<Value> = [("Board", "board"), ("Schematic", "schematic"), ("3D", "3d"), ("Mech", "mech"), ("Files", "files"), ("Review", "review")].iter().map(|(l, val)| json!({"label": l, "value": val, "on": *val == kind})).collect();
-    o.insert("choices".into(), Value::Array(chips));
+    let tab = if matches!(kind, "image" | "pdf" | "text") { "files" } else { kind };
+    let chips: Vec<Value> = [("Board", "board"), ("Schematic", "schematic"), ("3D", "3d"), ("Mech", "mech"), ("Files", "files"), ("Review", "review")].iter().map(|(l, val)| json!({"label": l, "value": val, "on": *val == tab})).collect();
+    v.as_object_mut()?.insert("choices".into(), Value::Array(chips));
     Some(v)
 }
 
@@ -97,6 +395,30 @@ mod tests {
         let mut st = State::new();
         for l in include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/gpui/slim/fixtures/thread-log.jsonl")).lines() { st.apply_line(l); }
         (st, "t1700000003-8".into())
+    }
+    #[test] fn the_threads_browser_is_a_page_with_nothing_to_watch() {
+        let (st, th) = state();
+        let template: Value = serde_json::from_str::<Value>(include_str!("thread_static.json")).unwrap()["viewer"].clone();
+        let session = json!({"sel": th, "rid": 1, "drafts": {}, "open": {}, "adding": false, "panel": false, "info": {}});
+        let o = view_action(&st, "h", &session, "browser").unwrap();
+        assert!(o.before.is_empty() && !o.boards_look, "no kicad.watch for a page of frames");
+        assert_eq!(o.patch["drafts"][format!("@view:{th}")], json!("browser"));
+        let mut s2 = session.clone(); crate::session::patch::merge(&mut s2, &o.patch);
+        let v = viewer_json(&st, &template, &s2).unwrap();
+        assert_eq!((v["open"].clone(), v["key"].clone()), (json!("browser"), json!("")));
+        // from a board: the watch is stopped
+        let board = json!({"sel": th, "rid": 5, "drafts": {format!("@view:{th}"): "board", "@view.at": "0|/tmp/soak2|"}, "open": {}, "adding": false, "panel": false, "info": {}});
+        assert_eq!(view_action(&st, "h", &board, "browser").unwrap().before.len(), 1);
+    }
+    #[test] fn a_panel_the_helper_opened_is_not_drawn_as_an_idle_viewer() {
+        let (st, th) = state();
+        let template: Value = serde_json::from_str::<Value>(include_str!("thread_static.json")).unwrap()["viewer"].clone();
+        let idle = json!({"sel": th, "rid": 1, "drafts": {}, "open": {}, "adding": false, "panel": false, "info": {}});
+        assert!(viewer_json(&st, &template, &idle).is_some(), "nothing open: the idle template");
+        let mut diff = idle.clone(); diff["panel"] = json!(true); diff["info"] = json!({format!("view.kind:{th}"): "diff"});
+        assert!(viewer_json(&st, &template, &diff).is_some(), "Diff on show is pages.rs's: the thread carries its diff beside the viewer");
+        let mut kind = idle.clone(); kind["info"] = json!({format!("view.kind:{th}"): "mech"});
+        assert!(viewer_json(&st, &template, &kind).is_none(), "a view.kind in the info alone is the helper's too");
     }
     #[test] fn the_view_action_and_the_viewer_of_board_schematic_and_3d_are_the_helpers() {
         let (st, th) = state(); let f = fx();
@@ -119,7 +441,125 @@ mod tests {
         let close = view_action(&st, "h", &s_open, "").unwrap();
         assert_eq!(close.before.len(), 1); assert!(!close.boards_look);
         assert!(close.before[0]["text"].as_str().unwrap().contains("\"kind\":\"\""));
-        // not ported: Files, a project home, an open Files page behind it
-        assert!(view_action(&st, "h", &s_open, "files").is_none());
+        // Files is ported: opening it from a board stops the watch (a drawing's source is not the folder's), and Review is ported (session/pages.rs)
+        let f = view_action(&st, "h", &s_open, "files").unwrap();
+        assert_eq!(f.before.len(), 1); assert!(f.before[0]["text"].as_str().unwrap().contains("\"kind\":\"\"")); assert!(!f.boards_look);
+        assert_eq!(f.patch["drafts"][format!("@view:{th}")], "files");
+        assert!(view_action(&st, "h", &s_open, "review").is_some(), "Review is drawn from the session (session/pages.rs)");
+    }
+
+
+    fn files_world(tag: &str) -> (State, String, std::path::PathBuf) {
+        let d = std::env::temp_dir().join(format!("bp-fm-pres-{}-{tag}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(d.join("docs/deep")).unwrap(); std::fs::create_dir_all(d.join("mech")).unwrap();
+        for (f, c) in [("notes.md", "# n"), ("a.kicad_pcb", "(kicad_pcb)"), ("pic.png", "x"), ("doc.pdf", "x"), ("m.step", "x"), ("plain.bin", "x"), ("docs/a.txt", "a"), (".env", "k"), ("docs/server.key", "k")] { std::fs::write(d.join(f), c).unwrap(); }
+        let mut st = State::new(); for l in include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/gpui/slim/fixtures/thread-log.jsonl")).lines() { st.apply_line(l); }
+        let th = "t1700000003-8".to_string(); let proj = st.threads.get(&th).map(|t| t.project.clone()).unwrap();
+        if let Some(p) = st.projects.get_mut(&proj) { p.root = d.to_string_lossy().into_owned(); p.title = "My: Board".into(); }
+        (st, th, d)
+    }
+    fn sess(th: &str, drafts: Value) -> Value { json!({"sel": th, "rid": 1, "drafts": drafts, "open": {}, "adding": false, "panel": false, "info": {}}) }
+    #[test] fn the_files_page_lists_rows_trail_and_downloads_as_core_fm_does() {
+        let (st, th, d) = files_world("rows"); let root = d.to_string_lossy().into_owned();
+        let rows = file_rows(&root, &th, "").unwrap();
+        let by = |n: &str| rows.iter().find(|r| r["label"] == n).unwrap().clone();
+        assert_eq!(rows[0]["label"], "docs"); assert_eq!(rows[1]["label"], "mech"); // folders first
+        assert_eq!((by("docs")["action"].as_str(), by("docs")["kind"].as_str(), by("docs")["icon"].as_str()), (Some("fm-cd"), Some("folder"), Some("folder")));
+        assert_eq!((by("notes.md")["action"].as_str(), by("notes.md")["kind"].as_str(), by("notes.md")["detail"].as_str()), (Some("fm-open"), Some("text"), Some("3 B")));
+        assert_eq!(by("a.kicad_pcb")["kind"], "board"); assert_eq!(by("a.kicad_pcb")["icon"], "circuit-board"); assert_eq!(by("m.step")["kind"], "3d"); assert_eq!(by("pic.png")["icon"], "image"); assert_eq!(by("doc.pdf")["icon"], "file-text");
+        assert_eq!((by("plain.bin")["action"].as_str(), by("plain.bin")["icon"].as_str()), (Some(""), Some("file")), "a file the tab cannot show is listed only");
+        assert!(rows.iter().all(|r| r["label"] != ".env"), "dotfiles are not listed");
+        assert_eq!(by("notes.md")["down"], format!("/files/get?thread={th}&path=notes.md")); assert_eq!(by("docs")["down"], format!("/files/zip?thread={th}&path=docs")); assert_eq!(by("docs")["downName"], "docs.zip");
+        let sub = file_rows(&root, &th, "docs").unwrap();
+        assert_eq!(sub.iter().map(|r| r["label"].as_str().unwrap()).collect::<Vec<_>>(), ["deep", "a.txt", "server.key"]);
+        assert_eq!(sub[2]["down"], "", "a download never serves what a zip leaves out"); assert_eq!(sub[1]["value"], "docs/a.txt");
+        assert_eq!(files_trail("docs/deep"), vec![json!({"label":"Project","action":"fm-cd","value":""}), json!({"label":"docs","action":"fm-cd","value":"docs"}), json!({"label":"deep","action":"fm-cd","value":"docs/deep"})]);
+        assert_eq!(zip_name("My: Board", ""), "My_ Board.zip"); assert_eq!(zip_name("", ".."), "project.zip"); assert_eq!(files_page(&st, &root, &th, "")["zipName"], "My_ Board.zip");
+        assert_eq!(size_text(1023), "1023 B"); assert_eq!(size_text(1024), "1 KB"); assert_eq!(size_text(1536), "2 KB"); assert_eq!(size_text(5 << 20), "5.0 MB"); assert_eq!(size_text(3 << 30), "3.0 GB");
+        assert!(file_rows(&root, &th, "../x").is_err() && file_rows("", &th, "").is_err() && file_rows(&root, &th, "nope").is_err());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+    #[test] fn fm_actions_walk_folders_open_files_and_refuse_escapes() {
+        let (st, th, d) = files_world("act"); let root = d.to_string_lossy().into_owned();
+        let template: Value = serde_json::from_str::<Value>(include_str!("thread_static.json")).unwrap()["viewer"].clone();
+        let run = |sess: &Value, a: &str, v: &str| files_action(&st, "h", sess, a, v);
+        let mut s1 = sess(&th, json!({})); let o = run(&s1, "fm-cd", "docs").unwrap(); crate::session::patch::merge(&mut s1, &o.patch);
+        assert_eq!(s1["drafts"][format!("@files.dir:{th}")], "docs"); assert_eq!(s1["drafts"][format!("@view:{th}")], "files");
+        let v = viewer_json(&st, &template, &s1).unwrap();
+        assert_eq!(v["open"], "files"); assert_eq!(v["files"]["trail"].as_array().unwrap().len(), 2); assert!(v["files"]["rows"].as_array().unwrap().iter().any(|r| r["label"] == "a.txt"));
+        assert_eq!(v["choices"].as_array().unwrap().iter().find(|c| c["on"] == true).unwrap()["value"], "files");
+        let o = run(&s1, "fm-up", "").unwrap(); crate::session::patch::merge(&mut s1, &o.patch); assert_eq!(s1["drafts"][format!("@files.dir:{th}")], "");
+        assert!(run(&s1, "fm-cd", "..").is_none() && run(&s1, "fm-cd", "/etc").is_none() && run(&s1, "fm-open", "../x.png").is_none() && run(&s1, "fm-open", "nope.png").is_none());
+        // a board opens in the Board viewer on its own file, and the hub is asked to watch that path
+        let o = run(&s1, "fm-open", "a.kicad_pcb").unwrap(); let mut s2 = s1.clone(); crate::session::patch::merge(&mut s2, &o.patch);
+        let w = o.before[0]["text"].as_str().unwrap(); assert!(w.contains("\"kind\":\"board\"") && w.contains(&format!("{root}/a.kicad_pcb")), "{w}");
+        let v = viewer_json(&st, &template, &s2).unwrap(); assert_eq!(v["open"], "board"); assert_eq!(v["key"], format!("0|{root}|{root}/a.kicad_pcb"));
+        // an image, a PDF and a note open as a file page of the Files tab; the watch is stopped
+        for (n, k) in [("pic.png", "image"), ("doc.pdf", "pdf"), ("notes.md", "text")] {
+            let o = run(&s2, "fm-open", n).unwrap(); let mut s3 = s2.clone(); crate::session::patch::merge(&mut s3, &o.patch);
+            assert!(o.before[0]["text"].as_str().unwrap().contains("\"kind\":\"\""), "{n}");
+            let v = viewer_json(&st, &template, &s3).unwrap(); assert_eq!(v["open"], k); assert_eq!(v["file"]["name"], n); assert_eq!(v["file"]["kind"], k);
+            assert_eq!(v["file"]["url"], format!("/img?path={}", pct(&format!("{root}/{n}"), true)));
+            assert_eq!(v["choices"].as_array().unwrap().iter().find(|c| c["on"] == true).unwrap()["value"], "files", "{n}: Files stays lit");
+            // back to the folder (fm), and from there another tab
+            let o = run(&s3, "fm", "").unwrap(); let mut s4 = s3.clone(); crate::session::patch::merge(&mut s4, &o.patch); assert_eq!(viewer_json(&st, &template, &s4).unwrap()["open"], "files");
+            let o = view_action(&st, "h", &s3, "board").unwrap(); let mut s5 = s3.clone(); crate::session::patch::merge(&mut s5, &o.patch); assert_eq!(viewer_json(&st, &template, &s5).unwrap()["key"], format!("0|{root}|"), "a tab press shows the project's own board again");
+        }
+        // a file the tab cannot show changes nothing
+        let o = run(&s1, "fm-open", "plain.bin").unwrap(); assert!(o.before.is_empty() && o.patch == json!({}));
+        // Mech and Browser keep working beside it
+        assert!(view_action(&st, "h", &s1, "mech").is_some() && view_action(&st, "h", &s1, "browser").is_some());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+    #[test] fn mech_lists_models_picks_the_assembly_and_watches_the_part_as_3d() {
+        let d = std::env::temp_dir().join(format!("bp-mech-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join("mech/sub")).unwrap();
+        for f in ["mech/bracket.step", "mech/main-assembly.stp", "mech/sub/lid.glb", "mech/notes.txt", "mech/.hidden.step"] { std::fs::write(d.join(f), "x").unwrap(); }
+        let root = d.to_string_lossy().into_owned(); let ps = mech_parts(&root);
+        assert_eq!(ps, vec!["mech/bracket.step", "mech/main-assembly.stp", "mech/sub/lid.glb"]);
+        assert_eq!(mech_current(&ps, "").as_deref(), Some("mech/main-assembly.stp"), "the assembly is the default");
+        assert_eq!(mech_current(&ps, "mech/sub/lid.glb").as_deref(), Some("mech/sub/lid.glb"));
+        assert_eq!(mech_current(&ps, "mech/gone.step").as_deref(), Some("mech/main-assembly.stp"), "a part no longer listed falls back");
+        let (want, abs) = mech_want(&root, &ps, "mech/bracket.step");
+        assert_eq!(want, format!("2|{root}|{root}/mech/bracket.step")); assert_eq!(abs, format!("{root}/mech/bracket.step"));
+        assert_eq!(mech_want(&root, &[], ""), (String::new(), String::new()));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+    #[test] fn split_is_three_pages_and_a_key_of_its_own() {
+        let template: Value = serde_json::from_str::<Value>(include_str!("thread_static.json")).unwrap()["viewer"].clone();
+        let p = page(&template, "schematic", "/p", &json!({}), ""); assert_eq!(p["key"], "1|/p|");
+        assert_eq!(page(&template, "3d", "/p", &json!({}), "")["layers"], "0|/p|");
+        assert_eq!(key("split", "/p"), "split|/p|"); assert_eq!(key("split", ""), "");
+    }
+
+    #[test] fn layer_focus_masks_pick_and_modes_follow_core_layers() {
+        let f = Focus::read("12|1");
+        assert_eq!(masks(false, 0, f), (0, 536870911 & !kept(false, f)), "dim: the rest drawn at a quarter, nothing hidden");
+        let only = Focus::read("12|2"); let (off, dim) = masks(false, 0, only); assert_eq!(dim, 0); assert_eq!(off & bit(12), 0, "the active layer is never hidden"); assert!(off & bit(5) != 0);
+        assert_eq!(masks(false, 4, Focus::read("")), (4, 0), "no focus: only the person's own");
+        assert_eq!(pick(Focus::read(""), 5), Focus { active: 5, mode: 1 }); assert_eq!(pick(Focus { active: 5, mode: 1 }, 5), Focus { active: 5, mode: 0 }, "again puts all back");
+        assert_eq!(set_mode(false, Focus::read(""), 2), Focus { active: 12, mode: 2 }); assert_eq!(set_mode(true, Focus::read(""), 1).active, 0);
+        assert_eq!(Focus::read("7|2").show(), "7|2"); assert!(!Focus::read("7|0").on());
+    }
+
+    #[test] fn a_viewer_show_of_a_part_opens_mech_on_it() {
+        let d = std::env::temp_dir().join(format!("bp-mech2-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(d.join("mech")).unwrap();
+        for f in ["mech/a.step", "mech/b.step"] { std::fs::write(d.join(f), "x").unwrap(); }
+        let root = d.to_string_lossy().into_owned();
+        let mut st = State::new(); for l in include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/gpui/slim/fixtures/thread-log.jsonl")).lines() { st.apply_line(l); }
+        let th = "t1700000003-8"; let proj = st.threads.get(th).map(|t| t.project.clone()).unwrap();
+        if let Some(p) = st.projects.get_mut(&proj) { p.root = root.clone(); }
+        let session = json!({"sel": th, "rid": 1, "drafts": {}, "open": {}, "adding": false, "panel": false, "info": {}});
+        let o = view_action(&st, "h", &session, &format!("mech\t{root}/mech/b.step")).unwrap();
+        assert_eq!(o.patch["drafts"][format!("@mech.part:{th}")], "mech/b.step");
+        let w = o.before[0]["text"].as_str().unwrap(); assert!(w.contains("\"kind\":\"3d\"") && w.contains(&format!("{root}/mech/b.step")), "{w}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test] fn a_sheet_is_part_of_the_schematics_source_and_is_watched_by_its_file() {
+        let template: Value = serde_json::from_str::<Value>(include_str!("thread_static.json")).unwrap()["viewer"].clone();
+        let drafts = json!({"@view.sheet:t1": "/p/amp.kicad_sch"});
+        assert_eq!(page(&template, "schematic", "/p", &drafts, "t1")["key"], "1|/p|/p/amp.kicad_sch");
+        assert_eq!(page(&template, "schematic", "/p", &drafts, "t2")["key"], "1|/p|", "another thread's sheet is not this one's");
+        assert_eq!(page(&template, "board", "/p", &drafts, "t1")["key"], "0|/p|");
     }
 }

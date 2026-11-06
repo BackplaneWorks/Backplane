@@ -1,11 +1,19 @@
 //! Mail (src/core/mail.bend, mailbody.bend, hub.bend `Mail.*`, mailowner.bend): the mailroom's pure part. A mail is a body (the text, kept in
 //! `<home>/mail/<conversation>.jsonl`) and a header event (`MailPosted`, with `ConvSet` for a new conversation); the box folded from those events is
-//! `mailbox::Box`. Slice 1 files mail (`file.rs`); the requests (slice 2), triage and private threads (slice 3) and Google (slice 4) use these types.
+//! `mailbox::Box`. Slice 1 files mail (`file.rs`), slice 2 is the requests, slice 3 routing, triage and private threads (`route.rs`, `escalate.rs`, `run.rs`, `funnel.rs`, `tools.rs`); Google (slice 4) will use these types.
 //! No message text or address is ever logged by this module.
 pub mod file;
 pub mod owner;
 pub mod requests;
 pub mod mailbox;
+pub mod charter;
+pub mod escalate;
+pub mod funnel;
+pub mod prompt;
+pub mod prompt_text;
+pub mod route;
+pub mod run;
+pub mod tools;
 pub mod store;
 
 

@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 use std::sync::{Arc, Mutex as StdMutex};
 
 type Got = (String, String, String, Option<(String, String, String)>);
-#[derive(Default)] struct Rec { got: StdMutex<Vec<Got>>, stopped: StdMutex<Vec<String>>, slow: bool, hub: std::sync::OnceLock<Arc<Hub>> }
+#[derive(Default)] struct Rec { rides: StdMutex<Vec<(String, String, String)>>, notes: StdMutex<Vec<(String, String, String)>>, got: StdMutex<Vec<Got>>, stopped: StdMutex<Vec<String>>, slow: bool, hub: std::sync::OnceLock<Arc<Hub>>, answer: StdMutex<String>, queue: StdMutex<Vec<String>> }
 impl Inbox for Arc<Rec> {
     fn deliver<'a>(&'a self, th: &'a str, msg: &'a str, text: &'a str, o: Option<(String, String, String)>) -> Fut<'a, Result<(), String>> {
         Box::pin(async move {
@@ -22,6 +22,10 @@ impl Inbox for Arc<Rec> {
         })
     }
     fn stop<'a>(&'a self, th: &'a str) -> Fut<'a, ()> { Box::pin(async move { self.stopped.lock().unwrap().push(th.into()); }) }
+    fn queued<'a>(&'a self, _th: &'a str) -> Fut<'a, Vec<String>> { Box::pin(async move { self.queue.lock().unwrap().clone() }) }
+    fn approve<'a>(&'a self, _th: &'a str, _tool: &'a str, _detail: &'a str) -> Fut<'a, Result<String, String>> { Box::pin(async move { Ok(self.answer.lock().unwrap().clone()) }) }
+    fn note<'a>(&'a self, th: &'a str, id: &'a str, text: &'a str) -> Fut<'a, Result<(), String>> { Box::pin(async move { self.notes.lock().unwrap().push((th.into(), id.into(), text.into())); Ok(()) }) }
+    fn ride<'a>(&'a self, th: &'a str, id: &'a str, text: &'a str) -> Fut<'a, Result<(), String>> { Box::pin(async move { self.rides.lock().unwrap().push((th.into(), id.into(), text.into())); Ok(()) }) }
 }
 async fn start_slow(name: &str, log: &str, slow: bool) -> (Arc<Hub>, Arc<Bots>, Arc<Rec>) {
     let home = std::env::temp_dir().join(format!("bp-bots-{}-{name}", std::process::id())); let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap();
@@ -53,6 +57,7 @@ async fn bot(hub: &Arc<Hub>, name: &str) -> String {
     let ev: Vec<Value> = log(&hub).into_iter().filter(|e| e["$"] != "SettingSet").collect(); // the hub's own start-up settings come first
     assert_eq!(ev[0]["$"], "ThreadCreated"); assert_eq!((ev[0]["title"].as_str().unwrap(), ev[0]["env"].as_str().unwrap(), ev[0]["project"].as_str().unwrap()), ("Ada", "local", ""));
     assert_eq!(ev[1]["$"], "BotSet"); assert_eq!(ev[1]["id"], b.as_str()); assert_eq!(ev[1]["thread"], ev[0]["id"]); assert_eq!(ev[1]["look"], seed("Ada"));
+    assert!(log(&hub).iter().any(|e| e["$"] == "WorktreeSet"), "the folder is made before the reply: a message sent at once to a new bot has somewhere to run");
     until(&hub, |l| l.iter().any(|e| e["$"] == "WorktreeSet")).await;
     let w = log(&hub).into_iter().find(|e| e["$"] == "WorktreeSet").unwrap();
     assert_eq!(w["id"], ev[0]["id"]); assert!(w["worktree"].as_str().unwrap().ends_with(&format!("/bots/{b}")));
@@ -141,14 +146,16 @@ async fn bot(hub: &Arc<Hub>, name: &str) -> String {
     assert_eq!(rpc(&hub, "bots.room", json!({"room":"r1","name":"lab","members":format!("{a}\n{b}\n{c}\n{u}\nzed@far")})).await["ok"], true);
     let n = log(&hub).len();
     assert_eq!(rpc(&hub, "bots.post", json!({"room":"r1","text":"hello all","msg":"p1"})).await["ok"], true);
-    assert_eq!(kinds(&hub, n), vec!["RoomPosted", "BotWoke", "BotWoke"]);
+    assert_eq!(kinds(&hub, n)[..3], ["RoomPosted", "BotWoke", "BotWoke"]); // the uberbot is not woken: the post is filed for it
+    assert!(kinds(&hub, n).iter().any(|k| k == "MailPosted"), "the uberbot in the room: filed as the room's mail, though the fold already holds the post's header");
     let e = &log(&hub)[n]; assert_eq!((e["id"].as_str().unwrap(), e["from"].as_str().unwrap(), e["hop"].as_u64().unwrap()), ("p1", "you", 0));
     let got = rec.got.lock().unwrap().clone(); assert_eq!(got.len(), 2);
     assert_eq!(got[0].2, "[message from you in #lab]\nhello all");
     assert_eq!(got[0].3, Some(("person".into(), "room".into(), "lab".into())));
     assert!(got[0].1.ends_with(".0") && got[1].1.ends_with(".1"));
     assert_eq!(rpc(&hub, "bots.post", json!({"room":"r1","text":"hello all","msg":"p1"})).await["ok"], true);
-    assert_eq!(log(&hub).len(), n + 3, "a repeat stores and wakes nothing");
+    let count = |k: &str| kinds(&hub, n).iter().filter(|x| x.as_str() == k).count();
+    assert_eq!((count("RoomPosted"), count("BotWoke")), (1, 2), "a repeat stores and wakes nothing");
     assert_eq!(rpc(&hub, "bots.post", json!({"room":"nope","text":"x"})).await["error"], "no such room");
     assert_eq!(rpc(&hub, "bots.room_delete", json!({"room":"r1"})).await["ok"], true);
     assert_eq!(rpc(&hub, "bots.post", json!({"room":"r1","text":"x"})).await["error"], "no such room");
@@ -367,16 +374,49 @@ const JS_ROUTINE_STEPS: &str = include_str!("../../../../test/gpui/bots/fixtures
     assert_eq!(plan(&z, 1, "Mars/Base", "", "in 5m", None), Pick::Plan { cron: String::new(), once: 301, tz: "Mars/Base".into() });
 }
 
+async fn th_a(bots: &Arc<Bots>, b: &str) -> String { bots.world().await.bot(b).unwrap().thread.clone() }
 #[tokio::test] async fn session_asks_the_chat_thread_and_the_default_tab() {
     // U.Bots.chat.of and BU.tab.default for a view whose target is a bot
     let (hub, bots, _r) = start("api", "").await;
     let (a, u) = (bot(&hub, "aa").await, bot(&hub, "uu").await);
     let th = bots.world().await.bot(&a).unwrap().thread.clone();
     assert_eq!(chat_thread(&hub, &a).await, Some(th)); assert_eq!(chat_thread(&hub, "nope").await, None);
-    assert_eq!(default_tab(&hub, &a, false).await, "chat"); assert_eq!(default_tab(&hub, &u, false).await, "chat");
+    assert_eq!(default_tab(), "chat");
     hub.commit(&json!({"$":"UberSet","bot":u,"uid":"u1-x","at":5})).await.unwrap();
-    assert_eq!(default_tab(&hub, &u, false).await, "status", "a client without the Mailroom opens the uberbot on its Status");
-    assert_eq!(default_tab(&hub, &u, true).await, "chat"); assert_eq!(default_tab(&hub, &a, false).await, "chat");
+    // the page: Chat unless a tab this bot has is asked for; the uberbot's bar folds Status under Mailroom; a bot nobody knows has none
+    let p = crate::bots::bot_page(&hub, &u, "", 10).await.unwrap(); assert_eq!((p["tab"].as_str(), p["navTab"].as_str(), p["uber"].as_bool()), (Some("chat"), Some("chat"), Some(true)));
+    let p = crate::bots::bot_page(&hub, &u, "status", 10).await.unwrap(); assert_eq!((p["tab"].as_str(), p["navTab"].as_str(), p["subtabs"].as_array().unwrap().len()), (Some("status"), Some("mail"), 2));
+    let p = crate::bots::bot_page(&hub, &a, "status", 10).await.unwrap(); assert_eq!(p["tab"], "chat", "a plain bot has no Status");
+    assert!(crate::bots::bot_page(&hub, "nope", "", 10).await.is_none());
+    hub.commit(&json!({"$":"MemorySaved","bot":a,"key":"k","kind":"fact","text":"t","tags":"","at":5})).await.unwrap();
+    let p = crate::bots::bot_page(&hub, &a, "memory", 10).await.unwrap(); assert_eq!(p["memory"].as_array().unwrap().len(), 1); assert_eq!(p["memoryMore"], 0); assert_eq!(p["chat"], th_a(&bots, &a).await);
+    // the Memory tab pages: 200 memories of ~1 KB are three pages; each page starts where the last ended, Newer comes back, every memory is on exactly one page
+    for i in 0..200 { hub.commit(&json!({"$":"MemorySaved","bot":a,"key":format!("m{i:03}"),"kind":"fact","text":"x".repeat(1000),"tags":"","at":100 + i})).await.unwrap(); }
+    let mut seen = std::collections::BTreeSet::new(); let mut from = 0usize; let mut pages = 0;
+    loop {
+        let p = crate::bots::bot_page_from(&hub, &a, "memory", 1000, from).await.unwrap(); pages += 1;
+        assert_eq!(p["memoryFrom"], from); assert_eq!(p["memoryTotal"], 201);
+        for r in p["memory"].as_array().unwrap() { assert!(seen.insert(r["key"].as_str().unwrap().to_string()), "once"); }
+        assert!(serde_json::to_string(&p).unwrap().len() < 80 * 1024, "a page stays under the reply limit");
+        if from > 0 { assert!(p["memoryPrev"].is_u64()); } else { assert!(p["memoryPrev"].is_null()); }
+        match p["memoryNext"].as_u64() { Some(n) => { assert!(n as usize > from); from = n as usize } None => { assert_eq!(p["memoryMore"], 0); break } }
+    }
+    assert_eq!((seen.len(), pages >= 3), (201, true), "{pages} pages");
+    let back = crate::bots::bot_page_from(&hub, &a, "memory", 1000, from).await.unwrap(); let prev = back["memoryPrev"].as_u64().unwrap() as usize;
+    assert_eq!(crate::bots::bot_page_from(&hub, &a, "memory", 1000, prev).await.unwrap()["memoryNext"], from, "Newer then Older is the same page boundary");
+    // Webhooks: revoking one takes it off the tab; an unknown hook is refused
+    hub.commit(&json!({"$":"HookSet","id":"hk1","bot":a,"name":"ci","revoked":false,"at":6})).await.unwrap();
+    assert_eq!(crate::bots::bot_page(&hub, &a, "hooks", 10).await.unwrap()["hooks"].as_array().unwrap().len(), 1);
+    assert_eq!(rpc(&hub, "bots.hook_revoke", json!({"hook":"nope"})).await["ok"], false);
+    assert_eq!(rpc(&hub, "bots.hook_revoke", json!({"hook":"hk1"})).await["ok"], true);
+    assert_eq!(crate::bots::bot_page(&hub, &a, "hooks", 10).await.unwrap()["hooks"].as_array().unwrap().len(), 0);
+    // the pages that were "not drawn yet": Status (the plane as text), Mail (headers), Space (the bot's blocks), Settings (persona)
+    let p = crate::bots::bot_page(&hub, &u, "status", 10).await.unwrap(); assert!(p["plane"].is_string(), "Status carries the plane as text");
+    let p = crate::bots::bot_page(&hub, &u, "mail", 10).await.unwrap(); assert!(p["mail"].is_array() && p["mailTotal"].is_u64(), "Mail carries its conversation headers");
+    let p = crate::bots::bot_page(&hub, &u, "space", 10).await.unwrap(); assert!(p["space"].is_null() && p["spacePage"] == false, "no space yet");
+    hub.commit(&json!({"$":"SpaceSet","bot":u,"spec":"{\"title\":\"T\",\"blocks\":[{\"type\":\"heading\",\"text\":\"H\"}]}","at":6})).await.unwrap();
+    let p = crate::bots::bot_page(&hub, &u, "space", 10).await.unwrap(); assert_eq!(p["space"]["blocks"][0]["text"], "H");
+    let p = crate::bots::bot_page(&hub, &u, "settings", 10).await.unwrap(); assert!(p["persona"].is_string() && p["created"].is_string());
     let uth = bots.world().await.bot(&u).unwrap().thread.clone(); assert_eq!(chat_thread(&hub, &u).await, Some(uth));
 }
 
@@ -546,8 +586,8 @@ const JS_MAIL1_EVENTS: &str = include_str!("../../../../test/gpui/bots/fixtures/
 const JS_MAIL1_STEPS: &str = include_str!("../../../../test/gpui/bots/fixtures/js-mail1-steps.json");
 
 #[tokio::test] async fn js_parity_mail_filing() {
-    // the mailroom on: a room post is filed, a routine's firing is filed instead of delivered; the uberbot's routine is filed with an owner ticket; mail off with the
-    // uberbot in a room files nothing (the post is already in the box). Compared with a JS-hub recording: events, and the journal files line by line.
+    // the mailroom on: a room post is filed, a routine's firing is filed instead of delivered; the uberbot's routine is filed with an owner ticket. Compared with a JS-hub recording
+    // (events, and the journal files line by line) up to the post in the uberbot's room: there the JS hub filed nothing, so the uberbot never heard it, and this hub files it on purpose.
     std::env::set_var("TZ", "Etc/UTC");
     let (hub, bots, rec) = start("parity-mail1", "").await;
     let steps: Vec<Value> = serde_json::from_str(JS_MAIL1_STEPS).unwrap();
@@ -559,7 +599,9 @@ const JS_MAIL1_STEPS: &str = include_str!("../../../../test/gpui/bots/fixtures/j
     step(5, &rpc(&hub, "bots.post", json!({"room":"r1","text":"hello all","msg":"p1"})).await);
     step(6, &rpc(&hub, "bots.routine", json!({"bot":ada,"routine":"ro1","name":"later","at":"in 3d","prompt":"do it"})).await);
     step(7, &rpc(&hub, "bots.routine_run", json!({"routine":"ro1"})).await);
-    assert!(rec.got.lock().unwrap().is_empty(), "with the mailroom on nothing is delivered to a bot's agent");
+    // with the mailroom on the bot's agent is not told directly: its mail starts a run, whose brief is the only delivery
+    for _ in 0..100 { if !rec.got.lock().unwrap().is_empty() { break } tokio::time::sleep(std::time::Duration::from_millis(50)).await }
+    assert!(rec.got.lock().unwrap().iter().all(|g| g.0.starts_with("run") && g.2.starts_with("<charter>")), "only a run's brief is delivered");
     hub.commit(&json!({"$":"SettingSet","key":"mail.on","value":"off","at":2})).await.unwrap();
     let r = rpc(&hub, "bots.create", json!({"name":"bub","uber":true})).await; step(9, &r); let bub = r["bot"].as_str().unwrap().to_string();
     until(&hub, |l| l.iter().any(|e| e["$"] == "UberSet")).await;
@@ -574,8 +616,13 @@ const JS_MAIL1_STEPS: &str = include_str!("../../../../test/gpui/bots/fixtures/j
     let dir = hub.cfg.home.join("mail"); let mut names: Vec<String> = std::fs::read_dir(&dir).map(|d| d.filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default(); names.sort();
     for n in names.iter().filter(|n| n.ends_with(".jsonl")) { let lines: Vec<String> = std::fs::read_to_string(dir.join(n)).unwrap().lines().map(str::to_string).collect(); ours.push(json!({"$":"MailFile","name":n,"lines":lines})); }
     let (a, b): (Vec<String>, Vec<String>) = (norm(&js).iter().map(|s| unclock(s)).collect(), canon(&ours).iter().map(|s| unclock(s)).collect());
-    for (i, (x, y)) in a.iter().zip(b.iter()).enumerate() { assert_eq!(x, y, "event {i}: JS left, Rust right") }
-    assert_eq!(a.len(), b.len(), "same number of events\nJS: {a:#?}\nRust: {b:#?}");
+    let at = |v: &[String]| v.iter().position(|s| s.contains("RoomPosted") && s.contains("\"p2\"")).expect("the post in the uberbot's room");
+    assert_eq!(a[..=at(&a)], b[..=at(&b)], "JS left, Rust right");
+    let file = |v: &[String], n: &str| v.iter().find(|s| s.contains("MailFile") && s.contains(n)).cloned();
+    assert_eq!(file(&a, "room%3Ar1.jsonl"), file(&b, "room%3Ar1.jsonl")); assert!(file(&a, "routine%3Aro1.jsonl").is_some()); assert_eq!(file(&a, "routine%3Aro1.jsonl"), file(&b, "routine%3Aro1.jsonl"));
+    assert!(file(&a, "room%3Ar2.jsonl").is_none() && file(&b, "room%3Ar2.jsonl").is_some(), "the post in the uberbot's room is filed here");
+    let l = log(&hub); assert!(l.iter().any(|e| e["$"] == "RunSet" && e["conv"] == "room:r2" && e["bot"] == bub.as_str()), "and wakes a triage run");
+    assert!(l.iter().any(|e| e["$"] == "MailPosted" && e["conv"] == "routine:ro2") && l.iter().any(|e| e["$"] == "SettingSet" && e["key"].as_str().unwrap_or("").starts_with("owner.mail.pending.")), "the uberbot's routine: filed with its ticket");
 }
 /// the run's clock inside a record (a ten-digit second, and the log length in an owner ticket's stamp)
 fn unclock(s: &str) -> String {
@@ -955,7 +1002,8 @@ async fn owner_pair(tag: &str) -> Pair {
     let cid = l["convs"][0]["id"].as_str().unwrap().to_string(); assert!(cid.starts_with("owner:"), "{cid}");
     assert!(l["convs"][0]["parts"].as_array().unwrap().iter().any(|p| p == &json!(format!("bot:{ubb}"))));
     let rd = rpc(&hb, "mail.read", json!({"conv":cid})).await["result"].clone(); assert_eq!(rd["mails"][0]["text"], "hello owner\nmore"); assert_eq!(rd["mails"][0]["to"], format!("bot:{ubb}").as_str());
-    assert_eq!(bb.owner_records().await.len(), 1, "the holder keeps a ticket for the run to claim");
+    until(&hb, |l| l.iter().any(|e| e["$"] == "RunSet")).await;
+    assert!(bb.owner_records().await.is_empty(), "the holder's run claims the ticket as it starts");
     // the same request again is acknowledged without a second filing; a wrong link, a stale term and a body that is not the ticket's are refused
     let key = mail::owner::key(&r);
     let req = |term: u64, id: &str| json!({"m":"owner.mail","p":{"sender":ame,"uid":uid,"term":term,"ticket":{"uid":uid,"origin":ame,"mail":{"id":id},"conversation":{},"id":id,"conv":"c"},"body":{},"hold":""}});
@@ -1039,8 +1087,9 @@ async fn owner_planned(p: &Pair) {
     let ada = bot(&hub, "ada").await;
     let th = log(&hub).iter().find(|e| e["$"] == "BotSet" && e["id"] == ada.as_str()).unwrap()["thread"].as_str().unwrap().to_string();
     let set = tools::BotToolSet(bots.clone());
-    assert_eq!(set.list(&th).len(), tools::NAMES.len(), "a bot's thread lists every bot tool");
-    assert!(set.list("t-other").is_empty(), "a thread that is no bot's lists none");
+    assert_eq!(set.list(&th).len(), ledger::NAMES.len() + tools::NAMES.len(), "a bot's thread lists every bot tool");
+    let plain: Vec<String> = set.list("t-other").iter().map(|d| d["name"].as_str().unwrap().to_string()).collect();
+    assert_eq!(plain, ledger::NAMES, "a thread that is no bot's lists the ledgers' only");
     assert!(set.owns("memory_save") && !set.owns("thread_list"));
     let (ok, body) = set.call(&th, "memory_save", &json!({"key":"k","text":"v"})).await; assert!(ok, "{body}");
     assert_eq!(set.call("t-other", "memory_save", &json!({})).await, (false, json!({"error":"unknown tool"})));
@@ -1122,4 +1171,215 @@ fn unprompted_probe() {
         assert!(o.status.success(), "{expect}: {}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
         assert!(String::from_utf8_lossy(&o.stdout).contains("unprompted_work_runs_live_and_not_on_a_copy_hub ... ok"), "the probe ran ({expect})");
     }
+}
+
+// ---- the ledger tools, notify_person and project_create against the recorded JS hub (test/gpui/bots/record_ledger.mjs) ----
+/// ids and times inside a stored value or a sentence: `b1793945350-204`, `k...-1-0`, `1793945367.219`
+fn scrub(s: &str) -> String {
+    let c: Vec<char> = s.chars().collect(); let (mut o, mut i) = (String::new(), 0);
+    let run = |i: usize| c[i..].iter().take_while(|x| x.is_ascii_digit()).count();
+    while i < c.len() {
+        let stamp = run(i) == 10 && (i == 0 || !c[i - 1].is_ascii_digit());
+        let id = "bkpnqmto".contains(c[i]) && i + 1 < c.len() && run(i + 1) == 10 && (i == 0 || !c[i - 1].is_alphanumeric());
+        if id || stamp {
+            i += if id { 11 } else { 10 }; o.push_str(if id { "ID" } else { "T" });
+            while i + 1 < c.len() && (c[i] == '-' || c[i] == '.') && c[i + 1].is_ascii_digit() { i += 1 + run(i + 1) }
+        } else { o.push(c[i]); i += 1 }
+    }
+    o
+}
+fn scrubbed(v: &Value) -> Value {
+    match v { Value::Object(o) => Value::Object(o.iter().map(|(k, x)| (k.clone(), if ["at", "updated"].contains(&k.as_str()) { json!(0) } else { scrubbed(x) })).collect()),
+        Value::Array(a) => Value::Array(a.iter().map(scrubbed).collect()), Value::String(s) => json!(scrub(s)), x => x.clone() }
+}
+/// what a tool writes, as a recording shows it: its board and told records, the alert record, a new project, a post and the wakes it makes
+fn tool_line(e: &Value) -> bool { ["ProjectCreated", "RoomPosted", "BotWoke"].contains(&e["$"].as_str().unwrap_or("")) || (e["$"] == "SettingSet" && ["told.", "board.", "alert."].iter().any(|k| e["key"].as_str().unwrap_or("").starts_with(k))) }
+fn stored(e: &Value) -> Value {
+    let mut v = e.clone(); if let Some(o) = v.as_object_mut() { o.remove("at"); }
+    if let Some(x) = e["value"].as_str() { if let Ok(j) = serde_json::from_str::<Value>(x) { v["value"] = scrubbed(&j) } else { v["value"] = json!(scrub(x)) } }
+    v["key"] = json!(scrub(e["key"].as_str().unwrap_or(""))); if e["id"].is_string() { v["id"] = json!(scrub(e["id"].as_str().unwrap())) } v
+}
+#[tokio::test] async fn js_ledger_tools() {
+    let rec: Value = serde_json::from_str(include_str!("../../../../test/gpui/bots/fixtures/js-ledger-calls.json")).unwrap();
+    let js: Vec<Value> = include_str!("../../../../test/gpui/bots/fixtures/js-ledger.jsonl").lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+    let (hub, bots, inbox) = start("ledger", "").await;
+    let work = std::env::temp_dir().join(format!("bp-ledger-{}", std::process::id())); let _ = std::fs::remove_dir_all(&work); std::fs::create_dir_all(&work).unwrap();
+    std::fs::write(work.join("afile"), "x").unwrap(); let w = work.to_str().unwrap().to_string();
+    let (mut done, mut n) = (0usize, 0); let mut ids: Vec<(String, String)> = vec![];
+    for c in rec["calls"].as_array().unwrap() {
+        let (name, pre, post) = (c["name"].as_str().unwrap(), c["pre"].as_u64().unwrap() as usize, c["post"].as_u64().unwrap() as usize);
+        // the two folders under the person's home would land in the home of whoever runs this test; commands::fs has their path rules
+        let home = name == "project_create" && c["args"]["path"].as_str().map_or(false, |p| !p.is_empty() && !p.starts_with('/'));
+        if !tools::owns(name) || home { continue }
+        if pre > done { hub.commit_many(&js[done..pre]).await.unwrap(); done = pre }
+        let mut text = c["args"].to_string(); for (a, b) in &ids { text = text.replace(a.as_str(), b) } text = text.replace("/tmp/bp-rec-work", &w);
+        let args: Value = serde_json::from_str(&text).unwrap();
+        *inbox.answer.lock().unwrap() = c["answer"].as_str().filter(|a| !a.is_empty()).unwrap_or("session").to_string();
+        let th = c["thread"].as_str().unwrap(); let at = log(&hub).len();
+        let (ok, body) = bots.tool_call_at(th, name, &args, c["t"].as_u64().unwrap()).await;
+        let raw = c["result"]["content"][0]["text"].as_str().unwrap();
+        let want: Value = serde_json::from_str(raw).unwrap_or_else(|_| json!(raw));
+        assert_eq!(c["result"]["isError"].as_bool().unwrap(), !ok, "{name} {args}: {body}");
+        let got: Value = serde_json::from_str(&body.to_string().replace(&w, "/tmp/bp-rec-work")).unwrap();
+        assert_eq!(scrubbed(&got), scrubbed(&want), "{name} {args}");
+        if let (Some(a), Some(b)) = (want["id"].as_str(), body["id"].as_str()) { ids.push((a.to_string(), b.to_string())) }
+        // what the call left in the log; a mark an alert gets is the state lane's (no Transform on this hub)
+        let mine: Vec<Value> = log(&hub)[at..].iter().filter(|e| tool_line(e)).map(stored).collect();
+        let theirs: Vec<Value> = js[pre.max(done)..post].iter().filter(|e| tool_line(e) && !(["notify_person", "project_create"].contains(&name) && e["key"].as_str().map_or(false, |k| k.starts_with("told.") || k.starts_with("alert.") && name == "project_create"))).map(stored).collect();
+        let mine: Vec<Value> = serde_json::from_str(&serde_json::to_string(&mine).unwrap().replace(&w, "/tmp/bp-rec-work")).unwrap();
+        assert_eq!(mine, theirs, "{name} {args}");
+        // the rest of what happened meanwhile (an ask closing, a turn) is the hub's, and comes from the recording
+        let rest: Vec<Value> = js[pre.max(done)..post].iter().filter(|e| !tool_line(e)).cloned().collect(); hub.commit_many(&rest).await.unwrap(); done = post.max(done);
+        n += 1;
+    }
+    assert_eq!(n, rec["calls"].as_array().unwrap().iter().filter(|c| tools::owns(c["name"].as_str().unwrap())).count() - 2, "every recorded call of these tools but the two folders under the home");
+    let names = |k: &str| rec[k].as_array().unwrap().iter().map(|x| x.as_str().unwrap().to_string()).filter(|x| tools::owns(x)).collect::<Vec<_>>();
+    use crate::agents::mcp::ToolSet;
+    let set = tools::BotToolSet(bots.clone()); let list = |t: &str| set.list(t).iter().map(|d| d["name"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+    assert_eq!(list(rec["thread"].as_str().unwrap()), names("listBot"), "a bot's tools in the JS order");
+    assert_eq!(list("t1700000001-2"), names("listPlain"), "a plain thread's");
+    let _ = std::fs::remove_dir_all(&work);
+}
+#[test] fn told_keys_words_and_overlap_follow_told_bend() {
+    assert_eq!(ledger::key_pick("  Lunch: Dana!!  ", "x"), "lunch:-dana-");
+    assert_eq!(ledger::key_pick("", "The new board revision shipped to the fab today"), "the-new-board-revision-shipped-the-fab-today");
+    assert_eq!(ledger::key_pick("", "ok"), "ok", "a text with no word of three is its own key");
+    assert_eq!(ledger::words("the The THE a1 b2c é"), vec!["the", "b2c"], "distinct, lower case, three or more, ASCII runs");
+    let (w, x) = (ledger::words("dana lunch nyc wed"), ledger::words("Dana lunch in NYC Wed 10/28"));
+    assert!(ledger::same(&w, &x)); assert!(!ledger::same(&ledger::words("board"), &ledger::words("nothing here"))); assert!(ledger::same(&ledger::words("board"), &ledger::words("the board shipped")));
+    assert!(!ledger::same(&ledger::words("one two three four five"), &ledger::words("one two six seven eight nine")), "two of five is under 60%");
+    assert_eq!(ledger::channel_ok(""), "chat"); assert_eq!(ledger::channel_ok(" DIGEST "), "digest"); assert_eq!(ledger::channel_ok("weird"), "other");
+}
+#[test] fn told_check_stops_at_the_window_and_the_tenth() {
+    let r = |at: u64| ledger::Told { key: "k".into(), text: "t".into(), channel: "chat".into(), bot: String::new(), at };
+    let all: Vec<_> = (0..12).map(|i| r(1000 * 86400 - i)).chain([r(1000)]).collect();
+    assert_eq!(ledger::check(&all, 1000 * 86400, "k", "", 0).len(), 10);
+    assert_eq!(ledger::check(&all[10..], 1000 * 86400, "k", "", 99).len(), 2, "at most 30 days back, the old one left out");
+}
+#[test] fn board_dates_and_items_follow_tboard_bend() {
+    for (d, ok) in [("2026-12-01", true), ("2026-13-01", false), ("2026-12-32", false), ("2026-12-00", false), ("12/1", false), ("2026/12/01", false), ("20a6-12-01", false)] { assert_eq!(ledger::date(d), ok, "{d}") }
+    let i = ledger::item_of("- [x] two (due 2026-11-30)").unwrap(); assert_eq!((i.title.as_str(), i.status.as_str(), i.due.as_str()), ("two", "done", "2026-11-30"));
+    let i = ledger::item_of("12. [~] three due:2026-12-24").unwrap(); assert_eq!((i.title.as_str(), i.status.as_str(), i.due.as_str()), ("three", "doing", "2026-12-24"));
+    assert_eq!(ledger::item_of("- [q] not a box"), None); assert_eq!(ledger::item_of("[ ] no bullet"), None); assert_eq!(ledger::item_of("- [ ]"), None); assert_eq!(ledger::item_of("- [ ]x"), None);
+    assert_eq!(ledger::title_norm("  Two\t WORDS\n"), "two words");
+    assert_eq!(ledger::status_norm(" DOING "), "doing"); assert_eq!(ledger::status_norm("nonsense"), "todo");
+}
+#[tokio::test] async fn what_a_tool_does_for_the_uberbot_makes_ops() {
+    // Bots.ub: every commit a tool makes goes through World::also, so the uberbot's own changes reach its other machines
+    let (hub, bots, _r) = start("tool-ops", "{\"$\":\"SettingSet\",\"key\":\"machine.id\",\"value\":\"m1\",\"at\":1}\n").await;
+    let b = bot(&hub, "kit").await; assert_eq!(rpc(&hub, "bots.uber", json!({"bot":b})).await["ok"], true);
+    let th = log(&hub).iter().find(|e| e["$"] == "BotSet" && e["id"] == b.as_str()).unwrap()["thread"].as_str().unwrap().to_string();
+    let ops = |hub: &Arc<Hub>| log(hub).iter().filter(|e| e["$"] == "UberOp").map(|e| serde_json::from_str::<Value>(e["op"].as_str().unwrap()).unwrap()["k"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+    for (name, a) in [("memory_save", json!({"key":"k","kind":"fact","text":"v"})), ("memory_forget", json!({"key":"k"})), ("space_set", json!({"spec":"{}"})), ("space_page", json!({"html":"<p>"})),
+        ("routine_set", json!({"id":"","name":"n","schedule":"daily 09:30","prompt":"p"})), ("remind_person", json!({"at":"in 20m","text":"t"}))] {
+        let (ok, body) = bots.tool_call(&th, name, &a).await; assert!(ok, "{name}: {body}");
+    }
+    let rid = log(&hub).iter().find(|e| e["$"] == "RoutineSet").unwrap()["id"].as_str().unwrap().to_string();
+    assert!(bots.tool_call(&th, "routine_delete", &json!({"id":rid})).await.0);
+    assert_eq!(ops(&hub), ["mem", "forget", "space", "page", "routine", "routine", "routine-del"]);
+    let n = ops(&hub).len();
+    assert!(bots.tool_call(&th, "told_mark", &json!({"text":"said it"})).await.0); assert!(bots.tool_call(&th, "task_board_add", &json!({"title":"t"})).await.0);
+    assert_eq!(ops(&hub).len(), n, "the ledgers are this machine's own");
+}
+#[tokio::test] async fn notify_skips_a_queued_message_when_it_finds_the_turn() {
+    // Turn.of.state: a message waiting behind the turn is not its trigger
+    let (hub, bots, rec) = start("notify-q", "").await;
+    let b = bot(&hub, "ada").await; let th = log(&hub).iter().find(|e| e["$"] == "BotSet" && e["id"] == b.as_str()).unwrap()["thread"].as_str().unwrap().to_string();
+    hub.commit_many(&[json!({"$":"MessagePosted","thread":th,"msg":"m1","role":"user","text":"[routine: digest]\nmake it","at":100}), json!({"$":"MessagePosted","thread":th,"msg":"m2","role":"user","text":"later","at":101})]).await.unwrap();
+    let digest = |bots: Arc<Bots>, th: String| async move { bots.tool_call_at(&th, "notify_person", &json!({"text":"d","reason":"digest"}), 200).await };
+    assert!(!digest(bots.clone(), th.clone()).await.0, "the turn's message is the newest");
+    *rec.queue.lock().unwrap() = vec!["m2".into()];
+    assert_eq!(digest(bots.clone(), th.clone()).await, (true, json!({"ok":true,"note":"sent to the person"})));
+}
+#[tokio::test] async fn a_filed_mail_to_the_uberbot_gives_its_agent_a_turn_once_however_often_it_is_routed() {
+    // a routine's firing is filed for the uberbot; its run is bound to that input, claims the owner ticket, and the agent is handed the brief with the exact body.
+    // Routing the same header again (the owner outbox walk does, every 20 s) starts nothing.
+    std::env::set_var("TZ", "Etc/UTC");
+    let (hub, bots, rec) = start("route-once", "").await;
+    let r = rpc(&hub, "bots.create", json!({"name":"bub","uber":true})).await; let bub = r["bot"].as_str().unwrap().to_string();
+    until(&hub, |l| l.iter().any(|e| e["$"] == "UberSet")).await;
+    until(&hub, |l| l.iter().filter(|e| e["$"] == "WorktreeSet").count() >= 1).await;
+    assert!(bots.uber_init(now_s()).await > 0);
+    assert_eq!(rpc(&hub, "bots.routine", json!({"bot":bub,"routine":"ro2","name":"morning","at":"in 3d","prompt":"plan the day"})).await["ok"], true);
+    assert_eq!(rpc(&hub, "bots.routine_run", json!({"routine":"ro2"})).await["ok"], true);
+    for _ in 0..100 { if !rec.got.lock().unwrap().is_empty() { break } tokio::time::sleep(std::time::Duration::from_millis(50)).await }
+    let got = rec.got.lock().unwrap().clone(); assert_eq!(got.len(), 1, "one brief");
+    let (th, _msg, text, _o) = &got[0];
+    assert!(th.starts_with("run") && text.starts_with("<charter>") && text.contains("<mail_history newest-first>") && text.contains("private mailroom triage"), "the owner's brief");
+    let ev = log(&hub);
+    let run = ev.iter().find(|e| e["$"] == "RunSet").expect("RunSet"); let mail_id = run["mail"].as_str().unwrap().to_string();
+    assert_eq!((run["bot"].as_str().unwrap(), run["conv"].as_str().unwrap(), run["thread"].as_str().unwrap()), (bub.as_str(), "routine:ro2", th.as_str()));
+    assert!(ev.iter().any(|e| e["$"] == "SettingSet" && e["key"] == format!("run.bound.{th}") && e["value"] == mail_id.as_str()), "bound to its input");
+    assert!(ev.iter().any(|e| e["$"] == "SettingSet" && e["key"].as_str().unwrap_or("").starts_with("owner.mail.pending.") && e["value"] == ""), "the owner ticket is claimed with the run");
+    let body = mail::store::read(&mail::store::path(&hub.cfg.home, "routine:ro2")).remove(0);
+    let n = ev.len();
+    bots.route_body(body.clone()).await; bots.route_body(body).await;
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    assert_eq!(log(&hub).iter().filter(|e| e["$"] == "RunSet").count(), 1, "a header already bound to a run starts no second one");
+    assert_eq!(log(&hub).len(), n, "and logs nothing");
+    assert_eq!(rec.got.lock().unwrap().len(), 1);
+}
+
+mod triage;
+mod standin;
+
+async fn call_hook(hub: &Arc<Hub>, hid: &str, hs: Vec<(String, String)>, body: &str) -> (String, String) {
+    let h = hub.http_for(&format!("/hook/{hid}")).expect("the /hook route is registered");
+    let mut r = crate::auth::Req::new("POST", &format!("/hook/{hid}"), hs); r.body = body.as_bytes().to_vec();
+    let a = h.call(hub, &r).await; (a.status.to_string(), String::from_utf8_lossy(&a.body).into_owned())
+}
+#[tokio::test] async fn a_webhook_is_made_signed_calls_reach_the_bot_once_and_revoking_drops_its_secret() {
+    use crate::net::sign;
+    let (hub, _b, rec) = start("hooks", "").await; let a = bot(&hub, "ada").await;
+    assert_eq!(rpc(&hub, "bots.hook", json!({"bot":"nobody","name":"ci"})).await["ok"], false);
+    let r = rpc(&hub, "bots.hook", json!({"bot":a,"name":"ci"})).await; assert_eq!(r["ok"], true, "{r}");
+    let (hid, secret) = (r["hook"].as_str().unwrap().to_string(), r["secret"].as_str().unwrap().to_string());
+    assert_eq!(r["path"], format!("/hook/{hid}")); assert_eq!(secret.len(), 64);
+    let page = crate::bots::bot_page(&hub, &a, "hooks", 10).await.unwrap(); assert_eq!(page["hooks"][0]["name"], "ci");
+    // no credentials, then a wrong signature, then a stale one
+    assert_eq!(call_hook(&hub, &hid, vec![], "{}").await.0, "401 Unauthorized");
+    let now = crate::bots::rpc::now_s(); let body = r#"{"event":"build","ok":true}"#;
+    let hs = |ts: u64, sig: String| vec![("X-Backplane-Timestamp".to_string(), ts.to_string()), ("X-Backplane-Signature".to_string(), sig)];
+    assert_eq!(call_hook(&hub, &hid, hs(now, "sha256=00".into()), body).await.1, "bad or stale signature");
+    assert_eq!(call_hook(&hub, &hid, hs(now - 1000, sign::header(&secret, now - 1000, body)), body).await.1, "bad or stale signature");
+    assert!(rec.got.lock().unwrap().is_empty(), "nothing reached the bot yet");
+    // a genuine call: heard once as data, counted; the same call again is a replay
+    let good = hs(now, sign::header(&secret, now, body));
+    assert_eq!(call_hook(&hub, &hid, good.clone(), body).await, ("200 OK".to_string(), "ok".to_string()));
+    assert_eq!(call_hook(&hub, &hid, good, body).await.1, "already seen");
+    let got = rec.got.lock().unwrap().clone(); assert_eq!(got.len(), 1, "{got:?}"); assert!(got[0].2.starts_with("[webhook: ci] A signed request arrived."), "{}", got[0].2); assert!(got[0].2.contains(body));
+    assert_eq!(crate::bots::bot_page(&hub, &a, "hooks", 10).await.unwrap()["hooks"][0]["count"], 1);
+    // GitHub's signature, keyed by the secret's text and replayed by its delivery id
+    let gh = format!("sha256={}", hex::encode(crate::net::owner::hmac_sha256(secret.as_bytes(), body.as_bytes())));
+    let ghs = vec![("X-Hub-Signature-256".to_string(), gh), ("X-GitHub-Delivery".to_string(), "d1".to_string())];
+    assert_eq!(call_hook(&hub, &hid, ghs.clone(), body).await.0, "200 OK"); assert_eq!(call_hook(&hub, &hid, ghs, body).await.1, "already seen");
+    // a bearer token: none until one is made, then each call is new, then off
+    let bearer = |t: &str| vec![("Authorization".to_string(), format!("Bearer {t}"))];
+    assert_eq!(call_hook(&hub, &hid, bearer("x"), body).await.1, "this webhook has no bearer token: make one in its bot's Webhooks tab");
+    let t = rpc(&hub, "bots.hook_token", json!({"hook":hid,"op":"show"})).await; let tok = t["token"].as_str().unwrap().to_string();
+    assert_eq!(tok.len(), 32); assert!(t["tokenUrl"].as_str().unwrap().ends_with(&format!("/hook/{hid}")));
+    assert_eq!(rpc(&hub, "bots.hook_token", json!({"hook":hid,"op":"show"})).await["token"], tok.as_str(), "shown again, not remade");
+    assert_eq!(call_hook(&hub, &hid, bearer("wrong"), body).await.1, "wrong bearer token");
+    assert_eq!(call_hook(&hub, &hid, bearer(&tok), body).await.0, "200 OK"); assert_eq!(call_hook(&hub, &hid, bearer(&tok), body).await.0, "200 OK");
+    let new = rpc(&hub, "bots.hook_token", json!({"hook":hid,"op":"new"})).await["token"].as_str().unwrap().to_string(); assert_ne!(new, tok);
+    assert_eq!(call_hook(&hub, &hid, bearer(&tok), body).await.1, "wrong bearer token");
+    assert_eq!(rpc(&hub, "bots.hook_token", json!({"hook":"nope","op":"show"})).await["ok"], false);
+    // revoking drops the hook and its files: the secret that signed before is refused
+    assert_eq!(rpc(&hub, "bots.hook_revoke", json!({"hook":hid})).await["ok"], true);
+    assert!(!hub.cfg.home.join("secrets/hooks").join(&hid).exists() && !hub.cfg.home.join("secrets/hooks").join(format!("{hid}.token")).exists());
+    let n = rec.got.lock().unwrap().len(); let later = hs(now + 1, sign::header(&secret, now + 1, "x"));
+    assert_eq!(call_hook(&hub, &hid, later, "x").await.0, "401 Unauthorized"); assert_eq!(rec.got.lock().unwrap().len(), n);
+}
+
+#[tokio::test] async fn a_task_run_asked_for_wakes_the_bot_with_its_parameters() {
+    // main.rs starts the browser driver before the bots: this hub does the same, so Bots wires the driver's wake
+    let home = std::env::temp_dir().join(format!("bp-bots-{}-taskrun", std::process::id())); let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap(); std::fs::write(home.join("events.jsonl"), "").unwrap();
+    let hub = Hub::start(Cfg { home, version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+    crate::term::start(hub.clone());
+    let rec = Arc::new(Rec::default()); let _bots = Bots::start_with(hub.clone(), Arc::new(rec.clone())).await;
+    let a = bot(&hub, "ada").await; let d = crate::term::driver::get(&hub).expect("driver");
+    d.set_task(&a, "login", r#"{"v":1,"slug":"login","name":"Log in","description":"","params":[{"name":"user","label":"","kind":"text","example":""}],"steps":[]}"#, 1700000001).await;
+    let r = rpc(&hub, "bots.task", json!({"bot":a,"op":"run","slug":"login","params":{"user":"ada"}})).await; assert_eq!(r["ok"], true, "{r}");
+    for _ in 0..100 { if rec.got.lock().unwrap().iter().any(|x| x.2.starts_with("[task: login] Run the task skill login with") && x.2.contains("ada")) { return } tokio::time::sleep(std::time::Duration::from_millis(50)).await }
+    panic!("the bot never heard the task: {:?}", rec.got.lock().unwrap());
 }

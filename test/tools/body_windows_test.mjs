@@ -112,4 +112,37 @@ check('a windowed bot message keeps its header, Reply and a whole-message Copy',
  const page=JSON.stringify(b.project(rr()));assert(!page.includes('displayed part'));
  assert.equal((page.match(/"reply-to"/g)||[]).length,1,'one Reply, outside the pages');
 });
+check('a picture of a thread read before draws the bodies read for it; never another thread’s, never a streaming row, never the one bound now',()=>{
+ const {b,requests}=setup();
+ const detailOf=(id,parts)=>({epoch:'e',generation:'1',viewId:'v',target:{kind:'thread',id},window:{partial:parts}});
+ const pa={id:'m',thread:'a',version:'7',cursor:'0',bodyPage:1,automatic:true}, live={id:'@live:a',thread:'a',version:'1',cursor:'0',bodyPage:1,automatic:true};
+ const rootA=node('div','timeline',{id:'timeline'},[node('bp-memo','m',{fn:'msg',who:'a'},[text('real prefix')]),node('bp-memo','@live:a',{fn:'msg',who:'a'},[text('streaming')])]);
+ b.bind('h',detailOf('a',[pa,live]),'owner',rootA,false,'thread:a');
+ b.observe(timeline(b,false,'next',true,rootA),true);
+ assert(b.accept({id:'m',thread:'a',version:'7',bodyPage:1,start:0,end:12,total:12,text:'whole body A',hasMore:false,complete:true,cursor:'',previous:''},requests.find(r=>r.entryId==='m')));
+ assert.equal(b.projectHeld(rootA,'thread:a'),rootA,'the destination bound now draws through project(), not held()');
+ const rootB=node('div','timeline',{id:'timeline'},[node('bp-memo','n',{fn:'msg',who:'a'},[text('b prefix')])]);
+ b.bind('h',detailOf('b',[{id:'n',thread:'b',version:'3',cursor:'0',bodyPage:1,automatic:true}]),'owner',rootB,false,'thread:b');
+ const held=b.projectHeld(rootA,'thread:a'),again=b.project(rootA,{parts:new Map([['m',pa]]),reader:()=>null});
+ assert(read(held).includes('whole body A'),'A’s page drawn at once');
+ assert.equal(attrs(elems(held.kids)[0]).class,'msg assistant','as the hub’s view will draw it: a message with a body window');
+ assert.equal(elems(held.kids)[1],elems(rootA.kids)[1],'the streaming row is left to the hub');
+ assert(!read(again).includes('whole body A'));
+ assert.equal(b.projectHeld(rootB,'thread:b'),rootB,'B is bound now');
+ assert.equal(b.projectHeld(rootA,'thread:c'),rootA,'nothing held for C');
+ assert(read(b.projectHeld(rootB,'thread:a')).includes('b prefix'),'held parts only touch their own ids');
+ assert.equal(requests.filter(r=>r.entryId==='n').length,0,'held drawing asks nothing');
+});
+check('a body not read yet whose whole text a prefetched picture had draws it as its first page will, and still reads the page',()=>{
+ const {b,requests}=setup();
+ b.renderBody=n=>({...n,tag:'div',kids:list([node('p','',{},[text(read(n))])])});
+ b.wholes(node('div','timeline',{id:'timeline'},[node('bp-memo','m',{fn:'msg',who:'a'},[text('the whole message')]),node('bp-memo','@live:x',{fn:'msg'},[text('streaming')])]));
+ const before=b.project(root());
+ assert(read(before).includes('the whole message'),'the whole text at once');assert(!read(before).includes('Loading message text'),'nothing says it is loading');
+ b.observe(timeline(b,false,'next',true,root()),true);assert.equal(requests.length,1,'the page is still read');
+ assert(b.accept({id:'m',thread:'a',version:'7',bodyPage:1,start:0,end:17,total:17,text:'the whole message',hasMore:false,complete:true,cursor:'',previous:''},requests[0]));
+ const after=b.project(root()),part=k=>JSON.stringify(elems(elems(k.kids).find(x=>attrs(x).class==='body body-window').kids)[0]);
+ assert.equal(part(elems(after.kids)[0]),part(elems(before.kids)[0]),'the page draws the very same part');
+ assert(!b.whole.has('@live:x'),'never a streaming row');
+});
 console.log(JSON.stringify({pass:true,checks,scope:'Read-only body source, bounded retention and current owner/version fences; no service or DOM/anchor qualification'}));

@@ -2,6 +2,10 @@ import os, struct, json, array
 import FreeCAD as App, FreeCADGui as Gui, ImportGui
 src, out, tol = os.environ["BP_IN"], os.environ["BP_OUT"], float(os.environ.get("BP_TOL", "0.25"))
 try:
+    # a person's FreeCAD preferences can make a STEP import wait forever offscreen: Import's "import mode" 2 (found hanging on 1.1: a box never came in), and the
+    # "show this dialog" boxes. Set in memory only: this process ends with os._exit, which saves nothing.
+    App.ParamGet("User parameter:BaseApp/Preferences/Mod/Import").SetInt("ImportMode", 0)
+    App.ParamGet("User parameter:BaseApp/Preferences/Mod/Part/STEP").SetBool("VisibleImportDialog", False)
     doc = App.newDocument("bpmesh")
     ImportGui.insert(src, doc.Name)
     default = (0.8, 0.8, 0.901961)

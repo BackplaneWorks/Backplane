@@ -343,6 +343,45 @@
   }
  },
  {
+  "name": "plane_read",
+  "description": "Read the status plane as text: what waits on the person (approvals, questions, failures, most urgent first), what runs, the bots, the rooms with unread posts and the routines, here, with the ids thread_read and thread_send take. With `machine` (machine_list shows them), that other machine of the person's own plane instead, its ids made <link>~<id>. idle lists the day's idle threads too.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "machine": {
+     "type": "string",
+     "description": "Another machine's name (or link id): read its plane."
+    },
+    "idle": {
+     "type": "boolean",
+     "description": "Also list the threads idle in the last day (default: only their count)."
+    }
+   },
+   "required": []
+  }
+ },
+ {
+  "name": "notify_person",
+  "description": "Alert the person on their phone and desktop. Allowed only for: needs_you (you are blocked until they decide, approve, log in, enter a code or answer; prefer asking in your turn's question or an approval when that fits), done (work the person gave you in your own thread is finished; at most once per thing they asked), reminder or digest (only in a turn that a routine they scheduled started). Anything else is refused: post it in a room, put it in your Space or on the task board, where it shows in the app without an alert.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "text": {
+     "type": "string",
+     "description": "What they should know, short: the first line is what the alert shows."
+    },
+    "reason": {
+     "type": "string",
+     "description": "needs_you, done, reminder or digest."
+    }
+   },
+   "required": [
+    "text",
+    "reason"
+   ]
+  }
+ },
+ {
   "name": "remind_person",
   "description": "Alert the person at a time, with no agent turn: a notification on their desktop and phone, and a reminder line in your thread. Use it for 'remind me...', not routine_set. Times as in routine_set's `at`, in the person's time zone unless `tz` says otherwise.",
   "inputSchema": {
@@ -379,6 +418,26 @@
     }
    },
    "required": []
+  }
+ },
+ {
+  "name": "project_create",
+  "description": "Make a new project for the person: a folder (made when missing) added to their projects. The person is asked to approve it first. Answers the project's id; start work there with thread_launch and that `project`.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "path": {
+     "type": "string",
+     "description": "The folder: an absolute path, ~/x, or a name (under the home folder)."
+    },
+    "name": {
+     "type": "string",
+     "description": "Its name in the sidebar (default: the folder's)."
+    }
+   },
+   "required": [
+    "path"
+   ]
   }
  }
 ]

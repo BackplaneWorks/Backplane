@@ -1095,7 +1095,7 @@ class BackplaneApp : Application() {
     override fun onCreate() {
         super.onCreate()
         Notes.channels(this)
-        core
+        if (!BuildConfig.DATA_APP) core
     }
 }
 

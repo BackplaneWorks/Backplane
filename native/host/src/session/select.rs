@@ -28,7 +28,9 @@ pub fn select(f: &dyn Facts, hub: &str, session: &Value, value: &str) -> Option<
     let id = value.rsplit('|').next().unwrap_or("");
     let (old, d, info) = (s(session, "sel"), &session["drafts"], &session["info"]);
     if id.is_empty() || id.contains('~') || id.starts_with("project-home-") || id.starts_with('@') || !f.thread_exists(id) { return None }
-    if s(info, &format!("panel:{id}")) == "1" || !s(d, &format!("@kept:{id}")).is_empty() { return None }
+    // (a panel to restore is the helper's, except Diff and Review, which come back with their thread: pages.rs)
+    let own_panel = matches!(s(info, &format!("view.kind:{id}")), "diff" | "review");
+    if (s(info, &format!("panel:{id}")) == "1" && !own_panel) || !s(d, &format!("@kept:{id}")).is_empty() { return None }
     let rid = session["rid"].as_u64().unwrap_or(0);
     let mut drafts = Map::new();
     // Ui.select.k
@@ -51,6 +53,8 @@ pub fn select(f: &dyn Facts, hub: &str, session: &Value, value: &str) -> Option<
         next_rid += 1;
     }
     let mut patch = json!({"sel": id, "drafts": drafts, "info": info_patch, "open": {"settings": false}});
+    // Ui.reselect: the new thread's panel is the one it left
+    if old != id && session["panel"].as_bool().unwrap_or(false) != (s(info, &format!("panel:{id}")) == "1") { patch["panel"] = json!(s(info, &format!("panel:{id}")) == "1"); }
     if want { patch["rid"] = json!(next_rid) }
     Some(SelectOut { session_patch: patch, cmds, next_target: json!({"kind": "thread", "id": id}) })
 }
@@ -100,6 +104,8 @@ mod tests {
         for v in ["", "h|link~t9", "h|project-home-p1", "h|@x", "h|unknown"] { assert!(select(&f, HUB, &session(), v).is_none(), "{v}") }
         let mut s = session(); s["info"]["panel:t1700000002-3"] = json!("1");
         assert!(select(&f, HUB, &s, "t1700000002-3").is_none(), "a viewer panel to restore");
+        s["info"]["view.kind:t1700000002-3"] = json!("diff"); s["sel"] = json!("tother");
+        assert_eq!(select(&f, HUB, &s, "t1700000002-3").unwrap().session_patch["panel"], json!(true), "Diff and Review come back with their thread");
         let mut k = session(); k["drafts"]["@kept:t1700000002-3"] = json!("x");
         assert!(select(&f, HUB, &k, "t1700000002-3").is_none(), "Draft.stale");
     }

@@ -166,7 +166,11 @@ impl Mcp {
         { let tool = if name == "permission_prompt" { sv(&a, "tool_name") } else { name };
           let why = ag.rule_refusal(thread, tool).await;
           if !why.is_empty() { return Some(if name == "permission_prompt" { result(id, perm_text(&perm_deny(&why))) } else { result(id, shaped(false, &json!(why))) }) } }
-        if name == "permission_prompt" { return self.permit(ag, thread, id, &a, sock).await }
+        if name == "permission_prompt" {
+            if let Some(m) = ag.mailroom() { if let Some(v) = m.permit(thread, sv(&a, "tool_name"), a.get("input").unwrap_or(&Value::Null)).await { return Some(result(id, perm_text(&v))) } } // Perm.run: a mail run's charter decides, no ask
+            return self.permit(ag, thread, id, &a, sock).await
+        }
+        if let Some(m) = ag.mailroom() { if let Some((ok, body)) = m.gate(thread, name, &a).await { return Some(result(id, shaped(ok, &body))) } } // Hub.mcp.charter
         let (ok, body) = match name {
             "orchestrator_capabilities" => ag.tool_caps(thread).await,
             "thread_list" => ag.tool_list(thread).await,
@@ -196,7 +200,14 @@ impl Mcp {
             "secret_list" => crate::settings::secret::tool_list(),
             "secret_run" => { let cwd = ag.world().await.cwd(thread); crate::settings::secret::tool_run(thread, &cwd, &a).await }
             n if crate::term::tools::NAMES.contains(&n) => crate::term::tools::call(&ag.hub, thread, n, &a).await.unwrap_or_else(|| fail("unknown tool")),
-            "viewer_show" => { ag.hub.push_all(&json!({"t":"view","thread":thread,"path":sv(&a, "path"),"kind":sv(&a, "kind")})); (true, json!({"shown":sv(&a, "path")})) }
+            "viewer_show" => {
+                // the answer carries what the viewer then shows (kind, source, part, sheet, layer, selection) as the client reports it; a client that does not answer in 2 s leaves the last report, marked
+                let before = crate::files::kicad::watch::viewer_state(thread).0;
+                ag.hub.push_all(&json!({"t":"view","thread":thread,"path":sv(&a, "path"),"kind":sv(&a, "kind")}));
+                let mut now = crate::files::kicad::watch::viewer_state(thread);
+                for _ in 0..40 { if now.0 > before { break } tokio::time::sleep(std::time::Duration::from_millis(50)).await; now = crate::files::kicad::watch::viewer_state(thread); }
+                (true, json!({"shown":sv(&a, "path"),"viewer":now.1,"settled":now.0 > before}))
+            }
             n if ag.tool_sets().iter().any(|s| s.owns(n)) => { let s = ag.tool_sets().into_iter().find(|s| s.owns(n)).unwrap(); s.call(thread, n, &a).await }
             _ => fail("unknown tool"),
         };

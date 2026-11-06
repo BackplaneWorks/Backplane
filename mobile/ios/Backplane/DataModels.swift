@@ -151,3 +151,50 @@ struct DError: Error, LocalizedError {
     var message: String
     var errorDescription: String? { message.isEmpty ? code : message }
 }
+
+// MARK: data/1 additions (hello.features: actions, search, models, mentions, bots, notify; native/host/src/data/ext.rs)
+struct DBot: Codable, Equatable, Identifiable {
+    var id: String; var name: String; var thread: String; var uber: Bool
+    enum CodingKeys: String, CodingKey { case id, name, thread, uber }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); id = c.str(.id); name = c.str(.name); thread = c.str(.thread); uber = c.bool(.uber) }
+}
+struct DRoom: Codable, Equatable, Hashable, Identifiable {
+    var id: String; var name: String
+    enum CodingKeys: String, CodingKey { case id, name }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); id = c.str(.id); name = c.str(.name) }
+}
+struct DDirectory: Decodable { var bots: [DBot]; var rooms: [DRoom]
+    enum CodingKeys: String, CodingKey { case bots, rooms }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); bots = (try? c.decode([DBot].self, forKey: .bots)) ?? []; rooms = (try? c.decode([DRoom].self, forKey: .rooms)) ?? [] } }
+struct DPost: Decodable, Identifiable {
+    var id: String; var from: String; var text: String; var at: Int
+    enum CodingKeys: String, CodingKey { case id, from, text, at }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); id = c.str(.id); from = c.str(.from); text = c.str(.text); at = c.int(.at) }
+}
+struct DPosts: Decodable { var posts: [DPost]
+    enum CodingKeys: String, CodingKey { case posts }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); posts = (try? c.decode([DPost].self, forKey: .posts)) ?? [] } }
+struct DThreadOpt: Decodable { var thread: DThread?
+    enum CodingKeys: String, CodingKey { case thread }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); thread = try? c.decode(DThread.self, forKey: .thread) } }
+struct DSearch: Decodable { var threads: [DThread]; var projects: [DProject]
+    enum CodingKeys: String, CodingKey { case threads, projects }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); threads = (try? c.decode([DThread].self, forKey: .threads)) ?? []; projects = (try? c.decode([DProject].self, forKey: .projects)) ?? [] } }
+struct DModelRow: Decodable, Identifiable {
+    var value: String; var label: String; var ok: Bool; var id: String { value }
+    enum CodingKeys: String, CodingKey { case value, label, ok }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); value = c.str(.value); label = c.str(.label).isEmpty ? c.str(.value) : c.str(.label); ok = c.bool(.ok) }
+}
+struct DModels: Decodable { var models: [String: [DModelRow]]
+    enum CodingKeys: String, CodingKey { case models }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); models = (try? c.decode([String: [DModelRow]].self, forKey: .models)) ?? [:] } }
+struct DMention: Decodable, Identifiable {
+    var sigil: String; var mid: String; var label: String; var detail: String; var id: String { sigil + mid }
+    enum CodingKeys: String, CodingKey { case sigil, id, label, detail }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); sigil = c.str(.sigil); mid = c.str(.id); label = c.str(.label); detail = c.str(.detail) }
+}
+struct DMentions: Decodable { var items: [DMention]
+    enum CodingKeys: String, CodingKey { case items }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); items = (try? c.decode([DMention].self, forKey: .items)) ?? [] } }
+
+struct DModelGroup: Identifiable { var provider: String; var rows: [DModelRow]; var id: String { provider } }

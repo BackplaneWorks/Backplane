@@ -36,6 +36,12 @@ fn pager_row(cx:&mut Context<Backplane>,id:String,pager:&Value,light:bool)->Opti
 }
 pub fn string(v:&Value,key:&str)->String {v[key].as_str().unwrap_or("").to_string()}
 impl Backplane {
+    /// An agent's viewer_show (or the script's `viewshow` step): open the page its kind or file names on the thread on screen, and a model's part on it.
+    pub(crate) fn view_show(&mut self,thread:&str,kind:&str,path:&str,cx:&mut Context<Self>){
+        let Some((k,part))=screens::viewer::shown(kind,path) else {return};
+        if !(self.selected==thread||self.selected.ends_with(&format!("|{thread}"))||thread.is_empty()) {return}
+        let _=self.tx.try_send(screens::viewer::view_kind(&match part {Some(p)=>format!("{k}\t{p}"),None=>k})); cx.notify();
+    }
     fn new(window:&mut Window,cx:&mut Context<Self>,config:hub::Config,started:Instant)->Self {
         let (swatches,gallery,fonts,theme)=(config.swatches,config.gallery,config.fonts,config.theme.clone());let steps:VecDeque<Step>=config.script.as_ref().map(|p|script::load(p)).unwrap_or_default();let script_total=steps.len();
         // a client that never gets projects says so (a hub with a canned presenter, a refused token ...) instead of leaving a script waiting silently
@@ -66,15 +72,22 @@ impl Backplane {
                 let mut r=r;let prev=self.data["thread"].take();self.data=r["shown"].take();self.picture_applied(cx);
                 self.timeline_picture(prev,&r["window"]);
                 if self.data["deleting"].is_object(){eprintln!("GPUI_LOG {{\"deleting\":{}}}",self.data["deleting"]["id"]);}let selected=string(&self.data["thread"],"id");
-                if !selected.is_empty() {let selected=screens::attach::raw_id(&selected).to_string();self.screens.menu_open=screens::tools::menu_keeps(self.screens.menu_open,&self.selected,&selected);self.picture_arrived(&selected,cx);self.selected=selected;}
+                screens::accounts::thread_changed(self,&selected);if !selected.is_empty() {let selected=screens::attach::raw_id(&selected).to_string();self.screens.menu_open=screens::tools::menu_keeps(self.screens.menu_open,&self.selected,&selected);self.picture_arrived(&selected,cx);self.selected=selected;}
                 self.thread_source="hub";
                 if let Some((label,t0))=self.confirm.take(){self.m("input",serde_json::json!({"step":label,"ok":true,"latency_ms":(t0.elapsed().as_secs_f64()*1e6).round()/1e3,"source":"hub"}));}
                 self.apply_ms=t_apply.elapsed().as_secs_f64()*1000.0;self.timing=Some(timing);self.applied_at=Some(Instant::now());self.adopt_new(cx);
             },
             Event::Plot(b)=>self.plot_received(b,cx),
             Event::Answer(id,reply)=>screens::improvements::answered(self,id,reply,cx),
-            Event::Rpc(tag,ok,why)=>screens::settings::rpc_done(self,tag,ok,&why,cx),
+            Event::Data(_,v)=>screens::accounts::got(self,v,cx),
+            Event::Rpc(tag,ok,why)=>if tag.starts_with("acct"){screens::accounts::done(self,tag,ok,&why,cx)}else if tag.starts_with("files") {screens::filesui::rpc_done(self,tag,ok,&why,cx)} else {screens::settings::rpc_done(self,tag,ok,&why,cx)},
             Event::PlotTooBig(n)=>self.screens.plot.too_big(n),
+            Event::Refs(r)=>{ self.screens.plotview.hist.refs=screens::plot::refs_of(&r); cx.notify(); }
+            Event::Steps(r)=>{ self.screens.plotview.hist.steps=screens::histbar::steps_of(&r); cx.notify(); }
+            Event::Sheets(rows)=>{ self.screens.plot.sheets=screens::plot::sheet_rows(&rows); cx.notify(); }
+            Event::ViewShow(thread,kind,path)=>self.view_show(&thread,&kind,&path,cx),
+            Event::Pick(info)=>{ let slot=self.screens.pick_slot.unwrap_or(0); let card=screens::plot::card(&info); let pv=self.screens.pv(slot); if pv.picked.is_some() { pv.card=card.clone(); } if let Some(c)=card { screens::plotview::cross_probe(self,slot,&c); } screens::plotview::report_state(self); cx.notify(); }
+            Event::Probe(slot,m)=>{ let pv=self.screens.pv(slot); if pv.lit.len()<20000 { pv.lit.extend(m); } cx.notify(); }
             Event::Status(s)=>{self.status=s;if self.status=="Connected"{self.error.clear();}},
             Event::Accepted=>{self.input.update(cx,|input,cx|input.set(String::new(),cx));self.drafts.remove(&self.selected);self.screens.drafts.set(&self.selected,"");self.timeline_to_end();}, // (the file too: the box's own change comes after the map entry is gone, and would not clear it)
             Event::Older(cursor,page)=>self.older_landed(cursor,page,cx),
@@ -99,7 +112,7 @@ impl Backplane {
     pub fn open_settings(&mut self,cx:&mut Context<Self>){
         let hub_open=self.data["settings"].is_object();
         let ui=&mut self.screens.settings_ui;
-        if ui.open_local||hub_open{ui.open_local=false;ui.device=false;} else {ui.open_local=true;ui.device=true;}
+        if ui.open_local||hub_open{ui.open_local=false;ui.device=false;ui.accounts=false;} else {ui.open_local=true;ui.device=true;self.screens.focus_settings=true;}
         let _=self.tx.try_send(Command::Action("flag".into(),"settings".into()));cx.notify();
     }
     pub fn focus_search(&mut self,cx:&mut Context<Self>){if !self.sidebar_open{self.sidebar_toggle(cx);}self.ui_epoch+=1;self.screens.projects.focus=Some("search");cx.notify();}
@@ -165,7 +178,7 @@ impl Backplane {
     fn user_entries(&self)->usize {self.data["thread"]["entries"].as_array().map_or(0,|e|e.iter().filter(|e|e["kind"]=="user").count())}
     /// Ctrl/Cmd-C with no text field focused (a click in the timeline leaves none): copy what is selected there.
     fn copy_selection(&mut self,_:&CopySelection,_:&mut Window,cx:&mut Context<Self>){self.timeline_copy(cx);}
-    fn close_popup(&mut self,_:&ClosePopup,_:&mut Window,cx:&mut Context<Self>){if self.ctx_close(cx){return;}if screens::improvements::escape(self,cx){return;}if let Some(a)=screens::projects::close_on_escape(&self.data){let _=self.tx.try_send(a);cx.notify();return;}if self.screens.menu_open {self.screens.menu_open=false;}else if let Some(a)=screens::tools::close_question(&self.data) {let _=self.tx.try_send(a);}else if self.data["settings"].is_object() {let _=self.tx.try_send(Command::Action("flag".into(),"settings".into()));}else if let Some(a)=screens::bots::close_form(&self.data) {let _=self.tx.try_send(a);}else{let _=self.tx.try_send(Command::Action("skill-close".into(),String::new()));}cx.notify();}
+    fn close_popup(&mut self,_:&ClosePopup,_:&mut Window,cx:&mut Context<Self>){if self.ctx_close(cx){return;}if self.screens.acct.menu{self.screens.acct.menu=false;cx.notify();return;}if screens::settings::is_open(self){screens::settings::close(self,cx);return;}if screens::improvements::escape(self,cx){return;}if let Some(a)=screens::projects::close_on_escape(&self.data){let _=self.tx.try_send(a);cx.notify();return;}if self.screens.menu_open {self.screens.menu_open=false;}else if let Some(a)=screens::tools::close_question(&self.data) {let _=self.tx.try_send(a);}else if self.data["settings"].is_object() {let _=self.tx.try_send(Command::Action("flag".into(),"settings".into()));}else if let Some(a)=screens::bots::close_form(&self.data) {let _=self.tx.try_send(a);}else{let _=self.tx.try_send(Command::Action("skill-close".into(),String::new()));}cx.notify();}
 }
 /// Every key binding, from the defaults and this device's shortcut choices (called again when one changes).
 pub fn bind_all(cx:&mut App,l:&local::Local){
@@ -176,6 +189,8 @@ pub fn bind_all(cx:&mut App,l:&local::Local){
         KeyBinding::new(&l.key("sidebar"),ToggleSidebarKey,None),KeyBinding::new(&l.key("search"),FocusSearchKey,None)]);
 }
 fn main()->anyhow::Result<()> {
+    #[cfg(feature="cef")]
+    if let Some(code)=viewers::cef::subprocess(){std::process::exit(code);} // a CEF helper process (renderer, gpu...) is this executable run again
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
     let started=Instant::now();let config=hub::Config::parse()?;let exit_after=config.exit_after;
     if config.swatches||config.gallery||config.fonts||std::env::var_os("BACKPLANE_GPUI_RECTS").is_some(){art::enable_rects();}

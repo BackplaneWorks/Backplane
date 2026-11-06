@@ -8,7 +8,7 @@ use tokio_tungstenite::connect_async;
 
 struct Fake(Arc<Hub>);
 impl RpcHandler for Fake {
-    fn methods(&self) -> &'static [&'static str] { &["project.add", "thread.create", "thread.modes", "ask.answer", "turn.interrupt"] }
+    fn methods(&self) -> &'static [&'static str] { &["project.add", "thread.create", "thread.modes", "ask.answer", "turn.interrupt", "thread.pin", "thread.rename"] }
     fn call<'a>(&'a self, h: &'a Arc<Hub>, _w: &'a Caller, id: &'a Value, m: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let _ = &self.0; let at = now_ms() / 1000;
@@ -17,7 +17,7 @@ impl RpcHandler for Fake {
                 "project.add" => { let root = s(p, "path"); h.commit(&json!({"$":"ProjectCreated","id":format!("p{n}"),"title":root.rsplit('/').next().unwrap_or(""),"root":root,"at":at})).await.unwrap(); vec![json!({"t":"reply","id":id,"ok":true})] }
                 "thread.create" => { let t = format!("t{n}"); h.commit(&json!({"$":"ThreadCreated","id":t,"project":s(p,"project"),"title":if s(p,"title").is_empty(){"New thread"}else{s(p,"title")},"env":"local","branch":"","worktree":"","provider":"claude","model":"","at":at})).await.unwrap(); vec![json!({"t":"reply","id":id,"ok":true,"thread":t})] }
                 "ask.answer" => { h.commit(&json!({"$":"AskClosed","id":s(p,"id"),"answer":s(p,"answer"),"at":at})).await.unwrap(); vec![json!({"t":"reply","id":id,"ok":true})] }
-                "thread.modes" | "turn.interrupt" => vec![json!({"t":"reply","id":id,"ok":true})],
+                "thread.modes" | "turn.interrupt" | "thread.pin" | "thread.rename" => vec![json!({"t":"reply","id":id,"ok":true})],
                 _ => vec![json!({"t":"reply","id":id,"ok":false,"error":"no"})],
             }
         })
@@ -59,10 +59,10 @@ async fn ask(ws: &mut Ws, id: u64, m: &str, p: Value) -> Value {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_hello_capabilities_and_both_encodings() {
-    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images"]));
+    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser"]));
     let (_h, port) = up("hello").await;
     let mut ws = open(port, "&enc=json").await; let v = next(&mut ws).await;
-    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert_eq!(v["features"], json!(["images"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
+    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
     // the default is binary CBOR with plain string keys
     let mut c = open(port, "").await; let m = tokio::time::timeout(Duration::from_secs(5), c.next()).await.unwrap().unwrap().unwrap();
     let Message::Binary(b) = m else { panic!("binary") }; assert!(b.windows(5).any(|w| w == b"proto"), "plain keys, not the hub's dictionary");
@@ -195,4 +195,27 @@ async fn ask(ws: &mut Ws, id: u64, m: &str, p: Value) -> Value {
     let v = json!({"t":"reply","id":7,"ok":true,"result":{"xs":[1,-2,300,70000,"é"],"n":null,"f":false}});
     let mut o = vec![]; cbor_plain(&v, &mut o); assert_eq!(crate::cbor::decode(&o).unwrap(), v);
     assert!(o.windows(6).any(|w| w == b"result"));
+}
+
+// the phone additions (data/ext.rs)
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_additions_search_models_mentions_directory_and_actions() {
+    let (_h, port) = up("ext").await; let mut ws = open(port, "&enc=json").await; next(&mut ws).await;
+    let r = ask(&mut ws, 1, "search", json!({"q":"SECOND"})).await; assert_eq!(r["result"]["threads"].as_array().unwrap().iter().map(|t| t["id"].as_str().unwrap()).collect::<Vec<_>>(), vec!["t2"], "case-insensitive, by title");
+    let r = ask(&mut ws, 2, "search", json!({"q":"alpha"})).await; assert_eq!(r["result"]["projects"][0]["id"], "p1"); assert_eq!(r["result"]["threads"].as_array().unwrap().len(), 2, "a project's name finds its threads");
+    assert!(ask(&mut ws, 3, "search", json!({"q":""})).await["result"]["threads"].as_array().unwrap().is_empty());
+    let r = ask(&mut ws, 4, "models.list", json!({})).await; assert!(r["result"]["models"]["claude"].as_array().map_or(false, |a| !a.is_empty()), "claude's models are built in");
+    let r = ask(&mut ws, 5, "mentions.list", json!({"q":"fir","kind":">"})).await; assert_eq!(r["result"]["items"][0]["label"], "First"); assert_eq!(r["result"]["items"][0]["sigil"], ">");
+    let r = ask(&mut ws, 6, "mentions.list", json!({"q":"alp","kind":"%"})).await; assert_eq!(r["result"]["items"][0]["id"], "p1");
+    let r = ask(&mut ws, 7, "bots.list", json!({})).await; assert_eq!((r["result"]["bots"].as_array().unwrap().len(), r["result"]["rooms"].as_array().unwrap().len()), (0, 0), "no bots lane on this hub: empty, not an error");
+    let r = ask(&mut ws, 8, "thread.act", json!({"thread":"t1","action":"pin"})).await; assert_eq!(r["ok"], true); assert_eq!(r["result"]["thread"]["id"], "t1");
+    let r = ask(&mut ws, 9, "thread.act", json!({"thread":"t1","action":"explode"})).await; assert_eq!(r["ok"], false);
+    let r = ask(&mut ws, 10, "thread.act", json!({"thread":"nope","action":"pin"})).await; assert_eq!(r["ok"], false);
+    let r = ask(&mut ws, 11, "thread.act", json!({"thread":"t1","action":"rename","title":"  "})).await; assert_eq!(r["ok"], false, "a blank title is refused before any request");
+}
+#[test] fn notify_for_marks_asks_and_turn_ends_only() {
+    let t = |k: &str| ext::notify_for(&json!({"$":"TurnChanged","state":k}), "t1", "T", "");
+    assert_eq!(t("completed").unwrap()["kind"], "done"); assert_eq!(t("failed").unwrap()["kind"], "fail");
+    assert!(t("running").is_none() && t("interrupted").is_none() && t("cancelled").is_none());
+    assert_eq!(ext::notify_for(&json!({"$":"AskOpened"}), "t1", "T", "rm -rf x").unwrap()["body"], "rm -rf x");
+    assert!(ext::notify_for(&json!({"$":"MessagePosted"}), "t1", "T", "").is_none());
 }

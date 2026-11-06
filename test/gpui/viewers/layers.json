@@ -1,0 +1,1 @@
+[{"select":0},{"wait":1500},{"click":"rail:Board"},{"wait":5000},{"action":["view-layer-pick","5"]},{"wait":5000},{"action":["view-layer-mode","2"]},{"wait":5000},{"action":["view-layer-pick","5"]},{"action":["view-layer","12"]},{"wait":5000}]

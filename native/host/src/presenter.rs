@@ -25,6 +25,8 @@ pub trait Presenter: Send + Sync {
     /// Why it went down, once, for the log: how the helper process ended (a signal, an exit code) and the call that found it dead.
     fn why_down(&self) -> Option<String> { None }
     fn restart(&self) -> Fut<'_, ()> { Box::pin(async { Ok(()) }) }
+    /// There is no helper at all (the hub runs without `--policy-bin`): nothing a request is sent to can be waited for, so the Rust screens answer everything they can, reads included.
+    fn absent(&self) -> bool { false }
 }
 
 /// JSON text made pure ASCII: non-ASCII becomes \uXXXX (UTF-16 pairs), as the policy requires.

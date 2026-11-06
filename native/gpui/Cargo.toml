@@ -1,18 +1,25 @@
 [package]
 name = "backplane-gpui"
-version = "0.1.0"
+version = "0.15.0"
 edition = "2024"
 publish = false
 
+[features]
+default = []
+# Embedded Chromium (OSR) in the Browser tab; needs libcef.so at run time (see docs/browser-gpui-cef.md). Off: the hub-frame JPEG poller.
+cef = ["dep:cef"]
+
 [dependencies]
+cef = { version = "=154.5.0", default-features = false, optional = true }
 anyhow = "1"
 async-channel = "2"
 env_logger = { version = "0.11", default-features = false }
 lyon = { version = "1", default-features = false }
-image = { version = "0.25.1", default-features = false, features = ["jpeg"] }
+image = { version = "0.25.1", default-features = false, features = ["jpeg", "png"] }
 ureq = { version = "2", default-features = false }
 futures-util = { version = "0.3", features = ["sink"] }
 serde_json = "1"
+base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["rt", "net", "sync", "time", "macros"] }
 tokio-tungstenite = { version = "0.28", default-features = false, features = ["connect", "handshake"] }

@@ -7,6 +7,8 @@ pub mod attach_http;
 pub mod fm;
 pub mod imgroutes;
 pub mod mimg;
+pub mod ops;
+pub mod tools;
 pub mod git;
 pub mod misc;
 pub mod rv;
@@ -72,6 +74,22 @@ impl HttpHandler for Downloads {
                 // /view/*: Hub.bot.view's refusal; /files/*: FilesHttp.root
                 return if req.route().starts_with("/view/") { HttpReply::text("403 Forbidden", "not a thread of this machine, or not a file the viewers read") } else { HttpReply::text("404 Not Found", "no such thread") };
             }
+            if req.route() == "/files/get" {
+                let (root, rel) = (root_of(hub, &thread).await.unwrap(), fm::from_uri(&req.param("path")));
+                return match tokio::task::spawn_blocking(move || ops::read(&root, &rel).map(|b| (b, rel))).await {
+                    Ok(Ok((b, rel))) => HttpReply { status: "200 OK", ctype: "application/octet-stream".into(), extra: format!("Content-Disposition: attachment; filename=\"{}\"\r\nX-Content-Type-Options: nosniff\r\n", fm::last(&rel).replace(['"', '\r', '\n', '\\'], "_")), body: b },
+                    Ok(Err(e)) => HttpReply::text("404 Not Found", &e),
+                    Err(_) => HttpReply::text("500 Internal Server Error", "cannot read file"),
+                };
+            }
+            if req.route() == "/files/zip" {
+                let (root, rel) = (root_of(hub, &thread).await.unwrap(), fm::from_uri(&req.param("path")));
+                return match tokio::task::spawn_blocking(move || ops::zip_dir(&root, &rel).map(|b| (b, rel))).await {
+                    Ok(Ok((b, rel))) => HttpReply { status: "200 OK", ctype: "application/zip".into(), extra: format!("Content-Disposition: attachment; filename=\"{}.zip\"\r\nX-Content-Type-Options: nosniff\r\n", { let n = fm::last(&rel); if n.is_empty() { "project" } else { n } }.replace(['"', '\r', '\n', '\\'], "_")), body: b },
+                    Ok(Err(e)) => HttpReply::text("404 Not Found", &e),
+                    Err(_) => HttpReply::text("500 Internal Server Error", "cannot zip"),
+                };
+            }
             HttpReply::text("501 Not Implemented", "this route is not served by this hub")
         })
     }
@@ -79,11 +97,12 @@ impl HttpHandler for Downloads {
 
 struct Files;
 impl RpcHandler for Files {
-    fn methods(&self) -> &'static [&'static str] { &["files.dir"] }
+    fn methods(&self) -> &'static [&'static str] { &["files.dir", "files.op", "files.read"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             match method {
                 "files.dir" => vec![files_dir(hub, id, p).await],
+                "files.op" | "files.read" => vec![files_op(hub, id, method, p).await],
                 _ => vec![json!({"t":"reply","id":id,"ok":false,"error":"unknown method"})],
             }
         })
@@ -168,7 +187,8 @@ pub async fn note(hub: &Arc<Hub>, thread: &str, tone: &str, summary: &str) {
 mod boundary_tests {
     use super::*;
     use crate::{hub::Cfg, presenter::Canned};
-    fn tmp(n: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-boundary-{}-{n}", std::process::id())); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
+    /// a folder per call: tests of this module run side by side, and one sharing a folder wipes the other's files
+    fn tmp(n: &str) -> PathBuf { static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0); let p = std::env::temp_dir().join(format!("bp-boundary-{}-{n}-{}", std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::Relaxed))); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
     async fn world() -> (Arc<Hub>, PathBuf) {
         let (home, proj) = (tmp("home"), tmp("proj"));
         std::fs::write(proj.join("a.txt"), "x").unwrap();
@@ -182,7 +202,7 @@ mod boundary_tests {
             json!({"$":"ThreadDeleted","id":"gone","at":3}), json!({"$":"ProjectRemoved","id":"p2","at":3})]).await.unwrap();
         (hub, proj)
     }
-    const ROUTES: &[&str] = &["files.dir", "files.list", "git.status", "git.diff", "git.act", "git.revert", "history.refs", "history.resolve", "kicad.components", "boards.list", "mech.list", "mech.render",
+    const ROUTES: &[&str] = &["files.dir", "files.op", "files.read", "files.list", "git.status", "git.diff", "git.act", "git.revert", "history.refs", "history.resolve", "kicad.components", "boards.list", "mech.list", "mech.render",
         "review.bom", "review.checks", "review.tick", "review.comment", "review.release", "kicad.export10", "pdf.page", "file.open"];
     #[tokio::test] async fn every_folder_route_refuses_what_does_not_resolve() {
         let (hub, _) = world().await;
@@ -215,6 +235,24 @@ mod boundary_tests {
         // an archived thread keeps its folder
         hub.commit(&json!({"$":"ThreadArchived","id":"ok","archived":true,"at":4})).await.unwrap();
         assert_eq!(root_of(&hub, "ok").await.unwrap(), proj);
+    }
+    #[tokio::test] async fn files_op_writes_inside_the_project_and_files_get_and_zip_serve_it() {
+        let (hub, proj) = world().await;
+        let who = Caller { gen: "g".into(), client: 1 };
+        let call = |m: &'static str, p: Value| { let (hub, who) = (hub.clone(), Caller { gen: "g".into(), client: 1 }); async move { hub.rpc_for(m).unwrap().call(&hub, &who, &json!(7), m, &p).await.remove(0) } };
+        let _ = &who;
+        assert_eq!(call("files.op", json!({"thread":"ok","op":"mkdir","path":"sub"})).await["ok"], true);
+        let w = call("files.op", json!({"thread":"ok","op":"write","path":"sub/n.txt","data":"aGVsbG8="})).await; assert_eq!(w["ok"], true, "{w}");
+        assert_eq!(call("files.op", json!({"thread":"ok","op":"write","path":"sub/n.txt","data":"aGVsbG8="})).await["ok"], false, "never replaces");
+        assert_eq!(call("files.op", json!({"thread":"ok","op":"rename","path":"sub/n.txt","to":"m.txt"})).await["result"]["path"], "sub/m.txt");
+        assert_eq!(call("files.read", json!({"thread":"ok","path":"sub/m.txt"})).await["result"]["text"], "hello");
+        assert_eq!(call("files.op", json!({"thread":"ok","op":"write","path":"../x","data":"aA=="})).await["ok"], false);
+        assert_eq!(call("files.op", json!({"thread":"nope","op":"mkdir","path":"z"})).await, threadpath::refusal(&json!(7)));
+        let dl = |route: &'static str, path: &'static str| { let req = Req::new("GET", &format!("{route}?thread=ok&path={path}"), vec![]); let hub = hub.clone(); async move { hub.http_for(route).unwrap().call(&hub, &req).await } };
+        let g = dl("/files/get", "sub/m.txt").await; assert!(g.status.starts_with("200") && g.body == b"hello", "{}", g.status);
+        let z = dl("/files/zip", "sub").await; assert!(z.status.starts_with("200") && z.body.starts_with(b"PK"), "{}", z.status);
+        assert!(dl("/files/get", "..%2Fetc").await.status.starts_with("400"));
+        assert_eq!(call("files.op", json!({"thread":"ok","op":"delete","path":"sub"})).await["ok"], true); assert!(!proj.join("sub").exists());
     }
     #[tokio::test] async fn downloads_and_viewer_sources_keep_the_boundary() {
         let (hub, _) = world().await;
@@ -258,5 +296,22 @@ mod boundary_tests {
         let o = std::process::Command::new(std::env::current_exe().unwrap()).args(["files::boundary_tests::copy_writes_probe", "--exact", "--nocapture", "--test-threads=1"])
             .env("BACKPLANE_COPY", "1").env("BP_COPY_PROBE", "1").env_remove("BACKPLANE_AGENTS").output().unwrap();
         assert!(o.status.success(), "{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
+    }
+}
+
+/// files.op {thread, op: mkdir|rename|delete|write, path, to?, data?} and files.read {thread, path, max?}: the Files tab's writes (ops.rs).
+/// Ok: `{ok:true, result:{path, thread, op}}` (files.read: `{text, path}`); a refusal says why in `result.text`. A hub on a copied log writes nothing.
+async fn files_op(hub: &Arc<Hub>, id: &Value, method: &str, p: &Value) -> Value {
+    let thread = p.get("thread").and_then(Value::as_str).unwrap_or("");
+    let Some(root) = root_of(hub, thread).await else { return threadpath::refusal(id) };
+    if method == "files.op" && crate::copy::on() { let e = crate::copy::HOME_ONLY; return json!({"t":"reply","id":id,"ok":false,"error":e,"result":{"text":e,"thread":thread}}) }
+    let (p2, m) = (p.clone(), method.to_string());
+    let r = tokio::task::spawn_blocking(move || if m == "files.read" {
+        let rel = p2.get("path").and_then(Value::as_str).unwrap_or("");
+        ops::read_text(&root, rel, p2.get("max").and_then(Value::as_u64).unwrap_or(65536).min(1 << 20) as usize).map(|t| json!({"text":t,"path":rel}))
+    } else { ops::run(&root, &p2).map(|path| json!({"path":path,"op":p2.get("op").cloned().unwrap_or(Value::Null)})) }).await.unwrap_or(Err("failed".into()));
+    match r {
+        Ok(mut v) => { v["thread"] = json!(thread); json!({"t":"reply","id":id,"ok":true,"result":v}) }
+        Err(e) => json!({"t":"reply","id":id,"ok":false,"error":e,"result":{"text":e,"thread":thread}}),
     }
 }

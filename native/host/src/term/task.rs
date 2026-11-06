@@ -18,6 +18,7 @@ pub struct Task { pub slug: String, pub name: String, pub description: String, p
 
 fn gs(v: &J, k: &str) -> String { v.get(k).and_then(J::as_str).unwrap_or("").to_string() }
 fn gn(v: &J, k: &str) -> u64 { v.get(k).and_then(J::as_u64).unwrap_or(0) }
+pub fn first_name(t: &Task) -> String { first(&t.name, &t.slug) }
 fn first(a: &str, b: &str) -> String { if a.is_empty() { b.to_string() } else { a.to_string() } }
 
 /// Task.slug: lowercase, [a-z0-9-], dashes collapsed and trimmed, at most 48 chars, "task" if nothing is left.

@@ -7,7 +7,7 @@ use tokio::sync::mpsc::{self, Sender};
 use tokio_tungstenite::tungstenite::{Message, protocol::WebSocketConfig};
 
 #[derive(Debug)] pub enum Command { Rpc(String,crate::screens::settings::Secret,&'static str), Sleep(f64), Select(String), Send(String), Draft(String), Action(String,String), Page(String), Ask(String,Value,u64), /** read this history page of the thread, then stand on the newest again */ History(String) }
-#[derive(Debug)] pub enum Event { PlotTooBig(usize), Rpc(&'static str,bool,String), Answer(u64,Value), Plot(Vec<u8>), NetWake, Picture(Value,Timing), Status(String), Accepted, /** a history page read for this cursor (None: its answer went stale) */ Older(String,Option<Value>), Error(String), /** the hub answered, and said no: shown, but the connection is fine */ Refused(String) }
+#[derive(Debug)] pub enum Event { PlotTooBig(usize), /** a direct request's result (the accounts snapshot) */ Data(&'static str,Value), /** history.steps' answer */ Steps(Value), /** history.refs' answer: git dir, top, refs lines, board, schematic */ Refs(Value), /** a cross-probe's pieces on canvas slot: (chunk, piece) */ Probe(usize,Vec<(usize,usize)>), /** a schematic's sheets: rows `depth<TAB>leaf<TAB>name<TAB>file` per line */ Sheets(String), /** an agent's viewer_show: thread, kind, path */ ViewShow(String,String,String), /** what a tapped piece is (kicad.info's answer) */ Pick(String), Rpc(&'static str,bool,String), Answer(u64,Value), Plot(Vec<u8>), NetWake, Picture(Value,Timing), Status(String), Accepted, /** a history page read for this cursor (None: its answer went stale) */ Older(String,Option<Value>), Error(String), /** the hub answered, and said no: shown, but the connection is fine */ Refused(String) }
 /// The connection label an event sets (None: it leaves the label alone). A refusal is a live connection, so it is not "Disconnected".
 pub fn status_for(ev:&Event)->Option<&'static str>{match ev{Event::Error(_)=>Some("Disconnected"),_=>None}}
 #[cfg(test)] mod status_tests{use super::*;use core::prelude::v1::test;
@@ -57,6 +57,8 @@ impl View {
     fn fresh(config:&Config)->Self {Self {restored:Restore::None,saved:None,drawn:false,rpcs:HashMap::new(),asks:HashMap::new(),hub:config.hub.replacen("ws://","http://",1),cid:format!("gpui-{}-{}",std::process::id(),millis()),
         greeting:Value::Null,target:json!({"kind":"recent","id":""}),session:json!({"sel":"","rid":millis(),"drafts":{},"open":{},"adding":false,"panel":false,"info":{}}),
         view_id:String::new(),revision:0,next:(1_u64<<47)+millis(),pending:HashMap::new(),outgoing:HashMap::new(),rpc_names:HashMap::new(),dirty:false,controls:HashMap::new(),sent:HashMap::new(),paging:None,want_page:None,req_draft:HashMap::new(),offered:HashMap::new(),bases:delta::Bases::default()}}
+    /// the session key the composer's text goes under: the thread on show (a bot's target shows its chat thread), else the target
+    fn draft_key(&self)->String {self.session["sel"].as_str().filter(|s|!s.is_empty()).or(self.target["id"].as_str()).unwrap_or("").to_string()}
     fn request(&mut self, method:&str, extra:Value)->Value {
         self.next+=1;self.revision+=1;
         let mut p=json!({"version":1,"hub":self.hub,"generation":self.greeting["generation"],"epoch":self.greeting["epoch"],"requestRevision":self.revision,
@@ -131,8 +133,8 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                 Command::Rpc(m,p,tag)=>{static RPC:std::sync::atomic::AtomicU64=std::sync::atomic::AtomicU64::new(1<<30);let id=RPC.fetch_add(1,std::sync::atomic::Ordering::Relaxed);v.rpcs.insert(id,tag);if v.rpcs.len()>64 {v.rpcs.clear();}json!({"id":id,"m":m,"p":p.0})},
                 Command::Ask(m,p,tag)=>{static ASK:std::sync::atomic::AtomicU64=std::sync::atomic::AtomicU64::new(1<<31);let id=ASK.fetch_add(1,std::sync::atomic::Ordering::Relaxed);v.asks.insert(id,tag);if v.asks.len()>64 {v.asks.clear();}json!({"id":id,"m":m,"p":p})},
                 Command::Select(id)=>{let id=unqualify(&id);v.want_page=None;v.target=json!({"kind":"thread","id":id});v.session["sel"]=json!(id);v.view_id.clear();v.request("view.open",json!({}))},
-                Command::Send(text)=>{ensure!(!v.view_id.is_empty(),"view not ready");let id=v.target["id"].as_str().unwrap_or("").to_string();v.session["drafts"][id]=json!(text);v.request("view.action",json!({"action":"send","value":""}))},
-                Command::Draft(text)=>{let id=v.target["id"].as_str().unwrap_or("").to_string();v.session["drafts"][id]=json!(text);v.request("view.action",json!({"action":"draft","value":text}))},
+                Command::Send(text)=>{ensure!(!v.view_id.is_empty(),"view not ready");let id=v.draft_key();v.session["drafts"][id]=json!(text);v.request("view.action",json!({"action":"send","value":""}))},
+                Command::Draft(text)=>{let id=v.draft_key();v.session["drafts"][id]=json!(text);v.request("view.action",json!({"action":"draft","value":text}))},
                 Command::History(cursor)=>{if v.view_id.is_empty()||!v.pending.is_empty()||v.paging.is_some(){v.want_page=Some(cursor);continue;}v.page(&cursor)},
                 Command::Page(value)=>{ensure!(!v.view_id.is_empty(),"view not ready");v.request("view.action",json!({"action":"native-sidebar-page","value":value}))},
                 Command::Action(action,value)=>{if action.starts_with("row-")||action.starts_with("delete")||action.starts_with("rename"){eprintln!("GPUI_LOG {{\"action\":{},\"value\":{}}}",Value::String(action.clone()),Value::String(value.chars().take(80).collect()));}v.request("view.action",json!({"action":action,"value":value}))},
@@ -144,11 +146,11 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
             let mut x=match frame {Message::Binary(bytes)=>{size=bytes.len();wire::decode(&bytes)?},Message::Text(text)=>serde_json::from_str(&text)?,Message::Ping(bytes)=>{sink.send(Message::Pong(bytes)).await?;continue},Message::Close(_)=>anyhow::bail!("closed"),_=>continue};
             let decoded=std::time::Instant::now();
             match x["t"].as_str().unwrap_or("") {
-                "view"=>{ensure!(x["version"]==1&&x["renderer"]=="mobile"&&x["generation"].is_string()&&x["epoch"].is_string(),"unsupported hub greeting");v.greeting=x;v.drawn=false;if v.target["kind"]!="recent"&&v.restored==Restore::None&&v.saved.is_none(){v.restored=Restore::First;}let request=v.request("view.open",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;},
+                "view"=>{if x.get("version").is_none()&&x["thread"].is_string()&&x["kind"].is_string() {let g=|k:&str|x[k].as_str().unwrap_or("").to_string();let _=events.send(Event::ViewShow(g("thread"),g("kind"),g("path"))).await;continue;}ensure!(x["version"]==1&&x["renderer"]=="mobile"&&x["generation"].is_string()&&x["epoch"].is_string(),"unsupported hub greeting");v.greeting=x;v.drawn=false;if v.target["kind"]!="recent"&&v.restored==Restore::None&&v.saved.is_none(){v.restored=Restore::First;}let request=v.request("view.open",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;},
                 "reply"=>{
                     let id=x["id"].as_u64().unwrap_or(0);
                     if let Some(tag)=v.asks.remove(&id) {let _=events.send(Event::Answer(tag,x)).await;continue;}
-                    if let Some(tag)=v.rpcs.remove(&id) {let why=crate::screens::settings::reply_error(&x);let _=events.send(Event::Rpc(tag,x["ok"]==true,why)).await;continue;}
+                    if let Some(tag)=v.rpcs.remove(&id) {if tag=="acct" {let _=events.send(Event::Data(tag.clone(),x["result"].clone())).await;}if tag=="steps" {let _=events.send(Event::Steps(if x["ok"]==true {x["result"].clone()} else {Value::Null})).await;continue;}if tag.starts_with("probe") {let slot:usize=tag[5..].parse().unwrap_or(0);let m=x["result"]["matches"].as_array().map(|a|a.iter().filter_map(|p|Some((p[0].as_u64()? as usize,p[1].as_u64()? as usize))).collect()).unwrap_or_default();let _=events.send(Event::Probe(slot,m)).await;continue;}if tag=="refs" {let _=events.send(Event::Refs(if x["ok"]==true {x["result"].clone()} else {Value::Null})).await;continue;}if tag=="pick" {let _=events.send(Event::Pick(if x["ok"]==true {x["result"]["info"].as_str().unwrap_or("").to_string()} else {String::new()})).await;continue;}let ok=x["ok"]==true;let why=if ok&&(tag.starts_with("files")||tag.starts_with("hook")){x["result"].to_string()}else{crate::screens::settings::reply_error(&x)};let _=events.send(Event::Rpc(tag,ok,why)).await;continue;}
                     if let Some(is_post)=v.outgoing.remove(&id) {let name=v.rpc_names.remove(&id).unwrap_or_default();if !is_post {v.dirty=true;} /* a job's answer (mech.list, boards.list, fab.look...) is folded by the hub into this view: ask for it */
                         // every product RPC's answer is logged, so a refused send is never silent (the reply's error may be a plain string, a code or a message)
                         let why=if x["ok"]==true {String::new()} else {rpc_error(&x)};
@@ -231,6 +233,8 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                     c.bytes+=text.len();c.parts.push(text.to_string());c.next+=1;c.done=x["last"]==true;
                 },
                 "view.changed"=>{eprintln!("GPUI_LOG {{\"view_changed\":true}}");if x["generation"]==v.greeting["generation"]&&x["epoch"]==v.greeting["epoch"]&&x["viewId"]==v.view_id&&x["target"]==v.target {v.dirty=true;}},
+                "notify"=>{crate::screens::desk::show(&x);},
+                "sheets"=>{let _=events.send(Event::Sheets(x["rows"].as_str().unwrap_or("").to_string())).await;},
                 "hb"=>{sink.send(Message::Binary(wire::encode(&json!({"id":0,"m":"ping","p":{}})).into())).await?;},
                 _=>{}
             }

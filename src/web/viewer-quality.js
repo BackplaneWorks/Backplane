@@ -42,26 +42,26 @@ export class ViewerQuality {
     for (const [value, label] of [["fast", "Fast"], ["studio", "Studio"], ["pathtrace", "Path trace"]]) { const o = document.createElement("option"); o.value = value; o.textContent = label; this.mode.append(o); }
     this.mode.value = state.renderMode;
     this.mode.addEventListener("change", () => {
-      state.renderMode = this.mode.value;
-      this.samples.hidden = state.renderMode !== "pathtrace";
-      this.detail.hidden = !isStep(this.path()) || state.renderMode === "fast";
-      if (state.renderMode === "fast") { void this.enable(false); return; }
-      state.quality = true;
-      if (this.renderer && this.asset?.revision === this.revision()) { this.renderer.setMode(state.renderMode === "pathtrace" ? "pathtrace" : "raster", { samples: Number(this.samples.value) }); this.sync(); }
+      this.state.renderMode = this.mode.value;
+      this.samples.hidden = this.state.renderMode !== "pathtrace";
+      this.detail.hidden = !isStep(this.path()) || this.state.renderMode === "fast";
+      if (this.state.renderMode === "fast") { void this.enable(false); return; }
+      this.state.quality = true;
+      if (this.renderer && this.asset?.revision === this.revision()) { this.renderer.setMode(this.state.renderMode === "pathtrace" ? "pathtrace" : "raster", { samples: Number(this.samples.value) }); this.sync(); }
       else if (!this.loading) void this.enable(true);
     });
     this.frame = button("Frame part", () => this.framePart(), "Frame the selected component using its actual source model bounds"); this.frame.disabled = true;
     this.samples = document.createElement("select"); this.samples.className = "solid-samples"; this.samples.setAttribute("aria-label", "Path tracing sample limit");
     for (const n of [32, 64, 128, 256]) { const o = document.createElement("option"); o.value = n; o.textContent = `${n} samples`; this.samples.append(o); }
     this.samples.value = state.samples || 64; this.samples.hidden = state.renderMode !== "pathtrace";
-    this.samples.addEventListener("change", () => { state.samples = Number(this.samples.value); this.renderer?.setMode("pathtrace", { samples: state.samples }); });
+    this.samples.addEventListener("change", () => { this.state.samples = Number(this.samples.value); this.renderer?.setMode("pathtrace", { samples: this.state.samples }); });
     this.detail = document.createElement("select"); this.detail.className = "solid-detail"; this.detail.setAttribute("aria-label", "Model detail");
     for (const [value, label, title] of DETAIL) { const o = document.createElement("option"); o.value = value; o.textContent = label; o.title = title; this.detail.append(o); }
     this.detail.value = detailLevel(); this.detail.title = "How finely STEP models are meshed in Studio and Path trace on this device";
     this.detail.hidden = !isStep(this.path()) || state.renderMode === "fast";
     this.detail.addEventListener("change", () => {
       try { localStorage.setItem(DETAIL_KEY, this.detail.value); } catch {}
-      this.stop(); if (state.quality) void this.enable(true);
+      this.stop(); if (this.state.quality) void this.enable(true);
     });
     this.snapButton = button("Snap view", () => void this.snap(), "Save this view as a picture");
     const bar = root.querySelector(".solid-toolbar"), before = bar.querySelector(".solid-model-name");
@@ -213,11 +213,13 @@ export class ViewerQuality {
     }
   }
   describeMaterials(status) {
-    this.materialNote.textContent = status.materialPolicy === "realistic"
+    let text = status.materialPolicy === "realistic"
       ? "Estimated physical finishes on identified materials. Saved colors and model placement are preserved; source materials remain available."
       : status.materialPolicy === "source-defaults" ? "Original CAD export materials, including its transparency and default surface factors."
       : "CAD studio estimates only missing surface factors. Explicit export settings are preserved.";
-    if (status.materialWarnings?.length) this.materialNote.textContent += ` ${status.materialWarnings.join(" ")}`;
+    if (status.materialWarnings?.length) text += ` ${status.materialWarnings.join(" ")}`;
+    // (said again at every status: written only when it changes)
+    if (this.materialNote.textContent !== text) this.materialNote.textContent = text;
   }
   async updateSolder() {
     const renderer = this.renderer, generation = this.generation;
@@ -238,7 +240,9 @@ export class ViewerQuality {
     }
   }
   sync() {
-    if (!this.renderer) return;
+    // (off the page, kept by viewer-tools.js: the camera on the page is
+    // another view's; it syncs when it is back)
+    if (!this.renderer || !this.root.isConnected) return;
     const pose = this.solid.cameraSnapshot?.(); if (!pose) return;
     const text = JSON.stringify(pose);
     // Until the main view has fitted its own model (or has a saved pose to

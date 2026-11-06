@@ -11,7 +11,8 @@ const JS_QUEUE: &str = include_str!("../../../../test/gpui/agents/fixtures/js-qu
 const JS_INTERRUPT: &str = include_str!("../../../../test/gpui/agents/fixtures/js-interrupt.jsonl");
 const T1: &str = "t1700000001-2";
 
-fn dir(name: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-ag-{}-{}", std::process::id(), name)); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
+/// a folder per call: helpers shared by several tests (`deliveries`) ask by the same name, and tests run side by side
+fn dir(name: &str) -> PathBuf { static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0); let p = std::env::temp_dir().join(format!("bp-ag-{}-{}-{}", std::process::id(), name, N.fetch_add(1, Relaxed))); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
 fn script(d: &Path, name: &str, body: &str) { use std::os::unix::fs::PermissionsExt; let p = d.join(name); std::fs::write(&p, body).unwrap(); std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap(); }
 /// The JS test fleet's stand-in (test/tools/perf_standin.ts) with the settings the recordings used.
 fn perf_standin(d: &Path, secs: u32) { script(d, "claude", &STANDIN.replacen("\n", &format!("\nexport FAKE_PER=2 FAKE_CYCLE=5 FAKE_SECS={secs} FAKE_LOG=/dev/null\n"), 1)); }
@@ -264,6 +265,53 @@ fn running_log(work: &Path, extra: &str) -> String { base_log(work, 1, &format!(
     let (hub, ag, _h, _w) = start("cl", |w| running_log(w, &carry), |_| Cli::standin(&sd)).await;
     tokio::time::sleep(Duration::from_millis(500)).await;
     assert!(log_from(&hub, 0).await.iter().any(|e| turn_is(e, "interrupted"))); assert_eq!(ag.stats.procs_spawned.load(Relaxed), 0); ag.shutdown();
+}
+fn tid(i: usize) -> String { if i == 0 { T1.to_string() } else { format!("t17000010{i:02}-{i}") } }
+/// `n` threads cut by a restart; the last by id has run the longest
+fn cut_log(w: &Path, n: usize) -> String { let mut l = base_log(w, n, ""); for i in 0..n { let (id, at) = (tid(i), 1700000100 + n - i); l += &format!("{{\"$\":\"MessagePosted\",\"thread\":\"{id}\",\"msg\":\"u{i}\",\"role\":\"user\",\"text\":\"x\",\"at\":{at}}}\n{{\"$\":\"TurnChanged\",\"thread\":\"{id}\",\"state\":\"running\",\"at\":{at}}}\n") } l }
+fn carried(ev: &[Value]) -> Vec<(String, u64)> { ev.iter().filter(|e| is(e, "MessagePosted") && e["role"] == "user" && e["text"].as_str().unwrap_or("").starts_with(world::CARRY_TEXT)).map(|e| (e["thread"].as_str().unwrap().to_string(), e["at"].as_u64().unwrap())).collect() }
+fn waiting(ev: &[Value]) -> Vec<String> { let mut m = std::collections::BTreeMap::new(); for e in ev.iter().filter(|e| is(e, "SettingSet") && e["key"].as_str().unwrap_or("").starts_with("carry.wait.")) { m.insert(e["key"].as_str().unwrap().to_string(), e["value"] == "1"); } m.into_iter().filter(|x| x.1).map(|x| x.0).collect() }
+#[tokio::test(flavor = "multi_thread")] async fn a_restart_brings_back_every_cut_thread_oldest_first_and_a_few_at_a_time() {
+    let sd = dir("ca-bin"); perf_standin(&sd, 1);
+    let (hub, ag, _h, _w) = start("ca", |w| cut_log(w, 10), |_| Cli::standin(&sd)).await;
+    let ev = until(&hub, 0, 45, |ev| carried(ev).len() == 10 && ev.iter().filter(|e| turn_is(e, "completed")).count() == 10).await;
+    let c = carried(&ev); let order: Vec<String> = c.iter().map(|x| x.0.clone()).collect();
+    assert_eq!(order, (0..10).rev().map(tid).collect::<Vec<_>>(), "the longest running first, every one of them, once");
+    for i in 0..10 { let th = tid(i);
+        let mine: Vec<&Value> = ev.iter().filter(|e| e["thread"] == th.as_str()).collect();
+        assert_eq!(mine.iter().filter(|e| e["summary"] == "Continuing after the restart").count(), 1, "{th}");
+        let at = |s: &str| mine.iter().rposition(|e| turn_is(e, s)).unwrap_or_else(|| panic!("{th} has no {s} turn"));
+        assert!(at("interrupted") < at("running") && at("running") < at("completed"), "{th} took a turn after the cut");
+    }
+    assert!(c[BURST - 1].1 - c[0].1 <= 1, "the first BURST at once");
+    assert!(c[9].1 - c[BURST - 1].1 >= (9 - BURST as u64 + 1 - 1) * CARRY_GAP_S - 1, "the rest apart: {c:?}");
+    assert_eq!(waiting(&ev), Vec::<String>::new(), "nothing left in line"); assert_eq!(ag.stats.procs_spawned.load(Relaxed), 10); ag.shutdown();
+}
+#[tokio::test(flavor = "multi_thread")] async fn restart_continue_turned_off_stops_those_still_in_line() {
+    let sd = dir("co2-bin"); script(&sd, "claude", DEAF);
+    let (hub, ag, _h, _w) = start("co2", |w| cut_log(w, 6), |_| Cli::standin(&sd)).await;
+    assert_eq!(waiting(&log_from(&hub, 0).await).len(), 2, "those past the burst are written down");
+    hub.commit(&json!({"$":"SettingSet","key":"restart.continue","value":"off","at":1700000200})).await.unwrap();
+    let ev = until(&hub, 0, 12, |ev| waiting(ev).is_empty()).await;
+    assert_eq!(waiting(&ev), Vec::<String>::new()); assert_eq!(carried(&ev).len(), BURST); ag.shutdown();
+}
+#[tokio::test(flavor = "multi_thread")] async fn a_second_restart_keeps_the_line_and_forgets_what_the_person_took_over() {
+    let sd = dir("c2-bin"); perf_standin(&sd, 1);
+    let wait = |i: usize| format!("{{\"$\":\"SettingSet\",\"key\":\"carry.wait.{}\",\"value\":\"1\",\"at\":1700000150}}\n", tid(i));
+    let state = |i: usize, s: &str| format!("{{\"$\":\"TurnChanged\",\"thread\":\"{}\",\"state\":\"{s}\",\"at\":1700000150}}\n", tid(i));
+    // 0 still waited when the hub stopped; 1's own turn ended meanwhile, and a later Stop must not read as a restart's cut
+    let (hub, ag, _h, _w) = start("c2", |w| { let mut l = cut_log(w, 2); l += &(state(0, "interrupted") + &wait(0) + &state(1, "completed") + &wait(1)); l }, |_| Cli::standin(&sd)).await;
+    let ev = until(&hub, 0, 12, |ev| !carried(ev).is_empty() && ev.iter().any(|e| turn_is(e, "completed") && e["at"].as_u64().unwrap_or(0) > 1700000200)).await;
+    assert_eq!(carried(&ev).into_iter().map(|c| c.0).collect::<Vec<_>>(), vec![tid(0)]);
+    assert_eq!(waiting(&ev), Vec::<String>::new()); ag.shutdown();
+}
+#[tokio::test(flavor = "multi_thread")] async fn a_restart_carries_a_codex_thread_on_in_its_own_session() {
+    let sd = dir("cx-bin"); let args = sd.join("args");
+    script(&sd, "codex", &format!("#!/bin/sh\nprintf '%s\\n' \"$@\" > {}\necho '{{\"type\":\"turn.completed\",\"usage\":{{\"input_tokens\":1,\"cached_input_tokens\":0,\"output_tokens\":1}}}}'\n", args.display()));
+    let (hub, ag, _h, _w) = start("cx", |w| { let l = cut_log(w, 1).replace("\"provider\":\"claude\"", "\"provider\":\"codex\""); l + &format!("{{\"$\":\"SessionSet\",\"id\":\"{T1}\",\"session\":\"S-cut\",\"at\":1700000120}}\n") }, |_| Cli::standin(&sd)).await;
+    let ev = until(&hub, 0, 10, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await;
+    assert_eq!(carried(&ev).len(), 1, "{ev:?}");
+    let a = std::fs::read_to_string(&args).unwrap(); assert!(a.starts_with("exec\nresume\nS-cut\n") && a.contains(world::CARRY_TEXT), "{a}"); ag.shutdown();
 }
 #[tokio::test(flavor = "multi_thread")] async fn a_restart_carries_on_at_most_a_burst_at_once() {
     let sd = dir("cb-bin"); script(&sd, "claude", DEAF);
@@ -1127,8 +1175,9 @@ fn watch_log(work: &Path, rows: &[String], extra: &str) -> String { base_log(wor
     ag.shutdown();
 }
 #[test] fn side_by_side_runs_only_the_persons_turn_with_the_persons_agent_and_guards() {
+    // the child gets a clean PATH below: `person_dirs` puts the hub's own PATH first, so a real `claude` on the machine's PATH (~/.local/bin) would be run instead of the person's stand-in
     let me = std::env::current_exe().unwrap(); let person = dir("sbs-person"); let live = dir("sbs-live").join("events.jsonl"); std::fs::write(&live, "{\"$\":\"ProjectCreated\",\"id\":\"z\",\"title\":\"z\",\"root\":\"/nonexistent-live\",\"at\":1}\n").unwrap();
-    let o = std::process::Command::new(me).args(["agents::tests::sbs_child_probe", "--exact", "--nocapture", "--test-threads=1"]).env("BACKPLANE_COPY", "1").env("BACKPLANE_SIDE_BY_SIDE", "1").env("BACKPLANE_PERSON_HOME", &person).env("BACKPLANE_LIVE_LOG", &live).env("BP_SBS_PROBE", "1").env("BP_SBS_PERSON", &person).env("BP_SBS_LIVE", &live).env_remove("BACKPLANE_AGENTS").output().unwrap();
+    let o = std::process::Command::new(me).args(["agents::tests::sbs_child_probe", "--exact", "--nocapture", "--test-threads=1"]).env("PATH", "/usr/bin:/bin").env("BACKPLANE_COPY", "1").env("BACKPLANE_SIDE_BY_SIDE", "1").env("BACKPLANE_PERSON_HOME", &person).env("BACKPLANE_LIVE_LOG", &live).env("BP_SBS_PROBE", "1").env("BP_SBS_PERSON", &person).env("BP_SBS_LIVE", &live).env_remove("BACKPLANE_AGENTS").output().unwrap();
     assert!(o.status.success(), "{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
     assert!(String::from_utf8_lossy(&o.stdout).contains("sbs_child_probe ... ok"), "the probe ran: {}", String::from_utf8_lossy(&o.stdout));
 }
@@ -1229,4 +1278,18 @@ fn watch_log(work: &Path, rows: &[String], extra: &str) -> String { base_log(wor
     let text = v["message"]["content"].as_str().map(str::to_string).or_else(|| v["message"]["content"][0]["text"].as_str().map(str::to_string)).unwrap();
     let want = "\n\n<references>\n>fix-the-perf-lag is the thread \"Fix the perf lag\" (id t1700000009-7, project \"Radio board\"): Profiling the render loop. Read it with thread_read.\n%radio-board is the project \"Radio board\" (id p2, folder /r/radio).\n@Ada is the bot \"Ada\"; it has been sent this message and may answer in this thread.\n#ops-room is the group chat \"Ops Room\"; this message was posted there.\n</references>";
     assert!(text.ends_with(want), "{text}");
+}
+#[cfg(test)] mod lost;
+#[cfg(test)] mod note;
+
+#[tokio::test(flavor = "multi_thread")] async fn viewer_show_answers_with_what_the_viewer_then_shows() {
+    let sd = dir("vs-bin"); perf_standin(&sd, 1);
+    let (_hub, ag, _h, _w) = start("vs", |w| base_log(w, 2, ""), |_| Cli::standin(&sd)).await;
+    // a client that reports in time: the answer carries its state, settled
+    let late = tokio::spawn(async { tokio::time::sleep(std::time::Duration::from_millis(120)).await; crate::files::kicad::watch::viewer_report(T1, json!({"open": "mech", "part": "mech/a.step", "selection": null})); });
+    let (_, r) = rpc_mcp(&ag, T1, "", "tools/call", json!({"name":"viewer_show","arguments":{"kind":"mech","path":"mech/a.step"}})).await; late.await.unwrap();
+    let t = tool_text(&r); assert_eq!(t["settled"], true); assert_eq!(t["viewer"]["part"], "mech/a.step"); assert_eq!(t["shown"], "mech/a.step");
+    // a client that says nothing: the last report, marked unsettled
+    let (_, r) = rpc_mcp(&ag, T1, "", "tools/call", json!({"name":"viewer_show","arguments":{"kind":"board","path":""}})).await;
+    let t = tool_text(&r); assert_eq!(t["settled"], false); assert_eq!(t["viewer"]["open"], "mech");
 }

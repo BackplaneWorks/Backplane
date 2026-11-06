@@ -217,7 +217,7 @@ struct Planned<'a> { id: &'a str, created: u64, latest: u64, key: Vec<bool>, sh:
 /// The caller pages its project identities first, then pages each visible list before rendering rows.
 pub struct Plan<'a> {
     st: &'a State, o: &'a Opts<'a>, ix: HashMap<String,u8>, kids_by: HashMap<&'a str,Vec<&'a str>>,
-    projects: Vec<Planned<'a>>, order: Vec<(usize,bool)>,
+    projects: Vec<Planned<'a>>, order: Vec<(usize,bool)>, older_n: usize,
 }
 
 pub fn plan<'a>(st: &'a State, o: &'a Opts<'a>) -> Plan<'a> {
@@ -256,11 +256,16 @@ pub fn plan<'a>(st: &'a State, o: &'a Opts<'a>) -> Plan<'a> {
     let mut order=vec![];
     for p in &live { order.push((ps.iter().position(|x| x.id==p.id).unwrap(),false)); }
     for p in &quiet { order.push((ps.iter().position(|x| x.id==p.id).unwrap(),true)); }
-    if o.older_open { for p in &older { order.push((ps.iter().position(|x| x.id==p.id).unwrap(),true)); } }
-    Plan { st, o, ix, kids_by, projects:ps, order }
+    // the project holding the open thread stays in the list even among the older ones (Side.cur.held)
+    let held=st.threads.get(o.selected).map(|t|t.project.as_str()).unwrap_or("");
+    for p in &older { if o.older_open || p.id==held { order.push((ps.iter().position(|x| x.id==p.id).unwrap(),true)); } }
+    let older_n=older.iter().filter(|p|o.older_open || p.id!=held).count();
+    Plan { st, o, ix, kids_by, projects:ps, order, older_n }
 }
 
 impl Plan<'_> {
+    /// How many projects are in the Older group (no live thread, quiet for more than QUIET_DAYS): drawn only once it is opened
+    pub fn older_count(&self) -> usize { self.older_n }
     pub fn ids(&self) -> Vec<&str> { self.order.iter().map(|(i,_)|self.projects[*i].id).collect() }
     fn find(&self,id: &str) -> Option<(&Planned<'_>,bool)> {
         self.order.iter().find(|(i,_)|self.projects[*i].id==id).map(|(i,quiet)|(&self.projects[*i],*quiet))

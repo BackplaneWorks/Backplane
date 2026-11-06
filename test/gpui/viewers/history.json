@@ -1,0 +1,1 @@
+[{"select":0},{"wait":1500},{"click":"rail:Board"},{"wait":5000},{"hist":0},{"wait":2500},{"hist":1},{"wait":5000},{"histmode":0},{"wait":4000},{"histmode":2},{"wait":4000},{"histmode":1},{"wait":3000},{"hist":null},{"wait":3000},{"histplay":true},{"wait":16000}]

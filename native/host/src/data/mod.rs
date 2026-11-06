@@ -3,6 +3,7 @@
 //! Reads come from the model (`Model::page`, thread and project metadata) and the policy state; writes are the hub's own RPCs (`project.add`, `thread.create`,
 //! `turn.start`, `ask.answer`, `turn.interrupt`) run as this connection; subscriptions turn each new log line, and the streamed text of a running turn, into
 //! pushes (`thread`, `project`, `entry`, `text`, `turn`) for the lists and threads a connection asked for.
+mod ext;
 use crate::hub::{Conn, Hub, Out};
 use crate::wire;
 use anyhow::Result;
@@ -14,7 +15,7 @@ use tokio_tungstenite::tungstenite::{protocol::WebSocketConfig, Message};
 
 pub const PROTO: &str = "data/1";
 /// What this hub does beyond the base of data/1; a hub from before an addition does not list it (the app can warn instead of sending what would be dropped).
-pub const FEATURES: &[&str] = &["images"];
+pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser"];
 const PREVIEW: usize = 140;
 const ASK_SCAN: usize = 4000;
 
@@ -63,8 +64,10 @@ fn thread_json(hub: &Hub, m: &crate::model::Model, id: &str, asks: &HashMap<Stri
     let state = if waiting > 0 { "asking" } else { match t.turn.as_str() { "running" => "working", "failed" => "failed", _ => "idle" } };
     let preview = m.page(&hub.store, id, 0, 1).ok().and_then(|p| p.rows.first().map(|r| clip(&r.text, PREVIEW))).unwrap_or_default();
     let (pinned, settled) = flags(hub, id);
+    // a model chosen within the provider is a ModesSet (the policy state), a switch of provider a ProviderSet (the model's fold)
+    let model = crate::statehost::policies().and_then(|p| p.with_state(|st| st.threads.get(id).map(|t| t.model.clone()))).flatten().filter(|m| !m.is_empty()).unwrap_or_else(|| t.model.clone());
     Some(json!({"id":id,"project":t.project,"title":t.title,"state":state,"updatedAt":ms(t.activity.max(t.created)),"pinned":pinned,"settled":settled,"archived":t.archived,
-        "provider":t.provider,"model":t.model,"preview":preview,"waiting":waiting}))
+        "provider":t.provider,"model":model,"preview":preview,"waiting":waiting}))
 }
 fn project_json(m: &crate::model::Model, id: &str, asks: &HashMap<String, u64>) -> Option<Value> {
     let p = m.projects.get(id).filter(|p| !p.removed)?;
@@ -118,7 +121,7 @@ fn row_entry(r: &crate::model::Row) -> Option<Value> {
     let at = ms(r.at);
     if r.kind == "msg" {
         let kind = match r.role.as_str() { "user" => "user", "assistant" => "assistant", _ => "note" };
-        return Some(json!({"id":r.id,"kind":kind,"text":r.text,"at":at}));
+        return Some(json!({"id":r.id,"kind":kind,"text":if kind == "user" { shown_text(&r.text) } else { r.text.clone() },"at":at}));
     }
     Some(match r.role.as_str() {
         "tool" => json!({"id":r.id,"kind":"tool","text":r.text,"at":at,"tool":{"name":r.akind,"summary":clip(&r.text, 200),"state":"done"}}),
@@ -127,6 +130,8 @@ fn row_entry(r: &crate::model::Row) -> Option<Value> {
         _ => json!({"id":r.id,"kind":"note","text":r.text,"at":at}),
     })
 }
+/// The paths of attached images are told to the agent in the message's text (`[Attached image: <path>]` lines); the phone shows the pictures instead.
+fn shown_text(t: &str) -> String { if !t.contains("[Attached image: ") { return t.to_string() } t.lines().filter(|l| !(l.starts_with("[Attached image: ") && l.ends_with(']'))).collect::<Vec<_>>().join("\n").trim_end().to_string() }
 fn live_entry(thread: &str, text: &str) -> Value { json!({"id":format!("live:{thread}"),"kind":"assistant","text":text,"at":now_ms(),"live":true}) }
 
 async fn entries(hub: &Hub, p: &Value) -> Result<Value, Value> {
@@ -141,7 +146,7 @@ async fn entries(hub: &Hub, p: &Value) -> Result<Value, Value> {
     rows.sort_by_key(|r| r.ord);
     let mut out: Vec<Value> = rows.iter().filter_map(|r| { let mut e = row_entry(r)?;
         // a user message's images are on its log line
-        if r.kind == "msg" && r.role == "user" { if let Some(a) = hub.store.get(r.seq as usize - 1).ok().and_then(|l| if l.contains("\"attachments\"") { serde_json::from_str::<Value>(&l).ok() } else { None }).and_then(|v| v.get("attachments").cloned()) { e["attachments"] = a } }
+        if r.kind == "msg" && r.role == "user" { if let Some(a) = attachments_of(hub, r.seq as usize - 1, &r.id) { e["attachments"] = a } }
         Some(e) }).collect();
     // older entries exist when the page read more ordinals than it returns (its lookahead) or has rows below it
     let more = page.below > 0 || page.rows.iter().map(|r| r.ord).collect::<HashSet<_>>().len() > ids.len();
@@ -152,6 +157,15 @@ async fn entries(hub: &Hub, p: &Value) -> Result<Value, Value> {
         if let Some((_, text)) = hub.live_snapshot().into_iter().find(|(t, _)| t == th) { out.push(live_entry(th, &text)) }
     }
     Ok(json!({"thread":thread,"entries":out,"next":next}))
+}
+
+/// A user message's images: on its own line (the built-in turn.start) or on the MessageAttached line the agents' turn.start commits a few lines after it.
+fn attachments_of(hub: &Hub, line: usize, msg: &str) -> Option<Value> {
+    let own = hub.store.get(line).ok()?;
+    if own.contains("\"attachments\"") { return serde_json::from_str::<Value>(&own).ok().and_then(|v| v.get("attachments").cloned()) }
+    let hi = (line + 14).min(hub.store.len());
+    for l in hub.store.range(line + 1, hi).ok()? { if l.contains("\"MessageAttached\"") && l.contains(msg) { if let Ok(v) = serde_json::from_str::<Value>(&l) { if s(&v, "msg") == msg { return v.get("attachments").cloned() } } } }
+    None
 }
 
 fn dirs(p: &Value) -> Result<Value, Value> {
@@ -275,7 +289,7 @@ async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Result<Value,
         "attachment.get" => attachment_get(hub, p),
         "ask.answer" => { rpc(hub, c, "ask.answer", json!({"id":s(p, "ask"),"answer":s(p, "answer")})).await?; Ok(json!({})) }
         "turn.interrupt" => { rpc(hub, c, "turn.interrupt", json!({"thread":s(p, "thread")})).await?; Ok(json!({})) }
-        _ => Err(err("unknown method")),
+        _ => match ext::call(hub, c, m, p).await { Some(r) => r, None => Err(err("unknown method")) },
     }
 }
 
@@ -294,6 +308,7 @@ fn turn_word(state: &str) -> &'static str { match state { "running" => "working"
 /// The pushes for new log lines, for the lists and threads this connection subscribed to.
 async fn deltas(hub: &Hub, lines: &[String], subs: &mut Subs) -> Vec<Value> {
     if subs.subs.is_empty() { return vec![] }
+    let mut notes: Vec<(Value, String)> = vec![];
     let mut out = vec![]; let (mut upsert, mut gone, mut projects): (Vec<String>, Vec<String>, Vec<(String, bool)>) = (vec![], vec![], vec![]);
     for l in lines {
         let Ok(e) = serde_json::from_str::<Value>(l) else { continue };
@@ -307,17 +322,18 @@ async fn deltas(hub: &Hub, lines: &[String], subs: &mut Subs) -> Vec<Value> {
             "MessagePosted" => {
                 let (id, role) = (s(&e, "msg"), s(&e, "role"));
                 let kind = match role { "user" => "user", "assistant" => "assistant", _ => "note" };
-                let mut en = json!({"id":id,"kind":kind,"text":s(&e,"text"),"at":ms(e["at"].as_u64().unwrap_or(0))});
+                let mut en = json!({"id":id,"kind":kind,"text":if kind == "user" { shown_text(s(&e, "text")) } else { s(&e, "text").to_string() },"at":ms(e["at"].as_u64().unwrap_or(0))});
                 if let Some(a) = e.get("attachments") { en["attachments"] = a.clone() }
                 if kind == "user" { if let Some(x) = recalled(id) { if let Some(c) = x.get("clientId") { en["clientId"] = c.clone() } } }
                 if kind == "assistant" && subs.live.remove(&th) { en["replaces"] = json!(format!("live:{th}")) }
                 entry = Some(en);
             }
+            "MessageAttached" => { let id = s(&e, "msg"); let mut en = json!({"id":id,"kind":"user","text":"","at":ms(e["at"].as_u64().unwrap_or(0)),"attachments":e["attachments"]}); if let Some(x) = recalled(id) { en["text"] = x["text"].clone(); if let Some(c) = x.get("clientId") { en["clientId"] = c.clone() } } entry = Some(en) }
             "ActivityLogged" => entry = Some(row_entry(&crate::model::Row { seq: 0, ord: 0, id: s(&e, "act").into(), thread: th.clone(), src: String::new(), kind: "act", role: s(&e, "tone").into(), akind: s(&e, "kind").into(), text: s(&e, "summary").into(), at: e["at"].as_u64().unwrap_or(0) }).unwrap()),
-            "AskOpened" => entry = Some(ask_entry(&e, None)),
+            "AskOpened" => { entry = Some(ask_entry(&e, None)); notes.push((e.clone(), th.clone())) }
             // the whole ask again, answered (an AskClosed names only the ask: its thread and question come from its AskOpened)
             "AskClosed" => { let id = s(&e, "id"); entry = Some(match &opened { Some(o) => ask_entry(o, Some(s(&e, "answer"))), None => json!({"id":format!("ask:{id}"),"kind":"ask","text":"","at":ms(e["at"].as_u64().unwrap_or(0)),"ask":{"id":id,"state":"answered","question":"","options":[],"answered":s(&e,"answer")}}) }); }
-            "TurnChanged" => for sub in subs.threads(&th) { out.push(d(sub, "turn", json!({"thread":th,"state":turn_word(s(&e, "state"))}))) },
+            "TurnChanged" => { for sub in subs.threads(&th) { out.push(d(sub, "turn", json!({"thread":th,"state":turn_word(s(&e, "state"))}))) } notes.push((e.clone(), th.clone())) },
             _ => {}
         }
         if !th.is_empty() && !matches!(s(&e, "$"), "ThreadDeleted") && !th.starts_with("remind") { if !upsert.contains(&th) { upsert.push(th.clone()) } }
@@ -325,6 +341,8 @@ async fn deltas(hub: &Hub, lines: &[String], subs: &mut Subs) -> Vec<Value> {
     }
     if upsert.is_empty() && gone.is_empty() && projects.is_empty() { return out }
     let g = hub.model().await; let asks = open_ask_counts(hub);
+    for (e, th) in &notes { let title = g.threads.get(th).map_or("", |t| t.title.as_str()); let q = if s(e, "$") == "AskOpened" { ask_entry(e, None)["text"].as_str().unwrap_or("").to_string() } else { String::new() };
+        if let Some(n) = ext::notify_for(e, th, title, &q) { for sub in subs.lists() { out.push(d(sub, "notify", n.clone())) } } }
     for th in &upsert { if let Some(t) = thread_json(hub, &g, th, &asks) { for sub in subs.lists().into_iter().chain(subs.threads(th)) { out.push(d(sub, "thread", json!({"thread":t}))) } } }
     for th in &gone { for sub in subs.lists().into_iter().chain(subs.threads(th)) { out.push(d(sub, "thread.removed", json!({"id":th}))) } }
     for (id, alive) in &projects { for sub in subs.lists() { match alive.then(|| project_json(&g, id, &asks)).flatten() { Some(p) => out.push(d(sub, "project", json!({"project":p}))), None => out.push(d(sub, "project.removed", json!({"id":id}))) } } }
@@ -386,7 +404,13 @@ pub async fn socket(hub: Arc<Hub>, s: TcpStream, json_mode: bool, token: String,
                 if len > seen { let _ = hub.changed.send(len as u64); } // (more than one pass: wake again)
             }
             f = frames.recv() => { if let Ok(f) = f { for p in live_pushes(&f, &mut subs) { tx.send(pack(&p, json_mode)).await?; } } }
-            o = outbox.recv() => { let Some(o) = o else { return Ok(()) }; if let Out::Close = o { return Ok(()) } }
+            o = outbox.recv() => { let Some(o) = o else { return Ok(()) };
+                match o { Out::Close => return Ok(()),
+                    // a viewer's plot frames (binary CBOR) and its small announcements; anything else the hub pushes is for the other clients
+                    Out::Raw(b) => if ext::wants_raw(&b) { tx.send(Message::Binary(b.into())).await?; },
+                    Out::Value(v) => if ext::wants_value(&v) {
+                        // a plot's "none" is binary like the plots (one decoder in the app); a browser frame's announcement is JSON
+                        if v["t"] == "plot" { let mut b = Vec::new(); cbor_plain(&v, &mut b); tx.send(Message::Binary(b.into())).await?; } else { tx.send(pack(&v, json_mode)).await?; } } } }
             _ = beat.tick() => { tx.send(pack(&json!({"t":"hb"}), json_mode)).await?; }
         }
     }

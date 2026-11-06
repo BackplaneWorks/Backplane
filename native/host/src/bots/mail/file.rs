@@ -51,29 +51,41 @@ impl Bots {
         self.hub.model().await.threads.get(&th).map(|t| t.project.clone()).unwrap_or_default()
     }
     /// Mail.file: file a mail from `o` to `to`. Ok(false) when the id was filed already.
-    pub async fn file_mail(&self, w: &World, now: u64, o: &Origin, to: &str, text: &str, msg: &str) -> Result<bool, String> {
-        let conv_id = super::route(o, to); let n = self.names_for(w).await;
+    pub async fn file_mail(&self, w: &World, now: u64, o: &Origin, to: &str, text: &str, msg: &str) -> Result<bool, String> { self.file_operational(w, now, o, to, text, msg, "", vec![]).await }
+    /// Operational.mail: `want`: "fyi", "act", or "" for the kind's own; `after`: the producer's acknowledgements, committed with the header (alone when the header is there already)
+    #[allow(clippy::too_many_arguments)]
+    pub async fn file_operational(&self, w: &World, now: u64, o: &Origin, to: &str, text: &str, msg: &str, want: &str, after: Vec<Value>) -> Result<bool, String> { self.file_in(w, now, o, to, text, msg, want, after, "").await }
+    /// `conv`: the conversation it joins, "" for Mail.route's
+    #[allow(clippy::too_many_arguments)]
+    pub async fn file_in(&self, w: &World, now: u64, o: &Origin, to: &str, text: &str, msg: &str, want: &str, after: Vec<Value>, conv: &str) -> Result<bool, String> {
+        if w.mail.has(msg) { if !after.is_empty() { self.hub.commit_many(&after).await.map_err(|e| format!("{e:#}"))?; } return Ok(false) }
+        let conv_id = if conv.is_empty() { super::route(o, to) } else { conv.to_string() }; let n = self.names_for(w).await;
         let subj = subject(o.kind == "launch", &n, o, to);
         let old = w.mail.conv(&conv_id);
         let conv = if old.id.is_empty() {
             let project = or(self.project_of(w, &o.from).await, self.project_of(w, to).await);
             Conv { id: conv_id.clone(), subject: subj, kind: super::conv_mail_kind(&conv_id, &o.kind), parts: vec![o.from.clone(), to.to_string()], project, tags: vec![], made: now, last: now, n: 0 }
         } else { old };
-        let mail = Hdr { id: msg.into(), conv: conv_id, from: o.from.clone(), to: to.into(), kind: o.kind.clone(), r#ref: o.r#ref.clone(), want: super::want(&o.kind, "", &super::flags(o, text)), head: super::head(text), size: super::bytes(text), at: now };
-        self.file_body(w, Body { conv, mail, text: text.into() }).await
+        let mail = Hdr { id: msg.into(), conv: conv_id, from: o.from.clone(), to: to.into(), kind: o.kind.clone(), r#ref: o.r#ref.clone(), want: super::want(&o.kind, want, &super::flags(o, text)), head: super::head(text), size: super::bytes(text), at: now };
+        self.file_body_with(w, Body { conv, mail, text: text.into() }, None, after).await
     }
     /// Mail.room.file: the one mail a room post makes (the room's conversation is new in the body, whatever the box has)
     pub async fn file_room_mail(&self, w: &World, now: u64, from: &str, room: &str, text: &str, msg: &str, parts: Vec<String>, subject: &str) -> Result<bool, String> {
         let o = Origin::new(from, "room", room); let to = format!("room:{room}"); let conv = super::route(&o, &to);
         let c = Conv { id: conv.clone(), subject: subject.into(), kind: super::conv_mail_kind(&conv, "room"), parts, project: String::new(), tags: vec![], made: now, last: now, n: 0 };
         let mail = Hdr { id: msg.into(), conv, from: from.into(), to, kind: "room".into(), r#ref: room.into(), want: "fyi".into(), head: super::head(text), size: super::bytes(text), at: now };
-        self.file_body(w, Body { conv: c, mail, text: text.into() }).await
+        let body = Body { conv: c, mail, text: text.into() };
+        // with the mailroom off the post's own RoomPosted already put its header in the box (MailRoom.post), so `has` is no sign it was filed: the uberbot in a room hears it only through this filing, and Box.mail ignores the repeat
+        if w.setting("mail.on", "off") == "on" { self.file_body(w, body).await } else { self.file_new(w, body, None, vec![]).await }
     }
     /// Mail.file.body + MailJob.append: the journal first, then ConvSet (a new conversation), MailPosted and the owner ticket, in one commit
-    pub async fn file_body(&self, w: &World, body: Body) -> Result<bool, String> { self.file_body_with(w, body, None).await }
-    /// `extra`: the changes that replace Owner.track's (an imported owner mail brings its own ticket and receipt)
-    pub async fn file_body_with(&self, w: &World, body: Body, extra: Option<Vec<Value>>) -> Result<bool, String> {
+    pub async fn file_body(&self, w: &World, body: Body) -> Result<bool, String> { self.file_body_with(w, body, None, vec![]).await }
+    /// `extra`: the changes that replace Owner.track's (an imported owner mail brings its own ticket and receipt); `after`: Operational.after's, last in the commit
+    pub async fn file_body_with(&self, w: &World, body: Body, extra: Option<Vec<Value>>, after: Vec<Value>) -> Result<bool, String> {
         if w.mail.has(&body.mail.id) { return Ok(false) }
+        self.file_new(w, body, extra, after).await
+    }
+    async fn file_new(&self, w: &World, body: Body, extra: Option<Vec<Value>>, after: Vec<Value>) -> Result<bool, String> {
         let home = self.hub.cfg.home.clone(); let b2 = body.clone();
         if let Err(e) = tokio::task::spawn_blocking(move || store::append(&home, &b2)).await.map_err(|e| e.to_string())? {
             // MailJob.failed: counted and logged (the kind only); the changes that led here stay committed, as in Bend; mail to the uberbot's triage is told by the router
@@ -83,11 +95,13 @@ impl Bots {
         if w.mail.conv(&body.conv.id).id.is_empty() { ev.push(conv_event(&body.conv)) }
         ev.push(header_event(&body.mail));
         match extra { Some(x) => ev.extend(x), None => ev.extend(self.owner_track(w, &body).await) }
+        ev.extend(after);
         self.hub.commit_many(&ev).await.map_err(|e| format!("{e:#}"))?;
         if let Some(r) = self.router.get() { r.routed(&body) }
         Ok(true)
     }
     /// Owner.track: mail addressed to the uberbot's triage is recorded as a ticket (journal coordinates and header only, never the text)
+    pub(super) async fn owner_track_of(&self, w: &World, b: &Body) -> Vec<Value> { self.owner_track(w, b).await }
     async fn owner_track(&self, w: &World, b: &Body) -> Vec<Value> {
         let ub = w.uber_bot();
         if !w.triage_owner(&ub) { return vec![] }
@@ -105,7 +119,7 @@ impl Bots {
 
 impl Bots {
     /// MailStore.recover + Hub.mail.recovered: a body that reached the journal but whose header never reached the log (a crash between the two) gets its
-    /// ConvSet (if the conversation is unknown) and MailPosted now. Re-seeding the owner's tickets for recovered mail is triage's (slice 3).
+    /// ConvSet (if the conversation is unknown), MailPosted and, for the uberbot's, an owner ticket now (the outbox walk routes it). 
     pub async fn mail_recover(&self) -> usize {
         if crate::copy::on() { return 0 } // it commits headers: not on a copy of a log
         let w = self.world().await; let dir = self.hub.cfg.home.join("mail");
@@ -118,6 +132,7 @@ impl Bots {
                 if w.mail.has(&m.id) || !seen.insert(m.id.clone()) { continue }
                 if w.mail.conv(&c.id).id.is_empty() && convs.insert(c.id.clone()) { ev.push(conv_event(&c)) }
                 ev.push(header_event(&m));
+                let b = Body { conv: c, mail: m, text: String::new() }; ev.extend(self.owner_track(&w, &b).await); // Owner.recovered: a body that survived a torn commit is new input
             }
         }
         let n = ev.iter().filter(|e| e["$"] == "MailPosted").count();

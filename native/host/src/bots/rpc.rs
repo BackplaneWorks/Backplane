@@ -11,14 +11,39 @@ use tokio::sync::{Mutex, MutexGuard};
 pub trait Inbox: Send + Sync {
     fn deliver<'a>(&'a self, thread: &'a str, msg: &'a str, text: &'a str, origin: Option<(String, String, String)>) -> Fut<'a, Result<(), String>>;
     fn stop<'a>(&'a self, thread: &'a str) -> Fut<'a, ()>;
+    /// The messages waiting behind the thread's turn (M.Queue.items)
+    fn queued<'a>(&'a self, _thread: &'a str) -> Fut<'a, Vec<String>> { Box::pin(async { vec![] }) }
+    /// An approval the person answers: the answer, once given (at once "session" when they allowed the tool for this session). The future is held until then.
+    fn approve<'a>(&'a self, _thread: &'a str, _tool: &'a str, _detail: &'a str) -> Fut<'a, Result<String, String>> { Box::pin(async { Err("nobody can answer here".to_string()) }) }
+    /// the same message with M.System's role (a mailroom escalation into a bot's thread)
+    fn deliver_system<'a>(&'a self, thread: &'a str, msg: &'a str, text: &'a str, origin: Option<(String, String, String)>) -> Fut<'a, Result<(), String>> { self.deliver(thread, msg, text, origin) }
+    /// Wake.ride: a note on a thread's ride
+    fn ride<'a>(&'a self, thread: &'a str, id: &'a str, text: &'a str) -> Fut<'a, Result<(), String>>;
+    /// Ride.note alone: the note joins the ride (a running Claude turn hears it at once) and starts no turn
+    fn note<'a>(&'a self, thread: &'a str, id: &'a str, text: &'a str) -> Fut<'a, Result<(), String>>;
 }
 impl Inbox for Arc<Agents> {
     fn deliver<'a>(&'a self, thread: &'a str, msg: &'a str, text: &'a str, origin: Option<(String, String, String)>) -> Fut<'a, Result<(), String>> { Box::pin(async move { Agents::deliver(self, thread, msg, text, origin, vec![]).await }) }
     // B.AgentStop: ends the agent's process in any state, no events
     fn stop<'a>(&'a self, thread: &'a str) -> Fut<'a, ()> { Box::pin(async move { let _ = Agents::stop(self, thread).await; }) }
+    fn queued<'a>(&'a self, thread: &'a str) -> Fut<'a, Vec<String>> { Box::pin(async move { self.world().await.queued.get(thread).cloned().unwrap_or_default() }) }
+    fn approve<'a>(&'a self, thread: &'a str, tool: &'a str, detail: &'a str) -> Fut<'a, Result<String, String>> {
+        Box::pin(async move {
+            if self.world().await.sessions.contains(&(thread.to_string(), tool.to_string())) { return Ok("session".to_string()) } // Perm.session_ok
+            let now = now_s(); let ask = hub_id("q", now, self.seq_n()); let (tx, rx) = tokio::sync::oneshot::channel();
+            { let mut m = self.parked.lock().unwrap(); if m.values().filter(|x| x.thread == thread).count() >= 16 { return Err("too many questions are waiting for the person".to_string()) }
+              m.insert(ask.clone(), crate::agents::mcp::Parked { thread: thread.into(), tool: tool.into(), input: Value::Null, id: Value::Null, tx }); }
+            let pend = self.pending_ev(thread, 1, "", now).await;
+            self.commit_events(vec![json!({"$":"AskOpened","id":ask,"thread":thread,"kind":"approval","tool":tool,"detail":detail,"options":"","at":now}), pend]).await;
+            rx.await.map_err(|_| "the question went away unanswered".to_string())
+        })
+    }
+    fn deliver_system<'a>(&'a self, thread: &'a str, msg: &'a str, text: &'a str, origin: Option<(String, String, String)>) -> Fut<'a, Result<(), String>> { Box::pin(async move { Agents::deliver_as(self, "system", thread, msg, text, origin, vec![]).await }) }
+    fn ride<'a>(&'a self, thread: &'a str, id: &'a str, text: &'a str) -> Fut<'a, Result<(), String>> { Box::pin(async move { Agents::wake_ride(self, thread, id, text).await }) }
+    fn note<'a>(&'a self, thread: &'a str, id: &'a str, text: &'a str) -> Fut<'a, Result<(), String>> { Box::pin(async move { Agents::ride_note(self, thread, id, text).await }) }
 }
 
-pub struct Bots { pub hub: Arc<Hub>, world: Mutex<World>, inbox: Arc<dyn Inbox>, pub(crate) router: std::sync::OnceLock<Arc<dyn super::mail::file::Router>>, last_id: std::sync::Mutex<(u64, u64)>, pub(crate) owner_link: std::sync::OnceLock<Arc<dyn super::mail::owner::OwnerLink>>, pub(crate) owner_busy: std::sync::atomic::AtomicBool, star: std::sync::OnceLock<Arc<StarPrompt>>, threads: std::sync::RwLock<std::collections::HashSet<String>> }
+pub struct Bots { pub hub: Arc<Hub>, world: Mutex<World>, pub(super) inbox: Arc<dyn Inbox>, pub(crate) router: std::sync::OnceLock<Arc<dyn super::mail::file::Router>>, last_id: std::sync::Mutex<(u64, u64)>, pub(crate) owner_link: std::sync::OnceLock<Arc<dyn super::mail::owner::OwnerLink>>, pub(crate) owner_busy: std::sync::atomic::AtomicBool, star: std::sync::OnceLock<Arc<StarPrompt>>, threads: std::sync::RwLock<std::collections::HashSet<String>>, pub(crate) mail_lists: std::sync::RwLock<std::collections::HashMap<String, Vec<&'static str>>> }
 /// the state lane's star-nudge count for a human prompt (statehost::policies()?.star_prompt): the events to commit with the prompt and, on the fifth, the offer for its connection
 pub type StarPrompt = dyn Fn(&str, u64) -> (Vec<Value>, Option<Value>) + Send + Sync;
 
@@ -60,17 +85,32 @@ impl Bots {
     pub async fn start(hub: Arc<Hub>, agents: Arc<Agents>) -> Arc<Bots> {
         let b = Bots::start_with(hub, Arc::new(agents.clone())).await; b.start_ticker();
         agents.add_tools(Arc::new(super::tools::BotToolSet(b.clone()))); // the bots' own MCP tools join Backplane's in a bot's thread
+        agents.add_tools(Arc::new(super::mail::tools::MailTools(b.clone()))); // the mailroom's, listed by what the thread is
+        agents.set_mailroom(Arc::new(super::mail::funnel::Room(Arc::downgrade(&b))));
+        let cut = agents.cut_at_start(); b.run_recover(&cut).await; b.owner_legacy().await;
         b
     }
     pub async fn start_with(hub: Arc<Hub>, inbox: Arc<dyn Inbox>) -> Arc<Bots> {
         let store = hub.store.clone();
         let w = tokio::task::spawn_blocking(move || { let mut w = crate::ckpt::take("bots", &store, || World::load(&store)).unwrap_or_default(); if let Err(e) = w.sync(&store) { eprintln!("bots: reading the log: {e:#}") } w }).await.unwrap_or_default();
-        let b = Arc::new(Bots { hub: hub.clone(), world: Mutex::new(w), inbox, router: Default::default(), last_id: Default::default(), owner_link: Default::default(), owner_busy: Default::default(), star: Default::default(), threads: Default::default() });
+        let mut w = w; w.steps.clear(); // what the start folded was answered when it happened
+        let b = Arc::new(Bots { hub: hub.clone(), world: Mutex::new(w), inbox, router: Default::default(), last_id: Default::default(), owner_link: Default::default(), owner_busy: Default::default(), star: Default::default(), threads: Default::default(), mail_lists: Default::default() });
         { let g = b.world.lock().await; b.refresh_threads(&g); }
         { let me = b.clone(); crate::ckpt::register(move |store| me.world.blocking_lock().save(store)); }
         { let me = b.clone(); tokio::spawn(async move { loop { tokio::time::sleep(std::time::Duration::from_secs(20)).await; me.owner_outbox().await } }); } // OwnerJob: the outbox is walked again
+        let _ = b.router.set(Arc::new(super::mail::run::MailRouter(Arc::downgrade(&b))));
+        b.start_after();
         hub.register_rpc(Arc::new(Rpc(b.clone())));
+        // the browser driver's wake (a task run asked for, a teach recording finished): the bot hears it as a message from the person; `bot` is a bot id or its thread's
+        if let Some(d) = crate::term::driver::get(&hub) {
+            let me = Arc::downgrade(&b);
+            d.set_wake(Arc::new(move |bot, text| { if let Some(b) = me.upgrade() { let bot = bot.to_string(); tokio::spawn(async move {
+                let id = { let w = b.world().await; if w.live(&bot) { Some(bot.clone()) } else { w.bots.values().find(|x| !x.deleted && x.thread == bot).map(|x| x.id.clone()) } };
+                if let Some(id) = id { let _ = b.say(&json!(0), &id, &text, "", "", None).await; }
+            }); } }));
+        }
         super::api::register(&hub, &b);
+        hub.register_http(Arc::new(super::hooks::HookHttp { bots: b.clone(), seen: Default::default() }));
         super::mail::requests::register(&hub, &b);
         let me = b.clone(); tokio::spawn(async move { let n = me.mail_recover().await; if n > 0 { eprintln!("bots: {n} mail header(s) recovered from the journal") } });
         b
@@ -78,7 +118,12 @@ impl Bots {
     /// the threads that are live bots' (a tool list asks without waiting for the world lock). Refreshed only when the world catches up (`world()`): a path that starts a bot's agent
     /// without touching the world first would list no bot tools for that whole process (tools/list is read once at start), and a deleted bot's thread stays listed until the
     /// next catch-up (its calls are refused). Today a bot's first turn goes through `say`, which does; a new path (bot_create, a far-mirrored bot, uber promotion) must refresh.
-    fn refresh_threads(&self, w: &World) { *self.threads.write().unwrap() = w.bots.values().filter(|b| !b.deleted && !b.thread.is_empty()).map(|b| b.thread.clone()).collect(); }
+    fn refresh_threads(&self, w: &World) {
+        let mut t: std::collections::HashSet<String> = w.bots.values().filter(|b| !b.deleted && !b.thread.is_empty()).map(|b| b.thread.clone()).collect();
+        t.extend(w.mail.runs.values().filter(|r| r.live && w.run_bot(&r.thread).is_some()).map(|r| r.thread.clone())); // a run and a back office work as their bot (Bots.route: Run.bot)
+        *self.mail_lists.write().unwrap() = super::mail::tools::lists(w);
+        *self.threads.write().unwrap() = t;
+    }
     pub fn is_bot_thread(&self, th: &str) -> bool { self.threads.read().unwrap().contains(th) }
     /// The world caught up with the log; the guard is the lock a request holds from decision to commit.
     pub async fn world(&self) -> MutexGuard<'_, World> {
@@ -97,6 +142,9 @@ impl Bots {
     pub(super) fn hub_id(&self, prefix: &str, now: u64) -> String { self.id(prefix, now) }
     pub(super) async fn commit_reply_pub(&self, id: &Value, events: Vec<Value>) -> Vec<Value> { self.commit_reply(id, events).await }
     pub(super) async fn inbox_deliver_raw(&self, th: &str, msg: &str, text: &str, o: Option<(String, String, String)>) -> Result<(), String> { self.inbox.deliver(th, msg, text, o).await }
+    pub(super) async fn inbox_deliver_role(&self, system: bool, th: &str, msg: &str, text: &str, o: Option<(String, String, String)>) -> Result<(), String> { if system { self.inbox.deliver_system(th, msg, text, o).await } else { self.inbox.deliver(th, msg, text, o).await } }
+    pub(super) async fn inbox_note(&self, th: &str, id: &str, text: &str) -> Result<(), String> { self.inbox.note(th, id, text).await }
+    pub(super) async fn inbox_ride(&self, th: &str, id: &str, text: &str) -> Result<(), String> { self.inbox.ride(th, id, text).await }
     pub(super) async fn inbox_deliver(&self, k: &super::routines::Wake) -> Result<(), String> { self.inbox.deliver(&k.thread, &k.msg, &k.text, k.origin.clone()).await }
     /// B.Hub.id(prefix, now, seq) with seq the log's length. A Bend Step is atomic, so two ids of one second never share a length; here a request decides
     /// before it commits, so a second id asked for in the same second while the log has not grown gets the next number (an id stays what it was otherwise).
@@ -127,7 +175,9 @@ impl Bots {
         // the reply goes first; the bot's folder and the promotion follow (BotFx home, BotFx uber)
         let me = self.clone(); let (b2, t2) = (bot.clone(), th.clone());
         let uber = p.get("uber").and_then(Value::as_bool).unwrap_or(false);
-        tokio::spawn(async move { me.home(&b2, &t2).await; if uber { let _ = me.promote_job(&b2).await; } });
+        // the folder first, then the reply: a message sent at once to a new bot starts a turn that needs its folder (without it: "its folder  is gone")
+        me.home(&b2, &t2).await;
+        if uber { tokio::spawn(async move { let _ = me.promote_job(&b2).await; }); }
         vec![json!({"t":"reply","id":id,"ok":true,"bot":bot})]
     }
 
@@ -213,6 +263,8 @@ impl Bots {
 
     /// Bots.post.id: a person's post in a room (hop 0): logged, then every other member here hears it (never a held one, never when the
     /// mail funnel files the post or the member is the uberbot: Bots.wake.room). Members elsewhere ("name@peer") are the net lane's.
+    /// A post from the person that no client made (a mention in a thread): no star count, no reply.
+    pub(crate) async fn post_as_person(&self, room: &str, text: &str) -> Vec<Value> { self.post(&Value::Null, &json!({"room": room, "text": text}), None).await }
     async fn post(&self, id: &Value, p: &Value, star: Option<u64>) -> Vec<Value> {
         let (msg, text) = (gs(p, "msg"), gs(p, "text"));
         let w = self.world().await;
@@ -264,7 +316,7 @@ fn human(who: &Caller, p: &Value) -> Option<u64> { if who.client > 0 && matches!
 
 struct Rpc(Arc<Bots>);
 impl RpcHandler for Rpc {
-    fn methods(&self) -> &'static [&'static str] { &["bots.create", "bots.edit", "bots.delete", "bots.say", "bots.room", "bots.room_delete", "bots.post", "bots.remember", "bots.forget", "bots.space", "bots.uber", "bots.routine", "bots.routine_delete", "bots.routine_run", "bots.pin", "bots.uber_home", "bots.uber_join"] }
+    fn methods(&self) -> &'static [&'static str] { &["bots.create", "bots.edit", "bots.delete", "bots.say", "bots.room", "bots.room_delete", "bots.post", "bots.remember", "bots.forget", "bots.space", "bots.uber", "bots.routine", "bots.routine_delete", "bots.routine_run", "bots.hook", "bots.hook_token", "bots.hook_revoke", "bots.pin", "bots.uber_home", "bots.uber_join"] }
     fn call<'a>(&'a self, _hub: &'a Arc<Hub>, who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let b = &self.0;
@@ -282,6 +334,10 @@ impl RpcHandler for Rpc {
                 "bots.uber" => b.uber(id, gs(p, "bot")).await,
                 "bots.routine" => b.routine(id, p).await,
                 "bots.routine_delete" => { let w = b.world().await; let now = now_s(); b.commit_reply(id, w.also(now, vec![json!({"$":"RoutineDeleted","id":gs(p, "routine"),"at":now})])).await }
+                // Bots.hook_revoke: the log notes it (a revoked hook keeps its name and counts); the secret is the server's and has no Rust store yet (bots.hook makes none)
+                "bots.hook" => b.hook_new(id, p).await,
+                "bots.hook_token" => b.hook_token(id, p).await,
+                "bots.hook_revoke" => { let w = b.world().await; let hid = gs(p, "hook"); if !w.hooks.contains_key(hid) { return vec![err(id, "no such webhook")] } let now = now_s(); let r = b.commit_reply(id, vec![json!({"$":"HookSet","id":hid,"bot":"","name":"","revoked":true,"at":now})]).await; super::hooks::forget(&b.hub.cfg.home, hid); r }
                 "bots.routine_run" => b.routine_run(id, gs(p, "routine")).await,
                 "bots.pin" => b.pin(id, p).await,
                 "bots.uber_home" => b.uber_home(id).await,
