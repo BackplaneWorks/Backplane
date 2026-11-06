@@ -1,116 +1,59 @@
 # Building the iOS app
 
-The iOS app's screen is the paired hub's phone web client (docs/phone-web.md)
-in a WKWebView; the app keeps what a page can't do (docs/phone-app-shell.md):
-pairing, alerts and the Live Activity, the camera permission, the share
-sheet, links out, haptics. Its earlier native screens are still there for
-one release behind **Classic screens**.
-
-## What changed in the app (for whoever builds it)
-
-- `mobile/ios/Backplane/WebShell.swift` (new): the WKWebView, its
-  navigation and UI delegates, downloads, the `window.backplaneApp` bridge
-  (handler `backplane`, answers through `window.backplaneApp._receive`), the
-  "Can't reach" screen, the re-pair screen, the app's own settings sheet,
-  and `AppRoot` (web screen or the native ones).
-- `mobile/ios/Backplane/PairingStore.swift` (new): the pairing links in the
-  Keychain (`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`). The first
-  launch moves them from UserDefaults (`links`) and removes them there once
-  the Keychain holds them.
-- `AppModel.swift`: owns the shell (`web`), routes a tapped notification or
-  island to the page (`open-thread`), keeps an alert quiet for the thread the
-  page shows, and answers the page's hub list.
-- `AppSettings.swift`: `classic` (UserDefaults `app.classic`), more haptics.
-- `Tabs.swift`: a **Classic screens** toggle in the native Settings, to go
-  back to the web screen.
-- `BackplaneApp.swift`: the window shows `AppRoot`.
-- `mobile/shell/backplane-app.js` is the bridge shim both apps inject. It is
-  copied into `mobile/ios/Backplane/backplane-app.js` at build time (git
-  ignores the copy, like `bridge.js`).
+The iOS app is native SwiftUI and speaks data/1 to the paired hub (build with
+`GPUI_NATIVE DATA_APP`). It has no web view, bridge or Classic screens.
 
 The project uses Xcode 16's synchronized folders
 (`PBXFileSystemSynchronizedRootGroup`): every file in `Backplane/`,
-`Shared/` and `Island/` is in its target without a `project.pbxproj` entry,
-so the new Swift files and the copied `.js` need no project edit. No new
-package, capability, entitlement or Info.plist key.
+`Shared/` and `Island/` is in its target without a `project.pbxproj` entry.
+Every build uses `SWIFT_ACTIVE_COMPILATION_CONDITIONS` `GPUI_NATIVE DATA_APP`
+(set by `mobile/ios/build.sh`, which passes it for all modes).
 
 ## Build it (on the Mac)
 
-Needs Xcode 16 or newer (iOS 17 deployment target) and, to make
+Needs Xcode (the scripts use `/Applications/Xcode.app`; the minimum version is
+unverified, needs a real iOS build). `mobile/ios/build.sh` has three modes:
 
-1. `git pull` in a checkout of the repository.
-2. Simulator: `mobile/ios/build.sh sim`. It makes `bridge.js`
-   (`scripts/build-mobile.sh --js`), copies it and `backplane-app.js` into
-   `mobile/ios/Backplane/`, builds Debug for the Simulator, installs it on the
-   booted iPhone (or boots one) and launches it. With a `bridge.js` already
-   there (e.g. copied from a Linux build's `mobile/build/assets/bridge.js`),
-3. A real iPhone over USB or Wi-Fi: put `mobile/ios/signing.env` beside the
-   script (never committed) with at least `TEAM_ID=` (and `BUNDLE_ID=` if
-   not `dev.backplane.mobile`), trust the Mac on the phone, then
-   `mobile/ios/build.sh device` (`DEVICE=<id>` from
-   `xcrun devicectl list devices` when several are connected). Xcode's
-   automatic signing makes the development profile
-   (`-allowProvisioningUpdates`); the account must be signed in to Xcode.
-4. TestFlight: `mobile/ios/build.sh archive` with the App Store Connect key
-   in `signing.env` (mobile/README.md, "TestFlight"). From Linux,
-   `scripts/build-ios.sh archive` does the same over SSH (it copies the two
-   scripts, rsyncs `mobile/ios` and runs `build.sh` there).
-5. In Xcode's window instead: run step 2 once (so the two `.js` files are in
-   `Backplane/`), open `mobile/ios/Backplane.xcodeproj`, pick the team for
-   both targets (Backplane and BackplaneIsland) and Run.
+- `sim`: a Debug build into `build/dd`, installed and launched
+  (`dev.backplane.mobile`) on a booted iPhone Simulator, or the first
+  available iPhone, which it boots.
+- `device`: a Debug build signed for development, installed with
+  `xcrun devicectl` on a connected iPhone (`DEVICE=<id>`, else the first).
+  Needs `mobile/ios/signing.env` (never committed) with `TEAM_ID` and
+  optionally `BUNDLE_ID` (default `dev.backplane.mobile`).
+- `archive`: a signed Release archive exported and uploaded to App Store
+  Connect (TestFlight). `signing.env` also needs `ASC_KEY_ID`,
+  `ASC_ISSUER_ID`, `ASC_KEY_PATH`; `BUILD_NUMBER` defaults to the date and
+  minute. It signs by hand with the `backplane-signing` keychain and
+  `~/.bp-sign` when present, else lets Xcode sign.
 
-Debug builds started with any `BACKPLANE_*` variable (the Simulator
-automation in mobile/README.md: `BACKPLANE_LINK`, `BACKPLANE_ACTS`, ...)
-show the native screens it drives; add `BACKPLANE_WEB=1` for the web screen.
+From a Linux checkout, with the Mac `hs-mac-mini` reachable through
+`build/gpui/mac-ssh`:
 
-If the bundle has no `backplane-app.js` the app still runs, but the page
-gets no bridge (no notification taps into the page, no share sheet, no app
-settings); the console says so at launch.
+- `scripts/ios-build.sh [clean|release]` rsyncs `mobile/ios` to
+  `~/bp-gpui-ios/ios` and runs a simulator xcodebuild (`DATA=1` adds
+  `-DDATA_APP`; `ADHOC=1` ad-hoc signs the Debug build so the keychain, which
+  holds the pairing, works; `release` is an optimised build with
+  `BP_MEASURE`).
+- `scripts/ios-archive.sh check|upload`: a no-signing Release device build to
+  see that it compiles, or an archive uploaded to TestFlight.
+
+Other `scripts/ios-*.sh` helpers (run, pair, shots, measure) exist; none is
+described here.
 
 ## Test on a real iPhone
 
-Pair against a hub on the tailnet with a few threads (stand-in agents are
-fine), then:
+Pair against a hub on the tailnet with a few threads, then check. Everything
+below is unverified, needs a real iOS build:
 
-- [ ] First launch after the update keeps the pairing (it moves to the
-      Keychain) and opens the web screen, not the pairing screen.
-- [ ] A fresh install pairs natively (scan the QR in Settings → Devices, a
-      `backplane://pair` link from the Camera app, a pasted link, a short
-      code); the web screen opens on that hub without asking again.
-- [ ] Kill the app (swipe it away) and open it: still paired, no flash of
-      the page's pairing screen.
-- [ ] Notifications: allow them (App settings → Notifications), lock the
-      phone, let a turn end: the alert arrives; tapping it opens that thread
-      in the page. With the app open on another thread a banner shows; on
-      that same thread none does.
-- [ ] Live Activity / Dynamic Island while a turn runs; tapping a row opens
-      that thread in the page.
-- [ ] Icon badge follows the Now tab's need-you count.
-- [ ] Back: the page's ‹ and a swipe in from the left edge go back a screen
-      (the screen follows the finger); nothing goes back past the hub's page.
-- [ ] Text size: Settings → Display → Text Size (or Accessibility → Larger
-      Text) bigger and smaller; coming back, the page is zoomed to match
-      (85 %-125 %).
-- [ ] Keyboard: the composer stays above it; nothing is hidden under the
-      notch or the home bar; rotate to landscape and back.
-- [ ] Attach a photo (library and Take Photo) and a file (Files) from the
-      composer.
-- [ ] A link in a message to another site opens in Safari; a link to a
-      file on the hub opens in a sheet over the page; a download (Snap view
-      in 3D, a report) offers the share sheet (Save to Files).
-- [ ] Share from the page (where it offers it) shows the share sheet.
-- [ ] Settings → This phone app → App settings opens the app's own sheet:
-      Hubs, Classic screens, Notifications, the version.
-- [ ] Several hubs: pair a second one (App settings → Hubs); the page
-      switches to it; switch back from the page's hub list or Hubs.
-- [ ] Turn the hub off (or leave the tailnet) and open the app: "Can't reach
-      <hub>" with Try again, the other hubs and Classic screens; turn it on:
-      Try again (or waiting 15 s) loads the page.
+- [ ] A fresh install pairs (scan the QR in Settings → Devices, a
+      `backplane://pair` link from the Camera app, or a pasted link).
+- [ ] Kill the app and open it: still paired.
+- [ ] Notifications arrive when a turn ends, and tapping one opens that thread.
+- [ ] Live Activity / Dynamic Island while a turn runs; a tap opens the thread.
+- [ ] Keyboard: the composer stays above it; rotate to landscape and back.
+- [ ] Attach a photo and a file from the composer.
+- [ ] Several hubs: pair a second one and switch between them.
 - [ ] Revoke this phone in Settings → Devices on the computer: the app asks
-      for a new invitation; pairing again opens the page.
-- [ ] Dark and light: no white flash on open; the status bar is readable
-      with the page's theme dark while the phone is light and the other
-      way round (Settings → Appearance → Theme); with the theme unset the
-      page follows the phone's appearance.
-- [ ] Classic screens on and off from App settings and from the native
-      Settings; both work and keep the pairing.
+      for a new invitation.
+- [ ] Dark and light appearance.
