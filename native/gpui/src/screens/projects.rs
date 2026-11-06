@@ -108,6 +108,37 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, p: &Projects, data: &Value
         .into_any_element())
 }
 
+/// The sidebar's project with this (raw) id.
+pub fn find<'a>(data: &'a Value, pid: &str) -> Option<&'a Value> {
+    data["projects"].as_array()?.iter().find(|p| string(p, "id").rsplit('|').next() == Some(pid))
+}
+/// A project's page, from the sidebar's own rows (no round trip): its name and folder, New thread, and each thread that is in it.
+pub fn page(cx: &mut Context<Backplane>, light: bool, data: &Value, pid: &str, ctl: &mut Vec<crate::script::CtlEntry>) -> Vec<AnyElement> {
+    use crate::script::CtlEntry;
+    let Some(p) = find(data, pid) else { return vec![] };
+    let c = |n: &str| theme::color(light, n);
+    let threads: Vec<&Value> = p["threads"].as_array().into_iter().flatten().chain(p["settled"].as_array().into_iter().flatten()).collect();
+    let mut out: Vec<AnyElement> = vec![
+        div().text_size(px(22.)).font_weight(FontWeight::BOLD).child(string(p, "title")).into_any_element(),
+        div().text_size(px(12.)).text_color(c("dim")).child(string(p, "root")).into_any_element(),
+    ];
+    let pid2 = pid.to_string();
+    ctl.push(CtlEntry { id: "page-new-thread".into(), label: "New thread".into(), ctl: Ctl::Node("new-thread".into(), pid.to_string()) });
+    out.push(div().id("page-new-thread").px_3().py_1().w(px(140.)).border_1().border_color(c("line")).bg(c("raise")).text_size(px(12.)).cursor_pointer().hover(|s| s.bg(c("panel"))).child("New thread")
+        .on_click(cx.listener(move |this, _, _, cx| { this.arm_new(); let _ = this.tx.try_send(Command::Action("new-thread".into(), pid2.clone())); cx.notify(); })).into_any_element());
+    out.push(div().pt_3().text_size(px(11.)).text_color(c("faint")).child(format!("THREADS ({})", threads.len())).into_any_element());
+    if threads.is_empty() { out.push(div().text_color(c("dim")).child("No threads yet.").into_any_element()); }
+    for t in threads {
+        let id = string(t, "id"); let raw = id.rsplit('|').next().unwrap_or(&id).to_string();
+        let dot = match t["state"].as_str().unwrap_or("") { "running" => c("accent"), "failed" => c("bad"), _ => c("ok") };
+        ctl.push(CtlEntry { id: format!("page-thread:{raw}"), label: string(t, "title"), ctl: Ctl::Select(id.clone()) });
+        out.push(div().id(SharedString::from(format!("page-thread-{raw}"))).flex().items_center().gap_2().px_2().h(px(30.)).border_b_1().border_color(c("line")).cursor_pointer().hover(|s| s.bg(c("raise")))
+            .child(div().w(px(6.)).h(px(6.)).rounded_full().bg(dot)).child(div().flex_1().overflow_hidden().whitespace_nowrap().child(string(t, "title")))
+            .on_click(cx.listener(move |this, _, window, cx| this.select(id.clone(), window, cx))).into_any_element());
+    }
+    out
+}
+
 /// The controls these draw, for the harness.
 pub fn controls(data: &Value) -> Vec<(String, String, Ctl)> {
     let mut out = vec![("ui:Add project".to_string(), "Add project".to_string(), Ctl::Node("picker-open".into(), String::new()))];
@@ -127,6 +158,10 @@ mod tests {
         let f = folders(&d).unwrap(); assert_eq!(f.items.len(), 2); assert_eq!(f.items[1].action, "proj-add"); assert!(matches!(close_on_escape(&d), Some(Command::Action(a, _)) if a == "proj-close"));
         assert!(folders(&Value::Null).is_none() && close_on_escape(&Value::Null).is_none());
         assert_eq!(controls(&d).iter().map(|c| c.0.as_str()).collect::<Vec<_>>(), ["ui:Add project", "folder-0", "folder-1", "folders-cancel"]);
+    }
+    #[test] fn a_project_is_found_by_its_raw_id_with_or_without_the_hub_prefix() {
+        let d = j(r#"{"projects":[{"id":"http://h|p1","title":"A","threads":[{"id":"http://h|t1","title":"T"}]},{"id":"p2","title":"B"}]}"#);
+        assert_eq!(string(find(&d, "p1").unwrap(), "title"), "A"); assert_eq!(string(find(&d, "p2").unwrap(), "title"), "B"); assert!(find(&d, "p3").is_none() && find(&Value::Null, "p1").is_none());
     }
     #[test] fn the_hubs_text_replaces_a_box_only_when_it_is_news() {
         let sent = vec!["a".to_string(), "ab".to_string()];

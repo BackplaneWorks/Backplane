@@ -110,7 +110,7 @@ impl Backplane {
             Goal::Frame => true,
             Goal::Changed(epoch) => self.ui_epoch != *epoch,
             Goal::Reconnected => self.reconnected,
-            Goal::Home => self.data["projectHome"].is_object(),
+            Goal::Home => self.data["projectHome"].is_object() || self.project_page.is_some(),
             Goal::Popup => self.data["thread"]["skills"].as_array().map_or(false, |s| !s.is_empty()), // the hub's rows, nothing local
             Goal::Typed(text) => self.input.read(cx).content.as_ref() == text,
             Goal::Sent(before) => self.user_entries() > *before,
@@ -190,7 +190,7 @@ impl Backplane {
                 let pid = self.data["projects"][i]["id"].as_str().unwrap_or("").to_string();
                 let raw = pid.rsplit_once('|').map_or(pid.as_str(), |(_, r)| r).to_string();
                 self.begin(format!("home:{i}"), Goal::Home, cx);
-                let _ = self.tx.try_send(crate::hub::Command::Action("select".into(), format!("project-home-{raw}")));
+                self.open_project(raw.clone(), cx);
             }
             Step::Popup(text) => { self.begin(format!("popup:{text}"), Goal::Popup, cx); self.set_text(text, cx); }
             Step::Type(text) => {
@@ -347,7 +347,7 @@ impl Backplane {
             Ctl::PickFiles => { self.pick_files(cx); self.ui_epoch += 1; "attach picker".into() }
             Ctl::ToggleSidebar => { self.sidebar_toggle(cx); "toggle sidebar".into() }
             Ctl::Select(id) => { self.select_id(id.clone(), cx); "view.open thread".into() }
-            Ctl::Home(pid) => { let _ = self.tx.try_send(Command::Action("select".into(), format!("project-home-{pid}"))); "view.action select project-home".into() }
+            Ctl::Home(pid) => { self.open_project(pid.clone(), cx); "project page".into() }
             Ctl::Fold(v) => { self.fold_click(v.clone()); "view.action fold".into() }
             Ctl::Send => { self.do_send(cx); self.ui_epoch += 1; "send".into() }
             Ctl::Skill(w) => { let _ = self.tx.try_send(Command::Action("skill".into(), w.clone())); self.await_completion(cx); self.ui_epoch += 1; "view.action skill".into() }

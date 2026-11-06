@@ -95,7 +95,7 @@ fn node_el(cx: &mut Context<Backplane>, n: &Value, light: bool, depth: usize, pa
 }
 
 /// In check mode the control records its window rectangle under its id (the e2e driver aims clicks with it); otherwise nothing is added.
-fn with_rect<E: ParentElement + Styled>(e: E, id: impl FnOnce() -> String) -> E { if art::rects_on() { e.relative().child(art::probe_rect(id())) } else { e } }
+pub(crate) fn with_rect<E: ParentElement + Styled>(e: E, id: impl FnOnce() -> String) -> E { if art::rects_on() { e.relative().child(art::probe_rect(id())) } else { e } }
 fn ic(light: bool, name: &'static str, size: f32, tok: &str) -> AnyElement { art::icon(name, size, theme::color(light, tok)) }
 fn chip(light: bool, label: String) -> Div {
     let c = |name: &str| theme::color(light, name);
@@ -185,8 +185,8 @@ impl Render for Backplane {
             let pid = string(project, "id"); let pid = pid.rsplit_once('|').map_or(pid.as_str(), |(_, r)| r).to_string();
             ctl.push(CtlEntry { id: format!("project:{pid}"), label: string(project, "title"), ctl: Ctl::Home(pid.clone()) });
             let (pid_new, pid_new2) = (pid.clone(), pid.clone());
-            rows.push(with_rect(div().id(SharedString::from(format!("proj-{pid}"))), || format!("project:{pid}")).flex().items_center().gap_2().px_3().pt_3().pb_1().text_size(px(11.)).text_color(c("dim")).cursor_pointer().hover(|s| s.text_color(c("text")))
-                .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("select".into(), format!("project-home-{pid}"))); cx.notify(); }))
+            rows.push(with_rect(div().id(SharedString::from(format!("proj-{pid}"))), || format!("project:{pid}")).flex().items_center().gap_2().px_3().pt_3().pb_1().text_size(px(11.)).text_color(if self.project_page.as_deref() == Some(pid_new.as_str()) { c("text") } else { c("dim") }).cursor_pointer().hover(|s| s.text_color(c("text")))
+                .on_click(cx.listener(move |this, _, _, cx| { this.open_project(pid.clone(), cx); }))
                 .child(ic(light, "chevron-down", 14., "dim")).child(ic(light, "folder", 14., "ok")).child(div().flex_1().child(string(project, "title").to_uppercase())).child(with_rect(div().id(SharedString::from(format!("new-{pid_new}"))), || "ui:New thread".to_string()).cursor_pointer().on_click(cx.listener(move |this, _, _, cx| { cx.stop_propagation(); this.arm_new(); let _ = this.tx.try_send(Command::Action("new-thread".into(), pid_new2.clone())); cx.notify(); })).child(ic(light, "plus", 16., "dim"))).into_any_element());
             for t in project["threads"].as_array().into_iter().flatten().chain(project["settled"].as_array().into_iter().flatten()) {
                 let id = string(t, "id");
@@ -236,8 +236,9 @@ impl Render for Backplane {
         let no_rows = thread["entries"].as_array().map_or(true, |e| e.is_empty());
         // project home replaces the thread when the hub selected it
         let home = &self.data["projectHome"];
-        let has_home = home.is_object();
-        let home_els: Vec<AnyElement> = if has_home {
+        let page = self.project_page.clone().filter(|p| crate::screens::projects::find(&self.data, p).is_some());
+        let has_home = home.is_object() || page.is_some();
+        let home_els: Vec<AnyElement> = if let (false, Some(p)) = (home.is_object(), page.as_ref()) { crate::screens::projects::page(cx, light, &self.data, p, &mut ctl) } else if has_home {
             home["cards"].as_array().into_iter().flatten().take(60).enumerate().map(|(i, k)| node_el(cx, k, light, 0, &format!("h{i}"), &mut ctl)).collect()
         } else { Vec::new() };
         // popup
