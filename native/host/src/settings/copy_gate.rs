@@ -86,7 +86,7 @@ mod tests {
             if code.contains("Kind::Net") { net_users.push(name) }
         }
         assert!(bad.is_empty(), "{bad:?}"); net_users.sort();
-        assert_eq!(net_users, ["fab.rs", "webhook.rs"], "the only settings code that makes a Kind::Net process; there is no telemetry sender and no update check in the Rust hub");
+        assert_eq!(net_users, ["fab.rs", "skill_install.rs", "webhook.rs"], "the only settings code that makes a Kind::Net process (skill_install.rs: a skill the person confirmed, refused on a copy); there is no telemetry sender and no update check in the Rust hub");
         assert!(!std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/settings/telemetry.rs")).unwrap().contains("proc::"), "telemetry.rs starts no process");
     }
 
