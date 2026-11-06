@@ -159,16 +159,22 @@ impl Backplane {
                 let id = string(t, "id");
                 let raw = id.rsplit_once('|').map_or(id.as_str(), |(_, i)| i);
                 let selected = raw == self.selected;
-                let dot = match t["status"].as_str().unwrap_or("") { "active" => c("accent"), "blocked" | "failed" | "stalled" => c("bad"), "waiting" => c("dim"), "settled" | "inactive" => c("faint"), _ => c("ok") };
+                // green: working; yellow: monitoring (waiting on work it started); red: stopped, failed or needing the person; grey: idle
+                let dot = match (t["status"].as_str().unwrap_or(""), t["state"].as_str().unwrap_or("")) {
+                    ("blocked" | "failed" | "stalled", _) | (_, "fail" | "stop") => c("bad"),
+                    ("waiting", _) => c("warn"),
+                    ("active", _) | (_, "run") => c("ok"),
+                    _ => c("faint"),
+                };
                 ctl.push(CtlEntry { id: format!("thread:{raw}"), label: string(t, "title"), ctl: Ctl::Select(id.clone()) });
                 let (depth, kids, open) = (t["depth"].as_u64().unwrap_or(0).min(6) as f32, t["children"].as_u64().unwrap_or(0), t["expanded"].as_bool().unwrap_or(false));
                 let toggle = (kids > 0).then(|| {
                     let tid = id.clone();
-                    div().id(SharedString::from(format!("tree-{id}"))).flex_shrink_0().w(px(16.)).cursor_pointer().child(ic(light, if open { "chevron-down" } else { "chevron-right" }, 14., "dim"))
+                    div().id(SharedString::from(format!("tree-{id}"))).flex_shrink_0().w(px(16.)).h_full().flex().items_center().cursor_pointer().child(ic(light, if open { "chevron-down" } else { "chevron-right" }, 14., "dim"))
                         .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("thread-tree".into(), format!("{tid}|{}", if open { 0 } else { 1 }))); cx.stop_propagation(); cx.notify(); }))
                 });
                 if kids > 0 { ctl.push(CtlEntry { id: format!("tree:{raw}"), label: format!("{} subthreads", kids), ctl: Ctl::Node("thread-tree".into(), format!("{id}|{}", if open { 0 } else { 1 })) }); }
-                with_rect(div().id(SharedString::from(format!("thread-{id}"))), || format!("thread:{raw}")).flex().items_center().gap_2().pl(px(22. + depth * 14.)).pr_3().h(px(32.)).when(faded, |d| d.opacity(0.55))
+                with_rect(div().id(SharedString::from(format!("thread-{id}"))), || format!("thread:{raw}")).flex().items_center().gap_2().pl(px(6. + depth * 14.)).pr_3().h(px(32.)).when(faded, |d| d.opacity(0.55))
                     .border_l_2().border_color(if selected { c("ok") } else { c("panel") })
                     .bg(if selected { c("raise") } else { c("panel") }).hover(|s| s.bg(c("raise"))).cursor_pointer()
                     .on_click(cx.listener({ let sid = id.clone(); move |this, _, window, cx| this.select(sid.clone(), window, cx) }))
@@ -176,7 +182,7 @@ impl Backplane {
                         .drag_over::<DragRow>({ let a = c("accent"); move |s, _, _, _| s.border_t_2().border_color(a) }))
                     .on_drop(cx.listener({ let target = raw.to_string(); move |this, d: &DragRow, _, cx| { let _ = this.tx.try_send(Command::Action("reorder".into(), format!("{}\u{1f}{}", d.id, target))); cx.notify(); } }))
                     .on_mouse_down(MouseButton::Right, { let (row, pid2) = (t.clone(), pid.to_string()); cx.listener(move |this, e: &MouseDownEvent, _, cx| { let items = crate::screens::ctxmenu::thread_items(&row, &pid2); this.ctx_open(e.position, items, cx); }) })
-                    .children(toggle).child(div().size(px(5.)).bg(dot)).child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().flex().gap_2().child(div().overflow_hidden().text_ellipsis().child(string(t, "title"))).children((!sub.is_empty()).then(|| div().flex_shrink_0().max_w(px(80.)).overflow_hidden().text_ellipsis().text_size(px(11.)).text_color(c("faint")).child(sub.to_string()))))
+                    .child(div().w(px(16.)).flex_shrink_0().children(toggle)).child(div().size(px(6.)).flex_shrink_0().bg(dot)).child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().flex().gap_2().child(div().overflow_hidden().text_ellipsis().child(string(t, "title"))).children((!sub.is_empty()).then(|| div().flex_shrink_0().max_w(px(80.)).overflow_hidden().text_ellipsis().text_size(px(11.)).text_color(c("faint")).child(sub.to_string()))))
                     .child(div().text_size(px(11.)).text_color(c("faint")).child(if kids > 0 && string(t, "agents").is_empty() { format!("{kids}") } else { string(t, "ago") })).into_any_element()
     }
 }
@@ -298,7 +304,7 @@ impl Render for Backplane {
         for project in self.data["projects"].as_array().into_iter().flatten() {
             let pid = string(project, "id"); let pid = pid.rsplit_once('|').map_or(pid.as_str(), |(_, r)| r).to_string();
             ctl.push(CtlEntry { id: format!("project:{pid}"), label: string(project, "title"), ctl: Ctl::Home(pid.clone()) });
-            let (pid_new, pid_new2, pid_thr) = (pid.clone(), pid.clone(), pid.clone());
+            let (pid_new, pid_new2, pid_thr, pid_set) = (pid.clone(), pid.clone(), pid.clone(), pid.clone());
             rows.push(with_rect(div().id(SharedString::from(format!("proj-{pid}"))), || format!("project:{pid}")).flex().items_center().gap_2().px_3().pt_3().pb_1().text_size(px(11.)).text_color(if self.project_page.as_deref() == Some(pid_new.as_str()) { c("text") } else { c("dim") }).cursor_pointer().hover(|s| s.text_color(c("text")))
                 .on_click(cx.listener(move |this, _, _, cx| { this.open_project(pid.clone(), cx); }))
                 .on_drag(DragProj { id: pid_new.clone(), label: string(project, "title") }, |d, _, _, cx| { let l = d.label.clone(); cx.new(|_| Ghost(l)) })
@@ -306,8 +312,17 @@ impl Render for Backplane {
                 .on_drop(cx.listener({ let target = pid_new.clone(); move |this, d: &DragProj, _, cx| { let _ = this.tx.try_send(Command::Action("reorder-project".into(), format!("{}\u{1f}{}", d.id, target))); cx.notify(); } }))
                 .on_mouse_down(MouseButton::Right, { let pidm = pid_new.clone(); cx.listener(move |this, e: &MouseDownEvent, _, cx| { let items = crate::screens::ctxmenu::project_items(&pidm); this.ctx_open(e.position, items, cx); }) })
                 .child(ic(light, "chevron-down", 14., "dim")).child(ic(light, "folder", 14., "ok")).child(div().flex_1().child(string(project, "title").to_uppercase())).child(with_rect(div().id(SharedString::from(format!("new-{pid_new}"))), || "ui:New thread".to_string()).cursor_pointer().on_click(cx.listener(move |this, _, _, cx| { cx.stop_propagation(); this.arm_new(); let _ = this.tx.try_send(Command::Action("new-thread".into(), pid_new2.clone())); cx.notify(); })).child(ic(light, "plus", 16., "dim"))).into_any_element());
-            for t in project["threads"].as_array().into_iter().flatten().chain(project["settled"].as_array().into_iter().flatten()) {
-                rows.push(self.side_thread(cx, light, t, &pid_thr, "", false, &mut ctl));
+            for t in project["threads"].as_array().into_iter().flatten() { rows.push(self.side_thread(cx, light, t, &pid_thr, "", false, &mut ctl)); }
+            // the Settled shelf: a drop-down at the foot of the project; the hub builds its rows only while it is open
+            let settled_n = project["settledCount"].as_u64().unwrap_or_else(|| project["settled"].as_array().map_or(0, |a| a.len() as u64));
+            let settled_open = project["open"].as_bool().unwrap_or(false);
+            if settled_n > 0 || settled_open {
+                let value = string(project, "id");
+                ctl.push(CtlEntry { id: format!("settled:{pid_set}"), label: format!("Settled ({settled_n})"), ctl: Ctl::Node("flag".into(), value.clone()) });
+                rows.push(with_rect(div().id(SharedString::from(format!("settled-{pid_set}"))), || format!("settled:{pid_set}")).flex().items_center().gap_1().pl(px(6.)).pr_3().h(px(26.)).text_size(px(11.)).text_color(c("faint")).cursor_pointer().hover(|s| s.bg(c("raise")))
+                    .child(div().w(px(16.)).flex_shrink_0().child(ic(light, if settled_open { "chevron-down" } else { "chevron-right" }, 14., "dim"))).child(format!("Settled ({settled_n})"))
+                    .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("flag".into(), value.clone())); cx.notify(); })).into_any_element());
+                if settled_open { for t in project["settled"].as_array().into_iter().flatten() { rows.push(self.side_thread(cx, light, t, &pid_thr, "", true, &mut ctl)); } }
             }
         }
         // the Active view: threads that need the person first, then the settled ones folded under "Settled N"
