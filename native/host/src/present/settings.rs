@@ -11,7 +11,7 @@ static VERSION: OnceLock<String> = OnceLock::new();
 pub fn set_version(v: &str) { let _ = VERSION.set(v.to_string()); }
 
 /// The ported pages in the order the desktop menu lists them (Settings.menu.pages): page id and title.
-pub const PAGES: &[(&str, &str)] = &[("appearance", "Appearance"), ("threads", "Threads"), ("agents", "Agents"), ("ordering", "Ordering"), ("network", "Network and updates"), ("timezone", "Time zone"), ("about", "About"), ("privacy", "Privacy")];
+pub const PAGES: &[(&str, &str)] = &[("appearance", "Appearance"), ("threads", "Threads"), ("agents", "Agents"), ("writing", "Writing"), ("cad", "CAD"), ("ordering", "Ordering"), ("network", "Network and updates"), ("keys", "API keys"), ("timezone", "Time zone"), ("about", "About"), ("privacy", "Privacy")];
 
 pub struct Out { pub patch: Value, pub cmds: Vec<Value> }
 
@@ -167,7 +167,101 @@ fn privacy(st: &State, info: &Value) -> Vec<Value> {
     let mut note = "All telemetry: installs, updates, daily activity, daily counts of threads, messages, model tokens, bot traffic, boards created and completed board orders; random install id, version, package channel, OS, architecture and UTC day. Used for product and aggregate investor metrics. Board/order data is integer counts only: no design paths, hashes, dimensions, layers, part numbers, BOMs, netlists or prices. No content, files, names or credentials. Off disables every category. Local diagnostics stay on this device unless you choose to export them. This build of the hub sends nothing yet. Privacy policy: https://backplane.works/privacy".to_string();
     if !id.is_empty() { note.push_str(&format!(" Install id: {id}")); }
     let n = set(st, "telemetry.reset", "").parse::<u64>().unwrap_or(0) + 1;
-    vec![row("Share anonymous usage", &note, vec![btn("On", "setting", "telemetry.share=on", on), btn("Off", "setting", "telemetry.share=off", !on), btn("Reset id", "setting", &format!("telemetry.reset={n}"), false)])]
+    vec![row("Share anonymous usage", &note, vec![btn("On", "setting", "telemetry.share=on", on), btn("Off", "setting", "telemetry.share=off", !on), btn("Reset id", "setting", &format!("telemetry.reset={n}"), false),
+        btn("Privacy", "open-url", "https://backplane.works/privacy", false), btn("Report an issue", "open-url", &bug_url(info), false)])]
+}
+
+/// Settings > Writing (TextGen): the small model that titles threads, names branches and writes commit messages: `text.provider` (claude, codex, grok or muse) and `text.model` ("" is the provider's light model).
+fn writing(st: &State, info: &Value) -> Vec<Value> {
+    const TEXT: &[&str] = &["claude", "codex", "grok", "muse"];
+    let models: Value = info["models"].as_str().and_then(|s| serde_json::from_str(s).ok()).unwrap_or(Value::Null);
+    let prov = { let p = set(st, "text.provider", "claude").trim(); if TEXT.contains(&p) { p } else { "claude" } };
+    let model = set(st, "text.model", "").trim();
+    let mut ids: Vec<&str> = vec![""];
+    ids.extend(models[prov].as_array().into_iter().flatten().filter_map(Value::as_str).take(12));
+    if !ids.contains(&model) { ids.push(model); }
+    vec![
+        row("Writing: provider", "A small model keeps this cheap. It names each thread from its first message.", chips(TEXT, prov, "text.provider")),
+        row("Model for titles, branch names and commit messages", &format!("{}: the provider's light model unless one is chosen.", if model.is_empty() { "default" } else { model }), chips(&ids, model, "text.model")),
+    ]
+}
+
+/// Settings > CAD: the KiCad the hub found (what it told: `kicad.*`), the path field, the IPC switch, and FreeCAD. KiCad's install and update controls belong to the CAD tools lane; this page says what is there.
+fn cad(st: &State, session: &Value, info: &Value) -> Vec<Value> {
+    let i = |k: &str| info[k].as_str().unwrap_or("");
+    let kicad = match (i("kicad.status"), i("kicad.version"), i("kicad.cli")) {
+        (_, v, c) if !c.is_empty() => format!("{}{}", if v.is_empty() { "found".to_string() } else { format!("version {v}") }, format!(" · {c}")),
+        ("checking", _, _) => "checking".to_string(),
+        _ => "KiCad was not found. Set its folder below, or install it from kicad.org.".to_string(),
+    };
+    let path = if session["drafts"]["@f.kpath"].is_string() { draft(session, "@f.kpath") } else { set(st, "kicad.path", "") };
+    let free = if i("freecad").is_empty() { "FreeCAD was not found. Mechanical parts are made with it.".to_string() } else { i("freecad").to_string() };
+    vec![
+        row_f("KiCad", &kicad, vec![field("kpath", "Path to KiCad's command line, empty for the one on PATH", path)], vec![btn("Set", "kicad-path", "", true)]),
+        row("FreeCAD", &free, vec![]),
+        row("KiCad over its API", "Lets agents edit a board in a running KiCad. Off uses the files only.", chips(&["on", "off"], set(st, "kicad.ipc", "on"), "kicad.ipc")),
+    ]
+}
+
+/// The API keys the hub keeps by name (never a value): a list with Forget (asks once), and a form: a name and the key, saved straight to the hub (the key is a vault field, never an action).
+fn keys(st: &State, session: &Value, info: &Value) -> Vec<Value> {
+    let _ = st;
+    let home = info["home"].as_str().unwrap_or("");
+    let text = if home.is_empty() { String::new() } else { crate::settings::keys::names_kept(std::path::Path::new(home)) };
+    let names: Vec<&str> = text.lines().filter(|l| !l.is_empty()).collect();
+    let arming = draft(session, "@keys.rm");
+    let mut v = vec![row("API keys", "Kept on this machine, in the hub's secrets folder. Agents are told their names and where to load them, never the values.", vec![])];
+    if names.is_empty() { v.push(row("No keys yet", "", vec![])); }
+    for n in &names {
+        let ask = arming == *n;
+        v.push(row(n, if ask { "Press again to forget it." } else { "" }, vec![btn(if ask { "Forget it" } else { "Forget" }, "key-del", n, ask)]));
+    }
+    let err = draft(session, "@key.err");
+    let name = draft(session, "@f.kname");
+    let mut form = row_f("New key", if err.is_empty() { "The name is the environment variable it is loaded as (OPENAI_API_KEY). The key is sent to the hub once and never shown again." } else { err },
+        vec![field("kname", "Name", name), json!({"name": "kval", "hint": "Key", "secret": true, "vault": true, "value": ""})],
+        vec![btn("Save", "secret-save", &format!("@apikey\u{1f}{name}"), true)]);
+    if !err.is_empty() { form["tone"] = json!("bad"); }
+    v.push(form);
+    v
+}
+
+/// The fallback hierarchy (Fallbackv.rows): one opt-in ordered list of provider/model per hub, tried in order at a confirmed usage limit. The list is edited with `setting fallback.chain=...` (Move up, Move down, Remove, Add).
+fn fallback(st: &State, info: &Value) -> Vec<Value> {
+    use crate::settings::fallback as fb;
+    let caps: Value = info["models"].as_str().and_then(|s| serde_json::from_str(s).ok()).unwrap_or(Value::Null);
+    let chain = fb::parse(set(st, "fallback.chain", ""));
+    let on = set(st, "fallback.on", "off") == "on";
+    let mut v = vec![row("Fallback hierarchy", "Applies to all threads and bots, including delegates, routines and mail runs. Your chosen model runs first. At a confirmed usage limit, try entries after it; if the whole chain is unavailable, work pauses and asks for attention.",
+        vec![btn("Enabled", "setting", "fallback.on=on", on), btn("Disabled", "setting", "fallback.on=off", !on)])];
+    let down = |key: &str| { let mut r = chain.clone(); r.reverse(); let mut r = fb::up(&r, key); r.reverse(); r };
+    for (i, t) in chain.iter().enumerate() {
+        let key = t.key();
+        v.push(row(&format!("{}. {}", i + 1, key), if fb::caps_valid(&caps, t) { "" } else { "Unavailable on this machine. Skipped during fallback." },
+            vec![btn("Move up", "setting", &format!("fallback.chain={}", fb::show(&fb::up(&chain, &key))), false), btn("Move down", "setting", &format!("fallback.chain={}", fb::show(&down(&key))), false),
+                 btn("Remove", "setting", &format!("fallback.chain={}", fb::show(&fb::remove(&chain, &key))), false)]));
+    }
+    let providers: Vec<&str> = PROVIDERS.iter().copied().filter(|p| caps[p].as_array().map_or(false, |a| !a.is_empty())).collect();
+    let ap = { let p = set(st, "fallback.add.provider", "codex"); if providers.contains(&p) { p } else { providers.first().copied().unwrap_or("codex") } };
+    let models: Vec<&str> = caps[ap].as_array().into_iter().flatten().filter_map(Value::as_str).take(16).collect();
+    let am = { let m = set(st, "fallback.add.model", ""); if models.contains(&m) { m } else { models.first().copied().unwrap_or("") } };
+    if !providers.is_empty() {
+        v.push(row("Add a provider", "Choose an installed provider and model, then add it to the end.", chips(&providers, ap, "fallback.add.provider")));
+        v.push(row("Add a model", "Only installed models can be saved. Duplicate entries are not allowed.", chips(&models, am, "fallback.add.model")));
+        let target = fb::Target { provider: ap.to_string(), model: am.to_string() };
+        let mut next = chain.clone(); next.push(target.clone());
+        let addable = fb::caps_valid(&caps, &target) && !fb::has(&chain, &target.key());
+        v.push(row(&target.key(), "", if addable { vec![btn("Add to hierarchy", "setting", &format!("fallback.chain={}", fb::show(&next)), false)] } else { vec![] }));
+    }
+    v
+}
+
+/// The Privacy page's links: the privacy policy, and the issue form carrying the version, OS and architecture.
+fn bug_url(info: &Value) -> String {
+    let enc = |s: &str| -> String { s.bytes().map(|b| if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~') { (b as char).to_string() } else { format!("%{b:02X}") }).collect() };
+    let v = VERSION.get().map(String::as_str).filter(|v| !v.is_empty()).unwrap_or("unknown");
+    let known = |k: &str, ok: &[&str]| { let s = info[k].as_str().unwrap_or(""); if ok.contains(&s) { s.to_string() } else { "unknown".to_string() } };
+    format!("https://github.com/i2cjak/Backplane/issues/new?body={}", enc(&format!("Version: {v}\nOS: {} {}\n\nWhat happened:\n", known("os", &["linux", "darwin", "windows"]), known("arch", &["x64", "arm64"]))))
 }
 
 /// The rows shown while the dialog is open: the page menu (no page chosen) or one page, its first row the way back.
@@ -178,7 +272,7 @@ pub fn view(st: &State, session: &Value, info: &Value) -> Value {
     } else {
         let title = PAGES.iter().find(|(id, _)| *id == p).map_or("", |(_, t)| *t);
         let mut r = vec![row(title, "", vec![btn("‹ Settings", "settings-page", "", false)])];
-        r.extend(match p { "appearance" => appearance(st), "threads" => threads(st, session), "about" => about(st), "agents" => agents(st, info), "ordering" => ordering(st), "network" => network(st, info), "timezone" => timezone(st, session), "privacy" => privacy(st, info), _ => vec![] });
+        r.extend(match p { "appearance" => appearance(st), "threads" => threads(st, session), "about" => about(st), "agents" => { let mut a = agents(st, info); a.extend(fallback(st, info)); a }, "writing" => writing(st, info), "cad" => cad(st, session, info), "keys" => keys(st, session, info), "ordering" => ordering(st), "network" => network(st, info), "timezone" => timezone(st, session), "privacy" => privacy(st, info), _ => vec![] });
         r
     };
     json!({"rows": rows})
@@ -200,11 +294,26 @@ pub fn act(hub: &str, session: &Value, action: &str, value: &str) -> Option<Out>
         "settings-page" => {
             let p = if PAGES.iter().any(|(id, _)| *id == value) { value } else { "" };
             // opening Threads fills the webhook fields from the saved settings (Settings.seed): the drafts are dropped so the saved values show
-            json!({"drafts": {"@settings.page": p, "@f.whurl": Value::Null, "@f.whsec": Value::Null, "@hook.err": "", "@f.tzname": "", "@tz.err": ""}})
+            json!({"drafts": {"@settings.page": p, "@f.whurl": Value::Null, "@f.whsec": Value::Null, "@hook.err": "", "@f.tzname": "", "@tz.err": "", "@f.kpath": Value::Null, "@f.kname": "", "@keys.rm": "", "@key.err": ""}})
         }
+        "kicad-path" => {
+            if !session["drafts"]["@f.kpath"].is_string() { return Some(Out { patch: json!({}), cmds }) }
+            let raw = draft(session, "@f.kpath").trim().to_string();
+            send(session, hub, "setting.set", json!({"key": "kicad.path", "value": raw}), &mut cmds, &mut rid);
+            json!({"drafts": {"@f.kpath": raw}})
+        }
+        // an API key forgotten: the first press asks, the same again forgets it (ApiKeys.del)
+        "key-del" => {
+            if value.is_empty() { return None }
+            if draft(session, "@keys.rm") == value { send(session, hub, "bots.voice", json!({"op": "api-del", "name": value}), &mut cmds, &mut rid); json!({"drafts": {"@keys.rm": ""}}) }
+            else { json!({"drafts": {"@keys.rm": value}}) }
+        }
+        // the client's own answers to the key it saved straight to the hub
+        "key-sent" => json!({"drafts": {"@f.kname": "", "@key.err": "", "@keys.rm": ""}}),
+        "key-err" => json!({"drafts": {"@key.err": value}}),
         "bfield" => {
             let (name, text) = value.split_once('\u{1f}')?;
-            if !matches!(name, "whurl" | "whsec" | "tzname") { return None }
+            if !matches!(name, "whurl" | "whsec" | "tzname" | "kpath" | "kname") { return None }
             json!({"drafts": {format!("@f.{name}"): text}})
         }
         "setting" => {
@@ -247,8 +356,56 @@ mod tests {
 
     #[test] fn the_menu_lists_the_ported_pages_each_a_settings_page_button() {
         let v = view(&st(&[]), &json!({"open": {"settings": true}, "drafts": {}}), &json!({}));
-        assert_eq!(labels(&v), ["Appearance", "Threads", "Agents", "Ordering", "Network and updates", "Time zone", "About", "Privacy"]);
+        assert_eq!(labels(&v), ["Appearance", "Threads", "Agents", "Writing", "CAD", "Ordering", "Network and updates", "API keys", "Time zone", "About", "Privacy"]);
         assert_eq!(v["rows"][1]["buttons"][0]["action"], "settings-page"); assert_eq!(v["rows"][1]["buttons"][0]["value"], "threads");
+    }
+    fn pg_rows(page: &str, kv: &[(&str, &str)], drafts: Value, info: Value) -> Vec<Value> {
+        let v = view(&st(kv), &json!({"open": {"settings": true}, "drafts": {"@settings.page": page, "x": drafts}}), &info); v["rows"].as_array().unwrap().clone()
+    }
+    #[test] fn writing_offers_its_providers_and_the_providers_models() {
+        let info = json!({"models": r#"{"claude":["haiku","sonnet"],"codex":["gpt-6"]}"#});
+        let r = pg_rows("writing", &[("text.provider", "claude")], json!({}), info);
+        assert_eq!(r[1]["buttons"].as_array().unwrap().iter().map(|b| b["label"].as_str().unwrap()).collect::<Vec<_>>(), ["claude", "codex", "grok", "muse"]);
+        assert_eq!(r[1]["buttons"][0]["on"], true);
+        assert_eq!(r[2]["buttons"].as_array().unwrap().iter().map(|b| b["value"].as_str().unwrap()).collect::<Vec<_>>(), ["text.model=", "text.model=haiku", "text.model=sonnet"]);
+    }
+    #[test] fn the_privacy_page_has_its_two_link_buttons_and_the_issue_form_names_the_version_os_and_arch() {
+        let r = pg_rows("privacy", &[], json!({}), json!({"os": "linux", "arch": "x64"}));
+        let b = r[1]["buttons"].as_array().unwrap();
+        let open: Vec<&Value> = b.iter().filter(|x| x["action"] == "open-url").collect();
+        assert_eq!(open.len(), 2); assert_eq!(open[0]["value"], "https://backplane.works/privacy");
+        let u = open[1]["value"].as_str().unwrap(); assert!(u.starts_with("https://github.com/i2cjak/Backplane/issues/new?body=Version%3A") && u.contains("OS%3A%20linux%20x64"), "{u}");
+        assert!(bug_url(&json!({"os": "plan9"})).contains("OS%3A%20unknown%20unknown"));
+    }
+    #[test] fn api_keys_list_names_only_and_forgetting_asks_once() {
+        let dir = std::env::temp_dir().join(format!("bp-keys-page-{}", std::process::id())); let _ = std::fs::remove_dir_all(&dir);
+        crate::settings::keys::add(&dir, "OPENAI_API_KEY", "sk-secret-123").unwrap();
+        let info = json!({"home": dir.to_str().unwrap()});
+        let r = pg_rows("keys", &[], json!({}), info.clone());
+        let all = serde_json::to_string(&r).unwrap(); assert!(all.contains("OPENAI_API_KEY") && !all.contains("sk-secret-123"), "a key's value is never in a row");
+        assert!(r.iter().any(|x| x["fields"].as_array().map_or(false, |f| f.iter().any(|f| f["vault"] == true && f["secret"] == true && f["value"] == ""))), "the key field is sealed");
+        // press once: armed; the same again: the request, and nothing in between goes to the hub
+        let s0 = json!({"rid": 1, "drafts": {}}); let o = act("h", &s0, "key-del", "OPENAI_API_KEY").unwrap(); assert!(o.cmds.is_empty()); assert_eq!(o.patch["drafts"]["@keys.rm"], "OPENAI_API_KEY");
+        let s1 = json!({"rid": 1, "drafts": {"@keys.rm": "OPENAI_API_KEY"}}); let o = act("h", &s1, "key-del", "OPENAI_API_KEY").unwrap(); assert_eq!(o.cmds.len(), 1);
+        assert!(o.cmds[0]["text"].as_str().unwrap().contains("api-del"));
+        assert!(act("h", &s0, "key-err", "Name the key first.").unwrap().patch["drafts"]["@key.err"] == "Name the key first.");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    #[test] fn the_fallback_hierarchy_edits_its_chain_by_setting_and_adds_only_installed_models() {
+        let info = json!({"models": r#"{"claude":["opus"],"codex":["gpt-6"]}"#});
+        let r = pg_rows("agents", &[("fallback.chain", "claude/opus,codex/gpt-6"), ("fallback.on", "on")], json!({}), info);
+        let labels: Vec<&str> = r.iter().map(|x| x["label"].as_str().unwrap()).collect();
+        assert!(labels.contains(&"1. claude/opus") && labels.contains(&"2. codex/gpt-6"), "{labels:?}");
+        let second = r.iter().find(|x| x["label"] == "2. codex/gpt-6").unwrap();
+        assert_eq!(second["buttons"][0]["value"], "fallback.chain=codex/gpt-6,claude/opus", "Move up");
+        assert_eq!(second["buttons"][2]["value"], "fallback.chain=claude/opus", "Remove");
+        let enabled = r.iter().find(|x| x["label"] == "Fallback hierarchy").unwrap(); assert_eq!(enabled["buttons"][0]["on"], true);
+    }
+    #[test] fn cad_keeps_the_typed_path_and_sets_it_on_a_press() {
+        let r = pg_rows("cad", &[], json!({}), json!({"kicad.cli": "/usr/bin/kicad-cli", "kicad.version": "10.0.7"}));
+        assert!(r[1]["note"].as_str().unwrap().contains("10.0.7")); assert_eq!(r[1]["fields"][0]["name"], "kpath");
+        let s = json!({"rid": 3, "drafts": {"@f.kpath": " /opt/kicad/bin "}}); let o = act("h", &s, "kicad-path", "").unwrap();
+        assert!(o.cmds[0]["text"].as_str().unwrap().contains(r#""key":"kicad.path","value":"/opt/kicad/bin""#));
     }
     #[test] fn a_page_leads_with_the_way_back_and_marks_the_current_chip() {
         let v = view(&st(&[("settle.idle.minutes", "30"), ("restart.continue", "off")]), &json!({"drafts": {"@settings.page": "threads"}}), &json!({}));
