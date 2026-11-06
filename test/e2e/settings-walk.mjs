@@ -5,7 +5,7 @@
 // Form rows (fields + a Save/Set button) are walked with a typed value. Output: OUTDIR/settings-walk.json, one record per control: {page,label,control,value,applied,persisted,effect,note}.
 // `effect` is only true where a probe below proves the hub acts on the value; every other control says effect:null (not probed): never pass.
 import {mkdirSync,writeFileSync,readFileSync,existsSync,rmSync} from 'node:fs';
-import {makeStandins,startHub,stopHub,sleep} from '../perf/lib.mjs';
+import {makeStandins,startHub,stopHub,sleep,pidAlive} from '../perf/lib.mjs';
 import {viewClient} from '../perf/view.mjs';
 import {encode} from '../wire.mjs';
 const [bin,out,port0]=process.argv.slice(2);const port=Number(port0||3830);
@@ -14,7 +14,7 @@ const home=out+'/home';process.env.NO_SCOPE='1';
 const walk=(o,f,d=0)=>{if(d>14||!o||typeof o!=='object')return;f(o);for(const k of Object.keys(o))walk(o[k],f,d+1)};
 let hub=null,v=null;
 async function up(){hub=await startHub({bin,home,port,standins:out+'/bin',log:out+'/hub.log'});v=await viewClient(hub,{mobile:true,delta:false,native:true});await v.open();await act('flag','settings')}
-async function down(){try{v.close()}catch{}stopHub(hub);for(let i=0;i<100&&existsSync(`/proc/${hub.pid}`);i++)await sleep(100);await sleep(500)}
+async function down(){try{v.close()}catch{}stopHub(hub);for(let i=0;i<100&&pidAlive(hub.pid);i++)await sleep(100);await sleep(500)}
 // the presenter answers with `cmds` the client carries out (type send: an RPC to the hub); do what the client does
 const act=async(action,value='')=>{const r=await v.req('view.action',{action,value},30000);
   for(const c of r?.x?.result?.cmds||[])if(c.type==='send'){try{v.ws.send(encode(JSON.parse(c.text)))}catch(e){console.error('cmd send failed',e)}await sleep(150)}
