@@ -2,6 +2,8 @@
 
 > Paths under `src/` below (`src/core`, `src/server`, `src/web`, `src/mobile`, `src/app`) name the Bend JS tree, removed from this checkout (tag `main-bend-final`). Where the current Rust code for each is, is unverified; look under `native/host/src/` and `native/gpui/`.
 
+> **What the Rust hub has today (read from `native/host/src`):** only the bookkeeping. `state/fam.rs` folds the `DeployAsked` and `DeployBuilt` events into the setting `deploy.ship` (phase, commit, staged, live, askers); the `deploy_restart` and `deploy_main` tool names are known to the mail charter's risk list (`bots/mail/charter.rs`) and to the copy gate (`settings/copy_gate.rs`, which blocks `deploy.restart`, `deploy.cancel`, `deploy.status`, `deploy.main` and `deploy_restart` in a copy). I found **no code** that runs the build job, stages a package, swaps `install_into`-style, restarts in place, or updates itself, and no CEF host code in the hub. So the build/stage/swap/restart steps below describe the removed Bend hub and are not current behaviour. The commit stamp is real: `--commit` or `BACKPLANE_COMMIT` (`main.rs`, default `unknown`); `scripts/dev-reload.sh` passes it and `scripts/fresh.sh` can. Auto-update is off with `BACKPLANE_NO_UPDATE=1` (set by `scripts/fresh.sh` and the farsync tests); I did not find the code that reads it.
+
 A restart must not interrupt a running turn. Batch delivery once per qualified
 milestone, then wait for all live turns, tool calls and build locks to clear.
 The actual server handoff adds this stronger idle-turn guard to the existing
@@ -16,7 +18,7 @@ permission to cut a turn.
   `deploy_status` and `deploy_cancel` read and cancel it.
 - A client (the person): the requests `deploy.restart {stage?, note?}`,
   `deploy.cancel` and `deploy.status`.
-- `scripts/dev.sh install [h@host]` (script removed with the Bend tree; what replaces it for the deploy job is unverified. The builds now are `scripts/dev-build.sh`, which builds `native/host` and `native/gpui` and publishes them with `scripts/dev-cut.sh`): built, staged the package and posted
+- `scripts/dev.sh install [h@host]` (script removed with the Bend tree; nothing in the Rust hub replaces it. The builds now are `scripts/dev-build.sh`, which builds `native/host` and `native/gpui` and publishes them with `scripts/dev-cut.sh`): built, staged the package and posted
   `deploy_restart` to the running hub's loopback MCP route
   (`POST /mcp/deploy`; "deploy" is no thread, so the person is the requester).
   It prints "deploy queued" and ends. With no hub answering, or with
@@ -47,7 +49,7 @@ The request is the private setting `deploy.wait`, one JSON line (`by`, `note`,
    without flock(1) they count as free) and answers `Deploy.check.idle`, using the authoritative current turn state.
 3. Clear: `deploy.done` is written (the same line plus the threads cut) and
    `deploy.wait` cleared in one step, then the server moves the staged package
-   into the running install's folder as the removed `scripts/dev.sh`'s `install_into` did (unverified for the Rust hub)
+   into the running install's folder as the removed `scripts/dev.sh`'s `install_into` did (the Rust hub has no such code)
    (renames; the old `web/` is kept as `web.old`) and restarts the hub in
    place (the updater's `Upgrade.restart`, same PID). A failed swap clears
    `deploy.done` and tells the requester; nothing restarts.
@@ -100,7 +102,7 @@ the service alone, stamped with that release, by putting the environment in
 `deploy.wrap`, e.g.
 `env BACKPLANE_DEV_SERVICE_ONLY=1 BACKPLANE_VERSION_STAMP=0.12.0 ~/Documents/i2cjak/bp-coord/bin/bp-admit.sh --mem 14 --cores 4 --`.
 Every build stamps the commit it was made from beside the version
-(`BACKPLANE_COMMIT_STAMP`, the removed `scripts/dev.sh` set it; unverified who sets it now), and `GET /hello`
+(`BACKPLANE_COMMIT_STAMP`, the removed `scripts/dev.sh` set it; now `--commit` or the `BACKPLANE_COMMIT` environment variable), and `GET /hello`
 answers it as `"commit"`, so builds with the same version are told apart.
 
 What happens:
@@ -115,7 +117,7 @@ What happens:
    many came.
 3. The build is a job of its own under `<home>/deploy/<commit>/`: a temporary
    detached worktree of the repo (`wt`, removed after), `scripts/dev.sh stage
-   <dir>/pkg` (script removed; the build now is `scripts/dev-build.sh`; whether the deploy job runs it is unverified), the log `out`, the exit status `code`. It is
+   <dir>/pkg` (script removed; the build now is `scripts/dev-build.sh`; the Rust hub has no deploy job that runs it), the log `out`, the exit status `code`. It is
    started with `setsid`, inside `deploy.wrap` (or the default scope), so a hub
    OOM or the restart it leads to never cuts it. Its pid and start time are
    recorded (`DeployBuilt` state `pid`). Stale worktrees of ended builds are
@@ -144,7 +146,7 @@ failed, skipped, live), folded into the setting `deploy.ship`.
 
 Laws `ship_*`; tests `test/ship_test`, `bun test/tools/deploy_main_e2e.ts BINARY`.
 
-Optional CEF runtimes use the same staged deployment. `scripts/dev.sh stage` (removed; unverified)
+Optional CEF runtimes use the same staged deployment. `scripts/dev.sh stage` (removed; no CEF staging code in the Rust hub)
 only builds/stages a CEF host if this machine already has the optional runtime;
 Chrome-only installations do not fetch or install CEF. The pinned CEF libraries
 are reused and checked against the distribution used to build the small host.
