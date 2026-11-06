@@ -15,7 +15,7 @@ use serde_json::Value;
 use std::{collections::{HashMap,VecDeque},time::{Duration,Instant}};
 use script::{Pending,Step};
 use hub::{Command,Event};
-actions!(backplane,[Send,ClosePopup,CopySelection,ToggleSidebarKey,FocusSearchKey]);
+actions!(backplane,[Send,ClosePopup,CopySelection,ToggleSidebarKey,FocusSearchKey,OpenPaletteKey]);
 pub struct Backplane {
     pub input:Entity<screens::composer::Composer>, data:Value, status:String, error:String,
     tx:tokio::sync::mpsc::Sender<Command>, selected:String,
@@ -178,7 +178,7 @@ impl Backplane {
     fn user_entries(&self)->usize {self.data["thread"]["entries"].as_array().map_or(0,|e|e.iter().filter(|e|e["kind"]=="user").count())}
     /// Ctrl/Cmd-C with no text field focused (a click in the timeline leaves none): copy what is selected there.
     fn copy_selection(&mut self,_:&CopySelection,_:&mut Window,cx:&mut Context<Self>){self.timeline_copy(cx);}
-    fn close_popup(&mut self,_:&ClosePopup,_:&mut Window,cx:&mut Context<Self>){if self.ctx_close(cx){return;}if self.screens.picker_open{self.screens.picker_open=false;cx.notify();return;}if self.screens.acct.menu{self.screens.acct.menu=false;cx.notify();return;}if screens::settings::is_open(self){screens::settings::close(self,cx);return;}if screens::improvements::escape(self,cx){return;}if let Some(a)=screens::projects::close_on_escape(&self.data){let _=self.tx.try_send(a);cx.notify();return;}if self.screens.menu_open {self.screens.menu_open=false;}else if let Some(a)=screens::tools::close_question(&self.data) {let _=self.tx.try_send(a);}else if self.data["settings"].is_object() {let _=self.tx.try_send(Command::Action("flag".into(),"settings".into()));}else if let Some(a)=screens::bots::close_form(&self.data) {let _=self.tx.try_send(a);}else{let _=self.tx.try_send(Command::Action("skill-close".into(),String::new()));}cx.notify();}
+    fn close_popup(&mut self,_:&ClosePopup,_:&mut Window,cx:&mut Context<Self>){if self.ctx_close(cx){return;}if self.palette_close(cx){return;}if self.screens.lightbox.take().is_some(){cx.notify();return;}if self.screens.picker_open{self.screens.picker_open=false;cx.notify();return;}if self.screens.acct.menu{self.screens.acct.menu=false;cx.notify();return;}if screens::settings::is_open(self){screens::settings::close(self,cx);return;}if screens::improvements::escape(self,cx){return;}if let Some(a)=screens::projects::close_on_escape(&self.data){let _=self.tx.try_send(a);cx.notify();return;}if self.screens.menu_open {self.screens.menu_open=false;}else if let Some(a)=screens::tools::close_question(&self.data) {let _=self.tx.try_send(a);}else if self.data["settings"].is_object() {let _=self.tx.try_send(Command::Action("flag".into(),"settings".into()));}else if let Some(a)=screens::bots::close_form(&self.data) {let _=self.tx.try_send(a);}else if self.input.read(cx).popup_open {let draft=self.input.read(cx).content.to_string();self.screens.popup_off=Some(draft);}cx.notify();}
 }
 /// Every key binding, from the defaults and this device's shortcut choices (called again when one changes).
 pub fn bind_all(cx:&mut App,l:&local::Local){
@@ -186,7 +186,7 @@ pub fn bind_all(cx:&mut App,l:&local::Local){
     input::bind(cx);screens::composer::bind(cx);screens::improvements::bind(cx);
     let send=l.key("send");
     cx.bind_keys([KeyBinding::new(&send,Send,Some("Composer")),KeyBinding::new("ctrl-enter",Send,Some("Composer")),KeyBinding::new(&l.key("close"),ClosePopup,None),KeyBinding::new("secondary-c",CopySelection,None),
-        KeyBinding::new(&l.key("sidebar"),ToggleSidebarKey,None),KeyBinding::new(&l.key("search"),FocusSearchKey,None)]);
+        KeyBinding::new(&l.key("sidebar"),ToggleSidebarKey,None),KeyBinding::new(&l.key("search"),FocusSearchKey,None),KeyBinding::new("ctrl-shift-p",OpenPaletteKey,None)]);
 }
 fn main()->anyhow::Result<()> {
     #[cfg(feature="cef")]

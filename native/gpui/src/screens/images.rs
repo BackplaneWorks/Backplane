@@ -2,7 +2,7 @@
 //! `url` for attachments), kept bounded, and drawn when they arrive. The fetch runs on a thread of its own; the
 //! window repaints while any is loading (glue.rs). The token goes in the query as for /attach and is never logged.
 use super::attach::Target;
-use gpui::{Image, ImageFormat};
+use gpui::{prelude::*, *};
 use std::{collections::{HashMap, VecDeque}, io::{Read, Write}, net::TcpStream, sync::{Arc, Condvar, Mutex}, time::Duration};
 
 pub const MAX_BYTES: usize = 24 << 20;
@@ -126,6 +126,15 @@ impl Images {
             }
         }
     }
+}
+
+/// The lightbox: the picture as large as the window allows over a dimmed page; a click anywhere, or Esc, puts it away.
+pub fn lightbox(cx: &mut Context<crate::Backplane>, shown: Option<&(Arc<gpui::Image>, String)>) -> Option<AnyElement> {
+    let (img, name) = shown?;
+    Some(div().id("lightbox").absolute().inset_0().occlude().flex().flex_col().items_center().justify_center().gap_2().p_6().bg(gpui::hsla(0., 0., 0., 0.88)).cursor_pointer()
+        .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| { this.screens.lightbox = None; cx.notify(); }))
+        .child(gpui::img(ImageSource::Image(img.clone())).flex_1().min_h_0().max_w_full().object_fit(ObjectFit::Contain))
+        .child(div().text_size(px(12.)).text_color(gpui::rgb(0xc8ccd4)).child(format!("{name} · click or Esc to close"))).into_any_element())
 }
 
 #[cfg(test)]

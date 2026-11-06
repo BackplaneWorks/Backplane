@@ -151,6 +151,11 @@ pub fn act(params: &Value, facts: &dyn Facts) -> Option<ActOut> {
             let sel = s(session, "sel"); if !safe(sel) { return None }
             Some(ActOut { session_patch: json!({"drafts": {format!("@reply:{sel}"): "", format!("@reply.q:{sel}"): "", format!("@reply.full:{sel}"): ""}}), cmds: vec![] })
         }
+        // Esc on a popup (Ui.skill_close): the popup stays shut for this draft; the draft it was shut on is remembered (`@sk.off`), another edit opens it again
+        "skill-close" => {
+            let sel = s(session, "sel"); if !safe(sel) { return None }
+            Some(ActOut { session_patch: json!({"drafts": {"@sk.off": draft_of(session, sel)}}), cmds: vec![] })
+        }
         "send" | "send-alt" => {
             let sel = s(session, "sel");
             send(&SendCtx { hub, cid: s(params, "cid"), now_s: params["now"].as_u64().unwrap_or(0) / 1000, bot_thread: facts.bot_thread(sel), bot: facts.bot_of(sel), binding: facts.account_binding(sel) }, session)

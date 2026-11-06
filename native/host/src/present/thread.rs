@@ -391,6 +391,9 @@ pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value
         if e["kind"] == "user" { let refs = crate::session::composer::mention::refs_in(st, hub, e["text"].as_str().unwrap_or("")); if !refs.is_empty() { e["refs"] = Value::Array(refs); } }
     }
     o.insert("entries".into(), Value::Array(entries));
+    // the agent's to-do list and its background work (null while there is none; the client opens and shuts them)
+    o.insert("todos".into(), super::panels::todos(st, thread));
+    o.insert("subs".into(), super::panels::subs(st, thread));
     // Render.native_screen: thread.earlier = window.remaining when the host sent a window, else the page's own hidden count (0 on the newest page)
     let earlier = if params["window"].is_object() { params["window"]["remaining"].as_u64().unwrap_or(0) } else { 0 };
     o.insert("earlier".into(), json!(earlier));

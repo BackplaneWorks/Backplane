@@ -15,7 +15,7 @@ pub fn metric(started: Instant, event: &str, mut fields: Value) {
 pub enum Step { Cef(Value), Files(String), ScrollState(String), Home(usize), Select(usize), Tap(f32, f32, usize), Sheets(bool), Compare(Option<usize>), Hist(Option<i64>), HistMode(u8), HistPlay, ViewShow(String, String), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), Imp(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Mark(String), Fit, Unsupported(String) }
 /// What a click on a registered control does; the e2e harness's controls inventory and `click` step use these.
 #[derive(Clone, Debug)]
-pub enum Ctl { None, Rail(String), PickFiles, ToggleSidebar, ToggleContext, Select(String), Home(String), Fold(String), Send, Skill(String), Page(String), Node(String, String), More, RenameSave(String), Imp(String), FocusSearch }
+pub enum Ctl { None, OpenPalette, Rail(String), PickFiles, ToggleSidebar, ToggleContext, Select(String), Home(String), Fold(String), Send, Skill(String), Page(String), Node(String, String), More, RenameSave(String), Imp(String), FocusSearch }
 #[derive(Clone, Debug)]
 pub struct CtlEntry { pub id: String, pub label: String, pub ctl: Ctl }
 #[derive(Clone, Debug)]
@@ -394,6 +394,7 @@ impl Backplane {
             Ctl::Send => { self.do_send(cx); self.ui_epoch += 1; "send".into() }
             Ctl::Skill(w) => { let _ = self.tx.try_send(Command::Action("skill".into(), w.clone())); self.await_completion(cx); self.ui_epoch += 1; "view.action skill".into() }
             Ctl::Page(v) => { let _ = self.tx.try_send(Command::Page(v.clone())); "view.action native-sidebar-page".into() }
+            Ctl::OpenPalette => { self.palette_open(cx); self.ui_epoch += 1; "open palette".into() }
             Ctl::FocusSearch => { self.focus_search(cx); self.ui_epoch += 1; "focus search".into() }
             Ctl::More => { self.screens.menu_open = !self.screens.menu_open; self.ui_epoch += 1; cx.notify(); "thread menu".into() }
             Ctl::RenameSave(id) => { let text = self.screens.fields.get("title").map(|s| s.input.read(cx).content.to_string()).unwrap_or_default(); if let Some(c) = crate::screens::tools::rename_save(id, &text) { let _ = self.tx.try_send(c); } "view.action rename-save".into() }
