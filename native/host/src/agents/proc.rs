@@ -135,6 +135,49 @@ pub fn reap_orphans(home: &str) -> usize {
 #[cfg(not(target_os = "linux"))]
 pub fn reap_orphans(_home: &str) -> usize { 0 }
 
+/// Off Linux nothing ends an agent when the hub is killed (no PDEATHSIG), so one small watcher process per hub does: the hub keeps the write end of a pipe to it
+/// (close-on-exec, so no agent holds it), registers each agent's process group, and when the pipe closes because the hub is gone the watcher kills every group still registered.
+/// The watcher is this binary with `--agent-reaper`; it is its own session, so the signal that killed the hub does not reach it.
+#[cfg(not(target_os = "linux"))]
+mod reaper {
+    use std::io::Write;
+    static PIPE: std::sync::Mutex<Option<std::process::ChildStdin>> = std::sync::Mutex::new(None);
+    fn send(line: &str) -> bool {
+        let mut g = PIPE.lock().unwrap();
+        if g.is_none() {
+            let Ok(exe) = std::env::current_exe() else { return false };
+            use std::os::unix::process::CommandExt;
+            let mut c = crate::proc::std_cmd(crate::proc::Kind::Local, exe);
+            #[cfg(not(test))] c.arg("--agent-reaper");
+            #[cfg(test)] c.args(["agents::tests::reaper_child", "--exact", "--nocapture", "--test-threads=1"]).env("BP_REAPER_CHILD", "1"); // a test binary takes no such flag: its watcher is a test that only runs as that child
+            c.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+            unsafe { c.pre_exec(|| { libc::setsid(); Ok(()) }); }
+            match c.spawn() { Ok(mut ch) => { *g = ch.stdin.take(); std::thread::spawn(move || { let _ = ch.wait(); }); } Err(_) => return false }
+        }
+        let ok = g.as_mut().map_or(false, |w| w.write_all(line.as_bytes()).and_then(|_| w.flush()).is_ok());
+        if !ok { *g = None }
+        ok
+    }
+    pub fn add(pid: u32) { if pid > 0 && !send(&format!("+{pid}\n")) { send(&format!("+{pid}\n")); } }
+    pub fn remove(pid: u32) { if pid > 0 { let mut g = PIPE.lock().unwrap(); if let Some(w) = g.as_mut() { let _ = w.write_all(format!("-{pid}\n").as_bytes()).and_then(|_| w.flush()); } } }
+}
+#[cfg(target_os = "linux")]
+mod reaper { pub fn add(_pid: u32) {} pub fn remove(_pid: u32) {} }
+
+/// `backplane-hub --agent-reaper`: read "+pid" / "-pid" lines from stdin; at end of input (the hub is gone) kill each process group still listed. Returns the exit code.
+pub fn reaper_main() -> i32 {
+    use std::io::BufRead;
+    let mut live = std::collections::BTreeSet::<i32>::new();
+    for l in std::io::stdin().lock().lines() {
+        let Ok(l) = l else { break };
+        let (sign, n) = l.split_at(l.len().min(1));
+        let Ok(pid) = n.trim().parse::<i32>() else { continue };
+        match sign { "+" => { live.insert(pid); } "-" => { live.remove(&pid); } _ => {} }
+    }
+    for pid in live { if pid > 1 { unsafe { libc::kill(-pid, libc::SIGKILL); libc::kill(pid, libc::SIGKILL); } } }
+    0
+}
+
 /// What a person's real agent runs with (SIDE-BY-SIDE.md check 6): the real HOME and the PATH worked out from it; every `BACKPLANE_*` of this hub is removed from its environment.
 pub struct PersonChild { pub home: PathBuf, pub path: std::ffi::OsString }
 pub fn spawn(program: &Path, args: &[String], cwd: &Path, extra_path: Option<&Path>, env: &[(String, String)]) -> std::io::Result<Proc> { spawn_with(crate::proc::Kind::Agent, None, program, args, cwd, extra_path, env) }
@@ -152,10 +195,11 @@ fn spawn_with(kind: crate::proc::Kind, person: Option<&PersonChild>, program: &P
         None => { if let Some(o) = OWNER.get() { c.env("BACKPLANE_AGENT_OWNER", o); } }
         Some(p) => { let (remove, set) = super::person::child_env(&p.home, &p.path, std::env::vars_os()); for k in remove { c.env_remove(k); } for (k, v) in set { c.env(k, v); } } // no BACKPLANE_* (so no owner mark either: PDEATHSIG ends it with the hub)
     }
-    // Linux: the kernel kills the agent when the hub dies (PDEATHSIG). macOS has no such call, and reap_orphans does nothing off Linux yet, so nothing ends a killed hub's agent there.
+    // Linux: the kernel kills the agent when the hub dies (PDEATHSIG). Elsewhere the `reaper` watcher does (the whole group, grandchildren included).
     unsafe { c.pre_exec(|| { libc::setsid(); #[cfg(target_os = "linux")] libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL); Ok(()) }); }
     let mut child = c.spawn()?;
     let pid = child.id().unwrap_or(0);
+    reaper::add(pid);
     let mut stdin = child.stdin.take().expect("piped"); let stdout = child.stdout.take().expect("piped"); let mut stderr = child.stderr.take().expect("piped");
     let (in_tx, mut in_rx) = mpsc::channel::<String>(IN_QUEUE);
     let (out_tx, out_rx) = mpsc::channel::<String>(OUT_QUEUE);
@@ -169,6 +213,7 @@ fn spawn_with(kind: crate::proc::Kind, person: Option<&PersonChild>, program: &P
         use std::os::unix::process::ExitStatusExt;
         let e = match st { Ok(s) => Exit { code: s.code(), signal: s.signal(), stderr: err }, Err(e) => Exit { code: None, signal: None, stderr: e.to_string() } };
         if pid > 0 { unsafe { libc::kill(-(pid as i32), libc::SIGKILL); } } // the group: anything the agent left behind
+        reaper::remove(pid);
         let _ = exit_tx.send(e);
     });
     Ok(Proc { pid, input: in_tx, lines: out_rx, exit: exit_rx })
