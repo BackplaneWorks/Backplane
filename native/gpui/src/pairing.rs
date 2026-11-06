@@ -4,7 +4,7 @@
 use serde_json::{json, Value};
 use std::{io::{self, Read, Write}, net::TcpStream, path::PathBuf, sync::{Arc, OnceLock}, time::Duration};
 
-const SCHEMES: [&str; 2] = ["backplane://", "bpgpui://"];
+const SCHEMES: [&str; 3] = ["backplane://", "bpgpui://", "backplane-gpui://"];
 pub fn is_link(s: &str) -> bool { SCHEMES.iter().any(|p| s.starts_with(p)) }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -223,6 +223,7 @@ mod tests {
         let enc = format!("http%3A%2F%2F10.0.0.1%3A3801%2Fpair%23invite%3D{SECRET}");
         assert_eq!(invitation(&format!("backplane://pair?url={enc}")), inv("http://10.0.0.1:3801", SECRET));
         assert_eq!(invitation(&format!("bpgpui://pair?x=1&url={enc}")), inv("http://10.0.0.1:3801", SECRET));
+        assert_eq!(invitation(&format!("backplane-gpui://pair?url={enc}")), inv("http://10.0.0.1:3801", SECRET), "each app's own scheme");
         assert_eq!(invitation("backplane://pair"), None);
     }
     #[test] fn what_is_not_a_pairing_link_is_refused() {

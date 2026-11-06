@@ -34,11 +34,13 @@ address: Backplane does not introduce a public code-resolver service. Both
 devices need a route to the hub, usually its LAN or tailnet.
 
 A pairing link is `http(s)://<hub>/pair#invite=<secret>&routes=<addresses>`. The
-scheme link `backplane://pair?url=<that link>` reaches an installed app from
-anywhere (a message, another app). The desktop client never pairs from a link
-that came from outside its window: it names the hub and asks, with Cancel first.
-Packages register the scheme: `deploy/backplane.desktop` on Linux, the bundle on
-macOS, the manifests on the phones. Short codes need the hub address: there is no
+scheme link `backplane://pair?url=<that link>` reaches the desktop client from
+anywhere (a message, another app); `deploy/backplane.desktop` registers it on
+Linux and the bundle `scripts/mac-run.sh` makes on macOS. The phone builds keep
+their own schemes: `bpgpui://` on Android, `backplane-gpui://` on iOS.
+The desktop client takes all three, and never pairs from a link that came from
+outside its window: it names the hub and asks, with Cancel first.
+Short codes need the hub address: there is no
 public code resolver. Both devices need a route to the hub, usually its LAN or
 tailnet. The hub answers `POST /auth/known` (is this origin one of the owner's
 hubs), but no client asks it yet.

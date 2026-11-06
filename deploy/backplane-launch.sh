@@ -29,6 +29,12 @@ desktop=
 for d in "${BACKPLANE_DESKTOP:-}" "$here/desktop/backplane-open" "$here/desktop/Backplane.app/Contents/MacOS/Backplane"; do
   if [ -n "$d" ] && [ -x "$d" ]; then desktop=$d; break; fi
 done
+# a pairing link is for the desktop app: never hand one to the hub as if it were an option
+case ${1:-} in
+  backplane://*)
+    [ -n "$desktop" ] && exec "$desktop" "$@"
+    echo "backplane: no desktop app here to open that link" >&2; exit 1 ;;
+esac
 shown=0
 [ -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || shown=1
 [ "$(uname -s)" != Darwin ] || shown=1
