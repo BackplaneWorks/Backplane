@@ -771,12 +771,12 @@ async fn codex_start(name: &str) -> (Arc<Hub>, Arc<Agents>, PathBuf) {
     assert!(!proc::alive(child), "the agent dies with its hub (PDEATHSIG on Linux, the reaper watcher elsewhere)");
     // Linux: what the agent started outlives it and the next hub on the home ends it. Elsewhere the watcher kills the whole group.
     #[cfg(not(target_os = "linux"))] { let end = Instant::now() + Duration::from_secs(5); while proc::alive(grand) && Instant::now() < end { tokio::time::sleep(Duration::from_millis(50)).await } assert!(!proc::alive(grand), "the watcher ends the agent's group"); return }
-    #[cfg(target_os = "linux")]
+    #[cfg(target_os = "linux")] {
     assert!(proc::alive(grand), "(a grandchild survives the kernel's rule: this is why the next hub reaps)");
-    #[cfg(target_os = "linux")]
     let n = proc::reap_orphans(&d.to_string_lossy()); assert!(n >= 1, "reaped {n}");
     let end = Instant::now() + Duration::from_secs(5); while proc::alive(grand) && Instant::now() < end { tokio::time::sleep(Duration::from_millis(50)).await }
     assert!(!proc::alive(grand), "no orphan after the next hub starts");
+    }
 }
 
 /// Item 5 measurement, never run in CI: a SYNTHETIC log (no real data) of BP_SYNTH_EVENTS events (default 1.7M, 2000 threads) in a temp dir.
