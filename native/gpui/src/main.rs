@@ -3,6 +3,7 @@ mod art;
 mod delta;
 mod hub;
 mod input;
+mod keys;
 mod local;
 mod screens;
 mod script;
@@ -21,7 +22,7 @@ pub struct Backplane {
     pub input:Entity<screens::composer::Composer>, data:Value, status:String, error:String,
     tx:tokio::sync::mpsc::Sender<Command>, selected:String,
     drafts:HashMap<String,String>, started:Instant, usable:bool,
-    first_frame:bool, script_done:bool, pub timeline:ListState, pub cats:art::Cats, pub links_sent:bool, pub links_last:String, pub sidebar_open:bool, pub local:local::Local, pub project_page:Option<String>, pub arm_new:Option<(Instant,std::collections::HashSet<String>)>, pub echo_seq:u64, pub thread_cache:Vec<(String,Value)>, pub thread_source:&'static str, pub confirm:Option<(String,Instant)>, pub ack_pending:Option<(String,Instant)>, pub recording:Option<(String,Vec<f64>)>, pub ui_epoch:u64, pub controls:Vec<script::CtlEntry>, pub ctl_last:String, pub last_layout:String, pub wake_at:Option<Instant>, pub reconnected:bool, pub click_info:Option<(String,String)>, pub timing:Option<hub::Timing>, pub applied_at:Option<Instant>, pub apply_ms:f64, pub render_us:u64, swatches:bool, gallery:bool, fonts:bool, theme_override:Option<bool>, steps:VecDeque<Step>, pending:Option<Pending>, seq:u64, want_focus:bool, script_total:usize, screens:screens::Screens,
+    first_frame:bool, script_done:bool, pub timeline:ListState, pub cats:art::Cats, pub links_sent:bool, pub links_last:String, pub sidebar_open:bool, pub models_pending:bool, pub local:local::Local, pub project_page:Option<String>, pub arm_new:Option<(Instant,std::collections::HashSet<String>)>, pub echo_seq:u64, pub thread_cache:Vec<(String,Value)>, pub thread_source:&'static str, pub confirm:Option<(String,Instant)>, pub ack_pending:Option<(String,Instant)>, pub recording:Option<(String,Vec<f64>)>, pub ui_epoch:u64, pub controls:Vec<script::CtlEntry>, pub ctl_last:String, pub last_layout:String, pub wake_at:Option<Instant>, pub reconnected:bool, pub click_info:Option<(String,String)>, pub timing:Option<hub::Timing>, pub applied_at:Option<Instant>, pub apply_ms:f64, pub render_us:u64, swatches:bool, gallery:bool, fonts:bool, theme_override:Option<bool>, steps:VecDeque<Step>, pending:Option<Pending>, seq:u64, want_focus:bool, script_total:usize, screens:screens::Screens,
 }
 fn pager_row(cx:&mut Context<Backplane>,id:String,pager:&Value,light:bool)->Option<AnyElement> {let c=|name:&str|theme::color(light,name);
     let mut row=div().flex().gap_2().px_3().py_1().text_size(px(11.));let mut any=false;
@@ -61,7 +62,7 @@ impl Backplane {
         }).detach();
         cx.subscribe(&input,|this,_,event:&screens::composer::ComposerEvent,cx|this.attach_event(event,cx)).detach();
         cx.on_app_quit(|this,_|{this.screens.drafts.flush();async{}}).detach();
-        Self{input,data:Value::Null,status:"Connecting…".into(),error:art::assets_missing().unwrap_or_default(),tx,selected:String::new(),drafts:saved.clone(),started,usable:false,first_frame:false,script_done:false,timeline:ListState::new(0,ListAlignment::Bottom,px(screens::timeline::RUNWAY)),cats:art::Cats::new(),links_sent:false,links_last:String::new(),sidebar_open:local.sidebar_open,local,project_page:None,arm_new:None,echo_seq:0,thread_cache:Vec::new(),thread_source:"hub",confirm:None,ack_pending:None,recording:None,ui_epoch:0,controls:Vec::new(),ctl_last:String::new(),last_layout:String::new(),wake_at:None,reconnected:false,click_info:None,timing:None,applied_at:None,apply_ms:0.0,render_us:0,swatches,gallery,fonts,theme_override:theme.as_deref().map(|t|t=="light"),steps,pending:None,seq:0,want_focus:false,script_total,screens:screens::Screens::new(cx,target,drafts_path,saved)}
+        Self{input,data:Value::Null,status:"Connecting…".into(),error:art::assets_missing().unwrap_or_default(),tx,selected:String::new(),drafts:saved.clone(),started,usable:false,first_frame:false,script_done:false,timeline:ListState::new(0,ListAlignment::Bottom,px(screens::timeline::RUNWAY)),cats:art::Cats::new(),links_sent:false,links_last:String::new(),sidebar_open:local.sidebar_open,models_pending:false,local,project_page:None,arm_new:None,echo_seq:0,thread_cache:Vec::new(),thread_source:"hub",confirm:None,ack_pending:None,recording:None,ui_epoch:0,controls:Vec::new(),ctl_last:String::new(),last_layout:String::new(),wake_at:None,reconnected:false,click_info:None,timing:None,applied_at:None,apply_ms:0.0,render_us:0,swatches,gallery,fonts,theme_override:theme.as_deref().map(|t|t=="light"),steps,pending:None,seq:0,want_focus:false,script_total,screens:screens::Screens::new(cx,target,drafts_path,saved)}
     }
     fn receive(&mut self,event:Event,cx:&mut Context<Self>) {
         if let Some(s)=hub::status_for(&event){self.status=s.into();}
@@ -183,13 +184,7 @@ impl Backplane {
     fn close_popup(&mut self,_:&ClosePopup,window:&mut Window,cx:&mut Context<Self>){if self.ctx_close(cx){return;}if screens::filesui::escape(self,window,cx){return;}if self.palette_close(cx){return;}if self.screens.lightbox.take().is_some(){cx.notify();return;}if self.screens.picker_open{self.screens.picker_open=false;cx.notify();return;}if self.screens.acct.menu{self.screens.acct.menu=false;cx.notify();return;}if screens::settings::is_open(self){screens::settings::close(self,cx);return;}if screens::improvements::escape(self,cx){return;}if let Some(a)=screens::projects::close_on_escape(&self.data){let _=self.tx.try_send(a);cx.notify();return;}if let Some(a)=screens::tools::close_question(&self.data) {let _=self.tx.try_send(a);}else if self.data["settings"].is_object() {let _=self.tx.try_send(Command::Action("flag".into(),"settings".into()));}else if let Some(a)=screens::bots::close_form(&self.data) {let _=self.tx.try_send(a);}else if self.input.read(cx).popup_open {let draft=self.input.read(cx).content.to_string();self.screens.popup_off=Some(draft);}cx.notify();}
 }
 /// Every key binding, from the defaults and this device's shortcut choices (called again when one changes).
-pub fn bind_all(cx:&mut App,l:&local::Local){
-    cx.clear_key_bindings();
-    input::bind(cx);screens::composer::bind(cx);screens::improvements::bind(cx);
-    let send=l.key("send");
-    cx.bind_keys([KeyBinding::new(&send,Send,Some("Composer")),KeyBinding::new("ctrl-enter",Send,Some("Composer")),KeyBinding::new(&l.key("close"),ClosePopup,None),KeyBinding::new("secondary-c",CopySelection,None),
-        KeyBinding::new(&l.key("sidebar"),ToggleSidebarKey,None),KeyBinding::new(&l.key("search"),FocusSearchKey,None),KeyBinding::new("ctrl-shift-p",OpenPaletteKey,None)]);
-}
+pub fn bind_all(cx:&mut App,l:&local::Local){keys::bind_all(cx,l);}
 fn main()->anyhow::Result<()> {
     #[cfg(feature="cef")]
     if let Some(code)=viewers::cef::subprocess(){std::process::exit(code);} // a CEF helper process (renderer, gpu...) is this executable run again

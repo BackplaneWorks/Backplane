@@ -384,9 +384,11 @@ pub fn device_rows(l: &crate::local::Local) -> Vec<Row> {
         r("Desktop notifications", "Kept for this device. Alerts for what needs you and for settled work show as desktop notifications.", vec![b("On", "notifications", "on", l.notifications), b("Off", "notifications", "off", !l.notifications)]),
         r("Keyboard shortcuts", "", vec![]),
     ];
-    for (a, label, _) in lo::SHORTCUTS {
-        rows.push(r(label, &format!("Now {}. Press to take the next key.", l.key(a)), vec![b(&l.key(a), "shortcut", a, false)]));
+    for x in crate::keys::TABLE {
+        if x.kind == crate::keys::Kind::Fixed { rows.push(r(&format!("{} · {}", x.label, x.scope), &format!("{}. Fixed.", crate::keys::hint(l, x.id)), vec![])); }
+        else { let k = crate::keys::hint(l, x.id); rows.push(r(&format!("{} · {}", x.label, x.scope), &format!("Now {k}. Press to take the next key."), vec![b(&k, "shortcut", x.id, false)])); }
     }
+    for (k, why) in crate::keys::MISSING { rows.push(r(k, &format!("Not yet: {why}."), vec![])); }
     rows.push(r("Shortcuts to defaults", "", vec![b("Reset", "shortcuts-reset", "", false)]));
     rows
 }

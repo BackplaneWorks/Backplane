@@ -13,8 +13,9 @@ use std::{collections::HashMap, path::{Path, PathBuf}, sync::Arc, time::Duration
 
 actions!(improvements, [Toggle]);
 
-pub fn bind(cx: &mut App) {
-    cx.bind_keys([KeyBinding::new("ctrl-alt-i", Toggle, None), KeyBinding::new("enter", super::composer::Newline, Some("ImpInput")), KeyBinding::new("ctrl-enter", super::composer::Go, Some("ImpInput"))]);
+pub fn bind(cx: &mut App) { cx.bind_keys(bindings()); }
+pub fn bindings() -> Vec<KeyBinding> {
+    vec![KeyBinding::new("ctrl-alt-i", Toggle, None), KeyBinding::new("enter", super::composer::Newline, Some("ImpInput")), KeyBinding::new("ctrl-enter", super::composer::Go, Some("ImpInput"))]
 }
 
 /// What a reply is for. A step names the one that follows it.

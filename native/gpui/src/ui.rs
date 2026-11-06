@@ -278,6 +278,7 @@ impl Render for Backplane {
         crate::screens::improvements::tick(self, window, cx);
         crate::screens::desk::tick(self, window, cx);
         if self.want_focus { self.want_focus = false; self.input.focus_handle(cx).focus(window); }
+        if self.models_pending { self.models_pending = false; self.picker_toggle(window, cx); }
         if let Some(w) = self.screens.projects.focus.take() { let e = if w == "folder" { self.screens.projects.folder.clone() } else { self.screens.projects.search.clone() }; if let Some(e) = e { window.focus(&e.focus_handle(cx)); } }
         if let Some(n) = self.screens.focus_field.take() { if let Some(s) = self.screens.fields.get(&n) { window.focus(&s.input.focus_handle(cx)); } }
         if self.screens.focus_settings { self.screens.focus_settings = false; window.focus(&self.screens.settings_focus); }
@@ -439,7 +440,7 @@ impl Render for Backplane {
         let ctx = string(&thread["picker"], "label").split("ctx ").nth(1).map(|s| format!("ctx {}", s.split(' ').next().unwrap_or(""))).unwrap_or_default();
         // Remaining provider allowance, as the hub words it ("72% left · shared"); "limit —" until the provider has reported one.
         let allowance = { let a = string(thread, "allowance"); if a.is_empty() { "limit —".to_string() } else { a } };
-        let tools_strip = crate::screens::tools::strip(cx, light, thread);
+        let tools_strip = crate::screens::tools::strip(cx, light, thread, &self.local);
         let mut rail: Vec<AnyElement> = Vec::new();
         crate::screens::viewer::follow(&self.tx, thread);
         let active_kind = if thread["diff"].is_object() { String::new() } else { crate::screens::viewer::active_kind(&thread["viewer"], self.screens.rail_pending.as_deref()) };
@@ -451,10 +452,10 @@ impl Render for Backplane {
                 Some((a, v)) => {
                     let active = a == "view-kind" && v == active_kind;
                     ctl.push(CtlEntry { id: format!("rail:{l}"), label: l.to_string(), ctl: if a == "view-kind" { Ctl::Rail(v.into()) } else { Ctl::Node(a.into(), v.into()) } });
-                    rail.push(with_rect(div().id(SharedString::from(format!("rail-{l}"))), || format!("rail:{l}")).cursor_pointer().on_click(cx.listener(move |this, _, _, cx| { let cmd = if a == "view-kind" { this.screens.rail_pending = Some(v.to_string()); this.screens.rail_at = Some(std::time::Instant::now()); this.screens.plot_click = matches!(v, "board" | "schematic").then(std::time::Instant::now); crate::screens::viewer::view_kind(v) } else { Command::Action(a.into(), v.into()) }; let _ = this.tx.try_send(cmd); cx.notify(); }))
+                    rail.push(with_rect(div().id(SharedString::from(format!("rail-{l}"))), || format!("rail:{l}")).cursor_pointer().on_click(cx.listener(move |this, _, _, cx| this.rail_press(a, v, cx))).tooltip({ let letter = crate::keys::rail_letter(if a == "diff" { "diff" } else { v }).to_uppercase(); let chord = match (a, v) { ("diff", _) => crate::keys::hint(&self.local, "diff"), (_, "files") => crate::keys::hint(&self.local, "files"), _ => String::new() }; let key = [letter, chord].into_iter().filter(|k| !k.is_empty()).collect::<Vec<_>>().join(" or "); crate::keys::tip(l, &key, light) })
                         .flex().flex_col().items_center().h(px(48.)).justify_center().gap_1().text_size(px(10.)).when(active, |d| d.bg(c("raise")).border_l_2().border_color(c("accent"))).text_color(c(if active { "text" } else { "dim" })).hover(|s| s.text_color(c("text"))).child(ic(light, i, 18., if active { "accent" } else { "dim" })).child(*l).into_any_element());
                 }
-                None if *l == "Commands" => rail.push(with_rect(div().id("rail-Commands").cursor_pointer().on_click(cx.listener(|this, _, _, cx| this.palette_open(cx))), || "rail:Commands".to_string()).flex().flex_col().items_center().h(px(48.)).justify_center().gap_1().text_size(px(10.)).text_color(c("dim")).hover(|s| s.bg(c("raise"))).child(ic(light, i, 18., "dim")).child(*l).into_any_element()),
+                None if *l == "Commands" => rail.push(with_rect(div().id("rail-Commands").cursor_pointer().on_click(cx.listener(|this, _, _, cx| this.palette_open(cx))).tooltip(crate::keys::tip("Commands", &crate::keys::hint(&self.local, "palette"), light)), || "rail:Commands".to_string()).flex().flex_col().items_center().h(px(48.)).justify_center().gap_1().text_size(px(10.)).text_color(c("dim")).hover(|s| s.bg(c("raise"))).child(ic(light, i, 18., "dim")).child(*l).into_any_element()),
                 None => rail.push(with_rect(div().opacity(0.45), || format!("rail:{l}")).flex().flex_col().items_center().h(px(48.)).justify_center().gap_1().text_size(px(10.)).text_color(c("dim")).child(ic(light, i, 18., "dim")).child(*l).into_any_element()),
             }
         }
@@ -484,9 +485,9 @@ impl Render for Backplane {
         let connected = self.status == "Connected";
         if !self.screens.img_poll && self.screens.images.loading() { self.screens.img_poll = true; crate::screens::timeline::poll(cx); }
 
-        let el = div().size_full().flex().flex_col().bg(c("bg"))
+        let el = crate::keys::attach(div().size_full().flex().flex_col().bg(c("bg")),cx)
             .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| this.attach_event(&crate::screens::composer::ComposerEvent::Files(paths.paths().to_vec()), cx))).text_color(c("text")).text_size(px(13. * self.local.text_pct as f32 / 100.)).font_family(self.local.font.clone()).line_height(px(20. * self.local.text_pct as f32 / 100.))
-            .relative().on_action(cx.listener(|this, _: &crate::OpenPaletteKey, _, cx| this.palette_open(cx))).on_action(cx.listener(|this, _: &crate::screens::improvements::Toggle, _, cx| crate::screens::improvements::toggle(this, cx))).on_action(cx.listener(|this, _: &crate::ToggleSidebarKey, _, cx| this.sidebar_toggle(cx))).on_action(cx.listener(|this, _: &crate::FocusSearchKey, _, cx| this.focus_search(cx))).on_action(cx.listener(Self::send)).on_action(cx.listener(Self::close_popup)).on_action(cx.listener(Self::copy_selection))
+            .relative().on_action(cx.listener(|this, _: &crate::OpenPaletteKey, _, cx| if !this.palette_close(cx) { this.palette_open(cx) })).on_action(cx.listener(|this, _: &crate::screens::improvements::Toggle, _, cx| crate::screens::improvements::toggle(this, cx))).on_action(cx.listener(|this, _: &crate::ToggleSidebarKey, _, cx| this.sidebar_toggle(cx))).on_action(cx.listener(|this, _: &crate::FocusSearchKey, _, cx| this.focus_search(cx))).on_action(cx.listener(Self::send)).on_action(cx.listener(Self::close_popup)).on_action(cx.listener(Self::copy_selection))
             // the dev build strip, only while a build is being made or waits to relaunch
             .children(self.screens.devbar.clone().map(|b| crate::screens::devbar::strip(cx, &b, light, self.screens.devbar_confirm.is_some())))
             // top bar
@@ -499,7 +500,7 @@ impl Render for Backplane {
                     .child(div().text_color(c("faint")).child("/")).child(div().text_color(c("dim")).child(if has_thread { "Project".to_string() } else { "Projects".to_string() }))
                     .when(has_thread, |d| d.child(div().text_color(c("faint")).child("/")).child(div().id("thread-title").cursor_pointer().on_click(cx.listener(|this, _, _, cx| { let id = string(&this.data["thread"], "id"); let id = crate::screens::attach::raw_id(&id).to_string(); let _ = this.tx.try_send(Command::Action("row-rename".into(), id)); cx.notify(); })).font_weight(FontWeight::BOLD).child(string(thread, "title"))).child(ic(light, "chevron-down", 14., "dim"))))
                 .child(div().flex().items_center().gap_3()
-                    .child(with_rect(div().id("palette-bar").cursor_pointer().on_click(cx.listener(|this, _, _, cx| this.palette_open(cx))), || "ui:Jump or run a command".to_string()).w(px(260.)).px_2().flex().items_center().gap_2().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("faint")).child(ic(light, "chevron-right", 13., "faint")).child("Jump or run a command"))
+                    .child(with_rect(div().id("palette-bar").cursor_pointer().on_click(cx.listener(|this, _, _, cx| this.palette_open(cx))).tooltip(crate::keys::tip("Jump or run a command", &crate::keys::hint(&self.local, "palette"), light)), || "ui:Jump or run a command".to_string()).w(px(260.)).px_2().flex().items_center().gap_2().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("faint")).child(ic(light, "chevron-right", 13., "faint")).child("Jump or run a command"))
                     .child(with_rect(div().id("improvements-btn"), || "ui:Improvements".to_string()).cursor_pointer().on_click(cx.listener(|this, _, _, cx| crate::screens::improvements::toggle(this, cx))).px_2().flex().items_center().gap_2().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("dim")).child(ic(light, "message-square", 15., "dim")).child("Improvements"))
                     .child(with_rect(div().id("search-btn"), || "ui:Search".to_string()).cursor_pointer().on_click(cx.listener(|this, _, _, cx| this.focus_search(cx))).child(ic(light, "search", 15., "dim"))).child(with_rect(div().id("gear"), || "ui:Settings".to_string()).cursor_pointer().on_click(cx.listener(|this, _, _, cx| { this.open_settings(cx); })).child(ic(light, "settings", 15., "dim")))))
             .children(crate::screens::strip::view(light, &self.data))
@@ -563,7 +564,7 @@ impl Render for Backplane {
                     .children(crate::screens::projects::view(cx, light, &self.screens.projects, &self.data))
                     .children(crate::screens::bots::forms(cx, light, &self.screens.fields, &self.data))
                     .children(crate::screens::settings::view(cx, light, &self.screens.fields, &self.data["settings"], &self.screens.settings_focus, &self.screens.settings_ui, &self.local, &self.screens.acct))
-                    .children(crate::screens::palette::view(cx, light, &self.data, &self.screens.palette))
+                    .children(crate::screens::palette::view(cx, light, &self.data, &self.screens.palette, &self.local, &self.selected))
                     .children(crate::screens::images::lightbox(cx, self.screens.lightbox.as_ref()))
                 )
                 .children(crate::screens::viewer::view(cx, &reg, light, &self.screens.files, &self.screens.images, self.screens.attacher.target.as_ref(), thread, &self.screens.plot, &mut self.screens.plotview, &mut self.screens.split_pv, self.screens.solid.as_ref(), self.screens.browser.as_ref().map(|(_, b)| b)))

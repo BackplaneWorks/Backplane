@@ -229,7 +229,7 @@ impl Bar {
             .child(content)
             .on_mouse_down(MouseButton::Left, cx.listener(|this, e: &MouseDownEvent, w, cx| { w.focus(&this.bar.focus); this.bar.edit = false; if let Some((x, y)) = this.bar.thousandths(e.position) { this.bar.input(serde_json::json!({"op": "click", "x": x, "y": y})); } cx.notify(); }))
             .on_scroll_wheel(cx.listener(|this, e: &ScrollWheelEvent, _, _| { let dy = match e.delta { ScrollDelta::Pixels(p) => -f32::from(p.y), ScrollDelta::Lines(l) => -l.y * 40.0 }; let dx = match e.delta { ScrollDelta::Pixels(p) => -f32::from(p.x), ScrollDelta::Lines(l) => -l.x * 40.0 }; this.bar.input(serde_json::json!({"op": "scroll", "dx": dx, "dy": dy})); }))
-            .on_key_down(cx.listener(|this, e, w, cx| this.bar.key(e, w, cx)));
+            .key_context("Viewer").on_key_down(cx.listener(|this, e, w, cx| this.bar.key(e, w, cx)));
         div().size_full().flex().flex_col().bg(c("bg")).child(strip).child(chrome).child(view).into_any_element()
     }
 }

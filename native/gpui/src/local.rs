@@ -12,8 +12,6 @@ pub const SIDEBAR_PX: (u32, u32, u32) = (180, 420, 24);
 /// The viewer pane's width: 0 is the default (VIEWER_PX_DEFAULT); a drag on its left edge sets it, a double click puts it back.
 pub const VIEWER_PX: (u32, u32) = (380, 1400);
 pub const VIEWER_PX_DEFAULT: u32 = 700;
-/// (action, label, default keystroke): the keys the client binds itself.
-pub const SHORTCUTS: [(&str, &str, &str); 4] = [("send", "Send the message", "enter"), ("close", "Close a popup", "escape"), ("sidebar", "Fold or unfold the sidebar", "ctrl-b"), ("search", "Search the sidebar", "ctrl-k")];
 /// Keystrokes a shortcut can be set to (a pick, not free text: a bad keystroke would unbind the action).
 pub const KEYS: [&str; 8] = ["enter", "ctrl-enter", "escape", "ctrl-b", "ctrl-k", "ctrl-shift-b", "ctrl-shift-k", "alt-s"];
 
@@ -47,7 +45,7 @@ impl Local {
         if !THEMES.iter().any(|(k, _)| *k == l.theme) { l.theme = "hub".into() }
         if !VIEWS.iter().any(|(k, _)| *k == l.default_view) { l.default_view = "last".into() }
         if l.font.is_empty() { l.font = FONTS[0].0.into() }
-        l.shortcuts.retain(|a, k| SHORTCUTS.iter().any(|(s, _, _)| s == a) && KEYS.contains(&k.as_str()));
+        l.shortcuts.retain(|a, k| crate::keys::rebindable(a) && crate::keys::choices(a).contains(k));
         l
     }
     pub fn load() -> Local { path().map(|p| Local::read(&p)).unwrap_or_default() }
@@ -61,7 +59,7 @@ impl Local {
         })();
         if let Err(e) = r { eprintln!("local settings not saved: {e}") }
     }
-    pub fn key(&self, action: &str) -> String { self.shortcuts.get(action).cloned().or_else(|| SHORTCUTS.iter().find(|(a, _, _)| *a == action).map(|(_, _, k)| k.to_string())).unwrap_or_default() }
+    pub fn key(&self, action: &str) -> String { self.shortcuts.get(action).cloned().or_else(|| crate::keys::find(action).map(|x| x.key.to_string())).unwrap_or_default() }
     /// Apply a change by name (the dialog's buttons are `local:<name>` with a value). False for a name or value this layer does not know.
     pub fn set(&mut self, name: &str, value: &str) -> bool {
         match name {
@@ -75,8 +73,8 @@ impl Local {
             "default-view" if VIEWS.iter().any(|(k, _)| *k == value) => self.default_view = value.into(),
             "shortcut" => { // "<action>\u{1f}<key>", or just "<action>" to take the next key in the list
                 let (a, k) = value.split_once('\u{1f}').unwrap_or((value, ""));
-                if !SHORTCUTS.iter().any(|(s, _, _)| *s == a) { return false }
-                let key = if k.is_empty() { let now = self.key(a); KEYS[(KEYS.iter().position(|x| *x == now).map_or(0, |i| i + 1)) % KEYS.len()].to_string() } else if KEYS.contains(&k) { k.to_string() } else { return false };
+                if !crate::keys::rebindable(a) { return false }
+                let ch = crate::keys::choices(a); let key = if k.is_empty() { let now = self.key(a); ch[(ch.iter().position(|x| *x == now).map_or(0, |i| i + 1)) % ch.len()].clone() } else if ch.iter().any(|x| x == k) { k.to_string() } else { return false };
                 self.shortcuts.insert(a.into(), key);
             }
             "shortcuts-reset" => self.shortcuts.clear(),

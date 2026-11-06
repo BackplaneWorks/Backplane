@@ -8,9 +8,18 @@ use gpui::{prelude::*, *};
 use serde_json::Value;
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum Do { Thread(String), Action(String, String), Settings, Sidebar }
+pub enum Do { Thread(String), Action(String, String), Settings, Sidebar, Models, Prev, Next, Uber, Shortcuts }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Item { pub label: String, pub place: String, pub kind: &'static str, pub what: Do }
+/// The key that does what an item does, as the person reads it ("" for none).
+pub fn shortcut(it: &Item, current: &str, l: &crate::local::Local) -> String {
+    let id = match &it.what {
+        Do::Action(a, v) if a == "view-kind" && v != "files" => return crate::keys::rail_letter(v).to_uppercase(),
+        Do::Action(a, v) => crate::keys::id_for(a, v, current),
+        Do::Sidebar => "sidebar", Do::Models => "models", Do::Prev => "prev", Do::Next => "next", Do::Uber => "uber", _ => "",
+    };
+    if id.is_empty() { String::new() } else { crate::keys::hint(l, id) }
+}
 
 #[derive(Default)]
 pub struct Palette { pub focus: bool, pub open: bool, pub input: Option<Entity<Composer>>, pub q: String, pub ix: usize }
@@ -38,6 +47,13 @@ pub fn items(data: &Value) -> Vec<Item> {
             v.push(Item { label: format!("Open {l}"), place: "viewer".into(), kind: "action", what: Do::Action("view-kind".into(), k.into()) });
         }
     }
+    if thread.is_object() {
+        v.push(Item { label: "Agent, model and effort".into(), place: String::new(), kind: "action", what: Do::Models });
+        v.push(Item { label: "Previous thread".into(), place: String::new(), kind: "action", what: Do::Prev });
+        v.push(Item { label: "Next thread".into(), place: String::new(), kind: "action", what: Do::Next });
+    }
+    if data["bots"].as_array().map_or(false, |b| b.iter().any(|b| b["uber"] == true)) { v.push(Item { label: "Uberbot chat".into(), place: String::new(), kind: "action", what: Do::Uber }); }
+    v.push(Item { label: "Keyboard shortcuts".into(), place: String::new(), kind: "action", what: Do::Shortcuts });
     v.push(Item { label: "Settings".into(), place: String::new(), kind: "action", what: Do::Settings });
     v.push(Item { label: "Fold or unfold the sidebar".into(), place: String::new(), kind: "action", what: Do::Sidebar });
     for p in data["projects"].as_array().into_iter().flatten() {
@@ -94,21 +110,27 @@ impl Backplane {
             Do::Action(a, v) => { if a == "fork" { self.arm_new(); } let _ = self.tx.try_send(Command::Action(a, v)); }
             Do::Settings => self.open_settings(cx),
             Do::Sidebar => self.sidebar_toggle(cx),
+            Do::Models => self.models_pending = true,
+            Do::Prev | Do::Next => { let n = crate::keys::neighbour(&self.data, &self.selected, it.what == Do::Next); if let Some(id) = n { self.select_id(id, cx); } }
+            Do::Uber => { let id = self.data["bots"].as_array().into_iter().flatten().find(|b| b["uber"] == true).map(|b| crate::string(b, "id")); if let Some(id) = id { let _ = self.tx.try_send(Command::Action("bot".into(), id)); } }
+            Do::Shortcuts => self.open_settings(cx),
         }
         cx.notify();
     }
 }
 
-pub fn view(cx: &mut Context<Backplane>, light: bool, data: &Value, p: &Palette) -> Option<AnyElement> {
+pub fn view(cx: &mut Context<Backplane>, light: bool, data: &Value, p: &Palette, l: &crate::local::Local, sel: &str) -> Option<AnyElement> {
     if !p.open { return None }
     let c = |n: &str| theme::color(light, n);
     let list = found(items(data), &p.q, 10);
     let ix = p.ix.min(list.len().saturating_sub(1));
+    let current = crate::keys::project_of(data, sel);
     let mut col = div().flex().flex_col().py_1();
     if list.is_empty() { col = col.child(div().px_3().py_1().text_color(c("faint")).child("Nothing matches")); }
     for (i, it) in list.iter().enumerate() {
         col = col.child(div().id(SharedString::from(format!("pal-{i}"))).flex().items_center().gap_3().px_3().py_1().cursor_pointer().when(i == ix, |d| d.bg(c("raise"))).hover(|s| s.bg(c("raise")))
             .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(it.label.clone()))
+            .child(div().text_size(px(11.)).text_color(c("dim")).child(shortcut(it, &current, l)))
             .child(div().text_size(px(11.)).text_color(c("faint")).child(if it.place.is_empty() { it.kind.to_string() } else { it.place.clone() }))
             .on_click(cx.listener(move |this, _, _, cx| this.palette_run(Some(i), cx))));
     }

@@ -617,8 +617,9 @@ impl TextInput {
         self.reset(); self.selected_range=text.len()..text.len();self.content=text.into();cx.notify();
     }
 }
-pub fn bind(cx: &mut App) {
-    cx.bind_keys([
+pub fn bind(cx: &mut App) { cx.bind_keys(bindings()); }
+pub fn bindings() -> Vec<KeyBinding> {
+    vec![
         KeyBinding::new("backspace", Backspace, Some("TextInput")),
         KeyBinding::new("delete", Delete, Some("TextInput")),
         KeyBinding::new("left", Left, Some("TextInput")),
@@ -631,5 +632,5 @@ pub fn bind(cx: &mut App) {
         KeyBinding::new("ctrl-x", Cut, Some("TextInput")),
         KeyBinding::new("home", Home, Some("TextInput")),
         KeyBinding::new("end", End, Some("TextInput")),
-    ]);
+    ]
 }
