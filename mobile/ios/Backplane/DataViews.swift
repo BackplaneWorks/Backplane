@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import PhotosUI
 
 // The phone app's screens for data/1 (docs/gpui/PHONE-DATA.md): native SwiftUI over typed values from DataClient. Fresh-home scope: projects, their
 // threads, one thread (entries, a composer, approvals), Improvements, and this phone's own settings.
@@ -60,6 +61,7 @@ struct DataThreadsView: View {
                 Section {
                     ForEach(threads(p)) { t in
                         NavigationLink(value: t.id) { DataThreadRow(thread: t) }
+                            .onAppear { client.prefetch(t.id) }
                             .accessibilityIdentifier("data.thread.row." + t.id)
                     }
                     if client.threads.filter({ $0.project == p.id }).isEmpty {
@@ -215,6 +217,10 @@ struct DataThreadView: View {
     @Bindable var client: DataClient
     let id: String
     @State private var text = ""
+    @State private var pending: [Data] = []
+    @State private var picked: [PhotosPickerItem] = []
+
+    init(client: DataClient, id: String) { self.client = client; self.id = id; client.touch(id) }
 
     private var thread: DThread? { client.threads.first { $0.id == id } }
     private var list: [DEntry] { client.entries[id] ?? [] }
@@ -239,14 +245,30 @@ struct DataThreadView: View {
                 .onChange(of: list.last?.id) { _, _ in proxy.scrollTo("end", anchor: .bottom) }
                 .onChange(of: list.count) { _, _ in proxy.scrollTo("end", anchor: .bottom) }
             }
+            if !pending.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(Array(pending.enumerated()), id: \.offset) { i, d in
+                            ZStack(alignment: .topTrailing) {
+                                if let u = UIImage(data: d) { Image(uiImage: u).resizable().scaledToFill().frame(width: 64, height: 64).clipShape(RoundedRectangle(cornerRadius: 8)) }
+                                Button { pending.remove(at: i) } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.white, .black.opacity(0.6)) }
+                                    .accessibilityLabel("Remove picture")
+                            }
+                        }
+                    }.padding(.horizontal)
+                }.padding(.vertical, 6).background(BackplaneDesign.panel).accessibilityIdentifier("data.pending.images")
+            }
             HStack(alignment: .bottom, spacing: 8) {
+                PhotosPicker(selection: $picked, maxSelectionCount: max(0, 4 - pending.count), matching: .images) {
+                    Image(systemName: "paperclip").font(.system(size: 22)).frame(minWidth: 36, minHeight: 44)
+                }.accessibilityLabel("Attach pictures").accessibilityIdentifier("data.attach")
                 UIKitField(text: text, placeholder: "Message", editable: true,
                            onChange: { text = $0; client.setDraft(id, $0) },
-                           onSend: { send() }, onPasteImages: { _ in })
+                           onSend: { send() }, onPasteImages: { imgs in add(imgs.compactMap { $0.jpegData(compressionQuality: 0.95) }) })
                     .padding(.horizontal, 12).padding(.vertical, 8)
                     .background(BackplaneDesign.raised, in: RoundedRectangle(cornerRadius: 10))
                     .accessibilityLabel("Message")
-                let blank = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                let blank = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && pending.isEmpty
                 let stop = working && blank
                 Button { if stop { Task { await client.interrupt(id) } } else { send() } } label: {
                     Image(systemName: stop ? "stop.circle.fill" : "arrow.up.circle.fill").font(.system(size: 32))
@@ -261,14 +283,35 @@ struct DataThreadView: View {
         }
         .navigationTitle(thread?.title.isEmpty == false ? thread!.title : "Thread")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { text = client.drafts[id] ?? ""; client.openThread(id) }
+        .onChange(of: picked) { _, items in
+            guard !items.isEmpty else { return }
+            Task {
+                var raw: [Data] = []
+                for it in items { if let d = try? await it.loadTransferable(type: Data.self) { raw.append(d) } }
+                picked = []
+                add(raw)
+            }
+        }
+        .onAppear {
+            let had = !(client.entries[id] ?? []).isEmpty
+            text = client.drafts[id] ?? ""; client.openThread(id)
+            DispatchQueue.main.async { client.shown(id, hadCopy: had) }
+        }
         .onDisappear { client.closeThread(id) }
     }
     private func send() {
         let t = text
-        guard !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        text = ""
-        client.send(id, t)
+        guard !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !pending.isEmpty else { return }
+        let images = pending
+        text = ""; pending = []
+        client.send(id, t, images: images)
+    }
+    // pictures chosen or pasted: shrunk off the main thread, at most four to a message
+    private func add(_ raw: [Data]) {
+        Task {
+            let small = await Task.detached { raw.compactMap { DataClient.prepared($0) } }.value
+            pending = Array((pending + small).prefix(4))
+        }
     }
 }
 
@@ -286,7 +329,11 @@ struct DataEntryRow: View {
         case "user":
             HStack { Spacer(minLength: 48)
                 VStack(alignment: .trailing, spacing: 3) {
-                    Text(entry.text).padding(10).background(BackplaneDesign.accent.opacity(0.18), in: RoundedRectangle(cornerRadius: 12))
+                    ForEach(Array(entry.localImages.enumerated()), id: \.offset) { _, d in
+                        if let u = UIImage(data: d) { Image(uiImage: u).resizable().scaledToFit().frame(maxWidth: 220, maxHeight: 220).clipShape(RoundedRectangle(cornerRadius: 10)).accessibilityIdentifier("data.entry.image") }
+                    }
+                    if entry.localImages.isEmpty { ForEach(entry.attachments) { a in DataAttachmentImage(client: client, attachment: a) } }
+                    if !entry.text.isEmpty { Text(entry.text).padding(10).background(BackplaneDesign.accent.opacity(0.18), in: RoundedRectangle(cornerRadius: 12)) }
                     if entry.sending { Text("Sending…").font(.caption2).foregroundStyle(.secondary) }
                     if entry.failed { Button("Not sent · Retry") { client.retry(thread, entry) }.font(.caption).foregroundStyle(.red) }
                 }
@@ -434,5 +481,32 @@ struct DataSettingsView: View {
         .confirmationDialog("Forget this hub?", isPresented: $confirmUnpair, titleVisibility: .visible) {
             Button("Forget", role: .destructive) { client.unpair() }
         } message: { Text("This phone's saved copy of its threads is removed. Pair again to come back.") }
+    }
+}
+
+// a picture of a message: this phone's copy when it has one, else fetched once from the hub (attachment.get) and kept
+struct DataAttachmentImage: View {
+    let client: DataClient
+    let attachment: DAttachment
+    @State private var image: UIImage?
+    @State private var failed = false
+    @State private var full = false
+    var body: some View {
+        Group {
+            if let image { Image(uiImage: image).resizable().scaledToFit().frame(maxWidth: 220, maxHeight: 220).clipShape(RoundedRectangle(cornerRadius: 10)).onTapGesture { full = true } }
+            else if failed { Label(attachment.name, systemImage: "photo").font(.footnote).foregroundStyle(.secondary) }
+            else { ProgressView().frame(width: 80, height: 80) }
+        }
+        .task(id: attachment.id) {
+            if let d = await client.attachmentData(attachment.id), let u = UIImage(data: d) { image = u } else { failed = true }
+        }
+        .fullScreenCover(isPresented: $full) {
+            ZStack(alignment: .topTrailing) {
+                Color.black.ignoresSafeArea()
+                if let image { Image(uiImage: image).resizable().scaledToFit() }
+                Button { full = false } label: { Image(systemName: "xmark.circle.fill").font(.title).foregroundStyle(.white) }.padding()
+            }
+        }
+        .accessibilityIdentifier("data.entry.image")
     }
 }

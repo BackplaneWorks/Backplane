@@ -216,9 +216,43 @@ final class DataClient {
         open = id
         guard conn == .online else { return }
         let g = gen
+        // the subscribe and the newest page go out back to back on the one socket (it keeps their order): no round trip between them
         Task {
-            do { try await subscribeThread(id, g); await refreshThread(id) } catch {}
+            async let sub: Void? = try? await self.subscribeThread(id, g)
+            await refreshThread(id)
+            _ = await sub
         }
+    }
+
+    // MARK: cache-first: what the list shows is read ahead, so opening it paints from memory
+    @ObservationIgnored private var prefetched: [String: Date] = [:]
+    @ObservationIgnored private var prefetchBusy = 0
+    @ObservationIgnored private var touched: [String: UInt64] = [:]
+    // a finger went down on a thread: read it now (and remember when, for the open timing)
+    func touch(_ id: String) {
+        if touched[id].map({ DispatchTime.now().uptimeNanoseconds - $0 > 1_000_000_000 }) ?? true { touched[id] = DispatchTime.now().uptimeNanoseconds }
+        prefetch(id)
+    }
+    // (the thread screen is made at the tap: DataThreadView.init calls touch, onAppear + one run loop later is "shown")
+    func prefetch(_ id: String) {
+        guard conn == .online, id != open, prefetchBusy < 4, prefetched[id].map({ Date().timeIntervalSince($0) > 60 }) ?? true else { return }
+        prefetched[id] = Date(); prefetchBusy += 1
+        let g = gen
+        Task {
+            defer { prefetchBusy -= 1 }
+            guard let r: DEntriesPage = try? await call("thread.entries", ["thread": id, "limit": 40]), g == gen, id != open else { return }
+            let pending = (entries[id] ?? []).filter { $0.sending || $0.failed }
+            entries[id] = r.entries + pending
+            older[id] = r.next
+            loadedThreads.insert(id)
+        }
+    }
+    // the thread's screen is up: how long since the touch (or the open call), and whether it had a saved copy to show
+    func shown(_ id: String, hadCopy: Bool) {
+        #if DEBUG || BP_MEASURE
+        let t0 = touched.removeValue(forKey: id) ?? DispatchTime.now().uptimeNanoseconds
+        NSLog("Backplane open cached=%@ ms=%.1f", String(hadCopy), Double(DispatchTime.now().uptimeNanoseconds - t0) / 1e6)
+        #endif
     }
     func closeThread(_ id: String) {
         if open == id { open = nil }
@@ -313,28 +347,53 @@ final class DataClient {
     }
 
     // MARK: actions
-    func send(_ tid: String, _ text: String) {
+    func send(_ tid: String, _ text: String, images: [Data] = []) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        guard !text.isEmpty || !images.isEmpty else { return }
         let cid = UUID().uuidString
         var local = DEntry(id: "local:" + cid, kind: "user", text: text, at: Int(Date().timeIntervalSince1970 * 1000), clientId: cid)
-        local.sending = true
+        local.sending = true; local.localImages = images
         entries[tid, default: []].append(local)
         setDraft(tid, "")
-        Task { await deliver(tid, text, cid) }
+        Task { await deliver(tid, text, cid, images) }
     }
     func retry(_ tid: String, _ entry: DEntry) {
         guard let cid = entry.clientId, var l = entries[tid], let i = l.firstIndex(where: { $0.id == entry.id }) else { return }
         l[i].failed = false; l[i].sending = true; entries[tid] = l
-        Task { await deliver(tid, entry.text, cid) }
+        Task { await deliver(tid, entry.text, cid, entry.localImages) }
     }
-    private func deliver(_ tid: String, _ text: String, _ cid: String) async {
+    private func deliver(_ tid: String, _ text: String, _ cid: String, _ images: [Data]) async {
         do {
-            let r: DEntryReply = try await call("message.send", ["thread": tid, "text": text, "clientId": cid])
+            var p: [String: Any] = ["thread": tid, "text": text, "clientId": cid]
+            if !images.isEmpty {
+                p["attachments"] = images.enumerated().map { ["name": "photo-\($0.offset + 1).jpg", "mime": "image/jpeg", "data": $0.element.base64EncodedString()] }
+            }
+            let r: DEntryReply = try await call("message.send", p)
+            // the pictures sent stay on this phone under the hub's ids: no fetch for what we just sent
+            for (i, a) in r.entry.attachments.enumerated() where i < images.count { Self.attachmentCache.setObject(images[i] as NSData, forKey: a.id as NSString) }
             put(r.entry, in: tid)
         } catch {
             if var l = entries[tid], let i = l.firstIndex(where: { $0.clientId == cid }) { l[i].sending = false; l[i].failed = true; entries[tid] = l }
         }
+    }
+
+    // MARK: pictures
+    nonisolated(unsafe) static let attachmentCache = NSCache<NSString, NSData>()
+    func attachmentData(_ id: String) async -> Data? {
+        if let d = Self.attachmentCache.object(forKey: id as NSString) { return d as Data }
+        guard let r: DAttachmentData = try? await call("attachment.get", ["id": id]), let d = Data(base64Encoded: r.data) else { return nil }
+        Self.attachmentCache.setObject(d as NSData, forKey: id as NSString)
+        return d
+    }
+    // a picture chosen or pasted: the longest side at most 2048 px, JPEG at 0.8 (about a megabyte at most; the hub takes 8 MB)
+    nonisolated static func prepared(_ data: Data) -> Data? {
+        guard let image = UIImage(data: data) else { return nil }
+        let longest = max(image.size.width, image.size.height) * image.scale
+        let factor = longest > 2048 ? 2048 / longest : 1
+        let size = CGSize(width: image.size.width * image.scale * factor, height: image.size.height * image.scale * factor)
+        let fmt = UIGraphicsImageRendererFormat(); fmt.scale = 1; fmt.opaque = true
+        let out = UIGraphicsImageRenderer(size: size, format: fmt).image { _ in UIColor.white.setFill(); UIRectFill(CGRect(origin: .zero, size: size)); image.draw(in: CGRect(origin: .zero, size: size)) }
+        return out.jpegData(compressionQuality: 0.8)
     }
     func answer(_ tid: String, ask: String, option: String) async {
         do {

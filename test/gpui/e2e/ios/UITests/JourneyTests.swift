@@ -229,6 +229,81 @@ final class Journeys: XCTestCase {
         d.shot("relaunch")
     }
 
+    // Opening threads one after another, again and again: the app logs "Backplane open cached=... ms=..." for each (touch to screen). Needs 3 threads:
+    // it makes them (a first message each) when the project has fewer.
+    func test_data_switch() {
+        d = Driver("data-switch"); defer { d.finish() }
+        func env(_ k: String) -> String? { let v = d.env[k]; return (v?.isEmpty ?? true) ? nil : v }
+        let path = env("HUB_PROJECT_PATH") ?? "~/bp-stub-projects/e2e1"
+        let title = path.split(separator: "/").last.map(String.init) ?? "e2e1"
+        d.app.terminate(); d.app.launchEnvironment = ["BACKPLANE_LINK": d.link, "BACKPLANE_PERFORMANCE": "1"]; d.app.launch()
+        let rows = d.app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'data.thread.row.'"))
+        guard d.step("threads tab", act: {}, expect: { d.el("data.project.add").waitForExistence(timeout: 20) }) else { return }
+        if !d.app.buttons["New thread in \(title)"].waitForExistence(timeout: 6) {
+            d.tap(d.el("data.project.add")); let f = d.el("data.project.path"); _ = f.waitForExistence(timeout: 10); d.tap(f)
+            f.press(forDuration: 1.0); if d.app.menuItems["Select All"].waitForExistence(timeout: 2) { d.app.menuItems["Select All"].tap() }; f.typeText(path)
+            d.tap(d.el("data.project.add.confirm")); _ = d.app.buttons["New thread in \(title)"].waitForExistence(timeout: 15)
+        }
+        var made = 0
+        while rows.count < 3 && made < 3 {
+            let b = d.app.buttons["New thread in \(title)"]; for _ in 0..<40 where !b.isHittable { usleep(250_000) }; b.tap()
+            let t = d.el("data.thread.new.text"); _ = t.waitForExistence(timeout: 10); d.tap(t); t.typeText("switch test \(made)"); d.tap(d.el("data.thread.new.start"))
+            made += 1; sleep(5)
+        }
+        for _ in 0..<20 where d.el("data.thread.new.text").exists { usleep(500_000) }
+        sleep(3)
+        d.shot("switch-list")
+        let n = min(rows.count, 3)
+        var opened = 0
+        for round in 0..<4 {
+            for i in 0..<n {
+                let row = rows.element(boundBy: i)
+                for _ in 0..<20 where !(row.exists && row.isHittable) { usleep(250_000) }
+                let t0 = CFAbsoluteTimeGetCurrent()
+                if row.isHittable { row.tap() } else { row.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap() }
+                let ok = d.el("thread.composer").waitForExistence(timeout: 10)
+                d.steps.append(["do": "open thread \(i) round \(round)", "tap_epoch_ms": (Date().timeIntervalSince1970 * 1000).rounded(), "tap_ms": 0, "result_ms": d.ms(t0), "ok": ok])
+                opened += ok ? 1 : 0
+                let back = d.app.navigationBars.buttons.element(boundBy: 0); if back.exists { back.tap() }
+                usleep(600_000)
+            }
+        }
+        d.metrics["opened"] = opened
+    }
+
+    // A picture pasted into the composer is attached, sent with a message, and shown in the thread (the hub keeps it; the phone shows its own copy).
+    func test_data_image() {
+        d = Driver("data-image"); defer { d.finish() }
+        func env(_ k: String) -> String? { let v = d.env[k]; return (v?.isEmpty ?? true) ? nil : v }
+        let path = env("HUB_PROJECT_PATH") ?? "~/bp-stub-projects/e2e1"
+        let title = path.split(separator: "/").last.map(String.init) ?? "e2e1"
+        d.app.terminate(); d.app.launchEnvironment = ["BACKPLANE_LINK": d.link, "BACKPLANE_PERFORMANCE": "1"]; d.app.launch()
+        let rows = d.app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'data.thread.row.'"))
+        guard d.step("threads tab", act: {}, expect: { d.el("data.project.add").waitForExistence(timeout: 20) }) else { return }
+        if !d.app.buttons["New thread in \(title)"].waitForExistence(timeout: 6) {
+            d.tap(d.el("data.project.add")); let f = d.el("data.project.path"); _ = f.waitForExistence(timeout: 10); d.tap(f)
+            f.press(forDuration: 1.0); if d.app.menuItems["Select All"].waitForExistence(timeout: 2) { d.app.menuItems["Select All"].tap() }; f.typeText(path)
+            d.tap(d.el("data.project.add.confirm")); _ = d.app.buttons["New thread in \(title)"].waitForExistence(timeout: 15)
+        }
+        if rows.count == 0 {
+            let b = d.app.buttons["New thread in \(title)"]; for _ in 0..<40 where !b.isHittable { usleep(250_000) }; b.tap()
+            let t = d.el("data.thread.new.text"); _ = t.waitForExistence(timeout: 10); d.tap(t); t.typeText("picture thread"); d.tap(d.el("data.thread.new.start")); sleep(5)
+        }
+        guard d.step("open a thread", act: { for _ in 0..<20 where !(rows.firstMatch.exists && rows.firstMatch.isHittable) { usleep(250_000) }; rows.firstMatch.tap() }, expect: { d.el("thread.composer").waitForExistence(timeout: 10) }) else { return }
+        // a picture on the pasteboard, pasted with the system menu
+        UIPasteboard.general.image = UIGraphicsImageRenderer(size: CGSize(width: 300, height: 200)).image { c in UIColor.systemTeal.setFill(); c.fill(CGRect(x: 0, y: 0, width: 300, height: 200)) }
+        let comp = d.el("thread.composer")
+        d.step("paste the picture", act: { d.tap(comp); comp.press(forDuration: 1.0); if d.app.menuItems["Paste"].waitForExistence(timeout: 4) { d.app.menuItems["Paste"].tap() } }, expect: { d.el("data.pending.images").waitForExistence(timeout: 10) })
+        d.shot("picture-pending")
+        d.step("send it with a message", act: { d.type(comp, "here is a picture"); d.tap(d.el("thread.send")) }, expect: { d.el("data.entry.image").waitForExistence(timeout: 20) && !d.el("data.pending.images").exists })
+        d.shot("picture-sent")
+        // leave and come back: the picture shows again (this phone's copy, or fetched from the hub)
+        let back = d.app.navigationBars.buttons.element(boundBy: 0); if back.exists { back.tap() }
+        sleep(1)
+        d.step("open it again", act: { for _ in 0..<20 where !(rows.firstMatch.exists && rows.firstMatch.isHittable) { usleep(250_000) }; rows.firstMatch.tap() }, expect: { d.el("data.entry.image").waitForExistence(timeout: 15) })
+        d.shot("picture-again")
+    }
+
     func test_bots_rooms() {
         d = Driver("bots-rooms"); defer { d.finish() }
         d.launch(); tab("Bots")
