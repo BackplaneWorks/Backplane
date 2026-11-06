@@ -253,6 +253,16 @@ pub fn start(hub: &Arc<Hub>) {
         srvs: vec![], wait: vec![], shown: String::new(), env: Env::default(), lines: lines.clone() };
     tokio::spawn(async move { while let Some(m) = rx.recv().await { a.handle(m) } });
     if IPC.set(Ipc { tx, lines }).is_ok() { hub.register_rpc(Arc::new(IpcRpc)) }
+    // Settings > CAD reads kicad.* and freecad from the hub's info: say what is found now, and again whenever the path field changes
+    let h = hub.clone();
+    tokio::spawn(async move {
+        let mut rx = h.subscribe(); let mut seen = String::from("\u{0}");
+        loop {
+            let now = h.setting("kicad.path").await.unwrap_or_default();
+            if now != seen { seen = now; publish_cad(&h).await }
+            match rx.recv().await { Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {} Err(_) => return }
+        }
+    });
 }
 /// The servers' lines now ("project|state|why", one per line): the info key `kicad.ipc.servers`.
 pub fn servers() -> String { IPC.get().map(|i| i.lines.lock().unwrap().clone()).unwrap_or_default() }
@@ -263,6 +273,22 @@ fn newest_in(dir: &Path) -> Vec<PathBuf> {
     let mut v: Vec<String> = std::fs::read_dir(dir).map(|d| d.flatten().filter_map(|e| e.file_name().into_string().ok()).collect()).unwrap_or_default();
     v.sort_by(|a, b| if a == b { std::cmp::Ordering::Equal } else if ks::version_ge(a, b) { std::cmp::Ordering::Less } else { std::cmp::Ordering::Greater });
     v.into_iter().map(|n| dir.join(n).join("bin/kicad-cli")).collect()
+}
+/// Publish what this machine has for Settings > CAD: info `kicad.cli`, `kicad.version`, `kicad.status`, `kicad.source` and `freecad` (empty when absent).
+pub async fn publish_cad(hub: &Arc<Hub>) {
+    let env = runtime(hub).await;
+    let cli = env.cli.clone();
+    let probe = if cli.is_empty() { None } else {
+        tokio::task::spawn_blocking(move || crate::proc::std_cmd(crate::proc::Kind::Local, &cli).arg("--version").stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null()).output().ok()).await.ok().flatten()
+    };
+    let (status, version) = match (&probe, env.cli.is_empty()) {
+        (_, true) => ("missing".to_string(), String::new()),
+        (Some(o), _) if o.status.success() => { let v = String::from_utf8_lossy(&o.stdout).trim().to_string(); (if v.contains("-bp.") { env.status.clone() } else { "stock".into() }, v) }
+        _ => ("broken".to_string(), String::new()),
+    };
+    let source = if hub.setting("kicad.path").await.map_or(false, |s| !s.is_empty()) { "setting" } else { "path" };
+    let fc = super::stepglb::freecad_cmd(&hub.cfg.home);
+    for (k, v) in [("kicad.cli", env.cli.as_str()), ("kicad.version", version.as_str()), ("kicad.status", status.as_str()), ("kicad.source", source), ("freecad", fc.as_str())] { hub.set_info(k, v).await; }
 }
 /// The runtime to use (Rt.candidates, trimmed): the `kicad.path` setting, BACKPLANE_KICAD_CLI, beside the hub, the install directories (newest first), PATH.
 pub async fn runtime(hub: &Arc<Hub>) -> Env {
