@@ -15,13 +15,13 @@ fn s<'a>(v: &'a Value, k: &str) -> &'a str { v[k].as_str().unwrap_or("") }
 fn draft_of<'a>(session: &'a Value, key: &str) -> &'a str { session["drafts"][key].as_str().unwrap_or("") }
 
 /// A word typed with a sigil or `/` is a popup in play: the helper's Refs.want / Skills.want decide what that asks for.
-fn popup_word(text: &str) -> bool { matches!(super::slash::token(text).chars().next(), Some('/' | '$' | '@' | '>' | '%' | '#')) }
+#[allow(dead_code)] fn popup_word(text: &str) -> bool { matches!(super::slash::token(text).chars().next(), Some('/' | '$' | '@' | '>' | '%' | '#')) }
 
 /// Ui.act "draft": the selected thread's draft set, the host asked to keep it (Draft.keep).
 pub fn draft(hub: &str, session: &Value, value: &str) -> Option<ActOut> {
     let sel = s(session, "sel");
-    // an open popup or a word that opens one: info `refs`/`refs.for`/`sk.off` and the skills fetch are the helper's
-    if popup_word(value) || !s(&session["info"], "refs").is_empty() || !s(&session["info"], "refs.for").is_empty() { return None }
+    // A word with a sigil (`@ > % # $ /`) is only text here: its popup rows came from the Bend helper (refs/skills fetch), which the GPUI hub does not run; asking it answered
+    // PRESENTER_UNAVAILABLE on every keystroke. The slash commands are still offered (fields), the draft is kept as typed.
     let mut cmds = vec![];
     if safe(sel) { cmds.push(json!({"type": "keep", "thread": format!("{hub}|{sel}"), "text": value})) }
     Some(ActOut { session_patch: json!({"drafts": { sel: value }}), cmds })
@@ -54,7 +54,7 @@ pub fn send(cx: &SendCtx, session: &Value) -> Option<ActOut> {
     let text = if atts.is_empty() { body.to_string() } else if body.is_empty() { lines } else { format!("{body}\n\n{lines}") };
     let text = text.as_str();
     if sel.is_empty() || !safe(sel) || text.is_empty() { return None }
-    if body.starts_with('/') || cx.bot_thread { return None }
+    if ["/btw", "/give", "/secret", "/intent"].iter().any(|w| command_is(body, w)) || cx.bot_thread { return None }
     if !s(d, &format!("@reply:{sel}")).is_empty() || !s(d, &format!("@intent.edit:{sel}")).is_empty() || !s(d, "@draft.bound").is_empty() { return None }
     let rid = session["rid"].as_u64().unwrap_or(0);
     // Rpc.text: {"id":rid,"m":"turn.start","p":{thread,text,msg,mode}} in this key order
@@ -125,10 +125,14 @@ mod tests {
         assert_eq!(o.session_patch, json!({"drafts": {"t1700000002-3": "hello parity"}}));
     }
     #[test] fn a_scratch_selection_is_not_kept() { assert!(draft("h", &json!({"sel": "@x"}), "a").unwrap().cmds.is_empty()) }
-    #[test] fn a_popup_in_play_is_the_helpers() {
-        for v in ["/gi", "hi $sk", "see @bo", "to >th", "in %pr", "post #ro"] { assert!(draft("h", &session(), v).is_none(), "{v}") }
-        let mut s = session(); s["info"]["refs"] = json!("x");
-        assert!(draft("h", &s, "plain").is_none());
+    #[test] fn a_sigil_word_is_kept_like_any_text() {
+        for v in ["/gi", "hi $sk", "see @bo", "to >th", "in %pr", "post #ro", "a ^b"] { assert!(draft("h", &session(), v).is_some(), "{v}") }
+    }
+    #[test] fn only_the_helpers_own_commands_do_not_send() {
+        let cx = SendCtx { hub: "h", cid: "c", now_s: 1, bot_thread: false, binding: None };
+        let with = |d: &str| json!({"sel": "t1700000002-3", "rid": 2, "drafts": {"t1700000002-3": d}, "info": {}});
+        assert!(send(&cx, &with("/btw why")).is_none() && send(&cx, &with("/give >x")).is_none());
+        assert!(send(&cx, &with("/compact")).is_some() && send(&cx, &with("see @bot %proj")).is_some());
     }
     #[test] fn send_is_what_the_js_hub_answered() {
         let cx = SendCtx { hub: "http://127.0.0.1:3820", cid: "parity-gpui", now_s: 1793864523, bot_thread: false, binding: None };
