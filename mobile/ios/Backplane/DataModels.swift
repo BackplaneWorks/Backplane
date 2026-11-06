@@ -60,6 +60,8 @@ struct DEntry: Codable, Equatable, Identifiable {
     var kind: String    // user | assistant | tool | ask | note | step
     var text: String
     var at: Int
+    var label: String = ""   // a design step: what changed; a note: its name
+    var tone: String = ""    // a note: error, info…
     var clientId: String?
     var replaces: String?   // the final entry that ends a stream names the live entry it replaces
     var live: Bool
@@ -70,13 +72,13 @@ struct DEntry: Codable, Equatable, Identifiable {
     var sending = false
     var failed = false
     var localImages: [Data] = []   // the pictures of a message this phone is sending (JPEG), shown before the hub has them
-    enum CodingKeys: String, CodingKey { case id, kind, text, at, clientId, replaces, live, tool, ask, attachments }
+    enum CodingKeys: String, CodingKey { case id, kind, text, at, label, tone, clientId, replaces, live, tool, ask, attachments }
     init(id: String, kind: String, text: String, at: Int, clientId: String? = nil, live: Bool = false) {
         self.id = id; self.kind = kind; self.text = text; self.at = at; self.clientId = clientId; self.live = live
     }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
-        id = c.str(.id); kind = c.str(.kind); text = c.str(.text); at = c.int(.at)
+        id = c.str(.id); kind = c.str(.kind); text = c.str(.text); at = c.int(.at); label = c.str(.label); tone = c.str(.tone)
         clientId = try? c.decode(String.self, forKey: .clientId)
         replaces = try? c.decode(String.self, forKey: .replaces)
         live = c.bool(.live)
@@ -111,14 +113,17 @@ struct DThread: Codable, Equatable, Identifiable {
     var archived: Bool
     var provider: String
     var model: String
+    var effort: String
+    var runtime: String
+    var chip: String    // the composer's "claude / opus / high", in the hub's words
     var preview: String
     var waiting: Int
-    enum CodingKeys: String, CodingKey { case id, project, title, state, updatedAt, pinned, settled, archived, provider, model, preview, waiting }
+    enum CodingKeys: String, CodingKey { case id, project, title, state, updatedAt, pinned, settled, archived, provider, model, effort, runtime, chip, preview, waiting }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = c.str(.id); project = c.str(.project); title = c.str(.title); state = c.str(.state); updatedAt = c.int(.updatedAt)
         pinned = c.bool(.pinned); settled = c.bool(.settled); archived = c.bool(.archived)
-        provider = c.str(.provider); model = c.str(.model); preview = c.str(.preview); waiting = c.int(.waiting)
+        provider = c.str(.provider); model = c.str(.model); effort = c.str(.effort); runtime = c.str(.runtime); chip = c.str(.chip); preview = c.str(.preview); waiting = c.int(.waiting)
     }
 }
 
@@ -180,14 +185,34 @@ struct DThreadOpt: Decodable { var thread: DThread?
 struct DSearch: Decodable { var threads: [DThread]; var projects: [DProject]
     enum CodingKeys: String, CodingKey { case threads, projects }
     init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); threads = (try? c.decode([DThread].self, forKey: .threads)) ?? []; projects = (try? c.decode([DProject].self, forKey: .projects)) ?? [] } }
-struct DModelRow: Decodable, Identifiable {
-    var value: String; var label: String; var ok: Bool; var id: String { value }
-    enum CodingKeys: String, CodingKey { case value, label, ok }
-    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); value = c.str(.value); label = c.str(.label).isEmpty ? c.str(.value) : c.str(.label); ok = c.bool(.ok) }
+// the picker under the composer (`thread.picker`): sections the hub lists, drawn in order; a press is `thread.pick`
+struct DChoice: Decodable, Identifiable {
+    var label: String; var value: String; var on: Bool; var ok: Bool; var why: String; var id: String { value }
+    enum CodingKeys: String, CodingKey { case label, value, on, ok, why }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); value = c.str(.value); label = c.str(.label).isEmpty ? c.str(.value) : c.str(.label); on = c.bool(.on); ok = (try? c.decode(Bool.self, forKey: .ok)) ?? true; why = c.str(.why) }
 }
-struct DModels: Decodable { var models: [String: [DModelRow]]
-    enum CodingKeys: String, CodingKey { case models }
-    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); models = (try? c.decode([String: [DModelRow]].self, forKey: .models)) ?? [:] } }
+struct DPickerSection: Decodable, Identifiable {
+    var title: String; var action: String; var choices: [DChoice]; var id: String { action }
+    enum CodingKeys: String, CodingKey { case title, action, choices }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); title = c.str(.title); action = c.str(.action); choices = (try? c.decode([DChoice].self, forKey: .choices)) ?? [] }
+}
+struct DPicker: Decodable { var chip: String; var sections: [DPickerSection]
+    enum CodingKeys: String, CodingKey { case chip, sections }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); chip = c.str(.chip); sections = (try? c.decode([DPickerSection].self, forKey: .sections)) ?? [] } }
+struct DPickerReply: Decodable { var picker: DPicker }
+/// What a new thread will run with, chosen before it exists.
+struct DNewThreadChoice: Equatable {
+    var provider: String?; var model: String?; var effort: String?; var runtime: String?
+    var params: [String: Any] { var p: [String: Any] = [:]; if let provider { p["provider"] = provider }; if let model { p["model"] = model }; if let effort { p["effort"] = effort }; if let runtime { p["runtime"] = runtime }; return p }
+    mutating func set(_ action: String, _ value: String) {
+        switch action {
+        case "provider": provider = value; model = ""; effort = ""
+        case "model": model = value
+        case "effort": effort = value
+        default: runtime = value
+        }
+    }
+}
 struct DMention: Decodable, Identifiable {
     var sigil: String; var mid: String; var label: String; var detail: String; var id: String { sigil + mid }
     enum CodingKeys: String, CodingKey { case sigil, id, label, detail }
@@ -196,5 +221,3 @@ struct DMention: Decodable, Identifiable {
 struct DMentions: Decodable { var items: [DMention]
     enum CodingKeys: String, CodingKey { case items }
     init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); items = (try? c.decode([DMention].self, forKey: .items)) ?? [] } }
-
-struct DModelGroup: Identifiable { var provider: String; var rows: [DModelRow]; var id: String { provider } }

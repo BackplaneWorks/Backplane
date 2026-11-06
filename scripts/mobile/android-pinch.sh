@@ -2,7 +2,7 @@
 # A real two-finger pinch on the emulator (adb's `input` has one finger only): multi-touch events written with sendevent to the emulator's touch screen.
 # usage: scripts/mobile/android-pinch.sh DEVICE out|in [CX CY]    (DEVICE like /dev/input/event12; coordinates in screen pixels, default the middle of the board view)
 set -eu
-ROOT=$(cd "$(dirname "$0")/../.." && pwd); E=$ROOT/scripts/gpui/android-emu.sh
+ROOT=$(cd "$(dirname "$0")/../.." && pwd); E=$ROOT/scripts/android-emu.sh
 DEV=$1; DIR=${2:-out}; CX=${3:-540}; CY=${4:-1100}
 ax() { echo $(( $1 * 32767 / 1080 )); }; ay() { echo $(( $1 * 32767 / 2400 )); }
 {

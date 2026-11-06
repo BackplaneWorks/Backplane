@@ -46,16 +46,17 @@ struct DataThreadDialogs: ViewModifier {
 struct DataSearchResults: View {
     let client: DataClient
     let query: String
+    let open: (String) -> Void
     @State private var result: DSearch?
     var body: some View {
         List {
             if let r = result {
-                if r.threads.isEmpty && r.projects.isEmpty { Text("Nothing matches “\(query)”").foregroundStyle(.secondary) }
-                ForEach(r.projects) { p in Label(p.title, systemImage: "folder").accessibilityIdentifier("data.search.project." + p.id) }
-                ForEach(r.threads) { t in NavigationLink(value: t.id) { DataThreadRow(thread: t) }.accessibilityIdentifier("data.search.thread." + t.id) }
-            } else { ProgressView() }
+                if r.threads.isEmpty && r.projects.isEmpty { Text("Nothing matches “\(query)”").dmono(12).foregroundStyle(BackplaneDesign.dim).padding(12).dataRow() }
+                ForEach(r.projects) { p in Label { Text(p.title).dmono(13) } icon: { Image(systemName: "folder").foregroundStyle(BackplaneDesign.ok) }.padding(.horizontal, 12).frame(minHeight: 40).dataRow().accessibilityIdentifier("data.search.project." + p.id) }
+                ForEach(r.threads) { t in Button { open(t.id) } label: { DataThreadRow(thread: t) }.buttonStyle(.plain).dataRow().accessibilityIdentifier("data.search.thread." + t.id) }
+            } else { ProgressView().frame(maxWidth: .infinity).dataRow() }
         }
-        .listStyle(.plain)
+        .listStyle(.plain).scrollContentBackground(.hidden).background(BackplaneDesign.panel)
         .task(id: query) {
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled else { return }
@@ -64,40 +65,58 @@ struct DataSearchResults: View {
     }
 }
 
-/// The model picker: provider, then its models, from `models.list`; the choice is `thread.model`.
-struct DataModelSheet: View {
+/// The picker the composer's chip opens: the hub's sections, the one in force marked. On a thread a press is the desktop's own request; before a thread exists it is
+/// remembered and sent with `thread.create`. It stays open, so a model and an effort are one visit.
+struct DataPickerSheet: View {
     let client: DataClient
-    let thread: DThread
+    let thread: String?
+    @Binding var choice: DNewThreadChoice
     @Environment(\.dismiss) private var dismiss
-    @State private var groups: [DModelGroup] = []
+    @State private var picker: DPicker?
     @State private var error = ""
+    private func load() async { do { picker = try await client.picker(thread: thread, choice); error = "" } catch { self.error = error.localizedDescription } }
+    private func press(_ s: DPickerSection, _ c: DChoice) {
+        Task {
+            if let thread { do { try await client.pick(thread, action: s.action, value: c.value) } catch { self.error = error.localizedDescription; return } }
+            else { choice.set(s.action, c.value) }
+            await load()
+        }
+    }
     var body: some View {
-        NavigationStack {
-            List {
-                if !error.isEmpty { Text(error).foregroundStyle(.red).font(.footnote) }
-                ForEach(groups) { g in
-                    Section(g.provider) {
-                        ForEach(g.rows.isEmpty ? [DModelRow.defaultRow] : g.rows) { r in
-                            Button {
-                                Task { do { try await client.setModel(thread.id, provider: g.provider, model: r.value); dismiss() } catch { self.error = error.localizedDescription } }
-                            } label: {
-                                HStack { Text(r.label); Spacer(); if thread.provider == g.provider && thread.model == r.value { Image(systemName: "checkmark") } }
+        VStack(spacing: 0) {
+            HStack {
+                Text(picker?.chip ?? " ").dmono(12).foregroundStyle(BackplaneDesign.text).lineLimit(1).accessibilityIdentifier("data.picker.chip")
+                Spacer()
+                Button("Done") { dismiss() }.dmono(13, bold: true).foregroundStyle(BackplaneDesign.accent).accessibilityIdentifier("data.picker.done")
+            }.padding(.horizontal, 14).frame(height: 48)
+            DLine()
+            if !error.isEmpty { Text(error).dmono(12).foregroundStyle(BackplaneDesign.bad).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).padding(.vertical, 8).accessibilityIdentifier("data.picker.error") }
+            ScrollView {
+                // (a plain stack: Model's default and Effort's auto both have the value "", and a lazy stack draws the second blank)
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(picker?.sections ?? []) { s in
+                        DHeading(text: s.title).padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 4)
+                        ForEach(s.choices) { c in
+                            Button { press(s, c) } label: {
+                                HStack(spacing: 8) {
+                                    Text(c.on ? "✓" : "").dmono(13).foregroundStyle(BackplaneDesign.accent).frame(width: 16)
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(c.label).dmono(13).foregroundStyle(c.ok ? BackplaneDesign.text : BackplaneDesign.faint)
+                                        if !c.ok, !c.why.isEmpty { Text(c.why).dmono(11).foregroundStyle(BackplaneDesign.faint) }
+                                    }
+                                    Spacer(minLength: 0)
+                                }.padding(.horizontal, 14).frame(minHeight: 44).background(c.on ? BackplaneDesign.raised : .clear).contentShape(Rectangle())
                             }
-                            .disabled(!r.ok).accessibilityIdentifier("data.model." + g.provider + "." + r.value)
+                            .buttonStyle(.plain).disabled(!c.ok).accessibilityAddTraits(c.on ? .isSelected : []).accessibilityIdentifier("data.pick." + s.action + "." + c.value)
                         }
                     }
-                }
+                }.padding(.bottom, 16)
             }
-            .navigationTitle("Model · \(thread.provider) / \(thread.model.isEmpty ? "default" : thread.model)")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
         }
-        .task { groups = await client.models() }
+        .background(BackplaneDesign.panel)
+        .presentationDetents([.medium, .large]).presentationDragIndicator(.visible).dataSheet()
+        .task { await load() }
     }
-}
-extension DModelRow {
-    // a provider that lists no models still offers its default
-    static var defaultRow: DModelRow { try! JSONDecoder().decode(DModelRow.self, from: Data(#"{"value":"","label":"default","ok":true}"#.utf8)) }
 }
 
 /// The word being typed begins with @ > % # & and the hub offers matches: one tap puts it in the draft.
@@ -120,9 +139,9 @@ struct DataMentionBar: View {
                         Button {
                             let name = (m.sigil == "@" || m.sigil == "#" || m.sigil == "&") ? m.label : m.mid
                             pick(String(text[..<t.range.lowerBound]) + m.sigil + name + " ")
-                        } label: { HStack { Text(m.sigil + m.label).font(.system(.footnote, design: .monospaced)); Spacer(); Text(m.detail).font(.caption).foregroundStyle(.secondary) }.padding(.horizontal).padding(.vertical, 8) }
+                        } label: { HStack { Text(m.sigil + m.label).dmono(12); Spacer(); Text(m.detail).dmono(11).foregroundStyle(BackplaneDesign.dim).lineLimit(1) }.padding(.horizontal, 12).frame(minHeight: 40).contentShape(Rectangle()) }
                         .buttonStyle(.plain)
-                        Divider()
+                        DLine()
                     }
                 }
                 .background(BackplaneDesign.panel).accessibilityIdentifier("data.mentions")
@@ -147,19 +166,21 @@ struct DataRoomView: View {
                 LazyVStack(alignment: .leading, spacing: 10) {
                     ForEach(posts) { p in
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(p.from.isEmpty ? "you" : p.from).font(.system(.caption, design: .monospaced).bold()).foregroundStyle(BackplaneDesign.accent)
-                            Text(p.text).font(.system(.footnote, design: .monospaced))
+                            Text(p.from.isEmpty ? "you" : p.from).dmono(11, bold: true).foregroundStyle(BackplaneDesign.accent)
+                            Text(p.text).dmono(13).textSelection(.enabled)
                         }
                     }
                 }.padding()
             }
-            HStack {
-                TextField("Post to #\(room.name)", text: $draft, axis: .vertical).textFieldStyle(.roundedBorder).accessibilityIdentifier("data.room.composer")
+            DLine()
+            HStack(alignment: .bottom, spacing: 8) {
+                TextField("Post to #\(room.name)", text: $draft, axis: .vertical).dmono(13).padding(10).dbox(BackplaneDesign.accent).accessibilityIdentifier("data.room.composer")
                 Button("Post") { let t = draft; draft = ""; Task { try? await client.roomPost(room.id, t); posts = await client.roomPosts(room.id) } }
-                    .buttonStyle(.borderedProminent).disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty).accessibilityIdentifier("data.room.post")
-            }.padding().background(BackplaneDesign.panel)
+                    .buttonStyle(DButton(primary: true)).disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty).accessibilityIdentifier("data.room.post")
+            }.padding(12)
         }
-        .navigationTitle("#" + room.name).navigationBarTitleDisplayMode(.inline)
+        .background(BackplaneDesign.background)
+        .dataBar("#" + room.name)
         .task { while !Task.isCancelled { posts = await client.roomPosts(room.id); try? await Task.sleep(for: .seconds(2.5)) } }
     }
 }

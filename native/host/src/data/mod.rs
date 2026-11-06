@@ -15,7 +15,7 @@ use tokio_tungstenite::tungstenite::{protocol::WebSocketConfig, Message};
 
 pub const PROTO: &str = "data/1";
 /// What this hub does beyond the base of data/1; a hub from before an addition does not list it (the app can warn instead of sending what would be dropped).
-pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review"];
+pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker"];
 const PREVIEW: usize = 140;
 const ASK_SCAN: usize = 4000;
 
@@ -62,12 +62,14 @@ fn thread_json(hub: &Hub, m: &crate::model::Model, id: &str, asks: &HashMap<Stri
     let t = m.threads.get(id).filter(|t| !t.deleted)?;
     let waiting = asks.get(id).copied().unwrap_or(0);
     let state = if waiting > 0 { "asking" } else { match t.turn.as_str() { "running" => "working", "failed" => "failed", _ => "idle" } };
-    let preview = m.page(&hub.store, id, 0, 1).ok().and_then(|p| p.rows.first().map(|r| clip(&r.text, PREVIEW))).unwrap_or_default();
+    // what was last said, not the last tool call or a design step's record; a thread with only activity shows nothing
+    let preview = m.page(&hub.store, id, 0, 8).ok().and_then(|p| p.rows.iter().find(|r| r.kind == "msg" && !r.text.trim().is_empty()).map(|r| clip(&shown_text(&r.text), PREVIEW))).unwrap_or_default();
     let (pinned, settled) = flags(hub, id);
     // a model chosen within the provider is a ModesSet (the policy state), a switch of provider a ProviderSet (the model's fold)
-    let model = crate::statehost::policies().and_then(|p| p.with_state(|st| st.threads.get(id).map(|t| t.model.clone()))).flatten().filter(|m| !m.is_empty()).unwrap_or_else(|| t.model.clone());
+    let (model, effort, runtime) = crate::statehost::policies().and_then(|p| p.with_state(|st| (st.threads.get(id).map_or(String::new(), |t| t.model.clone()), st.settings.get(&format!("effort.{id}")).cloned().unwrap_or_default(), st.runtime.get(id).cloned().unwrap_or_default()))).unwrap_or_default();
+    let model = if model.is_empty() { t.model.clone() } else { model };
     Some(json!({"id":id,"project":t.project,"title":t.title,"state":state,"updatedAt":ms(t.activity.max(t.created)),"pinned":pinned,"settled":settled,"archived":t.archived,
-        "provider":t.provider,"model":model,"preview":preview,"waiting":waiting}))
+        "provider":t.provider,"model":model,"effort":effort,"runtime":runtime,"chip":ext::chip(&t.provider, &model, &effort),"preview":preview,"waiting":waiting}))
 }
 fn project_json(m: &crate::model::Model, id: &str, asks: &HashMap<String, u64>) -> Option<Value> {
     let p = m.projects.get(id).filter(|p| !p.removed)?;
@@ -121,13 +123,21 @@ fn row_entry(r: &crate::model::Row) -> Option<Value> {
     let at = ms(r.at);
     if r.kind == "msg" {
         let kind = match r.role.as_str() { "user" => "user", "assistant" => "assistant", _ => "note" };
+        if kind == "assistant" && r.text.trim().is_empty() { return None }
         return Some(json!({"id":r.id,"kind":kind,"text":if kind == "user" { shown_text(&r.text) } else { r.text.clone() },"at":at}));
     }
-    Some(match r.role.as_str() {
-        "tool" => json!({"id":r.id,"kind":"tool","text":r.text,"at":at,"tool":{"name":r.akind,"summary":clip(&r.text, 200),"state":"done"}}),
-        "step" => json!({"id":r.id,"kind":"step","text":r.text,"at":at}),
-        "error" => json!({"id":r.id,"kind":"note","text":r.text,"at":at}),
-        _ => json!({"id":r.id,"kind":"note","text":r.text,"at":at}),
+    act_entry(&r.id, &r.role, &r.akind, &r.text, at)
+}
+/// An activity as the phones see it, in the desktop's words (present/thread.rs): a tool call by its shown name, a design step by what changed, anything else a note
+/// with its name and tone. A phone folds a run of `tool` and `step` entries (docs/PHONE-DATA.md); the design as it was before an edit is no entry at all.
+fn act_entry(id: &str, role: &str, akind: &str, text: &str, at: u64) -> Option<Value> {
+    use crate::present::thread as pt;
+    let e = pt::Ent { id: id.into(), msg: false, role: role.into(), akind: akind.into(), text: text.into(), at };
+    Some(match role {
+        "tool" => json!({"id":id,"kind":"tool","text":text,"at":at,"tool":{"name":pt::shown_name(akind),"summary":if text == akind { String::new() } else { clip(text, 200) },"state":"done"}}),
+        "step" if pt::step_base(&e) => return None,
+        "step" => json!({"id":id,"kind":"step","text":text,"label":pt::step_row(&e),"at":at}),
+        _ => { let a = pt::plain_act(&e); json!({"id":id,"kind":"note","text":a["text"],"label":a["label"],"tone":a["tone"],"at":at}) }
     })
 }
 /// The paths of attached images are told to the agent in the message's text (`[Attached image: <path>]` lines); the phone shows the pictures instead.
@@ -279,8 +289,9 @@ async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Result<Value,
             for k in ["title", "provider", "model"] { if !s(p, k).is_empty() { q[k] = p[k].clone() } }
             let r = rpc(hub, c, "thread.create", q).await?;
             let id = r["thread"].as_str().unwrap_or("").to_string(); if id.is_empty() { return Err(err("no thread was made")) }
-            let runtime = if s(p, "permission") == "auto" { "full-access" } else { "approval-required" };
+            let runtime = if !s(p, "runtime").is_empty() { s(p, "runtime") } else if s(p, "permission") == "auto" { "full-access" } else { "approval-required" };
             rpc(hub, c, "thread.modes", json!({"thread":id,"runtime":runtime})).await?;
+            if !s(p, "effort").is_empty() { rpc(hub, c, "thread.effort", json!({"thread":id,"effort":s(p, "effort")})).await?; }
             if !s(p, "text").is_empty() { send_message(hub, c, &id, s(p, "text"), "", &Value::Null).await?; }
             let g = hub.model().await; let asks = open_ask_counts(hub);
             thread_json(hub, &g, &id, &asks).map(|t| json!({"thread":t})).ok_or_else(|| err("no thread was made"))
@@ -325,11 +336,12 @@ async fn deltas(hub: &Hub, lines: &[String], subs: &mut Subs) -> Vec<Value> {
                 let mut en = json!({"id":id,"kind":kind,"text":if kind == "user" { shown_text(s(&e, "text")) } else { s(&e, "text").to_string() },"at":ms(e["at"].as_u64().unwrap_or(0))});
                 if let Some(a) = e.get("attachments") { en["attachments"] = a.clone() }
                 if kind == "user" { if let Some(x) = recalled(id) { if let Some(c) = x.get("clientId") { en["clientId"] = c.clone() } } }
-                if kind == "assistant" && subs.live.remove(&th) { en["replaces"] = json!(format!("live:{th}")) }
-                entry = Some(en);
+                let replaced = kind == "assistant" && subs.live.remove(&th);
+                if replaced { en["replaces"] = json!(format!("live:{th}")) }
+                if replaced || kind != "assistant" || !s(&e, "text").trim().is_empty() { entry = Some(en) }
             }
             "MessageAttached" => { let id = s(&e, "msg"); let mut en = json!({"id":id,"kind":"user","text":"","at":ms(e["at"].as_u64().unwrap_or(0)),"attachments":e["attachments"]}); if let Some(x) = recalled(id) { en["text"] = x["text"].clone(); if let Some(c) = x.get("clientId") { en["clientId"] = c.clone() } } entry = Some(en) }
-            "ActivityLogged" => entry = Some(row_entry(&crate::model::Row { seq: 0, ord: 0, id: s(&e, "act").into(), thread: th.clone(), src: String::new(), kind: "act", role: s(&e, "tone").into(), akind: s(&e, "kind").into(), text: s(&e, "summary").into(), at: e["at"].as_u64().unwrap_or(0) }).unwrap()),
+            "ActivityLogged" => entry = act_entry(s(&e, "act"), s(&e, "tone"), s(&e, "kind"), s(&e, "summary"), ms(e["at"].as_u64().unwrap_or(0))),
             "AskOpened" => { entry = Some(ask_entry(&e, None)); notes.push((e.clone(), th.clone())) }
             // the whole ask again, answered (an AskClosed names only the ask: its thread and question come from its AskOpened)
             "AskClosed" => { let id = s(&e, "id"); entry = Some(match &opened { Some(o) => ask_entry(o, Some(s(&e, "answer"))), None => json!({"id":format!("ask:{id}"),"kind":"ask","text":"","at":ms(e["at"].as_u64().unwrap_or(0)),"ask":{"id":id,"state":"answered","question":"","options":[],"answered":s(&e,"answer")}}) }); }

@@ -120,4 +120,7 @@ dependencies {
     implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
     // it brings an old Fragment; the ActivityResult APIs need 1.3 or later
     implementation("androidx.fragment:fragment-ktx:1.8.5")
+    testImplementation("junit:junit:4.13.2")
+    // the real org.json for unit tests (android.jar's is a stub)
+    testImplementation("org.json:json:20240303")
 }

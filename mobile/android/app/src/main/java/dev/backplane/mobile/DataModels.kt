@@ -17,12 +17,25 @@ data class DEntry(
     val live: Boolean = false, val tool: DTool? = null, val ask: DAsk? = null, val attachments: List<DAttachment> = emptyList(),
     val sending: Boolean = false, val failed: Boolean = false,
     val localImages: List<ByteArray> = emptyList(), // phone-only: the pictures of a message this phone is sending
+    val label: String = "", // a design step: what changed; a note: its name
+    val tone: String = "",  // a note: error, info…
 )
 data class DProject(val id: String, val title: String, val root: String, val threadCount: Int, val updatedAt: Long, val waiting: Int)
 data class DThread(
     val id: String, val project: String, val title: String, val state: String, val updatedAt: Long, val pinned: Boolean, val settled: Boolean,
     val archived: Boolean, val provider: String, val model: String, val preview: String, val waiting: Int,
+    val effort: String = "", val runtime: String = "", val chip: String = "", // chip: the composer's "claude / opus / high", in the hub's words
 )
+// the picker under the composer (`thread.picker`): sections the hub lists, drawn in order; a press is `thread.pick`
+data class DChoice(val label: String, val value: String, val on: Boolean, val ok: Boolean, val why: String)
+data class DPickerSection(val title: String, val action: String, val choices: List<DChoice>)
+data class DPicker(val chip: String, val sections: List<DPickerSection>)
+/** What a new thread will run with, chosen before it exists. */
+data class DNewThreadChoice(val provider: String? = null, val model: String? = null, val effort: String? = null, val runtime: String? = null) {
+    fun set(action: String, value: String) = when (action) { "provider" -> copy(provider = value, model = "", effort = ""); "model" -> copy(model = value); "effort" -> copy(effort = value); else -> copy(runtime = value) }
+    fun into(p: JSONObject, skipEmpty: Boolean = false): JSONObject { listOf("provider" to provider, "model" to model, "effort" to effort, "runtime" to runtime).forEach { (k, v) -> if (v != null && (v.isNotEmpty() || !skipEmpty)) p.put(k, v) }; return p }
+}
+fun parsePicker(o: JSONObject) = DPicker(o.str("chip"), o.optJSONArray("sections").list { s -> DPickerSection(s.str("title"), s.str("action"), s.optJSONArray("choices").list { c -> DChoice(c.str("label").ifEmpty { c.str("value") }, c.str("value"), c.optBoolean("on"), c.optBoolean("ok", true), c.str("why")) }) })
 
 fun parseOption(o: JSONObject) = DOption(o.str("id"), o.str("label").ifEmpty { o.str("id") })
 fun parseAsk(o: JSONObject) = DAsk(o.str("id"), o.str("state"), o.str("question"), o.optJSONArray("options").list(::parseOption), if (o.has("answered") && !o.isNull("answered")) o.str("answered") else null)
@@ -32,11 +45,12 @@ fun parseEntry(o: JSONObject) = DEntry(
     o.optJSONObject("tool")?.let { DTool(it.str("name"), it.str("summary"), it.str("state")) },
     o.optJSONObject("ask")?.let(::parseAsk),
     o.optJSONArray("attachments").list { DAttachment(it.str("id"), it.str("name"), it.str("mime"), it.lng("bytes")) },
+    label = o.str("label"), tone = o.str("tone"),
 )
 fun parseProject(o: JSONObject) = DProject(o.str("id"), o.str("title"), o.str("root"), o.optInt("threadCount", 0), o.lng("updatedAt"), o.optInt("waiting", 0))
 fun parseThread(o: JSONObject) = DThread(
     o.str("id"), o.str("project"), o.str("title"), o.str("state"), o.lng("updatedAt"), o.optBoolean("pinned"), o.optBoolean("settled"), o.optBoolean("archived"),
-    o.str("provider"), o.str("model"), o.str("preview"), o.optInt("waiting", 0),
+    o.str("provider"), o.str("model"), o.str("preview"), o.optInt("waiting", 0), o.str("effort"), o.str("runtime"), o.str("chip"),
 )
 fun parseProjects(a: JSONArray?) = a.list(::parseProject)
 fun parseThreads(a: JSONArray?) = a.list(::parseThread)

@@ -12,7 +12,7 @@ start)
   for n in codex grok muse; do printf '#!/bin/sh\nexit 1\n' > $H/bin/$n; chmod +x $H/bin/$n; done
   echo "# demo" > $H/proj/README.md
   # a KiCad project (the hub's own plot fixtures), a model, a picture, a PDF and a note: what the viewer tabs show
-  F=$ROOT/test/gpui/files/fixtures; mkdir -p $H/proj/mech $H/proj/docs
+  F=$ROOT/test/files/fixtures; mkdir -p $H/proj/mech $H/proj/docs
   cp $F/plot/ecc83-pp.kicad_pcb $H/proj/ecc83.kicad_pcb; cp $F/plot/ampli_ht.kicad_sch $H/proj/ecc83.kicad_sch; echo '{}' > $H/proj/ecc83.kicad_pro
   cp $F/mesh/bracket.step $H/proj/mech/bracket.step; cp $ROOT/test/mobile/pic.png $H/proj/docs/picture.png; cp $ROOT/test/mobile/note.pdf $H/proj/docs/note.pdf
   # a git repository with one change, for the Diff tab
@@ -25,7 +25,13 @@ H=sys.argv[1]; N=int(time.time())
 ev=[{"$":"ProjectCreated","id":"p1","title":"demo","root":H+"/proj","at":N},
     {"$":"ThreadCreated","id":"t1","project":"p1","title":"Fix the ecc83 board","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":N},
     {"$":"MessagePosted","thread":"t1","msg":"m1","role":"user","text":"Move the tube socket 2mm left","at":N},
-    {"$":"MessagePosted","thread":"t1","msg":"m2","role":"assistant","text":"Done. I moved **J1** two millimetres left and re-ran DRC.","at":N+1},
+    {"$":"ActivityLogged","thread":"t1","act":"a0","tone":"step","kind":"step","summary":'{"p":"","w":"start"}',"at":N},
+    {"$":"ActivityLogged","thread":"t1","act":"a1","tone":"tool","kind":"Read","summary":"ecc83.kicad_pcb","at":N},
+    {"$":"ActivityLogged","thread":"t1","act":"a2","tone":"tool","kind":"Bash","summary":"kicad-cli pcb drc ecc83.kicad_pcb --output drc.rpt","at":N},
+    {"$":"ActivityLogged","thread":"t1","act":"a3","tone":"tool","kind":"mcp__backplane__viewer_show","summary":"ecc83.kicad_pcb","at":N},
+    {"$":"ActivityLogged","thread":"t1","act":"a4","tone":"tool","kind":"TodoWrite","summary":"TodoWrite","at":N},
+    {"$":"ActivityLogged","thread":"t1","act":"a5","tone":"step","kind":"step","summary":'{"p":"abc","w":"end","f":["M\\tecc83.kicad_pcb"]}',"at":N},
+    {"$":"MessagePosted","thread":"t1","msg":"m2","role":"assistant","text":"Done. I moved **J1** two millimetres left and re-ran DRC.\n\n- `J1` at 42.0, 31.5\n- 0 errors, 2 warnings\n\n```\nkicad-cli pcb drc ecc83.kicad_pcb\n```","at":N+1},
     {"$":"ThreadCreated","id":"tb1","project":"","title":"ada","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":N},
     {"$":"BotSet","id":"b1","name":"ada","thread":"tb1","look":3,"persona":"","at":N},
     {"$":"RoomSet","id":"r1","name":"lab","members":"ada","at":N},
@@ -36,7 +42,7 @@ PY
   FC=$(command -v freecadcmd || true); mkdir -p $H/fc; [ -n "$FC" ] && printf '#!/bin/sh\nexec %s "$@"\n' "$FC" > $H/fc/freecadcmd && chmod +x $H/fc/freecadcmd && export BACKPLANE_FREECAD=$H/fc/freecadcmd && export PATH=/usr/bin:/bin
   # LIVE=1: the real browser helper (tools/browser on Bun, Playwright driving the machine's Chrome) instead of a planted frame
   [ "${LIVE:-}" = 1 ] && { printf '#!/bin/sh\nexport BACKPLANE_CHROME=${CHROME:-/usr/bin/google-chrome}\nexec %s %s/tools/browser/src/main.ts "$@"\n' "$BUN" "$ROOT" > $H/bin/backplane-browser; chmod +x $H/bin/backplane-browser; export BACKPLANE_BROWSER=$H/bin/backplane-browser; }
-  export BACKPLANE_AGENTS=$H/bin BACKPLANE_NO_UPDATE=1 BP_STANDIN_MODE=stream BP_STREAM_N=8 BP_STREAM_MS=200
+  export BACKPLANE_AGENTS=$H/bin BACKPLANE_NO_UPDATE=1 BP_STANDIN_MODE=${STANDIN:-stream} BP_STREAM_N=8 BP_STREAM_MS=200
   cd $H/proj
   nohup systemd-run --user --scope -q -p MemoryMax=3G -p MemorySwapMax=0 nice -n 10 $HUBBIN --home $H/home --port $PORT --host 127.0.0.1 --no-tailscale --foreground > $H/hub.log 2>&1 &
   echo $! > $H/pid; sleep 4; curl -s -m3 http://127.0.0.1:$PORT/hello | head -c 160; echo ;;

@@ -23,7 +23,7 @@ Status: **done** (built and driven on the emulator), **built** (iOS: compiled on
 | Thread actions: pin, settle, archive, rename, delete | done | **done** (row long-press, header menu; driven: pin, rename, settle) | built | `thread.act` |
 | Project rename / remove | done | **built** (long-press menu; not driven) | built | `project.act` |
 | Search projects and threads | partial | **done** (driven) | built | `search` |
-| Model picker (provider, model) | done | **done** (driven: claude / opus) | built | `models.list`, `thread.model` |
+| Picker under the composer (model, effort, provider, permissions), also for a new thread | done | **done** (driven) | **done** (run on a simulator) | `thread.picker`, `thread.pick` |
 | Mention popup (@ > % # &) | done | **done** (driven: `@a` → `@ada`) | built | `mentions.list`; slash commands: gap |
 | Bots and rooms: list, a bot's thread, a room's posts and post | done | **done** (driven) | built | uberbot Status tab, routines, spaces: gap |
 | Alerts: a turn ended, failed, an ask opened (app in the background) | done | **done** (driven: notification in the shade, tap opens the thread) | built | hub `notify` push |
@@ -40,7 +40,8 @@ Status: **done** (built and driven on the emulator), **built** (iOS: compiled on
 | Browser tab against a live page | done (CEF child window) | **done** (driven: the helper's Chrome page shown, a tap clicked its button, the page's server heard it) | built | frames route (Option A of docs/gpui/BROWSER-EMBED.md); the CEF lane's embedded window does not publish to `screen.jpg` |
 | Terminal | done | gap | gap | |
 | Thread tree, fork, snooze, reorder, badges | done | gap | gap | no `data/1` request |
-| Tool-call folds, to-do list, subagents panel, stamps | done | gap (tool rows only) | gap | |
+| Tool-call folds, stamps | done | **done** (driven) | **done** (run on a simulator) | `DataFold`, `test/mobile/fold_labels.json` |
+| To-do list, subagents panel | done | gap | gap | |
 | Desktop's right rail, tabs, ctx meter | done | n/a on a phone | n/a | |
 
 ## Evidence
@@ -64,4 +65,4 @@ Status: **done** (built and driven on the emulator), **built** (iOS: compiled on
 ## Next
 1. When the viewer/files/browser requests land in `native/host`, add them to `data/1` as features and build the tabs on both phones (the classic `PlotView.kt`/`.swift` draw boards from chunks; reuse them).
 2. iOS: run the data app in the simulator against `scripts/mobile/data-hub.sh` and drive it; Markdown renderer; the desktop's mono styling.
-3. Android: reconnect-after-sleep and long-session runs, tool-call folds, slash commands, thread tree.
+3. Android: reconnect-after-sleep and long-session runs, slash commands, thread tree.

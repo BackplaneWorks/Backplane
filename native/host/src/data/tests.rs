@@ -8,7 +8,7 @@ use tokio_tungstenite::connect_async;
 
 struct Fake(Arc<Hub>);
 impl RpcHandler for Fake {
-    fn methods(&self) -> &'static [&'static str] { &["project.add", "thread.create", "thread.modes", "ask.answer", "turn.interrupt", "thread.pin", "thread.rename"] }
+    fn methods(&self) -> &'static [&'static str] { &["project.add", "thread.create", "thread.modes", "thread.effort", "thread.provider", "ask.answer", "turn.interrupt", "thread.pin", "thread.rename"] }
     fn call<'a>(&'a self, h: &'a Arc<Hub>, _w: &'a Caller, id: &'a Value, m: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let _ = &self.0; let at = now_ms() / 1000;
@@ -17,7 +17,7 @@ impl RpcHandler for Fake {
                 "project.add" => { let root = s(p, "path"); h.commit(&json!({"$":"ProjectCreated","id":format!("p{n}"),"title":root.rsplit('/').next().unwrap_or(""),"root":root,"at":at})).await.unwrap(); vec![json!({"t":"reply","id":id,"ok":true})] }
                 "thread.create" => { let t = format!("t{n}"); h.commit(&json!({"$":"ThreadCreated","id":t,"project":s(p,"project"),"title":if s(p,"title").is_empty(){"New thread"}else{s(p,"title")},"env":"local","branch":"","worktree":"","provider":"claude","model":"","at":at})).await.unwrap(); vec![json!({"t":"reply","id":id,"ok":true,"thread":t})] }
                 "ask.answer" => { h.commit(&json!({"$":"AskClosed","id":s(p,"id"),"answer":s(p,"answer"),"at":at})).await.unwrap(); vec![json!({"t":"reply","id":id,"ok":true})] }
-                "thread.modes" | "turn.interrupt" | "thread.pin" | "thread.rename" => vec![json!({"t":"reply","id":id,"ok":true})],
+                "thread.modes" | "thread.effort" | "thread.provider" | "turn.interrupt" | "thread.pin" | "thread.rename" => vec![json!({"t":"reply","id":id,"ok":true})],
                 _ => vec![json!({"t":"reply","id":id,"ok":false,"error":"no"})],
             }
         })
@@ -59,10 +59,10 @@ async fn ask(ws: &mut Ws, id: u64, m: &str, p: Value) -> Value {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_hello_capabilities_and_both_encodings() {
-    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review"]));
+    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker"]));
     let (_h, port) = up("hello").await;
     let mut ws = open(port, "&enc=json").await; let v = next(&mut ws).await;
-    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
+    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
     // the default is binary CBOR with plain string keys
     let mut c = open(port, "").await; let m = tokio::time::timeout(Duration::from_secs(5), c.next()).await.unwrap().unwrap().unwrap();
     let Message::Binary(b) = m else { panic!("binary") }; assert!(b.windows(5).any(|w| w == b"proto"), "plain keys, not the hub's dictionary");
@@ -77,7 +77,7 @@ async fn ask(ws: &mut Ws, id: u64, m: &str, p: Value) -> Value {
     let p1 = ps.iter().find(|p| p["id"] == "p1").unwrap(); assert_eq!((p1["threadCount"].as_u64(), p1["waiting"].as_u64(), p1["root"].as_str()), (Some(2), Some(1), Some("/tmp/alpha")));
     let r = ask(&mut ws, 2, "threads.list", json!({"limit":1})).await; let ts = &r["result"]["threads"]; assert_eq!(ts[0]["id"], "t2"); let next_c = r["result"]["next"].as_str().unwrap().to_string();
     let r = ask(&mut ws, 3, "threads.list", json!({"limit":1,"before":next_c})).await; let t = &r["result"]["threads"][0]; assert_eq!(t["id"], "t1"); assert!(r["result"]["next"].is_null());
-    assert_eq!((t["state"].as_str(), t["waiting"].as_u64(), t["preview"].as_str()), (Some("asking"), Some(1), Some("ls -la")), "an open ask makes the thread asking; the preview is the last text");
+    assert_eq!((t["state"].as_str(), t["waiting"].as_u64(), t["preview"].as_str()), (Some("asking"), Some(1), Some("hi, how can I help with this long reply that goes on")), "an open ask makes the thread asking; the preview is the last thing said");
     let r = ask(&mut ws, 4, "threads.list", json!({"archived":true})).await; assert_eq!(r["result"]["threads"].as_array().unwrap().len(), 1); assert_eq!(r["result"]["threads"][0]["id"], "t3");
     let r = ask(&mut ws, 5, "threads.list", json!({"project":"p2"})).await; assert!(r["result"]["threads"].as_array().unwrap().is_empty(), "t3 is archived");
     let r = ask(&mut ws, 6, "nope", json!({})).await; assert_eq!(r["ok"], false);
@@ -218,4 +218,62 @@ async fn ask(ws: &mut Ws, id: u64, m: &str, p: Value) -> Value {
     assert!(t("running").is_none() && t("interrupted").is_none() && t("cancelled").is_none());
     assert_eq!(ext::notify_for(&json!({"$":"AskOpened"}), "t1", "T", "rm -rf x").unwrap()["body"], "rm -rf x");
     assert!(ext::notify_for(&json!({"$":"MessagePosted"}), "t1", "T", "").is_none());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_activity_arrives_ready_to_fold_in_the_desktops_words() {
+    let (hub, port) = up("fold").await;
+    for l in [r#"{"$":"ActivityLogged","thread":"t2","act":"a2","tone":"tool","kind":"mcp__backplane__viewer_show","summary":"open the board","at":1700000021}"#,
+              r#"{"$":"ActivityLogged","thread":"t2","act":"a3","tone":"tool","kind":"TodoWrite","summary":"TodoWrite","at":1700000022}"#,
+              r#"{"$":"ActivityLogged","thread":"t2","act":"a4","tone":"step","kind":"step","summary":"{\"p\":\"\",\"w\":\"start\"}","at":1700000023}"#,
+              r#"{"$":"ActivityLogged","thread":"t2","act":"a5","tone":"step","kind":"step","summary":"{\"p\":\"abc\",\"w\":\"end\",\"f\":[\"M\\tboard.kicad_pcb\"]}","at":1700000024}"#,
+              r#"{"$":"ActivityLogged","thread":"t2","act":"a6","tone":"error","kind":"result","summary":"","at":1700000025}"#,
+              r#"{"$":"MessagePosted","thread":"t2","msg":"m9","role":"assistant","text":"  ","at":1700000026}"#] {
+        hub.commit(&serde_json::from_str::<Value>(l).unwrap()).await.unwrap();
+    }
+    let mut ws = open(port, "&enc=json").await; let _ = next(&mut ws).await;
+    let r = ask(&mut ws, 1, "thread.entries", json!({"thread":"t2"})).await; let es = r["result"]["entries"].as_array().unwrap().clone();
+    assert_eq!(es.iter().map(|e| e["id"].as_str().unwrap()).collect::<Vec<_>>(), ["a2", "a3", "a5", "a6"], "the design before the edits and a blank reply are no entries");
+    assert_eq!(es[0]["tool"]["name"], "viewer_show"); assert_eq!(es[0]["tool"]["summary"], "open the board");
+    assert_eq!(es[1]["tool"]["name"], "To-do"); assert_eq!(es[1]["tool"]["summary"], "", "a summary that only repeats the name says nothing");
+    assert_eq!(es[2]["kind"], "step"); assert_eq!(es[2]["label"], "Design change · board.kicad_pcb");
+    assert_eq!(es[3]["kind"], "note"); assert_eq!(es[3]["tone"], "error"); assert_eq!(es[3]["text"], "The turn ended with an error; the agent gave no reason.");
+    let r = ask(&mut ws, 2, "threads.list", json!({"project":"p1"})).await; let t1 = r["result"]["threads"].as_array().unwrap().iter().find(|t| t["id"] == "t1").unwrap().clone();
+    assert_eq!(t1["preview"], "hi, how can I help with this long reply that goes on", "the last thing said, not the tool call after it");
+    assert_eq!(t1["chip"], "claude / default / auto");
+    let sub = ask(&mut ws, 3, "subscribe", json!({"topic":"thread","thread":"t2"})).await; assert!(sub["ok"] == true);
+    hub.commit(&json!({"$":"ActivityLogged","thread":"t2","act":"a7","tone":"step","kind":"step","summary":"{\"p\":\"\",\"w\":\"start\"}","at":1700000030})).await.unwrap();
+    hub.commit(&json!({"$":"ActivityLogged","thread":"t2","act":"a8","tone":"tool","kind":"Bash","summary":"ls","at":1700000031})).await.unwrap();
+    let v = loop { let v = next(&mut ws).await; if v["k"] == "entry" { break v } };
+    assert_eq!(v["entry"]["id"], "a8", "a design base is not pushed either"); assert_eq!(v["entry"]["tool"]["name"], "Bash"); assert_eq!(v["entry"]["at"], 1700000031000u64);
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_the_picker_offers_what_the_desktop_does_and_a_pick_is_its_request() {
+    let (_hub, port) = up("picker").await;
+    let mut ws = open(port, "&enc=json").await; let hello = next(&mut ws).await;
+    for f in ["fold", "picker"] { assert!(hello["features"].as_array().unwrap().iter().any(|x| x == f), "{f}"); }
+    let r = ask(&mut ws, 1, "thread.picker", json!({"thread":"t1"})).await; let p = &r["result"]["picker"];
+    assert_eq!(p["chip"], "claude / default / auto");
+    let titles: Vec<&str> = p["sections"].as_array().unwrap().iter().map(|x| x["title"].as_str().unwrap()).collect(); assert_eq!(titles, ["Model", "Effort", "Provider", "Permissions"]);
+    let model = &p["sections"][0]["choices"]; assert_eq!(model[0]["label"], "default"); assert_eq!(model[0]["on"], true); assert_eq!(model[2]["value"], "opus"); assert_eq!(model[2]["label"], "Opus 5.5 \u{b7} claude-opus-5-5");
+    assert_eq!(p["sections"][2]["choices"][1]["value"], "codex", "a provider's value is its name, without the desktop's @");
+    let r = ask(&mut ws, 2, "thread.picker", json!({"provider":"codex"})).await; let p = &r["result"]["picker"];
+    assert_eq!(p["chip"], "codex / default / auto"); assert_eq!(p["sections"][0]["choices"].as_array().unwrap().len(), 1, "no listing: its default");
+    assert_eq!(p["sections"][3]["choices"][0]["on"], true, "a new thread asks for approvals by default");
+    let r = ask(&mut ws, 3, "thread.picker", json!({"provider":"opencode"})).await; assert_eq!(r["result"]["picker"]["sections"][1]["title"], "Provider", "no effort levels, no Effort section");
+    for (i, (a, v)) in [("model", "opus"), ("effort", "high"), ("provider", "codex"), ("runtime", "auto")].iter().enumerate() {
+        let r = ask(&mut ws, 10 + i as u64, "thread.pick", json!({"thread":"t1","action":a,"value":v})).await; assert_eq!(r["ok"], true, "{a}"); assert_eq!(r["result"]["thread"]["id"], "t1");
+    }
+    let r = ask(&mut ws, 20, "thread.pick", json!({"thread":"t1","action":"colour","value":"x"})).await; assert_eq!(r["ok"], false);
+    let r = ask(&mut ws, 21, "thread.pick", json!({"thread":"nope","action":"model","value":"x"})).await; assert_eq!(r["ok"], false);
+    let r = ask(&mut ws, 22, "thread.create", json!({"project":"p1","provider":"claude","model":"opus","effort":"high","runtime":"auto"})).await; assert_eq!(r["ok"], true);
+}
+#[test] fn the_picker_keeps_a_model_the_list_lacks_and_marks_what_is_in_force() {
+    let models = json!({"claude":[{"value":"opus","label":"Opus","ok":true,"why":""}],"codex":[{"value":"gpt","label":"GPT","ok":false,"why":"its CLI is not installed on this machine"}]});
+    let p = super::ext::picker_sections(&models, "claude", "old-model", "high", "auto");
+    assert_eq!(p["chip"], "claude / old-model / high");
+    let m = p["sections"][0]["choices"].as_array().unwrap(); assert_eq!(m.len(), 3); assert_eq!(m[2]["value"], "old-model"); assert_eq!(m[2]["on"], true); assert_eq!(m[0]["on"], false);
+    assert!(p["sections"][1]["choices"].as_array().unwrap().iter().any(|c| c["value"] == "high" && c["on"] == true));
+    assert!(p["sections"][3]["choices"].as_array().unwrap().iter().any(|c| c["value"] == "auto" && c["on"] == true));
+    let p = super::ext::picker_sections(&models, "codex", "gpt", "", "");
+    assert_eq!(p["sections"][0]["choices"][1]["ok"], false); assert_eq!(p["sections"][0]["choices"][1]["why"], "its CLI is not installed on this machine");
+    assert!(p["sections"][3]["choices"].as_array().unwrap().iter().any(|c| c["value"] == "full-access" && c["on"] == true), "a thread with no mode set runs with full access");
 }

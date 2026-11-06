@@ -277,8 +277,8 @@ object DataClient {
         projects = (projects.filter { it.id != p.id } + p).sortedByDescending { it.updatedAt }
         return p
     }
-    suspend fun createThread(project: String, text: String): DThread {
-        val p = JSONObject().put("project", project).put("clientId", UUID.randomUUID().toString()).put("permission", "ask")
+    suspend fun createThread(project: String, text: String, choice: DNewThreadChoice = DNewThreadChoice()): DThread {
+        val p = choice.into(JSONObject().put("project", project).put("clientId", UUID.randomUUID().toString()).put("permission", "ask"), skipEmpty = true)
         if (text.isNotBlank()) p.put("text", text.trim())
         val t = parseThread(call("thread.create", p).getJSONObject("thread")); upsert(t); return t
     }
@@ -314,11 +314,11 @@ object DataClient {
         val r = call("search", JSONObject().put("q", q))
         return parseThreads(r.optJSONArray("threads")) to parseProjects(r.optJSONArray("projects"))
     }
-    suspend fun models(): Map<String, List<Triple<String, String, Boolean>>> {
-        val m = call("models.list").optJSONObject("models") ?: return emptyMap()
-        return m.keys().asSequence().associateWith { k -> m.optJSONArray(k)?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Triple(it.optString("value"), it.optString("label", it.optString("value")), it.optBoolean("ok")) } } ?: emptyList() }
+    suspend fun picker(thread: String?, choice: DNewThreadChoice = DNewThreadChoice()): DPicker {
+        val p = choice.into(JSONObject()); if (thread != null) p.put("thread", thread)
+        return parsePicker(call("thread.picker", p).getJSONObject("picker"))
     }
-    suspend fun setModel(tid: String, provider: String, model: String) { call("thread.model", JSONObject().put("thread", tid).put("provider", provider).put("model", model)).optJSONObject("thread")?.let { upsert(parseThread(it)) } }
+    suspend fun pick(tid: String, action: String, value: String) { call("thread.pick", JSONObject().put("thread", tid).put("action", action).put("value", value)).optJSONObject("thread")?.let { upsert(parseThread(it)) } }
     data class Mention(val sigil: String, val id: String, val label: String, val detail: String)
     suspend fun mentions(q: String, kind: String): List<Mention> {
         val a = call("mentions.list", JSONObject().put("q", q).put("kind", kind).put("limit", 8)).optJSONArray("items") ?: return emptyList()
@@ -433,7 +433,7 @@ object DataClient {
             withContext(Dispatchers.IO) {
                 val j = JSONObject().put("hub", hub)
                     .put("projects", JSONArray(ps.map { JSONObject().put("id", it.id).put("title", it.title).put("root", it.root).put("threadCount", it.threadCount).put("updatedAt", it.updatedAt).put("waiting", it.waiting) }))
-                    .put("threads", JSONArray(ts.map { JSONObject().put("id", it.id).put("project", it.project).put("title", it.title).put("state", it.state).put("updatedAt", it.updatedAt).put("pinned", it.pinned).put("settled", it.settled).put("archived", it.archived).put("provider", it.provider).put("model", it.model).put("preview", it.preview).put("waiting", it.waiting) }))
+                    .put("threads", JSONArray(ts.map { JSONObject().put("id", it.id).put("project", it.project).put("title", it.title).put("state", it.state).put("updatedAt", it.updatedAt).put("pinned", it.pinned).put("settled", it.settled).put("archived", it.archived).put("provider", it.provider).put("model", it.model).put("effort", it.effort).put("runtime", it.runtime).put("chip", it.chip).put("preview", it.preview).put("waiting", it.waiting) }))
                     .put("entries", JSONObject().also { o -> es.forEach { (k, v) -> o.put(k, JSONArray(v.map(::J))) } })
                 runCatching { cacheFile().writeText(j.toString()) }
             }

@@ -13,12 +13,45 @@
 //! Diff and Review (features "diff", "review"): `viewer.diff {thread, from?, to?}` → `{diff, nogit?}` (the hub's git.diff: unified text) · `review.page {thread, page: bom|checks, a?, b?, commit?}` → `{report:{md, err, gate, line, tasks:[…]}}`
 //! (review.bom / review.checks: Markdown the hub writes) · `review.tick {thread, index}` → `{ticked:{tasks}}` · `review.comment {thread, op: add|edit|resolve|reopen|drop, text?, id?, parent?, file?, layer?, x?, y?, item?}` → `{}` ·
 //! `review.list {thread}` → `{comments:[{id, text, by, at, parent, resolved, file, layer, x, y, item}]}` (the thread's review acts folded, oldest first).
+//! Picker (feature "picker"): `thread.picker {thread?, provider?, model?, effort?, runtime?}` → `{picker:{chip, sections:[{title, action, choices:[{label, value, on, ok, why}]}]}}` (a thread's own, or a new thread's from what is given) ·
+//! `thread.pick {thread, action: model|effort|provider|runtime, value}` → `{thread}`: the desktop's picker, the same requests it sends.
 //! Pushes on a `lists` subscription: `{"k":"notify","kind":"done"|"fail"|"ask","thread","title","body"}` when a turn ends or an ask opens.
 use super::*;
 
-pub const FEATURES: &[&str] = &["actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review"];
+pub const FEATURES: &[&str] = &["actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker"];
 
 const THREAD_ACTS: &[&str] = &["pin", "unpin", "settle", "unsettle", "archive", "unarchive", "delete"];
+
+/// The composer's chip as the desktop draws it: "claude / opus / high".
+pub fn chip(provider: &str, model: &str, effort: &str) -> String { format!("{provider} / {} / {}", if model.is_empty() { "default" } else { model }, if effort.is_empty() { "auto" } else { effort }) }
+
+/// The picker the desktop opens from that chip (present/keys.rs), as sections a phone draws in order and answers with `thread.pick`. Models carry the hub's labels and
+/// say when one cannot be used; a provider with no list offers its default. Pure: `models` is `settings::models::all`.
+pub fn picker_sections(models: &Value, provider: &str, model: &str, effort: &str, runtime: &str) -> Value {
+    let k = crate::present::keys::picker(provider, model, effort, "");
+    let plain = |list: &Value, strip: bool| -> Vec<Value> { list.as_array().into_iter().flatten().map(|c| { let v = c["value"].as_str().unwrap_or(""); json!({"label":c["label"],"value":if strip { v.trim_start_matches('@') } else { v },"on":c["on"],"ok":true,"why":""}) }).collect() };
+    let mut rows = vec![json!({"label":"default","value":"","on":model.is_empty(),"ok":true,"why":""})];
+    for r in models[provider].as_array().into_iter().flatten() { let v = r["value"].as_str().unwrap_or(""); if !v.is_empty() { rows.push(json!({"label":r["label"],"value":v,"on":v == model,"ok":r["ok"],"why":r["why"]})) } }
+    if !model.is_empty() && !rows.iter().any(|c| c["value"] == model) { rows.push(json!({"label":model,"value":model,"on":true,"ok":true,"why":""})) }
+    let efforts = plain(&k["efforts"], false);
+    let mut sections = vec![json!({"title":"Model","action":"model","choices":rows})];
+    if !efforts.is_empty() { sections.push(json!({"title":"Effort","action":"effort","choices":efforts})) }
+    sections.push(json!({"title":"Provider","action":"provider","choices":plain(&k["providers"], true)}));
+    sections.push(json!({"title":"Permissions","action":"runtime","choices":plain(&crate::present::keys::permissions(runtime)["choices"], false)}));
+    json!({"chip":chip(provider, model, effort),"sections":sections})
+}
+
+async fn picker(hub: &Arc<Hub>, p: &Value) -> Result<Value, Value> {
+    let th = s(p, "thread");
+    let now = if th.is_empty() { Value::Null } else { thread_now(hub, th).await? };
+    // a new thread: what the phone has chosen so far, else the hub's default agent, and approvals on (the phones' default)
+    let setting = |k: &str| crate::statehost::policies().and_then(|x| x.with_state(|st| st.settings.get(k).cloned())).flatten().unwrap_or_default();
+    let pick = |k: &str, dflt: String| if p.get(k).is_some() { s(p, k).to_string() } else if th.is_empty() { dflt } else { s(&now, k).to_string() };
+    let provider = pick("provider", { let d = setting("agent.provider"); if d.is_empty() { "claude".into() } else { d } });
+    let model = pick("model", if p.get("provider").is_some() { String::new() } else { setting("agent.model") });
+    let models: Value = serde_json::from_str(&crate::settings::models::all()).unwrap_or(Value::Null);
+    Ok(json!({"picker":picker_sections(&models, &provider, &model, &pick("effort", String::new()), &pick("runtime", "approval-required".into()))}))
+}
 
 async fn thread_now(hub: &Arc<Hub>, id: &str) -> Result<Value, Value> {
     // the planner's events are committed before its reply; read the model again for the thread as it is now
@@ -51,6 +84,18 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Re
             // the same provider: only the model changes (thread.modes); another provider is a switch (thread.provider, a handoff between turns)
             let same = hub.model().await.threads.get(th).map_or(false, |t| t.provider == s(p, "provider"));
             let r = if same { rpc(hub, c, "thread.modes", json!({"thread":th,"model":s(p, "model")})).await } else { rpc(hub, c, "thread.provider", q).await };
+            match r { Ok(_) => thread_now(hub, th).await.map(|t| json!({"thread":t})), Err(e) => Err(e) }
+        }
+        "thread.picker" => picker(hub, p).await,
+        "thread.pick" => {
+            let (th, value) = (s(p, "thread"), s(p, "value")); if !known_thread(&*hub.model().await, th) { return Some(Err(err("unknown thread"))) }
+            let r = match s(p, "action") {
+                "model" => rpc(hub, c, "thread.modes", json!({"thread":th,"model":value})).await,
+                "effort" => rpc(hub, c, "thread.effort", json!({"thread":th,"effort":value})).await,
+                "provider" => rpc(hub, c, "thread.provider", json!({"thread":th,"provider":value})).await,
+                "runtime" => rpc(hub, c, "thread.modes", json!({"thread":th,"runtime":value})).await,
+                _ => return Some(Err(err("action: model, effort, provider or runtime"))),
+            };
             match r { Ok(_) => thread_now(hub, th).await.map(|t| json!({"thread":t})), Err(e) => Err(e) }
         }
         "mentions.list" => mentions(hub, p).await,

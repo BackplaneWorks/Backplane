@@ -55,7 +55,7 @@ fun ViewerScreen(thread: DThread, back: () -> Unit) {
         DBar("Viewer · ${thread.title.ifEmpty { "New thread" }}", back)
         Row(Modifier.fillMaxWidth().background(dcs.surfaceVariant).horizontalScroll(rememberScrollState())) {
             tabs.forEach { t ->
-                DMono(t, if (t == tab) dcs.primary else dcs.onSurfaceVariant, 12, Modifier.clickable { tab = t; target = null }.padding(horizontal = 14.dp, vertical = 12.dp).testTag("vtab.$t"), bold = t == tab)
+                DMono(t, if (t == tab) dcs.onPrimary else dcs.onSurface, 12, Modifier.background(if (t == tab) dcs.primary else dcs.surfaceVariant).clickable { tab = t; target = null }.padding(horizontal = 14.dp, vertical = 12.dp).testTag("vtab.$t"), bold = t == tab)
             }
         }
         DLine()

@@ -68,12 +68,12 @@ struct DataViewerView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 0) {
                     ForEach(tabs, id: \.self) { t in
-                        Button { tab = t; target = nil } label: { Text(t).font(.system(.subheadline, design: .monospaced)).fontWeight(t == tab ? .bold : .regular).foregroundStyle(t == tab ? BackplaneDesign.accent : .secondary).padding(.horizontal, 14).padding(.vertical, 10) }
+                        Button { tab = t; target = nil } label: { Text(t).dmono(12, bold: t == tab).foregroundStyle(t == tab ? BackplaneDesign.onAccent : BackplaneDesign.text).padding(.horizontal, 14).padding(.vertical, 10).background(t == tab ? BackplaneDesign.accent : BackplaneDesign.panel) }
                             .accessibilityIdentifier("data.vtab." + t)
                     }
                 }
             }.background(BackplaneDesign.panel)
-            Divider()
+            DLine()
             Group {
                 switch tab {
                 case "Board": DataPlotTab(client: client, thread: thread, kind: "board", path: target?.tab == "Board" ? target!.path : "", has: !(files?.pcb ?? "").isEmpty || target != nil, none: "No board in this project yet")
@@ -88,7 +88,8 @@ struct DataViewerView: View {
                 }
             }
         }
-        .navigationTitle("Viewer · " + (thread.title.isEmpty ? "New thread" : thread.title)).navigationBarTitleDisplayMode(.inline)
+        .background(BackplaneDesign.background)
+        .dataBar(thread.title.isEmpty ? "New thread" : thread.title)
         .task { files = await client.viewerFiles(thread.id); if !(files?.pcb ?? "").isEmpty { tab = "Board" } }
         .onDisappear { Task { try? await client.watch(thread.id, kind: "") } }
     }
@@ -240,7 +241,7 @@ struct DataFilesTab: View {
                     Text("/" + dir).font(.system(.footnote, design: .monospaced))
                     Spacer()
                 }.padding(.horizontal, 12).padding(.vertical, 8).background(BackplaneDesign.panel)
-                if !err.isEmpty { Text(err).foregroundStyle(.red).font(.footnote).padding(12) }
+                if !err.isEmpty { Text(err).foregroundStyle(BackplaneDesign.bad).font(.footnote).padding(12) }
                 if let l = list {
                     List(l.sorted { ($0.dir ? 0 : 1, $0.name.lowercased()) < ($1.dir ? 0 : 1, $1.name.lowercased()) }) { e in
                         let full = dir.isEmpty ? e.name : dir + "/" + e.name
@@ -276,7 +277,7 @@ struct DataFilePreview: View {
             HStack { Button { close() } label: { Text("‹ " + (path.split(separator: "/").last.map(String.init) ?? path)).font(.system(.subheadline, design: .monospaced).bold()) }.accessibilityIdentifier("data.preview.back"); Spacer() }
                 .padding(.horizontal, 12).padding(.vertical, 8).background(BackplaneDesign.panel)
             Divider()
-            if failed { Text("This file could not be read.").foregroundStyle(.red).padding(16) }
+            if failed { Text("This file could not be read.").foregroundStyle(BackplaneDesign.bad).padding(16) }
             else if let d = data {
                 if imageExt.contains(ext(path)), let u = UIImage(data: d) { Image(uiImage: u).resizable().scaledToFit().padding(8).accessibilityIdentifier("data.preview.image") }
                 else if ext(path) == "pdf" { DataPDFView(data: d).accessibilityIdentifier("data.preview.pdf") }
@@ -308,16 +309,16 @@ struct DataBrowserTab: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                if !driving { Button("Take over") { driving = true; run("takeover") }.buttonStyle(.borderedProminent).accessibilityIdentifier("data.browser.takeover") }
+                if !driving { Button("Take over") { driving = true; run("takeover") }.buttonStyle(DButton(primary: true)).accessibilityIdentifier("data.browser.takeover") }
                 else {
                     Button("‹") { run("toolbar", ["command": "back"]) }.accessibilityIdentifier("data.browser.back")
-                    TextField("Address", text: $url).textFieldStyle(.roundedBorder).textInputAutocapitalization(.never).autocorrectionDisabled().accessibilityIdentifier("data.browser.url")
+                    TextField("Address", text: $url).dmono(13).padding(8).dbox().textInputAutocapitalization(.never).autocorrectionDisabled().accessibilityIdentifier("data.browser.url")
                     Button("Go") { run("navigate", ["url": pageUrl(url)]) }.disabled(url.trimmingCharacters(in: .whitespaces).isEmpty).accessibilityIdentifier("data.browser.go")
                     Button("Hand back") { driving = false; run("handback") }.accessibilityIdentifier("data.browser.handback")
                 }
                 Spacer(minLength: 0)
             }.padding(8).background(BackplaneDesign.panel)
-            if !err.isEmpty { Text(err).foregroundStyle(.red).font(.footnote).padding(.horizontal, 12) }
+            if !err.isEmpty { Text(err).foregroundStyle(BackplaneDesign.bad).font(.footnote).padding(.horizontal, 12) }
             Divider()
             GeometryReader { geo in
                 if let f = frame {
@@ -431,7 +432,7 @@ struct DataDiffTab: View {
             HStack { Text("CHANGES").font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary); Spacer(); Button("Refresh") { n += 1 }.accessibilityIdentifier("data.diff.refresh") }
                 .padding(8).background(BackplaneDesign.panel)
             Divider()
-            if !err.isEmpty { Text(err).foregroundStyle(.red).font(.footnote).padding(16) }
+            if !err.isEmpty { Text(err).foregroundStyle(BackplaneDesign.bad).font(.footnote).padding(16) }
             else if let d = diff {
                 if !d.nogit.isEmpty { Text("This project is not a git repository, so there is nothing to compare.").foregroundStyle(.secondary).padding(16).accessibilityIdentifier("data.diff.nogit") }
                 else if d.diff.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { Text("No changes.").foregroundStyle(.secondary).padding(16) }
@@ -497,11 +498,11 @@ struct DataReportPage: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
                 Button(ticks ? "Run checks" : "Refresh") { run += 1 }.buttonStyle(.bordered).accessibilityIdentifier("data.review.run")
-                if !err.isEmpty { Text(err).foregroundStyle(.red).font(.footnote) }
+                if !err.isEmpty { Text(err).foregroundStyle(BackplaneDesign.bad).font(.footnote) }
                 if let r = rep {
                     if !r.line.isEmpty { Text(r.line).font(.system(.footnote, design: .monospaced).bold()).foregroundStyle(BackplaneDesign.accent) }
                     if !r.gate.isEmpty { Text(r.gate).font(.caption).foregroundStyle(.secondary) }
-                    if !r.err.isEmpty { Text(r.err).font(.footnote).foregroundStyle(.red) }
+                    if !r.err.isEmpty { Text(r.err).font(.footnote).foregroundStyle(BackplaneDesign.bad) }
                     if !r.md.isEmpty { ScrollView(.horizontal) { Text(.init(r.md)).font(.system(.caption, design: .monospaced)) } }
                     if ticks { ForEach(Array(tasks.enumerated()), id: \.offset) { i, t in
                         Button { Task { if let n = await client.tick(thread.id, i) { tasks = n } } } label: {
@@ -523,7 +524,7 @@ struct DataCommentsPage: View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
-                    if !err.isEmpty { Text(err).foregroundStyle(.red).font(.footnote) }
+                    if !err.isEmpty { Text(err).foregroundStyle(BackplaneDesign.bad).font(.footnote) }
                     if let l = list {
                         if l.isEmpty { Text("No comments yet. Add one below; the agent reads the open ones with its next message.").font(.footnote).foregroundStyle(.secondary) }
                         ForEach(l.filter { $0.parent.isEmpty }) { c in
@@ -539,9 +540,9 @@ struct DataCommentsPage: View {
             }.accessibilityIdentifier("data.review.comments")
             Divider()
             HStack {
-                TextField("A review comment", text: $draft, axis: .vertical).textFieldStyle(.roundedBorder).accessibilityIdentifier("data.review.composer")
+                TextField("A review comment", text: $draft, axis: .vertical).dmono(13).padding(8).dbox().accessibilityIdentifier("data.review.composer")
                 Button("Add") { let t = draft; draft = ""; Task { do { try await client.comment(thread.id, "add", ["text": t]) } catch { err = error.localizedDescription }; await load() } }
-                    .buttonStyle(.borderedProminent).disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty).accessibilityIdentifier("data.review.add")
+                    .buttonStyle(DButton(primary: true)).disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty).accessibilityIdentifier("data.review.add")
             }.padding(8).background(BackplaneDesign.panel)
         }
         .task { await load() }
