@@ -10,8 +10,10 @@ machine or across machines, including other people's Backplanes.
 - A bot is backed by one thread (`Bot.thread`). Its turns, model, provider,
   approvals, tools and timeline are the thread's. The thread belongs to no
   project (project `""`), so it never shows on a project shelf; it works in
-  `<home>/bots/<id>/`, its home folder (set by a `WorktreeSet` once the hub
-  has made the folder).
+  `~/.backplane/bots/<id>/`, its home folder (`bots::relocate::root`; `BACKPLANE_BOTS_DIR`
+  overrides it, and a copy run or a home under the temp dir keeps `<home>/bots`). On start the hub copies what older builds kept
+  elsewhere (`<home>/bots/<id>`, the folder a `WorktreeSet` named, and the agent's session history and memory keyed by that folder)
+  to the new place: backup in `~/.backplane/backups/bots-move-<time>/`, copy, verify, then `.moved.json`. Old folders are left alone.
 - Everything else lives in `M.State.bots : BT.World`,
   folded from additive `Change` variants (`Bot*`, `Room*`, `Hook*`,
   `Routine*`, `Memory*`, `Space*`, `Peer*`).

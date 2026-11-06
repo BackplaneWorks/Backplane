@@ -68,7 +68,7 @@ fn s<'a>(v: &'a Value, k: &str) -> &'a str { v.get(k).and_then(Value::as_str).un
 impl Driver {
     pub fn set_wake(&self, w: Wake) { *self.wake.lock().unwrap() = Some(w) }
     fn wake(&self, bot: &str, text: String) { if let Some(w) = self.wake.lock().unwrap().clone() { w(bot, text) } }
-    pub(crate) fn dir(&self, bot: &str) -> PathBuf { self.hub.cfg.home.join("bots").join(bot).join("tasks") }
+    pub(crate) fn dir(&self, bot: &str) -> PathBuf { crate::bots::relocate::root(&self.hub.cfg.home).join(bot).join("tasks") }
     fn safe(bot: &str) -> bool { teach::part_ok(bot, false) }
     /// A joining client's info: every bot with something to say.
     pub async fn info(&self) -> Vec<(String, String)> { self.st.lock().await.teach.info() }
@@ -302,7 +302,7 @@ impl Driver {
             _ => fail("unknown tool"),
         }
     }
-    pub(crate) fn run_dir(&self, bot: &str, run: &str) -> PathBuf { self.hub.cfg.home.join("bots").join(bot).join(teach::run_dir(run)) }
+    pub(crate) fn run_dir(&self, bot: &str, run: &str) -> PathBuf { crate::bots::relocate::root(&self.hub.cfg.home).join(bot).join(teach::run_dir(run)) }
     async fn run(&self, thread: &str, a: &Value, now: u64) -> (bool, Value) {
         let bot = thread; let slug = task::slug(s(a, "slug")); let fail = |m: &str| (false, json!({"error": m}));
         if !Self::safe(bot) { return fail("no bot") }
@@ -391,7 +391,7 @@ pub async fn tasks_http(hub: &Arc<Hub>, req: &Req) -> Option<HttpReply> {
     let (run, f) = (crate::files::fm::from_uri(&req.param("run")), crate::files::fm::from_uri(&req.param("f")));
     let file = if f.is_empty() { teach::pause_file(req.param("n").parse().unwrap_or(0)) } else { f };
     if !teach::part_ok(bot, false) || !teach::run_ok(&run) || !teach::file_ok(&file) { return nf() }
-    let path = hub.cfg.home.join("bots").join(bot).join(teach::run_dir(&run)).join(&file);
+    let path = crate::bots::relocate::root(&hub.cfg.home).join(bot).join(teach::run_dir(&run)).join(&file);
     match tokio::task::spawn_blocking(move || { let m = std::fs::metadata(&path).ok()?; if m.len() > 8 << 20 { return None } std::fs::read(&path).ok() }).await.ok().flatten() {
         Some(b) => Some(HttpReply::ok(if file.ends_with(".png") { "image/png" } else { "image/jpeg" }, b)), None => nf(),
     }

@@ -181,11 +181,11 @@ impl Bots {
         vec![json!({"t":"reply","id":id,"ok":true,"bot":bot})]
     }
 
-    /// BotJob.home: the bot's folder `<home>/bots/<bot>` (git init'ed), then the thread works there.
+    /// BotJob.home: the bot's folder `~/.backplane/bots/<bot>` (relocate::root; git init'ed), then the thread works there.
     pub(super) async fn home_pub(&self, bot: &str, thread: &str) { self.home(bot, thread).await }
     async fn home(&self, bot: &str, thread: &str) {
         if !safe_id(bot) { eprintln!("bots: not a folder name: {bot}"); return }
-        let path = self.hub.cfg.home.join("bots").join(bot);
+        let path = super::relocate::root(&self.hub.cfg.home).join(bot);
         let p2 = path.clone();
         let _ = tokio::task::spawn_blocking(move || { let _ = std::fs::create_dir_all(&p2); let _ = crate::proc::std_cmd(crate::proc::Kind::Local, "git").args(["init", "-q"]).current_dir(&p2).output(); }).await;
         let _ = self.hub.commit(&json!({"$":"WorktreeSet","id":thread,"branch":"","worktree":path.to_string_lossy(),"at":now_s()})).await;
@@ -298,9 +298,9 @@ impl Bots {
         if !safe_id(bot) { return Err("not a bot id".into()) }
         let thread = { let w = self.world().await; w.bot(bot).map(|b| b.thread.clone()).unwrap_or_default() };
         if !thread.is_empty() && !safe_id(&thread) { return Err("not a bot id".into()) }
-        let now = now_s(); let home = self.hub.cfg.home.to_string_lossy().to_string();
+        let now = now_s(); let home = self.hub.cfg.home.to_string_lossy().to_string(); let broot = super::relocate::root(&self.hub.cfg.home).to_string_lossy().into_owned();
         let (b, t) = (bot.to_string(), if thread.is_empty() { bot.to_string() } else { thread });
-        let ran = tokio::task::spawn_blocking(move || crate::proc::std_cmd(crate::proc::Kind::Local, "sh").args(["-c", BACKUP_SH, "sh", &home, &now.to_string(), &b, &t]).current_dir("/").status().map(|s| s.success()).unwrap_or(false)).await.unwrap_or(false);
+        let ran = tokio::task::spawn_blocking(move || crate::proc::std_cmd(crate::proc::Kind::Local, "sh").args(["-c", BACKUP_SH, "sh", &home, &now.to_string(), &b, &t, &broot]).current_dir("/").status().map(|s| s.success()).unwrap_or(false)).await.unwrap_or(false);
         if !ran { return Err("could not back the bot up; nothing changed".into()) }
         let mut seed = [0u8; 4]; if let Ok(mut f) = std::fs::File::open("/dev/urandom") { let _ = std::io::Read::read_exact(&mut f, &mut seed); }
         let uid = format!("u{now}-{}", hex::encode(seed));
@@ -309,7 +309,7 @@ impl Bots {
         Ok(uid)
     }
 }
-const BACKUP_SH: &str = "set -e; d=\"$1/backups/uber-$2-$3\"; mkdir -p \"$d\"; if [ -d \"$1/bots/$3\" ]; then cp -a \"$1/bots/$3\" \"$d/home\"; fi; grep -F -e \"$3\" -e \"$4\" \"$1/events.jsonl\" > \"$d/events.jsonl\" || [ $? -eq 1 ]";
+const BACKUP_SH: &str = "set -e; d=\"$1/backups/uber-$2-$3\"; mkdir -p \"$d\"; if [ -d \"$5/$3\" ]; then cp -a \"$5/$3\" \"$d/home\"; fi; grep -F -e \"$3\" -e \"$4\" \"$1/events.jsonl\" > \"$d/events.jsonl\" || [ $? -eq 1 ]";
 
 /// a person's prompt through a client connection (never a retry): the connection the star offer would go to
 fn human(who: &Caller, p: &Value) -> Option<u64> { if who.client > 0 && matches!(p.get("retry"), None | Some(Value::Null) | Some(Value::Bool(false))) { Some(who.client) } else { None } }

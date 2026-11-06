@@ -154,7 +154,7 @@ impl World {
     pub fn cwd(&self, th: &str) -> String {
         let Some(t) = self.threads.get(th) else { return String::new() };
         // a bot's own thread works in `<home>/bots/<bot>`, whatever a WorktreeSet once said (never a folder made elsewhere)
-        if let Some(b) = self.bot_of.get(th) { if !self.home.is_empty() && crate::bots::rpc::safe_id(b) && self.bots.get(b).map_or(false, |x| x.1 == th) { let d = std::path::Path::new(&self.home).join("bots").join(b); let _ = std::fs::create_dir_all(&d); return d.to_string_lossy().into_owned() } }
+        if let Some(b) = self.bot_of.get(th) { if !self.home.is_empty() && crate::bots::rpc::safe_id(b) && self.bots.get(b).map_or(false, |x| x.1 == th) { let d = crate::bots::relocate::root(std::path::Path::new(&self.home)).join(b); let _ = std::fs::create_dir_all(&d); return d.to_string_lossy().into_owned() } }
         if !t.worktree.is_empty() { t.worktree.clone() } else { self.roots.get(&t.project).cloned().unwrap_or_default() }
     }
     /// Work.busy (without delegated tasks, which this module does not run): the thread's background and watched rows, ended ones included
