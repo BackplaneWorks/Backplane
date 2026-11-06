@@ -198,6 +198,7 @@ impl Backplane {
         super::settings::sync(self, cx);
         super::projects::sync(self, cx);
         super::plotview::report_state(self);
+        super::histbar::follow_focus(self);
         super::filesui::sync(self, cx);
         self.browser_page(cx);
         // a form or a room page opened: its first field takes the keys; closed: back to the composer

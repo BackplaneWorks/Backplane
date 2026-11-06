@@ -158,7 +158,8 @@ fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, 
         }).collect::<Vec<_>>()));
     }
     // Layers: the menu lists the layers this plot has; the hub's masks decide what the canvas draws
-    let present: std::collections::BTreeSet<u32> = frame.chunks.iter().map(|c| c.layer).collect();
+    let mut present = std::collections::BTreeMap::new();
+    for ch in &frame.chunks { present.entry(ch.layer).or_insert(ch.color); }
     let strip = crate::viewers::layers::strip(viewer, &present);
     // Sheets: a schematic of several sheets lists them as a tree (indented by depth); a press shows that sheet, the root first
     if sheets.len() > 1 && open == "schematic" && layers {
@@ -182,7 +183,7 @@ fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, 
     if layers {
         let fit = div().id(SharedString::from(format!("plot-fit-{slot}"))).px_2().py_1().mt_1().ml_1().text_size(px(12.)).cursor_pointer().border_1().border_color(c("line")).bg(c("raise")).hover(|s| s.bg(c("panel"))).child("Fit")
             .on_click(cx.listener(move |this, _, _, cx| { let pv = this.screens.pv(slot); pv.touched = false; pv.fit_wh = (0., 0.); cx.notify(); }));
-        col = col.child(div().flex().items_center().child(crate::viewers::layers::strip_el(cx, light, &strip, pv.layers_open)).child(fit));
+        col = col.child(div().flex().items_center().child(crate::viewers::layers::strip_el(cx, light, &strip, &pv.layers_key)).child(fit));
     }
     let mut area = div().relative().flex().flex_col().flex_1().min_h_0().child(super::plotview::canvas_el(cx, slot, pv.focus.clone(), light, frame, view, crate::viewers::layers::masks(viewer)));
     if layers { if let Some(p) = crate::viewers::layers::panel_el(cx, light, &strip, pv.layers_open, pv.layers_cap.unwrap_or(280.), &pv.layers_scroll) { area = area.child(p); } }
