@@ -70,11 +70,21 @@ fn on_path(c: &str) -> Option<String> {
     if c.contains('/') { return runnable(Path::new(c)).then(|| c.to_string()) }
     std::env::var_os("PATH").and_then(|p| std::env::split_paths(&p).map(|d| d.join(c)).find(|f| runnable(f))).map(|f| f.to_string_lossy().into_owned())
 }
+/// macOS app bundles: `rel` under /Applications and ~/Applications (a user-level install, no admin rights), in that order.
+pub fn mac_apps(rel: &str) -> Vec<String> {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let mut v = vec![format!("/Applications/{rel}")];
+    if !home.is_empty() { v.push(format!("{home}/Applications/{rel}")) }
+    v
+}
+/// KiCad's command line inside its macOS bundle: the unified installer's KiCad/KiCad.app, or a bare KiCad.app.
+pub fn kicad_mac_clis() -> Vec<String> { ["KiCad/KiCad.app/Contents/MacOS/kicad-cli", "KiCad.app/Contents/MacOS/kicad-cli"].iter().flat_map(|r| mac_apps(r)).collect() }
 /// FreeCAD.find: BACKPLANE_FREECAD, the managed install under the hub's home, then FreeCAD's command names on PATH, then macOS's app
 pub fn freecad_cmd(home: &Path) -> String {
     let managed = std::fs::read_to_string(home.join("freecad/command")).ok().and_then(|t| t.lines().next().map(str::to_string)).unwrap_or_default();
     let env = std::env::var("BACKPLANE_FREECAD").unwrap_or_default();
-    [env.as_str(), managed.as_str(), "freecadcmd", "FreeCADCmd", "freecad.cmd", "/Applications/FreeCAD.app/Contents/Resources/bin/freecadcmd"].iter().filter(|c| !c.is_empty()).find_map(|c| on_path(c)).unwrap_or_default()
+    let apps = mac_apps("FreeCAD.app/Contents/Resources/bin/freecadcmd");
+    [env.as_str(), managed.as_str(), "freecadcmd", "FreeCADCmd", "freecad.cmd"].into_iter().chain(apps.iter().map(String::as_str)).filter(|c| !c.is_empty()).find_map(|c| on_path(c)).unwrap_or_default()
 }
 /// freecadGui: the GUI program beside its console one, else on PATH
 pub fn freecad_gui(cmd: &str) -> String {
@@ -199,4 +209,8 @@ mod tests {
     }
     #[test] fn two_stages_of_one_model_are_two_folders() { let d = dir("st"); let o = d.join("o").to_string_lossy().into_owned(); assert_ne!(stage(&o, "export-").unwrap(), stage(&o, "export-").unwrap()); }
     #[test] fn fnv_is_key_hash() { assert_eq!(fnv(""), 2166136261); assert_eq!(fnv("a"), 0xe40c292c); }
+    #[test] fn mac_app_bundles_are_looked_for_system_wide_and_in_the_users_applications() {
+        let v = mac_apps("FreeCAD.app/Contents/Resources/bin/freecadcmd"); assert_eq!(v[0], "/Applications/FreeCAD.app/Contents/Resources/bin/freecadcmd");
+        let k = kicad_mac_clis(); assert!(k.iter().any(|p| p.ends_with("/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli")) && k.iter().any(|p| p.ends_with("/Applications/KiCad.app/Contents/MacOS/kicad-cli")));
+    }
 }

@@ -16,8 +16,8 @@ fn on_path(name: &str) -> Option<PathBuf> { std::env::var_os("PATH").and_then(|p
 impl HostInfo {
     pub fn probe(home: &Path) -> HostInfo {
         let mut h = HostInfo { home: home.to_path_buf(), user_home: std::env::var("HOME").unwrap_or_else(|_| "/nonexistent".into()), render: std::env::current_exe().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default(), ..Default::default() };
-        h.fc = std::env::var("BACKPLANE_FREECAD").ok().filter(|s| !s.is_empty()).or_else(|| on_path("freecadcmd").map(|p| p.to_string_lossy().into_owned())).unwrap_or_default();
-        if let Some(cli) = std::env::var("BACKPLANE_KICAD_CLI").ok().filter(|s| !s.is_empty()).map(PathBuf::from).or_else(|| on_path("kicad-cli")) {
+        h.fc = std::env::var("BACKPLANE_FREECAD").ok().filter(|s| !s.is_empty()).or_else(|| on_path("freecadcmd").map(|p| p.to_string_lossy().into_owned())).unwrap_or_else(|| crate::kicad::stepglb::freecad_cmd(home));
+        if let Some(cli) = std::env::var("BACKPLANE_KICAD_CLI").ok().filter(|s| !s.is_empty()).map(PathBuf::from).or_else(|| on_path("kicad-cli")).or_else(|| crate::kicad::stepglb::kicad_mac_clis().into_iter().map(PathBuf::from).find(|p| p.is_file())) {
             let out = crate::proc::std_cmd(crate::proc::Kind::Local, &cli).arg("--version").stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null()).output().ok();
             h.kicad = match out { Some(o) if o.status.success() => { let v = String::from_utf8_lossy(&o.stdout).trim().to_string(); Kicad { status: if v.contains("-bp.") { "ok" } else { "stock" }.into(), cli: cli.to_string_lossy().into_owned(), version: v, commit: std::env::var("BACKPLANE_KICAD_COMMIT").unwrap_or_default(), why: String::new() } }
                 _ => Kicad { status: "broken".into(), cli: cli.to_string_lossy().into_owned(), why: "it does not run".into(), ..Default::default() } };
