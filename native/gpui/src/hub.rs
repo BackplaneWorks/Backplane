@@ -195,7 +195,18 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                     let timing=Timing{rtt_ms,decode_ms,process_ms,bytes:size,delta:is_delta};
                     let rv=r;let r=&rv;
                     if target!=v.target||revision!=v.revision {
-                        eprintln!("GPUI_LOG {{\"stale_reply\":{{\"method\":\"{method}\",\"same_target\":{},\"reply_rev\":{revision},\"now_rev\":{}}}}}",target==v.target,v.revision);
+                        // The reply is stale for drawing (the hub moved on while it was in flight) but its commands are what the person's press asked for: they still go out, once.
+                        if method=="view.action" && r["version"]==1 && r["hub"]==v.hub && r["generation"]==v.greeting["generation"] && r["epoch"]==v.greeting["epoch"] {
+                            for command in r["cmds"].as_array().into_iter().flatten() {
+                                if command["type"]!="send" || !(command["hub"].is_null()||command["hub"]==v.hub) {continue;}
+                                let Some(request)=command["text"].as_str().and_then(|t|serde_json::from_str::<Value>(t).ok()) else {continue};
+                                let (Some(rpc_id),m)=(request["id"].as_u64(),request["m"].as_str().unwrap_or("")) else {continue};
+                                if m.starts_with("view.")||rpc_id>=(1<<47) {continue;}
+                                eprintln!("GPUI_LOG {{\"rpc_sent\":\"{m}\",\"thread\":{},\"stale\":true}}",request["p"]["thread"]);
+                                v.outgoing.insert(rpc_id,is_post(m));v.rpc_names.insert(rpc_id,m.to_string());
+                                sink.send(Message::Binary(wire::encode(&request).into())).await?;
+                            }
+                        }
                         v.dirty=true;
                         if let Some(cursor)=paged {
                             let _=events.send(Event::Older(cursor,None)).await;
