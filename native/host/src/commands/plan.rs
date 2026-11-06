@@ -25,6 +25,14 @@ fn s(p: &Value, k: &str, d: &str) -> String { p.get(k).and_then(Value::as_str).u
 /// J.Json.get_nat: a number, or a string of digits, else the default.
 fn nat(p: &Value, k: &str) -> u64 { match p.get(k) { Some(Value::Number(n)) => n.as_u64().unwrap_or(0), Some(Value::String(t)) => t.parse().unwrap_or(0), _ => 0 } }
 fn done(events: Vec<Value>, id: &Value) -> Option<Plan> { Some(Plan { events, reply: ok(id), stop: None, wt: None, scratch: None, act: None }) }
+/// Merge.found: the events that settle a thread whose branch is merged, once (none when it is not due).
+pub fn merged(f: &Fold, th: &str, url: &str, at: u64) -> Vec<Value> {
+    let t = f.threads.get(th).cloned().unwrap_or_default();
+    let shelf_ok = !(t.deleted || t.archived) && t.forced != 1 && (t.pinned || t.forced == 2 || t.settled_at <= t.unsettled_at);
+    if !(shelf_ok && !t.branch.is_empty() && f.setting(&format!("merged.{th}")).is_empty()) { return vec![] }
+    vec![json!({"$":"ThreadMerged","id":th,"url":url,"at":at}),
+        json!({"$":"ActivityLogged","thread":th,"act":hub_id("g", at, f.n()),"tone":"info","kind":"git","summary":format!("merged{}", if url.is_empty() { String::new() } else { format!(": {url}") }),"at":at})]
+}
 pub fn hub_id(prefix: &str, at: u64, seq: usize) -> String { format!("{prefix}{at}-{seq}") }
 
 /// Whether a thread's snooze is still on at `now` (M.Snooze.on).
@@ -190,15 +198,7 @@ fn plan_inner(f: &Fold, at: u64, id: &Value, method: &str, p: &Value, cx: &Ctx) 
             done(ev, id)
         }
         // Merge.found: gh saw the thread's branch merged; it settles, once. (Policy.merged's alert record is not written: the notification records are not ported.)
-        "thread.merged" => {
-            let t = f.threads.get(&th).cloned().unwrap_or_default();
-            let shelf_ok = !(t.deleted || t.archived) && t.forced != 1 && (t.pinned || t.forced == 2 || t.settled_at <= t.unsettled_at);
-            let due = shelf_ok && !t.branch.is_empty() && f.setting(&format!("merged.{th}")).is_empty();
-            if !due { return done(vec![], id) }
-            let url = s(p, "url", "");
-            done(vec![json!({"$":"ThreadMerged","id":th,"url":url,"at":at}),
-                json!({"$":"ActivityLogged","thread":th,"act":hub_id("g", at, f.n()),"tone":"info","kind":"git","summary":format!("merged{}", if url.is_empty() { String::new() } else { format!(": {url}") }),"at":at})], id)
-        }
+        "thread.merged" => done(merged(f, &th, &s(p, "url", ""), at), id),
         "project.start" => start(f, at, id, p),
         // Queue.steer: a queued message sent now (into the running turn, or as a turn of its own); the agents module runs it
         "queue.steer" => {
