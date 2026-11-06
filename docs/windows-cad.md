@@ -5,18 +5,16 @@ Cygwin shell for subprocesses. KiCad, FreeCAD and the Bun helpers are native
 Windows programs. Filesystem paths cross that boundary explicitly; message
 text is never rewritten globally.
 
-Build the two native helpers from Linux with Bun 1.4.3 or newer:
+Build the native helper from Linux with Bun 1.4.3 or newer:
 
 ```sh
 BUN=/path/to/bun scripts/build-windows-helpers.sh
 ```
 
 `build/windows-helpers/` contains `backplane-step2glb.exe`,
-`backplane-kipc.exe`, dependency licenses and a checksum manifest. Keep both
-helpers beside `backplane.exe`, and ship the license directory with them.
-The KiCad helper loads the selected runtime's `nng.dll` from its `bin` or
-`lib` directory and uses that runtime's descriptor set. A separate system
-NNG installation is unnecessary.
+a dependency license and a checksum manifest. Keep the helper beside
+`backplane.exe`, and ship the license directory with it.
+The hub speaks KiCad's IPC itself (no KiCad helper): pure-Rust nng and protobuf, with the selected runtime's descriptor set.
 
 Set `BACKPLANE_KICAD` to the Backplane KiCad runtime root or its
 `bin/kicad-cli.exe`; a stock KiCad installation does not provide all of
@@ -71,14 +69,7 @@ files belong in an isolated acceptance directory. Test the resulting STEP
 with the native helper on Windows. Linux output does not establish Windows
 acceptance.
 
-Run the compiled helper's Windows Worker/error-path check with Cygwin Python:
-
-```sh
-python3 test/tools/windows-kipc.py /path/to/backplane-kipc.exe
-```
-
-This checks the real bundled Worker and a missing-runtime error; it does not
-claim a working KiCad server. After creating the orange FreeCAD STEP fixture,
+After creating the orange FreeCAD STEP fixture,
 exercise the GUI fallback and process/pipe completion with:
 
 ```sh

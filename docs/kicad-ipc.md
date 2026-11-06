@@ -42,15 +42,12 @@ unknown/new commands require the write choice too, including unknown commands
 whose names merely start with Get or List.
 
 The exact read-only allowlist is `Project.reads` in
-`src/core/kicad-project`. It matches full protobuf type names, including
+`kicad/project.rs`. It matches full protobuf type names, including
 legacy board/schematic GetItems spellings; an unknown namespace is not allowed
 merely because its command has a familiar leaf name.
 
-Regression coverage: `test/kicad_project_test`,
-`test/kicad_copy_ui_test`, `test/tools/kicad_project_test.py` and
-`test/tools/kicad_project_e2e.ts`. The filesystem tests use actual linked Git
-worktrees, including nested project folders and separate Git metadata; the
-integration test records launch and IPC-helper requests without a real GUI.
+Regression coverage: the tests in `kicad/project.rs`. The filesystem tests use actual linked Git
+worktrees, including nested project folders and separate Git metadata.
 
 Agents edit boards and schematics through the hub, not by starting their own KiCad. The hub runs one
 headless `kicad-cli api-server` per project and sends commands to it over KiCad's IPC API (nng and
@@ -59,22 +56,23 @@ fallback says so in the tool result.
 
 ## Pieces
 
-- `src/core/kserve` (pure, laws `kserve_*`): `KS.dir` (`$XDG_RUNTIME_DIR/backplane/kicad/<digest>`,
-  else `<home>/run/kicad/<digest>`, one directory per project), `KS.argv` (`--socket <dir>/api.sock`,
-  `--parent-pid <hub>`, `--idle-exit 600` when the runtime has `idle-exit`), `KS.ready` (the
-  `KiCad API server listening at <path>` line), `KS.version_ok` (full version ends in the manifest's
-  `-bp.N`), `KS.retry` (1, 5, 30 s within 300 s, then give up), `KS.plan` / `KS.evict` (two servers at
-  most), `KS.headless_refused` (selection, view state, `RunAction`, ... answered by the hub at once).
-- `src/server/kserve`: the actor. A request for a project waits while its server starts (spawn,
+All in `native/host/src/kicad/`:
+
+- `kserve.rs` (pure rules): the project's socket directory (`$XDG_RUNTIME_DIR/backplane/kicad/<digest>`,
+  else `<home>/run/kicad/<digest>`, one per project), `argv` (`--socket <dir>/api.sock`,
+  `--parent-pid <hub>`, `--idle-exit 600` when the runtime has `idle-exit`), the ready line
+  (`KiCad API server listening at <path>`), the `-bp.N` version check, `retry` (1, 5, 30 s within 300 s,
+  then give up), `plan` / eviction (two servers at most), `headless_refused` (selection, view state,
+  `RunAction`, ... answered by the hub at once) and `guard`.
+- `ipc.rs`: the actor. A request for a project waits while its server starts (spawn,
   ready line within 30 s, `Ping`, `GetVersion`) and goes out when it is ready. A third project asks the
   least recently used server to `kiapi.backplane.Shutdown` first (only when the runtime lists `shutdown`).
   The servers' state is the info key `kicad.ipc.servers` (`project|state|why`, one line each); Settings
   shows it under the KiCad IPC row, and a `failed` server is a notice with Retry (`kicad.retry`).
-- `tools/kipc/` (`backplane-kipc`, Bun): NDJSON on stdin/stdout. `{"id","sock","type","message"}` is a
-  command; `{"id","op":"spawn","key","argv"}` starts a server and reports `{"event":"line"}` and
-  `{"event":"exit"}`; `{"id","op":"close","sock"}` drops a connection. libnng comes from the runtime's
-  `lib/`, then the system; the schema from the runtime's descriptor set (`--desc`, per request `desc`);
-  without one only `Ping` and `GetVersion` work.
+- `kipc.rs` over `nng.rs` and `proto.rs`: the transport, in process. Pure-Rust nng and protobuf (the schema
+  from the runtime's descriptor set; without one only `Ping` and `GetVersion` work). One task per socket
+  owns its connection; a fresh socket in the project's private directory counts as readiness, including
+  KiCad's `api-<pid>.sock` fallback. There is no helper process.
 - MCP: `kicad_ipc {path, type, message}` and `kicad_ipc_status {path}`.
 
 ## Rules
@@ -102,21 +100,14 @@ fallback says so in the tool result.
   symbol with only a library id makes an empty symbol, so it is refused unless the runtime lists `symbol-from-libid`:
   `LoadAllLibraries`, wait for `GetLibraryStatuses`, then `PlaceSymbolFromLibrary`.
 
-Test: `bun test/tools/kicad_ipc_e2e.ts` (a stub server stands in for KiCad), `bun tools/kipc/test/kipc.ts`.
+Test: `cd native/host && cargo test kicad::` (a stand-in server stands in for KiCad); `sh test/files/boat-kipc-job.sh` runs the transport probe too.
 
 ## Real runtime e2e
 
-`test/tools/kicad_ipc_real_e2e.ts` runs the whole path against a real Backplane KiCad: a hub on a free port and a temp
-home, the real `backplane-kipc`, the demo `ecc83` copied from the runtime, and only the hub's MCP tools.
-
-```sh
-bun test/tools/kicad_ipc_real_e2e.ts build/backplane-serve build/wire /path/to/backplane-kicad-linux-x86_64-10.99.0-bp.4
-```
-
-Without a runtime (or without `bin/kicad-cli` in it) it prints `skipped: no runtime` and exits 0. It checks health and
-status, footprint/pad/3D-model counts, an edit saved and reloaded, a partial footprint update preserving contents and attributes, a netlist import, symbols
-placed and created from library IDs without bulk preload, a rolled-back commit and the server's argv. Each check is an `ok`/`FAIL` line. It stops the hub
-it started; the KiCad server ends with it (`--parent-pid`).
+`test/files/kipc_hub_e2e.mjs` runs the whole path against a real Backplane KiCad: a hub on a free port and a temp
+home, the demo `ecc83` copied from the runtime, a stand-in agent and only the hub's MCP tools
+(`bun test/files/kipc_hub_e2e.mjs HUB RUNTIME PORT WORK`). It checks the answers, that no Bun or JS process is in the
+hub's tree, and that the server ends with the hub (`--parent-pid`).
 
 Health caches are checked against the current minimum even after an app update. Their file stamps cover the selected
 runtime and candidates ahead of it; adding unrelated PATH entries after it does not invalidate healthy startup state.
@@ -127,11 +118,9 @@ are accepted. Symbol libraries load on demand; agents need no blanket library pr
 The installer checks the pinned bp.4 asset against both the release SHA256SUMS and the verified SHA-256
 `f60a71817d057f9dcf3faef632b2f85d06a613108dee23807c9de81aae97e0b4`.
 
-KiCad can buffer its ready line until exit when stdout is a pipe. The helper discovers a fresh socket in the
+KiCad can buffer its ready line until exit when stdout is a pipe. The hub discovers a fresh socket in the
 project's private socket directory, including KiCad's `api-<pid>.sock` fallback, and the hub then requires Ping
 and a matching version. Sockets present before launch never count as readiness for that launch.
-`bun tools/kipc/test/readiness.ts` checks buffered readiness with a fresh requested socket, an occupied requested
-path plus a new alternate, and an occupied path with no new socket.
 
 When the pinned managed install is absent, discovery retains other installed versions as newest-first fallbacks.
 An old install therefore reports old and offers Update; the pinned directory appearing invalidates the health cache
