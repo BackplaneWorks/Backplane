@@ -35,7 +35,7 @@ fn parse() -> std::result::Result<Args, i32> {
     let a: Vec<String> = std::env::args().skip(1).collect();
     let (mut home, mut port, mut host, mut window) = (None, None, "127.0.0.1".to_string(), None::<PathBuf>);
     let (mut no_tailscale, mut https, mut only) = (false, false, false);
-    let (mut version, mut commit) = (env!("CARGO_PKG_VERSION").to_string(), std::env::var("BACKPLANE_COMMIT").unwrap_or_else(|_| "unknown".into()));
+    let (mut version, mut commit) = (env!("CARGO_PKG_VERSION").to_string(), std::env::var("BACKPLANE_COMMIT").unwrap_or_else(|_| option_env!("BACKPLANE_COMMIT").unwrap_or("unknown").into())); // a launch can name it; a build stamps it (BACKPLANE_COMMIT at compile time)
     let mut i = 0;
     while i < a.len() {
         let value = |i: usize| a.get(i + 1).cloned().ok_or_else(|| { eprint!("{USAGE}"); 2 });

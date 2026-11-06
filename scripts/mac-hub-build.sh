@@ -9,7 +9,9 @@ HOST=${MAC_HOST:-hs-mac-mini}; DEST=bp-e2e
 SSH="ssh -o BatchMode=yes"; [ -f "$ROOT/build/gpui/mac-ssh" ] && SSH="$ROOT/build/gpui/mac-ssh"
 $SSH $HOST "mkdir -p ~/$DEST/src ~/$DEST/dist ~/$DEST/logs"
 git -C "$ROOT" archive --format=tar HEAD native assets docs test i18n | $SSH $HOST "rm -rf ~/$DEST/src && mkdir -p ~/$DEST/src && tar -x -C ~/$DEST/src"
-$SSH $HOST "lockf -k /tmp/bp-mac-heavy.lockf sh -s" -- "$WHAT" "$TEST" <<'REMOTE'
+# the Mac gets no .git: stamp the commit into the binary (BP_COMMIT overrides; /hello then reports it)
+COMMIT=${BP_COMMIT:-$(git -C "$ROOT" rev-parse --short=10 HEAD)}
+$SSH $HOST "lockf -k /tmp/bp-mac-heavy.lockf sh -s" -- "$WHAT" "${TEST:--}" "$COMMIT" <<'REMOTE'
 set -eu
 WHAT=${1:-both}; TEST=${2:-}
 while ! mkdir /tmp/bp-mac-heavy.lock 2>/dev/null; do sleep 20; done; trap 'rmdir /tmp/bp-mac-heavy.lock' EXIT
