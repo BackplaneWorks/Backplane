@@ -267,7 +267,11 @@ fn newest_in(dir: &Path) -> Vec<PathBuf> {
 /// The runtime to use (Rt.candidates, trimmed): the `kicad.path` setting, BACKPLANE_KICAD_CLI, beside the hub, the install directories (newest first), PATH.
 pub async fn runtime(hub: &Arc<Hub>) -> Env {
     let mut c: Vec<PathBuf> = vec![];
-    if let Some(s) = hub.setting("kicad.path").await.filter(|s| !s.is_empty()) { c.push(s.into()) }
+    if let Some(s) = hub.setting("kicad.path").await.filter(|s| !s.is_empty()) {
+        // the field takes the command line itself, or a folder that holds it (an install's bin/, or a macOS KiCad.app)
+        let p = PathBuf::from(&s);
+        if p.is_dir() { for r in ["kicad-cli", "bin/kicad-cli", "Contents/MacOS/kicad-cli", "KiCad.app/Contents/MacOS/kicad-cli"] { c.push(p.join(r)) } } else { c.push(p) }
+    }
     if let Some(s) = std::env::var_os("BACKPLANE_KICAD_CLI").filter(|s| !s.is_empty()) { c.push(s.into()) }
     if let Some(d) = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("kicad/bin/kicad-cli"))) { c.push(d) }
     let home = std::env::var("HOME").unwrap_or_default();
@@ -275,6 +279,7 @@ pub async fn runtime(hub: &Arc<Hub>) -> Env {
     for d in [PathBuf::from(&data).join("backplane/kicad"), PathBuf::from(&home).join(".backplane-bend/kicad"), hub.cfg.home.join("kicad")] { c.extend(newest_in(&d)) }
     for d in std::env::var("PATH").unwrap_or_default().split(':').filter(|d| !d.is_empty()) { c.push(Path::new(d).join("kicad-cli")) }
     c.push("/usr/bin/kicad-cli".into());
+    c.extend(super::stepglb::kicad_mac_clis().into_iter().map(PathBuf::from)); // macOS: the app bundle, system-wide or in ~/Applications
     match c.into_iter().find(|p| p.is_file()) { Some(p) => read_runtime(&p), None => Env { status: "missing".into(), ..Default::default() } }
 }
 /// Rt.manifest + KH.status from the runtime's manifest.json (no version probe: `runs` is taken as true when a manifest is read).
