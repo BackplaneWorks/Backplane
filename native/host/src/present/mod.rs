@@ -12,6 +12,7 @@ pub mod viewer;
 pub mod settings;
 pub mod botforms;
 pub mod ready;
+pub mod badge;
 mod refusal;
 pub mod tz;
 pub mod window;

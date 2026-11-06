@@ -448,8 +448,9 @@ final class DataClient {
             else if let t = r.thread { upsert(t) }
         } catch { failure = error.localizedDescription }
     }
-    func projectAct(_ id: String, _ action: String, title: String = "") async {
-        var p: [String: Any] = ["project": id, "action": action]; if !title.isEmpty { p["title"] = title }
+    func badgeList() async -> DBadgeList? { try? await call("badge.list") }
+    func projectAct(_ id: String, _ action: String, title: String = "", value: String = "") async {
+        var p: [String: Any] = ["project": id, "action": action]; if !title.isEmpty { p["title"] = title }; if !value.isEmpty { p["value"] = value }
         do {
             _ = try await call("project.act", p, as: DEmpty.self)
             if action == "remove" { projects.removeAll { $0.id == id }; threads.removeAll { $0.project == id }; scheduleSave() } else { await refresh() }

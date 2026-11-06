@@ -298,11 +298,14 @@ pub fn recent(st: &State,p: &Value) -> Option<Value> {
             (indices,pager)
         })?;
         let icon=setting(st,&format!("project.icon.{owner}"));
-        if ["folder","circuit-board","cpu","zap","radio","box","layers","code","terminal","globe","wrench","flask-conical","book","star"].contains(&icon) { project["icon"]=json!(icon); }
+        project["icon"]=json!(super::badge::icon_of(icon));
+        let color=super::badge::color_of(setting(st,&format!("project.color.{owner}")),owner);
+        project["color"]=json!(color); project["css"]=json!(super::badge::css_of(color));
+        if text(&session["drafts"],"@look")==owner { project["look"]=super::badge::editor(owner,setting(st,&format!("project.color.{owner}")),icon); }
         Some(project)
     }).collect();
     let ren=text(&session["drafts"],"@ren");
-    let renaming=if ren.is_empty() || text(&session["drafts"],"@ren.inline")=="1" { Value::Null }else{json!({"id":format!("{hub}|{ren}"),"title":"Rename thread","text":text(&session["drafts"],"@f.title"),"yes":"Rename","no":"Cancel"})};
+    let renaming=if ren.is_empty() || text(&session["drafts"],"@ren.inline")=="1" { Value::Null }else{json!({"id":format!("{hub}|{ren}"),"title":if text(&session["drafts"],"@ren.kind")=="project" {"Rename project"} else {"Rename thread"},"text":text(&session["drafts"],"@f.title"),"yes":"Rename","no":"Cancel"})};
     let del=text(&session["drafts"],"@del");
     let deleting=if del.is_empty() { Value::Null }else{json!({"id":if del.contains('|'){del.to_string()}else{format!("{hub}|{del}")},"title":"Delete thread","body":st.threads.get(del.strip_prefix(&format!("{hub}|" )).unwrap_or(del)).map(|t|t.title.as_str()).unwrap_or(""),"yes":"Delete","no":"Cancel"})};
     let pages=json!([{"version":1,"hub":hub,"projects":projects_page,"active":null,"legacy":null}]);
@@ -363,7 +366,9 @@ mod tests {
         let expected=&frames[7]["json"]["result"];
         let mut p=frames[3]["json"]["p"].clone();
         p["viewId"]=expected["viewId"].clone(); p["revision"]=json!(st.seq); p["now"]=json!(now*1000); p["nativeKey"]=json!("00112233445566778899aabbccddeeff");
-        let actual=recent(&st,&p).expect("recorded recent request is ported");
+        let mut actual=recent(&st,&p).expect("recorded recent request is ported");
+        // approved difference: a project carries its badge colour (`color`, `css`; present/badge.rs), which 0.14's recording does not have
+        for path in ["/shown/projects","/overlay/j/projects"] { for pr in actual.pointer_mut(path).and_then(|v| v.as_array_mut()).into_iter().flatten() { if let Some(o)=pr.as_object_mut() { o.remove("color"); o.remove("css"); } } }
         let mut shown=expected["shown"].clone(); retain_root(&mut shown,OMITTED);
         assert_eq!(actual["shown"],shown,"retained GPUI shown fields differ (no value normalisations)");
         let mut overlay=expected["overlay"].clone(); retain_root(&mut overlay["j"],OVERLAY_OMITTED);
@@ -419,9 +424,15 @@ mod state_tests {
             json!({"$":"RoomSet","id":"dm:a:b","name":"Direct","members":"b\nother","at":3}),
             json!({"$":"SettingSet","key":"ui.theme","value":"light","at":4}),
             json!({"$":"SettingSet","key":"project.icon.p","value":"cpu","at":4}),
+            json!({"$":"SettingSet","key":"project.color.p","value":"pink","at":4}),
             json!({"$":"SettingSet","key":"ride.t","value":"not kept","at":4})] { event(&mut st,e); }
         let v=recent(&st,&params()).unwrap(); let s=&v["shown"];
         assert_eq!(s["theme"],"light"); assert_eq!(s["projects"][0]["icon"],"cpu");
+        assert_eq!((s["projects"][0]["color"].as_str(),s["projects"][0]["css"].as_str()),(Some("pink"),Some("#e06fb4")));
+        assert!(s["projects"][0].get("look").is_none(),"the editor is shut");
+        let mut open=params(); open["session"]["drafts"]["@look"]=json!("p");
+        let e=&recent(&st,&open).unwrap()["shown"]["projects"][0]["look"];
+        assert_eq!(e["colors"].as_array().unwrap().iter().find(|c|c["on"]==true).unwrap()["label"],"pink"); assert_eq!(e["icons"].as_array().unwrap().iter().find(|c|c["on"]==true).unwrap()["value"],"project.icon.p=cpu");
         assert_eq!(s["bots"][0]["id"],"h|b"); assert_eq!(s["bots"][0]["name"],"Cat"); assert_eq!(s["bots"][0]["look"],42);
         assert_eq!(s["rooms"].as_array().unwrap().len(),1); assert_eq!(s["rooms"][0]["members"],2);
         assert!(!st.settings.contains_key("ride.t") && st.entries.is_empty());

@@ -14,6 +14,7 @@ struct DataThreadActions: View {
             Button(thread.pinned ? "Unpin" : "Pin", systemImage: thread.pinned ? "pin.slash" : "pin") { Task { await client.threadAct(thread.id, thread.pinned ? "unpin" : "pin") } }
             Button(thread.settled ? "Unsettle" : "Settle", systemImage: "checkmark.circle") { Task { await client.threadAct(thread.id, thread.settled ? "unsettle" : "settle") } }
             Button(thread.archived ? "Unarchive" : "Archive", systemImage: "archivebox") { Task { await client.threadAct(thread.id, thread.archived ? "unarchive" : "archive") } }
+            if !thread.parent.isEmpty { Button("Move to top level", systemImage: "arrow.up.left") { Task { await client.threadAct(thread.id, "detach") } } }
             Button("Rename", systemImage: "pencil") { renaming = thread }
             Button("Delete…", systemImage: "trash", role: .destructive) { deleting = thread }
         }
@@ -182,5 +183,72 @@ struct DataRoomView: View {
         .background(BackplaneDesign.background)
         .dataBar("#" + room.name)
         .task { while !Task.isCancelled { posts = await client.roomPosts(room.id); try? await Task.sleep(for: .seconds(2.5)) } }
+    }
+}
+
+/// The SF Symbol drawn for a project's icon name (the hub's list, present/badge.rs); anything else is the folder.
+func dataBadgeSymbol(_ icon: String) -> String {
+    switch icon {
+    case "circuit-board": "cpu.fill"
+    case "cpu": "cpu"
+    case "zap": "bolt"
+    case "radio": "antenna.radiowaves.left.and.right"
+    case "box": "shippingbox"
+    case "layers": "square.3.layers.3d"
+    case "code": "chevron.left.forwardslash.chevron.right"
+    case "terminal": "terminal"
+    case "globe": "globe"
+    case "wrench": "wrench"
+    case "flask-conical": "flask"
+    case "book": "book"
+    case "star": "star"
+    default: "folder"
+    }
+}
+
+/// A project's badge: the hub's tints and icons (`badge.list`); a press is `project.act color|icon`.
+struct DataBadgeSheet: View {
+    let client: DataClient
+    let project: DProject
+    @State private var list: DBadgeList?
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        NavigationStack {
+            Form {
+                if let l = list {
+                    Section("Colour") {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 40))], spacing: 12) {
+                            ForEach(l.colors, id: \.name) { t in
+                                Button { Task { await client.projectAct(project.id, "color", value: t.name) } } label: {
+                                    Rectangle().fill(Color(css: t.css) ?? .gray).frame(width: 32, height: 32)
+                                        .overlay(Rectangle().stroke(t.css.caseInsensitiveCompare(project.css) == .orderedSame ? Color.primary : .clear, lineWidth: 2))
+                                }.buttonStyle(.plain).accessibilityIdentifier("badge.color." + t.name)
+                            }
+                        }
+                    }
+                    Section("Icon") {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 40))], spacing: 12) {
+                            ForEach(l.icons, id: \.self) { n in
+                                Button { Task { await client.projectAct(project.id, "icon", value: n) } } label: {
+                                    Image(systemName: dataBadgeSymbol(n)).frame(width: 32, height: 32)
+                                        .overlay(Rectangle().stroke(n == project.icon ? Color.primary : .clear, lineWidth: 2))
+                                }.buttonStyle(.plain).accessibilityIdentifier("badge.icon." + n)
+                            }
+                        }
+                    }
+                } else { ProgressView() }
+            }
+            .navigationTitle(project.title).navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+        }
+        .task { list = await client.badgeList() }
+    }
+}
+
+extension Color {
+    /// "#rrggbb" as a colour; nil for anything else.
+    init?(css: String) {
+        guard css.hasPrefix("#"), css.count == 7, let v = UInt32(css.dropFirst(), radix: 16) else { return nil }
+        self.init(red: Double((v >> 16) & 255) / 255, green: Double((v >> 8) & 255) / 255, blue: Double(v & 255) / 255)
     }
 }

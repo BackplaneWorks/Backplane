@@ -6,6 +6,7 @@ pub mod attach;
 pub mod desk;
 pub mod devbar;
 pub mod ctxmenu;
+pub mod badge;
 pub mod bar;
 pub mod blink;
 pub mod bots;

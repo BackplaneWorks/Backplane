@@ -58,6 +58,8 @@ fn flags(hub: &Hub, id: &str) -> (bool, bool) {
     let _ = hub;
     crate::statehost::policies().and_then(|p| p.with_state(|st| st.threads.get(id).map(|t| (t.pinned, t.settled_at > t.unsettled_at)))).flatten().unwrap_or((false, false))
 }
+/// A setting of the policy state ("" when unset or the state is not up).
+fn setting_of(k: &str) -> String { crate::statehost::policies().and_then(|p| p.with_state(|st| st.settings.get(k).cloned())).flatten().unwrap_or_default() }
 fn thread_json(hub: &Hub, m: &crate::model::Model, id: &str, asks: &HashMap<String, u64>) -> Option<Value> {
     let t = m.threads.get(id).filter(|t| !t.deleted)?;
     let waiting = asks.get(id).copied().unwrap_or(0);
@@ -69,7 +71,7 @@ fn thread_json(hub: &Hub, m: &crate::model::Model, id: &str, asks: &HashMap<Stri
     let (model, effort, runtime) = crate::statehost::policies().and_then(|p| p.with_state(|st| (st.threads.get(id).map_or(String::new(), |t| t.model.clone()), st.settings.get(&format!("effort.{id}")).cloned().unwrap_or_default(), st.runtime.get(id).cloned().unwrap_or_default()))).unwrap_or_default();
     let model = if model.is_empty() { t.model.clone() } else { model };
     Some(json!({"id":id,"project":t.project,"title":t.title,"state":state,"updatedAt":ms(t.activity.max(t.created)),"pinned":pinned,"settled":settled,"archived":t.archived,
-        "provider":t.provider,"model":model,"effort":effort,"runtime":runtime,"chip":ext::chip(&t.provider, &model, &effort),"preview":preview,"waiting":waiting}))
+        "provider":t.provider,"model":model,"effort":effort,"runtime":runtime,"chip":ext::chip(&t.provider, &model, &effort),"preview":preview,"waiting":waiting,"parent":setting_of(&format!("thread.parent.{id}"))}))
 }
 fn project_json(m: &crate::model::Model, id: &str, asks: &HashMap<String, u64>) -> Option<Value> {
     let p = m.projects.get(id).filter(|p| !p.removed)?;
@@ -77,7 +79,9 @@ fn project_json(m: &crate::model::Model, id: &str, asks: &HashMap<String, u64>) 
     let count = ts.iter().filter(|(_, t)| !t.archived).count();
     let updated = ts.iter().map(|(_, t)| t.activity.max(t.created)).max().unwrap_or(0);
     let waiting: u64 = ts.iter().map(|(i, _)| asks.get(*i).copied().unwrap_or(0)).sum();
-    Some(json!({"id":id,"title":p.title,"root":p.root,"threadCount":count,"updatedAt":ms(updated),"waiting":waiting}))
+    let color = crate::present::badge::color_of(&setting_of(&format!("project.color.{id}")), id).to_string();
+    Some(json!({"id":id,"title":p.title,"root":p.root,"threadCount":count,"updatedAt":ms(updated),"waiting":waiting,
+        "icon":crate::present::badge::icon_of(&setting_of(&format!("project.icon.{id}"))),"css":crate::present::badge::css_of(&color),"color":color}))
 }
 /// A cursor is "<updatedAt>:<id>" over a list sorted newest first, ties by id.
 fn page_of(mut items: Vec<(u64, String, Value)>, limit: usize, before: &str) -> (Vec<Value>, Value) {

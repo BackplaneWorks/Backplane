@@ -49,6 +49,7 @@ struct DataThreadsView: View {
     @State private var deleting: DThread?
     @State private var projectMenu: DProject?
     @State private var renamingProject: DProject?
+    @State private var badgeProject: DProject?
     @State private var projectTitle = ""
     @State private var shut = Set(UserDefaults.standard.stringArray(forKey: "data.projects.shut") ?? [])
     @State private var settledOpen: Set<String> = []
@@ -103,6 +104,7 @@ struct DataThreadsView: View {
             Button("Keep it", role: .cancel) {}
         }
         .sheet(isPresented: $addingProject) { DataNewProjectSheet(client: client) }
+        .sheet(item: $badgeProject) { DataBadgeSheet(client: client, project: $0) }
         .sheet(item: Binding(get: { newThread.map { Wrapped(id: $0) } }, set: { newThread = $0?.id })) { w in
             DataNewThreadSheet(client: client, project: w.id) { path.append($0) }
         }
@@ -164,7 +166,7 @@ struct DataThreadsView: View {
             Button { toggle(p) } label: {
                 HStack(spacing: 8) {
                     Image(systemName: shut.contains(p.id) ? "chevron.right" : "chevron.down").font(.system(size: 11)).foregroundStyle(BackplaneDesign.dim).frame(width: 14)
-                    Image(systemName: "folder").font(.system(size: 13)).foregroundStyle(BackplaneDesign.ok)
+                    Image(systemName: dataBadgeSymbol(p.icon)).font(.system(size: 13)).foregroundStyle(Color(css: p.css) ?? BackplaneDesign.ok)
                     Text(p.title.uppercased()).dmono(12).foregroundStyle(BackplaneDesign.dim).lineLimit(1)
                     if p.waiting > 0 { Text("\(p.waiting)").dmono(11, bold: true).foregroundStyle(BackplaneDesign.bad) }
                     Spacer(minLength: 0)
@@ -174,7 +176,7 @@ struct DataThreadsView: View {
                 .buttonStyle(.plain).accessibilityLabel("New thread in \(p.title)").accessibilityIdentifier("data.thread.new." + p.id)
         }
         .padding(.leading, 10).padding(.trailing, 2).dataRow()
-        .contextMenu { if client.has("actions") { Button("Rename", systemImage: "pencil") { projectTitle = p.title; renamingProject = p }; Button("Remove project", systemImage: "trash", role: .destructive) { projectMenu = p } } }
+        .contextMenu { if client.has("actions") { Button("Rename", systemImage: "pencil") { projectTitle = p.title; renamingProject = p }; Button("Badge", systemImage: "paintpalette") { badgeProject = p }; Button("Remove project", systemImage: "trash", role: .destructive) { projectMenu = p } } }
     }
     private func threadRow(_ t: DThread) -> some View {
         Button { path.append(t.id) } label: { DataThreadRow(thread: t) }

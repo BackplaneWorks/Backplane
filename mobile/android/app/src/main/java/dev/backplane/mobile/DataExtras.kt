@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import kotlinx.coroutines.launch
+import org.json.JSONObject
 
 // The data/1 additions on the phone: thread and project actions, search, the model picker, mention popup, bots and rooms (see native/host/src/data/ext.rs).
 
@@ -60,6 +61,7 @@ fun threadActions(t: DThread, rename: () -> Unit, confirmDelete: () -> Unit): Li
     add((if (t.pinned) "Unpin" else "Pin") to { DataClient.threadAct(t.id, if (t.pinned) "unpin" else "pin"); Unit })
     add((if (t.settled) "Unsettle" else "Settle") to { DataClient.threadAct(t.id, if (t.settled) "unsettle" else "settle"); Unit })
     add((if (t.archived) "Unarchive" else "Archive") to { DataClient.threadAct(t.id, if (t.archived) "unarchive" else "archive"); Unit })
+    if (t.parent.isNotEmpty()) add("Move to top level" to { DataClient.threadAct(t.id, "detach"); Unit })
     add("Rename" to rename)
     add("Delete…" to confirmDelete)
 }
@@ -73,11 +75,43 @@ fun ThreadMenus(t: DThread, shown: Boolean, close: () -> Unit, deleted: () -> Un
     if (deleting) ActionSheet("Delete “${t.title}”? This cannot be undone.", listOf("Delete thread" to { DataClient.threadAct(t.id, "delete"); deleted() }, "Keep it" to {}), { deleting = false })
 }
 
+/** A project's badge: the hub's tints and icons (`badge.list`); a press is `project.act color|icon`. */
+@Composable
+fun BadgeSheet(p: DProject, close: () -> Unit) {
+    var list by remember { mutableStateOf<JSONObject?>(null) }
+    LaunchedEffect(p.id) { list = runCatching { DataClient.badgeList() }.getOrNull() }
+    Dialog(onDismissRequest = close) {
+        Column(Modifier.fillMaxWidth().background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(12.dp).testTag("badge.sheet"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            DMono(p.title, dcs.onSurfaceVariant, 11)
+            val l = list
+            if (l == null) DMono("loading…", dcs.onSurfaceVariant, 11)
+            else {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val cs = l.optJSONArray("colors"); (0 until (cs?.length() ?: 0)).map { cs!!.getJSONObject(it).let { c -> c.optString("name") to c.optString("css") } }.forEach { (name, css) ->
+                        val on = css.equals(p.css, ignoreCase = true)
+                        Box(Modifier.size(24.dp).background(runCatching { Color(android.graphics.Color.parseColor(css)) }.getOrDefault(dcs.onSurfaceVariant))
+                            .border(BorderStroke(if (on) 2.dp else 0.dp, dcs.onSurface)).clickable { DataClient.projectAct(p.id, "color", value = name) }.testTag("badge.color.$name"))
+                    }
+                }
+                val ia = l.optJSONArray("icons"); val icons = (0 until (ia?.length() ?: 0)).map { ia!!.optString(it) }
+                icons.chunked(3).forEach { row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        row.forEach { n -> DMono((if (n == p.icon) "● " else "○ ") + n, dcs.onSurface, 12, Modifier.weight(1f).clickable { DataClient.projectAct(p.id, "icon", value = n) }.padding(vertical = 4.dp).testTag("badge.icon.$n")) }
+                    }
+                }
+            }
+            DBtn("Close", false, onClick = close)
+        }
+    }
+}
+
 @Composable
 fun ProjectMenus(p: DProject, shown: Boolean, close: () -> Unit) {
     var renaming by remember(p.id) { mutableStateOf(false) }
     var removing by remember(p.id) { mutableStateOf(false) }
-    if (shown) ActionSheet(p.title, listOf("Rename" to { renaming = true }, "Remove project…" to { removing = true }), close)
+    var badge by remember(p.id) { mutableStateOf(false) }
+    if (shown) ActionSheet(p.title, listOf("Rename" to { renaming = true }, "Badge…" to { badge = true }, "Remove project…" to { removing = true }), close)
+    if (badge) BadgeSheet(p) { badge = false }
     if (renaming) TextPrompt("Rename project", p.title, "Rename", { renaming = false }) { DataClient.projectAct(p.id, "rename", it) }
     if (removing) ActionSheet("Remove “${p.title}” and its threads from the list?", listOf("Remove project" to { DataClient.projectAct(p.id, "remove") }, "Keep it" to {}), { removing = false })
 }
