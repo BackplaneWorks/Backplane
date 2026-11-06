@@ -203,6 +203,7 @@ impl CefPage {
     pub fn script(&mut self, v: &serde_json::Value, cx: &mut Context<Self>) -> serde_json::Value {
         use serde_json::json;
         let Some(t) = self.tab().cloned() else { return json!({"ok": false, "error": "no tab"}) };
+        if let Some(i) = v["tab"].as_u64() { if (i as usize) < self.tabs.len() { self.active = i as usize; self.image = None; if let Some(t) = self.tab() { t.hidden(false); } } cx.notify(); return json!({"ok": true, "tab": i}) }
         if let Some(u) = v["goto"].as_str() { t.navigate(u); return json!({"ok": true, "goto": u}) }
         if let Some(a) = v["click"].as_array() {
             let (x, y) = (a.first().and_then(|n| n.as_f64()).unwrap_or(0.) as i32, a.get(1).and_then(|n| n.as_f64()).unwrap_or(0.) as i32);

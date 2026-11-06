@@ -40,7 +40,7 @@ cat > "$OUT/script.json" <<JSON
  {"type":"$(printf '%s' "$EV" | sed 's/"/\\"/g')"},{"send":true},{"wait":9000},
  {"cef":{"handback":true}},{"wait":1500},{"type":"$(printf '%s' "$EV" | sed 's/"/\\"/g')"},{"send":true},{"wait":9000},{"cef":{"report":true}},
  {"mark":"remote"},{"wait":50000},{"cef":{"report":true}},
- {"cef":{"goto":"http://127.0.0.1:$PPORT/bench.html"}},{"wait":4000},{"cef":{"report":true}},{"wait":3000},{"cef":{"report":true}},{"cef":{"latency":true}},{"wait":1500},{"cef":{"report":true}},{"wait":500}]
+ {"cef":{"tab":0}},{"cef":{"goto":"http://127.0.0.1:$PPORT/bench.html"}},{"wait":4000},{"cef":{"report":true}},{"wait":3000},{"cef":{"report":true}},{"cef":{"latency":true}},{"wait":1500},{"cef":{"report":true}},{"wait":500}]
 JSON
 DISPLAY=$DISP LD_LIBRARY_PATH=$RT BACKPLANE_CEF=$RT BACKPLANE_CEF_CDP_PORT=$CDP BACKPLANE_CEF_NO_GPU=1 BACKPLANE_CEF_TEST_FILE=$HERE/page/test-upload.txt BACKPLANE_CEF_PROFILE=$OUT/profile VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json LP_NUM_THREADS=2 \
   BACKPLANE_GPUI_ASSETS=$MAIN/build/gpui/linux/assets HOME=$OUT/fakehome \
@@ -120,7 +120,7 @@ TD=$(cat "$OUT/home/bots/t1/tasks/.draft.jsonl" 2>/dev/null | head -3)
 echo "$TD" | cut -c1-300
 check "teach mode recorded the native click in the hub's draft" "$(echo "$TD" | grep -q '"do":"click".*Click me' && echo 1 || echo 0)" "$TD"
 # popup keeps its opener
-python3 "$HERE/xinput.py" click $((WX+VX+180)) $((WY+VY+328)); sleep 3
+python3 "$HERE/xinput.py" click $((WX+VX+180)) $((WY+VY+328)); sleep 7
 titles > "$OUT/targets-after-popup.txt"; T5=$(title); check "window.open popup kept its opener (opener title '$T5')" "$([ "$T5" = msg:hi-from-popup ] && echo 1 || echo 0)" "$T5"
 # a real layout change resizes the page: fold the sidebar (the chevron at the window's top left), measured from the change to the first painted frame of the new size
 python3 "$HERE/xinput.py" click 16 59; sleep 1
