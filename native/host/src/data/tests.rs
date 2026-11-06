@@ -1,0 +1,150 @@
+//! The phone data API over a real socket (JSON frames, and CBOR for the default), with fake project/thread handlers that commit what the real ones commit.
+use super::*;
+use crate::api::{Caller, Fut, RpcHandler};
+use crate::hub::Cfg;
+use crate::presenter::Canned;
+use tokio::net::TcpListener;
+use tokio_tungstenite::connect_async;
+
+struct Fake(Arc<Hub>);
+impl RpcHandler for Fake {
+    fn methods(&self) -> &'static [&'static str] { &["project.add", "thread.create", "thread.modes", "ask.answer", "turn.interrupt"] }
+    fn call<'a>(&'a self, h: &'a Arc<Hub>, _w: &'a Caller, id: &'a Value, m: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
+        Box::pin(async move {
+            let _ = &self.0; let at = now_ms() / 1000;
+            let n = h.store.len();
+            match m {
+                "project.add" => { let root = s(p, "path"); h.commit(&json!({"$":"ProjectCreated","id":format!("p{n}"),"title":root.rsplit('/').next().unwrap_or(""),"root":root,"at":at})).await.unwrap(); vec![json!({"t":"reply","id":id,"ok":true})] }
+                "thread.create" => { let t = format!("t{n}"); h.commit(&json!({"$":"ThreadCreated","id":t,"project":s(p,"project"),"title":if s(p,"title").is_empty(){"New thread"}else{s(p,"title")},"env":"local","branch":"","worktree":"","provider":"claude","model":"","at":at})).await.unwrap(); vec![json!({"t":"reply","id":id,"ok":true,"thread":t})] }
+                "ask.answer" => { h.commit(&json!({"$":"AskClosed","id":s(p,"id"),"answer":s(p,"answer"),"at":at})).await.unwrap(); vec![json!({"t":"reply","id":id,"ok":true})] }
+                "thread.modes" | "turn.interrupt" => vec![json!({"t":"reply","id":id,"ok":true})],
+                _ => vec![json!({"t":"reply","id":id,"ok":false,"error":"no"})],
+            }
+        })
+    }
+}
+const LOG: &str = r#"{"$":"ProjectCreated","id":"p1","title":"alpha","root":"/tmp/alpha","at":1700000000}
+{"$":"ProjectCreated","id":"p2","title":"beta","root":"/tmp/beta","at":1700000001}
+{"$":"ThreadCreated","id":"t1","project":"p1","title":"First","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1700000010}
+{"$":"ThreadCreated","id":"t2","project":"p1","title":"Second","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1700000020}
+{"$":"ThreadCreated","id":"t3","project":"p2","title":"Third","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1700000030}
+{"$":"MessagePosted","thread":"t1","msg":"m1","role":"user","text":"hello there","at":1700000011}
+{"$":"MessagePosted","thread":"t1","msg":"m2","role":"assistant","text":"hi, how can I help with this long reply that goes on","at":1700000012}
+{"$":"ActivityLogged","thread":"t1","act":"a1","tone":"tool","kind":"Bash","summary":"ls -la","at":1700000013}
+{"$":"AskOpened","id":"q1","thread":"t1","kind":"approval","tool":"Bash","detail":"rm -rf x","options":"","at":1700000014}
+{"$":"ThreadArchived","id":"t3","archived":true,"at":1700000031}
+"#;
+async fn up(name: &str) -> (Arc<Hub>, u16) {
+    let dir = std::env::temp_dir().join(format!("bp-data-{}-{name}", std::process::id())); let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("token"), "tok").unwrap(); std::fs::write(dir.join("events.jsonl"), LOG).unwrap();
+    let cfg = Cfg { home: dir, version: "0.14.0".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() };
+    let hub = Hub::start(cfg, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+    hub.register_rpc(Arc::new(Fake(hub.clone())));
+    let l = TcpListener::bind("127.0.0.1:0").await.unwrap(); let port = l.local_addr().unwrap().port();
+    { let hub = hub.clone(); tokio::spawn(async move { loop { let (st, _) = l.accept().await.unwrap(); let h = hub.clone(); tokio::spawn(async move { let _ = wire::serve_with(h, st, false).await; }); } }); }
+    (hub, port)
+}
+type Ws = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>;
+async fn open(port: u16, q: &str) -> Ws { connect_async(format!("ws://127.0.0.1:{port}/ws?data=1{q}&token=tok")).await.unwrap().0 }
+async fn next(ws: &mut Ws) -> Value {
+    loop {
+        let m = tokio::time::timeout(Duration::from_secs(5), ws.next()).await.expect("a frame in time").unwrap().unwrap();
+        let v = match m { Message::Text(t) => serde_json::from_str(t.as_str()).unwrap(), Message::Binary(b) => crate::cbor::decode(&b).unwrap(), _ => continue };
+        if v["t"] != "hb" { return v }
+    }
+}
+async fn ask(ws: &mut Ws, id: u64, m: &str, p: Value) -> Value {
+    ws.send(Message::Text(json!({"id":id,"m":m,"p":p}).to_string().into())).await.unwrap();
+    loop { let v = next(ws).await; if v["t"] == "reply" && v["id"] == id { return v } }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_hello_capabilities_and_both_encodings() {
+    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1");
+    let (_h, port) = up("hello").await;
+    let mut ws = open(port, "&enc=json").await; let v = next(&mut ws).await;
+    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
+    // the default is binary CBOR with plain string keys
+    let mut c = open(port, "").await; let m = tokio::time::timeout(Duration::from_secs(5), c.next()).await.unwrap().unwrap().unwrap();
+    let Message::Binary(b) = m else { panic!("binary") }; assert!(b.windows(5).any(|w| w == b"proto"), "plain keys, not the hub's dictionary");
+    assert!(b.windows(6).any(|w| w == b"data/1"), "hello names the protocol"); // (the hub's own decoder reads at most 32-bit widths; `now` is a 64-bit millisecond count)
+    // no credential, no socket
+    assert!(connect_async(format!("ws://127.0.0.1:{port}/ws?data=1&enc=json")).await.is_err());
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_lists_page_newest_first_and_count_what_waits() {
+    let (_h, port) = up("lists").await; let mut ws = open(port, "&enc=json").await; next(&mut ws).await;
+    let r = ask(&mut ws, 1, "projects.list", json!({})).await; let ps = r["result"]["projects"].as_array().unwrap();
+    assert_eq!(ps.iter().map(|p| p["id"].as_str().unwrap()).collect::<Vec<_>>(), ["p2", "p1"].iter().map(|x| *x).collect::<Vec<_>>().iter().map(|x| *x).collect::<Vec<_>>(), "recent first: p2 holds the newest thread");
+    let p1 = ps.iter().find(|p| p["id"] == "p1").unwrap(); assert_eq!((p1["threadCount"].as_u64(), p1["waiting"].as_u64(), p1["root"].as_str()), (Some(2), Some(1), Some("/tmp/alpha")));
+    let r = ask(&mut ws, 2, "threads.list", json!({"limit":1})).await; let ts = &r["result"]["threads"]; assert_eq!(ts[0]["id"], "t2"); let next_c = r["result"]["next"].as_str().unwrap().to_string();
+    let r = ask(&mut ws, 3, "threads.list", json!({"limit":1,"before":next_c})).await; let t = &r["result"]["threads"][0]; assert_eq!(t["id"], "t1"); assert!(r["result"]["next"].is_null());
+    assert_eq!((t["state"].as_str(), t["waiting"].as_u64(), t["preview"].as_str()), (Some("asking"), Some(1), Some("ls -la")), "an open ask makes the thread asking; the preview is the last text");
+    let r = ask(&mut ws, 4, "threads.list", json!({"archived":true})).await; assert_eq!(r["result"]["threads"].as_array().unwrap().len(), 1); assert_eq!(r["result"]["threads"][0]["id"], "t3");
+    let r = ask(&mut ws, 5, "threads.list", json!({"project":"p2"})).await; assert!(r["result"]["threads"].as_array().unwrap().is_empty(), "t3 is archived");
+    let r = ask(&mut ws, 6, "nope", json!({})).await; assert_eq!(r["ok"], false);
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_entries_newest_page_first_with_asks_and_the_live_reply() {
+    let (hub, port) = up("entries").await; let mut ws = open(port, "&enc=json").await; next(&mut ws).await;
+    let r = ask(&mut ws, 1, "thread.entries", json!({"thread":"t1","limit":2})).await; let e = r["result"]["entries"].as_array().unwrap();
+    let kinds: Vec<&str> = e.iter().map(|x| x["kind"].as_str().unwrap()).collect();
+    assert_eq!(kinds, ["assistant", "tool", "ask"], "the newest page, oldest to newest, with the open ask last: {e:?}");
+    assert_eq!(e[1]["tool"], json!({"name":"Bash","summary":"ls -la","state":"done"}));
+    let a = &e[2]["ask"]; assert_eq!((a["id"].as_str(), a["state"].as_str()), (Some("q1"), Some("open"))); assert_eq!(a["options"][0]["id"], "accept"); assert!(a["question"].as_str().unwrap().contains("rm -rf x"));
+    let cursor = r["result"]["next"].as_str().unwrap().to_string();
+    let r = ask(&mut ws, 2, "thread.entries", json!({"thread":"t1","before":cursor})).await; let e = r["result"]["entries"].as_array().unwrap();
+    assert_eq!((e.len(), e[0]["kind"].as_str(), e[0]["text"].as_str()), (1, Some("user"), Some("hello there"))); assert!(r["result"]["next"].is_null());
+    // a late joiner gets the reply so far, marked live
+    hub.live_delta("t1", "partial text").await.unwrap();
+    let r = ask(&mut ws, 3, "thread.entries", json!({"thread":"t1"})).await; let last = r["result"]["entries"].as_array().unwrap().last().unwrap().clone();
+    assert_eq!((last["id"].as_str(), last["live"].as_bool(), last["text"].as_str()), (Some("live:t1"), Some(true), Some("partial text")));
+    assert_eq!(ask(&mut ws, 4, "thread.entries", json!({"thread":"nope"})).await["ok"], false);
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_writes_make_a_project_a_thread_and_a_message_once() {
+    let (hub, port) = up("writes").await; let mut ws = open(port, "&enc=json").await; next(&mut ws).await;
+    let d = ask(&mut ws, 1, "dirs.list", json!({"path":"/"})).await; assert_eq!(d["result"]["path"], "/"); assert!(d["result"]["parent"].is_null()); assert!(!d["result"]["dirs"].as_array().unwrap().is_empty());
+    let dir = std::env::temp_dir().join(format!("bp-data-proj-{}", std::process::id())); std::fs::create_dir_all(&dir).unwrap();
+    let r = ask(&mut ws, 2, "project.add", json!({"path":dir.to_string_lossy()})).await; assert_eq!(r["ok"], true, "{r}");
+    let pid = r["result"]["project"]["id"].as_str().unwrap().to_string();
+    let r = ask(&mut ws, 3, "thread.create", json!({"project":pid,"title":"Mine","text":"first words","permission":"ask"})).await; assert_eq!(r["ok"], true, "{r}");
+    let th = r["result"]["thread"]["id"].as_str().unwrap().to_string(); assert_eq!(r["result"]["thread"]["title"], "Mine");
+    let e = ask(&mut ws, 4, "thread.entries", json!({"thread":th})).await; assert_eq!(e["result"]["entries"][0]["text"], "first words");
+    let a = ask(&mut ws, 5, "message.send", json!({"thread":th,"text":"again","clientId":"c-1"})).await; assert_eq!((a["result"]["entry"]["clientId"].as_str(), a["result"]["entry"]["kind"].as_str()), (Some("c-1"), Some("user")));
+    let b = ask(&mut ws, 6, "message.send", json!({"thread":th,"text":"again","clientId":"c-1"})).await; assert_eq!(a["result"]["entry"], b["result"]["entry"], "the same clientId posts once");
+    let n = ask(&mut ws, 7, "thread.entries", json!({"thread":th})).await["result"]["entries"].as_array().unwrap().iter().filter(|x| x["text"] == "again").count(); assert_eq!(n, 1);
+    assert_eq!(ask(&mut ws, 8, "message.send", json!({"thread":th,"text":"  "})).await["ok"], false);
+    assert_eq!(ask(&mut ws, 9, "ask.answer", json!({"ask":"q1","answer":"accept"})).await["ok"], true);
+    let r = ask(&mut ws, 10, "thread.entries", json!({"thread":"t1"})).await; assert!(r["result"]["entries"].as_array().unwrap().iter().all(|x| x["kind"] != "ask"), "an answered ask is no longer open");
+    let _ = hub;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_subscriptions_push_entries_text_turns_and_list_changes() {
+    let (hub, port) = up("subs").await; let mut ws = open(port, "&enc=json").await; next(&mut ws).await;
+    let lists = ask(&mut ws, 1, "subscribe", json!({"topic":"lists"})).await["result"]["sub"].as_u64().unwrap();
+    let thr = ask(&mut ws, 2, "subscribe", json!({"topic":"thread","thread":"t1"})).await["result"]["sub"].as_u64().unwrap();
+    assert_eq!(ask(&mut ws, 3, "subscribe", json!({"topic":"thread","thread":"zz"})).await["ok"], false);
+    hub.commit(&json!({"$":"TurnChanged","thread":"t1","state":"running","at":1700000100})).await.unwrap();
+    let mut got = vec![]; for _ in 0..2 { got.push(next(&mut ws).await) }
+    assert!(got.iter().any(|v| v["k"] == "turn" && v["sub"] == thr && v["state"] == "working"), "{got:?}");
+    assert!(got.iter().any(|v| v["k"] == "thread" && v["sub"] == lists && v["thread"]["state"] == "asking"), "an open ask outranks a running turn: {got:?}");
+    // streamed text: the live entry first, then the appends, then the final entry replaces it
+    hub.live_delta("t1", "Hel").await.unwrap(); hub.live_delta("t1", "lo").await.unwrap();
+    async fn kind(ws: &mut Ws, k: &str) -> Value { loop { let v = next(ws).await; if v["k"] == k { return v } } } // (the thread's own state pushes come between)
+    let a = kind(&mut ws, "entry").await; assert_eq!((a["k"].as_str(), a["entry"]["id"].as_str(), a["entry"]["live"].as_bool()), (Some("entry"), Some("live:t1"), Some(true)), "{a}");
+    let t1 = kind(&mut ws, "text").await; let t2 = kind(&mut ws, "text").await; assert_eq!((t1["k"].as_str(), t1["append"].as_str(), t2["append"].as_str()), (Some("text"), Some("Hel"), Some("lo")));
+    hub.live_end("t1").await.unwrap();
+    hub.commit(&json!({"$":"MessagePosted","thread":"t1","msg":"m9","role":"assistant","text":"Hello","at":1700000101})).await.unwrap();
+    let f = loop { let v = next(&mut ws).await; if v["k"] == "entry" { break v } };
+    assert_eq!((f["entry"]["id"].as_str(), f["entry"]["replaces"].as_str(), f["entry"]["live"].is_null()), (Some("m9"), Some("live:t1"), true), "{f}");
+    // a new thread and a project reach the lists subscription
+    hub.commit(&json!({"$":"ThreadCreated","id":"t9","project":"p2","title":"Brand new","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1700000200})).await.unwrap();
+    let n = loop { let v = next(&mut ws).await; if v["k"] == "thread" && v["thread"]["id"] == "t9" { break v } }; assert_eq!(n["sub"], lists);
+    hub.commit(&json!({"$":"ThreadDeleted","id":"t9","at":1700000201})).await.unwrap();
+    let g = loop { let v = next(&mut ws).await; if v["k"] == "thread.removed" { break v } }; assert_eq!(g["id"], "t9");
+    assert_eq!(ask(&mut ws, 4, "unsubscribe", json!({"sub":thr})).await["ok"], true);
+    hub.commit(&json!({"$":"MessagePosted","thread":"t1","msg":"m10","role":"user","text":"quiet","at":1700000300})).await.unwrap();
+    hub.commit(&json!({"$":"ThreadCreated","id":"t10","project":"p2","title":"x","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1700000301})).await.unwrap();
+    let v = loop { let v = next(&mut ws).await; if v["k"] == "thread" || v["k"] == "entry" { break v } }; assert_eq!(v["k"], "thread", "no entry push after unsubscribing the thread: {v}");
+}
+#[test] fn data_plain_cbor_has_string_keys_and_the_hubs_decoder_reads_it_back() {
+    let v = json!({"t":"reply","id":7,"ok":true,"result":{"xs":[1,-2,300,70000,"é"],"n":null,"f":false}});
+    let mut o = vec![]; cbor_plain(&v, &mut o); assert_eq!(crate::cbor::decode(&o).unwrap(), v);
+    assert!(o.windows(6).any(|w| w == b"result"));
+}
