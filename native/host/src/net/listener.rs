@@ -29,6 +29,8 @@ pub trait Tailscale: Send + Sync {
     fn status(&self) -> Fut<String>;
     /// `tailscale serve --bg --https=<https> http://127.0.0.1:<port>` (443 unless the test sets another): HTTPS on this node's MagicDNS name, proxied to the hub. Whether it took.
     fn serve(&self, _port: u16, _https: u16) -> Fut<bool> { Box::pin(async { false }) }
+    /// `tailscale serve status --json`: what this node already serves ("" when it cannot be read)
+    fn serve_status(&self) -> Fut<String> { Box::pin(async { String::new() }) }
 }
 pub struct Cli;
 async fn run(args: Vec<String>) -> String {
@@ -45,6 +47,7 @@ impl Tailscale for Cli {
     fn ip4(&self) -> Fut<String> { Box::pin(async { run(vec!["ip".into(), "-4".into()]).await.lines().next().unwrap_or("").trim().to_string() }) }
     fn whois(&self, ip: String) -> Fut<String> { Box::pin(async move { run(vec!["whois".into(), "--json".into(), ip]).await }) }
     fn status(&self) -> Fut<String> { Box::pin(async { run(vec!["status".into(), "--json".into()]).await }) }
+    fn serve_status(&self) -> Fut<String> { Box::pin(async { run(vec!["serve".into(), "status".into(), "--json".into()]).await }) }
 }
 
 /// `--tailscale-https` (server.bend `Tailnet.https`): put the hub behind `tailscale serve` on HTTPS and give a phone that address, which
@@ -59,7 +62,24 @@ pub async fn https(ts: &dyn Tailscale, routes: &AuthRoutes, port: u16, token: &s
     let Some(hp) = https_port_of(v.as_deref()) else { eprintln!("BACKPLANE_HTTPS_PORT={:?} is not a port: no tailscale serve, no https address", v.unwrap_or_default()); return None };
     https_on(ts, routes, port, hp, token).await
 }
+/// Whether the HTTPS port `hp` of `tailscale serve status --json` is already taken by something other than a proxy to this hub (`http://127.0.0.1:<port>`): another
+/// hub's, a dev server's, the person's. Serving on it would replace that mapping, and our later `off` would remove it. Some(what holds it), None when free or ours.
+pub fn serve_taken(status: &str, hp: u16, port: u16) -> Option<String> {
+    let Ok(j) = serde_json::from_str::<serde_json::Value>(status) else { return None };
+    let ours = format!("http://127.0.0.1:{port}");
+    let mut held: Vec<String> = vec![];
+    for (k, v) in j["Web"].as_object().into_iter().flatten() {
+        if k.rsplit(':').next().and_then(|p| p.parse::<u16>().ok()) != Some(hp) { continue }
+        for h in v["Handlers"].as_object().into_iter().flat_map(|m| m.values()) {
+            let what = h["Proxy"].as_str().or(h["Path"].as_str()).or(h["Text"].as_str()).unwrap_or("a handler").to_string();
+            if what != ours { held.push(what) }
+        }
+    }
+    if held.is_empty() && j["TCP"].get(hp.to_string()).is_some() && j["Web"].as_object().map_or(true, |w| !w.keys().any(|k| k.rsplit(':').next().and_then(|p| p.parse::<u16>().ok()) == Some(hp))) { held.push("a TCP forward".into()) }
+    if held.is_empty() { None } else { Some(held.join(", ")) }
+}
 async fn https_on(ts: &dyn Tailscale, routes: &AuthRoutes, port: u16, hp: u16, token: &str) -> Option<String> {
+    if let Some(what) = serve_taken(&ts.serve_status().await, hp, port) { eprintln!("tailscale serve port {hp} is already used here ({what}): not taking it; choose another BACKPLANE_HTTPS_PORT"); return None }
     if !ts.serve(port, hp).await { return None }
     let name = tailnet::dns_name(&ts.status().await);
     if name.is_empty() { return None }
@@ -223,6 +243,28 @@ mod tests {
         // serve refused, or no DNS name: nothing is claimed
         assert_eq!(https_on(&Serve { took: false, status: r#"{"Self":{"DNSName":"x.ts.net."}}"#.into() }, &routes, 3787, 443, "tok").await, None);
         assert_eq!(https_on(&Serve { took: true, status: "{}".into() }, &routes, 3787, 443, "tok").await, None);
+        let _ = std::fs::remove_dir_all(h);
+    }
+    #[test] fn a_serve_port_in_use_is_not_taken_and_ours_is_not_taken_twice_over() {
+        let st = |p: u16, to: &str| json!({"TCP":{p.to_string():{"HTTPS":true}},"Web":{format!("box.ts.net:{p}"):{"Handlers":{"/":{"Proxy":to}}}}}).to_string();
+        assert_eq!(serve_taken(&st(8451, "http://127.0.0.1:3797"), 8451, 3793), Some("http://127.0.0.1:3797".into()), "another hub's mapping on the port");
+        assert_eq!(serve_taken(&st(8451, "http://127.0.0.1:3797"), 8451, 3797), None, "our own mapping (a restart) is fine");
+        assert_eq!(serve_taken(&st(8451, "http://127.0.0.1:3797"), 8453, 3798), None, "another port is free");
+        assert_eq!(serve_taken("{}", 8451, 3797), None); assert_eq!(serve_taken("", 8451, 3797), None); assert_eq!(serve_taken("not json", 8451, 3797), None);
+        assert_eq!(serve_taken(&json!({"TCP":{"8451":{"TCPForward":"127.0.0.1:22"}}}).to_string(), 8451, 3797), Some("a TCP forward".into()));
+    }
+    #[tokio::test] async fn https_does_not_serve_on_a_port_someone_else_holds() {
+        struct Busy(std::sync::atomic::AtomicBool);
+        impl Tailscale for Busy {
+            fn ip4(&self) -> Fut<String> { Box::pin(async { String::new() }) }
+            fn whois(&self, _: String) -> Fut<String> { Box::pin(async { String::new() }) }
+            fn status(&self) -> Fut<String> { Box::pin(async { r#"{"Self":{"DNSName":"box.ts.net."}}"#.into() }) }
+            fn serve_status(&self) -> Fut<String> { Box::pin(async { json!({"Web":{"box.ts.net:8451":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:3797"}}}}}).to_string() }) }
+            fn serve(&self, _: u16, _: u16) -> Fut<bool> { self.0.store(true, std::sync::atomic::Ordering::SeqCst); Box::pin(async { true }) }
+        }
+        let (_hub, _p, routes, h) = node("busy").await; let ts = Busy(Default::default());
+        assert_eq!(https_on(&ts, &routes, 3793, 8451, "tok").await, None);
+        assert!(!ts.0.load(std::sync::atomic::Ordering::SeqCst), "serve was never run on a taken port");
         let _ = std::fs::remove_dir_all(h);
     }
     #[test] fn https_port_unset_is_443_and_a_bad_value_is_refused_never_443() {
